@@ -59,10 +59,10 @@ type Error struct {
 func (e *Error) Error() string { return e.Message }
 
 // ErrSignedOut is returned by calls that need an account.
-var ErrSignedOut = errors.New("Sign in to use this.")
+var ErrSignedOut = errors.New("Sign in to use this.") //nolint:staticcheck // shown to people as a sentence.
 
 // ErrNotConfigured is returned when the build has no server.
-var ErrNotConfigured = errors.New("This build has no server; it works on this device only.")
+var ErrNotConfigured = errors.New("This build has no server; it works on this device only.") //nolint:staticcheck // shown to people as a sentence.
 
 type session struct {
 	AccessToken  string    `json:"access_token"`
@@ -159,17 +159,17 @@ func (c *Client) keep(s *session) {
 	c.sess = s
 	c.mu.Unlock()
 	if s == nil {
-		keychain.Delete(secretKey)
+		_ = keychain.Delete(secretKey)
 		return
 	}
 	// Keep what fits in the keychain; the access token is fetched again.
 	small := *s
-	if raw, _ := json.Marshal(small); len(raw) > mygo.MaxSecretSize {
+	if raw, _ := json.Marshal(small); len(raw) > mygo.MaxSecretSize { // #nosec G117 -- the session goes to the keychain.
 		small.AccessToken = ""
 		small.ExpiresAt = 0
 	}
-	raw, _ := json.Marshal(small)
-	keychain.Set(secretKey, raw)
+	raw, _ := json.Marshal(small) // #nosec G117 -- the session goes to the keychain.
+	_ = keychain.Set(secretKey, raw)
 }
 
 func (c *Client) authRequest(ctx context.Context, path string, body any, withToken bool) (map[string]any, error) {
@@ -194,10 +194,10 @@ func (c *Client) authRequest(ctx context.Context, path string, body any, withTok
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	var out map[string]any
 	data, _ := io.ReadAll(res.Body)
-	json.Unmarshal(data, &out)
+	_ = json.Unmarshal(data, &out)
 	if res.StatusCode >= 400 {
 		return out, &Error{Status: res.StatusCode, Message: message(out, string(data))}
 	}
@@ -226,7 +226,7 @@ func (c *Client) fromToken(out map[string]any) (*store.User, error) {
 		s.ExpiresAt = time.Now().Unix() + int64(exp)
 	}
 	if s.AccessToken == "" || s.User == nil {
-		return nil, errors.New("The server did not sign you in.")
+		return nil, errors.New("The server did not sign you in.") //nolint:staticcheck // shown to people as a sentence.
 	}
 	c.keep(&s)
 	u := toUser(s.User)
@@ -279,7 +279,7 @@ func (c *Client) VerifyCode(email, code string) (*store.User, error) {
 func (c *Client) SignOut() {
 	if c.SignedIn() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		c.authRequest(ctx, "logout", map[string]any{}, true)
+		_, _ = c.authRequest(ctx, "logout", map[string]any{}, true)
 		cancel()
 	}
 	c.keep(nil)
@@ -356,7 +356,7 @@ func (c *Client) UpdateUser(data map[string]any) error {
 	if err != nil {
 		return err
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 	if res.StatusCode >= 400 {
 		return &Error{Status: res.StatusCode, Message: "Could not update the profile"}
 	}
@@ -393,17 +393,17 @@ func (c *Client) requestWith(hc *http.Client, ctx context.Context, method, path 
 		return nil, err
 	}
 	if res.StatusCode >= 400 {
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		data, _ := io.ReadAll(res.Body)
 		var m map[string]any
-		json.Unmarshal(data, &m)
+		_ = json.Unmarshal(data, &m)
 		return nil, &Error{Status: res.StatusCode, Message: message(m, string(data))}
 	}
 	return res, nil
 }
 
 func decodeRows(res *http.Response) ([]map[string]any, error) {
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
@@ -518,11 +518,11 @@ func (c *Client) RPC(ctx context.Context, name string, args map[string]any) (any
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	var out any
 	data, _ := io.ReadAll(res.Body)
 	if len(bytes.TrimSpace(data)) > 0 {
-		json.Unmarshal(data, &out)
+		_ = json.Unmarshal(data, &out)
 	}
 	return out, nil
 }
@@ -534,11 +534,11 @@ func (c *Client) Invoke(ctx context.Context, name string, body map[string]any) (
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	out := map[string]any{}
 	data, _ := io.ReadAll(res.Body)
 	if len(bytes.TrimSpace(data)) > 0 {
-		json.Unmarshal(data, &out)
+		_ = json.Unmarshal(data, &out)
 	}
 	return out, nil
 }
@@ -554,7 +554,7 @@ func (c *Client) InvokeStream(ctx context.Context, name string, body map[string]
 	if err != nil {
 		return err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	sc := bufio.NewScanner(res.Body)
 	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for sc.Scan() {
@@ -578,7 +578,7 @@ func (c *Client) Upload(ctx context.Context, bucket, path string, data io.Reader
 	if err != nil {
 		return err
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 	return nil
 }
 
@@ -588,7 +588,7 @@ func (c *Client) Download(ctx context.Context, bucket, path string) ([]byte, err
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	return io.ReadAll(res.Body)
 }
 

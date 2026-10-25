@@ -37,9 +37,10 @@ func (a *App) panel(c *ui.Context) {
 }
 
 type chatState struct {
-	draft string
-	input ui.Handle
-	end   ui.ScrollState
+	draft   string
+	input   ui.Handle
+	end     ui.ScrollState
+	sendNow bool // Enter was pressed in the composer
 }
 
 var chat = map[string]*chatState{}
@@ -94,7 +95,17 @@ func (a *App) agentPanel(c *ui.Context) {
 	ui.Column(c.Key("composer")).Padding(10, 12, 12).Gap(8).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
 		box := ui.Column(c).Padding(8, 10).Gap(6).Radius(10).Border(1, pal.Border).Background(pal.Surface)
 		box.Children(func() {
-			in := ui.TextAreaBase(c.Key("draft"), &cs.draft).Bind(&cs.input).Placeholder("Ask the agent…").FontSize(14).MinHeight(40).MaxHeight(160)
+			// The text area takes a plain Enter as a newline before any
+			// Shortcut sees it; OnTextKey sees it first. Shift+Enter
+			// still breaks the line.
+			ui.TextAreaBase(c.Key("draft"), &cs.draft).Bind(&cs.input).Placeholder("Ask the agent…").FontSize(14).MinHeight(40).MaxHeight(160).
+				OnTextKey(func(k ui.TextKey) bool {
+					if k.Key != ui.KeyEnter || k.Mods != 0 {
+						return false
+					}
+					cs.sendNow = true
+					return true
+				})
 			if a.dialogs.focusChat {
 				a.dialogs.focusChat = false
 				cs.input.Focus()
@@ -107,7 +118,8 @@ func (a *App) agentPanel(c *ui.Context) {
 				cs.draft = ""
 				cs.end.Y = 1e9
 			}
-			if in.Shortcut(0, ui.KeyEnter) {
+			if cs.sendNow {
+				cs.sendNow = false
 				send()
 			}
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
@@ -220,7 +232,7 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 						if ghost(c, "redo", "redo-2", "Redo").Clicked() {
 							a.hub.RedoRun(a.page.id, run.ID)
 						}
-					} else if ghost(c, "undo", "undo-2", "Undo run").Clicked() {
+					} else if ghost(c, "undo", "undo-2", "Undo").Clicked() {
 						a.hub.UndoRun(a.page.id, run.ID)
 					}
 				})
@@ -231,7 +243,10 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 
 // Comments --------------------------------------------------------------
 
-type threadDraft struct{ text string }
+type threadDraft struct {
+	text    string
+	sendNow bool // Enter was pressed in the reply box
+}
 
 var replies = map[string]*threadDraft{}
 
@@ -253,10 +268,12 @@ func (a *App) commentsPanel(c *ui.Context) {
 				}
 			}
 			if open == 0 && a.dialogs.newComment == nil {
-				ui.Column(c).Padding(20, 6).Gap(8).Children(func() {
+				// As the home view's empty state is: an icon over centered text.
+				ui.Column(c).FillWidth().Padding(48, 16).Gap(8).AlignItems(ui.Center).Children(func() {
+					ui.Icon(c, theme.Icon("message-square")).FontSize(26).TextColor(pal.ChartMuted).Margin(0, 0, 4, 0)
 					ui.Text(c, "No open comments").FontSize(14).FontWeight(600).TextColor(pal.Text)
-					ui.Text(c, "Select text in the page and choose Comment. Write @ and an agent's name in a reply to have it answer.").
-						FontSize(13).TextColor(pal.TextMuted)
+					ui.Text(c, "Select text in the page and choose Comment. Mention an agent with @ in a reply to have it answer.").
+						FontSize(13).TextColor(pal.TextMuted).TextAlign(ui.Center).MaxWidth(260)
 				})
 			}
 			for _, t := range ps.threads {
@@ -349,10 +366,14 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 				}
 				if t.Root.Resolved {
 					if iconButton(c, "reopen", "rotate-ccw", "Reopen").Clicked() {
-						a.st.SetResolved(t.Root.ID, false)
+						if err := a.st.SetResolved(t.Root.ID, false); err != nil {
+							a.toast("Could not reopen: " + err.Error())
+						}
 					}
 				} else if iconButton(c, "resolve", "check", "Resolve").Clicked() {
-					a.st.SetResolved(t.Root.ID, true)
+					if err := a.st.SetResolved(t.Root.ID, true); err != nil {
+						a.toast("Could not resolve: " + err.Error())
+					}
 				}
 			})
 			for _, cm := range t.All() {
@@ -360,18 +381,29 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 			}
 			if !t.Root.Resolved {
 				ui.Row(c).Gap(6).AlignItems(ui.End).Children(func() {
-					in := ui.TextAreaBase(c.Key("reply"), &draft.text).Placeholder("Reply…").FontSize(13).Grow(1).MinHeight(30).
-						Padding(6, 8).Radius(7).Border(1, pal.Divider)
+					ui.TextAreaBase(c.Key("reply"), &draft.text).Placeholder("Reply…").FontSize(13).Grow(1).MinHeight(30).
+						Padding(6, 8).Radius(7).Border(1, pal.Divider).
+						OnTextKey(func(k ui.TextKey) bool {
+							if k.Key != ui.KeyEnter || (k.Mods != 0 && k.Mods != ui.Cmd) {
+								return false
+							}
+							draft.sendNow = true
+							return true
+						})
 					send := func() {
 						body := strings.TrimSpace(draft.text)
 						if body == "" {
 							return
 						}
-						a.st.AddComment(ps.id, t.Root.BlockID, body, t.Root.ID, "", "", "")
+						if _, err := a.st.AddComment(ps.id, t.Root.BlockID, body, t.Root.ID, "", "", ""); err != nil {
+							a.toast(err.Error())
+							return
+						}
 						draft.text = ""
 						a.agentInComment(t.Root, body)
 					}
-					if in.Shortcut(ui.Cmd, ui.KeyEnter) || in.Shortcut(0, ui.KeyEnter) {
+					if draft.sendNow {
+						draft.sendNow = false
 						send()
 					}
 					if strings.TrimSpace(draft.text) != "" && iconButton(c, "send", "arrow-up", "Reply").Clicked() {
@@ -399,7 +431,9 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 				more := iconButton(c, "more", "ellipsis", "Comment actions").Size(20, 20)
 				more.Menu(func(m *ui.Menu) {
 					if m.Item("Delete comment").Chosen() {
-						a.st.DeleteComment(cm.ID)
+						if err := a.st.DeleteComment(cm.ID); err != nil {
+							a.toast("Could not delete: " + err.Error())
+						}
 					}
 				})
 			}

@@ -190,6 +190,93 @@ func runeOff(n *doc.Node, units int) int {
 	return i
 }
 
+// clip is what Leaflet last copied: the text it put on the clipboard and
+// the blocks that text stands for. Pasting that text again pastes the
+// blocks, with the tables, charts, images, embeds, recordings and nesting
+// that markdown loses on the way.
+var clip struct {
+	text   string
+	blocks []*doc.Node
+}
+
+// copyBlocks returns the blocks of a selection over more than one block,
+// or of one block selected whole that is not text, cut to the selection,
+// with their nesting; nil for text within one block.
+func (e *Editor) copyBlocks() []*doc.Node {
+	if e.Collapsed() {
+		return nil
+	}
+	a, b := e.ordered()
+	if a.ID == b.ID {
+		if n := e.node(a.ID); n == nil || n.IsText() {
+			return nil
+		}
+	}
+	us := e.units()
+	var out []*doc.Node
+	type open struct {
+		depth int
+		n     *doc.Node
+	}
+	var stack []open
+	for i := e.index(a.ID); i >= 0 && i <= e.index(b.ID) && i < len(us); i++ {
+		n := us[i].Clone()
+		if n.Type != "table" {
+			n.Children = nil
+		}
+		if n.IsText() {
+			from, to := 0, textLen(n)
+			if n.ID == a.ID {
+				from = a.Off
+			}
+			if n.ID == b.ID {
+				to = b.Off
+			}
+			n.SetDelta(n.Delta().Slice(from, to))
+		}
+		depth := e.depth(n.ID)
+		for len(stack) > 0 && stack[len(stack)-1].depth >= depth {
+			stack = stack[:len(stack)-1]
+		}
+		if len(stack) > 0 && doc.NestableTypes[stack[len(stack)-1].n.Type] {
+			p := stack[len(stack)-1].n
+			p.Children = append(p.Children, n)
+		} else {
+			out = append(out, n)
+		}
+		stack = append(stack, open{depth, n})
+	}
+	return out
+}
+
+// inTable reports whether a block is inside a table's cell.
+func (e *Editor) inTable(id string) bool {
+	for loc := e.Content.Locate(id); loc != nil && loc.Parent != nil; loc = e.Content.Locate(loc.Parent.ID) {
+		if loc.Parent.Type == "table" {
+			return true
+		}
+	}
+	return false
+}
+
+// freshBlocks copies blocks with new IDs, to paste them again.
+func freshBlocks(nodes []*doc.Node) []*doc.Node {
+	out := make([]*doc.Node, len(nodes))
+	for i, n := range nodes {
+		c := n.Clone()
+		var renew func(*doc.Node)
+		renew = func(n *doc.Node) {
+			n.ID = doc.NewBlockID()
+			for _, k := range n.Children {
+				renew(k)
+			}
+		}
+		renew(c)
+		out[i] = c
+	}
+	return out
+}
+
 // copyText returns the selection as markdown, a line per block.
 func (e *Editor) copyText() string {
 	if e.Collapsed() {
@@ -245,12 +332,33 @@ func blockPrefix(n *doc.Node, depth int) string {
 }
 
 // parseLines reads pasted text as blocks: a line each, with markdown
-// block prefixes.
+// block prefixes. List items indented under one nest in it, and lines of
+// a markdown table make a table.
 func parseLines(text string) []*doc.Node {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	var out []*doc.Node
+	// lists are the list items open at each depth, for nesting.
+	var lists []*doc.Node
+	var table [][]string
+	flushTable := func() {
+		if len(table) > 0 {
+			if t, err := doc.TableNode(table, ""); err == nil {
+				out = append(out, t)
+			}
+			table = nil
+		}
+	}
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimLeft(line, " \t")
+		if strings.HasPrefix(trimmed, "|") {
+			lists = nil
+			if row := tableRow(trimmed); row != nil {
+				table = append(table, row)
+			}
+			continue
+		}
+		flushTable()
+		indent := strings.Count(line[:len(line)-len(trimmed)], " ") + 2*strings.Count(line[:len(line)-len(trimmed)], "\t")
 		typ, rest := "paragraph", trimmed
 		level, checked := 0, false
 		switch {
@@ -268,7 +376,8 @@ func parseLines(text string) []*doc.Node {
 			typ, rest = "bulleted_list", trimmed[2:]
 		case strings.HasPrefix(trimmed, "> "):
 			typ, rest = "quote", trimmed[2:]
-		case trimmed == "---":
+		case doc.IsRule(trimmed):
+			lists = nil
 			out = append(out, &doc.Node{ID: doc.NewBlockID(), Type: "divider"})
 			continue
 		default:
@@ -283,9 +392,43 @@ func parseLines(text string) []*doc.Node {
 		if typ == "todo_list" {
 			n.Set("checked", checked)
 		}
-		out = append(out, n)
+		if !doc.NestableTypes[typ] {
+			lists = nil
+			out = append(out, n)
+			continue
+		}
+		// Two spaces, or a tab, a level: under the item open one level up.
+		depth := min(indent/2, len(lists))
+		lists = append(lists[:depth], n)
+		if depth == 0 {
+			out = append(out, n)
+		} else {
+			parent := lists[depth-1]
+			parent.Children = append(parent.Children, n)
+		}
 	}
+	flushTable()
 	return out
+}
+
+// tableRow reads a line of a markdown table, or nil for the line under the
+// header ("| --- | --- |").
+func tableRow(line string) []string {
+	line = strings.TrimSpace(line)
+	line = strings.TrimPrefix(line, "|")
+	line = strings.TrimSuffix(line, "|")
+	cells := strings.Split(line, "|")
+	rule := true
+	for i, c := range cells {
+		cells[i] = strings.TrimSpace(c)
+		if strings.Trim(cells[i], "-: ") != "" || cells[i] == "" {
+			rule = false
+		}
+	}
+	if rule {
+		return nil
+	}
+	return cells
 }
 
 func isDigits(s string) bool {
@@ -297,13 +440,21 @@ func isDigits(s string) bool {
 	return s != ""
 }
 
-// paste inserts text at the caret: a line inline, several as blocks.
+// paste inserts text at the caret: a line inline, several as blocks. The
+// text Leaflet itself last copied pastes as the blocks it came from.
 func (e *Editor) paste(text string) {
 	if e.ReadOnly || text == "" {
 		return
 	}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
-	if !strings.Contains(text, "\n") {
+	var blocks []*doc.Node
+	if e.inTable(e.focus.ID) {
+		// A cell holds one line: the lines join.
+		text = strings.Join(strings.Fields(strings.ReplaceAll(text, "\n", " ")), " ")
+	} else if clip.blocks != nil && text == clip.text {
+		blocks = freshBlocks(clip.blocks)
+	}
+	if blocks == nil && !strings.Contains(text, "\n") {
 		e.pushUndo(false)
 		e.coalescing = false
 		e.deleteSelection()
@@ -317,7 +468,12 @@ func (e *Editor) paste(text string) {
 		}
 		return
 	}
-	blocks := parseLines(strings.TrimRight(text, "\n"))
+	if blocks == nil {
+		blocks = parseLines(strings.TrimRight(text, "\n"))
+	}
+	if len(blocks) == 0 {
+		return
+	}
 	e.pushUndo(false)
 	e.coalescing = false
 	e.deleteSelection()
@@ -326,11 +482,37 @@ func (e *Editor) paste(text string) {
 		e.InsertBlocks(blocks...)
 		return
 	}
-	// The first line joins the caret's block, the last takes what followed
-	// the caret, and the lines between become blocks of their own.
 	d := n.Delta()
 	head, tail := d.Slice(0, e.focus.Off), d.Slice(e.focus.Off, d.Len())
 	first := blocks[0]
+	if !first.IsText() {
+		// A table, chart and the like cannot join a line: the blocks go
+		// before the caret's block, or after its text before the caret.
+		if head.Len() == 0 {
+			for _, b := range blocks {
+				_ = e.Content.Insert(doc.Position{Before: n.ID}, b)
+			}
+			e.layouts = map[string]*blockLayout{}
+			e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
+			e.changed()
+			return
+		}
+		n.SetDelta(head)
+		e.invalidate(n.ID)
+		at := n.ID
+		for _, b := range blocks {
+			_ = e.Content.Insert(doc.Position{After: at}, b)
+			at = b.ID
+		}
+		p := newText("paragraph", tail)
+		_ = e.Content.Insert(doc.Position{After: at}, p)
+		e.layouts = map[string]*blockLayout{}
+		e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
+		e.changed()
+		return
+	}
+	// The first line joins the caret's block, the last takes what followed
+	// the caret, and the lines between become blocks of their own.
 	n.SetDelta(head.Concat(first.Delta()))
 	if head.Len() == 0 && first.Type != "paragraph" {
 		n.Type = first.Type
@@ -342,15 +524,36 @@ func (e *Editor) paste(text string) {
 	}
 	e.invalidate(n.ID)
 	at := n.ID
+	if len(first.Children) > 0 {
+		if NestableTypes(n) {
+			n.Children = append(first.Children, n.Children...)
+		} else {
+			for _, k := range first.Children {
+				_ = e.Content.Insert(doc.Position{After: at}, k)
+				at = k.ID
+			}
+		}
+	}
 	last := n
+	if len(first.Children) > 0 {
+		last = first.Children[len(first.Children)-1]
+	}
 	for _, b := range blocks[1:] {
-		e.Content.Insert(doc.Position{After: at}, b)
+		_ = e.Content.Insert(doc.Position{After: at}, b)
 		at, last = b.ID, b
 	}
-	off := textLen(last)
-	if last.IsText() {
-		last.SetDelta(last.Delta().Concat(tail))
+	// What followed the caret goes on the last line pasted.
+	for len(last.Children) > 0 && last.Type != "table" {
+		last = last.Children[len(last.Children)-1]
 	}
+	if !last.IsText() {
+		p := newText("paragraph", tail)
+		_ = e.Content.Insert(doc.Position{After: at}, p)
+		last = p
+		tail = nil
+	}
+	off := textLen(last)
+	last.SetDelta(last.Delta().Concat(tail))
 	e.layouts = map[string]*blockLayout{}
 	e.Select(Pos{last.ID, off}, Pos{last.ID, off})
 	e.changed()

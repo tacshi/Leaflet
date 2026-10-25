@@ -54,7 +54,7 @@ func (e *Editor) deleteSelection() bool {
 	// The selection started on a block selected whole: replace it with an
 	// empty paragraph holding what was after the selection.
 	p := newText("paragraph", tail)
-	e.Content.Insert(doc.Position{After: first.ID}, p)
+	_ = e.Content.Insert(doc.Position{After: first.ID}, p)
 	e.Content.Remove(first.ID)
 	e.anchor, e.focus = Pos{p.ID, 0}, Pos{p.ID, 0}
 	return true
@@ -69,7 +69,7 @@ func (e *Editor) liftChildren(n *doc.Node) {
 	n.Children = nil
 	at := n.ID
 	for _, k := range kids {
-		e.Content.Insert(doc.Position{After: at}, k)
+		_ = e.Content.Insert(doc.Position{After: at}, k)
 		at = k.ID
 	}
 }
@@ -100,7 +100,7 @@ func (e *Editor) InsertText(s string) {
 	if !n.IsText() {
 		// Typing on a block selected whole starts a paragraph after it.
 		p := newText("paragraph", nil)
-		e.Content.Insert(doc.Position{After: n.ID}, p)
+		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
 		n = p
 		e.focus = Pos{p.ID, 0}
 	}
@@ -114,6 +114,9 @@ func (e *Editor) InsertText(s string) {
 	e.anchor, e.focus = Pos{n.ID, off}, Pos{n.ID, off}
 	if s == " " {
 		e.markdownShortcut(n)
+	}
+	if s == "-" {
+		e.dividerShortcut(n)
 	}
 	if r, _ := utf8.DecodeRuneInString(s); (r == '/' || r == '@') && utf8.RuneCountInString(s) == 1 {
 		runes := []rune(n.Delta().Plain())
@@ -129,8 +132,9 @@ func (e *Editor) InsertText(s string) {
 	e.changed()
 }
 
-// markdownShortcut turns "# ", "- ", "1. ", "[] ", "> " and "---" typed at
-// the start of a paragraph into the block they stand for.
+// markdownShortcut turns "# ", "- ", "1. ", "[] " and "> " typed at the
+// start of a paragraph into the block they stand for; dividerShortcut
+// takes "---".
 func (e *Editor) markdownShortcut(n *doc.Node) {
 	if n.Type != "paragraph" && n.Type != "bulleted_list" {
 		return
@@ -161,6 +165,20 @@ func (e *Editor) markdownShortcut(n *doc.Node) {
 	fn()
 	n.SetDelta(n.Delta().Delete(0, e.focus.Off))
 	e.invalidate(n.ID)
+	e.anchor, e.focus = Pos{n.ID, 0}, Pos{n.ID, 0}
+}
+
+// dividerShortcut turns "---" typed alone in a paragraph into a divider
+// before it, leaving the caret in the emptied paragraph to go on writing.
+func (e *Editor) dividerShortcut(n *doc.Node) {
+	if n.Type != "paragraph" || e.focus.Off != 3 || n.Delta().Plain() != "---" {
+		return
+	}
+	// Undo goes back to the text as typed.
+	e.pushUndo(false)
+	_ = e.Content.Insert(doc.Position{Before: n.ID}, &doc.Node{ID: doc.NewBlockID(), Type: "divider"})
+	n.SetDelta(nil)
+	e.layouts = map[string]*blockLayout{}
 	e.anchor, e.focus = Pos{n.ID, 0}, Pos{n.ID, 0}
 }
 
@@ -234,7 +252,7 @@ func (e *Editor) Enter() {
 	}
 	if !n.IsText() {
 		p := newText("paragraph", nil)
-		e.Content.Insert(doc.Position{After: n.ID}, p)
+		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
 		e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
 		e.changed()
 		return
@@ -260,7 +278,7 @@ func (e *Editor) Enter() {
 		if p.Type == "todo_list" {
 			p.Set("checked", false)
 		}
-		e.Content.Insert(doc.Position{Before: n.ID}, p)
+		_ = e.Content.Insert(doc.Position{Before: n.ID}, p)
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
 		e.changed()
 		return
@@ -275,7 +293,7 @@ func (e *Editor) Enter() {
 		// The new item comes first among the children.
 		n.Children = append([]*doc.Node{p}, n.Children...)
 	} else {
-		e.Content.Insert(doc.Position{After: n.ID}, p)
+		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
 	}
 	e.invalidate(n.ID)
 	e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
@@ -471,7 +489,7 @@ func (e *Editor) Indent() {
 		return
 	}
 	e.pushUndo(false)
-	e.Content.Move(n.ID, doc.Position{Parent: prev.ID})
+	_ = e.Content.Move(n.ID, doc.Position{Parent: prev.ID})
 	e.Select(e.anchor, e.focus)
 	e.changed()
 }
@@ -505,7 +523,7 @@ func (e *Editor) outdent(n *doc.Node) {
 		e.Content.Remove(s.ID)
 	}
 	parent := loc.Parent.ID
-	e.Content.Move(n.ID, doc.Position{After: parent})
+	_ = e.Content.Move(n.ID, doc.Position{After: parent})
 	n.Children = append(n.Children, after...)
 }
 
@@ -566,7 +584,7 @@ func (e *Editor) InsertBlocks(nodes ...*doc.Node) {
 		pos = doc.Position{After: n.ID}
 		replace = n.Type == "paragraph" && textLen(n) == 0
 	}
-	e.Content.Insert(pos, nodes...)
+	_ = e.Content.Insert(pos, nodes...)
 	if replace {
 		e.Content.Remove(n.ID)
 	}
@@ -577,7 +595,7 @@ func (e *Editor) InsertBlocks(nodes ...*doc.Node) {
 		us := e.units()
 		if i := e.index(last.ID); i+1 >= len(us) {
 			p := newText("paragraph", nil)
-			e.Content.Insert(doc.Position{After: last.ID}, p)
+			_ = e.Content.Insert(doc.Position{After: last.ID}, p)
 			last = p
 		}
 	}
@@ -721,7 +739,7 @@ func (e *Editor) InsertMention(t Trigger, m doc.Mention) {
 func (e *Editor) SelectAll() {
 	n := e.node(e.focus.ID)
 	a, b := e.ordered()
-	if n != nil && n.IsText() && !(a.ID == b.ID && a.Off == 0 && b.Off == textLen(n)) && a.ID == b.ID {
+	if n != nil && n.IsText() && a.ID == b.ID && (a.Off != 0 || b.Off != textLen(n)) {
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, textLen(n)})
 		return
 	}

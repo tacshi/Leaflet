@@ -352,16 +352,51 @@ func abs32(f float32) float32 {
 	return f
 }
 
+// niceTicks splits lo..hi into about n steps of 1, 2 or 5 times a power
+// of ten, widened to whole steps: the values of a chart's gridlines.
+func niceTicks(lo, hi float64, n int) []float64 {
+	raw := (hi - lo) / float64(n)
+	mag := math.Pow(10, math.Floor(math.Log10(raw)))
+	step := mag
+	for _, m := range []float64{1, 2, 5, 10} {
+		if step = m * mag; step >= raw {
+			break
+		}
+	}
+	var ticks []float64
+	for v := math.Floor(lo/step) * step; v < hi+step*0.999; v += step {
+		ticks = append(ticks, math.Round(v/step)*step)
+	}
+	return ticks
+}
+
+func textWidth(p *ui.Painter, text string, size float32) float32 {
+	w, _ := p.MeasureText(0, ui.Span{Text: text, Size: size, Font: "Figtree", Features: "tnum"})
+	return w
+}
+
+// drawLine draws the lines over gridlines with their values at the left,
+// inset so the first and last labels stay inside.
 func drawLine(p *ui.Painter, r ui.Rect, labels []string, series []ChartSeries, pal *theme.Palette, family string) {
 	if len(labels) == 0 || len(series) == 0 {
 		return
 	}
 	lo, hi := valueRange(series)
-	left, right := r.X+8, r.X+r.W-8
+	ticks := niceTicks(lo, hi, 3)
+	lo, hi = ticks[0], ticks[len(ticks)-1]
+	gutter := float32(0)
+	for _, t := range ticks {
+		gutter = max(gutter, textWidth(p, fmtValue(t), 11))
+	}
+	gutter += 10
+	left := r.X + gutter + max(8, textWidth(p, labels[0], 12)/2)
+	right := r.X + r.W - max(8, textWidth(p, labels[len(labels)-1], 12)/2)
 	top, bottom := r.Y+14, r.Y+r.H-22
-	for i := 0; i <= 3; i++ {
-		y := top + (bottom-top)*float32(i)/3
-		p.Fill(ui.Rect{X: r.X, Y: y, W: r.W, H: 1}, pal.Divider, 0)
+	for _, t := range ticks {
+		y := bottom - float32((t-lo)/(hi-lo))*(bottom-top)
+		p.Fill(ui.Rect{X: r.X + gutter, Y: y, W: r.W - gutter, H: 1}, pal.Divider, 0)
+		text := fmtValue(t)
+		label(p, r.X+gutter-10-textWidth(p, text, 11), y-7, 0, text, 11, pal.TextMuted, family, false)
 	}
 	step := float32(0)
 	if len(labels) > 1 {

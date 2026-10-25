@@ -66,7 +66,7 @@ func (s *Service) Start() {
 				time.Sleep(1200 * time.Millisecond)
 			case <-tick.C:
 			}
-			s.SyncNow()
+			_ = s.SyncNow()
 		}
 	}()
 }
@@ -166,42 +166,49 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 	if name == "" {
 		name = "My space"
 	}
-	s.st.PutSpace(remoteID, name, uid)
+	if err := s.st.PutSpace(remoteID, name, uid); err != nil {
+		return err
+	}
 	if local, ok := s.st.Value("space.local"); ok && local != remoteID {
 		if err := s.st.MoveSpace(local, remoteID); err != nil {
 			return err
 		}
 	}
-	s.st.SetValue("space.local", remoteID)
-	s.st.SetValue("space."+uid, remoteID)
+	if err := s.st.SetValue("space.local", remoteID); err != nil {
+		return err
+	}
+	if err := s.st.SetValue("space."+uid, remoteID); err != nil {
+		return err
+	}
 	// Everything made before sign-in goes up now.
+	var failed error
 	pages, _ := s.st.AllPages()
 	for _, p := range pages {
-		s.st.Queue("pages", p.ID, store.PageToRemote(p), "", p.ID)
-		s.st.Queue("page_content", p.ID, map[string]any{"page_id": p.ID}, "page from this device", p.ID)
+		failed = errors.Join(failed, s.st.Queue("pages", p.ID, store.PageToRemote(p), "", p.ID))
+		failed = errors.Join(failed, s.st.Queue("page_content", p.ID, map[string]any{"page_id": p.ID}, "page from this device", p.ID))
 	}
 	folders, _ := s.st.Folders()
 	for _, f := range folders {
-		s.st.Queue("folders", f.ID, store.FolderToRemote(f), "", "")
+		failed = errors.Join(failed, s.st.Queue("folders", f.ID, store.FolderToRemote(f), "", ""))
 	}
 	files, _ := s.st.Files()
 	for _, f := range files {
 		f.SpaceID = remoteID
 		f.StoragePath = remoteID + "/" + f.ID + "/" + f.Name
-		s.st.PutFile(f)
-		s.st.Queue("files", f.ID, store.FileToRemote(f), "file", "")
+		failed = errors.Join(failed, s.st.PutFile(f))
+		failed = errors.Join(failed, s.st.Queue("files", f.ID, store.FileToRemote(f), "file", ""))
 		if f.LocalPath != "" {
 			ct := f.MimeType
 			if ct == "" {
 				ct = "application/octet-stream"
 			}
-			s.st.Queue("storage", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": f.LocalPath, "content_type": ct}, "file waiting to upload", "")
+			failed = errors.Join(failed, s.st.Queue("storage", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": f.LocalPath, "content_type": ct}, "file waiting to upload", ""))
 		}
 	}
 	sess := s.st.Session()
 	sess.SpaceID, sess.UserID, sess.SignedIn = remoteID, uid, true
 	s.st.SetSession(sess)
-	return nil
+	return failed
 }
 
 // DeviceName names this device in Account › Devices.
@@ -232,7 +239,7 @@ func (s *Service) heartbeat(ctx context.Context) error {
 		return err
 	}
 	if row != nil && row["revoked_at"] != nil {
-		s.st.SetValue("device.revoked", "true")
+		_ = s.st.SetValue("device.revoked", "true")
 		s.be.SignOut()
 		return remote.ErrSignedOut
 	}
@@ -259,11 +266,11 @@ func (s *Service) push(ctx context.Context) error {
 				return err
 			}
 			log.Printf("outbox %s/%s: %v", e.Entity, e.EntityID, err)
-			s.st.MarkFailed(e.ID, err.Error())
+			_ = s.st.MarkFailed(e.ID, err.Error())
 			continue
 		}
 		if done {
-			s.st.Dequeue(e.ID)
+			_ = s.st.Dequeue(e.ID)
 		}
 	}
 	return nil
@@ -272,7 +279,9 @@ func (s *Service) push(ctx context.Context) error {
 // pushOne sends one entry and reports whether it can leave the queue.
 func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) (bool, error) {
 	var payload map[string]any
-	json.Unmarshal([]byte(e.Payload), &payload)
+	if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
+		return false, err
+	}
 	switch e.Entity {
 	case "page_content":
 		return s.pushContent(ctx, e.EntityID)
@@ -354,7 +363,7 @@ func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) 
 		}
 	}
 	for _, c := range conflicts {
-		s.st.AddConflict(pageID, c)
+		_ = s.st.AddConflict(pageID, c)
 	}
 	return !typedMeanwhile, nil
 }
@@ -373,11 +382,11 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 	if local == "" {
 		return true, nil
 	}
-	f, err := os.Open(local)
+	f, err := os.Open(local) // #nosec G304 -- a file in the app's own data folder.
 	if err != nil {
 		return true, nil // gone: nothing to upload
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	bucket, _ := payload["bucket"].(string)
 	recID, _ := payload["recording_id"].(string)
 	path, _ := payload["path"].(string)
@@ -393,12 +402,12 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 			r.AudioPath, r.UploadedAt = path, time.Now()
 		})
 		if err == nil {
-			s.be.Upsert(ctx, "recordings", store.RecordingToRemote(rec), "")
+			_, _ = s.be.Upsert(ctx, "recordings", store.RecordingToRemote(rec), "")
 			if s.KeepAudio != nil && s.KeepAudio() == "until_uploaded" {
 				// The page plays it from Storage now.
-				f.Close()
-				os.Remove(local)
-				s.st.ClearLocalPath(recID)
+				_ = f.Close()
+				_ = os.Remove(local)
+				_ = s.st.ClearLocalPath(recID)
 			}
 		}
 	}
@@ -428,7 +437,7 @@ func (s *Service) pullTable(ctx context.Context, table, columns string, apply fu
 		latest = store.S(r, "updated_at")
 	}
 	if latest != cur {
-		s.st.SetValue("sync.cursor."+table, latest)
+		_ = s.st.SetValue("sync.cursor."+table, latest)
 		s.st.Notify(table, "")
 	}
 	return nil
@@ -494,11 +503,13 @@ func (s *Service) pullComments(ctx context.Context) error {
 			if name == "" {
 				name = "Someone"
 			}
-			s.st.PutRemoteComment(r, name)
+			if err := s.st.PutRemoteComment(r, name); err != nil {
+				log.Printf("pull comments: %v", err)
+			}
 		}
 		latest = store.S(r, "updated_at")
 	}
-	s.st.SetValue("sync.cursor.comments", latest)
+	_ = s.st.SetValue("sync.cursor.comments", latest)
 	s.st.Notify("comments", "")
 	return nil
 }
@@ -525,7 +536,7 @@ func (s *Service) pullContents(ctx context.Context) error {
 		latest = store.S(r, "updated_at")
 	}
 	if latest != cur {
-		s.st.SetValue("sync.cursor.page_content", latest)
+		_ = s.st.SetValue("sync.cursor.page_content", latest)
 	}
 	return nil
 }
@@ -558,7 +569,9 @@ func (s *Service) RefreshContent(ctx context.Context, pageID string) (*doc.Conte
 		var conflicts []doc.Conflict
 		next, conflicts = doc.Merge(base, doc.MustDecode(local.Content), remoteContent)
 		for _, c := range conflicts {
-			s.st.AddConflict(pageID, c)
+			if err := s.st.AddConflict(pageID, c); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if err := s.st.PutSyncedContent(pageID, next, remoteContent.Encode(), remoteAt); err != nil {
@@ -595,7 +608,7 @@ func (s *Service) FlushPage(ctx context.Context, pageID string) error {
 				return err
 			}
 			if done {
-				s.st.Dequeue(e.ID)
+				_ = s.st.Dequeue(e.ID)
 			}
 		}
 	}
@@ -617,7 +630,7 @@ func (s *Service) Push(ctx context.Context, entity, id string) error {
 				return err
 			}
 			if done {
-				s.st.Dequeue(e.ID)
+				_ = s.st.Dequeue(e.ID)
 			}
 		}
 	}

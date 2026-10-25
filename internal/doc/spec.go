@@ -42,6 +42,10 @@ func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 		id = NewBlockID()
 	}
 	text, _ := spec["text"].(string)
+	if typ == "paragraph" && IsRule(text) {
+		// A Markdown rule written as text is the divider it stands for.
+		typ = "divider"
+	}
 	n := &Node{ID: id, Type: typ}
 	switch typ {
 	case "paragraph", "quote":
@@ -112,6 +116,16 @@ func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 		return nil, toolErr("Only list blocks can have children, not %q.", typ)
 	}
 	return n, nil
+}
+
+// IsRule tells whether a line is a Markdown horizontal rule: three or
+// more of -, * or _, spaces between them allowed.
+func IsRule(line string) bool {
+	s := strings.ReplaceAll(strings.TrimSpace(line), " ", "")
+	if len(s) < 3 || strings.Trim(s, s[:1]) != "" {
+		return false
+	}
+	return s[0] == '-' || s[0] == '*' || s[0] == '_'
 }
 
 // ChartData validates a chart spec and returns its stored data.
@@ -291,7 +305,9 @@ func BlockViews(c *Content) []map[string]any {
 				}
 				v["chart"] = ch
 			case "embed":
-				v["embed"] = map[string]any{"title": n.Data["title"], "height": n.Data["height"]}
+				// The source too, so an agent can change an embed with
+				// replace_block rather than write a new one blind.
+				v["embed"] = map[string]any{"title": n.Data["title"], "height": n.Data["height"], "html": n.Data["html"]}
 			case "image":
 				v["image"] = map[string]any{"url": n.Data["url"]}
 			case "recording":

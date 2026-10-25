@@ -20,12 +20,12 @@ type WavWriter struct {
 
 // CreateWav starts a WAV file.
 func CreateWav(path string) (*WavWriter, error) {
-	f, err := os.Create(path)
+	f, err := os.Create(path) // #nosec G304 -- a recording's audio file, which the app names.
 	if err != nil {
 		return nil, err
 	}
 	if _, err := f.Write(wavHeader(0)); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 	return &WavWriter{Path: path, f: f}, nil
@@ -44,10 +44,34 @@ func (w *WavWriter) Write(pcm []byte) error {
 // Close writes the header's sizes and closes the file.
 func (w *WavWriter) Close() error {
 	if _, err := w.f.WriteAt(wavHeader(w.bytes), 0); err != nil {
-		w.f.Close()
+		_ = w.f.Close()
 		return err
 	}
 	return w.f.Close()
+}
+
+// repairWav writes the header's sizes of a WAV file that was never closed,
+// from the samples that reached it, and returns its duration in
+// milliseconds, or 0 when it cannot.
+func repairWav(path string) int {
+	f, err := os.OpenFile(path, os.O_RDWR, 0) // #nosec G304 -- a recording's audio file, which the app names.
+	if err != nil {
+		return 0
+	}
+	fi, err := f.Stat()
+	if err != nil || fi.Size() < 44 {
+		_ = f.Close()
+		return 0
+	}
+	data := (fi.Size() - 44) &^ 1 // whole 16-bit samples
+	if _, err := f.WriteAt(wavHeader(data), 0); err != nil {
+		_ = f.Close()
+		return 0
+	}
+	if err := f.Close(); err != nil {
+		return 0
+	}
+	return int(data * 1000 / 2 / SampleRate)
 }
 
 func wavHeader(dataBytes int64) []byte {
@@ -75,7 +99,7 @@ func WavFromPCM(pcm []byte) []byte {
 
 // ReadWav reads the PCM16 samples of a simple WAV file.
 func ReadWav(path string) ([]byte, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- a recording's audio file, which the app names.
 	if err != nil {
 		return nil, err
 	}

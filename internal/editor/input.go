@@ -539,6 +539,7 @@ func (e *Editor) command(name string) bool {
 	case "copy", "cut":
 		if s := e.copyText(); s != "" {
 			e.services.WriteClipboard(s)
+			clip.text, clip.blocks = s, e.copyBlocks()
 		}
 		if name == "cut" && !e.Collapsed() {
 			e.Backspace(false)

@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -172,5 +173,100 @@ func TestClickImageThenDelete(t *testing.T) {
 		if n.Type == "divider" {
 			t.Fatalf("divider still there: %v", texts(e))
 		}
+	}
+}
+
+func TestDividerShortcut(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("---")
+	tt.Type("after")
+	got := texts(e)
+	if len(got) != 2 || got[0] != "divider:" || got[1] != "paragraph:after" {
+		t.Fatalf("got %q", got)
+	}
+	// Dashes inside text stay text.
+	tt.Key(0, ui.KeyEnter)
+	tt.Type("a---")
+	if got := texts(e); got[len(got)-1] != "paragraph:a---" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestPasteMarkdownKeepsNestingAndTables(t *testing.T) {
+	e, _, _ := setup(t)
+	e.paste("- Day 1\n  - Kiyomizu-dera\n- Day 2\n\n| Item | Cost |\n| --- | --- |\n| Hotel | 800 |\nafter")
+	top := e.Content.Children
+	var types []string
+	for _, n := range top {
+		types = append(types, n.Type)
+	}
+	if len(top) < 4 || top[0].Type != "bulleted_list" || len(top[0].Children) != 1 || top[0].Children[0].Delta().Plain() != "Kiyomizu-dera" {
+		t.Fatalf("lists %v %v", types, texts(e))
+	}
+	var table *doc.Node
+	for _, n := range top {
+		if n.Type == "table" {
+			table = n
+		}
+	}
+	if table == nil {
+		t.Fatalf("no table: %v", types)
+	}
+	if rows := doc.TableRows(table); len(rows) != 2 || rows[1][0] != "Hotel" || rows[1][1] != "800" {
+		t.Errorf("rows %v", rows)
+	}
+	if last := e.units()[len(e.units())-1]; last.Delta().Plain() != "after" {
+		t.Errorf("last %v", texts(e))
+	}
+}
+
+func TestCopyPasteKeepsBlocks(t *testing.T) {
+	e, _, _ := setup(t)
+	item := newText("bulleted_list", doc.FromMarkdown("Day 1"))
+	item.Children = []*doc.Node{newText("bulleted_list", doc.FromMarkdown("Kiyomizu-dera"))}
+	table, _ := doc.TableNode([][]string{{"Item", "Cost"}, {"Hotel", "800"}}, "")
+	end := newText("paragraph", doc.FromMarkdown("end"))
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{item, table, end} })
+	e.Select(Pos{item.ID, 0}, Pos{end.ID, 3})
+	text := e.copyText()
+	clip.text, clip.blocks = text, e.copyBlocks()
+	// Paste into an empty page of its own.
+	f := New(doc.Empty(), &fakeHost{})
+	f.PlaceCaret(f.Content.Children[0].ID, 0)
+	f.paste(text)
+	top := f.Content.Children
+	if len(top) < 3 || top[0].Type != "bulleted_list" || len(top[0].Children) != 1 || top[1].Type != "table" {
+		t.Fatalf("got %v", texts(f))
+	}
+	if top[1].ID == table.ID || top[0].ID == item.ID {
+		t.Error("pasted blocks kept the copied IDs")
+	}
+	if rows := doc.TableRows(top[1]); len(rows) != 2 || rows[1][1] != "800" {
+		t.Errorf("rows %v", rows)
+	}
+}
+
+func TestPasteLinesInTableCellJoin(t *testing.T) {
+	e, _, _ := setup(t)
+	table, _ := doc.TableNode([][]string{{"a"}}, "")
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table} })
+	cell := table.Children[0].Children[0]
+	e.PlaceCaret(cell.ID, 1)
+	e.paste("one\ntwo")
+	if got := cell.Delta().Plain(); got != "aone two" {
+		t.Errorf("cell %q", got)
+	}
+	if len(e.Content.Children) != 1 {
+		t.Errorf("blocks %v", texts(e))
+	}
+}
+
+func TestNiceTicks(t *testing.T) {
+	got := niceTicks(0, 1720, 3)
+	if fmt.Sprint(got) != "[0 1000 2000]" {
+		t.Errorf("ticks %v", got)
+	}
+	if got := niceTicks(0, 12, 3); fmt.Sprint(got) != "[0 5 10 15]" {
+		t.Errorf("ticks %v", got)
 	}
 }

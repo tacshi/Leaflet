@@ -1,7 +1,6 @@
 package app
 
 import (
-	"archive/zip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -42,7 +41,7 @@ func (a *App) settingsView(c *ui.Context) {
 		})
 		ui.Scroll(c.Key("settings:" + a.route.Section)).Grow(1).Children(func() {
 			ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(28, 32, 60).Children(func() {
-				ui.Column(c).Width(min(a.contentWidth(c)+40, 640)).Gap(18).Children(func() {
+				ui.Column(c).Width(a.settingsWidth(c)).Gap(18).Children(func() {
 					switch a.route.Section {
 					case "providers":
 						a.modelsSettings(c)
@@ -57,6 +56,16 @@ func (a *App) settingsView(c *ui.Context) {
 			})
 		})
 	})
+}
+
+// settingsWidth is the width of a settings section: up to 640, within
+// the room beside the sidebar and the section list, less its padding.
+func (a *App) settingsWidth(c *ui.Context) float32 {
+	w, _ := c.Size()
+	if a.settings.SidebarOpen {
+		w -= a.sidebarW + 1
+	}
+	return max(min(w-221-2*32, 640), 280)
 }
 
 func heading(c *ui.Context, title, desc string) {
@@ -104,12 +113,13 @@ func (a *App) accountSettings(c *ui.Context) {
 				a.saveName(s.name)
 			}
 		})
-		title, desc := "Sync", "This build keeps pages on this device only"
-		switch {
-		case a.session.SignedIn:
+		// A build without a server says so once, in Offline and storage.
+		if !a.backend.Configured() {
+			return
+		}
+		title, desc := "Sync", "Sign in to sync pages between devices and share them"
+		if a.session.SignedIn {
 			title, desc = "Signed in", a.session.Email
-		case a.backend.Configured():
-			desc = "Sign in to sync pages between devices and share them"
 		}
 		settingRow(c, "email", title, desc, false, func() {
 			switch {
@@ -175,7 +185,10 @@ func (a *App) accountSettings(c *ui.Context) {
 						go func() {
 							ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 							defer cancel()
-							a.backend.Upsert(ctx, "devices", map[string]any{"id": id, "user_id": a.backend.UserID(), "revoked_at": time.Now().UTC().Format(time.RFC3339)}, "")
+							if _, err := a.backend.Upsert(ctx, "devices", map[string]any{"id": id, "user_id": a.backend.UserID(), "revoked_at": time.Now().UTC().Format(time.RFC3339)}, ""); err != nil {
+								a.update(func() { a.toast("Could not sign out the device: " + err.Error()) })
+								return
+							}
 							a.loadDevices()
 						}()
 					}
@@ -222,7 +235,9 @@ func (a *App) accountSettings(c *ui.Context) {
 								}
 								s.deleteOpen = false
 								a.signOut()
-								a.st.Wipe()
+								if err := a.st.Wipe(); err != nil {
+									a.toast("Could not delete the data on this device: " + err.Error())
+								}
 								a.toast("Your account was deleted")
 							})
 						}()
@@ -238,14 +253,24 @@ func (a *App) saveName(name string) {
 	if name == "" || name == a.session.DisplayName {
 		return
 	}
-	a.st.SetDisplayName(name)
+	if err := a.st.SetDisplayName(name); err != nil {
+		account.name = a.session.DisplayName
+		a.toast("Could not save: " + err.Error())
+		return
+	}
 	a.session = a.st.Session()
 	if a.backend.SignedIn() {
 		go func() {
-			a.backend.UpdateUser(map[string]any{"display_name": name})
+			err := a.backend.UpdateUser(map[string]any{"display_name": name})
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			a.backend.Upsert(ctx, "profiles", map[string]any{"id": a.backend.UserID(), "display_name": name}, "")
+			_, uerr := a.backend.Upsert(ctx, "profiles", map[string]any{"id": a.backend.UserID(), "display_name": name}, "")
+			if err == nil {
+				err = uerr
+			}
+			if err != nil {
+				a.update(func() { a.toast("Could not save your name on the server: " + err.Error()) })
+			}
 		}()
 	}
 }
@@ -278,41 +303,12 @@ func (a *App) exportAll() {
 	}()
 }
 
-func (a *App) writeExport(path string) error {
-	pages, err := a.st.Pages()
-	if err != nil {
-		return err
-	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	z := zip.NewWriter(f)
-	used := map[string]int{}
-	for _, p := range pages {
-		c := a.st.Content(p.ID)
-		if c == nil {
-			continue
-		}
-		name := safeName(p.DisplayTitle())
-		if n := used[name]; n > 0 {
-			name = fmt.Sprintf("%s (%d)", name, n+1)
-		}
-		used[safeName(p.DisplayTitle())]++
-		w, err := z.Create(name + ".md")
-		if err != nil {
-			return err
-		}
-		w.Write([]byte(doc.PageMarkdown(p.DisplayTitle(), c, a.pageTitleOf)))
-	}
-	return z.Close()
-}
-
 func (a *App) signOut() {
 	a.flush()
 	a.backend.SignOut()
-	a.st.LoadSession(nil)
+	if _, err := a.st.LoadSession(nil); err != nil {
+		a.toast(err.Error())
+	}
 	a.session = a.st.Session()
 	account.loaded, account.devices = false, nil
 }
@@ -364,7 +360,9 @@ func (a *App) modelsSettings(c *ui.Context) {
 			case p.IsLocal:
 				where = "On this device · " + p.BaseURL
 			}
-			if p.SupportsTools != nil && !*p.SupportsTools {
+			// Agents always use tools on a ChatGPT plan (hub.go), whatever
+			// an older test left in supports_tools.
+			if p.SupportsTools != nil && !*p.SupportsTools && p.AuthKind != "account" {
 				where += " · chat only"
 			}
 			pp := p
@@ -388,8 +386,16 @@ func (a *App) modelsSettings(c *ui.Context) {
 	ui.Row(c).Gap(8).Children(func() {
 		add := primary(c, "add", "plus", "Add a provider")
 		add.Menu(func(m *ui.Menu) {
+			// One ChatGPT sign-in is enough: its row edits it.
+			signedIn := false
+			for _, p := range a.providers {
+				signedIn = signedIn || p.AuthKind == "account"
+			}
 			group := ""
 			for _, p := range agents.Presets {
+				if p.Auth == "account" && signedIn {
+					continue
+				}
 				if p.Group != group {
 					if group != "" {
 						m.Separator()
@@ -566,14 +572,20 @@ func (a *App) providerDialog(c *ui.Context) {
 			if form.errorText != "" {
 				ui.Text(c, form.errorText).FontSize(12.5).TextColor(pal.DangerText)
 			}
-			if account && form.chatgpt == nil && form.id == "" {
-				return // nothing to save before signing in
+			// Nothing to save before signing in: an existing sign-in can
+			// only be removed.
+			signedOut := account && form.chatgpt == nil
+			if signedOut && form.id == "" {
+				return
 			}
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				if form.id != "" && danger(c, "remove", "Remove").Clicked() {
 					a.removeProvider(form.id)
 				}
 				ui.Spacer(c)
+				if signedOut {
+					return
+				}
 				cannot := form.saving || (!local && !a.session.SignedIn) || (account && form.chatgpt == nil) || strings.TrimSpace(form.model) == ""
 				if primary(c, "save", "", "Save").Disabled(cannot).Clicked() {
 					a.saveProvider()
@@ -625,14 +637,14 @@ func (a *App) chatgptSignIn() {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		g, err := agents.SignInChatGPT(ctx, host, clientID, func(u string) { mygo.Shell.OpenExternal(u) })
+		g, err := agents.SignInChatGPT(ctx, host, clientID, func(u string) { _ = mygo.Shell.OpenExternal(u) })
 		a.update(func() {
 			form.signingIn = false
 			if err != nil {
 				form.result, form.resultOK = err.Error(), false
 				return
 			}
-			a.st.SetValue("chatgpt.client", g.Account().ClientID)
+			_ = a.st.SetValue("chatgpt.client", g.Account().ClientID)
 			form.chatgpt, form.email = g, g.Account().Email
 			form.name = "ChatGPT"
 			a.fetchModels()
@@ -832,7 +844,10 @@ func (a *App) saveProvider() {
 			return
 		}
 		if preset.Auth != "account" {
-			agents.SetLocalKey(p.ID, form.apiKey)
+			if err := agents.SetLocalKey(p.ID, form.apiKey); err != nil {
+				form.errorText = "Could not save the key: " + err.Error()
+				return
+			}
 		}
 		if a.settings.DefaultModel == "" {
 			a.settings.DefaultModel = store.ModelChoice{ProviderID: p.ID, Model: p.DefaultModel}.Encode()
@@ -864,15 +879,23 @@ func (a *App) saveProvider() {
 			}
 			raw, _ := json.Marshal(res["provider"])
 			var row map[string]any
-			json.Unmarshal(raw, &row)
+			if err := json.Unmarshal(raw, &row); err != nil {
+				form.errorText = err.Error()
+				return
+			}
 			p := store.ProviderFromRemote(row)
-			if p.SupportsTools == nil {
+			if tools != nil {
+				// What the dialog knows, from the stored value or a test
+				// run in it, over what the server last heard.
 				p.SupportsTools = tools
 			}
 			if len(p.Models) == 0 {
 				p.Models = models
 			}
-			a.st.PutProvider(p)
+			if err := a.st.PutProvider(p); err != nil {
+				form.errorText = err.Error()
+				return
+			}
 			if a.settings.DefaultModel == "" {
 				a.settings.DefaultModel = store.ModelChoice{ProviderID: p.ID, Model: p.DefaultModel}.Encode()
 				a.saveSettings()
@@ -891,7 +914,9 @@ func (a *App) removeProvider(id string) {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			a.backend.Invoke(ctx, "providers", map[string]any{"action": "delete", "id": id})
+			if _, err := a.backend.Invoke(ctx, "providers", map[string]any{"action": "delete", "id": id}); err != nil {
+				a.update(func() { a.toast("Could not delete: " + err.Error()) })
+			}
 		}()
 	}
 	if p.AuthKind == "account" {
@@ -901,8 +926,13 @@ func (a *App) removeProvider(id string) {
 			agents.ForgetChatGPT(ctx, id)
 		}()
 	}
-	agents.SetLocalKey(id, "")
-	a.st.DeleteProvider(id)
+	if err := agents.SetLocalKey(id, ""); err != nil {
+		a.toast("Could not delete the key: " + err.Error())
+	}
+	if err := a.st.DeleteProvider(id); err != nil {
+		a.toast("Could not delete: " + err.Error())
+		return
+	}
 	if ch, ok := a.settings.Default(); ok && ch.ProviderID == id {
 		a.settings.DefaultModel = ""
 		a.saveSettings()
@@ -945,7 +975,9 @@ func (a *App) offlineSettings(c *ui.Context) {
 							a.resolveConflict(cf, cf.LocalNode)
 						}
 						if m.Item("Keep the newer version").Chosen() {
-							a.st.ResolveConflict(cf.ID)
+							if err := a.st.ResolveConflict(cf.ID); err != nil {
+								a.toast("Could not resolve: " + err.Error())
+							}
 						}
 						if m.Item("Open page").Chosen() {
 							a.openPage(cf.PageID)
@@ -965,7 +997,7 @@ func (a *App) offlineSettings(c *ui.Context) {
 		settingRow(c, "images", "Image cache", "Pictures of image blocks loaded from the web", false, func() {
 			if button(c, "clear", "trash", "Clear").Clicked() {
 				a.images = newImageCache(a.images.dir)
-				os.RemoveAll(a.images.dir)
+				_ = os.RemoveAll(a.images.dir)
 				c.Toast("Cleared the image cache")
 			}
 		})
@@ -1005,7 +1037,7 @@ func (a *App) syncSettings(c *ui.Context) {
 		}
 		settingRow(c, "sync", title, status, true, func() {
 			if button(c, "sync-now", "refresh-cw", "Sync now").Disabled(a.syncing).Clicked() {
-				go a.sync.SyncNow()
+				go func() { _ = a.sync.SyncNow() }()
 			}
 		})
 		wo := a.settings.WorkOffline
@@ -1041,18 +1073,26 @@ func (a *App) syncSettings(c *ui.Context) {
 func (a *App) resolveConflict(cf store.ConflictRow, node *doc.Node) {
 	apply := func(content *doc.Content) {
 		if content.Find(cf.BlockID) != nil {
-			content.Replace(cf.BlockID, node.Clone())
+			_ = content.Replace(cf.BlockID, node.Clone())
 		} else {
-			content.Insert(doc.Position{At: "end"}, node.Clone())
+			_ = content.Insert(doc.Position{At: "end"}, node.Clone())
 		}
 	}
 	if ed := a.Editor(cf.PageID); ed != nil {
 		ed.Edit(apply)
 		a.savePage()
 	} else if c := a.st.Content(cf.PageID); c != nil {
-		a.st.AddHistory(cf.PageID, c, "conflict", "", "Before resolving a conflict")
+		if err := a.st.AddHistory(cf.PageID, c, "conflict", "", "Before resolving a conflict"); err != nil {
+			a.toast("Could not resolve: " + err.Error())
+			return
+		}
 		apply(c)
-		a.st.SaveContent(cf.PageID, c)
+		if _, _, err := a.st.SaveContent(cf.PageID, c); err != nil {
+			a.toast("Could not resolve: " + err.Error())
+			return
+		}
 	}
-	a.st.ResolveConflict(cf.ID)
+	if err := a.st.ResolveConflict(cf.ID); err != nil {
+		a.toast("Could not resolve: " + err.Error())
+	}
 }

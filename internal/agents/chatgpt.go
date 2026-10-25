@@ -69,7 +69,7 @@ func discover(ctx context.Context) (*chatgptDiscovery, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	var d chatgptDiscovery
 	if err := json.NewDecoder(res.Body).Decode(&d); err != nil {
 		return nil, err
@@ -117,10 +117,12 @@ func postToken(ctx context.Context, endpoint string, form url.Values) (*chatgptT
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	var t chatgptTokens
 	data, _ := io.ReadAll(res.Body)
-	json.Unmarshal(data, &t)
+	if err := json.Unmarshal(data, &t); err != nil && res.StatusCode < 400 {
+		return nil, fmt.Errorf("ChatGPT sign-in failed: %w", err)
+	}
 	if res.StatusCode >= 400 || t.Error != "" {
 		msg := t.Description
 		if msg == "" {
@@ -149,7 +151,7 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 			return nil, err
 		}
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 	port := ln.Addr().(*net.TCPAddr).Port
 	host := fmt.Sprintf("127.0.0.1:%d", port)
 	redirect := "http://" + host + "/auth/callback"
@@ -189,7 +191,7 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if e := v.Get("error"); e != "" {
-			fmt.Fprint(w, signInPage("Sign-in was cancelled", "You can close this tab."))
+			_, _ = fmt.Fprint(w, signInPage("Sign-in was cancelled", "You can close this tab."))
 			msg := "Sign-in was cancelled."
 			if e != "access_denied" {
 				msg = "ChatGPT sign-in failed: " + e
@@ -197,17 +199,17 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 			done <- callback{err: errors.New(msg)}
 			return
 		}
-		fmt.Fprint(w, signInPage("Signed in to Leaflet", "You can close this tab and go back to Leaflet."))
+		_, _ = fmt.Fprint(w, signInPage("Signed in to Leaflet", "You can close this tab and go back to Leaflet."))
 		done <- callback{code: v.Get("code"), clientID: v.Get("client_id")}
 	})}
-	go srv.Serve(ln)
-	defer srv.Close()
+	go func() { _ = srv.Serve(ln) }()
+	defer func() { _ = srv.Close() }()
 	open(d.AuthorizationEndpoint + "?" + q.Encode())
 	var cb callback
 	select {
 	case cb = <-done:
 	case <-ctx.Done():
-		return nil, errors.New("Sign-in timed out. Try again.")
+		return nil, errors.New("Sign-in timed out. Try again.") //nolint:staticcheck // shown to people as a sentence.
 	}
 	if cb.err != nil {
 		return nil, cb.err
@@ -218,9 +220,9 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 	}
 	switch {
 	case issued == "" || issued == "dynamic_agent_client" || !clientIDRe.MatchString(issued):
-		return nil, errors.New("ChatGPT did not register Leaflet. Try again.")
+		return nil, errors.New("ChatGPT did not register Leaflet. Try again.") //nolint:staticcheck // shown to people as a sentence.
 	case clientID != "" && issued != clientID:
-		return nil, errors.New("ChatGPT answered for another registration. Try again.")
+		return nil, errors.New("ChatGPT answered for another registration. Try again.") //nolint:staticcheck // shown to people as a sentence.
 	}
 	t, err := postToken(ctx, d.TokenEndpoint, url.Values{
 		"grant_type": {"authorization_code"}, "client_id": {issued}, "code": {cb.code},
@@ -234,7 +236,7 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 		return nil, err
 	}
 	if !strings.Contains(" "+t.Scope+" ", " "+chatgptPlan+" ") {
-		return nil, errors.New("ChatGPT didn't let Leaflet use your plan. Using a plan needs ChatGPT Plus or Pro.")
+		return nil, errors.New("ChatGPT didn't let Leaflet use your plan. Using a plan needs ChatGPT Plus or Pro.") //nolint:staticcheck // shown to people as a sentence.
 	}
 	email, _ := claims["email"].(string)
 	sub, _ := claims["sub"].(string)
@@ -271,7 +273,7 @@ func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, no
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	var jwks struct {
 		Keys []struct {
 			Kid string `json:"kid"`
@@ -364,7 +366,7 @@ func (g *ChatGPT) token(ctx context.Context) (string, error) {
 		return g.access, nil
 	}
 	if g.acct.RefreshToken == "" {
-		return "", errors.New("Sign in with ChatGPT again in Settings › Agent providers.")
+		return "", errors.New("Sign in with ChatGPT again in Settings › Agent providers.") //nolint:staticcheck // shown to people as a sentence.
 	}
 	d, err := discover(ctx)
 	if err != nil {
@@ -376,7 +378,7 @@ func (g *ChatGPT) token(ctx context.Context) (string, error) {
 	})
 	if err != nil {
 		if t != nil && t.Error == "invalid_grant" {
-			return "", errors.New("Your ChatGPT sign-in ended. Sign in again in Settings › Agent providers.")
+			return "", errors.New("Your ChatGPT sign-in ended. Sign in again in Settings › Agent providers.") //nolint:staticcheck // shown to people as a sentence.
 		}
 		return "", err
 	}
@@ -402,7 +404,7 @@ func (g *ChatGPT) SignOut(ctx context.Context) {
 	}.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if res, err := http.DefaultClient.Do(req); err == nil {
-		res.Body.Close()
+		_ = res.Body.Close()
 	}
 }
 
@@ -436,7 +438,7 @@ func (g *ChatGPT) do(ctx context.Context, method, path string, body any, accept 
 		return nil, err
 	}
 	if res.StatusCode >= 400 {
-		defer res.Body.Close()
+		defer func() { _ = res.Body.Close() }()
 		data, _ := io.ReadAll(res.Body)
 		msg := res.Status
 		var m map[string]any
@@ -458,7 +460,7 @@ func (g *ChatGPT) ListModels(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	var body struct {
 		Models []struct {
 			Slug       string `json:"slug"`
@@ -531,7 +533,7 @@ func (g *ChatGPT) Chat(ctx context.Context, model string, messages []map[string]
 	if err != nil {
 		return ChatResult{}, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	sc := bufio.NewScanner(res.Body)
 	sc.Buffer(make([]byte, 64*1024), 32*1024*1024)
 	// The final event may come with an empty output, the items having

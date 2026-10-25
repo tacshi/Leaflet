@@ -119,6 +119,6 @@ func (s *Store) DeviceID() string {
 		return id
 	}
 	id := doc.NewRowID()
-	s.SetValue("device.id", id)
+	_ = s.SetValue("device.id", id)
 	return id
 }

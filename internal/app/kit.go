@@ -100,8 +100,21 @@ func danger(c *ui.Context, key, label string) ui.Element {
 
 // field is a bordered text input.
 func field(c *ui.Context, key string, value *string, placeholder string) ui.Element {
+	return fieldBox(c, key, value, placeholder, false)
+}
+
+// growField is a field that takes the free width of the row it is in:
+// Grow on what field returns sizes the input, not its box.
+func growField(c *ui.Context, key string, value *string, placeholder string) ui.Element {
+	return fieldBox(c, key, value, placeholder, true)
+}
+
+func fieldBox(c *ui.Context, key string, value *string, placeholder string, grow bool) ui.Element {
 	pal := theme.Of(c)
 	box := ui.Row(c.Key(key)).Height(34).Padding(0, 10).Radius(7).Border(1, pal.Border).Background(pal.Surface).AlignItems(ui.Center)
+	if grow {
+		box.Grow(1)
+	}
 	var in ui.Element
 	box.Children(func() {
 		in = ui.TextInputBase(c.Key("input"), value).Placeholder(placeholder).Grow(1).FontSize(14).TextColor(pal.Text)
@@ -114,8 +127,21 @@ func field(c *ui.Context, key string, value *string, placeholder string) ui.Elem
 
 // password is a bordered secret input.
 func password(c *ui.Context, key string, value *string, placeholder string) ui.Element {
+	return passwordBox(c, key, value, placeholder, false)
+}
+
+// growPassword is a password that takes the free width of its row, as
+// growField is.
+func growPassword(c *ui.Context, key string, value *string, placeholder string) ui.Element {
+	return passwordBox(c, key, value, placeholder, true)
+}
+
+func passwordBox(c *ui.Context, key string, value *string, placeholder string, grow bool) ui.Element {
 	pal := theme.Of(c)
 	box := ui.Row(c.Key(key)).Height(34).Padding(0, 10).Radius(7).Border(1, pal.Border).Background(pal.Surface).AlignItems(ui.Center)
+	if grow {
+		box.Grow(1)
+	}
 	var in ui.Element
 	box.Children(func() {
 		in = ui.TextInputBase(c.Key("input"), value).Password().Placeholder(placeholder).Grow(1).FontSize(14).TextColor(pal.Text)
@@ -166,7 +192,7 @@ func card(c *ui.Context, key string, fn func()) ui.Element {
 // settingRow is a row of a card: a title and description beside a control.
 func settingRow(c *ui.Context, key, title, desc string, first bool, control func()) {
 	pal := theme.Of(c)
-	row := ui.Row(c.Key(key)).Padding(12, 16).Gap(16).AlignItems(ui.Center)
+	row := ui.Row(c.Key(key)).Padding(12, 16).Gap(16).AlignItems(ui.Center).FillWidth()
 	if !first {
 		row.BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider)
 	}

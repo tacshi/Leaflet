@@ -234,3 +234,20 @@ func TestDeltaEdits(t *testing.T) {
 		t.Errorf("delete %+v", d)
 	}
 }
+
+func TestRulesAreDividers(t *testing.T) {
+	for _, s := range []string{"---", "***", "___", "- - -", " ----- "} {
+		if !IsRule(s) {
+			t.Errorf("%q is a rule", s)
+		}
+	}
+	for _, s := range []string{"--", "-*-", "**bold**", "--- x", ""} {
+		if IsRule(s) {
+			t.Errorf("%q is not a rule", s)
+		}
+	}
+	n, err := SpecToNode(map[string]any{"type": "paragraph", "text": "---"}, "", "Agent")
+	if err != nil || n.Type != "divider" {
+		t.Errorf("paragraph of --- became %v, %v", n, err)
+	}
+}

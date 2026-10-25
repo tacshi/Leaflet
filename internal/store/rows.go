@@ -29,7 +29,7 @@ func (s *Store) Folders() ([]Folder, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Folder
 	for rows.Next() {
 		var f Folder
@@ -70,7 +70,9 @@ func (s *Store) CreateFolder(name string) (Folder, error) {
 	if err := s.PutFolder(f); err != nil {
 		return Folder{}, err
 	}
-	s.Queue("folders", f.ID, FolderToRemote(f), "new folder", "")
+	if err := s.Queue("folders", f.ID, FolderToRemote(f), "new folder", ""); err != nil {
+		return Folder{}, err
+	}
 	s.Notify("folders", "")
 	return f, nil
 }
@@ -81,7 +83,9 @@ func (s *Store) RenameFolder(f Folder, name string) error {
 	if err := s.PutFolder(f); err != nil {
 		return err
 	}
-	s.Queue("folders", f.ID, FolderToRemote(f), "renamed folder", "")
+	if err := s.Queue("folders", f.ID, FolderToRemote(f), "renamed folder", ""); err != nil {
+		return err
+	}
 	s.Notify("folders", "")
 	return nil
 }
@@ -95,14 +99,20 @@ func (s *Store) DeleteFolder(f Folder) error {
 	}
 	for _, p := range pages {
 		p.FolderID, p.UpdatedAt = "", now
-		s.putPage(p)
-		s.queuePage(p, "moved")
+		if err := s.putPage(p); err != nil {
+			return err
+		}
+		if err := s.queuePage(p, "moved"); err != nil {
+			return err
+		}
 	}
 	f.DeletedAt, f.UpdatedAt = now, now
 	if err := s.PutFolder(f); err != nil {
 		return err
 	}
-	s.Queue("folders", f.ID, FolderToRemote(f), "deleted folder", "")
+	if err := s.Queue("folders", f.ID, FolderToRemote(f), "deleted folder", ""); err != nil {
+		return err
+	}
 	s.Notify("folders", "")
 	s.Notify("pages", "")
 	return nil
@@ -130,7 +140,7 @@ func (s *Store) Files() ([]File, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []File
 	for rows.Next() {
 		var f File
@@ -164,7 +174,7 @@ func (s *Store) AddFile(source, folderID, pageID, mime string) (File, error) {
 	id := doc.NewRowID()
 	name := filepath.Base(source)
 	dir := filepath.Join(s.Dir, "files", id)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return File{}, err
 	}
 	local := filepath.Join(dir, name)
@@ -182,12 +192,16 @@ func (s *Store) AddFile(source, folderID, pageID, mime string) (File, error) {
 	if err := s.PutFile(f); err != nil {
 		return File{}, err
 	}
-	s.Queue("files", id, FileToRemote(f), "new file", pageID)
+	if err := s.Queue("files", id, FileToRemote(f), "new file", pageID); err != nil {
+		return File{}, err
+	}
 	ct := mime
 	if ct == "" {
 		ct = "application/octet-stream"
 	}
-	s.Queue("storage", "files/"+id, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": local, "content_type": ct}, "file waiting to upload", pageID)
+	if err := s.Queue("storage", "files/"+id, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": local, "content_type": ct}, "file waiting to upload", pageID); err != nil {
+		return File{}, err
+	}
 	s.Notify("files", "")
 	return f, nil
 }
@@ -199,23 +213,25 @@ func (s *Store) DeleteFile(f File) error {
 	if err := s.PutFile(f); err != nil {
 		return err
 	}
-	s.Queue("files", f.ID, FileToRemote(f), "deleted file", "")
+	if err := s.Queue("files", f.ID, FileToRemote(f), "deleted file", ""); err != nil {
+		return err
+	}
 	s.Notify("files", "")
 	return nil
 }
 
 func copyFile(from, to string) error {
-	in, err := os.Open(from)
+	in, err := os.Open(from) // #nosec G304 -- the file the user picked to add.
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-	out, err := os.Create(to)
+	defer func() { _ = in.Close() }()
+	out, err := os.Create(to) // #nosec G304 -- a path in the app's own files folder.
 	if err != nil {
 		return err
 	}
 	if _, err := io.Copy(out, in); err != nil {
-		out.Close()
+		_ = out.Close()
 		return err
 	}
 	return out.Close()
@@ -271,7 +287,7 @@ func (s *Store) Threads(pageID string) ([]Thread, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var all []Comment
 	for rows.Next() {
 		c, err := scanComment(rows)
@@ -312,7 +328,9 @@ func (s *Store) saveComment(c Comment, label string) error {
 	if err := s.PutComment(c); err != nil {
 		return err
 	}
-	s.Queue("comments", c.ID, CommentToRemote(c), label, c.PageID)
+	if err := s.Queue("comments", c.ID, CommentToRemote(c), label, c.PageID); err != nil {
+		return err
+	}
 	s.Notify("comments", c.PageID)
 	return nil
 }
@@ -375,7 +393,9 @@ func (s *Store) Reanchor(pageID, from, to string) error {
 		for _, c := range t.All() {
 			if c.BlockID == from {
 				c.BlockID, c.UpdatedAt = to, time.Now()
-				s.saveComment(c, "comment moved")
+				if err := s.saveComment(c, "comment moved"); err != nil {
+					return err
+				}
 			}
 		}
 	}
@@ -420,7 +440,7 @@ func scanRecording(sc interface{ Scan(...any) error }) (Recording, error) {
 	err := sc.Scan(&r.ID, &r.PageID, &r.BlockID, &audio, &local, &r.DurationMs, &r.SttProvider, &r.SttModel, &r.Status, &transcript, &lang, &errText, &c, &u, &up)
 	r.AudioPath, r.LocalPath, r.Language, r.Error = audio.String, local.String, lang.String, errText.String
 	r.CreatedAt, r.UpdatedAt, r.UploadedAt = time.UnixMilli(c), time.UnixMilli(u), fromMs(up)
-	json.Unmarshal([]byte(transcript), &r.Transcript)
+	_ = json.Unmarshal([]byte(transcript), &r.Transcript)
 	return r, err
 }
 
@@ -435,7 +455,7 @@ func (s *Store) Recordings() ([]Recording, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Recording
 	for rows.Next() {
 		r, err := scanRecording(rows)
@@ -493,7 +513,9 @@ func (s *Store) UpdateRecording(id string, fn func(*Recording)) (Recording, erro
 		if r.AudioPath == "" && r.LocalPath != "" {
 			label = "audio waiting to upload"
 		}
-		s.Queue("recordings", r.ID, RecordingToRemote(r), label, r.PageID)
+		if err := s.Queue("recordings", r.ID, RecordingToRemote(r), label, r.PageID); err != nil {
+			return Recording{}, err
+		}
 	}
 	s.Notify("recordings", r.PageID)
 	return r, nil

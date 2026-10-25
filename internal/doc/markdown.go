@@ -99,7 +99,7 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 		}
 		if c == '*' || c == '_' {
 			prevIsWord := i > 0 && isWord(s[i-1])
-			if !(c == '_' && prevIsWord) {
+			if c != '_' || !prevIsWord {
 				if end := findSingle(s, c, i+1); end > i+1 {
 					flush()
 					a := attrs

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+<defs><mask id="m"><rect width="1024" height="1024" fill="#fff"/>
+<g transform="translate(512 500) rotate(38) scale(1.18)">
+<path d="M0 300 C-22 150 -12 -120 30 -318" stroke="#000" stroke-width="56" stroke-linecap="round" fill="none"/></g></mask></defs>
+<g mask="url(#m)"><g transform="translate(512 500) rotate(38) scale(1.18)">
+<path d="M0 300 C-118 262 -232 140 -228 -20 C-222 -170 -120 -282 36 -334 C150 -262 214 -120 204 12 C192 150 104 262 0 300 Z" fill="#000"/>
+<path d="M0 280 C 6 340 -6 380 -40 430" stroke="#000" stroke-width="70" stroke-linecap="round" fill="none"/>
+</g></g></svg>

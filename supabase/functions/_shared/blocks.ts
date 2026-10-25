@@ -403,9 +403,16 @@ export interface SpecOptions {
   author?: string;
 }
 
+/** Whether a line is a Markdown horizontal rule: three or more of -, * or _. */
+export function isRule(line: string): boolean {
+  return /^([-*_])(\s*\1){2,}$/.test(line.trim());
+}
+
 export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()): NodeJSON {
   if (!spec || typeof spec !== "object") throw new SpecError("Each block must be an object");
-  const type = String(spec.type ?? "paragraph");
+  let type = String(spec.type ?? "paragraph");
+  // A Markdown rule written as text is the divider it stands for.
+  if (type === "paragraph" && isRule(spec.text ?? "")) type = "divider";
   if (!SPEC_TYPES.has(type)) {
     throw new SpecError(
       `Unknown block type "${type}". Use one of: ${[...SPEC_TYPES].join(", ")}`,

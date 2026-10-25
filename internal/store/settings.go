@@ -82,7 +82,7 @@ func (s Settings) Default() (ModelChoice, bool) {
 func (s *Store) Settings() Settings {
 	out := DefaultSettings()
 	if raw, ok := s.Value("settings"); ok {
-		json.Unmarshal([]byte(raw), &out)
+		_ = json.Unmarshal([]byte(raw), &out)
 	}
 	if out.SidebarWidth == 0 {
 		out.SidebarWidth = 264

@@ -77,16 +77,19 @@ func (f *fakeModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var body map[string]any
-	json.NewDecoder(r.Body).Decode(&body)
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	f.requests = append(f.requests, body)
 	if f.status != 0 {
 		w.WriteHeader(f.status)
-		json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "model not found"}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"message": "model not found"}})
 		return
 	}
 	reply := f.replies[0]
 	f.replies = f.replies[1:]
-	json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": reply, "finish_reason": "stop"}}})
+	_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": reply, "finish_reason": "stop"}}})
 }
 
 func call(name string, args map[string]any) map[string]any {

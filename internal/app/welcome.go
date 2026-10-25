@@ -58,7 +58,7 @@ func (a *App) createWelcome() error {
 		map[string]any{"type": "bulleted_list", "text": "Press **Tab** to nest an item, **Shift-Tab** to lift it back"},
 	}})
 	text("numbered_list", "Ask an agent to fill in a section")
-	text("numbered_list", "Review its edits, and **Undo run** if you don't like them")
+	text("numbered_list", welcomeReviewStep)
 
 	heading("Tables")
 	add(map[string]any{"type": "table", "rows": []any{
@@ -102,20 +102,27 @@ func (a *App) createWelcome() error {
 		image, _ := a.addWelcomeImage(p.ID, c)
 		sub, _ := a.addWelcomeSubpage(p.ID, c)
 		if image || sub {
-			a.st.SaveContent(p.ID, c)
+			if _, _, err := a.st.SaveContent(p.ID, c); err != nil {
+				return err
+			}
 		}
 	}
-	a.st.SetValue("welcome.page", p.ID)
-	a.st.SetValue("welcome.version", welcomeVersion)
+	if err := a.st.SetValue("welcome.page", p.ID); err != nil {
+		return err
+	}
+	if err := a.st.SetValue("welcome.version", welcomeVersion); err != nil {
+		return err
+	}
 	return a.st.SetValue("welcome.created", "true")
 }
 
 const (
 	welcomeTitle   = "Welcome to Leaflet"
-	welcomeVersion = "4"
+	welcomeVersion = "7"
 
 	welcomeProviderTodo = "Add an agent provider in **Settings › Agent providers**: sign in with ChatGPT, paste an API key, or use a model server such as Ollama"
 	welcomeRecordTodo   = "Press the microphone in the header to add a recording with its transcript"
+	welcomeReviewStep   = "Review its edits, and **Undo** if you don't like them"
 )
 
 // updateWelcome rewrites the steps of an earlier welcome page that point
@@ -146,6 +153,12 @@ func (a *App) updateWelcome() error {
 		}
 		changed := false
 		c.Walk(func(n, _ *doc.Node) {
+			// Version 6 named the run bar's button Undo.
+			if n.Type == "numbered_list" && n.Delta().Plain() == "Review its edits, and Undo run if you don't like them" {
+				n.SetDelta(doc.FromMarkdown(welcomeReviewStep))
+				changed = true
+				return
+			}
 			if n.Type != "todo_list" {
 				return
 			}
@@ -161,6 +174,41 @@ func (a *App) updateWelcome() error {
 			}
 			n.SetDelta(doc.FromMarkdown(next))
 			changed = true
+		})
+		// Version 5 gave the embeds a dark theme: the ones still as the
+		// guide made them take it.
+		c.Walk(func(n, _ *doc.Node) {
+			if n.Type != "embed" {
+				return
+			}
+			src := n.Str("html")
+			for _, e := range []struct{ was, now string }{
+				{"html,body{margin:0;background:#fff;color:#16181d;font:14px", savingsEmbed},
+				{"html,body{margin:0;height:100%;background:#f5f6f8;font:12px", pianoEmbed},
+			} {
+				if strings.Contains(src, e.was) && !strings.Contains(src, "data-theme") {
+					n.Data["html"] = e.now
+					changed = true
+				}
+			}
+		})
+		// Version 7 styled the sliders, kept the planets' names apart and
+		// fit the piano to a narrow frame.
+		c.Walk(func(n, _ *doc.Node) {
+			if n.Type != "embed" {
+				return
+			}
+			src := n.Str("html")
+			for _, e := range []struct{ was, now, mark string }{
+				{"var planets = [", solarSystemEmbed, "min-width:0;"},
+				{"Saved every month", savingsEmbed, "--p"},
+				{`var whites = [[0, "A"]`, pianoEmbed, "kb.style.zoom"},
+			} {
+				if strings.Contains(src, e.was) && !strings.Contains(src, e.mark) {
+					n.Data["html"] = e.now
+					changed = true
+				}
+			}
 		})
 		for _, add := range []func(string, *doc.Content) (bool, error){a.addWelcomeImage, a.addWelcomeSubpage} {
 			if added, err := add(id, c); err != nil {
@@ -195,9 +243,9 @@ func (a *App) addWelcomeImage(pageID string, c *doc.Content) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer os.RemoveAll(dir)
+	defer func() { _ = os.RemoveAll(dir) }()
 	path := filepath.Join(dir, "Dawn over the lake.jpg")
-	if err := os.WriteFile(path, welcomeImage, 0o644); err != nil {
+	if err := os.WriteFile(path, welcomeImage, 0o600); err != nil {
 		return false, err
 	}
 	f, err := a.st.AddFile(path, "", pageID, "image/jpeg")
@@ -299,9 +347,10 @@ const solarSystemEmbed = `<!doctype html>
 html,body{margin:0;height:100%;background:#070914;color:#d8ddff;font:13px -apple-system,system-ui,sans-serif;overflow:hidden}
 canvas{display:block;width:100%;height:100%}
 .bar{position:absolute;left:12px;right:12px;bottom:12px;display:flex;gap:12px;align-items:center;background:rgba(18,22,48,.72);padding:8px 12px;border-radius:10px}
-.bar input{flex:1;accent-color:#7b8cff}
+.bar input{-webkit-appearance:none;appearance:none;flex:1;min-width:0;height:4px;border-radius:2px;outline:none;background:linear-gradient(#7b8cff,#7b8cff) 0/var(--p,0%) 100% no-repeat,rgba(255,255,255,.18)}
+.bar input::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#e9ebff;box-shadow:0 1px 3px rgba(0,0,0,.4);cursor:pointer}
 .bar button{background:#3446c9;color:#fff;border:0;border-radius:6px;padding:5px 12px;font:inherit;cursor:pointer}
-.bar span{min-width:96px;text-align:right;font-variant-numeric:tabular-nums;color:#aab3ff}
+.bar span{min-width:96px;text-align:right;font-variant-numeric:tabular-nums;color:#aab3ff;white-space:nowrap}
 </style></head><body>
 <canvas id="c"></canvas>
 <div class="bar"><button id="p">Pause</button><label for="s">Speed</label><input id="s" type="range" min="1" max="500" step="1" value="60"><span id="v">60 days / s</span></div>
@@ -323,7 +372,9 @@ var stars = [];
 for (var i = 0; i < 220; i++) stars.push([Math.random(), Math.random(), Math.random() * 1.2 + 0.2]);
 var days = 0, speed = 60, running = true, last = performance.now();
 var s = document.getElementById("s"), v = document.getElementById("v"), b = document.getElementById("p");
-s.oninput = function () { speed = +s.value; v.textContent = speed + (speed == 1 ? " day / s" : " days / s"); };
+function fill(el) { el.style.setProperty("--p", (el.value - el.min) / (el.max - el.min) * 100 + "%"); }
+s.oninput = function () { speed = +s.value; v.textContent = speed + (speed == 1 ? " day / s" : " days / s"); fill(s); };
+fill(s);
 b.onclick = function () { running = !running; b.textContent = running ? "Pause" : "Play"; };
 function frame(now) {
   var dt = Math.min(now - last, 60) / 1000; last = now;
@@ -334,13 +385,28 @@ function frame(now) {
   var g = x.createRadialGradient(cx, cy, 0, cx, cy, 18);
   g.addColorStop(0, "#fff6c8"); g.addColorStop(0.4, "#ffc44d"); g.addColorStop(1, "rgba(255,150,40,0)");
   x.fillStyle = g; x.beginPath(); x.arc(cx, cy, 18, 0, 7); x.fill();
+  // Each name goes beside its planet where it overlaps no other name, or
+  // is left out.
+  var placed = [];
+  x.font = "11px -apple-system,system-ui";
   for (var j = 0; j < planets.length; j++) {
     var p = planets[j], a = days / p.p * Math.PI * 2, rr = p.r * R;
     x.strokeStyle = "rgba(150,160,255,0.13)"; x.beginPath(); x.ellipse(cx, cy, rr, rr * 0.55, 0, 0, 7); x.stroke();
     var px = cx + Math.cos(a) * rr, py = cy + Math.sin(a) * rr * 0.55;
     if (p.ring) { x.strokeStyle = "rgba(230,211,155,0.7)"; x.beginPath(); x.ellipse(px, py, p.s * 1.9, p.s * 0.7, -0.3, 0, 7); x.stroke(); }
     x.fillStyle = p.c; x.beginPath(); x.arc(px, py, p.s, 0, 7); x.fill();
-    if (W > 420) { x.fillStyle = "rgba(216,221,255,0.7)"; x.font = "11px -apple-system,system-ui"; x.fillText(p.n, px + p.s + 4, py - p.s - 2); }
+    if (W > 420) {
+      var tw = x.measureText(p.n).width;
+      var spots = [[px + p.s + 4, py - p.s - 2], [px + p.s + 4, py + p.s + 11], [px - p.s - 4 - tw, py - p.s - 2], [px - p.s - 4 - tw, py + p.s + 11]];
+      for (var k = 0; k < spots.length; k++) {
+        var lx = spots[k][0], ly = spots[k][1], free = true;
+        for (var q = 0; q < placed.length && free; q++) {
+          var o = placed[q];
+          free = lx > o[0] + o[2] + 4 || lx + tw + 4 < o[0] || Math.abs(ly - o[1]) > 12;
+        }
+        if (free) { x.fillStyle = "rgba(216,221,255,0.7)"; x.fillText(p.n, lx, ly); placed.push([lx, ly, tw]); break; }
+      }
+    }
   }
   x.fillStyle = "#aab3ff"; x.font = "12px -apple-system,system-ui";
   x.fillText("Year " + (days / 365.25).toFixed(1), 14, 22);
@@ -358,7 +424,8 @@ html,body{margin:0;background:#fff;color:#16181d;font:14px -apple-system,system-
 label{display:block;font-size:12px;color:#565c67;margin:0 0 4px}
 .row{margin-bottom:14px}
 .row div{display:flex;gap:10px;align-items:center}
-input{flex:1;accent-color:#3446c9}
+input{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;outline:none;background:linear-gradient(#3446c9,#3446c9) 0/var(--p,0%) 100% no-repeat,#dfe2ea}
+input::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:#fff;border:1px solid #c9ccd4;box-shadow:0 1px 3px rgba(0,0,0,.15);cursor:pointer}
 output{min-width:70px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
 .total{font-size:30px;font-weight:700;letter-spacing:-.5px;font-variant-numeric:tabular-nums}
 .sub{color:#565c67;font-size:12px;margin-top:2px}
@@ -367,6 +434,13 @@ output{min-width:70px;text-align:right;font-weight:600;font-variant-numeric:tabu
 .legend{display:flex;gap:14px;margin-top:8px;font-size:12px;color:#565c67}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
 @media (max-width:480px){.wrap{grid-template-columns:1fr}}
+:root[data-theme=dark],:root[data-theme=dark] body{background:#1b1e24;color:#e9ebef}
+:root[data-theme=dark] label,:root[data-theme=dark] .sub,:root[data-theme=dark] .legend{color:#9ea4af}
+:root[data-theme=dark] input{background:linear-gradient(#7b8cff,#7b8cff) 0/var(--p,0%) 100% no-repeat,#3a3f4a}
+:root[data-theme=dark] input::-webkit-slider-thumb{background:#e9ebef;border-color:#e9ebef}
+:root[data-theme=dark] .bars div{background:linear-gradient(#6a7bff var(--g),#3a4377 var(--g))}
+:root[data-theme=dark] .legend span:first-child i{background:#3a4377!important}
+:root[data-theme=dark] .legend span:last-child i{background:#6a7bff!important}
 </style></head><body><div class="wrap">
 <div>
 <div class="row"><label for="m">Saved every month</label><div><input id="m" type="range" min="50" max="3000" step="50" value="500"><output id="mo"></output></div></div>
@@ -384,6 +458,7 @@ output{min-width:70px;text-align:right;font-weight:600;font-variant-numeric:tabu
 var m = document.getElementById("m"), r = document.getElementById("r"), y = document.getElementById("y");
 function money(v) { return "$" + Math.round(v).toLocaleString("en-US"); }
 function update() {
+  [m, r, y].forEach(function (el) { el.style.setProperty("--p", (el.value - el.min) / (el.max - el.min) * 100 + "%"); });
   var monthly = +m.value, rate = +r.value / 100 / 12, years = +y.value;
   document.getElementById("mo").textContent = money(monthly);
   document.getElementById("ro").textContent = (+r.value).toFixed(2) + "%";
@@ -422,6 +497,12 @@ html,body{margin:0;height:100%;background:#f5f6f8;font:12px -apple-system,system
 .w.on{background:#dfe3f6;box-shadow:inset 0 -2px 0 #c9d0f3}
 .b.on{background:#3446c9;color:#dfe3f6}
 .hint{color:#6b717c}
+:root[data-theme=dark],:root[data-theme=dark] body{background:#1b1e24}
+:root[data-theme=dark] .w{background:#e4e6ea;border-color:#2e333c;box-shadow:inset 0 -4px 0 #c9ccd4;color:#6b717c}
+:root[data-theme=dark] .b{background:#0b0c0f}
+:root[data-theme=dark] .w.on{background:#bac3ff}
+:root[data-theme=dark] .b.on{background:#4f5fd9}
+:root[data-theme=dark] .hint{color:#9ea4af}
 </style></head><body>
 <div class="wrap" tabindex="0" id="wrap"><div class="kb" id="kb"></div><div class="hint">Click the keys, or click here and type the letters on them</div></div>
 <script>
@@ -459,6 +540,9 @@ blacks.forEach(function (b) {
   el.style.left = (b[2] * 43 + 43 - 14) + "px";
   kb.appendChild(el);
 });
+// The keyboard shrinks to fit a narrow frame.
+function fit() { kb.style.zoom = Math.min(1, (innerWidth - 32) / 431); }
+fit(); addEventListener("resize", fit);
 document.addEventListener("keydown", function (e) {
   var semi = keys[e.key.toLowerCase()];
   if (typeof semi === "number" && !e.repeat) { press(semi); e.preventDefault(); }

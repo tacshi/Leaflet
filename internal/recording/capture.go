@@ -146,8 +146,8 @@ func (r *Recorder) remove(session string) {
 // the app runs.
 func Register() {
 	mygo.Bind(service)
-	mygo.Protocol.HandleFunc(Scheme, func(w http.ResponseWriter, r *http.Request) {
+	_ = mygo.Protocol.HandleFunc(Scheme, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(capturePage))
+		_, _ = w.Write([]byte(capturePage))
 	})
 }

@@ -51,6 +51,28 @@ func TestTidyJoinsPunctuationLines(t *testing.T) {
 	}
 }
 
+func TestTidyJoinsSplitSentences(t *testing.T) {
+	got := Tidy([]store.Segment{
+		{StartMs: 0, EndMs: 9000, Text: "What builds tolerance is practice,"},
+		{StartMs: 13000, EndMs: 15000, Text: "the approach is to seek"},
+		{StartMs: 16000, EndMs: 20000, Text: "out small doses of it."},
+		{StartMs: 21000, EndMs: 22000, Text: "Then it gets easier."},
+		{StartMs: 23000, EndMs: 24000, Text: "and easier", Speaker: "2"},
+	})
+	want := []string{"What builds tolerance is practice, the approach is to seek out small doses of it.", "Then it gets easier.", "and easier"}
+	if len(got) != len(want) {
+		t.Fatalf("segments %+v", got)
+	}
+	for i, w := range want {
+		if got[i].Text != w {
+			t.Errorf("line %d: %q", i, got[i].Text)
+		}
+	}
+	if got[0].StartMs != 0 || got[0].EndMs != 20000 {
+		t.Errorf("times %+v", got[0])
+	}
+}
+
 func TestMeterWindowsAcrossChunks(t *testing.T) {
 	// Chunks of any size give one level per 50 ms window.
 	var m Meter

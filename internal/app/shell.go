@@ -20,6 +20,7 @@ func (a *App) view(c *ui.Context) {
 		c.Root().Background(ui.Transparent)
 	}
 	a.shortcuts(c)
+	a.refreshTray()
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		if a.settings.SidebarOpen {
 			width := a.sidebarW
@@ -43,8 +44,10 @@ func (a *App) view(c *ui.Context) {
 // sidebarHandle is the edge the user drags to resize the sidebar.
 func (a *App) sidebarHandle(c *ui.Context) {
 	pal := theme.Of(c)
-	h := ui.Box(c.Key("sidebar-edge")).Width(1).FillHeight().Background(pal.Divider).Cursor(ui.CursorResizeColumn)
-	grip := ui.Box(c.Key("sidebar-grip")).Width(7).FillHeight().Margin(0, 0, 0, -4).Cursor(ui.CursorResizeColumn).Label("Resize sidebar")
+	h := ui.Box(c.Key("sidebar-edge")).Width(1).FillHeight().Background(pal.Separator).Cursor(ui.CursorResizeColumn)
+	// The grip straddles the edge and takes no width of its own: a gap
+	// would show the sidebar's material between the edge and the page.
+	grip := ui.Box(c.Key("sidebar-grip")).Width(7).FillHeight().Margin(0, -4, 0, -3).Cursor(ui.CursorResizeColumn).Label("Resize sidebar")
 	if dx, _, ok := grip.Dragged(); ok && dx != 0 {
 		a.sidebarW = min(max(a.sidebarW+dx, 200), 420)
 	}

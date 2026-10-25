@@ -75,7 +75,7 @@ func (a *App) navRow(c *ui.Context, key, icon, label, hint string, active bool, 
 
 func (a *App) sectionHeader(c *ui.Context, title, icon, label string, action func()) {
 	pal := theme.Of(c)
-	row := ui.Row(c.Key("section:"+title)).Height(28).Padding(0, 4, 0, 10).Margin(10, 0, 2).AlignItems(ui.Center)
+	row := ui.Row(c.Key("section:"+title)).Height(28).Padding(0, 4, 0, 8).Margin(10, 0, 2).AlignItems(ui.Center)
 	hovered := row.Hovered()
 	row.Children(func() {
 		ui.Text(c, title).FontSize(11.5).FontWeight(650).TextColor(pal.TextMuted).Grow(1).LetterSpacing(0.2)
@@ -95,22 +95,17 @@ func (a *App) folderRow(c *ui.Context, f store.Folder) {
 	pal := theme.Of(c)
 	open := a.folderOpen[f.ID]
 	pages := a.children("", f.ID, true)
-	row := ui.ButtonBase(c.Key("folder:"+f.ID)).Height(30).Padding(0, 4, 0, 6).Gap(6).Radius(7).AlignItems(ui.Center).TextColor(pal.TextSecondary)
-	hovered := row.Hovered()
-	if hovered {
-		row.Background(pal.Hover)
-	}
+	row, hovered := treeRow(c, "folder:"+f.ID, 0, false)
+	row.Label(f.Name)
 	row.Children(func() {
-		chev := "chevron-right"
-		if open {
-			chev = "chevron-down"
+		if disclosure(c, true, open, "Show what's in the folder") {
+			a.folderOpen[f.ID] = !open
 		}
-		ui.Icon(c, theme.Icon(chev)).FontSize(12).TextColor(pal.TextMuted)
 		icon := "folder"
 		if open {
 			icon = "folder-open"
 		}
-		ui.Icon(c, theme.Icon(icon)).FontSize(15).TextColor(pal.Icon)
+		treeIcon(c, icon, false)
 		ui.Text(c, f.Name).FontSize(13.5).Grow(1).SingleLine()
 		more := iconButton(c, "more", "ellipsis", "Folder actions").Size(22, 22)
 		if !hovered {
@@ -123,19 +118,17 @@ func (a *App) folderRow(c *ui.Context, f store.Folder) {
 		a.folderOpen[f.ID] = !open
 	}
 	if open {
-		ui.Column(c.Key("folder-kids:" + f.ID)).Gap(1).PaddingStart(14).Children(func() {
-			for _, p := range pages {
-				a.pageRow(c, p, 0)
+		for _, p := range pages {
+			a.pageRow(c, p, 1)
+		}
+		for _, file := range a.files {
+			if file.FolderID == f.ID {
+				a.fileRow(c, file, 1)
 			}
-			for _, file := range a.files {
-				if file.FolderID == f.ID {
-					a.fileRow(c, file)
-				}
-			}
-			if len(pages) == 0 {
-				ui.Text(c, "Empty folder").FontSize(12.5).TextColor(pal.TextMuted).Padding(4, 10)
-			}
-		})
+		}
+		if len(pages) == 0 {
+			ui.Text(c, "Empty folder").FontSize(12.5).TextColor(pal.TextMuted).Padding(5, 0, 5, treeTextStart(1))
+		}
 	}
 }
 
@@ -153,27 +146,30 @@ func (a *App) folderMenu(m *ui.Menu, f store.Folder) {
 	}
 	m.Separator()
 	if m.Item("Delete folder").Chosen() {
-		a.st.DeleteFolder(f)
+		if err := a.st.DeleteFolder(f); err != nil {
+			a.toast("Could not delete: " + err.Error())
+			return
+		}
 		a.toast(fmt.Sprintf("Deleted %s. Its pages moved to the top level.", f.Name))
 	}
 }
 
-func (a *App) fileRow(c *ui.Context, f store.File) {
-	pal := theme.Of(c)
-	row := ui.ButtonBase(c.Key("file:"+f.ID)).Height(28).Padding(0, 6, 0, 26).Gap(8).Radius(7).AlignItems(ui.Center).TextColor(pal.TextSecondary)
-	if row.Hovered() {
-		row.Background(pal.Hover)
-	}
+func (a *App) fileRow(c *ui.Context, f store.File, depth int) {
+	row, _ := treeRow(c, "file:"+f.ID, depth, false)
+	row.Label(f.Name)
 	row.Children(func() {
-		ui.Icon(c, theme.Icon("file")).FontSize(14).TextColor(pal.Icon)
-		ui.Text(c, f.Name).FontSize(13).Grow(1).SingleLine()
+		disclosure(c, false, false, "")
+		treeIcon(c, "file", false)
+		ui.Text(c, f.Name).FontSize(13.5).Grow(1).SingleLine()
 	})
 	row.ContextMenu(func(m *ui.Menu) {
 		if m.Item("Open").Chosen() && f.LocalPath != "" {
 			a.openFile(f)
 		}
 		if m.Item("Delete file").Chosen() {
-			a.st.DeleteFile(f)
+			if err := a.st.DeleteFile(f); err != nil {
+				a.toast("Could not delete: " + err.Error())
+			}
 		}
 	})
 	if row.DoubleClicked() || row.Clicked() {
@@ -186,53 +182,34 @@ func (a *App) pageRow(c *ui.Context, p store.Page, depth int) {
 	kids := a.children(p.ID, "", false)
 	open := a.expanded[p.ID]
 	active := a.route.Kind == "page" && a.route.ID == p.ID
-	row := ui.ButtonBase(c.Key("page:"+p.ID)).Height(30).Padding(0, 4, 0, 6+float32(depth)*14).Gap(6).Radius(7).
-		AlignItems(ui.Center).TextColor(pal.TextSecondary).Label(p.DisplayTitle())
-	hovered := row.Hovered()
-	switch {
-	case active:
-		row.Background(pal.NavSelected).TextColor(pal.Text)
-	case hovered:
-		row.Background(pal.Hover)
-	}
+	row, hovered := treeRow(c, "page:"+p.ID, depth, active)
+	row.Label(p.DisplayTitle())
 	row.Children(func() {
-		if len(kids) > 0 {
-			chev := "chevron-right"
-			if open {
-				chev = "chevron-down"
-			}
-			t := ui.ButtonBase(c.Key("toggle")).Size(16, 16).Center().Radius(4).Label("Show subpages")
-			if t.Hovered() {
-				t.Background(pal.Hover)
-			}
-			t.Children(func() { ui.Icon(c, theme.Icon(chev)).FontSize(12).TextColor(pal.TextMuted) })
-			if t.Clicked() {
-				a.expanded[p.ID] = !open
-			}
-		} else {
-			ui.Box(c).Size(16, 16).Center().Children(func() {
-				ui.Icon(c, theme.Icon("file-text")).FontSize(13).TextColor(pal.Icon)
-			})
+		if disclosure(c, len(kids) > 0, open, "Show subpages") {
+			a.expanded[p.ID] = !open
 		}
+		treeIcon(c, "file-text", active)
 		title := ui.Text(c, p.DisplayTitle()).FontSize(13.5).Grow(1).SingleLine()
+		if active {
+			title.FontWeight(500)
+		}
 		if p.Title == "" {
 			title.TextColor(pal.TextMuted)
 		}
-		if active && a.page != nil && a.page.dirty {
-			ui.Box(c).Size(6, 6).Radius(3).Background(pal.ChartMuted)
+		// + only while hovered, so a title has the room until then; the
+		// menu button stays built for its menu to report the choice.
+		if hovered {
+			if iconButton(c, "add", "plus", "Add a subpage").Size(22, 22).Clicked() {
+				a.newPage(p.ID, "")
+			}
 		}
-		add := iconButton(c, "add", "plus", "Add a subpage").Size(22, 22)
 		more := iconButton(c, "more", "ellipsis", "Page actions").Size(22, 22)
 		if !hovered {
-			add.Opacity(0)
 			more.Opacity(0)
 		}
-		if add.Clicked() {
-			a.newPage(p.ID, "")
-		}
-		more.Menu(func(m *ui.Menu) { a.pageMenu(m, p) })
+		more.Menu(func(m *ui.Menu) { a.pageMenu(m, p, false) })
 	})
-	row.ContextMenu(func(m *ui.Menu) { a.pageMenu(m, p) })
+	row.ContextMenu(func(m *ui.Menu) { a.pageMenu(m, p, false) })
 	if row.Clicked() {
 		a.openPage(p.ID)
 	}
@@ -243,17 +220,81 @@ func (a *App) pageRow(c *ui.Context, p store.Page, depth int) {
 	}
 }
 
-// pageMenu is a page's actions, in the sidebar and the page's header.
-func (a *App) pageMenu(m *ui.Menu, p store.Page) {
+// The rows of the sidebar's tree share one shape: a slot for the arrow
+// that shows children, empty when there are none, an icon and the title,
+// indented a step a level, so titles line up at each level.
+const (
+	treeStep   = 16 // indent a level
+	treeLeft   = 4  // padding before the arrow
+	treeSlot   = 16 // the arrow's slot, and the icon's
+	treeGap    = 6
+	treeHeight = 28
+)
+
+// treeTextStart is where a row's title starts at depth, for text that
+// lines up with titles.
+func treeTextStart(depth int) float32 {
+	return treeLeft + float32(depth)*treeStep + 2*treeSlot + 2*treeGap
+}
+
+// treeRow starts a row of the tree, with its hover and selection.
+func treeRow(c *ui.Context, key string, depth int, active bool) (ui.Element, bool) {
+	pal := theme.Of(c)
+	row := ui.ButtonBase(c.Key(key)).Height(treeHeight).Padding(0, 4, 0, treeLeft+float32(depth)*treeStep).Gap(treeGap).Radius(6).
+		AlignItems(ui.Center).TextColor(pal.TextSecondary)
+	hovered := row.Hovered()
+	switch {
+	case active:
+		row.Background(pal.NavSelected).TextColor(pal.Text)
+	case hovered:
+		row.Background(pal.Hover).TextColor(pal.Text)
+	}
+	return row, hovered
+}
+
+// disclosure is the arrow that shows or hides a row's children, or its
+// empty slot; it reports a click.
+func disclosure(c *ui.Context, show, open bool, label string) bool {
+	pal := theme.Of(c)
+	if !show {
+		ui.Box(c).Size(treeSlot, treeSlot)
+		return false
+	}
+	chev := "chevron-right"
+	if open {
+		chev = "chevron-down"
+	}
+	t := ui.ButtonBase(c.Key("toggle")).Size(treeSlot, treeSlot).Center().Radius(4).Label(label)
+	if t.Hovered() {
+		t.Background(pal.Hover)
+	}
+	t.Children(func() { ui.Icon(c, theme.Icon(chev)).FontSize(11).TextColor(pal.TextMuted) })
+	return t.Clicked()
+}
+
+// treeIcon is a row's icon, in the accent on the selected row.
+func treeIcon(c *ui.Context, name string, active bool) {
+	pal := theme.Of(c)
+	color := pal.Icon
+	if active {
+		color = pal.AccentText
+	}
+	ui.Box(c).Size(treeSlot, treeSlot).Center().Children(func() {
+		ui.Icon(c, theme.Icon(name)).FontSize(15).TextColor(color)
+	})
+}
+
+// pageMenu is a page's actions, in the sidebar and the page's header;
+// the header's leaves out Share, whose button is beside it. Share and
+// Keep on this device need a server to share and sync with.
+func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 	editable := a.canEdit(p.ID)
 	if m.Item("Add subpage").Disabled(!editable).Chosen() {
 		a.newPage(p.ID, "")
 	}
 	if m.Item("Rename").Disabled(!editable).Chosen() {
 		a.openPage(p.ID)
-		if a.page != nil {
-			a.page.titleIn.Focus()
-		}
+		a.focusTitle(true)
 	}
 	if m.Item("Move to…").Disabled(!editable).Chosen() {
 		a.dialogs.openMove(p.ID)
@@ -262,14 +303,17 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page) {
 	if m.Item("Page history").Chosen() {
 		a.openHistory(p.ID)
 	}
-	if m.Item("Share…").Chosen() {
+	server := a.backend.Configured()
+	if !header && server && m.Item("Share…").Chosen() {
 		a.openShare(p.ID)
 	}
 	if m.Item("Export as Markdown…").Chosen() {
 		a.exportPage(p.ID)
 	}
-	if m.Item("Keep on this device").Checked(p.KeepOffline || a.settings.AllPagesOffline).Disabled(a.settings.AllPagesOffline).Chosen() {
-		a.st.SetKeepOffline(p.ID, !p.KeepOffline)
+	if server && m.Item("Keep on this device").Checked(p.KeepOffline || a.settings.AllPagesOffline).Disabled(a.settings.AllPagesOffline).Chosen() {
+		if err := a.st.SetKeepOffline(p.ID, !p.KeepOffline); err != nil {
+			a.toast("Could not save: " + err.Error())
+		}
 	}
 	m.Separator()
 	if m.Item("Delete").Disabled(!editable).Chosen() {
@@ -279,7 +323,7 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page) {
 
 func (a *App) sidebarFooter(c *ui.Context) {
 	pal := theme.Of(c)
-	ui.Row(c.Key("sidebar-footer")).Padding(8, 8, 8, 12).Gap(10).AlignItems(ui.Center).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
+	ui.Row(c.Key("sidebar-footer")).Padding(8, 8, 8, 12).Gap(10).AlignItems(ui.Center).BorderWidth(1, 0, 0, 0).BorderColor(pal.Separator).Children(func() {
 		avatar(c, a.session.Initial(), 26, false)
 		ui.Column(c).Grow(1).Children(func() {
 			ui.Text(c, a.session.DisplayName).FontSize(13).FontWeight(600).TextColor(pal.Text).SingleLine()
@@ -290,6 +334,12 @@ func (a *App) sidebarFooter(c *ui.Context) {
 		if !a.session.SignedIn && a.backend.Configured() {
 			if ghost(c, "sign-in", "", "Sign in").Clicked() {
 				a.navigate(Route{Kind: "signin"})
+			}
+		}
+		if a.updateReady != "" {
+			tip := "Restart to update to " + a.updateReady
+			if iconButton(c, "update", "rotate-cw", tip).TextColor(pal.Accent).Clicked() {
+				a.restartToUpdate()
 			}
 		}
 		settings := iconButton(c, "settings", "settings", "Settings (⌘,)")

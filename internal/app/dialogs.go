@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
@@ -42,9 +43,10 @@ type dialogs struct {
 	hits       []store.SearchHit
 	hitIndex   int
 
-	folderOpen bool
-	folder     *store.Folder
-	folderName string
+	folderOpen   bool
+	folder       *store.Folder
+	folderName   string
+	folderSelect bool // select the name as the field takes the focus
 
 	moveOpen  bool
 	movePage  string
@@ -73,6 +75,7 @@ type dialogs struct {
 	chartError  string
 
 	embedOpen   bool
+	embedID     string // the embed being edited, or "" for a new one
 	embedTitle  string
 	embedHTML   string
 	embedHeight string
@@ -160,7 +163,7 @@ func (a *App) searchDialog(c *ui.Context) {
 					ui.Column(c).Grow(1).Children(func() {
 						ui.Text(c, h.Title).FontSize(14).TextColor(pal.Text).SingleLine()
 						if h.Snippet != "" {
-							ui.Text(c, h.Snippet).FontSize(12).TextColor(pal.TextMuted).SingleLine()
+							ui.RichText(c, matchSpans(h.Snippet, d.query, pal.Text)...).FontSize(12).TextColor(pal.TextMuted).SingleLine()
 						}
 					})
 				})
@@ -183,6 +186,17 @@ func (a *App) searchDialog(c *ui.Context) {
 	})
 }
 
+// matchSpans sets the first match of query in text apart, in color.
+func matchSpans(text, query string, color ui.Color) []ui.Span {
+	q := strings.ToLower(strings.TrimSpace(query))
+	lower := strings.ToLower(text)
+	i := strings.Index(lower, q)
+	if q == "" || i < 0 || len(lower) != len(text) {
+		return []ui.Span{{Text: text}}
+	}
+	return []ui.Span{{Text: text[:i]}, {Text: text[i : i+len(q)], Color: color, Weight: 600}, {Text: text[i+len(q):]}}
+}
+
 func (a *App) openHit(h store.SearchHit) {
 	a.dialogs.searchOpen = false
 	a.openPage(h.PageID)
@@ -201,7 +215,7 @@ func (d *dialogs) openRenameFolder(f *store.Folder) {
 	d.folderOpen, d.folder = true, f
 	d.folderName = ""
 	if f != nil {
-		d.folderName = f.Name
+		d.folderName, d.folderSelect = f.Name, true
 	}
 }
 
@@ -215,6 +229,10 @@ func (a *App) folderDialog(c *ui.Context) {
 		dialogHeader(c, title, "Folders group pages and files in your space.", &d.folderOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(14).Children(func() {
 			in := field(c, "name", &d.folderName, "Folder name").AutoFocus()
+			if d.folderSelect && in.Focused() {
+				d.folderSelect = false
+				in.SetTextSelection(0, utf8.RuneCountInString(d.folderName))
+			}
 			save := func() {
 				name := strings.TrimSpace(d.folderName)
 				if name == "" {
@@ -225,7 +243,9 @@ func (a *App) folderDialog(c *ui.Context) {
 						a.folderOpen[f.ID] = true
 					}
 				} else {
-					a.st.RenameFolder(*d.folder, name)
+					if err := a.st.RenameFolder(*d.folder, name); err != nil {
+						a.toast("Could not rename: " + err.Error())
+					}
 				}
 				d.folderOpen = false
 			}
@@ -263,7 +283,7 @@ func (a *App) moveDialog(c *ui.Context) {
 			field(c, "q", &d.moveQuery, "Search pages").AutoFocus()
 			ui.Scroll(c).MaxHeight(320).Children(func() {
 				target := func(key, icon, title, parent, folder string) {
-					row := ui.ButtonBase(c.Key(key)).Padding(7, 10).Gap(10).Radius(7).AlignItems(ui.Center)
+					row := ui.ButtonBase(c.Key(key)).Padding(7, 10).Gap(10).Radius(7).AlignItems(ui.Center).Justify(ui.Start).FillWidth()
 					if row.Hovered() {
 						row.Background(pal.Hover)
 					}
@@ -375,13 +395,27 @@ func (a *App) restoreVersion(pageID string, c *doc.Content) {
 		a.savePage()
 	}
 	if cur := a.st.Content(pageID); cur != nil {
-		a.st.AddHistory(pageID, cur, "restore", "", "Before restoring "+time.Now().Format("Jan 2, 15:04"))
+		if err := a.st.AddHistory(pageID, cur, "restore", "", "Before restoring "+time.Now().Format("Jan 2, 15:04")); err != nil {
+			a.toast("Could not restore: " + err.Error())
+			return
+		}
 	}
 	if ed := a.Editor(pageID); ed != nil {
 		ed.Edit(func(content *doc.Content) { content.Children = c.Copy().Children })
 		a.savePage()
-	} else {
-		a.st.SaveContent(pageID, c)
+		// The last run's edits are gone or back with the version: undoing
+		// it now would do nothing, or something else.
+		if run := a.hub.Session(pageID).Latest(); run != nil {
+			a.dialogs.hideRun = run.ID
+		}
+		if a.page != nil && a.page.id == pageID {
+			clear(a.page.tinted)
+			// A selection made on the other version means nothing here.
+			ed.Select(ed.Caret(), ed.Caret())
+		}
+	} else if _, _, err := a.st.SaveContent(pageID, c); err != nil {
+		a.toast("Could not restore: " + err.Error())
+		return
 	}
 	a.toast("Restored the earlier version")
 }
@@ -423,7 +457,7 @@ func (a *App) shareDialog(c *ui.Context) {
 				notice(c, "info", "info", "Only the owner of this space can change who it is shared with.", nil)
 			default:
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					in := field(c, "email", &d.shareEmail, "Name or email").Grow(1)
+					in := growField(c, "email", &d.shareEmail, "Name or email")
 					selectBox(c, "role", &d.shareRole, []string{"editor", "viewer"}, func(s string) string {
 						return map[string]string{"editor": "Can edit", "viewer": "Can view"}[s]
 					}, 116)
@@ -489,7 +523,10 @@ func (a *App) shareDialog(c *ui.Context) {
 								go func() {
 									ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 									defer cancel()
-									a.backend.RPC(ctx, "unshare_page", map[string]any{"p_page_id": page, "p_user_id": uid})
+									if _, err := a.backend.RPC(ctx, "unshare_page", map[string]any{"p_page_id": page, "p_user_id": uid}); err != nil {
+										a.update(func() { d.shareError = err.Error() })
+										return
+									}
 									a.loadMembers(page)
 									a.update(func() { d.shareMember, _ = a.st.Members(page) })
 								}()
@@ -554,7 +591,7 @@ func (d *dialogs) openChart(id string, ed *editor.Editor) {
 func parseChartCSV(csv string) (labels []any, series []any, err error) {
 	lines := strings.Split(strings.TrimSpace(csv), "\n")
 	if len(lines) < 2 {
-		return nil, nil, fmt.Errorf("Add a header row and at least one row of values.")
+		return nil, nil, fmt.Errorf("Add a header row and at least one row of values.") //nolint:staticcheck // shown to people as a sentence.
 	}
 	split := func(s string) []string {
 		parts := strings.Split(s, ",")
@@ -565,7 +602,7 @@ func parseChartCSV(csv string) (labels []any, series []any, err error) {
 	}
 	header := split(lines[0])
 	if len(header) < 2 {
-		return nil, nil, fmt.Errorf("The header needs a label column and at least one series.")
+		return nil, nil, fmt.Errorf("The header needs a label column and at least one series.") //nolint:staticcheck // shown to people as a sentence.
 	}
 	values := make([][]any, len(header)-1)
 	for i, line := range lines[1:] {
@@ -575,7 +612,7 @@ func parseChartCSV(csv string) (labels []any, series []any, err error) {
 			v := 0.0
 			if s+1 < len(cells) && cells[s+1] != "" {
 				if v, err = strconv.ParseFloat(cells[s+1], 64); err != nil {
-					return nil, nil, fmt.Errorf("Row %d: %q is not a number.", i+2, cells[s+1])
+					return nil, nil, fmt.Errorf("Row %d: %q is not a number.", i+2, cells[s+1]) //nolint:staticcheck // shown to people as a sentence.
 				}
 			}
 			values[s] = append(values[s], v)
@@ -634,8 +671,15 @@ func (a *App) chartDialog(c *ui.Context) {
 // Embeds ----------------------------------------------------------------
 
 func (d *dialogs) openEmbed() {
-	d.embedOpen, d.embedTitle, d.embedHeight = true, "Interactive embed", "320"
+	d.embedOpen, d.embedID, d.embedTitle, d.embedHeight = true, "", "Interactive embed", "320"
 	d.embedHTML = "<!doctype html>\n<html><body style=\"font-family: system-ui; padding: 16px\">\n  <button onclick=\"this.textContent = Number(this.textContent) + 1\">0</button>\n</body></html>"
+}
+
+// editEmbed opens the dialog on an embed in the page, to change it.
+func (d *dialogs) editEmbed(n *doc.Node) {
+	d.embedOpen, d.embedID = true, n.ID
+	d.embedTitle, d.embedHTML = n.Str("title"), n.Str("html")
+	d.embedHeight = strconv.Itoa(n.Int("height", 320))
 }
 
 func (a *App) embedDialog(c *ui.Context) {
@@ -652,14 +696,27 @@ func (a *App) embedDialog(c *ui.Context) {
 				if button(c, "cancel", "", "Cancel").Clicked() {
 					d.embedOpen = false
 				}
-				if primary(c, "insert", "", "Insert").Clicked() && a.page != nil {
+				label := "Insert"
+				if d.embedID != "" {
+					label = "Save"
+				}
+				if primary(c, "insert", "", label).Clicked() && a.page != nil {
 					h, _ := strconv.Atoi(d.embedHeight)
 					n, err := doc.SpecToNode(map[string]any{"type": "embed", "embed": map[string]any{"title": d.embedTitle, "html": d.embedHTML, "height": float64(h)}}, "", a.session.DisplayName)
 					if err != nil {
 						a.toast(err.Error())
 						return
 					}
-					a.page.editor.InsertBlocks(n)
+					if id := d.embedID; id != "" {
+						a.page.editor.Edit(func(content *doc.Content) {
+							if old := content.Find(id); old != nil {
+								n.Data["author"] = old.Data["author"]
+								old.Data = n.Data
+							}
+						})
+					} else {
+						a.page.editor.InsertBlocks(n)
+					}
 					d.embedOpen = false
 				}
 			})
@@ -731,7 +788,7 @@ func (a *App) inlinePrompt(c *ui.Context) {
 			})
 		}
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			in := field(c, "ask", &ip.text, "Ask the agent to write, rewrite or explain…").Grow(1).AutoFocus()
+			in := growField(c, "ask", &ip.text, "Ask the agent to write, rewrite or explain…").AutoFocus()
 			if in.Submitted() {
 				a.sendInline(ip)
 			}
@@ -784,10 +841,10 @@ func (a *App) insertReply(after, reply string) {
 			after = ""
 		}
 		if after == "" {
-			c.Insert(doc.Position{}, nodes...)
+			_ = c.Insert(doc.Position{}, nodes...)
 			return
 		}
-		c.Insert(doc.Position{After: after}, nodes...)
+		_ = c.Insert(doc.Position{After: after}, nodes...)
 	})
 }
 
@@ -818,7 +875,7 @@ func (a *App) sendInline(ip *inlinePrompt) {
 		Done: func(r *agents.Run) {
 			ip.working = false
 			ip.reply = agents.Describe(r)
-			// What it made is in the page, with Undo run below it.
+			// What it made is in the page, with Undo below it.
 			if r.Error == "" && len(r.Ops) > 0 && a.dialogs.inline == ip {
 				a.dialogs.inline = nil
 			}

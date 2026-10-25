@@ -90,7 +90,7 @@ type Store struct {
 
 // Open opens (creating) the database in dir.
 func Open(dir string) (*Store, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
 	path := filepath.Join(dir, "leaflet.db")
@@ -116,7 +116,7 @@ func OpenPath(path, dir string) (*Store, error) {
 	// in-memory database stays one database.
 	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(schema); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("create schema: %w", err)
 	}
 	return &Store{db: db, Dir: dir}, nil
@@ -207,8 +207,6 @@ func fromMs(v sql.NullInt64) time.Time {
 	}
 	return time.UnixMilli(v.Int64)
 }
-
-func str(v sql.NullString) string { return v.String }
 
 var errNotFound = errors.New("not found")
 

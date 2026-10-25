@@ -24,10 +24,11 @@ const (
 	PageFont = "Source Serif 4"
 )
 
-// Palette is the color tokens.
+// Palette is the color tokens. Separator is a line on the sidebar, whose
+// translucent material shows a solid light line as a white stripe.
 type Palette struct {
 	Ground, Sidebar, Surface, Panel                   ui.Color
-	Border, Divider                                   ui.Color
+	Border, Divider, Separator                        ui.Color
 	Text, TextSecondary, TextMuted, Placeholder, Icon ui.Color
 	Accent, OnAccent, AccentSoft, AccentSoftBorder    ui.Color
 	AccentText, NavSelected, AgentSection, Selection  ui.Color
@@ -50,6 +51,7 @@ var light = Palette{
 	DangerBg: ui.Hex("#FFF7F7"), DangerBorder: ui.Hex("#F0C9C9"), Danger: ui.Hex("#C62828"), DangerText: ui.Hex("#A61B1B"),
 	ChartMuted: ui.Hex("#9AA1AD"), SwitchOff: ui.Hex("#B8BDC7"), Inverse: ui.Hex("#16181D"), OnInverse: ui.Hex("#FFFFFF"),
 	Hover: ui.RGBA(22, 24, 29, 0.05), Shadow: ui.RGBA(16, 18, 22, 0.10), Code: ui.Hex("#F1F2F5"),
+	Separator: ui.RGBA(0, 0, 0, 0.09),
 }
 
 var dark = Palette{
@@ -63,6 +65,7 @@ var dark = Palette{
 	DangerBg: ui.Hex("#341B1B"), DangerBorder: ui.Hex("#5C2D2D"), Danger: ui.Hex("#E25B5B"), DangerText: ui.Hex("#FFA3A3"),
 	ChartMuted: ui.Hex("#6B7280"), SwitchOff: ui.Hex("#4A505B"), Inverse: ui.Hex("#E9EBEF"), OnInverse: ui.Hex("#16181D"),
 	Hover: ui.RGBA(233, 235, 239, 0.06), Shadow: ui.RGBA(0, 0, 0, 0.35), Code: ui.Hex("#23272E"),
+	Separator: ui.RGBA(255, 255, 255, 0.08),
 }
 
 // Of returns the palette for the window's appearance.

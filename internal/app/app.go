@@ -7,11 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/updater"
+	"github.com/egoist/mygo/plugins/updater/native"
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 
@@ -67,13 +67,29 @@ type App struct {
 	panelOpen  bool
 	panelTab   int
 	toasts     []toast
+	// toastUntil is when the last toast goes, for the run bar to wait
+	// rather than show under it.
+	toastUntil time.Time
 
 	dialogs dialogs
 	md      markdown.Options
 	images  *imageCache
 	embeds  map[string]*mygo.WebView
+	// embedSrc is the page each embed's web view last loaded, and
+	// embedSizes how tall its content said it is, once it has drawn.
+	embedSrc   map[string]string
+	embedSizes map[string]embedSize
 
-	mu sync.Mutex
+	// The menu bar icon, and the menu it last showed.
+	tray      *mygo.Tray
+	trayShown trayState
+	trayBuilt bool
+	// updateReady is the version installed in the background, which runs
+	// once the app starts again.
+	updateReady string
+	// quitting is set as a quit starts, when closing the window closes it
+	// rather than hiding it to the menu bar.
+	quitting bool
 }
 
 type toast struct {
@@ -87,13 +103,22 @@ type pageState struct {
 	editor  *editor.Editor
 	title   string
 	titleIn ui.Handle
+	// focusTitle asks the title to take the focus, for this many more
+	// frames until it has it: a native menu closing, or the page it
+	// replaces, can take it back in the frames between.
+	focusTitle int
+	// selectTitle selects the title as it takes the focus, to rename.
+	selectTitle bool
 	// loaded is the stored content the editor started from or last saved.
 	loaded  *doc.Content
 	dirty   bool
 	timer   *time.Timer
 	threads []store.Thread
 	members []store.Member
-	// runs are the agent runs of this page, newest last, for Undo run.
+	// agents are the names of the agents that edited the page before it
+	// opened, for the byline; the runs since are the hub's.
+	agents []string
+	// runs are the agent runs of this page, newest last, for Undo.
 	tinted map[string]bool
 	// scroll is where the page is scrolled to.
 	scroll ui.ScrollState
@@ -101,10 +126,13 @@ type pageState struct {
 
 // Run starts the app.
 func Run() {
-	a := &App{expanded: map[string]bool{}, folderOpen: map[string]bool{}, embeds: map[string]*mygo.WebView{}}
+	a := &App{expanded: map[string]bool{}, folderOpen: map[string]bool{}, embeds: map[string]*mygo.WebView{}, embedSrc: map[string]string{}, embedSizes: map[string]embedSize{}}
 	theme.RegisterFonts()
 	recording.Register()
 	mygo.BindAs("Embeds", &embedScroll{a: a})
+	// MyGo's updater, with its window for "Check for Updates…"; the check
+	// as the app starts is checkForUpdate's, which installs quietly.
+	mygo.Use(native.New(updater.Options{DisableAutomaticChecks: true}))
 	mygo.App.WhenReady(func() {
 		if err := a.start(); err != nil {
 			mygo.Dialog.Error("Leaflet could not start", err.Error())
@@ -150,6 +178,7 @@ func (a *App) start() error {
 	a.session = st.Session()
 	a.images = newImageCache(filepath.Join(st.Dir, "images"))
 	a.rec = recording.NewController(st, a.backend)
+	a.rec.RecoverInterrupted()
 	a.hub = agents.NewHub(st, a.backend, a)
 	a.sync = syncsvc.New(st, a.backend)
 	a.online = mygo.Network.Status().Online
@@ -200,8 +229,24 @@ func (a *App) start() error {
 		Vibrancy:      mygo.VibrancySidebar,
 		Content:       ui.View(a.view),
 	})
-	a.win.OnClose(func(*mygo.CloseEvent) { a.flush() })
-	a.rec.Attach(a.win, func(fn func()) { a.update(fn) })
+	a.startTray()
+	a.win.OnClose(func(e *mygo.CloseEvent) {
+		a.flush()
+		// With the menu bar icon, closing the window hides it, and the
+		// icon or the Dock brings it back.
+		if a.tray != nil && !a.quitting {
+			e.PreventDefault()
+			a.win.Hide()
+		}
+	})
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
+	mygo.App.OnActivate(func(visible bool) {
+		if !visible {
+			a.update(a.showWindow)
+		}
+	})
+	go a.checkForUpdate()
+	a.rec.Attach(a.win, func(fn func()) { a.update(func() { fn(); a.refreshTray() }) })
 	a.sync.Start()
 	return nil
 }
@@ -250,7 +295,7 @@ func (a *App) reload(ch store.Change) {
 			if p := a.pageByID(a.page.id); p == nil {
 				a.page = nil
 				a.route = Route{Kind: "home"}
-			} else if a.page.titleIn.Focused(nil) == false && p.Title != a.page.title {
+			} else if !a.page.titleIn.Focused(nil) && p.Title != a.page.title {
 				a.page.title = p.Title
 			}
 		}
@@ -403,8 +448,13 @@ func (a *App) openPage(id string) {
 	for _, p := range a.ancestors(id) {
 		a.expanded[p.ID] = true
 	}
-	if p := a.pageByID(id); p != nil && p.FolderID != "" {
-		a.folderOpen[p.FolderID] = true
+	// A folder holds the page itself, or the page at the top of it.
+	top := a.pageByID(id)
+	if anc := a.ancestors(id); len(anc) > 0 {
+		top = &anc[0]
+	}
+	if top != nil && top.FolderID != "" {
+		a.folderOpen[top.FolderID] = true
 	}
 	if a.win == nil {
 		a.route = Route{Kind: "page", ID: id}
@@ -432,10 +482,17 @@ func (a *App) loadPage(id string) {
 	ed.Tinted = ps.tinted
 	ed.OnChange = func() { a.scheduleSave() }
 	ps.editor = ed
+	for _, pid := range a.st.JobEditors(id) {
+		for _, pr := range a.providers {
+			if pr.ID == pid && !contains(ps.agents, pr.Name) {
+				ps.agents = append(ps.agents, pr.Name)
+			}
+		}
+	}
 	ps.threads, _ = a.st.Threads(id)
 	ps.members, _ = a.st.Members(id)
 	a.page = ps
-	a.st.SetValue("last.page", id)
+	_ = a.st.SetValue("last.page", id)
 	if a.backend.SignedIn() && !a.isShared(*p) {
 		go a.loadMembers(id)
 	}
@@ -450,6 +507,7 @@ func (a *App) closePage() {
 		v.Destroy()
 		delete(a.embeds, id)
 	}
+	clear(a.embedSrc)
 	a.page = nil
 }
 
@@ -508,7 +566,7 @@ func (a *App) savePage() {
 	ps.editor.Content.Blocks, ps.editor.Content.Deleted = stamped.Blocks, stamped.Deleted
 	ps.loaded = stamped.Copy()
 	if changed {
-		a.st.MaybeAutosave(ps.id, stamped)
+		_ = a.st.MaybeAutosave(ps.id, stamped)
 		a.sync.Kick()
 	}
 }
@@ -529,7 +587,9 @@ func (a *App) saveTitle() {
 		return
 	}
 	if p := a.pageByID(ps.id); p != nil && p.Title != ps.title && a.canEdit(ps.id) {
-		a.st.RenamePage(ps.id, ps.title)
+		if err := a.st.RenamePage(ps.id, ps.title); err != nil {
+			a.toast("Could not rename: " + err.Error())
+		}
 	}
 }
 
@@ -560,6 +620,7 @@ func (a *App) externalContent(pageID string) {
 // toast shows a message at the bottom of the window.
 func (a *App) toast(text string) {
 	a.toasts = append(a.toasts, toast{text: text})
+	a.holdRunBar(4 * time.Second)
 	if a.win != nil {
 		a.win.Invalidate()
 	}
@@ -567,8 +628,18 @@ func (a *App) toast(text string) {
 
 func (a *App) toastAction(text, action string, fn func()) {
 	a.toasts = append(a.toasts, toast{text: text, action: action, fn: fn})
+	a.holdRunBar(8 * time.Second)
 	if a.win != nil {
 		a.win.Invalidate()
+	}
+}
+
+// holdRunBar keeps the run bar away while a toast shows for d, as both sit
+// at the bottom of the page, and brings it back after.
+func (a *App) holdRunBar(d time.Duration) {
+	if until := time.Now().Add(d); until.After(a.toastUntil) {
+		a.toastUntil = until
+		time.AfterFunc(d+50*time.Millisecond, func() { a.update(func() {}) })
 	}
 }
 
@@ -584,8 +655,14 @@ func (a *App) newPage(parent, folder string) {
 		a.expanded[parent] = true
 	}
 	a.openPage(p.ID)
+	a.focusTitle(false)
+}
+
+// focusTitle puts the caret in the open page's title, selecting the title
+// when select is set.
+func (a *App) focusTitle(selectAll bool) {
 	if a.page != nil {
-		a.page.titleIn.Focus()
+		a.page.focusTitle, a.page.selectTitle = 3, selectAll
 	}
 }
 
@@ -613,14 +690,27 @@ func (a *App) deletePage(id string) {
 		}
 	}
 	a.toastAction("Deleted "+title, "Undo", func() {
-		a.st.RestorePages(ids)
+		if err := a.st.RestorePages(ids); err != nil {
+			a.toast("Could not restore: " + err.Error())
+		}
 		a.pages, _ = a.st.Pages()
 	})
 }
 
 func (a *App) setMenu() {
 	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
-		{Role: mygo.RoleAppMenu},
+		{Label: "Leaflet", Submenu: []*mygo.MenuItem{
+			{Role: mygo.RoleAbout},
+			updater.MenuItem(),
+			mygo.Separator(),
+			{Role: mygo.RoleServices},
+			mygo.Separator(),
+			{Role: mygo.RoleHide},
+			{Role: mygo.RoleHideOthers},
+			{Role: mygo.RoleUnhide},
+			mygo.Separator(),
+			{Role: mygo.RoleQuit},
+		}},
 		{Label: "File", Submenu: []*mygo.MenuItem{
 			{Label: "New Page", Accelerator: "CmdOrCtrl+N", Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.update(func() { a.newPage("", "") })
@@ -683,5 +773,3 @@ func (a *App) pageTitleOf(id string) string {
 	}
 	return ""
 }
-
-func trimTitle(s string) string { return strings.TrimSpace(s) }

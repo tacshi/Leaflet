@@ -20,7 +20,9 @@ func TestChatGPTResponses(t *testing.T) {
 			t.Errorf("request %s %s", r.URL.Path, r.Header.Get("Authorization"))
 		}
 		var b map[string]any
-		json.NewDecoder(r.Body).Decode(&b)
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			t.Error(err)
+		}
 		bodies = append(bodies, b)
 		w.Header().Set("Content-Type", "text/event-stream")
 		var resp map[string]any
@@ -30,7 +32,7 @@ func TestChatGPTResponses(t *testing.T) {
 			resp = map[string]any{"output": []any{map[string]any{"type": "message", "content": []any{map[string]any{"type": "output_text", "text": "Done."}}}}}
 		}
 		raw, _ := json.Marshal(map[string]any{"type": "response.completed", "response": resp})
-		fmt.Fprintf(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"x\"}\n\nevent: response.completed\ndata: %s\n\n", raw)
+		_, _ = fmt.Fprintf(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"x\"}\n\nevent: response.completed\ndata: %s\n\n", raw)
 	}))
 	defer srv.Close()
 	g := &ChatGPT{access: "tok", expires: time.Now().Add(time.Hour), base: srv.URL}
@@ -65,7 +67,7 @@ func TestChatGPTStreamedItems(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		send := func(ev map[string]any) {
 			raw, _ := json.Marshal(ev)
-			fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev["type"], raw)
+			_, _ = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev["type"], raw)
 		}
 		if calls == 1 {
 			send(map[string]any{"type": "response.output_item.done", "item": map[string]any{"type": "function_call", "call_id": "c1", "name": "ping", "arguments": `{"value":"ok"}`}})

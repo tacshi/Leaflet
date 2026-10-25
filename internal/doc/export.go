@@ -35,7 +35,7 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 				b.WriteString(indent + "- " + text + "\n")
 			case "numbered_list":
 				number++
-				b.WriteString(fmt.Sprintf("%s%d. %s\n", indent, number, text))
+				fmt.Fprintf(&b, "%s%d. %s\n", indent, number, text)
 			case "todo_list":
 				box := "[ ]"
 				if n.Bool("checked") {
@@ -47,7 +47,7 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 			case "divider":
 				b.WriteString("---\n\n")
 			case "image":
-				b.WriteString(fmt.Sprintf("![%s](%s)\n\n", n.Str("alt"), n.Str("url")))
+				fmt.Fprintf(&b, "![%s](%s)\n\n", n.Str("alt"), n.Str("url"))
 			case "table":
 				writeTable(&b, TableRows(n))
 			case "chart":
@@ -69,7 +69,12 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 					b.WriteString("*" + cap + "*\n\n")
 				}
 			case "embed":
-				b.WriteString("*" + n.Str("title") + " (interactive embed)*\n\n")
+				title := n.Str("title")
+				if title == "" || strings.EqualFold(title, "interactive embed") {
+					b.WriteString("*Interactive embed*\n\n")
+				} else {
+					b.WriteString("*" + title + " (interactive embed)*\n\n")
+				}
 			case "recording":
 				b.WriteString("*Recording: " + n.Str("title") + "*\n\n")
 			case "subpage":

@@ -57,7 +57,7 @@ func (s *Store) queryPages(where string, args ...any) ([]Page, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Page
 	for rows.Next() {
 		p, err := scanPage(rows)
@@ -158,8 +158,12 @@ func (s *Store) CreatePage(o NewPageOptions) (Page, error) {
 	if err := s.putContent(p.ID, body, now, nil); err != nil {
 		return Page{}, err
 	}
-	s.queuePage(p, "new page")
-	s.Queue("page_content", p.ID, map[string]any{"page_id": p.ID}, "new page", p.ID)
+	if err := s.queuePage(p, "new page"); err != nil {
+		return Page{}, err
+	}
+	if err := s.Queue("page_content", p.ID, map[string]any{"page_id": p.ID}, "new page", p.ID); err != nil {
+		return Page{}, err
+	}
 	s.Notify("pages", p.ID)
 	return p, nil
 }
@@ -174,7 +178,9 @@ func (s *Store) RenamePage(id, title string) error {
 	if err := s.putPage(p); err != nil {
 		return err
 	}
-	s.queuePage(p, "renamed")
+	if err := s.queuePage(p, "renamed"); err != nil {
+		return err
+	}
 	s.Notify("pages", id)
 	return nil
 }
@@ -246,7 +252,9 @@ func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
 	if err := s.putPage(p); err != nil {
 		return err
 	}
-	s.queuePage(p, "moved")
+	if err := s.queuePage(p, "moved"); err != nil {
+		return err
+	}
 	s.Notify("pages", id)
 	return nil
 }
@@ -274,7 +282,9 @@ func (s *Store) DeletePage(id string) ([]string, error) {
 		if err := s.putPage(p); err != nil {
 			return nil, err
 		}
-		s.queuePage(p, "deleted")
+		if err := s.queuePage(p, "deleted"); err != nil {
+			return nil, err
+		}
 	}
 	s.Notify("pages", id)
 	return ids, nil
@@ -291,7 +301,9 @@ func (s *Store) RestorePages(ids []string) error {
 		if err := s.putPage(p); err != nil {
 			return err
 		}
-		s.queuePage(p, "restored")
+		if err := s.queuePage(p, "restored"); err != nil {
+			return err
+		}
 	}
 	s.Notify("pages", "")
 	return nil
@@ -394,8 +406,12 @@ func (s *Store) SaveContent(pageID string, c *doc.Content) (*doc.Content, bool, 
 	if changed == 1 {
 		label = "1 block edited"
 	}
-	s.Queue("page_content", pageID, map[string]any{"page_id": pageID}, label, pageID)
-	s.db.Exec(`UPDATE pages SET updated_at = ? WHERE id = ?`, ms(now), pageID)
+	if err := s.Queue("page_content", pageID, map[string]any{"page_id": pageID}, label, pageID); err != nil {
+		return nil, false, err
+	}
+	if _, err := s.db.Exec(`UPDATE pages SET updated_at = ? WHERE id = ?`, ms(now), pageID); err != nil {
+		return nil, false, err
+	}
 	s.Notify("page_contents", pageID)
 	return stamped, true, nil
 }
@@ -418,7 +434,9 @@ func (s *Store) AddHistory(pageID string, c *doc.Content, reason, aiJobID, label
 		h.ID, h.PageID, h.Content, h.Reason, ns(h.AIJobID), h.Label, ms(h.CreatedAt)); err != nil {
 		return err
 	}
-	s.Queue("page_history", h.ID, HistoryToRemote(h, s.Session().UserID), "page history", pageID)
+	if err := s.Queue("page_history", h.ID, HistoryToRemote(h, s.Session().UserID), "page history", pageID); err != nil {
+		return err
+	}
 	s.Notify("page_history", pageID)
 	return nil
 }
@@ -429,7 +447,7 @@ func (s *Store) History(pageID string) ([]HistoryEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []HistoryEntry
 	for rows.Next() {
 		var h HistoryEntry
@@ -502,37 +520,46 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 	}
 	for rows.Next() {
 		var id, text string
-		rows.Scan(&id, &text)
+		if err := rows.Scan(&id, &text); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
 		if _, ok := titles[id]; !ok || seen[id] {
 			continue
 		}
 		hits = append(hits, SearchHit{Kind: "page", Title: TitleOr(titles[id]), PageID: id, Snippet: snippet(text, q)})
 	}
-	rows.Close()
+	_ = rows.Close()
 	rows, err = s.db.Query(`SELECT page_id, block_id FROM recordings WHERE lower(transcript) LIKE ? LIMIT 10`, like)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var id, block string
-		rows.Scan(&id, &block)
+		if err := rows.Scan(&id, &block); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
 		if _, ok := titles[id]; ok {
 			hits = append(hits, SearchHit{Kind: "recording", Title: "Recording · " + TitleOr(titles[id]), PageID: id, BlockID: block})
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 	rows, err = s.db.Query(`SELECT page_id, block_id, body FROM comments WHERE lower(body) LIKE ? AND deleted_at IS NULL LIMIT 10`, like)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var id, block, body string
-		rows.Scan(&id, &block, &body)
+		if err := rows.Scan(&id, &block, &body); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
 		if _, ok := titles[id]; ok {
 			hits = append(hits, SearchHit{Kind: "comment", Title: body, PageID: id, BlockID: block, Snippet: "Comment on " + TitleOr(titles[id])})
 		}
 	}
-	rows.Close()
+	_ = rows.Close()
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
@@ -540,19 +567,43 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 }
 
 func snippet(text, q string) string {
+	// Blocks read as a line of their own, set apart by a dot.
+	var lines []string
+	for _, l := range strings.Split(text, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			lines = append(lines, l)
+		}
+	}
+	text = strings.Join(lines, " · ")
 	lower := strings.ToLower(text)
-	i := strings.Index(lower, q)
+	i, n := strings.Index(lower, q), len(q)
 	if i < 0 {
 		return ""
 	}
-	start, end := max(i-30, 0), min(i+len(q)+50, len(text))
+	if len(lower) != len(text) {
+		// Lowering changed the byte length, so the match is not at the
+		// same place in text: show its start.
+		i, n = 0, 0
+	}
+	start, end := max(i-30, 0), min(i+n+50, len(text))
+	// Start and end at whole words, where one is near.
+	if start > 0 {
+		if j := strings.IndexByte(text[start:i], ' '); j >= 0 {
+			start += j + 1
+		}
+	}
+	if end < len(text) {
+		if j := strings.LastIndexByte(text[i+n:end], ' '); j >= 0 {
+			end = i + n + j
+		}
+	}
 	for start > 0 && !utf8Start(text[start]) {
 		start--
 	}
 	for end < len(text) && !utf8Start(text[end]) {
 		end++
 	}
-	out := strings.ReplaceAll(text[start:end], "\n", " ")
+	out := strings.Trim(text[start:end], " ·")
 	if start > 0 {
 		out = "…" + out
 	}

@@ -27,8 +27,10 @@ func (a *App) startRecording(pageID, _ string) {
 			return
 		}
 		if c := a.st.Content(pageID); c != nil {
-			c.Insert(doc.Position{At: "end"}, n)
-			a.st.SaveContent(pageID, c)
+			_ = c.Insert(doc.Position{At: "end"}, n)
+			if _, _, err := a.st.SaveContent(pageID, c); err != nil {
+				a.toast("Could not save: " + err.Error())
+			}
 		}
 	})
 	if err != nil {
@@ -146,7 +148,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 				ui.Icon(c, theme.Icon("mic")).FontSize(15).TextColor(map[bool]ui.Color{true: pal.Danger, false: pal.AccentText}[live])
 			})
 			ui.Column(c).Grow(1).Children(func() {
-				ui.Text(c, n.Str("title")).FontSize(14).FontWeight(600).TextColor(pal.Text)
+				ui.Text(c, a.recordingTitle(n, rec, err == nil)).FontSize(14).FontWeight(600).TextColor(pal.Text)
 				status := ""
 				switch {
 				case err != nil:
@@ -168,12 +170,12 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 			})
 			if err == nil && !live && rec.Status != "recording" {
 				pl := players[id]
-				icon := "play"
+				icon, label := "play", "Play"
 				if pl != nil && pl.p != nil && pl.p.Playing() {
-					icon = "pause"
+					icon, label = "pause", "Pause"
 					c.After(250 * time.Millisecond)
 				}
-				b := iconButton(c, "play", icon, "Play")
+				b := iconButton(c, "play", icon, label)
 				if pl != nil && pl.loading {
 					b.Disabled(true)
 				}
@@ -240,6 +242,20 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 			})
 		}
 	})
+}
+
+// recordingTitle is the name a recording block shows: its title, with the
+// time it was made where the title, as older blocks', gives only the day,
+// or just "Recording" on a page of the same name, as the menu bar makes.
+func (a *App) recordingTitle(n *doc.Node, rec store.Recording, found bool) string {
+	title := n.Str("title")
+	if day := rec.CreatedAt.Local(); found && !rec.CreatedAt.IsZero() && title == "Recording · "+day.Format("Jan 2") {
+		title = "Recording · " + day.Format("Jan 2, 15:04")
+	}
+	if a.page != nil && strings.TrimSpace(a.page.title) == title {
+		return "Recording"
+	}
+	return title
 }
 
 func transcriptText(rec store.Recording) string {
@@ -315,7 +331,7 @@ func (a *App) insertTranscript(blockID string, rec store.Recording) {
 		n.SetDelta(doc.Delta{{Text: fmtDuration(time.Duration(s.StartMs)*time.Millisecond) + "  ", Attrs: doc.Attrs{Bold: true}}, {Text: s.Text}})
 		nodes = append(nodes, n)
 	}
-	ed.Edit(func(c *doc.Content) { c.Insert(doc.Position{After: blockID}, nodes...) })
+	ed.Edit(func(c *doc.Content) { _ = c.Insert(doc.Position{After: blockID}, nodes...) })
 }
 
 // Speech to text ---------------------------------------------------------
@@ -338,6 +354,10 @@ type speechState struct {
 
 var speech speechState
 
+// sttControlW is the width of Speech to text's fields and lists; a
+// field's input is that less its box's padding.
+const sttControlW = 280
+
 func (a *App) speechSettings(c *ui.Context) {
 	pal := theme.Of(c)
 	s := &speech
@@ -352,6 +372,8 @@ func (a *App) speechSettings(c *ui.Context) {
 	changed := false
 	heading(c, "Speech to text", "How recordings become transcripts.")
 	prov := map[string]int{"openai-compatible": 0, "soniox": 1}[stt.Provider]
+	// One card for the engine and its settings, their controls one width
+	// so their left edges line up.
 	card(c, "engine", func() {
 		settingRow(c, "provider", "Transcription", engineStatus(*stt, s.sonioxSaved || a.session.SignedIn), true, func() {
 			if segmented(c, "provider", &prov, "Endpoint", "Soniox"); true {
@@ -362,16 +384,14 @@ func (a *App) speechSettings(c *ui.Context) {
 				}
 			}
 		})
-	})
-	if stt.Provider == "openai-compatible" {
-		card(c, "endpoint", func() {
-			settingRow(c, "url", "Endpoint", "OpenAI-compatible; one on your network works offline", true, func() {
-				if field(c, "url", &stt.BaseURL, "http://localhost:8000/v1").Width(260).Changed() {
+		if stt.Provider == "openai-compatible" {
+			settingRow(c, "url", "Endpoint", "OpenAI-compatible; one on your network works offline", false, func() {
+				if field(c, "url", &stt.BaseURL, "http://localhost:8000/v1").Width(sttControlW - 20).Changed() {
 					changed = true
 				}
 			})
 			settingRow(c, "model", "Model", "", false, func() {
-				if field(c, "model", &stt.Model, "gpt-transcribe").Width(260).Changed() {
+				if field(c, "model", &stt.Model, "gpt-transcribe").Width(sttControlW - 20).Changed() {
 					changed = true
 				}
 			})
@@ -380,12 +400,16 @@ func (a *App) speechSettings(c *ui.Context) {
 				// where the key is kept.
 			} else if recording.IsLocalEndpoint(stt.BaseURL) {
 				settingRow(c, "key", "API key", "Kept in this device's keychain", false, func() {
-					if password(c, "key", &s.key, "Optional").Width(180).Changed() {
-						keychain.Set("stt.endpoint.key", []byte(s.key))
-					}
-					a.sttTestButton(c, func(ctx context.Context) error {
-						_, err := recording.TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, recording.WavFromPCM(make([]byte, recording.SampleRate)), s.key, "auto")
-						return err
+					ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
+						if growPassword(c, "key", &s.key, "Optional").Changed() {
+							if err := keychain.Set("stt.endpoint.key", []byte(s.key)); err != nil {
+								a.toast("Could not save the key: " + err.Error())
+							}
+						}
+						a.sttTestButton(c, func(ctx context.Context) error {
+							_, err := recording.TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, recording.WavFromPCM(make([]byte, recording.SampleRate)), s.key, "auto")
+							return err
+						})
 					})
 				})
 			} else {
@@ -405,24 +429,24 @@ func (a *App) speechSettings(c *ui.Context) {
 				}
 				settingRow(c, "key", "API key from", desc, false, func() {
 					choice := stt.ProviderID
-					if selectBox(c, "key-from", &choice, append([]string{""}, ids...), func(s string) string { return names[s] }, 180); choice != stt.ProviderID {
+					if selectBox(c, "key-from", &choice, append([]string{""}, ids...), func(s string) string { return names[s] }, sttControlW); choice != stt.ProviderID {
 						stt.ProviderID = choice
 						changed = true
 					}
 				})
 			}
-		})
-	} else {
-		card(c, "soniox", func() {
-			where, ph := "Live transcripts; key kept on the server", "Paste a key"
-			if !a.session.SignedIn {
-				where = "Live transcripts; key kept on this device"
-			}
-			if s.sonioxSaved {
-				ph = "Saved"
-			}
-			settingRow(c, "key", "Soniox API key", where, true, func() {
-				if password(c, "key", &s.soniox, ph).Width(160).Changed() {
+			return
+		}
+		where, ph := "Live transcripts; key kept on the server", "Paste a key"
+		if !a.session.SignedIn {
+			where = "Live transcripts; key kept on this device"
+		}
+		if s.sonioxSaved {
+			ph = "Saved"
+		}
+		settingRow(c, "key", "Soniox API key", where, false, func() {
+			ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
+				if growPassword(c, "key", &s.soniox, ph).Changed() {
 					s.testResult = ""
 				}
 				key := strings.TrimSpace(s.soniox)
@@ -434,20 +458,20 @@ func (a *App) speechSettings(c *ui.Context) {
 					a.saveSonioxKey()
 				}
 			})
-			settingRow(c, "model", "Model", "", false, func() {
-				if field(c, "model", &stt.SonioxModel, "stt-rt-v5").Width(200).Changed() {
-					changed = true
-				}
-			})
-			sp := stt.SpeakerLabels
-			settingRow(c, "speakers", "Label speakers", "", false, func() {
-				if toggle(c, "speakers", &sp).Changed() {
-					stt.SpeakerLabels = sp
-					changed = true
-				}
-			})
 		})
-	}
+		settingRow(c, "model", "Model", "", false, func() {
+			if field(c, "model", &stt.SonioxModel, "stt-rt-v5").Width(sttControlW - 20).Changed() {
+				changed = true
+			}
+		})
+		sp := stt.SpeakerLabels
+		settingRow(c, "speakers", "Label speakers", "", false, func() {
+			if toggle(c, "speakers", &sp).Changed() {
+				stt.SpeakerLabels = sp
+				changed = true
+			}
+		})
+	})
 	// Both engines' Test buttons report here.
 	if s.testResult != "" {
 		notice(c, map[bool]string{true: "ok", false: "danger"}[s.testOK], map[bool]string{true: "check", false: "circle-alert"}[s.testOK], s.testResult, nil)
@@ -459,7 +483,7 @@ func (a *App) speechSettings(c *ui.Context) {
 			if _, ok := recording.Languages[lang]; !ok {
 				lang = "auto"
 			}
-			if selectBox(c, "lang", &lang, recording.LanguageCodes(), recording.LanguageName, 180); lang != stt.Language {
+			if selectBox(c, "lang", &lang, recording.LanguageCodes(), recording.LanguageName, sttControlW); lang != stt.Language {
 				stt.Language = lang
 				changed = true
 			}

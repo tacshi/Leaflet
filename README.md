@@ -16,7 +16,7 @@ app itself. Runs on macOS, Windows and Linux.
   `@agent` in comment threads. Every edit is a validated tool call
   (`read_page`, `insert_blocks`, `replace_block`, `move_block`,
   `delete_blocks`, `create_subpage`, plus cross-page reads), applied as ops
-  that stream into the open page as one undo step, with Undo run / Redo and
+  that stream into the open page as one undo step, with Undo / Redo and
   a page-history snapshot before each run.
 - **Models**: any OpenAI-compatible provider. Built-in presets (OpenAI,
   Claude, xAI, OpenRouter, DeepSeek, GLM), custom endpoints, and local
@@ -85,6 +85,8 @@ usage description is in `mygo.json`.
 
 ```bash
 go test ./...                        # doc model, merge, ops/undo, store, editor, agent loop
+make check   # gofmt, golangci-lint, govulncheck and gosec
+make clean   # remove build/ and the binary go build leaves
 cd supabase/functions && deno test _shared/
 ```
 

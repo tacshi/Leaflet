@@ -114,14 +114,12 @@ type Editor struct {
 	hasDesired bool
 	reveal     string
 	blink      time.Time
-	selectAll  int
 
-	trigger    *Trigger
-	menuIndex  int
-	menuItems  []MenuItem
-	linkOpen   bool
-	linkDraft  string
-	toolbarOff bool
+	trigger   *Trigger
+	menuIndex int
+	menuItems []MenuItem
+	linkOpen  bool
+	linkDraft string
 
 	handle   ui.Handle
 	services ui.Services

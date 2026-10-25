@@ -136,11 +136,11 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 			if p.own != o.own {
 				repl := o.node.Clone()
 				repl.Children = current.Children
-				result.Replace(id, repl)
+				_ = result.Replace(id, repl)
 			}
 			if (p.parent != o.parent || p.prev != o.prev) && movedSinceBase(o, otherFlat, baseFlat[id]) {
 				if pos, ok := positionIn(result, o); ok && !result.IsSelfOrAncestor(id, pos.Anchor()) {
-					result.Move(id, pos)
+					_ = result.Move(id, pos)
 				}
 			}
 			times[id] = ot
@@ -203,7 +203,7 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		if !ok {
 			pos = Position{At: "end"}
 		}
-		result.Insert(pos, o.node.Clone())
+		_ = result.Insert(pos, o.node.Clone())
 		times[id] = editedAt
 		delete(tombstones, id)
 		var kids func(*Node)

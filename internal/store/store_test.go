@@ -15,7 +15,7 @@ func open(t *testing.T) *Store {
 	if _, err := s.LoadSession(nil); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
@@ -23,16 +23,16 @@ func TestKeyBetween(t *testing.T) {
 	a := KeyBetween("", "")
 	b := KeyBetween(a, "")
 	c := KeyBetween(a, b)
-	if !(a < c && c < b) {
+	if a >= c || c >= b {
 		t.Errorf("keys %q %q %q", a, c, b)
 	}
 	first := KeyBetween("", a)
-	if !(first < a) {
+	if first >= a {
 		t.Errorf("first %q not before %q", first, a)
 	}
 	for i := 0; i < 50; i++ {
 		next := KeyBetween(a, c)
-		if !(a < next && next < c) {
+		if a >= next || next >= c {
 			t.Fatalf("step %d: %q not between %q and %q", i, next, a, c)
 		}
 		c = next
@@ -79,7 +79,9 @@ func TestPagesAndContent(t *testing.T) {
 	if pages, _ := s.Pages(); len(pages) != 0 {
 		t.Errorf("pages left %d", len(pages))
 	}
-	s.RestorePages(ids)
+	if err := s.RestorePages(ids); err != nil {
+		t.Fatal(err)
+	}
 	if pages, _ := s.Pages(); len(pages) != 2 {
 		t.Errorf("restored %d", len(pages))
 	}
@@ -89,14 +91,52 @@ func TestComments(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "x"})
 	root, _ := s.AddComment(p.ID, "b1", "Is this right?", "", "quote", "", "")
-	s.AddComment(p.ID, "b1", "Yes", root.ID, "", "agent", "Claude")
+	if _, err := s.AddComment(p.ID, "b1", "Yes", root.ID, "", "agent", "Claude"); err != nil {
+		t.Fatal(err)
+	}
 	threads, _ := s.Threads(p.ID)
 	if len(threads) != 1 || len(threads[0].Replies) != 1 || threads[0].Replies[0].AuthorName != "Claude" {
 		t.Fatalf("threads %+v", threads)
 	}
-	s.SetResolved(root.ID, true)
+	if err := s.SetResolved(root.ID, true); err != nil {
+		t.Fatal(err)
+	}
 	threads, _ = s.Threads(p.ID)
 	if !threads[0].Root.Resolved {
 		t.Error("not resolved")
+	}
+}
+
+func TestJobEditors(t *testing.T) {
+	s := open(t)
+	edit := map[string]any{"ops": []any{map[string]any{"op": "insert"}}, "reply": ""}
+	answer := map[string]any{"ops": nil, "reply": "Hello"}
+	for _, j := range []Job{
+		{ID: "1", PageID: "p", ProviderID: "chatgpt", Status: "done", Result: edit},
+		{ID: "2", PageID: "p", ProviderID: "ollama", Status: "done", Result: answer},
+		{ID: "3", PageID: "p", ProviderID: "claude", Status: "failed", Result: edit},
+		{ID: "4", PageID: "p", ProviderID: "chatgpt", Status: "done", Result: edit},
+		{ID: "5", PageID: "q", ProviderID: "claude", Status: "done", Result: edit},
+	} {
+		if err := s.PutJob(j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := s.JobEditors("p"); len(got) != 1 || got[0] != "chatgpt" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestSnippet(t *testing.T) {
+	text := "Day 1: temples\nKiyomizu-dera\nDay 2: Arashiyama\n\nBook hotel\nBuy JR pass\nTravel is the only thing you buy that makes you richer."
+	got := snippet(text, "hotel")
+	if got != "…Day 2: Arashiyama · Book hotel · Buy JR pass · Travel is the only thing you…" {
+		t.Errorf("snippet %q", got)
+	}
+	if got := snippet("short note", "note"); got != "short note" {
+		t.Errorf("snippet %q", got)
+	}
+	if got := snippet("nothing here", "hotel"); got != "" {
+		t.Errorf("snippet %q", got)
 	}
 }

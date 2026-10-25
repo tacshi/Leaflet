@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 
@@ -33,11 +34,12 @@ func (a *App) pageView(c *ui.Context) {
 				a.startRecording(ps.id, "")
 			}
 		}
-		if iconButton(c, "share", "share", "Share").Clicked() {
+		// Sharing needs a server; a build without one leaves it out.
+		if a.backend.Configured() && iconButton(c, "share", "share", "Share").Clicked() {
 			a.openShare(ps.id)
 		}
 		more := iconButton(c, "page-more", "ellipsis", "Page actions")
-		more.Menu(func(m *ui.Menu) { a.pageMenu(m, *p) })
+		more.Menu(func(m *ui.Menu) { a.pageMenu(m, *p, true) })
 		// The panel's own top bar has the toggle while it is open, as the
 		// sidebar does on the left.
 		if !a.panelOpen {
@@ -71,11 +73,11 @@ func (a *App) pageView(c *ui.Context) {
 				})
 			})
 		})
-		if run := sess.Latest(); run != nil && time.Since(run.At) < 10*time.Minute && run.Status != "running" {
-			a.runBar(c, run)
-		}
+		// One bar at a time, and none under a toast.
 		if sess.Running {
 			a.runningBar(c, sess)
+		} else if run := sess.Latest(); run != nil && time.Since(run.At) < 10*time.Minute && run.Status != "running" && time.Now().After(a.toastUntil) {
+			a.runBar(c, run)
 		}
 	})
 }
@@ -83,15 +85,24 @@ func (a *App) pageView(c *ui.Context) {
 func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 	pal := theme.Of(c)
 	ui.Row(c.Key("crumbs")).Gap(2).AlignItems(ui.Center).Margin(0, 0, 0, 6).Shrink(1).ClipX().Children(func() {
+		// A chevron goes between crumbs, never after the last.
+		crumbs := 0
+		sep := func() {
+			if crumbs > 0 {
+				ui.Icon(c, theme.Icon("chevron-right")).FontSize(11).TextColor(pal.ChartMuted)
+			}
+			crumbs++
+		}
 		if p.FolderID != "" {
 			for _, f := range a.folders {
 				if f.ID == p.FolderID {
-					ui.Text(c, f.Name).FontSize(13).TextColor(pal.TextMuted).SingleLine()
-					ui.Icon(c, theme.Icon("chevron-right")).FontSize(11).TextColor(pal.ChartMuted)
+					sep()
+					ui.Text(c, f.Name).FontSize(13).TextColor(pal.TextMuted).SingleLine().Padding(3, 6)
 				}
 			}
 		}
 		for _, anc := range a.ancestors(p.ID) {
+			sep()
 			b := ui.ButtonBase(c.Key("crumb:"+anc.ID)).Padding(3, 6).Radius(6)
 			if b.Hovered() {
 				b.Background(pal.Hover)
@@ -102,10 +113,10 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 			if b.Clicked() {
 				a.openPage(anc.ID)
 			}
-			ui.Icon(c, theme.Icon("chevron-right")).FontSize(11).TextColor(pal.ChartMuted)
 		}
 		// The page's own title shows here once its big title scrolls away.
 		if a.page.scroll.Y > 80 {
+			sep()
 			ui.Text(c, p.DisplayTitle()).FontSize(13).FontWeight(600).TextColor(pal.Text).SingleLine().MaxWidth(260).Padding(3, 6)
 		}
 		if a.isShared(p) {
@@ -117,45 +128,40 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 	})
 }
 
-// syncStatus shows whether the page is saved and synced as one icon, with
-// the details in its tooltip; a click works offline or online again.
+// syncStatus shows an icon only when saving needs the user: offline with
+// edits waiting, or a sync that failed. A page that saved says so in its
+// byline; the account row says how syncing goes.
 func (a *App) syncStatus(c *ui.Context) {
 	pal := theme.Of(c)
-	tip, icon, fg := "Saved on this device", "check", pal.TextMuted
+	if !a.session.SignedIn {
+		return
+	}
+	var tip, icon string
 	switch {
-	case !a.session.SignedIn:
-		if a.page != nil && a.page.dirty {
-			tip, icon = "Saving…", "refresh-cw"
-		}
 	case a.settings.WorkOffline || !a.online:
-		tip, icon, fg = "Offline", "cloud-off", pal.WarnText
+		tip, icon = "Offline", "cloud-off"
 		if a.pending > 0 {
 			tip = fmt.Sprintf("Offline · %d %s queued", a.pending, plural(a.pending, "edit", "edits"))
 		}
 		if a.settings.WorkOffline {
 			tip += " · click to go back online"
 		}
-	case a.syncing || (a.page != nil && a.page.dirty) || a.pending > 0:
-		tip, icon = "Syncing…", "refresh-cw"
+	case a.syncError != "":
+		tip, icon = "Last sync failed: "+a.syncError+" · click to try again", "circle-alert"
 	default:
-		tip = "Saved and synced · click to work offline"
+		return
 	}
-	b := ui.ButtonBase(c.Key("sync-status")).Size(28, 28).Center().Radius(7).Label(tip).Tooltip(tip).TextColor(fg)
-	if b.Hovered() && a.session.SignedIn {
+	b := ui.ButtonBase(c.Key("sync-status")).Size(28, 28).Center().Radius(7).Label(tip).Tooltip(tip).TextColor(pal.WarnText)
+	if b.Hovered() {
 		b.Background(pal.Hover)
 	}
-	b.Children(func() {
-		ic := ui.Icon(c, theme.Icon(icon)).FontSize(15)
-		if icon == "refresh-cw" {
-			ic.Rotate(ic.Loop("spin", 1200*time.Millisecond, ui.Linear) * 360)
+	b.Children(func() { ui.Icon(c, theme.Icon(icon)).FontSize(15) })
+	if b.Clicked() {
+		if a.settings.WorkOffline {
+			a.settings.WorkOffline = false
+			a.saveSettings()
 		}
-	})
-	if b.Clicked() && a.session.SignedIn {
-		a.settings.WorkOffline = !a.settings.WorkOffline
-		a.saveSettings()
-		if !a.settings.WorkOffline {
-			a.sync.Kick()
-		}
+		a.sync.Kick()
 	}
 }
 
@@ -166,6 +172,17 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 	in := ui.TextInputBase(c.Key("title:"+p.ID), &ps.title).Bind(&ps.titleIn).Placeholder("Untitled").
 		Font(theme.PageFont).FontSize(size).FontWeight(700).TextColor(pal.Text).ReadOnly(ps.editor.ReadOnly).
 		Label("Page title").Margin(0, 0, 6)
+	if ps.focusTitle > 0 {
+		if in.Focused() {
+			ps.focusTitle = 0
+		} else {
+			ps.focusTitle--
+			in.Focus()
+			if ps.selectTitle {
+				in.SetTextSelection(0, utf8.RuneCountInString(ps.title))
+			}
+		}
+	}
 	if in.Changed() {
 		// Rename shortly after typing stops, as the content saves.
 		a.saveTitleSoon()
@@ -196,6 +213,11 @@ func (a *App) byline(c *ui.Context, p store.Page) {
 	if p.CreatedBy == "" || p.CreatedBy == a.session.UserID {
 		editors = append(editors, a.session.DisplayName)
 	}
+	for _, name := range a.page.agents {
+		if !contains(editors, name) {
+			editors = append(editors, name)
+		}
+	}
 	for _, r := range a.hub.Session(p.ID).Runs {
 		if len(r.Ops) > 0 && !contains(editors, r.AgentName) {
 			editors = append(editors, r.AgentName)
@@ -206,7 +228,11 @@ func (a *App) byline(c *ui.Context, p store.Page) {
 		who = "Someone"
 	}
 	ui.Row(c.Key("byline")).Gap(8).AlignItems(ui.Center).Margin(0, 0, 22).Children(func() {
-		ui.Text(c, "Edited by "+who+" · "+humanTime(p.UpdatedAt)).FontSize(13).TextColor(pal.TextMuted)
+		when := humanTime(p.UpdatedAt)
+		if a.page.dirty {
+			when = "Saving…"
+		}
+		ui.Text(c, "Edited by "+who+" · "+when).FontSize(13).TextColor(pal.TextMuted)
 		if n := len(a.page.members); n > 0 {
 			ui.Text(c, "·").TextColor(pal.ChartMuted)
 			ui.Textf(c, "Shared with %d", n).FontSize(13).TextColor(pal.TextMuted)
@@ -270,10 +296,10 @@ func (a *App) isEmpty() bool {
 // emptyActions are the ways to start an empty page.
 func (a *App) emptyActions(c *ui.Context) {
 	pal := theme.Of(c)
-	ui.Column(c.Key("empty")).Gap(6).Margin(18, 0, 0).Children(func() {
+	ui.Column(c.Key("empty")).Gap(6).Margin(18, 0, 0).AlignItems(ui.Start).Children(func() {
 		ui.Text(c, "Start with").FontSize(12).FontWeight(600).TextColor(pal.TextMuted).Margin(0, 0, 4, 2)
 		row := func(key, icon, label, hint string, fn func()) {
-			b := ui.ButtonBase(c.Key(key)).Padding(8, 10).Gap(12).Radius(8).AlignItems(ui.Center).MaxWidth(420)
+			b := ui.ButtonBase(c.Key(key)).Padding(8, 10).Gap(12).Radius(8).AlignItems(ui.Center).Justify(ui.Start).FillWidth().MaxWidth(420)
 			if b.Hovered() {
 				b.Background(pal.Hover)
 			}
@@ -321,7 +347,7 @@ func (a *App) runBar(c *ui.Context, run *agents.Run) {
 			b.Children(func() { ui.Text(c, label).FontSize(12.5).FontWeight(600).TextColor(pal.OnInverse) })
 			return b.Clicked()
 		}
-		if !run.Undone && btn("undo-run", "Undo run") {
+		if !run.Undone && btn("undo-run", "Undo") {
 			a.hub.UndoRun(a.page.id, run.ID)
 		}
 		if run.Undone && btn("redo-run", "Redo") {

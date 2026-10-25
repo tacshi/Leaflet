@@ -32,14 +32,14 @@ func (s *Store) Queue(entity, id string, payload map[string]any, label, pageID s
 	}
 	var pending int64
 	err = s.db.QueryRow(`SELECT id FROM outbox WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, entity, id).Scan(&pending)
-	switch {
-	case err == nil:
+	switch err {
+	case nil:
 		if label == "" {
 			_, err = s.db.Exec(`UPDATE outbox SET payload = ?, attempts = 0, last_error = NULL WHERE id = ?`, string(raw), pending)
 		} else {
 			_, err = s.db.Exec(`UPDATE outbox SET payload = ?, label = ?, attempts = 0, last_error = NULL WHERE id = ?`, string(raw), label, pending)
 		}
-	case err == sql.ErrNoRows:
+	case sql.ErrNoRows:
 		_, err = s.db.Exec(`INSERT INTO outbox (entity, entity_id, op, payload, label, page_id, created_at) VALUES (?, ?, 'upsert', ?, ?, ?, ?)`,
 			entity, id, string(raw), label, ns(pageID), time.Now().UnixMilli())
 	}
@@ -55,7 +55,7 @@ func (s *Store) Pending() ([]OutboxEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []OutboxEntry
 	for rows.Next() {
 		var e OutboxEntry
@@ -73,14 +73,14 @@ func (s *Store) Pending() ([]OutboxEntry, error) {
 // PendingCount is how many changes wait for the server.
 func (s *Store) PendingCount() int {
 	var n int
-	s.db.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n)
 	return n
 }
 
 // HasPending reports whether a row has a change waiting.
 func (s *Store) HasPending(entity, id string) bool {
 	var n int
-	s.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE entity = ? AND entity_id = ?`, entity, id).Scan(&n)
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE entity = ? AND entity_id = ?`, entity, id).Scan(&n)
 	return n > 0
 }
 

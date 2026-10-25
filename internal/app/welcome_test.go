@@ -14,7 +14,7 @@ func TestWelcomePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if _, err := st.LoadSession(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,9 @@ func TestWelcomePage(t *testing.T) {
 		t.Errorf("subpage %q: parent %q, %v", sub, p.ParentID, err)
 	}
 	// A second start makes no more pages.
-	a.createWelcome()
+	if err := a.createWelcome(); err != nil {
+		t.Fatal(err)
+	}
 	if pages, _ := st.Pages(); len(pages) != 2 {
 		t.Errorf("%d pages after a second start", len(pages))
 	}
@@ -54,7 +56,7 @@ func TestUpdateWelcome(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.Close()
+	defer func() { _ = st.Close() }()
 	if _, err := st.LoadSession(nil); err != nil {
 		t.Fatal(err)
 	}
@@ -67,13 +69,17 @@ func TestUpdateWelcome(t *testing.T) {
 		n, _ := doc.SpecToNode(map[string]any{"type": "todo_list", "text": s}, "", "Leaflet")
 		blocks = append(blocks, n)
 	}
+	review, _ := doc.SpecToNode(map[string]any{"type": "numbered_list", "text": "Review its edits, and **Undo run** if you don't like them"}, "", "Leaflet")
+	blocks = append(blocks, review)
 	closing, _ := doc.SpecToNode(map[string]any{"type": "paragraph", "text": "Make a new page with the pencil at the top of the sidebar, and nest pages inside pages from the **+** beside them."}, "", "Leaflet")
 	blocks = append(blocks, closing)
 	p, err := st.CreatePage(store.NewPageOptions{Title: welcomeTitle, Content: doc.FromBlocks(blocks)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.SetValue("welcome.created", "true")
+	if err := st.SetValue("welcome.created", "true"); err != nil {
+		t.Fatal(err)
+	}
 	a := &App{st: st}
 	if err := a.updateWelcome(); err != nil {
 		t.Fatal(err)
@@ -88,6 +94,9 @@ func TestUpdateWelcome(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("got %q", got)
 	}
+	if n := st.Content(p.ID).Find(review.ID); n == nil || n.Delta().ToMarkdown() != welcomeReviewStep {
+		t.Errorf("review step not renamed")
+	}
 	// The image section comes after the steps, with the picture as a file
 	// of the page.
 	var image *doc.Node
@@ -100,7 +109,7 @@ func TestUpdateWelcome(t *testing.T) {
 		t.Fatal("no image added")
 	}
 	path := strings.TrimPrefix(image.Str("url"), "file://")
-	if data, err := os.ReadFile(path); err != nil || len(data) != len(welcomeImage) {
+	if data, err := os.ReadFile(path); err != nil || len(data) != len(welcomeImage) { // #nosec G304 -- the image file the store just added.
 		t.Errorf("image file %s: %v", path, err)
 	}
 	// The Subpages section takes the place of the old closing line.
@@ -112,8 +121,12 @@ func TestUpdateWelcome(t *testing.T) {
 		t.Errorf("last block %s", last.Type)
 	}
 	// A second run adds no second image or subpage.
-	st.SetValue("welcome.version", "2")
-	a.updateWelcome()
+	if err := st.SetValue("welcome.version", "2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.updateWelcome(); err != nil {
+		t.Fatal(err)
+	}
 	kinds := map[string]int{}
 	st.Content(p.ID).Walk(func(n, _ *doc.Node) { kinds[n.Type]++ })
 	if kinds["image"] != 1 || kinds["subpage"] != 1 {
@@ -124,5 +137,44 @@ func TestUpdateWelcome(t *testing.T) {
 	}
 	if v, _ := st.Value("welcome.version"); v != welcomeVersion {
 		t.Errorf("version %q", v)
+	}
+}
+
+func TestUpdateWelcomeEmbedsTheme(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	embed := func(src string) *doc.Node {
+		n, _ := doc.SpecToNode(map[string]any{"type": "embed", "embed": map[string]any{"title": "x", "html": src, "height": 200.0}}, "", "Leaflet")
+		return n
+	}
+	// As version 4 made it, and one the user wrote.
+	old := embed(`<html><head><style>html,body{margin:0;background:#fff;color:#16181d;font:14px sans-serif}</style></head></html>`)
+	mine := embed(`<p>mine</p>`)
+	p, err := st.CreatePage(store.NewPageOptions{Title: welcomeTitle, Content: doc.FromBlocks([]*doc.Node{old, mine})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetValue("welcome.created", "true"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetValue("welcome.version", "4"); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{st: st}
+	if err := a.updateWelcome(); err != nil {
+		t.Fatal(err)
+	}
+	c := st.Content(p.ID)
+	if got := c.Find(old.ID).Str("html"); got != savingsEmbed {
+		t.Error("the guide's embed kept its light-only HTML")
+	}
+	if got := c.Find(mine.ID).Str("html"); got != `<p>mine</p>` {
+		t.Errorf("the user's embed changed: %q", got)
 	}
 }

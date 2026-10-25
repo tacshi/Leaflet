@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/coder/websocket"
 
@@ -38,17 +39,27 @@ func IsLocalEndpoint(baseURL string) bool {
 func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, apiKey, language string) ([]store.Segment, error) {
 	var body bytes.Buffer
 	w := multipart.NewWriter(&body)
-	w.WriteField("model", model)
-	w.WriteField("response_format", "verbose_json")
+	if err := w.WriteField("model", model); err != nil {
+		return nil, err
+	}
+	if err := w.WriteField("response_format", "verbose_json"); err != nil {
+		return nil, err
+	}
 	if language != "auto" && language != "" && !strings.Contains(language, "-") {
-		w.WriteField("language", language)
+		if err := w.WriteField("language", language); err != nil {
+			return nil, err
+		}
 	}
 	part, err := w.CreateFormFile("file", "recording.wav")
 	if err != nil {
 		return nil, err
 	}
-	part.Write(wav)
-	w.Close()
+	if _, err := part.Write(wav); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", agents.NormalizeBaseURL(baseURL)+"/audio/transcriptions", &body)
@@ -63,14 +74,14 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, 
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	data, _ := io.ReadAll(res.Body)
 	if res.StatusCode >= 400 {
 		body := strings.TrimSpace(string(data))
 		if len(body) > 200 || strings.HasPrefix(body, "<") {
 			body = ""
 		}
-		return nil, fmt.Errorf("Transcription failed: %s %s", res.Status, body)
+		return nil, fmt.Errorf("Transcription failed: %s %s", res.Status, body) //nolint:staticcheck // shown to people as a sentence.
 	}
 	var out struct {
 		Text     string  `json:"text"`
@@ -102,7 +113,7 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, 
 // TestSonioxKey checks a Soniox API key against Soniox's API.
 func TestSonioxKey(ctx context.Context, key string) error {
 	if strings.TrimSpace(key) == "" {
-		return fmt.Errorf("Paste a key to test")
+		return fmt.Errorf("Paste a key to test") //nolint:staticcheck // shown to people as a sentence.
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.soniox.com/v1/models", nil)
 	if err != nil {
@@ -113,7 +124,7 @@ func TestSonioxKey(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-	res.Body.Close()
+	_ = res.Body.Close()
 	switch {
 	case res.StatusCode == 401 || res.StatusCode == 403:
 		return fmt.Errorf("Soniox rejected this key")
@@ -178,7 +189,7 @@ func DialSoniox(ctx context.Context, apiKey, model string, hints []string, speak
 		"language_hints": hints, "enable_speaker_diarization": speakers, "enable_endpoint_detection": true,
 	})
 	if err := conn.Write(ctx, websocket.MessageText, cfg); err != nil {
-		conn.Close(websocket.StatusInternalError, "")
+		_ = conn.Close(websocket.StatusInternalError, "")
 		return nil, err
 	}
 	s := &Soniox{conn: conn, done: make(chan struct{})}
@@ -244,22 +255,24 @@ func (s *Soniox) textLocked() string {
 func (s *Soniox) Send(pcm []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	s.conn.Write(ctx, websocket.MessageBinary, pcm)
+	_ = s.conn.Write(ctx, websocket.MessageBinary, pcm)
 }
 
 // Finish ends the stream and waits for the last final words.
 func (s *Soniox) Finish() ([]store.Segment, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	s.conn.Write(ctx, websocket.MessageBinary, []byte{})
+	_ = s.conn.Write(ctx, websocket.MessageBinary, []byte{})
 	cancel()
 	select {
 	case <-s.done:
 	case <-time.After(15 * time.Second):
 	}
-	s.conn.Close(websocket.StatusNormalClosure, "")
+	_ = s.conn.Close(websocket.StatusNormalClosure, "")
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	segs := TokensToSegments(s.final)
+	// Words still waiting to be final when the stream ended, as when it
+	// timed out, showed live: they stay rather than vanish.
+	segs := TokensToSegments(append(s.final, s.pending...))
 	if s.err != nil && len(segs) == 0 {
 		return nil, s.err
 	}
@@ -272,18 +285,37 @@ func isPunct(text string) bool {
 }
 
 // Tidy joins lines of only punctuation to the line before, as transcripts
-// made before TokensToSegments did so have them.
+// made before TokensToSegments did so have them, and a line that carries
+// on a sentence, starting in lower case after one that did not end it, as
+// a pause mid-sentence splits it.
 func Tidy(segs []store.Segment) []store.Segment {
 	var out []store.Segment
 	for _, s := range segs {
-		if isPunct(s.Text) && len(out) > 0 {
-			out[len(out)-1].Text += strings.TrimSpace(s.Text)
-			out[len(out)-1].EndMs = max(out[len(out)-1].EndMs, s.EndMs)
-			continue
+		if len(out) > 0 {
+			prev := &out[len(out)-1]
+			if isPunct(s.Text) {
+				prev.Text += strings.TrimSpace(s.Text)
+				prev.EndMs = max(prev.EndMs, s.EndMs)
+				continue
+			}
+			if s.Speaker == prev.Speaker && carriesOn(prev.Text, s.Text) && len(prev.Text)+len(s.Text) < 600 {
+				prev.Text += " " + strings.TrimSpace(s.Text)
+				prev.EndMs = max(prev.EndMs, s.EndMs)
+				continue
+			}
 		}
 		out = append(out, s)
 	}
 	return out
+}
+
+// carriesOn tells whether next continues the sentence prev leaves open:
+// prev ends without a sentence's end and next starts in lower case.
+func carriesOn(prev, next string) bool {
+	prev, next = strings.TrimSpace(prev), strings.TrimSpace(next)
+	last, _ := utf8.DecodeLastRuneInString(prev)
+	first, _ := utf8.DecodeRuneInString(next)
+	return prev != "" && !strings.ContainsRune(".!?…。！？\"”'’)", last) && unicode.IsLower(first)
 }
 
 // TokensToSegments groups Soniox tokens into transcript segments: a new

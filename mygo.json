@@ -1,11 +1,15 @@
 {
   "name": "Leaflet",
-  "identifier": "dev.leaflet.app",
+  "identifier": "app.capyvibe.leaflet",
   "version": "0.1.0",
   "out": "build",
   "macos": {
     "infoPlist": {
       "NSMicrophoneUsageDescription": "Leaflet records audio into recording blocks when you press Record."
     }
+  },
+  "updates": {
+    "publicKey": "Q87NmLe4TldXTvIJN7uNSLn9FKbPE1NTe+2tcDTqC+U=",
+    "github": "tacshi/Leaflet"
   }
 }

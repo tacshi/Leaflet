@@ -60,7 +60,7 @@ func (s *Store) PutRemoteRecording(r map[string]any) error {
 		rec.Status = "ready"
 	}
 	if raw, err := json.Marshal(r["transcript"]); err == nil {
-		json.Unmarshal(raw, &rec.Transcript)
+		_ = json.Unmarshal(raw, &rec.Transcript)
 	}
 	if old, err := s.Recording(rec.ID); err == nil {
 		rec.LocalPath, rec.UploadedAt = old.LocalPath, old.UploadedAt

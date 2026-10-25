@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -243,9 +244,7 @@ func (a *App) addSubpageBlock() {
 	a.expanded[ps.id] = true
 	a.savePage()
 	a.openPage(p.ID)
-	if a.page != nil {
-		a.page.titleIn.Focus()
-	}
+	a.focusTitle(false)
 }
 
 var imageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".bmp": true}
@@ -304,7 +303,7 @@ func (a *App) openFile(f store.File) {
 		a.toast("This file is on the server; it downloads when you sync.")
 		return
 	}
-	mygo.Shell.OpenPath(f.LocalPath)
+	_ = mygo.Shell.OpenPath(f.LocalPath)
 }
 
 // exportPage saves a page as Markdown.
@@ -324,7 +323,7 @@ func (a *App) exportPage(id string) {
 		if path == "" {
 			return
 		}
-		err := os.WriteFile(path, []byte(md), 0o644)
+		err := os.WriteFile(path, []byte(md), 0o644) // #nosec G306 -- a file the user saves, readable like any other they save.
 		a.update(func() {
 			if err != nil {
 				a.toast("Could not export: " + err.Error())
@@ -363,7 +362,7 @@ func (a *App) loadMembers(pageID string) {
 		members = append(members, store.Member{PageID: pageID, UserID: store.S(m, "user_id"), Role: store.S(m, "role"),
 			DisplayName: store.S(m, "display_name"), Email: store.S(m, "email")})
 	}
-	a.st.SetMembers(pageID, members)
+	_ = a.st.SetMembers(pageID, members)
 }
 
 // imageCache loads the pictures of image blocks.
@@ -423,7 +422,7 @@ func fetch(url string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode >= 400 {
 		return nil, &remote.Error{Status: res.StatusCode, Message: res.Status}
 	}
@@ -457,12 +456,45 @@ const embedWheel = `<script>(function () {
   }, {passive: true});
 })();</script>`
 
+// embedFit runs in an embed's frame: it tells the page how tall the
+// embed's content is at the frame's width, so a block too short for it,
+// as a page narrows and its layout stacks, grows to show it all.
+const embedFit = `<script>(function () {
+  var last = "";
+  function fit() {
+    var b = document.body;
+    if (!b) return;
+    var s = getComputedStyle(b);
+    var h = Math.ceil(b.scrollHeight + (parseFloat(s.marginTop) || 0) + (parseFloat(s.marginBottom) || 0));
+    var key = h + ":" + innerWidth;
+    if (key === last) return;
+    last = key;
+    parent.postMessage({leafletSize: [h, innerWidth]}, "*");
+  }
+  addEventListener("load", function () {
+    fit();
+    new ResizeObserver(fit).observe(document.body);
+  });
+  addEventListener("resize", fit);
+})();</script>`
+
 // embedPage wraps an embed's HTML in a sandboxed frame: frames never call
 // Go, and the policy keeps it off the network. A srcdoc frame inherits the
 // wrapper's policy, so the wrapper has the frame's. The wrapper's own
-// script only passes the frame's leftover wheel movement to the page.
-func embedPage(src string) string {
-	meta := `<meta http-equiv="Content-Security-Policy" content="` + embedCSP + `">` + embedWheel
+// script only passes the frame's leftover wheel movement and its content's
+// size to the page, for the embed id.
+//
+// In the dark theme the frame's root gets data-theme="dark" and a dark
+// color scheme, so an embed that styles nothing follows the page, and one
+// that does can match it with :root[data-theme="dark"].
+func embedPage(id, src string, dark bool) string {
+	bg, scheme := "#fff", "light"
+	if dark {
+		bg, scheme = "#1b1e24", "dark"
+	}
+	meta := `<meta http-equiv="Content-Security-Policy" content="` + embedCSP + `">` +
+		`<meta name="color-scheme" content="` + scheme + `">` +
+		`<script>document.documentElement.dataset.theme = "` + scheme + `";</script>` + embedWheel + embedFit
 	inner := src
 	if i := strings.Index(strings.ToLower(inner), "<head>"); i >= 0 {
 		inner = inner[:i+6] + meta + inner[i+6:]
@@ -470,18 +502,34 @@ func embedPage(src string) string {
 		inner = meta + inner
 	}
 	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="` + embedCSP + `; frame-src about: data:">` +
-		`<style>html,body{margin:0;height:100%;background:#fff}iframe{border:0;width:100%;height:100%;display:block;background:#fff}</style></head><body>` +
+		`<meta name="color-scheme" content="` + scheme + `">` +
+		`<style>html,body{margin:0;height:100%;background:` + bg + `}iframe{border:0;width:100%;height:100%;display:block;background:` + bg + `}</style></head><body>` +
 		`<iframe id="f" sandbox="allow-scripts" srcdoc="` + html.EscapeString(inner) + `"></iframe>` +
 		// Without a wheel listener of its own, WebKit scrolls the wrapper
 		// without telling a frame that could scroll, so it never forwards.
 		`<script>addEventListener("wheel", function () {}, {passive: true});` +
 		`addEventListener("message", function (e) {` +
-		`if (e.source !== document.getElementById("f").contentWindow || !e.data || typeof e.data.leafletWheel !== "number") return;` +
-		`window.mygo && window.mygo.call("Embeds.Scroll", e.data.leafletWheel);});</script></body></html>`
+		`if (e.source !== document.getElementById("f").contentWindow || !e.data || !window.mygo) return;` +
+		`if (typeof e.data.leafletWheel === "number") window.mygo.call("Embeds.Scroll", e.data.leafletWheel);` +
+		`var z = e.data.leafletSize;` +
+		`if (z && typeof z[0] === "number" && typeof z[1] === "number") window.mygo.call("Embeds.Size", ` + strconv.Quote(id) + `, z[0], z[1]);` +
+		`});</script></body></html>`
 }
 
-// embedScroll is the service an embed's wrapper calls to scroll the page.
+// embedScroll is the service an embed's wrapper calls: to scroll the page,
+// and to say how tall the embed's content is.
 type embedScroll struct{ a *App }
+
+// embedSize is how tall an embed's content is at a width of its frame.
+type embedSize struct{ h, w float32 }
+
+// Size keeps the height of embed id's content at its frame's width w. The
+// first call also tells that the embed has drawn, so it shows.
+func (s *embedScroll) Size(id string, h, w float64) {
+	s.a.update(func() {
+		s.a.embedSizes[id] = embedSize{float32(min(max(h, 0), 4000)), float32(w)}
+	})
+}
 
 // Scroll scrolls the open page by dy DIPs, for wheel movement over an
 // embed that the embed did not use.
@@ -497,17 +545,50 @@ func (s *embedScroll) Scroll(dy float64) {
 func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 	pal := theme.Of(c)
 	height := float32(min(max(n.Int("height", 320), 120), 1200))
-	src := n.Str("html")
 	key := n.ID
-	ui.Column(c.Key("embed:" + n.ID)).Gap(8).Children(func() {
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Icon(c, theme.Icon("layout-grid")).FontSize(13).TextColor(pal.TextMuted)
-			ui.Text(c, n.Str("title")).FontSize(13).FontWeight(600).TextColor(pal.TextSecondary).Grow(1).SingleLine()
-			ui.Text(c, "Sandboxed").FontSize(11).TextColor(pal.TextMuted)
+	// The block grows when the content is taller at this width, as a
+	// narrow page stacks its layout. The frame is inside the card's border
+	// and padding.
+	const pad = 14
+	size, ready := a.embedSizes[key]
+	if ready && abs32(size.w-(width-2-2*pad)) < 4 {
+		height = max(height, min(size.h, 1200))
+	}
+	// Loaded again when the HTML or the theme changes: by hand, by an
+	// agent, by undo or a restored version.
+	src := embedPage(key, n.Str("html"), c.Theme().Dark)
+	// A card as a chart is, with the title inside.
+	box := ui.Column(c.Key("embed:"+n.ID)).Padding(12, pad, pad).Gap(10).Radius(10).Border(1, pal.Divider).Background(pal.Surface)
+	hovered := box.Hovered()
+	box.Children(func() {
+		ui.Row(c).Height(24).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, n.Str("title")).FontWeight(650).FontSize(15).TextColor(pal.Text).Grow(1).SingleLine()
+			if a.page != nil && !a.page.editor.ReadOnly {
+				b := ui.ButtonBase(c.Key("edit")).Height(24).Padding(0, 8).Gap(4).Radius(6).TextColor(pal.TextMuted).
+					Opacity(map[bool]float32{true: 1, false: 0}[hovered]).AlignItems(ui.Center).Label("Edit embed")
+				if b.Hovered() {
+					b.Background(pal.Hover)
+				}
+				b.Children(func() {
+					ui.Icon(c, theme.Icon("pencil")).FontSize(12)
+					ui.Text(c, "Edit").FontSize(12)
+				})
+				if b.Clicked() {
+					a.dialogs.editEmbed(n)
+				}
+			}
+			ui.Row(c).Gap(4).AlignItems(ui.Center).Tooltip("Runs apart from your data, with no network").Children(func() {
+				ui.Icon(c, theme.Icon("shield-check")).FontSize(12).TextColor(pal.TextMuted)
+				ui.Text(c, "Sandboxed").FontSize(11).TextColor(pal.TextMuted)
+			})
 		})
 		v := a.embeds[key]
 		if v == nil && a.win != nil {
-			wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: "#ffffff"})
+			bg := "#ffffff"
+			if c.Theme().Dark {
+				bg = "#1b1e24"
+			}
+			wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: bg})
 			if err != nil {
 				ui.Text(c, "Embeds cannot show here: "+err.Error()).TextColor(pal.TextMuted)
 				return
@@ -519,14 +600,32 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 				}
 			})
 			page.SetWindowOpenHandler(func(mygo.WindowOpenRequest) *mygo.WindowOptions { return nil })
-			page.LoadHTML(embedPage(src), "about:blank")
 			a.embeds[key] = wv
 			v = wv
 		}
 		if v != nil {
-			ui.WebView(c, v).Height(height).FillWidth().Radius(8).Border(1, pal.Divider)
+			if a.embedSrc[key] != src {
+				v.Page().LoadHTML(src, "about:blank")
+				a.embedSrc[key] = src
+				delete(a.embedSizes, key)
+				ready = false
+			}
+			// Until the embed draws, its box shows rather than a blank
+			// page in the frame's color.
+			wv := ui.WebView(c, v).Height(height).FillWidth().Radius(6)
+			if !ready {
+				wv.Opacity(0)
+				ui.Box(c).Height(height).FillWidth().Margin(-height-10, 0, 0, 0).Radius(6).Background(pal.Ground)
+			}
 		}
 	})
+}
+
+func abs32(f float32) float32 {
+	if f < 0 {
+		return -f
+	}
+	return f
 }
 
 var _ agents.Host = (*App)(nil)

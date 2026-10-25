@@ -302,21 +302,29 @@ func (h *Hub) ChatGPT(providerID string) (*ChatGPT, error) {
 	}
 	raw, err := keychain.Get("chatgpt." + providerID)
 	if err != nil {
-		return nil, errors.New("Sign in with ChatGPT again in Settings › Agent providers.")
+		return nil, errors.New("Sign in with ChatGPT again in Settings › Agent providers.") //nolint:staticcheck // shown to people as a sentence.
 	}
 	var acct ChatGPTAccount
 	if err := json.Unmarshal(raw, &acct); err != nil {
 		return nil, err
 	}
 	g := NewChatGPT(acct)
-	g.OnRefresh = func(a ChatGPTAccount) { SaveChatGPT(providerID, a) }
+	g.OnRefresh = func(a ChatGPTAccount) {
+		if err := SaveChatGPT(providerID, a); err != nil {
+			log.Printf("keep ChatGPT sign-in: %v", err)
+		}
+	}
 	chatgptClients[providerID] = g
 	return g, nil
 }
 
 // UseChatGPT keeps a new ChatGPT sign-in for a provider.
 func UseChatGPT(providerID string, g *ChatGPT) error {
-	g.OnRefresh = func(a ChatGPTAccount) { SaveChatGPT(providerID, a) }
+	g.OnRefresh = func(a ChatGPTAccount) {
+		if err := SaveChatGPT(providerID, a); err != nil {
+			log.Printf("keep ChatGPT sign-in: %v", err)
+		}
+	}
 	chatgptMu.Lock()
 	chatgptClients[providerID] = g
 	chatgptMu.Unlock()
@@ -325,7 +333,7 @@ func UseChatGPT(providerID string, g *ChatGPT) error {
 
 // SaveChatGPT keeps a ChatGPT sign-in in the keychain.
 func SaveChatGPT(providerID string, a ChatGPTAccount) error {
-	raw, _ := json.Marshal(a)
+	raw, _ := json.Marshal(a) // #nosec G117 -- the sign-in goes to the keychain.
 	return keychain.Set("chatgpt."+providerID, raw)
 }
 
@@ -338,7 +346,7 @@ func ForgetChatGPT(ctx context.Context, providerID string) {
 	if g != nil {
 		g.SignOut(ctx)
 	}
-	keychain.Delete("chatgpt." + providerID)
+	_ = keychain.Delete("chatgpt." + providerID)
 }
 
 // HostID names this device to OpenAI's sign-in, the same every time.
@@ -347,7 +355,7 @@ func (h *Hub) HostID() string {
 		return id
 	}
 	id := "urn:uuid:" + doc.NewRowID()
-	h.st.SetValue("chatgpt.host", id)
+	_ = h.st.SetValue("chatgpt.host", id)
 	return id
 }
 
@@ -536,7 +544,9 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before, w
 			if live := h.host.Editor(pageID); live != nil && closed {
 				// The page was opened during the run: it gets the run's
 				// changes as one step.
-				live.ApplyOps(run.Ops)
+				if err := live.ApplyOps(run.Ops); err != nil {
+					log.Printf("agent run on the open page: %v", err)
+				}
 			} else if closed {
 				if _, _, err := h.st.SaveContent(pageID, work); err != nil {
 					log.Printf("agent run on a closed page: %v", err)
@@ -548,13 +558,17 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before, w
 		if option.Local() {
 			jobID = run.ID
 		}
-		h.st.AddHistory(pageID, before, "agent_run", jobID, label)
+		if err := h.st.AddHistory(pageID, before, "agent_run", jobID, label); err != nil {
+			log.Printf("agent run history: %v", err)
+		}
 		h.host.Tint(pageID, run.BlockIDs())
 	}
 	if option.Local() {
 		h.logLocalJob(run, req)
 		if req.Surface == "comment" && run.Error == "" && run.Reply != "" && len(req.FocusBlockIDs) > 0 {
-			h.st.AddComment(pageID, req.FocusBlockIDs[0], run.Reply, req.CommentID, "", "agent", option.Name())
+			if _, err := h.st.AddComment(pageID, req.FocusBlockIDs[0], run.Reply, req.CommentID, "", "agent", option.Name()); err != nil {
+				run.Status, run.Error = "failed", err.Error()
+			}
 		}
 	} else {
 		h.host.SyncNow()
@@ -649,11 +663,13 @@ func (h *Hub) logLocalJob(run *Run, req Request) {
 		status = "failed"
 	}
 	// Local providers have no server row, so the job stays on this device.
-	h.st.PutJob(store.Job{
+	if err := h.st.PutJob(store.Job{
 		ID: run.ID, PageID: req.PageID, Surface: run.Surface, FocusBlockIDs: req.FocusBlockIDs, CommentID: req.CommentID,
 		ConversationID: req.ConversationID, ProviderID: req.ProviderID, Model: req.Model, Status: status,
 		Request: req.JobRequest(), Result: map[string]any{"reply": run.Reply, "ops": run.Ops, "edits": edits}, Error: run.Error,
-	})
+	}); err != nil {
+		log.Printf("agent job: %v", err)
+	}
 }
 
 // UndoRun reverts a whole run, even after later edits elsewhere on the page.
@@ -687,10 +703,14 @@ func (h *Hub) apply(pageID string, ops []doc.Op) {
 	for _, o := range ops {
 		switch o.Op {
 		case "delete_page":
-			h.st.DeletePage(o.PageID)
+			if _, err := h.st.DeletePage(o.PageID); err != nil {
+				log.Printf("undo run: %v", err)
+			}
 		case "create_page":
 			if o.Page != nil {
-				h.st.RestorePages([]string{o.Page.ID})
+				if err := h.st.RestorePages([]string{o.Page.ID}); err != nil {
+					log.Printf("undo run: %v", err)
+				}
 			}
 		default:
 			blockOps = append(blockOps, o)
@@ -700,7 +720,9 @@ func (h *Hub) apply(pageID string, ops []doc.Op) {
 		return
 	}
 	if ed := h.host.Editor(pageID); ed != nil {
-		ed.ApplyOps(blockOps)
+		if err := ed.ApplyOps(blockOps); err != nil {
+			log.Printf("undo run: %v", err)
+		}
 		return
 	}
 	c := h.st.Content(pageID)
@@ -712,11 +734,15 @@ func (h *Hub) apply(pageID string, ops []doc.Op) {
 			log.Printf("undo run: %v", err)
 		}
 	}
-	h.st.SaveContent(pageID, c)
+	if _, _, err := h.st.SaveContent(pageID, c); err != nil {
+		log.Printf("undo run: %v", err)
+	}
 }
 
 func (h *Hub) markJob(id, status string) {
-	h.st.SetJobStatus(id, status)
+	if err := h.st.SetJobStatus(id, status); err != nil {
+		log.Printf("job status: %v", err)
+	}
 	if h.be.SignedIn() && h.host.Online() {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)

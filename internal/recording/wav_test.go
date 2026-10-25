@@ -1,0 +1,65 @@
+package recording
+
+import (
+	"encoding/binary"
+	"math"
+	"testing"
+
+	"leaflet/internal/store"
+)
+
+// tone is a chunk of a sine at an RMS of the given dBFS.
+func tone(db float64) []byte {
+	amp := math.Pow(10, db/20) * math.Sqrt2
+	pcm := make([]byte, 2*1600)
+	for i := 0; i < 1600; i++ {
+		v := int16(amp * 32767 * math.Sin(float64(i)*2*math.Pi*440/16000))
+		binary.LittleEndian.PutUint16(pcm[2*i:], uint16(v))
+	}
+	return pcm
+}
+
+func TestLevel(t *testing.T) {
+	if l := Level(make([]byte, 3200)); l != 0 {
+		t.Errorf("silence %v", l)
+	}
+	// Quiet speech into a laptop microphone, around -35 dBFS, shows
+	// clearly; loud speech fills the meter.
+	if l := Level(tone(-35)); l < 0.4 || l > 0.5 {
+		t.Errorf("-35 dBFS %v", l)
+	}
+	if l := Level(tone(-6)); l != 1 {
+		t.Errorf("-6 dBFS %v", l)
+	}
+}
+
+func TestLatePunctuationEndsTheLine(t *testing.T) {
+	segs := TokensToSegments([]Token{
+		{Text: "I", StartMs: 23000, EndMs: 23200},
+		{Text: " think", StartMs: 23200, EndMs: 23600},
+		{Text: ".", StartMs: 26000, EndMs: 26100},
+	})
+	if len(segs) != 1 || segs[0].Text != "I think." {
+		t.Errorf("segments %+v", segs)
+	}
+}
+
+func TestTidyJoinsPunctuationLines(t *testing.T) {
+	got := Tidy([]store.Segment{{StartMs: 23000, EndMs: 23600, Text: "I think"}, {StartMs: 26000, EndMs: 26100, Text: "."}})
+	if len(got) != 1 || got[0].Text != "I think." || got[0].EndMs != 26100 {
+		t.Errorf("segments %+v", got)
+	}
+}
+
+func TestMeterWindowsAcrossChunks(t *testing.T) {
+	// Chunks of any size give one level per 50 ms window.
+	var m Meter
+	pcm := tone(-20) // 1600 samples: two windows
+	got := 0
+	for _, part := range [][]byte{pcm[:500], pcm[500:2100], pcm[2100:]} {
+		got += len(m.Levels(part))
+	}
+	if got != 2 {
+		t.Errorf("%d levels", got)
+	}
+}

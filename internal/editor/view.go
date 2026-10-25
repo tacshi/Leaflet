@@ -1,0 +1,483 @@
+package editor
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/egoist/mygo/ui"
+
+	"leaflet/internal/doc"
+	"leaflet/internal/theme"
+)
+
+const blinkPeriod = 530 * time.Millisecond
+
+// View builds the editor.
+func (e *Editor) View(c *ui.Context) ui.Element {
+	pal := theme.Of(c)
+	dark := c.Theme().Dark
+	e.services = c.Services()
+	root := ui.Column(c.Key("page-editor")).Bind(&e.handle).Label("Page").Cursor(ui.CursorText).FillWidth().FocusRing(false)
+	if !e.ReadOnly {
+		root.HandleTextInput(e).Role(ui.RoleTextField)
+	} else {
+		root.Focusable()
+	}
+	root.HandleInput(e.HandleInput)
+	e.focused = root.Focused()
+	root.Draw(func(p *ui.Painter, r ui.Rect) {
+		// The root paints before its blocks: move every block with it,
+		// then the blocks on screen set their exact boxes.
+		e.root = r
+		for id, b := range e.rel {
+			e.geom[id] = ui.Rect{X: r.X + b.X, Y: r.Y + b.Y, W: b.W, H: b.H}
+		}
+	})
+	root.Children(func() {
+		e.blocks(c, e.Content.Children, pal, dark)
+	})
+	e.reveal = ""
+	e.overlays(c, pal)
+	return root
+}
+
+func (e *Editor) blocks(c *ui.Context, nodes []*doc.Node, pal *theme.Palette, dark bool) {
+	number := 0
+	for _, n := range nodes {
+		if n.Type == "numbered_list" {
+			number++
+		} else {
+			number = 0
+		}
+		if n.IsText() {
+			e.textBlock(c, n, number, pal, dark)
+		} else {
+			e.atomicBlock(c, n, pal)
+		}
+		if n.Type != "table" && len(n.Children) > 0 {
+			e.blocks(c, n.Children, pal, dark)
+		}
+	}
+}
+
+// inSelection returns the part of a block's text the selection covers, in
+// runes, and whether it covers any.
+func (e *Editor) inSelection(n *doc.Node) (int, int, bool) {
+	if e.Collapsed() {
+		return 0, 0, false
+	}
+	a, b := e.ordered()
+	i, ia, ib := e.index(n.ID), e.index(a.ID), e.index(b.ID)
+	if i < ia || i > ib {
+		return 0, 0, false
+	}
+	from, to := 0, textLen(n)
+	if i == ia {
+		from = a.Off
+	}
+	if i == ib {
+		to = b.Off
+	}
+	if i == ib && i != ia && to == 0 && n.IsText() {
+		return 0, 0, false
+	}
+	return from, to, true
+}
+
+func placeholder(n *doc.Node, only bool) string {
+	switch n.Type {
+	case "heading":
+		return fmt.Sprintf("Heading %d", n.Int("level", 1))
+	case "bulleted_list", "numbered_list":
+		return "List"
+	case "todo_list":
+		return "To-do"
+	case "quote":
+		return "Quote"
+	}
+	if only {
+		return "Write, or press / for blocks and @ for agents"
+	}
+	return "Press / for blocks, @ for agents"
+}
+
+func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Palette, dark bool) {
+	l := e.layout(n, pal, dark)
+	depth := e.depth(n.ID)
+	box := ui.Box(c.Key(n.ID)).Height(l.h).FillWidth()
+	if e.reveal == n.ID {
+		box.ScrollIntoView()
+	}
+	tinted := e.Tinted[n.ID]
+	empty := textLen(n) == 0
+	isFocus := e.focus.ID == n.ID
+	only := len(e.Content.Children) == 1 && len(n.Children) == 0
+	showPlaceholder := empty && !e.ReadOnly && ((isFocus && e.focused) || only) && !e.marked
+	selFrom, selTo, selected := e.inSelection(n)
+	focused := e.focused
+	caretOff := e.focus.Off
+	marked, mStart, mEnd := e.marked && isFocus, e.markStart, e.markEnd
+	blink := e.blink
+	collapsed := e.Collapsed()
+	box.Draw(func(p *ui.Painter, r ui.Rect) {
+		e.place(n.ID, r)
+		ox, oy := r.X+l.x, r.Y+l.y
+		if tinted {
+			p.Fill(ui.Rect{X: r.X - 8, Y: r.Y, W: r.W + 16, H: r.H}, pal.AgentSection, 6)
+		}
+		first := l.layout.Caret(0)
+		mx := r.X + float32(depth)*indentStep
+		switch n.Type {
+		case "bulleted_list":
+			cy := oy + first.Y + first.H/2
+			s := float32(5.5)
+			switch depth % 3 {
+			case 0:
+				p.Fill(ui.Rect{X: mx + 9, Y: cy - s/2, W: s, H: s}, pal.Text, s/2)
+			case 1:
+				p.Stroke(ui.Rect{X: mx + 9, Y: cy - s/2, W: s, H: s}, pal.Text, s/2, 1.2)
+			default:
+				p.Fill(ui.Rect{X: mx + 9, Y: cy - s/2, W: s, H: s}, pal.Text, 1)
+			}
+		case "numbered_list":
+			label := ui.Span{Text: fmt.Sprintf("%d.", number), Font: l.font.Family, Size: l.font.Size, Color: pal.TextMuted, Features: "tnum"}
+			w, h := p.MeasureText(0, label)
+			p.RichText(mx+markerWidth(n)-w-6, oy+first.Y+(first.H-h)/2, 0, label)
+		case "todo_list":
+			cy := oy + first.Y + first.H/2
+			box := ui.Rect{X: mx + 3, Y: cy - 8, W: 16, H: 16}
+			if n.Bool("checked") {
+				p.Fill(box, pal.Accent, 4)
+				p.Icon(theme.Icon("check"), ui.Rect{X: box.X + 2, Y: box.Y + 2, W: 12, H: 12}, pal.OnAccent)
+			} else {
+				p.Stroke(box, pal.TextMuted, 4, 1.4)
+			}
+		case "quote":
+			p.Fill(ui.Rect{X: mx + 2, Y: r.Y + 4, W: 3, H: r.H - 8}, pal.AccentSoftBorder, 1.5)
+		}
+		if selected {
+			a, b := utf16Off(n, selFrom), utf16Off(n, selTo)
+			if a == b || empty {
+				p.Fill(ui.Rect{X: ox, Y: oy + first.Y, W: 6, H: first.H}, pal.Selection, 0)
+			}
+			for _, s := range l.layout.SelectionRects(ui.TextInputRange{Start: a, End: b}) {
+				s.X += ox
+				s.Y += oy
+				p.Fill(s, pal.Selection, 2)
+			}
+		}
+		if showPlaceholder {
+			p.RichText(ox, oy, r.W-l.x, ui.Span{Text: placeholder(n, only), Font: l.font.Family, Size: l.font.Size,
+				Weight: l.font.Weight, Italic: l.font.Italic, Color: pal.Placeholder})
+		}
+		p.TextLayout(l.layout, ox, oy, pal.Text)
+		if marked {
+			a, b := utf16Off(n, mStart), utf16Off(n, mEnd)
+			for _, s := range l.layout.SelectionRects(ui.TextInputRange{Start: a, End: b}) {
+				p.Fill(ui.Rect{X: ox + s.X, Y: oy + s.Y + s.H - 2, W: s.W, H: 1.5}, pal.Accent, 0)
+			}
+		}
+		if focused && isFocus && collapsed {
+			since := p.Now().Sub(blink)
+			if since < 0 || (since/blinkPeriod)%2 == 0 {
+				cr := l.layout.Caret(utf16Off(n, caretOff))
+				p.Fill(ui.Rect{X: ox + cr.X - 0.5, Y: oy + cr.Y, W: 2, H: cr.H}, pal.Accent, 1)
+			}
+			if since >= 0 {
+				p.After(blinkPeriod - since%blinkPeriod)
+			}
+		}
+	})
+	if count := e.Host.CommentCount(n.ID); count > 0 {
+		box.Children(func() { e.commentBadge(c, n.ID, count, l.y, pal) })
+	}
+}
+
+func (e *Editor) commentBadge(c *ui.Context, id string, count int, top float32, pal *theme.Palette) {
+	b := ui.ButtonBase(c.Key("comments:"+id)).Absolute().Top(top).Right(-52).Padding(2, 7).Radius(999).
+		Gap(4).Background(pal.WarnBg).Border(1, pal.WarnBorder).TextColor(pal.WarnText).Cursor(ui.CursorPointer).
+		Label(fmt.Sprintf("%d comments", count))
+	if b.Hovered() {
+		b.Background(pal.WarnBorder)
+	}
+	b.Children(func() {
+		ui.Icon(c, theme.Icon("message-square")).FontSize(12)
+		ui.Textf(c, "%d", count).FontSize(12).Bold()
+	})
+	if b.Clicked() {
+		e.Host.OpenComments(id)
+	}
+}
+
+// atomicBlock builds a block selected whole: a divider, image, table,
+// chart, embed, recording or subpage.
+func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
+	_, _, inSel := e.inSelection(n)
+	selected := (e.focus.ID == n.ID && e.Collapsed() && e.focused) || inSel
+	depth := e.depth(n.ID)
+	wrap := ui.Column(c.Key(n.ID)).FillWidth().Padding(6, 0).PaddingStart(float32(depth) * indentStep).Cursor(ui.CursorDefault)
+	if e.reveal == n.ID {
+		wrap.ScrollIntoView()
+	}
+	tinted := e.Tinted[n.ID]
+	wrap.Draw(func(p *ui.Painter, r ui.Rect) {
+		e.place(n.ID, r)
+		if tinted {
+			p.Fill(ui.Rect{X: r.X - 8, Y: r.Y, W: r.W + 16, H: r.H}, pal.AgentSection, 6)
+		}
+	})
+	if selected {
+		wrap.DrawOver(func(p *ui.Painter, r ui.Rect) {
+			p.Stroke(ui.Rect{X: r.X - 4, Y: r.Y + 2, W: r.W + 8, H: r.H - 4}, pal.Accent, 8, 2)
+		})
+	}
+	wrap.Children(func() {
+		switch n.Type {
+		case "divider":
+			ui.Box(c).Height(20).FillWidth().Draw(func(p *ui.Painter, r ui.Rect) {
+				p.Fill(ui.Rect{X: r.X, Y: r.Y + r.H/2, W: r.W, H: 1}, pal.Border, 0)
+			})
+		case "image":
+			e.imageBlock(c, n, pal)
+		case "table":
+			e.tableBlock(c, n, pal)
+		case "chart":
+			e.chartBlock(c, n, pal)
+		case "embed":
+			e.Host.Embed(c, n, e.width)
+		case "recording":
+			e.Host.Recording(c, n)
+		case "subpage":
+			e.subpageBlock(c, n, pal)
+		default:
+			ui.Text(c, "Unsupported block: "+n.Type).TextColor(pal.TextMuted)
+		}
+		if count := e.Host.CommentCount(n.ID); count > 0 {
+			e.commentBadge(c, n.ID, count, 8, pal)
+		}
+	})
+}
+
+func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
+	url := n.Str("url")
+	bmp := e.Host.Image(url)
+	if bmp == nil {
+		ui.Row(c).Height(160).FillWidth().Center().Radius(8).Background(pal.Ground).Border(1, pal.Divider).Children(func() {
+			ui.Icon(c, theme.Icon("image")).TextColor(pal.TextMuted)
+			ui.Text(c, "Loading image…").TextColor(pal.TextMuted).Margin(0, 0, 0, 8)
+		})
+		return
+	}
+	w, h := bmp.Size()
+	maxW := e.width - float32(e.depth(n.ID))*indentStep
+	dw := min(float32(w), maxW)
+	dh := dw * float32(h) / max(float32(w), 1)
+	if mw := n.Int("width", 0); mw > 0 && float32(mw) < dw {
+		dw, dh = float32(mw), float32(mw)*float32(h)/max(float32(w), 1)
+	}
+	row := ui.Row(c).FillWidth()
+	if n.Str("align") != "left" {
+		row.Justify(ui.Center)
+	}
+	row.Children(func() {
+		ui.Image(c, bmp).Size(dw, dh).Fit(ui.Contain).Radius(6).Label(n.Str("alt"))
+	})
+}
+
+func (e *Editor) subpageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
+	id := n.Str("page_id")
+	title := e.Host.PageTitle(id)
+	card := ui.ButtonBase(c.Key("sub:"+n.ID)).Gap(10).Padding(9, 12).Radius(8).Border(1, pal.Divider).
+		Background(pal.Surface).Cursor(ui.CursorPointer).AlignItems(ui.Center)
+	if card.Hovered() {
+		card.Background(pal.Hover.Over(pal.Surface))
+	}
+	card.Children(func() {
+		ui.Icon(c, theme.Icon("file-text")).TextColor(pal.Icon).FontSize(16)
+		if title == "" {
+			ui.Text(c, "Page not found").TextColor(pal.TextMuted)
+		} else {
+			ui.Text(c, title).FontWeight(600).TextColor(pal.Text)
+		}
+		ui.Spacer(c)
+		ui.Icon(c, theme.Icon("chevron-right")).TextColor(pal.TextMuted).FontSize(14)
+	})
+	if card.Clicked() && title != "" {
+		e.Host.OpenPage(id)
+	}
+}
+
+// overlays builds the / and @ menus, the selection toolbar and the link
+// editor, above the page.
+func (e *Editor) overlays(c *ui.Context, pal *theme.Palette) {
+	if e.trigger != nil {
+		t := *e.trigger
+		if t.Kind == '/' {
+			e.menuItems = e.Host.SlashItems(t.Query)
+		} else {
+			e.menuItems = e.Host.MentionItems(t.Query)
+		}
+		if e.menuIndex >= len(e.menuItems) {
+			e.menuIndex = 0
+		}
+		if cr, ok := e.caretRect(Pos{t.ID, t.Off}); ok {
+			e.menu(c, cr, pal)
+		}
+		return
+	}
+	if e.linkOpen {
+		a, _ := e.ordered()
+		if cr, ok := e.caretRect(a); ok {
+			e.linkEditor(c, cr, pal)
+		}
+		return
+	}
+	if !e.Collapsed() && e.focused && !e.dragging && !e.ReadOnly {
+		a, b := e.ordered()
+		if n := e.node(a.ID); n != nil && n.IsText() && a.ID == b.ID {
+			if cr, ok := e.caretRect(a); ok {
+				e.toolbar(c, cr, pal)
+			}
+		}
+	}
+}
+
+func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
+	_, wh := c.Size()
+	ui.Overlay(c, func() {
+		panel := ui.Column(c.Key("block-menu")).Absolute().Left(at.X-6).Width(300).Padding(6).Gap(1).
+			Radius(10).Background(pal.Surface).Border(1, pal.Border).Shadow(0, 10, 30, 0, pal.Shadow)
+		h := float32(min(len(e.menuItems), 9))*34 + 16
+		if at.Y+at.H+6+h > wh {
+			panel.Top(max(at.Y-6-h, 8))
+		} else {
+			panel.Top(at.Y + at.H + 6)
+		}
+		if panel.PressedOutside() {
+			e.trigger = nil
+		}
+		panel.Children(func() {
+			if len(e.menuItems) == 0 {
+				ui.Text(c, "No matches").TextColor(pal.TextMuted).Padding(8, 10)
+				return
+			}
+			ui.Scroll(c).MaxHeight(320).Children(func() {
+				group := ""
+				for i, item := range e.menuItems {
+					if item.Group != "" && item.Group != group {
+						group = item.Group
+						ui.Text(c, group).FontSize(11).FontWeight(600).TextColor(pal.TextMuted).Padding(8, 10, 4)
+					}
+					row := ui.ButtonBase(c.Key("item:"+item.Key)).Gap(10).Padding(6, 10).Radius(6).AlignItems(ui.Center).KeepFocus()
+					if i == e.menuIndex {
+						row.Background(pal.NavSelected)
+						if e.reveal == "" {
+							row.ScrollIntoView()
+						}
+					} else if row.Hovered() {
+						row.Background(pal.Hover)
+					}
+					row.Children(func() {
+						if item.Icon != "" {
+							ui.Box(c).Size(26, 26).Center().Radius(6).Background(pal.Ground).Border(1, pal.Divider).Children(func() {
+								ui.Icon(c, theme.Icon(item.Icon)).FontSize(14).TextColor(pal.Icon)
+							})
+						}
+						ui.Column(c).Grow(1).Children(func() {
+							ui.Text(c, item.Label).TextColor(pal.Text).SingleLine()
+							if item.Hint != "" {
+								ui.Text(c, item.Hint).FontSize(12).TextColor(pal.TextMuted).SingleLine()
+							}
+						})
+					})
+					if row.Hovered() && c.Modifiers() == 0 {
+						_ = i
+					}
+					if row.Clicked() {
+						t := *e.trigger
+						e.trigger = nil
+						e.Host.Pick(t, item)
+					}
+				}
+			})
+		})
+	})
+}
+
+func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
+	ui.Overlay(c, func() {
+		bar := ui.Row(c.Key("selection-toolbar")).Absolute().Left(max(at.X-8, 8)).Top(max(at.Y-46, 8)).Padding(4).Gap(2).
+			Radius(9).Background(pal.Inverse).Shadow(0, 8, 24, 0, pal.Shadow).AlignItems(ui.Center)
+		bar.Children(func() {
+			tool := func(key, icon, label string, on bool, fn func()) {
+				b := ui.ButtonBase(c.Key("tb:"+key)).Size(30, 28).Center().Radius(6).KeepFocus().Label(label).Tooltip(label).TextColor(pal.OnInverse)
+				if on {
+					b.Background(pal.OnInverse.Alpha(0.18))
+				} else if b.Hovered() {
+					b.Background(pal.OnInverse.Alpha(0.1))
+				}
+				b.Children(func() { ui.Icon(c, theme.Icon(icon)).FontSize(15) })
+				if b.Clicked() {
+					fn()
+				}
+			}
+			tool("b", "bold", "Bold", e.Has(func(a doc.Attrs) bool { return a.Bold }), e.ToggleBold)
+			tool("i", "italic", "Italic", e.Has(func(a doc.Attrs) bool { return a.Italic }), e.ToggleItalic)
+			tool("code", "code", "Code", e.Has(func(a doc.Attrs) bool { return a.Code }), e.ToggleCode)
+			tool("link", "link", "Link", e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
+			ui.Box(c).Size(1, 18).Background(pal.OnInverse.Alpha(0.2)).Margin(0, 4)
+			text := func(key, icon, label string, fn func()) {
+				b := ui.ButtonBase(c.Key("tb:"+key)).Height(28).Padding(0, 9).Gap(6).Radius(6).KeepFocus().TextColor(pal.OnInverse).AlignItems(ui.Center)
+				if b.Hovered() {
+					b.Background(pal.OnInverse.Alpha(0.1))
+				}
+				b.Children(func() {
+					ui.Icon(c, theme.Icon(icon)).FontSize(14)
+					ui.Text(c, label).FontSize(13).FontWeight(500)
+				})
+				if b.Clicked() {
+					fn()
+				}
+			}
+			text("comment", "message-square", "Comment", func() {
+				id, quote := e.SelectedText()
+				e.Host.Comment(id, quote)
+			})
+			text("ask", "sparkles", "Ask agent", func() {
+				id, quote := e.SelectedText()
+				e.Host.AskAgent(id, quote)
+			})
+		})
+	})
+}
+
+func (e *Editor) linkEditor(c *ui.Context, at ui.Rect, pal *theme.Palette) {
+	ui.Overlay(c, func() {
+		panel := ui.Row(c.Key("link-editor")).Absolute().Left(max(at.X-8, 8)).Top(at.Y+at.H+8).Width(340).Padding(6).Gap(6).
+			Radius(10).Background(pal.Surface).Border(1, pal.Border).Shadow(0, 10, 30, 0, pal.Shadow).AlignItems(ui.Center)
+		if panel.PressedOutside() || panel.OverlayShortcut(0, ui.KeyEscape) {
+			e.linkOpen = false
+			e.Focus()
+		}
+		panel.Children(func() {
+			ui.Icon(c, theme.Icon("link")).TextColor(pal.TextMuted).Margin(0, 2, 0, 6)
+			in := ui.TextInputBase(c.Key("link-url"), &e.linkDraft).Placeholder("Paste a link").Grow(1).AutoFocus()
+			apply := func() {
+				e.SetLink(e.linkDraft)
+				e.linkOpen = false
+				e.Focus()
+			}
+			if in.Submitted() {
+				apply()
+			}
+			if ui.PrimaryButton(c, "Link").Clicked() {
+				apply()
+			}
+			if e.LinkAt() != "" && ui.Button(c, "Remove").Clicked() {
+				e.SetLink("")
+				e.linkOpen = false
+				e.Focus()
+			}
+		})
+	})
+}

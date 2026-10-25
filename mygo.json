@@ -1,0 +1,11 @@
+{
+  "name": "Leaflet",
+  "identifier": "dev.leaflet.app",
+  "version": "0.1.0",
+  "out": "build",
+  "macos": {
+    "infoPlist": {
+      "NSMicrophoneUsageDescription": "Leaflet records audio into recording blocks when you press Record."
+    }
+  }
+}

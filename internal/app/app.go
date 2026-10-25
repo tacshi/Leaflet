@@ -1,0 +1,687 @@
+// Package app is Leaflet's desktop app: the window, the shell around pages,
+// and the screens and dialogs, in MyGo's native UI.
+package app
+
+import (
+	"log"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown"
+
+	"leaflet/internal/agents"
+	"leaflet/internal/doc"
+	"leaflet/internal/editor"
+	"leaflet/internal/recording"
+	"leaflet/internal/remote"
+	"leaflet/internal/store"
+	syncsvc "leaflet/internal/sync"
+	"leaflet/internal/theme"
+)
+
+// Route is what the main area shows.
+type Route struct {
+	Kind    string // home | page | settings | signin
+	ID      string // the page
+	Section string // the settings section
+}
+
+// App is the state of the app, kept for as long as it runs.
+type App struct {
+	st      *store.Store
+	win     *mygo.Window
+	backend *remote.Client
+	sync    *syncsvc.Service
+	hub     *agents.Hub
+	rec     *recording.Controller
+
+	settings store.Settings
+	session  store.Session
+	online   bool
+
+	// What the views show, reloaded as the store changes.
+	pages     []store.Page
+	folders   []store.Folder
+	files     []store.File
+	providers []store.Provider
+	pending   int
+	conflicts []store.ConflictRow
+	syncing   bool
+	syncError string
+
+	route   Route
+	history []Route
+	future  []Route
+	page    *pageState
+
+	// Shell.
+	sidebarW   float32
+	expanded   map[string]bool
+	folderOpen map[string]bool
+	panelOpen  bool
+	panelTab   int
+	toasts     []toast
+
+	dialogs dialogs
+	md      markdown.Options
+	images  *imageCache
+	embeds  map[string]*mygo.WebView
+
+	mu sync.Mutex
+}
+
+type toast struct {
+	text, action string
+	fn           func()
+}
+
+// pageState is the page open in the main area.
+type pageState struct {
+	id      string
+	editor  *editor.Editor
+	title   string
+	titleIn ui.Handle
+	// loaded is the stored content the editor started from or last saved.
+	loaded  *doc.Content
+	dirty   bool
+	timer   *time.Timer
+	threads []store.Thread
+	members []store.Member
+	// runs are the agent runs of this page, newest last, for Undo run.
+	tinted map[string]bool
+	// scroll is where the page is scrolled to.
+	scroll ui.ScrollState
+}
+
+// Run starts the app.
+func Run() {
+	a := &App{expanded: map[string]bool{}, folderOpen: map[string]bool{}, embeds: map[string]*mygo.WebView{}}
+	theme.RegisterFonts()
+	recording.Register()
+	mygo.BindAs("Embeds", &embedScroll{a: a})
+	mygo.App.WhenReady(func() {
+		if err := a.start(); err != nil {
+			mygo.Dialog.Error("Leaflet could not start", err.Error())
+			mygo.App.Quit()
+			return
+		}
+	})
+	if err := mygo.App.Run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func dataDir() string {
+	if d := os.Getenv("LEAFLET_DATA_DIR"); d != "" {
+		return d
+	}
+	dir, err := mygo.App.Path(mygo.PathUserData)
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".leaflet")
+	}
+	return dir
+}
+
+func (a *App) start() error {
+	st, err := store.Open(dataDir())
+	if err != nil {
+		return err
+	}
+	a.st = st
+	a.settings = st.Settings()
+	a.sidebarW = a.settings.SidebarWidth
+	a.panelOpen = false
+	a.applyTheme()
+	a.backend = remote.New(remote.Config(), st)
+	var user *store.User
+	if a.backend.Configured() {
+		user = a.backend.RestoreSession()
+	}
+	if _, err := st.LoadSession(user); err != nil {
+		return err
+	}
+	a.session = st.Session()
+	a.images = newImageCache(filepath.Join(st.Dir, "images"))
+	a.rec = recording.NewController(st, a.backend)
+	a.hub = agents.NewHub(st, a.backend, a)
+	a.sync = syncsvc.New(st, a.backend)
+	a.online = mygo.Network.Status().Online
+	mygo.Network.OnChanged(func(s mygo.NetworkStatus) {
+		a.update(func() {
+			a.online = s.Online
+			if s.Online {
+				a.sync.Kick()
+			}
+		})
+	})
+	a.sync.OnState = func(running bool, err error) {
+		a.update(func() {
+			a.syncing = running
+			a.syncError = ""
+			if err != nil {
+				a.syncError = err.Error()
+			}
+		})
+	}
+	a.sync.OnPageContent = func(pageID string) {
+		a.update(func() { a.externalContent(pageID) })
+	}
+	a.sync.Offline = func() bool { return a.settings.WorkOffline }
+	st.Subscribe(func(ch store.Change) { a.update(func() { a.reload(ch) }) })
+	if err := a.createWelcome(); err != nil {
+		log.Printf("welcome page: %v", err)
+	}
+	if err := a.updateWelcome(); err != nil {
+		log.Printf("welcome page: %v", err)
+	}
+	a.reloadAll()
+	a.route = Route{Kind: "home"}
+	if last, ok := st.Value("last.page"); ok && a.pageByID(last) != nil {
+		a.openPage(last)
+	} else if len(a.pages) > 0 {
+		a.openPage(a.pages[0].ID)
+	}
+	a.setMenu()
+	a.win = mygo.NewWindow(mygo.WindowOptions{
+		Title:         "Leaflet",
+		Width:         1240,
+		Height:        820,
+		MinWidth:      720,
+		MinHeight:     480,
+		StateKey:      "main",
+		TitleBarStyle: mygo.TitleBarHidden,
+		Vibrancy:      mygo.VibrancySidebar,
+		Content:       ui.View(a.view),
+	})
+	a.win.OnClose(func(*mygo.CloseEvent) { a.flush() })
+	a.rec.Attach(a.win, func(fn func()) { a.update(fn) })
+	a.sync.Start()
+	return nil
+}
+
+// update runs fn on the main thread and redraws.
+func (a *App) update(fn func()) {
+	if a.win == nil {
+		fn()
+		return
+	}
+	a.win.Update(fn)
+}
+
+func (a *App) applyTheme() {
+	switch a.settings.Theme {
+	case "light":
+		mygo.Theme.SetSource(mygo.ThemeLight)
+	case "dark":
+		mygo.Theme.SetSource(mygo.ThemeDark)
+	default:
+		mygo.Theme.SetSource(mygo.ThemeSystem)
+	}
+}
+
+func (a *App) saveSettings() {
+	if err := a.st.SaveSettings(a.settings); err != nil {
+		log.Printf("settings: %v", err)
+	}
+}
+
+// reloadAll reads everything the views show.
+func (a *App) reloadAll() {
+	for _, t := range []string{"pages", "folders", "files", "model_providers", "outbox", "conflicts", "session"} {
+		a.reload(store.Change{Table: t})
+	}
+}
+
+// reload rereads what a change touched.
+func (a *App) reload(ch store.Change) {
+	all := ch.Table == "*"
+	if all || ch.Table == "pages" || ch.Table == "page_contents" {
+		if pages, err := a.st.Pages(); err == nil {
+			a.pages = pages
+		}
+		if a.page != nil {
+			if p := a.pageByID(a.page.id); p == nil {
+				a.page = nil
+				a.route = Route{Kind: "home"}
+			} else if a.page.titleIn.Focused(nil) == false && p.Title != a.page.title {
+				a.page.title = p.Title
+			}
+		}
+	}
+	if all || ch.Table == "folders" {
+		a.folders, _ = a.st.Folders()
+	}
+	if all || ch.Table == "files" {
+		a.files, _ = a.st.Files()
+	}
+	if all || ch.Table == "model_providers" {
+		a.providers, _ = a.st.Providers()
+	}
+	if all || ch.Table == "outbox" {
+		a.pending = a.st.PendingCount()
+	}
+	if all || ch.Table == "conflicts" {
+		a.conflicts, _ = a.st.Conflicts()
+	}
+	if all || ch.Table == "session" {
+		a.session = a.st.Session()
+	}
+	if a.page != nil && (all || ch.Table == "comments" && (ch.PageID == "" || ch.PageID == a.page.id)) {
+		a.page.threads, _ = a.st.Threads(a.page.id)
+	}
+	if a.page != nil && (all || ch.Table == "page_members") {
+		a.page.members, _ = a.st.Members(a.page.id)
+	}
+	if a.win != nil {
+		a.win.Invalidate()
+	}
+}
+
+func (a *App) pageByID(id string) *store.Page {
+	for i := range a.pages {
+		if a.pages[i].ID == id {
+			return &a.pages[i]
+		}
+	}
+	return nil
+}
+
+// children returns the pages under a parent, or the top-level pages of a
+// folder ("" for none) when parent is "".
+func (a *App) children(parent, folder string, top bool) []store.Page {
+	var out []store.Page
+	for _, p := range a.pages {
+		if p.ParentID != parent {
+			continue
+		}
+		if top && p.FolderID != folder {
+			continue
+		}
+		if parent == "" && p.SpaceID != a.session.SpaceID && !a.isShared(p) {
+			continue
+		}
+		out = append(out, p)
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].SortKey < out[j].SortKey })
+	return out
+}
+
+// isShared reports whether a page belongs to someone else's space.
+func (a *App) isShared(p store.Page) bool { return p.SpaceID != a.session.SpaceID }
+
+// sharedRoots are pages shared with the user whose parent is not.
+func (a *App) sharedRoots() []store.Page {
+	var out []store.Page
+	for _, p := range a.pages {
+		if !a.isShared(p) {
+			continue
+		}
+		if p.ParentID == "" || a.pageByID(p.ParentID) == nil {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ancestors returns a page's parents, the root first.
+func (a *App) ancestors(id string) []store.Page {
+	var out []store.Page
+	seen := map[string]bool{}
+	for p := a.pageByID(id); p != nil && p.ParentID != "" && !seen[p.ID]; {
+		seen[p.ID] = true
+		parent := a.pageByID(p.ParentID)
+		if parent == nil {
+			break
+		}
+		out = append([]store.Page{*parent}, out...)
+		p = parent
+	}
+	return out
+}
+
+// navigate shows a route, remembering where the app was.
+func (a *App) navigate(r Route) {
+	if r == a.route {
+		return
+	}
+	a.flush()
+	a.history = append(a.history, a.route)
+	a.future = nil
+	a.show(r)
+}
+
+func (a *App) show(r Route) {
+	a.route = r
+	if r.Kind == "page" {
+		a.loadPage(r.ID)
+	} else {
+		a.closePage()
+	}
+}
+
+func (a *App) back() {
+	if len(a.history) == 0 {
+		return
+	}
+	a.flush()
+	r := a.history[len(a.history)-1]
+	a.history = a.history[:len(a.history)-1]
+	a.future = append(a.future, a.route)
+	if r.Kind == "page" && a.pageByID(r.ID) == nil {
+		r = Route{Kind: "home"}
+	}
+	a.show(r)
+}
+
+func (a *App) forward() {
+	if len(a.future) == 0 {
+		return
+	}
+	a.flush()
+	r := a.future[len(a.future)-1]
+	a.future = a.future[:len(a.future)-1]
+	a.history = append(a.history, a.route)
+	if r.Kind == "page" && a.pageByID(r.ID) == nil {
+		r = Route{Kind: "home"}
+	}
+	a.show(r)
+}
+
+// openPage shows a page.
+func (a *App) openPage(id string) {
+	if a.route.Kind == "page" && a.route.ID == id {
+		return
+	}
+	// Show where it is in the sidebar.
+	for _, p := range a.ancestors(id) {
+		a.expanded[p.ID] = true
+	}
+	if p := a.pageByID(id); p != nil && p.FolderID != "" {
+		a.folderOpen[p.FolderID] = true
+	}
+	if a.win == nil {
+		a.route = Route{Kind: "page", ID: id}
+		a.loadPage(id)
+		return
+	}
+	a.navigate(Route{Kind: "page", ID: id})
+}
+
+func (a *App) loadPage(id string) {
+	a.closePage()
+	p := a.pageByID(id)
+	if p == nil {
+		a.route = Route{Kind: "home"}
+		return
+	}
+	content := a.st.Content(id)
+	if content == nil {
+		content = doc.Empty()
+	}
+	ps := &pageState{id: id, title: p.Title, loaded: content.Copy(), tinted: map[string]bool{}}
+	ed := editor.New(content, &host{a: a})
+	ed.Size = float32(a.settings.TextSize)
+	ed.ReadOnly = !a.canEdit(id)
+	ed.Tinted = ps.tinted
+	ed.OnChange = func() { a.scheduleSave() }
+	ps.editor = ed
+	ps.threads, _ = a.st.Threads(id)
+	ps.members, _ = a.st.Members(id)
+	a.page = ps
+	a.st.SetValue("last.page", id)
+	if a.backend.SignedIn() && !a.isShared(*p) {
+		go a.loadMembers(id)
+	}
+}
+
+func (a *App) closePage() {
+	if a.page == nil {
+		return
+	}
+	a.flush()
+	for id, v := range a.embeds {
+		v.Destroy()
+		delete(a.embeds, id)
+	}
+	a.page = nil
+}
+
+// canEdit reports whether the user may change a page: their own, or one
+// shared with them as an editor.
+func (a *App) canEdit(id string) bool {
+	p := a.pageByID(id)
+	if p == nil {
+		return false
+	}
+	if !a.isShared(*p) {
+		return true
+	}
+	for _, m := range a.st.MembersOrNil(id) {
+		if m.UserID == a.session.UserID {
+			return m.Role == "editor" || m.Role == "owner"
+		}
+	}
+	return true
+}
+
+// scheduleSave saves the open page shortly after the typing stops.
+func (a *App) scheduleSave() {
+	ps := a.page
+	if ps == nil || ps.editor.ReadOnly {
+		return
+	}
+	ps.dirty = true
+	if ps.timer != nil {
+		ps.timer.Stop()
+	}
+	ps.timer = time.AfterFunc(700*time.Millisecond, func() {
+		a.update(func() {
+			if a.page == ps {
+				a.savePage()
+			}
+		})
+	})
+}
+
+// savePage stores the open page's content.
+func (a *App) savePage() {
+	ps := a.page
+	if ps == nil || !ps.dirty {
+		return
+	}
+	ps.dirty = false
+	if ps.timer != nil {
+		ps.timer.Stop()
+	}
+	stamped, changed, err := a.st.SaveContent(ps.id, ps.editor.Content)
+	if err != nil {
+		a.toast("Could not save: " + err.Error())
+		return
+	}
+	ps.editor.Content.Blocks, ps.editor.Content.Deleted = stamped.Blocks, stamped.Deleted
+	ps.loaded = stamped.Copy()
+	if changed {
+		a.st.MaybeAutosave(ps.id, stamped)
+		a.sync.Kick()
+	}
+}
+
+// flush saves what is waiting to be saved.
+func (a *App) flush() {
+	if a.page != nil {
+		if a.page.title != "" || a.pageByID(a.page.id) != nil {
+			a.saveTitle()
+		}
+		a.savePage()
+	}
+}
+
+func (a *App) saveTitle() {
+	ps := a.page
+	if ps == nil {
+		return
+	}
+	if p := a.pageByID(ps.id); p != nil && p.Title != ps.title && a.canEdit(ps.id) {
+		a.st.RenamePage(ps.id, ps.title)
+	}
+}
+
+// externalContent brings content stored from outside the editor (sync,
+// agent runs on the server, restores) into the open page, merging what is
+// being typed.
+func (a *App) externalContent(pageID string) {
+	ps := a.page
+	if ps == nil || ps.id != pageID {
+		return
+	}
+	stored := a.st.Content(pageID)
+	if stored == nil || stored.Encode() == ps.loaded.Encode() {
+		return
+	}
+	if ps.dirty {
+		local := ps.editor.Content.Stamped(ps.loaded, doc.NowMs())
+		merged, _ := doc.Merge(ps.loaded, local, stored)
+		ps.editor.Replace(merged)
+		ps.loaded = stored.Copy()
+		a.scheduleSave()
+		return
+	}
+	ps.editor.Replace(stored.Copy())
+	ps.loaded = stored.Copy()
+}
+
+// toast shows a message at the bottom of the window.
+func (a *App) toast(text string) {
+	a.toasts = append(a.toasts, toast{text: text})
+	if a.win != nil {
+		a.win.Invalidate()
+	}
+}
+
+func (a *App) toastAction(text, action string, fn func()) {
+	a.toasts = append(a.toasts, toast{text: text, action: action, fn: fn})
+	if a.win != nil {
+		a.win.Invalidate()
+	}
+}
+
+// newPage creates a page and opens it.
+func (a *App) newPage(parent, folder string) {
+	p, err := a.st.CreatePage(store.NewPageOptions{ParentID: parent, FolderID: folder})
+	if err != nil {
+		a.toast("Could not create the page: " + err.Error())
+		return
+	}
+	a.pages, _ = a.st.Pages()
+	if parent != "" {
+		a.expanded[parent] = true
+	}
+	a.openPage(p.ID)
+	if a.page != nil {
+		a.page.titleIn.Focus()
+	}
+}
+
+// deletePage deletes a page and offers to undo.
+func (a *App) deletePage(id string) {
+	title := "Untitled"
+	if p := a.pageByID(id); p != nil {
+		title = p.DisplayTitle()
+	}
+	if a.page != nil && a.page.id == id {
+		a.flush()
+	}
+	ids, err := a.st.DeletePage(id)
+	if err != nil {
+		a.toast("Could not delete: " + err.Error())
+		return
+	}
+	a.pages, _ = a.st.Pages()
+	if a.route.Kind == "page" {
+		for _, d := range ids {
+			if d == a.route.ID {
+				a.closePage()
+				a.route = Route{Kind: "home"}
+			}
+		}
+	}
+	a.toastAction("Deleted "+title, "Undo", func() {
+		a.st.RestorePages(ids)
+		a.pages, _ = a.st.Pages()
+	})
+}
+
+func (a *App) setMenu() {
+	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
+		{Role: mygo.RoleAppMenu},
+		{Label: "File", Submenu: []*mygo.MenuItem{
+			{Label: "New Page", Accelerator: "CmdOrCtrl+N", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.update(func() { a.newPage("", "") })
+			}},
+			{Label: "New Folder", Accelerator: "CmdOrCtrl+Shift+N", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.update(func() { a.dialogs.openRenameFolder(nil) })
+			}},
+			{Type: mygo.MenuItemSeparator},
+			{Label: "Search", Accelerator: "CmdOrCtrl+P", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.update(func() { a.openSearch() })
+			}},
+			{Label: "Export Page as Markdown…", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.update(func() {
+					if a.page != nil {
+						a.exportPage(a.page.id)
+					}
+				})
+			}},
+			{Type: mygo.MenuItemSeparator},
+			{Role: mygo.RoleClose},
+		}},
+		{Role: mygo.RoleEditMenu},
+		{Label: "View", Submenu: []*mygo.MenuItem{
+			{Label: "Toggle Sidebar", Accelerator: "CmdOrCtrl+\\", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.update(func() { a.toggleSidebar() })
+			}},
+			{Label: "Toggle Agent Panel", Accelerator: "CmdOrCtrl+J", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.update(func() { a.togglePanel(0) })
+			}},
+			{Label: "Comments", Accelerator: "CmdOrCtrl+Shift+M", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.update(func() { a.togglePanel(1) })
+			}},
+			{Type: mygo.MenuItemSeparator},
+			{Label: "Back", Accelerator: "CmdOrCtrl+[", Click: func(*mygo.MenuItem, *mygo.Window) { a.update(a.back) }},
+			{Label: "Forward", Accelerator: "CmdOrCtrl+]", Click: func(*mygo.MenuItem, *mygo.Window) { a.update(a.forward) }},
+			{Type: mygo.MenuItemSeparator},
+			{Role: mygo.RoleToggleFullScreen},
+		}},
+		{Role: mygo.RoleWindowMenu},
+	}))
+}
+
+func (a *App) toggleSidebar() {
+	a.settings.SidebarOpen = !a.settings.SidebarOpen
+	a.saveSettings()
+}
+
+func (a *App) togglePanel(tab int) {
+	if a.panelOpen && a.panelTab == tab {
+		a.panelOpen = false
+		return
+	}
+	a.panelOpen, a.panelTab = true, tab
+}
+
+// pageTitleOf is a page's title for display.
+func (a *App) pageTitleOf(id string) string {
+	if p := a.pageByID(id); p != nil {
+		return p.DisplayTitle()
+	}
+	return ""
+}
+
+func trimTitle(s string) string { return strings.TrimSpace(s) }

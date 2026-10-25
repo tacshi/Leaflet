@@ -1,0 +1,243 @@
+import { assert, assertEquals } from "jsr:@std/assert@1";
+import {
+  deltaToMarkdown,
+  markdownToDelta,
+  type NodeJSON,
+  type PageContent,
+  pageViews,
+  plainText,
+  specToNode,
+  tableRows,
+} from "./blocks.ts";
+import { applyOps, type Op, PageEditSession, type ToolHooks } from "./tools.ts";
+import { tokensToSegments } from "./segments.ts";
+
+const hooks: ToolHooks = {
+  readPage: (content) => Promise.resolve({ blocks: pageViews(content) }),
+  createSubpage: (title) =>
+    Promise.resolve({ id: "page-2", space_id: "space-1", parent_id: "page-1", title, sort_key: "a0" }),
+  listPages: () => Promise.resolve([]),
+  readOtherPage: () => Promise.resolve({}),
+};
+
+function para(id: string, text: string, children?: NodeJSON[]): NodeJSON {
+  return { id, type: "paragraph", data: { delta: [{ insert: text }] }, ...(children ? { children } : {}) };
+}
+
+function sample(): PageContent {
+  return {
+    document: {
+      id: "root",
+      type: "page",
+      children: [
+        { id: "h1", type: "heading", data: { level: 2, delta: [{ insert: "Goals" }] } },
+        {
+          id: "l1",
+          type: "bulleted_list",
+          data: { delta: [{ insert: "Create pages" }] },
+          children: [{ id: "l2", type: "bulleted_list", data: { delta: [{ insert: "nested" }] } }],
+        },
+        para("p1", "Offline editing"),
+        para("p2", "Risks"),
+      ],
+    },
+    meta: { v: 1, blocks: {}, deleted: {} },
+  };
+}
+
+/** Structure only: ids, types and data, without meta timestamps. */
+function shape(content: PageContent) {
+  return content.document;
+}
+
+Deno.test("inline markdown round-trips through delta", () => {
+  const src = "Ship **v1** with *offline* `drift`, [docs](https://example.com) and ~~old~~ snake_case";
+  const delta = markdownToDelta(src);
+  assertEquals(delta, [
+    { insert: "Ship " },
+    { insert: "v1", attributes: { bold: true } },
+    { insert: " with " },
+    { insert: "offline", attributes: { italic: true } },
+    { insert: " " },
+    { insert: "drift", attributes: { code: true } },
+    { insert: ", " },
+    { insert: "docs", attributes: { href: "https://example.com" } },
+    { insert: " and " },
+    { insert: "old", attributes: { strikethrough: true } },
+    { insert: " snake_case" },
+  ]);
+  assertEquals(markdownToDelta(deltaToMarkdown(delta)), delta);
+});
+
+Deno.test("nested formatting, escapes and mentions", () => {
+  assertEquals(markdownToDelta("**bold _and italic_**"), [
+    { insert: "bold ", attributes: { bold: true } },
+    { insert: "and italic", attributes: { bold: true, italic: true } },
+  ]);
+  assertEquals(markdownToDelta("2 \\* 3 = 6"), [{ insert: "2 * 3 = 6" }]);
+  const mention = [{ insert: "@Mina Park", attributes: { mention: { kind: "user", id: "u1", name: "Mina Park" } } }];
+  assertEquals(markdownToDelta(deltaToMarkdown(mention)), mention);
+  const literal = [{ insert: "a * b and [x] _y_" }];
+  assertEquals(markdownToDelta(deltaToMarkdown(literal)), literal);
+});
+
+Deno.test("tables use appflowy's col-major cell layout", () => {
+  let n = 0;
+  const node = specToNode({ type: "table", rows: [["Phase", "Risks"], ["Agents", "4"]] }, { newId: () => `id${n++}` });
+  assertEquals(node.data?.colsLen, 2);
+  assertEquals(node.data?.rowsLen, 2);
+  assertEquals(
+    node.children!.map((c) => [c.data?.colPosition, c.data?.rowPosition, c.children![0].type]),
+    [[0, 0, "paragraph"], [0, 1, "paragraph"], [1, 0, "paragraph"], [1, 1, "paragraph"]],
+  );
+  assertEquals(tableRows(node), [["Phase", "Risks"], ["Agents", "4"]]);
+});
+
+Deno.test("edit session applies tools and records replayable ops", async () => {
+  const session = new PageEditSession(sample(), hooks, {
+    canEdit: true,
+    crossPage: false,
+    author: "Claude",
+    now: () => 1000,
+  });
+  const inserted = await session.call(
+    "insert_blocks",
+    JSON.stringify({
+      position: { after: "h1" },
+      blocks: [
+        { type: "paragraph", text: "Intro **text**" },
+        {
+          type: "chart",
+          chart: { chart_type: "bar", title: "Risks", labels: ["A", "B"], series: [{ name: "n", values: [1, 4] }] },
+        },
+      ],
+    }),
+  );
+  const ids = (inserted.result as { inserted_ids: string[] }).inserted_ids;
+  assertEquals(ids.length, 2);
+  assertEquals(inserted.summary, "Added 2 blocks");
+
+  const replaced = await session.call("replace_block", {
+    id: "p1",
+    block: { type: "heading", level: 3, text: "Offline" },
+  });
+  assertEquals(replaced.result, { id: "p1" });
+  const keptChildren = await session.call("replace_block", {
+    id: "l1",
+    block: { type: "todo_list", text: "Create pages" },
+  });
+  assertEquals(keptChildren.result, { id: "l1" });
+
+  const moved = await session.call("move_block", { id: "p2", position: { before: "h1" } });
+  assertEquals(moved.result, { id: "p2" });
+  const nested = await session.call("move_block", { id: ids[0], position: { parent: "l1" } });
+  assertEquals(nested.result, { id: ids[0] });
+
+  const deleted = await session.call("delete_blocks", { ids: ["l2", ids[1]] });
+  assertEquals(deleted.result, { deleted_ids: ["l2", ids[1]] });
+
+  const top = session.content.document.children!.map((c) => c.id);
+  assertEquals(top, ["p2", "h1", "l1", "p1"]);
+  assertEquals(session.content.document.children![2].type, "todo_list");
+  assertEquals(session.content.document.children![2].children!.map((c) => c.id), [ids[0]]);
+  assertEquals(session.content.meta.deleted["l2"], 1000);
+  assertEquals(session.content.meta.blocks["p1"], 1000);
+
+  // Replaying the ops on the original page gives the same page (the client
+  // applies streamed ops this way)…
+  const replayed = applyOps(session.before, session.ops, 1000);
+  assertEquals(shape(replayed), shape(session.content));
+
+  // …and inverting them in reverse order gives the original back (Undo run).
+  const inverse: Op[] = [];
+  for (const op of [...session.ops].reverse()) {
+    switch (op.op) {
+      case "insert":
+        inverse.push({ op: "delete", ids: op.nodes.map((n) => n.id), previous: [] });
+        break;
+      case "replace":
+        inverse.push({ op: "replace", id: op.id, node: op.previous, previous: op.node });
+        break;
+      case "move":
+        inverse.push({ op: "move", id: op.id, position: op.from, from: op.position });
+        break;
+      case "delete":
+        for (const prev of [...op.previous].reverse()) {
+          inverse.push({ op: "insert", position: prev.position, nodes: [prev.node] });
+        }
+        break;
+    }
+  }
+  assertEquals(shape(applyOps(session.content, inverse, 2000)), shape(session.before));
+});
+
+Deno.test("invalid calls return errors and change nothing", async () => {
+  const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false });
+  const cases: [string, unknown][] = [
+    ["replace_block", { id: "nope", block: { type: "paragraph", text: "x" } }],
+    ["insert_blocks", { position: { after: "h1", before: "p1" }, blocks: [{ type: "paragraph" }] }],
+    ["insert_blocks", { position: { parent: "p1" }, blocks: [{ type: "paragraph" }] }],
+    ["insert_blocks", { position: { at: "end" }, blocks: [{ type: "paragraph", children: [{ type: "paragraph" }] }] }],
+    ["insert_blocks", { position: { at: "end" }, blocks: [{ type: "code" }] }],
+    ["insert_blocks", {
+      position: { at: "end" },
+      blocks: [{
+        type: "chart",
+        chart: { chart_type: "bar", labels: ["a", "b"], series: [{ name: "s", values: [1] }] },
+      }],
+    }],
+    ["move_block", { id: "l1", position: { after: "l2" } }],
+    ["replace_block", { id: "l1", block: { type: "quote", text: "x" } }],
+    ["list_pages", {}],
+    ["nonexistent", {}],
+  ];
+  for (const [name, args] of cases) {
+    const outcome = await session.call(name, args as Record<string, unknown>);
+    assert((outcome.result as { error?: string }).error, `${name} should fail: ${JSON.stringify(args)}`);
+    assertEquals(outcome.ops, []);
+  }
+  assertEquals(shape(session.content), shape(sample()));
+  assertEquals((await session.call("read_page", "")).ops, []);
+
+  const viewer = new PageEditSession(sample(), hooks, { canEdit: false, crossPage: true });
+  const denied = await viewer.call("delete_blocks", { ids: ["p1"] });
+  assert((denied.result as { error?: string }).error?.includes("view access"));
+});
+
+Deno.test("create_subpage records a create_page op", async () => {
+  const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false, now: () => 5 });
+  const outcome = await session.call("create_subpage", { title: "Notes", blocks: [{ type: "paragraph", text: "hi" }] });
+  assertEquals(outcome.result, { page_id: "page-2" });
+  const op = outcome.ops[0] as Extract<Op, { op: "create_page" }>;
+  assertEquals(op.page.title, "Notes");
+  assertEquals(plainText(op.content), "hi");
+  assertEquals(session.changed, false);
+});
+
+Deno.test("views flatten nesting and fold tables", () => {
+  const content = sample();
+  content.document.children!.push(
+    specToNode({ type: "table", rows: [["a", "b"]] }, { newId: () => crypto.randomUUID() }),
+  );
+  const views = pageViews(content);
+  assertEquals(views.map((v) => [v.id, v.depth, v.parent_id]).slice(0, 3), [
+    ["h1", 0, undefined],
+    ["l1", 0, undefined],
+    ["l2", 1, "l1"],
+  ]);
+  assertEquals(views.at(-1)!.rows, [["a", "b"]]);
+});
+
+Deno.test("soniox tokens group into segments", () => {
+  const segments = tokensToSegments([
+    { text: "Hello", start_ms: 0, end_ms: 400, speaker: 1 },
+    { text: " there.", start_ms: 400, end_ms: 3500, speaker: 1 },
+    { text: " Next", start_ms: 3600, end_ms: 3900, speaker: 1 },
+    { text: "你好", start_ms: 4000, end_ms: 4500, speaker: 2 },
+  ]);
+  assertEquals(segments, [
+    { start_ms: 0, end_ms: 3500, text: "Hello there.", speaker: "1" },
+    { start_ms: 3600, end_ms: 3900, text: "Next", speaker: "1" },
+    { start_ms: 4000, end_ms: 4500, text: "你好", speaker: "2" },
+  ]);
+});

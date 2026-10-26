@@ -34,8 +34,12 @@ app itself. Runs on macOS, Windows and Linux.
   an outbox and sync when online. Offline edits to the same block merge
   last-write-wins per block, with a conflict notice and a way to restore the
   other version.
+- **Outside agents**: `leaflet mcp` is a Model Context Protocol server
+  for Claude Code, Claude Desktop, Codex, Cursor and the like, with the
+  in-app agents' page tools plus finding and creating pages. The open app
+  shows what they write within a second.
 - **Settings**: Account (name, theme, text size, devices, export, delete),
-  Models, Speech to text, Offline and storage.
+  Models, External agents, Speech to text, Offline and storage.
 
 Real-time co-editing (CRDTs over Supabase Realtime) is the deferred phase
 of the design and is not built.
@@ -72,6 +76,34 @@ folder, for trying things out.
 To try agents without an API key, run a local model server (for example
 `ollama serve` with `qwen3:8b`) and add it in Settings › Models.
 
+## Agents outside the app
+
+`leaflet mcp` serves the pages on this device over stdio, to any MCP
+client. Settings › External agents gives the setup for Claude Code,
+Codex, Cursor, VS Code and the rest, with this app's executable and data
+folder filled in, ready to copy. For Claude Code it is:
+
+```bash
+claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<data folder> -- <executable> mcp
+```
+
+It opens the same database as the app (`LEAFLET_DATA_DIR` too), so it
+works with the app open or closed. Its tools are `list_pages`,
+`search_pages`, `read_page`, `create_page`, `rename_page`, and the in-app
+agents' `insert_blocks`, `replace_block`, `move_block` and `delete_blocks`,
+each given a `page_id`. Edits keep a page-history snapshot before an
+agent's first edit of a page, then one per ten minutes of its edits, and
+sync like any other change. The app checks the database every second for
+other processes' writes, and merges them into the open page, keeping what
+is being typed.
+
+To try it on a development build, build a binary and give it the dev
+app's data folder:
+
+```bash
+go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HOME/Library/Application Support/Leaflet Dev" -- "$PWD/leaflet" mcp
+```
+
 ## Build
 
 ```bash
@@ -105,6 +137,7 @@ internal/
   remote/     Supabase over HTTP: Auth, PostgREST, Storage, Edge Functions
   sync/       outbox push, pulls, space adoption, device heartbeat
   agents/     OpenAI-compatible client, presets, prompt, page tools, loop, hub
+  mcp/        leaflet mcp: the page tools for agents outside the app
   recording/  capture page, WAV, Soniox streaming, endpoint transcription
   theme/      colors, Figtree and Source Serif 4, Lucide icons
 supabase/     migrations (tables, RLS, RPCs, Vault), Edge Functions

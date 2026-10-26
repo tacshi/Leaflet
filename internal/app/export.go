@@ -19,13 +19,26 @@ func (a *App) writeExport(file string) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.Create(file) // #nosec G304 -- the file the user picked to export to.
+	templates, err := a.st.Templates()
 	if err != nil {
 		return err
 	}
 	folders := map[string]string{}
 	for _, fo := range a.folders {
 		folders[fo.ID] = fo.Name
+	}
+	// Templates go in a folder of their own.
+	const templatesFolder = "\x00templates"
+	folders[templatesFolder] = "Templates"
+	for _, t := range templates {
+		if t.ParentID == "" {
+			t.FolderID = templatesFolder
+		}
+		pages = append(pages, t)
+	}
+	f, err := os.Create(file) // #nosec G304 -- the file the user picked to export to.
+	if err != nil {
+		return err
 	}
 	if err := exportZip(f, pages, folders, a.st.Content, os.ReadFile); err != nil {
 		_ = f.Close()

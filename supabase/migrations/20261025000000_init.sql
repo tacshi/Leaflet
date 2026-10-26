@@ -73,6 +73,9 @@ create table public.pages (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz,
+  -- A template, or a subpage of one: kept to start pages from, out of the
+  -- page list.
+  is_template boolean not null default false,
   constraint pages_not_own_parent check (parent_id is distinct from id)
 );
 

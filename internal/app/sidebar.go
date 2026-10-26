@@ -296,21 +296,31 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 		a.openPage(p.ID)
 		a.focusTitle(true)
 	}
-	if m.Item("Move to…").Disabled(!editable).Chosen() {
-		a.dialogs.openMove(p.ID)
+	// A template stays out of the page list: it doesn't move among the
+	// pages, and starts copies from a blank page rather than here.
+	if !p.Template {
+		if m.Item("Move to…").Disabled(!editable).Chosen() {
+			a.dialogs.openMove(p.ID)
+		}
+		if m.Item("Duplicate").Chosen() {
+			a.duplicatePage(p)
+		}
+		if m.Item("Save as template").Chosen() {
+			a.saveAsTemplate(p)
+		}
 	}
 	m.Separator()
 	if m.Item("Page history").Chosen() {
 		a.openHistory(p.ID)
 	}
 	server := a.backend.Configured()
-	if !header && server && m.Item("Share…").Chosen() {
+	if !header && server && !p.Template && m.Item("Share…").Chosen() {
 		a.openShare(p.ID)
 	}
 	if m.Item("Export as Markdown…").Chosen() {
 		a.exportPage(p.ID)
 	}
-	if server && m.Item("Keep on this device").Checked(p.KeepOffline || a.settings.AllPagesOffline).Disabled(a.settings.AllPagesOffline).Chosen() {
+	if server && !p.Template && m.Item("Keep on this device").Checked(p.KeepOffline || a.settings.AllPagesOffline).Disabled(a.settings.AllPagesOffline).Chosen() {
 		if err := a.st.SetKeepOffline(p.ID, !p.KeepOffline); err != nil {
 			a.toast("Could not save: " + err.Error())
 		}

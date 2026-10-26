@@ -147,7 +147,7 @@ func (a *App) searchDialog(c *ui.Context) {
 		panel.Width(600).Radius(12).Background(pal.Surface).Border(1, pal.Border).Shadow(0, 24, 60, 0, pal.Shadow).Clip()
 		ui.Row(c).Height(52).Padding(0, 16).Gap(10).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
 			ui.Icon(c, theme.Icon("search")).FontSize(17).TextColor(pal.TextMuted)
-			in := ui.TextInputBase(c.Key("q"), &d.query).Placeholder("Search pages, recordings and comments").FontSize(16).Grow(1).AutoFocus()
+			in := ui.TextInputBase(c.Key("q"), &d.query).Placeholder("Search pages, templates, recordings and comments").FontSize(16).Grow(1).AutoFocus()
 			if in.Changed() {
 				d.hits, _ = a.st.Search(d.query, 30)
 				d.hitIndex = 0
@@ -176,10 +176,15 @@ func (a *App) searchDialog(c *ui.Context) {
 					row.Background(pal.Hover)
 				}
 				row.Children(func() {
-					icon := map[string]string{"page": "file-text", "recording": "mic", "comment": "message-square"}[h.Kind]
+					icon := map[string]string{"page": "file-text", "template": "layout-template", "recording": "mic", "comment": "message-square"}[h.Kind]
 					ui.Icon(c, theme.Icon(icon)).FontSize(15).TextColor(pal.Icon)
-					ui.Column(c).Grow(1).Children(func() {
-						ui.Text(c, h.Title).FontSize(14).TextColor(pal.Text).SingleLine()
+					ui.Column(c).Grow(1).Shrink(1).Children(func() {
+						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+							ui.Text(c, h.Title).FontSize(14).TextColor(pal.Text).SingleLine().Shrink(1)
+							if h.Kind == "template" {
+								templatePill(c)
+							}
+						})
 						if h.Snippet != "" {
 							ui.RichText(c, matchSpans(h.Snippet, d.query, pal.Text)...).FontSize(12).TextColor(pal.TextMuted).SingleLine()
 						}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/store"
 )
 
 // The page tools every agent surface uses (docs/protocol.md §2), mirroring
@@ -104,6 +105,71 @@ type ToolContext struct {
 	ReadOtherPage func(id string) map[string]any
 	// Transcript is a recording's transcript as text, "" when there is none.
 	Transcript func(recordingID string) string
+}
+
+// PageTools is the ToolContext of a page in the store: its subpages,
+// comments and transcripts, subpages made in the store, and, with
+// crossPage, reading the user's other pages.
+func PageTools(st *store.Store, pageID, title, agent string, content *doc.Content, crossPage bool) ToolContext {
+	tc := ToolContext{
+		Content: content, PageID: pageID, PageTitle: title, AgentName: agent,
+		Transcript: func(id string) string {
+			rec, err := st.Recording(id)
+			if err != nil {
+				return ""
+			}
+			return TranscriptText(rec.Transcript)
+		},
+		Subpages: func() []map[string]any {
+			kids, _ := st.Children(pageID, "")
+			out := []map[string]any{}
+			for _, k := range kids {
+				out = append(out, map[string]any{"id": k.ID, "title": k.DisplayTitle()})
+			}
+			return out
+		},
+		Comments: func() []map[string]any {
+			threads, _ := st.Threads(pageID)
+			out := []map[string]any{}
+			for _, t := range threads {
+				var thread []map[string]any
+				for _, c := range t.All() {
+					thread = append(thread, map[string]any{"author": c.AuthorName, "body": c.Body})
+				}
+				out = append(out, map[string]any{"block_id": t.Root.BlockID, "resolved": t.Root.Resolved, "thread": thread})
+			}
+			return out
+		},
+		CreateSubpage: func(title string, nodes []*doc.Node) (string, error) {
+			var c *doc.Content
+			if len(nodes) > 0 {
+				c = doc.FromBlocks(nodes)
+			}
+			p, err := st.CreatePage(store.NewPageOptions{ParentID: pageID, Title: title, Content: c})
+			return p.ID, err
+		},
+	}
+	if crossPage {
+		tc.ListPages = func() []map[string]any {
+			pages, _ := st.Pages()
+			out := []map[string]any{}
+			for _, p := range pages {
+				if p.ID != pageID {
+					out = append(out, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "parent_id": p.ParentID})
+				}
+			}
+			return out
+		}
+		tc.ReadOtherPage = func(id string) map[string]any {
+			p, err := st.Page(id)
+			c := st.Content(id)
+			if err != nil || c == nil || !p.DeletedAt.IsZero() {
+				return nil
+			}
+			return map[string]any{"page": map[string]any{"id": id, "title": p.DisplayTitle()}, "blocks": tc.Views(c)}
+		}
+	}
+	return tc
 }
 
 // Views are the blocks as agents read them, with the transcripts of
@@ -271,7 +337,10 @@ func (x *Executor) position(raw any) (doc.Position, error) {
 	return doc.Position{}, nil
 }
 
-func (x *Executor) specs(raw any) ([]*doc.Node, error) {
+func (x *Executor) specs(raw any) ([]*doc.Node, error) { return Specs(raw, x.Ctx.AgentName) }
+
+// Specs turns a tool call's list of blocks into nodes, written by author.
+func Specs(raw any, author string) ([]*doc.Node, error) {
 	list, ok := raw.([]any)
 	if !ok || len(list) == 0 {
 		return nil, terr("blocks must be a non-empty list.")
@@ -282,7 +351,7 @@ func (x *Executor) specs(raw any) ([]*doc.Node, error) {
 		if !ok {
 			return nil, terr("Each block must be an object.")
 		}
-		n, err := doc.SpecToNode(m, "", x.Ctx.AgentName)
+		n, err := doc.SpecToNode(m, "", author)
 		if err != nil {
 			return nil, err
 		}

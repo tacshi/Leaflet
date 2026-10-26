@@ -35,7 +35,7 @@ func (a *App) pageView(c *ui.Context) {
 			}
 		}
 		// Sharing needs a server; a build without one leaves it out.
-		if a.backend.Configured() && iconButton(c, "share", "share", "Share").Clicked() {
+		if a.backend.Configured() && !p.Template && iconButton(c, "share", "share", "Share").Clicked() {
 			a.openShare(ps.id)
 		}
 		more := iconButton(c, "page-more", "ellipsis", "Page actions")
@@ -48,6 +48,15 @@ func (a *App) pageView(c *ui.Context) {
 			}
 		}
 	})
+	// The page menu's choice runs as the title bar draws: Delete closes
+	// the page and Duplicate opens another, so the next frame draws what
+	// is open now.
+	if a.page != ps {
+		if a.win != nil {
+			a.win.Invalidate()
+		}
+		return
+	}
 	sess := a.hub.Session(ps.id)
 	ui.Box(c.Key("page-body")).Grow(1).Children(func() {
 		scroll := ui.Scroll(c.Key("page-scroll:" + ps.id)).TrackScroll(&ps.scroll).Fill()
@@ -119,6 +128,9 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 		if a.page.scroll.Y > 80 {
 			sep()
 			ui.Text(c, p.DisplayTitle()).FontSize(13).FontWeight(600).TextColor(pal.Text).SingleLine().MaxWidth(260).Padding(3, 6)
+		}
+		if p.Template {
+			templatePill(c)
 		}
 		if a.isShared(p) {
 			ui.Text(c, "Shared").FontSize(11).FontWeight(600).TextColor(pal.AccentText).Padding(1, 6).Radius(999).Background(pal.AccentSoft)
@@ -299,20 +311,33 @@ func (a *App) emptyActions(c *ui.Context) {
 	pal := theme.Of(c)
 	ui.Column(c.Key("empty")).Gap(6).Margin(18, 0, 0).AlignItems(ui.Start).Children(func() {
 		ui.Text(c, "Start with").FontSize(12).FontWeight(600).TextColor(pal.TextMuted).Margin(0, 0, 4, 2)
-		row := func(key, icon, label, hint string, fn func()) {
+		// A row with a menu shows its button while hovered, as the
+		// sidebar's rows do.
+		row := func(key, icon, label, hint string, fn func(), menu func(m *ui.Menu)) {
 			b := ui.ButtonBase(c.Key(key)).Padding(8, 10).Gap(12).Radius(8).AlignItems(ui.Center).Justify(ui.Start).FillWidth().MaxWidth(420)
-			if b.Hovered() {
+			hovered := b.Hovered()
+			if hovered {
 				b.Background(pal.Hover)
 			}
 			b.Children(func() {
 				ui.Box(c).Size(30, 30).Radius(8).Center().Background(pal.Ground).Border(1, pal.Divider).Children(func() {
 					ui.Icon(c, theme.Icon(icon)).FontSize(15).TextColor(pal.Icon)
 				})
-				ui.Column(c).Children(func() {
-					ui.Text(c, label).FontSize(14).FontWeight(550).TextColor(pal.Text)
-					ui.Text(c, hint).FontSize(12).TextColor(pal.TextMuted)
+				ui.Column(c).Grow(1).Shrink(1).Children(func() {
+					ui.Text(c, label).FontSize(14).FontWeight(550).TextColor(pal.Text).SingleLine()
+					ui.Text(c, hint).FontSize(12).TextColor(pal.TextMuted).SingleLine()
 				})
+				if menu != nil {
+					more := iconButton(c, "more", "ellipsis", "Template actions").Size(24, 24)
+					if !hovered {
+						more.Opacity(0)
+					}
+					more.Menu(menu)
+				}
 			})
+			if menu != nil {
+				b.ContextMenu(menu)
+			}
 			if b.Clicked() {
 				fn()
 			}
@@ -320,9 +345,13 @@ func (a *App) emptyActions(c *ui.Context) {
 		row("draft", "sparkles", "Draft with an agent", "Say what this page is for", func() {
 			a.panelOpen, a.panelTab = true, 0
 			a.dialogs.focusChat = true
-		})
-		row("subpage", "file-plus", "Add a subpage", "Pages nest inside pages", func() { a.addSubpageBlock() })
-		row("upload", "upload", "Upload a file", "Pictures and files go in the page", func() { a.uploadIntoPage() })
+		}, nil)
+		row("subpage", "file-plus", "Add a subpage", "Pages nest inside pages", func() { a.addSubpageBlock() }, nil)
+		row("upload", "upload", "Upload a file", "Pictures and files go in the page", func() { a.uploadIntoPage() }, nil)
+		// A template starts from the others, not from itself.
+		if p := a.pageByID(a.page.id); p != nil && !p.Template {
+			a.templateActions(c, row)
+		}
 	})
 }
 
@@ -417,7 +446,7 @@ func (a *App) pageNotices(c *ui.Context, pageID string) bool {
 	if n == 0 {
 		return false
 	}
-	text := fmt.Sprintf("%d %s changed here and on another device while apart. The newer version of each was kept.", n, plural(n, "block", "blocks"))
+	text := fmt.Sprintf("%d %s changed here and on another device while apart. One version of each was kept.", n, plural(n, "block", "blocks"))
 	notice(c, "warn", "git-compare", text, func() {
 		if button(c, "review", "", "Review").Clicked() {
 			a.navigate(Route{Kind: "settings", Section: "offline"})

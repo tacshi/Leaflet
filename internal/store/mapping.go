@@ -19,7 +19,7 @@ func PageToRemote(p Page) map[string]any {
 	return map[string]any{
 		"id": p.ID, "space_id": p.SpaceID, "parent_id": ns(p.ParentID), "folder_id": ns(p.FolderID),
 		"title": p.Title, "icon": ns(p.Icon), "sort_key": p.SortKey, "created_by": ns(p.CreatedBy),
-		"created_at": iso(p.CreatedAt), "deleted_at": iso(p.DeletedAt),
+		"created_at": iso(p.CreatedAt), "deleted_at": iso(p.DeletedAt), "is_template": p.Template,
 	}
 }
 
@@ -146,7 +146,7 @@ func PageFromRemote(r map[string]any, keepOffline bool) Page {
 		ID: S(r, "id"), SpaceID: S(r, "space_id"), ParentID: S(r, "parent_id"), FolderID: S(r, "folder_id"),
 		Title: S(r, "title"), Icon: S(r, "icon"), SortKey: sk, CreatedBy: S(r, "created_by"),
 		CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"]),
-		KeepOffline: keepOffline,
+		KeepOffline: keepOffline, Template: r["is_template"] == true,
 	}
 }
 

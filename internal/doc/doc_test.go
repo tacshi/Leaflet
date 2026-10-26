@@ -175,6 +175,34 @@ func TestMergeSameBlockNewerWins(t *testing.T) {
 	}
 }
 
+// A block only one side changed since base takes that side's version,
+// whatever the times say: an edit in the same millisecond as base (an
+// agent writing right after a save) or from a device whose clock is behind
+// is not lost.
+func TestMergeOneSidedEditWinsWhateverTheTimes(t *testing.T) {
+	base := page(map[string]int64{"a": 5, "b": 5}, para("a", "one"), para("b", "two"))
+	for _, remoteAt := range []int64{5, 2} {
+		local := page(map[string]int64{"a": 9, "b": 5}, para("a", "ONE"), para("b", "two"))
+		remote := page(map[string]int64{"a": 5, "b": remoteAt}, para("a", "one"), para("b", "TWO"))
+		got, conflicts := Merge(base, local, remote)
+		if !reflect.DeepEqual(texts(got), []string{"ONE", "TWO"}) || len(conflicts) != 0 {
+			t.Errorf("remote at %d: texts %v conflicts %v", remoteAt, texts(got), conflicts)
+		}
+		// The same with the sides the other way round.
+		got, conflicts = Merge(base, remote, local)
+		if !reflect.DeepEqual(texts(got), []string{"ONE", "TWO"}) || len(conflicts) != 0 {
+			t.Errorf("local at %d: texts %v conflicts %v", remoteAt, texts(got), conflicts)
+		}
+	}
+	// A move one side made, the other side's time newer.
+	local := page(map[string]int64{"a": 9, "b": 5}, para("a", "ONE"), para("b", "two"))
+	remote := page(map[string]int64{"a": 5, "b": 3}, para("b", "two"), para("a", "one"))
+	got, _ := Merge(base, local, remote)
+	if !reflect.DeepEqual(texts(got), []string{"two", "ONE"}) {
+		t.Errorf("move: texts %v", texts(got))
+	}
+}
+
 func TestMergeInsertsInPlace(t *testing.T) {
 	base := page(map[string]int64{"a": 1, "c": 1}, para("a", "one"), para("c", "three"))
 	local := page(map[string]int64{"a": 1, "b": 5, "c": 1}, para("a", "one"), para("b", "two"), para("c", "three"))
@@ -185,19 +213,81 @@ func TestMergeInsertsInPlace(t *testing.T) {
 	}
 }
 
+// A block one side deleted stays deleted if the other side left it as it
+// was in base. If the other side edited it, it comes back, whichever came
+// later, as a conflict whose deleted side is nil.
 func TestMergeDeletesAndEdits(t *testing.T) {
 	base := page(map[string]int64{"a": 1, "b": 1}, para("a", "one"), para("b", "two"))
 	local := page(map[string]int64{"b": 8}, para("b", "two!"))
 	local.Deleted["a"] = 4
-	remote := page(map[string]int64{"a": 3, "b": 1}, para("a", "one?"), para("b", "two"))
-	got, _ := Merge(base, local, remote)
-	if !reflect.DeepEqual(texts(got), []string{"two!"}) {
-		t.Errorf("delete should win: %v", texts(got))
+	untouched := page(map[string]int64{"a": 1, "b": 1}, para("a", "one"), para("b", "two"))
+	got, conflicts := Merge(base, local, untouched)
+	if !reflect.DeepEqual(texts(got), []string{"two!"}) || len(conflicts) != 0 {
+		t.Errorf("delete should win: %v %+v", texts(got), conflicts)
 	}
-	remote2 := page(map[string]int64{"a": 9, "b": 1}, para("a", "one?"), para("b", "two"))
-	got2, _ := Merge(base, local, remote2)
-	if !reflect.DeepEqual(texts(got2), []string{"one?", "two!"}) {
-		t.Errorf("edit should win: %v", texts(got2))
+	if got.Deleted["a"] == 0 {
+		t.Error("no tombstone for a")
+	}
+	for _, editedAt := range []int64{3, 9} {
+		remote := page(map[string]int64{"a": editedAt, "b": 1}, para("a", "one?"), para("b", "two"))
+		for _, sides := range [][2]*Content{{local, remote}, {remote, local}} {
+			got, conflicts := Merge(base, sides[0], sides[1])
+			if !reflect.DeepEqual(texts(got), []string{"one?", "two!"}) {
+				t.Errorf("edit at %d should come back: %v", editedAt, texts(got))
+			}
+			if len(conflicts) != 1 || conflicts[0].BlockID != "a" {
+				t.Fatalf("edit at %d: conflicts %+v", editedAt, conflicts)
+			}
+			c := conflicts[0]
+			deleted, kept := c.Local, c.Remote
+			if sides[0] == remote {
+				deleted, kept = c.Remote, c.Local
+			}
+			if deleted != nil || kept == nil || kept.Delta().Plain() != "one?" || c.Kept() == "" {
+				t.Errorf("edit at %d: conflict %+v", editedAt, c)
+			}
+			if (c.Local == nil) != (c.Kept() == "remote") {
+				t.Errorf("edit at %d: kept %s", editedAt, c.Kept())
+			}
+		}
+	}
+}
+
+// A list one side deleted comes back whole when the other side edited an
+// item in it, and stays deleted when the other side only added a block
+// beside it.
+func TestMergeDeletedParentWithEditedChild(t *testing.T) {
+	item := func(id, text string, kids ...*Node) *Node {
+		n := para(id, text)
+		n.Type, n.Children = "bulleted_list", kids
+		return n
+	}
+	base := page(map[string]int64{"l": 1, "x": 1, "y": 1, "p": 1}, item("l", "list", item("x", "x"), item("y", "y")), para("p", "end"))
+	local := page(map[string]int64{"p": 1}, para("p", "end"))
+	local.Deleted["l"], local.Deleted["x"], local.Deleted["y"] = 5, 5, 5
+	remote := page(map[string]int64{"l": 1, "x": 2, "y": 1, "p": 1}, item("l", "list", item("x", "x!"), item("y", "y")), para("p", "end"))
+	got, conflicts := Merge(base, local, remote)
+	if got.Find("l") == nil || got.Find("y") == nil || got.Find("x").Delta().Plain() != "x!" {
+		t.Errorf("the list did not come back whole: %v", texts(got))
+	}
+	if len(conflicts) != 1 || conflicts[0].BlockID != "l" || conflicts[0].Local != nil {
+		t.Errorf("conflicts %+v", conflicts)
+	}
+	inserted := page(map[string]int64{"l": 1, "x": 1, "y": 1, "n": 6, "p": 1}, item("l", "list", item("x", "x"), item("y", "y")), para("n", "new"), para("p", "end"))
+	got, conflicts = Merge(base, local, inserted)
+	if !reflect.DeepEqual(texts(got), []string{"new", "end"}) || len(conflicts) != 0 {
+		t.Errorf("texts %v conflicts %+v", texts(got), conflicts)
+	}
+	// A block added above it does not move it; moving it below "end" does.
+	above := page(map[string]int64{"n": 6, "l": 1, "x": 1, "y": 1, "p": 1}, para("n", "new"), item("l", "list", item("x", "x"), item("y", "y")), para("p", "end"))
+	got, conflicts = Merge(base, local, above)
+	if !reflect.DeepEqual(texts(got), []string{"new", "end"}) || len(conflicts) != 0 {
+		t.Errorf("added above: texts %v conflicts %+v", texts(got), conflicts)
+	}
+	moved := page(map[string]int64{"p": 1, "l": 6, "x": 1, "y": 1}, para("p", "end"), item("l", "list", item("x", "x"), item("y", "y")))
+	got, conflicts = Merge(base, local, moved)
+	if !reflect.DeepEqual(texts(got), []string{"end", "list", "x", "y"}) || len(conflicts) != 1 {
+		t.Errorf("moved: texts %v conflicts %+v", texts(got), conflicts)
 	}
 }
 

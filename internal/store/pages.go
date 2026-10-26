@@ -26,6 +26,9 @@ type Page struct {
 	DeletedAt time.Time
 	// KeepOffline keeps the page's content on this device.
 	KeepOffline bool
+	// Template marks a template, or a subpage of one: a page kept to start
+	// others from, out of the page list.
+	Template bool
 }
 
 // DisplayTitle is the title, or "Untitled".
@@ -39,14 +42,14 @@ func TitleOr(t string) string {
 	return t
 }
 
-const pageCols = `id, space_id, parent_id, folder_id, title, icon, sort_key, created_by, created_at, updated_at, deleted_at, keep_offline`
+const pageCols = `id, space_id, parent_id, folder_id, title, icon, sort_key, created_by, created_at, updated_at, deleted_at, keep_offline, is_template`
 
 func scanPage(sc interface{ Scan(...any) error }) (Page, error) {
 	var p Page
 	var parent, folder, icon, by sql.NullString
 	var created, updated int64
 	var deleted sql.NullInt64
-	err := sc.Scan(&p.ID, &p.SpaceID, &parent, &folder, &p.Title, &icon, &p.SortKey, &by, &created, &updated, &deleted, &p.KeepOffline)
+	err := sc.Scan(&p.ID, &p.SpaceID, &parent, &folder, &p.Title, &icon, &p.SortKey, &by, &created, &updated, &deleted, &p.KeepOffline, &p.Template)
 	p.ParentID, p.FolderID, p.Icon, p.CreatedBy = parent.String, folder.String, icon.String, by.String
 	p.CreatedAt, p.UpdatedAt, p.DeletedAt = time.UnixMilli(created), time.UnixMilli(updated), fromMs(deleted)
 	return p, err
@@ -69,9 +72,15 @@ func (s *Store) queryPages(where string, args ...any) ([]Page, error) {
 	return out, rows.Err()
 }
 
-// Pages returns the pages not deleted, in sort order.
+// Pages returns the pages not deleted, in sort order, without templates.
 func (s *Store) Pages() ([]Page, error) {
-	return s.queryPages(`deleted_at IS NULL ORDER BY sort_key`)
+	return s.queryPages(`deleted_at IS NULL AND is_template = 0 ORDER BY sort_key`)
+}
+
+// Templates returns the templates not deleted and their subpages, in sort
+// order.
+func (s *Store) Templates() ([]Page, error) {
+	return s.queryPages(`deleted_at IS NULL AND is_template = 1 ORDER BY sort_key`)
 }
 
 // Page returns one page, deleted or not.
@@ -89,13 +98,13 @@ func (s *Store) Children(parentID, spaceID string) ([]Page, error) {
 }
 
 func (s *Store) putPage(p Page) error {
-	_, err := s.db.Exec(`INSERT INTO pages (`+pageCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := s.db.Exec(`INSERT INTO pages (`+pageCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id, parent_id = excluded.parent_id,
 		folder_id = excluded.folder_id, title = excluded.title, icon = excluded.icon, sort_key = excluded.sort_key,
 		created_by = excluded.created_by, created_at = excluded.created_at, updated_at = excluded.updated_at,
-		deleted_at = excluded.deleted_at, keep_offline = excluded.keep_offline`,
+		deleted_at = excluded.deleted_at, keep_offline = excluded.keep_offline, is_template = excluded.is_template`,
 		p.ID, p.SpaceID, ns(p.ParentID), ns(p.FolderID), p.Title, ns(p.Icon), p.SortKey, ns(p.CreatedBy),
-		ms(p.CreatedAt), ms(p.UpdatedAt), nt(p.DeletedAt), p.KeepOffline)
+		ms(p.CreatedAt), ms(p.UpdatedAt), nt(p.DeletedAt), p.KeepOffline, p.Template)
 	return err
 }
 
@@ -109,40 +118,48 @@ type NewPageOptions struct {
 	ParentID string
 	FolderID string
 	SpaceID  string
-	Title    string
+	// AfterID puts the page after that page among its siblings, else last.
+	AfterID string
+	Title   string
+	Icon    string
+	// Template makes a template; a subpage of one is a template anyway.
+	Template bool
 	Content  *doc.Content
 }
 
-// CreatePage creates a page last among its siblings.
+// CreatePage creates a page, last among its siblings unless AfterID says
+// where.
 func (s *Store) CreatePage(o NewPageOptions) (Page, error) {
 	sess := s.Session()
 	spaceID := o.SpaceID
+	template := o.Template
 	if o.ParentID != "" {
-		if parent, err := s.Page(o.ParentID); err == nil && spaceID == "" {
-			spaceID = parent.SpaceID
+		if parent, err := s.Page(o.ParentID); err == nil {
+			if spaceID == "" {
+				spaceID = parent.SpaceID
+			}
+			// A subpage of a template is part of it.
+			template = template || parent.Template
 		}
 	}
 	if spaceID == "" {
 		spaceID = sess.SpaceID
 	}
-	siblings, err := s.Children(o.ParentID, spaceID)
+	folderID := ""
+	if o.ParentID == "" {
+		folderID = o.FolderID
+	}
+	key, err := s.keyAfter(o.ParentID, spaceID, folderID, o.AfterID, "")
 	if err != nil {
 		return Page{}, err
 	}
-	last := ""
-	if len(siblings) > 0 {
-		last = siblings[len(siblings)-1].SortKey
-	}
 	now := time.Now()
 	p := Page{
-		ID: o.ID, SpaceID: spaceID, ParentID: o.ParentID, Title: o.Title,
-		SortKey: KeyBetween(last, ""), CreatedAt: now, UpdatedAt: now, KeepOffline: true,
+		ID: o.ID, SpaceID: spaceID, ParentID: o.ParentID, FolderID: folderID, Title: o.Title, Icon: o.Icon,
+		SortKey: key, CreatedAt: now, UpdatedAt: now, KeepOffline: true, Template: template,
 	}
 	if p.ID == "" {
 		p.ID = doc.NewRowID()
-	}
-	if o.ParentID == "" {
-		p.FolderID = o.FolderID
 	}
 	if sess.UserID != LocalUserID {
 		p.CreatedBy = sess.UserID
@@ -213,13 +230,39 @@ func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
 	if parentID != "" && s.IsDescendant(parentID, id) {
 		return ErrMoveIntoSelf
 	}
-	all, err := s.Children(parentID, p.SpaceID)
+	key, err := s.keyAfter(parentID, p.SpaceID, folderID, afterID, id)
 	if err != nil {
 		return err
 	}
+	if parentID != "" {
+		if parent, err := s.Page(parentID); err == nil {
+			p.SpaceID = parent.SpaceID
+		}
+		folderID = ""
+	}
+	p.ParentID, p.FolderID = parentID, folderID
+	p.SortKey, p.UpdatedAt = key, time.Now()
+	if err := s.putPage(p); err != nil {
+		return err
+	}
+	if err := s.queuePage(p, "moved"); err != nil {
+		return err
+	}
+	s.Notify("pages", id)
+	return nil
+}
+
+// keyAfter is a sort key for a page put after afterID among the pages
+// under parentID, or the top-level pages of folderID, or last when afterID
+// is "". skip, the page being put, is left out of them.
+func (s *Store) keyAfter(parentID, spaceID, folderID, afterID, skip string) (string, error) {
+	all, err := s.Children(parentID, spaceID)
+	if err != nil {
+		return "", err
+	}
 	var siblings []Page
 	for _, q := range all {
-		if q.ID != id && (parentID != "" || q.FolderID == folderID) {
+		if q.ID != skip && (parentID != "" || q.FolderID == folderID) {
 			siblings = append(siblings, q)
 		}
 	}
@@ -238,24 +281,94 @@ func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
 			}
 		}
 	}
-	if parentID != "" {
-		if parent, err := s.Page(parentID); err == nil {
-			p.SpaceID = parent.SpaceID
-		}
-		folderID = ""
-	}
-	p.ParentID, p.FolderID = parentID, folderID
 	if before != "" && after != "" && before >= after {
 		after = ""
 	}
-	p.SortKey, p.UpdatedAt = KeyBetween(before, after), time.Now()
-	if err := s.putPage(p); err != nil {
-		return err
+	return KeyBetween(before, after), nil
+}
+
+// CopyOptions say where a copy of a page goes, as NewPageOptions do.
+type CopyOptions struct {
+	ParentID string
+	FolderID string
+	SpaceID  string
+	AfterID  string
+	Title    string
+	// Template makes the copy and its subpages templates; else they are
+	// pages.
+	Template bool
+}
+
+// CopyPage copies a page and its subpages, which keep their titles and
+// order, and returns the copy. Links among them go to the copies.
+func (s *Store) CopyPage(id string, o CopyOptions) (Page, error) {
+	tree, ids, contents, err := s.copyPlan(id, doc.NewRowID())
+	if err != nil {
+		return Page{}, err
 	}
-	if err := s.queuePage(p, "moved"); err != nil {
-		return err
+	p, err := s.CreatePage(NewPageOptions{ID: ids[id], ParentID: o.ParentID, FolderID: o.FolderID, SpaceID: o.SpaceID,
+		AfterID: o.AfterID, Title: o.Title, Icon: tree[0].Icon, Template: o.Template, Content: contents[0]})
+	if err != nil {
+		return Page{}, err
 	}
-	s.Notify("pages", id)
+	return p, s.createCopies(tree[1:], ids, contents[1:], o.Template)
+}
+
+// CopyInto copies page id's subpages under page into, and returns a copy
+// of id's content for into to hold, as when a page starts from a
+// template. Links among them go to the copies.
+func (s *Store) CopyInto(id, into string) (*doc.Content, error) {
+	tree, ids, contents, err := s.copyPlan(id, into)
+	if err != nil {
+		return nil, err
+	}
+	target, err := s.Page(into)
+	if err != nil {
+		return nil, err
+	}
+	return contents[0], s.createCopies(tree[1:], ids, contents[1:], target.Template)
+}
+
+// copyPlan reads page id and the pages under it, parents before their
+// subpages, and gives each the ID of its copy (copyID for id) and its
+// content with links among them going to the copies.
+func (s *Store) copyPlan(id, copyID string) ([]Page, map[string]string, []*doc.Content, error) {
+	root, err := s.Page(id)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	tree := []Page{root}
+	for i := 0; i < len(tree); i++ {
+		kids, err := s.queryPages(`parent_id = ? AND deleted_at IS NULL ORDER BY sort_key`, tree[i].ID)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		tree = append(tree, kids...)
+	}
+	ids := map[string]string{id: copyID}
+	for _, p := range tree[1:] {
+		ids[p.ID] = doc.NewRowID()
+	}
+	contents := make([]*doc.Content, len(tree))
+	for i, p := range tree {
+		c := s.Content(p.ID)
+		if c == nil {
+			return nil, nil, nil, fmt.Errorf("%s is not on this device yet", p.DisplayTitle())
+		}
+		contents[i] = c.CopyFor(ids)
+	}
+	return tree, ids, contents, nil
+}
+
+// createCopies makes the copies of subpages that copyPlan planned, each
+// last under its parent's copy, so they keep their order.
+func (s *Store) createCopies(pages []Page, ids map[string]string, contents []*doc.Content, template bool) error {
+	for i, p := range pages {
+		if _, err := s.CreatePage(NewPageOptions{ID: ids[p.ID], ParentID: ids[p.ParentID], Title: p.Title,
+			Icon: p.Icon, Template: template, Content: contents[i]}); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -478,24 +591,33 @@ func (s *Store) MaybeAutosave(pageID string, c *doc.Content) error {
 
 // SearchHit is one search result.
 type SearchHit struct {
-	Kind    string // page | recording | comment
+	Kind    string // page | template | recording | comment
 	Title   string
 	PageID  string
 	Snippet string
 	BlockID string
 }
 
-// Search finds pages by title or text, recordings by transcript, and
-// comments. A blank query returns the most recently edited pages.
+// Search finds pages and templates by title or text, recordings by
+// transcript, and comments. A blank query returns the most recently edited
+// pages.
 func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 	q := strings.ToLower(strings.TrimSpace(query))
 	pages, err := s.Pages()
 	if err != nil {
 		return nil, err
 	}
+	templates, err := s.Templates()
+	if err != nil {
+		return nil, err
+	}
 	titles := map[string]string{}
 	for _, p := range pages {
 		titles[p.ID] = p.Title
+	}
+	templateTitles := map[string]string{}
+	for _, t := range templates {
+		templateTitles[t.ID] = t.Title
 	}
 	var hits []SearchHit
 	if q == "" {
@@ -516,6 +638,12 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 			seen[p.ID] = true
 		}
 	}
+	for _, t := range templates {
+		if strings.Contains(strings.ToLower(t.Title), q) {
+			hits = append(hits, SearchHit{Kind: "template", Title: t.DisplayTitle(), PageID: t.ID})
+			seen[t.ID] = true
+		}
+	}
 	like := "%" + q + "%"
 	rows, err := s.db.Query(`SELECT page_id, plain_text FROM page_contents WHERE lower(plain_text) LIKE ? LIMIT ?`, like, limit)
 	if err != nil {
@@ -527,7 +655,14 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 			_ = rows.Close()
 			return nil, err
 		}
-		if _, ok := titles[id]; !ok || seen[id] {
+		if seen[id] {
+			continue
+		}
+		if title, ok := templateTitles[id]; ok {
+			hits = append(hits, SearchHit{Kind: "template", Title: TitleOr(title), PageID: id, Snippet: snippet(text, q)})
+			continue
+		}
+		if _, ok := titles[id]; !ok {
 			continue
 		}
 		hits = append(hits, SearchHit{Kind: "page", Title: TitleOr(titles[id]), PageID: id, Snippet: snippet(text, q)})

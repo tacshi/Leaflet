@@ -48,13 +48,16 @@ type App struct {
 
 	// What the views show, reloaded as the store changes.
 	pages     []store.Page
-	folders   []store.Folder
-	files     []store.File
-	providers []store.Provider
-	pending   int
-	conflicts []store.ConflictRow
-	syncing   bool
-	syncError string
+	templates []store.Page
+	// templateHints are templates' first lines, by ID and edit time.
+	templateHints map[string]string
+	folders       []store.Folder
+	files         []store.File
+	providers     []store.Provider
+	pending       int
+	conflicts     []store.ConflictRow
+	syncing       bool
+	syncError     string
 
 	route   Route
 	history []Route
@@ -120,8 +123,11 @@ type pageState struct {
 	focusTitle int
 	// selectTitle selects the title as it takes the focus, to rename.
 	selectTitle bool
-	// loaded is the stored content the editor started from or last saved.
+	// loaded is the stored content the editor started from or last saved,
+	// and stored that content as the store has it, encoded, before any
+	// change that is no edit (page mentions' new titles).
 	loaded  *doc.Content
+	stored  string
 	dirty   bool
 	timer   *time.Timer
 	threads []store.Thread
@@ -158,7 +164,9 @@ func Run() {
 	}
 }
 
-func dataDir() string {
+// DataDir is the folder of the app's database: LEAFLET_DATA_DIR, or the
+// app's data folder.
+func DataDir() string {
 	if d := os.Getenv("LEAFLET_DATA_DIR"); d != "" {
 		return d
 	}
@@ -171,7 +179,7 @@ func dataDir() string {
 }
 
 func (a *App) start() error {
-	st, err := store.Open(dataDir())
+	st, err := store.Open(DataDir())
 	if err != nil {
 		return err
 	}
@@ -226,6 +234,8 @@ func (a *App) start() error {
 	}
 	a.sync.Offline = func() bool { return a.settings.WorkOffline }
 	st.Subscribe(func(ch store.Change) { a.update(func() { a.reload(ch) }) })
+	// Agents outside the app (leaflet mcp) write to the database too.
+	go st.WatchOthers(time.Second, nil, func() { a.update(a.outsideChange) })
 	if err := a.createWelcome(); err != nil {
 		log.Printf("welcome page: %v", err)
 	}
@@ -313,6 +323,9 @@ func (a *App) reload(ch store.Change) {
 		if pages, err := a.st.Pages(); err == nil {
 			a.pages = pages
 		}
+		if templates, err := a.st.Templates(); err == nil {
+			a.templates = templates
+		}
 		if a.page != nil {
 			if p := a.pageByID(a.page.id); p == nil {
 				a.page = nil
@@ -351,10 +364,16 @@ func (a *App) reload(ch store.Change) {
 	}
 }
 
+// pageByID finds a page, or a template, which opens as one.
 func (a *App) pageByID(id string) *store.Page {
 	for i := range a.pages {
 		if a.pages[i].ID == id {
 			return &a.pages[i]
+		}
+	}
+	for i := range a.templates {
+		if a.templates[i].ID == id {
+			return &a.templates[i]
 		}
 	}
 	return nil
@@ -497,6 +516,7 @@ func (a *App) loadPage(id string) {
 	if content == nil {
 		content = doc.Empty()
 	}
+	stored := content.Encode()
 	// Mentions of pages show their titles now, as renamed since; this
 	// is no edit, so it saves with the page's next one. The store has
 	// the title the page just closed saved, which a.pages may not yet.
@@ -504,7 +524,7 @@ func (a *App) loadPage(id string) {
 		p, err := a.st.Page(id)
 		return p.DisplayTitle(), err == nil
 	})
-	ps := &pageState{id: id, title: p.Title, loaded: content.Copy(), tinted: map[string]bool{}}
+	ps := &pageState{id: id, title: p.Title, loaded: content.Copy(), stored: stored, tinted: map[string]bool{}}
 	ed := editor.New(content, &host{a: a})
 	ed.Size = float32(a.settings.TextSize)
 	ed.ReadOnly = !a.canEdit(id)
@@ -584,6 +604,9 @@ func (a *App) savePage() {
 	if ps == nil || !ps.dirty {
 		return
 	}
+	// What was stored since, by another process, merges in first, so the
+	// save keeps it.
+	a.externalContent(ps.id)
 	ps.dirty = false
 	if ps.timer != nil {
 		ps.timer.Stop()
@@ -594,7 +617,7 @@ func (a *App) savePage() {
 		return
 	}
 	ps.editor.Content.Blocks, ps.editor.Content.Deleted = stamped.Blocks, stamped.Deleted
-	ps.loaded = stamped.Copy()
+	ps.loaded, ps.stored = stamped.Copy(), stamped.Encode()
 	if changed {
 		_ = a.st.MaybeAutosave(ps.id, stamped)
 		a.sync.Kick()
@@ -632,19 +655,29 @@ func (a *App) externalContent(pageID string) {
 		return
 	}
 	stored := a.st.Content(pageID)
-	if stored == nil || stored.Encode() == ps.loaded.Encode() {
+	if stored == nil || stored.Encode() == ps.stored {
 		return
 	}
 	if ps.dirty {
 		local := ps.editor.Content.Stamped(ps.loaded, doc.NowMs())
-		merged, _ := doc.Merge(ps.loaded, local, stored)
+		merged, _ := doc.Merge(doc.MustDecode(ps.stored), local, stored)
 		ps.editor.Replace(merged)
-		ps.loaded = stored.Copy()
+		ps.loaded, ps.stored = stored.Copy(), stored.Encode()
 		a.scheduleSave()
 		return
 	}
 	ps.editor.Replace(stored.Copy())
-	ps.loaded = stored.Copy()
+	ps.loaded, ps.stored = stored.Copy(), stored.Encode()
+}
+
+// outsideChange rereads everything after another process wrote to the
+// database, brings the open page up to date, and syncs what it queued.
+func (a *App) outsideChange() {
+	a.reload(store.Change{Table: "*"})
+	if a.page != nil {
+		a.externalContent(a.page.id)
+	}
+	a.sync.Kick()
 }
 
 // toast shows a message at the bottom of the window.
@@ -683,7 +716,7 @@ func (a *App) newPage(parent, folder string) {
 	a.pages, _ = a.st.Pages()
 	if parent != "" {
 		a.expanded[parent] = true
-		a.linkSubpage(parent, p.ID)
+		a.linkSubpage(parent, p.ID, "")
 	}
 	a.openPage(p.ID)
 	a.focusTitle(false)
@@ -691,11 +724,21 @@ func (a *App) newPage(parent, folder string) {
 
 // linkSubpage puts a link to subpage id at the end of page parent, as
 // / › Subpage does where the caret is, so a page made from the sidebar
-// shows in the page it is inside.
-func (a *App) linkSubpage(parent, id string) {
+// shows in the page it is inside. A copy goes after the link to the page
+// it copies, after, when parent has one.
+func (a *App) linkSubpage(parent, id, after string) {
 	link := &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": id}}
+	insert := func(c *doc.Content) {
+		at := doc.Position{At: "end"}
+		c.Walk(func(n, _ *doc.Node) {
+			if after != "" && n.Type == "subpage" && n.Str("page_id") == after {
+				at = doc.Position{After: n.ID}
+			}
+		})
+		_ = c.Insert(at, link)
+	}
 	if ed := a.Editor(parent); ed != nil {
-		ed.Edit(func(c *doc.Content) { _ = c.Insert(doc.Position{At: "end"}, link) })
+		ed.Edit(insert)
 		a.savePage()
 		return
 	}
@@ -703,7 +746,7 @@ func (a *App) linkSubpage(parent, id string) {
 	if c == nil {
 		c = doc.Empty()
 	}
-	_ = c.Insert(doc.Position{At: "end"}, link)
+	insert(c)
 	if _, _, err := a.st.SaveContent(parent, c); err != nil {
 		a.toast("Could not link the subpage: " + err.Error())
 	}

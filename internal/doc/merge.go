@@ -1,7 +1,9 @@
 package doc
 
 // Conflict is a block both sides changed since they last agreed. Last write
-// wins, and the losing version is kept so the user can bring it back.
+// wins, and the losing version is kept so the user can bring it back. A
+// block one side deleted and the other changed is kept, with a nil node for
+// the side that deleted it, so the user can delete it again.
 type Conflict struct {
 	BlockID        string
 	Local, Remote  *Node
@@ -9,9 +11,10 @@ type Conflict struct {
 	RemoteEditedAt int64
 }
 
-// Kept is the side last-write-wins kept: "local" or "remote".
+// Kept is the side the merge kept: "local" or "remote". A block one side
+// deleted and the other edited is kept, and the deleted side's node is nil.
 func (c Conflict) Kept() string {
-	if c.LocalEditedAt >= c.RemoteEditedAt {
+	if c.Remote == nil || c.Local != nil && c.LocalEditedAt >= c.RemoteEditedAt {
 		return "local"
 	}
 	return "remote"
@@ -119,10 +122,12 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		}
 		pt, ot := timeOf(primary, id), timeOf(other, id)
 		b := baseFlat[id]
-		baseTime := timeOf(base, id)
-		localChanged := b == nil || (localFlat[id].own != b.own && timeOf(local, id) > baseTime)
-		remoteChanged := b == nil || (remoteFlat[id].own != b.own && timeOf(remote, id) > baseTime)
-		if localChanged && remoteChanged && p.own != o.own {
+		// What a side changed since base, it changed whatever its times
+		// say: an edit in the same millisecond as base, or from a device
+		// whose clock is behind, still counts. Times only decide what
+		// both sides changed.
+		primaryEdited, otherEdited := b == nil || p.own != b.own, b == nil || o.own != b.own
+		if primaryEdited && otherEdited && p.own != o.own {
 			conflicts = append(conflicts, Conflict{
 				BlockID:        id,
 				Local:          localFlat[id].node.Clone(),
@@ -131,48 +136,96 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 				RemoteEditedAt: timeOf(remote, id),
 			})
 		}
-		if ot > pt {
-			current := result.Find(id)
-			if p.own != o.own {
-				repl := o.node.Clone()
-				repl.Children = current.Children
-				_ = result.Replace(id, repl)
-			}
-			if (p.parent != o.parent || p.prev != o.prev) && movedSinceBase(o, otherFlat, baseFlat[id]) {
+		otherWins := func(primaryChanged, otherChanged bool) bool {
+			return otherChanged && (!primaryChanged || ot > pt)
+		}
+		taken := false
+		if p.own != o.own && otherWins(primaryEdited, otherEdited) {
+			repl := o.node.Clone()
+			repl.Children = result.Find(id).Children
+			_ = result.Replace(id, repl)
+			taken = true
+		}
+		if p.parent != o.parent || p.prev != o.prev {
+			if otherWins(movedSinceBase(p, primaryFlat, b, baseFlat), movedSinceBase(o, otherFlat, b, baseFlat)) {
 				if pos, ok := positionIn(result, o); ok && !result.IsSelfOrAncestor(id, pos.Anchor()) {
 					_ = result.Move(id, pos)
+					taken = true
 				}
 			}
-			times[id] = ot
-		} else {
-			times[id] = pt
+		}
+		times[id] = pt
+		if taken {
+			times[id] = max(pt, ot)
 		}
 	}
 
-	// Blocks only in the primary: drop them if the other side deleted them
-	// later than they were last edited.
-	for id := range primaryFlat {
-		if _, ok := otherFlat[id]; ok {
-			continue
+	// A block on one side only was deleted on the other, or made on this
+	// one. Deleted since base, it stays deleted if this side left it, and
+	// the subpages under it, as they were in base; if this side changed
+	// any of it, it comes back whole, whatever the times, as a conflict to
+	// review. With no base to tell, the newer of the edit and the
+	// tombstone wins.
+	changed := func(c *Content, sideFlat map[string]*flat, id string) bool {
+		changedHere := false
+		var visit func(n *Node)
+		visit = func(n *Node) {
+			f, b := sideFlat[n.ID], baseFlat[n.ID]
+			if b == nil || f.own != b.own || movedSinceBase(f, sideFlat, b, baseFlat) {
+				changedHere = true
+			}
+			for _, k := range n.Children {
+				visit(k)
+			}
 		}
-		deletedAt, hasDel := other.Deleted[id]
-		editedAt := timeOf(primary, id)
-		_, existedAtBase := baseFlat[id]
-		deletedOnOther := hasDel || (existedAtBase && editedAt <= timeOf(base, id))
-		at := editedAt
-		if hasDel {
-			at = deletedAt
+		visit(sideFlat[id].node)
+		return changedHere
+	}
+	deletedConflict := func(id string, kept *Node, keptOnPrimary bool, editedAt, deletedAt int64) {
+		c := Conflict{BlockID: id, Local: kept.Clone(), LocalEditedAt: editedAt, RemoteEditedAt: deletedAt}
+		if keptOnPrimary != primaryIsLocal {
+			c = Conflict{BlockID: id, Remote: kept.Clone(), LocalEditedAt: deletedAt, RemoteEditedAt: editedAt}
 		}
-		if deletedOnOther && at >= editedAt {
+		conflicts = append(conflicts, c)
+	}
+	// stays reports whether a block of side, missing from the other side,
+	// stays, recording a conflict when it comes back over a delete.
+	stays := func(side *Content, sideFlat map[string]*flat, deletions map[string]int64, id string, sideIsPrimary bool) bool {
+		deletedAt, hasDel := deletions[id]
+		editedAt := timeOf(side, id)
+		if _, inBase := baseFlat[id]; !inBase {
+			return !hasDel || editedAt > deletedAt
+		}
+		if !changed(side, sideFlat, id) {
+			return false
+		}
+		deletedConflict(id, sideFlat[id].node, sideIsPrimary, editedAt, deletedAt)
+		return true
+	}
+
+	// Blocks only in the primary, in document order: a block that stays
+	// keeps the blocks under it.
+	var dropPrimary func(nodes []*Node)
+	dropPrimary = func(nodes []*Node) {
+		for _, n := range nodes {
+			id := n.ID
+			if _, ok := otherFlat[id]; ok {
+				dropPrimary(n.Children)
+				continue
+			}
+			if stays(primary, primaryFlat, other.Deleted, id, true) {
+				continue
+			}
 			result.Remove(id)
 			delete(times, id)
-			tombstones[id] = max(tombstones[id], at)
+			tombstones[id] = max(tombstones[id], other.Deleted[id], timeOf(primary, id))
 		}
 	}
+	dropPrimary(primary.Children)
 
-	// Blocks only on the other side: add them unless the primary deleted
-	// them later than they were last edited. Walk the other side in order,
-	// so inserted runs keep their order.
+	// Blocks only on the other side: add those that stay. Walk the other
+	// side in order, so inserted runs keep their order; a block that stays
+	// comes with the blocks under it.
 	for _, n := range other.All() {
 		id := n.ID
 		if _, ok := primaryFlat[id]; ok {
@@ -181,30 +234,22 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		if result.Find(id) != nil {
 			continue // came in with a new parent
 		}
-		deletedAt, hasDel := primary.Deleted[id]
-		editedAt := timeOf(other, id)
-		_, existedAtBase := baseFlat[id]
-		deletedOnPrimary := hasDel || (existedAtBase && editedAt <= timeOf(base, id))
-		at := editedAt
-		if hasDel {
-			at = deletedAt
-		}
-		if deletedOnPrimary && at >= editedAt {
-			continue
-		}
 		o := otherFlat[id]
 		parentMissing := o.parent != "" && result.Find(o.parent) == nil
 		if parentMissing {
 			if _, ok := otherFlat[o.parent]; ok {
-				continue // added with its parent's subtree
+				continue // its parent stayed deleted, and it with it
 			}
+		}
+		if !stays(other, otherFlat, primary.Deleted, id, false) {
+			continue
 		}
 		pos, ok := positionIn(result, o)
 		if !ok {
 			pos = Position{At: "end"}
 		}
 		_ = result.Insert(pos, o.node.Clone())
-		times[id] = editedAt
+		times[id] = timeOf(other, id)
 		delete(tombstones, id)
 		var kids func(*Node)
 		kids = func(n *Node) {
@@ -233,19 +278,21 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 }
 
 // movedSinceBase reports whether a side really moved the block since base,
-// as opposed to its neighbours being deleted around it.
-func movedSinceBase(side *flat, sideFlat map[string]*flat, base *flat) bool {
+// as opposed to blocks being deleted or added around it: it compares the
+// nearest preceding sibling that both base and the side have.
+func movedSinceBase(side *flat, sideFlat map[string]*flat, base *flat, baseFlat map[string]*flat) bool {
 	if base == nil || side.parent != base.parent {
 		return true
 	}
-	basePrev := ""
-	for _, id := range base.prevs {
-		if _, ok := sideFlat[id]; ok {
-			basePrev = id
-			break
+	nearest := func(prevs []string, in map[string]*flat) string {
+		for _, id := range prevs {
+			if _, ok := in[id]; ok {
+				return id
+			}
 		}
+		return ""
 	}
-	return side.prev != basePrev
+	return nearest(side.prevs, baseFlat) != nearest(base.prevs, sideFlat)
 }
 
 func positionIn(c *Content, f *flat) (Position, bool) {

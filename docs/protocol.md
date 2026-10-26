@@ -32,7 +32,13 @@ metadata:
 - `meta.blocks[id]` is the last time (ms since epoch) that block's own content,
   type, or position changed. `meta.deleted[id]` is a tombstone.
 - Until CRDTs land, two versions of a page merge **last-write-wins per block**
-  (see `internal/doc/merge.go`).
+  (see `internal/doc/merge.go`): a block only one side changed since the
+  version both last agreed on takes that side's change, whatever the times;
+  the times decide only blocks both sides changed. A block one side deleted
+  stays deleted if the other side left it (and everything under it) as it
+  was; if the other side changed any of it, it comes back whole, and the
+  conflict is kept with the deleted side's node null, so the user can delete
+  it again.
 - Saves are compare-and-set on `page_content.revision`, which the server
   moves on with every update. A writer reads `content, revision`, merges,
   then updates `where page_id = … and revision = <what it read>`. Zero rows
@@ -77,6 +83,8 @@ current title into it when the page opens.
 Every surface (inline `@`, selection, sidebar chat, comment `@`) runs the same
 loop with the same tools. Tool definitions live in
 `internal/agents/tools.go` and `supabase/functions/_shared/tools.ts`.
+`leaflet mcp` (`internal/mcp`) offers the same page tools, each with a
+`page_id`, to agents outside the app.
 
 ### BlockSpec (what a model writes)
 
@@ -202,7 +210,9 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
 See `supabase/migrations/`. Row-level security: the space owner has full
 access; `page_permissions` grants `viewer` or `editor` on a page and all its
 subpages; moving a page under a new parent requires edit access to both.
-`model_providers.encrypted_secret` and `refresh_token` hold Vault secret IDs
+`pages.is_template` marks a template and every subpage of one (a subpage
+made under a template is one too); templates stay out of the page list,
+search and `list_pages`. `model_providers.encrypted_secret` and `refresh_token` hold Vault secret IDs
 and are not selectable by clients.
 
 Storage buckets: `recordings` (`{user_id}/{recording_id}.m4a`), `files`

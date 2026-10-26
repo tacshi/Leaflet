@@ -21,6 +21,7 @@ import (
 var sections = []struct{ id, icon, label string }{
 	{"account", "user", "Account"},
 	{"providers", "sparkles", "Agent providers"},
+	{"external", "bot", "External agents"},
 	{"speech", "mic", "Speech to text"},
 	{"offline", "cloud-download", "Offline and storage"},
 }
@@ -45,6 +46,8 @@ func (a *App) settingsView(c *ui.Context) {
 					switch a.route.Section {
 					case "providers":
 						a.modelsSettings(c)
+					case "external":
+						a.externalSettings(c)
 					case "speech":
 						a.speechSettings(c)
 					case "offline":
@@ -1019,14 +1022,35 @@ func (a *App) offlineSettings(c *ui.Context) {
 				if cf.Kept == "remote" {
 					kept, other = cf.RemoteNode, cf.LocalNode
 				}
-				desc := fmt.Sprintf("Kept “%s” over “%s”", short(kept.Delta().Plain(), 40), short(other.Delta().Plain(), 40))
+				// A block one side deleted and the other edited was kept,
+				// and can be deleted again.
+				deleted := other == nil
+				desc := ""
+				switch {
+				case cf.LocalNode == nil:
+					desc = fmt.Sprintf("Kept “%s”: deleted on this device, edited on another", short(kept.Delta().Plain(), 40))
+				case cf.RemoteNode == nil:
+					desc = fmt.Sprintf("Kept “%s”: deleted on another device, edited on this one", short(kept.Delta().Plain(), 40))
+				default:
+					desc = fmt.Sprintf("Kept “%s” over “%s”", short(kept.Delta().Plain(), 40), short(other.Delta().Plain(), 40))
+				}
 				settingRow(c, cf.ID, a.pageTitleOf(cf.PageID), desc, i == 0, func() {
 					b := button(c, "act", "", "Resolve")
 					b.Menu(func(m *ui.Menu) {
-						if m.Item("Use this device's version").Chosen() {
+						if deleted {
+							if m.Item("Delete it").Chosen() {
+								a.resolveConflict(cf, nil)
+							}
+							if m.Item("Keep it").Chosen() {
+								if err := a.st.ResolveConflict(cf.ID); err != nil {
+									a.toast("Could not resolve: " + err.Error())
+								}
+							}
+						}
+						if !deleted && m.Item("Use this device's version").Chosen() {
 							a.resolveConflict(cf, cf.LocalNode)
 						}
-						if m.Item("Keep the newer version").Chosen() {
+						if !deleted && m.Item("Keep the newer version").Chosen() {
 							if err := a.st.ResolveConflict(cf.ID); err != nil {
 								a.toast("Could not resolve: " + err.Error())
 							}
@@ -1121,9 +1145,17 @@ func (a *App) syncSettings(c *ui.Context) {
 	})
 }
 
-// resolveConflict puts a version of a block back.
+// resolveConflict puts a version of a block back, or deletes the block
+// for a nil node.
 func (a *App) resolveConflict(cf store.ConflictRow, node *doc.Node) {
 	apply := func(content *doc.Content) {
+		if node == nil {
+			content.Remove(cf.BlockID)
+			if len(content.Children) == 0 {
+				content.Children = doc.Empty().Children
+			}
+			return
+		}
 		if content.Find(cf.BlockID) != nil {
 			_ = content.Replace(cf.BlockID, node.Clone())
 		} else {

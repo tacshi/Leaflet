@@ -51,3 +51,42 @@ func (c *Content) RefreshPageMentions(title func(id string) (string, bool)) bool
 	})
 	return changed
 }
+
+// CopyFor returns a copy of c for a new page: new block IDs, stamped now,
+// and links to the pages in pages, of subpage blocks and inline links
+// alike, pointing to the page each maps to instead, so a page copied with
+// its subpages links to the copies.
+func (c *Content) CopyFor(pages map[string]string) *Content {
+	children := make([]*Node, len(c.Children))
+	for i, n := range c.Children {
+		children[i] = n.Clone()
+	}
+	out := &Content{Children: children}
+	out.Walk(func(n, _ *Node) {
+		n.ID = ""
+		if to, ok := pages[n.Str("page_id")]; ok && n.Type == "subpage" {
+			n.Set("page_id", to)
+		}
+		if !n.IsText() {
+			return
+		}
+		d := n.Delta()
+		touched := false
+		for i, r := range d {
+			id, ok := PageLinkID(r.Attrs.Href)
+			to, mapped := pages[id]
+			if !ok || !mapped {
+				continue
+			}
+			d[i].Attrs.Href = PageLink(to)
+			if m := r.Attrs.Mention; m != nil && m.Kind == "page" {
+				d[i].Attrs.Mention = &Mention{Kind: "page", ID: to, Name: m.Name}
+			}
+			touched = true
+		}
+		if touched {
+			n.SetDelta(d)
+		}
+	})
+	return FromBlocks(out.Children)
+}

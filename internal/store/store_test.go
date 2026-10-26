@@ -1,7 +1,9 @@
 package store
 
 import (
+	"strings"
 	"testing"
+	"time"
 
 	"leaflet/internal/doc"
 )
@@ -214,5 +216,191 @@ func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 	providers, _ := s.Providers()
 	if len(providers) != 1 || providers[0].ID != "ollama" {
 		t.Errorf("providers %+v", providers)
+	}
+}
+
+func TestWatchOthers(t *testing.T) {
+	dir := t.TempDir()
+	app, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = app.Close() }()
+	other, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Close() }()
+	seen := make(chan struct{}, 10)
+	stop := make(chan struct{})
+	defer close(stop)
+	go app.WatchOthers(10*time.Millisecond, stop, func() { seen <- struct{}{} })
+	time.Sleep(30 * time.Millisecond)
+	// The app's own writes are not news to it.
+	if err := app.SetValue("own", "1"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if len(seen) != 0 {
+		t.Fatal("the app's own write counted as another's")
+	}
+	if err := other.SetValue("theirs", "1"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-seen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("another process's write went unseen")
+	}
+}
+
+func TestSavedContentReadsBackTheSame(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{Title: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := s.Content(p.ID)
+	n := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
+	n.SetDelta(doc.FromMarkdown("Some **bold** text"))
+	_ = c.Insert(doc.Position{At: "end"}, n)
+	stamped, _, err := s.SaveContent(p.ID, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The app tells another process's save from its own by this.
+	if got := s.Content(p.ID).Encode(); got != stamped.Encode() {
+		t.Errorf("stored %s\nsaved  %s", got, stamped.Encode())
+	}
+}
+
+func TestCopyPage(t *testing.T) {
+	s := open(t)
+	para := func(text string, a doc.Attrs) *doc.Node {
+		n := &doc.Node{Type: "paragraph"}
+		n.SetDelta(doc.Delta{{Text: text, Attrs: a}})
+		return n
+	}
+	before, _ := s.CreatePage(NewPageOptions{Title: "Before"})
+	prd, _ := s.CreatePage(NewPageOptions{Title: "PRD", Icon: "📄"})
+	if _, err := s.CreatePage(NewPageOptions{Title: "After"}); err != nil {
+		t.Fatal(err)
+	}
+	faq, _ := s.CreatePage(NewPageOptions{ParentID: prd.ID, Title: "FAQ", Content: doc.FromBlocks([]*doc.Node{para("Questions", doc.Attrs{})})})
+	risks, _ := s.CreatePage(NewPageOptions{ParentID: prd.ID, Title: "Risks"})
+	deep, _ := s.CreatePage(NewPageOptions{ParentID: faq.ID, Title: "Deep"})
+	body := doc.FromBlocks([]*doc.Node{
+		para("FAQ", doc.PageMention(faq.ID, "FAQ")),
+		{Type: "subpage", Data: map[string]any{"page_id": risks.ID}},
+		para("Elsewhere", doc.PageMention(before.ID, "Before")),
+	})
+	if _, _, err := s.SaveContent(prd.ID, body); err != nil {
+		t.Fatal(err)
+	}
+
+	cp, err := s.CopyPage(prd.ID, CopyOptions{AfterID: prd.ID, Title: "PRD copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cp.ID == prd.ID || cp.Title != "PRD copy" || cp.Icon != "📄" || cp.Template {
+		t.Fatalf("copy %+v", cp)
+	}
+	pages, _ := s.Children("", s.Session().SpaceID)
+	var order []string
+	for _, p := range pages {
+		order = append(order, p.Title)
+	}
+	if strings.Join(order, ",") != "Before,PRD,PRD copy,After" {
+		t.Errorf("order %v", order)
+	}
+	kids, _ := s.Children(cp.ID, "")
+	if len(kids) != 2 || kids[0].Title != "FAQ" || kids[1].Title != "Risks" || kids[0].ID == faq.ID {
+		t.Fatalf("copied subpages %+v", kids)
+	}
+	if grand, _ := s.Children(kids[0].ID, ""); len(grand) != 1 || grand[0].Title != "Deep" || grand[0].ID == deep.ID {
+		t.Errorf("copied grandchildren %+v", grand)
+	}
+	if c := s.Content(kids[0].ID); c.PlainText() != "Questions" {
+		t.Errorf("subpage content %q", c.PlainText())
+	}
+	c := s.Content(cp.ID)
+	if m := c.Children[0].Delta()[0].Attrs.Mention; m.ID != kids[0].ID {
+		t.Errorf("mention of a subpage goes to %s, not its copy", m.ID)
+	}
+	if got := c.Children[1].Str("page_id"); got != kids[1].ID {
+		t.Errorf("subpage block goes to %s, not the copy", got)
+	}
+	if m := c.Children[2].Delta()[0].Attrs.Mention; m.ID != before.ID {
+		t.Errorf("mention of another page changed to %s", m.ID)
+	}
+	if c.Children[0].ID == body.Children[0].ID {
+		t.Error("block IDs were kept")
+	}
+
+	// A template and its subpages stay out of the page list.
+	tpl, err := s.CopyPage(prd.ID, CopyOptions{Title: "PRD", Template: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, _ := s.Pages()
+	for _, p := range all {
+		if p.Template || p.ID == tpl.ID {
+			t.Errorf("template %q in Pages", p.Title)
+		}
+	}
+	templates, _ := s.Templates()
+	if len(templates) != 4 {
+		t.Errorf("%d template pages, want the template and its 3 subpages", len(templates))
+	}
+
+	// Starting a page from it copies its subpages as pages.
+	page, _ := s.CreatePage(NewPageOptions{Title: "New PRD"})
+	in, err := s.CopyInto(tpl.ID, page.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kids, _ = s.Children(page.ID, "")
+	if len(kids) != 2 || kids[0].Template {
+		t.Fatalf("subpages from the template %+v", kids)
+	}
+	if got := in.Children[1].Str("page_id"); got != kids[1].ID {
+		t.Errorf("content from the template links %s, not the new subpage", got)
+	}
+}
+
+// Search finds templates by title and text, marked as templates, and
+// leaves them out of the recent pages.
+func TestSearchFindsTemplates(t *testing.T) {
+	s := open(t)
+	body := func(text string) *doc.Content {
+		n := &doc.Node{Type: "paragraph"}
+		n.SetDelta(doc.Delta{{Text: text}})
+		return doc.FromBlocks([]*doc.Node{n})
+	}
+	if _, err := s.CreatePage(NewPageOptions{Title: "Postmortem: outage", Content: body("Timeline of the outage")}); err != nil {
+		t.Fatal(err)
+	}
+	tpl, err := s.CreatePage(NewPageOptions{Title: "Postmortem", Template: true, Content: body("Timeline and root cause")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := func(hits []SearchHit) map[string]string {
+		out := map[string]string{}
+		for _, h := range hits {
+			out[h.Title] = h.Kind
+		}
+		return out
+	}
+	hits, _ := s.Search("postmortem", 10)
+	if k := kinds(hits); k["Postmortem"] != "template" || k["Postmortem: outage"] != "page" {
+		t.Errorf("by title %+v", hits)
+	}
+	hits, _ = s.Search("root cause", 10)
+	if len(hits) != 1 || hits[0].Kind != "template" || hits[0].PageID != tpl.ID || hits[0].Snippet == "" {
+		t.Errorf("by text %+v", hits)
+	}
+	hits, _ = s.Search("", 10)
+	if _, ok := kinds(hits)["Postmortem"]; ok {
+		t.Errorf("a template in recents %+v", hits)
 	}
 }

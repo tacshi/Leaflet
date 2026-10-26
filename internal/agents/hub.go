@@ -592,65 +592,7 @@ func short(s string) string {
 }
 
 func (h *Hub) toolContext(pageID, title, agent string, content *doc.Content, settings store.Settings) ToolContext {
-	tc := ToolContext{
-		Content: content, PageID: pageID, PageTitle: title, AgentName: agent,
-		Transcript: func(id string) string {
-			rec, err := h.st.Recording(id)
-			if err != nil {
-				return ""
-			}
-			return TranscriptText(rec.Transcript)
-		},
-		Subpages: func() []map[string]any {
-			kids, _ := h.st.Children(pageID, "")
-			out := []map[string]any{}
-			for _, k := range kids {
-				out = append(out, map[string]any{"id": k.ID, "title": k.DisplayTitle()})
-			}
-			return out
-		},
-		Comments: func() []map[string]any {
-			threads, _ := h.st.Threads(pageID)
-			out := []map[string]any{}
-			for _, t := range threads {
-				var thread []map[string]any
-				for _, c := range t.All() {
-					thread = append(thread, map[string]any{"author": c.AuthorName, "body": c.Body})
-				}
-				out = append(out, map[string]any{"block_id": t.Root.BlockID, "resolved": t.Root.Resolved, "thread": thread})
-			}
-			return out
-		},
-		CreateSubpage: func(title string, nodes []*doc.Node) (string, error) {
-			var c *doc.Content
-			if len(nodes) > 0 {
-				c = doc.FromBlocks(nodes)
-			}
-			p, err := h.st.CreatePage(store.NewPageOptions{ParentID: pageID, Title: title, Content: c})
-			return p.ID, err
-		},
-	}
-	if settings.AgentsReadOtherPages {
-		tc.ListPages = func() []map[string]any {
-			pages, _ := h.st.Pages()
-			out := []map[string]any{}
-			for _, p := range pages {
-				if p.ID != pageID {
-					out = append(out, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "parent_id": p.ParentID})
-				}
-			}
-			return out
-		}
-		tc.ReadOtherPage = func(id string) map[string]any {
-			p, err := h.st.Page(id)
-			c := h.st.Content(id)
-			if err != nil || c == nil || !p.DeletedAt.IsZero() {
-				return nil
-			}
-			return map[string]any{"page": map[string]any{"id": id, "title": p.DisplayTitle()}, "blocks": tc.Views(c)}
-		}
-	}
-	return tc
+	return PageTools(h.st, pageID, title, agent, content, settings.AgentsReadOtherPages)
 }
 
 func (h *Hub) logLocalJob(run *Run, req Request) {

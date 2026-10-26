@@ -176,9 +176,11 @@ func (s *Store) SetJobStatus(id, status string) error {
 
 // ConflictRow is a block both sides changed while apart.
 type ConflictRow struct {
-	ID             string
-	PageID         string
-	BlockID        string
+	ID      string
+	PageID  string
+	BlockID string
+	// LocalNode or RemoteNode is nil for a block that side deleted and the
+	// other edited, which was kept.
 	LocalNode      *doc.Node
 	RemoteNode     *doc.Node
 	Kept           string // local | remote
@@ -216,9 +218,9 @@ func (s *Store) Conflicts() ([]ConflictRow, error) {
 		if err := rows.Scan(&c.ID, &c.PageID, &c.BlockID, &local, &remote, &c.Kept, &le, &re, &cr); err != nil {
 			return nil, err
 		}
-		c.LocalNode, c.RemoteNode = &doc.Node{}, &doc.Node{}
-		_ = json.Unmarshal([]byte(local), c.LocalNode)
-		_ = json.Unmarshal([]byte(remote), c.RemoteNode)
+		// A deleted side is stored as null.
+		_ = json.Unmarshal([]byte(local), &c.LocalNode)
+		_ = json.Unmarshal([]byte(remote), &c.RemoteNode)
 		c.LocalEditedAt, c.RemoteEditedAt, c.CreatedAt = time.UnixMilli(le), time.UnixMilli(re), time.UnixMilli(cr)
 		out = append(out, c)
 	}

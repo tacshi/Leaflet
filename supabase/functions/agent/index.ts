@@ -167,7 +167,7 @@ async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: J
     // --- page and permissions -------------------------------------------
     const { data: page, error: pageError } = await uc
       .from("pages")
-      .select("id, space_id, parent_id, title")
+      .select("id, space_id, parent_id, title, is_template")
       .eq("id", job.page_id)
       .is("deleted_at", null)
       .maybeSingle();
@@ -293,6 +293,8 @@ async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: J
           parent_id: page.id,
           title,
           sort_key: sortKey,
+          // A subpage of a template is part of it.
+          is_template: page.is_template,
         });
         if (insertError) throw new ToolError(`Could not create the subpage: ${insertError.message}`);
         const { error: subContentError } = await uc.from("page_content").insert({
@@ -306,7 +308,8 @@ async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: J
         return { id, space_id: page.space_id, parent_id: page.id, title, sort_key: sortKey };
       },
       listPages: async (): Promise<PageSummary[]> => (await rows<PageSummary>(
-        uc.from("pages").select("id, title, parent_id").is("deleted_at", null).neq("id", page.id).limit(500),
+        uc.from("pages").select("id, title, parent_id").is("deleted_at", null).eq("is_template", false)
+          .neq("id", page.id).limit(500),
       )),
       readOtherPage: async (otherId: string) => {
         const { data: other } = await uc

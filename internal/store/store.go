@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS pages (
   id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_id TEXT, folder_id TEXT,
   title TEXT NOT NULL DEFAULT '', icon TEXT, sort_key TEXT NOT NULL, created_by TEXT,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
-  keep_offline INTEGER NOT NULL DEFAULT 1);
+  keep_offline INTEGER NOT NULL DEFAULT 1, is_template INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS pages_space ON pages (space_id, parent_id);
 CREATE TABLE IF NOT EXISTS page_contents (
   page_id TEXT PRIMARY KEY, content TEXT NOT NULL, plain_text TEXT NOT NULL DEFAULT '',
@@ -143,6 +143,37 @@ func (s *Store) Notify(table, pageID string) {
 	s.mu.Unlock()
 	for _, fn := range ls {
 		fn(Change{Table: table, PageID: pageID})
+	}
+}
+
+// WatchOthers calls fn, every so often, after another process (such as
+// `leaflet mcp`) has written to the database. It returns when stop
+// closes.
+func (s *Store) WatchOthers(every time.Duration, stop <-chan struct{}, fn func()) {
+	// data_version moves on when another connection commits; the
+	// store's one connection keeps it, so the app's own writes leave it.
+	version := func() int64 {
+		var v int64
+		if err := s.db.QueryRow(`PRAGMA data_version`).Scan(&v); err != nil {
+			return -1
+		}
+		return v
+	}
+	last := version()
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-t.C:
+			if v := version(); v != last && v >= 0 {
+				if last >= 0 {
+					fn()
+				}
+				last = v
+			}
+		}
 	}
 }
 

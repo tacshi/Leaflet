@@ -166,7 +166,9 @@ shortcuts. A second click works.
 ### Missing
 
 - **M1.** Duplicate a page, or templates, to start a PRD or postmortem from
-  one.
+  one. Added since: the page menu's Duplicate copies a page and its
+  subpages next to it, and Save as template keeps a copy out of the page
+  list, which a blank page then offers under Start with.
 - **M2.** A live preview while writing TeX or Mermaid in their dialogs.
 - **M3.** Links to existing pages: `@` lists only agents and people, and only
   `/ › Subpage` links a page, a new one. Added since: `@` lists pages too and

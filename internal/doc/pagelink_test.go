@@ -37,3 +37,42 @@ func TestRefreshPageMentions(t *testing.T) {
 		t.Error("changed again")
 	}
 }
+
+func TestCopyFor(t *testing.T) {
+	p := &Node{ID: "p", Type: "paragraph"}
+	p.SetDelta(Delta{{Text: "Notes", Attrs: PageMention("notes", "Notes")}, {Text: " and "}, {Text: "RFC", Attrs: PageMention("rfc", "RFC")}})
+	kid := &Node{ID: "k", Type: "paragraph"}
+	kid.SetDelta(Delta{{Text: "inside"}})
+	list := &Node{ID: "l", Type: "bulleted_list", Children: []*Node{kid}}
+	list.SetDelta(Delta{{Text: "item"}})
+	sub := &Node{ID: "s", Type: "subpage", Data: map[string]any{"page_id": "notes"}}
+	c := FromBlocks([]*Node{p, list, sub})
+	out := c.CopyFor(map[string]string{"notes": "notes2"})
+
+	seen := map[string]bool{}
+	out.Walk(func(n, _ *Node) {
+		if n.ID == "" || n.ID == "p" || n.ID == "l" || n.ID == "k" || n.ID == "s" || seen[n.ID] {
+			t.Errorf("block %s kept an old or blank ID", n.ID)
+		}
+		seen[n.ID] = true
+		if out.Blocks[n.ID] == 0 {
+			t.Errorf("block %s is not stamped", n.ID)
+		}
+	})
+	if got := out.Children[2].Str("page_id"); got != "notes2" {
+		t.Errorf("subpage links %q", got)
+	}
+	d := out.Children[0].Delta()
+	if d[0].Attrs.Href != PageLink("notes2") || d[0].Attrs.Mention.ID != "notes2" || d[0].Attrs.Mention.Name != "Notes" {
+		t.Errorf("mention of a copied page %+v", d[0].Attrs)
+	}
+	if d[2].Attrs.Href != PageLink("rfc") || d[2].Attrs.Mention.ID != "rfc" {
+		t.Errorf("mention of another page %+v", d[2].Attrs)
+	}
+	if out.Children[1].Children[0].Delta().Plain() != "inside" {
+		t.Error("nested block lost")
+	}
+	if c.Children[0].ID != "p" || c.Children[2].Str("page_id") != "notes" {
+		t.Error("the original changed")
+	}
+}

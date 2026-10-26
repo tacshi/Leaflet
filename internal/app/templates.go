@@ -1,0 +1,162 @@
+package app
+
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/egoist/mygo/ui"
+
+	"leaflet/internal/doc"
+	"leaflet/internal/store"
+	"leaflet/internal/theme"
+)
+
+// duplicatePage copies a page and its subpages next to it, links the copy
+// where the page is linked, and opens it. A page shared with the user
+// that they can't add to the parent of is copied into their own space.
+func (a *App) duplicatePage(p store.Page) {
+	a.flush()
+	o := store.CopyOptions{ParentID: p.ParentID, FolderID: p.FolderID, AfterID: p.ID, Title: copyTitle(p.Title)}
+	if a.isShared(p) && (p.ParentID == "" || !a.canEdit(p.ParentID)) {
+		o = store.CopyOptions{Title: o.Title}
+	}
+	cp, err := a.st.CopyPage(p.ID, o)
+	if err != nil {
+		a.toast("Could not duplicate: " + err.Error())
+		return
+	}
+	a.pages, _ = a.st.Pages()
+	if cp.ParentID != "" {
+		a.linkSubpage(cp.ParentID, cp.ID, p.ID)
+	}
+	a.openPage(cp.ID)
+	a.focusTitle(true)
+}
+
+// copyTitle is the title of a copy, as Finder names one.
+func copyTitle(title string) string {
+	if strings.TrimSpace(title) == "" {
+		return ""
+	}
+	return title + " copy"
+}
+
+// saveAsTemplate keeps a copy of a page, with its subpages, as a template
+// to start other pages from.
+func (a *App) saveAsTemplate(p store.Page) {
+	a.flush()
+	t, err := a.st.CopyPage(p.ID, store.CopyOptions{Title: p.Title, Template: true})
+	if err != nil {
+		a.toast("Could not save the template: " + err.Error())
+		return
+	}
+	a.templates, _ = a.st.Templates()
+	a.toastAction("Saved "+t.DisplayTitle()+" as a template", "Edit", func() { a.openPage(t.ID) })
+}
+
+// templateRoots are the templates themselves, without their subpages, by
+// title.
+func (a *App) templateRoots() []store.Page {
+	var out []store.Page
+	for _, t := range a.templates {
+		if t.ParentID == "" {
+			out = append(out, t)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return strings.ToLower(out[i].DisplayTitle()) < strings.ToLower(out[j].DisplayTitle())
+	})
+	return out
+}
+
+// templateKids are the subpages of a template.
+func (a *App) templateKids(id string) []store.Page {
+	var out []store.Page
+	for _, t := range a.templates {
+		if t.ParentID == id {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// applyTemplate fills the open, empty page from a template: its content,
+// as one undo step, and copies of its subpages. An untitled page takes the
+// template's title, selected to type over.
+func (a *App) applyTemplate(t store.Page) {
+	ps := a.page
+	if ps == nil {
+		return
+	}
+	c, err := a.st.CopyInto(t.ID, ps.id)
+	if err != nil {
+		a.toast("Could not use the template: " + err.Error())
+		return
+	}
+	ps.editor.Edit(func(cur *doc.Content) { cur.Children = c.Children })
+	a.pages, _ = a.st.Pages()
+	if len(a.children(ps.id, "", false)) > 0 {
+		a.expanded[ps.id] = true
+	}
+	a.savePage()
+	if strings.TrimSpace(ps.title) == "" && t.Title != "" {
+		ps.title = t.Title
+		a.saveTitle()
+		a.focusTitle(true)
+	}
+}
+
+// templatePill marks a template, where it shows among pages.
+func templatePill(c *ui.Context) {
+	pal := theme.Of(c)
+	ui.Text(c, "Template").FontSize(11).FontWeight(600).TextColor(pal.AccentText).Padding(1, 6).Radius(999).Background(pal.AccentSoft)
+}
+
+// templateActions list the templates under a blank page's other ways to
+// start, each with a menu to edit or delete it.
+func (a *App) templateActions(c *ui.Context, row func(key, icon, label, hint string, fn func(), menu func(m *ui.Menu))) {
+	pal := theme.Of(c)
+	roots := a.templateRoots()
+	if len(roots) == 0 {
+		return
+	}
+	ui.Text(c, "Templates").FontSize(12).FontWeight(600).TextColor(pal.TextMuted).Margin(10, 0, 4, 2)
+	for _, t := range roots {
+		row("template:"+t.ID, "layout-template", t.DisplayTitle(), a.templateHint(t), func() { a.applyTemplate(t) }, func(m *ui.Menu) {
+			if m.Item("Edit template").Chosen() {
+				a.openPage(t.ID)
+			}
+			if m.Item("Delete template").Chosen() {
+				a.deletePage(t.ID)
+			}
+		})
+	}
+}
+
+// templateHint is the first line of a template's text, to tell templates
+// apart, or how many subpages it has when it has no text; kept until the
+// template next changes.
+func (a *App) templateHint(t store.Page) string {
+	key := t.ID + "@" + t.UpdatedAt.String()
+	if h, ok := a.templateHints[key]; ok {
+		return h
+	}
+	hint := "Empty"
+	if n := len(a.templateKids(t.ID)); n > 0 {
+		hint = fmt.Sprintf("%d %s", n, plural(n, "subpage", "subpages"))
+	}
+	if row, err := a.st.ContentRow(t.ID); err == nil {
+		for _, l := range strings.Split(row.PlainText, "\n") {
+			if l = strings.TrimSpace(l); l != "" {
+				hint = l
+				break
+			}
+		}
+	}
+	if a.templateHints == nil {
+		a.templateHints = map[string]string{}
+	}
+	a.templateHints[key] = hint
+	return hint
+}

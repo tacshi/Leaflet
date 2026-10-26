@@ -76,6 +76,8 @@ type App struct {
 	// treeState is the sidebar's tree, its items open and its row chosen.
 	treeState ui.OutlineState[string]
 	treeRow   int
+	// treeRows are the tree's rows built this frame, for drops beside them.
+	treeRows  []treeRow
 	panelOpen bool
 	panelTab  int
 	toasts    []toast
@@ -812,6 +814,71 @@ func (a *App) linkSubpage(parent, id, after string) {
 	if _, _, err := a.st.SaveContent(parent, c); err != nil {
 		a.toast("Could not link the subpage: " + err.Error())
 	}
+}
+
+// unlinkSubpage takes the links to subpage id out of page parent, as when
+// the subpage moves out of it.
+func (a *App) unlinkSubpage(parent, id string) {
+	remove := func(c *doc.Content) {
+		var links []string
+		c.Walk(func(n, _ *doc.Node) {
+			if n.Type == "subpage" && n.Str("page_id") == id {
+				links = append(links, n.ID)
+			}
+		})
+		for _, l := range links {
+			c.Remove(l)
+		}
+	}
+	if ed := a.Editor(parent); ed != nil {
+		ed.Edit(remove)
+		a.savePage()
+		return
+	}
+	c := a.st.Content(parent)
+	if c == nil {
+		return
+	}
+	remove(c)
+	if _, _, err := a.st.SaveContent(parent, c); err != nil {
+		a.toast("Could not unlink the subpage: " + err.Error())
+	}
+}
+
+// hasSubpageLink reports whether page parent links to subpage id.
+func (a *App) hasSubpageLink(parent, id string) bool {
+	c := a.st.Content(parent)
+	if ed := a.Editor(parent); ed != nil {
+		c = ed.Content
+	}
+	found := false
+	if c != nil {
+		c.Walk(func(n, _ *doc.Node) { found = found || n.Type == "subpage" && n.Str("page_id") == id })
+	}
+	return found
+}
+
+// movePage moves page id under page parent, or to the top level, by
+// move, and keeps the links to it in step: a page it leaves loses its
+// link, and a page it goes into links to it at its end.
+func (a *App) movePage(id, parent string, move func() error) error {
+	old := ""
+	if p := a.pageByID(id); p != nil {
+		old = p.ParentID
+	}
+	if err := move(); err != nil {
+		return err
+	}
+	if old == parent {
+		return nil
+	}
+	if old != "" && a.canEdit(old) {
+		a.unlinkSubpage(old, id)
+	}
+	if parent != "" && a.canEdit(parent) && !a.hasSubpageLink(parent, id) {
+		a.linkSubpage(parent, id, "")
+	}
+	return nil
 }
 
 // focusTitle puts the caret in the open page's title, selecting the title

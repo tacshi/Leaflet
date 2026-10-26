@@ -223,6 +223,22 @@ var ErrMoveIntoSelf = errors.New("a page cannot move inside itself")
 // MovePage moves a page under parentID (or to the top level, into
 // folderID), after afterID among its new siblings, or last.
 func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
+	return s.movePage(id, parentID, folderID, func(spaceID string) (string, error) {
+		return s.keyAfter(parentID, spaceID, folderID, afterID, id)
+	})
+}
+
+// MovePageBefore moves a page under parentID (or to the top level, into
+// folderID), before beforeID among its new siblings, or first.
+func (s *Store) MovePageBefore(id, parentID, folderID, beforeID string) error {
+	return s.movePage(id, parentID, folderID, func(spaceID string) (string, error) {
+		return s.keyBefore(parentID, spaceID, folderID, beforeID, id)
+	})
+}
+
+// movePage moves a page under parentID or into folderID, at the sort key
+// key gives for its space.
+func (s *Store) movePage(id, parentID, folderID string, key func(spaceID string) (string, error)) error {
 	p, err := s.Page(id)
 	if err != nil {
 		return err
@@ -230,7 +246,7 @@ func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
 	if parentID != "" && s.IsDescendant(parentID, id) {
 		return ErrMoveIntoSelf
 	}
-	key, err := s.keyAfter(parentID, p.SpaceID, folderID, afterID, id)
+	k, err := key(p.SpaceID)
 	if err != nil {
 		return err
 	}
@@ -241,7 +257,7 @@ func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
 		folderID = ""
 	}
 	p.ParentID, p.FolderID = parentID, folderID
-	p.SortKey, p.UpdatedAt = key, time.Now()
+	p.SortKey, p.UpdatedAt = k, time.Now()
 	if err := s.putPage(p); err != nil {
 		return err
 	}
@@ -256,15 +272,9 @@ func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
 // under parentID, or the top-level pages of folderID, or last when afterID
 // is "". skip, the page being put, is left out of them.
 func (s *Store) keyAfter(parentID, spaceID, folderID, afterID, skip string) (string, error) {
-	all, err := s.Children(parentID, spaceID)
+	siblings, err := s.siblings(parentID, spaceID, folderID, skip)
 	if err != nil {
 		return "", err
-	}
-	var siblings []Page
-	for _, q := range all {
-		if q.ID != skip && (parentID != "" || q.FolderID == folderID) {
-			siblings = append(siblings, q)
-		}
 	}
 	before, after := "", ""
 	if afterID == "" {
@@ -285,6 +295,47 @@ func (s *Store) keyAfter(parentID, spaceID, folderID, afterID, skip string) (str
 		after = ""
 	}
 	return KeyBetween(before, after), nil
+}
+
+// keyBefore is a sort key for a page put before beforeID among the pages
+// keyAfter takes, or first when beforeID is "" or not among them.
+func (s *Store) keyBefore(parentID, spaceID, folderID, beforeID, skip string) (string, error) {
+	siblings, err := s.siblings(parentID, spaceID, folderID, skip)
+	if err != nil {
+		return "", err
+	}
+	before, after := "", ""
+	for i, q := range siblings {
+		if q.ID == beforeID {
+			after = q.SortKey
+			if i > 0 {
+				before = siblings[i-1].SortKey
+			}
+		}
+	}
+	if after == "" && len(siblings) > 0 {
+		after = siblings[0].SortKey
+	}
+	if before != "" && after != "" && before >= after {
+		before = ""
+	}
+	return KeyBetween(before, after), nil
+}
+
+// siblings are the pages under parentID, or the top-level pages of
+// folderID, in order, but skip.
+func (s *Store) siblings(parentID, spaceID, folderID, skip string) ([]Page, error) {
+	all, err := s.Children(parentID, spaceID)
+	if err != nil {
+		return nil, err
+	}
+	var out []Page
+	for _, q := range all {
+		if q.ID != skip && (parentID != "" || q.FolderID == folderID) {
+			out = append(out, q)
+		}
+	}
+	return out, nil
 }
 
 // CopyOptions say where a copy of a page goes, as NewPageOptions do.

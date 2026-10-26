@@ -156,7 +156,9 @@ func (a *App) tree(c *ui.Context) {
 	s.List.Selected = &a.treeRow
 	s.List.Header = func(i int) bool { return strings.HasPrefix(s.Item(i), "section:") }
 	s.List.Label = func(i int) string { return a.treeLabel(s.Item(i)) }
+	a.treeRows = a.treeRows[:0]
 	list := ui.Outline(c, s, roots, children, func(key string) { a.treeItem(c, key) }).Grow(1).Padding(0, 8, 12)
+	a.treeDrop(c, list)
 	if list.Changed() && a.treeRow >= 0 && a.treeRow < s.Rows() {
 		key := s.Item(a.treeRow)
 		kind, id, _ := strings.Cut(key, ":")
@@ -220,6 +222,9 @@ func (a *App) treeItem(c *ui.Context, key string) {
 		return
 	}
 	row := ui.Row(c.Key("item:" + key)).Grow(1).Height(26).Gap(6).AlignItems(ui.Center)
+	if kind != "file" {
+		a.treeRows = append(a.treeRows, treeRow{key, row.Bounds()})
+	}
 	hovered := row.Hovered()
 	// On the chosen row, the accent's, buttons are in its text's color.
 	color := pal.Icon
@@ -253,6 +258,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			})
 		})
 		row.ContextMenu(func(m *ui.Menu) { a.folderMenu(m, f) })
+		a.pageDrop(c, row, key)
 	case "page":
 		p := a.pageByID(id)
 		if p == nil {
@@ -274,6 +280,18 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			})
 		})
 		row.ContextMenu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
+		// A drag source takes the press from the list, so a click on it
+		// opens the page itself.
+		if a.canEdit(id) {
+			row.Drag(pageDrag{id})
+			if row.Dragging() {
+				row.Opacity(0.4)
+			}
+			if row.Clicked() {
+				a.openPage(id)
+			}
+		}
+		a.pageDrop(c, row, key)
 	case "file":
 		var f store.File
 		for _, x := range a.files {
@@ -295,6 +313,208 @@ func (a *App) treeItem(c *ui.Context, key string) {
 				}
 			}
 		})
+	}
+}
+
+// pageDrag is a page dragged in the sidebar's tree, to another place.
+type pageDrag struct{ id string }
+
+// Where a page dragged over a row goes: before it, after it, or inside.
+const (
+	dropBefore = iota
+	dropAfter
+	dropInside
+)
+
+// treeRow is a row of the sidebar's tree built this frame: its item, and
+// its content's box, after its arrow, in the last frame.
+type treeRow struct {
+	key string
+	box ui.Rect
+}
+
+// dropSpot is where page d dragged goes over the row of key, at (x, y)
+// in its content's box of height h: a page's top and bottom quarter put
+// it before and after the page, and its middle inside it, last, as a
+// folder's row does. Below the last page among its siblings, x left of
+// the content puts it after a page above instead, a level out for each
+// indent; out says how many. A page cannot go inside itself, or into
+// another space.
+func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (at int, target string, out int, ok bool) {
+	kind, id, _ := strings.Cut(key, ":")
+	p := a.pageByID(d.id)
+	if p == nil {
+		return 0, "", 0, false
+	}
+	if kind == "folder" {
+		return dropInside, key, 0, !a.isShared(*p)
+	}
+	t := a.pageByID(id)
+	if t == nil || t.SpaceID != p.SpaceID || id != d.id && a.st.IsDescendant(id, d.id) {
+		return 0, "", 0, false
+	}
+	switch {
+	case y < h/4 && id != d.id:
+		return dropBefore, key, 0, true
+	case y > h*3/4:
+		indent := a.treeIndent(c)
+		for levels := int(-x/indent) + 1; x < 0 && levels > 0 && t.ParentID != "" && a.lastSibling(t, d.id); levels-- {
+			if t, out = a.pageByID(t.ParentID), out+1; t == nil {
+				return 0, "", 0, false
+			}
+		}
+		return dropAfter, "page:" + t.ID, out, t.ID != d.id
+	case id != d.id:
+		return dropInside, key, 0, a.canEdit(id)
+	}
+	return 0, "", 0, false
+}
+
+// treeIndent is how far in each level of the tree is.
+func (a *App) treeIndent(c *ui.Context) float32 {
+	if a.treeState.Indent > 0 {
+		return a.treeState.Indent
+	}
+	return c.Theme().Space(4)
+}
+
+// pageDrop makes the row of key take pages dragged onto it, where
+// dropSpot says, and shows where they would go: a line before or after
+// it, or the row tinted for inside.
+func (a *App) pageDrop(c *ui.Context, row ui.Element, key string) {
+	pal := theme.Of(c)
+	spot := func(d pageDrag) (int, string, int, bool) {
+		x, y, _ := row.PointerPosition()
+		return a.dropSpot(c, d, key, x, y, row.Bounds().H)
+	}
+	if d, ok := ui.DragOver[pageDrag](row); ok {
+		if at, _, _, ok := spot(d); ok {
+			if at == dropInside {
+				row.Background(pal.AccentSoft).Radius(6)
+			} else {
+				row.DrawOver(func(p *ui.Painter, r ui.Rect) {
+					y := r.Y
+					if at == dropAfter {
+						y += r.H
+					}
+					dropLine(p, r.X, y, r.X+r.W, pal)
+				})
+			}
+		}
+	}
+	if d, ok := ui.Drop[pageDrag](row); ok {
+		if at, target, out, ok := spot(d); ok {
+			a.dropPage(d.id, target, at, out > 0)
+		}
+	}
+}
+
+// treeDrop makes the tree take pages dragged beside its rows' content,
+// over their arrows and indents, as dropSpot says for the row there, and
+// below its rows, to the end of My space's top level.
+func (a *App) treeDrop(c *ui.Context, list ui.Element) {
+	pal := theme.Of(c)
+	spot := func(d pageDrag) (at int, target string, out int, row ui.Rect, ok bool) {
+		lb := list.Bounds()
+		lx, ly, _ := list.PointerPosition()
+		x, y := lb.X+lx, lb.Y+ly
+		// Below the rows, the line starts where the top level's do.
+		end, left := float32(0), lb.X+lb.W
+		for _, r := range a.treeRows {
+			end, left = max(end, r.box.Y+r.box.H), min(left, r.box.X)
+			if y >= r.box.Y && y < r.box.Y+r.box.H {
+				at, target, out, ok = a.dropSpot(c, d, r.key, x-r.box.X, y-r.box.Y, r.box.H)
+				return at, target, out, r.box, ok
+			}
+		}
+		if p := a.pageByID(d.id); y >= end && end > 0 && p != nil && !a.isShared(*p) {
+			return dropAfter, "", 0, ui.Rect{X: left, Y: end, W: lb.X + lb.W - 8 - left}, true
+		}
+		return 0, "", 0, ui.Rect{}, false
+	}
+	if d, ok := ui.DragOver[pageDrag](list); ok {
+		if at, target, out, row, ok := spot(d); ok {
+			lb := list.Bounds()
+			list.DrawOver(func(p *ui.Painter, r ui.Rect) {
+				// The row's box, from the list's in the window to its own.
+				x, y := r.X+row.X-lb.X, r.Y+row.Y-lb.Y
+				switch {
+				case target == "":
+					dropLine(p, x, y, x+row.W, pal)
+				case at == dropInside:
+					p.Fill(ui.Rect{X: x, Y: y, W: row.W, H: row.H}, pal.AccentSoft, 6)
+				default:
+					if at == dropAfter {
+						y += row.H
+					}
+					dropLine(p, x-float32(out)*a.treeIndent(c), y, x+row.W, pal)
+				}
+			})
+		}
+	}
+	if d, ok := ui.Drop[pageDrag](list); ok {
+		if at, target, out, _, ok := spot(d); ok {
+			if target == "" {
+				if err := a.movePage(d.id, "", func() error { return a.st.MovePage(d.id, "", "", "") }); err != nil {
+					a.toast("Could not move: " + err.Error())
+				}
+				return
+			}
+			a.dropPage(d.id, target, at, out > 0)
+		}
+	}
+}
+
+// dropLine is where a page dragged would go: a line from x to right at
+// y, with a dot at its start.
+func dropLine(p *ui.Painter, x, y, right float32, pal *theme.Palette) {
+	p.Fill(ui.Rect{X: x + 4, Y: y - 1, W: right - x - 4, H: 2}, pal.Accent, 1)
+	p.Fill(ui.Rect{X: x, Y: y - 4, W: 8, H: 8}, pal.Accent, 4)
+}
+
+// lastSibling reports whether page p is the last of its siblings, but
+// page skip, unless that is p.
+func (a *App) lastSibling(p *store.Page, skip string) bool {
+	siblings := a.children(p.ParentID, p.FolderID, p.ParentID == "")
+	for k := len(siblings) - 1; k >= 0; k-- {
+		if siblings[k].ID != skip || skip == p.ID {
+			return siblings[k].ID == p.ID
+		}
+	}
+	return false
+}
+
+// dropPage moves page id to where it dropped by the item key: before or
+// after it among its siblings, or inside it, last. After a page showing
+// its subpages is before the first of them, unless out, a level out of
+// the row it dropped on.
+func (a *App) dropPage(id, key string, at int, out bool) {
+	kind, target, _ := strings.Cut(key, ":")
+	parent, move := "", func() error { return nil }
+	switch {
+	case kind == "folder":
+		move = func() error { return a.st.MovePage(id, "", target, "") }
+		a.treeOpen("folder", target)
+	case at == dropInside:
+		parent, move = target, func() error { return a.st.MovePage(id, target, "", "") }
+		a.treeOpen("page", target)
+	default:
+		t := a.pageByID(target)
+		if t == nil {
+			return
+		}
+		parent = t.ParentID
+		switch {
+		case at == dropBefore:
+			move = func() error { return a.st.MovePageBefore(id, t.ParentID, t.FolderID, t.ID) }
+		case !out && a.treeState.Open.Has(key) && len(a.children(t.ID, "", false)) > 0:
+			parent, move = t.ID, func() error { return a.st.MovePageBefore(id, t.ID, "", "") }
+		default:
+			move = func() error { return a.st.MovePage(id, t.ParentID, t.FolderID, t.ID) }
+		}
+	}
+	if err := a.movePage(id, parent, move); err != nil {
+		a.toast("Could not move: " + err.Error())
 	}
 }
 

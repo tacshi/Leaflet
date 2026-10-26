@@ -333,7 +333,9 @@ func (a *App) moveDialog(c *ui.Context) {
 						ui.Text(c, title).FontSize(13.5).TextColor(pal.Text).SingleLine()
 					})
 					if row.Clicked() {
-						if err := a.st.MovePage(d.movePage, parent, folder, ""); err != nil {
+						if err := a.movePage(d.movePage, parent, func() error {
+							return a.st.MovePage(d.movePage, parent, folder, "")
+						}); err != nil {
 							a.toast(err.Error())
 						} else {
 							d.moveOpen = false

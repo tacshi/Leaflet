@@ -85,11 +85,13 @@ func (a *App) recordingPill(c *ui.Context) {
 	})
 }
 
-// player is the playback of one recording.
+// player is the playback of one recording; from is where it starts once
+// its audio loads, as a time chosen before then asks.
 type player struct {
 	sound   *audio.Sound
 	p       *audio.Player
 	loading bool
+	from    time.Duration
 	err     string
 }
 
@@ -132,6 +134,9 @@ func (a *App) play(rec store.Recording) {
 			}
 			pl.sound = snd
 			pl.p = snd.NewPlayer()
+			if pl.from > 0 {
+				pl.p.Seek(pl.from)
+			}
 			pl.p.Play()
 		})
 	}()
@@ -187,6 +192,10 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					more = iconButton(c, "more", "ellipsis", "Recording actions")
 				})
 				more.Menu(func(m *ui.Menu) {
+					if m.Item("Copy transcript").Disabled(len(rec.Transcript) == 0).Chosen() {
+						c.WriteClipboard(transcriptPlain(rec))
+						c.Toast("Copied")
+					}
 					if m.Item("Insert transcript as text").Disabled(len(rec.Transcript) == 0).Chosen() {
 						a.insertTranscript(n.ID, rec)
 					}
@@ -223,7 +232,9 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 			notice(c, "danger", "circle-alert", rec.Error, nil)
 		}
 		if len(rec.Transcript) > 0 {
-			ui.Column(c).Gap(8).Selectable().Children(func() {
+			// A click on a line plays from it, so its text is not selectable;
+			// the menu's Copy transcript copies it.
+			ui.Column(c).Gap(8).Children(func() {
 				for i, s := range recording.Tidy(rec.Transcript) {
 					// The time sits on the line's baseline, though its type is smaller.
 					ui.Row(c.Key(i)).Gap(12).AlignItems(ui.Baseline).Children(func() {
@@ -234,12 +245,19 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 						if ts.Clicked() {
 							a.seek(rec, time.Duration(s.StartMs)*time.Millisecond)
 						}
-						ui.Column(c).Grow(1).Children(func() {
+						line := ui.Column(c.Key("line")).Grow(1).Padding(0, 6).Margin(0, -6).Radius(6)
+						if line.Hovered() {
+							line.Background(pal.Hover)
+						}
+						line.Children(func() {
 							if s.Speaker != "" {
 								ui.Text(c, "Speaker "+s.Speaker).FontSize(11.5).FontWeight(600).TextColor(pal.TextMuted)
 							}
 							ui.Text(c, s.Text).FontSize(14).Font(theme.PageFont).TextColor(pal.Text)
 						})
+						if line.Clicked() {
+							a.seek(rec, time.Duration(s.StartMs)*time.Millisecond)
+						}
 					})
 				}
 			})
@@ -261,6 +279,20 @@ func (a *App) recordingTitle(n *doc.Node, rec store.Recording, found bool) strin
 	return title
 }
 
+// transcriptPlain is a recording's transcript as text to copy: a line
+// each, after its speaker's name when it has one.
+func transcriptPlain(rec store.Recording) string {
+	var lines []string
+	for _, s := range recording.Tidy(rec.Transcript) {
+		if s.Speaker != "" {
+			lines = append(lines, "Speaker "+s.Speaker+": "+s.Text)
+		} else {
+			lines = append(lines, s.Text)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func transcriptText(rec store.Recording) string {
 	var lines []string
 	for _, s := range recording.Tidy(rec.Transcript) {
@@ -269,10 +301,12 @@ func transcriptText(rec store.Recording) string {
 	return strings.Join(lines, "\n")
 }
 
+// seek plays a recording from t, once its audio loads if it has not.
 func (a *App) seek(rec store.Recording, t time.Duration) {
 	pl := players[rec.ID]
 	if pl == nil || pl.p == nil {
 		a.play(rec)
+		players[rec.ID].from = t
 		return
 	}
 	pl.p.Seek(t)

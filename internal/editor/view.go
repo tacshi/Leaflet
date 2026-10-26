@@ -470,53 +470,54 @@ func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 	})
 }
 
+// toolbar is the selection's: MyGo's Toolbar on a panel in the theme's
+// colors, as MyGo's popovers are, its controls leaving the keys in the
+// page.
 func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 	ui.Overlay(c, func() {
-		bar := ui.Row(c.Key("selection-toolbar")).Bind(&e.bar).Absolute().Left(max(at.X-8, 8)).Top(max(at.Y-46, 8)).Padding(4).Gap(2).
-			Radius(9).Background(pal.Inverse).Shadow(0, 8, 24, 0, pal.Shadow).AlignItems(ui.Center)
-		bar.Children(func() {
-			tool := func(key, icon, label string, on bool, fn func()) {
-				b := ui.ButtonBase(c.Key("tb:"+key)).Size(30, 28).Center().Radius(6).KeepFocus().Label(label).Tooltip(label).TextColor(pal.OnInverse)
-				if on {
-					b.Background(pal.OnInverse.Alpha(0.18))
-				} else if b.Hovered() {
-					b.Background(pal.OnInverse.Alpha(0.1))
+		t := c.Theme()
+		panel := ui.Row(c.Key("selection-toolbar")).Bind(&e.bar).Absolute().Left(max(at.X-8, 8)).Top(max(at.Y-50, 8)).
+			Radius(t.Radius+2).Background(t.Background).Border(1, t.Border).Shadow(0, 6, 20, 0, ui.RGBA(0, 0, 0, 0.18))
+		panel.Children(func() {
+			ui.Toolbar(c, func() {
+				toggle := func(icon, label string, on bool, fn func()) {
+					v := on
+					tg := ui.Toggle(c, &v, "").Label(label).Tooltip(label).KeepFocus()
+					tg.Children(func() { ui.Icon(c, theme.Icon(icon)).FontSize(15) })
+					if tg.Changed() {
+						fn()
+					}
 				}
-				b.Children(func() { ui.Icon(c, theme.Icon(icon)).FontSize(15) })
-				if b.Clicked() {
-					fn()
+				// Code takes no formats.
+				if !e.inCode() {
+					toggle("bold", "Bold", e.Has(func(a doc.Attrs) bool { return a.Bold }), e.ToggleBold)
+					toggle("italic", "Italic", e.Has(func(a doc.Attrs) bool { return a.Italic }), e.ToggleItalic)
+					toggle("code", "Code", e.Has(func(a doc.Attrs) bool { return a.Code }), e.ToggleCode)
+					toggle("link", "Link", e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
+					e.colorButton(c, pal)
+					ui.Divider(c).Height(18)
 				}
-			}
-			// Code takes no formats.
-			if !e.inCode() {
-				tool("b", "bold", "Bold", e.Has(func(a doc.Attrs) bool { return a.Bold }), e.ToggleBold)
-				tool("i", "italic", "Italic", e.Has(func(a doc.Attrs) bool { return a.Italic }), e.ToggleItalic)
-				tool("code", "code", "Code", e.Has(func(a doc.Attrs) bool { return a.Code }), e.ToggleCode)
-				tool("link", "link", "Link", e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
-				e.colorButton(c, pal)
-				ui.Box(c).Size(1, 18).Background(pal.OnInverse.Alpha(0.2)).Margin(0, 4)
-			}
-			text := func(key, icon, label string, fn func()) {
-				b := ui.ButtonBase(c.Key("tb:"+key)).Height(28).Padding(0, 9).Gap(6).Radius(6).KeepFocus().TextColor(pal.OnInverse).AlignItems(ui.Center)
-				if b.Hovered() {
-					b.Background(pal.OnInverse.Alpha(0.1))
+				action := func(icon, label string, fn func()) {
+					b := ui.Button(c, "").Label(label).KeepFocus()
+					b.Children(func() {
+						ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+							ui.Icon(c, theme.Icon(icon)).FontSize(14)
+							ui.Text(c, label)
+						})
+					})
+					if b.Clicked() {
+						fn()
+					}
 				}
-				b.Children(func() {
-					ui.Icon(c, theme.Icon(icon)).FontSize(14)
-					ui.Text(c, label).FontSize(13).FontWeight(500)
+				action("message-square", "Comment", func() {
+					id, quote := e.SelectedText()
+					e.Host.Comment(id, quote)
 				})
-				if b.Clicked() {
-					fn()
-				}
-			}
-			text("comment", "message-square", "Comment", func() {
-				id, quote := e.SelectedText()
-				e.Host.Comment(id, quote)
-			})
-			text("ask", "sparkles", "Ask agent", func() {
-				id, quote := e.SelectedText()
-				e.Host.AskAgent(id, quote)
-			})
+				action("sparkles", "Ask agent", func() {
+					id, quote := e.SelectedText()
+					e.Host.AskAgent(id, quote)
+				})
+			}).Label("Format")
 		})
 	})
 }

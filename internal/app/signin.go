@@ -45,7 +45,7 @@ func (a *App) signInView(c *ui.Context) {
 					notice(c, "info", "info", "This build has no server. Set SUPABASE_URL and SUPABASE_ANON_KEY to sign in.", nil)
 					return
 				}
-				segmented(c, "mode", &s.mode, "Password", "Create account", "Email code")
+				ui.Segmented(c.Key("mode"), &s.mode, "Password", "Create account", "Email code")
 				switch s.mode {
 				case 0:
 					field(c, "email", &s.email, "Email").AutoFocus()

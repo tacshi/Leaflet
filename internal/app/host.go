@@ -310,7 +310,7 @@ func (a *App) addSubpageBlock() {
 	a.pages, _ = a.st.Pages()
 	n := &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": p.ID}}
 	ps.editor.InsertBlocks(n)
-	a.expanded[ps.id] = true
+	a.treeOpen("page", ps.id)
 	a.savePage()
 	a.openPage(p.ID)
 	a.focusTitle(false)
@@ -367,7 +367,7 @@ func (a *App) uploadFile(folderID string) {
 					a.toast("Could not add the file: " + err.Error())
 				}
 			}
-			a.folderOpen[folderID] = true
+			a.treeOpen("folder", folderID)
 		})
 	}()
 }

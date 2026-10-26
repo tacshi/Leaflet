@@ -29,24 +29,27 @@ func (a *App) pageView(c *ui.Context) {
 		a.syncStatus(c)
 		if a.rec.Active() {
 			a.recordingPill(c)
-		} else if !ps.editor.ReadOnly {
-			if iconButton(c, "record", "mic", "Record").Clicked() {
-				a.startRecording(ps.id, "")
+		}
+		tools(c, func() {
+			if !a.rec.Active() && !ps.editor.ReadOnly {
+				if iconButton(c, "record", "mic", "Record").Clicked() {
+					a.startRecording(ps.id, "")
+				}
 			}
-		}
-		// Sharing needs a server; a build without one leaves it out.
-		if a.backend.Configured() && !p.Template && iconButton(c, "share", "share", "Share").Clicked() {
-			a.openShare(ps.id)
-		}
-		more := iconButton(c, "page-more", "ellipsis", "Page actions")
-		more.Menu(func(m *ui.Menu) { a.pageMenu(m, *p, true) })
-		// The panel's own top bar has the toggle while it is open, as the
-		// sidebar does on the left.
-		if !a.panelOpen {
-			if iconButton(c, "show-panel", "panel-right", "Show agent and comments (⌘J)").Clicked() {
-				a.panelOpen = true
+			// Sharing needs a server; a build without one leaves it out.
+			if a.backend.Configured() && !p.Template && iconButton(c, "share", "share", "Share").Clicked() {
+				a.openShare(ps.id)
 			}
-		}
+			more := iconButton(c, "page-more", "ellipsis", "Page actions")
+			more.Menu(func(m *ui.Menu) { a.pageMenu(m, *p, true) })
+			// The panel's own top bar has the toggle while it is open, as
+			// the sidebar does on the left.
+			if !a.panelOpen {
+				if iconButton(c, "show-panel", "panel-right", "Show agent and comments (⌘J)").Clicked() {
+					a.panelOpen = true
+				}
+			}
+		})
 	})
 	// The page menu's choice runs as the title bar draws: Delete closes
 	// the page and Duplicate opens another, so the next frame draws what
@@ -94,42 +97,37 @@ func (a *App) pageView(c *ui.Context) {
 	})
 }
 
+// breadcrumbs is MyGo's path of the page: its folder, the pages above it,
+// and it, where a click on the folder shows it in the sidebar and one on
+// a page above opens that page. Its marks follow it.
 func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 	pal := theme.Of(c)
-	ui.Row(c.Key("crumbs")).Gap(2).AlignItems(ui.Center).Margin(0, 0, 0, 6).Shrink(1).ClipX().Children(func() {
-		// A chevron goes between crumbs, never after the last.
-		crumbs := 0
-		sep := func() {
-			if crumbs > 0 {
-				ui.Icon(c, theme.Icon("chevron-right")).FontSize(11).TextColor(pal.ChartMuted)
-			}
-			crumbs++
-		}
-		if p.FolderID != "" {
-			for _, f := range a.folders {
-				if f.ID == p.FolderID {
-					sep()
-					ui.Text(c, f.Name).FontSize(13).TextColor(pal.TextMuted).SingleLine().Padding(3, 6)
-				}
+	var path []string
+	var open []func()
+	// The folder is the page's at the top's: a subpage is in none.
+	ancestors := a.ancestors(p.ID)
+	top := p
+	if len(ancestors) > 0 {
+		top = ancestors[0]
+	}
+	if top.FolderID != "" {
+		for _, f := range a.folders {
+			if f.ID == top.FolderID {
+				path = append(path, f.Name)
+				open = append(open, func() { a.treeOpen("folder", f.ID) })
 			}
 		}
-		for _, anc := range a.ancestors(p.ID) {
-			sep()
-			b := ui.ButtonBase(c.Key("crumb:"+anc.ID)).Padding(3, 6).Radius(6)
-			if b.Hovered() {
-				b.Background(pal.Hover)
-			}
-			b.Children(func() {
-				ui.Text(c, anc.DisplayTitle()).FontSize(13).TextColor(pal.TextMuted).SingleLine().MaxWidth(160)
-			})
-			if b.Clicked() {
-				a.openPage(anc.ID)
-			}
-		}
-		// The page's own title shows here once its big title scrolls away.
-		if a.page.scroll.Y > 80 {
-			sep()
-			ui.Text(c, p.DisplayTitle()).FontSize(13).FontWeight(600).TextColor(pal.Text).SingleLine().MaxWidth(260).Padding(3, 6)
+	}
+	for _, anc := range ancestors {
+		path = append(path, anc.DisplayTitle())
+		open = append(open, func() { a.openPage(anc.ID) })
+	}
+	path = append(path, p.DisplayTitle())
+	ui.Row(c.Key("crumbs")).Gap(6).AlignItems(ui.Center).Margin(0, 0, 0, 6).Shrink(1).ClipX().Children(func() {
+		chosen := -1
+		crumbs := ui.Breadcrumbs(c, path, &chosen).Label("Where the page is").FontSize(13).Shrink(1)
+		if crumbs.Changed() && chosen >= 0 && chosen < len(open) {
+			open[chosen]()
 		}
 		if p.Template {
 			templatePill(c)
@@ -330,11 +328,13 @@ func (a *App) emptyActions(c *ui.Context) {
 					ui.Text(c, hint).FontSize(12).TextColor(pal.TextMuted).SingleLine()
 				})
 				if menu != nil {
-					more := iconButton(c, "more", "ellipsis", "Template actions").Size(24, 24)
-					if !hovered {
-						more.Opacity(0)
-					}
-					more.Menu(menu)
+					tools(c, func() {
+						more := iconButton(c, "more", "ellipsis", "Template actions").Size(24, 24).Padding(4)
+						if !hovered {
+							more.Opacity(0)
+						}
+						more.Menu(menu)
+					})
 				}
 			})
 			if menu != nil {

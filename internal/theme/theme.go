@@ -35,12 +35,10 @@ type Palette struct {
 	WarnBg, WarnBorder, WarnText                      ui.Color
 	OkBg, OkBorder, OkText                            ui.Color
 	DangerBg, DangerBorder, Danger, DangerText        ui.Color
-	ChartMuted, SwitchOff, Inverse, OnInverse, Hover  ui.Color
+	ChartMuted, Inverse, OnInverse, Hover             ui.Color
 	Shadow                                            ui.Color
-	Code                                              ui.Color
-	// Syntax colors of code blocks, after GitHub's.
-	CodeKeyword, CodeString, CodeNumber, CodeComment ui.Color
-	CodeFunction, CodeType, CodeTag                  ui.Color
+	// Code is the card of code blocks; MyGo's code theme colors the code.
+	Code ui.Color
 }
 
 var light = Palette{
@@ -52,11 +50,9 @@ var light = Palette{
 	WarnBg: ui.Hex("#FDF3E7"), WarnBorder: ui.Hex("#F3DDC2"), WarnText: ui.Hex("#7A3A08"),
 	OkBg: ui.Hex("#F1F8F3"), OkBorder: ui.Hex("#D5E5DA"), OkText: ui.Hex("#1E5A35"),
 	DangerBg: ui.Hex("#FFF7F7"), DangerBorder: ui.Hex("#F0C9C9"), Danger: ui.Hex("#C62828"), DangerText: ui.Hex("#A61B1B"),
-	ChartMuted: ui.Hex("#9AA1AD"), SwitchOff: ui.Hex("#B8BDC7"), Inverse: ui.Hex("#16181D"), OnInverse: ui.Hex("#FFFFFF"),
+	ChartMuted: ui.Hex("#9AA1AD"), Inverse: ui.Hex("#16181D"), OnInverse: ui.Hex("#FFFFFF"),
 	Hover: ui.RGBA(22, 24, 29, 0.05), Shadow: ui.RGBA(16, 18, 22, 0.10), Code: ui.Hex("#F1F2F5"),
-	Separator:   ui.RGBA(0, 0, 0, 0.09),
-	CodeKeyword: ui.Hex("#CF222E"), CodeString: ui.Hex("#0A3069"), CodeNumber: ui.Hex("#0550AE"), CodeComment: ui.Hex("#59636E"),
-	CodeFunction: ui.Hex("#8250DF"), CodeType: ui.Hex("#953800"), CodeTag: ui.Hex("#116329"),
+	Separator: ui.RGBA(0, 0, 0, 0.09),
 }
 
 var dark = Palette{
@@ -68,11 +64,9 @@ var dark = Palette{
 	WarnBg: ui.Hex("#34261A"), WarnBorder: ui.Hex("#5A4127"), WarnText: ui.Hex("#F2C493"),
 	OkBg: ui.Hex("#16291E"), OkBorder: ui.Hex("#29483A"), OkText: ui.Hex("#93D6AA"),
 	DangerBg: ui.Hex("#341B1B"), DangerBorder: ui.Hex("#5C2D2D"), Danger: ui.Hex("#E25B5B"), DangerText: ui.Hex("#FFA3A3"),
-	ChartMuted: ui.Hex("#6B7280"), SwitchOff: ui.Hex("#4A505B"), Inverse: ui.Hex("#E9EBEF"), OnInverse: ui.Hex("#16181D"),
+	ChartMuted: ui.Hex("#6B7280"), Inverse: ui.Hex("#E9EBEF"), OnInverse: ui.Hex("#16181D"),
 	Hover: ui.RGBA(233, 235, 239, 0.06), Shadow: ui.RGBA(0, 0, 0, 0.35), Code: ui.Hex("#23272E"),
-	Separator:   ui.RGBA(255, 255, 255, 0.08),
-	CodeKeyword: ui.Hex("#FF7B72"), CodeString: ui.Hex("#A5D6FF"), CodeNumber: ui.Hex("#79C0FF"), CodeComment: ui.Hex("#8B949E"),
-	CodeFunction: ui.Hex("#D2A8FF"), CodeType: ui.Hex("#FFA657"), CodeTag: ui.Hex("#7EE787"),
+	Separator: ui.RGBA(255, 255, 255, 0.08),
 }
 
 // Of returns the palette for the window's appearance.

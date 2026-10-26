@@ -43,6 +43,7 @@ type dialogs struct {
 	query      string
 	hits       []store.SearchHit
 	hitIndex   int
+	hitList    ui.ListState
 
 	folderOpen   bool
 	folder       *store.Folder
@@ -157,41 +158,45 @@ func (a *App) searchDialog(c *ui.Context) {
 		backdrop.Background(ui.RGBA(10, 12, 16, 0.28)).Justify(ui.Start).PaddingY(90)
 		panel.Width(600).Radius(12).Background(pal.Surface).Border(1, pal.Border).Shadow(0, 24, 60, 0, pal.Shadow).Clip()
 		ui.Row(c).Height(52).Padding(0, 16).Gap(10).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
+			// MyGo's SearchField would fit, but its element is its frame:
+			// AutoFocus and the arrows reach that, not its input.
 			ui.Icon(c, theme.Icon("search")).FontSize(17).TextColor(pal.TextMuted)
 			in := ui.TextInputBase(c.Key("q"), &d.query).Placeholder("Search pages, templates, recordings and comments").FontSize(16).Grow(1).AutoFocus()
 			if in.Changed() {
 				d.hits, _ = a.st.Search(d.query, 30)
 				d.hitIndex = 0
 			}
+			// The keys stay in the field; Up and Down move the list's
+			// choice.
 			if in.Shortcut(0, ui.KeyDown) && len(d.hits) > 0 {
 				d.hitIndex = (d.hitIndex + 1) % len(d.hits)
+				d.hitList.ScrollIntoView(d.hitIndex)
 			}
 			if in.Shortcut(0, ui.KeyUp) && len(d.hits) > 0 {
 				d.hitIndex = (d.hitIndex - 1 + len(d.hits)) % len(d.hits)
+				d.hitList.ScrollIntoView(d.hitIndex)
 			}
 			if in.Submitted() && d.hitIndex < len(d.hits) {
 				a.openHit(d.hits[d.hitIndex])
 			}
 			ui.Text(c, "esc").FontSize(11).TextColor(pal.TextMuted).Padding(2, 6).Radius(4).Border(1, pal.Divider)
 		})
-		ui.Scroll(c).MaxHeight(420).Padding(6).Children(func() {
-			if d.query == "" && len(d.hits) > 0 {
-				label(c, "Recent")
-			}
-			for i, h := range d.hits {
-				row := ui.ButtonBase(c.Key(fmt.Sprintf("hit:%d", i))).Padding(8, 10).Gap(12).Radius(8).AlignItems(ui.Center)
-				if i == d.hitIndex {
-					row.Background(pal.NavSelected)
-					row.ScrollIntoView()
-				} else if row.Hovered() {
-					row.Background(pal.Hover)
-				}
-				row.Children(func() {
+		if d.query == "" && len(d.hits) > 0 {
+			ui.Box(c).Padding(6, 6, 0).Children(func() { label(c, "Recent") })
+		}
+		if len(d.hits) > 0 {
+			// MyGo's list: its row chosen, which the field's keys move, a
+			// click and Enter open.
+			d.hitList.Selected = &d.hitIndex
+			d.hitList.Label = func(i int) string { return d.hits[i].Title }
+			hits := ui.List(c, &d.hitList, len(d.hits), func(i int) {
+				h := d.hits[i]
+				ui.Row(c).Padding(8, 10).Gap(12).AlignItems(ui.Center).Children(func() {
 					icon := map[string]string{"page": "file-text", "template": "layout-template", "recording": "mic", "comment": "message-square"}[h.Kind]
-					ui.Icon(c, theme.Icon(icon)).FontSize(15).TextColor(pal.Icon)
+					ui.Icon(c, theme.Icon(icon)).FontSize(15)
 					ui.Column(c).Grow(1).Shrink(1).Children(func() {
 						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-							ui.Text(c, h.Title).FontSize(14).TextColor(pal.Text).SingleLine().Shrink(1)
+							ui.Text(c, h.Title).FontSize(14).SingleLine().Shrink(1)
 							if h.Kind == "template" {
 								templatePill(c)
 							}
@@ -201,10 +206,12 @@ func (a *App) searchDialog(c *ui.Context) {
 						}
 					})
 				})
-				if row.Clicked() {
-					a.openHit(h)
-				}
+			}).MaxHeight(420).Padding(6)
+			if hits.Changed() || hits.Submitted() {
+				a.openHit(d.hits[min(d.hitIndex, len(d.hits)-1)])
 			}
+		}
+		ui.Box(c).Children(func() {
 			if d.query != "" && len(d.hits) == 0 {
 				ui.Column(c).Padding(24).Gap(10).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, "Nothing matches “"+d.query+"”").TextColor(pal.TextMuted)
@@ -274,7 +281,7 @@ func (a *App) folderDialog(c *ui.Context) {
 				}
 				if d.folder == nil {
 					if f, err := a.st.CreateFolder(name); err == nil {
-						a.folderOpen[f.ID] = true
+						a.treeOpen("folder", f.ID)
 					}
 				} else {
 					if err := a.st.RenameFolder(*d.folder, name); err != nil {
@@ -331,7 +338,7 @@ func (a *App) moveDialog(c *ui.Context) {
 						} else {
 							d.moveOpen = false
 							if parent != "" {
-								a.expanded[parent] = true
+								a.treeOpen("page", parent)
 							}
 						}
 					}
@@ -408,8 +415,7 @@ func (a *App) historyDialog(c *ui.Context) {
 						}
 						return
 					}
-					in := ui.TextInputBase(c.Key("version-name"), &d.versionName).Placeholder("Name, as “Sent to legal”").AutoFocus().
-						FontSize(13.5).Height(30).Padding(0, 8).Radius(7).Border(1, pal.Border).Background(pal.Surface)
+					in := ui.TextInput(c.Key("version-name"), &d.versionName).Placeholder("Name, as “Sent to legal”").AutoFocus()
 					if in.Submitted() {
 						a.nameVersion(d.versionName)
 					}
@@ -455,17 +461,14 @@ func (a *App) historyDialog(c *ui.Context) {
 				h := d.history[min(d.historyPick, len(d.history)-1)]
 				content := doc.MustDecode(h.Content)
 				ui.Row(c).Padding(10, 16).Gap(10).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
-					segmented(c, "history-view", &d.historyView, "This version", "Changes since")
+					ui.Segmented(c.Key("history-view"), &d.historyView, "This version", "Changes since")
 					ui.Spacer(c)
 					if d.historyView == 1 {
 						a.historyStats(c, h, content)
-						side := iconButton(c, "side-by-side", "columns-2", "Side by side")
-						if d.sideBySide {
-							side.Background(pal.NavSelected).TextColor(pal.Text)
-						}
-						if side.Clicked() {
-							d.sideBySide = !d.sideBySide
-						}
+						tools(c, func() {
+							side := ui.Toggle(c.Key("side-by-side"), &d.sideBySide, "").Label("Side by side").Tooltip("Side by side")
+							side.Children(func() { ui.Icon(c, theme.Icon("columns-2")).FontSize(16) })
+						})
 					}
 				})
 				if d.historyView == 1 {
@@ -656,7 +659,7 @@ func (a *App) shareDialog(c *ui.Context) {
 			label(c, "People with access")
 			ui.Column(c).Gap(2).Children(func() {
 				ui.Row(c).Padding(6, 0).Gap(10).AlignItems(ui.Center).Children(func() {
-					avatar(c, a.session.Initial(), 28, false)
+					avatar(c, a.session.DisplayName, 28, false)
 					ui.Text(c, a.session.DisplayName+" (you)").Grow(1).TextColor(pal.Text)
 					ui.Text(c, "Owner").FontSize(12.5).TextColor(pal.TextMuted)
 				})
@@ -665,7 +668,7 @@ func (a *App) shareDialog(c *ui.Context) {
 						continue
 					}
 					ui.Row(c.Key(m.UserID)).Padding(6, 0).Gap(10).AlignItems(ui.Center).Children(func() {
-						avatar(c, strings.ToUpper(firstRune(m.Name())), 28, false)
+						avatar(c, m.Name(), 28, false)
 						ui.Column(c).Grow(1).Children(func() {
 							ui.Text(c, m.Name()).TextColor(pal.Text)
 							if m.Email != "" && m.DisplayName != "" {
@@ -674,7 +677,9 @@ func (a *App) shareDialog(c *ui.Context) {
 						})
 						ui.Text(c, map[string]string{"editor": "Can edit", "viewer": "Can view", "owner": "Owner"}[m.Role]).FontSize(12.5).TextColor(pal.TextMuted)
 						if p != nil && !a.isShared(*p) && m.Role != "owner" {
-							if iconButton(c, "remove", "x", "Remove").Clicked() {
+							remove := false
+							tools(c, func() { remove = iconButton(c, "remove", "x", "Remove").Clicked() })
+							if remove {
 								page, uid := d.sharePage, m.UserID
 								go func() {
 									ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -699,13 +704,6 @@ func (a *App) shareDialog(c *ui.Context) {
 			})
 		})
 	})
-}
-
-func firstRune(s string) string {
-	for _, r := range s {
-		return string(r)
-	}
-	return "?"
 }
 
 // Charts ----------------------------------------------------------------
@@ -787,7 +785,7 @@ func (a *App) chartDialog(c *ui.Context) {
 		dialogHeader(c, "Chart data", "One row per label. Columns after the first are series.", &d.chartOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(12).Children(func() {
 			field(c, "title", &d.chartTitle, "Title")
-			segmented(c, "kind", &d.chartKind, "Bar", "Line", "Pie")
+			ui.Segmented(c.Key("kind"), &d.chartKind, "Bar", "Line", "Pie")
 			area := ui.TextArea(c.Key("csv"), &d.chartCSV).Height(180).Font("monospace").FontSize(13)
 			_ = area
 			field(c, "caption", &d.chartCap, "Caption (optional)")
@@ -964,10 +962,12 @@ func (a *App) inlinePrompt(c *ui.Context) {
 				title += " about “" + short(ip.quote, 48) + "”"
 			}
 			ui.Text(c, title).FontSize(13).FontWeight(600).TextColor(pal.AccentText).Grow(1).SingleLine()
-			if iconButton(c, "close", "x", "Close").Clicked() {
-				a.dialogs.inline = nil
-				ps.editor.Focus()
-			}
+			tools(c, func() {
+				if iconButton(c, "close", "x", "Close").Clicked() {
+					a.dialogs.inline = nil
+					ps.editor.Focus()
+				}
+			})
 		})
 		if ip.reply != "" || ip.working {
 			if ip.working {

@@ -64,18 +64,21 @@ type App struct {
 	syncing    bool
 	syncError  string
 
-	route   Route
-	history []Route
-	future  []Route
-	page    *pageState
+	route Route
+	// router is MyGo's history of the routes; routerAt is its path the
+	// app last followed.
+	router   *ui.Router
+	routerAt string
+	page     *pageState
 
 	// Shell.
-	sidebarW   float32
-	expanded   map[string]bool
-	folderOpen map[string]bool
-	panelOpen  bool
-	panelTab   int
-	toasts     []toast
+	sidebarW float32
+	// treeState is the sidebar's tree, its items open and its row chosen.
+	treeState ui.OutlineState[string]
+	treeRow   int
+	panelOpen bool
+	panelTab  int
+	toasts    []toast
 	// toastUntil is when the last toast goes, for the run bar to wait
 	// rather than show under it.
 	toastUntil time.Time
@@ -157,7 +160,7 @@ type pageState struct {
 
 // Run starts the app.
 func Run() {
-	a := &App{expanded: map[string]bool{}, folderOpen: map[string]bool{}, embeds: map[string]*mygo.WebView{}, embedSrc: map[string]string{}, embedSizes: map[string]embedSize{},
+	a := &App{embeds: map[string]*mygo.WebView{}, embedSrc: map[string]string{}, embedSizes: map[string]embedSize{},
 		videos: map[string]*mygo.WebView{}, videoInfo: map[string]videoInfo{}, videoAsked: map[string]bool{},
 		linkInfo: map[string]linkInfo{}, linkAsked: map[string]bool{}}
 	theme.RegisterFonts()
@@ -263,6 +266,10 @@ func (a *App) start() error {
 	} else if len(a.pages) > 0 {
 		a.openPage(a.pages[0].ID)
 	}
+	// The router starts at the route opened, with no history before it.
+	a.router = ui.NewRouter(a.route.path())
+	a.router.Transition = ui.TransitionNone
+	a.routerAt = a.router.Path()
 	a.setMenu()
 	a.startReminders()
 	a.win = mygo.NewWindow(mygo.WindowOptions{
@@ -448,15 +455,59 @@ func (a *App) ancestors(id string) []store.Page {
 	return out
 }
 
-// navigate shows a route, remembering where the app was.
+// Navigation is MyGo's Router: its history of the routes' paths, which
+// Back and Forward, their keys and buttons go through.
+
+// path is a route's path in the router.
+func (r Route) path() string {
+	switch r.Kind {
+	case "page":
+		return "/page/" + r.ID
+	case "settings":
+		return "/settings/" + r.Section
+	case "todos", "signin":
+		return "/" + r.Kind
+	}
+	return "/"
+}
+
+// routeAt is the route of a path in the router.
+func routeAt(path string) Route {
+	kind, rest, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
+	switch kind {
+	case "page":
+		return Route{Kind: "page", ID: rest}
+	case "settings":
+		return Route{Kind: "settings", Section: rest}
+	case "todos", "signin":
+		return Route{Kind: kind}
+	}
+	return Route{Kind: "home"}
+}
+
+// routeTitle names the route shown, as Back's list of pages does.
+func (a *App) routeTitle() string {
+	switch a.route.Kind {
+	case "page":
+		return a.pageTitleOf(a.route.ID)
+	case "settings":
+		return "Settings"
+	case "todos":
+		return "To-dos"
+	case "signin":
+		return "Sign in"
+	}
+	return "Leaflet"
+}
+
+// navigate shows a route, after the router's current one.
 func (a *App) navigate(r Route) {
 	if r == a.route {
 		return
 	}
 	a.flush()
-	a.history = append(a.history, a.route)
-	a.future = nil
 	a.show(r)
+	a.follow()
 }
 
 func (a *App) show(r Route) {
@@ -469,31 +520,44 @@ func (a *App) show(r Route) {
 }
 
 func (a *App) back() {
-	if len(a.history) == 0 {
-		return
+	if a.router != nil {
+		a.router.Back()
+		a.follow()
 	}
-	a.flush()
-	r := a.history[len(a.history)-1]
-	a.history = a.history[:len(a.history)-1]
-	a.future = append(a.future, a.route)
-	if r.Kind == "page" && a.pageByID(r.ID) == nil {
-		r = Route{Kind: "home"}
-	}
-	a.show(r)
 }
 
 func (a *App) forward() {
-	if len(a.future) == 0 {
+	if a.router != nil {
+		a.router.Forward()
+		a.follow()
+	}
+}
+
+// follow keeps the app's route and the router's in step: a move of the
+// router (Back, Forward, their keys and buttons) shows its route, and a
+// route the app went to (navigate, a settings section chosen) goes into
+// the router's history.
+func (a *App) follow() {
+	if a.router == nil {
 		return
 	}
-	a.flush()
-	r := a.future[len(a.future)-1]
-	a.future = a.future[:len(a.future)-1]
-	a.history = append(a.history, a.route)
-	if r.Kind == "page" && a.pageByID(r.ID) == nil {
-		r = Route{Kind: "home"}
+	at := a.router.Path()
+	if at != a.routerAt {
+		a.routerAt = at
+		r := routeAt(at)
+		if r.Kind == "page" && a.pageByID(r.ID) == nil {
+			r = Route{Kind: "home"}
+		}
+		if r != a.route {
+			a.flush()
+			a.show(r)
+		}
+		return
 	}
-	a.show(r)
+	if p := a.route.path(); p != at {
+		a.router.Push(p)
+		a.routerAt = a.router.Path()
+	}
 }
 
 // openPage shows a page.
@@ -503,7 +567,7 @@ func (a *App) openPage(id string) {
 	}
 	// Show where it is in the sidebar.
 	for _, p := range a.ancestors(id) {
-		a.expanded[p.ID] = true
+		a.treeOpen("page", p.ID)
 	}
 	// A folder holds the page itself, or the page at the top of it.
 	top := a.pageByID(id)
@@ -511,7 +575,7 @@ func (a *App) openPage(id string) {
 		top = &anc[0]
 	}
 	if top != nil && top.FolderID != "" {
-		a.folderOpen[top.FolderID] = true
+		a.treeOpen("folder", top.FolderID)
 	}
 	if a.win == nil {
 		a.route = Route{Kind: "page", ID: id}
@@ -731,7 +795,7 @@ func (a *App) newPage(parent, folder string) {
 	}
 	a.pages, _ = a.st.Pages()
 	if parent != "" {
-		a.expanded[parent] = true
+		a.treeOpen("page", parent)
 		a.linkSubpage(parent, p.ID, "")
 	}
 	a.openPage(p.ID)

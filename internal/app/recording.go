@@ -175,14 +175,17 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					icon, label = "pause", "Pause"
 					c.After(250 * time.Millisecond)
 				}
-				b := iconButton(c, "play", icon, label)
-				if pl != nil && pl.loading {
-					b.Disabled(true)
-				}
-				if b.Clicked() {
-					a.play(rec)
-				}
-				more := iconButton(c, "more", "ellipsis", "Recording actions")
+				var more ui.Element
+				tools(c, func() {
+					b := iconButton(c, "play", icon, label)
+					if pl != nil && pl.loading {
+						b.Disabled(true)
+					}
+					if b.Clicked() {
+						a.play(rec)
+					}
+					more = iconButton(c, "more", "ellipsis", "Recording actions")
+				})
 				more.Menu(func(m *ui.Menu) {
 					if m.Item("Insert transcript as text").Disabled(len(rec.Transcript) == 0).Chosen() {
 						a.insertTranscript(n.ID, rec)
@@ -376,7 +379,7 @@ func (a *App) speechSettings(c *ui.Context) {
 	// so their left edges line up.
 	card(c, "engine", func() {
 		settingRow(c, "provider", "Transcription", engineStatus(*stt, s.sonioxSaved || a.session.SignedIn), true, func() {
-			if segmented(c, "provider", &prov, "Endpoint", "Soniox"); true {
+			if ui.Segmented(c.Key("provider"), &prov, "Endpoint", "Soniox"); true {
 				want := []string{"openai-compatible", "soniox"}[prov]
 				if want != stt.Provider {
 					stt.Provider = want
@@ -466,7 +469,7 @@ func (a *App) speechSettings(c *ui.Context) {
 		})
 		sp := stt.SpeakerLabels
 		settingRow(c, "speakers", "Label speakers", "", false, func() {
-			if toggle(c, "speakers", &sp).Changed() {
+			if ui.Switch(c.Key("speakers"), &sp).Changed() {
 				stt.SpeakerLabels = sp
 				changed = true
 			}
@@ -490,7 +493,7 @@ func (a *App) speechSettings(c *ui.Context) {
 		})
 		keep := stt.KeepAudio
 		settingRow(c, "keep", "Keep the audio", "Otherwise only the transcript stays", false, func() {
-			if toggle(c, "keep", &keep).Changed() {
+			if ui.Switch(c.Key("keep"), &keep).Changed() {
 				stt.KeepAudio = keep
 				changed = true
 			}

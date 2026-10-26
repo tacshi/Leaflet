@@ -1,7 +1,6 @@
 package editor
 
 import (
-	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -268,13 +267,27 @@ func TestPasteLinesInTableCellJoin(t *testing.T) {
 	}
 }
 
-func TestNiceTicks(t *testing.T) {
-	got := niceTicks(0, 1720, 3)
-	if fmt.Sprint(got) != "[0 1000 2000]" {
-		t.Errorf("ticks %v", got)
-	}
-	if got := niceTicks(0, 12, 3); fmt.Sprint(got) != "[0 5 10 15]" {
-		t.Errorf("ticks %v", got)
+// Charts are MyGo's: a bar chart's labels and values, a line chart's
+// ticks, and a pie's shares.
+func TestCharts(t *testing.T) {
+	for _, kind := range []string{"bar", "line", "pie"} {
+		e, tt, _ := setup(t)
+		n, err := doc.SpecToNode(map[string]any{"type": "chart", "chart": map[string]any{
+			"chart_type": kind, "title": "Sales", "labels": []any{"Q1", "Q2", "Q3"},
+			"series": []any{map[string]any{"name": "2026", "values": []any{120.0, 340.0, 1720.0}}},
+		}}, "", "Agent")
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.InsertBlocks(n)
+		tt.Frame()
+		tt.Frame()
+		want := map[string][]string{"bar": {"Sales", "Q1", "Q3", "1720"}, "line": {"Q2", "0", "1000", "2000"}, "pie": {"Sales", "Q1", "Q3"}}[kind]
+		for _, s := range want {
+			if !tt.HasText(s) {
+				t.Errorf("%s chart has no %q: %v", kind, s, tt.Texts())
+			}
+		}
 	}
 }
 

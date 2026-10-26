@@ -33,16 +33,18 @@ func (a *App) externalSettings(c *ui.Context) {
 			for i, cl := range externalClients {
 				labels[i] = cl.label
 			}
-			segmented(c, "client", &external.client, labels...)
+			ui.Segmented(c.Key("client"), &external.client, labels...)
 		})
 		ui.Column(c).Padding(0, 16, 14).Gap(8).FillWidth().Children(func() {
 			ui.Text(c, where).FontSize(12).TextColor(pal.TextMuted)
 			ui.Row(c).FillWidth().Padding(8, 8, 8, 12).Gap(8).Radius(8).Border(1, pal.Divider).Background(pal.Ground).AlignItems(ui.Start).Children(func() {
 				ui.Text(c, snippet).Font("monospace").FontSize(12).TextColor(pal.Text).Wrap().Selectable().Grow(1).MinWidth(0)
-				if iconButton(c, "copy", "copy", "Copy").Clicked() {
-					c.WriteClipboard(snippet)
-					c.Toast("Copied")
-				}
+				tools(c, func() {
+					if iconButton(c, "copy", "copy", "Copy").Clicked() {
+						c.WriteClipboard(snippet)
+						c.Toast("Copied")
+					}
+				})
 			})
 		})
 	})

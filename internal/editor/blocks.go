@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/chart"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
@@ -342,20 +343,16 @@ func (e *Editor) chartBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 				}
 			}
 		})
-		height := float32(220)
-		if kind == "pie" {
-			height = 200
-		}
-		ui.Box(c).Height(height).FillWidth().Draw(func(p *ui.Painter, r ui.Rect) {
+		if len(labels) > 0 && len(series) > 0 {
 			switch kind {
 			case "line":
-				drawLine(p, r, labels, series, pal, e.Family)
+				lineChart(c, labels, series, pal)
 			case "pie":
-				drawPie(p, r, labels, series, pal, e.Family)
+				pieChart(c, labels, series, pal)
 			default:
-				drawBars(p, r, labels, series, pal, e.Family)
+				barChart(c, labels, series, pal)
 			}
-		})
+		}
 		if len(series) > 1 || kind == "pie" {
 			legend(c, kind, labels, series, pal)
 		}
@@ -395,204 +392,126 @@ func legend(c *ui.Context, kind string, labels []string, series []ChartSeries, p
 	})
 }
 
-func valueRange(series []ChartSeries) (float64, float64) {
-	lo, hi := 0.0, 0.0
+// Charts are MyGo's: its scales, plot and axes, marks and paths, in the
+// palette's colors.
+
+// values are all the values of a chart's series.
+func values(series []ChartSeries) []float64 {
+	var out []float64
 	for _, s := range series {
-		for _, v := range s.Values {
-			lo, hi = math.Min(lo, v), math.Max(hi, v)
-		}
+		out = append(out, s.Values...)
 	}
-	if hi == lo {
-		hi = lo + 1
-	}
-	return lo, hi
+	return out
 }
 
-func label(p *ui.Painter, x, y, maxW float32, text string, size float32, color ui.Color, family string, center bool) {
-	s := ui.Span{Text: text, Size: size, Color: color, Font: "Figtree", Features: "tnum"}
-	w, _ := p.MeasureText(0, s)
-	if w > maxW && maxW > 0 {
-		for len([]rune(text)) > 1 && w > maxW {
-			rs := []rune(text)
-			text = string(rs[:len(rs)-1])
-			s.Text = text + "…"
-			w, _ = p.MeasureText(0, s)
-		}
+// axisLabel is a tick's label, under or beside a plot.
+func axisLabel(c *ui.Context, pal *theme.Palette) func(chart.Side, chart.Tick) {
+	return func(_ chart.Side, t chart.Tick) {
+		ui.Text(c, t.Label).FontSize(12).TextColor(pal.TextMuted).NoWrap()
 	}
-	if center {
-		x -= w / 2
-	}
-	p.RichText(x, y, 0, s)
 }
 
-// drawBars draws the design's bars: the value above each, its label below,
-// the largest in the accent color and the others muted. Several series
-// stand side by side in their own colors.
-func drawBars(p *ui.Painter, r ui.Rect, labels []string, series []ChartSeries, pal *theme.Palette, family string) {
-	if len(labels) == 0 || len(series) == 0 {
-		return
-	}
-	lo, hi := valueRange(series)
-	top, bottom := r.Y+20, r.Y+r.H-22
-	plotH := bottom - top
-	zero := bottom - float32((0-lo)/(hi-lo))*plotH
-	group := r.W / float32(len(labels))
+// barChart shows bars from zero with their values above them and their
+// labels below: one series' tallest in the accent and the others muted,
+// several series side by side in their own colors.
+func barChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.Palette) {
+	lo, hi := chart.Extent(append(values(series), 0)...)
+	y := chart.NewLinear(lo, hi).Nice(4)
+	x := chart.NewBand(labels...).Padding(0.38, 0.1)
 	ns := len(series)
-	barW := min(group*0.62/float32(ns), 64)
 	colors := seriesColors(pal, ns)
-	maxIdx, maxV := -1, math.Inf(-1)
+	tallest := -1
 	if ns == 1 {
 		for i, v := range series[0].Values {
-			if v > maxV {
-				maxIdx, maxV = i, v
+			if tallest < 0 || v > series[0].Values[tallest] {
+				tallest = i
 			}
 		}
 	}
-	p.Fill(ui.Rect{X: r.X, Y: zero, W: r.W, H: 1}, pal.Divider, 0)
-	for i, l := range labels {
-		cx := r.X + group*(float32(i)+0.5)
-		start := cx - barW*float32(ns)/2
-		for si, s := range series {
-			if i >= len(s.Values) {
-				continue
+	chart.Plot(c, chart.Axes{Bottom: x.Ticks(), Label: axisLabel(c, pal)}, func(area ui.Element) {
+		chart.RuleY(c, y.At(0), 1).Background(pal.Divider)
+		for i := range labels {
+			band := x.Band(i)
+			w := (band.Hi - band.Lo) / float32(ns)
+			for si, s := range series {
+				if i >= len(s.Values) {
+					continue
+				}
+				v := s.Values[i]
+				color := colors[si]
+				if ns == 1 {
+					color = pal.ChartMuted
+					if i == tallest {
+						color = pal.Accent
+					}
+				}
+				span := chart.Span{Lo: band.Lo + w*float32(si) + w*0.06, Hi: band.Lo + w*float32(si+1) - w*0.06}
+				chart.Rect(c, span, y.Span(0, v)).Background(color).Radius(4)
+				chart.Anchor(c, span.Mid(), y.At(max(v, 0)), ui.Center, ui.End, func() {
+					ui.Text(c, fmtValue(v)).FontSize(12).TextColor(pal.TextSecondary).NoWrap().Margin(0, 0, 3, 0)
+				})
 			}
-			v := s.Values[i]
-			y := bottom - float32((v-lo)/(hi-lo))*plotH
-			color := colors[si]
-			if ns == 1 {
-				color = pal.ChartMuted
-				if i == maxIdx {
-					color = pal.Accent
+		}
+	}).FillWidth().Height(220).Gap(6).Padding(18, 0, 0) // room for the tallest bar's value
+}
+
+// lineChart shows lines with a dot at each value, over gridlines whose
+// values are at the left.
+func lineChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.Palette) {
+	lo, hi := chart.Extent(values(series)...)
+	y := chart.NewLinear(lo, hi).Nice(3)
+	x := chart.NewBand(labels...)
+	ticks := y.Ticks(3)
+	colors := seriesColors(pal, len(series))
+	chart.Plot(c, chart.Axes{Left: ticks, Bottom: x.Ticks(), Label: axisLabel(c, pal)}, func(area ui.Element) {
+		area.Draw(func(p *ui.Painter, r ui.Rect) {
+			for _, t := range ticks {
+				p.Line(r.X, chart.Y(r, t.At), r.X+r.W, chart.Y(r, t.At), 1, pal.Divider)
+			}
+			for si, s := range series {
+				var xs, ys []float32
+				for i, v := range s.Values {
+					if i < len(labels) {
+						xs, ys = append(xs, x.At(i)), append(ys, y.At(v))
+					}
+				}
+				p.StrokePath(chart.Line(r, xs, ys, chart.CurveLinear), 2.2, colors[si])
+			}
+		})
+		for si, s := range series {
+			for i, v := range s.Values {
+				if i < len(labels) {
+					chart.Point(c, x.At(i), y.At(v), 7, 7).Radius(3.5).Background(colors[si])
 				}
 			}
-			x := start + barW*float32(si) + 2
-			bar := ui.Rect{X: x, Y: min(y, zero), W: barW - 4, H: max(abs32(zero-y), 1)}
-			p.Fill(bar, color, 4)
-			label(p, x+(barW-4)/2, min(y, zero)-17, barW+8, fmtValue(v), 12, pal.TextSecondary, family, true)
 		}
-		label(p, cx, bottom+5, group-4, l, 12, pal.TextMuted, family, true)
-	}
+	}).FillWidth().Height(220).Gap(8)
 }
 
-func abs32(f float32) float32 {
-	if f < 0 {
-		return -f
-	}
-	return f
-}
-
-// niceTicks splits lo..hi into about n steps of 1, 2 or 5 times a power
-// of ten, widened to whole steps: the values of a chart's gridlines.
-func niceTicks(lo, hi float64, n int) []float64 {
-	raw := (hi - lo) / float64(n)
-	mag := math.Pow(10, math.Floor(math.Log10(raw)))
-	step := mag
-	for _, m := range []float64{1, 2, 5, 10} {
-		if step = m * mag; step >= raw {
-			break
-		}
-	}
-	var ticks []float64
-	for v := math.Floor(lo/step) * step; v < hi+step*0.999; v += step {
-		ticks = append(ticks, math.Round(v/step)*step)
-	}
-	return ticks
-}
-
-func textWidth(p *ui.Painter, text string, size float32) float32 {
-	w, _ := p.MeasureText(0, ui.Span{Text: text, Size: size, Font: "Figtree", Features: "tnum"})
-	return w
-}
-
-// drawLine draws the lines over gridlines with their values at the left,
-// inset so the first and last labels stay inside.
-func drawLine(p *ui.Painter, r ui.Rect, labels []string, series []ChartSeries, pal *theme.Palette, family string) {
-	if len(labels) == 0 || len(series) == 0 {
-		return
-	}
-	lo, hi := valueRange(series)
-	ticks := niceTicks(lo, hi, 3)
-	lo, hi = ticks[0], ticks[len(ticks)-1]
-	gutter := float32(0)
-	for _, t := range ticks {
-		gutter = max(gutter, textWidth(p, fmtValue(t), 11))
-	}
-	gutter += 10
-	left := r.X + gutter + max(8, textWidth(p, labels[0], 12)/2)
-	right := r.X + r.W - max(8, textWidth(p, labels[len(labels)-1], 12)/2)
-	top, bottom := r.Y+14, r.Y+r.H-22
-	for _, t := range ticks {
-		y := bottom - float32((t-lo)/(hi-lo))*(bottom-top)
-		p.Fill(ui.Rect{X: r.X + gutter, Y: y, W: r.W - gutter, H: 1}, pal.Divider, 0)
-		text := fmtValue(t)
-		label(p, r.X+gutter-10-textWidth(p, text, 11), y-7, 0, text, 11, pal.TextMuted, family, false)
-	}
-	step := float32(0)
-	if len(labels) > 1 {
-		step = (right - left) / float32(len(labels)-1)
-	}
-	colors := seriesColors(pal, len(series))
-	for si, s := range series {
-		var path ui.Path
-		var pts [][2]float32
-		for i, v := range s.Values {
-			if i >= len(labels) {
-				break
-			}
-			x := left + step*float32(i)
-			y := bottom - float32((v-lo)/(hi-lo))*(bottom-top)
-			pts = append(pts, [2]float32{x, y})
-			if i == 0 {
-				path.MoveTo(x, y)
-			} else {
-				path.LineTo(x, y)
-			}
-		}
-		p.StrokePath(&path, 2.2, colors[si])
-		for _, pt := range pts {
-			var dot ui.Path
-			dot.Circle(pt[0], pt[1], 3.5)
-			p.FillPath(&dot, colors[si])
-		}
-	}
-	for i, l := range labels {
-		label(p, left+step*float32(i), bottom+5, max(step-4, 40), l, 12, pal.TextMuted, family, true)
-	}
-}
-
-func drawPie(p *ui.Painter, r ui.Rect, labels []string, series []ChartSeries, pal *theme.Palette, family string) {
-	if len(series) == 0 || len(series[0].Values) == 0 {
-		return
-	}
-	values := series[0].Values
+// pieChart shows the first series' shares as slices, with the share of
+// each one large enough on it.
+func pieChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.Palette) {
+	vals := series[0].Values
 	total := 0.0
-	for _, v := range values {
-		total += math.Max(v, 0)
+	for _, v := range vals {
+		total += max(v, 0)
 	}
 	if total == 0 {
 		return
 	}
-	radius := min(r.H, r.W) / 2 * 0.9
-	cx, cy := r.X+r.W/2, r.Y+r.H/2
-	colors := seriesColors(pal, len(values))
-	angle := -math.Pi / 2
-	for i, v := range values {
-		sweep := math.Max(v, 0) / total * 2 * math.Pi
-		var path ui.Path
-		path.MoveTo(cx, cy)
-		steps := max(int(sweep/(math.Pi/48)), 1)
-		for s := 0; s <= steps; s++ {
-			a := angle + sweep*float64(s)/float64(steps)
-			path.LineTo(cx+radius*float32(math.Cos(a)), cy+radius*float32(math.Sin(a)))
+	slices := chart.Pie(vals, 0.015)
+	colors := seriesColors(pal, len(vals))
+	ui.Box(c).Height(200).FillWidth().Role(ui.RoleImage).Label("Pie chart").Draw(func(p *ui.Painter, r ui.Rect) {
+		radius := min(r.H, r.W) / 2 * 0.9
+		cx, cy := r.X+r.W/2, r.Y+r.H/2
+		for i, s := range slices {
+			p.FillPath(chart.Sector(cx, cy, 0, radius, s), colors[i])
+			if s.End-s.Start > 0.35 {
+				lx, ly := chart.Polar(cx, cy, radius*0.62, s.Mid())
+				share := ui.Span{Text: fmt.Sprintf("%.0f%%", max(vals[i], 0)/total*100), Size: 12, Color: ui.Hex("#FFFFFF"), Font: "Figtree", Features: "tnum"}
+				w, h := p.MeasureText(0, share)
+				p.RichText(lx-w/2, ly-h/2, 0, share)
+			}
 		}
-		path.Close()
-		p.FillPath(&path, colors[i])
-		p.StrokePath(&path, 1.5, pal.Surface)
-		if sweep > 0.35 {
-			mid := angle + sweep/2
-			pct := fmt.Sprintf("%.0f%%", v/total*100)
-			label(p, cx+radius*0.62*float32(math.Cos(mid)), cy+radius*0.62*float32(math.Sin(mid))-8, 0, pct, 12, ui.Hex("#FFFFFF"), family, true)
-		}
-		angle += sweep
-	}
+	})
 }

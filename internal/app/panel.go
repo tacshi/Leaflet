@@ -19,16 +19,20 @@ func (a *App) panel(c *ui.Context) {
 	bar := c.TitleBar()
 	ui.Row(c.Key("panel-top")).Height(max(bar.Height, 46)).Padding(0, 10, 0, 12).Gap(6).AlignItems(ui.Center).DragWindow().
 		BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
-		segmented(c, "panel-tab", &a.panelTab, "Agent", "Comments", "Outline")
+		// MyGo's tabs, as high as the bar, so the chosen one's line is on
+		// the bar's bottom edge.
+		ui.Tabs(c.Key("panel-tab"), &a.panelTab, "Agent", "Comments", "Outline").FillHeight().AlignItems(ui.Stretch)
 		ui.Spacer(c)
-		if a.panelTab == 0 {
-			if iconButton(c, "new-chat", "square-pen", "New conversation").Clicked() {
-				a.hub.Session(a.page.id).NewConversation()
+		tools(c, func() {
+			if a.panelTab == 0 {
+				if iconButton(c, "new-chat", "message-square-plus", "New conversation").Clicked() {
+					a.hub.Session(a.page.id).NewConversation()
+				}
 			}
-		}
-		if iconButton(c, "hide-panel", "panel-right", "Hide panel (⌘J)").Clicked() {
-			a.panelOpen = false
-		}
+			if iconButton(c, "hide-panel", "panel-right", "Hide panel (⌘J)").Clicked() {
+				a.panelOpen = false
+			}
+		})
 	})
 	switch a.panelTab {
 	case 0:
@@ -97,12 +101,11 @@ func (a *App) agentPanel(c *ui.Context) {
 		})
 	})
 	ui.Column(c.Key("composer")).Padding(10, 12, 12).Gap(8).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
-		box := ui.Column(c).Padding(8, 10).Gap(6).Radius(10).Border(1, pal.Border).Background(pal.Surface)
-		box.Children(func() {
-			// The text area takes a plain Enter as a newline before any
-			// Shortcut sees it; OnTextKey sees it first. Shift+Enter
+		ui.Column(c).Gap(8).Children(func() {
+			// MyGo's text area. It takes a plain Enter as a newline before
+			// any Shortcut sees it; OnTextKey sees it first. Shift+Enter
 			// still breaks the line.
-			ui.TextAreaBase(c.Key("draft"), &cs.draft).Bind(&cs.input).Placeholder("Ask the agent…").FontSize(14).MinHeight(40).MaxHeight(160).
+			ui.TextArea(c.Key("draft"), &cs.draft).Bind(&cs.input).Placeholder("Ask the agent…").MinHeight(64).MaxHeight(180).
 				OnTextKey(func(k ui.TextKey) bool {
 					if k.Key != ui.KeyEnter || k.Mods != 0 {
 						return false
@@ -136,13 +139,8 @@ func (a *App) agentPanel(c *ui.Context) {
 				}
 			})
 		})
-		if in := in(box); in {
-			box.Border(1.5, pal.Accent)
-		}
 	})
 }
-
-func in(e ui.Element) bool { return e.FocusWithin() }
 
 // focusBlocks are the blocks the editor's selection is on.
 func (a *App) focusBlocks() []string {
@@ -152,23 +150,15 @@ func (a *App) focusBlocks() []string {
 	return []string{a.page.editor.FocusBlock()}
 }
 
+// agentPicker is MyGo's menu button choosing the agent and model the
+// panel's chat asks.
 func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.Option) {
-	pal := theme.Of(c)
 	current, err := a.hub.Resolve(sess.Selected)
 	name := "No agent"
 	if err == nil {
 		name = current.Label()
 	}
-	b := ui.ButtonBase(c.Key("agent-picker")).Height(26).Padding(0, 8).Gap(6).Radius(7).AlignItems(ui.Center).TextColor(pal.TextSecondary)
-	if b.Hovered() {
-		b.Background(pal.Hover)
-	}
-	b.Children(func() {
-		ui.Icon(c, theme.Icon("sparkles")).FontSize(12).TextColor(pal.Accent)
-		ui.Text(c, name).FontSize(12).SingleLine().MaxWidth(200)
-		ui.Icon(c, theme.Icon("chevron-down")).FontSize(11)
-	})
-	b.Menu(func(m *ui.Menu) {
+	ui.MenuButton(c.Key("agent-picker"), name, func(m *ui.Menu) {
 		for _, o := range options {
 			for _, model := range agents.Models(o.Provider) {
 				ch := store.ModelChoice{ProviderID: o.Provider.ID, Model: model}
@@ -182,7 +172,7 @@ func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.
 		if m.Item("Manage agent providers…").Chosen() {
 			a.navigate(Route{Kind: "settings", Section: "providers"})
 		}
-	})
+	}).Label("Agent").FontSize(12)
 }
 
 func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.Session) {
@@ -303,14 +293,13 @@ func (a *App) commentsPanel(c *ui.Context) {
 }
 
 func (a *App) newCommentCard(c *ui.Context, nc *newComment) {
-	pal := theme.Of(c)
 	ps := a.page
 	card(c, "new-comment", func() {
 		ui.Column(c).Padding(12).Gap(10).Children(func() {
 			if nc.quote != "" {
 				quoteChip(c, nc.quote)
 			}
-			in := ui.TextAreaBase(c.Key("text"), &nc.text).Placeholder("Add a comment… (@ an agent to ask it)").FontSize(13.5).MinHeight(56).AutoFocus()
+			in := ui.TextArea(c.Key("text"), &nc.text).Placeholder("Add a comment… (@ an agent to ask it)").MinHeight(64).AutoFocus()
 			post := func() {
 				body := strings.TrimSpace(nc.text)
 				if body == "" {
@@ -336,7 +325,7 @@ func (a *App) newCommentCard(c *ui.Context, nc *newComment) {
 				}
 			})
 		})
-	}).Border(1.5, pal.Accent)
+	})
 }
 
 func quoteChip(c *ui.Context, quote string) {
@@ -368,25 +357,26 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 				if jump.Clicked() {
 					ps.editor.PlaceCaret(t.Root.BlockID, 0)
 				}
-				if t.Root.Resolved {
-					if iconButton(c, "reopen", "rotate-ccw", "Reopen").Clicked() {
-						if err := a.st.SetResolved(t.Root.ID, false); err != nil {
-							a.toast("Could not reopen: " + err.Error())
+				tools(c, func() {
+					if t.Root.Resolved {
+						if iconButton(c, "reopen", "rotate-ccw", "Reopen").Clicked() {
+							if err := a.st.SetResolved(t.Root.ID, false); err != nil {
+								a.toast("Could not reopen: " + err.Error())
+							}
+						}
+					} else if iconButton(c, "resolve", "check", "Resolve").Clicked() {
+						if err := a.st.SetResolved(t.Root.ID, true); err != nil {
+							a.toast("Could not resolve: " + err.Error())
 						}
 					}
-				} else if iconButton(c, "resolve", "check", "Resolve").Clicked() {
-					if err := a.st.SetResolved(t.Root.ID, true); err != nil {
-						a.toast("Could not resolve: " + err.Error())
-					}
-				}
+				})
 			})
 			for _, cm := range t.All() {
 				a.commentRow(c, cm)
 			}
 			if !t.Root.Resolved {
 				ui.Row(c).Gap(6).AlignItems(ui.End).Children(func() {
-					ui.TextAreaBase(c.Key("reply"), &draft.text).Placeholder("Reply…").FontSize(13).Grow(1).MinHeight(30).
-						Padding(6, 8).Radius(7).Border(1, pal.Divider).
+					ui.TextArea(c.Key("reply"), &draft.text).Placeholder("Reply…").Grow(1).MinHeight(34).
 						OnTextKey(func(k ui.TextKey) bool {
 							if k.Key != ui.KeyEnter || (k.Mods != 0 && k.Mods != ui.Cmd) {
 								return false
@@ -410,8 +400,12 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 						draft.sendNow = false
 						send()
 					}
-					if strings.TrimSpace(draft.text) != "" && iconButton(c, "send", "arrow-up", "Reply").Clicked() {
-						send()
+					if strings.TrimSpace(draft.text) != "" {
+						tools(c, func() {
+							if iconButton(c, "send", "arrow-up", "Reply").Clicked() {
+								send()
+							}
+						})
 					}
 				})
 			}
@@ -427,18 +421,20 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 	pal := theme.Of(c)
 	ui.Column(c.Key(cm.ID)).Gap(4).Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			avatar(c, strings.ToUpper(firstRune(cm.AuthorName)), 20, cm.AuthorKind == "agent")
+			avatar(c, cm.AuthorName, 20, cm.AuthorKind == "agent")
 			ui.Text(c, cm.AuthorName).FontSize(12.5).FontWeight(600).TextColor(pal.Text)
 			ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).Grow(1)
 			mine := cm.AuthorKind == "user" && (cm.AuthorID == "" || cm.AuthorID == a.session.UserID)
 			if mine {
-				more := iconButton(c, "more", "ellipsis", "Comment actions").Size(20, 20)
-				more.Menu(func(m *ui.Menu) {
-					if m.Item("Delete comment").Chosen() {
-						if err := a.st.DeleteComment(cm.ID); err != nil {
-							a.toast("Could not delete: " + err.Error())
+				tools(c, func() {
+					more := iconButton(c, "more", "ellipsis", "Comment actions").Size(20, 20).Padding(2)
+					more.Menu(func(m *ui.Menu) {
+						if m.Item("Delete comment").Chosen() {
+							if err := a.st.DeleteComment(cm.ID); err != nil {
+								a.toast("Could not delete: " + err.Error())
+							}
 						}
-					}
+					})
 				})
 			}
 		})

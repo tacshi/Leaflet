@@ -21,15 +21,6 @@ type Session struct {
 	SignedIn bool
 }
 
-// Initial is the letter on the user's avatar.
-func (s Session) Initial() string {
-	n := strings.TrimSpace(s.DisplayName)
-	if n == "" {
-		return "?"
-	}
-	return strings.ToUpper(string([]rune(n)[:1]))
-}
-
 // Session returns the current session.
 func (s *Store) Session() Session {
 	s.mu.Lock()

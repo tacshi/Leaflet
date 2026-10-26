@@ -26,6 +26,16 @@ var sections = []struct{ id, icon, label string }{
 	{"offline", "cloud-download", "Offline and storage"},
 }
 
+// settingsNav is MyGo's sidebar of the sections, the route's chosen.
+func (a *App) settingsNav(c *ui.Context) ui.Element {
+	pal := theme.Of(c)
+	return ui.Sidebar(c.Key("settings-nav"), &a.route.Section, func() {
+		for _, s := range sections {
+			ui.SidebarItem(c, s.id, theme.Icon(s.icon), s.label)
+		}
+	}).Width(220).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Label("Settings")
+}
+
 func (a *App) settingsView(c *ui.Context) {
 	pal := theme.Of(c)
 	a.titleBar(c, func() {
@@ -33,13 +43,7 @@ func (a *App) settingsView(c *ui.Context) {
 		ui.Spacer(c)
 	})
 	ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
-		ui.Column(c.Key("settings-nav")).Width(220).Padding(16, 10).Gap(2).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Children(func() {
-			for _, s := range sections {
-				a.navRow(c, "set:"+s.id, s.icon, s.label, "", a.route.Section == s.id, func() {
-					a.route.Section = s.id
-				})
-			}
-		})
+		a.settingsNav(c)
 		ui.Scroll(c.Key("settings:" + a.route.Section)).Grow(1).Children(func() {
 			ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(28, 32, 60).Children(func() {
 				ui.Column(c).Width(a.settingsWidth(c)).Gap(18).Children(func() {
@@ -144,7 +148,7 @@ func (a *App) accountSettings(c *ui.Context) {
 	label(c, "Appearance")
 	card(c, "appearance", func() {
 		settingRow(c, "theme", "Theme", "", true, func() {
-			if segmented(c, "theme", &s.themeIdx, "System", "Light", "Dark"); true {
+			if ui.Segmented(c.Key("theme"), &s.themeIdx, "System", "Light", "Dark"); true {
 				want := []string{"system", "light", "dark"}[s.themeIdx]
 				if want != a.settings.Theme {
 					a.settings.Theme = want
@@ -161,7 +165,7 @@ func (a *App) accountSettings(c *ui.Context) {
 					chosen = k
 				}
 			}
-			if segmented(c, "size", &chosen, "Small", "Default", "Large", "Larger"); sizes[chosen] != a.settings.TextSize {
+			if ui.Segmented(c.Key("size"), &chosen, "Small", "Default", "Large", "Larger"); sizes[chosen] != a.settings.TextSize {
 				a.settings.TextSize = sizes[chosen]
 				a.saveSettings()
 			}
@@ -491,14 +495,14 @@ func (a *App) modelsSettings(c *ui.Context) {
 			})
 			v := a.settings.LocalWhenOffline
 			settingRow(c, "offline", "Use a provider on this machine when offline", "Agents keep working without a connection", false, func() {
-				if toggle(c, "offline", &v).Changed() {
+				if ui.Switch(c.Key("offline"), &v).Changed() {
 					a.settings.LocalWhenOffline = v
 					a.saveSettings()
 				}
 			})
 			r := a.settings.AgentsReadOtherPages
 			settingRow(c, "cross", "Let agents read your other pages", "They only ever edit the page they are asked on", false, func() {
-				if toggle(c, "cross", &r).Changed() {
+				if ui.Switch(c.Key("cross"), &r).Changed() {
 					a.settings.AgentsReadOtherPages = r
 					a.saveSettings()
 				}
@@ -1035,8 +1039,7 @@ func (a *App) offlineSettings(c *ui.Context) {
 					desc = fmt.Sprintf("Kept “%s” over “%s”", short(kept.Delta().Plain(), 40), short(other.Delta().Plain(), 40))
 				}
 				settingRow(c, cf.ID, a.pageTitleOf(cf.PageID), desc, i == 0, func() {
-					b := button(c, "act", "", "Resolve")
-					b.Menu(func(m *ui.Menu) {
+					ui.MenuButton(c.Key("act"), "Resolve", func(m *ui.Menu) {
 						if deleted {
 							if m.Item("Delete it").Chosen() {
 								a.resolveConflict(cf, nil)
@@ -1118,7 +1121,7 @@ func (a *App) syncSettings(c *ui.Context) {
 		})
 		wo := a.settings.WorkOffline
 		settingRow(c, "work-offline", "Work offline", "Keep changes on this device until you turn this off", false, func() {
-			if toggle(c, "wo", &wo).Changed() {
+			if ui.Switch(c.Key("wo"), &wo).Changed() {
 				a.settings.WorkOffline = wo
 				a.saveSettings()
 				if !wo {
@@ -1128,7 +1131,7 @@ func (a *App) syncSettings(c *ui.Context) {
 		})
 		all := a.settings.AllPagesOffline
 		settingRow(c, "all", "Keep all pages on this device", "Otherwise only pages you mark, and those you open", false, func() {
-			if toggle(c, "all", &all).Changed() {
+			if ui.Switch(c.Key("all"), &all).Changed() {
 				a.settings.AllPagesOffline = all
 				a.saveSettings()
 			}

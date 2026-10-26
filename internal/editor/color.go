@@ -69,20 +69,17 @@ var colors = []struct {
 const highlightAlpha = "40"
 
 // colorButton is the toolbar's color button, a dot of the selected text's
-// color, which opens a popover of dots: the text's colors and the
-// highlights, each row after one that takes it away.
+// color, the theme's text color while it has none, which opens a popover
+// of dots: the text's colors and the highlights, each row after one that
+// takes it away.
 func (e *Editor) colorButton(c *ui.Context, pal *theme.Palette) {
 	attrs := e.selectionAttrs()
-	b := ui.ButtonBase(c.Key("tb:color")).Size(30, 28).Center().Radius(6).KeepFocus().Label("Color").Tooltip("Color")
-	if e.colorOpen {
-		b.Background(pal.OnInverse.Alpha(0.18))
-	} else if b.Hovered() {
-		b.Background(pal.OnInverse.Alpha(0.1))
-	}
+	b := ui.Button(c, "").Label("Color").Tooltip("Color").KeepFocus()
 	b.Children(func() {
-		dot := ui.Box(c).Size(12, 12).Radius(999).Border(1.5, pal.OnInverse.Alpha(0.7))
+		// The text's color: the theme's while it has none of its own.
+		dot := ui.Box(c).Size(12, 12).Radius(999).Background(pal.Text)
 		if attrs.Color != "" {
-			dot.Background(hexColor(attrs.Color)).Border(0, ui.Color{})
+			dot.Background(hexColor(attrs.Color))
 		}
 		if attrs.Background != "" {
 			dot.Border(2, hexColor(attrs.Background).Alpha(1))

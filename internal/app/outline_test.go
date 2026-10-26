@@ -136,3 +136,31 @@ func TestHeadingTree(t *testing.T) {
 		t.Errorf("roots %v kids %v", roots, kids)
 	}
 }
+
+// The sidebar's edge is MyGo's split: the arrows move it, within the
+// sidebar's range.
+func TestSidebarSplit(t *testing.T) {
+	a := templatesApp(t)
+	a.rec = recording.NewController(a.st, a.backend)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.SidebarOpen, a.settings.TextSize = true, 16
+	a.sidebarW = 260
+	a.route = Route{Kind: "home"}
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1200, 700)
+	tt.Frame()
+	if err := tt.Click("Divider"); err != nil {
+		t.Fatalf("%v in %v", err, tt.Texts())
+	}
+	tt.Key(0, ui.KeyRight)
+	tt.Frame()
+	if a.sidebarW <= 260 {
+		t.Errorf("width %v after Right", a.sidebarW)
+	}
+	for i := 0; i < 40; i++ {
+		tt.Key(0, ui.KeyRight)
+	}
+	tt.Frame()
+	if a.sidebarW != sidebarMax {
+		t.Errorf("width %v, want at most %v", a.sidebarW, float32(sidebarMax))
+	}
+}

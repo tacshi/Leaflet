@@ -97,7 +97,7 @@ func (a *App) applyTemplate(t store.Page) {
 	ps.editor.Edit(func(cur *doc.Content) { cur.Children = c.Children })
 	a.pages, _ = a.st.Pages()
 	if len(a.children(ps.id, "", false)) > 0 {
-		a.expanded[ps.id] = true
+		a.treeOpen("page", ps.id)
 	}
 	a.savePage()
 	if strings.TrimSpace(ps.title) == "" && t.Title != "" {

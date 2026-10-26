@@ -4,8 +4,10 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+	codeeditor "github.com/egoist/mygo/ui/editor"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/theme"
 )
 
 func TestTextColorAndHighlight(t *testing.T) {
@@ -47,5 +49,57 @@ func TestTextColorAndHighlight(t *testing.T) {
 	}
 	if !doc.ValidColor(colorHex(ui.Hex("#123456"))) || colorHex(ui.Color{}) != "" {
 		t.Error("colorHex")
+	}
+}
+
+// Code is colored by MyGo's highlighting, in its code theme's colors, and
+// the spans keep the text exactly.
+func TestCodeSpansUseMyGo(t *testing.T) {
+	pal := theme.For(false)
+	code := "func main() {\n\t// hi\n}"
+	spans := codeSpans(code, "golang", ui.Font{Family: "monospace", Size: 14}, pal)
+	text, keyword, comment := "", false, false
+	ct := codeTheme(pal)
+	for _, s := range spans {
+		text += s.Text
+		if s.Text == "func" && s.Color == ct.TokenColor(codeeditor.TokenKeyword) {
+			keyword = true
+		}
+		if s.Text == "// hi" && s.Color == ct.TokenColor(codeeditor.TokenComment) {
+			comment = true
+		}
+	}
+	if text != code || !keyword || !comment {
+		t.Errorf("text %q keyword %v comment %v: %+v", text, keyword, comment, spans)
+	}
+	if got := codeSpans("x", "brainfuck", ui.Font{}, pal); len(got) != 1 || got[0].Color != (ui.Color{}) {
+		t.Errorf("an unknown language is not plain: %+v", got)
+	}
+}
+
+// The selection toolbar is MyGo's: its Bold and Italic toggles format the
+// selected text and show pressed while it is.
+func TestSelectionToolbar(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("ship it now")
+	n := e.Content.Children[0]
+	e.Select(Pos{n.ID, 5}, Pos{n.ID, 7})
+	tt.Frame()
+	for _, label := range []string{"Bold", "Italic"} {
+		if err := tt.Click(label); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+	}
+	d := n.Delta()
+	if len(d) != 3 || !d[1].Attrs.Bold || !d[1].Attrs.Italic || d[0].Attrs.Bold {
+		t.Fatalf("delta %+v", d)
+	}
+	if !e.Has(func(a doc.Attrs) bool { return a.Bold }) {
+		t.Error("Bold does not show pressed")
+	}
+	// The keys stayed in the page.
+	if !e.Focused() {
+		t.Error("the toolbar took the focus")
 	}
 }

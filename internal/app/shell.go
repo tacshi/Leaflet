@@ -1,6 +1,8 @@
 package app
 
 import (
+	"time"
+
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/theme"
@@ -21,43 +23,65 @@ func (a *App) view(c *ui.Context) {
 	}
 	a.shortcuts(c)
 	a.refreshTray()
-	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-		if a.settings.SidebarOpen {
-			width := a.sidebarW
-			bar := ui.Column(c.Key("sidebar")).Width(width).FillHeight()
+	a.follow()
+	// The page, and beside it the agent and comments panel when open.
+	page := func() {
+		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+			main := ui.Column(c.Key("main")).Grow(1).FillHeight().Background(pal.Surface)
+			if a.router == nil {
+				main.Children(func() { a.main(c) })
+			} else {
+				// The router's view: its page, titled for Back's list.
+				main.Children(func() {
+					a.router.View(c, func(r *ui.Route) {
+						r.Title(a.routeTitle())
+						a.main(c)
+					}).Fill()
+				})
+			}
+			if a.panelOpen && a.route.Kind == "page" && a.page != nil {
+				ui.Column(c.Key("panel")).Width(panelWidth).FillHeight().Background(pal.Panel).
+					BorderWidth(0, 0, 0, 1).BorderColor(pal.Divider).Children(func() { a.panel(c) })
+			}
+		})
+	}
+	if !a.settings.SidebarOpen {
+		page()
+	} else {
+		// MyGo's split: its line, dragged or moved with the arrows,
+		// resizes the sidebar.
+		split := ui.Split(c, &a.sidebarW, func() {
+			bar := ui.Column(c.Key("sidebar")).Fill()
 			if !c.Vibrancy() {
 				bar.Background(pal.Sidebar)
 			}
 			bar.Children(func() { a.sidebar(c) })
-			a.sidebarHandle(c)
+		}, page).Fill()
+		if split.Changed() {
+			a.sidebarW = min(max(a.sidebarW, sidebarMin), sidebarMax)
+			a.saveSidebarSoon()
 		}
-		ui.Column(c.Key("main")).Grow(1).FillHeight().Background(pal.Surface).Children(func() { a.main(c) })
-		if a.panelOpen && a.route.Kind == "page" && a.page != nil {
-			ui.Column(c.Key("panel")).Width(panelWidth).FillHeight().Background(pal.Panel).
-				BorderWidth(0, 0, 0, 1).BorderColor(pal.Divider).Children(func() { a.panel(c) })
-		}
-	})
+	}
 	a.dialogs.view(c, a)
 	a.toastView(c)
 }
 
-// sidebarHandle is the edge the user drags to resize the sidebar.
-func (a *App) sidebarHandle(c *ui.Context) {
-	pal := theme.Of(c)
-	h := ui.Box(c.Key("sidebar-edge")).Width(1).FillHeight().Background(pal.Separator).Cursor(ui.CursorResizeColumn)
-	// The grip straddles the edge and takes no width of its own: a gap
-	// would show the sidebar's material between the edge and the page.
-	grip := ui.Box(c.Key("sidebar-grip")).Width(7).FillHeight().Margin(0, -4, 0, -3).Cursor(ui.CursorResizeColumn).Label("Resize sidebar")
-	if dx, _, ok := grip.Dragged(); ok && dx != 0 {
-		a.sidebarW = min(max(a.sidebarW+dx, 200), 420)
+// The sidebar's width stays between these.
+const sidebarMin, sidebarMax = 200, 420
+
+var sidebarTimer *time.Timer
+
+// saveSidebarSoon keeps the sidebar's width once it stops moving.
+func (a *App) saveSidebarSoon() {
+	if sidebarTimer != nil {
+		sidebarTimer.Stop()
 	}
-	if _, _, ok := grip.DragEnded(); ok {
-		a.settings.SidebarWidth = a.sidebarW
-		a.saveSettings()
-	}
-	if grip.Hovered() || grip.Dragging() {
-		h.Background(pal.Accent)
-	}
+	sidebarTimer = time.AfterFunc(400*time.Millisecond, func() {
+		a.update(func() {
+			a.settings.SidebarWidth = a.sidebarW
+			a.saveSettings()
+		})
+	})
 }
 
 // contentWidth is the width the page's text wraps at.
@@ -103,27 +127,17 @@ func (a *App) titleBar(c *ui.Context, fn func()) {
 	}
 	ui.Row(c.Key("titlebar")).Height(max(bar.Height, 46)).Padding(0, 12, 0, left).Gap(4).AlignItems(ui.Center).
 		DragWindow().BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
-		if !a.settings.SidebarOpen {
-			if iconButton(c, "show-sidebar", "panel-left", "Show sidebar").Clicked() {
-				a.toggleSidebar()
+		tools(c, func() {
+			if !a.settings.SidebarOpen {
+				if iconButton(c, "show-sidebar", "panel-left", "Show sidebar").Clicked() {
+					a.toggleSidebar()
+				}
 			}
-		}
-		back := iconButton(c, "back", "chevron-left", "Back")
-		back.Disabled(len(a.history) == 0)
-		if len(a.history) == 0 {
-			back.Opacity(0.35)
-		}
-		if back.Clicked() {
-			a.back()
-		}
-		fwd := iconButton(c, "forward", "chevron-right", "Forward")
-		fwd.Disabled(len(a.future) == 0)
-		if len(a.future) == 0 {
-			fwd.Opacity(0.35)
-		}
-		if fwd.Clicked() {
-			a.forward()
-		}
+			if a.router != nil {
+				ui.BackButton(c, a.router)
+				ui.ForwardButton(c, a.router)
+			}
+		})
 		fn()
 	})
 }
@@ -133,8 +147,6 @@ func (a *App) shortcuts(c *ui.Context) {
 	c.OnShortcut(ui.Cmd, ui.KeyBackslash, a.toggleSidebar)
 	c.OnShortcut(ui.Cmd, ui.KeyN, func() { a.newPage("", "") })
 	c.OnShortcut(ui.Cmd, ui.KeyJ, func() { a.togglePanel(0) })
-	c.OnShortcut(ui.Cmd, ui.KeyBracketLeft, a.back)
-	c.OnShortcut(ui.Cmd, ui.KeyBracketRight, a.forward)
 	c.OnShortcut(ui.Cmd, ui.KeyComma, func() { a.navigate(Route{Kind: "settings", Section: "account"}) })
 }
 

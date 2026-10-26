@@ -5,9 +5,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/alecthomas/chroma/v2"
-	"github.com/alecthomas/chroma/v2/lexers"
 	"github.com/egoist/mygo/ui"
+	codeeditor "github.com/egoist/mygo/ui/editor"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
@@ -25,65 +24,62 @@ const (
 	codePad    = 14
 )
 
-// codeSpans colors a code block's text by its language's tokens. The spans
-// hold exactly the block's text, so offsets in the layout stay the text's.
+// codeSpans colors a code block's text with MyGo's highlighting of its
+// language, in MyGo's colors for its kinds of tokens. The spans hold
+// exactly the block's text, so offsets in the layout stay the text's.
 func codeSpans(code, language string, font ui.Font, pal *theme.Palette) []ui.Span {
 	plain := []ui.Span{{Text: code, Font: font.Family, Size: font.Size}}
-	lexer := lexers.Get(language)
-	if lexer == nil || language == "" || code == "" {
+	lang := codeeditor.LanguageNamed(language)
+	if lang == nil || lang.Tokenizer == nil || code == "" {
 		return plain
 	}
-	it, err := chroma.Coalesce(lexer).Tokenise(nil, code)
-	if err != nil {
-		return plain
-	}
+	ct := codeTheme(pal)
 	var out []ui.Span
-	rest := code
-	for _, t := range it.Tokens() {
-		// Some lexers end the text with a line break it did not have.
-		text := t.Value
-		if len(text) > len(rest) {
-			text = rest
-		}
-		if !strings.HasPrefix(rest, text) {
-			return plain
-		}
-		rest = rest[len(text):]
+	add := func(text string, k codeeditor.TokenKind, colored bool) {
 		if text == "" {
-			continue
+			return
 		}
 		s := ui.Span{Text: text, Font: font.Family, Size: font.Size}
-		s.Color, s.Italic = tokenColor(t.Type, pal)
+		if colored {
+			st := ct.Tokens[k]
+			s.Color, s.Italic = ct.TokenColor(k), st.Italic
+			if st.Bold {
+				s.Weight = 700
+			}
+		}
 		out = append(out, s)
 	}
-	if rest != "" {
-		return plain
+	var state uint64
+	var tokens []codeeditor.Token
+	lines := strings.Split(code, "\n")
+	for i, line := range lines {
+		tokens, state = lang.Tokenizer.Tokenize(line, state, tokens[:0])
+		at := 0
+		for _, t := range tokens {
+			end := min(max(t.End, at), len(line))
+			add(line[at:end], t.Kind, true)
+			at = end
+		}
+		add(line[at:], 0, false)
+		if i < len(lines)-1 {
+			add("\n", 0, false)
+		}
 	}
 	return out
 }
 
-// tokenColor is the color of a kind of token, and whether it is italic;
-// a zero color is the text's.
-func tokenColor(t chroma.TokenType, pal *theme.Palette) (ui.Color, bool) {
-	switch {
-	case t.InCategory(chroma.Comment):
-		return pal.CodeComment, true
-	case t == chroma.KeywordType || t == chroma.NameClass || t == chroma.NameNamespace:
-		return pal.CodeType, false
-	case t == chroma.KeywordConstant || t == chroma.NameConstant || t == chroma.NameBuiltin || t == chroma.NameAttribute:
-		return pal.CodeNumber, false
-	case t.InCategory(chroma.Keyword) || t == chroma.OperatorWord || t == chroma.GenericDeleted:
-		return pal.CodeKeyword, false
-	case t.InSubCategory(chroma.LiteralString):
-		return pal.CodeString, false
-	case t.InSubCategory(chroma.LiteralNumber) || t == chroma.GenericHeading || t == chroma.GenericSubheading:
-		return pal.CodeNumber, false
-	case t == chroma.NameFunction || t == chroma.NameFunctionMagic || t == chroma.NameDecorator:
-		return pal.CodeFunction, false
-	case t == chroma.NameTag || t == chroma.GenericInserted:
-		return pal.CodeTag, false
+var codeThemes = map[*theme.Palette]*codeeditor.Theme{}
+
+// codeTheme is MyGo's code theme for a palette: GitHub's colors of
+// tokens, light or dark, over the palette's text.
+func codeTheme(pal *theme.Palette) *codeeditor.Theme {
+	if ct, ok := codeThemes[pal]; ok {
+		return ct
 	}
-	return ui.Color{}, false
+	ct := codeeditor.DefaultTheme(&ui.Theme{Dark: pal == theme.For(true), Background: pal.Code, Text: pal.Text,
+		TextMuted: pal.TextMuted, Selection: pal.Selection, Accent: pal.Accent, Border: pal.Border})
+	codeThemes[pal] = ct
+	return ct
 }
 
 // codeBarView builds a code block's bar: its language, to choose while
@@ -95,22 +91,13 @@ func (e *Editor) codeBarView(c *ui.Context, n *doc.Node, left float32, hovered b
 		if e.ReadOnly {
 			ui.Text(c, name).FontSize(12).TextColor(pal.TextMuted).Padding(0, 6)
 		} else {
-			b := ui.ButtonBase(c.Key("language")).Height(24).Padding(0, 6).Gap(4).Radius(6).TextColor(pal.TextMuted).
-				AlignItems(ui.Center).Label("Language: " + name)
-			if b.Hovered() {
-				b.Background(pal.Hover).TextColor(pal.Text)
-			}
-			b.Children(func() {
-				ui.Text(c, name).FontSize(12)
-				ui.Icon(c, theme.Icon("chevron-down")).FontSize(11)
-			})
-			b.Menu(func(m *ui.Menu) {
+			ui.MenuButton(c.Key("language"), name, func(m *ui.Menu) {
 				for _, l := range doc.CodeLanguages {
 					if m.Item(l.Name).Checked(l.ID == n.Str("language")).Chosen() {
 						e.SetCodeLanguage(n.ID, l.ID)
 					}
 				}
-			})
+			}).Label("Language: " + name).FontSize(12)
 		}
 		ui.Spacer(c)
 		copied := e.copied == n.ID && time.Since(e.copiedAt) < 1500*time.Millisecond

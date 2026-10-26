@@ -24,8 +24,7 @@ func templatesApp(t *testing.T) *App {
 		t.Fatal(err)
 	}
 	be := remote.New(remote.Config(), st)
-	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session(),
-		expanded: map[string]bool{}, folderOpen: map[string]bool{}}
+	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
 	a.reloadAll()
 	return a
 }

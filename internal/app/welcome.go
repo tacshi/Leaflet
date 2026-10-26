@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
@@ -15,10 +14,17 @@ import (
 //go:embed welcome/dawn.jpg
 var welcomeImage []byte
 
-// createWelcome gives a new space one page that shows what pages can do:
-// writing, lists, code, tables, images, charts, video, interactive embeds,
-// callouts, toggles, math, diagrams, agents, shortcuts, subpages and links
-// between pages.
+const (
+	welcomeTitle    = "Welcome to Leaflet"
+	welcomeSubTitle = "Weekly team sync"
+
+	welcomeDateTodo = "Hover this to-do and choose **Add date** to give it a due date"
+)
+
+// createWelcome gives a new space one page that shows what pages can do,
+// with an example subpage inside it: writing, blocks, media, charts,
+// embeds, to-dos, recordings, agents, organizing and finding pages,
+// working together, sync and shortcuts.
 func (a *App) createWelcome() error {
 	if _, ok := a.st.Value("welcome.created"); ok {
 		return nil
@@ -26,476 +32,193 @@ func (a *App) createWelcome() error {
 	if pages, _ := a.st.Pages(); len(pages) > 0 {
 		return a.st.SetValue("welcome.created", "true")
 	}
+	// The picture is a file of the page and the subpage a page inside it,
+	// so the page comes first and its blocks after.
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: welcomeTitle})
+	if err != nil {
+		return err
+	}
+	image, err := a.welcomeImageFile(p.ID)
+	if err != nil {
+		return err
+	}
+	sub, err := a.st.CreatePage(store.NewPageOptions{ParentID: p.ID, Title: welcomeSubTitle, Content: welcomeSubpage()})
+	if err != nil {
+		return err
+	}
+	blocks, err := welcomeBlocks(image, sub.ID)
+	if err != nil {
+		return err
+	}
+	if _, _, err := a.st.SaveContent(p.ID, doc.FromBlocks(blocks)); err != nil {
+		return err
+	}
+	if err := a.st.SetValue("welcome.page", p.ID); err != nil {
+		return err
+	}
+	return a.st.SetValue("welcome.created", "true")
+}
+
+// welcomeImageFile adds the guide's picture as a file of its page.
+func (a *App) welcomeImageFile(pageID string) (store.File, error) {
+	dir, err := os.MkdirTemp("", "leaflet-welcome")
+	if err != nil {
+		return store.File{}, err
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	path := filepath.Join(dir, "Dawn over the lake.jpg")
+	if err := os.WriteFile(path, welcomeImage, 0o600); err != nil {
+		return store.File{}, err
+	}
+	return a.st.AddFile(path, "", pageID, "image/jpeg")
+}
+
+// welcomeBlocks are the guide's blocks, with its picture and a card for
+// and a link to its subpage.
+func welcomeBlocks(image store.File, subID string) ([]*doc.Node, error) {
 	var blocks []*doc.Node
+	var bad error
 	add := func(m map[string]any) {
 		n, err := doc.SpecToNode(m, "", "Leaflet")
-		if err != nil {
-			panic(err)
+		if err != nil && bad == nil {
+			bad = err
 		}
-		blocks = append(blocks, n)
+		if n != nil {
+			blocks = append(blocks, n)
+		}
 	}
 	text := func(typ, s string) { add(map[string]any{"type": typ, "text": s}) }
 	heading := func(s string) { add(map[string]any{"type": "heading", "level": 2.0, "text": s}) }
+	chart := func(m map[string]any) { add(map[string]any{"type": "chart", "chart": m}) }
 	embed := func(title, html string, height int) {
 		add(map[string]any{"type": "embed", "embed": map[string]any{"title": title, "html": html, "height": float64(height)}})
 	}
 
-	text("paragraph", "Pages are living documents you write with people and agents. Everything here is saved on this device first and syncs when you are online. This page shows what a page can hold; change anything, it is yours.")
+	text("paragraph", "Pages are living documents you write with people and agents. They are saved on this device first and sync when you are online. This page shows what a page can do; change anything, it is yours.")
 
 	heading("Try it")
 	for _, s := range []string{
-		welcomeSlashTodo,
-		welcomeMentionTodo,
-		"Select some text, then choose **Ask agent** or **Comment**",
-		welcomeRecordTodo,
-		welcomeProviderTodo,
+		"Type **/** on an empty line to add any block",
+		"Type **@** to ask an agent to write here, mention someone or link a page",
+		"Select some text, then choose **Ask agent**, **Comment** or a color",
+		"Press the microphone in the header to record, with a transcript",
+		"Add an agent provider in **Settings › Agent providers**: sign in with ChatGPT, paste an API key, or use a model server such as Ollama",
 	} {
 		text("todo_list", s)
 	}
 
 	heading("Writing")
-	text("paragraph", welcomeWritingText)
+	text("paragraph", "Type **bold**, *italic*, `code`, ~~strikethrough~~ and [links](https://github.com/egoist/mygo) as Markdown and they format as you go. At the start of a line, `#` makes a heading, `-` a bullet, `1.` a numbered item, `[]` a to-do, `>` a quote and `---` a divider. Pasted Markdown keeps its headings, lists, tables and code.")
 	text("quote", "The best way to have a good idea is to have a lot of ideas, and throw the bad ones away.")
 	add(map[string]any{"type": "numbered_list", "text": "Write a rough outline", "children": []any{
-		map[string]any{"type": "bulleted_list", "text": "Press **Tab** to nest an item, **Shift-Tab** to lift it back"},
+		map[string]any{"type": "bulleted_list", "text": "Press **Tab** to nest an item, **⇧Tab** to lift it back"},
 	}})
 	text("numbered_list", "Ask an agent to fill in a section")
-	text("numbered_list", welcomeReviewStep)
+	text("numbered_list", "Review its edits, and **Undo** if you don't like them")
 
-	heading("Tables")
-	text("paragraph", welcomeTableText)
+	heading("Blocks")
+	text("paragraph", "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end, and cells take formatting.")
 	add(map[string]any{"type": "table", "rows": []any{
 		[]any{"Milestone", "Owner", "Due"},
 		[]any{"Outline the guide", "You", "Monday"},
 		[]any{"First draft", "Agent", "Wednesday"},
 		[]any{"Review and publish", "You", "Friday"},
 	}})
+	text("paragraph", "Code colors its syntax: type three backticks and a language, or pick one in the bar above the block.")
+	add(map[string]any{"type": "code", "language": "javascript", "text": welcomeCode})
+	add(map[string]any{"type": "callout", "tone": "tip", "text": "A callout sets a note apart. Click its icon to make it a tip, a warning or a caution."})
+	add(map[string]any{"type": "toggle_list", "text": "A toggle folds away what is inside it: click the arrow", "children": []any{
+		map[string]any{"type": "paragraph", "text": "Press **Enter** at the end of an open toggle to write inside it."},
+	}})
+	text("paragraph", "**Math** is TeX and **Diagram** is Mermaid; **Edit** opens their source. **Link card** previews a web page, and **File** keeps any file with the page.")
+	add(map[string]any{"type": "math_equation", "formula": `\int_0^1 x^2\,dx = \frac{1}{3} \qquad e^{i\pi} + 1 = 0`})
+	add(map[string]any{"type": "diagram", "source": "flowchart LR\n  Idea([Idea]) --> Draft[Write a draft]\n  Draft --> Review{Review}\n  Review -->|changes| Draft\n  Review -->|ok| Publish([Publish])"})
 
-	heading("Charts")
-	text("paragraph", "Charts are blocks too. Agents make them from your numbers, and **Edit data** on a chart changes them by hand.")
-	add(map[string]any{"type": "chart", "chart": map[string]any{
+	heading("Pictures, video and charts")
+	text("paragraph", "Images are saved with the page, so they show offline. Paste a YouTube or Vimeo link on an empty line for a video that plays in place.")
+	blocks = append(blocks, &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
+		"url": "file://" + image.LocalPath, "align": "center", "alt": "A dawn over mountains and a still lake", "file_id": image.ID,
+	}})
+	add(map[string]any{"type": "video", "video": map[string]any{"url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ", "title": "Big Buck Bunny · Blender Foundation"}})
+	text("paragraph", "Charts are bar, line or pie. Agents make them from your numbers, and **Edit data** changes them by hand.")
+	chart(map[string]any{
 		"chart_type": "bar", "title": "What people keep in pages", "labels": []any{"Notes", "Plans", "Research", "Recordings"},
 		"series": []any{map[string]any{"name": "Pages", "values": []any{12.0, 7.0, 5.0, 3.0}}}, "caption": "Example data",
-	}})
-	add(map[string]any{"type": "chart", "chart": map[string]any{
+	})
+	chart(map[string]any{
 		"chart_type": "line", "title": "Words written per day", "labels": []any{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"},
 		"series": []any{
 			map[string]any{"name": "You", "values": []any{420.0, 380.0, 650.0, 540.0, 720.0, 210.0, 300.0}},
 			map[string]any{"name": "Agents", "values": []any{150.0, 260.0, 300.0, 480.0, 390.0, 120.0, 90.0}},
 		},
-	}})
-	add(map[string]any{"type": "chart", "chart": map[string]any{
+	})
+	chart(map[string]any{
 		"chart_type": "pie", "title": "Where the week went", "labels": []any{"Writing", "Meetings", "Research", "Email"},
 		"series": []any{map[string]any{"name": "Hours", "values": []any{14.0, 9.0, 8.0, 5.0}}},
-	}})
+	})
 
 	heading("Interactive embeds")
-	text("paragraph", "Embeds are small apps inside a page. They run sandboxed, with no network and no access to your data. Ask an agent for one, as “@ make a pomodoro timer”, or try these:")
+	text("paragraph", "Embeds are small apps in a page, sandboxed with no network and no access to your data. Ask an agent for one, as “@ make a pomodoro timer”, or try these:")
 	embed("The solar system, at your speed", solarSystemEmbed, 380)
 	embed("Savings calculator", savingsEmbed, 270)
 	embed("A piano to play", pianoEmbed, 250)
 
-	p, err := a.st.CreatePage(store.NewPageOptions{Title: welcomeTitle, Content: doc.FromBlocks(blocks)})
-	if err != nil {
-		return err
-	}
-	// The picture is a file of the page and the subpage is a page of its
-	// own, so they go in once the page exists; then the sections later
-	// versions brought, as they go in earlier guides.
-	if c := a.st.Content(p.ID); c != nil {
-		image, _ := a.addWelcomeImage(p.ID, c)
-		sub, _ := a.addWelcomeSubpage(p.ID, c)
-		sections, err := addWelcomeSections(p.ID, c)
-		if err != nil {
-			return err
-		}
-		links, err := a.addWelcomeLinks(p.ID, c)
-		if err != nil {
-			return err
-		}
-		if sections || image || sub || links {
-			if _, _, err := a.st.SaveContent(p.ID, c); err != nil {
-				return err
-			}
-		}
-	}
-	if err := a.st.SetValue("welcome.page", p.ID); err != nil {
-		return err
-	}
-	if err := a.st.SetValue("welcome.version", welcomeVersion); err != nil {
-		return err
-	}
-	return a.st.SetValue("welcome.created", "true")
-}
+	heading("To-dos and recordings")
+	text("todo_list", welcomeDateTodo)
+	text("paragraph", "A due to-do reminds you on the day and turns red once overdue. The **To-dos** button at the top of the sidebar gathers the open ones from every page.")
+	text("paragraph", "A recording comes with a transcript, a time on each line: click a time to play from there. Its **…** menu puts the transcript in the page or has an agent sum it up. **Settings › Speech to text** picks Soniox or an OpenAI-compatible server, which can run on your own network, and the language. The menu bar icon starts a recording without opening the window.")
 
-const (
-	welcomeTitle   = "Welcome to Leaflet"
-	welcomeVersion = "10"
-
-	welcomeSlashTodo   = "Type **/** on an empty line to add a heading, list, table, chart, code, video or embed"
-	welcomeMentionTodo = "Type **@** to ask an agent to write here, to mention someone, or to link to another page"
-
-	welcomeWritingText = "Text takes **bold**, *italic*, `code`, ~~strikethrough~~ and [links](https://github.com/egoist/mygo). Type them as markdown and they turn into formats as you go. Paste a web link and it is a link, or paste it over selected text to link that; pasted Markdown comes in as headings, lists, tables and code."
-	welcomeTableText   = "Click a cell to write in it; cells take **bold**, *italic* and links. **Tab** and **⇧Tab** move between cells, **Tab** in the last cell adds a row, and **Enter** goes down a row."
-	welcomeSubpageText = "Pages nest inside pages. Add one with **/** › **Subpage**, or the **+** beside a page in the sidebar, and a link card to it goes in the page. Make a page of its own with the pencil at the top of the sidebar."
-	welcomeTabKeys     = "Nest or lift a list item, indent code, or move between table cells"
-	welcomeLinksTitle  = "Links between pages"
-
-	welcomeProviderTodo = "Add an agent provider in **Settings › Agent providers**: sign in with ChatGPT, paste an API key, or use a model server such as Ollama"
-	welcomeRecordTodo   = "Press the microphone in the header to add a recording with its transcript"
-	welcomeReviewStep   = "Review its edits, and **Undo** if you don't like them"
-)
-
-// updateWelcome rewrites the steps of an earlier welcome page that point
-// at settings or buttons that have since moved, and adds the image and
-// subpage examples it lacked. Other edits stay.
-func (a *App) updateWelcome() error {
-	if v, _ := a.st.Value("welcome.version"); v == welcomeVersion {
-		return nil
-	}
-	if _, ok := a.st.Value("welcome.created"); !ok {
-		return nil
-	}
-	var ids []string
-	if id, ok := a.st.Value("welcome.page"); ok {
-		ids = append(ids, id)
-	} else {
-		pages, _ := a.st.Pages()
-		for _, p := range pages {
-			if p.Title == welcomeTitle {
-				ids = append(ids, p.ID)
-			}
-		}
-	}
-	for _, id := range ids {
-		c := a.st.Content(id)
-		if c == nil {
-			continue
-		}
-		changed := false
-		c.Walk(func(n, _ *doc.Node) {
-			// Version 6 named the run bar's button Undo.
-			if n.Type == "numbered_list" && n.Delta().Plain() == "Review its edits, and Undo run if you don't like them" {
-				n.SetDelta(doc.FromMarkdown(welcomeReviewStep))
-				changed = true
-				return
-			}
-			// Version 8 brought code and video blocks.
-			if n.Type == "todo_list" && n.Delta().Plain() == "Type / on an empty line to add a heading, list, table, chart, or embed" {
-				n.SetDelta(doc.FromMarkdown(welcomeSlashTodo))
-				changed = true
-				return
-			}
-			if n.Type != "todo_list" {
-				return
-			}
-			text := n.Delta().Plain()
-			var next string
-			switch {
-			case strings.Contains(text, "Settings › Models"):
-				next = welcomeProviderTodo
-			case text == "Press Record to add a recording with its transcript":
-				next = welcomeRecordTodo
-			default:
-				return
-			}
-			n.SetDelta(doc.FromMarkdown(next))
-			changed = true
-		})
-		// Version 10 brought links between pages, keys for tables and
-		// pasting.
-		c.Walk(func(n, _ *doc.Node) {
-			for _, r := range []struct{ typ, was, now string }{
-				{"todo_list", "Type @ to ask an agent to write here, or to mention someone", welcomeMentionTodo},
-				{"paragraph", "Text takes bold, italic, code, strikethrough and links. Type them as markdown and they turn into formats as you go.", welcomeWritingText},
-				{"paragraph", "Pages nest inside pages. Add one with / › Subpage, or the + beside a page in the sidebar. Make a page of its own with the pencil at the top of the sidebar.", welcomeSubpageText},
-				{"paragraph", "Nest or lift a list item, or indent code", welcomeTabKeys},
-			} {
-				if n.Type == r.typ && n.Delta().Plain() == r.was {
-					n.SetDelta(doc.FromMarkdown(r.now))
-					changed = true
-				}
-			}
-		})
-		// Version 5 gave the embeds a dark theme: the ones still as the
-		// guide made them take it.
-		c.Walk(func(n, _ *doc.Node) {
-			if n.Type != "embed" {
-				return
-			}
-			src := n.Str("html")
-			for _, e := range []struct{ was, now string }{
-				{"html,body{margin:0;background:#fff;color:#16181d;font:14px", savingsEmbed},
-				{"html,body{margin:0;height:100%;background:#f5f6f8;font:12px", pianoEmbed},
-			} {
-				if strings.Contains(src, e.was) && !strings.Contains(src, "data-theme") {
-					n.Data["html"] = e.now
-					changed = true
-				}
-			}
-		})
-		// Version 7 styled the sliders, kept the planets' names apart and
-		// fit the piano to a narrow frame.
-		c.Walk(func(n, _ *doc.Node) {
-			if n.Type != "embed" {
-				return
-			}
-			src := n.Str("html")
-			for _, e := range []struct{ was, now, mark string }{
-				{"var planets = [", solarSystemEmbed, "min-width:0;"},
-				{"Saved every month", savingsEmbed, "--p"},
-				{`var whites = [[0, "A"]`, pianoEmbed, "kb.style.zoom"},
-			} {
-				if strings.Contains(src, e.was) && !strings.Contains(src, e.mark) {
-					n.Data["html"] = e.now
-					changed = true
-				}
-			}
-		})
-		for _, add := range []func(string, *doc.Content) (bool, error){a.addWelcomeImage, a.addWelcomeSubpage, addWelcomeSections, addWelcomeTableText, a.addWelcomeLinks} {
-			if added, err := add(id, c); err != nil {
-				return err
-			} else if added {
-				changed = true
-			}
-		}
-		if changed {
-			if _, _, err := a.st.SaveContent(id, c); err != nil {
-				return err
-			}
-		}
-	}
-	return a.st.SetValue("welcome.version", welcomeVersion)
-}
-
-// welcomeSection is a section of the guide that a version after the first
-// brought: its heading, which tells it is there, the headings it goes
-// before, the first of them in the page, else the end, and its blocks.
-type welcomeSection struct {
-	heading string
-	before  []string
-	blocks  []map[string]any
-}
-
-// welcomeSections are added to a guide that lacks them, in this order.
-var welcomeSections = []welcomeSection{
-	{"Code", []string{"Tables", "Images", "Charts", "Interactive embeds", "Subpages"}, []map[string]any{
-		{"type": "paragraph", "text": "Type three backticks and a language, as in Markdown, then press **Enter**; or choose **/** › **Code**. Code keeps its spacing and colors its syntax, and the bar above it picks the language and copies the code. **Tab** indents the lines you select, and **Enter** on a second blank line at the end leaves the block."},
-		{"type": "code", "language": "javascript", "text": welcomeCode},
-	}},
-	{"Video", []string{"Interactive embeds", "Subpages"}, []map[string]any{
-		{"type": "paragraph", "text": "Paste a YouTube or Vimeo link on an empty line and it becomes a video that plays in the page, or choose **/** › **Video**. Its picture and title show until you press play."},
-		{"type": "video", "video": map[string]any{"url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ", "title": "Big Buck Bunny · Blender Foundation"}},
-	}},
-	{"More blocks", []string{"Working with agents", "Shortcuts", "Subpages"}, []map[string]any{
-		{"type": "callout", "tone": "tip", "text": "A callout sets a note apart. Click its icon to make it a tip, a warning or a caution."},
-		{"type": "toggle_list", "text": "A toggle folds away what is inside it: click the arrow", "children": []any{
-			map[string]any{"type": "paragraph", "text": "Press **Enter** at the end of an open toggle to write inside it, or **Tab** to move the line below in."},
-		}},
-		{"type": "paragraph", "text": "**/** › **Math** writes a formula in TeX, and **/** › **Diagram** a flowchart or other diagram in Mermaid. Both draw on the page, and **Edit** opens their source."},
-		{"type": "math_equation", "formula": `\int_0^1 x^2\,dx = \frac{1}{3} \qquad e^{i\pi} + 1 = 0`},
-		{"type": "diagram", "source": "flowchart LR\n  Idea([Idea]) --> Draft[Write a draft]\n  Draft --> Review{Review}\n  Review -->|changes| Draft\n  Review -->|ok| Publish([Publish])"},
-		{"type": "paragraph", "text": "**/** › **Link card** shows a web page with its title and picture, and **/** › **File** keeps a file of any kind with the page."},
-	}},
-	{"Working with agents", []string{"Subpages"}, []map[string]any{
-		{"type": "paragraph", "text": "Agents read the whole page and edit it with you. They write and rewrite text, and make tables, charts, code and embeds. Each run is one step you can undo, and the blocks it changed are tinted until the next."},
-		{"type": "bulleted_list", "text": "**@** on a line asks about that spot: “@ write an intro for this page”"},
-		{"type": "bulleted_list", "text": "Select text, then **Ask agent**: “make this shorter”, “translate it to French”"},
-		{"type": "bulleted_list", "text": "The panel on the right (**⌘J**) holds a chat about the page and its comment threads. Mention an agent in a comment and it answers in the thread."},
-		{"type": "bulleted_list", "text": "Things to ask: “turn the milestones into a chart”, “sum up the recording as action items”, “add a Go example of this”"},
-	}},
-	{"Shortcuts", []string{"Subpages"}, []map[string]any{
-		{"type": "table", "rows": []any{
-			[]any{"Keys", "Does"},
-			[]any{"⌘P", "Search pages, recordings and comments"},
-			[]any{"⌘N", "Make a new page"},
-			[]any{"⌘J", "Show or hide the agent panel"},
-			[]any{"⌘\\", "Show or hide the sidebar"},
-			[]any{"⌘[  ⌘]", "Go back and forward between pages"},
-			[]any{"⌘B  ⌘I  ⌘U", "Bold, italic, underline"},
-			[]any{"⌘E  ⇧⌘X", "Inline code, strikethrough"},
-			[]any{"⌘K", "Link the selected text"},
-			[]any{"⇧Enter", "A line break within a block"},
-			[]any{"Tab  ⇧Tab", welcomeTabKeys},
-			[]any{"⌘Z  ⇧⌘Z", "Undo, redo"},
-		}},
-		{"type": "paragraph", "text": "At the start of a line, type `#` and a space for a heading, `-` for a bullet, `1.` for a numbered item, `[]` for a to-do and `>` for a quote; `---` makes a divider."},
-	}},
-}
-
-// welcomeCode is the guide's code example.
-const welcomeCode = `// Count the words in a page's text, as a byline might.
-function wordCount(text) {
-  return text.split(/\s+/).filter(Boolean).length;
-}
-
-console.log(wordCount("Pages are living documents")); // 4`
-
-// addWelcomeSections adds the sections of welcomeSections a guide lacks.
-// It takes the page's ID only to go with addWelcomeImage and the others.
-func addWelcomeSections(_ string, c *doc.Content) (bool, error) {
-	headings := map[string]string{}
-	for _, n := range c.All() {
-		if n.Type == "heading" {
-			if text := n.Delta().Plain(); headings[text] == "" {
-				headings[text] = n.ID
-			}
-		}
-	}
-	added := false
-	for _, s := range welcomeSections {
-		if headings[s.heading] != "" {
-			continue
-		}
-		var nodes []*doc.Node
-		for _, spec := range append([]map[string]any{{"type": "heading", "level": 2.0, "text": s.heading}}, s.blocks...) {
-			n, err := doc.SpecToNode(spec, "", "Leaflet")
-			if err != nil {
-				return false, err
-			}
-			nodes = append(nodes, n)
-		}
-		before := ""
-		for _, h := range s.before {
-			if before = headings[h]; before != "" {
-				break
-			}
-		}
-		if err := c.Insert(doc.Position{Before: before}, nodes...); err != nil {
-			return false, err
-		}
-		headings[s.heading] = nodes[0].ID
-		added = true
-	}
-	return added, nil
-}
-
-// addWelcomeTableText puts how to write in a table under the Tables
-// heading of a guide that lacks it.
-func addWelcomeTableText(_ string, c *doc.Content) (bool, error) {
-	plain := doc.FromMarkdown(welcomeTableText).Plain()
-	tables := ""
-	for _, n := range c.All() {
-		if n.Type == "paragraph" && n.Delta().Plain() == plain {
-			return false, nil
-		}
-		if tables == "" && n.Type == "heading" && n.Delta().Plain() == "Tables" {
-			tables = n.ID
-		}
-	}
-	if tables == "" {
-		return false, nil
-	}
-	n, err := doc.SpecToNode(map[string]any{"type": "paragraph", "text": welcomeTableText}, "", "Leaflet")
-	if err != nil {
-		return false, err
-	}
-	return true, c.Insert(doc.Position{After: tables}, n)
-}
-
-// addWelcomeLinks ends a guide that lacks it with Links between pages,
-// linking to the example subpage while it is there.
-func (a *App) addWelcomeLinks(_ string, c *doc.Content) (bool, error) {
-	sub := ""
-	for _, n := range c.All() {
-		if n.Type == "heading" && n.Delta().Plain() == welcomeLinksTitle {
-			return false, nil
-		}
-		if sub == "" && n.Type == "subpage" {
-			sub = n.Str("page_id")
-		}
-	}
-	var nodes []*doc.Node
-	for _, m := range []map[string]any{
-		{"type": "heading", "level": 2.0, "text": welcomeLinksTitle},
-		{"type": "paragraph", "text": "Type **@** in your text and pick a page to link to it. The link shows the page's title, keeps up when the page is renamed, and opens the page on a click."},
+	heading("Agents")
+	text("paragraph", "Agents read the page and edit it with you: text, tables, charts, code and embeds. Each run is one step you can undo, and the blocks it changed stay tinted until the next.")
+	for _, s := range []string{
+		"**@** on a line asks about that spot: “@ write an intro for this page”",
+		"Select text, then **Ask agent**: “make this shorter”, “translate it to French”",
+		"The panel (**⌘J**) holds a chat about the page. Mention an agent in a comment and it answers in the thread",
+		"**Settings › Agent providers** sets the default agent, a model on this machine for offline use, and whether agents may read your other pages",
+		"Claude Code, Codex, Cursor and other MCP clients can work on your pages too: **Settings › External agents** sets them up",
 	} {
-		n, err := doc.SpecToNode(m, "", "Leaflet")
-		if err != nil {
-			return false, err
-		}
-		nodes = append(nodes, n)
+		text("bulleted_list", s)
 	}
-	if p, err := a.st.Page(sub); sub != "" && err == nil && p.DeletedAt.IsZero() {
-		title := p.DisplayTitle()
-		n := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
-		n.SetDelta(doc.Delta{{Text: "The notes from the last sync are in "}, {Text: title, Attrs: doc.PageMention(p.ID, title)}, {Text: "."}})
-		nodes = append(nodes, n)
-	}
-	return true, c.Insert(doc.Position{}, nodes...)
-}
 
-// addWelcomeImage adds the Images section to a welcome page that has no
-// image, before its charts: the picture becomes a file of the page.
-func (a *App) addWelcomeImage(pageID string, c *doc.Content) (bool, error) {
-	var before string
-	for _, n := range c.All() {
-		if n.Type == "image" {
-			return false, nil
-		}
-		text := n.Delta().Plain()
-		if before == "" && (n.Type == "heading" && (text == "Charts" || text == "Interactive embeds" || text == "Subpages") || text == welcomeNestText) {
-			before = n.ID
-		}
-	}
-	dir, err := os.MkdirTemp("", "leaflet-welcome")
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = os.RemoveAll(dir) }()
-	path := filepath.Join(dir, "Dawn over the lake.jpg")
-	if err := os.WriteFile(path, welcomeImage, 0o600); err != nil {
-		return false, err
-	}
-	f, err := a.st.AddFile(path, "", pageID, "image/jpeg")
-	if err != nil {
-		return false, err
-	}
-	var nodes []*doc.Node
-	for _, spec := range []map[string]any{
-		{"type": "heading", "level": 2.0, "text": "Images"},
-		{"type": "paragraph", "text": "Add a picture with **/** › **Image**. It is saved with the page, so it shows offline too."},
-	} {
-		n, err := doc.SpecToNode(spec, "", "Leaflet")
-		if err != nil {
-			return false, err
-		}
-		nodes = append(nodes, n)
-	}
-	nodes = append(nodes, &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
-		"url": "file://" + f.LocalPath, "align": "center", "alt": "A dawn over mountains and a still lake", "file_id": f.ID,
+	heading("Organizing pages")
+	text("paragraph", "Pages nest inside pages: **/** › **Subpage**, or the **+** beside a page in the sidebar, adds one with a card for it here.")
+	blocks = append(blocks, &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": subID}})
+	link := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
+	link.SetDelta(doc.Delta{
+		{Text: "Type "}, {Text: "@", Attrs: doc.Attrs{Bold: true}}, {Text: " and a page's name to link to it, as to "},
+		{Text: welcomeSubTitle, Attrs: doc.PageMention(subID, welcomeSubTitle)}, {Text: "; the link keeps up when the page is renamed."},
+	})
+	blocks = append(blocks, link)
+	text("paragraph", "Folders, from the button beside **My space**, group pages. A page's **…** menu moves it, duplicates it with its subpages, exports it as Markdown, or saves it as a template, which a blank page then offers to start from.")
+	text("paragraph", "Headings fold their section from the arrow beside them, and the panel's **Outline** tab lists them. Right-click a block to **Copy link to block**.")
+
+	heading("Working together")
+	text("paragraph", "Select text and choose **Comment** to start a thread. Threads live in the panel's **Comments** tab, where you reply and **Resolve** them. Once you sign in, **Share** in the header invites people to edit or view a page and its subpages.")
+	text("paragraph", "**Page history** in the **…** menu keeps a version every ten minutes of editing and before each agent run. See what changed since one, inline or side by side, name the current one, or restore it.")
+	text("paragraph", "Pages work offline and sync between devices when you sign in; **Settings › Offline and storage** chooses which stay on this device. A block changed on two devices while apart keeps one version, and the page says so, with the other a click away.")
+
+	heading("Shortcuts")
+	add(map[string]any{"type": "table", "rows": []any{
+		[]any{"Keys", "Does"},
+		[]any{"⌘P", "Search pages, templates, recordings and comments"},
+		[]any{"⌘N", "Make a new page"},
+		[]any{"⌘J", "Show or hide the agent panel"},
+		[]any{"⌘\\", "Show or hide the sidebar"},
+		[]any{"⌘,", "Open Settings: theme, text size, agents and speech"},
+		[]any{"⌘[  ⌘]", "Go back and forward between pages"},
+		[]any{"⌘B  ⌘I  ⌘U", "Bold, italic, underline"},
+		[]any{"⌘E  ⇧⌘X", "Inline code, strikethrough"},
+		[]any{"⌘K", "Link the selected text"},
+		[]any{"⇧Enter", "A line break within a block"},
+		[]any{"Tab  ⇧Tab", "Nest or lift a list item, indent code, or move between table cells"},
+		[]any{"⌘Z  ⇧⌘Z", "Undo, redo"},
 	}})
-	// With no heading to go before, the section goes at the end.
-	if err := c.Insert(doc.Position{Before: before}, nodes...); err != nil {
-		return false, err
-	}
-	return true, nil
+	return blocks, bad
 }
 
-// welcomeNestText closed earlier guides; the Subpages section replaces it.
-const welcomeNestText = "Make a new page with the pencil at the top of the sidebar, and nest pages inside pages from the + beside them."
-
-// addWelcomeSubpage ends a welcome page that has no subpage with the
-// Subpages section, linking to an example page made inside it.
-func (a *App) addWelcomeSubpage(pageID string, c *doc.Content) (bool, error) {
-	var old string
-	for _, n := range c.All() {
-		if n.Type == "subpage" {
-			return false, nil
-		}
-		if n.Type == "paragraph" && n.Delta().Plain() == welcomeNestText {
-			old = n.ID
-		}
-	}
-	var child []*doc.Node
-	var nodes []*doc.Node
-	add := func(list *[]*doc.Node, m map[string]any) error {
-		n, err := doc.SpecToNode(m, "", "Leaflet")
-		if err == nil {
-			*list = append(*list, n)
-		}
-		return err
-	}
+// welcomeSubpage is the content of the guide's example subpage.
+func welcomeSubpage() *doc.Content {
+	var blocks []*doc.Node
 	for _, m := range []map[string]any{
 		{"type": "paragraph", "text": "Notes from the week's sync. This page lives inside **Welcome to Leaflet**: the sidebar shows it under its parent, and sharing the parent shares it too."},
 		{"type": "heading", "level": 2.0, "text": "Agenda"},
@@ -513,31 +236,20 @@ func (a *App) addWelcomeSubpage(pageID string, c *doc.Content) (bool, error) {
 		}},
 		{"type": "todo_list", "text": "Ask an agent to turn these notes into an email"},
 	} {
-		if err := add(&child, m); err != nil {
-			return false, err
+		if n, err := doc.SpecToNode(m, "", "Leaflet"); err == nil {
+			blocks = append(blocks, n)
 		}
 	}
-	for _, m := range []map[string]any{
-		{"type": "heading", "level": 2.0, "text": "Subpages"},
-		{"type": "paragraph", "text": welcomeSubpageText},
-	} {
-		if err := add(&nodes, m); err != nil {
-			return false, err
-		}
-	}
-	p, err := a.st.CreatePage(store.NewPageOptions{ParentID: pageID, Title: "Weekly team sync", Content: doc.FromBlocks(child)})
-	if err != nil {
-		return false, err
-	}
-	nodes = append(nodes, &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": p.ID}})
-	if err := c.Insert(doc.Position{Before: old}, nodes...); err != nil {
-		return false, err
-	}
-	if old != "" {
-		c.Remove(old)
-	}
-	return true, nil
+	return doc.FromBlocks(blocks)
 }
+
+// welcomeCode is the guide's code example.
+const welcomeCode = `// Count the words in a page's text, as a byline might.
+function wordCount(text) {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+console.log(wordCount("Pages are living documents")); // 4`
 
 // solarSystemEmbed draws the planets orbiting the sun, with a speed slider
 // and a pause button.

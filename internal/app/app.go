@@ -259,9 +259,6 @@ func (a *App) start() error {
 	if err := a.createWelcome(); err != nil {
 		log.Printf("welcome page: %v", err)
 	}
-	if err := a.updateWelcome(); err != nil {
-		log.Printf("welcome page: %v", err)
-	}
 	a.reloadAll()
 	a.route = Route{Kind: "home"}
 	if last, ok := st.Value("last.page"); ok && a.pageByID(last) != nil {

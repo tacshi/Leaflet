@@ -1,64 +1,124 @@
-# Leaflet
+<p align="center">
+  <img src="resources/icon.png" width="128" height="128" alt="Leaflet">
+</p>
 
-A desktop app where people and AI co-write living documents ("pages") in a
-personal space. Written in Go with [MyGo](https://github.com/egoist/mygo)'s
-native UI: everything is drawn by MyGo on the GPU, with no web view for the
-app itself. Runs on macOS, Windows and Linux.
+<h1 align="center">Leaflet</h1>
 
-- **Pages**: nested pages and folders, and a block editor of Leaflet's own,
-  built on MyGo's text-input primitives: headings, lists with nesting,
-  to-dos, quotes, tables, images, charts (bar, line, pie), sandboxed
-  interactive embeds, recordings and subpage links. Markdown shortcuts
-  (`# `, `- `, `[] `, `> `, `**bold**`, `` `code` ``), the `/` menu, `@`
-  mentions, a selection toolbar, undo and redo, and selections across
-  blocks.
-- **Agents**: inline `@agent`, selection › Ask agent, sidebar chat, and
-  `@agent` in comment threads. Every edit is a validated tool call
-  (`read_page`, `insert_blocks`, `replace_block`, `move_block`,
-  `delete_blocks`, `create_subpage`, plus cross-page reads), applied as ops
-  that stream into the open page as one undo step, with Undo / Redo and
-  a page-history snapshot before each run.
-- **Models**: any OpenAI-compatible provider. Built-in presets (OpenAI,
-  Claude, xAI, OpenRouter, DeepSeek, GLM), custom endpoints, and local
-  servers (Ollama, LM Studio, llama.cpp, vLLM). Cloud keys stay on the
-  server (Vault) and cloud models run in the `agent` Edge Function; local
-  models run the same loop on this device, so agents work offline on them.
-- **Recording**: 16 kHz capture into a recording block with playback and a
-  timestamped transcript. Soniox real-time streaming with short-lived keys,
-  or any OpenAI-compatible `/audio/transcriptions` endpoint (one on your
-  network is called straight from the device and works offline).
-- **Comments and sharing**: threads anchored to stable block IDs, resolve
-  and reopen, per-page sharing with viewer or editor roles (inherited by
-  subpages).
-- **Offline first**: everything is saved to SQLite first; changes go through
-  an outbox and sync when online. Offline edits to the same block merge
-  last-write-wins per block, with a conflict notice and a way to restore the
-  other version.
-- **Outside agents**: `leaflet mcp` is a Model Context Protocol server
-  for Claude Code, Claude Desktop, Codex, Cursor and the like, with the
-  in-app agents' page tools plus finding and creating pages. The open app
-  shows what they write within a second.
-- **Settings**: Account (name, theme, text size, devices, export, delete),
-  Models, External agents, Speech to text, Offline and storage.
+<p align="center">
+  A native desktop app where people and AI agents write living documents together.
+</p>
 
-Real-time co-editing (CRDTs over Supabase Realtime) is the deferred phase
-of the design and is not built.
+<p align="center">
+  <a href="https://github.com/tacshi/Leaflet/releases/latest"><img src="https://img.shields.io/github/v/release/tacshi/Leaflet?sort=semver&label=release" alt="Latest release"></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/macOS-12%2B-000000?logo=apple&logoColor=white" alt="macOS 12 or later"></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/Windows-x64%20%7C%20arm64-0078D4?logo=windows&logoColor=white" alt="Windows x64 and arm64"></a>
+  <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go 1.27"></a>
+  <a href="#agents-outside-the-app-mcp"><img src="https://img.shields.io/badge/MCP-supported-6E56CF" alt="MCP supported"></a>
+  <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-MyGo-F2545B" alt="Built with MyGo"></a>
+</p>
 
-## Run it
+Leaflet keeps your notes, specs and meeting records as pages of blocks, and
+lets AI agents work in them beside you. Ask one inline, from a selection,
+in a chat or in a comment thread: it reads the page and edits it with
+validated tools, as one step you can undo. Pages are saved on your device
+first and sync when you sign in, so Leaflet works offline, with local
+models too.
 
-Go 1.27.3 or later. No cgo, no C compiler.
+It is written in Go with [MyGo](https://github.com/egoist/mygo), which
+draws the whole interface natively on the GPU, with no web view for the app
+itself.
+
+## Contents
+
+- [Features](#features)
+- [Requirements](#requirements)
+- [Install](#install)
+- [Run from source](#run-from-source)
+- [Agents outside the app (MCP)](#agents-outside-the-app-mcp)
+- [Build and release](#build-and-release)
+- [Development](#development)
+- [Project layout](#project-layout)
+- [Known limitations](#known-limitations)
+- [Acknowledgments](#acknowledgments)
+
+## Features
+
+### Write
+
+- A block editor of Leaflet's own: headings, nested lists, to-dos with due
+  dates, quotes, callouts, toggles, tables, code with syntax highlighting,
+  math, diagrams, charts, images, files, videos, link cards and sandboxed
+  interactive embeds.
+- Markdown shortcuts, the `/` menu, `@` mentions of people, agents and
+  pages, a selection toolbar with text colors, folding headings, an
+  outline, and links to pages and to single blocks.
+- Nested pages and folders, templates, duplicate pages, search, and export
+  to Markdown.
+- Page history with named versions, and what changed since any of them,
+  inline or side by side.
+
+### Work with agents
+
+- Ask an agent inline with `@agent`, from a selection, in the side chat or
+  in a comment thread.
+- Every edit is a validated tool call (`read_page`, `insert_blocks`,
+  `replace_block`, `move_block`, `delete_blocks`, `create_subpage`) that
+  streams into the page as one undo step, after a history snapshot.
+- Any OpenAI-compatible provider: presets for OpenAI, Claude, xAI,
+  OpenRouter, DeepSeek and GLM, a ChatGPT Plus or Pro sign-in, custom
+  endpoints, and local servers such as Ollama, LM Studio, llama.cpp and
+  vLLM, which run agents offline.
+- Agents outside the app, such as Claude Code, Codex and Cursor, work on
+  pages through [`leaflet mcp`](#agents-outside-the-app-mcp).
+
+### Record
+
+- Recording blocks with playback and a timestamped transcript.
+- Real-time transcription with Soniox, or any OpenAI-compatible
+  `/audio/transcriptions` endpoint, including one on your own network.
+
+### Share and sync
+
+- Comment threads anchored to blocks, and sharing a page with viewers or
+  editors, inherited by its subpages.
+- Offline first: everything is saved to SQLite, and changes sync through
+  an outbox when online. Edits made apart merge block by block, with a
+  conflict notice and a way to bring back the other version.
+- To-do reminders, a menu bar icon, light and dark themes, and updates
+  from GitHub Releases.
+
+## Requirements
+
+- macOS 12 or later, on Apple silicon or Intel; or Windows on x64 or arm64.
+- To build from source: Go 1.27.3 or later. No cgo or C compiler is
+  needed. Release builds also need Xcode for macOS, and NSIS for Windows
+  installers.
+- Sign-in, sync, sharing and cloud models need a Leaflet server: a
+  [Supabase](https://supabase.com) project set up from
+  [`supabase/`](supabase/README.md). Without one, Leaflet runs on your
+  device alone.
+
+## Install
+
+Download the disk image for macOS or the installer for Windows from the
+[latest release](https://github.com/tacshi/Leaflet/releases/latest).
+Installed copies update themselves from GitHub Releases.
+
+## Run from source
 
 ```bash
+git clone https://github.com/tacshi/Leaflet.git
+cd Leaflet
 go tool mygo dev
 ```
 
-Without a server the app runs on this device only: pages, editing,
-comments, local models and transcription servers on your network work;
-sign-in, sync, sharing, cloud models and cloud transcription are hidden or
-explained in place.
+Without a server, Leaflet runs on this device only: pages, editing,
+comments, local models and transcription servers on your network all
+work, and sign-in, sync, sharing, cloud models and cloud transcription are
+hidden or explained in place.
 
-With Supabase (see [`supabase/README.md`](supabase/README.md) for the
-backend), set the project at run time:
+To use a Supabase backend (see [`supabase/README.md`](supabase/README.md)),
+set it at run time:
 
 ```bash
 SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<anon key> go tool mygo dev
@@ -70,98 +130,118 @@ or build it in:
 MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://… -X leaflet/internal/remote.DefaultAnonKey=…" go tool mygo build
 ```
 
-`LEAFLET_DATA_DIR` keeps the database somewhere other than the app's data
-folder, for trying things out.
-
 To try agents without an API key, run a local model server (for example
 `ollama serve` with `qwen3:8b`) and add it in Settings › Models.
 
-## Agents outside the app
+### Data
 
-`leaflet mcp` serves the pages on this device over stdio, to any MCP
-client. Settings › External agents gives the setup for Claude Code,
-Codex, Cursor, VS Code and the rest, with this app's executable and data
-folder filled in, ready to copy. For Claude Code it is:
+Leaflet keeps its database in the app's data folder, such as
+`~/Library/Application Support/Leaflet` on macOS, or in the folder that
+`LEAFLET_DATA_DIR` names.
+
+## Agents outside the app (MCP)
+
+`leaflet mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+server on stdio for Claude Code, Claude Desktop, Codex, Cursor, VS Code and
+other clients. Settings › External agents gives the setup for each, with
+this app's executable and data folder filled in. For Claude Code:
 
 ```bash
 claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<data folder> -- <executable> mcp
 ```
 
-It opens the same database as the app (`LEAFLET_DATA_DIR` too), so it
-works with the app open or closed. Its tools are `list_pages`,
-`search_pages`, `read_page`, `create_page`, `rename_page`, and the in-app
-agents' `insert_blocks`, `replace_block`, `move_block` and `delete_blocks`,
-each given a `page_id`. Edits keep a page-history snapshot before an
-agent's first edit of a page, then one per ten minutes of its edits, and
-sync like any other change. The app checks the database every second for
-other processes' writes, and merges them into the open page, keeping what
-is being typed.
+| Tool | What it does |
+| --- | --- |
+| `list_pages`, `search_pages` | Find pages by title and text |
+| `read_page` | Read a page's blocks, with their IDs |
+| `create_page`, `rename_page` | Make and rename pages |
+| `insert_blocks`, `replace_block`, `move_block`, `delete_blocks` | Edit a page, as the in-app agents do |
 
-To try it on a development build, build a binary and give it the dev
-app's data folder:
+The server opens the same database as the app, so it works with the app
+open or closed. Pages shared with you to view are read-only. Edits keep a
+history snapshot before an agent's first edit of a page, then one per ten
+minutes of its edits, and sync like any other change. The open app picks up
+what they write within a second and merges it with what is being typed.
+
+To try it on a development build, give a binary the dev app's data folder:
 
 ```bash
 go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HOME/Library/Application Support/Leaflet Dev" -- "$PWD/leaflet" mcp
 ```
 
-## Build
+## Build and release
+
+`go tool mygo build` builds the app into `build/`. The scripts build for
+macOS by default, or for Windows with `--win`:
+
+| Script | Builds |
+| --- | --- |
+| `scripts/build-debug.sh [--mac\|--win] [--open]` | A debug build named Leaflet Debug, with its own identifier and data folder, that never updates itself, so it runs beside a release copy |
+| `scripts/build-release.sh [--mac] [--win] [<version>]` | Signed and notarized disk images for Apple silicon, Intel and universal, and installers for Windows x64 and arm64, with signed update archives |
+| `scripts/publish.sh <version> [--mac] [--win] [--dry-run]` | A GitHub release: checks, release notes from `CHANGELOG.md`, the build, the tag and publishing |
+
+Run any script with `--help` for its options. macOS releases need a
+Developer ID Application identity and a `notarytool` keychain profile,
+Windows installers need NSIS (`brew install makensis`), and every release
+needs the update signing key; `scripts/build-release.sh --help` explains
+each one.
+
+## Development
 
 ```bash
-go tool mygo build
+go test ./...                                # model, merge, store, sync, editor, agents
+make check                                   # gofmt, golangci-lint, govulncheck and gosec
+make clean                                   # remove build/ and the binary go build leaves
+cd supabase/functions && deno test _shared/  # the Edge Functions' shared code
 ```
 
-The packaged app lands in `build/`. Recording asks for the microphone; the
-usage description is in `mygo.json`.
+The editor's tests run its view headless with `ui.NewTester`.
+[`docs/protocol.md`](docs/protocol.md) is the contract between the app and
+the backend: the document format, the agent tools, and the save and sync
+rules.
 
-## Tests
+## Project layout
 
-```bash
-go test ./...                        # doc model, merge, ops/undo, store, editor, agent loop
-make check   # gofmt, golangci-lint, govulncheck and gosec
-make clean   # remove build/ and the binary go build leaves
-cd supabase/functions && deno test _shared/
-```
+| Path | Contents |
+| --- | --- |
+| `main.go` | Entry point: the app, and `leaflet mcp` |
+| `internal/app` | Window, shell, sidebar, page screen, panels, dialogs and settings |
+| `internal/editor` | The block editor: model, editing, layout, input and blocks |
+| `internal/doc` | The page document model: blocks, deltas, inline Markdown, ops, per-block merge and Markdown export |
+| `internal/store` | SQLite (pure Go) tables, the outbox and settings |
+| `internal/remote` | Supabase over HTTP: Auth, PostgREST, Storage and Edge Functions |
+| `internal/sync` | Pushing the outbox, pulls, account adoption and the device heartbeat |
+| `internal/agents` | The OpenAI-compatible client, presets, prompt, page tools, loop and hub |
+| `internal/mcp` | `leaflet mcp`: the page tools for agents outside the app |
+| `internal/recording` | Capture, WAV, Soniox streaming and endpoint transcription |
+| `internal/theme` | Colors, fonts and icons |
+| `scripts` | Debug and release builds, and publishing to GitHub Releases |
+| `supabase` | Migrations (tables, row-level security, RPCs, Vault) and Edge Functions |
+| `docs` | The protocol, user stories and the icon's sources |
 
-The editor tests run its view headless with `ui.NewTester`.
+Microphone capture runs in a small page on the app's own `leaflet-rec://`
+scheme, a secure context the system's web view lets use the microphone, so
+the app needs no native audio code. Embeds, math and diagrams run in
+sandboxed frames under a content security policy with no network, and can
+never call the app's Go code.
 
-## Layout
+## Known limitations
 
-```
-main.go
-internal/
-  app/        window, shell, sidebar, page screen, panels, dialogs, settings
-  editor/     the block editor: model, editing, layout, input, blocks
-  doc/        page document model: blocks, deltas, inline markdown, ops,
-              per-block merge, Markdown export (docs/protocol.md)
-  store/      SQLite (pure Go) tables, repositories, outbox, settings
-  remote/     Supabase over HTTP: Auth, PostgREST, Storage, Edge Functions
-  sync/       outbox push, pulls, space adoption, device heartbeat
-  agents/     OpenAI-compatible client, presets, prompt, page tools, loop, hub
-  mcp/        leaflet mcp: the page tools for agents outside the app
-  recording/  capture page, WAV, Soniox streaming, endpoint transcription
-  theme/      colors, Figtree and Source Serif 4, Lucide icons
-supabase/     migrations (tables, RLS, RPCs, Vault), Edge Functions
-docs/protocol.md the contract between the client and the backend
-```
-
-Microphone capture runs in a small page served on the app's own
-`leaflet-rec://` scheme: such pages are secure contexts the system's web
-view lets use the microphone, so the app needs no native audio code. Embeds
-run in a sandboxed frame under a content security policy with no network,
-and frames can never call the app's Go code.
-
-## Open items
-
+- Real-time co-editing is not built: pages sync and merge block by block.
 - On-device speech recognition (Qwen3-ASR, SenseVoice through sherpa-onnx)
-  is not ported: sherpa-onnx needs native libraries. Serve a model behind an
-  OpenAI-compatible endpoint on your network instead.
-- OpenAI and Claude account sign-in for third-party apps is unconfirmed, so
-  the Models screen uses API keys.
-- MOSS-Transcribe-Diarize has no on-device runtime; it can be served behind
-  an OpenAI-compatible endpoint.
+  is not ported, as sherpa-onnx needs native libraries. Serve a model
+  behind an OpenAI-compatible endpoint on your network instead; the same
+  goes for MOSS-Transcribe-Diarize.
+- OpenAI and Claude account sign-in for third-party apps is unconfirmed,
+  so those providers take API keys.
 
-## Third-party assets
+## Acknowledgments
 
-Figtree and Source Serif 4 are under the SIL Open Font License
-(`internal/theme/fonts/OFL-*.txt`); Lucide icons are under the ISC license
-(`internal/theme/icons/LICENSE`).
+Leaflet is built on [MyGo](https://github.com/egoist/mygo). It bundles
+[Figtree](https://github.com/erikdkennedy/figtree) and
+[Source Serif 4](https://github.com/adobe-fonts/source-serif) under the SIL
+Open Font License (`internal/theme/fonts/OFL-*.txt`),
+[Lucide](https://lucide.dev) icons under the ISC license
+(`internal/theme/icons/LICENSE`), and [KaTeX](https://katex.org) and
+[Pele](https://github.com/obsidianmd/pele) under the MIT license for math
+and diagrams ([`internal/app/third_party`](internal/app/third_party/README.md)).

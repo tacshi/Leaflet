@@ -1,4 +1,4 @@
-# Check and cleanup; go tool mygo builds the app.
+# Check and cleanup; scripts/ builds and publishes the app.
 #
 #   make check		# formatting, lint, known vulnerabilities, security
 #   make clean		# remove what builds leave: build/ and the binary
@@ -6,8 +6,8 @@
 # Everything builds without cgo, as MyGo requires.
 export CGO_ENABLED := 0
 
-# Where go tool mygo build puts the app and updates; and the binary
-# go build . leaves here.
+# Where scripts/ and go tool mygo build put the apps, installers and
+# updates; and the binary go build . leaves here.
 BUILD_DIR ?= build
 BINARIES := leaflet
 

@@ -624,13 +624,14 @@ const embedFit = `<script>(function () {
 // script only passes the frame's leftover wheel movement and its content's
 // size to the page, for the embed id.
 //
-// In the dark theme the frame's root gets data-theme="dark" and a dark
-// color scheme, so an embed that styles nothing follows the page, and one
-// that does can match it with :root[data-theme="dark"].
-func embedPage(id, src string, dark bool) string {
-	bg, scheme := "#fff", "light"
-	if dark {
-		bg, scheme = "#1b1e24", "dark"
+// Its background is the page's. In the dark theme the frame's root gets
+// data-theme="dark" and a dark color scheme, so an embed that styles
+// nothing follows the page, and one that does can match it with
+// :root[data-theme="dark"].
+func embedPage(id, src string, pal *theme.Palette) string {
+	bg, scheme := hexOf(pal.Surface), "light"
+	if pal.Dark {
+		scheme = "dark"
 	}
 	meta := `<meta http-equiv="Content-Security-Policy" content="` + embedCSP + `">` +
 		`<meta name="color-scheme" content="` + scheme + `">` +
@@ -654,6 +655,16 @@ func embedPage(id, src string, dark bool) string {
 		`var z = e.data.leafletSize;` +
 		`if (z && typeof z[0] === "number" && typeof z[1] === "number") window.mygo.call("Embeds.Size", ` + strconv.Quote(id) + `, z[0], z[1]);` +
 		`});</script></body></html>`
+}
+
+// hexOf writes a color as CSS's "#rrggbb".
+func hexOf(c ui.Color) string {
+	const digits = "0123456789abcdef"
+	out := []byte{'#'}
+	for _, v := range []uint8{c.R, c.G, c.B} {
+		out = append(out, digits[v>>4], digits[v&15])
+	}
+	return string(out)
 }
 
 // embedScroll is the service an embed's wrapper calls: to scroll the page,
@@ -733,18 +744,14 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 // agent, by undo or a restored version.
 func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float32) float32, height, gap float32) {
 	pal := theme.Of(c)
-	src := embedPage(key, html, c.Theme().Dark)
+	src := embedPage(key, html, pal)
 	size, ready := a.embedSizes[key]
 	if ready && abs32(size.w-w) < 4 {
 		height = fit(size.h)
 	}
 	v := a.embeds[key]
 	if v == nil && a.win != nil {
-		bg := "#ffffff"
-		if c.Theme().Dark {
-			bg = "#1b1e24"
-		}
-		wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: bg})
+		wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: hexOf(pal.Surface)})
 		if err != nil {
 			ui.Text(c, "This cannot show here: "+err.Error()).TextColor(pal.TextMuted)
 			return

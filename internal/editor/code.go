@@ -76,7 +76,7 @@ func codeTheme(pal *theme.Palette) *codeeditor.Theme {
 	if ct, ok := codeThemes[pal]; ok {
 		return ct
 	}
-	ct := codeeditor.DefaultTheme(&ui.Theme{Dark: pal == theme.For(true), Background: pal.Code, Text: pal.Text,
+	ct := codeeditor.DefaultTheme(&ui.Theme{Dark: pal.Dark, Background: pal.Code, Text: pal.Text,
 		TextMuted: pal.TextMuted, Selection: pal.Selection, Accent: pal.Accent, Border: pal.Border})
 	codeThemes[pal] = ct
 	return ct

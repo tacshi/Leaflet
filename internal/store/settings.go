@@ -40,7 +40,9 @@ func DecodeModelChoice(raw string) (ModelChoice, bool) {
 
 // Settings are the app's settings on this device.
 type Settings struct {
-	Theme        string  `json:"theme"` // system | light | dark
+	Theme string `json:"theme"` // system | light | sepia | dark
+	// Accent is a name of theme.Accents, "system" or "" for Indigo.
+	Accent       string  `json:"accent,omitempty"`
 	TextSize     float64 `json:"text_size"`
 	DefaultModel string  `json:"default_model,omitempty"`
 	// LocalWhenOffline switches to a local model when offline.

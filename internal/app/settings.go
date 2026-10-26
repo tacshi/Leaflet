@@ -105,12 +105,45 @@ type accountState struct {
 
 var account accountState
 
+// accentDots is a row of dots choosing the accent: the desktop's, where
+// it has one, then Leaflet's.
+func (a *App) accentDots(c *ui.Context) {
+	pal := theme.Of(c)
+	isDark := c.Theme().Dark
+	ui.Row(c.Key("accents")).Gap(8).Children(func() {
+		dot := func(name, label string, color ui.Color) {
+			d := ui.ButtonBase(c.Key(name)).Size(20, 20).Radius(999).Background(color).Label(label).Tooltip(label)
+			chosen := a.settings.Accent == name || a.settings.Accent == "" && name == theme.Accents[0].Name
+			if chosen {
+				d.Border(2, pal.Text)
+			} else if d.Hovered() {
+				d.Border(2, pal.Border)
+			}
+			if d.Clicked() && !chosen {
+				a.settings.Accent = name
+				a.saveSettings()
+				a.applyTheme()
+			}
+		}
+		if system, ok := theme.Accent("system", isDark, c.Preferences().Accent); ok {
+			dot("system", "System", system)
+		}
+		for _, acc := range theme.Accents {
+			color := acc.Light
+			if isDark {
+				color = acc.Dark
+			}
+			dot(acc.Name, acc.Name, color)
+		}
+	})
+}
+
 func (a *App) accountSettings(c *ui.Context) {
 	pal := theme.Of(c)
 	s := &account
 	if !s.nameLoaded {
 		s.name, s.nameLoaded = a.session.DisplayName, true
-		s.themeIdx = map[string]int{"system": 0, "light": 1, "dark": 2}[a.settings.Theme]
+		s.themeIdx = map[string]int{"system": 0, "light": 1, "sepia": 2, "dark": 3}[a.settings.Theme]
 		s.size = a.settings.TextSize
 	}
 	heading(c, "Account", "Your name, how pages look, and the devices you use.")
@@ -148,8 +181,8 @@ func (a *App) accountSettings(c *ui.Context) {
 	label(c, "Appearance")
 	card(c, "appearance", func() {
 		settingRow(c, "theme", "Theme", "", true, func() {
-			if ui.Segmented(c.Key("theme"), &s.themeIdx, "System", "Light", "Dark"); true {
-				want := []string{"system", "light", "dark"}[s.themeIdx]
+			if ui.Segmented(c.Key("theme"), &s.themeIdx, "System", "Light", "Sepia", "Dark"); true {
+				want := []string{"system", "light", "sepia", "dark"}[s.themeIdx]
 				if want != a.settings.Theme {
 					a.settings.Theme = want
 					a.saveSettings()
@@ -157,6 +190,7 @@ func (a *App) accountSettings(c *ui.Context) {
 				}
 			}
 		})
+		settingRow(c, "accent", "Accent color", "", false, func() { a.accentDots(c) })
 		settingRow(c, "size", "Page text size", "", false, func() {
 			sizes := []float64{15, 17, 19, 21}
 			chosen := 1

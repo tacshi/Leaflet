@@ -52,7 +52,7 @@ func (a *App) view(c *ui.Context) {
 		// resizes the sidebar.
 		split := ui.Split(c, &a.sidebarW, func() {
 			bar := ui.Column(c.Key("sidebar")).Fill()
-			if !c.Vibrancy() {
+			if !c.Vibrancy() || pal.Opaque {
 				bar.Background(pal.Sidebar)
 			}
 			bar.Children(func() { a.sidebar(c) })

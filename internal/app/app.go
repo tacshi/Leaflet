@@ -312,8 +312,9 @@ func (a *App) update(fn func()) {
 }
 
 func (a *App) applyTheme() {
+	theme.Look(a.settings.Theme == "sepia", a.settings.Accent)
 	switch a.settings.Theme {
-	case "light":
+	case "light", "sepia":
 		mygo.Theme.SetSource(mygo.ThemeLight)
 	case "dark":
 		mygo.Theme.SetSource(mygo.ThemeDark)

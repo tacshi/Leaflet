@@ -375,3 +375,24 @@ func TestColorsRoundTrip(t *testing.T) {
 		t.Errorf("markdown %q", md)
 	}
 }
+
+// One side wraps blocks in a new toggle while the other edits elsewhere:
+// the blocks move into the toggle, once each, in order.
+func TestMergeMoveIntoANewBlock(t *testing.T) {
+	base := page(map[string]int64{"a": 1, "x": 1, "y": 1}, para("a", "one"), para("x", "two"), para("y", "three"))
+	box := para("box", "box")
+	box.Type = "toggle"
+	box.Children = []*Node{para("x", "two"), para("y", "three")}
+	wrapped := page(map[string]int64{"a": 1, "x": 2, "y": 2, "box": 2}, para("a", "one"), box)
+	edited := page(map[string]int64{"a": 3, "x": 1, "y": 1}, para("a", "ONE"), para("x", "two"), para("y", "three"))
+	for _, got := range []*Content{first(Merge(base, edited, wrapped)), first(Merge(base, wrapped, edited))} {
+		if !reflect.DeepEqual(texts(got), []string{"ONE", "box", "two", "three"}) {
+			t.Errorf("texts %v", texts(got))
+		}
+		if b := got.Find("box"); b == nil || len(b.Children) != 2 {
+			t.Errorf("box %+v", b)
+		}
+	}
+}
+
+func first(c *Content, _ []Conflict) *Content { return c }

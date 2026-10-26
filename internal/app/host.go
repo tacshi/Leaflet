@@ -79,8 +79,19 @@ type host struct{ a *App }
 
 func (h *host) PageTitle(id string) string { return h.a.pageTitleOf(id) }
 func (h *host) OpenPage(id string)         { h.a.openPage(id) }
-func (h *host) Image(url string) *ui.Bitmap {
-	return h.a.images.get(url, func() { h.a.update(func() {}) })
+func (h *host) Image(n *doc.Node) *ui.Bitmap {
+	redraw := func() { h.a.update(func() {}) }
+	url := n.Str("url")
+	// An uploaded picture is found by its file: its url is a path on the
+	// device that uploaded it.
+	if f, ok := h.a.fileByID(n.Str("file_id")); ok {
+		path := h.a.localFile(f, redraw)
+		if path == "" {
+			return nil
+		}
+		url = "file://" + path
+	}
+	return h.a.images.get(url, redraw)
 }
 func (h *host) Embed(c *ui.Context, n *doc.Node, width float32) { h.a.embedBlock(c, n, width) }
 func (h *host) Video(c *ui.Context, n *doc.Node, width float32) { h.a.videoBlock(c, n, width) }
@@ -373,11 +384,66 @@ func (a *App) uploadFile(folderID string) {
 }
 
 func (a *App) openFile(f store.File) {
-	if f.LocalPath == "" {
-		a.toast("This file is on the server; it downloads when you sync.")
+	// A click tries a download that failed again.
+	delete(a.downloads, f.ID)
+	path := a.localFile(f, func() {
+		if f, ok := a.fileByID(f.ID); ok && f.LocalPath != "" {
+			_ = mygo.Shell.OpenPath(f.LocalPath)
+		}
+	})
+	if path == "" {
+		a.toast("Downloading " + f.Name + "…")
 		return
 	}
-	_ = mygo.Shell.OpenPath(f.LocalPath)
+	_ = mygo.Shell.OpenPath(path)
+}
+
+func (a *App) fileByID(id string) (store.File, bool) {
+	if id == "" {
+		return store.File{}, false
+	}
+	for _, f := range a.files {
+		if f.ID == id {
+			return f, true
+		}
+	}
+	return store.File{}, false
+}
+
+// localFile returns where a file is on this device, or "" while one
+// uploaded from another device downloads; done runs once it has. A
+// download that fails is not tried again until the file is opened.
+func (a *App) localFile(f store.File, done func()) string {
+	if f.LocalPath != "" {
+		if _, err := os.Stat(f.LocalPath); err == nil {
+			return f.LocalPath
+		}
+	}
+	if f.StoragePath == "" || !a.backend.SignedIn() || a.downloads[f.ID] {
+		return ""
+	}
+	if a.downloads == nil {
+		a.downloads = map[string]bool{}
+	}
+	a.downloads[f.ID] = true
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		data, err := a.backend.Download(ctx, "files", f.StoragePath)
+		if err == nil {
+			_, err = a.st.DownloadedFile(f.ID, data)
+		}
+		a.update(func() {
+			if err != nil {
+				log.Printf("download %s: %v", f.Name, err)
+				return
+			}
+			delete(a.downloads, f.ID)
+			a.reload(store.Change{Table: "files"})
+			done()
+		})
+	}()
+	return ""
 }
 
 // exportPage saves a page as Markdown.

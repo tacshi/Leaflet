@@ -534,10 +534,12 @@ func (s *Store) SaveContent(pageID string, c *doc.Content) (*doc.Content, bool, 
 
 // HistoryEntry is a snapshot of a page.
 type HistoryEntry struct {
-	ID        string
-	PageID    string
-	Content   string
-	Reason    string // agent_run | autosave | restore | conflict | manual (named)
+	ID      string
+	PageID  string
+	Content string
+	Reason  string // agent_run | autosave | restore | conflict | manual (named)
+	// AIJobID is the local agent run that made the snapshot. It stays on
+	// this device, as the run's job does.
 	AIJobID   string
 	Label     string
 	CreatedAt time.Time

@@ -455,7 +455,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 	if o.Surface == "sidebar" {
 		req.ConversationID = s.ConversationID
 	}
-	first := true
+	d := &delivery{}
 	events := Events{
 		Status: func(st string) { h.host.Update(func() { run.Status = st }) },
 		Op: func(op doc.Op, summary string) {
@@ -465,14 +465,13 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 				if o.Reply != nil {
 					o.Reply.Text = summary + "…"
 				}
-				if op.Op == "create_page" || op.Op == "delete_page" {
-					return
-				}
-				if live := h.host.Editor(pageID); live != nil {
-					if err := live.ApplyOp(op, first); err != nil {
-						log.Printf("agent op on the open page: %v", err)
-					}
-					first = false
+				switch live := h.host.Editor(pageID); {
+				case live != nil:
+					d.to(live, run.Ops)
+				case !option.Local():
+					// The server keeps a cloud run's ops: a page opened
+					// later gets them by syncing.
+					d.sent = len(run.Ops)
 				}
 			})
 		},
@@ -495,7 +494,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 				}
 			}
 		}
-		h.host.Update(func() { h.finish(s, run, req, option, before, work, ed == nil, res, err, o) })
+		h.host.Update(func() { h.finish(s, run, req, option, before, d, res, err, o) })
 	}()
 	return run
 }
@@ -527,7 +526,53 @@ func (h *Hub) insertJob(ctx context.Context, req Request) error {
 	return err
 }
 
-func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before, work *doc.Content, closed bool, res Result, err error, o RunOptions) {
+// delivery is how far a run's ops have reached the page: those before
+// sent are in an open editor, or were saved with it when it closed.
+type delivery struct {
+	sent int
+	ed   *editor.Editor
+}
+
+// to applies the ops ed does not have yet, in order, so an op never comes
+// before the blocks it needs. The first op an editor gets starts an undo
+// step that the rest join.
+func (d *delivery) to(ed *editor.Editor, ops []doc.Op) {
+	for _, op := range ops[d.sent:] {
+		if op.Op == "create_page" || op.Op == "delete_page" {
+			continue
+		}
+		if err := ed.ApplyOp(op, ed != d.ed); err != nil {
+			log.Printf("agent op on the open page: %v", err)
+		}
+		d.ed = ed
+	}
+	d.sent = len(ops)
+}
+
+// save applies the ops the page does not have yet to its stored content,
+// which keeps whatever else changed there during the run.
+func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op) error {
+	if d.sent == len(ops) {
+		return nil
+	}
+	c := st.Content(pageID)
+	if c == nil {
+		c = doc.Empty()
+	}
+	for _, op := range ops[d.sent:] {
+		if op.Op == "create_page" || op.Op == "delete_page" {
+			continue
+		}
+		if err := c.Apply(op); err != nil {
+			log.Printf("agent op on a closed page: %v", err)
+		}
+	}
+	d.sent = len(ops)
+	_, _, err := st.SaveContent(pageID, c)
+	return err
+}
+
+func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *doc.Content, d *delivery, res Result, err error, o RunOptions) {
 	s.Running = false
 	run.Reply = res.Reply
 	if len(run.Ops) == 0 && len(res.Ops) > 0 {
@@ -541,16 +586,12 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before, w
 	pageID := s.PageID
 	if len(run.Ops) > 0 {
 		if option.Local() {
-			if live := h.host.Editor(pageID); live != nil && closed {
-				// The page was opened during the run: it gets the run's
-				// changes as one step.
-				if err := live.ApplyOps(run.Ops); err != nil {
-					log.Printf("agent run on the open page: %v", err)
-				}
-			} else if closed {
-				if _, _, err := h.st.SaveContent(pageID, work); err != nil {
-					log.Printf("agent run on a closed page: %v", err)
-				}
+			// The page may have opened or closed during the run: it gets
+			// the ops it missed, open or stored.
+			if live := h.host.Editor(pageID); live != nil {
+				d.to(live, run.Ops)
+			} else if err := d.save(h.st, pageID, run.Ops); err != nil {
+				log.Printf("agent run on a closed page: %v", err)
 			}
 		}
 		label := "Before " + option.Name() + ": " + short(req.Instruction)
@@ -592,7 +633,11 @@ func short(s string) string {
 }
 
 func (h *Hub) toolContext(pageID, title, agent string, content *doc.Content, settings store.Settings) ToolContext {
-	return PageTools(h.st, pageID, title, agent, content, settings.AgentsReadOtherPages)
+	tc := PageTools(h.st, pageID, title, agent, content, settings.AgentsReadOtherPages)
+	// An agent edits only what the user may.
+	p, err := h.st.Page(pageID)
+	tc.ReadOnly = err != nil || !h.st.CanEdit(p)
+	return tc
 }
 
 func (h *Hub) logLocalJob(run *Run, req Request) {

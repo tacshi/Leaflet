@@ -86,7 +86,10 @@ type App struct {
 	dialogs dialogs
 	md      markdown.Options
 	images  *imageCache
-	embeds  map[string]*mygo.WebView
+	// downloads are the files downloading from the server, or that
+	// failed to.
+	downloads map[string]bool
+	embeds    map[string]*mygo.WebView
 	// embedSrc is the page each embed's web view last loaded, and
 	// embedSizes how tall its content said it is, once it has drawn.
 	embedSrc   map[string]string
@@ -381,6 +384,7 @@ func (a *App) reload(ch store.Change) {
 	}
 	if a.page != nil && (all || ch.Table == "page_members") {
 		a.page.members, _ = a.st.Members(a.page.id)
+		a.page.editor.ReadOnly = !a.canEdit(a.page.id)
 	}
 	if a.win != nil {
 		a.win.Invalidate()
@@ -621,8 +625,9 @@ func (a *App) loadPage(id string) {
 	ps.threads, _ = a.st.Threads(id)
 	ps.members, _ = a.st.Members(id)
 	a.page = ps
+	a.sync.SetOpen(id, true)
 	_ = a.st.SetValue("last.page", id)
-	if a.backend.SignedIn() && !a.isShared(*p) {
+	if a.backend.SignedIn() {
 		go a.loadMembers(id)
 	}
 }
@@ -637,26 +642,15 @@ func (a *App) closePage() {
 		delete(a.embeds, id)
 	}
 	clear(a.embedSrc)
+	a.sync.SetOpen(a.page.id, false)
 	a.page = nil
 	a.dropVideos()
 }
 
-// canEdit reports whether the user may change a page: their own, or one
-// shared with them as an editor.
+// canEdit reports whether the user may change a page.
 func (a *App) canEdit(id string) bool {
 	p := a.pageByID(id)
-	if p == nil {
-		return false
-	}
-	if !a.isShared(*p) {
-		return true
-	}
-	for _, m := range a.st.MembersOrNil(id) {
-		if m.UserID == a.session.UserID {
-			return m.Role == "editor" || m.Role == "owner"
-		}
-	}
-	return true
+	return p != nil && a.st.CanEdit(*p)
 }
 
 // scheduleSave saves the open page shortly after the typing stops.

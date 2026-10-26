@@ -206,6 +206,28 @@ func (s *Store) AddFile(source, folderID, pageID, mime string) (File, error) {
 	return f, nil
 }
 
+// DownloadedFile keeps a file downloaded from the server at path, which
+// is this device's alone.
+func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
+	var name string
+	if err := s.db.QueryRow(`SELECT name FROM files WHERE id = ?`, id).Scan(&name); err != nil {
+		return "", err
+	}
+	dir := filepath.Join(s.Dir, "files", id)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return "", err
+	}
+	local := filepath.Join(dir, filepath.Base(name))
+	if err := os.WriteFile(local, data, 0o600); err != nil {
+		return "", err
+	}
+	if _, err := s.db.Exec(`UPDATE files SET local_path = ? WHERE id = ?`, local, id); err != nil {
+		return "", err
+	}
+	s.Notify("files", "")
+	return local, nil
+}
+
 // DeleteFile deletes a file.
 func (s *Store) DeleteFile(f File) error {
 	now := time.Now()

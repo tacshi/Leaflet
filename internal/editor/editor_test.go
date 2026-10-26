@@ -18,7 +18,7 @@ type fakeHost struct {
 
 func (h *fakeHost) PageTitle(id string) string                  { return "Sub" }
 func (h *fakeHost) OpenPage(id string)                          { h.opened = append(h.opened, id) }
-func (h *fakeHost) Image(url string) *ui.Bitmap                 { return nil }
+func (h *fakeHost) Image(n *doc.Node) *ui.Bitmap                { return nil }
 func (h *fakeHost) Embed(c *ui.Context, n *doc.Node, w float32) {}
 func (h *fakeHost) Video(c *ui.Context, n *doc.Node, w float32) {}
 func (h *fakeHost) Card(c *ui.Context, n *doc.Node)             {}

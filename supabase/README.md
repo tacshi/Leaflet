@@ -90,5 +90,6 @@ migration relies on `vault.create_secret`, `vault.update_secret` and
   `sensevoice`, `soniox`, `openai-compatible`. The server transcribes only
   `soniox` and OpenAI-compatible endpoints (`provider_id` or `base_url` set);
   on-device models transcribe on the device.
-- **Storage**: viewers of a shared page can read its recordings and the
-  owner's images; only the space owner writes `files/` and `images/`.
+- **Storage**: viewers of a shared page can read its recordings, the files
+  on it and the owner's images; only the space owner writes `files/` and
+  `images/`.

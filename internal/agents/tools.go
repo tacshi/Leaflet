@@ -73,15 +73,14 @@ func tool(name, desc string, props map[string]any, required ...string) map[strin
 	}}
 }
 
-// ToolDefinitions are the tools offered to a model.
-func ToolDefinitions(crossPage bool) []map[string]any {
+// ToolDefinitions are the tools offered to a model: only the reading ones
+// on a page the user may not edit.
+func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 	out := []map[string]any{
 		tool("read_page", "Read the whole page: every block with its ID, subpage titles, and comment threads.", map[string]any{}),
-		tool("insert_blocks", "Insert new blocks at a position.", map[string]any{"position": positionSchema, "blocks": map[string]any{"type": "array", "items": blockSchema}}, "position", "blocks"),
-		tool("replace_block", "Replace one block with a new one, keeping its ID (and its nested items when it stays a list).", map[string]any{"id": map[string]any{"type": "string"}, "block": blockSchema}, "id", "block"),
-		tool("move_block", "Move a block (with its nested items) to a new position.", map[string]any{"id": map[string]any{"type": "string"}, "position": positionSchema}, "id", "position"),
-		tool("delete_blocks", "Delete blocks by ID, with their nested items.", map[string]any{"ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "ids"),
-		tool("create_subpage", "Create a subpage of this page, optionally with content.", map[string]any{"title": map[string]any{"type": "string"}, "blocks": map[string]any{"type": "array", "items": blockSchema}}, "title"),
+	}
+	if !readOnly {
+		out = append(out, editTools()...)
 	}
 	if crossPage {
 		out = append(out,
@@ -91,14 +90,27 @@ func ToolDefinitions(crossPage bool) []map[string]any {
 	return out
 }
 
+func editTools() []map[string]any {
+	return []map[string]any{
+		tool("insert_blocks", "Insert new blocks at a position.", map[string]any{"position": positionSchema, "blocks": map[string]any{"type": "array", "items": blockSchema}}, "position", "blocks"),
+		tool("replace_block", "Replace one block with a new one, keeping its ID (and its nested items when it stays a list).", map[string]any{"id": map[string]any{"type": "string"}, "block": blockSchema}, "id", "block"),
+		tool("move_block", "Move a block (with its nested items) to a new position.", map[string]any{"id": map[string]any{"type": "string"}, "position": positionSchema}, "id", "position"),
+		tool("delete_blocks", "Delete blocks by ID, with their nested items.", map[string]any{"ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "ids"),
+		tool("create_subpage", "Create a subpage of this page, optionally with content.", map[string]any{"title": map[string]any{"type": "string"}, "blocks": map[string]any{"type": "array", "items": blockSchema}}, "title"),
+	}
+}
+
 // ToolContext is what the tools need beyond the page's blocks.
 type ToolContext struct {
 	Content   *doc.Content
 	PageID    string
 	PageTitle string
 	AgentName string
-	Subpages  func() []map[string]any
-	Comments  func() []map[string]any
+	// ReadOnly is a page the user may view but not edit: the tools that
+	// change it refuse.
+	ReadOnly bool
+	Subpages func() []map[string]any
+	Comments func() []map[string]any
 	// CreateSubpage makes the subpage and returns its ID.
 	CreateSubpage func(title string, nodes []*doc.Node) (string, error)
 	// ListPages and ReadOtherPage are nil when cross-page reading is off.
@@ -239,6 +251,12 @@ func terr(format string, args ...any) error {
 }
 
 func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, error) {
+	switch name {
+	case "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_subpage":
+		if x.Ctx.ReadOnly {
+			return nil, terr("You can read this page but not edit it: the user has view access only.")
+		}
+	}
 	switch name {
 	case "read_page":
 		return x.readPage(), nil

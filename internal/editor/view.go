@@ -319,8 +319,7 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 }
 
 func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
-	url := n.Str("url")
-	bmp := e.Host.Image(url)
+	bmp := e.Host.Image(n)
 	if bmp == nil {
 		ui.Row(c).Height(160).FillWidth().Center().Radius(8).Background(pal.Ground).Border(1, pal.Divider).Children(func() {
 			ui.Icon(c, theme.Icon("image")).TextColor(pal.TextMuted)

@@ -1,7 +1,9 @@
 package store
 
 import (
+	"strconv"
 	"strings"
+	gosync "sync"
 	"testing"
 	"time"
 
@@ -168,6 +170,58 @@ func TestDequeueKeepsNewerPayload(t *testing.T) {
 	}
 }
 
+// An edit queued while another process sends the queue is never lost:
+// right after it is queued, it either waits or went up.
+func TestQueueWhileSending(t *testing.T) {
+	dir := t.TempDir()
+	app, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = app.Close() }()
+	sync, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sync.Close() }()
+	var mu gosync.Mutex
+	sent := map[string]bool{}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			entries, _ := sync.Pending()
+			for _, e := range entries {
+				mu.Lock()
+				sent[e.Payload] = true
+				mu.Unlock()
+				_ = sync.Dequeue(e)
+			}
+		}
+	}()
+	defer func() { close(stop); <-done }()
+	for i := range 1000 {
+		if err := app.Queue("pages", "p1", map[string]any{"title": i}, "", "p1"); err != nil {
+			t.Fatal(err)
+		}
+		payload := `{"title":` + strconv.Itoa(i) + `}`
+		mu.Lock()
+		left, _ := app.Pending()
+		waits := len(left) > 0 && left[len(left)-1].Payload == payload
+		if !waits && !sent[payload] {
+			mu.Unlock()
+			t.Fatalf("edit %d was lost", i)
+		}
+		mu.Unlock()
+	}
+}
+
 func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 	s := open(t)
 	if _, err := s.CreatePage(NewPageOptions{Title: "A's plan"}); err != nil {
@@ -191,6 +245,7 @@ func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 	if _, err := s.LoadSession(&User{ID: "A", Email: "a@example.com"}); err != nil {
 		t.Fatal(err)
 	}
+	device := s.DeviceID()
 	if pages, _ := s.Pages(); len(pages) != 1 {
 		t.Fatalf("A signing back in: %d pages", len(pages))
 	}
@@ -207,6 +262,9 @@ func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 	}
 	if sess.SpaceID == "remote-a" {
 		t.Error("B's session is in A's space")
+	}
+	if s.DeviceID() == device {
+		t.Error("B uses the device row A registered")
 	}
 	for _, k := range []string{"space.A", "account", "sync.cursor.pages"} {
 		if _, ok := s.Value(k); ok {
@@ -441,5 +499,28 @@ func TestTodos(t *testing.T) {
 	got, err := s.Todos()
 	if err != nil || len(got) != 1 || got[0].PageID != p.ID || got[0].PageTitle != "PRD" || got[0].Text != "Send the draft" {
 		t.Errorf("todos %+v %v", got, err)
+	}
+}
+
+// A local agent run's snapshot keeps its job here, and goes up without
+// it, as the job has no server row.
+func TestAgentRunHistoryGoesUpWithoutItsJob(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddHistory(p.ID, doc.Empty(), "agent_run", "job-1", "Before Test"); err != nil {
+		t.Fatal(err)
+	}
+	history, _ := s.History(p.ID)
+	if len(history) != 1 || history[0].AIJobID != "job-1" {
+		t.Fatalf("history %+v", history)
+	}
+	entries, _ := s.Pending()
+	for _, e := range entries {
+		if e.Entity == "page_history" && strings.Contains(e.Payload, "ai_job_id") {
+			t.Errorf("queued %s", e.Payload)
+		}
 	}
 }

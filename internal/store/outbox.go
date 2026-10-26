@@ -27,29 +27,42 @@ type OutboxEntry struct {
 
 // Queue queues an upsert for the server. A pending upsert of the same row
 // is replaced instead of queued twice, so the queue shows one entry per
-// changed thing; the replacement gets the next revision.
+// changed thing; the replacement gets the next revision. Replacing goes
+// by the row, in one transaction, so sync sending the entry meanwhile
+// cannot leave the change out of the queue.
 func (s *Store) Queue(entity, id string, payload map[string]any, label, pageID string) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	var pending int64
-	err = s.db.QueryRow(`SELECT id FROM outbox WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, entity, id).Scan(&pending)
-	switch err {
-	case nil:
-		if label == "" {
-			_, err = s.db.Exec(`UPDATE outbox SET payload = ?, revision = revision + 1, attempts = 0, last_error = NULL WHERE id = ?`, string(raw), pending)
-		} else {
-			_, err = s.db.Exec(`UPDATE outbox SET payload = ?, label = ?, revision = revision + 1, attempts = 0, last_error = NULL WHERE id = ?`, string(raw), label, pending)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	set := `payload = ?, revision = revision + 1, attempts = 0, last_error = NULL`
+	args := []any{string(raw)}
+	if label != "" {
+		set += `, label = ?`
+		args = append(args, label)
+	}
+	res, err := tx.Exec(`UPDATE outbox SET `+set+` WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, append(args, entity, id)...)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		if _, err := tx.Exec(`INSERT INTO outbox (entity, entity_id, op, payload, label, page_id, created_at) VALUES (?, ?, 'upsert', ?, ?, ?, ?)`,
+			entity, id, string(raw), label, ns(pageID), time.Now().UnixMilli()); err != nil {
+			return err
 		}
-	case sql.ErrNoRows:
-		_, err = s.db.Exec(`INSERT INTO outbox (entity, entity_id, op, payload, label, page_id, created_at) VALUES (?, ?, 'upsert', ?, ?, ?, ?)`,
-			entity, id, string(raw), label, ns(pageID), time.Now().UnixMilli())
 	}
-	if err == nil {
-		s.Notify("outbox", pageID)
+	if err := tx.Commit(); err != nil {
+		return err
 	}
-	return err
+	s.Notify("outbox", pageID)
+	return nil
 }
 
 // Pending returns the queue, oldest first.

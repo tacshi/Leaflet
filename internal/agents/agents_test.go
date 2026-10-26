@@ -198,7 +198,7 @@ func TestProviderErrors(t *testing.T) {
 }
 
 func TestCommentPromptAnswersRatherThanEdits(t *testing.T) {
-	p := SystemPrompt("ChatGPT", "PRD", "comment", false, true)
+	p := SystemPrompt("ChatGPT", "PRD", "comment", false, true, false)
 	if !strings.Contains(p, "edit the page only if they ask for a change") {
 		t.Error("a comment's prompt lets the agent edit the page unasked")
 	}

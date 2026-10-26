@@ -84,7 +84,8 @@ func JobToRemote(j Job, userID string) map[string]any {
 	}
 }
 
-// HistoryToRemote is a snapshot as the page_history table has it.
+// HistoryToRemote is a snapshot as the page_history table has it, without
+// its job: a local run's job has no server row for ai_job_id to name.
 func HistoryToRemote(h HistoryEntry, userID string) map[string]any {
 	var content any = rawJSON(h.Content)
 	var by any = userID
@@ -92,8 +93,7 @@ func HistoryToRemote(h HistoryEntry, userID string) map[string]any {
 		by = nil
 	}
 	return map[string]any{
-		"id": h.ID, "page_id": h.PageID, "content": content, "reason": h.Reason, "ai_job_id": ns(h.AIJobID),
-		"created_by": by, "created_at": iso(h.CreatedAt),
+		"id": h.ID, "page_id": h.PageID, "content": content, "reason": h.Reason, "created_by": by, "created_at": iso(h.CreatedAt),
 	}
 }
 

@@ -85,7 +85,7 @@ func Today() string { return time.Now().Format("2006-01-02") }
 
 // SystemPrompt is the prompt of every agent run, kept in step with
 // supabase/functions/_shared/prompt.ts.
-func SystemPrompt(agentName, pageTitle, surface string, canReadOtherPages, supportsTools bool) string {
+func SystemPrompt(agentName, pageTitle, surface string, canReadOtherPages, supportsTools, readOnly bool) string {
 	focus := "The user is chatting with you beside the page. The whole page is your focus."
 	switch surface {
 	case "inline":
@@ -100,7 +100,13 @@ func SystemPrompt(agentName, pageTitle, surface string, canReadOtherPages, suppo
 	var b strings.Builder
 	b.WriteString("You are " + agentName + ", an AI collaborator in Leaflet, an app where people and AI co-write living documents called pages. Today is " + Today() + ". The current page is \"" + pageTitle + "\".\n\n")
 	b.WriteString(focus + " Focus is where to start, not a boundary: you may read every block and edit anywhere on the page when the request calls for it.\n\n")
-	if supportsTools {
+	switch {
+	case readOnly:
+		b.WriteString("The user can view this page but not edit it, so you cannot edit it either. Answer from the page instead.\n")
+		if supportsTools && canReadOtherPages {
+			b.WriteString("- You may read the user's other pages with list_pages and read_other_page.\n")
+		}
+	case supportsTools:
 		b.WriteString(`How to work:
 - Call read_page first unless the page is already in this conversation.
 - Make every change with the tools (insert_blocks, replace_block, move_block, delete_blocks, create_subpage). Never paste page content into your reply instead of editing.
@@ -118,7 +124,7 @@ func SystemPrompt(agentName, pageTitle, surface string, canReadOtherPages, suppo
 		if canReadOtherPages {
 			b.WriteString("- You may read the user's other pages with list_pages and read_other_page, but you only edit this page.\n")
 		}
-	} else {
+	default:
 		b.WriteString("This model cannot call tools, so you cannot edit the page. Answer in the reply, and say what you would change.\n")
 	}
 	b.WriteString("\nWhen you are done, reply in one to three short sentences: what you changed, or your answer. Do not repeat the content you wrote.")

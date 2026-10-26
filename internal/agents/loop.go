@@ -85,14 +85,14 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 		parts = append(parts, "Page content:\n"+string(raw))
 	}
 	parts = append(parts, req.Instruction)
-	messages := []map[string]any{{"role": "system", "content": SystemPrompt(req.AgentName, req.PageTitle, req.Surface, tc.ListPages != nil, req.SupportsTools)}}
+	messages := []map[string]any{{"role": "system", "content": SystemPrompt(req.AgentName, req.PageTitle, req.Surface, tc.ListPages != nil, req.SupportsTools, tc.ReadOnly)}}
 	for _, t := range req.History {
 		messages = append(messages, map[string]any{"role": t["role"], "content": t["content"]})
 	}
 	messages = append(messages, map[string]any{"role": "user", "content": strings.Join(parts, "\n\n")})
 	var tools []map[string]any
 	if req.SupportsTools {
-		tools = ToolDefinitions(tc.ListPages != nil)
+		tools = ToolDefinitions(tc.ListPages != nil, tc.ReadOnly)
 	}
 	for round := 0; round < MaxRounds; round++ {
 		res, err := client.Chat(ctx, req.Model, messages, tools, 0)

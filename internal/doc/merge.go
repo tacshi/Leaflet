@@ -108,7 +108,9 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 	}
 
 	// Blocks on both sides: the newer version of each wins. Iterate in
-	// document order so moves apply predictably.
+	// document order so moves apply predictably. A move into a block only
+	// the other side has waits until that block is in.
+	waiting := map[string]bool{}
 	for _, n := range primary.All() {
 		id := n.ID
 		p := primaryFlat[id]
@@ -148,7 +150,9 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		}
 		if p.parent != o.parent || p.prev != o.prev {
 			if otherWins(movedSinceBase(p, primaryFlat, b, baseFlat), movedSinceBase(o, otherFlat, b, baseFlat)) {
-				if pos, ok := positionIn(result, o); ok && !result.IsSelfOrAncestor(id, pos.Anchor()) {
+				if o.parent != "" && result.Find(o.parent) == nil {
+					waiting[id] = true
+				} else if pos, ok := positionIn(result, o); ok && !result.IsSelfOrAncestor(id, pos.Anchor()) {
 					_ = result.Move(id, pos)
 					taken = true
 				}
@@ -248,7 +252,22 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		if !ok {
 			pos = Position{At: "end"}
 		}
-		_ = result.Insert(pos, o.node.Clone())
+		// Blocks under it that both sides have are already in, where
+		// the merge above put them.
+		node := o.node.Clone()
+		var shared func(*Node)
+		shared = func(n *Node) {
+			kept := n.Children[:0]
+			for _, k := range n.Children {
+				if _, ok := primaryFlat[k.ID]; !ok {
+					shared(k)
+					kept = append(kept, k)
+				}
+			}
+			n.Children = kept
+		}
+		shared(node)
+		_ = result.Insert(pos, node)
 		times[id] = timeOf(other, id)
 		delete(tombstones, id)
 		var kids func(*Node)
@@ -259,7 +278,20 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 				kids(k)
 			}
 		}
-		kids(o.node)
+		kids(node)
+	}
+
+	// Moves into blocks the other side made, now that those are in, in
+	// the other side's order so each lands after the one before it.
+	for _, n := range other.All() {
+		id := n.ID
+		if !waiting[id] {
+			continue
+		}
+		if pos, ok := positionUnder(result, otherFlat[id]); ok && !result.IsSelfOrAncestor(id, pos.Anchor()) {
+			_ = result.Move(id, pos)
+			times[id] = max(timeOf(primary, id), timeOf(other, id))
+		}
 	}
 
 	live := map[string]bool{}
@@ -293,6 +325,24 @@ func movedSinceBase(side *flat, sideFlat map[string]*flat, base *flat, baseFlat 
 		return ""
 	}
 	return nearest(side.prevs, baseFlat) != nearest(base.prevs, sideFlat)
+}
+
+// positionUnder is positionIn with neighbours only where they are under
+// the block's parent: those still waiting to move in are not.
+func positionUnder(c *Content, f *flat) (Position, bool) {
+	under := func(id string) bool {
+		loc := c.Locate(id)
+		return loc != nil && loc.Parent != nil && loc.Parent.ID == f.parent
+	}
+	switch {
+	case f.prev != "" && under(f.prev):
+		return Position{After: f.prev}, true
+	case f.next != "" && under(f.next):
+		return Position{Before: f.next}, true
+	case c.Find(f.parent) != nil:
+		return Position{Parent: f.parent}, true
+	}
+	return Position{}, false
 }
 
 func positionIn(c *Content, f *flat) (Position, bool) {

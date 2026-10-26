@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"slices"
 	"strings"
 	gosync "sync"
 	"time"
@@ -81,15 +82,28 @@ func (s *Service) Kick() {
 	}
 }
 
-// SetOpen marks a page as open, so its content is always pulled.
+// SetOpen marks a page as open, so its content is always pulled, and
+// brings an opened page up to date in the background.
 func (s *Service) SetOpen(pageID string, open bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if open {
-		s.open[pageID] = true
-	} else {
+	if !open {
 		delete(s.open, pageID)
+		return
 	}
+	s.open[pageID] = true
+	go func() {
+		if !s.CanSync() {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		s.running.Lock()
+		defer s.running.Unlock()
+		if _, err := s.RefreshContent(ctx, pageID); err != nil {
+			log.Printf("open page %s: %v", pageID, err)
+		}
+	}()
 }
 
 // CanSync reports whether a pass can run: signed in, online, and not
@@ -101,8 +115,12 @@ func (s *Service) CanSync() bool {
 	if s.Offline != nil && s.Offline() {
 		return false
 	}
-	return mygo.Network.Status().Online
+	return online()
 }
+
+// online reports whether the device has a connection; tests stand in
+// for the system's answer.
+var online = func() bool { return mygo.Network.Status().Online }
 
 // Hold runs fn between passes, so no pass sees its changes half made.
 func (s *Service) Hold(fn func()) {
@@ -222,6 +240,17 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 			failed = errors.Join(failed, s.st.Queue("storage", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": f.LocalPath, "content_type": ct}, "file waiting to upload", ""))
 		}
 	}
+	// A finished recording's audio uploads once signed in, so recordings
+	// made before then still have it.
+	recordings, _ := s.st.Recordings()
+	for _, r := range recordings {
+		if r.Status != "ready" && r.Status != "failed" || r.AudioPath != "" || r.LocalPath == "" {
+			continue
+		}
+		if _, err := os.Stat(r.LocalPath); err == nil {
+			failed = errors.Join(failed, s.st.QueueUpload(r))
+		}
+	}
 	sess := s.st.Session()
 	sess.SpaceID, sess.UserID, sess.SignedIn = remoteID, uid, true
 	s.st.SetSession(sess)
@@ -309,11 +338,7 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 			payload["created_by"] = uid
 		}
 	case "comments":
-		// The server stamps the author on insert (for agent replies, the
-		// user who asked); later upserts must send the same value.
-		if payload["author_id"] == nil {
-			payload["author_id"] = uid
-		}
+		return s.pushComment(ctx, uid, payload)
 	case "page_history":
 		payload["created_by"] = uid
 	case "ai_jobs":
@@ -321,6 +346,38 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 	}
 	_, err := s.be.Upsert(ctx, e.Entity, payload, "")
 	return err == nil, err
+}
+
+// pushComment updates a comment the server has with what may change, and
+// inserts one it has not. An upsert would not do: its insert stamps the
+// caller as the author, which the server then refuses as a change to the
+// comment, so resolving someone else's comment never went up.
+func (s *Service) pushComment(ctx context.Context, uid string, payload map[string]any) (bool, error) {
+	changes := map[string]any{"resolved": payload["resolved"]}
+	if author, _ := payload["author_id"].(string); author == "" || author == uid {
+		for _, k := range []string{"body", "quote", "agent_name", "deleted_at"} {
+			changes[k] = payload[k]
+		}
+	} else if payload["deleted_at"] != nil {
+		changes["deleted_at"] = payload["deleted_at"]
+	}
+	id, _ := payload["id"].(string)
+	rows, err := s.be.Update(ctx, "comments", []string{remote.Eq("id", id)}, changes)
+	if err != nil || len(rows) > 0 {
+		return err == nil, err
+	}
+	// The server stamps the author on insert (for agent replies, the user
+	// who asked).
+	if payload["author_id"] == nil {
+		payload["author_id"] = uid
+	}
+	if _, err := s.be.Insert(ctx, "comments", payload); err != nil {
+		if remote.IsConflict(err) {
+			return false, errors.New("the comment is someone else's, and you cannot change it")
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // errStale means someone saved the page's content between reading it and
@@ -485,12 +542,12 @@ func (s *Service) setCursor(table string, c cursor) {
 // changed reads up to limit rows changed after the cursor, oldest first.
 // Rows of the same time come in key order, so a pull that stops among
 // them resumes at the next one.
-func (s *Service) changed(ctx context.Context, table, key, columns string, cur cursor, limit int) ([]map[string]any, error) {
+func (s *Service) changed(ctx context.Context, table, key, columns string, cur cursor, limit int, filters ...string) ([]map[string]any, error) {
 	after := remote.Gt("updated_at", cur.at)
 	if cur.key != "" {
 		after = "or=(updated_at.gt." + quote(cur.at) + ",and(updated_at.eq." + quote(cur.at) + "," + key + ".gt." + quote(cur.key) + "))"
 	}
-	return s.be.Select(ctx, table, remote.Query{Select: columns, Filters: []string{after}, Order: "updated_at," + key, Limit: limit})
+	return s.be.Select(ctx, table, remote.Query{Select: columns, Filters: append([]string{after}, filters...), Order: "updated_at," + key, Limit: limit})
 }
 
 // quote makes a value safe inside a PostgREST or=(…) filter.
@@ -549,10 +606,92 @@ func (s *Service) pull(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.pullShared(ctx); err != nil {
+		return err
+	}
 	if err := s.pullComments(ctx); err != nil {
 		return err
 	}
 	return s.pullContents(ctx)
+}
+
+// pullShared brings the pages newly shared with the user, with the pages
+// under them and what they hold. Sharing changes no page, so the pulls
+// that go by time pass over a page that last changed before them.
+func (s *Service) pullShared(ctx context.Context) error {
+	rows, err := s.changed(ctx, "page_permissions", "page_id", "page_id, updated_at", s.cursor("page_permissions"), 100,
+		remote.Eq("user_id", s.be.UserID()))
+	if err != nil {
+		return err
+	}
+	var failed error
+	s.store("page_permissions", "page_id", rows, func(r map[string]any) error {
+		failed = s.pullTree(ctx, store.S(r, "page_id"))
+		return failed
+	})
+	return failed
+}
+
+// pullTree stores a page and the pages under it, their comments, files
+// and recordings, and has their content fetched.
+func (s *Service) pullTree(ctx context.Context, rootID string) error {
+	var ids []string
+	filter := remote.Eq("id", rootID)
+	for depth := 0; depth < 64; depth++ {
+		rows, err := s.be.Select(ctx, "pages", remote.Query{Select: "*", Filters: []string{filter}})
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			break
+		}
+		var level []string
+		for _, r := range rows {
+			if err := s.st.PutRemotePage(r); err != nil {
+				return err
+			}
+			level = append(level, store.S(r, "id"))
+		}
+		ids = append(ids, level...)
+		filter = remote.In("parent_id", level)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	s.st.Notify("pages", "")
+	inPages := []string{remote.In("page_id", ids)}
+	comments, err := s.be.Select(ctx, "comments", remote.Query{Select: "*", Filters: inPages})
+	if err != nil {
+		return err
+	}
+	names := s.authorNames(ctx, comments)
+	for _, r := range comments {
+		if err := s.st.PutRemoteComment(r, names[store.S(r, "author_id")]); err != nil {
+			return err
+		}
+	}
+	for _, step := range []struct {
+		table string
+		apply func(map[string]any) error
+	}{{"files", s.st.PutRemoteFile}, {"recordings", s.st.PutRemoteRecording}} {
+		rows, err := s.be.Select(ctx, step.table, remote.Query{Select: "*", Filters: inPages})
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			if err := step.apply(r); err != nil {
+				return err
+			}
+		}
+		s.st.Notify(step.table, "")
+	}
+	s.st.Notify("comments", "")
+	waiting := s.waiting()
+	for _, id := range ids {
+		waiting[id] = true
+	}
+	s.setWaiting(waiting)
+	return nil
 }
 
 func (s *Service) pullComments(ctx context.Context) error {
@@ -560,33 +699,39 @@ func (s *Service) pullComments(ctx context.Context) error {
 	if err != nil || len(rows) == 0 {
 		return err
 	}
+	names := s.authorNames(ctx, rows)
+	s.store("comments", "id", rows, func(r map[string]any) error {
+		return s.st.PutRemoteComment(r, names[store.S(r, "author_id")])
+	})
+	return nil
+}
+
+// authorNames are the names of comments' authors, by their IDs, with
+// "Someone" for one without a name.
+func (s *Service) authorNames(ctx context.Context, comments []map[string]any) map[string]string {
 	ids := map[string]bool{}
-	for _, r := range rows {
-		if a := store.S(r, "author_id"); a != "" {
-			ids[a] = true
-		}
+	for _, r := range comments {
+		ids[store.S(r, "author_id")] = true
 	}
 	names := map[string]string{}
-	if len(ids) > 0 {
-		var list []string
-		for id := range ids {
+	var list []string
+	for id := range ids {
+		names[id] = "Someone"
+		if id != "" {
 			list = append(list, id)
 		}
+	}
+	if len(list) > 0 {
 		profiles, err := s.be.Select(ctx, "profiles", remote.Query{Select: "id, display_name", Filters: []string{remote.In("id", list)}})
 		if err == nil {
 			for _, p := range profiles {
-				names[store.S(p, "id")] = store.S(p, "display_name")
+				if n := store.S(p, "display_name"); n != "" {
+					names[store.S(p, "id")] = n
+				}
 			}
 		}
 	}
-	s.store("comments", "id", rows, func(r map[string]any) error {
-		name := names[store.S(r, "author_id")]
-		if name == "" {
-			name = "Someone"
-		}
-		return s.st.PutRemoteComment(r, name)
-	})
-	return nil
+	return names
 }
 
 func (s *Service) pullContents(ctx context.Context) error {
@@ -595,27 +740,71 @@ func (s *Service) pullContents(ctx context.Context) error {
 		return err
 	}
 	allOffline := s.st.Settings().AllPagesOffline
-	cur := s.cursor("page_content")
-	start := cur
-	var failed error
-	for _, r := range rows {
-		id := store.S(r, "page_id")
+	// refresh fetches a page's content if this device keeps it. A page
+	// not here yet waits for its row, which a later pull brings.
+	waiting := s.waiting()
+	refresh := func(id string) error {
 		p, err := s.st.Page(id)
+		if err != nil {
+			waiting[id] = true
+			return nil
+		}
+		delete(waiting, id)
 		s.mu.Lock()
 		open := s.open[id]
 		s.mu.Unlock()
-		if err == nil && (open || allOffline || p.KeepOffline) {
+		if open || allOffline || p.KeepOffline {
 			if _, err := s.RefreshContent(ctx, id); err != nil {
-				failed = err
-				break
+				waiting[id] = true
+				return err
 			}
+		}
+		return nil
+	}
+	var failed error
+	for id := range waiting {
+		if failed = refresh(id); failed != nil {
+			break
+		}
+	}
+	cur := s.cursor("page_content")
+	start := cur
+	for _, r := range rows {
+		if failed != nil {
+			break
+		}
+		id := store.S(r, "page_id")
+		if failed = refresh(id); failed != nil {
+			break
 		}
 		cur = cursor{store.S(r, "updated_at"), id}
 	}
 	if cur != start {
 		s.setCursor("page_content", cur)
 	}
+	s.setWaiting(waiting)
 	return failed
+}
+
+// waiting are the pages whose content changed before their own row came,
+// so their content is fetched once it has.
+func (s *Service) waiting() map[string]bool {
+	out := map[string]bool{}
+	if v, ok := s.st.Value("sync.content_waiting"); ok && v != "" {
+		for _, id := range strings.Split(v, ",") {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+func (s *Service) setWaiting(ids map[string]bool) {
+	list := make([]string, 0, len(ids))
+	for id := range ids {
+		list = append(list, id)
+	}
+	slices.Sort(list)
+	_ = s.st.SetValue("sync.content_waiting", strings.Join(list, ","))
 }
 
 // RefreshContent brings a page's content up to date with the server,

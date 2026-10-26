@@ -288,6 +288,8 @@ create index recordings_page_idx on public.recordings (page_id);
 create index recordings_updated_idx on public.recordings (updated_at);
 create index files_space_idx on public.files (space_id);
 create index files_updated_idx on public.files (updated_at);
+create index files_page_idx on public.files (page_id);
+create index files_storage_path_idx on public.files (storage_path);
 create index model_providers_user_idx on public.model_providers (user_id);
 create index ai_jobs_page_idx on public.ai_jobs (page_id, created_at desc);
 create index ai_jobs_conversation_idx on public.ai_jobs (conversation_id, created_at);
@@ -819,9 +821,12 @@ create policy recordings_update on public.recordings for update to authenticated
 create policy recordings_delete on public.recordings for delete to authenticated
   using (public.can_edit_page(page_id));
 
--- files: the space owner only
+-- files: the space owner manages them; anyone who can view the page a file
+-- is on can read it
 create policy files_all on public.files for all to authenticated
   using (public.is_space_owner(space_id)) with check (public.is_space_owner(space_id));
+create policy files_select_shared on public.files for select to authenticated
+  using (page_id is not null and public.can_view_page(page_id));
 
 -- ai_jobs: viewers may ask (the worker then runs without edit tools)
 create policy ai_jobs_select on public.ai_jobs for select to authenticated
@@ -1143,10 +1148,20 @@ create policy recordings_objects_shared_read on storage.objects for select to au
     )
   );
 
--- files/{space_id}/{file_id}/{name} — the space owner only.
+-- files/{space_id}/{file_id}/{name} — written by the space owner; readable
+-- by anyone who can view the page the file is on.
 create policy files_objects_owner on storage.objects for all to authenticated
   using (bucket_id = 'files' and public.owns_space_path(name))
   with check (bucket_id = 'files' and public.owns_space_path(name));
+
+create policy files_objects_shared_read on storage.objects for select to authenticated
+  using (
+    bucket_id = 'files'
+    and exists (
+      select 1 from public.files f
+      where f.storage_path = storage.objects.name and f.page_id is not null and public.can_view_page(f.page_id)
+    )
+  );
 
 -- images/{space_id}/{image_id}.{ext} — written by the owner, readable by
 -- anyone the space shares a page with.

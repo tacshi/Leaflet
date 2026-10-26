@@ -38,7 +38,7 @@ var hints = map[string]struct {
 
 func toolList() []map[string]any {
 	defs := map[string]map[string]any{}
-	for _, d := range agents.ToolDefinitions(false) {
+	for _, d := range agents.ToolDefinitions(false, false) {
 		fn := d["function"].(map[string]any)
 		defs[fn["name"].(string)] = fn
 	}
@@ -198,25 +198,10 @@ func (t *pageTools) page(args map[string]any, edit bool) (store.Page, error) {
 	if err != nil || !p.DeletedAt.IsZero() {
 		return store.Page{}, toolErr("No page " + id + ".")
 	}
-	if edit && !t.canEdit(p) {
+	if edit && !t.s.st.CanEdit(p) {
 		return store.Page{}, toolErr("The page is shared with the user to view, not to edit.")
 	}
 	return p, nil
-}
-
-// canEdit is the app's rule: the user's own pages, and pages shared with
-// them as an editor.
-func (t *pageTools) canEdit(p store.Page) bool {
-	sess := t.s.st.Session()
-	if p.SpaceID == sess.SpaceID {
-		return true
-	}
-	for _, m := range t.s.st.MembersOrNil(p.ID) {
-		if m.UserID == sess.UserID {
-			return m.Role == "editor" || m.Role == "owner"
-		}
-	}
-	return true
 }
 
 // onPage runs one of the in-app agents' tools on a page, and stores what

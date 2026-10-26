@@ -209,6 +209,21 @@ func TestSharedPageToView(t *testing.T) {
 	}
 }
 
+// A page shared with the user is read-only until its members say they
+// may edit it, as in the app.
+func TestSharedPageBeforeItsMembers(t *testing.T) {
+	st := newStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Theirs", SpaceID: "someone-else"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := session(t, NewServer(st, "0.1.0"),
+		call(2, "insert_blocks", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "paragraph", "text": "x"}}}))
+	if out, failed := result(t, got[2]); !failed || !strings.Contains(out["error"].(string), "view") {
+		t.Errorf("edit before the members loaded %v", out)
+	}
+}
+
 func TestAgentName(t *testing.T) {
 	for _, c := range [][3]string{{"", "claude-code", "Claude Code"}, {"Cursor", "cursor-vscode", "Cursor"}, {"", "codex_mcp", "Codex Mcp"}, {"", "", ""}} {
 		if got := agentName(c[0], c[1]); got != c[2] {

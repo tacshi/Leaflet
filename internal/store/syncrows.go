@@ -92,3 +92,19 @@ func (s *Store) MembersOrNil(pageID string) []Member {
 	m, _ := s.Members(pageID)
 	return m
 }
+
+// CanEdit reports whether the user may change a page: their own, or one
+// shared with them as an editor. A shared page is read-only until its
+// members have loaded.
+func (s *Store) CanEdit(p Page) bool {
+	sess := s.Session()
+	if p.SpaceID == sess.SpaceID {
+		return true
+	}
+	for _, m := range s.MembersOrNil(p.ID) {
+		if m.UserID == sess.UserID {
+			return m.Role == "editor" || m.Role == "owner"
+		}
+	}
+	return false
+}

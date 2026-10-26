@@ -111,26 +111,6 @@ func TestComments(t *testing.T) {
 	}
 }
 
-func TestJobEditors(t *testing.T) {
-	s := open(t)
-	edit := map[string]any{"ops": []any{map[string]any{"op": "insert"}}, "reply": ""}
-	answer := map[string]any{"ops": nil, "reply": "Hello"}
-	for _, j := range []Job{
-		{ID: "1", PageID: "p", ProviderID: "chatgpt", Status: "done", Result: edit},
-		{ID: "2", PageID: "p", ProviderID: "ollama", Status: "done", Result: answer},
-		{ID: "3", PageID: "p", ProviderID: "claude", Status: "failed", Result: edit},
-		{ID: "4", PageID: "p", ProviderID: "chatgpt", Status: "done", Result: edit},
-		{ID: "5", PageID: "q", ProviderID: "claude", Status: "done", Result: edit},
-	} {
-		if err := s.PutJob(j); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if got := s.JobEditors("p"); len(got) != 1 || got[0] != "chatgpt" {
-		t.Errorf("got %q", got)
-	}
-}
-
 func TestSnippet(t *testing.T) {
 	text := "Day 1: temples\nKiyomizu-dera\nDay 2: Arashiyama\n\nBook hotel\nBuy JR pass\nTravel is the only thing you buy that makes you richer."
 	got := snippet(text, "hotel")

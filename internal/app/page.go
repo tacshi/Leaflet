@@ -226,16 +226,6 @@ func (a *App) byline(c *ui.Context, p store.Page) {
 	if p.CreatedBy == "" || p.CreatedBy == a.session.UserID {
 		editors = append(editors, a.session.DisplayName)
 	}
-	for _, name := range a.page.agents {
-		if !contains(editors, name) {
-			editors = append(editors, name)
-		}
-	}
-	for _, r := range a.hub.Session(p.ID).Runs {
-		if len(r.Ops) > 0 && !contains(editors, r.AgentName) {
-			editors = append(editors, r.AgentName)
-		}
-	}
 	who := strings.Join(editors, " and ")
 	if who == "" {
 		who = "Someone"

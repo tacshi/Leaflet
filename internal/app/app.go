@@ -143,9 +143,6 @@ type pageState struct {
 	timer   *time.Timer
 	threads []store.Thread
 	members []store.Member
-	// agents are the names of the agents that edited the page before it
-	// opened, for the byline; the runs since are the hub's.
-	agents []string
 	// runs are the agent runs of this page, newest last, for Undo.
 	tinted map[string]bool
 	// scroll is where the page is scrolled to, and viewTop where its
@@ -612,13 +609,6 @@ func (a *App) loadPage(id string) {
 	ed.Tinted = ps.tinted
 	ed.OnChange = func() { a.scheduleSave() }
 	ps.editor = ed
-	for _, pid := range a.st.JobEditors(id) {
-		for _, pr := range a.providers {
-			if pr.ID == pid && !contains(ps.agents, pr.Name) {
-				ps.agents = append(ps.agents, pr.Name)
-			}
-		}
-	}
 	ps.threads, _ = a.st.Threads(id)
 	ps.members, _ = a.st.Members(id)
 	a.page = ps

@@ -490,7 +490,8 @@ func (a *App) lastSibling(p *store.Page, skip string) bool {
 // the row it dropped on.
 func (a *App) dropPage(id, key string, at int, out bool) {
 	kind, target, _ := strings.Cut(key, ":")
-	parent, move := "", func() error { return nil }
+	var parent string
+	var move func() error
 	switch {
 	case kind == "folder":
 		move = func() error { return a.st.MovePage(id, "", target, "") }

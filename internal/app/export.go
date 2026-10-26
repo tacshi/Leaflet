@@ -147,10 +147,11 @@ func exportZip(w io.Writer, pages []store.Page, folders map[string]string, conte
 		if fail != nil {
 			return fail
 		}
-		// Links to pages, of subpage blocks and page mentions alike, go
-		// to the pages' files.
+		// Links to pages, of subpage blocks and page mentions alike, and
+		// links to their blocks, go to the pages' files.
 		for id, to := range paths {
 			md = strings.ReplaceAll(md, "("+doc.PageLink(id)+")", "("+rel(to+".md")+")")
+			md = strings.ReplaceAll(md, "("+doc.PageLink(id)+"#", "("+rel(to+".md")+"#")
 		}
 		fw, err := create(own+".md", p.UpdatedAt)
 		if err != nil {

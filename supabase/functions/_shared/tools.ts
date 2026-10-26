@@ -99,6 +99,7 @@ const blockSpecSchema = {
     },
     level: { type: "integer", minimum: 1, maximum: 6, description: "Heading level" },
     checked: { type: "boolean", description: "For todo_list" },
+    due: { type: "string", description: "For todo_list: the day it is due, YYYY-MM-DD" },
     children: {
       type: "array",
       description: "Nested blocks (BlockSpec objects). Only list blocks take children; a toggle_list takes any.",

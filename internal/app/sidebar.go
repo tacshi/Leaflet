@@ -18,6 +18,13 @@ func (a *App) sidebar(c *ui.Context) {
 		if iconButton(c, "search", "search", "Search (⌘P)").Clicked() {
 			a.openSearch()
 		}
+		todos := iconButton(c, "todos", "square-check", "To-dos")
+		if a.route.Kind == "todos" {
+			todos.Background(pal.NavSelected).TextColor(pal.Text)
+		}
+		if todos.Clicked() {
+			a.navigate(Route{Kind: "todos"})
+		}
 		if iconButton(c, "new-page", "square-pen", "New page (⌘N)").Clicked() {
 			a.newPage("", "")
 		}

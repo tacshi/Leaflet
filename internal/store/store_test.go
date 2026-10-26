@@ -404,3 +404,42 @@ func TestSearchFindsTemplates(t *testing.T) {
 		t.Errorf("a template in recents %+v", hits)
 	}
 }
+
+// A named version stays in a page's history past its newest 50.
+func TestHistoryKeepsNamedVersions(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "PRD"})
+	c := s.Content(p.ID)
+	if err := s.AddHistory(p.ID, c, "manual", "", "Sent to legal"); err != nil {
+		t.Fatal(err)
+	}
+	// Named a day before the others.
+	if _, err := s.db.Exec(`UPDATE page_history SET created_at = created_at - 86400000 WHERE reason = 'manual'`); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 55; i++ {
+		if err := s.AddHistory(p.ID, c, "autosave", "", "Autosave"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h, err := s.History(p.ID)
+	if err != nil || len(h) != 51 || h[len(h)-1].Label != "Sent to legal" {
+		t.Errorf("%d entries, last %+v, %v", len(h), h[len(h)-1], err)
+	}
+}
+
+// To-dos come from pages, not templates.
+func TestTodos(t *testing.T) {
+	s := open(t)
+	todo := &doc.Node{Type: "todo_list"}
+	todo.SetDelta(doc.Delta{{Text: "Send the draft"}})
+	todo.SetDue(time.Now())
+	p, _ := s.CreatePage(NewPageOptions{Title: "PRD", Content: doc.FromBlocks([]*doc.Node{todo})})
+	if _, err := s.CopyPage(p.ID, CopyOptions{Title: "PRD", Template: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Todos()
+	if err != nil || len(got) != 1 || got[0].PageID != p.ID || got[0].PageTitle != "PRD" || got[0].Text != "Send the draft" {
+		t.Errorf("todos %+v %v", got, err)
+	}
+}

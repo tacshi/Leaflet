@@ -444,17 +444,22 @@ func (e *Editor) menuKey(ev ui.InputEvent) bool {
 func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 	switch ev.Kind {
 	case ui.InputPointerDown:
+		wx, wy := ev.X+e.root.X, ev.Y+e.root.Y
 		if ev.Button != 0 {
+			// The context menu acts on the block it opened on.
+			e.menuBlock = ""
+			if p, ok := e.hit(wx, wy); ok {
+				e.menuBlock = p.ID
+			}
 			return false
 		}
-		wx, wy := ev.X+e.root.X, ev.Y+e.root.Y
 		p, ok := e.hit(wx, wy)
 		if !ok {
 			return false
 		}
 		e.trigger = nil
 		e.linkOpen = false
-		if n := e.node(p.ID); n != nil && e.inCodeBar(n, wy) {
+		if n := e.node(p.ID); n != nil && (e.inCodeBar(n, wy) || e.inGutter(n, wx, wy)) || e.onChip(wx, wy) {
 			return false
 		}
 		if n := e.node(p.ID); n != nil && e.marker(n, wx, wy) {
@@ -483,8 +488,13 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 		// A page link opens the page, as a click on a page in the sidebar
 		// does; a web link wants Cmd, so that a click can place the caret.
 		if ev.Clicks == 1 && (ev.Mods == 0 || ev.Mods == ui.Cmd) {
-			if id, ok := doc.PageLinkID(e.linkAtPos(p)); ok {
-				e.Host.OpenPage(id)
+			link := e.linkAtPos(p)
+			if id, ok := doc.PageLinkID(link); ok {
+				if block := doc.LinkBlock(link); block != "" {
+					e.Host.OpenBlock(id, block)
+				} else {
+					e.Host.OpenPage(id)
+				}
 				return true
 			}
 		}

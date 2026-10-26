@@ -28,7 +28,7 @@ import (
 
 // Route is what the main area shows.
 type Route struct {
-	Kind    string // home | page | settings | signin
+	Kind    string // home | page | todos | settings | signin
 	ID      string // the page
 	Section string // the settings section
 }
@@ -51,13 +51,18 @@ type App struct {
 	templates []store.Page
 	// templateHints are templates' first lines, by ID and edit time.
 	templateHints map[string]string
-	folders       []store.Folder
-	files         []store.File
-	providers     []store.Provider
-	pending       int
-	conflicts     []store.ConflictRow
-	syncing       bool
-	syncError     string
+	// todos are the open to-dos of every page, read again when stale;
+	// todoState is the To-dos view's list.
+	todos      []store.PageTodo
+	todosStale bool
+	todoState  ui.ListState
+	folders    []store.Folder
+	files      []store.File
+	providers  []store.Provider
+	pending    int
+	conflicts  []store.ConflictRow
+	syncing    bool
+	syncError  string
 
 	route   Route
 	history []Route
@@ -137,8 +142,17 @@ type pageState struct {
 	agents []string
 	// runs are the agent runs of this page, newest last, for Undo.
 	tinted map[string]bool
-	// scroll is where the page is scrolled to.
-	scroll ui.ScrollState
+	// scroll is where the page is scrolled to, and viewTop where its
+	// scroll area starts in the window. scrollTo is a block to bring to
+	// the top of it once the page has laid it out.
+	scroll   ui.ScrollState
+	viewTop  float32
+	scrollTo string
+	// outline is the Outline tab's list of headings, outlineRow its row
+	// chosen, and outlineSeen the headings it has opened once.
+	outline     ui.OutlineState[string]
+	outlineRow  int
+	outlineSeen map[string]bool
 }
 
 // Run starts the app.
@@ -202,7 +216,7 @@ func (a *App) start() error {
 	// here, a web link the browser.
 	a.md.OnLink = func(url string) {
 		if id, ok := doc.PageLinkID(url); ok {
-			a.update(func() { a.openPage(id) })
+			a.update(func() { a.openBlock(id, doc.LinkBlock(url)) })
 		} else if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "mailto:") {
 			_ = mygo.Shell.OpenExternal(url)
 		}
@@ -250,6 +264,7 @@ func (a *App) start() error {
 		a.openPage(a.pages[0].ID)
 	}
 	a.setMenu()
+	a.startReminders()
 	a.win = mygo.NewWindow(mygo.WindowOptions{
 		Title:         "Leaflet",
 		Width:         1240,
@@ -326,6 +341,7 @@ func (a *App) reload(ch store.Change) {
 		if templates, err := a.st.Templates(); err == nil {
 			a.templates = templates
 		}
+		a.todosStale = true
 		if a.page != nil {
 			if p := a.pageByID(a.page.id); p == nil {
 				a.page = nil

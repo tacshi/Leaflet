@@ -323,3 +323,16 @@ Deno.test("a page mention reads and writes as a link to the page", () => {
   });
   assertEquals(deltaToMarkdown(delta), "See [RFC: Sync v2](leaflet://page/p-9) first");
 });
+
+Deno.test("a to-do keeps its due date", () => {
+  const opts = { newId: () => crypto.randomUUID() };
+  const node = specToNode({ type: "todo_list", text: "Send the draft", due: "2026-10-30" }, opts);
+  assertEquals(node.data?.due, "2026-10-30");
+  assertEquals(
+    pageViews({ document: { type: "page", id: "root", children: [node] }, meta: { v: 1, blocks: {}, deleted: {} } })[0]
+      .due,
+    "2026-10-30",
+  );
+  const bad = specToNode({ type: "todo_list", text: "x", due: "Friday" }, opts);
+  assertEquals(bad.data?.due, undefined);
+});

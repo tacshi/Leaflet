@@ -76,7 +76,9 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 		if c == '[' {
 			if m := linkRe.FindStringSubmatch(string(s[i:])); m != nil {
 				flush()
-				if id, ok := PageLinkID(m[2]); ok {
+				// A link to a page is a mention of it; one to a block of a
+				// page stays a link, with its own text.
+				if id, ok := PageLinkID(m[2]); ok && LinkBlock(m[2]) == "" {
 					text := FromMarkdown(m[1]).Plain()
 					*out = append(*out, Run{Text: text, Attrs: PageMention(id, text)})
 					i += len([]rune(m[0]))

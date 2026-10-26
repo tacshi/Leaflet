@@ -52,7 +52,7 @@ metadata:
 | `paragraph` | `delta` | |
 | `heading` | `delta`, `level` 1–6 | |
 | `bulleted_list`, `numbered_list` | `delta` | nested items go in `children` |
-| `todo_list` | `delta`, `checked` | |
+| `todo_list` | `delta`, `checked`, `due?` | `due` is the day it is due, `YYYY-MM-DD`, in the user's own time |
 | `quote` | `delta` | |
 | `code` | `delta`, `language` | the delta is the code as plain text, line breaks and all; `language` is an ID such as `go`, or `""` for plain text |
 | `callout` | `delta`, `tone` (`info`\|`tip`\|`warning`\|`danger`) | a tinted box; Markdown writes it as a GitHub alert |
@@ -71,10 +71,14 @@ metadata:
 | `subpage` | `page_id` | link card to a child page |
 
 Delta attributes: `bold`, `italic`, `underline`, `strikethrough`, `code`,
-`href`, `mention` (`{ "kind": "user"|"agent"|"page", "id": "...", "name": "..." }`).
+`href`, `mention` (`{ "kind": "user"|"agent"|"page", "id": "...", "name": "..." }`),
+and `color` and `background`, the text's color and highlight as hex
+(`"#rrggbbaa"`), which Markdown leaves out, as MyGo's rich text does.
 A page mention is the page's title with `href` `leaflet://page/<id>` and a
 `mention` of kind `page`; in agents' inline Markdown it is
 `[Title](leaflet://page/<id>)`, and such a link read back is a page mention.
+A link to a block of a page is `leaflet://page/<id>#<block id>`, which
+stays a link.
 Leaflet shows it as a chip, opens the page on a click, and writes the page's
 current title into it when the page opens.
 

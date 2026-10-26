@@ -12,13 +12,14 @@ import (
 	"leaflet/internal/theme"
 )
 
-// panel is the side panel of a page: the agent chat and the comments.
+// panel is the side panel of a page: the agent chat, the comments and the
+// outline.
 func (a *App) panel(c *ui.Context) {
 	pal := theme.Of(c)
 	bar := c.TitleBar()
 	ui.Row(c.Key("panel-top")).Height(max(bar.Height, 46)).Padding(0, 10, 0, 12).Gap(6).AlignItems(ui.Center).DragWindow().
 		BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
-		segmented(c, "panel-tab", &a.panelTab, "Agent", "Comments")
+		segmented(c, "panel-tab", &a.panelTab, "Agent", "Comments", "Outline")
 		ui.Spacer(c)
 		if a.panelTab == 0 {
 			if iconButton(c, "new-chat", "square-pen", "New conversation").Clicked() {
@@ -29,10 +30,13 @@ func (a *App) panel(c *ui.Context) {
 			a.panelOpen = false
 		}
 	})
-	if a.panelTab == 0 {
+	switch a.panelTab {
+	case 0:
 		a.agentPanel(c)
-	} else {
+	case 1:
 		a.commentsPanel(c)
+	default:
+		a.outlinePanel(c)
 	}
 }
 

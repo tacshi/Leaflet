@@ -123,6 +123,12 @@ func (e *Editor) spans(n *doc.Node, pal *theme.Palette, font ui.Font) []ui.Span 
 			s.Underline = true
 			s.DecorationColor = pal.AccentSoftBorder
 		}
+		if r.Attrs.Color != "" {
+			s.Color = hexColor(r.Attrs.Color)
+		}
+		if r.Attrs.Background != "" {
+			s.Background = hexColor(r.Attrs.Background)
+		}
 		if r.Attrs.Mention != nil {
 			s.Color = pal.AccentText
 			s.Weight = 600
@@ -233,14 +239,15 @@ func (e *Editor) copyBlocks() []*doc.Node {
 			return nil
 		}
 	}
-	us := e.units()
+	// A folded heading's section goes with it.
+	us := e.withSections()
 	var out []*doc.Node
 	type open struct {
 		depth int
 		n     *doc.Node
 	}
 	var stack []open
-	for i := e.index(a.ID); i >= 0 && i <= e.index(b.ID) && i < len(us); i++ {
+	for i := indexIn(us, a.ID); i >= 0 && i <= indexIn(us, b.ID) && i < len(us); i++ {
 		n := us[i].Clone()
 		// A folded toggle takes its hidden children with it.
 		if n.Type != "table" && !collapsed(n) {
@@ -311,9 +318,9 @@ func (e *Editor) copyText() string {
 			return n.Delta().Slice(a.Off, b.Off).Plain()
 		}
 	}
-	us := e.units()
+	us := e.withSections()
 	var lines []string
-	for i := e.index(a.ID); i <= e.index(b.ID) && i < len(us); i++ {
+	for i := indexIn(us, a.ID); i <= indexIn(us, b.ID) && i < len(us); i++ {
 		n := us[i]
 		if !n.IsText() {
 			sub := &doc.Content{Children: []*doc.Node{n.Clone()}}

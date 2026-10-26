@@ -325,3 +325,10 @@ func selectBox(c *ui.Context, key string, value *string, options []string, displ
 	})
 	return sel.Trigger
 }
+
+// accentBadge is MyGo's badge in the accent's colors, for what a page is:
+// a template, or shared.
+func accentBadge(c *ui.Context, text string) ui.Element {
+	pal := theme.Of(c)
+	return ui.Badge(c, text).Background(pal.AccentSoft).TextColor(pal.AccentText)
+}

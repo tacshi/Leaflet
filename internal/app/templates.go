@@ -108,10 +108,7 @@ func (a *App) applyTemplate(t store.Page) {
 }
 
 // templatePill marks a template, where it shows among pages.
-func templatePill(c *ui.Context) {
-	pal := theme.Of(c)
-	ui.Text(c, "Template").FontSize(11).FontWeight(600).TextColor(pal.AccentText).Padding(1, 6).Radius(999).Background(pal.AccentSoft)
-}
+func templatePill(c *ui.Context) { accentBadge(c, "Template") }
 
 // templateActions list the templates under a blank page's other ways to
 // start, each with a menu to edit or delete it.

@@ -59,7 +59,9 @@ func (a *App) pageView(c *ui.Context) {
 	}
 	sess := a.hub.Session(ps.id)
 	ui.Box(c.Key("page-body")).Grow(1).Children(func() {
-		scroll := ui.Scroll(c.Key("page-scroll:" + ps.id)).TrackScroll(&ps.scroll).Fill()
+		a.scrollToBlock()
+		scroll := ui.Scroll(c.Key("page-scroll:" + ps.id)).TrackScroll(&ps.scroll).Fill().
+			Draw(func(_ *ui.Painter, r ui.Rect) { ps.viewTop = r.Y })
 		scroll.Children(func() {
 			ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(40, pagePadX, 160).Children(func() {
 				col := ui.Column(c).Width(a.contentWidth(c)).Gap(0)
@@ -133,10 +135,10 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 			templatePill(c)
 		}
 		if a.isShared(p) {
-			ui.Text(c, "Shared").FontSize(11).FontWeight(600).TextColor(pal.AccentText).Padding(1, 6).Radius(999).Background(pal.AccentSoft)
+			accentBadge(c, "Shared")
 		}
 		if a.page.editor.ReadOnly {
-			ui.Text(c, "View only").FontSize(11).FontWeight(600).TextColor(pal.TextMuted).Padding(1, 6).Radius(999).Background(pal.Ground)
+			ui.Badge(c, "View only").TextColor(pal.TextMuted)
 		}
 	})
 }

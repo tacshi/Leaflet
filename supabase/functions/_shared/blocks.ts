@@ -56,6 +56,8 @@ export interface BlockSpec {
   link?: { url: string };
   level?: number;
   checked?: boolean;
+  /** For todo_list: the day it is due, YYYY-MM-DD. */
+  due?: string;
   children?: BlockSpec[];
   rows?: string[][];
   chart?: ChartSpec;
@@ -77,6 +79,7 @@ export interface BlockView {
   parent_id?: string;
   level?: number;
   checked?: boolean;
+  due?: string;
   language?: string;
   tone?: string;
   collapsed?: boolean;
@@ -540,7 +543,10 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
       node = textNode(id, type, spec.text ?? "", { level: clampInt(spec.level, 1, 6, 2) });
       break;
     case "todo_list":
-      node = textNode(id, type, spec.text ?? "", { checked: spec.checked === true });
+      node = textNode(id, type, spec.text ?? "", {
+        checked: spec.checked === true,
+        ...(typeof spec.due === "string" && /^\d{4}-\d{2}-\d{2}$/.test(spec.due) ? { due: spec.due } : {}),
+      });
       break;
     case "paragraph":
     case "bulleted_list":
@@ -744,6 +750,7 @@ export function nodeView(
       break;
     case "todo_list":
       view.checked = data.checked === true;
+      if (typeof data.due === "string") view.due = data.due;
       break;
     case "table":
       view.rows = tableRows(node);

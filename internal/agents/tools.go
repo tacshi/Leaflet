@@ -39,6 +39,7 @@ var blockSchema = map[string]any{
 			"properties": map[string]any{"url": map[string]any{"type": "string"}}},
 		"level":   map[string]any{"type": "integer", "description": "Heading level 1-3."},
 		"checked": map[string]any{"type": "boolean"},
+		"due":     map[string]any{"type": "string", "description": "For todo_list: the day it is due, YYYY-MM-DD"},
 		"children": map[string]any{"type": "array", "description": "Nested blocks: list items under a list item, or any blocks inside a toggle_list.",
 			"items": map[string]any{"type": "object"}},
 		"rows": map[string]any{"type": "array", "description": "Table rows; the first row is the header.",

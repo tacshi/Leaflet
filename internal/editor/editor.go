@@ -70,6 +70,10 @@ type Host interface {
 	// EditBlock opens what a block is made from: a chart's data, or a math
 	// or diagram block's source.
 	EditBlock(blockID string)
+	// OpenBlock opens a page at one of its blocks, for a link to a block.
+	OpenBlock(pageID, blockID string)
+	// BlockLink is the link to a block of this page.
+	BlockLink(blockID string) string
 }
 
 type snapshot struct {
@@ -138,6 +142,19 @@ type Editor struct {
 	cellFocused bool
 	cellMove    int
 
+	// hid are the blocks folded headings hide, as the page last built;
+	// menuBlock is the block a context menu was opened on.
+	hid       map[string]bool
+	menuBlock string
+	// bar is the selection toolbar, kept while the focus is in it or its
+	// colors are open.
+	bar       ui.Handle
+	colorOpen bool
+	// dueOpen is the to-do whose calendar is open; chips are where the
+	// to-dos' dates show, which take presses.
+	dueOpen string
+	chips   map[string]ui.Rect
+
 	handle   ui.Handle
 	services ui.Services
 }
@@ -145,7 +162,7 @@ type Editor struct {
 // New returns an editor of content.
 func New(content *doc.Content, host Host) *Editor {
 	e := &Editor{Content: content, Host: host, Family: "Source Serif 4", Size: 17,
-		layouts: map[string]*blockLayout{}, geom: map[string]ui.Rect{}, rel: map[string]ui.Rect{}, width: 680}
+		layouts: map[string]*blockLayout{}, geom: map[string]ui.Rect{}, rel: map[string]ui.Rect{}, chips: map[string]ui.Rect{}, width: 680}
 	if len(content.Children) == 0 {
 		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
 		p.SetDelta(nil)
@@ -172,12 +189,22 @@ func (e *Editor) SetWidth(w float32) {
 
 // units are the blocks the caret goes through, in document order: text
 // blocks and blocks selected whole, nested list items after their parent.
-// Table cells belong to their table.
-func (e *Editor) units() []*doc.Node {
+// Table cells belong to their table, and a folded heading's section is
+// out of the way.
+func (e *Editor) units() []*doc.Node { return e.walkUnits(e.hidden()) }
+
+// withSections are the units with the sections of folded headings: what a
+// selection over a folded heading copies and deletes.
+func (e *Editor) withSections() []*doc.Node { return e.walkUnits(nil) }
+
+func (e *Editor) walkUnits(hidden map[string]bool) []*doc.Node {
 	var out []*doc.Node
 	var visit func([]*doc.Node)
 	visit = func(nodes []*doc.Node) {
 		for _, n := range nodes {
+			if hidden[n.ID] {
+				continue
+			}
 			out = append(out, n)
 			// A folded toggle's children are out of the caret's way.
 			if n.Type != "table" && !collapsed(n) {
@@ -189,8 +216,10 @@ func (e *Editor) units() []*doc.Node {
 	return out
 }
 
-func (e *Editor) index(id string) int {
-	for i, n := range e.units() {
+func (e *Editor) index(id string) int { return indexIn(e.units(), id) }
+
+func indexIn(nodes []*doc.Node, id string) int {
+	for i, n := range nodes {
 		if n.ID == id {
 			return i
 		}

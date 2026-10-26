@@ -34,6 +34,8 @@ func (h *fakeHost) Pick(t Trigger, item MenuItem)    { h.picked = append(h.picke
 func (h *fakeHost) Comment(id, quote string)         {}
 func (h *fakeHost) AskAgent(id, quote string)        {}
 func (h *fakeHost) EditBlock(id string)              { h.edited = append(h.edited, id) }
+func (h *fakeHost) OpenBlock(page, id string)        { h.opened = append(h.opened, page+"#"+id) }
+func (h *fakeHost) BlockLink(id string) string       { return doc.BlockLink("this", id) }
 
 func setup(t *testing.T) (*Editor, *ui.Tester, *fakeHost) {
 	t.Helper()

@@ -21,6 +21,23 @@ type Attrs struct {
 	Code    bool
 	Href    string
 	Mention *Mention
+	// Color colors the text and Background highlights it, as hex
+	// ("#rrggbbaa"), as MyGo's rich text does; "" for none.
+	Color, Background string
+}
+
+// ValidColor reports whether s is a color as runs keep one: "#" and 6 or
+// 8 hex digits.
+func ValidColor(s string) bool {
+	if len(s) != 7 && len(s) != 9 || s[0] != '#' {
+		return false
+	}
+	for _, r := range s[1:] {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return false
+		}
+	}
+	return true
 }
 
 // Zero reports whether the run is plain text.
@@ -29,7 +46,8 @@ func (a Attrs) Zero() bool { return a == Attrs{} }
 // Equal compares two sets of formats.
 func (a Attrs) Equal(b Attrs) bool {
 	if a.Bold != b.Bold || a.Italic != b.Italic || a.Under != b.Under ||
-		a.Strike != b.Strike || a.Code != b.Code || a.Href != b.Href {
+		a.Strike != b.Strike || a.Code != b.Code || a.Href != b.Href ||
+		a.Color != b.Color || a.Background != b.Background {
 		return false
 	}
 	if (a.Mention == nil) != (b.Mention == nil) {
@@ -81,6 +99,12 @@ func attrsFromJSON(v any) Attrs {
 	a.Strike, _ = m["strikethrough"].(bool)
 	a.Code, _ = m["code"].(bool)
 	a.Href, _ = m["href"].(string)
+	if s, _ := m["color"].(string); ValidColor(s) {
+		a.Color = s
+	}
+	if s, _ := m["background"].(string); ValidColor(s) {
+		a.Background = s
+	}
 	if mm, ok := m["mention"].(map[string]any); ok {
 		men := &Mention{}
 		men.Kind, _ = mm["kind"].(string)
@@ -110,6 +134,12 @@ func (a Attrs) json() map[string]any {
 	}
 	if a.Href != "" {
 		m["href"] = a.Href
+	}
+	if a.Color != "" {
+		m["color"] = a.Color
+	}
+	if a.Background != "" {
+		m["background"] = a.Background
 	}
 	if a.Mention != nil {
 		m["mention"] = map[string]any{"kind": a.Mention.Kind, "id": a.Mention.ID, "name": a.Mention.Name}

@@ -76,3 +76,19 @@ func TestCopyFor(t *testing.T) {
 		t.Error("the original changed")
 	}
 }
+
+func TestBlockLink(t *testing.T) {
+	link := BlockLink("prd", "b1")
+	if link != "leaflet://page/prd#b1" {
+		t.Fatalf("link %q", link)
+	}
+	if id, ok := PageLinkID(link); !ok || id != "prd" || LinkBlock(link) != "b1" {
+		t.Errorf("page %q %v block %q", id, ok, LinkBlock(link))
+	}
+	if LinkBlock(PageLink("prd")) != "" || LinkBlock("https://x.dev/#a") != "" {
+		t.Error("a block where there is none")
+	}
+	if _, ok := PageLinkID("leaflet://page/#b1"); ok {
+		t.Error("a link with no page")
+	}
+}

@@ -537,7 +537,7 @@ type HistoryEntry struct {
 	ID        string
 	PageID    string
 	Content   string
-	Reason    string // agent_run | autosave | restore | conflict
+	Reason    string // agent_run | autosave | restore | conflict | manual (named)
 	AIJobID   string
 	Label     string
 	CreatedAt time.Time
@@ -557,9 +557,12 @@ func (s *Store) AddHistory(pageID string, c *doc.Content, reason, aiJobID, label
 	return nil
 }
 
-// History returns a page's newest 50 snapshots.
+// History returns a page's newest 50 snapshots, and the versions named
+// before them.
 func (s *Store) History(pageID string) ([]HistoryEntry, error) {
-	rows, err := s.db.Query(`SELECT id, page_id, content, reason, ai_job_id, label, created_at FROM page_history WHERE page_id = ? ORDER BY created_at DESC LIMIT 50`, pageID)
+	rows, err := s.db.Query(`SELECT id, page_id, content, reason, ai_job_id, label, created_at FROM page_history
+		WHERE page_id = ? AND (reason = 'manual' OR id IN (SELECT id FROM page_history WHERE page_id = ? ORDER BY created_at DESC LIMIT 50))
+		ORDER BY created_at DESC`, pageID, pageID)
 	if err != nil {
 		return nil, err
 	}
@@ -587,6 +590,33 @@ func (s *Store) MaybeAutosave(pageID string, c *doc.Content) error {
 		return nil
 	}
 	return s.AddHistory(pageID, c, "autosave", "", "Autosave")
+}
+
+// PageTodo is an open to-do of a page, with a due date or an owner.
+type PageTodo struct {
+	doc.Todo
+	PageID    string
+	PageTitle string
+}
+
+// Todos returns the open to-dos of the pages on this device, but
+// templates', that have a due date or an owner, page by page.
+func (s *Store) Todos() ([]PageTodo, error) {
+	pages, err := s.Pages()
+	if err != nil {
+		return nil, err
+	}
+	var out []PageTodo
+	for _, p := range pages {
+		c := s.Content(p.ID)
+		if c == nil {
+			continue
+		}
+		for _, t := range c.Todos() {
+			out = append(out, PageTodo{Todo: t, PageID: p.ID, PageTitle: p.DisplayTitle()})
+		}
+	}
+	return out, nil
 }
 
 // SearchHit is one search result.

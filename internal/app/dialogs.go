@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
+	codeeditor "github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown"
 
 	"leaflet/internal/agents"
@@ -56,6 +57,16 @@ type dialogs struct {
 	historyPage string
 	history     []store.HistoryEntry
 	historyPick int
+	// historyView shows the version chosen (0) or what changed since
+	// (1), in historyDiff, made for the version historyDiffOf; naming is
+	// set while the current version's name is typed in versionName.
+	historyView   int
+	historyDiff   codeeditor.DiffState
+	historyDiffOf string
+	// sideBySide shows the changes as two columns, kept while the app runs.
+	sideBySide  bool
+	naming      bool
+	versionName string
 
 	shareOpen   bool
 	sharePage   string
@@ -353,50 +364,117 @@ func (a *App) openHistory(id string) {
 		a.savePage()
 	}
 	d := &a.dialogs
-	d.historyOpen, d.historyPage, d.historyPick = true, id, 0
+	d.historyOpen, d.historyPage, d.historyPick, d.historyDiffOf, d.naming = true, id, 0, "", false
 	d.history, _ = a.st.History(id)
+}
+
+// historyLabel says what a version is: its name, or why it was kept.
+func historyLabel(h store.HistoryEntry) string {
+	if h.Label != "" {
+		return h.Label
+	}
+	return map[string]string{"agent_run": "Before an agent run", "autosave": "Autosave", "restore": "Before a restore", "conflict": "Conflict"}[h.Reason]
+}
+
+// nameVersion keeps the page as it is now as a version with a name.
+func (a *App) nameVersion(name string) {
+	d := &a.dialogs
+	if a.page != nil && a.page.id == d.historyPage {
+		a.savePage()
+	}
+	c := a.st.Content(d.historyPage)
+	if c == nil || strings.TrimSpace(name) == "" {
+		return
+	}
+	if err := a.st.AddHistory(d.historyPage, c, "manual", "", strings.TrimSpace(name)); err != nil {
+		a.toast("Could not keep the version: " + err.Error())
+		return
+	}
+	d.history, _ = a.st.History(d.historyPage)
+	d.historyPick, d.historyDiffOf, d.naming, d.versionName = 0, "", false, ""
 }
 
 func (a *App) historyDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
-	dialog(c, &d.historyOpen, 760, func() {
+	dialog(c, &d.historyOpen, 860, func() {
 		dialogHeader(c, "Page history", a.pageTitleOf(d.historyPage), &d.historyOpen)
-		if len(d.history) == 0 {
-			ui.Text(c, "No earlier versions yet. Leaflet keeps one every ten minutes of editing and before each agent run.").
-				TextColor(pal.TextMuted).Padding(0, 20, 24)
-			return
-		}
-		ui.Row(c).Height(440).AlignItems(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
-			ui.Scroll(c).Width(250).Padding(6).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Children(func() {
-				for i, h := range d.history {
-					row := ui.ButtonBase(c.Key(h.ID)).Padding(8, 10).Radius(7).Justify(ui.Start)
-					if i == d.historyPick {
-						row.Background(pal.NavSelected)
-					} else if row.Hovered() {
-						row.Background(pal.Hover)
+		ui.Row(c).Height(500).AlignItems(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
+			ui.Column(c).Width(250).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Children(func() {
+				ui.Column(c).Padding(8, 8, 4).Children(func() {
+					if !d.naming {
+						if ghost(c, "name-version", "bookmark", "Name the current version").Justify(ui.Start).FillWidth().Clicked() {
+							d.naming = true
+						}
+						return
 					}
-					row.Children(func() {
-						ui.Column(c).Gap(2).Children(func() {
-							ui.Text(c, h.CreatedAt.Format("Jan 2, 15:04")).FontSize(13.5).FontWeight(550).TextColor(pal.Text)
-							l := h.Label
-							if l == "" {
-								l = map[string]string{"agent_run": "Before an agent run", "autosave": "Autosave", "restore": "Before a restore", "conflict": "Conflict"}[h.Reason]
+					in := ui.TextInputBase(c.Key("version-name"), &d.versionName).Placeholder("Name, as “Sent to legal”").AutoFocus().
+						FontSize(13.5).Height(30).Padding(0, 8).Radius(7).Border(1, pal.Border).Background(pal.Surface)
+					if in.Submitted() {
+						a.nameVersion(d.versionName)
+					}
+					if in.Shortcut(0, ui.KeyEscape) {
+						d.naming, d.versionName = false, ""
+					}
+				})
+				ui.Scroll(c).Grow(1).Padding(0, 6, 6).Children(func() {
+					if len(d.history) == 0 {
+						ui.Text(c, "No earlier versions yet. Leaflet keeps one every ten minutes of editing and before each agent run.").
+							FontSize(12.5).TextColor(pal.TextMuted).Padding(8, 10)
+					}
+					for i, h := range d.history {
+						row := ui.ButtonBase(c.Key(h.ID)).Padding(8, 10).Radius(7).Justify(ui.Start).Gap(8).AlignItems(ui.Start)
+						if i == d.historyPick {
+							row.Background(pal.NavSelected)
+						} else if row.Hovered() {
+							row.Background(pal.Hover)
+						}
+						named := h.Reason == "manual"
+						row.Children(func() {
+							ui.Column(c).Gap(2).Grow(1).Children(func() {
+								ui.Text(c, h.CreatedAt.Format("Jan 2, 15:04")).FontSize(13.5).FontWeight(550).TextColor(pal.Text)
+								l := ui.Text(c, historyLabel(h)).FontSize(12).TextColor(pal.TextMuted).MaxLines(2)
+								if named {
+									l.TextColor(pal.AccentText).FontWeight(600)
+								}
+							})
+							if named {
+								ui.Icon(c, theme.Icon("bookmark")).FontSize(13).TextColor(pal.AccentText)
 							}
-							ui.Text(c, l).FontSize(12).TextColor(pal.TextMuted).MaxLines(2)
 						})
-					})
-					if row.Clicked() {
-						d.historyPick = i
+						if row.Clicked() {
+							d.historyPick = i
+						}
 					}
-				}
+				})
 			})
+			if len(d.history) == 0 {
+				return
+			}
 			ui.Column(c).Grow(1).Children(func() {
 				h := d.history[min(d.historyPick, len(d.history)-1)]
 				content := doc.MustDecode(h.Content)
-				ui.Scroll(c).Grow(1).Padding(18, 24).Children(func() {
-					markdown.View(c, doc.PageMarkdown("", content, a.pageTitleOf), &a.md).Font(theme.PageFont).FontSize(15)
+				ui.Row(c).Padding(10, 16).Gap(10).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
+					segmented(c, "history-view", &d.historyView, "This version", "Changes since")
+					ui.Spacer(c)
+					if d.historyView == 1 {
+						a.historyStats(c, h, content)
+						side := iconButton(c, "side-by-side", "columns-2", "Side by side")
+						if d.sideBySide {
+							side.Background(pal.NavSelected).TextColor(pal.Text)
+						}
+						if side.Clicked() {
+							d.sideBySide = !d.sideBySide
+						}
+					}
 				})
+				if d.historyView == 1 {
+					a.historyChanges(c, h, content)
+				} else {
+					ui.Scroll(c).Grow(1).Padding(18, 24).Children(func() {
+						markdown.View(c, doc.PageMarkdown("", content, a.pageTitleOf), &a.md).Font(theme.PageFont).FontSize(15)
+					})
+				}
 				ui.Row(c).Padding(12, 16).Justify(ui.End).Gap(8).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
 					if button(c, "close", "", "Close").Clicked() {
 						d.historyOpen = false
@@ -408,6 +486,61 @@ func (a *App) historyDialog(c *ui.Context) {
 				})
 			})
 		})
+	})
+}
+
+// historyDiff compares a version's Markdown with the page's now, in the
+// diff viewer, made again when another version is chosen.
+func (a *App) historyDiff(h store.HistoryEntry, content *doc.Content) *codeeditor.DiffState {
+	d := &a.dialogs
+	if d.historyDiffOf != h.ID {
+		now := a.st.Content(d.historyPage)
+		if now == nil {
+			now = doc.Empty()
+		}
+		d.historyDiff = codeeditor.DiffState{
+			Old:  codeeditor.NewBuffer(doc.PageMarkdown("", content, a.pageTitleOf)),
+			New:  codeeditor.NewBuffer(doc.PageMarkdown("", now, a.pageTitleOf)),
+			Wrap: true, NoLineNumbers: true,
+			Font: ui.Font{Family: theme.PageFont, Size: 14},
+		}
+		d.historyDiffOf = h.ID
+	}
+	d.historyDiff.Layout = codeeditor.DiffUnified
+	if d.sideBySide {
+		d.historyDiff.Layout = codeeditor.DiffSplit
+	}
+	return &d.historyDiff
+}
+
+// historyStats says how many lines changed since a version.
+func (a *App) historyStats(c *ui.Context, h store.HistoryEntry, content *doc.Content) {
+	pal := theme.Of(c)
+	added, deleted := a.historyDiff(h, content).Stats()
+	if added == 0 && deleted == 0 {
+		return
+	}
+	ui.Row(c).Gap(8).Children(func() {
+		ui.Textf(c, "+%d", added).FontSize(12.5).FontWeight(600).TextColor(pal.OkText)
+		ui.Textf(c, "−%d", deleted).FontSize(12.5).FontWeight(600).TextColor(pal.DangerText)
+		ui.Text(c, plural(added+deleted, "line", "lines")).FontSize(12.5).TextColor(pal.TextMuted)
+	})
+}
+
+// historyChanges shows what changed on the page since a version: the
+// lines of its Markdown removed and added, with the words changed in
+// them, and the unchanged ones folded away.
+func (a *App) historyChanges(c *ui.Context, h store.HistoryEntry, content *doc.Content) {
+	pal := theme.Of(c)
+	diff := a.historyDiff(h, content)
+	if added, deleted := diff.Stats(); added == 0 && deleted == 0 {
+		ui.Column(c).Grow(1).Center().Children(func() {
+			ui.Text(c, "No changes since this version").TextColor(pal.TextMuted)
+		})
+		return
+	}
+	ui.Box(c).Grow(1).Padding(8, 0, 0, 8).Children(func() {
+		codeeditor.DiffView(c, diff).Fill()
 	})
 }
 

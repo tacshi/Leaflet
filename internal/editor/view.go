@@ -33,6 +33,23 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 			e.geom[id] = ui.Rect{X: r.X + b.X, Y: r.Y + b.Y, W: b.W, H: b.H}
 		}
 	})
+	root.ContextMenu(func(m *ui.Menu) {
+		if e.colored() && m.Item("Remove color").Chosen() {
+			e.SetColor("")
+			e.SetHighlight("")
+		}
+		if e.menuBlock != "" && e.node(e.menuBlock) != nil {
+			if m.Item("Copy link to block").Chosen() {
+				e.services.WriteClipboard(e.Host.BlockLink(e.menuBlock))
+				c.Toast("Copied a link to the block")
+			}
+			m.Separator()
+		}
+		m.EditItems()
+	})
+	e.hid = e.hidden()
+	// The chips shown fill this in again as they draw.
+	clear(e.chips)
 	root.Children(func() {
 		e.blocks(c, e.Content.Children, pal, dark)
 	})
@@ -44,6 +61,9 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 func (e *Editor) blocks(c *ui.Context, nodes []*doc.Node, pal *theme.Palette, dark bool) {
 	number := 0
 	for _, n := range nodes {
+		if e.hid[n.ID] {
+			continue
+		}
 		if n.Type == "numbered_list" {
 			number++
 		} else {
@@ -215,6 +235,14 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 		if n.Type == "code" {
 			e.codeBarView(c, n, float32(depth)*indentStep, hovered || isFocus && focused, pal)
 		}
+		if n.Type == "heading" {
+			first := l.layout.Caret(0)
+			e.headingGutter(c, n, l.y+first.Y+first.H/2-11, hovered, pal)
+		}
+		if n.Type == "todo_list" {
+			end := l.layout.Caret(utf16Off(n, textLen(n)))
+			e.dueChip(c, n, l.x+end.X+8, l.y+end.Y+(end.H-20)/2, hovered || isFocus && focused, pal)
+		}
 		if count := e.Host.CommentCount(n.ID); count > 0 {
 			e.commentBadge(c, n.ID, count, l.y, pal)
 		}
@@ -364,14 +392,19 @@ func (e *Editor) overlays(c *ui.Context, pal *theme.Palette) {
 		}
 		return
 	}
-	if !e.Collapsed() && e.focused && !e.dragging && !e.ReadOnly {
+	// The toolbar stays while the focus is in it, or its color picker is
+	// open.
+	if !e.Collapsed() && (e.focused || e.colorOpen || e.bar.FocusWithin(c)) && !e.dragging && !e.ReadOnly {
 		a, b := e.ordered()
 		if n := e.node(a.ID); n != nil && n.IsText() && a.ID == b.ID {
 			if cr, ok := e.caretRect(a); ok {
 				e.toolbar(c, cr, pal)
+				return
 			}
 		}
 	}
+	// With no toolbar, its color picker is closed.
+	e.colorOpen = false
 }
 
 func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
@@ -439,7 +472,7 @@ func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 
 func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 	ui.Overlay(c, func() {
-		bar := ui.Row(c.Key("selection-toolbar")).Absolute().Left(max(at.X-8, 8)).Top(max(at.Y-46, 8)).Padding(4).Gap(2).
+		bar := ui.Row(c.Key("selection-toolbar")).Bind(&e.bar).Absolute().Left(max(at.X-8, 8)).Top(max(at.Y-46, 8)).Padding(4).Gap(2).
 			Radius(9).Background(pal.Inverse).Shadow(0, 8, 24, 0, pal.Shadow).AlignItems(ui.Center)
 		bar.Children(func() {
 			tool := func(key, icon, label string, on bool, fn func()) {
@@ -460,6 +493,7 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 				tool("i", "italic", "Italic", e.Has(func(a doc.Attrs) bool { return a.Italic }), e.ToggleItalic)
 				tool("code", "code", "Code", e.Has(func(a doc.Attrs) bool { return a.Code }), e.ToggleCode)
 				tool("link", "link", "Link", e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
+				e.colorButton(c, pal)
 				ui.Box(c).Size(1, 18).Background(pal.OnInverse.Alpha(0.2)).Margin(0, 4)
 			}
 			text := func(key, icon, label string, fn func()) {

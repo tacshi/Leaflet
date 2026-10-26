@@ -359,3 +359,19 @@ func TestMarkdownNestsByMarkerWidth(t *testing.T) {
 		t.Errorf("got\n%q\nwant\n%q", got, want)
 	}
 }
+
+func TestColorsRoundTrip(t *testing.T) {
+	d := Delta{{Text: "red", Attrs: Attrs{Color: "#d1242fff"}}, {Text: " marked", Attrs: Attrs{Background: "#fff8c5ff"}}}
+	back := DeltaFromJSON(d.JSON())
+	if len(back) != 2 || back[0].Attrs.Color != "#d1242fff" || back[1].Attrs.Background != "#fff8c5ff" {
+		t.Errorf("back %+v", back)
+	}
+	bad := DeltaFromJSON([]any{map[string]any{"insert": "x", "attributes": map[string]any{"color": "red; x"}}})
+	if bad[0].Attrs.Color != "" {
+		t.Errorf("kept a color that is not one: %q", bad[0].Attrs.Color)
+	}
+	// Markdown has no colors, as in MyGo's rich text.
+	if md := d.ToMarkdown(); md != "red marked" {
+		t.Errorf("markdown %q", md)
+	}
+}

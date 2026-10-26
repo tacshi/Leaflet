@@ -30,8 +30,9 @@ func (e *Editor) deleteSelection() bool {
 		e.anchor, e.focus = a, a
 		return true
 	}
-	us := e.units()
-	ia, ib := e.index(a.ID), e.index(b.ID)
+	// A folded heading's section goes with it.
+	us := e.withSections()
+	ia, ib := indexIn(us, a.ID), indexIn(us, b.ID)
 	first, last := us[ia], us[ib]
 	var tail doc.Delta
 	if last.IsText() {
@@ -321,6 +322,11 @@ func (e *Editor) Enter() {
 		// The new item comes first among the children.
 		n.Children = append([]*doc.Node{p}, n.Children...)
 	} else {
+		// A new line after a folded heading starts its section, which
+		// shows.
+		if foldedHeading(n) {
+			n.Set("collapsed", false)
+		}
 		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
 	}
 	e.invalidate(n.ID)
@@ -474,7 +480,7 @@ func (e *Editor) Delete(word bool) {
 // kind; the children a paragraph cannot hold move up after it.
 func (e *Editor) toParagraph(n *doc.Node) {
 	n.Type = "paragraph"
-	for _, k := range []string{"checked", "level", "language", "tone", "collapsed"} {
+	for _, k := range []string{"checked", "due", "level", "language", "tone", "collapsed"} {
 		delete(n.Data, k)
 	}
 	e.liftChildren(n)
@@ -592,7 +598,7 @@ func (e *Editor) SetType(typ string, level int) {
 			continue
 		}
 		n.Type = typ
-		for _, k := range []string{"checked", "level", "language", "tone", "collapsed"} {
+		for _, k := range []string{"checked", "due", "level", "language", "tone", "collapsed"} {
 			delete(n.Data, k)
 		}
 		switch typ {

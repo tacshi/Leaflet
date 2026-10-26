@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ToolError is a tool call an agent made that cannot be applied. The
@@ -59,6 +60,11 @@ func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 		if typ == "todo_list" {
 			checked, _ := spec["checked"].(bool)
 			n.Set("checked", checked)
+			if due, _ := spec["due"].(string); due != "" {
+				if t, err := time.ParseInLocation(DueLayout, due, time.Local); err == nil {
+					n.SetDue(t)
+				}
+			}
 		}
 		if typ == "toggle_list" {
 			collapsed, _ := spec["collapsed"].(bool)
@@ -351,6 +357,9 @@ func BlockViews(c *Content) []map[string]any {
 				v["level"] = n.Int("level", 1)
 			case "todo_list":
 				v["checked"] = n.Bool("checked")
+				if due := n.Str("due"); due != "" {
+					v["due"] = due
+				}
 			case "table":
 				v["rows"] = TableRows(n)
 			case "chart":

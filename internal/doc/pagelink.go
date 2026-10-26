@@ -9,10 +9,24 @@ const PageLinkPrefix = "leaflet://page/"
 // PageLink is the link to page id.
 func PageLink(id string) string { return PageLinkPrefix + id }
 
-// PageLinkID returns the page a link points to, if it is a page link.
+// PageLinkID returns the page a link points to, if it is a page link, or
+// a link to a block of one.
 func PageLinkID(href string) (string, bool) {
 	id, ok := strings.CutPrefix(href, PageLinkPrefix)
+	id, _, _ = strings.Cut(id, "#")
 	return id, ok && id != ""
+}
+
+// BlockLink is the link to block id of page pageID: it opens the page there.
+func BlockLink(pageID, id string) string { return PageLink(pageID) + "#" + id }
+
+// LinkBlock returns the block a page link points to, or "" for the page.
+func LinkBlock(href string) string {
+	if _, ok := PageLinkID(href); !ok {
+		return ""
+	}
+	_, block, _ := strings.Cut(href, "#")
+	return block
 }
 
 // PageMention is the text and formats of a mention of page id titled

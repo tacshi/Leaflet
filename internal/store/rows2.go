@@ -149,25 +149,6 @@ func (s *Store) PutJob(j Job) error {
 	return err
 }
 
-// JobEditors returns the providers whose agent runs changed a page, in
-// the order they first did.
-func (s *Store) JobEditors(pageID string) []string {
-	rows, err := s.db.Query(`SELECT provider_id FROM ai_jobs WHERE page_id = ? AND status = 'done' AND result LIKE '%"ops":[{%'
-		GROUP BY provider_id ORDER BY MIN(created_at)`, pageID)
-	if err != nil {
-		return nil
-	}
-	defer func() { _ = rows.Close() }()
-	var out []string
-	for rows.Next() {
-		var id string
-		if rows.Scan(&id) == nil {
-			out = append(out, id)
-		}
-	}
-	return out
-}
-
 // SetJobStatus changes an agent run's status.
 func (s *Store) SetJobStatus(id, status string) error {
 	_, err := s.db.Exec(`UPDATE ai_jobs SET status = ?, updated_at = ? WHERE id = ?`, status, time.Now().UnixMilli(), id)

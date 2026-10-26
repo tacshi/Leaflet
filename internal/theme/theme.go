@@ -1,5 +1,5 @@
 // Package theme is Leaflet's look: the color tokens of the v1 design with a
-// matching dark set, Figtree for the interface, Source Serif 4 for pages,
+// matching dark set and a sepia one, in a choice of accents, Figtree for the interface, Source Serif 4 for pages,
 // and Lucide's icons.
 package theme
 
@@ -39,6 +39,9 @@ type Palette struct {
 	Shadow                                            ui.Color
 	// Code is the card of code blocks; MyGo's code theme colors the code.
 	Code ui.Color
+	// Dark is the dark appearance's; Opaque paints the sidebar over the
+	// window's material.
+	Dark, Opaque bool
 }
 
 var light = Palette{
@@ -66,23 +69,133 @@ var dark = Palette{
 	DangerBg: ui.Hex("#341B1B"), DangerBorder: ui.Hex("#5C2D2D"), Danger: ui.Hex("#E25B5B"), DangerText: ui.Hex("#FFA3A3"),
 	ChartMuted: ui.Hex("#6B7280"), Inverse: ui.Hex("#E9EBEF"), OnInverse: ui.Hex("#16181D"),
 	Hover: ui.RGBA(233, 235, 239, 0.06), Shadow: ui.RGBA(0, 0, 0, 0.35), Code: ui.Hex("#23272E"),
-	Separator: ui.RGBA(255, 255, 255, 0.08),
+	Separator: ui.RGBA(255, 255, 255, 0.08), Dark: true,
 }
 
-// Of returns the palette for the window's appearance.
-func Of(c *ui.Context) *Palette {
-	if c.Theme().Dark {
-		return &dark
+// sepia is the light appearance on warm paper, for long reading. Its
+// sidebar is painted over the window's material, which would show gray.
+var sepia = Palette{
+	Ground: ui.Hex("#F1E8D6"), Sidebar: ui.Hex("#ECE2CD"), Surface: ui.Hex("#F8F1E3"), Panel: ui.Hex("#F4ECDC"),
+	Border: ui.Hex("#DCCFB6"), Divider: ui.Hex("#E5D9C3"),
+	Text: ui.Hex("#3B2A1A"), TextSecondary: ui.Hex("#5A4632"), TextMuted: ui.Hex("#6B5743"), Placeholder: ui.Hex("#806B55"), Icon: ui.Hex("#67533F"),
+	WarnBg: ui.Hex("#F8E8D2"), WarnBorder: ui.Hex("#EBD2B0"), WarnText: ui.Hex("#7A3A08"),
+	OkBg: ui.Hex("#EAEEDB"), OkBorder: ui.Hex("#D2DBBC"), OkText: ui.Hex("#2D5A28"),
+	DangerBg: ui.Hex("#F8E6DE"), DangerBorder: ui.Hex("#EBC6B8"), Danger: ui.Hex("#B8321F"), DangerText: ui.Hex("#9A2414"),
+	ChartMuted: ui.Hex("#A8987F"), Inverse: ui.Hex("#3B2A1A"), OnInverse: ui.Hex("#F8F1E3"),
+	Hover: ui.RGBA(59, 42, 26, 0.06), Shadow: ui.RGBA(60, 40, 20, 0.12), Code: ui.Hex("#EFE5D2"),
+	Separator: ui.RGBA(80, 50, 20, 0.12), Opaque: true,
+}
+
+func init() { sepia = withAccent(sepia, light.Accent) }
+
+// Accents are the accent colors to choose from, by name, each light and
+// dark; Indigo is Leaflet's own.
+var Accents = []struct {
+	Name        string
+	Light, Dark ui.Color
+}{
+	{"Indigo", light.Accent, dark.Accent},
+	{"Blue", ui.Hex("#1F6FD1"), ui.Hex("#3B82F6")},
+	{"Purple", ui.Hex("#7A3FC2"), ui.Hex("#8B5CF6")},
+	{"Pink", ui.Hex("#B8256A"), ui.Hex("#D9468A")},
+	{"Orange", ui.Hex("#B8500F"), ui.Hex("#D2661F")},
+	{"Green", ui.Hex("#1E7A4C"), ui.Hex("#2E8F5E")},
+	{"Graphite", ui.Hex("#525866"), ui.Hex("#6E7583")},
+}
+
+// look is what Look chose, which every palette follows.
+var look struct {
+	sepia  bool
+	accent string
+}
+
+// Look chooses sepia paper for the light appearance and the accent: a
+// name of Accents, "system" for the desktop's, or "" for Indigo.
+func Look(isSepia bool, accent string) {
+	look.sepia, look.accent = isSepia, accent
+}
+
+// Accent returns the accent named, light or dark, with system the
+// desktop's; ok is false where there is none, as for Indigo.
+func Accent(name string, isDark bool, system ui.Color) (ui.Color, bool) {
+	if name == "system" {
+		if system.A == 0 {
+			return ui.Color{}, false
+		}
+		system.A = 255
+		if isDark {
+			return system.Mix(ui.Hex("#FFFFFF"), 0.12), true
+		}
+		return system, true
 	}
-	return &light
+	for _, a := range Accents[1:] {
+		if a.Name == name {
+			if isDark {
+				return a.Dark, true
+			}
+			return a.Light, true
+		}
+	}
+	return ui.Color{}, false
 }
 
-// For returns the palette of an appearance.
+type paletteKey struct {
+	dark, sepia bool
+	accent      ui.Color
+}
+
+// palettes are the palettes made, kept so that each look has one.
+var palettes = map[paletteKey]*Palette{}
+
+// Of returns the palette for the window's appearance and the look.
+func Of(c *ui.Context) *Palette {
+	isDark := c.Theme().Dark
+	accent, _ := Accent(look.accent, isDark, c.Preferences().Accent)
+	k := paletteKey{isDark, look.sepia && !isDark, accent}
+	if p, ok := palettes[k]; ok {
+		return p
+	}
+	p := *For(isDark)
+	if k.sepia {
+		p = sepia
+	}
+	if accent.A > 0 {
+		p = withAccent(p, accent)
+	}
+	palettes[k] = &p
+	return &p
+}
+
+// For returns Leaflet's own palette of an appearance.
 func For(isDark bool) *Palette {
 	if isDark {
 		return &dark
 	}
 	return &light
+}
+
+// withAccent returns p in accent, its tints mixed from its surface as
+// Indigo's are, and the text on it dark where white would not stand out.
+func withAccent(p Palette, accent ui.Color) Palette {
+	tint := func(light, dark float32) ui.Color {
+		if p.Dark {
+			return p.Surface.Mix(accent, dark)
+		}
+		return p.Surface.Mix(accent, light)
+	}
+	p.Accent = accent
+	p.AccentSoft, p.AccentSoftBorder = tint(0.09, 0.2), tint(0.27, 0.5)
+	p.NavSelected, p.AgentSection, p.Selection = tint(0.16, 0.28), tint(0.06, 0.13), tint(0.19, 0.45)
+	if p.Dark {
+		p.AccentText = accent.Mix(ui.Hex("#FFFFFF"), 0.6)
+	} else {
+		p.AccentText = accent.Mix(p.Text, 0.25)
+	}
+	p.OnAccent = ui.Hex("#FFFFFF")
+	if 0.299*float32(accent.R)+0.587*float32(accent.G)+0.114*float32(accent.B) > 165 {
+		p.OnAccent = ui.Hex("#18181B")
+	}
+	return p
 }
 
 // Apply sets the window theme from the palette, keeping what follows the

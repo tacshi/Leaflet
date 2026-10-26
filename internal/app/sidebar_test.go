@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -51,6 +52,143 @@ func TestSidebarTree(t *testing.T) {
 	}
 	if a.treeRow < 0 || a.treeState.Item(a.treeRow) != "page:"+faq.ID {
 		t.Errorf("chosen row %d", a.treeRow)
+	}
+}
+
+// A page dragged in the tree goes between pages by their top and bottom
+// edges, and inside one by its middle, which then links to it, until it
+// moves out; a click on it still opens it.
+func TestSidebarDragPages(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.SidebarOpen = true
+	var ids []string
+	for _, title := range []string{"Alpha", "Beta", "Gamma"} {
+		p, _ := a.st.CreatePage(store.NewPageOptions{Title: title})
+		ids = append(ids, p.ID)
+	}
+	a.reloadAll()
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 260, 600)
+	tt.Frame()
+	order := func() (out []string) {
+		for _, p := range a.children("", "", true) {
+			out = append(out, p.Title)
+		}
+		return out
+	}
+	drag := func(from, onto string, dy float32) {
+		t.Helper()
+		f, ok1 := tt.Find(from)
+		o, ok2 := tt.Find(onto)
+		if !ok1 || !ok2 {
+			t.Fatalf("no %s or %s in %v", from, onto, tt.Texts())
+		}
+		x, y := f.X+f.W/2, f.Y+f.H/2
+		ty := o.Y + o.H/2 + dy
+		tt.Press(x, y)
+		for i := 1; i <= 4; i++ {
+			tt.Move(x, y+(ty-y)*float32(i)/4)
+		}
+		tt.Release(x, ty)
+		a.reloadAll()
+		tt.Frame()
+	}
+	// Gamma before Alpha: onto Alpha's top edge.
+	drag("Gamma", "Alpha", -10)
+	if got := fmt.Sprint(order()); got != "[Gamma Alpha Beta]" {
+		t.Fatalf("order %s", got)
+	}
+	// Gamma after Beta: onto Beta's bottom edge.
+	drag("Gamma", "Beta", 10)
+	if got := fmt.Sprint(order()); got != "[Alpha Beta Gamma]" {
+		t.Fatalf("order %s", got)
+	}
+	// Alpha inside Beta: onto its middle.
+	drag("Alpha", "Beta", 0)
+	if p := a.pageByID(ids[0]); p == nil || p.ParentID != ids[1] {
+		t.Fatalf("Alpha is under %q", p.ParentID)
+	}
+	if got := fmt.Sprint(order()); got != "[Beta Gamma]" {
+		t.Fatalf("order %s", got)
+	}
+	if !a.hasSubpageLink(ids[1], ids[0]) {
+		t.Error("Beta does not link to Alpha inside it")
+	}
+	// Beta cannot go inside Alpha, its own subpage.
+	tt.Frame()
+	drag("Beta", "Alpha", 0)
+	if p := a.pageByID(ids[1]); p == nil || p.ParentID != "" {
+		t.Fatalf("Beta moved under %q", p.ParentID)
+	}
+	// Alpha back to the top level, by Move to…: Beta's link goes.
+	if err := a.movePage(ids[0], "", func() error { return a.st.MovePage(ids[0], "", "", "") }); err != nil {
+		t.Fatal(err)
+	}
+	if a.hasSubpageLink(ids[1], ids[0]) {
+		t.Error("Beta still links to Alpha, moved out")
+	}
+	a.reloadAll()
+	tt.Frame()
+	if err := tt.Click("Gamma"); err != nil {
+		t.Fatal(err)
+	}
+	if a.route.Kind != "page" || a.route.ID != ids[2] {
+		t.Errorf("a click on a draggable row opens %+v", a.route)
+	}
+}
+
+// A subpage comes out of its page by the bottom edge of the last
+// subpage with the pointer left of it, or by the room below the tree.
+func TestSidebarDragOut(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.SidebarOpen = true
+	welcome, _ := a.st.CreatePage(store.NewPageOptions{Title: "Welcome"})
+	reversi, _ := a.st.CreatePage(store.NewPageOptions{Title: "Reversi", ParentID: welcome.ID})
+	sync, _ := a.st.CreatePage(store.NewPageOptions{Title: "Sync", ParentID: welcome.ID})
+	a.reloadAll()
+	a.treeOpen("page", welcome.ID)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 260, 600)
+	tt.Frame()
+	drag := func(from string, tx, ty float32) {
+		t.Helper()
+		f, ok := tt.Find(from)
+		if !ok {
+			t.Fatalf("no %s in %v", from, tt.Texts())
+		}
+		x, y := f.X+f.W/2, f.Y+f.H/2
+		tt.Press(x, y)
+		for i := 1; i <= 4; i++ {
+			tt.Move(x+(tx-x)*float32(i)/4, y+(ty-y)*float32(i)/4)
+		}
+		tt.Release(tx, ty)
+		a.reloadAll()
+		tt.Frame()
+	}
+	// Onto the bottom edge of Sync, the last subpage, left of its icon:
+	// after Welcome.
+	// Find gives the whole row; its indent is at its start.
+	s, _ := tt.Find("Sync")
+	drag("Reversi", s.X+12, s.Y+s.H/2+10)
+	if p := a.pageByID(reversi.ID); p == nil || p.ParentID != "" {
+		t.Fatalf("Reversi is under %q", p.ParentID)
+	}
+	var top []string
+	for _, p := range a.children("", "", true) {
+		top = append(top, p.Title)
+	}
+	if fmt.Sprint(top) != "[Welcome Reversi]" {
+		t.Fatalf("top level %v", top)
+	}
+	// Into the room below the tree: the end of the top level.
+	drag("Sync", 130, 450)
+	if p := a.pageByID(sync.ID); p == nil || p.ParentID != "" {
+		t.Fatalf("Sync is under %q", p.ParentID)
+	}
+	if a.hasSubpageLink(welcome.ID, sync.ID) {
+		t.Error("Welcome still links to Sync")
 	}
 }
 

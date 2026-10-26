@@ -20,6 +20,7 @@ import (
 
 var sections = []struct{ id, icon, label string }{
 	{"account", "user", "Account"},
+	{"appearance", "palette", "Appearance"},
 	{"providers", "sparkles", "Agent providers"},
 	{"external", "bot", "External agents"},
 	{"speech", "mic", "Speech to text"},
@@ -48,6 +49,8 @@ func (a *App) settingsView(c *ui.Context) {
 			ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(28, 32, 60).Children(func() {
 				ui.Column(c).Width(a.settingsWidth(c)).Gap(18).Children(func() {
 					switch a.route.Section {
+					case "appearance":
+						a.appearanceSettings(c)
 					case "providers":
 						a.modelsSettings(c)
 					case "external":
@@ -90,8 +93,6 @@ func heading(c *ui.Context, title, desc string) {
 type accountState struct {
 	name       string
 	nameLoaded bool
-	themeIdx   int
-	size       float64
 	devices    []map[string]any
 	loaded     bool
 	deleteOpen bool
@@ -105,15 +106,77 @@ type accountState struct {
 
 var account accountState
 
+// Appearance ------------------------------------------------------------
+
+func (a *App) appearanceSettings(c *ui.Context) {
+	heading(c, "Appearance", "How Leaflet and your pages look.")
+	themeIdx := map[string]int{"system": 0, "light": 1, "sepia": 2, "dark": 3}[a.settings.Theme]
+	card(c, "appearance", func() {
+		settingRow(c, "theme", "Theme", "", true, func() {
+			ui.Segmented(c.Key("theme"), &themeIdx, "System", "Light", "Sepia", "Dark")
+			if want := []string{"system", "light", "sepia", "dark"}[themeIdx]; want != a.settings.Theme {
+				a.settings.Theme = want
+				a.saveSettings()
+				a.applyTheme()
+			}
+		})
+		settingRow(c, "accent", "Accent color", "", false, func() { a.accentDots(c) })
+		settingRow(c, "size", "Page text size", "", false, func() {
+			sizes := []float64{15, 17, 19, 21}
+			chosen := 1
+			for k, v := range sizes {
+				if v == a.settings.TextSize {
+					chosen = k
+				}
+			}
+			if ui.Segmented(c.Key("size"), &chosen, "Small", "Default", "Large", "Larger"); sizes[chosen] != a.settings.TextSize {
+				a.settings.TextSize = sizes[chosen]
+				a.saveSettings()
+			}
+		})
+	})
+}
+
+// accentDots is a row of dots choosing the accent: the desktop's, where
+// it has one, then Leaflet's.
+func (a *App) accentDots(c *ui.Context) {
+	pal := theme.Of(c)
+	isDark := c.Theme().Dark
+	ui.Row(c.Key("accents")).Gap(8).Children(func() {
+		dot := func(name, label string, color ui.Color) {
+			d := ui.ButtonBase(c.Key(name)).Size(20, 20).Radius(999).Background(color).Label(label).Tooltip(label)
+			chosen := a.settings.Accent == name || a.settings.Accent == "" && name == theme.Accents[0].Name
+			if chosen {
+				d.Border(2, pal.Text)
+			} else if d.Hovered() {
+				d.Border(2, pal.Border)
+			}
+			if d.Clicked() && !chosen {
+				a.settings.Accent = name
+				a.saveSettings()
+				a.applyTheme()
+			}
+		}
+		if system, ok := theme.Accent("system", isDark, c.Preferences().Accent); ok {
+			dot("system", "System", system)
+		}
+		for _, acc := range theme.Accents {
+			color := acc.Light
+			if isDark {
+				color = acc.Dark
+			}
+			dot(acc.Name, acc.Name, color)
+		}
+	})
+}
+
 func (a *App) accountSettings(c *ui.Context) {
 	pal := theme.Of(c)
 	s := &account
 	if !s.nameLoaded {
 		s.name, s.nameLoaded = a.session.DisplayName, true
-		s.themeIdx = map[string]int{"system": 0, "light": 1, "dark": 2}[a.settings.Theme]
-		s.size = a.settings.TextSize
 	}
-	heading(c, "Account", "Your name, how pages look, and the devices you use.")
+	heading(c, "Account", "Your name and the devices you use.")
 	card(c, "profile", func() {
 		settingRow(c, "name", "Name", "Shown on your comments and edits", true, func() {
 			in := field(c, "name", &s.name, "Your name").Width(220)
@@ -142,32 +205,6 @@ func (a *App) accountSettings(c *ui.Context) {
 				if primary(c, "signin", "", "Sign in").Clicked() {
 					a.navigate(Route{Kind: "signin"})
 				}
-			}
-		})
-	})
-	label(c, "Appearance")
-	card(c, "appearance", func() {
-		settingRow(c, "theme", "Theme", "", true, func() {
-			if ui.Segmented(c.Key("theme"), &s.themeIdx, "System", "Light", "Dark"); true {
-				want := []string{"system", "light", "dark"}[s.themeIdx]
-				if want != a.settings.Theme {
-					a.settings.Theme = want
-					a.saveSettings()
-					a.applyTheme()
-				}
-			}
-		})
-		settingRow(c, "size", "Page text size", "", false, func() {
-			sizes := []float64{15, 17, 19, 21}
-			chosen := 1
-			for k, v := range sizes {
-				if v == a.settings.TextSize {
-					chosen = k
-				}
-			}
-			if ui.Segmented(c.Key("size"), &chosen, "Small", "Default", "Large", "Larger"); sizes[chosen] != a.settings.TextSize {
-				a.settings.TextSize = sizes[chosen]
-				a.saveSettings()
 			}
 		})
 	})

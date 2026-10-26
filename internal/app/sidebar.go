@@ -24,8 +24,17 @@ func (a *App) sidebar(c *ui.Context) {
 			if a.route.Kind == "todos" {
 				todos.Background(pal.NavSelected).TextColor(pal.Text)
 			}
+			// It toggles: clicked while open, it goes back to where the
+			// view was opened from.
 			if todos.Clicked() {
-				a.navigate(Route{Kind: "todos"})
+				switch {
+				case a.route.Kind != "todos":
+					a.navigate(Route{Kind: "todos"})
+				case a.router != nil && a.router.CanGoBack():
+					a.back()
+				default:
+					a.navigate(Route{Kind: "home"})
+				}
 			}
 			if iconButton(c, "new-page", "square-pen", "New page (⌘N)").Clicked() {
 				a.newPage("", "")

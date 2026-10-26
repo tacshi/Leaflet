@@ -114,3 +114,45 @@ func TestAgentOnAPageToView(t *testing.T) {
 		t.Errorf("%d tools offered", len(defs))
 	}
 }
+
+// A page's chat comes back after a restart, with its runs still undoable
+// and a reply that never finished marked as such.
+func TestChatSurvivesARestart(t *testing.T) {
+	st := openStore(t)
+	h := NewHub(st, nil, nil)
+	s := h.Session("p")
+	run := &Run{ID: "r1", Status: "done", AgentName: "Test", Ops: []doc.Op{insertAfter("p1", "x1", "one")},
+		Edits: []Edit{{Summary: "Added a line", BlockIDs: []string{"x1"}}}}
+	pending := &Run{ID: "r2", Status: "running"}
+	s.Runs = []*Run{run, pending}
+	s.Messages = []*Message{
+		{Mine: true, Text: "Add a line"}, {Text: "Added a line.", RunID: "r1", AgentName: "Test"},
+		{Mine: true, Text: "Again"}, {Text: "Reading the page…", RunID: "r2", Pending: true},
+	}
+	h.saveChat(s)
+
+	again := NewHub(st, nil, nil).Session("p")
+	if again.ConversationID != s.ConversationID || len(again.Messages) != 4 {
+		t.Fatalf("conversation %q, %d messages", again.ConversationID, len(again.Messages))
+	}
+	if m := again.Messages[3]; m.Pending || !m.Error {
+		t.Errorf("unfinished reply %+v", m)
+	}
+	r := again.Run("r1")
+	if r == nil || len(r.Ops) != 1 || r.Ops[0].Nodes[0].ID != "x1" || len(r.Edits) != 1 {
+		t.Fatalf("run %+v", r)
+	}
+	if r2 := again.Run("r2"); r2 == nil || r2.Status != "failed" {
+		t.Errorf("unfinished run %+v", r2)
+	}
+	// The run bar is for runs of this launch.
+	if again.Latest() != nil {
+		t.Error("a restored run shows in the run bar")
+	}
+
+	h2 := NewHub(st, nil, nil)
+	h2.NewConversation("p")
+	if got := NewHub(st, nil, nil).Session("p"); len(got.Messages) != 0 {
+		t.Errorf("%d messages after a new conversation", len(got.Messages))
+	}
+}

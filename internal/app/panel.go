@@ -26,7 +26,7 @@ func (a *App) panel(c *ui.Context) {
 		tools(c, func() {
 			if a.panelTab == 0 {
 				if iconButton(c, "new-chat", "message-square-plus", "New conversation").Clicked() {
-					a.hub.Session(a.page.id).NewConversation()
+					a.hub.NewConversation(a.page.id)
 				}
 			}
 			if iconButton(c, "hide-panel", "panel-right", "Hide panel (⌘J)").Clicked() {

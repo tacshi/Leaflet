@@ -85,6 +85,8 @@ type Run struct {
 	Undone      bool
 	Error       string
 	At          time.Time
+	// Restored is a run of an earlier launch, kept with its chat reply.
+	Restored bool `json:"-"`
 }
 
 // BlockIDs are the blocks the run touched.
@@ -117,20 +119,91 @@ func (s *Session) Run(id string) *Run {
 	return nil
 }
 
-// Latest is the newest run that changed the page and is not undone.
+// Latest is the newest run of this launch that changed the page.
 func (s *Session) Latest() *Run {
 	for i := len(s.Runs) - 1; i >= 0; i-- {
-		if r := s.Runs[i]; len(r.Ops) > 0 {
+		if r := s.Runs[i]; len(r.Ops) > 0 && !r.Restored {
 			return r
 		}
 	}
 	return nil
 }
 
-// NewConversation clears the sidebar chat.
-func (s *Session) NewConversation() {
+// savedChat is a page's sidebar chat as the device keeps it between
+// launches, with the runs its replies show, so they can still be undone.
+type savedChat struct {
+	ConversationID string     `json:"conversation_id"`
+	Messages       []*Message `json:"messages"`
+	Runs           []*Run     `json:"runs,omitempty"`
+}
+
+// maxSavedMessages bounds the chat kept for a page.
+const maxSavedMessages = 200
+
+func chatKey(pageID string) string { return "chat." + pageID }
+
+// loadChat reads a page's chat from an earlier launch into s. A reply
+// still pending then never got its answer.
+func (h *Hub) loadChat(s *Session) {
+	raw, ok := h.st.Value(chatKey(s.PageID))
+	if !ok {
+		return
+	}
+	var saved savedChat
+	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
+		log.Printf("agent chat: %v", err)
+		return
+	}
+	for _, m := range saved.Messages {
+		if m.Pending {
+			m.Pending, m.Error, m.Text = false, true, "The app closed before the agent finished."
+		}
+	}
+	for _, r := range saved.Runs {
+		r.Restored = true
+		if r.Status != "done" && r.Status != "failed" {
+			r.Status = "failed"
+		}
+	}
+	if saved.ConversationID != "" {
+		s.ConversationID = saved.ConversationID
+	}
+	s.Messages, s.Runs = saved.Messages, saved.Runs
+}
+
+// saveChat keeps a page's chat for the next launch.
+func (h *Hub) saveChat(s *Session) {
+	if len(s.Messages) == 0 {
+		if err := h.st.DeleteValue(chatKey(s.PageID)); err != nil {
+			log.Printf("agent chat: %v", err)
+		}
+		return
+	}
+	msgs := s.Messages
+	if len(msgs) > maxSavedMessages {
+		msgs = msgs[len(msgs)-maxSavedMessages:]
+	}
+	saved := savedChat{ConversationID: s.ConversationID, Messages: msgs}
+	for _, m := range msgs {
+		if r := s.Run(m.RunID); r != nil {
+			saved.Runs = append(saved.Runs, r)
+		}
+	}
+	raw, err := json.Marshal(saved)
+	if err == nil {
+		err = h.st.SetValue(chatKey(s.PageID), string(raw))
+	}
+	if err != nil {
+		log.Printf("agent chat: %v", err)
+	}
+}
+
+// NewConversation clears a page's sidebar chat.
+func (h *Hub) NewConversation(pageID string) {
+	s := h.Session(pageID)
 	s.Messages = nil
 	s.ConversationID = doc.NewRowID()
+	h.saveChat(s)
 }
 
 // Hub runs agents for every page.
@@ -151,6 +224,7 @@ func (h *Hub) Session(pageID string) *Session {
 	s := h.sessions[pageID]
 	if s == nil {
 		s = &Session{PageID: pageID, ConversationID: doc.NewRowID()}
+		h.loadChat(s)
 		h.sessions[pageID] = s
 	}
 	return s
@@ -371,6 +445,7 @@ func (h *Hub) Chat(pageID, text string, focus []string) {
 	s.Messages = append(s.Messages, reply)
 	history := chatHistory(s.Messages)
 	h.Start(pageID, RunOptions{Surface: "sidebar", Instruction: t, Focus: focus, History: history, Reply: reply})
+	h.saveChat(s)
 }
 
 func chatHistory(msgs []*Message) []map[string]string {
@@ -618,6 +693,7 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		o.Reply.Pending = false
 		o.Reply.Error = run.Error != ""
 		o.Reply.Text = Describe(run)
+		h.saveChat(s)
 	}
 	if o.Done != nil {
 		o.Done(run)
@@ -668,6 +744,7 @@ func (h *Hub) UndoRun(pageID, runID string) {
 	}
 	h.apply(pageID, doc.InvertRun(run.Ops))
 	run.Undone = true
+	h.saveChat(s)
 	h.host.Tint(pageID, nil)
 	h.markJob(runID, "reverted")
 }
@@ -681,6 +758,7 @@ func (h *Hub) RedoRun(pageID, runID string) {
 	}
 	h.apply(pageID, run.Ops)
 	run.Undone = false
+	h.saveChat(s)
 	h.host.Tint(pageID, run.BlockIDs())
 	h.markJob(runID, "done")
 }

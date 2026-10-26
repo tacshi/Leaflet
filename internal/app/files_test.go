@@ -56,7 +56,7 @@ func TestFileFromAnotherDeviceDownloads(t *testing.T) {
 	}
 	f, _ = a.fileByID(id)
 	path := a.localFile(f, func() { t.Error("downloaded twice") })
-	if data, err := os.ReadFile(path); err != nil || string(data) != "hello" {
+	if data, err := os.ReadFile(path); err != nil || string(data) != "hello" { // #nosec G304 -- the file the test just downloaded.
 		t.Errorf("%s has %q, %v", path, data, err)
 	}
 }

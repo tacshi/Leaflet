@@ -23,8 +23,10 @@ func TestExportZip(t *testing.T) {
 	}
 	img := &doc.Node{ID: "i", Type: "image", Data: map[string]any{"url": "file:///data/files/x/dawn.jpg", "alt": "dawn"}}
 	link := &doc.Node{ID: "s", Type: "subpage", Data: map[string]any{"page_id": "hotels"}}
+	mention := &doc.Node{ID: "m", Type: "paragraph"}
+	mention.SetDelta(doc.Delta{{Text: "See "}, {Text: "Notes", Attrs: doc.PageMention("notes", "Notes")}})
 	contents := map[string]*doc.Content{
-		"trip":   doc.FromBlocks([]*doc.Node{img, link}),
+		"trip":   doc.FromBlocks([]*doc.Node{img, link, mention}),
 		"hotels": doc.FromBlocks([]*doc.Node{img.Clone()}),
 		"notes":  doc.Empty(),
 		"notes2": doc.Empty(),
@@ -63,7 +65,8 @@ func TestExportZip(t *testing.T) {
 		t.Errorf("files %v", keys(got))
 	}
 	trip := got["Travel/Trip planning.md"]
-	if !strings.Contains(trip, "](../files/dawn.jpg)") || !strings.Contains(trip, "](Trip%20planning/Hotels.md)") {
+	if !strings.Contains(trip, "](../files/dawn.jpg)") || !strings.Contains(trip, "](Trip%20planning/Hotels.md)") ||
+		!strings.Contains(trip, "See [Notes](../Notes.md)") {
 		t.Errorf("trip links:\n%s", trip)
 	}
 	if !strings.Contains(got["Travel/Trip planning/Hotels.md"], "](../../files/dawn.jpg)") {

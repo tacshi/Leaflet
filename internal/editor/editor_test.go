@@ -3,6 +3,7 @@ package editor
 import (
 	"fmt"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -539,5 +540,60 @@ func TestPasteLinksAndSources(t *testing.T) {
 	g.Enter()
 	if top := g.Content.Children; top[0].Type != "diagram" || len(host.edited) != 1 || host.edited[0] != top[0].ID {
 		t.Errorf("got %v, edited %v", texts(g), host.edited)
+	}
+}
+
+func TestTableCellsTabAndEnter(t *testing.T) {
+	e, tt, _ := setup(t)
+	table, _ := doc.TableNode([][]string{{"ID", "Name"}, {"", ""}}, "")
+	after := newText("paragraph", doc.FromMarkdown("after"))
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table, after} })
+	tt.Frame()
+	// Click the first body cell: it opens to its Markdown.
+	box := e.geom[table.ID]
+	tt.ClickAt(box.X+20, box.Y+box.H*0.75)
+	tt.Frame()
+	if e.cellEdit != cellKey(table.ID, 1, 0) {
+		t.Fatalf("editing %q", e.cellEdit)
+	}
+	tt.Type("R1")
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	tt.Type("**Queue** edits")
+	// Tab past the last cell adds a row and goes to its first cell.
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	if rows := table.Int("rowsLen", 0); rows != 3 {
+		t.Fatalf("rows %d", rows)
+	}
+	if e.cellEdit != cellKey(table.ID, 2, 0) {
+		t.Fatalf("after Tab, editing %q", e.cellEdit)
+	}
+	rows := doc.TableRows(table)
+	if rows[1][0] != "R1" || rows[1][1] != "**Queue** edits" {
+		t.Errorf("rows %q", rows)
+	}
+	// Enter on the last row leaves the table for the block after it.
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if e.cellEdit != "" || e.Caret().ID != after.ID {
+		t.Errorf("after Enter: editing %q, caret in %s", e.cellEdit, e.Caret().ID)
+	}
+}
+
+func TestPasteMarkdownBlankLinesSeparate(t *testing.T) {
+	nodes := parseLines("## Start\n\n> [!NOTE]\n> Needs Go\n\n1. one\n\n2. two\n\n```go\na := 1\n\nb := 2\n```\n")
+	var types []string
+	for _, n := range nodes {
+		types = append(types, n.Type)
+		if n.Type == "paragraph" && n.Delta().Len() == 0 {
+			t.Errorf("an empty paragraph in %v", types)
+		}
+	}
+	if got := strings.Join(types, " "); got != "heading callout numbered_list numbered_list code" {
+		t.Fatalf("blocks %s", got)
+	}
+	if code := nodes[4].Delta().Plain(); code != "a := 1\n\nb := 2" {
+		t.Errorf("code %q lost its blank line", code)
 	}
 }

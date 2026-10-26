@@ -111,9 +111,6 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 	l := e.layout(n, pal, dark)
 	depth := e.depth(n.ID)
 	box := ui.Box(c.Key(n.ID)).Height(l.h).FillWidth()
-	if e.reveal == n.ID {
-		box.ScrollIntoView()
-	}
 	tinted := e.Tinted[n.ID]
 	empty := textLen(n) == 0
 	isFocus := e.focus.ID == n.ID
@@ -212,6 +209,9 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 	})
 	hovered := box.Hovered()
 	box.Children(func() {
+		if e.reveal == n.ID {
+			revealBelow(c, l.h)
+		}
 		if n.Type == "code" {
 			e.codeBarView(c, n, float32(depth)*indentStep, hovered || isFocus && focused, pal)
 		}
@@ -380,7 +380,8 @@ func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 		panel := ui.Column(c.Key("block-menu")).Absolute().Left(at.X-6).Width(300).Padding(6).Gap(1).
 			Radius(10).Background(pal.Surface).Border(1, pal.Border).Shadow(0, 10, 30, 0, pal.Shadow)
 		h := float32(min(len(e.menuItems), 9))*34 + 16
-		if at.Y+at.H+6+h > wh {
+		// Above the line when it would go under the bars at the bottom.
+		if at.Y+at.H+6+h > wh-revealMargin {
 			panel.Top(max(at.Y-6-h, 8))
 		} else {
 			panel.Top(at.Y + at.H + 6)
@@ -515,4 +516,16 @@ func (e *Editor) linkEditor(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 			}
 		})
 	})
+}
+
+// revealMargin is the room kept under a block brought into view: the bars
+// at the bottom of the page, an agent's run and its Undo, cover what is
+// under them.
+const revealMargin = 80
+
+// revealBelow scrolls the block of height h being built into view with
+// revealMargin under it, as ScrollIntoView alone would leave it at the
+// window's edge.
+func revealBelow(c *ui.Context, h float32) {
+	ui.Box(c.Key("reveal")).Absolute().Left(0).Top(0).Width(1).Height(h + revealMargin).ScrollIntoView()
 }

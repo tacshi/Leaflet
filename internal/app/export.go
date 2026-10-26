@@ -134,15 +134,11 @@ func exportZip(w io.Writer, pages []store.Page, folders map[string]string, conte
 		if fail != nil {
 			return fail
 		}
-		c.Walk(func(n, _ *doc.Node) {
-			if n.Type != "subpage" {
-				return
-			}
-			id := n.Str("page_id")
-			if to, ok := paths[id]; ok {
-				md = strings.ReplaceAll(md, "(leaflet://page/"+id+")", "("+rel(to+".md")+")")
-			}
-		})
+		// Links to pages, of subpage blocks and page mentions alike, go
+		// to the pages' files.
+		for id, to := range paths {
+			md = strings.ReplaceAll(md, "("+doc.PageLink(id)+")", "("+rel(to+".md")+")")
+		}
 		fw, err := create(own+".md", p.UpdatedAt)
 		if err != nil {
 			return err

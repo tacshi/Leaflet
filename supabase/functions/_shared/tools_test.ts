@@ -311,3 +311,15 @@ Deno.test("callouts, toggles, videos, link cards, math and diagrams", () => {
   assertEquals(views[0].collapsed, true);
   assertEquals(views[3].url, "https://youtu.be/dQw4w9WgXcQ");
 });
+
+Deno.test("a page mention reads and writes as a link to the page", () => {
+  const delta = markdownToDelta("See [RFC: Sync v2](leaflet://page/p-9) first");
+  assertEquals(delta[1], {
+    insert: "RFC: Sync v2",
+    attributes: {
+      href: "leaflet://page/p-9",
+      mention: { kind: "page", id: "p-9", name: "RFC: Sync v2" },
+    },
+  });
+  assertEquals(deltaToMarkdown(delta), "See [RFC: Sync v2](leaflet://page/p-9) first");
+});

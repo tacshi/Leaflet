@@ -555,7 +555,7 @@ func (a *App) shareDialog(c *ui.Context) {
 			})
 			ui.Row(c).Gap(8).Children(func() {
 				if button(c, "copy", "link", "Copy link").Clicked() {
-					c.WriteClipboard("leaflet://page/" + d.sharePage)
+					c.WriteClipboard(doc.PageLink(d.sharePage))
 					c.Toast("Link copied")
 				}
 			})

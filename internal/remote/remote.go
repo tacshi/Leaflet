@@ -498,6 +498,32 @@ func (c *Client) Upsert(ctx context.Context, table string, rows any, onConflict 
 	return decodeRows(res)
 }
 
+// Update changes the rows that match the filters and returns them as
+// stored; none when nothing matched.
+func (c *Client) Update(ctx context.Context, table string, filters []string, values map[string]any) ([]map[string]any, error) {
+	raw, err := json.Marshal(values)
+	if err != nil {
+		return nil, err
+	}
+	q := make([]string, len(filters))
+	for i, f := range filters {
+		k, v, _ := strings.Cut(f, "=")
+		q[i] = url.QueryEscape(k) + "=" + url.QueryEscape(v)
+	}
+	res, err := c.request(ctx, "PATCH", "/rest/v1/"+table+"?"+strings.Join(q, "&"), bytes.NewReader(raw), map[string]string{"Prefer": "return=representation"})
+	if err != nil {
+		return nil, err
+	}
+	return decodeRows(res)
+}
+
+// IsConflict reports whether err is the server refusing a row that already
+// exists.
+func IsConflict(err error) bool {
+	var re *Error
+	return errors.As(err, &re) && re.Status == http.StatusConflict
+}
+
 // Insert inserts rows and returns them as stored.
 func (c *Client) Insert(ctx context.Context, table string, rows any) ([]map[string]any, error) {
 	raw, err := json.Marshal(rows)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 
@@ -15,6 +16,10 @@ func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	rows, cols := n.Int("rowsLen", 0), n.Int("colsLen", 0)
 	if rows == 0 || cols == 0 {
 		return
+	}
+	if e.cellMove != 0 && strings.HasPrefix(e.cellEdit, n.ID+":") {
+		e.moveCell(n)
+		rows = n.Int("rowsLen", 0)
 	}
 	colW := max((e.width-float32(e.depth(n.ID))*indentStep-2)/float32(cols), 80)
 	wrap := ui.Column(c.Key("table:" + n.ID)).Gap(6)
@@ -74,21 +79,112 @@ func small(c *ui.Context, key, icon, label string, pal *theme.Palette) bool {
 	return b.Clicked()
 }
 
+// Moves between a table's cells, from Tab, Shift-Tab and Enter.
+const (
+	cellNext = 1 + iota
+	cellPrev
+	cellDown
+)
+
+func cellKey(table string, r, col int) string { return fmt.Sprintf("%s:%d:%d", table, r, col) }
+
+// moveCell makes the move asked for in a cell of table n: Tab past the
+// last cell adds a row, as other editors do, and Enter on the last row
+// leaves the table for the block after it.
+func (e *Editor) moveCell(n *doc.Node) {
+	move := e.cellMove
+	e.cellMove = 0
+	var r, col int
+	if _, err := fmt.Sscanf(strings.TrimPrefix(e.cellEdit, n.ID+":"), "%d:%d", &r, &col); err != nil {
+		return
+	}
+	rows, cols := n.Int("rowsLen", 0), n.Int("colsLen", 0)
+	switch move {
+	case cellNext:
+		if col++; col == cols {
+			col, r = 0, r+1
+		}
+		if r == rows {
+			e.Edit(func(*doc.Content) { addTableRow(n) })
+		}
+	case cellPrev:
+		if col--; col < 0 {
+			col, r = cols-1, r-1
+		}
+		if r < 0 {
+			r, col = 0, 0
+		}
+	case cellDown:
+		if r++; r == rows {
+			e.cellEdit = ""
+			us := e.units()
+			if i := e.index(n.ID); i >= 0 && i+1 < len(us) {
+				e.PlaceCaret(us[i+1].ID, 0)
+				e.Focus()
+			}
+			return
+		}
+	}
+	e.cellEdit, e.cellFocused = cellKey(n.ID, r, col), false
+}
+
 func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w float32, pal *theme.Palette) {
 	key := fmt.Sprintf("cell:%d:%d", r, col)
 	box := ui.Box(c.Key(key)).Width(w).Padding(8, 10)
 	if col > 0 {
 		box.BorderWidth(0, 0, 0, 1).BorderColor(pal.Border)
 	}
+	var para *doc.Node
+	if cell != nil && len(cell.Children) > 0 {
+		para = cell.Children[0]
+	}
+	font := ui.Font{Family: e.Family, Size: e.Size * 0.88}
+	if r == 0 {
+		font.Weight = 600
+	}
+	id := cellKey(table.ID, r, col)
 	box.Children(func() {
+		if e.ReadOnly || e.cellEdit != id {
+			// Its text formatted, wrapping in the column; a click edits it.
+			view := ui.Box(c.Key("view")).FillWidth().MinHeight(font.Size * 1.3).Cursor(ui.CursorText)
+			view.Children(func() {
+				if para != nil && para.Delta().Len() > 0 {
+					ui.RichText(c, e.spans(para, pal, font)...).Font(font.Family).FontSize(font.Size).FontWeight(font.Weight).TextColor(pal.Text)
+				}
+			})
+			if !e.ReadOnly && view.Clicked() {
+				e.cellEdit, e.cellFocused = id, false
+			}
+			return
+		}
+		// The cell's Markdown, wrapping, while it is edited.
 		text := ""
-		if cell != nil && len(cell.Children) > 0 {
-			text = cell.Children[0].Delta().ToMarkdown()
+		if para != nil {
+			text = para.Delta().ToMarkdown()
 		}
 		before := text
-		in := ui.TextInputBase(c.Key("in"), &text).Font(e.Family).FontSize(e.Size * 0.88).TextColor(pal.Text).ReadOnly(e.ReadOnly)
-		if r == 0 {
-			in.FontWeight(600)
+		in := ui.TextAreaBase(c.Key("in"), &text).Font(font.Family).FontSize(font.Size).FontWeight(font.Weight).
+			TextColor(pal.Text).FillWidth().AutoFocus().
+			OnTextKey(func(k ui.TextKey) bool {
+				switch {
+				case k.Key == ui.KeyTab && k.Mods == 0:
+					e.cellMove = cellNext
+				case k.Key == ui.KeyTab && k.Mods == ui.Shift:
+					e.cellMove = cellPrev
+				case k.Key == ui.KeyEnter && k.Mods == 0:
+					e.cellMove = cellDown // a cell holds one paragraph
+				default:
+					return false
+				}
+				return true
+			})
+		if in.Focused() {
+			e.cellFocused = true
+		} else if e.cellFocused && e.cellMove == 0 {
+			// The focus went elsewhere: show the cell formatted now,
+			// not at whatever next redraws the window.
+			e.cellEdit, e.cellFocused = "", false
+			e.services.Invalidate()
 		}
 		if text != before {
 			e.pushUndo(true)
@@ -101,8 +197,41 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 				cell.Children = []*doc.Node{newText("paragraph", nil)}
 			}
 			cell.Children[0].SetDelta(doc.FromMarkdown(text))
+			e.invalidate(table.ID)
 			e.changed()
 		}
+		if from, to := in.TextSelection(); from != to && in.Focused() {
+			e.cellTools(c, in, table.ID, text, from, to, pal)
+		}
+	})
+}
+
+// cellTools offers Comment and Ask agent on text selected in a table
+// cell, as the selection toolbar does in the page's text.
+func (e *Editor) cellTools(c *ui.Context, in ui.Element, table, text string, from, to int, pal *theme.Palette) {
+	runes := []rune(text)
+	from, to = max(min(from, to, len(runes)), 0), min(max(from, to), len(runes))
+	quote := string(runes[from:to])
+	ui.Overlay(c, func() {
+		bar := ui.Row(c.Key("cell-tools")).AttachTo(in, ui.AnchorTopLeft, ui.AnchorBottomLeft).Top(-8).Padding(4).Gap(2).
+			Radius(9).Background(pal.Inverse).Shadow(0, 8, 24, 0, pal.Shadow).AlignItems(ui.Center)
+		bar.Children(func() {
+			text := func(key, icon, label string, fn func()) {
+				b := ui.ButtonBase(c.Key(key)).Height(28).Padding(0, 9).Gap(6).Radius(6).KeepFocus().TextColor(pal.OnInverse).AlignItems(ui.Center)
+				if b.Hovered() {
+					b.Background(pal.OnInverse.Alpha(0.1))
+				}
+				b.Children(func() {
+					ui.Icon(c, theme.Icon(icon)).FontSize(14)
+					ui.Text(c, label).FontSize(13).FontWeight(500)
+				})
+				if b.Clicked() {
+					fn()
+				}
+			}
+			text("comment", "message-square", "Comment", func() { e.Host.Comment(table, quote) })
+			text("ask", "sparkles", "Ask agent", func() { e.Host.AskAgent(table, quote) })
+		})
 	})
 }
 

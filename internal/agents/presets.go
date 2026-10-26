@@ -93,7 +93,9 @@ func SystemPrompt(agentName, pageTitle, surface string, canReadOtherPages, suppo
 	case "selection":
 		focus = "The user selected some text and asked about it. The selected blocks are your focus."
 	case "comment":
-		focus = "The user mentioned you in a comment thread anchored to a block. That block is your focus; your reply is posted in the thread."
+		// As prompt.ts says it: a question in a thread gets an answer, not
+		// an edit of the page.
+		focus = "The user mentioned you in a comment thread anchored to a block. That block is your focus. Answer in the thread; edit the page only if they ask for a change. Your reply is posted as a comment: keep it short."
 	}
 	var b strings.Builder
 	b.WriteString("You are " + agentName + ", an AI collaborator in Leaflet, an app where people and AI co-write living documents called pages. Today is " + Today() + ". The current page is \"" + pageTitle + "\".\n\n")

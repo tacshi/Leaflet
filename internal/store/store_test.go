@@ -140,3 +140,79 @@ func TestSnippet(t *testing.T) {
 		t.Errorf("snippet %q", got)
 	}
 }
+
+func TestDequeueKeepsNewerPayload(t *testing.T) {
+	s := open(t)
+	if err := s.Queue("pages", "p1", map[string]any{"title": "Draft"}, "", "p1"); err != nil {
+		t.Fatal(err)
+	}
+	sent, _ := s.Pending()
+	// Renamed again while the first rename was on its way.
+	if err := s.Queue("pages", "p1", map[string]any{"title": "Final"}, "", "p1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Dequeue(sent[0]); err != nil {
+		t.Fatal(err)
+	}
+	left, _ := s.Pending()
+	if len(left) != 1 || left[0].Payload != `{"title":"Final"}` {
+		t.Fatalf("left %+v", left)
+	}
+	if err := s.Dequeue(left[0]); err != nil {
+		t.Fatal(err)
+	}
+	if s.HasPending("pages", "p1") {
+		t.Error("still pending after the latest was sent")
+	}
+}
+
+func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
+	s := open(t)
+	if _, err := s.CreatePage(NewPageOptions{Title: "A's plan"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutProvider(Provider{ID: "ollama", Preset: "ollama", Name: "Ollama", IsLocal: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutProvider(Provider{ID: "cloud", Preset: "openai", Name: "OpenAI"}); err != nil {
+		t.Fatal(err)
+	}
+	// What sync does on A's first sign-in: adopt the device's space.
+	local := s.Session().SpaceID
+	for k, v := range map[string]string{"space.A": "remote-a", "space.local": "remote-a", "account": "A", "sync.cursor.pages": "t|p"} {
+		_ = s.SetValue(k, v)
+	}
+	if err := s.MoveSpace(local, "remote-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := s.LoadSession(&User{ID: "A", Email: "a@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	if pages, _ := s.Pages(); len(pages) != 1 {
+		t.Fatalf("A signing back in: %d pages", len(pages))
+	}
+
+	sess, err := s.LoadSession(&User{ID: "B", Email: "b@example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pages, _ := s.Pages(); len(pages) != 0 {
+		t.Errorf("B sees %d of A's pages", len(pages))
+	}
+	if s.PendingCount() != 0 {
+		t.Errorf("%d of A's changes still queued", s.PendingCount())
+	}
+	if sess.SpaceID == "remote-a" {
+		t.Error("B's session is in A's space")
+	}
+	for _, k := range []string{"space.A", "account", "sync.cursor.pages"} {
+		if _, ok := s.Value(k); ok {
+			t.Errorf("%s kept", k)
+		}
+	}
+	providers, _ := s.Providers()
+	if len(providers) != 1 || providers[0].ID != "ollama" {
+		t.Errorf("providers %+v", providers)
+	}
+}

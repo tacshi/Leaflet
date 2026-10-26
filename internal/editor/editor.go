@@ -129,6 +129,15 @@ type Editor struct {
 	copied   string
 	copiedAt time.Time
 
+	// cellEdit is the table cell being edited, as cellKey names it: it
+	// shows its Markdown in an input, and the others their text
+	// formatted. cellFocused is set once that input has had the focus,
+	// to tell when it loses it; cellMove is the move Tab, Shift-Tab or
+	// Enter asked for in it, made as its table builds.
+	cellEdit    string
+	cellFocused bool
+	cellMove    int
+
 	handle   ui.Handle
 	services ui.Services
 }

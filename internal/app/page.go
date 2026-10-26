@@ -62,7 +62,7 @@ func (a *App) pageView(c *ui.Context) {
 					}
 					ps.editor.View(c)
 					a.dropVideos()
-					if a.isEmpty() && !ps.editor.ReadOnly {
+					if a.isEmpty() && !ps.editor.ReadOnly && a.dialogs.inline == nil {
 						a.emptyActions(c)
 					}
 					a.inlinePrompt(c)

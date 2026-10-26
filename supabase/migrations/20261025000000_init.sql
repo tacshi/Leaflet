@@ -4,6 +4,8 @@
 -- Conventions
 -- * Every table with updated_at gets it from the server (clock_timestamp())
 --   on insert and on every update; clients pull with `updated_at > cursor`.
+-- * page_content saves are compare-and-set on its revision: update where
+--   the revision is the one read; zero rows means read, merge and retry.
 -- * pages, folders, comments and files are soft-deleted (deleted_at) so the
 --   deletion reaches other devices through the same pull.
 -- * Access: the space owner has full access; page_permissions grants viewer
@@ -82,6 +84,8 @@ create table public.page_content (
   -- Flattened text of the page, for search.
   plain_text text not null default '',
   updated_by uuid default auth.uid() references auth.users (id) on delete set null,
+  -- Moves on with every update; saves are compare-and-set on it (protocol §1).
+  revision bigint not null default 0,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -309,6 +313,22 @@ begin
   end loop;
 end;
 $$;
+
+-- page_content's revision moves on with every update, whatever the writer
+-- sent, so a writer that does not check it still makes the others retry.
+create or replace function public.bump_revision()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.revision := old.revision + 1;
+  return new;
+end;
+$$;
+
+create trigger page_content_bump_revision before update on public.page_content
+  for each row execute function public.bump_revision();
 
 -- ---------------------------------------------------------------------------
 -- Access helpers (security definer: they read past RLS, keyed on auth.uid())

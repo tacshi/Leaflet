@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS pages (
 CREATE INDEX IF NOT EXISTS pages_space ON pages (space_id, parent_id);
 CREATE TABLE IF NOT EXISTS page_contents (
   page_id TEXT PRIMARY KEY, content TEXT NOT NULL, plain_text TEXT NOT NULL DEFAULT '',
-  updated_at INTEGER NOT NULL, base_content TEXT, remote_updated_at INTEGER);
+  updated_at INTEGER NOT NULL, base_content TEXT, remote_updated_at INTEGER,
+  remote_revision INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS comments (
   id TEXT PRIMARY KEY, page_id TEXT NOT NULL, block_id TEXT NOT NULL, parent_comment_id TEXT,
   author_id TEXT, author_kind TEXT NOT NULL DEFAULT 'user', author_name TEXT NOT NULL DEFAULT '',
@@ -60,7 +61,7 @@ CREATE TABLE IF NOT EXISTS page_history (
 CREATE TABLE IF NOT EXISTS outbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL, entity_id TEXT NOT NULL, op TEXT NOT NULL,
   payload TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', page_id TEXT, attempts INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT, created_at INTEGER NOT NULL);
+  last_error TEXT, created_at INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS outbox_entity ON outbox (entity, entity_id);
 CREATE TABLE IF NOT EXISTS conflicts (
   id TEXT PRIMARY KEY, page_id TEXT NOT NULL, block_id TEXT NOT NULL, local_node TEXT NOT NULL,

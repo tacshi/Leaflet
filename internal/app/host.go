@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -163,6 +164,22 @@ func (h *host) MentionItems(query string) []editor.MenuItem {
 	if len(h.a.hub.Options()) == 0 && q == "" {
 		out = append(out, editor.MenuItem{Key: "connect", Label: "Add an agent provider", Hint: "Settings › Agent providers", Icon: "sparkles", Group: "Agents"})
 	}
+	// The user's pages, to mention one: most recently edited first.
+	pages := slices.Clone(h.a.pages)
+	slices.SortStableFunc(pages, func(x, y store.Page) int { return y.UpdatedAt.Compare(x.UpdatedAt) })
+	n := 0
+	for _, p := range pages {
+		if n == 8 {
+			break
+		}
+		if h.a.page != nil && p.ID == h.a.page.id {
+			continue
+		}
+		if q == "" || strings.Contains(strings.ToLower(p.DisplayTitle()), q) {
+			out = append(out, editor.MenuItem{Key: "page:" + p.ID, Label: p.DisplayTitle(), Hint: h.a.pagePlace(p), Icon: "file-text", Group: "Pages"})
+			n++
+		}
+	}
 	if h.a.page != nil {
 		for _, m := range h.a.page.members {
 			if m.UserID == h.a.session.UserID {
@@ -174,6 +191,20 @@ func (h *host) MentionItems(query string) []editor.MenuItem {
 		}
 	}
 	return out
+}
+
+// pagePlace says where a page is, for a list of pages: in its parent
+// page, else its folder, else nothing at the top of the space.
+func (a *App) pagePlace(p store.Page) string {
+	if parent := a.pageByID(p.ParentID); parent != nil {
+		return parent.DisplayTitle()
+	}
+	for _, f := range a.folders {
+		if f.ID == p.FolderID {
+			return f.Name
+		}
+	}
+	return ""
 }
 
 func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
@@ -192,6 +223,8 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 			ed.RemoveTrigger(t)
 			choice := store.ModelChoice{ProviderID: strings.TrimPrefix(item.Key, "agent:")}
 			a.dialogs.inline = &inlinePrompt{blockID: t.ID, agent: choice, agentName: item.Label}
+		case strings.HasPrefix(item.Key, "page:"):
+			ed.InsertPageMention(t, strings.TrimPrefix(item.Key, "page:"), item.Label)
 		case strings.HasPrefix(item.Key, "user:"):
 			ed.InsertMention(t, doc.Mention{Kind: "user", ID: strings.TrimPrefix(item.Key, "user:"), Name: item.Label})
 		}

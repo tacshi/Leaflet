@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 	"runtime"
+	"strings"
 	gosync "sync"
 	"time"
 
@@ -102,6 +104,13 @@ func (s *Service) CanSync() bool {
 	return mygo.Network.Status().Online
 }
 
+// Hold runs fn between passes, so no pass sees its changes half made.
+func (s *Service) Hold(fn func()) {
+	s.running.Lock()
+	defer s.running.Unlock()
+	fn()
+}
+
 // SyncNow runs one pass, after the one in progress.
 func (s *Service) SyncNow() error {
 	if !s.CanSync() {
@@ -141,9 +150,14 @@ func (s *Service) pass(ctx context.Context) error {
 }
 
 // resolveSpace, after sign-in, moves the pages made on this device into
-// the account's space and queues them for upload.
+// the account's space and queues them for upload. Pages are only ever
+// adopted from the device's own space: another account's are forgotten
+// before signing in (store.LoadSession).
 func (s *Service) resolveSpace(ctx context.Context) error {
 	uid := s.be.UserID()
+	if acct := s.st.CachedAccount(); acct != "" && acct != uid {
+		return errors.New("this device still keeps another account's pages")
+	}
 	if _, ok := s.st.Value("space." + uid); ok {
 		return nil
 	}
@@ -178,6 +192,9 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 		return err
 	}
 	if err := s.st.SetValue("space."+uid, remoteID); err != nil {
+		return err
+	}
+	if err := s.st.SetValue("account", uid); err != nil {
 		return err
 	}
 	// Everything made before sign-in goes up now.
@@ -266,11 +283,11 @@ func (s *Service) push(ctx context.Context) error {
 				return err
 			}
 			log.Printf("outbox %s/%s: %v", e.Entity, e.EntityID, err)
-			_ = s.st.MarkFailed(e.ID, err.Error())
+			_ = s.st.MarkFailed(e, err.Error())
 			continue
 		}
 		if done {
-			_ = s.st.Dequeue(e.ID)
+			_ = s.st.Dequeue(e)
 		}
 	}
 	return nil
@@ -306,41 +323,68 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 	return err == nil, err
 }
 
+// errStale means someone saved the page's content between reading it and
+// saving over it.
+var errStale = errors.New("the page changed on the server while saving")
+
 func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) {
+	if _, err := s.st.Page(pageID); err != nil {
+		return true, nil
+	}
+	// Another device or an agent may save in between: merge with what it
+	// saved and try again.
+	for range 3 {
+		done, err := s.saveContent(ctx, pageID)
+		if !errors.Is(err, errStale) {
+			return done, err
+		}
+	}
+	return false, errors.New("the page kept changing on the server, or you cannot edit it")
+}
+
+// saveContent merges this device's content with the server's and saves the
+// result, if the server still has the revision it merged with.
+func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) {
 	row, err := s.st.ContentRow(pageID)
 	if err != nil {
 		return true, nil
 	}
-	if _, err := s.st.Page(pageID); err != nil {
-		return true, nil
-	}
 	local := doc.MustDecode(row.Content)
-	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: "content, updated_at", Filters: []string{remote.Eq("page_id", pageID)}})
+	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: "content, revision, updated_at", Filters: []string{remote.Eq("page_id", pageID)}})
 	if err != nil {
 		return false, err
 	}
 	merged := local
 	var conflicts []doc.Conflict
-	if remoteRow != nil {
-		remoteAt := store.Time(remoteRow["updated_at"])
-		if row.RemoteUpdatedAt.IsZero() || remoteAt.After(row.RemoteUpdatedAt) {
-			remoteContent := contentOf(remoteRow["content"])
-			var base *doc.Content
-			if row.BaseContent != "" {
-				base = doc.MustDecode(row.BaseContent)
-			}
-			merged, conflicts = doc.Merge(base, local, remoteContent)
+	if remoteRow != nil && behind(row, remoteRow) {
+		var base *doc.Content
+		if row.BaseContent != "" {
+			base = doc.MustDecode(row.BaseContent)
+		}
+		merged, conflicts = doc.Merge(base, local, contentOf(remoteRow["content"]))
+	}
+	values := map[string]any{"content": json.RawMessage(merged.Encode()), "plain_text": merged.PlainText()}
+	var saved []map[string]any
+	if remoteRow == nil {
+		values["page_id"] = pageID
+		saved, err = s.be.Insert(ctx, "page_content", values)
+		if remote.IsConflict(err) {
+			return false, errStale
+		}
+	} else {
+		saved, err = s.be.Update(ctx, "page_content", []string{
+			remote.Eq("page_id", pageID), remote.Eq("revision", fmt.Sprint(store.Int(remoteRow, "revision"))),
+		}, values)
+		if err == nil && len(saved) == 0 {
+			return false, errStale
 		}
 	}
-	saved, err := s.be.Upsert(ctx, "page_content", map[string]any{
-		"page_id": pageID, "content": json.RawMessage(merged.Encode()), "plain_text": merged.PlainText(),
-	}, "page_id")
 	if err != nil {
 		return false, err
 	}
-	savedAt := time.Now()
+	savedAt, savedRev := time.Now(), int64(0)
 	if len(saved) > 0 {
-		savedAt = store.Time(saved[0]["updated_at"])
+		savedAt, savedRev = store.Time(saved[0]["updated_at"]), store.Int(saved[0], "revision")
 	}
 	// The user may have kept typing while this was in flight.
 	now, _ := s.st.ContentRow(pageID)
@@ -349,7 +393,7 @@ func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) 
 	if typedMeanwhile {
 		next, _ = doc.Merge(local, doc.MustDecode(now.Content), merged)
 	}
-	if err := s.st.PushedContent(pageID, next.Encode(), next.PlainText(), merged.Encode(), savedAt); err != nil {
+	if err := s.st.PushedContent(pageID, next.Encode(), next.PlainText(), merged.Encode(), savedAt, savedRev); err != nil {
 		return false, err
 	}
 	current := now.Content
@@ -366,6 +410,13 @@ func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) 
 		_ = s.st.AddConflict(pageID, c)
 	}
 	return !typedMeanwhile, nil
+}
+
+// behind reports whether the server has content this device has not
+// merged: it never synced the page, or the server has a revision it has
+// not seen.
+func behind(row store.ContentRow, remoteRow map[string]any) bool {
+	return row.RemoteUpdatedAt.IsZero() || store.Int(remoteRow, "revision") != row.RemoteRevision
 }
 
 func contentOf(v any) *doc.Content {
@@ -414,32 +465,65 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 	return true, nil
 }
 
-func (s *Service) cursor(table string) string {
-	if v, ok := s.st.Value("sync.cursor." + table); ok {
-		return v
+// cursor is where a table's pull resumes: the last row stored here, by
+// its time and key.
+type cursor struct{ at, key string }
+
+func (s *Service) cursor(table string) cursor {
+	v, ok := s.st.Value("sync.cursor." + table)
+	if !ok {
+		return cursor{at: "1970-01-01T00:00:00Z"}
 	}
-	return "1970-01-01T00:00:00Z"
+	at, key, _ := strings.Cut(v, "|")
+	return cursor{at, key}
+}
+
+func (s *Service) setCursor(table string, c cursor) {
+	_ = s.st.SetValue("sync.cursor."+table, c.at+"|"+c.key)
+}
+
+// changed reads up to limit rows changed after the cursor, oldest first.
+// Rows of the same time come in key order, so a pull that stops among
+// them resumes at the next one.
+func (s *Service) changed(ctx context.Context, table, key, columns string, cur cursor, limit int) ([]map[string]any, error) {
+	after := remote.Gt("updated_at", cur.at)
+	if cur.key != "" {
+		after = "or=(updated_at.gt." + quote(cur.at) + ",and(updated_at.eq." + quote(cur.at) + "," + key + ".gt." + quote(cur.key) + "))"
+	}
+	return s.be.Select(ctx, table, remote.Query{Select: columns, Filters: []string{after}, Order: "updated_at," + key, Limit: limit})
+}
+
+// quote makes a value safe inside a PostgREST or=(…) filter.
+func quote(v string) string { return `"` + strings.ReplaceAll(v, `"`, `\"`) + `"` }
+
+// store applies pulled rows in order and moves the cursor past each one
+// stored. It stops at the first that cannot be stored, so the next pull
+// starts with it again. A row with a change waiting here is passed over:
+// the change wins and goes up on the next push.
+func (s *Service) store(table, key string, rows []map[string]any, apply func(map[string]any) error) {
+	cur := s.cursor(table)
+	start := cur
+	for _, r := range rows {
+		if !s.st.HasPending(table, store.S(r, key)) {
+			if err := apply(r); err != nil {
+				log.Printf("pull %s %s: %v", table, store.S(r, key), err)
+				break
+			}
+		}
+		cur = cursor{store.S(r, "updated_at"), store.S(r, key)}
+	}
+	if cur != start {
+		s.setCursor(table, cur)
+		s.st.Notify(table, "")
+	}
 }
 
 func (s *Service) pullTable(ctx context.Context, table, columns string, apply func(map[string]any) error) error {
-	cur := s.cursor(table)
-	rows, err := s.be.Select(ctx, table, remote.Query{Select: columns, Filters: []string{remote.Gt("updated_at", cur)}, Order: "updated_at", Limit: 500})
+	rows, err := s.changed(ctx, table, "id", columns, s.cursor(table), 500)
 	if err != nil {
 		return err
 	}
-	latest := cur
-	for _, r := range rows {
-		if !s.st.HasPending(table, store.S(r, "id")) {
-			if err := apply(r); err != nil {
-				log.Printf("pull %s: %v", table, err)
-			}
-		}
-		latest = store.S(r, "updated_at")
-	}
-	if latest != cur {
-		_ = s.st.SetValue("sync.cursor."+table, latest)
-		s.st.Notify(table, "")
-	}
+	s.store(table, "id", rows, apply)
 	return nil
 }
 
@@ -472,8 +556,7 @@ func (s *Service) pull(ctx context.Context) error {
 }
 
 func (s *Service) pullComments(ctx context.Context) error {
-	cur := s.cursor("comments")
-	rows, err := s.be.Select(ctx, "comments", remote.Query{Filters: []string{remote.Gt("updated_at", cur)}, Order: "updated_at", Limit: 500})
+	rows, err := s.changed(ctx, "comments", "id", "*", s.cursor("comments"), 500)
 	if err != nil || len(rows) == 0 {
 		return err
 	}
@@ -496,32 +579,25 @@ func (s *Service) pullComments(ctx context.Context) error {
 			}
 		}
 	}
-	latest := cur
-	for _, r := range rows {
-		if !s.st.HasPending("comments", store.S(r, "id")) {
-			name := names[store.S(r, "author_id")]
-			if name == "" {
-				name = "Someone"
-			}
-			if err := s.st.PutRemoteComment(r, name); err != nil {
-				log.Printf("pull comments: %v", err)
-			}
+	s.store("comments", "id", rows, func(r map[string]any) error {
+		name := names[store.S(r, "author_id")]
+		if name == "" {
+			name = "Someone"
 		}
-		latest = store.S(r, "updated_at")
-	}
-	_ = s.st.SetValue("sync.cursor.comments", latest)
-	s.st.Notify("comments", "")
+		return s.st.PutRemoteComment(r, name)
+	})
 	return nil
 }
 
 func (s *Service) pullContents(ctx context.Context) error {
-	cur := s.cursor("page_content")
-	rows, err := s.be.Select(ctx, "page_content", remote.Query{Select: "page_id, updated_at", Filters: []string{remote.Gt("updated_at", cur)}, Order: "updated_at", Limit: 200})
+	rows, err := s.changed(ctx, "page_content", "page_id", "page_id, updated_at", s.cursor("page_content"), 200)
 	if err != nil {
 		return err
 	}
 	allOffline := s.st.Settings().AllPagesOffline
-	latest := cur
+	cur := s.cursor("page_content")
+	start := cur
+	var failed error
 	for _, r := range rows {
 		id := store.S(r, "page_id")
 		p, err := s.st.Page(id)
@@ -530,15 +606,16 @@ func (s *Service) pullContents(ctx context.Context) error {
 		s.mu.Unlock()
 		if err == nil && (open || allOffline || p.KeepOffline) {
 			if _, err := s.RefreshContent(ctx, id); err != nil {
-				return err
+				failed = err
+				break
 			}
 		}
-		latest = store.S(r, "updated_at")
+		cur = cursor{store.S(r, "updated_at"), id}
 	}
-	if latest != cur {
-		_ = s.st.SetValue("sync.cursor.page_content", latest)
+	if cur != start {
+		s.setCursor("page_content", cur)
 	}
-	return nil
+	return failed
 }
 
 // RefreshContent brings a page's content up to date with the server,
@@ -547,7 +624,7 @@ func (s *Service) RefreshContent(ctx context.Context, pageID string) (*doc.Conte
 	if !s.CanSync() {
 		return s.st.Content(pageID), nil
 	}
-	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: "content, updated_at", Filters: []string{remote.Eq("page_id", pageID)}})
+	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: "content, revision, updated_at", Filters: []string{remote.Eq("page_id", pageID)}})
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +633,7 @@ func (s *Service) RefreshContent(ctx context.Context, pageID string) (*doc.Conte
 		return s.st.Content(pageID), nil
 	}
 	remoteAt := store.Time(remoteRow["updated_at"])
-	if localErr == nil && !local.RemoteUpdatedAt.IsZero() && !remoteAt.After(local.RemoteUpdatedAt) {
+	if localErr == nil && !behind(local, remoteRow) {
 		return doc.MustDecode(local.Content), nil
 	}
 	remoteContent := contentOf(remoteRow["content"])
@@ -574,7 +651,7 @@ func (s *Service) RefreshContent(ctx context.Context, pageID string) (*doc.Conte
 			}
 		}
 	}
-	if err := s.st.PutSyncedContent(pageID, next, remoteContent.Encode(), remoteAt); err != nil {
+	if err := s.st.PutSyncedContent(pageID, next, remoteContent.Encode(), remoteAt, store.Int(remoteRow, "revision")); err != nil {
 		return nil, err
 	}
 	if localErr != nil || local.Content != next.Encode() {
@@ -608,7 +685,7 @@ func (s *Service) FlushPage(ctx context.Context, pageID string) error {
 				return err
 			}
 			if done {
-				_ = s.st.Dequeue(e.ID)
+				_ = s.st.Dequeue(e)
 			}
 		}
 	}
@@ -630,7 +707,7 @@ func (s *Service) Push(ctx context.Context, entity, id string) error {
 				return err
 			}
 			if done {
-				_ = s.st.Dequeue(e.ID)
+				_ = s.st.Dequeue(e)
 			}
 		}
 	}

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -157,6 +158,12 @@ func (a *App) doVerify() {
 // signedIn sets the session up after signing in and starts syncing.
 func (a *App) signedIn(user *store.User) {
 	a.flush()
+	// Signing in as someone else removes the previous account's pages,
+	// with any changes of theirs that never went up.
+	lost := 0
+	if prev := a.st.CachedAccount(); prev != "" && prev != user.ID {
+		lost = a.st.PendingCount()
+	}
 	if _, err := a.st.LoadSession(user); err != nil {
 		a.toast(err.Error())
 		return
@@ -164,6 +171,9 @@ func (a *App) signedIn(user *store.User) {
 	a.session = a.st.Session()
 	signIn = signInState{}
 	a.toast("Signed in as " + user.Email)
+	if lost > 0 {
+		a.toast(fmt.Sprintf("Removed %d %s by the previous account that had not uploaded", lost, plural(lost, "change", "changes")))
+	}
 	a.back()
 	if a.route.Kind == "signin" {
 		a.show(Route{Kind: "home"})

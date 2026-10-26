@@ -323,9 +323,11 @@ type ContentRow struct {
 	PlainText string
 	UpdatedAt time.Time
 	// BaseContent is the server version this device last synced with, the
-	// merge base; RemoteUpdatedAt is its time.
+	// merge base; RemoteUpdatedAt is its time and RemoteRevision its
+	// revision.
 	BaseContent     string
 	RemoteUpdatedAt time.Time
+	RemoteRevision  int64
 }
 
 // ContentRow returns a page's stored content.
@@ -334,8 +336,8 @@ func (s *Store) ContentRow(pageID string) (ContentRow, error) {
 	var updated int64
 	var base sql.NullString
 	var remote sql.NullInt64
-	err := s.db.QueryRow(`SELECT page_id, content, plain_text, updated_at, base_content, remote_updated_at FROM page_contents WHERE page_id = ?`, pageID).
-		Scan(&r.PageID, &r.Content, &r.PlainText, &updated, &base, &remote)
+	err := s.db.QueryRow(`SELECT page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision FROM page_contents WHERE page_id = ?`, pageID).
+		Scan(&r.PageID, &r.Content, &r.PlainText, &updated, &base, &remote, &r.RemoteRevision)
 	r.UpdatedAt, r.BaseContent, r.RemoteUpdatedAt = time.UnixMilli(updated), base.String, fromMs(remote)
 	return r, err
 }
@@ -353,21 +355,22 @@ func (s *Store) Content(pageID string) *doc.Content {
 func (s *Store) putContent(pageID string, c *doc.Content, at time.Time, keep *ContentRow) error {
 	var base any
 	var remote any
+	var revision int64
 	if keep != nil {
-		base, remote = ns(keep.BaseContent), nt(keep.RemoteUpdatedAt)
+		base, remote, revision = ns(keep.BaseContent), nt(keep.RemoteUpdatedAt), keep.RemoteRevision
 	}
-	_, err := s.db.Exec(`INSERT INTO page_contents (page_id, content, plain_text, updated_at, base_content, remote_updated_at)
-		VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(page_id) DO UPDATE SET content = excluded.content,
+	_, err := s.db.Exec(`INSERT INTO page_contents (page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision)
+		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(page_id) DO UPDATE SET content = excluded.content,
 		plain_text = excluded.plain_text, updated_at = excluded.updated_at, base_content = excluded.base_content,
-		remote_updated_at = excluded.remote_updated_at`,
-		pageID, c.Encode(), c.PlainText(), ms(at), base, remote)
+		remote_updated_at = excluded.remote_updated_at, remote_revision = excluded.remote_revision`,
+		pageID, c.Encode(), c.PlainText(), ms(at), base, remote, revision)
 	return err
 }
 
 // PutSyncedContent stores content that came from the server, with the
 // base it now agrees on.
-func (s *Store) PutSyncedContent(pageID string, c *doc.Content, base string, remoteAt time.Time) error {
-	keep := &ContentRow{BaseContent: base, RemoteUpdatedAt: remoteAt}
+func (s *Store) PutSyncedContent(pageID string, c *doc.Content, base string, remoteAt time.Time, revision int64) error {
+	keep := &ContentRow{BaseContent: base, RemoteUpdatedAt: remoteAt, RemoteRevision: revision}
 	if err := s.putContent(pageID, c, time.Now(), keep); err != nil {
 		return err
 	}

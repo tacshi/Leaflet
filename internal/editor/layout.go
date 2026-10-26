@@ -128,6 +128,7 @@ func (e *Editor) spans(n *doc.Node, pal *theme.Palette, font ui.Font) []ui.Span 
 			s.Weight = 600
 			s.Background = pal.AccentSoft
 			s.Radius = 4
+			s.Underline = false // a page mention is a link, shown as a mention
 		}
 		out = append(out, s)
 	}
@@ -430,6 +431,12 @@ func parseLines(text string) []*doc.Node {
 			continue
 		}
 		callout = nil
+		if strings.TrimSpace(line) == "" {
+			// A blank line only separates blocks, as in Markdown; it makes
+			// no empty paragraph. A list goes on across it.
+			flushTable()
+			continue
+		}
 		if language, ok := doc.CodeFence(trimmed); ok || strings.TrimSpace(trimmed) == "$$" {
 			flushTable()
 			lists = nil

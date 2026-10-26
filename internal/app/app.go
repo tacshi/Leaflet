@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -189,6 +190,15 @@ func (a *App) start() error {
 	}
 	a.session = st.Session()
 	a.images = newImageCache(filepath.Join(st.Dir, "images"))
+	// Links in agents' replies and previews: a page link opens the page
+	// here, a web link the browser.
+	a.md.OnLink = func(url string) {
+		if id, ok := doc.PageLinkID(url); ok {
+			a.update(func() { a.openPage(id) })
+		} else if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "mailto:") {
+			_ = mygo.Shell.OpenExternal(url)
+		}
+	}
 	a.rec = recording.NewController(st, a.backend)
 	a.rec.RecoverInterrupted()
 	a.hub = agents.NewHub(st, a.backend, a)
@@ -487,6 +497,13 @@ func (a *App) loadPage(id string) {
 	if content == nil {
 		content = doc.Empty()
 	}
+	// Mentions of pages show their titles now, as renamed since; this
+	// is no edit, so it saves with the page's next one. The store has
+	// the title the page just closed saved, which a.pages may not yet.
+	content.RefreshPageMentions(func(id string) (string, bool) {
+		p, err := a.st.Page(id)
+		return p.DisplayTitle(), err == nil
+	})
 	ps := &pageState{id: id, title: p.Title, loaded: content.Copy(), tinted: map[string]bool{}}
 	ed := editor.New(content, &host{a: a})
 	ed.Size = float32(a.settings.TextSize)
@@ -666,9 +683,30 @@ func (a *App) newPage(parent, folder string) {
 	a.pages, _ = a.st.Pages()
 	if parent != "" {
 		a.expanded[parent] = true
+		a.linkSubpage(parent, p.ID)
 	}
 	a.openPage(p.ID)
 	a.focusTitle(false)
+}
+
+// linkSubpage puts a link to subpage id at the end of page parent, as
+// / › Subpage does where the caret is, so a page made from the sidebar
+// shows in the page it is inside.
+func (a *App) linkSubpage(parent, id string) {
+	link := &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": id}}
+	if ed := a.Editor(parent); ed != nil {
+		ed.Edit(func(c *doc.Content) { _ = c.Insert(doc.Position{At: "end"}, link) })
+		a.savePage()
+		return
+	}
+	c := a.st.Content(parent)
+	if c == nil {
+		c = doc.Empty()
+	}
+	_ = c.Insert(doc.Position{At: "end"}, link)
+	if _, _, err := a.st.SaveContent(parent, c); err != nil {
+		a.toast("Could not link the subpage: " + err.Error())
+	}
 }
 
 // focusTitle puts the caret in the open page's title, selecting the title

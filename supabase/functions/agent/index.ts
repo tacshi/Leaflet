@@ -198,7 +198,7 @@ async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: J
     // --- context --------------------------------------------------------
     const { data: contentRow, error: contentError } = await uc
       .from("page_content")
-      .select("content, updated_at")
+      .select("content, revision")
       .eq("page_id", page.id)
       .maybeSingle();
     if (contentError) throw new Error(contentError.message);
@@ -436,26 +436,38 @@ async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: J
       });
       if (historyError) console.error("page_history:", historyError.message);
 
-      // Someone saved the page while the agent ran: replay its ops on top.
-      const { data: latest } = await uc
-        .from("page_content")
-        .select("content, updated_at")
-        .eq("page_id", page.id)
-        .maybeSingle();
-      let finalContent = session.content;
-      if ((latest?.updated_at ?? null) !== (contentRow?.updated_at ?? null)) {
-        finalContent = applyOps(
-          normalizeContent(latest?.content),
-          session.ops.filter((op: Op) => op.op !== "create_page"),
-        );
+      // Someone may save the page while the agent runs, or between reading
+      // and saving here: replay the agent's ops on what they saved, and save
+      // only over the revision that was read (protocol §1).
+      const ops = session.ops.filter((op: Op) => op.op !== "create_page");
+      let saved = false;
+      for (let attempt = 0; attempt < 3 && !saved; attempt++) {
+        const { data: latest, error: latestError } = await uc
+          .from("page_content")
+          .select("content, revision")
+          .eq("page_id", page.id)
+          .maybeSingle();
+        if (latestError) throw new Error(`Could not save the page: ${latestError.message}`);
+        const finalContent = (latest?.revision ?? null) === (contentRow?.revision ?? null)
+          ? session.content
+          : applyOps(normalizeContent(latest?.content), ops);
+        const values = { content: finalContent, plain_text: plainText(finalContent), updated_by: user.id };
+        if (latest) {
+          const { data, error } = await uc
+            .from("page_content")
+            .update(values)
+            .eq("page_id", page.id)
+            .eq("revision", latest.revision)
+            .select("revision");
+          if (error) throw new Error(`Could not save the page: ${error.message}`);
+          saved = (data?.length ?? 0) > 0;
+        } else {
+          const { error } = await uc.from("page_content").insert({ page_id: page.id, ...values });
+          if (error && error.code !== "23505") throw new Error(`Could not save the page: ${error.message}`);
+          saved = !error;
+        }
       }
-      const { error: saveError } = await uc.from("page_content").upsert({
-        page_id: page.id,
-        content: finalContent,
-        plain_text: plainText(finalContent),
-        updated_by: user.id,
-      }, { onConflict: "page_id" });
-      if (saveError) throw new Error(`Could not save the page: ${saveError.message}`);
+      if (!saved) throw new Error("Could not save the page: it kept changing, or you cannot edit it.");
     }
 
     const { error: jobError } = await uc

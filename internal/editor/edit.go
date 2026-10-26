@@ -793,6 +793,26 @@ func (e *Editor) InsertMention(t Trigger, m doc.Mention) {
 	e.changed()
 }
 
+// InsertPageMention puts a mention of page id, titled title, in place of
+// the @ menu's trigger: the page's title linked to it, then a space.
+func (e *Editor) InsertPageMention(t Trigger, id, title string) {
+	n := e.node(t.ID)
+	if n == nil {
+		return
+	}
+	e.pushUndo(false)
+	end := min(t.Off+1+utf8.RuneCountInString(t.Query), textLen(n))
+	d := n.Delta().Delete(t.Off, end)
+	d = d.Insert(t.Off, title, doc.PageMention(id, title))
+	at := t.Off + utf8.RuneCountInString(title)
+	d = d.Insert(at, " ", doc.Attrs{})
+	n.SetDelta(d)
+	e.invalidate(n.ID)
+	e.trigger = nil
+	e.Select(Pos{n.ID, at + 1}, Pos{n.ID, at + 1})
+	e.changed()
+}
+
 // SelectAll selects the focus block's text, then the whole page.
 func (e *Editor) SelectAll() {
 	n := e.node(e.focus.ID)

@@ -2,6 +2,7 @@ package doc
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -12,19 +13,21 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 	if title != "" {
 		b.WriteString("# " + title + "\n\n")
 	}
-	var visit func(nodes []*Node, depth int)
-	visit = func(nodes []*Node, depth int) {
+	// indent is the room before a block, nested under list items: as much
+	// as each item's marker takes, as CommonMark nests by ("1. " three).
+	var visit func(nodes []*Node, indent string)
+	visit = func(nodes []*Node, indent string) {
 		number := 0
 		inList := false
 		for _, n := range nodes {
-			indent := strings.Repeat("  ", depth)
+			marker := 2 // "- ", and a task's "- " before its box
 			text := n.Delta().ToMarkdown()
 			if n.Type != "numbered_list" {
 				number = 0
 			}
 			// A toggle is a <details>, not a list item.
 			item := NestableTypes[n.Type] && n.Type != "toggle_list"
-			if depth == 0 && inList && !item {
+			if indent == "" && inList && !item {
 				b.WriteString("\n")
 			}
 			inList = item
@@ -38,6 +41,7 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 			case "numbered_list":
 				number++
 				fmt.Fprintf(&b, "%s%d. %s\n", indent, number, text)
+				marker = len(strconv.Itoa(number)) + 2
 			case "todo_list":
 				box := "[ ]"
 				if n.Bool("checked") {
@@ -52,7 +56,7 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 				b.WriteString(CalloutMarkdown(n) + "\n\n")
 			case "toggle_list":
 				b.WriteString("<details>\n<summary>" + text + "</summary>\n\n")
-				visit(n.Children, 0)
+				visit(n.Children, "")
 				b.WriteString("</details>\n\n")
 				continue
 			case "divider":
@@ -105,14 +109,14 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 				if pageTitle != nil {
 					name = pageTitle(name)
 				}
-				b.WriteString("[" + name + "](leaflet://page/" + n.Str("page_id") + ")\n\n")
+				b.WriteString("[" + name + "](" + PageLink(n.Str("page_id")) + ")\n\n")
 			}
 			if n.Type != "table" && len(n.Children) > 0 {
-				visit(n.Children, depth+1)
+				visit(n.Children, indent+strings.Repeat(" ", marker))
 			}
 		}
 	}
-	visit(c.Children, 0)
+	visit(c.Children, "")
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 

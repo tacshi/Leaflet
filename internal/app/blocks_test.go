@@ -3,6 +3,10 @@ package app
 import (
 	"strings"
 	"testing"
+
+	"github.com/egoist/mygo/ui"
+
+	"leaflet/internal/doc"
 )
 
 func TestReadLinkInfo(t *testing.T) {
@@ -38,5 +42,46 @@ func TestRenderedPages(t *testing.T) {
 	}
 	if page := mathPage(`\frac{a}{b}`); !strings.Contains(page, `"\\frac{a}{b}"`) || !strings.Contains(page, "katex.render(") {
 		t.Error("math page")
+	}
+}
+
+func TestRenderedBlockShowsChromeOnHover(t *testing.T) {
+	a := &App{}
+	n, err := doc.SpecToNode(map[string]any{"type": "math_equation", "formula": "x^2"}, "", "Leaflet")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Fill().Padding(20).Children(func() { a.renderedBlock(c, n, 400) })
+	}, 500, 200)
+	tt.Frame()
+	label, ok := tt.Find("Math")
+	if !ok {
+		t.Fatal("no Math label")
+	}
+	// Inked: pixels of the border's left edge and of the label that differ
+	// from the page around them.
+	inked := func() (border, text int) {
+		img := tt.Image()
+		scale := float32(img.Bounds().Dx()) / 500
+		ground := img.RGBAAt(int(5*scale), int(5*scale))
+		for y := label.Y; y < label.Y+label.H; y++ {
+			if img.RGBAAt(int(20*scale), int(y*scale)) != ground {
+				border++
+			}
+			for x := label.X; x < label.X+label.W; x++ {
+				if img.RGBAAt(int(x*scale), int(y*scale)) != ground {
+					text++
+				}
+			}
+		}
+		return border, text
+	}
+	if border, text := inked(); border != 0 || text != 0 {
+		t.Errorf("without the pointer: border %d, label %d pixels", border, text)
+	}
+	tt.Move(label.X+10, label.Y+label.H/2)
+	if border, text := inked(); border == 0 || text == 0 {
+		t.Errorf("with the pointer over it: border %d, label %d pixels", border, text)
 	}
 }

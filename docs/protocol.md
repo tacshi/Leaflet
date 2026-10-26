@@ -33,6 +33,11 @@ metadata:
   type, or position changed. `meta.deleted[id]` is a tombstone.
 - Until CRDTs land, two versions of a page merge **last-write-wins per block**
   (see `internal/doc/merge.go`).
+- Saves are compare-and-set on `page_content.revision`, which the server
+  moves on with every update. A writer reads `content, revision`, merges,
+  then updates `where page_id = … and revision = <what it read>`. Zero rows
+  updated means someone saved in between: read again, merge again, retry. A
+  page with no row yet is inserted; a conflict on insert means the same.
 
 ### Block types
 
@@ -60,7 +65,12 @@ metadata:
 | `subpage` | `page_id` | link card to a child page |
 
 Delta attributes: `bold`, `italic`, `underline`, `strikethrough`, `code`,
-`href`, `mention` (`{ "kind": "user"|"agent", "id": "...", "name": "..." }`).
+`href`, `mention` (`{ "kind": "user"|"agent"|"page", "id": "...", "name": "..." }`).
+A page mention is the page's title with `href` `leaflet://page/<id>` and a
+`mention` of kind `page`; in agents' inline Markdown it is
+`[Title](leaflet://page/<id>)`, and such a link read back is a page mention.
+Leaflet shows it as a chip, opens the page on a click, and writes the page's
+current title into it when the page opens.
 
 ## 2. Agent tools
 
@@ -173,7 +183,21 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
 | | `{ action: "save_key", provider: "soniox", api_key }` | `{ ok }` |
 | `account` | `{ action: "delete" }` | `{ ok }` |
 
-## 6. Postgres tables
+## 6. Sync
+
+- The outbox keeps one entry per changed row. Replacing a queued payload
+  moves the entry's revision on, and an upload takes the entry off the queue
+  only if its revision is still the one sent.
+- Each table is pulled in `(updated_at, key)` order from a cursor of the
+  last row stored here (`key` is `id`, or `page_id` for `page_content`). A
+  row that cannot be stored stops that table's pull, and the next pull starts
+  with it.
+- A device keeps one account's pages. Pages made before signing in are moved
+  into the account's space on its first sync. Signing out uploads what is
+  waiting, then removes the account's pages, queue and cursors from the
+  device; signing in as another account does the same first.
+
+## 7. Postgres tables
 
 See `supabase/migrations/`. Row-level security: the space owner has full
 access; `page_permissions` grants `viewer` or `editor` on a page and all its

@@ -480,6 +480,14 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 				return false
 			}
 		}
+		// A page link opens the page, as a click on a page in the sidebar
+		// does; a web link wants Cmd, so that a click can place the caret.
+		if ev.Clicks == 1 && (ev.Mods == 0 || ev.Mods == ui.Cmd) {
+			if id, ok := doc.PageLinkID(e.linkAtPos(p)); ok {
+				e.Host.OpenPage(id)
+				return true
+			}
+		}
 		if ev.Mods&ui.Cmd != 0 {
 			if url := e.linkAtPos(p); url != "" {
 				e.services.OpenURL(url)

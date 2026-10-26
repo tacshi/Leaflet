@@ -11,8 +11,9 @@ import (
 func (d Delta) ToMarkdown() string {
 	var b strings.Builder
 	for _, r := range d {
-		if r.Attrs.Mention != nil && r.Attrs.Mention.Name != "" {
-			b.WriteString("@" + r.Attrs.Mention.Name)
+		// A page mention is a link to the page, which reads back as one.
+		if m := r.Attrs.Mention; m != nil && m.Name != "" && m.Kind != "page" {
+			b.WriteString("@" + m.Name)
 			continue
 		}
 		text := r.Text
@@ -75,6 +76,12 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 		if c == '[' {
 			if m := linkRe.FindStringSubmatch(string(s[i:])); m != nil {
 				flush()
+				if id, ok := PageLinkID(m[2]); ok {
+					text := FromMarkdown(m[1]).Plain()
+					*out = append(*out, Run{Text: text, Attrs: PageMention(id, text)})
+					i += len([]rune(m[0]))
+					continue
+				}
 				a := attrs
 				a.Href = m[2]
 				parseInline([]rune(m[1]), a, out)

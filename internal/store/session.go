@@ -55,6 +55,14 @@ type User struct {
 // LoadSession sets up the session at startup, creating a space on this
 // device the first time so the app works before, or without, signing in.
 func (s *Store) LoadSession(user *User) (Session, error) {
+	if user != nil {
+		// The device keeps one account's pages: another account's go first.
+		if prev := s.CachedAccount(); prev != "" && prev != user.ID {
+			if err := s.ForgetAccount(); err != nil {
+				return Session{}, err
+			}
+		}
+	}
 	name, hasName := s.Value("profile.name")
 	if user != nil {
 		spaceID, ok := s.Value("space." + user.ID)
@@ -87,6 +95,41 @@ func (s *Store) LoadSession(user *User) (Session, error) {
 	sess := Session{UserID: LocalUserID, DisplayName: name, SpaceID: spaceID}
 	s.SetSession(sess)
 	return sess, nil
+}
+
+// CachedAccount is the account whose pages this device keeps, or "" when
+// the pages are this device's own, made before signing in.
+func (s *Store) CachedAccount() string {
+	id, _ := s.Value("account")
+	return id
+}
+
+// ForgetAccount removes the account's pages, and everything synced or
+// waiting to sync with them, from this device. Settings and the device's
+// own model connections stay. The next session starts with an empty space.
+func (s *Store) ForgetAccount() error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, q := range []string{
+		`DELETE FROM spaces`, `DELETE FROM folders`, `DELETE FROM pages`, `DELETE FROM page_contents`,
+		`DELETE FROM comments`, `DELETE FROM recordings`, `DELETE FROM files`, `DELETE FROM ai_jobs`,
+		`DELETE FROM model_providers WHERE is_local = 0`, `DELETE FROM page_history`, `DELETE FROM outbox`,
+		`DELETE FROM conflicts`, `DELETE FROM page_members`,
+		`DELETE FROM key_values WHERE key IN ('account', 'profile.name', 'last.page')
+			OR key LIKE 'space.%' OR key LIKE 'sync.cursor.%'`,
+	} {
+		if _, err := tx.Exec(q); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.Notify("*", "")
+	return nil
 }
 
 func (s *Store) ensureLocalSpace(owner string) (string, error) {

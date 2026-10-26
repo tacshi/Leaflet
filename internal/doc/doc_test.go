@@ -251,3 +251,21 @@ func TestRulesAreDividers(t *testing.T) {
 		t.Errorf("paragraph of --- became %v, %v", n, err)
 	}
 }
+
+func TestMarkdownNestsByMarkerWidth(t *testing.T) {
+	item := func(typ, text string, kids ...*Node) *Node {
+		n := &Node{ID: NewBlockID(), Type: typ, Children: kids}
+		n.SetDelta(FromMarkdown(text))
+		return n
+	}
+	c := FromBlocks([]*Node{
+		item("numbered_list", "Clone the repo", item("bulleted_list", "Use SSH")),
+		item("numbered_list", "Run the tests"),
+		item("bulleted_list", "Notes", item("bulleted_list", "One")),
+	})
+	got := PageMarkdown("", c, nil)
+	want := "1. Clone the repo\n   - Use SSH\n2. Run the tests\n- Notes\n  - One\n"
+	if got != want {
+		t.Errorf("got\n%q\nwant\n%q", got, want)
+	}
+}

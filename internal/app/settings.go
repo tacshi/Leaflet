@@ -90,6 +90,10 @@ type accountState struct {
 	deleteOpen bool
 	confirm    string
 	busy       bool
+	// signingOut is set while waiting changes go up before signing out;
+	// unsynced counts those that could not, to ask about.
+	signingOut bool
+	unsynced   int
 }
 
 var account accountState
@@ -124,7 +128,7 @@ func (a *App) accountSettings(c *ui.Context) {
 		settingRow(c, "email", title, desc, false, func() {
 			switch {
 			case a.session.SignedIn:
-				if button(c, "signout", "log-out", "Sign out").Clicked() {
+				if button(c, "signout", "log-out", "Sign out").Disabled(s.signingOut).Clicked() {
 					a.signOut()
 				}
 			case a.backend.Configured():
@@ -211,6 +215,25 @@ func (a *App) accountSettings(c *ui.Context) {
 			})
 		}
 	})
+	if s.unsynced > 0 {
+		open := true
+		dialog(c, &open, 420, func() {
+			dialogHeader(c, "Sign out anyway?", fmt.Sprintf("%d %s not uploaded yet. Signing out removes %s from this device.",
+				s.unsynced, plural(s.unsynced, "change is", "changes are"), plural(s.unsynced, "it", "them")), &open)
+			ui.Row(c).Padding(0, 20, 20).Justify(ui.End).Gap(8).Children(func() {
+				if button(c, "cancel", "", "Cancel").Clicked() {
+					open = false
+				}
+				if danger(c, "go", "Sign out").Clicked() {
+					open = false
+					a.leave(a.st.ForgetAccount)
+				}
+			})
+		})
+		if !open {
+			s.unsynced = 0
+		}
+	}
 	if s.deleteOpen {
 		dialog(c, &s.deleteOpen, 420, func() {
 			dialogHeader(c, "Delete your account?", "This cannot be undone.", &s.deleteOpen)
@@ -234,10 +257,7 @@ func (a *App) accountSettings(c *ui.Context) {
 									return
 								}
 								s.deleteOpen = false
-								a.signOut()
-								if err := a.st.Wipe(); err != nil {
-									a.toast("Could not delete the data on this device: " + err.Error())
-								}
+								a.leave(a.st.Wipe)
 								a.toast("Your account was deleted")
 							})
 						}()
@@ -303,14 +323,46 @@ func (a *App) exportAll() {
 	}()
 }
 
+// signOut uploads the changes waiting, then signs out and removes the
+// account's pages from this device. Changes that could not go up are
+// asked about first.
 func (a *App) signOut() {
 	a.flush()
-	a.backend.SignOut()
-	if _, err := a.st.LoadSession(nil); err != nil {
-		a.toast(err.Error())
-	}
-	a.session = a.st.Session()
-	account.loaded, account.devices = false, nil
+	account.signingOut = true
+	go func() {
+		_ = a.sync.SyncNow()
+		n := a.st.PendingCount()
+		a.update(func() {
+			account.signingOut = false
+			if n > 0 {
+				account.unsynced = n
+				return
+			}
+			a.leave(a.st.ForgetAccount)
+		})
+	}()
+}
+
+// leave signs out and clears this device with clear, between sync passes.
+func (a *App) leave(clear func() error) {
+	a.flush()
+	go func() {
+		var err error
+		a.sync.Hold(func() {
+			a.backend.SignOut()
+			err = clear()
+		})
+		a.update(func() {
+			if err != nil {
+				a.toast("Could not remove your pages from this device: " + err.Error())
+			}
+			if _, err := a.st.LoadSession(nil); err != nil {
+				a.toast(err.Error())
+			}
+			a.session = a.st.Session()
+			account.loaded, account.devices, account.nameLoaded = false, nil, false
+		})
+	}()
 }
 
 // Agent providers -------------------------------------------------------

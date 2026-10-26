@@ -124,6 +124,12 @@ func TimeOrZero(v any) time.Time {
 	return Time(v)
 }
 
+// Int reads a number column of a remote row.
+func Int(r map[string]any, key string) int64 {
+	n, _ := r[key].(float64)
+	return int64(n)
+}
+
 // S reads a string column of a remote row.
 func S(r map[string]any, key string) string {
 	s, _ := r[key].(string)

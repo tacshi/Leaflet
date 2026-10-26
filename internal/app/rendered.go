@@ -77,8 +77,9 @@ svg{max-width:100%;height:auto}</style></head><body><div id="d"></div>
 }</script></body></html>`
 }
 
-// renderedBlock shows a math or diagram block, with a bar over it that
-// names it and, while editing, opens its source.
+// renderedBlock shows a math or diagram block. While the pointer is over
+// it, a border and a bar that names it and, while editing, opens its source
+// show; they keep their room otherwise, so nothing moves.
 func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 	pal := theme.Of(c)
 	_, source := doc.BlockSource(n)
@@ -88,14 +89,18 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 	}
 	editable := a.page != nil && !a.page.editor.ReadOnly
 	const pad = 12
-	box := ui.Column(c.Key("rendered:"+n.ID)).Padding(4, pad, pad).Gap(4).Radius(8).Border(1, pal.Divider).Background(pal.Surface)
+	box := ui.Column(c.Key("rendered:"+n.ID)).Padding(4, pad, pad).Gap(4).Radius(8).Border(1, ui.Transparent).Background(pal.Surface)
 	hovered := box.Hovered()
+	if hovered {
+		box.BorderColor(pal.Divider)
+	}
+	shown := map[bool]float32{true: 1, false: 0}[hovered]
 	box.Children(func() {
 		ui.Row(c).Height(26).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, name).FontSize(12).TextColor(pal.TextMuted).Grow(1)
+			ui.Text(c, name).FontSize(12).TextColor(pal.TextMuted).Opacity(shown).Grow(1)
 			if editable && strings.TrimSpace(source) != "" {
 				b := ui.ButtonBase(c.Key("edit")).Height(24).Padding(0, 8).Gap(4).Radius(6).TextColor(pal.TextMuted).
-					Opacity(map[bool]float32{true: 1, false: 0}[hovered]).AlignItems(ui.Center).Label("Edit " + strings.ToLower(name))
+					Opacity(shown).AlignItems(ui.Center).Label("Edit " + strings.ToLower(name))
 				if b.Hovered() {
 					b.Background(pal.Hover).TextColor(pal.Text)
 				}

@@ -246,6 +246,10 @@ function parseMention(href: string): Attrs | null {
   return m ? { kind: m[1], id: m[2] } : null;
 }
 
+// A link to one of the user's pages, as doc.PageLink makes it: a page
+// mention is the page's title linked to it.
+const PAGE_LINK = /^leaflet:\/\/page\/(.+)$/;
+
 // Parses **bold**, *italic* or _italic_, `code`, ~~strike~~ and [text](url).
 export function markdownToDelta(src: string, attrs: Attrs = {}): DeltaOp[] {
   const out: DeltaOp[] = [];
@@ -314,6 +318,14 @@ export function markdownToDelta(src: string, attrs: Attrs = {}): DeltaOp[] {
           const name = m[1].replace(/\\(.)/g, "$1").replace(/^@/, "");
           flush();
           pushText(out, `@${name}`, { ...attrs, mention: { ...mention, name } });
+        } else if (PAGE_LINK.test(m[2])) {
+          const name = m[1].replace(/\\(.)/g, "$1");
+          flush();
+          pushText(out, name, {
+            ...attrs,
+            href: m[2],
+            mention: { kind: "page", id: m[2].match(PAGE_LINK)![1], name },
+          });
         } else {
           nest(m[1], { href: m[2] });
         }
@@ -342,7 +354,8 @@ export function deltaToMarkdown(delta: DeltaOp[]): string {
     if (typeof op.insert !== "string") continue;
     const a = op.attributes ?? {};
     const mention = a.mention as { kind?: string; id?: string; name?: string } | undefined;
-    if (mention?.id) {
+    // A page mention writes as its link, below.
+    if (mention?.id && mention.kind !== "page") {
       const name = (mention.name ?? op.insert.replace(/^@/, "")).replace(/([\]\\])/g, "\\$1");
       out += `[@${name}](mention:${mention.kind === "agent" ? "agent" : "user"}:${mention.id})`;
       continue;

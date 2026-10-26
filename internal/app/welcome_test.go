@@ -40,11 +40,14 @@ func TestWelcomePage(t *testing.T) {
 		kinds["code"] != 1 || kinds["video"] != 1 {
 		t.Errorf("blocks %v", kinds)
 	}
-	if got := strings.Join(headings(st.Content(welcome)), ", "); got != "Try it, Writing, Code, Tables, Images, Charts, Video, Interactive embeds, More blocks, Working with agents, Shortcuts, Subpages" {
+	if got := strings.Join(headings(st.Content(welcome)), ", "); got != "Try it, Writing, Code, Tables, Images, Charts, Video, Interactive embeds, More blocks, Working with agents, Shortcuts, Subpages, Links between pages" {
 		t.Errorf("sections %s", got)
 	}
 	if p, err := st.Page(sub); err != nil || p.ParentID != welcome {
 		t.Errorf("subpage %q: parent %q, %v", sub, p.ParentID, err)
+	}
+	if got := linkedPage(st.Content(welcome)); got != sub {
+		t.Errorf("the guide links to %q, want the subpage %q", got, sub)
 	}
 	// A second start makes no more pages.
 	if err := a.createWelcome(); err != nil {
@@ -53,6 +56,17 @@ func TestWelcomePage(t *testing.T) {
 	if pages, _ := st.Pages(); len(pages) != 2 {
 		t.Errorf("%d pages after a second start", len(pages))
 	}
+}
+
+// linkedPage is the page the guide's last block mentions.
+func linkedPage(c *doc.Content) string {
+	last := c.Children[len(c.Children)-1]
+	for _, r := range last.Delta() {
+		if id, ok := doc.PageLinkID(r.Attrs.Href); ok {
+			return id
+		}
+	}
+	return ""
 }
 
 func headings(c *doc.Content) []string {
@@ -127,13 +141,13 @@ func TestUpdateWelcome(t *testing.T) {
 	if data, err := os.ReadFile(path); err != nil || len(data) != len(welcomeImage) { // #nosec G304 -- the image file the store just added.
 		t.Errorf("image file %s: %v", path, err)
 	}
-	// The Subpages section takes the place of the old closing line.
+	// The Subpages section takes the place of the old closing line, and
+	// links to its page close the guide.
 	if n := st.Content(p.ID).Find(closing.ID); n != nil {
 		t.Error("the old closing line stayed")
 	}
-	last := st.Content(p.ID).Children[len(st.Content(p.ID).Children)-1]
-	if last.Type != "subpage" {
-		t.Errorf("last block %s", last.Type)
+	if linkedPage(st.Content(p.ID)) == "" {
+		t.Error("the guide does not end linking to the subpage")
 	}
 	// A second run adds no second image or subpage.
 	if err := st.SetValue("welcome.version", "2"); err != nil {
@@ -148,7 +162,7 @@ func TestUpdateWelcome(t *testing.T) {
 		t.Errorf("blocks after a second run %v", kinds)
 	}
 	// The new sections go before Subpages, which stays last.
-	if got := strings.Join(headings(st.Content(p.ID)), ", "); got != "Code, Images, Video, More blocks, Working with agents, Shortcuts, Subpages" {
+	if got := strings.Join(headings(st.Content(p.ID)), ", "); got != "Code, Images, Video, More blocks, Working with agents, Shortcuts, Subpages, Links between pages" {
 		t.Errorf("sections %s", got)
 	}
 	if pages, _ := st.Pages(); len(pages) != 2 {
@@ -195,5 +209,78 @@ func TestUpdateWelcomeEmbedsTheme(t *testing.T) {
 	}
 	if got := c.Find(mine.ID).Str("html"); got != `<p>mine</p>` {
 		t.Errorf("the user's embed changed: %q", got)
+	}
+}
+
+func TestUpdateWelcomeFromVersion9(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	a := &App{st: st}
+	// A guide as version 9 made it: the steps, sections and table rows
+	// version 10 rewrote, without the table text and the links.
+	if err := a.createWelcome(); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := st.Value("welcome.page")
+	c := st.Content(id)
+	var tableText, links string
+	for _, n := range c.All() {
+		switch n.Delta().ToMarkdown() {
+		case welcomeMentionTodo:
+			n.SetDelta(doc.FromMarkdown("Type **@** to ask an agent to write here, or to mention someone"))
+		case welcomeTabKeys:
+			n.SetDelta(doc.FromMarkdown("Nest or lift a list item, or indent code"))
+		case welcomeTableText:
+			tableText = n.ID
+		}
+		if n.Type == "heading" && n.Delta().Plain() == welcomeLinksTitle {
+			links = n.ID
+		}
+	}
+	c.Remove(tableText)
+	for c.Children[len(c.Children)-1].ID != links {
+		c.Remove(c.Children[len(c.Children)-1].ID)
+	}
+	c.Remove(links)
+	if _, _, err := st.SaveContent(id, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetValue("welcome.version", "9"); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 { // a second run adds nothing more
+		if err := a.updateWelcome(); err != nil {
+			t.Fatal(err)
+		}
+		_ = st.SetValue("welcome.version", "9")
+	}
+	c = st.Content(id)
+	var found []string
+	for _, n := range c.All() {
+		switch md := n.Delta().ToMarkdown(); md {
+		case welcomeMentionTodo, welcomeTabKeys, welcomeTableText:
+			found = append(found, md)
+		}
+	}
+	if len(found) != 3 {
+		t.Errorf("found %q", found)
+	}
+	for i, n := range c.Children {
+		if n.Type == "heading" && n.Delta().Plain() == "Tables" && c.Children[i+1].Delta().ToMarkdown() != welcomeTableText {
+			t.Error("the table text is not under Tables")
+		}
+	}
+	if got := strings.Count(strings.Join(headings(c), ","), welcomeLinksTitle); got != 1 {
+		t.Errorf("%d link sections", got)
+	}
+	if linkedPage(c) == "" {
+		t.Error("the guide does not end linking to the subpage")
 	}
 }

@@ -80,10 +80,10 @@ func (s *Store) ClearLocalPath(id string) error {
 }
 
 // PushedContent records what the server stored for a page: the content
-// this device now has, the base both agree on, and its time.
-func (s *Store) PushedContent(pageID, content, plain, base string, remoteAt time.Time) error {
-	_, err := s.db.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, base_content = ?, remote_updated_at = ? WHERE page_id = ?`,
-		content, plain, base, remoteAt.UnixMilli(), pageID)
+// this device now has, the base both agree on, and its time and revision.
+func (s *Store) PushedContent(pageID, content, plain, base string, remoteAt time.Time, revision int64) error {
+	_, err := s.db.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, base_content = ?, remote_updated_at = ?, remote_revision = ? WHERE page_id = ?`,
+		content, plain, base, remoteAt.UnixMilli(), revision, pageID)
 	return err
 }
 

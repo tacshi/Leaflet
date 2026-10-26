@@ -17,7 +17,8 @@ var welcomeImage []byte
 
 // createWelcome gives a new space one page that shows what pages can do:
 // writing, lists, code, tables, images, charts, video, interactive embeds,
-// callouts, toggles, math, diagrams, agents, shortcuts and subpages.
+// callouts, toggles, math, diagrams, agents, shortcuts, subpages and links
+// between pages.
 func (a *App) createWelcome() error {
 	if _, ok := a.st.Value("welcome.created"); ok {
 		return nil
@@ -44,7 +45,7 @@ func (a *App) createWelcome() error {
 	heading("Try it")
 	for _, s := range []string{
 		welcomeSlashTodo,
-		"Type **@** to ask an agent to write here, or to mention someone",
+		welcomeMentionTodo,
 		"Select some text, then choose **Ask agent** or **Comment**",
 		welcomeRecordTodo,
 		welcomeProviderTodo,
@@ -53,7 +54,7 @@ func (a *App) createWelcome() error {
 	}
 
 	heading("Writing")
-	text("paragraph", "Text takes **bold**, *italic*, `code`, ~~strikethrough~~ and [links](https://github.com/egoist/mygo). Type them as markdown and they turn into formats as you go.")
+	text("paragraph", welcomeWritingText)
 	text("quote", "The best way to have a good idea is to have a lot of ideas, and throw the bad ones away.")
 	add(map[string]any{"type": "numbered_list", "text": "Write a rough outline", "children": []any{
 		map[string]any{"type": "bulleted_list", "text": "Press **Tab** to nest an item, **Shift-Tab** to lift it back"},
@@ -62,6 +63,7 @@ func (a *App) createWelcome() error {
 	text("numbered_list", welcomeReviewStep)
 
 	heading("Tables")
+	text("paragraph", welcomeTableText)
 	add(map[string]any{"type": "table", "rows": []any{
 		[]any{"Milestone", "Owner", "Due"},
 		[]any{"Outline the guide", "You", "Monday"},
@@ -107,7 +109,11 @@ func (a *App) createWelcome() error {
 		if err != nil {
 			return err
 		}
-		if sections || image || sub {
+		links, err := a.addWelcomeLinks(p.ID, c)
+		if err != nil {
+			return err
+		}
+		if sections || image || sub || links {
 			if _, _, err := a.st.SaveContent(p.ID, c); err != nil {
 				return err
 			}
@@ -124,9 +130,16 @@ func (a *App) createWelcome() error {
 
 const (
 	welcomeTitle   = "Welcome to Leaflet"
-	welcomeVersion = "9"
+	welcomeVersion = "10"
 
-	welcomeSlashTodo = "Type **/** on an empty line to add a heading, list, table, chart, code, video or embed"
+	welcomeSlashTodo   = "Type **/** on an empty line to add a heading, list, table, chart, code, video or embed"
+	welcomeMentionTodo = "Type **@** to ask an agent to write here, to mention someone, or to link to another page"
+
+	welcomeWritingText = "Text takes **bold**, *italic*, `code`, ~~strikethrough~~ and [links](https://github.com/egoist/mygo). Type them as markdown and they turn into formats as you go. Paste a web link and it is a link, or paste it over selected text to link that; pasted Markdown comes in as headings, lists, tables and code."
+	welcomeTableText   = "Click a cell to write in it; cells take **bold**, *italic* and links. **Tab** and **⇧Tab** move between cells, **Tab** in the last cell adds a row, and **Enter** goes down a row."
+	welcomeSubpageText = "Pages nest inside pages. Add one with **/** › **Subpage**, or the **+** beside a page in the sidebar, and a link card to it goes in the page. Make a page of its own with the pencil at the top of the sidebar."
+	welcomeTabKeys     = "Nest or lift a list item, indent code, or move between table cells"
+	welcomeLinksTitle  = "Links between pages"
 
 	welcomeProviderTodo = "Add an agent provider in **Settings › Agent providers**: sign in with ChatGPT, paste an API key, or use a model server such as Ollama"
 	welcomeRecordTodo   = "Press the microphone in the header to add a recording with its transcript"
@@ -189,6 +202,21 @@ func (a *App) updateWelcome() error {
 			n.SetDelta(doc.FromMarkdown(next))
 			changed = true
 		})
+		// Version 10 brought links between pages, keys for tables and
+		// pasting.
+		c.Walk(func(n, _ *doc.Node) {
+			for _, r := range []struct{ typ, was, now string }{
+				{"todo_list", "Type @ to ask an agent to write here, or to mention someone", welcomeMentionTodo},
+				{"paragraph", "Text takes bold, italic, code, strikethrough and links. Type them as markdown and they turn into formats as you go.", welcomeWritingText},
+				{"paragraph", "Pages nest inside pages. Add one with / › Subpage, or the + beside a page in the sidebar. Make a page of its own with the pencil at the top of the sidebar.", welcomeSubpageText},
+				{"paragraph", "Nest or lift a list item, or indent code", welcomeTabKeys},
+			} {
+				if n.Type == r.typ && n.Delta().Plain() == r.was {
+					n.SetDelta(doc.FromMarkdown(r.now))
+					changed = true
+				}
+			}
+		})
 		// Version 5 gave the embeds a dark theme: the ones still as the
 		// guide made them take it.
 		c.Walk(func(n, _ *doc.Node) {
@@ -224,7 +252,7 @@ func (a *App) updateWelcome() error {
 				}
 			}
 		})
-		for _, add := range []func(string, *doc.Content) (bool, error){a.addWelcomeImage, a.addWelcomeSubpage, addWelcomeSections} {
+		for _, add := range []func(string, *doc.Content) (bool, error){a.addWelcomeImage, a.addWelcomeSubpage, addWelcomeSections, addWelcomeTableText, a.addWelcomeLinks} {
 			if added, err := add(id, c); err != nil {
 				return err
 			} else if added {
@@ -288,7 +316,7 @@ var welcomeSections = []welcomeSection{
 			[]any{"⌘E  ⇧⌘X", "Inline code, strikethrough"},
 			[]any{"⌘K", "Link the selected text"},
 			[]any{"⇧Enter", "A line break within a block"},
-			[]any{"Tab  ⇧Tab", "Nest or lift a list item, or indent code"},
+			[]any{"Tab  ⇧Tab", welcomeTabKeys},
 			[]any{"⌘Z  ⇧⌘Z", "Undo, redo"},
 		}},
 		{"type": "paragraph", "text": "At the start of a line, type `#` and a space for a heading, `-` for a bullet, `1.` for a numbered item, `[]` for a to-do and `>` for a quote; `---` makes a divider."},
@@ -340,6 +368,61 @@ func addWelcomeSections(_ string, c *doc.Content) (bool, error) {
 		added = true
 	}
 	return added, nil
+}
+
+// addWelcomeTableText puts how to write in a table under the Tables
+// heading of a guide that lacks it.
+func addWelcomeTableText(_ string, c *doc.Content) (bool, error) {
+	plain := doc.FromMarkdown(welcomeTableText).Plain()
+	tables := ""
+	for _, n := range c.All() {
+		if n.Type == "paragraph" && n.Delta().Plain() == plain {
+			return false, nil
+		}
+		if tables == "" && n.Type == "heading" && n.Delta().Plain() == "Tables" {
+			tables = n.ID
+		}
+	}
+	if tables == "" {
+		return false, nil
+	}
+	n, err := doc.SpecToNode(map[string]any{"type": "paragraph", "text": welcomeTableText}, "", "Leaflet")
+	if err != nil {
+		return false, err
+	}
+	return true, c.Insert(doc.Position{After: tables}, n)
+}
+
+// addWelcomeLinks ends a guide that lacks it with Links between pages,
+// linking to the example subpage while it is there.
+func (a *App) addWelcomeLinks(_ string, c *doc.Content) (bool, error) {
+	sub := ""
+	for _, n := range c.All() {
+		if n.Type == "heading" && n.Delta().Plain() == welcomeLinksTitle {
+			return false, nil
+		}
+		if sub == "" && n.Type == "subpage" {
+			sub = n.Str("page_id")
+		}
+	}
+	var nodes []*doc.Node
+	for _, m := range []map[string]any{
+		{"type": "heading", "level": 2.0, "text": welcomeLinksTitle},
+		{"type": "paragraph", "text": "Type **@** in your text and pick a page to link to it. The link shows the page's title, keeps up when the page is renamed, and opens the page on a click."},
+	} {
+		n, err := doc.SpecToNode(m, "", "Leaflet")
+		if err != nil {
+			return false, err
+		}
+		nodes = append(nodes, n)
+	}
+	if p, err := a.st.Page(sub); sub != "" && err == nil && p.DeletedAt.IsZero() {
+		title := p.DisplayTitle()
+		n := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
+		n.SetDelta(doc.Delta{{Text: "The notes from the last sync are in "}, {Text: title, Attrs: doc.PageMention(p.ID, title)}, {Text: "."}})
+		nodes = append(nodes, n)
+	}
+	return true, c.Insert(doc.Position{}, nodes...)
 }
 
 // addWelcomeImage adds the Images section to a welcome page that has no
@@ -436,7 +519,7 @@ func (a *App) addWelcomeSubpage(pageID string, c *doc.Content) (bool, error) {
 	}
 	for _, m := range []map[string]any{
 		{"type": "heading", "level": 2.0, "text": "Subpages"},
-		{"type": "paragraph", "text": "Pages nest inside pages. Add one with **/** › **Subpage**, or the **+** beside a page in the sidebar. Make a page of its own with the pencil at the top of the sidebar."},
+		{"type": "paragraph", "text": welcomeSubpageText},
 	} {
 		if err := add(&nodes, m); err != nil {
 			return false, err

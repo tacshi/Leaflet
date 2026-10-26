@@ -209,7 +209,7 @@ func (e *Editor) chartBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 					ui.Text(c, "Edit data").FontSize(12)
 				})
 				if b.Clicked() {
-					e.Host.EditChart(n.ID)
+					e.Host.EditBlock(n.ID)
 				}
 			}
 		})

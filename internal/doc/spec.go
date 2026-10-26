@@ -19,7 +19,7 @@ func toolErr(format string, args ...any) error {
 // AgentTypes are the block types agents may write.
 var AgentTypes = []string{
 	"paragraph", "heading", "bulleted_list", "numbered_list", "todo_list", "quote",
-	"divider", "image", "table", "chart", "embed",
+	"divider", "image", "table", "chart", "embed", "video", "code", "callout", "toggle_list", "link_preview", "math_equation", "diagram",
 }
 
 var chartTypes = map[string]bool{"bar": true, "line": true, "pie": true}
@@ -54,11 +54,15 @@ func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 		level := min(max(AsInt(spec["level"], 2), 1), 6)
 		n.SetDelta(FromMarkdown(text))
 		n.Set("level", level)
-	case "bulleted_list", "numbered_list", "todo_list":
+	case "bulleted_list", "numbered_list", "todo_list", "toggle_list":
 		n.SetDelta(FromMarkdown(text))
 		if typ == "todo_list" {
 			checked, _ := spec["checked"].(bool)
 			n.Set("checked", checked)
+		}
+		if typ == "toggle_list" {
+			collapsed, _ := spec["collapsed"].(bool)
+			n.Set("collapsed", collapsed)
 		}
 		if kids, ok := spec["children"].([]any); ok {
 			for _, k := range kids {
@@ -69,6 +73,15 @@ func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 				n.Children = append(n.Children, child)
 			}
 		}
+	case "callout":
+		tone, _ := spec["tone"].(string)
+		n.SetDelta(FromMarkdown(text))
+		n.Set("tone", CalloutTone(tone))
+	case "code":
+		// The code as it is: no markdown.
+		language, _ := spec["language"].(string)
+		n = CodeNode(strings.TrimSuffix(text, "\n"), language)
+		n.ID = id
 	case "divider":
 	case "image":
 		img := asMap(spec["image"])
@@ -111,6 +124,41 @@ func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 			"height": min(max(AsInt(e["height"], 320), 120), 1200),
 			"author": author,
 		}
+	case "math_equation":
+		formula, _ := spec["formula"].(string)
+		if strings.TrimSpace(formula) == "" {
+			return nil, toolErr("A math_equation block needs formula, in TeX.")
+		}
+		n.Data = MathNode(formula).Data
+	case "diagram":
+		source, _ := spec["source"].(string)
+		if strings.TrimSpace(source) == "" {
+			return nil, toolErr("A diagram block needs source, in Mermaid.")
+		}
+		n.Data = DiagramNode(source).Data
+	case "link_preview":
+		l := asMap(spec["link"])
+		if l == nil {
+			l = spec
+		}
+		link, _ := l["url"].(string)
+		ln, err := LinkNode(link)
+		if err != nil {
+			return nil, err
+		}
+		n.Data = ln.Data
+	case "video":
+		v := asMap(spec["video"])
+		if v == nil {
+			v = spec
+		}
+		link, _ := v["url"].(string)
+		title, _ := v["title"].(string)
+		vn, err := VideoNode(link, title)
+		if err != nil {
+			return nil, err
+		}
+		n.Data = vn.Data
 	}
 	if kids, ok := spec["children"].([]any); ok && len(kids) > 0 && !NestableTypes[typ] {
 		return nil, toolErr("Only list blocks can have children, not %q.", typ)
@@ -292,6 +340,13 @@ func BlockViews(c *Content) []map[string]any {
 				v["text"] = n.Delta().ToMarkdown()
 			}
 			switch n.Type {
+			case "code":
+				v["text"] = n.Delta().Plain()
+				v["language"] = n.Str("language")
+			case "callout":
+				v["tone"] = CalloutTone(n.Str("tone"))
+			case "toggle_list":
+				v["collapsed"] = n.Bool("collapsed")
 			case "heading":
 				v["level"] = n.Int("level", 1)
 			case "todo_list":
@@ -310,6 +365,16 @@ func BlockViews(c *Content) []map[string]any {
 				v["embed"] = map[string]any{"title": n.Data["title"], "height": n.Data["height"], "html": n.Data["html"]}
 			case "image":
 				v["image"] = map[string]any{"url": n.Data["url"]}
+			case "video":
+				v["video"] = map[string]any{"url": n.Data["url"], "title": n.Data["title"]}
+			case "math_equation":
+				v["formula"] = n.Str("formula")
+			case "diagram":
+				v["source"] = n.Str("source")
+			case "link_preview":
+				v["link"] = map[string]any{"url": n.Data["url"], "title": n.Data["title"], "description": n.Data["description"]}
+			case "file":
+				v["file"] = map[string]any{"name": n.Data["name"], "mime": n.Data["mime"], "size": n.Data["size"]}
 			case "recording":
 				v["recording"] = map[string]any{"recording_id": n.Data["recording_id"], "title": n.Data["title"]}
 			case "subpage":

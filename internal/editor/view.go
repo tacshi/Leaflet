@@ -54,7 +54,7 @@ func (e *Editor) blocks(c *ui.Context, nodes []*doc.Node, pal *theme.Palette, da
 		} else {
 			e.atomicBlock(c, n, pal)
 		}
-		if n.Type != "table" && len(n.Children) > 0 {
+		if n.Type != "table" && !collapsed(n) && len(n.Children) > 0 {
 			e.blocks(c, n.Children, pal, dark)
 		}
 	}
@@ -94,6 +94,12 @@ func placeholder(n *doc.Node, only bool) string {
 		return "To-do"
 	case "quote":
 		return "Quote"
+	case "code":
+		return "Code"
+	case "callout":
+		return "Callout"
+	case "toggle_list":
+		return "Toggle"
 	}
 	if only {
 		return "Write, or press / for blocks and @ for agents"
@@ -154,6 +160,22 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 			}
 		case "quote":
 			p.Fill(ui.Rect{X: mx + 2, Y: r.Y + 4, W: 3, H: r.H - 8}, pal.AccentSoftBorder, 1.5)
+		case "code":
+			p.Fill(ui.Rect{X: mx, Y: r.Y + codeMargin, W: r.X + r.W - mx, H: r.H - 2*codeMargin}, pal.Code, 8)
+		case "callout":
+			bg, border, fg, icon := calloutLook(n.Str("tone"), pal)
+			card := ui.Rect{X: mx, Y: r.Y + calloutMargin, W: r.X + r.W - mx, H: r.H - 2*calloutMargin}
+			p.Fill(card, bg, 8)
+			p.Stroke(card, border, 8, 1)
+			cy := oy + first.Y + first.H/2
+			p.Icon(theme.Icon(icon), ui.Rect{X: mx + 14, Y: cy - 9, W: 18, H: 18}, fg)
+		case "toggle_list":
+			cy := oy + first.Y + first.H/2
+			icon := "chevron-down"
+			if n.Bool("collapsed") {
+				icon = "chevron-right"
+			}
+			p.Icon(theme.Icon(icon), ui.Rect{X: mx + 4, Y: cy - 8, W: 16, H: 16}, pal.TextMuted)
 		}
 		if selected {
 			a, b := utf16Off(n, selFrom), utf16Off(n, selTo)
@@ -188,9 +210,15 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 			}
 		}
 	})
-	if count := e.Host.CommentCount(n.ID); count > 0 {
-		box.Children(func() { e.commentBadge(c, n.ID, count, l.y, pal) })
-	}
+	hovered := box.Hovered()
+	box.Children(func() {
+		if n.Type == "code" {
+			e.codeBarView(c, n, float32(depth)*indentStep, hovered || isFocus && focused, pal)
+		}
+		if count := e.Host.CommentCount(n.ID); count > 0 {
+			e.commentBadge(c, n.ID, count, l.y, pal)
+		}
+	})
 }
 
 func (e *Editor) commentBadge(c *ui.Context, id string, count int, top float32, pal *theme.Palette) {
@@ -210,7 +238,7 @@ func (e *Editor) commentBadge(c *ui.Context, id string, count int, top float32, 
 }
 
 // atomicBlock builds a block selected whole: a divider, image, table,
-// chart, embed, recording or subpage.
+// chart, embed, video, recording or subpage.
 func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	_, _, inSel := e.inSelection(n)
 	selected := (e.focus.ID == n.ID && e.Collapsed() && e.focused) || inSel
@@ -243,8 +271,12 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 			e.tableBlock(c, n, pal)
 		case "chart":
 			e.chartBlock(c, n, pal)
-		case "embed":
-			e.Host.Embed(c, n, e.width)
+		case "embed", "math_equation", "diagram":
+			e.Host.Embed(c, n, e.width-float32(depth)*indentStep)
+		case "video":
+			e.Host.Video(c, n, e.width-float32(depth)*indentStep)
+		case "link_preview", "file":
+			e.Host.Card(c, n)
 		case "recording":
 			e.Host.Recording(c, n)
 		case "subpage":
@@ -421,11 +453,14 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 					fn()
 				}
 			}
-			tool("b", "bold", "Bold", e.Has(func(a doc.Attrs) bool { return a.Bold }), e.ToggleBold)
-			tool("i", "italic", "Italic", e.Has(func(a doc.Attrs) bool { return a.Italic }), e.ToggleItalic)
-			tool("code", "code", "Code", e.Has(func(a doc.Attrs) bool { return a.Code }), e.ToggleCode)
-			tool("link", "link", "Link", e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
-			ui.Box(c).Size(1, 18).Background(pal.OnInverse.Alpha(0.2)).Margin(0, 4)
+			// Code takes no formats.
+			if !e.inCode() {
+				tool("b", "bold", "Bold", e.Has(func(a doc.Attrs) bool { return a.Bold }), e.ToggleBold)
+				tool("i", "italic", "Italic", e.Has(func(a doc.Attrs) bool { return a.Italic }), e.ToggleItalic)
+				tool("code", "code", "Code", e.Has(func(a doc.Attrs) bool { return a.Code }), e.ToggleCode)
+				tool("link", "link", "Link", e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
+				ui.Box(c).Size(1, 18).Background(pal.OnInverse.Alpha(0.2)).Margin(0, 4)
+			}
 			text := func(key, icon, label string, fn func()) {
 				b := ui.ButtonBase(c.Key("tb:"+key)).Height(28).Padding(0, 9).Gap(6).Radius(6).KeepFocus().TextColor(pal.OnInverse).AlignItems(ui.Center)
 				if b.Hovered() {

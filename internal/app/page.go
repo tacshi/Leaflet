@@ -61,6 +61,7 @@ func (a *App) pageView(c *ui.Context) {
 						ui.Box(c).Height(8)
 					}
 					ps.editor.View(c)
+					a.dropVideos()
 					if a.isEmpty() && !ps.editor.ReadOnly {
 						a.emptyActions(c)
 					}
@@ -321,7 +322,7 @@ func (a *App) emptyActions(c *ui.Context) {
 			a.dialogs.focusChat = true
 		})
 		row("subpage", "file-plus", "Add a subpage", "Pages nest inside pages", func() { a.addSubpageBlock() })
-		row("upload", "upload", "Upload a file", "Images go in the page; other files in the space", func() { a.uploadIntoPage() })
+		row("upload", "upload", "Upload a file", "Pictures and files go in the page", func() { a.uploadIntoPage() })
 	})
 }
 

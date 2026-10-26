@@ -79,6 +79,16 @@ type App struct {
 	// embedSizes how tall its content said it is, once it has drawn.
 	embedSrc   map[string]string
 	embedSizes map[string]embedSize
+	// videos are the players of the open page's videos that were played;
+	// videoInfo what each video's site said about it, once asked
+	// (videoAsked), by provider and ID.
+	videos     map[string]*mygo.WebView
+	videoInfo  map[string]videoInfo
+	videoAsked map[string]bool
+	// linkInfo is what each link card's page said about itself, once
+	// asked (linkAsked), by link.
+	linkInfo  map[string]linkInfo
+	linkAsked map[string]bool
 
 	// The menu bar icon, and the menu it last showed.
 	tray      *mygo.Tray
@@ -126,7 +136,9 @@ type pageState struct {
 
 // Run starts the app.
 func Run() {
-	a := &App{expanded: map[string]bool{}, folderOpen: map[string]bool{}, embeds: map[string]*mygo.WebView{}, embedSrc: map[string]string{}, embedSizes: map[string]embedSize{}}
+	a := &App{expanded: map[string]bool{}, folderOpen: map[string]bool{}, embeds: map[string]*mygo.WebView{}, embedSrc: map[string]string{}, embedSizes: map[string]embedSize{},
+		videos: map[string]*mygo.WebView{}, videoInfo: map[string]videoInfo{}, videoAsked: map[string]bool{},
+		linkInfo: map[string]linkInfo{}, linkAsked: map[string]bool{}}
 	theme.RegisterFonts()
 	recording.Register()
 	mygo.BindAs("Embeds", &embedScroll{a: a})
@@ -509,6 +521,7 @@ func (a *App) closePage() {
 	}
 	clear(a.embedSrc)
 	a.page = nil
+	a.dropVideos()
 }
 
 // canEdit reports whether the user may change a page: their own, or one

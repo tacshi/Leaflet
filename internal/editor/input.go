@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"runtime"
 	"time"
 	"unicode/utf16"
 
@@ -453,13 +454,20 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 		}
 		e.trigger = nil
 		e.linkOpen = false
-		if n := e.node(p.ID); n != nil && n.Type == "todo_list" {
-			if box, ok := e.geom[n.ID]; ok {
-				x := box.X + float32(e.depth(n.ID))*indentStep
-				if wx >= x && wx < x+markerWidth(n) && wy >= box.Y && wy < box.Y+box.H {
-					e.ToggleChecked(n.ID)
-					return true
-				}
+		if n := e.node(p.ID); n != nil && e.inCodeBar(n, wy) {
+			return false
+		}
+		if n := e.node(p.ID); n != nil && e.marker(n, wx, wy) {
+			switch n.Type {
+			case "todo_list":
+				e.ToggleChecked(n.ID)
+				return true
+			case "callout":
+				e.CycleTone(n.ID)
+				return true
+			case "toggle_list":
+				e.ToggleCollapsed(n.ID)
+				return true
 			}
 		}
 		// A press on a block such as a subpage, chart or table selects it
@@ -564,7 +572,55 @@ func (e *Editor) command(name string) bool {
 	return false
 }
 
+// emacsKeys are the Control keys that act as other keys on macOS, as in its
+// text fields, after Emacs.
+var emacsKeys = map[ui.Key]ui.Key{ui.KeyB: ui.KeyLeft, ui.KeyF: ui.KeyRight, ui.KeyP: ui.KeyUp, ui.KeyN: ui.KeyDown,
+	ui.KeyH: ui.KeyBackspace, ui.KeyD: ui.KeyDelete, ui.KeyJ: ui.KeyEnter}
+
+// killed is what Control-K took out last, for Control-Y.
+var killed string
+
+// emacsKey handles the other Control keys of macOS: to the start or end of
+// the block, killing to its end and yanking that back, and bringing the
+// caret into view.
+func (e *Editor) emacsKey(key ui.Key, shift bool) bool {
+	switch key {
+	case ui.KeyA:
+		e.horizontal(-1, false, true, shift)
+	case ui.KeyE:
+		e.horizontal(1, false, true, shift)
+	case ui.KeyK:
+		n := e.focusNode()
+		if e.ReadOnly || n == nil {
+			break
+		}
+		e.Select(e.focus, e.focus)
+		if off := e.focus.Off; off < textLen(n) {
+			killed = string([]rune(n.Delta().Plain())[off:])
+			e.Select(e.focus, Pos{n.ID, textLen(n)})
+			e.Backspace(false)
+		} else {
+			e.Delete(false) // at the end, join the next block
+		}
+	case ui.KeyY:
+		e.InsertText(killed)
+	case ui.KeyL:
+		e.reveal = e.focus.ID
+	default:
+		return false
+	}
+	e.services.Invalidate()
+	return true
+}
+
 func (e *Editor) key(ev ui.InputEvent) bool {
+	if runtime.GOOS == "darwin" && ev.Mods&^ui.Shift == ui.Ctrl {
+		if to, ok := emacsKeys[ev.Key]; ok {
+			ev.Key, ev.Mods = to, ev.Mods&ui.Shift
+		} else if e.emacsKey(ev.Key, ev.Mods&ui.Shift != 0) {
+			return true
+		}
+	}
 	if e.menuKey(ev) {
 		return true
 	}
@@ -597,6 +653,10 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 	case ui.KeyTab:
 		if ev.Mods&^ui.Shift != 0 {
 			return false
+		}
+		if e.inCode() && !e.ReadOnly {
+			e.indentCode(e.focusNode(), shift)
+			return true
 		}
 		if shift {
 			e.Outdent()

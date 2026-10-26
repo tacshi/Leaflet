@@ -80,6 +80,18 @@ type dialogs struct {
 	embedHTML   string
 	embedHeight string
 
+	// The dialog asking for a video's or a link card's link.
+	linkOpen  bool
+	linkKind  string
+	linkURL   string
+	linkError string
+
+	// The dialog editing a math or diagram block's source.
+	sourceOpen bool
+	sourceID   string
+	sourceKind string
+	sourceText string
+
 	inline       *inlinePrompt
 	newComment   *newComment
 	commentFocus string
@@ -108,6 +120,12 @@ func (d *dialogs) view(c *ui.Context, a *App) {
 	}
 	if d.embedOpen {
 		a.embedDialog(c)
+	}
+	if d.linkOpen {
+		a.linkDialog(c)
+	}
+	if d.sourceOpen {
+		a.sourceDialog(c)
 	}
 }
 
@@ -718,6 +736,63 @@ func (a *App) embedDialog(c *ui.Context) {
 						a.page.editor.InsertBlocks(n)
 					}
 					d.embedOpen = false
+				}
+			})
+		})
+	})
+}
+
+// Links ------------------------------------------------------------------
+
+// openLinkDialog asks for the link of a block of a kind: "video" or
+// "link_preview".
+func (d *dialogs) openLinkDialog(kind string) {
+	d.linkOpen, d.linkKind, d.linkURL, d.linkError = true, kind, "", ""
+}
+
+func (a *App) linkDialog(c *ui.Context) {
+	pal := theme.Of(c)
+	d := &a.dialogs
+	title, subtitle, example := "Link card", "Paste a link to a web page.", "https://"
+	if d.linkKind == "video" {
+		title, subtitle, example = "Video", "Paste a YouTube or Vimeo link.", "https://www.youtube.com/watch?v=…"
+	}
+	dialog(c, &d.linkOpen, 480, func() {
+		dialogHeader(c, title, subtitle, &d.linkOpen)
+		ui.Column(c).Padding(0, 20, 20).Gap(14).Children(func() {
+			in := field(c, "url", &d.linkURL, example).AutoFocus()
+			if d.linkError != "" {
+				ui.Text(c, d.linkError).FontSize(12.5).TextColor(pal.DangerText)
+			}
+			insert := func() {
+				var n *doc.Node
+				var err error
+				if d.linkKind == "video" {
+					n, err = doc.VideoNode(d.linkURL, "")
+				} else {
+					n, err = doc.LinkNode(d.linkURL)
+				}
+				if err != nil {
+					d.linkError = "That isn't a YouTube or Vimeo link."
+					if d.linkKind != "video" {
+						d.linkError = "That isn't a web link."
+					}
+					return
+				}
+				if a.page != nil {
+					a.page.editor.InsertBlocks(n)
+				}
+				d.linkOpen = false
+			}
+			if in.Submitted() {
+				insert()
+			}
+			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+				if button(c, "cancel", "", "Cancel").Clicked() {
+					d.linkOpen = false
+				}
+				if primary(c, "insert", "", "Insert").Clicked() {
+					insert()
 				}
 			})
 		})

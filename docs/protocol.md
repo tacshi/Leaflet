@@ -43,11 +43,19 @@ metadata:
 | `bulleted_list`, `numbered_list` | `delta` | nested items go in `children` |
 | `todo_list` | `delta`, `checked` | |
 | `quote` | `delta` | |
+| `code` | `delta`, `language` | the delta is the code as plain text, line breaks and all; `language` is an ID such as `go`, or `""` for plain text |
+| `callout` | `delta`, `tone` (`info`\|`tip`\|`warning`\|`danger`) | a tinted box; Markdown writes it as a GitHub alert |
+| `toggle_list` | `delta`, `collapsed` | any blocks nest in `children`, hidden while collapsed |
 | `divider` | — | |
 | `image` | `url`, `align`, `width`, `height` | |
 | `table` | `colsLen`, `rowsLen`, … | children are `table/cell` nodes with `colPosition`, `rowPosition`, each holding one `paragraph` |
 | `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client |
 | `embed` | `title`, `html`, `height` | sandboxed HTML, no access to app storage or tokens |
+| `video` | `url`, `title` | a YouTube or Vimeo link, played in the page |
+| `link_preview` | `url`, `title`, `description`, `image`, `site` | a card for a web page; the client fills in what the page says about itself |
+| `file` | `file_id`, `url`, `name`, `size`, `mime` | a file kept with the page, as a card |
+| `math_equation` | `formula` | TeX, drawn in display style by KaTeX |
+| `diagram` | `source` | Mermaid, drawn by Pele |
 | `recording` | `recording_id`, `title`, `duration_ms` | transcript lives in `recordings` |
 | `subpage` | `page_id` | link card to a child page |
 
@@ -64,15 +72,22 @@ loop with the same tools. Tool definitions live in
 
 ```json
 {
-  "type": "paragraph|heading|bulleted_list|numbered_list|todo_list|quote|divider|image|table|chart|embed",
-  "text": "inline markdown: **bold**, *italic*, `code`, ~~strike~~, [link](https://…)",
+  "type": "paragraph|heading|bulleted_list|numbered_list|todo_list|toggle_list|quote|callout|code|divider|image|table|chart|embed|video|link_preview|math_equation|diagram",
+  "text": "inline markdown: **bold**, *italic*, `code`, ~~strike~~, [link](https://…); for code, the code verbatim",
+  "language": "go",
+  "tone": "tip",
+  "collapsed": false,
+  "formula": "e^{i\\pi} + 1 = 0",
+  "source": "flowchart LR\n  Idea --> Draft --> Publish",
   "level": 2,
   "checked": false,
   "children": [ { "type": "bulleted_list", "text": "nested item" } ],
   "rows": [["Header A", "Header B"], ["a", "b"]],
   "chart": { "chart_type": "bar", "title": "Risks by phase", "labels": ["Editor", "Agents"], "series": [{ "name": "Open risks", "values": [1, 4] }] },
   "embed": { "title": "Phase timeline", "html": "<!doctype html>…", "height": 320 },
-  "image": { "url": "https://…", "alt": "…" }
+  "image": { "url": "https://…", "alt": "…" },
+  "video": { "url": "https://www.youtube.com/watch?v=…", "title": "…" },
+  "link": { "url": "https://…" }
 }
 ```
 
@@ -95,7 +110,9 @@ Exactly one of: `{ "after": "<block id>" }`, `{ "before": "<block id>" }`,
 | `list_pages` | — | `{ pages: [{id, title, parent_id}] }` (only when cross-page reading is on) |
 | `read_other_page` | `page_id` | same shape as `read_page` |
 
-`BlockView` = `{ id, type, text, depth, parent_id?, level?, checked?, rows?, chart?, embed?, recording? }`.
+`BlockView` = `{ id, type, text, depth, parent_id?, level?, checked?, language?, tone?, collapsed?, formula?, source?, rows?, chart?, embed?, recording? }`
+(the client's also has `video`, `link` and `file` objects; the server's a `url`);
+a code block's `text` is its code, not markdown.
 
 Validation before applying any call: the tool is known; every referenced block
 ID exists in the page; the block type is allowed; nesting is legal (only list

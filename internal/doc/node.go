@@ -22,7 +22,7 @@ type Node struct {
 	Children []*Node        `json:"children,omitempty"`
 }
 
-// Block types that hold rich text in data.delta.
+// Block types that hold rich text in data.delta; a code block's is plain.
 var TextTypes = map[string]bool{
 	"paragraph":     true,
 	"heading":       true,
@@ -30,6 +30,9 @@ var TextTypes = map[string]bool{
 	"numbered_list": true,
 	"todo_list":     true,
 	"quote":         true,
+	"code":          true,
+	"callout":       true,
+	"toggle_list":   true,
 }
 
 // Block types that may hold nested blocks in children.
@@ -37,6 +40,7 @@ var NestableTypes = map[string]bool{
 	"bulleted_list": true,
 	"numbered_list": true,
 	"todo_list":     true,
+	"toggle_list":   true,
 }
 
 // IsText reports whether the block holds rich text.

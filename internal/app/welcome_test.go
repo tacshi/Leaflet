@@ -36,8 +36,12 @@ func TestWelcomePage(t *testing.T) {
 			sub = n.Str("page_id")
 		}
 	}
-	if kinds["embed"] != 3 || kinds["chart"] != 3 || kinds["table"] != 1 || kinds["image"] != 1 || kinds["subpage"] != 1 {
+	if kinds["embed"] != 3 || kinds["chart"] != 3 || kinds["table"] != 2 || kinds["image"] != 1 || kinds["subpage"] != 1 ||
+		kinds["code"] != 1 || kinds["video"] != 1 {
 		t.Errorf("blocks %v", kinds)
+	}
+	if got := strings.Join(headings(st.Content(welcome)), ", "); got != "Try it, Writing, Code, Tables, Images, Charts, Video, Interactive embeds, More blocks, Working with agents, Shortcuts, Subpages" {
+		t.Errorf("sections %s", got)
 	}
 	if p, err := st.Page(sub); err != nil || p.ParentID != welcome {
 		t.Errorf("subpage %q: parent %q, %v", sub, p.ParentID, err)
@@ -51,6 +55,16 @@ func TestWelcomePage(t *testing.T) {
 	}
 }
 
+func headings(c *doc.Content) []string {
+	var out []string
+	for _, n := range c.Children {
+		if n.Type == "heading" {
+			out = append(out, n.Delta().Plain())
+		}
+	}
+	return out
+}
+
 func TestUpdateWelcome(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
@@ -62,6 +76,7 @@ func TestUpdateWelcome(t *testing.T) {
 	}
 	var blocks []*doc.Node
 	for _, s := range []string{
+		"Type **/** on an empty line to add a heading, list, table, chart, or embed",
 		"Press **Record** to add a recording with its transcript",
 		"Connect a model in **Settings › Models**: a cloud provider, or a local one such as Ollama",
 		"My own step",
@@ -90,7 +105,7 @@ func TestUpdateWelcome(t *testing.T) {
 			got = append(got, n.Delta().ToMarkdown())
 		}
 	})
-	want := []string{welcomeRecordTodo, welcomeProviderTodo, "My own step"}
+	want := []string{welcomeSlashTodo, welcomeRecordTodo, welcomeProviderTodo, "My own step"}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("got %q", got)
 	}
@@ -129,8 +144,12 @@ func TestUpdateWelcome(t *testing.T) {
 	}
 	kinds := map[string]int{}
 	st.Content(p.ID).Walk(func(n, _ *doc.Node) { kinds[n.Type]++ })
-	if kinds["image"] != 1 || kinds["subpage"] != 1 {
+	if kinds["image"] != 1 || kinds["subpage"] != 1 || kinds["code"] != 1 || kinds["video"] != 1 {
 		t.Errorf("blocks after a second run %v", kinds)
+	}
+	// The new sections go before Subpages, which stays last.
+	if got := strings.Join(headings(st.Content(p.ID)), ", "); got != "Code, Images, Video, More blocks, Working with agents, Shortcuts, Subpages" {
+		t.Errorf("sections %s", got)
 	}
 	if pages, _ := st.Pages(); len(pages) != 2 {
 		t.Errorf("%d pages after a second run", len(pages))

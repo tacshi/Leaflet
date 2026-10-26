@@ -374,8 +374,12 @@ func (c *Content) PlainText() string {
 	c.Walk(func(n, _ *Node) {
 		var s string
 		switch n.Type {
-		case "chart", "embed":
+		case "chart", "embed", "video":
 			s = n.Str("title")
+		case "link_preview", "file":
+			s = cardTitle(n)
+		case "math_equation", "diagram":
+			_, s = BlockSource(n)
 		default:
 			s = n.Delta().Plain()
 		}

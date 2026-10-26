@@ -41,7 +41,9 @@ func (e *Editor) deleteSelection() bool {
 	// outside the selection move up to their parent's place as it goes.
 	for i := ib; i > ia; i-- {
 		n := us[i]
-		e.liftChildren(n)
+		if !collapsed(n) || i == ib {
+			e.liftChildren(n)
+		}
 		e.Content.Remove(n.ID)
 		e.invalidate(n.ID)
 	}
@@ -107,6 +109,16 @@ func (e *Editor) InsertText(s string) {
 	attrs := n.Delta().AttrsAt(e.focus.Off)
 	if e.hasTyping {
 		attrs = e.typing
+	}
+	if n.Type == "code" {
+		// Code is typed as it is: no formats, shortcuts or menus.
+		n.SetDelta(n.Delta().Insert(e.focus.Off, s, doc.Attrs{}))
+		e.invalidate(n.ID)
+		off := e.focus.Off + utf8.RuneCountInString(s)
+		e.anchor, e.focus = Pos{n.ID, off}, Pos{n.ID, off}
+		e.reveal = n.ID
+		e.changed()
+		return
 	}
 	n.SetDelta(n.Delta().Insert(e.focus.Off, s, attrs))
 	e.invalidate(n.ID)
@@ -232,7 +244,7 @@ func (e *Editor) inlineShortcut(n *doc.Node) {
 // continues is the type a new block after n takes on Enter.
 func continues(n *doc.Node) string {
 	switch n.Type {
-	case "bulleted_list", "numbered_list", "todo_list":
+	case "bulleted_list", "numbered_list", "todo_list", "toggle_list":
 		return n.Type
 	}
 	return "paragraph"
@@ -257,14 +269,20 @@ func (e *Editor) Enter() {
 		e.changed()
 		return
 	}
+	if n.Type == "code" {
+		e.codeEnter(n)
+		return
+	}
+	if e.fenceEnter(n) {
+		return
+	}
 	d := n.Delta()
-	// Enter in an empty list item or quote ends the list.
+	// Enter in an empty list item, quote or callout ends it.
 	if d.Len() == 0 && n.Type != "paragraph" && n.Type != "heading" {
 		if loc := e.Content.Locate(n.ID); loc != nil && loc.Parent != nil {
 			e.outdent(n)
 		} else {
-			n.Type = "paragraph"
-			delete(n.Data, "checked")
+			e.toParagraph(n)
 		}
 		e.invalidate(n.ID)
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
@@ -284,12 +302,22 @@ func (e *Editor) Enter() {
 		return
 	}
 	head, tail := d.Slice(0, off), d.Slice(off, d.Len())
+	if n.Type == "toggle_list" && !collapsed(n) {
+		// In an open toggle, the new line is its first child.
+		n.SetDelta(head)
+		p := newText("paragraph", tail)
+		n.Children = append([]*doc.Node{p}, n.Children...)
+		e.invalidate(n.ID)
+		e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
+		e.changed()
+		return
+	}
 	n.SetDelta(head)
 	p := newText(continues(n), tail)
 	if p.Type == "todo_list" {
 		p.Set("checked", false)
 	}
-	if NestableTypes(n) && len(n.Children) > 0 {
+	if NestableTypes(n) && len(n.Children) > 0 && !collapsed(n) {
 		// The new item comes first among the children.
 		n.Children = append([]*doc.Node{p}, n.Children...)
 	} else {
@@ -362,9 +390,7 @@ func (e *Editor) Backspace(word bool) {
 		if loc := e.Content.Locate(n.ID); loc != nil && loc.Parent != nil {
 			e.outdent(n)
 		} else {
-			n.Type = "paragraph"
-			delete(n.Data, "checked")
-			delete(n.Data, "level")
+			e.toParagraph(n)
 		}
 		e.invalidate(n.ID)
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
@@ -387,7 +413,7 @@ func (e *Editor) Backspace(word bool) {
 		return
 	}
 	at := textLen(prev)
-	prev.SetDelta(prev.Delta().Concat(n.Delta()))
+	prev.SetDelta(joined(prev, n))
 	e.liftChildren(n)
 	e.Content.Remove(n.ID)
 	e.invalidate(prev.ID)
@@ -437,11 +463,30 @@ func (e *Editor) Delete(word bool) {
 		e.Select(Pos{next.ID, 0}, Pos{next.ID, 0})
 		return
 	}
-	n.SetDelta(n.Delta().Concat(next.Delta()))
+	n.SetDelta(joined(n, next))
 	e.liftChildren(next)
 	e.Content.Remove(next.ID)
 	e.invalidate(n.ID)
 	e.changed()
+}
+
+// toParagraph turns a block into a paragraph, without the data of its
+// kind; the children a paragraph cannot hold move up after it.
+func (e *Editor) toParagraph(n *doc.Node) {
+	n.Type = "paragraph"
+	for _, k := range []string{"checked", "level", "language", "tone", "collapsed"} {
+		delete(n.Data, k)
+	}
+	e.liftChildren(n)
+}
+
+// joined is the text of a block with the next one's after it: plain when
+// it is code.
+func joined(n, next *doc.Node) doc.Delta {
+	if n.Type == "code" {
+		return doc.Delta{{Text: n.Delta().Plain() + next.Delta().Plain()}}.Compact()
+	}
+	return n.Delta().Concat(next.Delta())
 }
 
 // removeBlock deletes a block selected whole, and puts the caret beside it.
@@ -477,16 +522,21 @@ func (e *Editor) Indent() {
 		return
 	}
 	n := e.node(e.focus.ID)
-	if n == nil || !NestableTypes(n) {
+	if n == nil || !n.IsText() {
 		return
 	}
 	loc := e.Content.Locate(n.ID)
 	if loc == nil || loc.Index == 0 {
 		return
 	}
+	// List items nest in list items; any text nests in a toggle.
 	prev := loc.Siblings[loc.Index-1]
-	if !NestableTypes(prev) {
+	if !NestableTypes(prev) || !NestableTypes(n) && prev.Type != "toggle_list" {
 		return
+	}
+	if collapsed(prev) {
+		prev.Set("collapsed", false)
+		e.invalidate(prev.ID)
 	}
 	e.pushUndo(false)
 	_ = e.Content.Move(n.ID, doc.Position{Parent: prev.ID})
@@ -542,13 +592,21 @@ func (e *Editor) SetType(typ string, level int) {
 			continue
 		}
 		n.Type = typ
-		delete(n.Data, "level")
-		delete(n.Data, "checked")
+		for _, k := range []string{"checked", "level", "language", "tone", "collapsed"} {
+			delete(n.Data, k)
+		}
 		switch typ {
 		case "heading":
 			n.Set("level", level)
 		case "todo_list":
 			n.Set("checked", false)
+		case "code":
+			n.SetDelta(doc.Delta{{Text: n.Delta().Plain()}}.Compact())
+			n.Set("language", "")
+		case "callout":
+			n.Set("tone", "info")
+		case "toggle_list":
+			n.Set("collapsed", false)
 		}
 		if !NestableTypes(n) && len(n.Children) > 0 {
 			e.liftChildren(n)
@@ -612,7 +670,7 @@ func (e *Editor) Format(has func(doc.Attrs) bool, set func(*doc.Attrs, bool)) {
 	}
 	if e.Collapsed() {
 		n := e.node(e.focus.ID)
-		if n == nil || !n.IsText() {
+		if n == nil || !n.IsText() || n.Type == "code" {
 			return
 		}
 		if !e.hasTyping {
@@ -629,7 +687,7 @@ func (e *Editor) Format(has func(doc.Attrs) bool, set func(*doc.Attrs, bool)) {
 	each := func(fn func(n *doc.Node, from, to int)) {
 		for i := ia; i <= ib; i++ {
 			n := us[i]
-			if !n.IsText() {
+			if !n.IsText() || n.Type == "code" {
 				continue
 			}
 			from, to := 0, textLen(n)

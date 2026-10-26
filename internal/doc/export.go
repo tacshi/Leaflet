@@ -22,10 +22,12 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 			if n.Type != "numbered_list" {
 				number = 0
 			}
-			if depth == 0 && inList && !NestableTypes[n.Type] {
+			// A toggle is a <details>, not a list item.
+			item := NestableTypes[n.Type] && n.Type != "toggle_list"
+			if depth == 0 && inList && !item {
 				b.WriteString("\n")
 			}
-			inList = NestableTypes[n.Type]
+			inList = item
 			switch n.Type {
 			case "paragraph":
 				b.WriteString(indent + text + "\n\n")
@@ -44,6 +46,15 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 				b.WriteString(indent + "- " + box + " " + text + "\n")
 			case "quote":
 				b.WriteString("> " + text + "\n\n")
+			case "code":
+				b.WriteString(indent + strings.ReplaceAll(CodeMarkdown(n), "\n", "\n"+indent) + "\n\n")
+			case "callout":
+				b.WriteString(CalloutMarkdown(n) + "\n\n")
+			case "toggle_list":
+				b.WriteString("<details>\n<summary>" + text + "</summary>\n\n")
+				visit(n.Children, 0)
+				b.WriteString("</details>\n\n")
+				continue
 			case "divider":
 				b.WriteString("---\n\n")
 			case "image":
@@ -75,6 +86,18 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 				} else {
 					b.WriteString("*" + title + " (interactive embed)*\n\n")
 				}
+			case "video":
+				title := n.Str("title")
+				if title == "" {
+					title = "Video"
+				}
+				fmt.Fprintf(&b, "[%s](%s)\n\n", title, n.Str("url"))
+			case "math_equation":
+				b.WriteString("$$\n" + n.Str("formula") + "\n$$\n\n")
+			case "diagram":
+				b.WriteString(CodeMarkdown(&Node{Type: "code", Data: map[string]any{"language": "mermaid", "delta": Delta{{Text: n.Str("source")}}.JSON()}}) + "\n\n")
+			case "link_preview", "file":
+				fmt.Fprintf(&b, "[%s](%s)\n\n", cardTitle(n), n.Str("url"))
 			case "recording":
 				b.WriteString("*Recording: " + n.Str("title") + "*\n\n")
 			case "subpage":

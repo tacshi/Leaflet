@@ -41,7 +41,7 @@ type Trigger struct {
 }
 
 // Host is what the editor needs from the app: pages, images, embeds,
-// recordings, comments and agents.
+// videos, recordings, comments and agents.
 type Host interface {
 	PageTitle(id string) string
 	OpenPage(id string)
@@ -49,6 +49,10 @@ type Host interface {
 	Image(url string) *ui.Bitmap
 	// Embed builds the web view of an embed block.
 	Embed(c *ui.Context, n *doc.Node, width float32)
+	// Video builds a video block.
+	Video(c *ui.Context, n *doc.Node, width float32)
+	// Card builds a link card or a file's card.
+	Card(c *ui.Context, n *doc.Node)
 	// Recording builds a recording block.
 	Recording(c *ui.Context, n *doc.Node)
 	// CommentCount is the number of open threads on a block.
@@ -63,8 +67,9 @@ type Host interface {
 	// Comment and AskAgent act on the selected text of a block.
 	Comment(blockID, quote string)
 	AskAgent(blockID, quote string)
-	// EditChart opens the data of a chart block.
-	EditChart(blockID string)
+	// EditBlock opens what a block is made from: a chart's data, or a math
+	// or diagram block's source.
+	EditBlock(blockID string)
 }
 
 type snapshot struct {
@@ -120,6 +125,9 @@ type Editor struct {
 	menuItems []MenuItem
 	linkOpen  bool
 	linkDraft string
+	// copied is the code block whose code was copied last, at copiedAt.
+	copied   string
+	copiedAt time.Time
 
 	handle   ui.Handle
 	services ui.Services
@@ -162,7 +170,8 @@ func (e *Editor) units() []*doc.Node {
 	visit = func(nodes []*doc.Node) {
 		for _, n := range nodes {
 			out = append(out, n)
-			if n.Type != "table" {
+			// A folded toggle's children are out of the caret's way.
+			if n.Type != "table" && !collapsed(n) {
 				visit(n.Children)
 			}
 		}
@@ -400,6 +409,18 @@ func (e *Editor) Edit(fn func(c *doc.Content)) {
 	fn(e.Content)
 	e.layouts = map[string]*blockLayout{}
 	e.Select(e.anchor, e.focus)
+	e.changed()
+}
+
+// SetData sets a block's data outside the undo history: what the app
+// learns about a block after it is in the page, as a video's title.
+func (e *Editor) SetData(id, key string, v any) {
+	n := e.node(id)
+	if n == nil || e.ReadOnly {
+		return
+	}
+	n.Set(key, v)
+	e.invalidate(id)
 	e.changed()
 }
 

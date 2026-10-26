@@ -82,7 +82,15 @@ func (h *host) Image(url string) *ui.Bitmap {
 	return h.a.images.get(url, func() { h.a.update(func() {}) })
 }
 func (h *host) Embed(c *ui.Context, n *doc.Node, width float32) { h.a.embedBlock(c, n, width) }
-func (h *host) Recording(c *ui.Context, n *doc.Node)            { h.a.recordingBlock(c, n) }
+func (h *host) Video(c *ui.Context, n *doc.Node, width float32) { h.a.videoBlock(c, n, width) }
+func (h *host) Card(c *ui.Context, n *doc.Node) {
+	if n.Type == "file" {
+		h.a.fileBlock(c, n)
+	} else {
+		h.a.linkPreviewBlock(c, n)
+	}
+}
+func (h *host) Recording(c *ui.Context, n *doc.Node) { h.a.recordingBlock(c, n) }
 
 func (h *host) CommentCount(blockID string) int {
 	if h.a.page == nil {
@@ -116,12 +124,20 @@ var slashItems = []slashItem{
 	{editor.MenuItem{Key: "numbered_list", Label: "Numbered list", Hint: "A list with numbers", Icon: "list-ordered", Group: "Basic"}, "number ordered ol"},
 	{editor.MenuItem{Key: "todo_list", Label: "To-do list", Hint: "Track tasks", Icon: "square-check", Group: "Basic"}, "todo task check"},
 	{editor.MenuItem{Key: "quote", Label: "Quote", Hint: "Set off a quotation", Icon: "quote", Group: "Basic"}, "quote blockquote"},
+	{editor.MenuItem{Key: "callout", Label: "Callout", Hint: "Set off a note, tip or warning", Icon: "info", Group: "Basic"}, "callout note tip warning alert admonition"},
+	{editor.MenuItem{Key: "toggle_list", Label: "Toggle", Hint: "Fold away what is inside", Icon: "chevron-right", Group: "Basic"}, "toggle collapse fold details disclosure"},
+	{editor.MenuItem{Key: "code", Label: "Code", Hint: "Code with highlighting", Icon: "code", Group: "Basic"}, "code snippet program ```"},
 	{editor.MenuItem{Key: "divider", Label: "Divider", Hint: "A line between sections", Icon: "minus", Group: "Basic"}, "divider line hr rule"},
 	{editor.MenuItem{Key: "table", Label: "Table", Hint: "Rows and columns", Icon: "table", Group: "Blocks"}, "table grid"},
 	{editor.MenuItem{Key: "chart", Label: "Chart", Hint: "Bar, line or pie", Icon: "chart-column", Group: "Blocks"}, "chart graph bar line pie"},
+	{editor.MenuItem{Key: "math_equation", Label: "Math", Hint: "A formula in TeX", Icon: "sigma", Group: "Blocks"}, "math equation formula latex tex katex"},
+	{editor.MenuItem{Key: "diagram", Label: "Diagram", Hint: "A Mermaid flowchart or other diagram", Icon: "workflow", Group: "Blocks"}, "diagram mermaid flowchart sequence chart graph"},
 	{editor.MenuItem{Key: "embed", Label: "Interactive embed", Hint: "HTML that runs sandboxed", Icon: "layout-grid", Group: "Blocks"}, "embed html widget"},
 	{editor.MenuItem{Key: "subpage", Label: "Subpage", Hint: "A page inside this page", Icon: "file-plus", Group: "Blocks"}, "page subpage child"},
 	{editor.MenuItem{Key: "image", Label: "Image", Hint: "Upload a picture", Icon: "image", Group: "Blocks"}, "image picture photo"},
+	{editor.MenuItem{Key: "video", Label: "Video", Hint: "A YouTube or Vimeo link", Icon: "play", Group: "Blocks"}, "video youtube vimeo movie film"},
+	{editor.MenuItem{Key: "link_preview", Label: "Link card", Hint: "A web page with its title and picture", Icon: "globe", Group: "Blocks"}, "link card bookmark preview url web"},
+	{editor.MenuItem{Key: "file", Label: "File", Hint: "Attach a file to the page", Icon: "paperclip", Group: "Blocks"}, "file attach attachment upload document pdf"},
 	{editor.MenuItem{Key: "recording", Label: "Recording", Hint: "Audio with a transcript", Icon: "mic", Group: "Blocks"}, "record audio voice transcript"},
 }
 
@@ -183,7 +199,7 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 	}
 	ed.RemoveTrigger(t)
 	switch item.Key {
-	case "paragraph", "bulleted_list", "numbered_list", "todo_list", "quote":
+	case "paragraph", "bulleted_list", "numbered_list", "todo_list", "quote", "code", "callout", "toggle_list":
 		ed.SetType(item.Key, 0)
 	case "h1", "h2", "h3":
 		ed.SetType("heading", int(item.Key[1]-'0'))
@@ -207,6 +223,17 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 		a.addSubpageBlock()
 	case "image":
 		a.uploadIntoPage()
+	case "video", "link_preview":
+		a.dialogs.openLinkDialog(item.Key)
+	case "file":
+		a.uploadIntoPage()
+	case "math_equation", "diagram":
+		n := doc.MathNode("")
+		if item.Key == "diagram" {
+			n = doc.DiagramNode("")
+		}
+		ed.InsertBlocks(n)
+		a.dialogs.openSource(n)
 	case "recording":
 		a.startRecording(ps.id, "")
 	}
@@ -221,9 +248,18 @@ func (h *host) AskAgent(blockID, quote string) {
 	h.a.dialogs.inline = &inlinePrompt{blockID: blockID, quote: quote, selection: true}
 }
 
-func (h *host) EditChart(blockID string) {
-	if h.a.page != nil {
-		h.a.dialogs.openChart(blockID, h.a.page.editor)
+func (h *host) EditBlock(blockID string) {
+	ps := h.a.page
+	if ps == nil {
+		return
+	}
+	n := ps.editor.Content.Find(blockID)
+	switch {
+	case n == nil:
+	case n.Type == "chart":
+		h.a.dialogs.openChart(blockID, ps.editor)
+	case n.Type == "math_equation" || n.Type == "diagram":
+		h.a.dialogs.openSource(n)
 	}
 }
 
@@ -249,8 +285,8 @@ func (a *App) addSubpageBlock() {
 
 var imageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".bmp": true}
 
-// uploadIntoPage picks a file: an image goes in the page, other files go
-// in the space beside it.
+// uploadIntoPage picks files and puts them in the page: a picture as an
+// image, others as file cards.
 func (a *App) uploadIntoPage() {
 	ps := a.page
 	if ps == nil {
@@ -270,14 +306,19 @@ func (a *App) uploadIntoPage() {
 					a.toast("Could not add the file: " + err.Error())
 					continue
 				}
-				if imageExts[ext] && a.page != nil && a.page.id == pageID {
-					n := &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
+				if a.page == nil || a.page.id != pageID {
+					a.toast("Added " + f.Name + " to the space")
+					continue
+				}
+				n := &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
+					"url": "file://" + f.LocalPath, "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
+				}}
+				if imageExts[ext] {
+					n = &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
 						"url": "file://" + f.LocalPath, "align": "center", "alt": f.Name, "file_id": f.ID,
 					}}
-					a.page.editor.InsertBlocks(n)
-				} else {
-					a.toast("Added " + f.Name + " to the space")
 				}
+				a.page.editor.InsertBlocks(n)
 			}
 		})
 	}()
@@ -543,20 +584,15 @@ func (s *embedScroll) Scroll(dy float64) {
 }
 
 func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
+	switch n.Type {
+	case "math_equation", "diagram":
+		a.renderedBlock(c, n, width)
+		return
+	}
 	pal := theme.Of(c)
 	height := float32(min(max(n.Int("height", 320), 120), 1200))
-	key := n.ID
-	// The block grows when the content is taller at this width, as a
-	// narrow page stacks its layout. The frame is inside the card's border
-	// and padding.
+	// The frame is inside the card's border and padding.
 	const pad = 14
-	size, ready := a.embedSizes[key]
-	if ready && abs32(size.w-(width-2-2*pad)) < 4 {
-		height = max(height, min(size.h, 1200))
-	}
-	// Loaded again when the HTML or the theme changes: by hand, by an
-	// agent, by undo or a restored version.
-	src := embedPage(key, n.Str("html"), c.Theme().Dark)
 	// A card as a chart is, with the title inside.
 	box := ui.Column(c.Key("embed:"+n.ID)).Padding(12, pad, pad).Gap(10).Radius(10).Border(1, pal.Divider).Background(pal.Surface)
 	hovered := box.Hovered()
@@ -582,43 +618,62 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 				ui.Text(c, "Sandboxed").FontSize(11).TextColor(pal.TextMuted)
 			})
 		})
-		v := a.embeds[key]
-		if v == nil && a.win != nil {
-			bg := "#ffffff"
-			if c.Theme().Dark {
-				bg = "#1b1e24"
-			}
-			wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: bg})
-			if err != nil {
-				ui.Text(c, "Embeds cannot show here: "+err.Error()).TextColor(pal.TextMuted)
-				return
-			}
-			page := wv.Page()
-			page.OnWillNavigate(func(e *mygo.NavigateEvent) {
-				if !strings.HasPrefix(e.URL, "about:") && !strings.HasPrefix(e.URL, "data:") {
-					e.PreventDefault()
-				}
-			})
-			page.SetWindowOpenHandler(func(mygo.WindowOpenRequest) *mygo.WindowOptions { return nil })
-			a.embeds[key] = wv
-			v = wv
-		}
-		if v != nil {
-			if a.embedSrc[key] != src {
-				v.Page().LoadHTML(src, "about:blank")
-				a.embedSrc[key] = src
-				delete(a.embedSizes, key)
-				ready = false
-			}
-			// Until the embed draws, its box shows rather than a blank
-			// page in the frame's color.
-			wv := ui.WebView(c, v).Height(height).FillWidth().Radius(6)
-			if !ready {
-				wv.Opacity(0)
-				ui.Box(c).Height(height).FillWidth().Margin(-height-10, 0, 0, 0).Radius(6).Background(pal.Ground)
-			}
-		}
+		// The block grows when the content is taller at this width, as a
+		// narrow page stacks its layout.
+		a.sandbox(c, n.ID, n.Str("html"), width-2-2*pad, func(content float32) float32 {
+			return max(height, min(content, 1200))
+		}, height, 10)
 	})
+}
+
+// sandbox shows HTML in a block's sandboxed web view, key naming it, at
+// width w inside the page. fit gives the frame's height from its
+// content's, once that has drawn; until then it is height, and the box
+// shows, gap above it, rather than a blank page in the frame's color.
+// The view loads again when the HTML or the theme changes: by hand, by an
+// agent, by undo or a restored version.
+func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float32) float32, height, gap float32) {
+	pal := theme.Of(c)
+	src := embedPage(key, html, c.Theme().Dark)
+	size, ready := a.embedSizes[key]
+	if ready && abs32(size.w-w) < 4 {
+		height = fit(size.h)
+	}
+	v := a.embeds[key]
+	if v == nil && a.win != nil {
+		bg := "#ffffff"
+		if c.Theme().Dark {
+			bg = "#1b1e24"
+		}
+		wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: bg})
+		if err != nil {
+			ui.Text(c, "This cannot show here: "+err.Error()).TextColor(pal.TextMuted)
+			return
+		}
+		page := wv.Page()
+		page.OnWillNavigate(func(e *mygo.NavigateEvent) {
+			if !strings.HasPrefix(e.URL, "about:") && !strings.HasPrefix(e.URL, "data:") {
+				e.PreventDefault()
+			}
+		})
+		page.SetWindowOpenHandler(func(mygo.WindowOpenRequest) *mygo.WindowOptions { return nil })
+		a.embeds[key] = wv
+		v = wv
+	}
+	if v == nil {
+		return
+	}
+	if a.embedSrc[key] != src {
+		v.Page().LoadHTML(src, "about:blank")
+		a.embedSrc[key] = src
+		delete(a.embedSizes, key)
+		ready = false
+	}
+	wv := ui.WebView(c, v).Height(height).FillWidth().Radius(6)
+	if !ready {
+		wv.Opacity(0)
+		ui.Box(c).Height(height).FillWidth().Margin(-height-gap, 0, 0, 0).Radius(6).Background(pal.Ground)
+	}
 }
 
 func abs32(f float32) float32 {

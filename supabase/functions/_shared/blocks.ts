@@ -42,6 +42,18 @@ export interface EmbedSpec {
 export interface BlockSpec {
   type: string;
   text?: string;
+  /** For code: the language, such as "go" or "python". */
+  language?: string;
+  /** For callout: info, tip, warning or danger. */
+  tone?: string;
+  /** For toggle_list: whether it starts folded. */
+  collapsed?: boolean;
+  /** For math_equation: the TeX formula. */
+  formula?: string;
+  /** For diagram: the Mermaid source. */
+  source?: string;
+  video?: { url: string; title?: string };
+  link?: { url: string };
   level?: number;
   checked?: boolean;
   children?: BlockSpec[];
@@ -65,6 +77,12 @@ export interface BlockView {
   parent_id?: string;
   level?: number;
   checked?: boolean;
+  language?: string;
+  tone?: string;
+  collapsed?: boolean;
+  formula?: string;
+  source?: string;
+  url?: string;
   rows?: string[][];
   chart?: Record<string, unknown>;
   embed?: { title: string; height: number; html_length: number };
@@ -78,10 +96,13 @@ export const TEXT_TYPES = new Set([
   "numbered_list",
   "todo_list",
   "quote",
+  "code",
+  "callout",
+  "toggle_list",
 ]);
 
 /** Block types that may hold nested blocks. */
-export const LIST_TYPES = new Set(["bulleted_list", "numbered_list", "todo_list"]);
+export const LIST_TYPES = new Set(["bulleted_list", "numbered_list", "todo_list", "toggle_list"]);
 
 /** Block types an agent may create. */
 export const SPEC_TYPES = new Set([
@@ -91,6 +112,10 @@ export const SPEC_TYPES = new Set([
   "table",
   "chart",
   "embed",
+  "video",
+  "link_preview",
+  "math_equation",
+  "diagram",
 ]);
 
 // ---------------------------------------------------------------------------
@@ -351,6 +376,80 @@ export class SpecError extends Error {}
 
 export type IdFactory = () => string;
 
+const LANGUAGE_ALIASES: Record<string, string> = {
+  sh: "bash",
+  shell: "bash",
+  zsh: "bash",
+  console: "bash",
+  "c++": "cpp",
+  cc: "cpp",
+  cs: "csharp",
+  "c#": "csharp",
+  golang: "go",
+  htm: "html",
+  js: "javascript",
+  jsx: "javascript",
+  mjs: "javascript",
+  node: "javascript",
+  kt: "kotlin",
+  md: "markdown",
+  py: "python",
+  python3: "python",
+  rb: "ruby",
+  rs: "rust",
+  ts: "typescript",
+  tsx: "typescript",
+  yml: "yaml",
+  docker: "dockerfile",
+  text: "",
+  txt: "",
+  plain: "",
+  plaintext: "",
+  none: "",
+};
+
+const CALLOUT_TONES = new Set(["info", "tip", "warning", "danger"]);
+
+/** A callout's tone, or info (doc.CalloutTone). */
+export function calloutTone(tone: unknown): string {
+  const t = String(tone ?? "").trim().toLowerCase();
+  return CALLOUT_TONES.has(t) ? t : "info";
+}
+
+/** Whether a link is to a YouTube or Vimeo video (doc.ParseVideoURL). */
+export function isVideoURL(link: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(link.trim());
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase().replace(/^www\./, "");
+  const parts = u.pathname.split("/").filter(Boolean);
+  const youtubeId = /^[A-Za-z0-9_-]{11}$/;
+  switch (host) {
+    case "youtu.be":
+      return parts.length === 1 && youtubeId.test(parts[0]);
+    case "youtube.com":
+    case "m.youtube.com":
+    case "music.youtube.com":
+    case "youtube-nocookie.com":
+      if (parts.length === 1 && parts[0] === "watch") return youtubeId.test(u.searchParams.get("v") ?? "");
+      return parts.length === 2 && ["embed", "shorts", "live", "v"].includes(parts[0]) && youtubeId.test(parts[1]);
+    case "vimeo.com":
+    case "player.vimeo.com":
+      return parts.some((p) => /^[0-9]+$/.test(p));
+  }
+  return false;
+}
+
+/** A code block's language as the ID it keeps (doc.CodeLanguageID). */
+export function codeLanguage(name: unknown): string {
+  const id = String(name ?? "").trim().toLowerCase();
+  return Object.hasOwn(LANGUAGE_ALIASES, id) ? LANGUAGE_ALIASES[id] : id;
+}
+
 function textNode(id: string, type: string, text: string, extra: Record<string, unknown> = {}): NodeJSON {
   return { id, type, data: { ...extra, delta: markdownToDelta(text ?? "") } };
 }
@@ -436,6 +535,48 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
     case "quote":
       node = textNode(id, type, spec.text ?? "");
       break;
+    case "callout":
+      node = textNode(id, type, spec.text ?? "", { tone: calloutTone(spec.tone) });
+      break;
+    case "toggle_list":
+      node = textNode(id, type, spec.text ?? "", { collapsed: spec.collapsed === true });
+      break;
+    case "video": {
+      const url = String(spec.video?.url ?? "").trim();
+      if (!isVideoURL(url)) throw new SpecError("A video block needs `video.url`, a YouTube or Vimeo link");
+      node = { id, type, data: { url, title: String(spec.video?.title ?? "").trim() } };
+      break;
+    }
+    case "link_preview": {
+      const url = String(spec.link?.url ?? "").trim();
+      if (!/^https?:\/\/[^\s/]+/i.test(url) || /\s/.test(url)) {
+        throw new SpecError("A link_preview block needs `link.url`, an http(s) link");
+      }
+      node = { id, type, data: { url } };
+      break;
+    }
+    case "math_equation": {
+      const formula = String(spec.formula ?? "").trim();
+      if (!formula) throw new SpecError("A math_equation block needs `formula`, in TeX");
+      node = { id, type, data: { formula } };
+      break;
+    }
+    case "diagram": {
+      const source = String(spec.source ?? "").replace(/^\n+|\n+$/g, "");
+      if (!source.trim()) throw new SpecError("A diagram block needs `source`, in Mermaid");
+      node = { id, type, data: { source } };
+      break;
+    }
+    case "code": {
+      // The code as it is, not markdown; data.delta is its plain text.
+      const code = String(spec.text ?? "").replace(/\n$/, "");
+      node = {
+        id,
+        type,
+        data: { delta: code ? [{ insert: code }] : [], language: codeLanguage(spec.language) },
+      };
+      break;
+    }
     case "divider":
       node = { id, type };
       break;
@@ -562,6 +703,32 @@ export function nodeView(
     case "heading":
       view.level = Number(data.level ?? 1);
       break;
+    case "code":
+      view.text = deltaToPlain(deltaOf(node));
+      view.language = String(data.language ?? "");
+      break;
+    case "callout":
+      view.tone = calloutTone(data.tone);
+      break;
+    case "toggle_list":
+      view.collapsed = data.collapsed === true;
+      break;
+    case "video":
+    case "link_preview":
+      view.text = String(data.title ?? data.url ?? "");
+      view.url = String(data.url ?? "");
+      break;
+    case "file":
+      view.text = String(data.name ?? "");
+      break;
+    case "math_equation":
+      view.formula = String(data.formula ?? "");
+      view.text = view.formula;
+      break;
+    case "diagram":
+      view.source = String(data.source ?? "");
+      view.text = view.source;
+      break;
     case "todo_list":
       view.checked = data.checked === true;
       break;
@@ -633,9 +800,14 @@ export function plainText(content: PageContent): string {
     if (TEXT_TYPES.has(node.type)) {
       const text = deltaToPlain(deltaOf(node));
       if (text) lines.push(text);
-    } else if (node.type === "chart" || node.type === "embed") {
+    } else if (["chart", "embed", "video", "link_preview"].includes(node.type)) {
       const title = String(node.data?.title ?? "");
       if (title) lines.push(title);
+    } else if (node.type === "file" && node.data?.name) {
+      lines.push(String(node.data.name));
+    } else if (node.type === "math_equation" || node.type === "diagram") {
+      const source = String(node.data?.formula ?? node.data?.source ?? "");
+      if (source) lines.push(source);
     }
   });
   return lines.join("\n");

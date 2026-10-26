@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"runtime"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -12,12 +13,15 @@ import (
 type fakeHost struct {
 	picked []MenuItem
 	opened []string
+	edited []string
 }
 
 func (h *fakeHost) PageTitle(id string) string                  { return "Sub" }
 func (h *fakeHost) OpenPage(id string)                          { h.opened = append(h.opened, id) }
 func (h *fakeHost) Image(url string) *ui.Bitmap                 { return nil }
 func (h *fakeHost) Embed(c *ui.Context, n *doc.Node, w float32) {}
+func (h *fakeHost) Video(c *ui.Context, n *doc.Node, w float32) {}
+func (h *fakeHost) Card(c *ui.Context, n *doc.Node)             {}
 func (h *fakeHost) Recording(c *ui.Context, n *doc.Node)        {}
 func (h *fakeHost) CommentCount(string) int                     { return 0 }
 func (h *fakeHost) OpenComments(string)                         {}
@@ -28,7 +32,7 @@ func (h *fakeHost) MentionItems(q string) []MenuItem { return nil }
 func (h *fakeHost) Pick(t Trigger, item MenuItem)    { h.picked = append(h.picked, item) }
 func (h *fakeHost) Comment(id, quote string)         {}
 func (h *fakeHost) AskAgent(id, quote string)        {}
-func (h *fakeHost) EditChart(id string)              {}
+func (h *fakeHost) EditBlock(id string)              { h.edited = append(h.edited, id) }
 
 func setup(t *testing.T) (*Editor, *ui.Tester, *fakeHost) {
 	t.Helper()
@@ -268,5 +272,272 @@ func TestNiceTicks(t *testing.T) {
 	}
 	if got := niceTicks(0, 12, 3); fmt.Sprint(got) != "[0 5 10 15]" {
 		t.Errorf("ticks %v", got)
+	}
+}
+
+func TestPasteVideoLink(t *testing.T) {
+	e, _, _ := setup(t)
+	e.paste("https://youtu.be/dQw4w9WgXcQ")
+	if top := e.Content.Children; len(top) != 2 || top[0].Type != "video" || top[0].Str("url") != "https://youtu.be/dQw4w9WgXcQ" || top[1].Type != "paragraph" {
+		t.Fatalf("got %v", texts(e))
+	}
+	// On a line with text the link stays text.
+	e.InsertText("see ")
+	e.paste("https://youtu.be/dQw4w9WgXcQ")
+	if got := texts(e); got[len(got)-1] != "paragraph:see https://youtu.be/dQw4w9WgXcQ" {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestEmacsKeys(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Control keys act as Emacs only on macOS")
+	}
+	e, tt, _ := setup(t)
+	tt.Type("Hello")
+	tt.Key(ui.Ctrl, ui.KeyJ)
+	tt.Type("world")
+	tt.Key(ui.Ctrl, ui.KeyA)
+	tt.Key(ui.Ctrl, ui.KeyF)
+	tt.Key(ui.Ctrl, ui.KeyD)
+	tt.Key(ui.Ctrl, ui.KeyB)
+	tt.Key(ui.Ctrl, ui.KeyP)
+	tt.Key(ui.Ctrl, ui.KeyE)
+	tt.Key(ui.Ctrl, ui.KeyH)
+	if got := texts(e); len(got) != 2 || got[0] != "paragraph:Hell" || got[1] != "paragraph:wrld" {
+		t.Fatalf("after moving and deleting %v", got)
+	}
+	tt.Key(ui.Ctrl, ui.KeyA)
+	tt.Key(ui.Ctrl, ui.KeyF)
+	tt.Key(ui.Ctrl, ui.KeyK)
+	if got := texts(e); len(got) != 2 || got[0] != "paragraph:H" {
+		t.Fatalf("after kill %v", got)
+	}
+	tt.Key(ui.Ctrl, ui.KeyK)
+	if got := texts(e); len(got) != 1 || got[0] != "paragraph:Hwrld" {
+		t.Fatalf("kill at the end joins %v", got)
+	}
+	tt.Key(ui.Ctrl, ui.KeyE)
+	tt.Key(ui.Ctrl, ui.KeyY)
+	tt.Key(ui.Ctrl, ui.KeyN)
+	tt.Key(ui.Ctrl, ui.KeyL)
+	if got := texts(e); len(got) != 1 || got[0] != "paragraph:Hwrldell" {
+		t.Fatalf("after yank %v", got)
+	}
+}
+
+func TestEmacsKeysInSlashMenu(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Control keys act as Emacs only on macOS")
+	}
+	_, tt, host := setup(t)
+	tt.Type("/")
+	tt.Key(ui.Ctrl, ui.KeyN)
+	tt.Key(ui.Ctrl, ui.KeyP)
+	tt.Key(0, ui.KeyEnter)
+	if len(host.picked) != 1 || host.picked[0].Key != "h1" {
+		t.Fatalf("picked %v", host.picked)
+	}
+}
+
+// code makes the page one empty code block, with the caret in it.
+func code(t *testing.T) (*Editor, *doc.Node) {
+	t.Helper()
+	e, _, _ := setup(t)
+	e.SetType("code", 0)
+	n := e.Content.Children[0]
+	if n.Type != "code" {
+		t.Fatalf("got %v", texts(e))
+	}
+	return e, n
+}
+
+func TestCodeTyping(t *testing.T) {
+	e, n := code(t)
+	e.InsertText("func f() {")
+	e.Enter()
+	e.InsertText("  **x** / @y")
+	e.Enter()
+	if got := n.Delta().Plain(); got != "func f() {\n  **x** / @y\n  " {
+		t.Fatalf("code %q", got)
+	}
+	if len(n.Delta()) != 1 || !n.Delta()[0].Attrs.Zero() || e.Trigger() != nil {
+		t.Errorf("code took formats or a menu: %+v", n.Delta())
+	}
+	// The second blank line at the end leaves the block, without them.
+	e.Enter()
+	e.Enter()
+	if got := n.Delta().Plain(); got != "func f() {\n  **x** / @y" {
+		t.Errorf("code %q", got)
+	}
+	if top := e.Content.Children; len(top) != 2 || top[1].Type != "paragraph" || e.FocusBlock() != top[1].ID {
+		t.Errorf("after %v", texts(e))
+	}
+}
+
+func TestCodeIndent(t *testing.T) {
+	e, n := code(t)
+	e.paste("a\nb\nc")
+	if got := n.Delta().Plain(); got != "a\nb\nc" || len(e.Content.Children) != 1 {
+		t.Fatalf("pasted %q %v", got, texts(e))
+	}
+	e.Select(Pos{n.ID, 0}, Pos{n.ID, 3})
+	e.indentCode(n, false)
+	if got := n.Delta().Plain(); got != "  a\n  b\nc" {
+		t.Errorf("indented %q", got)
+	}
+	if a, b := e.Range(); a.Off != 2 || b.Off != 7 {
+		t.Errorf("selection %v %v", a, b)
+	}
+	e.indentCode(n, true)
+	if got := n.Delta().Plain(); got != "a\nb\nc" {
+		t.Errorf("outdented %q", got)
+	}
+	e.PlaceCaret(n.ID, 1)
+	e.indentCode(n, false)
+	if got := n.Delta().Plain(); got != "a  \nb\nc" {
+		t.Errorf("tab at the caret %q", got)
+	}
+}
+
+func TestFencedCode(t *testing.T) {
+	e, _, _ := setup(t)
+	e.paste("Intro\n```go\nfunc a() {\n\treturn\n}\n```\nAfter")
+	top := e.Content.Children
+	if len(top) != 3 || top[1].Type != "code" || top[1].Str("language") != "go" || top[1].Delta().Plain() != "func a() {\n\treturn\n}" {
+		t.Fatalf("got %v", texts(e))
+	}
+	e.Select(Pos{top[0].ID, 0}, Pos{top[2].ID, 5})
+	if got := e.copyText(); got != "Intro\n```go\nfunc a() {\n\treturn\n}\n```\nAfter" {
+		t.Errorf("copied %q", got)
+	}
+	// A fence typed in a paragraph and Enter start a code block.
+	f, _, _ := setup(t)
+	f.InsertText("```py")
+	f.Enter()
+	if n := f.Content.Children[0]; n.Type != "code" || n.Str("language") != "python" || n.Delta().Plain() != "" {
+		t.Errorf("got %v", texts(f))
+	}
+}
+
+func TestCodeCopyButton(t *testing.T) {
+	e, tt, _ := setup(t)
+	e.SetType("code", 0)
+	n := e.Content.Children[0]
+	e.InsertText("x := 1")
+	tt.Frame()
+	if err := tt.Click("Copy code"); err != nil {
+		t.Fatal(err)
+	}
+	if got := tt.Clipboard(); got != "x := 1" {
+		t.Errorf("clipboard %q", got)
+	}
+	// The press went to the button, not to the code: the caret stays.
+	if p := e.Caret(); p.ID != n.ID || p.Off != 6 {
+		t.Errorf("caret %v", p)
+	}
+	tt.Frame()
+	if _, ok := tt.Find("Copied"); !ok {
+		t.Error("the button does not say it copied")
+	}
+}
+
+func TestCallout(t *testing.T) {
+	e, _, _ := setup(t)
+	e.SetType("callout", 0)
+	n := e.Content.Children[0]
+	e.InsertText("Note")
+	if n.Type != "callout" || n.Str("tone") != "info" {
+		t.Fatalf("got %+v", n.Data)
+	}
+	e.CycleTone(n.ID)
+	e.CycleTone(n.ID)
+	if n.Str("tone") != "warning" {
+		t.Errorf("tone %q", n.Str("tone"))
+	}
+	// Enter leaves it for a paragraph; Backspace at its start ends it.
+	e.Enter()
+	if top := e.Content.Children; len(top) != 2 || top[1].Type != "paragraph" {
+		t.Errorf("after Enter %v", texts(e))
+	}
+	e.PlaceCaret(n.ID, 0)
+	e.Backspace(false)
+	if n.Type != "paragraph" || n.Data["tone"] != nil {
+		t.Errorf("after Backspace %+v", n.Data)
+	}
+	// A GitHub alert pasted is a callout.
+	f, _, _ := setup(t)
+	f.paste("> [!TIP]\n> Keep it short.\n> Then stop.\nAfter")
+	if c := f.Content.Children[0]; c.Type != "callout" || c.Str("tone") != "tip" || c.Delta().Plain() != "Keep it short.\nThen stop." {
+		t.Errorf("pasted %v", texts(f))
+	}
+}
+
+func TestToggle(t *testing.T) {
+	e, _, _ := setup(t)
+	e.SetType("toggle_list", 0)
+	tg := e.Content.Children[0]
+	e.InsertText("Details")
+	// Enter in an open toggle writes inside it.
+	e.Enter()
+	e.InsertText("Hidden")
+	if len(tg.Children) != 1 || tg.Children[0].Delta().Plain() != "Hidden" {
+		t.Fatalf("children %v", texts(e))
+	}
+	inside := tg.Children[0].ID
+	// Folding it takes its children out of the caret's way, and moves the
+	// caret out of them.
+	e.ToggleCollapsed(tg.ID)
+	if got := len(e.units()); got != 1 || e.Caret().ID != tg.ID {
+		t.Errorf("units %d, caret %v", got, e.Caret())
+	}
+	// Enter in a folded toggle starts the next toggle.
+	e.Enter()
+	if top := e.Content.Children; len(top) != 2 || top[1].Type != "toggle_list" {
+		t.Errorf("after Enter %v", texts(e))
+	}
+	// A paragraph after an open toggle nests in it with Tab.
+	e.ToggleCollapsed(tg.ID)
+	e.SetType("paragraph", 0)
+	e.Indent()
+	if len(tg.Children) != 2 || tg.Children[1].Type != "paragraph" || len(e.Content.Children) != 1 {
+		t.Errorf("after Tab %v", texts(e))
+	}
+	// Copying the folded toggle takes its children too.
+	e.ToggleCollapsed(tg.ID)
+	end := newText("paragraph", nil)
+	e.Edit(func(c *doc.Content) { c.Children = append(c.Children, end) })
+	e.Select(Pos{tg.ID, 0}, Pos{end.ID, 0})
+	if blocks := e.copyBlocks(); len(blocks) != 2 || len(blocks[0].Children) != 2 || blocks[0].Children[0].ID != inside {
+		t.Errorf("copied %+v", blocks)
+	}
+}
+
+func TestPasteLinksAndSources(t *testing.T) {
+	e, _, _ := setup(t)
+	e.paste("https://go.dev/doc")
+	n := e.Content.Children[0]
+	if d := n.Delta(); len(d) != 1 || d[0].Attrs.Href != "https://go.dev/doc" {
+		t.Errorf("pasted link %+v", d)
+	}
+	// On selected text a link links it.
+	e.Edit(func(c *doc.Content) { n.SetDelta(doc.Delta{{Text: "the docs"}}) })
+	e.Select(Pos{n.ID, 4}, Pos{n.ID, 8})
+	e.paste("https://go.dev")
+	if d := n.Delta(); n.Delta().Plain() != "the docs" || len(d) != 2 || d[1].Attrs.Href != "https://go.dev" {
+		t.Errorf("linked %+v", d)
+	}
+	f, _, _ := setup(t)
+	f.paste("```mermaid\ngraph TD\n  A-->B\n```\n$$\nx^2\n$$\nend")
+	top := f.Content.Children
+	if len(top) < 3 || top[0].Type != "diagram" || top[0].Str("source") != "graph TD\n  A-->B" || top[1].Type != "math_equation" || top[1].Str("formula") != "x^2" {
+		t.Fatalf("pasted %v", texts(f))
+	}
+	// A Mermaid fence typed and Enter make a diagram, open to write.
+	g, _, host := setup(t)
+	g.InsertText("```mermaid")
+	g.Enter()
+	if top := g.Content.Children; top[0].Type != "diagram" || len(host.edited) != 1 || host.edited[0] != top[0].ID {
+		t.Errorf("got %v, edited %v", texts(g), host.edited)
 	}
 }

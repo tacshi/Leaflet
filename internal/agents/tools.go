@@ -27,11 +27,18 @@ var blockSchema = map[string]any{
 	"type":        "object",
 	"description": "A block to write.",
 	"properties": map[string]any{
-		"type":    map[string]any{"type": "string", "enum": doc.AgentTypes},
-		"text":    map[string]any{"type": "string", "description": "Inline markdown: **bold**, *italic*, `code`, ~~strike~~, [text](url). No block syntax such as # or -."},
+		"type":      map[string]any{"type": "string", "enum": doc.AgentTypes},
+		"text":      map[string]any{"type": "string", "description": "Inline markdown: **bold**, *italic*, `code`, ~~strike~~, [text](url). No block syntax such as # or -. For a code block, the code itself, verbatim, with its line breaks and no fence."},
+		"language":  map[string]any{"type": "string", "description": "A code block's language, such as go, python or typescript."},
+		"tone":      map[string]any{"type": "string", "enum": []string{"info", "tip", "warning", "danger"}, "description": "A callout's tone."},
+		"collapsed": map[string]any{"type": "boolean", "description": "Whether a toggle_list starts folded, its children hidden."},
+		"formula":   map[string]any{"type": "string", "description": "A math_equation's formula in TeX, without $ delimiters, shown in display style."},
+		"source":    map[string]any{"type": "string", "description": "A diagram's Mermaid source: flowchart, sequenceDiagram, classDiagram, stateDiagram, gantt, pie, mindmap and the rest."},
+		"link": map[string]any{"type": "object", "description": "A link_preview: a card for a web page, with its title and picture.",
+			"properties": map[string]any{"url": map[string]any{"type": "string"}}},
 		"level":   map[string]any{"type": "integer", "description": "Heading level 1-3."},
 		"checked": map[string]any{"type": "boolean"},
-		"children": map[string]any{"type": "array", "description": "Nested list items (list blocks only).",
+		"children": map[string]any{"type": "array", "description": "Nested blocks: list items under a list item, or any blocks inside a toggle_list.",
 			"items": map[string]any{"type": "object"}},
 		"rows": map[string]any{"type": "array", "description": "Table rows; the first row is the header.",
 			"items": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
@@ -48,6 +55,8 @@ var blockSchema = map[string]any{
 		"embed": map[string]any{"type": "object", "description": "A self-contained interactive HTML widget. It runs sandboxed with no network or storage access.",
 			"properties": map[string]any{"title": map[string]any{"type": "string"}, "html": map[string]any{"type": "string"}, "height": map[string]any{"type": "integer"}}},
 		"image": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}, "alt": map[string]any{"type": "string"}}},
+		"video": map[string]any{"type": "object", "description": "A YouTube or Vimeo video that plays in the page.",
+			"properties": map[string]any{"url": map[string]any{"type": "string", "description": "The video's YouTube or Vimeo link."}, "title": map[string]any{"type": "string"}}},
 	},
 	"required": []string{"type"},
 }
@@ -459,9 +468,10 @@ func summaryFor(verb string, nodes []*doc.Node) string {
 		return fmt.Sprintf("%s %d blocks", verb, len(nodes))
 	}
 	n := nodes[0]
-	kind := map[string]string{"chart": "chart", "table": "table", "embed": "interactive embed", "heading": "heading", "image": "image"}[n.Type]
+	kind := map[string]string{"chart": "chart", "table": "table", "embed": "interactive embed", "heading": "heading", "image": "image", "video": "video", "code": "code block",
+		"callout": "callout", "toggle_list": "toggle", "link_preview": "link card", "math_equation": "formula", "diagram": "diagram"}[n.Type]
 	title := ""
-	if n.Type == "chart" || n.Type == "embed" {
+	if n.Type == "chart" || n.Type == "embed" || n.Type == "video" {
 		title = n.Str("title")
 	}
 	what := "a block"

@@ -178,7 +178,7 @@ Deno.test("invalid calls return errors and change nothing", async () => {
     ["insert_blocks", { position: { after: "h1", before: "p1" }, blocks: [{ type: "paragraph" }] }],
     ["insert_blocks", { position: { parent: "p1" }, blocks: [{ type: "paragraph" }] }],
     ["insert_blocks", { position: { at: "end" }, blocks: [{ type: "paragraph", children: [{ type: "paragraph" }] }] }],
-    ["insert_blocks", { position: { at: "end" }, blocks: [{ type: "code" }] }],
+    ["insert_blocks", { position: { at: "end" }, blocks: [{ type: "toggle" }] }],
     ["insert_blocks", {
       position: { at: "end" },
       blocks: [{
@@ -240,4 +240,74 @@ Deno.test("soniox tokens group into segments", () => {
     { start_ms: 3600, end_ms: 3900, text: "Next", speaker: "1" },
     { start_ms: 4000, end_ms: 4500, text: "你好", speaker: "2" },
   ]);
+});
+
+Deno.test("code blocks keep their code verbatim", () => {
+  let n = 0;
+  const code = 'func main() {\n\tfmt.Println("**hi**")\n}';
+  const node = specToNode({ type: "code", text: code + "\n", language: "Golang" }, { newId: () => `id${n++}` });
+  assertEquals(node.data, { delta: [{ insert: code }], language: "go" });
+  const content: PageContent = {
+    document: { id: "root", type: "page", children: [node] },
+    meta: { v: 1, blocks: {}, deleted: {} },
+  };
+  const [view] = pageViews(content);
+  assertEquals(view.text, code);
+  assertEquals(view.language, "go");
+  assertEquals(plainText(content), code);
+  assertEquals(
+    specToNode({ type: "code", language: "constructor" }, { newId: () => "x" }).data?.language,
+    "constructor",
+  );
+});
+
+Deno.test("callouts, toggles, videos, link cards, math and diagrams", () => {
+  let n = 0;
+  const opts = { newId: () => `id${n++}` };
+  const toggle = specToNode({
+    type: "toggle_list",
+    text: "Details",
+    collapsed: true,
+    children: [{ type: "paragraph", text: "Hidden" }, { type: "code", text: "x" }],
+  }, opts);
+  assertEquals(toggle.data?.collapsed, true);
+  assertEquals(toggle.children?.length, 2);
+  assertEquals(specToNode({ type: "callout", text: "Careful", tone: "WARNING" }, opts).data?.tone, "warning");
+  assertEquals(specToNode({ type: "callout", text: "x", tone: "loud" }, opts).data?.tone, "info");
+  const video = specToNode({ type: "video", video: { url: "https://youtu.be/dQw4w9WgXcQ" } }, opts);
+  assertEquals(video.data?.url, "https://youtu.be/dQw4w9WgXcQ");
+  assertEquals(specToNode({ type: "link_preview", link: { url: "https://go.dev/doc" } }, opts).data, {
+    url: "https://go.dev/doc",
+  });
+  assertEquals(specToNode({ type: "math_equation", formula: " e^{i\\pi}+1=0 " }, opts).data, {
+    formula: "e^{i\\pi}+1=0",
+  });
+  assertEquals(specToNode({ type: "diagram", source: "\ngraph TD\n  A-->B\n" }, opts).data, {
+    source: "graph TD\n  A-->B",
+  });
+  for (
+    const bad of [
+      { type: "video", video: { url: "https://example.com/v.mp4" } },
+      { type: "link_preview", link: { url: "ftp://x" } },
+      { type: "math_equation" },
+      { type: "diagram", source: " " },
+      { type: "callout", children: [{ type: "paragraph" }] },
+    ]
+  ) {
+    let threw = false;
+    try {
+      specToNode(bad, opts);
+    } catch {
+      threw = true;
+    }
+    assert(threw, JSON.stringify(bad));
+  }
+  const content: PageContent = {
+    document: { id: "root", type: "page", children: [toggle, video] },
+    meta: { v: 1, blocks: {}, deleted: {} },
+  };
+  const views = pageViews(content);
+  assertEquals(views.map((v) => v.type), ["toggle_list", "paragraph", "code", "video"]);
+  assertEquals(views[0].collapsed, true);
+  assertEquals(views[3].url, "https://youtu.be/dQw4w9WgXcQ");
 });

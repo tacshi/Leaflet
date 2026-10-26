@@ -97,7 +97,7 @@ func exportZip(w io.Writer, pages []store.Page, folders map[string]string, conte
 		})
 		var fail error
 		c.Walk(func(n, _ *doc.Node) {
-			if n.Type != "image" || fail != nil {
+			if n.Type != "image" && n.Type != "file" || fail != nil {
 				return
 			}
 			src := n.Str("url")

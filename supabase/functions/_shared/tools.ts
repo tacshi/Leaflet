@@ -75,13 +75,33 @@ const blockSpecSchema = {
     text: {
       type: "string",
       description:
-        "Text with inline markdown: **bold**, *italic*, `code`, ~~strike~~, [link](https://…). For text block types.",
+        "Text with inline markdown: **bold**, *italic*, `code`, ~~strike~~, [link](https://…). For text block types. For code, the code itself, verbatim, with its line breaks and no fence.",
+    },
+    language: { type: "string", description: "For code: the language, such as go, python or typescript" },
+    tone: { type: "string", enum: ["info", "tip", "warning", "danger"], description: "For callout: its tone" },
+    collapsed: { type: "boolean", description: "For toggle_list: whether it starts folded, its children hidden" },
+    formula: { type: "string", description: "For math_equation: the formula in TeX, without $ delimiters" },
+    source: {
+      type: "string",
+      description: "For diagram: Mermaid source (flowchart, sequenceDiagram, classDiagram, gantt, pie, mindmap, …)",
+    },
+    video: {
+      type: "object",
+      description: "For video: a YouTube or Vimeo video that plays in the page",
+      properties: { url: { type: "string" }, title: { type: "string" } },
+      required: ["url"],
+    },
+    link: {
+      type: "object",
+      description: "For link_preview: a card for a web page, with its title and picture",
+      properties: { url: { type: "string" } },
+      required: ["url"],
     },
     level: { type: "integer", minimum: 1, maximum: 6, description: "Heading level" },
     checked: { type: "boolean", description: "For todo_list" },
     children: {
       type: "array",
-      description: "Nested blocks (BlockSpec objects). Only list blocks take children.",
+      description: "Nested blocks (BlockSpec objects). Only list blocks take children; a toggle_list takes any.",
       items: { type: "object" },
     },
     rows: {
@@ -372,6 +392,20 @@ function insertSummary(nodes: NodeJSON[]): string {
         return `Added section${quoteOf(n)}`;
       case "image":
         return "Inserted image";
+      case "code":
+        return "Inserted code block";
+      case "callout":
+        return `Added callout${quoteOf(n)}`;
+      case "toggle_list":
+        return `Added toggle${quoteOf(n)}`;
+      case "video":
+        return "Inserted video";
+      case "link_preview":
+        return "Inserted link card";
+      case "math_equation":
+        return "Inserted formula";
+      case "diagram":
+        return "Inserted diagram";
       default:
         return `Added ${n.type.replace("_", " ")}${quoteOf(n)}`;
     }

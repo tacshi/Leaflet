@@ -59,6 +59,13 @@ func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 		top, bottom = 6, 6
 	case "bulleted_list", "numbered_list", "todo_list":
 		top, bottom = 2, 2
+	case "code":
+		font.Family, font.Size = "monospace", size*0.8
+		top, bottom = codeMargin+codeBar, codePad+codeMargin
+	case "callout":
+		top, bottom = calloutMargin+calloutPad, calloutPad+calloutMargin
+	case "toggle_list":
+		top, bottom = 2, 2
 	}
 	return
 }
@@ -67,10 +74,14 @@ func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 // box.
 func markerWidth(n *doc.Node) float32 {
 	switch n.Type {
-	case "bulleted_list", "numbered_list", "todo_list":
+	case "bulleted_list", "numbered_list", "todo_list", "toggle_list":
 		return 26
+	case "callout":
+		return 44
 	case "quote":
 		return 18
+	case "code":
+		return codePad
 	}
 	return 0
 }
@@ -78,6 +89,9 @@ func markerWidth(n *doc.Node) float32 {
 // spans styles a block's runs, with an input method's composition in
 // place.
 func (e *Editor) spans(n *doc.Node, pal *theme.Palette, font ui.Font) []ui.Span {
+	if n.Type == "code" {
+		return codeSpans(n.Delta().Plain(), n.Str("language"), font, pal)
+	}
 	d := n.Delta()
 	muted := n.Type == "todo_list" && n.Bool("checked")
 	var out []ui.Span
@@ -138,6 +152,12 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette, dark bool) *blockLayout
 	depth := e.depth(n.ID)
 	x := float32(depth)*indentStep + markerWidth(n)
 	width := max(e.width-x, 40)
+	switch n.Type {
+	case "code":
+		width = max(width-codePad, 40)
+	case "callout":
+		width = max(width-calloutPad, 40)
+	}
 	raw, _ := json.Marshal(n.Data)
 	key := n.Type + string(raw) + ftoa(width) + ftoa(font.Size) + e.Family
 	if dark {
@@ -221,7 +241,8 @@ func (e *Editor) copyBlocks() []*doc.Node {
 	var stack []open
 	for i := e.index(a.ID); i >= 0 && i <= e.index(b.ID) && i < len(us); i++ {
 		n := us[i].Clone()
-		if n.Type != "table" {
+		// A folded toggle takes its hidden children with it.
+		if n.Type != "table" && !collapsed(n) {
 			n.Children = nil
 		}
 		if n.IsText() {
@@ -305,6 +326,16 @@ func (e *Editor) copyText() string {
 		if n.ID == b.ID {
 			to = b.Off
 		}
+		if n.Type == "code" || n.Type == "callout" {
+			part := n.Clone()
+			part.SetDelta(n.Delta().Slice(from, to))
+			if n.Type == "code" {
+				lines = append(lines, doc.CodeMarkdown(part))
+			} else {
+				lines = append(lines, doc.CalloutMarkdown(part))
+			}
+			continue
+		}
 		text := n.Delta().Slice(from, to).ToMarkdown()
 		lines = append(lines, blockPrefix(n, e.depth(n.ID))+text)
 	}
@@ -327,13 +358,15 @@ func blockPrefix(n *doc.Node, depth int) string {
 		return ind + "- [ ] "
 	case "quote":
 		return "> "
+	case "toggle_list":
+		return ind + "▸ "
 	}
 	return ""
 }
 
 // parseLines reads pasted text as blocks: a line each, with markdown
-// block prefixes. List items indented under one nest in it, and lines of
-// a markdown table make a table.
+// block prefixes. List items indented under one nest in it, lines of a
+// markdown table make a table, and a fenced block a code block.
 func parseLines(text string) []*doc.Node {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	var out []*doc.Node
@@ -348,8 +381,68 @@ func parseLines(text string) []*doc.Node {
 			table = nil
 		}
 	}
+	// code is the fenced block open, and fence the backticks it opened
+	// with; its indent comes off each of its lines.
+	// A Mermaid fence makes a diagram, and lines between "$$" math: the
+	// block in its place in out, at codeAt, once it closes.
+	var code *doc.Node
+	var codeLines []string
+	fence, fenceIndent := "", ""
+	codeAt := 0
+	closeCode := func() {
+		text := strings.Join(codeLines, "\n")
+		switch {
+		case fence == "$$":
+			out[codeAt] = doc.MathNode(text)
+		case code.Str("language") == "mermaid":
+			out[codeAt] = doc.DiagramNode(text)
+		default:
+			code.SetDelta(doc.Delta{{Text: text}}.Compact())
+		}
+		code = nil
+	}
+	// callout is the GitHub alert being read: its lines go in it.
+	var callout *doc.Node
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimLeft(line, " \t")
+		if code != nil {
+			if fence == "$$" && strings.TrimSpace(trimmed) == "$$" || fence != "$$" && strings.HasPrefix(trimmed, fence) && strings.Trim(trimmed, "` ") == "" {
+				closeCode()
+				continue
+			}
+			codeLines = append(codeLines, strings.TrimPrefix(line, fenceIndent))
+			continue
+		}
+		if tone, ok := doc.AlertTone(trimmed); ok {
+			flushTable()
+			lists = nil
+			callout = newText("callout", nil)
+			callout.Set("tone", tone)
+			out = append(out, callout)
+			continue
+		}
+		if rest, ok := strings.CutPrefix(trimmed, ">"); ok && callout != nil {
+			d := callout.Delta()
+			if d.Len() > 0 {
+				d = d.Concat(doc.Delta{{Text: "\n"}})
+			}
+			callout.SetDelta(d.Concat(doc.FromMarkdown(strings.TrimPrefix(rest, " "))))
+			continue
+		}
+		callout = nil
+		if language, ok := doc.CodeFence(trimmed); ok || strings.TrimSpace(trimmed) == "$$" {
+			flushTable()
+			lists = nil
+			code, codeLines = doc.CodeNode("", language), nil
+			fenceIndent = line[:len(line)-len(trimmed)]
+			fence = trimmed[:len(trimmed)-len(strings.TrimLeft(trimmed, "`"))]
+			if !ok {
+				fence = "$$"
+			}
+			codeAt = len(out)
+			out = append(out, code)
+			continue
+		}
 		if strings.HasPrefix(trimmed, "|") {
 			lists = nil
 			if row := tableRow(trimmed); row != nil {
@@ -408,6 +501,10 @@ func parseLines(text string) []*doc.Node {
 		}
 	}
 	flushTable()
+	if code != nil {
+		// A fence left open runs to the end.
+		closeCode()
+	}
 	return out
 }
 
@@ -440,13 +537,37 @@ func isDigits(s string) bool {
 	return s != ""
 }
 
+// joins reports whether a pasted block's text joins the line it is pasted
+// on.
+func joins(n *doc.Node) bool { return n.IsText() && n.Type != "code" }
+
 // paste inserts text at the caret: a line inline, several as blocks. The
-// text Leaflet itself last copied pastes as the blocks it came from.
+// text Leaflet itself last copied pastes as the blocks it came from, and a
+// YouTube or Vimeo link pasted on an empty line as a video.
 func (e *Editor) paste(text string) {
 	if e.ReadOnly || text == "" {
 		return
 	}
 	text = strings.ReplaceAll(text, "\r\n", "\n")
+	if a, _ := e.ordered(); e.node(a.ID) != nil && e.node(a.ID).Type == "code" && (clip.blocks == nil || text != clip.text) {
+		// Into code, text goes as it is.
+		e.pushUndo(false)
+		e.coalescing = false
+		e.deleteSelection()
+		n := e.node(e.focus.ID)
+		n.SetDelta(doc.Delta{{Text: string([]rune(n.Delta().Plain())[:e.focus.Off]) + text + string([]rune(n.Delta().Plain())[e.focus.Off:])}})
+		e.invalidate(n.ID)
+		off := e.focus.Off + utf8.RuneCountInString(text)
+		e.Select(Pos{n.ID, off}, Pos{n.ID, off})
+		e.changed()
+		return
+	}
+	if n := e.node(e.focus.ID); n != nil && n.Type == "paragraph" && textLen(n) == 0 && e.Collapsed() && !e.inTable(n.ID) {
+		if v, err := doc.VideoNode(text, ""); err == nil {
+			e.InsertBlocks(v)
+			return
+		}
+	}
 	var blocks []*doc.Node
 	if e.inTable(e.focus.ID) {
 		// A cell holds one line: the lines join.
@@ -455,12 +576,22 @@ func (e *Editor) paste(text string) {
 		blocks = freshBlocks(clip.blocks)
 	}
 	if blocks == nil && !strings.Contains(text, "\n") {
+		// A web link pasted on selected text links it.
+		if a, b := e.ordered(); doc.WebURL(text) && a.ID == b.ID && a.Off < b.Off && e.node(a.ID).IsText() {
+			e.SetLink(strings.TrimSpace(text))
+			return
+		}
 		e.pushUndo(false)
 		e.coalescing = false
 		e.deleteSelection()
 		n := e.node(e.focus.ID)
 		if n != nil && n.IsText() {
-			n.SetDelta(n.Delta().Insert(e.focus.Off, text, n.Delta().AttrsAt(e.focus.Off)))
+			attrs := n.Delta().AttrsAt(e.focus.Off)
+			if doc.WebURL(text) {
+				// A web link pasted goes in as a link to itself.
+				attrs.Href = strings.TrimSpace(text)
+			}
+			n.SetDelta(n.Delta().Insert(e.focus.Off, text, attrs))
 			e.invalidate(n.ID)
 			off := e.focus.Off + utf8.RuneCountInString(text)
 			e.Select(Pos{n.ID, off}, Pos{n.ID, off})
@@ -485,9 +616,9 @@ func (e *Editor) paste(text string) {
 	d := n.Delta()
 	head, tail := d.Slice(0, e.focus.Off), d.Slice(e.focus.Off, d.Len())
 	first := blocks[0]
-	if !first.IsText() {
-		// A table, chart and the like cannot join a line: the blocks go
-		// before the caret's block, or after its text before the caret.
+	if !joins(first) {
+		// A table, chart, code and the like cannot join a line: the blocks
+		// go before the caret's block, or after its text before the caret.
 		if head.Len() == 0 {
 			for _, b := range blocks {
 				_ = e.Content.Insert(doc.Position{Before: n.ID}, b)
@@ -546,7 +677,7 @@ func (e *Editor) paste(text string) {
 	for len(last.Children) > 0 && last.Type != "table" {
 		last = last.Children[len(last.Children)-1]
 	}
-	if !last.IsText() {
+	if !joins(last) {
 		p := newText("paragraph", tail)
 		_ = e.Content.Insert(doc.Position{After: at}, p)
 		last = p

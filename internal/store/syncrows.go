@@ -81,10 +81,19 @@ func (s *Store) ClearLocalPath(id string) error {
 
 // PushedContent records what the server stored for a page: the content
 // this device now has, the base both agree on, and its time and revision.
-func (s *Store) PushedContent(pageID, content, plain, base string, remoteAt time.Time, revision int64) error {
-	_, err := s.db.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, base_content = ?, remote_updated_at = ?, remote_revision = ? WHERE page_id = ?`,
-		content, plain, base, remoteAt.UnixMilli(), revision, pageID)
-	return err
+// It stores them only while over is still the stored content, checked in
+// the statement that writes, and returns ErrContentChanged otherwise.
+func (s *Store) PushedContent(pageID, over, content, plain, base string, remoteAt time.Time, revision int64) error {
+	res, err := s.db.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, base_content = ?, remote_updated_at = ?, remote_revision = ?
+		WHERE page_id = ? AND content = ?`,
+		content, plain, base, remoteAt.UnixMilli(), revision, pageID, over)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return ErrContentChanged
+	}
+	return nil
 }
 
 // MembersOrNil returns a page's members, or nil.

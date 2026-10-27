@@ -443,16 +443,31 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	if len(saved) > 0 {
 		savedAt, savedRev = store.Time(saved[0]["updated_at"]), store.Int(saved[0], "revision")
 	}
-	// The user may have kept typing while this was in flight.
-	now, _ := s.st.ContentRow(pageID)
-	typedMeanwhile := now.Content != "" && now.Content != row.Content
+	// The user may have kept typing while this was in flight, or type while
+	// this merges: store the merge only over the content it merged.
+	var now store.ContentRow
 	next := merged
-	if typedMeanwhile {
-		next, _ = doc.Merge(local, doc.MustDecode(now.Content), merged)
+	for tries := 1; ; tries++ {
+		if now, err = s.st.ContentRow(pageID); err != nil {
+			break
+		}
+		next = merged
+		if now.Content != row.Content {
+			next, _ = doc.Merge(local, doc.MustDecode(now.Content), merged)
+		}
+		beforeStore(pageID)
+		err = s.st.PushedContent(pageID, now.Content, next.Encode(), next.PlainText(), merged.Encode(), savedAt, savedRev)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, store.ErrContentChanged) {
+			return false, err
+		}
+		if tries == 3 {
+			return false, errors.New("the page kept changing here while it synced")
+		}
 	}
-	if err := s.st.PushedContent(pageID, next.Encode(), next.PlainText(), merged.Encode(), savedAt, savedRev); err != nil {
-		return false, err
-	}
+	typedMeanwhile := now.Content != "" && now.Content != row.Content
 	current := now.Content
 	if current == "" {
 		current = row.Content
@@ -817,39 +832,53 @@ func (s *Service) RefreshContent(ctx context.Context, pageID string) (*doc.Conte
 	if err != nil {
 		return nil, err
 	}
-	local, localErr := s.st.ContentRow(pageID)
 	if remoteRow == nil {
 		return s.st.Content(pageID), nil
 	}
 	remoteAt := store.Time(remoteRow["updated_at"])
-	if localErr == nil && !behind(local, remoteRow) {
-		return doc.MustDecode(local.Content), nil
-	}
 	remoteContent := contentOf(remoteRow["content"])
-	next := remoteContent
-	if localErr == nil && s.st.HasPending("page_content", pageID) {
-		var base *doc.Content
-		if local.BaseContent != "" {
-			base = doc.MustDecode(local.BaseContent)
+	// The user or an agent may save while this merges: store the merge
+	// only over the content it merged, and merge again otherwise.
+	for range 3 {
+		local, localErr := s.st.ContentRow(pageID)
+		if localErr == nil && !behind(local, remoteRow) {
+			return doc.MustDecode(local.Content), nil
 		}
+		next := remoteContent
 		var conflicts []doc.Conflict
-		next, conflicts = doc.Merge(base, doc.MustDecode(local.Content), remoteContent)
+		if localErr == nil && s.st.HasPending("page_content", pageID) {
+			var base *doc.Content
+			if local.BaseContent != "" {
+				base = doc.MustDecode(local.BaseContent)
+			}
+			next, conflicts = doc.Merge(base, doc.MustDecode(local.Content), remoteContent)
+		}
+		beforeStore(pageID)
+		err := s.st.PutSyncedContentOver(pageID, local.Content, next, remoteContent.Encode(), remoteAt, store.Int(remoteRow, "revision"))
+		if errors.Is(err, store.ErrContentChanged) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
 		for _, c := range conflicts {
 			if err := s.st.AddConflict(pageID, c); err != nil {
 				return nil, err
 			}
 		}
-	}
-	if err := s.st.PutSyncedContent(pageID, next, remoteContent.Encode(), remoteAt, store.Int(remoteRow, "revision")); err != nil {
-		return nil, err
-	}
-	if localErr != nil || local.Content != next.Encode() {
-		if s.OnPageContent != nil {
-			s.OnPageContent(pageID)
+		if localErr != nil || local.Content != next.Encode() {
+			if s.OnPageContent != nil {
+				s.OnPageContent(pageID)
+			}
 		}
+		return next, nil
 	}
-	return next, nil
+	return nil, errors.New("the page kept changing here while it synced")
 }
+
+// beforeStore runs between merging a page's content and storing the merge;
+// tests save there, standing in for the user typing.
+var beforeStore = func(pageID string) {}
 
 // FlushPage pushes a page's pending changes right away, so a cloud agent
 // starts from what the user sees.

@@ -294,8 +294,10 @@ func (a *App) start() error {
 		MinHeight:     480,
 		StateKey:      "main",
 		TitleBarStyle: mygo.TitleBarHidden,
-		Vibrancy:      mygo.VibrancySidebar,
-		Content:       ui.View(a.view),
+		// Centred in the 46pt header rows, in line with their buttons.
+		TrafficLightPosition: &mygo.Point{X: 9, Y: 16},
+		Vibrancy:             mygo.VibrancySidebar,
+		Content:              ui.View(a.view),
 	})
 	a.startTray()
 	a.win.OnClose(func(e *mygo.CloseEvent) {

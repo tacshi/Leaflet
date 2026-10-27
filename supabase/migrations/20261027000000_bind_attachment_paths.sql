@@ -36,7 +36,8 @@ create policy recordings_objects_shared_read on storage.objects for select to au
   );
 
 -- files/{space_id}/{id}/{name}: only the space's owner writes its rows.
-drop policy files_objects_shared_read on storage.objects;
+-- Projects that applied init before the first release lack the policy.
+drop policy if exists files_objects_shared_read on storage.objects;
 create policy files_objects_shared_read on storage.objects for select to authenticated
   using (
     bucket_id = 'files'

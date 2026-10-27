@@ -7,6 +7,8 @@ The contract with the Go client is [`../docs/protocol.md`](../docs/protocol.md).
 supabase/
   config.toml
   migrations/20261025000000_init.sql   tables, RLS, RPCs, Vault helpers, buckets
+  migrations/20261027000000_bind_attachment_paths.sql   attachment paths bound to their rows
+  migrations/20261027120000_catch_up_init.sql           what init gained after it shipped
   functions/
     _shared/        cors, clients, OpenAI-compatible client, blocks, tools, prompt
     agent/          NDJSON agent worker (protocol §4)
@@ -14,6 +16,9 @@ supabase/
     stt/            Soniox temporary keys, Soniox key storage, file transcription
     account/        account deletion
 ```
+
+Each schema change is a new migration: `supabase db push` never runs one a
+project has applied again, so an edit to it reaches no existing project.
 
 ## Local development
 

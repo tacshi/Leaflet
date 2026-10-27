@@ -39,11 +39,11 @@ func (e *Editor) depth(id string) int {
 // style returns a text block's font and the room above and below it.
 func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 	size := e.Size
-	font = ui.Font{Family: e.Family, Size: size}
+	font = ui.Font{Family: e.Family, Size: size, LineHeight: e.LineHeight}
 	top, bottom = 3, 3
 	switch n.Type {
 	case "heading":
-		font.Weight = 650
+		font.Weight, font.LineHeight = 650, 0
 		switch n.Int("level", 1) {
 		case 1:
 			font.Size, top, bottom = size*1.75, 22, 6
@@ -60,7 +60,7 @@ func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 	case "bulleted_list", "numbered_list", "todo_list":
 		top, bottom = 2, 2
 	case "code":
-		font.Family, font.Size = "monospace", size*0.8
+		font.Family, font.Size, font.LineHeight = "monospace", size*0.8, 0
 		top, bottom = codeMargin+codeBar, codePad+codeMargin
 	case "callout":
 		top, bottom = calloutMargin+calloutPad, calloutPad+calloutMargin
@@ -166,7 +166,7 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette, dark bool) *blockLayout
 		width = max(width-calloutPad, 40)
 	}
 	raw, _ := json.Marshal(n.Data)
-	key := n.Type + string(raw) + ftoa(width) + ftoa(font.Size) + e.Family
+	key := n.Type + string(raw) + ftoa(width) + ftoa(font.Size) + ftoa(font.LineHeight) + e.Family
 	if dark {
 		key += "d"
 	}
@@ -177,7 +177,7 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette, dark bool) *blockLayout
 	tl := ui.ShapeRichText(spans, font, width)
 	_, h := tl.Size()
 	if h == 0 {
-		h = font.Size * 1.3
+		h = font.Size * max(font.LineHeight, 1.3)
 	}
 	l := &blockLayout{key: key, layout: tl, x: x, y: top, h: top + h + bottom, font: font}
 	e.layouts[n.ID] = l

@@ -207,8 +207,12 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 			}
 		}
 		if showPlaceholder {
-			p.RichText(ox, oy, r.W-l.x, ui.Span{Text: placeholder(n, only), Font: l.font.Family, Size: l.font.Size,
-				Weight: l.font.Weight, Italic: l.font.Italic, Color: pal.Placeholder})
+			// A span takes its font's own line height: it is centered on
+			// the block's first line, which may be taller.
+			hint := ui.Span{Text: placeholder(n, only), Font: l.font.Family, Size: l.font.Size,
+				Weight: l.font.Weight, Italic: l.font.Italic, Color: pal.Placeholder}
+			_, h := p.MeasureText(r.W-l.x, hint)
+			p.RichText(ox, oy+first.Y+(first.H-h)/2, r.W-l.x, hint)
 		}
 		p.TextLayout(l.layout, ox, oy, pal.Text)
 		if marked {

@@ -63,6 +63,9 @@ func (a *App) view(c *ui.Context) {
 		}
 	}
 	a.dialogs.view(c, a)
+	if a.settingsOpen {
+		a.settingsDialog(c)
+	}
 	a.toastView(c)
 }
 
@@ -106,9 +109,6 @@ func (a *App) main(c *ui.Context) {
 	case "todos":
 		a.todosView(c)
 		return
-	case "settings":
-		a.settingsView(c)
-		return
 	case "signin":
 		a.signInView(c)
 		return
@@ -147,7 +147,7 @@ func (a *App) shortcuts(c *ui.Context) {
 	c.OnShortcut(ui.Cmd, ui.KeyBackslash, a.toggleSidebar)
 	c.OnShortcut(ui.Cmd, ui.KeyN, func() { a.newPage("", "") })
 	c.OnShortcut(ui.Cmd, ui.KeyJ, func() { a.togglePanel(0) })
-	c.OnShortcut(ui.Cmd, ui.KeyComma, func() { a.navigate(Route{Kind: "settings", Section: "account"}) })
+	c.OnShortcut(ui.Cmd, ui.KeyComma, a.toggleSettings)
 }
 
 // homeView shows when no page is open.

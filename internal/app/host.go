@@ -229,7 +229,7 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 		switch {
 		case item.Key == "connect":
 			ed.RemoveTrigger(t)
-			a.navigate(Route{Kind: "settings", Section: "providers"})
+			a.openSettings("providers")
 		case strings.HasPrefix(item.Key, "agent:"):
 			ed.RemoveTrigger(t)
 			choice := store.ModelChoice{ProviderID: strings.TrimPrefix(item.Key, "agent:")}

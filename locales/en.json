@@ -3993,6 +3993,10 @@
   "@welcomeTogetherComments": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
+  "welcomeComment": "This is a comment. It sits beside the paragraph it is about, and replies go under it. Write a reply below to try it, then choose Resolve when you are done.",
+  "@welcomeComment": {
+    "description": "The welcome guide page, made once on first run: a comment the guide comes with, on its paragraph about comments, from Leaflet (plain text)."
+  },
   "welcomeTogetherHistory": "**Page history** in the **…** menu keeps a version every ten minutes of editing and before each agent run. See what changed since one, inline or side by side, name the current one, or restore it.",
   "@welcomeTogetherHistory": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
@@ -4068,6 +4072,16 @@
       "parent": {
         "type": "String",
         "example": "Welcome to Leaflet"
+      }
+    }
+  },
+  "welcomeSubTemplate": "This page is also kept as a template: open a new blank page and choose **{title}** under **Templates** to start next week's notes from it. **Save as template** in a page's **…** menu does the same for any page.",
+  "@welcomeSubTemplate": {
+    "description": "The guide's example subpage (Weekly team sync): a tip under its first paragraph (Markdown); title is the subpage's title.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Weekly team sync"
       }
     }
   },

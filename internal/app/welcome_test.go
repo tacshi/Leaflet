@@ -63,6 +63,22 @@ func TestWelcomePage(t *testing.T) {
 	if got := linkedPage(c); got != sub {
 		t.Errorf("the guide links to %q, want the subpage %q", got, sub)
 	}
+	// A comment from Leaflet on the paragraph about comments.
+	threads, _ := st.Threads(welcome)
+	if len(threads) != 1 || threads[0].Root.AuthorKind != "agent" || threads[0].Root.AuthorName != "Leaflet" {
+		t.Fatalf("threads %+v", threads)
+	}
+	if b := c.Find(threads[0].Root.BlockID); b == nil || !strings.HasPrefix(b.Delta().Plain(), "Select text and choose Comment") {
+		t.Errorf("the comment is on %v", b)
+	}
+	// The subpage's meeting is a template too, which starts at its agenda.
+	templates, _ := st.Templates()
+	if len(templates) != 1 || templates[0].Title != "Weekly team sync" {
+		t.Fatalf("templates %+v", templates)
+	}
+	if first := st.Content(templates[0].ID).Children[0]; first.Delta().Plain() != "Agenda" {
+		t.Errorf("the template starts with %q", first.Delta().Plain())
+	}
 	// A second start makes no more pages.
 	if err := a.createWelcome(); err != nil {
 		t.Fatal(err)
@@ -77,7 +93,7 @@ func TestWelcomePage(t *testing.T) {
 // is left in English but the keys of shortcuts.
 func TestWelcomeTranslated(t *testing.T) {
 	build := func(m locales.Messages) []*doc.Node {
-		blocks, err := welcomeBlocks(m, store.File{ID: "image", LocalPath: "/dawn.jpg"}, "sub")
+		blocks, _, err := welcomeBlocks(m, store.File{ID: "image", LocalPath: "/dawn.jpg"}, "sub")
 		if err != nil {
 			t.Fatal(err)
 		}

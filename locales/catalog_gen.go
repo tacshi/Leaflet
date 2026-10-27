@@ -11565,6 +11565,22 @@ func (msgs Messages) WelcomeTogetherComments() string {
 	return Catalog.Format(msgs.locale, "welcomeTogetherComments", nil)
 }
 
+// WelcomeComment says "This is a comment. It sits beside the paragraph it is about, and replies go under it. Write a reply below to try it, …"
+// in the language the app shows.
+//
+// The welcome guide page, made once on first run: a comment the guide comes
+// with, on its paragraph about comments, from Leaflet (plain text).
+func WelcomeComment() string { return In(i18n.Locale()).WelcomeComment() }
+
+// WelcomeComment says "This is a comment. It sits beside the paragraph it is about, and replies go under it. Write a reply below to try it, …"
+// in the language of msgs.
+//
+// The welcome guide page, made once on first run: a comment the guide comes
+// with, on its paragraph about comments, from Leaflet (plain text).
+func (msgs Messages) WelcomeComment() string {
+	return Catalog.Format(msgs.locale, "welcomeComment", nil)
+}
+
 // WelcomeTogetherHistory says "**Page history** in the **…** menu keeps a version every ten minutes of editing and before each agent run. See what…"
 // in the language the app shows.
 //
@@ -11845,6 +11861,22 @@ func WelcomeSubIntro(parent string) string { return In(i18n.Locale()).WelcomeSub
 // (Markdown); parent is the guide's title.
 func (msgs Messages) WelcomeSubIntro(parent string) string {
 	return Catalog.Format(msgs.locale, "welcomeSubIntro", map[string]any{"parent": parent})
+}
+
+// WelcomeSubTemplate says "This page is also kept as a template: open a new blank page and choose **{title}** under **Templates** to start next …"
+// in the language the app shows.
+//
+// The guide's example subpage (Weekly team sync): a tip under its first
+// paragraph (Markdown); title is the subpage's title.
+func WelcomeSubTemplate(title string) string { return In(i18n.Locale()).WelcomeSubTemplate(title) }
+
+// WelcomeSubTemplate says "This page is also kept as a template: open a new blank page and choose **{title}** under **Templates** to start next …"
+// in the language of msgs.
+//
+// The guide's example subpage (Weekly team sync): a tip under its first
+// paragraph (Markdown); title is the subpage's title.
+func (msgs Messages) WelcomeSubTemplate(title string) string {
+	return Catalog.Format(msgs.locale, "welcomeSubTemplate", map[string]any{"title": title})
 }
 
 // WelcomeSubAgenda says "Agenda"

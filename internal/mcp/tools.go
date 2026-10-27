@@ -228,13 +228,12 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		if len(x.Ops) == 0 {
 			return out, nil
 		}
-		if now, err := st.ContentRow(p.ID); err != nil || now.Content != row.Content {
+		if _, _, err := st.SaveContentOver(p.ID, row.Content, content); errors.Is(err, store.ErrContentChanged) {
 			continue
-		}
-		if err := t.snapshot(p.ID, before); err != nil {
+		} else if err != nil {
 			return nil, err
 		}
-		if _, _, err := st.SaveContent(p.ID, content); err != nil {
+		if err := t.snapshot(p.ID, before); err != nil {
 			return nil, err
 		}
 		return out, nil

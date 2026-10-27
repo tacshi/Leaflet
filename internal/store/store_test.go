@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 	gosync "sync"
@@ -502,5 +503,35 @@ func TestAgentRunHistoryGoesUpWithoutItsJob(t *testing.T) {
 		if e.Entity == "page_history" && strings.Contains(e.Payload, "ai_job_id") {
 			t.Errorf("queued %s", e.Payload)
 		}
+	}
+}
+
+func TestSaveContentOver(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read, _ := s.ContentRow(p.ID)
+	agent := doc.MustDecode(read.Content)
+	agent.Children[0].SetDelta(doc.Delta{{Text: "From the agent"}})
+	// Someone else saves after the agent read the page.
+	human := doc.MustDecode(read.Content)
+	human.Children[0].SetDelta(doc.Delta{{Text: "Typed"}})
+	if _, _, err := s.SaveContent(p.ID, human); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.SaveContentOver(p.ID, read.Content, agent); !errors.Is(err, ErrContentChanged) {
+		t.Fatalf("saved over a change: %v", err)
+	}
+	if got := s.Content(p.ID).PlainText(); !strings.Contains(got, "Typed") {
+		t.Errorf("content %q", got)
+	}
+	now, _ := s.ContentRow(p.ID)
+	if _, changed, err := s.SaveContentOver(p.ID, now.Content, agent); err != nil || !changed {
+		t.Fatalf("save %v %v", changed, err)
+	}
+	if got := s.Content(p.ID).PlainText(); !strings.Contains(got, "From the agent") {
+		t.Errorf("content %q", got)
 	}
 }

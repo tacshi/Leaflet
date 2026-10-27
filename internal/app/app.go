@@ -101,9 +101,11 @@ type App struct {
 	downloads map[string]bool
 	embeds    map[string]*mygo.WebView
 	// embedSrc is the page each embed's web view last loaded, and
-	// embedSizes how tall its content said it is, once it has drawn.
-	embedSrc   map[string]string
-	embedSizes map[string]embedSize
+	// embedSizes how tall its content said it is, once it has drawn;
+	// embedZoomed the diagrams zoomed in.
+	embedSrc    map[string]string
+	embedSizes  map[string]embedSize
+	embedZoomed map[string]bool
 	// videos are the players of the open page's videos that were played;
 	// videoInfo what each video's site said about it, once asked
 	// (videoAsked), by provider and ID.
@@ -164,6 +166,9 @@ type pageState struct {
 	scroll   ui.ScrollState
 	viewTop  float32
 	scrollTo string
+	// fullDiagram is the diagram block filling the page's body, if one
+	// is.
+	fullDiagram string
 	// outline is the Outline tab's list of headings, outlineRow its row
 	// chosen, and outlineSeen the headings it has opened once.
 	outline     ui.OutlineState[string]
@@ -174,7 +179,7 @@ type pageState struct {
 // Run starts the app.
 func Run() {
 	a := &App{embeds: map[string]*mygo.WebView{}, embedSrc: map[string]string{}, embedSizes: map[string]embedSize{},
-		videos: map[string]*mygo.WebView{}, videoInfo: map[string]videoInfo{}, videoAsked: map[string]bool{},
+		embedZoomed: map[string]bool{}, videos: map[string]*mygo.WebView{}, videoInfo: map[string]videoInfo{}, videoAsked: map[string]bool{},
 		linkInfo: map[string]linkInfo{}, linkAsked: map[string]bool{}}
 	theme.RegisterFonts()
 	recording.Register()
@@ -666,6 +671,7 @@ func (a *App) closePage() {
 		delete(a.embeds, id)
 	}
 	clear(a.embedSrc)
+	clear(a.embedZoomed)
 	a.sync.SetOpen(a.page.id, false)
 	a.page = nil
 	a.dropVideos()

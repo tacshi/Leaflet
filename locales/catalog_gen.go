@@ -5013,6 +5013,76 @@ func (msgs Messages) RenderedDiagramHelp() string {
 	return Catalog.Format(msgs.locale, "renderedDiagramHelp", nil)
 }
 
+// RenderedZoomIn says "Zoom in"
+// in the language the app shows.
+//
+// Button over a diagram that zooms into it.
+func RenderedZoomIn() string { return In(i18n.Locale()).RenderedZoomIn() }
+
+// RenderedZoomIn says "Zoom in"
+// in the language of msgs.
+//
+// Button over a diagram that zooms into it.
+func (msgs Messages) RenderedZoomIn() string {
+	return Catalog.Format(msgs.locale, "renderedZoomIn", nil)
+}
+
+// RenderedZoomOut says "Zoom out"
+// in the language the app shows.
+//
+// Button over a diagram that zooms out of it.
+func RenderedZoomOut() string { return In(i18n.Locale()).RenderedZoomOut() }
+
+// RenderedZoomOut says "Zoom out"
+// in the language of msgs.
+//
+// Button over a diagram that zooms out of it.
+func (msgs Messages) RenderedZoomOut() string {
+	return Catalog.Format(msgs.locale, "renderedZoomOut", nil)
+}
+
+// RenderedZoomFit says "Fit diagram"
+// in the language the app shows.
+//
+// Button over a zoomed-in diagram that shows all of it again.
+func RenderedZoomFit() string { return In(i18n.Locale()).RenderedZoomFit() }
+
+// RenderedZoomFit says "Fit diagram"
+// in the language of msgs.
+//
+// Button over a zoomed-in diagram that shows all of it again.
+func (msgs Messages) RenderedZoomFit() string {
+	return Catalog.Format(msgs.locale, "renderedZoomFit", nil)
+}
+
+// RenderedFullScreen says "Full screen"
+// in the language the app shows.
+//
+// Button over a diagram that fills the page with it.
+func RenderedFullScreen() string { return In(i18n.Locale()).RenderedFullScreen() }
+
+// RenderedFullScreen says "Full screen"
+// in the language of msgs.
+//
+// Button over a diagram that fills the page with it.
+func (msgs Messages) RenderedFullScreen() string {
+	return Catalog.Format(msgs.locale, "renderedFullScreen", nil)
+}
+
+// RenderedExitFullScreen says "Exit full screen"
+// in the language the app shows.
+//
+// Button over a diagram filling the page that brings the page back.
+func RenderedExitFullScreen() string { return In(i18n.Locale()).RenderedExitFullScreen() }
+
+// RenderedExitFullScreen says "Exit full screen"
+// in the language of msgs.
+//
+// Button over a diagram filling the page that brings the page back.
+func (msgs Messages) RenderedExitFullScreen() string {
+	return Catalog.Format(msgs.locale, "renderedExitFullScreen", nil)
+}
+
 // VideoNotALink says "Not a YouTube or Vimeo link: {url}"
 // in the language the app shows.
 //

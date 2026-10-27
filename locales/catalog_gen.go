@@ -9125,16 +9125,18 @@ func (msgs Messages) SettingsWorkOffline() string {
 	return Catalog.Format(msgs.locale, "settingsWorkOffline", nil)
 }
 
-// SettingsWorkOfflineDesc says "Keep changes on this device until you turn this off"
+// SettingsWorkOfflineDesc says "Pause syncing and cloud services, even with a connection"
 // in the language the app shows.
 //
-// Settings › Sync and storage: a switch.
+// Settings › Sync and storage: under Work offline. It pauses sync, cloud
+// agents and cloud speech to text.
 func SettingsWorkOfflineDesc() string { return In(i18n.Locale()).SettingsWorkOfflineDesc() }
 
-// SettingsWorkOfflineDesc says "Keep changes on this device until you turn this off"
+// SettingsWorkOfflineDesc says "Pause syncing and cloud services, even with a connection"
 // in the language of msgs.
 //
-// Settings › Sync and storage: a switch.
+// Settings › Sync and storage: under Work offline. It pauses sync, cloud
+// agents and cloud speech to text.
 func (msgs Messages) SettingsWorkOfflineDesc() string {
 	return Catalog.Format(msgs.locale, "settingsWorkOfflineDesc", nil)
 }

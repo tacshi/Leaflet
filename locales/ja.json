@@ -635,7 +635,7 @@
   "settingsChangesWaiting": "{count, plural, other {# 件の変更が同期待ち}}",
   "settingsSyncNow": "今すぐ同期",
   "settingsWorkOffline": "オフラインで作業",
-  "settingsWorkOfflineDesc": "オフにするまで、変更をこのデバイスに保持します",
+  "settingsWorkOfflineDesc": "接続中でも、同期とクラウドサービスを一時停止します",
   "settingsAllPagesOffline": "すべてのページをこのデバイスに保持",
   "settingsAllPagesOfflineDesc": "オフの場合は、マークしたページと開いたページのみ",
   "settingsKeepAudio": "録音の音声をこのデバイスに保持",

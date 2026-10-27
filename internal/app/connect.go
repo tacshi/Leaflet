@@ -236,7 +236,7 @@ func readEntry(id string, env agentEnv) (*serverEntry, error) {
 		return codexEntry(string(raw)), nil
 	}
 	path, keys := jsonConfig(id, env)
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- an AI app's own settings file, at the place it keeps it.
 	if err != nil {
 		return nil, ignoreMissing(err)
 	}
@@ -283,7 +283,7 @@ func jsonConfig(id string, env agentEnv) (path string, keys []string) {
 		return filepath.Join(env.home, ".cursor", "mcp.json"), []string{"mcpServers"}
 	case "opencode":
 		path = openCodeConfig(env)
-		raw, _ := os.ReadFile(path)
+		raw, _ := os.ReadFile(path) // #nosec G304 -- OpenCode's own settings file.
 		return path, openCodeKeys(raw)
 	}
 	return "", nil
@@ -348,7 +348,7 @@ func nested(raw []byte, keys []string) (map[string]json.RawMessage, error) {
 // the file stays as it was, comments, order and spacing too; the server
 // is written in the spacing of those around it.
 func editServers(path string, keys []string, server any) error {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- an AI app's own settings file, at the place it keeps it.
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -476,7 +476,7 @@ func codexConfig(env agentEnv) string {
 // is want after it (nil: gone). A spelling of the file fn cannot change so
 // is left as it is, and said.
 func editCodex(path string, want *serverEntry, fn func(string) (string, error)) error {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) // #nosec G304 -- Codex's own settings file.
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
@@ -643,11 +643,12 @@ func isLeafletKey(key []string) bool {
 // writeAtomic replaces a file whole, so an app reading it never finds it
 // half written, and keeps its permissions.
 func writeAtomic(path string, data []byte) error {
-	mode := fs.FileMode(0o644)
+	// A new file only its owner reads, as settings may hold keys.
+	mode := fs.FileMode(0o600)
 	if fi, err := os.Stat(path); err == nil {
 		mode = fi.Mode().Perm()
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
@@ -743,7 +744,7 @@ func hasBundle(bundles []string, home string) bool {
 func runCLI(cli string, env agentEnv, args ...string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, cli, args...)
+	cmd := exec.CommandContext(ctx, cli, args...) // #nosec G204 -- an AI app's own command-line tool, found where it installs, with arguments Leaflet writes.
 	cmd.Env = append(os.Environ(), "PATH="+strings.Join([]string{filepath.Dir(cli), env.path}, string(filepath.ListSeparator)))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -769,7 +770,7 @@ var loginPath = sync.OnceValue(func() string {
 	defer cancel()
 	// Interactive too, as version managers set PATH in .zshrc; the
 	// marker keeps what the shell prints as it starts out of it.
-	out, err := exec.CommandContext(ctx, sh, "-lic", `printf '\n__LEAFLET_PATH__%s\n' "$PATH"`).Output()
+	out, err := exec.CommandContext(ctx, sh, "-lic", `printf '\n__LEAFLET_PATH__%s\n' "$PATH"`).Output() // #nosec G204 -- the user's own login shell, from $SHELL.
 	if err == nil {
 		for _, line := range strings.Split(string(out), "\n") {
 			if p, ok := strings.CutPrefix(line, "__LEAFLET_PATH__"); ok {

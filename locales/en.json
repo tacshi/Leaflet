@@ -3295,6 +3295,100 @@
   "@externalAddToOther": {
     "description": "Settings › External agents › Other."
   },
+  "externalLooking": "Looking for AI apps on this computer…",
+  "@externalLooking": {
+    "description": "Settings › External agents: while the AI apps on this computer are looked for."
+  },
+  "externalNoneFound": "No AI apps found on this computer. You can still set one up by hand.",
+  "@externalNoneFound": {
+    "description": "Settings › External agents: when none of the AI apps Leaflet connects is installed."
+  },
+  "externalConnect": "Connect",
+  "@externalConnect": {
+    "description": "Settings › External agents: the button that adds Leaflet to an AI app's settings."
+  },
+  "externalUpdate": "Update",
+  "@externalUpdate": {
+    "description": "Settings › External agents: the button that points an AI app at this copy of Leaflet when it has another one."
+  },
+  "externalDisconnect": "Disconnect",
+  "@externalDisconnect": {
+    "description": "Settings › External agents: the button that removes Leaflet from an AI app's settings."
+  },
+  "externalWorking": "Working…",
+  "@externalWorking": {
+    "description": "Settings › External agents: the button while an AI app is connected or disconnected."
+  },
+  "externalLastUsed": "Connected · last used {when}",
+  "@externalLastUsed": {
+    "description": "Settings › External agents: an AI app that has used Leaflet; when is a relative time such as “5 min ago”.",
+    "placeholders": {
+      "when": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+  "externalAdded": "Added. Restart {app} to start using it.",
+  "@externalAdded": {
+    "description": "Settings › External agents: an AI app Leaflet was added to that has not used it yet.",
+    "placeholders": {
+      "app": {
+        "type": "String",
+        "example": "Codex"
+      }
+    }
+  },
+  "externalFinishIn": "Confirm in {app} to finish.",
+  "@externalFinishIn": {
+    "description": "Settings › External agents: after Leaflet asked an AI app (Cursor, VS Code) to add it, until the app has.",
+    "placeholders": {
+      "app": {
+        "type": "String",
+        "example": "Codex"
+      }
+    }
+  },
+  "externalOtherCopy": "Set up for another copy of Leaflet",
+  "@externalOtherCopy": {
+    "description": "Settings › External agents: an AI app whose settings point at a Leaflet elsewhere, or at other pages."
+  },
+  "externalMoveFirst": "Move Leaflet to the Applications folder first, so AI apps can keep finding it.",
+  "@externalMoveFirst": {
+    "description": "Settings › External agents: when Leaflet runs from a disk image or from where macOS put a download."
+  },
+  "externalByHand": "Set up by hand",
+  "@externalByHand": {
+    "description": "Settings › External agents: the disclosure over the setup to copy into an AI app's settings."
+  },
+  "externalConnectFailed": "Could not connect {app}: {error}",
+  "@externalConnectFailed": {
+    "description": "Settings › External agents: a toast when connecting an AI app failed.",
+    "placeholders": {
+      "app": {
+        "type": "String",
+        "example": "Codex"
+      },
+      "error": {
+        "type": "String",
+        "example": "permission denied"
+      }
+    }
+  },
+  "externalDisconnectFailed": "Could not disconnect {app}: {error}",
+  "@externalDisconnectFailed": {
+    "description": "Settings › External agents: a toast when disconnecting an AI app failed.",
+    "placeholders": {
+      "app": {
+        "type": "String",
+        "example": "Codex"
+      },
+      "error": {
+        "type": "String",
+        "example": "permission denied"
+      }
+    }
+  },
   "signinTitle": "Sign in to Leaflet",
   "@signinTitle": {
     "description": "The sign-in page's title."

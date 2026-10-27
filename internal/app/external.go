@@ -6,27 +6,113 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/mcp"
 	"leaflet/internal/theme"
 	"leaflet/locales"
 )
 
-// External agents: how to connect AI apps on this computer to
-// `leaflet mcp` (internal/mcp), which is this app's own executable.
+// External agents: the AI apps on this computer connected to `leaflet
+// mcp` (internal/mcp), which is this app's own executable, with a click
+// (connect.go), or by hand.
 
 var externalClients = []struct{ id, label string }{
 	{"claude", "Claude Code"}, {"codex", "Codex"}, {"cursor", "Cursor"}, {"vscode", "VS Code"}, {"other", "Other"},
 }
 
-// external is the client the section shows the setup of.
-var external struct{ client int }
+// external is the section's state: the apps found on this computer,
+// what is being done to one, and the client the setup by hand shows.
+var external struct {
+	agents   []agentStatus
+	checked  time.Time
+	checking bool
+	// busy is the app being connected or disconnected; waiting is the app
+	// asked by its install link, until its settings have Leaflet.
+	busy, waiting string
+	byHand        bool
+	client        int
+}
 
 func (a *App) externalSettings(c *ui.Context) {
 	pal := theme.Of(c)
 	heading(c, locales.SettingsSectionExternal(), locales.ExternalDesc())
-	where, snippet := agentSetup(externalClients[external.client].id, executable(), a.st.Dir)
+	// Looked for again as the section shows, and as agents write, which
+	// wakes the app, so a connection shows once an app makes it.
+	if !external.checking && time.Since(external.checked) > 3*time.Second {
+		a.checkAgents()
+	}
+	exe, dir := executable(), a.st.Dir
+	moved := translocated(exe)
+	if moved {
+		notice(c, "warn", "triangle-alert", locales.ExternalMoveFirst(), nil)
+	}
+	var found []agentStatus
+	for _, s := range external.agents {
+		if s.installed {
+			found = append(found, s)
+		}
+	}
+	switch {
+	case external.checked.IsZero():
+		ui.Text(c, locales.ExternalLooking()).FontSize(13).TextColor(pal.TextMuted)
+	case len(found) == 0:
+		ui.Text(c, locales.ExternalNoneFound()).FontSize(13).TextColor(pal.TextMuted)
+	default:
+		card(c, "agents", func() {
+			for i, s := range found {
+				a.agentRow(c, s, exe, dir, moved, i == 0)
+			}
+		})
+	}
+	ui.Collapsible(c.Key("by-hand"), locales.ExternalByHand(), &external.byHand, func() {
+		a.setupByHand(c, exe, dir)
+	})
+}
+
+// agentRow is an app found: how it stands with Leaflet, and what to do.
+func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, first bool) {
+	id := s.app.id
+	var desc string
+	switch {
+	case s.entry == nil && external.waiting == id:
+		desc = locales.ExternalFinishIn(s.app.label)
+	case s.entry == nil:
+	case !s.current(exe, dir):
+		desc = locales.ExternalOtherCopy()
+	case !s.seen.IsZero():
+		desc = locales.ExternalLastUsed(humanTime(s.seen))
+	default:
+		desc = locales.ExternalAdded(s.app.label)
+	}
+	settingRow(c, id, s.app.label, desc, first, func() {
+		switch {
+		case external.busy == id:
+			button(c, "busy", "", locales.ExternalWorking()).Disabled(true)
+		case s.entry != nil && s.current(exe, dir):
+			if button(c, "disconnect", "", locales.ExternalDisconnect()).Disabled(external.busy != "").Clicked() {
+				a.disconnectAgent(s)
+			}
+		default:
+			text := locales.ExternalConnect()
+			if s.entry != nil {
+				text = locales.ExternalUpdate()
+			}
+			if primary(c, "connect", "", text).Disabled(moved || external.busy != "").Clicked() {
+				a.connectAgent(s, exe, dir)
+			}
+		}
+	})
+}
+
+// setupByHand is each client's setup to copy, for an app not found or
+// not listed.
+func (a *App) setupByHand(c *ui.Context, exe, dir string) {
+	pal := theme.Of(c)
+	where, snippet := agentSetup(externalClients[external.client].id, exe, dir)
 	card(c, "connect", func() {
 		ui.Row(c).Padding(12, 16).FillWidth().Children(func() {
 			labels := make([]string, len(externalClients))
@@ -50,6 +136,75 @@ func (a *App) externalSettings(c *ui.Context) {
 				})
 			})
 		})
+	})
+}
+
+// checkAgents looks for the apps again, away from the window's thread.
+func (a *App) checkAgents() {
+	external.checking = true
+	go func() {
+		found := detectAgents(currentAgentEnv(), a.st.ValuesWithPrefix(mcp.SeenPrefix))
+		a.update(func() {
+			external.agents, external.checked, external.checking = found, time.Now(), false
+			for _, s := range found {
+				if s.app.id == external.waiting && s.entry != nil {
+					external.waiting = ""
+				}
+			}
+		})
+	}()
+}
+
+// connectAgent connects an app: by its install link, which asks in the
+// app, so the section waits to see its settings change; or here.
+func (a *App) connectAgent(s agentStatus, exe, dir string) {
+	if link := installLink(s.app.id, exe, dir); link != "" {
+		external.waiting = s.app.id
+		if err := mygo.Shell.OpenExternal(link); err != nil {
+			external.waiting = ""
+			a.toast(locales.ExternalConnectFailed(s.app.label, err.Error()))
+			return
+		}
+		go a.awaitAgent(s.app.id)
+		return
+	}
+	a.changeAgent(s, func() error { return connectAgent(s.app.id, s.cli, currentAgentEnv(), exe, dir) }, locales.ExternalConnectFailed)
+}
+
+func (a *App) disconnectAgent(s agentStatus) {
+	a.changeAgent(s, func() error { return disconnectAgent(s.app.id, s.cli, currentAgentEnv()) }, locales.ExternalDisconnectFailed)
+}
+
+// changeAgent runs fn on an app's settings, then looks at them again.
+func (a *App) changeAgent(s agentStatus, fn func() error, failed func(app, err string) string) {
+	external.busy = s.app.id
+	go func() {
+		err := fn()
+		a.update(func() {
+			external.busy = ""
+			if err != nil {
+				a.toast(failed(s.app.label, err.Error()))
+			}
+			a.checkAgents()
+		})
+	}()
+}
+
+// awaitAgent watches an app's settings for a few minutes after its
+// install link opened, as the window may not redraw meanwhile.
+func (a *App) awaitAgent(id string) {
+	env := currentAgentEnv()
+	for range 90 {
+		time.Sleep(2 * time.Second)
+		if e, _ := readEntry(id, env); e != nil {
+			a.update(a.checkAgents)
+			return
+		}
+	}
+	a.update(func() {
+		if external.waiting == id {
+			external.waiting = ""
+		}
 	})
 }
 

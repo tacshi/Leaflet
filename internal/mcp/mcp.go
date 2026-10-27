@@ -13,7 +13,9 @@ import (
 	"io"
 	"log"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"leaflet/internal/store"
@@ -48,7 +50,28 @@ type Server struct {
 	version string
 	// agent is the client's name, which signs its blocks and history.
 	agent string
-	pages pageTools
+	// client is the name the client gave in its clientInfo, and seen when
+	// the server last wrote down that it served it.
+	client string
+	seen   time.Time
+	pages  pageTools
+}
+
+// SeenPrefix starts the key-value settings that say when a client was
+// last served: SeenPrefix + its clientInfo name, lower case, is the Unix
+// time. Settings › External agents shows from them which apps work.
+const SeenPrefix = "mcp_seen:"
+
+// markSeen writes down that the client is served now, at most once a
+// minute: each write wakes the app, which watches the database.
+func (s *Server) markSeen() {
+	if s.client == "" || time.Since(s.seen) < time.Minute {
+		return
+	}
+	s.seen = time.Now()
+	if err := s.st.SetValue(SeenPrefix+strings.ToLower(s.client), strconv.FormatInt(s.seen.Unix(), 10)); err != nil {
+		log.Printf("mcp: %v", err)
+	}
 }
 
 // NewServer serves the pages in st.
@@ -121,6 +144,8 @@ func (s *Server) handle(req request) (any, *rpcError) {
 		if name := agentName(p.ClientInfo.Title, p.ClientInfo.Name); name != "" {
 			s.agent = name
 		}
+		s.client = strings.TrimSpace(p.ClientInfo.Name)
+		s.markSeen()
 		version := versions[0]
 		if slices.Contains(versions, p.ProtocolVersion) {
 			version = p.ProtocolVersion
@@ -149,6 +174,7 @@ func (s *Server) handle(req request) (any, *rpcError) {
 		if p.Arguments == nil {
 			p.Arguments = map[string]any{}
 		}
+		s.markSeen()
 		out := s.pages.call(p.Name, p.Arguments)
 		_, failed := out["error"]
 		return map[string]any{

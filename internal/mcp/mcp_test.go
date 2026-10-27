@@ -64,7 +64,8 @@ func result(t *testing.T, answer map[string]any) (map[string]any, bool) {
 const initialize = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"claude-code","version":"2.0"}}}`
 
 func TestHandshake(t *testing.T) {
-	s := NewServer(newStore(t), "0.1.0")
+	st := newStore(t)
+	s := NewServer(st, "0.1.0")
 	got := session(t, s, initialize,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
 		`{"jsonrpc":"2.0","id":2,"method":"tools/list"}`,
@@ -76,6 +77,9 @@ func TestHandshake(t *testing.T) {
 	}
 	if len(got) != 4 {
 		t.Errorf("answered %d messages, want 4 (no answer to a notification)", len(got))
+	}
+	if seen := st.ValuesWithPrefix(SeenPrefix); seen["claude-code"] == "" {
+		t.Errorf("seen %v, want claude-code", seen)
 	}
 	names := map[string]map[string]any{}
 	for _, tool := range got[2]["result"].(map[string]any)["tools"].([]any) {

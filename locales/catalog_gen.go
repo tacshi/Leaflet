@@ -9213,6 +9213,232 @@ func (msgs Messages) ExternalAddToOther() string {
 	return Catalog.Format(msgs.locale, "externalAddToOther", nil)
 }
 
+// ExternalLooking says "Looking for AI apps on this computer…"
+// in the language the app shows.
+//
+// Settings › External agents: while the AI apps on this computer are
+// looked for.
+func ExternalLooking() string { return In(i18n.Locale()).ExternalLooking() }
+
+// ExternalLooking says "Looking for AI apps on this computer…"
+// in the language of msgs.
+//
+// Settings › External agents: while the AI apps on this computer are
+// looked for.
+func (msgs Messages) ExternalLooking() string {
+	return Catalog.Format(msgs.locale, "externalLooking", nil)
+}
+
+// ExternalNoneFound says "No AI apps found on this computer. You can still set one up by hand."
+// in the language the app shows.
+//
+// Settings › External agents: when none of the AI apps Leaflet connects
+// is installed.
+func ExternalNoneFound() string { return In(i18n.Locale()).ExternalNoneFound() }
+
+// ExternalNoneFound says "No AI apps found on this computer. You can still set one up by hand."
+// in the language of msgs.
+//
+// Settings › External agents: when none of the AI apps Leaflet connects
+// is installed.
+func (msgs Messages) ExternalNoneFound() string {
+	return Catalog.Format(msgs.locale, "externalNoneFound", nil)
+}
+
+// ExternalConnect says "Connect"
+// in the language the app shows.
+//
+// Settings › External agents: the button that adds Leaflet to an AI app's
+// settings.
+func ExternalConnect() string { return In(i18n.Locale()).ExternalConnect() }
+
+// ExternalConnect says "Connect"
+// in the language of msgs.
+//
+// Settings › External agents: the button that adds Leaflet to an AI app's
+// settings.
+func (msgs Messages) ExternalConnect() string {
+	return Catalog.Format(msgs.locale, "externalConnect", nil)
+}
+
+// ExternalUpdate says "Update"
+// in the language the app shows.
+//
+// Settings › External agents: the button that points an AI app at this
+// copy of Leaflet when it has another one.
+func ExternalUpdate() string { return In(i18n.Locale()).ExternalUpdate() }
+
+// ExternalUpdate says "Update"
+// in the language of msgs.
+//
+// Settings › External agents: the button that points an AI app at this
+// copy of Leaflet when it has another one.
+func (msgs Messages) ExternalUpdate() string {
+	return Catalog.Format(msgs.locale, "externalUpdate", nil)
+}
+
+// ExternalDisconnect says "Disconnect"
+// in the language the app shows.
+//
+// Settings › External agents: the button that removes Leaflet from an AI
+// app's settings.
+func ExternalDisconnect() string { return In(i18n.Locale()).ExternalDisconnect() }
+
+// ExternalDisconnect says "Disconnect"
+// in the language of msgs.
+//
+// Settings › External agents: the button that removes Leaflet from an AI
+// app's settings.
+func (msgs Messages) ExternalDisconnect() string {
+	return Catalog.Format(msgs.locale, "externalDisconnect", nil)
+}
+
+// ExternalWorking says "Working…"
+// in the language the app shows.
+//
+// Settings › External agents: the button while an AI app is connected or
+// disconnected.
+func ExternalWorking() string { return In(i18n.Locale()).ExternalWorking() }
+
+// ExternalWorking says "Working…"
+// in the language of msgs.
+//
+// Settings › External agents: the button while an AI app is connected or
+// disconnected.
+func (msgs Messages) ExternalWorking() string {
+	return Catalog.Format(msgs.locale, "externalWorking", nil)
+}
+
+// ExternalLastUsed says "Connected · last used {when}"
+// in the language the app shows.
+//
+// Settings › External agents: an AI app that has used Leaflet; when is a
+// relative time such as “5 min ago”.
+func ExternalLastUsed(when string) string { return In(i18n.Locale()).ExternalLastUsed(when) }
+
+// ExternalLastUsed says "Connected · last used {when}"
+// in the language of msgs.
+//
+// Settings › External agents: an AI app that has used Leaflet; when is a
+// relative time such as “5 min ago”.
+func (msgs Messages) ExternalLastUsed(when string) string {
+	return Catalog.Format(msgs.locale, "externalLastUsed", map[string]any{"when": when})
+}
+
+// ExternalAdded says "Added. Restart {app} to start using it."
+// in the language the app shows.
+//
+// Settings › External agents: an AI app Leaflet was added to that has not
+// used it yet.
+func ExternalAdded(app string) string { return In(i18n.Locale()).ExternalAdded(app) }
+
+// ExternalAdded says "Added. Restart {app} to start using it."
+// in the language of msgs.
+//
+// Settings › External agents: an AI app Leaflet was added to that has not
+// used it yet.
+func (msgs Messages) ExternalAdded(app string) string {
+	return Catalog.Format(msgs.locale, "externalAdded", map[string]any{"app": app})
+}
+
+// ExternalFinishIn says "Confirm in {app} to finish."
+// in the language the app shows.
+//
+// Settings › External agents: after Leaflet asked an AI app (Cursor, VS
+// Code) to add it, until the app has.
+func ExternalFinishIn(app string) string { return In(i18n.Locale()).ExternalFinishIn(app) }
+
+// ExternalFinishIn says "Confirm in {app} to finish."
+// in the language of msgs.
+//
+// Settings › External agents: after Leaflet asked an AI app (Cursor, VS
+// Code) to add it, until the app has.
+func (msgs Messages) ExternalFinishIn(app string) string {
+	return Catalog.Format(msgs.locale, "externalFinishIn", map[string]any{"app": app})
+}
+
+// ExternalOtherCopy says "Set up for another copy of Leaflet"
+// in the language the app shows.
+//
+// Settings › External agents: an AI app whose settings point at a Leaflet
+// elsewhere, or at other pages.
+func ExternalOtherCopy() string { return In(i18n.Locale()).ExternalOtherCopy() }
+
+// ExternalOtherCopy says "Set up for another copy of Leaflet"
+// in the language of msgs.
+//
+// Settings › External agents: an AI app whose settings point at a Leaflet
+// elsewhere, or at other pages.
+func (msgs Messages) ExternalOtherCopy() string {
+	return Catalog.Format(msgs.locale, "externalOtherCopy", nil)
+}
+
+// ExternalMoveFirst says "Move Leaflet to the Applications folder first, so AI apps can keep finding it."
+// in the language the app shows.
+//
+// Settings › External agents: when Leaflet runs from a disk image or from
+// where macOS put a download.
+func ExternalMoveFirst() string { return In(i18n.Locale()).ExternalMoveFirst() }
+
+// ExternalMoveFirst says "Move Leaflet to the Applications folder first, so AI apps can keep finding it."
+// in the language of msgs.
+//
+// Settings › External agents: when Leaflet runs from a disk image or from
+// where macOS put a download.
+func (msgs Messages) ExternalMoveFirst() string {
+	return Catalog.Format(msgs.locale, "externalMoveFirst", nil)
+}
+
+// ExternalByHand says "Set up by hand"
+// in the language the app shows.
+//
+// Settings › External agents: the disclosure over the setup to copy into
+// an AI app's settings.
+func ExternalByHand() string { return In(i18n.Locale()).ExternalByHand() }
+
+// ExternalByHand says "Set up by hand"
+// in the language of msgs.
+//
+// Settings › External agents: the disclosure over the setup to copy into
+// an AI app's settings.
+func (msgs Messages) ExternalByHand() string {
+	return Catalog.Format(msgs.locale, "externalByHand", nil)
+}
+
+// ExternalConnectFailed says "Could not connect {app}: {error}"
+// in the language the app shows.
+//
+// Settings › External agents: a toast when connecting an AI app failed.
+func ExternalConnectFailed(app string, error string) string {
+	return In(i18n.Locale()).ExternalConnectFailed(app, error)
+}
+
+// ExternalConnectFailed says "Could not connect {app}: {error}"
+// in the language of msgs.
+//
+// Settings › External agents: a toast when connecting an AI app failed.
+func (msgs Messages) ExternalConnectFailed(app string, error string) string {
+	return Catalog.Format(msgs.locale, "externalConnectFailed", map[string]any{"app": app, "error": error})
+}
+
+// ExternalDisconnectFailed says "Could not disconnect {app}: {error}"
+// in the language the app shows.
+//
+// Settings › External agents: a toast when disconnecting an AI app
+// failed.
+func ExternalDisconnectFailed(app string, error string) string {
+	return In(i18n.Locale()).ExternalDisconnectFailed(app, error)
+}
+
+// ExternalDisconnectFailed says "Could not disconnect {app}: {error}"
+// in the language of msgs.
+//
+// Settings › External agents: a toast when disconnecting an AI app
+// failed.
+func (msgs Messages) ExternalDisconnectFailed(app string, error string) string {
+	return Catalog.Format(msgs.locale, "externalDisconnectFailed", map[string]any{"app": app, "error": error})
+}
+
 // SigninTitle says "Sign in to Leaflet"
 // in the language the app shows.
 //

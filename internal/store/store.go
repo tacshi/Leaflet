@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -278,6 +279,24 @@ func (s *Store) SetValue(key, value string) error {
 		s.Notify("key_values", "")
 	}
 	return err
+}
+
+// ValuesWithPrefix is the key-value settings whose keys start with
+// prefix, by their keys less it.
+func (s *Store) ValuesWithPrefix(prefix string) map[string]string {
+	out := map[string]string{}
+	rows, err := s.db.Query(`SELECT key, value FROM key_values WHERE substr(key, 1, ?) = ?`, len(prefix), prefix)
+	if err != nil {
+		return out
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var k, v string
+		if rows.Scan(&k, &v) == nil {
+			out[strings.TrimPrefix(k, prefix)] = v
+		}
+	}
+	return out
 }
 
 // DeleteValue removes a key-value setting.

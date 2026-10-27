@@ -7,6 +7,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // A folded heading hides its section: the blocks after it among its
@@ -156,9 +157,9 @@ func (e *Editor) headingGutter(c *ui.Context, n *doc.Node, top float32, hovered 
 	}
 	// The link button shows a check for a moment once it copied.
 	copied := e.copied == n.ID && time.Since(e.copiedAt) < 1500*time.Millisecond
-	icon, label := "link", "Copy link to heading"
+	icon, label := "link", locales.EditorCopyHeadingLink()
 	if copied {
-		icon, label = "check", "Copied"
+		icon, label = "check", locales.CommonCopied()
 	}
 	if button("link:"+n.ID, icon, label, -gutterWidth, copied) {
 		e.services.WriteClipboard(e.Host.BlockLink(n.ID))
@@ -173,9 +174,9 @@ func (e *Editor) headingGutter(c *ui.Context, n *doc.Node, top float32, hovered 
 		return
 	}
 	folded := foldedHeading(n)
-	icon, label = "chevron-down", "Fold section"
+	icon, label = "chevron-down", locales.EditorFoldSection()
 	if folded {
-		icon, label = "chevron-right", "Unfold section"
+		icon, label = "chevron-right", locales.EditorUnfoldSection()
 	}
 	if button("fold:"+n.ID, icon, label, -26, folded) {
 		e.ToggleFold(n.ID)

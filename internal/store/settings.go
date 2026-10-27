@@ -42,9 +42,12 @@ func DecodeModelChoice(raw string) (ModelChoice, bool) {
 type Settings struct {
 	Theme string `json:"theme"` // system | light | sepia | dark
 	// Accent is a name of theme.Accents, "system" or "" for Indigo.
-	Accent       string  `json:"accent,omitempty"`
-	TextSize     float64 `json:"text_size"`
-	DefaultModel string  `json:"default_model,omitempty"`
+	Accent   string  `json:"accent,omitempty"`
+	TextSize float64 `json:"text_size"`
+	// Language is the tag of the language the app shows, as App.SetLocale
+	// keeps it, or "" to follow the system's.
+	Language     string `json:"language,omitempty"`
+	DefaultModel string `json:"default_model,omitempty"`
 	// LocalWhenOffline switches to a local model when offline.
 	LocalWhenOffline     bool `json:"local_when_offline"`
 	AgentsReadOtherPages bool `json:"agents_read_other_pages"`

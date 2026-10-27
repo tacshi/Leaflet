@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // External agents: how to connect AI apps on this computer to
@@ -24,14 +25,16 @@ var external struct{ client int }
 
 func (a *App) externalSettings(c *ui.Context) {
 	pal := theme.Of(c)
-	heading(c, "External agents", "AI apps on this computer, such as Claude Code, Codex and Cursor, can find, read and edit your pages. "+
-		"What they change shows here as they change it, and each page keeps a version from before their edits in its history.")
+	heading(c, locales.SettingsSectionExternal(), locales.ExternalDesc())
 	where, snippet := agentSetup(externalClients[external.client].id, executable(), a.st.Dir)
 	card(c, "connect", func() {
 		ui.Row(c).Padding(12, 16).FillWidth().Children(func() {
 			labels := make([]string, len(externalClients))
 			for i, cl := range externalClients {
 				labels[i] = cl.label
+				if cl.id == "other" {
+					labels[i] = locales.ExternalClientOther()
+				}
 			}
 			ui.Segmented(c.Key("client"), &external.client, labels...)
 		})
@@ -40,9 +43,9 @@ func (a *App) externalSettings(c *ui.Context) {
 			ui.Row(c).FillWidth().Padding(8, 8, 8, 12).Gap(8).Radius(8).Border(1, pal.Divider).Background(pal.Ground).AlignItems(ui.Start).Children(func() {
 				ui.Text(c, snippet).Font("monospace").FontSize(12).TextColor(pal.Text).Wrap().Selectable().Grow(1).MinWidth(0)
 				tools(c, func() {
-					if iconButton(c, "copy", "copy", "Copy").Clicked() {
+					if iconButton(c, "copy", "copy", locales.CommonCopy()).Clicked() {
 						c.WriteClipboard(snippet)
-						c.Toast("Copied")
+						c.Toast(locales.CommonCopied())
 					}
 				})
 			})
@@ -72,14 +75,14 @@ func agentSetup(client, exe, dir string) (where, snippet string) {
       "env": { "LEAFLET_DATA_DIR": ` + jsonString(dir) + ` }`
 	switch client {
 	case "claude":
-		return "Run in a terminal:", "claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=" + shellQuote(dir) + " -- " + shellQuote(exe) + " mcp"
+		return locales.ExternalRunInTerminal(), "claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=" + shellQuote(dir) + " -- " + shellQuote(exe) + " mcp"
 	case "codex":
-		return "Add to ~/.codex/config.toml:", `[mcp_servers.leaflet]
+		return locales.ExternalAddTo("~/.codex/config.toml"), `[mcp_servers.leaflet]
 command = ` + jsonString(exe) + `
 args = ["mcp"]
 env = { LEAFLET_DATA_DIR = ` + jsonString(dir) + ` }`
 	case "cursor":
-		return "Add to ~/.cursor/mcp.json:", `{
+		return locales.ExternalAddTo("~/.cursor/mcp.json"), `{
   "mcpServers": {
     "leaflet": {
       ` + server + `
@@ -87,7 +90,7 @@ env = { LEAFLET_DATA_DIR = ` + jsonString(dir) + ` }`
   }
 }`
 	case "vscode":
-		return "Add to your user mcp.json (MCP: Open User Configuration):", `{
+		return locales.ExternalAddToVSCode(), `{
   "servers": {
     "leaflet": {
       "type": "stdio",
@@ -96,7 +99,7 @@ env = { LEAFLET_DATA_DIR = ` + jsonString(dir) + ` }`
   }
 }`
 	}
-	return "For Claude Desktop (claude_desktop_config.json) and other apps that read an mcpServers JSON:", `{
+	return locales.ExternalAddToOther(), `{
   "mcpServers": {
     "leaflet": {
       ` + server + `

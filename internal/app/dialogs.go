@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +17,7 @@ import (
 	"leaflet/internal/editor"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 type inlinePrompt struct {
@@ -161,7 +162,7 @@ func (a *App) searchDialog(c *ui.Context) {
 			// MyGo's SearchField would fit, but its element is its frame:
 			// AutoFocus and the arrows reach that, not its input.
 			ui.Icon(c, theme.Icon("search")).FontSize(17).TextColor(pal.TextMuted)
-			in := ui.TextInputBase(c.Key("q"), &d.query).Placeholder("Search pages, templates, recordings and comments").FontSize(16).Grow(1).AutoFocus()
+			in := ui.TextInputBase(c.Key("q"), &d.query).Placeholder(locales.DialogSearchPlaceholder()).FontSize(16).Grow(1).AutoFocus()
 			if in.Changed() {
 				d.hits, _ = a.st.Search(d.query, 30)
 				d.hitIndex = 0
@@ -182,7 +183,7 @@ func (a *App) searchDialog(c *ui.Context) {
 			ui.Text(c, "esc").FontSize(11).TextColor(pal.TextMuted).Padding(2, 6).Radius(4).Border(1, pal.Divider)
 		})
 		if d.query == "" && len(d.hits) > 0 {
-			ui.Box(c).Padding(6, 6, 0).Children(func() { label(c, "Recent") })
+			ui.Box(c).Padding(6, 6, 0).Children(func() { label(c, locales.DialogSearchRecent()) })
 		}
 		if len(d.hits) > 0 {
 			// MyGo's list: its row chosen, which the field's keys move, a
@@ -214,8 +215,8 @@ func (a *App) searchDialog(c *ui.Context) {
 		ui.Box(c).Children(func() {
 			if d.query != "" && len(d.hits) == 0 {
 				ui.Column(c).Padding(24).Gap(10).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "Nothing matches “"+d.query+"”").TextColor(pal.TextMuted)
-					if a.page != nil && a.hub.Available() && button(c, "ask", "sparkles", "Ask an agent instead").Clicked() {
+					ui.Text(c, locales.DialogSearchNoMatch(d.query)).TextColor(pal.TextMuted)
+					if a.page != nil && a.hub.Available() && button(c, "ask", "sparkles", locales.DialogSearchAskAgent()).Clicked() {
 						q := d.query
 						d.searchOpen = false
 						a.panelOpen, a.panelTab = true, 0
@@ -262,14 +263,14 @@ func (d *dialogs) openRenameFolder(f *store.Folder) {
 
 func (a *App) folderDialog(c *ui.Context) {
 	d := &a.dialogs
-	title := "New folder"
+	title := locales.DialogFolderNew()
 	if d.folder != nil {
-		title = "Rename folder"
+		title = locales.DialogFolderRename()
 	}
 	dialog(c, &d.folderOpen, 380, func() {
-		dialogHeader(c, title, "Folders group pages and files in your space.", &d.folderOpen)
+		dialogHeader(c, title, locales.DialogFolderSubtitle(), &d.folderOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(14).Children(func() {
-			in := field(c, "name", &d.folderName, "Folder name").AutoFocus()
+			in := field(c, "name", &d.folderName, locales.DialogFolderName()).AutoFocus()
 			if d.folderSelect && in.Focused() {
 				d.folderSelect = false
 				in.SetTextSelection(0, utf8.RuneCountInString(d.folderName))
@@ -285,7 +286,7 @@ func (a *App) folderDialog(c *ui.Context) {
 					}
 				} else {
 					if err := a.st.RenameFolder(*d.folder, name); err != nil {
-						a.toast("Could not rename: " + err.Error())
+						a.toast(locales.DialogFolderRenameFailed(err.Error()))
 					}
 				}
 				d.folderOpen = false
@@ -294,12 +295,12 @@ func (a *App) folderDialog(c *ui.Context) {
 				save()
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if button(c, "cancel", "", "Cancel").Clicked() {
+				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					d.folderOpen = false
 				}
-				label := "Create"
+				label := locales.DialogFolderCreate()
 				if d.folder != nil {
-					label = "Rename"
+					label = locales.CommonRename()
 				}
 				if primary(c, "save", "", label).Clicked() {
 					save()
@@ -319,9 +320,9 @@ func (a *App) moveDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
 	dialog(c, &d.moveOpen, 440, func() {
-		dialogHeader(c, "Move “"+a.pageTitleOf(d.movePage)+"”", "Choose where it goes.", &d.moveOpen)
+		dialogHeader(c, locales.DialogMoveTitle(a.pageTitleOf(d.movePage)), locales.DialogMoveSubtitle(), &d.moveOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(10).Children(func() {
-			field(c, "q", &d.moveQuery, "Search pages").AutoFocus()
+			field(c, "q", &d.moveQuery, locales.DialogMoveSearch()).AutoFocus()
 			ui.Scroll(c).MaxHeight(320).Children(func() {
 				target := func(key, icon, title, parent, folder string) {
 					row := ui.ButtonBase(c.Key(key)).Padding(7, 10).Gap(10).Radius(7).AlignItems(ui.Center).Justify(ui.Start).FillWidth()
@@ -347,7 +348,7 @@ func (a *App) moveDialog(c *ui.Context) {
 				}
 				q := strings.ToLower(d.moveQuery)
 				if q == "" {
-					target("top", "file-text", "Top level of My space", "", "")
+					target("top", "file-text", locales.DialogMoveTopLevel(), "", "")
 					for _, f := range a.folders {
 						target("folder:"+f.ID, "folder", f.Name, "", f.ID)
 					}
@@ -382,7 +383,17 @@ func historyLabel(h store.HistoryEntry) string {
 	if h.Label != "" {
 		return h.Label
 	}
-	return map[string]string{"agent_run": "Before an agent run", "autosave": "Autosave", "restore": "Before a restore", "conflict": "Conflict"}[h.Reason]
+	switch h.Reason {
+	case "agent_run":
+		return locales.DialogHistoryAgentRun()
+	case "autosave":
+		return locales.DialogHistoryAutosave()
+	case "restore":
+		return locales.DialogHistoryBeforeRestore()
+	case "conflict":
+		return locales.DialogHistoryConflict()
+	}
+	return ""
 }
 
 // nameVersion keeps the page as it is now as a version with a name.
@@ -396,7 +407,7 @@ func (a *App) nameVersion(name string) {
 		return
 	}
 	if err := a.st.AddHistory(d.historyPage, c, "manual", "", strings.TrimSpace(name)); err != nil {
-		a.toast("Could not keep the version: " + err.Error())
+		a.toast(locales.DialogHistoryKeepFailed(err.Error()))
 		return
 	}
 	d.history, _ = a.st.History(d.historyPage)
@@ -407,17 +418,17 @@ func (a *App) historyDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
 	dialog(c, &d.historyOpen, 860, func() {
-		dialogHeader(c, "Page history", a.pageTitleOf(d.historyPage), &d.historyOpen)
+		dialogHeader(c, locales.DialogHistoryTitle(), a.pageTitleOf(d.historyPage), &d.historyOpen)
 		ui.Row(c).Height(500).AlignItems(ui.Stretch).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
 			ui.Column(c).Width(250).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Children(func() {
 				ui.Column(c).Padding(8, 8, 4).Children(func() {
 					if !d.naming {
-						if ghost(c, "name-version", "bookmark", "Name the current version").Justify(ui.Start).FillWidth().Clicked() {
+						if ghost(c, "name-version", "bookmark", locales.DialogHistoryNameVersion()).Justify(ui.Start).FillWidth().Clicked() {
 							d.naming = true
 						}
 						return
 					}
-					in := ui.TextInput(c.Key("version-name"), &d.versionName).Placeholder("Name, as “Sent to legal”").AutoFocus()
+					in := ui.TextInput(c.Key("version-name"), &d.versionName).Placeholder(locales.DialogHistoryNamePlaceholder()).AutoFocus()
 					if in.Submitted() {
 						a.nameVersion(d.versionName)
 					}
@@ -427,7 +438,7 @@ func (a *App) historyDialog(c *ui.Context) {
 				})
 				ui.Scroll(c).Grow(1).Padding(0, 6, 6).Children(func() {
 					if len(d.history) == 0 {
-						ui.Text(c, "No earlier versions yet. Leaflet keeps one every ten minutes of editing and before each agent run.").
+						ui.Text(c, locales.DialogHistoryEmpty()).
 							FontSize(12.5).TextColor(pal.TextMuted).Padding(8, 10)
 					}
 					for i, h := range d.history {
@@ -440,7 +451,7 @@ func (a *App) historyDialog(c *ui.Context) {
 						named := h.Reason == "manual"
 						row.Children(func() {
 							ui.Column(c).Gap(2).Grow(1).Children(func() {
-								ui.Text(c, h.CreatedAt.Format("Jan 2, 15:04")).FontSize(13.5).FontWeight(550).TextColor(pal.Text)
+								ui.Text(c, locales.DialogHistoryWhen(h.CreatedAt)).FontSize(13.5).FontWeight(550).TextColor(pal.Text)
 								l := ui.Text(c, historyLabel(h)).FontSize(12).TextColor(pal.TextMuted).MaxLines(2)
 								if named {
 									l.TextColor(pal.AccentText).FontWeight(600)
@@ -463,12 +474,12 @@ func (a *App) historyDialog(c *ui.Context) {
 				h := d.history[min(d.historyPick, len(d.history)-1)]
 				content := doc.MustDecode(h.Content)
 				ui.Row(c).Padding(10, 16).Gap(10).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
-					ui.Segmented(c.Key("history-view"), &d.historyView, "This version", "Changes since")
+					ui.Segmented(c.Key("history-view"), &d.historyView, locales.DialogHistoryThisVersion(), locales.DialogHistoryChangesSince())
 					ui.Spacer(c)
 					if d.historyView == 1 {
 						a.historyStats(c, h, content)
 						tools(c, func() {
-							side := ui.Toggle(c.Key("side-by-side"), &d.sideBySide, "").Label("Side by side").Tooltip("Side by side")
+							side := ui.Toggle(c.Key("side-by-side"), &d.sideBySide, "").Label(locales.DialogHistorySideBySide()).Tooltip(locales.DialogHistorySideBySide())
 							side.Children(func() { ui.Icon(c, theme.Icon("columns-2")).FontSize(16) })
 						})
 					}
@@ -481,10 +492,10 @@ func (a *App) historyDialog(c *ui.Context) {
 					})
 				}
 				ui.Row(c).Padding(12, 16).Justify(ui.End).Gap(8).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
-					if button(c, "close", "", "Close").Clicked() {
+					if button(c, "close", "", locales.CommonClose()).Clicked() {
 						d.historyOpen = false
 					}
-					if primary(c, "restore", "history", "Restore this version").Disabled(!a.canEdit(d.historyPage)).Clicked() {
+					if primary(c, "restore", "history", locales.DialogHistoryRestore()).Disabled(!a.canEdit(d.historyPage)).Clicked() {
 						a.restoreVersion(d.historyPage, content)
 						d.historyOpen = false
 					}
@@ -528,7 +539,7 @@ func (a *App) historyStats(c *ui.Context, h store.HistoryEntry, content *doc.Con
 	ui.Row(c).Gap(8).Children(func() {
 		ui.Textf(c, "+%d", added).FontSize(12.5).FontWeight(600).TextColor(pal.OkText)
 		ui.Textf(c, "−%d", deleted).FontSize(12.5).FontWeight(600).TextColor(pal.DangerText)
-		ui.Text(c, plural(added+deleted, "line", "lines")).FontSize(12.5).TextColor(pal.TextMuted)
+		ui.Text(c, locales.DialogHistoryLines(added+deleted)).FontSize(12.5).TextColor(pal.TextMuted)
 	})
 }
 
@@ -540,7 +551,7 @@ func (a *App) historyChanges(c *ui.Context, h store.HistoryEntry, content *doc.C
 	diff := a.historyDiff(h, content)
 	if added, deleted := diff.Stats(); added == 0 && deleted == 0 {
 		ui.Column(c).Grow(1).Center().Children(func() {
-			ui.Text(c, "No changes since this version").TextColor(pal.TextMuted)
+			ui.Text(c, locales.DialogHistoryNoChanges()).TextColor(pal.TextMuted)
 		})
 		return
 	}
@@ -556,8 +567,8 @@ func (a *App) restoreVersion(pageID string, c *doc.Content) {
 		a.savePage()
 	}
 	if cur := a.st.Content(pageID); cur != nil {
-		if err := a.st.AddHistory(pageID, cur, "restore", "", "Before restoring "+time.Now().Format("Jan 2, 15:04")); err != nil {
-			a.toast("Could not restore: " + err.Error())
+		if err := a.st.AddHistory(pageID, cur, "restore", "", locales.DialogHistoryBeforeRestoring(time.Now())); err != nil {
+			a.toast(locales.DialogHistoryRestoreFailed(err.Error()))
 			return
 		}
 	}
@@ -575,10 +586,10 @@ func (a *App) restoreVersion(pageID string, c *doc.Content) {
 			ed.Select(ed.Caret(), ed.Caret())
 		}
 	} else if _, _, err := a.st.SaveContent(pageID, c); err != nil {
-		a.toast("Could not restore: " + err.Error())
+		a.toast(locales.DialogHistoryRestoreFailed(err.Error()))
 		return
 	}
-	a.toast("Restored the earlier version")
+	a.toast(locales.DialogHistoryRestored())
 }
 
 // Share -----------------------------------------------------------------
@@ -600,27 +611,27 @@ func (a *App) shareDialog(c *ui.Context) {
 	d := &a.dialogs
 	p := a.pageByID(d.sharePage)
 	dialog(c, &d.shareOpen, 480, func() {
-		dialogHeader(c, "Share “"+a.pageTitleOf(d.sharePage)+"”", "People you add can open this page and its subpages.", &d.shareOpen)
+		dialogHeader(c, locales.DialogShareTitle(a.pageTitleOf(d.sharePage)), locales.DialogShareSubtitle(), &d.shareOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(14).Children(func() {
 			switch {
 			case !a.backend.Configured():
-				notice(c, "info", "info", "This build runs on this device only. Sharing needs a Leaflet server.", nil)
+				notice(c, "info", "info", locales.DialogShareLocalOnly(), nil)
 				return
 			case !a.session.SignedIn:
-				notice(c, "info", "info", "Sign in to share pages with other people.", func() {
-					if primary(c, "signin", "", "Sign in").Clicked() {
+				notice(c, "info", "info", locales.DialogShareSignIn(), func() {
+					if primary(c, "signin", "", locales.CommonSignIn()).Clicked() {
 						d.shareOpen = false
 						a.navigate(Route{Kind: "signin"})
 					}
 				})
 				return
 			case p != nil && a.isShared(*p):
-				notice(c, "info", "info", "Only the owner of this space can change who it is shared with.", nil)
+				notice(c, "info", "info", locales.DialogShareOwnerOnly(), nil)
 			default:
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					in := growField(c, "email", &d.shareEmail, "Name or email")
+					in := growField(c, "email", &d.shareEmail, locales.DialogShareInvitee())
 					selectBox(c, "role", &d.shareRole, []string{"editor", "viewer"}, func(s string) string {
-						return map[string]string{"editor": "Can edit", "viewer": "Can view"}[s]
+						return shareRoleName(s)
 					}, 116)
 					invite := func() {
 						email := strings.TrimSpace(d.shareEmail)
@@ -650,7 +661,7 @@ func (a *App) shareDialog(c *ui.Context) {
 					if in.Submitted() {
 						invite()
 					}
-					if primary(c, "invite", "", "Invite").Disabled(d.shareBusy).Clicked() {
+					if primary(c, "invite", "", locales.DialogShareInvite()).Disabled(d.shareBusy).Clicked() {
 						invite()
 					}
 				})
@@ -658,12 +669,12 @@ func (a *App) shareDialog(c *ui.Context) {
 					ui.Text(c, d.shareError).FontSize(12.5).TextColor(pal.DangerText)
 				}
 			}
-			label(c, "People with access")
+			label(c, locales.DialogSharePeople())
 			ui.Column(c).Gap(2).Children(func() {
 				ui.Row(c).Padding(6, 0).Gap(10).AlignItems(ui.Center).Children(func() {
 					avatar(c, a.session.DisplayName, 28, false)
-					ui.Text(c, a.session.DisplayName+" (you)").Grow(1).TextColor(pal.Text)
-					ui.Text(c, "Owner").FontSize(12.5).TextColor(pal.TextMuted)
+					ui.Text(c, locales.DialogShareYou(a.session.DisplayName)).Grow(1).TextColor(pal.Text)
+					ui.Text(c, locales.CommonOwner()).FontSize(12.5).TextColor(pal.TextMuted)
 				})
 				for _, m := range d.shareMember {
 					if m.UserID == a.session.UserID {
@@ -677,10 +688,10 @@ func (a *App) shareDialog(c *ui.Context) {
 								ui.Text(c, m.Email).FontSize(12).TextColor(pal.TextMuted)
 							}
 						})
-						ui.Text(c, map[string]string{"editor": "Can edit", "viewer": "Can view", "owner": "Owner"}[m.Role]).FontSize(12.5).TextColor(pal.TextMuted)
+						ui.Text(c, shareRoleName(m.Role)).FontSize(12.5).TextColor(pal.TextMuted)
 						if p != nil && !a.isShared(*p) && m.Role != "owner" {
 							remove := false
-							tools(c, func() { remove = iconButton(c, "remove", "x", "Remove").Clicked() })
+							tools(c, func() { remove = iconButton(c, "remove", "x", locales.CommonRemove()).Clicked() })
 							if remove {
 								page, uid := d.sharePage, m.UserID
 								go func() {
@@ -699,13 +710,26 @@ func (a *App) shareDialog(c *ui.Context) {
 				}
 			})
 			ui.Row(c).Gap(8).Children(func() {
-				if button(c, "copy", "link", "Copy link").Clicked() {
+				if button(c, "copy", "link", locales.DialogShareCopyLink()).Clicked() {
 					c.WriteClipboard(doc.PageLink(d.sharePage))
-					c.Toast("Link copied")
+					c.Toast(locales.DialogShareLinkCopied())
 				}
 			})
 		})
 	})
+}
+
+// shareRoleName says a role of a person a page is shared with.
+func shareRoleName(role string) string {
+	switch role {
+	case "editor":
+		return locales.DialogShareCanEdit()
+	case "viewer":
+		return locales.DialogShareCanView()
+	case "owner":
+		return locales.CommonOwner()
+	}
+	return ""
 }
 
 // Charts ----------------------------------------------------------------
@@ -727,7 +751,7 @@ func (d *dialogs) openChart(id string, ed *editor.Editor) {
 	}
 	// One row per label: label, then a value per series.
 	var b strings.Builder
-	b.WriteString("label")
+	b.WriteString(locales.DialogChartLabelColumn())
 	for _, s := range series {
 		b.WriteString(", " + s.Name)
 	}
@@ -747,7 +771,7 @@ func (d *dialogs) openChart(id string, ed *editor.Editor) {
 func parseChartCSV(csv string) (labels []any, series []any, err error) {
 	lines := strings.Split(strings.TrimSpace(csv), "\n")
 	if len(lines) < 2 {
-		return nil, nil, fmt.Errorf("Add a header row and at least one row of values.") //nolint:staticcheck // shown to people as a sentence.
+		return nil, nil, errors.New(locales.DialogChartNeedRows())
 	}
 	split := func(s string) []string {
 		parts := strings.Split(s, ",")
@@ -758,7 +782,7 @@ func parseChartCSV(csv string) (labels []any, series []any, err error) {
 	}
 	header := split(lines[0])
 	if len(header) < 2 {
-		return nil, nil, fmt.Errorf("The header needs a label column and at least one series.") //nolint:staticcheck // shown to people as a sentence.
+		return nil, nil, errors.New(locales.DialogChartNeedSeries())
 	}
 	values := make([][]any, len(header)-1)
 	for i, line := range lines[1:] {
@@ -768,7 +792,7 @@ func parseChartCSV(csv string) (labels []any, series []any, err error) {
 			v := 0.0
 			if s+1 < len(cells) && cells[s+1] != "" {
 				if v, err = strconv.ParseFloat(cells[s+1], 64); err != nil {
-					return nil, nil, fmt.Errorf("Row %d: %q is not a number.", i+2, cells[s+1]) //nolint:staticcheck // shown to people as a sentence.
+					return nil, nil, errors.New(locales.DialogChartNotNumber(i+2, cells[s+1]))
 				}
 			}
 			values[s] = append(values[s], v)
@@ -784,21 +808,21 @@ func (a *App) chartDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
 	dialog(c, &d.chartOpen, 520, func() {
-		dialogHeader(c, "Chart data", "One row per label. Columns after the first are series.", &d.chartOpen)
+		dialogHeader(c, locales.DialogChartTitle(), locales.DialogChartSubtitle(), &d.chartOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(12).Children(func() {
-			field(c, "title", &d.chartTitle, "Title")
-			ui.Segmented(c.Key("kind"), &d.chartKind, "Bar", "Line", "Pie")
+			field(c, "title", &d.chartTitle, locales.DialogFieldTitle())
+			ui.Segmented(c.Key("kind"), &d.chartKind, locales.DialogChartBar(), locales.DialogChartLine(), locales.DialogChartPie())
 			area := ui.TextArea(c.Key("csv"), &d.chartCSV).Height(180).Font("monospace").FontSize(13)
 			_ = area
-			field(c, "caption", &d.chartCap, "Caption (optional)")
+			field(c, "caption", &d.chartCap, locales.DialogChartCaption())
 			if d.chartError != "" {
 				ui.Text(c, d.chartError).FontSize(12.5).TextColor(pal.DangerText)
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if button(c, "cancel", "", "Cancel").Clicked() {
+				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					d.chartOpen = false
 				}
-				if primary(c, "save", "", "Save chart").Clicked() {
+				if primary(c, "save", "", locales.DialogChartSave()).Clicked() {
 					labels, series, err := parseChartCSV(d.chartCSV)
 					if err == nil {
 						var data map[string]any
@@ -827,7 +851,7 @@ func (a *App) chartDialog(c *ui.Context) {
 // Embeds ----------------------------------------------------------------
 
 func (d *dialogs) openEmbed() {
-	d.embedOpen, d.embedID, d.embedTitle, d.embedHeight = true, "", "Interactive embed", "320"
+	d.embedOpen, d.embedID, d.embedTitle, d.embedHeight = true, "", locales.DialogEmbedTitle(), "320"
 	d.embedHTML = "<!doctype html>\n<html><body style=\"font-family: system-ui; padding: 16px\">\n  <button onclick=\"this.textContent = Number(this.textContent) + 1\">0</button>\n</body></html>"
 }
 
@@ -841,20 +865,20 @@ func (d *dialogs) editEmbed(n *doc.Node) {
 func (a *App) embedDialog(c *ui.Context) {
 	d := &a.dialogs
 	dialog(c, &d.embedOpen, 600, func() {
-		dialogHeader(c, "Interactive embed", "HTML, CSS and JavaScript that run sandboxed, with no network or storage.", &d.embedOpen)
+		dialogHeader(c, locales.DialogEmbedTitle(), locales.DialogEmbedSubtitle(), &d.embedOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(12).Children(func() {
-			field(c, "title", &d.embedTitle, "Title")
+			field(c, "title", &d.embedTitle, locales.DialogFieldTitle())
 			ui.TextArea(c.Key("html"), &d.embedHTML).Height(240).Font("monospace").FontSize(12.5)
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "Height").FontSize(13)
+				ui.Text(c, locales.DialogEmbedHeight()).FontSize(13)
 				field(c, "height", &d.embedHeight, "320").Width(80)
 				ui.Spacer(c)
-				if button(c, "cancel", "", "Cancel").Clicked() {
+				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					d.embedOpen = false
 				}
-				label := "Insert"
+				label := locales.DialogInsert()
 				if d.embedID != "" {
-					label = "Save"
+					label = locales.CommonSave()
 				}
 				if primary(c, "insert", "", label).Clicked() && a.page != nil {
 					h, _ := strconv.Atoi(d.embedHeight)
@@ -891,9 +915,9 @@ func (d *dialogs) openLinkDialog(kind string) {
 func (a *App) linkDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
-	title, subtitle, example := "Link card", "Paste a link to a web page.", "https://"
+	title, subtitle, example := locales.DialogLinkCardTitle(), locales.DialogLinkCardSubtitle(), "https://"
 	if d.linkKind == "video" {
-		title, subtitle, example = "Video", "Paste a YouTube or Vimeo link.", "https://www.youtube.com/watch?v=…"
+		title, subtitle, example = locales.DialogLinkVideoTitle(), locales.DialogLinkVideoSubtitle(), "https://www.youtube.com/watch?v=…"
 	}
 	dialog(c, &d.linkOpen, 480, func() {
 		dialogHeader(c, title, subtitle, &d.linkOpen)
@@ -911,9 +935,9 @@ func (a *App) linkDialog(c *ui.Context) {
 					n, err = doc.LinkNode(d.linkURL)
 				}
 				if err != nil {
-					d.linkError = "That isn't a YouTube or Vimeo link."
+					d.linkError = locales.DialogLinkNotVideo()
 					if d.linkKind != "video" {
-						d.linkError = "That isn't a web link."
+						d.linkError = locales.DialogLinkNotWeb()
 					}
 					return
 				}
@@ -926,10 +950,10 @@ func (a *App) linkDialog(c *ui.Context) {
 				insert()
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if button(c, "cancel", "", "Cancel").Clicked() {
+				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					d.linkOpen = false
 				}
-				if primary(c, "insert", "", "Insert").Clicked() {
+				if primary(c, "insert", "", locales.DialogInsert()).Clicked() {
 					insert()
 				}
 			})
@@ -956,16 +980,16 @@ func (a *App) inlinePrompt(c *ui.Context) {
 				if o, err := a.hub.Resolve(nil); err == nil {
 					name = o.Name()
 				} else {
-					name = "Agent"
+					name = locales.CommonAgent()
 				}
 			}
-			title := "Ask " + name
+			title := locales.DialogInlineAsk(name)
 			if ip.quote != "" {
-				title += " about “" + short(ip.quote, 48) + "”"
+				title = locales.DialogInlineAskAbout(name, short(ip.quote, 48))
 			}
 			ui.Text(c, title).FontSize(13).FontWeight(600).TextColor(pal.AccentText).Grow(1).SingleLine()
 			tools(c, func() {
-				if iconButton(c, "close", "x", "Close").Clicked() {
+				if iconButton(c, "close", "x", locales.CommonClose()).Clicked() {
 					a.dialogs.inline = nil
 					ps.editor.Focus()
 				}
@@ -975,7 +999,7 @@ func (a *App) inlinePrompt(c *ui.Context) {
 			if ip.working {
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Spinner(c).Size(14, 14)
-					ui.Text(c, "Working…").FontSize(13).TextColor(pal.TextMuted)
+					ui.Text(c, locales.DialogInlineWorking()).FontSize(13).TextColor(pal.TextMuted)
 				})
 			} else {
 				run := a.hub.Session(ps.id).Run(ip.runID)
@@ -983,7 +1007,7 @@ func (a *App) inlinePrompt(c *ui.Context) {
 				// A reply in words can go in the page; edits are there already.
 				if run != nil && run.Error == "" && run.Reply != "" && len(run.Ops) == 0 {
 					ui.Row(c).Gap(8).Children(func() {
-						if button(c, "insert", "plus", "Insert into page").Clicked() {
+						if button(c, "insert", "plus", locales.DialogInlineInsert()).Clicked() {
 							a.insertReply(ip.blockID, run.Reply)
 							a.dialogs.inline = nil
 						}
@@ -994,8 +1018,9 @@ func (a *App) inlinePrompt(c *ui.Context) {
 		}
 		if ip.selection && ip.text == "" {
 			ui.Row(c).Wrap().Gap(6).Children(func() {
-				for _, s := range []string{"Explain this", "Make it shorter", "Fix the grammar", "Turn into a list", "Chart these numbers"} {
-					if ghost(c, "chip:"+s, "", s).Border(1, pal.AccentSoftBorder).Clicked() {
+				chips := []string{locales.DialogInlineExplain(), locales.DialogInlineShorter(), locales.DialogInlineGrammar(), locales.DialogInlineList(), locales.DialogInlineChart()}
+				for i, s := range chips {
+					if ghost(c, "chip:"+strconv.Itoa(i), "", s).Border(1, pal.AccentSoftBorder).Clicked() {
 						ip.text = s
 						a.sendInline(ip)
 					}
@@ -1003,7 +1028,7 @@ func (a *App) inlinePrompt(c *ui.Context) {
 			})
 		}
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			in := growField(c, "ask", &ip.text, "Ask the agent to write, rewrite or explain…").AutoFocus()
+			in := growField(c, "ask", &ip.text, locales.DialogInlinePlaceholder()).AutoFocus()
 			if in.Submitted() {
 				a.sendInline(ip)
 			}
@@ -1011,7 +1036,7 @@ func (a *App) inlinePrompt(c *ui.Context) {
 				a.dialogs.inline = nil
 				ps.editor.Focus()
 			}
-			if primary(c, "send", "arrow-up", "Send").Disabled(strings.TrimSpace(ip.text) == "").Clicked() {
+			if primary(c, "send", "arrow-up", locales.DialogInlineSend()).Disabled(strings.TrimSpace(ip.text) == "").Clicked() {
 				a.sendInline(ip)
 			}
 		})

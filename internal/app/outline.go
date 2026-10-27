@@ -7,6 +7,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 func (h *host) OpenBlock(pageID, blockID string) { h.a.openBlock(pageID, blockID) }
@@ -24,7 +25,7 @@ func (a *App) openBlock(pageID, blockID string) {
 		return
 	}
 	if a.page.editor.Content.Find(blockID) == nil {
-		a.toast("That part of the page is gone")
+		a.toast(locales.OutlineBlockGone())
 		return
 	}
 	a.goToBlock(blockID)
@@ -56,7 +57,7 @@ func (a *App) outlinePanel(c *ui.Context) {
 	ps := a.page
 	heads := ps.editor.Headings()
 	if len(heads) == 0 {
-		ui.Text(c, "The page's headings show here, to go to one.").FontSize(13).TextColor(pal.TextMuted).Padding(22, 18)
+		ui.Text(c, locales.OutlineEmpty()).FontSize(13).TextColor(pal.TextMuted).Padding(22, 18)
 		return
 	}
 	nodes := map[string]*doc.Node{}
@@ -86,7 +87,7 @@ func (a *App) outlinePanel(c *ui.Context) {
 	list := ui.Outline(c, &ps.outline, roots, func(id string) []string { return kids[id] }, func(id string) {
 		text := nodes[id].Delta().Plain()
 		if text == "" {
-			ui.Text(c, "Untitled heading").FontSize(13.5).TextColor(pal.TextMuted).SingleLine()
+			ui.Text(c, locales.OutlineUntitledHeading()).FontSize(13.5).TextColor(pal.TextMuted).SingleLine()
 			return
 		}
 		ui.Text(c, text).FontSize(13.5).SingleLine()

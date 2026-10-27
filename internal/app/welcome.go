@@ -2,11 +2,17 @@ package app
 
 import (
 	_ "embed"
+	"encoding/json"
+	"html"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/egoist/mygo/i18n"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // welcomeImage is a dawn over mountains and a lake, drawn for the guide.
@@ -14,17 +20,11 @@ import (
 //go:embed welcome/dawn.jpg
 var welcomeImage []byte
 
-const (
-	welcomeTitle    = "Welcome to Leaflet"
-	welcomeSubTitle = "Weekly team sync"
-
-	welcomeDateTodo = "Hover this to-do and choose **Add date** to give it a due date"
-)
-
 // createWelcome gives a new space one page that shows what pages can do,
 // with an example subpage inside it: writing, blocks, media, charts,
 // embeds, to-dos, recordings, agents, organizing and finding pages,
-// working together, sync and shortcuts.
+// working together, sync and shortcuts. They are written in the language
+// the app shows when they are made.
 func (a *App) createWelcome() error {
 	if _, ok := a.st.Value("welcome.created"); ok {
 		return nil
@@ -32,21 +32,22 @@ func (a *App) createWelcome() error {
 	if pages, _ := a.st.Pages(); len(pages) > 0 {
 		return a.st.SetValue("welcome.created", "true")
 	}
+	m := locales.In(i18n.Locale())
 	// The picture is a file of the page and the subpage a page inside it,
 	// so the page comes first and its blocks after.
-	p, err := a.st.CreatePage(store.NewPageOptions{Title: welcomeTitle})
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: m.WelcomeTitle()})
 	if err != nil {
 		return err
 	}
-	image, err := a.welcomeImageFile(p.ID)
+	image, err := a.welcomeImageFile(p.ID, m.WelcomeImageName()+".jpg")
 	if err != nil {
 		return err
 	}
-	sub, err := a.st.CreatePage(store.NewPageOptions{ParentID: p.ID, Title: welcomeSubTitle, Content: welcomeSubpage()})
+	sub, err := a.st.CreatePage(store.NewPageOptions{ParentID: p.ID, Title: m.WelcomeSubTitle(), Content: welcomeSubpage(m)})
 	if err != nil {
 		return err
 	}
-	blocks, err := welcomeBlocks(image, sub.ID)
+	blocks, err := welcomeBlocks(m, image, sub.ID)
 	if err != nil {
 		return err
 	}
@@ -59,27 +60,28 @@ func (a *App) createWelcome() error {
 	return a.st.SetValue("welcome.created", "true")
 }
 
-// welcomeImageFile adds the guide's picture as a file of its page.
-func (a *App) welcomeImageFile(pageID string) (store.File, error) {
+// welcomeImageFile adds the guide's picture as a file of its page, named
+// name.
+func (a *App) welcomeImageFile(pageID, name string) (store.File, error) {
 	dir, err := os.MkdirTemp("", "leaflet-welcome")
 	if err != nil {
 		return store.File{}, err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	path := filepath.Join(dir, "Dawn over the lake.jpg")
+	path := filepath.Join(dir, name)
 	if err := os.WriteFile(path, welcomeImage, 0o600); err != nil {
 		return store.File{}, err
 	}
 	return a.st.AddFile(path, "", pageID, "image/jpeg")
 }
 
-// welcomeBlocks are the guide's blocks, with its picture and a card for
-// and a link to its subpage.
-func welcomeBlocks(image store.File, subID string) ([]*doc.Node, error) {
+// welcomeBlocks are the guide's blocks in m's language, with its picture
+// and a card for and a link to its subpage.
+func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.Node, error) {
 	var blocks []*doc.Node
 	var bad error
-	add := func(m map[string]any) {
-		n, err := doc.SpecToNode(m, "", "Leaflet")
+	add := func(spec map[string]any) {
+		n, err := doc.SpecToNode(spec, "", "Leaflet")
 		if err != nil && bad == nil {
 			bad = err
 		}
@@ -89,171 +91,229 @@ func welcomeBlocks(image store.File, subID string) ([]*doc.Node, error) {
 	}
 	text := func(typ, s string) { add(map[string]any{"type": typ, "text": s}) }
 	heading := func(s string) { add(map[string]any{"type": "heading", "level": 2.0, "text": s}) }
-	chart := func(m map[string]any) { add(map[string]any{"type": "chart", "chart": m}) }
-	embed := func(title, html string, height int) {
-		add(map[string]any{"type": "embed", "embed": map[string]any{"title": title, "html": html, "height": float64(height)}})
+	chart := func(spec map[string]any) { add(map[string]any{"type": "chart", "chart": spec}) }
+	embed := func(title, page string, height int) {
+		add(map[string]any{"type": "embed", "embed": map[string]any{"title": title, "html": page, "height": float64(height)}})
 	}
 
-	text("paragraph", "Pages are living documents you write with people and agents. They are saved on this device first and sync when you are online. This page shows what a page can do; change anything, it is yours.")
+	text("paragraph", m.WelcomeIntro())
 
-	heading("Try it")
+	heading(m.WelcomeTryHeading())
 	for _, s := range []string{
-		"Type **/** on an empty line to add any block",
-		"Type **@** to ask an agent to write here, mention someone or link a page",
-		"Select some text, then choose **Ask agent**, **Comment** or a color",
-		"Press the microphone in the header to record, with a transcript",
-		"Add an agent provider in **Settings › Agent providers**: sign in with ChatGPT, paste an API key, or use a model server such as Ollama",
+		m.WelcomeTrySlash(),
+		m.WelcomeTryAt(),
+		m.WelcomeTrySelect(),
+		m.WelcomeTryRecord(),
+		m.WelcomeTryProvider(),
 	} {
 		text("todo_list", s)
 	}
 
-	heading("Writing")
-	text("paragraph", "Type **bold**, *italic*, `code`, ~~strikethrough~~ and [links](https://github.com/egoist/mygo) as Markdown and they format as you go. At the start of a line, `#` makes a heading, `-` a bullet, `1.` a numbered item, `[]` a to-do, `>` a quote and `---` a divider. Pasted Markdown keeps its headings, lists, tables and code.")
-	text("quote", "The best way to have a good idea is to have a lot of ideas, and throw the bad ones away.")
-	add(map[string]any{"type": "numbered_list", "text": "Write a rough outline", "children": []any{
-		map[string]any{"type": "bulleted_list", "text": "Press **Tab** to nest an item, **⇧Tab** to lift it back"},
+	heading(m.WelcomeWritingHeading())
+	text("paragraph", m.WelcomeWritingMarkdown())
+	text("quote", m.WelcomeQuote())
+	add(map[string]any{"type": "numbered_list", "text": m.WelcomeListOutline(), "children": []any{
+		map[string]any{"type": "bulleted_list", "text": m.WelcomeListNest()},
 	}})
-	text("numbered_list", "Ask an agent to fill in a section")
-	text("numbered_list", "Review its edits, and **Undo** if you don't like them")
+	text("numbered_list", m.WelcomeListAsk())
+	text("numbered_list", m.WelcomeListReview())
 
-	heading("Blocks")
-	text("paragraph", "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end, and cells take formatting.")
+	heading(m.WelcomeBlocksHeading())
+	text("paragraph", m.WelcomeBlocksTable())
+	you, agent := m.WelcomeTableYou(), m.WelcomeTableAgent()
 	add(map[string]any{"type": "table", "rows": []any{
-		[]any{"Milestone", "Owner", "Due"},
-		[]any{"Outline the guide", "You", "Monday"},
-		[]any{"First draft", "Agent", "Wednesday"},
-		[]any{"Review and publish", "You", "Friday"},
+		[]any{m.WelcomeTableMilestone(), m.WelcomeTableOwner(), m.WelcomeTableDue()},
+		[]any{m.WelcomeTableOutline(), you, m.WelcomeMonday()},
+		[]any{m.WelcomeTableDraft(), agent, m.WelcomeWednesday()},
+		[]any{m.WelcomeTableReview(), you, m.WelcomeFriday()},
 	}})
-	text("paragraph", "Code colors its syntax: type three backticks and a language, or pick one in the bar above the block.")
-	add(map[string]any{"type": "code", "language": "javascript", "text": welcomeCode})
-	add(map[string]any{"type": "callout", "tone": "tip", "text": "A callout sets a note apart. Click its icon to make it a tip, a warning or a caution."})
-	add(map[string]any{"type": "toggle_list", "text": "A toggle folds away what is inside it: click the arrow", "children": []any{
-		map[string]any{"type": "paragraph", "text": "Press **Enter** at the end of an open toggle to write inside it."},
+	text("paragraph", m.WelcomeCodeIntro())
+	add(map[string]any{"type": "code", "language": "javascript", "text": welcomeCode(m)})
+	add(map[string]any{"type": "callout", "tone": "tip", "text": m.WelcomeCallout()})
+	add(map[string]any{"type": "toggle_list", "text": m.WelcomeToggle(), "children": []any{
+		map[string]any{"type": "paragraph", "text": m.WelcomeToggleInside()},
 	}})
-	text("paragraph", "**Math** is TeX and **Diagram** is Mermaid; **Edit** opens their source. **Link card** previews a web page, and **File** keeps any file with the page.")
+	text("paragraph", m.WelcomeMathDiagram())
 	add(map[string]any{"type": "math_equation", "formula": `\int_0^1 x^2\,dx = \frac{1}{3} \qquad e^{i\pi} + 1 = 0`})
-	add(map[string]any{"type": "diagram", "source": "flowchart LR\n  Idea([Idea]) --> Draft[Write a draft]\n  Draft --> Review{Review}\n  Review -->|changes| Draft\n  Review -->|ok| Publish([Publish])"})
+	add(map[string]any{"type": "diagram", "source": "flowchart LR\n  Idea([" + m.WelcomeDiagramIdea() + "]) --> Draft[" + m.WelcomeDiagramDraft() + "]\n  Draft --> Review{" + m.WelcomeDiagramReview() +
+		"}\n  Review -->|" + m.WelcomeDiagramChanges() + "| Draft\n  Review -->|" + m.WelcomeDiagramOk() + "| Publish([" + m.WelcomeDiagramPublish() + "])"})
 
-	heading("Pictures, video and charts")
-	text("paragraph", "Images are saved with the page, so they show offline. Paste a YouTube or Vimeo link on an empty line for a video that plays in place.")
+	heading(m.WelcomeMediaHeading())
+	text("paragraph", m.WelcomeMediaImages())
 	blocks = append(blocks, &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
-		"url": "file://" + image.LocalPath, "align": "center", "alt": "A dawn over mountains and a still lake", "file_id": image.ID,
+		"url": "file://" + image.LocalPath, "align": "center", "alt": m.WelcomeImageAlt(), "file_id": image.ID,
 	}})
 	add(map[string]any{"type": "video", "video": map[string]any{"url": "https://www.youtube.com/watch?v=aqz-KE-bpKQ", "title": "Big Buck Bunny · Blender Foundation"}})
-	text("paragraph", "Charts are bar, line or pie. Agents make them from your numbers, and **Edit data** changes them by hand.")
+	text("paragraph", m.WelcomeMediaCharts())
+	research := m.WelcomeChartResearch()
 	chart(map[string]any{
-		"chart_type": "bar", "title": "What people keep in pages", "labels": []any{"Notes", "Plans", "Research", "Recordings"},
-		"series": []any{map[string]any{"name": "Pages", "values": []any{12.0, 7.0, 5.0, 3.0}}}, "caption": "Example data",
+		"chart_type": "bar", "title": m.WelcomeChartPagesTitle(), "labels": []any{m.WelcomeChartNotes(), m.WelcomeChartPlans(), research, m.WelcomeChartRecordings()},
+		"series": []any{map[string]any{"name": m.WelcomeChartPages(), "values": []any{12.0, 7.0, 5.0, 3.0}}}, "caption": m.WelcomeChartCaption(),
 	})
 	chart(map[string]any{
-		"chart_type": "line", "title": "Words written per day", "labels": []any{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"},
+		"chart_type": "line", "title": m.WelcomeChartWordsTitle(), "labels": []any{
+			m.WelcomeChartMon(), m.WelcomeChartTue(), m.WelcomeChartWed(), m.WelcomeChartThu(), m.WelcomeChartFri(), m.WelcomeChartSat(), m.WelcomeChartSun(),
+		},
 		"series": []any{
-			map[string]any{"name": "You", "values": []any{420.0, 380.0, 650.0, 540.0, 720.0, 210.0, 300.0}},
-			map[string]any{"name": "Agents", "values": []any{150.0, 260.0, 300.0, 480.0, 390.0, 120.0, 90.0}},
+			map[string]any{"name": you, "values": []any{420.0, 380.0, 650.0, 540.0, 720.0, 210.0, 300.0}},
+			map[string]any{"name": m.WelcomeChartAgents(), "values": []any{150.0, 260.0, 300.0, 480.0, 390.0, 120.0, 90.0}},
 		},
 	})
 	chart(map[string]any{
-		"chart_type": "pie", "title": "Where the week went", "labels": []any{"Writing", "Meetings", "Research", "Email"},
-		"series": []any{map[string]any{"name": "Hours", "values": []any{14.0, 9.0, 8.0, 5.0}}},
+		"chart_type": "pie", "title": m.WelcomeChartWeekTitle(), "labels": []any{m.WelcomeChartWriting(), m.WelcomeChartMeetings(), research, m.WelcomeChartEmail()},
+		"series": []any{map[string]any{"name": m.WelcomeChartHours(), "values": []any{14.0, 9.0, 8.0, 5.0}}},
 	})
 
-	heading("Interactive embeds")
-	text("paragraph", "Embeds are small apps in a page, sandboxed with no network and no access to your data. Ask an agent for one, as “@ make a pomodoro timer”, or try these:")
-	embed("The solar system, at your speed", solarSystemEmbed, 380)
-	embed("Savings calculator", savingsEmbed, 270)
-	embed("A piano to play", pianoEmbed, 250)
+	heading(m.WelcomeEmbedsHeading())
+	text("paragraph", m.WelcomeEmbedsIntro())
+	embed(m.WelcomeSolarTitle(), solarSystemEmbed(m), 380)
+	embed(m.WelcomeSavingsTitle(), savingsEmbed(m), 270)
+	embed(m.WelcomePianoTitle(), pianoEmbed(m), 250)
 
-	heading("To-dos and recordings")
-	text("todo_list", welcomeDateTodo)
-	text("paragraph", "A due to-do reminds you on the day and turns red once overdue. The **To-dos** button at the top of the sidebar gathers the open ones from every page.")
-	text("paragraph", "A recording comes with a transcript, a time on each line: click a time to play from there. Its **…** menu puts the transcript in the page or has an agent sum it up. **Settings › Speech to text** picks Soniox or an OpenAI-compatible server, which can run on your own network, and the language. The menu bar icon starts a recording without opening the window.")
+	heading(m.WelcomeTodosHeading())
+	text("todo_list", m.WelcomeDateTodo())
+	text("paragraph", m.WelcomeTodosDue())
+	text("paragraph", m.WelcomeRecordings())
 
-	heading("Agents")
-	text("paragraph", "Agents read the page and edit it with you: text, tables, charts, code and embeds. Each run is one step you can undo, and the blocks it changed stay tinted until the next.")
+	heading(m.WelcomeAgentsHeading())
+	text("paragraph", m.WelcomeAgentsIntro())
 	for _, s := range []string{
-		"**@** on a line asks about that spot: “@ write an intro for this page”",
-		"Select text, then **Ask agent**: “make this shorter”, “translate it to French”",
-		"The panel (**⌘J**) holds a chat about the page. Mention an agent in a comment and it answers in the thread",
-		"**Settings › Agent providers** sets the default agent, a model on this machine for offline use, and whether agents may read your other pages",
-		"Claude Code, Codex, Cursor and other MCP clients can work on your pages too: **Settings › External agents** sets them up",
+		m.WelcomeAgentsAt(),
+		m.WelcomeAgentsSelect(),
+		m.WelcomeAgentsPanel(),
+		m.WelcomeAgentsSettings(),
+		m.WelcomeAgentsExternal(),
 	} {
 		text("bulleted_list", s)
 	}
 
-	heading("Organizing pages")
-	text("paragraph", "Pages nest inside pages: **/** › **Subpage**, or the **+** beside a page in the sidebar, adds one with a card for it here.")
+	heading(m.WelcomeOrganizingHeading())
+	text("paragraph", m.WelcomeOrganizingNest())
 	blocks = append(blocks, &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": subID}})
-	link := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
-	link.SetDelta(doc.Delta{
-		{Text: "Type "}, {Text: "@", Attrs: doc.Attrs{Bold: true}}, {Text: " and a page's name to link to it, as to "},
-		{Text: welcomeSubTitle, Attrs: doc.PageMention(subID, welcomeSubTitle)}, {Text: "; the link keeps up when the page is renamed."},
-	})
-	blocks = append(blocks, link)
-	text("paragraph", "Folders, from the button beside **My space**, group pages. A page's **…** menu moves it, duplicates it with its subpages, exports it as Markdown, or saves it as a template, which a blank page then offers to start from.")
-	text("paragraph", "Headings fold their section from the arrow beside them, and the panel's **Outline** tab lists them. Right-click a block to **Copy link to block**.")
+	// The message says where the link to the subpage goes, by a mark in
+	// its place.
+	const mark = "￼"
+	if link, err := doc.SpecToNode(map[string]any{"type": "paragraph", "text": m.WelcomeOrganizingLink(mark)}, "", "Leaflet"); err == nil {
+		title := m.WelcomeSubTitle()
+		link.SetDelta(withRun(link.Delta(), mark, doc.Run{Text: title, Attrs: doc.PageMention(subID, title)}))
+		blocks = append(blocks, link)
+	} else if bad == nil {
+		bad = err
+	}
+	text("paragraph", m.WelcomeOrganizingFolders())
+	text("paragraph", m.WelcomeOrganizingHeadings())
 
-	heading("Working together")
-	text("paragraph", "Select text and choose **Comment** to start a thread. Threads live in the panel's **Comments** tab, where you reply and **Resolve** them. Once you sign in, **Share** in the header invites people to edit or view a page and its subpages.")
-	text("paragraph", "**Page history** in the **…** menu keeps a version every ten minutes of editing and before each agent run. See what changed since one, inline or side by side, name the current one, or restore it.")
-	text("paragraph", "Pages work offline and sync between devices when you sign in; **Settings › Offline and storage** chooses which stay on this device. A block changed on two devices while apart keeps one version, and the page says so, with the other a click away.")
+	heading(m.WelcomeTogetherHeading())
+	text("paragraph", m.WelcomeTogetherComments())
+	text("paragraph", m.WelcomeTogetherHistory())
+	text("paragraph", m.WelcomeTogetherSync())
 
-	heading("Shortcuts")
+	heading(m.WelcomeShortcutsHeading())
 	add(map[string]any{"type": "table", "rows": []any{
-		[]any{"Keys", "Does"},
-		[]any{"⌘P", "Search pages, templates, recordings and comments"},
-		[]any{"⌘N", "Make a new page"},
-		[]any{"⌘J", "Show or hide the agent panel"},
-		[]any{"⌘\\", "Show or hide the sidebar"},
-		[]any{"⌘,", "Open Settings: theme, text size, agents and speech"},
-		[]any{"⌘[  ⌘]", "Go back and forward between pages"},
-		[]any{"⌘B  ⌘I  ⌘U", "Bold, italic, underline"},
-		[]any{"⌘E  ⇧⌘X", "Inline code, strikethrough"},
-		[]any{"⌘K", "Link the selected text"},
-		[]any{"⇧Enter", "A line break within a block"},
-		[]any{"Tab  ⇧Tab", "Nest or lift a list item, indent code, or move between table cells"},
-		[]any{"⌘Z  ⇧⌘Z", "Undo, redo"},
+		[]any{m.WelcomeShortcutsKeys(), m.WelcomeShortcutsDoes()},
+		[]any{"⌘P", m.WelcomeShortcutSearch()},
+		[]any{"⌘N", m.WelcomeShortcutNewPage()},
+		[]any{"⌘J", m.WelcomeShortcutAgentPanel()},
+		[]any{"⌘\\", m.WelcomeShortcutSidebar()},
+		[]any{"⌘,", m.WelcomeShortcutSettings()},
+		[]any{"⌘[  ⌘]", m.WelcomeShortcutBackForward()},
+		[]any{"⌘B  ⌘I  ⌘U", m.WelcomeShortcutFormat()},
+		[]any{"⌘E  ⇧⌘X", m.WelcomeShortcutCodeStrike()},
+		[]any{"⌘K", m.WelcomeShortcutLink()},
+		[]any{"⇧Enter", m.WelcomeShortcutLineBreak()},
+		[]any{"Tab  ⇧Tab", m.WelcomeShortcutTab()},
+		[]any{"⌘Z  ⇧⌘Z", m.WelcomeShortcutUndo()},
 	}})
 	return blocks, bad
 }
 
-// welcomeSubpage is the content of the guide's example subpage.
-func welcomeSubpage() *doc.Content {
+// withRun puts run in d where mark is, in place of the mark.
+func withRun(d doc.Delta, mark string, run doc.Run) doc.Delta {
+	var out doc.Delta
+	for _, r := range d {
+		before, after, ok := strings.Cut(r.Text, mark)
+		if !ok {
+			out = append(out, r)
+			continue
+		}
+		if before != "" {
+			out = append(out, doc.Run{Text: before, Attrs: r.Attrs})
+		}
+		out = append(out, run)
+		if after != "" {
+			out = append(out, doc.Run{Text: after, Attrs: r.Attrs})
+		}
+	}
+	return out
+}
+
+// welcomeSubpage is the content of the guide's example subpage, in m's
+// language.
+func welcomeSubpage(m locales.Messages) *doc.Content {
 	var blocks []*doc.Node
-	for _, m := range []map[string]any{
-		{"type": "paragraph", "text": "Notes from the week's sync. This page lives inside **Welcome to Leaflet**: the sidebar shows it under its parent, and sharing the parent shares it too."},
-		{"type": "heading", "level": 2.0, "text": "Agenda"},
-		{"type": "numbered_list", "text": "What shipped since last week"},
-		{"type": "numbered_list", "text": "Blockers"},
-		{"type": "numbered_list", "text": "Plans for next week"},
-		{"type": "heading", "level": 2.0, "text": "Decisions"},
-		{"type": "bulleted_list", "text": "Keep the release on **Friday**"},
-		{"type": "bulleted_list", "text": "Move the design review to Thursday"},
-		{"type": "heading", "level": 2.0, "text": "Action items"},
+	for _, spec := range []map[string]any{
+		{"type": "paragraph", "text": m.WelcomeSubIntro(m.WelcomeTitle())},
+		{"type": "heading", "level": 2.0, "text": m.WelcomeSubAgenda()},
+		{"type": "numbered_list", "text": m.WelcomeSubShipped()},
+		{"type": "numbered_list", "text": m.WelcomeSubBlockers()},
+		{"type": "numbered_list", "text": m.WelcomeSubPlans()},
+		{"type": "heading", "level": 2.0, "text": m.WelcomeSubDecisions()},
+		{"type": "bulleted_list", "text": m.WelcomeSubRelease()},
+		{"type": "bulleted_list", "text": m.WelcomeSubDesignReview()},
+		{"type": "heading", "level": 2.0, "text": m.WelcomeSubActions()},
 		{"type": "table", "rows": []any{
-			[]any{"Task", "Owner", "Due"},
-			[]any{"Write the release notes", "You", "Thursday"},
-			[]any{"Sum up beta feedback", "Agent", "Wednesday"},
+			[]any{m.WelcomeTableTask(), m.WelcomeTableOwner(), m.WelcomeTableDue()},
+			[]any{m.WelcomeSubReleaseNotes(), m.WelcomeTableYou(), m.WelcomeThursday()},
+			[]any{m.WelcomeSubFeedback(), m.WelcomeTableAgent(), m.WelcomeWednesday()},
 		}},
-		{"type": "todo_list", "text": "Ask an agent to turn these notes into an email"},
+		{"type": "todo_list", "text": m.WelcomeSubEmail()},
 	} {
-		if n, err := doc.SpecToNode(m, "", "Leaflet"); err == nil {
+		if n, err := doc.SpecToNode(spec, "", "Leaflet"); err == nil {
 			blocks = append(blocks, n)
 		}
 	}
 	return doc.FromBlocks(blocks)
 }
 
-// welcomeCode is the guide's code example.
-const welcomeCode = `// Count the words in a page's text, as a byline might.
+// welcomeCode is the guide's code example, its comment in m's language.
+func welcomeCode(m locales.Messages) string {
+	return "// " + m.WelcomeCodeComment() + `
 function wordCount(text) {
   return text.split(/\s+/).filter(Boolean).length;
 }
 
 console.log(wordCount("Pages are living documents")); // 4`
+}
+
+// fillEmbed puts an embed's texts in its HTML: {{key}} as HTML text and
+// {{js:key}} as a JavaScript string.
+func fillEmbed(page string, texts map[string]string) string {
+	pairs := make([]string, 0, 4*len(texts))
+	for k, v := range texts {
+		js, _ := json.Marshal(v)
+		pairs = append(pairs, "{{"+k+"}}", html.EscapeString(v), "{{js:"+k+"}}", string(js))
+	}
+	return strings.NewReplacer(pairs...).Replace(page)
+}
+
+// The embeds' texts that count a number say it with "%1" in its place,
+// which their scripts fill in.
+const embedNumber = "%1"
 
 // solarSystemEmbed draws the planets orbiting the sun, with a speed slider
-// and a pause button.
-const solarSystemEmbed = `<!doctype html>
+// and a pause button, in m's language.
+func solarSystemEmbed(m locales.Messages) string {
+	return fillEmbed(solarSystemPage, map[string]string{
+		"pause": m.WelcomeSolarPause(), "play": m.WelcomeSolarPlay(), "speed": m.WelcomeSolarSpeed(),
+		"speedNow": m.WelcomeSolarDaysPerSecond(60, "60"),
+		"speedOne": m.WelcomeSolarDaysPerSecond(1, embedNumber), "speedOther": m.WelcomeSolarDaysPerSecond(2, embedNumber),
+		"year":    m.WelcomeSolarYear(embedNumber),
+		"mercury": m.WelcomeSolarMercury(), "venus": m.WelcomeSolarVenus(), "earth": m.WelcomeSolarEarth(), "mars": m.WelcomeSolarMars(),
+		"jupiter": m.WelcomeSolarJupiter(), "saturn": m.WelcomeSolarSaturn(), "uranus": m.WelcomeSolarUranus(), "neptune": m.WelcomeSolarNeptune(),
+	})
+}
+
+const solarSystemPage = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
 html,body{margin:0;height:100%;background:#070914;color:#d8ddff;font:13px -apple-system,system-ui,sans-serif;overflow:hidden}
 canvas{display:block;width:100%;height:100%}
@@ -264,29 +324,29 @@ canvas{display:block;width:100%;height:100%}
 .bar span{min-width:96px;text-align:right;font-variant-numeric:tabular-nums;color:#aab3ff;white-space:nowrap}
 </style></head><body>
 <canvas id="c"></canvas>
-<div class="bar"><button id="p">Pause</button><label for="s">Speed</label><input id="s" type="range" min="1" max="500" step="1" value="60"><span id="v">60 days / s</span></div>
+<div class="bar"><button id="p">{{pause}}</button><label for="s">{{speed}}</label><input id="s" type="range" min="1" max="500" step="1" value="60"><span id="v">{{speedNow}}</span></div>
 <script>
 var c = document.getElementById("c"), x = c.getContext("2d"), W = 0, H = 0;
 function size() { var d = window.devicePixelRatio || 1; W = c.clientWidth; H = c.clientHeight; c.width = W * d; c.height = H * d; x.setTransform(d, 0, 0, d, 0, 0); }
 size(); window.addEventListener("resize", size);
 var planets = [
-  {n: "Mercury", p: 88, r: 0.16, s: 2.5, c: "#b5b0a8"},
-  {n: "Venus", p: 225, r: 0.24, s: 4, c: "#e8c27a"},
-  {n: "Earth", p: 365, r: 0.32, s: 4.2, c: "#4f9dff"},
-  {n: "Mars", p: 687, r: 0.40, s: 3.2, c: "#e0603e"},
-  {n: "Jupiter", p: 4333, r: 0.56, s: 9, c: "#d9a66b"},
-  {n: "Saturn", p: 10759, r: 0.70, s: 7.5, c: "#e6d39b", ring: true},
-  {n: "Uranus", p: 30687, r: 0.82, s: 5.5, c: "#8fe0e6"},
-  {n: "Neptune", p: 60190, r: 0.94, s: 5.5, c: "#5a73ff"}
+  {n: {{js:mercury}}, p: 88, r: 0.16, s: 2.5, c: "#b5b0a8"},
+  {n: {{js:venus}}, p: 225, r: 0.24, s: 4, c: "#e8c27a"},
+  {n: {{js:earth}}, p: 365, r: 0.32, s: 4.2, c: "#4f9dff"},
+  {n: {{js:mars}}, p: 687, r: 0.40, s: 3.2, c: "#e0603e"},
+  {n: {{js:jupiter}}, p: 4333, r: 0.56, s: 9, c: "#d9a66b"},
+  {n: {{js:saturn}}, p: 10759, r: 0.70, s: 7.5, c: "#e6d39b", ring: true},
+  {n: {{js:uranus}}, p: 30687, r: 0.82, s: 5.5, c: "#8fe0e6"},
+  {n: {{js:neptune}}, p: 60190, r: 0.94, s: 5.5, c: "#5a73ff"}
 ];
 var stars = [];
 for (var i = 0; i < 220; i++) stars.push([Math.random(), Math.random(), Math.random() * 1.2 + 0.2]);
 var days = 0, speed = 60, running = true, last = performance.now();
 var s = document.getElementById("s"), v = document.getElementById("v"), b = document.getElementById("p");
 function fill(el) { el.style.setProperty("--p", (el.value - el.min) / (el.max - el.min) * 100 + "%"); }
-s.oninput = function () { speed = +s.value; v.textContent = speed + (speed == 1 ? " day / s" : " days / s"); fill(s); };
+s.oninput = function () { speed = +s.value; v.textContent = (speed == 1 ? {{js:speedOne}} : {{js:speedOther}}).split("%1").join(speed); fill(s); };
 fill(s);
-b.onclick = function () { running = !running; b.textContent = running ? "Pause" : "Play"; };
+b.onclick = function () { running = !running; b.textContent = running ? {{js:pause}} : {{js:play}}; };
 function frame(now) {
   var dt = Math.min(now - last, 60) / 1000; last = now;
   if (running) days += dt * speed;
@@ -320,15 +380,23 @@ function frame(now) {
     }
   }
   x.fillStyle = "#aab3ff"; x.font = "12px -apple-system,system-ui";
-  x.fillText("Year " + (days / 365.25).toFixed(1), 14, 22);
+  x.fillText({{js:year}}.split("%1").join((days / 365.25).toFixed(1)), 14, 22);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 </script></body></html>`
 
 // savingsEmbed works out savings from a monthly deposit, a rate and the
-// years, with a bar for each year.
-const savingsEmbed = `<!doctype html>
+// years, with a bar for each year, in m's language.
+func savingsEmbed(m locales.Messages) string {
+	return fillEmbed(savingsPage, map[string]string{
+		"monthly": m.WelcomeSavingsMonthly(), "return": m.WelcomeSavingsReturn(), "years": m.WelcomeSavingsYears(),
+		"yearOne": m.WelcomeSavingsYearCount(1, embedNumber), "yearOther": m.WelcomeSavingsYearCount(2, embedNumber),
+		"saved": m.WelcomeSavingsSaved(), "earned": m.WelcomeSavingsEarned(), "summary": m.WelcomeSavingsSummary(embedNumber, "%2"),
+	})
+}
+
+const savingsPage = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
 html,body{margin:0;background:#fff;color:#16181d;font:14px -apple-system,system-ui,sans-serif}
 .wrap{display:grid;grid-template-columns:minmax(200px,1fr) 1.3fr;gap:20px;padding:18px}
@@ -354,15 +422,15 @@ output{min-width:70px;text-align:right;font-weight:600;font-variant-numeric:tabu
 :root[data-theme=dark] .legend span:last-child i{background:#6a7bff!important}
 </style></head><body><div class="wrap">
 <div>
-<div class="row"><label for="m">Saved every month</label><div><input id="m" type="range" min="50" max="3000" step="50" value="500"><output id="mo"></output></div></div>
-<div class="row"><label for="r">Yearly return</label><div><input id="r" type="range" min="0" max="12" step="0.25" value="5"><output id="ro"></output></div></div>
-<div class="row"><label for="y">Years</label><div><input id="y" type="range" min="1" max="40" step="1" value="20"><output id="yo"></output></div></div>
+<div class="row"><label for="m">{{monthly}}</label><div><input id="m" type="range" min="50" max="3000" step="50" value="500"><output id="mo"></output></div></div>
+<div class="row"><label for="r">{{return}}</label><div><input id="r" type="range" min="0" max="12" step="0.25" value="5"><output id="ro"></output></div></div>
+<div class="row"><label for="y">{{years}}</label><div><input id="y" type="range" min="1" max="40" step="1" value="20"><output id="yo"></output></div></div>
 </div>
 <div>
 <div class="total" id="t"></div>
 <div class="sub" id="d"></div>
 <div class="bars" id="b"></div>
-<div class="legend"><span><i style="background:#c9d0f3"></i>Saved</span><span><i style="background:#3446c9"></i>Earned</span></div>
+<div class="legend"><span><i style="background:#c9d0f3"></i>{{saved}}</span><span><i style="background:#3446c9"></i>{{earned}}</span></div>
 </div>
 </div>
 <script>
@@ -373,7 +441,7 @@ function update() {
   var monthly = +m.value, rate = +r.value / 100 / 12, years = +y.value;
   document.getElementById("mo").textContent = money(monthly);
   document.getElementById("ro").textContent = (+r.value).toFixed(2) + "%";
-  document.getElementById("yo").textContent = years + (years == 1 ? " year" : " years");
+  document.getElementById("yo").textContent = (years == 1 ? {{js:yearOne}} : {{js:yearOther}}).split("%1").join(years);
   var balance = 0, rows = [];
   for (var i = 1; i <= years * 12; i++) {
     balance = balance * (1 + rate) + monthly;
@@ -381,7 +449,7 @@ function update() {
   }
   var paid = monthly * years * 12;
   document.getElementById("t").textContent = money(balance);
-  document.getElementById("d").textContent = money(paid) + " saved, " + money(balance - paid) + " earned";
+  document.getElementById("d").textContent = {{js:summary}}.split("%1").join(money(paid)).split("%2").join(money(balance - paid));
   var b = document.getElementById("b"); b.innerHTML = "";
   var top = rows[rows.length - 1][0];
   rows.forEach(function (row) {
@@ -397,8 +465,12 @@ update();
 </script></body></html>`
 
 // pianoEmbed is an octave and a half to play with the pointer or the
-// keyboard, through the Web Audio API.
-const pianoEmbed = `<!doctype html>
+// keyboard, through the Web Audio API, in m's language.
+func pianoEmbed(m locales.Messages) string {
+	return fillEmbed(pianoPage, map[string]string{"hint": m.WelcomePianoHint()})
+}
+
+const pianoPage = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
 html,body{margin:0;height:100%;background:#f5f6f8;font:12px -apple-system,system-ui,sans-serif;user-select:none;-webkit-user-select:none}
 .wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px;outline:none}
@@ -415,7 +487,7 @@ html,body{margin:0;height:100%;background:#f5f6f8;font:12px -apple-system,system
 :root[data-theme=dark] .b.on{background:#4f5fd9}
 :root[data-theme=dark] .hint{color:#9ea4af}
 </style></head><body>
-<div class="wrap" tabindex="0" id="wrap"><div class="kb" id="kb"></div><div class="hint">Click the keys, or click here and type the letters on them</div></div>
+<div class="wrap" tabindex="0" id="wrap"><div class="kb" id="kb"></div><div class="hint">{{hint}}</div></div>
 <script>
 var whites = [[0, "A"], [2, "S"], [4, "D"], [5, "F"], [7, "G"], [9, "H"], [11, "J"], [12, "K"], [14, "L"], [16, ";"]];
 var blacks = [[1, "W", 0], [3, "E", 1], [6, "T", 3], [8, "Y", 4], [10, "U", 5], [13, "O", 7], [15, "P", 8]];

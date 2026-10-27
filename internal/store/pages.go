@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/locales"
 )
 
 // Page is a page row.
@@ -34,10 +35,11 @@ type Page struct {
 // DisplayTitle is the title, or "Untitled".
 func (p Page) DisplayTitle() string { return TitleOr(p.Title) }
 
-// TitleOr returns a title, or "Untitled" for a blank one.
+// TitleOr returns a title, or "Untitled" in the app's language for a
+// blank one.
 func TitleOr(t string) string {
 	if strings.TrimSpace(t) == "" {
-		return "Untitled"
+		return locales.CommonUntitled()
 	}
 	return t
 }
@@ -762,7 +764,7 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 			return nil, err
 		}
 		if _, ok := titles[id]; ok {
-			hits = append(hits, SearchHit{Kind: "recording", Title: "Recording · " + TitleOr(titles[id]), PageID: id, BlockID: block})
+			hits = append(hits, SearchHit{Kind: "recording", Title: locales.StoreSearchRecording(TitleOr(titles[id])), PageID: id, BlockID: block})
 		}
 	}
 	_ = rows.Close()
@@ -777,7 +779,7 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 			return nil, err
 		}
 		if _, ok := titles[id]; ok {
-			hits = append(hits, SearchHit{Kind: "comment", Title: body, PageID: id, BlockID: block, Snippet: "Comment on " + TitleOr(titles[id])})
+			hits = append(hits, SearchHit{Kind: "comment", Title: body, PageID: id, BlockID: block, Snippet: locales.StoreSearchCommentOn(TitleOr(titles[id]))})
 		}
 	}
 	_ = rows.Close()

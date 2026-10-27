@@ -1,0 +1,3984 @@
+{
+  "@@locale": "en",
+  "appMenuFile": "File",
+  "@appMenuFile": {
+    "description": "The menu bar: the File menu."
+  },
+  "appMenuView": "View",
+  "@appMenuView": {
+    "description": "The menu bar: the View menu."
+  },
+  "appMenuNewPage": "New Page",
+  "@appMenuNewPage": {
+    "description": "The File menu and the menu bar icon's menu: make a new page."
+  },
+  "appMenuNewFolder": "New Folder",
+  "@appMenuNewFolder": {
+    "description": "The File menu: make a new folder."
+  },
+  "appMenuSearch": "Search",
+  "@appMenuSearch": {
+    "description": "The File menu: open search."
+  },
+  "appMenuExportMarkdown": "Export Page as Markdown…",
+  "@appMenuExportMarkdown": {
+    "description": "The File menu: save the open page as a Markdown file."
+  },
+  "appMenuToggleSidebar": "Toggle Sidebar",
+  "@appMenuToggleSidebar": {
+    "description": "The View menu: show or hide the sidebar."
+  },
+  "appMenuToggleAgentPanel": "Toggle Agent Panel",
+  "@appMenuToggleAgentPanel": {
+    "description": "The View menu: show or hide the agent panel."
+  },
+  "appMenuComments": "Comments",
+  "@appMenuComments": {
+    "description": "The View menu: show the comments panel."
+  },
+  "appMenuForward": "Forward",
+  "@appMenuForward": {
+    "description": "The View menu: go forward to the next page in history."
+  },
+  "appStartFailed": "Leaflet could not start",
+  "@appStartFailed": {
+    "description": "Title of the error dialog when the app fails to start."
+  },
+  "appRouteTodos": "To-dos",
+  "@appRouteTodos": {
+    "description": "The name of the To-dos view, in Back's list of pages."
+  },
+  "appErrorSave": "Could not save: {error}",
+  "@appErrorSave": {
+    "description": "Toast when the open page could not be saved.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "disk full"
+      }
+    }
+  },
+  "appErrorRename": "Could not rename: {error}",
+  "@appErrorRename": {
+    "description": "Toast when a page could not be renamed.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "disk full"
+      }
+    }
+  },
+  "appErrorCreatePage": "Could not create the page: {error}",
+  "@appErrorCreatePage": {
+    "description": "Toast when a new page could not be created.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "disk full"
+      }
+    }
+  },
+  "appErrorLinkSubpage": "Could not link the subpage: {error}",
+  "@appErrorLinkSubpage": {
+    "description": "Toast when a link to a subpage could not be added to its parent page.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "disk full"
+      }
+    }
+  },
+  "appErrorUnlinkSubpage": "Could not unlink the subpage: {error}",
+  "@appErrorUnlinkSubpage": {
+    "description": "Toast when a link to a subpage could not be removed from its old parent page.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "disk full"
+      }
+    }
+  },
+  "appErrorDelete": "Could not delete: {error}",
+  "@appErrorDelete": {
+    "description": "Toast when a page could not be deleted.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "disk full"
+      }
+    }
+  },
+  "appErrorRestore": "Could not restore: {error}",
+  "@appErrorRestore": {
+    "description": "Toast when a deleted page could not be restored with Undo.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "disk full"
+      }
+    }
+  },
+  "appDeleted": "Deleted {title}",
+  "@appDeleted": {
+    "description": "Toast after a page is deleted, with an Undo button.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Ideas"
+      }
+    }
+  },
+  "shellShowSidebar": "Show sidebar",
+  "@shellShowSidebar": {
+    "description": "Tooltip of the title bar button that shows the hidden sidebar."
+  },
+  "shellNoPageOpen": "No page open",
+  "@shellNoPageOpen": {
+    "description": "Heading of the main area when no page is open."
+  },
+  "shellNoPageHint": "Pick a page in the sidebar, or start a new one.",
+  "@shellNoPageHint": {
+    "description": "Text under the heading when no page is open."
+  },
+  "shellNewPage": "New page",
+  "@shellNewPage": {
+    "description": "Button when no page is open: make a new page."
+  },
+  "trayNewRecording": "New Recording",
+  "@trayNewRecording": {
+    "description": "The menu bar icon's menu: start a recording in a new page."
+  },
+  "trayStopRecording": "Stop Recording",
+  "@trayStopRecording": {
+    "description": "The menu bar icon's menu: stop the recording."
+  },
+  "trayShowLeaflet": "Show Leaflet",
+  "@trayShowLeaflet": {
+    "description": "The menu bar icon's menu: bring the window back."
+  },
+  "trayRestartToUpdate": "Restart to Update",
+  "@trayRestartToUpdate": {
+    "description": "The menu bar icon's menu, once an update is installed: restart the app."
+  },
+  "trayQuit": "Quit Leaflet",
+  "@trayQuit": {
+    "description": "The menu bar icon's menu: quit the app."
+  },
+  "outlineEmpty": "The page's headings show here, to go to one.",
+  "@outlineEmpty": {
+    "description": "The outline panel, when the page has no headings."
+  },
+  "outlineBlockGone": "That part of the page is gone",
+  "@outlineBlockGone": {
+    "description": "Toast when a link goes to a block that no longer exists."
+  },
+  "outlineUntitledHeading": "Untitled heading",
+  "@outlineUntitledHeading": {
+    "description": "The outline panel: a heading without text."
+  },
+  "hostGroupBasic": "Basic",
+  "@hostGroupBasic": {
+    "description": "The / menu: the group of basic blocks."
+  },
+  "hostGroupBlocks": "Blocks",
+  "@hostGroupBlocks": {
+    "description": "The / menu: the group of other blocks."
+  },
+  "hostGroupPages": "Pages",
+  "@hostGroupPages": {
+    "description": "The @ menu: the group of pages to mention."
+  },
+  "hostGroupPeople": "People",
+  "@hostGroupPeople": {
+    "description": "The @ menu: the group of people to mention."
+  },
+  "hostAddAgentProvider": "Add an agent provider",
+  "@hostAddAgentProvider": {
+    "description": "The @ menu when no agent provider is set up."
+  },
+  "hostAddAgentProviderHint": "Settings › Agent providers",
+  "@hostAddAgentProviderHint": {
+    "description": "The @ menu: where agent providers are added."
+  },
+  "hostSlashText": "Text",
+  "@hostSlashText": {
+    "description": "The / menu: a paragraph block."
+  },
+  "hostSlashTextHint": "Plain writing",
+  "@hostSlashTextHint": {
+    "description": "The / menu: hint of Text."
+  },
+  "hostSlashHeading1": "Heading 1",
+  "@hostSlashHeading1": {
+    "description": "The / menu."
+  },
+  "hostSlashHeading1Hint": "Big section heading",
+  "@hostSlashHeading1Hint": {
+    "description": "The / menu: hint of Heading 1."
+  },
+  "hostSlashHeading2": "Heading 2",
+  "@hostSlashHeading2": {
+    "description": "The / menu."
+  },
+  "hostSlashHeading2Hint": "Medium section heading",
+  "@hostSlashHeading2Hint": {
+    "description": "The / menu: hint of Heading 2."
+  },
+  "hostSlashHeading3": "Heading 3",
+  "@hostSlashHeading3": {
+    "description": "The / menu."
+  },
+  "hostSlashHeading3Hint": "Small section heading",
+  "@hostSlashHeading3Hint": {
+    "description": "The / menu: hint of Heading 3."
+  },
+  "hostSlashBulleted": "Bulleted list",
+  "@hostSlashBulleted": {
+    "description": "The / menu."
+  },
+  "hostSlashBulletedHint": "A simple list",
+  "@hostSlashBulletedHint": {
+    "description": "The / menu: hint of Bulleted list."
+  },
+  "hostSlashNumbered": "Numbered list",
+  "@hostSlashNumbered": {
+    "description": "The / menu."
+  },
+  "hostSlashNumberedHint": "A list with numbers",
+  "@hostSlashNumberedHint": {
+    "description": "The / menu: hint of Numbered list."
+  },
+  "hostSlashTodo": "To-do list",
+  "@hostSlashTodo": {
+    "description": "The / menu."
+  },
+  "hostSlashTodoHint": "Track tasks",
+  "@hostSlashTodoHint": {
+    "description": "The / menu: hint of To-do list."
+  },
+  "hostSlashQuote": "Quote",
+  "@hostSlashQuote": {
+    "description": "The / menu."
+  },
+  "hostSlashQuoteHint": "Set off a quotation",
+  "@hostSlashQuoteHint": {
+    "description": "The / menu: hint of Quote."
+  },
+  "hostSlashCallout": "Callout",
+  "@hostSlashCallout": {
+    "description": "The / menu."
+  },
+  "hostSlashCalloutHint": "Set off a note, tip or warning",
+  "@hostSlashCalloutHint": {
+    "description": "The / menu: hint of Callout."
+  },
+  "hostSlashToggle": "Toggle",
+  "@hostSlashToggle": {
+    "description": "The / menu: a block that folds away its contents."
+  },
+  "hostSlashToggleHint": "Fold away what is inside",
+  "@hostSlashToggleHint": {
+    "description": "The / menu: hint of Toggle."
+  },
+  "hostSlashCode": "Code",
+  "@hostSlashCode": {
+    "description": "The / menu."
+  },
+  "hostSlashCodeHint": "Code with highlighting",
+  "@hostSlashCodeHint": {
+    "description": "The / menu: hint of Code."
+  },
+  "hostSlashDivider": "Divider",
+  "@hostSlashDivider": {
+    "description": "The / menu."
+  },
+  "hostSlashDividerHint": "A line between sections",
+  "@hostSlashDividerHint": {
+    "description": "The / menu: hint of Divider."
+  },
+  "hostSlashTable": "Table",
+  "@hostSlashTable": {
+    "description": "The / menu."
+  },
+  "hostSlashTableHint": "Rows and columns",
+  "@hostSlashTableHint": {
+    "description": "The / menu: hint of Table."
+  },
+  "hostSlashChart": "Chart",
+  "@hostSlashChart": {
+    "description": "The / menu."
+  },
+  "hostSlashChartHint": "Bar, line or pie",
+  "@hostSlashChartHint": {
+    "description": "The / menu: hint of Chart."
+  },
+  "hostSlashMath": "Math",
+  "@hostSlashMath": {
+    "description": "The / menu."
+  },
+  "hostSlashMathHint": "A formula in TeX",
+  "@hostSlashMathHint": {
+    "description": "The / menu: hint of Math."
+  },
+  "hostSlashDiagram": "Diagram",
+  "@hostSlashDiagram": {
+    "description": "The / menu."
+  },
+  "hostSlashDiagramHint": "A Mermaid flowchart or other diagram",
+  "@hostSlashDiagramHint": {
+    "description": "The / menu: hint of Diagram."
+  },
+  "hostSlashEmbed": "Interactive embed",
+  "@hostSlashEmbed": {
+    "description": "The / menu."
+  },
+  "hostSlashEmbedHint": "HTML that runs sandboxed",
+  "@hostSlashEmbedHint": {
+    "description": "The / menu: hint of Interactive embed."
+  },
+  "hostSlashSubpage": "Subpage",
+  "@hostSlashSubpage": {
+    "description": "The / menu."
+  },
+  "hostSlashSubpageHint": "A page inside this page",
+  "@hostSlashSubpageHint": {
+    "description": "The / menu: hint of Subpage."
+  },
+  "hostSlashImage": "Image",
+  "@hostSlashImage": {
+    "description": "The / menu."
+  },
+  "hostSlashImageHint": "Upload a picture",
+  "@hostSlashImageHint": {
+    "description": "The / menu: hint of Image."
+  },
+  "hostSlashVideo": "Video",
+  "@hostSlashVideo": {
+    "description": "The / menu."
+  },
+  "hostSlashVideoHint": "A YouTube or Vimeo link",
+  "@hostSlashVideoHint": {
+    "description": "The / menu: hint of Video."
+  },
+  "hostSlashLinkCard": "Link card",
+  "@hostSlashLinkCard": {
+    "description": "The / menu."
+  },
+  "hostSlashLinkCardHint": "A web page with its title and picture",
+  "@hostSlashLinkCardHint": {
+    "description": "The / menu: hint of Link card."
+  },
+  "hostSlashFile": "File",
+  "@hostSlashFile": {
+    "description": "The / menu: a file attached to the page."
+  },
+  "hostSlashFileHint": "Attach a file to the page",
+  "@hostSlashFileHint": {
+    "description": "The / menu: hint of File."
+  },
+  "hostSlashRecordingHint": "Audio with a transcript",
+  "@hostSlashRecordingHint": {
+    "description": "The / menu: hint of Recording."
+  },
+  "hostTableColumn": "Column {n}",
+  "@hostTableColumn": {
+    "description": "The header cells of a new table.",
+    "placeholders": {
+      "n": {
+        "type": "int",
+        "example": "1"
+      }
+    }
+  },
+  "hostChartTitle": "New chart",
+  "@hostChartTitle": {
+    "description": "The title of a new chart."
+  },
+  "hostChartSeries": "Value",
+  "@hostChartSeries": {
+    "description": "The name of a new chart's series."
+  },
+  "hostErrorCreateSubpage": "Could not create the subpage: {error}",
+  "@hostErrorCreateSubpage": {
+    "description": "Toast when a subpage could not be created.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "disk full"
+      }
+    }
+  },
+  "hostUploadTitle": "Upload a file",
+  "@hostUploadTitle": {
+    "description": "Title of the file picker to upload a file."
+  },
+  "hostErrorAddFile": "Could not add the file: {error}",
+  "@hostErrorAddFile": {
+    "description": "Toast when an uploaded file could not be added.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "disk full"
+      }
+    }
+  },
+  "hostAddedToSpace": "Added {name} to the space",
+  "@hostAddedToSpace": {
+    "description": "Toast when a file was uploaded while its page was no longer open.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Notes.pdf"
+      }
+    }
+  },
+  "hostDownloading": "Downloading {name}…",
+  "@hostDownloading": {
+    "description": "Toast when a file opened is still downloading.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Notes.pdf"
+      }
+    }
+  },
+  "hostExportTitle": "Export as Markdown",
+  "@hostExportTitle": {
+    "description": "Title of the save dialog exporting a page."
+  },
+  "hostErrorExport": "Could not export: {error}",
+  "@hostErrorExport": {
+    "description": "Toast when a page could not be exported.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "disk full"
+      }
+    }
+  },
+  "hostExported": "Exported {name}",
+  "@hostExported": {
+    "description": "Toast after a page is exported, with the file's name.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Notes.pdf"
+      }
+    }
+  },
+  "hostEditEmbed": "Edit embed",
+  "@hostEditEmbed": {
+    "description": "Accessibility name of the button editing an interactive embed."
+  },
+  "hostSandboxTooltip": "Runs apart from your data, with no network",
+  "@hostSandboxTooltip": {
+    "description": "Tooltip of the Sandboxed badge of an interactive embed."
+  },
+  "hostSandboxed": "Sandboxed",
+  "@hostSandboxed": {
+    "description": "Badge of an interactive embed."
+  },
+  "hostEmbedError": "This cannot show here: {error}",
+  "@hostEmbedError": {
+    "description": "Shown in place of an embed whose web view could not be made.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "disk full"
+      }
+    }
+  },
+  "settingsLanguage": "Language",
+  "@settingsLanguage": {
+    "description": "Settings › Appearance: the row choosing the app's language."
+  },
+  "settingsLanguageSystem": "System",
+  "@settingsLanguageSystem": {
+    "description": "Settings › Appearance › Language: follow the system's languages."
+  },
+  "commonCancel": "Cancel",
+  "@commonCancel": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonClose": "Close",
+  "@commonClose": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonSave": "Save",
+  "@commonSave": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonRemove": "Remove",
+  "@commonRemove": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonDelete": "Delete",
+  "@commonDelete": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonEdit": "Edit",
+  "@commonEdit": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonUndo": "Undo",
+  "@commonUndo": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonCopied": "Copied",
+  "@commonCopied": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonCopy": "Copy",
+  "@commonCopy": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonSignIn": "Sign in",
+  "@commonSignIn": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonSignOut": "Sign out",
+  "@commonSignOut": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonUntitled": "Untitled",
+  "@commonUntitled": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonToday": "Today",
+  "@commonToday": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonYou": "You",
+  "@commonYou": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonAgent": "Agent",
+  "@commonAgent": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonAgents": "Agents",
+  "@commonAgents": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonRecording": "Recording",
+  "@commonRecording": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonEmail": "Email",
+  "@commonEmail": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonOwner": "Owner",
+  "@commonOwner": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonModel": "Model",
+  "@commonModel": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonEndpoint": "Endpoint",
+  "@commonEndpoint": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonRename": "Rename",
+  "@commonRename": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonRetry": "Retry",
+  "@commonRetry": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonDone": "Done",
+  "@commonDone": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonOpen": "Open",
+  "@commonOpen": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonAdd": "Add",
+  "@commonAdd": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonComment": "Comment",
+  "@commonComment": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonPause": "Pause",
+  "@commonPause": {
+    "description": "A common word used in several places of the app."
+  },
+  "commonBack": "Back",
+  "@commonBack": {
+    "description": "A common word used in several places of the app."
+  },
+  "cardSizeGB": "{size, number, ::.0} GB",
+  "@cardSizeGB": {
+    "description": "A file card: a file's size in gigabytes.",
+    "placeholders": {
+      "size": {
+        "type": "double"
+      }
+    }
+  },
+  "cardSizeMB": "{size, number, ::.0} MB",
+  "@cardSizeMB": {
+    "description": "A file card: a file's size in megabytes.",
+    "placeholders": {
+      "size": {
+        "type": "double"
+      }
+    }
+  },
+  "cardSizeKB": "{size, number, integer} KB",
+  "@cardSizeKB": {
+    "description": "A file card: a file's size in kilobytes.",
+    "placeholders": {
+      "size": {
+        "type": "int"
+      }
+    }
+  },
+  "cardSizeBytes": "{count, plural, one {# byte} other {# bytes}}",
+  "@cardSizeBytes": {
+    "description": "A file card: a small file's size in bytes.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "cardOpenFile": "Open {name}",
+  "@cardOpenFile": {
+    "description": "A file card's accessibility name: opens the file.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "cardFile": "File",
+  "@cardFile": {
+    "description": "A file card's name when the file's name is unknown."
+  },
+  "cardNotOnDevice": "Not on this device yet",
+  "@cardNotOnDevice": {
+    "description": "A file card, under the name, when the file has not reached this device."
+  },
+  "cardFileDetail": "{kind} · {size}",
+  "@cardFileDetail": {
+    "description": "A file card, under the name: the file's type (PDF, PNG) and size.",
+    "placeholders": {
+      "kind": {
+        "type": "String"
+      },
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "exportTemplatesFolder": "Templates",
+  "@exportTemplatesFolder": {
+    "description": "Export: the name of the folder in the exported zip holding the templates."
+  },
+  "templateDuplicateFailed": "Could not duplicate: {error}",
+  "@templateDuplicateFailed": {
+    "description": "A toast when duplicating a page fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "templateCopyTitle": "{title} copy",
+  "@templateCopyTitle": {
+    "description": "The title of a duplicated page, as Finder names a copy.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "templateSaveFailed": "Could not save the template: {error}",
+  "@templateSaveFailed": {
+    "description": "A toast when saving a page as a template fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "templateSaved": "Saved {title} as a template",
+  "@templateSaved": {
+    "description": "A toast after a page is saved as a template, with an Edit button.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "templateUseFailed": "Could not use the template: {error}",
+  "@templateUseFailed": {
+    "description": "A toast when filling a page from a template fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "templatePill": "Template",
+  "@templatePill": {
+    "description": "A badge marking a template among pages and search results."
+  },
+  "templateSectionTitle": "Templates",
+  "@templateSectionTitle": {
+    "description": "A blank page: the heading over the templates to start it from."
+  },
+  "templateEdit": "Edit template",
+  "@templateEdit": {
+    "description": "A blank page: a template's menu item opening it to edit."
+  },
+  "templateDelete": "Delete template",
+  "@templateDelete": {
+    "description": "A blank page: a template's menu item deleting it."
+  },
+  "templateHintEmpty": "Empty",
+  "@templateHintEmpty": {
+    "description": "A blank page: under a template's name, when it has no text or subpages."
+  },
+  "templateHintSubpages": "{count, plural, one {# subpage} other {# subpages}}",
+  "@templateHintSubpages": {
+    "description": "A blank page: under a template's name, when it has subpages but no text.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dialogSearchPlaceholder": "Search pages, templates, recordings and comments",
+  "@dialogSearchPlaceholder": {
+    "description": "Search dialog: the field's placeholder."
+  },
+  "dialogSearchRecent": "Recent",
+  "@dialogSearchRecent": {
+    "description": "Search dialog: the heading over recent pages, before anything is typed."
+  },
+  "dialogSearchNoMatch": "Nothing matches “{query}”",
+  "@dialogSearchNoMatch": {
+    "description": "Search dialog: nothing found for the query.",
+    "placeholders": {
+      "query": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogSearchAskAgent": "Ask an agent instead",
+  "@dialogSearchAskAgent": {
+    "description": "Search dialog: a button, when nothing matches, asking an agent the query."
+  },
+  "dialogFolderNew": "New folder",
+  "@dialogFolderNew": {
+    "description": "Folder dialog: the title when creating a folder."
+  },
+  "dialogFolderRename": "Rename folder",
+  "@dialogFolderRename": {
+    "description": "Folder dialog: the title when renaming a folder."
+  },
+  "dialogFolderSubtitle": "Folders group pages and files in your space.",
+  "@dialogFolderSubtitle": {
+    "description": "Folder dialog: the subtitle."
+  },
+  "dialogFolderName": "Folder name",
+  "@dialogFolderName": {
+    "description": "Folder dialog: the name field's placeholder."
+  },
+  "dialogFolderRenameFailed": "Could not rename: {error}",
+  "@dialogFolderRenameFailed": {
+    "description": "A toast when renaming a folder fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogFolderCreate": "Create",
+  "@dialogFolderCreate": {
+    "description": "Folder dialog: the button creating the folder."
+  },
+  "dialogMoveTitle": "Move “{title}”",
+  "@dialogMoveTitle": {
+    "description": "Move dialog: the title, naming the page moved.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogMoveSubtitle": "Choose where it goes.",
+  "@dialogMoveSubtitle": {
+    "description": "Move dialog: the subtitle."
+  },
+  "dialogMoveSearch": "Search pages",
+  "@dialogMoveSearch": {
+    "description": "Move dialog: the search field's placeholder."
+  },
+  "dialogMoveTopLevel": "Top level of My space",
+  "@dialogMoveTopLevel": {
+    "description": "Move dialog: the destination at the top level of the user's space."
+  },
+  "dialogHistoryAgentRun": "Before an agent run",
+  "@dialogHistoryAgentRun": {
+    "description": "Page history: why a version was kept: before an agent edited the page."
+  },
+  "dialogHistoryAutosave": "Autosave",
+  "@dialogHistoryAutosave": {
+    "description": "Page history: why a version was kept: saved automatically."
+  },
+  "dialogHistoryBeforeRestore": "Before a restore",
+  "@dialogHistoryBeforeRestore": {
+    "description": "Page history: why a version was kept: before an earlier version was restored."
+  },
+  "dialogHistoryConflict": "Conflict",
+  "@dialogHistoryConflict": {
+    "description": "Page history: why a version was kept: a sync conflict."
+  },
+  "dialogHistoryKeepFailed": "Could not keep the version: {error}",
+  "@dialogHistoryKeepFailed": {
+    "description": "A toast when naming a version fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogHistoryTitle": "Page history",
+  "@dialogHistoryTitle": {
+    "description": "Page history dialog: the title."
+  },
+  "dialogHistoryNameVersion": "Name the current version",
+  "@dialogHistoryNameVersion": {
+    "description": "Page history: the button naming the current version."
+  },
+  "dialogHistoryNamePlaceholder": "Name, as “Sent to legal”",
+  "@dialogHistoryNamePlaceholder": {
+    "description": "Page history: the version name field's placeholder."
+  },
+  "dialogHistoryEmpty": "No earlier versions yet. Leaflet keeps one every ten minutes of editing and before each agent run.",
+  "@dialogHistoryEmpty": {
+    "description": "Page history: the list of versions when there are none."
+  },
+  "dialogHistoryWhen": "{at, date, ::MMMdHm}",
+  "@dialogHistoryWhen": {
+    "description": "Page history: when a version was kept, its date and time.",
+    "placeholders": {
+      "at": {
+        "type": "DateTime"
+      }
+    }
+  },
+  "dialogHistoryThisVersion": "This version",
+  "@dialogHistoryThisVersion": {
+    "description": "Page history: the tab showing the chosen version."
+  },
+  "dialogHistoryChangesSince": "Changes since",
+  "@dialogHistoryChangesSince": {
+    "description": "Page history: the tab showing what changed since the chosen version."
+  },
+  "dialogHistorySideBySide": "Side by side",
+  "@dialogHistorySideBySide": {
+    "description": "Page history: the toggle showing changes in two columns."
+  },
+  "dialogHistoryLines": "{count, plural, one {line} other {lines}}",
+  "@dialogHistoryLines": {
+    "description": "Page history: after the counts of lines added and removed (+3 −2 lines).",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "dialogHistoryRestore": "Restore this version",
+  "@dialogHistoryRestore": {
+    "description": "Page history: the button restoring the chosen version."
+  },
+  "dialogHistoryNoChanges": "No changes since this version",
+  "@dialogHistoryNoChanges": {
+    "description": "Page history: the changes tab when nothing changed."
+  },
+  "dialogHistoryBeforeRestoring": "Before restoring {at, date, ::MMMdHm}",
+  "@dialogHistoryBeforeRestoring": {
+    "description": "Page history: the name given to the version kept before a restore, with the time.",
+    "placeholders": {
+      "at": {
+        "type": "DateTime"
+      }
+    }
+  },
+  "dialogHistoryRestoreFailed": "Could not restore: {error}",
+  "@dialogHistoryRestoreFailed": {
+    "description": "A toast when restoring a version fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogHistoryRestored": "Restored the earlier version",
+  "@dialogHistoryRestored": {
+    "description": "A toast after a version is restored."
+  },
+  "dialogShareTitle": "Share “{title}”",
+  "@dialogShareTitle": {
+    "description": "Share dialog: the title, naming the page.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogShareSubtitle": "People you add can open this page and its subpages.",
+  "@dialogShareSubtitle": {
+    "description": "Share dialog: the subtitle."
+  },
+  "dialogShareLocalOnly": "This build runs on this device only. Sharing needs a Leaflet server.",
+  "@dialogShareLocalOnly": {
+    "description": "Share dialog: a notice when the app has no server."
+  },
+  "dialogShareSignIn": "Sign in to share pages with other people.",
+  "@dialogShareSignIn": {
+    "description": "Share dialog: a notice when signed out."
+  },
+  "dialogShareOwnerOnly": "Only the owner of this space can change who it is shared with.",
+  "@dialogShareOwnerOnly": {
+    "description": "Share dialog: a notice on a page shared with the user."
+  },
+  "dialogShareInvitee": "Name or email",
+  "@dialogShareInvitee": {
+    "description": "Share dialog: the field of the person to invite."
+  },
+  "dialogShareCanEdit": "Can edit",
+  "@dialogShareCanEdit": {
+    "description": "Share dialog: the role of a person who can edit."
+  },
+  "dialogShareCanView": "Can view",
+  "@dialogShareCanView": {
+    "description": "Share dialog: the role of a person who can only view."
+  },
+  "dialogShareInvite": "Invite",
+  "@dialogShareInvite": {
+    "description": "Share dialog: the button inviting the person."
+  },
+  "dialogSharePeople": "People with access",
+  "@dialogSharePeople": {
+    "description": "Share dialog: the heading over the people the page is shared with."
+  },
+  "dialogShareYou": "{name} (you)",
+  "@dialogShareYou": {
+    "description": "Share dialog: the user's own row.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogShareCopyLink": "Copy link",
+  "@dialogShareCopyLink": {
+    "description": "Share dialog: the button copying the page's link."
+  },
+  "dialogShareLinkCopied": "Link copied",
+  "@dialogShareLinkCopied": {
+    "description": "A toast after the page's link is copied."
+  },
+  "dialogChartNeedRows": "Add a header row and at least one row of values.",
+  "@dialogChartNeedRows": {
+    "description": "Chart dialog: an error when the data has too few rows."
+  },
+  "dialogChartNeedSeries": "The header needs a label column and at least one series.",
+  "@dialogChartNeedSeries": {
+    "description": "Chart dialog: an error when the header has too few columns."
+  },
+  "dialogChartNotNumber": "Row {row}: “{value}” is not a number.",
+  "@dialogChartNotNumber": {
+    "description": "Chart dialog: an error when a value is not a number.",
+    "placeholders": {
+      "row": {
+        "type": "int"
+      },
+      "value": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogChartLabelColumn": "label",
+  "@dialogChartLabelColumn": {
+    "description": "Chart dialog: the name of the first column in the data, lowercase like a CSV header."
+  },
+  "dialogChartTitle": "Chart data",
+  "@dialogChartTitle": {
+    "description": "Chart dialog: the title."
+  },
+  "dialogChartSubtitle": "One row per label. Columns after the first are series.",
+  "@dialogChartSubtitle": {
+    "description": "Chart dialog: the subtitle."
+  },
+  "dialogFieldTitle": "Title",
+  "@dialogFieldTitle": {
+    "description": "Chart and embed dialogs: the title field's placeholder."
+  },
+  "dialogChartBar": "Bar",
+  "@dialogChartBar": {
+    "description": "Chart dialog: the bar chart kind."
+  },
+  "dialogChartLine": "Line",
+  "@dialogChartLine": {
+    "description": "Chart dialog: the line chart kind."
+  },
+  "dialogChartPie": "Pie",
+  "@dialogChartPie": {
+    "description": "Chart dialog: the pie chart kind."
+  },
+  "dialogChartCaption": "Caption (optional)",
+  "@dialogChartCaption": {
+    "description": "Chart dialog: the caption field's placeholder."
+  },
+  "dialogChartSave": "Save chart",
+  "@dialogChartSave": {
+    "description": "Chart dialog: the button saving the chart."
+  },
+  "dialogEmbedTitle": "Interactive embed",
+  "@dialogEmbedTitle": {
+    "description": "Embed dialog: the title, and the default title of a new embed."
+  },
+  "dialogEmbedSubtitle": "HTML, CSS and JavaScript that run sandboxed, with no network or storage.",
+  "@dialogEmbedSubtitle": {
+    "description": "Embed dialog: the subtitle."
+  },
+  "dialogEmbedHeight": "Height",
+  "@dialogEmbedHeight": {
+    "description": "Embed dialog: the label of the height field."
+  },
+  "dialogInsert": "Insert",
+  "@dialogInsert": {
+    "description": "Embed and link dialogs: the button inserting the block."
+  },
+  "dialogLinkCardTitle": "Link card",
+  "@dialogLinkCardTitle": {
+    "description": "Link dialog: the title when adding a link card."
+  },
+  "dialogLinkCardSubtitle": "Paste a link to a web page.",
+  "@dialogLinkCardSubtitle": {
+    "description": "Link dialog: the subtitle when adding a link card."
+  },
+  "dialogLinkVideoTitle": "Video",
+  "@dialogLinkVideoTitle": {
+    "description": "Link dialog: the title when adding a video."
+  },
+  "dialogLinkVideoSubtitle": "Paste a YouTube or Vimeo link.",
+  "@dialogLinkVideoSubtitle": {
+    "description": "Link dialog: the subtitle when adding a video."
+  },
+  "dialogLinkNotVideo": "That isn't a YouTube or Vimeo link.",
+  "@dialogLinkNotVideo": {
+    "description": "Link dialog: an error when the link is not a video."
+  },
+  "dialogLinkNotWeb": "That isn't a web link.",
+  "@dialogLinkNotWeb": {
+    "description": "Link dialog: an error when the link is not a web link."
+  },
+  "dialogInlineAsk": "Ask {name}",
+  "@dialogInlineAsk": {
+    "description": "Inline agent prompt: the title, naming the agent.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogInlineAskAbout": "Ask {name} about “{quote}”",
+  "@dialogInlineAskAbout": {
+    "description": "Inline agent prompt: the title, naming the agent and the selected text.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "quote": {
+        "type": "String"
+      }
+    }
+  },
+  "dialogInlineWorking": "Working…",
+  "@dialogInlineWorking": {
+    "description": "Inline agent prompt: while the agent works."
+  },
+  "dialogInlineInsert": "Insert into page",
+  "@dialogInlineInsert": {
+    "description": "Inline agent prompt: the button putting the agent's reply in the page."
+  },
+  "dialogInlineExplain": "Explain this",
+  "@dialogInlineExplain": {
+    "description": "Inline agent prompt on a selection: a suggestion chip, sent to the agent as the instruction."
+  },
+  "dialogInlineShorter": "Make it shorter",
+  "@dialogInlineShorter": {
+    "description": "Inline agent prompt on a selection: a suggestion chip, sent to the agent as the instruction."
+  },
+  "dialogInlineGrammar": "Fix the grammar",
+  "@dialogInlineGrammar": {
+    "description": "Inline agent prompt on a selection: a suggestion chip, sent to the agent as the instruction."
+  },
+  "dialogInlineList": "Turn into a list",
+  "@dialogInlineList": {
+    "description": "Inline agent prompt on a selection: a suggestion chip, sent to the agent as the instruction."
+  },
+  "dialogInlineChart": "Chart these numbers",
+  "@dialogInlineChart": {
+    "description": "Inline agent prompt on a selection: a suggestion chip, sent to the agent as the instruction."
+  },
+  "dialogInlinePlaceholder": "Ask the agent to write, rewrite or explain…",
+  "@dialogInlinePlaceholder": {
+    "description": "Inline agent prompt: the field's placeholder."
+  },
+  "dialogInlineSend": "Send",
+  "@dialogInlineSend": {
+    "description": "Inline agent prompt: the button sending the instruction."
+  },
+  "storeSearchRecording": "Recording · {title}",
+  "@storeSearchRecording": {
+    "description": "Search results: a recording's transcript matched, in the page titled title.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "storeSearchCommentOn": "Comment on {title}",
+  "@storeSearchCommentOn": {
+    "description": "Search results: under a matching comment, the page it is on.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "editorCodePlainText": "Plain text",
+  "@editorCodePlainText": {
+    "description": "A code block's language menu: no language."
+  },
+  "shellHistoryBack": "Back",
+  "@shellHistoryBack": {
+    "description": "The page header: go back in the history of pages; MyGo's button says it in English only."
+  },
+  "shellHistoryForward": "Forward",
+  "@shellHistoryForward": {
+    "description": "The page header: go forward in the history of pages."
+  },
+  "pageRecord": "Record",
+  "@pageRecord": {
+    "description": "Page title bar: button starting a recording."
+  },
+  "pageShare": "Share",
+  "@pageShare": {
+    "description": "Page title bar: button opening sharing."
+  },
+  "pageActions": "Page actions",
+  "@pageActions": {
+    "description": "Accessibility name/tooltip of a page's ⋯ menu button (title bar and sidebar)."
+  },
+  "pageShowPanel": "Show agent and comments (⌘J)",
+  "@pageShowPanel": {
+    "description": "Page title bar: tooltip of the button opening the side panel."
+  },
+  "pageBreadcrumbsLabel": "Where the page is",
+  "@pageBreadcrumbsLabel": {
+    "description": "Accessibility name of the page's breadcrumbs."
+  },
+  "pageSharedBadge": "Shared",
+  "@pageSharedBadge": {
+    "description": "Badge after the breadcrumbs of a shared page."
+  },
+  "pageViewOnly": "View only",
+  "@pageViewOnly": {
+    "description": "Badge after the breadcrumbs of a page the user cannot edit."
+  },
+  "pageSyncOffline": "Offline",
+  "@pageSyncOffline": {
+    "description": "Sync status tooltip and the sidebar's account line, while offline."
+  },
+  "pageSyncOfflineQueued": "{count, plural, one {Offline · # edit queued} other {Offline · # edits queued}}",
+  "@pageSyncOfflineQueued": {
+    "description": "Sync status tooltip: offline with edits waiting.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "3"
+      }
+    }
+  },
+  "pageSyncGoOnline": "{status} · click to go back online",
+  "@pageSyncGoOnline": {
+    "description": "Sync status tooltip while working offline on purpose; status is the offline text before it.",
+    "placeholders": {
+      "status": {
+        "type": "String",
+        "example": "Offline"
+      }
+    }
+  },
+  "pageSyncFailed": "Last sync failed: {error} · click to try again",
+  "@pageSyncFailed": {
+    "description": "Sync status tooltip after a failed sync.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "pageTitleLabel": "Page title",
+  "@pageTitleLabel": {
+    "description": "Accessibility name of the page's title field."
+  },
+  "pageBylineSomeone": "Someone",
+  "@pageBylineSomeone": {
+    "description": "Byline under the title: who edited, when unknown."
+  },
+  "pageBylineSaving": "Saving…",
+  "@pageBylineSaving": {
+    "description": "Byline under the title, in place of the time, while saving."
+  },
+  "pageBylineEdited": "Edited by {name} · {when}",
+  "@pageBylineEdited": {
+    "description": "Byline under the page title: who edited and when (a relative time).",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Ada"
+      },
+      "when": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+  "pageBylineSharedWith": "Shared with {count}",
+  "@pageBylineSharedWith": {
+    "description": "Byline under the title: how many people the page is shared with.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "2"
+      }
+    }
+  },
+  "pageTimeJustNow": "just now",
+  "@pageTimeJustNow": {
+    "description": "A relative time: less than a minute ago. Shown in bylines, comments and settings."
+  },
+  "pageTimeMinutesAgo": "{count, plural, one {# min ago} other {# min ago}}",
+  "@pageTimeMinutesAgo": {
+    "description": "A relative time: minutes ago.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "5"
+      }
+    }
+  },
+  "pageTimeTodayAt": "today at {at, time, short}",
+  "@pageTimeTodayAt": {
+    "description": "A relative time: earlier today, at a time.",
+    "placeholders": {
+      "at": {
+        "type": "DateTime"
+      }
+    }
+  },
+  "pageTimeYesterdayAt": "yesterday at {at, time, short}",
+  "@pageTimeYesterdayAt": {
+    "description": "A relative time: yesterday, at a time.",
+    "placeholders": {
+      "at": {
+        "type": "DateTime"
+      }
+    }
+  },
+  "pageTimeDate": "{date, date, ::MMMd}",
+  "@pageTimeDate": {
+    "description": "A date this year, as Jan 2.",
+    "placeholders": {
+      "date": {
+        "type": "DateTime"
+      }
+    }
+  },
+  "pageTimeDateYear": "{date, date, ::yMMMd}",
+  "@pageTimeDateYear": {
+    "description": "A date of another year, as Jan 2, 2025.",
+    "placeholders": {
+      "date": {
+        "type": "DateTime"
+      }
+    }
+  },
+  "pageStartWith": "Start with",
+  "@pageStartWith": {
+    "description": "Heading over the ways to start an empty page."
+  },
+  "pageTemplateActions": "Template actions",
+  "@pageTemplateActions": {
+    "description": "Empty page: accessibility name of a template row's ⋯ menu button."
+  },
+  "pageDraftWithAgent": "Draft with an agent",
+  "@pageDraftWithAgent": {
+    "description": "Empty page: a way to start it."
+  },
+  "pageDraftWithAgentHint": "Say what this page is for",
+  "@pageDraftWithAgentHint": {
+    "description": "Empty page: the hint under Draft with an agent."
+  },
+  "pageAddSubpage": "Add a subpage",
+  "@pageAddSubpage": {
+    "description": "Empty page row, and the sidebar's + button on a page."
+  },
+  "pageAddSubpageHint": "Pages nest inside pages",
+  "@pageAddSubpageHint": {
+    "description": "Empty page: the hint under Add a subpage."
+  },
+  "pageUpload": "Upload a file",
+  "@pageUpload": {
+    "description": "Empty page: a way to start it."
+  },
+  "pageUploadHint": "Pictures and files go in the page",
+  "@pageUploadHint": {
+    "description": "Empty page: the hint under Upload a file."
+  },
+  "pageRunEdited": "{agent} edited {count, plural, one {# block} other {# blocks}}",
+  "@pageRunEdited": {
+    "description": "Bar at the bottom of a page after an agent edited it.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "Claude"
+      },
+      "count": {
+        "type": "int",
+        "example": "3"
+      }
+    }
+  },
+  "pageRunUndone": "Undid {agent}'s edits",
+  "@pageRunUndone": {
+    "description": "Bar at the bottom of a page after the agent's edits were undone.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "Claude"
+      }
+    }
+  },
+  "pageRedo": "Redo",
+  "@pageRedo": {
+    "description": "Button redoing an agent's undone edits (page bar and chat)."
+  },
+  "pageDismiss": "Dismiss",
+  "@pageDismiss": {
+    "description": "Accessibility name of the × of the agent run bar."
+  },
+  "pageAgentWorking": "{agent} is working…",
+  "@pageAgentWorking": {
+    "description": "Bar at the bottom of a page while an agent runs.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "Claude"
+      }
+    }
+  },
+  "pageConflicts": "{count, plural, one {# block changed here and on another device while apart. One version of each was kept.} other {# blocks changed here and on another device while apart. One version of each was kept.}}",
+  "@pageConflicts": {
+    "description": "Notice over a page with sync conflicts.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "2"
+      }
+    }
+  },
+  "pageReview": "Review",
+  "@pageReview": {
+    "description": "Button in the conflicts notice, opening Settings."
+  },
+  "panelTabComments": "Comments",
+  "@panelTabComments": {
+    "description": "Side panel tab."
+  },
+  "panelTabOutline": "Outline",
+  "@panelTabOutline": {
+    "description": "Side panel tab."
+  },
+  "panelNewConversation": "New conversation",
+  "@panelNewConversation": {
+    "description": "Side panel: button starting a new agent chat."
+  },
+  "panelHide": "Hide panel (⌘J)",
+  "@panelHide": {
+    "description": "Side panel: tooltip of the button hiding it."
+  },
+  "panelNoProviderTitle": "Add an agent provider",
+  "@panelNoProviderTitle": {
+    "description": "Agent panel when no provider is set up: heading."
+  },
+  "panelNoProviderBody": "Agents run on a service you choose: a cloud one such as OpenAI or Claude, or a model server on your machine, such as Ollama.",
+  "@panelNoProviderBody": {
+    "description": "Agent panel when no provider is set up: explanation."
+  },
+  "panelOpenProviders": "Open Settings › Agent providers",
+  "@panelOpenProviders": {
+    "description": "Agent panel when no provider is set up: button."
+  },
+  "panelChatEmpty": "Ask about this page, or have an agent write in it.",
+  "@panelChatEmpty": {
+    "description": "Agent panel with no messages yet."
+  },
+  "panelSuggestSummarize": "Summarize this page",
+  "@panelSuggestSummarize": {
+    "description": "Agent panel suggestion; clicked, it is sent as the user's message."
+  },
+  "panelSuggestStructure": "Suggest a structure for this page",
+  "@panelSuggestStructure": {
+    "description": "Agent panel suggestion; clicked, it is sent as the user's message."
+  },
+  "panelSuggestGaps": "Find gaps or open questions",
+  "@panelSuggestGaps": {
+    "description": "Agent panel suggestion; clicked, it is sent as the user's message."
+  },
+  "panelSuggestChart": "Turn the numbers here into a chart",
+  "@panelSuggestChart": {
+    "description": "Agent panel suggestion; clicked, it is sent as the user's message."
+  },
+  "panelAskPlaceholder": "Ask the agent…",
+  "@panelAskPlaceholder": {
+    "description": "Placeholder of the agent chat's text box."
+  },
+  "panelSend": "Send",
+  "@panelSend": {
+    "description": "Accessibility name of the chat's send button."
+  },
+  "panelNoAgent": "No agent",
+  "@panelNoAgent": {
+    "description": "Agent picker, when no agent is chosen."
+  },
+  "panelManageProviders": "Manage agent providers…",
+  "@panelManageProviders": {
+    "description": "Agent picker menu item."
+  },
+  "panelCommentsEmpty": "No open comments",
+  "@panelCommentsEmpty": {
+    "description": "Comments panel empty state: heading."
+  },
+  "panelCommentsEmptyHint": "Select text in the page and choose Comment. Mention an agent with @ in a reply to have it answer.",
+  "@panelCommentsEmptyHint": {
+    "description": "Comments panel empty state: explanation."
+  },
+  "panelShowResolved": "{count, plural, one {Show # resolved} other {Show # resolved}}",
+  "@panelShowResolved": {
+    "description": "Comments panel: button showing resolved threads.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "2"
+      }
+    }
+  },
+  "panelHideResolved": "Hide resolved",
+  "@panelHideResolved": {
+    "description": "Comments panel: button hiding resolved threads."
+  },
+  "panelCommentPlaceholder": "Add a comment… (@ an agent to ask it)",
+  "@panelCommentPlaceholder": {
+    "description": "Placeholder of a new comment's text box."
+  },
+  "panelQuote": "“{text}”",
+  "@panelQuote": {
+    "description": "The quoted text a comment is on.",
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "panelOnBlock": "On a block",
+  "@panelOnBlock": {
+    "description": "Comment thread on a whole block, with no quoted text."
+  },
+  "panelReopen": "Reopen",
+  "@panelReopen": {
+    "description": "Comment thread: button reopening a resolved thread."
+  },
+  "panelResolve": "Resolve",
+  "@panelResolve": {
+    "description": "Comment thread: button resolving it."
+  },
+  "panelCouldNotReopen": "Could not reopen: {error}",
+  "@panelCouldNotReopen": {
+    "description": "Toast.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "panelCouldNotResolve": "Could not resolve: {error}",
+  "@panelCouldNotResolve": {
+    "description": "Toast.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "panelReplyPlaceholder": "Reply…",
+  "@panelReplyPlaceholder": {
+    "description": "Placeholder of a thread's reply box."
+  },
+  "panelReply": "Reply",
+  "@panelReply": {
+    "description": "Tooltip of a thread's send-reply button."
+  },
+  "panelCommentActions": "Comment actions",
+  "@panelCommentActions": {
+    "description": "Accessibility name of a comment's ⋯ menu button."
+  },
+  "panelDeleteComment": "Delete comment",
+  "@panelDeleteComment": {
+    "description": "Comment menu item."
+  },
+  "panelCouldNotDelete": "Could not delete: {error}",
+  "@panelCouldNotDelete": {
+    "description": "Toast after deleting a comment failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "sidebarSearch": "Search (⌘P)",
+  "@sidebarSearch": {
+    "description": "Sidebar: tooltip of the search button."
+  },
+  "sidebarNewPage": "New page (⌘N)",
+  "@sidebarNewPage": {
+    "description": "Sidebar: tooltip of the new page button."
+  },
+  "sidebarHide": "Hide sidebar (⌘\\)",
+  "@sidebarHide": {
+    "description": "Sidebar: tooltip of the button hiding it."
+  },
+  "sidebarNoPages": "No pages yet",
+  "@sidebarNoPages": {
+    "description": "Sidebar with no pages."
+  },
+  "sidebarNewPageInFolder": "New page in folder",
+  "@sidebarNewPageInFolder": {
+    "description": "Folder menu item."
+  },
+  "sidebarUploadFile": "Upload file…",
+  "@sidebarUploadFile": {
+    "description": "Folder menu item."
+  },
+  "sidebarRenameEllipsis": "Rename…",
+  "@sidebarRenameEllipsis": {
+    "description": "Folder menu item."
+  },
+  "sidebarDeleteFolder": "Delete folder",
+  "@sidebarDeleteFolder": {
+    "description": "Folder menu item."
+  },
+  "sidebarCouldNotDelete": "Could not delete: {error}",
+  "@sidebarCouldNotDelete": {
+    "description": "Toast after deleting a folder or file failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "sidebarFolderDeleted": "Deleted {name}. Its pages moved to the top level.",
+  "@sidebarFolderDeleted": {
+    "description": "Toast after deleting a folder.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Projects"
+      }
+    }
+  },
+  "sidebarMySpace": "My space",
+  "@sidebarMySpace": {
+    "description": "Sidebar section header."
+  },
+  "sidebarSharedWithMe": "Shared with me",
+  "@sidebarSharedWithMe": {
+    "description": "Sidebar section header."
+  },
+  "sidebarNewFolder": "New folder",
+  "@sidebarNewFolder": {
+    "description": "Sidebar: tooltip of My space's + button."
+  },
+  "sidebarFolderActions": "Folder actions",
+  "@sidebarFolderActions": {
+    "description": "Accessibility name of a folder's ⋯ menu button."
+  },
+  "sidebarDeleteFile": "Delete file",
+  "@sidebarDeleteFile": {
+    "description": "File context menu item."
+  },
+  "sidebarCouldNotMove": "Could not move: {error}",
+  "@sidebarCouldNotMove": {
+    "description": "Toast after moving a page failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "sidebarAddSubpage": "Add subpage",
+  "@sidebarAddSubpage": {
+    "description": "Page menu item."
+  },
+  "sidebarMoveTo": "Move to…",
+  "@sidebarMoveTo": {
+    "description": "Page menu item."
+  },
+  "sidebarDuplicate": "Duplicate",
+  "@sidebarDuplicate": {
+    "description": "Page menu item."
+  },
+  "sidebarSaveAsTemplate": "Save as template",
+  "@sidebarSaveAsTemplate": {
+    "description": "Page menu item."
+  },
+  "sidebarPageHistory": "Page history",
+  "@sidebarPageHistory": {
+    "description": "Page menu item."
+  },
+  "sidebarShareEllipsis": "Share…",
+  "@sidebarShareEllipsis": {
+    "description": "Page menu item."
+  },
+  "sidebarExportMarkdown": "Export as Markdown…",
+  "@sidebarExportMarkdown": {
+    "description": "Page menu item."
+  },
+  "sidebarKeepOnDevice": "Keep on this device",
+  "@sidebarKeepOnDevice": {
+    "description": "Page menu item (checkbox): keep the page offline."
+  },
+  "sidebarCouldNotSave": "Could not save: {error}",
+  "@sidebarCouldNotSave": {
+    "description": "Toast after saving failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "sidebarRestartToUpdate": "Restart to update to {version}",
+  "@sidebarRestartToUpdate": {
+    "description": "Sidebar footer: tooltip of the update button.",
+    "placeholders": {
+      "version": {
+        "type": "String",
+        "example": "1.2.0"
+      }
+    }
+  },
+  "sidebarSettings": "Settings (⌘,)",
+  "@sidebarSettings": {
+    "description": "Sidebar footer: tooltip of the settings button."
+  },
+  "sidebarOnDevice": "On this device",
+  "@sidebarOnDevice": {
+    "description": "Sidebar footer: account line when not signed in."
+  },
+  "sidebarSyncing": "Syncing…",
+  "@sidebarSyncing": {
+    "description": "Sidebar footer: account line while syncing."
+  },
+  "sidebarToSync": "{count, plural, one {# change to sync} other {# changes to sync}}",
+  "@sidebarToSync": {
+    "description": "Sidebar footer: account line with changes waiting.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "3"
+      }
+    }
+  },
+  "sidebarSynced": "Synced",
+  "@sidebarSynced": {
+    "description": "Sidebar footer: account line when all is synced."
+  },
+  "todosTitle": "To-dos",
+  "@todosTitle": {
+    "description": "To-dos view title, and the sidebar button opening it."
+  },
+  "todosEmptyTitle": "Nothing to do",
+  "@todosEmptyTitle": {
+    "description": "To-dos view empty state: heading."
+  },
+  "todosEmptyBody": "To-dos with a date, or someone @mentioned, show here from every page.",
+  "@todosEmptyBody": {
+    "description": "To-dos view empty state: explanation."
+  },
+  "todosSectionOverdue": "Overdue",
+  "@todosSectionOverdue": {
+    "description": "To-dos view section header."
+  },
+  "todosSectionUpcoming": "Upcoming",
+  "@todosSectionUpcoming": {
+    "description": "To-dos view section header."
+  },
+  "todosSectionNoDate": "No date",
+  "@todosSectionNoDate": {
+    "description": "To-dos view section header."
+  },
+  "todosUntitled": "To-do",
+  "@todosUntitled": {
+    "description": "A to-do with no text."
+  },
+  "todosPageAndOwner": "{page} · {owner}",
+  "@todosPageAndOwner": {
+    "description": "To-dos view: the line under a to-do, its page and owner.",
+    "placeholders": {
+      "page": {
+        "type": "String"
+      },
+      "owner": {
+        "type": "String"
+      }
+    }
+  },
+  "todosFinished": "Done: {text}",
+  "@todosFinished": {
+    "description": "Toast after checking off a to-do.",
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "todosDueToday": "Due today",
+  "@todosDueToday": {
+    "description": "Reminder notification title."
+  },
+  "todosOverdueOn": "Overdue · {when}",
+  "@todosOverdueOn": {
+    "description": "Reminder notification title of an overdue to-do; when is its due date.",
+    "placeholders": {
+      "when": {
+        "type": "String",
+        "example": "Yesterday"
+      }
+    }
+  },
+  "renderedMath": "Math",
+  "@renderedMath": {
+    "description": "Name of a math block, shown over it and as a dialog title."
+  },
+  "renderedDiagram": "Diagram",
+  "@renderedDiagram": {
+    "description": "Name of a diagram block, shown over it and as a dialog title."
+  },
+  "renderedWriteFormula": "Write a formula",
+  "@renderedWriteFormula": {
+    "description": "An empty math block's button."
+  },
+  "renderedWriteDiagram": "Write a diagram",
+  "@renderedWriteDiagram": {
+    "description": "An empty diagram block's button."
+  },
+  "renderedEditMath": "Edit math",
+  "@renderedEditMath": {
+    "description": "Accessibility name of a math block's Edit button."
+  },
+  "renderedEditDiagram": "Edit diagram",
+  "@renderedEditDiagram": {
+    "description": "Accessibility name of a diagram block's Edit button."
+  },
+  "renderedMathHelp": "A formula in TeX, as \\frac'{a}{b}' or \\sum_'{i=1}'^n i^2, drawn in display style.",
+  "@renderedMathHelp": {
+    "description": "Math source dialog subtitle. The TeX examples stay as they are; apostrophes quote the braces."
+  },
+  "renderedDiagramHelp": "Mermaid: a flowchart, sequence, class, state, Gantt or other diagram.",
+  "@renderedDiagramHelp": {
+    "description": "Diagram source dialog subtitle."
+  },
+  "videoNotALink": "Not a YouTube or Vimeo link: {url}",
+  "@videoNotALink": {
+    "description": "A video block whose link is not a video.",
+    "placeholders": {
+      "url": {
+        "type": "String"
+      }
+    }
+  },
+  "videoPlay": "Play {title}",
+  "@videoPlay": {
+    "description": "Accessibility name of a video's poster.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "videoCannotPlay": "Videos cannot play here: {error}",
+  "@videoCannotPlay": {
+    "description": "Toast when a video player could not be made.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recBlockTitle": "Recording · {when, date, ::MMMdHm}",
+  "@recBlockTitle": {
+    "description": "The default title of a new recording block (and of a page made for a recording), with the date and time it was made.",
+    "placeholders": {
+      "when": {
+        "type": "DateTime"
+      }
+    }
+  },
+  "recCouldNotSave": "Could not save: {error}",
+  "@recCouldNotSave": {
+    "description": "Toast when a recording block could not be saved into its page.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recStarting": "Starting…",
+  "@recStarting": {
+    "description": "The recording pill in the page header, while the microphone starts."
+  },
+  "recStop": "Stop",
+  "@recStop": {
+    "description": "The recording pill's button that stops recording."
+  },
+  "recNotFound": "Recording not found on this device",
+  "@recNotFound": {
+    "description": "Status line of a recording block whose recording is not on this device."
+  },
+  "recAddingTimestamps": "Adding timestamps…",
+  "@recAddingTimestamps": {
+    "description": "Status line of a recording block after recording stops, while the transcript gets its times."
+  },
+  "recTranscribing": "Transcribing…",
+  "@recTranscribing": {
+    "description": "Status of a recording being transcribed; also Settings › Speech to text while a microphone test transcribes."
+  },
+  "recTranscriptionFailed": "Transcription failed",
+  "@recTranscriptionFailed": {
+    "description": "Status line of a recording block whose transcription failed."
+  },
+  "recStatus": "{duration} · {engine}",
+  "@recStatus": {
+    "description": "Status line of a recording block: its length (as 3:05) and what transcribed it (Soniox, Endpoint, or Audio only).",
+    "placeholders": {
+      "duration": {
+        "type": "String",
+        "example": "3:05"
+      },
+      "engine": {
+        "type": "String",
+        "example": "Soniox"
+      }
+    }
+  },
+  "recAudioOnly": "Audio only",
+  "@recAudioOnly": {
+    "description": "A recording kept without a transcript: in its block's status line, and as the engine while recording without transcription."
+  },
+  "recPlay": "Play",
+  "@recPlay": {
+    "description": "Button of a recording block that plays its audio."
+  },
+  "recActions": "Recording actions",
+  "@recActions": {
+    "description": "Accessibility name of the … button of a recording block."
+  },
+  "recCopyTranscript": "Copy transcript",
+  "@recCopyTranscript": {
+    "description": "Recording block menu item."
+  },
+  "recInsertTranscript": "Insert transcript as text",
+  "@recInsertTranscript": {
+    "description": "Recording block menu item: puts the transcript after the block as paragraphs."
+  },
+  "recSummarize": "Summarize with agent",
+  "@recSummarize": {
+    "description": "Recording block menu item."
+  },
+  "recTranscribeAgain": "Transcribe again",
+  "@recTranscribeAgain": {
+    "description": "Recording block menu item, for a recording that has a transcript."
+  },
+  "recTranscribe": "Transcribe",
+  "@recTranscribe": {
+    "description": "Recording block menu item, for a recording without a transcript."
+  },
+  "recSpeaker": "Speaker {name}",
+  "@recSpeaker": {
+    "description": "Above a line of a transcript: who said it; name is a number or letter the engine gives.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "1"
+      }
+    }
+  },
+  "recSpeakerLine": "Speaker {name}: {text}",
+  "@recSpeakerLine": {
+    "description": "A line of a transcript as copied to the clipboard, after its speaker.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "1"
+      },
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "recSttTitle": "Speech to text",
+  "@recSttTitle": {
+    "description": "Settings: the section heading of the transcription settings."
+  },
+  "recSttSubtitle": "How recordings become transcripts.",
+  "@recSttSubtitle": {
+    "description": "Settings › Speech to text: the line under the heading."
+  },
+  "recSttTranscription": "Transcription",
+  "@recSttTranscription": {
+    "description": "Settings › Speech to text: the row choosing the engine (Endpoint or Soniox)."
+  },
+  "recSttEndpointDesc": "OpenAI-compatible; one on your network works offline",
+  "@recSttEndpointDesc": {
+    "description": "Settings › Speech to text: the description of the Endpoint row."
+  },
+  "recSttApiKey": "API key",
+  "@recSttApiKey": {
+    "description": "Settings › Speech to text: the row of the endpoint's key."
+  },
+  "recSttKeyInKeychain": "Kept in this device's keychain",
+  "@recSttKeyInKeychain": {
+    "description": "Settings › Speech to text: the description of the API key row."
+  },
+  "recSttOptional": "Optional",
+  "@recSttOptional": {
+    "description": "Settings › Speech to text: placeholder of the endpoint's API key field."
+  },
+  "recSttKeyNotSaved": "Could not save the key: {error}",
+  "@recSttKeyNotSaved": {
+    "description": "Toast when an API key could not be saved.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recSttNoKey": "No key",
+  "@recSttNoKey": {
+    "description": "Settings › Speech to text › API key from: the choice of no provider's key."
+  },
+  "recSttKeyFrom": "API key from",
+  "@recSttKeyFrom": {
+    "description": "Settings › Speech to text: the row choosing which agent provider's key a cloud endpoint uses."
+  },
+  "recSttKeyFromDesc": "The server calls the endpoint with this provider's key",
+  "@recSttKeyFromDesc": {
+    "description": "Settings › Speech to text: the description of the API key from row."
+  },
+  "recSttAddProvider": "Add a cloud agent provider, such as OpenAI, to use its key here",
+  "@recSttAddProvider": {
+    "description": "Settings › Speech to text: the description of the API key from row when there is no cloud provider."
+  },
+  "recSttSonioxKey": "Soniox API key",
+  "@recSttSonioxKey": {
+    "description": "Settings › Speech to text: the row of the Soniox key."
+  },
+  "recSttSonioxOnServer": "Live transcripts; key kept on the server",
+  "@recSttSonioxOnServer": {
+    "description": "Settings › Speech to text: description of the Soniox key row, signed in."
+  },
+  "recSttSonioxOnDevice": "Live transcripts; key kept on this device",
+  "@recSttSonioxOnDevice": {
+    "description": "Settings › Speech to text: description of the Soniox key row, signed out."
+  },
+  "recSttPasteKey": "Paste a key",
+  "@recSttPasteKey": {
+    "description": "Settings › Speech to text: placeholder of the Soniox key field."
+  },
+  "recSttKeySaved": "Saved",
+  "@recSttKeySaved": {
+    "description": "Settings › Speech to text: placeholder of the Soniox key field when a key is saved."
+  },
+  "recSttSpeakers": "Label speakers",
+  "@recSttSpeakers": {
+    "description": "Settings › Speech to text: the switch that labels who speaks in transcripts."
+  },
+  "recSttLanguage": "Language",
+  "@recSttLanguage": {
+    "description": "Settings › Speech to text › Recording: the language recordings are in."
+  },
+  "recSttKeepAudio": "Keep the audio",
+  "@recSttKeepAudio": {
+    "description": "Settings › Speech to text › Recording: the switch keeping recordings' audio."
+  },
+  "recSttKeepAudioDesc": "Otherwise only the transcript stays",
+  "@recSttKeepAudioDesc": {
+    "description": "Settings › Speech to text: the description of Keep the audio."
+  },
+  "recSttMicStarting": "Starting the microphone…",
+  "@recSttMicStarting": {
+    "description": "Settings › Speech to text › Test with microphone, while the microphone starts."
+  },
+  "recSttListening": "{seconds, plural, one {Listening for # second; say something} other {Listening for # seconds; say something}}",
+  "@recSttListening": {
+    "description": "Settings › Speech to text › Test with microphone, while it records.",
+    "placeholders": {
+      "seconds": {
+        "type": "int",
+        "example": "4"
+      }
+    }
+  },
+  "recSttTestMic": "Test with microphone",
+  "@recSttTestMic": {
+    "description": "Settings › Speech to text: the row that tries the microphone and the engine."
+  },
+  "recSttRecordTest": "Record a test",
+  "@recSttRecordTest": {
+    "description": "Settings › Speech to text: the button that records a short test."
+  },
+  "recSttTesting": "Testing…",
+  "@recSttTesting": {
+    "description": "Settings › Speech to text: a Test button while it runs."
+  },
+  "recSttHeard": "“{text}”",
+  "@recSttHeard": {
+    "description": "Settings › Speech to text: what the microphone test heard, quoted.",
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "recSttNotSetUp": "Not set up",
+  "@recSttNotSetUp": {
+    "description": "Settings › Speech to text: the Transcription row's description when no engine is set up."
+  },
+  "recSttTest": "Test",
+  "@recSttTest": {
+    "description": "Settings › Speech to text: the button that tests an endpoint or key."
+  },
+  "recSttItWorks": "It works",
+  "@recSttItWorks": {
+    "description": "Settings › Speech to text: the result of a successful test."
+  },
+  "recSttSavedOnDevice": "Saved the key on this device",
+  "@recSttSavedOnDevice": {
+    "description": "Toast after saving the Soniox key on this device."
+  },
+  "recSttSavedOnServer": "Saved the key on the server",
+  "@recSttSavedOnServer": {
+    "description": "Toast after saving the key on the server."
+  },
+  "recLanguageDetect": "Detect",
+  "@recLanguageDetect": {
+    "description": "Settings › Speech to text › Language: let the engine detect the language."
+  },
+  "recEngineSonioxCloud": "Soniox · cloud",
+  "@recEngineSonioxCloud": {
+    "description": "Where transcription runs: Soniox in the cloud. In Settings and a recording's status while recording."
+  },
+  "recEngineServer": "Transcription server",
+  "@recEngineServer": {
+    "description": "The name of a transcription endpoint that has no model set."
+  },
+  "recEngineLocal": "{name} · your server",
+  "@recEngineLocal": {
+    "description": "Where transcription runs: a model on the person's own server.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "whisper-1"
+      }
+    }
+  },
+  "recEngineCloud": "{name} · cloud",
+  "@recEngineCloud": {
+    "description": "Where transcription runs: a model in the cloud.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "gpt-transcribe"
+      }
+    }
+  },
+  "recErrSetUpEndpoint": "Set up a transcription endpoint in Settings › Speech to text.",
+  "@recErrSetUpEndpoint": {
+    "description": "Error when transcription has no endpoint."
+  },
+  "recErrNeedsConnection": "Transcription needs a connection.",
+  "@recErrNeedsConnection": {
+    "description": "Error when offline."
+  },
+  "recErrSignInOrServer": "Sign in to transcribe in the cloud, or set a transcription server on your network in Settings › Speech to text.",
+  "@recErrSignInOrServer": {
+    "description": "Error when signed out without a local engine."
+  },
+  "recErrOfflineServer": "Transcription needs a connection. Set a server on your network in Settings › Speech to text to record offline.",
+  "@recErrOfflineServer": {
+    "description": "Error when offline with a cloud engine."
+  },
+  "recErrAlreadyRecording": "Already recording.",
+  "@recErrAlreadyRecording": {
+    "description": "Error when a recording is asked for while one runs."
+  },
+  "recErrWindowNotReady": "The window is not ready.",
+  "@recErrWindowNotReady": {
+    "description": "Error when recording starts before the window is."
+  },
+  "recErrCloudTest": "A cloud endpoint transcribes saved recordings, so record on a page to try it.",
+  "@recErrCloudTest": {
+    "description": "Settings › Speech to text: why a microphone test cannot transcribe with a cloud endpoint."
+  },
+  "recErrQuit": "Leaflet quit before the transcript was done.",
+  "@recErrQuit": {
+    "description": "The error of a recording whose transcription was cut off by quitting; kept with the recording."
+  },
+  "recErrMicDetail": "The microphone did not start: {error}",
+  "@recErrMicDetail": {
+    "description": "Error when the microphone fails, with the system's reason.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recErrMic": "The microphone did not start.",
+  "@recErrMic": {
+    "description": "Error when the microphone fails."
+  },
+  "recErrLive": "Live transcript unavailable: {error}",
+  "@recErrLive": {
+    "description": "Error when the live transcript cannot connect.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recErrAudioNotSaved": "The audio could not be saved: {error}",
+  "@recErrAudioNotSaved": {
+    "description": "Error when writing the audio fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recErrMicWorks": "The microphone works. {reason}",
+  "@recErrMicWorks": {
+    "description": "Settings › Speech to text › Test with microphone: the microphone works but transcription cannot run, and why.",
+    "placeholders": {
+      "reason": {
+        "type": "String"
+      }
+    }
+  },
+  "recErrSonioxTimeout": "Soniox did not connect in time.",
+  "@recErrSonioxTimeout": {
+    "description": "Error of a test when Soniox does not connect."
+  },
+  "recErrNoWords": "No words were heard. Check the microphone, and speak during the test.",
+  "@recErrNoWords": {
+    "description": "Error of a microphone test that heard nothing."
+  },
+  "recErrSonioxSaved": "Soniox transcribes as you record here; saved audio needs a Leaflet server.",
+  "@recErrSonioxSaved": {
+    "description": "Error when retranscribing with Soniox while signed out."
+  },
+  "recErrAudioMissing": "The audio is not on this device.",
+  "@recErrAudioMissing": {
+    "description": "Error when a recording's audio is missing."
+  },
+  "recErrSignIn": "Sign in to transcribe in the cloud.",
+  "@recErrSignIn": {
+    "description": "Error when the cloud needs signing in."
+  },
+  "recErrEndpoint": "Transcription failed: {status} {details}",
+  "@recErrEndpoint": {
+    "description": "Error of a transcription endpoint, with the HTTP status and its message (may be empty).",
+    "placeholders": {
+      "status": {
+        "type": "String",
+        "example": "500 Internal Server Error"
+      },
+      "details": {
+        "type": "String"
+      }
+    }
+  },
+  "recErrPasteKey": "Paste a key to test",
+  "@recErrPasteKey": {
+    "description": "Settings › Speech to text: testing an empty Soniox key."
+  },
+  "recErrSonioxRejected": "Soniox rejected this key",
+  "@recErrSonioxRejected": {
+    "description": "Settings › Speech to text: a Soniox key test that failed."
+  },
+  "recErrSonioxStatus": "Soniox answered {status}",
+  "@recErrSonioxStatus": {
+    "description": "Settings › Speech to text: a Soniox key test with an unexpected HTTP status.",
+    "placeholders": {
+      "status": {
+        "type": "String",
+        "example": "500 Internal Server Error"
+      }
+    }
+  },
+  "editorPage": "Page",
+  "@editorPage": {
+    "description": "Accessibility name of the page's editor."
+  },
+  "editorTableRow": "Row",
+  "@editorTableRow": {
+    "description": "Table block buttons (with + or − icons) that add or remove a row."
+  },
+  "editorTableColumn": "Column",
+  "@editorTableColumn": {
+    "description": "Table block buttons (with + or − icons) that add or remove a column."
+  },
+  "editorAskAgent": "Ask agent",
+  "@editorAskAgent": {
+    "description": "Selection toolbar button that asks an agent about the selected text."
+  },
+  "editorEditData": "Edit data",
+  "@editorEditData": {
+    "description": "Chart block button that edits its data."
+  },
+  "editorPieChart": "Pie chart",
+  "@editorPieChart": {
+    "description": "Accessibility name of a pie chart."
+  },
+  "editorPieShare": "{share, number, percent}",
+  "@editorPieShare": {
+    "description": "A slice's share on a pie chart, as 25%.",
+    "placeholders": {
+      "share": {
+        "type": "double",
+        "example": "0.25"
+      }
+    }
+  },
+  "editorCodeLanguage": "Language: {name}",
+  "@editorCodeLanguage": {
+    "description": "Accessibility name of a code block's language menu.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Go"
+      }
+    }
+  },
+  "editorCopyCode": "Copy code",
+  "@editorCopyCode": {
+    "description": "Code block button."
+  },
+  "editorColor": "Color",
+  "@editorColor": {
+    "description": "Selection toolbar button that opens text colors."
+  },
+  "editorColorText": "Text",
+  "@editorColorText": {
+    "description": "Color popover: the row of text colors."
+  },
+  "editorColorHighlight": "Highlight",
+  "@editorColorHighlight": {
+    "description": "Color popover: the row of highlight colors."
+  },
+  "editorNoTextColor": "No text color",
+  "@editorNoTextColor": {
+    "description": "Color popover: the dot that takes the text color away."
+  },
+  "editorNoHighlight": "No highlight color",
+  "@editorNoHighlight": {
+    "description": "Color popover: the dot that takes the highlight away."
+  },
+  "editorColorRed": "Red",
+  "@editorColorRed": {
+    "description": "A text or highlight color."
+  },
+  "editorColorOrange": "Orange",
+  "@editorColorOrange": {
+    "description": "A text or highlight color."
+  },
+  "editorColorYellow": "Yellow",
+  "@editorColorYellow": {
+    "description": "A text or highlight color."
+  },
+  "editorColorGreen": "Green",
+  "@editorColorGreen": {
+    "description": "A text or highlight color."
+  },
+  "editorColorTeal": "Teal",
+  "@editorColorTeal": {
+    "description": "A text or highlight color."
+  },
+  "editorColorBlue": "Blue",
+  "@editorColorBlue": {
+    "description": "A text or highlight color."
+  },
+  "editorColorIndigo": "Indigo",
+  "@editorColorIndigo": {
+    "description": "A text or highlight color."
+  },
+  "editorColorPurple": "Purple",
+  "@editorColorPurple": {
+    "description": "A text or highlight color."
+  },
+  "editorColorPink": "Pink",
+  "@editorColorPink": {
+    "description": "A text or highlight color."
+  },
+  "editorColorBrown": "Brown",
+  "@editorColorBrown": {
+    "description": "A text or highlight color."
+  },
+  "editorColorGray": "Gray",
+  "@editorColorGray": {
+    "description": "A text or highlight color."
+  },
+  "editorCopyHeadingLink": "Copy link to heading",
+  "@editorCopyHeadingLink": {
+    "description": "Button beside a heading."
+  },
+  "editorFoldSection": "Fold section",
+  "@editorFoldSection": {
+    "description": "Button beside a heading that hides its section."
+  },
+  "editorUnfoldSection": "Unfold section",
+  "@editorUnfoldSection": {
+    "description": "Button beside a folded heading."
+  },
+  "editorTomorrow": "Tomorrow",
+  "@editorTomorrow": {
+    "description": "A to-do's due date."
+  },
+  "editorYesterday": "Yesterday",
+  "@editorYesterday": {
+    "description": "A to-do's due date."
+  },
+  "editorDueDay": "{due, date, ::MMMd}",
+  "@editorDueDay": {
+    "description": "A to-do's due date in this year, as Jan 2.",
+    "placeholders": {
+      "due": {
+        "type": "DateTime"
+      }
+    }
+  },
+  "editorDueDate": "{due, date, ::yMMMd}",
+  "@editorDueDate": {
+    "description": "A to-do's due date in another year, as Jan 2, 2027.",
+    "placeholders": {
+      "due": {
+        "type": "DateTime"
+      }
+    }
+  },
+  "editorAddDate": "Add date",
+  "@editorAddDate": {
+    "description": "A to-do's chip that gives it a due date."
+  },
+  "editorDueDateLabel": "Due date: {date}",
+  "@editorDueDateLabel": {
+    "description": "Accessibility name of a to-do's due date chip.",
+    "placeholders": {
+      "date": {
+        "type": "String",
+        "example": "Tomorrow"
+      }
+    }
+  },
+  "editorRemoveDate": "Remove date",
+  "@editorRemoveDate": {
+    "description": "A to-do's due date popover button."
+  },
+  "editorRemoveColor": "Remove color",
+  "@editorRemoveColor": {
+    "description": "Page context menu item that takes away the selection's colors."
+  },
+  "editorCopyBlockLink": "Copy link to block",
+  "@editorCopyBlockLink": {
+    "description": "Page context menu item."
+  },
+  "editorCopiedBlockLink": "Copied a link to the block",
+  "@editorCopiedBlockLink": {
+    "description": "Toast after Copy link to block."
+  },
+  "editorPhHeading": "Heading {level}",
+  "@editorPhHeading": {
+    "description": "Placeholder of an empty heading.",
+    "placeholders": {
+      "level": {
+        "type": "int",
+        "example": "1"
+      }
+    }
+  },
+  "editorPhList": "List",
+  "@editorPhList": {
+    "description": "Placeholder of an empty list item."
+  },
+  "editorPhTodo": "To-do",
+  "@editorPhTodo": {
+    "description": "Placeholder of an empty to-do."
+  },
+  "editorPhQuote": "Quote",
+  "@editorPhQuote": {
+    "description": "Placeholder of an empty quote."
+  },
+  "editorPhCode": "Code",
+  "@editorPhCode": {
+    "description": "Placeholder of an empty code block."
+  },
+  "editorPhCallout": "Callout",
+  "@editorPhCallout": {
+    "description": "Placeholder of an empty callout."
+  },
+  "editorPhToggle": "Toggle",
+  "@editorPhToggle": {
+    "description": "Placeholder of an empty toggle list."
+  },
+  "editorPhFirst": "Write, or press / for blocks and @ for agents",
+  "@editorPhFirst": {
+    "description": "Placeholder of an empty page's only line."
+  },
+  "editorPhEmpty": "Press / for blocks, @ for agents",
+  "@editorPhEmpty": {
+    "description": "Placeholder of the empty line with the caret."
+  },
+  "editorCommentCount": "{count, plural, one {# comment} other {# comments}}",
+  "@editorCommentCount": {
+    "description": "Accessibility name of a block's comment badge.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "3"
+      }
+    }
+  },
+  "editorUnsupported": "Unsupported block: {type}",
+  "@editorUnsupported": {
+    "description": "Shown in place of a block this version cannot show.",
+    "placeholders": {
+      "type": {
+        "type": "String",
+        "example": "widget"
+      }
+    }
+  },
+  "editorLoadingImage": "Loading image…",
+  "@editorLoadingImage": {
+    "description": "Image block while its image loads."
+  },
+  "editorPageNotFound": "Page not found",
+  "@editorPageNotFound": {
+    "description": "A subpage block whose page is gone."
+  },
+  "editorNoMatches": "No matches",
+  "@editorNoMatches": {
+    "description": "The / and @ menus with nothing matching."
+  },
+  "editorBold": "Bold",
+  "@editorBold": {
+    "description": "Selection toolbar button."
+  },
+  "editorItalic": "Italic",
+  "@editorItalic": {
+    "description": "Selection toolbar button."
+  },
+  "editorInlineCode": "Code",
+  "@editorInlineCode": {
+    "description": "Selection toolbar button that formats text as inline code."
+  },
+  "editorLink": "Link",
+  "@editorLink": {
+    "description": "Selection toolbar button that adds a link; also the link editor's button that applies it."
+  },
+  "editorFormat": "Format",
+  "@editorFormat": {
+    "description": "Accessibility name of the selection toolbar."
+  },
+  "editorPasteLink": "Paste a link",
+  "@editorPasteLink": {
+    "description": "Placeholder of the link editor's field."
+  },
+  "settingsTitle": "Settings",
+  "@settingsTitle": {
+    "description": "The Settings dialog's title and its section list's name."
+  },
+  "settingsSectionAccount": "Account",
+  "@settingsSectionAccount": {
+    "description": "Settings: the section and heading of the account."
+  },
+  "settingsSectionAppearance": "Appearance",
+  "@settingsSectionAppearance": {
+    "description": "Settings: the section and heading of the appearance."
+  },
+  "settingsSectionProviders": "Agent providers",
+  "@settingsSectionProviders": {
+    "description": "Settings: the section and heading of the services agents run on."
+  },
+  "settingsSectionExternal": "External agents",
+  "@settingsSectionExternal": {
+    "description": "Settings: the section and heading of AI apps connecting over MCP."
+  },
+  "settingsSectionSpeech": "Speech to text",
+  "@settingsSectionSpeech": {
+    "description": "Settings: the section of speech to text."
+  },
+  "settingsSectionOffline": "Offline and storage",
+  "@settingsSectionOffline": {
+    "description": "Settings: the section and heading of offline use and storage."
+  },
+  "settingsAppearanceDesc": "How Leaflet and your pages look.",
+  "@settingsAppearanceDesc": {
+    "description": "Settings › Appearance: the description under the heading."
+  },
+  "settingsTheme": "Theme",
+  "@settingsTheme": {
+    "description": "Settings › Appearance: the row choosing the theme."
+  },
+  "settingsSystem": "System",
+  "@settingsSystem": {
+    "description": "Settings › Appearance: the theme or accent of the system."
+  },
+  "settingsThemeLight": "Light",
+  "@settingsThemeLight": {
+    "description": "Settings › Appearance › Theme: the light theme."
+  },
+  "settingsThemeSepia": "Sepia",
+  "@settingsThemeSepia": {
+    "description": "Settings › Appearance › Theme: the sepia paper theme."
+  },
+  "settingsThemeDark": "Dark",
+  "@settingsThemeDark": {
+    "description": "Settings › Appearance › Theme: the dark theme."
+  },
+  "settingsAccent": "Accent color",
+  "@settingsAccent": {
+    "description": "Settings › Appearance: the row choosing the accent color."
+  },
+  "settingsAccentName": "{name, select, Indigo {Indigo} Blue {Blue} Purple {Purple} Pink {Pink} Orange {Orange} Green {Green} Graphite {Graphite} other {{name}}}",
+  "@settingsAccentName": {
+    "description": "Settings › Appearance › Accent color: the tooltip of an accent's dot, by its name.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Blue"
+      }
+    }
+  },
+  "settingsTextSize": "Page text size",
+  "@settingsTextSize": {
+    "description": "Settings › Appearance: the row choosing the size of page text."
+  },
+  "settingsTextSizeSmall": "Small",
+  "@settingsTextSizeSmall": {
+    "description": "Settings › Appearance › Page text size."
+  },
+  "settingsTextSizeDefault": "Default",
+  "@settingsTextSizeDefault": {
+    "description": "Settings › Appearance › Page text size."
+  },
+  "settingsTextSizeLarge": "Large",
+  "@settingsTextSizeLarge": {
+    "description": "Settings › Appearance › Page text size."
+  },
+  "settingsTextSizeLarger": "Larger",
+  "@settingsTextSizeLarger": {
+    "description": "Settings › Appearance › Page text size."
+  },
+  "settingsAccountDesc": "Your name and the devices you use.",
+  "@settingsAccountDesc": {
+    "description": "Settings › Account: the description under the heading."
+  },
+  "settingsName": "Name",
+  "@settingsName": {
+    "description": "Settings › Account: the row of the person's name; also a provider's name field."
+  },
+  "settingsNameDesc": "Shown on your comments and edits",
+  "@settingsNameDesc": {
+    "description": "Settings › Account › Name: the description."
+  },
+  "settingsYourName": "Your name",
+  "@settingsYourName": {
+    "description": "The placeholder of a field for the person's name (Settings, sign-up)."
+  },
+  "settingsSync": "Sync",
+  "@settingsSync": {
+    "description": "Settings › Account: the row to sign in, when signed out."
+  },
+  "settingsSyncDesc": "Sign in to sync pages between devices and share them",
+  "@settingsSyncDesc": {
+    "description": "Settings › Account › Sync: the description."
+  },
+  "settingsSignedIn": "Signed in",
+  "@settingsSignedIn": {
+    "description": "Settings › Account: the row's title when signed in; its email shows under it."
+  },
+  "settingsDevices": "Devices",
+  "@settingsDevices": {
+    "description": "Settings › Account: the heading over the devices signed in."
+  },
+  "settingsDevicesLoading": "Loading devices…",
+  "@settingsDevicesLoading": {
+    "description": "Settings › Account › Devices: while the list loads."
+  },
+  "settingsDeviceLastActive": "Last active {when}",
+  "@settingsDeviceLastActive": {
+    "description": "Settings › Account › Devices: when a device was last used; when is a relative time such as “5 min ago”.",
+    "placeholders": {
+      "when": {
+        "type": "String",
+        "example": "5 min ago"
+      }
+    }
+  },
+  "settingsDeviceThis": "This device",
+  "@settingsDeviceThis": {
+    "description": "Settings › Account › Devices: the device in use."
+  },
+  "settingsDeviceSignedOut": "Signed out",
+  "@settingsDeviceSignedOut": {
+    "description": "Settings › Account › Devices: a device signed out."
+  },
+  "settingsDeviceSignOutFailed": "Could not sign out the device: {error}",
+  "@settingsDeviceSignOutFailed": {
+    "description": "A notification when signing out another device failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsYourData": "Your data",
+  "@settingsYourData": {
+    "description": "Settings › Account: the heading over export and account deletion."
+  },
+  "settingsExportAll": "Export all pages",
+  "@settingsExportAll": {
+    "description": "Settings › Account: the row exporting every page; also the save dialog's title."
+  },
+  "settingsExportAllDesc": "A zip of Markdown files, one per page",
+  "@settingsExportAllDesc": {
+    "description": "Settings › Account › Export all pages: the description."
+  },
+  "settingsExportButton": "Export…",
+  "@settingsExportButton": {
+    "description": "Settings › Account › Export all pages: the button."
+  },
+  "settingsExportFileName": "Leaflet pages.zip",
+  "@settingsExportFileName": {
+    "description": "The default file name of an export of all pages."
+  },
+  "settingsExportFailed": "Could not export: {error}",
+  "@settingsExportFailed": {
+    "description": "A notification when exporting failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsExported": "Exported {name}",
+  "@settingsExported": {
+    "description": "A notification after exporting, with the file's name.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Leaflet pages.zip"
+      }
+    }
+  },
+  "settingsDeleteAccount": "Delete account",
+  "@settingsDeleteAccount": {
+    "description": "Settings › Account: the row and button deleting the account."
+  },
+  "settingsDeleteAccountDesc": "Deletes your space, pages, recordings and keys on the server",
+  "@settingsDeleteAccountDesc": {
+    "description": "Settings › Account › Delete account: the description."
+  },
+  "settingsDeleteButton": "Delete…",
+  "@settingsDeleteButton": {
+    "description": "Settings › Account › Delete account: the button opening the confirmation."
+  },
+  "settingsSignOutAnyway": "Sign out anyway?",
+  "@settingsSignOutAnyway": {
+    "description": "The title of the dialog asking to sign out with changes not uploaded."
+  },
+  "settingsSignOutUnsynced": "{count, plural, one {# change is not uploaded yet. Signing out removes it from this device.} other {# changes are not uploaded yet. Signing out removes them from this device.}}",
+  "@settingsSignOutUnsynced": {
+    "description": "The dialog asking to sign out with changes not uploaded.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "3"
+      }
+    }
+  },
+  "settingsDeleteAccountTitle": "Delete your account?",
+  "@settingsDeleteAccountTitle": {
+    "description": "The title of the dialog confirming deleting the account."
+  },
+  "settingsCannotUndo": "This cannot be undone.",
+  "@settingsCannotUndo": {
+    "description": "The dialog confirming deleting the account."
+  },
+  "settingsTypeDelete": "Type DELETE to confirm.",
+  "@settingsTypeDelete": {
+    "description": "The dialog confirming deleting the account; DELETE is typed as is, in English."
+  },
+  "settingsDeleteAccountFailed": "Could not delete the account: {error}",
+  "@settingsDeleteAccountFailed": {
+    "description": "A notification when deleting the account failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsAccountDeleted": "Your account was deleted",
+  "@settingsAccountDeleted": {
+    "description": "A notification after deleting the account."
+  },
+  "settingsSaveFailed": "Could not save: {error}",
+  "@settingsSaveFailed": {
+    "description": "A notification when saving the name failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsNameServerFailed": "Could not save your name on the server: {error}",
+  "@settingsNameServerFailed": {
+    "description": "A notification when the name could not go to the server.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsRemovePagesFailed": "Could not remove your pages from this device: {error}",
+  "@settingsRemovePagesFailed": {
+    "description": "A notification when signing out could not clear this device.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsProvidersDesc": "The services agents run on. Cloud keys stay on the server; a model server on your machine works offline.",
+  "@settingsProvidersDesc": {
+    "description": "Settings › Agent providers: the description under the heading."
+  },
+  "settingsNoProviders": "No providers yet",
+  "@settingsNoProviders": {
+    "description": "Settings › Agent providers: when there are none."
+  },
+  "settingsNoProvidersDesc": "Sign in with ChatGPT, add a cloud service such as Claude with an API key, or a model server such as Ollama.",
+  "@settingsNoProvidersDesc": {
+    "description": "Settings › Agent providers: when there are none."
+  },
+  "settingsProviderCloud": "Cloud · key on the server",
+  "@settingsProviderCloud": {
+    "description": "Settings › Agent providers: where a cloud provider runs."
+  },
+  "settingsProviderPlan": "ChatGPT plan",
+  "@settingsProviderPlan": {
+    "description": "Settings › Agent providers: a provider signed in with ChatGPT."
+  },
+  "settingsProviderPlanEmail": "ChatGPT plan · {email}",
+  "@settingsProviderPlanEmail": {
+    "description": "Settings › Agent providers: a provider signed in with ChatGPT, and its account.",
+    "placeholders": {
+      "email": {
+        "type": "String",
+        "example": "me@example.com"
+      }
+    }
+  },
+  "settingsProviderLocal": "On this device · {url}",
+  "@settingsProviderLocal": {
+    "description": "Settings › Agent providers: a model server on this machine, and its address.",
+    "placeholders": {
+      "url": {
+        "type": "String",
+        "example": "http://localhost:11434/v1"
+      }
+    }
+  },
+  "settingsProviderChatOnly": "{where} · chat only",
+  "@settingsProviderChatOnly": {
+    "description": "Settings › Agent providers: a provider whose models cannot use tools.",
+    "placeholders": {
+      "where": {
+        "type": "String",
+        "example": "Cloud · key on the server"
+      }
+    }
+  },
+  "settingsProviderEdit": "Edit {name}",
+  "@settingsProviderEdit": {
+    "description": "Settings › Agent providers: a provider's row, and the dialog editing it.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Claude"
+      }
+    }
+  },
+  "settingsAddProvider": "Add a provider",
+  "@settingsAddProvider": {
+    "description": "Settings › Agent providers: the button with a menu of providers."
+  },
+  "settingsSignInWith": "Sign in with {name}…",
+  "@settingsSignInWith": {
+    "description": "Settings › Agent providers › Add a provider: a provider one signs in to.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "ChatGPT"
+      }
+    }
+  },
+  "settingsDefaults": "Defaults",
+  "@settingsDefaults": {
+    "description": "Settings › Agent providers: the heading over the default agent."
+  },
+  "settingsDefaultAgent": "Default agent",
+  "@settingsDefaultAgent": {
+    "description": "Settings › Agent providers › Defaults."
+  },
+  "settingsDefaultAgentDesc": "Used unless you pick another",
+  "@settingsDefaultAgentDesc": {
+    "description": "Settings › Agent providers › Defaults › Default agent."
+  },
+  "settingsLocalWhenOffline": "Use a provider on this machine when offline",
+  "@settingsLocalWhenOffline": {
+    "description": "Settings › Agent providers › Defaults: a switch."
+  },
+  "settingsLocalWhenOfflineDesc": "Agents keep working without a connection",
+  "@settingsLocalWhenOfflineDesc": {
+    "description": "Settings › Agent providers › Defaults: a switch."
+  },
+  "settingsReadOtherPages": "Let agents read your other pages",
+  "@settingsReadOtherPages": {
+    "description": "Settings › Agent providers › Defaults: a switch."
+  },
+  "settingsReadOtherPagesDesc": "They only ever edit the page they are asked on",
+  "@settingsReadOtherPagesDesc": {
+    "description": "Settings › Agent providers › Defaults: a switch."
+  },
+  "settingsConnectProvider": "Connect {name}",
+  "@settingsConnectProvider": {
+    "description": "The title of the dialog adding a provider.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Claude"
+      }
+    }
+  },
+  "settingsProviderDescCloud": "Runs in Leaflet's server with your key, which never comes back to this device.",
+  "@settingsProviderDescCloud": {
+    "description": "The provider dialog: a cloud provider."
+  },
+  "settingsProviderDescAccount": "Agents use your ChatGPT Plus or Pro plan. Sign-in stays on this device.",
+  "@settingsProviderDescAccount": {
+    "description": "The provider dialog: signing in with ChatGPT."
+  },
+  "settingsProviderDescLocal": "Runs on this device against your model server, so agents work offline.",
+  "@settingsProviderDescLocal": {
+    "description": "The provider dialog: a model server on this machine."
+  },
+  "settingsProviderDescNoServer": "Cloud providers need a Leaflet server, which this build doesn't have.",
+  "@settingsProviderDescNoServer": {
+    "description": "The provider dialog: a cloud provider in a build without a server."
+  },
+  "settingsProviderDescSignIn": "Cloud providers run on the server: sign in first, or add a model server on this machine.",
+  "@settingsProviderDescSignIn": {
+    "description": "The provider dialog: a cloud provider while signed out."
+  },
+  "settingsProviderClaudeNote": "{desc} Claude plans only work in Claude's own apps, so this takes an API key.",
+  "@settingsProviderClaudeNote": {
+    "description": "The provider dialog for Claude: the description, then a note on Claude plans.",
+    "placeholders": {
+      "desc": {
+        "type": "String",
+        "example": "Runs in Leaflet's server with your key, which never comes back to this device."
+      }
+    }
+  },
+  "settingsBaseURL": "Base URL",
+  "@settingsBaseURL": {
+    "description": "The provider dialog: the field of the server's address."
+  },
+  "settingsAPIKey": "API key",
+  "@settingsAPIKey": {
+    "description": "The provider dialog: the field of the key."
+  },
+  "settingsTest": "Test",
+  "@settingsTest": {
+    "description": "The provider dialog: the button trying the provider."
+  },
+  "settingsTesting": "Testing…",
+  "@settingsTesting": {
+    "description": "The provider dialog: while trying the provider."
+  },
+  "settingsPasteKey": "Paste a key",
+  "@settingsPasteKey": {
+    "description": "The provider dialog: the key field's placeholder."
+  },
+  "settingsKeySaved": "Saved on the server · paste a new key to replace it",
+  "@settingsKeySaved": {
+    "description": "The provider dialog: the key field's placeholder for a saved cloud provider."
+  },
+  "settingsOptional": "Optional",
+  "@settingsOptional": {
+    "description": "The provider dialog: the key field's placeholder for a model server."
+  },
+  "settingsSignedInAs": "Signed in as {email}",
+  "@settingsSignedInAs": {
+    "description": "The provider dialog for ChatGPT, and a notification after signing in.",
+    "placeholders": {
+      "email": {
+        "type": "String",
+        "example": "me@example.com"
+      }
+    }
+  },
+  "settingsSignedInAccount": "Signed in as your ChatGPT account",
+  "@settingsSignedInAccount": {
+    "description": "The provider dialog for ChatGPT, when its email is unknown."
+  },
+  "settingsSwitchAccount": "Switch account",
+  "@settingsSwitchAccount": {
+    "description": "The provider dialog for ChatGPT: signs in again."
+  },
+  "settingsChatGPTSignIn": "Sign in with ChatGPT",
+  "@settingsChatGPTSignIn": {
+    "description": "The provider dialog for ChatGPT: the button."
+  },
+  "settingsWaitingBrowser": "Waiting for the browser…",
+  "@settingsWaitingBrowser": {
+    "description": "The provider dialog for ChatGPT: while signing in in the browser."
+  },
+  "settingsChatGPTNote": "Your browser opens to sign in. Leaflet never sees your password, and you can set a usage limit for it in ChatGPT's settings.",
+  "@settingsChatGPTNote": {
+    "description": "The provider dialog for ChatGPT: under the sign-in button."
+  },
+  "settingsModelID": "Model ID",
+  "@settingsModelID": {
+    "description": "The provider dialog: the placeholder of a model typed in."
+  },
+  "settingsFetchingModels": "Fetching models…",
+  "@settingsFetchingModels": {
+    "description": "The provider dialog: while listing the models."
+  },
+  "settingsOtherModel": "Other model…",
+  "@settingsOtherModel": {
+    "description": "The provider dialog › Model: type in a model not listed."
+  },
+  "settingsChooseModel": "Choose a model",
+  "@settingsChooseModel": {
+    "description": "The provider dialog › Model: none chosen."
+  },
+  "settingsFromList": "From the list",
+  "@settingsFromList": {
+    "description": "The provider dialog › Model: back to the list of models."
+  },
+  "settingsListModelsFailed": "Could not list models: {error}",
+  "@settingsListModelsFailed": {
+    "description": "The provider dialog: listing the models failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsChooseModelToTest": "Choose a model to test with",
+  "@settingsChooseModelToTest": {
+    "description": "The provider dialog: testing without a model."
+  },
+  "settingsPasteKeyToTest": "Paste a key to test",
+  "@settingsPasteKeyToTest": {
+    "description": "The provider dialog: testing without a key."
+  },
+  "settingsNeedURLAndModel": "A base URL and a model are needed.",
+  "@settingsNeedURLAndModel": {
+    "description": "The provider dialog: saving without them."
+  },
+  "settingsKeepSignInFailed": "Could not keep the sign-in: {error}",
+  "@settingsKeepSignInFailed": {
+    "description": "The provider dialog: saving a ChatGPT sign-in failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsSaveKeyFailed": "Could not save the key: {error}",
+  "@settingsSaveKeyFailed": {
+    "description": "The provider dialog: saving the key failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsDeleteFailed": "Could not delete: {error}",
+  "@settingsDeleteFailed": {
+    "description": "A notification when removing a provider failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsDeleteKeyFailed": "Could not delete the key: {error}",
+  "@settingsDeleteKeyFailed": {
+    "description": "A notification when removing a provider's key failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsOfflineDesc": "Everything is saved on this device first, and goes to the server when you are online.",
+  "@settingsOfflineDesc": {
+    "description": "Settings › Offline and storage: the description under the heading."
+  },
+  "settingsLocalOnly": "Pages are kept on this device",
+  "@settingsLocalOnly": {
+    "description": "Settings › Offline and storage: a build without a server."
+  },
+  "settingsLocalOnlyDesc": "This build has no server to sync with",
+  "@settingsLocalOnlyDesc": {
+    "description": "Settings › Offline and storage: a build without a server."
+  },
+  "settingsConflicts": "Conflicts",
+  "@settingsConflicts": {
+    "description": "Settings › Offline and storage: the heading over conflicts of sync."
+  },
+  "settingsConflictDeletedHere": "Kept “{text}”: deleted on this device, edited on another",
+  "@settingsConflictDeletedHere": {
+    "description": "Settings › Offline and storage › Conflicts: the block kept, by its text.",
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsConflictDeletedThere": "Kept “{text}”: deleted on another device, edited on this one",
+  "@settingsConflictDeletedThere": {
+    "description": "Settings › Offline and storage › Conflicts: the block kept, by its text.",
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsConflictKeptOver": "Kept “{kept}” over “{other}”",
+  "@settingsConflictKeptOver": {
+    "description": "Settings › Offline and storage › Conflicts: the version kept, and the other.",
+    "placeholders": {
+      "kept": {
+        "type": "String"
+      },
+      "other": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsResolve": "Resolve",
+  "@settingsResolve": {
+    "description": "Settings › Offline and storage › Conflicts: the menu of a conflict."
+  },
+  "settingsDeleteIt": "Delete it",
+  "@settingsDeleteIt": {
+    "description": "Settings › Conflicts › Resolve: delete the block kept."
+  },
+  "settingsKeepIt": "Keep it",
+  "@settingsKeepIt": {
+    "description": "Settings › Conflicts › Resolve: keep the block."
+  },
+  "settingsUseThisDevice": "Use this device's version",
+  "@settingsUseThisDevice": {
+    "description": "Settings › Conflicts › Resolve."
+  },
+  "settingsKeepNewer": "Keep the newer version",
+  "@settingsKeepNewer": {
+    "description": "Settings › Conflicts › Resolve."
+  },
+  "settingsOpenPage": "Open page",
+  "@settingsOpenPage": {
+    "description": "Settings › Conflicts › Resolve."
+  },
+  "settingsResolveFailed": "Could not resolve: {error}",
+  "@settingsResolveFailed": {
+    "description": "A notification when resolving a conflict failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsStorage": "Storage",
+  "@settingsStorage": {
+    "description": "Settings › Offline and storage: the heading over storage."
+  },
+  "settingsDataFolder": "Data folder",
+  "@settingsDataFolder": {
+    "description": "Settings › Offline and storage › Storage."
+  },
+  "settingsDataFolderDesc": "Pages, recordings and files on this device",
+  "@settingsDataFolderDesc": {
+    "description": "Settings › Offline and storage › Storage."
+  },
+  "settingsShow": "Show",
+  "@settingsShow": {
+    "description": "Settings › Storage › Data folder: shows the folder in the file manager."
+  },
+  "settingsImageCache": "Image cache",
+  "@settingsImageCache": {
+    "description": "Settings › Offline and storage › Storage."
+  },
+  "settingsImageCacheDesc": "Pictures of image blocks loaded from the web",
+  "@settingsImageCacheDesc": {
+    "description": "Settings › Offline and storage › Storage."
+  },
+  "settingsClear": "Clear",
+  "@settingsClear": {
+    "description": "Settings › Storage › Image cache: the button."
+  },
+  "settingsImageCacheCleared": "Cleared the image cache",
+  "@settingsImageCacheCleared": {
+    "description": "A notification after clearing the image cache."
+  },
+  "settingsNotSyncing": "Not syncing",
+  "@settingsNotSyncing": {
+    "description": "Settings › Offline and storage: signed out."
+  },
+  "settingsNotSyncingDesc": "Sign in to sync pages between devices",
+  "@settingsNotSyncingDesc": {
+    "description": "Settings › Offline and storage: signed out."
+  },
+  "settingsUpToDate": "Up to date",
+  "@settingsUpToDate": {
+    "description": "Settings › Offline and storage: the sync status."
+  },
+  "settingsOfflineByChoice": "Working offline by choice",
+  "@settingsOfflineByChoice": {
+    "description": "Settings › Offline and storage: the sync status."
+  },
+  "settingsNoConnection": "No connection",
+  "@settingsNoConnection": {
+    "description": "Settings › Offline and storage: the sync status."
+  },
+  "settingsSyncing": "Syncing…",
+  "@settingsSyncing": {
+    "description": "Settings › Offline and storage: the sync status."
+  },
+  "settingsSyncFailed": "Last sync failed: {error}",
+  "@settingsSyncFailed": {
+    "description": "Settings › Offline and storage: the sync status.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsSynced": "Synced",
+  "@settingsSynced": {
+    "description": "Settings › Offline and storage: no changes waiting."
+  },
+  "settingsChangesWaiting": "{count, plural, one {# change waiting} other {# changes waiting}}",
+  "@settingsChangesWaiting": {
+    "description": "Settings › Offline and storage: changes not uploaded yet.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "3"
+      }
+    }
+  },
+  "settingsSyncNow": "Sync now",
+  "@settingsSyncNow": {
+    "description": "Settings › Offline and storage: the button."
+  },
+  "settingsWorkOffline": "Work offline",
+  "@settingsWorkOffline": {
+    "description": "Settings › Offline and storage: a switch."
+  },
+  "settingsWorkOfflineDesc": "Keep changes on this device until you turn this off",
+  "@settingsWorkOfflineDesc": {
+    "description": "Settings › Offline and storage: a switch."
+  },
+  "settingsAllPagesOffline": "Keep all pages on this device",
+  "@settingsAllPagesOffline": {
+    "description": "Settings › Offline and storage: a switch."
+  },
+  "settingsAllPagesOfflineDesc": "Otherwise only pages you mark, and those you open",
+  "@settingsAllPagesOfflineDesc": {
+    "description": "Settings › Offline and storage: a switch."
+  },
+  "settingsKeepAudio": "Keep recordings' audio on this device",
+  "@settingsKeepAudio": {
+    "description": "Settings › Offline and storage: how long to keep audio."
+  },
+  "settingsKeepAudioUntilUploaded": "Until uploaded",
+  "@settingsKeepAudioUntilUploaded": {
+    "description": "Settings › Offline and storage › Keep recordings' audio."
+  },
+  "settingsKeepAudio30Days": "For 30 days",
+  "@settingsKeepAudio30Days": {
+    "description": "Settings › Offline and storage › Keep recordings' audio."
+  },
+  "settingsKeepAudioAlways": "Always",
+  "@settingsKeepAudioAlways": {
+    "description": "Settings › Offline and storage › Keep recordings' audio."
+  },
+  "settingsHistoryBeforeResolving": "Before resolving a conflict",
+  "@settingsHistoryBeforeResolving": {
+    "description": "A page's history: the version saved before resolving a conflict of sync."
+  },
+  "externalDesc": "AI apps on this computer, such as Claude Code, Codex and Cursor, can find, read and edit your pages. What they change shows here as they change it, and each page keeps a version from before their edits in its history.",
+  "@externalDesc": {
+    "description": "Settings › External agents: the description under the heading."
+  },
+  "externalClientOther": "Other",
+  "@externalClientOther": {
+    "description": "Settings › External agents: the choice of any other AI app."
+  },
+  "externalRunInTerminal": "Run in a terminal:",
+  "@externalRunInTerminal": {
+    "description": "Settings › External agents: over a command to run."
+  },
+  "externalAddTo": "Add to {path}:",
+  "@externalAddTo": {
+    "description": "Settings › External agents: over a setup to add to a configuration file.",
+    "placeholders": {
+      "path": {
+        "type": "String",
+        "example": "~/.codex/config.toml"
+      }
+    }
+  },
+  "externalAddToVSCode": "Add to your user mcp.json (MCP: Open User Configuration):",
+  "@externalAddToVSCode": {
+    "description": "Settings › External agents › VS Code; “MCP: Open User Configuration” is VS Code's command, in English."
+  },
+  "externalAddToOther": "For Claude Desktop (claude_desktop_config.json) and other apps that read an mcpServers JSON:",
+  "@externalAddToOther": {
+    "description": "Settings › External agents › Other."
+  },
+  "signinTitle": "Sign in to Leaflet",
+  "@signinTitle": {
+    "description": "The sign-in page's title."
+  },
+  "signinSubtitle": "Sync your pages between devices, share them, and use cloud models.",
+  "@signinSubtitle": {
+    "description": "The sign-in page, under its title."
+  },
+  "signinNoServer": "This build has no server. Set SUPABASE_URL and SUPABASE_ANON_KEY to sign in.",
+  "@signinNoServer": {
+    "description": "The sign-in page in a build without a server."
+  },
+  "signinPassword": "Password",
+  "@signinPassword": {
+    "description": "The sign-in page: the way of signing in with a password, and the password field."
+  },
+  "signinCreateAccount": "Create account",
+  "@signinCreateAccount": {
+    "description": "The sign-in page: the way of creating an account, and its button."
+  },
+  "signinEmailCode": "Email code",
+  "@signinEmailCode": {
+    "description": "The sign-in page: the way of signing in with a code emailed."
+  },
+  "signinPasswordNew": "Password (at least 8 characters)",
+  "@signinPasswordNew": {
+    "description": "The sign-in page › Create account: the password field."
+  },
+  "signinCode": "Code from the email",
+  "@signinCode": {
+    "description": "The sign-in page › Email code: the code field."
+  },
+  "signinSendCode": "Email me a code",
+  "@signinSendCode": {
+    "description": "The sign-in page › Email code: the button."
+  },
+  "signinContinueLocal": "Continue on this device",
+  "@signinContinueLocal": {
+    "description": "The sign-in page: going on without an account."
+  },
+  "signinConfirmEmail": "Check your email to confirm the account, then sign in.",
+  "@signinConfirmEmail": {
+    "description": "The sign-in page, after creating an account."
+  },
+  "signinEnterEmailPassword": "Enter your email and password.",
+  "@signinEnterEmailPassword": {
+    "description": "The sign-in page: signing in without them."
+  },
+  "signinPasswordTooShort": "Use a password of at least 8 characters.",
+  "@signinPasswordTooShort": {
+    "description": "The sign-in page › Create account: a short password."
+  },
+  "signinCodeSent": "We emailed you a sign-in link and code.",
+  "@signinCodeSent": {
+    "description": "The sign-in page › Email code: after sending it."
+  },
+  "signinRemovedChanges": "{count, plural, one {Removed # change by the previous account that had not uploaded} other {Removed # changes by the previous account that had not uploaded}}",
+  "@signinRemovedChanges": {
+    "description": "A notification after signing in as another account.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "2"
+      }
+    }
+  },
+  "welcomeTitle": "Welcome to Leaflet",
+  "@welcomeTitle": {
+    "description": "The welcome guide page, made once on first run: the page's title."
+  },
+  "welcomeSubTitle": "Weekly team sync",
+  "@welcomeSubTitle": {
+    "description": "The welcome guide page, made once on first run: the title of its example subpage."
+  },
+  "welcomeImageName": "Dawn over the lake",
+  "@welcomeImageName": {
+    "description": "The welcome guide page, made once on first run: the file name of its picture, without the extension."
+  },
+  "welcomeImageAlt": "A dawn over mountains and a still lake",
+  "@welcomeImageAlt": {
+    "description": "The welcome guide page, made once on first run: the picture's alternative text."
+  },
+  "welcomeIntro": "Pages are living documents you write with people and agents. They are saved on this device first and sync when you are online. This page shows what a page can do; change anything, it is yours.",
+  "@welcomeIntro": {
+    "description": "The welcome guide page, made once on first run: the first paragraph."
+  },
+  "welcomeTryHeading": "Try it",
+  "@welcomeTryHeading": {
+    "description": "The welcome guide page, made once on first run: a section heading."
+  },
+  "welcomeTrySlash": "Type **/** on an empty line to add any block",
+  "@welcomeTrySlash": {
+    "description": "The welcome guide page, made once on first run: a to-do of Try it (Markdown)."
+  },
+  "welcomeTryAt": "Type **@** to ask an agent to write here, mention someone or link a page",
+  "@welcomeTryAt": {
+    "description": "The welcome guide page, made once on first run: a to-do of Try it (Markdown)."
+  },
+  "welcomeTrySelect": "Select some text, then choose **Ask agent**, **Comment** or a color",
+  "@welcomeTrySelect": {
+    "description": "The welcome guide page, made once on first run: a to-do of Try it (Markdown)."
+  },
+  "welcomeTryRecord": "Press the microphone in the header to record, with a transcript",
+  "@welcomeTryRecord": {
+    "description": "The welcome guide page, made once on first run: a to-do of Try it."
+  },
+  "welcomeTryProvider": "Add an agent provider in **Settings › Agent providers**: sign in with ChatGPT, paste an API key, or use a model server such as Ollama",
+  "@welcomeTryProvider": {
+    "description": "The welcome guide page, made once on first run: a to-do of Try it (Markdown)."
+  },
+  "welcomeWritingHeading": "Writing",
+  "@welcomeWritingHeading": {
+    "description": "The welcome guide page, made once on first run: a section heading."
+  },
+  "welcomeWritingMarkdown": "Type **bold**, *italic*, `code`, ~~strikethrough~~ and [links](https://github.com/egoist/mygo) as Markdown and they format as you go. At the start of a line, `#` makes a heading, `-` a bullet, `1.` a numbered item, `[]` a to-do, `>` a quote and `---` a divider. Pasted Markdown keeps its headings, lists, tables and code.",
+  "@welcomeWritingMarkdown": {
+    "description": "The welcome guide page, made once on first run: a paragraph showing inline Markdown; keep the Markdown and the link."
+  },
+  "welcomeQuote": "The best way to have a good idea is to have a lot of ideas, and throw the bad ones away.",
+  "@welcomeQuote": {
+    "description": "The welcome guide page, made once on first run: an example quote block."
+  },
+  "welcomeListOutline": "Write a rough outline",
+  "@welcomeListOutline": {
+    "description": "The welcome guide page, made once on first run: an example numbered list item."
+  },
+  "welcomeListNest": "Press **Tab** to nest an item, **⇧Tab** to lift it back",
+  "@welcomeListNest": {
+    "description": "The welcome guide page, made once on first run: an example nested bullet (Markdown)."
+  },
+  "welcomeListAsk": "Ask an agent to fill in a section",
+  "@welcomeListAsk": {
+    "description": "The welcome guide page, made once on first run: an example numbered list item."
+  },
+  "welcomeListReview": "Review its edits, and **Undo** if you don't like them",
+  "@welcomeListReview": {
+    "description": "The welcome guide page, made once on first run: an example numbered list item (Markdown)."
+  },
+  "welcomeBlocksHeading": "Blocks",
+  "@welcomeBlocksHeading": {
+    "description": "The welcome guide page, made once on first run: a section heading."
+  },
+  "welcomeBlocksTable": "**/** adds any block. In a table, **Tab** moves to the next cell and adds a row at the end, and cells take formatting.",
+  "@welcomeBlocksTable": {
+    "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeTableMilestone": "Milestone",
+  "@welcomeTableMilestone": {
+    "description": "The welcome guide page, made once on first run: a column heading of the example table."
+  },
+  "welcomeTableOwner": "Owner",
+  "@welcomeTableOwner": {
+    "description": "The welcome guide page, made once on first run: a column heading of the example tables."
+  },
+  "welcomeTableDue": "Due",
+  "@welcomeTableDue": {
+    "description": "The welcome guide page, made once on first run: a column heading of the example tables."
+  },
+  "welcomeTableTask": "Task",
+  "@welcomeTableTask": {
+    "description": "The guide's example subpage (Weekly team sync): a column heading of its table."
+  },
+  "welcomeTableOutline": "Outline the guide",
+  "@welcomeTableOutline": {
+    "description": "The welcome guide page, made once on first run: a row of the example table."
+  },
+  "welcomeTableDraft": "First draft",
+  "@welcomeTableDraft": {
+    "description": "The welcome guide page, made once on first run: a row of the example table."
+  },
+  "welcomeTableReview": "Review and publish",
+  "@welcomeTableReview": {
+    "description": "The welcome guide page, made once on first run: a row of the example table."
+  },
+  "welcomeTableYou": "You",
+  "@welcomeTableYou": {
+    "description": "The welcome guide page, made once on first run: an owner in the example tables, and a chart series: the reader."
+  },
+  "welcomeTableAgent": "Agent",
+  "@welcomeTableAgent": {
+    "description": "The welcome guide page, made once on first run: an owner in the example tables."
+  },
+  "welcomeMonday": "Monday",
+  "@welcomeMonday": {
+    "description": "The welcome guide page, made once on first run: a due day in the example table."
+  },
+  "welcomeWednesday": "Wednesday",
+  "@welcomeWednesday": {
+    "description": "The welcome guide page, made once on first run: a due day in the example tables."
+  },
+  "welcomeThursday": "Thursday",
+  "@welcomeThursday": {
+    "description": "The guide's example subpage (Weekly team sync): a due day in its table."
+  },
+  "welcomeFriday": "Friday",
+  "@welcomeFriday": {
+    "description": "The welcome guide page, made once on first run: a due day in the example table."
+  },
+  "welcomeCodeIntro": "Code colors its syntax: type three backticks and a language, or pick one in the bar above the block.",
+  "@welcomeCodeIntro": {
+    "description": "The welcome guide page, made once on first run: a paragraph before the code example."
+  },
+  "welcomeCodeComment": "Count the words in a page's text, as a byline might.",
+  "@welcomeCodeComment": {
+    "description": "The welcome guide page, made once on first run: the comment on the first line of the JavaScript example."
+  },
+  "welcomeCallout": "A callout sets a note apart. Click its icon to make it a tip, a warning or a caution.",
+  "@welcomeCallout": {
+    "description": "The welcome guide page, made once on first run: an example callout."
+  },
+  "welcomeToggle": "A toggle folds away what is inside it: click the arrow",
+  "@welcomeToggle": {
+    "description": "The welcome guide page, made once on first run: an example toggle list."
+  },
+  "welcomeToggleInside": "Press **Enter** at the end of an open toggle to write inside it.",
+  "@welcomeToggleInside": {
+    "description": "The welcome guide page, made once on first run: the paragraph inside the example toggle (Markdown)."
+  },
+  "welcomeMathDiagram": "**Math** is TeX and **Diagram** is Mermaid; **Edit** opens their source. **Link card** previews a web page, and **File** keeps any file with the page.",
+  "@welcomeMathDiagram": {
+    "description": "The welcome guide page, made once on first run: a paragraph naming blocks of the / menu (Markdown)."
+  },
+  "welcomeDiagramIdea": "Idea",
+  "@welcomeDiagramIdea": {
+    "description": "The welcome guide page, made once on first run: a node of the example Mermaid flowchart."
+  },
+  "welcomeDiagramDraft": "Write a draft",
+  "@welcomeDiagramDraft": {
+    "description": "The welcome guide page, made once on first run: a node of the example Mermaid flowchart."
+  },
+  "welcomeDiagramReview": "Review",
+  "@welcomeDiagramReview": {
+    "description": "The welcome guide page, made once on first run: a node of the example Mermaid flowchart."
+  },
+  "welcomeDiagramChanges": "changes",
+  "@welcomeDiagramChanges": {
+    "description": "The welcome guide page, made once on first run: an edge label of the example Mermaid flowchart: the review asks for changes."
+  },
+  "welcomeDiagramOk": "ok",
+  "@welcomeDiagramOk": {
+    "description": "The welcome guide page, made once on first run: an edge label of the example Mermaid flowchart: the review passes."
+  },
+  "welcomeDiagramPublish": "Publish",
+  "@welcomeDiagramPublish": {
+    "description": "The welcome guide page, made once on first run: a node of the example Mermaid flowchart."
+  },
+  "welcomeMediaHeading": "Pictures, video and charts",
+  "@welcomeMediaHeading": {
+    "description": "The welcome guide page, made once on first run: a section heading."
+  },
+  "welcomeMediaImages": "Images are saved with the page, so they show offline. Paste a YouTube or Vimeo link on an empty line for a video that plays in place.",
+  "@welcomeMediaImages": {
+    "description": "The welcome guide page, made once on first run: a paragraph."
+  },
+  "welcomeMediaCharts": "Charts are bar, line or pie. Agents make them from your numbers, and **Edit data** changes them by hand.",
+  "@welcomeMediaCharts": {
+    "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeChartPagesTitle": "What people keep in pages",
+  "@welcomeChartPagesTitle": {
+    "description": "The welcome guide page, made once on first run: the title of the example bar chart."
+  },
+  "welcomeChartNotes": "Notes",
+  "@welcomeChartNotes": {
+    "description": "The welcome guide page, made once on first run: a bar of the example bar chart."
+  },
+  "welcomeChartPlans": "Plans",
+  "@welcomeChartPlans": {
+    "description": "The welcome guide page, made once on first run: a bar of the example bar chart."
+  },
+  "welcomeChartResearch": "Research",
+  "@welcomeChartResearch": {
+    "description": "The welcome guide page, made once on first run: a bar of the bar chart and a slice of the pie chart."
+  },
+  "welcomeChartRecordings": "Recordings",
+  "@welcomeChartRecordings": {
+    "description": "The welcome guide page, made once on first run: a bar of the example bar chart."
+  },
+  "welcomeChartPages": "Pages",
+  "@welcomeChartPages": {
+    "description": "The welcome guide page, made once on first run: the series of the example bar chart."
+  },
+  "welcomeChartCaption": "Example data",
+  "@welcomeChartCaption": {
+    "description": "The welcome guide page, made once on first run: the caption of the example bar chart."
+  },
+  "welcomeChartWordsTitle": "Words written per day",
+  "@welcomeChartWordsTitle": {
+    "description": "The welcome guide page, made once on first run: the title of the example line chart."
+  },
+  "welcomeChartMon": "Mon",
+  "@welcomeChartMon": {
+    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
+  },
+  "welcomeChartTue": "Tue",
+  "@welcomeChartTue": {
+    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
+  },
+  "welcomeChartWed": "Wed",
+  "@welcomeChartWed": {
+    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
+  },
+  "welcomeChartThu": "Thu",
+  "@welcomeChartThu": {
+    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
+  },
+  "welcomeChartFri": "Fri",
+  "@welcomeChartFri": {
+    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
+  },
+  "welcomeChartSat": "Sat",
+  "@welcomeChartSat": {
+    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
+  },
+  "welcomeChartSun": "Sun",
+  "@welcomeChartSun": {
+    "description": "The welcome guide page, made once on first run: a day on the line chart's axis."
+  },
+  "welcomeChartAgents": "Agents",
+  "@welcomeChartAgents": {
+    "description": "The welcome guide page, made once on first run: a series of the example line chart."
+  },
+  "welcomeChartWeekTitle": "Where the week went",
+  "@welcomeChartWeekTitle": {
+    "description": "The welcome guide page, made once on first run: the title of the example pie chart."
+  },
+  "welcomeChartWriting": "Writing",
+  "@welcomeChartWriting": {
+    "description": "The welcome guide page, made once on first run: a slice of the example pie chart."
+  },
+  "welcomeChartMeetings": "Meetings",
+  "@welcomeChartMeetings": {
+    "description": "The welcome guide page, made once on first run: a slice of the example pie chart."
+  },
+  "welcomeChartEmail": "Email",
+  "@welcomeChartEmail": {
+    "description": "The welcome guide page, made once on first run: a slice of the example pie chart."
+  },
+  "welcomeChartHours": "Hours",
+  "@welcomeChartHours": {
+    "description": "The welcome guide page, made once on first run: the series of the example pie chart."
+  },
+  "welcomeEmbedsHeading": "Interactive embeds",
+  "@welcomeEmbedsHeading": {
+    "description": "The welcome guide page, made once on first run: a section heading."
+  },
+  "welcomeEmbedsIntro": "Embeds are small apps in a page, sandboxed with no network and no access to your data. Ask an agent for one, as “@ make a pomodoro timer”, or try these:",
+  "@welcomeEmbedsIntro": {
+    "description": "The welcome guide page, made once on first run: a paragraph before the example embeds."
+  },
+  "welcomeSolarTitle": "The solar system, at your speed",
+  "@welcomeSolarTitle": {
+    "description": "An interactive embed in the welcome guide: its title."
+  },
+  "welcomeSolarPause": "Pause",
+  "@welcomeSolarPause": {
+    "description": "An interactive embed in the welcome guide: the solar system's button that stops it."
+  },
+  "welcomeSolarPlay": "Play",
+  "@welcomeSolarPlay": {
+    "description": "An interactive embed in the welcome guide: the solar system's button that starts it again."
+  },
+  "welcomeSolarSpeed": "Speed",
+  "@welcomeSolarSpeed": {
+    "description": "An interactive embed in the welcome guide: the label of the solar system's speed slider."
+  },
+  "welcomeSolarDaysPerSecond": "{count, plural, one {{days} day / s} other {{days} days / s}}",
+  "@welcomeSolarDaysPerSecond": {
+    "description": "An interactive embed in the welcome guide: the solar system's speed: simulated days per second; days is count written out.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "60"
+      },
+      "days": {
+        "type": "String",
+        "example": "60"
+      }
+    }
+  },
+  "welcomeSolarYear": "Year {year}",
+  "@welcomeSolarYear": {
+    "description": "An interactive embed in the welcome guide: the solar system's elapsed time, as Year 1.5.",
+    "placeholders": {
+      "year": {
+        "type": "String",
+        "example": "1.5"
+      }
+    }
+  },
+  "welcomeSolarMercury": "Mercury",
+  "@welcomeSolarMercury": {
+    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
+  },
+  "welcomeSolarVenus": "Venus",
+  "@welcomeSolarVenus": {
+    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
+  },
+  "welcomeSolarEarth": "Earth",
+  "@welcomeSolarEarth": {
+    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
+  },
+  "welcomeSolarMars": "Mars",
+  "@welcomeSolarMars": {
+    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
+  },
+  "welcomeSolarJupiter": "Jupiter",
+  "@welcomeSolarJupiter": {
+    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
+  },
+  "welcomeSolarSaturn": "Saturn",
+  "@welcomeSolarSaturn": {
+    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
+  },
+  "welcomeSolarUranus": "Uranus",
+  "@welcomeSolarUranus": {
+    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
+  },
+  "welcomeSolarNeptune": "Neptune",
+  "@welcomeSolarNeptune": {
+    "description": "An interactive embed in the welcome guide: a planet's name in the solar system."
+  },
+  "welcomeSavingsTitle": "Savings calculator",
+  "@welcomeSavingsTitle": {
+    "description": "An interactive embed in the welcome guide: its title."
+  },
+  "welcomeSavingsMonthly": "Saved every month",
+  "@welcomeSavingsMonthly": {
+    "description": "An interactive embed in the welcome guide: the savings calculator's slider of the monthly deposit."
+  },
+  "welcomeSavingsReturn": "Yearly return",
+  "@welcomeSavingsReturn": {
+    "description": "An interactive embed in the welcome guide: the savings calculator's slider of the yearly return."
+  },
+  "welcomeSavingsYears": "Years",
+  "@welcomeSavingsYears": {
+    "description": "An interactive embed in the welcome guide: the savings calculator's slider of the years."
+  },
+  "welcomeSavingsYearCount": "{count, plural, one {{years} year} other {{years} years}}",
+  "@welcomeSavingsYearCount": {
+    "description": "An interactive embed in the welcome guide: the savings calculator's number of years; years is count written out.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "20"
+      },
+      "years": {
+        "type": "String",
+        "example": "20"
+      }
+    }
+  },
+  "welcomeSavingsSaved": "Saved",
+  "@welcomeSavingsSaved": {
+    "description": "An interactive embed in the welcome guide: the savings calculator's legend: the money put in."
+  },
+  "welcomeSavingsEarned": "Earned",
+  "@welcomeSavingsEarned": {
+    "description": "An interactive embed in the welcome guide: the savings calculator's legend: the money earned."
+  },
+  "welcomeSavingsSummary": "{saved} saved, {earned} earned",
+  "@welcomeSavingsSummary": {
+    "description": "An interactive embed in the welcome guide: the savings calculator's line under the total; both are amounts of money.",
+    "placeholders": {
+      "saved": {
+        "type": "String",
+        "example": "$120,000"
+      },
+      "earned": {
+        "type": "String",
+        "example": "$85,510"
+      }
+    }
+  },
+  "welcomePianoTitle": "A piano to play",
+  "@welcomePianoTitle": {
+    "description": "An interactive embed in the welcome guide: its title."
+  },
+  "welcomePianoHint": "Click the keys, or click here and type the letters on them",
+  "@welcomePianoHint": {
+    "description": "An interactive embed in the welcome guide: the hint under the piano's keys."
+  },
+  "welcomeTodosHeading": "To-dos and recordings",
+  "@welcomeTodosHeading": {
+    "description": "The welcome guide page, made once on first run: a section heading."
+  },
+  "welcomeDateTodo": "Hover this to-do and choose **Add date** to give it a due date",
+  "@welcomeDateTodo": {
+    "description": "The welcome guide page, made once on first run: an example to-do (Markdown)."
+  },
+  "welcomeTodosDue": "A due to-do reminds you on the day and turns red once overdue. The **To-dos** button at the top of the sidebar gathers the open ones from every page.",
+  "@welcomeTodosDue": {
+    "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeRecordings": "A recording comes with a transcript, a time on each line: click a time to play from there. Its **…** menu puts the transcript in the page or has an agent sum it up. **Settings › Speech to text** picks Soniox or an OpenAI-compatible server, which can run on your own network, and the language. The menu bar icon starts a recording without opening the window.",
+  "@welcomeRecordings": {
+    "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeAgentsHeading": "Agents",
+  "@welcomeAgentsHeading": {
+    "description": "The welcome guide page, made once on first run: a section heading."
+  },
+  "welcomeAgentsIntro": "Agents read the page and edit it with you: text, tables, charts, code and embeds. Each run is one step you can undo, and the blocks it changed stay tinted until the next.",
+  "@welcomeAgentsIntro": {
+    "description": "The welcome guide page, made once on first run: a paragraph."
+  },
+  "welcomeAgentsAt": "**@** on a line asks about that spot: “@ write an intro for this page”",
+  "@welcomeAgentsAt": {
+    "description": "The welcome guide page, made once on first run: a bullet (Markdown)."
+  },
+  "welcomeAgentsSelect": "Select text, then **Ask agent**: “make this shorter”, “translate it to French”",
+  "@welcomeAgentsSelect": {
+    "description": "The welcome guide page, made once on first run: a bullet (Markdown)."
+  },
+  "welcomeAgentsPanel": "The panel (**⌘J**) holds a chat about the page. Mention an agent in a comment and it answers in the thread",
+  "@welcomeAgentsPanel": {
+    "description": "The welcome guide page, made once on first run: a bullet (Markdown)."
+  },
+  "welcomeAgentsSettings": "**Settings › Agent providers** sets the default agent, a model on this machine for offline use, and whether agents may read your other pages",
+  "@welcomeAgentsSettings": {
+    "description": "The welcome guide page, made once on first run: a bullet (Markdown)."
+  },
+  "welcomeAgentsExternal": "Claude Code, Codex, Cursor and other MCP clients can work on your pages too: **Settings › External agents** sets them up",
+  "@welcomeAgentsExternal": {
+    "description": "The welcome guide page, made once on first run: a bullet (Markdown)."
+  },
+  "welcomeOrganizingHeading": "Organizing pages",
+  "@welcomeOrganizingHeading": {
+    "description": "The welcome guide page, made once on first run: a section heading."
+  },
+  "welcomeOrganizingNest": "Pages nest inside pages: **/** › **Subpage**, or the **+** beside a page in the sidebar, adds one with a card for it here.",
+  "@welcomeOrganizingNest": {
+    "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeOrganizingLink": "Type **@** and a page's name to link to it, as to {page}; the link keeps up when the page is renamed.",
+  "@welcomeOrganizingLink": {
+    "description": "The welcome guide page, made once on first run: a paragraph (Markdown); page is the example subpage's title, shown as a link to it.",
+    "placeholders": {
+      "page": {
+        "type": "String",
+        "example": "Weekly team sync"
+      }
+    }
+  },
+  "welcomeOrganizingFolders": "Folders, from the button beside **My space**, group pages. A page's **…** menu moves it, duplicates it with its subpages, exports it as Markdown, or saves it as a template, which a blank page then offers to start from.",
+  "@welcomeOrganizingFolders": {
+    "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeOrganizingHeadings": "Headings fold their section from the arrow beside them, and the panel's **Outline** tab lists them. Right-click a block to **Copy link to block**.",
+  "@welcomeOrganizingHeadings": {
+    "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeTogetherHeading": "Working together",
+  "@welcomeTogetherHeading": {
+    "description": "The welcome guide page, made once on first run: a section heading."
+  },
+  "welcomeTogetherComments": "Select text and choose **Comment** to start a thread. Threads live in the panel's **Comments** tab, where you reply and **Resolve** them. Once you sign in, **Share** in the header invites people to edit or view a page and its subpages.",
+  "@welcomeTogetherComments": {
+    "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeTogetherHistory": "**Page history** in the **…** menu keeps a version every ten minutes of editing and before each agent run. See what changed since one, inline or side by side, name the current one, or restore it.",
+  "@welcomeTogetherHistory": {
+    "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeTogetherSync": "Pages work offline and sync between devices when you sign in; **Settings › Offline and storage** chooses which stay on this device. A block changed on two devices while apart keeps one version, and the page says so, with the other a click away.",
+  "@welcomeTogetherSync": {
+    "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeShortcutsHeading": "Shortcuts",
+  "@welcomeShortcutsHeading": {
+    "description": "The welcome guide page, made once on first run: a section heading."
+  },
+  "welcomeShortcutsKeys": "Keys",
+  "@welcomeShortcutsKeys": {
+    "description": "The welcome guide page, made once on first run: a column heading of the shortcuts table."
+  },
+  "welcomeShortcutsDoes": "Does",
+  "@welcomeShortcutsDoes": {
+    "description": "The welcome guide page, made once on first run: a column heading of the shortcuts table: what the keys do."
+  },
+  "welcomeShortcutSearch": "Search pages, templates, recordings and comments",
+  "@welcomeShortcutSearch": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘P)."
+  },
+  "welcomeShortcutNewPage": "Make a new page",
+  "@welcomeShortcutNewPage": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘N)."
+  },
+  "welcomeShortcutAgentPanel": "Show or hide the agent panel",
+  "@welcomeShortcutAgentPanel": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘J)."
+  },
+  "welcomeShortcutSidebar": "Show or hide the sidebar",
+  "@welcomeShortcutSidebar": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘\\)."
+  },
+  "welcomeShortcutSettings": "Open Settings: theme, text size, agents and speech",
+  "@welcomeShortcutSettings": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘,)."
+  },
+  "welcomeShortcutBackForward": "Go back and forward between pages",
+  "@welcomeShortcutBackForward": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘[ ⌘])."
+  },
+  "welcomeShortcutFormat": "Bold, italic, underline",
+  "@welcomeShortcutFormat": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘B ⌘I ⌘U)."
+  },
+  "welcomeShortcutCodeStrike": "Inline code, strikethrough",
+  "@welcomeShortcutCodeStrike": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘E ⇧⌘X)."
+  },
+  "welcomeShortcutLink": "Link the selected text",
+  "@welcomeShortcutLink": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘K)."
+  },
+  "welcomeShortcutLineBreak": "A line break within a block",
+  "@welcomeShortcutLineBreak": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⇧Enter)."
+  },
+  "welcomeShortcutTab": "Nest or lift a list item, indent code, or move between table cells",
+  "@welcomeShortcutTab": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (Tab ⇧Tab)."
+  },
+  "welcomeShortcutUndo": "Undo, redo",
+  "@welcomeShortcutUndo": {
+    "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘Z ⇧⌘Z)."
+  },
+  "welcomeSubIntro": "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent, and sharing the parent shares it too.",
+  "@welcomeSubIntro": {
+    "description": "The guide's example subpage (Weekly team sync): its first paragraph (Markdown); parent is the guide's title.",
+    "placeholders": {
+      "parent": {
+        "type": "String",
+        "example": "Welcome to Leaflet"
+      }
+    }
+  },
+  "welcomeSubAgenda": "Agenda",
+  "@welcomeSubAgenda": {
+    "description": "The guide's example subpage (Weekly team sync): a heading."
+  },
+  "welcomeSubShipped": "What shipped since last week",
+  "@welcomeSubShipped": {
+    "description": "The guide's example subpage (Weekly team sync): an agenda item."
+  },
+  "welcomeSubBlockers": "Blockers",
+  "@welcomeSubBlockers": {
+    "description": "The guide's example subpage (Weekly team sync): an agenda item."
+  },
+  "welcomeSubPlans": "Plans for next week",
+  "@welcomeSubPlans": {
+    "description": "The guide's example subpage (Weekly team sync): an agenda item."
+  },
+  "welcomeSubDecisions": "Decisions",
+  "@welcomeSubDecisions": {
+    "description": "The guide's example subpage (Weekly team sync): a heading."
+  },
+  "welcomeSubRelease": "Keep the release on **Friday**",
+  "@welcomeSubRelease": {
+    "description": "The guide's example subpage (Weekly team sync): a decision (Markdown)."
+  },
+  "welcomeSubDesignReview": "Move the design review to Thursday",
+  "@welcomeSubDesignReview": {
+    "description": "The guide's example subpage (Weekly team sync): a decision."
+  },
+  "welcomeSubActions": "Action items",
+  "@welcomeSubActions": {
+    "description": "The guide's example subpage (Weekly team sync): a heading."
+  },
+  "welcomeSubReleaseNotes": "Write the release notes",
+  "@welcomeSubReleaseNotes": {
+    "description": "The guide's example subpage (Weekly team sync): a task in its table."
+  },
+  "welcomeSubFeedback": "Sum up beta feedback",
+  "@welcomeSubFeedback": {
+    "description": "The guide's example subpage (Weekly team sync): a task in its table."
+  },
+  "welcomeSubEmail": "Ask an agent to turn these notes into an email",
+  "@welcomeSubEmail": {
+    "description": "The guide's example subpage (Weekly team sync): its to-do."
+  }
+}

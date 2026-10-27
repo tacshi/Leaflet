@@ -11,6 +11,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // Video blocks show the video's picture until play is clicked, and then
@@ -93,7 +94,7 @@ func (a *App) videoBlock(c *ui.Context, n *doc.Node, width float32) {
 	pal := theme.Of(c)
 	v, ok := doc.ParseVideoURL(n.Str("url"))
 	if !ok {
-		ui.Text(c, "Not a YouTube or Vimeo link: "+n.Str("url")).TextColor(pal.TextMuted)
+		ui.Text(c, locales.VideoNotALink(n.Str("url"))).TextColor(pal.TextMuted)
 		return
 	}
 	height := width * 9 / 16
@@ -117,7 +118,7 @@ func (a *App) videoBlock(c *ui.Context, n *doc.Node, width float32) {
 	}
 	white := ui.RGB(255, 255, 255)
 	poster := ui.ButtonBase(c.Key("video:" + n.ID)).Height(height).FillWidth().Radius(8).Clip().
-		Background(ui.RGB(0, 0, 0)).Cursor(ui.CursorPointer).Label("Play " + title)
+		Background(ui.RGB(0, 0, 0)).Cursor(ui.CursorPointer).Label(locales.VideoPlay(title))
 	hovered := poster.Hovered()
 	poster.Children(func() {
 		if bmp := a.images.get(thumb, func() { a.update(func() {}) }); bmp != nil {
@@ -147,7 +148,7 @@ func (a *App) playVideo(id string, v doc.Video) {
 	}
 	wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: "#000000"})
 	if err != nil {
-		a.toast("Videos cannot play here: " + err.Error())
+		a.toast(locales.VideoCannotPlay(err.Error()))
 		return
 	}
 	page := wv.Page()

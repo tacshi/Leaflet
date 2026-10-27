@@ -24,6 +24,7 @@ import (
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // Route is what the main area shows.
@@ -175,7 +176,7 @@ func Run() {
 	mygo.Use(native.New(updater.Options{DisableAutomaticChecks: true}))
 	mygo.App.WhenReady(func() {
 		if err := a.start(); err != nil {
-			mygo.Dialog.Error("Leaflet could not start", err.Error())
+			mygo.Dialog.Error(locales.AppStartFailed(), err.Error())
 			mygo.App.Quit()
 			return
 		}
@@ -272,6 +273,14 @@ func (a *App) start() error {
 	a.router.Transition = ui.TransitionNone
 	a.routerAt = a.router.Path()
 	a.setMenu()
+	// What was set once says the new language when it changes.
+	mygo.App.OnLocaleChanged(func(string) {
+		a.update(func() {
+			a.setMenu()
+			a.trayBuilt = false
+			a.refreshTray()
+		})
+	})
 	a.startReminders()
 	a.win = mygo.NewWindow(mygo.WindowOptions{
 		Title:         "Leaflet",
@@ -490,9 +499,9 @@ func (a *App) routeTitle() string {
 	case "page":
 		return a.pageTitleOf(a.route.ID)
 	case "todos":
-		return "To-dos"
+		return locales.AppRouteTodos()
 	case "signin":
-		return "Sign in"
+		return locales.CommonSignIn()
 	}
 	return "Leaflet"
 }
@@ -691,7 +700,7 @@ func (a *App) savePage() {
 	}
 	stamped, changed, err := a.st.SaveContent(ps.id, ps.editor.Content)
 	if err != nil {
-		a.toast("Could not save: " + err.Error())
+		a.toast(locales.AppErrorSave(err.Error()))
 		return
 	}
 	ps.editor.Content.Blocks, ps.editor.Content.Deleted = stamped.Blocks, stamped.Deleted
@@ -719,7 +728,7 @@ func (a *App) saveTitle() {
 	}
 	if p := a.pageByID(ps.id); p != nil && p.Title != ps.title && a.canEdit(ps.id) {
 		if err := a.st.RenamePage(ps.id, ps.title); err != nil {
-			a.toast("Could not rename: " + err.Error())
+			a.toast(locales.AppErrorRename(err.Error()))
 		}
 	}
 }
@@ -788,7 +797,7 @@ func (a *App) holdRunBar(d time.Duration) {
 func (a *App) newPage(parent, folder string) {
 	p, err := a.st.CreatePage(store.NewPageOptions{ParentID: parent, FolderID: folder})
 	if err != nil {
-		a.toast("Could not create the page: " + err.Error())
+		a.toast(locales.AppErrorCreatePage(err.Error()))
 		return
 	}
 	a.pages, _ = a.st.Pages()
@@ -826,7 +835,7 @@ func (a *App) linkSubpage(parent, id, after string) {
 	}
 	insert(c)
 	if _, _, err := a.st.SaveContent(parent, c); err != nil {
-		a.toast("Could not link the subpage: " + err.Error())
+		a.toast(locales.AppErrorLinkSubpage(err.Error()))
 	}
 }
 
@@ -855,7 +864,7 @@ func (a *App) unlinkSubpage(parent, id string) {
 	}
 	remove(c)
 	if _, _, err := a.st.SaveContent(parent, c); err != nil {
-		a.toast("Could not unlink the subpage: " + err.Error())
+		a.toast(locales.AppErrorUnlinkSubpage(err.Error()))
 	}
 }
 
@@ -905,7 +914,7 @@ func (a *App) focusTitle(selectAll bool) {
 
 // deletePage deletes a page and offers to undo.
 func (a *App) deletePage(id string) {
-	title := "Untitled"
+	title := locales.CommonUntitled()
 	if p := a.pageByID(id); p != nil {
 		title = p.DisplayTitle()
 	}
@@ -914,7 +923,7 @@ func (a *App) deletePage(id string) {
 	}
 	ids, err := a.st.DeletePage(id)
 	if err != nil {
-		a.toast("Could not delete: " + err.Error())
+		a.toast(locales.AppErrorDelete(err.Error()))
 		return
 	}
 	a.pages, _ = a.st.Pages()
@@ -926,9 +935,9 @@ func (a *App) deletePage(id string) {
 			}
 		}
 	}
-	a.toastAction("Deleted "+title, "Undo", func() {
+	a.toastAction(locales.AppDeleted(title), locales.CommonUndo(), func() {
 		if err := a.st.RestorePages(ids); err != nil {
-			a.toast("Could not restore: " + err.Error())
+			a.toast(locales.AppErrorRestore(err.Error()))
 		}
 		a.pages, _ = a.st.Pages()
 	})
@@ -948,18 +957,18 @@ func (a *App) setMenu() {
 			mygo.Separator(),
 			{Role: mygo.RoleQuit},
 		}},
-		{Label: "File", Submenu: []*mygo.MenuItem{
-			{Label: "New Page", Accelerator: "CmdOrCtrl+N", Click: func(*mygo.MenuItem, *mygo.Window) {
+		{Label: locales.AppMenuFile(), Submenu: []*mygo.MenuItem{
+			{Label: locales.AppMenuNewPage(), Accelerator: "CmdOrCtrl+N", Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.update(func() { a.newPage("", "") })
 			}},
-			{Label: "New Folder", Accelerator: "CmdOrCtrl+Shift+N", Click: func(*mygo.MenuItem, *mygo.Window) {
+			{Label: locales.AppMenuNewFolder(), Accelerator: "CmdOrCtrl+Shift+N", Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.update(func() { a.dialogs.openRenameFolder(nil) })
 			}},
 			{Type: mygo.MenuItemSeparator},
-			{Label: "Search", Accelerator: "CmdOrCtrl+P", Click: func(*mygo.MenuItem, *mygo.Window) {
+			{Label: locales.AppMenuSearch(), Accelerator: "CmdOrCtrl+P", Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.update(func() { a.openSearch() })
 			}},
-			{Label: "Export Page as Markdown…", Click: func(*mygo.MenuItem, *mygo.Window) {
+			{Label: locales.AppMenuExportMarkdown(), Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.update(func() {
 					if a.page != nil {
 						a.exportPage(a.page.id)
@@ -970,19 +979,19 @@ func (a *App) setMenu() {
 			{Role: mygo.RoleClose},
 		}},
 		{Role: mygo.RoleEditMenu},
-		{Label: "View", Submenu: []*mygo.MenuItem{
-			{Label: "Toggle Sidebar", Accelerator: "CmdOrCtrl+\\", Click: func(*mygo.MenuItem, *mygo.Window) {
+		{Label: locales.AppMenuView(), Submenu: []*mygo.MenuItem{
+			{Label: locales.AppMenuToggleSidebar(), Accelerator: "CmdOrCtrl+\\", Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.update(func() { a.toggleSidebar() })
 			}},
-			{Label: "Toggle Agent Panel", Accelerator: "CmdOrCtrl+J", Click: func(*mygo.MenuItem, *mygo.Window) {
+			{Label: locales.AppMenuToggleAgentPanel(), Accelerator: "CmdOrCtrl+J", Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.update(func() { a.togglePanel(0) })
 			}},
-			{Label: "Comments", Accelerator: "CmdOrCtrl+Shift+M", Click: func(*mygo.MenuItem, *mygo.Window) {
+			{Label: locales.AppMenuComments(), Accelerator: "CmdOrCtrl+Shift+M", Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.update(func() { a.togglePanel(1) })
 			}},
 			{Type: mygo.MenuItemSeparator},
-			{Label: "Back", Accelerator: "CmdOrCtrl+[", Click: func(*mygo.MenuItem, *mygo.Window) { a.update(a.back) }},
-			{Label: "Forward", Accelerator: "CmdOrCtrl+]", Click: func(*mygo.MenuItem, *mygo.Window) { a.update(a.forward) }},
+			{Label: locales.CommonBack(), Accelerator: "CmdOrCtrl+[", Click: func(*mygo.MenuItem, *mygo.Window) { a.update(a.back) }},
+			{Label: locales.AppMenuForward(), Accelerator: "CmdOrCtrl+]", Click: func(*mygo.MenuItem, *mygo.Window) { a.update(a.forward) }},
 			{Type: mygo.MenuItemSeparator},
 			{Role: mygo.RoleToggleFullScreen},
 		}},

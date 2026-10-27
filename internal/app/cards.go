@@ -1,9 +1,9 @@
 package app
 
 import (
-	"fmt"
 	"html"
 	"log"
+	"math"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -13,6 +13,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // Link cards and file cards.
@@ -182,20 +183,20 @@ func (a *App) linkPreviewBlock(c *ui.Context, n *doc.Node) {
 func humanSize(n int64) string {
 	switch {
 	case n >= 1<<30:
-		return fmt.Sprintf("%.1f GB", float64(n)/(1<<30))
+		return locales.CardSizeGB(math.Round(float64(n)/(1<<30)*10) / 10)
 	case n >= 1<<20:
-		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+		return locales.CardSizeMB(math.Round(float64(n)/(1<<20)*10) / 10)
 	case n >= 1<<10:
-		return fmt.Sprintf("%.0f KB", float64(n)/(1<<10))
+		return locales.CardSizeKB(int(math.Round(float64(n) / (1 << 10))))
 	}
-	return fmt.Sprintf("%d bytes", n)
+	return locales.CardSizeBytes(int(n))
 }
 
 func (a *App) fileBlock(c *ui.Context, n *doc.Node) {
 	pal := theme.Of(c)
 	for _, file := range a.files {
 		if file.ID == n.Str("file_id") {
-			b := cardButton(c, "file:"+n.ID, "Open "+file.Name)
+			b := cardButton(c, "file:"+n.ID, locales.CardOpenFile(file.Name))
 			a.fileCard(c, b, file.Name, file.SizeBytes, pal)
 			if b.Clicked() {
 				a.openFile(file)
@@ -206,7 +207,7 @@ func (a *App) fileBlock(c *ui.Context, n *doc.Node) {
 	// Not on this device yet, or gone: the card says so.
 	name := n.Str("name")
 	if name == "" {
-		name = "File"
+		name = locales.CardFile()
 	}
 	a.fileCard(c, cardButton(c, "file:"+n.ID, name).Opacity(0.7), name, -1, pal)
 }
@@ -219,11 +220,11 @@ func (a *App) fileCard(c *ui.Context, b ui.Element, name string, size int64, pal
 		ui.Column(c).Grow(1).Gap(2).Children(func() {
 			ui.Text(c, name).FontWeight(600).FontSize(14).TextColor(pal.Text).SingleLine()
 			kind := strings.ToUpper(strings.TrimPrefix(filepath.Ext(name), "."))
-			detail := "Not on this device yet"
+			detail := locales.CardNotOnDevice()
 			if size >= 0 {
 				detail = humanSize(size)
 				if kind != "" {
-					detail = kind + " · " + detail
+					detail = locales.CardFileDetail(kind, detail)
 				}
 			}
 			ui.Text(c, detail).FontSize(12).TextColor(pal.TextMuted)

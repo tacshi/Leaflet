@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/locales"
 )
 
 // LocalUserID is the user until someone signs in.
@@ -69,7 +70,7 @@ func (s *Store) LoadSession(user *User) (Session, error) {
 				name, _, _ = strings.Cut(user.Email, "@")
 			}
 			if name == "" {
-				name = "You"
+				name = locales.CommonYou()
 			}
 		}
 		sess := Session{UserID: user.ID, DisplayName: name, Email: user.Email, SpaceID: spaceID, SignedIn: true}
@@ -81,7 +82,7 @@ func (s *Store) LoadSession(user *User) (Session, error) {
 		return Session{}, err
 	}
 	if !hasName {
-		name = "You"
+		name = locales.CommonYou()
 	}
 	sess := Session{UserID: LocalUserID, DisplayName: name, SpaceID: spaceID}
 	s.SetSession(sess)

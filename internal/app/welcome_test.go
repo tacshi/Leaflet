@@ -1,12 +1,14 @@
 package app
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 func TestWelcomePage(t *testing.T) {
@@ -67,6 +69,60 @@ func TestWelcomePage(t *testing.T) {
 	}
 	if pages, _ := st.Pages(); len(pages) != 2 {
 		t.Errorf("%d pages after a second start", len(pages))
+	}
+}
+
+// TestWelcomeTranslated checks the guide and its subpage say every text in
+// Chinese and Japanese: the same blocks as in English, none of whose texts
+// is left in English but the keys of shortcuts.
+func TestWelcomeTranslated(t *testing.T) {
+	build := func(m locales.Messages) []*doc.Node {
+		blocks, err := welcomeBlocks(m, store.File{ID: "image", LocalPath: "/dawn.jpg"}, "sub")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return append(doc.FromBlocks(blocks).All(), welcomeSubpage(m).All()...)
+	}
+	en := build(locales.In("en"))
+	for _, lang := range []string{"zh-Hans", "ja"} {
+		m := locales.In(lang)
+		if m.WelcomeTitle() == locales.In("en").WelcomeTitle() || m.WelcomeImageName() == locales.In("en").WelcomeImageName() {
+			t.Errorf("%s: the title or the picture's name is in English", lang)
+		}
+		got := build(m)
+		if len(got) != len(en) {
+			t.Fatalf("%s: %d blocks, want %d", lang, len(got), len(en))
+		}
+		for i, n := range got {
+			e := en[i]
+			if n.Type != e.Type {
+				t.Fatalf("%s: block %d is %s, want %s", lang, i, n.Type, e.Type)
+			}
+			for _, r := range n.Delta() {
+				if strings.Contains(r.Text, "**") {
+					t.Errorf("%s: unformatted Markdown in %q", lang, n.Delta().Plain())
+				}
+			}
+			text, english := n.Delta().Plain(), e.Delta().Plain()
+			if text != "" && text == english && !strings.ContainsAny(text, "⌘⇧") {
+				t.Errorf("%s: %s block %q is in English", lang, n.Type, text)
+			}
+			// Charts, embeds, the picture and the diagram keep their texts
+			// in their data.
+			var data, englishData []byte
+			for _, k := range []string{"title", "labels", "series", "caption", "html", "alt", "source"} {
+				if n.Type == "video" {
+					break
+				}
+				if v, ok := n.Data[k]; ok {
+					data, _ = json.Marshal(v)
+					englishData, _ = json.Marshal(e.Data[k])
+					if string(data) == string(englishData) && string(data) != `""` {
+						t.Errorf("%s: the %s of a %s block is in English", lang, k, n.Type)
+					}
+				}
+			}
+		}
 	}
 }
 

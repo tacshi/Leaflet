@@ -11,6 +11,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
@@ -50,16 +51,16 @@ func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 		// they take no room otherwise.
 		if !e.ReadOnly && editing {
 			ui.Row(c).Gap(6).Children(func() {
-				if small(c, "add-row", "plus", "Row", pal) {
+				if small(c, "add-row", "plus", locales.EditorTableRow(), pal) {
 					e.Edit(func(*doc.Content) { addTableRow(n) })
 				}
-				if small(c, "add-col", "plus", "Column", pal) {
+				if small(c, "add-col", "plus", locales.EditorTableColumn(), pal) {
 					e.Edit(func(*doc.Content) { addTableColumn(n) })
 				}
-				if rows > 1 && small(c, "del-row", "minus", "Row", pal) {
+				if rows > 1 && small(c, "del-row", "minus", locales.EditorTableRow(), pal) {
 					e.Edit(func(*doc.Content) { removeTableRow(n) })
 				}
-				if cols > 1 && small(c, "del-col", "minus", "Column", pal) {
+				if cols > 1 && small(c, "del-col", "minus", locales.EditorTableColumn(), pal) {
 					e.Edit(func(*doc.Content) { removeTableColumn(n) })
 				}
 			})
@@ -230,8 +231,8 @@ func (e *Editor) cellTools(c *ui.Context, in ui.Element, table, text string, fro
 					fn()
 				}
 			}
-			text("comment", "message-square", "Comment", func() { e.Host.Comment(table, quote) })
-			text("ask", "sparkles", "Ask agent", func() { e.Host.AskAgent(table, quote) })
+			text("comment", "message-square", locales.CommonComment(), func() { e.Host.Comment(table, quote) })
+			text("ask", "sparkles", locales.EditorAskAgent(), func() { e.Host.AskAgent(table, quote) })
 		})
 	})
 }
@@ -336,7 +337,7 @@ func (e *Editor) chartBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 				}
 				b.Children(func() {
 					ui.Icon(c, theme.Icon("pencil")).FontSize(12)
-					ui.Text(c, "Edit data").FontSize(12)
+					ui.Text(c, locales.EditorEditData()).FontSize(12)
 				})
 				if b.Clicked() {
 					e.Host.EditBlock(n.ID)
@@ -501,14 +502,14 @@ func pieChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.P
 	}
 	slices := chart.Pie(vals, 0.015)
 	colors := seriesColors(pal, len(vals))
-	ui.Box(c).Height(200).FillWidth().Role(ui.RoleImage).Label("Pie chart").Draw(func(p *ui.Painter, r ui.Rect) {
+	ui.Box(c).Height(200).FillWidth().Role(ui.RoleImage).Label(locales.EditorPieChart()).Draw(func(p *ui.Painter, r ui.Rect) {
 		radius := min(r.H, r.W) / 2 * 0.9
 		cx, cy := r.X+r.W/2, r.Y+r.H/2
 		for i, s := range slices {
 			p.FillPath(chart.Sector(cx, cy, 0, radius, s), colors[i])
 			if s.End-s.Start > 0.35 {
 				lx, ly := chart.Polar(cx, cy, radius*0.62, s.Mid())
-				share := ui.Span{Text: fmt.Sprintf("%.0f%%", max(vals[i], 0)/total*100), Size: 12, Color: ui.Hex("#FFFFFF"), Font: "Figtree", Features: "tnum"}
+				share := ui.Span{Text: locales.EditorPieShare(max(vals[i], 0) / total), Size: 12, Color: ui.Hex("#FFFFFF"), Font: "Figtree", Features: "tnum"}
 				w, h := p.MeasureText(0, share)
 				p.RichText(lx-w/2, ly-h/2, 0, share)
 			}

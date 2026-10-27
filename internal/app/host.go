@@ -24,6 +24,7 @@ import (
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // The app as the agents' host.
@@ -127,36 +128,40 @@ type slashItem struct {
 	keywords string
 }
 
-var slashItems = []slashItem{
-	{editor.MenuItem{Key: "paragraph", Label: "Text", Hint: "Plain writing", Icon: "type", Group: "Basic"}, "text paragraph plain"},
-	{editor.MenuItem{Key: "h1", Label: "Heading 1", Hint: "Big section heading", Icon: "heading-1", Group: "Basic"}, "h1 title heading"},
-	{editor.MenuItem{Key: "h2", Label: "Heading 2", Hint: "Medium section heading", Icon: "heading-2", Group: "Basic"}, "h2 heading subtitle"},
-	{editor.MenuItem{Key: "h3", Label: "Heading 3", Hint: "Small section heading", Icon: "heading-3", Group: "Basic"}, "h3 heading"},
-	{editor.MenuItem{Key: "bulleted_list", Label: "Bulleted list", Hint: "A simple list", Icon: "list", Group: "Basic"}, "bullet list ul"},
-	{editor.MenuItem{Key: "numbered_list", Label: "Numbered list", Hint: "A list with numbers", Icon: "list-ordered", Group: "Basic"}, "number ordered ol"},
-	{editor.MenuItem{Key: "todo_list", Label: "To-do list", Hint: "Track tasks", Icon: "square-check", Group: "Basic"}, "todo task check"},
-	{editor.MenuItem{Key: "quote", Label: "Quote", Hint: "Set off a quotation", Icon: "quote", Group: "Basic"}, "quote blockquote"},
-	{editor.MenuItem{Key: "callout", Label: "Callout", Hint: "Set off a note, tip or warning", Icon: "info", Group: "Basic"}, "callout note tip warning alert admonition"},
-	{editor.MenuItem{Key: "toggle_list", Label: "Toggle", Hint: "Fold away what is inside", Icon: "chevron-right", Group: "Basic"}, "toggle collapse fold details disclosure"},
-	{editor.MenuItem{Key: "code", Label: "Code", Hint: "Code with highlighting", Icon: "code", Group: "Basic"}, "code snippet program ```"},
-	{editor.MenuItem{Key: "divider", Label: "Divider", Hint: "A line between sections", Icon: "minus", Group: "Basic"}, "divider line hr rule"},
-	{editor.MenuItem{Key: "table", Label: "Table", Hint: "Rows and columns", Icon: "table", Group: "Blocks"}, "table grid"},
-	{editor.MenuItem{Key: "chart", Label: "Chart", Hint: "Bar, line or pie", Icon: "chart-column", Group: "Blocks"}, "chart graph bar line pie"},
-	{editor.MenuItem{Key: "math_equation", Label: "Math", Hint: "A formula in TeX", Icon: "sigma", Group: "Blocks"}, "math equation formula latex tex katex"},
-	{editor.MenuItem{Key: "diagram", Label: "Diagram", Hint: "A Mermaid flowchart or other diagram", Icon: "workflow", Group: "Blocks"}, "diagram mermaid flowchart sequence chart graph"},
-	{editor.MenuItem{Key: "embed", Label: "Interactive embed", Hint: "HTML that runs sandboxed", Icon: "layout-grid", Group: "Blocks"}, "embed html widget"},
-	{editor.MenuItem{Key: "subpage", Label: "Subpage", Hint: "A page inside this page", Icon: "file-plus", Group: "Blocks"}, "page subpage child"},
-	{editor.MenuItem{Key: "image", Label: "Image", Hint: "Upload a picture", Icon: "image", Group: "Blocks"}, "image picture photo"},
-	{editor.MenuItem{Key: "video", Label: "Video", Hint: "A YouTube or Vimeo link", Icon: "play", Group: "Blocks"}, "video youtube vimeo movie film"},
-	{editor.MenuItem{Key: "link_preview", Label: "Link card", Hint: "A web page with its title and picture", Icon: "globe", Group: "Blocks"}, "link card bookmark preview url web"},
-	{editor.MenuItem{Key: "file", Label: "File", Hint: "Attach a file to the page", Icon: "paperclip", Group: "Blocks"}, "file attach attachment upload document pdf"},
-	{editor.MenuItem{Key: "recording", Label: "Recording", Hint: "Audio with a transcript", Icon: "mic", Group: "Blocks"}, "record audio voice transcript"},
+// slashItems are the / menu's choices, said in the app's language; the
+// keywords stay English, to find a block by its English name too.
+func slashItems() []slashItem {
+	return []slashItem{
+		{editor.MenuItem{Key: "paragraph", Label: locales.HostSlashText(), Hint: locales.HostSlashTextHint(), Icon: "type", Group: locales.HostGroupBasic()}, "text paragraph plain"},
+		{editor.MenuItem{Key: "h1", Label: locales.HostSlashHeading1(), Hint: locales.HostSlashHeading1Hint(), Icon: "heading-1", Group: locales.HostGroupBasic()}, "h1 title heading"},
+		{editor.MenuItem{Key: "h2", Label: locales.HostSlashHeading2(), Hint: locales.HostSlashHeading2Hint(), Icon: "heading-2", Group: locales.HostGroupBasic()}, "h2 heading subtitle"},
+		{editor.MenuItem{Key: "h3", Label: locales.HostSlashHeading3(), Hint: locales.HostSlashHeading3Hint(), Icon: "heading-3", Group: locales.HostGroupBasic()}, "h3 heading"},
+		{editor.MenuItem{Key: "bulleted_list", Label: locales.HostSlashBulleted(), Hint: locales.HostSlashBulletedHint(), Icon: "list", Group: locales.HostGroupBasic()}, "bullet list ul"},
+		{editor.MenuItem{Key: "numbered_list", Label: locales.HostSlashNumbered(), Hint: locales.HostSlashNumberedHint(), Icon: "list-ordered", Group: locales.HostGroupBasic()}, "number ordered ol"},
+		{editor.MenuItem{Key: "todo_list", Label: locales.HostSlashTodo(), Hint: locales.HostSlashTodoHint(), Icon: "square-check", Group: locales.HostGroupBasic()}, "todo task check"},
+		{editor.MenuItem{Key: "quote", Label: locales.HostSlashQuote(), Hint: locales.HostSlashQuoteHint(), Icon: "quote", Group: locales.HostGroupBasic()}, "quote blockquote"},
+		{editor.MenuItem{Key: "callout", Label: locales.HostSlashCallout(), Hint: locales.HostSlashCalloutHint(), Icon: "info", Group: locales.HostGroupBasic()}, "callout note tip warning alert admonition"},
+		{editor.MenuItem{Key: "toggle_list", Label: locales.HostSlashToggle(), Hint: locales.HostSlashToggleHint(), Icon: "chevron-right", Group: locales.HostGroupBasic()}, "toggle collapse fold details disclosure"},
+		{editor.MenuItem{Key: "code", Label: locales.HostSlashCode(), Hint: locales.HostSlashCodeHint(), Icon: "code", Group: locales.HostGroupBasic()}, "code snippet program ```"},
+		{editor.MenuItem{Key: "divider", Label: locales.HostSlashDivider(), Hint: locales.HostSlashDividerHint(), Icon: "minus", Group: locales.HostGroupBasic()}, "divider line hr rule"},
+		{editor.MenuItem{Key: "table", Label: locales.HostSlashTable(), Hint: locales.HostSlashTableHint(), Icon: "table", Group: locales.HostGroupBlocks()}, "table grid"},
+		{editor.MenuItem{Key: "chart", Label: locales.HostSlashChart(), Hint: locales.HostSlashChartHint(), Icon: "chart-column", Group: locales.HostGroupBlocks()}, "chart graph bar line pie"},
+		{editor.MenuItem{Key: "math_equation", Label: locales.HostSlashMath(), Hint: locales.HostSlashMathHint(), Icon: "sigma", Group: locales.HostGroupBlocks()}, "math equation formula latex tex katex"},
+		{editor.MenuItem{Key: "diagram", Label: locales.HostSlashDiagram(), Hint: locales.HostSlashDiagramHint(), Icon: "workflow", Group: locales.HostGroupBlocks()}, "diagram mermaid flowchart sequence chart graph"},
+		{editor.MenuItem{Key: "embed", Label: locales.HostSlashEmbed(), Hint: locales.HostSlashEmbedHint(), Icon: "layout-grid", Group: locales.HostGroupBlocks()}, "embed html widget"},
+		{editor.MenuItem{Key: "subpage", Label: locales.HostSlashSubpage(), Hint: locales.HostSlashSubpageHint(), Icon: "file-plus", Group: locales.HostGroupBlocks()}, "page subpage child"},
+		{editor.MenuItem{Key: "image", Label: locales.HostSlashImage(), Hint: locales.HostSlashImageHint(), Icon: "image", Group: locales.HostGroupBlocks()}, "image picture photo"},
+		{editor.MenuItem{Key: "video", Label: locales.HostSlashVideo(), Hint: locales.HostSlashVideoHint(), Icon: "play", Group: locales.HostGroupBlocks()}, "video youtube vimeo movie film"},
+		{editor.MenuItem{Key: "link_preview", Label: locales.HostSlashLinkCard(), Hint: locales.HostSlashLinkCardHint(), Icon: "globe", Group: locales.HostGroupBlocks()}, "link card bookmark preview url web"},
+		{editor.MenuItem{Key: "file", Label: locales.HostSlashFile(), Hint: locales.HostSlashFileHint(), Icon: "paperclip", Group: locales.HostGroupBlocks()}, "file attach attachment upload document pdf"},
+		{editor.MenuItem{Key: "recording", Label: locales.CommonRecording(), Hint: locales.HostSlashRecordingHint(), Icon: "mic", Group: locales.HostGroupBlocks()}, "record audio voice transcript"},
+	}
 }
 
 func (h *host) SlashItems(query string) []editor.MenuItem {
 	q := strings.ToLower(strings.TrimSpace(query))
 	var out []editor.MenuItem
-	for _, it := range slashItems {
+	for _, it := range slashItems() {
 		if q == "" || strings.Contains(strings.ToLower(it.Label), q) || strings.Contains(it.keywords, q) {
 			out = append(out, it.MenuItem)
 		}
@@ -169,11 +174,11 @@ func (h *host) MentionItems(query string) []editor.MenuItem {
 	var out []editor.MenuItem
 	for _, o := range h.a.hub.Options() {
 		if q == "" || strings.Contains(strings.ToLower(o.Name()), q) {
-			out = append(out, editor.MenuItem{Key: "agent:" + o.Provider.ID, Label: o.Name(), Hint: o.Model, Icon: "sparkles", Group: "Agents"})
+			out = append(out, editor.MenuItem{Key: "agent:" + o.Provider.ID, Label: o.Name(), Hint: o.Model, Icon: "sparkles", Group: locales.CommonAgents()})
 		}
 	}
 	if len(h.a.hub.Options()) == 0 && q == "" {
-		out = append(out, editor.MenuItem{Key: "connect", Label: "Add an agent provider", Hint: "Settings › Agent providers", Icon: "sparkles", Group: "Agents"})
+		out = append(out, editor.MenuItem{Key: "connect", Label: locales.HostAddAgentProvider(), Hint: locales.HostAddAgentProviderHint(), Icon: "sparkles", Group: locales.CommonAgents()})
 	}
 	// The user's pages, to mention one: most recently edited first.
 	pages := slices.Clone(h.a.pages)
@@ -187,7 +192,7 @@ func (h *host) MentionItems(query string) []editor.MenuItem {
 			continue
 		}
 		if q == "" || strings.Contains(strings.ToLower(p.DisplayTitle()), q) {
-			out = append(out, editor.MenuItem{Key: "page:" + p.ID, Label: p.DisplayTitle(), Hint: h.a.pagePlace(p), Icon: "file-text", Group: "Pages"})
+			out = append(out, editor.MenuItem{Key: "page:" + p.ID, Label: p.DisplayTitle(), Hint: h.a.pagePlace(p), Icon: "file-text", Group: locales.HostGroupPages()})
 			n++
 		}
 	}
@@ -197,7 +202,7 @@ func (h *host) MentionItems(query string) []editor.MenuItem {
 				continue
 			}
 			if q == "" || strings.Contains(strings.ToLower(m.Name()), q) {
-				out = append(out, editor.MenuItem{Key: "user:" + m.UserID, Label: m.Name(), Hint: m.Role, Icon: "user", Group: "People"})
+				out = append(out, editor.MenuItem{Key: "user:" + m.UserID, Label: m.Name(), Hint: m.Role, Icon: "user", Group: locales.HostGroupPeople()})
 			}
 		}
 	}
@@ -250,12 +255,12 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 	case "divider":
 		ed.InsertBlocks(&doc.Node{ID: doc.NewBlockID(), Type: "divider"})
 	case "table":
-		n, _ := doc.TableNode([][]string{{"Column 1", "Column 2", "Column 3"}, {"", "", ""}, {"", "", ""}}, "")
+		n, _ := doc.TableNode([][]string{{locales.HostTableColumn(1), locales.HostTableColumn(2), locales.HostTableColumn(3)}, {"", "", ""}, {"", "", ""}}, "")
 		ed.InsertBlocks(n)
 	case "chart":
 		data, _ := doc.ChartData(map[string]any{
-			"chart_type": "bar", "title": "New chart", "labels": []any{"A", "B", "C"},
-			"series": []any{map[string]any{"name": "Value", "values": []any{3.0, 5.0, 2.0}}},
+			"chart_type": "bar", "title": locales.HostChartTitle(), "labels": []any{"A", "B", "C"},
+			"series": []any{map[string]any{"name": locales.HostChartSeries(), "values": []any{3.0, 5.0, 2.0}}},
 		})
 		data["author"] = a.session.DisplayName
 		n := &doc.Node{ID: doc.NewBlockID(), Type: "chart", Data: data}
@@ -315,7 +320,7 @@ func (a *App) addSubpageBlock() {
 	}
 	p, err := a.st.CreatePage(store.NewPageOptions{ParentID: ps.id})
 	if err != nil {
-		a.toast("Could not create the subpage: " + err.Error())
+		a.toast(locales.HostErrorCreateSubpage(err.Error()))
 		return
 	}
 	a.pages, _ = a.st.Pages()
@@ -338,7 +343,7 @@ func (a *App) uploadIntoPage() {
 	}
 	pageID := ps.id
 	go func() {
-		paths, _ := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: "Upload a file"})
+		paths, _ := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: locales.HostUploadTitle()})
 		if len(paths) == 0 {
 			return
 		}
@@ -347,11 +352,11 @@ func (a *App) uploadIntoPage() {
 				ext := strings.ToLower(filepath.Ext(path))
 				f, err := a.st.AddFile(path, "", pageID, mime.TypeByExtension(ext))
 				if err != nil {
-					a.toast("Could not add the file: " + err.Error())
+					a.toast(locales.HostErrorAddFile(err.Error()))
 					continue
 				}
 				if a.page == nil || a.page.id != pageID {
-					a.toast("Added " + f.Name + " to the space")
+					a.toast(locales.HostAddedToSpace(f.Name))
 					continue
 				}
 				n := &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
@@ -371,11 +376,11 @@ func (a *App) uploadIntoPage() {
 // uploadFile adds files to a folder.
 func (a *App) uploadFile(folderID string) {
 	go func() {
-		paths, _ := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: "Upload a file"})
+		paths, _ := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: locales.HostUploadTitle()})
 		a.update(func() {
 			for _, path := range paths {
 				if _, err := a.st.AddFile(path, folderID, "", mime.TypeByExtension(filepath.Ext(path))); err != nil {
-					a.toast("Could not add the file: " + err.Error())
+					a.toast(locales.HostErrorAddFile(err.Error()))
 				}
 			}
 			a.treeOpen("folder", folderID)
@@ -392,7 +397,7 @@ func (a *App) openFile(f store.File) {
 		}
 	})
 	if path == "" {
-		a.toast("Downloading " + f.Name + "…")
+		a.toast(locales.HostDownloading(f.Name))
 		return
 	}
 	_ = mygo.Shell.OpenPath(path)
@@ -459,16 +464,16 @@ func (a *App) exportPage(id string) {
 	md := doc.PageMarkdown(p.DisplayTitle(), c, a.pageTitleOf)
 	name := safeName(p.DisplayTitle()) + ".md"
 	go func() {
-		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: "Export as Markdown", DefaultPath: name})
+		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportTitle(), DefaultPath: name})
 		if path == "" {
 			return
 		}
 		err := os.WriteFile(path, []byte(md), 0o644) // #nosec G306 -- a file the user saves, readable like any other they save.
 		a.update(func() {
 			if err != nil {
-				a.toast("Could not export: " + err.Error())
+				a.toast(locales.HostErrorExport(err.Error()))
 			} else {
-				a.toast("Exported " + filepath.Base(path))
+				a.toast(locales.HostExported(filepath.Base(path)))
 			}
 		})
 	}()
@@ -482,7 +487,7 @@ func safeName(s string) string {
 		return r
 	}, s)
 	if strings.TrimSpace(s) == "" {
-		return "Untitled"
+		return locales.CommonUntitled()
 	}
 	return s
 }
@@ -711,21 +716,21 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 			ui.Text(c, n.Str("title")).FontWeight(650).FontSize(15).TextColor(pal.Text).Grow(1).SingleLine()
 			if a.page != nil && !a.page.editor.ReadOnly {
 				b := ui.ButtonBase(c.Key("edit")).Height(24).Padding(0, 8).Gap(4).Radius(6).TextColor(pal.TextMuted).
-					Opacity(map[bool]float32{true: 1, false: 0}[hovered]).AlignItems(ui.Center).Label("Edit embed")
+					Opacity(map[bool]float32{true: 1, false: 0}[hovered]).AlignItems(ui.Center).Label(locales.HostEditEmbed())
 				if b.Hovered() {
 					b.Background(pal.Hover)
 				}
 				b.Children(func() {
 					ui.Icon(c, theme.Icon("pencil")).FontSize(12)
-					ui.Text(c, "Edit").FontSize(12)
+					ui.Text(c, locales.CommonEdit()).FontSize(12)
 				})
 				if b.Clicked() {
 					a.dialogs.editEmbed(n)
 				}
 			}
-			ui.Row(c).Gap(4).AlignItems(ui.Center).Tooltip("Runs apart from your data, with no network").Children(func() {
+			ui.Row(c).Gap(4).AlignItems(ui.Center).Tooltip(locales.HostSandboxTooltip()).Children(func() {
 				ui.Icon(c, theme.Icon("shield-check")).FontSize(12).TextColor(pal.TextMuted)
-				ui.Text(c, "Sandboxed").FontSize(11).TextColor(pal.TextMuted)
+				ui.Text(c, locales.HostSandboxed()).FontSize(11).TextColor(pal.TextMuted)
 			})
 		})
 		// The block grows when the content is taller at this width, as a
@@ -753,7 +758,7 @@ func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float
 	if v == nil && a.win != nil {
 		wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: hexOf(pal.Surface)})
 		if err != nil {
-			ui.Text(c, "This cannot show here: "+err.Error()).TextColor(pal.TextMuted)
+			ui.Text(c, locales.HostEmbedError(err.Error())).TextColor(pal.TextMuted)
 			return
 		}
 		page := wv.Page()

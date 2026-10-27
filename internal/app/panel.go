@@ -10,6 +10,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // panel is the side panel of a page: the agent chat, the comments and the
@@ -21,15 +22,15 @@ func (a *App) panel(c *ui.Context) {
 		BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
 		// MyGo's tabs, as high as the bar, so the chosen one's line is on
 		// the bar's bottom edge.
-		ui.Tabs(c.Key("panel-tab"), &a.panelTab, "Agent", "Comments", "Outline").FillHeight().AlignItems(ui.Stretch)
+		ui.Tabs(c.Key("panel-tab"), &a.panelTab, locales.CommonAgent(), locales.PanelTabComments(), locales.PanelTabOutline()).FillHeight().AlignItems(ui.Stretch)
 		ui.Spacer(c)
 		tools(c, func() {
 			if a.panelTab == 0 {
-				if iconButton(c, "new-chat", "message-square-plus", "New conversation").Clicked() {
+				if iconButton(c, "new-chat", "message-square-plus", locales.PanelNewConversation()).Clicked() {
 					a.hub.NewConversation(a.page.id)
 				}
 			}
-			if iconButton(c, "hide-panel", "panel-right", "Hide panel (⌘J)").Clicked() {
+			if iconButton(c, "hide-panel", "panel-right", locales.PanelHide()).Clicked() {
 				a.panelOpen = false
 			}
 		})
@@ -71,10 +72,10 @@ func (a *App) agentPanel(c *ui.Context) {
 	if len(options) == 0 {
 		ui.Column(c).Grow(1).Padding(24).Gap(12).Justify(ui.Center).Children(func() {
 			avatar(c, "", 40, true)
-			ui.Text(c, "Add an agent provider").FontSize(16).FontWeight(650).TextColor(pal.Text)
-			ui.Text(c, "Agents run on a service you choose: a cloud one such as OpenAI or Claude, or a model server on your machine, such as Ollama.").
+			ui.Text(c, locales.PanelNoProviderTitle()).FontSize(16).FontWeight(650).TextColor(pal.Text)
+			ui.Text(c, locales.PanelNoProviderBody()).
 				FontSize(13).TextColor(pal.TextMuted)
-			if primary(c, "connect", "sparkles", "Open Settings › Agent providers").Clicked() {
+			if primary(c, "connect", "sparkles", locales.PanelOpenProviders()).Clicked() {
 				a.openSettings("providers")
 			}
 		})
@@ -87,9 +88,10 @@ func (a *App) agentPanel(c *ui.Context) {
 		ui.Column(c).Gap(14).Children(func() {
 			if len(sess.Messages) == 0 {
 				ui.Column(c).Gap(10).Padding(12, 2).Children(func() {
-					ui.Text(c, "Ask about this page, or have an agent write in it.").FontSize(13.5).TextColor(pal.TextMuted)
-					for _, s := range []string{"Summarize this page", "Suggest a structure for this page", "Find gaps or open questions", "Turn the numbers here into a chart"} {
-						if ghost(c, "suggest:"+s, "sparkles", s).Border(1, pal.Divider).Justify(ui.Start).Height(32).Clicked() {
+					ui.Text(c, locales.PanelChatEmpty()).FontSize(13.5).TextColor(pal.TextMuted)
+					suggestions := []string{locales.PanelSuggestSummarize(), locales.PanelSuggestStructure(), locales.PanelSuggestGaps(), locales.PanelSuggestChart()}
+					for i, s := range suggestions {
+						if ghost(c, fmt.Sprintf("suggest:%d", i), "sparkles", s).Border(1, pal.Divider).Justify(ui.Start).Height(32).Clicked() {
 							a.hub.Chat(ps.id, s, a.focusBlocks())
 						}
 					}
@@ -105,7 +107,7 @@ func (a *App) agentPanel(c *ui.Context) {
 			// MyGo's text area. It takes a plain Enter as a newline before
 			// any Shortcut sees it; OnTextKey sees it first. Shift+Enter
 			// still breaks the line.
-			ui.TextArea(c.Key("draft"), &cs.draft).Bind(&cs.input).Placeholder("Ask the agent…").MinHeight(64).MaxHeight(180).
+			ui.TextArea(c.Key("draft"), &cs.draft).Bind(&cs.input).Placeholder(locales.PanelAskPlaceholder()).MinHeight(64).MaxHeight(180).
 				OnTextKey(func(k ui.TextKey) bool {
 					if k.Key != ui.KeyEnter || k.Mods != 0 {
 						return false
@@ -132,7 +134,7 @@ func (a *App) agentPanel(c *ui.Context) {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				a.agentPicker(c, sess, options)
 				ui.Spacer(c)
-				b := primary(c, "send", "arrow-up", "").Size(28, 28).Padding(0).Label("Send")
+				b := primary(c, "send", "arrow-up", "").Size(28, 28).Padding(0).Label(locales.PanelSend())
 				b.Disabled(strings.TrimSpace(cs.draft) == "" || sess.Running)
 				if b.Clicked() {
 					send()
@@ -154,7 +156,7 @@ func (a *App) focusBlocks() []string {
 // panel's chat asks.
 func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.Option) {
 	current, err := a.hub.Resolve(sess.Selected)
-	name := "No agent"
+	name := locales.PanelNoAgent()
 	if err == nil {
 		name = current.Label()
 	}
@@ -169,10 +171,10 @@ func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.
 			}
 		}
 		m.Separator()
-		if m.Item("Manage agent providers…").Chosen() {
+		if m.Item(locales.PanelManageProviders()).Chosen() {
 			a.openSettings("providers")
 		}
-	}).Label("Agent").FontSize(12)
+	}).Label(locales.CommonAgent()).FontSize(12)
 }
 
 func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.Session) {
@@ -189,7 +191,7 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 			avatar(c, "", 20, true)
 			name := m.AgentName
 			if name == "" {
-				name = "Agent"
+				name = locales.CommonAgent()
 			}
 			ui.Text(c, name).FontSize(12.5).FontWeight(600).TextColor(pal.TextSecondary)
 		})
@@ -223,10 +225,10 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 				}
 				ui.Row(c).Gap(6).Margin(4, 0, 0).Children(func() {
 					if run.Undone {
-						if ghost(c, "redo", "redo-2", "Redo").Clicked() {
+						if ghost(c, "redo", "redo-2", locales.PageRedo()).Clicked() {
 							a.hub.RedoRun(a.page.id, run.ID)
 						}
-					} else if ghost(c, "undo", "undo-2", "Undo").Clicked() {
+					} else if ghost(c, "undo", "undo-2", locales.CommonUndo()).Clicked() {
 						a.hub.UndoRun(a.page.id, run.ID)
 					}
 				})
@@ -265,8 +267,8 @@ func (a *App) commentsPanel(c *ui.Context) {
 				// As the home view's empty state is: an icon over centered text.
 				ui.Column(c).FillWidth().Padding(48, 16).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Icon(c, theme.Icon("message-square")).FontSize(26).TextColor(pal.ChartMuted).Margin(0, 0, 4, 0)
-					ui.Text(c, "No open comments").FontSize(14).FontWeight(600).TextColor(pal.Text)
-					ui.Text(c, "Select text in the page and choose Comment. Mention an agent with @ in a reply to have it answer.").
+					ui.Text(c, locales.PanelCommentsEmpty()).FontSize(14).FontWeight(600).TextColor(pal.Text)
+					ui.Text(c, locales.PanelCommentsEmptyHint()).
 						FontSize(13).TextColor(pal.TextMuted).TextAlign(ui.Center).MaxWidth(260)
 				})
 			}
@@ -276,9 +278,9 @@ func (a *App) commentsPanel(c *ui.Context) {
 				}
 			}
 			if resolved > 0 {
-				label := fmt.Sprintf("Show %d resolved", resolved)
+				label := locales.PanelShowResolved(resolved)
 				if showResolved {
-					label = "Hide resolved"
+					label = locales.PanelHideResolved()
 				}
 				if ghost(c, "toggle-resolved", "", label).Clicked() {
 					if showResolved {
@@ -299,7 +301,7 @@ func (a *App) newCommentCard(c *ui.Context, nc *newComment) {
 			if nc.quote != "" {
 				quoteChip(c, nc.quote)
 			}
-			in := ui.TextArea(c.Key("text"), &nc.text).Placeholder("Add a comment… (@ an agent to ask it)").MinHeight(64).AutoFocus()
+			in := ui.TextArea(c.Key("text"), &nc.text).Placeholder(locales.PanelCommentPlaceholder()).MinHeight(64).AutoFocus()
 			post := func() {
 				body := strings.TrimSpace(nc.text)
 				if body == "" {
@@ -317,10 +319,10 @@ func (a *App) newCommentCard(c *ui.Context, nc *newComment) {
 				post()
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if button(c, "cancel", "", "Cancel").Clicked() {
+				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					a.dialogs.newComment = nil
 				}
-				if primary(c, "post", "", "Comment").Disabled(strings.TrimSpace(nc.text) == "").Clicked() {
+				if primary(c, "post", "", locales.CommonComment()).Disabled(strings.TrimSpace(nc.text) == "").Clicked() {
 					post()
 				}
 			})
@@ -330,7 +332,7 @@ func (a *App) newCommentCard(c *ui.Context, nc *newComment) {
 
 func quoteChip(c *ui.Context, quote string) {
 	pal := theme.Of(c)
-	ui.Text(c, "“"+short(quote, 120)+"”").FontSize(12.5).Italic().TextColor(pal.TextMuted).Padding(4, 8).
+	ui.Text(c, locales.PanelQuote(short(quote, 120))).FontSize(12.5).Italic().TextColor(pal.TextMuted).Padding(4, 8).
 		BorderWidth(0, 0, 0, 3).BorderColor(pal.WarnBorder).Background(pal.WarnBg).Radius(4)
 }
 
@@ -351,7 +353,7 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 					if t.Root.Quote != "" {
 						quoteChip(c, t.Root.Quote)
 					} else {
-						ui.Text(c, "On a block").FontSize(12).TextColor(pal.TextMuted)
+						ui.Text(c, locales.PanelOnBlock()).FontSize(12).TextColor(pal.TextMuted)
 					}
 				})
 				if jump.Clicked() {
@@ -359,14 +361,14 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 				}
 				tools(c, func() {
 					if t.Root.Resolved {
-						if iconButton(c, "reopen", "rotate-ccw", "Reopen").Clicked() {
+						if iconButton(c, "reopen", "rotate-ccw", locales.PanelReopen()).Clicked() {
 							if err := a.st.SetResolved(t.Root.ID, false); err != nil {
-								a.toast("Could not reopen: " + err.Error())
+								a.toast(locales.PanelCouldNotReopen(err.Error()))
 							}
 						}
-					} else if iconButton(c, "resolve", "check", "Resolve").Clicked() {
+					} else if iconButton(c, "resolve", "check", locales.PanelResolve()).Clicked() {
 						if err := a.st.SetResolved(t.Root.ID, true); err != nil {
-							a.toast("Could not resolve: " + err.Error())
+							a.toast(locales.PanelCouldNotResolve(err.Error()))
 						}
 					}
 				})
@@ -376,7 +378,7 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 			}
 			if !t.Root.Resolved {
 				ui.Row(c).Gap(6).AlignItems(ui.End).Children(func() {
-					ui.TextArea(c.Key("reply"), &draft.text).Placeholder("Reply…").Grow(1).MinHeight(34).
+					ui.TextArea(c.Key("reply"), &draft.text).Placeholder(locales.PanelReplyPlaceholder()).Grow(1).MinHeight(34).
 						OnTextKey(func(k ui.TextKey) bool {
 							if k.Key != ui.KeyEnter || (k.Mods != 0 && k.Mods != ui.Cmd) {
 								return false
@@ -402,7 +404,7 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 					}
 					if strings.TrimSpace(draft.text) != "" {
 						tools(c, func() {
-							if iconButton(c, "send", "arrow-up", "Reply").Clicked() {
+							if iconButton(c, "send", "arrow-up", locales.PanelReply()).Clicked() {
 								send()
 							}
 						})
@@ -427,11 +429,11 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 			mine := cm.AuthorKind == "user" && (cm.AuthorID == "" || cm.AuthorID == a.session.UserID)
 			if mine {
 				tools(c, func() {
-					more := iconButton(c, "more", "ellipsis", "Comment actions").Size(20, 20).Padding(2)
+					more := iconButton(c, "more", "ellipsis", locales.PanelCommentActions()).Size(20, 20).Padding(2)
 					more.Menu(func(m *ui.Menu) {
-						if m.Item("Delete comment").Chosen() {
+						if m.Item(locales.PanelDeleteComment()).Chosen() {
 							if err := a.st.DeleteComment(cm.ID); err != nil {
-								a.toast("Could not delete: " + err.Error())
+								a.toast(locales.PanelCouldNotDelete(err.Error()))
 							}
 						}
 					})

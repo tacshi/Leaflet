@@ -6,6 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 const (
@@ -129,13 +130,14 @@ func (a *App) titleBar(c *ui.Context, fn func()) {
 		DragWindow().BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
 		tools(c, func() {
 			if !a.settings.SidebarOpen {
-				if iconButton(c, "show-sidebar", "panel-left", "Show sidebar").Clicked() {
+				if iconButton(c, "show-sidebar", "panel-left", locales.ShellShowSidebar()).Clicked() {
 					a.toggleSidebar()
 				}
 			}
 			if a.router != nil {
-				ui.BackButton(c, a.router)
-				ui.ForwardButton(c, a.router)
+				back, forward := locales.ShellHistoryBack(), locales.ShellHistoryForward()
+				ui.BackButton(c, a.router).Label(back).Tooltip(back)
+				ui.ForwardButton(c, a.router).Label(forward).Tooltip(forward)
 			}
 		})
 		fn()
@@ -156,9 +158,9 @@ func (a *App) homeView(c *ui.Context) {
 	a.titleBar(c, func() { ui.Spacer(c) })
 	ui.Column(c).Grow(1).Center().Gap(14).Children(func() {
 		ui.Icon(c, theme.Icon("file-text")).FontSize(36).TextColor(pal.ChartMuted)
-		ui.Text(c, "No page open").FontSize(18).FontWeight(650).TextColor(pal.Text)
-		ui.Text(c, "Pick a page in the sidebar, or start a new one.").TextColor(pal.TextMuted)
-		if primary(c, "new", "plus", "New page").Clicked() {
+		ui.Text(c, locales.ShellNoPageOpen()).FontSize(18).FontWeight(650).TextColor(pal.Text)
+		ui.Text(c, locales.ShellNoPageHint()).TextColor(pal.TextMuted)
+		if primary(c, "new", "plus", locales.ShellNewPage()).Clicked() {
 			a.newPage("", "")
 		}
 	})

@@ -11,6 +11,7 @@ import (
 	"leaflet/internal/editor"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // todoRow is a row of the To-dos view: a section's header, or a to-do.
@@ -29,7 +30,7 @@ func todoRows(todos []store.PageTodo, now time.Time) []todoRow {
 		case t.Due.IsZero():
 		case editor.Overdue(t.Due, now):
 			s = "Overdue"
-		case editor.DueLabel(t.Due, now) == "Today":
+		case dueToday(t.Due, now):
 			s = "Today"
 		default:
 			s = "Upcoming"
@@ -51,6 +52,28 @@ func todoRows(todos []store.PageTodo, now time.Time) []todoRow {
 	return out
 }
 
+// dueToday reports whether a due date is now's day.
+func dueToday(due, now time.Time) bool {
+	y, m, d := due.In(time.Local).Date()
+	ny, nm, nd := now.In(time.Local).Date()
+	return y == ny && m == nm && d == nd
+}
+
+// todoSection is the name a person reads of a section of the To-dos view.
+func todoSection(header string) string {
+	switch header {
+	case "Overdue":
+		return locales.TodosSectionOverdue()
+	case "Today":
+		return locales.CommonToday()
+	case "Upcoming":
+		return locales.TodosSectionUpcoming()
+	case "No date":
+		return locales.TodosSectionNoDate()
+	}
+	return header
+}
+
 // todoList returns the open to-dos, read again after pages changed.
 func (a *App) todoList() []store.PageTodo {
 	if a.todosStale || a.todos == nil {
@@ -68,15 +91,15 @@ func (a *App) todoList() []store.PageTodo {
 func (a *App) todosView(c *ui.Context) {
 	pal := theme.Of(c)
 	a.titleBar(c, func() {
-		ui.Text(c, "To-dos").FontSize(13).FontWeight(600).TextColor(pal.Text).Padding(3, 6)
+		ui.Text(c, locales.TodosTitle()).FontSize(13).FontWeight(600).TextColor(pal.Text).Padding(3, 6)
 		ui.Spacer(c)
 	})
 	rows := todoRows(a.todoList(), time.Now())
 	if len(rows) == 0 {
 		ui.Column(c).Grow(1).Center().Gap(8).Children(func() {
 			ui.Icon(c, theme.Icon("square-check")).FontSize(32).TextColor(pal.ChartMuted)
-			ui.Text(c, "Nothing to do").FontSize(17).FontWeight(650).TextColor(pal.Text)
-			ui.Text(c, "To-dos with a date, or someone @mentioned, show here from every page.").TextColor(pal.TextMuted)
+			ui.Text(c, locales.TodosEmptyTitle()).FontSize(17).FontWeight(650).TextColor(pal.Text)
+			ui.Text(c, locales.TodosEmptyBody()).TextColor(pal.TextMuted)
 		})
 		return
 	}
@@ -91,7 +114,7 @@ func (a *App) todosView(c *ui.Context) {
 		ui.List(c, &a.todoState, len(rows), func(i int) {
 			r := rows[i]
 			if r.header != "" {
-				ui.Text(c, r.header).FontSize(12).FontWeight(650).TextColor(pal.TextMuted).Padding(16, 10, 6).
+				ui.Text(c, todoSection(r.header)).FontSize(12).FontWeight(650).TextColor(pal.TextMuted).Padding(16, 10, 6).
 					Background(pal.Surface).FillWidth()
 				return
 			}
@@ -107,18 +130,18 @@ func (a *App) todoRowView(c *ui.Context, t store.PageTodo, pal *theme.Palette) {
 	}
 	row.Children(func() {
 		done := false
-		if ui.Checkbox(c, &done, "").Label("Done").Changed() {
+		if ui.Checkbox(c, &done, "").Label(locales.CommonDone()).Changed() {
 			a.finishTodo(t)
 		}
 		ui.Column(c).Grow(1).Shrink(1).Gap(2).Children(func() {
 			text := t.Text
 			if strings.TrimSpace(text) == "" {
-				text = "To-do"
+				text = locales.TodosUntitled()
 			}
 			ui.Text(c, text).FontSize(14.5).TextColor(pal.Text).SingleLine()
 			sub := t.PageTitle
 			if t.Owner != "" {
-				sub += " · " + t.Owner
+				sub = locales.TodosPageAndOwner(sub, t.Owner)
 			}
 			ui.Text(c, sub).FontSize(12).TextColor(pal.TextMuted).SingleLine()
 		})
@@ -152,13 +175,13 @@ func (a *App) finishTodo(t store.PageTodo) {
 		if n := c.Find(t.BlockID); n != nil {
 			n.Set("checked", checked)
 			if _, _, err := a.st.SaveContent(t.PageID, c); err != nil {
-				a.toast("Could not save: " + err.Error())
+				a.toast(locales.SidebarCouldNotSave(err.Error()))
 			}
 		}
 	}
 	set(true)
 	a.todosStale = true
-	a.toastAction("Done: "+t.Text, "Undo", func() {
+	a.toastAction(locales.TodosFinished(t.Text), locales.CommonUndo(), func() {
 		set(false)
 		a.todosStale = true
 	})
@@ -175,7 +198,7 @@ func dueReminders(todos []store.PageTodo, now time.Time, reminded func(t store.P
 		if t.Due.IsZero() || reminded(t) {
 			continue
 		}
-		today := editor.DueLabel(t.Due, now) == "Today"
+		today := dueToday(t.Due, now)
 		if editor.Overdue(t.Due, now) || today && now.Hour() >= reminderHour {
 			out = append(out, t)
 		}
@@ -197,9 +220,9 @@ func (a *App) remind() {
 		return ok && v == due(t)
 	}
 	for _, t := range dueReminders(a.todoList(), time.Now(), reminded) {
-		title := "Due today"
+		title := locales.TodosDueToday()
 		if editor.Overdue(t.Due, time.Now()) {
-			title = "Overdue · " + editor.DueLabel(t.Due, time.Now())
+			title = locales.TodosOverdueOn(editor.DueLabel(t.Due, time.Now()))
 		}
 		n := mygo.NewNotification(mygo.NotificationOptions{ID: todoNotification + t.PageID + "#" + t.BlockID,
 			Title: title, Subtitle: t.PageTitle, Body: t.Text, Group: "todos"})

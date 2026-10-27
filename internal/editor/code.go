@@ -10,6 +10,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // Code blocks: a card of monospace text, colored by its language, with the
@@ -87,23 +88,23 @@ func codeTheme(pal *theme.Palette) *codeeditor.Theme {
 func (e *Editor) codeBarView(c *ui.Context, n *doc.Node, left float32, hovered bool, pal *theme.Palette) {
 	bar := ui.Row(c.Key("code-bar")).Absolute().Top(codeMargin).Left(left + codePad - 6).Right(codePad - 6).Height(codeBar).AlignItems(ui.Center)
 	bar.Children(func() {
-		name := doc.CodeLanguageName(n.Str("language"))
+		name := codeLanguageName(n.Str("language"))
 		if e.ReadOnly {
 			ui.Text(c, name).FontSize(12).TextColor(pal.TextMuted).Padding(0, 6)
 		} else {
 			ui.MenuButton(c.Key("language"), name, func(m *ui.Menu) {
 				for _, l := range doc.CodeLanguages {
-					if m.Item(l.Name).Checked(l.ID == n.Str("language")).Chosen() {
+					if m.Item(codeLanguageName(l.ID)).Checked(l.ID == n.Str("language")).Chosen() {
 						e.SetCodeLanguage(n.ID, l.ID)
 					}
 				}
-			}).Label("Language: " + name).FontSize(12)
+			}).Label(locales.EditorCodeLanguage(name)).FontSize(12)
 		}
 		ui.Spacer(c)
 		copied := e.copied == n.ID && time.Since(e.copiedAt) < 1500*time.Millisecond
-		icon, label := "copy", "Copy code"
+		icon, label := "copy", locales.EditorCopyCode()
 		if copied {
-			icon, label = "check", "Copied"
+			icon, label = "check", locales.CommonCopied()
 		}
 		b := ui.ButtonBase(c.Key("copy")).Size(26, 24).Center().Radius(6).TextColor(pal.TextMuted).Label(label).Tooltip(label).
 			Opacity(map[bool]float32{true: 1, false: 0}[hovered || copied])
@@ -287,4 +288,13 @@ func (e *Editor) indentCode(n *doc.Node, out bool) {
 	e.invalidate(n.ID)
 	e.Select(Pos{n.ID, moved(e.anchor.Off)}, Pos{n.ID, moved(e.focus.Off)})
 	e.changed()
+}
+
+// codeLanguageName is how a language ID shows: its name, or plain text
+// in the app's language.
+func codeLanguageName(id string) string {
+	if id == "" {
+		return locales.EditorCodePlainText()
+	}
+	return doc.CodeLanguageName(id)
 }

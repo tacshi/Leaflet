@@ -12,6 +12,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 func (a *App) writeExport(file string) error {
@@ -29,7 +30,7 @@ func (a *App) writeExport(file string) error {
 	}
 	// Templates go in a folder of their own.
 	const templatesFolder = "\x00templates"
-	folders[templatesFolder] = "Templates"
+	folders[templatesFolder] = locales.ExportTemplatesFolder()
 	for _, t := range templates {
 		if t.ParentID == "" {
 			t.FolderID = templatesFolder
@@ -106,7 +107,7 @@ func exportZip(w io.Writer, pages []store.Page, folders map[string]string, conte
 			if q, ok := byID[id]; ok {
 				return q.DisplayTitle()
 			}
-			return "Untitled"
+			return locales.CommonUntitled()
 		})
 		var fail error
 		c.Walk(func(n, _ *doc.Node) {

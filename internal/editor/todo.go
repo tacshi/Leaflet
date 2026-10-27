@@ -7,6 +7,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // SetDue gives a to-do a due date, or takes it away for a zero time, as a
@@ -28,16 +29,16 @@ func DueLabel(due, now time.Time) string {
 	day := func(t time.Time) time.Time { return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local) }
 	switch int(day(due).Sub(day(now)).Hours() / 24) {
 	case 0:
-		return "Today"
+		return locales.CommonToday()
 	case 1:
-		return "Tomorrow"
+		return locales.EditorTomorrow()
 	case -1:
-		return "Yesterday"
+		return locales.EditorYesterday()
 	}
 	if due.Year() == now.Year() {
-		return due.Format("Jan 2")
+		return locales.EditorDueDay(due)
 	}
-	return due.Format("Jan 2, 2006")
+	return locales.EditorDueDate(due)
 }
 
 // Overdue reports whether a due date is a day before now's.
@@ -55,18 +56,18 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 		return
 	}
 	now := time.Now()
-	label, fg, bg := "Add date", pal.TextMuted, pal.Ground
+	label, fg, bg := locales.EditorAddDate(), pal.TextMuted, pal.Ground
 	if has {
 		label = DueLabel(due, now)
 		switch {
 		case Overdue(due, now):
 			fg, bg = pal.DangerText, pal.DangerBg
-		case label == "Today":
+		case label == locales.CommonToday():
 			fg, bg = pal.AccentText, pal.AccentSoft
 		}
 	}
 	chip := ui.ButtonBase(c.Key("due:"+n.ID)).Absolute().Left(left).Top(top).Height(20).Padding(0, 7).Gap(4).Radius(6).
-		Background(bg).TextColor(fg).AlignItems(ui.Center).Label("Due date: " + label).Cursor(ui.CursorPointer)
+		Background(bg).TextColor(fg).AlignItems(ui.Center).Label(locales.EditorDueDateLabel(label)).Cursor(ui.CursorPointer)
 	chip.Draw(func(_ *ui.Painter, r ui.Rect) { e.chips[n.ID] = r })
 	chip.Children(func() {
 		ui.Icon(c, theme.Icon("calendar")).FontSize(11)
@@ -85,7 +86,7 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 			open = false
 			e.Focus()
 		}
-		if has && ui.Button(c, "Remove date").Clicked() {
+		if has && ui.Button(c, locales.EditorRemoveDate()).Clicked() {
 			e.SetDue(n.ID, time.Time{})
 			open = false
 			e.Focus()

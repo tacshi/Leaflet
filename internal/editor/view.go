@@ -8,6 +8,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 const blinkPeriod = 530 * time.Millisecond
@@ -17,7 +18,7 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 	pal := theme.Of(c)
 	dark := c.Theme().Dark
 	e.services = c.Services()
-	root := ui.Column(c.Key("page-editor")).Bind(&e.handle).Label("Page").Cursor(ui.CursorText).FillWidth().FocusRing(false)
+	root := ui.Column(c.Key("page-editor")).Bind(&e.handle).Label(locales.EditorPage()).Cursor(ui.CursorText).FillWidth().FocusRing(false)
 	if !e.ReadOnly {
 		root.HandleTextInput(e).Role(ui.RoleTextField)
 	} else {
@@ -34,14 +35,14 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 		}
 	})
 	root.ContextMenu(func(m *ui.Menu) {
-		if e.colored() && m.Item("Remove color").Chosen() {
+		if e.colored() && m.Item(locales.EditorRemoveColor()).Chosen() {
 			e.SetColor("")
 			e.SetHighlight("")
 		}
 		if e.menuBlock != "" && e.node(e.menuBlock) != nil {
-			if m.Item("Copy link to block").Chosen() {
+			if m.Item(locales.EditorCopyBlockLink()).Chosen() {
 				e.services.WriteClipboard(e.Host.BlockLink(e.menuBlock))
-				c.Toast("Copied a link to the block")
+				c.Toast(locales.EditorCopiedBlockLink())
 			}
 			m.Separator()
 		}
@@ -107,24 +108,24 @@ func (e *Editor) inSelection(n *doc.Node) (int, int, bool) {
 func placeholder(n *doc.Node, only bool) string {
 	switch n.Type {
 	case "heading":
-		return fmt.Sprintf("Heading %d", n.Int("level", 1))
+		return locales.EditorPhHeading(n.Int("level", 1))
 	case "bulleted_list", "numbered_list":
-		return "List"
+		return locales.EditorPhList()
 	case "todo_list":
-		return "To-do"
+		return locales.EditorPhTodo()
 	case "quote":
-		return "Quote"
+		return locales.EditorPhQuote()
 	case "code":
-		return "Code"
+		return locales.EditorPhCode()
 	case "callout":
-		return "Callout"
+		return locales.EditorPhCallout()
 	case "toggle_list":
-		return "Toggle"
+		return locales.EditorPhToggle()
 	}
 	if only {
-		return "Write, or press / for blocks and @ for agents"
+		return locales.EditorPhFirst()
 	}
-	return "Press / for blocks, @ for agents"
+	return locales.EditorPhEmpty()
 }
 
 func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Palette, dark bool) {
@@ -252,7 +253,7 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 func (e *Editor) commentBadge(c *ui.Context, id string, count int, top float32, pal *theme.Palette) {
 	b := ui.ButtonBase(c.Key("comments:"+id)).Absolute().Top(top).Right(-52).Padding(2, 7).Radius(999).
 		Gap(4).Background(pal.WarnBg).Border(1, pal.WarnBorder).TextColor(pal.WarnText).Cursor(ui.CursorPointer).
-		Label(fmt.Sprintf("%d comments", count))
+		Label(locales.EditorCommentCount(count))
 	if b.Hovered() {
 		b.Background(pal.WarnBorder)
 	}
@@ -310,7 +311,7 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 		case "subpage":
 			e.subpageBlock(c, n, pal)
 		default:
-			ui.Text(c, "Unsupported block: "+n.Type).TextColor(pal.TextMuted)
+			ui.Text(c, locales.EditorUnsupported(n.Type)).TextColor(pal.TextMuted)
 		}
 		if count := e.Host.CommentCount(n.ID); count > 0 {
 			e.commentBadge(c, n.ID, count, 8, pal)
@@ -323,7 +324,7 @@ func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	if bmp == nil {
 		ui.Row(c).Height(160).FillWidth().Center().Radius(8).Background(pal.Ground).Border(1, pal.Divider).Children(func() {
 			ui.Icon(c, theme.Icon("image")).TextColor(pal.TextMuted)
-			ui.Text(c, "Loading image…").TextColor(pal.TextMuted).Margin(0, 0, 0, 8)
+			ui.Text(c, locales.EditorLoadingImage()).TextColor(pal.TextMuted).Margin(0, 0, 0, 8)
 		})
 		return
 	}
@@ -354,7 +355,7 @@ func (e *Editor) subpageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	card.Children(func() {
 		ui.Icon(c, theme.Icon("file-text")).TextColor(pal.Icon).FontSize(16)
 		if title == "" {
-			ui.Text(c, "Page not found").TextColor(pal.TextMuted)
+			ui.Text(c, locales.EditorPageNotFound()).TextColor(pal.TextMuted)
 		} else {
 			ui.Text(c, title).FontWeight(600).TextColor(pal.Text)
 		}
@@ -423,7 +424,7 @@ func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 		}
 		panel.Children(func() {
 			if len(e.menuItems) == 0 {
-				ui.Text(c, "No matches").TextColor(pal.TextMuted).Padding(8, 10)
+				ui.Text(c, locales.EditorNoMatches()).TextColor(pal.TextMuted).Padding(8, 10)
 				return
 			}
 			ui.Scroll(c).MaxHeight(320).Children(func() {
@@ -489,10 +490,10 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 				}
 				// Code takes no formats.
 				if !e.inCode() {
-					toggle("bold", "Bold", e.Has(func(a doc.Attrs) bool { return a.Bold }), e.ToggleBold)
-					toggle("italic", "Italic", e.Has(func(a doc.Attrs) bool { return a.Italic }), e.ToggleItalic)
-					toggle("code", "Code", e.Has(func(a doc.Attrs) bool { return a.Code }), e.ToggleCode)
-					toggle("link", "Link", e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
+					toggle("bold", locales.EditorBold(), e.Has(func(a doc.Attrs) bool { return a.Bold }), e.ToggleBold)
+					toggle("italic", locales.EditorItalic(), e.Has(func(a doc.Attrs) bool { return a.Italic }), e.ToggleItalic)
+					toggle("code", locales.EditorInlineCode(), e.Has(func(a doc.Attrs) bool { return a.Code }), e.ToggleCode)
+					toggle("link", locales.EditorLink(), e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
 					e.colorButton(c, pal)
 					ui.Divider(c).Height(18)
 				}
@@ -508,15 +509,15 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 						fn()
 					}
 				}
-				action("message-square", "Comment", func() {
+				action("message-square", locales.CommonComment(), func() {
 					id, quote := e.SelectedText()
 					e.Host.Comment(id, quote)
 				})
-				action("sparkles", "Ask agent", func() {
+				action("sparkles", locales.EditorAskAgent(), func() {
 					id, quote := e.SelectedText()
 					e.Host.AskAgent(id, quote)
 				})
-			}).Label("Format")
+			}).Label(locales.EditorFormat())
 		})
 	})
 }
@@ -531,7 +532,7 @@ func (e *Editor) linkEditor(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 		}
 		panel.Children(func() {
 			ui.Icon(c, theme.Icon("link")).TextColor(pal.TextMuted).Margin(0, 2, 0, 6)
-			in := ui.TextInputBase(c.Key("link-url"), &e.linkDraft).Placeholder("Paste a link").Grow(1).AutoFocus()
+			in := ui.TextInputBase(c.Key("link-url"), &e.linkDraft).Placeholder(locales.EditorPasteLink()).Grow(1).AutoFocus()
 			apply := func() {
 				e.SetLink(e.linkDraft)
 				e.linkOpen = false
@@ -540,10 +541,10 @@ func (e *Editor) linkEditor(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 			if in.Submitted() {
 				apply()
 			}
-			if ui.PrimaryButton(c, "Link").Clicked() {
+			if ui.PrimaryButton(c, locales.EditorLink()).Clicked() {
 				apply()
 			}
-			if e.LinkAt() != "" && ui.Button(c, "Remove").Clicked() {
+			if e.LinkAt() != "" && ui.Button(c, locales.CommonRemove()).Clicked() {
 				e.SetLink("")
 				e.linkOpen = false
 				e.Focus()

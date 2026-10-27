@@ -149,7 +149,6 @@
   "templateDelete": "删除模板",
   "templateHintEmpty": "空白",
   "templateHintSubpages": "{count, plural, other {# 个子页面}}",
-  "dialogSearchPlaceholder": "搜索页面、模板、录音和评论",
   "dialogSearchRecent": "最近",
   "dialogSearchNoMatch": "没有与“{query}”匹配的结果",
   "dialogSearchAskAgent": "改为询问智能体",

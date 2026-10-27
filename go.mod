@@ -6,7 +6,7 @@ tool github.com/egoist/mygo/cmd/mygo
 
 require (
 	github.com/coder/websocket v1.8.15
-	github.com/egoist/mygo v0.6.4
+	github.com/egoist/mygo v0.7.1
 	modernc.org/sqlite v1.61.0
 )
 

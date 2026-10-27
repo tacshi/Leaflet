@@ -755,10 +755,6 @@
       }
     }
   },
-  "dialogSearchPlaceholder": "Search pages, templates, recordings and comments",
-  "@dialogSearchPlaceholder": {
-    "description": "Search dialog: the field's placeholder."
-  },
   "dialogSearchRecent": "Recent",
   "@dialogSearchRecent": {
     "description": "Search dialog: the heading over recent pages, before anything is typed."

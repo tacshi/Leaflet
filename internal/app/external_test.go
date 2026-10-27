@@ -21,6 +21,11 @@ func TestAgentSetup(t *testing.T) {
 			if snippet != want {
 				t.Errorf("claude:\n%s\nwant\n%s", snippet, want)
 			}
+		case "opencode":
+			want := "opencode mcp add --global leaflet --env LEAFLET_DATA_DIR='/Users/me/Library/Application Support/Leaflet' -- " + exe + " mcp"
+			if snippet != want {
+				t.Errorf("opencode:\n%s\nwant\n%s", snippet, want)
+			}
 		case "codex":
 			for _, line := range []string{`[mcp_servers.leaflet]`, `command = "` + exe + `"`, `args = ["mcp"]`, `env = { LEAFLET_DATA_DIR = "` + dir + `" }`} {
 				if !strings.Contains(snippet, line) {

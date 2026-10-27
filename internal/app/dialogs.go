@@ -1020,9 +1020,13 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 		})
 		if ip.reply != "" || ip.working {
 			if ip.working {
+				label := locales.DialogInlineWorking()
+				if run := a.hub.Session(ps.id).Run(ip.runID); run != nil {
+					label = runProgress(run, label)
+				}
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Spinner(c).Size(14, 14)
-					ui.Text(c, locales.DialogInlineWorking()).FontSize(13).TextColor(pal.TextMuted)
+					ui.Text(c, label).FontSize(13).TextColor(pal.TextMuted)
 				})
 			} else {
 				run := a.hub.Session(ps.id).Run(ip.runID)

@@ -7,6 +7,7 @@ tool github.com/egoist/mygo/cmd/mygo
 require (
 	github.com/coder/websocket v1.8.15
 	github.com/egoist/mygo v0.7.1
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/tailscale/hujson v0.0.0-20260727124030-b80ff77dac4f
 	modernc.org/sqlite v1.61.0
 )

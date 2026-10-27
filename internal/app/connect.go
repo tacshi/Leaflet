@@ -12,7 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
+	"reflect"
 	"runtime"
 	"slices"
 	"strconv"
@@ -20,6 +20,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
+	"github.com/pelletier/go-toml/v2/unstable"
 	"github.com/tailscale/hujson"
 )
 
@@ -79,10 +81,12 @@ func currentAgentEnv() agentEnv {
 }
 
 // serverEntry is what an app's settings say about the server named
-// leaflet.
+// leaflet: how it starts, and whether it is turned off.
 type serverEntry struct {
-	Command string            `json:"command"`
-	Env     map[string]string `json:"env"`
+	Command string
+	Args    []string
+	Env     map[string]string
+	Off     bool
 }
 
 // agentStatus is an app as found on this computer.
@@ -97,10 +101,12 @@ type agentStatus struct {
 	seen time.Time
 }
 
-// current says whether the app's leaflet server is this copy of
-// Leaflet, on the pages in dir.
+// current says whether the app's leaflet server starts this copy of
+// Leaflet's server on the pages in dir. Anything else, another copy or a
+// server that would not start or is turned off, is for Update to mend.
 func (s agentStatus) current(exe, dir string) bool {
-	return s.entry != nil && s.entry.Command == exe && s.entry.Env["LEAFLET_DATA_DIR"] == dir
+	e := s.entry
+	return e != nil && !e.Off && e.Command == exe && slices.Equal(e.Args, []string{"mcp"}) && e.Env["LEAFLET_DATA_DIR"] == dir
 }
 
 // detectAgents finds the apps on this computer, and what their settings
@@ -177,12 +183,13 @@ func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 		// Not by its tool, which writes the whole file anew: other tables
 		// reordered, numbers and empty lists respelled, comments lost.
 		_, snippet := agentSetup("codex", exe, dir)
-		return editCodex(codexConfig(env), func(text string) string {
-			text = strings.TrimRight(withoutCodexEntry(text), "\n")
-			if text != "" {
+		want := &serverEntry{Command: exe, Args: []string{"mcp"}, Env: map[string]string{"LEAFLET_DATA_DIR": dir}}
+		return editCodex(codexConfig(env), want, func(text string) (string, error) {
+			text, err := withoutCodexEntry(text)
+			if text = strings.TrimRight(text, "\n"); text != "" {
 				text += "\n\n"
 			}
-			return text + snippet + "\n"
+			return text + snippet + "\n", err
 		})
 	case "opencode":
 		if cli != "" {
@@ -201,7 +208,7 @@ func disconnectAgent(id, cli string, env agentEnv) error {
 	case "claude":
 		return runCLI(cli, env, "mcp", "remove", "-s", "user", "leaflet")
 	case "codex":
-		return editCodex(codexConfig(env), withoutCodexEntry)
+		return editCodex(codexConfig(env), nil, withoutCodexEntry)
 	}
 	// OpenCode's tool adds servers but does not remove them.
 	path, keys := jsonConfig(id, env)
@@ -239,21 +246,25 @@ func readEntry(id string, env agentEnv) (*serverEntry, error) {
 	}
 	var e struct {
 		Command     json.RawMessage   `json:"command"`
+		Args        []string          `json:"args"`
 		Env         map[string]string `json:"env"`
 		Environment map[string]string `json:"environment"`
+		Disabled    bool              `json:"disabled"`
+		Enabled     *bool             `json:"enabled"`
 	}
 	if err := json.Unmarshal(servers["leaflet"], &e); err != nil {
 		return nil, err
 	}
-	// OpenCode keeps the command and its arguments in one list, and the
-	// environment under its own name.
-	out := &serverEntry{Env: e.Env}
+	// OpenCode keeps the command and its arguments in one list, the
+	// environment under its own name, and turns a server off by enabled
+	// (before its second version) or disabled.
+	out := &serverEntry{Args: e.Args, Env: e.Env, Off: e.Disabled || e.Enabled != nil && !*e.Enabled}
 	if e.Environment != nil {
 		out.Env = e.Environment
 	}
 	var argv []string
 	if json.Unmarshal(e.Command, &argv) == nil && len(argv) > 0 {
-		out.Command = argv[0]
+		out.Command, out.Args = argv[0], argv[1:]
 	} else {
 		_ = json.Unmarshal(e.Command, &out.Command)
 	}
@@ -460,86 +471,173 @@ func codexConfig(env agentEnv) string {
 	return filepath.Join(env.home, ".codex", "config.toml")
 }
 
-func editCodex(path string, fn func(string) string) error {
+// editCodex changes Codex's config.toml by fn, and writes the change only
+// when the file still reads as it did, but for the leaflet server, which
+// is want after it (nil: gone). A spelling of the file fn cannot change so
+// is left as it is, and said.
+func editCodex(path string, want *serverEntry, fn func(string) (string, error)) error {
 	raw, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	return writeAtomic(path, []byte(fn(string(raw))))
-}
-
-// codexTable is the TOML table a line heads, or "" for another line.
-func codexTable(line string) string {
-	l := strings.TrimSpace(line)
-	if !strings.HasPrefix(l, "[") {
-		return ""
+	before, err := decodeTOML(raw)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
 	}
-	if i := strings.Index(l, "#"); i >= 0 {
-		l = strings.TrimSpace(l[:i])
+	text, err := fn(string(raw))
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
 	}
-	return strings.TrimSpace(strings.Trim(l, "[]"))
-}
-
-func isLeafletTable(table string) bool {
-	return table == "mcp_servers.leaflet" || strings.HasPrefix(table, "mcp_servers.leaflet.")
-}
-
-var (
-	codexCommand = regexp.MustCompile(`^\s*command\s*=\s*("(?:[^"\\]|\\.)*"|'[^']*')`)
-	codexDataDir = regexp.MustCompile(`LEAFLET_DATA_DIR\s*=\s*("(?:[^"\\]|\\.)*"|'[^']*')`)
-)
-
-// codexEntry reads the leaflet server of a Codex config.toml, as its
-// own tool writes it (an [mcp_servers.leaflet.env] table) or as
-// agentSetup does (an inline env).
-func codexEntry(text string) *serverEntry {
-	var e *serverEntry
-	in := false
-	for _, line := range strings.Split(text, "\n") {
-		if t := codexTable(line); t != "" {
-			in = isLeafletTable(t)
-			if in && e == nil {
-				e = &serverEntry{Env: map[string]string{}}
+	after, err := decodeTOML([]byte(text))
+	if err != nil {
+		return fmt.Errorf("%s: could not change it safely: %w", path, err)
+	}
+	got := tomlEntry(after)
+	for _, doc := range []map[string]any{before, after} {
+		// An mcp_servers that held only leaflet may come or go with it.
+		if servers := tomlServers(doc); servers != nil {
+			if delete(servers, "leaflet"); len(servers) == 0 {
+				delete(doc, "mcp_servers")
 			}
-			continue
 		}
-		if !in {
-			continue
+	}
+	if !reflect.DeepEqual(before, after) || (want == nil) != (got == nil) || want != nil && !reflect.DeepEqual(*want, *got) {
+		return fmt.Errorf("%s: could not change it safely", path)
+	}
+	return writeAtomic(path, []byte(text))
+}
+
+func decodeTOML(raw []byte) (map[string]any, error) {
+	doc := map[string]any{}
+	if err := toml.Unmarshal(raw, &doc); err != nil {
+		return nil, err
+	}
+	return doc, nil
+}
+
+// tomlServers is the mcp_servers table of a decoded config.toml, or nil.
+func tomlServers(doc map[string]any) map[string]any {
+	servers, _ := doc["mcp_servers"].(map[string]any)
+	return servers
+}
+
+// tomlEntry is the leaflet server of a decoded config.toml, or nil.
+func tomlEntry(doc map[string]any) *serverEntry {
+	server, ok := tomlServers(doc)["leaflet"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	e := &serverEntry{Env: map[string]string{}}
+	e.Command, _ = server["command"].(string)
+	if args, ok := server["args"].([]any); ok {
+		e.Args = []string{}
+		for _, a := range args {
+			s, _ := a.(string)
+			e.Args = append(e.Args, s)
 		}
-		if m := codexCommand.FindStringSubmatch(line); m != nil {
-			e.Command = tomlString(m[1])
+	}
+	if env, ok := server["env"].(map[string]any); ok {
+		for k, v := range env {
+			e.Env[k], _ = v.(string)
 		}
-		if m := codexDataDir.FindStringSubmatch(line); m != nil {
-			e.Env["LEAFLET_DATA_DIR"] = tomlString(m[1])
-		}
+	}
+	if enabled, ok := server["enabled"].(bool); ok {
+		e.Off = !enabled
 	}
 	return e
 }
 
-// withoutCodexEntry is a Codex config.toml without the leaflet server.
-func withoutCodexEntry(text string) string {
-	var out []string
-	in := false
-	for _, line := range strings.Split(text, "\n") {
-		if t := codexTable(line); t != "" {
-			in = isLeafletTable(t)
-		}
-		if !in {
-			out = append(out, line)
-		}
+// codexEntry reads the leaflet server of a Codex config.toml, however
+// its keys are spelled, or nil.
+func codexEntry(text string) *serverEntry {
+	doc, err := decodeTOML([]byte(text))
+	if err != nil {
+		return nil
 	}
-	return strings.TrimRight(strings.Join(out, "\n"), "\n") + "\n"
+	return tomlEntry(doc)
 }
 
-// tomlString is the value of a TOML string, basic or literal; a basic
-// string's escapes are JSON's.
-func tomlString(s string) string {
-	if strings.HasPrefix(s, "'") {
-		return strings.Trim(s, "'")
+// withoutCodexEntry is a Codex config.toml without the leaflet server:
+// without each table header and key under mcp_servers.leaflet, as TOML
+// reads them (quoted, spaced, dotted or inline), and the comments among
+// them. Everything else stays as it was, strings that look like tables too.
+func withoutCodexEntry(text string) (string, error) {
+	data := []byte(text)
+	p := unstable.Parser{KeepComments: true}
+	p.Reset(data)
+	type expr struct {
+		start   int
+		leaflet bool
+		comment bool
 	}
-	var v string
-	_ = json.Unmarshal([]byte(s), &v)
-	return v
+	var exprs []expr
+	var table []string
+	for p.NextExpression() {
+		n := p.Expression()
+		e := expr{start: -1}
+		var key []string
+		if n.Kind != unstable.Comment {
+			for it := n.Key(); it.Next(); {
+				k := it.Node()
+				if e.start < 0 {
+					e.start = int(k.Raw.Offset)
+				}
+				key = append(key, string(k.Data))
+			}
+		}
+		switch n.Kind {
+		case unstable.Comment:
+			e.start, e.comment = int(n.Raw.Offset), true
+			e.leaflet = isLeafletKey(table)
+		case unstable.Table, unstable.ArrayTable:
+			table = key
+			e.leaflet = isLeafletKey(key)
+		default:
+			e.leaflet = isLeafletKey(append(slices.Clone(table), key...))
+		}
+		// From the start of its line.
+		e.start = strings.LastIndex(text[:e.start], "\n") + 1
+		exprs = append(exprs, e)
+	}
+	if err := p.Error(); err != nil {
+		return "", err
+	}
+	// A comment among the leaflet server's lines goes with them, unless
+	// what follows it is not the server's: then it heads that.
+	for i := len(exprs) - 1; i >= 0; i-- {
+		if exprs[i].comment && exprs[i].leaflet {
+			exprs[i].leaflet = i+1 < len(exprs) && exprs[i+1].leaflet
+		}
+	}
+	var b strings.Builder
+	at := 0
+	for i, e := range exprs {
+		end := len(text)
+		if i+1 < len(exprs) {
+			end = exprs[i+1].start
+		}
+		if e.leaflet {
+			// Keep the blank lines after it.
+			cut := strings.TrimRight(text[e.start:end], " \t\r\n")
+			b.WriteString(text[at:e.start])
+			at = e.start + len(cut)
+			at += len(text[at:end]) - len(strings.TrimLeft(text[at:end], " \t\r"))
+			if at < end && text[at] == '\n' {
+				at++
+			}
+			// Unless a blank line comes before it already, or nothing does.
+			if out := b.String(); out == "" || strings.HasSuffix(out, "\n\n") {
+				at = end
+			}
+		}
+	}
+	b.WriteString(text[at:])
+	return strings.TrimRight(b.String(), "\n") + "\n", nil
+}
+
+// isLeafletKey says whether a TOML key is the leaflet server or in it.
+func isLeafletKey(key []string) bool {
+	return len(key) >= 2 && key[0] == "mcp_servers" && key[1] == "leaflet"
 }
 
 // writeAtomic replaces a file whole, so an app reading it never finds it

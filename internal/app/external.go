@@ -87,7 +87,7 @@ func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, fir
 		icon, text = "clock", locales.ExternalFinishIn(s.app.label)
 	case s.entry == nil:
 	case !s.current(exe, dir):
-		icon, text, color = "circle-alert", locales.ExternalOtherCopy(), pal.WarnText
+		icon, text, color = "circle-alert", locales.ExternalNotSetUp(), pal.WarnText
 	case !s.seen.IsZero():
 		icon, text, color = "check", locales.ExternalLastUsed(humanTime(s.seen)), pal.OkText
 	case id == "chatgpt":

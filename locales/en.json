@@ -3361,9 +3361,9 @@
       }
     }
   },
-  "externalOtherCopy": "Set up for another copy of Leaflet",
-  "@externalOtherCopy": {
-    "description": "Settings › External agents: an AI app whose settings point at a Leaflet elsewhere, or at other pages."
+  "externalNotSetUp": "Not set up for this Leaflet",
+  "@externalNotSetUp": {
+    "description": "Settings › External agents: an AI app whose settings name Leaflet but would not start this copy's server on these pages: another copy, other pages, a server that would not start, or one turned off. Update mends it."
   },
   "externalMoveFirst": "Move Leaflet to the Applications folder first, so AI apps can keep finding it.",
   "@externalMoveFirst": {

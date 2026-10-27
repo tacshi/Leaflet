@@ -43,7 +43,10 @@ model = "o4-mini"
 	if e == nil || e.Command != "/App/Le af.app/x" || e.Env["LEAFLET_DATA_DIR"] != `/a "b"` {
 		t.Errorf("own: %+v", e)
 	}
-	got := withoutCodexEntry(own)
+	got, err := withoutCodexEntry(own)
+	if err != nil {
+		t.Fatal(err)
+	}
 	for _, keep := range []string{`model = "o3"`, "[mcp_servers.other]", "[profiles.fast]", `model = "o4-mini"`} {
 		if !strings.Contains(got, keep) {
 			t.Errorf("lost %s:\n%s", keep, got)
@@ -372,5 +375,97 @@ func TestChatGPTSharesCodex(t *testing.T) {
 		if s := by[id]; !s.current(testExe, testDir) || s.seen.Unix() != 1700000000 {
 			t.Errorf("%s: %+v", id, s)
 		}
+	}
+}
+
+// Codex's settings spell a server's tables in many ways TOML takes as
+// one; Leaflet must see, replace and remove each, and never break the
+// file.
+func TestCodexSpellings(t *testing.T) {
+	for name, text := range map[string]string{
+		"quoted":    "[mcp_servers.\"leaflet\"]\ncommand = \"/old\"\nargs = [\"mcp\"]\n\n[mcp_servers.\"leaflet\".env]\nLEAFLET_DATA_DIR = \"/old\"\n",
+		"spaced":    "[ mcp_servers . 'leaflet' ]\ncommand = '/old'\nargs = ['mcp']\nenv = { LEAFLET_DATA_DIR = '/old' }\n",
+		"dotted":    "[mcp_servers]\nleaflet.command = \"/old\"\nleaflet.args = [\"mcp\"]\nleaflet.env.LEAFLET_DATA_DIR = \"/old\"\n",
+		"inline":    "[mcp_servers]\nleaflet = { command = \"/old\", args = [\"mcp\"], env = { LEAFLET_DATA_DIR = \"/old\" } }\n",
+		"top-level": "mcp_servers.leaflet.command = \"/old\"\nmcp_servers.leaflet.args = [\"mcp\"]\n",
+	} {
+		before := "model = \"o3\"\n# keep me\ninstructions = \"\"\"\n[mcp_servers.leaflet]\nis text, not a table\n\"\"\"\n\n" + text + "\n# and me\n[profiles.fast]\nmodel = \"o4-mini\"\n"
+		e := codexEntry(before)
+		if e == nil || e.Command != "/old" {
+			t.Errorf("%s: read %+v", name, e)
+		}
+		env := testEnv(t)
+		path := codexConfig(env)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := connectAgent("codex", "", env, testExe, testDir); err != nil {
+			t.Errorf("%s: connect: %v", name, err)
+			continue
+		}
+		raw, _ := os.ReadFile(path)
+		if got := codexEntry(string(raw)); !(agentStatus{entry: got}).current(testExe, testDir) {
+			t.Errorf("%s: connected to %+v:\n%s", name, got, raw)
+		}
+		for _, keep := range []string{"# keep me", "is text, not a table", "# and me", "[profiles.fast]", `model = "o4-mini"`} {
+			if !strings.Contains(string(raw), keep) {
+				t.Errorf("%s: lost %q:\n%s", name, keep, raw)
+			}
+		}
+		if err := disconnectAgent("codex", "", env); err != nil {
+			t.Fatalf("%s: disconnect: %v", name, err)
+		}
+		raw, _ = os.ReadFile(path)
+		if codexEntry(string(raw)) != nil || !strings.Contains(string(raw), "is text, not a table") {
+			t.Errorf("%s: disconnected:\n%s", name, raw)
+		}
+	}
+}
+
+// An entry that would not start Leaflet's server is not current, so the
+// row offers Update, which writes it whole again.
+func TestBrokenEntryIsNotCurrent(t *testing.T) {
+	for name, text := range map[string]string{
+		"no mcp":   "[mcp_servers.leaflet]\ncommand = \"" + testExe + "\"\nenv = { LEAFLET_DATA_DIR = \"" + testDir + "\" }\n",
+		"extra":    "[mcp_servers.leaflet]\ncommand = \"" + testExe + "\"\nargs = [\"mcp\", \"--x\"]\nenv = { LEAFLET_DATA_DIR = \"" + testDir + "\" }\n",
+		"disabled": "[mcp_servers.leaflet]\ncommand = \"" + testExe + "\"\nargs = [\"mcp\"]\nenabled = false\nenv = { LEAFLET_DATA_DIR = \"" + testDir + "\" }\n",
+	} {
+		if (agentStatus{entry: codexEntry(text)}).current(testExe, testDir) {
+			t.Errorf("%s: current", name)
+		}
+	}
+	env := testEnv(t)
+	for name, server := range map[string]string{
+		"json no mcp":       `{"mcpServers": {"leaflet": {"command": "` + testExe + `", "env": {"LEAFLET_DATA_DIR": "` + testDir + `"}}}}`,
+		"json disabled":     `{"mcpServers": {"leaflet": {"command": "` + testExe + `", "args": ["mcp"], "disabled": true, "env": {"LEAFLET_DATA_DIR": "` + testDir + `"}}}}`,
+		"opencode no mcp":   `{"mcp": {"servers": {"leaflet": {"type": "local", "command": ["` + testExe + `"], "environment": {"LEAFLET_DATA_DIR": "` + testDir + `"}}}}}`,
+		"opencode disabled": `{"mcp": {"servers": {"leaflet": {"type": "local", "command": ["` + testExe + `", "mcp"], "disabled": true, "environment": {"LEAFLET_DATA_DIR": "` + testDir + `"}}}}}`,
+		"opencode v1 off":   `{"mcp": {"leaflet": {"type": "local", "command": ["` + testExe + `", "mcp"], "enabled": false, "environment": {"LEAFLET_DATA_DIR": "` + testDir + `"}}}}`,
+	} {
+		id := "claude-desktop"
+		if strings.HasPrefix(name, "opencode") {
+			id = "opencode"
+		}
+		path, _ := jsonConfig(id, env)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(server), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		e, err := readEntry(id, env)
+		if err != nil || e == nil || (agentStatus{entry: e}).current(testExe, testDir) {
+			t.Errorf("%s: %+v %v", name, e, err)
+		}
+		if err := connectAgent(id, "", env, testExe, testDir); err != nil {
+			t.Fatal(err)
+		}
+		if e, _ := readEntry(id, env); !(agentStatus{entry: e}).current(testExe, testDir) {
+			t.Errorf("%s: not repaired: %+v", name, e)
+		}
+		_ = os.Remove(path)
 	}
 }

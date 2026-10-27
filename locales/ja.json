@@ -653,7 +653,7 @@
   "externalAdded": "追加しました。{app} を再起動してから、ページの作業を頼んでください。",
   "externalAddedChatGPT": "追加しました。ChatGPT を Codex に切り替えてから、ページの作業を頼んでください。",
   "externalFinishIn": "{app} で確認して完了してください。",
-  "externalOtherCopy": "別の Leaflet 用に設定されています",
+  "externalNotSetUp": "この Leaflet 用に設定されていません",
   "externalMoveFirst": "AI アプリが Leaflet を見つけ続けられるよう、先に Leaflet を「アプリケーション」フォルダに移動してください。",
   "externalByHand": "手動で設定",
   "externalConnectFailed": "{app} に接続できませんでした：{error}",

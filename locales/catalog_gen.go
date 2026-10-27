@@ -9407,20 +9407,22 @@ func (msgs Messages) ExternalFinishIn(app string) string {
 	return Catalog.Format(msgs.locale, "externalFinishIn", map[string]any{"app": app})
 }
 
-// ExternalOtherCopy says "Set up for another copy of Leaflet"
+// ExternalNotSetUp says "Not set up for this Leaflet"
 // in the language the app shows.
 //
-// Settings › External agents: an AI app whose settings point at a Leaflet
-// elsewhere, or at other pages.
-func ExternalOtherCopy() string { return In(i18n.Locale()).ExternalOtherCopy() }
+// Settings › External agents: an AI app whose settings name Leaflet but
+// would not start this copy's server on these pages: another copy, other
+// pages, a server that would not start, or one turned off. Update mends it.
+func ExternalNotSetUp() string { return In(i18n.Locale()).ExternalNotSetUp() }
 
-// ExternalOtherCopy says "Set up for another copy of Leaflet"
+// ExternalNotSetUp says "Not set up for this Leaflet"
 // in the language of msgs.
 //
-// Settings › External agents: an AI app whose settings point at a Leaflet
-// elsewhere, or at other pages.
-func (msgs Messages) ExternalOtherCopy() string {
-	return Catalog.Format(msgs.locale, "externalOtherCopy", nil)
+// Settings › External agents: an AI app whose settings name Leaflet but
+// would not start this copy's server on these pages: another copy, other
+// pages, a server that would not start, or one turned off. Update mends it.
+func (msgs Messages) ExternalNotSetUp() string {
+	return Catalog.Format(msgs.locale, "externalNotSetUp", nil)
 }
 
 // ExternalMoveFirst says "Move Leaflet to the Applications folder first, so AI apps can keep finding it."

@@ -653,7 +653,7 @@
   "externalAdded": "已添加。重启 {app}，然后让它处理一个页面。",
   "externalAddedChatGPT": "已添加。把 ChatGPT 切换到 Codex，然后让它处理一个页面。",
   "externalFinishIn": "请在 {app} 中确认以完成。",
-  "externalOtherCopy": "已为另一个 Leaflet 设置",
+  "externalNotSetUp": "未针对此 Leaflet 设置",
   "externalMoveFirst": "请先把 Leaflet 移到“应用程序”文件夹，这样 AI 应用才能一直找到它。",
   "externalByHand": "手动设置",
   "externalConnectFailed": "无法连接 {app}：{error}",

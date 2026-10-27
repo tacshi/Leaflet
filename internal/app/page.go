@@ -410,8 +410,13 @@ func (a *App) runningBar(c *ui.Context, s *agents.Session) {
 			run = r
 		}
 	}
-	// A run from Ask agent shows how it goes in its own prompt.
-	if ip := a.dialogs.inline; run == nil || ip != nil && ip.runID == run.ID {
+	// A run from Ask agent shows how it goes in its own prompt, and one
+	// from the chat in the chat, while it is open.
+	ip := a.dialogs.inline
+	switch {
+	case run == nil, ip != nil && ip.runID == run.ID:
+		return
+	case run.Surface == "sidebar" && a.panelOpen && a.panelTab == 0:
 		return
 	}
 	ui.Row(c.Key("running-bar")).Attach(ui.AnchorBottom, ui.AnchorBottom).Bottom(18).Padding(8, 14).Gap(10).Radius(10).

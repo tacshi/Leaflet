@@ -23,8 +23,9 @@ var welcomeImage []byte
 // createWelcome gives a new space one page that shows what pages can do,
 // with an example subpage inside it: writing, blocks, media, charts,
 // embeds, to-dos, recordings, agents, organizing and finding pages,
-// working together, sync and shortcuts. They are written in the language
-// the app shows when they are made.
+// working together, sync and shortcuts. A comment shows a thread, and the
+// subpage is also kept as a template. They are written in the language the
+// app shows when they are made.
 func (a *App) createWelcome() error {
 	if _, ok := a.st.Value("welcome.created"); ok {
 		return nil
@@ -47,11 +48,17 @@ func (a *App) createWelcome() error {
 	if err != nil {
 		return err
 	}
-	blocks, err := welcomeBlocks(m, image, sub.ID)
+	blocks, commentsID, err := welcomeBlocks(m, image, sub.ID)
 	if err != nil {
 		return err
 	}
 	if _, _, err := a.st.SaveContent(p.ID, doc.FromBlocks(blocks)); err != nil {
+		return err
+	}
+	if _, err := a.st.AddComment(p.ID, commentsID, m.WelcomeComment(), "", "", "agent", "Leaflet"); err != nil {
+		return err
+	}
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: m.WelcomeSubTitle(), Template: true, Content: doc.FromBlocks(welcomeMeeting(m))}); err != nil {
 		return err
 	}
 	if err := a.st.SetValue("welcome.page", p.ID); err != nil {
@@ -76,8 +83,9 @@ func (a *App) welcomeImageFile(pageID, name string) (store.File, error) {
 }
 
 // welcomeBlocks are the guide's blocks in m's language, with its picture
-// and a card for and a link to its subpage.
-func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.Node, error) {
+// and a card for and a link to its subpage, and the ID of the block about
+// comments, which the guide's example comment is on.
+func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.Node, string, error) {
 	var blocks []*doc.Node
 	var bad error
 	add := func(spec map[string]any) {
@@ -205,6 +213,7 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 
 	heading(m.WelcomeTogetherHeading())
 	text("paragraph", m.WelcomeTogetherComments())
+	commentsID := blocks[len(blocks)-1].ID
 	text("paragraph", m.WelcomeTogetherHistory())
 	text("paragraph", m.WelcomeTogetherSync())
 
@@ -224,7 +233,7 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 		[]any{"Tab  ⇧Tab", m.WelcomeShortcutTab()},
 		[]any{"⌘Z  ⇧⌘Z", m.WelcomeShortcutUndo()},
 	}})
-	return blocks, bad
+	return blocks, commentsID, bad
 }
 
 // withRun puts run in d where mark is, in place of the mark.
@@ -248,11 +257,25 @@ func withRun(d doc.Delta, mark string, run doc.Run) doc.Delta {
 }
 
 // welcomeSubpage is the content of the guide's example subpage, in m's
-// language.
+// language: where it lives, that it is a template too, and the meeting.
 func welcomeSubpage(m locales.Messages) *doc.Content {
 	var blocks []*doc.Node
 	for _, spec := range []map[string]any{
 		{"type": "paragraph", "text": m.WelcomeSubIntro(m.WelcomeTitle())},
+		{"type": "callout", "tone": "tip", "text": m.WelcomeSubTemplate(m.WelcomeSubTitle())},
+	} {
+		if n, err := doc.SpecToNode(spec, "", "Leaflet"); err == nil {
+			blocks = append(blocks, n)
+		}
+	}
+	return doc.FromBlocks(append(blocks, welcomeMeeting(m)...))
+}
+
+// welcomeMeeting are the blocks of the example meeting's notes, which the
+// subpage shows and the template it is kept as starts with.
+func welcomeMeeting(m locales.Messages) []*doc.Node {
+	var blocks []*doc.Node
+	for _, spec := range []map[string]any{
 		{"type": "heading", "level": 2.0, "text": m.WelcomeSubAgenda()},
 		{"type": "numbered_list", "text": m.WelcomeSubShipped()},
 		{"type": "numbered_list", "text": m.WelcomeSubBlockers()},
@@ -272,7 +295,7 @@ func welcomeSubpage(m locales.Messages) *doc.Content {
 			blocks = append(blocks, n)
 		}
 	}
-	return doc.FromBlocks(blocks)
+	return blocks
 }
 
 // welcomeCode is the guide's code example, its comment in m's language.

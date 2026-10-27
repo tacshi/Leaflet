@@ -303,6 +303,24 @@ func (s *Store) Comment(id string) (Comment, error) {
 	return scanComment(s.db.QueryRow(`SELECT `+commentCols+` FROM comments WHERE id = ?`, id))
 }
 
+// AllComments returns every comment, deleted ones too.
+func (s *Store) AllComments() ([]Comment, error) {
+	rows, err := s.db.Query(`SELECT ` + commentCols + ` FROM comments ORDER BY created_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Comment
+	for rows.Next() {
+		c, err := scanComment(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
 // Threads returns a page's comment threads, oldest first.
 func (s *Store) Threads(pageID string) ([]Thread, error) {
 	rows, err := s.db.Query(`SELECT `+commentCols+` FROM comments WHERE page_id = ? AND deleted_at IS NULL ORDER BY created_at`, pageID)

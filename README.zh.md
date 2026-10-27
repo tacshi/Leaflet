@@ -24,7 +24,7 @@
 Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页面，并让 AI
 智能体在你身边一起工作。你可以在行内、从选中的文字、在聊天中或在评论串里
 向它提问：它会阅读页面，并通过经过校验的工具来编辑页面，整个修改只算一步，
-可以一键撤销。页面先保存在你的设备上，登录后再同步，所以 Leaflet 可以离线
+可以一键撤销。页面先保存在你的设备上，再通过 iCloud 云盘同步，或在登录后通过 Leaflet 服务器同步，所以 Leaflet 可以离线
 使用，也可以搭配本地模型。
 
 它用 Go 和 [MyGo](https://github.com/egoist/mygo) 编写，MyGo 在 GPU
@@ -78,6 +78,9 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 - 锚定在块上的评论串，以及与查看者或编辑者共享页面，子页面会继承共享设置。
 - 离线优先：所有内容都保存在 SQLite 中，联网后通过发件箱同步。分开进行的
   编辑会按块合并，出现冲突时会给出提示，并可以恢复另一个版本。
+- iCloud 同步：你的 Mac 和 PC 通过 iCloud 云盘中的 Leaflet 文件夹同步，
+  无需服务器，也无需登录。在“设置 › 同步与存储”中打开；Windows 上需要
+  iCloud for Windows。
 - 待办提醒、菜单栏图标、浅色与深色主题，以及来自 GitHub Releases 的更新。
 - 支持英文、简体中文和日文：Leaflet 跟随系统语言，也可以在
   设置 › 外观 中选择；欢迎指南会以首次运行时的语言写成。
@@ -87,7 +90,8 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 - macOS 12 或更高版本（Apple 芯片或 Intel）；或 x64、arm64 上的 Windows。
 - 从源码构建：Go 1.27.3 或更高版本。不需要 cgo 或 C 编译器。发布构建还
   需要 Xcode（macOS）和 NSIS（Windows 安装程序）。
-- 登录、同步、共享和云端模型需要一个 Leaflet 服务器：一个按
+- iCloud 同步需要打开 iCloud 云盘。
+- 登录、共享、云端模型以及与他人同步需要一个 Leaflet 服务器：一个按
   [`supabase/`](supabase/README.md) 配置的 [Supabase](https://supabase.com)
   项目。没有服务器时，Leaflet 仅在你的设备上运行。
 
@@ -211,7 +215,8 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `internal/doc` | 页面文档模型：块、增量、行内 Markdown、操作、按块合并和 Markdown 导出 |
 | `internal/store` | SQLite（纯 Go）表、发件箱和设置 |
 | `internal/remote` | 基于 HTTP 的 Supabase：Auth、PostgREST、Storage 和 Edge Functions |
-| `internal/sync` | 推送发件箱、拉取、账户接管和设备心跳 |
+| `internal/sync` | 推送发件箱、拉取、账户接管和设备心跳，经由 Supabase 或 iCloud 云盘 |
+| `internal/icloud` | iCloud 云盘中的 Leaflet 文件夹：完整写入的文件，以及请 iCloud 下载它们 |
 | `internal/agents` | 兼容 OpenAI 的客户端、预设、提示词、页面工具、循环和中枢 |
 | `internal/mcp` | `leaflet mcp`：供应用外智能体使用的页面工具 |
 | `internal/recording` | 采集、WAV、Soniox 流式传输和端点转写 |

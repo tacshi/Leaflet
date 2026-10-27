@@ -396,3 +396,43 @@ func TestMergeMoveIntoANewBlock(t *testing.T) {
 }
 
 func first(c *Content, _ []Conflict) *Content { return c }
+
+// A block's time never goes back, so an edit on a device whose clock is
+// behind the one it merged from still wins.
+func TestStampingNeverGoesBack(t *testing.T) {
+	before := page(map[string]int64{"a": 100, "b": 100}, para("a", "one"), para("b", "two"))
+	after := page(map[string]int64{}, para("a", "one!"))
+	s := after.Stamped(before, 40)
+	if s.Blocks["a"] != 101 || s.Deleted["b"] != 101 {
+		t.Errorf("blocks %v deleted %v", s.Blocks, s.Deleted)
+	}
+	back := page(map[string]int64{}, para("a", "one!"), para("b", "back")).Stamped(s, 40)
+	if back.Blocks["b"] != 102 {
+		t.Errorf("a block back over its tombstone got %d", back.Blocks["b"])
+	}
+}
+
+// Two devices merging the same two versions, each as its local one, keep
+// the same block when the times are equal.
+func TestMergeTiesAgree(t *testing.T) {
+	base := page(map[string]int64{"a": 1}, para("a", "one"))
+	mine := page(map[string]int64{"a": 7}, para("a", "mine"))
+	theirs := page(map[string]int64{"a": 7}, para("a", "theirs"))
+	here, hc := Merge(base, mine, theirs)
+	there, tc := Merge(base, theirs, mine)
+	if !reflect.DeepEqual(texts(here), texts(there)) {
+		t.Fatalf("here %v there %v", texts(here), texts(there))
+	}
+	if len(hc) != 1 || len(tc) != 1 || hc[0].Kept() == tc[0].Kept() {
+		t.Errorf("kept here %v there %v", hc, tc)
+	}
+	// A tie on a move too.
+	base = page(map[string]int64{"a": 1, "b": 1, "c": 1}, para("a", "a"), para("b", "b"), para("c", "c"))
+	mine = page(map[string]int64{"a": 1, "b": 1, "c": 5}, para("c", "c"), para("a", "a"), para("b", "b"))
+	theirs = page(map[string]int64{"a": 1, "b": 1, "c": 5}, para("a", "a"), para("c", "c"), para("b", "b"))
+	here, _ = Merge(base, mine, theirs)
+	there, _ = Merge(base, theirs, mine)
+	if !reflect.DeepEqual(texts(here), texts(there)) {
+		t.Errorf("move: here %v there %v", texts(here), texts(there))
+	}
+}

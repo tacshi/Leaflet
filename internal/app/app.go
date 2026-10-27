@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"log"
 	"os"
 	"path/filepath"
@@ -63,6 +64,9 @@ type App struct {
 	conflicts  []store.ConflictRow
 	syncing    bool
 	syncError  string
+	syncErr    error
+	// icloudStop stops watching the Leaflet folder in iCloud Drive.
+	icloudStop context.CancelFunc
 
 	route Route
 	// router is MyGo's history of the routes; routerAt is its path the
@@ -245,16 +249,16 @@ func (a *App) start() error {
 	a.sync.OnState = func(running bool, err error) {
 		a.update(func() {
 			a.syncing = running
-			a.syncError = ""
-			if err != nil {
-				a.syncError = err.Error()
-			}
+			a.syncErr, a.syncError = err, a.syncMessage(err)
 		})
 	}
 	a.sync.OnPageContent = func(pageID string) {
 		a.update(func() { a.externalContent(pageID) })
 	}
 	a.sync.Offline = func() bool { return a.settings.WorkOffline }
+	a.sync.KeepAudio = func() string { return a.settings.KeepAudioOnDevice }
+	a.rec.Blobs = a.sync
+	a.startICloud()
 	st.Subscribe(func(ch store.Change) { a.update(func() { a.reload(ch) }) })
 	// Agents outside the app (leaflet mcp) write to the database too.
 	go st.WatchOthers(time.Second, nil, func() { a.update(a.outsideChange) })

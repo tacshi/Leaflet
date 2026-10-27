@@ -7105,13 +7105,13 @@ func (msgs Messages) SettingsSectionSpeech() string {
 	return Catalog.Format(msgs.locale, "settingsSectionSpeech", nil)
 }
 
-// SettingsSectionOffline says "Offline and storage"
+// SettingsSectionOffline says "Sync and storage"
 // in the language the app shows.
 //
 // Settings: the section and heading of offline use and storage.
 func SettingsSectionOffline() string { return In(i18n.Locale()).SettingsSectionOffline() }
 
-// SettingsSectionOffline says "Offline and storage"
+// SettingsSectionOffline says "Sync and storage"
 // in the language of msgs.
 //
 // Settings: the section and heading of offline use and storage.
@@ -8531,16 +8531,16 @@ func (msgs Messages) SettingsDeleteKeyFailed(error string) string {
 	return Catalog.Format(msgs.locale, "settingsDeleteKeyFailed", map[string]any{"error": error})
 }
 
-// SettingsOfflineDesc says "Everything is saved on this device first, and goes to the server when you are online."
+// SettingsOfflineDesc says "Everything is saved on this device first, and syncs to your other devices when it can."
 // in the language the app shows.
 //
-// Settings › Offline and storage: the description under the heading.
+// Settings › Sync and storage: the description under the heading.
 func SettingsOfflineDesc() string { return In(i18n.Locale()).SettingsOfflineDesc() }
 
-// SettingsOfflineDesc says "Everything is saved on this device first, and goes to the server when you are online."
+// SettingsOfflineDesc says "Everything is saved on this device first, and syncs to your other devices when it can."
 // in the language of msgs.
 //
-// Settings › Offline and storage: the description under the heading.
+// Settings › Sync and storage: the description under the heading.
 func (msgs Messages) SettingsOfflineDesc() string {
 	return Catalog.Format(msgs.locale, "settingsOfflineDesc", nil)
 }
@@ -8548,13 +8548,13 @@ func (msgs Messages) SettingsOfflineDesc() string {
 // SettingsLocalOnly says "Pages are kept on this device"
 // in the language the app shows.
 //
-// Settings › Offline and storage: a build without a server.
+// Settings › Sync and storage: a build without a server.
 func SettingsLocalOnly() string { return In(i18n.Locale()).SettingsLocalOnly() }
 
 // SettingsLocalOnly says "Pages are kept on this device"
 // in the language of msgs.
 //
-// Settings › Offline and storage: a build without a server.
+// Settings › Sync and storage: a build without a server.
 func (msgs Messages) SettingsLocalOnly() string {
 	return Catalog.Format(msgs.locale, "settingsLocalOnly", nil)
 }
@@ -8562,13 +8562,13 @@ func (msgs Messages) SettingsLocalOnly() string {
 // SettingsLocalOnlyDesc says "This build has no server to sync with"
 // in the language the app shows.
 //
-// Settings › Offline and storage: a build without a server.
+// Settings › Sync and storage: a build without a server.
 func SettingsLocalOnlyDesc() string { return In(i18n.Locale()).SettingsLocalOnlyDesc() }
 
 // SettingsLocalOnlyDesc says "This build has no server to sync with"
 // in the language of msgs.
 //
-// Settings › Offline and storage: a build without a server.
+// Settings › Sync and storage: a build without a server.
 func (msgs Messages) SettingsLocalOnlyDesc() string {
 	return Catalog.Format(msgs.locale, "settingsLocalOnlyDesc", nil)
 }
@@ -8576,13 +8576,13 @@ func (msgs Messages) SettingsLocalOnlyDesc() string {
 // SettingsConflicts says "Conflicts"
 // in the language the app shows.
 //
-// Settings › Offline and storage: the heading over conflicts of sync.
+// Settings › Sync and storage: the heading over conflicts of sync.
 func SettingsConflicts() string { return In(i18n.Locale()).SettingsConflicts() }
 
 // SettingsConflicts says "Conflicts"
 // in the language of msgs.
 //
-// Settings › Offline and storage: the heading over conflicts of sync.
+// Settings › Sync and storage: the heading over conflicts of sync.
 func (msgs Messages) SettingsConflicts() string {
 	return Catalog.Format(msgs.locale, "settingsConflicts", nil)
 }
@@ -8590,8 +8590,7 @@ func (msgs Messages) SettingsConflicts() string {
 // SettingsConflictDeletedHere says "Kept “{text}”: deleted on this device, edited on another"
 // in the language the app shows.
 //
-// Settings › Offline and storage › Conflicts: the block kept, by its
-// text.
+// Settings › Sync and storage › Conflicts: the block kept, by its text.
 func SettingsConflictDeletedHere(text string) string {
 	return In(i18n.Locale()).SettingsConflictDeletedHere(text)
 }
@@ -8599,8 +8598,7 @@ func SettingsConflictDeletedHere(text string) string {
 // SettingsConflictDeletedHere says "Kept “{text}”: deleted on this device, edited on another"
 // in the language of msgs.
 //
-// Settings › Offline and storage › Conflicts: the block kept, by its
-// text.
+// Settings › Sync and storage › Conflicts: the block kept, by its text.
 func (msgs Messages) SettingsConflictDeletedHere(text string) string {
 	return Catalog.Format(msgs.locale, "settingsConflictDeletedHere", map[string]any{"text": text})
 }
@@ -8608,8 +8606,7 @@ func (msgs Messages) SettingsConflictDeletedHere(text string) string {
 // SettingsConflictDeletedThere says "Kept “{text}”: deleted on another device, edited on this one"
 // in the language the app shows.
 //
-// Settings › Offline and storage › Conflicts: the block kept, by its
-// text.
+// Settings › Sync and storage › Conflicts: the block kept, by its text.
 func SettingsConflictDeletedThere(text string) string {
 	return In(i18n.Locale()).SettingsConflictDeletedThere(text)
 }
@@ -8617,8 +8614,7 @@ func SettingsConflictDeletedThere(text string) string {
 // SettingsConflictDeletedThere says "Kept “{text}”: deleted on another device, edited on this one"
 // in the language of msgs.
 //
-// Settings › Offline and storage › Conflicts: the block kept, by its
-// text.
+// Settings › Sync and storage › Conflicts: the block kept, by its text.
 func (msgs Messages) SettingsConflictDeletedThere(text string) string {
 	return Catalog.Format(msgs.locale, "settingsConflictDeletedThere", map[string]any{"text": text})
 }
@@ -8626,7 +8622,7 @@ func (msgs Messages) SettingsConflictDeletedThere(text string) string {
 // SettingsConflictKeptOver says "Kept “{kept}” over “{other}”"
 // in the language the app shows.
 //
-// Settings › Offline and storage › Conflicts: the version kept, and the
+// Settings › Sync and storage › Conflicts: the version kept, and the
 // other.
 func SettingsConflictKeptOver(kept string, other string) string {
 	return In(i18n.Locale()).SettingsConflictKeptOver(kept, other)
@@ -8635,7 +8631,7 @@ func SettingsConflictKeptOver(kept string, other string) string {
 // SettingsConflictKeptOver says "Kept “{kept}” over “{other}”"
 // in the language of msgs.
 //
-// Settings › Offline and storage › Conflicts: the version kept, and the
+// Settings › Sync and storage › Conflicts: the version kept, and the
 // other.
 func (msgs Messages) SettingsConflictKeptOver(kept string, other string) string {
 	return Catalog.Format(msgs.locale, "settingsConflictKeptOver", map[string]any{"kept": kept, "other": other})
@@ -8644,13 +8640,13 @@ func (msgs Messages) SettingsConflictKeptOver(kept string, other string) string 
 // SettingsResolve says "Resolve"
 // in the language the app shows.
 //
-// Settings › Offline and storage › Conflicts: the menu of a conflict.
+// Settings › Sync and storage › Conflicts: the menu of a conflict.
 func SettingsResolve() string { return In(i18n.Locale()).SettingsResolve() }
 
 // SettingsResolve says "Resolve"
 // in the language of msgs.
 //
-// Settings › Offline and storage › Conflicts: the menu of a conflict.
+// Settings › Sync and storage › Conflicts: the menu of a conflict.
 func (msgs Messages) SettingsResolve() string {
 	return Catalog.Format(msgs.locale, "settingsResolve", nil)
 }
@@ -8744,13 +8740,13 @@ func (msgs Messages) SettingsResolveFailed(error string) string {
 // SettingsStorage says "Storage"
 // in the language the app shows.
 //
-// Settings › Offline and storage: the heading over storage.
+// Settings › Sync and storage: the heading over storage.
 func SettingsStorage() string { return In(i18n.Locale()).SettingsStorage() }
 
 // SettingsStorage says "Storage"
 // in the language of msgs.
 //
-// Settings › Offline and storage: the heading over storage.
+// Settings › Sync and storage: the heading over storage.
 func (msgs Messages) SettingsStorage() string {
 	return Catalog.Format(msgs.locale, "settingsStorage", nil)
 }
@@ -8758,13 +8754,13 @@ func (msgs Messages) SettingsStorage() string {
 // SettingsDataFolder says "Data folder"
 // in the language the app shows.
 //
-// Settings › Offline and storage › Storage.
+// Settings › Sync and storage › Storage.
 func SettingsDataFolder() string { return In(i18n.Locale()).SettingsDataFolder() }
 
 // SettingsDataFolder says "Data folder"
 // in the language of msgs.
 //
-// Settings › Offline and storage › Storage.
+// Settings › Sync and storage › Storage.
 func (msgs Messages) SettingsDataFolder() string {
 	return Catalog.Format(msgs.locale, "settingsDataFolder", nil)
 }
@@ -8772,13 +8768,13 @@ func (msgs Messages) SettingsDataFolder() string {
 // SettingsDataFolderDesc says "Pages, recordings and files on this device"
 // in the language the app shows.
 //
-// Settings › Offline and storage › Storage.
+// Settings › Sync and storage › Storage.
 func SettingsDataFolderDesc() string { return In(i18n.Locale()).SettingsDataFolderDesc() }
 
 // SettingsDataFolderDesc says "Pages, recordings and files on this device"
 // in the language of msgs.
 //
-// Settings › Offline and storage › Storage.
+// Settings › Sync and storage › Storage.
 func (msgs Messages) SettingsDataFolderDesc() string {
 	return Catalog.Format(msgs.locale, "settingsDataFolderDesc", nil)
 }
@@ -8802,13 +8798,13 @@ func (msgs Messages) SettingsShow() string {
 // SettingsImageCache says "Image cache"
 // in the language the app shows.
 //
-// Settings › Offline and storage › Storage.
+// Settings › Sync and storage › Storage.
 func SettingsImageCache() string { return In(i18n.Locale()).SettingsImageCache() }
 
 // SettingsImageCache says "Image cache"
 // in the language of msgs.
 //
-// Settings › Offline and storage › Storage.
+// Settings › Sync and storage › Storage.
 func (msgs Messages) SettingsImageCache() string {
 	return Catalog.Format(msgs.locale, "settingsImageCache", nil)
 }
@@ -8816,13 +8812,13 @@ func (msgs Messages) SettingsImageCache() string {
 // SettingsImageCacheDesc says "Pictures of image blocks loaded from the web"
 // in the language the app shows.
 //
-// Settings › Offline and storage › Storage.
+// Settings › Sync and storage › Storage.
 func SettingsImageCacheDesc() string { return In(i18n.Locale()).SettingsImageCacheDesc() }
 
 // SettingsImageCacheDesc says "Pictures of image blocks loaded from the web"
 // in the language of msgs.
 //
-// Settings › Offline and storage › Storage.
+// Settings › Sync and storage › Storage.
 func (msgs Messages) SettingsImageCacheDesc() string {
 	return Catalog.Format(msgs.locale, "settingsImageCacheDesc", nil)
 }
@@ -8858,13 +8854,13 @@ func (msgs Messages) SettingsImageCacheCleared() string {
 // SettingsNotSyncing says "Not syncing"
 // in the language the app shows.
 //
-// Settings › Offline and storage: signed out.
+// Settings › Sync and storage: signed out.
 func SettingsNotSyncing() string { return In(i18n.Locale()).SettingsNotSyncing() }
 
 // SettingsNotSyncing says "Not syncing"
 // in the language of msgs.
 //
-// Settings › Offline and storage: signed out.
+// Settings › Sync and storage: signed out.
 func (msgs Messages) SettingsNotSyncing() string {
 	return Catalog.Format(msgs.locale, "settingsNotSyncing", nil)
 }
@@ -8872,27 +8868,147 @@ func (msgs Messages) SettingsNotSyncing() string {
 // SettingsNotSyncingDesc says "Sign in to sync pages between devices"
 // in the language the app shows.
 //
-// Settings › Offline and storage: signed out.
+// Settings › Sync and storage: signed out.
 func SettingsNotSyncingDesc() string { return In(i18n.Locale()).SettingsNotSyncingDesc() }
 
 // SettingsNotSyncingDesc says "Sign in to sync pages between devices"
 // in the language of msgs.
 //
-// Settings › Offline and storage: signed out.
+// Settings › Sync and storage: signed out.
 func (msgs Messages) SettingsNotSyncingDesc() string {
 	return Catalog.Format(msgs.locale, "settingsNotSyncingDesc", nil)
+}
+
+// SettingsICloud says "iCloud sync"
+// in the language the app shows.
+//
+// Settings › Sync and storage: the switch for syncing through iCloud
+// Drive.
+func SettingsICloud() string { return In(i18n.Locale()).SettingsICloud() }
+
+// SettingsICloud says "iCloud sync"
+// in the language of msgs.
+//
+// Settings › Sync and storage: the switch for syncing through iCloud
+// Drive.
+func (msgs Messages) SettingsICloud() string {
+	return Catalog.Format(msgs.locale, "settingsICloud", nil)
+}
+
+// SettingsICloudDesc says "Sync pages between your devices through iCloud Drive"
+// in the language the app shows.
+//
+// Settings › Sync and storage: under iCloud sync, while it is off.
+func SettingsICloudDesc() string { return In(i18n.Locale()).SettingsICloudDesc() }
+
+// SettingsICloudDesc says "Sync pages between your devices through iCloud Drive"
+// in the language of msgs.
+//
+// Settings › Sync and storage: under iCloud sync, while it is off.
+func (msgs Messages) SettingsICloudDesc() string {
+	return Catalog.Format(msgs.locale, "settingsICloudDesc", nil)
+}
+
+// SettingsICloudOnDesc says "Pages sync through the Leaflet folder in iCloud Drive"
+// in the language the app shows.
+//
+// Settings › Sync and storage: under iCloud sync, while it is on.
+func SettingsICloudOnDesc() string { return In(i18n.Locale()).SettingsICloudOnDesc() }
+
+// SettingsICloudOnDesc says "Pages sync through the Leaflet folder in iCloud Drive"
+// in the language of msgs.
+//
+// Settings › Sync and storage: under iCloud sync, while it is on.
+func (msgs Messages) SettingsICloudOnDesc() string {
+	return Catalog.Format(msgs.locale, "settingsICloudOnDesc", nil)
+}
+
+// SettingsICloudUnavailable says "iCloud Drive isn't available. Sign in to iCloud and turn on iCloud Drive, or turn iCloud sync off and on again."
+// in the language the app shows.
+//
+// iCloud sync cannot run: iCloud Drive is off, or the Leaflet folder in it
+// went.
+func SettingsICloudUnavailable() string { return In(i18n.Locale()).SettingsICloudUnavailable() }
+
+// SettingsICloudUnavailable says "iCloud Drive isn't available. Sign in to iCloud and turn on iCloud Drive, or turn iCloud sync off and on again."
+// in the language of msgs.
+//
+// iCloud sync cannot run: iCloud Drive is off, or the Leaflet folder in it
+// went.
+func (msgs Messages) SettingsICloudUnavailable() string {
+	return Catalog.Format(msgs.locale, "settingsICloudUnavailable", nil)
+}
+
+// SettingsICloudNoAccess says "Leaflet can't open iCloud Drive. Allow it in System Settings › Privacy & Security › Files and Folders."
+// in the language the app shows.
+//
+// iCloud sync cannot run: macOS keeps Leaflet out of iCloud Drive.
+func SettingsICloudNoAccess() string { return In(i18n.Locale()).SettingsICloudNoAccess() }
+
+// SettingsICloudNoAccess says "Leaflet can't open iCloud Drive. Allow it in System Settings › Privacy & Security › Files and Folders."
+// in the language of msgs.
+//
+// iCloud sync cannot run: macOS keeps Leaflet out of iCloud Drive.
+func (msgs Messages) SettingsICloudNoAccess() string {
+	return Catalog.Format(msgs.locale, "settingsICloudNoAccess", nil)
+}
+
+// SettingsICloudOpenPrivacy says "Open Settings"
+// in the language the app shows.
+//
+// Settings › Sync and storage: a button that opens macOS's privacy
+// settings.
+func SettingsICloudOpenPrivacy() string { return In(i18n.Locale()).SettingsICloudOpenPrivacy() }
+
+// SettingsICloudOpenPrivacy says "Open Settings"
+// in the language of msgs.
+//
+// Settings › Sync and storage: a button that opens macOS's privacy
+// settings.
+func (msgs Messages) SettingsICloudOpenPrivacy() string {
+	return Catalog.Format(msgs.locale, "settingsICloudOpenPrivacy", nil)
+}
+
+// SettingsICloudOtherLibrary says "The Leaflet folder in iCloud Drive was replaced. Turn iCloud sync off and on again to join it."
+// in the language the app shows.
+//
+// iCloud sync cannot run: the Leaflet folder holds other pages than this
+// device syncs.
+func SettingsICloudOtherLibrary() string { return In(i18n.Locale()).SettingsICloudOtherLibrary() }
+
+// SettingsICloudOtherLibrary says "The Leaflet folder in iCloud Drive was replaced. Turn iCloud sync off and on again to join it."
+// in the language of msgs.
+//
+// iCloud sync cannot run: the Leaflet folder holds other pages than this
+// device syncs.
+func (msgs Messages) SettingsICloudOtherLibrary() string {
+	return Catalog.Format(msgs.locale, "settingsICloudOtherLibrary", nil)
+}
+
+// SettingsICloudNewer says "A newer Leaflet synced through iCloud Drive. Update Leaflet to keep syncing."
+// in the language the app shows.
+//
+// iCloud sync cannot run: a newer version of Leaflet wrote to the folder.
+func SettingsICloudNewer() string { return In(i18n.Locale()).SettingsICloudNewer() }
+
+// SettingsICloudNewer says "A newer Leaflet synced through iCloud Drive. Update Leaflet to keep syncing."
+// in the language of msgs.
+//
+// iCloud sync cannot run: a newer version of Leaflet wrote to the folder.
+func (msgs Messages) SettingsICloudNewer() string {
+	return Catalog.Format(msgs.locale, "settingsICloudNewer", nil)
 }
 
 // SettingsUpToDate says "Up to date"
 // in the language the app shows.
 //
-// Settings › Offline and storage: the sync status.
+// Settings › Sync and storage: the sync status.
 func SettingsUpToDate() string { return In(i18n.Locale()).SettingsUpToDate() }
 
 // SettingsUpToDate says "Up to date"
 // in the language of msgs.
 //
-// Settings › Offline and storage: the sync status.
+// Settings › Sync and storage: the sync status.
 func (msgs Messages) SettingsUpToDate() string {
 	return Catalog.Format(msgs.locale, "settingsUpToDate", nil)
 }
@@ -8900,13 +9016,13 @@ func (msgs Messages) SettingsUpToDate() string {
 // SettingsOfflineByChoice says "Working offline by choice"
 // in the language the app shows.
 //
-// Settings › Offline and storage: the sync status.
+// Settings › Sync and storage: the sync status.
 func SettingsOfflineByChoice() string { return In(i18n.Locale()).SettingsOfflineByChoice() }
 
 // SettingsOfflineByChoice says "Working offline by choice"
 // in the language of msgs.
 //
-// Settings › Offline and storage: the sync status.
+// Settings › Sync and storage: the sync status.
 func (msgs Messages) SettingsOfflineByChoice() string {
 	return Catalog.Format(msgs.locale, "settingsOfflineByChoice", nil)
 }
@@ -8914,13 +9030,13 @@ func (msgs Messages) SettingsOfflineByChoice() string {
 // SettingsNoConnection says "No connection"
 // in the language the app shows.
 //
-// Settings › Offline and storage: the sync status.
+// Settings › Sync and storage: the sync status.
 func SettingsNoConnection() string { return In(i18n.Locale()).SettingsNoConnection() }
 
 // SettingsNoConnection says "No connection"
 // in the language of msgs.
 //
-// Settings › Offline and storage: the sync status.
+// Settings › Sync and storage: the sync status.
 func (msgs Messages) SettingsNoConnection() string {
 	return Catalog.Format(msgs.locale, "settingsNoConnection", nil)
 }
@@ -8928,13 +9044,13 @@ func (msgs Messages) SettingsNoConnection() string {
 // SettingsSyncing says "Syncing…"
 // in the language the app shows.
 //
-// Settings › Offline and storage: the sync status.
+// Settings › Sync and storage: the sync status.
 func SettingsSyncing() string { return In(i18n.Locale()).SettingsSyncing() }
 
 // SettingsSyncing says "Syncing…"
 // in the language of msgs.
 //
-// Settings › Offline and storage: the sync status.
+// Settings › Sync and storage: the sync status.
 func (msgs Messages) SettingsSyncing() string {
 	return Catalog.Format(msgs.locale, "settingsSyncing", nil)
 }
@@ -8942,13 +9058,13 @@ func (msgs Messages) SettingsSyncing() string {
 // SettingsSyncFailed says "Last sync failed: {error}"
 // in the language the app shows.
 //
-// Settings › Offline and storage: the sync status.
+// Settings › Sync and storage: the sync status.
 func SettingsSyncFailed(error string) string { return In(i18n.Locale()).SettingsSyncFailed(error) }
 
 // SettingsSyncFailed says "Last sync failed: {error}"
 // in the language of msgs.
 //
-// Settings › Offline and storage: the sync status.
+// Settings › Sync and storage: the sync status.
 func (msgs Messages) SettingsSyncFailed(error string) string {
 	return Catalog.Format(msgs.locale, "settingsSyncFailed", map[string]any{"error": error})
 }
@@ -8956,13 +9072,13 @@ func (msgs Messages) SettingsSyncFailed(error string) string {
 // SettingsSynced says "Synced"
 // in the language the app shows.
 //
-// Settings › Offline and storage: no changes waiting.
+// Settings › Sync and storage: no changes waiting.
 func SettingsSynced() string { return In(i18n.Locale()).SettingsSynced() }
 
 // SettingsSynced says "Synced"
 // in the language of msgs.
 //
-// Settings › Offline and storage: no changes waiting.
+// Settings › Sync and storage: no changes waiting.
 func (msgs Messages) SettingsSynced() string {
 	return Catalog.Format(msgs.locale, "settingsSynced", nil)
 }
@@ -8970,13 +9086,13 @@ func (msgs Messages) SettingsSynced() string {
 // SettingsChangesWaiting says "{count, plural, one {# change waiting} other {# changes waiting}}"
 // in the language the app shows.
 //
-// Settings › Offline and storage: changes not uploaded yet.
+// Settings › Sync and storage: changes not uploaded yet.
 func SettingsChangesWaiting(count int) string { return In(i18n.Locale()).SettingsChangesWaiting(count) }
 
 // SettingsChangesWaiting says "{count, plural, one {# change waiting} other {# changes waiting}}"
 // in the language of msgs.
 //
-// Settings › Offline and storage: changes not uploaded yet.
+// Settings › Sync and storage: changes not uploaded yet.
 func (msgs Messages) SettingsChangesWaiting(count int) string {
 	return Catalog.Format(msgs.locale, "settingsChangesWaiting", map[string]any{"count": count})
 }
@@ -8984,13 +9100,13 @@ func (msgs Messages) SettingsChangesWaiting(count int) string {
 // SettingsSyncNow says "Sync now"
 // in the language the app shows.
 //
-// Settings › Offline and storage: the button.
+// Settings › Sync and storage: the button.
 func SettingsSyncNow() string { return In(i18n.Locale()).SettingsSyncNow() }
 
 // SettingsSyncNow says "Sync now"
 // in the language of msgs.
 //
-// Settings › Offline and storage: the button.
+// Settings › Sync and storage: the button.
 func (msgs Messages) SettingsSyncNow() string {
 	return Catalog.Format(msgs.locale, "settingsSyncNow", nil)
 }
@@ -8998,13 +9114,13 @@ func (msgs Messages) SettingsSyncNow() string {
 // SettingsWorkOffline says "Work offline"
 // in the language the app shows.
 //
-// Settings › Offline and storage: a switch.
+// Settings › Sync and storage: a switch.
 func SettingsWorkOffline() string { return In(i18n.Locale()).SettingsWorkOffline() }
 
 // SettingsWorkOffline says "Work offline"
 // in the language of msgs.
 //
-// Settings › Offline and storage: a switch.
+// Settings › Sync and storage: a switch.
 func (msgs Messages) SettingsWorkOffline() string {
 	return Catalog.Format(msgs.locale, "settingsWorkOffline", nil)
 }
@@ -9012,13 +9128,13 @@ func (msgs Messages) SettingsWorkOffline() string {
 // SettingsWorkOfflineDesc says "Keep changes on this device until you turn this off"
 // in the language the app shows.
 //
-// Settings › Offline and storage: a switch.
+// Settings › Sync and storage: a switch.
 func SettingsWorkOfflineDesc() string { return In(i18n.Locale()).SettingsWorkOfflineDesc() }
 
 // SettingsWorkOfflineDesc says "Keep changes on this device until you turn this off"
 // in the language of msgs.
 //
-// Settings › Offline and storage: a switch.
+// Settings › Sync and storage: a switch.
 func (msgs Messages) SettingsWorkOfflineDesc() string {
 	return Catalog.Format(msgs.locale, "settingsWorkOfflineDesc", nil)
 }
@@ -9026,13 +9142,13 @@ func (msgs Messages) SettingsWorkOfflineDesc() string {
 // SettingsAllPagesOffline says "Keep all pages on this device"
 // in the language the app shows.
 //
-// Settings › Offline and storage: a switch.
+// Settings › Sync and storage: a switch.
 func SettingsAllPagesOffline() string { return In(i18n.Locale()).SettingsAllPagesOffline() }
 
 // SettingsAllPagesOffline says "Keep all pages on this device"
 // in the language of msgs.
 //
-// Settings › Offline and storage: a switch.
+// Settings › Sync and storage: a switch.
 func (msgs Messages) SettingsAllPagesOffline() string {
 	return Catalog.Format(msgs.locale, "settingsAllPagesOffline", nil)
 }
@@ -9040,13 +9156,13 @@ func (msgs Messages) SettingsAllPagesOffline() string {
 // SettingsAllPagesOfflineDesc says "Otherwise only pages you mark, and those you open"
 // in the language the app shows.
 //
-// Settings › Offline and storage: a switch.
+// Settings › Sync and storage: a switch.
 func SettingsAllPagesOfflineDesc() string { return In(i18n.Locale()).SettingsAllPagesOfflineDesc() }
 
 // SettingsAllPagesOfflineDesc says "Otherwise only pages you mark, and those you open"
 // in the language of msgs.
 //
-// Settings › Offline and storage: a switch.
+// Settings › Sync and storage: a switch.
 func (msgs Messages) SettingsAllPagesOfflineDesc() string {
 	return Catalog.Format(msgs.locale, "settingsAllPagesOfflineDesc", nil)
 }
@@ -9054,13 +9170,13 @@ func (msgs Messages) SettingsAllPagesOfflineDesc() string {
 // SettingsKeepAudio says "Keep recordings' audio on this device"
 // in the language the app shows.
 //
-// Settings › Offline and storage: how long to keep audio.
+// Settings › Sync and storage: how long to keep audio.
 func SettingsKeepAudio() string { return In(i18n.Locale()).SettingsKeepAudio() }
 
 // SettingsKeepAudio says "Keep recordings' audio on this device"
 // in the language of msgs.
 //
-// Settings › Offline and storage: how long to keep audio.
+// Settings › Sync and storage: how long to keep audio.
 func (msgs Messages) SettingsKeepAudio() string {
 	return Catalog.Format(msgs.locale, "settingsKeepAudio", nil)
 }
@@ -9068,7 +9184,7 @@ func (msgs Messages) SettingsKeepAudio() string {
 // SettingsKeepAudioUntilUploaded says "Until uploaded"
 // in the language the app shows.
 //
-// Settings › Offline and storage › Keep recordings' audio.
+// Settings › Sync and storage › Keep recordings' audio.
 func SettingsKeepAudioUntilUploaded() string {
 	return In(i18n.Locale()).SettingsKeepAudioUntilUploaded()
 }
@@ -9076,7 +9192,7 @@ func SettingsKeepAudioUntilUploaded() string {
 // SettingsKeepAudioUntilUploaded says "Until uploaded"
 // in the language of msgs.
 //
-// Settings › Offline and storage › Keep recordings' audio.
+// Settings › Sync and storage › Keep recordings' audio.
 func (msgs Messages) SettingsKeepAudioUntilUploaded() string {
 	return Catalog.Format(msgs.locale, "settingsKeepAudioUntilUploaded", nil)
 }
@@ -9084,13 +9200,13 @@ func (msgs Messages) SettingsKeepAudioUntilUploaded() string {
 // SettingsKeepAudio30Days says "For 30 days"
 // in the language the app shows.
 //
-// Settings › Offline and storage › Keep recordings' audio.
+// Settings › Sync and storage › Keep recordings' audio.
 func SettingsKeepAudio30Days() string { return In(i18n.Locale()).SettingsKeepAudio30Days() }
 
 // SettingsKeepAudio30Days says "For 30 days"
 // in the language of msgs.
 //
-// Settings › Offline and storage › Keep recordings' audio.
+// Settings › Sync and storage › Keep recordings' audio.
 func (msgs Messages) SettingsKeepAudio30Days() string {
 	return Catalog.Format(msgs.locale, "settingsKeepAudio30Days", nil)
 }
@@ -9098,13 +9214,13 @@ func (msgs Messages) SettingsKeepAudio30Days() string {
 // SettingsKeepAudioAlways says "Always"
 // in the language the app shows.
 //
-// Settings › Offline and storage › Keep recordings' audio.
+// Settings › Sync and storage › Keep recordings' audio.
 func SettingsKeepAudioAlways() string { return In(i18n.Locale()).SettingsKeepAudioAlways() }
 
 // SettingsKeepAudioAlways says "Always"
 // in the language of msgs.
 //
-// Settings › Offline and storage › Keep recordings' audio.
+// Settings › Sync and storage › Keep recordings' audio.
 func (msgs Messages) SettingsKeepAudioAlways() string {
 	return Catalog.Format(msgs.locale, "settingsKeepAudioAlways", nil)
 }
@@ -11463,13 +11579,13 @@ func (msgs Messages) WelcomeTogetherHistory() string {
 	return Catalog.Format(msgs.locale, "welcomeTogetherHistory", nil)
 }
 
-// WelcomeTogetherSync says "Pages work offline and sync between devices when you sign in; **Settings › Offline and storage** chooses which stay…"
+// WelcomeTogetherSync says "Pages work offline and sync between your devices through iCloud Drive, or a Leaflet server when you sign in; **Settin…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func WelcomeTogetherSync() string { return In(i18n.Locale()).WelcomeTogetherSync() }
 
-// WelcomeTogetherSync says "Pages work offline and sync between devices when you sign in; **Settings › Offline and storage** chooses which stay…"
+// WelcomeTogetherSync says "Pages work offline and sync between your devices through iCloud Drive, or a Leaflet server when you sign in; **Settin…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).

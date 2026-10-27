@@ -1,8 +1,9 @@
 # Leaflet protocol
 
 The contracts shared by the Go client (`internal/`) and the Supabase backend
-(`supabase/`). Both sides must agree on everything here; change it in one place
-and update both.
+(`supabase/`), and the format of the folder iCloud sync goes through (§8),
+which any app reading it must keep to. Both sides must agree on everything
+here; change it in one place and update both.
 
 ## 1. Page content
 
@@ -204,6 +205,9 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
   last row stored here (`key` is `id`, or `page_id` for `page_content`). A
   row that cannot be stored stops that table's pull, and the next pull starts
   with it.
+- A device syncs one way at a time: through the server while signed in, or
+  through iCloud Drive (§8) while that is on; signing in turns iCloud sync
+  off.
 - A device keeps one account's pages. Pages made before signing in are moved
   into the account's space on its first sync. Signing out uploads what is
   waiting, then removes the account's pages, queue and cursors from the
@@ -225,3 +229,72 @@ Storage buckets: `recordings` (`{user_id}/{recording_id}.m4a`), `files`
 RPCs: `share_page(p_page_id, p_email, p_role)`, `unshare_page(p_page_id, p_user_id)`,
 `page_members(p_page_id)`, `set_provider_secret(p_provider_id, p_secret)`
 (authenticated), `get_provider_secret(p_provider_id)` (service role only).
+
+## 8. iCloud Drive folder
+
+iCloud sync needs no server: the devices of one person sync through the
+folder `Leaflet` in their iCloud Drive (`~/Library/Mobile Documents/
+com~apple~CloudDocs/Leaflet` on macOS, `%USERPROFILE%\iCloudDrive\Leaflet`
+with iCloud for Windows). Every file has one writer, so iCloud never keeps
+two versions of one; versions are in the files, never in their times; and
+nothing depends on being told of changes, which a reader finds by listing.
+
+```
+Leaflet/
+  space.json                 {format, space_id, created_at, created_by_device}
+  devices/<device-id>/       written by that device alone
+    device.json              {format, id, name, platform, last_active_at, log_from}
+    log/<seq>.json           a batch: seq is 16 digits, from 1, one more each batch
+    pages/<page-id>.json     the device's version of a page
+  blobs/files/<file-id>/<name>
+  blobs/recordings/<recording-id>.wav
+```
+
+- **Every file** is JSON with `format` (now 1). A reader leaves alone a file
+  of a newer format, and stops syncing until it is updated. Files are
+  written whole: to a temporary file, moved into place. Readers pass over
+  names that start with a dot, and names that fit no pattern above, such as
+  the copies iCloud makes ("space 2.json").
+- **space.json** names the space the devices sync: every device files its
+  pages, folders and files under that `space_id`, whatever a row says. The
+  first device makes it from its own space. When two made it at once, the
+  lowest `space_id` among `space*.json` wins; a device that made a losing
+  one moves its pages into the winner, sends them all again, and removes it.
+  A folder that goes, or whose space changes, after a device joined it
+  stops that device's sync until the user turns iCloud sync off and on.
+- **A batch** is `{format, device, seq, written_at, snapshot, entries}`,
+  never changed once written. An entry is a row,
+  `{kind: "row", table, id, at, by, row}`, for `pages`, `folders`, `files`,
+  `comments` and `recordings` in their tables' shape (§7) with `updated_at`
+  and, for a comment, `author_name`; or a page's new content,
+  `{kind: "content", page_id, version}`. Page history and agent runs stay on
+  each device. A row's version is `(at, by)`, compared by `at` then `by`;
+  the newer applies. A device that changed a row it has not sent yet keeps
+  its change, and sends it with an `at` after every version it has seen.
+- **A page file** is `{format, page_id, version, merged, content}`: the
+  device's whole version of the page (§1), `version` when it wrote it (ms,
+  one more than its last at least), and `merged`, the version of each other
+  device's page file it had merged then. A device merges each other
+  device's newer page file into its own (§1's merge), with the base the
+  file of that device it merged last, and writes its own when the result is
+  new to both. A conflict is noted on the device whose edit lost, when the
+  other device had not merged it.
+- **Order.** A device writes blobs and page files before the batch that
+  names them, and reads each device's batches in order from the last it
+  applied, stopping at one that is missing, still downloading, or does not
+  parse: it reads that one first next time. iCloud may still bring a batch
+  before the page file it names: a reader merges that page once the file
+  has at least the version the batch named. A version is published once
+  its batch is written; until then it is sent again.
+- **Compaction.** Past 500 batches, a device writes the latest entry of each
+  row and page of its log as one batch with `snapshot: true`, sets
+  `log_from` to its seq, and removes the batches before it. A reader that
+  finds batches missing goes on from the first snapshot after the gap, as
+  a compaction cut short leaves batches before its snapshot.
+- **A device that finds** in its own folder a batch after the last it wrote,
+  or a copy iCloud made, shares its ID with another device (a restored
+  backup): it takes a new ID, reads the old ID's folder as another device's,
+  and sends everything again.
+- **Not downloaded.** A file iCloud has not downloaded (on macOS before 14,
+  `.<name>.icloud` beside where it goes; after, a file flagged dataless) is
+  asked for, and read on a later pass.

@@ -2548,7 +2548,7 @@
   "@settingsSectionSpeech": {
     "description": "Settings: the section of speech to text."
   },
-  "settingsSectionOffline": "Offline and storage",
+  "settingsSectionOffline": "Sync and storage",
   "@settingsSectionOffline": {
     "description": "Settings: the section and heading of offline use and storage."
   },
@@ -3067,25 +3067,25 @@
       }
     }
   },
-  "settingsOfflineDesc": "Everything is saved on this device first, and goes to the server when you are online.",
+  "settingsOfflineDesc": "Everything is saved on this device first, and syncs to your other devices when it can.",
   "@settingsOfflineDesc": {
-    "description": "Settings › Offline and storage: the description under the heading."
+    "description": "Settings › Sync and storage: the description under the heading."
   },
   "settingsLocalOnly": "Pages are kept on this device",
   "@settingsLocalOnly": {
-    "description": "Settings › Offline and storage: a build without a server."
+    "description": "Settings › Sync and storage: a build without a server."
   },
   "settingsLocalOnlyDesc": "This build has no server to sync with",
   "@settingsLocalOnlyDesc": {
-    "description": "Settings › Offline and storage: a build without a server."
+    "description": "Settings › Sync and storage: a build without a server."
   },
   "settingsConflicts": "Conflicts",
   "@settingsConflicts": {
-    "description": "Settings › Offline and storage: the heading over conflicts of sync."
+    "description": "Settings › Sync and storage: the heading over conflicts of sync."
   },
   "settingsConflictDeletedHere": "Kept “{text}”: deleted on this device, edited on another",
   "@settingsConflictDeletedHere": {
-    "description": "Settings › Offline and storage › Conflicts: the block kept, by its text.",
+    "description": "Settings › Sync and storage › Conflicts: the block kept, by its text.",
     "placeholders": {
       "text": {
         "type": "String"
@@ -3094,7 +3094,7 @@
   },
   "settingsConflictDeletedThere": "Kept “{text}”: deleted on another device, edited on this one",
   "@settingsConflictDeletedThere": {
-    "description": "Settings › Offline and storage › Conflicts: the block kept, by its text.",
+    "description": "Settings › Sync and storage › Conflicts: the block kept, by its text.",
     "placeholders": {
       "text": {
         "type": "String"
@@ -3103,7 +3103,7 @@
   },
   "settingsConflictKeptOver": "Kept “{kept}” over “{other}”",
   "@settingsConflictKeptOver": {
-    "description": "Settings › Offline and storage › Conflicts: the version kept, and the other.",
+    "description": "Settings › Sync and storage › Conflicts: the version kept, and the other.",
     "placeholders": {
       "kept": {
         "type": "String"
@@ -3115,7 +3115,7 @@
   },
   "settingsResolve": "Resolve",
   "@settingsResolve": {
-    "description": "Settings › Offline and storage › Conflicts: the menu of a conflict."
+    "description": "Settings › Sync and storage › Conflicts: the menu of a conflict."
   },
   "settingsDeleteIt": "Delete it",
   "@settingsDeleteIt": {
@@ -3148,15 +3148,15 @@
   },
   "settingsStorage": "Storage",
   "@settingsStorage": {
-    "description": "Settings › Offline and storage: the heading over storage."
+    "description": "Settings › Sync and storage: the heading over storage."
   },
   "settingsDataFolder": "Data folder",
   "@settingsDataFolder": {
-    "description": "Settings › Offline and storage › Storage."
+    "description": "Settings › Sync and storage › Storage."
   },
   "settingsDataFolderDesc": "Pages, recordings and files on this device",
   "@settingsDataFolderDesc": {
-    "description": "Settings › Offline and storage › Storage."
+    "description": "Settings › Sync and storage › Storage."
   },
   "settingsShow": "Show",
   "@settingsShow": {
@@ -3164,11 +3164,11 @@
   },
   "settingsImageCache": "Image cache",
   "@settingsImageCache": {
-    "description": "Settings › Offline and storage › Storage."
+    "description": "Settings › Sync and storage › Storage."
   },
   "settingsImageCacheDesc": "Pictures of image blocks loaded from the web",
   "@settingsImageCacheDesc": {
-    "description": "Settings › Offline and storage › Storage."
+    "description": "Settings › Sync and storage › Storage."
   },
   "settingsClear": "Clear",
   "@settingsClear": {
@@ -3180,31 +3180,63 @@
   },
   "settingsNotSyncing": "Not syncing",
   "@settingsNotSyncing": {
-    "description": "Settings › Offline and storage: signed out."
+    "description": "Settings › Sync and storage: signed out."
   },
   "settingsNotSyncingDesc": "Sign in to sync pages between devices",
   "@settingsNotSyncingDesc": {
-    "description": "Settings › Offline and storage: signed out."
+    "description": "Settings › Sync and storage: signed out."
+  },
+  "settingsICloud": "iCloud sync",
+  "@settingsICloud": {
+    "description": "Settings › Sync and storage: the switch for syncing through iCloud Drive."
+  },
+  "settingsICloudDesc": "Sync pages between your devices through iCloud Drive",
+  "@settingsICloudDesc": {
+    "description": "Settings › Sync and storage: under iCloud sync, while it is off."
+  },
+  "settingsICloudOnDesc": "Pages sync through the Leaflet folder in iCloud Drive",
+  "@settingsICloudOnDesc": {
+    "description": "Settings › Sync and storage: under iCloud sync, while it is on."
+  },
+  "settingsICloudUnavailable": "iCloud Drive isn't available. Sign in to iCloud and turn on iCloud Drive, or turn iCloud sync off and on again.",
+  "@settingsICloudUnavailable": {
+    "description": "iCloud sync cannot run: iCloud Drive is off, or the Leaflet folder in it went."
+  },
+  "settingsICloudNoAccess": "Leaflet can't open iCloud Drive. Allow it in System Settings › Privacy & Security › Files and Folders.",
+  "@settingsICloudNoAccess": {
+    "description": "iCloud sync cannot run: macOS keeps Leaflet out of iCloud Drive."
+  },
+  "settingsICloudOpenPrivacy": "Open Settings",
+  "@settingsICloudOpenPrivacy": {
+    "description": "Settings › Sync and storage: a button that opens macOS's privacy settings."
+  },
+  "settingsICloudOtherLibrary": "The Leaflet folder in iCloud Drive was replaced. Turn iCloud sync off and on again to join it.",
+  "@settingsICloudOtherLibrary": {
+    "description": "iCloud sync cannot run: the Leaflet folder holds other pages than this device syncs."
+  },
+  "settingsICloudNewer": "A newer Leaflet synced through iCloud Drive. Update Leaflet to keep syncing.",
+  "@settingsICloudNewer": {
+    "description": "iCloud sync cannot run: a newer version of Leaflet wrote to the folder."
   },
   "settingsUpToDate": "Up to date",
   "@settingsUpToDate": {
-    "description": "Settings › Offline and storage: the sync status."
+    "description": "Settings › Sync and storage: the sync status."
   },
   "settingsOfflineByChoice": "Working offline by choice",
   "@settingsOfflineByChoice": {
-    "description": "Settings › Offline and storage: the sync status."
+    "description": "Settings › Sync and storage: the sync status."
   },
   "settingsNoConnection": "No connection",
   "@settingsNoConnection": {
-    "description": "Settings › Offline and storage: the sync status."
+    "description": "Settings › Sync and storage: the sync status."
   },
   "settingsSyncing": "Syncing…",
   "@settingsSyncing": {
-    "description": "Settings › Offline and storage: the sync status."
+    "description": "Settings › Sync and storage: the sync status."
   },
   "settingsSyncFailed": "Last sync failed: {error}",
   "@settingsSyncFailed": {
-    "description": "Settings › Offline and storage: the sync status.",
+    "description": "Settings › Sync and storage: the sync status.",
     "placeholders": {
       "error": {
         "type": "String"
@@ -3213,11 +3245,11 @@
   },
   "settingsSynced": "Synced",
   "@settingsSynced": {
-    "description": "Settings › Offline and storage: no changes waiting."
+    "description": "Settings › Sync and storage: no changes waiting."
   },
   "settingsChangesWaiting": "{count, plural, one {# change waiting} other {# changes waiting}}",
   "@settingsChangesWaiting": {
-    "description": "Settings › Offline and storage: changes not uploaded yet.",
+    "description": "Settings › Sync and storage: changes not uploaded yet.",
     "placeholders": {
       "count": {
         "type": "int",
@@ -3227,39 +3259,39 @@
   },
   "settingsSyncNow": "Sync now",
   "@settingsSyncNow": {
-    "description": "Settings › Offline and storage: the button."
+    "description": "Settings › Sync and storage: the button."
   },
   "settingsWorkOffline": "Work offline",
   "@settingsWorkOffline": {
-    "description": "Settings › Offline and storage: a switch."
+    "description": "Settings › Sync and storage: a switch."
   },
   "settingsWorkOfflineDesc": "Keep changes on this device until you turn this off",
   "@settingsWorkOfflineDesc": {
-    "description": "Settings › Offline and storage: a switch."
+    "description": "Settings › Sync and storage: a switch."
   },
   "settingsAllPagesOffline": "Keep all pages on this device",
   "@settingsAllPagesOffline": {
-    "description": "Settings › Offline and storage: a switch."
+    "description": "Settings › Sync and storage: a switch."
   },
   "settingsAllPagesOfflineDesc": "Otherwise only pages you mark, and those you open",
   "@settingsAllPagesOfflineDesc": {
-    "description": "Settings › Offline and storage: a switch."
+    "description": "Settings › Sync and storage: a switch."
   },
   "settingsKeepAudio": "Keep recordings' audio on this device",
   "@settingsKeepAudio": {
-    "description": "Settings › Offline and storage: how long to keep audio."
+    "description": "Settings › Sync and storage: how long to keep audio."
   },
   "settingsKeepAudioUntilUploaded": "Until uploaded",
   "@settingsKeepAudioUntilUploaded": {
-    "description": "Settings › Offline and storage › Keep recordings' audio."
+    "description": "Settings › Sync and storage › Keep recordings' audio."
   },
   "settingsKeepAudio30Days": "For 30 days",
   "@settingsKeepAudio30Days": {
-    "description": "Settings › Offline and storage › Keep recordings' audio."
+    "description": "Settings › Sync and storage › Keep recordings' audio."
   },
   "settingsKeepAudioAlways": "Always",
   "@settingsKeepAudioAlways": {
-    "description": "Settings › Offline and storage › Keep recordings' audio."
+    "description": "Settings › Sync and storage › Keep recordings' audio."
   },
   "settingsHistoryBeforeResolving": "Before resolving a conflict",
   "@settingsHistoryBeforeResolving": {
@@ -3965,7 +3997,7 @@
   "@welcomeTogetherHistory": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
-  "welcomeTogetherSync": "Pages work offline and sync between devices when you sign in; **Settings › Offline and storage** chooses which stay on this device. A block changed on two devices while apart keeps one version, and the page says so, with the other a click away.",
+  "welcomeTogetherSync": "Pages work offline and sync between your devices through iCloud Drive, or a Leaflet server when you sign in; **Settings › Sync and storage** turns iCloud sync on and chooses which pages stay on this device. A block changed on two devices while apart keeps one version, and the page says so, with the other a click away.",
   "@welcomeTogetherSync": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },

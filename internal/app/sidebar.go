@@ -560,7 +560,7 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 	if m.Item(locales.SidebarExportMarkdown()).Chosen() {
 		a.exportPage(p.ID)
 	}
-	if server && !p.Template && m.Item(locales.SidebarKeepOnDevice()).Checked(p.KeepOffline || a.settings.AllPagesOffline).Disabled(a.settings.AllPagesOffline).Chosen() {
+	if (server || a.sync.ICloudOn()) && !p.Template && m.Item(locales.SidebarKeepOnDevice()).Checked(p.KeepOffline || a.settings.AllPagesOffline).Disabled(a.settings.AllPagesOffline).Chosen() {
 		if err := a.st.SetKeepOffline(p.ID, !p.KeepOffline); err != nil {
 			a.toast(locales.SidebarCouldNotSave(err.Error()))
 		}
@@ -581,7 +581,7 @@ func (a *App) sidebarFooter(c *ui.Context) {
 				ui.Text(c, status).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
 			}
 		})
-		if !a.session.SignedIn && a.backend.Configured() {
+		if !a.syncOn() && a.backend.Configured() {
 			if ghost(c, "sign-in", "", locales.CommonSignIn()).Clicked() {
 				a.navigate(Route{Kind: "signin"})
 			}
@@ -608,11 +608,11 @@ func (a *App) sidebarFooter(c *ui.Context) {
 // or how syncing goes.
 func (a *App) accountStatus() string {
 	switch {
-	case !a.session.SignedIn:
+	case !a.syncOn():
 		return locales.SidebarOnDevice()
 	case a.syncing:
 		return locales.SidebarSyncing()
-	case !a.online || a.settings.WorkOffline:
+	case a.offlineNow():
 		return locales.PageSyncOffline()
 	case a.pending > 0:
 		return locales.SidebarToSync(a.pending)

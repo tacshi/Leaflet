@@ -25,8 +25,8 @@ Leaflet keeps your notes, specs and meeting records as pages of blocks, and
 lets AI agents work in them beside you. Ask one inline, from a selection,
 in a chat or in a comment thread: it reads the page and edits it with
 validated tools, as one step you can undo. Pages are saved on your device
-first and sync when you sign in, so Leaflet works offline, with local
-models too.
+first and sync through iCloud Drive, or a Leaflet server when you sign in,
+so Leaflet works offline, with local models too.
 
 It is written in Go with [MyGo](https://github.com/egoist/mygo), which
 draws the whole interface natively on the GPU, with no web view for the app
@@ -88,6 +88,9 @@ itself.
 - Offline first: everything is saved to SQLite, and changes sync through
   an outbox when online. Edits made apart merge block by block, with a
   conflict notice and a way to bring back the other version.
+- iCloud sync: your Macs and PCs sync through the Leaflet folder in iCloud
+  Drive, with no server and no sign-in. Turn it on in Settings › Sync
+  and storage; on Windows it needs iCloud for Windows.
 - To-do reminders, a menu bar icon, light and dark themes, and updates
   from GitHub Releases.
 - In English, Simplified Chinese and Japanese: Leaflet follows the
@@ -100,10 +103,11 @@ itself.
 - To build from source: Go 1.27.3 or later. No cgo or C compiler is
   needed. Release builds also need Xcode for macOS, and NSIS for Windows
   installers.
-- Sign-in, sync, sharing and cloud models need a Leaflet server: a
-  [Supabase](https://supabase.com) project set up from
+- iCloud sync needs iCloud Drive turned on.
+- Sign-in, sharing, cloud models and sync with other people need a Leaflet
+  server: a [Supabase](https://supabase.com) project set up from
   [`supabase/`](supabase/README.md). Without one, Leaflet runs on your
-  device alone.
+  devices alone.
 
 ## Install
 
@@ -225,7 +229,8 @@ rules.
 | `internal/doc` | The page document model: blocks, deltas, inline Markdown, ops, per-block merge and Markdown export |
 | `internal/store` | SQLite (pure Go) tables, the outbox and settings |
 | `internal/remote` | Supabase over HTTP: Auth, PostgREST, Storage and Edge Functions |
-| `internal/sync` | Pushing the outbox, pulls, account adoption and the device heartbeat |
+| `internal/sync` | Pushing the outbox, pulls, account adoption and the device heartbeat, through Supabase or iCloud Drive |
+| `internal/icloud` | The Leaflet folder in iCloud Drive: its files, written whole, and asking iCloud to download them |
 | `internal/agents` | The OpenAI-compatible client, presets, prompt, page tools, loop and hub |
 | `internal/mcp` | `leaflet mcp`: the page tools for agents outside the app |
 | `internal/recording` | Capture, WAV, Soniox streaming and endpoint transcription |

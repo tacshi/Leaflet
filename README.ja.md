@@ -25,7 +25,7 @@ Leaflet は、メモや仕様書、議事録をブロックでできたページ
 エージェントがあなたの隣でそこに書き込めるようにします。行内で、選択範囲から、
 チャットで、あるいはコメントスレッドで頼むと、エージェントはページを読み、
 検証済みのツールで編集します。その編集は 1 回の操作として取り消せます。ページは
-まずデバイスに保存され、サインインすると同期されるので、Leaflet はオフラインでも、
+まずデバイスに保存され、iCloud Drive を通じて、またはサインインすると Leaflet サーバーを通じて同期されるので、Leaflet はオフラインでも、
 ローカルモデルでも使えます。
 
 Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれています。MyGo
@@ -89,6 +89,9 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 - オフラインファースト：すべて SQLite に保存され、オンラインになると送信トレイ
   を通じて同期されます。別々に行われた編集はブロック単位でマージされ、競合が
   あれば通知とともにもう一方のバージョンを戻す手段が示されます。
+- iCloud 同期：Mac や PC が iCloud Drive の Leaflet フォルダを通じて同期
+  します。サーバーもサインインも不要です。「設定 › 同期とストレージ」で
+  オンにします。Windows では iCloud for Windows が必要です。
 - ToDo のリマインダー、メニューバーのアイコン、ライトとダークのテーマ、
   GitHub Releases からのアップデート。
 - 英語・簡体字中国語・日本語に対応：Leaflet はシステムの言語に従うほか、
@@ -101,7 +104,8 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 - ソースからビルドするには Go 1.27.3 以降。cgo や C コンパイラは不要です。
   リリースビルドには、macOS では Xcode、Windows インストーラには NSIS も
   必要です。
-- サインイン、同期、共有、クラウドモデルには Leaflet サーバーが必要です：
+- iCloud 同期には iCloud Drive をオンにしておく必要があります。
+- サインイン、共有、クラウドモデル、他の人との同期には Leaflet サーバーが必要です：
   [`supabase/`](supabase/README.md) の手順で用意した
   [Supabase](https://supabase.com) プロジェクトです。サーバーがなければ、
   Leaflet はデバイス上だけで動作します。
@@ -230,7 +234,8 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/doc` | ページのドキュメントモデル：ブロック、差分、インライン Markdown、操作、ブロック単位のマージ、Markdown 書き出し |
 | `internal/store` | SQLite（純 Go）のテーブル、送信トレイ、設定 |
 | `internal/remote` | HTTP 経由の Supabase：Auth、PostgREST、Storage、Edge Functions |
-| `internal/sync` | 送信トレイのプッシュ、プル、アカウントの引き継ぎ、デバイスのハートビート |
+| `internal/sync` | 送信トレイのプッシュ、プル、アカウントの引き継ぎ、デバイスのハートビート（Supabase または iCloud Drive 経由） |
+| `internal/icloud` | iCloud Drive の Leaflet フォルダ：まるごと書き込むファイルと、iCloud へのダウンロードの依頼 |
 | `internal/agents` | OpenAI 互換クライアント、プリセット、プロンプト、ページツール、ループ、ハブ |
 | `internal/mcp` | `leaflet mcp`：アプリ外のエージェント向けページツール |
 | `internal/recording` | キャプチャ、WAV、Soniox ストリーミング、エンドポイントでの文字起こし |

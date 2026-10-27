@@ -1,6 +1,7 @@
-// Package sync moves changes between this device and Supabase: it drains
-// the outbox, pulls rows changed since the last pull, and merges page
-// content per block (docs/protocol.md §1).
+// Package sync moves changes between this device and the others: through
+// Supabase, or through the Leaflet folder in iCloud Drive (docs/protocol.md
+// §6, §8). It drains the outbox, pulls rows changed since the last pull,
+// and merges page content per block (§1).
 package sync
 
 import (
@@ -10,15 +11,18 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
 	gosync "sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/icloud"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 )
@@ -37,7 +41,11 @@ type Service struct {
 	Offline func() bool
 	// KeepAudio is the setting for audio after upload.
 	KeepAudio func() string
+	// ICloud is the Leaflet folder in iCloud Drive, which sync goes
+	// through instead of Supabase while SetICloud has turned it on.
+	ICloud icloud.Folder
 
+	cloudOn atomic.Bool
 	kick    chan struct{}
 	mu      gosync.Mutex
 	running gosync.Mutex
@@ -82,6 +90,91 @@ func (s *Service) Kick() {
 	}
 }
 
+// target is where a pass syncs: the Supabase server, or the Leaflet folder
+// in iCloud Drive.
+type target interface {
+	// ready reports whether there is somewhere to sync: signed in, or
+	// iCloud sync on.
+	ready() bool
+	needsNetwork() bool
+	pass(ctx context.Context) error
+	refresh(ctx context.Context, pageID string) (*doc.Content, error)
+	flush(ctx context.Context, pageID string) error
+	// fetch reads a file or a recording's audio another device uploaded.
+	fetch(ctx context.Context, bucket, path string) ([]byte, error)
+}
+
+func (s *Service) target() target {
+	if s.cloudOn.Load() {
+		return cloudTarget{s}
+	}
+	return supabaseTarget{s}
+}
+
+type supabaseTarget struct{ s *Service }
+
+func (t supabaseTarget) ready() bool                    { return t.s.be.SignedIn() }
+func (t supabaseTarget) needsNetwork() bool             { return true }
+func (t supabaseTarget) pass(ctx context.Context) error { return t.s.pass(ctx) }
+func (t supabaseTarget) refresh(ctx context.Context, pageID string) (*doc.Content, error) {
+	return t.s.refreshRemote(ctx, pageID)
+}
+func (t supabaseTarget) flush(ctx context.Context, pageID string) error {
+	return t.s.flushRemote(ctx, pageID)
+}
+func (t supabaseTarget) fetch(ctx context.Context, bucket, path string) ([]byte, error) {
+	return t.s.be.Download(ctx, bucket, path)
+}
+
+// SetICloud turns iCloud sync on or off; a pass running goes on as it
+// started. Turned off, the changes made meanwhile wait in the outbox, and
+// go once it is on again.
+func (s *Service) SetICloud(on bool) {
+	s.cloudOn.Store(on)
+	if on {
+		s.Kick()
+	}
+}
+
+// ICloudOn reports whether iCloud sync is on.
+func (s *Service) ICloudOn() bool { return s.cloudOn.Load() }
+
+// Uploads reports whether files and audio go up to another place for the
+// other devices: signed in, or iCloud sync on.
+func (s *Service) Uploads() bool { return s.target().ready() }
+
+// CanFetch reports whether Fetch has somewhere to get what another device
+// uploaded from: signed in, iCloud sync on, or the Leaflet folder of
+// iCloud Drive this device synced through before.
+func (s *Service) CanFetch() bool {
+	if s.target().ready() {
+		return true
+	}
+	joined, _ := s.st.Value("icloud.space")
+	return joined != "" && s.ICloud.Root != ""
+}
+
+// Fetch reads a file (bucket "files") or a recording's audio
+// ("recordings") that another device uploaded, by its storage path. What
+// went up to iCloud Drive stays there after switching to the server,
+// until it has gone up again.
+func (s *Service) Fetch(ctx context.Context, bucket, path string) ([]byte, error) {
+	t := s.target()
+	if _, cloud := t.(cloudTarget); cloud {
+		return t.fetch(ctx, bucket, path)
+	}
+	if t.ready() {
+		data, err := t.fetch(ctx, bucket, path)
+		if err == nil || !s.keptInICloud(bucket, path) {
+			return data, err
+		}
+	}
+	if s.keptInICloud(bucket, path) {
+		return s.cloudFetch(ctx, bucket, path)
+	}
+	return nil, errors.New("sync: not signed in, and not in iCloud Drive")
+}
+
 // SetOpen marks a page as open, so its content is always pulled, and
 // brings an opened page up to date in the background.
 func (s *Service) SetOpen(pageID string, open bool) {
@@ -106,16 +199,18 @@ func (s *Service) SetOpen(pageID string, open bool) {
 	}()
 }
 
-// CanSync reports whether a pass can run: signed in, online, and not
-// working offline.
+// CanSync reports whether a pass can run: signed in and online, or with
+// iCloud sync on, and not working offline. iCloud Drive keeps what Leaflet
+// writes to it until it is online itself.
 func (s *Service) CanSync() bool {
-	if !s.be.SignedIn() {
+	t := s.target()
+	if !t.ready() {
 		return false
 	}
 	if s.Offline != nil && s.Offline() {
 		return false
 	}
-	return online()
+	return !t.needsNetwork() || online()
 }
 
 // online reports whether the device has a connection; tests stand in
@@ -141,8 +236,9 @@ func (s *Service) SyncNow() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	err := s.pass(ctx)
-	if remote.IsNetwork(err) {
+	t := s.target()
+	err := t.pass(ctx)
+	if t.needsNetwork() && remote.IsNetwork(err) {
 		err = nil // offline: try again later
 	}
 	if err != nil && !errors.Is(err, remote.ErrSignedOut) {
@@ -216,6 +312,21 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 		return err
 	}
 	// Everything made before sign-in goes up now.
+	failed := s.requeueAll(remoteID)
+	sess := s.st.Session()
+	sess.SpaceID, sess.UserID, sess.SignedIn = remoteID, uid, true
+	s.st.SetSession(sess)
+	return failed
+}
+
+// requeueAll queues everything on this device to go up, now in the space
+// spaceID: the pages and their content, folders, comments, files and
+// recordings with their audio. A file or audio this device has only in
+// iCloud Drive, as after syncing through it, comes here first, to go up
+// from here.
+func (s *Service) requeueAll(spaceID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
 	var failed error
 	pages, _ := s.st.AllPages()
 	for _, p := range pages {
@@ -226,13 +337,24 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 	for _, f := range folders {
 		failed = errors.Join(failed, s.st.Queue("folders", f.ID, store.FolderToRemote(f), "", ""))
 	}
+	comments, _ := s.st.AllComments()
+	for _, c := range comments {
+		failed = errors.Join(failed, s.st.Queue("comments", c.ID, store.CommentToRemote(c), "", c.PageID))
+	}
 	files, _ := s.st.Files()
 	for _, f := range files {
-		f.SpaceID = remoteID
-		f.StoragePath = remoteID + "/" + f.ID + "/" + f.Name
+		if !onDevice(f.LocalPath) && f.StoragePath != "" && s.keptInICloud("files", f.StoragePath) {
+			if data, err := s.cloudFetch(ctx, "files", f.StoragePath); err == nil {
+				if local, err := s.st.DownloadedFile(f.ID, data); err == nil {
+					f.LocalPath = local
+				}
+			}
+		}
+		f.SpaceID = spaceID
+		f.StoragePath = spaceID + "/" + f.ID + "/" + f.Name
 		failed = errors.Join(failed, s.st.PutFile(f))
 		failed = errors.Join(failed, s.st.Queue("files", f.ID, store.FileToRemote(f), "file", ""))
-		if f.LocalPath != "" {
+		if onDevice(f.LocalPath) {
 			ct := f.MimeType
 			if ct == "" {
 				ct = "application/octet-stream"
@@ -240,21 +362,38 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 			failed = errors.Join(failed, s.st.Queue("storage", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": f.LocalPath, "content_type": ct}, "file waiting to upload", ""))
 		}
 	}
-	// A finished recording's audio uploads once signed in, so recordings
-	// made before then still have it.
+	// A finished recording goes up with its audio, which keeps the path
+	// it has until the upload gives it another.
 	recordings, _ := s.st.Recordings()
 	for _, r := range recordings {
-		if r.Status != "ready" && r.Status != "failed" || r.AudioPath != "" || r.LocalPath == "" {
+		if r.Status != "ready" && r.Status != "failed" {
 			continue
 		}
-		if _, err := os.Stat(r.LocalPath); err == nil {
+		if !onDevice(r.LocalPath) && r.AudioPath != "" && s.keptInICloud("recordings", r.AudioPath) {
+			if data, err := s.cloudFetch(ctx, "recordings", r.AudioPath); err == nil {
+				local := filepath.Join(s.st.Dir, "recordings", r.ID+".wav")
+				if err := os.MkdirAll(filepath.Dir(local), 0o750); err == nil && os.WriteFile(local, data, 0o600) == nil {
+					if rec, err := s.st.UpdateRecording(r.ID, func(x *store.Recording) { x.LocalPath = local }); err == nil {
+						r = rec
+					}
+				}
+			}
+		}
+		failed = errors.Join(failed, s.st.Queue("recordings", r.ID, store.RecordingToRemote(r), "", r.PageID))
+		if onDevice(r.LocalPath) {
 			failed = errors.Join(failed, s.st.QueueUpload(r))
 		}
 	}
-	sess := s.st.Session()
-	sess.SpaceID, sess.UserID, sess.SignedIn = remoteID, uid, true
-	s.st.SetSession(sess)
 	return failed
+}
+
+// onDevice reports whether a file is on this device.
+func onDevice(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 // DeviceName names this device in Account › Devices.
@@ -769,7 +908,7 @@ func (s *Service) pullContents(ctx context.Context) error {
 		open := s.open[id]
 		s.mu.Unlock()
 		if open || allOffline || p.KeepOffline {
-			if _, err := s.RefreshContent(ctx, id); err != nil {
+			if _, err := s.refreshRemote(ctx, id); err != nil {
 				waiting[id] = true
 				return err
 			}
@@ -822,12 +961,17 @@ func (s *Service) setWaiting(ids map[string]bool) {
 	_ = s.st.SetValue("sync.content_waiting", strings.Join(list, ","))
 }
 
-// RefreshContent brings a page's content up to date with the server,
-// merging unsynced edits made here.
+// RefreshContent brings a page's content up to date with the other
+// devices', merging unsynced edits made here.
 func (s *Service) RefreshContent(ctx context.Context, pageID string) (*doc.Content, error) {
 	if !s.CanSync() {
 		return s.st.Content(pageID), nil
 	}
+	return s.target().refresh(ctx, pageID)
+}
+
+// refreshRemote brings a page's content up to date with the server's.
+func (s *Service) refreshRemote(ctx context.Context, pageID string) (*doc.Content, error) {
 	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: "content, revision, updated_at", Filters: []string{remote.Eq("page_id", pageID)}})
 	if err != nil {
 		return nil, err
@@ -888,6 +1032,10 @@ func (s *Service) FlushPage(ctx context.Context, pageID string) error {
 	}
 	s.running.Lock()
 	defer s.running.Unlock()
+	return s.target().flush(ctx, pageID)
+}
+
+func (s *Service) flushRemote(ctx context.Context, pageID string) error {
 	if err := s.resolveSpace(ctx); err != nil {
 		return err
 	}

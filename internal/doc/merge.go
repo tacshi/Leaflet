@@ -14,7 +14,17 @@ type Conflict struct {
 // Kept is the side the merge kept: "local" or "remote". A block one side
 // deleted and the other edited is kept, and the deleted side's node is nil.
 func (c Conflict) Kept() string {
-	if c.Remote == nil || c.Local != nil && c.LocalEditedAt >= c.RemoteEditedAt {
+	switch {
+	case c.Remote == nil:
+		return "local"
+	case c.Local == nil:
+		return "remote"
+	case c.LocalEditedAt != c.RemoteEditedAt:
+		if c.LocalEditedAt > c.RemoteEditedAt {
+			return "local"
+		}
+		return "remote"
+	case canonical([]any{c.Local.Type, c.Local.Data}) >= canonical([]any{c.Remote.Type, c.Remote.Data}):
 		return "local"
 	}
 	return "remote"
@@ -80,7 +90,9 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		return c.Blocks[id]
 	}
 
-	// Start from whichever side edited most recently, then fold in the other.
+	// Start from whichever side edited most recently, then fold in the
+	// other; at equal times, from the greater version, so that the merge
+	// comes out the same whichever side is local.
 	var localLatest, remoteLatest int64
 	for _, t := range local.Blocks {
 		localLatest = max(localLatest, t)
@@ -88,7 +100,7 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 	for _, t := range remote.Blocks {
 		remoteLatest = max(remoteLatest, t)
 	}
-	primaryIsLocal := localLatest >= remoteLatest
+	primaryIsLocal := localLatest > remoteLatest || localLatest == remoteLatest && local.Encode() >= remote.Encode()
 	primary, other, primaryFlat, otherFlat := local, remote, localFlat, remoteFlat
 	if !primaryIsLocal {
 		primary, other, primaryFlat, otherFlat = remote, local, remoteFlat, localFlat
@@ -138,18 +150,20 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 				RemoteEditedAt: timeOf(remote, id),
 			})
 		}
-		otherWins := func(primaryChanged, otherChanged bool) bool {
-			return otherChanged && (!primaryChanged || ot > pt)
+		// Equal times go to the greater version, so that every device
+		// merging the same two picks the same one.
+		otherWins := func(primaryChanged, otherChanged, otherGreater bool) bool {
+			return otherChanged && (!primaryChanged || ot > pt || ot == pt && otherGreater)
 		}
 		taken := false
-		if p.own != o.own && otherWins(primaryEdited, otherEdited) {
+		if p.own != o.own && otherWins(primaryEdited, otherEdited, o.own > p.own) {
 			repl := o.node.Clone()
 			repl.Children = result.Find(id).Children
 			_ = result.Replace(id, repl)
 			taken = true
 		}
 		if p.parent != o.parent || p.prev != o.prev {
-			if otherWins(movedSinceBase(p, primaryFlat, b, baseFlat), movedSinceBase(o, otherFlat, b, baseFlat)) {
+			if otherWins(movedSinceBase(p, primaryFlat, b, baseFlat), movedSinceBase(o, otherFlat, b, baseFlat), o.signature > p.signature) {
 				if o.parent != "" && result.Find(o.parent) == nil {
 					waiting[id] = true
 				} else if pos, ok := positionIn(result, o); ok && !result.IsSelfOrAncestor(id, pos.Anchor()) {
@@ -362,4 +376,10 @@ func positionIn(c *Content, f *flat) (Position, bool) {
 		return Position{Parent: f.parent}, true
 	}
 	return Position{}, false
+}
+
+// SameBlock reports whether two nodes are the same version of a block:
+// the same type and data, whatever their children.
+func SameBlock(a, b *Node) bool {
+	return a != nil && b != nil && canonical([]any{a.Type, a.Data}) == canonical([]any{b.Type, b.Data})
 }

@@ -280,6 +280,28 @@ func (e *Editor) caretRect(p Pos) (ui.Rect, bool) {
 	return c, true
 }
 
+// RangeRect is the box in the window of the text from one position to
+// another: the lines it is on, across its first block's width. A block
+// that isn't text gives its whole box.
+func (e *Editor) RangeRect(from, to Pos) (ui.Rect, bool) {
+	box, ok := e.geom[from.ID]
+	if !ok {
+		return ui.Rect{}, false
+	}
+	a, okA := e.caretRect(from)
+	b, okB := e.caretRect(to)
+	if !okA || !okB {
+		return box, true
+	}
+	if n := e.node(from.ID); n == nil || !n.IsText() {
+		a = box
+	}
+	if n := e.node(to.ID); n == nil || !n.IsText() {
+		b = e.geom[to.ID]
+	}
+	return ui.Rect{X: box.X, Y: a.Y, W: box.W, H: b.Y + b.H - a.Y}, true
+}
+
 // moveTo moves the caret, extending the selection with Shift.
 func (e *Editor) moveTo(p Pos, extend bool) {
 	desired, has := e.desiredX, e.hasDesired

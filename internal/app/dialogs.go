@@ -30,6 +30,10 @@ type inlinePrompt struct {
 	runID     string
 	reply     string
 	working   bool
+	// from and to are the text it was asked from, which it shows beside;
+	// shown is set once it has.
+	from, to editor.Pos
+	shown    bool
 }
 
 type newComment struct {
@@ -961,7 +965,9 @@ func (a *App) linkDialog(c *ui.Context) {
 
 // Inline agent prompt ---------------------------------------------------
 
-// inlinePrompt asks an agent to work on a block, from @ or a selection.
+// inlinePrompt asks an agent to work on a block, from @ or a selection:
+// a panel below the text it was asked from, or above it where there is no
+// room below.
 func (a *App) inlinePrompt(c *ui.Context) {
 	pal := theme.Of(c)
 	ip := a.dialogs.inline
@@ -969,8 +975,27 @@ func (a *App) inlinePrompt(c *ui.Context) {
 		return
 	}
 	ps := a.page
-	ui.Column(c.Key("inline-prompt")).Margin(14, 0, 0).Padding(12).Gap(10).Radius(10).Background(pal.AgentSection).
-		Border(1, pal.AccentSoftBorder).Children(func() {
+	at, ok := ps.editor.RangeRect(ip.from, ip.to)
+	if !ok {
+		return
+	}
+	ui.Overlay(c, func() {
+		anchor := ui.Box(c.Key("inline-anchor")).Absolute().Left(at.X).Top(at.Y).Size(at.W, at.H).PassThrough()
+		panel := ui.Column(c.Key("inline-prompt")).AttachTo(anchor, ui.AnchorBottomLeft, ui.AnchorTopLeft).Width(at.W).Margin(8, 0, 0).
+			Padding(12).Gap(10).Radius(10).Background(pal.AgentSection).Border(1, pal.AccentSoftBorder).Shadow(0, 10, 30, 0, pal.Shadow)
+		// A press elsewhere puts away a prompt with nothing in it yet, but
+		// not the press on Ask agent that opened it.
+		if panel.PressedOutside() && ip.shown && strings.TrimSpace(ip.text) == "" && !ip.working && ip.reply == "" {
+			a.dialogs.inline = nil
+		}
+		ip.shown = true
+		a.inlinePanel(c, panel, ip, pal)
+	})
+}
+
+func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal *theme.Palette) {
+	ps := a.page
+	panel.Children(func() {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			avatar(c, "", 22, true)
 			name := ip.agentName

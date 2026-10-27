@@ -238,7 +238,8 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 		case strings.HasPrefix(item.Key, "agent:"):
 			ed.RemoveTrigger(t)
 			choice := store.ModelChoice{ProviderID: strings.TrimPrefix(item.Key, "agent:")}
-			a.dialogs.inline = &inlinePrompt{blockID: t.ID, agent: choice, agentName: item.Label}
+			at := editor.Pos{ID: t.ID, Off: t.Off}
+			a.dialogs.inline = &inlinePrompt{blockID: t.ID, agent: choice, agentName: item.Label, from: at, to: at}
 		case strings.HasPrefix(item.Key, "page:"):
 			ed.InsertPageMention(t, strings.TrimPrefix(item.Key, "page:"), item.Label)
 		case strings.HasPrefix(item.Key, "user:"):
@@ -294,7 +295,13 @@ func (h *host) Comment(blockID, quote string) {
 }
 
 func (h *host) AskAgent(blockID, quote string) {
-	h.a.dialogs.inline = &inlinePrompt{blockID: blockID, quote: quote, selection: true}
+	ip := &inlinePrompt{blockID: blockID, quote: quote, selection: true}
+	ip.from, ip.to = editor.Pos{ID: blockID}, editor.Pos{ID: blockID}
+	// Text selected in the page, not in a table's cell, which gives its table.
+	if from, to := h.a.page.editor.Range(); from.ID == blockID {
+		ip.from, ip.to = from, to
+	}
+	h.a.dialogs.inline = ip
 }
 
 func (h *host) EditBlock(blockID string) {

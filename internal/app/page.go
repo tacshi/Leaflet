@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -183,9 +184,20 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 	pal := theme.Of(c)
 	ps := a.page
 	size := float32(a.settings.TextSize) * 2.15
-	in := ui.TextInputBase(c.Key("title:"+p.ID), &ps.title).Bind(&ps.titleIn).Placeholder(locales.CommonUntitled()).
+	// A text area, so a long title wraps rather than scrolls out of view.
+	// It holds one line: Enter, and Down at its end, go on to the page.
+	in := ui.TextAreaBase(c.Key("title:"+p.ID), &ps.title).Bind(&ps.titleIn).Lines(1, 8).FillWidth().
+		Placeholder(locales.CommonUntitled()).
 		Font(theme.PageFont).FontSize(size).FontWeight(700).TextColor(pal.Text).ReadOnly(ps.editor.ReadOnly).
-		Label(locales.PageTitleLabel()).Margin(0, 0, 6)
+		Label(locales.PageTitleLabel()).Margin(0, 0, 6).
+		OnTextKey(func(k ui.TextKey) bool {
+			leave := k.Mods == 0 && (k.Key == ui.KeyEnter || k.Key == ui.KeyDown && ps.titleAtEnd)
+			if leave {
+				ps.titleLeave = true
+				a.win.Invalidate()
+			}
+			return leave || k.Key == ui.KeyEnter // no line breaks in a title
+		})
 	if ps.focusTitle > 0 {
 		if in.Focused() {
 			ps.focusTitle = 0
@@ -198,15 +210,19 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 		}
 	}
 	if in.Changed() {
+		// A pasted title keeps to one line.
+		if strings.ContainsAny(ps.title, "\r\n") {
+			ps.title = strings.Join(strings.Fields(ps.title), " ")
+			a.win.Invalidate()
+		}
 		// Rename shortly after typing stops, as the content saves.
 		a.saveTitleSoon()
 	}
-	if in.Submitted() {
+	start, end := in.TextSelection()
+	ps.titleAtEnd = start == end && end == utf8.RuneCountInString(ps.title)
+	if ps.titleLeave {
+		ps.titleLeave = false
 		a.saveTitle()
-		ps.editor.PlaceCaret(ps.editor.Content.Children[0].ID, 0)
-		ps.editor.Focus()
-	}
-	if in.Shortcut(0, ui.KeyDown) {
 		ps.editor.PlaceCaret(ps.editor.Content.Children[0].ID, 0)
 		ps.editor.Focus()
 	}

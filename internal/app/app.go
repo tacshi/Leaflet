@@ -83,6 +83,7 @@ type App struct {
 	// treeRows are the tree's rows built this frame, for drops beside them.
 	treeRows  []treeRow
 	panelOpen bool
+	panelW    float32
 	panelTab  int
 	// settingsOpen shows Settings over the window, at settingsSection.
 	settingsOpen    bool
@@ -215,6 +216,7 @@ func (a *App) start() error {
 	a.st = st
 	a.settings = st.Settings()
 	a.sidebarW = a.settings.SidebarWidth
+	a.panelW = a.settings.PanelWidth
 	a.panelOpen = false
 	a.applyTheme()
 	a.backend = remote.New(remote.Config(), st)

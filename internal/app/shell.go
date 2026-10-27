@@ -12,7 +12,6 @@ import (
 const (
 	pageMaxWidth = 720
 	pagePadX     = 56
-	panelWidth   = 360
 )
 
 // view builds the window.
@@ -27,8 +26,8 @@ func (a *App) view(c *ui.Context) {
 	a.follow()
 	// The page, and beside it the agent and comments panel when open.
 	page := func() {
-		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
-			main := ui.Column(c.Key("main")).Grow(1).FillHeight().Background(pal.Surface)
+		main := func() {
+			main := ui.Column(c.Key("main")).Fill().Background(pal.Surface)
 			if a.router == nil {
 				main.Children(func() { a.main(c) })
 			} else {
@@ -40,11 +39,22 @@ func (a *App) view(c *ui.Context) {
 					}).Fill()
 				})
 			}
-			if a.panelOpen && a.route.Kind == "page" && a.page != nil {
-				ui.Column(c.Key("panel")).Width(panelWidth).FillHeight().Background(pal.Panel).
-					BorderWidth(0, 0, 0, 1).BorderColor(pal.Divider).Children(func() { a.panel(c) })
-			}
-		})
+		}
+		if !a.panelShown() {
+			main()
+			return
+		}
+		// MyGo's split sizes its first pane, the page: the panel gets the
+		// rest, so its width is kept and the page's follows from it.
+		room := a.pageRoom(c)
+		mainW := room - a.panelW - 1
+		split := ui.Split(c, &mainW, main, func() {
+			ui.Column(c.Key("panel")).Fill().Background(pal.Panel).Children(func() { a.panel(c) })
+		}).Fill()
+		if split.Changed() {
+			a.panelW = min(max(room-mainW-1, panelMin), panelMax)
+			a.saveWidthsSoon()
+		}
 	}
 	if !a.settings.SidebarOpen {
 		page()
@@ -60,7 +70,7 @@ func (a *App) view(c *ui.Context) {
 		}, page).Fill()
 		if split.Changed() {
 			a.sidebarW = min(max(a.sidebarW, sidebarMin), sidebarMax)
-			a.saveSidebarSoon()
+			a.saveWidthsSoon()
 		}
 	}
 	a.dialogs.view(c, a)
@@ -70,32 +80,50 @@ func (a *App) view(c *ui.Context) {
 	a.toastView(c)
 }
 
-// The sidebar's width stays between these.
-const sidebarMin, sidebarMax = 200, 420
+// The sidebar's and the panel's widths stay between these.
+const (
+	sidebarMin, sidebarMax = 200, 420
+	panelMin, panelMax     = 280, 640
+)
 
-var sidebarTimer *time.Timer
+var widthsTimer *time.Timer
 
-// saveSidebarSoon keeps the sidebar's width once it stops moving.
-func (a *App) saveSidebarSoon() {
-	if sidebarTimer != nil {
-		sidebarTimer.Stop()
+// saveWidthsSoon keeps the sidebar's and the panel's widths once they stop
+// moving.
+func (a *App) saveWidthsSoon() {
+	if widthsTimer != nil {
+		widthsTimer.Stop()
 	}
-	sidebarTimer = time.AfterFunc(400*time.Millisecond, func() {
+	widthsTimer = time.AfterFunc(400*time.Millisecond, func() {
 		a.update(func() {
 			a.settings.SidebarWidth = a.sidebarW
+			a.settings.PanelWidth = a.panelW
 			a.saveSettings()
 		})
 	})
 }
 
-// contentWidth is the width the page's text wraps at.
-func (a *App) contentWidth(c *ui.Context) float32 {
+// panelShown reports whether the agent and comments panel is beside the
+// page.
+func (a *App) panelShown() bool {
+	return a.panelOpen && a.route.Kind == "page" && a.page != nil
+}
+
+// pageRoom is the width beside the sidebar: the page's, and the panel's
+// when shown.
+func (a *App) pageRoom(c *ui.Context) float32 {
 	w, _ := c.Size()
 	if a.settings.SidebarOpen {
 		w -= a.sidebarW + 1
 	}
+	return w
+}
+
+// contentWidth is the width the page's text wraps at.
+func (a *App) contentWidth(c *ui.Context) float32 {
+	w := a.pageRoom(c)
 	if a.panelOpen {
-		w -= panelWidth + 1
+		w -= a.panelW + 1
 	}
 	return max(min(w-2*pagePadX, pageMaxWidth), 280)
 }

@@ -69,7 +69,7 @@ func DefaultSettings() Settings {
 	return Settings{
 		Theme: "system", TextSize: 17, LocalWhenOffline: true, AgentsReadOtherPages: true,
 		AllPagesOffline: true, KeepAudioOnDevice: "until_uploaded", SidebarOpen: true,
-		SidebarWidth: 264, PanelWidth: 340,
+		SidebarWidth: 264, PanelWidth: 360,
 		Stt: SttSettings{
 			Provider: "openai-compatible", ModelSize: "qwen3-asr-0.6b", RunOn: "auto", Language: "auto",
 			LiveTranscript: true, KeepAudio: true, SonioxModel: "stt-rt-v5", LanguageHints: []string{"en", "zh"},
@@ -95,7 +95,7 @@ func (s *Store) Settings() Settings {
 		out.SidebarWidth = 264
 	}
 	if out.PanelWidth == 0 {
-		out.PanelWidth = 340
+		out.PanelWidth = 360
 	}
 	if out.Stt.Provider != "soniox" && out.Stt.Provider != "openai-compatible" {
 		out.Stt.Provider = "openai-compatible"

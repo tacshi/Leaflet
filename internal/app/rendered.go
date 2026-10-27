@@ -63,18 +63,96 @@ try { katex.render(` + scriptString(formula) + `, m, {displayMode: true, output:
 catch (e) { m.className = "err"; m.textContent = e.message; }</script></body></html>`
 }
 
-// diagramPage draws Mermaid source, in the page's colors.
+// diagramPage draws Mermaid source, in the page's colors. It zooms at the
+// pointer with a pinch, or Ctrl and the wheel, and from 1 to 8 times;
+// zoomed in, a drag moves it and a double click fits it again. Its bar
+// sends "in", "out" and "fit", and hears whether it is zoomed in.
 func diagramPage(source string) string {
 	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>` + renderedStyle + `
 .pele{--pele-bg:transparent;--pele-fg:#16181d;--pele-muted:#565c67;--pele-line:#3d424c;--pele-surface:#f5f6f8;--pele-surface-alt:#eceef2;--pele-border:#c9ced8;--pele-accent:#3446c9;--pele-fg-on-light:#16181d;--pele-fg-on-dark:#e9ebef;--pele-font:-apple-system,system-ui,sans-serif}
 :root[data-theme="dark"] .pele{--pele-fg:#e9ebef;--pele-muted:#9ea4af;--pele-line:#c0c5ce;--pele-surface:#23272e;--pele-surface-alt:#2b3038;--pele-border:#3a404a;--pele-accent:#8a97ff}
-svg{max-width:100%;height:auto}</style></head><body><div id="d"></div>
+svg{max-width:100%;height:auto}
+#v{overflow:hidden}
+#d{transform-origin:0 0}
+#v.zoomed{cursor:grab;-webkit-user-select:none;user-select:none}
+#v.dragging{cursor:grabbing}</style></head><body><div id="v"><div id="d"></div></div>
 <script type="module">` + peleModule + `
 // In a block of its own, clear of the names Pele's module takes.
 {
-  const box = document.getElementById("d");
+  const view = document.getElementById("v"), box = document.getElementById("d");
   try { box.innerHTML = peleRender(` + scriptString(source) + `, {fontFamily: "-apple-system, system-ui, sans-serif"}).svg; }
   catch (e) { box.className = "err"; box.textContent = e.message; }
+
+  // The diagram is k times its size, moved by x and y, kept over the view.
+  let k = 1, x = 0, y = 0, told = false;
+  function show() {
+    const w = view.clientWidth, h = view.clientHeight;
+    x = Math.min(0, Math.max(w - w * k, x));
+    y = Math.min(0, Math.max(h - h * k, y));
+    box.style.transform = k === 1 ? "" : "translate(" + x + "px," + y + "px) scale(" + k + ")";
+    view.classList.toggle("zoomed", k > 1);
+    if (told !== k > 1) {
+      told = k > 1;
+      parent.postMessage({leafletZoomed: told}, "*");
+    }
+  }
+  // zoomAt zooms by f, keeping the point at px, py of the view in place.
+  function zoomAt(px, py, f) {
+    const n = Math.min(Math.max(k * f, 1), 8);
+    x = px - (px - x) * n / k;
+    y = py - (py - y) * n / k;
+    k = n;
+    show();
+  }
+  function at(e) {
+    const r = view.getBoundingClientRect();
+    return typeof e.clientX === "number" ? [e.clientX - r.left, e.clientY - r.top] : [r.width / 2, r.height / 2];
+  }
+  // WebKit tells a pinch as gestures; others as the wheel with Ctrl.
+  let pinch = 0;
+  addEventListener("gesturestart", e => { e.preventDefault(); pinch = 1; });
+  addEventListener("gesturechange", e => {
+    e.preventDefault();
+    if (!pinch) return;
+    zoomAt(...at(e), e.scale / pinch);
+    pinch = e.scale;
+  });
+  addEventListener("gestureend", e => { e.preventDefault(); pinch = 0; });
+  addEventListener("wheel", e => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    if (!pinch) zoomAt(...at(e), Math.exp(-e.deltaY * (e.deltaMode ? 0.1 : 0.01)));
+  }, {passive: false});
+  let drag = null;
+  view.addEventListener("pointerdown", e => {
+    if (k === 1 || e.button !== 0) return;
+    e.preventDefault();
+    drag = {id: e.pointerId, x: e.clientX - x, y: e.clientY - y};
+    view.setPointerCapture(e.pointerId);
+    view.classList.add("dragging");
+  });
+  view.addEventListener("pointermove", e => {
+    if (!drag || e.pointerId !== drag.id) return;
+    x = e.clientX - drag.x;
+    y = e.clientY - drag.y;
+    show();
+  });
+  const drop = e => {
+    if (drag && e.pointerId === drag.id) {
+      drag = null;
+      view.classList.remove("dragging");
+    }
+  };
+  view.addEventListener("pointerup", drop);
+  view.addEventListener("pointercancel", drop);
+  view.addEventListener("dblclick", () => { k = 1; show(); });
+  addEventListener("resize", show);
+  addEventListener("message", e => {
+    if (e.source !== parent || !e.data) return;
+    const how = e.data.leafletZoom;
+    if (how === "fit") { k = 1; show(); }
+    else if (how === "in" || how === "out") zoomAt(view.clientWidth / 2, view.clientHeight / 2, how === "in" ? 1.5 : 1 / 1.5);
+  });
 }</script></body></html>`
 }
 
@@ -101,8 +179,26 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 	}
 	shown := map[bool]float32{true: 1, false: 0}[hovered]
 	box.Children(func() {
-		ui.Row(c).Height(26).AlignItems(ui.Center).Children(func() {
+		ui.Row(c).Height(26).Gap(2).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, name).FontSize(12).TextColor(pal.TextMuted).Opacity(shown).Grow(1)
+			if n.Type == "diagram" && strings.TrimSpace(source) != "" {
+				zoom := func(key, icon, label, how string) {
+					b := ui.ButtonBase(c.Key(key)).Size(24, 24).Center().Radius(6).TextColor(pal.TextMuted).
+						Opacity(shown).Label(label).Tooltip(label)
+					if b.Hovered() {
+						b.Background(pal.Hover).TextColor(pal.Text)
+					}
+					b.Children(func() { ui.Icon(c, theme.Icon(icon)).FontSize(13) })
+					if b.Clicked() {
+						a.zoomEmbed(n.ID, how)
+					}
+				}
+				if a.embedZoomed[n.ID] {
+					zoom("zoom-fit", "rotate-ccw", locales.RenderedZoomFit(), "fit")
+				}
+				zoom("zoom-out", "zoom-out", locales.RenderedZoomOut(), "out")
+				zoom("zoom-in", "zoom-in", locales.RenderedZoomIn(), "in")
+			}
 			if editable && strings.TrimSpace(source) != "" {
 				b := ui.ButtonBase(c.Key("edit")).Height(24).Padding(0, 8).Gap(4).Radius(6).TextColor(pal.TextMuted).
 					Opacity(shown).AlignItems(ui.Center).Label(edit)

@@ -1809,6 +1809,18 @@
   "@renderedDiagramHelp": {
     "description": "Diagram source dialog subtitle."
   },
+  "renderedZoomIn": "Zoom in",
+  "@renderedZoomIn": {
+    "description": "Button over a diagram that zooms into it."
+  },
+  "renderedZoomOut": "Zoom out",
+  "@renderedZoomOut": {
+    "description": "Button over a diagram that zooms out of it."
+  },
+  "renderedZoomFit": "Fit diagram",
+  "@renderedZoomFit": {
+    "description": "Button over a zoomed-in diagram that shows all of it again."
+  },
   "videoNotALink": "Not a YouTube or Vimeo link: {url}",
   "@videoNotALink": {
     "description": "A video block whose link is not a video.",

@@ -634,7 +634,7 @@ const embedFit = `<script>(function () {
 // Go, and the policy keeps it off the network. A srcdoc frame inherits the
 // wrapper's policy, so the wrapper has the frame's. The wrapper's own
 // script only passes the frame's leftover wheel movement and its content's
-// size to the page, for the embed id.
+// size and whether it is zoomed in to the page, for the embed id.
 //
 // Its background is the page's. In the dark theme the frame's root gets
 // data-theme="dark" and a dark color scheme, so an embed that styles
@@ -666,6 +666,7 @@ func embedPage(id, src string, pal *theme.Palette) string {
 		`if (typeof e.data.leafletWheel === "number") window.mygo.call("Embeds.Scroll", e.data.leafletWheel);` +
 		`var z = e.data.leafletSize;` +
 		`if (z && typeof z[0] === "number" && typeof z[1] === "number") window.mygo.call("Embeds.Size", ` + strconv.Quote(id) + `, z[0], z[1]);` +
+		`if (typeof e.data.leafletZoomed === "boolean") window.mygo.call("Embeds.Zoomed", ` + strconv.Quote(id) + `, e.data.leafletZoomed);` +
 		`});</script></body></html>`
 }
 
@@ -680,7 +681,7 @@ func hexOf(c ui.Color) string {
 }
 
 // embedScroll is the service an embed's wrapper calls: to scroll the page,
-// and to say how tall the embed's content is.
+// and to say how tall the embed's content is and whether it is zoomed in.
 type embedScroll struct{ a *App }
 
 // embedSize is how tall an embed's content is at a width of its frame.
@@ -692,6 +693,31 @@ func (s *embedScroll) Size(id string, h, w float64) {
 	s.a.update(func() {
 		s.a.embedSizes[id] = embedSize{float32(min(max(h, 0), 4000)), float32(w)}
 	})
+}
+
+// Zoomed keeps whether diagram id is zoomed in, for its bar to offer to
+// fit it again.
+func (s *embedScroll) Zoomed(id string, zoomed bool) {
+	s.a.update(func() {
+		if zoomed {
+			s.a.embedZoomed[id] = true
+		} else {
+			delete(s.a.embedZoomed, id)
+		}
+	})
+}
+
+// zoomEmbed asks embed key's frame to zoom: "in", "out", or "fit" to show
+// all of it again.
+func (a *App) zoomEmbed(key, how string) {
+	v := a.embeds[key]
+	if v == nil {
+		return
+	}
+	page := v.Page()
+	script := `document.getElementById("f").contentWindow.postMessage({leafletZoom: ` + strconv.Quote(how) + `}, "*")`
+	// Eval waits for the page, so not on the UI thread.
+	go func() { _, _ = page.Eval(script) }()
 }
 
 // Scroll scrolls the open page by dy DIPs, for wheel movement over an
@@ -785,6 +811,7 @@ func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float
 		v.Page().LoadHTML(src, "about:blank")
 		a.embedSrc[key] = src
 		delete(a.embedSizes, key)
+		delete(a.embedZoomed, key)
 		ready = false
 	}
 	wv := ui.WebView(c, v).Height(height).FillWidth().Radius(6)

@@ -30,12 +30,19 @@ func TestExportZip(t *testing.T) {
 		"trip":   doc.FromBlocks([]*doc.Node{img, link, mention}),
 		"hotels": doc.FromBlocks([]*doc.Node{img.Clone()}),
 		"notes":  doc.Empty(),
-		"notes2": doc.Empty(),
+		"notes2": doc.FromBlocks([]*doc.Node{{ID: "s", Type: "image", Data: map[string]any{
+			"url": "file:///elsewhere/files/sun/sun.jpg", "alt": "sun", "file_id": "sun"}}}),
 	}
 	var buf bytes.Buffer
 	err := exportZip(&buf, pages, map[string]string{"f": "Travel"}, func(id string) *doc.Content { return contents[id] },
+		func(id string) string {
+			if id == "sun" {
+				return "/data/files/sun/sun.jpg"
+			}
+			return ""
+		},
 		func(p string) ([]byte, error) {
-			if p == "/data/files/x/dawn.jpg" {
+			if p == "/data/files/x/dawn.jpg" || p == "/data/files/sun/sun.jpg" {
 				return []byte("jpeg"), nil
 			}
 			return nil, os.ErrNotExist
@@ -57,12 +64,12 @@ func TestExportZip(t *testing.T) {
 			t.Errorf("%s modified %v", f.Name, f.Modified)
 		}
 	}
-	for _, name := range []string{"Travel/Trip planning.md", "Travel/Trip planning/Hotels.md", "Notes.md", "Notes (2).md", "files/dawn.jpg"} {
+	for _, name := range []string{"Travel/Trip planning.md", "Travel/Trip planning/Hotels.md", "Notes.md", "Notes (2).md", "files/dawn.jpg", "files/sun.jpg"} {
 		if _, ok := got[name]; !ok {
 			t.Errorf("no %s in %v", name, keys(got))
 		}
 	}
-	if len(got) != 5 {
+	if len(got) != 6 {
 		t.Errorf("files %v", keys(got))
 	}
 	trip := got["Travel/Trip planning.md"]
@@ -72,6 +79,9 @@ func TestExportZip(t *testing.T) {
 	}
 	if !strings.Contains(got["Travel/Trip planning/Hotels.md"], "](../../files/dawn.jpg)") {
 		t.Errorf("hotels:\n%s", got["Travel/Trip planning/Hotels.md"])
+	}
+	if !strings.Contains(got["Notes (2).md"], "](files/sun.jpg)") {
+		t.Errorf("notes 2:\n%s", got["Notes (2).md"])
 	}
 }
 

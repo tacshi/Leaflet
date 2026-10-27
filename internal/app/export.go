@@ -41,7 +41,13 @@ func (a *App) writeExport(file string) error {
 	if err != nil {
 		return err
 	}
-	if err := exportZip(f, pages, folders, a.st.Content, os.ReadFile); err != nil {
+	localPath := func(fileID string) string {
+		if f, ok := a.fileByID(fileID); ok {
+			return f.LocalPath
+		}
+		return ""
+	}
+	if err := exportZip(f, pages, folders, a.st.Content, localPath, os.ReadFile); err != nil {
 		_ = f.Close()
 		return err
 	}
@@ -51,8 +57,10 @@ func (a *App) writeExport(file string) error {
 // exportZip writes the pages as Markdown files in a zip: a folder is a
 // directory, and so is a page with subpages, which go in it beside the
 // page's own file. Pictures kept on this device go in files/, and links to
-// them and to subpages are relative, so the zip reads anywhere.
-func exportZip(w io.Writer, pages []store.Page, folders map[string]string, content func(id string) *doc.Content, readFile func(string) ([]byte, error)) error {
+// them and to subpages are relative, so the zip reads anywhere. localPath
+// is where a file is on this device, or "" when it is not.
+func exportZip(w io.Writer, pages []store.Page, folders map[string]string, content func(id string) *doc.Content,
+	localPath func(fileID string) string, readFile func(string) ([]byte, error)) error {
 	byID := map[string]store.Page{}
 	for _, p := range pages {
 		byID[p.ID] = p
@@ -118,6 +126,11 @@ func exportZip(w io.Writer, pages []store.Page, folders map[string]string, conte
 			local, ok := strings.CutPrefix(src, "file://")
 			if !ok {
 				return
+			}
+			// An uploaded file's url is a path on the device that uploaded
+			// it: this device keeps its copy elsewhere.
+			if p := localPath(n.Str("file_id")); p != "" {
+				local = p
 			}
 			name, done := files[src]
 			if !done {

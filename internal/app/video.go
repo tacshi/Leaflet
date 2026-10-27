@@ -153,13 +153,18 @@ func (a *App) playVideo(id string, v doc.Video) {
 	}
 	page := wv.Page()
 	// The player's links, as to the video on its site, open in the
-	// browser rather than in the block.
+	// browser rather than in the block; what its script opens on its own,
+	// as an ad's pop-up, opens nowhere.
 	page.OnWillNavigate(func(e *mygo.NavigateEvent) {
 		e.PreventDefault()
-		openLink(e.URL)
+		if e.UserInitiated {
+			openLink(e.URL)
+		}
 	})
 	page.SetWindowOpenHandler(func(r mygo.WindowOpenRequest) *mygo.WindowOptions {
-		openLink(r.URL)
+		if r.UserInitiated {
+			openLink(r.URL)
+		}
 		return nil
 	})
 	page.LoadHTML(videoPage(v), videoOrigin)

@@ -87,11 +87,14 @@ func Today() string { return time.Now().Format("2006-01-02") }
 // supabase/functions/_shared/prompt.ts.
 func SystemPrompt(agentName, pageTitle, surface string, canReadOtherPages, supportsTools, readOnly bool) string {
 	focus := "The user is chatting with you beside the page. The whole page is your focus."
+	done := "When you are done, reply in one to three short sentences: what you changed, or your answer. Do not repeat the content you wrote."
 	switch surface {
 	case "inline":
 		focus = "The user mentioned you inside a block. That block is your focus: write or change it in place."
 	case "selection":
-		focus = "The user selected some text and asked about it. The selected blocks are your focus."
+		// A question gets an answer, which the user can insert themselves.
+		focus = "The user selected some text and asked about it. The selected blocks are your focus. If they ask a question about it (explain it, what it is, why), answer in your reply and leave the page as it is: they can insert your answer into the page themselves. Edit the page only when they ask for a change, such as making it shorter, fixing its grammar, or turning it into a list or a chart."
+		done = "When you are done, reply with your answer, as long as it needs to be and no longer, in paragraphs, - lists and ## headings with inline markdown; or, if you edited the page, say what you changed in one or two sentences without repeating it."
 	case "comment":
 		// As prompt.ts says it: a question in a thread gets an answer, not
 		// an edit of the page.
@@ -127,7 +130,7 @@ func SystemPrompt(agentName, pageTitle, surface string, canReadOtherPages, suppo
 	default:
 		b.WriteString("This model cannot call tools, so you cannot edit the page. Answer in the reply, and say what you would change.\n")
 	}
-	b.WriteString("\nWhen you are done, reply in one to three short sentences: what you changed, or your answer. Do not repeat the content you wrote.")
+	b.WriteString("\n" + done)
 	return b.String()
 }
 

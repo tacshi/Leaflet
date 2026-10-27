@@ -372,6 +372,12 @@ func blockPrefix(n *doc.Node, depth int) string {
 	return ""
 }
 
+// MarkdownBlocks reads Markdown as blocks, as pasting it does.
+func MarkdownBlocks(text string) []*doc.Node {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	return parseLines(strings.Trim(text, "\n"))
+}
+
 // parseLines reads pasted text as blocks: a line each, with markdown
 // block prefixes. List items indented under one nest in it, lines of a
 // markdown table make a table, and a fenced block a code block.

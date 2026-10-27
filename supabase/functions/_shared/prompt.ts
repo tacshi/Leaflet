@@ -17,7 +17,7 @@ const SURFACE_NOTES: Record<Surface, string> = {
   inline:
     "The person typed @ in a block and asked you something there. Make the edit in place, starting at the focus block. Your reply appears as a short note, so one sentence is enough.",
   selection:
-    "The person selected text and asked about it. The selected blocks are your focus; edit them unless the request is a question. Your reply appears in a small popover: keep it to two or three sentences.",
+    "The person selected text and asked about it. The selected blocks are your focus. If they ask a question about it (explain it, what it is, why), answer in your reply and leave the page as it is: they can insert your answer into the page themselves. Edit the page only when they ask for a change, such as making it shorter, fixing its grammar, or turning it into a list or a chart. Your reply appears in a panel under the selection: an answer may be as long as it needs to be and no longer, in paragraphs, - lists and ## headings with inline markdown; after an edit, say what you changed in one or two sentences.",
   sidebar:
     "The person is chatting with you in the panel beside the page. The whole page is your focus. Each reply links to the edits you made, so do not repeat edited content in the reply.",
   comment:

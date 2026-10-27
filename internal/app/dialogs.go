@@ -1020,13 +1020,19 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 		})
 		if ip.reply != "" || ip.working {
 			if ip.working {
+				label := locales.DialogInlineWorking()
+				if run := a.hub.Session(ps.id).Run(ip.runID); run != nil {
+					label = runProgress(run, label)
+				}
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Spinner(c).Size(14, 14)
-					ui.Text(c, locales.DialogInlineWorking()).FontSize(13).TextColor(pal.TextMuted)
+					ui.Text(c, label).FontSize(13).TextColor(pal.TextMuted)
 				})
 			} else {
 				run := a.hub.Session(ps.id).Run(ip.runID)
-				ui.Text(c, ip.reply).FontSize(13.5).TextColor(pal.Text).Selectable()
+				ui.Scroll(c).MaxHeight(320).Children(func() {
+					markdown.View(c, ip.reply, &a.md).FontSize(13.5)
+				})
 				// A reply in words can go in the page; edits are there already.
 				if run != nil && run.Error == "" && run.Reply != "" && len(run.Ops) == 0 {
 					ui.Row(c).Gap(8).Children(func() {
@@ -1066,36 +1072,13 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 	})
 }
 
-// insertReply puts an agent's reply in the page after a block, as
-// paragraphs, list items and headings written in Markdown.
+// insertReply puts an agent's reply in the page after a block, its
+// Markdown read as blocks, as pasting it does.
 func (a *App) insertReply(after, reply string) {
 	if a.page == nil {
 		return
 	}
-	var nodes []*doc.Node
-	for _, line := range strings.Split(reply, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		typ, level := "paragraph", 0
-		switch {
-		case strings.HasPrefix(line, "### "):
-			typ, level, line = "heading", 3, line[4:]
-		case strings.HasPrefix(line, "## "):
-			typ, level, line = "heading", 2, line[3:]
-		case strings.HasPrefix(line, "# "):
-			typ, level, line = "heading", 1, line[2:]
-		case strings.HasPrefix(line, "- "), strings.HasPrefix(line, "* "):
-			typ, line = "bulleted_list", line[2:]
-		}
-		n := &doc.Node{ID: doc.NewBlockID(), Type: typ, Data: map[string]any{}}
-		if level > 0 {
-			n.Data["level"] = level
-		}
-		n.SetDelta(doc.FromMarkdown(line))
-		nodes = append(nodes, n)
-	}
+	nodes := editor.MarkdownBlocks(reply)
 	if len(nodes) == 0 {
 		return
 	}

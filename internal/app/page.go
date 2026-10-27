@@ -410,18 +410,29 @@ func (a *App) runningBar(c *ui.Context, s *agents.Session) {
 			run = r
 		}
 	}
-	if run == nil {
+	// A run from Ask agent shows how it goes in its own prompt, and one
+	// from the chat in the chat, while it is open.
+	ip := a.dialogs.inline
+	switch {
+	case run == nil, ip != nil && ip.runID == run.ID:
+		return
+	case run.Surface == "sidebar" && a.panelOpen && a.panelTab == 0:
 		return
 	}
 	ui.Row(c.Key("running-bar")).Attach(ui.AnchorBottom, ui.AnchorBottom).Bottom(18).Padding(8, 14).Gap(10).Radius(10).
 		Background(pal.Surface).Border(1, pal.AccentSoftBorder).Shadow(0, 10, 30, 0, pal.Shadow).AlignItems(ui.Center).Children(func() {
 		ui.Spinner(c).Size(14, 14)
-		label := locales.PageAgentWorking(run.AgentName)
-		if n := len(run.Edits); n > 0 {
-			label = run.Edits[n-1].Summary + "…"
-		}
-		ui.Text(c, label).FontSize(13).TextColor(pal.Text)
+		ui.Text(c, runProgress(run, locales.PageAgentWorking(run.AgentName))).FontSize(13).TextColor(pal.Text)
 	})
+}
+
+// runProgress is what a running agent is doing: its latest edit, or
+// working while it has made none.
+func runProgress(run *agents.Run, working string) string {
+	if n := len(run.Edits); n > 0 {
+		return run.Edits[n-1].Summary + "…"
+	}
+	return working
 }
 
 func uniq(ids []string) []string {

@@ -3265,9 +3265,9 @@
   "@settingsWorkOffline": {
     "description": "Settings › Sync and storage: a switch."
   },
-  "settingsWorkOfflineDesc": "Keep changes on this device until you turn this off",
+  "settingsWorkOfflineDesc": "Pause syncing and cloud services, even with a connection",
   "@settingsWorkOfflineDesc": {
-    "description": "Settings › Sync and storage: a switch."
+    "description": "Settings › Sync and storage: under Work offline. It pauses sync, cloud agents and cloud speech to text."
   },
   "settingsAllPagesOffline": "Keep all pages on this device",
   "@settingsAllPagesOffline": {

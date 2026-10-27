@@ -635,7 +635,7 @@
   "settingsChangesWaiting": "{count, plural, other {# 处更改等待同步}}",
   "settingsSyncNow": "立即同步",
   "settingsWorkOffline": "离线工作",
-  "settingsWorkOfflineDesc": "在关闭此选项前，更改只保留在此设备上",
+  "settingsWorkOfflineDesc": "即使已联网，也暂停同步和云端服务",
   "settingsAllPagesOffline": "在此设备上保留所有页面",
   "settingsAllPagesOfflineDesc": "否则只保留你标记的和打开过的页面",
   "settingsKeepAudio": "在此设备上保留录音的音频",

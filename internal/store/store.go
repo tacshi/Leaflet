@@ -4,6 +4,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -116,11 +117,93 @@ func OpenPath(path, dir string) (*Store, error) {
 	// One connection: writes from the UI and sync take turns, and an
 	// in-memory database stays one database.
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrate(db); err != nil {
 		_ = db.Close()
-		return nil, fmt.Errorf("create schema: %w", err)
+		return nil, err
 	}
 	return &Store{db: db, Dir: dir}, nil
+}
+
+// migrations bring a database an earlier version made up to this one's:
+// migrations[i] takes it from schema version i to i+1, kept in PRAGMA
+// user_version. A change to a table that exists adds one here as well as
+// changing schema; a new table needs only schema.
+var migrations = []func(context.Context, *sql.Conn) error{
+	// 1: columns added before the first release, which kept no version:
+	// databases from the releases have them, earlier ones lack them.
+	func(ctx context.Context, c *sql.Conn) error {
+		return addColumns(ctx, c, [][3]string{
+			{"pages", "is_template", "INTEGER NOT NULL DEFAULT 0"},
+			{"page_contents", "remote_revision", "INTEGER NOT NULL DEFAULT 0"},
+			{"outbox", "revision", "INTEGER NOT NULL DEFAULT 0"},
+		})
+	},
+}
+
+// migrate creates the tables, or brings those an earlier version made up
+// to date, in one transaction that another process opening the database
+// waits for.
+func migrate(db *sql.DB) error {
+	ctx := context.Background()
+	c, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = c.Close() }()
+	if _, err := c.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return fmt.Errorf("migrate: %w", err)
+	}
+	if err := upgrade(ctx, c); err != nil {
+		_, _ = c.ExecContext(ctx, `ROLLBACK`)
+		return err
+	}
+	_, err = c.ExecContext(ctx, `COMMIT`)
+	return err
+}
+
+func upgrade(ctx context.Context, c *sql.Conn) error {
+	var version, tables int
+	if err := c.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	if version > len(migrations) {
+		return fmt.Errorf("the database is from a newer Leaflet (schema %d; this one knows %d)", version, len(migrations))
+	}
+	// A new database gets the schema as it is; only one an earlier
+	// version made runs the migrations.
+	if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pages'`).Scan(&tables); err != nil {
+		return err
+	}
+	if tables > 0 {
+		for i := version; i < len(migrations); i++ {
+			if err := migrations[i](ctx, c); err != nil {
+				return fmt.Errorf("migrate to schema %d: %w", i+1, err)
+			}
+		}
+	}
+	if _, err := c.ExecContext(ctx, schema); err != nil {
+		return fmt.Errorf("create schema: %w", err)
+	}
+	_, err := c.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, len(migrations)))
+	return err
+}
+
+// addColumns adds the columns, as {table, column, definition}, that their
+// tables lack.
+func addColumns(ctx context.Context, c *sql.Conn, cols [][3]string) error {
+	for _, col := range cols {
+		var n int
+		if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, col[0], col[1]).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			continue
+		}
+		if _, err := c.ExecContext(ctx, "ALTER TABLE "+col[0]+" ADD COLUMN "+col[1]+" "+col[2]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close closes the database.

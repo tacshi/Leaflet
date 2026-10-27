@@ -1030,7 +1030,9 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 				})
 			} else {
 				run := a.hub.Session(ps.id).Run(ip.runID)
-				ui.Text(c, ip.reply).FontSize(13.5).TextColor(pal.Text).Selectable()
+				ui.Scroll(c).MaxHeight(320).Children(func() {
+					markdown.View(c, ip.reply, &a.md).FontSize(13.5)
+				})
 				// A reply in words can go in the page; edits are there already.
 				if run != nil && run.Error == "" && run.Reply != "" && len(run.Ops) == 0 {
 					ui.Row(c).Gap(8).Children(func() {

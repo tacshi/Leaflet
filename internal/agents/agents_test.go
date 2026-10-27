@@ -203,3 +203,13 @@ func TestCommentPromptAnswersRatherThanEdits(t *testing.T) {
 		t.Error("a comment's prompt lets the agent edit the page unasked")
 	}
 }
+
+func TestSelectionPromptAnswersQuestions(t *testing.T) {
+	p := SystemPrompt("ChatGPT", "PRD", "selection", false, true, false)
+	if !strings.Contains(p, "answer in your reply and leave the page as it is") {
+		t.Error("a question about a selection gets an edit, not an answer")
+	}
+	if strings.Contains(p, "one to three short sentences") {
+		t.Error("an answer about a selection is cut to three sentences")
+	}
+}

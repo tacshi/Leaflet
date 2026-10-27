@@ -17,6 +17,10 @@
   <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-MyGo-F2545B" alt="Built with MyGo"></a>
 </p>
 
+<p align="center">
+  <b>English</b> | <a href="README.zh.md">简体中文</a> | <a href="README.ja.md">日本語</a>
+</p>
+
 Leaflet keeps your notes, specs and meeting records as pages of blocks, and
 lets AI agents work in them beside you. Ask one inline, from a selection,
 in a chat or in a comment thread: it reads the page and edits it with
@@ -86,6 +90,9 @@ itself.
   conflict notice and a way to bring back the other version.
 - To-do reminders, a menu bar icon, light and dark themes, and updates
   from GitHub Releases.
+- In English, Simplified Chinese and Japanese: Leaflet follows the
+  system's language, or the one chosen in Settings › Appearance, and its
+  welcome guide is written in the language of the first run.
 
 ## Requirements
 
@@ -131,7 +138,7 @@ MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://… -X leaflet/inter
 ```
 
 To try agents without an API key, run a local model server (for example
-`ollama serve` with `qwen3:8b`) and add it in Settings › Models.
+`ollama serve` with `qwen3:8b`) and add it in Settings › Agent providers.
 
 ### Data
 
@@ -196,6 +203,14 @@ cd supabase/functions && deno test _shared/  # the Edge Functions' shared code
 ```
 
 The editor's tests run its view headless with `ui.NewTester`.
+
+The app's texts are MyGo catalogs in [`locales/`](locales), one file per
+language (`en.json`, `zh-Hans.json`, `ja.json`), from which `go tool mygo
+dev` and `go tool mygo build` write `locales/catalog_gen.go`; commit it
+with the catalogs. `go tool mygo i18n check` checks them, and
+`go tool mygo dev -lang ja` runs the app in a language without changing
+the one it keeps. To add a language, add its catalog, named after its
+BCP 47 tag.
 [`docs/protocol.md`](docs/protocol.md) is the contract between the app and
 the backend: the document format, the agent tools, and the save and sync
 rules.
@@ -215,6 +230,7 @@ rules.
 | `internal/mcp` | `leaflet mcp`: the page tools for agents outside the app |
 | `internal/recording` | Capture, WAV, Soniox streaming and endpoint transcription |
 | `internal/theme` | Colors, fonts and icons |
+| `locales` | The app's texts in each language, and the Go code generated from them |
 | `scripts` | Debug and release builds, and publishing to GitHub Releases |
 | `supabase` | Migrations (tables, row-level security, RPCs, Vault) and Edge Functions |
 | `docs` | The protocol, user stories and the icon's sources |

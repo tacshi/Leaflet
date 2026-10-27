@@ -1,15 +1,16 @@
 package app
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
+	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // duplicatePage copies a page and its subpages next to it, links the copy
@@ -23,7 +24,7 @@ func (a *App) duplicatePage(p store.Page) {
 	}
 	cp, err := a.st.CopyPage(p.ID, o)
 	if err != nil {
-		a.toast("Could not duplicate: " + err.Error())
+		a.toast(locales.TemplateDuplicateFailed(err.Error()))
 		return
 	}
 	a.pages, _ = a.st.Pages()
@@ -39,7 +40,7 @@ func copyTitle(title string) string {
 	if strings.TrimSpace(title) == "" {
 		return ""
 	}
-	return title + " copy"
+	return locales.TemplateCopyTitle(title)
 }
 
 // saveAsTemplate keeps a copy of a page, with its subpages, as a template
@@ -48,11 +49,11 @@ func (a *App) saveAsTemplate(p store.Page) {
 	a.flush()
 	t, err := a.st.CopyPage(p.ID, store.CopyOptions{Title: p.Title, Template: true})
 	if err != nil {
-		a.toast("Could not save the template: " + err.Error())
+		a.toast(locales.TemplateSaveFailed(err.Error()))
 		return
 	}
 	a.templates, _ = a.st.Templates()
-	a.toastAction("Saved "+t.DisplayTitle()+" as a template", "Edit", func() { a.openPage(t.ID) })
+	a.toastAction(locales.TemplateSaved(t.DisplayTitle()), locales.CommonEdit(), func() { a.openPage(t.ID) })
 }
 
 // templateRoots are the templates themselves, without their subpages, by
@@ -91,7 +92,7 @@ func (a *App) applyTemplate(t store.Page) {
 	}
 	c, err := a.st.CopyInto(t.ID, ps.id)
 	if err != nil {
-		a.toast("Could not use the template: " + err.Error())
+		a.toast(locales.TemplateUseFailed(err.Error()))
 		return
 	}
 	ps.editor.Edit(func(cur *doc.Content) { cur.Children = c.Children })
@@ -108,7 +109,7 @@ func (a *App) applyTemplate(t store.Page) {
 }
 
 // templatePill marks a template, where it shows among pages.
-func templatePill(c *ui.Context) { accentBadge(c, "Template") }
+func templatePill(c *ui.Context) { accentBadge(c, locales.TemplatePill()) }
 
 // templateActions list the templates under a blank page's other ways to
 // start, each with a menu to edit or delete it.
@@ -118,13 +119,13 @@ func (a *App) templateActions(c *ui.Context, row func(key, icon, label, hint str
 	if len(roots) == 0 {
 		return
 	}
-	ui.Text(c, "Templates").FontSize(12).FontWeight(600).TextColor(pal.TextMuted).Margin(10, 0, 4, 2)
+	ui.Text(c, locales.TemplateSectionTitle()).FontSize(12).FontWeight(600).TextColor(pal.TextMuted).Margin(10, 0, 4, 2)
 	for _, t := range roots {
 		row("template:"+t.ID, "layout-template", t.DisplayTitle(), a.templateHint(t), func() { a.applyTemplate(t) }, func(m *ui.Menu) {
-			if m.Item("Edit template").Chosen() {
+			if m.Item(locales.TemplateEdit()).Chosen() {
 				a.openPage(t.ID)
 			}
-			if m.Item("Delete template").Chosen() {
+			if m.Item(locales.TemplateDelete()).Chosen() {
 				a.deletePage(t.ID)
 			}
 		})
@@ -133,15 +134,15 @@ func (a *App) templateActions(c *ui.Context, row func(key, icon, label, hint str
 
 // templateHint is the first line of a template's text, to tell templates
 // apart, or how many subpages it has when it has no text; kept until the
-// template next changes.
+// template next changes or the app's language does.
 func (a *App) templateHint(t store.Page) string {
-	key := t.ID + "@" + t.UpdatedAt.String()
+	key := t.ID + "@" + t.UpdatedAt.String() + "@" + i18n.Locale()
 	if h, ok := a.templateHints[key]; ok {
 		return h
 	}
-	hint := "Empty"
+	hint := locales.TemplateHintEmpty()
 	if n := len(a.templateKids(t.ID)); n > 0 {
-		hint = fmt.Sprintf("%d %s", n, plural(n, "subpage", "subpages"))
+		hint = locales.TemplateHintSubpages(n)
 	}
 	if row, err := a.st.ContentRow(t.ID); err == nil {
 		for _, l := range strings.Split(row.PlainText, "\n") {

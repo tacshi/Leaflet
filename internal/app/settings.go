@@ -10,31 +10,36 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
-var sections = []struct{ id, icon, label string }{
-	{"account", "user", "Account"},
-	{"appearance", "palette", "Appearance"},
-	{"providers", "sparkles", "Agent providers"},
-	{"external", "bot", "External agents"},
-	{"speech", "mic", "Speech to text"},
-	{"offline", "cloud-download", "Offline and storage"},
+// settingsSections are Settings' sections, said in the language shown.
+func settingsSections() []struct{ id, icon, label string } {
+	return []struct{ id, icon, label string }{
+		{"account", "user", locales.SettingsSectionAccount()},
+		{"appearance", "palette", locales.SettingsSectionAppearance()},
+		{"providers", "sparkles", locales.SettingsSectionProviders()},
+		{"external", "bot", locales.SettingsSectionExternal()},
+		{"speech", "mic", locales.SettingsSectionSpeech()},
+		{"offline", "cloud-download", locales.SettingsSectionOffline()},
+	}
 }
 
 // settingsNav is MyGo's sidebar of the sections, the route's chosen.
 func (a *App) settingsNav(c *ui.Context) ui.Element {
 	pal := theme.Of(c)
 	return ui.Sidebar(c.Key("settings-nav"), &a.settingsSection, func() {
-		for _, s := range sections {
+		for _, s := range settingsSections() {
 			ui.SidebarItem(c, s.id, theme.Icon(s.icon), s.label)
 		}
-	}).Width(settingsNavW).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Label("Settings")
+	}).Width(settingsNavW).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Label(locales.SettingsTitle())
 }
 
 // The settings dialog's room: its section list, its padding beside a
@@ -59,9 +64,9 @@ func (a *App) settingsDialog(c *ui.Context) {
 			ui.Column(c).Grow(1).Shrink(1).Children(func() {
 				ui.Row(c).Padding(14, 14, 10, settingsPadX).Gap(12).AlignItems(ui.Center).
 					BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
-					ui.Text(c, "Settings").FontSize(15).FontWeight(650).TextColor(pal.Text).Grow(1)
+					ui.Text(c, locales.SettingsTitle()).FontSize(15).FontWeight(650).TextColor(pal.Text).Grow(1)
 					tools(c, func() {
-						if iconButton(c, "close", "x", "Close").Clicked() {
+						if iconButton(c, "close", "x", locales.CommonClose()).Clicked() {
 							a.settingsOpen = false
 						}
 					})
@@ -133,19 +138,34 @@ var account accountState
 // Appearance ------------------------------------------------------------
 
 func (a *App) appearanceSettings(c *ui.Context) {
-	heading(c, "Appearance", "How Leaflet and your pages look.")
+	heading(c, locales.SettingsSectionAppearance(), locales.SettingsAppearanceDesc())
 	themeIdx := map[string]int{"system": 0, "light": 1, "sepia": 2, "dark": 3}[a.settings.Theme]
 	card(c, "appearance", func() {
-		settingRow(c, "theme", "Theme", "", true, func() {
-			ui.Segmented(c.Key("theme"), &themeIdx, "System", "Light", "Sepia", "Dark")
+		settingRow(c, "theme", locales.SettingsTheme(), "", true, func() {
+			ui.Segmented(c.Key("theme"), &themeIdx, locales.SettingsSystem(), locales.SettingsThemeLight(), locales.SettingsThemeSepia(), locales.SettingsThemeDark())
 			if want := []string{"system", "light", "sepia", "dark"}[themeIdx]; want != a.settings.Theme {
 				a.settings.Theme = want
 				a.saveSettings()
 				a.applyTheme()
 			}
 		})
-		settingRow(c, "accent", "Accent color", "", false, func() { a.accentDots(c) })
-		settingRow(c, "size", "Page text size", "", false, func() {
+		settingRow(c, "language", locales.SettingsLanguage(), "", false, func() {
+			tags := append([]string{""}, mygo.App.Languages()...)
+			lang := a.settings.Language
+			selectBox(c, "language", &lang, tags, func(tag string) string {
+				if tag == "" {
+					return locales.SettingsLanguageSystem()
+				}
+				return i18n.Autonym(tag)
+			}, 180)
+			if lang != a.settings.Language {
+				a.settings.Language = lang
+				a.saveSettings()
+				mygo.App.SetLocale(lang)
+			}
+		})
+		settingRow(c, "accent", locales.SettingsAccent(), "", false, func() { a.accentDots(c) })
+		settingRow(c, "size", locales.SettingsTextSize(), "", false, func() {
 			sizes := []float64{15, 17, 19, 21}
 			chosen := 1
 			for k, v := range sizes {
@@ -153,7 +173,7 @@ func (a *App) appearanceSettings(c *ui.Context) {
 					chosen = k
 				}
 			}
-			if ui.Segmented(c.Key("size"), &chosen, "Small", "Default", "Large", "Larger"); sizes[chosen] != a.settings.TextSize {
+			if ui.Segmented(c.Key("size"), &chosen, locales.SettingsTextSizeSmall(), locales.SettingsTextSizeDefault(), locales.SettingsTextSizeLarge(), locales.SettingsTextSizeLarger()); sizes[chosen] != a.settings.TextSize {
 				a.settings.TextSize = sizes[chosen]
 				a.saveSettings()
 			}
@@ -182,14 +202,14 @@ func (a *App) accentDots(c *ui.Context) {
 			}
 		}
 		if system, ok := theme.Accent("system", isDark, c.Preferences().Accent); ok {
-			dot("system", "System", system)
+			dot("system", locales.SettingsSystem(), system)
 		}
 		for _, acc := range theme.Accents {
 			color := acc.Light
 			if isDark {
 				color = acc.Dark
 			}
-			dot(acc.Name, acc.Name, color)
+			dot(acc.Name, locales.SettingsAccentName(acc.Name), color)
 		}
 	})
 }
@@ -200,10 +220,10 @@ func (a *App) accountSettings(c *ui.Context) {
 	if !s.nameLoaded {
 		s.name, s.nameLoaded = a.session.DisplayName, true
 	}
-	heading(c, "Account", "Your name and the devices you use.")
+	heading(c, locales.SettingsSectionAccount(), locales.SettingsAccountDesc())
 	card(c, "profile", func() {
-		settingRow(c, "name", "Name", "Shown on your comments and edits", true, func() {
-			in := field(c, "name", &s.name, "Your name").Width(220)
+		settingRow(c, "name", locales.SettingsName(), locales.SettingsNameDesc(), true, func() {
+			in := field(c, "name", &s.name, locales.SettingsYourName()).Width(220)
 			if in.Submitted() || (in.Changed() && false) {
 				a.saveName(s.name)
 			}
@@ -215,50 +235,50 @@ func (a *App) accountSettings(c *ui.Context) {
 		if !a.backend.Configured() {
 			return
 		}
-		title, desc := "Sync", "Sign in to sync pages between devices and share them"
+		title, desc := locales.SettingsSync(), locales.SettingsSyncDesc()
 		if a.session.SignedIn {
-			title, desc = "Signed in", a.session.Email
+			title, desc = locales.SettingsSignedIn(), a.session.Email
 		}
 		settingRow(c, "email", title, desc, false, func() {
 			switch {
 			case a.session.SignedIn:
-				if button(c, "signout", "log-out", "Sign out").Disabled(s.signingOut).Clicked() {
+				if button(c, "signout", "log-out", locales.CommonSignOut()).Disabled(s.signingOut).Clicked() {
 					a.signOut()
 				}
 			case a.backend.Configured():
-				if primary(c, "signin", "", "Sign in").Clicked() {
+				if primary(c, "signin", "", locales.CommonSignIn()).Clicked() {
 					a.navigate(Route{Kind: "signin"})
 				}
 			}
 		})
 	})
 	if a.session.SignedIn {
-		label(c, "Devices")
+		label(c, locales.SettingsDevices())
 		if !s.loaded {
 			s.loaded = true
 			go a.loadDevices()
 		}
 		card(c, "devices", func() {
 			if len(s.devices) == 0 {
-				settingRow(c, "none", "Loading devices…", "", true, nil)
+				settingRow(c, "none", locales.SettingsDevicesLoading(), "", true, nil)
 			}
 			me := a.st.DeviceID()
 			for i, d := range s.devices {
 				id := store.S(d, "id")
-				desc := "Last active " + humanTime(store.Time(d["last_active_at"]))
+				desc := locales.SettingsDeviceLastActive(humanTime(store.Time(d["last_active_at"])))
 				if id == me {
-					desc = "This device"
+					desc = locales.SettingsDeviceThis()
 				}
 				if d["revoked_at"] != nil {
-					desc = "Signed out"
+					desc = locales.SettingsDeviceSignedOut()
 				}
 				settingRow(c, "dev:"+id, store.S(d, "name"), desc, i == 0, func() {
-					if id != me && d["revoked_at"] == nil && button(c, "revoke", "", "Sign out").Clicked() {
+					if id != me && d["revoked_at"] == nil && button(c, "revoke", "", locales.CommonSignOut()).Clicked() {
 						go func() {
 							ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 							defer cancel()
 							if _, err := a.backend.Upsert(ctx, "devices", map[string]any{"id": id, "user_id": a.backend.UserID(), "revoked_at": time.Now().UTC().Format(time.RFC3339)}, ""); err != nil {
-								a.update(func() { a.toast("Could not sign out the device: " + err.Error()) })
+								a.update(func() { a.toast(locales.SettingsDeviceSignOutFailed(err.Error())) })
 								return
 							}
 							a.loadDevices()
@@ -268,16 +288,16 @@ func (a *App) accountSettings(c *ui.Context) {
 			}
 		})
 	}
-	label(c, "Your data")
+	label(c, locales.SettingsYourData())
 	card(c, "data", func() {
-		settingRow(c, "export", "Export all pages", "A zip of Markdown files, one per page", true, func() {
-			if button(c, "export", "download", "Export…").Clicked() {
+		settingRow(c, "export", locales.SettingsExportAll(), locales.SettingsExportAllDesc(), true, func() {
+			if button(c, "export", "download", locales.SettingsExportButton()).Clicked() {
 				a.exportAll()
 			}
 		})
 		if a.session.SignedIn {
-			settingRow(c, "delete", "Delete account", "Deletes your space, pages, recordings and keys on the server", false, func() {
-				if danger(c, "delete", "Delete…").Clicked() {
+			settingRow(c, "delete", locales.SettingsDeleteAccount(), locales.SettingsDeleteAccountDesc(), false, func() {
+				if danger(c, "delete", locales.SettingsDeleteButton()).Clicked() {
 					s.deleteOpen, s.confirm = true, ""
 				}
 			})
@@ -286,13 +306,12 @@ func (a *App) accountSettings(c *ui.Context) {
 	if s.unsynced > 0 {
 		open := true
 		dialog(c, &open, 420, func() {
-			dialogHeader(c, "Sign out anyway?", fmt.Sprintf("%d %s not uploaded yet. Signing out removes %s from this device.",
-				s.unsynced, plural(s.unsynced, "change is", "changes are"), plural(s.unsynced, "it", "them")), &open)
+			dialogHeader(c, locales.SettingsSignOutAnyway(), locales.SettingsSignOutUnsynced(s.unsynced), &open)
 			ui.Row(c).Padding(0, 20, 20).Justify(ui.End).Gap(8).Children(func() {
-				if button(c, "cancel", "", "Cancel").Clicked() {
+				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					open = false
 				}
-				if danger(c, "go", "Sign out").Clicked() {
+				if danger(c, "go", locales.CommonSignOut()).Clicked() {
 					open = false
 					a.leave(a.st.ForgetAccount)
 				}
@@ -304,15 +323,15 @@ func (a *App) accountSettings(c *ui.Context) {
 	}
 	if s.deleteOpen {
 		dialog(c, &s.deleteOpen, 420, func() {
-			dialogHeader(c, "Delete your account?", "This cannot be undone.", &s.deleteOpen)
+			dialogHeader(c, locales.SettingsDeleteAccountTitle(), locales.SettingsCannotUndo(), &s.deleteOpen)
 			ui.Column(c).Padding(0, 20, 20).Gap(12).Children(func() {
-				ui.Text(c, "Type DELETE to confirm.").FontSize(13).TextColor(pal.TextMuted)
+				ui.Text(c, locales.SettingsTypeDelete()).FontSize(13).TextColor(pal.TextMuted)
 				field(c, "confirm", &s.confirm, "DELETE").AutoFocus()
 				ui.Row(c).Justify(ui.End).Gap(8).Children(func() {
-					if button(c, "cancel", "", "Cancel").Clicked() {
+					if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 						s.deleteOpen = false
 					}
-					if danger(c, "go", "Delete account").Clicked() && s.confirm == "DELETE" && !s.busy {
+					if danger(c, "go", locales.SettingsDeleteAccount()).Clicked() && s.confirm == "DELETE" && !s.busy {
 						s.busy = true
 						go func() {
 							ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -321,12 +340,12 @@ func (a *App) accountSettings(c *ui.Context) {
 							a.update(func() {
 								s.busy = false
 								if err != nil {
-									a.toast("Could not delete the account: " + err.Error())
+									a.toast(locales.SettingsDeleteAccountFailed(err.Error()))
 									return
 								}
 								s.deleteOpen = false
 								a.leave(a.st.Wipe)
-								a.toast("Your account was deleted")
+								a.toast(locales.SettingsAccountDeleted())
 							})
 						}()
 					}
@@ -343,7 +362,7 @@ func (a *App) saveName(name string) {
 	}
 	if err := a.st.SetDisplayName(name); err != nil {
 		account.name = a.session.DisplayName
-		a.toast("Could not save: " + err.Error())
+		a.toast(locales.SettingsSaveFailed(err.Error()))
 		return
 	}
 	a.session = a.st.Session()
@@ -357,7 +376,7 @@ func (a *App) saveName(name string) {
 				err = uerr
 			}
 			if err != nil {
-				a.update(func() { a.toast("Could not save your name on the server: " + err.Error()) })
+				a.update(func() { a.toast(locales.SettingsNameServerFailed(err.Error())) })
 			}
 		}()
 	}
@@ -376,16 +395,16 @@ func (a *App) loadDevices() {
 func (a *App) exportAll() {
 	a.flush()
 	go func() {
-		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: "Export all pages", DefaultPath: "Leaflet pages.zip"})
+		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.SettingsExportAll(), DefaultPath: locales.SettingsExportFileName()})
 		if path == "" {
 			return
 		}
 		err := a.writeExport(path)
 		a.update(func() {
 			if err != nil {
-				a.toast("Could not export: " + err.Error())
+				a.toast(locales.SettingsExportFailed(err.Error()))
 			} else {
-				a.toast("Exported " + filepath.Base(path))
+				a.toast(locales.SettingsExported(filepath.Base(path)))
 			}
 		})
 	}()
@@ -422,7 +441,7 @@ func (a *App) leave(clear func() error) {
 		})
 		a.update(func() {
 			if err != nil {
-				a.toast("Could not remove your pages from this device: " + err.Error())
+				a.toast(locales.SettingsRemovePagesFailed(err.Error()))
 			}
 			if _, err := a.st.LoadSession(nil); err != nil {
 				a.toast(err.Error())
@@ -464,29 +483,29 @@ var form providerForm
 
 func (a *App) modelsSettings(c *ui.Context) {
 	pal := theme.Of(c)
-	heading(c, "Agent providers", "The services agents run on. Cloud keys stay on the server; a model server on your machine works offline.")
+	heading(c, locales.SettingsSectionProviders(), locales.SettingsProvidersDesc())
 	card(c, "providers", func() {
 		if len(a.providers) == 0 {
-			settingRow(c, "none", "No providers yet", "Sign in with ChatGPT, add a cloud service such as Claude with an API key, or a model server such as Ollama.", true, nil)
+			settingRow(c, "none", locales.SettingsNoProviders(), locales.SettingsNoProvidersDesc(), true, nil)
 		}
 		for i, p := range a.providers {
-			where := "Cloud · key on the server"
+			where := locales.SettingsProviderCloud()
 			switch {
 			case p.AuthKind == "account":
-				where = "ChatGPT plan"
+				where = locales.SettingsProviderPlan()
 				if g, err := a.hub.ChatGPT(p.ID); err == nil && g.Account().Email != "" {
-					where += " · " + g.Account().Email
+					where = locales.SettingsProviderPlanEmail(g.Account().Email)
 				}
 			case p.IsLocal:
-				where = "On this device · " + p.BaseURL
+				where = locales.SettingsProviderLocal(p.BaseURL)
 			}
 			// Agents always use tools on a ChatGPT plan (hub.go), whatever
 			// an older test left in supports_tools.
 			if p.SupportsTools != nil && !*p.SupportsTools && p.AuthKind != "account" {
-				where += " · chat only"
+				where = locales.SettingsProviderChatOnly(where)
 			}
 			pp := p
-			row := ui.ButtonBase(c.Key("p:" + p.ID)).Justify(ui.Start).Label("Edit " + p.Name)
+			row := ui.ButtonBase(c.Key("p:" + p.ID)).Justify(ui.Start).Label(locales.SettingsProviderEdit(p.Name))
 			if i > 0 {
 				row.BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider)
 			}
@@ -504,7 +523,7 @@ func (a *App) modelsSettings(c *ui.Context) {
 		}
 	})
 	ui.Row(c).Gap(8).Children(func() {
-		add := primary(c, "add", "plus", "Add a provider")
+		add := primary(c, "add", "plus", locales.SettingsAddProvider())
 		add.Menu(func(m *ui.Menu) {
 			// One ChatGPT sign-in is enough: its row edits it.
 			signedIn := false
@@ -524,7 +543,7 @@ func (a *App) modelsSettings(c *ui.Context) {
 				}
 				label := p.Name
 				if p.Auth == "account" {
-					label = "Sign in with " + p.Name + "…"
+					label = locales.SettingsSignInWith(p.Name)
 				}
 				if m.Item(label).Chosen() {
 					a.newProvider(p)
@@ -533,7 +552,7 @@ func (a *App) modelsSettings(c *ui.Context) {
 		})
 	})
 	if len(a.providers) > 0 {
-		label(c, "Defaults")
+		label(c, locales.SettingsDefaults())
 		card(c, "defaults", func() {
 			var choices []string
 			names := map[string]string{}
@@ -548,21 +567,21 @@ func (a *App) modelsSettings(c *ui.Context) {
 			if cur == "" && len(choices) > 0 {
 				cur = choices[0]
 			}
-			settingRow(c, "default", "Default agent", "Used unless you pick another", true, func() {
+			settingRow(c, "default", locales.SettingsDefaultAgent(), locales.SettingsDefaultAgentDesc(), true, func() {
 				if selectBox(c, "default", &cur, choices, func(s string) string { return names[s] }, 240); cur != a.settings.DefaultModel {
 					a.settings.DefaultModel = cur
 					a.saveSettings()
 				}
 			})
 			v := a.settings.LocalWhenOffline
-			settingRow(c, "offline", "Use a provider on this machine when offline", "Agents keep working without a connection", false, func() {
+			settingRow(c, "offline", locales.SettingsLocalWhenOffline(), locales.SettingsLocalWhenOfflineDesc(), false, func() {
 				if ui.Switch(c.Key("offline"), &v).Changed() {
 					a.settings.LocalWhenOffline = v
 					a.saveSettings()
 				}
 			})
 			r := a.settings.AgentsReadOtherPages
-			settingRow(c, "cross", "Let agents read your other pages", "They only ever edit the page they are asked on", false, func() {
+			settingRow(c, "cross", locales.SettingsReadOtherPages(), locales.SettingsReadOtherPagesDesc(), false, func() {
 				if ui.Switch(c.Key("cross"), &r).Changed() {
 					a.settings.AgentsReadOtherPages = r
 					a.saveSettings()
@@ -605,23 +624,23 @@ func (a *App) providerDialog(c *ui.Context) {
 	preset := agents.PresetByID(form.preset)
 	account := preset.Auth == "account"
 	local := preset.Local
-	title := "Connect " + preset.Name
+	title := locales.SettingsConnectProvider(preset.Name)
 	if form.id != "" {
-		title = "Edit " + form.name
+		title = locales.SettingsProviderEdit(form.name)
 	}
-	desc := "Runs in Leaflet's server with your key, which never comes back to this device."
+	desc := locales.SettingsProviderDescCloud()
 	switch {
 	case account:
-		desc = "Agents use your ChatGPT Plus or Pro plan. Sign-in stays on this device."
+		desc = locales.SettingsProviderDescAccount()
 	case local:
-		desc = "Runs on this device against your model server, so agents work offline."
+		desc = locales.SettingsProviderDescLocal()
 	case !a.backend.Configured():
-		desc = "Cloud providers need a Leaflet server, which this build doesn't have."
+		desc = locales.SettingsProviderDescNoServer()
 	case !a.session.SignedIn:
-		desc = "Cloud providers run on the server: sign in first, or add a model server on this machine."
+		desc = locales.SettingsProviderDescSignIn()
 	}
 	if preset.ID == "claude" {
-		desc += " Claude plans only work in Claude's own apps, so this takes an API key."
+		desc = locales.SettingsProviderClaudeNote(desc)
 	}
 	dialog(c, &form.open, 500, func() {
 		dialogHeader(c, title, desc, &form.open)
@@ -635,8 +654,8 @@ func (a *App) providerDialog(c *ui.Context) {
 			if account {
 				a.chatgptRow(c)
 			} else {
-				fieldRow("Name", func() { field(c, "name", &form.name, preset.Name) })
-				fieldRow("Base URL", func() {
+				fieldRow(locales.SettingsName(), func() { field(c, "name", &form.name, preset.Name) })
+				fieldRow(locales.SettingsBaseURL(), func() {
 					ph := preset.Placeholder
 					if ph == "" {
 						ph = preset.BaseURL
@@ -645,22 +664,22 @@ func (a *App) providerDialog(c *ui.Context) {
 				})
 			}
 			testButton := func() {
-				label := "Test"
+				label := locales.SettingsTest()
 				if form.testing {
-					label = "Testing…"
+					label = locales.SettingsTesting()
 				}
 				if button(c, "test", "", label).MinWidth(82).Justify(ui.Center).Disabled(form.testing || (account && form.chatgpt == nil)).Clicked() {
 					a.testProvider()
 				}
 			}
 			if !account {
-				fieldRow("API key", func() {
-					ph := "Paste a key"
+				fieldRow(locales.SettingsAPIKey(), func() {
+					ph := locales.SettingsPasteKey()
 					if form.id != "" && !local {
-						ph = "Saved on the server · paste a new key to replace it"
+						ph = locales.SettingsKeySaved()
 					}
 					if local {
-						ph = "Optional"
+						ph = locales.SettingsOptional()
 					}
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						var in ui.Element
@@ -680,7 +699,7 @@ func (a *App) providerDialog(c *ui.Context) {
 				notice(c, kind, map[bool]string{true: "check", false: "circle-alert"}[form.resultOK], form.result, nil)
 			}
 			if !account || form.chatgpt != nil {
-				fieldRow("Model", func() {
+				fieldRow(locales.CommonModel(), func() {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						a.modelPicker(c)
 						if account {
@@ -699,7 +718,7 @@ func (a *App) providerDialog(c *ui.Context) {
 				return
 			}
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				if form.id != "" && danger(c, "remove", "Remove").Clicked() {
+				if form.id != "" && danger(c, "remove", locales.CommonRemove()).Clicked() {
 					a.removeProvider(form.id)
 				}
 				ui.Spacer(c)
@@ -707,7 +726,7 @@ func (a *App) providerDialog(c *ui.Context) {
 					return
 				}
 				cannot := form.saving || (!local && !a.session.SignedIn) || (account && form.chatgpt == nil) || strings.TrimSpace(form.model) == ""
-				if primary(c, "save", "", "Save").Disabled(cannot).Clicked() {
+				if primary(c, "save", "", locales.CommonSave()).Disabled(cannot).Clicked() {
 					a.saveProvider()
 				}
 			})
@@ -721,26 +740,26 @@ func (a *App) chatgptRow(c *ui.Context) {
 	if form.chatgpt != nil {
 		ui.Row(c).Padding(10, 12).Gap(10).Radius(8).Background(pal.OkBg).Border(1, pal.OkBorder).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, theme.Icon("check")).FontSize(15).TextColor(pal.OkText)
-			who := form.email
-			if who == "" {
-				who = "your ChatGPT account"
+			who := locales.SettingsSignedInAccount()
+			if form.email != "" {
+				who = locales.SettingsSignedInAs(form.email)
 			}
-			ui.Text(c, "Signed in as "+who).FontSize(13.5).TextColor(pal.OkText).Grow(1)
-			if ghost(c, "again", "", "Switch account").Clicked() {
+			ui.Text(c, who).FontSize(13.5).TextColor(pal.OkText).Grow(1)
+			if ghost(c, "again", "", locales.SettingsSwitchAccount()).Clicked() {
 				a.chatgptSignIn()
 			}
 		})
 		return
 	}
-	label := "Sign in with ChatGPT"
+	label := locales.SettingsChatGPTSignIn()
 	if form.signingIn {
-		label = "Waiting for the browser…"
+		label = locales.SettingsWaitingBrowser()
 	}
 	ui.Column(c).Gap(8).Children(func() {
 		if primary(c, "signin", "user", label).Height(36).Disabled(form.signingIn).Clicked() {
 			a.chatgptSignIn()
 		}
-		ui.Text(c, "Your browser opens to sign in. Leaflet never sees your password, and you can set a usage limit for it in ChatGPT's settings.").
+		ui.Text(c, locales.SettingsChatGPTNote()).
 			FontSize(12).TextColor(pal.TextMuted)
 	})
 }
@@ -777,9 +796,9 @@ func (a *App) modelPicker(c *ui.Context) {
 	const other = "\x00other"
 	ui.Box(c).Grow(1).Children(func() {
 		if form.custom || len(form.models) == 0 {
-			ph := "Model ID"
+			ph := locales.SettingsModelID()
 			if form.fetching {
-				ph = "Fetching models…"
+				ph = locales.SettingsFetchingModels()
 			}
 			field(c, "model-id", &form.model, ph)
 			return
@@ -792,10 +811,10 @@ func (a *App) modelPicker(c *ui.Context) {
 		choice := form.model
 		selectBox(c, "model", &choice, options, func(s string) string {
 			if s == other {
-				return "Other model…"
+				return locales.SettingsOtherModel()
 			}
 			if s == "" {
-				return "Choose a model"
+				return locales.SettingsChooseModel()
 			}
 			return s
 		}, 0).FillWidth()
@@ -808,7 +827,7 @@ func (a *App) modelPicker(c *ui.Context) {
 	if !form.custom && len(form.models) == 0 && !form.fetching {
 		return
 	}
-	if form.custom && len(form.models) > 0 && ghost(c, "list", "", "From the list").Clicked() {
+	if form.custom && len(form.models) > 0 && ghost(c, "list", "", locales.SettingsFromList()).Clicked() {
 		form.custom = false
 		if len(form.models) > 0 {
 			form.model = form.models[0]
@@ -862,7 +881,7 @@ func (a *App) fetchModels() {
 			form.fetching = false
 			if err != nil {
 				if !preset.Local || form.id != "" {
-					form.result, form.resultOK = "Could not list models: "+err.Error(), false
+					form.result, form.resultOK = locales.SettingsListModelsFailed(err.Error()), false
 				}
 				return
 			}
@@ -897,7 +916,7 @@ func (a *App) testProvider() {
 		switch {
 		case g != nil:
 			if model == "" {
-				res = agents.TestResult{Message: "Choose a model to test with"}
+				res = agents.TestResult{Message: locales.SettingsChooseModelToTest()}
 			} else {
 				res = agents.TestModel(ctx, g, model, nil)
 			}
@@ -915,7 +934,7 @@ func (a *App) testProvider() {
 				res.Message, _ = r["message"].(string)
 			}
 		default:
-			res = agents.TestResult{Message: "Paste a key to test"}
+			res = agents.TestResult{Message: locales.SettingsPasteKeyToTest()}
 		}
 		a.update(func() {
 			form.testing = false
@@ -934,7 +953,7 @@ func (a *App) testProvider() {
 func (a *App) saveProvider() {
 	preset := agents.PresetByID(form.preset)
 	if preset.Auth != "account" && strings.TrimSpace(form.baseURL) == "" || strings.TrimSpace(form.model) == "" {
-		form.errorText = "A base URL and a model are needed."
+		form.errorText = locales.SettingsNeedURLAndModel()
 		return
 	}
 	if preset.Local {
@@ -952,7 +971,7 @@ func (a *App) saveProvider() {
 		if preset.Auth == "account" {
 			p.AuthKind, p.BaseURL = "account", preset.BaseURL
 			if err := agents.UseChatGPT(p.ID, form.chatgpt); err != nil {
-				form.errorText = "Could not keep the sign-in: " + err.Error()
+				form.errorText = locales.SettingsKeepSignInFailed(err.Error())
 				return
 			}
 		}
@@ -965,7 +984,7 @@ func (a *App) saveProvider() {
 		}
 		if preset.Auth != "account" {
 			if err := agents.SetLocalKey(p.ID, form.apiKey); err != nil {
-				form.errorText = "Could not save the key: " + err.Error()
+				form.errorText = locales.SettingsSaveKeyFailed(err.Error())
 				return
 			}
 		}
@@ -1035,7 +1054,7 @@ func (a *App) removeProvider(id string) {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			if _, err := a.backend.Invoke(ctx, "providers", map[string]any{"action": "delete", "id": id}); err != nil {
-				a.update(func() { a.toast("Could not delete: " + err.Error()) })
+				a.update(func() { a.toast(locales.SettingsDeleteFailed(err.Error())) })
 			}
 		}()
 	}
@@ -1047,10 +1066,10 @@ func (a *App) removeProvider(id string) {
 		}()
 	}
 	if err := agents.SetLocalKey(id, ""); err != nil {
-		a.toast("Could not delete the key: " + err.Error())
+		a.toast(locales.SettingsDeleteKeyFailed(err.Error()))
 	}
 	if err := a.st.DeleteProvider(id); err != nil {
-		a.toast("Could not delete: " + err.Error())
+		a.toast(locales.SettingsDeleteFailed(err.Error()))
 		return
 	}
 	if ch, ok := a.settings.Default(); ok && ch.ProviderID == id {
@@ -1070,16 +1089,16 @@ type offlineState struct {
 var offline offlineState
 
 func (a *App) offlineSettings(c *ui.Context) {
-	heading(c, "Offline and storage", "Everything is saved on this device first, and goes to the server when you are online.")
+	heading(c, locales.SettingsSectionOffline(), locales.SettingsOfflineDesc())
 	if a.backend.Configured() {
 		a.syncSettings(c)
 	} else {
 		card(c, "status", func() {
-			settingRow(c, "local", "Pages are kept on this device", "This build has no server to sync with", true, nil)
+			settingRow(c, "local", locales.SettingsLocalOnly(), locales.SettingsLocalOnlyDesc(), true, nil)
 		})
 	}
 	if len(a.conflicts) > 0 {
-		label(c, "Conflicts")
+		label(c, locales.SettingsConflicts())
 		card(c, "conflicts", func() {
 			for i, cf := range a.conflicts {
 				cf := cf
@@ -1093,33 +1112,33 @@ func (a *App) offlineSettings(c *ui.Context) {
 				desc := ""
 				switch {
 				case cf.LocalNode == nil:
-					desc = fmt.Sprintf("Kept “%s”: deleted on this device, edited on another", short(kept.Delta().Plain(), 40))
+					desc = locales.SettingsConflictDeletedHere(short(kept.Delta().Plain(), 40))
 				case cf.RemoteNode == nil:
-					desc = fmt.Sprintf("Kept “%s”: deleted on another device, edited on this one", short(kept.Delta().Plain(), 40))
+					desc = locales.SettingsConflictDeletedThere(short(kept.Delta().Plain(), 40))
 				default:
-					desc = fmt.Sprintf("Kept “%s” over “%s”", short(kept.Delta().Plain(), 40), short(other.Delta().Plain(), 40))
+					desc = locales.SettingsConflictKeptOver(short(kept.Delta().Plain(), 40), short(other.Delta().Plain(), 40))
 				}
 				settingRow(c, cf.ID, a.pageTitleOf(cf.PageID), desc, i == 0, func() {
-					ui.MenuButton(c.Key("act"), "Resolve", func(m *ui.Menu) {
+					ui.MenuButton(c.Key("act"), locales.SettingsResolve(), func(m *ui.Menu) {
 						if deleted {
-							if m.Item("Delete it").Chosen() {
+							if m.Item(locales.SettingsDeleteIt()).Chosen() {
 								a.resolveConflict(cf, nil)
 							}
-							if m.Item("Keep it").Chosen() {
+							if m.Item(locales.SettingsKeepIt()).Chosen() {
 								if err := a.st.ResolveConflict(cf.ID); err != nil {
-									a.toast("Could not resolve: " + err.Error())
+									a.toast(locales.SettingsResolveFailed(err.Error()))
 								}
 							}
 						}
-						if !deleted && m.Item("Use this device's version").Chosen() {
+						if !deleted && m.Item(locales.SettingsUseThisDevice()).Chosen() {
 							a.resolveConflict(cf, cf.LocalNode)
 						}
-						if !deleted && m.Item("Keep the newer version").Chosen() {
+						if !deleted && m.Item(locales.SettingsKeepNewer()).Chosen() {
 							if err := a.st.ResolveConflict(cf.ID); err != nil {
-								a.toast("Could not resolve: " + err.Error())
+								a.toast(locales.SettingsResolveFailed(err.Error()))
 							}
 						}
-						if m.Item("Open page").Chosen() {
+						if m.Item(locales.SettingsOpenPage()).Chosen() {
 							a.openPage(cf.PageID)
 						}
 					})
@@ -1127,18 +1146,18 @@ func (a *App) offlineSettings(c *ui.Context) {
 			}
 		})
 	}
-	label(c, "Storage")
+	label(c, locales.SettingsStorage())
 	card(c, "storage", func() {
-		settingRow(c, "where", "Data folder", "Pages, recordings and files on this device", true, func() {
-			if button(c, "reveal", "folder-open", "Show").Clicked() {
+		settingRow(c, "where", locales.SettingsDataFolder(), locales.SettingsDataFolderDesc(), true, func() {
+			if button(c, "reveal", "folder-open", locales.SettingsShow()).Clicked() {
 				mygo.Shell.ShowItemInFolder(a.st.Dir)
 			}
 		})
-		settingRow(c, "images", "Image cache", "Pictures of image blocks loaded from the web", false, func() {
-			if button(c, "clear", "trash", "Clear").Clicked() {
+		settingRow(c, "images", locales.SettingsImageCache(), locales.SettingsImageCacheDesc(), false, func() {
+			if button(c, "clear", "trash", locales.SettingsClear()).Clicked() {
 				a.images = newImageCache(a.images.dir)
 				_ = os.RemoveAll(a.images.dir)
-				c.Toast("Cleared the image cache")
+				c.Toast(locales.SettingsImageCacheCleared())
 			}
 		})
 	})
@@ -1153,35 +1172,35 @@ func (a *App) syncSettings(c *ui.Context) {
 	}
 	card(c, "status", func() {
 		if !a.session.SignedIn {
-			settingRow(c, "sync", "Not syncing", "Sign in to sync pages between devices", true, func() {
-				if primary(c, "signin", "", "Sign in").Clicked() {
+			settingRow(c, "sync", locales.SettingsNotSyncing(), locales.SettingsNotSyncingDesc(), true, func() {
+				if primary(c, "signin", "", locales.CommonSignIn()).Clicked() {
 					a.navigate(Route{Kind: "signin"})
 				}
 			})
 			return
 		}
-		status := "Up to date"
+		status := locales.SettingsUpToDate()
 		switch {
 		case a.settings.WorkOffline:
-			status = "Working offline by choice"
+			status = locales.SettingsOfflineByChoice()
 		case !a.online:
-			status = "No connection"
+			status = locales.SettingsNoConnection()
 		case a.syncing:
-			status = "Syncing…"
+			status = locales.SettingsSyncing()
 		case a.syncError != "":
-			status = "Last sync failed: " + a.syncError
+			status = locales.SettingsSyncFailed(a.syncError)
 		}
-		title := "Synced"
+		title := locales.SettingsSynced()
 		if n := len(offline.queue); n > 0 {
-			title = fmt.Sprintf("%d %s waiting", n, plural(n, "change", "changes"))
+			title = locales.SettingsChangesWaiting(n)
 		}
 		settingRow(c, "sync", title, status, true, func() {
-			if button(c, "sync-now", "refresh-cw", "Sync now").Disabled(a.syncing).Clicked() {
+			if button(c, "sync-now", "refresh-cw", locales.SettingsSyncNow()).Disabled(a.syncing).Clicked() {
 				go func() { _ = a.sync.SyncNow() }()
 			}
 		})
 		wo := a.settings.WorkOffline
-		settingRow(c, "work-offline", "Work offline", "Keep changes on this device until you turn this off", false, func() {
+		settingRow(c, "work-offline", locales.SettingsWorkOffline(), locales.SettingsWorkOfflineDesc(), false, func() {
 			if ui.Switch(c.Key("wo"), &wo).Changed() {
 				a.settings.WorkOffline = wo
 				a.saveSettings()
@@ -1191,16 +1210,16 @@ func (a *App) syncSettings(c *ui.Context) {
 			}
 		})
 		all := a.settings.AllPagesOffline
-		settingRow(c, "all", "Keep all pages on this device", "Otherwise only pages you mark, and those you open", false, func() {
+		settingRow(c, "all", locales.SettingsAllPagesOffline(), locales.SettingsAllPagesOfflineDesc(), false, func() {
 			if ui.Switch(c.Key("all"), &all).Changed() {
 				a.settings.AllPagesOffline = all
 				a.saveSettings()
 			}
 		})
 		keep := a.settings.KeepAudioOnDevice
-		settingRow(c, "audio", "Keep recordings' audio on this device", "", false, func() {
+		settingRow(c, "audio", locales.SettingsKeepAudio(), "", false, func() {
 			if selectBox(c, "audio", &keep, []string{"until_uploaded", "30_days", "always"}, func(s string) string {
-				return map[string]string{"until_uploaded": "Until uploaded", "30_days": "For 30 days", "always": "Always"}[s]
+				return map[string]string{"until_uploaded": locales.SettingsKeepAudioUntilUploaded(), "30_days": locales.SettingsKeepAudio30Days(), "always": locales.SettingsKeepAudioAlways()}[s]
 			}, 170); keep != a.settings.KeepAudioOnDevice {
 				a.settings.KeepAudioOnDevice = keep
 				a.saveSettings()
@@ -1230,17 +1249,17 @@ func (a *App) resolveConflict(cf store.ConflictRow, node *doc.Node) {
 		ed.Edit(apply)
 		a.savePage()
 	} else if c := a.st.Content(cf.PageID); c != nil {
-		if err := a.st.AddHistory(cf.PageID, c, "conflict", "", "Before resolving a conflict"); err != nil {
-			a.toast("Could not resolve: " + err.Error())
+		if err := a.st.AddHistory(cf.PageID, c, "conflict", "", locales.SettingsHistoryBeforeResolving()); err != nil {
+			a.toast(locales.SettingsResolveFailed(err.Error()))
 			return
 		}
 		apply(c)
 		if _, _, err := a.st.SaveContent(cf.PageID, c); err != nil {
-			a.toast("Could not resolve: " + err.Error())
+			a.toast(locales.SettingsResolveFailed(err.Error()))
 			return
 		}
 	}
 	if err := a.st.ResolveConflict(cf.ID); err != nil {
-		a.toast("Could not resolve: " + err.Error())
+		a.toast(locales.SettingsResolveFailed(err.Error()))
 	}
 }

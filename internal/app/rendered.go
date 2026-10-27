@@ -10,6 +10,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // Math and diagram blocks: TeX drawn by KaTeX as MathML, and Mermaid
@@ -83,9 +84,13 @@ svg{max-width:100%;height:auto}</style></head><body><div id="d"></div>
 func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 	pal := theme.Of(c)
 	_, source := doc.BlockSource(n)
-	name, empty, page := "Math", "Write a formula", mathPage(source)
+	name, empty, edit := locales.RenderedMath(), locales.RenderedWriteFormula(), locales.RenderedEditMath()
+	var page string
 	if n.Type == "diagram" {
-		name, empty, page = "Diagram", "Write a diagram", diagramPage(source)
+		name, empty, edit = locales.RenderedDiagram(), locales.RenderedWriteDiagram(), locales.RenderedEditDiagram()
+		page = diagramPage(source)
+	} else {
+		page = mathPage(source)
 	}
 	editable := a.page != nil && !a.page.editor.ReadOnly
 	const pad = 12
@@ -100,13 +105,13 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 			ui.Text(c, name).FontSize(12).TextColor(pal.TextMuted).Opacity(shown).Grow(1)
 			if editable && strings.TrimSpace(source) != "" {
 				b := ui.ButtonBase(c.Key("edit")).Height(24).Padding(0, 8).Gap(4).Radius(6).TextColor(pal.TextMuted).
-					Opacity(shown).AlignItems(ui.Center).Label("Edit " + strings.ToLower(name))
+					Opacity(shown).AlignItems(ui.Center).Label(edit)
 				if b.Hovered() {
 					b.Background(pal.Hover).TextColor(pal.Text)
 				}
 				b.Children(func() {
 					ui.Icon(c, theme.Icon("pencil")).FontSize(12)
-					ui.Text(c, "Edit").FontSize(12)
+					ui.Text(c, locales.CommonEdit()).FontSize(12)
 				})
 				if b.Clicked() {
 					a.dialogs.openSource(n)
@@ -149,19 +154,19 @@ func (d *dialogs) openSource(n *doc.Node) {
 
 func (a *App) sourceDialog(c *ui.Context) {
 	d := &a.dialogs
-	title, subtitle := "Math", "A formula in TeX, as \\frac{a}{b} or \\sum_{i=1}^n i^2, drawn in display style."
+	title, subtitle := locales.RenderedMath(), locales.RenderedMathHelp()
 	if d.sourceKind == "diagram" {
-		title, subtitle = "Diagram", "Mermaid: a flowchart, sequence, class, state, Gantt or other diagram."
+		title, subtitle = locales.RenderedDiagram(), locales.RenderedDiagramHelp()
 	}
 	dialog(c, &d.sourceOpen, 600, func() {
 		dialogHeader(c, title, subtitle, &d.sourceOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(12).Children(func() {
 			ui.TextArea(c.Key("source"), &d.sourceText).Height(220).Font("monospace").FontSize(12.5).AutoFocus()
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
-				if button(c, "cancel", "", "Cancel").Clicked() {
+				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					d.sourceOpen = false
 				}
-				if primary(c, "save", "", "Save").Clicked() && a.page != nil {
+				if primary(c, "save", "", locales.CommonSave()).Clicked() && a.page != nil {
 					id, text := d.sourceID, d.sourceText
 					a.page.editor.Edit(func(content *doc.Content) {
 						if n := content.Find(id); n != nil {

@@ -4,6 +4,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // The app's widgets: MyGo's, with what Leaflet adds to them.
@@ -192,7 +193,7 @@ func dialogHeader(c *ui.Context, title, subtitle string, open *bool) {
 			}
 		})
 		tools(c, func() {
-			if iconButton(c, "close", "x", "Close").Clicked() {
+			if iconButton(c, "close", "x", locales.CommonClose()).Clicked() {
 				*open = false
 			}
 		})

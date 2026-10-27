@@ -2,12 +2,12 @@ package editor
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // colorHex is a color as runs keep it, "" for a clear one, which takes
@@ -55,14 +55,18 @@ func (e *Editor) colored() bool {
 }
 
 // colors are the colors a run takes, MyGo's color picker's swatches, by
-// name; a highlight is one at a quarter of its strength, which text
+// key, with the names people read; a highlight is one at a quarter of its strength, which text
 // reads through.
 var colors = []struct {
-	name, hex string
+	key, hex string
+	name     func() string
 }{
-	{"Red", "#ef4444"}, {"Orange", "#f97316"}, {"Yellow", "#eab308"}, {"Green", "#22c55e"},
-	{"Teal", "#14b8a6"}, {"Blue", "#3b82f6"}, {"Indigo", "#6366f1"}, {"Purple", "#a855f7"},
-	{"Pink", "#ec4899"}, {"Brown", "#92400e"}, {"Gray", "#71717a"},
+	{"red", "#ef4444", locales.EditorColorRed}, {"orange", "#f97316", locales.EditorColorOrange},
+	{"yellow", "#eab308", locales.EditorColorYellow}, {"green", "#22c55e", locales.EditorColorGreen},
+	{"teal", "#14b8a6", locales.EditorColorTeal}, {"blue", "#3b82f6", locales.EditorColorBlue},
+	{"indigo", "#6366f1", locales.EditorColorIndigo}, {"purple", "#a855f7", locales.EditorColorPurple},
+	{"pink", "#ec4899", locales.EditorColorPink}, {"brown", "#92400e", locales.EditorColorBrown},
+	{"gray", "#71717a", locales.EditorColorGray},
 }
 
 // highlightAlpha is the strength of a highlight, in hex.
@@ -74,7 +78,7 @@ const highlightAlpha = "40"
 // takes it away.
 func (e *Editor) colorButton(c *ui.Context, pal *theme.Palette) {
 	attrs := e.selectionAttrs()
-	b := ui.Button(c, "").Label("Color").Tooltip("Color").KeepFocus()
+	b := ui.Button(c, "").Label(locales.EditorColor()).Tooltip(locales.EditorColor()).KeepFocus()
 	b.Children(func() {
 		// The text's color: the theme's while it has none of its own.
 		dot := ui.Box(c).Size(12, 12).Radius(999).Background(pal.Text)
@@ -90,17 +94,17 @@ func (e *Editor) colorButton(c *ui.Context, pal *theme.Palette) {
 	}
 	ui.Popover(c, b, &e.colorOpen, func() {
 		ui.Column(c).Gap(6).Children(func() {
-			e.colorDots(c, pal, "Text", attrs.Color, "", e.SetColor)
-			e.colorDots(c, pal, "Highlight", attrs.Background, highlightAlpha, e.SetHighlight)
+			e.colorDots(c, pal, "text", locales.EditorColorText(), locales.EditorNoTextColor(), attrs.Color, "", e.SetColor)
+			e.colorDots(c, pal, "highlight", locales.EditorColorHighlight(), locales.EditorNoHighlight(), attrs.Background, highlightAlpha, e.SetHighlight)
 		})
 	})
 }
 
 // colorDots is a row of dots choosing a color, alpha its strength, after
-// one that takes the color away.
-func (e *Editor) colorDots(c *ui.Context, pal *theme.Palette, label, value, alpha string, set func(string)) {
+// one, named none, that takes the color away.
+func (e *Editor) colorDots(c *ui.Context, pal *theme.Palette, key, label, none, value, alpha string, set func(string)) {
 	ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(pal.TextMuted)
-	ui.Row(c.Key("dots:" + label)).Gap(6).Children(func() {
+	ui.Row(c.Key("dots:" + key)).Gap(6).Children(func() {
 		dot := func(key, name, hex string) {
 			d := ui.ButtonBase(c.Key(key)).Size(18, 18).Radius(999).KeepFocus().Label(name).Tooltip(name)
 			if hex == "" {
@@ -117,13 +121,13 @@ func (e *Editor) colorDots(c *ui.Context, pal *theme.Palette, label, value, alph
 				set(hex)
 			}
 		}
-		dot("none", "No "+strings.ToLower(label)+" color", "")
+		dot("none", none, "")
 		for _, col := range colors {
 			hex := col.hex + "ff"
 			if alpha != "" {
 				hex = col.hex + alpha
 			}
-			dot(col.name, col.name, hex)
+			dot(col.key, col.name(), hex)
 		}
 	})
 }

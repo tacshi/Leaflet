@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/plugins/updater"
 
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // trayIcon is the leaf of the app's icon as a template image, which macOS
@@ -48,16 +49,16 @@ func (a *App) refreshTray() {
 		return
 	}
 	a.trayShown, a.trayBuilt = st, true
-	record := &mygo.MenuItem{Label: "New Recording", Click: func(*mygo.MenuItem, *mygo.Window) {
+	record := &mygo.MenuItem{Label: locales.TrayNewRecording(), Click: func(*mygo.MenuItem, *mygo.Window) {
 		a.update(func() { a.newRecordingPage(); a.refreshTray() })
 	}}
 	if st.recording {
-		record = &mygo.MenuItem{Label: "Stop Recording", Click: func(*mygo.MenuItem, *mygo.Window) {
+		record = &mygo.MenuItem{Label: locales.TrayStopRecording(), Click: func(*mygo.MenuItem, *mygo.Window) {
 			a.update(func() { a.rec.Stop(); a.refreshTray() })
 		}}
 	}
 	a.tray.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
-		{Label: "New Page", Click: func(*mygo.MenuItem, *mygo.Window) {
+		{Label: locales.AppMenuNewPage(), Click: func(*mygo.MenuItem, *mygo.Window) {
 			a.update(func() {
 				a.showWindow()
 				a.newPage("", "")
@@ -65,10 +66,10 @@ func (a *App) refreshTray() {
 		}},
 		record,
 		mygo.Separator(),
-		{Label: "Show Leaflet", Click: func(*mygo.MenuItem, *mygo.Window) { a.update(a.showWindow) }},
+		{Label: locales.TrayShowLeaflet(), Click: func(*mygo.MenuItem, *mygo.Window) { a.update(a.showWindow) }},
 		mygo.Separator(),
 		a.updateMenuItem(),
-		{Label: "Quit Leaflet", Role: mygo.RoleQuit},
+		{Label: locales.TrayQuit(), Role: mygo.RoleQuit},
 	}))
 }
 
@@ -76,7 +77,7 @@ func (a *App) refreshTray() {
 // update is installed and waits for the app to start again.
 func (a *App) updateMenuItem() *mygo.MenuItem {
 	if a.updateReady != "" {
-		return &mygo.MenuItem{Label: "Restart to Update", Click: func(*mygo.MenuItem, *mygo.Window) { a.restartToUpdate() }}
+		return &mygo.MenuItem{Label: locales.TrayRestartToUpdate(), Click: func(*mygo.MenuItem, *mygo.Window) { a.restartToUpdate() }}
 	}
 	return updater.MenuItem()
 }
@@ -95,9 +96,9 @@ func (a *App) showWindow() {
 // when it began.
 func (a *App) newRecordingPage() {
 	a.showWindow()
-	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Recording · " + time.Now().Format("Jan 2, 15:04")})
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: locales.RecBlockTitle(time.Now())})
 	if err != nil {
-		a.toast("Could not create the page: " + err.Error())
+		a.toast(locales.AppErrorCreatePage(err.Error()))
 		return
 	}
 	a.pages, _ = a.st.Pages()

@@ -1,8 +1,6 @@
 package app
 
 import (
-	"fmt"
-	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -12,6 +10,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 func (a *App) pageView(c *ui.Context) {
@@ -32,20 +31,20 @@ func (a *App) pageView(c *ui.Context) {
 		}
 		tools(c, func() {
 			if !a.rec.Active() && !ps.editor.ReadOnly {
-				if iconButton(c, "record", "mic", "Record").Clicked() {
+				if iconButton(c, "record", "mic", locales.PageRecord()).Clicked() {
 					a.startRecording(ps.id, "")
 				}
 			}
 			// Sharing needs a server; a build without one leaves it out.
-			if a.backend.Configured() && !p.Template && iconButton(c, "share", "share", "Share").Clicked() {
+			if a.backend.Configured() && !p.Template && iconButton(c, "share", "share", locales.PageShare()).Clicked() {
 				a.openShare(ps.id)
 			}
-			more := iconButton(c, "page-more", "ellipsis", "Page actions")
+			more := iconButton(c, "page-more", "ellipsis", locales.PageActions())
 			more.Menu(func(m *ui.Menu) { a.pageMenu(m, *p, true) })
 			// The panel's own top bar has the toggle while it is open, as
 			// the sidebar does on the left.
 			if !a.panelOpen {
-				if iconButton(c, "show-panel", "panel-right", "Show agent and comments (⌘J)").Clicked() {
+				if iconButton(c, "show-panel", "panel-right", locales.PageShowPanel()).Clicked() {
 					a.panelOpen = true
 				}
 			}
@@ -125,7 +124,7 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 	path = append(path, p.DisplayTitle())
 	ui.Row(c.Key("crumbs")).Gap(6).AlignItems(ui.Center).Margin(0, 0, 0, 6).Shrink(1).ClipX().Children(func() {
 		chosen := -1
-		crumbs := ui.Breadcrumbs(c, path, &chosen).Label("Where the page is").FontSize(13).Shrink(1)
+		crumbs := ui.Breadcrumbs(c, path, &chosen).Label(locales.PageBreadcrumbsLabel()).FontSize(13).Shrink(1)
 		if crumbs.Changed() && chosen >= 0 && chosen < len(open) {
 			open[chosen]()
 		}
@@ -133,10 +132,10 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 			templatePill(c)
 		}
 		if a.isShared(p) {
-			accentBadge(c, "Shared")
+			accentBadge(c, locales.PageSharedBadge())
 		}
 		if a.page.editor.ReadOnly {
-			ui.Badge(c, "View only").TextColor(pal.TextMuted)
+			ui.Badge(c, locales.PageViewOnly()).TextColor(pal.TextMuted)
 		}
 	})
 }
@@ -152,15 +151,15 @@ func (a *App) syncStatus(c *ui.Context) {
 	var tip, icon string
 	switch {
 	case a.settings.WorkOffline || !a.online:
-		tip, icon = "Offline", "cloud-off"
+		tip, icon = locales.PageSyncOffline(), "cloud-off"
 		if a.pending > 0 {
-			tip = fmt.Sprintf("Offline · %d %s queued", a.pending, plural(a.pending, "edit", "edits"))
+			tip = locales.PageSyncOfflineQueued(a.pending)
 		}
 		if a.settings.WorkOffline {
-			tip += " · click to go back online"
+			tip = locales.PageSyncGoOnline(tip)
 		}
 	case a.syncError != "":
-		tip, icon = "Last sync failed: "+a.syncError+" · click to try again", "circle-alert"
+		tip, icon = locales.PageSyncFailed(a.syncError), "circle-alert"
 	default:
 		return
 	}
@@ -182,9 +181,9 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 	pal := theme.Of(c)
 	ps := a.page
 	size := float32(a.settings.TextSize) * 2.15
-	in := ui.TextInputBase(c.Key("title:"+p.ID), &ps.title).Bind(&ps.titleIn).Placeholder("Untitled").
+	in := ui.TextInputBase(c.Key("title:"+p.ID), &ps.title).Bind(&ps.titleIn).Placeholder(locales.CommonUntitled()).
 		Font(theme.PageFont).FontSize(size).FontWeight(700).TextColor(pal.Text).ReadOnly(ps.editor.ReadOnly).
-		Label("Page title").Margin(0, 0, 6)
+		Label(locales.PageTitleLabel()).Margin(0, 0, 6)
 	if ps.focusTitle > 0 {
 		if in.Focused() {
 			ps.focusTitle = 0
@@ -222,23 +221,22 @@ func (a *App) saveTitleSoon() {
 
 func (a *App) byline(c *ui.Context, p store.Page) {
 	pal := theme.Of(c)
-	editors := []string{}
+	who := ""
 	if p.CreatedBy == "" || p.CreatedBy == a.session.UserID {
-		editors = append(editors, a.session.DisplayName)
+		who = a.session.DisplayName
 	}
-	who := strings.Join(editors, " and ")
 	if who == "" {
-		who = "Someone"
+		who = locales.PageBylineSomeone()
 	}
 	ui.Row(c.Key("byline")).Gap(8).AlignItems(ui.Center).Margin(0, 0, 22).Children(func() {
 		when := humanTime(p.UpdatedAt)
 		if a.page.dirty {
-			when = "Saving…"
+			when = locales.PageBylineSaving()
 		}
-		ui.Text(c, "Edited by "+who+" · "+when).FontSize(13).TextColor(pal.TextMuted)
+		ui.Text(c, locales.PageBylineEdited(who, when)).FontSize(13).TextColor(pal.TextMuted)
 		if n := len(a.page.members); n > 0 {
 			ui.Text(c, "·").TextColor(pal.ChartMuted)
-			ui.Textf(c, "Shared with %d", n).FontSize(13).TextColor(pal.TextMuted)
+			ui.Text(c, locales.PageBylineSharedWith(n)).FontSize(13).TextColor(pal.TextMuted)
 		}
 	})
 }
@@ -259,17 +257,17 @@ func humanTime(t time.Time) string {
 	d := time.Since(t)
 	switch {
 	case d < time.Minute:
-		return "just now"
+		return locales.PageTimeJustNow()
 	case d < time.Hour:
-		return fmt.Sprintf("%d min ago", int(d.Minutes()))
+		return locales.PageTimeMinutesAgo(int(d.Minutes()))
 	case d < 24*time.Hour && t.Day() == time.Now().Day():
-		return "today at " + t.Format("15:04")
+		return locales.PageTimeTodayAt(t)
 	case d < 48*time.Hour:
-		return "yesterday at " + t.Format("15:04")
+		return locales.PageTimeYesterdayAt(t)
 	case t.Year() == time.Now().Year():
-		return t.Format("Jan 2")
+		return locales.PageTimeDate(t)
 	}
-	return t.Format("Jan 2, 2006")
+	return locales.PageTimeDateYear(t)
 }
 
 // caretAtEnd puts the caret at the end of the page, after a new paragraph
@@ -300,7 +298,7 @@ func (a *App) isEmpty() bool {
 func (a *App) emptyActions(c *ui.Context) {
 	pal := theme.Of(c)
 	ui.Column(c.Key("empty")).Gap(6).Margin(18, 0, 0).AlignItems(ui.Start).Children(func() {
-		ui.Text(c, "Start with").FontSize(12).FontWeight(600).TextColor(pal.TextMuted).Margin(0, 0, 4, 2)
+		ui.Text(c, locales.PageStartWith()).FontSize(12).FontWeight(600).TextColor(pal.TextMuted).Margin(0, 0, 4, 2)
 		// A row with a menu shows its button while hovered, as the
 		// sidebar's rows do.
 		row := func(key, icon, label, hint string, fn func(), menu func(m *ui.Menu)) {
@@ -319,7 +317,7 @@ func (a *App) emptyActions(c *ui.Context) {
 				})
 				if menu != nil {
 					tools(c, func() {
-						more := iconButton(c, "more", "ellipsis", "Template actions").Size(24, 24).Padding(4)
+						more := iconButton(c, "more", "ellipsis", locales.PageTemplateActions()).Size(24, 24).Padding(4)
 						if !hovered {
 							more.Opacity(0)
 						}
@@ -334,12 +332,12 @@ func (a *App) emptyActions(c *ui.Context) {
 				fn()
 			}
 		}
-		row("draft", "sparkles", "Draft with an agent", "Say what this page is for", func() {
+		row("draft", "sparkles", locales.PageDraftWithAgent(), locales.PageDraftWithAgentHint(), func() {
 			a.panelOpen, a.panelTab = true, 0
 			a.dialogs.focusChat = true
 		}, nil)
-		row("subpage", "file-plus", "Add a subpage", "Pages nest inside pages", func() { a.addSubpageBlock() }, nil)
-		row("upload", "upload", "Upload a file", "Pictures and files go in the page", func() { a.uploadIntoPage() }, nil)
+		row("subpage", "file-plus", locales.PageAddSubpage(), locales.PageAddSubpageHint(), func() { a.addSubpageBlock() }, nil)
+		row("upload", "upload", locales.PageUpload(), locales.PageUploadHint(), func() { a.uploadIntoPage() }, nil)
 		// A template starts from the others, not from itself.
 		if p := a.pageByID(a.page.id); p != nil && !p.Template {
 			a.templateActions(c, row)
@@ -356,9 +354,9 @@ func (a *App) runBar(c *ui.Context, run *agents.Run) {
 	ui.Row(c.Key("run-bar")).Attach(ui.AnchorBottom, ui.AnchorBottom).Bottom(18).Padding(6, 6, 6, 14).Gap(10).Radius(10).
 		Background(pal.Inverse).TextColor(pal.OnInverse).Shadow(0, 10, 30, 0, pal.Shadow).AlignItems(ui.Center).Children(func() {
 		ui.Icon(c, theme.Icon("sparkles")).FontSize(14)
-		text := fmt.Sprintf("%s edited %d %s", run.AgentName, len(uniq(run.BlockIDs())), plural(len(uniq(run.BlockIDs())), "block", "blocks"))
+		text := locales.PageRunEdited(run.AgentName, len(uniq(run.BlockIDs())))
 		if run.Undone {
-			text = "Undid " + run.AgentName + "'s edits"
+			text = locales.PageRunUndone(run.AgentName)
 		}
 		ui.Text(c, text).FontSize(13).FontWeight(500)
 		btn := func(key, label string) bool {
@@ -369,13 +367,13 @@ func (a *App) runBar(c *ui.Context, run *agents.Run) {
 			b.Children(func() { ui.Text(c, label).FontSize(12.5).FontWeight(600).TextColor(pal.OnInverse) })
 			return b.Clicked()
 		}
-		if !run.Undone && btn("undo-run", "Undo") {
+		if !run.Undone && btn("undo-run", locales.CommonUndo()) {
 			a.hub.UndoRun(a.page.id, run.ID)
 		}
-		if run.Undone && btn("redo-run", "Redo") {
+		if run.Undone && btn("redo-run", locales.PageRedo()) {
 			a.hub.RedoRun(a.page.id, run.ID)
 		}
-		x := ui.ButtonBase(c.Key("hide-run")).Size(24, 24).Center().Radius(6).Label("Dismiss")
+		x := ui.ButtonBase(c.Key("hide-run")).Size(24, 24).Center().Radius(6).Label(locales.PageDismiss())
 		x.Children(func() { ui.Icon(c, theme.Icon("x")).FontSize(13).TextColor(pal.OnInverse.Alpha(0.7)) })
 		if x.Clicked() {
 			a.dialogs.hideRun = run.ID
@@ -400,7 +398,7 @@ func (a *App) runningBar(c *ui.Context, s *agents.Session) {
 	ui.Row(c.Key("running-bar")).Attach(ui.AnchorBottom, ui.AnchorBottom).Bottom(18).Padding(8, 14).Gap(10).Radius(10).
 		Background(pal.Surface).Border(1, pal.AccentSoftBorder).Shadow(0, 10, 30, 0, pal.Shadow).AlignItems(ui.Center).Children(func() {
 		ui.Spinner(c).Size(14, 14)
-		label := run.AgentName + " is working…"
+		label := locales.PageAgentWorking(run.AgentName)
 		if n := len(run.Edits); n > 0 {
 			label = run.Edits[n-1].Summary + "…"
 		}
@@ -420,13 +418,6 @@ func uniq(ids []string) []string {
 	return out
 }
 
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
-}
-
 // pageNotices shows conflicts on the open page.
 func (a *App) pageNotices(c *ui.Context, pageID string) bool {
 	n := 0
@@ -438,9 +429,9 @@ func (a *App) pageNotices(c *ui.Context, pageID string) bool {
 	if n == 0 {
 		return false
 	}
-	text := fmt.Sprintf("%d %s changed here and on another device while apart. One version of each was kept.", n, plural(n, "block", "blocks"))
+	text := locales.PageConflicts(n)
 	notice(c, "warn", "git-compare", text, func() {
-		if button(c, "review", "", "Review").Clicked() {
+		if button(c, "review", "", locales.PageReview()).Clicked() {
 			a.openSettings("offline")
 		}
 	})

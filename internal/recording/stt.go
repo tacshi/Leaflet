@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -20,6 +21,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // IsLocalEndpoint reports whether an endpoint is on this machine or
@@ -81,7 +83,7 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, 
 		if len(body) > 200 || strings.HasPrefix(body, "<") {
 			body = ""
 		}
-		return nil, fmt.Errorf("Transcription failed: %s %s", res.Status, body) //nolint:staticcheck // shown to people as a sentence.
+		return nil, errors.New(locales.RecErrEndpoint(res.Status, body))
 	}
 	var out struct {
 		Text     string  `json:"text"`
@@ -113,7 +115,7 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, 
 // TestSonioxKey checks a Soniox API key against Soniox's API.
 func TestSonioxKey(ctx context.Context, key string) error {
 	if strings.TrimSpace(key) == "" {
-		return fmt.Errorf("Paste a key to test") //nolint:staticcheck // shown to people as a sentence.
+		return errors.New(locales.RecErrPasteKey())
 	}
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.soniox.com/v1/models", nil)
 	if err != nil {
@@ -127,9 +129,9 @@ func TestSonioxKey(ctx context.Context, key string) error {
 	_ = res.Body.Close()
 	switch {
 	case res.StatusCode == 401 || res.StatusCode == 403:
-		return fmt.Errorf("Soniox rejected this key")
+		return errors.New(locales.RecErrSonioxRejected())
 	case res.StatusCode >= 400:
-		return fmt.Errorf("Soniox answered %s", res.Status)
+		return errors.New(locales.RecErrSonioxStatus(res.Status))
 	}
 	return nil
 }

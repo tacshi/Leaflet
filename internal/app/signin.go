@@ -1,7 +1,6 @@
 package app
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -9,6 +8,7 @@ import (
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 func remoteQuery(order string) remote.Query { return remote.Query{Order: order} }
@@ -38,42 +38,42 @@ func (a *App) signInView(c *ui.Context) {
 					ui.Box(c).Size(44, 44).Radius(12).Background(pal.Accent).Center().Children(func() {
 						ui.Icon(c, theme.Icon("file-text")).FontSize(22).TextColor(pal.OnAccent)
 					})
-					ui.Text(c, "Sign in to Leaflet").FontSize(22).FontWeight(700).TextColor(pal.Text).Margin(10, 0, 0)
-					ui.Text(c, "Sync your pages between devices, share them, and use cloud models.").FontSize(13.5).TextColor(pal.TextMuted).TextAlign(ui.Center)
+					ui.Text(c, locales.SigninTitle()).FontSize(22).FontWeight(700).TextColor(pal.Text).Margin(10, 0, 0)
+					ui.Text(c, locales.SigninSubtitle()).FontSize(13.5).TextColor(pal.TextMuted).TextAlign(ui.Center)
 				})
 				if !a.backend.Configured() {
-					notice(c, "info", "info", "This build has no server. Set SUPABASE_URL and SUPABASE_ANON_KEY to sign in.", nil)
+					notice(c, "info", "info", locales.SigninNoServer(), nil)
 					return
 				}
-				ui.Segmented(c.Key("mode"), &s.mode, "Password", "Create account", "Email code")
+				ui.Segmented(c.Key("mode"), &s.mode, locales.SigninPassword(), locales.SigninCreateAccount(), locales.SigninEmailCode())
 				switch s.mode {
 				case 0:
-					field(c, "email", &s.email, "Email").AutoFocus()
-					if password(c, "password", &s.password, "Password").Submitted() {
+					field(c, "email", &s.email, locales.CommonEmail()).AutoFocus()
+					if password(c, "password", &s.password, locales.SigninPassword()).Submitted() {
 						a.doSignIn()
 					}
-					if primary(c, "go", "", "Sign in").Disabled(s.busy).Clicked() {
+					if primary(c, "go", "", locales.CommonSignIn()).Disabled(s.busy).Clicked() {
 						a.doSignIn()
 					}
 				case 1:
-					field(c, "name", &s.name, "Your name").AutoFocus()
-					field(c, "email", &s.email, "Email")
-					if password(c, "password", &s.password, "Password (at least 8 characters)").Submitted() {
+					field(c, "name", &s.name, locales.SettingsYourName()).AutoFocus()
+					field(c, "email", &s.email, locales.CommonEmail())
+					if password(c, "password", &s.password, locales.SigninPasswordNew()).Submitted() {
 						a.doSignUp()
 					}
-					if primary(c, "go", "", "Create account").Disabled(s.busy).Clicked() {
+					if primary(c, "go", "", locales.SigninCreateAccount()).Disabled(s.busy).Clicked() {
 						a.doSignUp()
 					}
 				case 2:
-					field(c, "email", &s.email, "Email").AutoFocus()
+					field(c, "email", &s.email, locales.CommonEmail()).AutoFocus()
 					if s.sent {
-						if field(c, "code", &s.code, "Code from the email").Submitted() {
+						if field(c, "code", &s.code, locales.SigninCode()).Submitted() {
 							a.doVerify()
 						}
-						if primary(c, "verify", "", "Sign in").Disabled(s.busy).Clicked() {
+						if primary(c, "verify", "", locales.CommonSignIn()).Disabled(s.busy).Clicked() {
 							a.doVerify()
 						}
-					} else if primary(c, "send", "", "Email me a code").Disabled(s.busy).Clicked() {
+					} else if primary(c, "send", "", locales.SigninSendCode()).Disabled(s.busy).Clicked() {
 						a.doSendCode()
 					}
 				}
@@ -84,7 +84,7 @@ func (a *App) signInView(c *ui.Context) {
 					notice(c, "ok", "check", s.info, nil)
 				}
 				ui.Divider(c)
-				if ghost(c, "local", "laptop", "Continue on this device").Clicked() {
+				if ghost(c, "local", "laptop", locales.SigninContinueLocal()).Clicked() {
 					a.back()
 					if a.route.Kind == "signin" {
 						a.show(Route{Kind: "home"})
@@ -107,7 +107,7 @@ func (a *App) runAuth(fn func() (*store.User, error)) {
 				return
 			}
 			if user == nil {
-				s.info = "Check your email to confirm the account, then sign in."
+				s.info = locales.SigninConfirmEmail()
 				return
 			}
 			a.signedIn(user)
@@ -118,7 +118,7 @@ func (a *App) runAuth(fn func() (*store.User, error)) {
 func (a *App) doSignIn() {
 	email, pw := strings.TrimSpace(signIn.email), signIn.password
 	if email == "" || pw == "" {
-		signIn.err = "Enter your email and password."
+		signIn.err = locales.SigninEnterEmailPassword()
 		return
 	}
 	a.runAuth(func() (*store.User, error) { return a.backend.SignIn(email, pw) })
@@ -127,7 +127,7 @@ func (a *App) doSignIn() {
 func (a *App) doSignUp() {
 	email, pw, name := strings.TrimSpace(signIn.email), signIn.password, strings.TrimSpace(signIn.name)
 	if len(pw) < 8 {
-		signIn.err = "Use a password of at least 8 characters."
+		signIn.err = locales.SigninPasswordTooShort()
 		return
 	}
 	a.runAuth(func() (*store.User, error) { return a.backend.SignUp(email, pw, name) })
@@ -145,7 +145,7 @@ func (a *App) doSendCode() {
 				return
 			}
 			signIn.sent = true
-			signIn.info = "We emailed you a sign-in link and code."
+			signIn.info = locales.SigninCodeSent()
 		})
 	}()
 }
@@ -170,9 +170,9 @@ func (a *App) signedIn(user *store.User) {
 	}
 	a.session = a.st.Session()
 	signIn = signInState{}
-	a.toast("Signed in as " + user.Email)
+	a.toast(locales.SettingsSignedInAs(user.Email))
 	if lost > 0 {
-		a.toast(fmt.Sprintf("Removed %d %s by the previous account that had not uploaded", lost, plural(lost, "change", "changes")))
+		a.toast(locales.SigninRemovedChanges(lost))
 	}
 	a.back()
 	if a.route.Kind == "signin" {

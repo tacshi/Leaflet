@@ -22,6 +22,7 @@ import (
 	"leaflet/internal/keychain"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // Controller is the recording in progress, and the transcriptions running.
@@ -107,7 +108,7 @@ func (r *Controller) RecoverInterrupted() {
 				x.Status, x.Error = "ready", ""
 				return
 			}
-			x.Status, x.Error = "failed", "Leaflet quit before the transcript was done."
+			x.Status, x.Error = "failed", locales.RecErrQuit()
 		}); err != nil {
 			log.Printf("recording: %v", err)
 		}
@@ -145,16 +146,16 @@ func (r *Controller) View() *mygo.WebView {
 // EngineLabel names where transcription runs.
 func EngineLabel(s store.SttSettings) string {
 	if s.Provider == "soniox" {
-		return "Soniox · cloud"
+		return locales.RecEngineSonioxCloud()
 	}
 	name := s.Model
 	if name == "" {
-		name = "Transcription server"
+		name = locales.RecEngineServer()
 	}
 	if IsLocalEndpoint(s.BaseURL) {
-		return name + " · your server"
+		return locales.RecEngineLocal(name)
 	}
-	return name + " · cloud"
+	return locales.RecEngineCloud(name)
 }
 
 // Usable says whether the chosen engine can transcribe now, and why not.
@@ -163,18 +164,18 @@ func Usable(s store.SttSettings, online, signedIn bool) error {
 	switch {
 	case s.Provider == "openai-compatible" && IsLocalEndpoint(s.BaseURL):
 		if s.BaseURL == "" {
-			return errors.New("Set up a transcription endpoint in Settings › Speech to text.") //nolint:staticcheck // shown to people as a sentence.
+			return errors.New(locales.RecErrSetUpEndpoint())
 		}
 		return nil
 	case s.Provider == "soniox" && LocalSonioxKey() != "":
 		if !online {
-			return errors.New("Transcription needs a connection.") //nolint:staticcheck // shown to people as a sentence.
+			return errors.New(locales.RecErrNeedsConnection())
 		}
 		return nil
 	case !signedIn:
-		return errors.New("Sign in to transcribe in the cloud, or set a transcription server on your network in Settings › Speech to text.") //nolint:staticcheck // shown to people as a sentence.
+		return errors.New(locales.RecErrSignInOrServer())
 	case !online:
-		return errors.New("Transcription needs a connection. Set a server on your network in Settings › Speech to text to record offline.") //nolint:staticcheck // shown to people as a sentence.
+		return errors.New(locales.RecErrOfflineServer())
 	}
 	return nil
 }
@@ -188,11 +189,11 @@ func (r *Controller) dir() (string, error) {
 // the page; it runs on the main thread.
 func (r *Controller) Start(pageID string, stt store.SttSettings, online bool, insert func(n *doc.Node)) error {
 	if r.Active() {
-		return errors.New("Already recording.") //nolint:staticcheck // shown to people as a sentence.
+		return errors.New(locales.RecErrAlreadyRecording())
 	}
 	transcribe := Usable(stt, online, r.be.SignedIn()) == nil
 	if r.win == nil {
-		return errors.New("The window is not ready.") //nolint:staticcheck // shown to people as a sentence.
+		return errors.New(locales.RecErrWindowNotReady())
 	}
 	id := doc.NewRowID()
 	blockID := doc.NewBlockID()
@@ -215,7 +216,7 @@ func (r *Controller) Start(pageID string, stt store.SttSettings, online bool, in
 		return err
 	}
 	insert(&doc.Node{ID: blockID, Type: "recording", Data: map[string]any{
-		"recording_id": rec.ID, "title": "Recording · " + time.Now().Format("Jan 2, 15:04"), "duration_ms": 0,
+		"recording_id": rec.ID, "title": locales.RecBlockTitle(time.Now()), "duration_ms": 0,
 	}})
 	return r.capture(wav, stt, transcribe, State{PageID: pageID, BlockID: blockID, ID: rec.ID})
 }
@@ -225,15 +226,15 @@ func (r *Controller) Start(pageID string, stt store.SttSettings, online bool, in
 // thread with what was heard; the audio is not kept.
 func (r *Controller) Test(stt store.SttSettings, online bool, d time.Duration, done func(text string, err error)) error {
 	if r.Active() {
-		return errors.New("Already recording.") //nolint:staticcheck // shown to people as a sentence.
+		return errors.New(locales.RecErrAlreadyRecording())
 	}
 	if r.win == nil {
-		return errors.New("The window is not ready.") //nolint:staticcheck // shown to people as a sentence.
+		return errors.New(locales.RecErrWindowNotReady())
 	}
 	why := Usable(stt, online, r.be.SignedIn())
 	// The server transcribes for a cloud endpoint only from a saved recording.
 	if why == nil && stt.Provider != "soniox" && !IsLocalEndpoint(stt.BaseURL) {
-		why = errors.New("A cloud endpoint transcribes saved recordings, so record on a page to try it.") //nolint:staticcheck // shown to people as a sentence.
+		why = errors.New(locales.RecErrCloudTest())
 	}
 	wav, err := CreateWav(filepath.Join(os.TempDir(), "leaflet-test-"+doc.NewRowID()+".wav"))
 	if err != nil {
@@ -256,7 +257,7 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 	r.mu.Unlock()
 	st.Starting, st.Engine = true, EngineLabel(stt)
 	if !transcribe {
-		st.Engine = "Audio only"
+		st.Engine = locales.RecAudioOnly()
 	}
 	r.State = st
 	service.add(session, &captureSink{
@@ -283,7 +284,7 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 		},
 		failed: func(msg string) {
 			r.update(func() {
-				r.State.Error = "The microphone did not start: " + msg
+				r.State.Error = locales.RecErrMicDetail(msg)
 				r.abort()
 			})
 		},
@@ -296,7 +297,7 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 				same := r.session == session
 				r.mu.Unlock()
 				if same && r.State.Starting {
-					r.State.Error = "The microphone did not start."
+					r.State.Error = locales.RecErrMic()
 					r.abort()
 				}
 			})
@@ -343,7 +344,7 @@ func (r *Controller) startSoniox(stt store.SttSettings) {
 			return
 		}
 	}
-	r.update(func() { r.State.Error = "Live transcript unavailable: " + err.Error() })
+	r.update(func() { r.State.Error = locales.RecErrLive(err.Error()) })
 }
 
 func (r *Controller) chunk(pcm []byte) {
@@ -356,7 +357,7 @@ func (r *Controller) chunk(pcm []byte) {
 	s := r.soniox
 	r.mu.Unlock()
 	if err != nil {
-		r.update(func() { r.State.Error = "The audio could not be saved: " + err.Error() })
+		r.update(func() { r.State.Error = locales.RecErrAudioNotSaved(err.Error()) })
 	}
 	if s != nil {
 		s.Send(pcm)
@@ -415,7 +416,7 @@ func (r *Controller) abort() {
 	if test != nil {
 		msg := r.State.Error
 		if msg == "" {
-			msg = "The microphone did not start."
+			msg = locales.RecErrMic()
 		}
 		test("", errors.New(msg))
 	}
@@ -502,7 +503,7 @@ func (r *Controller) Stop() {
 func (r *Controller) transcribeTest(path string, soniox *Soniox, stt store.SttSettings, why error, liveErr string) (string, error) {
 	defer func() { _ = os.Remove(path) }()
 	if why != nil {
-		return "", errors.New("The microphone works. " + why.Error())
+		return "", errors.New(locales.RecErrMicWorks(why.Error()))
 	}
 	var segs []store.Segment
 	var err error
@@ -511,7 +512,7 @@ func (r *Controller) transcribeTest(path string, soniox *Soniox, stt store.SttSe
 		segs, err = soniox.Finish()
 	case stt.Provider == "soniox":
 		if liveErr == "" {
-			liveErr = "Soniox did not connect in time."
+			liveErr = locales.RecErrSonioxTimeout()
 		}
 		err = errors.New(liveErr)
 	default:
@@ -533,7 +534,7 @@ func (r *Controller) transcribeTest(path string, soniox *Soniox, stt store.SttSe
 		}
 	}
 	if len(words) == 0 {
-		return "", errors.New("No words were heard. Check the microphone, and speak during the test.") //nolint:staticcheck // shown to people as a sentence.
+		return "", errors.New(locales.RecErrNoWords())
 	}
 	return strings.Join(words, " "), nil
 }
@@ -547,7 +548,7 @@ func (r *Controller) Retranscribe(id string, stt store.SttSettings, online bool)
 	// Soniox transcribes saved audio through the server; with only a key
 	// on this device it works while recording.
 	if stt.Provider == "soniox" && !r.be.SignedIn() {
-		return errors.New("Soniox transcribes as you record here; saved audio needs a Leaflet server.") //nolint:staticcheck // Soniox is a proper name and starts the message.
+		return errors.New(locales.RecErrSonioxSaved())
 	}
 	model := stt.Model
 	if stt.Provider == "soniox" {
@@ -603,7 +604,7 @@ func (r *Controller) transcribe(rec store.Recording, path string, soniox *Soniox
 	ctx := context.Background()
 	readAudio := func() ([]byte, error) {
 		if path == "" {
-			return nil, errors.New("The audio is not on this device.") //nolint:staticcheck // shown to people as a sentence.
+			return nil, errors.New(locales.RecErrAudioMissing())
 		}
 		return os.ReadFile(path) // #nosec G304 -- the recording's own audio file.
 	}
@@ -616,7 +617,7 @@ func (r *Controller) transcribe(rec store.Recording, path string, soniox *Soniox
 		return TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, audio, string(key), stt.Language)
 	}
 	if !r.be.SignedIn() {
-		return nil, errors.New("Sign in to transcribe in the cloud.") //nolint:staticcheck // shown to people as a sentence.
+		return nil, errors.New(locales.RecErrSignIn())
 	}
 	// The server reads the audio from Storage, so it goes up first.
 	if rec.AudioPath == "" {
@@ -673,5 +674,5 @@ func (r *Controller) Audio(ctx context.Context, rec store.Recording) ([]byte, er
 	if rec.AudioPath != "" && r.be.SignedIn() {
 		return r.be.Download(ctx, "recordings", rec.AudioPath)
 	}
-	return nil, errors.New("The audio is not on this device.") //nolint:staticcheck // shown to people as a sentence.
+	return nil, errors.New(locales.RecErrAudioMissing())
 }

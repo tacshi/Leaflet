@@ -1,13 +1,13 @@
 package app
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 func (a *App) sidebar(c *ui.Context) {
@@ -17,10 +17,10 @@ func (a *App) sidebar(c *ui.Context) {
 	ui.Row(c.Key("sidebar-top")).Height(max(bar.Height, 46)).Padding(0, 8, 0, bar.Left+8).Gap(2).AlignItems(ui.Center).DragWindow().Children(func() {
 		ui.Spacer(c)
 		tools(c, func() {
-			if iconButton(c, "search", "search", "Search (⌘P)").Clicked() {
+			if iconButton(c, "search", "search", locales.SidebarSearch()).Clicked() {
 				a.openSearch()
 			}
-			todos := iconButton(c, "todos", "square-check", "To-dos")
+			todos := iconButton(c, "todos", "square-check", locales.TodosTitle())
 			if a.route.Kind == "todos" {
 				todos.Background(pal.NavSelected).TextColor(pal.Text)
 			}
@@ -36,27 +36,27 @@ func (a *App) sidebar(c *ui.Context) {
 					a.navigate(Route{Kind: "home"})
 				}
 			}
-			if iconButton(c, "new-page", "square-pen", "New page (⌘N)").Clicked() {
+			if iconButton(c, "new-page", "square-pen", locales.SidebarNewPage()).Clicked() {
 				a.newPage("", "")
 			}
-			if iconButton(c, "hide-sidebar", "panel-left", "Hide sidebar (⌘\\)").Clicked() {
+			if iconButton(c, "hide-sidebar", "panel-left", locales.SidebarHide()).Clicked() {
 				a.toggleSidebar()
 			}
 		})
 	})
 	a.tree(c)
 	if len(a.pages) == 0 {
-		ui.Text(c, "No pages yet").FontSize(13).TextColor(pal.TextMuted).Padding(0, 18, 12)
+		ui.Text(c, locales.SidebarNoPages()).FontSize(13).TextColor(pal.TextMuted).Padding(0, 18, 12)
 	}
 	a.sidebarFooter(c)
 }
 
-func (a *App) sectionHeader(c *ui.Context, title, icon, label string, action func()) {
+func (a *App) sectionHeader(c *ui.Context, key, title, icon, label string, action func()) {
 	pal := theme.Of(c)
 	// In the tree, a header starts where the rows' arrows do: back over
 	// the slot the Outline keeps for an arrow, and the gap after it.
 	t := c.Theme()
-	row := ui.Row(c.Key("section:"+title)).Height(28).Padding(0, 4, 0, 0).Margin(10, 0, 2).
+	row := ui.Row(c.Key("section:"+key)).Height(28).Padding(0, 4, 0, 0).Margin(10, 0, 2).
 		MarginStart(-(t.Space(4) + t.Space(1))).Grow(1).AlignItems(ui.Center)
 	hovered := row.Hovered()
 	row.Children(func() {
@@ -76,24 +76,24 @@ func (a *App) sectionHeader(c *ui.Context, title, icon, label string, action fun
 }
 
 func (a *App) folderMenu(m *ui.Menu, f store.Folder) {
-	if m.Item("New page in folder").Chosen() {
+	if m.Item(locales.SidebarNewPageInFolder()).Chosen() {
 		a.treeOpen("folder", f.ID)
 		a.newPage("", f.ID)
 	}
-	if m.Item("Upload file…").Chosen() {
+	if m.Item(locales.SidebarUploadFile()).Chosen() {
 		a.uploadFile(f.ID)
 	}
-	if m.Item("Rename…").Chosen() {
+	if m.Item(locales.SidebarRenameEllipsis()).Chosen() {
 		ff := f
 		a.dialogs.openRenameFolder(&ff)
 	}
 	m.Separator()
-	if m.Item("Delete folder").Chosen() {
+	if m.Item(locales.SidebarDeleteFolder()).Chosen() {
 		if err := a.st.DeleteFolder(f); err != nil {
-			a.toast("Could not delete: " + err.Error())
+			a.toast(locales.SidebarCouldNotDelete(err.Error()))
 			return
 		}
-		a.toast(fmt.Sprintf("Deleted %s. Its pages moved to the top level.", f.Name))
+		a.toast(locales.SidebarFolderDeleted(f.Name))
 	}
 }
 
@@ -186,7 +186,12 @@ func (a *App) treeLabel(key string) string {
 	kind, id, _ := strings.Cut(key, ":")
 	switch kind {
 	case "section":
-		return map[string]string{"mine": "My space", "shared": "Shared with me"}[id]
+		switch id {
+		case "mine":
+			return locales.SidebarMySpace()
+		case "shared":
+			return locales.SidebarSharedWithMe()
+		}
 	case "folder":
 		for _, f := range a.folders {
 			if f.ID == id {
@@ -215,9 +220,9 @@ func (a *App) treeItem(c *ui.Context, key string) {
 	kind, id, _ := strings.Cut(key, ":")
 	if kind == "section" {
 		if id == "mine" {
-			a.sectionHeader(c, "My space", "folder-plus", "New folder", func() { a.dialogs.openRenameFolder(nil) })
+			a.sectionHeader(c, "mine", locales.SidebarMySpace(), "folder-plus", locales.SidebarNewFolder(), func() { a.dialogs.openRenameFolder(nil) })
 		} else {
-			a.sectionHeader(c, "Shared with me", "", "", nil)
+			a.sectionHeader(c, "shared", locales.SidebarSharedWithMe(), "", "", nil)
 		}
 		return
 	}
@@ -254,7 +259,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			ui.Icon(c, theme.Icon(icon)).FontSize(15)
 			ui.Text(c, f.Name).FontSize(13.5).Grow(1).SingleLine()
 			tools(c, func() {
-				button("more", "ellipsis", "Folder actions").Menu(func(m *ui.Menu) { a.folderMenu(m, f) })
+				button("more", "ellipsis", locales.SidebarFolderActions()).Menu(func(m *ui.Menu) { a.folderMenu(m, f) })
 			})
 		})
 		row.ContextMenu(func(m *ui.Menu) { a.folderMenu(m, f) })
@@ -273,10 +278,10 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			// + only while hovered, so a title has the room until then; the
 			// menu button stays built for its menu to report the choice.
 			tools(c, func() {
-				if hovered && button("add", "plus", "Add a subpage").Clicked() {
+				if hovered && button("add", "plus", locales.PageAddSubpage()).Clicked() {
 					a.newPage(p.ID, "")
 				}
-				button("more", "ellipsis", "Page actions").Menu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
+				button("more", "ellipsis", locales.PageActions()).Menu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
 			})
 		})
 		row.ContextMenu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
@@ -304,12 +309,12 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			ui.Text(c, f.Name).FontSize(13.5).Grow(1).SingleLine()
 		})
 		row.ContextMenu(func(m *ui.Menu) {
-			if m.Item("Open").Chosen() && f.LocalPath != "" {
+			if m.Item(locales.CommonOpen()).Chosen() && f.LocalPath != "" {
 				a.openFile(f)
 			}
-			if m.Item("Delete file").Chosen() {
+			if m.Item(locales.SidebarDeleteFile()).Chosen() {
 				if err := a.st.DeleteFile(f); err != nil {
-					a.toast("Could not delete: " + err.Error())
+					a.toast(locales.SidebarCouldNotDelete(err.Error()))
 				}
 			}
 		})
@@ -456,7 +461,7 @@ func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 		if at, target, out, _, ok := spot(d); ok {
 			if target == "" {
 				if err := a.movePage(d.id, "", func() error { return a.st.MovePage(d.id, "", "", "") }); err != nil {
-					a.toast("Could not move: " + err.Error())
+					a.toast(locales.SidebarCouldNotMove(err.Error()))
 				}
 				return
 			}
@@ -515,7 +520,7 @@ func (a *App) dropPage(id, key string, at int, out bool) {
 		}
 	}
 	if err := a.movePage(id, parent, move); err != nil {
-		a.toast("Could not move: " + err.Error())
+		a.toast(locales.SidebarCouldNotMove(err.Error()))
 	}
 }
 
@@ -524,44 +529,44 @@ func (a *App) dropPage(id, key string, at int, out bool) {
 // Keep on this device need a server to share and sync with.
 func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 	editable := a.canEdit(p.ID)
-	if m.Item("Add subpage").Disabled(!editable).Chosen() {
+	if m.Item(locales.SidebarAddSubpage()).Disabled(!editable).Chosen() {
 		a.newPage(p.ID, "")
 	}
-	if m.Item("Rename").Disabled(!editable).Chosen() {
+	if m.Item(locales.CommonRename()).Disabled(!editable).Chosen() {
 		a.openPage(p.ID)
 		a.focusTitle(true)
 	}
 	// A template stays out of the page list: it doesn't move among the
 	// pages, and starts copies from a blank page rather than here.
 	if !p.Template {
-		if m.Item("Move to…").Disabled(!editable).Chosen() {
+		if m.Item(locales.SidebarMoveTo()).Disabled(!editable).Chosen() {
 			a.dialogs.openMove(p.ID)
 		}
-		if m.Item("Duplicate").Chosen() {
+		if m.Item(locales.SidebarDuplicate()).Chosen() {
 			a.duplicatePage(p)
 		}
-		if m.Item("Save as template").Chosen() {
+		if m.Item(locales.SidebarSaveAsTemplate()).Chosen() {
 			a.saveAsTemplate(p)
 		}
 	}
 	m.Separator()
-	if m.Item("Page history").Chosen() {
+	if m.Item(locales.SidebarPageHistory()).Chosen() {
 		a.openHistory(p.ID)
 	}
 	server := a.backend.Configured()
-	if !header && server && !p.Template && m.Item("Share…").Chosen() {
+	if !header && server && !p.Template && m.Item(locales.SidebarShareEllipsis()).Chosen() {
 		a.openShare(p.ID)
 	}
-	if m.Item("Export as Markdown…").Chosen() {
+	if m.Item(locales.SidebarExportMarkdown()).Chosen() {
 		a.exportPage(p.ID)
 	}
-	if server && !p.Template && m.Item("Keep on this device").Checked(p.KeepOffline || a.settings.AllPagesOffline).Disabled(a.settings.AllPagesOffline).Chosen() {
+	if server && !p.Template && m.Item(locales.SidebarKeepOnDevice()).Checked(p.KeepOffline || a.settings.AllPagesOffline).Disabled(a.settings.AllPagesOffline).Chosen() {
 		if err := a.st.SetKeepOffline(p.ID, !p.KeepOffline); err != nil {
-			a.toast("Could not save: " + err.Error())
+			a.toast(locales.SidebarCouldNotSave(err.Error()))
 		}
 	}
 	m.Separator()
-	if m.Item("Delete").Disabled(!editable).Chosen() {
+	if m.Item(locales.CommonDelete()).Disabled(!editable).Chosen() {
 		a.deletePage(p.ID)
 	}
 }
@@ -577,18 +582,18 @@ func (a *App) sidebarFooter(c *ui.Context) {
 			}
 		})
 		if !a.session.SignedIn && a.backend.Configured() {
-			if ghost(c, "sign-in", "", "Sign in").Clicked() {
+			if ghost(c, "sign-in", "", locales.CommonSignIn()).Clicked() {
 				a.navigate(Route{Kind: "signin"})
 			}
 		}
 		tools(c, func() {
 			if a.updateReady != "" {
-				tip := "Restart to update to " + a.updateReady
+				tip := locales.SidebarRestartToUpdate(a.updateReady)
 				if iconButton(c, "update", "rotate-cw", tip).TextColor(pal.Accent).Clicked() {
 					a.restartToUpdate()
 				}
 			}
-			settings := iconButton(c, "settings", "settings", "Settings (⌘,)")
+			settings := iconButton(c, "settings", "settings", locales.SidebarSettings())
 			if a.settingsOpen {
 				settings.Background(pal.NavSelected).TextColor(pal.Text)
 			}
@@ -604,13 +609,13 @@ func (a *App) sidebarFooter(c *ui.Context) {
 func (a *App) accountStatus() string {
 	switch {
 	case !a.session.SignedIn:
-		return "On this device"
+		return locales.SidebarOnDevice()
 	case a.syncing:
-		return "Syncing…"
+		return locales.SidebarSyncing()
 	case !a.online || a.settings.WorkOffline:
-		return "Offline"
+		return locales.PageSyncOffline()
 	case a.pending > 0:
-		return fmt.Sprintf("%d %s to sync", a.pending, plural(a.pending, "change", "changes"))
+		return locales.SidebarToSync(a.pending)
 	}
-	return "Synced"
+	return locales.SidebarSynced()
 }

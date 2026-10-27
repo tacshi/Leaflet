@@ -15,6 +15,7 @@ import (
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/locales"
 )
 
 // startRecording records into the open page.
@@ -29,7 +30,7 @@ func (a *App) startRecording(pageID, _ string) {
 		if c := a.st.Content(pageID); c != nil {
 			_ = c.Insert(doc.Position{At: "end"}, n)
 			if _, _, err := a.st.SaveContent(pageID, c); err != nil {
-				a.toast("Could not save: " + err.Error())
+				a.toast(locales.RecCouldNotSave(err.Error()))
 			}
 		}
 	})
@@ -58,7 +59,7 @@ func (a *App) recordingPill(c *ui.Context) {
 		}
 		label := fmtDuration(a.rec.Elapsed())
 		if st.Starting {
-			label = "Starting…"
+			label = locales.RecStarting()
 		}
 		ui.Text(c, label).FontSize(12.5).FontWeight(600).TextColor(pal.DangerText).FontFeatures("tnum")
 		c.After(500 * time.Millisecond)
@@ -66,7 +67,7 @@ func (a *App) recordingPill(c *ui.Context) {
 			// The capture page must be in the window to keep running.
 			ui.WebView(c, v).Size(1, 1).Opacity(0.01)
 		}
-		pause := ui.ButtonBase(c.Key("pause")).Size(22, 22).Center().Radius(999).Label("Pause").TextColor(pal.DangerText)
+		pause := ui.ButtonBase(c.Key("pause")).Size(22, 22).Center().Radius(999).Label(locales.CommonPause()).TextColor(pal.DangerText)
 		pause.Children(func() {
 			icon := "pause"
 			if st.Paused {
@@ -77,8 +78,8 @@ func (a *App) recordingPill(c *ui.Context) {
 		if pause.Clicked() {
 			a.rec.TogglePause()
 		}
-		stop := ui.ButtonBase(c.Key("stop")).Height(22).Padding(0, 8).Radius(999).Background(pal.Danger).TextColor(pal.OnAccent).Label("Stop")
-		stop.Children(func() { ui.Text(c, "Stop").FontSize(12).FontWeight(600) })
+		stop := ui.ButtonBase(c.Key("stop")).Height(22).Padding(0, 8).Radius(999).Background(pal.Danger).TextColor(pal.OnAccent).Label(locales.RecStop())
+		stop.Children(func() { ui.Text(c, locales.RecStop()).FontSize(12).FontWeight(600) })
 		if stop.Clicked() {
 			a.rec.Stop()
 		}
@@ -157,27 +158,27 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 				status := ""
 				switch {
 				case err != nil:
-					status = "Recording not found on this device"
+					status = locales.RecNotFound()
 				case live:
 					status = a.rec.State.Engine
 				case a.rec.Finishing[id]:
-					status = "Adding timestamps…"
+					status = locales.RecAddingTimestamps()
 				case rec.Status == "transcribing" || a.rec.Transcribing[id]:
-					status = "Transcribing…"
+					status = locales.RecTranscribing()
 				case rec.Status == "failed":
-					status = "Transcription failed"
+					status = locales.RecTranscriptionFailed()
 				case rec.SttProvider == "":
-					status = fmtDuration(time.Duration(rec.DurationMs)*time.Millisecond) + " · Audio only"
+					status = locales.RecStatus(fmtDuration(time.Duration(rec.DurationMs)*time.Millisecond), locales.RecAudioOnly())
 				default:
-					status = fmtDuration(time.Duration(rec.DurationMs)*time.Millisecond) + " · " + map[bool]string{true: "Soniox", false: "Endpoint"}[rec.SttProvider == "soniox"]
+					status = locales.RecStatus(fmtDuration(time.Duration(rec.DurationMs)*time.Millisecond), map[bool]string{true: "Soniox", false: locales.CommonEndpoint()}[rec.SttProvider == "soniox"])
 				}
 				ui.Text(c, status).FontSize(12).TextColor(pal.TextMuted)
 			})
 			if err == nil && !live && rec.Status != "recording" {
 				pl := players[id]
-				icon, label := "play", "Play"
+				icon, label := "play", locales.RecPlay()
 				if pl != nil && pl.p != nil && pl.p.Playing() {
-					icon, label = "pause", "Pause"
+					icon, label = "pause", locales.CommonPause()
 					c.After(250 * time.Millisecond)
 				}
 				var more ui.Element
@@ -189,23 +190,23 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					if b.Clicked() {
 						a.play(rec)
 					}
-					more = iconButton(c, "more", "ellipsis", "Recording actions")
+					more = iconButton(c, "more", "ellipsis", locales.RecActions())
 				})
 				more.Menu(func(m *ui.Menu) {
-					if m.Item("Copy transcript").Disabled(len(rec.Transcript) == 0).Chosen() {
+					if m.Item(locales.RecCopyTranscript()).Disabled(len(rec.Transcript) == 0).Chosen() {
 						c.WriteClipboard(transcriptPlain(rec))
-						c.Toast("Copied")
+						c.Toast(locales.CommonCopied())
 					}
-					if m.Item("Insert transcript as text").Disabled(len(rec.Transcript) == 0).Chosen() {
+					if m.Item(locales.RecInsertTranscript()).Disabled(len(rec.Transcript) == 0).Chosen() {
 						a.insertTranscript(n.ID, rec)
 					}
-					if m.Item("Summarize with agent").Disabled(len(rec.Transcript) == 0 || !a.hub.Available()).Chosen() {
+					if m.Item(locales.RecSummarize()).Disabled(len(rec.Transcript) == 0 || !a.hub.Available()).Chosen() {
 						a.panelOpen, a.panelTab = true, 0
 						a.hub.Chat(a.page.id, "Summarize the recording “"+n.Str("title")+"” below it on the page. Its transcript:\n"+transcriptText(rec), []string{n.ID})
 					}
-					label := "Transcribe again"
+					label := locales.RecTranscribeAgain()
 					if len(rec.Transcript) == 0 {
-						label = "Transcribe"
+						label = locales.RecTranscribe()
 					}
 					if m.Item(label).Chosen() {
 						if err := a.rec.Retranscribe(id, a.settings.Stt, a.online && !a.settings.WorkOffline); err != nil {
@@ -251,7 +252,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 						}
 						line.Children(func() {
 							if s.Speaker != "" {
-								ui.Text(c, "Speaker "+s.Speaker).FontSize(11.5).FontWeight(600).TextColor(pal.TextMuted)
+								ui.Text(c, locales.RecSpeaker(s.Speaker)).FontSize(11.5).FontWeight(600).TextColor(pal.TextMuted)
 							}
 							ui.Text(c, s.Text).FontSize(14).Font(theme.PageFont).TextColor(pal.Text)
 						})
@@ -268,13 +269,14 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 // recordingTitle is the name a recording block shows: its title, with the
 // time it was made where the title, as older blocks', gives only the day,
 // or just "Recording" on a page of the same name, as the menu bar makes.
+// Older blocks were titled in English, "Recording · Jan 2".
 func (a *App) recordingTitle(n *doc.Node, rec store.Recording, found bool) string {
 	title := n.Str("title")
 	if day := rec.CreatedAt.Local(); found && !rec.CreatedAt.IsZero() && title == "Recording · "+day.Format("Jan 2") {
-		title = "Recording · " + day.Format("Jan 2, 15:04")
+		title = locales.RecBlockTitle(day)
 	}
 	if a.page != nil && strings.TrimSpace(a.page.title) == title {
-		return "Recording"
+		return locales.CommonRecording()
 	}
 	return title
 }
@@ -285,7 +287,7 @@ func transcriptPlain(rec store.Recording) string {
 	var lines []string
 	for _, s := range recording.Tidy(rec.Transcript) {
 		if s.Speaker != "" {
-			lines = append(lines, "Speaker "+s.Speaker+": "+s.Text)
+			lines = append(lines, locales.RecSpeakerLine(s.Speaker, s.Text))
 		} else {
 			lines = append(lines, s.Text)
 		}
@@ -407,13 +409,13 @@ func (a *App) speechSettings(c *ui.Context) {
 		s.sonioxSaved = recording.LocalSonioxKey() != ""
 	}
 	changed := false
-	heading(c, "Speech to text", "How recordings become transcripts.")
+	heading(c, locales.RecSttTitle(), locales.RecSttSubtitle())
 	prov := map[string]int{"openai-compatible": 0, "soniox": 1}[stt.Provider]
 	// One card for the engine and its settings, their controls one width
 	// so their left edges line up.
 	card(c, "engine", func() {
-		settingRow(c, "provider", "Transcription", engineStatus(*stt, s.sonioxSaved || a.session.SignedIn), true, func() {
-			if ui.Segmented(c.Key("provider"), &prov, "Endpoint", "Soniox"); true {
+		settingRow(c, "provider", locales.RecSttTranscription(), engineStatus(*stt, s.sonioxSaved || a.session.SignedIn), true, func() {
+			if ui.Segmented(c.Key("provider"), &prov, locales.CommonEndpoint(), "Soniox"); true {
 				want := []string{"openai-compatible", "soniox"}[prov]
 				if want != stt.Provider {
 					stt.Provider = want
@@ -422,12 +424,12 @@ func (a *App) speechSettings(c *ui.Context) {
 			}
 		})
 		if stt.Provider == "openai-compatible" {
-			settingRow(c, "url", "Endpoint", "OpenAI-compatible; one on your network works offline", false, func() {
+			settingRow(c, "url", locales.CommonEndpoint(), locales.RecSttEndpointDesc(), false, func() {
 				if field(c, "url", &stt.BaseURL, "http://localhost:8000/v1").Width(sttControlW - 20).Changed() {
 					changed = true
 				}
 			})
-			settingRow(c, "model", "Model", "", false, func() {
+			settingRow(c, "model", locales.CommonModel(), "", false, func() {
 				if field(c, "model", &stt.Model, "gpt-transcribe").Width(sttControlW - 20).Changed() {
 					changed = true
 				}
@@ -436,11 +438,11 @@ func (a *App) speechSettings(c *ui.Context) {
 				// The key row comes with an address: where it is says
 				// where the key is kept.
 			} else if recording.IsLocalEndpoint(stt.BaseURL) {
-				settingRow(c, "key", "API key", "Kept in this device's keychain", false, func() {
+				settingRow(c, "key", locales.RecSttApiKey(), locales.RecSttKeyInKeychain(), false, func() {
 					ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
-						if growPassword(c, "key", &s.key, "Optional").Changed() {
+						if growPassword(c, "key", &s.key, locales.RecSttOptional()).Changed() {
 							if err := keychain.Set("stt.endpoint.key", []byte(s.key)); err != nil {
-								a.toast("Could not save the key: " + err.Error())
+								a.toast(locales.RecSttKeyNotSaved(err.Error()))
 							}
 						}
 						a.sttTestButton(c, func(ctx context.Context) error {
@@ -453,18 +455,18 @@ func (a *App) speechSettings(c *ui.Context) {
 				// The server calls a cloud endpoint with the key of one of
 				// the agent providers.
 				var ids []string
-				names := map[string]string{"": "No key"}
+				names := map[string]string{"": locales.RecSttNoKey()}
 				for _, p := range a.providers {
 					if !p.IsLocal {
 						ids = append(ids, p.ID)
 						names[p.ID] = p.Name
 					}
 				}
-				desc := "The server calls the endpoint with this provider's key"
+				desc := locales.RecSttKeyFromDesc()
 				if len(ids) == 0 {
-					desc = "Add a cloud agent provider, such as OpenAI, to use its key here"
+					desc = locales.RecSttAddProvider()
 				}
-				settingRow(c, "key", "API key from", desc, false, func() {
+				settingRow(c, "key", locales.RecSttKeyFrom(), desc, false, func() {
 					choice := stt.ProviderID
 					if selectBox(c, "key-from", &choice, append([]string{""}, ids...), func(s string) string { return names[s] }, sttControlW); choice != stt.ProviderID {
 						stt.ProviderID = choice
@@ -474,14 +476,14 @@ func (a *App) speechSettings(c *ui.Context) {
 			}
 			return
 		}
-		where, ph := "Live transcripts; key kept on the server", "Paste a key"
+		where, ph := locales.RecSttSonioxOnServer(), locales.RecSttPasteKey()
 		if !a.session.SignedIn {
-			where = "Live transcripts; key kept on this device"
+			where = locales.RecSttSonioxOnDevice()
 		}
 		if s.sonioxSaved {
-			ph = "Saved"
+			ph = locales.RecSttKeySaved()
 		}
-		settingRow(c, "key", "Soniox API key", where, false, func() {
+		settingRow(c, "key", locales.RecSttSonioxKey(), where, false, func() {
 			ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
 				if growPassword(c, "key", &s.soniox, ph).Changed() {
 					s.testResult = ""
@@ -491,18 +493,18 @@ func (a *App) speechSettings(c *ui.Context) {
 					key = recording.LocalSonioxKey()
 				}
 				a.sttTestButton(c, func(ctx context.Context) error { return recording.TestSonioxKey(ctx, key) })
-				if button(c, "save-key", "", "Save").Disabled(s.saving || strings.TrimSpace(s.soniox) == "").Clicked() {
+				if button(c, "save-key", "", locales.CommonSave()).Disabled(s.saving || strings.TrimSpace(s.soniox) == "").Clicked() {
 					a.saveSonioxKey()
 				}
 			})
 		})
-		settingRow(c, "model", "Model", "", false, func() {
+		settingRow(c, "model", locales.CommonModel(), "", false, func() {
 			if field(c, "model", &stt.SonioxModel, "stt-rt-v5").Width(sttControlW - 20).Changed() {
 				changed = true
 			}
 		})
 		sp := stt.SpeakerLabels
-		settingRow(c, "speakers", "Label speakers", "", false, func() {
+		settingRow(c, "speakers", locales.RecSttSpeakers(), "", false, func() {
 			if ui.Switch(c.Key("speakers"), &sp).Changed() {
 				stt.SpeakerLabels = sp
 				changed = true
@@ -513,10 +515,10 @@ func (a *App) speechSettings(c *ui.Context) {
 	if s.testResult != "" {
 		notice(c, map[bool]string{true: "ok", false: "danger"}[s.testOK], map[bool]string{true: "check", false: "circle-alert"}[s.testOK], s.testResult, nil)
 	}
-	label(c, "Recording")
+	label(c, locales.CommonRecording())
 	card(c, "recording", func() {
 		lang := stt.Language
-		settingRow(c, "lang", "Language", "", true, func() {
+		settingRow(c, "lang", locales.RecSttLanguage(), "", true, func() {
 			if _, ok := recording.Languages[lang]; !ok {
 				lang = "auto"
 			}
@@ -526,7 +528,7 @@ func (a *App) speechSettings(c *ui.Context) {
 			}
 		})
 		keep := stt.KeepAudio
-		settingRow(c, "keep", "Keep the audio", "Otherwise only the transcript stays", false, func() {
+		settingRow(c, "keep", locales.RecSttKeepAudio(), locales.RecSttKeepAudioDesc(), false, func() {
 			if ui.Switch(c.Key("keep"), &keep).Changed() {
 				stt.KeepAudio = keep
 				changed = true
@@ -536,28 +538,28 @@ func (a *App) speechSettings(c *ui.Context) {
 		if s.micTesting {
 			switch {
 			case a.rec.State.Starting:
-				desc = "Starting the microphone…"
+				desc = locales.RecSttMicStarting()
 			case a.rec.Active() && a.rec.State.LiveText != "":
 				desc = a.rec.State.LiveText
 			case a.rec.Active():
-				desc = "Listening for 4 seconds; say something"
+				desc = locales.RecSttListening(4)
 			default:
-				desc = "Transcribing…"
+				desc = locales.RecTranscribing()
 			}
 		}
-		settingRow(c, "test", "Test with microphone", desc, false, func() {
+		settingRow(c, "test", locales.RecSttTestMic(), desc, false, func() {
 			if v := a.rec.View(); s.micTesting && v != nil {
 				// The capture page must be in the window to keep running.
 				ui.WebView(c, v).Size(1, 1).Opacity(0.01)
 			}
-			label := "Record a test"
+			label := locales.RecSttRecordTest()
 			if s.micTesting {
-				label = "Testing…"
+				label = locales.RecSttTesting()
 			}
 			if button(c, "test", "mic", label).Disabled(a.rec.Active() || s.micTesting).Clicked() {
 				s.micTesting, s.micText = true, ""
 				err := a.rec.Test(a.settings.Stt, a.online && !a.settings.WorkOffline, 4*time.Second, func(text string, err error) {
-					s.micTesting, s.micText = false, "“"+text+"”"
+					s.micTesting, s.micText = false, locales.RecSttHeard(text)
 					if err != nil {
 						s.micText = err.Error()
 					}
@@ -578,7 +580,7 @@ func (a *App) speechSettings(c *ui.Context) {
 // engineStatus says where transcription runs, or that it is not set up.
 func engineStatus(stt store.SttSettings, hasSonioxKey bool) string {
 	if stt.Provider == "soniox" && !hasSonioxKey || stt.Provider != "soniox" && strings.TrimSpace(stt.BaseURL) == "" {
-		return "Not set up"
+		return locales.RecSttNotSetUp()
 	}
 	return recording.EngineLabel(stt)
 }
@@ -586,9 +588,9 @@ func engineStatus(stt store.SttSettings, hasSonioxKey bool) string {
 // sttTestButton is a Test button that runs test and shows how it went.
 func (a *App) sttTestButton(c *ui.Context, test func(ctx context.Context) error) {
 	s := &speech
-	label := "Test"
+	label := locales.RecSttTest()
 	if s.testing {
-		label = "Testing…"
+		label = locales.RecSttTesting()
 	}
 	// Wide enough for "Testing…", so the row keeps its layout.
 	if !button(c, "test", "", label).MinWidth(82).Justify(ui.Center).Disabled(s.testing).Clicked() {
@@ -604,7 +606,7 @@ func (a *App) sttTestButton(c *ui.Context, test func(ctx context.Context) error)
 			if err != nil {
 				s.testResult = err.Error()
 			} else {
-				s.testResult = "It works"
+				s.testResult = locales.RecSttItWorks()
 			}
 		})
 	}()
@@ -620,11 +622,11 @@ func (a *App) saveSonioxKey() {
 		return
 	}
 	if err := recording.SetLocalSonioxKey(key); err != nil {
-		a.toast("Could not save the key: " + err.Error())
+		a.toast(locales.RecSttKeyNotSaved(err.Error()))
 		return
 	}
 	s.soniox, s.sonioxSaved, s.testResult = "", true, ""
-	a.toast("Saved the key on this device")
+	a.toast(locales.RecSttSavedOnDevice())
 }
 
 func (a *App) saveSttKey(provider, key string) {
@@ -639,11 +641,11 @@ func (a *App) saveSttKey(provider, key string) {
 		a.update(func() {
 			speech.saving = false
 			if err != nil {
-				a.toast("Could not save the key: " + err.Error())
+				a.toast(locales.RecSttKeyNotSaved(err.Error()))
 				return
 			}
 			speech.soniox, speech.key = "", ""
-			a.toast("Saved the key on the server")
+			a.toast(locales.RecSttSavedOnServer())
 		})
 	}()
 }

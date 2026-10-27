@@ -1,9 +1,17 @@
 package recording
 
-import "sort"
+import (
+	"sort"
+	"strings"
+
+	"github.com/egoist/mygo/i18n"
+
+	"leaflet/locales"
+)
 
 // Languages are the languages speech engines take, by ISO 639-1 code
-// (Whisper's set, which OpenAI-compatible endpoints follow).
+// (Whisper's set, which OpenAI-compatible endpoints follow), with their
+// English names, which name the ones CLDR has no name of.
 var Languages = map[string]string{
 	"af": "Afrikaans", "am": "Amharic", "ar": "Arabic", "as": "Assamese", "az": "Azerbaijani",
 	"ba": "Bashkir", "be": "Belarusian", "bg": "Bulgarian", "bn": "Bengali", "bo": "Tibetan",
@@ -27,20 +35,35 @@ var Languages = map[string]string{
 	"vi": "Vietnamese", "yi": "Yiddish", "yo": "Yoruba", "yue": "Cantonese", "zh": "Chinese",
 }
 
-// LanguageCodes lists "auto" then the codes by name.
+// autonymCodes are the CLDR tags of codes Whisper writes otherwise.
+var autonymCodes = map[string]string{"jw": "jv"}
+
+// LanguageCodes lists "auto" then the codes by the names they show.
 func LanguageCodes() []string {
 	codes := make([]string, 0, len(Languages)+1)
 	for c := range Languages {
 		codes = append(codes, c)
 	}
-	sort.Slice(codes, func(i, j int) bool { return Languages[codes[i]] < Languages[codes[j]] })
+	sort.Slice(codes, func(i, j int) bool {
+		return strings.ToLower(LanguageName(codes[i])) < strings.ToLower(LanguageName(codes[j]))
+	})
 	return append([]string{"auto"}, codes...)
 }
 
-// LanguageName names a code; "auto" and unknown codes detect.
+// LanguageName names a code in its own language, as menus of languages
+// do ("Deutsch", "日本語"), or in English where CLDR has no name of it;
+// "auto" and unknown codes detect.
 func LanguageName(code string) string {
-	if n, ok := Languages[code]; ok {
-		return n
+	n, ok := Languages[code]
+	if !ok {
+		return locales.RecLanguageDetect()
 	}
-	return "Detect"
+	tag := code
+	if t, ok := autonymCodes[code]; ok {
+		tag = t
+	}
+	if a := i18n.Autonym(tag); a != "" {
+		return a
+	}
+	return n
 }

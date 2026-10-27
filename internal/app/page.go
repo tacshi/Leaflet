@@ -147,12 +147,12 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 // byline; the account row says how syncing goes.
 func (a *App) syncStatus(c *ui.Context) {
 	pal := theme.Of(c)
-	if !a.session.SignedIn {
+	if !a.syncOn() {
 		return
 	}
 	var tip, icon string
 	switch {
-	case a.settings.WorkOffline || !a.online:
+	case a.offlineNow():
 		tip, icon = locales.PageSyncOffline(), "cloud-off"
 		if a.pending > 0 {
 			tip = locales.PageSyncOfflineQueued(a.pending)

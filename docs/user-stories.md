@@ -39,7 +39,7 @@ data in the folder where both were already set up.
 | 28 | Settings › Account: name, theme, text size apply immediately and persist | ✅ |
 | 29 | Settings › Agent providers: open, Test | ⚠️ B7, B8 |
 | 30 | Settings › Speech to text: Test key, Record a test | ✅ key test · ➖ mic test inconclusive (speaker audio from `say` didn't reach the mic) |
-| 31 | Settings › Offline and storage | ✅ (only "Data folder" and "Image cache" in this build) |
+| 31 | Settings › Sync and storage | ✅ (only "Data folder" and "Image cache" in this build) |
 | 32 | Share while signed out explains that a server is needed | ✅ |
 
 Not testable here: sign-in, sync, conflicts, sharing roles, devices, delete

@@ -226,7 +226,7 @@ func TestSettingsSections(t *testing.T) {
 	a.settingsSection = "account"
 	tt := ui.NewTester(func(c *ui.Context) { a.settingsNav(c).FillHeight() }, 300, 400)
 	tt.Frame()
-	if err := tt.Click("Offline and storage"); err != nil {
+	if err := tt.Click("Sync and storage"); err != nil {
 		t.Fatal(err)
 	}
 	if a.settingsSection != "offline" {

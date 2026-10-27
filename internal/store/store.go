@@ -1,5 +1,6 @@
 // Package store is the app's database on this device: a mirror of the
-// Supabase tables plus device-only state (outbox, conflicts, settings).
+// Supabase tables plus device-only state (outbox, conflicts, settings, and
+// what iCloud sync has seen of the other devices).
 // Every change is saved here first and synced later.
 package store
 
@@ -73,6 +74,12 @@ CREATE TABLE IF NOT EXISTS page_members (
   page_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '',
   email TEXT NOT NULL DEFAULT '', PRIMARY KEY (page_id, user_id));
 CREATE TABLE IF NOT EXISTS key_values (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS peer_contents (
+  peer_id TEXT NOT NULL, page_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL,
+  PRIMARY KEY (peer_id, page_id));
+CREATE TABLE IF NOT EXISTS row_versions (
+  tbl TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, device TEXT NOT NULL,
+  PRIMARY KEY (tbl, id));
 `
 
 // Change says what changed: a table, and the page when one is concerned.
@@ -308,7 +315,8 @@ func (s *Store) DeleteValue(key string) error {
 // Wipe removes everything stored on this device.
 func (s *Store) Wipe() error {
 	for _, t := range []string{"spaces", "folders", "pages", "page_contents", "comments", "recordings",
-		"files", "ai_jobs", "model_providers", "page_history", "outbox", "conflicts", "page_members", "key_values"} {
+		"files", "ai_jobs", "model_providers", "page_history", "outbox", "conflicts", "page_members", "key_values",
+		"peer_contents", "row_versions"} {
 		if _, err := s.db.Exec("DELETE FROM " + t); err != nil {
 			return err
 		}

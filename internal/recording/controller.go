@@ -32,6 +32,11 @@ type Controller struct {
 	win    *mygo.Window
 	update func(func())
 
+	// Blobs is where audio goes up to for the other devices, and comes
+	// from when it is not on this one: the sync service. Without it,
+	// audio goes to Supabase when signed in.
+	Blobs Blobs
+
 	// The recording in progress, read and written on the main thread.
 	State State
 
@@ -57,6 +62,21 @@ type Controller struct {
 	// among them whose words came live, now getting their timestamps.
 	Transcribing map[string]bool
 	Finishing    map[string]bool
+}
+
+// Blobs is where audio goes up to and comes from.
+type Blobs interface {
+	// Uploads reports whether audio goes up at all.
+	Uploads() bool
+	CanFetch() bool
+	Fetch(ctx context.Context, bucket, path string) ([]byte, error)
+}
+
+func (r *Controller) uploads() bool {
+	if r.Blobs != nil {
+		return r.Blobs.Uploads()
+	}
+	return r.be.SignedIn()
 }
 
 // State is what the views show of the recording in progress.
@@ -478,7 +498,7 @@ func (r *Controller) Stop() {
 			rec, err := r.st.UpdateRecording(st.ID, func(rec *store.Recording) {
 				rec.Status, rec.DurationMs, rec.SttProvider, rec.SttModel = "ready", int(duration.Milliseconds()), "", ""
 			})
-			if err == nil && rec.AudioPath == "" && r.be.SignedIn() {
+			if err == nil && rec.AudioPath == "" && r.uploads() {
 				if err := r.st.QueueUpload(rec); err != nil {
 					log.Printf("recording: %v", err)
 				}
@@ -584,7 +604,7 @@ func (r *Controller) finish(rec store.Recording, path string, soniox *Soniox, st
 		x.Status, x.Error, x.Transcript = "ready", "", segs
 	})
 	if stt.KeepAudio {
-		if updated.AudioPath == "" && r.be.SignedIn() {
+		if updated.AudioPath == "" && r.uploads() {
 			if err := r.st.QueueUpload(updated); err != nil {
 				log.Printf("recording: %v", err)
 			}
@@ -664,14 +684,18 @@ func (r *Controller) transcribe(rec store.Recording, path string, soniox *Soniox
 	return segs, nil
 }
 
-// Audio returns a recording's WAV audio: on this device, or from Storage.
+// Audio returns a recording's WAV audio: on this device, or from where it
+// went up to.
 func (r *Controller) Audio(ctx context.Context, rec store.Recording) ([]byte, error) {
 	if rec.LocalPath != "" {
 		if data, err := os.ReadFile(rec.LocalPath); err == nil {
 			return data, nil
 		}
 	}
-	if rec.AudioPath != "" && r.be.SignedIn() {
+	if rec.AudioPath != "" && r.Blobs != nil && r.Blobs.CanFetch() {
+		return r.Blobs.Fetch(ctx, "recordings", rec.AudioPath)
+	}
+	if rec.AudioPath != "" && r.Blobs == nil && r.be.SignedIn() {
 		return r.be.Download(ctx, "recordings", rec.AudioPath)
 	}
 	return nil, errors.New(locales.RecErrAudioMissing())

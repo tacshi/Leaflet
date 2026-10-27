@@ -426,15 +426,29 @@ func ChangedBlocks(a, b *Content) map[string]bool {
 
 // Stamped returns the content with its meta updated against previous:
 // blocks that are new or whose content, type or position changed get now;
-// blocks that went get a tombstone.
+// blocks that went get a tombstone. A block's time never goes back, so an
+// edit on a device whose clock is behind still beats the version it
+// replaced.
 func (c *Content) Stamped(previous *Content, now int64) *Content {
+	stamp := func(id string) int64 {
+		t := now
+		if previous != nil {
+			if p, ok := previous.Blocks[id]; ok {
+				t = max(t, p+1)
+			}
+			if p, ok := previous.Deleted[id]; ok {
+				t = max(t, p+1)
+			}
+		}
+		return t
+	}
 	before := map[string]string{}
 	if previous != nil {
 		before = Signatures(previous)
 	}
-	after := Signatures(c)
+	sigs := Signatures(c)
 	blocks := map[string]int64{}
-	for id, sig := range after {
+	for id, sig := range sigs {
 		if before[id] == sig {
 			if previous != nil {
 				if t, ok := previous.Blocks[id]; ok {
@@ -447,7 +461,7 @@ func (c *Content) Stamped(previous *Content, now int64) *Content {
 				continue
 			}
 		}
-		blocks[id] = now
+		blocks[id] = stamp(id)
 	}
 	deleted := map[string]int64{}
 	if previous != nil {
@@ -459,11 +473,11 @@ func (c *Content) Stamped(previous *Content, now int64) *Content {
 		deleted[k] = v
 	}
 	for id := range before {
-		if _, ok := after[id]; !ok {
-			deleted[id] = now
+		if _, ok := sigs[id]; !ok {
+			deleted[id] = stamp(id)
 		}
 	}
-	for id := range after {
+	for id := range sigs {
 		delete(deleted, id)
 	}
 	return &Content{Children: c.Children, Blocks: blocks, Deleted: deleted}

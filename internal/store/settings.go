@@ -53,7 +53,9 @@ type Settings struct {
 	AgentsReadOtherPages bool `json:"agents_read_other_pages"`
 	AllPagesOffline      bool `json:"all_pages_offline"`
 	// WorkOffline treats the app as offline even with a connection.
-	WorkOffline             bool        `json:"work_offline"`
+	WorkOffline bool `json:"work_offline"`
+	// ICloudSync syncs pages through the Leaflet folder in iCloud Drive.
+	ICloudSync              bool        `json:"icloud_sync,omitempty"`
 	KeepAudioOnDevice       string      `json:"keep_audio_on_device"` // until_uploaded | 30_days | always
 	UploadAudioOverCellular bool        `json:"upload_audio_over_cellular"`
 	Stt                     SttSettings `json:"stt"`

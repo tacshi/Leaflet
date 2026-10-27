@@ -3,9 +3,11 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
+	"leaflet/internal/icloud"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -28,7 +31,7 @@ func settingsSections() []struct{ id, icon, label string } {
 		{"providers", "sparkles", locales.SettingsSectionProviders()},
 		{"external", "bot", locales.SettingsSectionExternal()},
 		{"speech", "mic", locales.SettingsSectionSpeech()},
-		{"offline", "cloud-download", locales.SettingsSectionOffline()},
+		{"offline", "refresh-cw", locales.SettingsSectionOffline()},
 	}
 }
 
@@ -231,8 +234,9 @@ func (a *App) accountSettings(c *ui.Context) {
 				a.saveName(s.name)
 			}
 		})
-		// A build without a server says so once, in Offline and storage.
-		if !a.backend.Configured() {
+		// A build without a server says so once, in Sync and storage;
+		// iCloud sync is there too.
+		if !a.backend.Configured() || a.sync.ICloudOn() {
 			return
 		}
 		title, desc := locales.SettingsSync(), locales.SettingsSyncDesc()
@@ -1079,7 +1083,7 @@ func (a *App) removeProvider(id string) {
 	form.open = false
 }
 
-// Offline and storage ---------------------------------------------------
+// Sync and storage ---------------------------------------------------
 
 type offlineState struct {
 	queue  []store.OutboxEntry
@@ -1090,7 +1094,7 @@ var offline offlineState
 
 func (a *App) offlineSettings(c *ui.Context) {
 	heading(c, locales.SettingsSectionOffline(), locales.SettingsOfflineDesc())
-	if a.backend.Configured() {
+	if a.backend.Configured() || a.session.SignedIn || icloud.Available() || a.settings.ICloudSync {
 		a.syncSettings(c)
 	} else {
 		card(c, "status", func() {
@@ -1163,7 +1167,8 @@ func (a *App) offlineSettings(c *ui.Context) {
 	})
 }
 
-// syncSettings are the parts of Offline and storage about the server.
+// syncSettings are the parts of Sync and storage about syncing: through
+// the server, or through iCloud Drive.
 func (a *App) syncSettings(c *ui.Context) {
 	if time.Since(offline.loaded) > 2*time.Second {
 		offline.queue, _ = a.st.Pending()
@@ -1171,19 +1176,35 @@ func (a *App) syncSettings(c *ui.Context) {
 		c.After(2 * time.Second)
 	}
 	card(c, "status", func() {
-		if !a.session.SignedIn {
-			settingRow(c, "sync", locales.SettingsNotSyncing(), locales.SettingsNotSyncingDesc(), true, func() {
-				if primary(c, "signin", "", locales.CommonSignIn()).Clicked() {
-					a.navigate(Route{Kind: "signin"})
+		first := true
+		if !a.session.SignedIn && (icloud.Available() || a.settings.ICloudSync) {
+			on := a.settings.ICloudSync
+			desc := locales.SettingsICloudDesc()
+			if on {
+				desc = locales.SettingsICloudOnDesc()
+			}
+			settingRow(c, "icloud", locales.SettingsICloud(), desc, true, func() {
+				if ui.Switch(c.Key("icloud"), &on).Changed() {
+					a.setICloud(on)
 				}
 			})
+			first = false
+		}
+		if !a.syncOn() {
+			if a.backend.Configured() {
+				settingRow(c, "sync", locales.SettingsNotSyncing(), locales.SettingsNotSyncingDesc(), first, func() {
+					if primary(c, "signin", "", locales.CommonSignIn()).Clicked() {
+						a.navigate(Route{Kind: "signin"})
+					}
+				})
+			}
 			return
 		}
 		status := locales.SettingsUpToDate()
 		switch {
 		case a.settings.WorkOffline:
 			status = locales.SettingsOfflineByChoice()
-		case !a.online:
+		case a.offlineNow():
 			status = locales.SettingsNoConnection()
 		case a.syncing:
 			status = locales.SettingsSyncing()
@@ -1194,7 +1215,12 @@ func (a *App) syncSettings(c *ui.Context) {
 		if n := len(offline.queue); n > 0 {
 			title = locales.SettingsChangesWaiting(n)
 		}
-		settingRow(c, "sync", title, status, true, func() {
+		settingRow(c, "sync", title, status, first, func() {
+			if errors.Is(a.syncErr, icloud.ErrNoAccess) && runtime.GOOS == "darwin" {
+				if button(c, "privacy", "settings", locales.SettingsICloudOpenPrivacy()).Clicked() {
+					openPrivacySettings()
+				}
+			}
 			if button(c, "sync-now", "refresh-cw", locales.SettingsSyncNow()).Disabled(a.syncing).Clicked() {
 				go func() { _ = a.sync.SyncNow() }()
 			}

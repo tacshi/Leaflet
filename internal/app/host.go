@@ -424,7 +424,7 @@ func (a *App) localFile(f store.File, done func()) string {
 			return f.LocalPath
 		}
 	}
-	if f.StoragePath == "" || !a.backend.SignedIn() || a.downloads[f.ID] {
+	if f.StoragePath == "" || !a.sync.CanFetch() || a.downloads[f.ID] {
 		return ""
 	}
 	if a.downloads == nil {
@@ -434,7 +434,7 @@ func (a *App) localFile(f store.File, done func()) string {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		data, err := a.backend.Download(ctx, "files", f.StoragePath)
+		data, err := a.sync.Fetch(ctx, "files", f.StoragePath)
 		if err == nil {
 			_, err = a.st.DownloadedFile(f.ID, data)
 		}

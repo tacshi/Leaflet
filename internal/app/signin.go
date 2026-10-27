@@ -158,6 +158,11 @@ func (a *App) doVerify() {
 // signedIn sets the session up after signing in and starts syncing.
 func (a *App) signedIn(user *store.User) {
 	a.flush()
+	// One way of syncing at a time: the server's, now.
+	if a.sync.ICloudOn() {
+		a.sync.SetICloud(false)
+		a.watchICloud(false)
+	}
 	// Signing in as someone else removes the previous account's pages,
 	// with any changes of theirs that never went up.
 	lost := 0

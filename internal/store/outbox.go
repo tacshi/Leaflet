@@ -18,7 +18,7 @@ type OutboxEntry struct {
 	// Revision counts the times the payload was replaced while queued, so
 	// sending an older payload does not take a newer one off the queue.
 	Revision  int64
-	Label     string // shown in Offline and storage, e.g. "2 blocks edited"
+	Label     string // shown in Sync and storage, e.g. "2 blocks edited"
 	PageID    string
 	Attempts  int
 	LastError string

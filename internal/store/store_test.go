@@ -645,3 +645,34 @@ func TestRefusesADatabaseFromANewerVersion(t *testing.T) {
 		t.Fatal("opened a database from a newer version")
 	}
 }
+
+func TestADatabaseGainsTheICloudTables(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	// A release's schema, from before iCloud sync.
+	before := strings.Split(schema, "CREATE TABLE IF NOT EXISTS peer_contents")[0]
+	writeDB(t, path, before, `PRAGMA user_version = 1`)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if err := s.PutPeerContent("d1", "p1", 5, "{}"); err != nil {
+		t.Fatal(err)
+	}
+	if p, ok := s.PeerContent("d1", "p1"); !ok || p.Version != 5 {
+		t.Errorf("peer content %+v %v", p, ok)
+	}
+	if err := s.SetRowVersion("pages", "p1", RowVersion{At: 9, Device: "d1"}); err != nil {
+		t.Fatal(err)
+	}
+	if v := s.RowVersion("pages", "p1"); v != (RowVersion{9, "d1"}) {
+		t.Errorf("row version %+v", v)
+	}
+	if err := s.ForgetICloud(); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.PeerContent("d1", "p1"); ok {
+		t.Error("peer content kept after ForgetICloud")
+	}
+}

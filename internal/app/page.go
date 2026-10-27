@@ -418,13 +418,6 @@ func uniq(ids []string) []string {
 	return out
 }
 
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
-}
-
 // pageNotices shows conflicts on the open page.
 func (a *App) pageNotices(c *ui.Context, pageID string) bool {
 	n := 0

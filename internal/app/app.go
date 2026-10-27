@@ -143,6 +143,9 @@ type pageState struct {
 	focusTitle int
 	// selectTitle selects the title as it takes the focus, to rename.
 	selectTitle bool
+	// titleAtEnd is whether the title's caret was at its end in the last
+	// frame; titleLeave asks the caret to move from the title to the page.
+	titleAtEnd, titleLeave bool
 	// loaded is the stored content the editor started from or last saved,
 	// and stored that content as the store has it, encoded, before any
 	// change that is no edit (page mentions' new titles).

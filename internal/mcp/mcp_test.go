@@ -78,8 +78,12 @@ func TestHandshake(t *testing.T) {
 	if len(got) != 4 {
 		t.Errorf("answered %d messages, want 4 (no answer to a notification)", len(got))
 	}
+	if seen := st.ValuesWithPrefix(SeenPrefix); len(seen) != 0 {
+		t.Errorf("seen %v before a tool call", seen)
+	}
+	session(t, s, call(4, "list_pages", nil))
 	if seen := st.ValuesWithPrefix(SeenPrefix); seen["claude-code"] == "" {
-		t.Errorf("seen %v, want claude-code", seen)
+		t.Errorf("seen %v after a tool call, want claude-code", seen)
 	}
 	names := map[string]map[string]any{}
 	for _, tool := range got[2]["result"].(map[string]any)["tools"].([]any) {

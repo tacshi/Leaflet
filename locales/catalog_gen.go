@@ -9229,6 +9229,54 @@ func (msgs Messages) ExternalLooking() string {
 	return Catalog.Format(msgs.locale, "externalLooking", nil)
 }
 
+// ExternalNotConnected says "Not connected"
+// in the language the app shows.
+//
+// Settings › External agents: an AI app found that Leaflet is not added
+// to.
+func ExternalNotConnected() string { return In(i18n.Locale()).ExternalNotConnected() }
+
+// ExternalNotConnected says "Not connected"
+// in the language of msgs.
+//
+// Settings › External agents: an AI app found that Leaflet is not added
+// to.
+func (msgs Messages) ExternalNotConnected() string {
+	return Catalog.Format(msgs.locale, "externalNotConnected", nil)
+}
+
+// ExternalConnecting says "Connecting…"
+// in the language the app shows.
+//
+// Settings › External agents: the button while Leaflet is added to an AI
+// app.
+func ExternalConnecting() string { return In(i18n.Locale()).ExternalConnecting() }
+
+// ExternalConnecting says "Connecting…"
+// in the language of msgs.
+//
+// Settings › External agents: the button while Leaflet is added to an AI
+// app.
+func (msgs Messages) ExternalConnecting() string {
+	return Catalog.Format(msgs.locale, "externalConnecting", nil)
+}
+
+// ExternalDisconnecting says "Disconnecting…"
+// in the language the app shows.
+//
+// Settings › External agents: the button while Leaflet is removed from an
+// AI app.
+func ExternalDisconnecting() string { return In(i18n.Locale()).ExternalDisconnecting() }
+
+// ExternalDisconnecting says "Disconnecting…"
+// in the language of msgs.
+//
+// Settings › External agents: the button while Leaflet is removed from an
+// AI app.
+func (msgs Messages) ExternalDisconnecting() string {
+	return Catalog.Format(msgs.locale, "externalDisconnecting", nil)
+}
+
 // ExternalNoneFound says "No AI apps found on this computer. You can still set one up by hand."
 // in the language the app shows.
 //
@@ -9293,22 +9341,6 @@ func (msgs Messages) ExternalDisconnect() string {
 	return Catalog.Format(msgs.locale, "externalDisconnect", nil)
 }
 
-// ExternalWorking says "Working…"
-// in the language the app shows.
-//
-// Settings › External agents: the button while an AI app is connected or
-// disconnected.
-func ExternalWorking() string { return In(i18n.Locale()).ExternalWorking() }
-
-// ExternalWorking says "Working…"
-// in the language of msgs.
-//
-// Settings › External agents: the button while an AI app is connected or
-// disconnected.
-func (msgs Messages) ExternalWorking() string {
-	return Catalog.Format(msgs.locale, "externalWorking", nil)
-}
-
 // ExternalLastUsed says "Connected · last used {when}"
 // in the language the app shows.
 //
@@ -9325,20 +9357,38 @@ func (msgs Messages) ExternalLastUsed(when string) string {
 	return Catalog.Format(msgs.locale, "externalLastUsed", map[string]any{"when": when})
 }
 
-// ExternalAdded says "Added. Restart {app} to start using it."
+// ExternalAdded says "Added. Restart {app}, then ask it to work on a page."
 // in the language the app shows.
 //
 // Settings › External agents: an AI app Leaflet was added to that has not
-// used it yet.
+// worked on a page yet.
 func ExternalAdded(app string) string { return In(i18n.Locale()).ExternalAdded(app) }
 
-// ExternalAdded says "Added. Restart {app} to start using it."
+// ExternalAdded says "Added. Restart {app}, then ask it to work on a page."
 // in the language of msgs.
 //
 // Settings › External agents: an AI app Leaflet was added to that has not
-// used it yet.
+// worked on a page yet.
 func (msgs Messages) ExternalAdded(app string) string {
 	return Catalog.Format(msgs.locale, "externalAdded", map[string]any{"app": app})
+}
+
+// ExternalAddedChatGPT says "Added. Switch ChatGPT to Codex, then ask it to work on a page."
+// in the language the app shows.
+//
+// Settings › External agents: ChatGPT, once Leaflet is added to the
+// settings it shares with Codex; only its Codex mode, not its chats, runs
+// local servers such as Leaflet. “Codex” is the mode's name in the app.
+func ExternalAddedChatGPT() string { return In(i18n.Locale()).ExternalAddedChatGPT() }
+
+// ExternalAddedChatGPT says "Added. Switch ChatGPT to Codex, then ask it to work on a page."
+// in the language of msgs.
+//
+// Settings › External agents: ChatGPT, once Leaflet is added to the
+// settings it shares with Codex; only its Codex mode, not its chats, runs
+// local servers such as Leaflet. “Codex” is the mode's name in the app.
+func (msgs Messages) ExternalAddedChatGPT() string {
+	return Catalog.Format(msgs.locale, "externalAddedChatGPT", nil)
 }
 
 // ExternalFinishIn says "Confirm in {app} to finish."

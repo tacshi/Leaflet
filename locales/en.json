@@ -3299,6 +3299,18 @@
   "@externalLooking": {
     "description": "Settings › External agents: while the AI apps on this computer are looked for."
   },
+  "externalNotConnected": "Not connected",
+  "@externalNotConnected": {
+    "description": "Settings › External agents: an AI app found that Leaflet is not added to."
+  },
+  "externalConnecting": "Connecting…",
+  "@externalConnecting": {
+    "description": "Settings › External agents: the button while Leaflet is added to an AI app."
+  },
+  "externalDisconnecting": "Disconnecting…",
+  "@externalDisconnecting": {
+    "description": "Settings › External agents: the button while Leaflet is removed from an AI app."
+  },
   "externalNoneFound": "No AI apps found on this computer. You can still set one up by hand.",
   "@externalNoneFound": {
     "description": "Settings › External agents: when none of the AI apps Leaflet connects is installed."
@@ -3315,10 +3327,6 @@
   "@externalDisconnect": {
     "description": "Settings › External agents: the button that removes Leaflet from an AI app's settings."
   },
-  "externalWorking": "Working…",
-  "@externalWorking": {
-    "description": "Settings › External agents: the button while an AI app is connected or disconnected."
-  },
   "externalLastUsed": "Connected · last used {when}",
   "@externalLastUsed": {
     "description": "Settings › External agents: an AI app that has used Leaflet; when is a relative time such as “5 min ago”.",
@@ -3329,15 +3337,19 @@
       }
     }
   },
-  "externalAdded": "Added. Restart {app} to start using it.",
+  "externalAdded": "Added. Restart {app}, then ask it to work on a page.",
   "@externalAdded": {
-    "description": "Settings › External agents: an AI app Leaflet was added to that has not used it yet.",
+    "description": "Settings › External agents: an AI app Leaflet was added to that has not worked on a page yet.",
     "placeholders": {
       "app": {
         "type": "String",
         "example": "Codex"
       }
     }
+  },
+  "externalAddedChatGPT": "Added. Switch ChatGPT to Codex, then ask it to work on a page.",
+  "@externalAddedChatGPT": {
+    "description": "Settings › External agents: ChatGPT, once Leaflet is added to the settings it shares with Codex; only its Codex mode, not its chats, runs local servers such as Leaflet. “Codex” is the mode's name in the app."
   },
   "externalFinishIn": "Confirm in {app} to finish.",
   "@externalFinishIn": {

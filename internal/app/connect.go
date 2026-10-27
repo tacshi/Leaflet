@@ -19,13 +19,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/tailscale/hujson"
 )
 
 // Connecting AI apps on this computer to `leaflet mcp` for the user, so
 // nobody has to open a terminal or find a settings file: by the app's
-// own command-line tool (Claude Code, Codex), its install link, which
-// asks in the app (Cursor, VS Code), or by its settings file (Claude
-// Desktop, and Codex without its tool).
+// own command-line tool (Claude Code, OpenCode), its install link, which
+// asks in the app (Cursor), or by its settings file (Claude Desktop,
+// Codex and ChatGPT, and OpenCode without its tool).
 
 // agentApp is an AI app Leaflet can connect.
 type agentApp struct {
@@ -35,14 +37,30 @@ type agentApp struct {
 	bundles []string
 	// cli is the app's command-line tool.
 	cli string
+	// settings is the app whose settings it reads, if another's.
+	settings string
 }
 
+// settingsID is the app whose settings the app reads: its own, or, for
+// ChatGPT, Codex's.
+func (a agentApp) settingsID() string {
+	if a.settings != "" {
+		return a.settings
+	}
+	return a.id
+}
+
+// agentApps are in the order Settings lists them: the apps for chatting
+// first, then those for code.
 var agentApps = []agentApp{
-	{id: "claude", label: "Claude Code", cli: "claude"},
+	// The ChatGPT app that runs Codex inside, and reads Codex's settings;
+	// an older ChatGPT runs no local servers.
+	{id: "chatgpt", label: "ChatGPT", bundles: []string{"ChatGPT.app/Contents/Resources/codex-cli"}, cli: "codex", settings: "codex"},
 	{id: "claude-desktop", label: "Claude Desktop", bundles: []string{"Claude.app"}},
 	{id: "codex", label: "Codex", bundles: []string{"Codex.app"}, cli: "codex"},
+	{id: "claude", label: "Claude Code", cli: "claude"},
+	{id: "opencode", label: "OpenCode", bundles: []string{"OpenCode.app"}, cli: "opencode"},
 	{id: "cursor", label: "Cursor", bundles: []string{"Cursor.app"}},
-	{id: "vscode", label: "VS Code", bundles: []string{"Visual Studio Code.app"}},
 }
 
 // agentEnv is where to look for the apps: the home folder, the user's
@@ -55,7 +73,8 @@ func currentAgentEnv() agentEnv {
 	home, _ := os.UserHomeDir()
 	config, _ := os.UserConfigDir()
 	dirs := append(filepath.SplitList(loginPath()), filepath.Join(home, ".local", "bin"), filepath.Join(home, ".claude", "local"),
-		"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(home, ".npm-global", "bin"), filepath.Join(home, ".bun", "bin"))
+		"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(home, ".npm-global", "bin"), filepath.Join(home, ".bun", "bin"),
+		filepath.Join(home, ".opencode", "bin"))
 	return agentEnv{home, config, strings.Join(dirs, string(filepath.ListSeparator))}
 }
 
@@ -97,15 +116,21 @@ func detectAgents(env agentEnv, seen map[string]string) []agentStatus {
 		switch app.id {
 		case "claude":
 			// Connected only by its tool, which keeps its settings file busy.
+		case "chatgpt":
+			// Its tool is Codex's, which it may keep inside.
+			s.installed = hasBundle(app.bundles, env.home)
 		case "codex":
-			s.installed = s.installed || exists(filepath.Dir(codexConfig(env)))
+			// Codex of its own: not the one inside ChatGPT, which has a row.
+			s.installed = s.cli != "" && !strings.Contains(s.cli, "/ChatGPT.app/") || hasBundle(app.bundles, env.home)
 		default:
 			path, _ := jsonConfig(app.id, env)
 			s.installed = s.installed || exists(filepath.Dir(path))
 		}
-		s.entry, _ = readEntry(app.id, env)
+		s.entry, _ = readEntry(app.settingsID(), env)
+		// ChatGPT's Codex and Codex call themselves the same; what one has
+		// used, both have.
 		for name, v := range seen {
-			if clientOf(name) != app.id {
+			if clientOf(name) != app.settingsID() {
 				continue
 			}
 			if unix, err := strconv.ParseInt(v, 10, 64); err == nil && time.Unix(unix, 0).After(s.seen) {
@@ -130,15 +155,15 @@ func clientOf(name string) string {
 		return "claude-desktop"
 	case strings.Contains(n, "codex"):
 		return "codex"
-	case strings.Contains(n, "visual studio code"), strings.Contains(n, "vscode"):
-		return "vscode"
+	case strings.Contains(n, "opencode"):
+		return "opencode"
 	}
 	return ""
 }
 
 // connectAgent adds this copy of Leaflet, exe on the pages in dir, to
-// an app's settings by its tool cli or its settings file; Cursor and VS
-// Code are connected by their installLink instead.
+// an app's settings by its tool cli or its settings file; Cursor is
+// connected by its installLink instead.
 func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 	switch id {
 	case "claude":
@@ -149,9 +174,8 @@ func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 		_ = runCLI(cli, env, "mcp", "remove", "-s", "user", "leaflet")
 		return runCLI(cli, env, "mcp", "add", "-s", "user", "leaflet", "-e", "LEAFLET_DATA_DIR="+dir, "--", exe, "mcp")
 	case "codex":
-		if cli != "" {
-			return runCLI(cli, env, "mcp", "add", "leaflet", "--env", "LEAFLET_DATA_DIR="+dir, "--", exe, "mcp")
-		}
+		// Not by its tool, which writes the whole file anew: other tables
+		// reordered, numbers and empty lists respelled, comments lost.
 		_, snippet := agentSetup("codex", exe, dir)
 		return editCodex(codexConfig(env), func(text string) string {
 			text = strings.TrimRight(withoutCodexEntry(text), "\n")
@@ -160,11 +184,15 @@ func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 			}
 			return text + snippet + "\n"
 		})
+	case "opencode":
+		if cli != "" {
+			return runCLI(cli, env, "mcp", "add", "--global", "leaflet", "--env", "LEAFLET_DATA_DIR="+dir, "--", exe, "mcp")
+		}
+		path, keys := jsonConfig(id, env)
+		return editServers(path, keys, map[string]any{"type": "local", "command": []string{exe, "mcp"}, "environment": map[string]string{"LEAFLET_DATA_DIR": dir}})
 	}
-	path, key := jsonConfig(id, env)
-	return editServers(path, key, func(servers map[string]json.RawMessage) {
-		servers["leaflet"] = mustJSON(map[string]any{"command": exe, "args": []string{"mcp"}, "env": map[string]string{"LEAFLET_DATA_DIR": dir}})
-	})
+	path, keys := jsonConfig(id, env)
+	return editServers(path, keys, map[string]any{"command": exe, "args": []string{"mcp"}, "env": map[string]string{"LEAFLET_DATA_DIR": dir}})
 }
 
 // disconnectAgent removes Leaflet from an app's settings.
@@ -173,28 +201,22 @@ func disconnectAgent(id, cli string, env agentEnv) error {
 	case "claude":
 		return runCLI(cli, env, "mcp", "remove", "-s", "user", "leaflet")
 	case "codex":
-		if cli != "" {
-			return runCLI(cli, env, "mcp", "remove", "leaflet")
-		}
 		return editCodex(codexConfig(env), withoutCodexEntry)
 	}
-	path, key := jsonConfig(id, env)
-	return editServers(path, key, func(servers map[string]json.RawMessage) { delete(servers, "leaflet") })
+	// OpenCode's tool adds servers but does not remove them.
+	path, keys := jsonConfig(id, env)
+	return editServers(path, keys, nil)
 }
 
-// installLink is the link that has Cursor or VS Code ask to add this
-// copy of Leaflet, or "" for the other apps.
+// installLink is the link that has Cursor ask to add this copy of
+// Leaflet, or "" for the other apps.
 func installLink(id, exe, dir string) string {
-	server := map[string]any{"command": exe, "args": []string{"mcp"}, "env": map[string]string{"LEAFLET_DATA_DIR": dir}}
-	switch id {
-	case "cursor":
-		config := base64.StdEncoding.EncodeToString(mustJSON(server))
-		return "cursor://anysphere.cursor-deeplink/mcp/install?name=leaflet&config=" + url.QueryEscape(config)
-	case "vscode":
-		server["name"], server["type"] = "leaflet", "stdio"
-		return "vscode:mcp/install?" + strings.ReplaceAll(url.QueryEscape(string(mustJSON(server))), "+", "%20")
+	if id != "cursor" {
+		return ""
 	}
-	return ""
+	server := map[string]any{"command": exe, "args": []string{"mcp"}, "env": map[string]string{"LEAFLET_DATA_DIR": dir}}
+	config := base64.StdEncoding.EncodeToString(mustJSON(server))
+	return "cursor://anysphere.cursor-deeplink/mcp/install?name=leaflet&config=" + url.QueryEscape(config)
 }
 
 // readEntry is the leaflet server in an app's settings, or nil.
@@ -206,68 +228,228 @@ func readEntry(id string, env agentEnv) (*serverEntry, error) {
 		}
 		return codexEntry(string(raw)), nil
 	}
-	path, key := jsonConfig(id, env)
+	path, keys := jsonConfig(id, env)
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, ignoreMissing(err)
 	}
-	var top map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &top); err != nil {
+	servers, err := nested(raw, keys)
+	if err != nil || servers["leaflet"] == nil {
 		return nil, err
 	}
-	var servers map[string]*serverEntry
-	if r, ok := top[key]; ok {
-		if err := json.Unmarshal(r, &servers); err != nil {
+	var e struct {
+		Command     json.RawMessage   `json:"command"`
+		Env         map[string]string `json:"env"`
+		Environment map[string]string `json:"environment"`
+	}
+	if err := json.Unmarshal(servers["leaflet"], &e); err != nil {
+		return nil, err
+	}
+	// OpenCode keeps the command and its arguments in one list, and the
+	// environment under its own name.
+	out := &serverEntry{Env: e.Env}
+	if e.Environment != nil {
+		out.Env = e.Environment
+	}
+	var argv []string
+	if json.Unmarshal(e.Command, &argv) == nil && len(argv) > 0 {
+		out.Command = argv[0]
+	} else {
+		_ = json.Unmarshal(e.Command, &out.Command)
+	}
+	return out, nil
+}
+
+// jsonConfig is an app's JSON settings file, and the keys its servers
+// are under.
+func jsonConfig(id string, env agentEnv) (path string, keys []string) {
+	switch id {
+	case "claude":
+		return filepath.Join(env.home, ".claude.json"), []string{"mcpServers"}
+	case "claude-desktop":
+		return filepath.Join(env.config, "Claude", "claude_desktop_config.json"), []string{"mcpServers"}
+	case "cursor":
+		return filepath.Join(env.home, ".cursor", "mcp.json"), []string{"mcpServers"}
+	case "opencode":
+		path = openCodeConfig(env)
+		raw, _ := os.ReadFile(path)
+		return path, openCodeKeys(raw)
+	}
+	return "", nil
+}
+
+// openCodeConfig is OpenCode's own settings file, which may have
+// comments (.jsonc).
+func openCodeConfig(env agentEnv) string {
+	dir := filepath.Join(env.home, ".config", "opencode")
+	if x := os.Getenv("XDG_CONFIG_HOME"); x != "" {
+		dir = filepath.Join(x, "opencode")
+	}
+	if p := filepath.Join(dir, "opencode.jsonc"); exists(p) && !exists(filepath.Join(dir, "opencode.json")) {
+		return p
+	}
+	return filepath.Join(dir, "opencode.json")
+}
+
+// openCodeKeys are where OpenCode's settings keep servers: under
+// mcp.servers since its second version, under mcp before. A file with
+// neither is taken as the second's.
+func openCodeKeys(raw []byte) []string {
+	mcp, err := nested(raw, []string{"mcp"})
+	if err == nil && len(mcp) > 0 && mcp["servers"] == nil {
+		return []string{"mcp"}
+	}
+	return []string{"mcp", "servers"}
+}
+
+// nested is the object under keys in a JSON document, or nil. The
+// document may have comments and trailing commas (JSONC), as OpenCode's
+// may.
+func nested(raw []byte, keys []string) (map[string]json.RawMessage, error) {
+	var m map[string]json.RawMessage
+	if len(bytes.TrimSpace(raw)) > 0 {
+		// Standardize works in place.
+		std, err := hujson.Standardize(bytes.Clone(raw))
+		if err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(std, &m); err != nil {
 			return nil, err
 		}
 	}
-	return servers["leaflet"], nil
-}
-
-// jsonConfig is an app's JSON settings file, and the key of its servers.
-func jsonConfig(id string, env agentEnv) (path, key string) {
-	switch id {
-	case "claude":
-		return filepath.Join(env.home, ".claude.json"), "mcpServers"
-	case "claude-desktop":
-		return filepath.Join(env.config, "Claude", "claude_desktop_config.json"), "mcpServers"
-	case "cursor":
-		return filepath.Join(env.home, ".cursor", "mcp.json"), "mcpServers"
-	case "vscode":
-		return filepath.Join(env.config, "Code", "User", "mcp.json"), "servers"
+	for _, k := range keys {
+		if m == nil {
+			return nil, nil
+		}
+		var next map[string]json.RawMessage
+		if r := m[k]; r != nil {
+			if err := json.Unmarshal(r, &next); err != nil {
+				return nil, err
+			}
+		}
+		m = next
 	}
-	return "", ""
+	return m, nil
 }
 
-// editServers changes the servers in a JSON settings file, keeping the
-// rest of it.
-func editServers(path, key string, fn func(servers map[string]json.RawMessage)) error {
-	top := map[string]json.RawMessage{}
+// editServers sets the server named leaflet, under keys in a JSON
+// settings file, to server, or removes it when server is nil. The rest of
+// the file stays as it was, comments, order and spacing too; the server
+// is written in the spacing of those around it.
+func editServers(path string, keys []string, server any) error {
 	raw, err := os.ReadFile(path)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	if len(bytes.TrimSpace(raw)) > 0 {
-		if err := json.Unmarshal(raw, &top); err != nil {
-			return fmt.Errorf("%s: %w", path, err)
+	if len(bytes.TrimSpace(raw)) == 0 {
+		if server == nil {
+			return nil
+		}
+		raw = []byte("{}\n")
+	}
+	doc, err := hujson.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	ptr := func(keys []string) string {
+		var b strings.Builder
+		for _, k := range keys {
+			b.WriteString("/" + strings.NewReplacer("~", "~0", "/", "~1").Replace(k))
+		}
+		return b.String()
+	}
+	full := append(slices.Clone(keys), "leaflet")
+	// A JSONC object may end in a comma, which hujson keeps as the last
+	// member having an AfterExtra; the member that is last after the
+	// change gets the comma, as the last one had.
+	object := func(keys []string) *hujson.Object {
+		if v := doc.Find(ptr(keys)); v != nil {
+			obj, _ := v.Value.(*hujson.Object)
+			return obj
+		}
+		return nil
+	}
+	endsInComma := func(obj *hujson.Object) bool {
+		return obj != nil && len(obj.Members) > 0 && obj.Members[len(obj.Members)-1].Value.AfterExtra != nil
+	}
+	keepComma := func(obj *hujson.Object, comma bool) {
+		if obj != nil && comma && len(obj.Members) > 0 && obj.Members[len(obj.Members)-1].Value.AfterExtra == nil {
+			obj.Members[len(obj.Members)-1].Value.AfterExtra = hujson.Extra{}
 		}
 	}
-	servers := map[string]json.RawMessage{}
-	if r, ok := top[key]; ok {
-		if err := json.Unmarshal(r, &servers); err != nil {
+	if server == nil {
+		if doc.Find(ptr(full)) == nil {
+			return nil
+		}
+		comma := endsInComma(object(keys))
+		if err := doc.Patch(mustJSON([]map[string]string{{"op": "remove", "path": ptr(full)}})); err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
+		keepComma(object(keys), comma)
+		return writeAtomic(path, doc.Pack())
 	}
-	fn(servers)
-	top[key] = mustJSON(servers)
+	// The value goes in at the first of keys missing, holding the rest.
+	at := 0
+	for at < len(full)-1 && doc.Find(ptr(full[:at+1])) != nil {
+		at++
+	}
+	value := server
+	for i := len(full) - 1; i > at; i-- {
+		value = map[string]any{full[i]: value}
+	}
+	unit := indentUnit(doc)
+	indent := strings.Repeat(unit, at+1)
 	var b bytes.Buffer
 	enc := json.NewEncoder(&b)
 	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(top); err != nil {
+	enc.SetIndent(indent, unit)
+	if err := enc.Encode(value); err != nil {
 		return err
 	}
-	return writeAtomic(path, b.Bytes())
+	op := "add"
+	if doc.Find(ptr(full[:at+1])) != nil {
+		op = "replace"
+	}
+	comma := endsInComma(object(full[:at]))
+	patch := `[{"op": "` + op + `", "path": ` + string(mustJSON(ptr(full[:at+1]))) + `, "value": ` + strings.TrimSuffix(b.String(), "\n") + `}]`
+	if err := doc.Patch([]byte(patch)); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	// Lay out the new member as its neighbours are: on a line of its own.
+	if obj := object(full[:at]); obj != nil {
+		keepComma(obj, comma)
+		for i := range obj.Members {
+			m := &obj.Members[i]
+			var name string
+			_ = json.Unmarshal(m.Name.Value.(hujson.Literal), &name)
+			if name != full[at] {
+				continue
+			}
+			if op == "add" {
+				m.Name.BeforeExtra = hujson.Extra("\n" + indent)
+			}
+			m.Value.BeforeExtra = hujson.Extra(" ")
+		}
+		if !bytes.Contains(obj.AfterExtra, []byte("\n")) {
+			obj.AfterExtra = hujson.Extra("\n" + strings.Repeat(unit, at))
+		}
+	}
+	return writeAtomic(path, doc.Pack())
+}
+
+// indentUnit is the indentation a JSON document steps in by: a tab, or
+// as many spaces as its first member is in; two spaces for a document
+// without one.
+func indentUnit(doc hujson.Value) string {
+	if obj, ok := doc.Value.(*hujson.Object); ok && len(obj.Members) > 0 {
+		before := string(obj.Members[0].Name.BeforeExtra)
+		if i := strings.LastIndex(before, "\n"); i >= 0 {
+			if ws := before[i+1:]; ws != "" && strings.Trim(ws, " \t") == "" {
+				return ws
+			}
+		}
+	}
+	return "  "
 }
 
 // codexConfig is Codex's settings file.
@@ -404,7 +586,10 @@ func findCLI(name string, env agentEnv) string {
 		bundled, _ = filepath.Glob(filepath.Join(env.config, "Claude", "claude-code", "*", "*", "claude.app", "Contents", "MacOS", "claude"))
 		slices.SortFunc(bundled, func(a, b string) int { return compareVersions(versionOf(b), versionOf(a)) })
 	case "codex":
-		bundled = []string{"/Applications/Codex.app/Contents/Resources/codex"}
+		for _, apps := range []string{"/Applications", filepath.Join(env.home, "Applications")} {
+			bundled = append(bundled, filepath.Join(apps, "Codex.app", "Contents", "Resources", "codex"),
+				filepath.Join(apps, "ChatGPT.app", "Contents", "Resources", "codex-cli", "CodexCLI.app", "Contents", "MacOS", "codex"))
+		}
 	}
 	for _, p := range bundled {
 		if isExecutable(p) {

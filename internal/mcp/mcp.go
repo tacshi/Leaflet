@@ -57,12 +57,14 @@ type Server struct {
 	pages  pageTools
 }
 
-// SeenPrefix starts the key-value settings that say when a client was
-// last served: SeenPrefix + its clientInfo name, lower case, is the Unix
-// time. Settings › External agents shows from them which apps work.
+// SeenPrefix starts the key-value settings that say when a client last
+// called a tool: SeenPrefix + its clientInfo name, lower case, is the Unix
+// time. Settings › External agents shows from them which apps work. A
+// client that only starts the server is not one: apps start their servers
+// as they open, even when they cannot go on (signed out, say).
 const SeenPrefix = "mcp_seen:"
 
-// markSeen writes down that the client is served now, at most once a
+// markSeen writes down that the client calls a tool now, at most once a
 // minute: each write wakes the app, which watches the database.
 func (s *Server) markSeen() {
 	if s.client == "" || time.Since(s.seen) < time.Minute {
@@ -145,7 +147,6 @@ func (s *Server) handle(req request) (any, *rpcError) {
 			s.agent = name
 		}
 		s.client = strings.TrimSpace(p.ClientInfo.Name)
-		s.markSeen()
 		version := versions[0]
 		if slices.Contains(versions, p.ProtocolVersion) {
 			version = p.ProtocolVersion

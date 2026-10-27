@@ -123,7 +123,7 @@ func TestConnectClaudeDesktop(t *testing.T) {
 		t.Errorf("still there: %+v", e)
 	}
 	// A file that is not JSON is left alone.
-	if err := os.WriteFile(path, []byte("{ // a comment\n}"), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte("{ not json"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := connectAgent("claude-desktop", "", env, testExe, testDir); err == nil {
@@ -153,20 +153,10 @@ func TestInstallLink(t *testing.T) {
 	}
 	check("cursor", cs)
 
-	link := installLink("vscode", testExe, testDir)
-	q, ok := strings.CutPrefix(link, "vscode:mcp/install?")
-	if !ok || strings.ContainsAny(q, " +") {
-		t.Fatalf("vscode: %s", link)
-	}
-	js, err := url.PathUnescape(q)
-	var vs server
-	if err != nil || json.Unmarshal([]byte(js), &vs) != nil || vs.Name != "leaflet" || vs.Type != "stdio" {
-		t.Fatalf("vscode %q: %v", js, err)
-	}
-	check("vscode", vs)
-
-	if installLink("claude", testExe, testDir) != "" {
-		t.Error("claude has a link")
+	for _, id := range []string{"claude", "opencode", "vscode"} {
+		if installLink(id, testExe, testDir) != "" {
+			t.Errorf("%s has a link", id)
+		}
 	}
 }
 
@@ -198,7 +188,7 @@ func TestDetectAgents(t *testing.T) {
 func TestClientOf(t *testing.T) {
 	for name, want := range map[string]string{
 		"claude-code": "claude", "claude-ai": "claude-desktop", "codex-mcp-client": "codex", "Codex": "codex",
-		"cursor-vscode": "cursor", "Visual Studio Code": "vscode", "Visual Studio Code - Insiders": "vscode", "goose": "",
+		"cursor-vscode": "cursor", "opencode": "opencode", "OpenCode": "opencode", "Visual Studio Code": "", "goose": "",
 	} {
 		if got := clientOf(name); got != want {
 			t.Errorf("clientOf(%q) = %q, want %q", name, got, want)
@@ -230,5 +220,157 @@ func TestFindCLI(t *testing.T) {
 	}
 	if got := findCLI("claude", env); got != filepath.Join(bin, "claude") {
 		t.Errorf("on PATH: %s", got)
+	}
+}
+
+func TestAgentOrder(t *testing.T) {
+	var got []string
+	for _, a := range agentApps {
+		got = append(got, a.label)
+	}
+	if want := "ChatGPT, Claude Desktop, Codex, Claude Code, OpenCode, Cursor"; strings.Join(got, ", ") != want {
+		t.Errorf("order %s, want %s", strings.Join(got, ", "), want)
+	}
+}
+
+func TestConnectOpenCodeWithoutCLI(t *testing.T) {
+	for name, before := range map[string]string{
+		// Its second version's settings, as `opencode mcp add` writes them.
+		"v2": `{"$schema": "https://opencode.ai/config.json", "mcp": {"servers": {"rea": {"type": "local", "command": ["npx", "rea"]}}}}`,
+		// Its first's, with servers right under mcp.
+		"v1":   `{"mcp": {"rea": {"type": "local", "command": ["npx", "rea"], "enabled": true}}}`,
+		"none": ``,
+	} {
+		env := testEnv(t)
+		t.Setenv("XDG_CONFIG_HOME", "")
+		path := openCodeConfig(env)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(before), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := connectAgent("opencode", "", env, testExe, testDir); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		raw, _ := os.ReadFile(path)
+		keys := []string{"mcp", "servers"}
+		if name == "v1" {
+			keys = []string{"mcp"}
+		}
+		servers, err := nested(raw, keys)
+		if err != nil || servers["leaflet"] == nil || (name != "none" && servers["rea"] == nil) {
+			t.Errorf("%s: connected under %v:\n%s", name, keys, raw)
+		}
+		var e struct {
+			Type    string   `json:"type"`
+			Command []string `json:"command"`
+		}
+		_ = json.Unmarshal(servers["leaflet"], &e)
+		got, _ := readEntry("opencode", env)
+		if e.Type != "local" || len(e.Command) != 2 || e.Command[1] != "mcp" || !(agentStatus{entry: got}).current(testExe, testDir) {
+			t.Errorf("%s: entry %+v, read %+v", name, e, got)
+		}
+		if err := disconnectAgent("opencode", "", env); err != nil {
+			t.Fatal(err)
+		}
+		raw, _ = os.ReadFile(path)
+		if got, _ := readEntry("opencode", env); got != nil || (name != "none" && !strings.Contains(string(raw), `"rea"`)) {
+			t.Errorf("%s: disconnected:\n%s", name, raw)
+		}
+	}
+}
+
+func TestEditServersKeepsTheFile(t *testing.T) {
+	dir := t.TempDir()
+	for _, c := range []struct {
+		name, before string
+		keys         []string
+		want         string
+	}{{
+		name: "opencode.jsonc",
+		before: `{
+  // my settings
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      /* a server */
+      "rea": { "type": "local", "command": ["npx", "rea"], },
+    },
+  },
+}
+`,
+		keys: []string{"mcp", "servers"},
+		want: `{
+  // my settings
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      /* a server */
+      "rea": { "type": "local", "command": ["npx", "rea"], },
+      "leaflet": {
+        "command": "/x"
+      },
+    },
+  },
+}
+`,
+	}, {
+		name:   "claude_desktop_config.json",
+		before: "{\n\t\"zShortcut\": \"Alt+Space\",\n\t\"aMenu\": true\n}\n",
+		keys:   []string{"mcpServers"},
+		want:   "{\n\t\"zShortcut\": \"Alt+Space\",\n\t\"aMenu\": true,\n\t\"mcpServers\": {\n\t\t\"leaflet\": {\n\t\t\t\"command\": \"/x\"\n\t\t}\n\t}\n}\n",
+	}, {
+		name: "new.json",
+		keys: []string{"mcp", "servers"},
+		want: "{\n  \"mcp\": {\n    \"servers\": {\n      \"leaflet\": {\n        \"command\": \"/x\"\n      }\n    }\n  }\n}\n",
+	}} {
+		path := filepath.Join(dir, c.name)
+		if c.before != "" {
+			if err := os.WriteFile(path, []byte(c.before), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := editServers(path, c.keys, map[string]string{"command": "/x"}); err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		got, _ := os.ReadFile(path)
+		if string(got) != c.want {
+			t.Errorf("%s: set:\n%s\nwant\n%s", c.name, got, c.want)
+		}
+		// Set again: replaced where it is.
+		if err := editServers(path, c.keys, map[string]string{"command": "/x"}); err != nil {
+			t.Fatal(err)
+		}
+		if again, _ := os.ReadFile(path); string(again) != c.want {
+			t.Errorf("%s: set again:\n%s", c.name, again)
+		}
+		if err := editServers(path, c.keys, nil); err != nil {
+			t.Fatal(err)
+		}
+		got, _ = os.ReadFile(path)
+		if servers, err := nested(got, c.keys); err != nil || servers["leaflet"] != nil {
+			t.Errorf("%s: removed: %v\n%s", c.name, err, got)
+		}
+		if c.before != "" && strings.Contains(c.before, "rea") && string(got) != c.before {
+			t.Errorf("%s: removed, not as before:\n%s", c.name, got)
+		}
+	}
+}
+
+func TestChatGPTSharesCodex(t *testing.T) {
+	env := testEnv(t)
+	if err := connectAgent("codex", "", env, testExe, testDir); err != nil {
+		t.Fatal(err)
+	}
+	found := detectAgents(env, map[string]string{"codex-mcp-client": "1700000000"})
+	by := map[string]agentStatus{}
+	for _, s := range found {
+		by[s.app.id] = s
+	}
+	for _, id := range []string{"chatgpt", "codex"} {
+		if s := by[id]; !s.current(testExe, testDir) || s.seen.Unix() != 1700000000 {
+			t.Errorf("%s: %+v", id, s)
+		}
 	}
 }

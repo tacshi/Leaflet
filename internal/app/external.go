@@ -21,7 +21,7 @@ import (
 // (connect.go), or by hand.
 
 var externalClients = []struct{ id, label string }{
-	{"claude", "Claude Code"}, {"codex", "Codex"}, {"cursor", "Cursor"}, {"vscode", "VS Code"}, {"other", "Other"},
+	{"codex", "Codex"}, {"claude", "Claude Code"}, {"opencode", "OpenCode"}, {"cursor", "Cursor"}, {"vscode", "VS Code"}, {"other", "Other"},
 }
 
 // external is the section's state: the apps found on this computer,
@@ -30,9 +30,11 @@ var external struct {
 	agents   []agentStatus
 	checked  time.Time
 	checking bool
-	// busy is the app being connected or disconnected; waiting is the app
-	// asked by its install link, until its settings have Leaflet.
+	// busy is the app being connected, or disconnected while
+	// disconnecting; waiting is the app asked by its install link, until
+	// its settings have Leaflet.
 	busy, waiting string
+	disconnecting bool
 	byHand        bool
 	client        int
 }
@@ -73,35 +75,63 @@ func (a *App) externalSettings(c *ui.Context) {
 	})
 }
 
-// agentRow is an app found: how it stands with Leaflet, and what to do.
+// agentRow is an app found: how it stands with Leaflet, said in a line
+// of its own color under its name, and what to do.
 func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, first bool) {
+	pal := theme.Of(c)
 	id := s.app.id
-	var desc string
+	// The line is always there, so the row keeps its height as it changes.
+	icon, text, color := "", locales.ExternalNotConnected(), pal.TextMuted
 	switch {
 	case s.entry == nil && external.waiting == id:
-		desc = locales.ExternalFinishIn(s.app.label)
+		icon, text = "clock", locales.ExternalFinishIn(s.app.label)
 	case s.entry == nil:
 	case !s.current(exe, dir):
-		desc = locales.ExternalOtherCopy()
+		icon, text, color = "circle-alert", locales.ExternalOtherCopy(), pal.WarnText
 	case !s.seen.IsZero():
-		desc = locales.ExternalLastUsed(humanTime(s.seen))
+		icon, text, color = "check", locales.ExternalLastUsed(humanTime(s.seen)), pal.OkText
+	case id == "chatgpt":
+		// Its chats run no local servers; its Codex mode does.
+		icon, text, color = "rotate-cw", locales.ExternalAddedChatGPT(), pal.WarnText
 	default:
-		desc = locales.ExternalAdded(s.app.label)
+		icon, text, color = "rotate-cw", locales.ExternalAdded(s.app.label), pal.WarnText
 	}
-	settingRow(c, id, s.app.label, desc, first, func() {
+	row := ui.Row(c.Key(id)).Padding(12, 16).Gap(16).AlignItems(ui.Center).FillWidth()
+	if !first {
+		row.BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider)
+	}
+	row.Children(func() {
+		ui.Column(c).Grow(1).Gap(3).Children(func() {
+			ui.Text(c, s.app.label).FontSize(14).FontWeight(500).TextColor(pal.Text)
+			ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
+				if icon != "" {
+					ui.Icon(c, theme.Icon(icon)).FontSize(13).TextColor(color)
+				}
+				ui.Text(c, text).FontSize(12).TextColor(color)
+			})
+		})
 		switch {
 		case external.busy == id:
-			button(c, "busy", "", locales.ExternalWorking()).Disabled(true)
+			label := locales.ExternalConnecting()
+			if external.disconnecting {
+				label = locales.ExternalDisconnecting()
+			}
+			ui.Button(c.Key("busy"), "").Label(label).Disabled(true).Children(func() {
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					ui.Spinner(c).Size(13, 13)
+					ui.Text(c, label).SingleLine()
+				})
+			})
 		case s.entry != nil && s.current(exe, dir):
 			if button(c, "disconnect", "", locales.ExternalDisconnect()).Disabled(external.busy != "").Clicked() {
 				a.disconnectAgent(s)
 			}
 		default:
-			text := locales.ExternalConnect()
+			label := locales.ExternalConnect()
 			if s.entry != nil {
-				text = locales.ExternalUpdate()
+				label = locales.ExternalUpdate()
 			}
-			if primary(c, "connect", "", text).Disabled(moved || external.busy != "").Clicked() {
+			if primary(c, "connect", "", label).Disabled(moved || external.busy != "").Clicked() {
 				a.connectAgent(s, exe, dir)
 			}
 		}
@@ -143,16 +173,22 @@ func (a *App) setupByHand(c *ui.Context, exe, dir string) {
 func (a *App) checkAgents() {
 	external.checking = true
 	go func() {
-		found := detectAgents(currentAgentEnv(), a.st.ValuesWithPrefix(mcp.SeenPrefix))
-		a.update(func() {
-			external.agents, external.checked, external.checking = found, time.Now(), false
-			for _, s := range found {
-				if s.app.id == external.waiting && s.entry != nil {
-					external.waiting = ""
-				}
-			}
-		})
+		found := a.findAgents()
+		a.update(func() { a.foundAgents(found) })
 	}()
+}
+
+func (a *App) findAgents() []agentStatus {
+	return detectAgents(currentAgentEnv(), a.st.ValuesWithPrefix(mcp.SeenPrefix))
+}
+
+func (a *App) foundAgents(found []agentStatus) {
+	external.agents, external.checked, external.checking = found, time.Now(), false
+	for _, s := range found {
+		if s.app.id == external.waiting && s.entry != nil {
+			external.waiting = ""
+		}
+	}
 }
 
 // connectAgent connects an app: by its install link, which asks in the
@@ -168,24 +204,29 @@ func (a *App) connectAgent(s agentStatus, exe, dir string) {
 		go a.awaitAgent(s.app.id)
 		return
 	}
-	a.changeAgent(s, func() error { return connectAgent(s.app.id, s.cli, currentAgentEnv(), exe, dir) }, locales.ExternalConnectFailed)
+	external.disconnecting = false
+	a.changeAgent(s, func() error { return connectAgent(s.app.settingsID(), s.cli, currentAgentEnv(), exe, dir) }, locales.ExternalConnectFailed)
 }
 
 func (a *App) disconnectAgent(s agentStatus) {
-	a.changeAgent(s, func() error { return disconnectAgent(s.app.id, s.cli, currentAgentEnv()) }, locales.ExternalDisconnectFailed)
+	external.disconnecting = true
+	a.changeAgent(s, func() error { return disconnectAgent(s.app.settingsID(), s.cli, currentAgentEnv()) }, locales.ExternalDisconnectFailed)
 }
 
-// changeAgent runs fn on an app's settings, then looks at them again.
+// changeAgent runs fn on an app's settings, then looks at them again
+// before the row stops being busy, so it goes straight to how the app
+// now stands.
 func (a *App) changeAgent(s agentStatus, fn func() error, failed func(app, err string) string) {
 	external.busy = s.app.id
 	go func() {
 		err := fn()
+		found := a.findAgents()
 		a.update(func() {
 			external.busy = ""
+			a.foundAgents(found)
 			if err != nil {
 				a.toast(failed(s.app.label, err.Error()))
 			}
-			a.checkAgents()
 		})
 	}()
 }
@@ -231,6 +272,8 @@ func agentSetup(client, exe, dir string) (where, snippet string) {
 	switch client {
 	case "claude":
 		return locales.ExternalRunInTerminal(), "claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=" + shellQuote(dir) + " -- " + shellQuote(exe) + " mcp"
+	case "opencode":
+		return locales.ExternalRunInTerminal(), "opencode mcp add --global leaflet --env LEAFLET_DATA_DIR=" + shellQuote(dir) + " -- " + shellQuote(exe) + " mcp"
 	case "codex":
 		return locales.ExternalAddTo("~/.codex/config.toml"), `[mcp_servers.leaflet]
 command = ` + jsonString(exe) + `

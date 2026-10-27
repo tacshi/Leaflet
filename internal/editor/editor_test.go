@@ -612,3 +612,13 @@ func TestPasteMarkdownBlankLinesSeparate(t *testing.T) {
 		t.Errorf("code %q lost its blank line", code)
 	}
 }
+
+func TestMarkdownBlocksReadsAReply(t *testing.T) {
+	var types []string
+	for _, n := range MarkdownBlocks("It says:\n\n> a quote\n\n- one\n") {
+		types = append(types, n.Type)
+	}
+	if got := strings.Join(types, " "); got != "paragraph quote bulleted_list" {
+		t.Errorf("blocks %q", got)
+	}
+}

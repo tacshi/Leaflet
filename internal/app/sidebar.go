@@ -589,11 +589,11 @@ func (a *App) sidebarFooter(c *ui.Context) {
 				}
 			}
 			settings := iconButton(c, "settings", "settings", "Settings (⌘,)")
-			if a.route.Kind == "settings" {
+			if a.settingsOpen {
 				settings.Background(pal.NavSelected).TextColor(pal.Text)
 			}
 			if settings.Clicked() {
-				a.navigate(Route{Kind: "settings", Section: "account"})
+				a.openSettings("account")
 			}
 		})
 	})

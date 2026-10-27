@@ -441,7 +441,7 @@ func (a *App) pageNotices(c *ui.Context, pageID string) bool {
 	text := fmt.Sprintf("%d %s changed here and on another device while apart. One version of each was kept.", n, plural(n, "block", "blocks"))
 	notice(c, "warn", "git-compare", text, func() {
 		if button(c, "review", "", "Review").Clicked() {
-			a.navigate(Route{Kind: "settings", Section: "offline"})
+			a.openSettings("offline")
 		}
 	})
 	return true

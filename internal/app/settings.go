@@ -30,52 +30,76 @@ var sections = []struct{ id, icon, label string }{
 // settingsNav is MyGo's sidebar of the sections, the route's chosen.
 func (a *App) settingsNav(c *ui.Context) ui.Element {
 	pal := theme.Of(c)
-	return ui.Sidebar(c.Key("settings-nav"), &a.route.Section, func() {
+	return ui.Sidebar(c.Key("settings-nav"), &a.settingsSection, func() {
 		for _, s := range sections {
 			ui.SidebarItem(c, s.id, theme.Icon(s.icon), s.label)
 		}
-	}).Width(220).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Label("Settings")
+	}).Width(settingsNavW).BorderWidth(0, 1, 0, 0).BorderColor(pal.Divider).Label("Settings")
 }
 
-func (a *App) settingsView(c *ui.Context) {
+// The settings dialog's room: its section list, its padding beside a
+// section, and its size, kept as the window allows.
+const settingsNavW, settingsPadX = 200, 28
+
+func settingsSize(c *ui.Context) (w, h float32) {
+	ww, wh := c.Size()
+	return max(min(880, ww-64), 320), max(min(640, wh*0.86), 240)
+}
+
+// settingsDialog is Settings over the window: the sections' list beside
+// the section chosen, closed by Escape, a click outside or its button.
+func (a *App) settingsDialog(c *ui.Context) {
 	pal := theme.Of(c)
-	a.titleBar(c, func() {
-		ui.Text(c, "Settings").FontSize(13).FontWeight(600).TextColor(pal.Text).Margin(0, 0, 0, 6)
-		ui.Spacer(c)
-	})
-	ui.Row(c).Grow(1).AlignItems(ui.Stretch).Children(func() {
-		a.settingsNav(c)
-		ui.Scroll(c.Key("settings:" + a.route.Section)).Grow(1).Children(func() {
-			ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(28, 32, 60).Children(func() {
-				ui.Column(c).Width(a.settingsWidth(c)).Gap(18).Children(func() {
-					switch a.route.Section {
-					case "appearance":
-						a.appearanceSettings(c)
-					case "providers":
-						a.modelsSettings(c)
-					case "external":
-						a.externalSettings(c)
-					case "speech":
-						a.speechSettings(c)
-					case "offline":
-						a.offlineSettings(c)
-					default:
-						a.accountSettings(c)
-					}
+	w, h := settingsSize(c)
+	dialog(c, &a.settingsOpen, w, func() {
+		ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+			// Focused as it opens, its section chosen shows in the accent
+			// and the arrows move through the sections.
+			a.settingsNav(c).FillHeight().AutoFocus()
+			ui.Column(c).Grow(1).Shrink(1).Children(func() {
+				ui.Row(c).Padding(14, 14, 10, settingsPadX).Gap(12).AlignItems(ui.Center).
+					BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
+					ui.Text(c, "Settings").FontSize(15).FontWeight(650).TextColor(pal.Text).Grow(1)
+					tools(c, func() {
+						if iconButton(c, "close", "x", "Close").Clicked() {
+							a.settingsOpen = false
+						}
+					})
 				})
+				a.settingsBody(c)
+			})
+		})
+	}).Height(h)
+}
+
+func (a *App) settingsBody(c *ui.Context) {
+	ui.Scroll(c.Key("settings:" + a.settingsSection)).Grow(1).Children(func() {
+		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(24, settingsPadX, 40).Children(func() {
+			ui.Column(c).Width(a.settingsWidth(c)).Gap(18).Children(func() {
+				switch a.settingsSection {
+				case "appearance":
+					a.appearanceSettings(c)
+				case "providers":
+					a.modelsSettings(c)
+				case "external":
+					a.externalSettings(c)
+				case "speech":
+					a.speechSettings(c)
+				case "offline":
+					a.offlineSettings(c)
+				default:
+					a.accountSettings(c)
+				}
 			})
 		})
 	})
 }
 
 // settingsWidth is the width of a settings section: up to 640, within
-// the room beside the sidebar and the section list, less its padding.
+// the dialog beside the section list, less its padding.
 func (a *App) settingsWidth(c *ui.Context) float32 {
-	w, _ := c.Size()
-	if a.settings.SidebarOpen {
-		w -= a.sidebarW + 1
-	}
-	return max(min(w-221-2*32, 640), 280)
+	w, _ := settingsSize(c)
+	return max(min(w-settingsNavW-1-2*settingsPadX, 640), 200)
 }
 
 func heading(c *ui.Context, title, desc string) {

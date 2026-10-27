@@ -28,9 +28,8 @@ import (
 
 // Route is what the main area shows.
 type Route struct {
-	Kind    string // home | page | todos | settings | signin
-	ID      string // the page
-	Section string // the settings section
+	Kind string // home | page | todos | signin
+	ID   string // the page
 }
 
 // App is the state of the app, kept for as long as it runs.
@@ -80,7 +79,10 @@ type App struct {
 	treeRows  []treeRow
 	panelOpen bool
 	panelTab  int
-	toasts    []toast
+	// settingsOpen shows Settings over the window, at settingsSection.
+	settingsOpen    bool
+	settingsSection string
+	toasts          []toast
 	// toastUntil is when the last toast goes, for the run bar to wait
 	// rather than show under it.
 	toastUntil time.Time
@@ -464,8 +466,6 @@ func (r Route) path() string {
 	switch r.Kind {
 	case "page":
 		return "/page/" + r.ID
-	case "settings":
-		return "/settings/" + r.Section
 	case "todos", "signin":
 		return "/" + r.Kind
 	}
@@ -478,8 +478,6 @@ func routeAt(path string) Route {
 	switch kind {
 	case "page":
 		return Route{Kind: "page", ID: rest}
-	case "settings":
-		return Route{Kind: "settings", Section: rest}
 	case "todos", "signin":
 		return Route{Kind: kind}
 	}
@@ -491,14 +489,31 @@ func (a *App) routeTitle() string {
 	switch a.route.Kind {
 	case "page":
 		return a.pageTitleOf(a.route.ID)
-	case "settings":
-		return "Settings"
 	case "todos":
 		return "To-dos"
 	case "signin":
 		return "Sign in"
 	}
 	return "Leaflet"
+}
+
+// openSettings shows Settings over the window at a section, Account if
+// none.
+func (a *App) openSettings(section string) {
+	a.flush()
+	if section == "" {
+		section = "account"
+	}
+	a.settingsSection, a.settingsOpen = section, true
+}
+
+// toggleSettings opens Settings at Account, or closes it, as ⌘, does.
+func (a *App) toggleSettings() {
+	if a.settingsOpen {
+		a.settingsOpen = false
+		return
+	}
+	a.openSettings("account")
 }
 
 // navigate shows a route, after the router's current one.
@@ -536,8 +551,7 @@ func (a *App) forward() {
 
 // follow keeps the app's route and the router's in step: a move of the
 // router (Back, Forward, their keys and buttons) shows its route, and a
-// route the app went to (navigate, a settings section chosen) goes into
-// the router's history.
+// route the app went to (navigate) goes into the router's history.
 func (a *App) follow() {
 	if a.router == nil {
 		return

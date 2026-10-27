@@ -223,19 +223,65 @@ func TestBreadcrumbs(t *testing.T) {
 // Settings' sections are MyGo's sidebar: a click shows a section.
 func TestSettingsSections(t *testing.T) {
 	a := templatesApp(t)
-	a.route = Route{Kind: "settings", Section: "account"}
+	a.settingsSection = "account"
 	tt := ui.NewTester(func(c *ui.Context) { a.settingsNav(c).FillHeight() }, 300, 400)
 	tt.Frame()
 	if err := tt.Click("Offline and storage"); err != nil {
 		t.Fatal(err)
 	}
-	if a.route.Section != "offline" {
-		t.Errorf("section %q", a.route.Section)
+	if a.settingsSection != "offline" {
+		t.Errorf("section %q", a.settingsSection)
+	}
+}
+
+// Settings is a dialog over the window: opening it leaves the route and
+// the router's history, Escape closes the dialog on top first.
+func TestSettingsModal(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.SidebarOpen, a.sidebarW = true, 240
+	a.route = Route{Kind: "todos"}
+	a.router = ui.NewRouter("/todos")
+	a.routerAt = a.router.Path()
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1200, 800)
+	tt.Frame()
+	if err := tt.Click("Settings (⌘,)"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !a.settingsOpen || a.settingsSection != "account" {
+		t.Errorf("the footer's button opened %v at %q", a.settingsOpen, a.settingsSection)
+	}
+	a.openSettings("providers")
+	tt.Frame()
+	if !tt.HasText("Agent providers") {
+		t.Error("Settings did not open at Agent providers")
+	}
+	if a.route != (Route{Kind: "todos"}) || a.router.Path() != "/todos" || a.router.CanGoBack() {
+		t.Errorf("route %+v, router at %q", a.route, a.router.Path())
+	}
+	if err := tt.Click("Account"); err != nil {
+		t.Fatal(err)
+	}
+	account.deleteOpen = true
+	t.Cleanup(func() { account.deleteOpen = false })
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if account.deleteOpen || !a.settingsOpen {
+		t.Fatalf("Escape left delete %v, settings %v", account.deleteOpen, a.settingsOpen)
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if a.settingsOpen {
+		t.Error("Escape did not close Settings")
+	}
+	if a.route != (Route{Kind: "todos"}) {
+		t.Errorf("closing Settings went to %+v", a.route)
 	}
 }
 
 // Navigation is MyGo's router: pages opened go into its history, Back and
-// Forward go through it, and a settings section chosen joins it.
+// Forward go through it.
 func TestRouterHistory(t *testing.T) {
 	a := templatesApp(t)
 	one, _ := a.st.CreatePage(store.NewPageOptions{Title: "One"})
@@ -257,17 +303,7 @@ func TestRouterHistory(t *testing.T) {
 	if a.route.ID != two.ID {
 		t.Fatalf("Forward went to %+v", a.route)
 	}
-	a.navigate(Route{Kind: "settings", Section: "account"})
-	a.route.Section = "offline" // as the sections' sidebar chooses one
-	a.follow()
-	if a.router.Path() != "/settings/offline" {
-		t.Errorf("router at %q", a.router.Path())
-	}
-	a.back()
-	if a.route != (Route{Kind: "settings", Section: "account"}) {
-		t.Errorf("Back went to %+v", a.route)
-	}
-	for _, r := range []Route{{Kind: "home"}, {Kind: "page", ID: "x"}, {Kind: "settings", Section: "speech"}, {Kind: "todos"}, {Kind: "signin"}} {
+	for _, r := range []Route{{Kind: "home"}, {Kind: "page", ID: "x"}, {Kind: "todos"}, {Kind: "signin"}} {
 		if got := routeAt(r.path()); got != r {
 			t.Errorf("%+v went to %q and back to %+v", r, r.path(), got)
 		}

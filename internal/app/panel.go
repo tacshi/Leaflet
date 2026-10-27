@@ -75,7 +75,7 @@ func (a *App) agentPanel(c *ui.Context) {
 			ui.Text(c, "Agents run on a service you choose: a cloud one such as OpenAI or Claude, or a model server on your machine, such as Ollama.").
 				FontSize(13).TextColor(pal.TextMuted)
 			if primary(c, "connect", "sparkles", "Open Settings › Agent providers").Clicked() {
-				a.navigate(Route{Kind: "settings", Section: "providers"})
+				a.openSettings("providers")
 			}
 		})
 		return
@@ -170,7 +170,7 @@ func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.
 		}
 		m.Separator()
 		if m.Item("Manage agent providers…").Chosen() {
-			a.navigate(Route{Kind: "settings", Section: "providers"})
+			a.openSettings("providers")
 		}
 	}).Label("Agent").FontSize(12)
 }

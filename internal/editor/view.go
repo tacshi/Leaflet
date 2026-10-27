@@ -499,7 +499,12 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 					toggle("code", locales.EditorInlineCode(), e.Has(func(a doc.Attrs) bool { return a.Code }), e.ToggleCode)
 					toggle("link", locales.EditorLink(), e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
 					e.colorButton(c, pal)
-					ui.Divider(c).Height(18)
+				}
+				comment := ui.Button(c, "").Label(locales.CommonComment()).Tooltip(locales.CommonComment()).KeepFocus()
+				comment.Children(func() { ui.Icon(c, theme.Icon("message-square")).FontSize(15) })
+				if comment.Clicked() {
+					id, quote := e.SelectedText()
+					e.Host.Comment(id, quote)
 				}
 				action := func(icon, label string, fn func()) {
 					b := ui.Button(c, "").Label(label).KeepFocus()
@@ -513,10 +518,6 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 						fn()
 					}
 				}
-				action("message-square", locales.CommonComment(), func() {
-					id, quote := e.SelectedText()
-					e.Host.Comment(id, quote)
-				})
 				action("sparkles", locales.EditorAskAgent(), func() {
 					id, quote := e.SelectedText()
 					e.Host.AskAgent(id, quote)

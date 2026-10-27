@@ -218,21 +218,27 @@ func (e *Editor) cellTools(c *ui.Context, in ui.Element, table, text string, fro
 		bar := ui.Row(c.Key("cell-tools")).AttachTo(in, ui.AnchorTopLeft, ui.AnchorBottomLeft).Top(-8).Padding(4).Gap(2).
 			Radius(9).Background(pal.Inverse).Shadow(0, 8, 24, 0, pal.Shadow).AlignItems(ui.Center)
 		bar.Children(func() {
-			text := func(key, icon, label string, fn func()) {
+			// Comment shows its icon alone, as in the selection toolbar.
+			text := func(key, icon, label string, iconOnly bool, fn func()) {
 				b := ui.ButtonBase(c.Key(key)).Height(28).Padding(0, 9).Gap(6).Radius(6).KeepFocus().TextColor(pal.OnInverse).AlignItems(ui.Center)
 				if b.Hovered() {
 					b.Background(pal.OnInverse.Alpha(0.1))
 				}
 				b.Children(func() {
 					ui.Icon(c, theme.Icon(icon)).FontSize(14)
-					ui.Text(c, label).FontSize(13).FontWeight(500)
+					if !iconOnly {
+						ui.Text(c, label).FontSize(13).FontWeight(500)
+					}
 				})
+				if iconOnly {
+					b.Label(label).Tooltip(label)
+				}
 				if b.Clicked() {
 					fn()
 				}
 			}
-			text("comment", "message-square", locales.CommonComment(), func() { e.Host.Comment(table, quote) })
-			text("ask", "sparkles", locales.EditorAskAgent(), func() { e.Host.AskAgent(table, quote) })
+			text("comment", "message-square", locales.CommonComment(), true, func() { e.Host.Comment(table, quote) })
+			text("ask", "sparkles", locales.EditorAskAgent(), false, func() { e.Host.AskAgent(table, quote) })
 		})
 	})
 }

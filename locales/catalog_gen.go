@@ -5055,6 +5055,34 @@ func (msgs Messages) RenderedZoomFit() string {
 	return Catalog.Format(msgs.locale, "renderedZoomFit", nil)
 }
 
+// RenderedFullScreen says "Full screen"
+// in the language the app shows.
+//
+// Button over a diagram that fills the page with it.
+func RenderedFullScreen() string { return In(i18n.Locale()).RenderedFullScreen() }
+
+// RenderedFullScreen says "Full screen"
+// in the language of msgs.
+//
+// Button over a diagram that fills the page with it.
+func (msgs Messages) RenderedFullScreen() string {
+	return Catalog.Format(msgs.locale, "renderedFullScreen", nil)
+}
+
+// RenderedExitFullScreen says "Exit full screen"
+// in the language the app shows.
+//
+// Button over a diagram filling the page that brings the page back.
+func RenderedExitFullScreen() string { return In(i18n.Locale()).RenderedExitFullScreen() }
+
+// RenderedExitFullScreen says "Exit full screen"
+// in the language of msgs.
+//
+// Button over a diagram filling the page that brings the page back.
+func (msgs Messages) RenderedExitFullScreen() string {
+	return Catalog.Format(msgs.locale, "renderedExitFullScreen", nil)
+}
+
 // VideoNotALink says "Not a YouTube or Vimeo link: {url}"
 // in the language the app shows.
 //

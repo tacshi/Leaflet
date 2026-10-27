@@ -634,7 +634,8 @@ const embedFit = `<script>(function () {
 // Go, and the policy keeps it off the network. A srcdoc frame inherits the
 // wrapper's policy, so the wrapper has the frame's. The wrapper's own
 // script only passes the frame's leftover wheel movement and its content's
-// size and whether it is zoomed in to the page, for the embed id.
+// size, whether it is zoomed in and its asking to leave full screen to the
+// page, for the embed id.
 //
 // Its background is the page's. In the dark theme the frame's root gets
 // data-theme="dark" and a dark color scheme, so an embed that styles
@@ -667,6 +668,7 @@ func embedPage(id, src string, pal *theme.Palette) string {
 		`var z = e.data.leafletSize;` +
 		`if (z && typeof z[0] === "number" && typeof z[1] === "number") window.mygo.call("Embeds.Size", ` + strconv.Quote(id) + `, z[0], z[1]);` +
 		`if (typeof e.data.leafletZoomed === "boolean") window.mygo.call("Embeds.Zoomed", ` + strconv.Quote(id) + `, e.data.leafletZoomed);` +
+		`if (e.data.leafletExit === true) window.mygo.call("Embeds.Exit", ` + strconv.Quote(id) + `);` +
 		`});</script></body></html>`
 }
 
@@ -703,6 +705,15 @@ func (s *embedScroll) Zoomed(id string, zoomed bool) {
 			s.a.embedZoomed[id] = true
 		} else {
 			delete(s.a.embedZoomed, id)
+		}
+	})
+}
+
+// Exit leaves the full screen view of the diagram whose frame is id.
+func (s *embedScroll) Exit(id string) {
+	s.a.update(func() {
+		if ps := s.a.page; ps != nil && "full:"+ps.fullDiagram == id {
+			s.a.leaveFullDiagram()
 		}
 	})
 }
@@ -777,14 +788,15 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 // sandbox shows HTML in a block's sandboxed web view, key naming it, at
 // width w inside the page. fit gives the frame's height from its
 // content's, once that has drawn; until then it is height, and the box
-// shows, gap above it, rather than a blank page in the frame's color.
+// shows, gap above it, rather than a blank page in the frame's color. A
+// nil fit has the frame fill the rest of its parent instead.
 // The view loads again when the HTML or the theme changes: by hand, by an
 // agent, by undo or a restored version.
 func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float32) float32, height, gap float32) {
 	pal := theme.Of(c)
 	src := embedPage(key, html, pal)
 	size, ready := a.embedSizes[key]
-	if ready && abs32(size.w-w) < 4 {
+	if ready && fit != nil && abs32(size.w-w) < 4 {
 		height = fit(size.h)
 	}
 	v := a.embeds[key]
@@ -814,7 +826,15 @@ func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float
 		delete(a.embedZoomed, key)
 		ready = false
 	}
-	wv := ui.WebView(c, v).Height(height).FillWidth().Radius(6)
+	wv := ui.WebView(c, v).FillWidth().Radius(6)
+	if fit == nil {
+		wv.Grow(1)
+		if !ready {
+			wv.Opacity(0)
+		}
+		return
+	}
+	wv.Height(height)
 	if !ready {
 		wv.Opacity(0)
 		ui.Box(c).Height(height).FillWidth().Margin(-height-gap, 0, 0, 0).Radius(6).Background(pal.Ground)

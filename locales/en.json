@@ -1821,6 +1821,14 @@
   "@renderedZoomFit": {
     "description": "Button over a zoomed-in diagram that shows all of it again."
   },
+  "renderedFullScreen": "Full screen",
+  "@renderedFullScreen": {
+    "description": "Button over a diagram that fills the page with it."
+  },
+  "renderedExitFullScreen": "Exit full screen",
+  "@renderedExitFullScreen": {
+    "description": "Button over a diagram filling the page that brings the page back."
+  },
   "videoNotALink": "Not a YouTube or Vimeo link: {url}",
   "@videoNotALink": {
     "description": "A video block whose link is not a video.",

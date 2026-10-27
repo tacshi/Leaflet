@@ -354,6 +354,8 @@
   "renderedZoomIn": "拡大",
   "renderedZoomOut": "縮小",
   "renderedZoomFit": "全体を表示",
+  "renderedFullScreen": "全画面表示",
+  "renderedExitFullScreen": "全画面表示を終了",
   "videoNotALink": "YouTube または Vimeo のリンクではありません：{url}",
   "videoPlay": "「{title}」を再生",
   "videoCannotPlay": "ここでは動画を再生できません：{error}",

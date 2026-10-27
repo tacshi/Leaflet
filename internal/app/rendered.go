@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"encoding/json"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -67,7 +68,20 @@ catch (e) { m.className = "err"; m.textContent = e.message; }</script></body></h
 // pointer with a pinch, or Ctrl and the wheel, and from 1 to 8 times;
 // zoomed in, a drag moves it and a double click fits it again. Its bar
 // sends "in", "out" and "fit", and hears whether it is zoomed in.
-func diagramPage(source string) string {
+//
+// full draws it to fill the frame, up to twice its size, for the page's
+// full screen view: there the wheel moves a zoomed diagram rather than
+// the page, and Escape asks to leave.
+func diagramPage(source string, full bool) string {
+	fill := ""
+	if full {
+		fill = `
+html,body{height:100%}
+body{padding:0}
+#v{height:100%}
+#d{height:100%;box-sizing:border-box;padding:24px;display:flex;align-items:center;justify-content:center}
+#d svg{width:100%;height:100%}`
+	}
 	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>` + renderedStyle + `
 .pele{--pele-bg:transparent;--pele-fg:#16181d;--pele-muted:#565c67;--pele-line:#3d424c;--pele-surface:#f5f6f8;--pele-surface-alt:#eceef2;--pele-border:#c9ced8;--pele-accent:#3446c9;--pele-fg-on-light:#16181d;--pele-fg-on-dark:#e9ebef;--pele-font:-apple-system,system-ui,sans-serif}
 :root[data-theme="dark"] .pele{--pele-fg:#e9ebef;--pele-muted:#9ea4af;--pele-line:#c0c5ce;--pele-surface:#23272e;--pele-surface-alt:#2b3038;--pele-border:#3a404a;--pele-accent:#8a97ff}
@@ -75,13 +89,18 @@ svg{max-width:100%;height:auto}
 #v{overflow:hidden}
 #d{transform-origin:0 0}
 #v.zoomed{cursor:grab;-webkit-user-select:none;user-select:none}
-#v.dragging{cursor:grabbing}</style></head><body><div id="v"><div id="d"></div></div>
+#v.dragging{cursor:grabbing}` + fill + `</style></head><body><div id="v"><div id="d"></div></div>
 <script type="module">` + peleModule + `
 // In a block of its own, clear of the names Pele's module takes.
 {
   const view = document.getElementById("v"), box = document.getElementById("d");
   try { box.innerHTML = peleRender(` + scriptString(source) + `, {fontFamily: "-apple-system, system-ui, sans-serif"}).svg; }
   catch (e) { box.className = "err"; box.textContent = e.message; }
+  const full = ` + strconv.FormatBool(full) + `, svg = box.querySelector("svg");
+  if (full && svg) {
+    svg.style.maxWidth = 2 * (parseFloat(svg.getAttribute("width")) || 800) + "px";
+    svg.style.maxHeight = 2 * (parseFloat(svg.getAttribute("height")) || 600) + "px";
+  }
 
   // The diagram is k times its size, moved by x and y, kept over the view.
   let k = 1, x = 0, y = 0, told = false;
@@ -123,6 +142,18 @@ svg{max-width:100%;height:auto}
     e.preventDefault();
     if (!pinch) zoomAt(...at(e), Math.exp(-e.deltaY * (e.deltaMode ? 0.1 : 0.01)));
   }, {passive: false});
+  // Filling the page, the wheel is the diagram's alone.
+  if (full) view.addEventListener("wheel", e => {
+    e.stopPropagation();
+    if (e.ctrlKey) return;
+    e.preventDefault();
+    x -= e.deltaX;
+    y -= e.deltaY;
+    show();
+  }, {passive: false});
+  if (full) addEventListener("keydown", e => {
+    if (e.key === "Escape") parent.postMessage({leafletExit: true}, "*");
+  });
   let drag = null;
   view.addEventListener("pointerdown", e => {
     if (k === 1 || e.button !== 0) return;
@@ -166,7 +197,7 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 	var page string
 	if n.Type == "diagram" {
 		name, empty, edit = locales.RenderedDiagram(), locales.RenderedWriteDiagram(), locales.RenderedEditDiagram()
-		page = diagramPage(source)
+		page = diagramPage(source, false)
 	} else {
 		page = mathPage(source)
 	}
@@ -182,22 +213,10 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 		ui.Row(c).Height(26).Gap(2).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, name).FontSize(12).TextColor(pal.TextMuted).Opacity(shown).Grow(1)
 			if n.Type == "diagram" && strings.TrimSpace(source) != "" {
-				zoom := func(key, icon, label, how string) {
-					b := ui.ButtonBase(c.Key(key)).Size(24, 24).Center().Radius(6).TextColor(pal.TextMuted).
-						Opacity(shown).Label(label).Tooltip(label)
-					if b.Hovered() {
-						b.Background(pal.Hover).TextColor(pal.Text)
-					}
-					b.Children(func() { ui.Icon(c, theme.Icon(icon)).FontSize(13) })
-					if b.Clicked() {
-						a.zoomEmbed(n.ID, how)
-					}
+				a.zoomTools(c, n.ID, shown)
+				if barButton(c, "full", "maximize-2", locales.RenderedFullScreen(), shown).Clicked() {
+					a.page.fullDiagram = n.ID
 				}
-				if a.embedZoomed[n.ID] {
-					zoom("zoom-fit", "rotate-ccw", locales.RenderedZoomFit(), "fit")
-				}
-				zoom("zoom-out", "zoom-out", locales.RenderedZoomOut(), "out")
-				zoom("zoom-in", "zoom-in", locales.RenderedZoomIn(), "in")
 			}
 			if editable && strings.TrimSpace(source) != "" {
 				b := ui.ButtonBase(c.Key("edit")).Height(24).Padding(0, 8).Gap(4).Radius(6).TextColor(pal.TextMuted).
@@ -239,6 +258,70 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 			return min(max(content, 32), 1600)
 		}, height, 4)
 	})
+}
+
+// barButton is an icon button of a rendered block's bar, shown as much as
+// shown says.
+func barButton(c *ui.Context, key, icon, label string, shown float32) ui.Element {
+	pal := theme.Of(c)
+	b := ui.ButtonBase(c.Key(key)).Size(24, 24).Center().Radius(6).TextColor(pal.TextMuted).
+		Opacity(shown).Label(label).Tooltip(label)
+	if b.Hovered() {
+		b.Background(pal.Hover).TextColor(pal.Text)
+	}
+	b.Children(func() { ui.Icon(c, theme.Icon(icon)).FontSize(13) })
+	return b
+}
+
+// zoomTools are the buttons that zoom the diagram of embed key, and fit it
+// again while it is zoomed in.
+func (a *App) zoomTools(c *ui.Context, key string, shown float32) {
+	if a.embedZoomed[key] && barButton(c, "zoom-fit", "rotate-ccw", locales.RenderedZoomFit(), shown).Clicked() {
+		a.zoomEmbed(key, "fit")
+	}
+	if barButton(c, "zoom-out", "zoom-out", locales.RenderedZoomOut(), shown).Clicked() {
+		a.zoomEmbed(key, "out")
+	}
+	if barButton(c, "zoom-in", "zoom-in", locales.RenderedZoomIn(), shown).Clicked() {
+		a.zoomEmbed(key, "in")
+	}
+}
+
+// fullDiagram fills the page's body with diagram n, to zoom and move about
+// it; Escape or its button brings back the page where it was.
+func (a *App) fullDiagram(c *ui.Context, n *doc.Node) {
+	pal := theme.Of(c)
+	key := "full:" + n.ID
+	_, source := doc.BlockSource(n)
+	ui.Column(c.Key(key)).Fill().Padding(0, pagePadX, 16).Children(func() {
+		ui.Row(c).Height(40).Gap(2).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, locales.RenderedDiagram()).FontSize(12).TextColor(pal.TextMuted).Grow(1)
+			a.zoomTools(c, key, 1)
+			if barButton(c, "exit-full", "minimize-2", locales.RenderedExitFullScreen(), 1).Clicked() {
+				a.leaveFullDiagram()
+			}
+		})
+		a.sandbox(c, key, diagramPage(source, true), 0, nil, 0, 0)
+	})
+	c.OnShortcut(0, ui.KeyEscape, a.leaveFullDiagram)
+}
+
+// leaveFullDiagram brings back the page from a diagram's full screen view,
+// and lets its frame go.
+func (a *App) leaveFullDiagram() {
+	ps := a.page
+	if ps == nil || ps.fullDiagram == "" {
+		return
+	}
+	key := "full:" + ps.fullDiagram
+	ps.fullDiagram = ""
+	if v := a.embeds[key]; v != nil {
+		v.Destroy()
+	}
+	delete(a.embeds, key)
+	delete(a.embedSrc, key)
+	delete(a.embedSizes, key)
+	delete(a.embedZoomed, key)
 }
 
 // Math and diagram source --------------------------------------------------

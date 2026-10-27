@@ -354,6 +354,8 @@
   "renderedZoomIn": "放大",
   "renderedZoomOut": "缩小",
   "renderedZoomFit": "显示全部",
+  "renderedFullScreen": "全屏",
+  "renderedExitFullScreen": "退出全屏",
   "videoNotALink": "不是 YouTube 或 Vimeo 链接：{url}",
   "videoPlay": "播放“{title}”",
   "videoCannotPlay": "无法在此播放视频：{error}",

@@ -166,6 +166,9 @@ type pageState struct {
 	scroll   ui.ScrollState
 	viewTop  float32
 	scrollTo string
+	// fullDiagram is the diagram block filling the page's body, if one
+	// is.
+	fullDiagram string
 	// outline is the Outline tab's list of headings, outlineRow its row
 	// chosen, and outlineSeen the headings it has opened once.
 	outline     ui.OutlineState[string]

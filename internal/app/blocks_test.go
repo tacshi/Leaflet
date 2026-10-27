@@ -36,9 +36,16 @@ func TestRenderedPages(t *testing.T) {
 		t.Fatal("Pele's render function was not found")
 	}
 	// Source goes in as a string the page cannot break out of.
-	page := diagramPage("graph TD\n  A[</script><b>x</b>]-->B")
+	page := diagramPage("graph TD\n  A[</script><b>x</b>]-->B", false)
 	if strings.Contains(page, "</script><b>") || strings.Contains(page, "<b>x</b>") {
 		t.Error("diagram source not escaped")
+	}
+	// Only the full screen page fills its frame and asks to leave.
+	if strings.Contains(page, "const full = true") || strings.Contains(page, "#v{height:100%}") {
+		t.Error("inline diagram page fills its frame")
+	}
+	if full := diagramPage("graph TD\n  A-->B", true); !strings.Contains(full, "const full = true") || !strings.Contains(full, "#v{height:100%}") {
+		t.Error("full screen diagram page does not fill its frame")
 	}
 	if page := mathPage(`\frac{a}{b}`); !strings.Contains(page, `"\\frac{a}{b}"`) || !strings.Contains(page, "katex.render(") {
 		t.Error("math page")

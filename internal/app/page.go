@@ -64,6 +64,14 @@ func (a *App) pageView(c *ui.Context) {
 	}
 	sess := a.hub.Session(ps.id)
 	ui.Box(c.Key("page-body")).Grow(1).Children(func() {
+		if ps.fullDiagram != "" {
+			if n := ps.editor.Content.Find(ps.fullDiagram); n != nil && n.Type == "diagram" {
+				a.fullDiagram(c, n)
+				return
+			}
+			// The block went: by undo, an agent or another device.
+			a.leaveFullDiagram()
+		}
 		a.scrollToBlock()
 		scroll := ui.Scroll(c.Key("page-scroll:" + ps.id)).TrackScroll(&ps.scroll).Fill().
 			Draw(func(_ *ui.Painter, r ui.Rect) { ps.viewTop = r.Y })

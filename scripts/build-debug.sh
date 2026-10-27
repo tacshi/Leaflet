@@ -13,7 +13,7 @@
 #
 # macOS builds go to build/mac-debug/Leaflet Debug.app, signed ad hoc.
 # Windows builds go to build/win-debug/windows-<arch>: Leaflet Debug.exe
-# with its files, and "Leaflet Debug Setup <version> <arch>.exe" when NSIS
+# with its files, and "leaflet-debug-setup-<version>-<arch>.exe" when NSIS
 # is installed (brew install makensis). Neither is signed for release.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/release.sh"

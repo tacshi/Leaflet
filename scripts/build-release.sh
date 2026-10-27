@@ -162,14 +162,14 @@ go tool mygo build -platform "$(
 	echo "${PLATFORMS[*]}"
 )" -o "$OUT_DIR" ${BUILD_ARGS[@]+"${BUILD_ARGS[@]}"}
 
-# MyGo names installers "<name> <version> <arch>.dmg" and "<name> Setup
-# <version> <arch>.exe", in a folder per platform; they are moved out beside
-# those folders under the usual names.
+# MyGo names installers "leaflet-<version>-<arch>.dmg" ("leaflet-<version>.dmg"
+# for universal) and "leaflet-setup-<version>-<arch>.exe", in a folder per
+# platform; they are moved out beside those folders under the usual names.
 if $MAC; then
 	for arch in "${MAC_ARCHES[@]}"; do
 		case "$arch" in
-		universal) dmg="$OUT_DIR/darwin-universal/Leaflet $VERSION.dmg" ;;
-		*) dmg="$OUT_DIR/darwin-$(goarch "$arch")/Leaflet $VERSION $(goarch "$arch").dmg" ;;
+		universal) dmg="$OUT_DIR/darwin-universal/leaflet-$VERSION.dmg" ;;
+		*) dmg="$OUT_DIR/darwin-$(goarch "$arch")/leaflet-$VERSION-$(goarch "$arch").dmg" ;;
 		esac
 		[[ -f "$dmg" ]] || die "expected $dmg after the build"
 		if $NOTARIZE; then
@@ -181,7 +181,7 @@ if $MAC; then
 fi
 if $WIN; then
 	for arch in "${WIN_ARCHES[@]}"; do
-		setup="$OUT_DIR/windows-$(goarch "$arch")/Leaflet Setup $VERSION $(goarch "$arch").exe"
+		setup="$OUT_DIR/windows-$(goarch "$arch")/leaflet-setup-$VERSION-$(goarch "$arch").exe"
 		[[ -f "$setup" ]] || die "expected $setup after the build"
 		mv -f "$setup" "$OUT_DIR/Leaflet-$VERSION-$arch-setup.exe"
 		info "$OUT_DIR/Leaflet-$VERSION-$arch-setup.exe"

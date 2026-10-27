@@ -747,7 +747,14 @@ func (a *App) externalContent(pageID string) {
 	}
 	if ps.dirty {
 		local := ps.editor.Content.Stamped(ps.loaded, doc.NowMs())
-		merged, _ := doc.Merge(doc.MustDecode(ps.stored), local, stored)
+		merged, conflicts := doc.Merge(doc.MustDecode(ps.stored), local, stored)
+		// The side a conflict loses is kept for recovery before the
+		// editor shows the merge.
+		for _, c := range conflicts {
+			if err := a.st.AddConflict(pageID, c); err != nil {
+				a.toast(locales.AppErrorSave(err.Error()))
+			}
+		}
 		ps.editor.Replace(merged)
 		ps.loaded, ps.stored = stored.Copy(), stored.Encode()
 		a.scheduleSave()

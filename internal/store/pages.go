@@ -550,11 +550,29 @@ func (s *Store) SetContentBase(pageID, base string, remoteAt time.Time) error {
 	return err
 }
 
+// ErrContentChanged is SaveContentOver's when the stored content is no
+// longer what the caller read.
+var ErrContentChanged = errors.New("store: page content changed")
+
 // SaveContent saves an editor's content: stamps the blocks that changed,
 // stores it, and queues it for the server. It returns the stamped content
 // and whether anything changed.
 func (s *Store) SaveContent(pageID string, c *doc.Content) (*doc.Content, bool, error) {
+	return s.saveContent(pageID, c, nil)
+}
+
+// SaveContentOver is SaveContent for content made from the stored content
+// over: it saves only while that is still what is stored, checked in the
+// statement that writes, and returns ErrContentChanged otherwise.
+func (s *Store) SaveContentOver(pageID, over string, c *doc.Content) (*doc.Content, bool, error) {
+	return s.saveContent(pageID, c, &over)
+}
+
+func (s *Store) saveContent(pageID string, c *doc.Content, over *string) (*doc.Content, bool, error) {
 	row, err := s.ContentRow(pageID)
+	if over != nil && (err != nil || row.Content != *over) {
+		return nil, false, ErrContentChanged
+	}
 	var previous *doc.Content
 	if err == nil {
 		previous = doc.MustDecode(row.Content)
@@ -564,7 +582,16 @@ func (s *Store) SaveContent(pageID string, c *doc.Content) (*doc.Content, bool, 
 	if previous != nil && previous.Encode() == stamped.Encode() {
 		return stamped, false, nil
 	}
-	if err := s.putContent(pageID, stamped, now, &row); err != nil {
+	if over != nil {
+		res, err := s.db.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, updated_at = ? WHERE page_id = ? AND content = ?`,
+			stamped.Encode(), stamped.PlainText(), ms(now), pageID, *over)
+		if err != nil {
+			return nil, false, err
+		}
+		if n, err := res.RowsAffected(); err != nil || n == 0 {
+			return nil, false, ErrContentChanged
+		}
+	} else if err := s.putContent(pageID, stamped, now, &row); err != nil {
 		return nil, false, err
 	}
 	changed := len(stamped.Blocks)

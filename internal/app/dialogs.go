@@ -159,10 +159,8 @@ func (a *App) searchDialog(c *ui.Context) {
 		backdrop.Background(ui.RGBA(10, 12, 16, 0.28)).Justify(ui.Start).PaddingY(90)
 		panel.Width(600).Radius(12).Background(pal.Surface).Border(1, pal.Border).Shadow(0, 24, 60, 0, pal.Shadow).Clip()
 		ui.Row(c).Height(52).Padding(0, 16).Gap(10).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
-			// MyGo's SearchField would fit, but its element is its frame:
-			// AutoFocus and the arrows reach that, not its input.
-			ui.Icon(c, theme.Icon("search")).FontSize(17).TextColor(pal.TextMuted)
-			in := ui.TextInputBase(c.Key("q"), &d.query).Placeholder(locales.DialogSearchPlaceholder()).FontSize(16).Grow(1).AutoFocus()
+			// The header is its frame.
+			in := ui.SearchField(c.Key("q"), &d.query).FontSize(16).Grow(1).Padding(0).BorderWidth(0).Background(ui.Transparent).AutoFocus()
 			if in.Changed() {
 				d.hits, _ = a.st.Search(d.query, 30)
 				d.hitIndex = 0

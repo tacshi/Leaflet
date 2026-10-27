@@ -129,6 +129,112 @@ func TestSaveMergesWithASaveInBetween(t *testing.T) {
 	}
 }
 
+// typeWhileStoring saves an edit to block b once, between a merge and its
+// store, standing in for the user typing then.
+func typeWhileStoring(t *testing.T, st *store.Store, pageID string) *bool {
+	t.Helper()
+	typed := false
+	was := beforeStore
+	beforeStore = func(id string) {
+		if typed || id != pageID {
+			return
+		}
+		typed = true
+		now := st.Content(id)
+		now.Find("b").SetDelta(doc.Delta{{Text: "two, typed meanwhile"}})
+		if _, _, err := st.SaveContent(id, now); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { beforeStore = was })
+	return &typed
+}
+
+func TestRefreshKeepsASaveMadeWhileMerging(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &doc.Content{Children: []*doc.Node{para("a", "one"), para("b", "two")},
+		Blocks: map[string]int64{"a": 1000, "b": 1000}, Deleted: map[string]int64{}}
+	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
+		t.Fatal(err)
+	}
+	mine := st.Content(p.ID)
+	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
+	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
+		t.Fatal(err)
+	}
+	theirs := base.Copy()
+	theirs.Children = append(theirs.Children, para("c", "three, added there"))
+	theirs.Blocks["c"] = time.Now().UnixMilli()
+	srv := &contentServer{content: theirs.Encode(), revision: 2}
+	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	typed := typeWhileStoring(t, st, p.ID)
+
+	if _, err := svc.RefreshContent(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !*typed {
+		t.Fatal("nothing was typed during the merge")
+	}
+	got := st.Content(p.ID)
+	if textOf(got, "a") != "one, edited here" || textOf(got, "b") != "two, typed meanwhile" || got.Find("c") == nil {
+		t.Errorf("device has %q / %q / %v", textOf(got, "a"), textOf(got, "b"), got.Find("c") != nil)
+	}
+	row, _ := st.ContentRow(p.ID)
+	if row.RemoteRevision != 2 {
+		t.Errorf("device has revision %d, want 2", row.RemoteRevision)
+	}
+}
+
+func TestPushKeepsASaveMadeWhileStoring(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &doc.Content{Children: []*doc.Node{para("a", "one"), para("b", "two")},
+		Blocks: map[string]int64{"a": 1000, "b": 1000}, Deleted: map[string]int64{}}
+	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
+		t.Fatal(err)
+	}
+	mine := st.Content(p.ID)
+	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
+	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
+		t.Fatal(err)
+	}
+	srv := &contentServer{content: base.Encode(), revision: 1}
+	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	typed := typeWhileStoring(t, st, p.ID)
+
+	done, err := svc.pushContent(context.Background(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !*typed {
+		t.Fatal("nothing was typed while the push stored")
+	}
+	if done {
+		t.Error("the push is done, though the typing still has to go")
+	}
+	got := st.Content(p.ID)
+	if textOf(got, "a") != "one, edited here" || textOf(got, "b") != "two, typed meanwhile" {
+		t.Errorf("device has %q / %q", textOf(got, "a"), textOf(got, "b"))
+	}
+	if !st.HasPending("page_content", p.ID) {
+		t.Error("the typing is no longer queued")
+	}
+}
+
 func TestPullResumesAtARowThatFailedToStore(t *testing.T) {
 	st := openStore(t)
 	const at = "2026-10-26T09:00:00.123456+00:00"

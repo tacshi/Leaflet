@@ -1,7 +1,9 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
+	"path/filepath"
 	"strconv"
 	"strings"
 	gosync "sync"
@@ -533,5 +535,113 @@ func TestSaveContentOver(t *testing.T) {
 	}
 	if got := s.Content(p.ID).PlainText(); !strings.Contains(got, "From the agent") {
 		t.Errorf("content %q", got)
+	}
+}
+
+// writeDB makes a database at path with the statements, as an earlier
+// version of Leaflet would have.
+func writeDB(t *testing.T, path string, stmts ...string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, q := range stmts {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func userVersion(t *testing.T, s *Store) int {
+	t.Helper()
+	var v int
+	if err := s.db.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
+
+func TestOpensADatabaseFromBeforeTheFirstRelease(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	// The tables whose columns changed, as the first commit made them.
+	writeDB(t, path,
+		`CREATE TABLE pages (
+		  id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_id TEXT, folder_id TEXT,
+		  title TEXT NOT NULL DEFAULT '', icon TEXT, sort_key TEXT NOT NULL, created_by TEXT,
+		  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
+		  keep_offline INTEGER NOT NULL DEFAULT 1)`,
+		`CREATE TABLE page_contents (
+		  page_id TEXT PRIMARY KEY, content TEXT NOT NULL, plain_text TEXT NOT NULL DEFAULT '',
+		  updated_at INTEGER NOT NULL, base_content TEXT, remote_updated_at INTEGER)`,
+		`CREATE TABLE outbox (
+		  id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL, entity_id TEXT NOT NULL, op TEXT NOT NULL,
+		  payload TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', page_id TEXT, attempts INTEGER NOT NULL DEFAULT 0,
+		  last_error TEXT, created_at INTEGER NOT NULL)`,
+		`INSERT INTO pages (id, space_id, title, sort_key, created_at, updated_at) VALUES ('p1', 's1', 'Plan', 'a', 1, 1)`,
+		`INSERT INTO page_contents (page_id, content, plain_text, updated_at, remote_updated_at) VALUES ('p1', '`+
+			(&doc.Content{Children: []*doc.Node{{ID: "a", Type: "paragraph"}}, Blocks: map[string]int64{}, Deleted: map[string]int64{}}).Encode()+
+			`', '', 1, 1)`,
+		`INSERT INTO outbox (entity, entity_id, op, payload, page_id, created_at) VALUES ('page_content', 'p1', 'upsert', '{}', 'p1', 1)`,
+	)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if v := userVersion(t, s); v != len(migrations) {
+		t.Errorf("schema %d, want %d", v, len(migrations))
+	}
+	p, err := s.Page("p1")
+	if err != nil || p.Title != "Plan" || p.Template {
+		t.Fatalf("page %+v, %v", p, err)
+	}
+	row, err := s.ContentRow("p1")
+	if err != nil || row.Content == "" || row.RemoteRevision != 0 {
+		t.Fatalf("content %+v, %v", row, err)
+	}
+	pending, err := s.Pending()
+	if err != nil || len(pending) != 1 || pending[0].EntityID != "p1" {
+		t.Fatalf("outbox %+v, %v", pending, err)
+	}
+	if _, err := s.CreatePage(NewPageOptions{Title: "Next"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpensADatabaseFromARelease(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	// The releases made the schema as it is, and kept no version.
+	writeDB(t, path, schema,
+		`INSERT INTO pages (id, space_id, title, sort_key, created_at, updated_at, is_template) VALUES ('p1', 's1', 'Plan', 'a', 1, 1, 1)`)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if v := userVersion(t, s); v != len(migrations) {
+		t.Errorf("schema %d, want %d", v, len(migrations))
+	}
+	if p, err := s.Page("p1"); err != nil || !p.Template {
+		t.Errorf("page %+v, %v", p, err)
+	}
+}
+
+func TestNewDatabaseHasTheLatestSchema(t *testing.T) {
+	if v := userVersion(t, open(t)); v != len(migrations) {
+		t.Errorf("schema %d, want %d", v, len(migrations))
+	}
+}
+
+func TestRefusesADatabaseFromANewerVersion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	writeDB(t, path, schema, `PRAGMA user_version = 1000`)
+	if s, err := OpenPath(path, dir); err == nil {
+		_ = s.Close()
+		t.Fatal("opened a database from a newer version")
 	}
 }

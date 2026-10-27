@@ -544,6 +544,32 @@ func (s *Store) PutSyncedContent(pageID string, c *doc.Content, base string, rem
 	return nil
 }
 
+// PutSyncedContentOver is PutSyncedContent for content merged from the
+// stored content over ("" when there was none): it stores only while that
+// is still what is stored, checked in the statement that writes, and
+// returns ErrContentChanged otherwise.
+func (s *Store) PutSyncedContentOver(pageID, over string, c *doc.Content, base string, remoteAt time.Time, revision int64) error {
+	var res sql.Result
+	var err error
+	if over == "" {
+		res, err = s.db.Exec(`INSERT INTO page_contents (page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision)
+			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(page_id) DO NOTHING`,
+			pageID, c.Encode(), c.PlainText(), ms(time.Now()), ns(base), nt(remoteAt), revision)
+	} else {
+		res, err = s.db.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, updated_at = ?, base_content = ?,
+			remote_updated_at = ?, remote_revision = ? WHERE page_id = ? AND content = ?`,
+			c.Encode(), c.PlainText(), ms(time.Now()), ns(base), nt(remoteAt), revision, pageID, over)
+	}
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return ErrContentChanged
+	}
+	s.Notify("page_contents", pageID)
+	return nil
+}
+
 // SetContentBase records the server version this device agrees with.
 func (s *Store) SetContentBase(pageID, base string, remoteAt time.Time) error {
 	_, err := s.db.Exec(`UPDATE page_contents SET base_content = ?, remote_updated_at = ? WHERE page_id = ?`, base, ms(remoteAt), pageID)

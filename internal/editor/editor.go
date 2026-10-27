@@ -89,6 +89,9 @@ type Editor struct {
 	// Font is the family and size of the page's text.
 	Family string
 	Size   float32
+	// LineHeight is the height of a line of prose, as a multiple of Size;
+	// 0 takes the font's own. Headings and code keep their font's own.
+	LineHeight float32
 	// ReadOnly shows the page without letting the user change it.
 	ReadOnly bool
 	// Tinted blocks were changed by the latest agent run.

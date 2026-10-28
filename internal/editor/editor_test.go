@@ -325,6 +325,19 @@ func TestPasteVideoLink(t *testing.T) {
 	}
 }
 
+func TestPasteImageLink(t *testing.T) {
+	e, _, _ := setup(t)
+	e.paste("https://example.com/a/cover.JPG?w=600")
+	if top := e.Content.Children; len(top) != 2 || top[0].Type != "image" || top[0].Str("url") != "https://example.com/a/cover.JPG?w=600" || top[1].Type != "paragraph" {
+		t.Fatalf("got %v", texts(e))
+	}
+	// A link to a page stays text.
+	e.paste("https://example.com/a/cover")
+	if got := texts(e); got[len(got)-1] != "paragraph:https://example.com/a/cover" {
+		t.Errorf("got %v", got)
+	}
+}
+
 func TestEmacsKeys(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("Control keys act as Emacs only on macOS")
@@ -697,30 +710,35 @@ func TestLeadingFollowsScript(t *testing.T) {
 	}
 }
 
-// Right-clicking an image or a video offers to change its link; a block of
-// text does not.
-func TestEditMediaLink(t *testing.T) {
+// Right-clicking an image or a video from the web offers to change its
+// link, an uploaded image to replace it; a block of text offers neither.
+func TestEditMedia(t *testing.T) {
 	e, tt, host := setup(t)
 	img := &doc.Node{ID: "img", Type: "image", Data: map[string]any{"url": "https://example.com/a.png"}}
 	video := &doc.Node{ID: "vid", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ"}}
-	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{para("p", "text"), img, video} })
+	upload := &doc.Node{ID: "up", Type: "image", Data: map[string]any{"url": "file:///x/a.png", "file_id": "f1"}}
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{para("p", "text"), img, video, upload} })
 	tt.Frame()
 	if _, ok := tt.Find("Loading image…"); !ok {
 		t.Error("the image does not say it is loading")
 	}
-	for _, id := range []string{"img", "vid"} {
+	for id, item := range map[string]string{"img": "Edit link", "vid": "Edit link", "up": "Replace image…"} {
 		r := e.geom[id]
 		tt.RightClickAt(r.X+20, r.Y+r.H/2)
-		if err := tt.ChooseMenuItem("Edit link"); err != nil {
+		if slices.Contains(tt.Menu(), "Edit link") && slices.Contains(tt.Menu(), "Replace image…") {
+			t.Errorf("%s offers both: %v", id, tt.Menu())
+		}
+		if err := tt.ChooseMenuItem(item); err != nil {
 			t.Fatalf("%s: %v; menu %v", id, err, tt.Menu())
 		}
 	}
-	if !reflect.DeepEqual(host.edited, []string{"img", "vid"}) {
+	slices.Sort(host.edited)
+	if !reflect.DeepEqual(host.edited, []string{"img", "up", "vid"}) {
 		t.Errorf("edited %v", host.edited)
 	}
 	r := e.geom["p"]
 	tt.RightClickAt(r.X+5, r.Y+r.H/2)
-	if slices.Contains(tt.Menu(), "Edit link") {
+	if slices.Contains(tt.Menu(), "Edit link") || slices.Contains(tt.Menu(), "Replace image…") {
 		t.Errorf("a paragraph's menu %v", tt.Menu())
 	}
 	// An image that cannot load says so, rather than loading forever.

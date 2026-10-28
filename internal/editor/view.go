@@ -44,8 +44,7 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 				e.services.WriteClipboard(e.Host.BlockLink(e.menuBlock))
 				c.Toast(locales.EditorCopiedBlockLink())
 			}
-			if t := e.node(e.menuBlock).Type; (t == "image" || t == "video") && !e.ReadOnly &&
-				m.Item(locales.EditorEditMediaLink()).Chosen() {
+			if label := mediaEdit(e.node(e.menuBlock)); label != "" && !e.ReadOnly && m.Item(label).Chosen() {
 				e.Host.EditBlock(e.menuBlock)
 			}
 			m.Separator()
@@ -325,6 +324,19 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 			e.commentBadge(c, n.ID, count, 8, pal)
 		}
 	})
+}
+
+// mediaEdit is the context menu's item changing what a block shows: an
+// uploaded image takes another file, an image or video from the web
+// another link.
+func mediaEdit(n *doc.Node) string {
+	switch {
+	case n.Type == "image" && n.Str("file_id") != "":
+		return locales.EditorReplaceImage()
+	case n.Type == "image" || n.Type == "video":
+		return locales.EditorEditMediaLink()
+	}
+	return ""
 }
 
 func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {

@@ -69,7 +69,8 @@ type Host interface {
 	Comment(blockID, quote string)
 	AskAgent(blockID, quote string)
 	// EditBlock opens what a block is made from: a chart's data, a math
-	// or diagram block's source, or an image's or video's link.
+	// or diagram block's source, an image's or video's link, or a picker
+	// for another file in place of an uploaded image.
 	EditBlock(blockID string)
 	// OpenBlock opens a page at one of its blocks, for a link to a block.
 	OpenBlock(pageID, blockID string)

@@ -1167,13 +1167,13 @@ func (msgs Messages) HostSlashImage() string {
 	return Catalog.Format(msgs.locale, "hostSlashImage", nil)
 }
 
-// HostSlashImageHint says "Upload a picture"
+// HostSlashImageHint says "Upload or link a picture"
 // in the language the app shows.
 //
 // The / menu: hint of Image.
 func HostSlashImageHint() string { return In(i18n.Locale()).HostSlashImageHint() }
 
-// HostSlashImageHint says "Upload a picture"
+// HostSlashImageHint says "Upload or link a picture"
 // in the language of msgs.
 //
 // The / menu: hint of Image.
@@ -1349,6 +1349,34 @@ func HostUploadTitle() string { return In(i18n.Locale()).HostUploadTitle() }
 // Title of the file picker to upload a file.
 func (msgs Messages) HostUploadTitle() string {
 	return Catalog.Format(msgs.locale, "hostUploadTitle", nil)
+}
+
+// HostReplaceImageTitle says "Choose an image"
+// in the language the app shows.
+//
+// Title of the file picker replacing an uploaded image.
+func HostReplaceImageTitle() string { return In(i18n.Locale()).HostReplaceImageTitle() }
+
+// HostReplaceImageTitle says "Choose an image"
+// in the language of msgs.
+//
+// Title of the file picker replacing an uploaded image.
+func (msgs Messages) HostReplaceImageTitle() string {
+	return Catalog.Format(msgs.locale, "hostReplaceImageTitle", nil)
+}
+
+// HostImageFiles says "Images"
+// in the language the app shows.
+//
+// File picker: the name of the filter showing only pictures.
+func HostImageFiles() string { return In(i18n.Locale()).HostImageFiles() }
+
+// HostImageFiles says "Images"
+// in the language of msgs.
+//
+// File picker: the name of the filter showing only pictures.
+func (msgs Messages) HostImageFiles() string {
+	return Catalog.Format(msgs.locale, "hostImageFiles", nil)
 }
 
 // HostErrorAddFile says "Could not add the file: {error}"
@@ -3155,18 +3183,34 @@ func (msgs Messages) DialogLinkImageTitle() string {
 	return Catalog.Format(msgs.locale, "dialogLinkImageTitle", nil)
 }
 
-// DialogLinkImageSubtitle says "Paste a link to an image."
+// DialogLinkImageSubtitle says "Paste a link to an image, or upload one."
 // in the language the app shows.
 //
 // Link dialog: the subtitle when changing an image's link.
 func DialogLinkImageSubtitle() string { return In(i18n.Locale()).DialogLinkImageSubtitle() }
 
-// DialogLinkImageSubtitle says "Paste a link to an image."
+// DialogLinkImageSubtitle says "Paste a link to an image, or upload one."
 // in the language of msgs.
 //
 // Link dialog: the subtitle when changing an image's link.
 func (msgs Messages) DialogLinkImageSubtitle() string {
 	return Catalog.Format(msgs.locale, "dialogLinkImageSubtitle", nil)
+}
+
+// DialogLinkImageUpload says "Upload…"
+// in the language the app shows.
+//
+// Image dialog: the button picking a picture on the device instead of a
+// link.
+func DialogLinkImageUpload() string { return In(i18n.Locale()).DialogLinkImageUpload() }
+
+// DialogLinkImageUpload says "Upload…"
+// in the language of msgs.
+//
+// Image dialog: the button picking a picture on the device instead of a
+// link.
+func (msgs Messages) DialogLinkImageUpload() string {
+	return Catalog.Format(msgs.locale, "dialogLinkImageUpload", nil)
 }
 
 // DialogLinkVideoTitle says "Video"
@@ -7097,6 +7141,22 @@ func EditorEditMediaLink() string { return In(i18n.Locale()).EditorEditMediaLink
 // Context menu on an image or video block: changes the link it shows.
 func (msgs Messages) EditorEditMediaLink() string {
 	return Catalog.Format(msgs.locale, "editorEditMediaLink", nil)
+}
+
+// EditorReplaceImage says "Replace image…"
+// in the language the app shows.
+//
+// Context menu on an uploaded image: picks another picture to show in its
+// place.
+func EditorReplaceImage() string { return In(i18n.Locale()).EditorReplaceImage() }
+
+// EditorReplaceImage says "Replace image…"
+// in the language of msgs.
+//
+// Context menu on an uploaded image: picks another picture to show in its
+// place.
+func (msgs Messages) EditorReplaceImage() string {
+	return Catalog.Format(msgs.locale, "editorReplaceImage", nil)
 }
 
 // EditorPhHeading says "Heading {level}"

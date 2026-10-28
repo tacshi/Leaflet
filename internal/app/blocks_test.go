@@ -96,20 +96,20 @@ func TestRenderedBlockShowsChromeOnHover(t *testing.T) {
 }
 
 // Editing an image's or video's link points it at the new link, as one
-// undo step; an uploaded image leaves its file for the link.
+// undo step.
 func TestSetMediaLink(t *testing.T) {
-	img := &doc.Node{ID: "img", Type: "image", Data: map[string]any{"url": "/Users/x/a.png", "file_id": "f1"}}
+	img := &doc.Node{ID: "img", Type: "image", Data: map[string]any{"url": "https://example.com/a.png", "align": "center"}}
 	video := &doc.Node{ID: "vid", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ", "title": "Old"}}
 	ed := editor.New(doc.Empty(), nil)
 	ed.Edit(func(c *doc.Content) { c.Children = []*doc.Node{img, video} })
 	a := &App{page: &pageState{editor: ed}, videos: map[string]*mygo.WebView{}}
 
 	a.dialogs.editLink(img)
-	if a.dialogs.linkURL != "" || a.dialogs.linkKind != "image" {
-		t.Errorf("an uploaded image's dialog starts at %q, %q", a.dialogs.linkURL, a.dialogs.linkKind)
+	if a.dialogs.linkURL != "https://example.com/a.png" || a.dialogs.linkKind != "image" {
+		t.Errorf("an image's dialog starts at %q, %q", a.dialogs.linkURL, a.dialogs.linkKind)
 	}
 	a.setMediaLink("img", "https://example.com/b.png")
-	if n := ed.Content.Find("img"); n.Str("url") != "https://example.com/b.png" || n.Str("file_id") != "" {
+	if n := ed.Content.Find("img"); n.Str("url") != "https://example.com/b.png" || n.Str("align") != "center" {
 		t.Errorf("image %v", n.Data)
 	}
 	a.dialogs.editLink(ed.Content.Find("vid"))

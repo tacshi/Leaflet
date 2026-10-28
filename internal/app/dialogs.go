@@ -935,21 +935,16 @@ func (a *App) embedDialog(c *ui.Context) {
 
 // Links ------------------------------------------------------------------
 
-// openLinkDialog asks for the link of a block of a kind: "video" or
-// "link_preview".
+// openLinkDialog asks for the link of a block of a kind: "video",
+// "link_preview" or "image", which can be uploaded instead.
 func (d *dialogs) openLinkDialog(kind string) {
 	d.linkOpen, d.linkKind, d.linkID, d.linkURL, d.linkError = true, kind, "", "", ""
 }
 
-// editLink opens the link dialog on an image or video block, to change
-// its link. An uploaded image's link is a path on a device: it starts
-// empty.
+// editLink opens the link dialog on an image or video block from the web,
+// to change its link.
 func (d *dialogs) editLink(n *doc.Node) {
-	url := n.Str("url")
-	if n.Str("file_id") != "" {
-		url = ""
-	}
-	d.linkOpen, d.linkKind, d.linkID, d.linkURL, d.linkError = true, n.Type, n.ID, url, ""
+	d.linkOpen, d.linkKind, d.linkID, d.linkURL, d.linkError = true, n.Type, n.ID, n.Str("url"), ""
 }
 
 func (a *App) linkDialog(c *ui.Context) {
@@ -989,6 +984,9 @@ func (a *App) linkDialog(c *ui.Context) {
 				case d.linkKind == "video":
 					n, _ := doc.VideoNode(link, "")
 					a.page.editor.InsertBlocks(n)
+				case d.linkKind == "image":
+					n, _ := doc.ImageNode(link)
+					a.page.editor.InsertBlocks(n)
 				default:
 					n, _ := doc.LinkNode(link)
 					a.page.editor.InsertBlocks(n)
@@ -999,6 +997,13 @@ func (a *App) linkDialog(c *ui.Context) {
 				insert()
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+				if d.linkKind == "image" {
+					if button(c, "upload", "upload", locales.DialogLinkImageUpload()).Clicked() {
+						d.linkOpen = false
+						a.uploadImage(d.linkID)
+					}
+					ui.Spacer(c)
+				}
 				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					d.linkOpen = false
 				}
@@ -1015,11 +1020,10 @@ func (a *App) linkDialog(c *ui.Context) {
 }
 
 // setMediaLink points an image or video block of the open page at a new
-// link. An image no longer shows its uploaded file, and a video drops its
-// player and the title learned from its old link.
+// link. A video drops its player and the title learned from its old link.
 func (a *App) setMediaLink(id, link string) {
 	ed := a.page.editor
-	if n := ed.Content.Find(id); n == nil || n.Str("url") == link && n.Str("file_id") == "" {
+	if n := ed.Content.Find(id); n == nil || n.Str("url") == link {
 		return
 	}
 	ed.Edit(func(content *doc.Content) {
@@ -1028,10 +1032,7 @@ func (a *App) setMediaLink(id, link string) {
 			return
 		}
 		n.Set("url", link)
-		switch n.Type {
-		case "image":
-			delete(n.Data, "file_id")
-		case "video":
+		if n.Type == "video" {
 			n.Set("title", "")
 		}
 	})

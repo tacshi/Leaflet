@@ -273,9 +273,7 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 		a.dialogs.openEmbed()
 	case "subpage":
 		a.addSubpageBlock()
-	case "image":
-		a.uploadIntoPage()
-	case "video", "link_preview":
+	case "video", "link_preview", "image":
 		a.dialogs.openLinkDialog(item.Key)
 	case "file":
 		a.uploadIntoPage()
@@ -318,6 +316,8 @@ func (h *host) EditBlock(blockID string) {
 		h.a.dialogs.openChart(blockID, ps.editor)
 	case n.Type == "math_equation" || n.Type == "diagram":
 		h.a.dialogs.openSource(n)
+	case n.Type == "image" && n.Str("file_id") != "":
+		h.a.uploadImage(blockID)
 	case n.Type == "image" || n.Type == "video":
 		h.a.dialogs.editLink(n)
 	}
@@ -343,7 +343,60 @@ func (a *App) addSubpageBlock() {
 	a.focusTitle(false)
 }
 
-var imageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".bmp": true}
+// uploadImage picks a picture on the device for an image block: a new one
+// at the caret when blockID is "", else in place of the block's picture.
+// A file it showed before stays with the page, for its history.
+func (a *App) uploadImage(blockID string) {
+	ps := a.page
+	if ps == nil {
+		return
+	}
+	pageID := ps.id
+	var exts []string
+	for ext := range doc.ImageExts {
+		exts = append(exts, strings.TrimPrefix(ext, "."))
+	}
+	slices.Sort(exts)
+	go func() {
+		paths, _ := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: locales.HostReplaceImageTitle(),
+			Filters: []mygo.FileFilter{{Name: locales.HostImageFiles(), Extensions: exts}}})
+		if len(paths) == 0 {
+			return
+		}
+		a.update(func() {
+			ext := strings.ToLower(filepath.Ext(paths[0]))
+			if !doc.ImageExts[ext] {
+				return
+			}
+			f, err := a.st.AddFile(paths[0], "", pageID, mime.TypeByExtension(ext))
+			if err != nil {
+				a.toast(locales.HostErrorAddFile(err.Error()))
+				return
+			}
+			if a.page == nil || a.page.id != pageID {
+				return
+			}
+			if blockID == "" {
+				a.page.editor.InsertBlocks(uploadedImage(f))
+				return
+			}
+			a.page.editor.Edit(func(content *doc.Content) {
+				if n := content.Find(blockID); n != nil && n.Type == "image" {
+					n.Set("url", "file://"+f.LocalPath)
+					n.Set("file_id", f.ID)
+					n.Set("alt", f.Name)
+				}
+			})
+		})
+	}()
+}
+
+// uploadedImage is an image block showing a file of the page.
+func uploadedImage(f store.File) *doc.Node {
+	return &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
+		"url": "file://" + f.LocalPath, "align": "center", "alt": f.Name, "file_id": f.ID,
+	}}
+}
 
 // uploadIntoPage picks files and puts them in the page: a picture as an
 // image, others as file cards.
@@ -373,10 +426,8 @@ func (a *App) uploadIntoPage() {
 				n := &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
 					"url": "file://" + f.LocalPath, "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
 				}}
-				if imageExts[ext] {
-					n = &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
-						"url": "file://" + f.LocalPath, "align": "center", "alt": f.Name, "file_id": f.ID,
-					}}
+				if doc.ImageExts[ext] {
+					n = uploadedImage(f)
 				}
 				a.page.editor.InsertBlocks(n)
 			}

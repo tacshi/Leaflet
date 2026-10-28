@@ -182,14 +182,15 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 
 ## Build and release
 
-`go tool mygo build` builds the app into `build/`. The scripts build for
-macOS by default, or for Windows with `--win`:
+`go tool mygo build` builds the app into `build/`. The release scripts
+build for macOS and Windows unless `--mac` or `--win` picks one; the debug
+script builds for macOS, or for Windows with `--win`:
 
 | Script | Builds |
 | --- | --- |
 | `scripts/build-debug.sh [--mac\|--win] [--open]` | A debug build named Leaflet Debug, with its own identifier and data folder, that never updates itself, so it runs beside a release copy |
 | `scripts/build-release.sh [--mac] [--win] [<version>]` | Signed and notarized disk images for Apple silicon, Intel and universal, and installers for Windows x64 and arm64, with signed update archives |
-| `scripts/publish.sh <version> [--mac] [--win] [--dry-run]` | A GitHub release: checks, release notes from `CHANGELOG.md`, the build, the tag and publishing |
+| `scripts/publish.sh <version> [--mac\|--win] [--dry-run]` | A GitHub release for macOS and Windows, or the one named: checks, release notes from `CHANGELOG.md`, the build, the tag and publishing |
 
 On Windows, the PowerShell 7 scripts build the Windows app on that machine.
 MyGo downloads NSIS if it isn't installed, and signing uses `signtool` from

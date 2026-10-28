@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Publishes a Leaflet release to GitHub, where installed copies find their
 # updates: the installers, update archives and manifests that
-# scripts/build-release.sh builds, for macOS unless --win says otherwise.
+# scripts/build-release.sh builds, for macOS and Windows unless --mac or
+# --win picks one.
 #
 #   scripts/publish.sh 0.2.0                 # build, review the notes, publish
-#   scripts/publish.sh 0.2.0 --mac --win     # for macOS and Windows
+#   scripts/publish.sh 0.2.0 --mac           # for macOS only
 #   scripts/publish.sh 0.2.0 --win           # for Windows only
 #   scripts/publish.sh 0.2.0 --dry-run       # check, show the notes and the steps
 #   scripts/publish.sh 0.2.0 --no-upload     # build into build/release only
@@ -40,7 +41,7 @@ for arg in "$@"; do
 	--no-upload) NO_UPLOAD=true ;;
 	--allow-branch) ALLOW_BRANCH=true ;;
 	-h | --help)
-		sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'
+		sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
 		exit 0
 		;;
 	-*) die "unknown option: $arg" ;;
@@ -52,7 +53,12 @@ for arg in "$@"; do
 done
 [[ -n "$VERSION" ]] || die "usage: scripts/publish.sh <version> [--mac] [--win] [--dry-run] [--no-upload] [--allow-branch]"
 check_version "$VERSION"
-$MAC || $WIN || MAC=true
+# Both, unless one is asked for: installed copies on either update only
+# from a release that has their platform's manifest.
+if ! $MAC && ! $WIN; then
+	MAC=true
+	WIN=true
+fi
 [[ "$(uname -s)" == "Darwin" ]] || die "Leaflet releases are built on macOS"
 TOOLS=(go git python3)
 if $MAC; then TOOLS+=(xcrun security); fi

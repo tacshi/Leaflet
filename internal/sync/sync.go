@@ -711,6 +711,11 @@ func (s *Service) pushComment(ctx context.Context, uid string, payload map[strin
 // saving over it.
 var errStale = errors.New("the page changed on the server while saving")
 
+// errUnreadable is a page whose content here cannot be read. It is neither
+// sent nor merged, as an empty page would take its place: the server's
+// copy stays as it is, and the change stays queued.
+var errUnreadable = errors.New("the page's content on this device could not be read, so it was not synced")
+
 func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) {
 	// A page that is gone has nothing to send; one that cannot be read now
 	// stays queued.
@@ -739,7 +744,10 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	} else if err != nil {
 		return false, err
 	}
-	local := doc.MustDecode(row.Content)
+	local, err := doc.Decode(row.Content)
+	if err != nil {
+		return false, errUnreadable
+	}
 	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: "content, revision, updated_at", Filters: []string{remote.Eq("page_id", pageID)}})
 	if err != nil {
 		return false, err
@@ -747,11 +755,7 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	merged := local
 	var conflicts []doc.Conflict
 	if remoteRow != nil && behind(row, remoteRow) {
-		var base *doc.Content
-		if row.BaseContent != "" {
-			base = doc.MustDecode(row.BaseContent)
-		}
-		merged, conflicts = doc.Merge(base, local, contentOf(remoteRow["content"]))
+		merged, conflicts = doc.Merge(baseOf(row), local, contentOf(remoteRow["content"]))
 	}
 	values := map[string]any{"content": json.RawMessage(merged.Encode()), "plain_text": merged.PlainText()}
 	var saved []map[string]any
@@ -786,7 +790,11 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 		}
 		next = merged
 		if now.Content != row.Content {
-			next, _ = doc.Merge(local, doc.MustDecode(now.Content), merged)
+			typed, err := doc.Decode(now.Content)
+			if err != nil {
+				return false, errUnreadable
+			}
+			next, _ = doc.Merge(local, typed, merged)
 		}
 		beforeStore(pageID)
 		err = s.st.PushedContent(pageID, now.Content, next.Encode(), next.PlainText(), merged.Encode(), savedAt, savedRev)
@@ -1030,6 +1038,7 @@ func (s *Service) pull(ctx context.Context) error {
 	if err := s.pullShared(ctx); err != nil {
 		return err
 	}
+	s.pullMembers(ctx)
 	if err := s.pullComments(ctx); err != nil {
 		return err
 	}
@@ -1055,10 +1064,56 @@ func (s *Service) pullShared(ctx context.Context) error {
 		return err == nil
 	}
 	s.store("page_permissions", "page_id", rows, have, func(r map[string]any) error {
-		failed = s.pullTree(ctx, store.S(r, "page_id"))
+		id := store.S(r, "page_id")
+		if failed = s.pullTree(ctx, id); failed == nil {
+			failed = s.LoadMembers(ctx, id)
+		}
 		return failed
 	})
 	return failed
+}
+
+// LoadMembers stores who a page is shared with, as the server has them,
+// each with their role on it, which a page above it may give.
+func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
+	res, err := s.be.RPC(ctx, "page_members", map[string]any{"p_page_id": pageID})
+	if err != nil {
+		return err
+	}
+	var members []store.Member
+	list, _ := res.([]any)
+	for _, r := range list {
+		m, _ := r.(map[string]any)
+		// A server from before invites says nothing: every share was one.
+		accepted, ok := m["accepted"].(bool)
+		members = append(members, store.Member{PageID: pageID, UserID: store.S(m, "user_id"), Role: store.S(m, "role"),
+			DisplayName: store.S(m, "display_name"), Email: store.S(m, "email"), Accepted: accepted || !ok})
+	}
+	return s.st.SetMembers(pageID, members)
+}
+
+// pullMembers loads the members of each tree of pages shared with the user
+// that has none here, as for a share accepted before sync loaded them:
+// an agent outside the app (leaflet mcp) edits only what they allow. A
+// tree's top page here has them for the pages inside it.
+func (s *Service) pullMembers(ctx context.Context) {
+	pages, err := s.st.AllPages()
+	if err != nil {
+		return
+	}
+	own := s.st.Session().SpaceID
+	here := map[string]bool{}
+	for _, p := range pages {
+		here[p.ID] = p.DeletedAt.IsZero()
+	}
+	for _, p := range pages {
+		if p.SpaceID == own || !p.DeletedAt.IsZero() || here[p.ParentID] || s.st.MembersOrNil(p.ID) != nil {
+			continue
+		}
+		if err := s.LoadMembers(ctx, p.ID); err != nil {
+			log.Printf("members of %s: %v", p.ID, err)
+		}
+	}
 }
 
 // pullTree stores a page and the pages under it, their comments, files
@@ -1297,16 +1352,22 @@ func (s *Service) refreshRemote(ctx context.Context, pageID string) (*doc.Conten
 	for range 3 {
 		local, localErr := s.st.ContentRow(pageID)
 		if localErr == nil && !behind(local, remoteRow) {
-			return doc.MustDecode(local.Content), nil
+			c, err := doc.Decode(local.Content)
+			if err != nil {
+				return nil, errUnreadable
+			}
+			return c, nil
 		}
 		next := remoteContent
 		var conflicts []doc.Conflict
+		// Content here that cannot be read, with no change waiting, is
+		// the server's now.
 		if localErr == nil && s.st.HasPending("page_content", pageID) {
-			var base *doc.Content
-			if local.BaseContent != "" {
-				base = doc.MustDecode(local.BaseContent)
+			mine, err := doc.Decode(local.Content)
+			if err != nil {
+				return nil, errUnreadable
 			}
-			next, conflicts = doc.Merge(base, doc.MustDecode(local.Content), remoteContent)
+			next, conflicts = doc.Merge(baseOf(local), mine, remoteContent)
 		}
 		beforeStore(pageID)
 		err := s.st.PutSyncedContentOver(pageID, local.Content, next, remoteContent.Encode(), remoteAt, store.Int(remoteRow, "revision"))
@@ -1329,6 +1390,16 @@ func (s *Service) refreshRemote(ctx context.Context, pageID string) (*doc.Conten
 		return next, nil
 	}
 	return nil, errors.New("the page kept changing here while it synced")
+}
+
+// baseOf is the content a page had when it last synced, which merges
+// start from: nil before the first sync, and when it cannot be read.
+func baseOf(row store.ContentRow) *doc.Content {
+	if row.BaseContent == "" {
+		return nil
+	}
+	base, _ := doc.Decode(row.BaseContent)
+	return base
 }
 
 // beforeStore runs between merging a page's content and storing the merge;

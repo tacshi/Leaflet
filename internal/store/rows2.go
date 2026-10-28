@@ -255,14 +255,20 @@ func (s *Store) Members(pageID string) ([]Member, error) {
 
 // SetMembers replaces the people a page is shared with.
 func (s *Store) SetMembers(pageID string, members []Member) error {
-	if _, err := s.db.Exec(`DELETE FROM page_members WHERE page_id = ?`, pageID); err != nil {
-		return err
-	}
-	for _, m := range members {
-		if _, err := s.db.Exec(`INSERT OR REPLACE INTO page_members (page_id, user_id, role, display_name, email, accepted) VALUES (?, ?, ?, ?, ?, ?)`,
-			pageID, m.UserID, m.Role, m.DisplayName, m.Email, m.Accepted); err != nil {
+	err := s.inTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`DELETE FROM page_members WHERE page_id = ?`, pageID); err != nil {
 			return err
 		}
+		for _, m := range members {
+			if _, err := tx.Exec(`INSERT OR REPLACE INTO page_members (page_id, user_id, role, display_name, email, accepted) VALUES (?, ?, ?, ?, ?, ?)`,
+				pageID, m.UserID, m.Role, m.DisplayName, m.Email, m.Accepted); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	s.Notify("page_members", pageID)
 	return nil

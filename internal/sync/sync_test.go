@@ -894,3 +894,134 @@ func TestRequeueSendsDeletedFiles(t *testing.T) {
 		t.Errorf("queued %v for the deleted file", queued)
 	}
 }
+
+// Content here that cannot be read is neither sent over the server's nor
+// merged with it as an empty page: the server keeps its copy, and the
+// change waits.
+func TestUnreadableContentIsNotSynced(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &doc.Content{Children: []*doc.Node{para("a", "one")}, Blocks: map[string]int64{"a": 1000}, Deleted: map[string]int64{}}
+	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
+		t.Fatal(err)
+	}
+	mine := st.Content(p.ID)
+	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
+	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
+		t.Fatal(err)
+	}
+	const broken = `{"children": [`
+	if _, err := st.DB().Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, broken, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	srv := &contentServer{content: base.Encode(), revision: 1}
+	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if done, err := svc.pushContent(context.Background(), p.ID); done || !errors.Is(err, errUnreadable) {
+		t.Errorf("push: done %v, %v", done, err)
+	}
+	if srv.updates != 0 || srv.content != base.Encode() {
+		t.Errorf("server saved over: %d updates, %s", srv.updates, srv.content)
+	}
+
+	// The server moves on: the change waiting here is not merged either.
+	theirs := base.Copy()
+	theirs.Children = append(theirs.Children, para("b", "two, added there"))
+	theirs.Blocks["b"] = time.Now().UnixMilli()
+	srv.content, srv.revision = theirs.Encode(), 2
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	if _, err := svc.RefreshContent(context.Background(), p.ID); !errors.Is(err, errUnreadable) {
+		t.Errorf("refresh: %v", err)
+	}
+	if row, _ := st.ContentRow(p.ID); row.Content != broken || !st.HasPending("page_content", p.ID) {
+		t.Errorf("content %q, pending %v", row.Content, st.HasPending("page_content", p.ID))
+	}
+}
+
+// Sync loads the members of a page shared with the user, so an agent
+// outside the app may edit it and the pages inside it as the share says,
+// opened in the app or not. A share accepted before sync loaded them gets
+// them on the next pull.
+func TestPullLoadsSharedPagesMembers(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	const (
+		root    = "00000000-0000-0000-0000-0000000000e1"
+		child   = "00000000-0000-0000-0000-0000000000e2"
+		earlier = "00000000-0000-0000-0000-0000000000e3"
+		other   = "00000000-0000-0000-0000-0000000000ff"
+	)
+	old := "2026-01-01T00:00:00Z"
+	page := func(id, parent string) map[string]any {
+		r := map[string]any{"id": id, "space_id": other, "title": id, "sort_key": "V", "created_at": old, "updated_at": old}
+		if parent != "" {
+			r["parent_id"] = parent
+		}
+		return r
+	}
+	roles := map[string]string{root: "editor", earlier: "viewer"}
+	var mu gosync.Mutex
+	var asked []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		var out any = []map[string]any{}
+		switch strings.TrimPrefix(r.URL.Path, "/rest/v1/") {
+		case "page_permissions":
+			if q.Get("updated_at") == "gt.1970-01-01T00:00:00Z" {
+				out = []map[string]any{{"page_id": root, "updated_at": time.Now().UTC().Format(time.RFC3339Nano)}}
+			}
+		case "pages":
+			switch {
+			case q.Get("id") == "eq."+root:
+				out = []map[string]any{page(root, "")}
+			case q.Get("parent_id") == `in.("`+root+`")`:
+				out = []map[string]any{page(child, root)}
+			}
+		case "rpc/page_members":
+			var args struct {
+				PageID string `json:"p_page_id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&args)
+			mu.Lock()
+			asked = append(asked, args.PageID)
+			mu.Unlock()
+			out = []map[string]any{
+				{"user_id": "u2", "role": "owner", "accepted": true},
+				{"user_id": "u1", "role": roles[args.PageID], "accepted": true},
+			}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if err := svc.pullShared(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{root, child} {
+		if p, err := st.Page(id); err != nil || !st.CanEdit(p) {
+			t.Errorf("shared to edit, %s: can edit %v, %v", id, st.CanEdit(p), err)
+		}
+	}
+
+	if err := st.PutRemotePage(page(earlier, "")); err != nil {
+		t.Fatal(err)
+	}
+	asked = nil
+	svc.pullMembers(context.Background())
+	if strings.Join(asked, ",") != earlier {
+		t.Errorf("members asked of %v, want only %s", asked, earlier)
+	}
+	if p, _ := st.Page(earlier); st.CanEdit(p) || len(st.MembersOrNil(earlier)) != 2 {
+		t.Errorf("shared to view: can edit %v, members %+v", st.CanEdit(p), st.MembersOrNil(earlier))
+	}
+}

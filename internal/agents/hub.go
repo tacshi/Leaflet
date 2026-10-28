@@ -737,7 +737,8 @@ func (d *delivery) to(ed *editor.Editor, ops []doc.Op) {
 }
 
 // save applies the ops the page does not have yet to its stored content,
-// which keeps whatever else changed there during the run.
+// which keeps whatever else changed there during the run. They count as
+// delivered once stored, so a save that fails can be tried again.
 func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op) error {
 	if d.sent == len(ops) {
 		return nil
@@ -757,9 +758,11 @@ func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op) error {
 			log.Printf("agent op on a closed page: %v", err)
 		}
 	}
+	if _, _, err := st.SaveContent(pageID, c); err != nil {
+		return err
+	}
 	d.sent = len(ops)
-	_, _, err = st.SaveContent(pageID, c)
-	return err
+	return nil
 }
 
 // errUnreadable is a page whose stored content cannot be read.
@@ -792,16 +795,23 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		run.Status = "done"
 	}
 	pageID := s.PageID
-	if len(run.Ops) > 0 {
-		if option.Local() {
-			// The page may have opened or closed during the run: it gets
-			// the ops it missed, open or stored.
-			if live := h.host.Editor(pageID); live != nil {
-				d.to(live, run.Ops)
-			} else if err := d.save(h.st, pageID, run.Ops); err != nil {
-				log.Printf("agent run on a closed page: %v", err)
+	saved := true
+	if len(run.Ops) > 0 && option.Local() {
+		// The page may have opened or closed during the run: it gets the
+		// ops it missed, open or stored.
+		if live := h.host.Editor(pageID); live != nil {
+			d.to(live, run.Ops)
+		} else if err := d.save(h.st, pageID, run.Ops); err != nil {
+			// The edits are not on the page, whatever the agent said.
+			log.Printf("agent run on a closed page: %v", err)
+			saved = false
+			run.Status = "failed"
+			if run.Error == "" {
+				run.Error = err.Error()
 			}
 		}
+	}
+	if len(run.Ops) > 0 && saved {
 		label := "Before " + option.Name() + ": " + short(req.Instruction)
 		jobID := ""
 		if option.Local() {

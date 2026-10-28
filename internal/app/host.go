@@ -615,12 +615,23 @@ type imageCache struct {
 	failed map[string]time.Time
 	// gifs are the animated GIFs among the pictures, as read. players
 	// play them, one for each block showing one, as MyGo shows a player
-	// in one place at a time: by url, # and block, nil for one that did
-	// not decode, and none while it is made.
+	// in one place at a time: by url, # and block, none while it is made.
+	// releasePlayers closes those no block has shown for a while.
 	gifs    map[string][]byte
-	players map[string]*ui.VideoPlayer
+	players map[string]*gifPlayer
 	making  map[string]bool
 }
+
+// gifPlayer is a block's player of an animated GIF, nil for one that did
+// not decode, and when a block last asked for it.
+type gifPlayer struct {
+	p     *ui.VideoPlayer
+	shown time.Time
+}
+
+// playerIdle is how long a GIF's player outlives the last frame that
+// built its block: its decoded frames and its goroutine go then.
+const playerIdle = 30 * time.Second
 
 // imageRetry is how long a picture that failed to load waits before it is
 // tried again, as the device may have come back online.
@@ -628,7 +639,7 @@ const imageRetry = time.Minute
 
 func newImageCache(root, dir string) *imageCache {
 	return &imageCache{root: root, dir: dir, pictures: map[string]ui.ImageSource{}, loading: map[string]bool{}, failed: map[string]time.Time{},
-		gifs: map[string][]byte{}, players: map[string]*ui.VideoPlayer{}, making: map[string]bool{}}
+		gifs: map[string][]byte{}, players: map[string]*gifPlayer{}, making: map[string]bool{}}
 }
 
 // get returns a picture, or nil while it loads; done runs when it has
@@ -683,8 +694,9 @@ func (ic *imageCache) player(url, block string, done func()) *ui.VideoPlayer {
 	if !ok || ic.making[key] {
 		return nil
 	}
-	if p, ok := ic.players[key]; ok {
-		return p
+	if gp, ok := ic.players[key]; ok {
+		gp.shown = time.Now()
+		return gp.p
 	}
 	ic.making[key] = true
 	go func() {
@@ -700,11 +712,30 @@ func (ic *imageCache) player(url, block string, done func()) *ui.VideoPlayer {
 		}
 		ic.mu.Lock()
 		delete(ic.making, key)
-		ic.players[key] = p
+		ic.players[key] = &gifPlayer{p: p, shown: time.Now()}
 		ic.mu.Unlock()
 		done()
 	}()
 	return nil
+}
+
+// releasePlayers closes and forgets the players no block has asked for
+// within playerIdle of now: those of blocks gone, scrolled away, or on a
+// page no longer open, and those made after their block went. Call it on
+// the main thread, as a player's methods are, after a frame's blocks are
+// built, so that a player on screen has just been asked for.
+func (ic *imageCache) releasePlayers(now time.Time) {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	for key, gp := range ic.players {
+		if now.Sub(gp.shown) < playerIdle {
+			continue
+		}
+		if gp.p != nil {
+			gp.p.Close()
+		}
+		delete(ic.players, key)
+	}
 }
 
 // animatedGIF reports whether data is a GIF of more than one frame.

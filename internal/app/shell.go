@@ -16,6 +16,13 @@ const (
 
 // view builds the window.
 func (a *App) view(c *ui.Context) {
+	// Once the frame has built its blocks, GIF players none of them
+	// showed for a while go.
+	defer func() {
+		if a.images != nil {
+			a.images.releasePlayers(time.Now())
+		}
+	}()
 	theme.Apply(c)
 	pal := theme.Of(c)
 	if c.Vibrancy() {

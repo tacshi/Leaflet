@@ -154,4 +154,23 @@ func TestAnimatedGIFPlays(t *testing.T) {
 	if q := ic.player(moving, "b2", nil); q == nil || q == p {
 		t.Errorf("second block's player %p, first's %p", q, p)
 	}
+	// A player its block keeps asking for stays; one no block asked for
+	// within playerIdle is closed and forgotten, and made again if its
+	// block shows once more.
+	ic.releasePlayers(time.Now().Add(playerIdle / 2))
+	if ic.player(moving, "b1", nil) != p {
+		t.Fatal("a player asked for recently was released")
+	}
+	ic.releasePlayers(time.Now().Add(2 * playerIdle))
+	if p.Playing() || len(ic.players) != 0 {
+		t.Errorf("after its block went: playing %v, %d players kept", p.Playing(), len(ic.players))
+	}
+	again := make(chan struct{})
+	if ic.player(moving, "b1", func() { close(again) }) != nil {
+		t.Fatal("a released player came back at once")
+	}
+	<-again
+	if q := ic.player(moving, "b1", nil); q == nil || q == p {
+		t.Errorf("the block's new player %p, the released one %p", q, p)
+	}
 }

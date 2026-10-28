@@ -648,8 +648,18 @@ func isLeafletKey(key []string) bool {
 }
 
 // writeAtomic replaces a file whole, so an app reading it never finds it
-// half written, and keeps its permissions.
+// half written, and keeps its permissions. A link, as to settings kept in
+// a dotfiles folder, stays a link: the file it leads to is replaced.
 func writeAtomic(path string, data []byte) error {
+	if real, err := filepath.EvalSymlinks(path); err == nil {
+		path = real
+	} else if to, err := os.Readlink(path); err == nil {
+		// A link to a file not made yet makes it.
+		if !filepath.IsAbs(to) {
+			to = filepath.Join(filepath.Dir(path), to)
+		}
+		path = to
+	}
 	// A new file only its owner reads, as settings may hold keys.
 	mode := fs.FileMode(0o600)
 	if fi, err := os.Stat(path); err == nil {

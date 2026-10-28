@@ -69,6 +69,10 @@ type App struct {
 	syncing    bool
 	syncError  string
 	syncErr    error
+	// invites are the pages shared with the user that wait for them to
+	// accept, as sync last read them; inviteBusy those being answered.
+	invites    []syncsvc.Invite
+	inviteBusy map[string]bool
 	// icloudStop stops watching the Leaflet folder in iCloud Drive.
 	icloudStop context.CancelFunc
 
@@ -281,6 +285,7 @@ func (a *App) start() error {
 	}
 	a.sync.Offline = func() bool { return a.settings.WorkOffline }
 	a.sync.KeepAudio = func() string { return a.settings.KeepAudioOnDevice }
+	a.startInvites()
 	a.rec.Blobs = a.sync
 	a.startICloud()
 	st.Subscribe(func(ch store.Change) { a.update(func() { a.reload(ch) }) })

@@ -377,6 +377,82 @@ func (msgs Messages) ShellNewPage() string {
 	return Catalog.Format(msgs.locale, "shellNewPage", nil)
 }
 
+// ShellInviteFrom says "{name} shared “{title}” with you"
+// in the language the app shows.
+//
+// Home view (and a desktop notification): a page someone shared with the
+// user, waiting for them to accept or decline it.
+func ShellInviteFrom(name string, title string) string {
+	return In(i18n.Locale()).ShellInviteFrom(name, title)
+}
+
+// ShellInviteFrom says "{name} shared “{title}” with you"
+// in the language of msgs.
+//
+// Home view (and a desktop notification): a page someone shared with the
+// user, waiting for them to accept or decline it.
+func (msgs Messages) ShellInviteFrom(name string, title string) string {
+	return Catalog.Format(msgs.locale, "shellInviteFrom", map[string]any{"name": name, "title": title})
+}
+
+// ShellInviteSomeone says "Someone"
+// in the language the app shows.
+//
+// Home view: who shared a page, when they have no name.
+func ShellInviteSomeone() string { return In(i18n.Locale()).ShellInviteSomeone() }
+
+// ShellInviteSomeone says "Someone"
+// in the language of msgs.
+//
+// Home view: who shared a page, when they have no name.
+func (msgs Messages) ShellInviteSomeone() string {
+	return Catalog.Format(msgs.locale, "shellInviteSomeone", nil)
+}
+
+// ShellInviteAccept says "Accept"
+// in the language the app shows.
+//
+// Home view: button that accepts a shared page's invite; the page then
+// appears in the sidebar.
+func ShellInviteAccept() string { return In(i18n.Locale()).ShellInviteAccept() }
+
+// ShellInviteAccept says "Accept"
+// in the language of msgs.
+//
+// Home view: button that accepts a shared page's invite; the page then
+// appears in the sidebar.
+func (msgs Messages) ShellInviteAccept() string {
+	return Catalog.Format(msgs.locale, "shellInviteAccept", nil)
+}
+
+// ShellInviteDecline says "Decline"
+// in the language the app shows.
+//
+// Home view: tooltip of the x button that declines a shared page's invite.
+func ShellInviteDecline() string { return In(i18n.Locale()).ShellInviteDecline() }
+
+// ShellInviteDecline says "Decline"
+// in the language of msgs.
+//
+// Home view: tooltip of the x button that declines a shared page's invite.
+func (msgs Messages) ShellInviteDecline() string {
+	return Catalog.Format(msgs.locale, "shellInviteDecline", nil)
+}
+
+// ShellInviteFailed says "Could not answer the invite: {error}"
+// in the language the app shows.
+//
+// Toast when accepting or declining an invite failed.
+func ShellInviteFailed(error string) string { return In(i18n.Locale()).ShellInviteFailed(error) }
+
+// ShellInviteFailed says "Could not answer the invite: {error}"
+// in the language of msgs.
+//
+// Toast when accepting or declining an invite failed.
+func (msgs Messages) ShellInviteFailed(error string) string {
+	return Catalog.Format(msgs.locale, "shellInviteFailed", map[string]any{"error": error})
+}
+
 // TrayNewRecording says "New Recording"
 // in the language the app shows.
 //
@@ -2679,18 +2755,18 @@ func (msgs Messages) DialogShareInvitee() string {
 	return Catalog.Format(msgs.locale, "dialogShareInvitee", nil)
 }
 
-// DialogShareSent says "If {email} has a Leaflet account, they can open the page now."
+// DialogShareSent says "If {email} has a Leaflet account, they'll get an invite."
 // in the language the app shows.
 //
 // Share dialog: shown after inviting someone; it never says whether the
-// email has an account.
+// email has an account. The page reaches them once they accept the invite.
 func DialogShareSent(email string) string { return In(i18n.Locale()).DialogShareSent(email) }
 
-// DialogShareSent says "If {email} has a Leaflet account, they can open the page now."
+// DialogShareSent says "If {email} has a Leaflet account, they'll get an invite."
 // in the language of msgs.
 //
 // Share dialog: shown after inviting someone; it never says whether the
-// email has an account.
+// email has an account. The page reaches them once they accept the invite.
 func (msgs Messages) DialogShareSent(email string) string {
 	return Catalog.Format(msgs.locale, "dialogShareSent", map[string]any{"email": email})
 }
@@ -2721,6 +2797,22 @@ func DialogShareCanView() string { return In(i18n.Locale()).DialogShareCanView()
 // Share dialog: the role of a person who can only view.
 func (msgs Messages) DialogShareCanView() string {
 	return Catalog.Format(msgs.locale, "dialogShareCanView", nil)
+}
+
+// DialogShareInvited says "Invited"
+// in the language the app shows.
+//
+// Share dialog: beside the role of a person who has not accepted the invite
+// yet.
+func DialogShareInvited() string { return In(i18n.Locale()).DialogShareInvited() }
+
+// DialogShareInvited says "Invited"
+// in the language of msgs.
+//
+// Share dialog: beside the role of a person who has not accepted the invite
+// yet.
+func (msgs Messages) DialogShareInvited() string {
+	return Catalog.Format(msgs.locale, "dialogShareInvited", nil)
 }
 
 // DialogShareInvite says "Invite"

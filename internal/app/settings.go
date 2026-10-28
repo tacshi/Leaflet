@@ -446,9 +446,11 @@ func (a *App) leave(clear func() error) {
 		var err error
 		a.sync.Hold(func() {
 			a.backend.SignOut()
+			a.sync.ClearInvites()
 			err = clear()
 		})
 		a.update(func() {
+			a.invites = nil
 			if err != nil {
 				a.toast(locales.SettingsRemovePagesFailed(err.Error()))
 			}

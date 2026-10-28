@@ -707,6 +707,10 @@ func (a *App) shareDialog(c *ui.Context) {
 								ui.Text(c, m.Email).FontSize(12).TextColor(pal.TextMuted)
 							}
 						})
+						if !m.Accepted && m.Role != "owner" {
+							ui.Text(c, locales.DialogShareInvited()).FontSize(12.5).TextColor(pal.TextMuted)
+							ui.Text(c, "·").FontSize(12.5).TextColor(pal.ChartMuted)
+						}
 						ui.Text(c, shareRoleName(m.Role)).FontSize(12.5).TextColor(pal.TextMuted)
 						if p != nil && !a.isShared(*p) && m.Role != "owner" {
 							remove := false

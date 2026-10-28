@@ -144,6 +144,39 @@
   "@shellNewPage": {
     "description": "Button when no page is open: make a new page."
   },
+  "shellInviteFrom": "{name} shared “{title}” with you",
+  "@shellInviteFrom": {
+    "description": "Home view (and a desktop notification): a page someone shared with the user, waiting for them to accept or decline it.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "shellInviteSomeone": "Someone",
+  "@shellInviteSomeone": {
+    "description": "Home view: who shared a page, when they have no name."
+  },
+  "shellInviteAccept": "Accept",
+  "@shellInviteAccept": {
+    "description": "Home view: button that accepts a shared page's invite; the page then appears in the sidebar."
+  },
+  "shellInviteDecline": "Decline",
+  "@shellInviteDecline": {
+    "description": "Home view: tooltip of the x button that declines a shared page's invite."
+  },
+  "shellInviteFailed": "Could not answer the invite: {error}",
+  "@shellInviteFailed": {
+    "description": "Toast when accepting or declining an invite failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "trayNewRecording": "New Recording",
   "@trayNewRecording": {
     "description": "The menu bar icon's menu: start a recording in a new page."
@@ -952,9 +985,9 @@
   "@dialogShareInvitee": {
     "description": "Share dialog: the field of the person to invite."
   },
-  "dialogShareSent": "If {email} has a Leaflet account, they can open the page now.",
+  "dialogShareSent": "If {email} has a Leaflet account, they'll get an invite.",
   "@dialogShareSent": {
-    "description": "Share dialog: shown after inviting someone; it never says whether the email has an account.",
+    "description": "Share dialog: shown after inviting someone; it never says whether the email has an account. The page reaches them once they accept the invite.",
     "placeholders": {
       "email": {
         "type": "String"
@@ -968,6 +1001,10 @@
   "dialogShareCanView": "Can view",
   "@dialogShareCanView": {
     "description": "Share dialog: the role of a person who can only view."
+  },
+  "dialogShareInvited": "Invited",
+  "@dialogShareInvited": {
+    "description": "Share dialog: beside the role of a person who has not accepted the invite yet."
   },
   "dialogShareInvite": "Invite",
   "@dialogShareInvite": {

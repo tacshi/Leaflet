@@ -210,6 +210,7 @@ func (a *App) shortcuts(c *ui.Context) {
 func (a *App) homeView(c *ui.Context) {
 	pal := theme.Of(c)
 	a.titleBar(c, func() { ui.Spacer(c) })
+	a.inviteList(c)
 	ui.Column(c).Grow(1).Center().Gap(14).Children(func() {
 		ui.Icon(c, theme.Icon("file-text")).FontSize(36).TextColor(pal.ChartMuted)
 		ui.Text(c, locales.ShellNoPageOpen()).FontSize(18).FontWeight(650).TextColor(pal.Text)

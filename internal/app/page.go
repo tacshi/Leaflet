@@ -44,12 +44,20 @@ func (a *App) pageView(c *ui.Context) {
 			}
 			more := iconButton(c, "page-more", "ellipsis", locales.PageActions())
 			more.Menu(func(m *ui.Menu) { a.pageMenu(m, *p, true) })
-			// The panel's own top bar has the toggle while it is open, as
-			// the sidebar does on the left.
-			if !a.panelOpen {
-				if iconButton(c, "show-panel", "panel-right", locales.PageShowPanel()).Clicked() {
-					a.panelOpen = true
-				}
+			// The toggle stays here while the panel is open, leaving the
+			// panel's top bar to its tabs: on Windows and Linux the window
+			// controls take the bar's right end.
+			label := locales.PageShowPanel()
+			if a.panelOpen {
+				label = locales.PanelHide()
+			}
+			toggle := iconButton(c, "toggle-panel", "panel-right", label)
+			if a.panelOpen {
+				pal := theme.Of(c)
+				toggle.Background(pal.NavSelected).TextColor(pal.Text)
+			}
+			if toggle.Clicked() {
+				a.panelOpen = !a.panelOpen
 			}
 		})
 	})

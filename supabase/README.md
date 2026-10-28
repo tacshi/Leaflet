@@ -69,6 +69,12 @@ plan (400 s limit) the deadline may go up to 380000:
 `supabase secrets set AGENT_DEADLINE_MS=360000`. A job left `running` past the
 deadline plus a minute (the platform stopped it) can be claimed again.
 
+Buckets cap uploads at 500 MiB for `recordings` (audio only), 200 MiB for
+`files` and 50 MiB for `images` (images only); a hosted project's global upload
+limit (Storage settings) must be at least as high for long recordings. The
+`stt` function transcribes recordings up to `STT_MAX_AUDIO_MB` (default 100,
+about 54 minutes of the app's WAV); longer ones transcribe on the device.
+
 Supabase Vault (`supabase_vault`) is enabled on every Supabase project; the
 migration relies on `vault.create_secret`, `vault.update_secret` and
 `vault.decrypted_secrets`.
@@ -113,3 +119,5 @@ migration relies on `vault.create_secret`, `vault.update_secret` and
   `images/`. Images go at `images/{space_id}/{page_id}/{image_id}.{ext}`, the
   page they are on; an image at `{space_id}/{image_id}.{ext}` is the owner's
   alone.
+  `recordings/{user_id}/{recording_id}.{ext}` is written only by the user who
+  made that `recordings` row, so upsert the row before uploading its audio.

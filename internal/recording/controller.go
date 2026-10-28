@@ -352,7 +352,8 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 func (r *Controller) startSoniox(session string, stt store.SttSettings) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	// A key on this device is used as is; otherwise the server lends one.
+	// A key on this device is used as is; otherwise the server makes a
+	// short-lived one from the key the user saved there.
 	key := LocalSonioxKey()
 	var err error
 	if key == "" {

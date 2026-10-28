@@ -472,3 +472,18 @@ func TestUndoDeleteOfSeveralBlocks(t *testing.T) {
 		}
 	}
 }
+
+func TestFailedMoveKeepsTheBlock(t *testing.T) {
+	list := &Node{ID: "p", Type: "bulleted_list", Children: []*Node{para("k", "k")}}
+	list.SetDelta(Delta{{Text: "p"}})
+	for _, p := range []Position{{After: "gone"}, {Before: "gone"}, {Parent: "gone"}, {After: "k"}, {Parent: "p"}} {
+		c := FromBlocks([]*Node{para("a", "a"), list})
+		original := c.Copy().Encode()
+		if err := c.Move("p", p); err == nil {
+			t.Errorf("move to %+v: no error", p)
+		}
+		if got := c.Encode(); got != original {
+			t.Errorf("move to %+v changed the page:\n%s", p, got)
+		}
+	}
+}

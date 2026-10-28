@@ -45,8 +45,9 @@ type Trigger struct {
 type Host interface {
 	PageTitle(id string) string
 	OpenPage(id string)
-	// Image returns an image block's picture, or nil while it loads.
-	Image(n *doc.Node) *ui.Bitmap
+	// Image returns an image block's picture, or nil while it loads or
+	// when it failed to load, as failed says.
+	Image(n *doc.Node) (bmp *ui.Bitmap, failed bool)
 	// Embed builds the web view of an embed block.
 	Embed(c *ui.Context, n *doc.Node, width float32)
 	// Video builds a video block.
@@ -67,8 +68,8 @@ type Host interface {
 	// Comment and AskAgent act on the selected text of a block.
 	Comment(blockID, quote string)
 	AskAgent(blockID, quote string)
-	// EditBlock opens what a block is made from: a chart's data, or a math
-	// or diagram block's source.
+	// EditBlock opens what a block is made from: a chart's data, a math
+	// or diagram block's source, or an image's or video's link.
 	EditBlock(blockID string)
 	// OpenBlock opens a page at one of its blocks, for a link to a block.
 	OpenBlock(pageID, blockID string)

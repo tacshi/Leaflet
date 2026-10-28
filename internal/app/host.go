@@ -79,7 +79,7 @@ type host struct{ a *App }
 
 func (h *host) PageTitle(id string) string { return h.a.pageTitleOf(id) }
 func (h *host) OpenPage(id string)         { h.a.openPage(id) }
-func (h *host) Image(n *doc.Node) *ui.Bitmap {
+func (h *host) Image(n *doc.Node) (*ui.Bitmap, bool) {
 	redraw := func() { h.a.update(func() {}) }
 	url := n.Str("url")
 	// An uploaded picture is found by its file: its url is a path on the
@@ -87,11 +87,14 @@ func (h *host) Image(n *doc.Node) *ui.Bitmap {
 	if f, ok := h.a.fileByID(n.Str("file_id")); ok {
 		path := h.a.localFile(f, redraw)
 		if path == "" {
-			return nil
+			return nil, false
 		}
 		url = "file://" + path
 	}
-	return h.a.images.get(url, redraw)
+	if b := h.a.images.get(url, redraw); b != nil {
+		return b, false
+	}
+	return nil, url == "" || h.a.images.hasFailed(url)
 }
 func (h *host) Embed(c *ui.Context, n *doc.Node, width float32) { h.a.embedBlock(c, n, width) }
 func (h *host) Video(c *ui.Context, n *doc.Node, width float32) { h.a.videoBlock(c, n, width) }
@@ -315,6 +318,8 @@ func (h *host) EditBlock(blockID string) {
 		h.a.dialogs.openChart(blockID, ps.editor)
 	case n.Type == "math_equation" || n.Type == "diagram":
 		h.a.dialogs.openSource(n)
+	case n.Type == "image" || n.Type == "video":
+		h.a.dialogs.editLink(n)
 	}
 }
 
@@ -563,19 +568,30 @@ type imageCache struct {
 	mu      sync.Mutex
 	bitmaps map[string]*ui.Bitmap
 	loading map[string]bool
+	// failed holds when a picture last failed to load.
+	failed map[string]time.Time
 }
+
+// imageRetry is how long a picture that failed to load waits before it is
+// tried again, as the device may have come back online.
+const imageRetry = time.Minute
 
 func newImageCache(root, dir string) *imageCache {
-	return &imageCache{root: root, dir: dir, bitmaps: map[string]*ui.Bitmap{}, loading: map[string]bool{}}
+	return &imageCache{root: root, dir: dir, bitmaps: map[string]*ui.Bitmap{}, loading: map[string]bool{}, failed: map[string]time.Time{}}
 }
 
-func (ic *imageCache) get(url string, loaded func()) *ui.Bitmap {
+// get returns a picture, or nil while it loads; done runs when it has
+// loaded or failed.
+func (ic *imageCache) get(url string, done func()) *ui.Bitmap {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
 	if b, ok := ic.bitmaps[url]; ok {
 		return b
 	}
 	if ic.loading[url] || url == "" {
+		return nil
+	}
+	if t, ok := ic.failed[url]; ok && time.Since(t) < imageRetry {
 		return nil
 	}
 	ic.loading[url] = true
@@ -589,15 +605,26 @@ func (ic *imageCache) get(url string, loaded func()) *ui.Bitmap {
 			log.Printf("image %s: %v", url, err)
 		}
 		ic.mu.Lock()
+		delete(ic.loading, url)
 		if b != nil {
 			ic.bitmaps[url] = b
+			delete(ic.failed, url)
+		} else {
+			ic.failed[url] = time.Now()
 		}
 		ic.mu.Unlock()
-		if b != nil {
-			loaded()
-		}
+		done()
 	}()
 	return nil
+}
+
+// hasFailed reports whether a picture failed to load, and is not being
+// tried again.
+func (ic *imageCache) hasFailed(url string) bool {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	_, ok := ic.failed[url]
+	return ok && !ic.loading[url]
 }
 
 // read reads a picture: from the web, or a file of the app's own, in its

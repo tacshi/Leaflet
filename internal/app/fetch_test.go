@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // Links from shared pages reach only the web: not files on this device,
@@ -58,4 +59,33 @@ func TestImagesReadOnlyTheirOwnFiles(t *testing.T) {
 			t.Errorf("read %s: %v", p, err)
 		}
 	}
+}
+
+// A picture that cannot be read says it failed, rather than loading
+// forever, and is tried again later.
+func TestImageCacheFailure(t *testing.T) {
+	root := t.TempDir()
+	ic := newImageCache(root, filepath.Join(root, "images"))
+	url := "file://" + filepath.Join(root, "missing.png")
+	done := make(chan struct{})
+	if ic.get(url, func() { close(done) }) != nil || ic.hasFailed(url) {
+		t.Fatal("a picture loading is shown or failed")
+	}
+	<-done
+	if !ic.hasFailed(url) {
+		t.Fatal("a missing picture has not failed")
+	}
+	if ic.get(url, func() { t.Error("tried again at once") }) != nil {
+		t.Fatal("a missing picture is shown")
+	}
+	// After a while it is tried again.
+	ic.mu.Lock()
+	ic.failed[url] = time.Now().Add(-imageRetry)
+	ic.mu.Unlock()
+	again := make(chan struct{})
+	ic.get(url, func() { close(again) })
+	if ic.hasFailed(url) {
+		t.Error("a picture tried again still says it failed")
+	}
+	<-again
 }

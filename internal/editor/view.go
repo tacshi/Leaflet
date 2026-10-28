@@ -44,6 +44,10 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 				e.services.WriteClipboard(e.Host.BlockLink(e.menuBlock))
 				c.Toast(locales.EditorCopiedBlockLink())
 			}
+			if t := e.node(e.menuBlock).Type; (t == "image" || t == "video") && !e.ReadOnly &&
+				m.Item(locales.EditorEditMediaLink()).Chosen() {
+				e.Host.EditBlock(e.menuBlock)
+			}
 			m.Separator()
 		}
 		m.EditItems()
@@ -324,11 +328,15 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 }
 
 func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
-	bmp := e.Host.Image(n)
+	bmp, failed := e.Host.Image(n)
 	if bmp == nil {
+		label := locales.EditorLoadingImage()
+		if failed {
+			label = locales.EditorImageFailed()
+		}
 		ui.Row(c).Height(160).FillWidth().Center().Radius(8).Background(pal.Ground).Border(1, pal.Divider).Children(func() {
 			ui.Icon(c, theme.Icon("image")).TextColor(pal.TextMuted)
-			ui.Text(c, locales.EditorLoadingImage()).TextColor(pal.TextMuted).Margin(0, 0, 0, 8)
+			ui.Text(c, label).TextColor(pal.TextMuted).Margin(0, 0, 0, 8)
 		})
 		return
 	}

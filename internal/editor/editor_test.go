@@ -3,6 +3,7 @@ package editor
 import (
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,11 +16,13 @@ type fakeHost struct {
 	picked []MenuItem
 	opened []string
 	edited []string
+	// imageFailed is whether images fail to load, rather than load forever.
+	imageFailed bool
 }
 
 func (h *fakeHost) PageTitle(id string) string                  { return "Sub" }
 func (h *fakeHost) OpenPage(id string)                          { h.opened = append(h.opened, id) }
-func (h *fakeHost) Image(n *doc.Node) *ui.Bitmap                { return nil }
+func (h *fakeHost) Image(n *doc.Node) (*ui.Bitmap, bool)        { return nil, h.imageFailed }
 func (h *fakeHost) Embed(c *ui.Context, n *doc.Node, w float32) {}
 func (h *fakeHost) Video(c *ui.Context, n *doc.Node, w float32) {}
 func (h *fakeHost) Card(c *ui.Context, n *doc.Node)             {}
@@ -691,5 +694,39 @@ func TestLeadingFollowsScript(t *testing.T) {
 		if got := leading(text); got != want {
 			t.Errorf("leading(%q) = %v, want %v", text, got, want)
 		}
+	}
+}
+
+// Right-clicking an image or a video offers to change its link; a block of
+// text does not.
+func TestEditMediaLink(t *testing.T) {
+	e, tt, host := setup(t)
+	img := &doc.Node{ID: "img", Type: "image", Data: map[string]any{"url": "https://example.com/a.png"}}
+	video := &doc.Node{ID: "vid", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ"}}
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{para("p", "text"), img, video} })
+	tt.Frame()
+	if _, ok := tt.Find("Loading image…"); !ok {
+		t.Error("the image does not say it is loading")
+	}
+	for _, id := range []string{"img", "vid"} {
+		r := e.geom[id]
+		tt.RightClickAt(r.X+20, r.Y+r.H/2)
+		if err := tt.ChooseMenuItem("Edit link"); err != nil {
+			t.Fatalf("%s: %v; menu %v", id, err, tt.Menu())
+		}
+	}
+	if !reflect.DeepEqual(host.edited, []string{"img", "vid"}) {
+		t.Errorf("edited %v", host.edited)
+	}
+	r := e.geom["p"]
+	tt.RightClickAt(r.X+5, r.Y+r.H/2)
+	if slices.Contains(tt.Menu(), "Edit link") {
+		t.Errorf("a paragraph's menu %v", tt.Menu())
+	}
+	// An image that cannot load says so, rather than loading forever.
+	host.imageFailed = true
+	tt.Frame()
+	if _, ok := tt.Find("Couldn't load image"); !ok {
+		t.Error("the image does not say it failed")
 	}
 }

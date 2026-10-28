@@ -1111,6 +1111,14 @@
   "@dialogLinkCardSubtitle": {
     "description": "Link dialog: the subtitle when adding a link card."
   },
+  "dialogLinkImageTitle": "Image",
+  "@dialogLinkImageTitle": {
+    "description": "Link dialog: the title when changing an image's link."
+  },
+  "dialogLinkImageSubtitle": "Paste a link to an image.",
+  "@dialogLinkImageSubtitle": {
+    "description": "Link dialog: the subtitle when changing an image's link."
+  },
   "dialogLinkVideoTitle": "Video",
   "@dialogLinkVideoTitle": {
     "description": "Link dialog: the title when adding a video."
@@ -2551,6 +2559,10 @@
   "@editorCopiedBlockLink": {
     "description": "Toast after Copy link to block."
   },
+  "editorEditMediaLink": "Edit link",
+  "@editorEditMediaLink": {
+    "description": "Context menu on an image or video block: changes the link it shows."
+  },
   "editorPhHeading": "Heading {level}",
   "@editorPhHeading": {
     "description": "Placeholder of an empty heading.",
@@ -2616,6 +2628,10 @@
   "editorLoadingImage": "Loading image…",
   "@editorLoadingImage": {
     "description": "Image block while its image loads."
+  },
+  "editorImageFailed": "Couldn't load image",
+  "@editorImageFailed": {
+    "description": "Image block whose image could not be loaded."
   },
   "editorPageNotFound": "Page not found",
   "@editorPageNotFound": {

@@ -3141,6 +3141,34 @@ func (msgs Messages) DialogLinkCardSubtitle() string {
 	return Catalog.Format(msgs.locale, "dialogLinkCardSubtitle", nil)
 }
 
+// DialogLinkImageTitle says "Image"
+// in the language the app shows.
+//
+// Link dialog: the title when changing an image's link.
+func DialogLinkImageTitle() string { return In(i18n.Locale()).DialogLinkImageTitle() }
+
+// DialogLinkImageTitle says "Image"
+// in the language of msgs.
+//
+// Link dialog: the title when changing an image's link.
+func (msgs Messages) DialogLinkImageTitle() string {
+	return Catalog.Format(msgs.locale, "dialogLinkImageTitle", nil)
+}
+
+// DialogLinkImageSubtitle says "Paste a link to an image."
+// in the language the app shows.
+//
+// Link dialog: the subtitle when changing an image's link.
+func DialogLinkImageSubtitle() string { return In(i18n.Locale()).DialogLinkImageSubtitle() }
+
+// DialogLinkImageSubtitle says "Paste a link to an image."
+// in the language of msgs.
+//
+// Link dialog: the subtitle when changing an image's link.
+func (msgs Messages) DialogLinkImageSubtitle() string {
+	return Catalog.Format(msgs.locale, "dialogLinkImageSubtitle", nil)
+}
+
 // DialogLinkVideoTitle says "Video"
 // in the language the app shows.
 //
@@ -7057,6 +7085,20 @@ func (msgs Messages) EditorCopiedBlockLink() string {
 	return Catalog.Format(msgs.locale, "editorCopiedBlockLink", nil)
 }
 
+// EditorEditMediaLink says "Edit link"
+// in the language the app shows.
+//
+// Context menu on an image or video block: changes the link it shows.
+func EditorEditMediaLink() string { return In(i18n.Locale()).EditorEditMediaLink() }
+
+// EditorEditMediaLink says "Edit link"
+// in the language of msgs.
+//
+// Context menu on an image or video block: changes the link it shows.
+func (msgs Messages) EditorEditMediaLink() string {
+	return Catalog.Format(msgs.locale, "editorEditMediaLink", nil)
+}
+
 // EditorPhHeading says "Heading {level}"
 // in the language the app shows.
 //
@@ -7223,6 +7265,20 @@ func EditorLoadingImage() string { return In(i18n.Locale()).EditorLoadingImage()
 // Image block while its image loads.
 func (msgs Messages) EditorLoadingImage() string {
 	return Catalog.Format(msgs.locale, "editorLoadingImage", nil)
+}
+
+// EditorImageFailed says "Couldn't load image"
+// in the language the app shows.
+//
+// Image block whose image could not be loaded.
+func EditorImageFailed() string { return In(i18n.Locale()).EditorImageFailed() }
+
+// EditorImageFailed says "Couldn't load image"
+// in the language of msgs.
+//
+// Image block whose image could not be loaded.
+func (msgs Messages) EditorImageFailed() string {
+	return Catalog.Format(msgs.locale, "editorImageFailed", nil)
 }
 
 // EditorPageNotFound says "Page not found"

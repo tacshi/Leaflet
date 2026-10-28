@@ -47,6 +47,9 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 			if label := mediaEdit(e.node(e.menuBlock)); label != "" && !e.ReadOnly && m.Item(label).Chosen() {
 				e.Host.EditBlock(e.menuBlock)
 			}
+			if label := mediaLink(e.linkAtPos(e.menuAt)); label != "" && !e.ReadOnly && m.Item(label).Chosen() {
+				e.LinkToMedia(e.menuAt)
+			}
 			m.Separator()
 		}
 		m.EditItems()
@@ -335,6 +338,18 @@ func mediaEdit(n *doc.Node) string {
 		return locales.EditorReplaceImage()
 	case n.Type == "image" || n.Type == "video":
 		return locales.EditorEditMediaLink()
+	}
+	return ""
+}
+
+// mediaLink is the context menu's item that shows a link to a video or a
+// picture as its block, or "".
+func mediaLink(href string) string {
+	if _, ok := doc.ParseVideoURL(href); ok {
+		return locales.EditorShowAsVideo()
+	}
+	if doc.ImageLink(href) {
+		return locales.EditorShowAsImage()
 	}
 	return ""
 }

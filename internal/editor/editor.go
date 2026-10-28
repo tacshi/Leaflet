@@ -145,9 +145,11 @@ type Editor struct {
 	cellMove    int
 
 	// hid are the blocks folded headings hide, as the page last built;
-	// menuBlock is the block a context menu was opened on.
+	// menuBlock is the block a context menu was opened on, and menuAt
+	// where in it.
 	hid       map[string]bool
 	menuBlock string
+	menuAt    Pos
 	// bar is the selection toolbar, kept while the focus is in it or its
 	// colors are open.
 	bar       ui.Handle

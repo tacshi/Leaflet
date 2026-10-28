@@ -2,15 +2,17 @@ package doc
 
 import (
 	"net/url"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
 )
 
-// Video is the YouTube or Vimeo video a link points to.
+// Video is the YouTube or Vimeo video a link points to, or the video file.
 type Video struct {
-	Provider string // "youtube" or "vimeo"
-	ID       string
+	Provider string // "youtube", "vimeo" or "file"
+	// ID is the video's ID on its site, or a file's link without its time.
+	ID string
 	// Hash is the key in the link of an unlisted Vimeo video.
 	Hash string
 	// Start is how many seconds in the link says to start.
@@ -25,8 +27,12 @@ var (
 	linkTime = regexp.MustCompile(`^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s?)?$`)
 )
 
+// VideoExts are the kinds of video file a video block plays, by extension.
+var VideoExts = map[string]bool{".mp4": true, ".m4v": true, ".mov": true, ".webm": true, ".ogv": true}
+
 // ParseVideoURL reads the video a YouTube or Vimeo link points to: a watch
-// page, a short link, a Short, a live stream or a player's own link.
+// page, a short link, a Short, a live stream or a player's own link. Any
+// other web link to a video file, as its extension says, is that file.
 func ParseVideoURL(s string) (Video, bool) {
 	u, err := url.Parse(strings.TrimSpace(s))
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
@@ -78,6 +84,11 @@ func ParseVideoURL(s string) (Video, bool) {
 			return v, true
 		}
 	}
+	if VideoExts[strings.ToLower(path.Ext(u.Path))] && u.Host != "" {
+		t, _ := strings.CutPrefix(u.Fragment, "t=")
+		u.Fragment, u.RawFragment = "", ""
+		return Video{Provider: "file", ID: u.String(), Start: startOf(t)}, true
+	}
 	return Video{}, false
 }
 
@@ -95,9 +106,12 @@ func startOf(t string) int {
 	return s
 }
 
-// WatchURL is the video's page on its site.
+// WatchURL is the video's page on its site, or the file.
 func (v Video) WatchURL() string {
-	if v.Provider == "vimeo" {
+	switch v.Provider {
+	case "file":
+		return v.PlayerURL()
+	case "vimeo":
 		u := "https://vimeo.com/" + v.ID
 		if v.Hash != "" {
 			u += "/" + v.Hash
@@ -111,10 +125,17 @@ func (v Video) WatchURL() string {
 	return u
 }
 
-// PlayerURL is the site's player for the video, to frame in a page. It
-// starts playing as it loads, as the user asked for it by clicking play.
+// PlayerURL is the site's player for the video, to frame in a page, or the
+// file. A player starts playing as it loads, as the user asked for it by
+// clicking play.
 func (v Video) PlayerURL() string {
-	if v.Provider == "vimeo" {
+	switch v.Provider {
+	case "file":
+		if v.Start > 0 {
+			return v.ID + "#t=" + strconv.Itoa(v.Start)
+		}
+		return v.ID
+	case "vimeo":
 		u := "https://player.vimeo.com/video/" + v.ID + "?autoplay=1&dnt=1"
 		if v.Hash != "" {
 			u += "&h=" + v.Hash
@@ -131,12 +152,28 @@ func (v Video) PlayerURL() string {
 	return u
 }
 
-// OEmbedURL is where the site tells the video's title and picture.
+// OEmbedURL is where the site tells the video's title and picture, or ""
+// for a file, which has no site to ask.
 func (v Video) OEmbedURL() string {
-	if v.Provider == "vimeo" {
+	switch v.Provider {
+	case "file":
+		return ""
+	case "vimeo":
 		return "https://vimeo.com/api/oembed.json?width=1280&url=" + url.QueryEscape(v.WatchURL())
 	}
 	return "https://www.youtube.com/oembed?format=json&url=" + url.QueryEscape(v.WatchURL())
+}
+
+// FileName is a video file's name, as its link ends, or "".
+func (v Video) FileName() string {
+	if v.Provider != "file" {
+		return ""
+	}
+	u, err := url.Parse(v.ID)
+	if err != nil {
+		return ""
+	}
+	return path.Base(u.Path)
 }
 
 // Thumbnail is the video's picture where it follows from the ID alone, as
@@ -148,11 +185,12 @@ func (v Video) Thumbnail() string {
 	return ""
 }
 
-// VideoNode is a video block for a YouTube or Vimeo link.
+// VideoNode is a video block for a YouTube or Vimeo link, or a link to a
+// video file.
 func VideoNode(link, title string) (*Node, error) {
 	link = strings.TrimSpace(link)
 	if _, ok := ParseVideoURL(link); !ok {
-		return nil, toolErr("A video block needs video.url, a YouTube or Vimeo link.")
+		return nil, toolErr("A video block needs video.url, a YouTube or Vimeo link or a link to a video file (.mp4, .webm, .mov).")
 	}
 	return &Node{ID: NewBlockID(), Type: "video", Data: map[string]any{"url": link, "title": strings.TrimSpace(title)}}, nil
 }

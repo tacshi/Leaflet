@@ -1195,13 +1195,13 @@ func (msgs Messages) HostSlashVideo() string {
 	return Catalog.Format(msgs.locale, "hostSlashVideo", nil)
 }
 
-// HostSlashVideoHint says "A YouTube or Vimeo link"
+// HostSlashVideoHint says "A YouTube, Vimeo or video file link"
 // in the language the app shows.
 //
 // The / menu: hint of Video.
 func HostSlashVideoHint() string { return In(i18n.Locale()).HostSlashVideoHint() }
 
-// HostSlashVideoHint says "A YouTube or Vimeo link"
+// HostSlashVideoHint says "A YouTube, Vimeo or video file link"
 // in the language of msgs.
 //
 // The / menu: hint of Video.
@@ -3227,13 +3227,13 @@ func (msgs Messages) DialogLinkVideoTitle() string {
 	return Catalog.Format(msgs.locale, "dialogLinkVideoTitle", nil)
 }
 
-// DialogLinkVideoSubtitle says "Paste a YouTube or Vimeo link."
+// DialogLinkVideoSubtitle says "Paste a YouTube or Vimeo link, or a link to a video file."
 // in the language the app shows.
 //
 // Link dialog: the subtitle when adding a video.
 func DialogLinkVideoSubtitle() string { return In(i18n.Locale()).DialogLinkVideoSubtitle() }
 
-// DialogLinkVideoSubtitle says "Paste a YouTube or Vimeo link."
+// DialogLinkVideoSubtitle says "Paste a YouTube or Vimeo link, or a link to a video file."
 // in the language of msgs.
 //
 // Link dialog: the subtitle when adding a video.
@@ -3241,13 +3241,13 @@ func (msgs Messages) DialogLinkVideoSubtitle() string {
 	return Catalog.Format(msgs.locale, "dialogLinkVideoSubtitle", nil)
 }
 
-// DialogLinkNotVideo says "That isn't a YouTube or Vimeo link."
+// DialogLinkNotVideo says "That isn't a YouTube, Vimeo or video file link."
 // in the language the app shows.
 //
 // Link dialog: an error when the link is not a video.
 func DialogLinkNotVideo() string { return In(i18n.Locale()).DialogLinkNotVideo() }
 
-// DialogLinkNotVideo says "That isn't a YouTube or Vimeo link."
+// DialogLinkNotVideo says "That isn't a YouTube, Vimeo or video file link."
 // in the language of msgs.
 //
 // Link dialog: an error when the link is not a video.
@@ -5403,13 +5403,13 @@ func (msgs Messages) RenderedExitFullScreen() string {
 	return Catalog.Format(msgs.locale, "renderedExitFullScreen", nil)
 }
 
-// VideoNotALink says "Not a YouTube or Vimeo link: {url}"
+// VideoNotALink says "Not a video link: {url}"
 // in the language the app shows.
 //
 // A video block whose link is not a video.
 func VideoNotALink(url string) string { return In(i18n.Locale()).VideoNotALink(url) }
 
-// VideoNotALink says "Not a YouTube or Vimeo link: {url}"
+// VideoNotALink says "Not a video link: {url}"
 // in the language of msgs.
 //
 // A video block whose link is not a video.
@@ -7141,6 +7141,38 @@ func EditorEditMediaLink() string { return In(i18n.Locale()).EditorEditMediaLink
 // Context menu on an image or video block: changes the link it shows.
 func (msgs Messages) EditorEditMediaLink() string {
 	return Catalog.Format(msgs.locale, "editorEditMediaLink", nil)
+}
+
+// EditorShowAsVideo says "Show as video"
+// in the language the app shows.
+//
+// Context menu on a link to a video in a page's text: shows the video,
+// playable, in place of the link.
+func EditorShowAsVideo() string { return In(i18n.Locale()).EditorShowAsVideo() }
+
+// EditorShowAsVideo says "Show as video"
+// in the language of msgs.
+//
+// Context menu on a link to a video in a page's text: shows the video,
+// playable, in place of the link.
+func (msgs Messages) EditorShowAsVideo() string {
+	return Catalog.Format(msgs.locale, "editorShowAsVideo", nil)
+}
+
+// EditorShowAsImage says "Show as image"
+// in the language the app shows.
+//
+// Context menu on a link to a picture in a page's text: shows the picture
+// in place of the link.
+func EditorShowAsImage() string { return In(i18n.Locale()).EditorShowAsImage() }
+
+// EditorShowAsImage says "Show as image"
+// in the language of msgs.
+//
+// Context menu on a link to a picture in a page's text: shows the picture
+// in place of the link.
+func (msgs Messages) EditorShowAsImage() string {
+	return Catalog.Format(msgs.locale, "editorShowAsImage", nil)
 }
 
 // EditorReplaceImage says "Replace image…"

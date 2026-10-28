@@ -389,7 +389,7 @@
   "@hostSlashVideo": {
     "description": "The / menu."
   },
-  "hostSlashVideoHint": "A YouTube or Vimeo link",
+  "hostSlashVideoHint": "A YouTube, Vimeo or video file link",
   "@hostSlashVideoHint": {
     "description": "The / menu: hint of Video."
   },
@@ -1135,11 +1135,11 @@
   "@dialogLinkVideoTitle": {
     "description": "Link dialog: the title when adding a video."
   },
-  "dialogLinkVideoSubtitle": "Paste a YouTube or Vimeo link.",
+  "dialogLinkVideoSubtitle": "Paste a YouTube or Vimeo link, or a link to a video file.",
   "@dialogLinkVideoSubtitle": {
     "description": "Link dialog: the subtitle when adding a video."
   },
-  "dialogLinkNotVideo": "That isn't a YouTube or Vimeo link.",
+  "dialogLinkNotVideo": "That isn't a YouTube, Vimeo or video file link.",
   "@dialogLinkNotVideo": {
     "description": "Link dialog: an error when the link is not a video."
   },
@@ -1954,7 +1954,7 @@
   "@renderedExitFullScreen": {
     "description": "Button over a diagram filling the page that brings the page back."
   },
-  "videoNotALink": "Not a YouTube or Vimeo link: {url}",
+  "videoNotALink": "Not a video link: {url}",
   "@videoNotALink": {
     "description": "A video block whose link is not a video.",
     "placeholders": {
@@ -2574,6 +2574,14 @@
   "editorEditMediaLink": "Edit link",
   "@editorEditMediaLink": {
     "description": "Context menu on an image or video block: changes the link it shows."
+  },
+  "editorShowAsVideo": "Show as video",
+  "@editorShowAsVideo": {
+    "description": "Context menu on a link to a video in a page's text: shows the video, playable, in place of the link."
+  },
+  "editorShowAsImage": "Show as image",
+  "@editorShowAsImage": {
+    "description": "Context menu on a link to a picture in a page's text: shows the picture in place of the link."
   },
   "editorReplaceImage": "Replace image…",
   "@editorReplaceImage": {

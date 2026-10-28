@@ -38,6 +38,7 @@ func fetch(link string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", fetchAgent)
 	res, err := publicClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -48,6 +49,11 @@ func fetch(link string) ([]byte, error) {
 	}
 	return io.ReadAll(io.LimitReader(res.Body, 20<<20))
 }
+
+// fetchAgent is the User-Agent fetch names, as a browser's: some sites
+// refuse Go's own, as segmentfault.com's picture links answer it 410 Gone
+// where a browser is sent on to the picture.
+const fetchAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Leaflet"
 
 // publicClient is fetch's: through the system's proxy, as the app's other
 // clients go, and to public addresses only.

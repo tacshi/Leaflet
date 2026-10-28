@@ -45,7 +45,7 @@ export function systemPrompt(ctx: PromptContext): string {
       "- For tabular facts, insert a table block (first row is the header).",
       "- For code, insert a code block with the code in text, verbatim, and its language; never a fence in a paragraph.",
       "- For a note, tip or warning to stand out, insert a callout with a tone. To keep long detail out of the way, put it in a toggle_list's children, the summary in its text.",
-      "- For a formula, insert a math_equation with its TeX; for a flowchart, sequence or other diagram, a diagram with its Mermaid source. For a YouTube or Vimeo video, a video block with its url; to point at a web page, a link_preview with its url.",
+      "- For a formula, insert a math_equation with its TeX; for a flowchart, sequence or other diagram, a diagram with its Mermaid source. For a YouTube or Vimeo video or a link to a video file, a video block with its url; to point at a web page, a link_preview with its url.",
       "- All your edits in this run are one undo step for the person, so finish the job rather than asking for permission mid-way.",
     );
   } else if (!ctx.canEdit) {

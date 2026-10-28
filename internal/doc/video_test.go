@@ -21,6 +21,9 @@ func TestParseVideoURL(t *testing.T) {
 		{"https://vimeo.com/76979871/8272103f6e#t=1h2s", Video{Provider: "vimeo", ID: "76979871", Hash: "8272103f6e", Start: 3602}},
 		{"https://vimeo.com/channels/staffpicks/76979871", Video{Provider: "vimeo", ID: "76979871"}},
 		{"https://player.vimeo.com/video/76979871?h=8272103f6e", Video{Provider: "vimeo", ID: "76979871", Hash: "8272103f6e"}},
+		{"https://blog-r2.jw1.dev/3b8wzvg9E4_tDvUx.mp4", Video{Provider: "file", ID: "https://blog-r2.jw1.dev/3b8wzvg9E4_tDvUx.mp4"}},
+		{"https://example.com/clips/A.MOV?sig=1#t=1m", Video{Provider: "file", ID: "https://example.com/clips/A.MOV?sig=1", Start: 60}},
+		{"http://example.com/a.webm", Video{Provider: "file", ID: "http://example.com/a.webm"}},
 	} {
 		got, ok := ParseVideoURL(tc.link)
 		if !ok || got != tc.want {
@@ -31,6 +34,7 @@ func TestParseVideoURL(t *testing.T) {
 		"", "dQw4w9WgXcQ", "https://www.youtube.com/", "https://www.youtube.com/watch?v=short",
 		"https://www.youtube.com/@channel", "https://vimeo.com/staffpicks", "ftp://youtu.be/dQw4w9WgXcQ",
 		"https://example.com/watch?v=dQw4w9WgXcQ", "see https://youtu.be/dQw4w9WgXcQ",
+		"https://example.com/a.mp3", "https://example.com/mp4", "file:///Users/me/a.mp4", "https:///a.mp4",
 	} {
 		if v, ok := ParseVideoURL(link); ok {
 			t.Errorf("%q is not a video: %+v", link, v)
@@ -56,6 +60,13 @@ func TestVideoURLs(t *testing.T) {
 	if vm.Thumbnail() != "" || yt.Thumbnail() != "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" {
 		t.Errorf("thumbnails %q %q", vm.Thumbnail(), yt.Thumbnail())
 	}
+	f := Video{Provider: "file", ID: "https://example.com/clips/a%20b.mp4?sig=1", Start: 60}
+	if f.PlayerURL() != "https://example.com/clips/a%20b.mp4?sig=1#t=60" || f.WatchURL() != f.PlayerURL() {
+		t.Errorf("file player %s, watch %s", f.PlayerURL(), f.WatchURL())
+	}
+	if f.OEmbedURL() != "" || f.Thumbnail() != "" || f.FileName() != "a b.mp4" || yt.FileName() != "" {
+		t.Errorf("file oembed %q, thumbnail %q, name %q", f.OEmbedURL(), f.Thumbnail(), f.FileName())
+	}
 }
 
 func TestVideoBlocks(t *testing.T) {
@@ -63,8 +74,11 @@ func TestVideoBlocks(t *testing.T) {
 	if err != nil || n.Type != "video" || n.Str("url") != "https://youtu.be/dQw4w9WgXcQ" || n.Str("title") != "Never" {
 		t.Fatalf("got %+v, %v", n, err)
 	}
-	if _, err := SpecToNode(map[string]any{"type": "video", "video": map[string]any{"url": "https://example.com/a.mp4"}}, "", "Agent"); err == nil {
-		t.Error("a link that is not YouTube or Vimeo made a video")
+	if _, err := SpecToNode(map[string]any{"type": "video", "video": map[string]any{"url": "https://example.com/a.mp4"}}, "", "Agent"); err != nil {
+		t.Errorf("a link to a video file made no video: %v", err)
+	}
+	if _, err := SpecToNode(map[string]any{"type": "video", "video": map[string]any{"url": "https://example.com/a"}}, "", "Agent"); err == nil {
+		t.Error("a link that is not to a video made a video")
 	}
 	c := FromBlocks([]*Node{n})
 	if views := BlockViews(c); views[0]["video"].(map[string]any)["url"] != "https://youtu.be/dQw4w9WgXcQ" {

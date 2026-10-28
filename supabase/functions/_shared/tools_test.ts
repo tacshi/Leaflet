@@ -287,7 +287,7 @@ Deno.test("callouts, toggles, videos, link cards, math and diagrams", () => {
   });
   for (
     const bad of [
-      { type: "video", video: { url: "https://example.com/v.mp4" } },
+      { type: "video", video: { url: "https://example.com/v" } },
       { type: "link_preview", link: { url: "ftp://x" } },
       { type: "math_equation" },
       { type: "diagram", source: " " },

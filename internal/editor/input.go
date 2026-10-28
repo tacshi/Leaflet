@@ -472,9 +472,9 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 		wx, wy := ev.X+e.root.X, ev.Y+e.root.Y
 		if ev.Button != 0 {
 			// The context menu acts on the block it opened on.
-			e.menuBlock = ""
+			e.menuBlock, e.menuAt = "", Pos{}
 			if p, ok := e.hit(wx, wy); ok {
-				e.menuBlock = p.ID
+				e.menuBlock, e.menuAt = p.ID, p
 			}
 			return false
 		}

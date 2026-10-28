@@ -541,6 +541,7 @@
   "settingsExportFileName": "Leaflet 页面.zip",
   "settingsExportFailed": "无法导出：{error}",
   "settingsExported": "已导出 {name}",
+  "settingsExportedMissing": "{count, plural, other {已导出 {name}，未包含 # 个无法下载的页面}}",
   "settingsDeleteAccount": "删除账户",
   "settingsDeleteAccountDesc": "删除服务器上的空间、页面、录音和密钥",
   "settingsDeleteButton": "删除…",

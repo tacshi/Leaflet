@@ -2,11 +2,13 @@ package app
 
 import (
 	"archive/zip"
+	"context"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,14 +17,16 @@ import (
 	"leaflet/locales"
 )
 
-func (a *App) writeExport(file string) error {
+// writeExport writes every page to file, and returns how many pages it
+// left out: those this device does not keep and could not download.
+func (a *App) writeExport(file string) (int, error) {
 	pages, err := a.st.Pages()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	templates, err := a.st.Templates()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	folders := map[string]string{}
 	for _, fo := range a.folders {
@@ -37,9 +41,26 @@ func (a *App) writeExport(file string) error {
 		}
 		pages = append(pages, t)
 	}
+	// A page this device does not keep comes down first, as when it is
+	// opened.
+	missing := 0
+	for _, p := range pages {
+		if a.st.Content(p.ID) != nil {
+			continue
+		}
+		var c *doc.Content
+		a.sync.Hold(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			c, err = a.sync.RefreshContent(ctx, p.ID)
+		})
+		if err != nil || c == nil {
+			missing++
+		}
+	}
 	f, err := os.Create(file) // #nosec G304 -- the file the user picked to export to.
 	if err != nil {
-		return err
+		return 0, err
 	}
 	localPath := func(fileID string) string {
 		if f, ok := a.fileByID(fileID); ok {
@@ -49,9 +70,9 @@ func (a *App) writeExport(file string) error {
 	}
 	if err := exportZip(f, pages, folders, a.st.Content, localPath, os.ReadFile); err != nil {
 		_ = f.Close()
-		return err
+		return 0, err
 	}
-	return f.Close()
+	return missing, f.Close()
 }
 
 // exportZip writes the pages as Markdown files in a zip: a folder is a
@@ -96,6 +117,10 @@ func exportZip(w io.Writer, pages []store.Page, folders map[string]string, conte
 
 	z := zip.NewWriter(w)
 	create := func(name string, at time.Time) (io.Writer, error) {
+		// Every name stays inside the folder the zip opens into.
+		if name != path.Clean(name) || path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
+			return nil, fmt.Errorf("export: unsafe name %q", name)
+		}
 		if at.IsZero() {
 			at = time.Now()
 		}
@@ -138,7 +163,7 @@ func exportZip(w io.Writer, pages []store.Page, folders map[string]string, conte
 				if err != nil {
 					return // gone from this device: the link stays as it was
 				}
-				base := path.Base(local)
+				base := safeName(filepath.Base(local))
 				name = "files/" + base
 				for n := 2; usedFiles[strings.ToLower(name)]; n++ {
 					ext := path.Ext(base)

@@ -541,6 +541,7 @@
   "settingsExportFileName": "Leaflet ページ.zip",
   "settingsExportFailed": "書き出せませんでした：{error}",
   "settingsExported": "{name} を書き出しました",
+  "settingsExportedMissing": "{count, plural, other {{name} を書き出しました（ダウンロードできなかった # ページを除く）}}",
   "settingsDeleteAccount": "アカウントを削除",
   "settingsDeleteAccountDesc": "サーバー上のスペース、ページ、録音、キーを削除します",
   "settingsDeleteButton": "削除…",

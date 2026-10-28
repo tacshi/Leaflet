@@ -636,3 +636,75 @@ func TestICloudJoiningAfreshSendsEverything(t *testing.T) {
 		t.Errorf("audio %q, %v", data, err)
 	}
 }
+
+// A file this device has only in iCloud Drive, not downloaded yet when
+// everything is sent again, waits with its old place, and goes once it
+// comes.
+func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
+	old := moveWait
+	moveWait = 200 * time.Millisecond
+	t.Cleanup(func() { moveWait = old })
+	root := cloudRoot(t)
+	a := newCloudDevice(t, root)
+	p := a.page("Attachments")
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := a.st.AddFile(src, "", p.ID, "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	file := func() store.File {
+		files, _ := a.st.Files()
+		for _, x := range files {
+			if x.ID == f.ID {
+				return x
+			}
+		}
+		t.Fatal("no file")
+		return store.File{}
+	}
+	f = file()
+	if err := os.Remove(f.LocalPath); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := blobPath("files", f.StoragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	hidden := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".icloud")
+	if err := os.Rename(path, hidden); err != nil {
+		t.Fatal(err)
+	}
+
+	const space = "00000000-0000-0000-0000-0000000000a2"
+	sess := a.st.Session()
+	sess.SpaceID = space
+	a.st.SetSession(sess)
+	if err := a.svc.requeueAll(space); err == nil {
+		t.Error("requeueAll said all went")
+	}
+	if got := file(); got.StoragePath != f.StoragePath || a.st.HasPending("files", f.ID) {
+		t.Errorf("file moved before it came: %+v", got)
+	}
+
+	if err := os.Rename(hidden, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.svc.retryMoves(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got := file()
+	if got.StoragePath != space+"/"+f.ID+"/"+f.Name || !onDevice(got.LocalPath) {
+		t.Errorf("file %+v", got)
+	}
+	if !a.st.HasPending("files", f.ID) || !a.st.HasPending("storage", "files/"+f.ID) {
+		t.Error("file not queued once it came")
+	}
+	if len(a.svc.ids(movesKey)) != 0 {
+		t.Errorf("still waiting for %v", a.svc.ids(movesKey))
+	}
+}

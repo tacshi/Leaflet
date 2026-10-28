@@ -403,11 +403,14 @@ func (a *App) exportAll() {
 		if path == "" {
 			return
 		}
-		err := a.writeExport(path)
+		missing, err := a.writeExport(path)
 		a.update(func() {
-			if err != nil {
+			switch {
+			case err != nil:
 				a.toast(locales.SettingsExportFailed(err.Error()))
-			} else {
+			case missing > 0:
+				a.toast(locales.SettingsExportedMissing(missing, filepath.Base(path)))
+			default:
 				a.toast(locales.SettingsExported(filepath.Base(path)))
 			}
 		})

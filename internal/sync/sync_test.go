@@ -429,6 +429,44 @@ func TestPullBringsAPageSharedWithTheUser(t *testing.T) {
 	}
 }
 
+// A shared page pulled again keeps a rename made here that has not gone
+// up yet.
+func TestPullSharedKeepsChangesWaiting(t *testing.T) {
+	st := openStore(t)
+	const (
+		root  = "00000000-0000-0000-0000-0000000000e1"
+		other = "00000000-0000-0000-0000-0000000000ff"
+	)
+	old := "2026-01-01T00:00:00Z"
+	server := map[string]any{"id": root, "space_id": other, "title": "Old title", "sort_key": "V", "created_at": old, "updated_at": old}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out := []map[string]any{}
+		switch strings.TrimPrefix(r.URL.Path, "/rest/v1/") {
+		case "page_permissions":
+			out = append(out, map[string]any{"page_id": root, "updated_at": time.Now().UTC().Format(time.RFC3339Nano)})
+		case "pages":
+			if r.URL.Query().Get("id") == "eq."+root {
+				out = append(out, server)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := st.PutRemotePage(server); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RenamePage(root, "New title"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.pullShared(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := st.Page(root); p.Title != "New title" {
+		t.Errorf("title %q", p.Title)
+	}
+}
+
 // Resolving someone else's comment updates only what may change, and a
 // comment the server does not have yet goes in whole.
 func TestCommentsPushAsUpdates(t *testing.T) {

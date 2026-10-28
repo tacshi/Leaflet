@@ -207,6 +207,11 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
   with it. Each pull reads again from 10 seconds behind its cursor, since a
   row is stamped before its transaction commits and one that commits late
   can carry an earlier time; rows already stored here are skipped.
+- Page history goes up and is never pulled. A device keeps the snapshots
+  of a page that its History shows, the newest 50 and every named
+  (`manual`) one, and removes the others as it takes a new one, with any of
+  them still waiting to go up. The server keeps a page's newest 50 unnamed
+  snapshots and all its named ones: a trigger prunes as each is inserted.
 - A device syncs one way at a time: through the server while signed in, or
   through iCloud Drive (§8) while that is on; signing in turns iCloud sync
   off.

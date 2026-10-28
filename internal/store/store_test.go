@@ -469,6 +469,59 @@ func TestHistoryKeepsNamedVersions(t *testing.T) {
 	}
 }
 
+// A page keeps only the snapshots History shows: its newest 50 and its
+// named versions. One pruned before it went up leaves the queue, and
+// another page's are left alone.
+func TestHistoryPrunesWhatItNoLongerShows(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "PRD"})
+	other, _ := s.CreatePage(NewPageOptions{Title: "Notes"})
+	c := s.Content(p.ID)
+	if err := s.AddHistory(other.ID, c, "autosave", "", "Autosave"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddHistory(p.ID, c, "manual", "", "Sent to legal"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 60; i++ {
+		if err := s.AddHistory(p.ID, c, "autosave", "", "Autosave "+strconv.Itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shown, err := s.History(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shown) != 51 || shown[0].Label != "Autosave 59" || shown[49].Label != "Autosave 10" || shown[50].Label != "Sent to legal" {
+		t.Fatalf("%d shown: first %q, 50th %q, last %q", len(shown), shown[0].Label, shown[49].Label, shown[len(shown)-1].Label)
+	}
+	var kept int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM page_history WHERE page_id = ?`, p.ID).Scan(&kept); err != nil || kept != 51 {
+		t.Errorf("%d kept, %v", kept, err)
+	}
+	ids := map[string]bool{}
+	for _, h := range shown {
+		ids[h.ID] = true
+	}
+	entries, _ := s.Pending()
+	queued := 0
+	for _, e := range entries {
+		if e.Entity != "page_history" || e.PageID != p.ID {
+			continue
+		}
+		queued++
+		if !ids[e.EntityID] {
+			t.Errorf("snapshot %s was pruned but is still queued", e.EntityID)
+		}
+	}
+	if queued != 51 {
+		t.Errorf("%d snapshots queued, want 51", queued)
+	}
+	if h, _ := s.History(other.ID); len(h) != 1 {
+		t.Errorf("the other page has %d snapshots", len(h))
+	}
+}
+
 // To-dos come from pages, not templates.
 func TestTodos(t *testing.T) {
 	s := open(t)

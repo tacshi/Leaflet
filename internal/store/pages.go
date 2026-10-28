@@ -716,7 +716,10 @@ func (s *Store) AddHistory(pageID string, c *doc.Content, reason, aiJobID, label
 			h.ID, h.PageID, h.Content, h.Reason, ns(h.AIJobID), h.Label, ms(h.CreatedAt)); err != nil {
 			return err
 		}
-		return queue(tx, "page_history", h.ID, remote, "page history", pageID)
+		if err := queue(tx, "page_history", h.ID, remote, "page history", pageID); err != nil {
+			return err
+		}
+		return pruneHistory(tx, pageID)
 	})
 	if err != nil {
 		return err
@@ -726,12 +729,29 @@ func (s *Store) AddHistory(pageID string, c *doc.Content, reason, aiJobID, label
 	return nil
 }
 
+// newestHistory selects the ids of a page's newest 50 snapshots, which
+// History shows with its named versions. Of two taken in the same
+// millisecond, the one stored later is newer.
+const newestHistory = `SELECT id FROM page_history WHERE page_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 50`
+
+// pruneHistory removes the snapshots of a page History no longer shows:
+// all but its newest 50 and its named versions. One still waiting to go
+// up leaves the queue with it, so the server never gets it.
+func pruneHistory(tx *sql.Tx, pageID string) error {
+	old := `SELECT id FROM page_history WHERE page_id = ? AND reason <> 'manual' AND id NOT IN (` + newestHistory + `)`
+	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'page_history' AND entity_id IN (`+old+`)`, pageID, pageID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`DELETE FROM page_history WHERE id IN (`+old+`)`, pageID, pageID)
+	return err
+}
+
 // History returns a page's newest 50 snapshots, and the versions named
 // before them.
 func (s *Store) History(pageID string) ([]HistoryEntry, error) {
 	rows, err := s.db.Query(`SELECT id, page_id, content, reason, ai_job_id, label, created_at FROM page_history
-		WHERE page_id = ? AND (reason = 'manual' OR id IN (SELECT id FROM page_history WHERE page_id = ? ORDER BY created_at DESC LIMIT 50))
-		ORDER BY created_at DESC`, pageID, pageID)
+		WHERE page_id = ? AND (reason = 'manual' OR id IN (`+newestHistory+`))
+		ORDER BY created_at DESC, rowid DESC`, pageID, pageID)
 	if err != nil {
 		return nil, err
 	}

@@ -248,7 +248,9 @@ the space owner reads all of a page's; only the person invited sets
 Moving a page under a new parent requires edit access to both.
 `pages.is_template` marks a template and every subpage of one (a subpage
 made under a template is one too); templates stay out of the page list,
-search and `list_pages`. `model_providers.encrypted_secret` and `refresh_token` hold Vault secret IDs
+search and `list_pages`. `pages.tags` is a page's tags (`text[]`, at most 50,
+each 1 to 64 characters), tidied by the app: no leading `#`, no repeats in
+any case; they sync with the row as its title does. `model_providers.encrypted_secret` and `refresh_token` hold Vault secret IDs
 and are not selectable by clients.
 
 Storage buckets: `recordings` (`{user_id}/{recording_id}.m4a`), `files`

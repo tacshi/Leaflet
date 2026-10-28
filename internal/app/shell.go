@@ -157,9 +157,6 @@ func (a *App) main(c *ui.Context) {
 			a.pageView(c)
 			return
 		}
-	case "todos":
-		a.todosView(c)
-		return
 	case "signin":
 		a.signInView(c)
 		return

@@ -31,7 +31,7 @@ import (
 
 // Route is what the main area shows.
 type Route struct {
-	Kind string // home | page | todos | signin
+	Kind string // home | page | signin
 	ID   string // the page
 }
 
@@ -57,7 +57,7 @@ type App struct {
 	// templateHints are templates' first lines, by ID and edit time.
 	templateHints map[string]string
 	// todos are the open to-dos of every page, read again when stale;
-	// todoState is the To-dos view's list.
+	// todoState is the sidebar's To-dos tab's list.
 	todos      []store.PageTodo
 	todosStale bool
 	todoState  ui.ListState
@@ -89,7 +89,11 @@ type App struct {
 	treeState ui.OutlineState[string]
 	treeRow   int
 	// treeRows are the tree's rows built this frame, for drops beside them.
-	treeRows  []treeRow
+	treeRows []treeRow
+	// tagTree is the Tags tab's tree of tags with their pages, and
+	// tagRow its row chosen.
+	tagTree   ui.OutlineState[string]
+	tagRow    int
 	panelOpen bool
 	panelW    float32
 	panelTab  int
@@ -164,6 +168,11 @@ type pageState struct {
 	// titleAtEnd is whether the title's caret was at its end in the last
 	// frame; titleLeave asks the caret to move from the title to the page.
 	titleAtEnd, titleLeave bool
+	// tags are the page's tags while tagsEditing shows them in a token
+	// field, which tagsFocused says has had the focus, to close as it
+	// loses it.
+	tags                     []string
+	tagsEditing, tagsFocused bool
 	// loaded is the stored content the editor started from or last saved,
 	// and stored that content as the store has it, encoded, before any
 	// change that is no edit (page mentions' new titles). row is the
@@ -522,7 +531,7 @@ func (r Route) path() string {
 	switch r.Kind {
 	case "page":
 		return "/page/" + r.ID
-	case "todos", "signin":
+	case "signin":
 		return "/" + r.Kind
 	}
 	return "/"
@@ -534,7 +543,7 @@ func routeAt(path string) Route {
 	switch kind {
 	case "page":
 		return Route{Kind: "page", ID: rest}
-	case "todos", "signin":
+	case "signin":
 		return Route{Kind: kind}
 	}
 	return Route{Kind: "home"}
@@ -545,8 +554,6 @@ func (a *App) routeTitle() string {
 	switch a.route.Kind {
 	case "page":
 		return a.pageTitleOf(a.route.ID)
-	case "todos":
-		return locales.AppRouteTodos()
 	case "signin":
 		return locales.CommonSignIn()
 	}

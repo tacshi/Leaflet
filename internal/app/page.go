@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -260,7 +261,9 @@ func (a *App) byline(c *ui.Context, p store.Page) {
 	if who == "" {
 		who = locales.PageBylineSomeone()
 	}
-	ui.Row(c.Key("byline")).Gap(8).AlignItems(ui.Center).Margin(0, 0, 22).Children(func() {
+	row := ui.Row(c.Key("byline")).Gap(8).AlignItems(ui.Center).Margin(0, 0, 22).Wrap()
+	hovered := row.Hovered()
+	row.Children(func() {
 		when := humanTime(p.UpdatedAt)
 		if a.page.dirty {
 			when = locales.PageBylineSaving()
@@ -269,6 +272,58 @@ func (a *App) byline(c *ui.Context, p store.Page) {
 		if n := len(a.page.members); n > 0 {
 			ui.Text(c, "·").TextColor(pal.ChartMuted)
 			ui.Text(c, locales.PageBylineSharedWith(n)).FontSize(13).TextColor(pal.TextMuted)
+		}
+		a.bylineTags(c, p, hovered)
+	})
+}
+
+// bylineTags are the page's tags in its byline, a click on one showing
+// its pages in the sidebar. On a page the user may change, a button shown
+// while the byline is hovered edits them in MyGo's token field, which
+// saves each change and closes as it loses the focus.
+func (a *App) bylineTags(c *ui.Context, p store.Page, hovered bool) {
+	pal := theme.Of(c)
+	ps := a.page
+	if ps.tagsEditing {
+		in := ui.TokenField(c.Key("tags"), &ps.tags, a.tagNames()).Label(locales.PageTagsLabel()).
+			FontSize(13).MinWidth(220).AutoFocus()
+		if in.Changed() {
+			if err := a.st.SetPageTags(ps.id, ps.tags); err != nil {
+				a.toast(locales.SidebarCouldNotSave(err.Error()))
+			}
+			if q, err := a.st.Page(ps.id); err == nil {
+				ps.tags = slices.Clone(q.Tags)
+			}
+		}
+		switch {
+		case in.Focused():
+			ps.tagsFocused = true
+		case ps.tagsFocused:
+			ps.tagsEditing, ps.tagsFocused = false, false
+		}
+		if in.Shortcut(0, ui.KeyEscape) {
+			ps.tagsEditing, ps.tagsFocused = false, false
+		}
+		return
+	}
+	if len(p.Tags) > 0 {
+		ui.Text(c, "·").TextColor(pal.ChartMuted)
+		for _, t := range p.Tags {
+			if tagButton(c, t).Clicked() {
+				a.showTag(t)
+			}
+		}
+	}
+	if !a.canEdit(p.ID) {
+		return
+	}
+	tools(c, func() {
+		b := iconButton(c, "add-tag", "tag", locales.PageAddTag()).Size(24, 24).Padding(4)
+		if !hovered {
+			b.Opacity(0)
+		}
+		if b.Clicked() {
+			ps.tags, ps.tagsEditing, ps.tagsFocused = slices.Clone(p.Tags), true, false
 		}
 	})
 }

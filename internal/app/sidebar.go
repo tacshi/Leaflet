@@ -10,6 +10,13 @@ import (
 	"leaflet/locales"
 )
 
+// Sidebar tabs, as Settings keeps the one shown.
+const (
+	tabPages = iota
+	tabTags
+	tabTodos
+)
+
 func (a *App) sidebar(c *ui.Context) {
 	pal := theme.Of(c)
 	bar := c.TitleBar()
@@ -20,58 +27,56 @@ func (a *App) sidebar(c *ui.Context) {
 			if iconButton(c, "search", "search", locales.SidebarSearch()).Clicked() {
 				a.openSearch()
 			}
-			todos := iconButton(c, "todos", "square-check", locales.TodosTitle())
-			if a.route.Kind == "todos" {
-				todos.Background(pal.NavSelected).TextColor(pal.Text)
-			}
-			// It toggles: clicked while open, it goes back to where the
-			// view was opened from.
-			if todos.Clicked() {
-				switch {
-				case a.route.Kind != "todos":
-					a.navigate(Route{Kind: "todos"})
-				case a.router != nil && a.router.CanGoBack():
-					a.back()
-				default:
-					a.navigate(Route{Kind: "home"})
-				}
-			}
 			if iconButton(c, "new-page", "square-pen", locales.SidebarNewPage()).Clicked() {
 				a.newPage("", "")
+			}
+			if iconButton(c, "new-folder", "folder-plus", locales.SidebarNewFolder()).Clicked() {
+				a.sidebarTab(tabPages)
+				a.dialogs.openRenameFolder(nil)
 			}
 			if iconButton(c, "hide-sidebar", "panel-left", locales.SidebarHide()).Clicked() {
 				a.toggleSidebar()
 			}
 		})
 	})
-	a.tree(c)
-	if len(a.pages) == 0 {
-		ui.Text(c, locales.SidebarNoPages()).FontSize(13).TextColor(pal.TextMuted).Padding(0, 18, 12)
+	// Room under the tabs, before the list they show.
+	ui.Row(c.Key("sidebar-tabs")).Padding(0, 12).Margin(0, 0, 10).Shrink(0).Children(func() {
+		tab := a.settings.SidebarTab
+		if ui.Tabs(c.Key("sidebar-tab"), &tab, locales.SidebarTabPages(), locales.SidebarTabTags(), locales.TodosTitle()).
+			Label(locales.SidebarTabsLabel()).Changed() {
+			a.sidebarTab(tab)
+		}
+	})
+	switch a.settings.SidebarTab {
+	case tabTags:
+		a.tagsTree(c)
+	case tabTodos:
+		a.todosList(c)
+	default:
+		a.tree(c)
+		if len(a.pages) == 0 {
+			ui.Text(c, locales.SidebarNoPages()).FontSize(13).TextColor(pal.TextMuted).Padding(0, 18, 12)
+		}
 	}
 	a.sidebarFooter(c)
 }
 
-func (a *App) sectionHeader(c *ui.Context, key, title, icon, label string, action func()) {
+// sidebarTab shows a tab of the sidebar, which Settings keeps.
+func (a *App) sidebarTab(tab int) {
+	if a.settings.SidebarTab != tab {
+		a.settings.SidebarTab = tab
+		a.saveSettings()
+	}
+}
+
+func (a *App) sectionHeader(c *ui.Context, key, title string) {
 	pal := theme.Of(c)
 	// In the tree, a header starts where the rows' arrows do: back over
 	// the slot the Outline keeps for an arrow, and the gap after it.
 	t := c.Theme()
-	row := ui.Row(c.Key("section:"+key)).Height(28).Padding(0, 4, 0, 0).Margin(10, 0, 2).
-		MarginStart(-(t.Space(4) + t.Space(1))).Grow(1).AlignItems(ui.Center)
-	hovered := row.Hovered()
-	row.Children(func() {
+	ui.Row(c.Key("section:"+key)).Height(28).Padding(0, 4, 0, 0).Margin(10, 0, 2).
+		MarginStart(-(t.Space(4) + t.Space(1))).Grow(1).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, title).FontSize(11.5).FontWeight(650).TextColor(pal.TextMuted).Grow(1).LetterSpacing(0.2)
-		if action != nil {
-			tools(c, func() {
-				b := iconButton(c, "action", icon, label).Size(22, 22).Padding(3)
-				if !hovered {
-					b.Opacity(0)
-				}
-				if b.Clicked() {
-					action()
-				}
-			})
-		}
 	})
 }
 
@@ -98,17 +103,17 @@ func (a *App) folderMenu(m *ui.Menu, f store.Folder) {
 }
 
 // The sidebar's tree is MyGo's Outline. Its items are keys: "section:" a
-// section's header, "folder:", "page:" or "file:" and the ID.
+// section's header ("shared"), "folder:", "page:" or "file:" and the ID.
 
 // treeOpen opens an item of the tree, as a page's ancestors to show it.
 func (a *App) treeOpen(kind, id string) { a.treeState.Open.Add(kind + ":" + id) }
 
-// tree builds the sidebar's tree: My space's folders, with their pages
-// and files, and its pages, then the pages shared with the user, pages
-// with their subpages. The open page is its row chosen; choosing a page
+// tree builds the sidebar's tree: the folders of the user's space, with
+// their pages and files, and its pages, then the pages shared with the
+// user, pages with their subpages. The open page is its row chosen; choosing a page
 // opens it, a file opens the file, and a folder opens or closes.
 func (a *App) tree(c *ui.Context) {
-	roots := []string{"section:mine"}
+	var roots []string
 	for _, f := range a.folders {
 		if f.SpaceID == a.session.SpaceID {
 			roots = append(roots, "folder:"+f.ID)
@@ -189,10 +194,7 @@ func (a *App) treeLabel(key string) string {
 	kind, id, _ := strings.Cut(key, ":")
 	switch kind {
 	case "section":
-		switch id {
-		case "mine":
-			return locales.SidebarMySpace()
-		case "shared":
+		if id == "shared" {
 			return locales.SidebarSharedWithMe()
 		}
 	case "folder":
@@ -222,11 +224,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 	pal := theme.Of(c)
 	kind, id, _ := strings.Cut(key, ":")
 	if kind == "section" {
-		if id == "mine" {
-			a.sectionHeader(c, "mine", locales.SidebarMySpace(), "folder-plus", locales.SidebarNewFolder(), func() { a.dialogs.openRenameFolder(nil) })
-		} else {
-			a.sectionHeader(c, "shared", locales.SidebarSharedWithMe(), "", "", nil)
-		}
+		a.sectionHeader(c, id, locales.SidebarSharedWithMe())
 		return
 	}
 	row := ui.Row(c.Key("item:" + key)).Grow(1).Height(26).Gap(6).AlignItems(ui.Center)
@@ -419,7 +417,7 @@ func (a *App) pageDrop(c *ui.Context, row ui.Element, key string) {
 
 // treeDrop makes the tree take pages dragged beside its rows' content,
 // over their arrows and indents, as dropSpot says for the row there, and
-// below its rows, to the end of My space's top level.
+// below its rows, to the end of the user's space's top level.
 func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 	pal := theme.Of(c)
 	spot := func(d pageDrag) (at int, target string, out int, row ui.Rect, ok bool) {

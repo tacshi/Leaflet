@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS pages (
   id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_id TEXT, folder_id TEXT,
   title TEXT NOT NULL DEFAULT '', icon TEXT, sort_key TEXT NOT NULL, created_by TEXT,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
-  keep_offline INTEGER NOT NULL DEFAULT 1, is_template INTEGER NOT NULL DEFAULT 0);
+  keep_offline INTEGER NOT NULL DEFAULT 1, is_template INTEGER NOT NULL DEFAULT 0,
+  tags TEXT NOT NULL DEFAULT '[]');
 CREATE INDEX IF NOT EXISTS pages_space ON pages (space_id, parent_id);
 CREATE INDEX IF NOT EXISTS pages_parent ON pages (parent_id, sort_key);
 CREATE TABLE IF NOT EXISTS page_contents (
@@ -165,6 +166,12 @@ var migrations = []func(context.Context, *sql.Conn) error{
 	func(ctx context.Context, c *sql.Conn) error {
 		return addColumns(ctx, c, [][3]string{
 			{"page_members", "accepted", "INTEGER NOT NULL DEFAULT 1"},
+		})
+	},
+	// 4: the pages' tags, a JSON array.
+	func(ctx context.Context, c *sql.Conn) error {
+		return addColumns(ctx, c, [][3]string{
+			{"pages", "tags", "TEXT NOT NULL DEFAULT '[]'"},
 		})
 	},
 }

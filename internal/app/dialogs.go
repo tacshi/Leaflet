@@ -58,6 +58,12 @@ type dialogs struct {
 	folderName   string
 	folderSelect bool // select the name as the field takes the focus
 
+	// The dialog renaming a tag on every page.
+	tagOpen   bool
+	tagOld    string
+	tagName   string
+	tagSelect bool
+
 	moveOpen  bool
 	movePage  string
 	moveQuery string
@@ -128,6 +134,9 @@ func (d *dialogs) view(c *ui.Context, a *App) {
 	}
 	if d.folderOpen {
 		a.folderDialog(c)
+	}
+	if d.tagOpen {
+		a.tagDialog(c)
 	}
 	if d.moveOpen {
 		a.moveDialog(c)
@@ -208,6 +217,15 @@ func (a *App) searchDialog(c *ui.Context) {
 							ui.Text(c, h.Title).FontSize(14).SingleLine().Shrink(1)
 							if h.Kind == "template" {
 								templatePill(c)
+							}
+							if pg := a.pageByID(h.PageID); pg != nil && h.Kind == "page" {
+								for _, t := range pg.Tags {
+									if i == d.hitIndex {
+										tagChipOnAccent(c, t)
+									} else {
+										tagChip(c, t)
+									}
+								}
 							}
 						})
 						if h.Snippet != "" {

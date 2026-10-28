@@ -60,8 +60,10 @@ type Settings struct {
 	UploadAudioOverCellular bool        `json:"upload_audio_over_cellular"`
 	Stt                     SttSettings `json:"stt"`
 	SidebarOpen             bool        `json:"sidebar_open"`
-	SidebarWidth            float32     `json:"sidebar_width,omitempty"`
-	PanelWidth              float32     `json:"panel_width,omitempty"`
+	// SidebarTab is the sidebar's tab shown: Pages, Tags or To-dos.
+	SidebarTab   int     `json:"sidebar_tab,omitempty"`
+	SidebarWidth float32 `json:"sidebar_width,omitempty"`
+	PanelWidth   float32 `json:"panel_width,omitempty"`
 }
 
 // DefaultSettings are the settings of a new install.

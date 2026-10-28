@@ -46,6 +46,25 @@ func TestSearchList(t *testing.T) {
 	}
 }
 
+// #tag in ⌘P keeps to the pages with the tag, which show their tags.
+func TestSearchByTag(t *testing.T) {
+	a := templatesApp(t)
+	plan, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan", Tags: []string{"work"}})
+	_, _ = a.st.CreatePage(store.NewPageOptions{Title: "Plan at home"})
+	a.reloadAll()
+	a.openSearch()
+	tt := ui.NewTester(func(c *ui.Context) { a.searchDialog(c) }, 900, 700)
+	tt.Frame()
+	tt.Type("#work plan")
+	tt.Frame()
+	if len(a.dialogs.hits) != 1 || a.dialogs.hits[0].PageID != plan.ID {
+		t.Fatalf("hits %+v", a.dialogs.hits)
+	}
+	if !tt.HasText("work") {
+		t.Errorf("the hit shows no tag: %v", tt.Texts())
+	}
+}
+
 // selectBox is MyGo's Select over the options' names: choosing a name
 // sets the option it shows.
 func TestSelectBox(t *testing.T) {

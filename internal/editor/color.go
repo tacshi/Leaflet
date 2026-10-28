@@ -69,6 +69,18 @@ var colors = []struct {
 	{"gray", "#71717a", locales.EditorColorGray},
 }
 
+// BrightColors are the colors text takes but gray and brown, which the
+// app colors other things by, as tags.
+func BrightColors() []ui.Color {
+	var out []ui.Color
+	for _, col := range colors {
+		if col.key != "gray" && col.key != "brown" {
+			out = append(out, ui.Hex(col.hex))
+		}
+	}
+	return out
+}
+
 // highlightAlpha is the strength of a highlight, in hex.
 const highlightAlpha = "40"
 

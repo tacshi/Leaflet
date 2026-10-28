@@ -15,7 +15,7 @@ import (
 	"leaflet/locales"
 )
 
-// todoRow is a row of the To-dos view: a section's header, or a to-do.
+// todoRow is a row of the To-dos tab: a section's header, or a to-do.
 type todoRow struct {
 	header string
 	todo   store.PageTodo
@@ -60,7 +60,7 @@ func dueToday(due, now time.Time) bool {
 	return y == ny && m == nm && d == nd
 }
 
-// todoSection is the name a person reads of a section of the To-dos view.
+// todoSection is the name a person reads of a section of the To-dos tab.
 func todoSection(header string) string {
 	switch header {
 	case "Overdue":
@@ -87,20 +87,16 @@ func (a *App) todoList() []store.PageTodo {
 	return a.todos
 }
 
-// todosView lists the open to-dos of every page that have a due date or
-// an owner: a check finishes one, a click goes to it.
-func (a *App) todosView(c *ui.Context) {
+// todosList is the sidebar's To-dos tab: the open to-dos of every page
+// that have a due date or an owner. A check finishes one, a click goes to
+// it.
+func (a *App) todosList(c *ui.Context) {
 	pal := theme.Of(c)
-	a.titleBar(c, func() {
-		ui.Text(c, locales.TodosTitle()).FontSize(13).FontWeight(600).TextColor(pal.Text).Padding(3, 6)
-		ui.Spacer(c)
-	})
 	rows := todoRows(a.todoList(), time.Now())
 	if len(rows) == 0 {
-		ui.Column(c).Grow(1).Center().Gap(8).Children(func() {
-			ui.Icon(c, theme.Icon("square-check")).FontSize(32).TextColor(pal.ChartMuted)
-			ui.Text(c, locales.TodosEmptyTitle()).FontSize(17).FontWeight(650).TextColor(pal.Text)
-			ui.Text(c, locales.TodosEmptyBody()).TextColor(pal.TextMuted)
+		ui.Column(c).Grow(1).Padding(2, 18).Gap(4).Children(func() {
+			ui.Text(c, locales.TodosEmptyTitle()).FontSize(13).FontWeight(600).TextColor(pal.Text)
+			ui.Text(c, locales.TodosEmptyBody()).FontSize(13).TextColor(pal.TextMuted)
 		})
 		return
 	}
@@ -111,44 +107,42 @@ func (a *App) todosView(c *ui.Context) {
 		}
 		return rows[i].todo.PageID + "#" + rows[i].todo.BlockID
 	}
-	ui.Column(c).Grow(1).AlignItems(ui.Center).Children(func() {
-		ui.List(c, &a.todoState, len(rows), func(i int) {
-			r := rows[i]
-			if r.header != "" {
-				ui.Text(c, todoSection(r.header)).FontSize(12).FontWeight(650).TextColor(pal.TextMuted).Padding(16, 10, 6).
-					Background(pal.Surface).FillWidth()
-				return
-			}
-			a.todoRowView(c, r.todo, pal)
-		}).Grow(1).Width(a.contentWidth(c)).Padding(8, 0, 40)
-	})
+	ui.List(c, &a.todoState, len(rows), func(i int) {
+		r := rows[i]
+		if r.header != "" {
+			ui.Text(c, todoSection(r.header)).FontSize(11.5).FontWeight(650).TextColor(pal.TextMuted).LetterSpacing(0.2).
+				Padding(10, 8, 4).FillWidth()
+			return
+		}
+		a.todoRowView(c, r.todo, pal)
+	}).Grow(1).Padding(0, 8, 12)
 }
 
 func (a *App) todoRowView(c *ui.Context, t store.PageTodo, pal *theme.Palette) {
-	row := ui.ButtonBase(c.Key("todo:"+t.PageID+"#"+t.BlockID)).Padding(8, 10).Gap(12).Radius(8).AlignItems(ui.Center).Justify(ui.Start).FillWidth()
+	row := ui.ButtonBase(c.Key("todo:"+t.PageID+"#"+t.BlockID)).Padding(5, 8).Gap(8).Radius(6).AlignItems(ui.Start).Justify(ui.Start).FillWidth()
 	if row.Hovered() {
 		row.Background(pal.Hover)
 	}
 	row.Children(func() {
 		done := false
-		if ui.Checkbox(c, &done, "").Label(locales.CommonDone()).Changed() {
+		if ui.Checkbox(c, &done, "").Label(locales.CommonDone()).Margin(1, 0, 0).Changed() {
 			a.finishTodo(t)
 		}
-		ui.Column(c).Grow(1).Shrink(1).Gap(2).Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).Gap(1).Children(func() {
 			text := t.Text
 			if strings.TrimSpace(text) == "" {
 				text = locales.TodosUntitled()
 			}
-			ui.Text(c, text).FontSize(14.5).TextColor(pal.Text).SingleLine()
+			ui.Text(c, text).FontSize(13.5).TextColor(pal.Text).SingleLine().Tooltip(text)
 			sub := t.PageTitle
 			if t.Owner != "" {
 				sub = locales.TodosPageAndOwner(sub, t.Owner)
 			}
-			ui.Text(c, sub).FontSize(12).TextColor(pal.TextMuted).SingleLine()
+			ui.Text(c, sub).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
 		})
 		if !t.Due.IsZero() {
 			now := time.Now()
-			due := ui.Badge(c, editor.DueLabel(t.Due, now))
+			due := ui.Badge(c, editor.DueLabel(t.Due, now)).FontSize(11).Shrink(0)
 			if editor.Overdue(t.Due, now) {
 				due.Background(pal.DangerBg).TextColor(pal.DangerText)
 			}

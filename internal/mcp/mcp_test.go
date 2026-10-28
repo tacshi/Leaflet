@@ -91,7 +91,7 @@ func TestHandshake(t *testing.T) {
 		m := tool.(map[string]any)
 		names[m["name"].(string)] = m
 	}
-	for _, n := range []string{"list_pages", "search_pages", "read_page", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page", "move_page", "create_folder", "rename_folder"} {
+	for _, n := range []string{"list_pages", "search_pages", "read_page", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page", "set_page_tags", "move_page", "create_folder", "rename_folder"} {
 		if names[n] == nil {
 			t.Errorf("no tool %s", n)
 		}
@@ -466,4 +466,39 @@ func TestUnreadablePageIsLeftAlone(t *testing.T) {
 	if row, err := st.ContentRow(p.ID); err != nil || row.Content != broken {
 		t.Errorf("content %q, %v", row.Content, err)
 	}
+}
+
+// set_page_tags replaces a page's tags, which list_pages, read_page and a
+// #tag search show.
+func TestPageTags(t *testing.T) {
+	st := newStore(t)
+	p, _ := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	s := NewServer(st, "0.1.0")
+	got := session(t, s, initialize,
+		call(2, "set_page_tags", map[string]any{"page_id": p.ID, "tags": []string{"#work", "Q4", "work"}}),
+		call(3, "list_pages", nil),
+		call(4, "read_page", map[string]any{"page_id": p.ID}),
+		call(5, "search_pages", map[string]any{"query": "#q4"}))
+	if out, failed := result(t, got[2]); failed || !slices.Equal(toStrings(out["tags"]), []string{"work", "Q4"}) {
+		t.Errorf("set %v", out)
+	}
+	if out, _ := result(t, got[3]); !slices.Equal(toStrings(out["pages"].([]any)[0].(map[string]any)["tags"]), []string{"work", "Q4"}) {
+		t.Errorf("listed %v", out)
+	}
+	if out, _ := result(t, got[4]); !slices.Equal(toStrings(out["page"].(map[string]any)["tags"]), []string{"work", "Q4"}) {
+		t.Errorf("read %v", out["page"])
+	}
+	if out, _ := result(t, got[5]); len(out["results"].([]any)) != 1 {
+		t.Errorf("found %v", out)
+	}
+}
+
+func toStrings(v any) []string {
+	var out []string
+	list, _ := v.([]any)
+	for _, x := range list {
+		s, _ := x.(string)
+		out = append(out, s)
+	}
+	return out
 }

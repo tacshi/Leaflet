@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	gosync "sync"
@@ -1173,5 +1174,46 @@ func TestPutRemoteKeepsAWaitingChange(t *testing.T) {
 	}
 	if got.KeepOffline {
 		t.Error("the pull changed keep offline")
+	}
+}
+
+// Pages left in a loop of parents, as two devices' moves can leave them
+// until sync breaks it, are under no page outside the loop.
+func TestParentLoop(t *testing.T) {
+	s := open(t)
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	put := func(id, parent string) {
+		t.Helper()
+		r := map[string]any{"id": id, "space_id": s.Session().SpaceID, "title": id, "sort_key": "V", "created_at": at, "updated_at": at}
+		if parent != "" {
+			r["parent_id"] = parent
+		}
+		if err := s.PutRemotePage(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put("a", "b")
+	put("b", "a")
+	put("c", "")
+	if s.IsDescendant("a", "c") {
+		t.Error("a page of the loop is under one outside it")
+	}
+	if !s.IsDescendant("a", "b") {
+		t.Error("a is not under b")
+	}
+	if loop := s.ParentLoop("c", "a"); loop != nil {
+		t.Errorf("c under a closes %v", loop)
+	}
+	if loop := s.ParentLoop("a", "b"); !slices.Equal(loop, []string{"a", "b"}) {
+		t.Errorf("a under b closes %v", loop)
+	}
+	if err := s.DetachPage("a"); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.Page("a"); p.ParentID != "" || !s.IsDescendant("b", "a") {
+		t.Errorf("after detaching a: parent %q", p.ParentID)
+	}
+	if n := s.PendingCount(); n != 0 {
+		t.Errorf("detaching queued %d changes", n)
 	}
 }

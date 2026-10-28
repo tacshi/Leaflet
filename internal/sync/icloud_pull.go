@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -215,7 +216,7 @@ func (s *Service) applyEntry(peer string, e icloud.Entry, waiting, changed map[s
 	var err error
 	switch e.Table {
 	case "pages":
-		err = s.st.PutRemotePage(r)
+		err = s.putCloudPage(r)
 	case "folders":
 		err = s.st.PutRemoteFolder(r)
 	case "files":
@@ -230,6 +231,28 @@ func (s *Service) applyEntry(peer string, e icloud.Entry, waiting, changed map[s
 	}
 	changed[e.Table] = true
 	return s.st.SetRowVersion(e.Table, e.ID, v)
+}
+
+// putCloudPage stores a page of another device's. Two devices that moved
+// pages inside each other at once leave them in a loop, each under the
+// other and none under a top-level page; no server turns the second move
+// away. The page of the loop with the least ID goes to the top level here,
+// which every device chooses alike, whichever of the rows it had first.
+func (s *Service) putCloudPage(r map[string]any) error {
+	id := store.S(r, "id")
+	loop := s.st.ParentLoop(id, store.S(r, "parent_id"))
+	if len(loop) == 0 {
+		return s.st.PutRemotePage(r)
+	}
+	least := slices.Min(loop)
+	if least == id {
+		r["parent_id"] = nil
+		return s.st.PutRemotePage(r)
+	}
+	if err := s.st.PutRemotePage(r); err != nil {
+		return err
+	}
+	return s.st.DetachPage(least)
 }
 
 // refreshWaiting brings up to date the pages whose content changed on

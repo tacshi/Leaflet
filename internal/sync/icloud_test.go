@@ -857,3 +857,28 @@ func TestICloudDeletedFileLeavesTheFolder(t *testing.T) {
 		t.Errorf("B kept its copy: %v", err)
 	}
 }
+
+// Two devices that move pages inside each other at once would leave them
+// in a loop, each under the other: both put the page of it with the least
+// ID back at the top level, and keep the other under it.
+func TestICloudBreaksALoopOfMoves(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p, q := a.page("P"), a.page("Q")
+	syncAll(a, b)
+	if err := a.st.MovePage(p.ID, q.ID, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.st.MovePage(q.ID, p.ID, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	top, under := min(p.ID, q.ID), max(p.ID, q.ID)
+	for _, d := range []*cloudDevice{a, b} {
+		t1, _ := d.st.Page(top)
+		t2, _ := d.st.Page(under)
+		if t1.ParentID != "" || t2.ParentID != top {
+			t.Errorf("parents %q / %q, want top level / %s", t1.ParentID, t2.ParentID, top)
+		}
+	}
+}

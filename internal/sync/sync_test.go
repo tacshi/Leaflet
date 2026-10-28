@@ -1025,3 +1025,80 @@ func TestPullLoadsSharedPagesMembers(t *testing.T) {
 		t.Errorf("shared to view: can edit %v, members %+v", st.CanEdit(p), st.MembersOrNil(earlier))
 	}
 }
+
+// A shared page's tree comes whole however many rows it has: the server
+// sends a page of them at a time, and leaves out the rest without saying.
+func TestPullSharedReadsEveryPageOfRows(t *testing.T) {
+	st := openStore(t)
+	treeIDs, treeRows = 1, 2
+	t.Cleanup(func() { treeIDs, treeRows = 100, 500 })
+	const (
+		root  = "00000000-0000-0000-0000-0000000000e1"
+		kid1  = "00000000-0000-0000-0000-0000000000e2"
+		kid2  = "00000000-0000-0000-0000-0000000000e3"
+		space = "00000000-0000-0000-0000-0000000000ff"
+	)
+	old := "2026-01-01T00:00:00Z"
+	page := func(id, parent string) map[string]any {
+		r := map[string]any{"id": id, "space_id": space, "title": id, "sort_key": "V", "created_at": old, "updated_at": old}
+		if parent != "" {
+			r["parent_id"] = parent
+		}
+		return r
+	}
+	tables := map[string][]map[string]any{
+		"pages": {page(root, ""), page(kid1, root), page(kid2, root)},
+	}
+	for i, pageID := range []string{kid1, kid1, kid1, kid1, kid1, kid2, root} {
+		tables["comments"] = append(tables["comments"], map[string]any{"id": "c" + string(rune('1'+i)), "page_id": pageID,
+			"block_id": "b1", "author_id": "u2", "body": "Look here", "created_at": old, "updated_at": old})
+	}
+	// in reports whether a row's col is one a filter names.
+	in := func(filter, v string) bool {
+		list, ok := strings.CutPrefix(filter, "in.(")
+		return ok && strings.Contains(strings.TrimSuffix(list, ")"), `"`+v+`"`)
+	}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		out := []map[string]any{}
+		table := strings.TrimPrefix(r.URL.Path, "/rest/v1/")
+		switch table {
+		case "page_permissions":
+			if q.Get("updated_at") == "gt.1970-01-01T00:00:00Z" {
+				out = append(out, map[string]any{"page_id": root, "updated_at": time.Now().UTC().Format(time.RFC3339Nano)})
+			}
+		case "pages", "comments", "files", "recordings":
+			after, _ := strings.CutPrefix(q.Get("id"), "gt.")
+			for _, row := range tables[table] {
+				id := store.S(row, "id")
+				switch {
+				case q.Get("id") == "eq."+id,
+					in(q.Get("parent_id"), store.S(row, "parent_id")) && id > after,
+					in(q.Get("page_id"), store.S(row, "page_id")) && id > after:
+					out = append(out, row)
+				}
+			}
+			// The server sends at most two rows here, as it sends at most
+			// 1,000.
+			if len(out) > 2 {
+				out = out[:2]
+			}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if err := svc.pullShared(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{root, kid1, kid2} {
+		if _, err := st.Page(id); err != nil {
+			t.Errorf("page %s: %v", id, err)
+		}
+	}
+	comments, _ := st.AllComments()
+	if len(comments) != len(tables["comments"]) {
+		t.Errorf("%d of %d comments", len(comments), len(tables["comments"]))
+	}
+}

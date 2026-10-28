@@ -399,14 +399,47 @@ func (a *App) openFile(f store.File) {
 	delete(a.downloads, f.ID)
 	path := a.localFile(f, func() {
 		if f, ok := a.fileByID(f.ID); ok && f.LocalPath != "" {
-			_ = mygo.Shell.OpenPath(f.LocalPath)
+			openSafely(f.LocalPath)
 		}
 	})
 	if path == "" {
 		a.toast(locales.HostDownloading(f.Name))
 		return
 	}
+	openSafely(path)
+}
+
+// openSafely opens a file in its app. Files come from other devices and
+// people, so the system is told first that it came from elsewhere, for
+// its checks before a program runs; and a file that would run as one,
+// not open in one, is shown in its folder instead.
+func openSafely(path string) {
+	markDownloaded(path)
+	if runsAsProgram(path) {
+		mygo.Shell.ShowItemInFolder(path)
+		return
+	}
 	_ = mygo.Shell.OpenPath(path)
+}
+
+// programExts are the kinds of file that opening runs: apps, installers,
+// scripts and the shortcuts to them.
+var programExts = map[string]bool{
+	".app": true, ".command": true, ".tool": true, ".terminal": true, ".sh": true, ".bash": true, ".zsh": true, ".csh": true,
+	".pkg": true, ".mpkg": true, ".dmg": true, ".scpt": true, ".scptd": true, ".applescript": true, ".workflow": true,
+	".action": true, ".fileloc": true, ".jar": true, ".py": true, ".pyw": true, ".pl": true, ".rb": true,
+	".exe": true, ".com": true, ".bat": true, ".cmd": true, ".msi": true, ".msix": true, ".appx": true, ".ps1": true,
+	".vbs": true, ".vbe": true, ".js": true, ".jse": true, ".wsf": true, ".wsh": true, ".hta": true, ".scr": true,
+	".cpl": true, ".msc": true, ".lnk": true, ".pif": true, ".reg": true, ".appref-ms": true,
+}
+
+// runsAsProgram reports whether opening the file would run it.
+func runsAsProgram(path string) bool {
+	if programExts[strings.ToLower(filepath.Ext(path))] {
+		return true
+	}
+	info, err := os.Stat(path)
+	return err == nil && runtime.GOOS != "windows" && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
 func (a *App) fileByID(id string) (store.File, bool) {

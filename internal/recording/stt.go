@@ -260,6 +260,11 @@ func (s *Soniox) Send(pcm []byte) {
 	_ = s.conn.Write(ctx, websocket.MessageBinary, pcm)
 }
 
+// Close drops the stream, for a recording that needs it no more.
+func (s *Soniox) Close() {
+	_ = s.conn.Close(websocket.StatusNormalClosure, "")
+}
+
 // Finish ends the stream and waits for the last final words.
 func (s *Soniox) Finish() ([]store.Segment, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

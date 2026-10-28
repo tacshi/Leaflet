@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -90,7 +91,7 @@ func TestHandshake(t *testing.T) {
 		m := tool.(map[string]any)
 		names[m["name"].(string)] = m
 	}
-	for _, n := range []string{"list_pages", "search_pages", "read_page", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page"} {
+	for _, n := range []string{"list_pages", "search_pages", "read_page", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page", "move_page", "create_folder", "rename_folder"} {
 		if names[n] == nil {
 			t.Errorf("no tool %s", n)
 		}
@@ -194,6 +195,97 @@ func TestCreateAndEditPage(t *testing.T) {
 	history, _ := st.History(id)
 	if len(history) != 1 || history[0].Label != "Before Claude Code" || strings.Contains(history[0].Content, "Founded") {
 		t.Errorf("history %+v", history)
+	}
+}
+
+// links are the pages page id links to as subpages.
+func links(st *store.Store, id string) []string {
+	var out []string
+	for _, n := range st.Content(id).Children {
+		if n.Type == "subpage" {
+			out = append(out, n.Str("page_id"))
+		}
+	}
+	return out
+}
+
+func TestFolders(t *testing.T) {
+	st := newStore(t)
+	s := NewServer(st, "0.1.0")
+	got := session(t, s, initialize,
+		call(2, "create_folder", map[string]any{"name": " Work "}),
+		call(3, "create_folder", map[string]any{"name": " "}))
+	out, failed := result(t, got[2])
+	folder, _ := out["folder_id"].(string)
+	if failed || folder == "" {
+		t.Fatalf("create_folder %v", out)
+	}
+	if _, failed := result(t, got[3]); !failed {
+		t.Errorf("create_folder with no name succeeded")
+	}
+	got = session(t, s,
+		call(4, "rename_folder", map[string]any{"folder_id": folder, "name": "Projects"}),
+		call(5, "rename_folder", map[string]any{"folder_id": "nope", "name": "X"}),
+		call(6, "create_page", map[string]any{"title": "Plan", "folder_id": folder}),
+		call(7, "create_page", map[string]any{"title": "Notes"}),
+		call(8, "create_page", map[string]any{"title": "Lost", "folder_id": "nope"}))
+	if _, failed := result(t, got[4]); failed {
+		t.Errorf("rename_folder %v", got[4])
+	}
+	if out, failed := result(t, got[5]); !failed || !strings.Contains(out["error"].(string), "nope") {
+		t.Errorf("rename_folder of no folder %v", out)
+	}
+	if out, failed := result(t, got[8]); !failed || !strings.Contains(out["error"].(string), "nope") {
+		t.Errorf("create_page in no folder %v", out)
+	}
+	out, _ = result(t, got[6])
+	plan := out["page_id"].(string)
+	out, _ = result(t, got[7])
+	notes := out["page_id"].(string)
+	got = session(t, s,
+		call(9, "create_page", map[string]any{"title": "Both", "parent_id": notes, "folder_id": folder}),
+		call(10, "list_pages", nil))
+	if out, failed := result(t, got[9]); !failed || !strings.Contains(out["error"].(string), "not both") {
+		t.Errorf("create_page with a parent and a folder %v", out)
+	}
+	listed, _ := result(t, got[10])
+	if f := listed["folders"].([]any); len(f) != 1 || f[0].(map[string]any)["name"] != "Projects" || f[0].(map[string]any)["id"] != folder {
+		t.Errorf("folders %v", f)
+	}
+	inFolder := map[string]any{}
+	for _, p := range listed["pages"].([]any) {
+		m := p.(map[string]any)
+		inFolder[m["title"].(string)] = m["folder_id"]
+	}
+	if inFolder["Plan"] != folder || inFolder["Notes"] != nil {
+		t.Errorf("pages' folders %v", inFolder)
+	}
+
+	// Into a page and out to a folder, the links follow the page.
+	got = session(t, s,
+		call(11, "move_page", map[string]any{"page_id": plan, "parent_id": notes}),
+		call(12, "move_page", map[string]any{"page_id": notes, "parent_id": plan}))
+	if _, failed := result(t, got[11]); failed {
+		t.Errorf("move_page inside a page %v", got[11])
+	}
+	if p, _ := st.Page(plan); p.ParentID != notes || p.FolderID != "" || !slices.Equal(links(st, notes), []string{plan}) {
+		t.Errorf("moved inside: page %+v, links %v", p, links(st, notes))
+	}
+	if out, failed := result(t, got[12]); !failed || !strings.Contains(out["error"].(string), "inside itself") {
+		t.Errorf("move_page inside its own subpage %v", out)
+	}
+	got = session(t, s,
+		call(13, "move_page", map[string]any{"page_id": plan, "folder_id": folder}),
+		call(14, "move_page", map[string]any{"page_id": notes, "parent_id": plan}))
+	if p, _ := st.Page(plan); p.ParentID != "" || p.FolderID != folder || len(links(st, notes)) != 0 {
+		t.Errorf("moved to a folder: page %+v, links %v", p, links(st, notes))
+	}
+	if _, failed := result(t, got[14]); failed {
+		t.Errorf("move_page %v", got[14])
+	}
+	got = session(t, s, call(15, "move_page", map[string]any{"page_id": notes}))
+	if p, _ := st.Page(notes); p.ParentID != "" || p.FolderID != "" || len(links(st, plan)) != 0 {
+		t.Errorf("moved to the top level: page %+v, links %v", p, links(st, plan))
 	}
 }
 

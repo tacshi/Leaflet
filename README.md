@@ -166,6 +166,8 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<data folder> -- <executable>
 | `list_pages`, `search_pages` | Find pages by title and text |
 | `read_page` | Read a page's blocks, with their IDs |
 | `create_page`, `rename_page` | Make and rename pages |
+| `move_page` | Move a page into a folder, inside another page, or to the top level |
+| `create_folder`, `rename_folder` | Make and rename folders |
 | `insert_blocks`, `replace_block`, `move_block`, `delete_blocks` | Edit a page, as the in-app agents do |
 
 The server opens the same database as the app, so it works with the app

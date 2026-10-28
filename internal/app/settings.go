@@ -1162,7 +1162,7 @@ func (a *App) offlineSettings(c *ui.Context) {
 		})
 		settingRow(c, "images", locales.SettingsImageCache(), locales.SettingsImageCacheDesc(), false, func() {
 			if button(c, "clear", "trash", locales.SettingsClear()).Clicked() {
-				a.images = newImageCache(a.images.dir)
+				a.images = newImageCache(a.images.root, a.images.dir)
 				_ = os.RemoveAll(a.images.dir)
 				c.Toast(locales.SettingsImageCacheCleared())
 			}

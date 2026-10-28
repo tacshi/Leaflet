@@ -2,11 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"html"
-	"io"
 	"log"
 	"mime"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,7 +21,6 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
-	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -522,16 +520,18 @@ func (a *App) loadMembers(pageID string) {
 	_ = a.st.SetMembers(pageID, members)
 }
 
-// imageCache loads the pictures of image blocks.
+// imageCache loads the pictures of image blocks; root is the app's data
+// folder, the only one it reads files from.
 type imageCache struct {
+	root    string
 	dir     string
 	mu      sync.Mutex
 	bitmaps map[string]*ui.Bitmap
 	loading map[string]bool
 }
 
-func newImageCache(dir string) *imageCache {
-	return &imageCache{dir: dir, bitmaps: map[string]*ui.Bitmap{}, loading: map[string]bool{}}
+func newImageCache(root, dir string) *imageCache {
+	return &imageCache{root: root, dir: dir, bitmaps: map[string]*ui.Bitmap{}, loading: map[string]bool{}}
 }
 
 func (ic *imageCache) get(url string, loaded func()) *ui.Bitmap {
@@ -545,7 +545,7 @@ func (ic *imageCache) get(url string, loaded func()) *ui.Bitmap {
 	}
 	ic.loading[url] = true
 	go func() {
-		data, err := fetch(url)
+		data, err := ic.read(url)
 		var b *ui.Bitmap
 		if err == nil {
 			b, err = ui.DecodeBitmap(data)
@@ -565,25 +565,38 @@ func (ic *imageCache) get(url string, loaded func()) *ui.Bitmap {
 	return nil
 }
 
-func fetch(url string) ([]byte, error) {
-	if strings.HasPrefix(url, "file://") {
-		return os.ReadFile(strings.TrimPrefix(url, "file://"))
+// read reads a picture: from the web, or a file of the app's own, in its
+// data folder. A file elsewhere on the device is not shown, as a block's
+// link to one can come from another device or person.
+func (ic *imageCache) read(url string) ([]byte, error) {
+	path, ok := strings.CutPrefix(url, "file://")
+	if !ok {
+		return fetch(url)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if !inFolder(ic.root, path) {
+		return nil, errNotOwnFile
+	}
+	return os.ReadFile(path) // #nosec G304 -- a file in the app's data folder.
+}
+
+// errNotOwnFile is for a file outside the app's data folder.
+var errNotOwnFile = errors.New("not a file of the app's")
+
+// inFolder reports whether path is in folder dir, links followed.
+func inFolder(dir, path string) bool {
+	if dir == "" || !filepath.IsAbs(path) {
+		return false
+	}
+	root, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		return nil, err
+		return false
 	}
-	res, err := http.DefaultClient.Do(req)
+	real, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return nil, err
+		return false
 	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode >= 400 {
-		return nil, &remote.Error{Status: res.StatusCode, Message: res.Status}
-	}
-	return io.ReadAll(io.LimitReader(res.Body, 20<<20))
+	rel, err := filepath.Rel(root, real)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 // embedURL is where an embed's wrapper page loads. WebView2 serves a

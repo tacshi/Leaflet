@@ -244,7 +244,7 @@ func (a *App) start() error {
 		return err
 	}
 	a.session = st.Session()
-	a.images = newImageCache(filepath.Join(st.Dir, "images"))
+	a.images = newImageCache(st.Dir, filepath.Join(st.Dir, "images"))
 	// Links in agents' replies and previews: a page link opens the page
 	// here, a web link the browser.
 	a.md.OnLink = func(url string) {

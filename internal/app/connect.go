@@ -37,6 +37,9 @@ type agentApp struct {
 	id, label string
 	// bundles are the app's names in the Applications folder on macOS.
 	bundles []string
+	// windows are the folders, in %LOCALAPPDATA%, the app installs to on
+	// Windows: its Microsoft Store package's, or its installer's.
+	windows []string
 	// cli is the app's command-line tool.
 	cli string
 	// settings is the app whose settings it reads, if another's.
@@ -58,11 +61,11 @@ var agentApps = []agentApp{
 	// The ChatGPT app that runs Codex inside, and reads Codex's settings;
 	// an older ChatGPT runs no local servers.
 	{id: "chatgpt", label: "ChatGPT", bundles: []string{"ChatGPT.app/Contents/Resources/codex-cli"}, cli: "codex", settings: "codex"},
-	{id: "claude-desktop", label: "Claude Desktop", bundles: []string{"Claude.app"}},
-	{id: "codex", label: "Codex", bundles: []string{"Codex.app"}, cli: "codex"},
+	{id: "claude-desktop", label: "Claude Desktop", bundles: []string{"Claude.app"}, windows: []string{`Packages\Claude_pzs8sxrjxfjjc`, "AnthropicClaude"}},
+	{id: "codex", label: "Codex", bundles: []string{"Codex.app"}, windows: []string{`Packages\OpenAI.Codex_2p2nqsd0c76g0`}, cli: "codex"},
 	{id: "claude", label: "Claude Code", cli: "claude"},
 	{id: "opencode", label: "OpenCode", bundles: []string{"OpenCode.app"}, cli: "opencode"},
-	{id: "cursor", label: "Cursor", bundles: []string{"Cursor.app"}},
+	{id: "cursor", label: "Cursor", bundles: []string{"Cursor.app"}, windows: []string{`Programs\cursor`}},
 }
 
 // agentEnv is where to look for the apps: the home folder, the user's
@@ -77,6 +80,10 @@ func currentAgentEnv() agentEnv {
 	dirs := append(filepath.SplitList(loginPath()), filepath.Join(home, ".local", "bin"), filepath.Join(home, ".claude", "local"),
 		"/opt/homebrew/bin", "/usr/local/bin", filepath.Join(home, ".npm-global", "bin"), filepath.Join(home, ".bun", "bin"),
 		filepath.Join(home, ".opencode", "bin"))
+	if runtime.GOOS == "windows" {
+		// Where npm puts the tools it installs, which PATH may lack.
+		dirs = append(dirs, filepath.Join(config, "npm"))
+	}
 	return agentEnv{home, config, strings.Join(dirs, string(filepath.ListSeparator))}
 }
 
@@ -118,16 +125,16 @@ func detectAgents(env agentEnv, seen map[string]string) []agentStatus {
 		if app.cli != "" {
 			s.cli = findCLI(app.cli, env)
 		}
-		s.installed = s.cli != "" || hasBundle(app.bundles, env.home)
+		s.installed = s.cli != "" || hasApp(app, env.home)
 		switch app.id {
 		case "claude":
 			// Connected only by its tool, which keeps its settings file busy.
 		case "chatgpt":
 			// Its tool is Codex's, which it may keep inside.
-			s.installed = hasBundle(app.bundles, env.home)
+			s.installed = hasApp(app, env.home)
 		case "codex":
 			// Codex of its own: not the one inside ChatGPT, which has a row.
-			s.installed = s.cli != "" && !strings.Contains(s.cli, "/ChatGPT.app/") || hasBundle(app.bundles, env.home)
+			s.installed = s.cli != "" && !strings.Contains(s.cli, "/ChatGPT.app/") || hasApp(app, env.home)
 		default:
 			path, _ := jsonConfig(app.id, env)
 			s.installed = s.installed || exists(filepath.Dir(path))
@@ -674,15 +681,30 @@ func writeAtomic(path string, data []byte) error {
 // folders of tools, or the one the app keeps (Claude Desktop's Claude
 // Code, newest first).
 func findCLI(name string, env agentEnv) string {
+	// On Windows, a tool is a program or a script with one of the
+	// extensions that run, such as claude.exe or npm's codex.cmd.
+	names := []string{name}
+	if runtime.GOOS == "windows" {
+		names = names[:0]
+		for _, ext := range windowsExts() {
+			names = append(names, name+ext)
+		}
+	}
 	for _, d := range filepath.SplitList(env.path) {
-		if p := filepath.Join(d, name); isExecutable(p) {
-			return p
+		for _, n := range names {
+			if p := filepath.Join(d, n); isExecutable(p) {
+				return p
+			}
 		}
 	}
 	var bundled []string
 	switch name {
 	case "claude":
-		bundled, _ = filepath.Glob(filepath.Join(env.config, "Claude", "claude-code", "*", "*", "claude.app", "Contents", "MacOS", "claude"))
+		tool := filepath.Join("claude.app", "Contents", "MacOS", "claude")
+		if runtime.GOOS == "windows" {
+			tool = "claude.exe"
+		}
+		bundled, _ = filepath.Glob(filepath.Join(env.config, "Claude", "claude-code", "*", "*", tool))
 		slices.SortFunc(bundled, func(a, b string) int { return compareVersions(versionOf(b), versionOf(a)) })
 	case "codex":
 		for _, apps := range []string{"/Applications", filepath.Join(env.home, "Applications")} {
@@ -725,12 +747,22 @@ func compareVersions(a, b string) int {
 	return 0
 }
 
-// hasBundle says whether one of bundles is in an Applications folder.
-func hasBundle(bundles []string, home string) bool {
+// hasApp says whether the app is installed: one of its bundles in an
+// Applications folder on macOS, or one of its folders in %LOCALAPPDATA%
+// on Windows.
+func hasApp(app agentApp, home string) bool {
+	if runtime.GOOS == "windows" {
+		for _, d := range app.windows {
+			if exists(filepath.Join(home, "AppData", "Local", d)) {
+				return true
+			}
+		}
+		return false
+	}
 	if runtime.GOOS != "darwin" {
 		return false
 	}
-	for _, b := range bundles {
+	for _, b := range app.bundles {
 		if exists(filepath.Join("/Applications", b)) || exists(filepath.Join(home, "Applications", b)) {
 			return true
 		}
@@ -793,9 +825,32 @@ func exists(p string) bool {
 	return err == nil
 }
 
+// isExecutable says whether p is a file that runs: by its permissions,
+// or on Windows, which has none, by its extension.
 func isExecutable(p string) bool {
 	fi, err := os.Stat(p)
-	return err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0
+	if err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	if runtime.GOOS == "windows" {
+		return slices.Contains(windowsExts(), strings.ToLower(filepath.Ext(p)))
+	}
+	return fi.Mode().Perm()&0o111 != 0
+}
+
+// windowsExts are the extensions of files Windows runs as commands, in
+// the order it tries them.
+func windowsExts() []string {
+	var exts []string
+	for _, e := range strings.Split(strings.ToLower(os.Getenv("PATHEXT")), ";") {
+		if e != "" {
+			exts = append(exts, e)
+		}
+	}
+	if len(exts) == 0 {
+		exts = []string{".com", ".exe", ".bat", ".cmd"}
+	}
+	return exts
 }
 
 func ignoreMissing(err error) error {

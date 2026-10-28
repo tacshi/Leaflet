@@ -125,7 +125,9 @@ func (c *Content) Apply(o Op) error {
 		if o.Node == nil {
 			return fmt.Errorf("replace without a node")
 		}
-		return c.Replace(o.ID, o.Node.Clone())
+		n := o.Node.Clone()
+		DropCells(n)
+		return c.Replace(o.ID, n)
 	case "move":
 		if o.Position == nil {
 			return fmt.Errorf("move without a position")

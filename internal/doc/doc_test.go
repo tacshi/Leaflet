@@ -590,3 +590,23 @@ func TestEscapeBlockStart(t *testing.T) {
 		}
 	}
 }
+
+// A table replaced with a list keeps none of its cells, whoever made the
+// op; a list's own items stay.
+func TestReplaceTableWithListDropsCells(t *testing.T) {
+	table, _ := TableNode([][]string{{"a", "b"}}, "t")
+	c := FromBlocks([]*Node{table})
+	list := &Node{ID: "t", Type: "bulleted_list", Children: table.Clone().Children}
+	list.SetDelta(Delta{{Text: "now a list"}})
+	list.Children = append(list.Children, para("k", "item"))
+	if err := c.Apply(Op{Op: "replace", ID: "t", Node: list, PrevNode: table}); err != nil {
+		t.Fatal(err)
+	}
+	n := c.Find("t")
+	if n.Type != "bulleted_list" || len(n.Children) != 1 || n.Children[0].ID != "k" {
+		t.Errorf("replaced with %s holding %d blocks", n.Type, len(n.Children))
+	}
+	if len(list.Children) != 3 {
+		t.Error("the op's node changed")
+	}
+}

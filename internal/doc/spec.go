@@ -2,6 +2,7 @@ package doc
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -284,6 +285,18 @@ func TableNode(rows [][]string, id string) (*Node, error) {
 		}
 	}
 	return n, nil
+}
+
+// DropCells takes table cells out of a block that is no longer a table,
+// as when a replace makes a list of one: its nested items, if any, stay.
+func DropCells(n *Node) {
+	if n.Type == "table" {
+		return
+	}
+	n.Children = slices.DeleteFunc(n.Children, func(k *Node) bool { return k.Type == "table/cell" })
+	if len(n.Children) == 0 {
+		n.Children = nil
+	}
 }
 
 // TableCell returns the cell of a table at a row and column, or nil.

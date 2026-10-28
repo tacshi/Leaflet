@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -116,6 +117,10 @@ func exportZip(w io.Writer, pages []store.Page, folders map[string]string, conte
 
 	z := zip.NewWriter(w)
 	create := func(name string, at time.Time) (io.Writer, error) {
+		// Every name stays inside the folder the zip opens into.
+		if name != path.Clean(name) || path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
+			return nil, fmt.Errorf("export: unsafe name %q", name)
+		}
 		if at.IsZero() {
 			at = time.Now()
 		}
@@ -158,7 +163,7 @@ func exportZip(w io.Writer, pages []store.Page, folders map[string]string, conte
 				if err != nil {
 					return // gone from this device: the link stays as it was
 				}
-				base := path.Base(local)
+				base := safeName(filepath.Base(local))
 				name = "files/" + base
 				for n := 2; usedFiles[strings.ToLower(name)]; n++ {
 					ext := path.Ext(base)

@@ -236,6 +236,9 @@ func (s *Service) SyncNow() error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
+	if err := s.retryMoves(ctx); err != nil {
+		log.Printf("sync: %v", err)
+	}
 	t := s.target()
 	err := t.pass(ctx)
 	if t.needsNetwork() && remote.IsNetwork(err) {
@@ -323,9 +326,10 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 // spaceID: the pages and their content, folders, comments, files and
 // recordings with their audio. A file or audio this device has only in
 // iCloud Drive, as after syncing through it, comes here first, to go up
-// from here.
+// from here; one that does not come yet waits, and retryMoves tries it
+// again before each pass.
 func (s *Service) requeueAll(spaceID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), moveWait)
 	defer cancel()
 	var failed error
 	pages, _ := s.st.AllPages()
@@ -341,50 +345,127 @@ func (s *Service) requeueAll(spaceID string) error {
 	for _, c := range comments {
 		failed = errors.Join(failed, s.st.Queue("comments", c.ID, store.CommentToRemote(c), "", c.PageID))
 	}
+	moves := map[string]bool{}
 	files, _ := s.st.Files()
 	for _, f := range files {
-		if !onDevice(f.LocalPath) && f.StoragePath != "" && s.keptInICloud("files", f.StoragePath) {
-			if data, err := s.cloudFetch(ctx, "files", f.StoragePath); err == nil {
-				if local, err := s.st.DownloadedFile(f.ID, data); err == nil {
-					f.LocalPath = local
-				}
-			}
-		}
-		f.SpaceID = spaceID
-		f.StoragePath = spaceID + "/" + f.ID + "/" + f.Name
-		failed = errors.Join(failed, s.st.PutFile(f))
-		failed = errors.Join(failed, s.st.Queue("files", f.ID, store.FileToRemote(f), "file", ""))
-		if onDevice(f.LocalPath) {
-			ct := f.MimeType
-			if ct == "" {
-				ct = "application/octet-stream"
-			}
-			failed = errors.Join(failed, s.st.Queue("storage", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": f.LocalPath, "content_type": ct}, "file waiting to upload", ""))
+		if err := s.requeueFile(ctx, f, spaceID); err != nil {
+			moves["files:"+f.ID] = true
+			failed = errors.Join(failed, err)
 		}
 	}
-	// A finished recording goes up with its audio, which keeps the path
-	// it has until the upload gives it another.
 	recordings, _ := s.st.Recordings()
 	for _, r := range recordings {
-		if r.Status != "ready" && r.Status != "failed" {
-			continue
-		}
-		if !onDevice(r.LocalPath) && r.AudioPath != "" && s.keptInICloud("recordings", r.AudioPath) {
-			if data, err := s.cloudFetch(ctx, "recordings", r.AudioPath); err == nil {
-				local := filepath.Join(s.st.Dir, "recordings", r.ID+".wav")
-				if err := os.MkdirAll(filepath.Dir(local), 0o750); err == nil && os.WriteFile(local, data, 0o600) == nil {
-					if rec, err := s.st.UpdateRecording(r.ID, func(x *store.Recording) { x.LocalPath = local }); err == nil {
-						r = rec
-					}
-				}
-			}
-		}
-		failed = errors.Join(failed, s.st.Queue("recordings", r.ID, store.RecordingToRemote(r), "", r.PageID))
-		if onDevice(r.LocalPath) {
-			failed = errors.Join(failed, s.st.QueueUpload(r))
+		if err := s.requeueRecording(ctx, r); err != nil {
+			moves["recordings:"+r.ID] = true
+			failed = errors.Join(failed, err)
 		}
 	}
-	return failed
+	return errors.Join(failed, s.setIDs(movesKey, moves))
+}
+
+// moveWait is how long requeueAll waits for iCloud Drive to bring what
+// this device has only there; a retry waits a quarter of it. Tests
+// shorten it.
+var moveWait = 2 * time.Minute
+
+// movesKey keeps the files and recordings requeueAll could not bring
+// from iCloud Drive yet, as "files:<id>" and "recordings:<id>".
+const movesKey = "sync.moves_waiting"
+
+// retryMoves queues the files and recordings requeueAll could not bring
+// from iCloud Drive, once they come.
+func (s *Service) retryMoves(ctx context.Context) error {
+	moves := s.ids(movesKey)
+	if len(moves) == 0 {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, moveWait/4)
+	defer cancel()
+	var failed error
+	left := map[string]bool{}
+	files, _ := s.st.Files()
+	for _, f := range files {
+		if key := "files:" + f.ID; moves[key] {
+			if err := s.requeueFile(ctx, f, s.st.Session().SpaceID); err != nil {
+				left[key] = true
+				failed = errors.Join(failed, err)
+			}
+		}
+	}
+	recordings, _ := s.st.Recordings()
+	for _, r := range recordings {
+		if key := "recordings:" + r.ID; moves[key] {
+			if err := s.requeueRecording(ctx, r); err != nil {
+				left[key] = true
+				failed = errors.Join(failed, err)
+			}
+		}
+	}
+	return errors.Join(failed, s.setIDs(movesKey, left))
+}
+
+// requeueFile queues a file to go up in space spaceID, with its contents
+// when this device has them. It changes nothing while the file is in
+// iCloud Drive but does not come here.
+func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string) error {
+	if !onDevice(f.LocalPath) && f.StoragePath != "" && s.keptInICloud("files", f.StoragePath) {
+		data, err := s.cloudFetch(ctx, "files", f.StoragePath)
+		if err != nil {
+			return fmt.Errorf("file %s from iCloud Drive: %w", f.Name, err)
+		}
+		if f.LocalPath, err = s.st.DownloadedFile(f.ID, data); err != nil {
+			return err
+		}
+	}
+	f.SpaceID = spaceID
+	f.StoragePath = spaceID + "/" + f.ID + "/" + f.Name
+	if err := s.st.PutFile(f); err != nil {
+		return err
+	}
+	if err := s.st.Queue("files", f.ID, store.FileToRemote(f), "file", ""); err != nil {
+		return err
+	}
+	if !onDevice(f.LocalPath) {
+		return nil
+	}
+	ct := f.MimeType
+	if ct == "" {
+		ct = "application/octet-stream"
+	}
+	return s.st.Queue("storage", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": f.LocalPath, "content_type": ct}, "file waiting to upload", "")
+}
+
+// requeueRecording queues a finished recording to go up with its audio,
+// which keeps the path it has until the upload gives it another. It
+// changes nothing while the audio is in iCloud Drive but does not come
+// here.
+func (s *Service) requeueRecording(ctx context.Context, r store.Recording) error {
+	if r.Status != "ready" && r.Status != "failed" {
+		return nil
+	}
+	if !onDevice(r.LocalPath) && r.AudioPath != "" && s.keptInICloud("recordings", r.AudioPath) {
+		data, err := s.cloudFetch(ctx, "recordings", r.AudioPath)
+		if err != nil {
+			return fmt.Errorf("recording %s from iCloud Drive: %w", r.ID, err)
+		}
+		local := filepath.Join(s.st.Dir, "recordings", r.ID+".wav")
+		if err := os.MkdirAll(filepath.Dir(local), 0o750); err != nil {
+			return err
+		}
+		if err := os.WriteFile(local, data, 0o600); err != nil {
+			return err
+		}
+		if r, err = s.st.UpdateRecording(r.ID, func(x *store.Recording) { x.LocalPath = local }); err != nil {
+			return err
+		}
+	}
+	if err := s.st.Queue("recordings", r.ID, store.RecordingToRemote(r), "", r.PageID); err != nil {
+		return err
+	}
+	if !onDevice(r.LocalPath) {
+		return nil
+	}
+	return s.st.QueueUpload(r)
 }
 
 // onDevice reports whether a file is on this device.
@@ -787,7 +868,8 @@ func (s *Service) pullShared(ctx context.Context) error {
 }
 
 // pullTree stores a page and the pages under it, their comments, files
-// and recordings, and has their content fetched.
+// and recordings, and has their content fetched. A row with a change
+// waiting here keeps it, as in the other pulls.
 func (s *Service) pullTree(ctx context.Context, rootID string) error {
 	var ids []string
 	filter := remote.Eq("id", rootID)
@@ -801,10 +883,13 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 		}
 		var level []string
 		for _, r := range rows {
-			if err := s.st.PutRemotePage(r); err != nil {
-				return err
+			id := store.S(r, "id")
+			if !s.st.HasPending("pages", id) {
+				if err := s.st.PutRemotePage(r); err != nil {
+					return err
+				}
 			}
-			level = append(level, store.S(r, "id"))
+			level = append(level, id)
 		}
 		ids = append(ids, level...)
 		filter = remote.In("parent_id", level)
@@ -820,6 +905,9 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 	}
 	names := s.authorNames(ctx, comments)
 	for _, r := range comments {
+		if s.st.HasPending("comments", store.S(r, "id")) {
+			continue
+		}
 		if err := s.st.PutRemoteComment(r, names[store.S(r, "author_id")]); err != nil {
 			return err
 		}
@@ -833,6 +921,9 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 			return err
 		}
 		for _, r := range rows {
+			if s.st.HasPending(step.table, store.S(r, "id")) {
+				continue
+			}
 			if err := step.apply(r); err != nil {
 				return err
 			}
@@ -942,9 +1033,14 @@ func (s *Service) pullContents(ctx context.Context) error {
 
 // waiting are the pages whose content changed before their own row came,
 // so their content is fetched once it has.
-func (s *Service) waiting() map[string]bool {
+func (s *Service) waiting() map[string]bool { return s.ids("sync.content_waiting") }
+
+func (s *Service) setWaiting(ids map[string]bool) { _ = s.setIDs("sync.content_waiting", ids) }
+
+// ids reads a set of IDs kept under key.
+func (s *Service) ids(key string) map[string]bool {
 	out := map[string]bool{}
-	if v, ok := s.st.Value("sync.content_waiting"); ok && v != "" {
+	if v, ok := s.st.Value(key); ok && v != "" {
 		for _, id := range strings.Split(v, ",") {
 			out[id] = true
 		}
@@ -952,13 +1048,13 @@ func (s *Service) waiting() map[string]bool {
 	return out
 }
 
-func (s *Service) setWaiting(ids map[string]bool) {
+func (s *Service) setIDs(key string, ids map[string]bool) error {
 	list := make([]string, 0, len(ids))
 	for id := range ids {
 		list = append(list, id)
 	}
 	slices.Sort(list)
-	_ = s.st.SetValue("sync.content_waiting", strings.Join(list, ","))
+	return s.st.SetValue(key, strings.Join(list, ","))
 }
 
 // RefreshContent brings a page's content up to date with the other

@@ -496,6 +496,10 @@ func safeName(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return locales.CommonUntitled()
 	}
+	// "." and ".." name the folder itself and the one above it.
+	if strings.Trim(s, ".") == "" {
+		return strings.ReplaceAll(s, ".", "-")
+	}
 	return s
 }
 

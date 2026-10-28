@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -82,6 +83,33 @@ func TestExportZip(t *testing.T) {
 	}
 	if !strings.Contains(got["Notes (2).md"], "](files/sun.jpg)") {
 		t.Errorf("notes 2:\n%s", got["Notes (2).md"])
+	}
+}
+
+// Pages and folders named "." or ".." stay inside the zip.
+func TestExportZipDotNames(t *testing.T) {
+	pages := []store.Page{
+		{ID: "up", Title: ".."},
+		{ID: "notes", Title: "Notes", ParentID: "up"},
+		{ID: "here", Title: ".", FolderID: "f"},
+	}
+	var buf bytes.Buffer
+	err := exportZip(&buf, pages, map[string]string{"f": ".."}, func(string) *doc.Content { return doc.Empty() },
+		func(string) string { return "" }, os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range r.File {
+		names = append(names, f.Name)
+	}
+	slices.Sort(names)
+	if want := []string{"--.md", "--/-.md", "--/Notes.md"}; !slices.Equal(names, want) {
+		t.Errorf("names %q, want %q", names, want)
 	}
 }
 

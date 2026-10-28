@@ -114,7 +114,10 @@ func OpenMemory(dir string) (*Store, error) {
 
 // OpenPath opens the database at a path.
 func OpenPath(path, dir string) (*Store, error) {
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(0)"
+	// Transactions take the write lock as they begin (_txlock), so what one
+	// reads stays as it read it until it commits, and one that cannot have
+	// the lock waits for it, up to the busy timeout, before doing anything.
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(0)&_txlock=immediate"
 	if path == ":memory:" {
 		dsn = ":memory:"
 	}
@@ -212,6 +215,28 @@ func addColumns(ctx context.Context, c *sql.Conn, cols [][3]string) error {
 		}
 	}
 	return nil
+}
+
+// querier is the database, or a transaction on it.
+type querier interface {
+	Exec(query string, args ...any) (sql.Result, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// inTx runs fn in one transaction, which holds the write lock from its
+// start: a change and its entry in the outbox are stored together or not
+// at all, and no pull stores between them. fn must use only tx, as the
+// store's one connection is the transaction's until it ends.
+func (s *Store) inTx(fn func(tx *sql.Tx) error) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Close closes the database.

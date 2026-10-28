@@ -676,3 +676,91 @@ func TestADatabaseGainsTheICloudTables(t *testing.T) {
 		t.Error("peer content kept after ForgetICloud")
 	}
 }
+
+// A save stores its content and queues it together: content another
+// process finds changed is always waiting to go up, so a pull never takes
+// it for the server's.
+func TestSavedContentIsAlwaysQueued(t *testing.T) {
+	dir := t.TempDir()
+	app, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = app.Close() }()
+	if _, err := app.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	p, err := app.CreatePage(NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, _ := app.Pending()
+	for _, e := range sent {
+		_ = app.Dequeue(e)
+	}
+	first, _ := app.ContentRow(p.ID)
+	sync, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sync.Close() }()
+	stop := make(chan struct{})
+	lost := make(chan string, 1)
+	go func() {
+		defer close(lost)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			row, err := sync.ContentRow(p.ID)
+			if err == nil && row.Content != first.Content && !sync.HasPending("page_content", p.ID) {
+				lost <- row.Content
+				return
+			}
+		}
+	}()
+	for i := range 200 {
+		c := doc.MustDecode(first.Content)
+		c.Children[0].SetDelta(doc.Delta{{Text: "edit " + strconv.Itoa(i)}})
+		if _, _, err := app.SaveContent(p.ID, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(stop)
+	if c, ok := <-lost; ok {
+		t.Fatalf("content stored without its entry in the outbox: %s", c)
+	}
+}
+
+// A save whose entry in the outbox cannot be stored stores nothing, so
+// the edit is not kept here only, never to go up.
+func TestASaveThatCannotQueueStoresNothing(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.ContentRow(p.ID)
+	if _, err := s.db.Exec(`DROP TABLE outbox`); err != nil {
+		t.Fatal(err)
+	}
+	c := doc.MustDecode(before.Content)
+	c.Children[0].SetDelta(doc.Delta{{Text: "Typed"}})
+	if _, _, err := s.SaveContent(p.ID, c); err == nil {
+		t.Fatal("saved with no outbox")
+	}
+	if after, _ := s.ContentRow(p.ID); after.Content != before.Content {
+		t.Errorf("content stored without its entry: %s", after.Content)
+	}
+	if _, err := s.CreatePage(NewPageOptions{ID: "p2", Title: "Next"}); err == nil {
+		t.Fatal("created a page with no outbox")
+	}
+	if _, err := s.Page("p2"); !IsNotFound(err) {
+		t.Errorf("page stored without its entry: %v", err)
+	}
+	if s.Content("p2") != nil {
+		t.Error("content stored without its entry")
+	}
+}

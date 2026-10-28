@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -585,6 +586,14 @@ func fetch(url string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(res.Body, 20<<20))
 }
 
+// embedURL is where an embed's wrapper page loads. WebView2 serves a
+// loaded document only to a URL it requests over the network, and never
+// requests about:blank, so there the page loads at an https URL of the
+// app's bundle ID instead, as a video's does, trusted to tell Go its
+// size. Its policy still keeps it off the network, and the embed's own
+// sandboxed frame has an opaque origin either way.
+var embedURL = map[bool]string{true: "https://embed.app.capyvibe.leaflet/", false: "about:blank"}[runtime.GOOS == "windows"]
+
 // embedCSP is the policy of an embed's frame: inline scripts and styles,
 // images, fonts and media from data and blob URLs, and nothing from the
 // network.
@@ -805,7 +814,7 @@ func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float
 	}
 	v := a.embeds[key]
 	if v == nil && a.win != nil {
-		wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: hexOf(pal.Surface)})
+		wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: hexOf(pal.Surface), Page: mygo.PageOptions{TrustedOrigins: []string{strings.TrimSuffix(embedURL, "/")}}})
 		if err != nil {
 			ui.Text(c, locales.HostEmbedError(err.Error())).TextColor(pal.TextMuted)
 			return
@@ -824,7 +833,7 @@ func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float
 		return
 	}
 	if a.embedSrc[key] != src {
-		v.Page().LoadHTML(src, "about:blank")
+		v.Page().LoadHTML(src, embedURL)
 		a.embedSrc[key] = src
 		delete(a.embedSizes, key)
 		delete(a.embedZoomed, key)

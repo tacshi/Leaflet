@@ -780,15 +780,56 @@ func (s *Service) setCursor(table string, c cursor) {
 	_ = s.st.SetValue("sync.cursor."+table, c.at+"|"+c.key)
 }
 
-// changed reads up to limit rows changed after the cursor, oldest first.
-// Rows of the same time come in key order, so a pull that stops among
-// them resumes at the next one.
-func (s *Service) changed(ctx context.Context, table, key, columns string, cur cursor, limit int, filters ...string) ([]map[string]any, error) {
-	after := remote.Gt("updated_at", cur.at)
-	if cur.key != "" {
-		after = "or=(updated_at.gt." + quote(cur.at) + ",and(updated_at.eq." + quote(cur.at) + "," + key + ".gt." + quote(cur.key) + "))"
+// overlap is how far behind its cursor a pull looks again. The server
+// stamps updated_at as a row changes, before the change commits, so a
+// change that commits late comes after rows stamped later, which the
+// cursor may have passed. Rows seen again are passed over where this
+// device has them as they are, and stored again otherwise, which stores
+// the row as the server has it, as the first time did.
+var overlap = 10 * time.Second
+
+// passed reports whether the cursor is at or past a row, which a pull
+// then reads again only for the overlap. A row whose time does not parse
+// is not passed.
+func (c cursor) passed(r map[string]any, key string) bool {
+	at, err := time.Parse(time.RFC3339Nano, store.S(r, "updated_at"))
+	if err != nil {
+		return false
 	}
-	return s.be.Select(ctx, table, remote.Query{Select: columns, Filters: append([]string{after}, filters...), Order: "updated_at," + key, Limit: limit})
+	cur, err := time.Parse(time.RFC3339Nano, c.at)
+	if err != nil {
+		return false
+	}
+	return at.Before(cur) || at.Equal(cur) && store.S(r, key) <= c.key
+}
+
+// changed reads up to limit rows changed after the cursor, oldest first,
+// after the rows of the overlap behind it. Rows of the same time come in
+// key order, so a pull that stops among them resumes at the next one.
+func (s *Service) changed(ctx context.Context, table, key, columns string, cur cursor, limit int, filters ...string) ([]map[string]any, error) {
+	from := cur
+	if at, err := time.Parse(time.RFC3339Nano, cur.at); err == nil && at.Unix() > 0 {
+		from = cursor{at: at.Add(-overlap).UTC().Format(time.RFC3339Nano)}
+	}
+	var out []map[string]any
+	for {
+		after := remote.Gt("updated_at", from.at)
+		if from.key != "" {
+			after = "or=(updated_at.gt." + quote(from.at) + ",and(updated_at.eq." + quote(from.at) + "," + key + ".gt." + quote(from.key) + "))"
+		}
+		rows, err := s.be.Select(ctx, table, remote.Query{Select: columns, Filters: append([]string{after}, filters...), Order: "updated_at," + key, Limit: limit})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rows...)
+		// An overlap fuller than a page reads on, so it does not hold the
+		// pull there.
+		if len(rows) < limit || !cur.passed(rows[len(rows)-1], key) {
+			return out, nil
+		}
+		last := rows[len(rows)-1]
+		from = cursor{store.S(last, "updated_at"), store.S(last, key)}
+	}
 }
 
 // quote makes a value safe inside a PostgREST or=(…) filter.
@@ -797,21 +838,33 @@ func quote(v string) string { return `"` + strings.ReplaceAll(v, `"`, `\"`) + `"
 // store applies pulled rows in order and moves the cursor past each one
 // stored. It stops at the first that cannot be stored, so the next pull
 // starts with it again. A row with a change waiting here is passed over:
-// the change wins and goes up on the next push.
-func (s *Service) store(table, key string, rows []map[string]any, apply func(map[string]any) error) {
+// the change wins and goes up on the next push. A row the cursor has
+// passed, of the overlap, is stored again only when this device does not
+// have it as it is (have), as when its change committed late.
+func (s *Service) store(table, key string, rows []map[string]any, have func(map[string]any) bool, apply func(map[string]any) error) {
 	cur := s.cursor(table)
 	start := cur
+	stored := false
 	for _, r := range rows {
+		again := start.passed(r, key)
+		if again && have(r) {
+			continue
+		}
 		if !s.st.HasPending(table, store.S(r, key)) {
 			if err := apply(r); err != nil {
 				log.Printf("pull %s %s: %v", table, store.S(r, key), err)
 				break
 			}
+			stored = true
 		}
-		cur = cursor{store.S(r, "updated_at"), store.S(r, key)}
+		if !again {
+			cur = cursor{store.S(r, "updated_at"), store.S(r, key)}
+		}
 	}
 	if cur != start {
 		s.setCursor(table, cur)
+	}
+	if stored || cur != start {
 		s.st.Notify(table, "")
 	}
 }
@@ -821,7 +874,12 @@ func (s *Service) pullTable(ctx context.Context, table, columns string, apply fu
 	if err != nil {
 		return err
 	}
-	s.store(table, "id", rows, apply)
+	have := func(r map[string]any) bool {
+		// A local model's connection stays on its device, never stored.
+		local, _ := r["is_local"].(bool)
+		return local || s.st.HasRowAt(table, store.S(r, "id"), store.Time(r["updated_at"]))
+	}
+	s.store(table, "id", rows, have, apply)
 	return nil
 }
 
@@ -866,7 +924,13 @@ func (s *Service) pullShared(ctx context.Context) error {
 		return err
 	}
 	var failed error
-	s.store("page_permissions", "page_id", rows, func(r map[string]any) error {
+	// A share seen again is of a page this device has, with what is under
+	// it, unless its pull failed.
+	have := func(r map[string]any) bool {
+		_, err := s.st.Page(store.S(r, "page_id"))
+		return err == nil
+	}
+	s.store("page_permissions", "page_id", rows, have, func(r map[string]any) error {
 		failed = s.pullTree(ctx, store.S(r, "page_id"))
 		return failed
 	})
@@ -941,8 +1005,7 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 	for _, id := range ids {
 		waiting[id] = true
 	}
-	s.setWaiting(waiting)
-	return nil
+	return s.setWaiting(waiting)
 }
 
 func (s *Service) pullComments(ctx context.Context) error {
@@ -951,7 +1014,10 @@ func (s *Service) pullComments(ctx context.Context) error {
 		return err
 	}
 	names := s.authorNames(ctx, rows)
-	s.store("comments", "id", rows, func(r map[string]any) error {
+	have := func(r map[string]any) bool {
+		return s.st.HasRowAt("comments", store.S(r, "id"), store.Time(r["updated_at"]))
+	}
+	s.store("comments", "id", rows, have, func(r map[string]any) error {
 		return s.st.PutRemoteComment(r, names[store.S(r, "author_id")])
 	})
 	return nil
@@ -1025,23 +1091,42 @@ func (s *Service) pullContents(ctx context.Context) error {
 			break
 		}
 		id := store.S(r, "page_id")
+		// Content seen again, of the overlap, is fetched only when this
+		// device has not merged that version or a later one.
+		again := start.passed(r, "page_id")
+		if again && s.hasContentAt(id, store.Time(r["updated_at"])) {
+			continue
+		}
 		if failed = refresh(id); failed != nil {
 			break
 		}
-		cur = cursor{store.S(r, "updated_at"), id}
+		if !again {
+			cur = cursor{store.S(r, "updated_at"), id}
+		}
+	}
+	// The pages that wait are kept before the cursor passes them: the
+	// other way round, a crash between would lose them.
+	if err := s.setWaiting(waiting); err != nil {
+		return errors.Join(failed, err)
 	}
 	if cur != start {
 		s.setCursor("page_content", cur)
 	}
-	s.setWaiting(waiting)
 	return failed
+}
+
+// hasContentAt reports whether this device has merged the server's
+// content of a page as of a time, or later.
+func (s *Service) hasContentAt(pageID string, at time.Time) bool {
+	row, err := s.st.ContentRow(pageID)
+	return err == nil && !row.RemoteUpdatedAt.IsZero() && row.RemoteUpdatedAt.UnixMilli() >= at.UnixMilli()
 }
 
 // waiting are the pages whose content changed before their own row came,
 // so their content is fetched once it has.
 func (s *Service) waiting() map[string]bool { return s.ids("sync.content_waiting") }
 
-func (s *Service) setWaiting(ids map[string]bool) { _ = s.setIDs("sync.content_waiting", ids) }
+func (s *Service) setWaiting(ids map[string]bool) error { return s.setIDs("sync.content_waiting", ids) }
 
 // ids reads a set of IDs kept under key.
 func (s *Service) ids(key string) map[string]bool {

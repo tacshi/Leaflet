@@ -36,6 +36,21 @@ func (s *Store) MoveSpace(from, to string) error {
 	return err
 }
 
+// pulled are the tables a pull from the server stores rows of, by id,
+// with the time each last changed there.
+var pulled = map[string]bool{"pages": true, "folders": true, "files": true, "comments": true, "recordings": true, "model_providers": true}
+
+// HasRowAt reports whether this device has a row pulled from the server as
+// it was at a time, to the millisecond kept here.
+func (s *Store) HasRowAt(table, id string, at time.Time) bool {
+	if !pulled[table] {
+		return false
+	}
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE id = ? AND updated_at = ?`, id, at.UnixMilli()).Scan(&n) // #nosec G202 -- table is one of pulled.
+	return n > 0
+}
+
 // PutRemoteFolder stores a folder from the server.
 func (s *Store) PutRemoteFolder(r map[string]any) error { return s.PutFolder(FolderFromRemote(r)) }
 

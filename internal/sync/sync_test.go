@@ -271,15 +271,87 @@ func TestPullResumesAtARowThatFailedToStore(t *testing.T) {
 	if err := svc.pullTable(ctx, "pages", "*", apply); err != nil {
 		t.Fatal(err)
 	}
-	want := `(updated_at.gt."` + at + `",and(updated_at.eq."` + at + `",id.gt."p1"))`
-	if queries[1] != want {
-		t.Errorf("second pull asked for\n%s\nwant\n%s", queries[1], want)
+	// From the overlap behind the cursor, where p1 is passed over.
+	if queries[1] != "" {
+		t.Errorf("second pull asked for %s", queries[1])
 	}
 	if strings.Join(stored, ",") != "p1,p2,p3" {
 		t.Errorf("stored %v", stored)
 	}
 	if v, _ := st.Value("sync.cursor.pages"); v != at+"|p3" {
 		t.Errorf("cursor %q", v)
+	}
+}
+
+// A row whose change commits after rows stamped later, which the pull has
+// passed, is found by the next pull, which looks again behind its cursor.
+// The rows it has already are not stored again.
+func TestPullFindsARowThatCommittedLate(t *testing.T) {
+	st := openStore(t)
+	t2 := time.Date(2026, 10, 26, 9, 0, 5, 123456000, time.UTC)
+	t1 := t2.Add(-3 * time.Second)
+	row := func(id string, at time.Time) map[string]any {
+		return map[string]any{"id": id, "space_id": st.Session().SpaceID, "title": id, "sort_key": "V",
+			"created_at": at.Format(time.RFC3339Nano), "updated_at": at.Format(time.RFC3339Nano)}
+	}
+	var filters []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		filters = append(filters, r.URL.Query().Get("updated_at"))
+		rows := []map[string]any{row("p1", t2)}
+		if len(filters) > 1 {
+			// p0 committed late, stamped before p1.
+			rows = []map[string]any{row("p0", t1), row("p1", t2)}
+		}
+		_ = json.NewEncoder(w).Encode(rows)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	stored := map[string]int{}
+	apply := func(r map[string]any) error {
+		stored[store.S(r, "id")]++
+		return st.PutRemotePage(r)
+	}
+	ctx := context.Background()
+	for range 3 {
+		if err := svc.pullTable(ctx, "pages", "*", apply); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := "gt." + t2.Add(-overlap).Format(time.RFC3339Nano); filters[1] != want {
+		t.Errorf("second pull asked for %s, want %s", filters[1], want)
+	}
+	if _, err := st.Page("p0"); err != nil {
+		t.Fatalf("the late row never came: %v", err)
+	}
+	if stored["p0"] != 1 || stored["p1"] != 1 {
+		t.Errorf("stored %v, each once", stored)
+	}
+	if v, _ := st.Value("sync.cursor.pages"); v != t2.Format(time.RFC3339Nano)+"|p1" {
+		t.Errorf("cursor %q", v)
+	}
+}
+
+// An overlap fuller than a page of rows reads on past it.
+func TestPullReadsPastAFullOverlap(t *testing.T) {
+	st := openStore(t)
+	at := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	var asked []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.RawQuery)
+		rows := []map[string]any{{"id": "a", "updated_at": at}, {"id": "b", "updated_at": at}}
+		if len(asked) > 1 {
+			rows = []map[string]any{{"id": "c", "updated_at": at}}
+		}
+		_ = json.NewEncoder(w).Encode(rows)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	rows, err := svc.changed(context.Background(), "pages", "id", "*", cursor{at, "b"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 || len(asked) != 2 || !strings.Contains(asked[1], "or=") {
+		t.Errorf("rows %v, asked %v", rows, asked)
 	}
 }
 

@@ -31,7 +31,9 @@ func (s *Service) cloudPull(ctx context.Context, me string) error {
 			log.Printf("icloud: pull %s: %v", peer, err)
 		}
 	}
-	s.setWaiting(waiting)
+	if err := s.setWaiting(waiting); err != nil {
+		return err
+	}
 	return s.refreshWaiting(ctx)
 }
 
@@ -73,9 +75,18 @@ func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
 			i = j - 1
 			continue
 		}
+		named := false
 		for _, e := range b.Entries {
 			if err := s.applyEntry(peer, e, waiting, changed); err != nil {
 				return fmt.Errorf("batch %d: %w", seq, err)
+			}
+			named = named || e.Kind == "content"
+		}
+		// The pages the batch names wait before the cursor passes it: the
+		// other way round, a crash between would lose them.
+		if named {
+			if err := s.setWaiting(waiting); err != nil {
+				return err
 			}
 		}
 		cursor = seq
@@ -188,7 +199,9 @@ func (s *Service) refreshWaiting(ctx context.Context) error {
 		}
 		delete(waiting, id)
 	}
-	s.setWaiting(waiting)
+	if err := s.setWaiting(waiting); err != nil {
+		return errors.Join(failed, err)
+	}
 	if errors.Is(failed, icloud.ErrNotReady) {
 		return nil
 	}

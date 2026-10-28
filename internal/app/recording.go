@@ -27,11 +27,14 @@ func (a *App) startRecording(pageID, _ string) {
 			a.savePage()
 			return
 		}
-		if c := a.st.Content(pageID); c != nil {
-			_ = c.Insert(doc.Position{At: "end"}, n)
-			if _, _, err := a.st.SaveContent(pageID, c); err != nil {
-				a.toast(locales.RecCouldNotSave(err.Error()))
+		err := a.saveStored(pageID, func(c *doc.Content) *doc.Content {
+			if c != nil {
+				_ = c.Insert(doc.Position{At: "end"}, n.Clone())
 			}
+			return c
+		})
+		if err != nil {
+			a.toast(locales.RecCouldNotSave(err.Error()))
 		}
 	})
 	if err != nil {

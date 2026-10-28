@@ -1282,8 +1282,13 @@ func (a *App) resolveConflict(cf store.ConflictRow, node *doc.Node) {
 			a.toast(locales.SettingsResolveFailed(err.Error()))
 			return
 		}
-		apply(c)
-		if _, _, err := a.st.SaveContent(cf.PageID, c); err != nil {
+		err := a.saveStored(cf.PageID, func(c *doc.Content) *doc.Content {
+			if c != nil {
+				apply(c)
+			}
+			return c
+		})
+		if err != nil {
 			a.toast(locales.SettingsResolveFailed(err.Error()))
 			return
 		}

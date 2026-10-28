@@ -8,6 +8,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/egoist/mygo/ui"
 )
 
 // Links from shared pages reach only the web: not files on this device,
@@ -57,5 +60,49 @@ func TestImagesReadOnlyTheirOwnFiles(t *testing.T) {
 		if _, err := ic.read("file://" + p); !errors.Is(err, errNotOwnFile) {
 			t.Errorf("read %s: %v", p, err)
 		}
+	}
+}
+
+// A picture that cannot be read says it failed, rather than loading
+// forever, and is tried again later.
+func TestImageCacheFailure(t *testing.T) {
+	root := t.TempDir()
+	ic := newImageCache(root, filepath.Join(root, "images"))
+	url := "file://" + filepath.Join(root, "missing.png")
+	done := make(chan struct{})
+	if ic.get(url, func() { close(done) }) != nil || ic.hasFailed(url) {
+		t.Fatal("a picture loading is shown or failed")
+	}
+	<-done
+	if !ic.hasFailed(url) {
+		t.Fatal("a missing picture has not failed")
+	}
+	if ic.get(url, func() { t.Error("tried again at once") }) != nil {
+		t.Fatal("a missing picture is shown")
+	}
+	// After a while it is tried again.
+	ic.mu.Lock()
+	ic.failed[url] = time.Now().Add(-imageRetry)
+	ic.mu.Unlock()
+	again := make(chan struct{})
+	ic.get(url, func() { close(again) })
+	if ic.hasFailed(url) {
+		t.Error("a picture tried again still says it failed")
+	}
+	<-again
+}
+
+// An SVG, as placehold.co serves, shows as a picture; text that is
+// neither a bitmap nor an SVG does not.
+func TestDecodePicture(t *testing.T) {
+	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400"><rect width="600" height="400" fill="#ddd"/></svg>`
+	pic, err := decodePicture([]byte(svg))
+	if s, ok := pic.(*ui.SVG); err != nil || !ok {
+		t.Fatalf("svg: %T, %v", pic, err)
+	} else if w, h := s.Size(); w != 600 || h != 400 {
+		t.Errorf("svg size %v×%v", w, h)
+	}
+	if pic, err := decodePicture([]byte("<html>not a picture</html>")); err == nil {
+		t.Errorf("html decoded as %T", pic)
 	}
 }

@@ -381,7 +381,7 @@
   "@hostSlashImage": {
     "description": "The / menu."
   },
-  "hostSlashImageHint": "Upload a picture",
+  "hostSlashImageHint": "Upload or link a picture",
   "@hostSlashImageHint": {
     "description": "The / menu: hint of Image."
   },
@@ -444,6 +444,14 @@
   "hostUploadTitle": "Upload a file",
   "@hostUploadTitle": {
     "description": "Title of the file picker to upload a file."
+  },
+  "hostReplaceImageTitle": "Choose an image",
+  "@hostReplaceImageTitle": {
+    "description": "Title of the file picker replacing an uploaded image."
+  },
+  "hostImageFiles": "Images",
+  "@hostImageFiles": {
+    "description": "File picker: the name of the filter showing only pictures."
   },
   "hostErrorAddFile": "Could not add the file: {error}",
   "@hostErrorAddFile": {
@@ -1110,6 +1118,18 @@
   "dialogLinkCardSubtitle": "Paste a link to a web page.",
   "@dialogLinkCardSubtitle": {
     "description": "Link dialog: the subtitle when adding a link card."
+  },
+  "dialogLinkImageTitle": "Image",
+  "@dialogLinkImageTitle": {
+    "description": "Link dialog: the title when changing an image's link."
+  },
+  "dialogLinkImageSubtitle": "Paste a link to an image, or upload one.",
+  "@dialogLinkImageSubtitle": {
+    "description": "Link dialog: the subtitle when changing an image's link."
+  },
+  "dialogLinkImageUpload": "Upload…",
+  "@dialogLinkImageUpload": {
+    "description": "Image dialog: the button picking a picture on the device instead of a link."
   },
   "dialogLinkVideoTitle": "Video",
   "@dialogLinkVideoTitle": {
@@ -2551,6 +2571,14 @@
   "@editorCopiedBlockLink": {
     "description": "Toast after Copy link to block."
   },
+  "editorEditMediaLink": "Edit link",
+  "@editorEditMediaLink": {
+    "description": "Context menu on an image or video block: changes the link it shows."
+  },
+  "editorReplaceImage": "Replace image…",
+  "@editorReplaceImage": {
+    "description": "Context menu on an uploaded image: picks another picture to show in its place."
+  },
   "editorPhHeading": "Heading {level}",
   "@editorPhHeading": {
     "description": "Placeholder of an empty heading.",
@@ -2616,6 +2644,10 @@
   "editorLoadingImage": "Loading image…",
   "@editorLoadingImage": {
     "description": "Image block while its image loads."
+  },
+  "editorImageFailed": "Couldn't load image",
+  "@editorImageFailed": {
+    "description": "Image block whose image could not be loaded."
   },
   "editorPageNotFound": "Page not found",
   "@editorPageNotFound": {

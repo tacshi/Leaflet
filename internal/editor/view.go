@@ -44,6 +44,9 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 				e.services.WriteClipboard(e.Host.BlockLink(e.menuBlock))
 				c.Toast(locales.EditorCopiedBlockLink())
 			}
+			if label := mediaEdit(e.node(e.menuBlock)); label != "" && !e.ReadOnly && m.Item(label).Chosen() {
+				e.Host.EditBlock(e.menuBlock)
+			}
 			m.Separator()
 		}
 		m.EditItems()
@@ -323,29 +326,58 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	})
 }
 
+// mediaEdit is the context menu's item changing what a block shows: an
+// uploaded image takes another file, an image or video from the web
+// another link.
+func mediaEdit(n *doc.Node) string {
+	switch {
+	case n.Type == "image" && n.Str("file_id") != "":
+		return locales.EditorReplaceImage()
+	case n.Type == "image" || n.Type == "video":
+		return locales.EditorEditMediaLink()
+	}
+	return ""
+}
+
 func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
-	bmp := e.Host.Image(n)
-	if bmp == nil {
+	pic, failed := e.Host.Image(n)
+	if pic == nil {
+		label := locales.EditorLoadingImage()
+		if failed {
+			label = locales.EditorImageFailed()
+		}
 		ui.Row(c).Height(160).FillWidth().Center().Radius(8).Background(pal.Ground).Border(1, pal.Divider).Children(func() {
 			ui.Icon(c, theme.Icon("image")).TextColor(pal.TextMuted)
-			ui.Text(c, locales.EditorLoadingImage()).TextColor(pal.TextMuted).Margin(0, 0, 0, 8)
+			ui.Text(c, label).TextColor(pal.TextMuted).Margin(0, 0, 0, 8)
 		})
 		return
 	}
-	w, h := bmp.Size()
+	w, h := pictureSize(pic)
 	maxW := e.width - float32(e.depth(n.ID))*indentStep
-	dw := min(float32(w), maxW)
-	dh := dw * float32(h) / max(float32(w), 1)
+	dw := min(w, maxW)
+	dh := dw * h / max(w, 1)
 	if mw := n.Int("width", 0); mw > 0 && float32(mw) < dw {
-		dw, dh = float32(mw), float32(mw)*float32(h)/max(float32(w), 1)
+		dw, dh = float32(mw), float32(mw)*h/max(w, 1)
 	}
 	row := ui.Row(c).FillWidth()
 	if n.Str("align") != "left" {
 		row.Justify(ui.Center)
 	}
 	row.Children(func() {
-		ui.Image(c, bmp).Size(dw, dh).Fit(ui.Contain).Radius(6).Label(n.Str("alt"))
+		ui.Image(c, pic).Size(dw, dh).Fit(ui.Contain).Radius(6).Label(n.Str("alt"))
 	})
+}
+
+// pictureSize is the size a bitmap or an SVG says it has.
+func pictureSize(pic ui.ImageSource) (w, h float32) {
+	switch p := pic.(type) {
+	case *ui.Bitmap:
+		iw, ih := p.Size()
+		return float32(iw), float32(ih)
+	case *ui.SVG:
+		return p.Size()
+	}
+	return 0, 0
 }
 
 func (e *Editor) subpageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {

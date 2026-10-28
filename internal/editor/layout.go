@@ -609,8 +609,9 @@ func isDigits(s string) bool {
 func joins(n *doc.Node) bool { return n.IsText() && n.Type != "code" }
 
 // paste inserts text at the caret: a line inline, several as blocks. The
-// text Leaflet itself last copied pastes as the blocks it came from, and a
-// YouTube or Vimeo link pasted on an empty line as a video.
+// text Leaflet itself last copied pastes as the blocks it came from, a
+// YouTube or Vimeo link pasted on an empty line as a video, and a link to
+// a picture there as an image.
 func (e *Editor) paste(text string) {
 	if e.ReadOnly || text == "" {
 		return
@@ -632,6 +633,11 @@ func (e *Editor) paste(text string) {
 	if n := e.node(e.focus.ID); n != nil && n.Type == "paragraph" && textLen(n) == 0 && e.Collapsed() && !e.inTable(n.ID) {
 		if v, err := doc.VideoNode(text, ""); err == nil {
 			e.InsertBlocks(v)
+			return
+		}
+		if doc.ImageLink(text) {
+			img, _ := doc.ImageNode(text)
+			e.InsertBlocks(img)
 			return
 		}
 	}

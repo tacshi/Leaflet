@@ -3,6 +3,7 @@ package editor
 import (
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,11 +16,13 @@ type fakeHost struct {
 	picked []MenuItem
 	opened []string
 	edited []string
+	// imageFailed is whether images fail to load, rather than load forever.
+	imageFailed bool
 }
 
 func (h *fakeHost) PageTitle(id string) string                  { return "Sub" }
 func (h *fakeHost) OpenPage(id string)                          { h.opened = append(h.opened, id) }
-func (h *fakeHost) Image(n *doc.Node) *ui.Bitmap                { return nil }
+func (h *fakeHost) Image(n *doc.Node) (ui.ImageSource, bool)    { return nil, h.imageFailed }
 func (h *fakeHost) Embed(c *ui.Context, n *doc.Node, w float32) {}
 func (h *fakeHost) Video(c *ui.Context, n *doc.Node, w float32) {}
 func (h *fakeHost) Card(c *ui.Context, n *doc.Node)             {}
@@ -318,6 +321,19 @@ func TestPasteVideoLink(t *testing.T) {
 	e.InsertText("see ")
 	e.paste("https://youtu.be/dQw4w9WgXcQ")
 	if got := texts(e); got[len(got)-1] != "paragraph:see https://youtu.be/dQw4w9WgXcQ" {
+		t.Errorf("got %v", got)
+	}
+}
+
+func TestPasteImageLink(t *testing.T) {
+	e, _, _ := setup(t)
+	e.paste("https://example.com/a/cover.JPG?w=600")
+	if top := e.Content.Children; len(top) != 2 || top[0].Type != "image" || top[0].Str("url") != "https://example.com/a/cover.JPG?w=600" || top[1].Type != "paragraph" {
+		t.Fatalf("got %v", texts(e))
+	}
+	// A link to a page stays text.
+	e.paste("https://example.com/a/cover")
+	if got := texts(e); got[len(got)-1] != "paragraph:https://example.com/a/cover" {
 		t.Errorf("got %v", got)
 	}
 }
@@ -691,5 +707,44 @@ func TestLeadingFollowsScript(t *testing.T) {
 		if got := leading(text); got != want {
 			t.Errorf("leading(%q) = %v, want %v", text, got, want)
 		}
+	}
+}
+
+// Right-clicking an image or a video from the web offers to change its
+// link, an uploaded image to replace it; a block of text offers neither.
+func TestEditMedia(t *testing.T) {
+	e, tt, host := setup(t)
+	img := &doc.Node{ID: "img", Type: "image", Data: map[string]any{"url": "https://example.com/a.png"}}
+	video := &doc.Node{ID: "vid", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ"}}
+	upload := &doc.Node{ID: "up", Type: "image", Data: map[string]any{"url": "file:///x/a.png", "file_id": "f1"}}
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{para("p", "text"), img, video, upload} })
+	tt.Frame()
+	if _, ok := tt.Find("Loading image…"); !ok {
+		t.Error("the image does not say it is loading")
+	}
+	for id, item := range map[string]string{"img": "Edit link", "vid": "Edit link", "up": "Replace image…"} {
+		r := e.geom[id]
+		tt.RightClickAt(r.X+20, r.Y+r.H/2)
+		if slices.Contains(tt.Menu(), "Edit link") && slices.Contains(tt.Menu(), "Replace image…") {
+			t.Errorf("%s offers both: %v", id, tt.Menu())
+		}
+		if err := tt.ChooseMenuItem(item); err != nil {
+			t.Fatalf("%s: %v; menu %v", id, err, tt.Menu())
+		}
+	}
+	slices.Sort(host.edited)
+	if !reflect.DeepEqual(host.edited, []string{"img", "up", "vid"}) {
+		t.Errorf("edited %v", host.edited)
+	}
+	r := e.geom["p"]
+	tt.RightClickAt(r.X+5, r.Y+r.H/2)
+	if slices.Contains(tt.Menu(), "Edit link") || slices.Contains(tt.Menu(), "Replace image…") {
+		t.Errorf("a paragraph's menu %v", tt.Menu())
+	}
+	// An image that cannot load says so, rather than loading forever.
+	host.imageFailed = true
+	tt.Frame()
+	if _, ok := tt.Find("Couldn't load image"); !ok {
+		t.Error("the image does not say it failed")
 	}
 }

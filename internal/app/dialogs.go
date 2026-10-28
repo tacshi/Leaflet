@@ -98,9 +98,11 @@ type dialogs struct {
 	embedHTML   string
 	embedHeight string
 
-	// The dialog asking for a video's or a link card's link.
+	// The dialog asking for a video's or a link card's link, or changing
+	// an image's or video's.
 	linkOpen  bool
 	linkKind  string
+	linkID    string // the block being changed, or "" for a new one
 	linkURL   string
 	linkError string
 
@@ -933,18 +935,27 @@ func (a *App) embedDialog(c *ui.Context) {
 
 // Links ------------------------------------------------------------------
 
-// openLinkDialog asks for the link of a block of a kind: "video" or
-// "link_preview".
+// openLinkDialog asks for the link of a block of a kind: "video",
+// "link_preview" or "image", which can be uploaded instead.
 func (d *dialogs) openLinkDialog(kind string) {
-	d.linkOpen, d.linkKind, d.linkURL, d.linkError = true, kind, "", ""
+	d.linkOpen, d.linkKind, d.linkID, d.linkURL, d.linkError = true, kind, "", "", ""
+}
+
+// editLink opens the link dialog on an image or video block from the web,
+// to change its link.
+func (d *dialogs) editLink(n *doc.Node) {
+	d.linkOpen, d.linkKind, d.linkID, d.linkURL, d.linkError = true, n.Type, n.ID, n.Str("url"), ""
 }
 
 func (a *App) linkDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
 	title, subtitle, example := locales.DialogLinkCardTitle(), locales.DialogLinkCardSubtitle(), "https://"
-	if d.linkKind == "video" {
+	switch d.linkKind {
+	case "video":
 		title, subtitle, example = locales.DialogLinkVideoTitle(), locales.DialogLinkVideoSubtitle(), "https://www.youtube.com/watch?v=…"
+	case "image":
+		title, subtitle = locales.DialogLinkImageTitle(), locales.DialogLinkImageSubtitle()
 	}
 	dialog(c, &d.linkOpen, 480, func() {
 		dialogHeader(c, title, subtitle, &d.linkOpen)
@@ -954,21 +965,30 @@ func (a *App) linkDialog(c *ui.Context) {
 				ui.Text(c, d.linkError).FontSize(12.5).TextColor(pal.DangerText)
 			}
 			insert := func() {
-				var n *doc.Node
-				var err error
+				link := strings.TrimSpace(d.linkURL)
+				valid := doc.WebURL(link)
 				if d.linkKind == "video" {
-					n, err = doc.VideoNode(d.linkURL, "")
-				} else {
-					n, err = doc.LinkNode(d.linkURL)
+					_, valid = doc.ParseVideoURL(link)
 				}
-				if err != nil {
-					d.linkError = locales.DialogLinkNotVideo()
-					if d.linkKind != "video" {
-						d.linkError = locales.DialogLinkNotWeb()
+				if !valid {
+					d.linkError = locales.DialogLinkNotWeb()
+					if d.linkKind == "video" {
+						d.linkError = locales.DialogLinkNotVideo()
 					}
 					return
 				}
-				if a.page != nil {
+				switch {
+				case a.page == nil:
+				case d.linkID != "":
+					a.setMediaLink(d.linkID, link)
+				case d.linkKind == "video":
+					n, _ := doc.VideoNode(link, "")
+					a.page.editor.InsertBlocks(n)
+				case d.linkKind == "image":
+					n, _ := doc.ImageNode(link)
+					a.page.editor.InsertBlocks(n)
+				default:
+					n, _ := doc.LinkNode(link)
 					a.page.editor.InsertBlocks(n)
 				}
 				d.linkOpen = false
@@ -977,15 +997,49 @@ func (a *App) linkDialog(c *ui.Context) {
 				insert()
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+				if d.linkKind == "image" {
+					if button(c, "upload", "upload", locales.DialogLinkImageUpload()).Clicked() {
+						d.linkOpen = false
+						a.uploadImage(d.linkID)
+					}
+					ui.Spacer(c)
+				}
 				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
 					d.linkOpen = false
 				}
-				if primary(c, "insert", "", locales.DialogInsert()).Clicked() {
+				label := locales.DialogInsert()
+				if d.linkID != "" {
+					label = locales.CommonSave()
+				}
+				if primary(c, "insert", "", label).Clicked() {
 					insert()
 				}
 			})
 		})
 	})
+}
+
+// setMediaLink points an image or video block of the open page at a new
+// link. A video drops its player and the title learned from its old link.
+func (a *App) setMediaLink(id, link string) {
+	ed := a.page.editor
+	if n := ed.Content.Find(id); n == nil || n.Str("url") == link {
+		return
+	}
+	ed.Edit(func(content *doc.Content) {
+		n := content.Find(id)
+		if n == nil {
+			return
+		}
+		n.Set("url", link)
+		if n.Type == "video" {
+			n.Set("title", "")
+		}
+	})
+	if wv := a.videos[id]; wv != nil {
+		wv.Destroy()
+		delete(a.videos, id)
+	}
 }
 
 // Inline agent prompt ---------------------------------------------------

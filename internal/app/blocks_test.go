@@ -4,9 +4,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/editor"
 )
 
 func TestReadLinkInfo(t *testing.T) {
@@ -90,5 +92,36 @@ func TestRenderedBlockShowsChromeOnHover(t *testing.T) {
 	tt.Move(label.X+10, label.Y+label.H/2)
 	if border, text := inked(); border == 0 || text == 0 {
 		t.Errorf("with the pointer over it: border %d, label %d pixels", border, text)
+	}
+}
+
+// Editing an image's or video's link points it at the new link, as one
+// undo step.
+func TestSetMediaLink(t *testing.T) {
+	img := &doc.Node{ID: "img", Type: "image", Data: map[string]any{"url": "https://example.com/a.png", "align": "center"}}
+	video := &doc.Node{ID: "vid", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ", "title": "Old"}}
+	ed := editor.New(doc.Empty(), nil)
+	ed.Edit(func(c *doc.Content) { c.Children = []*doc.Node{img, video} })
+	a := &App{page: &pageState{editor: ed}, videos: map[string]*mygo.WebView{}}
+
+	a.dialogs.editLink(img)
+	if a.dialogs.linkURL != "https://example.com/a.png" || a.dialogs.linkKind != "image" {
+		t.Errorf("an image's dialog starts at %q, %q", a.dialogs.linkURL, a.dialogs.linkKind)
+	}
+	a.setMediaLink("img", "https://example.com/b.png")
+	if n := ed.Content.Find("img"); n.Str("url") != "https://example.com/b.png" || n.Str("align") != "center" {
+		t.Errorf("image %v", n.Data)
+	}
+	a.dialogs.editLink(ed.Content.Find("vid"))
+	if a.dialogs.linkURL != "https://youtu.be/dQw4w9WgXcQ" {
+		t.Errorf("a video's dialog starts at %q", a.dialogs.linkURL)
+	}
+	a.setMediaLink("vid", "https://vimeo.com/76979871")
+	if n := ed.Content.Find("vid"); n.Str("url") != "https://vimeo.com/76979871" || n.Str("title") != "" {
+		t.Errorf("video %v", n.Data)
+	}
+	ed.Undo()
+	if n := ed.Content.Find("vid"); n.Str("url") != "https://youtu.be/dQw4w9WgXcQ" || n.Str("title") != "Old" {
+		t.Errorf("after undo, video %v", n.Data)
 	}
 }

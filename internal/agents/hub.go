@@ -743,26 +743,50 @@ func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op) error {
 	if d.sent == len(ops) {
 		return nil
 	}
-	c, err := stored(st, pageID)
-	if err != nil {
-		return err
-	}
-	if c == nil {
-		c = doc.Empty()
-	}
+	var missed []doc.Op
 	for _, op := range ops[d.sent:] {
-		if op.Op == "create_page" || op.Op == "delete_page" {
-			continue
-		}
-		if err := c.Apply(op); err != nil {
-			log.Printf("agent op on a closed page: %v", err)
+		if op.Op != "create_page" && op.Op != "delete_page" {
+			missed = append(missed, op)
 		}
 	}
-	if _, _, err := st.SaveContent(pageID, c); err != nil {
+	if err := storeOps(st, pageID, missed, true, "agent op on a closed page"); err != nil {
 		return err
 	}
 	d.sent = len(ops)
 	return nil
+}
+
+// errKeptChanging is a closed page stored over each time the ops were
+// applied to it.
+var errKeptChanging = errors.New("The page kept changing while saving the agent's edits.") //nolint:staticcheck // shown to people as a sentence.
+
+// storeOps applies ops to a page's stored content, an empty page when
+// there is none and orEmpty, and saves it only over the content it read:
+// what MCP or a sync stores in between is read again and gets the ops,
+// rather than being saved over.
+func storeOps(st *store.Store, pageID string, ops []doc.Op, orEmpty bool, what string) error {
+	for range 3 {
+		c, over, err := storedRow(st, pageID)
+		if err != nil {
+			return err
+		}
+		if c == nil {
+			if !orEmpty {
+				return nil
+			}
+			c = doc.Empty()
+		}
+		for _, op := range ops {
+			if err := c.Apply(op); err != nil {
+				log.Printf("%s: %v", what, err)
+			}
+		}
+		beforeStore(pageID)
+		if _, _, err := st.SaveContentOver(pageID, over, c); !errors.Is(err, store.ErrContentChanged) {
+			return err
+		}
+	}
+	return errKeptChanging
 }
 
 // errUnreadable is a page whose stored content cannot be read.
@@ -772,15 +796,26 @@ var errUnreadable = errors.New("The page's content could not be read, so agents 
 // cannot be read is an error rather than an empty page, which saving
 // would put in its place.
 func stored(st *store.Store, pageID string) (*doc.Content, error) {
+	c, _, err := storedRow(st, pageID)
+	return c, err
+}
+
+// beforeStore runs between applying ops to a page's stored content and
+// saving it; tests save there, standing in for MCP or a sync.
+var beforeStore = func(pageID string) {}
+
+// storedRow is stored, with the stored text it was read from ("" when
+// there is none) to save over.
+func storedRow(st *store.Store, pageID string) (*doc.Content, string, error) {
 	row, err := st.ContentRow(pageID)
 	if err != nil {
-		return nil, nil //nolint:nilerr // not kept on this device.
+		return nil, "", nil //nolint:nilerr // not kept on this device.
 	}
 	c, err := doc.Decode(row.Content)
 	if err != nil {
-		return nil, errUnreadable
+		return nil, "", errUnreadable
 	}
-	return c, nil
+	return c, row.Content, nil
 }
 
 func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *doc.Content, d *delivery, res Result, err error, o RunOptions) {
@@ -980,20 +1015,7 @@ func (h *Hub) apply(pageID string, ops []doc.Op) {
 		}
 		return
 	}
-	c, err := stored(h.st, pageID)
-	if err != nil {
-		log.Printf("undo run: %v", err)
-		return
-	}
-	if c == nil {
-		return
-	}
-	for _, o := range blockOps {
-		if err := c.Apply(o); err != nil {
-			log.Printf("undo run: %v", err)
-		}
-	}
-	if _, _, err := h.st.SaveContent(pageID, c); err != nil {
+	if err := storeOps(h.st, pageID, blockOps, false, "undo run"); err != nil {
 		log.Printf("undo run: %v", err)
 	}
 }

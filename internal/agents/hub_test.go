@@ -68,6 +68,40 @@ func TestDeliveryToAPageClosedMidRun(t *testing.T) {
 	}
 }
 
+// What MCP or a sync stores on a closed page while a run's ops are going
+// in stays: the ops go on top of it instead of saving over it.
+func TestDeliveryKeepsAConcurrentSave(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.SaveContent(p.ID, page()); err != nil {
+		t.Fatal(err)
+	}
+	saved := false
+	was := beforeStore
+	beforeStore = func(id string) {
+		if saved || id != p.ID {
+			return
+		}
+		saved = true
+		c := st.Content(id)
+		c.Children = append(c.Children, &doc.Node{ID: "theirs", Type: "paragraph"})
+		if _, _, err := st.SaveContent(id, c); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { beforeStore = was })
+	d := &delivery{}
+	if err := d.save(st, p.ID, []doc.Op{insertAfter("p1", "x1", "one")}); err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(st.Content(p.ID)); got != "h1,p1,x1,l1,theirs" {
+		t.Errorf("stored %s", got)
+	}
+}
+
 // Ops for a closed page whose stored content cannot be read are not saved
 // over it as if it were empty.
 func TestDeliveryToAnUnreadablePage(t *testing.T) {

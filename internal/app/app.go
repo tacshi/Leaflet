@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -523,6 +524,11 @@ func (a *App) ancestors(id string) []store.Page {
 	return out
 }
 
+// isUnder reports whether a page is another or among its subpages.
+func (a *App) isUnder(id, other string) bool {
+	return id == other || slices.ContainsFunc(a.ancestors(id), func(p store.Page) bool { return p.ID == other })
+}
+
 // Navigation is MyGo's Router: its history of the routes' paths, which
 // Back and Forward, their keys and buttons go through.
 
@@ -584,18 +590,22 @@ func (a *App) navigate(r Route) {
 	if r == a.route {
 		return
 	}
-	a.flush()
-	a.show(r)
-	a.follow()
+	if a.show(r) {
+		a.follow()
+	}
 }
 
-func (a *App) show(r Route) {
+// show shows a route once the open page closes: it reports false, still
+// at the page, when the page's edits could not be saved.
+func (a *App) show(r Route) bool {
+	if !a.closePage() {
+		return false
+	}
 	a.route = r
 	if r.Kind == "page" {
 		a.loadPage(r.ID)
-	} else {
-		a.closePage()
 	}
+	return true
 }
 
 func (a *App) back() {
@@ -626,9 +636,11 @@ func (a *App) follow() {
 		if r.Kind == "page" && a.pageByID(r.ID) == nil {
 			r = Route{Kind: "home"}
 		}
-		if r != a.route {
-			a.flush()
-			a.show(r)
+		if r != a.route && !a.show(r) {
+			// The page stays, with the edits it could not save: the
+			// router comes back to it.
+			a.router.Push(a.route.path())
+			a.routerAt = a.router.Path()
 		}
 		return
 	}
@@ -656,15 +668,19 @@ func (a *App) openPage(id string) {
 		a.treeOpen("folder", top.FolderID)
 	}
 	if a.win == nil {
-		a.route = Route{Kind: "page", ID: id}
-		a.loadPage(id)
+		if a.closePage() {
+			a.route = Route{Kind: "page", ID: id}
+			a.loadPage(id)
+		}
 		return
 	}
 	a.navigate(Route{Kind: "page", ID: id})
 }
 
 func (a *App) loadPage(id string) {
-	a.closePage()
+	if !a.closePage() {
+		return
+	}
 	p := a.pageByID(id)
 	if p == nil {
 		a.route = Route{Kind: "home"}
@@ -697,11 +713,21 @@ func (a *App) loadPage(id string) {
 	}
 }
 
-func (a *App) closePage() {
+// closePage closes the open page once its edits are saved. It reports
+// false, and the page stays open with them, when they could not be.
+func (a *App) closePage() bool {
 	if a.page == nil {
-		return
+		return true
 	}
-	a.flush()
+	if !a.flush() {
+		return false
+	}
+	a.discardPage()
+	return true
+}
+
+// discardPage closes the open page, saved or not.
+func (a *App) discardPage() {
 	for id, v := range a.embeds {
 		v.Destroy()
 		delete(a.embeds, id)
@@ -739,11 +765,12 @@ func (a *App) scheduleSave() {
 	})
 }
 
-// savePage stores the open page's content.
-func (a *App) savePage() {
+// savePage stores the open page's content. It reports whether nothing is
+// left to save.
+func (a *App) savePage() bool {
 	ps := a.page
 	if ps == nil || !ps.dirty {
-		return
+		return true
 	}
 	// What was stored since, by another process, merges in first, so the
 	// save keeps it. The save goes only over what merged: what is stored
@@ -762,7 +789,7 @@ func (a *App) savePage() {
 			// The edits wait, still to be saved, for the next save or the
 			// page closing.
 			a.toast(locales.AppErrorSave(err.Error()))
-			return
+			return false
 		}
 		ps.dirty = false
 		ps.editor.Content.Blocks, ps.editor.Content.Deleted = stamped.Blocks, stamped.Deleted
@@ -772,20 +799,23 @@ func (a *App) savePage() {
 			_ = a.st.MaybeAutosave(ps.id, stamped)
 			a.sync.Kick()
 		}
-		return
+		return true
 	}
 	// Stored over each time, the edits wait for the save that merging
 	// them scheduled.
+	return false
 }
 
-// flush saves what is waiting to be saved.
-func (a *App) flush() {
-	if a.page != nil {
-		if a.page.title != "" || a.pageByID(a.page.id) != nil {
-			a.saveTitle()
-		}
-		a.savePage()
+// flush saves what is waiting to be saved. It reports whether the open
+// page's edits are all stored.
+func (a *App) flush() bool {
+	if a.page == nil {
+		return true
 	}
+	if a.page.title != "" || a.pageByID(a.page.id) != nil {
+		a.saveTitle()
+	}
+	return a.savePage()
 }
 
 func (a *App) saveTitle() {
@@ -1032,8 +1062,10 @@ func (a *App) deletePage(id string) {
 	if p := a.pageByID(id); p != nil {
 		title = p.DisplayTitle()
 	}
-	if a.page != nil && a.page.id == id {
-		a.flush()
+	// The open page goes, itself or under the page, with its edits saved,
+	// for Undo to bring them back.
+	if a.page != nil && a.isUnder(a.page.id, id) && !a.flush() {
+		return
 	}
 	ids, err := a.st.DeletePage(id)
 	if err != nil {
@@ -1044,7 +1076,7 @@ func (a *App) deletePage(id string) {
 	if a.route.Kind == "page" {
 		for _, d := range ids {
 			if d == a.route.ID {
-				a.closePage()
+				a.discardPage()
 				a.route = Route{Kind: "home"}
 			}
 		}

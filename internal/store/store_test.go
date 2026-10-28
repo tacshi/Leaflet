@@ -538,6 +538,26 @@ func TestSaveContentOver(t *testing.T) {
 	}
 }
 
+// Saving over no content saves only while the page has none.
+func TestSaveContentOverNone(t *testing.T) {
+	s := open(t)
+	c := &doc.Content{Children: []*doc.Node{{ID: "a", Type: "paragraph"}}}
+	c.Children[0].SetDelta(doc.Delta{{Text: "First"}})
+	if _, changed, err := s.SaveContentOver("p1", "", c); err != nil || !changed {
+		t.Fatalf("save over none: %v %v", changed, err)
+	}
+	if !s.HasPending("page_content", "p1") {
+		t.Error("not queued")
+	}
+	c.Children[0].SetDelta(doc.Delta{{Text: "Second"}})
+	if _, _, err := s.SaveContentOver("p1", "", c); !errors.Is(err, ErrContentChanged) {
+		t.Fatalf("saved over content as over none: %v", err)
+	}
+	if got := s.Content("p1").PlainText(); !strings.Contains(got, "First") {
+		t.Errorf("content %q", got)
+	}
+}
+
 // writeDB makes a database at path with the statements, as an earlier
 // version of Leaflet would have.
 func writeDB(t *testing.T, path string, stmts ...string) {

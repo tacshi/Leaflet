@@ -630,8 +630,8 @@ func (s *Store) SaveContent(pageID string, c *doc.Content) (*doc.Content, bool, 
 }
 
 // SaveContentOver is SaveContent for content made from the stored content
-// over: it saves only while that is still what is stored, and returns
-// ErrContentChanged otherwise.
+// over ("" when there was none): it saves only while that is still what is
+// stored, and returns ErrContentChanged otherwise.
 func (s *Store) SaveContentOver(pageID, over string, c *doc.Content) (*doc.Content, bool, error) {
 	return s.saveContent(pageID, c, &over)
 }
@@ -645,8 +645,12 @@ func (s *Store) saveContent(pageID string, c *doc.Content, over *string) (*doc.C
 	changed := false
 	err := s.inTx(func(tx *sql.Tx) error {
 		row, err := contentRow(tx, pageID)
-		if over != nil && (err != nil || row.Content != *over) {
-			return ErrContentChanged
+		if over != nil {
+			// No content is stored as "", so "" can only mean none.
+			none := errors.Is(err, sql.ErrNoRows)
+			if *over == "" && !none || *over != "" && (err != nil || row.Content != *over) {
+				return ErrContentChanged
+			}
 		}
 		var previous *doc.Content
 		switch {

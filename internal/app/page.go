@@ -5,7 +5,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
@@ -24,7 +23,6 @@ func (a *App) pageView(c *ui.Context) {
 	}
 	ps.editor.SetWidth(a.contentWidth(c))
 	ps.editor.Size = float32(a.settings.TextSize)
-	ps.editor.LineHeight = proseLineHeight()
 	a.titleBar(c, func() {
 		a.breadcrumbs(c, *p)
 		ui.Spacer(c)
@@ -481,15 +479,4 @@ func (a *App) pageNotices(c *ui.Context, pageID string) bool {
 		}
 	})
 	return true
-}
-
-// proseLineHeight is the leading of a page's prose, in the language the
-// app shows: Chinese, Japanese and Korean, whose characters fill the em
-// square, read best with more than Latin text.
-func proseLineHeight() float32 {
-	switch i18n.Base(i18n.Locale()) {
-	case "zh", "ja", "ko":
-		return 1.8
-	}
-	return 1.5
 }

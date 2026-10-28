@@ -3,6 +3,7 @@ package editor
 import (
 	"encoding/json"
 	"strings"
+	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -39,7 +40,7 @@ func (e *Editor) depth(id string) int {
 // style returns a text block's font and the room above and below it.
 func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 	size := e.Size
-	font = ui.Font{Family: e.Family, Size: size, LineHeight: e.LineHeight}
+	font = ui.Font{Family: e.Family, Size: size, LineHeight: leading(n.Delta().Plain())}
 	top, bottom = 3, 3
 	switch n.Type {
 	case "heading":
@@ -68,6 +69,27 @@ func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 		top, bottom = 2, 2
 	}
 	return
+}
+
+// leading is the height of a line of prose, as a multiple of its size:
+// more for text mostly in Chinese, Japanese or Korean, whose characters
+// fill the em square, than for Latin text. One of those characters counts
+// as much as a word of four letters, so a few English terms or a link in
+// a Chinese paragraph leave it Chinese.
+func leading(text string) float32 {
+	cjk, other := 0, 0
+	for _, r := range text {
+		switch {
+		case unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul):
+			cjk++
+		case unicode.IsLetter(r):
+			other++
+		}
+	}
+	if cjk > 0 && cjk*4 >= other {
+		return 1.8
+	}
+	return 1.5
 }
 
 // markerWidth is the room before a block's text for its bullet, number or

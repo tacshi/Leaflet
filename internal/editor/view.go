@@ -34,6 +34,8 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 			e.geom[id] = ui.Rect{X: r.X + b.X, Y: r.Y + b.Y, W: b.W, H: b.H}
 		}
 	})
+	// The page's own text is drawn here, not in MyGo's text inputs, so
+	// MyGo's EditItems would add nothing: cut, copy and paste are keys.
 	root.PopoverMenu(func(m *ui.Menu) {
 		if e.colored() && m.Item(locales.EditorRemoveColor()).Chosen() {
 			e.SetColor("")
@@ -50,9 +52,7 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 			if label := mediaLink(e.linkAtPos(e.menuAt)); label != "" && !e.ReadOnly && m.Item(label).Chosen() {
 				e.LinkToMedia(e.menuAt)
 			}
-			m.Separator()
 		}
-		m.EditItems()
 	})
 	e.hid = e.hidden()
 	// The chips shown fill this in again as they draw.

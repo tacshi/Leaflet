@@ -229,7 +229,13 @@ func (a *App) searchDialog(c *ui.Context) {
 							}
 						})
 						if h.Snippet != "" {
-							ui.RichText(c, matchSpans(h.Snippet, d.query, pal.Text)...).FontSize(12).TextColor(pal.TextMuted).SingleLine()
+							// On the row chosen, in the accent, the snippet is in
+							// its text's color, as the title is.
+							muted, match := pal.TextMuted, pal.Text
+							if i == d.hitIndex {
+								muted, match = pal.OnAccent.Alpha(0.75), pal.OnAccent
+							}
+							ui.RichText(c, matchSpans(h.Snippet, d.query, match)...).FontSize(12).TextColor(muted).SingleLine()
 						}
 					})
 				})

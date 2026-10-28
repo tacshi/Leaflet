@@ -1411,6 +1411,10 @@
   "@panelTabOutline": {
     "description": "Side panel tab."
   },
+  "panelPastConversations": "Earlier conversations",
+  "@panelPastConversations": {
+    "description": "Side panel: icon button listing the page's earlier agent chats; choosing one opens it."
+  },
   "panelNewConversation": "New conversation",
   "@panelNewConversation": {
     "description": "Side panel: button starting a new agent chat."

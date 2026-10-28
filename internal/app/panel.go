@@ -128,8 +128,11 @@ func (a *App) agentPanel(c *ui.Context) {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				a.agentPicker(c, sess, options)
 				tools(c, func() {
-					if iconButton(c, "new-chat", "message-square-plus", locales.PanelNewConversation()).Clicked() {
+					if iconButton(c, "new-chat", "message-square-plus", locales.PanelNewConversation()).Disabled(sess.Running).Clicked() {
 						a.hub.NewConversation(ps.id)
+					}
+					if len(sess.Past) > 0 {
+						a.pastConversations(c, sess)
 					}
 				})
 				ui.Spacer(c)
@@ -174,6 +177,23 @@ func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.
 			a.openSettings("providers")
 		}
 	}).Label(locales.CommonAgent()).FontSize(12)
+}
+
+// pastConversations is MyGo's menu on an icon button, going back to one
+// of the page's earlier conversations.
+func (a *App) pastConversations(c *ui.Context, sess *agents.Session) {
+	b := iconButton(c, "past-chats", "history", locales.PanelPastConversations()).Disabled(sess.Running)
+	b.Menu(func(m *ui.Menu) {
+		open := ""
+		for _, p := range sess.Past {
+			if m.Item(p.Title()).Chosen() {
+				open = p.ID
+			}
+		}
+		if open != "" {
+			a.hub.OpenConversation(sess.PageID, open)
+		}
+	})
 }
 
 func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.Session) {

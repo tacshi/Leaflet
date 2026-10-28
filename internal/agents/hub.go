@@ -585,8 +585,12 @@ type RunOptions struct {
 	Done func(*Run)
 }
 
+// ErrRunning is a run asked for on a page an agent is already working on.
+var ErrRunning = errors.New("An agent is already working on this page. Try again when it is done.") //nolint:staticcheck // shown to people as a sentence.
+
 // Start runs an agent from any surface, in the background. Problems end
-// up in Run.Error.
+// up in Run.Error; a page runs one agent at a time, so a run asked for
+// while another works on it fails with ErrRunning.
 func (h *Hub) Start(pageID string, o RunOptions) *Run {
 	s := h.Session(pageID)
 	run := &Run{ID: doc.NewRowID(), Surface: o.Surface, Instruction: o.Instruction, Status: "running", At: time.Now()}
@@ -599,6 +603,9 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 			o.Done(run)
 		}
 		return run
+	}
+	if s.Running {
+		return fail(ErrRunning)
 	}
 	option, err := h.Resolve(firstNonNil(o.Agent, s.Selected))
 	if err != nil {

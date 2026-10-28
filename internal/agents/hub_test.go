@@ -299,3 +299,24 @@ func TestCrossPageOnlyOnTheUsersOwnPages(t *testing.T) {
 		t.Error("cross-page tools while the setting is off")
 	}
 }
+
+// A page runs one agent at a time: a run asked for while another works on
+// the page fails at once, and the first keeps the page's running state.
+func TestOneRunAtATimeOnAPage(t *testing.T) {
+	st := openStore(t)
+	h := NewHub(st, nil, nil)
+	s := h.Session("p1")
+	s.Running = true
+	reply := &Message{Pending: true}
+	var done *Run
+	run := h.Start("p1", RunOptions{Surface: "inline", Instruction: "go", Reply: reply, Done: func(r *Run) { done = r }})
+	if run.Status != "failed" || run.Error != ErrRunning.Error() || done != run {
+		t.Errorf("run %+v, done %v", run, done)
+	}
+	if reply.Pending || !reply.Error {
+		t.Errorf("reply %+v", reply)
+	}
+	if !s.Running || len(s.Runs) != 0 {
+		t.Errorf("running %v, runs %d", s.Running, len(s.Runs))
+	}
+}

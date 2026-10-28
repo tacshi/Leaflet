@@ -436,3 +436,39 @@ func TestMergeTiesAgree(t *testing.T) {
 		t.Errorf("move: here %v there %v", texts(here), texts(there))
 	}
 }
+
+func TestUndoDeleteOfSeveralBlocks(t *testing.T) {
+	list := func() *Node {
+		n := &Node{ID: "p", Type: "bulleted_list", Children: []*Node{para("a", "a"), para("b", "b"), para("c", "c")}}
+		n.SetDelta(Delta{{Text: "p"}})
+		return n
+	}
+	for _, tc := range []struct {
+		name   string
+		blocks func() []*Node
+		ids    []string
+	}{
+		{"first two", func() []*Node { return []*Node{para("a", "a"), para("b", "b"), para("c", "c")} }, []string{"a", "b"}},
+		{"reversed ids", func() []*Node { return []*Node{para("x", "x"), para("a", "a"), para("b", "b"), para("c", "c")} }, []string{"b", "a"}},
+		{"all of them", func() []*Node { return []*Node{para("a", "a"), para("b", "b")} }, []string{"b", "a"}},
+		{"first children", func() []*Node { return []*Node{list()} }, []string{"a", "b"}},
+		{"only children", func() []*Node { return []*Node{list()} }, []string{"c", "a", "b"}},
+		{"either side of a survivor", func() []*Node { return []*Node{para("a", "a"), para("b", "b"), para("c", "c")} }, []string{"c", "a"}},
+		{"parent and its child", func() []*Node { return []*Node{list(), para("z", "z")} }, []string{"b", "p"}},
+	} {
+		c := FromBlocks(tc.blocks())
+		original := c.Copy().Encode()
+		o := c.DeleteOp(tc.ids)
+		if err := c.Apply(o); err != nil {
+			t.Fatal(err)
+		}
+		for _, inv := range o.Invert() {
+			if err := c.Apply(inv); err != nil {
+				t.Errorf("%s: %v", tc.name, err)
+			}
+		}
+		if got := c.Encode(); got != original {
+			t.Errorf("%s: undo gave\n%s\nwant\n%s", tc.name, got, original)
+		}
+	}
+}

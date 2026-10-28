@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -347,6 +348,7 @@ func TestICloudDeviceWithAnotherDevicesID(t *testing.T) {
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
 	p := a.page("Plan")
 	a.sync()
+	writing, _ := a.st.Value("icloud.writing")
 	if err := a.st.RenamePage(p.ID, "Plan 2"); err != nil {
 		t.Fatal(err)
 	}
@@ -354,8 +356,10 @@ func TestICloudDeviceWithAnotherDevicesID(t *testing.T) {
 	old := a.st.DeviceID()
 	// A backup of A from before its last sync, restored: its log goes on
 	// past what the device knows.
-	if err := a.st.SetValue("icloud.seq", "1"); err != nil {
-		t.Fatal(err)
+	for k, v := range map[string]string{"icloud.seq": "1", "icloud.writing": writing} {
+		if err := a.st.SetValue(k, v); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := a.st.RenamePage(p.ID, "Plan 3"); err != nil {
 		t.Fatal(err)
@@ -706,5 +710,105 @@ func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
 	}
 	if len(a.svc.ids(movesKey)) != 0 {
 		t.Errorf("still waiting for %v", a.svc.ids(movesKey))
+	}
+}
+
+// A device that stopped between writing a batch and keeping its seq finds
+// the batch its own, not one another device wrote under its ID.
+func TestICloudStoppedAfterWritingABatch(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plan")
+	syncAll(a, b)
+	if err := a.st.RenamePage(p.ID, "Plan 2"); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	me := a.st.DeviceID()
+	seq := a.svc.intValue("icloud.seq")
+	if err := a.st.SetValue("icloud.seq", strconv.FormatInt(seq-1, 10)); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.RenamePage(p.ID, "Plan 3"); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if a.st.DeviceID() != me {
+		t.Fatal("took a new ID for a batch of its own")
+	}
+	if got := a.svc.intValue("icloud.seq"); got != seq+1 {
+		t.Errorf("seq %d, want %d", got, seq+1)
+	}
+	syncAll(b)
+	if b.title(p.ID) != "Plan 3" {
+		t.Errorf("B has %q", b.title(p.ID))
+	}
+}
+
+// A batch a crash cut short holds up no device: its writer writes it again
+// and sends everything once it runs again.
+func TestICloudRewritesItsOwnBatchCutShort(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plan")
+	syncAll(a, b)
+	if err := a.st.RenamePage(p.ID, "Plan 2"); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	me := a.st.DeviceID()
+	rel, _ := icloud.BatchPath(me, a.svc.intValue("icloud.seq"))
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(`{"format":1,"entr`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	if b.title(p.ID) != "Plan" {
+		t.Fatalf("B read a batch cut short: %q", b.title(p.ID))
+	}
+	// A runs again.
+	a.svc = New(a.st, remote.New(remote.Settings{}, a.st))
+	a.svc.ICloud = b.svc.ICloud
+	a.svc.ICloud.Temp = filepath.Join(t.TempDir(), "tmp")
+	a.svc.cloudOn.Store(true)
+	syncAll(a, b)
+	if a.st.DeviceID() != me {
+		t.Error("took a new ID")
+	}
+	if b.title(p.ID) != "Plan 2" {
+		t.Errorf("B has %q", b.title(p.ID))
+	}
+}
+
+// A batch of another device's that stays cut short, with batches after
+// it, is passed over in the end, so it does not hold up the rest.
+func TestICloudPassesOverABatchThatStaysCutShort(t *testing.T) {
+	tries, wait := damagedTries, damagedWait
+	damagedTries, damagedWait = 3, 0
+	t.Cleanup(func() { damagedTries, damagedWait = tries, wait })
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plan")
+	syncAll(a, b)
+	if err := a.st.RenamePage(p.ID, "Plan 2"); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	rel, _ := icloud.BatchPath(a.st.DeviceID(), a.svc.intValue("icloud.seq"))
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(`{"format":1,"entr`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.RenamePage(p.ID, "Plan 3"); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	for range damagedTries - 1 {
+		b.sync()
+		if b.title(p.ID) != "Plan" {
+			t.Fatalf("B passed over the batch at once: %q", b.title(p.ID))
+		}
+	}
+	b.sync()
+	if b.title(p.ID) != "Plan 3" {
+		t.Errorf("B has %q", b.title(p.ID))
 	}
 }

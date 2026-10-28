@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
+	"time"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/icloud"
@@ -37,6 +40,43 @@ func (s *Service) cloudPull(ctx context.Context, me string) error {
 	return s.refreshWaiting(ctx)
 }
 
+// A batch of another device's that does not parse, though iCloud has
+// downloaded it, holds up the device's log. It is read again each pass,
+// as iCloud may still be writing it, and the device that wrote it writes
+// it again when it was its last (checkOwnLog). Only once the device has
+// written batches after it, so will not, and it has stayed so for
+// damagedTries passes over damagedWait, is it passed over: what it held
+// is lost here, which is better than every later change.
+var (
+	damagedTries = 20
+	damagedWait  = 24 * time.Hour
+)
+
+// passDamaged records that batch seq of a device's does not parse, and
+// reports whether to pass over it now. later says whether the device has
+// written batches after it.
+func (s *Service) passDamaged(peer string, seq int64, later bool, err error) bool {
+	key := "icloud.damaged." + peer
+	v, _ := s.st.Value(key)
+	parts := strings.Split(v, "|")
+	now := cloudNow().UnixMilli()
+	first, tries := now, int64(0)
+	if len(parts) == 3 && parts[0] == strconv.FormatInt(seq, 10) {
+		first, _ = strconv.ParseInt(parts[1], 10, 64)
+		tries, _ = strconv.ParseInt(parts[2], 10, 64)
+	} else {
+		log.Printf("icloud: batch %d of %s does not parse; waiting for it: %v", seq, peer, err)
+	}
+	tries++
+	if !later || tries < int64(damagedTries) || now-first < damagedWait.Milliseconds() {
+		_ = s.st.SetValue(key, fmt.Sprintf("%d|%d|%d", seq, first, tries))
+		return false
+	}
+	log.Printf("icloud: batch %d of %s still does not parse, and batches came after it; passing over it", seq, peer)
+	_ = s.st.DeleteValue(key)
+	return true
+}
+
 // pullDevice applies a device's batches after its cursor. It stops at
 // one that is not here yet, or not downloaded, and the next pull starts
 // with it. A gap is passed over only to a snapshot after it, which holds
@@ -61,6 +101,23 @@ func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
 			continue
 		}
 		b, err := s.readBatch(peer, seq)
+		if errors.Is(err, icloud.ErrDamaged) {
+			// A snapshot after it holds it; failing that, the next batch
+			// may be passed over in the end. One after a gap waits with
+			// the gap.
+			if j := s.snapshotAfter(peer, seqs, i+1); j >= 0 {
+				i = j - 1
+				continue
+			}
+			if seq != cursor+1 || !s.passDamaged(peer, seq, i+1 < len(seqs), err) {
+				return nil
+			}
+			cursor = seq
+			if err := s.setInt(key, cursor); err != nil {
+				return err
+			}
+			continue
+		}
 		if err != nil {
 			if errors.Is(err, icloud.ErrNotReady) {
 				return nil

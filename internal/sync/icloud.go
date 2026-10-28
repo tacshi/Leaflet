@@ -25,6 +25,10 @@ import (
 //
 //	icloud.space           the space of the folder this device joined
 //	icloud.seq             the last batch this device wrote
+//	icloud.writing         the batch it writes, "<seq>|<written_at>", kept
+//	                       before it writes it
+//	icloud.damaged.<device> a batch of another device's that does not
+//	                       parse, "<seq>|<first seen, ms>|<passes>"
 //	icloud.cursor.<device> the last batch of another device applied here
 //	icloud.device_at       when device.json was last written (ms)
 
@@ -100,8 +104,17 @@ func (s *Service) cloudPass(ctx context.Context) error {
 		return err
 	}
 	me, err := s.checkDeviceID()
+	if errors.Is(err, icloud.ErrNotReady) {
+		return nil // its own last batch, once iCloud has it again
+	}
 	if err != nil {
 		return err
+	}
+	if !s.ownLogChecked {
+		if err := s.checkOwnLog(me); err != nil {
+			return err
+		}
+		s.ownLogChecked = true
 	}
 	if err := s.cloudPush(ctx, me); err != nil {
 		return err
@@ -199,6 +212,20 @@ func (s *Service) checkDeviceID() (string, error) {
 		return "", err
 	}
 	last := s.intValue("icloud.seq")
+	if !copies && len(seqs) > 0 && seqs[len(seqs)-1] == last+1 {
+		// This device may have stopped between writing a batch and
+		// keeping its seq.
+		own, err := s.wroteBatch(me, last+1)
+		if err != nil {
+			return "", err
+		}
+		if own {
+			if err := s.setInt("icloud.seq", last+1); err != nil {
+				return "", err
+			}
+			last++
+		}
+	}
 	if !copies && (len(seqs) == 0 || seqs[len(seqs)-1] <= last) {
 		return me, nil
 	}
@@ -211,6 +238,66 @@ func (s *Service) checkDeviceID() (string, error) {
 	}
 	space, _ := s.st.Value("icloud.space")
 	return next, s.requeueAll(space)
+}
+
+// wroteBatch reports whether batch seq of this device's log is the one it
+// kept, before writing it, that it was writing: the same seq and time.
+// One that does not parse is this device's too, cut short by the crash
+// that kept its seq from being saved: a batch another device wrote under
+// this one's ID would parse. One iCloud has not brought back is
+// ErrNotReady.
+func (s *Service) wroteBatch(me string, seq int64) (bool, error) {
+	v, _ := s.st.Value("icloud.writing")
+	n, at, _ := strings.Cut(v, "|")
+	if n != strconv.FormatInt(seq, 10) {
+		return false, nil
+	}
+	b, err := s.readBatch(me, seq)
+	if errors.Is(err, icloud.ErrDamaged) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return b.Device == me && b.Seq == seq && b.WrittenAt.Format(time.RFC3339Nano) == at, nil
+}
+
+// writeBatch writes a batch of this device's log, keeping what it writes
+// first (wroteBatch), and then its seq.
+func (s *Service) writeBatch(me string, b icloud.Batch) error {
+	rel, err := icloud.BatchPath(me, b.Seq)
+	if err != nil {
+		return err
+	}
+	if err := s.st.SetValue("icloud.writing", strconv.FormatInt(b.Seq, 10)+"|"+b.WrittenAt.Format(time.RFC3339Nano)); err != nil {
+		return err
+	}
+	if err := s.ICloud.WriteJSON(rel, b); err != nil {
+		return err
+	}
+	return s.setInt("icloud.seq", b.Seq)
+}
+
+// checkOwnLog reads, once a run, this device's last batch. One a crash cut
+// short before it reached the disk would hold up the other devices, which
+// read each device's batches in order, for good: it is written again
+// with nothing in it, and everything is sent again, as what it held is
+// lost.
+func (s *Service) checkOwnLog(me string) error {
+	seqs, _, err := s.ICloud.Batches(me)
+	if err != nil || len(seqs) == 0 {
+		return err
+	}
+	seq := seqs[len(seqs)-1]
+	if _, err := s.readBatch(me, seq); !errors.Is(err, icloud.ErrDamaged) {
+		return nil // fine, or not here to tell yet
+	}
+	log.Printf("icloud: batch %d of this device does not parse; writing it again and sending everything", seq)
+	if err := s.writeBatch(me, icloud.Batch{Format: icloud.Format, Device: me, Seq: seq, WrittenAt: cloudNow().UTC()}); err != nil {
+		return err
+	}
+	space, _ := s.st.Value("icloud.space")
+	return s.requeueAll(space)
 }
 
 // writeDevice writes device.json, at most once an hour unless now.
@@ -316,10 +403,7 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 		if s.ICloud.Exists(rel) {
 			return errors.New("icloud: another device wrote this device's next batch")
 		}
-		if err := s.ICloud.WriteJSON(rel, batch); err != nil {
-			return err
-		}
-		if err := s.setInt("icloud.seq", batch.Seq); err != nil {
+		if err := s.writeBatch(me, batch); err != nil {
 			return err
 		}
 	}

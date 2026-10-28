@@ -51,6 +51,9 @@ type Service struct {
 	running gosync.Mutex
 	open    map[string]bool
 	started bool
+	// ownLogChecked is set once a pass has read this device's last batch
+	// in iCloud Drive (checkOwnLog).
+	ownLogChecked bool
 }
 
 // New returns the sync service.

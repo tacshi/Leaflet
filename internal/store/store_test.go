@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -890,6 +891,55 @@ func TestADatabaseGainsTheIndexes(t *testing.T) {
 		if !strings.Contains(plan.String(), index) {
 			t.Errorf("%s\nplan:\n%s", q, plan.String())
 		}
+	}
+}
+
+// A database from before invites gains whether each member accepted, as
+// a new one has it; the members it kept had all accepted.
+func TestADatabaseGainsMembersAccepted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	before := strings.Replace(schema, ", accepted INTEGER NOT NULL DEFAULT 1", "", 1)
+	if before == schema {
+		t.Fatal("schema has no accepted column to leave out")
+	}
+	writeDB(t, path, before, `PRAGMA user_version = 2`,
+		`INSERT INTO page_members (page_id, user_id, role, display_name, email) VALUES ('p1', 'u2', 'editor', 'Sam', 'sam@example.com')`)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if v := userVersion(t, s); v != len(migrations) {
+		t.Errorf("schema %d, want %d", v, len(migrations))
+	}
+	members, err := s.Members("p1")
+	if err != nil || len(members) != 1 || !members[0].Accepted {
+		t.Fatalf("members %+v, %v", members, err)
+	}
+	if err := s.SetMembers("p1", []Member{{PageID: "p1", UserID: "u3", Role: "viewer", Email: "kim@example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	if members, _ := s.Members("p1"); len(members) != 1 || members[0].Accepted {
+		t.Errorf("an invited member reads back %+v", members)
+	}
+	columns := func(s *Store) string {
+		rows, err := s.db.Query(`SELECT name, type, "notnull", COALESCE(dflt_value, '') FROM pragma_table_info('page_members') ORDER BY cid`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var b strings.Builder
+		for rows.Next() {
+			var name, typ, def string
+			var notNull int
+			_ = rows.Scan(&name, &typ, &notNull, &def)
+			fmt.Fprintf(&b, "%s %s %d %s;", name, typ, notNull, def)
+		}
+		return b.String()
+	}
+	if got, want := columns(s), columns(open(t)); got != want {
+		t.Errorf("upgraded page_members\n%s\nnew\n%s", got, want)
 	}
 }
 

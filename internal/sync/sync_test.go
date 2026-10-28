@@ -522,6 +522,132 @@ func TestPullBringsAPageSharedWithTheUser(t *testing.T) {
 	}
 }
 
+// A page shared with the user waits for them as an invite: it is pulled
+// only once accepted, which moves the share on so the next pull brings
+// it. Declining one takes it off the list.
+func TestPullBringsASharedPageOnceAccepted(t *testing.T) {
+	st := openStore(t)
+	const (
+		root  = "00000000-0000-0000-0000-0000000000e1"
+		other = "00000000-0000-0000-0000-0000000000e3"
+		space = "00000000-0000-0000-0000-0000000000ff"
+	)
+	old := "2026-01-01T00:00:00Z"
+	var mu gosync.Mutex
+	type share struct {
+		at       string
+		accepted bool
+	}
+	shares := map[string]*share{root: {at: old}, other: {at: old}}
+	var asked []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		q := r.URL.Query()
+		out := []map[string]any{}
+		switch path := strings.TrimPrefix(r.URL.Path, "/rest/v1/"); path {
+		case "page_permissions":
+			asked = append(asked, q.Get("accepted_at"))
+			after, _ := time.Parse(time.RFC3339Nano, strings.TrimPrefix(q.Get("updated_at"), "gt."))
+			for _, id := range []string{root, other} {
+				sh := shares[id]
+				if sh == nil || !sh.accepted && q.Get("accepted_at") == "not.is.null" {
+					continue
+				}
+				if at, _ := time.Parse(time.RFC3339Nano, sh.at); at.After(after) {
+					out = append(out, map[string]any{"page_id": id, "updated_at": sh.at})
+				}
+			}
+		case "pages":
+			if q.Get("id") == "eq."+root {
+				out = append(out, map[string]any{"id": root, "space_id": space, "title": "Roadmap", "sort_key": "V", "created_at": old, "updated_at": old})
+			}
+		case "rpc/page_invites":
+			for _, id := range []string{root, other} {
+				if sh := shares[id]; sh != nil && !sh.accepted {
+					out = append(out, map[string]any{"page_id": id, "title": "Page " + id[len(id)-2:], "role": "editor",
+						"inviter_name": "Sam", "created_at": old})
+				}
+			}
+		case "rpc/accept_page_invite", "rpc/decline_page_invite":
+			var body struct {
+				PageID string `json:"p_page_id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if path == "rpc/decline_page_invite" {
+				delete(shares, body.PageID)
+			} else if sh := shares[body.PageID]; sh != nil {
+				sh.accepted, sh.at = true, time.Now().UTC().Format(time.RFC3339Nano)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	changes := 0
+	svc.OnInvites = func() { changes++ }
+	ctx := context.Background()
+	// An earlier pull went past the time the page was shared.
+	if err := st.SetValue("sync.cursor.page_permissions", "2026-06-01T00:00:00Z|"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.pullShared(ctx); err != nil {
+		t.Fatal(err)
+	}
+	svc.readInvites(ctx)
+	if len(asked) != 1 || asked[0] != "not.is.null" {
+		t.Errorf("shares asked for with accepted_at %q", asked)
+	}
+	if _, err := st.Page(root); err == nil {
+		t.Fatal("a page not accepted yet was pulled")
+	}
+	invites := svc.Invites()
+	if len(invites) != 2 || invites[0].Inviter != "Sam" || invites[0].Role != "editor" || changes != 1 {
+		t.Fatalf("invites %+v, %d changes", invites, changes)
+	}
+	// Read again, the same list is no change.
+	svc.readInvites(ctx)
+	if changes != 1 {
+		t.Errorf("%d changes for the same invites", changes)
+	}
+
+	if err := svc.AcceptInvite(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	if invites := svc.Invites(); len(invites) != 1 || invites[0].PageID != other {
+		t.Errorf("invites after accepting %+v", invites)
+	}
+	if err := svc.pullShared(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := st.Page(root); err != nil || p.Title != "Roadmap" {
+		t.Fatalf("the accepted page: %+v, %v", p, err)
+	}
+	if w := svc.waiting(); !w[root] {
+		t.Errorf("content not asked for: %v", w)
+	}
+
+	if err := svc.DeclineInvite(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	svc.readInvites(ctx)
+	if invites := svc.Invites(); len(invites) != 0 {
+		t.Errorf("invites after declining %+v", invites)
+	}
+	if _, err := st.Page(other); err == nil {
+		t.Error("a declined page was pulled")
+	}
+
+	// Signed out, there are none.
+	shares[other] = &share{at: old}
+	svc.readInvites(ctx)
+	svc.ClearInvites()
+	if invites := svc.Invites(); len(invites) != 0 {
+		t.Errorf("invites after signing out %+v", invites)
+	}
+}
+
 // A shared page pulled again keeps a rename made here that has not gone
 // up yet.
 func TestPullSharedKeepsChangesWaiting(t *testing.T) {

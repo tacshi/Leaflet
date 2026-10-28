@@ -222,6 +222,9 @@ type Member struct {
 	Role        string // owner | editor | viewer
 	DisplayName string
 	Email       string
+	// Accepted is false while the member has not accepted the page's
+	// invite.
+	Accepted bool
 }
 
 // Name is the member's display name, or email.
@@ -234,7 +237,7 @@ func (m Member) Name() string {
 
 // Members returns the people a page is shared with.
 func (s *Store) Members(pageID string) ([]Member, error) {
-	rows, err := s.db.Query(`SELECT page_id, user_id, role, display_name, email FROM page_members WHERE page_id = ? ORDER BY display_name`, pageID)
+	rows, err := s.db.Query(`SELECT page_id, user_id, role, display_name, email, accepted FROM page_members WHERE page_id = ? ORDER BY display_name`, pageID)
 	if err != nil {
 		return nil, err
 	}
@@ -242,7 +245,7 @@ func (s *Store) Members(pageID string) ([]Member, error) {
 	var out []Member
 	for rows.Next() {
 		var m Member
-		if err := rows.Scan(&m.PageID, &m.UserID, &m.Role, &m.DisplayName, &m.Email); err != nil {
+		if err := rows.Scan(&m.PageID, &m.UserID, &m.Role, &m.DisplayName, &m.Email, &m.Accepted); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -256,8 +259,8 @@ func (s *Store) SetMembers(pageID string, members []Member) error {
 		return err
 	}
 	for _, m := range members {
-		if _, err := s.db.Exec(`INSERT OR REPLACE INTO page_members (page_id, user_id, role, display_name, email) VALUES (?, ?, ?, ?, ?)`,
-			pageID, m.UserID, m.Role, m.DisplayName, m.Email); err != nil {
+		if _, err := s.db.Exec(`INSERT OR REPLACE INTO page_members (page_id, user_id, role, display_name, email, accepted) VALUES (?, ?, ?, ?, ?, ?)`,
+			pageID, m.UserID, m.Role, m.DisplayName, m.Email, m.Accepted); err != nil {
 			return err
 		}
 	}

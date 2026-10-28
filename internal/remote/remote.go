@@ -510,9 +510,10 @@ type Query struct {
 	Limit   int
 }
 
-// Eq, Gt and In build filters.
-func Eq(col, v string) string { return col + "=eq." + v }
-func Gt(col, v string) string { return col + "=gt." + v }
+// Eq, Gt, NotNull and In build filters.
+func Eq(col, v string) string   { return col + "=eq." + v }
+func Gt(col, v string) string   { return col + "=gt." + v }
+func NotNull(col string) string { return col + "=not.is.null" }
 func In(col string, vs []string) string {
 	quoted := make([]string, len(vs))
 	for i, v := range vs {

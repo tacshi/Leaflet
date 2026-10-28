@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS conflicts (
   created_at INTEGER NOT NULL, resolved_at INTEGER);
 CREATE TABLE IF NOT EXISTS page_members (
   page_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '',
-  email TEXT NOT NULL DEFAULT '', PRIMARY KEY (page_id, user_id));
+  email TEXT NOT NULL DEFAULT '', accepted INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (page_id, user_id));
 CREATE TABLE IF NOT EXISTS key_values (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS peer_contents (
   peer_id TEXT NOT NULL, page_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL,
@@ -161,6 +161,12 @@ var migrations = []func(context.Context, *sql.Conn) error{
 			{"peer_contents_page", "peer_contents", "page_id, peer_id"},
 		})
 	},
+	// 3: whether each member of a page has accepted its invite.
+	func(ctx context.Context, c *sql.Conn) error {
+		return addColumns(ctx, c, [][3]string{
+			{"page_members", "accepted", "INTEGER NOT NULL DEFAULT 1"},
+		})
+	},
 }
 
 // migrate creates the tables, or brings those an earlier version made up
@@ -212,14 +218,17 @@ func upgrade(ctx context.Context, c *sql.Conn) error {
 }
 
 // addColumns adds the columns, as {table, column, definition}, that their
-// tables lack.
+// tables lack; a table still to come gets them from schema.
 func addColumns(ctx context.Context, c *sql.Conn, cols [][3]string) error {
 	for _, col := range cols {
-		var n int
+		var tables, n int
+		if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, col[0]).Scan(&tables); err != nil {
+			return err
+		}
 		if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, col[0], col[1]).Scan(&n); err != nil {
 			return err
 		}
-		if n > 0 {
+		if tables == 0 || n > 0 {
 			continue
 		}
 		if _, err := c.ExecContext(ctx, "ALTER TABLE "+col[0]+" ADD COLUMN "+col[1]+" "+col[2]); err != nil {

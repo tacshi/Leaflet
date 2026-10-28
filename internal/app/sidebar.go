@@ -587,10 +587,18 @@ func (a *App) sidebarFooter(c *ui.Context) {
 			}
 		}
 		tools(c, func() {
-			if a.updateReady != "" {
+			switch {
+			case a.updateReady != "":
 				tip := locales.SidebarRestartToUpdate(a.updateReady)
 				if iconButton(c, "update", "rotate-cw", tip).TextColor(pal.Accent).Clicked() {
 					a.restartToUpdate()
+				}
+			case a.updateBusy != "":
+				b := ui.Button(c.Key("check-update"), "").Label(a.updateBusy).Tooltip(a.updateBusy).Padding(6).Disabled(true)
+				b.Children(func() { ui.Spinner(c).Size(16, 16) })
+			case a.updatable:
+				if iconButton(c, "check-update", "circle-fading-arrow-up", locales.SidebarCheckForUpdates()).Clicked() {
+					a.findUpdate(true)
 				}
 			}
 			settings := iconButton(c, "settings", "settings", locales.SidebarSettings())

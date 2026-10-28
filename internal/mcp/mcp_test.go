@@ -284,8 +284,57 @@ func TestFolders(t *testing.T) {
 		t.Errorf("move_page %v", got[14])
 	}
 	got = session(t, s, call(15, "move_page", map[string]any{"page_id": notes}))
+	if _, failed := result(t, got[15]); failed {
+		t.Errorf("move_page to the top level %v", got[15])
+	}
 	if p, _ := st.Page(notes); p.ParentID != "" || p.FolderID != "" || len(links(st, plan)) != 0 {
 		t.Errorf("moved to the top level: page %+v, links %v", p, links(st, plan))
+	}
+}
+
+// A page stays in its space, as the server has it, and out of templates.
+func TestMovePageStaysInItsSpace(t *testing.T) {
+	st := newStore(t)
+	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := st.CreatePage(store.NewPageOptions{Title: "Theirs", SpaceID: "someone-else"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inside, err := st.CreatePage(store.NewPageOptions{Title: "Inside", ParentID: theirs.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []store.Page{theirs, inside} {
+		if err := st.SetMembers(p.ID, []store.Member{{PageID: p.ID, UserID: st.Session().UserID, Role: "editor"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	template, err := st.CreatePage(store.NewPageOptions{Title: "PRD", Template: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	folder, err := st.CreateFolder("Work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := session(t, NewServer(st, "0.1.0"),
+		call(2, "move_page", map[string]any{"page_id": mine.ID, "parent_id": theirs.ID}),
+		call(3, "move_page", map[string]any{"page_id": inside.ID}),
+		call(4, "move_page", map[string]any{"page_id": inside.ID, "folder_id": folder.ID}),
+		call(5, "move_page", map[string]any{"page_id": mine.ID, "parent_id": template.ID}))
+	for id, want := range map[float64]string{2: "another space", 3: "top level", 4: "top level", 5: "template"} {
+		if out, failed := result(t, got[id]); !failed || !strings.Contains(out["error"].(string), want) {
+			t.Errorf("move %v: %v, want an error saying %q", id, out, want)
+		}
+	}
+	if p, _ := st.Page(mine.ID); p.ParentID != "" || p.SpaceID != mine.SpaceID {
+		t.Errorf("mine moved: %+v", p)
+	}
+	if p, _ := st.Page(inside.ID); p.ParentID != theirs.ID || p.FolderID != "" {
+		t.Errorf("inside moved: %+v", p)
 	}
 }
 

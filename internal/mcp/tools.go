@@ -206,7 +206,7 @@ func (t *pageTools) listPages() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	folders, _ := st.Folders()
+	folders, _ := t.folders()
 	ids := map[string]bool{}
 	outFolders := []map[string]any{}
 	for _, f := range folders {
@@ -231,13 +231,24 @@ func (t *pageTools) listPages() (map[string]any, error) {
 	return map[string]any{"pages": out, "folders": outFolders}, nil
 }
 
+// folders are the folders of the user's own space, the ones the sidebar
+// shows.
+func (t *pageTools) folders() ([]store.Folder, error) {
+	all, err := t.s.st.Folders()
+	if err != nil {
+		return nil, err
+	}
+	space := t.s.st.Session().SpaceID
+	return slices.DeleteFunc(all, func(f store.Folder) bool { return f.SpaceID != space }), nil
+}
+
 // folder is the folder of ID id.
 func (t *pageTools) folder(id any) (store.Folder, error) {
 	s, _ := id.(string)
 	if strings.TrimSpace(s) == "" {
 		return store.Folder{}, toolErr("folder_id is required.")
 	}
-	folders, err := t.s.st.Folders()
+	folders, err := t.folders()
 	if err != nil {
 		return store.Folder{}, err
 	}
@@ -374,7 +385,8 @@ func (t *pageTools) createPage(args map[string]any) (map[string]any, error) {
 
 // movePage moves a page as the sidebar does, and keeps the links to it in
 // step: a page it leaves loses its link, and a page it goes into links to
-// it at its end.
+// it at its end. A page stays in its space, as the server has it: it goes
+// inside a page of that space, or to the top level only of the user's own.
 func (t *pageTools) movePage(args map[string]any) (map[string]any, error) {
 	st := t.s.st
 	p, err := t.page(args, true)
@@ -388,7 +400,14 @@ func (t *pageTools) movePage(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if parent.ID != "" && st.IsDescendant(parent.ID, p.ID) {
+	switch {
+	case parent.Template:
+		return nil, toolErr("A page cannot move inside a template.")
+	case parent.ID != "" && parent.SpaceID != p.SpaceID:
+		return nil, toolErr("A page cannot move inside a page of another space.")
+	case parent.ID == "" && p.SpaceID != st.Session().SpaceID:
+		return nil, toolErr("A page shared with the user stays inside a page of its space: it cannot move to the top level or into a folder.")
+	case parent.ID != "" && st.IsDescendant(parent.ID, p.ID):
 		return nil, toolErr("A page cannot move inside itself or one of its subpages.")
 	}
 	if p.ParentID == parent.ID && (parent.ID != "" || p.FolderID == folderID) {

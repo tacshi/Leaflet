@@ -235,8 +235,6 @@
   "dialogInlineExplain": "解释一下",
   "dialogInlineShorter": "精简一下",
   "dialogInlineGrammar": "修正语法",
-  "dialogInlineList": "改成列表",
-  "dialogInlineChart": "把这些数字做成图表",
   "dialogInlinePlaceholder": "让智能体撰写、改写或解释…",
   "dialogInlineSend": "发送",
   "storeSearchRecording": "录音 · {title}",

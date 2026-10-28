@@ -1129,7 +1129,7 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 		}
 		if ip.selection && ip.text == "" {
 			ui.Row(c).Wrap().Gap(6).Children(func() {
-				chips := []string{locales.DialogInlineExplain(), locales.DialogInlineShorter(), locales.DialogInlineGrammar(), locales.DialogInlineList(), locales.DialogInlineChart()}
+				chips := []string{locales.DialogInlineExplain(), locales.DialogInlineShorter(), locales.DialogInlineGrammar()}
 				for i, s := range chips {
 					if ghost(c, "chip:"+strconv.Itoa(i), "", s).Border(1, pal.AccentSoftBorder).Clicked() {
 						ip.text = s

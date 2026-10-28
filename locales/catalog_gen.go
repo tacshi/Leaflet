@@ -3375,38 +3375,6 @@ func (msgs Messages) DialogInlineGrammar() string {
 	return Catalog.Format(msgs.locale, "dialogInlineGrammar", nil)
 }
 
-// DialogInlineList says "Turn into a list"
-// in the language the app shows.
-//
-// Inline agent prompt on a selection: a suggestion chip, sent to the agent
-// as the instruction.
-func DialogInlineList() string { return In(i18n.Locale()).DialogInlineList() }
-
-// DialogInlineList says "Turn into a list"
-// in the language of msgs.
-//
-// Inline agent prompt on a selection: a suggestion chip, sent to the agent
-// as the instruction.
-func (msgs Messages) DialogInlineList() string {
-	return Catalog.Format(msgs.locale, "dialogInlineList", nil)
-}
-
-// DialogInlineChart says "Chart these numbers"
-// in the language the app shows.
-//
-// Inline agent prompt on a selection: a suggestion chip, sent to the agent
-// as the instruction.
-func DialogInlineChart() string { return In(i18n.Locale()).DialogInlineChart() }
-
-// DialogInlineChart says "Chart these numbers"
-// in the language of msgs.
-//
-// Inline agent prompt on a selection: a suggestion chip, sent to the agent
-// as the instruction.
-func (msgs Messages) DialogInlineChart() string {
-	return Catalog.Format(msgs.locale, "dialogInlineChart", nil)
-}
-
 // DialogInlinePlaceholder says "Ask the agent to write, rewrite or explain…"
 // in the language the app shows.
 //

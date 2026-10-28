@@ -63,7 +63,7 @@ type Client struct {
 
 // NewClient returns a client for an endpoint.
 func NewClient(baseURL, apiKey string) *Client {
-	return &Client{BaseURL: NormalizeBaseURL(baseURL), APIKey: apiKey, HTTP: &http.Client{Transport: answerTransport()}}
+	return &Client{BaseURL: NormalizeBaseURL(baseURL), APIKey: apiKey, HTTP: &http.Client{Transport: answerTransport(), CheckRedirect: noRedirect}}
 }
 
 // Model requests have no overall timeout: a long answer may take most of

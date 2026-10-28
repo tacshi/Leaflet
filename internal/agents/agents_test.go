@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -277,5 +278,27 @@ func TestModelAnswerThatStops(t *testing.T) {
 	_, err := c.Chat(context.Background(), "m", []map[string]any{{"role": "user", "content": "hi"}}, nil, 0)
 	if !errors.Is(err, errIdle) || time.Since(start) > 5*time.Second {
 		t.Errorf("err %v after %v", err, time.Since(start))
+	}
+}
+
+// The API key is not sent on to wherever a redirect points.
+func TestClientRefusesRedirects(t *testing.T) {
+	var leaked atomic.Bool
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		leaked.Store(r.Header.Get("x-api-key") != "" || r.Header.Get("Authorization") != "")
+	}))
+	defer other.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer srv.Close()
+	c := NewClient(srv.URL, "secret")
+	// A Claude address sends the key as x-api-key too.
+	c.BaseURL += "/anthropic.com"
+	if _, err := c.ListModels(context.Background()); err == nil {
+		t.Error("followed a redirect")
+	}
+	if leaked.Load() {
+		t.Error("the key went on to another host")
 	}
 }

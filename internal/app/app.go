@@ -262,7 +262,6 @@ func (a *App) start() error {
 		}
 	}
 	a.rec = recording.NewController(st, a.backend)
-	a.rec.RecoverInterrupted()
 	a.hub = agents.NewHub(st, a.backend, a)
 	a.sync = syncsvc.New(st, a.backend)
 	a.online = mygo.Network.Status().Online
@@ -288,6 +287,8 @@ func (a *App) start() error {
 	a.startInvites()
 	a.rec.Blobs = a.sync
 	a.startICloud()
+	// Once it knows whether audio goes up, to the server or iCloud Drive.
+	a.rec.RecoverInterrupted()
 	st.Subscribe(func(ch store.Change) { a.update(func() { a.reload(ch) }) })
 	// Agents outside the app (leaflet mcp) write to the database too.
 	go st.WatchOthers(time.Second, nil, func() { a.update(a.outsideChange) })

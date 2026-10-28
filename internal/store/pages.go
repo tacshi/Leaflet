@@ -232,12 +232,15 @@ func (s *Store) RenamePage(id, title string) error {
 	return nil
 }
 
-// IsDescendant reports whether candidate is page of or one under it.
+// IsDescendant reports whether candidate is page of or one under it. Pages
+// in a loop of parents, which sync breaks, are under none outside it.
 func (s *Store) IsDescendant(candidate, of string) bool {
-	for cursor := candidate; cursor != ""; {
+	seen := map[string]bool{}
+	for cursor := candidate; cursor != "" && !seen[cursor]; {
 		if cursor == of {
 			return true
 		}
+		seen[cursor] = true
 		p, err := s.Page(cursor)
 		if err != nil {
 			return false
@@ -245,6 +248,37 @@ func (s *Store) IsDescendant(candidate, of string) bool {
 		cursor = p.ParentID
 	}
 	return false
+}
+
+// ParentLoop returns the pages of the loop that putting page id under
+// parentID would close, id first, or nil when it closes none.
+func (s *Store) ParentLoop(id, parentID string) []string {
+	loop := []string{id}
+	seen := map[string]bool{id: true}
+	for cursor := parentID; cursor != ""; {
+		if cursor == id {
+			return loop
+		}
+		if seen[cursor] {
+			return nil // a loop above, not through id
+		}
+		seen[cursor] = true
+		loop = append(loop, cursor)
+		p, err := s.Page(cursor)
+		if err != nil {
+			return nil
+		}
+		cursor = p.ParentID
+	}
+	return nil
+}
+
+// DetachPage puts a page at the top level here, without queueing it or
+// changing when it changed: sync uses it to break a loop of parents the
+// same way on every device.
+func (s *Store) DetachPage(id string) error {
+	_, err := s.db.Exec(`UPDATE pages SET parent_id = NULL, folder_id = NULL WHERE id = ?`, id)
+	return err
 }
 
 // ErrMoveIntoSelf is returned for a move under the page itself.

@@ -1121,9 +1121,8 @@ func (s *Service) pullMembers(ctx context.Context) {
 // waiting here keeps it, as in the other pulls.
 func (s *Service) pullTree(ctx context.Context, rootID string) error {
 	var ids []string
-	filter := remote.Eq("id", rootID)
+	rows, err := s.be.Select(ctx, "pages", remote.Query{Select: "*", Filters: []string{remote.Eq("id", rootID)}})
 	for depth := 0; depth < 64; depth++ {
-		rows, err := s.be.Select(ctx, "pages", remote.Query{Select: "*", Filters: []string{filter}})
 		if err != nil {
 			return err
 		}
@@ -1141,14 +1140,13 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 			level = append(level, id)
 		}
 		ids = append(ids, level...)
-		filter = remote.In("parent_id", level)
+		rows, err = s.selectIn(ctx, "pages", "parent_id", level)
 	}
 	if len(ids) == 0 {
 		return nil
 	}
 	s.st.Notify("pages", "")
-	inPages := []string{remote.In("page_id", ids)}
-	comments, err := s.be.Select(ctx, "comments", remote.Query{Select: "*", Filters: inPages})
+	comments, err := s.selectIn(ctx, "comments", "page_id", ids)
 	if err != nil {
 		return err
 	}
@@ -1165,7 +1163,7 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 		table string
 		apply func(map[string]any) error
 	}{{"files", s.st.PutRemoteFile}, {"recordings", s.st.PutRemoteRecording}} {
-		rows, err := s.be.Select(ctx, step.table, remote.Query{Select: "*", Filters: inPages})
+		rows, err := s.selectIn(ctx, step.table, "page_id", ids)
 		if err != nil {
 			return err
 		}
@@ -1185,6 +1183,37 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 		waiting[id] = true
 	}
 	return s.setWaiting(waiting)
+}
+
+// treeIDs is how many pages pullTree names in one request, and treeRows
+// how many rows it reads at a time: the server sends at most 1,000, and
+// leaves out the rest without saying so. Tests make them smaller.
+var treeIDs, treeRows = 100, 500
+
+// selectIn reads every row of a table whose col is one of ids: a few ids
+// at a time, and their rows a page at a time, in the order of the rows'
+// IDs.
+func (s *Service) selectIn(ctx context.Context, table, col string, ids []string) ([]map[string]any, error) {
+	var out []map[string]any
+	for chunk := range slices.Chunk(ids, treeIDs) {
+		after := ""
+		for {
+			filters := []string{remote.In(col, chunk)}
+			if after != "" {
+				filters = append(filters, remote.Gt("id", after))
+			}
+			rows, err := s.be.Select(ctx, table, remote.Query{Select: "*", Filters: filters, Order: "id", Limit: treeRows})
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, rows...)
+			if len(rows) < treeRows {
+				break
+			}
+			after = store.S(rows[len(rows)-1], "id")
+		}
+	}
+	return out, nil
 }
 
 func (s *Service) pullComments(ctx context.Context) error {

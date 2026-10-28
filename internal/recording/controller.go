@@ -111,7 +111,9 @@ func NewController(st *store.Store, be *remote.Client) *Controller {
 // "Transcribing…" for good. A recording cut off mid-way gets its WAV header
 // and duration from what reached the file. One with a transcript, the live
 // text saved at Stop, keeps it and is ready; one without is failed, which
-// offers "Transcribe again". Call it once, before any recording starts.
+// offers "Transcribe again". Either way its audio, which nothing uploaded,
+// goes up. Call it once, after Blobs is set and before any recording
+// starts.
 func (r *Controller) RecoverInterrupted() {
 	recs, err := r.st.Recordings()
 	if err != nil {
@@ -126,7 +128,7 @@ func (r *Controller) RecoverInterrupted() {
 		if cutOff && rec.LocalPath != "" {
 			duration = repairWav(rec.LocalPath)
 		}
-		if _, err := r.st.UpdateRecording(rec.ID, func(x *store.Recording) {
+		updated, err := r.st.UpdateRecording(rec.ID, func(x *store.Recording) {
 			if duration > 0 {
 				x.DurationMs = duration
 			}
@@ -135,8 +137,15 @@ func (r *Controller) RecoverInterrupted() {
 				return
 			}
 			x.Status, x.Error = "failed", locales.RecErrQuit()
-		}); err != nil {
+		})
+		if err != nil {
 			log.Printf("recording: %v", err)
+			continue
+		}
+		if updated.AudioPath == "" && updated.LocalPath != "" && r.uploads() {
+			if err := r.st.QueueUpload(updated); err != nil {
+				log.Printf("recording: %v", err)
+			}
 		}
 	}
 }

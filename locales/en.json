@@ -3736,7 +3736,7 @@
   "@welcomeImageAlt": {
     "description": "The welcome guide page, made once on first run: the picture's alternative text."
   },
-  "welcomeIntro": "Pages are living documents you write with people and agents. They are saved on this device first and sync when you are online. This page shows what a page can do; change anything, it is yours.",
+  "welcomeIntro": "Pages are living documents you write yourself, with agents to help. They are saved on this device first and sync between your devices when you are online. This page shows what a page can do; change anything, it is yours.",
   "@welcomeIntro": {
     "description": "The welcome guide page, made once on first run: the first paragraph."
   },
@@ -4232,11 +4232,11 @@
   "@welcomeOrganizingHeadings": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
-  "welcomeTogetherHeading": "Working together",
+  "welcomeTogetherHeading": "Comments, history and sync",
   "@welcomeTogetherHeading": {
-    "description": "The welcome guide page, made once on first run: a section heading."
+    "description": "The welcome guide page, made once on first run: the heading of the section on comments, page history and sync."
   },
-  "welcomeTogetherComments": "Select text and choose **Comment** to start a thread. Threads live in the panel's **Comments** tab, where you reply and **Resolve** them. Once you sign in, **Share** in the header invites people to edit or view a page and its subpages.",
+  "welcomeTogetherComments": "Select text and choose **Comment** to start a thread. Threads live in the panel's **Comments** tab, where you reply and **Resolve** them.",
   "@welcomeTogetherComments": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
@@ -4312,7 +4312,7 @@
   "@welcomeShortcutUndo": {
     "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘Z ⇧⌘Z)."
   },
-  "welcomeSubIntro": "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent, and sharing the parent shares it too.",
+  "welcomeSubIntro": "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent.",
   "@welcomeSubIntro": {
     "description": "The guide's example subpage (Weekly team sync): its first paragraph (Markdown); parent is the guide's title.",
     "placeholders": {

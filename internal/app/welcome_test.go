@@ -50,7 +50,7 @@ func TestWelcomePage(t *testing.T) {
 			t.Errorf("%d %s blocks, want %d", kinds[typ], typ, want)
 		}
 	}
-	if got := strings.Join(headings(c), ", "); got != "Try it, Writing, Blocks, Pictures, video and charts, Interactive embeds, To-dos and recordings, Agents, Organizing pages, Working together, Shortcuts" {
+	if got := strings.Join(headings(c), ", "); got != "Try it, Writing, Blocks, Pictures, video and charts, Interactive embeds, To-dos and recordings, Agents, Organizing pages, Comments, history and sync, Shortcuts" {
 		t.Errorf("sections %s", got)
 	}
 	// The picture is a file of the page.

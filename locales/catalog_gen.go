@@ -10489,13 +10489,13 @@ func (msgs Messages) WelcomeImageAlt() string {
 	return Catalog.Format(msgs.locale, "welcomeImageAlt", nil)
 }
 
-// WelcomeIntro says "Pages are living documents you write with people and agents. They are saved on this device first and sync when you ar…"
+// WelcomeIntro says "Pages are living documents you write yourself, with agents to help. They are saved on this device first and sync betw…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: the first paragraph.
 func WelcomeIntro() string { return In(i18n.Locale()).WelcomeIntro() }
 
-// WelcomeIntro says "Pages are living documents you write with people and agents. They are saved on this device first and sync when you ar…"
+// WelcomeIntro says "Pages are living documents you write yourself, with agents to help. They are saved on this device first and sync betw…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: the first paragraph.
@@ -12213,16 +12213,18 @@ func (msgs Messages) WelcomeOrganizingHeadings() string {
 	return Catalog.Format(msgs.locale, "welcomeOrganizingHeadings", nil)
 }
 
-// WelcomeTogetherHeading says "Working together"
+// WelcomeTogetherHeading says "Comments, history and sync"
 // in the language the app shows.
 //
-// The welcome guide page, made once on first run: a section heading.
+// The welcome guide page, made once on first run: the heading of the
+// section on comments, page history and sync.
 func WelcomeTogetherHeading() string { return In(i18n.Locale()).WelcomeTogetherHeading() }
 
-// WelcomeTogetherHeading says "Working together"
+// WelcomeTogetherHeading says "Comments, history and sync"
 // in the language of msgs.
 //
-// The welcome guide page, made once on first run: a section heading.
+// The welcome guide page, made once on first run: the heading of the
+// section on comments, page history and sync.
 func (msgs Messages) WelcomeTogetherHeading() string {
 	return Catalog.Format(msgs.locale, "welcomeTogetherHeading", nil)
 }
@@ -12523,14 +12525,14 @@ func (msgs Messages) WelcomeShortcutUndo() string {
 	return Catalog.Format(msgs.locale, "welcomeShortcutUndo", nil)
 }
 
-// WelcomeSubIntro says "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent, and sharing t…"
+// WelcomeSubIntro says "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent."
 // in the language the app shows.
 //
 // The guide's example subpage (Weekly team sync): its first paragraph
 // (Markdown); parent is the guide's title.
 func WelcomeSubIntro(parent string) string { return In(i18n.Locale()).WelcomeSubIntro(parent) }
 
-// WelcomeSubIntro says "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent, and sharing t…"
+// WelcomeSubIntro says "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent."
 // in the language of msgs.
 //
 // The guide's example subpage (Weekly team sync): its first paragraph

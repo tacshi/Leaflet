@@ -23,7 +23,7 @@ var welcomeImage []byte
 // createWelcome gives a new space one page that shows what pages can do,
 // with an example subpage inside it: writing, blocks, media, charts,
 // embeds, to-dos, recordings, agents, organizing and finding pages,
-// working together, sync and shortcuts. A comment shows a thread, and the
+// comments, history, sync and shortcuts. A comment shows a thread, and the
 // subpage is also kept as a template. The guide and the meeting carry a tag
 // each, so tags show from the start: in their bylines, the sidebar's Tags
 // tab and search. They are written in the language the app shows when they

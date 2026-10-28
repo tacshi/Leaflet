@@ -764,3 +764,56 @@ func TestASaveThatCannotQueueStoresNothing(t *testing.T) {
 		t.Error("content stored without its entry")
 	}
 }
+
+func TestADatabaseGainsTheIndexes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	// Schema 1, without the indexes schema 2 added.
+	var before []string
+	for _, stmt := range strings.Split(schema, ";") {
+		if !strings.Contains(stmt, "pages_parent") && !strings.Contains(stmt, "page_history_page") && !strings.Contains(stmt, "peer_contents_page") {
+			before = append(before, stmt)
+		}
+	}
+	writeDB(t, path, strings.Join(before, ";"), `PRAGMA user_version = 1`,
+		`INSERT INTO pages (id, space_id, parent_id, title, sort_key, created_at, updated_at) VALUES ('p2', 's1', 'p1', 'Sub', 'a', 1, 1)`)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if v := userVersion(t, s); v != len(migrations) {
+		t.Errorf("schema %d, want %d", v, len(migrations))
+	}
+	for _, name := range []string{"pages_parent", "page_history_page", "peer_contents_page"} {
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&n); err != nil || n != 1 {
+			t.Errorf("index %s: %d, %v", name, n, err)
+		}
+	}
+	if kids, err := s.Children("p1", "s1"); err != nil || len(kids) != 1 {
+		t.Errorf("children %+v, %v", kids, err)
+	}
+	// What the queries use.
+	for q, index := range map[string]string{
+		`SELECT id FROM pages WHERE parent_id = 'p1' AND deleted_at IS NULL ORDER BY sort_key`:      "pages_parent",
+		`SELECT created_at FROM page_history WHERE page_id = 'p1' ORDER BY created_at DESC LIMIT 1`: "page_history_page",
+		`SELECT peer_id, version, content FROM peer_contents WHERE page_id = 'p1' ORDER BY peer_id`: "peer_contents_page",
+	} {
+		var plan strings.Builder
+		rows, err := s.db.Query(`EXPLAIN QUERY PLAN ` + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			_ = rows.Scan(&id, &parent, &unused, &detail)
+			plan.WriteString(detail + "\n")
+		}
+		_ = rows.Close()
+		if !strings.Contains(plan.String(), index) {
+			t.Errorf("%s\nplan:\n%s", q, plan.String())
+		}
+	}
+}

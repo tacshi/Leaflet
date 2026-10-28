@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS pages (
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
   keep_offline INTEGER NOT NULL DEFAULT 1, is_template INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX IF NOT EXISTS pages_space ON pages (space_id, parent_id);
+CREATE INDEX IF NOT EXISTS pages_parent ON pages (parent_id, sort_key);
 CREATE TABLE IF NOT EXISTS page_contents (
   page_id TEXT PRIMARY KEY, content TEXT NOT NULL, plain_text TEXT NOT NULL DEFAULT '',
   updated_at INTEGER NOT NULL, base_content TEXT, remote_updated_at INTEGER,
@@ -61,6 +62,7 @@ CREATE TABLE IF NOT EXISTS model_providers (
 CREATE TABLE IF NOT EXISTS page_history (
   id TEXT PRIMARY KEY, page_id TEXT NOT NULL, content TEXT NOT NULL, reason TEXT NOT NULL, ai_job_id TEXT,
   label TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS page_history_page ON page_history (page_id, created_at);
 CREATE TABLE IF NOT EXISTS outbox (
   id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL, entity_id TEXT NOT NULL, op TEXT NOT NULL,
   payload TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', page_id TEXT, attempts INTEGER NOT NULL DEFAULT 0,
@@ -77,6 +79,7 @@ CREATE TABLE IF NOT EXISTS key_values (key TEXT PRIMARY KEY, value TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS peer_contents (
   peer_id TEXT NOT NULL, page_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL,
   PRIMARY KEY (peer_id, page_id));
+CREATE INDEX IF NOT EXISTS peer_contents_page ON peer_contents (page_id, peer_id);
 CREATE TABLE IF NOT EXISTS row_versions (
   tbl TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, device TEXT NOT NULL,
   PRIMARY KEY (tbl, id));
@@ -149,6 +152,15 @@ var migrations = []func(context.Context, *sql.Conn) error{
 			{"outbox", "revision", "INTEGER NOT NULL DEFAULT 0"},
 		})
 	},
+	// 2: indexes for the pages under a parent, a page's history, and what
+	// the other devices published of a page.
+	func(ctx context.Context, c *sql.Conn) error {
+		return addIndexes(ctx, c, [][3]string{
+			{"pages_parent", "pages", "parent_id, sort_key"},
+			{"page_history_page", "page_history", "page_id, created_at"},
+			{"peer_contents_page", "peer_contents", "page_id, peer_id"},
+		})
+	},
 }
 
 // migrate creates the tables, or brings those an earlier version made up
@@ -211,6 +223,24 @@ func addColumns(ctx context.Context, c *sql.Conn, cols [][3]string) error {
 			continue
 		}
 		if _, err := c.ExecContext(ctx, "ALTER TABLE "+col[0]+" ADD COLUMN "+col[1]+" "+col[2]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// addIndexes makes the indexes, as {name, table, columns}, of the tables
+// there are; a table still to come gets its own from schema.
+func addIndexes(ctx context.Context, c *sql.Conn, indexes [][3]string) error {
+	for _, ix := range indexes {
+		var n int
+		if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, ix[1]).Scan(&n); err != nil {
+			return err
+		}
+		if n == 0 {
+			continue
+		}
+		if _, err := c.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS "+ix[0]+" ON "+ix[1]+" ("+ix[2]+")"); err != nil {
 			return err
 		}
 	}

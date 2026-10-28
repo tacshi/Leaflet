@@ -691,6 +691,7 @@ func (a *App) closePage() {
 	a.sync.SetOpen(a.page.id, false)
 	a.page = nil
 	a.dropVideos()
+	dropPlayers()
 }
 
 // canEdit reports whether the user may change a page.

@@ -47,3 +47,21 @@ func TestTranscriptLinePlays(t *testing.T) {
 		t.Errorf("copied %q", got)
 	}
 }
+
+// A page's recordings stop playing and let their audio go as it closes.
+func TestClosingPageDropsPlayers(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	pl := &player{loading: true}
+	players["r1"] = pl
+	t.Cleanup(func() { delete(players, "r1") })
+	a.closePage()
+	if len(players) != 0 {
+		t.Errorf("players kept: %v", players)
+	}
+}

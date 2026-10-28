@@ -108,6 +108,17 @@ type player struct {
 
 var players = map[string]*player{}
 
+// dropPlayers stops the recordings playing and lets their audio go, as
+// the page that shows them closes.
+func dropPlayers() {
+	for id, pl := range players {
+		if pl.p != nil {
+			pl.p.Close()
+		}
+		delete(players, id)
+	}
+}
+
 func (a *App) play(rec store.Recording) {
 	pl := players[rec.ID]
 	if pl == nil {
@@ -139,6 +150,9 @@ func (a *App) play(rec store.Recording) {
 		}
 		a.update(func() {
 			pl.loading = false
+			if players[rec.ID] != pl {
+				return // the page closed meanwhile
+			}
 			if err != nil {
 				pl.err = err.Error()
 				return

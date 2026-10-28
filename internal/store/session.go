@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -89,6 +90,39 @@ func (s *Store) LoadSession(user *User) (Session, error) {
 	return sess, nil
 }
 
+// ErrNoSpace is a change that goes into a space no longer on this device:
+// the app has signed in, out or to another account meanwhile.
+var ErrNoSpace = errors.New("the space is no longer on this device: Leaflet changed accounts, try again")
+
+// ReloadSession reads the session again from what the app last stored, for
+// leaflet mcp, which shares the database with the app and may outlive the
+// account it started with. It makes nothing, and fails while the app is
+// between accounts and has no space yet.
+func (s *Store) ReloadSession() (Session, error) {
+	acct := s.CachedAccount()
+	spaceID, ok := "", false
+	if acct != "" {
+		spaceID, ok = s.Value("space." + acct)
+	}
+	if !ok {
+		if spaceID, ok = s.Value("space.local"); !ok {
+			return Session{}, ErrNoSpace
+		}
+	}
+	sess := s.Session()
+	sess.UserID, sess.SpaceID, sess.SignedIn = LocalUserID, spaceID, acct != ""
+	if acct != "" {
+		sess.UserID = acct
+	}
+	if name, ok := s.Value("profile.name"); ok {
+		sess.DisplayName = name
+	}
+	if sess != s.Session() {
+		s.SetSession(sess)
+	}
+	return sess, nil
+}
+
 // CachedAccount is the account whose pages this device keeps, or "" when
 // the pages are this device's own, made before signing in.
 func (s *Store) CachedAccount() string {
@@ -123,6 +157,13 @@ func (s *Store) ForgetAccount() error {
 	}
 	s.Notify("*", "")
 	return nil
+}
+
+// hasSpace reports whether a space is on this device.
+func hasSpace(q querier, id string) bool {
+	var n int
+	_ = q.QueryRow(`SELECT COUNT(*) FROM spaces WHERE id = ?`, id).Scan(&n)
+	return n > 0
 }
 
 func (s *Store) ensureLocalSpace(owner string) (string, error) {

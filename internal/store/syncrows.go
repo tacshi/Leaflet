@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"encoding/json"
 	"time"
 )
@@ -20,18 +21,22 @@ func (s *Store) PutSpace(id, name, owner string) error {
 	return err
 }
 
-// MoveSpace moves everything of one space into another.
+// MoveSpace moves everything of one space into another, in one
+// transaction, so nothing made meanwhile is left in the space it deletes.
 func (s *Store) MoveSpace(from, to string) error {
-	for _, q := range []string{
-		`UPDATE pages SET space_id = ? WHERE space_id = ?`,
-		`UPDATE folders SET space_id = ? WHERE space_id = ?`,
-		`UPDATE files SET space_id = ? WHERE space_id = ?`,
-	} {
-		if _, err := s.db.Exec(q, to, from); err != nil {
-			return err
+	err := s.inTx(func(tx *sql.Tx) error {
+		for _, q := range []string{
+			`UPDATE pages SET space_id = ? WHERE space_id = ?`,
+			`UPDATE folders SET space_id = ? WHERE space_id = ?`,
+			`UPDATE files SET space_id = ? WHERE space_id = ?`,
+		} {
+			if _, err := tx.Exec(q, to, from); err != nil {
+				return err
+			}
 		}
-	}
-	_, err := s.db.Exec(`DELETE FROM spaces WHERE id = ?`, from)
+		_, err := tx.Exec(`DELETE FROM spaces WHERE id = ?`, from)
+		return err
+	})
 	s.Notify("*", "")
 	return err
 }
@@ -51,8 +56,17 @@ func (s *Store) HasRowAt(table, id string, at time.Time) bool {
 	return n > 0
 }
 
-// PutRemoteFolder stores a folder from the server.
-func (s *Store) PutRemoteFolder(r map[string]any) error { return s.PutFolder(FolderFromRemote(r)) }
+// PutRemoteFolder stores a folder from the server, unless it has a change
+// waiting here, as PutRemotePage does a page.
+func (s *Store) PutRemoteFolder(r map[string]any) error {
+	f := FolderFromRemote(r)
+	return s.inTx(func(tx *sql.Tx) error {
+		if pending(tx, "folders", f.ID) {
+			return nil
+		}
+		return writeFolder(tx, f)
+	})
+}
 
 // PutRemoteComment stores a comment from the server.
 func (s *Store) PutRemoteComment(r map[string]any, authorName string) error {

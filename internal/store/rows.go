@@ -48,8 +48,10 @@ func (s *Store) Folders() ([]Folder, error) {
 }
 
 // PutFolder stores a folder row.
-func (s *Store) PutFolder(f Folder) error {
-	_, err := s.db.Exec(`INSERT INTO folders (id, space_id, parent_folder_id, name, sort_key, created_at, updated_at, deleted_at)
+func (s *Store) PutFolder(f Folder) error { return writeFolder(s.db, f) }
+
+func writeFolder(q querier, f Folder) error {
+	_, err := q.Exec(`INSERT INTO folders (id, space_id, parent_folder_id, name, sort_key, created_at, updated_at, deleted_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id,
 		parent_folder_id = excluded.parent_folder_id, name = excluded.name, sort_key = excluded.sort_key,
 		updated_at = excluded.updated_at, deleted_at = excluded.deleted_at`,
@@ -69,25 +71,37 @@ func (s *Store) CreateFolder(name string) (Folder, error) {
 	}
 	now := time.Now()
 	f := Folder{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, Name: name, SortKey: KeyBetween(last, ""), CreatedAt: now, UpdatedAt: now}
-	if err := s.PutFolder(f); err != nil {
+	err = s.inTx(func(tx *sql.Tx) error {
+		// As in CreatePage: the app may have changed accounts meanwhile.
+		if f.SpaceID != "" && !hasSpace(tx, f.SpaceID) {
+			return ErrNoSpace
+		}
+		return saveFolder(tx, f, "new folder")
+	})
+	if err != nil {
 		return Folder{}, err
 	}
-	if err := s.Queue("folders", f.ID, FolderToRemote(f), "new folder", ""); err != nil {
-		return Folder{}, err
-	}
+	s.Notify("outbox", "")
 	s.Notify("folders", "")
 	return f, nil
+}
+
+// saveFolder stores a folder changed here and queues it to go up, in the
+// caller's transaction, as savePages does pages.
+func saveFolder(tx *sql.Tx, f Folder, label string) error {
+	if err := writeFolder(tx, f); err != nil {
+		return err
+	}
+	return queue(tx, "folders", f.ID, FolderToRemote(f), label, "")
 }
 
 // RenameFolder renames a folder.
 func (s *Store) RenameFolder(f Folder, name string) error {
 	f.Name, f.UpdatedAt = name, time.Now()
-	if err := s.PutFolder(f); err != nil {
+	if err := s.inTx(func(tx *sql.Tx) error { return saveFolder(tx, f, "renamed folder") }); err != nil {
 		return err
 	}
-	if err := s.Queue("folders", f.ID, FolderToRemote(f), "renamed folder", ""); err != nil {
-		return err
-	}
+	s.Notify("outbox", "")
 	s.Notify("folders", "")
 	return nil
 }
@@ -99,22 +113,23 @@ func (s *Store) DeleteFolder(f Folder) error {
 	if err != nil {
 		return err
 	}
-	for _, p := range pages {
-		p.FolderID, p.UpdatedAt = "", now
-		if err := s.putPage(p); err != nil {
-			return err
-		}
-		if err := s.queuePage(p, "moved"); err != nil {
-			return err
-		}
-	}
 	f.DeletedAt, f.UpdatedAt = now, now
-	if err := s.PutFolder(f); err != nil {
+	err = s.inTx(func(tx *sql.Tx) error {
+		for _, p := range pages {
+			p.FolderID, p.UpdatedAt = "", now
+			if err := writePage(tx, p); err != nil {
+				return err
+			}
+			if err := queue(tx, "pages", p.ID, PageToRemote(p), "moved", p.ID); err != nil {
+				return err
+			}
+		}
+		return saveFolder(tx, f, "deleted folder")
+	})
+	if err != nil {
 		return err
 	}
-	if err := s.Queue("folders", f.ID, FolderToRemote(f), "deleted folder", ""); err != nil {
-		return err
-	}
+	s.Notify("outbox", "")
 	s.Notify("folders", "")
 	s.Notify("pages", "")
 	return nil

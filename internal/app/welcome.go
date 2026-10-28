@@ -24,8 +24,10 @@ var welcomeImage []byte
 // with an example subpage inside it: writing, blocks, media, charts,
 // embeds, to-dos, recordings, agents, organizing and finding pages,
 // working together, sync and shortcuts. A comment shows a thread, and the
-// subpage is also kept as a template. They are written in the language the
-// app shows when they are made.
+// subpage is also kept as a template. The guide and the meeting carry a tag
+// each, so tags show from the start: in their bylines, the sidebar's Tags
+// tab and search. They are written in the language the app shows when they
+// are made.
 func (a *App) createWelcome() error {
 	if _, ok := a.st.Value("welcome.created"); ok {
 		return nil
@@ -36,7 +38,7 @@ func (a *App) createWelcome() error {
 	m := locales.In(i18n.Locale())
 	// The picture is a file of the page and the subpage a page inside it,
 	// so the page comes first and its blocks after.
-	p, err := a.st.CreatePage(store.NewPageOptions{Title: m.WelcomeTitle()})
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: m.WelcomeTitle(), Tags: []string{m.WelcomeTagGuide()}})
 	if err != nil {
 		return err
 	}
@@ -44,7 +46,8 @@ func (a *App) createWelcome() error {
 	if err != nil {
 		return err
 	}
-	sub, err := a.st.CreatePage(store.NewPageOptions{ParentID: p.ID, Title: m.WelcomeSubTitle(), Content: welcomeSubpage(m)})
+	meetings := []string{m.WelcomeTagMeetings()}
+	sub, err := a.st.CreatePage(store.NewPageOptions{ParentID: p.ID, Title: m.WelcomeSubTitle(), Tags: meetings, Content: welcomeSubpage(m)})
 	if err != nil {
 		return err
 	}
@@ -58,7 +61,7 @@ func (a *App) createWelcome() error {
 	if _, err := a.st.AddComment(p.ID, commentsID, m.WelcomeComment(), "", "", "agent", "Leaflet"); err != nil {
 		return err
 	}
-	if _, err := a.st.CreatePage(store.NewPageOptions{Title: m.WelcomeSubTitle(), Template: true, Content: doc.FromBlocks(welcomeMeeting(m))}); err != nil {
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: m.WelcomeSubTitle(), Template: true, Tags: meetings, Content: doc.FromBlocks(welcomeMeeting(m))}); err != nil {
 		return err
 	}
 	if err := a.st.SetValue("welcome.page", p.ID); err != nil {
@@ -113,6 +116,7 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 		m.WelcomeTrySelect(),
 		m.WelcomeTryRecord(),
 		m.WelcomeTryProvider(),
+		m.WelcomeTryTag(),
 	} {
 		text("todo_list", s)
 	}
@@ -209,6 +213,7 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 		bad = err
 	}
 	text("paragraph", m.WelcomeOrganizingFolders())
+	text("paragraph", m.WelcomeOrganizingTags(m.WelcomeTagGuide(), m.WelcomeTagMeetings()))
 	text("paragraph", m.WelcomeOrganizingHeadings())
 
 	heading(m.WelcomeTogetherHeading())

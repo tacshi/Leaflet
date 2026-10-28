@@ -10595,6 +10595,56 @@ func (msgs Messages) WelcomeTryProvider() string {
 	return Catalog.Format(msgs.locale, "welcomeTryProvider", nil)
 }
 
+// WelcomeTagGuide says "guide"
+// in the language the app shows.
+//
+// The welcome guide page, made once on first run: the tag of the guide
+// itself, which the sidebar's Tags tab and search show. One short word, as
+// tags are.
+func WelcomeTagGuide() string { return In(i18n.Locale()).WelcomeTagGuide() }
+
+// WelcomeTagGuide says "guide"
+// in the language of msgs.
+//
+// The welcome guide page, made once on first run: the tag of the guide
+// itself, which the sidebar's Tags tab and search show. One short word, as
+// tags are.
+func (msgs Messages) WelcomeTagGuide() string {
+	return Catalog.Format(msgs.locale, "welcomeTagGuide", nil)
+}
+
+// WelcomeTagMeetings says "meetings"
+// in the language the app shows.
+//
+// The welcome guide page, made once on first run: the tag of the example
+// meeting subpage and its template. One short word, as tags are.
+func WelcomeTagMeetings() string { return In(i18n.Locale()).WelcomeTagMeetings() }
+
+// WelcomeTagMeetings says "meetings"
+// in the language of msgs.
+//
+// The welcome guide page, made once on first run: the tag of the example
+// meeting subpage and its template. One short word, as tags are.
+func (msgs Messages) WelcomeTagMeetings() string {
+	return Catalog.Format(msgs.locale, "welcomeTagMeetings", nil)
+}
+
+// WelcomeTryTag says "Hover the line under this page's title and click the tag button to add a tag"
+// in the language the app shows.
+//
+// The welcome guide page, made once on first run: a to-do of Try it: adding
+// a tag from the byline.
+func WelcomeTryTag() string { return In(i18n.Locale()).WelcomeTryTag() }
+
+// WelcomeTryTag says "Hover the line under this page's title and click the tag button to add a tag"
+// in the language of msgs.
+//
+// The welcome guide page, made once on first run: a to-do of Try it: adding
+// a tag from the byline.
+func (msgs Messages) WelcomeTryTag() string {
+	return Catalog.Format(msgs.locale, "welcomeTryTag", nil)
+}
+
 // WelcomeWritingHeading says "Writing"
 // in the language the app shows.
 //
@@ -12117,18 +12167,36 @@ func (msgs Messages) WelcomeOrganizingLink(page string) string {
 	return Catalog.Format(msgs.locale, "welcomeOrganizingLink", map[string]any{"page": page})
 }
 
-// WelcomeOrganizingFolders says "Folders, from the folder button at the top of the sidebar, group pages, and tags, added from a page's byline, file it…"
+// WelcomeOrganizingFolders says "Folders, from the folder button at the top of the sidebar, group pages. A page's **…** menu moves it, duplicates it…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func WelcomeOrganizingFolders() string { return In(i18n.Locale()).WelcomeOrganizingFolders() }
 
-// WelcomeOrganizingFolders says "Folders, from the folder button at the top of the sidebar, group pages, and tags, added from a page's byline, file it…"
+// WelcomeOrganizingFolders says "Folders, from the folder button at the top of the sidebar, group pages. A page's **…** menu moves it, duplicates it…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func (msgs Messages) WelcomeOrganizingFolders() string {
 	return Catalog.Format(msgs.locale, "welcomeOrganizingFolders", nil)
+}
+
+// WelcomeOrganizingTags says "Tags file a page under several names at once, as **{guide}** under this page's title. Add one from the tag button bes…"
+// in the language the app shows.
+//
+// The welcome guide page, made once on first run: how tags work, naming the
+// guide's and the meeting's tags (Markdown).
+func WelcomeOrganizingTags(guide string, meetings string) string {
+	return In(i18n.Locale()).WelcomeOrganizingTags(guide, meetings)
+}
+
+// WelcomeOrganizingTags says "Tags file a page under several names at once, as **{guide}** under this page's title. Add one from the tag button bes…"
+// in the language of msgs.
+//
+// The welcome guide page, made once on first run: how tags work, naming the
+// guide's and the meeting's tags (Markdown).
+func (msgs Messages) WelcomeOrganizingTags(guide string, meetings string) string {
+	return Catalog.Format(msgs.locale, "welcomeOrganizingTags", map[string]any{"guide": guide, "meetings": meetings})
 }
 
 // WelcomeOrganizingHeadings says "Headings fold their section from the arrow beside them, and the panel's **Outline** tab lists them. Right-click a blo…"
@@ -12263,14 +12331,14 @@ func (msgs Messages) WelcomeShortcutsDoes() string {
 	return Catalog.Format(msgs.locale, "welcomeShortcutsDoes", nil)
 }
 
-// WelcomeShortcutSearch says "Search pages, templates, recordings and comments"
+// WelcomeShortcutSearch says "Search pages, templates, recordings and comments; #tag keeps to a tag"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a row of the shortcuts
 // table (⌘P).
 func WelcomeShortcutSearch() string { return In(i18n.Locale()).WelcomeShortcutSearch() }
 
-// WelcomeShortcutSearch says "Search pages, templates, recordings and comments"
+// WelcomeShortcutSearch says "Search pages, templates, recordings and comments; #tag keeps to a tag"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a row of the shortcuts

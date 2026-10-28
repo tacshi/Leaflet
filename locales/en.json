@@ -3764,6 +3764,18 @@
   "@welcomeTryProvider": {
     "description": "The welcome guide page, made once on first run: a to-do of Try it (Markdown)."
   },
+  "welcomeTagGuide": "guide",
+  "@welcomeTagGuide": {
+    "description": "The welcome guide page, made once on first run: the tag of the guide itself, which the sidebar's Tags tab and search show. One short word, as tags are."
+  },
+  "welcomeTagMeetings": "meetings",
+  "@welcomeTagMeetings": {
+    "description": "The welcome guide page, made once on first run: the tag of the example meeting subpage and its template. One short word, as tags are."
+  },
+  "welcomeTryTag": "Hover the line under this page's title and click the tag button to add a tag",
+  "@welcomeTryTag": {
+    "description": "The welcome guide page, made once on first run: a to-do of Try it: adding a tag from the byline."
+  },
   "welcomeWritingHeading": "Writing",
   "@welcomeWritingHeading": {
     "description": "The welcome guide page, made once on first run: a section heading."
@@ -4198,9 +4210,23 @@
       }
     }
   },
-  "welcomeOrganizingFolders": "Folders, from the folder button at the top of the sidebar, group pages, and tags, added from a page's byline, file it under several names at once: the sidebar's **Tags** tab lists them, and search takes #tag. A page's **…** menu moves it, duplicates it with its subpages, exports it as Markdown, or saves it as a template, which a blank page then offers to start from.",
+  "welcomeOrganizingFolders": "Folders, from the folder button at the top of the sidebar, group pages. A page's **…** menu moves it, duplicates it with its subpages, exports it as Markdown, or saves it as a template, which a blank page then offers to start from.",
   "@welcomeOrganizingFolders": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeOrganizingTags": "Tags file a page under several names at once, as **{guide}** under this page's title. Add one from the tag button beside the byline; the sidebar's **Tags** tab groups pages by tag, and a click on a tag opens it there. In search, **#{meetings}** keeps to the pages tagged {meetings}.",
+  "@welcomeOrganizingTags": {
+    "description": "The welcome guide page, made once on first run: how tags work, naming the guide's and the meeting's tags (Markdown).",
+    "placeholders": {
+      "guide": {
+        "type": "String",
+        "example": "guide"
+      },
+      "meetings": {
+        "type": "String",
+        "example": "meetings"
+      }
+    }
   },
   "welcomeOrganizingHeadings": "Headings fold their section from the arrow beside them, and the panel's **Outline** tab lists them. Right-click a block to **Copy link to block**.",
   "@welcomeOrganizingHeadings": {
@@ -4238,7 +4264,7 @@
   "@welcomeShortcutsDoes": {
     "description": "The welcome guide page, made once on first run: a column heading of the shortcuts table: what the keys do."
   },
-  "welcomeShortcutSearch": "Search pages, templates, recordings and comments",
+  "welcomeShortcutSearch": "Search pages, templates, recordings and comments; #tag keeps to a tag",
   "@welcomeShortcutSearch": {
     "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘P)."
   },

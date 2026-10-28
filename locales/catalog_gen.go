@@ -7757,6 +7757,24 @@ func (msgs Messages) SettingsExported(name string) string {
 	return Catalog.Format(msgs.locale, "settingsExported", map[string]any{"name": name})
 }
 
+// SettingsExportedMissing says "{count, plural, one {Exported {name}, without # page that could not be downloaded} other {Exported {name}, without # …"
+// in the language the app shows.
+//
+// A notification after exporting, when some pages kept only on the server
+// could not be downloaded, with the file's name.
+func SettingsExportedMissing(count int, name string) string {
+	return In(i18n.Locale()).SettingsExportedMissing(count, name)
+}
+
+// SettingsExportedMissing says "{count, plural, one {Exported {name}, without # page that could not be downloaded} other {Exported {name}, without # …"
+// in the language of msgs.
+//
+// A notification after exporting, when some pages kept only on the server
+// could not be downloaded, with the file's name.
+func (msgs Messages) SettingsExportedMissing(count int, name string) string {
+	return Catalog.Format(msgs.locale, "settingsExportedMissing", map[string]any{"count": count, "name": name})
+}
+
 // SettingsDeleteAccount says "Delete account"
 // in the language the app shows.
 //

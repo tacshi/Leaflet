@@ -302,11 +302,12 @@ func (t *pageTools) linkSubpage(parent store.Page, id string) error {
 		if err := c.Insert(doc.Position{At: "end"}, &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": id}}); err != nil {
 			return err
 		}
-		if now, err := st.ContentRow(parent.ID); err != nil || now.Content != row.Content {
+		if _, _, err := st.SaveContentOver(parent.ID, row.Content, c); errors.Is(err, store.ErrContentChanged) {
 			continue
+		} else if err != nil {
+			return err
 		}
-		_, _, err = st.SaveContent(parent.ID, c)
-		return err
+		return nil
 	}
 	return toolErr("The parent page kept changing while saving.")
 }

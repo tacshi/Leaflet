@@ -2774,6 +2774,20 @@
       }
     }
   },
+  "settingsExportedMissing": "{count, plural, one {Exported {name}, without # page that could not be downloaded} other {Exported {name}, without # pages that could not be downloaded}}",
+  "@settingsExportedMissing": {
+    "description": "A notification after exporting, when some pages kept only on the server could not be downloaded, with the file's name.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "3"
+      },
+      "name": {
+        "type": "String",
+        "example": "Leaflet pages.zip"
+      }
+    }
+  },
   "settingsDeleteAccount": "Delete account",
   "@settingsDeleteAccount": {
     "description": "Settings › Account: the row and button deleting the account."

@@ -68,7 +68,9 @@ func TestAgentCommentSaysWhoAsked(t *testing.T) {
 	a := templatesApp(t)
 	a.session.UserID = "me"
 	a.page = &pageState{members: []store.Member{{UserID: "ann", DisplayName: "Ann"}}}
-	agent := func(by string) store.Comment { return store.Comment{AuthorKind: "agent", AuthorName: "Claude", AuthorID: by} }
+	agent := func(by string) store.Comment {
+		return store.Comment{AuthorKind: "agent", AuthorName: "Claude", AuthorID: by}
+	}
 	for _, tc := range []struct {
 		c    store.Comment
 		want string

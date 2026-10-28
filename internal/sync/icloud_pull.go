@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"time"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/icloud"
@@ -269,12 +268,23 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 	if hasBase {
 		base = doc.MustDecode(known.Content)
 	}
+	// The merge is queued to go to the other devices when it differs
+	// from the version merged and from what this device published, unless
+	// a change of this device's waits already.
+	own, _ := s.st.PeerContent(me, pageID)
+	label := func(merged string) string {
+		if merged != string(file.Content) && merged != own.Content && !s.st.HasPending("page_content", pageID) {
+			return "merged from another device"
+		}
+		return ""
+	}
 	// The user or an agent may save while this merges: store the merge
-	// only over the content it merged, and merge again otherwise.
+	// only over the content it merged, and merge again otherwise. It is
+	// stored and queued together, so it cannot be left here only.
 	var next *doc.Content
 	var conflicts []doc.Conflict
 	var before string
-	stored := false
+	stored, queued := false, false
 	for range 3 {
 		local, localErr := s.st.ContentRow(pageID)
 		next, conflicts, before = theirs, nil, ""
@@ -287,14 +297,15 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 			}
 		}
 		beforeStore(pageID)
-		err := s.st.PutSyncedContentOver(pageID, before, next, "", time.Time{}, 0)
+		l := label(next.Encode())
+		err := s.st.PutMergedContentOver(pageID, before, next, l)
 		if errors.Is(err, store.ErrContentChanged) {
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		stored = true
+		stored, queued = true, l != ""
 		break
 	}
 	if !stored {
@@ -312,11 +323,15 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 	if merged != before && s.OnPageContent != nil {
 		s.OnPageContent(pageID)
 	}
-	own, _ := s.st.PeerContent(me, pageID)
-	if merged != string(file.Content) && merged != own.Content && !s.st.HasPending("page_content", pageID) {
-		if err := s.st.Queue("page_content", pageID, map[string]any{"page_id": pageID}, "merged from another device", pageID); err != nil {
+	// Content this device had as merged, so stored nothing, is queued
+	// here.
+	if l := label(merged); !queued && l != "" {
+		if err := s.st.Queue("page_content", pageID, map[string]any{"page_id": pageID}, l, pageID); err != nil {
 			return err
 		}
+		queued = true
+	}
+	if queued {
 		s.Kick()
 	}
 	return nil

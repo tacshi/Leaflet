@@ -57,8 +57,8 @@ var blockSchema = map[string]any{
 		"embed": map[string]any{"type": "object", "description": "A self-contained interactive HTML widget. It runs sandboxed with no network or storage access.",
 			"properties": map[string]any{"title": map[string]any{"type": "string"}, "html": map[string]any{"type": "string"}, "height": map[string]any{"type": "integer"}}},
 		"image": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}, "alt": map[string]any{"type": "string"}}},
-		"video": map[string]any{"type": "object", "description": "A YouTube or Vimeo video that plays in the page.",
-			"properties": map[string]any{"url": map[string]any{"type": "string", "description": "The video's YouTube or Vimeo link."}, "title": map[string]any{"type": "string"}}},
+		"video": map[string]any{"type": "object", "description": "A YouTube or Vimeo video, or a video file, that plays in the page.",
+			"properties": map[string]any{"url": map[string]any{"type": "string", "description": "The video's YouTube or Vimeo link, or a link to the video file (.mp4, .webm, .mov)."}, "title": map[string]any{"type": "string"}}},
 	},
 	"required": []string{"type"},
 }

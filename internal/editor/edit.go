@@ -671,6 +671,57 @@ func (e *Editor) InsertBlocks(nodes ...*doc.Node) {
 	e.changed()
 }
 
+// LinkToMedia shows the video or picture the link at p points to as its
+// block: in place of the link's line when nothing else on it is words, as
+// a clipping's "🎬 Video" line, and after the line otherwise.
+func (e *Editor) LinkToMedia(p Pos) {
+	n, href := e.node(p.ID), e.linkAtPos(p)
+	if n == nil || href == "" || e.ReadOnly {
+		return
+	}
+	var m *doc.Node
+	if _, ok := doc.ParseVideoURL(href); ok {
+		m, _ = doc.VideoNode(href, "")
+	} else if doc.ImageLink(href) {
+		m, _ = doc.ImageNode(href)
+	}
+	if m == nil {
+		return
+	}
+	// The link's text is its runs around p.
+	from, to, at := 0, 0, 0
+	for _, r := range n.Delta() {
+		l := utf8.RuneCountInString(r.Text)
+		if r.Attrs.Href != href {
+			if to > p.Off {
+				break
+			}
+			from = at + l
+		}
+		at += l
+		if r.Attrs.Href == href {
+			to = at
+		}
+	}
+	text := []rune(n.Delta().Plain())
+	if label := strings.TrimSpace(string(text[from:to])); m.Type == "image" && label != href {
+		m.Set("alt", label)
+	}
+	rest := string(text[:from]) + string(text[to:])
+	e.pushUndo(false)
+	_ = e.Content.Insert(doc.Position{After: n.ID}, m)
+	if !strings.ContainsFunc(rest, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) && len(n.Children) == 0 {
+		e.Content.Remove(n.ID)
+	}
+	if us := e.units(); e.index(m.ID)+1 >= len(us) {
+		// Leave somewhere to type after it at the end of the page.
+		_ = e.Content.Insert(doc.Position{After: m.ID}, newText("paragraph", nil))
+	}
+	e.layouts = map[string]*blockLayout{}
+	e.Select(Pos{m.ID, 0}, Pos{m.ID, 0})
+	e.changed()
+}
+
 // Format toggles an inline format over the selection, or for typing at a
 // collapsed caret.
 func (e *Editor) Format(has func(doc.Attrs) bool, set func(*doc.Attrs, bool)) {

@@ -153,7 +153,7 @@ func slashItems() []slashItem {
 		{editor.MenuItem{Key: "embed", Label: locales.HostSlashEmbed(), Hint: locales.HostSlashEmbedHint(), Icon: "layout-grid", Group: locales.HostGroupBlocks()}, "embed html widget"},
 		{editor.MenuItem{Key: "subpage", Label: locales.HostSlashSubpage(), Hint: locales.HostSlashSubpageHint(), Icon: "file-plus", Group: locales.HostGroupBlocks()}, "page subpage child"},
 		{editor.MenuItem{Key: "image", Label: locales.HostSlashImage(), Hint: locales.HostSlashImageHint(), Icon: "image", Group: locales.HostGroupBlocks()}, "image picture photo"},
-		{editor.MenuItem{Key: "video", Label: locales.HostSlashVideo(), Hint: locales.HostSlashVideoHint(), Icon: "play", Group: locales.HostGroupBlocks()}, "video youtube vimeo movie film"},
+		{editor.MenuItem{Key: "video", Label: locales.HostSlashVideo(), Hint: locales.HostSlashVideoHint(), Icon: "play", Group: locales.HostGroupBlocks()}, "video youtube vimeo movie film mp4"},
 		{editor.MenuItem{Key: "link_preview", Label: locales.HostSlashLinkCard(), Hint: locales.HostSlashLinkCardHint(), Icon: "globe", Group: locales.HostGroupBlocks()}, "link card bookmark preview url web"},
 		{editor.MenuItem{Key: "file", Label: locales.HostSlashFile(), Hint: locales.HostSlashFileHint(), Icon: "paperclip", Group: locales.HostGroupBlocks()}, "file attach attachment upload document pdf"},
 		{editor.MenuItem{Key: "recording", Label: locales.CommonRecording(), Hint: locales.HostSlashRecordingHint(), Icon: "mic", Group: locales.HostGroupBlocks()}, "record audio voice transcript"},

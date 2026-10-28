@@ -63,7 +63,7 @@ metadata:
 | `table` | `colsLen`, `rowsLen`, … | children are `table/cell` nodes with `colPosition`, `rowPosition`, each holding one `paragraph` |
 | `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client |
 | `embed` | `title`, `html`, `height` | sandboxed HTML, no access to app storage or tokens |
-| `video` | `url`, `title` | a YouTube or Vimeo link, played in the page |
+| `video` | `url`, `title` | a YouTube or Vimeo link, or a link to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page |
 | `link_preview` | `url`, `title`, `description`, `image`, `site` | a card for a web page; the client fills in what the page says about itself |
 | `file` | `file_id`, `url`, `name`, `size`, `mime` | a file kept with the page, as a card |
 | `math_equation` | `formula` | TeX, drawn in display style by KaTeX |

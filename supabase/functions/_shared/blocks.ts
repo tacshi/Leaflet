@@ -432,7 +432,10 @@ export function calloutTone(tone: unknown): string {
   return CALLOUT_TONES.has(t) ? t : "info";
 }
 
-/** Whether a link is to a YouTube or Vimeo video (doc.ParseVideoURL). */
+/** Video files a video block plays, by extension (doc.VideoExts). */
+const VIDEO_EXTS = new Set([".mp4", ".m4v", ".mov", ".webm", ".ogv"]);
+
+/** Whether a link is to a YouTube or Vimeo video, or a video file (doc.ParseVideoURL). */
 export function isVideoURL(link: string): boolean {
   let u: URL;
   try {
@@ -455,9 +458,10 @@ export function isVideoURL(link: string): boolean {
       return parts.length === 2 && ["embed", "shorts", "live", "v"].includes(parts[0]) && youtubeId.test(parts[1]);
     case "vimeo.com":
     case "player.vimeo.com":
-      return parts.some((p) => /^[0-9]+$/.test(p));
+      if (parts.some((p) => /^[0-9]+$/.test(p))) return true;
   }
-  return false;
+  const ext = u.pathname.match(/\.[^./]*$/)?.[0].toLowerCase() ?? "";
+  return VIDEO_EXTS.has(ext);
 }
 
 /** A code block's language as the ID it keeps (doc.CodeLanguageID). */
@@ -562,7 +566,7 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
       break;
     case "video": {
       const url = String(spec.video?.url ?? "").trim();
-      if (!isVideoURL(url)) throw new SpecError("A video block needs `video.url`, a YouTube or Vimeo link");
+      if (!isVideoURL(url)) throw new SpecError("A video block needs `video.url`, a YouTube or Vimeo link or a link to a video file");
       node = { id, type, data: { url, title: String(spec.video?.title ?? "").trim() } };
       break;
     }

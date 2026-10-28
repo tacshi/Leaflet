@@ -748,3 +748,37 @@ func TestEditMedia(t *testing.T) {
 		t.Error("the image does not say it failed")
 	}
 }
+
+// A link to a video or picture shows as its block: in place of a line
+// that is only the link, after a line with words of its own.
+func TestLinkToMedia(t *testing.T) {
+	e, _, _ := setup(t)
+	clip := &doc.Node{ID: "clip", Type: "paragraph"}
+	clip.SetDelta(doc.Delta{{Text: "🎬 "}, {Text: "视频", Attrs: doc.Attrs{Href: "https://example.com/a.mp4"}}})
+	line := &doc.Node{ID: "line", Type: "paragraph"}
+	line.SetDelta(doc.Delta{{Text: "See "}, {Text: "the ", Attrs: doc.Attrs{Href: "https://example.com/b.png"}}, {Text: "chart", Attrs: doc.Attrs{Href: "https://example.com/b.png", Bold: true}}, {Text: " here"}})
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{clip, line} })
+
+	e.LinkToMedia(Pos{"line", 9})
+	top := e.Content.Children
+	if len(top) != 4 || top[1].ID != "line" || top[2].Type != "image" || top[2].Str("url") != "https://example.com/b.png" || top[2].Str("alt") != "the chart" || top[3].Type != "paragraph" {
+		t.Fatalf("image: %v", top)
+	}
+	e.LinkToMedia(Pos{"clip", 3})
+	top = e.Content.Children
+	if top[0].Type != "video" || top[0].Str("url") != "https://example.com/a.mp4" || top[1].ID != "line" || e.Content.Find("clip") != nil {
+		t.Fatalf("video: %v", top)
+	}
+	e.Undo()
+	if e.Content.Find("clip") == nil || e.Content.Children[0].Type == "video" {
+		t.Errorf("undo: %v", e.Content.Children)
+	}
+	// A link to a page is not media.
+	e.LinkToMedia(Pos{"line", 0})
+	if len(e.Content.Children) != 4 {
+		t.Errorf("not media: %v", e.Content.Children)
+	}
+	if mediaLink("https://example.com/") != "" || mediaLink("https://youtu.be/dQw4w9WgXcQ") == "" || mediaLink("https://example.com/b.png") == "" {
+		t.Error("menu items")
+	}
+}

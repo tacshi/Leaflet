@@ -15,7 +15,7 @@ import (
 )
 
 // Video blocks show the video's picture until play is clicked, and then
-// its site's player in a web view of its own.
+// its site's player, or a player of the file, in a web view of its own.
 
 // videoOrigin is the origin of the page a video's player is framed in.
 // YouTube's player wants the page that frames it named in the Referer, as
@@ -23,16 +23,20 @@ import (
 // gets none, and refuses to play.
 const videoOrigin = "https://app.capyvibe.leaflet/"
 
-// videoCSP lets a video's page frame only the two players, and run nothing
-// of its own.
-const videoCSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com"
+// videoCSP lets a video's page frame only the two players, or play only
+// web video files, and run nothing of its own.
+const videoCSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; media-src https: http:"
 
-// videoPage frames a video's player, to fill the web view.
+// videoPage frames a video's player, or plays the file, to fill the web
+// view.
 func videoPage(v doc.Video) string {
+	player := `<iframe src="` + html.EscapeString(v.PlayerURL()) + `" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`
+	if v.Provider == "file" {
+		player = `<video src="` + html.EscapeString(v.PlayerURL()) + `" controls autoplay playsinline></video>`
+	}
 	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="` + videoCSP + `">` +
-		`<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe{border:0;width:100%;height:100%;display:block}</style></head><body>` +
-		`<iframe src="` + html.EscapeString(v.PlayerURL()) + `" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>` +
-		`</body></html>`
+		`<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe,video{border:0;width:100%;height:100%;display:block}</style></head><body>` +
+		player + `</body></html>`
 }
 
 // videoInfo is what a video's site tells about it: its title and picture.
@@ -42,8 +46,12 @@ type videoInfo struct{ title, thumbnail string }
 func videoKey(v doc.Video) string { return v.Provider + ":" + v.ID }
 
 // videoInfoOf returns what the video's site said about it, asking it the
-// first time. Until it answers, or when it cannot, the info is empty.
+// first time. Until it answers, or when it cannot, the info is empty; a
+// file, with no site to ask, goes by its name.
 func (a *App) videoInfoOf(v doc.Video) videoInfo {
+	if v.Provider == "file" {
+		return videoInfo{title: v.FileName()}
+	}
 	key := videoKey(v)
 	if info, ok := a.videoInfo[key]; ok {
 		return info

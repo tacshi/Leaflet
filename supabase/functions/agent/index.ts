@@ -25,14 +25,34 @@ import {
 } from "../_shared/blocks.ts";
 import { applyOps, type Op, PageEditSession, type PageSummary, toolDefinitions, ToolError } from "../_shared/tools.ts";
 import { type Surface, systemPrompt, userMessage } from "../_shared/prompt.ts";
+import { isTimeout } from "../_shared/net.ts";
 
 const MAX_ROUNDS = 12;
 const INLINE_PAGE_LIMIT = 40_000;
 const TOOL_RESULT_LIMIT = 60_000;
 const HEARTBEAT_MS = 15_000;
 
+function envMs(name: string, fallback: number, min: number, max: number): number {
+  const n = Number(Deno.env.get(name));
+  return Number.isFinite(n) && n > 0 ? Math.min(max, Math.max(min, n)) : fallback;
+}
+
+// An Edge Function is stopped at its wall-clock limit (150 s on the free
+// plan, 400 s on paid plans), so a run stops calling the model at its
+// deadline, keeping time to save what it did. On a paid plan, raise
+// AGENT_DEADLINE_MS (at most 380 s).
+const DEADLINE_MS = envMs("AGENT_DEADLINE_MS", 120_000, 10_000, 380_000);
+// One model call; a call never runs past the deadline either.
+const CALL_TIMEOUT_MS = envMs("AGENT_CALL_TIMEOUT_MS", 60_000, 5_000, 380_000);
+// A call with less time than this left is not started.
+const MIN_CALL_MS = 5_000;
+// A job still running this long after it was claimed was stopped by the
+// platform before it could finish: it may be claimed again.
+const STALE_RUNNING_MS = DEADLINE_MS + 60_000;
+
 interface Job {
   id: string;
+  updated_at: string;
   page_id: string;
   user_id: string;
   surface: Surface;
@@ -73,6 +93,7 @@ type Emit = (event: Record<string, unknown>) => void;
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void } | undefined;
 
 Deno.serve(async (req) => {
+  const started = Date.now();
   const pre = preflight(req);
   if (pre) return pre;
   try {
@@ -88,15 +109,26 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (error) throw new Error(error.message);
     if (!job) throw new HttpError(404, "Job not found");
-    if (job.status !== "queued") throw new HttpError(409, `Job is already ${job.status}`);
+    const staleBefore = new Date(started - STALE_RUNNING_MS).toISOString();
+    const stale = job.status === "running" && Date.parse(job.updated_at) < started - STALE_RUNNING_MS;
+    if (job.status !== "queued" && !stale) throw new HttpError(409, `Job is already ${job.status}`);
 
-    // Claim the job so a retry cannot run it twice.
-    const { data: claimed, error: claimError } = await uc
+    // Runs the platform stopped before they finished stay running: fail
+    // the caller's others, and claim this one again if it is one.
+    const { error: sweepError } = await uc
       .from("ai_jobs")
-      .update({ status: "running" })
-      .eq("id", job_id)
-      .eq("status", "queued")
-      .select("id");
+      .update({ status: "failed", error: "The run stopped before it finished" })
+      .eq("user_id", user.id)
+      .eq("status", "running")
+      .lt("updated_at", staleBefore)
+      .neq("id", job_id);
+    if (sweepError) console.error("ai_jobs sweep:", sweepError.message);
+
+    // Claim the job so a retry cannot run it twice. Claiming moves
+    // updated_at on, so two retries of a stale job cannot both claim it.
+    let claim = uc.from("ai_jobs").update({ status: "running", error: null }).eq("id", job_id);
+    claim = stale ? claim.eq("status", "running").lt("updated_at", staleBefore) : claim.eq("status", "queued");
+    const { data: claimed, error: claimError } = await claim.select("id");
     if (claimError) throw new Error(claimError.message);
     if (!claimed?.length) throw new HttpError(409, "Job is already running");
 
@@ -113,7 +145,7 @@ Deno.serve(async (req) => {
           }
         };
         const heartbeat = setInterval(() => emit({ type: "status", status: "running" }), HEARTBEAT_MS);
-        const work = runJob(uc, serviceClient(), user, job as Job, emit).finally(() => {
+        const work = runJob(uc, serviceClient(), user, job as Job, emit, started + DEADLINE_MS).finally(() => {
           clearInterval(heartbeat);
           if (open) {
             open = false;
@@ -158,7 +190,14 @@ async function rows<T>(query: PromiseLike<{ data: T[] | null; error: { message: 
   return data ?? [];
 }
 
-async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: Job, emit: Emit): Promise<void> {
+async function runJob(
+  uc: SupabaseClient,
+  sc: SupabaseClient,
+  user: User,
+  job: Job,
+  emit: Emit,
+  deadline: number,
+): Promise<void> {
   emit({ type: "status", status: "running" });
   try {
     const instruction = String(job.request?.instruction ?? "").trim();
@@ -242,8 +281,11 @@ async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: J
         )
       ) names.set(p.id, p.display_name);
     }
+    // Anyone who can comment can post an agent comment (agents on devices
+    // reply through their user), so an agent comment names who asked.
+    const personOf = (c: CommentRow) => (c.author_id && names.get(c.author_id)) || "Someone";
     const authorOf = (c: CommentRow) =>
-      c.author_kind === "agent" ? (c.agent_name || "Agent") : (c.author_id && names.get(c.author_id)) || "Someone";
+      c.author_kind === "agent" ? `${c.agent_name || "Agent"} (agent, asked by ${personOf(c)})` : personOf(c);
 
     const threadsFor = (list: CommentRow[]) => {
       const roots = list.filter((c) => !c.parent_comment_id);
@@ -269,7 +311,15 @@ async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: J
       }
     }
 
-    const crossPage = job.request?.allow_cross_page !== false;
+    // Other pages are offered only on a page that is the caller's alone: on
+    // a shared page, someone else's writing could have the agent read the
+    // caller's other pages into it.
+    let crossPage = job.request?.allow_cross_page === true;
+    if (crossPage) {
+      const { data: members, error: membersError } = await uc.rpc("page_members", { p_page_id: page.id });
+      crossPage = !membersError && Array.isArray(members) && members.length > 0 &&
+        members.every((m: { user_id: string }) => m.user_id === user.id);
+    }
     let toolsEnabled = provider.supports_tools !== false;
 
     // --- tools ----------------------------------------------------------
@@ -308,14 +358,15 @@ async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: J
         return { id, space_id: page.space_id, parent_id: page.id, title, sort_key: sortKey };
       },
       listPages: async (): Promise<PageSummary[]> => (await rows<PageSummary>(
-        uc.from("pages").select("id, title, parent_id").is("deleted_at", null).eq("is_template", false)
-          .neq("id", page.id).limit(500),
+        uc.from("pages").select("id, title, parent_id").eq("space_id", page.space_id).is("deleted_at", null)
+          .eq("is_template", false).neq("id", page.id).limit(500),
       )),
       readOtherPage: async (otherId: string) => {
         const { data: other } = await uc
           .from("pages")
           .select("id, title")
           .eq("id", otherId)
+          .eq("space_id", page.space_id)
           .is("deleted_at", null)
           .maybeSingle();
         if (!other) throw new ToolError(`No page with id "${otherId}" that you can read`);
@@ -386,11 +437,25 @@ async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: J
     const edits: { summary: string; block_ids: string[] }[] = [];
     let reply = "";
     let finished = false;
+    let outOfTime = false;
     for (let round = 0; round < MAX_ROUNDS; round++) {
+      const left = deadline - Date.now();
+      if (left < MIN_CALL_MS) {
+        outOfTime = true;
+        break;
+      }
       let result;
       try {
-        result = await chatCompletion(conn, { model, messages, tools });
+        result = await chatCompletion(
+          conn,
+          { model, messages, tools },
+          AbortSignal.timeout(Math.min(CALL_TIMEOUT_MS, left)),
+        );
       } catch (e) {
+        if (isTimeout(e)) {
+          outOfTime = true;
+          break;
+        }
         if (e instanceof ProviderError && e.rejectedTools && tools.length && round === 0) {
           // The model has no tool calling: answer chat-only.
           tools = [];
@@ -421,10 +486,15 @@ async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: J
       finished = true;
       break;
     }
+    if (outOfTime && !session.changed) {
+      throw new Error("The model took too long to answer. Try again, or choose a faster model.");
+    }
     if (!reply) {
       const done = edits.map((e) => e.summary).join(". ");
       reply = finished
         ? (done ? `${done}.` : "Done.")
+        : outOfTime
+        ? `I ran out of time and stopped.${done ? ` So far: ${done}.` : ""}`
         : `I stopped after ${MAX_ROUNDS} steps.${done ? ` So far: ${done}.` : ""}`;
     }
     emit({ type: "text", delta: reply });
@@ -480,8 +550,11 @@ async function runJob(uc: SupabaseClient, sc: SupabaseClient, user: User, job: J
     if (jobError) console.error("ai_jobs:", jobError.message);
 
     if (job.surface === "comment" && threadRoot) {
-      const { error: replyError } = await uc.from("comments").insert({
+      // The service role posts the reply: comments_guard pins author_id to the
+      // caller on client inserts, and here it names the user who asked.
+      const { error: replyError } = await sc.from("comments").insert({
         page_id: page.id,
+        author_id: user.id,
         block_id: threadRoot.block_id,
         parent_comment_id: threadRoot.id,
         author_kind: "agent",

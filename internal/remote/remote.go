@@ -85,8 +85,25 @@ type Client struct {
 
 	mu   sync.Mutex
 	sess *session
+	// refreshing is the refresh under way, which other callers wait for.
+	refreshing *refresh
+	// keepMu has the keychain written in the order sess changes.
+	keepMu sync.Mutex
+	// noKeychain keeps the session in memory only, for tests.
+	noKeychain bool
 	// OnAuth runs after signing in or out.
 	OnAuth func(user *store.User)
+}
+
+// refresh is one exchange of a refresh token for a new session.
+type refresh struct {
+	from *session
+	done chan struct{}
+	// After done: the new access token, or why there is none. stale says
+	// the session changed meanwhile, so the result was thrown away.
+	tok   string
+	err   error
+	stale bool
 }
 
 // New returns a client for a project.
@@ -154,13 +171,27 @@ func (c *Client) RestoreSession() *store.User {
 	return toUser(s.User)
 }
 
-func (c *Client) keep(s *session) {
+// keep makes s the session, in memory and in the keychain.
+func (c *Client) keep(s *session) { c.replace(nil, s, true) }
+
+// replace is keep while the session is still old, or always with force; it
+// reports whether it kept s.
+func (c *Client) replace(old, s *session, force bool) bool {
+	c.keepMu.Lock()
+	defer c.keepMu.Unlock()
 	c.mu.Lock()
+	if !force && c.sess != old {
+		c.mu.Unlock()
+		return false
+	}
 	c.sess = s
 	c.mu.Unlock()
+	if c.noKeychain {
+		return true
+	}
 	if s == nil {
 		_ = keychain.Delete(secretKey)
-		return
+		return true
 	}
 	// Keep what fits in the keychain; the access token is fetched again.
 	small := *s
@@ -170,6 +201,7 @@ func (c *Client) keep(s *session) {
 	}
 	raw, _ := json.Marshal(small) // #nosec G117 -- the session goes to the keychain.
 	_ = keychain.Set(secretKey, raw)
+	return true
 }
 
 func (c *Client) authRequest(ctx context.Context, path string, body any, withToken bool) (map[string]any, error) {
@@ -216,7 +248,9 @@ func message(m map[string]any, fallback string) string {
 	return fallback
 }
 
-func (c *Client) fromToken(out map[string]any) (*store.User, error) {
+// decodeSession reads the session in the server's answer to a sign-in or
+// a refresh.
+func decodeSession(out map[string]any) (*session, error) {
 	raw, _ := json.Marshal(out)
 	var s session
 	if err := json.Unmarshal(raw, &s); err != nil {
@@ -225,10 +259,23 @@ func (c *Client) fromToken(out map[string]any) (*store.User, error) {
 	if exp, ok := out["expires_in"].(float64); ok && s.ExpiresAt == 0 {
 		s.ExpiresAt = time.Now().Unix() + int64(exp)
 	}
-	if s.AccessToken == "" || s.User == nil {
-		return nil, errors.New("The server did not sign you in.") //nolint:staticcheck // shown to people as a sentence.
+	if s.AccessToken == "" {
+		return nil, errNoSession
 	}
-	c.keep(&s)
+	return &s, nil
+}
+
+var errNoSession = errors.New("The server did not sign you in.") //nolint:staticcheck // shown to people as a sentence.
+
+func (c *Client) fromToken(out map[string]any) (*store.User, error) {
+	s, err := decodeSession(out)
+	if err != nil {
+		return nil, err
+	}
+	if s.User == nil {
+		return nil, errNoSession
+	}
+	c.keep(s)
 	u := toUser(s.User)
 	if c.OnAuth != nil {
 		c.OnAuth(u)
@@ -289,56 +336,87 @@ func (c *Client) SignOut() {
 }
 
 // token returns a fresh access token, refreshing it when it is about to
-// expire.
+// expire. Callers that need a refresh at once share one.
 func (c *Client) token(ctx context.Context) (string, error) {
-	c.mu.Lock()
-	s := c.sess
-	c.mu.Unlock()
-	if s == nil {
-		return "", ErrSignedOut
+	for {
+		c.mu.Lock()
+		s := c.sess
+		if s == nil {
+			c.mu.Unlock()
+			return "", ErrSignedOut
+		}
+		if s.AccessToken != "" && time.Now().Unix() < s.ExpiresAt-60 {
+			c.mu.Unlock()
+			return s.AccessToken, nil
+		}
+		r := c.refreshing
+		if r == nil || r.from != s {
+			r = &refresh{from: s, done: make(chan struct{})}
+			c.refreshing = r
+			go c.refresh(r)
+		}
+		c.mu.Unlock()
+		select {
+		case <-r.done:
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+		// Signed out or in as someone else meanwhile: go by the session now.
+		if !r.stale {
+			return r.tok, r.err
+		}
 	}
-	if s.AccessToken != "" && time.Now().Unix() < s.ExpiresAt-60 {
-		return s.AccessToken, nil
+}
+
+// refresh trades r's refresh token for a new session, and keeps it only
+// if r's session is still the one in use, so a sign-out or another sign-in
+// meanwhile is not undone.
+func (c *Client) refresh(r *refresh) {
+	defer close(r.done)
+	defer func() {
+		c.mu.Lock()
+		if c.refreshing == r {
+			c.refreshing = nil
+		}
+		c.mu.Unlock()
+	}()
+	// Not a caller's context: others wait for this too, and one giving up
+	// should not fail it for the rest. The client's timeout still applies.
+	out, err := c.authRequest(context.Background(), "token?grant_type=refresh_token", map[string]any{"refresh_token": r.from.RefreshToken}, false)
+	var s *session
+	if err == nil {
+		s, err = decodeSession(out)
 	}
-	out, err := c.authRequest(ctx, "token?grant_type=refresh_token", map[string]any{"refresh_token": s.RefreshToken}, false)
 	if err != nil {
 		var re *Error
-		if errors.As(err, &re) && re.Status >= 400 && re.Status < 500 {
-			// The session is gone: signed out elsewhere or revoked.
-			c.keep(nil)
+		// GoTrue answers a revoked, used or unknown refresh token with 400
+		// ("invalid_grant", "refresh_token_not_found" and the like). Other
+		// failures, a 429 among them, may pass, so they keep the session.
+		if errors.As(err, &re) && (re.Status == http.StatusBadRequest || re.Status == http.StatusUnauthorized) {
+			if !c.replace(r.from, nil, false) {
+				r.stale = true
+				return
+			}
 			if c.OnAuth != nil {
 				c.OnAuth(nil)
 			}
-			return "", ErrSignedOut
+			r.err = ErrSignedOut
+			return
 		}
-		return "", err
-	}
-	if _, err := c.fromTokenQuiet(out); err != nil {
-		return "", err
-	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.sess.AccessToken, nil
-}
-
-func (c *Client) fromTokenQuiet(out map[string]any) (*session, error) {
-	raw, _ := json.Marshal(out)
-	var s session
-	if err := json.Unmarshal(raw, &s); err != nil {
-		return nil, err
-	}
-	if exp, ok := out["expires_in"].(float64); ok && s.ExpiresAt == 0 {
-		s.ExpiresAt = time.Now().Unix() + int64(exp)
+		c.mu.Lock()
+		r.stale = c.sess != r.from
+		c.mu.Unlock()
+		r.err = err
+		return
 	}
 	if s.User == nil {
-		c.mu.Lock()
-		if c.sess != nil {
-			s.User = c.sess.User
-		}
-		c.mu.Unlock()
+		s.User = r.from.User
 	}
-	c.keep(&s)
-	return &s, nil
+	if !c.replace(r.from, s, false) {
+		r.stale = true
+		return
+	}
+	r.tok = s.AccessToken
 }
 
 // UpdateUser changes the account's profile data.
@@ -432,9 +510,10 @@ type Query struct {
 	Limit   int
 }
 
-// Eq, Gt and In build filters.
-func Eq(col, v string) string { return col + "=eq." + v }
-func Gt(col, v string) string { return col + "=gt." + v }
+// Eq, Gt, NotNull and In build filters.
+func Eq(col, v string) string   { return col + "=eq." + v }
+func Gt(col, v string) string   { return col + "=gt." + v }
+func NotNull(col string) string { return col + "=not.is.null" }
 func In(col string, vs []string) string {
 	quoted := make([]string, len(vs))
 	for i, v := range vs {
@@ -524,6 +603,12 @@ func IsConflict(err error) bool {
 	return errors.As(err, &re) && re.Status == http.StatusConflict
 }
 
+// IsNotFound reports whether err is the server having no such thing.
+func IsNotFound(err error) bool {
+	var re *Error
+	return errors.As(err, &re) && re.Status == http.StatusNotFound
+}
+
 // Insert inserts rows and returns them as stored.
 func (c *Client) Insert(ctx context.Context, table string, rows any) ([]map[string]any, error) {
 	raw, err := json.Marshal(rows)
@@ -601,6 +686,21 @@ func (c *Client) Upload(ctx context.Context, bucket, path string, data io.Reader
 	res, err := c.request(ctx, "POST", "/storage/v1/object/"+bucket+"/"+escapePath(path), data, map[string]string{
 		"Content-Type": contentType, "x-upsert": "true",
 	})
+	if err != nil {
+		return err
+	}
+	_ = res.Body.Close()
+	return nil
+}
+
+// Remove removes files of a Storage bucket. One the bucket does not have
+// is no error: Storage leaves it out of what it removed.
+func (c *Client) Remove(ctx context.Context, bucket string, paths ...string) error {
+	raw, err := json.Marshal(map[string]any{"prefixes": paths})
+	if err != nil {
+		return err
+	}
+	res, err := c.request(ctx, "DELETE", "/storage/v1/object/"+bucket, bytes.NewReader(raw), nil)
 	if err != nil {
 		return err
 	}

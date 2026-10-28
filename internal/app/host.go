@@ -2,11 +2,10 @@ package app
 
 import (
 	"context"
+	"errors"
 	"html"
-	"io"
 	"log"
 	"mime"
-	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -22,7 +21,6 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
-	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -401,14 +399,47 @@ func (a *App) openFile(f store.File) {
 	delete(a.downloads, f.ID)
 	path := a.localFile(f, func() {
 		if f, ok := a.fileByID(f.ID); ok && f.LocalPath != "" {
-			_ = mygo.Shell.OpenPath(f.LocalPath)
+			openSafely(f.LocalPath)
 		}
 	})
 	if path == "" {
 		a.toast(locales.HostDownloading(f.Name))
 		return
 	}
+	openSafely(path)
+}
+
+// openSafely opens a file in its app. Files come from other devices and
+// people, so the system is told first that it came from elsewhere, for
+// its checks before a program runs; and a file that would run as one,
+// not open in one, is shown in its folder instead.
+func openSafely(path string) {
+	markDownloaded(path)
+	if runsAsProgram(path) {
+		mygo.Shell.ShowItemInFolder(path)
+		return
+	}
 	_ = mygo.Shell.OpenPath(path)
+}
+
+// programExts are the kinds of file that opening runs: apps, installers,
+// scripts and the shortcuts to them.
+var programExts = map[string]bool{
+	".app": true, ".command": true, ".tool": true, ".terminal": true, ".sh": true, ".bash": true, ".zsh": true, ".csh": true,
+	".pkg": true, ".mpkg": true, ".dmg": true, ".scpt": true, ".scptd": true, ".applescript": true, ".workflow": true,
+	".action": true, ".fileloc": true, ".jar": true, ".py": true, ".pyw": true, ".pl": true, ".rb": true,
+	".exe": true, ".com": true, ".bat": true, ".cmd": true, ".msi": true, ".msix": true, ".appx": true, ".ps1": true,
+	".vbs": true, ".vbe": true, ".js": true, ".jse": true, ".wsf": true, ".wsh": true, ".hta": true, ".scr": true,
+	".cpl": true, ".msc": true, ".lnk": true, ".pif": true, ".reg": true, ".appref-ms": true,
+}
+
+// runsAsProgram reports whether opening the file would run it.
+func runsAsProgram(path string) bool {
+	if programExts[strings.ToLower(filepath.Ext(path))] {
+		return true
+	}
+	info, err := os.Stat(path)
+	return err == nil && runtime.GOOS != "windows" && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
 func (a *App) fileByID(id string) (store.File, bool) {
@@ -516,22 +547,26 @@ func (a *App) loadMembers(pageID string) {
 	list, _ := res.([]any)
 	for _, r := range list {
 		m, _ := r.(map[string]any)
+		// A server from before invites says nothing: every share was one.
+		accepted, ok := m["accepted"].(bool)
 		members = append(members, store.Member{PageID: pageID, UserID: store.S(m, "user_id"), Role: store.S(m, "role"),
-			DisplayName: store.S(m, "display_name"), Email: store.S(m, "email")})
+			DisplayName: store.S(m, "display_name"), Email: store.S(m, "email"), Accepted: accepted || !ok})
 	}
 	_ = a.st.SetMembers(pageID, members)
 }
 
-// imageCache loads the pictures of image blocks.
+// imageCache loads the pictures of image blocks; root is the app's data
+// folder, the only one it reads files from.
 type imageCache struct {
+	root    string
 	dir     string
 	mu      sync.Mutex
 	bitmaps map[string]*ui.Bitmap
 	loading map[string]bool
 }
 
-func newImageCache(dir string) *imageCache {
-	return &imageCache{dir: dir, bitmaps: map[string]*ui.Bitmap{}, loading: map[string]bool{}}
+func newImageCache(root, dir string) *imageCache {
+	return &imageCache{root: root, dir: dir, bitmaps: map[string]*ui.Bitmap{}, loading: map[string]bool{}}
 }
 
 func (ic *imageCache) get(url string, loaded func()) *ui.Bitmap {
@@ -545,7 +580,7 @@ func (ic *imageCache) get(url string, loaded func()) *ui.Bitmap {
 	}
 	ic.loading[url] = true
 	go func() {
-		data, err := fetch(url)
+		data, err := ic.read(url)
 		var b *ui.Bitmap
 		if err == nil {
 			b, err = ui.DecodeBitmap(data)
@@ -565,25 +600,38 @@ func (ic *imageCache) get(url string, loaded func()) *ui.Bitmap {
 	return nil
 }
 
-func fetch(url string) ([]byte, error) {
-	if strings.HasPrefix(url, "file://") {
-		return os.ReadFile(strings.TrimPrefix(url, "file://"))
+// read reads a picture: from the web, or a file of the app's own, in its
+// data folder. A file elsewhere on the device is not shown, as a block's
+// link to one can come from another device or person.
+func (ic *imageCache) read(url string) ([]byte, error) {
+	path, ok := strings.CutPrefix(url, "file://")
+	if !ok {
+		return fetch(url)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if !inFolder(ic.root, path) {
+		return nil, errNotOwnFile
+	}
+	return os.ReadFile(path) // #nosec G304 -- a file in the app's data folder.
+}
+
+// errNotOwnFile is for a file outside the app's data folder.
+var errNotOwnFile = errors.New("not a file of the app's")
+
+// inFolder reports whether path is in folder dir, links followed.
+func inFolder(dir, path string) bool {
+	if dir == "" || !filepath.IsAbs(path) {
+		return false
+	}
+	root, err := filepath.EvalSymlinks(dir)
 	if err != nil {
-		return nil, err
+		return false
 	}
-	res, err := http.DefaultClient.Do(req)
+	real, err := filepath.EvalSymlinks(path)
 	if err != nil {
-		return nil, err
+		return false
 	}
-	defer func() { _ = res.Body.Close() }()
-	if res.StatusCode >= 400 {
-		return nil, &remote.Error{Status: res.StatusCode, Message: res.Status}
-	}
-	return io.ReadAll(io.LimitReader(res.Body, 20<<20))
+	rel, err := filepath.Rel(root, real)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 
 // embedURL is where an embed's wrapper page loads. WebView2 serves a

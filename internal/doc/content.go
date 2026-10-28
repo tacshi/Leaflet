@@ -338,13 +338,21 @@ func (c *Content) Replace(id string, n *Node) error {
 	return nil
 }
 
-// Move moves a block, with its children, to a position.
+// Move moves a block, with its children, to a position. It checks the
+// position first, so a failed move leaves the block where it was.
 func (c *Content) Move(id string, p Position) error {
-	n := c.Remove(id)
-	if n == nil {
+	if c.Find(id) == nil {
 		return fmt.Errorf("no block %s", id)
 	}
-	return c.Insert(p, n)
+	if a := p.Anchor(); a != "" {
+		if c.Find(a) == nil {
+			return fmt.Errorf("no block %s", a)
+		}
+		if c.IsSelfOrAncestor(id, a) {
+			return fmt.Errorf("block %s can't move next to or inside itself", id)
+		}
+	}
+	return c.Insert(p, c.Remove(id))
 }
 
 // IsSelfOrAncestor reports whether ancestor is id or holds it.

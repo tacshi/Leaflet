@@ -80,6 +80,7 @@ type dialogs struct {
 	shareRole   string
 	shareBusy   bool
 	shareError  string
+	shareSent   string
 	shareMember []store.Member
 
 	chartOpen   bool
@@ -598,13 +599,22 @@ func (a *App) restoreVersion(pageID string, c *doc.Content) {
 
 func (a *App) openShare(id string) {
 	d := &a.dialogs
-	d.shareOpen, d.sharePage, d.shareEmail, d.shareRole, d.shareError = true, id, "", "editor", ""
+	d.shareOpen, d.sharePage, d.shareEmail, d.shareRole, d.shareError, d.shareSent = true, id, "", "editor", "", ""
 	d.shareMember, _ = a.st.Members(id)
 	if a.backend.SignedIn() {
 		go func() {
 			a.loadMembers(id)
-			a.update(func() { d.shareMember, _ = a.st.Members(id) })
+			a.update(func() { a.shareMembersOf(id) })
 		}()
+	}
+}
+
+// shareMembersOf shows page's members in the Share dialog, while it is
+// still the page the dialog is for: an answer for one before it comes
+// after the dialog opened for another.
+func (a *App) shareMembersOf(page string) {
+	if d := &a.dialogs; d.sharePage == page {
+		d.shareMember, _ = a.st.Members(page)
 	}
 }
 
@@ -640,7 +650,7 @@ func (a *App) shareDialog(c *ui.Context) {
 						if email == "" || d.shareBusy {
 							return
 						}
-						d.shareBusy, d.shareError = true, ""
+						d.shareBusy, d.shareError, d.shareSent = true, "", ""
 						page, role := d.sharePage, d.shareRole
 						go func() {
 							ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -651,12 +661,17 @@ func (a *App) shareDialog(c *ui.Context) {
 							}
 							a.update(func() {
 								d.shareBusy = false
+								if d.sharePage != page {
+									return
+								}
 								if err != nil {
 									d.shareError = err.Error()
 									return
 								}
-								d.shareEmail = ""
-								d.shareMember, _ = a.st.Members(page)
+								// The server answers alike whether or not the
+								// email has an account, so this can't say which.
+								d.shareEmail, d.shareSent = "", email
+								a.shareMembersOf(page)
 							})
 						}()
 					}
@@ -669,6 +684,8 @@ func (a *App) shareDialog(c *ui.Context) {
 				})
 				if d.shareError != "" {
 					ui.Text(c, d.shareError).FontSize(12.5).TextColor(pal.DangerText)
+				} else if d.shareSent != "" {
+					ui.Text(c, locales.DialogShareSent(d.shareSent)).FontSize(12.5).TextColor(pal.TextMuted)
 				}
 			}
 			label(c, locales.DialogSharePeople())
@@ -690,6 +707,10 @@ func (a *App) shareDialog(c *ui.Context) {
 								ui.Text(c, m.Email).FontSize(12).TextColor(pal.TextMuted)
 							}
 						})
+						if !m.Accepted && m.Role != "owner" {
+							ui.Text(c, locales.DialogShareInvited()).FontSize(12.5).TextColor(pal.TextMuted)
+							ui.Text(c, "·").FontSize(12.5).TextColor(pal.ChartMuted)
+						}
 						ui.Text(c, shareRoleName(m.Role)).FontSize(12.5).TextColor(pal.TextMuted)
 						if p != nil && !a.isShared(*p) && m.Role != "owner" {
 							remove := false
@@ -700,11 +721,15 @@ func (a *App) shareDialog(c *ui.Context) {
 									ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 									defer cancel()
 									if _, err := a.backend.RPC(ctx, "unshare_page", map[string]any{"p_page_id": page, "p_user_id": uid}); err != nil {
-										a.update(func() { d.shareError = err.Error() })
+										a.update(func() {
+											if d.sharePage == page {
+												d.shareError = err.Error()
+											}
+										})
 										return
 									}
 									a.loadMembers(page)
-									a.update(func() { d.shareMember, _ = a.st.Members(page) })
+									a.update(func() { a.shareMembersOf(page) })
 								}()
 							}
 						}

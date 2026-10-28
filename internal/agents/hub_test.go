@@ -68,6 +68,27 @@ func TestDeliveryToAPageClosedMidRun(t *testing.T) {
 	}
 }
 
+// Ops for a closed page whose stored content cannot be read are not saved
+// over it as if it were empty.
+func TestDeliveryToAnUnreadablePage(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Broken"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const broken = `{"children": [`
+	if _, err := st.DB().Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, broken, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	d := &delivery{}
+	if err := d.save(st, p.ID, []doc.Op{insertAfter("", "x1", "one")}); err == nil {
+		t.Error("saved over an unreadable page")
+	}
+	if row, err := st.ContentRow(p.ID); err != nil || row.Content != broken {
+		t.Errorf("content %q, %v", row.Content, err)
+	}
+}
+
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
 	st, err := store.OpenMemory(t.TempDir())
@@ -232,5 +253,70 @@ func TestUndoInAnEarlierConversation(t *testing.T) {
 	again.RedoRun("p", "r1")
 	if r := NewHub(st, nil, stubHost{}).Session("p").Run("r1"); r == nil || r.Undone {
 		t.Errorf("redone run after a restart %+v", r)
+	}
+}
+
+// An agent reads the user's other pages only from a page no one else
+// has: text other people put in a shared page could have it copy them
+// there.
+func TestCrossPageOnlyOnTheUsersOwnPages(t *testing.T) {
+	st := openStore(t)
+	me := st.Session().UserID
+	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared, err := st.CreatePage(store.NewPageOptions{Title: "Shared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMembers(shared.ID, []store.Member{{PageID: shared.ID, UserID: me, Role: "owner"}, {PageID: shared.ID, UserID: "friend", Role: "editor"}}); err != nil {
+		t.Fatal(err)
+	}
+	inside, err := st.CreatePage(store.NewPageOptions{Title: "Inside", ParentID: shared.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := st.CreatePage(store.NewPageOptions{Title: "Theirs", SpaceID: "someone-else"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, nil)
+	on := store.Settings{AgentsReadOtherPages: true}
+	for _, c := range []struct {
+		p    store.Page
+		want bool
+	}{{mine, true}, {shared, false}, {inside, false}, {theirs, false}} {
+		tc := h.toolContext(c.p.ID, c.p.Title, "Test", page(), on)
+		if got := tc.ListPages != nil; got != c.want {
+			t.Errorf("%s: cross-page tools %v, want %v", c.p.Title, got, c.want)
+		}
+		if got := h.crossPage(c.p, on); got != c.want {
+			t.Errorf("%s: cloud runs may read other pages %v, want %v", c.p.Title, got, c.want)
+		}
+	}
+	if tc := h.toolContext(mine.ID, "Mine", "Test", page(), store.Settings{}); tc.ListPages != nil {
+		t.Error("cross-page tools while the setting is off")
+	}
+}
+
+// A page runs one agent at a time: a run asked for while another works on
+// the page fails at once, and the first keeps the page's running state.
+func TestOneRunAtATimeOnAPage(t *testing.T) {
+	st := openStore(t)
+	h := NewHub(st, nil, nil)
+	s := h.Session("p1")
+	s.Running = true
+	reply := &Message{Pending: true}
+	var done *Run
+	run := h.Start("p1", RunOptions{Surface: "inline", Instruction: "go", Reply: reply, Done: func(r *Run) { done = r }})
+	if run.Status != "failed" || run.Error != ErrRunning.Error() || done != run {
+		t.Errorf("run %+v, done %v", run, done)
+	}
+	if reply.Pending || !reply.Error {
+		t.Errorf("reply %+v", reply)
+	}
+	if !s.Running || len(s.Runs) != 0 {
+		t.Errorf("running %v, runs %d", s.Running, len(s.Runs))
 	}
 }

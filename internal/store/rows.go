@@ -3,7 +3,9 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"time"
@@ -136,7 +138,14 @@ type File struct {
 
 // Files returns the files not deleted, newest first.
 func (s *Store) Files() ([]File, error) {
-	rows, err := s.db.Query(`SELECT id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at FROM files WHERE deleted_at IS NULL ORDER BY created_at DESC`)
+	return s.queryFiles(`deleted_at IS NULL ORDER BY created_at DESC`)
+}
+
+// AllFiles returns every file, deleted ones too.
+func (s *Store) AllFiles() ([]File, error) { return s.queryFiles(`1 = 1 ORDER BY created_at DESC`) }
+
+func (s *Store) queryFiles(where string) ([]File, error) {
+	rows, err := s.db.Query(`SELECT id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at FROM files WHERE ` + where)
 	if err != nil {
 		return nil, err
 	}
@@ -158,8 +167,10 @@ func (s *Store) Files() ([]File, error) {
 }
 
 // PutFile stores a file row.
-func (s *Store) PutFile(f File) error {
-	_, err := s.db.Exec(`INSERT INTO files (id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at)
+func (s *Store) PutFile(f File) error { return putFile(s.db, f) }
+
+func putFile(q querier, f File) error {
+	_, err := q.Exec(`INSERT INTO files (id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET folder_id = excluded.folder_id,
 		page_id = excluded.page_id, name = excluded.name, storage_path = excluded.storage_path,
 		local_path = COALESCE(excluded.local_path, files.local_path), mime_type = excluded.mime_type,
@@ -228,18 +239,52 @@ func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
 	return local, nil
 }
 
-// DeleteFile deletes a file.
+// DeleteFile deletes a file, which cannot be undone: its copy here goes
+// now, and its stored copy (in Storage, or iCloud Drive) once the
+// deletion has gone up. An upload still waiting is dropped.
 func (s *Store) DeleteFile(f File) error {
 	now := time.Now()
 	f.DeletedAt, f.UpdatedAt = now, now
-	if err := s.PutFile(f); err != nil {
+	err := s.inTx(func(tx *sql.Tx) error {
+		if err := putFile(tx, f); err != nil {
+			return err
+		}
+		if err := queue(tx, "files", f.ID, FileToRemote(f), "deleted file", ""); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'storage' AND entity_id = ?`, "files/"+f.ID); err != nil {
+			return err
+		}
+		if f.StoragePath == "" {
+			return nil
+		}
+		return queue(tx, "storage_delete", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "file_id": f.ID}, "deleted file", "")
+	})
+	if err != nil {
 		return err
 	}
-	if err := s.Queue("files", f.ID, FileToRemote(f), "deleted file", ""); err != nil {
-		return err
-	}
+	s.removeCopy(f.ID)
+	s.Notify("outbox", "")
 	s.Notify("files", "")
 	return nil
+}
+
+// removeCopy removes a deleted file's copy on this device, if it is one
+// the app made in its data folder: a path anywhere else is left alone.
+func (s *Store) removeCopy(id string) {
+	var local sql.NullString
+	if err := s.db.QueryRow(`SELECT local_path FROM files WHERE id = ? AND deleted_at IS NOT NULL`, id).Scan(&local); err != nil || local.String == "" {
+		return
+	}
+	dir := filepath.Join(s.Dir, "files", id)
+	if rel, err := filepath.Rel(dir, local.String); err != nil || !filepath.IsLocal(rel) {
+		return
+	}
+	if err := os.Remove(local.String); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	_ = os.Remove(dir) // only once it is empty
+	_, _ = s.db.Exec(`UPDATE files SET local_path = NULL WHERE id = ?`, id)
 }
 
 func copyFile(from, to string) error {

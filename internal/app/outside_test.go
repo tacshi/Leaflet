@@ -112,3 +112,61 @@ func TestDeletedAndEditedConflict(t *testing.T) {
 		t.Errorf("still listed: %+v", rows)
 	}
 }
+
+// A save that fails keeps the edits waiting, for the page closing to try
+// again; and an edit of a page not open goes only over what it read.
+func TestSaveFailsAndRaces(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	para := func(id, text string) *doc.Node {
+		n := &doc.Node{ID: id, Type: "paragraph"}
+		n.SetDelta(doc.FromMarkdown(text))
+		return n
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{para("p1", "one"), para("p2", "two")})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := st.CreatePage(store.NewPageOptions{Title: "Other", Content: doc.FromBlocks([]*doc.Node{para("q1", "one")})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	be := remote.New(remote.Config(), st)
+	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
+	a.reloadAll()
+
+	// Sync writes the other page while it is being changed: the change
+	// is made again over that, keeping both.
+	tries := 0
+	err = a.saveStored(other.ID, func(c *doc.Content) *doc.Content {
+		if tries++; tries == 1 {
+			synced := st.Content(other.ID)
+			synced.Find("q1").SetDelta(doc.FromMarkdown("one, synced"))
+			if _, _, err := st.SaveContent(other.ID, synced); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_ = c.Insert(doc.Position{At: "end"}, para("q2", "two, added"))
+		return c
+	})
+	if err != nil || tries != 2 {
+		t.Fatalf("saved with %v after %d tries", err, tries)
+	}
+	if text := st.Content(other.ID).PlainText(); !strings.Contains(text, "one, synced") || !strings.Contains(text, "two, added") {
+		t.Errorf("stored %q, want both", text)
+	}
+
+	a.openPage(p.ID)
+	a.page.editor.Content.Find("p1").SetDelta(doc.FromMarkdown("one, typed"))
+	a.page.dirty = true
+	_ = st.Close()
+	a.savePage()
+	if !a.page.dirty {
+		t.Error("a save that failed dropped the edits")
+	}
+}

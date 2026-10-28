@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -398,12 +399,13 @@ func (a *App) loadDevices() {
 
 func (a *App) exportAll() {
 	a.flush()
+	folders, files := slices.Clone(a.folders), slices.Clone(a.files)
 	go func() {
 		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.SettingsExportAll(), DefaultPath: locales.SettingsExportFileName()})
 		if path == "" {
 			return
 		}
-		missing, err := a.writeExport(path)
+		missing, err := a.writeExport(path, folders, files)
 		a.update(func() {
 			switch {
 			case err != nil:
@@ -444,9 +446,11 @@ func (a *App) leave(clear func() error) {
 		var err error
 		a.sync.Hold(func() {
 			a.backend.SignOut()
+			a.sync.ClearInvites()
 			err = clear()
 		})
 		a.update(func() {
+			a.invites = nil
 			if err != nil {
 				a.toast(locales.SettingsRemovePagesFailed(err.Error()))
 			}
@@ -1162,7 +1166,7 @@ func (a *App) offlineSettings(c *ui.Context) {
 		})
 		settingRow(c, "images", locales.SettingsImageCache(), locales.SettingsImageCacheDesc(), false, func() {
 			if button(c, "clear", "trash", locales.SettingsClear()).Clicked() {
-				a.images = newImageCache(a.images.dir)
+				a.images = newImageCache(a.images.root, a.images.dir)
 				_ = os.RemoveAll(a.images.dir)
 				c.Toast(locales.SettingsImageCacheCleared())
 			}
@@ -1282,8 +1286,13 @@ func (a *App) resolveConflict(cf store.ConflictRow, node *doc.Node) {
 			a.toast(locales.SettingsResolveFailed(err.Error()))
 			return
 		}
-		apply(c)
-		if _, _, err := a.st.SaveContent(cf.PageID, c); err != nil {
+		err := a.saveStored(cf.PageID, func(c *doc.Content) *doc.Content {
+			if c != nil {
+				apply(c)
+			}
+			return c
+		})
+		if err != nil {
 			a.toast(locales.SettingsResolveFailed(err.Error()))
 			return
 		}

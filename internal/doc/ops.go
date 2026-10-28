@@ -3,6 +3,7 @@ package doc
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 )
 
 // Removed is a block a delete took out and where it was.
@@ -124,7 +125,9 @@ func (c *Content) Apply(o Op) error {
 		if o.Node == nil {
 			return fmt.Errorf("replace without a node")
 		}
-		return c.Replace(o.ID, o.Node.Clone())
+		n := o.Node.Clone()
+		DropCells(n)
+		return c.Replace(o.ID, n)
 	case "move":
 		if o.Position == nil {
 			return fmt.Errorf("move without a position")
@@ -184,13 +187,37 @@ func InvertRun(ops []Op) []Op {
 }
 
 // DeleteOp builds a delete of ids that records where each block was, so it
-// can be inverted. Positions are taken before anything is removed, so
-// consecutive blocks restore in order.
+// can be inverted. The blocks are recorded in document order, each after
+// its previous sibling, which is either still there or restored just
+// before it; a first child goes before the next sibling that stays. A block
+// inside another deleted one comes back with it, so it isn't recorded.
 func (c *Content) DeleteOp(ids []string) Op {
 	o := Op{Op: "delete", IDs: ids, Removed: []Removed{}}
+	gone := map[string]bool{}
 	for _, id := range ids {
-		o.Removed = append(o.Removed, Removed{Node: c.Find(id).Clone(), Position: c.PositionOf(id)})
+		gone[id] = true
 	}
+	var visit func(nodes []*Node, parent *Node)
+	visit = func(nodes []*Node, parent *Node) {
+		for i, n := range nodes {
+			if !gone[n.ID] {
+				visit(n.Children, n)
+				continue
+			}
+			var p Position
+			if i > 0 {
+				p = Position{After: nodes[i-1].ID}
+			} else if j := slices.IndexFunc(nodes, func(k *Node) bool { return !gone[k.ID] }); j >= 0 {
+				p = Position{Before: nodes[j].ID}
+			} else if parent != nil {
+				p = Position{Parent: parent.ID}
+			} else {
+				p = Position{At: "start"}
+			}
+			o.Removed = append(o.Removed, Removed{Node: n.Clone(), Position: p})
+		}
+	}
+	visit(c.Children, nil)
 	return o
 }
 

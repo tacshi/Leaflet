@@ -436,3 +436,177 @@ func TestMergeTiesAgree(t *testing.T) {
 		t.Errorf("move: here %v there %v", texts(here), texts(there))
 	}
 }
+
+func TestUndoDeleteOfSeveralBlocks(t *testing.T) {
+	list := func() *Node {
+		n := &Node{ID: "p", Type: "bulleted_list", Children: []*Node{para("a", "a"), para("b", "b"), para("c", "c")}}
+		n.SetDelta(Delta{{Text: "p"}})
+		return n
+	}
+	for _, tc := range []struct {
+		name   string
+		blocks func() []*Node
+		ids    []string
+	}{
+		{"first two", func() []*Node { return []*Node{para("a", "a"), para("b", "b"), para("c", "c")} }, []string{"a", "b"}},
+		{"reversed ids", func() []*Node { return []*Node{para("x", "x"), para("a", "a"), para("b", "b"), para("c", "c")} }, []string{"b", "a"}},
+		{"all of them", func() []*Node { return []*Node{para("a", "a"), para("b", "b")} }, []string{"b", "a"}},
+		{"first children", func() []*Node { return []*Node{list()} }, []string{"a", "b"}},
+		{"only children", func() []*Node { return []*Node{list()} }, []string{"c", "a", "b"}},
+		{"either side of a survivor", func() []*Node { return []*Node{para("a", "a"), para("b", "b"), para("c", "c")} }, []string{"c", "a"}},
+		{"parent and its child", func() []*Node { return []*Node{list(), para("z", "z")} }, []string{"b", "p"}},
+	} {
+		c := FromBlocks(tc.blocks())
+		original := c.Copy().Encode()
+		o := c.DeleteOp(tc.ids)
+		if err := c.Apply(o); err != nil {
+			t.Fatal(err)
+		}
+		for _, inv := range o.Invert() {
+			if err := c.Apply(inv); err != nil {
+				t.Errorf("%s: %v", tc.name, err)
+			}
+		}
+		if got := c.Encode(); got != original {
+			t.Errorf("%s: undo gave\n%s\nwant\n%s", tc.name, got, original)
+		}
+	}
+}
+
+func TestFailedMoveKeepsTheBlock(t *testing.T) {
+	list := &Node{ID: "p", Type: "bulleted_list", Children: []*Node{para("k", "k")}}
+	list.SetDelta(Delta{{Text: "p"}})
+	for _, p := range []Position{{After: "gone"}, {Before: "gone"}, {Parent: "gone"}, {After: "k"}, {Parent: "p"}} {
+		c := FromBlocks([]*Node{para("a", "a"), list})
+		original := c.Copy().Encode()
+		if err := c.Move("p", p); err == nil {
+			t.Errorf("move to %+v: no error", p)
+		}
+		if got := c.Encode(); got != original {
+			t.Errorf("move to %+v changed the page:\n%s", p, got)
+		}
+	}
+}
+
+// One side makes a list item, moves a child into it and deletes the
+// child's old parent, while the other edits elsewhere: the child lands in
+// the new item whichever side is primary and whichever is local.
+func TestMergeMoveOutOfADeletedBlock(t *testing.T) {
+	item := func(id, text string, kids ...*Node) *Node {
+		n := &Node{ID: id, Type: "bulleted_list", Children: kids}
+		n.SetDelta(Delta{{Text: text}})
+		return n
+	}
+	base := page(map[string]int64{"p": 10, "c": 10, "z": 10}, item("p", "p", item("c", "c", para("g", "g"))), para("z", "z"))
+	base.Blocks["g"] = 10
+	for _, moverAt := range []int64{100, 300} {
+		mover := page(map[string]int64{"n": moverAt, "c": moverAt, "g": 10, "z": 10}, item("n", "n", item("c", "c", para("g", "g"))), para("z", "z"))
+		mover.Deleted["p"] = moverAt
+		editor := page(map[string]int64{"p": 10, "c": 10, "g": 10, "z": 200}, item("p", "p", item("c", "c", para("g", "g"))), para("z", "Z"))
+		for _, got := range []*Content{first(Merge(base, mover, editor)), first(Merge(base, editor, mover))} {
+			if !reflect.DeepEqual(texts(got), []string{"n", "c", "g", "Z"}) {
+				t.Errorf("mover at %d: texts %v", moverAt, texts(got))
+			}
+			if loc := got.Locate("c"); loc == nil || loc.Parent == nil || loc.Parent.ID != "n" {
+				t.Errorf("mover at %d: c is not in n: %s", moverAt, got.Encode())
+			}
+			if got.Find("p") != nil {
+				t.Errorf("mover at %d: p came back", moverAt)
+			}
+		}
+	}
+}
+
+// Text that looks like markup is escaped, so it reads back as written.
+// Spaces at the ends of a formatted run go outside its markers, and so
+// read back unformatted.
+func TestInlineMarkdownEscapes(t *testing.T) {
+	for _, tc := range []struct{ d, want Delta }{
+		{d: Delta{{Text: "2*3*4"}}},
+		{d: Delta{{Text: "use `x` and ``y``"}}},
+		{d: Delta{{Text: "a\\b \\* c\\"}}},
+		{d: Delta{{Text: "~~not struck~~ [not a link](x)"}}},
+		{d: Delta{{Text: "_x_ and snake_case_name and café_bar"}}},
+		{d: Delta{{Text: "trailing_"}, {Text: "_leading", Attrs: Attrs{Bold: true}}}},
+		{d: Delta{{Text: "x*", Attrs: Attrs{Italic: true}}}},
+		{d: Delta{{Text: "**", Attrs: Attrs{Bold: true}}}},
+		{d: Delta{{Text: "a`b", Attrs: Attrs{Code: true}}}},
+		{d: Delta{{Text: "`x`", Attrs: Attrs{Code: true}}}},
+		{d: Delta{{Text: " pad ", Attrs: Attrs{Code: true}}}},
+		{d: Delta{{Text: "x", Attrs: Attrs{Href: "https://e.com/a_(b)"}}}},
+		{d: Delta{{Text: "y", Attrs: Attrs{Href: "https://e.com/a)b"}}}},
+		{d: Delta{{Text: "z", Attrs: Attrs{Href: `https://e.com/a b\c<d>`}}}},
+		{d: Delta{{Text: "[x] ", Attrs: Attrs{Href: "https://e.com"}}, {Text: "after"}}},
+		{d: Delta{{Text: "# not a heading"}}},
+		{d: Delta{{Text: "a ", Attrs: Attrs{Italic: true}}, {Text: "b"}},
+			want: Delta{{Text: "a", Attrs: Attrs{Italic: true}}, {Text: " b"}}},
+		{d: Delta{{Text: " both ", Attrs: Attrs{Bold: true}}, {Text: "c"}},
+			want: Delta{{Text: " "}, {Text: "both", Attrs: Attrs{Bold: true}}, {Text: " c"}}},
+	} {
+		want := tc.want
+		if want == nil {
+			want = tc.d.Compact()
+		}
+		md := tc.d.ToMarkdown()
+		if got := FromMarkdown(md); !reflect.DeepEqual(got, want) {
+			t.Errorf("%+v wrote %q, which reads back as %+v", tc.d, md, got)
+		}
+	}
+}
+
+// Links as agents write them: parentheses in the url, or in brackets.
+func TestInlineMarkdownLinks(t *testing.T) {
+	for md, href := range map[string]string{
+		"[w](https://en.wikipedia.org/wiki/Go_(game))": "https://en.wikipedia.org/wiki/Go_(game)",
+		"[w](<https://e.com/a b>)":                     "https://e.com/a b",
+		`[w](https://e.com/a\)b)`:                      "https://e.com/a)b",
+	} {
+		if d := FromMarkdown(md); len(d) != 1 || d[0].Text != "w" || d[0].Attrs.Href != href {
+			t.Errorf("%q read as %+v", md, d)
+		}
+	}
+}
+
+func TestEscapeBlockStart(t *testing.T) {
+	for in, want := range map[string]string{
+		"# x":       `\# x`,
+		"### x":     `\### x`,
+		"#tag":      "#tag",
+		"- x":       `\- x`,
+		"-5 below":  "-5 below",
+		"+ x":       `\+ x`,
+		"> x":       `\> x`,
+		"| a |":     `\| a |`,
+		"1. x":      `1\. x`,
+		"12) x":     `12\) x`,
+		"3.14 is π": "3.14 is π",
+		"$$":        `\$$`,
+		"---":       `\---`,
+		"  # x":     `  \# x`,
+		"plain":     "plain",
+	} {
+		if got := EscapeBlockStart(in); got != want {
+			t.Errorf("%q escaped as %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A table replaced with a list keeps none of its cells, whoever made the
+// op; a list's own items stay.
+func TestReplaceTableWithListDropsCells(t *testing.T) {
+	table, _ := TableNode([][]string{{"a", "b"}}, "t")
+	c := FromBlocks([]*Node{table})
+	list := &Node{ID: "t", Type: "bulleted_list", Children: table.Clone().Children}
+	list.SetDelta(Delta{{Text: "now a list"}})
+	list.Children = append(list.Children, para("k", "item"))
+	if err := c.Apply(Op{Op: "replace", ID: "t", Node: list, PrevNode: table}); err != nil {
+		t.Fatal(err)
+	}
+	n := c.Find("t")
+	if n.Type != "bulleted_list" || len(n.Children) != 1 || n.Children[0].ID != "k" {
+		t.Errorf("replaced with %s holding %d blocks", n.Type, len(n.Children))
+	}
+	if len(list.Children) != 3 {
+		t.Error("the op's node changed")
+	}
+}

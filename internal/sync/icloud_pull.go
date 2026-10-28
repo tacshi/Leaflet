@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"time"
 
 	"leaflet/internal/doc"
@@ -32,8 +34,47 @@ func (s *Service) cloudPull(ctx context.Context, me string) error {
 			log.Printf("icloud: pull %s: %v", peer, err)
 		}
 	}
-	s.setWaiting(waiting)
+	if err := s.setWaiting(waiting); err != nil {
+		return err
+	}
 	return s.refreshWaiting(ctx)
+}
+
+// A batch of another device's that does not parse, though iCloud has
+// downloaded it, holds up the device's log. It is read again each pass,
+// as iCloud may still be writing it, and the device that wrote it writes
+// it again when it was its last (checkOwnLog). Only once the device has
+// written batches after it, so will not, and it has stayed so for
+// damagedTries passes over damagedWait, is it passed over: what it held
+// is lost here, which is better than every later change.
+var (
+	damagedTries = 20
+	damagedWait  = 24 * time.Hour
+)
+
+// passDamaged records that batch seq of a device's does not parse, and
+// reports whether to pass over it now. later says whether the device has
+// written batches after it.
+func (s *Service) passDamaged(peer string, seq int64, later bool, err error) bool {
+	key := "icloud.damaged." + peer
+	v, _ := s.st.Value(key)
+	parts := strings.Split(v, "|")
+	now := cloudNow().UnixMilli()
+	first, tries := now, int64(0)
+	if len(parts) == 3 && parts[0] == strconv.FormatInt(seq, 10) {
+		first, _ = strconv.ParseInt(parts[1], 10, 64)
+		tries, _ = strconv.ParseInt(parts[2], 10, 64)
+	} else {
+		log.Printf("icloud: batch %d of %s does not parse; waiting for it: %v", seq, peer, err)
+	}
+	tries++
+	if !later || tries < int64(damagedTries) || now-first < damagedWait.Milliseconds() {
+		_ = s.st.SetValue(key, fmt.Sprintf("%d|%d|%d", seq, first, tries))
+		return false
+	}
+	log.Printf("icloud: batch %d of %s still does not parse, and batches came after it; passing over it", seq, peer)
+	_ = s.st.DeleteValue(key)
+	return true
 }
 
 // pullDevice applies a device's batches after its cursor. It stops at
@@ -60,6 +101,23 @@ func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
 			continue
 		}
 		b, err := s.readBatch(peer, seq)
+		if errors.Is(err, icloud.ErrDamaged) {
+			// A snapshot after it holds it; failing that, the next batch
+			// may be passed over in the end. One after a gap waits with
+			// the gap.
+			if j := s.snapshotAfter(peer, seqs, i+1); j >= 0 {
+				i = j - 1
+				continue
+			}
+			if seq != cursor+1 || !s.passDamaged(peer, seq, i+1 < len(seqs), err) {
+				return nil
+			}
+			cursor = seq
+			if err := s.setInt(key, cursor); err != nil {
+				return err
+			}
+			continue
+		}
 		if err != nil {
 			if errors.Is(err, icloud.ErrNotReady) {
 				return nil
@@ -74,9 +132,18 @@ func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
 			i = j - 1
 			continue
 		}
+		named := false
 		for _, e := range b.Entries {
 			if err := s.applyEntry(peer, e, waiting, changed); err != nil {
 				return fmt.Errorf("batch %d: %w", seq, err)
+			}
+			named = named || e.Kind == "content"
+		}
+		// The pages the batch names wait before the cursor passes it: the
+		// other way round, a crash between would lose them.
+		if named {
+			if err := s.setWaiting(waiting); err != nil {
+				return err
 			}
 		}
 		cursor = seq
@@ -189,7 +256,9 @@ func (s *Service) refreshWaiting(ctx context.Context) error {
 		}
 		delete(waiting, id)
 	}
-	s.setWaiting(waiting)
+	if err := s.setWaiting(waiting); err != nil {
+		return errors.Join(failed, err)
+	}
 	if errors.Is(failed, icloud.ErrNotReady) {
 		return nil
 	}
@@ -269,12 +338,23 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 	if hasBase {
 		base = doc.MustDecode(known.Content)
 	}
+	// The merge is queued to go to the other devices when it differs
+	// from the version merged and from what this device published, unless
+	// a change of this device's waits already.
+	own, _ := s.st.PeerContent(me, pageID)
+	label := func(merged string) string {
+		if merged != string(file.Content) && merged != own.Content && !s.st.HasPending("page_content", pageID) {
+			return "merged from another device"
+		}
+		return ""
+	}
 	// The user or an agent may save while this merges: store the merge
-	// only over the content it merged, and merge again otherwise.
+	// only over the content it merged, and merge again otherwise. It is
+	// stored and queued together, so it cannot be left here only.
 	var next *doc.Content
 	var conflicts []doc.Conflict
 	var before string
-	stored := false
+	stored, queued := false, false
 	for range 3 {
 		local, localErr := s.st.ContentRow(pageID)
 		next, conflicts, before = theirs, nil, ""
@@ -287,14 +367,15 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 			}
 		}
 		beforeStore(pageID)
-		err := s.st.PutSyncedContentOver(pageID, before, next, "", time.Time{}, 0)
+		l := label(next.Encode())
+		err := s.st.PutMergedContentOver(pageID, before, next, l)
 		if errors.Is(err, store.ErrContentChanged) {
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		stored = true
+		stored, queued = true, l != ""
 		break
 	}
 	if !stored {
@@ -312,11 +393,15 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 	if merged != before && s.OnPageContent != nil {
 		s.OnPageContent(pageID)
 	}
-	own, _ := s.st.PeerContent(me, pageID)
-	if merged != string(file.Content) && merged != own.Content && !s.st.HasPending("page_content", pageID) {
-		if err := s.st.Queue("page_content", pageID, map[string]any{"page_id": pageID}, "merged from another device", pageID); err != nil {
+	// Content this device had as merged, so stored nothing, is queued
+	// here.
+	if l := label(merged); !queued && l != "" {
+		if err := s.st.Queue("page_content", pageID, map[string]any{"page_id": pageID}, l, pageID); err != nil {
 			return err
 		}
+		queued = true
+	}
+	if queued {
 		s.Kick()
 	}
 	return nil

@@ -61,3 +61,28 @@ func TestEarlierConversationsInThePanel(t *testing.T) {
 		t.Errorf("%d earlier conversations", len(sess.Past))
 	}
 }
+
+// An agent's comment asked for by someone else says whose it is, so a
+// person's own words can't pass as an agent's.
+func TestAgentCommentSaysWhoAsked(t *testing.T) {
+	a := templatesApp(t)
+	a.session.UserID = "me"
+	a.page = &pageState{members: []store.Member{{UserID: "ann", DisplayName: "Ann"}}}
+	agent := func(by string) store.Comment {
+		return store.Comment{AuthorKind: "agent", AuthorName: "Claude", AuthorID: by}
+	}
+	for _, tc := range []struct {
+		c    store.Comment
+		want string
+	}{
+		{agent("me"), ""},
+		{agent(""), ""},
+		{store.Comment{AuthorKind: "user", AuthorID: "ann"}, ""},
+		{agent("ann"), locales.PanelAskedBy("Ann")},
+		{agent("bob"), locales.PanelAskedBySomeone()},
+	} {
+		if got := a.askedBy(tc.c); got != tc.want {
+			t.Errorf("askedBy(%+v) = %q, want %q", tc.c, got, tc.want)
+		}
+	}
+}

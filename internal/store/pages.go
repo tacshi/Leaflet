@@ -99,8 +99,10 @@ func (s *Store) Children(parentID, spaceID string) ([]Page, error) {
 	return s.queryPages(`deleted_at IS NULL AND parent_id = ? ORDER BY sort_key`, parentID)
 }
 
-func (s *Store) putPage(p Page) error {
-	_, err := s.db.Exec(`INSERT INTO pages (`+pageCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+func (s *Store) putPage(p Page) error { return writePage(s.db, p) }
+
+func writePage(q querier, p Page) error {
+	_, err := q.Exec(`INSERT INTO pages (`+pageCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id, parent_id = excluded.parent_id,
 		folder_id = excluded.folder_id, title = excluded.title, icon = excluded.icon, sort_key = excluded.sort_key,
 		created_by = excluded.created_by, created_at = excluded.created_at, updated_at = excluded.updated_at,
@@ -171,18 +173,24 @@ func (s *Store) CreatePage(o NewPageOptions) (Page, error) {
 		content = doc.Empty()
 	}
 	body := content.Stamped(nil, now.UnixMilli())
-	if err := s.putPage(p); err != nil {
+	// The page, its content and their entries in the outbox are stored
+	// together: a page without its entries would never go to the server.
+	err = s.inTx(func(tx *sql.Tx) error {
+		if err := writePage(tx, p); err != nil {
+			return err
+		}
+		if err := writeContent(tx, p.ID, body, now, nil); err != nil {
+			return err
+		}
+		if err := queue(tx, "pages", p.ID, PageToRemote(p), "new page", p.ID); err != nil {
+			return err
+		}
+		return queue(tx, "page_content", p.ID, map[string]any{"page_id": p.ID}, "new page", p.ID)
+	})
+	if err != nil {
 		return Page{}, err
 	}
-	if err := s.putContent(p.ID, body, now, nil); err != nil {
-		return Page{}, err
-	}
-	if err := s.queuePage(p, "new page"); err != nil {
-		return Page{}, err
-	}
-	if err := s.Queue("page_content", p.ID, map[string]any{"page_id": p.ID}, "new page", p.ID); err != nil {
-		return Page{}, err
-	}
+	s.Notify("outbox", p.ID)
 	s.Notify("pages", p.ID)
 	return p, nil
 }
@@ -497,12 +505,14 @@ type ContentRow struct {
 }
 
 // ContentRow returns a page's stored content.
-func (s *Store) ContentRow(pageID string) (ContentRow, error) {
+func (s *Store) ContentRow(pageID string) (ContentRow, error) { return contentRow(s.db, pageID) }
+
+func contentRow(q querier, pageID string) (ContentRow, error) {
 	var r ContentRow
 	var updated int64
 	var base sql.NullString
 	var remote sql.NullInt64
-	err := s.db.QueryRow(`SELECT page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision FROM page_contents WHERE page_id = ?`, pageID).
+	err := q.QueryRow(`SELECT page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision FROM page_contents WHERE page_id = ?`, pageID).
 		Scan(&r.PageID, &r.Content, &r.PlainText, &updated, &base, &remote, &r.RemoteRevision)
 	r.UpdatedAt, r.BaseContent, r.RemoteUpdatedAt = time.UnixMilli(updated), base.String, fromMs(remote)
 	return r, err
@@ -519,13 +529,17 @@ func (s *Store) Content(pageID string) *doc.Content {
 }
 
 func (s *Store) putContent(pageID string, c *doc.Content, at time.Time, keep *ContentRow) error {
+	return writeContent(s.db, pageID, c, at, keep)
+}
+
+func writeContent(q querier, pageID string, c *doc.Content, at time.Time, keep *ContentRow) error {
 	var base any
 	var remote any
 	var revision int64
 	if keep != nil {
 		base, remote, revision = ns(keep.BaseContent), nt(keep.RemoteUpdatedAt), keep.RemoteRevision
 	}
-	_, err := s.db.Exec(`INSERT INTO page_contents (page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision)
+	_, err := q.Exec(`INSERT INTO page_contents (page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision)
 		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(page_id) DO UPDATE SET content = excluded.content,
 		plain_text = excluded.plain_text, updated_at = excluded.updated_at, base_content = excluded.base_content,
 		remote_updated_at = excluded.remote_updated_at, remote_revision = excluded.remote_revision`,
@@ -549,14 +563,43 @@ func (s *Store) PutSyncedContent(pageID string, c *doc.Content, base string, rem
 // is still what is stored, checked in the statement that writes, and
 // returns ErrContentChanged otherwise.
 func (s *Store) PutSyncedContentOver(pageID, over string, c *doc.Content, base string, remoteAt time.Time, revision int64) error {
+	if err := putSyncedOver(s.db, pageID, over, c, base, remoteAt, revision); err != nil {
+		return err
+	}
+	s.Notify("page_contents", pageID)
+	return nil
+}
+
+// PutMergedContentOver is PutSyncedContentOver for content merged from
+// another device's through iCloud Drive, which has no server base, and,
+// unless label is "", queues it to go out in the same transaction: stored
+// without its entry, this device's merge would never reach the others.
+func (s *Store) PutMergedContentOver(pageID, over string, c *doc.Content, label string) error {
+	err := s.inTx(func(tx *sql.Tx) error {
+		if err := putSyncedOver(tx, pageID, over, c, "", time.Time{}, 0); err != nil || label == "" {
+			return err
+		}
+		return queue(tx, "page_content", pageID, map[string]any{"page_id": pageID}, label, pageID)
+	})
+	if err != nil {
+		return err
+	}
+	if label != "" {
+		s.Notify("outbox", pageID)
+	}
+	s.Notify("page_contents", pageID)
+	return nil
+}
+
+func putSyncedOver(q querier, pageID, over string, c *doc.Content, base string, remoteAt time.Time, revision int64) error {
 	var res sql.Result
 	var err error
 	if over == "" {
-		res, err = s.db.Exec(`INSERT INTO page_contents (page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision)
+		res, err = q.Exec(`INSERT INTO page_contents (page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision)
 			VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(page_id) DO NOTHING`,
 			pageID, c.Encode(), c.PlainText(), ms(time.Now()), ns(base), nt(remoteAt), revision)
 	} else {
-		res, err = s.db.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, updated_at = ?, base_content = ?,
+		res, err = q.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, updated_at = ?, base_content = ?,
 			remote_updated_at = ?, remote_revision = ? WHERE page_id = ? AND content = ?`,
 			c.Encode(), c.PlainText(), ms(time.Now()), ns(base), nt(remoteAt), revision, pageID, over)
 	}
@@ -566,7 +609,6 @@ func (s *Store) PutSyncedContentOver(pageID, over string, c *doc.Content, base s
 	if n, err := res.RowsAffected(); err != nil || n == 0 {
 		return ErrContentChanged
 	}
-	s.Notify("page_contents", pageID)
 	return nil
 }
 
@@ -588,54 +630,68 @@ func (s *Store) SaveContent(pageID string, c *doc.Content) (*doc.Content, bool, 
 }
 
 // SaveContentOver is SaveContent for content made from the stored content
-// over: it saves only while that is still what is stored, checked in the
-// statement that writes, and returns ErrContentChanged otherwise.
+// over ("" when there was none): it saves only while that is still what is
+// stored, and returns ErrContentChanged otherwise.
 func (s *Store) SaveContentOver(pageID, over string, c *doc.Content) (*doc.Content, bool, error) {
 	return s.saveContent(pageID, c, &over)
 }
 
+// saveContent reads the stored content, stores the new content and queues
+// it in one transaction, which holds the write lock throughout: a pull
+// cannot store the server's content in between, finding nothing queued,
+// and a save that fails leaves nothing half done.
 func (s *Store) saveContent(pageID string, c *doc.Content, over *string) (*doc.Content, bool, error) {
-	row, err := s.ContentRow(pageID)
-	if over != nil && (err != nil || row.Content != *over) {
-		return nil, false, ErrContentChanged
-	}
-	var previous *doc.Content
-	if err == nil {
-		previous = doc.MustDecode(row.Content)
-	}
-	now := time.Now()
-	stamped := c.Stamped(previous, now.UnixMilli())
-	if previous != nil && previous.Encode() == stamped.Encode() {
-		return stamped, false, nil
-	}
-	if over != nil {
-		res, err := s.db.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, updated_at = ? WHERE page_id = ? AND content = ?`,
-			stamped.Encode(), stamped.PlainText(), ms(now), pageID, *over)
-		if err != nil {
-			return nil, false, err
+	var stamped *doc.Content
+	changed := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		row, err := contentRow(tx, pageID)
+		if over != nil {
+			// No content is stored as "", so "" can only mean none.
+			none := errors.Is(err, sql.ErrNoRows)
+			if *over == "" && !none || *over != "" && (err != nil || row.Content != *over) {
+				return ErrContentChanged
+			}
 		}
-		if n, err := res.RowsAffected(); err != nil || n == 0 {
-			return nil, false, ErrContentChanged
+		var previous *doc.Content
+		switch {
+		case err == nil:
+			previous = doc.MustDecode(row.Content)
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
 		}
-	} else if err := s.putContent(pageID, stamped, now, &row); err != nil {
+		now := time.Now()
+		stamped = c.Stamped(previous, now.UnixMilli())
+		if previous != nil && previous.Encode() == stamped.Encode() {
+			return nil
+		}
+		if err := writeContent(tx, pageID, stamped, now, &row); err != nil {
+			return err
+		}
+		blocks := len(stamped.Blocks)
+		if row.BaseContent != "" {
+			blocks = len(doc.ChangedBlocks(doc.MustDecode(row.BaseContent), stamped))
+		}
+		label := fmt.Sprintf("%d blocks edited", blocks)
+		if blocks == 1 {
+			label = "1 block edited"
+		}
+		if err := queue(tx, "page_content", pageID, map[string]any{"page_id": pageID}, label, pageID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE pages SET updated_at = ? WHERE id = ?`, ms(now), pageID); err != nil {
+			return err
+		}
+		changed = true
+		return nil
+	})
+	if err != nil {
 		return nil, false, err
 	}
-	changed := len(stamped.Blocks)
-	if row.BaseContent != "" {
-		changed = len(doc.ChangedBlocks(doc.MustDecode(row.BaseContent), stamped))
+	if changed {
+		s.Notify("outbox", pageID)
+		s.Notify("page_contents", pageID)
 	}
-	label := fmt.Sprintf("%d blocks edited", changed)
-	if changed == 1 {
-		label = "1 block edited"
-	}
-	if err := s.Queue("page_content", pageID, map[string]any{"page_id": pageID}, label, pageID); err != nil {
-		return nil, false, err
-	}
-	if _, err := s.db.Exec(`UPDATE pages SET updated_at = ? WHERE id = ?`, ms(now), pageID); err != nil {
-		return nil, false, err
-	}
-	s.Notify("page_contents", pageID)
-	return stamped, true, nil
+	return stamped, changed, nil
 }
 
 // HistoryEntry is a snapshot of a page.
@@ -654,23 +710,48 @@ type HistoryEntry struct {
 // AddHistory keeps a snapshot of a page.
 func (s *Store) AddHistory(pageID string, c *doc.Content, reason, aiJobID, label string) error {
 	h := HistoryEntry{ID: doc.NewRowID(), PageID: pageID, Content: c.Encode(), Reason: reason, AIJobID: aiJobID, Label: label, CreatedAt: time.Now()}
-	if _, err := s.db.Exec(`INSERT INTO page_history (id, page_id, content, reason, ai_job_id, label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		h.ID, h.PageID, h.Content, h.Reason, ns(h.AIJobID), h.Label, ms(h.CreatedAt)); err != nil {
+	remote := HistoryToRemote(h, s.Session().UserID)
+	err := s.inTx(func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`INSERT INTO page_history (id, page_id, content, reason, ai_job_id, label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+			h.ID, h.PageID, h.Content, h.Reason, ns(h.AIJobID), h.Label, ms(h.CreatedAt)); err != nil {
+			return err
+		}
+		if err := queue(tx, "page_history", h.ID, remote, "page history", pageID); err != nil {
+			return err
+		}
+		return pruneHistory(tx, pageID)
+	})
+	if err != nil {
 		return err
 	}
-	if err := s.Queue("page_history", h.ID, HistoryToRemote(h, s.Session().UserID), "page history", pageID); err != nil {
-		return err
-	}
+	s.Notify("outbox", pageID)
 	s.Notify("page_history", pageID)
 	return nil
+}
+
+// newestHistory selects the ids of a page's newest 50 snapshots, which
+// History shows with its named versions. Of two taken in the same
+// millisecond, the one stored later is newer.
+const newestHistory = `SELECT id FROM page_history WHERE page_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 50`
+
+// pruneHistory removes the snapshots of a page History no longer shows:
+// all but its newest 50 and its named versions. One still waiting to go
+// up leaves the queue with it, so the server never gets it.
+func pruneHistory(tx *sql.Tx, pageID string) error {
+	old := `SELECT id FROM page_history WHERE page_id = ? AND reason <> 'manual' AND id NOT IN (` + newestHistory + `)`
+	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'page_history' AND entity_id IN (`+old+`)`, pageID, pageID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`DELETE FROM page_history WHERE id IN (`+old+`)`, pageID, pageID)
+	return err
 }
 
 // History returns a page's newest 50 snapshots, and the versions named
 // before them.
 func (s *Store) History(pageID string) ([]HistoryEntry, error) {
 	rows, err := s.db.Query(`SELECT id, page_id, content, reason, ai_job_id, label, created_at FROM page_history
-		WHERE page_id = ? AND (reason = 'manual' OR id IN (SELECT id FROM page_history WHERE page_id = ? ORDER BY created_at DESC LIMIT 50))
-		ORDER BY created_at DESC`, pageID, pageID)
+		WHERE page_id = ? AND (reason = 'manual' OR id IN (`+newestHistory+`))
+		ORDER BY created_at DESC, rowid DESC`, pageID, pageID)
 	if err != nil {
 		return nil, err
 	}

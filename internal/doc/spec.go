@@ -2,6 +2,7 @@ package doc
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -24,6 +25,9 @@ var AgentTypes = []string{
 }
 
 var chartTypes = map[string]bool{"bar": true, "line": true, "pie": true}
+
+// maxEmbedHTML caps an embed's source, as the server does.
+const maxEmbedHTML = 200_000
 
 // SpecToNode turns a BlockSpec (docs/protocol.md §2) into a block. id is
 // kept when given.
@@ -119,6 +123,9 @@ func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 		html, _ := e["html"].(string)
 		if strings.TrimSpace(html) == "" {
 			return nil, toolErr("An embed block needs embed.html.")
+		}
+		if len(html) > maxEmbedHTML {
+			return nil, toolErr("embed.html must be under 200 KB.")
 		}
 		title, _ := e["title"].(string)
 		if title == "" {
@@ -284,6 +291,18 @@ func TableNode(rows [][]string, id string) (*Node, error) {
 		}
 	}
 	return n, nil
+}
+
+// DropCells takes table cells out of a block that is no longer a table,
+// as when a replace makes a list of one: its nested items, if any, stay.
+func DropCells(n *Node) {
+	if n.Type == "table" {
+		return
+	}
+	n.Children = slices.DeleteFunc(n.Children, func(k *Node) bool { return k.Type == "table/cell" })
+	if len(n.Children) == 0 {
+		n.Children = nil
+	}
 }
 
 // TableCell returns the cell of a table at a row and column, or nil.

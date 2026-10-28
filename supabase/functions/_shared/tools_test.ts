@@ -336,3 +336,20 @@ Deno.test("a to-do keeps its due date", () => {
   const bad = specToNode({ type: "todo_list", text: "x", due: "Friday" }, opts);
   assertEquals(bad.data?.due, undefined);
 });
+
+Deno.test("embed and image blocks match the Go spec", () => {
+  const embed = specToNode({ type: "embed", embed: { html: "<p>hi</p>" } }, { newId: () => "e", author: "Claude" });
+  assertEquals(embed.data, { title: "Interactive embed", html: "<p>hi</p>", height: 320, author: "Claude" });
+  const titled = specToNode({ type: "embed", embed: { html: "<p>hi</p>", title: "Timer", height: 50 } }, {
+    newId: () => "e",
+  });
+  assertEquals(titled.data, { title: "Timer", html: "<p>hi</p>", height: 120, author: "" });
+  const image = specToNode({ type: "image", image: { url: "https://example.com/a.png", alt: "A chart" } }, {
+    newId: () => "i",
+  });
+  assertEquals(image.data, { url: "https://example.com/a.png", align: "center", alt: "A chart" });
+  assertEquals(
+    specToNode({ type: "image", image: { url: "https://example.com/a.png" } }, { newId: () => "i" }).data?.alt,
+    "",
+  );
+});

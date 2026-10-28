@@ -3,6 +3,9 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -469,6 +472,59 @@ func TestHistoryKeepsNamedVersions(t *testing.T) {
 	}
 }
 
+// A page keeps only the snapshots History shows: its newest 50 and its
+// named versions. One pruned before it went up leaves the queue, and
+// another page's are left alone.
+func TestHistoryPrunesWhatItNoLongerShows(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "PRD"})
+	other, _ := s.CreatePage(NewPageOptions{Title: "Notes"})
+	c := s.Content(p.ID)
+	if err := s.AddHistory(other.ID, c, "autosave", "", "Autosave"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddHistory(p.ID, c, "manual", "", "Sent to legal"); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 60; i++ {
+		if err := s.AddHistory(p.ID, c, "autosave", "", "Autosave "+strconv.Itoa(i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	shown, err := s.History(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shown) != 51 || shown[0].Label != "Autosave 59" || shown[49].Label != "Autosave 10" || shown[50].Label != "Sent to legal" {
+		t.Fatalf("%d shown: first %q, 50th %q, last %q", len(shown), shown[0].Label, shown[49].Label, shown[len(shown)-1].Label)
+	}
+	var kept int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM page_history WHERE page_id = ?`, p.ID).Scan(&kept); err != nil || kept != 51 {
+		t.Errorf("%d kept, %v", kept, err)
+	}
+	ids := map[string]bool{}
+	for _, h := range shown {
+		ids[h.ID] = true
+	}
+	entries, _ := s.Pending()
+	queued := 0
+	for _, e := range entries {
+		if e.Entity != "page_history" || e.PageID != p.ID {
+			continue
+		}
+		queued++
+		if !ids[e.EntityID] {
+			t.Errorf("snapshot %s was pruned but is still queued", e.EntityID)
+		}
+	}
+	if queued != 51 {
+		t.Errorf("%d snapshots queued, want 51", queued)
+	}
+	if h, _ := s.History(other.ID); len(h) != 1 {
+		t.Errorf("the other page has %d snapshots", len(h))
+	}
+}
+
 // To-dos come from pages, not templates.
 func TestTodos(t *testing.T) {
 	s := open(t)
@@ -534,6 +590,26 @@ func TestSaveContentOver(t *testing.T) {
 		t.Fatalf("save %v %v", changed, err)
 	}
 	if got := s.Content(p.ID).PlainText(); !strings.Contains(got, "From the agent") {
+		t.Errorf("content %q", got)
+	}
+}
+
+// Saving over no content saves only while the page has none.
+func TestSaveContentOverNone(t *testing.T) {
+	s := open(t)
+	c := &doc.Content{Children: []*doc.Node{{ID: "a", Type: "paragraph"}}}
+	c.Children[0].SetDelta(doc.Delta{{Text: "First"}})
+	if _, changed, err := s.SaveContentOver("p1", "", c); err != nil || !changed {
+		t.Fatalf("save over none: %v %v", changed, err)
+	}
+	if !s.HasPending("page_content", "p1") {
+		t.Error("not queued")
+	}
+	c.Children[0].SetDelta(doc.Delta{{Text: "Second"}})
+	if _, _, err := s.SaveContentOver("p1", "", c); !errors.Is(err, ErrContentChanged) {
+		t.Fatalf("saved over content as over none: %v", err)
+	}
+	if got := s.Content("p1").PlainText(); !strings.Contains(got, "First") {
 		t.Errorf("content %q", got)
 	}
 }
@@ -674,5 +750,265 @@ func TestADatabaseGainsTheICloudTables(t *testing.T) {
 	}
 	if _, ok := s.PeerContent("d1", "p1"); ok {
 		t.Error("peer content kept after ForgetICloud")
+	}
+}
+
+// A save stores its content and queues it together: content another
+// process finds changed is always waiting to go up, so a pull never takes
+// it for the server's.
+func TestSavedContentIsAlwaysQueued(t *testing.T) {
+	dir := t.TempDir()
+	app, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = app.Close() }()
+	if _, err := app.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	p, err := app.CreatePage(NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent, _ := app.Pending()
+	for _, e := range sent {
+		_ = app.Dequeue(e)
+	}
+	first, _ := app.ContentRow(p.ID)
+	sync, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sync.Close() }()
+	stop := make(chan struct{})
+	lost := make(chan string, 1)
+	go func() {
+		defer close(lost)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			row, err := sync.ContentRow(p.ID)
+			if err == nil && row.Content != first.Content && !sync.HasPending("page_content", p.ID) {
+				lost <- row.Content
+				return
+			}
+		}
+	}()
+	for i := range 200 {
+		c := doc.MustDecode(first.Content)
+		c.Children[0].SetDelta(doc.Delta{{Text: "edit " + strconv.Itoa(i)}})
+		if _, _, err := app.SaveContent(p.ID, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(stop)
+	if c, ok := <-lost; ok {
+		t.Fatalf("content stored without its entry in the outbox: %s", c)
+	}
+}
+
+// A save whose entry in the outbox cannot be stored stores nothing, so
+// the edit is not kept here only, never to go up.
+func TestASaveThatCannotQueueStoresNothing(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _ := s.ContentRow(p.ID)
+	if _, err := s.db.Exec(`DROP TABLE outbox`); err != nil {
+		t.Fatal(err)
+	}
+	c := doc.MustDecode(before.Content)
+	c.Children[0].SetDelta(doc.Delta{{Text: "Typed"}})
+	if _, _, err := s.SaveContent(p.ID, c); err == nil {
+		t.Fatal("saved with no outbox")
+	}
+	if after, _ := s.ContentRow(p.ID); after.Content != before.Content {
+		t.Errorf("content stored without its entry: %s", after.Content)
+	}
+	if _, err := s.CreatePage(NewPageOptions{ID: "p2", Title: "Next"}); err == nil {
+		t.Fatal("created a page with no outbox")
+	}
+	if _, err := s.Page("p2"); !IsNotFound(err) {
+		t.Errorf("page stored without its entry: %v", err)
+	}
+	if s.Content("p2") != nil {
+		t.Error("content stored without its entry")
+	}
+}
+
+func TestADatabaseGainsTheIndexes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	// Schema 1, without the indexes schema 2 added.
+	var before []string
+	for _, stmt := range strings.Split(schema, ";") {
+		if !strings.Contains(stmt, "pages_parent") && !strings.Contains(stmt, "page_history_page") && !strings.Contains(stmt, "peer_contents_page") {
+			before = append(before, stmt)
+		}
+	}
+	writeDB(t, path, strings.Join(before, ";"), `PRAGMA user_version = 1`,
+		`INSERT INTO pages (id, space_id, parent_id, title, sort_key, created_at, updated_at) VALUES ('p2', 's1', 'p1', 'Sub', 'a', 1, 1)`)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if v := userVersion(t, s); v != len(migrations) {
+		t.Errorf("schema %d, want %d", v, len(migrations))
+	}
+	for _, name := range []string{"pages_parent", "page_history_page", "peer_contents_page"} {
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&n); err != nil || n != 1 {
+			t.Errorf("index %s: %d, %v", name, n, err)
+		}
+	}
+	if kids, err := s.Children("p1", "s1"); err != nil || len(kids) != 1 {
+		t.Errorf("children %+v, %v", kids, err)
+	}
+	// What the queries use.
+	for q, index := range map[string]string{
+		`SELECT id FROM pages WHERE parent_id = 'p1' AND deleted_at IS NULL ORDER BY sort_key`:      "pages_parent",
+		`SELECT created_at FROM page_history WHERE page_id = 'p1' ORDER BY created_at DESC LIMIT 1`: "page_history_page",
+		`SELECT peer_id, version, content FROM peer_contents WHERE page_id = 'p1' ORDER BY peer_id`: "peer_contents_page",
+	} {
+		var plan strings.Builder
+		rows, err := s.db.Query(`EXPLAIN QUERY PLAN ` + q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			_ = rows.Scan(&id, &parent, &unused, &detail)
+			plan.WriteString(detail + "\n")
+		}
+		_ = rows.Close()
+		if !strings.Contains(plan.String(), index) {
+			t.Errorf("%s\nplan:\n%s", q, plan.String())
+		}
+	}
+}
+
+// A database from before invites gains whether each member accepted, as
+// a new one has it; the members it kept had all accepted.
+func TestADatabaseGainsMembersAccepted(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	before := strings.Replace(schema, ", accepted INTEGER NOT NULL DEFAULT 1", "", 1)
+	if before == schema {
+		t.Fatal("schema has no accepted column to leave out")
+	}
+	writeDB(t, path, before, `PRAGMA user_version = 2`,
+		`INSERT INTO page_members (page_id, user_id, role, display_name, email) VALUES ('p1', 'u2', 'editor', 'Sam', 'sam@example.com')`)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if v := userVersion(t, s); v != len(migrations) {
+		t.Errorf("schema %d, want %d", v, len(migrations))
+	}
+	members, err := s.Members("p1")
+	if err != nil || len(members) != 1 || !members[0].Accepted {
+		t.Fatalf("members %+v, %v", members, err)
+	}
+	if err := s.SetMembers("p1", []Member{{PageID: "p1", UserID: "u3", Role: "viewer", Email: "kim@example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	if members, _ := s.Members("p1"); len(members) != 1 || members[0].Accepted {
+		t.Errorf("an invited member reads back %+v", members)
+	}
+	columns := func(s *Store) string {
+		rows, err := s.db.Query(`SELECT name, type, "notnull", COALESCE(dflt_value, '') FROM pragma_table_info('page_members') ORDER BY cid`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var b strings.Builder
+		for rows.Next() {
+			var name, typ, def string
+			var notNull int
+			_ = rows.Scan(&name, &typ, &notNull, &def)
+			fmt.Fprintf(&b, "%s %s %d %s;", name, typ, notNull, def)
+		}
+		return b.String()
+	}
+	if got, want := columns(s), columns(open(t)); got != want {
+		t.Errorf("upgraded page_members\n%s\nnew\n%s", got, want)
+	}
+}
+
+// Deleting a file removes its copy in the data folder, drops its upload
+// still waiting, and queues the removal of its stored copy after the
+// deletion. A copy outside the data folder is the user's, and stays.
+func TestDeletingAFileRemovesItsCopy(t *testing.T) {
+	s := open(t)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f.LocalPath); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the copy in the data folder stayed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(f.LocalPath)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the file's folder stayed: %v", err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("the file the user added went: %v", err)
+	}
+	var queued []string
+	entries, _ := s.Pending()
+	for _, e := range entries {
+		queued = append(queued, e.Entity+" "+e.EntityID)
+	}
+	if want := "files " + f.ID + ",storage_delete files/" + f.ID; strings.Join(queued, ",") != want {
+		t.Errorf("queued %v, want %s", queued, want)
+	}
+
+	outside := File{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, Name: "notes.txt", LocalPath: src,
+		StoragePath: "space/x/notes.txt", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := s.PutFile(outside); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteFile(outside); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("a file outside the data folder went: %v", err)
+	}
+}
+
+// A file deleted on another device loses its copy here as the deletion
+// arrives.
+func TestAPulledDeletionRemovesTheCopy(t *testing.T) {
+	s := open(t)
+	id := doc.NewRowID()
+	row := map[string]any{"id": id, "space_id": s.Session().SpaceID, "name": "plan.pdf", "storage_path": "space/" + id + "/plan.pdf",
+		"created_at": "2026-10-01T00:00:00Z", "updated_at": "2026-10-01T00:00:00Z"}
+	if err := s.PutRemoteFile(row); err != nil {
+		t.Fatal(err)
+	}
+	local, err := s.DownloadedFile(id, []byte("%PDF"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	row["deleted_at"], row["updated_at"] = "2026-10-02T00:00:00Z", "2026-10-02T00:00:00Z"
+	if err := s.PutRemoteFile(row); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(local); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the copy stayed: %v", err)
 	}
 }

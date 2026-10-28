@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -36,8 +37,11 @@ type Route struct {
 
 // App is the state of the app, kept for as long as it runs.
 type App struct {
-	st      *store.Store
-	win     *mygo.Window
+	st  *store.Store
+	win *mygo.Window
+	// post, in tests that have no window, takes what update would run on
+	// the main thread.
+	post    func(func())
 	backend *remote.Client
 	sync    *syncsvc.Service
 	hub     *agents.Hub
@@ -65,6 +69,10 @@ type App struct {
 	syncing    bool
 	syncError  string
 	syncErr    error
+	// invites are the pages shared with the user that wait for them to
+	// accept, as sync last read them; inviteBusy those being answered.
+	invites    []syncsvc.Invite
+	inviteBusy map[string]bool
 	// icloudStop stops watching the Leaflet folder in iCloud Drive.
 	icloudStop context.CancelFunc
 
@@ -158,9 +166,12 @@ type pageState struct {
 	titleAtEnd, titleLeave bool
 	// loaded is the stored content the editor started from or last saved,
 	// and stored that content as the store has it, encoded, before any
-	// change that is no edit (page mentions' new titles).
+	// change that is no edit (page mentions' new titles). row is the
+	// stored content exactly as the store has it ("" when it has none),
+	// for a save to go only over it.
 	loaded  *doc.Content
 	stored  string
+	row     string
 	dirty   bool
 	timer   *time.Timer
 	threads []store.Thread
@@ -240,7 +251,7 @@ func (a *App) start() error {
 		return err
 	}
 	a.session = st.Session()
-	a.images = newImageCache(filepath.Join(st.Dir, "images"))
+	a.images = newImageCache(st.Dir, filepath.Join(st.Dir, "images"))
 	// Links in agents' replies and previews: a page link opens the page
 	// here, a web link the browser.
 	a.md.OnLink = func(url string) {
@@ -274,6 +285,7 @@ func (a *App) start() error {
 	}
 	a.sync.Offline = func() bool { return a.settings.WorkOffline }
 	a.sync.KeepAudio = func() string { return a.settings.KeepAudioOnDevice }
+	a.startInvites()
 	a.rec.Blobs = a.sync
 	a.startICloud()
 	st.Subscribe(func(ch store.Change) { a.update(func() { a.reload(ch) }) })
@@ -326,7 +338,11 @@ func (a *App) start() error {
 		if a.tray != nil && !a.quitting {
 			e.PreventDefault()
 			a.win.Hide()
+			return
 		}
+		// The recording's capture page closes with the window: the
+		// recording ends, keeping what it has.
+		a.rec.Stop()
 	})
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
 	mygo.App.OnActivate(func(visible bool) {
@@ -344,6 +360,10 @@ func (a *App) start() error {
 // update runs fn on the main thread and redraws.
 func (a *App) update(fn func()) {
 	if a.win == nil {
+		if a.post != nil {
+			a.post(fn)
+			return
+		}
 		fn()
 		return
 	}
@@ -642,10 +662,8 @@ func (a *App) loadPage(id string) {
 		a.route = Route{Kind: "home"}
 		return
 	}
-	content := a.st.Content(id)
-	if content == nil {
-		content = doc.Empty()
-	}
+	row, _ := a.st.ContentRow(id)
+	content := doc.MustDecode(row.Content)
 	stored := content.Encode()
 	// Mentions of pages show their titles now, as renamed since; this
 	// is no edit, so it saves with the page's next one. The store has
@@ -654,7 +672,7 @@ func (a *App) loadPage(id string) {
 		p, err := a.st.Page(id)
 		return p.DisplayTitle(), err == nil
 	})
-	ps := &pageState{id: id, title: p.Title, loaded: content.Copy(), stored: stored, tinted: map[string]bool{}}
+	ps := &pageState{id: id, title: p.Title, loaded: content.Copy(), stored: stored, row: row.Content, tinted: map[string]bool{}}
 	ed := editor.New(content, &host{a: a})
 	ed.Size = float32(a.settings.TextSize)
 	ed.ReadOnly = !a.canEdit(id)
@@ -685,6 +703,7 @@ func (a *App) closePage() {
 	a.sync.SetOpen(a.page.id, false)
 	a.page = nil
 	a.dropVideos()
+	dropPlayers()
 }
 
 // canEdit reports whether the user may change a page.
@@ -719,23 +738,36 @@ func (a *App) savePage() {
 		return
 	}
 	// What was stored since, by another process, merges in first, so the
-	// save keeps it.
-	a.externalContent(ps.id)
-	ps.dirty = false
-	if ps.timer != nil {
-		ps.timer.Stop()
-	}
-	stamped, changed, err := a.st.SaveContent(ps.id, ps.editor.Content)
-	if err != nil {
-		a.toast(locales.AppErrorSave(err.Error()))
+	// save keeps it. The save goes only over what merged: what is stored
+	// in between merges on the next try instead of being written over.
+	for range 5 {
+		a.externalContent(ps.id)
+		if ps.timer != nil {
+			ps.timer.Stop()
+		}
+		// An empty row saves only while the page still has none.
+		stamped, changed, err := a.st.SaveContentOver(ps.id, ps.row, ps.editor.Content)
+		if errors.Is(err, store.ErrContentChanged) {
+			continue
+		}
+		if err != nil {
+			// The edits wait, still to be saved, for the next save or the
+			// page closing.
+			a.toast(locales.AppErrorSave(err.Error()))
+			return
+		}
+		ps.dirty = false
+		ps.editor.Content.Blocks, ps.editor.Content.Deleted = stamped.Blocks, stamped.Deleted
+		ps.loaded, ps.stored = stamped.Copy(), stamped.Encode()
+		if changed {
+			ps.row = ps.stored
+			_ = a.st.MaybeAutosave(ps.id, stamped)
+			a.sync.Kick()
+		}
 		return
 	}
-	ps.editor.Content.Blocks, ps.editor.Content.Deleted = stamped.Blocks, stamped.Deleted
-	ps.loaded, ps.stored = stamped.Copy(), stamped.Encode()
-	if changed {
-		_ = a.st.MaybeAutosave(ps.id, stamped)
-		a.sync.Kick()
-	}
+	// Stored over each time, the edits wait for the save that merging
+	// them scheduled.
 }
 
 // flush saves what is waiting to be saved.
@@ -768,8 +800,13 @@ func (a *App) externalContent(pageID string) {
 	if ps == nil || ps.id != pageID {
 		return
 	}
-	stored := a.st.Content(pageID)
-	if stored == nil || stored.Encode() == ps.stored {
+	row, err := a.st.ContentRow(pageID)
+	if err != nil || row.Content == ps.row {
+		return
+	}
+	stored := doc.MustDecode(row.Content)
+	if stored.Encode() == ps.stored {
+		ps.row = row.Content
 		return
 	}
 	if ps.dirty {
@@ -783,12 +820,12 @@ func (a *App) externalContent(pageID string) {
 			}
 		}
 		ps.editor.Replace(merged)
-		ps.loaded, ps.stored = stored.Copy(), stored.Encode()
+		ps.loaded, ps.stored, ps.row = stored.Copy(), stored.Encode(), row.Content
 		a.scheduleSave()
 		return
 	}
 	ps.editor.Replace(stored.Copy())
-	ps.loaded, ps.stored = stored.Copy(), stored.Encode()
+	ps.loaded, ps.stored, ps.row = stored.Copy(), stored.Encode(), row.Content
 }
 
 // outsideChange rereads everything after another process wrote to the
@@ -863,14 +900,48 @@ func (a *App) linkSubpage(parent, id, after string) {
 		a.savePage()
 		return
 	}
-	c := a.st.Content(parent)
-	if c == nil {
-		c = doc.Empty()
-	}
-	insert(c)
-	if _, _, err := a.st.SaveContent(parent, c); err != nil {
+	err := a.saveStored(parent, func(c *doc.Content) *doc.Content {
+		if c == nil {
+			c = doc.Empty()
+		}
+		insert(c)
+		return c
+	})
+	if err != nil {
 		a.toast(locales.AppErrorLinkSubpage(err.Error()))
 	}
+}
+
+// saveStored changes the stored content of a page the editor does not
+// have open: edit is given it (nil when this device has none) and returns
+// it changed, or nil to leave it. The save goes only over what edit was
+// given, so content synced in between is not written over: edit runs
+// again on that.
+func (a *App) saveStored(pageID string, edit func(c *doc.Content) *doc.Content) error {
+	err := store.ErrContentChanged
+	for range 5 {
+		var over string
+		var c *doc.Content
+		row, rowErr := a.st.ContentRow(pageID)
+		switch {
+		case rowErr == nil:
+			// Content that can't be read is left alone, not saved over.
+			if c, err = doc.Decode(row.Content); err != nil {
+				return err
+			}
+			over = row.Content
+		case !store.IsNotFound(rowErr):
+			return rowErr
+		}
+		if c = edit(c); c == nil {
+			return nil
+		}
+		_, _, err = a.st.SaveContentOver(pageID, over, c)
+		if !errors.Is(err, store.ErrContentChanged) {
+			return err
+		}
+	}
+	return err
 }
 
 // unlinkSubpage takes the links to subpage id out of page parent, as when
@@ -892,12 +963,13 @@ func (a *App) unlinkSubpage(parent, id string) {
 		a.savePage()
 		return
 	}
-	c := a.st.Content(parent)
-	if c == nil {
-		return
-	}
-	remove(c)
-	if _, _, err := a.st.SaveContent(parent, c); err != nil {
+	err := a.saveStored(parent, func(c *doc.Content) *doc.Content {
+		if c != nil {
+			remove(c)
+		}
+		return c
+	})
+	if err != nil {
 		a.toast(locales.AppErrorUnlinkSubpage(err.Error()))
 	}
 }

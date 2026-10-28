@@ -44,6 +44,9 @@ type Service struct {
 	// ICloud is the Leaflet folder in iCloud Drive, which sync goes
 	// through instead of Supabase while SetICloud has turned it on.
 	ICloud icloud.Folder
+	// OnInvites runs when the pages shared with the user that wait for
+	// them to accept (Invites) have changed.
+	OnInvites func()
 
 	cloudOn atomic.Bool
 	kick    chan struct{}
@@ -51,6 +54,13 @@ type Service struct {
 	running gosync.Mutex
 	open    map[string]bool
 	started bool
+	// ownLogChecked is set once a pass has read this device's last batch
+	// in iCloud Drive (checkOwnLog).
+	ownLogChecked bool
+	// invites are the account's invites (invitesOf) as the last pass
+	// read them.
+	invites   []Invite
+	invitesOf string
 }
 
 // New returns the sync service.
@@ -263,7 +273,99 @@ func (s *Service) pass(ctx context.Context) error {
 	if err := s.push(ctx); err != nil {
 		return err
 	}
-	return s.pull(ctx)
+	err := s.pull(ctx)
+	s.readInvites(ctx)
+	return err
+}
+
+// Invite is a page someone shared with the user, which reaches them once
+// they accept it (docs/protocol.md §6).
+type Invite struct {
+	PageID string
+	Title  string
+	// Role is viewer or editor.
+	Role string
+	// Inviter is the name of who shared it, or "".
+	Inviter string
+	At      time.Time
+}
+
+// Invites returns the signed-in account's invites, newest first, as the
+// last pass read them: none once signed out.
+func (s *Service) Invites() []Invite {
+	uid := s.be.UserID()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if uid == "" || s.invitesOf != uid {
+		return nil
+	}
+	return slices.Clone(s.invites)
+}
+
+// readInvites reads the account's invites. One that cannot be read now
+// leaves the list as it was.
+func (s *Service) readInvites(ctx context.Context) {
+	uid := s.be.UserID()
+	res, err := s.be.RPC(ctx, "page_invites", map[string]any{})
+	if err != nil {
+		if !remote.IsNetwork(err) && !errors.Is(err, remote.ErrSignedOut) {
+			log.Printf("sync: invites: %v", err)
+		}
+		return
+	}
+	var list []Invite
+	rows, _ := res.([]any)
+	for _, r := range rows {
+		m, _ := r.(map[string]any)
+		if store.S(m, "page_id") == "" {
+			continue
+		}
+		list = append(list, Invite{PageID: store.S(m, "page_id"), Title: store.S(m, "title"), Role: store.S(m, "role"),
+			Inviter: store.S(m, "inviter_name"), At: store.TimeOrZero(m["created_at"]).UTC()})
+	}
+	s.setInvites(uid, list)
+}
+
+func (s *Service) setInvites(uid string, list []Invite) {
+	s.mu.Lock()
+	same := s.invitesOf == uid && slices.Equal(s.invites, list)
+	s.invites, s.invitesOf = list, uid
+	s.mu.Unlock()
+	if !same && s.OnInvites != nil {
+		s.OnInvites()
+	}
+}
+
+// ClearInvites forgets the invites, as the account signs out.
+func (s *Service) ClearInvites() { s.setInvites("", nil) }
+
+// AcceptInvite accepts an invite: the page comes with the next pass,
+// which it asks for.
+func (s *Service) AcceptInvite(ctx context.Context, pageID string) error {
+	if _, err := s.be.RPC(ctx, "accept_page_invite", map[string]any{"p_page_id": pageID}); err != nil {
+		return err
+	}
+	s.dropInvite(pageID)
+	s.Kick()
+	return nil
+}
+
+// DeclineInvite declines an invite; the page never comes.
+func (s *Service) DeclineInvite(ctx context.Context, pageID string) error {
+	if _, err := s.be.RPC(ctx, "decline_page_invite", map[string]any{"p_page_id": pageID}); err != nil {
+		return err
+	}
+	s.dropInvite(pageID)
+	return nil
+}
+
+// dropInvite takes an invite answered off the list.
+func (s *Service) dropInvite(pageID string) {
+	s.mu.Lock()
+	list := slices.DeleteFunc(slices.Clone(s.invites), func(i Invite) bool { return i.PageID == pageID })
+	uid := s.invitesOf
+	s.mu.Unlock()
+	s.setInvites(uid, list)
 }
 
 // resolveSpace, after sign-in, moves the pages made on this device into
@@ -346,7 +448,9 @@ func (s *Service) requeueAll(spaceID string) error {
 		failed = errors.Join(failed, s.st.Queue("comments", c.ID, store.CommentToRemote(c), "", c.PageID))
 	}
 	moves := map[string]bool{}
-	files, _ := s.st.Files()
+	// Deleted files go too, as deleted pages do, so a deletion sent in a
+	// batch that was lost goes again: its stored copy may be gone.
+	files, _ := s.st.AllFiles()
 	for _, f := range files {
 		if err := s.requeueFile(ctx, f, spaceID); err != nil {
 			moves["files:"+f.ID] = true
@@ -405,10 +509,11 @@ func (s *Service) retryMoves(ctx context.Context) error {
 }
 
 // requeueFile queues a file to go up in space spaceID, with its contents
-// when this device has them. It changes nothing while the file is in
-// iCloud Drive but does not come here.
+// when this device has them (a deleted file's row goes alone). It changes
+// nothing while the file is in iCloud Drive but does not come here.
 func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string) error {
-	if !onDevice(f.LocalPath) && f.StoragePath != "" && s.keptInICloud("files", f.StoragePath) {
+	deleted := !f.DeletedAt.IsZero()
+	if !deleted && !onDevice(f.LocalPath) && f.StoragePath != "" && s.keptInICloud("files", f.StoragePath) {
 		data, err := s.cloudFetch(ctx, "files", f.StoragePath)
 		if err != nil {
 			return fmt.Errorf("file %s from iCloud Drive: %w", f.Name, err)
@@ -425,7 +530,7 @@ func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string)
 	if err := s.st.Queue("files", f.ID, store.FileToRemote(f), "file", ""); err != nil {
 		return err
 	}
-	if !onDevice(f.LocalPath) {
+	if deleted || !onDevice(f.LocalPath) {
 		return nil
 	}
 	ct := f.MimeType
@@ -553,6 +658,8 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 		return s.pushContent(ctx, e.EntityID)
 	case "storage":
 		return s.pushFile(ctx, uid, payload)
+	case "storage_delete":
+		return s.removeStored(ctx, payload)
 	case "pages":
 		if payload["created_by"] == nil {
 			payload["created_by"] = uid
@@ -605,8 +712,12 @@ func (s *Service) pushComment(ctx context.Context, uid string, payload map[strin
 var errStale = errors.New("the page changed on the server while saving")
 
 func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) {
-	if _, err := s.st.Page(pageID); err != nil {
+	// A page that is gone has nothing to send; one that cannot be read now
+	// stays queued.
+	if _, err := s.st.Page(pageID); store.IsNotFound(err) {
 		return true, nil
+	} else if err != nil {
+		return false, err
 	}
 	// Another device or an agent may save in between: merge with what it
 	// saved and try again.
@@ -623,8 +734,10 @@ func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) 
 // result, if the server still has the revision it merged with.
 func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) {
 	row, err := s.st.ContentRow(pageID)
-	if err != nil {
+	if store.IsNotFound(err) {
 		return true, nil
+	} else if err != nil {
+		return false, err
 	}
 	local := doc.MustDecode(row.Content)
 	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: "content, revision, updated_at", Filters: []string{remote.Eq("page_id", pageID)}})
@@ -757,6 +870,21 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 	return true, nil
 }
 
+// removeStored removes a deleted file's object from Storage, once the
+// server has the row that says it is deleted: until then the entry waits,
+// as the file is still there for the other devices. An object the server
+// does not have is gone already.
+func (s *Service) removeStored(ctx context.Context, payload map[string]any) (bool, error) {
+	if s.st.HasPending("files", store.S(payload, "file_id")) {
+		return false, nil
+	}
+	err := s.be.Remove(ctx, store.S(payload, "bucket"), store.S(payload, "path"))
+	if remote.IsNotFound(err) {
+		return true, nil
+	}
+	return err == nil, err
+}
+
 // cursor is where a table's pull resumes: the last row stored here, by
 // its time and key.
 type cursor struct{ at, key string }
@@ -774,15 +902,56 @@ func (s *Service) setCursor(table string, c cursor) {
 	_ = s.st.SetValue("sync.cursor."+table, c.at+"|"+c.key)
 }
 
-// changed reads up to limit rows changed after the cursor, oldest first.
-// Rows of the same time come in key order, so a pull that stops among
-// them resumes at the next one.
-func (s *Service) changed(ctx context.Context, table, key, columns string, cur cursor, limit int, filters ...string) ([]map[string]any, error) {
-	after := remote.Gt("updated_at", cur.at)
-	if cur.key != "" {
-		after = "or=(updated_at.gt." + quote(cur.at) + ",and(updated_at.eq." + quote(cur.at) + "," + key + ".gt." + quote(cur.key) + "))"
+// overlap is how far behind its cursor a pull looks again. The server
+// stamps updated_at as a row changes, before the change commits, so a
+// change that commits late comes after rows stamped later, which the
+// cursor may have passed. Rows seen again are passed over where this
+// device has them as they are, and stored again otherwise, which stores
+// the row as the server has it, as the first time did.
+var overlap = 10 * time.Second
+
+// passed reports whether the cursor is at or past a row, which a pull
+// then reads again only for the overlap. A row whose time does not parse
+// is not passed.
+func (c cursor) passed(r map[string]any, key string) bool {
+	at, err := time.Parse(time.RFC3339Nano, store.S(r, "updated_at"))
+	if err != nil {
+		return false
 	}
-	return s.be.Select(ctx, table, remote.Query{Select: columns, Filters: append([]string{after}, filters...), Order: "updated_at," + key, Limit: limit})
+	cur, err := time.Parse(time.RFC3339Nano, c.at)
+	if err != nil {
+		return false
+	}
+	return at.Before(cur) || at.Equal(cur) && store.S(r, key) <= c.key
+}
+
+// changed reads up to limit rows changed after the cursor, oldest first,
+// after the rows of the overlap behind it. Rows of the same time come in
+// key order, so a pull that stops among them resumes at the next one.
+func (s *Service) changed(ctx context.Context, table, key, columns string, cur cursor, limit int, filters ...string) ([]map[string]any, error) {
+	from := cur
+	if at, err := time.Parse(time.RFC3339Nano, cur.at); err == nil && at.Unix() > 0 {
+		from = cursor{at: at.Add(-overlap).UTC().Format(time.RFC3339Nano)}
+	}
+	var out []map[string]any
+	for {
+		after := remote.Gt("updated_at", from.at)
+		if from.key != "" {
+			after = "or=(updated_at.gt." + quote(from.at) + ",and(updated_at.eq." + quote(from.at) + "," + key + ".gt." + quote(from.key) + "))"
+		}
+		rows, err := s.be.Select(ctx, table, remote.Query{Select: columns, Filters: append([]string{after}, filters...), Order: "updated_at," + key, Limit: limit})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rows...)
+		// An overlap fuller than a page reads on, so it does not hold the
+		// pull there.
+		if len(rows) < limit || !cur.passed(rows[len(rows)-1], key) {
+			return out, nil
+		}
+		last := rows[len(rows)-1]
+		from = cursor{store.S(last, "updated_at"), store.S(last, key)}
+	}
 }
 
 // quote makes a value safe inside a PostgREST or=(…) filter.
@@ -791,21 +960,33 @@ func quote(v string) string { return `"` + strings.ReplaceAll(v, `"`, `\"`) + `"
 // store applies pulled rows in order and moves the cursor past each one
 // stored. It stops at the first that cannot be stored, so the next pull
 // starts with it again. A row with a change waiting here is passed over:
-// the change wins and goes up on the next push.
-func (s *Service) store(table, key string, rows []map[string]any, apply func(map[string]any) error) {
+// the change wins and goes up on the next push. A row the cursor has
+// passed, of the overlap, is stored again only when this device does not
+// have it as it is (have), as when its change committed late.
+func (s *Service) store(table, key string, rows []map[string]any, have func(map[string]any) bool, apply func(map[string]any) error) {
 	cur := s.cursor(table)
 	start := cur
+	stored := false
 	for _, r := range rows {
+		again := start.passed(r, key)
+		if again && have(r) {
+			continue
+		}
 		if !s.st.HasPending(table, store.S(r, key)) {
 			if err := apply(r); err != nil {
 				log.Printf("pull %s %s: %v", table, store.S(r, key), err)
 				break
 			}
+			stored = true
 		}
-		cur = cursor{store.S(r, "updated_at"), store.S(r, key)}
+		if !again {
+			cur = cursor{store.S(r, "updated_at"), store.S(r, key)}
+		}
 	}
 	if cur != start {
 		s.setCursor(table, cur)
+	}
+	if stored || cur != start {
 		s.st.Notify(table, "")
 	}
 }
@@ -815,7 +996,12 @@ func (s *Service) pullTable(ctx context.Context, table, columns string, apply fu
 	if err != nil {
 		return err
 	}
-	s.store(table, "id", rows, apply)
+	have := func(r map[string]any) bool {
+		// A local model's connection stays on its device, never stored.
+		local, _ := r["is_local"].(bool)
+		return local || s.st.HasRowAt(table, store.S(r, "id"), store.Time(r["updated_at"]))
+	}
+	s.store(table, "id", rows, have, apply)
 	return nil
 }
 
@@ -850,17 +1036,25 @@ func (s *Service) pull(ctx context.Context) error {
 	return s.pullContents(ctx)
 }
 
-// pullShared brings the pages newly shared with the user, with the pages
-// under them and what they hold. Sharing changes no page, so the pulls
-// that go by time pass over a page that last changed before them.
+// pullShared brings the pages newly shared with the user, once they have
+// accepted them, with the pages under them and what they hold. Sharing
+// changes no page, so the pulls that go by time pass over a page that last
+// changed before them. Accepting moves the share's updated_at on, so a
+// share accepted after the cursor passed it comes then.
 func (s *Service) pullShared(ctx context.Context) error {
 	rows, err := s.changed(ctx, "page_permissions", "page_id", "page_id, updated_at", s.cursor("page_permissions"), 100,
-		remote.Eq("user_id", s.be.UserID()))
+		remote.Eq("user_id", s.be.UserID()), remote.NotNull("accepted_at"))
 	if err != nil {
 		return err
 	}
 	var failed error
-	s.store("page_permissions", "page_id", rows, func(r map[string]any) error {
+	// A share seen again is of a page this device has, with what is under
+	// it, unless its pull failed.
+	have := func(r map[string]any) bool {
+		_, err := s.st.Page(store.S(r, "page_id"))
+		return err == nil
+	}
+	s.store("page_permissions", "page_id", rows, have, func(r map[string]any) error {
 		failed = s.pullTree(ctx, store.S(r, "page_id"))
 		return failed
 	})
@@ -935,8 +1129,7 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 	for _, id := range ids {
 		waiting[id] = true
 	}
-	s.setWaiting(waiting)
-	return nil
+	return s.setWaiting(waiting)
 }
 
 func (s *Service) pullComments(ctx context.Context) error {
@@ -945,7 +1138,10 @@ func (s *Service) pullComments(ctx context.Context) error {
 		return err
 	}
 	names := s.authorNames(ctx, rows)
-	s.store("comments", "id", rows, func(r map[string]any) error {
+	have := func(r map[string]any) bool {
+		return s.st.HasRowAt("comments", store.S(r, "id"), store.Time(r["updated_at"]))
+	}
+	s.store("comments", "id", rows, have, func(r map[string]any) error {
 		return s.st.PutRemoteComment(r, names[store.S(r, "author_id")])
 	})
 	return nil
@@ -1019,23 +1215,42 @@ func (s *Service) pullContents(ctx context.Context) error {
 			break
 		}
 		id := store.S(r, "page_id")
+		// Content seen again, of the overlap, is fetched only when this
+		// device has not merged that version or a later one.
+		again := start.passed(r, "page_id")
+		if again && s.hasContentAt(id, store.Time(r["updated_at"])) {
+			continue
+		}
 		if failed = refresh(id); failed != nil {
 			break
 		}
-		cur = cursor{store.S(r, "updated_at"), id}
+		if !again {
+			cur = cursor{store.S(r, "updated_at"), id}
+		}
+	}
+	// The pages that wait are kept before the cursor passes them: the
+	// other way round, a crash between would lose them.
+	if err := s.setWaiting(waiting); err != nil {
+		return errors.Join(failed, err)
 	}
 	if cur != start {
 		s.setCursor("page_content", cur)
 	}
-	s.setWaiting(waiting)
 	return failed
+}
+
+// hasContentAt reports whether this device has merged the server's
+// content of a page as of a time, or later.
+func (s *Service) hasContentAt(pageID string, at time.Time) bool {
+	row, err := s.st.ContentRow(pageID)
+	return err == nil && !row.RemoteUpdatedAt.IsZero() && row.RemoteUpdatedAt.UnixMilli() >= at.UnixMilli()
 }
 
 // waiting are the pages whose content changed before their own row came,
 // so their content is fetched once it has.
 func (s *Service) waiting() map[string]bool { return s.ids("sync.content_waiting") }
 
-func (s *Service) setWaiting(ids map[string]bool) { _ = s.setIDs("sync.content_waiting", ids) }
+func (s *Service) setWaiting(ids map[string]bool) error { return s.setIDs("sync.content_waiting", ids) }
 
 // ids reads a set of IDs kept under key.
 func (s *Service) ids(key string) map[string]bool {

@@ -585,13 +585,16 @@ type RunOptions struct {
 	Done func(*Run)
 }
 
+// ErrRunning is a run asked for on a page an agent is already working on.
+var ErrRunning = errors.New("An agent is already working on this page. Try again when it is done.") //nolint:staticcheck // shown to people as a sentence.
+
 // Start runs an agent from any surface, in the background. Problems end
-// up in Run.Error.
+// up in Run.Error; a page runs one agent at a time, so a run asked for
+// while another works on it fails with ErrRunning.
 func (h *Hub) Start(pageID string, o RunOptions) *Run {
 	s := h.Session(pageID)
-	option, err := h.Resolve(firstNonNil(o.Agent, s.Selected))
 	run := &Run{ID: doc.NewRowID(), Surface: o.Surface, Instruction: o.Instruction, Status: "running", At: time.Now()}
-	if err != nil {
+	fail := func(err error) *Run {
 		run.AgentName, run.Status, run.Error = "Agent", "failed", err.Error()
 		if o.Reply != nil {
 			o.Reply.Pending, o.Reply.Error, o.Reply.Text = false, true, run.Error
@@ -601,21 +604,30 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		}
 		return run
 	}
-	run.AgentName = option.Name()
-	s.Runs = append(s.Runs, run)
-	s.Running = true
-	if o.Reply != nil {
-		o.Reply.RunID, o.Reply.AgentName = run.ID, option.Name()
+	if s.Running {
+		return fail(ErrRunning)
+	}
+	option, err := h.Resolve(firstNonNil(o.Agent, s.Selected))
+	if err != nil {
+		return fail(err)
 	}
 	h.host.SaveNow(pageID)
 	ed := h.host.Editor(pageID)
 	var before *doc.Content
 	if ed != nil {
 		before = ed.Content.Copy()
-	} else if c := h.st.Content(pageID); c != nil {
+	} else if c, err := stored(h.st, pageID); err != nil {
+		return fail(err)
+	} else if c != nil {
 		before = c
 	} else {
 		before = doc.Empty()
+	}
+	run.AgentName = option.Name()
+	s.Runs = append(s.Runs, run)
+	s.Running = true
+	if o.Reply != nil {
+		o.Reply.RunID, o.Reply.AgentName = run.ID, option.Name()
 	}
 	page, _ := h.st.Page(pageID)
 	settings := h.host.Settings()
@@ -625,7 +637,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		// ChatGPT's models all call tools, whatever an earlier test found.
 		SupportsTools: option.Provider.SupportsTools == nil || *option.Provider.SupportsTools || option.Provider.AuthKind == "account",
 		FocusBlockIDs: o.Focus, SelectionText: o.Selection, CommentID: o.CommentID,
-		History: o.History, AllowCrossPage: settings.AgentsReadOtherPages,
+		History: o.History, AllowCrossPage: h.crossPage(page, settings),
 	}
 	if o.Surface == "sidebar" {
 		req.ConversationID = s.ConversationID
@@ -730,7 +742,10 @@ func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op) error {
 	if d.sent == len(ops) {
 		return nil
 	}
-	c := st.Content(pageID)
+	c, err := stored(st, pageID)
+	if err != nil {
+		return err
+	}
 	if c == nil {
 		c = doc.Empty()
 	}
@@ -743,8 +758,26 @@ func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op) error {
 		}
 	}
 	d.sent = len(ops)
-	_, _, err := st.SaveContent(pageID, c)
+	_, _, err = st.SaveContent(pageID, c)
 	return err
+}
+
+// errUnreadable is a page whose stored content cannot be read.
+var errUnreadable = errors.New("The page's content could not be read, so agents leave it as it is.") //nolint:staticcheck // shown to people as a sentence.
+
+// stored is a page's stored content, nil when it is not kept here. What
+// cannot be read is an error rather than an empty page, which saving
+// would put in its place.
+func stored(st *store.Store, pageID string) (*doc.Content, error) {
+	row, err := st.ContentRow(pageID)
+	if err != nil {
+		return nil, nil //nolint:nilerr // not kept on this device.
+	}
+	c, err := doc.Decode(row.Content)
+	if err != nil {
+		return nil, errUnreadable
+	}
+	return c, nil
 }
 
 func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *doc.Content, d *delivery, res Result, err error, o RunOptions) {
@@ -809,11 +842,46 @@ func short(s string) string {
 }
 
 func (h *Hub) toolContext(pageID, title, agent string, content *doc.Content, settings store.Settings) ToolContext {
-	tc := PageTools(h.st, pageID, title, agent, content, settings.AgentsReadOtherPages)
-	// An agent edits only what the user may.
 	p, err := h.st.Page(pageID)
+	tc := PageTools(h.st, pageID, title, agent, content, err == nil && h.crossPage(p, settings))
+	// An agent edits only what the user may.
 	tc.ReadOnly = err != nil || !h.st.CanEdit(p)
 	return tc
+}
+
+// crossPage reports whether an agent on p may read the user's other
+// pages. Not on a page other people write in too: what they wrote could
+// tell the agent to copy the user's other pages into it.
+func (h *Hub) crossPage(p store.Page, settings store.Settings) bool {
+	return settings.AgentsReadOtherPages && p.ID != "" && !sharedWithOthers(h.st, p)
+}
+
+// sharedWithOthers reports whether anyone but the user has a page: it is
+// in someone else's space, or it or a page it is inside has members other
+// than the user.
+func sharedWithOthers(st *store.Store, p store.Page) bool {
+	sess := st.Session()
+	seen := map[string]bool{}
+	for p.ID != "" && !seen[p.ID] {
+		seen[p.ID] = true
+		if p.SpaceID != sess.SpaceID {
+			return true
+		}
+		for _, m := range st.MembersOrNil(p.ID) {
+			if m.UserID != sess.UserID {
+				return true
+			}
+		}
+		if p.ParentID == "" {
+			break
+		}
+		parent, err := st.Page(p.ParentID)
+		if err != nil {
+			break
+		}
+		p = parent
+	}
+	return false
 }
 
 func (h *Hub) logLocalJob(run *Run, req Request) {
@@ -902,7 +970,11 @@ func (h *Hub) apply(pageID string, ops []doc.Op) {
 		}
 		return
 	}
-	c := h.st.Content(pageID)
+	c, err := stored(h.st, pageID)
+	if err != nil {
+		log.Printf("undo run: %v", err)
+		return
+	}
 	if c == nil {
 		return
 	}

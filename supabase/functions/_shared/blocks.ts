@@ -602,7 +602,8 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
     case "image": {
       const url = spec.image?.url ?? "";
       if (!/^https?:\/\//i.test(url)) throw new SpecError("image.url must be an http(s) URL");
-      node = { id, type, data: { url, align: "center" } };
+      const alt = typeof spec.image?.alt === "string" ? spec.image.alt : "";
+      node = { id, type, data: { url, align: "center", alt } };
       break;
     }
     case "table":
@@ -621,13 +622,16 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
         throw new SpecError("An embed block needs `embed.html`");
       }
       if (html.length > 200_000) throw new SpecError("embed.html must be under 200 KB");
+      // As internal/doc/spec.go builds it.
+      const title = typeof spec.embed?.title === "string" && spec.embed.title ? spec.embed.title : "Interactive embed";
       node = {
         id,
         type,
         data: {
-          title: String(spec.embed?.title ?? ""),
+          title,
           html,
-          height: clampInt(spec.embed?.height, 120, 1200, 360),
+          height: clampInt(spec.embed?.height, 120, 1200, 320),
+          author: opts.author ?? "",
         },
       };
       break;

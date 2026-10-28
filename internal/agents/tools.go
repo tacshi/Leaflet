@@ -436,12 +436,13 @@ func (x *Executor) replace(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(prev.Children) > 0 && n.Children == nil {
+	// A table's children are its cells, which no other type keeps.
+	if len(prev.Children) > 0 && n.Children == nil && prev.Type != "table" {
 		if doc.NestableTypes[n.Type] {
 			for _, k := range prev.Children {
 				n.Children = append(n.Children, k.Clone())
 			}
-		} else if prev.Type != "table" {
+		} else {
 			return nil, terr("Block %s has nested items. Move or delete them first, or keep a list type.", id)
 		}
 	}

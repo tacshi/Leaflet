@@ -9,8 +9,9 @@ import (
 // OutboxEntry is a change waiting for the server.
 type OutboxEntry struct {
 	ID int64
-	// Entity is the Supabase table (pages, page_content, comments…) or
-	// "storage" for a file upload.
+	// Entity is the Supabase table (pages, page_content, comments…),
+	// "storage" for a file upload, or "storage_delete" for the removal of
+	// a deleted file's stored copy.
 	Entity   string
 	EntityID string
 	Op       string // upsert | delete
@@ -31,37 +32,38 @@ type OutboxEntry struct {
 // by the row, in one transaction, so sync sending the entry meanwhile
 // cannot leave the change out of the queue.
 func (s *Store) Queue(entity, id string, payload map[string]any, label, pageID string) error {
+	if err := s.inTx(func(tx *sql.Tx) error { return queue(tx, entity, id, payload, label, pageID) }); err != nil {
+		return err
+	}
+	s.Notify("outbox", pageID)
+	return nil
+}
+
+// queue is Queue in a transaction of the caller's, which stores the change
+// it queues in the same one.
+func queue(q querier, entity, id string, payload map[string]any, label, pageID string) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
 	set := `payload = ?, revision = revision + 1, attempts = 0, last_error = NULL`
 	args := []any{string(raw)}
 	if label != "" {
 		set += `, label = ?`
 		args = append(args, label)
 	}
-	res, err := tx.Exec(`UPDATE outbox SET `+set+` WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, append(args, entity, id)...)
+	res, err := q.Exec(`UPDATE outbox SET `+set+` WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, append(args, entity, id)...)
 	if err != nil {
 		return err
 	}
 	if n, err := res.RowsAffected(); err != nil {
 		return err
 	} else if n == 0 {
-		if _, err := tx.Exec(`INSERT INTO outbox (entity, entity_id, op, payload, label, page_id, created_at) VALUES (?, ?, 'upsert', ?, ?, ?, ?)`,
+		if _, err := q.Exec(`INSERT INTO outbox (entity, entity_id, op, payload, label, page_id, created_at) VALUES (?, ?, 'upsert', ?, ?, ?, ?)`,
 			entity, id, string(raw), label, ns(pageID), time.Now().UnixMilli()); err != nil {
 			return err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	s.Notify("outbox", pageID)
 	return nil
 }
 

@@ -55,13 +55,25 @@ deno lint
 supabase link --project-ref <ref>
 supabase db push
 supabase functions deploy agent providers stt account
-supabase secrets set SONIOX_API_KEY=<optional app-wide Soniox key>
 ```
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are
-provided to functions automatically. `SONIOX_API_KEY` is optional: users can
-save their own Soniox key (Settings › Speech to text), and the app-wide key is
-the fallback for minting short-lived streaming keys.
+provided to functions automatically. There is no app-wide Soniox key: each
+user saves their own (Settings › Speech to text), and Soniox streaming and
+transcription are refused until they do.
+
+An agent run stops calling the model at `AGENT_DEADLINE_MS` (default 120000,
+under the 150 s wall-clock limit of the free plan) and saves what it did; each
+model call times out after `AGENT_CALL_TIMEOUT_MS` (default 60000). On a paid
+plan (400 s limit) the deadline may go up to 380000:
+`supabase secrets set AGENT_DEADLINE_MS=360000`. A job left `running` past the
+deadline plus a minute (the platform stopped it) can be claimed again.
+
+Buckets cap uploads at 500 MiB for `recordings` (audio only), 200 MiB for
+`files` and 50 MiB for `images` (images only); a hosted project's global upload
+limit (Storage settings) must be at least as high for long recordings. The
+`stt` function transcribes recordings up to `STT_MAX_AUDIO_MB` (default 100,
+about 54 minutes of the app's WAV); longer ones transcribe on the device.
 
 Supabase Vault (`supabase_vault`) is enabled on every Supabase project; the
 migration relies on `vault.create_secret`, `vault.update_secret` and
@@ -72,8 +84,15 @@ migration relies on `vault.create_secret`, `vault.update_secret` and
 - **model_providers**: clients can't read or write `encrypted_secret` /
   `refresh_token`, so select explicit columns (see `PROVIDER_COLUMNS` in
   `functions/_shared/supabase.ts`), never `*`. `has_secret` says whether a key
-  is saved. Keys go through the `providers` function (`save` with `api_key`)
-  or the `set_provider_secret` RPC; an empty key clears it.
+  is saved. Clients read and delete their rows but cannot insert or update
+  them: rows go through the `providers` function (`save`), which checks the
+  base URL. Keys go through `save` with `api_key` or the
+  `set_provider_secret` RPC; an empty key clears it.
+- **Base URLs** the server calls (cloud providers, OpenAI-compatible speech to
+  text) must be `https://` to a public host: names that resolve to private,
+  loopback, link-local or CGNAT addresses are refused, redirects are errors,
+  and errors show the status and the provider's JSON message, never the raw
+  body (`functions/_shared/net.ts`).
 - **Local providers** (`ollama`, `lmstudio`, `local`) may be saved without a
   key for listing, but the server never calls them and rejects their keys.
   Clients call local endpoints directly.
@@ -95,6 +114,15 @@ migration relies on `vault.create_secret`, `vault.update_secret` and
   `sensevoice`, `soniox`, `openai-compatible`. The server transcribes only
   `soniox` and OpenAI-compatible endpoints (`provider_id` or `base_url` set);
   on-device models transcribe on the device.
+- **Sharing** invites: `share_page` adds a pending `page_permissions` row
+  (`accepted_at` null) that grants nothing until the person accepts it with
+  `accept_page_invite` (or removes it with `decline_page_invite`);
+  `page_invites()` lists the caller's pending ones. Access checks count only
+  accepted rows.
 - **Storage**: viewers of a shared page can read its recordings, the files
-  on it and the owner's images; only the space owner writes `files/` and
-  `images/`.
+  on it and the images on it; only the space owner writes `files/` and
+  `images/`. Images go at `images/{space_id}/{page_id}/{image_id}.{ext}`, the
+  page they are on; an image at `{space_id}/{image_id}.{ext}` is the owner's
+  alone.
+  `recordings/{user_id}/{recording_id}.{ext}` is written only by the user who
+  made that `recordings` row, so upsert the row before uploading its audio.

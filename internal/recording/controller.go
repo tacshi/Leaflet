@@ -50,6 +50,12 @@ type Controller struct {
 	resumed time.Time
 	stt     store.SttSettings
 	meter   Meter
+	// connecting is whether a Soniox stream is on its way for the
+	// recording in progress, and early the audio recorded meanwhile, sent
+	// first once it is there: the transcript's times then match the WAV's.
+	connecting bool
+	early      [][]byte
+	earlyLen   int
 	// withText is whether the recording in progress gets a transcript;
 	// without an engine that can run, it keeps only its audio.
 	withText bool
@@ -269,8 +275,12 @@ func (r *Controller) Test(stt store.SttSettings, online bool, d time.Duration, d
 // capture starts the microphone into wav; st says what is recording.
 func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe bool, st State) error {
 	session := doc.NewBlockID()
+	live := transcribe && stt.Provider == "soniox"
 	r.mu.Lock()
 	r.wav, r.session, r.stt, r.paused, r.elapsed, r.resumed = wav, session, stt, false, 0, time.Time{}
+	// A stream still here is the last recording's, which its Stop is
+	// finishing: it hears none of this one.
+	r.soniox, r.connecting, r.early, r.earlyLen = nil, live, nil, 0
 	r.meter = Meter{}
 	r.withText = transcribe
 	testFor := r.testFor
@@ -281,7 +291,7 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 	}
 	r.State = st
 	service.add(session, &captureSink{
-		chunk: r.chunk,
+		chunk: func(pcm []byte) { r.chunk(session, pcm) },
 		started: func() {
 			r.mu.Lock()
 			r.resumed = time.Now()
@@ -324,8 +334,8 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 		})
 	}
 	// Soniox streams as it records, and its final words are the transcript.
-	if transcribe && stt.Provider == "soniox" {
-		go r.startSoniox(stt)
+	if live {
+		go r.startSoniox(session, stt)
 	}
 	v, err := r.win.NewWebView(mygo.WebViewOptions{URL: CaptureURL(session)})
 	if err != nil {
@@ -338,10 +348,12 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 	return nil
 }
 
-func (r *Controller) startSoniox(stt store.SttSettings) {
+// startSoniox connects the live stream for the recording session.
+func (r *Controller) startSoniox(session string, stt store.SttSettings) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	// A key on this device is used as is; otherwise the server lends one.
+	// A key on this device is used as is; otherwise the server makes a
+	// short-lived one from the key the user saved there.
 	key := LocalSonioxKey()
 	var err error
 	if key == "" {
@@ -358,23 +370,61 @@ func (r *Controller) startSoniox(stt store.SttSettings) {
 		s, err = DialSoniox(ctx, key, stt.SonioxModel, hints, stt.SpeakerLabels)
 		if err == nil {
 			s.OnText = func(text string) { r.update(func() { r.State.LiveText = text }) }
-			r.mu.Lock()
-			r.soniox = s
-			r.mu.Unlock()
+			r.attachSoniox(session, s)
 			return
 		}
 	}
-	r.update(func() { r.State.Error = locales.RecErrLive(err.Error()) })
+	r.mu.Lock()
+	same := r.session == session && r.connecting
+	r.connecting, r.early, r.earlyLen = false, nil, 0
+	r.mu.Unlock()
+	if same {
+		r.update(func() { r.State.Error = locales.RecErrLive(err.Error()) })
+	}
 }
 
-func (r *Controller) chunk(pcm []byte) {
+// attachSoniox makes s the stream of the recording session, sending it
+// first the audio recorded while it connected; a stream for a recording
+// that has stopped or failed since is closed.
+func (r *Controller) attachSoniox(session string, s *Soniox) {
+	for {
+		r.mu.Lock()
+		if r.session != session || !r.connecting {
+			r.mu.Unlock()
+			s.Close()
+			return
+		}
+		early := r.early
+		r.early, r.earlyLen = nil, 0
+		if len(early) == 0 {
+			r.soniox, r.connecting = s, false
+			r.mu.Unlock()
+			return
+		}
+		r.mu.Unlock()
+		// What is recorded while this goes waits for the next turn.
+		for _, pcm := range early {
+			s.Send(pcm)
+		}
+	}
+}
+
+// maxEarly is the most audio kept for a stream still connecting: 30 s at
+// 16 kHz, longer than connecting may take.
+const maxEarly = 30 * SampleRate * 2
+
+func (r *Controller) chunk(session string, pcm []byte) {
 	r.mu.Lock()
-	if r.paused || r.wav == nil {
+	if r.paused || r.wav == nil || r.session != session {
 		r.mu.Unlock()
 		return
 	}
 	err := r.wav.Write(pcm)
 	s := r.soniox
+	if s == nil && r.connecting && r.earlyLen+len(pcm) <= maxEarly {
+		r.early = append(r.early, pcm)
+		r.earlyLen += len(pcm)
+	}
 	r.mu.Unlock()
 	if err != nil {
 		r.update(func() { r.State.Error = locales.RecErrAudioNotSaved(err.Error()) })
@@ -399,9 +449,14 @@ func (r *Controller) chunk(pcm []byte) {
 // MaxLevels is how many of the latest levels State keeps: 20 s.
 const MaxLevels = 400
 
-// TogglePause pauses or resumes the recording.
+// TogglePause pauses or resumes the recording; one still starting has no
+// time running to pause yet.
 func (r *Controller) TogglePause() {
 	r.mu.Lock()
+	if r.resumed.IsZero() {
+		r.mu.Unlock()
+		return
+	}
 	if r.paused {
 		r.paused, r.resumed = false, time.Now()
 	} else {
@@ -420,12 +475,16 @@ func (r *Controller) TogglePause() {
 // abort ends a recording that could not start.
 func (r *Controller) abort() {
 	r.mu.Lock()
-	v, wav, session, test := r.view, r.wav, r.session, r.test
-	r.view, r.wav, r.test, r.testFor = nil, nil, nil, 0
+	v, wav, soniox, session, test := r.view, r.wav, r.soniox, r.session, r.test
+	r.view, r.wav, r.soniox, r.test, r.testFor = nil, nil, nil, nil, 0
+	r.connecting, r.early, r.earlyLen = false, nil, 0
 	r.mu.Unlock()
 	service.remove(session)
 	if v != nil {
 		v.Destroy()
+	}
+	if soniox != nil {
+		soniox.Close()
 	}
 	if wav != nil {
 		_ = wav.Close()
@@ -459,8 +518,10 @@ func (r *Controller) Stop() {
 	v, wav, soniox, session, stt, withText := r.view, r.wav, r.soniox, r.session, r.stt, r.withText
 	test, why := r.test, r.testWhy
 	// The WAV file and the stream stay until the capture page has sent
-	// the audio it still holds: that is the end of what was said.
+	// the audio it still holds: that is the end of what was said. A stream
+	// not there yet is not waited for; the audio is transcribed instead.
 	r.view, r.test, r.testFor = nil, nil, 0
+	r.connecting, r.early, r.earlyLen = false, nil, 0
 	r.mu.Unlock()
 	st := r.State
 	r.State = State{}

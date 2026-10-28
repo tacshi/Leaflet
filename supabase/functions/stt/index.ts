@@ -6,12 +6,16 @@ import type { SupabaseClient, User } from "jsr:@supabase/supabase-js@2";
 import { errorResponse, HttpError, json, preflight, readJson } from "../_shared/cors.ts";
 import { loadProvider, providerSecret, requireUser, serviceClient, userClient } from "../_shared/supabase.ts";
 import { normalizeBaseUrl } from "../_shared/openai.ts";
+import { safeFetch } from "../_shared/net.ts";
 import { type Segment, tokensToSegments } from "../_shared/segments.ts";
 
 const SONIOX_API = "https://api.soniox.com/v1";
 const SONIOX_ASYNC_MODEL = "stt-async-v3";
 const POLL_MS = 2_000;
 const POLL_LIMIT_MS = 110_000;
+// The audio is read into memory to send on; longer recordings transcribe on
+// the device. 100 MiB is about 54 minutes of the app's 16 kHz WAV.
+const MAX_AUDIO_BYTES = (Number(Deno.env.get("STT_MAX_AUDIO_MB")) || 100) * 1024 * 1024;
 
 interface Body {
   action: "soniox_key" | "save_key" | "transcribe";
@@ -59,7 +63,8 @@ async function sonioxKey(sc: SupabaseClient, user: User): Promise<string> {
     p_provider: "soniox",
   });
   if (error) throw new Error(error.message);
-  const key = (data as string | null) || Deno.env.get("SONIOX_API_KEY");
+  // Every user brings their own Soniox key; the server has none of its own.
+  const key = data as string | null;
   if (!key) throw new HttpError(400, "Add a Soniox API key in Settings › Speech to text");
   return key;
 }
@@ -135,11 +140,31 @@ async function transcribe(uc: SupabaseClient, sc: SupabaseClient, user: User, bo
   }
   const language = languageCode(body.language ?? settings.language);
 
+  const slash = rec.audio_path.lastIndexOf("/");
+  const folder = rec.audio_path.slice(0, Math.max(slash, 0));
+  const fileName = rec.audio_path.slice(slash + 1) || "audio.m4a";
+  const { data: listed, error: listError } = await uc.storage.from("recordings").list(folder, {
+    search: fileName,
+    limit: 100,
+  });
+  if (listError) throw new Error(`Could not read the audio: ${listError.message}`);
+  const object = listed?.find((o) => o.name === fileName);
+  if (!object) throw new HttpError(404, "This recording's audio is not on the server");
+  const size = Number(object.metadata?.size ?? 0);
+  if (size > MAX_AUDIO_BYTES) {
+    throw new HttpError(
+      413,
+      `This recording is too long to transcribe on the server (over ${
+        Math.round(MAX_AUDIO_BYTES / 1024 / 1024)
+      } MB). Choose an on-device model to transcribe it.`,
+    );
+  }
+
   await uc.from("recordings").update({ status: "transcribing", error: null }).eq("id", rec.id);
   try {
     const { data: audio, error: downloadError } = await uc.storage.from("recordings").download(rec.audio_path);
     if (downloadError || !audio) throw new Error(`Could not read the audio: ${downloadError?.message ?? "missing"}`);
-    const fileName = rec.audio_path.split("/").pop() || "audio.m4a";
+    if (audio.size > MAX_AUDIO_BYTES) throw new Error("This recording is too long to transcribe on the server");
 
     const { segments, model } = useSoniox
       ? await sonioxFile(await sonioxKey(sc, user), audio, fileName, settings, language)
@@ -189,19 +214,30 @@ async function openAiCompatible(
     form.append("response_format", format);
     if (format === "verbose_json") form.append("timestamp_granularities[]", "segment");
     if (language) form.append("language", language);
-    return await fetch(`${baseUrl}/audio/transcriptions`, {
+    // The base URL is the user's: safeFetch keeps it off private addresses.
+    return await safeFetch(`${baseUrl}/audio/transcriptions`, {
       method: "POST",
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
       body: form,
     });
   };
 
-  // Some models (gpt-4o-transcribe) only return plain json.
-  let res = await send("verbose_json");
-  if (res.status === 400) res = await send("json");
-  if (!res.ok) {
+  // Some models (gpt-4o-transcribe) only return plain json: ask them for it
+  // rather than sending the audio twice. Other models get one retry, only
+  // when the endpoint turns verbose_json down.
+  const jsonOnly = /^gpt-4o.*transcribe/i.test(model);
+  let res = await send(jsonOnly ? "json" : "verbose_json");
+  if (!jsonOnly && res.status === 400) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Transcription failed: ${res.status} ${text.slice(0, 300)}`);
+    if (/response_format|verbose_json|timestamp_granularities/i.test(text)) {
+      res = await send("json");
+    } else {
+      res = new Response(null, { status: 400, statusText: res.statusText });
+    }
+  }
+  if (!res.ok) {
+    await res.body?.cancel().catch(() => {});
+    throw new Error(`Transcription failed: the endpoint answered ${res.status} ${res.statusText}`.trim());
   }
   const data = await res.json();
   const segments: Segment[] = Array.isArray(data?.segments) && data.segments.length

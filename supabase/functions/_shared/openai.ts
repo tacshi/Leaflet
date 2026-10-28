@@ -1,6 +1,9 @@
 // One OpenAI-compatible client for every cloud preset (OpenAI, Claude via
 // Anthropic's OpenAI compatibility layer, xAI, OpenRouter, DeepSeek, GLM) and
-// any custom base URL.
+// any custom base URL. Every request goes through safeFetch: base URLs are
+// typed by people, so they must not reach the server's own network.
+
+import { safeFetch } from "./net.ts";
 
 export const PRESET_BASE_URLS: Record<string, string> = {
   openai: "https://api.openai.com/v1",
@@ -113,17 +116,42 @@ function headers(conn: Connection): Record<string, string> {
   return h;
 }
 
-async function failure(res: Response): Promise<ProviderError> {
-  const body = await res.text().catch(() => "");
-  let message = `${res.status} ${res.statusText}`.trim();
+/** One line of a provider's own error message, if it gave one. */
+function providerMessage(body: string): string {
+  let detail: unknown;
   try {
     const parsed = JSON.parse(body);
-    const detail = parsed?.error?.message ?? parsed?.error ?? parsed?.message;
-    if (typeof detail === "string" && detail) message = `${message}: ${detail}`;
+    detail = parsed?.error?.message ?? parsed?.error ?? parsed?.message;
   } catch {
-    if (body) message = `${message}: ${body.slice(0, 300)}`;
+    return "";
   }
-  return new ProviderError(res.status, message, body.slice(0, 2000));
+  if (typeof detail !== "string") return "";
+  // deno-lint-ignore no-control-regex
+  const line = detail.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  return line.length > 200 ? `${line.slice(0, 200)}…` : line;
+}
+
+const STATUS_MESSAGES: Record<number, string> = {
+  400: "The provider rejected the request",
+  401: "The provider rejected the API key",
+  403: "The provider refused access",
+  404: "Not found: check the base URL and model",
+  408: "The provider timed out",
+  413: "The request is too large for the provider",
+  429: "The provider is rate limiting requests; try again shortly",
+};
+
+/**
+ * A provider's error as a short message: its status, and the provider's
+ * own JSON error message when it sent one. The raw body is never shown, as
+ * it could be anything the address answered with.
+ */
+async function failure(res: Response): Promise<ProviderError> {
+  const body = (await res.text().catch(() => "")).slice(0, 2000);
+  const known = STATUS_MESSAGES[res.status] ??
+    (res.status >= 500 ? "The provider had an error" : "The provider refused the request");
+  const detail = providerMessage(body);
+  return new ProviderError(res.status, `${known} (${res.status})${detail ? `: ${detail}` : ""}`, body);
 }
 
 export async function chatCompletion(
@@ -139,7 +167,7 @@ export async function chatCompletion(
   if (request.temperature !== undefined) body.temperature = request.temperature;
   if (request.max_tokens !== undefined) body.max_tokens = request.max_tokens;
 
-  const res = await fetch(`${conn.baseUrl}/chat/completions`, {
+  const res = await safeFetch(`${conn.baseUrl}/chat/completions`, {
     method: "POST",
     headers: headers(conn),
     body: JSON.stringify(body),
@@ -179,7 +207,7 @@ export async function listModels(
   conn: Connection,
   signal?: AbortSignal,
 ): Promise<string[]> {
-  const res = await fetch(`${conn.baseUrl}/models`, {
+  const res = await safeFetch(`${conn.baseUrl}/models`, {
     headers: headers(conn),
     signal,
   });

@@ -496,3 +496,29 @@ func TestBrokenEntryIsNotCurrent(t *testing.T) {
 		_ = os.Remove(path)
 	}
 }
+
+// Settings kept elsewhere through a link stay linked when they change.
+func TestWriteAtomicFollowsLinks(t *testing.T) {
+	dir := t.TempDir()
+	real, link := filepath.Join(dir, "dotfiles", "config.toml"), filepath.Join(dir, "config.toml")
+	if err := os.MkdirAll(filepath.Dir(real), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(real, []byte("old"), 0o640); err != nil { // #nosec G306 -- a mode the write must keep.
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join("dotfiles", "config.toml"), link); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeAtomic(link, []byte("new")); err != nil {
+		t.Fatal(err)
+	}
+	if fi, err := os.Lstat(link); err != nil || fi.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link is gone: %v", err)
+	}
+	fi, err := os.Stat(real)
+	b, _ := os.ReadFile(real) // #nosec G304 -- a file in the test's own temporary folder.
+	if err != nil || string(b) != "new" || fi.Mode().Perm() != 0o640 {
+		t.Errorf("linked file %q, mode %v", b, fi.Mode())
+	}
+}

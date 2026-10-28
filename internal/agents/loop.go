@@ -3,12 +3,12 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"leaflet/internal/doc"
-	"leaflet/internal/remote"
 )
 
 // MaxRounds bounds the tool rounds of one run.
@@ -116,10 +116,18 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 	}, nil
 }
 
+// Streamer is the server's client as RunCloud uses it: *remote.Client.
+type Streamer interface {
+	InvokeStream(ctx context.Context, name string, body map[string]any, fn func(map[string]any)) error
+}
+
+// errCutOff is a run whose stream ended before the server said how.
+var errCutOff = errors.New("The connection to the agent ended before it finished.") //nolint:staticcheck // shown to people as a sentence.
+
 // RunCloud runs the loop on the server, whose Vault keeps the model's key.
 // The job row must exist (docs/protocol.md §4); ops come as the server
 // applies them.
-func RunCloud(ctx context.Context, be *remote.Client, jobID string, ev Events) (Result, error) {
+func RunCloud(ctx context.Context, be Streamer, jobID string, ev Events) (Result, error) {
 	var res Result
 	var failure error
 	done := false
@@ -158,7 +166,12 @@ func RunCloud(ctx context.Context, be *remote.Client, jobID string, ev Events) (
 	if failure != nil {
 		return res, failure
 	}
-	if err != nil && !done {
+	// A stream that ends without done was cut off, by the network or the
+	// server, and is no success.
+	if !done {
+		if err == nil {
+			err = errCutOff
+		}
 		return res, err
 	}
 	return res, nil

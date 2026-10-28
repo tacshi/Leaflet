@@ -56,14 +56,7 @@ func (s *Service) compact(me string) error {
 			snapshot.Entries = append(snapshot.Entries, e)
 		}
 	}
-	rel, err := icloud.BatchPath(me, snapshot.Seq)
-	if err != nil {
-		return err
-	}
-	if err := s.ICloud.WriteJSON(rel, snapshot); err != nil {
-		return err
-	}
-	if err := s.setInt("icloud.seq", snapshot.Seq); err != nil {
+	if err := s.writeBatch(me, snapshot); err != nil {
 		return err
 	}
 	if err := s.setInt("icloud.log_from", snapshot.Seq); err != nil {

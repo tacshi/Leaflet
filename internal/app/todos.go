@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/doc"
 	"leaflet/internal/editor"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
@@ -168,15 +169,19 @@ func (a *App) finishTodo(t store.PageTodo) {
 			}
 			return
 		}
-		c := a.st.Content(t.PageID)
-		if c == nil {
-			return
-		}
-		if n := c.Find(t.BlockID); n != nil {
-			n.Set("checked", checked)
-			if _, _, err := a.st.SaveContent(t.PageID, c); err != nil {
-				a.toast(locales.SidebarCouldNotSave(err.Error()))
+		err := a.saveStored(t.PageID, func(c *doc.Content) *doc.Content {
+			if c == nil {
+				return nil
 			}
+			n := c.Find(t.BlockID)
+			if n == nil {
+				return nil
+			}
+			n.Set("checked", checked)
+			return c
+		})
+		if err != nil {
+			a.toast(locales.SidebarCouldNotSave(err.Error()))
 		}
 	}
 	set(true)

@@ -271,15 +271,108 @@ func TestPullResumesAtARowThatFailedToStore(t *testing.T) {
 	if err := svc.pullTable(ctx, "pages", "*", apply); err != nil {
 		t.Fatal(err)
 	}
-	want := `(updated_at.gt."` + at + `",and(updated_at.eq."` + at + `",id.gt."p1"))`
-	if queries[1] != want {
-		t.Errorf("second pull asked for\n%s\nwant\n%s", queries[1], want)
+	// From the overlap behind the cursor, where p1 is passed over.
+	if queries[1] != "" {
+		t.Errorf("second pull asked for %s", queries[1])
 	}
 	if strings.Join(stored, ",") != "p1,p2,p3" {
 		t.Errorf("stored %v", stored)
 	}
 	if v, _ := st.Value("sync.cursor.pages"); v != at+"|p3" {
 		t.Errorf("cursor %q", v)
+	}
+}
+
+// A row whose change commits after rows stamped later, which the pull has
+// passed, is found by the next pull, which looks again behind its cursor.
+// The rows it has already are not stored again.
+func TestPullFindsARowThatCommittedLate(t *testing.T) {
+	st := openStore(t)
+	t2 := time.Date(2026, 10, 26, 9, 0, 5, 123456000, time.UTC)
+	t1 := t2.Add(-3 * time.Second)
+	row := func(id string, at time.Time) map[string]any {
+		return map[string]any{"id": id, "space_id": st.Session().SpaceID, "title": id, "sort_key": "V",
+			"created_at": at.Format(time.RFC3339Nano), "updated_at": at.Format(time.RFC3339Nano)}
+	}
+	var filters []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		filters = append(filters, r.URL.Query().Get("updated_at"))
+		rows := []map[string]any{row("p1", t2)}
+		if len(filters) > 1 {
+			// p0 committed late, stamped before p1.
+			rows = []map[string]any{row("p0", t1), row("p1", t2)}
+		}
+		_ = json.NewEncoder(w).Encode(rows)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	stored := map[string]int{}
+	apply := func(r map[string]any) error {
+		stored[store.S(r, "id")]++
+		return st.PutRemotePage(r)
+	}
+	ctx := context.Background()
+	for range 3 {
+		if err := svc.pullTable(ctx, "pages", "*", apply); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if want := "gt." + t2.Add(-overlap).Format(time.RFC3339Nano); filters[1] != want {
+		t.Errorf("second pull asked for %s, want %s", filters[1], want)
+	}
+	if _, err := st.Page("p0"); err != nil {
+		t.Fatalf("the late row never came: %v", err)
+	}
+	if stored["p0"] != 1 || stored["p1"] != 1 {
+		t.Errorf("stored %v, each once", stored)
+	}
+	if v, _ := st.Value("sync.cursor.pages"); v != t2.Format(time.RFC3339Nano)+"|p1" {
+		t.Errorf("cursor %q", v)
+	}
+}
+
+// An overlap fuller than a page of rows reads on past it.
+func TestPullReadsPastAFullOverlap(t *testing.T) {
+	st := openStore(t)
+	at := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC).Format(time.RFC3339Nano)
+	var asked []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.RawQuery)
+		rows := []map[string]any{{"id": "a", "updated_at": at}, {"id": "b", "updated_at": at}}
+		if len(asked) > 1 {
+			rows = []map[string]any{{"id": "c", "updated_at": at}}
+		}
+		_ = json.NewEncoder(w).Encode(rows)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	rows, err := svc.changed(context.Background(), "pages", "id", "*", cursor{at, "b"}, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 || len(asked) != 2 || !strings.Contains(asked[1], "or=") {
+		t.Errorf("rows %v, asked %v", rows, asked)
+	}
+}
+
+// Content the device cannot read now stays queued; only a page that is
+// gone takes its content off the queue.
+func TestPushKeepsContentItCannotRead(t *testing.T) {
+	st := openStore(t)
+	svc := New(st, remote.SignedInForTest("http://127.0.0.1:1", st, "u1"))
+	if done, err := svc.pushContent(context.Background(), "gone"); !done || err != nil {
+		t.Errorf("gone page: done %v, %v", done, err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	if done, err := svc.pushContent(context.Background(), p.ID); done || err == nil {
+		t.Errorf("unreadable page: done %v, %v", done, err)
+	}
+	if _, published, err := svc.publishContent(st.DeviceID(), p.ID); published != nil || err == nil {
+		t.Errorf("unreadable page published %v, %v", published, err)
 	}
 }
 
@@ -429,6 +522,132 @@ func TestPullBringsAPageSharedWithTheUser(t *testing.T) {
 	}
 }
 
+// A page shared with the user waits for them as an invite: it is pulled
+// only once accepted, which moves the share on so the next pull brings
+// it. Declining one takes it off the list.
+func TestPullBringsASharedPageOnceAccepted(t *testing.T) {
+	st := openStore(t)
+	const (
+		root  = "00000000-0000-0000-0000-0000000000e1"
+		other = "00000000-0000-0000-0000-0000000000e3"
+		space = "00000000-0000-0000-0000-0000000000ff"
+	)
+	old := "2026-01-01T00:00:00Z"
+	var mu gosync.Mutex
+	type share struct {
+		at       string
+		accepted bool
+	}
+	shares := map[string]*share{root: {at: old}, other: {at: old}}
+	var asked []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		q := r.URL.Query()
+		out := []map[string]any{}
+		switch path := strings.TrimPrefix(r.URL.Path, "/rest/v1/"); path {
+		case "page_permissions":
+			asked = append(asked, q.Get("accepted_at"))
+			after, _ := time.Parse(time.RFC3339Nano, strings.TrimPrefix(q.Get("updated_at"), "gt."))
+			for _, id := range []string{root, other} {
+				sh := shares[id]
+				if sh == nil || !sh.accepted && q.Get("accepted_at") == "not.is.null" {
+					continue
+				}
+				if at, _ := time.Parse(time.RFC3339Nano, sh.at); at.After(after) {
+					out = append(out, map[string]any{"page_id": id, "updated_at": sh.at})
+				}
+			}
+		case "pages":
+			if q.Get("id") == "eq."+root {
+				out = append(out, map[string]any{"id": root, "space_id": space, "title": "Roadmap", "sort_key": "V", "created_at": old, "updated_at": old})
+			}
+		case "rpc/page_invites":
+			for _, id := range []string{root, other} {
+				if sh := shares[id]; sh != nil && !sh.accepted {
+					out = append(out, map[string]any{"page_id": id, "title": "Page " + id[len(id)-2:], "role": "editor",
+						"inviter_name": "Sam", "created_at": old})
+				}
+			}
+		case "rpc/accept_page_invite", "rpc/decline_page_invite":
+			var body struct {
+				PageID string `json:"p_page_id"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if path == "rpc/decline_page_invite" {
+				delete(shares, body.PageID)
+			} else if sh := shares[body.PageID]; sh != nil {
+				sh.accepted, sh.at = true, time.Now().UTC().Format(time.RFC3339Nano)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	changes := 0
+	svc.OnInvites = func() { changes++ }
+	ctx := context.Background()
+	// An earlier pull went past the time the page was shared.
+	if err := st.SetValue("sync.cursor.page_permissions", "2026-06-01T00:00:00Z|"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := svc.pullShared(ctx); err != nil {
+		t.Fatal(err)
+	}
+	svc.readInvites(ctx)
+	if len(asked) != 1 || asked[0] != "not.is.null" {
+		t.Errorf("shares asked for with accepted_at %q", asked)
+	}
+	if _, err := st.Page(root); err == nil {
+		t.Fatal("a page not accepted yet was pulled")
+	}
+	invites := svc.Invites()
+	if len(invites) != 2 || invites[0].Inviter != "Sam" || invites[0].Role != "editor" || changes != 1 {
+		t.Fatalf("invites %+v, %d changes", invites, changes)
+	}
+	// Read again, the same list is no change.
+	svc.readInvites(ctx)
+	if changes != 1 {
+		t.Errorf("%d changes for the same invites", changes)
+	}
+
+	if err := svc.AcceptInvite(ctx, root); err != nil {
+		t.Fatal(err)
+	}
+	if invites := svc.Invites(); len(invites) != 1 || invites[0].PageID != other {
+		t.Errorf("invites after accepting %+v", invites)
+	}
+	if err := svc.pullShared(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p, err := st.Page(root); err != nil || p.Title != "Roadmap" {
+		t.Fatalf("the accepted page: %+v, %v", p, err)
+	}
+	if w := svc.waiting(); !w[root] {
+		t.Errorf("content not asked for: %v", w)
+	}
+
+	if err := svc.DeclineInvite(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	svc.readInvites(ctx)
+	if invites := svc.Invites(); len(invites) != 0 {
+		t.Errorf("invites after declining %+v", invites)
+	}
+	if _, err := st.Page(other); err == nil {
+		t.Error("a declined page was pulled")
+	}
+
+	// Signed out, there are none.
+	shares[other] = &share{at: old}
+	svc.readInvites(ctx)
+	svc.ClearInvites()
+	if invites := svc.Invites(); len(invites) != 0 {
+		t.Errorf("invites after signing out %+v", invites)
+	}
+}
+
 // A shared page pulled again keeps a rename made here that has not gone
 // up yet.
 func TestPullSharedKeepsChangesWaiting(t *testing.T) {
@@ -552,5 +771,126 @@ func TestSignInUploadsEarlierRecordings(t *testing.T) {
 	}
 	if strings.Join(uploads, ",") != "recordings/"+done.ID {
 		t.Errorf("uploads %v", uploads)
+	}
+}
+
+// A deleted file's object leaves Storage once the server has the row that
+// says so, and not before: while the row cannot go up, the removal waits.
+// An object the server does not have counts as removed.
+func TestDeletedFileLeavesStorageAfterItsRow(t *testing.T) {
+	st := openStore(t)
+	src := t.TempDir() + "/notes.txt"
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var requests []string
+	var removed []string
+	refuseRow, missing := true, false
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.URL.Path == "/rest/v1/files" && refuseRow:
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"message": "refused"})
+			return
+		case r.URL.Path == "/storage/v1/object/files":
+			var body struct {
+				Prefixes []string `json:"prefixes"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			removed = append(removed, body.Prefixes...)
+			if missing {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]any{"message": "not found"})
+				return
+			}
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 0 || st.PendingCount() != 2 {
+		t.Fatalf("removed %v before the row went up; %d waiting", removed, st.PendingCount())
+	}
+	refuseRow = false
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(removed, ",") != f.StoragePath || st.PendingCount() != 0 {
+		t.Errorf("removed %v, %d waiting", removed, st.PendingCount())
+	}
+	if requests[len(requests)-1] != "DELETE /storage/v1/object/files" || requests[len(requests)-2] != "POST /rest/v1/files" {
+		t.Errorf("requests %v", requests)
+	}
+
+	// Gone from the server already.
+	g, err := st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteFile(g); err != nil {
+		t.Fatal(err)
+	}
+	missing = true
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st.PendingCount() != 0 {
+		t.Errorf("%d waiting after a removal of what was not there", st.PendingCount())
+	}
+}
+
+// Sending everything again sends a deleted file's row, so its deletion
+// still reaches the other devices, but none of its contents.
+func TestRequeueSendsDeletedFiles(t *testing.T) {
+	st := openStore(t)
+	src := t.TempDir() + "/notes.txt"
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		if err := st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := New(st, remote.New(remote.Settings{}, st))
+	if err := svc.requeueAll(st.Session().SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	var queued []string
+	entries, _ = st.Pending()
+	for _, e := range entries {
+		if e.EntityID == f.ID || strings.HasSuffix(e.EntityID, "/"+f.ID) {
+			queued = append(queued, e.Entity)
+		}
+	}
+	if strings.Join(queued, ",") != "files" {
+		t.Errorf("queued %v for the deleted file", queued)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -135,5 +136,66 @@ func TestSignInJSONNotAPage(t *testing.T) {
 		case !c.ok && (err == nil || !strings.Contains(err.Error(), "couldn't reach ChatGPT's sign-in")):
 			t.Errorf("%d %s: %v", c.status, c.ctype, err)
 		}
+	}
+}
+
+// Renewing the access token waits on the network without holding the
+// account, which Settings reads on the main thread, and calls that need a
+// token at once share one renewal.
+func TestChatGPTRenewsOutsideTheAccount(t *testing.T) {
+	release := make(chan struct{})
+	var mu sync.Mutex
+	posts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		posts++
+		mu.Unlock()
+		<-release
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"new","refresh_token":"r2","expires_in":3600}`)
+	}))
+	defer srv.Close()
+	discoveryMu.Lock()
+	saved := discoveryCache
+	discoveryCache = &chatgptDiscovery{TokenEndpoint: srv.URL + "/token"}
+	discoveryMu.Unlock()
+	t.Cleanup(func() {
+		discoveryMu.Lock()
+		discoveryCache = saved
+		discoveryMu.Unlock()
+	})
+	g := NewChatGPT(ChatGPTAccount{ClientID: "c", Email: "me@example.com", RefreshToken: "r1"})
+	toks := make(chan string, 2)
+	for range 2 {
+		go func() {
+			tok, err := g.token(context.Background())
+			if err != nil {
+				t.Error(err)
+			}
+			toks <- tok
+		}()
+	}
+	// Both are waiting on the renewal now, or about to.
+	time.Sleep(50 * time.Millisecond)
+	read := make(chan ChatGPTAccount, 1)
+	go func() { read <- g.Account() }()
+	select {
+	case a := <-read:
+		if a.Email != "me@example.com" {
+			t.Errorf("account %+v", a)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("reading the account waited on the renewal")
+	}
+	close(release)
+	for range 2 {
+		if tok := <-toks; tok != "new" {
+			t.Errorf("token %q", tok)
+		}
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if posts != 1 || g.Account().RefreshToken != "r2" {
+		t.Errorf("%d renewals, refresh token %q", posts, g.Account().RefreshToken)
 	}
 }

@@ -444,6 +444,9 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			avatar(c, cm.AuthorName, 20, cm.AuthorKind == "agent")
 			ui.Text(c, cm.AuthorName).FontSize(12.5).FontWeight(600).TextColor(pal.Text)
+			if asked := a.askedBy(cm); asked != "" {
+				ui.Text(c, asked).FontSize(11.5).TextColor(pal.TextMuted)
+			}
 			ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).Grow(1)
 			mine := cm.AuthorKind == "user" && (cm.AuthorID == "" || cm.AuthorID == a.session.UserID)
 			if mine {
@@ -461,6 +464,22 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 		})
 		ui.Text(c, cm.Body).FontSize(13.5).TextColor(pal.Text).PaddingStart(28).Selectable()
 	})
+}
+
+// askedBy names who asked for an agent's comment, when that was someone
+// else: anyone who can comment can post one, so it says whose it is.
+func (a *App) askedBy(cm store.Comment) string {
+	if cm.AuthorKind != "agent" || cm.AuthorID == "" || cm.AuthorID == a.session.UserID {
+		return ""
+	}
+	if a.page != nil {
+		for _, m := range a.page.members {
+			if m.UserID == cm.AuthorID && m.Name() != "" {
+				return locales.PanelAskedBy(m.Name())
+			}
+		}
+	}
+	return locales.PanelAskedBySomeone()
 }
 
 // agentInComment runs an agent mentioned in a comment on the thread's

@@ -7,7 +7,9 @@ package sysproxy
 import (
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"golang.org/x/net/http/httpproxy"
@@ -54,11 +56,48 @@ func (s settings) proxy(u *url.URL) (*url.URL, error) {
 	return c.ProxyFunc()(u)
 }
 
-// bypass turns a system's exception ("*.local") into NO_PROXY's (".local").
+// bypass turns a system's exception into NO_PROXY's: "*.local" into
+// ".local", and an IPv4 prefix ("10.*", "192.168.*.*", "169.254/16") into
+// a CIDR, which is all NO_PROXY matches addresses by.
 func bypass(host string) string {
 	host = strings.TrimSpace(host)
+	if cidr, ok := prefix(host); ok {
+		return cidr
+	}
 	if rest, ok := strings.CutPrefix(host, "*."); ok {
 		return "." + rest
 	}
 	return host
+}
+
+// prefix reads an IPv4 prefix written with trailing "*" octets, or with
+// octets left out before a "/bits", as a CIDR.
+func prefix(host string) (string, bool) {
+	addr, bits, slash := strings.Cut(host, "/")
+	octets := strings.Split(addr, ".")
+	if len(octets) > 4 {
+		return "", false
+	}
+	given := len(octets)
+	for given > 0 && octets[given-1] == "*" {
+		given--
+	}
+	stars := given < len(octets)
+	if given == 0 || stars == slash {
+		return "", false
+	}
+	for _, o := range octets[:given] {
+		if n, err := strconv.Atoi(o); err != nil || n < 0 || n > 255 {
+			return "", false
+		}
+	}
+	if stars {
+		bits = strconv.Itoa(8 * given)
+	}
+	full := append(octets[:given:given], "0", "0", "0", "0")[:4]
+	p, err := netip.ParsePrefix(strings.Join(full, ".") + "/" + bits)
+	if err != nil {
+		return "", false
+	}
+	return p.Masked().String(), true
 }

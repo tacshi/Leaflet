@@ -204,7 +204,31 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
 - Each table is pulled in `(updated_at, key)` order from a cursor of the
   last row stored here (`key` is `id`, or `page_id` for `page_content`). A
   row that cannot be stored stops that table's pull, and the next pull starts
-  with it.
+  with it. Each pull reads again from 10 seconds behind its cursor, since a
+  row is stamped before its transaction commits and one that commits late
+  can carry an earlier time; rows already stored here are skipped.
+- Page history goes up and is never pulled. A device keeps the snapshots
+  of a page that its History shows, the newest 50 and every named
+  (`manual`) one, and removes the others as it takes a new one, with any of
+  them still waiting to go up. The server keeps a page's newest 50 unnamed
+  snapshots and all its named ones: a trigger prunes as each is inserted.
+- Deleting a file cannot be undone, so its bytes go with it. The deleting
+  device removes its own copy (only one the app made in its data folder,
+  never the file the user added) and queues the removal of the stored
+  copy, which runs once the row with `deleted_at` has gone up: the object
+  in the `files` bucket through Storage's `DELETE /storage/v1/object/files`
+  (an object already gone counts as removed), or the blob in iCloud Drive
+  once a batch has the deletion. An upload still waiting is dropped. A
+  device that pulls a deleted file removes its copy in its data folder.
+- Sharing a page invites: `share_page` adds a `page_permissions` row with
+  `accepted_at` null, and the page reaches the person only once they accept.
+  Each pass reads the account's pending invites with `page_invites()`, which
+  Home lists; `accept_page_invite` sets `accepted_at` (moving the row's
+  `updated_at` on), and `decline_page_invite` removes the row. The shares
+  are pulled by `updated_at` like the tables, filtered to
+  `accepted_at=not.is.null`, and each one pulled brings its page and the
+  pages under it, so a page accepted after the cursor passed its share
+  comes with the next pass.
 - A device syncs one way at a time: through the server while signed in, or
   through iCloud Drive (§8) while that is on; signing in turns iCloud sync
   off.
@@ -217,17 +241,27 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
 
 See `supabase/migrations/`. Row-level security: the space owner has full
 access; `page_permissions` grants `viewer` or `editor` on a page and all its
-subpages; moving a page under a new parent requires edit access to both.
+subpages once accepted (`accepted_at` set): every access check counts only
+accepted rows. The person invited reads their own rows, pending or not, and
+the space owner reads all of a page's; only the person invited sets
+`accepted_at`, through `accept_page_invite` (a trigger keeps it otherwise).
+Moving a page under a new parent requires edit access to both.
 `pages.is_template` marks a template and every subpage of one (a subpage
 made under a template is one too); templates stay out of the page list,
 search and `list_pages`. `model_providers.encrypted_secret` and `refresh_token` hold Vault secret IDs
 and are not selectable by clients.
 
 Storage buckets: `recordings` (`{user_id}/{recording_id}.m4a`), `files`
-(`{space_id}/{file_id}/{name}`), `images` (`{space_id}/{image_id}.{ext}`).
+(`{space_id}/{file_id}/{name}`), `images` (`{space_id}/{page_id}/{image_id}.{ext}`).
 
-RPCs: `share_page(p_page_id, p_email, p_role)`, `unshare_page(p_page_id, p_user_id)`,
-`page_members(p_page_id)`, `set_provider_secret(p_provider_id, p_secret)`
+RPCs: `share_page(p_page_id, p_email, p_role)` (an invite; it returns no
+rows whether or not the email has an account, and sharing again changes only
+the role), `unshare_page(p_page_id, p_user_id)` (also withdraws an invite),
+`page_members(p_page_id)` (`user_id, display_name, email, role, accepted`;
+people still invited are listed only to the owner), `page_invites()` (the
+caller's pending invites: `page_id, title, role, inviter_name, created_at`,
+of pages not deleted), `accept_page_invite(p_page_id)`,
+`decline_page_invite(p_page_id)`, `set_provider_secret(p_provider_id, p_secret)`
 (authenticated), `get_provider_secret(p_provider_id)` (service role only).
 
 ## 8. iCloud Drive folder
@@ -285,16 +319,25 @@ Leaflet/
   parse: it reads that one first next time. iCloud may still bring a batch
   before the page file it names: a reader merges that page once the file
   has at least the version the batch named. A version is published once
-  its batch is written; until then it is sent again.
+  its batch is written; until then it is sent again. Files are synced to
+  disk before they are moved into place.
+- **A damaged batch.** A device reads its own last batch once a run, and
+  rewrites it empty and sends everything again if it does not parse. A
+  reader skips a batch that stays damaged only when later batches exist,
+  after 20 passes and a day.
 - **Compaction.** Past 500 batches, a device writes the latest entry of each
   row and page of its log as one batch with `snapshot: true`, sets
   `log_from` to its seq, and removes the batches before it. A reader that
   finds batches missing goes on from the first snapshot after the gap, as
   a compaction cut short leaves batches before its snapshot.
-- **A device that finds** in its own folder a batch after the last it wrote,
-  or a copy iCloud made, shares its ID with another device (a restored
+- **A device that finds** in its own folder a batch after the last it wrote
+  (other than the one it notes it is writing), or a copy iCloud made, shares its ID with another device (a restored
   backup): it takes a new ID, reads the old ID's folder as another device's,
   and sends everything again.
+- **Blobs** are written by a device that has the file or audio. A device
+  that deletes a file removes its blob, whoever wrote it, once a batch of
+  its own has the deletion; one that sends everything again sends deleted
+  files' rows too, so a deletion in a batch that was lost goes again.
 - **Not downloaded.** A file iCloud has not downloaded (on macOS before 14,
   `.<name>.icloud` beside where it goes; after, a file flagged dataless) is
   asked for, and read on a later pass.

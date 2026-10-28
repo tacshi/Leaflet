@@ -1,6 +1,7 @@
 package app
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -27,7 +28,25 @@ func TestTranscriptLinePlays(t *testing.T) {
 	}
 	t.Cleanup(func() { delete(players, rec.ID) })
 	n := &doc.Node{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": rec.ID, "title": "Recording"}}
-	tt := ui.NewTester(func(c *ui.Context) { a.recordingBlock(c, n) }, 700, 400)
+	// The audio loads on its own goroutine; what it hands back runs in a
+	// frame, as Window.Update runs it on the main thread.
+	var mu sync.Mutex
+	var posted []func()
+	a.post = func(fn func()) {
+		mu.Lock()
+		posted = append(posted, fn)
+		mu.Unlock()
+	}
+	tt := ui.NewTester(func(c *ui.Context) {
+		mu.Lock()
+		fns := posted
+		posted = nil
+		mu.Unlock()
+		for _, fn := range fns {
+			fn()
+		}
+		a.recordingBlock(c, n)
+	}, 700, 400)
 	tt.Frame()
 	if err := tt.Click("She could neither sleep nor concentrate."); err != nil {
 		t.Fatal(err)
@@ -45,5 +64,23 @@ func TestTranscriptLinePlays(t *testing.T) {
 	tt.Frame()
 	if got, want := tt.Clipboard(), "A client waited for a result.\nShe could neither sleep nor concentrate."; got != want {
 		t.Errorf("copied %q", got)
+	}
+}
+
+// A page's recordings stop playing and let their audio go as it closes.
+func TestClosingPageDropsPlayers(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	pl := &player{loading: true}
+	players["r1"] = pl
+	t.Cleanup(func() { delete(players, "r1") })
+	a.closePage()
+	if len(players) != 0 {
+		t.Errorf("players kept: %v", players)
 	}
 }

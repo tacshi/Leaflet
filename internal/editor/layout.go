@@ -320,7 +320,7 @@ func (e *Editor) copyText() string {
 	}
 	us := e.withSections()
 	var lines []string
-	for i := indexIn(us, a.ID); i <= indexIn(us, b.ID) && i < len(us); i++ {
+	for i := indexIn(us, a.ID); i >= 0 && i <= indexIn(us, b.ID) && i < len(us); i++ {
 		n := us[i]
 		if !n.IsText() {
 			sub := &doc.Content{Children: []*doc.Node{n.Clone()}}
@@ -345,7 +345,11 @@ func (e *Editor) copyText() string {
 			continue
 		}
 		text := n.Delta().Slice(from, to).ToMarkdown()
-		lines = append(lines, blockPrefix(n, e.depth(n.ID))+text)
+		prefix := blockPrefix(n, e.depth(n.ID))
+		if prefix == "" {
+			text = doc.EscapeBlockStart(text)
+		}
+		lines = append(lines, prefix+text)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -529,12 +533,33 @@ func parseLines(text string) []*doc.Node {
 }
 
 // tableRow reads a line of a markdown table, or nil for the line under the
-// header ("| --- | --- |").
+// header ("| --- | --- |"). As in GitHub's tables, a backslash keeps the
+// character after it in the cell, and \| is a | of the cell's text.
 func tableRow(line string) []string {
 	line = strings.TrimSpace(line)
 	line = strings.TrimPrefix(line, "|")
-	line = strings.TrimSuffix(line, "|")
-	cells := strings.Split(line, "|")
+	var cells []string
+	var cell strings.Builder
+	for i := 0; i < len(line); i++ {
+		switch {
+		case line[i] == '\\' && i+1 < len(line):
+			i++
+			if line[i] != '|' {
+				cell.WriteByte('\\')
+			}
+			cell.WriteByte(line[i])
+		case line[i] == '|':
+			cells = append(cells, cell.String())
+			cell.Reset()
+		default:
+			cell.WriteByte(line[i])
+		}
+	}
+	// A closing | ends the last cell; without one, what is after the last
+	// | is a cell.
+	if rest := cell.String(); rest != "" || len(cells) == 0 {
+		cells = append(cells, rest)
+	}
 	rule := true
 	for i, c := range cells {
 		cells[i] = strings.TrimSpace(c)

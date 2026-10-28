@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/audio"
 	"github.com/egoist/mygo/ui"
 
@@ -27,11 +28,14 @@ func (a *App) startRecording(pageID, _ string) {
 			a.savePage()
 			return
 		}
-		if c := a.st.Content(pageID); c != nil {
-			_ = c.Insert(doc.Position{At: "end"}, n)
-			if _, _, err := a.st.SaveContent(pageID, c); err != nil {
-				a.toast(locales.RecCouldNotSave(err.Error()))
+		err := a.saveStored(pageID, func(c *doc.Content) *doc.Content {
+			if c != nil {
+				_ = c.Insert(doc.Position{At: "end"}, n.Clone())
 			}
+			return c
+		})
+		if err != nil {
+			a.toast(locales.RecCouldNotSave(err.Error()))
 		}
 	})
 	if err != nil {
@@ -63,11 +67,9 @@ func (a *App) recordingPill(c *ui.Context) {
 		}
 		ui.Text(c, label).FontSize(12.5).FontWeight(600).TextColor(pal.DangerText).FontFeatures("tnum")
 		c.After(500 * time.Millisecond)
-		if v := a.rec.View(); v != nil {
-			// The capture page must be in the window to keep running.
-			ui.WebView(c, v).Size(1, 1).Opacity(0.01)
-		}
-		pause := ui.ButtonBase(c.Key("pause")).Size(22, 22).Center().Radius(999).Label(locales.CommonPause()).TextColor(pal.DangerText)
+		// Before the microphone starts there is nothing to pause.
+		pause := ui.ButtonBase(c.Key("pause")).Size(22, 22).Center().Radius(999).Label(locales.CommonPause()).TextColor(pal.DangerText).
+			Disabled(st.Starting)
 		pause.Children(func() {
 			icon := "pause"
 			if st.Paused {
@@ -86,6 +88,14 @@ func (a *App) recordingPill(c *ui.Context) {
 	})
 }
 
+// recView is the recording's capture page, if one is running.
+func (a *App) recView() *mygo.WebView {
+	if a.rec == nil {
+		return nil
+	}
+	return a.rec.View()
+}
+
 // player is the playback of one recording; from is where it starts once
 // its audio loads, as a time chosen before then asks.
 type player struct {
@@ -97,6 +107,17 @@ type player struct {
 }
 
 var players = map[string]*player{}
+
+// dropPlayers stops the recordings playing and lets their audio go, as
+// the page that shows them closes.
+func dropPlayers() {
+	for id, pl := range players {
+		if pl.p != nil {
+			pl.p.Close()
+		}
+		delete(players, id)
+	}
+}
 
 func (a *App) play(rec store.Recording) {
 	pl := players[rec.ID]
@@ -129,6 +150,9 @@ func (a *App) play(rec store.Recording) {
 		}
 		a.update(func() {
 			pl.loading = false
+			if players[rec.ID] != pl {
+				return // the page closed meanwhile
+			}
 			if err != nil {
 				pl.err = err.Error()
 				return

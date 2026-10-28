@@ -1,0 +1,85 @@
+package recording
+
+import (
+	"bytes"
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+)
+
+// Audio recorded while the stream connects reaches it first, in order; a
+// stream that connects for a recording gone since is closed, not used.
+func TestSonioxGetsTheOpeningAudio(t *testing.T) {
+	heard := make(chan []byte, 10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		c, err := websocket.Accept(w, req, nil)
+		if err != nil {
+			return
+		}
+		for {
+			_, data, err := c.Read(context.Background())
+			if err != nil {
+				return
+			}
+			heard <- data
+		}
+	}))
+	defer srv.Close()
+	dial := func() *Soniox {
+		conn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &Soniox{conn: conn, done: make(chan struct{})}
+	}
+
+	wav, err := CreateWav(filepath.Join(t.TempDir(), "a.wav"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = wav.Close() }()
+	r := &Controller{update: func(fn func()) { fn() }, wav: wav, session: "s1", connecting: true}
+	r.chunk("s1", []byte{1, 1})
+	r.chunk("s1", []byte{2, 2})
+	r.chunk("old", []byte{9, 9})
+	s := dial()
+	r.attachSoniox("s1", s)
+	if r.soniox != s || r.connecting || len(r.early) != 0 {
+		t.Fatalf("not attached: %v %v %d", r.soniox == s, r.connecting, len(r.early))
+	}
+	r.chunk("s1", []byte{3, 3})
+	for _, want := range [][]byte{{1, 1}, {2, 2}, {3, 3}} {
+		select {
+		case got := <-heard:
+			if !bytes.Equal(got, want) {
+				t.Fatalf("heard %v, want %v", got, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("never heard %v", want)
+		}
+	}
+
+	// The next recording started before this stream connected.
+	r.session, r.soniox, r.connecting = "s2", nil, true
+	late := dial()
+	r.attachSoniox("s1", late)
+	if r.soniox != nil || !r.connecting {
+		t.Error("a stream for the last recording took this one")
+	}
+}
+
+// Pause before the microphone starts changes nothing: there is no time
+// running yet.
+func TestPauseWhileStarting(t *testing.T) {
+	r := &Controller{}
+	r.TogglePause()
+	if r.State.Paused || r.Elapsed() != 0 {
+		t.Errorf("paused %v, elapsed %v", r.State.Paused, r.Elapsed())
+	}
+}

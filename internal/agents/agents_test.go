@@ -302,3 +302,27 @@ func TestClientRefusesRedirects(t *testing.T) {
 		t.Error("the key went on to another host")
 	}
 }
+
+// A table rewritten as a list leaves its cells out of the op, as the server
+// does.
+func TestReplaceTableWithList(t *testing.T) {
+	table, _ := doc.TableNode([][]string{{"a", "b"}}, "t")
+	c := doc.FromBlocks([]*doc.Node{table})
+	x := executor(c)
+	out := x.Call("replace_block", map[string]any{"id": "t", "block": map[string]any{"type": "bulleted_list", "text": "now a list"}})
+	if e, ok := out["error"]; ok {
+		t.Fatal(e)
+	}
+	if len(x.Ops) != 1 || len(x.Ops[0].Node.Children) != 0 {
+		t.Errorf("ops %+v", x.Ops)
+	}
+}
+
+func TestEmbedSizeCap(t *testing.T) {
+	x := executor(page())
+	html := strings.Repeat("x", 200_001)
+	out := x.Call("insert_blocks", map[string]any{"position": map[string]any{"after": "p1"}, "blocks": []any{map[string]any{"type": "embed", "embed": map[string]any{"html": html}}}})
+	if e, _ := out["error"].(string); !strings.Contains(e, "200 KB") || len(x.Ops) != 0 {
+		t.Errorf("out %v", out)
+	}
+}

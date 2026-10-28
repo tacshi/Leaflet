@@ -487,3 +487,32 @@ func TestFailedMoveKeepsTheBlock(t *testing.T) {
 		}
 	}
 }
+
+// One side makes a list item, moves a child into it and deletes the
+// child's old parent, while the other edits elsewhere: the child lands in
+// the new item whichever side is primary and whichever is local.
+func TestMergeMoveOutOfADeletedBlock(t *testing.T) {
+	item := func(id, text string, kids ...*Node) *Node {
+		n := &Node{ID: id, Type: "bulleted_list", Children: kids}
+		n.SetDelta(Delta{{Text: text}})
+		return n
+	}
+	base := page(map[string]int64{"p": 10, "c": 10, "z": 10}, item("p", "p", item("c", "c", para("g", "g"))), para("z", "z"))
+	base.Blocks["g"] = 10
+	for _, moverAt := range []int64{100, 300} {
+		mover := page(map[string]int64{"n": moverAt, "c": moverAt, "g": 10, "z": 10}, item("n", "n", item("c", "c", para("g", "g"))), para("z", "z"))
+		mover.Deleted["p"] = moverAt
+		editor := page(map[string]int64{"p": 10, "c": 10, "g": 10, "z": 200}, item("p", "p", item("c", "c", para("g", "g"))), para("z", "Z"))
+		for _, got := range []*Content{first(Merge(base, mover, editor)), first(Merge(base, editor, mover))} {
+			if !reflect.DeepEqual(texts(got), []string{"n", "c", "g", "Z"}) {
+				t.Errorf("mover at %d: texts %v", moverAt, texts(got))
+			}
+			if loc := got.Locate("c"); loc == nil || loc.Parent == nil || loc.Parent.ID != "n" {
+				t.Errorf("mover at %d: c is not in n: %s", moverAt, got.Encode())
+			}
+			if got.Find("p") != nil {
+				t.Errorf("mover at %d: p came back", moverAt)
+			}
+		}
+	}
+}

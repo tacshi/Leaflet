@@ -222,7 +222,9 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 	}
 
 	// Blocks only in the primary, in document order: a block that stays
-	// keeps the blocks under it.
+	// keeps the blocks under it. One that goes leaves behind, in its
+	// place, the blocks under it the other side still has, as one it moved
+	// out before deleting it; the waiting moves below take them on.
 	var dropPrimary func(nodes []*Node)
 	dropPrimary = func(nodes []*Node) {
 		for _, n := range nodes {
@@ -234,9 +236,31 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 			if stays(primary, primaryFlat, other.Deleted, id, true) {
 				continue
 			}
+			var alive []*Node
+			var find func(*Node)
+			find = func(n *Node) {
+				for _, k := range n.Children {
+					if _, ok := otherFlat[k.ID]; ok {
+						alive = append(alive, k)
+					} else {
+						find(k)
+					}
+				}
+			}
+			if r := result.Find(id); r != nil {
+				find(r)
+			}
+			for _, k := range alive {
+				_ = result.Move(k.ID, Position{Before: id})
+			}
 			result.Remove(id)
 			delete(times, id)
 			tombstones[id] = max(tombstones[id], other.Deleted[id], timeOf(primary, id))
+			for _, k := range alive {
+				if f := primaryFlat[k.ID]; f != nil {
+					dropPrimary([]*Node{f.node})
+				}
+			}
 		}
 	}
 	dropPrimary(primary.Children)

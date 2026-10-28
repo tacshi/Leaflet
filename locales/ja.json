@@ -301,6 +301,8 @@
   "panelReplyPlaceholder": "返信…",
   "panelReply": "返信",
   "panelCommentActions": "コメントの操作",
+  "panelAskedBy": "{name} が依頼",
+  "panelAskedBySomeone": "他のユーザーが依頼",
   "panelDeleteComment": "コメントを削除",
   "panelCouldNotDelete": "削除できませんでした：{error}",
   "sidebarSearch": "検索（⌘P）",

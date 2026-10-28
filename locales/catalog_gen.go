@@ -4309,6 +4309,38 @@ func (msgs Messages) PanelCommentActions() string {
 	return Catalog.Format(msgs.locale, "panelCommentActions", nil)
 }
 
+// PanelAskedBy says "asked by {name}"
+// in the language the app shows.
+//
+// Comment header: after an agent's name, the person who asked the agent, so
+// a reply can't pass as the agent's own.
+func PanelAskedBy(name string) string { return In(i18n.Locale()).PanelAskedBy(name) }
+
+// PanelAskedBy says "asked by {name}"
+// in the language of msgs.
+//
+// Comment header: after an agent's name, the person who asked the agent, so
+// a reply can't pass as the agent's own.
+func (msgs Messages) PanelAskedBy(name string) string {
+	return Catalog.Format(msgs.locale, "panelAskedBy", map[string]any{"name": name})
+}
+
+// PanelAskedBySomeone says "asked by someone else"
+// in the language the app shows.
+//
+// Comment header: after an agent's name, when the person who asked it isn't
+// known on this device.
+func PanelAskedBySomeone() string { return In(i18n.Locale()).PanelAskedBySomeone() }
+
+// PanelAskedBySomeone says "asked by someone else"
+// in the language of msgs.
+//
+// Comment header: after an agent's name, when the person who asked it isn't
+// known on this device.
+func (msgs Messages) PanelAskedBySomeone() string {
+	return Catalog.Format(msgs.locale, "panelAskedBySomeone", nil)
+}
+
 // PanelDeleteComment says "Delete comment"
 // in the language the app shows.
 //

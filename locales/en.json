@@ -1557,6 +1557,19 @@
   "@panelCommentActions": {
     "description": "Accessibility name of a comment's ⋯ menu button."
   },
+  "panelAskedBy": "asked by {name}",
+  "@panelAskedBy": {
+    "description": "Comment header: after an agent's name, the person who asked the agent, so a reply can't pass as the agent's own.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "panelAskedBySomeone": "asked by someone else",
+  "@panelAskedBySomeone": {
+    "description": "Comment header: after an agent's name, when the person who asked it isn't known on this device."
+  },
   "panelDeleteComment": "Delete comment",
   "@panelDeleteComment": {
     "description": "Comment menu item."

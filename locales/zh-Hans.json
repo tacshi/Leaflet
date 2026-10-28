@@ -301,6 +301,8 @@
   "panelReplyPlaceholder": "回复…",
   "panelReply": "回复",
   "panelCommentActions": "评论操作",
+  "panelAskedBy": "由 {name} 发起",
+  "panelAskedBySomeone": "由其他人发起",
   "panelDeleteComment": "删除评论",
   "panelCouldNotDelete": "无法删除：{error}",
   "sidebarSearch": "搜索（⌘P）",

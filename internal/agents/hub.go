@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +108,8 @@ type Session struct {
 	ConversationID string
 	Running        bool
 	Selected       *store.ModelChoice
+	// Past are the page's earlier conversations, the latest first.
+	Past []*Conversation
 }
 
 // Run returns a run by ID.
@@ -129,46 +132,93 @@ func (s *Session) Latest() *Run {
 	return nil
 }
 
-// savedChat is a page's sidebar chat as the device keeps it between
+// Conversation is a page's sidebar chat as the device keeps it between
 // launches, with the runs its replies show, so they can still be undone.
-type savedChat struct {
-	ConversationID string     `json:"conversation_id"`
-	Messages       []*Message `json:"messages"`
-	Runs           []*Run     `json:"runs,omitempty"`
+type Conversation struct {
+	ID       string     `json:"conversation_id"`
+	Messages []*Message `json:"messages"`
+	Runs     []*Run     `json:"runs,omitempty"`
+	// At is when an earlier conversation was left for a new one.
+	At time.Time `json:"at,omitzero"`
 }
 
-// maxSavedMessages bounds the chat kept for a page.
-const maxSavedMessages = 200
-
-func chatKey(pageID string) string { return "chat." + pageID }
-
-// loadChat reads a page's chat from an earlier launch into s. A reply
-// still pending then never got its answer.
-func (h *Hub) loadChat(s *Session) {
-	raw, ok := h.st.Value(chatKey(s.PageID))
-	if !ok {
-		return
+// Title is the conversation's first request, on one line.
+func (c *Conversation) Title() string {
+	for _, m := range c.Messages {
+		if m.Mine {
+			line, _, _ := strings.Cut(m.Text, "\n")
+			return short(strings.TrimSpace(line))
+		}
 	}
-	var saved savedChat
-	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
-		log.Printf("agent chat: %v", err)
-		return
-	}
-	for _, m := range saved.Messages {
+	return ""
+}
+
+// restore marks what an earlier launch left unfinished: a reply still
+// pending never got its answer.
+func (c *Conversation) restore() {
+	for _, m := range c.Messages {
 		if m.Pending {
 			m.Pending, m.Error, m.Text = false, true, "The app closed before the agent finished."
 		}
 	}
-	for _, r := range saved.Runs {
+	for _, r := range c.Runs {
 		r.Restored = true
 		if r.Status != "done" && r.Status != "failed" {
 			r.Status = "failed"
 		}
 	}
-	if saved.ConversationID != "" {
-		s.ConversationID = saved.ConversationID
+}
+
+// maxSavedMessages bounds the chat kept for a page.
+const maxSavedMessages = 200
+
+// maxPastConversations bounds the earlier conversations kept for a page.
+const maxPastConversations = 50
+
+func chatKey(pageID string) string { return "chat." + pageID }
+
+func pastChatsKey(pageID string) string { return "chat.past." + pageID }
+
+// loadChat reads a page's chat and its earlier ones from an earlier launch
+// into s.
+func (h *Hub) loadChat(s *Session) {
+	if raw, ok := h.st.Value(pastChatsKey(s.PageID)); ok {
+		if err := json.Unmarshal([]byte(raw), &s.Past); err != nil {
+			log.Printf("agent chat: %v", err)
+		}
+		for _, c := range s.Past {
+			c.restore()
+		}
+	}
+	raw, ok := h.st.Value(chatKey(s.PageID))
+	if !ok {
+		return
+	}
+	var saved Conversation
+	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
+		log.Printf("agent chat: %v", err)
+		return
+	}
+	saved.restore()
+	if saved.ID != "" {
+		s.ConversationID = saved.ID
 	}
 	s.Messages, s.Runs = saved.Messages, saved.Runs
+}
+
+// current is the page's chat as it is kept, its runs with it.
+func (s *Session) current() *Conversation {
+	msgs := s.Messages
+	if len(msgs) > maxSavedMessages {
+		msgs = msgs[len(msgs)-maxSavedMessages:]
+	}
+	c := &Conversation{ID: s.ConversationID, Messages: msgs}
+	for _, m := range msgs {
+		if r := s.Run(m.RunID); r != nil {
+			c.Runs = append(c.Runs, r)
+		}
+	}
+	return c
 }
 
 // saveChat keeps a page's chat for the next launch.
@@ -179,17 +229,7 @@ func (h *Hub) saveChat(s *Session) {
 		}
 		return
 	}
-	msgs := s.Messages
-	if len(msgs) > maxSavedMessages {
-		msgs = msgs[len(msgs)-maxSavedMessages:]
-	}
-	saved := savedChat{ConversationID: s.ConversationID, Messages: msgs}
-	for _, m := range msgs {
-		if r := s.Run(m.RunID); r != nil {
-			saved.Runs = append(saved.Runs, r)
-		}
-	}
-	raw, err := json.Marshal(saved)
+	raw, err := json.Marshal(s.current())
 	if err == nil {
 		err = h.st.SetValue(chatKey(s.PageID), string(raw))
 	}
@@ -198,11 +238,71 @@ func (h *Hub) saveChat(s *Session) {
 	}
 }
 
-// NewConversation clears a page's sidebar chat.
+// savePast keeps a page's earlier conversations for the next launch.
+func (h *Hub) savePast(s *Session) {
+	var err error
+	if len(s.Past) == 0 {
+		err = h.st.DeleteValue(pastChatsKey(s.PageID))
+	} else {
+		var raw []byte
+		if raw, err = json.Marshal(s.Past); err == nil {
+			err = h.st.SetValue(pastChatsKey(s.PageID), string(raw))
+		}
+	}
+	if err != nil {
+		log.Printf("agent chat: %v", err)
+	}
+}
+
+// leave puts the page's chat first among its earlier ones, when it has
+// messages.
+func (h *Hub) leave(s *Session) {
+	if len(s.Messages) == 0 {
+		return
+	}
+	c := s.current()
+	c.At = time.Now()
+	s.Past = append([]*Conversation{c}, s.Past...)
+	if len(s.Past) > maxPastConversations {
+		s.Past = s.Past[:maxPastConversations]
+	}
+	h.savePast(s)
+}
+
+// NewConversation starts a page's sidebar chat afresh, keeping the one it
+// had among the earlier ones.
 func (h *Hub) NewConversation(pageID string) {
 	s := h.Session(pageID)
+	if s.Running {
+		return
+	}
+	h.leave(s)
 	s.Messages = nil
 	s.ConversationID = doc.NewRowID()
+	h.saveChat(s)
+}
+
+// OpenConversation goes back to an earlier conversation of a page,
+// keeping the one it had among the earlier ones.
+func (h *Hub) OpenConversation(pageID, id string) {
+	s := h.Session(pageID)
+	if s.Running {
+		return
+	}
+	i := slices.IndexFunc(s.Past, func(c *Conversation) bool { return c.ID == id })
+	if i < 0 {
+		return
+	}
+	c := s.Past[i]
+	s.Past = slices.Delete(s.Past, i, i+1)
+	h.leave(s)
+	s.Messages, s.ConversationID = c.Messages, c.ID
+	for _, r := range c.Runs {
+		if s.Run(r.ID) == nil {
+			s.Runs = append(s.Runs, r)
+		}
+	}
+	h.savePast(s)
 	h.saveChat(s)
 }
 

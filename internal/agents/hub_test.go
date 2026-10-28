@@ -156,3 +156,44 @@ func TestChatSurvivesARestart(t *testing.T) {
 		t.Errorf("%d messages after a new conversation", len(got.Messages))
 	}
 }
+
+// A new conversation keeps the one before among the earlier ones, which
+// opens again with its runs, after a restart too.
+func TestEarlierConversations(t *testing.T) {
+	st := openStore(t)
+	h := NewHub(st, nil, nil)
+	s := h.Session("p")
+	first := s.ConversationID
+	s.Runs = []*Run{{ID: "r1", Status: "done", Ops: []doc.Op{insertAfter("p1", "x1", "one")}}}
+	s.Messages = []*Message{{Mine: true, Text: "Add a line\nplease"}, {Text: "Added a line.", RunID: "r1"}}
+	h.saveChat(s)
+
+	h.NewConversation("p")
+	// An empty conversation is not kept.
+	h.NewConversation("p")
+	if len(s.Messages) != 0 || len(s.Past) != 1 || s.Past[0].ID != first || s.Past[0].Title() != "Add a line" {
+		t.Fatalf("%d messages, past %+v", len(s.Messages), s.Past)
+	}
+	second := s.ConversationID
+	s.Messages = []*Message{{Mine: true, Text: "Summarize"}, {Text: "It is a plan."}}
+	h.saveChat(s)
+
+	again := NewHub(st, nil, nil)
+	got := again.Session("p")
+	if len(got.Past) != 1 || got.ConversationID != second {
+		t.Fatalf("after a restart: conversation %q, %d earlier", got.ConversationID, len(got.Past))
+	}
+	again.OpenConversation("p", first)
+	if got.ConversationID != first || len(got.Messages) != 2 || got.Messages[0].Text != "Add a line\nplease" {
+		t.Fatalf("opened %q: %+v", got.ConversationID, got.Messages)
+	}
+	if r := got.Run("r1"); r == nil || len(r.Ops) != 1 {
+		t.Errorf("run %+v", r)
+	}
+	if len(got.Past) != 1 || got.Past[0].ID != second || got.Past[0].Title() != "Summarize" {
+		t.Errorf("earlier %+v", got.Past)
+	}
+	if last := NewHub(st, nil, nil).Session("p"); last.ConversationID != first || len(last.Past) != 1 {
+		t.Errorf("after another restart: conversation %q, %d earlier", last.ConversationID, len(last.Past))
+	}
+}

@@ -3885,6 +3885,22 @@ func (msgs Messages) PanelTabOutline() string {
 	return Catalog.Format(msgs.locale, "panelTabOutline", nil)
 }
 
+// PanelPastConversations says "Earlier conversations"
+// in the language the app shows.
+//
+// Side panel: icon button listing the page's earlier agent chats; choosing
+// one opens it.
+func PanelPastConversations() string { return In(i18n.Locale()).PanelPastConversations() }
+
+// PanelPastConversations says "Earlier conversations"
+// in the language of msgs.
+//
+// Side panel: icon button listing the page's earlier agent chats; choosing
+// one opens it.
+func (msgs Messages) PanelPastConversations() string {
+	return Catalog.Format(msgs.locale, "panelPastConversations", nil)
+}
+
 // PanelNewConversation says "New conversation"
 // in the language the app shows.
 //

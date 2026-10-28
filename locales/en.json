@@ -44,10 +44,6 @@
   "@appStartFailed": {
     "description": "Title of the error dialog when the app fails to start."
   },
-  "appRouteTodos": "To-dos",
-  "@appRouteTodos": {
-    "description": "The name of the To-dos view, in Back's list of pages."
-  },
   "appErrorSave": "Could not save: {error}",
   "@appErrorSave": {
     "description": "Toast when the open page could not be saved.",
@@ -859,7 +855,7 @@
   "@dialogMoveSearch": {
     "description": "Move dialog: the search field's placeholder."
   },
-  "dialogMoveTopLevel": "Top level of My space",
+  "dialogMoveTopLevel": "Top level",
   "@dialogMoveTopLevel": {
     "description": "Move dialog: the destination at the top level of the user's space."
   },
@@ -1683,17 +1679,71 @@
       }
     }
   },
-  "sidebarMySpace": "My space",
-  "@sidebarMySpace": {
-    "description": "Sidebar section header."
-  },
   "sidebarSharedWithMe": "Shared with me",
   "@sidebarSharedWithMe": {
     "description": "Sidebar section header."
   },
+  "sidebarTabPages": "Pages",
+  "@sidebarTabPages": {
+    "description": "Sidebar tab: the page tree."
+  },
+  "sidebarTabTags": "Tags",
+  "@sidebarTabTags": {
+    "description": "Sidebar tab: pages by tag."
+  },
+  "sidebarTabsLabel": "Sidebar view",
+  "@sidebarTabsLabel": {
+    "description": "Accessibility name of the sidebar's tabs (Pages, Tags, To-dos)."
+  },
+  "sidebarNoTags": "Add tags to a page to group it here.",
+  "@sidebarNoTags": {
+    "description": "Sidebar Tags tab with no tags yet."
+  },
+  "tagActions": "Tag actions",
+  "@tagActions": {
+    "description": "Accessibility name of a tag's ⋯ menu button in the sidebar."
+  },
+  "tagRenameEllipsis": "Rename…",
+  "@tagRenameEllipsis": {
+    "description": "Tag menu item: rename the tag on every page."
+  },
+  "tagDelete": "Delete tag",
+  "@tagDelete": {
+    "description": "Tag menu item: take the tag off every page."
+  },
+  "tagDeleted": "Deleted the tag {name}.",
+  "@tagDeleted": {
+    "description": "Toast after deleting a tag, with Undo.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "work"
+      }
+    }
+  },
+  "dialogTagRename": "Rename tag",
+  "@dialogTagRename": {
+    "description": "Rename tag dialog: title."
+  },
+  "dialogTagRenameSubtitle": "Renames it on every page you can edit. A name another tag has joins the two.",
+  "@dialogTagRenameSubtitle": {
+    "description": "Rename tag dialog: subtitle."
+  },
+  "dialogTagName": "Tag name",
+  "@dialogTagName": {
+    "description": "Rename tag dialog: the name field's placeholder."
+  },
+  "pageAddTag": "Add tag",
+  "@pageAddTag": {
+    "description": "Page byline: tooltip of the button editing the page's tags."
+  },
+  "pageTagsLabel": "Tags",
+  "@pageTagsLabel": {
+    "description": "Page byline: accessibility name of the tags field."
+  },
   "sidebarNewFolder": "New folder",
   "@sidebarNewFolder": {
-    "description": "Sidebar: tooltip of My space's + button."
+    "description": "Sidebar: tooltip of the new folder button at the top."
   },
   "sidebarFolderActions": "Folder actions",
   "@sidebarFolderActions": {
@@ -1833,7 +1883,7 @@
   },
   "todosTitle": "To-dos",
   "@todosTitle": {
-    "description": "To-dos view title, and the sidebar button opening it."
+    "description": "Sidebar tab listing the to-dos of every page."
   },
   "todosEmptyTitle": "Nothing to do",
   "@todosEmptyTitle": {
@@ -3686,7 +3736,7 @@
   "@welcomeImageAlt": {
     "description": "The welcome guide page, made once on first run: the picture's alternative text."
   },
-  "welcomeIntro": "Pages are living documents you write with people and agents. They are saved on this device first and sync when you are online. This page shows what a page can do; change anything, it is yours.",
+  "welcomeIntro": "Pages are living documents you write yourself, with agents to help. They are saved on this device first and sync between your devices when you are online. This page shows what a page can do; change anything, it is yours.",
   "@welcomeIntro": {
     "description": "The welcome guide page, made once on first run: the first paragraph."
   },
@@ -3713,6 +3763,18 @@
   "welcomeTryProvider": "Add an agent provider in **Settings › Agent providers**: sign in with ChatGPT, paste an API key, or use a model server such as Ollama",
   "@welcomeTryProvider": {
     "description": "The welcome guide page, made once on first run: a to-do of Try it (Markdown)."
+  },
+  "welcomeTagGuide": "guide",
+  "@welcomeTagGuide": {
+    "description": "The welcome guide page, made once on first run: the tag of the guide itself, which the sidebar's Tags tab and search show. One short word, as tags are."
+  },
+  "welcomeTagMeetings": "meetings",
+  "@welcomeTagMeetings": {
+    "description": "The welcome guide page, made once on first run: the tag of the example meeting subpage and its template. One short word, as tags are."
+  },
+  "welcomeTryTag": "Hover the line under this page's title and click the tag button to add a tag",
+  "@welcomeTryTag": {
+    "description": "The welcome guide page, made once on first run: a to-do of Try it: adding a tag from the byline."
   },
   "welcomeWritingHeading": "Writing",
   "@welcomeWritingHeading": {
@@ -4094,7 +4156,7 @@
   "@welcomeDateTodo": {
     "description": "The welcome guide page, made once on first run: an example to-do (Markdown)."
   },
-  "welcomeTodosDue": "A due to-do reminds you on the day and turns red once overdue. The **To-dos** button at the top of the sidebar gathers the open ones from every page.",
+  "welcomeTodosDue": "A due to-do reminds you on the day and turns red once overdue. The sidebar's **To-dos** tab gathers the open ones from every page.",
   "@welcomeTodosDue": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
@@ -4148,19 +4210,33 @@
       }
     }
   },
-  "welcomeOrganizingFolders": "Folders, from the button beside **My space**, group pages. A page's **…** menu moves it, duplicates it with its subpages, exports it as Markdown, or saves it as a template, which a blank page then offers to start from.",
+  "welcomeOrganizingFolders": "Folders, from the folder button at the top of the sidebar, group pages. A page's **…** menu moves it, duplicates it with its subpages, exports it as Markdown, or saves it as a template, which a blank page then offers to start from.",
   "@welcomeOrganizingFolders": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
+  },
+  "welcomeOrganizingTags": "Tags file a page under several names at once, as **{guide}** under this page's title. Add one from the tag button beside the byline; the sidebar's **Tags** tab groups pages by tag, and a click on a tag opens it there. In search, **#{meetings}** keeps to the pages tagged {meetings}.",
+  "@welcomeOrganizingTags": {
+    "description": "The welcome guide page, made once on first run: how tags work, naming the guide's and the meeting's tags (Markdown).",
+    "placeholders": {
+      "guide": {
+        "type": "String",
+        "example": "guide"
+      },
+      "meetings": {
+        "type": "String",
+        "example": "meetings"
+      }
+    }
   },
   "welcomeOrganizingHeadings": "Headings fold their section from the arrow beside them, and the panel's **Outline** tab lists them. Right-click a block to **Copy link to block**.",
   "@welcomeOrganizingHeadings": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
-  "welcomeTogetherHeading": "Working together",
+  "welcomeTogetherHeading": "Comments, history and sync",
   "@welcomeTogetherHeading": {
-    "description": "The welcome guide page, made once on first run: a section heading."
+    "description": "The welcome guide page, made once on first run: the heading of the section on comments, page history and sync."
   },
-  "welcomeTogetherComments": "Select text and choose **Comment** to start a thread. Threads live in the panel's **Comments** tab, where you reply and **Resolve** them. Once you sign in, **Share** in the header invites people to edit or view a page and its subpages.",
+  "welcomeTogetherComments": "Select text and choose **Comment** to start a thread. Threads live in the panel's **Comments** tab, where you reply and **Resolve** them.",
   "@welcomeTogetherComments": {
     "description": "The welcome guide page, made once on first run: a paragraph (Markdown)."
   },
@@ -4188,7 +4264,7 @@
   "@welcomeShortcutsDoes": {
     "description": "The welcome guide page, made once on first run: a column heading of the shortcuts table: what the keys do."
   },
-  "welcomeShortcutSearch": "Search pages, templates, recordings and comments",
+  "welcomeShortcutSearch": "Search pages, templates, recordings and comments; #tag keeps to a tag",
   "@welcomeShortcutSearch": {
     "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘P)."
   },
@@ -4236,7 +4312,7 @@
   "@welcomeShortcutUndo": {
     "description": "The welcome guide page, made once on first run: a row of the shortcuts table (⌘Z ⇧⌘Z)."
   },
-  "welcomeSubIntro": "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent, and sharing the parent shares it too.",
+  "welcomeSubIntro": "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent.",
   "@welcomeSubIntro": {
     "description": "The guide's example subpage (Weekly team sync): its first paragraph (Markdown); parent is the guide's title.",
     "placeholders": {

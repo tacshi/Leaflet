@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -121,6 +122,20 @@ func TestICloudJoinsOneSpace(t *testing.T) {
 	}
 	if n := a.st.PendingCount() + b.st.PendingCount(); n != 0 {
 		t.Errorf("%d changes still waiting", n)
+	}
+}
+
+// A page's tags go to the other devices with its row.
+func TestICloudCarriesTags(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plan")
+	if err := a.st.SetPageTags(p.ID, []string{"work", "Q4"}); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if got, err := b.st.Page(p.ID); err != nil || !slices.Equal(got.Tags, []string{"work", "Q4"}) {
+		t.Errorf("the other device has %q, %v", got.Tags, err)
 	}
 }
 

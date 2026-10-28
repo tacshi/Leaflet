@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -29,6 +30,9 @@ func TestSidebarTree(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("Product") || !tt.HasText("Notes") || tt.HasText("PRD") {
 		t.Fatalf("closed folder shows %v", tt.Texts())
+	}
+	if tt.HasText("My space") {
+		t.Errorf("the tree has a My space header: %v", tt.Texts())
 	}
 	if err := tt.Click("Product"); err != nil {
 		t.Fatal(err)
@@ -239,8 +243,8 @@ func TestSettingsSections(t *testing.T) {
 func TestSettingsModal(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen, a.sidebarW = true, 240
-	a.route = Route{Kind: "todos"}
-	a.router = ui.NewRouter("/todos")
+	a.route = Route{Kind: "signin"}
+	a.router = ui.NewRouter("/signin")
 	a.routerAt = a.router.Path()
 	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1200, 800)
 	tt.Frame()
@@ -256,7 +260,7 @@ func TestSettingsModal(t *testing.T) {
 	if !tt.HasText("Agent providers") {
 		t.Error("Settings did not open at Agent providers")
 	}
-	if a.route != (Route{Kind: "todos"}) || a.router.Path() != "/todos" || a.router.CanGoBack() {
+	if a.route != (Route{Kind: "signin"}) || a.router.Path() != "/signin" || a.router.CanGoBack() {
 		t.Errorf("route %+v, router at %q", a.route, a.router.Path())
 	}
 	if err := tt.Click("Account"); err != nil {
@@ -275,7 +279,7 @@ func TestSettingsModal(t *testing.T) {
 	if a.settingsOpen {
 		t.Error("Escape did not close Settings")
 	}
-	if a.route != (Route{Kind: "todos"}) {
+	if a.route != (Route{Kind: "signin"}) {
 		t.Errorf("closing Settings went to %+v", a.route)
 	}
 }
@@ -303,9 +307,105 @@ func TestRouterHistory(t *testing.T) {
 	if a.route.ID != two.ID {
 		t.Fatalf("Forward went to %+v", a.route)
 	}
-	for _, r := range []Route{{Kind: "home"}, {Kind: "page", ID: "x"}, {Kind: "todos"}, {Kind: "signin"}} {
+	for _, r := range []Route{{Kind: "home"}, {Kind: "page", ID: "x"}, {Kind: "signin"}} {
 		if got := routeAt(r.path()); got != r {
 			t.Errorf("%+v went to %q and back to %+v", r, r.path(), got)
 		}
+	}
+}
+
+// The sidebar's header makes folders, beside New page, and its tabs show
+// the pages, the tags and the to-dos, the tab chosen kept in Settings.
+func TestSidebarTabs(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.SidebarOpen = true
+	plan, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan", Tags: []string{"work"}})
+	_, _ = a.st.CreatePage(store.NewPageOptions{Title: "Standup", Tags: []string{"Work", "daily"}})
+	_, _ = a.st.CreatePage(store.NewPageOptions{Title: "Untagged"})
+	a.reloadAll()
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 260, 600)
+	tt.Frame()
+	if err := tt.Click("New folder"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.dialogs.folderOpen {
+		t.Error("New folder opened no dialog")
+	}
+	a.dialogs.folderOpen = false
+	if err := tt.Click("Tags"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.settings.SidebarTab != tabTags {
+		t.Fatalf("tab %d", a.settings.SidebarTab)
+	}
+	if !tt.HasText("work") || !tt.HasText("daily") || tt.HasText("Untagged") || tt.HasText("Plan") {
+		t.Fatalf("Tags tab shows %v", tt.Texts())
+	}
+	// A tag's menu is drawn in the window, in the app's look.
+	if err := tt.RightClick("daily"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("Rename…") || !tt.HasText("Delete tag") {
+		t.Fatalf("a tag's menu shows %v", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if err := tt.Click("work"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("Plan") || !tt.HasText("Standup") {
+		t.Fatalf("an open tag shows %v", tt.Texts())
+	}
+	if err := tt.Click("Plan"); err != nil {
+		t.Fatal(err)
+	}
+	if a.route.Kind != "page" || a.route.ID != plan.ID {
+		t.Errorf("route %+v", a.route)
+	}
+	if err := tt.Click("Pages"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.settings.SidebarTab != tabPages || !tt.HasText("Untagged") {
+		t.Errorf("Pages tab %d shows %v", a.settings.SidebarTab, tt.Texts())
+	}
+}
+
+// A tag renamed in the Tags tab is renamed on its pages, and one deleted
+// comes back with Undo.
+func TestRenameAndDeleteTag(t *testing.T) {
+	a := templatesApp(t)
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan", Tags: []string{"work", "q4"}})
+	// A template's tags change with the pages', and Undo puts them back.
+	tpl, _ := a.st.CreatePage(store.NewPageOptions{Title: "Review", Template: true, Tags: []string{"q4", "keep"}})
+	a.reloadAll()
+	a.dialogs.openRenameTag("work")
+	tt := ui.NewTester(func(c *ui.Context) { a.tagDialog(c) }, 600, 400)
+	tt.Frame()
+	tt.Frame() // the name is selected as the field takes the focus
+	tt.Type("job")
+	tt.Key(0, ui.KeyEnter)
+	if got, _ := a.st.Page(p.ID); !slices.Equal(got.Tags, []string{"job", "q4"}) || a.dialogs.tagOpen {
+		t.Fatalf("renamed to %q, dialog open %v", got.Tags, a.dialogs.tagOpen)
+	}
+	a.reloadAll()
+	a.deleteTag("q4")
+	if got, _ := a.st.Page(p.ID); !slices.Equal(got.Tags, []string{"job"}) {
+		t.Fatalf("after delete %q", got.Tags)
+	}
+	if got, _ := a.st.Page(tpl.ID); !slices.Equal(got.Tags, []string{"keep"}) {
+		t.Fatalf("the template after delete %q", got.Tags)
+	}
+	a.toasts[len(a.toasts)-1].fn()
+	if got, _ := a.st.Page(p.ID); !slices.Equal(got.Tags, []string{"job", "q4"}) {
+		t.Errorf("after undo %q", got.Tags)
+	}
+	if got, _ := a.st.Page(tpl.ID); !slices.Equal(got.Tags, []string{"q4", "keep"}) {
+		t.Errorf("the template after undo %q", got.Tags)
 	}
 }

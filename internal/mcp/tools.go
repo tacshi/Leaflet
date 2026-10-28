@@ -34,6 +34,7 @@ var hints = map[string]struct {
 	"delete_blocks": {"Delete Blocks", false, true},
 	"create_page":   {"Create Page", false, false},
 	"rename_page":   {"Rename Page", false, false},
+	"set_page_tags": {"Set Page Tags", false, true},
 	"move_page":     {"Move Page", false, false},
 	"create_folder": {"Create Folder", false, false},
 	"rename_folder": {"Rename Folder", false, false},
@@ -62,8 +63,8 @@ func toolList() []map[string]any {
 		}
 		return map[string]any{"type": "object", "properties": props, "required": required}
 	}
-	add("list_pages", "List the user's pages (IDs, titles, the page or folder each is in) and folders.", object(map[string]any{}))
-	add("search_pages", "Find pages by title or text, recordings by transcript, and comments.",
+	add("list_pages", "List the user's pages (IDs, titles, tags, the page or folder each is in) and folders.", object(map[string]any{}))
+	add("search_pages", "Find pages by title, tag or text, recordings by transcript, and comments. Words starting with # (as #work) keep to the pages with those tags; alone they list them.",
 		object(map[string]any{"query": map[string]any{"type": "string"}}, "query"))
 	for _, name := range pageToolNames {
 		fn := defs[name]
@@ -73,7 +74,7 @@ func toolList() []map[string]any {
 		required := append([]string{"page_id"}, params["required"].([]string)...)
 		desc := fn["description"].(string)
 		if name == "read_page" {
-			desc = "Read a page: every block with its ID, subpage titles, and comment threads."
+			desc = "Read a page: its tags, every block with its ID, subpage titles, and comment threads."
 		}
 		add(name, desc, object(props, required...))
 	}
@@ -86,6 +87,8 @@ func toolList() []map[string]any {
 			"folder_id": map[string]any{"type": "string", "description": "The folder to put it in, at the top level; not with parent_id."},
 		}, "title"))
 	add("rename_page", "Change a page's title.", object(map[string]any{"page_id": pageID, "title": map[string]any{"type": "string"}}, "page_id", "title"))
+	add("set_page_tags", "Set a page's tags, replacing the ones it has: an empty list takes them all off. Tags are short words or phrases, without #; reuse the ones list_pages shows where they fit.",
+		object(map[string]any{"page_id": pageID, "tags": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "page_id", "tags"))
 	add("move_page", "Move a page, with its subpages, inside another page (linked at its end), into a folder, or with neither to the top level outside folders.",
 		object(map[string]any{
 			"page_id":   pageID,
@@ -168,6 +171,26 @@ func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, 
 			return nil, err
 		}
 		return map[string]any{"page_id": p.ID}, nil
+	case "set_page_tags":
+		p, err := t.page(args, true)
+		if err != nil {
+			return nil, err
+		}
+		list, ok := args["tags"].([]any)
+		if !ok {
+			return nil, toolErr("tags is required, a list of strings.")
+		}
+		var tags []string
+		for _, v := range list {
+			if s, ok := v.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+		if err := st.SetPageTags(p.ID, tags); err != nil {
+			return nil, err
+		}
+		p, _ = st.Page(p.ID)
+		return map[string]any{"page_id": p.ID, "tags": p.Tags}, nil
 	case "move_page":
 		return t.movePage(args)
 	case "create_folder":
@@ -217,6 +240,9 @@ func (t *pageTools) listPages() (map[string]any, error) {
 	out := []map[string]any{}
 	for _, p := range pages {
 		row := map[string]any{"id": p.ID, "title": p.DisplayTitle()}
+		if len(p.Tags) > 0 {
+			row["tags"] = p.Tags
+		}
 		if p.ParentID != "" {
 			row["parent_id"] = p.ParentID
 		}
@@ -323,6 +349,9 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		before := content.Copy()
 		x := &agents.Executor{Ctx: agents.PageTools(st, p.ID, p.DisplayTitle(), t.s.agent, content, true)}
 		out := x.Call(name, args)
+		if page, ok := out["page"].(map[string]any); ok && name == "read_page" {
+			page["tags"] = p.Tags
+		}
 		if len(x.Ops) == 0 {
 			return out, nil
 		}

@@ -20,9 +20,11 @@ type fakeHost struct {
 	imageFailed bool
 }
 
-func (h *fakeHost) PageTitle(id string) string                  { return "Sub" }
-func (h *fakeHost) OpenPage(id string)                          { h.opened = append(h.opened, id) }
-func (h *fakeHost) Image(n *doc.Node) (ui.ImageSource, bool)    { return nil, h.imageFailed }
+func (h *fakeHost) PageTitle(id string) string { return "Sub" }
+func (h *fakeHost) OpenPage(id string)         { h.opened = append(h.opened, id) }
+func (h *fakeHost) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
+	return nil, nil, h.imageFailed
+}
 func (h *fakeHost) Embed(c *ui.Context, n *doc.Node, w float32) {}
 func (h *fakeHost) Video(c *ui.Context, n *doc.Node, w float32) {}
 func (h *fakeHost) Card(c *ui.Context, n *doc.Node)             {}
@@ -756,11 +758,12 @@ func TestEditMedia(t *testing.T) {
 	for id, item := range map[string]string{"img": "Edit link", "vid": "Edit link", "up": "Replace image…"} {
 		r := e.geom[id]
 		tt.RightClickAt(r.X+20, r.Y+r.H/2)
-		if slices.Contains(tt.Menu(), "Edit link") && slices.Contains(tt.Menu(), "Replace image…") {
-			t.Errorf("%s offers both: %v", id, tt.Menu())
+		tt.Frame()
+		if tt.HasText("Edit link") && tt.HasText("Replace image…") {
+			t.Errorf("%s offers both: %v", id, tt.Texts())
 		}
-		if err := tt.ChooseMenuItem(item); err != nil {
-			t.Fatalf("%s: %v; menu %v", id, err, tt.Menu())
+		if err := chooseDrawn(tt, item); err != nil {
+			t.Fatalf("%s: %v; shown %v", id, err, tt.Texts())
 		}
 	}
 	slices.Sort(host.edited)
@@ -769,9 +772,11 @@ func TestEditMedia(t *testing.T) {
 	}
 	r := e.geom["p"]
 	tt.RightClickAt(r.X+5, r.Y+r.H/2)
-	if slices.Contains(tt.Menu(), "Edit link") || slices.Contains(tt.Menu(), "Replace image…") {
-		t.Errorf("a paragraph's menu %v", tt.Menu())
+	tt.Frame()
+	if !tt.HasText("Copy link to block") || tt.HasText("Edit link") || tt.HasText("Replace image…") {
+		t.Errorf("a paragraph's menu: %v", tt.Texts())
 	}
+	tt.Key(0, ui.KeyEscape)
 	// An image that cannot load says so, rather than loading forever.
 	host.imageFailed = true
 	tt.Frame()
@@ -812,4 +817,15 @@ func TestLinkToMedia(t *testing.T) {
 	if mediaLink("https://example.com/") != "" || mediaLink("https://youtu.be/dQw4w9WgXcQ") == "" || mediaLink("https://example.com/b.png") == "" {
 		t.Error("menu items")
 	}
+}
+
+// chooseDrawn chooses an item of the context menu MyGo draws in the
+// window (PopoverMenu), which shows from the frame after the click.
+func chooseDrawn(tt *ui.Tester, item string) error {
+	tt.Frame()
+	if err := tt.Click(item); err != nil {
+		return err
+	}
+	tt.Frame()
+	return nil
 }

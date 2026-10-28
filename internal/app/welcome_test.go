@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -49,7 +50,7 @@ func TestWelcomePage(t *testing.T) {
 			t.Errorf("%d %s blocks, want %d", kinds[typ], typ, want)
 		}
 	}
-	if got := strings.Join(headings(c), ", "); got != "Try it, Writing, Blocks, Pictures, video and charts, Interactive embeds, To-dos and recordings, Agents, Organizing pages, Working together, Shortcuts" {
+	if got := strings.Join(headings(c), ", "); got != "Try it, Writing, Blocks, Pictures, video and charts, Interactive embeds, To-dos and recordings, Agents, Organizing pages, Comments, history and sync, Shortcuts" {
 		t.Errorf("sections %s", got)
 	}
 	// The picture is a file of the page.
@@ -71,9 +72,19 @@ func TestWelcomePage(t *testing.T) {
 	if b := c.Find(threads[0].Root.BlockID); b == nil || !strings.HasPrefix(b.Delta().Plain(), "Select text and choose Comment") {
 		t.Errorf("the comment is on %v", b)
 	}
+	// The guide and its meeting carry a tag each, as does the template.
+	if p, _ := st.Page(welcome); !slices.Equal(p.Tags, []string{"guide"}) {
+		t.Errorf("the guide's tags %q", p.Tags)
+	}
+	if p, _ := st.Page(sub); !slices.Equal(p.Tags, []string{"meetings"}) {
+		t.Errorf("the subpage's tags %q", p.Tags)
+	}
+	if !strings.Contains(c.PlainText(), "In search, #meetings keeps to the pages tagged meetings") {
+		t.Error("the guide does not say how tags work")
+	}
 	// The subpage's meeting is a template too, which starts at its agenda.
 	templates, _ := st.Templates()
-	if len(templates) != 1 || templates[0].Title != "Weekly team sync" {
+	if len(templates) != 1 || templates[0].Title != "Weekly team sync" || !slices.Equal(templates[0].Tags, []string{"meetings"}) {
 		t.Fatalf("templates %+v", templates)
 	}
 	if first := st.Content(templates[0].ID).Children[0]; first.Delta().Plain() != "Agenda" {

@@ -2,8 +2,10 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -30,6 +32,9 @@ type Page struct {
 	// Template marks a template, or a subpage of one: a page kept to start
 	// others from, out of the page list.
 	Template bool
+	// Tags are the page's tags, in the order they were added, as
+	// NormalizeTags leaves them.
+	Tags []string
 }
 
 // DisplayTitle is the title, or "Untitled".
@@ -44,14 +49,16 @@ func TitleOr(t string) string {
 	return t
 }
 
-const pageCols = `id, space_id, parent_id, folder_id, title, icon, sort_key, created_by, created_at, updated_at, deleted_at, keep_offline, is_template`
+const pageCols = `id, space_id, parent_id, folder_id, title, icon, sort_key, created_by, created_at, updated_at, deleted_at, keep_offline, is_template, tags`
 
 func scanPage(sc interface{ Scan(...any) error }) (Page, error) {
 	var p Page
 	var parent, folder, icon, by sql.NullString
 	var created, updated int64
 	var deleted sql.NullInt64
-	err := sc.Scan(&p.ID, &p.SpaceID, &parent, &folder, &p.Title, &icon, &p.SortKey, &by, &created, &updated, &deleted, &p.KeepOffline, &p.Template)
+	var tags string
+	err := sc.Scan(&p.ID, &p.SpaceID, &parent, &folder, &p.Title, &icon, &p.SortKey, &by, &created, &updated, &deleted, &p.KeepOffline, &p.Template, &tags)
+	p.Tags = decodeTags(tags)
 	p.ParentID, p.FolderID, p.Icon, p.CreatedBy = parent.String, folder.String, icon.String, by.String
 	p.CreatedAt, p.UpdatedAt, p.DeletedAt = time.UnixMilli(created), time.UnixMilli(updated), fromMs(deleted)
 	return p, err
@@ -100,13 +107,14 @@ func (s *Store) Children(parentID, spaceID string) ([]Page, error) {
 }
 
 func writePage(q querier, p Page) error {
-	_, err := q.Exec(`INSERT INTO pages (`+pageCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := q.Exec(`INSERT INTO pages (`+pageCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id, parent_id = excluded.parent_id,
 		folder_id = excluded.folder_id, title = excluded.title, icon = excluded.icon, sort_key = excluded.sort_key,
 		created_by = excluded.created_by, created_at = excluded.created_at, updated_at = excluded.updated_at,
-		deleted_at = excluded.deleted_at, keep_offline = excluded.keep_offline, is_template = excluded.is_template`,
+		deleted_at = excluded.deleted_at, keep_offline = excluded.keep_offline, is_template = excluded.is_template,
+		tags = excluded.tags`,
 		p.ID, p.SpaceID, ns(p.ParentID), ns(p.FolderID), p.Title, ns(p.Icon), p.SortKey, ns(p.CreatedBy),
-		ms(p.CreatedAt), ms(p.UpdatedAt), nt(p.DeletedAt), p.KeepOffline, p.Template)
+		ms(p.CreatedAt), ms(p.UpdatedAt), nt(p.DeletedAt), p.KeepOffline, p.Template, encodeTags(p.Tags))
 	return err
 }
 
@@ -144,6 +152,7 @@ type NewPageOptions struct {
 	AfterID string
 	Title   string
 	Icon    string
+	Tags    []string
 	// Template makes a template; a subpage of one is a template anyway.
 	Template bool
 	Content  *doc.Content
@@ -178,7 +187,7 @@ func (s *Store) CreatePage(o NewPageOptions) (Page, error) {
 	now := time.Now()
 	p := Page{
 		ID: o.ID, SpaceID: spaceID, ParentID: o.ParentID, FolderID: folderID, Title: o.Title, Icon: o.Icon,
-		SortKey: key, CreatedAt: now, UpdatedAt: now, KeepOffline: true, Template: template,
+		SortKey: key, CreatedAt: now, UpdatedAt: now, KeepOffline: true, Template: template, Tags: NormalizeTags(o.Tags),
 	}
 	if p.ID == "" {
 		p.ID = doc.NewRowID()
@@ -230,6 +239,166 @@ func (s *Store) RenamePage(id, title string) error {
 	}
 	s.Notify("pages", id)
 	return nil
+}
+
+// Tags are at most maxTags to a page, each at most maxTagLen characters,
+// as the server's pages table checks.
+const (
+	maxTags   = 50
+	maxTagLen = 64
+)
+
+// NormalizeTags tidies tags as people type them: each trimmed, without a
+// leading #, its spaces one, cut to maxTagLen; the blank ones and those
+// repeated, in any case, left out, the first spelling kept, in order.
+func NormalizeTags(in []string) []string {
+	out := []string{}
+	seen := map[string]bool{}
+	for _, t := range in {
+		t = strings.Join(strings.Fields(strings.TrimLeft(strings.TrimSpace(t), "#")), " ")
+		if r := []rune(t); len(r) > maxTagLen {
+			t = strings.TrimSpace(string(r[:maxTagLen]))
+		}
+		k := strings.ToLower(t)
+		if t == "" || seen[k] || len(out) == maxTags {
+			continue
+		}
+		seen[k] = true
+		out = append(out, t)
+	}
+	return out
+}
+
+func decodeTags(s string) []string {
+	var tags []string
+	_ = json.Unmarshal([]byte(s), &tags)
+	if tags == nil {
+		tags = []string{}
+	}
+	return tags
+}
+
+func encodeTags(tags []string) string {
+	if len(tags) == 0 {
+		return "[]"
+	}
+	b, _ := json.Marshal(tags)
+	return string(b)
+}
+
+// HasTag reports whether a page has a tag, in any case.
+func (p Page) HasTag(tag string) bool {
+	for _, t := range p.Tags {
+		if strings.EqualFold(t, tag) {
+			return true
+		}
+	}
+	return false
+}
+
+// SetPageTags changes a page's tags.
+func (s *Store) SetPageTags(id string, tags []string) error {
+	p, err := s.Page(id)
+	if err != nil {
+		return err
+	}
+	tags = NormalizeTags(tags)
+	if slices.Equal(p.Tags, tags) {
+		return nil
+	}
+	p.Tags, p.UpdatedAt = tags, time.Now()
+	if err := s.savePages("tagged", p); err != nil {
+		return err
+	}
+	s.Notify("pages", id)
+	return nil
+}
+
+// TagCount is a tag and how many pages have it.
+type TagCount struct {
+	Name  string
+	Count int
+}
+
+// Tags returns the tags of the pages, without templates, by name: a tag
+// spelled differently on two pages is one, as the first page spells it.
+func (s *Store) Tags() ([]TagCount, error) {
+	pages, err := s.Pages()
+	if err != nil {
+		return nil, err
+	}
+	return TagsOf(pages), nil
+}
+
+// TagsOf counts the tags of pages, by name.
+func TagsOf(pages []Page) []TagCount {
+	at := map[string]int{}
+	var out []TagCount
+	for _, p := range pages {
+		for _, t := range p.Tags {
+			k := strings.ToLower(t)
+			if i, ok := at[k]; ok {
+				out[i].Count++
+				continue
+			}
+			at[k] = len(out)
+			out = append(out, TagCount{Name: t, Count: 1})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name) })
+	return out
+}
+
+// RenameTag renames a tag on every page the user may change, templates
+// too, merging it into a tag of the new name a page has already. It
+// returns the pages changed, with the tags each had before.
+func (s *Store) RenameTag(old, name string) (map[string][]string, error) {
+	return s.retag(old, func(t string) string { return name })
+}
+
+// DeleteTag takes a tag off every page the user may change, templates
+// too, and returns the pages changed, with the tags each had before.
+func (s *Store) DeleteTag(tag string) (map[string][]string, error) {
+	return s.retag(tag, func(string) string { return "" })
+}
+
+// retag changes tag on every page the user may change that has it, to
+// what to says ("" takes it off), and returns the pages changed with
+// their tags before.
+func (s *Store) retag(tag string, to func(string) string) (map[string][]string, error) {
+	pages, err := s.queryPages(`deleted_at IS NULL`)
+	if err != nil {
+		return nil, err
+	}
+	var changed []Page
+	before := map[string][]string{}
+	now := time.Now()
+	for _, p := range pages {
+		if !p.HasTag(tag) || !s.CanEdit(p) {
+			continue
+		}
+		tags := make([]string, 0, len(p.Tags))
+		for _, t := range p.Tags {
+			if strings.EqualFold(t, tag) {
+				t = to(t)
+			}
+			tags = append(tags, t)
+		}
+		if tags = NormalizeTags(tags); slices.Equal(tags, p.Tags) {
+			continue
+		}
+		before[p.ID] = p.Tags
+		p.Tags, p.UpdatedAt = tags, now
+		changed = append(changed, p)
+	}
+	if len(changed) == 0 {
+		return nil, nil
+	}
+	if err := s.savePages("tagged", changed...); err != nil {
+		return nil, err
+	}
+	s.Notify("pages", "")
+	return before, nil
 }
 
 // IsDescendant reports whether candidate is page of or one under it. Pages
@@ -419,7 +588,7 @@ func (s *Store) CopyPage(id string, o CopyOptions) (Page, error) {
 		return Page{}, err
 	}
 	p, err := s.CreatePage(NewPageOptions{ID: ids[id], ParentID: o.ParentID, FolderID: o.FolderID, SpaceID: o.SpaceID,
-		AfterID: o.AfterID, Title: o.Title, Icon: tree[0].Icon, Template: o.Template, Content: contents[0]})
+		AfterID: o.AfterID, Title: o.Title, Icon: tree[0].Icon, Tags: tree[0].Tags, Template: o.Template, Content: contents[0]})
 	if err != nil {
 		return Page{}, err
 	}
@@ -437,6 +606,12 @@ func (s *Store) CopyInto(id, into string) (*doc.Content, error) {
 	target, err := s.Page(into)
 	if err != nil {
 		return nil, err
+	}
+	// The page takes the template's tags too, after its own.
+	if tags := NormalizeTags(append(append([]string{}, target.Tags...), tree[0].Tags...)); len(tags) != len(target.Tags) {
+		if err := s.SetPageTags(into, tags); err != nil {
+			return nil, err
+		}
 	}
 	return contents[0], s.createCopies(tree[1:], ids, contents[1:], target.Template)
 }
@@ -477,7 +652,7 @@ func (s *Store) copyPlan(id, copyID string) ([]Page, map[string]string, []*doc.C
 func (s *Store) createCopies(pages []Page, ids map[string]string, contents []*doc.Content, template bool) error {
 	for i, p := range pages {
 		if _, err := s.CreatePage(NewPageOptions{ID: ids[p.ID], ParentID: ids[p.ParentID], Title: p.Title,
-			Icon: p.Icon, Template: template, Content: contents[i]}); err != nil {
+			Icon: p.Icon, Tags: p.Tags, Template: template, Content: contents[i]}); err != nil {
 			return err
 		}
 	}
@@ -866,11 +1041,13 @@ type SearchHit struct {
 	BlockID string
 }
 
-// Search finds pages and templates by title or text, recordings by
-// transcript, and comments. A blank query returns the most recently edited
-// pages.
+// Search finds pages and templates by title, tag or text, recordings by
+// transcript, and comments. Words starting with # keep to the pages with
+// those tags, which alone lists them, newest first. A blank query returns
+// the most recently edited pages.
 func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
-	q := strings.ToLower(strings.TrimSpace(query))
+	filters, rest := SplitTagQuery(query)
+	q := strings.ToLower(rest)
 	pages, err := s.Pages()
 	if err != nil {
 		return nil, err
@@ -878,6 +1055,16 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 	templates, err := s.Templates()
 	if err != nil {
 		return nil, err
+	}
+	// Text, transcripts and comments are read for every page there is,
+	// the pages with the tags among them, while tags filter: a limit
+	// before the filter would let other pages' matches crowd theirs out.
+	textLimit, otherLimit := limit, 10
+	if len(filters) > 0 {
+		match := tagMatcher(filters, append(append([]Page{}, pages...), templates...))
+		pages, templates = slices.DeleteFunc(pages, func(p Page) bool { return !match(p) }),
+			slices.DeleteFunc(templates, func(p Page) bool { return !match(p) })
+		textLimit, otherLimit = -1, -1
 	}
 	titles := map[string]string{}
 	for _, p := range pages {
@@ -892,7 +1079,7 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		recent := append([]Page{}, pages...)
 		sort.Slice(recent, func(i, j int) bool { return recent[i].UpdatedAt.After(recent[j].UpdatedAt) })
 		for i, p := range recent {
-			if i == 8 {
+			if i == 8 && len(filters) == 0 || i == limit {
 				break
 			}
 			hits = append(hits, SearchHit{Kind: "page", Title: p.DisplayTitle(), PageID: p.ID})
@@ -901,7 +1088,7 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 	}
 	seen := map[string]bool{}
 	for _, p := range pages {
-		if strings.Contains(strings.ToLower(p.Title), q) {
+		if strings.Contains(strings.ToLower(p.Title), q) || tagContains(p, q) {
 			hits = append(hits, SearchHit{Kind: "page", Title: p.DisplayTitle(), PageID: p.ID})
 			seen[p.ID] = true
 		}
@@ -913,7 +1100,7 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		}
 	}
 	like := "%" + q + "%"
-	rows, err := s.db.Query(`SELECT page_id, plain_text FROM page_contents WHERE lower(plain_text) LIKE ? LIMIT ?`, like, limit)
+	rows, err := s.db.Query(`SELECT page_id, plain_text FROM page_contents WHERE lower(plain_text) LIKE ? LIMIT ?`, like, textLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -936,7 +1123,7 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		hits = append(hits, SearchHit{Kind: "page", Title: TitleOr(titles[id]), PageID: id, Snippet: snippet(text, q)})
 	}
 	_ = rows.Close()
-	rows, err = s.db.Query(`SELECT page_id, block_id FROM recordings WHERE lower(transcript) LIKE ? LIMIT 10`, like)
+	rows, err = s.db.Query(`SELECT page_id, block_id FROM recordings WHERE lower(transcript) LIKE ? LIMIT ?`, like, otherLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -951,7 +1138,7 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		}
 	}
 	_ = rows.Close()
-	rows, err = s.db.Query(`SELECT page_id, block_id, body FROM comments WHERE lower(body) LIKE ? AND deleted_at IS NULL LIMIT 10`, like)
+	rows, err = s.db.Query(`SELECT page_id, block_id, body FROM comments WHERE lower(body) LIKE ? AND deleted_at IS NULL LIMIT ?`, like, otherLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -970,6 +1157,51 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		hits = hits[:limit]
 	}
 	return hits, nil
+}
+
+// SplitTagQuery splits a search into its tag filters, the words starting
+// with #, without it, and the rest of its words.
+func SplitTagQuery(query string) (tags []string, rest string) {
+	var words []string
+	for _, w := range strings.Fields(query) {
+		if t, ok := strings.CutPrefix(w, "#"); ok {
+			if t = strings.TrimLeft(t, "#"); t != "" {
+				tags = append(tags, t)
+			}
+			continue
+		}
+		words = append(words, w)
+	}
+	return tags, strings.Join(words, " ")
+}
+
+// tagMatcher reports whether a page has every tag of filters: a tag of
+// that name, in any case, or while no page has one, a tag starting with
+// it, as one is typed.
+func tagMatcher(filters []string, pages []Page) func(Page) bool {
+	known := map[string]bool{}
+	for _, p := range pages {
+		for _, t := range p.Tags {
+			known[strings.ToLower(t)] = true
+		}
+	}
+	return func(p Page) bool {
+		for _, f := range filters {
+			f = strings.ToLower(f)
+			if !slices.ContainsFunc(p.Tags, func(t string) bool {
+				t = strings.ToLower(t)
+				return t == f || !known[f] && strings.HasPrefix(t, f)
+			}) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// tagContains reports whether a tag of p contains q, lower case.
+func tagContains(p Page, q string) bool {
+	return slices.ContainsFunc(p.Tags, func(t string) bool { return strings.Contains(strings.ToLower(t), q) })
 }
 
 func snippet(text, q string) string {

@@ -16,6 +16,13 @@ const (
 
 // view builds the window.
 func (a *App) view(c *ui.Context) {
+	// Once the frame has built its blocks, GIF players none of them
+	// showed for a while go.
+	defer func() {
+		if a.images != nil {
+			a.images.releasePlayers(time.Now())
+		}
+	}()
 	theme.Apply(c)
 	pal := theme.Of(c)
 	if c.Vibrancy() {
@@ -157,9 +164,6 @@ func (a *App) main(c *ui.Context) {
 			a.pageView(c)
 			return
 		}
-	case "todos":
-		a.todosView(c)
-		return
 	case "signin":
 		a.signInView(c)
 		return

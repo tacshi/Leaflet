@@ -1,9 +1,11 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"html"
+	"image/gif"
 	"log"
 	"mime"
 	"os"
@@ -79,7 +81,7 @@ type host struct{ a *App }
 
 func (h *host) PageTitle(id string) string { return h.a.pageTitleOf(id) }
 func (h *host) OpenPage(id string)         { h.a.openPage(id) }
-func (h *host) Image(n *doc.Node) (ui.ImageSource, bool) {
+func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	redraw := func() { h.a.update(func() {}) }
 	url := n.Str("url")
 	// An uploaded picture is found by its file: its url is a path on the
@@ -87,14 +89,14 @@ func (h *host) Image(n *doc.Node) (ui.ImageSource, bool) {
 	if f, ok := h.a.fileByID(n.Str("file_id")); ok {
 		path := h.a.localFile(f, redraw)
 		if path == "" {
-			return nil, false
+			return nil, nil, false
 		}
 		url = "file://" + path
 	}
 	if b := h.a.images.get(url, redraw); b != nil {
-		return b, false
+		return b, h.a.images.player(url, n.ID, redraw), false
 	}
-	return nil, url == "" || h.a.images.hasFailed(url)
+	return nil, nil, url == "" || h.a.images.hasFailed(url)
 }
 func (h *host) Embed(c *ui.Context, n *doc.Node, width float32) { h.a.embedBlock(c, n, width) }
 func (h *host) Video(c *ui.Context, n *doc.Node, width float32) { h.a.videoBlock(c, n, width) }
@@ -611,14 +613,33 @@ type imageCache struct {
 	loading  map[string]bool
 	// failed holds when a picture last failed to load.
 	failed map[string]time.Time
+	// gifs are the animated GIFs among the pictures, as read. players
+	// play them, one for each block showing one, as MyGo shows a player
+	// in one place at a time: by url, # and block, none while it is made.
+	// releasePlayers closes those no block has shown for a while.
+	gifs    map[string][]byte
+	players map[string]*gifPlayer
+	making  map[string]bool
 }
+
+// gifPlayer is a block's player of an animated GIF, nil for one that did
+// not decode, and when a block last asked for it.
+type gifPlayer struct {
+	p     *ui.VideoPlayer
+	shown time.Time
+}
+
+// playerIdle is how long a GIF's player outlives the last frame that
+// built its block: its decoded frames and its goroutine go then.
+const playerIdle = 30 * time.Second
 
 // imageRetry is how long a picture that failed to load waits before it is
 // tried again, as the device may have come back online.
 const imageRetry = time.Minute
 
 func newImageCache(root, dir string) *imageCache {
-	return &imageCache{root: root, dir: dir, pictures: map[string]ui.ImageSource{}, loading: map[string]bool{}, failed: map[string]time.Time{}}
+	return &imageCache{root: root, dir: dir, pictures: map[string]ui.ImageSource{}, loading: map[string]bool{}, failed: map[string]time.Time{},
+		gifs: map[string][]byte{}, players: map[string]*gifPlayer{}, making: map[string]bool{}}
 }
 
 // get returns a picture, or nil while it loads; done runs when it has
@@ -640,7 +661,7 @@ func (ic *imageCache) get(url string, done func()) ui.ImageSource {
 		data, err := ic.read(url)
 		var b ui.ImageSource
 		if err == nil {
-			b, err = decodePicture(data)
+			b, err = ui.DecodeImage(data)
 		}
 		if err != nil {
 			log.Printf("image %s: %v", url, err)
@@ -650,6 +671,9 @@ func (ic *imageCache) get(url string, done func()) ui.ImageSource {
 		if b != nil {
 			ic.pictures[url] = b
 			delete(ic.failed, url)
+			if animatedGIF(data) {
+				ic.gifs[url] = data
+			}
 		} else {
 			ic.failed[url] = time.Now()
 		}
@@ -659,18 +683,68 @@ func (ic *imageCache) get(url string, done func()) ui.ImageSource {
 	return nil
 }
 
-// decodePicture decodes a PNG, JPEG, GIF, WebP or BMP picture, or an SVG.
-func decodePicture(data []byte) (ui.ImageSource, error) {
-	b, err := ui.DecodeBitmap(data)
-	if err == nil {
-		return b, nil
+// player returns the player of an animated GIF in block, looping, or nil
+// for another picture, and while it is made, off the main thread, as its
+// frames decode; done runs when it is made.
+func (ic *imageCache) player(url, block string, done func()) *ui.VideoPlayer {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	data, ok := ic.gifs[url]
+	key := url + "#" + block
+	if !ok || ic.making[key] {
+		return nil
 	}
-	if s, serr := ui.ParseSVG(data); serr == nil {
-		if w, h := s.Size(); w > 0 && h > 0 {
-			return s, nil
+	if gp, ok := ic.players[key]; ok {
+		gp.shown = time.Now()
+		return gp.p
+	}
+	ic.making[key] = true
+	go func() {
+		d, err := ui.NewGIFDecoder(data)
+		var p *ui.VideoPlayer
+		if err == nil {
+			p, err = ui.NewVideoPlayer(d)
 		}
+		if err != nil {
+			log.Printf("gif %s: %v", url, err)
+		} else {
+			p.SetLoop(true)
+		}
+		ic.mu.Lock()
+		delete(ic.making, key)
+		ic.players[key] = &gifPlayer{p: p, shown: time.Now()}
+		ic.mu.Unlock()
+		done()
+	}()
+	return nil
+}
+
+// releasePlayers closes and forgets the players no block has asked for
+// within playerIdle of now: those of blocks gone, scrolled away, or on a
+// page no longer open, and those made after their block went. Call it on
+// the main thread, as a player's methods are, after a frame's blocks are
+// built, so that a player on screen has just been asked for.
+func (ic *imageCache) releasePlayers(now time.Time) {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	for key, gp := range ic.players {
+		if now.Sub(gp.shown) < playerIdle {
+			continue
+		}
+		if gp.p != nil {
+			gp.p.Close()
+		}
+		delete(ic.players, key)
 	}
-	return nil, err
+}
+
+// animatedGIF reports whether data is a GIF of more than one frame.
+func animatedGIF(data []byte) bool {
+	if !bytes.HasPrefix(data, []byte("GIF8")) {
+		return false
+	}
+	g, err := gif.DecodeAll(bytes.NewReader(data))
+	return err == nil && len(g.Image) > 1
 }
 
 // hasFailed reports whether a picture failed to load, and is not being

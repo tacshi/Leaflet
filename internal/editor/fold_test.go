@@ -121,8 +121,8 @@ func TestBlockLinks(t *testing.T) {
 	// Right-click a block for a link to it.
 	r = e.geom[b["b1"].ID]
 	tt.RightClickAt(r.X+5, r.Y+r.H/2)
-	if err := tt.ChooseMenuItem("Copy link to block"); err != nil {
-		t.Fatalf("%v; menu %v", err, tt.Menu())
+	if err := chooseDrawn(tt, "Copy link to block"); err != nil {
+		t.Fatalf("%v; shown %v", err, tt.Texts())
 	}
 	if got := tt.Clipboard(); got != doc.BlockLink("this", b["b1"].ID) {
 		t.Errorf("clipboard %q", got)

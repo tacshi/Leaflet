@@ -191,20 +191,6 @@ func (msgs Messages) AppStartFailed() string {
 	return Catalog.Format(msgs.locale, "appStartFailed", nil)
 }
 
-// AppRouteTodos says "To-dos"
-// in the language the app shows.
-//
-// The name of the To-dos view, in Back's list of pages.
-func AppRouteTodos() string { return In(i18n.Locale()).AppRouteTodos() }
-
-// AppRouteTodos says "To-dos"
-// in the language of msgs.
-//
-// The name of the To-dos view, in Back's list of pages.
-func (msgs Messages) AppRouteTodos() string {
-	return Catalog.Format(msgs.locale, "appRouteTodos", nil)
-}
-
 // AppErrorSave says "Could not save: {error}"
 // in the language the app shows.
 //
@@ -2407,13 +2393,13 @@ func (msgs Messages) DialogMoveSearch() string {
 	return Catalog.Format(msgs.locale, "dialogMoveSearch", nil)
 }
 
-// DialogMoveTopLevel says "Top level of My space"
+// DialogMoveTopLevel says "Top level"
 // in the language the app shows.
 //
 // Move dialog: the destination at the top level of the user's space.
 func DialogMoveTopLevel() string { return In(i18n.Locale()).DialogMoveTopLevel() }
 
-// DialogMoveTopLevel says "Top level of My space"
+// DialogMoveTopLevel says "Top level"
 // in the language of msgs.
 //
 // Move dialog: the destination at the top level of the user's space.
@@ -4643,20 +4629,6 @@ func (msgs Messages) SidebarFolderDeleted(name string) string {
 	return Catalog.Format(msgs.locale, "sidebarFolderDeleted", map[string]any{"name": name})
 }
 
-// SidebarMySpace says "My space"
-// in the language the app shows.
-//
-// Sidebar section header.
-func SidebarMySpace() string { return In(i18n.Locale()).SidebarMySpace() }
-
-// SidebarMySpace says "My space"
-// in the language of msgs.
-//
-// Sidebar section header.
-func (msgs Messages) SidebarMySpace() string {
-	return Catalog.Format(msgs.locale, "sidebarMySpace", nil)
-}
-
 // SidebarSharedWithMe says "Shared with me"
 // in the language the app shows.
 //
@@ -4671,16 +4643,198 @@ func (msgs Messages) SidebarSharedWithMe() string {
 	return Catalog.Format(msgs.locale, "sidebarSharedWithMe", nil)
 }
 
+// SidebarTabPages says "Pages"
+// in the language the app shows.
+//
+// Sidebar tab: the page tree.
+func SidebarTabPages() string { return In(i18n.Locale()).SidebarTabPages() }
+
+// SidebarTabPages says "Pages"
+// in the language of msgs.
+//
+// Sidebar tab: the page tree.
+func (msgs Messages) SidebarTabPages() string {
+	return Catalog.Format(msgs.locale, "sidebarTabPages", nil)
+}
+
+// SidebarTabTags says "Tags"
+// in the language the app shows.
+//
+// Sidebar tab: pages by tag.
+func SidebarTabTags() string { return In(i18n.Locale()).SidebarTabTags() }
+
+// SidebarTabTags says "Tags"
+// in the language of msgs.
+//
+// Sidebar tab: pages by tag.
+func (msgs Messages) SidebarTabTags() string {
+	return Catalog.Format(msgs.locale, "sidebarTabTags", nil)
+}
+
+// SidebarTabsLabel says "Sidebar view"
+// in the language the app shows.
+//
+// Accessibility name of the sidebar's tabs (Pages, Tags, To-dos).
+func SidebarTabsLabel() string { return In(i18n.Locale()).SidebarTabsLabel() }
+
+// SidebarTabsLabel says "Sidebar view"
+// in the language of msgs.
+//
+// Accessibility name of the sidebar's tabs (Pages, Tags, To-dos).
+func (msgs Messages) SidebarTabsLabel() string {
+	return Catalog.Format(msgs.locale, "sidebarTabsLabel", nil)
+}
+
+// SidebarNoTags says "Add tags to a page to group it here."
+// in the language the app shows.
+//
+// Sidebar Tags tab with no tags yet.
+func SidebarNoTags() string { return In(i18n.Locale()).SidebarNoTags() }
+
+// SidebarNoTags says "Add tags to a page to group it here."
+// in the language of msgs.
+//
+// Sidebar Tags tab with no tags yet.
+func (msgs Messages) SidebarNoTags() string {
+	return Catalog.Format(msgs.locale, "sidebarNoTags", nil)
+}
+
+// TagActions says "Tag actions"
+// in the language the app shows.
+//
+// Accessibility name of a tag's ⋯ menu button in the sidebar.
+func TagActions() string { return In(i18n.Locale()).TagActions() }
+
+// TagActions says "Tag actions"
+// in the language of msgs.
+//
+// Accessibility name of a tag's ⋯ menu button in the sidebar.
+func (msgs Messages) TagActions() string {
+	return Catalog.Format(msgs.locale, "tagActions", nil)
+}
+
+// TagRenameEllipsis says "Rename…"
+// in the language the app shows.
+//
+// Tag menu item: rename the tag on every page.
+func TagRenameEllipsis() string { return In(i18n.Locale()).TagRenameEllipsis() }
+
+// TagRenameEllipsis says "Rename…"
+// in the language of msgs.
+//
+// Tag menu item: rename the tag on every page.
+func (msgs Messages) TagRenameEllipsis() string {
+	return Catalog.Format(msgs.locale, "tagRenameEllipsis", nil)
+}
+
+// TagDelete says "Delete tag"
+// in the language the app shows.
+//
+// Tag menu item: take the tag off every page.
+func TagDelete() string { return In(i18n.Locale()).TagDelete() }
+
+// TagDelete says "Delete tag"
+// in the language of msgs.
+//
+// Tag menu item: take the tag off every page.
+func (msgs Messages) TagDelete() string {
+	return Catalog.Format(msgs.locale, "tagDelete", nil)
+}
+
+// TagDeleted says "Deleted the tag {name}."
+// in the language the app shows.
+//
+// Toast after deleting a tag, with Undo.
+func TagDeleted(name string) string { return In(i18n.Locale()).TagDeleted(name) }
+
+// TagDeleted says "Deleted the tag {name}."
+// in the language of msgs.
+//
+// Toast after deleting a tag, with Undo.
+func (msgs Messages) TagDeleted(name string) string {
+	return Catalog.Format(msgs.locale, "tagDeleted", map[string]any{"name": name})
+}
+
+// DialogTagRename says "Rename tag"
+// in the language the app shows.
+//
+// Rename tag dialog: title.
+func DialogTagRename() string { return In(i18n.Locale()).DialogTagRename() }
+
+// DialogTagRename says "Rename tag"
+// in the language of msgs.
+//
+// Rename tag dialog: title.
+func (msgs Messages) DialogTagRename() string {
+	return Catalog.Format(msgs.locale, "dialogTagRename", nil)
+}
+
+// DialogTagRenameSubtitle says "Renames it on every page you can edit. A name another tag has joins the two."
+// in the language the app shows.
+//
+// Rename tag dialog: subtitle.
+func DialogTagRenameSubtitle() string { return In(i18n.Locale()).DialogTagRenameSubtitle() }
+
+// DialogTagRenameSubtitle says "Renames it on every page you can edit. A name another tag has joins the two."
+// in the language of msgs.
+//
+// Rename tag dialog: subtitle.
+func (msgs Messages) DialogTagRenameSubtitle() string {
+	return Catalog.Format(msgs.locale, "dialogTagRenameSubtitle", nil)
+}
+
+// DialogTagName says "Tag name"
+// in the language the app shows.
+//
+// Rename tag dialog: the name field's placeholder.
+func DialogTagName() string { return In(i18n.Locale()).DialogTagName() }
+
+// DialogTagName says "Tag name"
+// in the language of msgs.
+//
+// Rename tag dialog: the name field's placeholder.
+func (msgs Messages) DialogTagName() string {
+	return Catalog.Format(msgs.locale, "dialogTagName", nil)
+}
+
+// PageAddTag says "Add tag"
+// in the language the app shows.
+//
+// Page byline: tooltip of the button editing the page's tags.
+func PageAddTag() string { return In(i18n.Locale()).PageAddTag() }
+
+// PageAddTag says "Add tag"
+// in the language of msgs.
+//
+// Page byline: tooltip of the button editing the page's tags.
+func (msgs Messages) PageAddTag() string {
+	return Catalog.Format(msgs.locale, "pageAddTag", nil)
+}
+
+// PageTagsLabel says "Tags"
+// in the language the app shows.
+//
+// Page byline: accessibility name of the tags field.
+func PageTagsLabel() string { return In(i18n.Locale()).PageTagsLabel() }
+
+// PageTagsLabel says "Tags"
+// in the language of msgs.
+//
+// Page byline: accessibility name of the tags field.
+func (msgs Messages) PageTagsLabel() string {
+	return Catalog.Format(msgs.locale, "pageTagsLabel", nil)
+}
+
 // SidebarNewFolder says "New folder"
 // in the language the app shows.
 //
-// Sidebar: tooltip of My space's + button.
+// Sidebar: tooltip of the new folder button at the top.
 func SidebarNewFolder() string { return In(i18n.Locale()).SidebarNewFolder() }
 
 // SidebarNewFolder says "New folder"
 // in the language of msgs.
 //
-// Sidebar: tooltip of My space's + button.
+// Sidebar: tooltip of the new folder button at the top.
 func (msgs Messages) SidebarNewFolder() string {
 	return Catalog.Format(msgs.locale, "sidebarNewFolder", nil)
 }
@@ -5034,13 +5188,13 @@ func (msgs Messages) SidebarSynced() string {
 // TodosTitle says "To-dos"
 // in the language the app shows.
 //
-// To-dos view title, and the sidebar button opening it.
+// Sidebar tab listing the to-dos of every page.
 func TodosTitle() string { return In(i18n.Locale()).TodosTitle() }
 
 // TodosTitle says "To-dos"
 // in the language of msgs.
 //
-// To-dos view title, and the sidebar button opening it.
+// Sidebar tab listing the to-dos of every page.
 func (msgs Messages) TodosTitle() string {
 	return Catalog.Format(msgs.locale, "todosTitle", nil)
 }
@@ -10335,13 +10489,13 @@ func (msgs Messages) WelcomeImageAlt() string {
 	return Catalog.Format(msgs.locale, "welcomeImageAlt", nil)
 }
 
-// WelcomeIntro says "Pages are living documents you write with people and agents. They are saved on this device first and sync when you ar…"
+// WelcomeIntro says "Pages are living documents you write yourself, with agents to help. They are saved on this device first and sync betw…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: the first paragraph.
 func WelcomeIntro() string { return In(i18n.Locale()).WelcomeIntro() }
 
-// WelcomeIntro says "Pages are living documents you write with people and agents. They are saved on this device first and sync when you ar…"
+// WelcomeIntro says "Pages are living documents you write yourself, with agents to help. They are saved on this device first and sync betw…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: the first paragraph.
@@ -10439,6 +10593,56 @@ func WelcomeTryProvider() string { return In(i18n.Locale()).WelcomeTryProvider()
 // (Markdown).
 func (msgs Messages) WelcomeTryProvider() string {
 	return Catalog.Format(msgs.locale, "welcomeTryProvider", nil)
+}
+
+// WelcomeTagGuide says "guide"
+// in the language the app shows.
+//
+// The welcome guide page, made once on first run: the tag of the guide
+// itself, which the sidebar's Tags tab and search show. One short word, as
+// tags are.
+func WelcomeTagGuide() string { return In(i18n.Locale()).WelcomeTagGuide() }
+
+// WelcomeTagGuide says "guide"
+// in the language of msgs.
+//
+// The welcome guide page, made once on first run: the tag of the guide
+// itself, which the sidebar's Tags tab and search show. One short word, as
+// tags are.
+func (msgs Messages) WelcomeTagGuide() string {
+	return Catalog.Format(msgs.locale, "welcomeTagGuide", nil)
+}
+
+// WelcomeTagMeetings says "meetings"
+// in the language the app shows.
+//
+// The welcome guide page, made once on first run: the tag of the example
+// meeting subpage and its template. One short word, as tags are.
+func WelcomeTagMeetings() string { return In(i18n.Locale()).WelcomeTagMeetings() }
+
+// WelcomeTagMeetings says "meetings"
+// in the language of msgs.
+//
+// The welcome guide page, made once on first run: the tag of the example
+// meeting subpage and its template. One short word, as tags are.
+func (msgs Messages) WelcomeTagMeetings() string {
+	return Catalog.Format(msgs.locale, "welcomeTagMeetings", nil)
+}
+
+// WelcomeTryTag says "Hover the line under this page's title and click the tag button to add a tag"
+// in the language the app shows.
+//
+// The welcome guide page, made once on first run: a to-do of Try it: adding
+// a tag from the byline.
+func WelcomeTryTag() string { return In(i18n.Locale()).WelcomeTryTag() }
+
+// WelcomeTryTag says "Hover the line under this page's title and click the tag button to add a tag"
+// in the language of msgs.
+//
+// The welcome guide page, made once on first run: a to-do of Try it: adding
+// a tag from the byline.
+func (msgs Messages) WelcomeTryTag() string {
+	return Catalog.Format(msgs.locale, "welcomeTryTag", nil)
 }
 
 // WelcomeWritingHeading says "Writing"
@@ -11793,13 +11997,13 @@ func (msgs Messages) WelcomeDateTodo() string {
 	return Catalog.Format(msgs.locale, "welcomeDateTodo", nil)
 }
 
-// WelcomeTodosDue says "A due to-do reminds you on the day and turns red once overdue. The **To-dos** button at the top of the sidebar gather…"
+// WelcomeTodosDue says "A due to-do reminds you on the day and turns red once overdue. The sidebar's **To-dos** tab gathers the open ones fro…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func WelcomeTodosDue() string { return In(i18n.Locale()).WelcomeTodosDue() }
 
-// WelcomeTodosDue says "A due to-do reminds you on the day and turns red once overdue. The **To-dos** button at the top of the sidebar gather…"
+// WelcomeTodosDue says "A due to-do reminds you on the day and turns red once overdue. The sidebar's **To-dos** tab gathers the open ones fro…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
@@ -11963,18 +12167,36 @@ func (msgs Messages) WelcomeOrganizingLink(page string) string {
 	return Catalog.Format(msgs.locale, "welcomeOrganizingLink", map[string]any{"page": page})
 }
 
-// WelcomeOrganizingFolders says "Folders, from the button beside **My space**, group pages. A page's **…** menu moves it, duplicates it with its sub…"
+// WelcomeOrganizingFolders says "Folders, from the folder button at the top of the sidebar, group pages. A page's **…** menu moves it, duplicates it…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func WelcomeOrganizingFolders() string { return In(i18n.Locale()).WelcomeOrganizingFolders() }
 
-// WelcomeOrganizingFolders says "Folders, from the button beside **My space**, group pages. A page's **…** menu moves it, duplicates it with its sub…"
+// WelcomeOrganizingFolders says "Folders, from the folder button at the top of the sidebar, group pages. A page's **…** menu moves it, duplicates it…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph (Markdown).
 func (msgs Messages) WelcomeOrganizingFolders() string {
 	return Catalog.Format(msgs.locale, "welcomeOrganizingFolders", nil)
+}
+
+// WelcomeOrganizingTags says "Tags file a page under several names at once, as **{guide}** under this page's title. Add one from the tag button bes…"
+// in the language the app shows.
+//
+// The welcome guide page, made once on first run: how tags work, naming the
+// guide's and the meeting's tags (Markdown).
+func WelcomeOrganizingTags(guide string, meetings string) string {
+	return In(i18n.Locale()).WelcomeOrganizingTags(guide, meetings)
+}
+
+// WelcomeOrganizingTags says "Tags file a page under several names at once, as **{guide}** under this page's title. Add one from the tag button bes…"
+// in the language of msgs.
+//
+// The welcome guide page, made once on first run: how tags work, naming the
+// guide's and the meeting's tags (Markdown).
+func (msgs Messages) WelcomeOrganizingTags(guide string, meetings string) string {
+	return Catalog.Format(msgs.locale, "welcomeOrganizingTags", map[string]any{"guide": guide, "meetings": meetings})
 }
 
 // WelcomeOrganizingHeadings says "Headings fold their section from the arrow beside them, and the panel's **Outline** tab lists them. Right-click a blo…"
@@ -11991,16 +12213,18 @@ func (msgs Messages) WelcomeOrganizingHeadings() string {
 	return Catalog.Format(msgs.locale, "welcomeOrganizingHeadings", nil)
 }
 
-// WelcomeTogetherHeading says "Working together"
+// WelcomeTogetherHeading says "Comments, history and sync"
 // in the language the app shows.
 //
-// The welcome guide page, made once on first run: a section heading.
+// The welcome guide page, made once on first run: the heading of the
+// section on comments, page history and sync.
 func WelcomeTogetherHeading() string { return In(i18n.Locale()).WelcomeTogetherHeading() }
 
-// WelcomeTogetherHeading says "Working together"
+// WelcomeTogetherHeading says "Comments, history and sync"
 // in the language of msgs.
 //
-// The welcome guide page, made once on first run: a section heading.
+// The welcome guide page, made once on first run: the heading of the
+// section on comments, page history and sync.
 func (msgs Messages) WelcomeTogetherHeading() string {
 	return Catalog.Format(msgs.locale, "welcomeTogetherHeading", nil)
 }
@@ -12109,14 +12333,14 @@ func (msgs Messages) WelcomeShortcutsDoes() string {
 	return Catalog.Format(msgs.locale, "welcomeShortcutsDoes", nil)
 }
 
-// WelcomeShortcutSearch says "Search pages, templates, recordings and comments"
+// WelcomeShortcutSearch says "Search pages, templates, recordings and comments; #tag keeps to a tag"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a row of the shortcuts
 // table (⌘P).
 func WelcomeShortcutSearch() string { return In(i18n.Locale()).WelcomeShortcutSearch() }
 
-// WelcomeShortcutSearch says "Search pages, templates, recordings and comments"
+// WelcomeShortcutSearch says "Search pages, templates, recordings and comments; #tag keeps to a tag"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a row of the shortcuts
@@ -12301,14 +12525,14 @@ func (msgs Messages) WelcomeShortcutUndo() string {
 	return Catalog.Format(msgs.locale, "welcomeShortcutUndo", nil)
 }
 
-// WelcomeSubIntro says "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent, and sharing t…"
+// WelcomeSubIntro says "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent."
 // in the language the app shows.
 //
 // The guide's example subpage (Weekly team sync): its first paragraph
 // (Markdown); parent is the guide's title.
 func WelcomeSubIntro(parent string) string { return In(i18n.Locale()).WelcomeSubIntro(parent) }
 
-// WelcomeSubIntro says "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent, and sharing t…"
+// WelcomeSubIntro says "Notes from the week's sync. This page lives inside **{parent}**: the sidebar shows it under its parent."
 // in the language of msgs.
 //
 // The guide's example subpage (Weekly team sync): its first paragraph

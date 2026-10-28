@@ -21,6 +21,7 @@ func PageToRemote(p Page) map[string]any {
 		"id": p.ID, "space_id": p.SpaceID, "parent_id": ns(p.ParentID), "folder_id": ns(p.FolderID),
 		"title": p.Title, "icon": ns(p.Icon), "sort_key": p.SortKey, "created_by": ns(p.CreatedBy),
 		"created_at": iso(p.CreatedAt), "deleted_at": iso(p.DeletedAt), "is_template": p.Template,
+		"tags": NormalizeTags(p.Tags),
 	}
 }
 
@@ -147,8 +148,24 @@ func PageFromRemote(r map[string]any, keepOffline bool) Page {
 		ID: S(r, "id"), SpaceID: S(r, "space_id"), ParentID: S(r, "parent_id"), FolderID: S(r, "folder_id"),
 		Title: S(r, "title"), Icon: S(r, "icon"), SortKey: sk, CreatedBy: S(r, "created_by"),
 		CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"]),
-		KeepOffline: keepOffline, Template: r["is_template"] == true,
+		KeepOffline: keepOffline, Template: r["is_template"] == true, Tags: tagsFromRemote(r["tags"]),
 	}
+}
+
+// tagsFromRemote reads a row's tags, none for a row without them.
+func tagsFromRemote(v any) []string {
+	var tags []string
+	switch v := v.(type) {
+	case []any:
+		for _, t := range v {
+			if s, ok := t.(string); ok {
+				tags = append(tags, s)
+			}
+		}
+	case []string:
+		tags = v
+	}
+	return NormalizeTags(tags)
 }
 
 // PutRemotePage stores a page that came from the server, unless it has a

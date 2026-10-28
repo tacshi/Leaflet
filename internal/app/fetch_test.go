@@ -1,7 +1,11 @@
 package app
 
 import (
+	"bytes"
 	"errors"
+	"image"
+	"image/color"
+	"image/gif"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -9,8 +13,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/egoist/mygo/ui"
 )
 
 // Links from shared pages reach only the web: not files on this device,
@@ -92,17 +94,83 @@ func TestImageCacheFailure(t *testing.T) {
 	<-again
 }
 
-// An SVG, as placehold.co serves, shows as a picture; text that is
-// neither a bitmap nor an SVG does not.
-func TestDecodePicture(t *testing.T) {
-	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400" viewBox="0 0 600 400"><rect width="600" height="400" fill="#ddd"/></svg>`
-	pic, err := decodePicture([]byte(svg))
-	if s, ok := pic.(*ui.SVG); err != nil || !ok {
-		t.Fatalf("svg: %T, %v", pic, err)
-	} else if w, h := s.Size(); w != 600 || h != 400 {
-		t.Errorf("svg size %v×%v", w, h)
+// An animated GIF gets a player, looping, for each block that shows it,
+// made off the main thread; a GIF of one frame stays a picture.
+func TestAnimatedGIFPlays(t *testing.T) {
+	root := t.TempDir()
+	ic := newImageCache(root, filepath.Join(root, "images"))
+	frame := func(c color.Gray) *image.Paletted {
+		f := image.NewPaletted(image.Rect(0, 0, 4, 2), color.Palette{color.Black, color.White})
+		f.Set(0, 0, c)
+		return f
 	}
-	if pic, err := decodePicture([]byte("<html>not a picture</html>")); err == nil {
-		t.Errorf("html decoded as %T", pic)
+	write := func(name string, frames int) string {
+		g := &gif.GIF{Config: image.Config{Width: 4, Height: 2}}
+		for i := range frames {
+			g.Image = append(g.Image, frame(color.Gray{Y: uint8(255 * (i % 2))}))
+			g.Delay = append(g.Delay, 5)
+		}
+		var b bytes.Buffer
+		if err := gif.EncodeAll(&b, g); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return "file://" + path
+	}
+	load := func(url string) {
+		done := make(chan struct{})
+		ic.get(url, func() { close(done) })
+		<-done
+		if ic.get(url, nil) == nil {
+			t.Fatalf("%s did not load", url)
+		}
+	}
+	moving, still := write("moving.gif", 3), write("still.gif", 1)
+	load(moving)
+	load(still)
+	if ic.player(still, "b1", func() { t.Error("a player for a still GIF") }) != nil {
+		t.Error("a still GIF has a player")
+	}
+	made := make(chan struct{})
+	if ic.player(moving, "b1", func() { close(made) }) != nil {
+		t.Fatal("a player made at once, on the main thread")
+	}
+	<-made
+	p := ic.player(moving, "b1", nil)
+	if p == nil || !p.Loop() {
+		t.Fatalf("player %v", p)
+	}
+	if w, h := p.Size(); w != 4 || h != 2 {
+		t.Errorf("player size %d×%d", w, h)
+	}
+	other := make(chan struct{})
+	if ic.player(moving, "b2", func() { close(other) }) != nil {
+		t.Fatal("another block shares the first one's player")
+	}
+	<-other
+	if q := ic.player(moving, "b2", nil); q == nil || q == p {
+		t.Errorf("second block's player %p, first's %p", q, p)
+	}
+	// A player its block keeps asking for stays; one no block asked for
+	// within playerIdle is closed and forgotten, and made again if its
+	// block shows once more.
+	ic.releasePlayers(time.Now().Add(playerIdle / 2))
+	if ic.player(moving, "b1", nil) != p {
+		t.Fatal("a player asked for recently was released")
+	}
+	ic.releasePlayers(time.Now().Add(2 * playerIdle))
+	if p.Playing() || len(ic.players) != 0 {
+		t.Errorf("after its block went: playing %v, %d players kept", p.Playing(), len(ic.players))
+	}
+	again := make(chan struct{})
+	if ic.player(moving, "b1", func() { close(again) }) != nil {
+		t.Fatal("a released player came back at once")
+	}
+	<-again
+	if q := ic.player(moving, "b1", nil); q == nil || q == p {
+		t.Errorf("the block's new player %p, the released one %p", q, p)
 	}
 }

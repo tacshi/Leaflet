@@ -167,7 +167,7 @@ func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.
 			for _, model := range agents.Models(o.Provider) {
 				ch := store.ModelChoice{ProviderID: o.Provider.ID, Model: model}
 				on := err == nil && current.Provider.ID == o.Provider.ID && current.Model == model
-				if m.Item(o.Name() + " · " + model).Checked(on).Chosen() {
+				if m.Item(o.Name() + " · " + model).Radio(on).Chosen() {
 					sess.Selected = &ch
 				}
 			}

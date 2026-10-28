@@ -45,7 +45,7 @@ func TestTodoRowsAndReminders(t *testing.T) {
 	}
 }
 
-// The To-dos view lists to-dos from every page; checking one off checks
+// The To-dos tab lists to-dos from every page; checking one off checks
 // it in its page.
 func TestTodosView(t *testing.T) {
 	a := templatesApp(t)
@@ -58,8 +58,14 @@ func TestTodosView(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.reloadAll()
-	a.route = Route{Kind: "todos"}
-	tt := ui.NewTester(func(c *ui.Context) { a.todosView(c) }, 900, 600)
+	a.settings.SidebarOpen = true
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 260, 600)
+	tt.Frame()
+	if err := tt.Click("To-dos"); err != nil {
+		t.Fatal(err)
+	}
 	tt.Frame()
 	for _, s := range []string{"Today", "Send the draft", "PRD"} {
 		if !tt.HasText(s) {

@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -1215,5 +1216,161 @@ func TestParentLoop(t *testing.T) {
 	}
 	if n := s.PendingCount(); n != 0 {
 		t.Errorf("detaching queued %d changes", n)
+	}
+}
+
+// Tags are tidied as they are set, go up with the page's row, and come
+// back from one the same.
+func TestPageTags(t *testing.T) {
+	if got, want := NormalizeTags([]string{" #Work ", "work", "", "two  words", "##x", strings.Repeat("a", 70)}),
+		[]string{"Work", "two words", "x", strings.Repeat("a", maxTagLen)}; !slices.Equal(got, want) {
+		t.Errorf("normalized %q, want %q", got, want)
+	}
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Plan"})
+	if err := s.SetPageTags(p.ID, []string{"work", "#Q4"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Page(p.ID)
+	if !slices.Equal(got.Tags, []string{"work", "Q4"}) {
+		t.Fatalf("tags %q", got.Tags)
+	}
+	pending, _ := s.Pending()
+	if !slices.ContainsFunc(pending, func(e OutboxEntry) bool {
+		return e.Entity == "pages" && strings.Contains(e.Payload, `"tags":["work","Q4"]`)
+	}) {
+		t.Errorf("queued %+v", pending)
+	}
+	// A row through JSON, as the server and iCloud send it.
+	var row map[string]any
+	b, _ := json.Marshal(PageToRemote(got))
+	_ = json.Unmarshal(b, &row)
+	if back := PageFromRemote(row, true); !slices.Equal(back.Tags, got.Tags) {
+		t.Errorf("read back %q", back.Tags)
+	}
+	delete(row, "tags")
+	if back := PageFromRemote(row, true); back.Tags == nil || len(back.Tags) != 0 {
+		t.Errorf("a row without tags read %q", back.Tags)
+	}
+	if c, err := s.CopyPage(p.ID, CopyOptions{Title: "Copy"}); err != nil || !slices.Equal(c.Tags, got.Tags) {
+		t.Errorf("copy %q, %v", c.Tags, err)
+	}
+}
+
+// The tags of the pages are counted once in any case, by name, and are
+// renamed, merged and deleted on every page.
+func TestRenameAndDeleteTags(t *testing.T) {
+	s := open(t)
+	a, _ := s.CreatePage(NewPageOptions{Title: "A", Tags: []string{"work", "draft"}})
+	b, _ := s.CreatePage(NewPageOptions{Title: "B", Tags: []string{"Work", "done"}})
+	_, _ = s.CreatePage(NewPageOptions{Title: "T", Template: true, Tags: []string{"template-only"}})
+	tags, _ := s.Tags()
+	if want := []TagCount{{"done", 1}, {"draft", 1}, {"work", 2}}; !slices.Equal(tags, want) {
+		t.Errorf("tags %+v, want %+v", tags, want)
+	}
+	if before, err := s.RenameTag("draft", "done"); err != nil || len(before) != 1 || !slices.Equal(before[a.ID], []string{"work", "draft"}) {
+		t.Fatalf("renamed %v, %v", before, err)
+	}
+	if p, _ := s.Page(a.ID); !slices.Equal(p.Tags, []string{"work", "done"}) {
+		t.Errorf("renamed to %q", p.Tags)
+	}
+	if before, err := s.RenameTag("done", "Work"); err != nil || len(before) != 2 {
+		t.Fatalf("merged %v, %v", before, err)
+	}
+	if p, _ := s.Page(b.ID); !slices.Equal(p.Tags, []string{"Work"}) {
+		t.Errorf("merged to %q", p.Tags)
+	}
+	if before, err := s.DeleteTag("WORK"); err != nil || len(before) != 2 {
+		t.Fatalf("deleted %v, %v", before, err)
+	}
+	if tags, _ := s.Tags(); len(tags) != 0 {
+		t.Errorf("left %+v", tags)
+	}
+}
+
+// Words starting with # keep a search to the pages with those tags, which
+// alone lists them; other words find a page by its tags too.
+func TestSearchByTag(t *testing.T) {
+	s := open(t)
+	plan, _ := s.CreatePage(NewPageOptions{Title: "Plan", Tags: []string{"work"}})
+	c := s.Content(plan.ID)
+	c.Children[0].SetDelta(doc.Delta{{Text: "the budget for Q4"}})
+	_, _, _ = s.SaveContent(plan.ID, c)
+	notes, _ := s.CreatePage(NewPageOptions{Title: "Notes", Tags: []string{"Work", "reading"}})
+	other, _ := s.CreatePage(NewPageOptions{Title: "Budget at home"})
+	ids := func(q string) []string {
+		hits, err := s.Search(q, 20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, h := range hits {
+			out = append(out, h.PageID)
+		}
+		slices.Sort(out)
+		return out
+	}
+	sorted := func(s ...string) []string { slices.Sort(s); return s }
+	for _, c := range []struct {
+		q    string
+		want []string
+	}{
+		{"#work", sorted(plan.ID, notes.ID)},
+		{"#work #reading", sorted(notes.ID)},
+		{"#work budget", sorted(plan.ID)},
+		{"budget", sorted(plan.ID, other.ID)},
+		{"readi", sorted(notes.ID)},
+		{"#rea", sorted(notes.ID)}, // while typing
+		{"#nope", nil},
+	} {
+		if got := ids(c.q); !slices.Equal(got, c.want) {
+			t.Errorf("%q found %v, want %v", c.q, got, c.want)
+		}
+	}
+}
+
+// A tag filter keeps to its pages before any limit: comments matching on
+// other pages, more than a search takes, hide none of the tagged page's.
+func TestSearchByTagPastOtherMatches(t *testing.T) {
+	s := open(t)
+	other, _ := s.CreatePage(NewPageOptions{Title: "Elsewhere"})
+	for range 12 {
+		if _, err := s.AddComment(other.ID, "b1", "a needle here", "", "", "user", "Me"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tagged, _ := s.CreatePage(NewPageOptions{Title: "Tagged", Tags: []string{"work"}})
+	if _, err := s.AddComment(tagged.ID, "b1", "the needle", "", "", "user", "Me"); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := s.Search("#work needle", 20)
+	if err != nil || len(hits) != 1 || hits[0].PageID != tagged.ID || hits[0].Kind != "comment" {
+		t.Errorf("hits %+v, %v", hits, err)
+	}
+}
+
+// A database from before tags gains them, none on each page.
+func TestADatabaseGainsTags(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	before := strings.Replace(schema, ",\n  tags TEXT NOT NULL DEFAULT '[]'", "", 1)
+	if before == schema {
+		t.Fatal("schema has no tags column to leave out")
+	}
+	writeDB(t, path, before, `PRAGMA user_version = 3`,
+		`INSERT INTO pages (id, space_id, title, sort_key, created_at, updated_at) VALUES ('p1', 's1', 'Plan', 'a', 1, 1)`)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if v := userVersion(t, s); v != len(migrations) {
+		t.Errorf("schema %d, want %d", v, len(migrations))
+	}
+	if p, err := s.Page("p1"); err != nil || p.Tags == nil || len(p.Tags) != 0 {
+		t.Fatalf("page %+v, %v", p, err)
+	}
+	if err := s.SetPageTags("p1", []string{"work"}); err != nil {
+		t.Fatal(err)
 	}
 }

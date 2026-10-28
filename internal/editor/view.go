@@ -34,7 +34,9 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 			e.geom[id] = ui.Rect{X: r.X + b.X, Y: r.Y + b.Y, W: b.W, H: b.H}
 		}
 	})
-	root.ContextMenu(func(m *ui.Menu) {
+	// The page's own text is drawn here, not in MyGo's text inputs, so
+	// MyGo's EditItems would add nothing: cut, copy and paste are keys.
+	root.PopoverMenu(func(m *ui.Menu) {
 		if e.colored() && m.Item(locales.EditorRemoveColor()).Chosen() {
 			e.SetColor("")
 			e.SetHighlight("")
@@ -50,9 +52,7 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 			if label := mediaLink(e.linkAtPos(e.menuAt)); label != "" && !e.ReadOnly && m.Item(label).Chosen() {
 				e.LinkToMedia(e.menuAt)
 			}
-			m.Separator()
 		}
-		m.EditItems()
 	})
 	e.hid = e.hidden()
 	// The chips shown fill this in again as they draw.
@@ -355,7 +355,7 @@ func mediaLink(href string) string {
 }
 
 func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
-	pic, failed := e.Host.Image(n)
+	pic, video, failed := e.Host.Image(n)
 	if pic == nil {
 		label := locales.EditorLoadingImage()
 		if failed {
@@ -367,7 +367,7 @@ func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 		})
 		return
 	}
-	w, h := pictureSize(pic)
+	w, h := ui.ImageSize(pic)
 	maxW := e.width - float32(e.depth(n.ID))*indentStep
 	dw := min(w, maxW)
 	dh := dw * h / max(w, 1)
@@ -379,20 +379,14 @@ func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 		row.Justify(ui.Center)
 	}
 	row.Children(func() {
+		// An animated GIF plays once its player is made, from the frame
+		// its picture shows.
+		if video != nil {
+			ui.Video(c, video).Size(dw, dh).Fit(ui.Contain).Radius(6).Label(n.Str("alt"))
+			return
+		}
 		ui.Image(c, pic).Size(dw, dh).Fit(ui.Contain).Radius(6).Label(n.Str("alt"))
 	})
-}
-
-// pictureSize is the size a bitmap or an SVG says it has.
-func pictureSize(pic ui.ImageSource) (w, h float32) {
-	switch p := pic.(type) {
-	case *ui.Bitmap:
-		iw, ih := p.Size()
-		return float32(iw), float32(ih)
-	case *ui.SVG:
-		return p.Size()
-	}
-	return 0, 0
 }
 
 func (e *Editor) subpageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {

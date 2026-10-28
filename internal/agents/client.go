@@ -84,8 +84,8 @@ var idleTimeout = 2 * time.Minute
 // errIdle is an answer that stopped coming.
 var errIdle = errors.New("the model stopped answering")
 
-// The transports are made on first use, after sysproxy.Install, so they
-// keep the system's proxy that it gives http.DefaultTransport.
+// The transports are made on first use, after main gives
+// http.DefaultTransport the system's proxy (netproxy), so they keep it.
 var (
 	answerTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(answerTimeout) })
 	streamTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(streamTimeout) })

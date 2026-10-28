@@ -1,8 +1,12 @@
 package app
 
 import (
+	"hash/fnv"
+	"strings"
+
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/editor"
 	"leaflet/internal/theme"
 	"leaflet/locales"
 )
@@ -226,4 +230,50 @@ func selectBox(c *ui.Context, key string, value *string, options []string, displ
 func accentBadge(c *ui.Context, text string) ui.Element {
 	pal := theme.Of(c)
 	return ui.Badge(c, text).Background(pal.AccentSoft).TextColor(pal.AccentText)
+}
+
+// tagColor is a tag's color: one of the editor's bright colors, chosen by
+// its name in any case, so a tag has the same one on every device.
+func tagColor(name string) ui.Color {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(strings.ToLower(name)))
+	colors := editor.BrightColors()
+	return colors[h.Sum32()%uint32(len(colors))]
+}
+
+// tagLook gives e a tag's look: a pill tinted in its color, its name in
+// a darker or, on a dark theme, lighter shade of it.
+func tagLook(c *ui.Context, e ui.Element, name string) ui.Element {
+	pal := theme.Of(c)
+	col := tagColor(name)
+	e.Padding(1, 7).Radius(999).Background(col.Alpha(0.16)).AlignItems(ui.Center).Shrink(0).Label(name)
+	e.Children(func() {
+		ui.Text(c, name).FontSize(12).FontWeight(550).TextColor(col.Mix(pal.Text, 0.35)).SingleLine()
+	})
+	return e
+}
+
+// tagChip shows a tag.
+func tagChip(c *ui.Context, name string) ui.Element {
+	return tagLook(c, ui.Row(c.Key("tag:"+name)), name)
+}
+
+// tagChipOnAccent shows a tag on a row chosen, in the accent: in the
+// row's text color, which a tag's own would not read on.
+func tagChipOnAccent(c *ui.Context, name string) ui.Element {
+	pal := theme.Of(c)
+	e := ui.Row(c.Key("tag:"+name)).Padding(1, 7).Radius(999).Background(pal.OnAccent.Alpha(0.2)).AlignItems(ui.Center).Shrink(0).Label(name)
+	e.Children(func() {
+		ui.Text(c, name).FontSize(12).FontWeight(550).TextColor(pal.OnAccent).SingleLine()
+	})
+	return e
+}
+
+// tagButton is a tag a click acts on.
+func tagButton(c *ui.Context, name string) ui.Element {
+	b := tagLook(c, ui.ButtonBase(c.Key("tag:"+name)), name).Tooltip(name)
+	if b.Hovered() {
+		b.Background(tagColor(name).Alpha(0.26))
+	}
+	return b
 }

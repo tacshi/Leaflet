@@ -70,7 +70,9 @@ func (a *App) recordingPill(c *ui.Context) {
 			// The capture page must be in the window to keep running.
 			ui.WebView(c, v).Size(1, 1).Opacity(0.01)
 		}
-		pause := ui.ButtonBase(c.Key("pause")).Size(22, 22).Center().Radius(999).Label(locales.CommonPause()).TextColor(pal.DangerText)
+		// Before the microphone starts there is nothing to pause.
+		pause := ui.ButtonBase(c.Key("pause")).Size(22, 22).Center().Radius(999).Label(locales.CommonPause()).TextColor(pal.DangerText).
+			Disabled(st.Starting)
 		pause.Children(func() {
 			icon := "pause"
 			if st.Paused {

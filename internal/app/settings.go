@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"time"
 
@@ -398,12 +399,13 @@ func (a *App) loadDevices() {
 
 func (a *App) exportAll() {
 	a.flush()
+	folders, files := slices.Clone(a.folders), slices.Clone(a.files)
 	go func() {
 		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.SettingsExportAll(), DefaultPath: locales.SettingsExportFileName()})
 		if path == "" {
 			return
 		}
-		missing, err := a.writeExport(path)
+		missing, err := a.writeExport(path, folders, files)
 		a.update(func() {
 			switch {
 			case err != nil:

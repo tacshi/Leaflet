@@ -5,13 +5,16 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/remote"
 	"leaflet/internal/store"
+	syncsvc "leaflet/internal/sync"
 )
 
 func TestExportZip(t *testing.T) {
@@ -110,6 +113,56 @@ func TestExportZipDotNames(t *testing.T) {
 	slices.Sort(names)
 	if want := []string{"--.md", "--/-.md", "--/Notes.md"}; !slices.Equal(names, want) {
 		t.Errorf("names %q, want %q", names, want)
+	}
+}
+
+// Export All takes the app's own files, and no file elsewhere that a
+// block links to.
+func TestExportOnlyOwnFiles(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	secret, pic := filepath.Join(outside, "id_rsa"), filepath.Join(outside, "pic.png")
+	for _, p := range []string{secret, pic} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f, err := st.AddFile(pic, "", "", "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := []*doc.Node{
+		{ID: "a", Type: "image", Data: map[string]any{"url": "file://" + f.LocalPath, "file_id": f.ID}},
+		{ID: "b", Type: "file", Data: map[string]any{"url": "file://" + secret, "name": "id_rsa"}},
+	}
+	if _, err := st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks(blocks)}); err != nil {
+		t.Fatal(err)
+	}
+	be := remote.New(remote.Config(), st)
+	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
+	a.reloadAll()
+	out := filepath.Join(t.TempDir(), "export.zip")
+	if _, err := a.writeExport(out, a.folders, a.files); err != nil {
+		t.Fatal(err)
+	}
+	r, err := zip.OpenReader(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	var names []string
+	for _, f := range r.File {
+		names = append(names, f.Name)
+	}
+	if !slices.Contains(names, "files/pic.png") || slices.Contains(names, "files/id_rsa") {
+		t.Errorf("exported %q", names)
 	}
 }
 

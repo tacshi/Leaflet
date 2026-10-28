@@ -18,8 +18,10 @@ import (
 )
 
 // writeExport writes every page to file, and returns how many pages it
-// left out: those this device does not keep and could not download.
-func (a *App) writeExport(file string) (int, error) {
+// left out: those this device does not keep and could not download. It
+// runs off the main thread, so it is given the folders and files as they
+// were when it started.
+func (a *App) writeExport(file string, allFolders []store.Folder, allFiles []store.File) (int, error) {
 	pages, err := a.st.Pages()
 	if err != nil {
 		return 0, err
@@ -29,7 +31,7 @@ func (a *App) writeExport(file string) (int, error) {
 		return 0, err
 	}
 	folders := map[string]string{}
-	for _, fo := range a.folders {
+	for _, fo := range allFolders {
 		folders[fo.ID] = fo.Name
 	}
 	// Templates go in a folder of their own.
@@ -62,13 +64,22 @@ func (a *App) writeExport(file string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	localPath := func(fileID string) string {
-		if f, ok := a.fileByID(fileID); ok {
-			return f.LocalPath
-		}
-		return ""
+	known := map[string]string{}
+	owned := map[string]bool{}
+	for _, f := range allFiles {
+		known[f.ID] = f.LocalPath
+		owned[f.LocalPath] = f.LocalPath != ""
 	}
-	if err := exportZip(f, pages, folders, a.st.Content, localPath, os.ReadFile); err != nil {
+	localPath := func(fileID string) string { return known[fileID] }
+	// Only the app's own files go in: a block's link to a file elsewhere,
+	// as from another device or person, is no reason to read it.
+	readFile := func(path string) ([]byte, error) {
+		if !owned[path] && !inFolder(a.st.Dir, path) {
+			return nil, errNotOwnFile
+		}
+		return os.ReadFile(path) // #nosec G304 -- a file of the app's own.
+	}
+	if err := exportZip(f, pages, folders, a.st.Content, localPath, readFile); err != nil {
 		_ = f.Close()
 		return 0, err
 	}

@@ -346,7 +346,11 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 	if live {
 		go r.startSoniox(session, stt)
 	}
-	v, err := r.win.NewWebView(mygo.WebViewOptions{URL: CaptureURL(session)})
+	// The page captures while the window is hidden or minimized too, as
+	// a recording started from the menu bar is: web views slow down then,
+	// unless told not to.
+	v, err := r.win.NewWebView(mygo.WebViewOptions{URL: CaptureURL(session),
+		Page: mygo.PageOptions{BackgroundThrottling: mygo.ThrottlingOff}})
 	if err != nil {
 		r.abort()
 		return err

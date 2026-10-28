@@ -96,7 +96,7 @@ func (e *Editor) codeBarView(c *ui.Context, n *doc.Node, left float32, hovered b
 			// Its name lines up with the code, as the read-only label does.
 			lang := ui.MenuButton(c.Key("language"), name, func(m *ui.Menu) {
 				for _, l := range doc.CodeLanguages {
-					if m.Item(codeLanguageName(l.ID)).Checked(l.ID == n.Str("language")).Chosen() {
+					if m.Item(codeLanguageName(l.ID)).Radio(l.ID == n.Str("language")).Chosen() {
 						e.SetCodeLanguage(n.ID, l.ID)
 					}
 				}

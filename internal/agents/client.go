@@ -8,11 +8,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -61,7 +63,91 @@ type Client struct {
 
 // NewClient returns a client for an endpoint.
 func NewClient(baseURL, apiKey string) *Client {
-	return &Client{BaseURL: NormalizeBaseURL(baseURL), APIKey: apiKey, HTTP: &http.Client{Timeout: 3 * time.Minute}}
+	return &Client{BaseURL: NormalizeBaseURL(baseURL), APIKey: apiKey, HTTP: &http.Client{Transport: answerTransport()}}
+}
+
+// Model requests have no overall timeout: a long answer may take most of
+// a run, whose context bounds it. A server that stops answering is given
+// up on instead.
+const (
+	// answerTimeout bounds the wait for an answer that is not streamed,
+	// whose headers come only once the model has finished: a run's length.
+	answerTimeout = 10 * time.Minute
+	// streamTimeout bounds the wait for a streamed answer to start.
+	streamTimeout = 2 * time.Minute
+)
+
+// idleTimeout is how long an answer may go without sending more of
+// itself; tests shorten it.
+var idleTimeout = 2 * time.Minute
+
+// errIdle is an answer that stopped coming.
+var errIdle = errors.New("the model stopped answering")
+
+// The transports are made on first use, after sysproxy.Install, so they
+// keep the system's proxy that it gives http.DefaultTransport.
+var (
+	answerTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(answerTimeout) })
+	streamTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(streamTimeout) })
+)
+
+// modelTransport is http.DefaultTransport giving up on a server that sends
+// no headers within header, or no more of its answer within idleTimeout.
+func modelTransport(header time.Duration) http.RoundTripper {
+	base := http.DefaultTransport
+	if t, ok := base.(*http.Transport); ok {
+		t = t.Clone()
+		t.ResponseHeaderTimeout = header
+		base = t
+	}
+	return idleTransport{base}
+}
+
+type idleTransport struct{ base http.RoundTripper }
+
+func (t idleTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	ctx, cancel := context.WithCancelCause(req.Context())
+	res, err := t.base.RoundTrip(req.WithContext(ctx))
+	if err != nil {
+		cancel(nil)
+		return nil, err
+	}
+	b := &idleBody{ReadCloser: res.Body, ctx: ctx, cancel: cancel}
+	b.timer = time.AfterFunc(idleTimeout, func() { cancel(errIdle) })
+	res.Body = b
+	return res, nil
+}
+
+// idleBody is an answer whose request ends when it stops coming.
+type idleBody struct {
+	io.ReadCloser
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+	timer  *time.Timer
+}
+
+func (b *idleBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if n > 0 {
+		b.timer.Reset(idleTimeout)
+	}
+	if err != nil && context.Cause(b.ctx) == errIdle {
+		err = errIdle
+	}
+	return n, err
+}
+
+func (b *idleBody) Close() error {
+	b.timer.Stop()
+	err := b.ReadCloser.Close()
+	b.cancel(nil)
+	return err
+}
+
+// noRedirect refuses to follow a redirect: the request carries the API
+// key, which would go on to wherever the redirect points.
+func noRedirect(*http.Request, []*http.Request) error {
+	return errors.New("redirected")
 }
 
 // NormalizeBaseURL trims slashes and a pasted /chat/completions or /models.

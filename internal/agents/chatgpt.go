@@ -383,6 +383,12 @@ type ChatGPT struct {
 	renewing sync.Mutex
 }
 
+// chatgptHTTP is the client of the plan's API. Its answers stream, so
+// they may take as long as a run, given they keep coming.
+var chatgptHTTP = sync.OnceValue(func() *http.Client {
+	return &http.Client{Transport: streamTransport(), CheckRedirect: noRedirect}
+})
+
 // NewChatGPT resumes a sign-in kept from before.
 func NewChatGPT(acct ChatGPTAccount) *ChatGPT { return &ChatGPT{acct: acct} }
 
@@ -479,9 +485,7 @@ func (g *ChatGPT) do(ctx context.Context, method, path string, body any, accept 
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	res, err := (&http.Client{Timeout: 3 * time.Minute, CheckRedirect: func(*http.Request, []*http.Request) error {
-		return errors.New("redirected")
-	}}).Do(req)
+	res, err := chatgptHTTP().Do(req)
 	if err != nil {
 		return nil, err
 	}

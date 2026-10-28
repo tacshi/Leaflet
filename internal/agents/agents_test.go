@@ -3,12 +3,14 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"leaflet/internal/doc"
 )
@@ -249,5 +251,31 @@ func TestCloudRunCutOff(t *testing.T) {
 	res, err = RunCloud(context.Background(), fakeStream{events: []map[string]any{op, done}, err: io.ErrUnexpectedEOF}, "j1", Events{})
 	if err != nil || res.Reply != "Done." {
 		t.Errorf("finished run: %v, %q", err, res.Reply)
+	}
+}
+
+// A model call has no overall timeout, the run bounding it, but one whose
+// answer stops coming is given up on.
+func TestModelAnswerThatStops(t *testing.T) {
+	saved := idleTimeout
+	idleTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { idleTimeout = saved })
+	stop := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices": [`))
+		w.(http.Flusher).Flush()
+		<-stop
+	}))
+	defer srv.Close()
+	defer close(stop)
+	c := NewClient(srv.URL, "")
+	if c.HTTP.Timeout != 0 {
+		t.Errorf("model calls time out after %v", c.HTTP.Timeout)
+	}
+	start := time.Now()
+	_, err := c.Chat(context.Background(), "m", []map[string]any{{"role": "user", "content": "hi"}}, nil, 0)
+	if !errors.Is(err, errIdle) || time.Since(start) > 5*time.Second {
+		t.Errorf("err %v after %v", err, time.Since(start))
 	}
 }

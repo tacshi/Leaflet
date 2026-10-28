@@ -320,7 +320,7 @@ func (e *Editor) copyText() string {
 	}
 	us := e.withSections()
 	var lines []string
-	for i := indexIn(us, a.ID); i <= indexIn(us, b.ID) && i < len(us); i++ {
+	for i := indexIn(us, a.ID); i >= 0 && i <= indexIn(us, b.ID) && i < len(us); i++ {
 		n := us[i]
 		if !n.IsText() {
 			sub := &doc.Content{Children: []*doc.Node{n.Clone()}}

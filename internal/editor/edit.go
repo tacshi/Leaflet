@@ -33,6 +33,9 @@ func (e *Editor) deleteSelection() bool {
 	// A folded heading's section goes with it.
 	us := e.withSections()
 	ia, ib := indexIn(us, a.ID), indexIn(us, b.ID)
+	if ia < 0 || ib < 0 {
+		return false
+	}
 	first, last := us[ia], us[ib]
 	var tail doc.Delta
 	if last.IsText() {
@@ -460,7 +463,7 @@ func (e *Editor) Delete(word bool) {
 	}
 	us := e.units()
 	i := e.index(n.ID)
-	if i+1 >= len(us) {
+	if i < 0 || i+1 >= len(us) {
 		return
 	}
 	next := us[i+1]
@@ -685,10 +688,13 @@ func (e *Editor) Format(has func(doc.Attrs) bool, set func(*doc.Attrs, bool)) {
 		set(&e.typing, !has(e.typing))
 		return
 	}
-	e.pushUndo(false)
 	a, b := e.ordered()
 	us := e.units()
 	ia, ib := e.index(a.ID), e.index(b.ID)
+	if ia < 0 || ib < 0 {
+		return
+	}
+	e.pushUndo(false)
 	all := true
 	each := func(fn func(n *doc.Node, from, to int)) {
 		for i := ia; i <= ib; i++ {

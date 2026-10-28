@@ -305,8 +305,35 @@ func (e *Editor) clamp(p Pos) Pos {
 		last := us[len(us)-1]
 		return Pos{last.ID, textLen(last)}
 	}
+	// A change from outside can fold the block away: the caret goes to the
+	// end of what folds it, as folding does.
+	if h := e.folding(p.ID); h != nil {
+		return Pos{h.ID, textLen(h)}
+	}
 	p.Off = min(max(p.Off, 0), textLen(n))
 	return p
+}
+
+// folding returns the shown block that folds block id away: the toggle it
+// is in, or the heading whose folded section holds it, or one that folds
+// those away in turn; nil when it shows.
+func (e *Editor) folding(id string) *doc.Node {
+	var out *doc.Node
+	for loc := e.Content.Locate(id); loc != nil; {
+		if h := e.folder(loc.Node.ID); h != nil {
+			out = h
+			loc = e.Content.Locate(h.ID)
+			continue
+		}
+		if loc.Parent == nil {
+			break
+		}
+		if collapsed(loc.Parent) {
+			out = loc.Parent
+		}
+		loc = e.Content.Locate(loc.Parent.ID)
+	}
+	return out
 }
 
 // SelectedText returns the selected text of the focus block, and the
@@ -417,6 +444,7 @@ func (e *Editor) ApplyOps(ops []doc.Op) error {
 		}
 	}
 	e.layouts = map[string]*blockLayout{}
+	e.marked = false
 	if len(e.Content.Children) == 0 {
 		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
 		p.SetDelta(nil)
@@ -436,6 +464,7 @@ func (e *Editor) ApplyOp(o doc.Op, newStep bool) error {
 	}
 	err := e.Content.Apply(o)
 	e.layouts = map[string]*blockLayout{}
+	e.marked = false
 	if len(e.Content.Children) == 0 {
 		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
 		p.SetDelta(nil)

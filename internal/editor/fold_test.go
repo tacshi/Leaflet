@@ -135,6 +135,54 @@ func para(id, text string) *doc.Node {
 	return n
 }
 
+// A change from outside can fold away the block the caret is in; the caret
+// then goes to the block that folds it, and editing there is safe.
+func TestCaretLeavesWhatAChangeFolds(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		fold   string
+		anchor Pos
+		focus  Pos
+		edit   func(e *Editor)
+		want   Pos
+	}{
+		{"backspace over toggle child", "T", Pos{"K", 1}, Pos{"Y", 2}, func(e *Editor) { e.Backspace(false) }, Pos{"T", 6}},
+		{"delete at end of toggle child", "T", Pos{"K", 3}, Pos{"K", 3}, func(e *Editor) { e.Delete(false) }, Pos{"T", 6}},
+		{"type in toggle child", "T", Pos{"K", 3}, Pos{"K", 3}, func(e *Editor) { e.InsertText("!") }, Pos{"T", 7}},
+		{"copy from folded section", "H", Pos{"S", 1}, Pos{"Y", 1}, func(e *Editor) { e.copyText() }, Pos{"H", 7}},
+		{"type in folded section", "H", Pos{"S", 1}, Pos{"S", 1}, func(e *Editor) { e.InsertText("!") }, Pos{"H", 8}},
+	} {
+		tg := &doc.Node{ID: "T", Type: "toggle_list", Children: []*doc.Node{para("K", "kid")}}
+		tg.SetDelta(doc.Delta{{Text: "toggle"}})
+		h := &doc.Node{ID: "H", Type: "heading", Data: map[string]any{"level": 2}}
+		h.SetDelta(doc.Delta{{Text: "heading"}})
+		c := doc.FromBlocks([]*doc.Node{para("F", "first"), tg, h, para("S", "section"), para("Y", "after")})
+		for _, apply := range []string{"Replace", "ApplyOps", "ApplyOp"} {
+			e := New(c.Copy(), &fakeHost{})
+			e.Select(tc.anchor, tc.focus)
+			next := e.Content.Copy()
+			folded := next.Find(tc.fold)
+			folded.Set("collapsed", true)
+			op := e.Content.ReplaceOp(tc.fold, folded.Clone())
+			switch apply {
+			case "Replace":
+				e.Replace(next)
+			case "ApplyOps":
+				_ = e.ApplyOps([]doc.Op{op})
+			case "ApplyOp":
+				_ = e.ApplyOp(op, true)
+			}
+			tc.edit(e)
+			if got := e.Caret(); got != tc.want {
+				t.Errorf("%s after %s: caret %v, want %v", tc.name, apply, got, tc.want)
+			}
+			if got := e.node("F").Delta().Plain(); got != "first" {
+				t.Errorf("%s after %s: first block is %q", tc.name, apply, got)
+			}
+		}
+	}
+}
+
 // Undo steps are whole pages, so after content comes in from outside they
 // would undo it too; they go.
 func TestReplaceDropsUndo(t *testing.T) {
@@ -150,5 +198,24 @@ func TestReplaceDropsUndo(t *testing.T) {
 	e.Undo()
 	if e.node("Q") == nil || e.node("A").Delta().Plain() != "ax" {
 		t.Errorf("undo reverted the change from outside: %v", texts(e))
+	}
+}
+
+// An agent's ops end a composition, as content from outside does.
+func TestOpsEndComposition(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Compose("ni", 2)
+	if !e.marked {
+		t.Fatal("not composing")
+	}
+	id := e.Content.Children[0].ID
+	_ = e.ApplyOps([]doc.Op{doc.InsertOp(doc.Position{After: id}, para("", "agent"))})
+	if e.marked {
+		t.Error("ApplyOps kept the composition")
+	}
+	tt.Compose("hao", 3)
+	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("", "more")), true)
+	if e.marked {
+		t.Error("ApplyOp kept the composition")
 	}
 }

@@ -326,7 +326,7 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		if !waiting[id] {
 			continue
 		}
-		if pos, ok := positionUnder(result, otherFlat[id]); ok && !result.IsSelfOrAncestor(id, pos.Anchor()) {
+		if pos, ok := positionIn(result, otherFlat[id]); ok && !result.IsSelfOrAncestor(id, pos.Anchor()) {
 			_ = result.Move(id, pos)
 			times[id] = max(timeOf(primary, id), timeOf(other, id))
 		}
@@ -365,29 +365,24 @@ func movedSinceBase(side *flat, sideFlat map[string]*flat, base *flat, baseFlat 
 	return nearest(side.prevs, baseFlat) != nearest(base.prevs, sideFlat)
 }
 
-// positionUnder is positionIn with neighbours only where they are under
-// the block's parent: those still waiting to move in are not.
-func positionUnder(c *Content, f *flat) (Position, bool) {
+// positionIn is where the block goes in c, next to its neighbours where
+// they are under its parent: one moved elsewhere, or still waiting to move
+// in, is no place to put it.
+func positionIn(c *Content, f *flat) (Position, bool) {
 	under := func(id string) bool {
 		loc := c.Locate(id)
-		return loc != nil && loc.Parent != nil && loc.Parent.ID == f.parent
+		if loc == nil {
+			return false
+		}
+		if loc.Parent == nil {
+			return f.parent == ""
+		}
+		return loc.Parent.ID == f.parent
 	}
-	switch {
-	case f.prev != "" && under(f.prev):
-		return Position{After: f.prev}, true
-	case f.next != "" && under(f.next):
-		return Position{Before: f.next}, true
-	case c.Find(f.parent) != nil:
-		return Position{Parent: f.parent}, true
-	}
-	return Position{}, false
-}
-
-func positionIn(c *Content, f *flat) (Position, bool) {
-	if f.prev != "" && c.Find(f.prev) != nil {
+	if f.prev != "" && under(f.prev) {
 		return Position{After: f.prev}, true
 	}
-	if f.next != "" && c.Find(f.next) != nil {
+	if f.next != "" && under(f.next) {
 		return Position{Before: f.next}, true
 	}
 	if f.parent == "" {

@@ -602,6 +602,12 @@ func IsConflict(err error) bool {
 	return errors.As(err, &re) && re.Status == http.StatusConflict
 }
 
+// IsNotFound reports whether err is the server having no such thing.
+func IsNotFound(err error) bool {
+	var re *Error
+	return errors.As(err, &re) && re.Status == http.StatusNotFound
+}
+
 // Insert inserts rows and returns them as stored.
 func (c *Client) Insert(ctx context.Context, table string, rows any) ([]map[string]any, error) {
 	raw, err := json.Marshal(rows)
@@ -679,6 +685,21 @@ func (c *Client) Upload(ctx context.Context, bucket, path string, data io.Reader
 	res, err := c.request(ctx, "POST", "/storage/v1/object/"+bucket+"/"+escapePath(path), data, map[string]string{
 		"Content-Type": contentType, "x-upsert": "true",
 	})
+	if err != nil {
+		return err
+	}
+	_ = res.Body.Close()
+	return nil
+}
+
+// Remove removes files of a Storage bucket. One the bucket does not have
+// is no error: Storage leaves it out of what it removed.
+func (c *Client) Remove(ctx context.Context, bucket string, paths ...string) error {
+	raw, err := json.Marshal(map[string]any{"prefixes": paths})
+	if err != nil {
+		return err
+	}
+	res, err := c.request(ctx, "DELETE", "/storage/v1/object/"+bucket, bytes.NewReader(raw), nil)
 	if err != nil {
 		return err
 	}

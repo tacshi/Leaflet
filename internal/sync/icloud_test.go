@@ -812,3 +812,48 @@ func TestICloudPassesOverABatchThatStaysCutShort(t *testing.T) {
 		t.Errorf("B has %q", b.title(p.ID))
 	}
 }
+
+// A deleted file's copy leaves the folder once the batch with its
+// deletion is written, and leaves each device that reads the batch.
+func TestICloudDeletedFileLeavesTheFolder(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := a.st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	rel, err := icloud.FileBlobPath(f.ID, f.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := filepath.Join(root, filepath.FromSlash(rel))
+	if _, err := os.Stat(blob); err != nil {
+		t.Fatalf("no copy in the folder: %v", err)
+	}
+	copyOnB, err := b.st.DownloadedFile(f.ID, []byte("hello"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := a.st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if _, err := os.Stat(filepath.Dir(blob)); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the copy stayed in the folder: %v", err)
+	}
+	if n := a.st.PendingCount(); n != 0 {
+		t.Errorf("%d waiting on A", n)
+	}
+	if files, _ := b.st.Files(); len(files) != 0 {
+		t.Errorf("B still has %d files", len(files))
+	}
+	if _, err := os.Stat(copyOnB); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("B kept its copy: %v", err)
+	}
+}

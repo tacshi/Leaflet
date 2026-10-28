@@ -212,6 +212,14 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
   (`manual`) one, and removes the others as it takes a new one, with any of
   them still waiting to go up. The server keeps a page's newest 50 unnamed
   snapshots and all its named ones: a trigger prunes as each is inserted.
+- Deleting a file cannot be undone, so its bytes go with it. The deleting
+  device removes its own copy (only one the app made in its data folder,
+  never the file the user added) and queues the removal of the stored
+  copy, which runs once the row with `deleted_at` has gone up: the object
+  in the `files` bucket through Storage's `DELETE /storage/v1/object/files`
+  (an object already gone counts as removed), or the blob in iCloud Drive
+  once a batch has the deletion. An upload still waiting is dropped. A
+  device that pulls a deleted file removes its copy in its data folder.
 - A device syncs one way at a time: through the server while signed in, or
   through iCloud Drive (§8) while that is on; signing in turns iCloud sync
   off.
@@ -307,6 +315,10 @@ Leaflet/
   (other than the one it notes it is writing), or a copy iCloud made, shares its ID with another device (a restored
   backup): it takes a new ID, reads the old ID's folder as another device's,
   and sends everything again.
+- **Blobs** are written by a device that has the file or audio. A device
+  that deletes a file removes its blob, whoever wrote it, once a batch of
+  its own has the deletion; one that sends everything again sends deleted
+  files' rows too, so a deletion in a batch that was lost goes again.
 - **Not downloaded.** A file iCloud has not downloaded (on macOS before 14,
   `.<name>.icloud` beside where it goes; after, a file flagged dataless) is
   asked for, and read on a later pass.

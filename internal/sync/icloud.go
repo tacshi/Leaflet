@@ -370,6 +370,8 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 		switch {
 		case e.Entity == "storage":
 			continue // failed above; tried again next pass
+		case e.Entity == "storage_delete":
+			continue // once the batch with the deletion is written
 		case syncedRows[e.Entity]:
 			entry, err := s.rowEntry(me, e)
 			if err != nil {
@@ -420,7 +422,40 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 		}
 		_ = s.st.Dequeue(d.e)
 	}
+	for _, e := range entries {
+		if e.Entity == "storage_delete" {
+			s.cloudRemove(e)
+		}
+	}
 	return nil
+}
+
+// cloudRemove removes a deleted file's copy from the folder once a batch
+// has the file's deletion: a device that reads the batch no longer needs
+// it, and one that reads none of it yet finds the file gone a little
+// sooner. A device that sends everything again sends deleted files too,
+// so a deletion in a batch that was lost still reaches the others.
+func (s *Service) cloudRemove(e store.OutboxEntry) {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
+		_ = s.st.MarkFailed(e, err.Error())
+		return
+	}
+	if s.st.HasPending("files", store.S(payload, "file_id")) {
+		return // the deletion is not in a batch yet
+	}
+	rel, err := blobPath(store.S(payload, "bucket"), store.S(payload, "path"))
+	if err != nil {
+		_ = s.st.Dequeue(e) // no copy was ever kept by such a name
+		return
+	}
+	if err := s.ICloud.Remove(rel); err != nil {
+		log.Printf("icloud: remove %s: %v", e.EntityID, err)
+		_ = s.st.MarkFailed(e, err.Error())
+		return
+	}
+	_ = s.ICloud.Remove(path.Dir(rel)) // its folder, once empty
+	_ = s.st.Dequeue(e)
 }
 
 // rowEntry is a queued row as a batch has it: the row with its time, and

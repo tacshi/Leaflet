@@ -9,8 +9,9 @@ import (
 // OutboxEntry is a change waiting for the server.
 type OutboxEntry struct {
 	ID int64
-	// Entity is the Supabase table (pages, page_content, comments…) or
-	// "storage" for a file upload.
+	// Entity is the Supabase table (pages, page_content, comments…),
+	// "storage" for a file upload, or "storage_delete" for the removal of
+	// a deleted file's stored copy.
 	Entity   string
 	EntityID string
 	Op       string // upsert | delete

@@ -647,3 +647,124 @@ func TestSignInUploadsEarlierRecordings(t *testing.T) {
 		t.Errorf("uploads %v", uploads)
 	}
 }
+
+// A deleted file's object leaves Storage once the server has the row that
+// says so, and not before: while the row cannot go up, the removal waits.
+// An object the server does not have counts as removed.
+func TestDeletedFileLeavesStorageAfterItsRow(t *testing.T) {
+	st := openStore(t)
+	src := t.TempDir() + "/notes.txt"
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var requests []string
+	var removed []string
+	refuseRow, missing := true, false
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch {
+		case r.URL.Path == "/rest/v1/files" && refuseRow:
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"message": "refused"})
+			return
+		case r.URL.Path == "/storage/v1/object/files":
+			var body struct {
+				Prefixes []string `json:"prefixes"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			removed = append(removed, body.Prefixes...)
+			if missing {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]any{"message": "not found"})
+				return
+			}
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 0 || st.PendingCount() != 2 {
+		t.Fatalf("removed %v before the row went up; %d waiting", removed, st.PendingCount())
+	}
+	refuseRow = false
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(removed, ",") != f.StoragePath || st.PendingCount() != 0 {
+		t.Errorf("removed %v, %d waiting", removed, st.PendingCount())
+	}
+	if requests[len(requests)-1] != "DELETE /storage/v1/object/files" || requests[len(requests)-2] != "POST /rest/v1/files" {
+		t.Errorf("requests %v", requests)
+	}
+
+	// Gone from the server already.
+	g, err := st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteFile(g); err != nil {
+		t.Fatal(err)
+	}
+	missing = true
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if st.PendingCount() != 0 {
+		t.Errorf("%d waiting after a removal of what was not there", st.PendingCount())
+	}
+}
+
+// Sending everything again sends a deleted file's row, so its deletion
+// still reaches the other devices, but none of its contents.
+func TestRequeueSendsDeletedFiles(t *testing.T) {
+	st := openStore(t)
+	src := t.TempDir() + "/notes.txt"
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		if err := st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc := New(st, remote.New(remote.Settings{}, st))
+	if err := svc.requeueAll(st.Session().SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	var queued []string
+	entries, _ = st.Pending()
+	for _, e := range entries {
+		if e.EntityID == f.ID || strings.HasSuffix(e.EntityID, "/"+f.ID) {
+			queued = append(queued, e.Entity)
+		}
+	}
+	if strings.Join(queued, ",") != "files" {
+		t.Errorf("queued %v for the deleted file", queued)
+	}
+}

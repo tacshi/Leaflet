@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -888,5 +890,75 @@ func TestADatabaseGainsTheIndexes(t *testing.T) {
 		if !strings.Contains(plan.String(), index) {
 			t.Errorf("%s\nplan:\n%s", q, plan.String())
 		}
+	}
+}
+
+// Deleting a file removes its copy in the data folder, drops its upload
+// still waiting, and queues the removal of its stored copy after the
+// deletion. A copy outside the data folder is the user's, and stays.
+func TestDeletingAFileRemovesItsCopy(t *testing.T) {
+	s := open(t)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(f.LocalPath); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the copy in the data folder stayed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Dir(f.LocalPath)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the file's folder stayed: %v", err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("the file the user added went: %v", err)
+	}
+	var queued []string
+	entries, _ := s.Pending()
+	for _, e := range entries {
+		queued = append(queued, e.Entity+" "+e.EntityID)
+	}
+	if want := "files " + f.ID + ",storage_delete files/" + f.ID; strings.Join(queued, ",") != want {
+		t.Errorf("queued %v, want %s", queued, want)
+	}
+
+	outside := File{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, Name: "notes.txt", LocalPath: src,
+		StoragePath: "space/x/notes.txt", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := s.PutFile(outside); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteFile(outside); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("a file outside the data folder went: %v", err)
+	}
+}
+
+// A file deleted on another device loses its copy here as the deletion
+// arrives.
+func TestAPulledDeletionRemovesTheCopy(t *testing.T) {
+	s := open(t)
+	id := doc.NewRowID()
+	row := map[string]any{"id": id, "space_id": s.Session().SpaceID, "name": "plan.pdf", "storage_path": "space/" + id + "/plan.pdf",
+		"created_at": "2026-10-01T00:00:00Z", "updated_at": "2026-10-01T00:00:00Z"}
+	if err := s.PutRemoteFile(row); err != nil {
+		t.Fatal(err)
+	}
+	local, err := s.DownloadedFile(id, []byte("%PDF"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	row["deleted_at"], row["updated_at"] = "2026-10-02T00:00:00Z", "2026-10-02T00:00:00Z"
+	if err := s.PutRemoteFile(row); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(local); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the copy stayed: %v", err)
 	}
 }

@@ -349,7 +349,9 @@ func (s *Service) requeueAll(spaceID string) error {
 		failed = errors.Join(failed, s.st.Queue("comments", c.ID, store.CommentToRemote(c), "", c.PageID))
 	}
 	moves := map[string]bool{}
-	files, _ := s.st.Files()
+	// Deleted files go too, as deleted pages do, so a deletion sent in a
+	// batch that was lost goes again: its stored copy may be gone.
+	files, _ := s.st.AllFiles()
 	for _, f := range files {
 		if err := s.requeueFile(ctx, f, spaceID); err != nil {
 			moves["files:"+f.ID] = true
@@ -408,10 +410,11 @@ func (s *Service) retryMoves(ctx context.Context) error {
 }
 
 // requeueFile queues a file to go up in space spaceID, with its contents
-// when this device has them. It changes nothing while the file is in
-// iCloud Drive but does not come here.
+// when this device has them (a deleted file's row goes alone). It changes
+// nothing while the file is in iCloud Drive but does not come here.
 func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string) error {
-	if !onDevice(f.LocalPath) && f.StoragePath != "" && s.keptInICloud("files", f.StoragePath) {
+	deleted := !f.DeletedAt.IsZero()
+	if !deleted && !onDevice(f.LocalPath) && f.StoragePath != "" && s.keptInICloud("files", f.StoragePath) {
 		data, err := s.cloudFetch(ctx, "files", f.StoragePath)
 		if err != nil {
 			return fmt.Errorf("file %s from iCloud Drive: %w", f.Name, err)
@@ -428,7 +431,7 @@ func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string)
 	if err := s.st.Queue("files", f.ID, store.FileToRemote(f), "file", ""); err != nil {
 		return err
 	}
-	if !onDevice(f.LocalPath) {
+	if deleted || !onDevice(f.LocalPath) {
 		return nil
 	}
 	ct := f.MimeType
@@ -556,6 +559,8 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 		return s.pushContent(ctx, e.EntityID)
 	case "storage":
 		return s.pushFile(ctx, uid, payload)
+	case "storage_delete":
+		return s.removeStored(ctx, payload)
 	case "pages":
 		if payload["created_by"] == nil {
 			payload["created_by"] = uid
@@ -764,6 +769,21 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 		}
 	}
 	return true, nil
+}
+
+// removeStored removes a deleted file's object from Storage, once the
+// server has the row that says it is deleted: until then the entry waits,
+// as the file is still there for the other devices. An object the server
+// does not have is gone already.
+func (s *Service) removeStored(ctx context.Context, payload map[string]any) (bool, error) {
+	if s.st.HasPending("files", store.S(payload, "file_id")) {
+		return false, nil
+	}
+	err := s.be.Remove(ctx, store.S(payload, "bucket"), store.S(payload, "path"))
+	if remote.IsNotFound(err) {
+		return true, nil
+	}
+	return err == nil, err
 }
 
 // cursor is where a table's pull resumes: the last row stored here, by

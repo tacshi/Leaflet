@@ -59,8 +59,18 @@ func (s *Store) PutRemoteComment(r map[string]any, authorName string) error {
 	return s.PutComment(CommentFromRemote(r, authorName))
 }
 
-// PutRemoteFile stores a file from the server, keeping its copy here.
-func (s *Store) PutRemoteFile(r map[string]any) error { return s.PutFile(FileFromRemote(r)) }
+// PutRemoteFile stores a file from the server, keeping its copy here
+// until the file is deleted.
+func (s *Store) PutRemoteFile(r map[string]any) error {
+	f := FileFromRemote(r)
+	if err := s.PutFile(f); err != nil {
+		return err
+	}
+	if !f.DeletedAt.IsZero() {
+		s.removeCopy(f.ID)
+	}
+	return nil
+}
 
 // PutRemoteRecording stores a recording from the server, keeping its
 // audio on this device.

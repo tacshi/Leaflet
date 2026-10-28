@@ -283,6 +283,27 @@ func TestPullResumesAtARowThatFailedToStore(t *testing.T) {
 	}
 }
 
+// Content the device cannot read now stays queued; only a page that is
+// gone takes its content off the queue.
+func TestPushKeepsContentItCannotRead(t *testing.T) {
+	st := openStore(t)
+	svc := New(st, remote.SignedInForTest("http://127.0.0.1:1", st, "u1"))
+	if done, err := svc.pushContent(context.Background(), "gone"); !done || err != nil {
+		t.Errorf("gone page: done %v, %v", done, err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	if done, err := svc.pushContent(context.Background(), p.ID); done || err == nil {
+		t.Errorf("unreadable page: done %v, %v", done, err)
+	}
+	if _, published, err := svc.publishContent(st.DeviceID(), p.ID); published != nil || err == nil {
+		t.Errorf("unreadable page published %v, %v", published, err)
+	}
+}
+
 func TestOpeningAPageFetchesItsContent(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})

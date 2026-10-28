@@ -605,8 +605,12 @@ func (s *Service) pushComment(ctx context.Context, uid string, payload map[strin
 var errStale = errors.New("the page changed on the server while saving")
 
 func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) {
-	if _, err := s.st.Page(pageID); err != nil {
+	// A page that is gone has nothing to send; one that cannot be read now
+	// stays queued.
+	if _, err := s.st.Page(pageID); store.IsNotFound(err) {
 		return true, nil
+	} else if err != nil {
+		return false, err
 	}
 	// Another device or an agent may save in between: merge with what it
 	// saved and try again.
@@ -623,8 +627,10 @@ func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) 
 // result, if the server still has the revision it merged with.
 func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) {
 	row, err := s.st.ContentRow(pageID)
-	if err != nil {
+	if store.IsNotFound(err) {
 		return true, nil
+	} else if err != nil {
+		return false, err
 	}
 	local := doc.MustDecode(row.Content)
 	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: "content, revision, updated_at", Filters: []string{remote.Eq("page_id", pageID)}})

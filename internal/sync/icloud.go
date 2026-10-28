@@ -371,12 +371,18 @@ func (s *Service) rowEntry(me string, e store.OutboxEntry) (icloud.Entry, error)
 // version published, nil when it was already. The version counts as
 // published once the batch is written: until then it goes again.
 func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerContent, error) {
-	if _, err := s.st.Page(pageID); err != nil {
+	// A page that is gone has nothing to publish; one that cannot be read
+	// now stays queued.
+	if _, err := s.st.Page(pageID); store.IsNotFound(err) {
 		return icloud.Entry{}, nil, nil
+	} else if err != nil {
+		return icloud.Entry{}, nil, err
 	}
 	row, err := s.st.ContentRow(pageID)
-	if err != nil {
+	if store.IsNotFound(err) {
 		return icloud.Entry{}, nil, nil
+	} else if err != nil {
+		return icloud.Entry{}, nil, err
 	}
 	own, _ := s.st.PeerContent(me, pageID)
 	if own.Content == row.Content && own.Version > 0 {

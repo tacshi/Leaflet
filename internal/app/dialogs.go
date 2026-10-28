@@ -603,8 +603,17 @@ func (a *App) openShare(id string) {
 	if a.backend.SignedIn() {
 		go func() {
 			a.loadMembers(id)
-			a.update(func() { d.shareMember, _ = a.st.Members(id) })
+			a.update(func() { a.shareMembersOf(id) })
 		}()
+	}
+}
+
+// shareMembersOf shows page's members in the Share dialog, while it is
+// still the page the dialog is for: an answer for one before it comes
+// after the dialog opened for another.
+func (a *App) shareMembersOf(page string) {
+	if d := &a.dialogs; d.sharePage == page {
+		d.shareMember, _ = a.st.Members(page)
 	}
 }
 
@@ -651,12 +660,15 @@ func (a *App) shareDialog(c *ui.Context) {
 							}
 							a.update(func() {
 								d.shareBusy = false
+								if d.sharePage != page {
+									return
+								}
 								if err != nil {
 									d.shareError = err.Error()
 									return
 								}
 								d.shareEmail = ""
-								d.shareMember, _ = a.st.Members(page)
+								a.shareMembersOf(page)
 							})
 						}()
 					}
@@ -700,11 +712,15 @@ func (a *App) shareDialog(c *ui.Context) {
 									ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 									defer cancel()
 									if _, err := a.backend.RPC(ctx, "unshare_page", map[string]any{"p_page_id": page, "p_user_id": uid}); err != nil {
-										a.update(func() { d.shareError = err.Error() })
+										a.update(func() {
+											if d.sharePage == page {
+												d.shareError = err.Error()
+											}
+										})
 										return
 									}
 									a.loadMembers(page)
-									a.update(func() { d.shareMember, _ = a.st.Members(page) })
+									a.update(func() { a.shareMembersOf(page) })
 								}()
 							}
 						}

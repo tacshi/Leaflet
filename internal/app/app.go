@@ -124,8 +124,12 @@ type App struct {
 	tray      *mygo.Tray
 	trayShown trayState
 	trayBuilt bool
-	// updateReady is the version installed in the background, which runs
-	// once the app starts again.
+	// updatable is set when the app can update itself; updateBusy names
+	// the check under way, or the download after it, for the icon beside
+	// Settings; updateReady is the version installed in the background,
+	// which runs once the app starts again.
+	updatable   bool
+	updateBusy  string
 	updateReady string
 	// quitting is set as a quit starts, when closing the window closes it
 	// rather than hiding it to the menu bar.
@@ -330,6 +334,7 @@ func (a *App) start() error {
 			a.update(a.showWindow)
 		}
 	})
+	a.updatable = mygo.Updater.Enabled()
 	go a.checkForUpdate()
 	a.rec.Attach(a.win, func(fn func()) { a.update(func() { fn(); a.refreshTray() }) })
 	a.sync.Start()

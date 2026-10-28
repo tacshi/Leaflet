@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -101,5 +102,38 @@ func TestRecordingViewsCarryTranscript(t *testing.T) {
 	rec, _ := views[0]["recording"].(map[string]any)
 	if rec["transcript"] != "[0:01] Ship on Friday." {
 		t.Errorf("view %v", views[0])
+	}
+}
+
+// A page where the sign-in should answer with JSON, such as a region's
+// block page or a network's own page when the proxy is not used, says
+// the sign-in can't be reached rather than failing to read JSON.
+func TestSignInJSONNotAPage(t *testing.T) {
+	cases := []struct {
+		status int
+		ctype  string
+		body   string
+		ok     bool
+	}{
+		{403, "text/html; charset=UTF-8", "<!DOCTYPE html><title>Unsupported region</title>", false},
+		{200, "text/html", "<html>Sign in to the Wi-Fi</html>", false},
+		{200, "application/json; charset=utf-8", `{"issuer":"x"}`, true},
+		{200, "application/jwk-set+json", `{"issuer":"x"}`, true},
+	}
+	for _, c := range cases {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", c.ctype)
+			w.WriteHeader(c.status)
+			_, _ = fmt.Fprint(w, c.body)
+		}))
+		var d chatgptDiscovery
+		err := getSignInJSON(context.Background(), srv.URL, &d)
+		srv.Close()
+		switch {
+		case c.ok && (err != nil || d.Issuer != "x"):
+			t.Errorf("%d %s: %v %+v", c.status, c.ctype, err, d)
+		case !c.ok && (err == nil || !strings.Contains(err.Error(), "couldn't reach ChatGPT's sign-in")):
+			t.Errorf("%d %s: %v", c.status, c.ctype, err)
+		}
 	}
 }

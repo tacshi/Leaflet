@@ -62,6 +62,13 @@ provided to functions automatically. There is no app-wide Soniox key: each
 user saves their own (Settings › Speech to text), and Soniox streaming and
 transcription are refused until they do.
 
+An agent run stops calling the model at `AGENT_DEADLINE_MS` (default 120000,
+under the 150 s wall-clock limit of the free plan) and saves what it did; each
+model call times out after `AGENT_CALL_TIMEOUT_MS` (default 60000). On a paid
+plan (400 s limit) the deadline may go up to 380000:
+`supabase secrets set AGENT_DEADLINE_MS=360000`. A job left `running` past the
+deadline plus a minute (the platform stopped it) can be claimed again.
+
 Supabase Vault (`supabase_vault`) is enabled on every Supabase project; the
 migration relies on `vault.create_secret`, `vault.update_secret` and
 `vault.decrypted_secrets`.

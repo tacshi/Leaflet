@@ -55,13 +55,12 @@ deno lint
 supabase link --project-ref <ref>
 supabase db push
 supabase functions deploy agent providers stt account
-supabase secrets set SONIOX_API_KEY=<optional app-wide Soniox key>
 ```
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are
-provided to functions automatically. `SONIOX_API_KEY` is optional: users can
-save their own Soniox key (Settings › Speech to text), and the app-wide key is
-the fallback for minting short-lived streaming keys.
+provided to functions automatically. There is no app-wide Soniox key: each
+user saves their own (Settings › Speech to text), and Soniox streaming and
+transcription are refused until they do.
 
 Supabase Vault (`supabase_vault`) is enabled on every Supabase project; the
 migration relies on `vault.create_secret`, `vault.update_secret` and

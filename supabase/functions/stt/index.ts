@@ -60,7 +60,8 @@ async function sonioxKey(sc: SupabaseClient, user: User): Promise<string> {
     p_provider: "soniox",
   });
   if (error) throw new Error(error.message);
-  const key = (data as string | null) || Deno.env.get("SONIOX_API_KEY");
+  // Every user brings their own Soniox key; the server has none of its own.
+  const key = data as string | null;
   if (!key) throw new HttpError(400, "Add a Soniox API key in Settings › Speech to text");
   return key;
 }

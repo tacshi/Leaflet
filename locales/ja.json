@@ -187,6 +187,7 @@
   "dialogShareSignIn": "サインインすると、ほかのユーザーとページを共有できます。",
   "dialogShareOwnerOnly": "共有相手を変更できるのは、このスペースのオーナーだけです。",
   "dialogShareInvitee": "名前またはメールアドレス",
+  "dialogShareSent": "{email} に Leaflet のアカウントがあれば、このページを開けるようになりました。",
   "dialogShareCanEdit": "編集可能",
   "dialogShareCanView": "閲覧のみ",
   "dialogShareInvite": "招待",

@@ -80,6 +80,7 @@ type dialogs struct {
 	shareRole   string
 	shareBusy   bool
 	shareError  string
+	shareSent   string
 	shareMember []store.Member
 
 	chartOpen   bool
@@ -598,7 +599,7 @@ func (a *App) restoreVersion(pageID string, c *doc.Content) {
 
 func (a *App) openShare(id string) {
 	d := &a.dialogs
-	d.shareOpen, d.sharePage, d.shareEmail, d.shareRole, d.shareError = true, id, "", "editor", ""
+	d.shareOpen, d.sharePage, d.shareEmail, d.shareRole, d.shareError, d.shareSent = true, id, "", "editor", "", ""
 	d.shareMember, _ = a.st.Members(id)
 	if a.backend.SignedIn() {
 		go func() {
@@ -649,7 +650,7 @@ func (a *App) shareDialog(c *ui.Context) {
 						if email == "" || d.shareBusy {
 							return
 						}
-						d.shareBusy, d.shareError = true, ""
+						d.shareBusy, d.shareError, d.shareSent = true, "", ""
 						page, role := d.sharePage, d.shareRole
 						go func() {
 							ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -667,7 +668,9 @@ func (a *App) shareDialog(c *ui.Context) {
 									d.shareError = err.Error()
 									return
 								}
-								d.shareEmail = ""
+								// The server answers alike whether or not the
+								// email has an account, so this can't say which.
+								d.shareEmail, d.shareSent = "", email
 								a.shareMembersOf(page)
 							})
 						}()
@@ -681,6 +684,8 @@ func (a *App) shareDialog(c *ui.Context) {
 				})
 				if d.shareError != "" {
 					ui.Text(c, d.shareError).FontSize(12.5).TextColor(pal.DangerText)
+				} else if d.shareSent != "" {
+					ui.Text(c, locales.DialogShareSent(d.shareSent)).FontSize(12.5).TextColor(pal.TextMuted)
 				}
 			}
 			label(c, locales.DialogSharePeople())

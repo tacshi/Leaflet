@@ -952,6 +952,15 @@
   "@dialogShareInvitee": {
     "description": "Share dialog: the field of the person to invite."
   },
+  "dialogShareSent": "If {email} has a Leaflet account, they can open the page now.",
+  "@dialogShareSent": {
+    "description": "Share dialog: shown after inviting someone; it never says whether the email has an account.",
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
   "dialogShareCanEdit": "Can edit",
   "@dialogShareCanEdit": {
     "description": "Share dialog: the role of a person who can edit."

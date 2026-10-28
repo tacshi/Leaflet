@@ -187,6 +187,7 @@
   "dialogShareSignIn": "登录后即可与他人共享页面。",
   "dialogShareOwnerOnly": "只有此空间的所有者才能更改共享对象。",
   "dialogShareInvitee": "姓名或邮箱",
+  "dialogShareSent": "如果 {email} 有 Leaflet 账户，现在就可以打开此页面。",
   "dialogShareCanEdit": "可编辑",
   "dialogShareCanView": "可查看",
   "dialogShareInvite": "邀请",

@@ -2679,6 +2679,22 @@ func (msgs Messages) DialogShareInvitee() string {
 	return Catalog.Format(msgs.locale, "dialogShareInvitee", nil)
 }
 
+// DialogShareSent says "If {email} has a Leaflet account, they can open the page now."
+// in the language the app shows.
+//
+// Share dialog: shown after inviting someone; it never says whether the
+// email has an account.
+func DialogShareSent(email string) string { return In(i18n.Locale()).DialogShareSent(email) }
+
+// DialogShareSent says "If {email} has a Leaflet account, they can open the page now."
+// in the language of msgs.
+//
+// Share dialog: shown after inviting someone; it never says whether the
+// email has an account.
+func (msgs Messages) DialogShareSent(email string) string {
+	return Catalog.Format(msgs.locale, "dialogShareSent", map[string]any{"email": email})
+}
+
 // DialogShareCanEdit says "Can edit"
 // in the language the app shows.
 //

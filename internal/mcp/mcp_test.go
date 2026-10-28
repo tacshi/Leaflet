@@ -293,6 +293,49 @@ func TestFolders(t *testing.T) {
 }
 
 // A page stays in its space, as the server has it, and out of templates.
+// The server keeps its own store on the app's database, from before the
+// app signed in: its pages go into the space the app has now.
+func TestFollowsTheAppToAnotherAccount(t *testing.T) {
+	dir := t.TempDir()
+	app, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+	if _, err := app.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	// What sync does on sign-in: adopt the server's space.
+	local := app.Session().SpaceID
+	if err := app.PutSpace("remote-a", "My space", "A"); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range map[string]string{"space.A": "remote-a", "space.local": "remote-a", "account": "A"} {
+		_ = app.SetValue(k, v)
+	}
+	if err := app.MoveSpace(local, "remote-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	got := session(t, NewServer(st, "0.1.0"), initialize, call(2, "create_page", map[string]any{"title": "Plan"}))
+	out, failed := result(t, got[2])
+	if failed {
+		t.Fatalf("create_page %v", out)
+	}
+	p, err := app.Page(out["page_id"].(string))
+	if err != nil || p.SpaceID != "remote-a" || p.CreatedBy != "A" {
+		t.Errorf("page %+v, %v", p, err)
+	}
+}
+
 func TestMovePageStaysInItsSpace(t *testing.T) {
 	st := newStore(t)
 	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine"})

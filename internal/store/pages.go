@@ -99,8 +99,6 @@ func (s *Store) Children(parentID, spaceID string) ([]Page, error) {
 	return s.queryPages(`deleted_at IS NULL AND parent_id = ? ORDER BY sort_key`, parentID)
 }
 
-func (s *Store) putPage(p Page) error { return writePage(s.db, p) }
-
 func writePage(q querier, p Page) error {
 	_, err := q.Exec(`INSERT INTO pages (`+pageCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id, parent_id = excluded.parent_id,
@@ -112,8 +110,28 @@ func writePage(q querier, p Page) error {
 	return err
 }
 
-func (s *Store) queuePage(p Page, label string) error {
-	return s.Queue("pages", p.ID, PageToRemote(p), label, p.ID)
+// savePages stores pages changed here and queues them to go up, in one
+// transaction: a change without its entry would never reach the server,
+// and a retry finding the change stored would not queue it either.
+func (s *Store) savePages(label string, pages ...Page) error {
+	err := s.inTx(func(tx *sql.Tx) error {
+		for _, p := range pages {
+			if err := writePage(tx, p); err != nil {
+				return err
+			}
+			if err := queue(tx, "pages", p.ID, PageToRemote(p), label, p.ID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	for _, p := range pages {
+		s.Notify("outbox", p.ID)
+	}
+	return nil
 }
 
 // NewPageOptions describe a page to create.
@@ -176,6 +194,11 @@ func (s *Store) CreatePage(o NewPageOptions) (Page, error) {
 	// The page, its content and their entries in the outbox are stored
 	// together: a page without its entries would never go to the server.
 	err = s.inTx(func(tx *sql.Tx) error {
+		// The app may have changed accounts since the session was read, as
+		// leaflet mcp runs apart from it: the page has nowhere to go then.
+		if spaceID != "" && spaceID == sess.SpaceID && !hasSpace(tx, spaceID) {
+			return ErrNoSpace
+		}
 		if err := writePage(tx, p); err != nil {
 			return err
 		}
@@ -202,10 +225,7 @@ func (s *Store) RenamePage(id, title string) error {
 		return err
 	}
 	p.Title, p.UpdatedAt = title, time.Now()
-	if err := s.putPage(p); err != nil {
-		return err
-	}
-	if err := s.queuePage(p, "renamed"); err != nil {
+	if err := s.savePages("renamed", p); err != nil {
 		return err
 	}
 	s.Notify("pages", id)
@@ -268,10 +288,7 @@ func (s *Store) movePage(id, parentID, folderID string, key func(spaceID string)
 	}
 	p.ParentID, p.FolderID = parentID, folderID
 	p.SortKey, p.UpdatedAt = k, time.Now()
-	if err := s.putPage(p); err != nil {
-		return err
-	}
-	if err := s.queuePage(p, "moved"); err != nil {
+	if err := s.savePages("moved", p); err != nil {
 		return err
 	}
 	s.Notify("pages", id)
@@ -447,18 +464,17 @@ func (s *Store) DeletePage(id string) ([]string, error) {
 		}
 	}
 	now := time.Now()
+	var pages []Page
 	for _, pid := range ids {
 		p, err := s.Page(pid)
 		if err != nil {
 			continue
 		}
 		p.DeletedAt, p.UpdatedAt = now, now
-		if err := s.putPage(p); err != nil {
-			return nil, err
-		}
-		if err := s.queuePage(p, "deleted"); err != nil {
-			return nil, err
-		}
+		pages = append(pages, p)
+	}
+	if err := s.savePages("deleted", pages...); err != nil {
+		return nil, err
 	}
 	s.Notify("pages", id)
 	return ids, nil
@@ -466,18 +482,17 @@ func (s *Store) DeletePage(id string) ([]string, error) {
 
 // RestorePages undoes a delete.
 func (s *Store) RestorePages(ids []string) error {
+	var pages []Page
 	for _, pid := range ids {
 		p, err := s.Page(pid)
 		if err != nil {
 			continue
 		}
 		p.DeletedAt, p.UpdatedAt = time.Time{}, time.Now()
-		if err := s.putPage(p); err != nil {
-			return err
-		}
-		if err := s.queuePage(p, "restored"); err != nil {
-			return err
-		}
+		pages = append(pages, p)
+	}
+	if err := s.savePages("restored", pages...); err != nil {
+		return err
 	}
 	s.Notify("pages", "")
 	return nil

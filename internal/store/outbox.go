@@ -96,9 +96,11 @@ func (s *Store) PendingCount() int {
 }
 
 // HasPending reports whether a row has a change waiting.
-func (s *Store) HasPending(entity, id string) bool {
+func (s *Store) HasPending(entity, id string) bool { return pending(s.db, entity, id) }
+
+func pending(q querier, entity, id string) bool {
 	var n int
-	_ = s.db.QueryRow(`SELECT COUNT(*) FROM outbox WHERE entity = ? AND entity_id = ?`, entity, id).Scan(&n)
+	_ = q.QueryRow(`SELECT COUNT(*) FROM outbox WHERE entity = ? AND entity_id = ?`, entity, id).Scan(&n)
 	return n > 0
 }
 

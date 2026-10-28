@@ -1,6 +1,7 @@
 package store
 
 import (
+	"database/sql"
 	"time"
 )
 
@@ -150,13 +151,20 @@ func PageFromRemote(r map[string]any, keepOffline bool) Page {
 	}
 }
 
-// PutRemotePage stores a page that came from the server.
+// PutRemotePage stores a page that came from the server, unless it has a
+// change waiting here: that change wins and goes up on the next push. The
+// check and the write are one transaction, so a change made in between,
+// here or by leaflet mcp, is never overwritten.
 func (s *Store) PutRemotePage(r map[string]any) error {
-	keep := true
-	if old, err := s.Page(S(r, "id")); err == nil {
-		keep = old.KeepOffline
-	}
-	return s.putPage(PageFromRemote(r, keep))
+	id := S(r, "id")
+	return s.inTx(func(tx *sql.Tx) error {
+		if pending(tx, "pages", id) {
+			return nil
+		}
+		keep := true
+		_ = tx.QueryRow(`SELECT keep_offline FROM pages WHERE id = ?`, id).Scan(&keep)
+		return writePage(tx, PageFromRemote(r, keep))
+	})
 }
 
 // FolderFromRemote reads a folders row.

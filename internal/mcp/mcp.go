@@ -176,7 +176,13 @@ func (s *Server) handle(req request) (any, *rpcError) {
 			p.Arguments = map[string]any{}
 		}
 		s.markSeen()
-		out := s.pages.call(p.Name, p.Arguments)
+		// The app may have changed accounts since the last call.
+		var out map[string]any
+		if _, err := s.st.ReloadSession(); err != nil {
+			out = map[string]any{"error": err.Error()}
+		} else {
+			out = s.pages.call(p.Name, p.Arguments)
+		}
 		_, failed := out["error"]
 		return map[string]any{
 			"content": []map[string]any{{"type": "text", "text": jsonText(out)}},

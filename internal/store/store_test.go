@@ -1012,3 +1012,166 @@ func TestAPulledDeletionRemovesTheCopy(t *testing.T) {
 		t.Errorf("the copy stayed: %v", err)
 	}
 }
+
+// leaflet mcp opens the app's database in a store of its own. When the app
+// changes accounts, its next call reads the new session, and a page it
+// makes before then fails rather than going into a space that is gone.
+func TestReloadSessionFollowsTheApp(t *testing.T) {
+	dir := t.TempDir()
+	app, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Close() })
+	agent, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = agent.Close() })
+	if _, err := app.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agent.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// The app signs in, and sync adopts the server's space.
+	local := app.Session().SpaceID
+	if err := app.PutSpace("remote-a", "My space", "A"); err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range map[string]string{"space.A": "remote-a", "space.local": "remote-a", "account": "A"} {
+		_ = app.SetValue(k, v)
+	}
+	if err := app.MoveSpace(local, "remote-a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agent.CreatePage(NewPageOptions{Title: "Stale"}); !errors.Is(err, ErrNoSpace) {
+		t.Errorf("page in the space that is gone: %v", err)
+	}
+	sess, err := agent.ReloadSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.UserID != "A" || sess.SpaceID != "remote-a" || !sess.SignedIn {
+		t.Errorf("signed in: session %+v", sess)
+	}
+	p, err := agent.CreatePage(NewPageOptions{Title: "Fresh"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.SpaceID != "remote-a" || p.CreatedBy != "A" {
+		t.Errorf("page in %q by %q", p.SpaceID, p.CreatedBy)
+	}
+
+	// Signing out: no space until the app makes its new one.
+	if err := app.ForgetAccount(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agent.ReloadSession(); !errors.Is(err, ErrNoSpace) {
+		t.Errorf("between accounts: %v", err)
+	}
+	if _, err := app.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	if sess, err = agent.ReloadSession(); err != nil {
+		t.Fatal(err)
+	}
+	if sess.UserID != LocalUserID || sess.SignedIn || sess.SpaceID != app.Session().SpaceID {
+		t.Errorf("signed out: session %+v, app's space %q", sess, app.Session().SpaceID)
+	}
+}
+
+// A page's change and its entry in the outbox are stored together: when
+// queueing fails the change is not kept, so trying again queues it.
+func TestFailedQueueKeepsNoChange(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{Title: "Old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFolder("Work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{`DELETE FROM outbox`, `CREATE TRIGGER full BEFORE INSERT ON outbox BEGIN SELECT RAISE(ABORT, 'disk full'); END`} {
+		if _, err := s.DB().Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RenamePage(p.ID, "New"); err == nil {
+		t.Error("rename stored without its entry")
+	}
+	if err := s.MovePage(p.ID, "", f.ID, ""); err == nil {
+		t.Error("move stored without its entry")
+	}
+	if _, err := s.DeletePage(p.ID); err == nil {
+		t.Error("delete stored without its entry")
+	}
+	if err := s.RenameFolder(f, "Play"); err == nil {
+		t.Error("folder rename stored without its entry")
+	}
+	if got, _ := s.Page(p.ID); got.Title != "Old" || got.FolderID != "" || !got.DeletedAt.IsZero() {
+		t.Errorf("page kept a change with no entry: %+v", got)
+	}
+	if folders, _ := s.Folders(); len(folders) != 1 || folders[0].Name != "Work" {
+		t.Errorf("folders %+v", folders)
+	}
+
+	if _, err := s.DB().Exec(`DROP TRIGGER full`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenamePage(p.ID, "New"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.HasPending("pages", p.ID) {
+		t.Error("the rename tried again is not queued")
+	}
+}
+
+// A page or folder pulled from the server leaves one with a change waiting
+// here as it is, checked as it is stored: the change goes up next push.
+func TestPutRemoteKeepsAWaitingChange(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{Title: "Mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetKeepOffline(p.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.CreateFolder("Mine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, folder := PageToRemote(p), FolderToRemote(f)
+	page["title"], folder["name"] = "Theirs", "Theirs"
+	put := func() {
+		t.Helper()
+		if err := s.PutRemotePage(page); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.PutRemoteFolder(folder); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put()
+	got, _ := s.Page(p.ID)
+	folders, _ := s.Folders()
+	if got.Title != "Mine" || folders[0].Name != "Mine" {
+		t.Errorf("waiting changes overwritten: page %q, folder %q", got.Title, folders[0].Name)
+	}
+
+	if _, err := s.DB().Exec(`DELETE FROM outbox`); err != nil {
+		t.Fatal(err)
+	}
+	put()
+	got, _ = s.Page(p.ID)
+	folders, _ = s.Folders()
+	if got.Title != "Theirs" || folders[0].Name != "Theirs" {
+		t.Errorf("pulled with nothing waiting: page %q, folder %q", got.Title, folders[0].Name)
+	}
+	if got.KeepOffline {
+		t.Error("the pull changed keep offline")
+	}
+}

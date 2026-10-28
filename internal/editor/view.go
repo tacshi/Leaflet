@@ -367,7 +367,7 @@ func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 		})
 		return
 	}
-	w, h := pictureSize(pic)
+	w, h := ui.ImageSize(pic)
 	maxW := e.width - float32(e.depth(n.ID))*indentStep
 	dw := min(w, maxW)
 	dh := dw * h / max(w, 1)
@@ -381,18 +381,6 @@ func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	row.Children(func() {
 		ui.Image(c, pic).Size(dw, dh).Fit(ui.Contain).Radius(6).Label(n.Str("alt"))
 	})
-}
-
-// pictureSize is the size a bitmap or an SVG says it has.
-func pictureSize(pic ui.ImageSource) (w, h float32) {
-	switch p := pic.(type) {
-	case *ui.Bitmap:
-		iw, ih := p.Size()
-		return float32(iw), float32(ih)
-	case *ui.SVG:
-		return p.Size()
-	}
-	return 0, 0
 }
 
 func (e *Editor) subpageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {

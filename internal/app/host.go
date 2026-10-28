@@ -640,7 +640,7 @@ func (ic *imageCache) get(url string, done func()) ui.ImageSource {
 		data, err := ic.read(url)
 		var b ui.ImageSource
 		if err == nil {
-			b, err = decodePicture(data)
+			b, err = ui.DecodeImage(data)
 		}
 		if err != nil {
 			log.Printf("image %s: %v", url, err)
@@ -657,20 +657,6 @@ func (ic *imageCache) get(url string, done func()) ui.ImageSource {
 		done()
 	}()
 	return nil
-}
-
-// decodePicture decodes a PNG, JPEG, GIF, WebP or BMP picture, or an SVG.
-func decodePicture(data []byte) (ui.ImageSource, error) {
-	b, err := ui.DecodeBitmap(data)
-	if err == nil {
-		return b, nil
-	}
-	if s, serr := ui.ParseSVG(data); serr == nil {
-		if w, h := s.Size(); w > 0 && h > 0 {
-			return s, nil
-		}
-	}
-	return nil, err
 }
 
 // hasFailed reports whether a picture failed to load, and is not being

@@ -566,7 +566,9 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
       break;
     case "video": {
       const url = String(spec.video?.url ?? "").trim();
-      if (!isVideoURL(url)) throw new SpecError("A video block needs `video.url`, a YouTube or Vimeo link or a link to a video file");
+      if (!isVideoURL(url)) {
+        throw new SpecError("A video block needs `video.url`, a YouTube or Vimeo link or a link to a video file");
+      }
       node = { id, type, data: { url, title: String(spec.video?.title ?? "").trim() } };
       break;
     }

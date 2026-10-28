@@ -128,3 +128,27 @@ func TestBlockLinks(t *testing.T) {
 		t.Errorf("clipboard %q", got)
 	}
 }
+
+func para(id, text string) *doc.Node {
+	n := &doc.Node{ID: id, Type: "paragraph"}
+	n.SetDelta(doc.Delta{{Text: text}})
+	return n
+}
+
+// Undo steps are whole pages, so after content comes in from outside they
+// would undo it too; they go.
+func TestReplaceDropsUndo(t *testing.T) {
+	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), para("B", "b")}), &fakeHost{})
+	e.Select(Pos{"A", 1}, Pos{"A", 1})
+	e.InsertText("x")
+	next := e.Content.Copy()
+	next.Children = append(next.Children, para("Q", "from outside"))
+	e.Replace(next)
+	if e.CanUndo() || e.CanRedo() {
+		t.Error("undo steps kept")
+	}
+	e.Undo()
+	if e.node("Q") == nil || e.node("A").Delta().Plain() != "ax" {
+		t.Errorf("undo reverted the change from outside: %v", texts(e))
+	}
+}

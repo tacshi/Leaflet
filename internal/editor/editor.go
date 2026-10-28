@@ -388,12 +388,15 @@ func (e *Editor) changed() {
 }
 
 // Replace swaps in content from outside the editor (sync, restores),
-// keeping the caret where it can.
+// keeping the caret where it can. The undo steps go: they are whole pages
+// from before the change, so going back to one would undo it too.
 func (e *Editor) Replace(c *doc.Content) {
 	e.Content.Children = c.Children
 	e.Content.Blocks, e.Content.Deleted = c.Blocks, c.Deleted
 	e.layouts = map[string]*blockLayout{}
 	e.marked = false
+	e.undo, e.redo = nil, nil
+	e.coalescing = false
 	if len(e.Content.Children) == 0 {
 		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
 		p.SetDelta(nil)

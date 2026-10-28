@@ -235,6 +235,54 @@ func TestPushKeepsASaveMadeWhileStoring(t *testing.T) {
 	}
 }
 
+// A block changed on the server and typed here while the push was out
+// is a conflict: the side the merge does not keep stays to recover.
+func TestPushKeepsAConflictTypedWhileStoring(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &doc.Content{Children: []*doc.Node{para("a", "one"), para("b", "two")},
+		Blocks: map[string]int64{"a": 1000, "b": 1000}, Deleted: map[string]int64{}}
+	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
+		t.Fatal(err)
+	}
+	mine := st.Content(p.ID)
+	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
+	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
+		t.Fatal(err)
+	}
+	theirs := base.Copy()
+	theirs.Find("b").SetDelta(doc.Delta{{Text: "two, edited there"}})
+	theirs.Blocks["b"] = 2000
+	srv := &contentServer{content: theirs.Encode(), revision: 2}
+	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	typed := typeWhileStoring(t, st, p.ID)
+
+	if _, err := svc.pushContent(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !*typed {
+		t.Fatal("nothing was typed while the push stored")
+	}
+	conflicts, err := st.Conflicts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sides []string
+	for _, c := range conflicts {
+		if c.BlockID == "b" && c.LocalNode != nil && c.RemoteNode != nil {
+			sides = append(sides, c.LocalNode.Delta().Plain()+" / "+c.RemoteNode.Delta().Plain())
+		}
+	}
+	if len(sides) != 1 || sides[0] != "two, typed meanwhile / two, edited there" {
+		t.Errorf("conflicts on b: %q", sides)
+	}
+}
+
 func TestPullResumesAtARowThatFailedToStore(t *testing.T) {
 	st := openStore(t)
 	const at = "2026-10-26T09:00:00.123456+00:00"

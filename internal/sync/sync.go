@@ -782,19 +782,21 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	}
 	// The user may have kept typing while this was in flight, or type while
 	// this merges: store the merge only over the content it merged.
+	// What that merge's conflicts lose is kept, as the first merge's is.
 	var now store.ContentRow
 	next := merged
+	var meanwhile []doc.Conflict
 	for tries := 1; ; tries++ {
 		if now, err = s.st.ContentRow(pageID); err != nil {
 			break
 		}
-		next = merged
+		next, meanwhile = merged, nil
 		if now.Content != row.Content {
 			typed, err := doc.Decode(now.Content)
 			if err != nil {
 				return false, errUnreadable
 			}
-			next, _ = doc.Merge(local, typed, merged)
+			next, meanwhile = doc.Merge(local, typed, merged)
 		}
 		beforeStore(pageID)
 		err = s.st.PushedContent(pageID, now.Content, next.Encode(), next.PlainText(), merged.Encode(), savedAt, savedRev)
@@ -819,7 +821,7 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 			s.OnPageContent(pageID)
 		}
 	}
-	for _, c := range conflicts {
+	for _, c := range append(conflicts, meanwhile...) {
 		_ = s.st.AddConflict(pageID, c)
 	}
 	return !typedMeanwhile, nil

@@ -204,7 +204,9 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
 - Each table is pulled in `(updated_at, key)` order from a cursor of the
   last row stored here (`key` is `id`, or `page_id` for `page_content`). A
   row that cannot be stored stops that table's pull, and the next pull starts
-  with it.
+  with it. Each pull reads again from 10 seconds behind its cursor, since a
+  row is stamped before its transaction commits and one that commits late
+  can carry an earlier time; rows already stored here are skipped.
 - A device syncs one way at a time: through the server while signed in, or
   through iCloud Drive (§8) while that is on; signing in turns iCloud sync
   off.
@@ -285,14 +287,19 @@ Leaflet/
   parse: it reads that one first next time. iCloud may still bring a batch
   before the page file it names: a reader merges that page once the file
   has at least the version the batch named. A version is published once
-  its batch is written; until then it is sent again.
+  its batch is written; until then it is sent again. Files are synced to
+  disk before they are moved into place.
+- **A damaged batch.** A device reads its own last batch once a run, and
+  rewrites it empty and sends everything again if it does not parse. A
+  reader skips a batch that stays damaged only when later batches exist,
+  after 20 passes and a day.
 - **Compaction.** Past 500 batches, a device writes the latest entry of each
   row and page of its log as one batch with `snapshot: true`, sets
   `log_from` to its seq, and removes the batches before it. A reader that
   finds batches missing goes on from the first snapshot after the gap, as
   a compaction cut short leaves batches before its snapshot.
-- **A device that finds** in its own folder a batch after the last it wrote,
-  or a copy iCloud made, shares its ID with another device (a restored
+- **A device that finds** in its own folder a batch after the last it wrote
+  (other than the one it notes it is writing), or a copy iCloud made, shares its ID with another device (a restored
   backup): it takes a new ID, reads the old ID's folder as another device's,
   and sends everything again.
 - **Not downloaded.** A file iCloud has not downloaded (on macOS before 14,

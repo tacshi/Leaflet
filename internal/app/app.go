@@ -37,8 +37,11 @@ type Route struct {
 
 // App is the state of the app, kept for as long as it runs.
 type App struct {
-	st      *store.Store
-	win     *mygo.Window
+	st  *store.Store
+	win *mygo.Window
+	// post, in tests that have no window, takes what update would run on
+	// the main thread.
+	post    func(func())
 	backend *remote.Client
 	sync    *syncsvc.Service
 	hub     *agents.Hub
@@ -352,6 +355,10 @@ func (a *App) start() error {
 // update runs fn on the main thread and redraws.
 func (a *App) update(fn func()) {
 	if a.win == nil {
+		if a.post != nil {
+			a.post(fn)
+			return
+		}
 		fn()
 		return
 	}

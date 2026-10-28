@@ -169,20 +169,16 @@ func (a *App) tagMenu(m *ui.Menu, tag string) {
 }
 
 // deleteTag takes a tag off every page the user may change, and offers
-// to put it back.
+// to put back each one's tags, templates' too, as they were.
 func (a *App) deleteTag(tag string) {
-	before := map[string][]string{}
-	for _, p := range a.pages {
-		before[p.ID] = p.Tags
-	}
-	ids, err := a.st.DeleteTag(tag)
+	before, err := a.st.DeleteTag(tag)
 	if err != nil {
 		a.toast(locales.SidebarCouldNotSave(err.Error()))
 		return
 	}
 	a.toastAction(locales.TagDeleted(tag), locales.CommonUndo(), func() {
-		for _, id := range ids {
-			if err := a.st.SetPageTags(id, before[id]); err != nil {
+		for id, tags := range before {
+			if err := a.st.SetPageTags(id, tags); err != nil {
 				a.toast(locales.SidebarCouldNotSave(err.Error()))
 				return
 			}

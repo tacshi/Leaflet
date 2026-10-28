@@ -1268,20 +1268,20 @@ func TestRenameAndDeleteTags(t *testing.T) {
 	if want := []TagCount{{"done", 1}, {"draft", 1}, {"work", 2}}; !slices.Equal(tags, want) {
 		t.Errorf("tags %+v, want %+v", tags, want)
 	}
-	if ids, err := s.RenameTag("draft", "done"); err != nil || len(ids) != 1 || ids[0] != a.ID {
-		t.Fatalf("renamed %v, %v", ids, err)
+	if before, err := s.RenameTag("draft", "done"); err != nil || len(before) != 1 || !slices.Equal(before[a.ID], []string{"work", "draft"}) {
+		t.Fatalf("renamed %v, %v", before, err)
 	}
 	if p, _ := s.Page(a.ID); !slices.Equal(p.Tags, []string{"work", "done"}) {
 		t.Errorf("renamed to %q", p.Tags)
 	}
-	if ids, err := s.RenameTag("done", "Work"); err != nil || len(ids) != 2 {
-		t.Fatalf("merged %v, %v", ids, err)
+	if before, err := s.RenameTag("done", "Work"); err != nil || len(before) != 2 {
+		t.Fatalf("merged %v, %v", before, err)
 	}
 	if p, _ := s.Page(b.ID); !slices.Equal(p.Tags, []string{"Work"}) {
 		t.Errorf("merged to %q", p.Tags)
 	}
-	if ids, err := s.DeleteTag("WORK"); err != nil || len(ids) != 2 {
-		t.Fatalf("deleted %v, %v", ids, err)
+	if before, err := s.DeleteTag("WORK"); err != nil || len(before) != 2 {
+		t.Fatalf("deleted %v, %v", before, err)
 	}
 	if tags, _ := s.Tags(); len(tags) != 0 {
 		t.Errorf("left %+v", tags)
@@ -1326,6 +1326,26 @@ func TestSearchByTag(t *testing.T) {
 		if got := ids(c.q); !slices.Equal(got, c.want) {
 			t.Errorf("%q found %v, want %v", c.q, got, c.want)
 		}
+	}
+}
+
+// A tag filter keeps to its pages before any limit: comments matching on
+// other pages, more than a search takes, hide none of the tagged page's.
+func TestSearchByTagPastOtherMatches(t *testing.T) {
+	s := open(t)
+	other, _ := s.CreatePage(NewPageOptions{Title: "Elsewhere"})
+	for range 12 {
+		if _, err := s.AddComment(other.ID, "b1", "a needle here", "", "", "user", "Me"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tagged, _ := s.CreatePage(NewPageOptions{Title: "Tagged", Tags: []string{"work"}})
+	if _, err := s.AddComment(tagged.ID, "b1", "the needle", "", "", "user", "Me"); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := s.Search("#work needle", 20)
+	if err != nil || len(hits) != 1 || hits[0].PageID != tagged.ID || hits[0].Kind != "comment" {
+		t.Errorf("hits %+v, %v", hits, err)
 	}
 }
 

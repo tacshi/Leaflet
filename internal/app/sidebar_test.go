@@ -381,6 +381,8 @@ func TestSidebarTabs(t *testing.T) {
 func TestRenameAndDeleteTag(t *testing.T) {
 	a := templatesApp(t)
 	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan", Tags: []string{"work", "q4"}})
+	// A template's tags change with the pages', and Undo puts them back.
+	tpl, _ := a.st.CreatePage(store.NewPageOptions{Title: "Review", Template: true, Tags: []string{"q4", "keep"}})
 	a.reloadAll()
 	a.dialogs.openRenameTag("work")
 	tt := ui.NewTester(func(c *ui.Context) { a.tagDialog(c) }, 600, 400)
@@ -396,8 +398,14 @@ func TestRenameAndDeleteTag(t *testing.T) {
 	if got, _ := a.st.Page(p.ID); !slices.Equal(got.Tags, []string{"job"}) {
 		t.Fatalf("after delete %q", got.Tags)
 	}
+	if got, _ := a.st.Page(tpl.ID); !slices.Equal(got.Tags, []string{"keep"}) {
+		t.Fatalf("the template after delete %q", got.Tags)
+	}
 	a.toasts[len(a.toasts)-1].fn()
 	if got, _ := a.st.Page(p.ID); !slices.Equal(got.Tags, []string{"job", "q4"}) {
 		t.Errorf("after undo %q", got.Tags)
+	}
+	if got, _ := a.st.Page(tpl.ID); !slices.Equal(got.Tags, []string{"q4", "keep"}) {
+		t.Errorf("the template after undo %q", got.Tags)
 	}
 }

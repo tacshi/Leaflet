@@ -349,28 +349,29 @@ func TagsOf(pages []Page) []TagCount {
 	return out
 }
 
-// RenameTag renames a tag on every page the user may change, merging it
-// into a tag of the new name a page has already. It returns the pages
-// changed.
-func (s *Store) RenameTag(old, name string) ([]string, error) {
+// RenameTag renames a tag on every page the user may change, templates
+// too, merging it into a tag of the new name a page has already. It
+// returns the pages changed, with the tags each had before.
+func (s *Store) RenameTag(old, name string) (map[string][]string, error) {
 	return s.retag(old, func(t string) string { return name })
 }
 
-// DeleteTag takes a tag off every page the user may change, and returns
-// the pages changed.
-func (s *Store) DeleteTag(tag string) ([]string, error) {
+// DeleteTag takes a tag off every page the user may change, templates
+// too, and returns the pages changed, with the tags each had before.
+func (s *Store) DeleteTag(tag string) (map[string][]string, error) {
 	return s.retag(tag, func(string) string { return "" })
 }
 
 // retag changes tag on every page the user may change that has it, to
-// what to says ("" takes it off), and returns the pages changed.
-func (s *Store) retag(tag string, to func(string) string) ([]string, error) {
+// what to says ("" takes it off), and returns the pages changed with
+// their tags before.
+func (s *Store) retag(tag string, to func(string) string) (map[string][]string, error) {
 	pages, err := s.queryPages(`deleted_at IS NULL`)
 	if err != nil {
 		return nil, err
 	}
 	var changed []Page
-	var ids []string
+	before := map[string][]string{}
 	now := time.Now()
 	for _, p := range pages {
 		if !p.HasTag(tag) || !s.CanEdit(p) {
@@ -386,9 +387,9 @@ func (s *Store) retag(tag string, to func(string) string) ([]string, error) {
 		if tags = NormalizeTags(tags); slices.Equal(tags, p.Tags) {
 			continue
 		}
+		before[p.ID] = p.Tags
 		p.Tags, p.UpdatedAt = tags, now
 		changed = append(changed, p)
-		ids = append(ids, p.ID)
 	}
 	if len(changed) == 0 {
 		return nil, nil
@@ -397,7 +398,7 @@ func (s *Store) retag(tag string, to func(string) string) ([]string, error) {
 		return nil, err
 	}
 	s.Notify("pages", "")
-	return ids, nil
+	return before, nil
 }
 
 // IsDescendant reports whether candidate is page of or one under it. Pages
@@ -1055,14 +1056,15 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Text and transcripts are read for every page there is, the pages
-	// with the tags among them, while tags filter.
-	textLimit := limit
+	// Text, transcripts and comments are read for every page there is,
+	// the pages with the tags among them, while tags filter: a limit
+	// before the filter would let other pages' matches crowd theirs out.
+	textLimit, otherLimit := limit, 10
 	if len(filters) > 0 {
 		match := tagMatcher(filters, append(append([]Page{}, pages...), templates...))
 		pages, templates = slices.DeleteFunc(pages, func(p Page) bool { return !match(p) }),
 			slices.DeleteFunc(templates, func(p Page) bool { return !match(p) })
-		textLimit = -1
+		textLimit, otherLimit = -1, -1
 	}
 	titles := map[string]string{}
 	for _, p := range pages {
@@ -1121,7 +1123,7 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		hits = append(hits, SearchHit{Kind: "page", Title: TitleOr(titles[id]), PageID: id, Snippet: snippet(text, q)})
 	}
 	_ = rows.Close()
-	rows, err = s.db.Query(`SELECT page_id, block_id FROM recordings WHERE lower(transcript) LIKE ? LIMIT 10`, like)
+	rows, err = s.db.Query(`SELECT page_id, block_id FROM recordings WHERE lower(transcript) LIKE ? LIMIT ?`, like, otherLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1136,7 +1138,7 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		}
 	}
 	_ = rows.Close()
-	rows, err = s.db.Query(`SELECT page_id, block_id, body FROM comments WHERE lower(body) LIKE ? AND deleted_at IS NULL LIMIT 10`, like)
+	rows, err = s.db.Query(`SELECT page_id, block_id, body FROM comments WHERE lower(body) LIKE ? AND deleted_at IS NULL LIMIT ?`, like, otherLimit)
 	if err != nil {
 		return nil, err
 	}

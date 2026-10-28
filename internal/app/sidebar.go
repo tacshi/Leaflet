@@ -157,9 +157,12 @@ func (a *App) tree(c *ui.Context) {
 	s.List.Header = func(i int) bool { return strings.HasPrefix(s.Item(i), "section:") }
 	s.List.Label = func(i int) string { return a.treeLabel(s.Item(i)) }
 	a.treeRows = a.treeRows[:0]
+	opened := s.Open.Len()
 	list := ui.Outline(c, s, roots, children, func(key string) { a.treeItem(c, key) }).Grow(1).Padding(0, 8, 12)
 	a.treeDrop(c, list)
-	if list.Changed() && a.treeRow >= 0 && a.treeRow < s.Rows() {
+	// An arrow closing an item over the open page chooses the item,
+	// which it has closed already: that is no click on it.
+	if list.Changed() && s.Open.Len() == opened && a.treeRow >= 0 && a.treeRow < s.Rows() {
 		key := s.Item(a.treeRow)
 		kind, id, _ := strings.Cut(key, ":")
 		switch kind {
@@ -395,7 +398,7 @@ func (a *App) pageDrop(c *ui.Context, row ui.Element, key string) {
 	if d, ok := ui.DragOver[pageDrag](row); ok {
 		if at, _, _, ok := spot(d); ok {
 			if at == dropInside {
-				row.Background(pal.AccentSoft).Radius(6)
+				row.Background(a.dropTint(key, pal)).Radius(6)
 			} else {
 				row.DrawOver(func(p *ui.Painter, r ui.Rect) {
 					y := r.Y
@@ -447,7 +450,7 @@ func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 				case target == "":
 					dropLine(p, x, y, x+row.W, pal)
 				case at == dropInside:
-					p.Fill(ui.Rect{X: x, Y: y, W: row.W, H: row.H}, pal.AccentSoft, 6)
+					p.Fill(ui.Rect{X: x, Y: y, W: row.W, H: row.H}, a.dropTint(target, pal), 6)
 				default:
 					if at == dropAfter {
 						y += row.H
@@ -468,6 +471,16 @@ func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 			a.dropPage(d.id, target, at, out > 0)
 		}
 	}
+}
+
+// dropTint is the tint of the row of key when a page dragged would go
+// inside it, see-through, for the tree paints it over the row's text: the
+// accent's, or on the open page's row, in the accent already, its text's.
+func (a *App) dropTint(key string, pal *theme.Palette) ui.Color {
+	if a.route.Kind == "page" && key == "page:"+a.route.ID {
+		return pal.OnAccent.Alpha(0.25)
+	}
+	return pal.Accent.Alpha(0.12)
 }
 
 // dropLine is where a page dragged would go: a line from x to right at

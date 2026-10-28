@@ -9,9 +9,11 @@ import (
 
 	"leaflet/internal/app"
 	"leaflet/internal/mcp"
+	"leaflet/internal/sysproxy"
 )
 
 func main() {
+	sysproxy.Install()
 	// `leaflet mcp` serves the pages to agents outside the app, on stdio.
 	if len(os.Args) == 2 && os.Args[1] == "mcp" {
 		if err := mcp.Main(app.DataDir(), mygo.App.Version(), os.Stdin, os.Stdout); err != nil {

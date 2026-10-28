@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -64,14 +65,8 @@ func discover(ctx context.Context) (*chatgptDiscovery, error) {
 	if discoveryCache != nil {
 		return discoveryCache, nil
 	}
-	req, _ := http.NewRequestWithContext(ctx, "GET", chatgptIssuer+"/.well-known/openid-configuration", nil)
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
 	var d chatgptDiscovery
-	if err := json.NewDecoder(res.Body).Decode(&d); err != nil {
+	if err := getSignInJSON(ctx, chatgptIssuer+"/.well-known/openid-configuration", &d); err != nil {
 		return nil, err
 	}
 	if d.Issuer != chatgptIssuer {
@@ -87,6 +82,37 @@ func discover(ctx context.Context) (*chatgptDiscovery, error) {
 	}
 	discoveryCache = &d
 	return &d, nil
+}
+
+// errSignInUnreachable is a page where OpenAI's sign-in should answer
+// with JSON: a block page for the region, or the network's own page when
+// a proxy is not used.
+func errSignInUnreachable(status string) error {
+	return fmt.Errorf("Leaflet couldn't reach ChatGPT's sign-in (%s). Check your network or proxy, then try again.", status) //nolint:staticcheck // shown to people as a sentence.
+}
+
+// isJSON is application/json, or a type of it such as jwk-set+json.
+func isJSON(res *http.Response) bool {
+	t, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type"))
+	return t == "application/json" || strings.HasPrefix(t, "application/") && strings.HasSuffix(t, "+json")
+}
+
+// getSignInJSON reads one of the sign-in's JSON documents.
+func getSignInJSON(ctx context.Context, u string, v any) error {
+	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
+	req.Header.Set("Accept", "application/json")
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode != http.StatusOK || !isJSON(res) {
+		return errSignInUnreachable(res.Status)
+	}
+	if err := json.NewDecoder(res.Body).Decode(v); err != nil {
+		return fmt.Errorf("ChatGPT sign-in failed: %w", err)
+	}
+	return nil
 }
 
 func randomString(n int) string {
@@ -121,6 +147,9 @@ func postToken(ctx context.Context, endpoint string, form url.Values) (*chatgptT
 	var t chatgptTokens
 	data, _ := io.ReadAll(res.Body)
 	if err := json.Unmarshal(data, &t); err != nil && res.StatusCode < 400 {
+		if !isJSON(res) {
+			return nil, errSignInUnreachable(res.Status)
+		}
 		return nil, fmt.Errorf("ChatGPT sign-in failed: %w", err)
 	}
 	if res.StatusCode >= 400 || t.Error != "" {
@@ -268,12 +297,6 @@ func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, no
 	if err != nil || json.Unmarshal(raw, &header) != nil || header.Alg != "RS256" {
 		return nil, errors.New("ChatGPT's identity token is not one Leaflet can check")
 	}
-	req, _ := http.NewRequestWithContext(ctx, "GET", d.JWKSURI, nil)
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = res.Body.Close() }()
 	var jwks struct {
 		Keys []struct {
 			Kid string `json:"kid"`
@@ -282,7 +305,7 @@ func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, no
 			E   string `json:"e"`
 		} `json:"keys"`
 	}
-	if err := json.NewDecoder(res.Body).Decode(&jwks); err != nil {
+	if err := getSignInJSON(ctx, d.JWKSURI, &jwks); err != nil {
 		return nil, err
 	}
 	var key *rsa.PublicKey

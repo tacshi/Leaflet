@@ -516,3 +516,77 @@ func TestMergeMoveOutOfADeletedBlock(t *testing.T) {
 		}
 	}
 }
+
+// Text that looks like markup is escaped, so it reads back as written.
+// Spaces at the ends of a formatted run go outside its markers, and so
+// read back unformatted.
+func TestInlineMarkdownEscapes(t *testing.T) {
+	for _, tc := range []struct{ d, want Delta }{
+		{d: Delta{{Text: "2*3*4"}}},
+		{d: Delta{{Text: "use `x` and ``y``"}}},
+		{d: Delta{{Text: "a\\b \\* c\\"}}},
+		{d: Delta{{Text: "~~not struck~~ [not a link](x)"}}},
+		{d: Delta{{Text: "_x_ and snake_case_name and café_bar"}}},
+		{d: Delta{{Text: "trailing_"}, {Text: "_leading", Attrs: Attrs{Bold: true}}}},
+		{d: Delta{{Text: "x*", Attrs: Attrs{Italic: true}}}},
+		{d: Delta{{Text: "**", Attrs: Attrs{Bold: true}}}},
+		{d: Delta{{Text: "a`b", Attrs: Attrs{Code: true}}}},
+		{d: Delta{{Text: "`x`", Attrs: Attrs{Code: true}}}},
+		{d: Delta{{Text: " pad ", Attrs: Attrs{Code: true}}}},
+		{d: Delta{{Text: "x", Attrs: Attrs{Href: "https://e.com/a_(b)"}}}},
+		{d: Delta{{Text: "y", Attrs: Attrs{Href: "https://e.com/a)b"}}}},
+		{d: Delta{{Text: "z", Attrs: Attrs{Href: `https://e.com/a b\c<d>`}}}},
+		{d: Delta{{Text: "[x] ", Attrs: Attrs{Href: "https://e.com"}}, {Text: "after"}}},
+		{d: Delta{{Text: "# not a heading"}}},
+		{d: Delta{{Text: "a ", Attrs: Attrs{Italic: true}}, {Text: "b"}},
+			want: Delta{{Text: "a", Attrs: Attrs{Italic: true}}, {Text: " b"}}},
+		{d: Delta{{Text: " both ", Attrs: Attrs{Bold: true}}, {Text: "c"}},
+			want: Delta{{Text: " "}, {Text: "both", Attrs: Attrs{Bold: true}}, {Text: " c"}}},
+	} {
+		want := tc.want
+		if want == nil {
+			want = tc.d.Compact()
+		}
+		md := tc.d.ToMarkdown()
+		if got := FromMarkdown(md); !reflect.DeepEqual(got, want) {
+			t.Errorf("%+v wrote %q, which reads back as %+v", tc.d, md, got)
+		}
+	}
+}
+
+// Links as agents write them: parentheses in the url, or in brackets.
+func TestInlineMarkdownLinks(t *testing.T) {
+	for md, href := range map[string]string{
+		"[w](https://en.wikipedia.org/wiki/Go_(game))": "https://en.wikipedia.org/wiki/Go_(game)",
+		"[w](<https://e.com/a b>)":                     "https://e.com/a b",
+		`[w](https://e.com/a\)b)`:                      "https://e.com/a)b",
+	} {
+		if d := FromMarkdown(md); len(d) != 1 || d[0].Text != "w" || d[0].Attrs.Href != href {
+			t.Errorf("%q read as %+v", md, d)
+		}
+	}
+}
+
+func TestEscapeBlockStart(t *testing.T) {
+	for in, want := range map[string]string{
+		"# x":       `\# x`,
+		"### x":     `\### x`,
+		"#tag":      "#tag",
+		"- x":       `\- x`,
+		"-5 below":  "-5 below",
+		"+ x":       `\+ x`,
+		"> x":       `\> x`,
+		"| a |":     `\| a |`,
+		"1. x":      `1\. x`,
+		"12) x":     `12\) x`,
+		"3.14 is π": "3.14 is π",
+		"$$":        `\$$`,
+		"---":       `\---`,
+		"  # x":     `  \# x`,
+		"plain":     "plain",
+	} {
+		if got := EscapeBlockStart(in); got != want {
+			t.Errorf("%q escaped as %q, want %q", in, got, want)
+		}
+	}
+}

@@ -33,7 +33,11 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 			inList = item
 			switch n.Type {
 			case "paragraph":
-				b.WriteString(indent + text + "\n\n")
+				lines := strings.Split(text, "\n")
+				for i, l := range lines {
+					lines[i] = EscapeBlockStart(l)
+				}
+				b.WriteString(indent + strings.Join(lines, "\n") + "\n\n")
 			case "heading":
 				b.WriteString(strings.Repeat("#", min(max(n.Int("level", 1), 1), 6)) + " " + text + "\n\n")
 			case "bulleted_list":

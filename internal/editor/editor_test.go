@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -636,5 +637,43 @@ func TestMarkdownBlocksReadsAReply(t *testing.T) {
 	}
 	if got := strings.Join(types, " "); got != "paragraph quote bulleted_list" {
 		t.Errorf("blocks %q", got)
+	}
+}
+
+// A page exported as Markdown reads back as the same blocks: text that
+// looks like a block's marker stays text, and a | stays in its cell.
+func TestMarkdownExportReadsBack(t *testing.T) {
+	var blocks []*doc.Node
+	for _, s := range []string{"```js", "# not a heading", "2*3*4", "- not an item", "1. not numbered", "> not a quote", "| not a table |", "$$", "---", "[!NOTE]"} {
+		blocks = append(blocks, newText("paragraph", doc.Delta{{Text: s}}))
+	}
+	table, _ := doc.TableNode([][]string{{"a|b", `c\|d`}, {"`x|y`", "e"}}, "")
+	blocks = append(blocks, table, newText("paragraph", doc.Delta{{Text: "last"}}))
+	md := doc.PageMarkdown("", doc.FromBlocks(blocks), nil)
+	got := MarkdownBlocks(md)
+	if len(got) != len(blocks) {
+		t.Fatalf("%q read back as %d blocks", md, len(got))
+	}
+	for i, n := range got {
+		if n.Type != blocks[i].Type || !reflect.DeepEqual(n.Delta(), blocks[i].Delta()) {
+			t.Errorf("block %d: %s %+v, want %s %+v", i, n.Type, n.Delta(), blocks[i].Type, blocks[i].Delta())
+		}
+	}
+	if rows := doc.TableRows(got[len(got)-2]); !reflect.DeepEqual(rows, doc.TableRows(table)) {
+		t.Errorf("table rows %q, want %q", rows, doc.TableRows(table))
+	}
+}
+
+func TestTableRowSplitsOnUnescapedPipes(t *testing.T) {
+	for line, want := range map[string][]string{
+		"| a | b |":       {"a", "b"},
+		`| a\|b | c |`:    {"a|b", "c"},
+		`| a\\| b |`:      {`a\\`, "b"},
+		`| \*x\* | y`:     {`\*x\*`, "y"},
+		"| --- | :---: |": nil,
+	} {
+		if got := tableRow(line); !reflect.DeepEqual(got, want) {
+			t.Errorf("%q split as %q, want %q", line, got, want)
+		}
 	}
 }

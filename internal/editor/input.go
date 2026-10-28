@@ -82,10 +82,13 @@ func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 	if e.ReadOnly {
 		return
 	}
+	// Without a range the text replaces the composition, so find it
+	// before ending it.
+	from, to, ok := e.target(r)
 	wasMarked := e.marked
 	e.marked = false
 	if text == "\n" || text == "\r" {
-		if from, to, ok := e.target(r); ok && from != to {
+		if ok && from != to {
 			n := e.focusNode()
 			n.SetDelta(n.Delta().Delete(from, to))
 			e.focus, e.anchor = Pos{n.ID, from}, Pos{n.ID, from}
@@ -96,7 +99,7 @@ func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 	if text == "\t" {
 		return
 	}
-	if from, to, ok := e.target(r); ok {
+	if ok {
 		n := e.focusNode()
 		if wasMarked {
 			// The composition was in the text as it went; take it out and

@@ -11,5 +11,6 @@ import (
 func SignedInForTest(url string, st *store.Store, userID string) *Client {
 	c := New(Settings{URL: url, AnonKey: "test"}, st)
 	c.sess = &session{AccessToken: "test", ExpiresAt: time.Now().Add(time.Hour).Unix(), User: &authUser{ID: userID}}
+	c.noKeychain = true
 	return c
 }

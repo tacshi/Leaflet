@@ -114,6 +114,11 @@ migration relies on `vault.create_secret`, `vault.update_secret` and
   `sensevoice`, `soniox`, `openai-compatible`. The server transcribes only
   `soniox` and OpenAI-compatible endpoints (`provider_id` or `base_url` set);
   on-device models transcribe on the device.
+- **Sharing** invites: `share_page` adds a pending `page_permissions` row
+  (`accepted_at` null) that grants nothing until the person accepts it with
+  `accept_page_invite` (or removes it with `decline_page_invite`);
+  `page_invites()` lists the caller's pending ones. Access checks count only
+  accepted rows.
 - **Storage**: viewers of a shared page can read its recordings, the files
   on it and the images on it; only the space owner writes `files/` and
   `images/`. Images go at `images/{space_id}/{page_id}/{image_id}.{ext}`, the

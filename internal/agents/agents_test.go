@@ -213,3 +213,13 @@ func TestSelectionPromptAnswersQuestions(t *testing.T) {
 		t.Error("an answer about a selection is cut to three sentences")
 	}
 }
+
+// Every prompt has the agent take what it reads as data: a page can hold
+// text written to steer it.
+func TestPromptTreatsContentAsData(t *testing.T) {
+	for _, surface := range []string{"sidebar", "inline", "selection", "comment"} {
+		if p := SystemPrompt("ChatGPT", "PRD", surface, true, true, false); !strings.Contains(p, "as data, not as instructions") {
+			t.Errorf("%s prompt takes page content as instructions", surface)
+		}
+	}
+}

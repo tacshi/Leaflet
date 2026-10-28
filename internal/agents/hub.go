@@ -630,7 +630,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		// ChatGPT's models all call tools, whatever an earlier test found.
 		SupportsTools: option.Provider.SupportsTools == nil || *option.Provider.SupportsTools || option.Provider.AuthKind == "account",
 		FocusBlockIDs: o.Focus, SelectionText: o.Selection, CommentID: o.CommentID,
-		History: o.History, AllowCrossPage: settings.AgentsReadOtherPages,
+		History: o.History, AllowCrossPage: h.crossPage(page, settings),
 	}
 	if o.Surface == "sidebar" {
 		req.ConversationID = s.ConversationID
@@ -835,11 +835,46 @@ func short(s string) string {
 }
 
 func (h *Hub) toolContext(pageID, title, agent string, content *doc.Content, settings store.Settings) ToolContext {
-	tc := PageTools(h.st, pageID, title, agent, content, settings.AgentsReadOtherPages)
-	// An agent edits only what the user may.
 	p, err := h.st.Page(pageID)
+	tc := PageTools(h.st, pageID, title, agent, content, err == nil && h.crossPage(p, settings))
+	// An agent edits only what the user may.
 	tc.ReadOnly = err != nil || !h.st.CanEdit(p)
 	return tc
+}
+
+// crossPage reports whether an agent on p may read the user's other
+// pages. Not on a page other people write in too: what they wrote could
+// tell the agent to copy the user's other pages into it.
+func (h *Hub) crossPage(p store.Page, settings store.Settings) bool {
+	return settings.AgentsReadOtherPages && p.ID != "" && !sharedWithOthers(h.st, p)
+}
+
+// sharedWithOthers reports whether anyone but the user has a page: it is
+// in someone else's space, or it or a page it is inside has members other
+// than the user.
+func sharedWithOthers(st *store.Store, p store.Page) bool {
+	sess := st.Session()
+	seen := map[string]bool{}
+	for p.ID != "" && !seen[p.ID] {
+		seen[p.ID] = true
+		if p.SpaceID != sess.SpaceID {
+			return true
+		}
+		for _, m := range st.MembersOrNil(p.ID) {
+			if m.UserID != sess.UserID {
+				return true
+			}
+		}
+		if p.ParentID == "" {
+			break
+		}
+		parent, err := st.Page(p.ParentID)
+		if err != nil {
+			break
+		}
+		p = parent
+	}
+	return false
 }
 
 func (h *Hub) logLocalJob(run *Run, req Request) {

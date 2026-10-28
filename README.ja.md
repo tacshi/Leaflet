@@ -174,6 +174,8 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 | `list_pages`、`search_pages` | タイトルと本文でページを探す |
 | `read_page` | ページのブロックを ID 付きで読む |
 | `create_page`、`rename_page` | ページの作成と名前の変更 |
+| `move_page` | ページをフォルダや別のページの中、またはトップレベルへ移動する |
+| `create_folder`、`rename_folder` | フォルダの作成と名前の変更 |
 | `insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | アプリ内のエージェントと同じようにページを編集する |
 
 このサーバーはアプリと同じデータベースを開くので、アプリが開いていても閉じて

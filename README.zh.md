@@ -157,6 +157,8 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 | `list_pages`、`search_pages` | 按标题和正文查找页面 |
 | `read_page` | 读取页面的块及其 ID |
 | `create_page`、`rename_page` | 新建和重命名页面 |
+| `move_page` | 把页面移入文件夹、其他页面内，或移到顶层 |
+| `create_folder`、`rename_folder` | 新建和重命名文件夹 |
 | `insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | 像应用内的智能体一样编辑页面 |
 
 该服务器与应用打开同一个数据库，所以无论应用是否打开都能工作。仅以查看

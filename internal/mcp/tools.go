@@ -13,7 +13,7 @@ import (
 )
 
 // The tools: the in-app agents' page tools (internal/agents/tools.go),
-// each given the page it works on, and tools to find and make pages.
+// each given the page it works on, and tools to find, make and file pages.
 
 // pageToolNames are the in-app tools that work on one page.
 var pageToolNames = []string{"read_page", "insert_blocks", "replace_block", "move_block", "delete_blocks"}
@@ -34,6 +34,9 @@ var hints = map[string]struct {
 	"delete_blocks": {"Delete Blocks", false, true},
 	"create_page":   {"Create Page", false, false},
 	"rename_page":   {"Rename Page", false, false},
+	"move_page":     {"Move Page", false, false},
+	"create_folder": {"Create Folder", false, false},
+	"rename_folder": {"Rename Folder", false, false},
 }
 
 func toolList() []map[string]any {
@@ -43,6 +46,7 @@ func toolList() []map[string]any {
 		defs[fn["name"].(string)] = fn
 	}
 	pageID := map[string]any{"type": "string", "description": "The page's ID, from list_pages or search_pages."}
+	folderID := map[string]any{"type": "string", "description": "The folder's ID, from list_pages."}
 	var out []map[string]any
 	add := func(name, desc string, schema map[string]any) {
 		h := hints[name]
@@ -58,7 +62,7 @@ func toolList() []map[string]any {
 		}
 		return map[string]any{"type": "object", "properties": props, "required": required}
 	}
-	add("list_pages", "List the user's pages: IDs, titles, the page each is inside, and folders.", object(map[string]any{}))
+	add("list_pages", "List the user's pages (IDs, titles, the page or folder each is in) and folders.", object(map[string]any{}))
 	add("search_pages", "Find pages by title or text, recordings by transcript, and comments.",
 		object(map[string]any{"query": map[string]any{"type": "string"}}, "query"))
 	for _, name := range pageToolNames {
@@ -79,8 +83,17 @@ func toolList() []map[string]any {
 			"title":     sub["title"],
 			"blocks":    sub["blocks"],
 			"parent_id": map[string]any{"type": "string", "description": "The page to put it inside; none for the top level."},
+			"folder_id": map[string]any{"type": "string", "description": "The folder to put it in, at the top level; not with parent_id."},
 		}, "title"))
 	add("rename_page", "Change a page's title.", object(map[string]any{"page_id": pageID, "title": map[string]any{"type": "string"}}, "page_id", "title"))
+	add("move_page", "Move a page, with its subpages, inside another page (linked at its end), into a folder, or with neither to the top level outside folders.",
+		object(map[string]any{
+			"page_id":   pageID,
+			"parent_id": map[string]any{"type": "string", "description": "The page to put it inside."},
+			"folder_id": map[string]any{"type": "string", "description": "The folder to put it in, at the top level; not with parent_id."},
+		}, "page_id"))
+	add("create_folder", "Create a folder for top-level pages, last in the sidebar.", object(map[string]any{"name": map[string]any{"type": "string"}}, "name"))
+	add("rename_folder", "Change a folder's name.", object(map[string]any{"folder_id": folderID, "name": map[string]any{"type": "string"}}, "folder_id", "name"))
 	return out
 }
 
@@ -155,6 +168,31 @@ func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, 
 			return nil, err
 		}
 		return map[string]any{"page_id": p.ID}, nil
+	case "move_page":
+		return t.movePage(args)
+	case "create_folder":
+		name, _ := args["name"].(string)
+		if name = strings.TrimSpace(name); name == "" {
+			return nil, toolErr("name is required.")
+		}
+		f, err := st.CreateFolder(name)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"folder_id": f.ID}, nil
+	case "rename_folder":
+		f, err := t.folder(args["folder_id"])
+		if err != nil {
+			return nil, err
+		}
+		name, _ := args["name"].(string)
+		if name = strings.TrimSpace(name); name == "" {
+			return nil, toolErr("name is required.")
+		}
+		if err := st.RenameFolder(f, name); err != nil {
+			return nil, err
+		}
+		return map[string]any{"folder_id": f.ID}, nil
 	}
 	if slices.Contains(pageToolNames, name) {
 		return t.onPage(name, args)
@@ -168,10 +206,12 @@ func (t *pageTools) listPages() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	folders, _ := st.Folders()
-	names := map[string]string{}
+	folders, _ := t.folders()
+	ids := map[string]bool{}
+	outFolders := []map[string]any{}
 	for _, f := range folders {
-		names[f.ID] = f.Name
+		ids[f.ID] = true
+		outFolders = append(outFolders, map[string]any{"id": f.ID, "name": f.Name})
 	}
 	sess := st.Session()
 	out := []map[string]any{}
@@ -180,15 +220,64 @@ func (t *pageTools) listPages() (map[string]any, error) {
 		if p.ParentID != "" {
 			row["parent_id"] = p.ParentID
 		}
-		if f := names[p.FolderID]; f != "" && p.ParentID == "" {
-			row["folder"] = f
+		if ids[p.FolderID] && p.ParentID == "" {
+			row["folder_id"] = p.FolderID
 		}
 		if p.SpaceID != sess.SpaceID {
 			row["shared"] = true
 		}
 		out = append(out, row)
 	}
-	return map[string]any{"pages": out}, nil
+	return map[string]any{"pages": out, "folders": outFolders}, nil
+}
+
+// folders are the folders of the user's own space, the ones the sidebar
+// shows.
+func (t *pageTools) folders() ([]store.Folder, error) {
+	all, err := t.s.st.Folders()
+	if err != nil {
+		return nil, err
+	}
+	space := t.s.st.Session().SpaceID
+	return slices.DeleteFunc(all, func(f store.Folder) bool { return f.SpaceID != space }), nil
+}
+
+// folder is the folder of ID id.
+func (t *pageTools) folder(id any) (store.Folder, error) {
+	s, _ := id.(string)
+	if strings.TrimSpace(s) == "" {
+		return store.Folder{}, toolErr("folder_id is required.")
+	}
+	folders, err := t.folders()
+	if err != nil {
+		return store.Folder{}, err
+	}
+	for _, f := range folders {
+		if f.ID == s {
+			return f, nil
+		}
+	}
+	return store.Folder{}, toolErr("No folder " + s + ".")
+}
+
+// place is where args put a page: inside the page parent_id, which the
+// user may change, or in the folder folder_id, or at the top level.
+func (t *pageTools) place(args map[string]any) (parent store.Page, folderID string, err error) {
+	parentID, _ := args["parent_id"].(string)
+	folderID, _ = args["folder_id"].(string)
+	if parentID != "" && folderID != "" {
+		return store.Page{}, "", toolErr("Give parent_id or folder_id, not both: a page inside another isn't in a folder.")
+	}
+	if parentID != "" {
+		parent, err = t.page(map[string]any{"page_id": parentID}, true)
+		return parent, "", err
+	}
+	if folderID != "" {
+		if _, err := t.folder(folderID); err != nil {
+			return store.Page{}, "", err
+		}
+	}
+	return store.Page{}, folderID, nil
 }
 
 // page is the page args name, which edit asks to be one the user may
@@ -268,13 +357,9 @@ func (t *pageTools) createPage(args map[string]any) (map[string]any, error) {
 	if strings.TrimSpace(title) == "" {
 		return nil, toolErr("title is required.")
 	}
-	parentID, _ := args["parent_id"].(string)
-	var parent store.Page
-	if parentID != "" {
-		var err error
-		if parent, err = t.page(map[string]any{"page_id": parentID}, true); err != nil {
-			return nil, err
-		}
+	parent, folderID, err := t.place(args)
+	if err != nil {
+		return nil, err
 	}
 	var content *doc.Content
 	if args["blocks"] != nil {
@@ -284,11 +369,11 @@ func (t *pageTools) createPage(args map[string]any) (map[string]any, error) {
 		}
 		content = doc.FromBlocks(nodes)
 	}
-	p, err := st.CreatePage(store.NewPageOptions{ParentID: parentID, Title: title, Content: content})
+	p, err := st.CreatePage(store.NewPageOptions{ParentID: parent.ID, FolderID: folderID, Title: title, Content: content})
 	if err != nil {
 		return nil, err
 	}
-	if parentID != "" {
+	if parent.ID != "" {
 		// As a page made from the sidebar, it shows in the page it is
 		// inside.
 		if err := t.linkSubpage(parent, p.ID); err != nil {
@@ -298,7 +383,91 @@ func (t *pageTools) createPage(args map[string]any) (map[string]any, error) {
 	return map[string]any{"page_id": p.ID}, nil
 }
 
+// movePage moves a page as the sidebar does, and keeps the links to it in
+// step: a page it leaves loses its link, and a page it goes into links to
+// it at its end. A page stays in its space, as the server has it: it goes
+// inside a page of that space, or to the top level only of the user's own.
+func (t *pageTools) movePage(args map[string]any) (map[string]any, error) {
+	st := t.s.st
+	p, err := t.page(args, true)
+	if err != nil {
+		return nil, err
+	}
+	if p.Template {
+		return nil, toolErr("A template doesn't move among the pages.")
+	}
+	parent, folderID, err := t.place(args)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case parent.Template:
+		return nil, toolErr("A page cannot move inside a template.")
+	case parent.ID != "" && parent.SpaceID != p.SpaceID:
+		return nil, toolErr("A page cannot move inside a page of another space.")
+	case parent.ID == "" && p.SpaceID != st.Session().SpaceID:
+		return nil, toolErr("A page shared with the user stays inside a page of its space: it cannot move to the top level or into a folder.")
+	case parent.ID != "" && st.IsDescendant(parent.ID, p.ID):
+		return nil, toolErr("A page cannot move inside itself or one of its subpages.")
+	}
+	if p.ParentID == parent.ID && (parent.ID != "" || p.FolderID == folderID) {
+		return map[string]any{"page_id": p.ID}, nil
+	}
+	if err := st.MovePage(p.ID, parent.ID, folderID, ""); err != nil {
+		return nil, err
+	}
+	if p.ParentID != parent.ID {
+		if old, err := st.Page(p.ParentID); err == nil && st.CanEdit(old) {
+			if err := t.unlinkSubpage(old, p.ID); err != nil {
+				return nil, err
+			}
+		}
+		if parent.ID != "" {
+			if err := t.linkSubpage(parent, p.ID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return map[string]any{"page_id": p.ID}, nil
+}
+
+// linkSubpage links page id at the end of parent, unless it links it
+// already.
 func (t *pageTools) linkSubpage(parent store.Page, id string) error {
+	return t.editLinks(parent, func(c *doc.Content) bool {
+		if len(subpageLinks(c, id)) > 0 {
+			return false
+		}
+		_ = c.Insert(doc.Position{At: "end"}, &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": id}})
+		return true
+	})
+}
+
+// unlinkSubpage removes parent's links to page id.
+func (t *pageTools) unlinkSubpage(parent store.Page, id string) error {
+	return t.editLinks(parent, func(c *doc.Content) bool {
+		links := subpageLinks(c, id)
+		for _, l := range links {
+			c.Remove(l)
+		}
+		return len(links) > 0
+	})
+}
+
+// subpageLinks are the IDs of c's links to page id.
+func subpageLinks(c *doc.Content, id string) []string {
+	var out []string
+	c.Walk(func(n, _ *doc.Node) {
+		if n.Type == "subpage" && n.Str("page_id") == id {
+			out = append(out, n.ID)
+		}
+	})
+	return out
+}
+
+// editLinks saves parent's content changed by edit, which reports whether
+// it changed it.
+func (t *pageTools) editLinks(parent store.Page, edit func(c *doc.Content) bool) error {
 	st := t.s.st
 	for range 3 {
 		row, err := st.ContentRow(parent.ID)
@@ -313,8 +482,8 @@ func (t *pageTools) linkSubpage(parent store.Page, id string) error {
 			// the page is inside it all the same.
 			return nil
 		}
-		if err := c.Insert(doc.Position{At: "end"}, &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": id}}); err != nil {
-			return err
+		if !edit(c) {
+			return nil
 		}
 		if _, _, err := st.SaveContentOver(parent.ID, row.Content, c); errors.Is(err, store.ErrContentChanged) {
 			continue

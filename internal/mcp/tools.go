@@ -109,6 +109,10 @@ func (t *pageTools) call(name string, args map[string]any) map[string]any {
 
 func toolErr(msg string) error { return &doc.ToolError{Message: msg} }
 
+// errUnreadable is a page whose stored content cannot be read: it is left
+// as it is.
+var errUnreadable = toolErr("The page's content could not be read, so it was left as it is.")
+
 func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, error) {
 	st := t.s.st
 	switch name {
@@ -221,7 +225,12 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		if err != nil {
 			return nil, toolErr("The page's content is not kept on this device.")
 		}
-		content := doc.MustDecode(row.Content)
+		// What cannot be read is refused rather than taken for an empty
+		// page, which saving would then put in its place.
+		content, err := doc.Decode(row.Content)
+		if err != nil {
+			return nil, errUnreadable
+		}
 		before := content.Copy()
 		x := &agents.Executor{Ctx: agents.PageTools(st, p.ID, p.DisplayTitle(), t.s.agent, content, true)}
 		out := x.Call(name, args)
@@ -298,7 +307,12 @@ func (t *pageTools) linkSubpage(parent store.Page, id string) error {
 			// still inside it, in the sidebar.
 			return nil
 		}
-		c := doc.MustDecode(row.Content)
+		c, err := doc.Decode(row.Content)
+		if err != nil {
+			// Nor is a parent whose content cannot be read written over:
+			// the page is inside it all the same.
+			return nil
+		}
 		if err := c.Insert(doc.Position{At: "end"}, &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": id}}); err != nil {
 			return err
 		}

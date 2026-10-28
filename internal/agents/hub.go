@@ -589,9 +589,8 @@ type RunOptions struct {
 // up in Run.Error.
 func (h *Hub) Start(pageID string, o RunOptions) *Run {
 	s := h.Session(pageID)
-	option, err := h.Resolve(firstNonNil(o.Agent, s.Selected))
 	run := &Run{ID: doc.NewRowID(), Surface: o.Surface, Instruction: o.Instruction, Status: "running", At: time.Now()}
-	if err != nil {
+	fail := func(err error) *Run {
 		run.AgentName, run.Status, run.Error = "Agent", "failed", err.Error()
 		if o.Reply != nil {
 			o.Reply.Pending, o.Reply.Error, o.Reply.Text = false, true, run.Error
@@ -601,21 +600,27 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		}
 		return run
 	}
-	run.AgentName = option.Name()
-	s.Runs = append(s.Runs, run)
-	s.Running = true
-	if o.Reply != nil {
-		o.Reply.RunID, o.Reply.AgentName = run.ID, option.Name()
+	option, err := h.Resolve(firstNonNil(o.Agent, s.Selected))
+	if err != nil {
+		return fail(err)
 	}
 	h.host.SaveNow(pageID)
 	ed := h.host.Editor(pageID)
 	var before *doc.Content
 	if ed != nil {
 		before = ed.Content.Copy()
-	} else if c := h.st.Content(pageID); c != nil {
+	} else if c, err := stored(h.st, pageID); err != nil {
+		return fail(err)
+	} else if c != nil {
 		before = c
 	} else {
 		before = doc.Empty()
+	}
+	run.AgentName = option.Name()
+	s.Runs = append(s.Runs, run)
+	s.Running = true
+	if o.Reply != nil {
+		o.Reply.RunID, o.Reply.AgentName = run.ID, option.Name()
 	}
 	page, _ := h.st.Page(pageID)
 	settings := h.host.Settings()
@@ -730,7 +735,10 @@ func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op) error {
 	if d.sent == len(ops) {
 		return nil
 	}
-	c := st.Content(pageID)
+	c, err := stored(st, pageID)
+	if err != nil {
+		return err
+	}
 	if c == nil {
 		c = doc.Empty()
 	}
@@ -743,8 +751,26 @@ func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op) error {
 		}
 	}
 	d.sent = len(ops)
-	_, _, err := st.SaveContent(pageID, c)
+	_, _, err = st.SaveContent(pageID, c)
 	return err
+}
+
+// errUnreadable is a page whose stored content cannot be read.
+var errUnreadable = errors.New("The page's content could not be read, so agents leave it as it is.") //nolint:staticcheck // shown to people as a sentence.
+
+// stored is a page's stored content, nil when it is not kept here. What
+// cannot be read is an error rather than an empty page, which saving
+// would put in its place.
+func stored(st *store.Store, pageID string) (*doc.Content, error) {
+	row, err := st.ContentRow(pageID)
+	if err != nil {
+		return nil, nil //nolint:nilerr // not kept on this device.
+	}
+	c, err := doc.Decode(row.Content)
+	if err != nil {
+		return nil, errUnreadable
+	}
+	return c, nil
 }
 
 func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *doc.Content, d *delivery, res Result, err error, o RunOptions) {
@@ -902,7 +928,11 @@ func (h *Hub) apply(pageID string, ops []doc.Op) {
 		}
 		return
 	}
-	c := h.st.Content(pageID)
+	c, err := stored(h.st, pageID)
+	if err != nil {
+		log.Printf("undo run: %v", err)
+		return
+	}
 	if c == nil {
 		return
 	}

@@ -68,6 +68,27 @@ func TestDeliveryToAPageClosedMidRun(t *testing.T) {
 	}
 }
 
+// Ops for a closed page whose stored content cannot be read are not saved
+// over it as if it were empty.
+func TestDeliveryToAnUnreadablePage(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Broken"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const broken = `{"children": [`
+	if _, err := st.DB().Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, broken, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	d := &delivery{}
+	if err := d.save(st, p.ID, []doc.Op{insertAfter("", "x1", "one")}); err == nil {
+		t.Error("saved over an unreadable page")
+	}
+	if row, err := st.ContentRow(p.ID); err != nil || row.Content != broken {
+		t.Errorf("content %q, %v", row.Content, err)
+	}
+}
+
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
 	st, err := store.OpenMemory(t.TempDir())

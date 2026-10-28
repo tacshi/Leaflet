@@ -257,3 +257,29 @@ func TestSearchLeavesOutTemplates(t *testing.T) {
 		t.Errorf("results %v", out)
 	}
 }
+
+// A page whose stored content cannot be read is left as it is, rather
+// than edited as an empty page and saved over.
+func TestUnreadablePageIsLeftAlone(t *testing.T) {
+	st := newStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Broken"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const broken = `{"children": [`
+	if _, err := st.DB().Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, broken, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	got := session(t, NewServer(st, "0.1.0"),
+		call(2, "insert_blocks", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "paragraph", "text": "x"}}}),
+		call(3, "create_page", map[string]any{"title": "Inside", "parent_id": p.ID}))
+	if out, failed := result(t, got[2]); !failed || !strings.Contains(out["error"].(string), "could not be read") {
+		t.Errorf("insert_blocks on an unreadable page %v", out)
+	}
+	if out, failed := result(t, got[3]); failed {
+		t.Errorf("create_page inside an unreadable page %v", out)
+	}
+	if row, err := st.ContentRow(p.ID); err != nil || row.Content != broken {
+		t.Errorf("content %q, %v", row.Content, err)
+	}
+}

@@ -26,6 +26,9 @@ var AgentTypes = []string{
 
 var chartTypes = map[string]bool{"bar": true, "line": true, "pie": true}
 
+// maxEmbedHTML caps an embed's source, as the server does.
+const maxEmbedHTML = 200_000
+
 // SpecToNode turns a BlockSpec (docs/protocol.md §2) into a block. id is
 // kept when given.
 func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
@@ -120,6 +123,9 @@ func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 		html, _ := e["html"].(string)
 		if strings.TrimSpace(html) == "" {
 			return nil, toolErr("An embed block needs embed.html.")
+		}
+		if len(html) > maxEmbedHTML {
+			return nil, toolErr("embed.html must be under 200 KB.")
 		}
 		title, _ := e["title"].(string)
 		if title == "" {

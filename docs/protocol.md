@@ -224,7 +224,7 @@ search and `list_pages`. `model_providers.encrypted_secret` and `refresh_token` 
 and are not selectable by clients.
 
 Storage buckets: `recordings` (`{user_id}/{recording_id}.m4a`), `files`
-(`{space_id}/{file_id}/{name}`), `images` (`{space_id}/{image_id}.{ext}`).
+(`{space_id}/{file_id}/{name}`), `images` (`{space_id}/{page_id}/{image_id}.{ext}`).
 
 RPCs: `share_page(p_page_id, p_email, p_role)`, `unshare_page(p_page_id, p_user_id)`,
 `page_members(p_page_id)`, `set_provider_secret(p_provider_id, p_secret)`

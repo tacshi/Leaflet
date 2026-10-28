@@ -595,20 +595,7 @@ func safeName(s string) string {
 func (a *App) loadMembers(pageID string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	res, err := a.backend.RPC(ctx, "page_members", map[string]any{"p_page_id": pageID})
-	if err != nil {
-		return
-	}
-	var members []store.Member
-	list, _ := res.([]any)
-	for _, r := range list {
-		m, _ := r.(map[string]any)
-		// A server from before invites says nothing: every share was one.
-		accepted, ok := m["accepted"].(bool)
-		members = append(members, store.Member{PageID: pageID, UserID: store.S(m, "user_id"), Role: store.S(m, "role"),
-			DisplayName: store.S(m, "display_name"), Email: store.S(m, "email"), Accepted: accepted || !ok})
-	}
-	_ = a.st.SetMembers(pageID, members)
+	_ = a.sync.LoadMembers(ctx, pageID)
 }
 
 // imageCache loads the pictures of image blocks; root is the app's data

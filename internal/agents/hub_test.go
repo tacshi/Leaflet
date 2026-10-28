@@ -89,6 +89,48 @@ func TestDeliveryToAnUnreadablePage(t *testing.T) {
 	}
 }
 
+// A run whose edits fail to store on a closed page fails, rather than
+// saying it is done, and its ops stay to deliver: storing them again works.
+func TestFailedSaveFailsTheRun(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`CREATE TRIGGER full_insert BEFORE INSERT ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`,
+		`CREATE TRIGGER full_update BEFORE UPDATE ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`,
+	} {
+		if _, err := st.DB().Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := NewHub(st, nil, stubHost{})
+	s := h.Session(p.ID)
+	run := &Run{ID: "r1", Ops: []doc.Op{insertAfter("", "x1", "one")}}
+	d := &delivery{}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	h.finish(s, run, Request{Instruction: "Add a line"}, local, st.Content(p.ID), d, Result{Reply: "Added a line."}, nil, RunOptions{})
+	if run.Status != "failed" || !strings.Contains(run.Error, "disk full") {
+		t.Errorf("run %q, error %q", run.Status, run.Error)
+	}
+	if history, _ := st.History(p.ID); len(history) != 0 {
+		t.Errorf("history of edits never stored: %d", len(history))
+	}
+
+	for _, q := range []string{`DROP TRIGGER full_insert`, `DROP TRIGGER full_update`} {
+		if _, err := st.DB().Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := d.save(st, p.ID, run.Ops); err != nil {
+		t.Fatal(err)
+	}
+	if c := st.Content(p.ID); c.Find("x1") == nil {
+		t.Errorf("stored again without the edit: %s", ids(c))
+	}
+}
+
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
 	st, err := store.OpenMemory(t.TempDir())

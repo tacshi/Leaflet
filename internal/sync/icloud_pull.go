@@ -336,7 +336,7 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 	}
 	var base *doc.Content
 	if hasBase {
-		base = doc.MustDecode(known.Content)
+		base, _ = doc.Decode(known.Content)
 	}
 	// The merge is queued to go to the other devices when it differs
 	// from the version merged and from what this device published, unless
@@ -360,7 +360,14 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 		next, conflicts, before = theirs, nil, ""
 		if localErr == nil {
 			before = local.Content
-			next, conflicts = doc.Merge(base, doc.MustDecode(local.Content), theirs)
+			mine, err := doc.Decode(local.Content)
+			if err != nil {
+				// Merging into an empty page would drop this device's
+				// version: it is left for when it can be read.
+				log.Printf("merge %s from %s: %v", pageID, peer, errUnreadable)
+				return nil
+			}
+			next, conflicts = doc.Merge(base, mine, theirs)
 			if next.Encode() == local.Content {
 				stored = true
 				break

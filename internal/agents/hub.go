@@ -835,6 +835,18 @@ func (h *Hub) logLocalJob(run *Run, req Request) {
 	}
 }
 
+// saveRun keeps a run's change with the conversation that shows it: the
+// page's chat or an earlier one, whose run the page's bar can still undo.
+func (h *Hub) saveRun(s *Session, runID string) {
+	for _, c := range s.Past {
+		if slices.ContainsFunc(c.Runs, func(r *Run) bool { return r.ID == runID }) {
+			h.savePast(s)
+			return
+		}
+	}
+	h.saveChat(s)
+}
+
 // UndoRun reverts a whole run, even after later edits elsewhere on the page.
 func (h *Hub) UndoRun(pageID, runID string) {
 	s := h.Session(pageID)
@@ -844,7 +856,7 @@ func (h *Hub) UndoRun(pageID, runID string) {
 	}
 	h.apply(pageID, doc.InvertRun(run.Ops))
 	run.Undone = true
-	h.saveChat(s)
+	h.saveRun(s, runID)
 	h.host.Tint(pageID, nil)
 	h.markJob(runID, "reverted")
 }
@@ -858,7 +870,7 @@ func (h *Hub) RedoRun(pageID, runID string) {
 	}
 	h.apply(pageID, run.Ops)
 	run.Undone = false
-	h.saveChat(s)
+	h.saveRun(s, runID)
 	h.host.Tint(pageID, run.BlockIDs())
 	h.markJob(runID, "done")
 }

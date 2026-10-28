@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -195,5 +196,41 @@ func TestEarlierConversations(t *testing.T) {
 	}
 	if last := NewHub(st, nil, nil).Session("p"); last.ConversationID != first || len(last.Past) != 1 {
 		t.Errorf("after another restart: conversation %q, %d earlier", last.ConversationID, len(last.Past))
+	}
+}
+
+// stubHost is a host with no page open.
+type stubHost struct{}
+
+func (stubHost) Update(fn func())                        { fn() }
+func (stubHost) Editor(string) *editor.Editor            { return nil }
+func (stubHost) SaveNow(string)                          {}
+func (stubHost) Online() bool                            { return false }
+func (stubHost) Settings() store.Settings                { return store.Settings{} }
+func (stubHost) FlushPage(context.Context, string) error { return nil }
+func (stubHost) SyncNow()                                {}
+func (stubHost) Tint(string, []string)                   {}
+
+// A run undone from the page's bar after its conversation was left stays
+// undone in that conversation, after a restart too.
+func TestUndoInAnEarlierConversation(t *testing.T) {
+	st := openStore(t)
+	h := NewHub(st, nil, stubHost{})
+	s := h.Session("p")
+	first := s.ConversationID
+	s.Runs = []*Run{{ID: "r1", Status: "done", Ops: []doc.Op{insertAfter("p1", "x1", "one")}}}
+	s.Messages = []*Message{{Mine: true, Text: "Add a line"}, {Text: "Added a line.", RunID: "r1"}}
+	h.saveChat(s)
+	h.NewConversation("p")
+	h.UndoRun("p", "r1")
+
+	again := NewHub(st, nil, stubHost{})
+	again.OpenConversation("p", first)
+	if r := again.Session("p").Run("r1"); r == nil || !r.Undone {
+		t.Fatalf("run after a restart %+v", r)
+	}
+	again.RedoRun("p", "r1")
+	if r := NewHub(st, nil, stubHost{}).Session("p").Run("r1"); r == nil || r.Undone {
+		t.Errorf("redone run after a restart %+v", r)
 	}
 }

@@ -72,8 +72,15 @@ migration relies on `vault.create_secret`, `vault.update_secret` and
 - **model_providers**: clients can't read or write `encrypted_secret` /
   `refresh_token`, so select explicit columns (see `PROVIDER_COLUMNS` in
   `functions/_shared/supabase.ts`), never `*`. `has_secret` says whether a key
-  is saved. Keys go through the `providers` function (`save` with `api_key`)
-  or the `set_provider_secret` RPC; an empty key clears it.
+  is saved. Clients read and delete their rows but cannot insert or update
+  them: rows go through the `providers` function (`save`), which checks the
+  base URL. Keys go through `save` with `api_key` or the
+  `set_provider_secret` RPC; an empty key clears it.
+- **Base URLs** the server calls (cloud providers, OpenAI-compatible speech to
+  text) must be `https://` to a public host: names that resolve to private,
+  loopback, link-local or CGNAT addresses are refused, redirects are errors,
+  and errors show the status and the provider's JSON message, never the raw
+  body (`functions/_shared/net.ts`).
 - **Local providers** (`ollama`, `lmstudio`, `local`) may be saved without a
   key for listing, but the server never calls them and rejects their keys.
   Clients call local endpoints directly.

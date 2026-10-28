@@ -1,7 +1,9 @@
 // Model providers (protocol §5): save a connection (its key goes to Vault),
 // list a provider's models, test it (including tool calling), delete it.
+// Clients cannot write model_providers themselves (20261028000000): rows are
+// written here, with the service role, once their base URL is checked.
 
-import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
+import type { SupabaseClient, User } from "jsr:@supabase/supabase-js@2";
 import { errorResponse, HttpError, json, preflight, readJson } from "../_shared/cors.ts";
 import {
   loadProvider,
@@ -22,6 +24,7 @@ import {
   ProviderError,
   type ToolDef,
 } from "../_shared/openai.ts";
+import { checkPublicUrl, UnsafeUrlError } from "../_shared/net.ts";
 
 const PRESETS = new Set(Object.keys(PRESET_NAMES));
 const TIMEOUT_MS = 20_000;
@@ -53,15 +56,15 @@ Deno.serve(async (req) => {
   try {
     const body = await readJson<Body>(req);
     const uc = userClient(req);
-    await requireUser(req, uc);
+    const user = await requireUser(req, uc);
     const sc = serviceClient();
     switch (body.action) {
       case "save":
-        return json({ provider: await save(uc, body.provider) });
+        return json({ provider: await save(uc, sc, user, body.provider) });
       case "models":
-        return json(await models(uc, sc, body));
+        return json(await models(uc, sc, user, body));
       case "test":
-        return json(await test(uc, sc, body));
+        return json(await test(uc, sc, user, body));
       case "delete": {
         const id = body.id ?? body.provider_id;
         if (!id) throw new HttpError(400, "id is required");
@@ -77,7 +80,12 @@ Deno.serve(async (req) => {
   }
 });
 
-async function save(uc: SupabaseClient, input?: ProviderInput): Promise<ProviderRow> {
+async function save(
+  uc: SupabaseClient,
+  sc: SupabaseClient,
+  user: User,
+  input?: ProviderInput,
+): Promise<ProviderRow> {
   if (!input || !PRESETS.has(input.preset)) throw new HttpError(400, "Unknown provider preset");
   const local = LOCAL_PRESETS.has(input.preset);
   if (local && input.api_key) {
@@ -93,6 +101,14 @@ async function save(uc: SupabaseClient, input?: ProviderInput): Promise<Provider
   } catch {
     throw new HttpError(400, "Enter the provider's base URL");
   }
+  // Local providers are only listed; the server never calls them.
+  if (!local) {
+    try {
+      await checkPublicUrl(baseUrl);
+    } catch (e) {
+      throw new HttpError(400, e instanceof UnsafeUrlError ? e.message : "Enter the provider's base URL");
+    }
+  }
 
   const row = {
     preset: input.preset,
@@ -105,11 +121,13 @@ async function save(uc: SupabaseClient, input?: ProviderInput): Promise<Provider
 
   let id = input.id;
   if (id) {
-    const { data, error } = await uc.from("model_providers").update(row).eq("id", id).select("id");
+    const { data, error } = await sc.from("model_providers").update(row).eq("id", id).eq("user_id", user.id)
+      .select("id");
     if (error) throw new Error(error.message);
     if (!data?.length) throw new HttpError(404, "Model provider not found");
   } else {
-    const { data, error } = await uc.from("model_providers").insert(row).select("id").single();
+    const { data, error } = await sc.from("model_providers").insert({ ...row, user_id: user.id }).select("id")
+      .single();
     if (error) throw new Error(error.message);
     id = (data as { id: string }).id;
   }
@@ -146,7 +164,7 @@ async function connection(
   return { conn: { baseUrl: normalizeBaseUrl(raw, preset), apiKey: body.api_key ?? null, preset } };
 }
 
-async function models(uc: SupabaseClient, sc: SupabaseClient, body: Body) {
+async function models(uc: SupabaseClient, sc: SupabaseClient, user: User, body: Body) {
   const { conn, row } = await connection(uc, sc, body);
   let ids: string[];
   try {
@@ -155,7 +173,7 @@ async function models(uc: SupabaseClient, sc: SupabaseClient, body: Body) {
     throw new HttpError(502, `Could not list models: ${e instanceof Error ? e.message : e}`);
   }
   if (row) {
-    await uc.from("model_providers").update({ models: ids }).eq("id", row.id);
+    await sc.from("model_providers").update({ models: ids }).eq("id", row.id).eq("user_id", user.id);
   }
   return { models: ids, supports_tools: row?.supports_tools ?? undefined };
 }
@@ -173,7 +191,7 @@ const PING: ToolDef = {
   },
 };
 
-async function test(uc: SupabaseClient, sc: SupabaseClient, body: Body) {
+async function test(uc: SupabaseClient, sc: SupabaseClient, user: User, body: Body) {
   const { conn, row } = await connection(uc, sc, body);
 
   let ids: string[] = [];
@@ -227,7 +245,7 @@ async function test(uc: SupabaseClient, sc: SupabaseClient, body: Body) {
     if (row) {
       const patch: Record<string, unknown> = { supports_tools: supportsTools };
       if (ids.length) patch.models = ids;
-      await uc.from("model_providers").update(patch).eq("id", row.id);
+      await sc.from("model_providers").update(patch).eq("id", row.id).eq("user_id", user.id);
     }
   }
   return { ok, models: ids, supports_tools: supportsTools, message };

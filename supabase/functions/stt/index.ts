@@ -6,6 +6,7 @@ import type { SupabaseClient, User } from "jsr:@supabase/supabase-js@2";
 import { errorResponse, HttpError, json, preflight, readJson } from "../_shared/cors.ts";
 import { loadProvider, providerSecret, requireUser, serviceClient, userClient } from "../_shared/supabase.ts";
 import { normalizeBaseUrl } from "../_shared/openai.ts";
+import { safeFetch } from "../_shared/net.ts";
 import { type Segment, tokensToSegments } from "../_shared/segments.ts";
 
 const SONIOX_API = "https://api.soniox.com/v1";
@@ -189,7 +190,8 @@ async function openAiCompatible(
     form.append("response_format", format);
     if (format === "verbose_json") form.append("timestamp_granularities[]", "segment");
     if (language) form.append("language", language);
-    return await fetch(`${baseUrl}/audio/transcriptions`, {
+    // The base URL is the user's: safeFetch keeps it off private addresses.
+    return await safeFetch(`${baseUrl}/audio/transcriptions`, {
       method: "POST",
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
       body: form,
@@ -200,8 +202,8 @@ async function openAiCompatible(
   let res = await send("verbose_json");
   if (res.status === 400) res = await send("json");
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Transcription failed: ${res.status} ${text.slice(0, 300)}`);
+    await res.body?.cancel().catch(() => {});
+    throw new Error(`Transcription failed: the endpoint answered ${res.status} ${res.statusText}`.trim());
   }
   const data = await res.json();
   const segments: Segment[] = Array.isArray(data?.segments) && data.segments.length

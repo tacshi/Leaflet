@@ -297,9 +297,11 @@ func (h *host) Comment(blockID, quote string) {
 func (h *host) AskAgent(blockID, quote string) {
 	ip := &inlinePrompt{blockID: blockID, quote: quote, selection: true}
 	ip.from, ip.to = editor.Pos{ID: blockID}, editor.Pos{ID: blockID}
-	// Text selected in the page, not in a table's cell, which gives its table.
+	// Text selected in the page, not in a table's cell, which gives its
+	// table. It can span blocks.
 	if from, to := h.a.page.editor.Range(); from.ID == blockID {
 		ip.from, ip.to = from, to
+		ip.blocks = h.a.page.editor.SelectedBlocks()
 	}
 	h.a.dialogs.inline = ip
 }

@@ -6,6 +6,7 @@
 package editor
 
 import (
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -337,19 +338,35 @@ func (e *Editor) folding(id string) *doc.Node {
 	return out
 }
 
-// SelectedText returns the selected text of the focus block, and the
-// block.
+// SelectedText returns the selection's first block, and the selected text
+// of the blocks it spans, a line each.
 func (e *Editor) SelectedText() (string, string) {
-	a, b := e.ordered()
-	n := e.node(a.ID)
-	if n == nil || !n.IsText() {
-		return a.ID, ""
+	a, _ := e.ordered()
+	var lines []string
+	for _, id := range e.SelectedBlocks() {
+		n := e.node(id)
+		if n == nil || !n.IsText() {
+			continue
+		}
+		from, to, _ := e.inSelection(n)
+		lines = append(lines, n.Delta().Slice(from, to).Plain())
 	}
-	end := textLen(n)
-	if b.ID == a.ID {
-		end = b.Off
+	return a.ID, strings.Join(lines, "\n")
+}
+
+// SelectedBlocks returns the blocks the selection spans, in order: the
+// caret's block when it is collapsed.
+func (e *Editor) SelectedBlocks() []string {
+	if e.Collapsed() {
+		return []string{e.focus.ID}
 	}
-	return a.ID, n.Delta().Slice(a.Off, end).Plain()
+	var out []string
+	for _, n := range e.units() {
+		if _, _, ok := e.inSelection(n); ok {
+			out = append(out, n.ID)
+		}
+	}
+	return out
 }
 
 // pushUndo keeps the page as it is before an edit. Typing in one block

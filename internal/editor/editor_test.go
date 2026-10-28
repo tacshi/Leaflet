@@ -168,6 +168,37 @@ func TestSelectionAcrossBlocksDeletes(t *testing.T) {
 	}
 }
 
+func TestSelectionAcrossBlocksForAgent(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("alpha")
+	tt.Key(0, ui.KeyEnter)
+	tt.Type("**beta**")
+	tt.Key(0, ui.KeyEnter)
+	tt.Type("gamma")
+	us := e.units()
+	e.Select(Pos{us[0].ID, 2}, Pos{us[2].ID, 3})
+	id, quote := e.SelectedText()
+	if id != us[0].ID || quote != "pha\nbeta\ngam" {
+		t.Fatalf("selected %q %q", id, quote)
+	}
+	if got := e.SelectedBlocks(); !slices.Equal(got, []string{us[0].ID, us[1].ID, us[2].ID}) {
+		t.Fatalf("blocks %v", got)
+	}
+	// Up to the start of a block leaves that block out.
+	e.Select(Pos{us[0].ID, 0}, Pos{us[2].ID, 0})
+	if got := e.SelectedBlocks(); len(got) != 2 {
+		t.Fatalf("blocks %v", got)
+	}
+	bold := func(a doc.Attrs) bool { return a.Bold }
+	if e.Has(bold) {
+		t.Fatal("bold across blocks with plain text")
+	}
+	e.Select(Pos{us[1].ID, 0}, Pos{us[2].ID, 0})
+	if !e.Has(bold) {
+		t.Fatal("not bold over the bold block")
+	}
+}
+
 func TestSubpageCardOpensPage(t *testing.T) {
 	e, tt, host := setup(t)
 	tt.Type("Intro")

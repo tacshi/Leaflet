@@ -740,41 +740,56 @@ func (e *Editor) Format(has func(doc.Attrs) bool, set func(*doc.Attrs, bool)) {
 		return
 	}
 	a, b := e.ordered()
-	us := e.units()
-	ia, ib := e.index(a.ID), e.index(b.ID)
-	if ia < 0 || ib < 0 {
+	if e.index(a.ID) < 0 || e.index(b.ID) < 0 {
 		return
 	}
 	e.pushUndo(false)
 	all := true
-	each := func(fn func(n *doc.Node, from, to int)) {
-		for i := ia; i <= ib; i++ {
-			n := us[i]
-			if !n.IsText() || n.Type == "code" {
-				continue
-			}
-			from, to := 0, textLen(n)
-			if i == ia {
-				from = a.Off
-			}
-			if i == ib {
-				to = b.Off
-			}
-			if from < to {
-				fn(n, from, to)
-			}
-		}
-	}
-	each(func(n *doc.Node, from, to int) { all = all && n.Delta().All(from, to, has) })
-	each(func(n *doc.Node, from, to int) {
+	e.eachSelected(func(n *doc.Node, from, to int) { all = all && n.Delta().All(from, to, has) })
+	e.eachSelected(func(n *doc.Node, from, to int) {
 		n.SetDelta(n.Delta().Format(from, to, func(at *doc.Attrs) { set(at, !all) }))
 		e.invalidate(n.ID)
 	})
 	e.changed()
 }
 
+// eachSelected calls fn with the selected text of each block the
+// selection spans that takes formats: text, but not code.
+func (e *Editor) eachSelected(fn func(n *doc.Node, from, to int)) {
+	a, b := e.ordered()
+	us := e.units()
+	ia, ib := e.index(a.ID), e.index(b.ID)
+	if ia < 0 || ib < 0 {
+		return
+	}
+	for i := ia; i <= ib; i++ {
+		n := us[i]
+		if !n.IsText() || n.Type == "code" {
+			continue
+		}
+		from, to := 0, textLen(n)
+		if i == ia {
+			from = a.Off
+		}
+		if i == ib {
+			to = b.Off
+		}
+		if from < to {
+			fn(n, from, to)
+		}
+	}
+}
+
 // Has reports whether the whole selection has a format.
 func (e *Editor) Has(has func(doc.Attrs) bool) bool {
+	if a, b := e.ordered(); a.ID != b.ID {
+		all, some := true, false
+		e.eachSelected(func(n *doc.Node, from, to int) {
+			some = true
+			all = all && n.Delta().All(from, to, has)
+		})
+		return some && all
+	}
 	n := e.node(e.focus.ID)
 	if n == nil || !n.IsText() {
 		return false
@@ -786,9 +801,6 @@ func (e *Editor) Has(has func(doc.Attrs) bool) bool {
 		return has(n.Delta().AttrsAt(e.focus.Off))
 	}
 	a, b := e.ordered()
-	if a.ID != b.ID {
-		return false
-	}
 	return n.Delta().All(a.Off, b.Off, has)
 }
 

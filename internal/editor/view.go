@@ -446,8 +446,8 @@ func (e *Editor) overlays(c *ui.Context, pal *theme.Palette) {
 	// The toolbar stays while the focus is in it, or its color picker is
 	// open.
 	if !e.Collapsed() && (e.focused || e.colorOpen || e.bar.FocusWithin(c)) && !e.dragging && !e.ReadOnly {
-		a, b := e.ordered()
-		if n := e.node(a.ID); n != nil && n.IsText() && a.ID == b.ID {
+		a, _ := e.ordered()
+		if n := e.node(a.ID); n != nil && n.IsText() {
 			if cr, ok := e.caretRect(a); ok {
 				e.toolbar(c, cr, pal)
 				return

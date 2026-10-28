@@ -21,7 +21,10 @@ import (
 )
 
 type inlinePrompt struct {
-	blockID   string
+	blockID string
+	// blocks are the blocks a selection spans, when it spans more than
+	// blockID.
+	blocks    []string
 	quote     string
 	selection bool
 	agent     store.ModelChoice
@@ -1116,7 +1119,7 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 				if run != nil && run.Error == "" && run.Reply != "" && len(run.Ops) == 0 {
 					ui.Row(c).Gap(8).Children(func() {
 						if button(c, "insert", "plus", locales.DialogInlineInsert()).Clicked() {
-							a.insertReply(ip.blockID, run.Reply)
+							a.insertReply(ip.focus()[len(ip.focus())-1], run.Reply)
 							a.dialogs.inline = nil
 						}
 					})
@@ -1173,12 +1176,21 @@ func (a *App) insertReply(after, reply string) {
 	})
 }
 
+// short is s on one line, cut to n runes.
 func short(s string, n int) string {
-	rs := []rune(strings.TrimSpace(s))
+	rs := []rune(strings.Join(strings.Fields(s), " "))
 	if len(rs) > n {
 		return string(rs[:n-1]) + "…"
 	}
 	return string(rs)
+}
+
+// focus is the blocks the prompt is about, in order.
+func (ip *inlinePrompt) focus() []string {
+	if len(ip.blocks) > 0 {
+		return ip.blocks
+	}
+	return []string{ip.blockID}
 }
 
 func (a *App) sendInline(ip *inlinePrompt) {
@@ -1196,7 +1208,7 @@ func (a *App) sendInline(ip *inlinePrompt) {
 	}
 	ip.working = true
 	run := a.hub.Start(a.page.id, agents.RunOptions{
-		Surface: surface, Instruction: ip.text, Focus: []string{ip.blockID}, Selection: ip.quote, Agent: agent,
+		Surface: surface, Instruction: ip.text, Focus: ip.focus(), Selection: ip.quote, Agent: agent,
 		Done: func(r *agents.Run) {
 			ip.working = false
 			ip.reply = agents.Describe(r)

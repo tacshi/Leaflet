@@ -58,7 +58,7 @@ func TestReadRefusesNewerAndHalfWrittenFiles(t *testing.T) {
 	if err := os.WriteFile(f.abs("b.json"), []byte(`{"format":1,"id":`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.ReadJSON("b.json", &Device{}); !errors.Is(err, ErrNotReady) {
+	if err := f.ReadJSON("b.json", &Device{}); !errors.Is(err, ErrNotReady) || !errors.Is(err, ErrDamaged) {
 		t.Errorf("half written: %v", err)
 	}
 	if err := f.ReadJSON("c.json", &Device{}); !errors.Is(err, fs.ErrNotExist) {

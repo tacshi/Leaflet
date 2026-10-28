@@ -36,6 +36,10 @@ var (
 	// ErrNotReady is a file's that iCloud has not downloaded yet; it has
 	// been asked to.
 	ErrNotReady = errors.New("icloud: not downloaded yet")
+	// ErrDamaged is, with ErrNotReady, a file's that is here but does not
+	// parse: one iCloud is still writing, or one a crash cut short before
+	// it reached the disk, which stays so.
+	ErrDamaged = errors.New("icloud: does not parse")
 )
 
 // Format is the folder's format, in every file it writes.
@@ -299,8 +303,8 @@ type header struct {
 }
 
 // ReadJSON reads a file into v. A file that does not parse is one iCloud
-// is still writing, and ErrNotReady; one from a newer Leaflet is
-// ErrNewerFormat.
+// is still writing, or one cut short, and both ErrNotReady and ErrDamaged;
+// one from a newer Leaflet is ErrNewerFormat.
 func (f Folder) ReadJSON(rel string, v any) error {
 	data, err := f.Read(rel)
 	if err != nil {
@@ -308,13 +312,13 @@ func (f Folder) ReadJSON(rel string, v any) error {
 	}
 	var h header
 	if err := json.Unmarshal(data, &h); err != nil {
-		return fmt.Errorf("%w: %s: %v", ErrNotReady, rel, err)
+		return fmt.Errorf("%w: %w: %s: %v", ErrNotReady, ErrDamaged, rel, err)
 	}
 	if h.Format > Format {
 		return ErrNewerFormat
 	}
 	if err := json.Unmarshal(data, v); err != nil {
-		return fmt.Errorf("%w: %s: %v", ErrNotReady, rel, err)
+		return fmt.Errorf("%w: %w: %s: %v", ErrNotReady, ErrDamaged, rel, err)
 	}
 	return nil
 }
@@ -351,7 +355,9 @@ func (f Folder) CopyIn(rel, source string) error {
 // write writes a file to Temp and moves it into place, so a device
 // reading the folder never sees half of it. Where Temp is on another disk
 // it writes beside the file instead, under a name that starts with a dot,
-// which readers pass over.
+// which readers pass over. The file reaches the disk before it moves, and
+// the move before write returns: a crash after it, with the database
+// saying the file was written, must not leave it cut short or gone.
 func (f Folder) write(rel string, fill func(io.Writer) error) error {
 	path := f.abs(rel)
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -373,6 +379,10 @@ func (f Folder) write(rel string, fill func(io.Writer) error) error {
 			continue
 		}
 		err = fill(tmp)
+		if err == nil {
+			// On macOS Sync is F_FULLFSYNC, past the disk's own cache.
+			err = tmp.Sync()
+		}
 		if cerr := tmp.Close(); err == nil {
 			err = cerr
 		}
@@ -380,12 +390,24 @@ func (f Folder) write(rel string, fill func(io.Writer) error) error {
 			err = rename(tmp.Name(), path)
 		}
 		if err == nil {
+			syncDir(filepath.Dir(path))
 			return nil
 		}
 		_ = os.Remove(tmp.Name())
 		last = err
 	}
 	return access(last, last)
+}
+
+// syncDir has a move into dir reach the disk, where the system allows it:
+// Windows opens no directory to sync.
+func syncDir(dir string) {
+	d, err := os.Open(dir) // #nosec G304 -- a directory of the Leaflet folder.
+	if err != nil {
+		return
+	}
+	_ = d.Sync()
+	_ = d.Close()
 }
 
 // rename moves a file into place. Windows refuses while another program,

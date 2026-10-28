@@ -1,6 +1,9 @@
 package sysproxy
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 func TestParseServer(t *testing.T) {
 	cases := map[string]settings{
@@ -14,5 +17,14 @@ func TestParseServer(t *testing.T) {
 		if got := parseServer(in); got.HTTP != want.HTTP || got.HTTPS != want.HTTPS || got.SOCKS != want.SOCKS {
 			t.Errorf("%q: %+v, want %+v", in, got, want)
 		}
+	}
+}
+
+func TestParseOverride(t *testing.T) {
+	var s settings
+	parseOverride(&s, "10.*;172.16.*;192.168.*;*.corp.example;<local>")
+	want := []string{"10.0.0.0/8", "172.16.0.0/16", "192.168.0.0/16", ".corp.example"}
+	if !s.Simple || !slices.Equal(s.Bypass, want) {
+		t.Errorf("%+v, want simple hosts and %q", s, want)
 	}
 }

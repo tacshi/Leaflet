@@ -20,16 +20,22 @@ func read() settings {
 	server, _, _ := k.GetStringValue("ProxyServer")
 	s = parseServer(server)
 	override, _, _ := k.GetStringValue("ProxyOverride")
+	parseOverride(&s, override)
+	return s
+}
+
+// parseOverride reads ProxyOverride, the exceptions split by ";", where
+// "<local>" stands for hosts without a dot.
+func parseOverride(s *settings, override string) {
 	for _, h := range strings.Split(override, ";") {
-		switch h = bypass(h); h {
-		case "":
-		case "<local>":
+		switch h = bypass(h); {
+		case h == "":
+		case strings.EqualFold(h, "<local>"):
 			s.Simple = true
 		default:
 			s.Bypass = append(s.Bypass, h)
 		}
 	}
-	return s
 }
 
 // parseServer reads ProxyServer: one "host:port" for every protocol, or

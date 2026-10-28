@@ -330,7 +330,11 @@ func (a *App) start() error {
 		if a.tray != nil && !a.quitting {
 			e.PreventDefault()
 			a.win.Hide()
+			return
 		}
+		// The recording's capture page closes with the window: the
+		// recording ends, keeping what it has.
+		a.rec.Stop()
 	})
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
 	mygo.App.OnActivate(func(visible bool) {

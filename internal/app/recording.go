@@ -66,10 +66,6 @@ func (a *App) recordingPill(c *ui.Context) {
 		}
 		ui.Text(c, label).FontSize(12.5).FontWeight(600).TextColor(pal.DangerText).FontFeatures("tnum")
 		c.After(500 * time.Millisecond)
-		if v := a.rec.View(); v != nil {
-			// The capture page must be in the window to keep running.
-			ui.WebView(c, v).Size(1, 1).Opacity(0.01)
-		}
 		// Before the microphone starts there is nothing to pause.
 		pause := ui.ButtonBase(c.Key("pause")).Size(22, 22).Center().Radius(999).Label(locales.CommonPause()).TextColor(pal.DangerText).
 			Disabled(st.Starting)

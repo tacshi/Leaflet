@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/audio"
 	"github.com/egoist/mygo/ui"
 
@@ -85,6 +86,14 @@ func (a *App) recordingPill(c *ui.Context) {
 			a.rec.Stop()
 		}
 	})
+}
+
+// recView is the recording's capture page, if one is running.
+func (a *App) recView() *mygo.WebView {
+	if a.rec == nil {
+		return nil
+	}
+	return a.rec.View()
 }
 
 // player is the playback of one recording; from is where it starts once

@@ -77,7 +77,7 @@ func (a *App) view(c *ui.Context) {
 	}
 	// The recording's capture page must be in the window to keep running,
 	// whatever the window shows; it is too small to see.
-	if v := a.rec.View(); v != nil {
+	if v := a.recView(); v != nil {
 		ui.WebView(c.Key("rec-capture"), v).Absolute().Left(0).Top(0).Size(1, 1).Opacity(0.01).PassThrough()
 	}
 	a.dialogs.view(c, a)

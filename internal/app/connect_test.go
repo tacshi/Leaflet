@@ -504,7 +504,7 @@ func TestWriteAtomicFollowsLinks(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(real), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(real, []byte("old"), 0o640); err != nil {
+	if err := os.WriteFile(real, []byte("old"), 0o640); err != nil { // #nosec G306 -- a mode the write must keep.
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join("dotfiles", "config.toml"), link); err != nil {
@@ -517,7 +517,8 @@ func TestWriteAtomicFollowsLinks(t *testing.T) {
 		t.Fatalf("the link is gone: %v", err)
 	}
 	fi, err := os.Stat(real)
-	if b, _ := os.ReadFile(real); err != nil || string(b) != "new" || fi.Mode().Perm() != 0o640 {
+	b, _ := os.ReadFile(real) // #nosec G304 -- a file in the test's own temporary folder.
+	if err != nil || string(b) != "new" || fi.Mode().Perm() != 0o640 {
 		t.Errorf("linked file %q, mode %v", b, fi.Mode())
 	}
 }

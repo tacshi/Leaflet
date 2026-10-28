@@ -86,19 +86,24 @@ func codeTheme(pal *theme.Palette) *codeeditor.Theme {
 // codeBarView builds a code block's bar: its language, to choose while
 // editing, and a button that copies the code.
 func (e *Editor) codeBarView(c *ui.Context, n *doc.Node, left float32, hovered bool, pal *theme.Palette) {
-	bar := ui.Row(c.Key("code-bar")).Absolute().Top(codeMargin).Left(left + codePad - 6).Right(codePad - 6).Height(codeBar).AlignItems(ui.Center)
-	bar.Children(func() {
+	// A toolbar's buttons take no face until hovered, so the bar reads as
+	// a label over the code rather than a form above it.
+	ui.Toolbar(c.Key("code-bar"), func() {
 		name := codeLanguageName(n.Str("language"))
 		if e.ReadOnly {
 			ui.Text(c, name).FontSize(12).TextColor(pal.TextMuted).Padding(0, 6)
 		} else {
-			ui.MenuButton(c.Key("language"), name, func(m *ui.Menu) {
+			// Its name lines up with the code, as the read-only label does.
+			lang := ui.MenuButton(c.Key("language"), name, func(m *ui.Menu) {
 				for _, l := range doc.CodeLanguages {
 					if m.Item(codeLanguageName(l.ID)).Checked(l.ID == n.Str("language")).Chosen() {
 						e.SetCodeLanguage(n.ID, l.ID)
 					}
 				}
-			}).Label(locales.EditorCodeLanguage(name)).FontSize(12)
+			}).Label(locales.EditorCodeLanguage(name)).FontSize(12).Padding(4, 6).TextColor(pal.TextMuted)
+			if lang.Hovered() {
+				lang.TextColor(pal.Text)
+			}
 		}
 		ui.Spacer(c)
 		copied := e.copied == n.ID && time.Since(e.copiedAt) < 1500*time.Millisecond
@@ -121,7 +126,7 @@ func (e *Editor) codeBarView(c *ui.Context, n *doc.Node, left float32, hovered b
 			e.services.WriteClipboard(n.Delta().Plain())
 			e.copied, e.copiedAt = n.ID, time.Now()
 		}
-	})
+	}).Label(locales.HostSlashCode()).Absolute().Top(codeMargin).Left(left + codePad - 6).Right(codePad - 6).Height(codeBar).Padding(0).Gap(2)
 }
 
 // inCodeBar reports whether a point in the window is on a code block's

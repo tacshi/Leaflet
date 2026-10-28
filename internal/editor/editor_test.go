@@ -80,6 +80,22 @@ func TestTypingAndEnter(t *testing.T) {
 	}
 }
 
+func TestComposeCommits(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("a")
+	for _, s := range []string{"v", "ve", "ve g", "ve ge"} {
+		tt.Compose(s, len([]rune(s)))
+	}
+	tt.Type("这个")
+	if got := texts(e); len(got) != 1 || got[0] != "paragraph:a这个" {
+		t.Fatalf("committed %v", got)
+	}
+	tt.Type("b")
+	if got := texts(e); got[0] != "paragraph:a这个b" {
+		t.Fatalf("typed after %v", got)
+	}
+}
+
 func TestMarkdownShortcuts(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("# Title")

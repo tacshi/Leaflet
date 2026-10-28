@@ -97,11 +97,16 @@ func isJSON(res *http.Response) bool {
 	return t == "application/json" || strings.HasPrefix(t, "application/") && strings.HasSuffix(t, "+json")
 }
 
+// signInHTTP is the client of OpenAI's sign-in. Its answers are small, so
+// one that takes longer than this has stalled, and would otherwise keep a
+// run waiting on a token.
+var signInHTTP = &http.Client{Timeout: 30 * time.Second}
+
 // getSignInJSON reads one of the sign-in's JSON documents.
 func getSignInJSON(ctx context.Context, u string, v any) error {
 	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
 	req.Header.Set("Accept", "application/json")
-	res, err := http.DefaultClient.Do(req)
+	res, err := signInHTTP.Do(req)
 	if err != nil {
 		return err
 	}
@@ -139,7 +144,7 @@ func postToken(ctx context.Context, endpoint string, form url.Values) (*chatgptT
 	req, _ := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	res, err := http.DefaultClient.Do(req)
+	res, err := signInHTTP.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -362,6 +367,8 @@ func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, no
 
 // ChatGPT runs agent requests on a ChatGPT plan through the Responses API.
 type ChatGPT struct {
+	// mu guards acct, access and expires, never across a request:
+	// Settings reads the account on the main thread while a token renews.
 	mu      sync.Mutex
 	acct    ChatGPTAccount
 	access  string
@@ -370,6 +377,10 @@ type ChatGPT struct {
 	base string
 	// OnRefresh keeps the account as its refresh token rotates.
 	OnRefresh func(ChatGPTAccount)
+	// renewing is held while the access token renews, so calls that need
+	// it at once wait for one renewal rather than each spend the refresh
+	// token.
+	renewing sync.Mutex
 }
 
 // NewChatGPT resumes a sign-in kept from before.
@@ -382,13 +393,25 @@ func (g *ChatGPT) Account() ChatGPTAccount {
 	return g.acct
 }
 
-func (g *ChatGPT) token(ctx context.Context) (string, error) {
+// fresh is the access token while it has a minute or more left.
+func (g *ChatGPT) fresh() (string, bool) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if g.access != "" && time.Now().Before(g.expires.Add(-time.Minute)) {
-		return g.access, nil
+	return g.access, g.access != "" && time.Now().Before(g.expires.Add(-time.Minute))
+}
+
+func (g *ChatGPT) token(ctx context.Context) (string, error) {
+	if tok, ok := g.fresh(); ok {
+		return tok, nil
 	}
-	if g.acct.RefreshToken == "" {
+	g.renewing.Lock()
+	defer g.renewing.Unlock()
+	// Another call may have renewed it while this one waited.
+	if tok, ok := g.fresh(); ok {
+		return tok, nil
+	}
+	acct := g.Account()
+	if acct.RefreshToken == "" {
 		return "", errors.New("Sign in with ChatGPT again in Settings › Agent providers.") //nolint:staticcheck // shown to people as a sentence.
 	}
 	d, err := discover(ctx)
@@ -396,8 +419,8 @@ func (g *ChatGPT) token(ctx context.Context) (string, error) {
 		return "", err
 	}
 	t, err := postToken(ctx, d.TokenEndpoint, url.Values{
-		"grant_type": {"refresh_token"}, "client_id": {g.acct.ClientID},
-		"refresh_token": {g.acct.RefreshToken}, "resource": {chatgptResource},
+		"grant_type": {"refresh_token"}, "client_id": {acct.ClientID},
+		"refresh_token": {acct.RefreshToken}, "resource": {chatgptResource},
 	})
 	if err != nil {
 		if t != nil && t.Error == "invalid_grant" {
@@ -405,6 +428,8 @@ func (g *ChatGPT) token(ctx context.Context) (string, error) {
 		}
 		return "", err
 	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.access, g.expires = t.AccessToken, time.Now().Add(time.Duration(t.ExpiresIn)*time.Second)
 	if t.RefreshToken != "" {
 		g.acct.RefreshToken = t.RefreshToken
@@ -426,7 +451,7 @@ func (g *ChatGPT) SignOut(ctx context.Context) {
 		"token": {acct.RefreshToken}, "token_type_hint": {"refresh_token"}, "client_id": {acct.ClientID},
 	}.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	if res, err := http.DefaultClient.Do(req); err == nil {
+	if res, err := signInHTTP.Do(req); err == nil {
 		_ = res.Body.Close()
 	}
 }

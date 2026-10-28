@@ -72,7 +72,10 @@ catch (e) { m.className = "err"; m.textContent = e.message; }</script></body></h
 // full draws it to fill the frame, up to twice its size, for the page's
 // full screen view: there the wheel moves a zoomed diagram rather than
 // the page, and Escape asks to leave.
-func diagramPage(source string, full bool) string {
+//
+// bg is the color behind it, which its edge labels and notes are set on
+// so lines do not run through their text.
+func diagramPage(source string, bg ui.Color, full bool) string {
 	fill := ""
 	if full {
 		fill = `
@@ -83,7 +86,7 @@ body{padding:0}
 #d svg{width:100%;height:100%}`
 	}
 	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>` + renderedStyle + `
-.pele{--pele-bg:transparent;--pele-fg:#16181d;--pele-muted:#565c67;--pele-line:#3d424c;--pele-surface:#f5f6f8;--pele-surface-alt:#eceef2;--pele-border:#c9ced8;--pele-accent:#3446c9;--pele-fg-on-light:#16181d;--pele-fg-on-dark:#e9ebef;--pele-font:-apple-system,system-ui,sans-serif}
+.pele{--pele-bg:` + hexOf(bg) + `;--pele-fg:#16181d;--pele-muted:#565c67;--pele-line:#3d424c;--pele-surface:#f5f6f8;--pele-surface-alt:#eceef2;--pele-border:#c9ced8;--pele-accent:#3446c9;--pele-fg-on-light:#16181d;--pele-fg-on-dark:#e9ebef;--pele-font:-apple-system,system-ui,sans-serif}
 :root[data-theme="dark"] .pele{--pele-fg:#e9ebef;--pele-muted:#9ea4af;--pele-line:#c0c5ce;--pele-surface:#23272e;--pele-surface-alt:#2b3038;--pele-border:#3a404a;--pele-accent:#8a97ff}
 svg{max-width:100%;height:auto}
 #v{overflow:hidden}
@@ -197,7 +200,7 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 	var page string
 	if n.Type == "diagram" {
 		name, empty, edit = locales.RenderedDiagram(), locales.RenderedWriteDiagram(), locales.RenderedEditDiagram()
-		page = diagramPage(source, false)
+		page = diagramPage(source, pal.Surface, false)
 	} else {
 		page = mathPage(source)
 	}
@@ -301,7 +304,7 @@ func (a *App) fullDiagram(c *ui.Context, n *doc.Node) {
 				a.leaveFullDiagram()
 			}
 		})
-		a.sandbox(c, key, diagramPage(source, true), 0, nil, 0, 0)
+		a.sandbox(c, key, diagramPage(source, pal.Surface, true), 0, nil, 0, 0)
 	})
 	c.OnShortcut(0, ui.KeyEscape, a.leaveFullDiagram)
 }

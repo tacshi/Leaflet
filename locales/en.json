@@ -1188,14 +1188,6 @@
   "@dialogInlineGrammar": {
     "description": "Inline agent prompt on a selection: a suggestion chip, sent to the agent as the instruction."
   },
-  "dialogInlineList": "Turn into a list",
-  "@dialogInlineList": {
-    "description": "Inline agent prompt on a selection: a suggestion chip, sent to the agent as the instruction."
-  },
-  "dialogInlineChart": "Chart these numbers",
-  "@dialogInlineChart": {
-    "description": "Inline agent prompt on a selection: a suggestion chip, sent to the agent as the instruction."
-  },
   "dialogInlinePlaceholder": "Ask the agent to write, rewrite or explain…",
   "@dialogInlinePlaceholder": {
     "description": "Inline agent prompt: the field's placeholder."

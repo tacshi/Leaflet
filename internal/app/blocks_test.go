@@ -38,7 +38,7 @@ func TestRenderedPages(t *testing.T) {
 		t.Fatal("Pele's render function was not found")
 	}
 	// Source goes in as a string the page cannot break out of.
-	page := diagramPage("graph TD\n  A[</script><b>x</b>]-->B", false)
+	page := diagramPage("graph TD\n  A[</script><b>x</b>]-->B", ui.Hex("#FFFFFF"), false)
 	if strings.Contains(page, "</script><b>") || strings.Contains(page, "<b>x</b>") {
 		t.Error("diagram source not escaped")
 	}
@@ -46,7 +46,11 @@ func TestRenderedPages(t *testing.T) {
 	if strings.Contains(page, "const full = true") || strings.Contains(page, "#v{height:100%}") {
 		t.Error("inline diagram page fills its frame")
 	}
-	if full := diagramPage("graph TD\n  A-->B", true); !strings.Contains(full, "const full = true") || !strings.Contains(full, "#v{height:100%}") {
+	// Edge labels sit on the color behind the diagram, over the lines.
+	if !strings.Contains(page, "--pele-bg:#ffffff") {
+		t.Error("diagram labels have no background")
+	}
+	if full := diagramPage("graph TD\n  A-->B", ui.Hex("#FFFFFF"), true); !strings.Contains(full, "const full = true") || !strings.Contains(full, "#v{height:100%}") {
 		t.Error("full screen diagram page does not fill its frame")
 	}
 	if page := mathPage(`\frac{a}{b}`); !strings.Contains(page, `"\\frac{a}{b}"`) || !strings.Contains(page, "katex.render(") {

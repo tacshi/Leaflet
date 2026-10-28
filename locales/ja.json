@@ -235,8 +235,6 @@
   "dialogInlineExplain": "説明して",
   "dialogInlineShorter": "短くして",
   "dialogInlineGrammar": "文法を直して",
-  "dialogInlineList": "リストにして",
-  "dialogInlineChart": "この数値をグラフにして",
   "dialogInlinePlaceholder": "エージェントに執筆・書き直し・説明を依頼…",
   "dialogInlineSend": "送信",
   "storeSearchRecording": "録音 · {title}",

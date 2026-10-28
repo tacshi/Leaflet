@@ -182,20 +182,30 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 
 ## Build and release
 
-`go tool mygo build` builds the app into `build/`. The scripts build for
-macOS by default, or for Windows with `--win`:
+`go tool mygo build` builds the app into `build/`. The release scripts
+build for macOS and Windows unless `--mac` or `--win` picks one; the debug
+script builds for macOS, or for Windows with `--win`:
 
 | Script | Builds |
 | --- | --- |
 | `scripts/build-debug.sh [--mac\|--win] [--open]` | A debug build named Leaflet Debug, with its own identifier and data folder, that never updates itself, so it runs beside a release copy |
 | `scripts/build-release.sh [--mac] [--win] [<version>]` | Signed and notarized disk images for Apple silicon, Intel and universal, and installers for Windows x64 and arm64, with signed update archives |
-| `scripts/publish.sh <version> [--mac] [--win] [--dry-run]` | A GitHub release: checks, release notes from `CHANGELOG.md`, the build, the tag and publishing |
+| `scripts/publish.sh <version> [--mac\|--win] [--dry-run]` | A GitHub release for macOS and Windows, or the one named: checks, release notes from `CHANGELOG.md`, the build, the tag and publishing |
 
-Run any script with `--help` for its options. macOS releases need a
-Developer ID Application identity and a `notarytool` keychain profile,
-Windows installers need NSIS (`brew install makensis`), and every release
-needs the update signing key; `scripts/build-release.sh --help` explains
-each one.
+On Windows, the PowerShell 7 scripts build the Windows app on that machine.
+MyGo downloads NSIS if it isn't installed, and signing uses `signtool` from
+the Windows SDK:
+
+| Script | Builds |
+| --- | --- |
+| `scripts\build-debug.ps1 [-Arch arm64\|x64] [-Open]` | Leaflet Debug, as `build-debug.sh --win` does |
+| `scripts\build-release.ps1 [<version>] [-Arch …] [-Upload]` | The x64 and arm64 installers with signed update archives, as `build-release.sh --win` does |
+
+Run any script with `--help` for its options, or `Get-Help` for a `.ps1`
+one. macOS releases need a Developer ID Application identity and a
+`notarytool` keychain profile, Windows installers need NSIS (`brew install
+makensis`), and every release needs the update signing key;
+`scripts/build-release.sh --help` explains each one.
 
 ## Development
 

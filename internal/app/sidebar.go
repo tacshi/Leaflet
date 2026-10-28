@@ -14,7 +14,7 @@ func (a *App) sidebar(c *ui.Context) {
 	pal := theme.Of(c)
 	bar := c.TitleBar()
 	// The window controls sit at the top left.
-	ui.Row(c.Key("sidebar-top")).Height(max(bar.Height, 46)).Padding(0, 8, 0, bar.Left+8).Gap(2).AlignItems(ui.Center).DragWindow().Children(func() {
+	ui.Row(c.Key("sidebar-top")).Height(max(bar.Height, headerHeight)).Padding(0, 8, 0, bar.Left+8).Gap(2).AlignItems(ui.Center).DragWindow().Children(func() {
 		ui.Spacer(c)
 		tools(c, func() {
 			if iconButton(c, "search", "search", locales.SidebarSearch()).Clicked() {

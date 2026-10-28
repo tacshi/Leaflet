@@ -85,6 +85,9 @@ type App struct {
 	panelOpen bool
 	panelW    float32
 	panelTab  int
+	// panelTabsW is how wide the panel's tabs were last frame, which the
+	// panel keeps room for.
+	panelTabsW float32
 	// settingsOpen shows Settings over the window, at settingsSection.
 	settingsOpen    bool
 	settingsSection string
@@ -304,8 +307,10 @@ func (a *App) start() error {
 		MinHeight:     480,
 		StateKey:      "main",
 		TitleBarStyle: mygo.TitleBarHidden,
-		// Centred in the 46pt header rows, in line with their buttons.
+		// Centred in the header rows, in line with their buttons: the
+		// traffic lights on macOS, the window buttons on Windows and Linux.
 		TrafficLightPosition: &mygo.Point{X: 9, Y: 16},
+		TitleBarHeight:       headerHeight,
 		Vibrancy:             mygo.VibrancySidebar,
 		Content:              ui.View(a.view),
 	})

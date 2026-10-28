@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -83,7 +84,8 @@ func TestConnectCodexWithoutCLI(t *testing.T) {
 	if !s.current(testExe, testDir) || strings.Count(string(raw), "[mcp_servers.leaflet") != 1 || !strings.HasPrefix(string(raw), "model = \"o3\"\n\n[mcp_servers.leaflet]") {
 		t.Errorf("connected:\n%s", raw)
 	}
-	if fi, _ := os.Stat(path); fi.Mode().Perm() != 0o600 {
+	// Windows has no such permissions.
+	if fi, _ := os.Stat(path); runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
 		t.Errorf("mode %v", fi.Mode().Perm())
 	}
 	if err := disconnectAgent("codex", "", env); err != nil {
@@ -201,8 +203,13 @@ func TestClientOf(t *testing.T) {
 
 func TestFindCLI(t *testing.T) {
 	env := testEnv(t)
+	// The tools as each system names them.
+	tool, onPath := filepath.Join("claude.app", "Contents", "MacOS", "claude"), "claude"
+	if runtime.GOOS == "windows" {
+		tool, onPath = "claude.exe", "claude.cmd"
+	}
 	for _, v := range []string{"2.1.99", "2.1.308", "2.1.304"} {
-		p := filepath.Join(env.config, "Claude", "claude-code", v, "abc", "claude.app", "Contents", "MacOS", "claude")
+		p := filepath.Join(env.config, "Claude", "claude-code", v, "abc", tool)
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -218,11 +225,31 @@ func TestFindCLI(t *testing.T) {
 	if err := os.MkdirAll(bin, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(bin, "claude"), nil, 0o700); err != nil { // #nosec G306 -- a stand-in for an app's tool, which must run.
+	if err := os.WriteFile(filepath.Join(bin, onPath), nil, 0o700); err != nil { // #nosec G306 -- a stand-in for an app's tool, which must run.
 		t.Fatal(err)
 	}
-	if got := findCLI("claude", env); got != filepath.Join(bin, "claude") {
+	if got := findCLI("claude", env); got != filepath.Join(bin, onPath) {
 		t.Errorf("on PATH: %s", got)
+	}
+}
+
+func TestHasAppOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows installs")
+	}
+	env := testEnv(t)
+	codex, cursor := agentApps[2], agentApps[5]
+	if hasApp(codex, env.home) || hasApp(cursor, env.home) {
+		t.Fatal("found apps in an empty home")
+	}
+	// The Microsoft Store's Codex, and Cursor's installer's.
+	for _, d := range []string{`Packages\OpenAI.Codex_2p2nqsd0c76g0`, `Programs\cursor`} {
+		if err := os.MkdirAll(filepath.Join(env.home, "AppData", "Local", d), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !hasApp(codex, env.home) || !hasApp(cursor, env.home) {
+		t.Error("missed installed apps")
 	}
 }
 

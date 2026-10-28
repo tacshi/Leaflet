@@ -2,10 +2,10 @@
 # Builds Leaflet's release installers, with the signed update archives,
 # deltas and manifests that installed copies update from.
 #
-#   scripts/build-release.sh                  # macOS, the version in mygo.json
+#   scripts/build-release.sh                  # macOS and Windows, the version in mygo.json
 #   scripts/build-release.sh 0.2.0            # another version
-#   scripts/build-release.sh --win            # Windows
-#   scripts/build-release.sh --mac --win      # both
+#   scripts/build-release.sh --mac            # macOS only
+#   scripts/build-release.sh --win            # Windows only
 #   scripts/build-release.sh --arch arm64     # only some: arm64, x64, universal
 #   scripts/build-release.sh --skip-notarize  # macOS signed, not notarized (faster)
 #   scripts/build-release.sh -o out           # another output directory
@@ -15,7 +15,8 @@
 # The installers go to build/release: Leaflet-<version>-{arm64,x64,universal}.dmg
 # for macOS (Apple silicon, Intel, both) and Leaflet-<version>-{x64,arm64}-setup.exe
 # for Windows, beside a folder per platform with the app and its updates.
-# --arch picks among each platform's: universal is macOS only. --upload puts
+# --arch picks among each platform's: universal is macOS only, so
+# --arch universal alone builds macOS only. --upload puts
 # them all in the draft release v<version> of tacshi/Leaflet, with gh;
 # installed copies see the update once the draft is published.
 #
@@ -72,7 +73,7 @@ while (($#)); do
 		shift
 		;;
 	-h | --help)
-		sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
+		sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
 		exit 0
 		;;
 	-*) die "unknown option: $1" ;;
@@ -83,7 +84,13 @@ while (($#)); do
 	esac
 	shift
 done
-$MAC || $WIN || MAC=true
+# Both, unless one is asked for.
+PICKED=true
+if ! $MAC && ! $WIN; then
+	MAC=true
+	WIN=true
+	PICKED=false
+fi
 
 [[ "$(uname -s)" == "Darwin" ]] || die "releases are built on macOS"
 for tool in go python3; do
@@ -113,7 +120,10 @@ for arch in ${ARCHES[@]+"${ARCHES[@]}"}; do
 done
 if $MAC && ((${#MAC_ARCHES[@]} == 0)); then MAC_ARCHES=(arm64 x64 universal); fi
 if $WIN && ((${#ARCHES[@]} == 0)); then WIN_ARCHES=(x64 arm64); fi
-if $WIN && ((${#WIN_ARCHES[@]} == 0)); then die "Windows has no universal build; --arch arm64 or x64"; fi
+if $WIN && ((${#WIN_ARCHES[@]} == 0)); then
+	$PICKED && die "Windows has no universal build; --arch arm64 or x64"
+	WIN=false
+fi
 
 PLATFORMS=()
 goarch() { if [[ "$1" == x64 ]]; then echo amd64; else echo "$1"; fi; }

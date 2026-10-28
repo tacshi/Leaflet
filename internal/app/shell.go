@@ -47,12 +47,14 @@ func (a *App) view(c *ui.Context) {
 		// MyGo's split sizes its first pane, the page: the panel gets the
 		// rest, so its width is kept and the page's follows from it.
 		room := a.pageRoom(c)
+		minW := a.panelMinW(c)
+		a.panelW = min(max(a.panelW, minW), panelMax)
 		mainW := room - a.panelW - 1
 		split := ui.Split(c, &mainW, main, func() {
 			ui.Column(c.Key("panel")).Fill().Background(pal.Panel).Children(func() { a.panel(c) })
 		}).Fill()
 		if split.Changed() {
-			a.panelW = min(max(room-mainW-1, panelMin), panelMax)
+			a.panelW = min(max(room-mainW-1, minW), panelMax)
 			a.saveWidthsSoon()
 		}
 	}
@@ -80,11 +82,26 @@ func (a *App) view(c *ui.Context) {
 	a.toastView(c)
 }
 
+// headerHeight is the height of the rows along the top of the window, the
+// title bar the window controls sit in.
+const headerHeight = 46
+
 // The sidebar's and the panel's widths stay between these.
 const (
 	sidebarMin, sidebarMax = 200, 420
 	panelMin, panelMax     = 280, 640
 )
+
+// The panel's top bar pads its tabs by these.
+const panelTopPadL, panelTopPadR = 12, 10
+
+// panelMinW is the narrowest the panel goes: panelMin, or wider when its
+// top bar needs it for the tabs, in a longer language, and the window
+// controls at its right end (Windows, Linux). It stays below panelMax.
+func (a *App) panelMinW(c *ui.Context) float32 {
+	top := panelTopPadL + a.panelTabsW + c.TitleBar().Right + panelTopPadR
+	return min(max(panelMin, top), panelMax)
+}
 
 var widthsTimer *time.Timer
 
@@ -146,15 +163,19 @@ func (a *App) main(c *ui.Context) {
 }
 
 // titleBar is the strip at the top of the main area: the window's drag
-// region, with the window controls' room when the sidebar is hidden.
+// region, with the window controls' room at the left when the sidebar is
+// hidden, and at the right (Windows, Linux) when the panel is.
 func (a *App) titleBar(c *ui.Context, fn func()) {
 	pal := theme.Of(c)
 	bar := c.TitleBar()
-	left := float32(12)
+	left, right := float32(12), float32(12)
 	if !a.settings.SidebarOpen {
 		left = bar.Left + 12
 	}
-	ui.Row(c.Key("titlebar")).Height(max(bar.Height, 46)).Padding(0, 12, 0, left).Gap(4).AlignItems(ui.Center).
+	if !a.panelShown() {
+		right = bar.Right + 12
+	}
+	ui.Row(c.Key("titlebar")).Height(max(bar.Height, headerHeight)).Padding(0, right, 0, left).Gap(4).AlignItems(ui.Center).
 		DragWindow().BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
 		tools(c, func() {
 			if !a.settings.SidebarOpen {

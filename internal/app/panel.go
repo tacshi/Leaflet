@@ -18,22 +18,16 @@ import (
 func (a *App) panel(c *ui.Context) {
 	pal := theme.Of(c)
 	bar := c.TitleBar()
-	ui.Row(c.Key("panel-top")).Height(max(bar.Height, 46)).Padding(0, 10, 0, 12).Gap(6).AlignItems(ui.Center).DragWindow().
+	// Only the tabs: the window controls sit at the top right on Windows
+	// and Linux, and the page's title bar has the panel's toggle.
+	ui.Row(c.Key("panel-top")).Height(max(bar.Height, headerHeight)).Padding(0, bar.Right+panelTopPadR, 0, panelTopPadL).AlignItems(ui.Center).DragWindow().
 		BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
 		// MyGo's tabs, as high as the bar, so the chosen one's line is on
-		// the bar's bottom edge.
-		ui.Tabs(c.Key("panel-tab"), &a.panelTab, locales.CommonAgent(), locales.PanelTabComments(), locales.PanelTabOutline()).FillHeight().AlignItems(ui.Stretch)
+		// the bar's bottom edge. They keep their width, which panelMinW
+		// keeps the panel wide enough for.
+		tabs := ui.Tabs(c.Key("panel-tab"), &a.panelTab, locales.CommonAgent(), locales.PanelTabComments(), locales.PanelTabOutline()).FillHeight().AlignItems(ui.Stretch).Shrink(0)
+		a.panelTabsW = tabs.Bounds().W
 		ui.Spacer(c)
-		tools(c, func() {
-			if a.panelTab == 0 {
-				if iconButton(c, "new-chat", "message-square-plus", locales.PanelNewConversation()).Clicked() {
-					a.hub.NewConversation(a.page.id)
-				}
-			}
-			if iconButton(c, "hide-panel", "panel-right", locales.PanelHide()).Clicked() {
-				a.panelOpen = false
-			}
-		})
 	})
 	switch a.panelTab {
 	case 0:
@@ -133,6 +127,11 @@ func (a *App) agentPanel(c *ui.Context) {
 			}
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				a.agentPicker(c, sess, options)
+				tools(c, func() {
+					if iconButton(c, "new-chat", "message-square-plus", locales.PanelNewConversation()).Clicked() {
+						a.hub.NewConversation(ps.id)
+					}
+				})
 				ui.Spacer(c)
 				b := primary(c, "send", "arrow-up", "").Size(28, 28).Padding(0).Label(locales.PanelSend())
 				b.Disabled(strings.TrimSpace(cs.draft) == "" || sess.Running)

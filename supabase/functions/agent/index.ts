@@ -308,7 +308,15 @@ async function runJob(
       }
     }
 
-    const crossPage = job.request?.allow_cross_page !== false;
+    // Other pages are offered only on a page that is the caller's alone: on
+    // a shared page, someone else's writing could have the agent read the
+    // caller's other pages into it.
+    let crossPage = job.request?.allow_cross_page === true;
+    if (crossPage) {
+      const { data: members, error: membersError } = await uc.rpc("page_members", { p_page_id: page.id });
+      crossPage = !membersError && Array.isArray(members) && members.length > 0 &&
+        members.every((m: { user_id: string }) => m.user_id === user.id);
+    }
     let toolsEnabled = provider.supports_tools !== false;
 
     // --- tools ----------------------------------------------------------
@@ -347,14 +355,15 @@ async function runJob(
         return { id, space_id: page.space_id, parent_id: page.id, title, sort_key: sortKey };
       },
       listPages: async (): Promise<PageSummary[]> => (await rows<PageSummary>(
-        uc.from("pages").select("id, title, parent_id").is("deleted_at", null).eq("is_template", false)
-          .neq("id", page.id).limit(500),
+        uc.from("pages").select("id, title, parent_id").eq("space_id", page.space_id).is("deleted_at", null)
+          .eq("is_template", false).neq("id", page.id).limit(500),
       )),
       readOtherPage: async (otherId: string) => {
         const { data: other } = await uc
           .from("pages")
           .select("id, title")
           .eq("id", otherId)
+          .eq("space_id", page.space_id)
           .is("deleted_at", null)
           .maybeSingle();
         if (!other) throw new ToolError(`No page with id "${otherId}" that you can read`);

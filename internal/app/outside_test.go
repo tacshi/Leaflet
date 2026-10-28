@@ -170,3 +170,62 @@ func TestSaveFailsAndRaces(t *testing.T) {
 		t.Error("a save that failed dropped the edits")
 	}
 }
+
+// Leaving a page whose edits fail to save keeps it open with them, rather
+// than dropping them; once saving works, it closes with them stored.
+func TestLeavingAPageThatCannotSave(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	be := remote.New(remote.Config(), st)
+	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
+	a.reloadAll()
+	a.openPage(p.ID)
+	if a.page == nil {
+		t.Fatal("the page did not open")
+	}
+	typed := &doc.Node{ID: "t1", Type: "paragraph"}
+	typed.SetDelta(doc.FromMarkdown("typed"))
+	a.page.editor.Content.Children = append(a.page.editor.Content.Children, typed)
+	a.page.dirty = true
+
+	full := []string{
+		`CREATE TRIGGER full_insert BEFORE INSERT ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`,
+		`CREATE TRIGGER full_update BEFORE UPDATE ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`,
+	}
+	for _, q := range full {
+		if _, err := st.DB().Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.openPage(other.ID)
+	if a.page == nil || a.page.id != p.ID || a.route.ID != p.ID || a.page.editor.Content.Find("t1") == nil {
+		t.Fatalf("left the page with its edits unsaved: route %+v", a.route)
+	}
+
+	for _, q := range []string{`DROP TRIGGER full_insert`, `DROP TRIGGER full_update`} {
+		if _, err := st.DB().Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.openPage(other.ID)
+	if a.page == nil || a.page.id != other.ID {
+		t.Fatal("did not leave the page once it saved")
+	}
+	if st.Content(p.ID).Find("t1") == nil {
+		t.Error("the edits were not stored")
+	}
+}

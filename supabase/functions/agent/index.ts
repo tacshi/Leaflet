@@ -281,8 +281,11 @@ async function runJob(
         )
       ) names.set(p.id, p.display_name);
     }
+    // Anyone who can comment can post an agent comment (agents on devices
+    // reply through their user), so an agent comment names who asked.
+    const personOf = (c: CommentRow) => (c.author_id && names.get(c.author_id)) || "Someone";
     const authorOf = (c: CommentRow) =>
-      c.author_kind === "agent" ? (c.agent_name || "Agent") : (c.author_id && names.get(c.author_id)) || "Someone";
+      c.author_kind === "agent" ? `${c.agent_name || "Agent"} (agent, asked by ${personOf(c)})` : personOf(c);
 
     const threadsFor = (list: CommentRow[]) => {
       const roots = list.filter((c) => !c.parent_comment_id);
@@ -547,8 +550,11 @@ async function runJob(
     if (jobError) console.error("ai_jobs:", jobError.message);
 
     if (job.surface === "comment" && threadRoot) {
-      const { error: replyError } = await uc.from("comments").insert({
+      // The service role posts the reply: comments_guard pins author_id to the
+      // caller on client inserts, and here it names the user who asked.
+      const { error: replyError } = await sc.from("comments").insert({
         page_id: page.id,
+        author_id: user.id,
         block_id: threadRoot.block_id,
         parent_comment_id: threadRoot.id,
         author_kind: "agent",

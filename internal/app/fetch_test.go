@@ -1,7 +1,11 @@
 package app
 
 import (
+	"bytes"
 	"errors"
+	"image"
+	"image/color"
+	"image/gif"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -88,4 +92,66 @@ func TestImageCacheFailure(t *testing.T) {
 		t.Error("a picture tried again still says it failed")
 	}
 	<-again
+}
+
+// An animated GIF gets a player, looping, for each block that shows it,
+// made off the main thread; a GIF of one frame stays a picture.
+func TestAnimatedGIFPlays(t *testing.T) {
+	root := t.TempDir()
+	ic := newImageCache(root, filepath.Join(root, "images"))
+	frame := func(c color.Gray) *image.Paletted {
+		f := image.NewPaletted(image.Rect(0, 0, 4, 2), color.Palette{color.Black, color.White})
+		f.Set(0, 0, c)
+		return f
+	}
+	write := func(name string, frames int) string {
+		g := &gif.GIF{Config: image.Config{Width: 4, Height: 2}}
+		for i := range frames {
+			g.Image = append(g.Image, frame(color.Gray{Y: uint8(255 * (i % 2))}))
+			g.Delay = append(g.Delay, 5)
+		}
+		var b bytes.Buffer
+		if err := gif.EncodeAll(&b, g); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return "file://" + path
+	}
+	load := func(url string) {
+		done := make(chan struct{})
+		ic.get(url, func() { close(done) })
+		<-done
+		if ic.get(url, nil) == nil {
+			t.Fatalf("%s did not load", url)
+		}
+	}
+	moving, still := write("moving.gif", 3), write("still.gif", 1)
+	load(moving)
+	load(still)
+	if ic.player(still, "b1", func() { t.Error("a player for a still GIF") }) != nil {
+		t.Error("a still GIF has a player")
+	}
+	made := make(chan struct{})
+	if ic.player(moving, "b1", func() { close(made) }) != nil {
+		t.Fatal("a player made at once, on the main thread")
+	}
+	<-made
+	p := ic.player(moving, "b1", nil)
+	if p == nil || !p.Loop() {
+		t.Fatalf("player %v", p)
+	}
+	if w, h := p.Size(); w != 4 || h != 2 {
+		t.Errorf("player size %d×%d", w, h)
+	}
+	other := make(chan struct{})
+	if ic.player(moving, "b2", func() { close(other) }) != nil {
+		t.Fatal("another block shares the first one's player")
+	}
+	<-other
+	if q := ic.player(moving, "b2", nil); q == nil || q == p {
+		t.Errorf("second block's player %p, first's %p", q, p)
+	}
 }

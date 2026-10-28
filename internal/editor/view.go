@@ -34,7 +34,7 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 			e.geom[id] = ui.Rect{X: r.X + b.X, Y: r.Y + b.Y, W: b.W, H: b.H}
 		}
 	})
-	root.ContextMenu(func(m *ui.Menu) {
+	root.PopoverMenu(func(m *ui.Menu) {
 		if e.colored() && m.Item(locales.EditorRemoveColor()).Chosen() {
 			e.SetColor("")
 			e.SetHighlight("")
@@ -355,7 +355,7 @@ func mediaLink(href string) string {
 }
 
 func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
-	pic, failed := e.Host.Image(n)
+	pic, video, failed := e.Host.Image(n)
 	if pic == nil {
 		label := locales.EditorLoadingImage()
 		if failed {
@@ -379,6 +379,12 @@ func (e *Editor) imageBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 		row.Justify(ui.Center)
 	}
 	row.Children(func() {
+		// An animated GIF plays once its player is made, from the frame
+		// its picture shows.
+		if video != nil {
+			ui.Video(c, video).Size(dw, dh).Fit(ui.Contain).Radius(6).Label(n.Str("alt"))
+			return
+		}
 		ui.Image(c, pic).Size(dw, dh).Fit(ui.Contain).Radius(6).Label(n.Str("alt"))
 	})
 }

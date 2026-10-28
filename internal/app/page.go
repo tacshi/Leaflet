@@ -413,7 +413,7 @@ func (a *App) emptyActions(c *ui.Context) {
 				}
 			})
 			if menu != nil {
-				b.ContextMenu(menu)
+				b.PopoverMenu(menu)
 			}
 			if b.Clicked() {
 				fn()

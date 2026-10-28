@@ -47,8 +47,10 @@ type Host interface {
 	PageTitle(id string) string
 	OpenPage(id string)
 	// Image returns an image block's picture, a bitmap or an SVG, or nil
-	// while it loads or when it failed to load, as failed says.
-	Image(n *doc.Node) (pic ui.ImageSource, failed bool)
+	// while it loads or when it failed to load, as failed says; for an
+	// animated GIF, also its player, once made, which plays it in the
+	// block.
+	Image(n *doc.Node) (pic ui.ImageSource, video *ui.VideoPlayer, failed bool)
 	// Embed builds the web view of an embed block.
 	Embed(c *ui.Context, n *doc.Node, width float32)
 	// Video builds a video block.

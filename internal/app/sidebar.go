@@ -263,7 +263,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 				button("more", "ellipsis", locales.SidebarFolderActions()).Menu(func(m *ui.Menu) { a.folderMenu(m, f) })
 			})
 		})
-		row.ContextMenu(func(m *ui.Menu) { a.folderMenu(m, f) })
+		row.PopoverMenu(func(m *ui.Menu) { a.folderMenu(m, f) })
 		a.pageDrop(c, row, key)
 	case "page":
 		p := a.pageByID(id)
@@ -285,7 +285,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 				button("more", "ellipsis", locales.PageActions()).Menu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
 			})
 		})
-		row.ContextMenu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
+		row.PopoverMenu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
 		// A drag source takes the press from the list, so a click on it
 		// opens the page itself.
 		if a.canEdit(id) {
@@ -309,7 +309,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			ui.Icon(c, theme.Icon("file")).FontSize(15)
 			ui.Text(c, f.Name).FontSize(13.5).Grow(1).SingleLine().Tooltip(f.Name)
 		})
-		row.ContextMenu(func(m *ui.Menu) {
+		row.PopoverMenu(func(m *ui.Menu) {
 			if m.Item(locales.CommonOpen()).Chosen() && f.LocalPath != "" {
 				a.openFile(f)
 			}

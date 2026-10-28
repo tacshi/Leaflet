@@ -139,7 +139,7 @@ func (a *App) tagItem(c *ui.Context, key string, counts map[string]int) {
 			})
 			ui.Text(c, strconv.Itoa(counts[tag])).FontSize(12).TextColor(pal.TextMuted).Padding(0, 4)
 		})
-		row.ContextMenu(func(m *ui.Menu) { a.tagMenu(m, tag) })
+		row.PopoverMenu(func(m *ui.Menu) { a.tagMenu(m, tag) })
 		return
 	}
 	id, _ := taggedPage(key)
@@ -154,7 +154,7 @@ func (a *App) tagItem(c *ui.Context, key string, counts map[string]int) {
 			title.TextColor(pal.TextMuted)
 		}
 	})
-	row.ContextMenu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
+	row.PopoverMenu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
 }
 
 // tagMenu is a tag's actions: renaming it, and taking it off every page.

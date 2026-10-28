@@ -41,8 +41,8 @@ func TestTextColorAndHighlight(t *testing.T) {
 	// Remove color, from the context menu, takes both away.
 	r := e.geom[n.ID]
 	tt.RightClickAt(r.X+20, r.Y+r.H/2)
-	if err := tt.ChooseMenuItem("Remove color"); err != nil {
-		t.Fatalf("%v; menu %v", err, tt.Menu())
+	if err := chooseDrawn(tt, "Remove color"); err != nil {
+		t.Fatalf("%v; shown %v", err, tt.Texts())
 	}
 	if d := n.Delta(); len(d) != 1 || !d[0].Attrs.Zero() {
 		t.Errorf("after Remove color %+v", d)

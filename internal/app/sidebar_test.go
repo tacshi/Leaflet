@@ -344,6 +344,16 @@ func TestSidebarTabs(t *testing.T) {
 	if !tt.HasText("work") || !tt.HasText("daily") || tt.HasText("Untagged") || tt.HasText("Plan") {
 		t.Fatalf("Tags tab shows %v", tt.Texts())
 	}
+	// A tag's menu is drawn in the window, in the app's look.
+	if err := tt.RightClick("daily"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if !tt.HasText("Rename…") || !tt.HasText("Delete tag") {
+		t.Fatalf("a tag's menu shows %v", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
 	if err := tt.Click("work"); err != nil {
 		t.Fatal(err)
 	}

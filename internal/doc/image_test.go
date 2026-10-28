@@ -5,6 +5,7 @@ import "testing"
 func TestImageLink(t *testing.T) {
 	for s, want := range map[string]bool{
 		"https://example.com/a.png":           true,
+		"https://example.com/logo.svg":        true,
 		" https://example.com/b/c.JPEG?x=1 ":  true,
 		"http://example.com/d.webp#frag":      true,
 		"https://example.com/page":            false,

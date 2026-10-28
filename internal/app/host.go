@@ -79,7 +79,7 @@ type host struct{ a *App }
 
 func (h *host) PageTitle(id string) string { return h.a.pageTitleOf(id) }
 func (h *host) OpenPage(id string)         { h.a.openPage(id) }
-func (h *host) Image(n *doc.Node) (*ui.Bitmap, bool) {
+func (h *host) Image(n *doc.Node) (ui.ImageSource, bool) {
 	redraw := func() { h.a.update(func() {}) }
 	url := n.Str("url")
 	// An uploaded picture is found by its file: its url is a path on the
@@ -614,11 +614,12 @@ func (a *App) loadMembers(pageID string) {
 // imageCache loads the pictures of image blocks; root is the app's data
 // folder, the only one it reads files from.
 type imageCache struct {
-	root    string
-	dir     string
-	mu      sync.Mutex
-	bitmaps map[string]*ui.Bitmap
-	loading map[string]bool
+	root string
+	dir  string
+	mu   sync.Mutex
+	// pictures are bitmaps, or SVGs, which MyGo draws itself.
+	pictures map[string]ui.ImageSource
+	loading  map[string]bool
 	// failed holds when a picture last failed to load.
 	failed map[string]time.Time
 }
@@ -628,15 +629,15 @@ type imageCache struct {
 const imageRetry = time.Minute
 
 func newImageCache(root, dir string) *imageCache {
-	return &imageCache{root: root, dir: dir, bitmaps: map[string]*ui.Bitmap{}, loading: map[string]bool{}, failed: map[string]time.Time{}}
+	return &imageCache{root: root, dir: dir, pictures: map[string]ui.ImageSource{}, loading: map[string]bool{}, failed: map[string]time.Time{}}
 }
 
 // get returns a picture, or nil while it loads; done runs when it has
 // loaded or failed.
-func (ic *imageCache) get(url string, done func()) *ui.Bitmap {
+func (ic *imageCache) get(url string, done func()) ui.ImageSource {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
-	if b, ok := ic.bitmaps[url]; ok {
+	if b, ok := ic.pictures[url]; ok {
 		return b
 	}
 	if ic.loading[url] || url == "" {
@@ -648,9 +649,9 @@ func (ic *imageCache) get(url string, done func()) *ui.Bitmap {
 	ic.loading[url] = true
 	go func() {
 		data, err := ic.read(url)
-		var b *ui.Bitmap
+		var b ui.ImageSource
 		if err == nil {
-			b, err = ui.DecodeBitmap(data)
+			b, err = decodePicture(data)
 		}
 		if err != nil {
 			log.Printf("image %s: %v", url, err)
@@ -658,7 +659,7 @@ func (ic *imageCache) get(url string, done func()) *ui.Bitmap {
 		ic.mu.Lock()
 		delete(ic.loading, url)
 		if b != nil {
-			ic.bitmaps[url] = b
+			ic.pictures[url] = b
 			delete(ic.failed, url)
 		} else {
 			ic.failed[url] = time.Now()
@@ -667,6 +668,20 @@ func (ic *imageCache) get(url string, done func()) *ui.Bitmap {
 		done()
 	}()
 	return nil
+}
+
+// decodePicture decodes a PNG, JPEG, GIF, WebP or BMP picture, or an SVG.
+func decodePicture(data []byte) (ui.ImageSource, error) {
+	b, err := ui.DecodeBitmap(data)
+	if err == nil {
+		return b, nil
+	}
+	if s, serr := ui.ParseSVG(data); serr == nil {
+		if w, h := s.Size(); w > 0 && h > 0 {
+			return s, nil
+		}
+	}
+	return nil, err
 }
 
 // hasFailed reports whether a picture failed to load, and is not being

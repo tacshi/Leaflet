@@ -7,7 +7,7 @@ import (
 )
 
 // ImageExts are the kinds of picture an image block shows, by extension.
-var ImageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".bmp": true}
+var ImageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true, ".bmp": true, ".svg": true}
 
 // ImageLink reports whether s is a web link to a picture, as the extension
 // of its path says.

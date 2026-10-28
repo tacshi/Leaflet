@@ -45,9 +45,9 @@ type Trigger struct {
 type Host interface {
 	PageTitle(id string) string
 	OpenPage(id string)
-	// Image returns an image block's picture, or nil while it loads or
-	// when it failed to load, as failed says.
-	Image(n *doc.Node) (bmp *ui.Bitmap, failed bool)
+	// Image returns an image block's picture, a bitmap or an SVG, or nil
+	// while it loads or when it failed to load, as failed says.
+	Image(n *doc.Node) (pic ui.ImageSource, failed bool)
 	// Embed builds the web view of an embed block.
 	Embed(c *ui.Context, n *doc.Node, width float32)
 	// Video builds a video block.

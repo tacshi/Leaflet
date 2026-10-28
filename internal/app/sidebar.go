@@ -260,7 +260,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 				icon = "folder-open"
 			}
 			ui.Icon(c, theme.Icon(icon)).FontSize(15)
-			ui.Text(c, f.Name).FontSize(13.5).Grow(1).SingleLine()
+			ui.Text(c, f.Name).FontSize(13.5).Grow(1).SingleLine().Tooltip(f.Name)
 			tools(c, func() {
 				button("more", "ellipsis", locales.SidebarFolderActions()).Menu(func(m *ui.Menu) { a.folderMenu(m, f) })
 			})
@@ -274,7 +274,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 		}
 		row.Children(func() {
 			ui.Icon(c, theme.Icon("file-text")).FontSize(15)
-			title := ui.Text(c, p.DisplayTitle()).FontSize(13.5).Grow(1).SingleLine()
+			title := ui.Text(c, p.DisplayTitle()).FontSize(13.5).Grow(1).SingleLine().Tooltip(p.DisplayTitle())
 			if open := a.route.Kind == "page" && a.route.ID == id; p.Title == "" && !open {
 				title.TextColor(pal.TextMuted)
 			}
@@ -309,7 +309,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 		}
 		row.Children(func() {
 			ui.Icon(c, theme.Icon("file")).FontSize(15)
-			ui.Text(c, f.Name).FontSize(13.5).Grow(1).SingleLine()
+			ui.Text(c, f.Name).FontSize(13.5).Grow(1).SingleLine().Tooltip(f.Name)
 		})
 		row.ContextMenu(func(m *ui.Menu) {
 			if m.Item(locales.CommonOpen()).Chosen() && f.LocalPath != "" {

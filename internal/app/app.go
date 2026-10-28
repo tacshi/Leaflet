@@ -733,14 +733,8 @@ func (a *App) savePage() {
 		if ps.timer != nil {
 			ps.timer.Stop()
 		}
-		var stamped *doc.Content
-		var changed bool
-		var err error
-		if ps.row == "" {
-			stamped, changed, err = a.st.SaveContent(ps.id, ps.editor.Content)
-		} else {
-			stamped, changed, err = a.st.SaveContentOver(ps.id, ps.row, ps.editor.Content)
-		}
+		// An empty row saves only while the page still has none.
+		stamped, changed, err := a.st.SaveContentOver(ps.id, ps.row, ps.editor.Content)
 		if errors.Is(err, store.ErrContentChanged) {
 			continue
 		}
@@ -914,19 +908,23 @@ func (a *App) linkSubpage(parent, id, after string) {
 func (a *App) saveStored(pageID string, edit func(c *doc.Content) *doc.Content) error {
 	err := store.ErrContentChanged
 	for range 5 {
-		row, rowErr := a.st.ContentRow(pageID)
+		var over string
 		var c *doc.Content
-		if rowErr == nil {
-			c = doc.MustDecode(row.Content)
+		row, rowErr := a.st.ContentRow(pageID)
+		switch {
+		case rowErr == nil:
+			// Content that can't be read is left alone, not saved over.
+			if c, err = doc.Decode(row.Content); err != nil {
+				return err
+			}
+			over = row.Content
+		case !store.IsNotFound(rowErr):
+			return rowErr
 		}
 		if c = edit(c); c == nil {
 			return nil
 		}
-		if rowErr != nil {
-			_, _, err = a.st.SaveContent(pageID, c)
-		} else {
-			_, _, err = a.st.SaveContentOver(pageID, row.Content, c)
-		}
+		_, _, err = a.st.SaveContentOver(pageID, over, c)
 		if !errors.Is(err, store.ErrContentChanged) {
 			return err
 		}

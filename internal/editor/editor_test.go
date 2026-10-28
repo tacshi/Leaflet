@@ -10,6 +10,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/theme"
 )
 
 type fakeHost struct {
@@ -828,4 +829,22 @@ func chooseDrawn(tt *ui.Tester, item string) error {
 	}
 	tt.Frame()
 	return nil
+}
+
+func TestFontsChangeLayout(t *testing.T) {
+	t.Cleanup(func() { theme.SetFonts("", "", "", "") })
+	e, tt, _ := setup(t)
+	tt.Type("中文 and `code`")
+	tt.Frame()
+	n := e.units()[0]
+	before := e.layoutOf(n)
+	if before == nil || before.font.Family != theme.PageFont {
+		t.Fatalf("layout before = %+v", before)
+	}
+	theme.SetFonts("Georgia", "Kaiti SC", "", "Menlo")
+	tt.Frame()
+	after := e.layoutOf(n)
+	if after == before || after.font.Family != "Georgia, Kaiti SC" {
+		t.Fatalf("layout after = %+v, same %v", after.font, after == before)
+	}
 }

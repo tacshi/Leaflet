@@ -243,7 +243,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 		if live {
 			a.levelMeter(c, a.rec.State.Levels)
 			if t := a.rec.State.LiveText; t != "" {
-				ui.Text(c, t).FontSize(13.5).TextColor(pal.TextSecondary).Font(theme.PageFont)
+				ui.Text(c, t).FontSize(13.5).TextColor(pal.TextSecondary).Font(theme.PageFamily(t))
 			}
 			return
 		}
@@ -278,7 +278,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 							if s.Speaker != "" {
 								ui.Text(c, locales.RecSpeaker(s.Speaker)).FontSize(11.5).FontWeight(600).TextColor(pal.TextMuted)
 							}
-							ui.Text(c, s.Text).FontSize(14).Font(theme.PageFont).TextColor(pal.Text)
+							ui.Text(c, s.Text).FontSize(14).Font(theme.PageFamily(s.Text)).TextColor(pal.Text)
 						})
 						if line.Clicked() {
 							a.seek(rec, time.Duration(s.StartMs)*time.Millisecond)

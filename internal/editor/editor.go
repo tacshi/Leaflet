@@ -91,9 +91,9 @@ type snapshot struct {
 type Editor struct {
 	Content *doc.Content
 	Host    Host
-	// Font is the family and size of the page's text.
-	Family string
-	Size   float32
+	// Size is the size of the page's text, whose fonts theme.PageFamily
+	// and theme.CodeFamily choose.
+	Size float32
 	// ReadOnly shows the page without letting the user change it.
 	ReadOnly bool
 	// Tinted blocks were changed by the latest agent run.
@@ -168,7 +168,7 @@ type Editor struct {
 
 // New returns an editor of content.
 func New(content *doc.Content, host Host) *Editor {
-	e := &Editor{Content: content, Host: host, Family: "Source Serif 4", Size: 17,
+	e := &Editor{Content: content, Host: host, Size: 17,
 		layouts: map[string]*blockLayout{}, geom: map[string]ui.Rect{}, rel: map[string]ui.Rect{}, chips: map[string]ui.Rect{}, width: 680}
 	if len(content.Children) == 0 {
 		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}

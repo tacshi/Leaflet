@@ -383,6 +383,8 @@ func (a *App) update(fn func()) {
 
 func (a *App) applyTheme() {
 	theme.Look(a.settings.Theme == "sepia", a.settings.Accent)
+	f := a.settings.Fonts
+	theme.SetFonts(f.Latin, f.Chinese, f.Japanese, f.Code)
 	switch a.settings.Theme {
 	case "light", "sepia":
 		mygo.Theme.SetSource(mygo.ThemeLight)

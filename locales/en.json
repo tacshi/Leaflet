@@ -2817,6 +2817,30 @@
   "@settingsTextSizeLarger": {
     "description": "Settings › Appearance › Page text size."
   },
+  "settingsFonts": "Fonts",
+  "@settingsFonts": {
+    "description": "Settings › Appearance: the label over the card choosing the fonts pages are set in."
+  },
+  "settingsFontLatin": "Latin text",
+  "@settingsFontLatin": {
+    "description": "Settings › Appearance › Fonts: the row choosing the font of Latin text, as English, in pages."
+  },
+  "settingsFontChinese": "Chinese text",
+  "@settingsFontChinese": {
+    "description": "Settings › Appearance › Fonts: the row choosing the font of Chinese characters in pages."
+  },
+  "settingsFontJapanese": "Japanese text",
+  "@settingsFontJapanese": {
+    "description": "Settings › Appearance › Fonts: the row choosing the font of Japanese characters in pages."
+  },
+  "settingsFontCode": "Code",
+  "@settingsFontCode": {
+    "description": "Settings › Appearance › Fonts: the row choosing the font of code blocks and inline code."
+  },
+  "settingsFontDefault": "Default",
+  "@settingsFontDefault": {
+    "description": "Settings › Appearance › Fonts: the choice of Leaflet's own font, or the system's where Leaflet has none."
+  },
   "settingsAccountDesc": "Your name and the devices you use.",
   "@settingsAccountDesc": {
     "description": "Settings › Account: the description under the heading."

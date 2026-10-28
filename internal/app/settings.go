@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -182,6 +183,54 @@ func (a *App) appearanceSettings(c *ui.Context) {
 				a.saveSettings()
 			}
 		})
+	})
+	label(c, locales.SettingsFonts())
+	card(c, "fonts", func() {
+		f := &a.settings.Fonts
+		a.fontRow(c, "latin", locales.SettingsFontLatin(), &f.Latin, false, true)
+		a.fontRow(c, "chinese", locales.SettingsFontChinese(), &f.Chinese, false, false)
+		a.fontRow(c, "japanese", locales.SettingsFontJapanese(), &f.Japanese, false, false)
+		a.fontRow(c, "code", locales.SettingsFontCode(), &f.Code, true, false)
+	})
+}
+
+// fontFamilies are the names of the families text can use, all of them
+// and the monospaced ones, read once.
+var fontFamilies struct {
+	once      sync.Once
+	all, mono []string
+}
+
+// fontRow is a row choosing *family among the system's fonts, the
+// monospaced ones for mono, or Leaflet's own for "".
+func (a *App) fontRow(c *ui.Context, key, title string, family *string, mono, first bool) {
+	fontFamilies.once.Do(func() {
+		for _, f := range ui.FontFamilies() {
+			fontFamilies.all = append(fontFamilies.all, f.Name)
+			if f.Monospaced {
+				fontFamilies.mono = append(fontFamilies.mono, f.Name)
+			}
+		}
+	})
+	names := fontFamilies.all
+	if mono {
+		names = fontFamilies.mono
+	}
+	settingRow(c, key, title, "", first, func() {
+		def := locales.SettingsFontDefault()
+		chosen := *family
+		if chosen == "" {
+			chosen = def
+		}
+		ui.Combobox(c.Key(key), &chosen, append([]string{def}, names...)).Width(220).Label(title)
+		if chosen == def {
+			chosen = ""
+		}
+		if chosen != *family {
+			*family = chosen
+			a.saveSettings()
+			a.applyTheme()
+		}
 	})
 }
 

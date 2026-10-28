@@ -38,12 +38,23 @@ func DecodeModelChoice(raw string) (ModelChoice, bool) {
 	return ModelChoice{p, m}, ok
 }
 
+// Fonts are the families pages are set in, each a family the system or
+// the app has, or "" for Leaflet's own: Latin for text in general, Chinese
+// and Japanese for the characters of those languages, and Code for code.
+type Fonts struct {
+	Latin    string `json:"latin,omitempty"`
+	Chinese  string `json:"chinese,omitempty"`
+	Japanese string `json:"japanese,omitempty"`
+	Code     string `json:"code,omitempty"`
+}
+
 // Settings are the app's settings on this device.
 type Settings struct {
 	Theme string `json:"theme"` // system | light | sepia | dark
 	// Accent is a name of theme.Accents, "system" or "" for Indigo.
 	Accent   string  `json:"accent,omitempty"`
 	TextSize float64 `json:"text_size"`
+	Fonts    Fonts   `json:"fonts"`
 	// Language is the tag of the language the app shows, as App.SetLocale
 	// keeps it, or "" to follow the system's.
 	Language     string `json:"language,omitempty"`

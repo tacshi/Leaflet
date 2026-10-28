@@ -520,7 +520,8 @@ func (a *App) historyDialog(c *ui.Context) {
 					a.historyChanges(c, h, content)
 				} else {
 					ui.Scroll(c).Grow(1).Padding(18, 24).Children(func() {
-						markdown.View(c, doc.PageMarkdown("", content, a.pageTitleOf), &a.md).Font(theme.PageFont).FontSize(15)
+						md := doc.PageMarkdown("", content, a.pageTitleOf)
+						markdown.View(c, md, &a.md).Font(theme.PageFamily(md)).FontSize(15)
 					})
 				}
 				ui.Row(c).Padding(12, 16).Justify(ui.End).Gap(8).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
@@ -546,11 +547,12 @@ func (a *App) historyDiff(h store.HistoryEntry, content *doc.Content) *codeedito
 		if now == nil {
 			now = doc.Empty()
 		}
+		old, cur := doc.PageMarkdown("", content, a.pageTitleOf), doc.PageMarkdown("", now, a.pageTitleOf)
 		d.historyDiff = codeeditor.DiffState{
-			Old:  codeeditor.NewBuffer(doc.PageMarkdown("", content, a.pageTitleOf)),
-			New:  codeeditor.NewBuffer(doc.PageMarkdown("", now, a.pageTitleOf)),
+			Old:  codeeditor.NewBuffer(old),
+			New:  codeeditor.NewBuffer(cur),
 			Wrap: true, NoLineNumbers: true,
-			Font: ui.Font{Family: theme.PageFont, Size: 14},
+			Font: ui.Font{Family: theme.PageFamily(old + cur), Size: 14},
 		}
 		d.historyDiffOf = h.ID
 	}

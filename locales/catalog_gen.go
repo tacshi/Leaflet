@@ -7891,6 +7891,102 @@ func (msgs Messages) SettingsTextSizeLarger() string {
 	return Catalog.Format(msgs.locale, "settingsTextSizeLarger", nil)
 }
 
+// SettingsFonts says "Fonts"
+// in the language the app shows.
+//
+// Settings › Appearance: the label over the card choosing the fonts pages
+// are set in.
+func SettingsFonts() string { return In(i18n.Locale()).SettingsFonts() }
+
+// SettingsFonts says "Fonts"
+// in the language of msgs.
+//
+// Settings › Appearance: the label over the card choosing the fonts pages
+// are set in.
+func (msgs Messages) SettingsFonts() string {
+	return Catalog.Format(msgs.locale, "settingsFonts", nil)
+}
+
+// SettingsFontLatin says "Latin text"
+// in the language the app shows.
+//
+// Settings › Appearance › Fonts: the row choosing the font of Latin
+// text, as English, in pages.
+func SettingsFontLatin() string { return In(i18n.Locale()).SettingsFontLatin() }
+
+// SettingsFontLatin says "Latin text"
+// in the language of msgs.
+//
+// Settings › Appearance › Fonts: the row choosing the font of Latin
+// text, as English, in pages.
+func (msgs Messages) SettingsFontLatin() string {
+	return Catalog.Format(msgs.locale, "settingsFontLatin", nil)
+}
+
+// SettingsFontChinese says "Chinese text"
+// in the language the app shows.
+//
+// Settings › Appearance › Fonts: the row choosing the font of Chinese
+// characters in pages.
+func SettingsFontChinese() string { return In(i18n.Locale()).SettingsFontChinese() }
+
+// SettingsFontChinese says "Chinese text"
+// in the language of msgs.
+//
+// Settings › Appearance › Fonts: the row choosing the font of Chinese
+// characters in pages.
+func (msgs Messages) SettingsFontChinese() string {
+	return Catalog.Format(msgs.locale, "settingsFontChinese", nil)
+}
+
+// SettingsFontJapanese says "Japanese text"
+// in the language the app shows.
+//
+// Settings › Appearance › Fonts: the row choosing the font of Japanese
+// characters in pages.
+func SettingsFontJapanese() string { return In(i18n.Locale()).SettingsFontJapanese() }
+
+// SettingsFontJapanese says "Japanese text"
+// in the language of msgs.
+//
+// Settings › Appearance › Fonts: the row choosing the font of Japanese
+// characters in pages.
+func (msgs Messages) SettingsFontJapanese() string {
+	return Catalog.Format(msgs.locale, "settingsFontJapanese", nil)
+}
+
+// SettingsFontCode says "Code"
+// in the language the app shows.
+//
+// Settings › Appearance › Fonts: the row choosing the font of code
+// blocks and inline code.
+func SettingsFontCode() string { return In(i18n.Locale()).SettingsFontCode() }
+
+// SettingsFontCode says "Code"
+// in the language of msgs.
+//
+// Settings › Appearance › Fonts: the row choosing the font of code
+// blocks and inline code.
+func (msgs Messages) SettingsFontCode() string {
+	return Catalog.Format(msgs.locale, "settingsFontCode", nil)
+}
+
+// SettingsFontDefault says "Default"
+// in the language the app shows.
+//
+// Settings › Appearance › Fonts: the choice of Leaflet's own font, or
+// the system's where Leaflet has none.
+func SettingsFontDefault() string { return In(i18n.Locale()).SettingsFontDefault() }
+
+// SettingsFontDefault says "Default"
+// in the language of msgs.
+//
+// Settings › Appearance › Fonts: the choice of Leaflet's own font, or
+// the system's where Leaflet has none.
+func (msgs Messages) SettingsFontDefault() string {
+	return Catalog.Format(msgs.locale, "settingsFontDefault", nil)
+}
+
 // SettingsAccountDesc says "Your name and the devices you use."
 // in the language the app shows.
 //

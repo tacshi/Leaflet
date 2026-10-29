@@ -344,7 +344,7 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := s.cloudUpload(e); err != nil {
+		if err := s.cloudUpload(ctx, e); err != nil {
 			log.Printf("icloud: upload %s: %v", e.EntityID, err)
 			_ = s.st.MarkFailed(e, err.Error())
 			continue
@@ -543,17 +543,17 @@ func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerCo
 }
 
 // cloudUpload copies a file or a recording's audio into the folder.
-func (s *Service) cloudUpload(e store.OutboxEntry) error {
+func (s *Service) cloudUpload(ctx context.Context, e store.OutboxEntry) error {
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
 		return err
 	}
 	local := store.S(payload, "local_path")
-	if local == "" {
-		return nil
-	}
-	if _, err := os.Stat(local); err != nil {
-		return nil // gone: nothing to upload
+	if !onDevice(local) {
+		var err error
+		if local, err = s.fetchCopied(ctx, payload); err != nil || local == "" {
+			return err // gone: nothing to upload
+		}
 	}
 	if recID := store.S(payload, "recording_id"); recID != "" {
 		rel, err := icloud.RecordingBlobPath(recID)
@@ -563,10 +563,13 @@ func (s *Service) cloudUpload(e store.OutboxEntry) error {
 		if err := s.ICloud.CopyIn(rel, local); err != nil {
 			return err
 		}
+		// The upload waits until the recording has its path, as in Storage.
 		if _, err := s.st.UpdateRecording(recID, func(r *store.Recording) {
 			r.AudioPath, r.UploadedAt = recID+".wav", cloudNow()
-		}); err != nil {
+		}); store.IsNotFound(err) {
 			return nil // the recording went meanwhile
+		} else if err != nil {
+			return err
 		}
 		if s.KeepAudio != nil && s.KeepAudio() == "until_uploaded" {
 			// The page plays it from iCloud Drive now.

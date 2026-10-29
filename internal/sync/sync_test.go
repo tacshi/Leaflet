@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1375,5 +1376,163 @@ func TestPullSharedReadsEveryPageOfRows(t *testing.T) {
 	comments, _ := st.AllComments()
 	if len(comments) != len(tables["comments"]) {
 		t.Errorf("%d of %d comments", len(comments), len(tables["comments"]))
+	}
+}
+
+// An upload stays queued while the recording cannot take its path here:
+// else nothing would send the audio again, and the other devices could
+// not play it.
+func TestUploadWaitsForTheRecordingsPath(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Standup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	local := t.TempDir() + "/a.wav"
+	if err := os.WriteFile(local, []byte("RIFF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := st.CreateRecording(p.ID, "b1", "", "", local, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err = st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status = "ready" }); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		_ = st.Dequeue(e)
+	}
+	if err := st.QueueUpload(r); err != nil {
+		t.Fatal(err)
+	}
+	// The disk refuses the recording's path, as a full one would.
+	if _, err := st.DB().Exec(`CREATE TRIGGER refuse BEFORE UPDATE ON recordings
+		BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	uploads := 0
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if req.URL.Path == "/storage/v1/object/recordings/u1/"+r.ID+".wav" {
+			uploads++
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+
+	// A failure here ends the pass, as one that stores a page's content does.
+	if err := svc.push(ctx); err == nil {
+		t.Error("the pass went on")
+	}
+	if !st.HasPending("storage", "recordings/"+r.ID) {
+		t.Fatal("the upload left the queue without the recording's path")
+	}
+	if _, err := st.DB().Exec(`DROP TRIGGER refuse`); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Recording(r.ID)
+	if uploads != 2 || got.AudioPath != "u1/"+r.ID+".wav" || st.HasPending("storage", "recordings/"+r.ID) {
+		t.Errorf("%d uploads, path %q, still queued %v", uploads, got.AudioPath, st.HasPending("storage", "recordings/"+r.ID))
+	}
+}
+
+// A copied page's file and recording that this device has only stored go
+// up as the copy's own, from the originals' stored copies; a copy whose
+// original is gone has nothing to send.
+func TestCopiesGoUpFromTheOriginals(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	space := st.Session().SpaceID
+	f := store.File{ID: "00000000-0000-0000-0000-0000000000f1", SpaceID: space, PageID: p.ID, Name: "plan.pdf",
+		MimeType: "application/pdf", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	f.StoragePath = space + "/" + f.ID + "/plan.pdf"
+	gone := f
+	gone.ID, gone.Name, gone.StoragePath = "00000000-0000-0000-0000-0000000000f2", "gone.pdf", space+"/00000000-0000-0000-0000-0000000000f2/gone.pdf"
+	for _, x := range []store.File{f, gone} {
+		if err := st.PutFile(x); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r, err := st.CreateRecording(p.ID, "b1", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err = st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status, x.AudioPath = "ready", "u0/"+r.ID+".wav" }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{
+		{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": r.ID}},
+		{ID: "b2", Type: "file", Data: map[string]any{"name": f.Name, "file_id": f.ID}},
+		{ID: "b3", Type: "file", Data: map[string]any{"name": gone.Name, "file_id": gone.ID}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := st.CopyPage(p.ID, store.CopyOptions{Title: "Meeting copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := st.Content(cp.ID).Children
+	recID, fileID, goneID := blocks[0].Str("recording_id"), blocks[1].Str("file_id"), blocks[2].Str("file_id")
+
+	var mu gosync.Mutex
+	uploaded := map[string]string{}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch req.URL.Path {
+		case "/storage/v1/object/authenticated/recordings/u0/" + r.ID + ".wav":
+			_, _ = w.Write([]byte("RIFF"))
+			return
+		case "/storage/v1/object/authenticated/files/" + f.StoragePath:
+			_, _ = w.Write([]byte("%PDF"))
+			return
+		case "/storage/v1/object/authenticated/files/" + gone.StoragePath:
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{"message": "not found"})
+			return
+		}
+		if rest, ok := strings.CutPrefix(req.URL.Path, "/storage/v1/object/"); ok && req.Method == http.MethodPost {
+			body, _ := io.ReadAll(req.Body)
+			uploaded[rest] = string(body)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cf, _ := st.File(fileID)
+	if uploaded["recordings/u1/"+recID+".wav"] != "RIFF" || uploaded["files/"+cf.StoragePath] != "%PDF" || len(uploaded) != 2 {
+		t.Errorf("uploaded %v", uploaded)
+	}
+	if c, _ := st.Recording(recID); c.AudioPath != "u1/"+recID+".wav" {
+		t.Errorf("the copy plays %q", c.AudioPath)
+	}
+	if data, err := os.ReadFile(cf.LocalPath); err != nil || string(data) != "%PDF" {
+		t.Errorf("the copy here: %q, %v", data, err)
+	}
+	for _, id := range []string{"recordings/" + recID, "files/" + fileID, "files/" + goneID} {
+		if st.HasPending("storage", id) {
+			t.Errorf("%s is still queued", id)
+		}
 	}
 }

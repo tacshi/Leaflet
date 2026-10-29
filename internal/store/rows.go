@@ -169,8 +169,20 @@ func (s *Store) Files() ([]File, error) {
 // AllFiles returns every file, deleted ones too.
 func (s *Store) AllFiles() ([]File, error) { return s.queryFiles(`1 = 1 ORDER BY created_at DESC`) }
 
-func (s *Store) queryFiles(where string) ([]File, error) {
-	rows, err := s.db.Query(`SELECT id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at FROM files WHERE ` + where)
+// File returns a file, deleted or not.
+func (s *Store) File(id string) (File, error) {
+	files, err := s.queryFiles(`id = ?`, id)
+	if err == nil && len(files) == 0 {
+		err = errNotFound
+	}
+	if err != nil {
+		return File{}, err
+	}
+	return files[0], nil
+}
+
+func (s *Store) queryFiles(where string, args ...any) ([]File, error) {
+	rows, err := s.db.Query(`SELECT id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at FROM files WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}

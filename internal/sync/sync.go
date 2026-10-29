@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -917,8 +918,11 @@ func contentOf(v any) (*doc.Content, error) {
 
 func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]any) (bool, error) {
 	local, _ := payload["local_path"].(string)
-	if local == "" {
-		return true, nil
+	if !onDevice(local) {
+		var err error
+		if local, err = s.fetchCopied(ctx, payload); err != nil || local == "" {
+			return err == nil, err // gone: nothing to upload
+		}
 	}
 	f, err := os.Open(local) // #nosec G304 -- a file in the app's own data folder.
 	if err != nil {
@@ -936,20 +940,61 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 		return false, err
 	}
 	if recID != "" {
+		// The upload waits until the recording has its path: else nothing
+		// would send it again, and the other devices could not play it.
 		rec, err := s.st.UpdateRecording(recID, func(r *store.Recording) {
 			r.AudioPath, r.UploadedAt = path, time.Now()
 		})
-		if err == nil {
-			_, _ = s.be.Upsert(ctx, "recordings", store.RecordingToRemote(rec), "")
-			if s.KeepAudio != nil && s.KeepAudio() == "until_uploaded" {
-				// The page plays it from Storage now.
-				_ = f.Close()
-				_ = os.Remove(local)
-				_ = s.st.ClearLocalPath(recID)
-			}
+		if store.IsNotFound(err) {
+			return true, nil // the recording went meanwhile
+		}
+		if err != nil {
+			return false, err
+		}
+		_, _ = s.be.Upsert(ctx, "recordings", store.RecordingToRemote(rec), "")
+		if s.KeepAudio != nil && s.KeepAudio() == "until_uploaded" {
+			// The page plays it from Storage now.
+			_ = f.Close()
+			_ = os.Remove(local)
+			_ = s.st.ClearLocalPath(recID)
 		}
 	}
 	return true, nil
+}
+
+// fetchCopied brings to this device the file or audio a copy was made
+// from, which goes up again as the copy's own: only those who can view
+// the page of the row a stored copy belongs to can read it. It returns
+// where the copy is kept here now, or "" when there is nothing to copy:
+// the copy had what it needs, or what it copies or the copy is gone.
+func (s *Service) fetchCopied(ctx context.Context, payload map[string]any) (string, error) {
+	from := store.S(payload, "from_path")
+	if from == "" {
+		return "", nil
+	}
+	data, err := s.Fetch(ctx, store.S(payload, "bucket"), from)
+	if remote.IsNotFound(err) || errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	var local string
+	if recID := store.S(payload, "recording_id"); recID != "" {
+		local = filepath.Join(s.st.Dir, "recordings", recID+".wav")
+		if err = os.MkdirAll(filepath.Dir(local), 0o750); err == nil {
+			err = os.WriteFile(local, data, 0o600)
+		}
+		if err == nil {
+			_, err = s.st.UpdateRecording(recID, func(r *store.Recording) { r.LocalPath = local })
+		}
+	} else {
+		local, err = s.st.DownloadedFile(store.S(payload, "file_id"), data)
+	}
+	if store.IsNotFound(err) {
+		return "", nil
+	}
+	return local, err
 }
 
 // removeStored removes a deleted file's object from Storage, once the

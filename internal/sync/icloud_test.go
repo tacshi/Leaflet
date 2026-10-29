@@ -938,3 +938,64 @@ func TestICloudBreaksALoopOfMoves(t *testing.T) {
 		}
 	}
 }
+
+// A page copied on a device that has its file and audio only in iCloud
+// Drive gets them as its own there, from the originals'.
+func TestICloudCopiesGoUpAsTheirOwn(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	a.svc.KeepAudio = func() string { return "until_uploaded" }
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wav := filepath.Join(t.TempDir(), "rec.wav")
+	if err := os.WriteFile(wav, []byte("RIFF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := a.page("Attachments")
+	f, err := a.st.AddFile(src, "", p.ID, "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := a.st.CreateRecording(p.ID, "blk", "", "", wav, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec, err = a.st.UpdateRecording(rec.ID, func(r *store.Recording) { r.Status = "ready" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.QueueUpload(rec); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.st.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{
+		{ID: "blk", Type: "recording", Data: map[string]any{"recording_id": rec.ID}},
+		{ID: "f", Type: "file", Data: map[string]any{"name": f.Name, "file_id": f.ID}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+
+	cp, err := b.st.CopyPage(p.ID, store.CopyOptions{Title: "Copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := b.st.Content(cp.ID).Children
+	recID, fileID := blocks[0].Str("recording_id"), blocks[1].Str("file_id")
+	syncAll(b, a)
+	ctx := context.Background()
+	r, err := a.st.Recording(recID)
+	if err != nil || r.AudioPath != recID+".wav" {
+		t.Fatalf("A's copy of the recording %+v, %v", r, err)
+	}
+	if data, err := a.svc.Fetch(ctx, "recordings", r.AudioPath); err != nil || string(data) != "RIFF" {
+		t.Errorf("audio %q, %v", data, err)
+	}
+	cf, err := a.st.File(fileID)
+	if err != nil || cf.PageID != cp.ID {
+		t.Fatalf("A's copy of the file %+v, %v", cf, err)
+	}
+	if data, err := a.svc.Fetch(ctx, "files", cf.StoragePath); err != nil || string(data) != "hello" {
+		t.Errorf("file %q, %v", data, err)
+	}
+}

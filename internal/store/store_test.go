@@ -529,11 +529,133 @@ func TestCopyPageCopiesRecordings(t *testing.T) {
 		if !s.HasPending("recordings", id) {
 			t.Errorf("block %d: the copy is not queued", i)
 		}
-		if got := s.HasPending("storage", "recordings/"+id); got != (orig.AudioPath == "") {
-			t.Errorf("block %d: upload queued %v", i, got)
+		// Uploaded audio goes up again, as the copy's own.
+		if !s.HasPending("storage", "recordings/"+id) {
+			t.Errorf("block %d: no upload queued", i)
 		}
 		if o, _ := s.Recording(orig.ID); o.PageID != p.ID || o.BlockID != orig.BlockID {
 			t.Errorf("block %d: the original moved to %s %s", i, o.PageID, o.BlockID)
+		}
+	}
+}
+
+// A copied recording whose audio is only stored goes up as its own from
+// the original's, which it plays until then: only those who can view the
+// original's page can read the original's.
+func TestCopyPageUploadsStoredAudioAsItsOwn(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Meeting"})
+	blockID := doc.NewBlockID()
+	r, err := s.CreateRecording(p.ID, blockID, "soniox", "m", "", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err = s.UpdateRecording(r.ID, func(x *Recording) { x.Status, x.AudioPath = "ready", "u1/"+r.ID+".wav" }); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{{ID: blockID, Type: "recording", Data: map[string]any{"recording_id": r.ID}}})); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := s.CopyPage(p.ID, CopyOptions{Title: "Meeting copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.Recording(s.Content(cp.ID).Children[0].Str("recording_id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.AudioPath != r.AudioPath || c.LocalPath != "" {
+		t.Errorf("copy plays %q, kept here at %q", c.AudioPath, c.LocalPath)
+	}
+	var payload string
+	if err := s.db.QueryRow(`SELECT payload FROM outbox WHERE entity = 'storage' AND entity_id = ?`, "recordings/"+c.ID).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var up map[string]any
+	_ = json.Unmarshal([]byte(payload), &up)
+	if up["from_path"] != r.AudioPath || up["recording_id"] != c.ID || up["path"] != nil {
+		t.Errorf("upload %v", up)
+	}
+}
+
+// A copied page's pictures and files are files of its own, on the copy,
+// as only those who can view the page a file is on can read it. A file on
+// this device is copied; one only stored goes up from the original's.
+// Starting a page from a template copies them the same way.
+func TestCopyPageCopiesFiles(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Trip"})
+	src := filepath.Join(t.TempDir(), "map.png")
+	if err := os.WriteFile(src, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	here, err := s.AddFile(src, "", p.ID, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := File{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, PageID: p.ID, Name: "plan.pdf", MimeType: "application/pdf",
+		SizeBytes: 3, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	stored.StoragePath = stored.SpaceID + "/" + stored.ID + "/plan.pdf"
+	if err := s.PutFile(stored); err != nil {
+		t.Fatal(err)
+	}
+	blocks := []*doc.Node{
+		{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{"url": "file://" + here.LocalPath, "file_id": here.ID}},
+		{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{"url": "file://" + here.LocalPath, "name": here.Name, "file_id": here.ID}},
+		{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{"url": "file:///elsewhere/plan.pdf", "name": stored.Name, "file_id": stored.ID}},
+	}
+	if _, _, err := s.SaveContent(p.ID, doc.FromBlocks(blocks)); err != nil {
+		t.Fatal(err)
+	}
+	check := func(how, pageID string, c *doc.Content) {
+		t.Helper()
+		ids := make([]string, len(c.Children))
+		for i, n := range c.Children {
+			ids[i] = n.Str("file_id")
+			orig := blocks[i].Str("file_id")
+			f, err := s.File(ids[i])
+			if ids[i] == orig || err != nil || f.PageID != pageID {
+				t.Fatalf("%s: block %d has file %q (%v) on page %q, the original is %s", how, i, ids[i], err, f.PageID, orig)
+			}
+			if f.StoragePath != f.SpaceID+"/"+f.ID+"/"+f.Name || n.Str("url") != "file://"+filepath.Join(s.Dir, "files", f.ID, f.Name) {
+				t.Errorf("%s: block %d: stored at %q, url %q", how, i, f.StoragePath, n.Str("url"))
+			}
+			if !s.HasPending("files", f.ID) {
+				t.Errorf("%s: block %d: the file's row is not queued", how, i)
+			}
+			var payload string
+			if err := s.db.QueryRow(`SELECT payload FROM outbox WHERE entity = 'storage' AND entity_id = ?`, "files/"+f.ID).Scan(&payload); err != nil {
+				t.Fatalf("%s: block %d: no upload: %v", how, i, err)
+			}
+			var up map[string]any
+			_ = json.Unmarshal([]byte(payload), &up)
+			if orig == here.ID {
+				if data, err := os.ReadFile(f.LocalPath); err != nil || string(data) != "png" || up["local_path"] != f.LocalPath || up["from_path"] != nil {
+					t.Errorf("%s: block %d: here at %q (%q, %v), upload %v", how, i, f.LocalPath, data, err, up)
+				}
+			} else if f.LocalPath != "" || up["from_path"] != stored.StoragePath || up["file_id"] != f.ID || up["path"] != f.StoragePath {
+				t.Errorf("%s: block %d: here at %q, upload %v", how, i, f.LocalPath, up)
+			}
+		}
+		if ids[0] != ids[1] {
+			t.Errorf("%s: one file became two: %v", how, ids)
+		}
+	}
+
+	cp, err := s.CopyPage(p.ID, CopyOptions{Title: "Trip copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("duplicate", cp.ID, s.Content(cp.ID))
+	tpl, _ := s.CreatePage(NewPageOptions{Title: "From template"})
+	c, err := s.CopyInto(p.ID, tpl.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	check("template", tpl.ID, c)
+	for i, n := range s.Content(p.ID).Children {
+		if n.Str("file_id") != blocks[i].Str("file_id") {
+			t.Errorf("the original's block %d now has file %q", i, n.Str("file_id"))
 		}
 	}
 }

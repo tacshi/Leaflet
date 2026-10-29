@@ -145,6 +145,7 @@
   "cardFileDetail": "{kind} · {size}",
   "exportTemplatesFolder": "模板",
   "templateDuplicateFailed": "无法创建副本：{error}",
+  "templateWaitForRecording": "请等此页面的录音完成后再试。",
   "templateCopyTitle": "{title} 副本",
   "templateSaveFailed": "无法保存模板：{error}",
   "templateSaved": "已将“{title}”存为模板",

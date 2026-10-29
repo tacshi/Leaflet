@@ -11,6 +11,7 @@ import (
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
+	"leaflet/locales"
 )
 
 func templatesApp(t *testing.T) *App {
@@ -24,7 +25,7 @@ func templatesApp(t *testing.T) *App {
 		t.Fatal(err)
 	}
 	be := remote.New(remote.Config(), st)
-	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
+	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session(), rec: recording.NewController(st, be)}
 	a.reloadAll()
 	return a
 }
@@ -68,6 +69,46 @@ func TestDuplicatePage(t *testing.T) {
 	}
 	if len(links) != 3 || links[0] != prd.ID || links[1] != cp.ID || links[2] != roadmap.ID {
 		t.Errorf("Product links %v", links)
+	}
+}
+
+// A page, or one under it, with a recording still being transcribed is not
+// copied until it is done: the copy would keep the recording unfinished.
+func TestDuplicateWaitsForRecording(t *testing.T) {
+	a := templatesApp(t)
+	notes, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	call, _ := a.st.CreatePage(store.NewPageOptions{ParentID: notes.ID, Title: "Call"})
+	rec, err := a.st.CreateRecording(call.ID, "b1", "soniox", "m", "", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	count := func() int { all, _ := a.st.Pages(); templates, _ := a.st.Templates(); return len(all) + len(templates) }
+	before := count()
+
+	a.rec.Transcribing[rec.ID] = true
+	for _, p := range []store.Page{notes, call} {
+		a.toasts = nil
+		a.duplicatePage(*a.pageByID(p.ID))
+		a.saveAsTemplate(*a.pageByID(p.ID))
+		if n := count(); n != before || len(a.toasts) != 2 || a.toasts[0].text != locales.TemplateWaitForRecording() {
+			t.Fatalf("%s: %d pages, want %d; toasts %+v", p.Title, n, before, a.toasts)
+		}
+	}
+	// A page beside it is copied.
+	other, _ := a.st.CreatePage(store.NewPageOptions{Title: "Other"})
+	a.reloadAll()
+	before = count()
+	a.duplicatePage(*a.pageByID(other.ID))
+	if n := count(); n != before+1 {
+		t.Errorf("a page without the recording: %d pages, want %d", n, before+1)
+	}
+
+	delete(a.rec.Transcribing, rec.ID)
+	before = count()
+	a.duplicatePage(*a.pageByID(notes.ID))
+	if n := count(); n != before+2 {
+		t.Errorf("once transcribed: %d pages, want %d", n, before+2)
 	}
 }
 

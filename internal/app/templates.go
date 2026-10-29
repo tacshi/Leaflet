@@ -18,6 +18,10 @@ import (
 // that they can't add to the parent of is copied into their own space.
 func (a *App) duplicatePage(p store.Page) {
 	a.flush()
+	if a.recordingIn(p.ID) {
+		a.toast(locales.TemplateWaitForRecording())
+		return
+	}
 	o := store.CopyOptions{ParentID: p.ParentID, FolderID: p.FolderID, AfterID: p.ID, Title: copyTitle(p.Title)}
 	if a.isShared(p) && (p.ParentID == "" || !a.canEdit(p.ParentID)) {
 		o = store.CopyOptions{Title: o.Title}
@@ -35,6 +39,21 @@ func (a *App) duplicatePage(p store.Page) {
 	a.focusTitle(true)
 }
 
+// recordingIn reports whether a recording on a page or its subpages is
+// still being made or transcribed here: a copy of it now would stay as it
+// is, without what the recording gets once it finishes.
+func (a *App) recordingIn(id string) bool {
+	if a.rec.Active() && a.isUnder(a.rec.State.PageID, id) {
+		return true
+	}
+	for rid := range a.rec.Transcribing {
+		if r, err := a.st.Recording(rid); err == nil && a.isUnder(r.PageID, id) {
+			return true
+		}
+	}
+	return false
+}
+
 // copyTitle is the title of a copy, as Finder names one.
 func copyTitle(title string) string {
 	if strings.TrimSpace(title) == "" {
@@ -47,6 +66,10 @@ func copyTitle(title string) string {
 // to start other pages from.
 func (a *App) saveAsTemplate(p store.Page) {
 	a.flush()
+	if a.recordingIn(p.ID) {
+		a.toast(locales.TemplateWaitForRecording())
+		return
+	}
 	t, err := a.st.CopyPage(p.ID, store.CopyOptions{Title: p.Title, Template: true})
 	if err != nil {
 		a.toast(locales.TemplateSaveFailed(err.Error()))

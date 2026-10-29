@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -72,8 +73,10 @@ type App struct {
 	syncErr    error
 	// invites are the pages shared with the user that wait for them to
 	// accept, as sync last read them; inviteBusy those being answered.
-	invites    []syncsvc.Invite
-	inviteBusy map[string]bool
+	// invitesOpen shows them below the sidebar's button for them.
+	invites     []syncsvc.Invite
+	inviteBusy  map[string]bool
+	invitesOpen bool
 	// icloudStop stops watching the Leaflet folder in iCloud Drive.
 	icloudStop context.CancelFunc
 
@@ -112,10 +115,11 @@ type App struct {
 	dialogs dialogs
 	md      markdown.Options
 	images  *imageCache
-	// downloads are the files downloading from the server, or that
-	// failed to.
-	downloads map[string]bool
-	embeds    map[string]*mygo.WebView
+	// downloads are the files downloading from the server, and
+	// downloadFails when those that failed to last did.
+	downloads     map[string]bool
+	downloadFails map[string]time.Time
+	embeds        map[string]*mygo.WebView
 	// embedSrc is the page each embed's web view last loaded, and
 	// embedSizes how tall its content said it is, once it has drawn;
 	// embedZoomed the diagrams zoomed in.
@@ -137,21 +141,49 @@ type App struct {
 	tray      *mygo.Tray
 	trayShown trayState
 	trayBuilt bool
-	// updatable is set when the app can update itself; updateBusy names
-	// the check under way, or the download after it, for the icon beside
-	// Settings; updateReady is the version installed in the background,
-	// which runs once the app starts again.
-	updatable   bool
-	updateBusy  string
-	updateReady string
+	// updatable is set when the app can update itself; updateChecking
+	// while the check, or the download after it, is under way; updateReady
+	// is the version installed in the background, which runs once the app
+	// starts again.
+	updatable      bool
+	updateChecking bool
+	updateReady    string
 	// quitting is set as a quit starts, when closing the window closes it
 	// rather than hiding it to the menu bar.
 	quitting bool
+
+	// fileToDelete is the file whose deleting the sidebar asks about.
+	fileToDelete *store.File
 
 	// pub is the page shared through a public link, if one is, and
 	// cloudflared what the app found of the tool that opens it.
 	pub         *pubLink
 	cloudflared cloudflaredInfo
+	// pubPage is pub's page, for agent runs to read off the main thread:
+	// a page anyone may read through a link keeps agents to itself.
+	pubPage struct {
+		sync.Mutex
+		id string
+	}
+}
+
+// setPub makes p the public link (nil for none).
+func (a *App) setPub(p *pubLink) {
+	a.pub = p
+	a.pubPage.Lock()
+	a.pubPage.id = ""
+	if p != nil {
+		a.pubPage.id = p.page
+	}
+	a.pubPage.Unlock()
+}
+
+// publiclyLinked reports whether a page is shared through a public link,
+// one still starting included; it may be called from any goroutine.
+func (a *App) publiclyLinked(pageID string) bool {
+	a.pubPage.Lock()
+	defer a.pubPage.Unlock()
+	return a.pubPage.id != "" && a.pubPage.id == pageID
 }
 
 type toast struct {
@@ -191,6 +223,9 @@ type pageState struct {
 	timer   *time.Timer
 	threads []store.Thread
 	members []store.Member
+	// unreadable is set while the stored content could not be read: the
+	// page opens empty and read-only, and is never saved over.
+	unreadable bool
 	// runs are the agent runs of this page, newest last, for Undo.
 	tinted map[string]bool
 	// scroll is where the page is scrolled to, and viewTop where its
@@ -278,6 +313,7 @@ func (a *App) start() error {
 	}
 	a.rec = recording.NewController(st, a.backend)
 	a.hub = agents.NewHub(st, a.backend, a)
+	a.hub.PublicLink = a.publiclyLinked
 	a.sync = syncsvc.New(st, a.backend)
 	a.online = mygo.Network.Status().Online
 	mygo.Network.OnChanged(func(s mygo.NetworkStatus) {
@@ -460,7 +496,7 @@ func (a *App) reload(ch store.Change) {
 	}
 	if a.page != nil && (all || ch.Table == "page_members") {
 		a.page.members, _ = a.st.Members(a.page.id)
-		a.page.editor.ReadOnly = !a.canEdit(a.page.id)
+		a.page.editor.ReadOnly = !a.canEdit(a.page.id) || a.page.unreadable
 	}
 	a.pubChanged(ch)
 	if a.win != nil {
@@ -597,8 +633,10 @@ func (a *App) toggleSettings() {
 	a.openSettings("account")
 }
 
-// navigate shows a route, after the router's current one.
+// navigate shows a route, after the router's current one. Settings, over
+// the window, closes for it, as for the sign-in page or a page it opens.
 func (a *App) navigate(r Route) {
+	a.settingsOpen = false
 	if r == a.route {
 		return
 	}
@@ -699,7 +737,14 @@ func (a *App) loadPage(id string) {
 		return
 	}
 	row, _ := a.st.ContentRow(id)
-	content := doc.MustDecode(row.Content)
+	// Content that can't be read opens as an empty page, kept from being
+	// saved in its place.
+	content, err := doc.Decode(row.Content)
+	unreadable := err != nil
+	if unreadable {
+		log.Printf("page %s: %v", id, err)
+		content = doc.Empty()
+	}
 	stored := content.Encode()
 	// Mentions of pages show their titles now, as renamed since; this
 	// is no edit, so it saves with the page's next one. The store has
@@ -708,10 +753,10 @@ func (a *App) loadPage(id string) {
 		p, err := a.st.Page(id)
 		return p.DisplayTitle(), err == nil
 	})
-	ps := &pageState{id: id, title: p.Title, loaded: content.Copy(), stored: stored, row: row.Content, tinted: map[string]bool{}}
+	ps := &pageState{id: id, title: p.Title, loaded: content.Copy(), stored: stored, row: row.Content, unreadable: unreadable, tinted: map[string]bool{}}
 	ed := editor.New(content, &host{a: a})
 	ed.Size = float32(a.settings.TextSize)
-	ed.ReadOnly = !a.canEdit(id)
+	ed.ReadOnly = !a.canEdit(id) || unreadable
 	ed.Tinted = ps.tinted
 	ed.OnChange = func() { a.scheduleSave() }
 	ps.editor = ed
@@ -788,7 +833,7 @@ func (a *App) scheduleSave() {
 // left to save.
 func (a *App) savePage() bool {
 	ps := a.page
-	if ps == nil || !ps.dirty {
+	if ps == nil || !ps.dirty || ps.unreadable {
 		return true
 	}
 	// What was stored since, by another process, merges in first, so the
@@ -861,6 +906,18 @@ func (a *App) externalContent(pageID string) {
 	if err != nil || row.Content == ps.row {
 		return
 	}
+	if ps.unreadable {
+		// Content that can be read again, as a sync brought it, opens.
+		c, err := doc.Decode(row.Content)
+		if err != nil {
+			return
+		}
+		ps.unreadable = false
+		ps.editor.ReadOnly = !a.canEdit(pageID)
+		ps.editor.Replace(c.Copy())
+		ps.loaded, ps.stored, ps.row = c.Copy(), c.Encode(), row.Content
+		return
+	}
 	stored := doc.MustDecode(row.Content)
 	if stored.Encode() == ps.stored {
 		ps.row = row.Content
@@ -923,6 +980,10 @@ func (a *App) holdRunBar(d time.Duration) {
 
 // newPage creates a page and opens it.
 func (a *App) newPage(parent, folder string) {
+	// A subpage changes its parent, which a page shared to view cannot be.
+	if parent != "" && !a.canEdit(parent) {
+		return
+	}
 	p, err := a.st.CreatePage(store.NewPageOptions{ParentID: parent, FolderID: folder})
 	if err != nil {
 		a.toast(locales.AppErrorCreatePage(err.Error()))

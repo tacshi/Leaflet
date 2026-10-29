@@ -159,14 +159,16 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 		if crumbs.Changed() && chosen >= 0 && chosen < len(open) {
 			open[chosen]()
 		}
-		if p.Template {
-			templatePill(c)
+		// What the page is, as icons; that it is shared with the user
+		// is in its byline.
+		mark := func(icon, label string) {
+			ui.Icon(c, theme.Icon(icon)).FontSize(14).TextColor(pal.TextMuted).Shrink(0).Label(label).Tooltip(label)
 		}
-		if a.isShared(p) {
-			accentBadge(c, locales.PageSharedBadge())
+		if p.Template {
+			mark("layout-template", locales.TemplatePill())
 		}
 		if a.page.editor.ReadOnly {
-			ui.Badge(c, locales.PageViewOnly()).TextColor(pal.TextMuted)
+			mark("eye", locales.PageViewOnly())
 		}
 	})
 }
@@ -282,7 +284,10 @@ func (a *App) byline(c *ui.Context, p store.Page) {
 			when = locales.PageBylineSaving()
 		}
 		ui.Text(c, locales.PageBylineEdited(who, when)).FontSize(13).TextColor(pal.TextMuted)
-		if n := len(a.page.members); n > 0 {
+		if a.isShared(p) {
+			ui.Text(c, "·").TextColor(pal.ChartMuted)
+			ui.Text(c, locales.PageBylineSharedWithYou()).FontSize(13).TextColor(pal.TextMuted)
+		} else if n := len(a.page.members); n > 0 {
 			ui.Text(c, "·").TextColor(pal.ChartMuted)
 			ui.Text(c, locales.PageBylineSharedWith(n)).FontSize(13).TextColor(pal.TextMuted)
 		}
@@ -501,10 +506,19 @@ func (a *App) runningBar(c *ui.Context, s *agents.Session) {
 	case run.Surface == "sidebar" && a.panelOpen && a.panelTab == 0:
 		return
 	}
-	ui.Row(c.Key("running-bar")).Attach(ui.AnchorBottom, ui.AnchorBottom).Bottom(18).Padding(8, 14).Gap(10).Radius(10).
-		Background(pal.Surface).Border(1, pal.AccentSoftBorder).Shadow(0, 10, 30, 0, pal.Shadow).AlignItems(ui.Center).Children(func() {
+	bar := ui.Row(c.Key("running-bar")).Attach(ui.AnchorBottom, ui.AnchorBottom).Bottom(18).Padding(8, 14).Gap(10).Radius(10).
+		Background(pal.Surface).Border(1, pal.AccentSoftBorder).Shadow(0, 10, 30, 0, pal.Shadow).AlignItems(ui.Center)
+	// A run on this device can be stopped; one on the server goes on.
+	stoppable := run.Stoppable()
+	if stoppable {
+		bar.Padding(6, 6, 6, 14)
+	}
+	bar.Children(func() {
 		ui.Spinner(c).Size(14, 14)
 		ui.Text(c, runProgress(run, locales.PageAgentWorking(run.AgentName))).FontSize(13).TextColor(pal.Text)
+		if stoppable && button(c, "stop-run", "square-stop", locales.PageStopRun()).Height(26).Clicked() {
+			a.hub.Stop(a.page.id, run.ID)
+		}
 	})
 }
 
@@ -529,8 +543,13 @@ func uniq(ids []string) []string {
 	return out
 }
 
-// pageNotices shows conflicts on the open page.
+// pageNotices shows conflicts on the open page, or that its content
+// could not be read.
 func (a *App) pageNotices(c *ui.Context, pageID string) bool {
+	if a.page.unreadable {
+		notice(c, "warn", "triangle-alert", locales.PageUnreadable(), nil)
+		return true
+	}
 	n := 0
 	for _, cf := range a.conflicts {
 		if cf.PageID == pageID {

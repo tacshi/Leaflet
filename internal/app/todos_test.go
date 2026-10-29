@@ -9,6 +9,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 func TestTodoRowsAndReminders(t *testing.T) {
@@ -81,5 +82,43 @@ func TestTodosView(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("Nothing to do") {
 		t.Errorf("still listed: %v", tt.Texts())
+	}
+}
+
+// A to-do of a page shared with the user to view is listed, but only its
+// editors check it off.
+func TestTodosOfAPageToView(t *testing.T) {
+	a := templatesApp(t)
+	const id = "00000000-0000-0000-0000-0000000000bb"
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := a.st.PutRemotePage(map[string]any{"id": id, "space_id": "00000000-0000-0000-0000-0000000000cc", "title": "Theirs",
+		"sort_key": "V", "created_at": at, "updated_at": at}); err != nil {
+		t.Fatal(err)
+	}
+	n := &doc.Node{ID: "t1", Type: "todo_list"}
+	n.SetDelta(doc.Delta{{Text: "Review the budget"}})
+	n.Set("checked", false)
+	n.SetDue(time.Now())
+	if _, _, err := a.st.SaveContent(id, doc.FromBlocks([]*doc.Node{n})); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.SetMembers(id, []store.Member{{PageID: id, UserID: a.session.UserID, Role: "viewer", Accepted: true}}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.settings.SidebarOpen, a.settings.SidebarTab = true, tabTodos
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 260, 600)
+	tt.Frame()
+	if !tt.HasText("Review the budget") {
+		t.Fatalf("not listed: %v", tt.Texts())
+	}
+	if err := tt.Click(locales.CommonDone()); err != nil {
+		t.Fatal(err)
+	}
+	a.finishTodo(a.todoList()[0])
+	if a.st.Content(id).Find("t1").Bool("checked") {
+		t.Error("a to-do of a page to view was checked off")
 	}
 }

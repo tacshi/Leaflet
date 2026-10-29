@@ -26,6 +26,7 @@ import {
 import { applyOps, type Op, PageEditSession, type PageSummary, toolDefinitions, ToolError } from "../_shared/tools.ts";
 import { type Surface, systemPrompt, userMessage } from "../_shared/prompt.ts";
 import { isTimeout } from "../_shared/net.ts";
+import { keyAfter, lastKey } from "../_shared/sortkey.ts";
 
 const MAX_ROUNDS = 12;
 const INLINE_PAGE_LIMIT = 40_000;
@@ -81,11 +82,12 @@ interface CommentRow {
   block_id: string;
   parent_comment_id: string | null;
   author_id: string | null;
-  author_kind: "user" | "agent";
+  author_kind: "user" | "agent" | "guest";
   agent_name: string | null;
   body: string;
   resolved: boolean;
   created_at: string;
+  deleted_at: string | null;
 }
 
 type Emit = (event: Record<string, unknown>) => void;
@@ -267,11 +269,16 @@ async function runJob(
 
     const comments = await rows<CommentRow>(
       uc.from("comments")
-        .select("id, block_id, parent_comment_id, author_id, author_kind, agent_name, body, resolved, created_at")
+        .select(
+          "id, block_id, parent_comment_id, author_id, author_kind, agent_name, body, resolved, created_at, deleted_at",
+        )
         .eq("page_id", page.id)
-        .is("deleted_at", null)
         .order("created_at"),
     );
+    // A thread whose first comment was deleted stays while it has replies,
+    // that comment shown as deleted: the app shows it so too.
+    const repliesTo = (root: CommentRow) => comments.filter((c) => c.parent_comment_id === root.id && !c.deleted_at);
+    const bodyOf = (c: CommentRow) => c.deleted_at ? "(deleted)" : c.body;
     const authorIds = [...new Set(comments.map((c) => c.author_id).filter((id): id is string => !!id))];
     const names = new Map<string, string>();
     if (authorIds.length) {
@@ -293,13 +300,13 @@ async function runJob(
         : personOf(c);
 
     const threadsFor = (list: CommentRow[]) => {
-      const roots = list.filter((c) => !c.parent_comment_id);
+      const roots = list.filter((c) => !c.parent_comment_id && (!c.deleted_at || repliesTo(c).length > 0));
       return roots.map((root) => ({
         block_id: root.block_id,
         resolved: root.resolved,
-        thread: [root, ...list.filter((c) => c.parent_comment_id === root.id)].map((c) => ({
+        thread: [root, ...repliesTo(root)].map((c) => ({
           author: authorOf(c),
-          body: c.body,
+          body: bodyOf(c),
         })),
       }));
     };
@@ -311,15 +318,19 @@ async function runJob(
       const rootId = trigger?.parent_comment_id ?? trigger?.id;
       threadRoot = comments.find((c) => c.id === rootId);
       if (threadRoot) {
-        thread = [threadRoot, ...comments.filter((c) => c.parent_comment_id === threadRoot!.id)]
-          .map((c) => ({ author: authorOf(c), body: c.body }));
+        thread = [threadRoot, ...repliesTo(threadRoot)]
+          .map((c) => ({ author: authorOf(c), body: bodyOf(c) }));
       }
     }
 
     // Other pages are offered only on a page that is the caller's alone: on
     // a shared page, someone else's writing could have the agent read the
-    // caller's other pages into it.
-    let crossPage = job.request?.allow_cross_page === true;
+    // caller's other pages into it. A guest's comment is someone else's too,
+    // though stored as the owner's (a deleted one still shows its name), and
+    // it is on a page with a public link: what the agent reads into it, its
+    // visitors read.
+    let crossPage = job.request?.allow_cross_page === true &&
+      !comments.some((c) => c.author_kind === "guest");
     if (crossPage) {
       const { data: members, error: membersError } = await uc.rpc("page_members", { p_page_id: page.id });
       crossPage = !membersError && Array.isArray(members) && members.length > 0 &&
@@ -337,10 +348,12 @@ async function runJob(
           comments: threadsFor(comments),
         }),
       createSubpage: async (title: string, subContent: PageContent) => {
+        // Last among its siblings, by the keys' bytes as the app orders
+        // them, not the database's collation.
         const siblings = await rows<{ sort_key: string }>(
-          uc.from("pages").select("sort_key").eq("parent_id", page.id).order("sort_key", { ascending: false }).limit(1),
+          uc.from("pages").select("sort_key").eq("parent_id", page.id),
         );
-        const sortKey = siblings[0]?.sort_key ? `${siblings[0].sort_key}m` : "a0";
+        const sortKey = keyAfter(lastKey(siblings.map((s) => s.sort_key)));
         const id = crypto.randomUUID();
         const { error: insertError } = await uc.from("pages").insert({
           id,

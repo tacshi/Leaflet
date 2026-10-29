@@ -193,10 +193,14 @@ func (s *Service) joinSpace(joined string) error {
 			return err
 		}
 	}
-	if err := s.st.SetValue("icloud.space", space.SpaceID); err != nil {
-		return err
+	// The folder counts as joined only once everything is queued for it:
+	// a device that stops before then, or could not queue it all, joins
+	// it again on the next pass.
+	failed := s.requeueAll(space.SpaceID)
+	if errors.Is(failed, errNotRequeued) {
+		return failed
 	}
-	return s.requeueAll(space.SpaceID)
+	return errors.Join(failed, s.st.SetValue("icloud.space", space.SpaceID))
 }
 
 // checkDeviceID returns the ID this device writes under. Two devices with
@@ -467,6 +471,8 @@ func (s *Service) rowEntry(me string, e store.OutboxEntry) (icloud.Entry, error)
 	if err := json.Unmarshal([]byte(e.Payload), &row); err != nil {
 		return icloud.Entry{}, err
 	}
+	// A batch has whole rows, newest wins.
+	delete(row, store.ChangedKey)
 	changed, err := s.st.RowUpdatedAt(e.Entity, e.EntityID)
 	if err != nil {
 		return icloud.Entry{}, err

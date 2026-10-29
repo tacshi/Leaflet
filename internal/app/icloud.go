@@ -42,11 +42,15 @@ func (a *App) syncMessage(err error) string {
 }
 
 // startICloud sets iCloud sync up as the settings have it. Signed in, the
-// pages sync through the server instead. With iCloud Drive gone, the
-// passes say so.
+// pages sync through the server instead, and the setting is off, as
+// signing in turns it off. With iCloud Drive gone, the passes say so.
 func (a *App) startICloud() {
 	a.sync.ICloud = icloud.Folder{Root: icloud.Root(), Temp: filepath.Join(a.st.Dir, "tmp")}
-	on := a.settings.ICloudSync && !a.session.SignedIn
+	if a.session.SignedIn && a.settings.ICloudSync {
+		a.settings.ICloudSync = false
+		a.saveSettings()
+	}
+	on := a.settings.ICloudSync
 	a.sync.SetICloud(on)
 	a.watchICloud(on)
 }

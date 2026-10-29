@@ -4,10 +4,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo/ui"
+
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
+	"leaflet/locales"
 )
 
 // An agent outside the app (leaflet mcp) edits the open page while the
@@ -227,5 +230,51 @@ func TestLeavingAPageThatCannotSave(t *testing.T) {
 	}
 	if st.Content(p.ID).Find("t1") == nil {
 		t.Error("the edits were not stored")
+	}
+}
+
+// Stored content that can't be read opens read-only with a notice, and
+// is never saved over; once a readable version comes, it opens as usual.
+func TestUnreadablePageOpensReadOnly(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const broken = `{"children": [{"id": "p1", "type": "paragraph", "delta": `
+	if _, err := a.st.DB().Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, broken, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	if a.page == nil || !a.page.unreadable || !a.page.editor.ReadOnly || a.Editor(p.ID) != nil {
+		t.Fatalf("opened as %+v", a.page)
+	}
+	tt := ui.NewTester(func(c *ui.Context) { a.pageNotices(c, p.ID) }, 800, 200)
+	tt.Frame()
+	if !tt.HasText(locales.PageUnreadable()) {
+		t.Errorf("no notice in %v", tt.Texts())
+	}
+	a.page.editor.Content.Children[0].SetDelta(doc.FromMarkdown("typed"))
+	a.page.dirty = true
+	a.reload(store.Change{Table: "page_members", PageID: p.ID})
+	if !a.page.editor.ReadOnly {
+		t.Error("editable again after its members were read")
+	}
+	if !a.closePage() {
+		t.Fatal("the page would not close")
+	}
+	if row, _ := a.st.ContentRow(p.ID); row.Content != broken {
+		t.Errorf("saved over: %q", row.Content)
+	}
+
+	a.loadPage(p.ID)
+	good := doc.FromBlocks([]*doc.Node{textNode("restored")})
+	if _, err := a.st.DB().Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, good.Encode(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.externalContent(p.ID)
+	if a.page.unreadable || a.page.editor.ReadOnly || !strings.Contains(a.page.editor.Content.PlainText(), "restored") {
+		t.Errorf("unreadable %v, read-only %v, shows %q", a.page.unreadable, a.page.editor.ReadOnly, a.page.editor.Content.PlainText())
 	}
 }

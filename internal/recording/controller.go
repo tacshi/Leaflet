@@ -670,9 +670,19 @@ func (r *Controller) finish(rec store.Recording, path string, soniox *Soniox, st
 		delete(r.Finishing, rec.ID)
 	})
 	segs, err := r.transcribe(rec, path, soniox, stt)
+	var lost error
+	if soniox != nil {
+		lost = soniox.Lost()
+	}
 	updated, _ := r.st.UpdateRecording(rec.ID, func(x *store.Recording) {
 		if err != nil {
 			x.Status, x.Error = "failed", err.Error()
+			return
+		}
+		// A stream that ended early heard only part of the recording: its
+		// words stay, and so does the audio, to transcribe again.
+		if lost != nil {
+			x.Status, x.Error, x.Transcript = "failed", locales.RecErrLiveStopped(lost.Error()), segs
 			return
 		}
 		x.Status, x.Error, x.Transcript = "ready", "", segs
@@ -689,6 +699,16 @@ func (r *Controller) finish(rec store.Recording, path string, soniox *Soniox, st
 			log.Printf("recording: %v", err)
 		}
 	}
+}
+
+// uploadAudio uploads a recording's audio, given as long as it takes over
+// a slow connection (256 kbit/s) and two minutes more: storage transfers
+// have no whole-request timeout of their own, so a stalled one ends here.
+func (r *Controller) uploadAudio(path string, audio []byte) error {
+	wait := 2*time.Minute + time.Duration(len(audio)/(32<<10))*time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	defer cancel()
+	return r.be.Upload(ctx, "recordings", path, bytes.NewReader(audio), "audio/wav")
 }
 
 func (r *Controller) transcribe(rec store.Recording, path string, soniox *Soniox, stt store.SttSettings) ([]store.Segment, error) {
@@ -726,7 +746,7 @@ func (r *Controller) transcribe(rec store.Recording, path string, soniox *Soniox
 		}, ""); err != nil {
 			return nil, err
 		}
-		if err := r.be.Upload(ctx, "recordings", up, bytes.NewReader(audio), "audio/wav"); err != nil {
+		if err := r.uploadAudio(up, audio); err != nil {
 			return nil, err
 		}
 		if _, err := r.be.Upsert(ctx, "recordings", map[string]any{"id": rec.ID, "page_id": rec.PageID, "block_id": rec.BlockID, "audio_path": up}, ""); err != nil {

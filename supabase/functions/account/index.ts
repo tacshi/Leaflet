@@ -56,24 +56,39 @@ async function removePrefix(sc: SupabaseClient, bucket: string, prefix: string):
   await removePaths(sc, bucket, paths);
 }
 
-/** Audio paths of recordings made by others on pages in a space. */
+/**
+ * Audio paths of recordings made by others on pages in a space. A row's
+ * audio_path is the client's to set, so only a path that is the row's own,
+ * recordings/{created_by}/{id}.{ext}, is removed: any other would let a
+ * row name someone else's audio for the service role to delete.
+ */
 async function othersRecordings(sc: SupabaseClient, spaceId: string, userId: string): Promise<string[]> {
   const paths: string[] = [];
   for (let from = 0;; from += 1000) {
     const { data, error } = await sc
       .from("recordings")
-      .select("audio_path, created_by, pages!inner(space_id)")
+      .select("id, audio_path, created_by, pages!inner(space_id)")
       .eq("pages.space_id", spaceId)
       .not("audio_path", "is", null)
       .order("id")
       .range(from, from + 999);
     if (error) throw new Error(`recordings: ${error.message}`);
     for (const r of data ?? []) {
-      if (r.audio_path && r.created_by !== userId) paths.push(r.audio_path);
+      if (r.audio_path && r.created_by && r.created_by !== userId && ownAudioPath(r.audio_path, r.created_by, r.id)) {
+        paths.push(r.audio_path);
+      }
     }
     if (!data || data.length < 1000) break;
   }
   return paths;
+}
+
+/** Whether path is recording id's own: {createdBy}/{id}.{ext}. */
+function ownAudioPath(path: string, createdBy: string, id: string): boolean {
+  const [folder, name, ...rest] = path.split("/");
+  if (rest.length > 0 || folder !== createdBy || !name) return false;
+  const dot = name.indexOf(".");
+  return (dot < 0 ? name : name.slice(0, dot)) === id;
 }
 
 async function removePaths(sc: SupabaseClient, bucket: string, paths: string[]): Promise<void> {

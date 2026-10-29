@@ -183,9 +183,17 @@ func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 		if cli == "" {
 			return errors.New("claude: command not found")
 		}
-		// It will not add a server it has, so the old one goes first.
+		// It will not add a server it has, so the old one goes first, and
+		// comes back as it was if the new one could not be added.
+		old := claudeEntry(env)
 		_ = runCLI(cli, env, "mcp", "remove", "-s", "user", "leaflet")
-		return runCLI(cli, env, "mcp", "add", "-s", "user", "leaflet", "-e", "LEAFLET_DATA_DIR="+dir, "--", exe, "mcp")
+		err := runCLI(cli, env, "mcp", "add", "-s", "user", "leaflet", "-e", "LEAFLET_DATA_DIR="+dir, "--", exe, "mcp")
+		if err != nil && old != nil {
+			if rerr := runCLI(cli, env, "mcp", "add-json", "-s", "user", "leaflet", string(old)); rerr != nil {
+				return fmt.Errorf("%w; putting the old entry back: %w", err, rerr)
+			}
+		}
+		return err
 	case "codex":
 		// Not by its tool, which writes the whole file anew: other tables
 		// reordered, numbers and empty lists respelled, comments lost.
@@ -207,6 +215,21 @@ func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 	}
 	path, keys := jsonConfig(id, env)
 	return editServers(path, keys, map[string]any{"command": exe, "args": []string{"mcp"}, "env": map[string]string{"LEAFLET_DATA_DIR": dir}})
+}
+
+// claudeEntry is the leaflet server in Claude Code's user settings, as
+// it has it, or nil.
+func claudeEntry(env agentEnv) json.RawMessage {
+	path, keys := jsonConfig("claude", env)
+	raw, err := os.ReadFile(path) // #nosec G304 -- Claude Code's own settings file.
+	if err != nil {
+		return nil
+	}
+	servers, err := nested(raw, keys)
+	if err != nil {
+		return nil
+	}
+	return servers["leaflet"]
 }
 
 // disconnectAgent removes Leaflet from an app's settings.

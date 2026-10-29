@@ -2158,13 +2158,15 @@ func (msgs Messages) TemplateUseFailed(error string) string {
 // TemplatePill says "Template"
 // in the language the app shows.
 //
-// A badge marking a template among pages and search results.
+// A badge marking a template among pages and search results, and the
+// tooltip of the icon after a template's breadcrumbs.
 func TemplatePill() string { return In(i18n.Locale()).TemplatePill() }
 
 // TemplatePill says "Template"
 // in the language of msgs.
 //
-// A badge marking a template among pages and search results.
+// A badge marking a template among pages and search results, and the
+// tooltip of the icon after a template's breadcrumbs.
 func (msgs Messages) TemplatePill() string {
 	return Catalog.Format(msgs.locale, "templatePill", nil)
 }
@@ -2801,6 +2803,38 @@ func DialogShareSent(email string) string { return In(i18n.Locale()).DialogShare
 // email has an account. The page reaches them once they accept the invite.
 func (msgs Messages) DialogShareSent(email string) string {
 	return Catalog.Format(msgs.locale, "dialogShareSent", map[string]any{"email": email})
+}
+
+// DialogShareInvalidEmail says "Enter an email address."
+// in the language the app shows.
+//
+// Share dialog: the server refused an invite because what was typed is no
+// email address.
+func DialogShareInvalidEmail() string { return In(i18n.Locale()).DialogShareInvalidEmail() }
+
+// DialogShareInvalidEmail says "Enter an email address."
+// in the language of msgs.
+//
+// Share dialog: the server refused an invite because what was typed is no
+// email address.
+func (msgs Messages) DialogShareInvalidEmail() string {
+	return Catalog.Format(msgs.locale, "dialogShareInvalidEmail", nil)
+}
+
+// DialogShareWithSelf says "That's your own email address."
+// in the language the app shows.
+//
+// Share dialog: the server refused an invite to the user's own email
+// address.
+func DialogShareWithSelf() string { return In(i18n.Locale()).DialogShareWithSelf() }
+
+// DialogShareWithSelf says "That's your own email address."
+// in the language of msgs.
+//
+// Share dialog: the server refused an invite to the user's own email
+// address.
+func (msgs Messages) DialogShareWithSelf() string {
+	return Catalog.Format(msgs.locale, "dialogShareWithSelf", nil)
 }
 
 // DialogShareCanEdit says "Can edit"
@@ -4073,30 +4107,16 @@ func (msgs Messages) PageBreadcrumbsLabel() string {
 	return Catalog.Format(msgs.locale, "pageBreadcrumbsLabel", nil)
 }
 
-// PageSharedBadge says "Shared"
-// in the language the app shows.
-//
-// Badge after the breadcrumbs of a shared page.
-func PageSharedBadge() string { return In(i18n.Locale()).PageSharedBadge() }
-
-// PageSharedBadge says "Shared"
-// in the language of msgs.
-//
-// Badge after the breadcrumbs of a shared page.
-func (msgs Messages) PageSharedBadge() string {
-	return Catalog.Format(msgs.locale, "pageSharedBadge", nil)
-}
-
 // PageViewOnly says "View only"
 // in the language the app shows.
 //
-// Badge after the breadcrumbs of a page the user cannot edit.
+// Tooltip of the icon after the breadcrumbs of a page the user cannot edit.
 func PageViewOnly() string { return In(i18n.Locale()).PageViewOnly() }
 
 // PageViewOnly says "View only"
 // in the language of msgs.
 //
-// Badge after the breadcrumbs of a page the user cannot edit.
+// Tooltip of the icon after the breadcrumbs of a page the user cannot edit.
 func (msgs Messages) PageViewOnly() string {
 	return Catalog.Format(msgs.locale, "pageViewOnly", nil)
 }
@@ -4229,6 +4249,20 @@ func PageBylineSharedWith(count int) string { return In(i18n.Locale()).PageBylin
 // Byline under the title: how many people the page is shared with.
 func (msgs Messages) PageBylineSharedWith(count int) string {
 	return Catalog.Format(msgs.locale, "pageBylineSharedWith", map[string]any{"count": count})
+}
+
+// PageBylineSharedWithYou says "Shared with you"
+// in the language the app shows.
+//
+// Byline under the title of a page someone else shared with the user.
+func PageBylineSharedWithYou() string { return In(i18n.Locale()).PageBylineSharedWithYou() }
+
+// PageBylineSharedWithYou says "Shared with you"
+// in the language of msgs.
+//
+// Byline under the title of a page someone else shared with the user.
+func (msgs Messages) PageBylineSharedWithYou() string {
+	return Catalog.Format(msgs.locale, "pageBylineSharedWithYou", nil)
 }
 
 // PageTimeJustNow says "just now"
@@ -4501,6 +4535,22 @@ func (msgs Messages) PageAgentWorking(agent string) string {
 	return Catalog.Format(msgs.locale, "pageAgentWorking", map[string]any{"agent": agent})
 }
 
+// PageStopRun says "Stop"
+// in the language the app shows.
+//
+// Where an agent shows at work (the bar at the bottom of the page, the
+// chat, the Ask agent prompt): the button stopping it.
+func PageStopRun() string { return In(i18n.Locale()).PageStopRun() }
+
+// PageStopRun says "Stop"
+// in the language of msgs.
+//
+// Where an agent shows at work (the bar at the bottom of the page, the
+// chat, the Ask agent prompt): the button stopping it.
+func (msgs Messages) PageStopRun() string {
+	return Catalog.Format(msgs.locale, "pageStopRun", nil)
+}
+
 // PageConflicts says "{count, plural, one {# block changed here and on another device while apart. One version of each was kept.} other {# …"
 // in the language the app shows.
 //
@@ -4513,6 +4563,20 @@ func PageConflicts(count int) string { return In(i18n.Locale()).PageConflicts(co
 // Notice over a page with sync conflicts.
 func (msgs Messages) PageConflicts(count int) string {
 	return Catalog.Format(msgs.locale, "pageConflicts", map[string]any{"count": count})
+}
+
+// PageUnreadable says "This page's content could not be read. It opened read-only, so that it is kept as it is."
+// in the language the app shows.
+//
+// Notice over a page whose stored content could not be read.
+func PageUnreadable() string { return In(i18n.Locale()).PageUnreadable() }
+
+// PageUnreadable says "This page's content could not be read. It opened read-only, so that it is kept as it is."
+// in the language of msgs.
+//
+// Notice over a page whose stored content could not be read.
+func (msgs Messages) PageUnreadable() string {
+	return Catalog.Format(msgs.locale, "pageUnreadable", nil)
 }
 
 // PageReview says "Review"
@@ -5011,6 +5075,22 @@ func (msgs Messages) PanelDeleteComment() string {
 	return Catalog.Format(msgs.locale, "panelDeleteComment", nil)
 }
 
+// PanelCommentDeleted says "This comment was deleted."
+// in the language the app shows.
+//
+// Comments panel: shown in place of a thread's first comment once it is
+// deleted, while the thread has replies.
+func PanelCommentDeleted() string { return In(i18n.Locale()).PanelCommentDeleted() }
+
+// PanelCommentDeleted says "This comment was deleted."
+// in the language of msgs.
+//
+// Comments panel: shown in place of a thread's first comment once it is
+// deleted, while the thread has replies.
+func (msgs Messages) PanelCommentDeleted() string {
+	return Catalog.Format(msgs.locale, "panelCommentDeleted", nil)
+}
+
 // PanelCouldNotDelete says "Could not delete: {error}"
 // in the language the app shows.
 //
@@ -5065,6 +5145,22 @@ func SidebarHide() string { return In(i18n.Locale()).SidebarHide() }
 // Sidebar: tooltip of the button hiding it.
 func (msgs Messages) SidebarHide() string {
 	return Catalog.Format(msgs.locale, "sidebarHide", nil)
+}
+
+// SidebarInvites says "{count, plural, one {# page shared with you} other {# pages shared with you}}"
+// in the language the app shows.
+//
+// Sidebar's top bar: tooltip of the button, shown only while invites wait,
+// that lists the pages shared with the user to accept.
+func SidebarInvites(count int) string { return In(i18n.Locale()).SidebarInvites(count) }
+
+// SidebarInvites says "{count, plural, one {# page shared with you} other {# pages shared with you}}"
+// in the language of msgs.
+//
+// Sidebar's top bar: tooltip of the button, shown only while invites wait,
+// that lists the pages shared with the user to accept.
+func (msgs Messages) SidebarInvites(count int) string {
+	return Catalog.Format(msgs.locale, "sidebarInvites", map[string]any{"count": count})
 }
 
 // SidebarNoPages says "No pages yet"
@@ -5405,6 +5501,36 @@ func (msgs Messages) SidebarDeleteFile() string {
 	return Catalog.Format(msgs.locale, "sidebarDeleteFile", nil)
 }
 
+// SidebarDeleteFileTitle says "Delete “{name}”?"
+// in the language the app shows.
+//
+// The alert asking before a file is deleted from the sidebar: its title.
+func SidebarDeleteFileTitle(name string) string {
+	return In(i18n.Locale()).SidebarDeleteFileTitle(name)
+}
+
+// SidebarDeleteFileTitle says "Delete “{name}”?"
+// in the language of msgs.
+//
+// The alert asking before a file is deleted from the sidebar: its title.
+func (msgs Messages) SidebarDeleteFileTitle(name string) string {
+	return Catalog.Format(msgs.locale, "sidebarDeleteFileTitle", map[string]any{"name": name})
+}
+
+// SidebarDeleteFileMessage says "It is deleted from every device it syncs to. You can't undo this."
+// in the language the app shows.
+//
+// The alert asking before a file is deleted from the sidebar: its message.
+func SidebarDeleteFileMessage() string { return In(i18n.Locale()).SidebarDeleteFileMessage() }
+
+// SidebarDeleteFileMessage says "It is deleted from every device it syncs to. You can't undo this."
+// in the language of msgs.
+//
+// The alert asking before a file is deleted from the sidebar: its message.
+func (msgs Messages) SidebarDeleteFileMessage() string {
+	return Catalog.Format(msgs.locale, "sidebarDeleteFileMessage", nil)
+}
+
 // SidebarCouldNotMove says "Could not move: {error}"
 // in the language the app shows.
 //
@@ -5561,98 +5687,6 @@ func (msgs Messages) SidebarRestartToUpdate(version string) string {
 	return Catalog.Format(msgs.locale, "sidebarRestartToUpdate", map[string]any{"version": version})
 }
 
-// SidebarCheckForUpdates says "Check for Updates"
-// in the language the app shows.
-//
-// Sidebar footer: tooltip of the button that checks for a newer version.
-func SidebarCheckForUpdates() string { return In(i18n.Locale()).SidebarCheckForUpdates() }
-
-// SidebarCheckForUpdates says "Check for Updates"
-// in the language of msgs.
-//
-// Sidebar footer: tooltip of the button that checks for a newer version.
-func (msgs Messages) SidebarCheckForUpdates() string {
-	return Catalog.Format(msgs.locale, "sidebarCheckForUpdates", nil)
-}
-
-// SidebarCheckingForUpdates says "Checking for updates…"
-// in the language the app shows.
-//
-// Sidebar footer: tooltip of the update button while a check is under way.
-func SidebarCheckingForUpdates() string { return In(i18n.Locale()).SidebarCheckingForUpdates() }
-
-// SidebarCheckingForUpdates says "Checking for updates…"
-// in the language of msgs.
-//
-// Sidebar footer: tooltip of the update button while a check is under way.
-func (msgs Messages) SidebarCheckingForUpdates() string {
-	return Catalog.Format(msgs.locale, "sidebarCheckingForUpdates", nil)
-}
-
-// SidebarDownloadingUpdate says "Downloading {version}…"
-// in the language the app shows.
-//
-// Sidebar footer: tooltip of the update button while a newer version
-// downloads.
-func SidebarDownloadingUpdate(version string) string {
-	return In(i18n.Locale()).SidebarDownloadingUpdate(version)
-}
-
-// SidebarDownloadingUpdate says "Downloading {version}…"
-// in the language of msgs.
-//
-// Sidebar footer: tooltip of the update button while a newer version
-// downloads.
-func (msgs Messages) SidebarDownloadingUpdate(version string) string {
-	return Catalog.Format(msgs.locale, "sidebarDownloadingUpdate", map[string]any{"version": version})
-}
-
-// SidebarUpToDate says "Leaflet {version} is up to date"
-// in the language the app shows.
-//
-// Toast after checking for updates found no newer version.
-func SidebarUpToDate(version string) string { return In(i18n.Locale()).SidebarUpToDate(version) }
-
-// SidebarUpToDate says "Leaflet {version} is up to date"
-// in the language of msgs.
-//
-// Toast after checking for updates found no newer version.
-func (msgs Messages) SidebarUpToDate(version string) string {
-	return Catalog.Format(msgs.locale, "sidebarUpToDate", map[string]any{"version": version})
-}
-
-// SidebarCheckForUpdatesFailed says "Could not check for updates"
-// in the language the app shows.
-//
-// Toast after checking for updates failed.
-func SidebarCheckForUpdatesFailed() string { return In(i18n.Locale()).SidebarCheckForUpdatesFailed() }
-
-// SidebarCheckForUpdatesFailed says "Could not check for updates"
-// in the language of msgs.
-//
-// Toast after checking for updates failed.
-func (msgs Messages) SidebarCheckForUpdatesFailed() string {
-	return Catalog.Format(msgs.locale, "sidebarCheckForUpdatesFailed", nil)
-}
-
-// SidebarInstallUpdateFailed says "Could not install Leaflet {version}"
-// in the language the app shows.
-//
-// Toast after a newer version was found but downloading or installing it
-// failed.
-func SidebarInstallUpdateFailed(version string) string {
-	return In(i18n.Locale()).SidebarInstallUpdateFailed(version)
-}
-
-// SidebarInstallUpdateFailed says "Could not install Leaflet {version}"
-// in the language of msgs.
-//
-// Toast after a newer version was found but downloading or installing it
-// failed.
-func (msgs Messages) SidebarInstallUpdateFailed(version string) string {
-	return Catalog.Format(msgs.locale, "sidebarInstallUpdateFailed", map[string]any{"version": version})
-}
-
 // SidebarSettings says "Settings (⌘,)"
 // in the language the app shows.
 //
@@ -5679,6 +5713,22 @@ func SidebarOnDevice() string { return In(i18n.Locale()).SidebarOnDevice() }
 // Sidebar footer: account line when not signed in.
 func (msgs Messages) SidebarOnDevice() string {
 	return Catalog.Format(msgs.locale, "sidebarOnDevice", nil)
+}
+
+// SidebarSignInToSync says "Sign in to sync"
+// in the language the app shows.
+//
+// Sidebar footer: tooltip of the account row, which opens the sign-in page,
+// while not signed in.
+func SidebarSignInToSync() string { return In(i18n.Locale()).SidebarSignInToSync() }
+
+// SidebarSignInToSync says "Sign in to sync"
+// in the language of msgs.
+//
+// Sidebar footer: tooltip of the account row, which opens the sign-in page,
+// while not signed in.
+func (msgs Messages) SidebarSignInToSync() string {
+	return Catalog.Format(msgs.locale, "sidebarSignInToSync", nil)
 }
 
 // SidebarSyncing says "Syncing…"
@@ -7093,6 +7143,22 @@ func RecErrLive(error string) string { return In(i18n.Locale()).RecErrLive(error
 // Error when the live transcript cannot connect.
 func (msgs Messages) RecErrLive(error string) string {
 	return Catalog.Format(msgs.locale, "recErrLive", map[string]any{"error": error})
+}
+
+// RecErrLiveStopped says "Live transcription stopped early, so the transcript may be missing the rest; the audio is kept: {error}"
+// in the language the app shows.
+//
+// A recording's error when its live Soniox stream ended before the
+// recording did.
+func RecErrLiveStopped(error string) string { return In(i18n.Locale()).RecErrLiveStopped(error) }
+
+// RecErrLiveStopped says "Live transcription stopped early, so the transcript may be missing the rest; the audio is kept: {error}"
+// in the language of msgs.
+//
+// A recording's error when its live Soniox stream ended before the
+// recording did.
+func (msgs Messages) RecErrLiveStopped(error string) string {
+	return Catalog.Format(msgs.locale, "recErrLiveStopped", map[string]any{"error": error})
 }
 
 // RecErrAudioNotSaved says "The audio could not be saved: {error}"
@@ -8655,6 +8721,24 @@ func (msgs Messages) SettingsDevicesLoading() string {
 	return Catalog.Format(msgs.locale, "settingsDevicesLoading", nil)
 }
 
+// SettingsDevicesFailed says "Could not load devices: {error}"
+// in the language the app shows.
+//
+// Settings › Account › Devices: the list could not be loaded; a Retry
+// button is beside it.
+func SettingsDevicesFailed(error string) string {
+	return In(i18n.Locale()).SettingsDevicesFailed(error)
+}
+
+// SettingsDevicesFailed says "Could not load devices: {error}"
+// in the language of msgs.
+//
+// Settings › Account › Devices: the list could not be loaded; a Retry
+// button is beside it.
+func (msgs Messages) SettingsDevicesFailed(error string) string {
+	return Catalog.Format(msgs.locale, "settingsDevicesFailed", map[string]any{"error": error})
+}
+
 // SettingsDeviceLastActive says "Last active {when}"
 // in the language the app shows.
 //
@@ -9753,6 +9837,72 @@ func SettingsDeleteFailed(error string) string { return In(i18n.Locale()).Settin
 // A notification when removing a provider failed.
 func (msgs Messages) SettingsDeleteFailed(error string) string {
 	return Catalog.Format(msgs.locale, "settingsDeleteFailed", map[string]any{"error": error})
+}
+
+// SettingsRemoveProviderTitle says "Remove “{name}”?"
+// in the language the app shows.
+//
+// Settings › Models: the alert asking before a model provider is removed:
+// its title.
+func SettingsRemoveProviderTitle(name string) string {
+	return In(i18n.Locale()).SettingsRemoveProviderTitle(name)
+}
+
+// SettingsRemoveProviderTitle says "Remove “{name}”?"
+// in the language of msgs.
+//
+// Settings › Models: the alert asking before a model provider is removed:
+// its title.
+func (msgs Messages) SettingsRemoveProviderTitle(name string) string {
+	return Catalog.Format(msgs.locale, "settingsRemoveProviderTitle", map[string]any{"name": name})
+}
+
+// SettingsRemoveProviderCloud says "Agents can no longer use it, and its API key is deleted from the server. You can't undo this."
+// in the language the app shows.
+//
+// Settings › Models: the alert asking before a provider kept on the
+// server is removed: its message.
+func SettingsRemoveProviderCloud() string { return In(i18n.Locale()).SettingsRemoveProviderCloud() }
+
+// SettingsRemoveProviderCloud says "Agents can no longer use it, and its API key is deleted from the server. You can't undo this."
+// in the language of msgs.
+//
+// Settings › Models: the alert asking before a provider kept on the
+// server is removed: its message.
+func (msgs Messages) SettingsRemoveProviderCloud() string {
+	return Catalog.Format(msgs.locale, "settingsRemoveProviderCloud", nil)
+}
+
+// SettingsRemoveProviderLocal says "Agents can no longer use it, and its key is deleted from this device."
+// in the language the app shows.
+//
+// Settings › Models: the alert asking before a provider on this device is
+// removed: its message.
+func SettingsRemoveProviderLocal() string { return In(i18n.Locale()).SettingsRemoveProviderLocal() }
+
+// SettingsRemoveProviderLocal says "Agents can no longer use it, and its key is deleted from this device."
+// in the language of msgs.
+//
+// Settings › Models: the alert asking before a provider on this device is
+// removed: its message.
+func (msgs Messages) SettingsRemoveProviderLocal() string {
+	return Catalog.Format(msgs.locale, "settingsRemoveProviderLocal", nil)
+}
+
+// SettingsRemoveProviderAccount says "Agents can no longer use it, and this device signs out of it."
+// in the language the app shows.
+//
+// Settings › Models: the alert asking before a provider signed in with an
+// account (ChatGPT) is removed: its message.
+func SettingsRemoveProviderAccount() string { return In(i18n.Locale()).SettingsRemoveProviderAccount() }
+
+// SettingsRemoveProviderAccount says "Agents can no longer use it, and this device signs out of it."
+// in the language of msgs.
+//
+// Settings › Models: the alert asking before a provider signed in with an
+// account (ChatGPT) is removed: its message.
+func (msgs Messages) SettingsRemoveProviderAccount() string {
+	return Catalog.Format(msgs.locale, "settingsRemoveProviderAccount", nil)
 }
 
 // SettingsDeleteKeyFailed says "Could not delete the key: {error}"
@@ -11047,18 +11197,38 @@ func (msgs Messages) SigninCodeSent() string {
 	return Catalog.Format(msgs.locale, "signinCodeSent", nil)
 }
 
-// SigninRemovedChanges says "{count, plural, one {Removed # change by the previous account that had not uploaded} other {Removed # changes by the …"
+// SigninAnyway says "Sign in anyway?"
 // in the language the app shows.
 //
-// A notification after signing in as another account.
-func SigninRemovedChanges(count int) string { return In(i18n.Locale()).SigninRemovedChanges(count) }
+// The title of the alert asking to sign in as another account while the
+// previous one's changes are not uploaded.
+func SigninAnyway() string { return In(i18n.Locale()).SigninAnyway() }
 
-// SigninRemovedChanges says "{count, plural, one {Removed # change by the previous account that had not uploaded} other {Removed # changes by the …"
+// SigninAnyway says "Sign in anyway?"
 // in the language of msgs.
 //
-// A notification after signing in as another account.
-func (msgs Messages) SigninRemovedChanges(count int) string {
-	return Catalog.Format(msgs.locale, "signinRemovedChanges", map[string]any{"count": count})
+// The title of the alert asking to sign in as another account while the
+// previous one's changes are not uploaded.
+func (msgs Messages) SigninAnyway() string {
+	return Catalog.Format(msgs.locale, "signinAnyway", nil)
+}
+
+// SigninRemovesUnsynced says "{count, plural, one {# change of the account signed in here before is not uploaded yet. Signing in as {email} removes…"
+// in the language the app shows.
+//
+// The alert asking to sign in as another account while the previous one's
+// changes are not uploaded: its message.
+func SigninRemovesUnsynced(count int, email string) string {
+	return In(i18n.Locale()).SigninRemovesUnsynced(count, email)
+}
+
+// SigninRemovesUnsynced says "{count, plural, one {# change of the account signed in here before is not uploaded yet. Signing in as {email} removes…"
+// in the language of msgs.
+//
+// The alert asking to sign in as another account while the previous one's
+// changes are not uploaded: its message.
+func (msgs Messages) SigninRemovesUnsynced(count int, email string) string {
+	return Catalog.Format(msgs.locale, "signinRemovesUnsynced", map[string]any{"count": count, "email": email})
 }
 
 // WelcomeTitle says "Welcome to Leaflet"

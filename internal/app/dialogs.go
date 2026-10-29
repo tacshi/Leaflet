@@ -17,6 +17,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -719,7 +720,7 @@ func (a *App) shareDialog(c *ui.Context) {
 									return
 								}
 								if err != nil {
-									d.shareError = err.Error()
+									d.shareError = shareFailure(err)
 									return
 								}
 								// The server answers alike whether or not the
@@ -1252,6 +1253,21 @@ func (a *App) setMediaLink(id, link string) {
 	}
 }
 
+// shareFailure says why share_page refused an invite, in words for the
+// user where the server names the reason.
+func shareFailure(err error) string {
+	var re *remote.Error
+	if errors.As(err, &re) {
+		switch re.Message {
+		case "invalid_email":
+			return locales.DialogShareInvalidEmail()
+		case "cannot_share_with_self":
+			return locales.DialogShareWithSelf()
+		}
+	}
+	return err.Error()
+}
+
 // Inline agent prompt ---------------------------------------------------
 
 // inlinePrompt asks an agent to work on a block, from @ or a selection:
@@ -1315,7 +1331,12 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 				}
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Spinner(c).Size(14, 14)
-					ui.Text(c, label).FontSize(13).TextColor(pal.TextMuted)
+					ui.Text(c, label).FontSize(13).TextColor(pal.TextMuted).Grow(1)
+					if run := a.hub.Session(ps.id).Run(ip.runID); run != nil && run.Stoppable() {
+						if button(c, "stop", "square-stop", locales.PageStopRun()).Clicked() {
+							a.hub.Stop(ps.id, run.ID)
+						}
+					}
 				})
 			} else {
 				run := a.hub.Session(ps.id).Run(ip.runID)

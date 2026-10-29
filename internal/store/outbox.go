@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"slices"
 	"time"
 )
 
@@ -65,6 +67,66 @@ func queue(q querier, entity, id string, payload map[string]any, label, pageID s
 		}
 	}
 	return nil
+}
+
+// ChangedKey names, in a queued row, the columns changed here since the
+// server last had the row. The push changes only those on the server, so
+// a change another device made meanwhile to another column is kept: an
+// offline rename no longer undoes a move or a deletion made elsewhere. A
+// row queued without it, new here or sent again whole, goes up whole.
+const ChangedKey = "_changed"
+
+// queueChange queues row, changed here from old, the row as stored before
+// the change (nil for a new one), naming the columns that changed, with
+// those of any change to it still queued. One still queued whole stays
+// whole; a change that changes nothing queues nothing.
+func queueChange(q querier, entity, id string, old, row map[string]any, label, pageID string) error {
+	if old == nil {
+		return queue(q, entity, id, row, label, pageID)
+	}
+	var cols []string
+	var queued string
+	switch err := q.QueryRow(`SELECT payload FROM outbox WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, entity, id).Scan(&queued); {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return err
+	default:
+		var prev map[string]any
+		if err := json.Unmarshal([]byte(queued), &prev); err != nil {
+			return err
+		}
+		prevCols, ok := prev[ChangedKey].([]any)
+		if !ok {
+			return queue(q, entity, id, row, label, pageID)
+		}
+		for _, c := range prevCols {
+			if s, ok := c.(string); ok {
+				cols = append(cols, s)
+			}
+		}
+	}
+	for k, v := range row {
+		if !slices.Contains(cols, k) && !sameJSON(v, old[k]) {
+			cols = append(cols, k)
+		}
+	}
+	if len(cols) == 0 {
+		return nil
+	}
+	slices.Sort(cols)
+	changed := make(map[string]any, len(row)+1)
+	for k, v := range row {
+		changed[k] = v
+	}
+	changed[ChangedKey] = cols
+	return queue(q, entity, id, changed, label, pageID)
+}
+
+// sameJSON reports whether two column values go up as the same JSON.
+func sameJSON(a, b any) bool {
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && string(ja) == string(jb)
 }
 
 // Pending returns the queue, oldest first.

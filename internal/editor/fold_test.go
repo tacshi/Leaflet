@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -183,21 +184,50 @@ func TestCaretLeavesWhatAChangeFolds(t *testing.T) {
 	}
 }
 
-// Undo steps are whole pages, so after content comes in from outside they
-// would undo it too; they go.
-func TestReplaceDropsUndo(t *testing.T) {
-	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), para("B", "b")}), &fakeHost{})
+// Undo steps last over content that comes in from outside: going back one
+// takes back what it changed, and the change from outside stays. A block
+// the step deleted comes back, one it made goes, and redo goes forward
+// again over the change.
+func TestReplaceKeepsUndo(t *testing.T) {
+	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), para("B", "b"), para("X", "x")}), &fakeHost{})
 	e.Select(Pos{"A", 1}, Pos{"A", 1})
-	e.InsertText("x")
-	next := e.Content.Copy()
-	next.Children = append(next.Children, para("Q", "from outside"))
-	e.Replace(next)
-	if e.CanUndo() || e.CanRedo() {
-		t.Error("undo steps kept")
+	e.InsertText("1")
+	e.Select(Pos{"X", 0}, Pos{"X", 1})
+	e.Backspace(false)
+	e.Backspace(false) // X joins B
+	e.Enter()
+	e.InsertText("new")
+	outside := func(fn func(c *doc.Content)) {
+		next := e.Content.Copy()
+		fn(next)
+		e.Replace(next)
 	}
-	e.Undo()
-	if e.node("Q") == nil || e.node("A").Delta().Plain() != "ax" {
-		t.Errorf("undo reverted the change from outside: %v", texts(e))
+	outside(func(c *doc.Content) {
+		c.Find("B").SetDelta(doc.Delta{{Text: "B from outside"}})
+		c.Children = append(c.Children, para("Q", "from outside"))
+	})
+	if !e.CanUndo() {
+		t.Fatal("undo steps went")
+	}
+	got := func() string { return strings.Join(texts(e), " | ") }
+	e.Undo() // the typing
+	e.Undo() // the Enter
+	if want := "paragraph:a1 | paragraph:B from outside | paragraph:from outside"; got() != want {
+		t.Errorf("after undoing the new line %q, want %q", got(), want)
+	}
+	outside(func(c *doc.Content) { c.Find("Q").SetDelta(doc.Delta{{Text: "again"}}) })
+	e.Undo() // X joining B, which brings X back after B, as Q is
+	e.Undo() // emptying X
+	e.Undo() // the 1
+	if want := "paragraph:a | paragraph:B from outside | paragraph:again | paragraph:x"; got() != want {
+		t.Errorf("after undoing all %q, want %q", got(), want)
+	}
+	if e.CanUndo() {
+		t.Error("steps left")
+	}
+	e.Redo()
+	if want := "paragraph:a1 | paragraph:B from outside | paragraph:again | paragraph:x"; got() != want {
+		t.Errorf("after redo %q, want %q", got(), want)
 	}
 }
 

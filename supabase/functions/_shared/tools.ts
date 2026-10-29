@@ -277,6 +277,21 @@ function resolveLenient(
 }
 
 /**
+ * A replace that left the block's children as they were: its node has the
+ * children its previous had (replace_block without children). Children
+ * given anew get new ids, so they never match.
+ */
+function keptChildren(op: Extract<Op, { op: "replace" }>): boolean {
+  const ids = (n: NodeJSON) => (n.children ?? []).map((c) => c.id).join("\n");
+  return op.previous.type !== "table" && ids(op.node) === ids(op.previous);
+}
+
+/** Whether node may take the children current has (replace's own check). */
+function canHoldChildren(node: NodeJSON, current: NodeJSON): boolean {
+  return current.type !== "table" && (LIST_TYPES.has(node.type) || node.type === current.type);
+}
+
+/**
  * Replays ops on a (possibly newer) version of a page. Ops whose blocks are
  * gone are skipped; inserts whose anchor is gone land at the end.
  */
@@ -305,6 +320,17 @@ export function applyOps(content: PageContent, ops: Op[], now = Date.now()): Pag
         const at = idx.get(op.id);
         if (!at) break;
         const node = clone(op.node);
+        // A replace that kept the block's children carries them as the
+        // agent read them: keep the ones the block has here instead, so
+        // a child edited or added since is not undone.
+        if (keptChildren(op) && canHoldChildren(node, at.node)) {
+          if (at.node.children?.length) node.children = at.node.children;
+          else delete node.children;
+          at.parent.children![at.index] = node;
+          out.meta.blocks[node.id] = now;
+          delete out.meta.deleted[node.id];
+          break;
+        }
         at.parent.children![at.index] = node;
         touch(node);
         break;

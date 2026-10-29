@@ -131,7 +131,8 @@ func (s *Store) CachedAccount() string {
 }
 
 // ForgetAccount removes the account's pages, and everything synced or
-// waiting to sync with them, from this device. Settings and the device's
+// waiting to sync with them, from this device, its files and recordings'
+// audio included. Settings and the device's
 // own model connections stay. The next session starts with an empty space,
 // and the device registers anew, as the server's row is the account's.
 func (s *Store) ForgetAccount() error {
@@ -145,7 +146,7 @@ func (s *Store) ForgetAccount() error {
 		`DELETE FROM comments`, `DELETE FROM recordings`, `DELETE FROM files`, `DELETE FROM ai_jobs`,
 		`DELETE FROM model_providers WHERE is_local = 0`, `DELETE FROM page_history`, `DELETE FROM outbox`,
 		`DELETE FROM conflicts`, `DELETE FROM page_members`, `DELETE FROM peer_contents`, `DELETE FROM row_versions`,
-		`DELETE FROM key_values WHERE key IN ('account', 'profile.name', 'last.page', 'device.id', 'sync.content_waiting')
+		`DELETE FROM key_values WHERE key IN ('account', 'profile.name', 'last.page', 'device.id', 'sync.content_waiting', 'sync.requeue_waiting', 'sync.moves_waiting')
 			OR key LIKE 'space.%' OR key LIKE 'sync.cursor.%' OR key LIKE 'chat.%' OR key LIKE 'icloud.%' OR key LIKE 'invite.%'`,
 	} {
 		if _, err := tx.Exec(q); err != nil {
@@ -156,7 +157,7 @@ func (s *Store) ForgetAccount() error {
 		return err
 	}
 	s.Notify("*", "")
-	return nil
+	return s.removeCopies()
 }
 
 // hasSpace reports whether a space is on this device.

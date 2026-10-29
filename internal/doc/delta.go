@@ -222,26 +222,71 @@ func (d Delta) Concat(e Delta) Delta {
 	return out.Compact()
 }
 
-// Insert inserts text in the given formats at a rune offset.
+// MentionAround returns where the mention that a rune offset is inside
+// starts and ends; ok is false when the offset is not inside one.
+func (d Delta) MentionAround(off int) (start, end int, ok bool) {
+	at := 0
+	for _, r := range d {
+		n := utf8.RuneCountInString(r.Text)
+		if off <= at {
+			break
+		}
+		if r.Attrs.Mention != nil && off < at+n {
+			return at, at + n, true
+		}
+		at += n
+	}
+	return 0, 0, false
+}
+
+// Widen widens a range of runes to the whole of each mention it cuts: a
+// mention is one unit, taken out or formatted whole.
+func (d Delta) Widen(start, end int) (int, int) {
+	if s, _, ok := d.MentionAround(start); ok {
+		start = s
+	}
+	if _, e, ok := d.MentionAround(end); ok {
+		end = e
+	}
+	return start, end
+}
+
+// Insert inserts text in the given formats at a rune offset; inside a
+// mention, after it.
 func (d Delta) Insert(at int, text string, attrs Attrs) Delta {
+	if _, end, ok := d.MentionAround(at); ok {
+		at = end
+	}
 	out := d.Slice(0, at)
 	out = append(out, Run{Text: text, Attrs: attrs})
 	out = append(out, d.Slice(at, d.Len())...)
 	return out.Compact()
 }
 
-// InsertDelta inserts rich text at a rune offset.
+// InsertDelta inserts rich text at a rune offset; inside a mention,
+// after it.
 func (d Delta) InsertDelta(at int, e Delta) Delta {
+	if _, end, ok := d.MentionAround(at); ok {
+		at = end
+	}
 	return d.Slice(0, at).Concat(e).Concat(d.Slice(at, d.Len()))
 }
 
-// Delete removes the runes from start to end.
+// Delete removes the runes from start to end, and the whole of a mention
+// they are part of.
 func (d Delta) Delete(start, end int) Delta {
+	if start < end {
+		start, end = d.Widen(start, end)
+	}
 	return d.Slice(0, start).Concat(d.Slice(end, d.Len()))
 }
 
-// Format changes the formats of the runes from start to end.
+// Format changes the formats of the runes from start to end, and of the
+// whole of a mention they are part of.
 func (d Delta) Format(start, end int, fn func(*Attrs)) Delta {
+	if start < end {
+		start, end = d.Widen(start, end)
+	}
 	var out Delta
 	out = append(out, d.Slice(0, start)...)
 	for _, r := range d.Slice(start, end) {

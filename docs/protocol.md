@@ -201,17 +201,27 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
 - The outbox keeps one entry per changed row. Replacing a queued payload
   moves the entry's revision on, and an upload takes the entry off the queue
   only if its revision is still the one sent.
+- A page or folder changed on a device goes up as the columns it changed
+  there (an update), so a change another device made to another column
+  meanwhile stays: an offline rename does not undo a move or a deletion. A
+  row the server does not have yet, or one sent again whole, goes up whole.
 - Each table is pulled in `(updated_at, key)` order from a cursor of the
   last row stored here (`key` is `id`, or `page_id` for `page_content`). A
   row that cannot be stored stops that table's pull, and the next pull starts
   with it. Each pull reads again from 10 seconds behind its cursor, since a
   row is stamped before its transaction commits and one that commits late
   can carry an earlier time; rows already stored here are skipped.
+- Page content from the server that a device cannot read (a newer format)
+  is neither merged nor stored, so it never stands in for an empty page:
+  that page's change here stays queued, and its content is asked for again
+  each pull, without stopping the pull of the others.
 - Page history goes up and is never pulled. A device keeps the snapshots
   of a page that its History shows, the newest 50 and every named
   (`manual`) one, and removes the others as it takes a new one, with any of
-  them still waiting to go up. The server keeps a page's newest 50 unnamed
-  snapshots and all its named ones: a trigger prunes as each is inserted.
+  them still waiting to go up. The server keeps each writer's newest 50
+  unnamed snapshots of a page and all its named ones: a trigger prunes as
+  each is inserted, only among the inserting writer's own, so one editor's
+  snapshots never push out anyone else's.
 - Deleting a file cannot be undone, so its bytes go with it. The deleting
   device removes its own copy (only one the app made in its data folder,
   never the file the user added) and queues the removal of the stored
@@ -221,9 +231,12 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
   once a batch has the deletion. An upload still waiting is dropped. A
   device that pulls a deleted file removes its copy in its data folder.
 - Sharing a page invites: `share_page` adds a `page_permissions` row with
-  `accepted_at` null, and the page reaches the person only once they accept.
+  `accepted_at` null for the account that has confirmed the address, or,
+  when none has, holds the invite for the address (`page_email_invites`)
+  until an account confirms it; the page reaches the person only once they
+  accept.
   Each pass reads the account's pending invites with `page_invites()`, which
-  Home lists; `accept_page_invite` sets `accepted_at` (moving the row's
+  the sidebar offers while any wait; `accept_page_invite` sets `accepted_at` (moving the row's
   `updated_at` on), and `decline_page_invite` removes the row. The shares
   are pulled by `updated_at` like the tables, filtered to
   `accepted_at=not.is.null`, and each one pulled brings its page and the
@@ -243,8 +256,11 @@ See `supabase/migrations/`. Row-level security: the space owner has full
 access; `page_permissions` grants `viewer` or `editor` on a page and all its
 subpages once accepted (`accepted_at` set): every access check counts only
 accepted rows. The person invited reads their own rows, pending or not, and
-the space owner reads all of a page's; only the person invited sets
+the space owner reads a page's accepted ones; only the person invited sets
 `accepted_at`, through `accept_page_invite` (a trigger keeps it otherwise).
+`page_history` is the owner's to read in full; anyone else reads the
+snapshots taken from when they accepted a share of the page, or of a page
+it is inside, on.
 Moving a page under a new parent requires edit access to both.
 `pages.is_template` marks a template and every subpage of one (a subpage
 made under a template is one too); templates stay out of the page list,
@@ -256,11 +272,15 @@ and are not selectable by clients.
 Storage buckets: `recordings` (`{user_id}/{recording_id}.m4a`), `files`
 (`{space_id}/{file_id}/{name}`), `images` (`{space_id}/{page_id}/{image_id}.{ext}`).
 
-RPCs: `share_page(p_page_id, p_email, p_role)` (an invite; it returns no
-rows whether or not the email has an account, and sharing again changes only
-the role), `unshare_page(p_page_id, p_user_id)` (also withdraws an invite),
-`page_members(p_page_id)` (`user_id, display_name, email, role, accepted`;
-people still invited are listed only to the owner), `page_invites()` (the
+RPCs: `share_page(p_page_id, p_email, p_role)` (an invite to the account
+that confirmed the address, or one waiting for it; it returns no rows
+either way, and sharing again changes only the role),
+`unshare_page(p_page_id, p_user_id)` (also withdraws an invite, by the id
+`page_members` gives it), `page_members(p_page_id)` (`user_id, display_name,
+email, role, accepted`; invites still waiting are listed only to the owner,
+and alike whether or not the address has an account: `user_id` is the
+invite's id, not the account's, `email` the address as shared, and
+`display_name` empty), `page_invites()` (the
 caller's pending invites: `page_id, title, role, inviter_name, created_at`,
 of pages not deleted), `accept_page_invite(p_page_id)`,
 `decline_page_invite(p_page_id)`, `set_provider_secret(p_provider_id, p_secret)`

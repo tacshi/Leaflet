@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,9 +122,12 @@ func OpenPath(path, dir string) (*Store, error) {
 	// Transactions take the write lock as they begin (_txlock), so what one
 	// reads stays as it read it until it commits, and one that cannot have
 	// the lock waits for it, up to the busy timeout, before doing anything.
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(0)&_txlock=immediate"
-	if path == ":memory:" {
-		dsn = ":memory:"
+	dsn := ":memory:"
+	if path != ":memory:" {
+		var err error
+		if dsn, err = fileURI(path, "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(0)&_txlock=immediate"); err != nil {
+			return nil, err
+		}
 	}
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -137,6 +141,21 @@ func OpenPath(path, dir string) (*Store, error) {
 		return nil, err
 	}
 	return &Store{db: db, Dir: dir}, nil
+}
+
+// fileURI is the SQLite URI of the database at path, with query: the
+// path escaped, so a "#", "?" or "%" in a folder's name opens that
+// folder's database and not another.
+func fileURI(path, query string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(abs), RawQuery: query}
+	if !strings.HasPrefix(u.Path, "/") {
+		u.Path = "/" + u.Path // C:/… on Windows
+	}
+	return u.String(), nil
 }
 
 // migrations bring a database an earlier version made up to this one's:
@@ -393,7 +412,15 @@ func (s *Store) Wipe() error {
 		}
 	}
 	s.Notify("*", "")
-	return nil
+	return s.removeCopies()
+}
+
+// removeCopies removes the copies of files and the recordings' audio the
+// app keeps in its data folder, once no row names them: left there, an
+// account's attachments and voice would stay on the device after it signs
+// out or is deleted.
+func (s *Store) removeCopies() error {
+	return errors.Join(os.RemoveAll(filepath.Join(s.Dir, "files")), os.RemoveAll(filepath.Join(s.Dir, "recordings")))
 }
 
 // Helpers for nullable columns: "" and zero times are NULL.

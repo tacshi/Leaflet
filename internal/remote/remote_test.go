@@ -150,3 +150,51 @@ func TestRefreshSignsOutOnlyWhenRevoked(t *testing.T) {
 		}
 	}
 }
+
+// Storage transfers take as long as they need, past the timeout of the
+// other calls, as a large recording's upload does; a server that does
+// not answer once the request is sent still fails them.
+func TestStorageTransfersOutlastTheCallTimeout(t *testing.T) {
+	was := longHeaderWait
+	longHeaderWait = 500 * time.Millisecond
+	t.Cleanup(func() { longHeaderWait = was })
+	var hang atomic.Bool
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hang.Load() {
+			_, _ = io.ReadAll(r.Body)
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+			}
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+		data, _ := io.ReadAll(r.Body)
+		if r.Method == "GET" {
+			_, _ = io.WriteString(w, "RIFF")
+			return
+		}
+		_, _ = fmt.Fprintf(w, `{"Key": %q}`, data)
+	}))
+	t.Cleanup(hs.Close)
+	c := SignedInForTest(hs.URL, nil, "u1")
+	c.http.Timeout = 100 * time.Millisecond
+	ctx := context.Background()
+	if err := c.Upload(ctx, "recordings", "u1/r.wav", strings.NewReader("RIFF"), "audio/wav"); err != nil {
+		t.Errorf("upload: %v", err)
+	}
+	if data, err := c.Download(ctx, "recordings", "u1/r.wav"); err != nil || string(data) != "RIFF" {
+		t.Errorf("download %q, %v", data, err)
+	}
+	hang.Store(true)
+	start := time.Now()
+	if err := c.Upload(ctx, "recordings", "u1/r.wav", strings.NewReader("RIFF"), "audio/wav"); err == nil || !IsNetwork(err) {
+		t.Errorf("upload to a server that does not answer: %v", err)
+	}
+	if err := c.InvokeStream(ctx, "agent", map[string]any{}, func(map[string]any) {}); err == nil {
+		t.Error("a run on a server that does not answer went")
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("gave up after %v", d)
+	}
+}

@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"log"
 	"time"
 
@@ -107,56 +108,39 @@ func (a *App) newRecordingPage() {
 }
 
 // checkForUpdate looks for a newer version as the app starts and installs
-// it in the background; the update runs once the app starts again, from
-// the icon beside Settings or the menu bar. "Check for Updates…" of the
-// menus is the updater plugin's, with its window.
+// it in the background, quietly; the update runs once the app starts
+// again, from the icon beside Settings, which shows only then, or the menu
+// bar. "Check for Updates…" of the menus is the updater plugin's, with its
+// window.
 func (a *App) checkForUpdate() {
 	time.Sleep(5 * time.Second) // let the app open first
-	a.update(func() { a.findUpdate(false) })
+	a.update(a.findUpdate)
 }
 
 // findUpdate checks for a newer version and installs it in the
 // background, unless a check is under way or an update waits already.
-// asked is set when the user asked, from the icon beside Settings: the
-// app then says it is up to date, or that the check or the install
-// failed. It runs on
-// the main thread.
-func (a *App) findUpdate(asked bool) {
-	if !a.updatable || a.updateBusy != "" || a.updateReady != "" {
+// What goes wrong is only logged: nobody asked. It runs on the main
+// thread.
+func (a *App) findUpdate() {
+	if !a.updatable || a.updateChecking || a.updateReady != "" {
 		return
 	}
-	a.updateBusy = locales.SidebarCheckingForUpdates()
+	a.updateChecking = true
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
 		up, err := mygo.Updater.Check(ctx)
-		var installErr error
 		if err == nil && up != nil {
-			a.update(func() { a.updateBusy = locales.SidebarDownloadingUpdate(up.Version) })
-			installErr = up.Install(ctx, nil)
+			if err = up.Install(ctx, nil); err != nil {
+				err = fmt.Errorf("%s: %w", up.Version, err)
+			}
 		}
 		if err != nil {
 			log.Printf("update: %v", err)
 		}
-		if installErr != nil {
-			log.Printf("update %s: %v", up.Version, installErr)
-		}
 		a.update(func() {
-			a.updateBusy = ""
-			switch {
-			case err != nil:
-				if asked {
-					a.toast(locales.SidebarCheckForUpdatesFailed())
-				}
-			case installErr != nil:
-				if asked {
-					a.toast(locales.SidebarInstallUpdateFailed(up.Version))
-				}
-			case up == nil:
-				if asked {
-					a.toast(locales.SidebarUpToDate(mygo.App.Version()))
-				}
-			default:
+			a.updateChecking = false
+			if err == nil && up != nil {
 				a.updateReady = up.Version
 				a.refreshTray()
 			}

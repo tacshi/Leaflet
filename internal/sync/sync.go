@@ -410,18 +410,23 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 	if err := s.st.SetValue("space.local", remoteID); err != nil {
 		return err
 	}
-	if err := s.st.SetValue("space."+uid, remoteID); err != nil {
-		return err
-	}
 	if err := s.st.SetValue("account", uid); err != nil {
 		return err
 	}
-	// Everything made before sign-in goes up now.
-	failed := s.requeueAll(remoteID)
+	// What is made from here on goes into the account's space: the
+	// device's own is gone.
 	sess := s.st.Session()
 	sess.SpaceID, sess.UserID, sess.SignedIn = remoteID, uid, true
 	s.st.SetSession(sess)
-	return failed
+	// Everything made before sign-in goes up now. The space counts as
+	// adopted only once it is all queued: a device that stops before then,
+	// or could not queue it all, adopts it again on the next pass, so
+	// nothing is left out of the queue that signing out checks.
+	failed := s.requeueAll(remoteID)
+	if errors.Is(failed, errNotRequeued) {
+		return failed
+	}
+	return errors.Join(failed, s.st.SetValue("space."+uid, remoteID))
 }
 
 // requeueAll queues everything on this device to go up, now in the space
@@ -430,42 +435,66 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 // iCloud Drive, as after syncing through it, comes here first, to go up
 // from here; one that does not come yet waits, and retryMoves tries it
 // again before each pass.
+//
+// What it could not read or queue it does all again before the next pass
+// (requeueKey), so nothing is left behind for good.
 func (s *Service) requeueAll(spaceID string) error {
+	if err := s.st.SetValue(requeueKey, spaceID); err != nil {
+		return fmt.Errorf("%w: %w", errNotRequeued, err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), moveWait)
 	defer cancel()
-	var failed error
-	pages, _ := s.st.AllPages()
+	var queued error
+	pages, err := s.st.AllPages()
+	queued = errors.Join(queued, err)
 	for _, p := range pages {
-		failed = errors.Join(failed, s.st.Queue("pages", p.ID, store.PageToRemote(p), "", p.ID))
-		failed = errors.Join(failed, s.st.Queue("page_content", p.ID, map[string]any{"page_id": p.ID}, "page from this device", p.ID))
+		queued = errors.Join(queued, s.st.Queue("pages", p.ID, store.PageToRemote(p), "", p.ID))
+		queued = errors.Join(queued, s.st.Queue("page_content", p.ID, map[string]any{"page_id": p.ID}, "page from this device", p.ID))
 	}
-	folders, _ := s.st.Folders()
+	folders, err := s.st.Folders()
+	queued = errors.Join(queued, err)
 	for _, f := range folders {
-		failed = errors.Join(failed, s.st.Queue("folders", f.ID, store.FolderToRemote(f), "", ""))
+		queued = errors.Join(queued, s.st.Queue("folders", f.ID, store.FolderToRemote(f), "", ""))
 	}
-	comments, _ := s.st.AllComments()
+	comments, err := s.st.AllComments()
+	queued = errors.Join(queued, err)
 	for _, c := range comments {
-		failed = errors.Join(failed, s.st.Queue("comments", c.ID, store.CommentToRemote(c), "", c.PageID))
+		queued = errors.Join(queued, s.st.Queue("comments", c.ID, store.CommentToRemote(c), "", c.PageID))
 	}
+	files, err := s.st.AllFiles()
+	queued = errors.Join(queued, err)
+	recordings, err := s.st.Recordings()
+	queued = errors.Join(queued, err)
+	var failed error
 	moves := map[string]bool{}
 	// Deleted files go too, as deleted pages do, so a deletion sent in a
 	// batch that was lost goes again: its stored copy may be gone.
-	files, _ := s.st.AllFiles()
 	for _, f := range files {
 		if err := s.requeueFile(ctx, f, spaceID); err != nil {
 			moves["files:"+f.ID] = true
 			failed = errors.Join(failed, err)
 		}
 	}
-	recordings, _ := s.st.Recordings()
 	for _, r := range recordings {
 		if err := s.requeueRecording(ctx, r); err != nil {
 			moves["recordings:"+r.ID] = true
 			failed = errors.Join(failed, err)
 		}
 	}
-	return errors.Join(failed, s.setIDs(movesKey, moves))
+	queued = errors.Join(queued, s.setIDs(movesKey, moves))
+	if queued != nil {
+		return errors.Join(failed, fmt.Errorf("%w: %w", errNotRequeued, queued))
+	}
+	return errors.Join(failed, s.st.SetValue(requeueKey, ""))
 }
+
+// requeueKey keeps the space requeueAll is queuing everything in, until it
+// has: one it could not finish runs again before the next pass.
+const requeueKey = "sync.requeue_waiting"
+
+// errNotRequeued is a requeueAll that did not queue everything, and runs
+// again before the next pass.
+var errNotRequeued = errors.New("not everything is queued to go up")
 
 // moveWait is how long requeueAll waits for iCloud Drive to bring what
 // this device has only there; a retry waits a quarter of it. Tests
@@ -477,8 +506,12 @@ var moveWait = 2 * time.Minute
 const movesKey = "sync.moves_waiting"
 
 // retryMoves queues the files and recordings requeueAll could not bring
-// from iCloud Drive, once they come.
+// from iCloud Drive, once they come, and runs again a requeueAll that did
+// not finish.
 func (s *Service) retryMoves(ctx context.Context) error {
+	if space, _ := s.st.Value(requeueKey); space != "" {
+		return s.requeueAll(space)
+	}
 	moves := s.ids(movesKey)
 	if len(moves) == 0 {
 		return nil
@@ -664,6 +697,9 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 		if payload["created_by"] == nil {
 			payload["created_by"] = uid
 		}
+		return s.pushChanged(ctx, e.Entity, payload)
+	case "folders":
+		return s.pushChanged(ctx, e.Entity, payload)
 	case "comments":
 		return s.pushComment(ctx, uid, payload)
 	case "page_history":
@@ -672,6 +708,31 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 		payload["user_id"] = uid
 	}
 	_, err := s.be.Upsert(ctx, e.Entity, payload, "")
+	return err == nil, err
+}
+
+// pushChanged sends a row changed here: only the columns it changed when
+// the server has the row, so a change another device made meanwhile to
+// another column stays, and the whole row when the server has none.
+func (s *Service) pushChanged(ctx context.Context, table string, payload map[string]any) (bool, error) {
+	cols, partial := payload[store.ChangedKey].([]any)
+	delete(payload, store.ChangedKey)
+	if partial {
+		changes := make(map[string]any, len(cols))
+		for _, c := range cols {
+			if k, ok := c.(string); ok {
+				changes[k] = payload[k]
+			}
+		}
+		if len(changes) == 0 {
+			return true, nil
+		}
+		rows, err := s.be.Update(ctx, table, []string{remote.Eq("id", store.S(payload, "id"))}, changes)
+		if err != nil || len(rows) > 0 {
+			return err == nil, err
+		}
+	}
+	_, err := s.be.Upsert(ctx, table, payload, "")
 	return err == nil, err
 }
 
@@ -716,6 +777,13 @@ var errStale = errors.New("the page changed on the server while saving")
 // copy stays as it is, and the change stays queued.
 var errUnreadable = errors.New("the page's content on this device could not be read, so it was not synced")
 
+// errServerUnreadable is a page whose content on the server cannot be
+// read here, as one a newer version of Leaflet wrote may not be. It is
+// neither merged nor saved over, as an empty page would take its place:
+// the server's copy stays, this device keeps its own, and its change
+// stays queued.
+var errServerUnreadable = errors.New("the page's content on the server could not be read, so it was not synced")
+
 func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) {
 	// A page that is gone has nothing to send; one that cannot be read now
 	// stays queued.
@@ -755,7 +823,11 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	merged := local
 	var conflicts []doc.Conflict
 	if remoteRow != nil && behind(row, remoteRow) {
-		merged, conflicts = doc.Merge(baseOf(row), local, contentOf(remoteRow["content"]))
+		theirs, err := contentOf(remoteRow["content"])
+		if err != nil {
+			return false, errServerUnreadable
+		}
+		merged, conflicts = doc.Merge(baseOf(row), local, theirs)
 	}
 	values := map[string]any{"content": json.RawMessage(merged.Encode()), "plain_text": merged.PlainText()}
 	var saved []map[string]any
@@ -834,13 +906,13 @@ func behind(row store.ContentRow, remoteRow map[string]any) bool {
 	return row.RemoteUpdatedAt.IsZero() || store.Int(remoteRow, "revision") != row.RemoteRevision
 }
 
-func contentOf(v any) *doc.Content {
-	raw, _ := json.Marshal(v)
-	c, err := doc.Decode(string(raw))
+// contentOf reads a page's content as the server sent it.
+func contentOf(v any) (*doc.Content, error) {
+	raw, err := json.Marshal(v)
 	if err != nil {
-		return doc.Empty()
+		return nil, err
 	}
-	return c
+	return doc.Decode(string(raw))
 }
 
 func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]any) (bool, error) {
@@ -1281,7 +1353,15 @@ func (s *Service) pullContents(ctx context.Context) error {
 		open := s.open[id]
 		s.mu.Unlock()
 		if open || allOffline || p.KeepOffline {
-			if _, err := s.refreshRemote(ctx, id); err != nil {
+			_, err := s.refreshRemote(ctx, id)
+			if errors.Is(err, errServerUnreadable) {
+				// The page keeps its content here, and waits for one it
+				// can read; the other pages' content still comes.
+				log.Printf("pull %s: %v", id, err)
+				waiting[id] = true
+				return nil
+			}
+			if err != nil {
 				waiting[id] = true
 				return err
 			}
@@ -1377,7 +1457,10 @@ func (s *Service) refreshRemote(ctx context.Context, pageID string) (*doc.Conten
 		return s.st.Content(pageID), nil
 	}
 	remoteAt := store.Time(remoteRow["updated_at"])
-	remoteContent := contentOf(remoteRow["content"])
+	remoteContent, err := contentOf(remoteRow["content"])
+	if err != nil {
+		return nil, errServerUnreadable
+	}
 	// The user or an agent may save while this merges: store the merge
 	// only over the content it merged, and merge again otherwise.
 	for range 3 {

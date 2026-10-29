@@ -86,9 +86,18 @@ type Run struct {
 	Undone      bool
 	Error       string
 	At          time.Time
+	// Stopped is a run the user stopped: it keeps the edits it made
+	// before, which undo as one step as a finished run's do.
+	Stopped bool
 	// Restored is a run of an earlier launch, kept with its chat reply.
 	Restored bool `json:"-"`
+	// stop cancels a run on this device while it works; a cloud run goes
+	// on on the server whatever the app does, so it has none.
+	stop context.CancelFunc
 }
+
+// Stoppable reports whether the run is working and Stop can end it.
+func (r *Run) Stoppable() bool { return r.stop != nil && !r.Stopped }
 
 // BlockIDs are the blocks the run touched.
 func (r *Run) BlockIDs() []string {
@@ -312,6 +321,9 @@ type Hub struct {
 	be       *remote.Client
 	host     Host
 	sessions map[string]*Session
+	// PublicLink reports whether a page has a public link open now, which
+	// the app serves; nil is none.
+	PublicLink func(pageID string) bool
 }
 
 // NewHub returns the hub.
@@ -664,8 +676,11 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		},
 	}
 	work := before.Copy()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	if option.Local() {
+		run.stop = cancel
+	}
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 		var res Result
 		var err error
@@ -684,6 +699,17 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		h.host.Update(func() { h.finish(s, run, req, option, before, d, res, err, o) })
 	}()
 	return run
+}
+
+// Stop ends a page's run on this device that is still working. It ends as
+// a finished run does, with the edits it made, as they came, on the page.
+func (h *Hub) Stop(pageID, runID string) {
+	run := h.Session(pageID).Run(runID)
+	if run == nil || !run.Stoppable() {
+		return
+	}
+	run.Stopped = true
+	run.stop()
 }
 
 func firstNonNil(a, b *store.ModelChoice) *store.ModelChoice {
@@ -820,9 +846,15 @@ func storedRow(st *store.Store, pageID string) (*doc.Content, string, error) {
 
 func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *doc.Content, d *delivery, res Result, err error, o RunOptions) {
 	s.Running = false
+	run.stop = nil
 	run.Reply = res.Reply
 	if len(run.Ops) == 0 && len(res.Ops) > 0 {
 		run.Ops, run.Edits = res.Ops, res.Edits
+	}
+	if run.Stopped {
+		// What it said before it stopped is no answer, and what it edited
+		// stays, for Undo.
+		run.Reply, err = "", nil
 	}
 	if err != nil {
 		run.Status, run.Error = "failed", err.Error()
@@ -896,9 +928,13 @@ func (h *Hub) toolContext(pageID, title, agent string, content *doc.Content, set
 
 // crossPage reports whether an agent on p may read the user's other
 // pages. Not on a page other people write in too: what they wrote could
-// tell the agent to copy the user's other pages into it.
+// tell the agent to copy the user's other pages into it. Nor on one with
+// a public link, or a guest's comment from one: its visitors read what
+// the agent copies into it, and a guest's comment is someone else's
+// writing, though stored as the user's.
 func (h *Hub) crossPage(p store.Page, settings store.Settings) bool {
-	return settings.AgentsReadOtherPages && p.ID != "" && !sharedWithOthers(h.st, p)
+	return settings.AgentsReadOtherPages && p.ID != "" && !sharedWithOthers(h.st, p) &&
+		!h.st.HasGuestComments(p.ID) && (h.PublicLink == nil || !h.PublicLink(p.ID))
 }
 
 // sharedWithOthers reports whether anyone but the user has a page: it is
@@ -1070,6 +1106,10 @@ func Describe(r *Run) string {
 	switch {
 	case r.Error != "":
 		return r.Error
+	case r.Stopped && len(r.Edits) > 0:
+		return fmt.Sprintf("Stopped after: %s.", r.Edits[len(r.Edits)-1].Summary)
+	case r.Stopped:
+		return "Stopped before making any changes."
 	case r.Reply != "":
 		return r.Reply
 	case len(r.Edits) > 0:

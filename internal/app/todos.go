@@ -124,8 +124,10 @@ func (a *App) todoRowView(c *ui.Context, t store.PageTodo, pal *theme.Palette) {
 		row.Background(pal.Hover)
 	}
 	row.Children(func() {
+		// A page shared to view lists its to-dos, which only its editors
+		// check off.
 		done := false
-		if ui.Checkbox(c, &done, "").Label(locales.CommonDone()).Margin(1, 0, 0).Changed() {
+		if ui.Checkbox(c, &done, "").Label(locales.CommonDone()).Margin(1, 0, 0).Disabled(!a.canEdit(t.PageID)).Changed() {
 			a.finishTodo(t)
 		}
 		ui.Column(c).Grow(1).Shrink(1).Gap(1).Children(func() {
@@ -155,6 +157,9 @@ func (a *App) todoRowView(c *ui.Context, t store.PageTodo, pal *theme.Palette) {
 
 // finishTodo checks a to-do off, in its page, and offers to undo it.
 func (a *App) finishTodo(t store.PageTodo) {
+	if !a.canEdit(t.PageID) {
+		return
+	}
 	set := func(checked bool) {
 		if ed := a.Editor(t.PageID); ed != nil {
 			if n := ed.Content.Find(t.BlockID); n != nil && n.Bool("checked") != checked {

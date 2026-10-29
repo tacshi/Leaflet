@@ -305,8 +305,10 @@ func (e *Editor) RangeRect(from, to Pos) (ui.Rect, bool) {
 	return ui.Rect{X: box.X, Y: a.Y, W: box.W, H: b.Y + b.H - a.Y}, true
 }
 
-// moveTo moves the caret, extending the selection with Shift.
+// moveTo moves the caret, extending the selection with Shift. Typing
+// after it is an undo step of its own.
 func (e *Editor) moveTo(p Pos, extend bool) {
+	e.BreakUndo()
 	desired, has := e.desiredX, e.hasDesired
 	if extend {
 		e.Select(e.anchor, p)
@@ -347,6 +349,10 @@ func (e *Editor) horizontal(dir int, word, line, extend bool) {
 		} else {
 			p.Off--
 		}
+		// A mention is passed over whole.
+		if start, _, ok := n.Delta().MentionAround(p.Off); ok {
+			p.Off = start
+		}
 	case dir > 0 && p.Off < textLen(n):
 		if word {
 			p.Off = wordEnd([]rune(n.Delta().Plain()), p.Off)
@@ -354,6 +360,9 @@ func (e *Editor) horizontal(dir int, word, line, extend bool) {
 			p.Off = runeOff(n, l.layout.NextBoundary(utf16Off(n, p.Off)))
 		} else {
 			p.Off++
+		}
+		if _, end, ok := n.Delta().MentionAround(p.Off); ok {
+			p.Off = end
 		}
 	case dir < 0 && i > 0:
 		prev := us[i-1]
@@ -588,16 +597,13 @@ func (e *Editor) linkAtPos(p Pos) string {
 func (e *Editor) command(name string) bool {
 	switch name {
 	case "copy", "cut":
-		if s := e.copyText(); s != "" {
-			e.services.WriteClipboard(s)
-			clip.text, clip.blocks = s, e.copyBlocks()
-		}
+		e.copySelection()
 		if name == "cut" && !e.Collapsed() {
 			e.Backspace(false)
 		}
 		return true
 	case "paste", "pasteAndMatchStyle":
-		e.paste(e.services.ReadClipboard())
+		e.pasteClipboard(name == "pasteAndMatchStyle")
 		return true
 	case "selectAll":
 		e.SelectAll()

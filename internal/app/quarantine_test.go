@@ -21,4 +21,11 @@ func TestRunsAsProgram(t *testing.T) {
 			t.Errorf("runsAsProgram(%s) = %v", name, got)
 		}
 	}
+	// Shortcuts, links and launchers, which run or send elsewhere as they
+	// open, though they are no programs themselves.
+	for _, name := range []string{"app.desktop", "site.url", "site.webloc", "site.inetloc", "share.library-ms", "find.search-ms", "help.chm"} {
+		if !runsAsProgram(filepath.Join(dir, name)) {
+			t.Errorf("runsAsProgram(%s) = false", name)
+		}
+	}
 }

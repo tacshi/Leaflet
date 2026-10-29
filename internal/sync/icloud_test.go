@@ -656,6 +656,47 @@ func TestICloudJoiningAfreshSendsEverything(t *testing.T) {
 	}
 }
 
+// A device joins the folder only once everything it had is queued for
+// it: one that could not queue it all joins again on the next pass, so
+// what it had still reaches the other devices.
+func TestICloudJoinsOnceAllIsQueued(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	a.sync()
+	f, err := b.st.CreateFolder("Work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The disk refuses the folder's entry, as one that is full would.
+	if _, err := b.st.DB().Exec(`CREATE TRIGGER refuse BEFORE INSERT ON outbox WHEN NEW.entity = 'folders'
+		BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := b.st.Pending()
+	for _, e := range entries {
+		if err := b.st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := b.svc.joinSpace(""); !errors.Is(err, errNotRequeued) {
+		t.Fatalf("joinSpace: %v", err)
+	}
+	if joined, _ := b.st.Value("icloud.space"); joined != "" {
+		t.Error("joined with the folder not queued")
+	}
+	if _, err := b.st.DB().Exec(`DROP TRIGGER refuse`); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(b, a)
+	if joined, _ := b.st.Value("icloud.space"); joined != a.st.Session().SpaceID {
+		t.Errorf("B joined %q, A's space is %q", joined, a.st.Session().SpaceID)
+	}
+	folders, _ := a.st.Folders()
+	if len(folders) != 1 || folders[0].ID != f.ID {
+		t.Errorf("A has folders %+v", folders)
+	}
+}
+
 // A file this device has only in iCloud Drive, not downloaded yet when
 // everything is sent again, waits with its old place, and goes once it
 // comes.

@@ -6,46 +6,184 @@ import (
 )
 
 // ToMarkdown writes rich text in the small inline markdown dialect agents
-// read and write: **bold**, *italic* or _italic_, `code`, ~~strike~~, and
-// [text](url). Text that would read as markup is escaped with
-// backslashes, so it reads back as written.
+// read and write: **bold** or __bold__, *italic* or _italic_, `code`,
+// ~~strike~~, and [text](url). Text that would read as markup is escaped with
+// backslashes, so it reads back as written. A format over several runs is
+// one span, the others nested in it, so runs side by side read back as
+// they were.
 func (d Delta) ToMarkdown() string {
-	var b strings.Builder
-	for _, r := range d {
-		// A page mention is a link to the page, which reads back as one.
-		if m := r.Attrs.Mention; m != nil && m.Name != "" && m.Kind != "page" {
-			b.WriteString("@" + m.Name)
-			continue
+	var toks []mdToken
+	var open []mdMark
+	for _, r := range trimSpans(d.Compact()) {
+		want := marksOf(r.Attrs)
+		k := 0
+		for k < len(open) && k < len(want) && open[k] == want[k] {
+			k++
 		}
-		var text string
-		if r.Attrs.Code {
-			text = codeSpan(r.Text)
-		} else {
-			// Spaces at either end go outside the markers, which must
-			// touch the text to read as markers.
-			core := strings.TrimSpace(r.Text)
-			lead, _, _ := strings.Cut(r.Text, core)
-			trail := r.Text[len(lead)+len(core):]
-			text = escapeText(core)
-			if core != "" {
-				if r.Attrs.Strike {
-					text = "~~" + text + "~~"
-				}
-				if r.Attrs.Italic {
-					text = "*" + text + "*"
-				}
-				if r.Attrs.Bold {
-					text = "**" + text + "**"
-				}
+		for len(open) > k {
+			toks = append(toks, mdToken{mark: open[len(open)-1], close: true})
+			open = open[:len(open)-1]
+		}
+		for _, m := range want[k:] {
+			toks = append(toks, mdToken{mark: m, open: true})
+			open = append(open, m)
+		}
+		switch m := r.Attrs.Mention; {
+		case m != nil && m.Name != "" && m.Kind != "page":
+			// A page mention is a link to the page, which reads back as
+			// one; others are their names.
+			toks = append(toks, mdToken{text: "@" + escapeText(m.Name)})
+		case r.Attrs.Code:
+			// Code spans side by side differ only in what Markdown can't
+			// say: they are one span, as backticks touching would not
+			// read back.
+			if n := len(toks); n > 0 && toks[n-1].code {
+				toks[n-1].text += r.Text
+			} else {
+				toks = append(toks, mdToken{text: r.Text, code: true})
 			}
-			text = lead + text + trail
+		default:
+			toks = append(toks, mdToken{text: escapeText(r.Text)})
 		}
-		if r.Attrs.Href != "" {
-			text = "[" + text + "](" + linkDestination(r.Attrs.Href) + ")"
+	}
+	for i := len(open) - 1; i >= 0; i-- {
+		toks = append(toks, mdToken{mark: open[i], close: true})
+	}
+	var b strings.Builder
+	for i, t := range toks {
+		switch {
+		case t.code:
+			b.WriteString(codeSpan(t.text))
+		case !t.open && !t.close:
+			b.WriteString(t.text)
+		case t.mark.kind == '[' && t.open:
+			b.WriteString("[")
+		case t.mark.kind == '[':
+			b.WriteString("](" + linkDestination(t.mark.href) + ")")
+		case t.mark.kind == '*' && boldTouchesItalic(toks, i):
+			// Bold beside an italic's * is __, as *** reads either way.
+			b.WriteString("__")
+		case t.mark.kind == '*':
+			b.WriteString("**")
+		case t.mark.kind == 'i':
+			b.WriteString("*")
+		case t.mark.kind == '~':
+			b.WriteString("~~")
 		}
-		b.WriteString(text)
 	}
 	return b.String()
+}
+
+// mdMark is a format Markdown writes around text: a link to href, bold
+// ('*'), italic ('i') or strike ('~').
+type mdMark struct {
+	kind byte
+	href string
+}
+
+// mdToken is a mark opening or closing, or text: written out, or code.
+type mdToken struct {
+	mark        mdMark
+	open, close bool
+	text        string
+	code        bool
+}
+
+// marksOf are the marks of a run, outermost first: a link holds the
+// others, as its brackets must.
+func marksOf(a Attrs) []mdMark {
+	var out []mdMark
+	if a.Href != "" {
+		out = append(out, mdMark{kind: '[', href: a.Href})
+	}
+	if a.Bold {
+		out = append(out, mdMark{kind: '*'})
+	}
+	if a.Italic {
+		out = append(out, mdMark{kind: 'i'})
+	}
+	if a.Strike {
+		out = append(out, mdMark{kind: '~'})
+	}
+	return out
+}
+
+// boldTouchesItalic reports whether the bold mark toks[i] opens or closes
+// has an italic mark next to either of its ends.
+func boldTouchesItalic(toks []mdToken, i int) bool {
+	at := func(j int) bool {
+		return j >= 0 && j < len(toks) && (toks[j].open || toks[j].close) && toks[j].mark.kind == 'i'
+	}
+	// The other end: bold doesn't nest in bold, so it is the next bold
+	// mark after an open, or before a close.
+	step := 1
+	if toks[i].close {
+		step = -1
+	}
+	j := i + step
+	for toks[j].mark.kind != '*' || !toks[j].open && !toks[j].close {
+		j += step
+	}
+	return at(i-1) || at(i+1) || at(j-1) || at(j+1)
+}
+
+// trimSpans takes bold, italic and strike off the spaces at either end of
+// the text they span, outside code: markers must touch text to read as
+// markers.
+func trimSpans(d Delta) Delta {
+	type char struct {
+		r   rune
+		a   Attrs
+		run int
+	}
+	var cs []char
+	for i, r := range d {
+		for _, c := range r.Text {
+			cs = append(cs, char{c, r.Attrs, i})
+		}
+	}
+	marks := []func(*Attrs) *bool{
+		func(a *Attrs) *bool { return &a.Bold },
+		func(a *Attrs) *bool { return &a.Italic },
+		func(a *Attrs) *bool { return &a.Strike },
+	}
+	space := func(i int) bool { return !cs[i].a.Code && unicode.IsSpace(cs[i].r) }
+	for _, mark := range marks {
+		for i := 0; i < len(cs); {
+			if !*mark(&cs[i].a) {
+				i++
+				continue
+			}
+			j := i
+			for j < len(cs) && *mark(&cs[j].a) {
+				j++
+			}
+			lo, hi := i, j
+			for lo < hi && space(lo) {
+				*mark(&cs[lo].a) = false
+				lo++
+			}
+			for hi > lo && space(hi-1) {
+				*mark(&cs[hi-1].a) = false
+				hi--
+			}
+			i = j
+		}
+	}
+	var out Delta
+	for i := 0; i < len(cs); {
+		j := i + 1
+		for j < len(cs) && cs[j].run == cs[i].run && cs[j].a.Equal(cs[i].a) {
+			j++
+		}
+		text := make([]rune, 0, j-i)
+		for _, c := range cs[i:j] {
+			text = append(text, c.r)
+		}
+		out = append(out, Run{Text: string(text), Attrs: cs[i].a})
+		i = j
+	}
+	return out.Compact()
 }
 
 // escapeText escapes the characters that would read as markup: all the
@@ -136,6 +274,11 @@ func link(s []rune) (text []rune, href string, n int, ok bool) {
 	for ; i < len(s); i++ {
 		if s[i] == '\\' {
 			i++
+		} else if s[i] == '`' {
+			// A ] in code is the code's.
+			if _, n := codeSpanAt(s[i:]); n > 0 {
+				i += n - 1
+			}
 		} else if s[i] == '[' {
 			depth++
 		} else if s[i] == ']' {
@@ -245,6 +388,18 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 				continue
 			}
 		}
+		// ***both*** is bold and italic, as agents write it.
+		if i+2 < len(s) && (c == '*' || c == '_') && s[i+1] == c && s[i+2] == c {
+			marker := string([]rune{c, c, c})
+			if end := indexString(s, marker, i+3); end > i+3 {
+				flush()
+				a := attrs
+				a.Bold, a.Italic = true, true
+				parseInline(s[i+3:end], a, out)
+				i = end + 3
+				continue
+			}
+		}
 		if i+1 < len(s) && (c == '*' || c == '~' || c == '_') && s[i+1] == c {
 			marker := string([]rune{c, c})
 			if end := indexString(s, marker, i+2); end > i+2 {
@@ -311,10 +466,31 @@ func codeSpanAt(s []rune) (string, int) {
 	return "", 0
 }
 
+// skipSpan returns where a code span or a link at s[j] ends, or j when
+// none starts there: they hold their text, markers and all, as the
+// markers around them look for their ends.
+func skipSpan(s []rune, j int) int {
+	switch s[j] {
+	case '`':
+		if _, n := codeSpanAt(s[j:]); n > 0 {
+			return j + n
+		}
+	case '[':
+		if _, _, n, ok := link(s[j:]); ok {
+			return j + n
+		}
+	}
+	return j
+}
+
 func findSingle(s []rune, marker rune, from int) int {
 	for j := from; j < len(s); j++ {
 		if s[j] == '\\' {
 			j++
+			continue
+		}
+		if k := skipSpan(s, j); k > j {
+			j = k - 1
 			continue
 		}
 		if s[j] != marker {
@@ -342,6 +518,10 @@ func indexString(s []rune, sub string, from int) int {
 	for j := from; j+len(m) <= len(s); j++ {
 		if s[j] == '\\' {
 			j++
+			continue
+		}
+		if k := skipSpan(s, j); k > j {
+			j = k - 1
 			continue
 		}
 		if string(s[j:j+len(m)]) == sub {

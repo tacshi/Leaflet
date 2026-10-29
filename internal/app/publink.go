@@ -11,6 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"image"
+	"image/color"
 	"log"
 	"maps"
 	"mime"
@@ -30,6 +32,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 	codeeditor "github.com/egoist/mygo/ui/editor"
+	"rsc.io/qr"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
@@ -59,8 +62,10 @@ type pubLink struct {
 	// state is "starting", "live" or "failed"; url is the link once live,
 	// and err why it failed.
 	state, url, err string
-	cmd             *exec.Cmd
-	srv             *http.Server
+	// qr is url as a QR code, to open the link on a phone.
+	qr  *ui.Bitmap
+	cmd *exec.Cmd
+	srv *http.Server
 	// timer waits for saves to settle before the page renders again; seq
 	// numbers the renders asked for.
 	timer *time.Timer
@@ -225,6 +230,26 @@ func parseTunnelURL(line string) string {
 	return ""
 }
 
+// qrBitmap is text as a QR code, one pixel a module, in black on white
+// with its quiet zone of 4 modules all round; it is nil for text too long
+// for one. The code's own Image leaves the zone out at the top and left.
+func qrBitmap(text string) *ui.Bitmap {
+	code, err := qr.Encode(text, qr.M)
+	if err != nil {
+		return nil
+	}
+	const quiet = 4
+	img := image.NewGray(image.Rect(0, 0, code.Size+2*quiet, code.Size+2*quiet))
+	for y := range img.Rect.Dy() {
+		for x := range img.Rect.Dx() {
+			if !code.Black(x-quiet, y-quiet) {
+				img.SetGray(x, y, color.Gray{Y: 0xff})
+			}
+		}
+	}
+	return ui.NewBitmap(img).Pixelated()
+}
+
 // splitEmails reads the emails field: addresses or *@domain, by commas,
 // spaces or lines.
 func splitEmails(s string) []string {
@@ -325,6 +350,7 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 				a.update(func() {
 					if a.pub == p && p.state == "starting" {
 						p.state, p.url = "live", u+"/"+p.token+"/"
+						p.qr = qrBitmap(p.url)
 						p.mu.Lock()
 						p.host = strings.TrimPrefix(u, "https://")
 						p.mu.Unlock()

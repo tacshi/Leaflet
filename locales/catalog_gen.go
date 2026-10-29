@@ -3795,6 +3795,22 @@ func (msgs Messages) PubStartingLink() string {
 	return Catalog.Format(msgs.locale, "pubStartingLink", nil)
 }
 
+// PubQRCode says "QR code of the link, to open it on a phone"
+// in the language the app shows.
+//
+// Share dialog: accessibility label of the QR code beside a live public
+// link.
+func PubQRCode() string { return In(i18n.Locale()).PubQRCode() }
+
+// PubQRCode says "QR code of the link, to open it on a phone"
+// in the language of msgs.
+//
+// Share dialog: accessibility label of the QR code beside a live public
+// link.
+func (msgs Messages) PubQRCode() string {
+	return Catalog.Format(msgs.locale, "pubQRCode", nil)
+}
+
 // PubAnyone says "Anyone with this link can view this page while Leaflet is open."
 // in the language the app shows.
 //

@@ -64,26 +64,33 @@ func (a *App) writeExport(file string, allFolders []store.Folder, allFiles []sto
 	if err != nil {
 		return 0, err
 	}
-	known := map[string]string{}
-	owned := map[string]bool{}
-	for _, f := range allFiles {
-		known[f.ID] = f.LocalPath
-		owned[f.LocalPath] = f.LocalPath != ""
-	}
-	localPath := func(fileID string) string { return known[fileID] }
-	// Only the app's own files go in: a block's link to a file elsewhere,
-	// as from another device or person, is no reason to read it.
-	readFile := func(path string) ([]byte, error) {
-		if !owned[path] && !inFolder(a.st.Dir, path) {
-			return nil, errNotOwnFile
-		}
-		return os.ReadFile(path) // #nosec G304 -- a file of the app's own.
-	}
+	localPath, readFile := ownFiles(a.st.Dir, allFiles)
 	if err := exportZip(f, pages, folders, a.st.Content, localPath, readFile); err != nil {
 		_ = f.Close()
 		return 0, err
 	}
 	return missing, f.Close()
+}
+
+// ownFiles returns where each of files is on this device ("" when it is
+// not), and a reader of the app's own files only: those the store keeps,
+// or in its data folder dir. A block's link to a file elsewhere, as from
+// another device or person, is no reason to read it.
+func ownFiles(dir string, files []store.File) (localPath func(fileID string) string, read func(path string) ([]byte, error)) {
+	known := map[string]string{}
+	owned := map[string]bool{}
+	for _, f := range files {
+		known[f.ID] = f.LocalPath
+		owned[f.LocalPath] = f.LocalPath != ""
+	}
+	localPath = func(fileID string) string { return known[fileID] }
+	read = func(path string) ([]byte, error) {
+		if !owned[path] && !inFolder(dir, path) {
+			return nil, errNotOwnFile
+		}
+		return os.ReadFile(path) // #nosec G304 -- a file of the app's own.
+	}
+	return localPath, read
 }
 
 // exportZip writes the pages as Markdown files in a zip: a folder is a

@@ -35,8 +35,10 @@ func FolderToRemote(f Folder) map[string]any {
 
 // CommentToRemote is a comment as the comments table has it.
 func CommentToRemote(c Comment) map[string]any {
+	// An agent's name, or a guest's, rides in agent_name: the row's
+	// author is the person who posted it.
 	var agent any
-	if c.AuthorKind == "agent" {
+	if c.AuthorKind == "agent" || c.AuthorKind == "guest" {
 		agent = c.AuthorName
 	}
 	return map[string]any{

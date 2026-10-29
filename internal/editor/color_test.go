@@ -59,7 +59,7 @@ func TestCodeSpansUseMyGo(t *testing.T) {
 	code := "func main() {\n\t// hi\n}"
 	spans := codeSpans(code, "golang", ui.Font{Family: "monospace", Size: 14}, pal)
 	text, keyword, comment := "", false, false
-	ct := codeTheme(pal)
+	ct := CodeTheme(pal)
 	for _, s := range spans {
 		text += s.Text
 		if s.Text == "func" && s.Color == ct.TokenColor(codeeditor.TokenKeyword) {

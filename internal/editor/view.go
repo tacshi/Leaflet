@@ -187,7 +187,7 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 		case "code":
 			p.Fill(ui.Rect{X: mx, Y: r.Y + codeMargin, W: r.X + r.W - mx, H: r.H - 2*codeMargin}, pal.Code, 8)
 		case "callout":
-			bg, border, fg, icon := calloutLook(n.Str("tone"), pal)
+			bg, border, fg, icon := CalloutLook(n.Str("tone"), pal)
 			card := ui.Rect{X: mx, Y: r.Y + calloutMargin, W: r.X + r.W - mx, H: r.H - 2*calloutMargin}
 			p.Fill(card, bg, 8)
 			p.Stroke(card, border, 8, 1)
@@ -260,18 +260,53 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 	})
 }
 
+// peekGrace is how long a badge's preview stays once the pointer leaves
+// it and the badge, to cross the gap between them.
+const peekGrace = 250 * time.Millisecond
+
+// commentBadge is the count of a block's open threads, in the margin:
+// hovered, it shows them in brief below it; clicked, it opens them in the
+// Comments panel.
 func (e *Editor) commentBadge(c *ui.Context, id string, count int, top float32, pal *theme.Palette) {
 	b := ui.ButtonBase(c.Key("comments:"+id)).Absolute().Top(top).Right(-52).Padding(2, 7).Radius(999).
 		Gap(4).Background(pal.WarnBg).Border(1, pal.WarnBorder).TextColor(pal.WarnText).Cursor(ui.CursorPointer).
 		Label(locales.EditorCommentCount(count))
-	if b.Hovered() {
+	// A press on it is the badge's, not the text's beside it.
+	b.Draw(func(_ *ui.Painter, r ui.Rect) { e.chips["comments:"+id] = r })
+	hovered := b.Hovered()
+	if hovered {
 		b.Background(pal.WarnBorder)
+	}
+	if !hovered && e.peekShut == id {
+		e.peekShut = ""
+	}
+	switch over := hovered && e.peekShut != id || e.peek == id && e.peekOver; {
+	case over:
+		e.peek, e.peekLeft = id, time.Time{}
+	case e.peek != id:
+	case e.peekLeft.IsZero():
+		e.peekLeft = time.Now()
+		c.After(peekGrace)
+	case time.Since(e.peekLeft) >= peekGrace:
+		e.peek, e.peekOver = "", false
+	default:
+		c.After(peekGrace - time.Since(e.peekLeft))
+	}
+	if e.peek == id {
+		ui.Overlay(c, func() {
+			panel := ui.Column(c.Key("comment-peek")).AttachTo(b, ui.AnchorBottomEnd, ui.AnchorTopEnd).Margin(6, 0, 0).
+				Width(300).MaxHeight(340).Padding(12).Gap(12).Radius(10).Background(pal.Surface).Border(1, pal.Border).
+				Shadow(0, 10, 30, 0, pal.Shadow)
+			e.peekOver = panel.Hovered()
+			panel.Children(func() { e.Host.CommentPreview(c, id) })
+		})
 	}
 	b.Children(func() {
 		ui.Icon(c, theme.Icon("message-square")).FontSize(12)
 		ui.Textf(c, "%d", count).FontSize(12).Bold()
 	})
 	if b.Clicked() {
+		e.peek, e.peekOver, e.peekShut = "", false, id
 		e.Host.OpenComments(id)
 	}
 }

@@ -317,6 +317,16 @@ func Icon(name string) *ui.SVG {
 	return s
 }
 
+// IconSVG returns a Lucide icon's SVG source by name, for a web page;
+// its strokes are currentColor.
+func IconSVG(name string) string {
+	data, err := icons.ReadFile("icons/" + name + ".svg")
+	if err != nil {
+		data, _ = icons.ReadFile("icons/circle-alert.svg")
+	}
+	return string(data)
+}
+
 // IconNames lists the bundled icons.
 func IconNames() []string {
 	entries, _ := icons.ReadDir("icons")

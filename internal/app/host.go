@@ -127,6 +127,41 @@ func (h *host) OpenComments(blockID string) {
 	h.a.dialogs.commentFocus = blockID
 }
 
+// CommentPreview shows a block's open threads as its badge's hover does:
+// each one's quote and comments, to read; a click on the badge opens them
+// in the panel to answer.
+func (h *host) CommentPreview(c *ui.Context, blockID string) {
+	a := h.a
+	if a.page == nil {
+		return
+	}
+	pal := theme.Of(c)
+	ui.Scroll(c).MaxHeight(316).Children(func() {
+		ui.Column(c).Gap(12).Children(func() {
+			for _, t := range a.page.threads {
+				if t.Root.BlockID != blockID || t.Root.Resolved {
+					continue
+				}
+				ui.Column(c.Key(t.Root.ID)).Gap(8).Children(func() {
+					if t.Root.Quote != "" {
+						quoteChip(c, t.Root.Quote)
+					}
+					for _, cm := range t.All() {
+						ui.Column(c.Key(cm.ID)).Gap(3).Children(func() {
+							ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+								avatar(c, cm.AuthorName, 18, cm.AuthorKind == "agent")
+								ui.Text(c, cm.AuthorName).FontSize(12.5).FontWeight(600).TextColor(pal.Text).SingleLine()
+								ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
+							})
+							ui.Text(c, cm.Body).FontSize(13).TextColor(pal.Text).Wrap().PaddingStart(24)
+						})
+					}
+				})
+			}
+		})
+	})
+}
+
 type slashItem struct {
 	editor.MenuItem
 	keywords string

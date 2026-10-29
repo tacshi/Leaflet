@@ -32,6 +32,7 @@ func (h *fakeHost) Card(c *ui.Context, n *doc.Node)             {}
 func (h *fakeHost) Recording(c *ui.Context, n *doc.Node)        {}
 func (h *fakeHost) CommentCount(string) int                     { return 0 }
 func (h *fakeHost) OpenComments(string)                         {}
+func (h *fakeHost) CommentPreview(*ui.Context, string)          {}
 func (h *fakeHost) SlashItems(q string) []MenuItem {
 	return []MenuItem{{Key: "h1", Label: "Heading 1"}}
 }

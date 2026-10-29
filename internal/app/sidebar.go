@@ -645,12 +645,20 @@ func (a *App) sidebarFooter(c *ui.Context) {
 			a.navigate(Route{Kind: "signin"})
 		}
 		tools(c, func() {
-			// An update shows once it is installed and waits for a restart;
-			// "Check for Updates…" is in the app's and the menu bar's menus.
-			if a.updateReady != "" {
+			// Check for updates; a spinner while the check or the download
+			// is under way, then the update waiting for a restart.
+			switch {
+			case a.updateReady != "":
 				tip := locales.SidebarRestartToUpdate(a.updateReady)
 				if iconButton(c, "update", "rotate-cw", tip).TextColor(pal.Accent).Clicked() {
 					a.restartToUpdate()
+				}
+			case a.updateBusy != "":
+				b := ui.Button(c.Key("check-update"), "").Label(a.updateBusy).Tooltip(a.updateBusy).Padding(6).Disabled(true)
+				b.Children(func() { ui.Spinner(c).Size(16, 16) })
+			case a.updatable:
+				if iconButton(c, "check-update", "circle-fading-arrow-up", locales.SidebarCheckForUpdates()).Clicked() {
+					a.findUpdate(true)
 				}
 			}
 			settings := iconButton(c, "settings", "settings", locales.SidebarSettings())

@@ -295,11 +295,21 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 // or just "Recording" on a page of the same name, as the menu bar makes.
 // Older blocks were titled in English, "Recording · Jan 2".
 func (a *App) recordingTitle(n *doc.Node, rec store.Recording, found bool) string {
+	page := ""
+	if a.page != nil {
+		page = a.page.title
+	}
+	return recordingName(n, rec, found, page)
+}
+
+// recordingName is recordingTitle for a block on the page titled page;
+// a block with no title is a Recording too.
+func recordingName(n *doc.Node, rec store.Recording, found bool, page string) string {
 	title := n.Str("title")
 	if day := rec.CreatedAt.Local(); found && !rec.CreatedAt.IsZero() && title == "Recording · "+day.Format("Jan 2") {
 		title = locales.RecBlockTitle(day)
 	}
-	if a.page != nil && strings.TrimSpace(a.page.title) == title {
+	if title == "" || strings.TrimSpace(page) == title {
 		return locales.CommonRecording()
 	}
 	return title

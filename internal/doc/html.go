@@ -35,6 +35,35 @@ type HTMLOptions struct {
 	// CalloutIcon is the icon, as HTML, of a callout's tone; it may be
 	// nil.
 	CalloutIcon func(tone string) string
+	// Icon is the app's icon of a name, as HTML; it may be nil.
+	Icon func(name string) string
+	// Chart draws a chart's plot and legend as HTML, as the app does;
+	// nil, or "", writes its numbers as a table.
+	Chart func(n *Node) string
+	// Due names a to-do's due date, or "" for none; it may be nil.
+	Due func(n *Node) string
+	// File returns where a file block's file is served to download, ""
+	// for nowhere, its name and what it is: its type and size. It may be
+	// nil.
+	File func(n *Node) (href, name, detail string)
+	// Recording returns what a recording block shows; nil shows only its
+	// title.
+	Recording func(n *Node) RecordingView
+}
+
+// RecordingView is what a recording block shows on a web page: its title,
+// how long it is, where its audio is served, "" for nowhere, and its
+// transcript.
+type RecordingView struct {
+	Title, Length, Audio string
+	Lines                []TranscriptLine
+}
+
+// TranscriptLine is a line of a recording's transcript: where it starts,
+// in seconds and as written, who says it, and what.
+type TranscriptLine struct {
+	Start               float64
+	Time, Speaker, Text string
 }
 
 // PageHTML writes a whole page as a web page that stands alone: its own
@@ -42,11 +71,12 @@ type HTMLOptions struct {
 // Every block carries its ID, as data-block, for the comments script.
 func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	var body strings.Builder
-	math, diagram, embed := false, false, false
+	math, diagram, embed, recording := false, false, false, false
 	c.Walk(func(n, _ *Node) {
 		math = math || n.Type == "math_equation"
 		diagram = diagram || n.Type == "diagram"
 		embed = embed || n.Type == "embed" && opts.Embed != nil
+		recording = recording || n.Type == "recording"
 	})
 	script := func(name string) string {
 		if opts.Script == nil {
@@ -70,8 +100,8 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	}
 	b.WriteString(`><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`)
 	b.WriteString(`<meta name="robots" content="noindex"><title>` + html.EscapeString(title) + `</title><style>` + pageCSS + `</style>` + opts.Head)
-	for _, name := range []string{"math", "diagram", "embed", "comments"} {
-		if name == "math" && !math || name == "diagram" && !diagram || name == "embed" && !embed {
+	for _, name := range []string{"math", "diagram", "embed", "recording", "comments"} {
+		if name == "math" && !math || name == "diagram" && !diagram || name == "embed" && !embed || name == "recording" && !recording {
 			continue
 		}
 		if src := script(name); src != "" {
@@ -93,6 +123,14 @@ type htmlWriter struct {
 	b             *strings.Builder
 	opts          HTMLOptions
 	math, diagram bool
+}
+
+// icon is the app's icon of a name, as HTML, or "".
+func (w htmlWriter) icon(name string) string {
+	if w.opts.Icon == nil {
+		return ""
+	}
+	return w.opts.Icon(name)
 }
 
 func (w htmlWriter) write(s ...string) {
@@ -127,6 +165,22 @@ func listTag(typ string) string {
 
 func (w htmlWriter) blocks(nodes []*Node) {
 	for i := 0; i < len(nodes); {
+		if h := nodes[i]; h.Type == "heading" && h.Bool("collapsed") {
+			// A folded heading folds its section away, as in the app: the
+			// blocks after it up to the next heading of its level or
+			// higher. The visitor opens it.
+			end := i + 1
+			for end < len(nodes) && (nodes[end].Type != "heading" || nodes[end].Int("level", 1) > h.Int("level", 1)) {
+				end++
+			}
+			w.write(`<details class="fold"><summary>`)
+			w.block(h)
+			w.write("</summary>\n")
+			w.blocks(nodes[i+1 : end])
+			w.write("</details>\n")
+			i = end
+			continue
+		}
 		typ := nodes[i].Type
 		tag := listTag(typ)
 		if tag == "" {
@@ -153,6 +207,11 @@ func (w htmlWriter) item(n *Node) {
 		w.write(`<input type="checkbox" disabled` + checked + `> `)
 	}
 	w.write(n.Delta().HTML())
+	if n.Type == "todo_list" && w.opts.Due != nil {
+		if due := w.opts.Due(n); due != "" {
+			w.write(` <span class="due">`, w.icon("calendar"), html.EscapeString(due), "</span>")
+		}
+	}
 	if len(n.Children) > 0 {
 		w.write("\n")
 		w.blocks(n.Children)
@@ -255,6 +314,16 @@ func (w htmlWriter) block(n *Node) {
 		if t := n.Str("title"); t != "" {
 			w.write("<figcaption><strong>", html.EscapeString(t), "</strong></figcaption>")
 		}
+		if w.opts.Chart != nil {
+			if plot := w.opts.Chart(n); plot != "" {
+				w.write(plot)
+				if cap := n.Str("caption"); cap != "" {
+					w.write("<figcaption>", html.EscapeString(cap), "</figcaption>")
+				}
+				w.write("</figure>\n")
+				break
+			}
+		}
 		w.write("<div class=\"table\"><table><tr><th></th>")
 		for _, l := range stringsOf(n.Data["labels"]) {
 			w.write("<th>", html.EscapeString(l), "</th>")
@@ -317,9 +386,9 @@ func (w htmlWriter) block(n *Node) {
 	case "link_preview":
 		w.card(n)
 	case "file":
-		w.write("<p", w.attrs(n, "card"), ">", html.EscapeString(cardTitle(n)), "</p>\n")
+		w.file(n)
 	case "recording":
-		w.write("<p", w.attrs(n, "muted"), "><em>", html.EscapeString(n.Str("title")), "</em></p>\n")
+		w.recording(n)
 	case "subpage":
 		// Only this page is shared: its subpages are names, not links.
 		name := n.Str("page_id")
@@ -348,7 +417,8 @@ func (w htmlWriter) block(n *Node) {
 	}
 }
 
-// card writes a link card: its title, linked, and its description.
+// card writes a link card as the app shows it: its title, description
+// and site, beside its picture, all a link.
 func (w htmlWriter) card(n *Node) {
 	link := n.Str("url")
 	title := cardTitle(n)
@@ -356,11 +426,79 @@ func (w htmlWriter) card(n *Node) {
 		w.write("<p", w.attrs(n, ""), ">", html.EscapeString(title), "</p>\n")
 		return
 	}
-	w.write("<p", w.attrs(n, "card"), `><a href="`, html.EscapeString(link), `" rel="noopener noreferrer">`, html.EscapeString(title), "</a>")
-	if d := n.Str("description"); d != "" {
-		w.write("<br><span class=\"muted\">", html.EscapeString(d), "</span>")
+	site := n.Str("site")
+	if u, err := url.Parse(link); err == nil && site == "" {
+		site = strings.TrimPrefix(u.Hostname(), "www.")
 	}
-	w.write("</p>\n")
+	w.write("<a", w.attrs(n, "card link"), ` href="`, html.EscapeString(link), `" rel="noopener noreferrer"><span class="text"><strong>`, html.EscapeString(title), "</strong>")
+	if d := n.Str("description"); d != "" {
+		w.write(`<span class="desc">`, html.EscapeString(d), "</span>")
+	}
+	w.write(`<span class="site">`, w.icon("globe"), html.EscapeString(site), "</span></span>")
+	if img := n.Str("image"); WebURL(img) {
+		w.write(`<img src="`, html.EscapeString(img), `" alt="" loading="lazy">`)
+	}
+	w.write("</a>\n")
+}
+
+// file writes a file's card: its name and what it is, a link that
+// downloads it where it is served.
+func (w htmlWriter) file(n *Node) {
+	name, href, detail := cardTitle(n), "", ""
+	if w.opts.File != nil {
+		var named string
+		href, named, detail = w.opts.File(n)
+		if named != "" {
+			name = named
+		}
+	}
+	tag := "div"
+	if href != "" {
+		tag = "a"
+	}
+	w.write("<", tag, w.attrs(n, "card file"))
+	if href != "" {
+		w.write(` href="`, html.EscapeString(href), `" download="`, html.EscapeString(name), `"`)
+	}
+	w.write(`><span class="ficon">`, w.icon("paperclip"), `</span><span class="text"><strong>`, html.EscapeString(name), "</strong>")
+	if detail != "" {
+		w.write(`<span class="muted">`, html.EscapeString(detail), "</span>")
+	}
+	w.write("</span></", tag, ">\n")
+}
+
+// recording writes a recording as the app shows it: its title and length,
+// a player, and its transcript, whose lines play from where they start.
+func (w htmlWriter) recording(n *Node) {
+	v := RecordingView{Title: n.Str("title")}
+	if w.opts.Recording != nil {
+		v = w.opts.Recording(n)
+	}
+	w.write("<figure", w.attrs(n, "recording"), `><div class="head"><span class="ricon">`, w.icon("mic"), `</span><span class="text"><strong>`, html.EscapeString(v.Title), "</strong>")
+	if v.Length != "" {
+		w.write(`<span class="muted">`, html.EscapeString(v.Length), "</span>")
+	}
+	w.write("</span></div>")
+	if v.Audio != "" {
+		w.write(`<audio controls preload="metadata" src="`, html.EscapeString(v.Audio), `"></audio>`)
+	}
+	if len(v.Lines) > 0 {
+		w.write(`<div class="transcript">`)
+		for _, l := range v.Lines {
+			if v.Audio != "" {
+				w.write(`<p data-start="`, strconv.FormatFloat(l.Start, 'f', -1, 64), `">`)
+			} else {
+				w.write("<p>")
+			}
+			w.write(`<span class="ts">`, html.EscapeString(l.Time), `</span><span class="line">`)
+			if l.Speaker != "" {
+				w.write(`<span class="speaker">`, html.EscapeString(l.Speaker), "</span>")
+			}
+			w.write(html.EscapeString(l.Text), "</span></p>")
+		}
+		w.write("</div>")
+	}
+	w.write("</figure>\n")
 }
 
 // shortCell is the most characters a cell holds for its column to count as
@@ -455,9 +593,11 @@ func safeHref(s string) string {
 const pageCSS = `:root{color-scheme:light dark;--fg:#16181d;--muted:#565c67;--bg:#fff;--line:#e3e6eb;--code:#f3f4f6;--link:#3446c9;
 --info:#eef1ff;--tip:#e9f7ef;--warning:#fff6e0;--danger:#fdecec;--th:#f5f6f8;
 --info-line:transparent;--tip-line:transparent;--warning-line:transparent;--danger-line:transparent;
---info-icon:currentColor;--tip-icon:currentColor;--warning-icon:currentColor;--danger-icon:currentColor}
+--info-icon:currentColor;--tip-icon:currentColor;--warning-icon:currentColor;--danger-icon:currentColor;
+--fg2:#3d424c;--accent:#3446c9;--chart-muted:#9aa1ad;--hover:rgba(22,24,29,.05);--due:#f0f1f4}
 @media (prefers-color-scheme:dark){:root{--fg:#e9ebef;--muted:#9ea4af;--bg:#16181d;--line:#2f343c;--code:#23272e;--link:#8a97ff;
---info:#22264a;--tip:#1c3326;--warning:#3a2f14;--danger:#3d1d1d;--th:#101216}}
+--info:#22264a;--tip:#1c3326;--warning:#3a2f14;--danger:#3d1d1d;--th:#101216;
+--fg2:#c0c5ce;--accent:#4f5fd9;--chart-muted:#6b7280;--hover:rgba(233,235,239,.06);--due:#23272e}}
 html{background:var(--bg);color:var(--fg)}
 body{margin:0;font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-text-size-adjust:100%}
 main{max-width:720px;margin:0 auto;padding:48px 16px 120px;overflow-wrap:anywhere}
@@ -494,6 +634,58 @@ th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-ali
 th{background:var(--th);font-weight:600}
 .muted{color:var(--muted)}
 .card{border:1px solid var(--line);border-radius:8px;padding:10px 14px}
+a.card,div.card{display:flex;align-items:center;gap:12px;margin:.5em 0;color:inherit;text-decoration:none;overflow:hidden}
+a.card:hover{background:var(--hover)}
+.card .text{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1}
+.card strong{font-size:15px;font-weight:600}
+.card .text>span{font-size:13px;line-height:1.45}
+.card.link{padding:0 0 0 14px;align-items:stretch}
+.card.link .text{padding:12px 14px 12px 0}
+.card.link .desc{color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card.link .site,.due{display:inline-flex;align-items:center;gap:5px;color:var(--muted);font-size:12px}
+.card svg,.due svg,.recording .ricon svg{width:12px;height:12px;flex:none}
+.card.link img{flex:none;width:150px;min-height:96px;object-fit:cover;align-self:stretch}
+.card .ficon{flex:none;display:flex;width:36px;height:36px;border-radius:8px;background:var(--code);align-items:center;justify-content:center}
+.card .ficon svg{width:17px;height:17px}
+.due{margin-left:.3em;padding:0 7px;line-height:20px;border-radius:6px;background:var(--due);font-weight:550;text-indent:0;vertical-align:.1em}
+details.fold>summary{list-style:none;cursor:pointer;display:flex;align-items:baseline}
+details.fold>summary::-webkit-details-marker{display:none}
+details.fold>summary::before{content:"";flex:none;width:.38em;height:.38em;margin:0 .45em 0 -.05em;border:solid var(--muted);border-width:0 2px 2px 0;transform:translateY(-.15em) rotate(-45deg)}
+details.fold[open]>summary::before{transform:translateY(-.25em) rotate(45deg)}
+figure.chart{border:1px solid var(--line);border-radius:10px;padding:16px 18px}
+figure.chart>figcaption:first-child{margin:0 0 10px;color:var(--fg);font-size:15px}
+figure.chart>figcaption:first-child strong{font-weight:650}
+figure.chart>figcaption:last-child:not(:first-child){font-size:12px;margin:10px 0 0}
+.plot{position:relative;height:220px;box-sizing:border-box;padding:18px 0 24px;font-size:12px;line-height:1;color:var(--muted)}
+.plot.line{padding:8px 0 24px}
+.plot .area{position:relative;height:100%}
+.plot .area>*{position:absolute;white-space:nowrap}
+.plot .g{left:0;right:0;height:1px;background:var(--line)}
+.plot .b{border-radius:4px}
+.plot .v{transform:translate(-50%,-3px);color:var(--fg2)}
+.plot .x{top:calc(100% + 8px);transform:translateX(-50%)}
+.plot .y{right:calc(100% + 8px);transform:translateY(50%)}
+.plot svg{inset:0;width:100%;height:100%;overflow:visible}
+.plot .d{width:7px;height:7px;border-radius:50%;transform:translate(-50%,50%)}
+svg.pie{display:block;height:200px;width:100%}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;margin-top:10px;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:9px;height:9px;border-radius:2px}
+figure.recording{border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:flex;flex-direction:column;gap:12px}
+.recording .head{display:flex;align-items:center;gap:10px}
+.recording .head .text{display:flex;flex-direction:column}
+.recording .head strong{font-size:14px;font-weight:600}
+.recording .head .muted{font-size:12px}
+.recording .ricon{flex:none;display:flex;width:30px;height:30px;border-radius:50%;background:var(--info);color:var(--link);align-items:center;justify-content:center}
+.recording .ricon svg{width:15px;height:15px}
+.recording audio{width:100%}
+.transcript{display:flex;flex-direction:column;gap:8px}
+.transcript p{display:flex;gap:12px;align-items:baseline;margin:0;font-size:14px;line-height:1.5}
+.transcript p[data-start]{cursor:pointer}
+.transcript .ts{flex:none;width:46px;font-size:12px;color:var(--link);font-variant-numeric:tabular-nums}
+.transcript .line{flex:1;min-width:0;padding:0 6px;margin:0 -6px;border-radius:6px}
+.transcript p[data-start]:hover .line{background:var(--hover)}
+.transcript .speaker{display:block;font-size:11.5px;font-weight:600;color:var(--muted)}
 figure.embed{border:1px solid var(--line);border-radius:10px;padding:12px 14px 14px}
 figure.embed figcaption{margin:0 0 10px;color:var(--fg);font-weight:650;font-size:15px}
 figure.embed iframe{display:block;width:100%;border:0}
@@ -503,6 +695,6 @@ figure.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .math,.diagram{text-align:center;overflow-x:auto}
 .diagram svg{max-width:100%;height:auto}
 @media (max-width:600px){main{padding:28px 16px 96px}h1.title{font-size:1.8em}pre{font-size:.92em}
-th:not(.nowrap),td:not(.nowrap){min-width:9em}}
+th:not(.nowrap),td:not(.nowrap){min-width:9em}.card.link img{width:96px}}
 .pele{--pele-bg:var(--bg);--pele-fg:#16181d;--pele-muted:#565c67;--pele-line:#3d424c;--pele-surface:#f5f6f8;--pele-surface-alt:#eceef2;--pele-border:#c9ced8;--pele-accent:#3446c9;--pele-fg-on-light:#16181d;--pele-fg-on-dark:#e9ebef;--pele-font:-apple-system,system-ui,sans-serif}
 @media (prefers-color-scheme:dark){.pele{--pele-fg:#e9ebef;--pele-muted:#9ea4af;--pele-line:#c0c5ce;--pele-surface:#23272e;--pele-surface-alt:#2b3038;--pele-border:#3a404a;--pele-accent:#8a97ff}}`

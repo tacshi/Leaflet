@@ -263,3 +263,21 @@ func (a *App) startReminders() {
 	}
 	time.AfterFunc(5*time.Second, tick)
 }
+
+// dueText names a to-do's due date for a shared page: as the editor does,
+// but as a date, not Today or Tomorrow, which go stale while the page
+// stays as it was rendered; "" for none.
+func dueText(n *doc.Node) string {
+	due, timed, ok := n.Due()
+	if !ok {
+		return ""
+	}
+	label := locales.EditorDueDate(due)
+	if due.Year() == time.Now().Year() {
+		label = locales.EditorDueDay(due)
+	}
+	if timed {
+		return locales.EditorDueAt(label, due)
+	}
+	return label
+}

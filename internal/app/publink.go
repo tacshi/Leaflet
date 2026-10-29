@@ -535,10 +535,15 @@ func pubHead(prefix string, comments bool) string {
 		{"comment", locales.PubComment()}, {"reply", locales.PubReply()}, {"name", locales.PubName()},
 		{"text", locales.PubText()}, {"send", locales.PubSend()}, {"cancel", locales.CommonCancel()},
 		{"failed", locales.PubFailed()}, {"busy", locales.PubBusy()},
+		{"full", locales.RenderedFullScreen()}, {"full-icon", theme.IconSVG("maximize-2")},
+		{"exit", locales.RenderedExitFullScreen()}, {"exit-icon", theme.IconSVG("minimize-2")},
+		{"fit", locales.RenderedZoomFit()}, {"fit-icon", theme.IconSVG("rotate-ccw")},
+		{"out", locales.RenderedZoomOut()}, {"out-icon", theme.IconSVG("zoom-out")},
+		{"in", locales.RenderedZoomIn()}, {"in-icon", theme.IconSVG("zoom-in")},
 	} {
 		b.WriteString(`<meta name="leaflet-` + s[0] + `" content="` + html.EscapeString(s[1]) + `">`)
 	}
-	b.WriteString(`<style>` + pubLook() + commentsCSS + `</style>`)
+	b.WriteString(`<style>` + pubLook() + diagramCSS + commentsCSS + `</style>`)
 	return b.String()
 }
 
@@ -733,7 +738,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 		case rest == "math.js":
 			serve("text/javascript; charset=utf-8", katexJS+"\n"+mathScript)
 		case rest == "diagram.js":
-			serve("text/javascript; charset=utf-8", peleModule+"\n"+diagramScript)
+			serve("text/javascript; charset=utf-8", peleModule+"\n"+zoomScript+"\n"+diagramScript)
 		case rest == "comments.js":
 			serve("text/javascript; charset=utf-8", commentsScript)
 		case rest == "embed.js":
@@ -947,15 +952,92 @@ const mathScript = `document.querySelectorAll(".math[data-tex]").forEach(functio
   try { katex.render(el.dataset.tex, el, {displayMode: true, output: "mathml", throwOnError: true}); } catch (e) {}
 });`
 
-// diagramScript draws the page's diagrams with Pele, which comes before it.
+// diagramScript draws the page's diagrams with Pele and zooms them with
+// zoomScript, which come before it. Each has a button that shows it alone,
+// filling the window, to zoom and move about it with the app's bar.
 const diagramScript = `{
+  const word = (n) => document.querySelector('meta[name="leaflet-' + n + '"]')?.content || "";
+  const button = (cls, label, icon) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = cls;
+    b.title = label;
+    b.setAttribute("aria-label", label);
+    b.innerHTML = icon;
+    return b;
+  };
+  let open = null, from = null;
+  const leave = () => {
+    if (!open) return;
+    open.remove();
+    open = null;
+    document.documentElement.classList.remove("dfull-open");
+    from.focus();
+  };
+  addEventListener("keydown", (e) => { if (e.key === "Escape") leave(); });
   document.querySelectorAll(".diagram[data-source]").forEach((el) => {
     try {
       el.innerHTML = peleRender(el.dataset.source, {fontFamily: "-apple-system, system-ui, sans-serif"}).svg;
       el.classList.add("pele");
-    } catch (e) {}
+    } catch (e) {
+      return;
+    }
+    const full = button("dbtn", word("full"), word("full-icon"));
+    full.onclick = () => {
+      from = full;
+      open = document.createElement("div");
+      open.className = "dfull";
+      open.setAttribute("role", "dialog");
+      open.setAttribute("aria-modal", "true");
+      open.setAttribute("aria-label", word("full"));
+      const bar = document.createElement("div"), view = document.createElement("div"), box = document.createElement("div");
+      bar.className = "dbar";
+      view.className = "dview";
+      box.className = "dbox";
+      const fit = button("dbtn", word("fit"), word("fit-icon")), out = button("dbtn", word("out"), word("out-icon")),
+        zin = button("dbtn", word("in"), word("in-icon")), exit = button("dbtn", word("exit"), word("exit-icon"));
+      fit.hidden = true;
+      bar.append(fit, out, zin, exit);
+      // Pele sizes its drawing to the page's width; this one fills the view.
+      const svg = el.querySelector("svg").cloneNode(true);
+      svg.style.removeProperty("height");
+      box.append(svg);
+      view.append(box);
+      open.append(bar, view);
+      document.body.appendChild(open);
+      document.documentElement.classList.add("dfull-open");
+      const zoom = leafletZoom(view, box, view, true, (z) => { fit.hidden = !z; });
+      fit.onclick = () => zoom("fit");
+      out.onclick = () => zoom("out");
+      zin.onclick = () => zoom("in");
+      exit.onclick = leave;
+      exit.focus();
+    };
+    el.appendChild(full);
   });
 }`
+
+// diagramCSS is the look of a diagram's full-window button, which shows
+// over the diagram while it is pointed at, or under it on a touch screen,
+// and of the diagram filling the window under its bar.
+const diagramCSS = `.diagram{position:relative}
+.dbtn{display:flex;padding:6px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--muted);cursor:pointer}
+.dbtn:hover{color:var(--fg)}
+.dbtn svg{width:16px;height:16px}
+.diagram>.dbtn{position:absolute;right:6px;bottom:6px;opacity:0;transition:opacity .15s}
+.diagram:hover>.dbtn,.diagram>.dbtn:focus-visible{opacity:1}
+@media (hover:none){.diagram>.dbtn{position:static;margin:4px 0 0 auto;opacity:1}}
+.dfull{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;background:var(--bg);
+padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)}
+.dbar{display:flex;justify-content:flex-end;gap:6px;padding:12px 12px 0}
+.dbtn[hidden]{display:none}
+.dview{flex:1;min-height:0;overflow:hidden;touch-action:none}
+.dview.zoomed{cursor:grab;-webkit-user-select:none;user-select:none}
+.dview.dragging{cursor:grabbing}
+.dbox{height:100%;box-sizing:border-box;padding:24px;display:flex;align-items:center;justify-content:center;transform-origin:0 0}
+.dbox svg{width:100%;height:100%}
+html.dfull-open{overflow:hidden}
+`
 
 const commentsCSS = `main{position:relative}
 .cbtn,.cbadge{position:absolute;font:13px -apple-system,system-ui,sans-serif;white-space:nowrap;cursor:pointer}

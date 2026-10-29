@@ -61,11 +61,27 @@ func TestRemoveProviderAsksAndWaitsForTheServer(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.reloadAll()
+	// The server's answers come on the main thread, between frames: the
+	// models the dialog lists as it opens, then the removal's.
+	posts := make(chan func(), 1)
+	a.post = func(fn func()) { posts <- fn }
+	answer := func(what string) {
+		t.Helper()
+		select {
+		case fn := <-posts:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the server never answered %s", what)
+		}
+	}
 	a.editProvider(&p)
 	tt := ui.NewTester(func(c *ui.Context) {
 		a.providerDialog(c)
 		a.removeAlert(c)
 	}, 900, 800)
+	// Its models' failure shows before Remove is clicked, not as it is,
+	// moving it from under the click.
+	answer("the models")
 	tt.Frame()
 	if err := tt.Click(locales.CommonRemove()); err != nil {
 		t.Fatal(err)
@@ -78,16 +94,8 @@ func TestRemoveProviderAsksAndWaitsForTheServer(t *testing.T) {
 		t.Fatal("removed before the alert was answered")
 	}
 	form.confirmRemove = false
-	// The server's answer comes on the main thread, between frames.
-	posts := make(chan func(), 1)
-	a.post = func(fn func()) { posts <- fn }
 	a.removeProvider(p.ID)
-	select {
-	case fn := <-posts:
-		fn()
-	case <-time.After(5 * time.Second):
-		t.Fatal("the server never answered")
-	}
+	answer("the removal")
 	tt.Frame()
 	if _, err := a.st.Provider(p.ID); err != nil {
 		t.Error("removed here though the server kept it")

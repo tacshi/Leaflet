@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -36,6 +37,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -98,9 +100,14 @@ type pubSnapshot struct {
 	blocks map[string]string
 }
 
+// pubFile is a file the shared page serves: a picture's data, or the
+// path of a file or a recording's audio, which is read as it is asked
+// for, a part at a time for a player. One with a name downloads as it.
 type pubFile struct {
 	typ  string
 	data []byte
+	path string
+	name string
 }
 
 // pubJob is what a render needs from the main thread.
@@ -172,7 +179,7 @@ const (
 // video players the app plays videos in, and its embeds, each of which is
 // served at its own path, sandboxed off the network.
 const pubCSP = "default-src 'none'; img-src 'self' https: data:; style-src 'unsafe-inline'; script-src 'self'; " +
-	"frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; media-src https: http:; " +
+	"frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https: http:; " +
 	"connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // findCloudflared looks for cloudflared on the login shell's PATH, which
@@ -532,6 +539,57 @@ func (p *pubLink) render(job pubJob) {
 		},
 		Code:        codeHTML,
 		CalloutIcon: func(tone string) string { return calloutIcon(tone) },
+		Icon:        theme.IconSVG,
+		Chart:       chartHTML,
+		Due:         dueText,
+		File: func(n *doc.Node) (href, name, detail string) {
+			name = n.Str("name")
+			for _, f := range job.files {
+				if f.ID != n.Str("file_id") {
+					continue
+				}
+				name = f.Name
+				path := localPath(f.ID)
+				if _, err := os.Stat(path); path == "" || err != nil {
+					break
+				}
+				served := strconv.Itoa(len(files)+1) + strings.ToLower(filepath.Ext(f.Name))
+				files[served] = pubFile{typ: "application/octet-stream", path: path, name: f.Name}
+				detail = humanSize(f.SizeBytes)
+				if kind := strings.ToUpper(strings.TrimPrefix(filepath.Ext(f.Name), ".")); kind != "" {
+					detail = locales.CardFileDetail(kind, detail)
+				}
+				return prefix + "f/" + served, name, detail
+			}
+			if name == "" {
+				name = locales.CardFile()
+			}
+			return "", name, locales.CardNotOnDevice()
+		},
+		Recording: func(n *doc.Node) doc.RecordingView {
+			rec, err := job.st.Recording(n.Str("recording_id"))
+			v := doc.RecordingView{Title: recordingName(n, rec, err == nil, job.title)}
+			if err != nil {
+				return v
+			}
+			v.Length = fmtDuration(time.Duration(rec.DurationMs) * time.Millisecond)
+			// Audio still being recorded, or not on this device, has no player.
+			if path := rec.LocalPath; rec.Status != "recording" && inFolder(job.st.Dir, path) {
+				if _, err := os.Stat(path); err == nil {
+					served := strconv.Itoa(len(files)+1) + ".wav"
+					files[served] = pubFile{typ: "audio/wav", path: path}
+					v.Audio = prefix + "f/" + served
+				}
+			}
+			for _, s := range recording.Tidy(rec.Transcript) {
+				l := doc.TranscriptLine{Start: float64(s.StartMs) / 1000, Time: fmtDuration(time.Duration(s.StartMs) * time.Millisecond), Text: s.Text}
+				if s.Speaker != "" {
+					l.Speaker = locales.RecSpeaker(s.Speaker)
+				}
+				v.Lines = append(v.Lines, l)
+			}
+			return v
+		},
 		PageTitle: func(id string) string {
 			if t, ok := job.titles[id]; ok {
 				return t
@@ -769,6 +827,8 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			serve("text/javascript; charset=utf-8", commentsScript)
 		case rest == "embed.js":
 			serve("text/javascript; charset=utf-8", embedScript)
+		case rest == "recording.js":
+			serve("text/javascript; charset=utf-8", recordingScript)
 		case rest == "favicon.png":
 			h.Set("Content-Type", "image/png")
 			_, _ = w.Write(pubFavicon)
@@ -789,7 +849,26 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 				return
 			}
 			h.Set("Content-Type", f.typ)
-			_, _ = w.Write(f.data)
+			if f.path == "" {
+				_, _ = w.Write(f.data)
+				return
+			}
+			file, err := os.Open(f.path) // #nosec G304 -- a file of the app's own.
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			defer func() { _ = file.Close() }()
+			info, err := file.Stat()
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			// A file downloads, never opens as a page of the link's.
+			if f.name != "" {
+				h.Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": f.name}))
+			}
+			http.ServeContent(w, r, "", info.ModTime(), file)
 		default:
 			http.NotFound(w, r)
 		}
@@ -965,6 +1044,19 @@ func pubEmbedPage(src string) string {
 // embedScript grows each embed's frame to the height its content says,
 // as the app's embed blocks grow, from the height the block keeps up to
 // 1200 pixels.
+// recordingScript plays a recording from a line of its transcript, as a
+// click on one does in the app, unless the click ends selecting text.
+const recordingScript = `document.addEventListener("click", function (e) {
+  var line = e.target.closest && e.target.closest(".recording [data-start]");
+  var sel = getSelection();
+  if (!line || sel && !sel.isCollapsed) return;
+  var audio = line.closest(".recording").querySelector("audio");
+  if (!audio) return;
+  audio.currentTime = +line.dataset.start;
+  audio.play();
+});
+`
+
 const embedScript = `addEventListener("message", function (e) {
   var z = e.data && e.data.leafletSize;
   if (!z || typeof z[0] !== "number") return;
@@ -1189,9 +1281,14 @@ const commentsScript = `(function () {
   }
   pop.onmouseenter = function () { clearTimeout(hide); };
   pop.onmouseleave = function () { pop.hidden = true; };
+  // A block in a closed toggle or folded section shows where it is closed.
+  function shown(el) {
+    for (var d = el.parentElement && el.parentElement.closest("details:not([open])"); d; d = d.parentElement && d.parentElement.closest("details:not([open])")) el = d;
+    return el;
+  }
   function place() {
     var m = main.getBoundingClientRect();
-    badges.forEach(function (b) { b.style.top = (b.block.getBoundingClientRect().top - m.top) + "px"; });
+    badges.forEach(function (b) { b.style.top = (shown(b.block).getBoundingClientRect().top - m.top) + "px"; });
   }
   place();
   addEventListener("load", place);

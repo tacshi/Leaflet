@@ -170,3 +170,72 @@ func TestStopAnAgentRun(t *testing.T) {
 		t.Error("no Send once stopped")
 	}
 }
+
+// Typing @ in a comment lists the agents, and choosing one writes its
+// name, which runs it when the comment is posted.
+func TestCommentAgentMenu(t *testing.T) {
+	a := templatesApp(t)
+	a.rec = recording.NewController(a.st, a.backend)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.SidebarOpen, a.settings.TextSize = true, 16
+	for _, p := range []store.Provider{
+		{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true},
+		{ID: "studio", Preset: "ollama", Name: "Studio", AuthKind: "none", DefaultModel: "qwen", IsLocal: true},
+	} {
+		if err := a.st.PutProvider(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.panelOpen, a.panelTab = true, 1
+	nc := &newComment{blockID: "b1", quote: "WAL"}
+	a.dialogs.newComment = nc
+
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
+	tt.Frame()
+	tt.Type("@")
+	tt.Frame()
+	if !tt.HasText("Ollama") || !tt.HasText("Studio") {
+		t.Fatalf("@ shows no agents: %q", tt.Texts())
+	}
+	tt.Type("st")
+	tt.Frame()
+	if tt.HasText("Ollama") {
+		t.Error("the menu keeps an agent the query doesn't match")
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	tt.Type("hi")
+	tt.Frame()
+	if nc.text != "@Studio hi" {
+		t.Errorf("text %q after Enter", nc.text)
+	}
+
+	// An address is no mention; Escape closes the menu until another @.
+	tt.Type(" me@x")
+	tt.Frame()
+	if tt.HasText("Ollama") {
+		t.Error("an email address opens the menu")
+	}
+	tt.Type(" @")
+	tt.Frame()
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	if tt.HasText("Ollama") {
+		t.Error("Escape leaves the menu open")
+	}
+	tt.Type(" @")
+	tt.Frame()
+	if err := tt.Click("Ollama"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if want := "@Studio hi me@x @ @Ollama "; nc.text != want {
+		t.Errorf("text %q after a click, want %q", nc.text, want)
+	}
+}

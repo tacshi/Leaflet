@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
@@ -279,6 +280,7 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 type threadDraft struct {
 	text    string
 	sendNow bool // Enter was pressed in the reply box
+	agents  agentPicker
 }
 
 var replies = map[string]*threadDraft{}
@@ -338,7 +340,9 @@ func (a *App) newCommentCard(c *ui.Context, nc *newComment) {
 			if nc.quote != "" {
 				quoteChip(c, nc.quote)
 			}
-			in := ui.TextArea(c.Key("text"), &nc.text).Placeholder(locales.PanelCommentPlaceholder()).MinHeight(64).AutoFocus()
+			in := ui.TextArea(c.Key("text"), &nc.text).Placeholder(locales.PanelCommentPlaceholder()).MinHeight(64).AutoFocus().
+				OnTextKey(nc.agents.key)
+			a.agentMenu(c, in, &nc.agents, &nc.text)
 			post := func() {
 				body := strings.TrimSpace(nc.text)
 				if body == "" {
@@ -371,6 +375,164 @@ func quoteChip(c *ui.Context, quote string) {
 	pal := theme.Of(c)
 	ui.Text(c, locales.PanelQuote(short(quote, 120))).FontSize(12.5).Italic().TextColor(pal.TextMuted).Padding(4, 8).
 		BorderWidth(0, 0, 0, 3).BorderColor(pal.WarnBorder).Background(pal.WarnBg).Radius(4)
+}
+
+// agentPicker is the @ menu of a comment box: typing @ lists the agents,
+// as the page's @ menu does, and choosing one writes its name, which
+// agentInComment finds to run it.
+type agentPicker struct {
+	open   bool
+	at     int // where the @ is, in runes
+	query  string
+	n      int // the rows listed
+	index  int
+	chosen bool // Enter or Tab was pressed on the highlighted row
+	closed int  // the @ whose menu was dismissed, +1; 0 for none
+	caret  int  // where to put the caret once a name is written, +1
+}
+
+// key takes the keys that move through the open menu, choose a row or
+// close it, from the comment box's OnTextKey.
+func (p *agentPicker) key(k ui.TextKey) bool {
+	if !p.open || k.Mods != 0 {
+		return false
+	}
+	switch k.Key {
+	case ui.KeyDown:
+		p.index = min(p.index+1, p.n-1)
+	case ui.KeyUp:
+		p.index = max(p.index-1, 0)
+	case ui.KeyEnter, ui.KeyTab:
+		p.chosen = true
+	case ui.KeyEscape:
+		p.open, p.closed = false, p.at+1
+	default:
+		return false
+	}
+	return true
+}
+
+// mentionAt finds the @ being typed before the caret of in: at the start
+// of text or after a space, so an email address opens no menu.
+func mentionAt(in ui.Element, text string) (at int, query string, ok bool) {
+	start, end := in.TextSelection()
+	if start != end || !in.Focused() {
+		return 0, "", false
+	}
+	r := []rune(text)
+	caret := min(end, len(r))
+	for i := caret - 1; i >= 0 && caret-i <= 25; i-- {
+		if unicode.IsSpace(r[i]) {
+			return 0, "", false
+		}
+		if r[i] == '@' {
+			if i > 0 && !unicode.IsSpace(r[i-1]) {
+				return 0, "", false
+			}
+			return i, string(r[i+1 : caret]), true
+		}
+	}
+	return 0, "", false
+}
+
+// agentMenu shows a comment box's @ menu below it, while an @ is typed.
+func (a *App) agentMenu(c *ui.Context, in ui.Element, p *agentPicker, text *string) {
+	pal := theme.Of(c)
+	if p.caret > 0 {
+		in.SetTextSelection(p.caret-1, p.caret-1)
+		p.caret = 0
+	}
+	at, query, ok := mentionAt(in, *text)
+	if !ok || p.closed != at+1 {
+		p.closed = 0
+	}
+	var options []agents.Option
+	all := a.hub.Options()
+	if ok {
+		q := strings.ToLower(query)
+		for _, o := range all {
+			if strings.Contains(strings.ToLower(o.Name()), q) {
+				options = append(options, o)
+			}
+		}
+	}
+	// With no agents yet, the menu offers to add one, as the page's does.
+	connect := ok && len(all) == 0 && query == ""
+	p.n = len(options)
+	if connect {
+		p.n = 1
+	}
+	p.open = ok && p.closed == 0 && p.n > 0
+	if !p.open {
+		p.chosen = false
+		return
+	}
+	if at != p.at || query != p.query {
+		p.at, p.query, p.index = at, query, 0
+	}
+	p.index = min(p.index, p.n-1)
+	// write puts s in place of the @ and its query, the caret after it.
+	write := func(s string) {
+		r := []rune(*text)
+		end := min(at+1+len([]rune(query)), len(r))
+		*text = string(r[:at]) + s + string(r[end:])
+		p.caret = at + len([]rune(s)) + 1
+		p.open = false
+		c.Invalidate()
+	}
+	choose := func(i int) {
+		if connect {
+			write("")
+			a.openSettings("providers")
+			return
+		}
+		write("@" + options[i].Name() + " ")
+	}
+	if p.chosen {
+		p.chosen = false
+		choose(p.index)
+		return
+	}
+	ui.PopoverBase(c, in, &p.open, func(panel ui.Element) {
+		panel.Width(max(in.Bounds().W, 240)).Padding(6).Gap(1).
+			Radius(10).Background(pal.Surface).Border(1, pal.Border).Shadow(0, 10, 30, 0, pal.Shadow)
+		panel.Children(func() {
+			ui.Text(c, locales.CommonAgents()).FontSize(11).FontWeight(600).TextColor(pal.TextMuted).Padding(8, 10, 4)
+			row := func(i int, key, icon, label, hint string) {
+				b := ui.ButtonBase(c.Key(key)).Gap(10).Padding(6, 10).Radius(6).AlignItems(ui.Center).KeepFocus()
+				if i == p.index {
+					b.Background(pal.NavSelected)
+				} else if b.Hovered() {
+					b.Background(pal.Hover)
+				}
+				b.Children(func() {
+					ui.Box(c).Size(26, 26).Center().Radius(6).Background(pal.Ground).Border(1, pal.Divider).Children(func() {
+						ui.Icon(c, theme.Icon(icon)).FontSize(14).TextColor(pal.Icon)
+					})
+					ui.Column(c).Grow(1).Children(func() {
+						ui.Text(c, label).TextColor(pal.Text).SingleLine()
+						if hint != "" {
+							ui.Text(c, hint).FontSize(12).TextColor(pal.TextMuted).SingleLine()
+						}
+					})
+				})
+				if b.Clicked() {
+					choose(i)
+				}
+			}
+			if connect {
+				row(0, "connect", "sparkles", locales.HostAddAgentProvider(), locales.HostAddAgentProviderHint())
+				return
+			}
+			for i, o := range options {
+				row(i, "agent:"+o.Provider.ID, "sparkles", o.Name(), o.Model)
+			}
+		})
+	})
+	// Pressing outside the menu, or Escape, closes it until another @.
+	if !p.open && p.caret == 0 {
+		p.closed = at + 1
+	}
 }
 
 func (a *App) threadCard(c *ui.Context, t store.Thread) {
@@ -415,14 +577,18 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 			}
 			if !t.Root.Resolved {
 				ui.Row(c).Gap(6).AlignItems(ui.End).Children(func() {
-					ui.TextArea(c.Key("reply"), &draft.text).Placeholder(locales.PanelReplyPlaceholder()).Grow(1).MinHeight(34).
+					in := ui.TextArea(c.Key("reply"), &draft.text).Placeholder(locales.PanelReplyPlaceholder()).Grow(1).MinHeight(34).
 						OnTextKey(func(k ui.TextKey) bool {
+							if draft.agents.key(k) {
+								return true
+							}
 							if k.Key != ui.KeyEnter || (k.Mods != 0 && k.Mods != ui.Cmd) {
 								return false
 							}
 							draft.sendNow = true
 							return true
 						})
+					a.agentMenu(c, in, &draft.agents, &draft.text)
 					send := func() {
 						body := strings.TrimSpace(draft.text)
 						if body == "" {

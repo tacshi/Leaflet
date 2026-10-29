@@ -989,7 +989,9 @@ func TestUndoStepsBreakWhenTheCaretMoves(t *testing.T) {
 
 // A frame with a selection over many blocks takes time in proportion to
 // the blocks, not to their square: each block finds its place and depth
-// without walking the page.
+// without walking the page. Eight times the blocks take about eight times
+// as long, and would take 64 times walking the page; the limit between
+// leaves room for a busy machine's timing, as CI's.
 func TestFrameWithSelectionIsLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times frames")
@@ -1008,15 +1010,16 @@ func TestFrameWithSelectionIsLinear(t *testing.T) {
 		tt.Frame()
 		best := time.Duration(math.MaxInt64)
 		for range 5 {
+			runtime.GC()
 			start := time.Now()
 			tt.Frame()
 			best = min(best, time.Since(start))
 		}
 		return best
 	}
-	small, large := frame(500), frame(2000)
-	if large > 8*small {
-		t.Errorf("a frame of 500 blocks takes %v, of 2000 %v", small, large)
+	small, large := frame(1000), frame(8000)
+	if large > 24*small {
+		t.Errorf("a frame of 1000 blocks takes %v, of 8000 %v", small, large)
 	}
 }
 

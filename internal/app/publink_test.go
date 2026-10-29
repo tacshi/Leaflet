@@ -16,6 +16,7 @@ import (
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
+	"leaflet/locales"
 )
 
 func TestParseTunnelURL(t *testing.T) {
@@ -398,5 +399,103 @@ func TestPubHeadDiagramWords(t *testing.T) {
 	}
 	if !strings.Contains(head, ".dfull{") {
 		t.Errorf("no full-window look in %s", head)
+	}
+}
+
+// A shared page shows each block as the editor does: charts drawn, due
+// dates, link cards with their pictures, files to download, recordings
+// to play with their transcripts, and folded headings folded.
+func TestPubBlocksAsInTheEditor(t *testing.T) {
+	a, p, h, pg := pubTest(t)
+	dir := a.st.Dir
+	pdf := filepath.Join(dir, "files", "notes.pdf")
+	wav := filepath.Join(dir, "recordings", "r1.wav")
+	for _, f := range []string{pdf, wav} {
+		if err := os.MkdirAll(filepath.Dir(f), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(f, []byte("0123456789"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.st.PutFile(store.File{ID: "f1", PageID: pg.ID, Name: "Notes.pdf", LocalPath: pdf, MimeType: "application/pdf", SizeBytes: 2048}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.PutRecording(store.Recording{ID: "r1", PageID: pg.ID, BlockID: "rec", LocalPath: wav, DurationMs: 65000, Status: "ready",
+		Transcript: []store.Segment{{StartMs: 1500, EndMs: 4000, Text: "Hello there.", Speaker: "1"}}}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+
+	text := func(id, typ, s string) *doc.Node {
+		n := &doc.Node{ID: id, Type: typ}
+		n.SetDelta(doc.FromMarkdown(s))
+		return n
+	}
+	todo := text("td", "todo_list", "Pack")
+	todo.SetDue(time.Date(2031, 3, 4, 9, 30, 0, 0, time.Local), true)
+	folded := text("h1", "heading", "Later")
+	folded.Set("level", 2)
+	folded.Set("collapsed", true)
+	next := text("h2", "heading", "Next")
+	next.Set("level", 2)
+	bars, _ := doc.ChartData(map[string]any{"chart_type": "bar", "title": "Pages", "labels": []any{"A", "B"},
+		"series": []any{map[string]any{"name": "n", "values": []any{3.0, 5.0}}}})
+	pie, _ := doc.ChartData(map[string]any{"chart_type": "pie", "title": "Week", "labels": []any{"Work", "Rest"},
+		"series": []any{map[string]any{"name": "h", "values": []any{3.0, 1.0}}}})
+	c := doc.FromBlocks([]*doc.Node{
+		todo,
+		{ID: "c1", Type: "chart", Data: bars},
+		{ID: "c2", Type: "chart", Data: pie},
+		{ID: "lk", Type: "link_preview", Data: map[string]any{"url": "https://www.example.com/a", "title": "Example", "description": "A page",
+			"image": "https://example.com/a.png"}},
+		{ID: "fl", Type: "file", Data: map[string]any{"file_id": "f1", "name": "Notes.pdf"}},
+		{ID: "gone", Type: "file", Data: map[string]any{"file_id": "nope", "name": "Old.zip"}},
+		{ID: "rec", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": ""}},
+		folded, text("p2", "paragraph", "Hidden"), next,
+	})
+	if _, _, err := a.st.SaveContent(pg.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	p.render(a.pubJob(p))
+	page := get(h, "/tok/").Body.String()
+	for _, want := range []string{
+		`<span class="due">`, locales.EditorDueAt(locales.EditorDueDate(time.Date(2031, 3, 4, 9, 30, 0, 0, time.Local)), time.Date(2031, 3, 4, 9, 30, 0, 0, time.Local)),
+		`<div class="plot"><div class="area">`, `background:var(--accent)`, `<span class="x" style="left:`,
+		`<svg class="pie"`, `<div class="legend">`, locales.EditorPieShare(0.75),
+		`<a id="b-lk" data-block="lk" class="card link" href="https://www.example.com/a"`, `<span class="desc">A page</span>`, `example.com</span>`, `<img src="https://example.com/a.png"`,
+		`class="card file" href="/tok/f/`, `download="Notes.pdf"`, locales.CardFileDetail("PDF", humanSize(2048)),
+		`<div id="b-gone" data-block="gone" class="card file">`, locales.CardNotOnDevice(),
+		`<strong>` + locales.CommonRecording() + `</strong>`, `<span class="muted">1:05</span>`, `<audio controls preload="metadata" src="/tok/f/`,
+		`<p data-start="1.5"><span class="ts">0:01</span><span class="line"><span class="speaker">` + locales.RecSpeaker("1") + `</span>Hello there.</span></p>`,
+		`<script src="/tok/recording.js" defer></script>`,
+		"<details class=\"fold\"><summary><h2 id=\"b-h1\" data-block=\"h1\">Later</h2>\n</summary>\n<p id=\"b-p2\" data-block=\"p2\">Hidden</p>\n</details>\n<h2 id=\"b-h2\"",
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("missing %q in\n%s", want, page)
+		}
+	}
+	if strings.Contains(page, "<table>") || strings.Contains(page, dir) {
+		t.Errorf("a chart as a table, or a path of the device's: %s", page)
+	}
+
+	src := func(after string) string {
+		_, rest, _ := strings.Cut(page, after)
+		s, _, _ := strings.Cut(rest, `"`)
+		return s
+	}
+	w := get(h, src(`class="card file" href="`))
+	if w.Code != http.StatusOK || w.Body.String() != "0123456789" || !strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment") {
+		t.Errorf("file: %d %v %q", w.Code, w.Header(), w.Body)
+	}
+	r := httptest.NewRequest(http.MethodGet, src(`<audio controls preload="metadata" src="`), nil)
+	r.Header.Set("Range", "bytes=2-4")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusPartialContent || w.Body.String() != "234" || w.Header().Get("Content-Type") != "audio/wav" || w.Header().Get("Content-Disposition") != "" {
+		t.Errorf("audio: %d %v %q", w.Code, w.Header(), w.Body)
+	}
+	if w := get(h, "/tok/recording.js"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "currentTime") {
+		t.Errorf("recording script: %d", w.Code)
 	}
 }

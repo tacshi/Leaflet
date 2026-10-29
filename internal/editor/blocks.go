@@ -328,7 +328,8 @@ func ChartOf(n *doc.Node) (kind, title, caption string, labels []string, series 
 	return
 }
 
-func fmtValue(v float64) string {
+// FormatValue writes a chart's value as its bars show it.
+func FormatValue(v float64) string {
 	if v == math.Trunc(v) && math.Abs(v) < 1e12 {
 		return strconv.FormatInt(int64(v), 10)
 	}
@@ -376,9 +377,16 @@ func (e *Editor) chartBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	})
 }
 
+// ChartColors are the colors of a chart's series after the first, which
+// is the accent.
+var ChartColors = []string{"#2F9E8F", "#D9822B", "#B04A9A", "#5B8DEF", "#8C6D46"}
+
 // seriesColors are the colors of a chart's series: the accent first.
 func seriesColors(pal *theme.Palette, n int) []ui.Color {
-	base := []ui.Color{pal.Accent, ui.Hex("#2F9E8F"), ui.Hex("#D9822B"), ui.Hex("#B04A9A"), ui.Hex("#5B8DEF"), ui.Hex("#8C6D46")}
+	base := []ui.Color{pal.Accent}
+	for _, h := range ChartColors {
+		base = append(base, ui.Hex(h))
+	}
 	out := make([]ui.Color, n)
 	for i := range out {
 		out[i] = base[i%len(base)]
@@ -462,7 +470,7 @@ func barChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.P
 				span := chart.Span{Lo: band.Lo + w*float32(si) + w*0.06, Hi: band.Lo + w*float32(si+1) - w*0.06}
 				chart.Rect(c, span, y.Span(0, v)).Background(color).Radius(4)
 				chart.Anchor(c, span.Mid(), y.At(max(v, 0)), ui.Center, ui.End, func() {
-					ui.Text(c, fmtValue(v)).FontSize(12).TextColor(pal.TextSecondary).NoWrap().Margin(0, 0, 3, 0)
+					ui.Text(c, FormatValue(v)).FontSize(12).TextColor(pal.TextSecondary).NoWrap().Margin(0, 0, 3, 0)
 				})
 			}
 		}

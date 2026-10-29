@@ -230,7 +230,7 @@ func (a *App) remind() {
 		now := time.Now()
 		title := locales.TodosDueToday()
 		// A to-do due at a time today is reminded of at it, as due.
-		if editor.Overdue(t.Due, t.Timed, now) && !(t.Timed && editor.DueToday(t.Due, now)) {
+		if editor.Overdue(t.Due, t.Timed, now) && (!t.Timed || !editor.DueToday(t.Due, now)) {
 			title = locales.TodosOverdueOn(editor.DueLabel(t.Due, t.Timed, now))
 		}
 		n := mygo.NewNotification(mygo.NotificationOptions{ID: todoNotification + t.PageID + "#" + t.BlockID,

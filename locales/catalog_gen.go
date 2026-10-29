@@ -11445,14 +11445,14 @@ func (msgs Messages) WelcomeTrySlash() string {
 	return Catalog.Format(msgs.locale, "welcomeTrySlash", nil)
 }
 
-// WelcomeTryAt says "Type **@** to ask an agent to write here, mention someone or link a page"
+// WelcomeTryAt says "Type **@** to ask an agent to write here, or to link a page"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a to-do of Try it
 // (Markdown).
 func WelcomeTryAt() string { return In(i18n.Locale()).WelcomeTryAt() }
 
-// WelcomeTryAt says "Type **@** to ask an agent to write here, mention someone or link a page"
+// WelcomeTryAt says "Type **@** to ask an agent to write here, or to link a page"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a to-do of Try it

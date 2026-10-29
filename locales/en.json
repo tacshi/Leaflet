@@ -4041,7 +4041,7 @@
   "@welcomeTrySlash": {
     "description": "The welcome guide page, made once on first run: a to-do of Try it (Markdown)."
   },
-  "welcomeTryAt": "Type **@** to ask an agent to write here, mention someone or link a page",
+  "welcomeTryAt": "Type **@** to ask an agent to write here, or to link a page",
   "@welcomeTryAt": {
     "description": "The welcome guide page, made once on first run: a to-do of Try it (Markdown)."
   },

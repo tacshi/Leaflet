@@ -2083,6 +2083,22 @@ func (msgs Messages) TemplateDuplicateFailed(error string) string {
 	return Catalog.Format(msgs.locale, "templateDuplicateFailed", map[string]any{"error": error})
 }
 
+// TemplateWaitForRecording says "Wait for the recording on this page to finish, then try again."
+// in the language the app shows.
+//
+// A toast when duplicating a page, or saving it as a template, while a
+// recording on it is still being made or transcribed.
+func TemplateWaitForRecording() string { return In(i18n.Locale()).TemplateWaitForRecording() }
+
+// TemplateWaitForRecording says "Wait for the recording on this page to finish, then try again."
+// in the language of msgs.
+//
+// A toast when duplicating a page, or saving it as a template, while a
+// recording on it is still being made or transcribed.
+func (msgs Messages) TemplateWaitForRecording() string {
+	return Catalog.Format(msgs.locale, "templateWaitForRecording", nil)
+}
+
 // TemplateCopyTitle says "{title} copy"
 // in the language the app shows.
 //

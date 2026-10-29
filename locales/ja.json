@@ -145,6 +145,7 @@
   "cardFileDetail": "{kind} · {size}",
   "exportTemplatesFolder": "テンプレート",
   "templateDuplicateFailed": "複製できませんでした：{error}",
+  "templateWaitForRecording": "このページの録音が終わってから、もう一度お試しください。",
   "templateCopyTitle": "{title} のコピー",
   "templateSaveFailed": "テンプレートを保存できませんでした：{error}",
   "templateSaved": "「{title}」をテンプレートとして保存しました",

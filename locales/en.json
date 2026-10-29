@@ -727,6 +727,10 @@
       }
     }
   },
+  "templateWaitForRecording": "Wait for the recording on this page to finish, then try again.",
+  "@templateWaitForRecording": {
+    "description": "A toast when duplicating a page, or saving it as a template, while a recording on it is still being made or transcribed."
+  },
   "templateCopyTitle": "{title} copy",
   "@templateCopyTitle": {
     "description": "The title of a duplicated page, as Finder names a copy.",

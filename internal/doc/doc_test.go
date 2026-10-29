@@ -397,6 +397,34 @@ func TestMergeMoveIntoANewBlock(t *testing.T) {
 
 func first(c *Content, _ []Conflict) *Content { return c }
 
+// One side moves a block into a toggle while the other inserts a block
+// after it at the top level: the new block stays at the top level, where
+// it was put, whichever side is primary.
+func TestMergeInsertAfterABlockMovedElsewhere(t *testing.T) {
+	toggle := func(kids ...*Node) *Node {
+		n := para("t", "t")
+		n.Type = "toggle"
+		n.Children = kids
+		return n
+	}
+	base := page(map[string]int64{"a": 1, "b": 1, "t": 1}, para("a", "a"), para("b", "b"), toggle())
+	for _, moverAt := range []int64{5, 9} {
+		mover := page(map[string]int64{"a": moverAt, "b": 1, "t": 1}, para("b", "b"), toggle(para("a", "a")))
+		inserter := page(map[string]int64{"a": 1, "b": 1, "c": 7, "t": 1}, para("a", "a"), para("c", "c"), para("b", "b"), toggle())
+		for _, got := range []*Content{first(Merge(base, mover, inserter)), first(Merge(base, inserter, mover))} {
+			if loc := got.Locate("c"); loc == nil || loc.Parent != nil {
+				t.Errorf("mover at %d: c is not at the top level: %s", moverAt, got.Encode())
+			}
+			if loc := got.Locate("a"); loc == nil || loc.Parent == nil || loc.Parent.ID != "t" {
+				t.Errorf("mover at %d: a is not in t: %s", moverAt, got.Encode())
+			}
+			if !reflect.DeepEqual(texts(got), []string{"c", "b", "t", "a"}) {
+				t.Errorf("mover at %d: texts %v", moverAt, texts(got))
+			}
+		}
+	}
+}
+
 // A block's time never goes back, so an edit on a device whose clock is
 // behind the one it merged from still wins.
 func TestStampingNeverGoesBack(t *testing.T) {

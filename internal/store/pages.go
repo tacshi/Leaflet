@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -583,7 +585,7 @@ type CopyOptions struct {
 // CopyPage copies a page and its subpages, which keep their titles and
 // order, and returns the copy. Links among them go to the copies.
 func (s *Store) CopyPage(id string, o CopyOptions) (Page, error) {
-	tree, ids, contents, err := s.copyPlan(id, doc.NewRowID())
+	tree, ids, contents, recs, err := s.copyPlan(id, doc.NewRowID())
 	if err != nil {
 		return Page{}, err
 	}
@@ -592,14 +594,17 @@ func (s *Store) CopyPage(id string, o CopyOptions) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
-	return p, s.createCopies(tree[1:], ids, contents[1:], o.Template)
+	if err := s.createCopies(tree[1:], ids, contents[1:], o.Template); err != nil {
+		return Page{}, err
+	}
+	return p, s.putRecordingCopies(recs)
 }
 
 // CopyInto copies page id's subpages under page into, and returns a copy
 // of id's content for into to hold, as when a page starts from a
 // template. Links among them go to the copies.
 func (s *Store) CopyInto(id, into string) (*doc.Content, error) {
-	tree, ids, contents, err := s.copyPlan(id, into)
+	tree, ids, contents, recs, err := s.copyPlan(id, into)
 	if err != nil {
 		return nil, err
 	}
@@ -613,22 +618,27 @@ func (s *Store) CopyInto(id, into string) (*doc.Content, error) {
 			return nil, err
 		}
 	}
-	return contents[0], s.createCopies(tree[1:], ids, contents[1:], target.Template)
+	if err := s.createCopies(tree[1:], ids, contents[1:], target.Template); err != nil {
+		return nil, err
+	}
+	return contents[0], s.putRecordingCopies(recs)
 }
 
 // copyPlan reads page id and the pages under it, parents before their
 // subpages, and gives each the ID of its copy (copyID for id) and its
-// content with links among them going to the copies.
-func (s *Store) copyPlan(id, copyID string) ([]Page, map[string]string, []*doc.Content, error) {
+// content with links among them going to the copies, and recording blocks
+// to recordings of their own, which putRecordingCopies stores once the
+// copies are in.
+func (s *Store) copyPlan(id, copyID string) ([]Page, map[string]string, []*doc.Content, []recordingCopy, error) {
 	root, err := s.Page(id)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	tree := []Page{root}
 	for i := 0; i < len(tree); i++ {
 		kids, err := s.queryPages(`parent_id = ? AND deleted_at IS NULL ORDER BY sort_key`, tree[i].ID)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, nil, nil, err
 		}
 		tree = append(tree, kids...)
 	}
@@ -637,14 +647,28 @@ func (s *Store) copyPlan(id, copyID string) ([]Page, map[string]string, []*doc.C
 		ids[p.ID] = doc.NewRowID()
 	}
 	contents := make([]*doc.Content, len(tree))
+	var recs []recordingCopy
 	for i, p := range tree {
 		c := s.Content(p.ID)
 		if c == nil {
-			return nil, nil, nil, fmt.Errorf("%s is not on this device yet", p.DisplayTitle())
+			return nil, nil, nil, nil, fmt.Errorf("%s is not on this device yet", p.DisplayTitle())
 		}
 		contents[i] = c.CopyFor(ids)
+		contents[i].Walk(func(n, _ *doc.Node) {
+			if n.Type != "recording" {
+				return
+			}
+			r, err := s.Recording(n.Str("recording_id"))
+			if err != nil {
+				return
+			}
+			from := r.ID
+			r.ID, r.PageID, r.BlockID = doc.NewRowID(), ids[p.ID], n.ID
+			n.Set("recording_id", r.ID)
+			recs = append(recs, recordingCopy{r, from})
+		})
 	}
-	return tree, ids, contents, nil
+	return tree, ids, contents, recs, nil
 }
 
 // createCopies makes the copies of subpages that copyPlan planned, each
@@ -655,6 +679,48 @@ func (s *Store) createCopies(pages []Page, ids map[string]string, contents []*do
 			Icon: p.Icon, Tags: p.Tags, Template: template, Content: contents[i]}); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+// recordingCopy is a recording of a copied page, and the ID of the one it
+// copies.
+type recordingCopy struct {
+	Recording
+	from string
+}
+
+// putRecordingCopies stores and queues the recordings of copied pages. They
+// share the audio that went up, so whoever can read the copy can play it.
+// Audio on this device is copied, as the original's may go once it is up,
+// and goes up as the copy's too if the original's was waiting to.
+func (s *Store) putRecordingCopies(recs []recordingCopy) error {
+	for _, c := range recs {
+		r := c.Recording
+		r.LocalPath = ""
+		if _, err := os.Stat(c.LocalPath); c.LocalPath != "" && err == nil {
+			r.LocalPath = filepath.Join(s.Dir, "recordings", r.ID+filepath.Ext(c.LocalPath))
+			if err := os.MkdirAll(filepath.Dir(r.LocalPath), 0o750); err != nil {
+				return err
+			}
+			if err := copyFile(c.LocalPath, r.LocalPath); err != nil {
+				return err
+			}
+		}
+		uploading := r.LocalPath != "" && s.HasPending("storage", "recordings/"+c.from)
+		r.UpdatedAt = time.Now()
+		if err := s.PutRecording(r); err != nil {
+			return err
+		}
+		if err := s.Queue("recordings", r.ID, RecordingToRemote(r), "", r.PageID); err != nil {
+			return err
+		}
+		if uploading {
+			if err := s.QueueUpload(r); err != nil {
+				return err
+			}
+		}
+		s.Notify("recordings", r.PageID)
 	}
 	return nil
 }

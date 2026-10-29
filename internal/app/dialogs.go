@@ -46,6 +46,7 @@ type newComment struct {
 	blockID string
 	quote   string
 	text    string
+	agents  agentPicker
 }
 
 // dialogs is the state of the app's dialogs and transient panels.

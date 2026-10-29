@@ -83,8 +83,8 @@ func TestPageHTMLBlocks(t *testing.T) {
 		"<ol>\n<li id=\"b-n1\"",
 		`<input type="checkbox" disabled checked> done`,
 		`<code class="language-go">x &lt; 1</code>`,
-		"<th>A</th><th>B</th>",
-		"<td><strong>2</strong></td>",
+		`<th class="nowrap">A</th><th class="nowrap">B</th>`,
+		`<td class="nowrap"><strong>2</strong></td>`,
 		`<img src="/tok/f/1" alt="a"`,
 		`<img src="https://x.dev/c.png"`,
 		"<em>Demo</em>",
@@ -145,5 +145,26 @@ func TestPageHTMLWithoutScripts(t *testing.T) {
 	out := PageHTML("T", &Content{Children: []*Node{d}}, HTMLOptions{})
 	if !strings.Contains(out, "<pre id=\"b-d1\" data-block=\"d1\"><code>graph TD; A--&gt;B</code></pre>") || strings.Contains(out, "<script") {
 		t.Errorf("diagram without its script:\n%s", out)
+	}
+}
+
+// A column of short labels stays on one line; a column with a sentence in
+// it wraps.
+func TestPageHTMLTableShortColumns(t *testing.T) {
+	table, err := TableNode([][]string{
+		{"Step", "What to do"},
+		{"1. Listen & restate", "Don't touch the marker yet. Repeat the problem in my own words"},
+	}, "tb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := PageHTML("T", &Content{Children: []*Node{table}}, HTMLOptions{})
+	for _, want := range []string{
+		`<th class="nowrap">Step</th><th>What to do</th>`,
+		`<td class="nowrap">1. Listen &amp; restate</td><td>Don&#39;t touch`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
 	}
 }

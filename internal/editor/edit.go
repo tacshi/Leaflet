@@ -619,11 +619,13 @@ func (e *Editor) SetType(typ string, level int) {
 	e.pushUndo(false)
 	a, b := e.ordered()
 	us := e.units()
+	var last *doc.Node
 	for i := e.index(a.ID); i >= 0 && i <= e.index(b.ID) && i < len(us); i++ {
 		n := us[i]
 		if !n.IsText() {
 			continue
 		}
+		last = n
 		n.Type = typ
 		for _, k := range []string{"checked", "due", "level", "language", "tone", "collapsed"} {
 			delete(n.Data, k)
@@ -645,6 +647,9 @@ func (e *Editor) SetType(typ string, level int) {
 			e.liftChildren(n)
 		}
 		e.invalidate(n.ID)
+	}
+	if typ == "code" && last != nil {
+		e.roomAfterCode(last)
 	}
 	e.changed()
 }

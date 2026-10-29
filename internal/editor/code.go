@@ -157,7 +157,8 @@ func (e *Editor) inCode() bool {
 
 // codeEnter breaks the line at the caret, indenting the new line as the
 // one it leaves. Enter on the second blank line at the end leaves the
-// block, without the blank lines, for a paragraph after it.
+// block, without the blank lines, for a paragraph after it: the empty one
+// already there, or a new one.
 func (e *Editor) codeEnter(n *doc.Node) {
 	runes := []rune(n.Delta().Plain())
 	off := e.focus.Off
@@ -166,8 +167,16 @@ func (e *Editor) codeEnter(n *doc.Node) {
 	if off == len(runes) && last >= 2 && strings.TrimSpace(lines[last]) == "" && strings.TrimSpace(lines[last-1]) == "" {
 		n.SetDelta(doc.Delta{{Text: strings.Join(lines[:last-1], "\n")}}.Compact())
 		e.invalidate(n.ID)
-		p := newText("paragraph", nil)
-		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
+		var p *doc.Node
+		if loc := e.Content.Locate(n.ID); loc != nil && loc.Index+1 < len(loc.Siblings) {
+			if next := loc.Siblings[loc.Index+1]; next.Type == "paragraph" && textLen(next) == 0 {
+				p = next
+			}
+		}
+		if p == nil {
+			p = newText("paragraph", nil)
+			_ = e.Content.Insert(doc.Position{After: n.ID}, p)
+		}
 		e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
 		e.changed()
 		return
@@ -211,9 +220,18 @@ func (e *Editor) fenceEnter(n *doc.Node) bool {
 	n.SetDelta(nil)
 	n.Set("language", language)
 	e.invalidate(n.ID)
+	e.roomAfterCode(n)
 	e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
 	e.changed()
 	return true
+}
+
+// roomAfterCode leaves a paragraph after a new code block at the end of
+// the page, for a click or Down to leave it by.
+func (e *Editor) roomAfterCode(n *doc.Node) {
+	if us := e.units(); len(us) > 0 && us[len(us)-1].ID == n.ID {
+		_ = e.Content.Insert(doc.Position{After: n.ID}, newText("paragraph", nil))
+	}
 }
 
 func lineStart(runes []rune, off int) int {

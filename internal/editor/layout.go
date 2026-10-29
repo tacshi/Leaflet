@@ -67,7 +67,7 @@ func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 	case "bulleted_list", "numbered_list", "todo_list":
 		top, bottom = 2, 2
 	case "code":
-		font.Family, font.Size, font.LineHeight = theme.CodeFamily(plain), size*0.8, 0
+		font.Family, font.Size, font.LineHeight = theme.CodeFamily(plain), size*0.8, 1.5
 		top, bottom = codeMargin+codeBar, codePad+codeMargin
 	case "callout":
 		top, bottom = calloutMargin+calloutPad, calloutPad+calloutMargin

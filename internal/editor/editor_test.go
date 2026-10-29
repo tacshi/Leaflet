@@ -428,16 +428,17 @@ func TestEmacsKeysInSlashMenu(t *testing.T) {
 	}
 }
 
-// code makes the page one empty code block, with the caret in it.
+// code makes the page an empty code block, with the caret in it, and
+// the paragraph left after it.
 func code(t *testing.T) (*Editor, *doc.Node) {
 	t.Helper()
 	e, _, _ := setup(t)
 	e.SetType("code", 0)
-	n := e.Content.Children[0]
-	if n.Type != "code" {
+	top := e.Content.Children
+	if len(top) != 2 || top[0].Type != "code" || top[1].Type != "paragraph" || e.FocusBlock() != top[0].ID {
 		t.Fatalf("got %v", texts(e))
 	}
-	return e, n
+	return e, top[0]
 }
 
 func TestCodeTyping(t *testing.T) {
@@ -466,7 +467,7 @@ func TestCodeTyping(t *testing.T) {
 func TestCodeIndent(t *testing.T) {
 	e, n := code(t)
 	e.paste("a\nb\nc")
-	if got := n.Delta().Plain(); got != "a\nb\nc" || len(e.Content.Children) != 1 {
+	if got := n.Delta().Plain(); got != "a\nb\nc" || len(e.Content.Children) != 2 {
 		t.Fatalf("pasted %q %v", got, texts(e))
 	}
 	e.Select(Pos{n.ID, 0}, Pos{n.ID, 3})
@@ -503,8 +504,19 @@ func TestFencedCode(t *testing.T) {
 	f, _, _ := setup(t)
 	f.InsertText("```py")
 	f.Enter()
-	if n := f.Content.Children[0]; n.Type != "code" || n.Str("language") != "python" || n.Delta().Plain() != "" {
+	if top := f.Content.Children; len(top) != 2 || top[0].Type != "code" || top[0].Str("language") != "python" || top[0].Delta().Plain() != "" || top[1].Type != "paragraph" {
 		t.Errorf("got %v", texts(f))
+	}
+	// One before a paragraph leaves none more.
+	g, _, _ := setup(t)
+	g.InsertText("After")
+	g.PlaceCaret(g.Content.Children[0].ID, 0)
+	g.Enter()
+	g.PlaceCaret(g.Content.Children[0].ID, 0)
+	g.InsertText("```go")
+	g.Enter()
+	if top := g.Content.Children; len(top) != 2 || top[0].Type != "code" || top[1].Delta().Plain() != "After" {
+		t.Errorf("got %v", texts(g))
 	}
 }
 

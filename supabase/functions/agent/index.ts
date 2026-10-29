@@ -289,8 +289,8 @@ async function runJob(
       c.author_kind === "agent"
         ? `${c.agent_name || "Agent"} (agent, asked by ${personOf(c)})`
         : c.author_kind === "guest"
-          ? `${c.agent_name || "Guest"} (guest, through the page's public link)`
-          : personOf(c);
+        ? `${c.agent_name || "Guest"} (guest, through the page's public link)`
+        : personOf(c);
 
     const threadsFor = (list: CommentRow[]) => {
       const roots = list.filter((c) => !c.parent_comment_id);

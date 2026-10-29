@@ -409,7 +409,7 @@
   "sidebarSynced": "同期済み",
   "todosTitle": "ToDo",
   "todosEmptyTitle": "ToDo はありません",
-  "todosEmptyBody": "日付付き、または誰かを @メンションした ToDo が、すべてのページからここに表示されます。",
+  "todosEmptyBody": "日付付きの ToDo が、すべてのページからここに表示されます。",
   "todosSectionOverdue": "期限切れ",
   "todosSectionUpcoming": "今後",
   "todosSectionNoDate": "日付なし",

@@ -5909,13 +5909,13 @@ func (msgs Messages) TodosEmptyTitle() string {
 	return Catalog.Format(msgs.locale, "todosEmptyTitle", nil)
 }
 
-// TodosEmptyBody says "To-dos with a date, or someone @mentioned, show here from every page."
+// TodosEmptyBody says "To-dos with a date show here from every page."
 // in the language the app shows.
 //
 // To-dos view empty state: explanation.
 func TodosEmptyBody() string { return In(i18n.Locale()).TodosEmptyBody() }
 
-// TodosEmptyBody says "To-dos with a date, or someone @mentioned, show here from every page."
+// TodosEmptyBody says "To-dos with a date show here from every page."
 // in the language of msgs.
 //
 // To-dos view empty state: explanation.

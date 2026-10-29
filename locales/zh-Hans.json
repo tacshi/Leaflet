@@ -409,7 +409,7 @@
   "sidebarSynced": "已同步",
   "todosTitle": "待办",
   "todosEmptyTitle": "没有待办",
-  "todosEmptyBody": "所有页面中带日期或 @提及了某人的待办都会显示在这里。",
+  "todosEmptyBody": "所有页面中带日期的待办都会显示在这里。",
   "todosSectionOverdue": "已逾期",
   "todosSectionUpcoming": "即将到来",
   "todosSectionNoDate": "无日期",

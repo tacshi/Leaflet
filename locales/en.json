@@ -2110,7 +2110,7 @@
   "@todosEmptyTitle": {
     "description": "To-dos view empty state: heading."
   },
-  "todosEmptyBody": "To-dos with a date, or someone @mentioned, show here from every page.",
+  "todosEmptyBody": "To-dos with a date show here from every page.",
   "@todosEmptyBody": {
     "description": "To-dos view empty state: explanation."
   },

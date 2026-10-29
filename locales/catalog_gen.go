@@ -2241,6 +2241,22 @@ func (msgs Messages) TemplateHintSubpages(count int) string {
 	return Catalog.Format(msgs.locale, "templateHintSubpages", map[string]any{"count": count})
 }
 
+// DialogSearchPlaceholder says "Search pages, or #tag to filter"
+// in the language the app shows.
+//
+// Search dialog: the search field's placeholder; #tag is typed as is, a #
+// before a tag's name.
+func DialogSearchPlaceholder() string { return In(i18n.Locale()).DialogSearchPlaceholder() }
+
+// DialogSearchPlaceholder says "Search pages, or #tag to filter"
+// in the language of msgs.
+//
+// Search dialog: the search field's placeholder; #tag is typed as is, a #
+// before a tag's name.
+func (msgs Messages) DialogSearchPlaceholder() string {
+	return Catalog.Format(msgs.locale, "dialogSearchPlaceholder", nil)
+}
+
 // DialogSearchRecent says "Recent"
 // in the language the app shows.
 //
@@ -5687,6 +5703,98 @@ func (msgs Messages) SidebarRestartToUpdate(version string) string {
 	return Catalog.Format(msgs.locale, "sidebarRestartToUpdate", map[string]any{"version": version})
 }
 
+// SidebarCheckForUpdates says "Check for Updates"
+// in the language the app shows.
+//
+// Sidebar footer: tooltip of the button that checks for a newer version.
+func SidebarCheckForUpdates() string { return In(i18n.Locale()).SidebarCheckForUpdates() }
+
+// SidebarCheckForUpdates says "Check for Updates"
+// in the language of msgs.
+//
+// Sidebar footer: tooltip of the button that checks for a newer version.
+func (msgs Messages) SidebarCheckForUpdates() string {
+	return Catalog.Format(msgs.locale, "sidebarCheckForUpdates", nil)
+}
+
+// SidebarCheckingForUpdates says "Checking for updates…"
+// in the language the app shows.
+//
+// Sidebar footer: tooltip of the update button while a check is under way.
+func SidebarCheckingForUpdates() string { return In(i18n.Locale()).SidebarCheckingForUpdates() }
+
+// SidebarCheckingForUpdates says "Checking for updates…"
+// in the language of msgs.
+//
+// Sidebar footer: tooltip of the update button while a check is under way.
+func (msgs Messages) SidebarCheckingForUpdates() string {
+	return Catalog.Format(msgs.locale, "sidebarCheckingForUpdates", nil)
+}
+
+// SidebarDownloadingUpdate says "Downloading {version}…"
+// in the language the app shows.
+//
+// Sidebar footer: tooltip of the update button while a newer version
+// downloads.
+func SidebarDownloadingUpdate(version string) string {
+	return In(i18n.Locale()).SidebarDownloadingUpdate(version)
+}
+
+// SidebarDownloadingUpdate says "Downloading {version}…"
+// in the language of msgs.
+//
+// Sidebar footer: tooltip of the update button while a newer version
+// downloads.
+func (msgs Messages) SidebarDownloadingUpdate(version string) string {
+	return Catalog.Format(msgs.locale, "sidebarDownloadingUpdate", map[string]any{"version": version})
+}
+
+// SidebarUpToDate says "Leaflet {version} is up to date"
+// in the language the app shows.
+//
+// Toast after checking for updates found no newer version.
+func SidebarUpToDate(version string) string { return In(i18n.Locale()).SidebarUpToDate(version) }
+
+// SidebarUpToDate says "Leaflet {version} is up to date"
+// in the language of msgs.
+//
+// Toast after checking for updates found no newer version.
+func (msgs Messages) SidebarUpToDate(version string) string {
+	return Catalog.Format(msgs.locale, "sidebarUpToDate", map[string]any{"version": version})
+}
+
+// SidebarCheckForUpdatesFailed says "Could not check for updates"
+// in the language the app shows.
+//
+// Toast after checking for updates failed.
+func SidebarCheckForUpdatesFailed() string { return In(i18n.Locale()).SidebarCheckForUpdatesFailed() }
+
+// SidebarCheckForUpdatesFailed says "Could not check for updates"
+// in the language of msgs.
+//
+// Toast after checking for updates failed.
+func (msgs Messages) SidebarCheckForUpdatesFailed() string {
+	return Catalog.Format(msgs.locale, "sidebarCheckForUpdatesFailed", nil)
+}
+
+// SidebarInstallUpdateFailed says "Could not install Leaflet {version}"
+// in the language the app shows.
+//
+// Toast after a newer version was found but downloading or installing it
+// failed.
+func SidebarInstallUpdateFailed(version string) string {
+	return In(i18n.Locale()).SidebarInstallUpdateFailed(version)
+}
+
+// SidebarInstallUpdateFailed says "Could not install Leaflet {version}"
+// in the language of msgs.
+//
+// Toast after a newer version was found but downloading or installing it
+// failed.
+func (msgs Messages) SidebarInstallUpdateFailed(version string) string {
+	return Catalog.Format(msgs.locale, "sidebarInstallUpdateFailed", map[string]any{"version": version})
+}
+
 // SidebarSettings says "Settings (⌘,)"
 // in the language the app shows.
 //
@@ -5801,13 +5909,13 @@ func (msgs Messages) TodosEmptyTitle() string {
 	return Catalog.Format(msgs.locale, "todosEmptyTitle", nil)
 }
 
-// TodosEmptyBody says "To-dos with a date, or someone @mentioned, show here from every page."
+// TodosEmptyBody says "To-dos with a date show here from every page."
 // in the language the app shows.
 //
 // To-dos view empty state: explanation.
 func TodosEmptyBody() string { return In(i18n.Locale()).TodosEmptyBody() }
 
-// TodosEmptyBody says "To-dos with a date, or someone @mentioned, show here from every page."
+// TodosEmptyBody says "To-dos with a date show here from every page."
 // in the language of msgs.
 //
 // To-dos view empty state: explanation.
@@ -11337,14 +11445,14 @@ func (msgs Messages) WelcomeTrySlash() string {
 	return Catalog.Format(msgs.locale, "welcomeTrySlash", nil)
 }
 
-// WelcomeTryAt says "Type **@** to ask an agent to write here, mention someone or link a page"
+// WelcomeTryAt says "Type **@** to ask an agent to write here, or to link a page"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a to-do of Try it
 // (Markdown).
 func WelcomeTryAt() string { return In(i18n.Locale()).WelcomeTryAt() }
 
-// WelcomeTryAt says "Type **@** to ask an agent to write here, mention someone or link a page"
+// WelcomeTryAt says "Type **@** to ask an agent to write here, or to link a page"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a to-do of Try it

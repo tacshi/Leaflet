@@ -796,6 +796,10 @@
       }
     }
   },
+  "dialogSearchPlaceholder": "Search pages, or #tag to filter",
+  "@dialogSearchPlaceholder": {
+    "description": "Search dialog: the search field's placeholder; #tag is typed as is, a # before a tag's name."
+  },
   "dialogSearchRecent": "Recent",
   "@dialogSearchRecent": {
     "description": "Search dialog: the heading over recent pages, before anything is typed."
@@ -2026,6 +2030,48 @@
       }
     }
   },
+  "sidebarCheckForUpdates": "Check for Updates",
+  "@sidebarCheckForUpdates": {
+    "description": "Sidebar footer: tooltip of the button that checks for a newer version."
+  },
+  "sidebarCheckingForUpdates": "Checking for updates…",
+  "@sidebarCheckingForUpdates": {
+    "description": "Sidebar footer: tooltip of the update button while a check is under way."
+  },
+  "sidebarDownloadingUpdate": "Downloading {version}…",
+  "@sidebarDownloadingUpdate": {
+    "description": "Sidebar footer: tooltip of the update button while a newer version downloads.",
+    "placeholders": {
+      "version": {
+        "type": "String",
+        "example": "1.2.0"
+      }
+    }
+  },
+  "sidebarUpToDate": "Leaflet {version} is up to date",
+  "@sidebarUpToDate": {
+    "description": "Toast after checking for updates found no newer version.",
+    "placeholders": {
+      "version": {
+        "type": "String",
+        "example": "1.2.0"
+      }
+    }
+  },
+  "sidebarCheckForUpdatesFailed": "Could not check for updates",
+  "@sidebarCheckForUpdatesFailed": {
+    "description": "Toast after checking for updates failed."
+  },
+  "sidebarInstallUpdateFailed": "Could not install Leaflet {version}",
+  "@sidebarInstallUpdateFailed": {
+    "description": "Toast after a newer version was found but downloading or installing it failed.",
+    "placeholders": {
+      "version": {
+        "type": "String",
+        "example": "1.2.0"
+      }
+    }
+  },
   "sidebarSettings": "Settings (⌘,)",
   "@sidebarSettings": {
     "description": "Sidebar footer: tooltip of the settings button."
@@ -2064,7 +2110,7 @@
   "@todosEmptyTitle": {
     "description": "To-dos view empty state: heading."
   },
-  "todosEmptyBody": "To-dos with a date, or someone @mentioned, show here from every page.",
+  "todosEmptyBody": "To-dos with a date show here from every page.",
   "@todosEmptyBody": {
     "description": "To-dos view empty state: explanation."
   },
@@ -3995,7 +4041,7 @@
   "@welcomeTrySlash": {
     "description": "The welcome guide page, made once on first run: a to-do of Try it (Markdown)."
   },
-  "welcomeTryAt": "Type **@** to ask an agent to write here, mention someone or link a page",
+  "welcomeTryAt": "Type **@** to ask an agent to write here, or to link a page",
   "@welcomeTryAt": {
     "description": "The welcome guide page, made once on first run: a to-do of Try it (Markdown)."
   },

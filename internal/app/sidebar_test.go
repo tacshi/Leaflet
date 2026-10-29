@@ -469,8 +469,8 @@ func TestDeleteFileAsksFirst(t *testing.T) {
 }
 
 // Not signed in, the account row signs in, and the footer has no other
-// way to; nor does it check for updates, which the menus do, or show one
-// until it is installed.
+// way to. Beside Settings an icon checks for updates, a spinner shows while
+// the check is under way, and the update shows once it is installed.
 func TestSidebarFooter(t *testing.T) {
 	a := templatesApp(t)
 	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u1")
@@ -482,8 +482,14 @@ func TestSidebarFooter(t *testing.T) {
 	if _, ok := tt.Find(locales.CommonSignIn()); ok {
 		t.Errorf("a Sign in button beside the account row: %v", tt.Texts())
 	}
-	a.updateChecking = true
+	if _, ok := tt.Find(locales.SidebarCheckForUpdates()); !ok {
+		t.Error("no icon to check for updates")
+	}
+	a.updateBusy = locales.SidebarCheckingForUpdates()
 	tt.Frame()
+	if _, ok := tt.Find(locales.SidebarCheckingForUpdates()); !ok {
+		t.Error("nothing shows the check under way")
+	}
 	if _, ok := tt.Find(locales.SidebarRestartToUpdate("2.0.0")); ok {
 		t.Error("an update shows before it is installed")
 	}
@@ -493,7 +499,7 @@ func TestSidebarFooter(t *testing.T) {
 	if a.route.Kind != "signin" {
 		t.Errorf("the account row went to %+v", a.route)
 	}
-	a.updateChecking, a.updateReady = false, "2.0.0"
+	a.updateBusy, a.updateReady = "", "2.0.0"
 	tt.Frame()
 	if _, ok := tt.Find(locales.SidebarRestartToUpdate("2.0.0")); !ok {
 		t.Error("no icon for the update installed")

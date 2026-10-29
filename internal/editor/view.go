@@ -243,7 +243,7 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 		if focused && isFocus && collapsed {
 			since := p.Now().Sub(blink)
 			if since < 0 || (since/blinkPeriod)%2 == 0 {
-				cr := l.layout.Caret(utf16Off(n, caretOff))
+				cr := textCaret(l.layout, utf16Off(n, caretOff))
 				p.Fill(ui.Rect{X: ox + cr.X - 0.5, Y: oy + cr.Y, W: 2, H: cr.H}, pal.Accent, 1)
 			}
 			if since >= 0 {
@@ -375,6 +375,20 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 			e.commentBadge(c, n.ID, count, 8, pal)
 		}
 	})
+}
+
+// textCaret is the caret drawn at index: as tall as its line's text, from
+// the top of its fonts to their bottom, not the whole line with the room
+// prose leaves between lines.
+func textCaret(l *ui.TextLayout, index int) ui.Rect {
+	cr := l.Caret(index)
+	for _, line := range l.Lines() {
+		if line.Rect.Y == cr.Y && line.Ascent+line.Descent > 0 {
+			cr.Y, cr.H = line.Baseline-line.Ascent, line.Ascent+line.Descent
+			break
+		}
+	}
+	return cr
 }
 
 // mediaEdit is the context menu's item changing what a block shows: an

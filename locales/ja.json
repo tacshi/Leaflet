@@ -156,6 +156,7 @@
   "templateDelete": "テンプレートを削除",
   "templateHintEmpty": "空",
   "templateHintSubpages": "{count, plural, other {# 個のサブページ}}",
+  "dialogSearchPlaceholder": "ページを検索、#タグ で絞り込み",
   "dialogSearchRecent": "最近",
   "dialogSearchNoMatch": "「{query}」に一致する項目はありません",
   "dialogSearchAskAgent": "代わりにエージェントに質問",

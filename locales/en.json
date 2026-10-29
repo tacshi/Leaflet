@@ -796,6 +796,10 @@
       }
     }
   },
+  "dialogSearchPlaceholder": "Search pages, or #tag to filter",
+  "@dialogSearchPlaceholder": {
+    "description": "Search dialog: the search field's placeholder; #tag is typed as is, a # before a tag's name."
+  },
   "dialogSearchRecent": "Recent",
   "@dialogSearchRecent": {
     "description": "Search dialog: the heading over recent pages, before anything is typed."

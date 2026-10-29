@@ -2241,6 +2241,22 @@ func (msgs Messages) TemplateHintSubpages(count int) string {
 	return Catalog.Format(msgs.locale, "templateHintSubpages", map[string]any{"count": count})
 }
 
+// DialogSearchPlaceholder says "Search pages, or #tag to filter"
+// in the language the app shows.
+//
+// Search dialog: the search field's placeholder; #tag is typed as is, a #
+// before a tag's name.
+func DialogSearchPlaceholder() string { return In(i18n.Locale()).DialogSearchPlaceholder() }
+
+// DialogSearchPlaceholder says "Search pages, or #tag to filter"
+// in the language of msgs.
+//
+// Search dialog: the search field's placeholder; #tag is typed as is, a #
+// before a tag's name.
+func (msgs Messages) DialogSearchPlaceholder() string {
+	return Catalog.Format(msgs.locale, "dialogSearchPlaceholder", nil)
+}
+
 // DialogSearchRecent says "Recent"
 // in the language the app shows.
 //

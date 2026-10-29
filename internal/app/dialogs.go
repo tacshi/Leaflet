@@ -186,7 +186,7 @@ func (a *App) searchDialog(c *ui.Context) {
 		panel.Width(600).Radius(12).Background(pal.Surface).Border(1, pal.Border).Shadow(0, 24, 60, 0, pal.Shadow).Clip()
 		ui.Row(c).Height(52).Padding(0, 16).Gap(10).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
 			// The header is its frame.
-			in := ui.SearchField(c.Key("q"), &d.query).FontSize(16).Grow(1).Padding(0).BorderWidth(0).Background(ui.Transparent).AutoFocus()
+			in := ui.SearchField(c.Key("q"), &d.query).Placeholder(locales.DialogSearchPlaceholder()).FontSize(16).Grow(1).Padding(0).BorderWidth(0).Background(ui.Transparent).AutoFocus()
 			if in.Changed() {
 				d.hits, _ = a.st.Search(d.query, 30)
 				d.hitIndex = 0

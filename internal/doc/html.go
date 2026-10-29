@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // HTMLOptions are what a page written as HTML gets from the app around it.
@@ -218,14 +219,33 @@ func (w htmlWriter) block(n *Node) {
 		w.write("<figure", w.attrs(n, class), `><img src="`, html.EscapeString(src), `" alt="`, html.EscapeString(n.Str("alt")), `"`, style, ` loading="lazy"></figure>`+"\n")
 	case "table":
 		w.write("<div", w.attrs(n, "table"), "><table>\n")
-		for r, row := range tableCells(n) {
+		grid := tableCells(n)
+		// A column of short labels (a step, a time) keeps each on one line,
+		// rather than wrapping so a column of sentences can be wider.
+		short := map[int]bool{}
+		if len(grid) > 0 {
+			for c := range grid[0] {
+				short[c] = true
+				for _, row := range grid {
+					if utf8.RuneCountInString(row[c].Plain()) > shortCell {
+						short[c] = false
+						break
+					}
+				}
+			}
+		}
+		for r, row := range grid {
 			cell := "td"
 			if r == 0 {
 				cell = "th"
 			}
 			w.write("<tr>")
-			for _, d := range row {
-				w.write("<", cell, ">", d.HTML(), "</", cell, ">")
+			for c, d := range row {
+				open := "<" + cell + ">"
+				if short[c] {
+					open = "<" + cell + ` class="nowrap">`
+				}
+				w.write(open, d.HTML(), "</", cell, ">")
 			}
 			w.write("</tr>\n")
 		}
@@ -342,6 +362,10 @@ func (w htmlWriter) card(n *Node) {
 	}
 	w.write("</p>\n")
 }
+
+// shortCell is the most characters a cell holds for its column to count as
+// short labels that stay on one line.
+const shortCell = 20
 
 // tableCells are a stored table's cells, row by row, as rich text.
 func tableCells(n *Node) [][]Delta {
@@ -463,7 +487,9 @@ figure.image{text-align:center}figure.image.left{text-align:left}
 figure.image img{max-width:100%;height:auto;border-radius:6px}
 figcaption{color:var(--muted);font-size:.9em;margin:.3em 0}
 .table{overflow-x:auto}
-table{border-collapse:collapse;font-size:.95em}
+table{border-collapse:collapse;font-size:.95em;overflow-wrap:break-word}
+table a,table code{overflow-wrap:anywhere}
+.nowrap{white-space:nowrap}
 th,td{border:1px solid var(--line);padding:6px 10px;text-align:left;vertical-align:top}
 th{background:var(--th);font-weight:600}
 .muted{color:var(--muted)}
@@ -476,6 +502,7 @@ figure.video .frame{position:relative;aspect-ratio:16/9;border-radius:8px;overfl
 figure.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 .math,.diagram{text-align:center;overflow-x:auto}
 .diagram svg{max-width:100%;height:auto}
-@media (max-width:600px){main{padding:28px 16px 96px}h1.title{font-size:1.8em}pre{font-size:.92em}}
+@media (max-width:600px){main{padding:28px 16px 96px}h1.title{font-size:1.8em}pre{font-size:.92em}
+th:not(.nowrap),td:not(.nowrap){min-width:9em}}
 .pele{--pele-bg:var(--bg);--pele-fg:#16181d;--pele-muted:#565c67;--pele-line:#3d424c;--pele-surface:#f5f6f8;--pele-surface-alt:#eceef2;--pele-border:#c9ced8;--pele-accent:#3446c9;--pele-fg-on-light:#16181d;--pele-fg-on-dark:#e9ebef;--pele-font:-apple-system,system-ui,sans-serif}
 @media (prefers-color-scheme:dark){.pele{--pele-fg:#e9ebef;--pele-muted:#9ea4af;--pele-line:#c0c5ce;--pele-surface:#23272e;--pele-surface-alt:#2b3038;--pele-border:#3a404a;--pele-accent:#8a97ff}}`

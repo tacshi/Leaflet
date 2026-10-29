@@ -1072,3 +1072,15 @@ func TestCopyAndPasteFormats(t *testing.T) {
 		t.Errorf("pasted plain HTML as %v", texts(e))
 	}
 }
+
+func TestCaretIsAsTallAsItsText(t *testing.T) {
+	font := ui.Font{Size: 16, LineHeight: 1.8}
+	l := ui.ShapeRichText([]ui.Span{{Text: "也就是「波形」：", Size: font.Size}}, font, 400)
+	line, cr := l.Lines()[0], textCaret(l, 3)
+	if cr.H >= line.Rect.H || cr.Y <= line.Rect.Y || cr.Y+cr.H >= line.Rect.Y+line.Rect.H {
+		t.Errorf("caret %+v fills its line %+v", cr, line.Rect)
+	}
+	if cr.H < font.Size {
+		t.Errorf("caret %+v shorter than the text, %v", cr, font.Size)
+	}
+}

@@ -155,7 +155,11 @@ func (h *host) CommentPreview(c *ui.Context, blockID string) {
 								ui.Text(c, cm.AuthorName).FontSize(12.5).FontWeight(600).TextColor(pal.Text).SingleLine()
 								ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
 							})
-							ui.Text(c, commentBody(cm)).FontSize(13).TextColor(pal.Text).Wrap().PaddingStart(24)
+							if !cm.DeletedAt.IsZero() {
+								ui.Text(c, commentBody(cm)).FontSize(13).TextColor(pal.Text).Wrap().PaddingStart(24)
+							} else {
+								a.commentText(c, cm.Body).FontSize(13).PaddingStart(24)
+							}
 						})
 					}
 				})

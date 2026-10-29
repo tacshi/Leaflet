@@ -114,7 +114,9 @@ type App struct {
 
 	dialogs dialogs
 	md      markdown.Options
-	images  *imageCache
+	// commentMD is how comments show: md's links, with mentions marked.
+	commentMD markdown.Options
+	images    *imageCache
 	// downloads are the files downloading from the server, and
 	// downloadFails when those that failed to last did.
 	downloads     map[string]bool
@@ -311,6 +313,7 @@ func (a *App) start() error {
 			_ = mygo.Shell.OpenExternal(url)
 		}
 	}
+	a.commentMD.OnLink = a.md.OnLink
 	a.rec = recording.NewController(st, a.backend)
 	a.hub = agents.NewHub(st, a.backend, a)
 	a.hub.PublicLink = a.publiclyLinked

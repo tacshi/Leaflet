@@ -386,3 +386,17 @@ func TestPublicLinkKeepsAgentsToThePage(t *testing.T) {
 		t.Error("a stopped link still counts")
 	}
 }
+
+// The page tells the diagram script its full-window button's words and
+// icons, whether or not visitors may comment.
+func TestPubHeadDiagramWords(t *testing.T) {
+	head := pubHead("/tok/", false)
+	for _, name := range []string{"full", "full-icon", "exit", "exit-icon", "fit", "fit-icon", "out", "out-icon", "in", "in-icon"} {
+		if !strings.Contains(head, `<meta name="leaflet-`+name+`" content="`) {
+			t.Errorf("no %s in %s", name, head)
+		}
+	}
+	if !strings.Contains(head, ".dfull{") {
+		t.Errorf("no full-window look in %s", head)
+	}
+}

@@ -64,6 +64,129 @@ try { katex.render(` + scriptString(formula) + `, m, {displayMode: true, output:
 catch (e) { m.className = "err"; m.textContent = e.message; }</script></body></html>`
 }
 
+// zoomScript defines leafletZoom(view, box, on, full, zoomed), which lets
+// the diagram drawn in box zoom and move over view: at a point with a
+// pinch, or Ctrl and the wheel, over on, from 1 to 8 times its fitted
+// size; zoomed in, a drag moves it and a double click fits it again. Where
+// a browser tells a pinch only as two touches, those zoom it too. It tells
+// zoomed whether it is zoomed in, and gives a function that zooms "in",
+// "out" or to "fit".
+//
+// full draws it to fill view, up to twice its size: there the wheel moves a
+// zoomed diagram rather than the page.
+const zoomScript = `function leafletZoom(view, box, on, full, zoomed) {
+  const svg = box.querySelector("svg");
+  if (full && svg) {
+    svg.style.maxWidth = 2 * (parseFloat(svg.getAttribute("width")) || 800) + "px";
+    svg.style.maxHeight = 2 * (parseFloat(svg.getAttribute("height")) || 600) + "px";
+  }
+
+  // The diagram is k times its size, moved by x and y, kept over the view.
+  let k = 1, x = 0, y = 0, told = false;
+  function show() {
+    const w = view.clientWidth, h = view.clientHeight;
+    x = Math.min(0, Math.max(w - w * k, x));
+    y = Math.min(0, Math.max(h - h * k, y));
+    box.style.transform = k === 1 ? "" : "translate(" + x + "px," + y + "px) scale(" + k + ")";
+    view.classList.toggle("zoomed", k > 1);
+    if (told !== k > 1) {
+      told = k > 1;
+      zoomed(told);
+    }
+  }
+  // zoomAt zooms by f, keeping the point at px, py of the view in place.
+  function zoomAt(px, py, f) {
+    const n = Math.min(Math.max(k * f, 1), 8);
+    x = px - (px - x) * n / k;
+    y = py - (py - y) * n / k;
+    k = n;
+    show();
+  }
+  function at(e) {
+    const r = view.getBoundingClientRect();
+    return typeof e.clientX === "number" ? [e.clientX - r.left, e.clientY - r.top] : [r.width / 2, r.height / 2];
+  }
+  // WebKit tells a pinch as gestures; others as the wheel with Ctrl.
+  const gestures = "ongesturestart" in window;
+  let pinch = 0;
+  on.addEventListener("gesturestart", e => { e.preventDefault(); pinch = 1; });
+  on.addEventListener("gesturechange", e => {
+    e.preventDefault();
+    if (!pinch) return;
+    zoomAt(...at(e), e.scale / pinch);
+    pinch = e.scale;
+  });
+  on.addEventListener("gestureend", e => { e.preventDefault(); pinch = 0; });
+  on.addEventListener("wheel", e => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    if (!pinch) zoomAt(...at(e), Math.exp(-e.deltaY * (e.deltaMode ? 0.1 : 0.01)));
+  }, {passive: false});
+  // Filling the page, the wheel is the diagram's alone.
+  if (full) view.addEventListener("wheel", e => {
+    e.stopPropagation();
+    if (e.ctrlKey) return;
+    e.preventDefault();
+    x -= e.deltaX;
+    y -= e.deltaY;
+    show();
+  }, {passive: false});
+  // One finger or the mouse moves it; two fingers apart, span, pinch it.
+  const touches = new Map();
+  let drag = null, span = 0;
+  const apart = () => {
+    const [a, b] = [...touches.values()];
+    return [Math.hypot(a[0] - b[0], a[1] - b[1]), (a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+  };
+  view.addEventListener("pointerdown", e => {
+    if (e.button !== 0) return;
+    if (e.pointerType === "touch") {
+      touches.set(e.pointerId, [e.clientX, e.clientY]);
+      view.setPointerCapture(e.pointerId);
+      if (touches.size > 1) {
+        drag = null;
+        view.classList.remove("dragging");
+        if (touches.size === 2 && !gestures) span = apart()[0];
+        return;
+      }
+    }
+    if (k === 1) return;
+    e.preventDefault();
+    drag = {id: e.pointerId, x: e.clientX - x, y: e.clientY - y};
+    view.setPointerCapture(e.pointerId);
+    view.classList.add("dragging");
+  });
+  view.addEventListener("pointermove", e => {
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, [e.clientX, e.clientY]);
+    if (span) {
+      const [d, mx, my] = apart();
+      zoomAt(...at({clientX: mx, clientY: my}), d / span);
+      span = d;
+      return;
+    }
+    if (!drag || e.pointerId !== drag.id) return;
+    x = e.clientX - drag.x;
+    y = e.clientY - drag.y;
+    show();
+  });
+  const drop = e => {
+    touches.delete(e.pointerId);
+    if (touches.size < 2) span = 0;
+    if (drag && e.pointerId === drag.id) {
+      drag = null;
+      view.classList.remove("dragging");
+    }
+  };
+  view.addEventListener("pointerup", drop);
+  view.addEventListener("pointercancel", drop);
+  view.addEventListener("dblclick", () => { k = 1; show(); });
+  new ResizeObserver(show).observe(view);
+  return how => {
+    if (how === "fit") { k = 1; show(); }
+    else if (how === "in" || how === "out") zoomAt(view.clientWidth / 2, view.clientHeight / 2, how === "in" ? 1.5 : 1 / 1.5);
+  };
+}`
+
 // diagramPage draws Mermaid source, in the page's colors. It zooms at the
 // pointer with a pinch, or Ctrl and the wheel, and from 1 to 8 times;
 // zoomed in, a drag moves it and a double click fits it again. Its bar
@@ -93,99 +216,19 @@ svg{max-width:100%;height:auto}
 #d{transform-origin:0 0}
 #v.zoomed{cursor:grab;-webkit-user-select:none;user-select:none}
 #v.dragging{cursor:grabbing}` + fill + `</style></head><body><div id="v"><div id="d"></div></div>
-<script type="module">` + peleModule + `
+<script type="module">` + peleModule + "\n" + zoomScript + `
 // In a block of its own, clear of the names Pele's module takes.
 {
   const view = document.getElementById("v"), box = document.getElementById("d");
   try { box.innerHTML = peleRender(` + scriptString(source) + `, {fontFamily: "-apple-system, system-ui, sans-serif"}).svg; }
   catch (e) { box.className = "err"; box.textContent = e.message; }
-  const full = ` + strconv.FormatBool(full) + `, svg = box.querySelector("svg");
-  if (full && svg) {
-    svg.style.maxWidth = 2 * (parseFloat(svg.getAttribute("width")) || 800) + "px";
-    svg.style.maxHeight = 2 * (parseFloat(svg.getAttribute("height")) || 600) + "px";
-  }
-
-  // The diagram is k times its size, moved by x and y, kept over the view.
-  let k = 1, x = 0, y = 0, told = false;
-  function show() {
-    const w = view.clientWidth, h = view.clientHeight;
-    x = Math.min(0, Math.max(w - w * k, x));
-    y = Math.min(0, Math.max(h - h * k, y));
-    box.style.transform = k === 1 ? "" : "translate(" + x + "px," + y + "px) scale(" + k + ")";
-    view.classList.toggle("zoomed", k > 1);
-    if (told !== k > 1) {
-      told = k > 1;
-      parent.postMessage({leafletZoomed: told}, "*");
-    }
-  }
-  // zoomAt zooms by f, keeping the point at px, py of the view in place.
-  function zoomAt(px, py, f) {
-    const n = Math.min(Math.max(k * f, 1), 8);
-    x = px - (px - x) * n / k;
-    y = py - (py - y) * n / k;
-    k = n;
-    show();
-  }
-  function at(e) {
-    const r = view.getBoundingClientRect();
-    return typeof e.clientX === "number" ? [e.clientX - r.left, e.clientY - r.top] : [r.width / 2, r.height / 2];
-  }
-  // WebKit tells a pinch as gestures; others as the wheel with Ctrl.
-  let pinch = 0;
-  addEventListener("gesturestart", e => { e.preventDefault(); pinch = 1; });
-  addEventListener("gesturechange", e => {
-    e.preventDefault();
-    if (!pinch) return;
-    zoomAt(...at(e), e.scale / pinch);
-    pinch = e.scale;
-  });
-  addEventListener("gestureend", e => { e.preventDefault(); pinch = 0; });
-  addEventListener("wheel", e => {
-    if (!e.ctrlKey) return;
-    e.preventDefault();
-    if (!pinch) zoomAt(...at(e), Math.exp(-e.deltaY * (e.deltaMode ? 0.1 : 0.01)));
-  }, {passive: false});
-  // Filling the page, the wheel is the diagram's alone.
-  if (full) view.addEventListener("wheel", e => {
-    e.stopPropagation();
-    if (e.ctrlKey) return;
-    e.preventDefault();
-    x -= e.deltaX;
-    y -= e.deltaY;
-    show();
-  }, {passive: false});
+  const full = ` + strconv.FormatBool(full) + `;
+  const zoom = leafletZoom(view, box, window, full, (z) => parent.postMessage({leafletZoomed: z}, "*"));
   if (full) addEventListener("keydown", e => {
     if (e.key === "Escape") parent.postMessage({leafletExit: true}, "*");
   });
-  let drag = null;
-  view.addEventListener("pointerdown", e => {
-    if (k === 1 || e.button !== 0) return;
-    e.preventDefault();
-    drag = {id: e.pointerId, x: e.clientX - x, y: e.clientY - y};
-    view.setPointerCapture(e.pointerId);
-    view.classList.add("dragging");
-  });
-  view.addEventListener("pointermove", e => {
-    if (!drag || e.pointerId !== drag.id) return;
-    x = e.clientX - drag.x;
-    y = e.clientY - drag.y;
-    show();
-  });
-  const drop = e => {
-    if (drag && e.pointerId === drag.id) {
-      drag = null;
-      view.classList.remove("dragging");
-    }
-  };
-  view.addEventListener("pointerup", drop);
-  view.addEventListener("pointercancel", drop);
-  view.addEventListener("dblclick", () => { k = 1; show(); });
-  addEventListener("resize", show);
   addEventListener("message", e => {
-    if (e.source !== parent || !e.data) return;
-    const how = e.data.leafletZoom;
-    if (how === "fit") { k = 1; show(); }
-    else if (how === "in" || how === "out") zoomAt(view.clientWidth / 2, view.clientHeight / 2, how === "in" ? 1.5 : 1 / 1.5);
+    if (e.source === parent && e.data && e.data.leafletZoom) zoom(e.data.leafletZoom);
   });
 }</script></body></html>`
 }

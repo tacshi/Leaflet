@@ -447,9 +447,15 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 			if asked := a.askedBy(cm); asked != "" {
 				ui.Text(c, asked).FontSize(11.5).TextColor(pal.TextMuted)
 			}
+			if cm.AuthorKind == "guest" {
+				ui.Text(c, locales.PanelViaPublicLink()).FontSize(11.5).TextColor(pal.TextMuted)
+			}
 			ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).Grow(1)
 			mine := cm.AuthorKind == "user" && (cm.AuthorID == "" || cm.AuthorID == a.session.UserID)
-			if mine {
+			// A guest's comment came through the owner's public link: the
+			// owner may delete it.
+			guest := cm.AuthorKind == "guest" && a.page != nil && a.ownsPage(a.page.id)
+			if mine || guest {
 				tools(c, func() {
 					more := iconButton(c, "more", "ellipsis", locales.PanelCommentActions()).Size(20, 20).Padding(2)
 					more.Menu(func(m *ui.Menu) {

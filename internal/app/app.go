@@ -147,6 +147,11 @@ type App struct {
 	// quitting is set as a quit starts, when closing the window closes it
 	// rather than hiding it to the menu bar.
 	quitting bool
+
+	// pub is the page shared through a public link, if one is, and
+	// cloudflared what the app found of the tool that opens it.
+	pub         *pubLink
+	cloudflared cloudflaredInfo
 }
 
 type toast struct {
@@ -352,10 +357,14 @@ func (a *App) start() error {
 			return
 		}
 		// The recording's capture page closes with the window: the
-		// recording ends, keeping what it has.
+		// recording ends, keeping what it has. So does a public link.
 		a.rec.Stop()
+		a.stopPub()
 	})
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { a.quitting = true })
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
+		a.quitting = true
+		a.stopPub()
+	})
 	mygo.App.OnActivate(func(visible bool) {
 		if !visible {
 			a.update(a.showWindow)
@@ -453,6 +462,7 @@ func (a *App) reload(ch store.Change) {
 		a.page.members, _ = a.st.Members(a.page.id)
 		a.page.editor.ReadOnly = !a.canEdit(a.page.id)
 	}
+	a.pubChanged(ch)
 	if a.win != nil {
 		a.win.Invalidate()
 	}
@@ -746,6 +756,13 @@ func (a *App) discardPage() {
 func (a *App) canEdit(id string) bool {
 	p := a.pageByID(id)
 	return p != nil && a.st.CanEdit(*p)
+}
+
+// ownsPage reports whether a page is in the user's own space, not shared
+// with them by someone else.
+func (a *App) ownsPage(id string) bool {
+	p := a.pageByID(id)
+	return p != nil && !a.isShared(*p)
 }
 
 // scheduleSave saves the open page shortly after the typing stops.

@@ -119,6 +119,24 @@ func TestComments(t *testing.T) {
 	}
 }
 
+// A guest's comment, from a page's public link, keeps the guest's name
+// through the server, in agent_name, as an agent's does.
+func TestGuestCommentRemote(t *testing.T) {
+	c := Comment{ID: "c", PageID: "p", BlockID: "b", AuthorKind: "guest", AuthorName: "Ann", Body: "Hi", AuthorID: "owner"}
+	r := CommentToRemote(c)
+	if r["agent_name"] != "Ann" || r["author_kind"] != "guest" {
+		t.Fatalf("remote %v", r)
+	}
+	r["author_id"] = "owner"
+	back := CommentFromRemote(r, "Owner Name")
+	if back.AuthorKind != "guest" || back.AuthorName != "Ann" {
+		t.Errorf("back %+v", back)
+	}
+	if r := CommentToRemote(Comment{AuthorKind: "user", AuthorName: "Me"}); r["agent_name"] != nil {
+		t.Errorf("a person's comment has no agent_name: %v", r)
+	}
+}
+
 func TestSnippet(t *testing.T) {
 	text := "Day 1: temples\nKiyomizu-dera\nDay 2: Arashiyama\n\nBook hotel\nBuy JR pass\nTravel is the only thing you buy that makes you richer."
 	got := snippet(text, "hotel")

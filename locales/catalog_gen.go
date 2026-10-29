@@ -2729,16 +2729,18 @@ func (msgs Messages) DialogShareSubtitle() string {
 	return Catalog.Format(msgs.locale, "dialogShareSubtitle", nil)
 }
 
-// DialogShareLocalOnly says "This build runs on this device only. Sharing needs a Leaflet server."
+// DialogShareLocalOnly says "This is a temporary, view-only link: visitors can't edit the page. Turning off sharing stops the link working."
 // in the language the app shows.
 //
-// Share dialog: a notice when the app has no server.
+// Share dialog: a notice under the public link, in a build with no server:
+// the link is temporary and view-only, and turning sharing off ends it.
 func DialogShareLocalOnly() string { return In(i18n.Locale()).DialogShareLocalOnly() }
 
-// DialogShareLocalOnly says "This build runs on this device only. Sharing needs a Leaflet server."
+// DialogShareLocalOnly says "This is a temporary, view-only link: visitors can't edit the page. Turning off sharing stops the link working."
 // in the language of msgs.
 //
-// Share dialog: a notice when the app has no server.
+// Share dialog: a notice under the public link, in a build with no server:
+// the link is temporary and view-only, and turning sharing off ends it.
 func (msgs Messages) DialogShareLocalOnly() string {
 	return Catalog.Format(msgs.locale, "dialogShareLocalOnly", nil)
 }
@@ -3505,6 +3507,526 @@ func PageShare() string { return In(i18n.Locale()).PageShare() }
 // Page title bar: button opening sharing.
 func (msgs Messages) PageShare() string {
 	return Catalog.Format(msgs.locale, "pageShare", nil)
+}
+
+// PageSharedPublicly says "Share (shared publicly)"
+// in the language the app shows.
+//
+// Page title bar: tooltip of the Share button while the page's public link
+// is live.
+func PageSharedPublicly() string { return In(i18n.Locale()).PageSharedPublicly() }
+
+// PageSharedPublicly says "Share (shared publicly)"
+// in the language of msgs.
+//
+// Page title bar: tooltip of the Share button while the page's public link
+// is live.
+func (msgs Messages) PageSharedPublicly() string {
+	return Catalog.Format(msgs.locale, "pageSharedPublicly", nil)
+}
+
+// PubTitle says "Public link"
+// in the language the app shows.
+//
+// Share dialog: heading over the temporary public link section.
+func PubTitle() string { return In(i18n.Locale()).PubTitle() }
+
+// PubTitle says "Public link"
+// in the language of msgs.
+//
+// Share dialog: heading over the temporary public link section.
+func (msgs Messages) PubTitle() string {
+	return Catalog.Format(msgs.locale, "pubTitle", nil)
+}
+
+// PubChecking says "Looking for cloudflared…"
+// in the language the app shows.
+//
+// Share dialog: shown while the app looks for Cloudflare's cloudflared
+// tool.
+func PubChecking() string { return In(i18n.Locale()).PubChecking() }
+
+// PubChecking says "Looking for cloudflared…"
+// in the language of msgs.
+//
+// Share dialog: shown while the app looks for Cloudflare's cloudflared
+// tool.
+func (msgs Messages) PubChecking() string {
+	return Catalog.Format(msgs.locale, "pubChecking", nil)
+}
+
+// PubNeedsCloudflared says "Public links use cloudflared, Cloudflare's free tool, which isn't installed yet."
+// in the language the app shows.
+//
+// Share dialog: shown when cloudflared is not installed. “cloudflared”
+// is the tool's name.
+func PubNeedsCloudflared() string { return In(i18n.Locale()).PubNeedsCloudflared() }
+
+// PubNeedsCloudflared says "Public links use cloudflared, Cloudflare's free tool, which isn't installed yet."
+// in the language of msgs.
+//
+// Share dialog: shown when cloudflared is not installed. “cloudflared”
+// is the tool's name.
+func (msgs Messages) PubNeedsCloudflared() string {
+	return Catalog.Format(msgs.locale, "pubNeedsCloudflared", nil)
+}
+
+// PubInstallCommand says "Install it in a terminal:"
+// in the language the app shows.
+//
+// Share dialog: over the command that installs cloudflared, when it is not
+// installed.
+func PubInstallCommand() string { return In(i18n.Locale()).PubInstallCommand() }
+
+// PubInstallCommand says "Install it in a terminal:"
+// in the language of msgs.
+//
+// Share dialog: over the command that installs cloudflared, when it is not
+// installed.
+func (msgs Messages) PubInstallCommand() string {
+	return Catalog.Format(msgs.locale, "pubInstallCommand", nil)
+}
+
+// PubInstallAgent says "Or give this to an AI agent that can run commands, such as Claude Code or Codex:"
+// in the language the app shows.
+//
+// Share dialog: over a prompt to copy into an AI coding agent, which
+// installs cloudflared for the user.
+func PubInstallAgent() string { return In(i18n.Locale()).PubInstallAgent() }
+
+// PubInstallAgent says "Or give this to an AI agent that can run commands, such as Claude Code or Codex:"
+// in the language of msgs.
+//
+// Share dialog: over a prompt to copy into an AI coding agent, which
+// installs cloudflared for the user.
+func (msgs Messages) PubInstallAgent() string {
+	return Catalog.Format(msgs.locale, "pubInstallAgent", nil)
+}
+
+// PubWaiting says "The switch appears here once it's installed."
+// in the language the app shows.
+//
+// Share dialog: the app looks for cloudflared every few seconds while the
+// install guide shows.
+func PubWaiting() string { return In(i18n.Locale()).PubWaiting() }
+
+// PubWaiting says "The switch appears here once it's installed."
+// in the language of msgs.
+//
+// Share dialog: the app looks for cloudflared every few seconds while the
+// install guide shows.
+func (msgs Messages) PubWaiting() string {
+	return Catalog.Format(msgs.locale, "pubWaiting", nil)
+}
+
+// PubInstallPrompt says "Install Cloudflare's cloudflared command-line tool on this {system} computer. Run `{command}`; if that can't work her…"
+// in the language the app shows.
+//
+// A prompt the user copies into an AI agent, which installs cloudflared.
+// {system} is macOS or Windows, {command} the install command, {url}
+// Cloudflare's downloads page. Keep the backticks.
+func PubInstallPrompt(system string, command string, url string) string {
+	return In(i18n.Locale()).PubInstallPrompt(system, command, url)
+}
+
+// PubInstallPrompt says "Install Cloudflare's cloudflared command-line tool on this {system} computer. Run `{command}`; if that can't work her…"
+// in the language of msgs.
+//
+// A prompt the user copies into an AI agent, which installs cloudflared.
+// {system} is macOS or Windows, {command} the install command, {url}
+// Cloudflare's downloads page. Keep the backticks.
+func (msgs Messages) PubInstallPrompt(system string, command string, url string) string {
+	return Catalog.Format(msgs.locale, "pubInstallPrompt", map[string]any{"system": system, "command": command, "url": url})
+}
+
+// PubInstallPromptGuide says "Install Cloudflare's cloudflared command-line tool on this {system} computer, following {url}. Then run `cloudflared …"
+// in the language the app shows.
+//
+// A prompt the user copies into an AI agent, which installs cloudflared, on
+// a system with no one install command. {system} is the system's name,
+// {url} Cloudflare's downloads page. Keep the backticks.
+func PubInstallPromptGuide(system string, url string) string {
+	return In(i18n.Locale()).PubInstallPromptGuide(system, url)
+}
+
+// PubInstallPromptGuide says "Install Cloudflare's cloudflared command-line tool on this {system} computer, following {url}. Then run `cloudflared …"
+// in the language of msgs.
+//
+// A prompt the user copies into an AI agent, which installs cloudflared, on
+// a system with no one install command. {system} is the system's name,
+// {url} Cloudflare's downloads page. Keep the backticks.
+func (msgs Messages) PubInstallPromptGuide(system string, url string) string {
+	return Catalog.Format(msgs.locale, "pubInstallPromptGuide", map[string]any{"system": system, "url": url})
+}
+
+// PubInstallGuide says "Install guide"
+// in the language the app shows.
+//
+// Share dialog: button opening Cloudflare's page of cloudflared installers.
+func PubInstallGuide() string { return In(i18n.Locale()).PubInstallGuide() }
+
+// PubInstallGuide says "Install guide"
+// in the language of msgs.
+//
+// Share dialog: button opening Cloudflare's page of cloudflared installers.
+func (msgs Messages) PubInstallGuide() string {
+	return Catalog.Format(msgs.locale, "pubInstallGuide", nil)
+}
+
+// PubOtherPage says "“{title}” has the public link. Stop it to share this page instead."
+// in the language the app shows.
+//
+// Share dialog: the app has one public link at a time, and another page has
+// it.
+func PubOtherPage(title string) string { return In(i18n.Locale()).PubOtherPage(title) }
+
+// PubOtherPage says "“{title}” has the public link. Stop it to share this page instead."
+// in the language of msgs.
+//
+// Share dialog: the app has one public link at a time, and another page has
+// it.
+func (msgs Messages) PubOtherPage(title string) string {
+	return Catalog.Format(msgs.locale, "pubOtherPage", map[string]any{"title": title})
+}
+
+// PubStop says "Stop"
+// in the language the app shows.
+//
+// Share dialog: button that stops another page's public link.
+func PubStop() string { return In(i18n.Locale()).PubStop() }
+
+// PubStop says "Stop"
+// in the language of msgs.
+//
+// Share dialog: button that stops another page's public link.
+func (msgs Messages) PubStop() string {
+	return Catalog.Format(msgs.locale, "pubStop", nil)
+}
+
+// PubShare says "Share with a temporary public link"
+// in the language the app shows.
+//
+// Share dialog: the switch that turns the public link on.
+func PubShare() string { return In(i18n.Locale()).PubShare() }
+
+// PubShare says "Share with a temporary public link"
+// in the language of msgs.
+//
+// Share dialog: the switch that turns the public link on.
+func (msgs Messages) PubShare() string {
+	return Catalog.Format(msgs.locale, "pubShare", nil)
+}
+
+// PubShareDesc says "Works while Leaflet is open. No account needed to view."
+// in the language the app shows.
+//
+// Share dialog: under the public link switch.
+func PubShareDesc() string { return In(i18n.Locale()).PubShareDesc() }
+
+// PubShareDesc says "Works while Leaflet is open. No account needed to view."
+// in the language of msgs.
+//
+// Share dialog: under the public link switch.
+func (msgs Messages) PubShareDesc() string {
+	return Catalog.Format(msgs.locale, "pubShareDesc", nil)
+}
+
+// PubStartingLink says "Starting the link…"
+// in the language the app shows.
+//
+// Share dialog: shown while cloudflared opens the tunnel.
+func PubStartingLink() string { return In(i18n.Locale()).PubStartingLink() }
+
+// PubStartingLink says "Starting the link…"
+// in the language of msgs.
+//
+// Share dialog: shown while cloudflared opens the tunnel.
+func (msgs Messages) PubStartingLink() string {
+	return Catalog.Format(msgs.locale, "pubStartingLink", nil)
+}
+
+// PubAnyone says "Anyone with this link can view this page while Leaflet is open."
+// in the language the app shows.
+//
+// Share dialog: under a live public link with no email list.
+func PubAnyone() string { return In(i18n.Locale()).PubAnyone() }
+
+// PubAnyone says "Anyone with this link can view this page while Leaflet is open."
+// in the language of msgs.
+//
+// Share dialog: under a live public link with no email list.
+func (msgs Messages) PubAnyone() string {
+	return Catalog.Format(msgs.locale, "pubAnyone", nil)
+}
+
+// PubOnlyEmails says "Only these emails can view this page, after a code sent to them."
+// in the language the app shows.
+//
+// Share dialog: under a live public link limited to some emails; visitors
+// sign in with a one-time code.
+func PubOnlyEmails() string { return In(i18n.Locale()).PubOnlyEmails() }
+
+// PubOnlyEmails says "Only these emails can view this page, after a code sent to them."
+// in the language of msgs.
+//
+// Share dialog: under a live public link limited to some emails; visitors
+// sign in with a one-time code.
+func (msgs Messages) PubOnlyEmails() string {
+	return Catalog.Format(msgs.locale, "pubOnlyEmails", nil)
+}
+
+// PubStopped says "The public link stopped."
+// in the language the app shows.
+//
+// Share dialog: the public link failed or cloudflared quit; cloudflared's
+// own message follows.
+func PubStopped() string { return In(i18n.Locale()).PubStopped() }
+
+// PubStopped says "The public link stopped."
+// in the language of msgs.
+//
+// Share dialog: the public link failed or cloudflared quit; cloudflared's
+// own message follows.
+func (msgs Messages) PubStopped() string {
+	return Catalog.Format(msgs.locale, "pubStopped", nil)
+}
+
+// PubEmails says "Only these emails (optional)"
+// in the language the app shows.
+//
+// Share dialog: placeholder of the field limiting the link to some emails.
+func PubEmails() string { return In(i18n.Locale()).PubEmails() }
+
+// PubEmails says "Only these emails (optional)"
+// in the language of msgs.
+//
+// Share dialog: placeholder of the field limiting the link to some emails.
+func (msgs Messages) PubEmails() string {
+	return Catalog.Format(msgs.locale, "pubEmails", nil)
+}
+
+// PubEmailsHint says "Addresses or *@domain, separated by commas."
+// in the language the app shows.
+//
+// Share dialog: under the emails field.
+func PubEmailsHint() string { return In(i18n.Locale()).PubEmailsHint() }
+
+// PubEmailsHint says "Addresses or *@domain, separated by commas."
+// in the language of msgs.
+//
+// Share dialog: under the emails field.
+func (msgs Messages) PubEmailsHint() string {
+	return Catalog.Format(msgs.locale, "pubEmailsHint", nil)
+}
+
+// PubEmailsInvalid says "Enter email addresses or *@domain, separated by commas."
+// in the language the app shows.
+//
+// Share dialog: the emails field has something that is no email.
+func PubEmailsInvalid() string { return In(i18n.Locale()).PubEmailsInvalid() }
+
+// PubEmailsInvalid says "Enter email addresses or *@domain, separated by commas."
+// in the language of msgs.
+//
+// Share dialog: the emails field has something that is no email.
+func (msgs Messages) PubEmailsInvalid() string {
+	return Catalog.Format(msgs.locale, "pubEmailsInvalid", nil)
+}
+
+// PubEmailsUpdate says "Update cloudflared to {version} or later to limit who can open the link."
+// in the language the app shows.
+//
+// Share dialog: the installed cloudflared is too old to limit a link to
+// emails.
+func PubEmailsUpdate(version string) string { return In(i18n.Locale()).PubEmailsUpdate(version) }
+
+// PubEmailsUpdate says "Update cloudflared to {version} or later to limit who can open the link."
+// in the language of msgs.
+//
+// Share dialog: the installed cloudflared is too old to limit a link to
+// emails.
+func (msgs Messages) PubEmailsUpdate(version string) string {
+	return Catalog.Format(msgs.locale, "pubEmailsUpdate", map[string]any{"version": version})
+}
+
+// PubApply says "Apply (new link)"
+// in the language the app shows.
+//
+// Share dialog: applies a changed email list; this restarts the tunnel and
+// changes the link.
+func PubApply() string { return In(i18n.Locale()).PubApply() }
+
+// PubApply says "Apply (new link)"
+// in the language of msgs.
+//
+// Share dialog: applies a changed email list; this restarts the tunnel and
+// changes the link.
+func (msgs Messages) PubApply() string {
+	return Catalog.Format(msgs.locale, "pubApply", nil)
+}
+
+// PubComments says "Allow comments"
+// in the language the app shows.
+//
+// Share dialog: switch letting visitors of the public link comment.
+func PubComments() string { return In(i18n.Locale()).PubComments() }
+
+// PubComments says "Allow comments"
+// in the language of msgs.
+//
+// Share dialog: switch letting visitors of the public link comment.
+func (msgs Messages) PubComments() string {
+	return Catalog.Format(msgs.locale, "pubComments", nil)
+}
+
+// PubCommentsDesc says "Visitors can comment on blocks. They see only comments made through this link."
+// in the language the app shows.
+//
+// Share dialog: under the Allow comments switch.
+func PubCommentsDesc() string { return In(i18n.Locale()).PubCommentsDesc() }
+
+// PubCommentsDesc says "Visitors can comment on blocks. They see only comments made through this link."
+// in the language of msgs.
+//
+// Share dialog: under the Allow comments switch.
+func (msgs Messages) PubCommentsDesc() string {
+	return Catalog.Format(msgs.locale, "pubCommentsDesc", nil)
+}
+
+// PubComment says "Comment"
+// in the language the app shows.
+//
+// Public page (seen by visitors): button by a block that opens the comment
+// form.
+func PubComment() string { return In(i18n.Locale()).PubComment() }
+
+// PubComment says "Comment"
+// in the language of msgs.
+//
+// Public page (seen by visitors): button by a block that opens the comment
+// form.
+func (msgs Messages) PubComment() string {
+	return Catalog.Format(msgs.locale, "pubComment", nil)
+}
+
+// PubReply says "Reply"
+// in the language the app shows.
+//
+// Public page (seen by visitors): button under a comment thread.
+func PubReply() string { return In(i18n.Locale()).PubReply() }
+
+// PubReply says "Reply"
+// in the language of msgs.
+//
+// Public page (seen by visitors): button under a comment thread.
+func (msgs Messages) PubReply() string {
+	return Catalog.Format(msgs.locale, "pubReply", nil)
+}
+
+// PubName says "Your name"
+// in the language the app shows.
+//
+// Public page (seen by visitors): placeholder of the name field of the
+// comment form.
+func PubName() string { return In(i18n.Locale()).PubName() }
+
+// PubName says "Your name"
+// in the language of msgs.
+//
+// Public page (seen by visitors): placeholder of the name field of the
+// comment form.
+func (msgs Messages) PubName() string {
+	return Catalog.Format(msgs.locale, "pubName", nil)
+}
+
+// PubText says "Write a comment…"
+// in the language the app shows.
+//
+// Public page (seen by visitors): placeholder of the comment field.
+func PubText() string { return In(i18n.Locale()).PubText() }
+
+// PubText says "Write a comment…"
+// in the language of msgs.
+//
+// Public page (seen by visitors): placeholder of the comment field.
+func (msgs Messages) PubText() string {
+	return Catalog.Format(msgs.locale, "pubText", nil)
+}
+
+// PubSend says "Send"
+// in the language the app shows.
+//
+// Public page (seen by visitors): button that posts the comment.
+func PubSend() string { return In(i18n.Locale()).PubSend() }
+
+// PubSend says "Send"
+// in the language of msgs.
+//
+// Public page (seen by visitors): button that posts the comment.
+func (msgs Messages) PubSend() string {
+	return Catalog.Format(msgs.locale, "pubSend", nil)
+}
+
+// PubFailed says "Couldn't send the comment. Try again."
+// in the language the app shows.
+//
+// Public page (seen by visitors): posting a comment failed.
+func PubFailed() string { return In(i18n.Locale()).PubFailed() }
+
+// PubFailed says "Couldn't send the comment. Try again."
+// in the language of msgs.
+//
+// Public page (seen by visitors): posting a comment failed.
+func (msgs Messages) PubFailed() string {
+	return Catalog.Format(msgs.locale, "pubFailed", nil)
+}
+
+// PubBusy says "Too many comments right now. Try again in a minute."
+// in the language the app shows.
+//
+// Public page (seen by visitors): the visitor or the link reached the
+// comment limit.
+func PubBusy() string { return In(i18n.Locale()).PubBusy() }
+
+// PubBusy says "Too many comments right now. Try again in a minute."
+// in the language of msgs.
+//
+// Public page (seen by visitors): the visitor or the link reached the
+// comment limit.
+func (msgs Messages) PubBusy() string {
+	return Catalog.Format(msgs.locale, "pubBusy", nil)
+}
+
+// PubStarting says "This page is getting ready. Reload in a moment."
+// in the language the app shows.
+//
+// Public page (seen by visitors): plain text shown before the page has
+// rendered.
+func PubStarting() string { return In(i18n.Locale()).PubStarting() }
+
+// PubStarting says "This page is getting ready. Reload in a moment."
+// in the language of msgs.
+//
+// Public page (seen by visitors): plain text shown before the page has
+// rendered.
+func (msgs Messages) PubStarting() string {
+	return Catalog.Format(msgs.locale, "pubStarting", nil)
+}
+
+// PanelViaPublicLink says "via public link"
+// in the language the app shows.
+//
+// Comments panel: after a visitor's name, on a comment made through the
+// page's public link.
+func PanelViaPublicLink() string { return In(i18n.Locale()).PanelViaPublicLink() }
+
+// PanelViaPublicLink says "via public link"
+// in the language of msgs.
+//
+// Comments panel: after a visitor's name, on a comment made through the
+// page's public link.
+func (msgs Messages) PanelViaPublicLink() string {
+	return Catalog.Format(msgs.locale, "panelViaPublicLink", nil)
 }
 
 // PageActions says "Page actions"

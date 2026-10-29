@@ -3,11 +3,13 @@ package app
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	codeeditor "github.com/egoist/mygo/ui/editor"
 	"github.com/egoist/mygo/ui/markdown"
@@ -91,6 +93,10 @@ type dialogs struct {
 	shareError  string
 	shareSent   string
 	shareMember []store.Member
+	// pubEmails is the public link's emails field, and pubComments its
+	// Allow comments switch.
+	pubEmails   string
+	pubComments bool
 
 	chartOpen   bool
 	chartID     string
@@ -632,6 +638,13 @@ func (a *App) openShare(id string) {
 	d := &a.dialogs
 	d.shareOpen, d.sharePage, d.shareEmail, d.shareRole, d.shareError, d.shareSent = true, id, "", "editor", "", ""
 	d.shareMember, _ = a.st.Members(id)
+	d.pubEmails, d.pubComments = "", false
+	if p := a.pub; p != nil && p.page == id {
+		p.mu.Lock()
+		d.pubEmails, d.pubComments = strings.Join(p.emails, ", "), p.comments
+		p.mu.Unlock()
+	}
+	a.checkCloudflared()
 	if a.backend.SignedIn() {
 		go func() {
 			a.loadMembers(id)
@@ -654,8 +667,18 @@ func (a *App) shareDialog(c *ui.Context) {
 	d := &a.dialogs
 	p := a.pageByID(d.sharePage)
 	dialog(c, &d.shareOpen, 480, func() {
-		dialogHeader(c, locales.DialogShareTitle(a.pageTitleOf(d.sharePage)), locales.DialogShareSubtitle(), &d.shareOpen)
+		// The subtitle is about inviting people, which needs a server.
+		subtitle := ""
+		if a.backend.Configured() {
+			subtitle = locales.DialogShareSubtitle()
+		}
+		dialogHeader(c, locales.DialogShareTitle(a.pageTitleOf(d.sharePage)), subtitle, &d.shareOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(14).Children(func() {
+			// Only a page's owner opens it to the web.
+			if a.ownsPage(d.sharePage) {
+				a.publicLink(c)
+				ui.Box(c).Height(1).FillWidth().Background(pal.Divider)
+			}
 			switch {
 			case !a.backend.Configured():
 				notice(c, "info", "info", locales.DialogShareLocalOnly(), nil)
@@ -788,6 +811,164 @@ func shareRoleName(role string) string {
 		return locales.CommonOwner()
 	}
 	return ""
+}
+
+// cloudflaredDownloads is Cloudflare's page of cloudflared's installers.
+const cloudflaredDownloads = "https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/"
+
+// publicLink is the Share dialog's public link: a switch that opens the
+// page to anyone with its link, or to some emails, through cloudflared.
+func (a *App) publicLink(c *ui.Context) {
+	pal := theme.Of(c)
+	d := &a.dialogs
+	p := a.pub
+	cf := a.cloudflared
+	label(c, locales.PubTitle())
+	switch {
+	case p == nil && !cf.checked:
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Spinner(c).Size(14, 14)
+			ui.Text(c, locales.PubChecking()).FontSize(13).TextColor(pal.TextMuted)
+		})
+		return
+	case p == nil && cf.path == "":
+		a.installCloudflared(c)
+		return
+	case p != nil && p.page != d.sharePage:
+		notice(c, "info", "globe", locales.PubOtherPage(a.pageTitleOf(p.page)), func() {
+			if button(c, "stop-other", "", locales.PubStop()).Clicked() {
+				a.stopPub()
+			}
+		})
+		return
+	}
+
+	emails := splitEmails(d.pubEmails)
+	valid := validEmails(emails)
+	start := func() {
+		if valid {
+			a.startPub(d.sharePage, emails, d.pubComments)
+		}
+	}
+	on := p != nil
+	ui.Row(c).Gap(16).AlignItems(ui.Center).FillWidth().Children(func() {
+		ui.Column(c).Grow(1).Gap(2).Children(func() {
+			ui.Text(c, locales.PubShare()).FontSize(14).FontWeight(500).TextColor(pal.Text)
+			ui.Text(c, locales.PubShareDesc()).FontSize(12).TextColor(pal.TextMuted)
+		})
+		if ui.Switch(c.Key("pub"), &on).Disabled(!on && !valid).Changed() {
+			if on {
+				start()
+			} else {
+				a.stopPub()
+			}
+		}
+	})
+	if p != nil {
+		switch p.state {
+		case "starting":
+			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Spinner(c).Size(14, 14)
+				ui.Text(c, locales.PubStartingLink()).FontSize(13).TextColor(pal.TextMuted)
+			})
+		case "live":
+			ui.Row(c).Padding(6, 6, 6, 10).Gap(8).Radius(8).Border(1, pal.Divider).Background(pal.Ground).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, p.url).FontSize(12.5).TextColor(pal.Text).Selectable().Grow(1).MinWidth(0)
+				tools(c, func() {
+					if iconButton(c, "copy-link", "copy", locales.CommonCopy()).Clicked() {
+						c.WriteClipboard(p.url)
+						c.Toast(locales.DialogShareLinkCopied())
+					}
+				})
+			})
+			note := locales.PubAnyone()
+			if len(p.emails) > 0 {
+				note = locales.PubOnlyEmails()
+			}
+			ui.Text(c, note).FontSize(12.5).TextColor(pal.TextMuted)
+		case "failed":
+			notice(c, "danger", "triangle-alert", locales.PubStopped(), func() {
+				if p.err != "" {
+					ui.Text(c, p.err).Font("monospace").FontSize(11.5).TextColor(pal.DangerText).Wrap().Selectable()
+				}
+				if button(c, "retry", "", locales.CommonRetry()).Disabled(!valid).Clicked() {
+					start()
+				}
+			})
+		}
+	}
+	ui.Column(c).Gap(6).FillWidth().Children(func() {
+		if !cf.canRestrict() && cf.path != "" {
+			ui.Text(c, locales.PubEmailsUpdate(cloudflaredMailVersion)).FontSize(12).TextColor(pal.TextMuted)
+			return
+		}
+		ui.Row(c).Gap(8).AlignItems(ui.Center).FillWidth().Children(func() {
+			growField(c, "emails", &d.pubEmails, locales.PubEmails())
+			// Who may open a link is fixed as it starts: other emails
+			// take a new link.
+			if p != nil && p.state != "failed" && !slices.Equal(emails, p.emails) {
+				if primary(c, "apply", "", locales.PubApply()).Disabled(!valid).Clicked() {
+					start()
+				}
+			}
+		})
+		if !valid {
+			ui.Text(c, locales.PubEmailsInvalid()).FontSize(12).TextColor(pal.DangerText)
+		} else {
+			ui.Text(c, locales.PubEmailsHint()).FontSize(12).TextColor(pal.TextMuted)
+		}
+	})
+	ui.Row(c).Gap(16).AlignItems(ui.Center).FillWidth().Children(func() {
+		ui.Column(c).Grow(1).Gap(2).Children(func() {
+			ui.Text(c, locales.PubComments()).FontSize(14).FontWeight(500).TextColor(pal.Text)
+			ui.Text(c, locales.PubCommentsDesc()).FontSize(12).TextColor(pal.TextMuted)
+		})
+		if ui.Switch(c.Key("pub-comments"), &d.pubComments).Changed() {
+			a.setPubComments(d.pubComments)
+		}
+	})
+}
+
+// installCloudflared guides the user to install cloudflared: a command to
+// run in a terminal, where the system has one, or a prompt to give an AI
+// agent that can run commands, as Claude Code or Codex. The dialog looks
+// again every few seconds, so the switch shows once it is installed.
+func (a *App) installCloudflared(c *ui.Context) {
+	pal := theme.Of(c)
+	cf := a.cloudflared
+	if !cf.busy && time.Since(cf.at) > 3*time.Second {
+		a.checkCloudflared()
+	}
+	c.After(3 * time.Second)
+	copyBox := func(key, text string, mono bool) {
+		ui.Row(c).Padding(6, 6, 6, 10).Gap(8).Radius(6).Border(1, pal.Divider).Background(pal.Ground).AlignItems(ui.Start).Children(func() {
+			t := ui.Text(c, text).FontSize(12).TextColor(pal.Text).Selectable().Wrap().Grow(1).MinWidth(0)
+			if mono {
+				t.Font("monospace")
+			}
+			tools(c, func() {
+				if iconButton(c, key, "copy", locales.CommonCopy()).Clicked() {
+					c.WriteClipboard(text)
+					c.Toast(locales.CommonCopied())
+				}
+			})
+		})
+	}
+	notice(c, "info", "info", locales.PubNeedsCloudflared(), func() {
+		if cmd := cloudflaredCommand(); cmd != "" {
+			ui.Text(c, locales.PubInstallCommand()).FontSize(12).TextColor(pal.TextMuted)
+			copyBox("copy-command", cmd, true)
+		}
+		ui.Text(c, locales.PubInstallAgent()).FontSize(12).TextColor(pal.TextMuted)
+		copyBox("copy-prompt", cloudflaredPrompt(), false)
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Spinner(c).Size(12, 12)
+			ui.Text(c, locales.PubWaiting()).FontSize(12).TextColor(pal.TextMuted).Grow(1)
+			if ghost(c, "guide", "", locales.PubInstallGuide()).Clicked() {
+				_ = mygo.Shell.OpenExternal(cloudflaredDownloads)
+			}
+		})
+	})
 }
 
 // Charts ----------------------------------------------------------------

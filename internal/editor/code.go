@@ -34,7 +34,7 @@ func codeSpans(code, language string, font ui.Font, pal *theme.Palette) []ui.Spa
 	if lang == nil || lang.Tokenizer == nil || code == "" {
 		return plain
 	}
-	ct := codeTheme(pal)
+	ct := CodeTheme(pal)
 	var out []ui.Span
 	add := func(text string, k codeeditor.TokenKind, colored bool) {
 		if text == "" {
@@ -71,9 +71,9 @@ func codeSpans(code, language string, font ui.Font, pal *theme.Palette) []ui.Spa
 
 var codeThemes = map[*theme.Palette]*codeeditor.Theme{}
 
-// codeTheme is MyGo's code theme for a palette: GitHub's colors of
+// CodeTheme is MyGo's code theme for a palette: GitHub's colors of
 // tokens, light or dark, over the palette's text.
-func codeTheme(pal *theme.Palette) *codeeditor.Theme {
+func CodeTheme(pal *theme.Palette) *codeeditor.Theme {
 	if ct, ok := codeThemes[pal]; ok {
 		return ct
 	}

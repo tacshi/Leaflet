@@ -977,9 +977,9 @@
   "@dialogShareSubtitle": {
     "description": "Share dialog: the subtitle."
   },
-  "dialogShareLocalOnly": "This build runs on this device only. Sharing needs a Leaflet server.",
+  "dialogShareLocalOnly": "This is a temporary, view-only link: visitors can't edit the page. Turning off sharing stops the link working.",
   "@dialogShareLocalOnly": {
-    "description": "Share dialog: a notice when the app has no server."
+    "description": "Share dialog: a notice under the public link, in a build with no server: the link is temporary and view-only, and turning sharing off ends it."
   },
   "dialogShareSignIn": "Sign in to share pages with other people.",
   "@dialogShareSignIn": {
@@ -1233,6 +1233,171 @@
   "pageShare": "Share",
   "@pageShare": {
     "description": "Page title bar: button opening sharing."
+  },
+  "pageSharedPublicly": "Share (shared publicly)",
+  "@pageSharedPublicly": {
+    "description": "Page title bar: tooltip of the Share button while the page's public link is live."
+  },
+  "pubTitle": "Public link",
+  "@pubTitle": {
+    "description": "Share dialog: heading over the temporary public link section."
+  },
+  "pubChecking": "Looking for cloudflared…",
+  "@pubChecking": {
+    "description": "Share dialog: shown while the app looks for Cloudflare's cloudflared tool."
+  },
+  "pubNeedsCloudflared": "Public links use cloudflared, Cloudflare's free tool, which isn't installed yet.",
+  "@pubNeedsCloudflared": {
+    "description": "Share dialog: shown when cloudflared is not installed. “cloudflared” is the tool's name."
+  },
+  "pubInstallCommand": "Install it in a terminal:",
+  "@pubInstallCommand": {
+    "description": "Share dialog: over the command that installs cloudflared, when it is not installed."
+  },
+  "pubInstallAgent": "Or give this to an AI agent that can run commands, such as Claude Code or Codex:",
+  "@pubInstallAgent": {
+    "description": "Share dialog: over a prompt to copy into an AI coding agent, which installs cloudflared for the user."
+  },
+  "pubWaiting": "The switch appears here once it's installed.",
+  "@pubWaiting": {
+    "description": "Share dialog: the app looks for cloudflared every few seconds while the install guide shows."
+  },
+  "pubInstallPrompt": "Install Cloudflare's cloudflared command-line tool on this {system} computer. Run `{command}`; if that can't work here, follow {url}. Then run `cloudflared --version` to check that it works.",
+  "@pubInstallPrompt": {
+    "description": "A prompt the user copies into an AI agent, which installs cloudflared. {system} is macOS or Windows, {command} the install command, {url} Cloudflare's downloads page. Keep the backticks.",
+    "placeholders": {
+      "system": {
+        "type": "String"
+      },
+      "command": {
+        "type": "String"
+      },
+      "url": {
+        "type": "String"
+      }
+    }
+  },
+  "pubInstallPromptGuide": "Install Cloudflare's cloudflared command-line tool on this {system} computer, following {url}. Then run `cloudflared --version` to check that it works.",
+  "@pubInstallPromptGuide": {
+    "description": "A prompt the user copies into an AI agent, which installs cloudflared, on a system with no one install command. {system} is the system's name, {url} Cloudflare's downloads page. Keep the backticks.",
+    "placeholders": {
+      "system": {
+        "type": "String"
+      },
+      "url": {
+        "type": "String"
+      }
+    }
+  },
+  "pubInstallGuide": "Install guide",
+  "@pubInstallGuide": {
+    "description": "Share dialog: button opening Cloudflare's page of cloudflared installers."
+  },
+  "pubOtherPage": "“{title}” has the public link. Stop it to share this page instead.",
+  "@pubOtherPage": {
+    "description": "Share dialog: the app has one public link at a time, and another page has it.",
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "pubStop": "Stop",
+  "@pubStop": {
+    "description": "Share dialog: button that stops another page's public link."
+  },
+  "pubShare": "Share with a temporary public link",
+  "@pubShare": {
+    "description": "Share dialog: the switch that turns the public link on."
+  },
+  "pubShareDesc": "Works while Leaflet is open. No account needed to view.",
+  "@pubShareDesc": {
+    "description": "Share dialog: under the public link switch."
+  },
+  "pubStartingLink": "Starting the link…",
+  "@pubStartingLink": {
+    "description": "Share dialog: shown while cloudflared opens the tunnel."
+  },
+  "pubAnyone": "Anyone with this link can view this page while Leaflet is open.",
+  "@pubAnyone": {
+    "description": "Share dialog: under a live public link with no email list."
+  },
+  "pubOnlyEmails": "Only these emails can view this page, after a code sent to them.",
+  "@pubOnlyEmails": {
+    "description": "Share dialog: under a live public link limited to some emails; visitors sign in with a one-time code."
+  },
+  "pubStopped": "The public link stopped.",
+  "@pubStopped": {
+    "description": "Share dialog: the public link failed or cloudflared quit; cloudflared's own message follows."
+  },
+  "pubEmails": "Only these emails (optional)",
+  "@pubEmails": {
+    "description": "Share dialog: placeholder of the field limiting the link to some emails."
+  },
+  "pubEmailsHint": "Addresses or *@domain, separated by commas.",
+  "@pubEmailsHint": {
+    "description": "Share dialog: under the emails field."
+  },
+  "pubEmailsInvalid": "Enter email addresses or *@domain, separated by commas.",
+  "@pubEmailsInvalid": {
+    "description": "Share dialog: the emails field has something that is no email."
+  },
+  "pubEmailsUpdate": "Update cloudflared to {version} or later to limit who can open the link.",
+  "@pubEmailsUpdate": {
+    "description": "Share dialog: the installed cloudflared is too old to limit a link to emails.",
+    "placeholders": {
+      "version": {
+        "type": "String"
+      }
+    }
+  },
+  "pubApply": "Apply (new link)",
+  "@pubApply": {
+    "description": "Share dialog: applies a changed email list; this restarts the tunnel and changes the link."
+  },
+  "pubComments": "Allow comments",
+  "@pubComments": {
+    "description": "Share dialog: switch letting visitors of the public link comment."
+  },
+  "pubCommentsDesc": "Visitors can comment on blocks. They see only comments made through this link.",
+  "@pubCommentsDesc": {
+    "description": "Share dialog: under the Allow comments switch."
+  },
+  "pubComment": "Comment",
+  "@pubComment": {
+    "description": "Public page (seen by visitors): button by a block that opens the comment form."
+  },
+  "pubReply": "Reply",
+  "@pubReply": {
+    "description": "Public page (seen by visitors): button under a comment thread."
+  },
+  "pubName": "Your name",
+  "@pubName": {
+    "description": "Public page (seen by visitors): placeholder of the name field of the comment form."
+  },
+  "pubText": "Write a comment…",
+  "@pubText": {
+    "description": "Public page (seen by visitors): placeholder of the comment field."
+  },
+  "pubSend": "Send",
+  "@pubSend": {
+    "description": "Public page (seen by visitors): button that posts the comment."
+  },
+  "pubFailed": "Couldn't send the comment. Try again.",
+  "@pubFailed": {
+    "description": "Public page (seen by visitors): posting a comment failed."
+  },
+  "pubBusy": "Too many comments right now. Try again in a minute.",
+  "@pubBusy": {
+    "description": "Public page (seen by visitors): the visitor or the link reached the comment limit."
+  },
+  "pubStarting": "This page is getting ready. Reload in a moment.",
+  "@pubStarting": {
+    "description": "Public page (seen by visitors): plain text shown before the page has rendered."
+  },
+  "panelViaPublicLink": "via public link",
+  "@panelViaPublicLink": {
+    "description": "Comments panel: after a visitor's name, on a comment made through the page's public link."
   },
   "pageActions": "Page actions",
   "@pageActions": {

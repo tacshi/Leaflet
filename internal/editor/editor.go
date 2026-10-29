@@ -61,7 +61,10 @@ type Host interface {
 	Recording(c *ui.Context, n *doc.Node)
 	// CommentCount is the number of open threads on a block.
 	CommentCount(blockID string) int
+	// OpenComments shows a block's threads in the Comments panel, and
+	// CommentPreview builds them in brief, for its badge's hover.
 	OpenComments(blockID string)
+	CommentPreview(c *ui.Context, blockID string)
 	// SlashItems are the / menu's choices for a query; MentionItems the @
 	// menu's.
 	SlashItems(query string) []MenuItem
@@ -158,9 +161,18 @@ type Editor struct {
 	bar       ui.Handle
 	colorOpen bool
 	// dueOpen is the to-do whose calendar is open; chips are where the
-	// to-dos' dates show, which take presses.
+	// to-dos' dates and the blocks' comment badges show, which take
+	// presses.
 	dueOpen string
 	chips   map[string]ui.Rect
+	// peek is the block whose comments show under its badge, peekOver
+	// whether the pointer is on them, and peekLeft when it left both;
+	// peekShut is the badge clicked, which shows none until the pointer
+	// leaves it.
+	peek     string
+	peekOver bool
+	peekLeft time.Time
+	peekShut string
 
 	handle   ui.Handle
 	services ui.Services

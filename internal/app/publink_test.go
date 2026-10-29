@@ -1,0 +1,370 @@
+package app
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
+	"slices"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"leaflet/internal/doc"
+	"leaflet/internal/remote"
+	"leaflet/internal/store"
+	syncsvc "leaflet/internal/sync"
+)
+
+func TestParseTunnelURL(t *testing.T) {
+	for line, want := range map[string]string{
+		"2026-10-29T10:00:00Z INF |  https://quiet-river-bold-moon.trycloudflare.com                                   |": "https://quiet-river-bold-moon.trycloudflare.com",
+		"2026-10-29T10:00:00Z INF Requesting new quick Tunnel on trycloudflare.com...":                                    "",
+		`2026-10-29T10:00:00Z ERR failed to request quick Tunnel: Post "https://api.trycloudflare.com/tunnel": EOF`:       "",
+		"2026-10-29T10:00:00Z INF Registered tunnel connection connIndex=0":                                               "",
+	} {
+		if got := parseTunnelURL(line); got != want {
+			t.Errorf("parseTunnelURL(%q) = %q, want %q", line, got, want)
+		}
+	}
+	if v := cloudflaredVersion("cloudflared version 2026.9.3 (built 2026-09-30-1200 UTC)"); v != "2026.9.3" {
+		t.Errorf("version %q", v)
+	}
+	if !(cloudflaredInfo{version: "2026.10.0"}).canRestrict() || (cloudflaredInfo{version: "2026.9.2"}).canRestrict() {
+		t.Error("canRestrict compares versions wrong")
+	}
+}
+
+func TestCloudflaredPrompt(t *testing.T) {
+	prompt := cloudflaredPrompt()
+	if !strings.Contains(prompt, cloudflaredDownloads) || !strings.Contains(prompt, "cloudflared --version") {
+		t.Errorf("prompt %q", prompt)
+	}
+	if cmd := cloudflaredCommand(); cmd != "" && !strings.Contains(prompt, cmd) {
+		t.Errorf("prompt %q lacks %q", prompt, cmd)
+	}
+}
+
+func TestSplitEmails(t *testing.T) {
+	got := splitEmails(" Ann@Example.com, *@team.dev;ann@example.com\nbo@x.io ")
+	if want := []string{"ann@example.com", "*@team.dev", "bo@x.io"}; !slices.Equal(got, want) {
+		t.Errorf("splitEmails = %q, want %q", got, want)
+	}
+	if !validEmails(got) || validEmails([]string{"ann"}) || validEmails([]string{"@x.io"}) || validEmails([]string{"a@localhost"}) {
+		t.Error("validEmails")
+	}
+}
+
+// pubTest is an app sharing one page through a link whose server runs
+// without a tunnel.
+func pubTest(t *testing.T) (*App, *pubLink, http.Handler, store.Page) {
+	t.Helper()
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	pic := filepath.Join(st.Dir, "files", "dawn.png")
+	if err := os.MkdirAll(filepath.Dir(pic), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pic, []byte("\x89PNG\r\n\x1a\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	para := &doc.Node{ID: "p1", Type: "paragraph"}
+	para.SetDelta(doc.FromMarkdown("Hello **world**"))
+	img := &doc.Node{ID: "i1", Type: "image", Data: map[string]any{"url": "file://" + pic, "alt": "dawn"}}
+	away := &doc.Node{ID: "i2", Type: "image", Data: map[string]any{"url": "file:///etc/hosts.png"}}
+	embed := &doc.Node{ID: "e1", Type: "embed", Data: map[string]any{"title": "Piano", "html": "<html><head></head><body><script>play()</script></body></html>", "height": 300}}
+	pg, err := st.CreatePage(store.NewPageOptions{Title: "Trip", Content: doc.FromBlocks([]*doc.Node{para, img, away, embed})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	be := remote.New(remote.Config(), st)
+	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
+	a.reloadAll()
+	p := &pubLink{page: pg.ID, token: "tok", state: "live", comments: true, threads: map[string]bool{}, posts: map[string][]time.Time{}}
+	a.pub = p
+	p.render(a.pubJob(p))
+	return a, p, a.pubHandler(p), pg
+}
+
+func get(h http.Handler, path string) *httptest.ResponseRecorder {
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+	return w
+}
+
+func TestPubServesOnlyThePage(t *testing.T) {
+	_, _, h, _ := pubTest(t)
+	w := get(h, "/tok/")
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "Hello <strong>world</strong>") {
+		t.Fatalf("page: %d %s", w.Code, w.Body)
+	}
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "default-src 'none'") || w.Header().Get("X-Robots-Tag") == "" {
+		t.Errorf("headers %v", w.Header())
+	}
+	if strings.Contains(w.Body.String(), "/etc/hosts") || strings.Contains(w.Body.String(), "file://") {
+		t.Errorf("a file of the device's own leaked: %s", w.Body)
+	}
+	if w := get(h, "/tok/f/1.png"); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" {
+		t.Errorf("picture: %d %v", w.Code, w.Header())
+	}
+	for _, path := range []string{"/", "/tak/", "/tokx/", "/tok/f/2.png", "/tok/f/../../etc/hosts", "/tok/other"} {
+		if w := get(h, path); w.Code != http.StatusNotFound {
+			t.Errorf("%s: %d, want 404", path, w.Code)
+		}
+	}
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/tok/", nil))
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("POST: %d", w.Code)
+	}
+	if w := get(h, "/tok/comments.js"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "leaflet-name") {
+		t.Errorf("comments script: %d", w.Code)
+	}
+
+	// An embed runs in its own sandbox, off the network, never in the page.
+	if page := get(h, "/tok/").Body.String(); strings.Contains(page, "play()") || !strings.Contains(page, `<iframe sandbox="allow-scripts" src="/tok/e/e1"`) {
+		t.Errorf("embed in the page: %s", page)
+	}
+	w = get(h, "/tok/e/e1")
+	if csp := w.Header().Get("Content-Security-Policy"); w.Code != http.StatusOK || !strings.Contains(csp, "sandbox allow-scripts") ||
+		!strings.Contains(csp, "default-src 'none'") || strings.Contains(csp, "connect-src") {
+		t.Errorf("embed: %d %q", w.Code, csp)
+	}
+	if body := w.Body.String(); !strings.Contains(body, "<head><meta charset") || !strings.Contains(body, "play()") || !strings.Contains(body, "leafletSize") {
+		t.Errorf("embed page: %s", body)
+	}
+	if w := get(h, "/tok/e/nope"); w.Code != http.StatusNotFound {
+		t.Errorf("unknown embed: %d", w.Code)
+	}
+}
+
+func TestCodeHTML(t *testing.T) {
+	got := codeHTML("func f() { return \"<b>\" } // x", "go")
+	if !strings.Contains(got, `<span class="k1">func</span>`) || !strings.Contains(got, "&lt;b&gt;") || strings.Contains(got, "<b>") {
+		t.Errorf("codeHTML = %s", got)
+	}
+	if got := codeHTML("a < b", "nope"); got != "a &lt; b" {
+		t.Errorf("unknown language: %s", got)
+	}
+	if !strings.Contains(pubLook(), ".k1{color:") || !strings.Contains(pubLook(), "--tip-icon:") {
+		t.Error("pubLook lacks token or callout colors")
+	}
+}
+
+func TestPubFollowsSaves(t *testing.T) {
+	a, p, h, pg := pubTest(t)
+	c := a.st.Content(pg.ID)
+	c.Find("p1").SetDelta(doc.FromMarkdown("Changed"))
+	if _, _, err := a.st.SaveContent(pg.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	p.render(a.pubJob(p))
+	if w := get(h, "/tok/"); !strings.Contains(w.Body.String(), "Changed") {
+		t.Errorf("the page did not follow the save: %s", w.Body)
+	}
+}
+
+func postComment(h http.Handler, origin, body string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPost, "/tok/comments", strings.NewReader(body))
+	r.Host = "quiet-river.trycloudflare.com"
+	r.Header.Set("Origin", origin)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Cf-Connecting-Ip", "203.0.113.7")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w
+}
+
+func TestPubComments(t *testing.T) {
+	a, p, h, pg := pubTest(t)
+	const origin = "https://quiet-river.trycloudflare.com"
+	internal, err := a.st.AddComment(pg.ID, "p1", "Private note", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	w := postComment(h, origin, `{"block":"p1","name":"Ann","body":"Looks good"}`)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("comment: %d %s", w.Code, w.Body)
+	}
+	threads, _ := a.st.Threads(pg.ID)
+	var guest store.Comment
+	for _, th := range threads {
+		if th.Root.AuthorKind == "guest" {
+			guest = th.Root
+		}
+	}
+	if guest.AuthorName != "Ann" || guest.Body != "Looks good" || guest.BlockID != "p1" {
+		t.Fatalf("stored %+v", guest)
+	}
+	if w := postComment(h, origin, `{"block":"p1","name":"Bo","body":"Which world?","quote":"Hello   world"}`); w.Code != http.StatusNoContent {
+		t.Fatalf("selection comment: %d", w.Code)
+	}
+	if w := postComment(h, origin, `{"block":"p1","name":"Bo","body":"Made up","quote":"not in the block"}`); w.Code != http.StatusNoContent {
+		t.Fatalf("comment with a stray quote: %d", w.Code)
+	}
+	threads, _ = a.st.Threads(pg.ID)
+	quotes := map[string]string{}
+	for _, th := range threads {
+		quotes[th.Root.Body] = th.Root.Quote
+	}
+	if quotes["Which world?"] != "Hello world" || quotes["Made up"] != "" {
+		t.Errorf("quotes %q", quotes)
+	}
+	if _, err := a.st.AddComment(pg.ID, "p1", "Thanks Ann", guest.ID, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	p.render(a.pubJob(p))
+	page := get(h, "/tok/").Body.String()
+	if !strings.Contains(page, `class="cbadge" data-for="p1"`) || !strings.Contains(page, `id="cpanel"`) || !strings.Contains(page, `<p class="tquote">Hello world</p>`) {
+		t.Errorf("no badge, panel or quote:\n%s", page)
+	}
+	if !strings.Contains(page, "Looks good") || !strings.Contains(page, "Thanks Ann") || strings.Contains(page, "Private note") {
+		t.Errorf("visitors should see this link's threads only:\n%s", page)
+	}
+
+	// cloudflared may hand the request on under another Host: the
+	// tunnel's own hostname is the page's origin all the same.
+	p.host = "quiet-river.trycloudflare.com"
+	r := httptest.NewRequest(http.MethodPost, "/tok/comments", strings.NewReader(`{"block":"p1","name":"Cy","body":"Via the tunnel"}`))
+	r.Host = "127.0.0.1:50331"
+	r.Header.Set("Origin", origin)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Cf-Connecting-Ip", "203.0.113.8")
+	if w := httptest.NewRecorder(); func() int { h.ServeHTTP(w, r); return w.Code }() != http.StatusNoContent {
+		t.Errorf("a post under the origin's Host was refused")
+	}
+
+	if w := postComment(h, origin, `{"parent":"`+guest.ID+`","name":"Ann","body":"Welcome"}`); w.Code != http.StatusNoContent {
+		t.Errorf("reply: %d", w.Code)
+	}
+
+	// A thread the owner resolved takes no more replies, and the refusal
+	// counts against no one's limit.
+	done, err := a.st.AddComment(pg.ID, "p1", "Fixed?", "", "", "guest", "Ann")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.threads[done.ID] = true
+	if err := a.st.SetResolved(done.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if w := postComment(h, origin, `{"parent":"`+done.ID+`","name":"Ann","body":"Late"}`); w.Code != http.StatusBadRequest {
+		t.Errorf("reply to a resolved thread: %d", w.Code)
+	}
+
+	// Only a link kept to emails is behind Access: on any other, the
+	// header a visitor sends names no one.
+	byEmail := func() string {
+		r := httptest.NewRequest(http.MethodPost, "/tok/comments", strings.NewReader(`{"block":"p1","name":"Dee","body":"Signed?"}`))
+		r.Host = "quiet-river.trycloudflare.com"
+		r.Header.Set("Origin", origin)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Cf-Connecting-Ip", "203.0.113.9")
+		r.Header.Set(accessEmailHeader, "boss@example.com")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("signed comment: %d", w.Code)
+		}
+		ts, _ := a.st.Threads(pg.ID)
+		return ts[len(ts)-1].Root.AuthorName
+	}
+	if name := byEmail(); name != "Dee" {
+		t.Errorf("an open link took the visitor's header: %q", name)
+	}
+	p.emails = []string{"boss@example.com"}
+	if name := byEmail(); name != "boss@example.com" {
+		t.Errorf("a link kept to emails named %q", name)
+	}
+	p.emails = nil
+	for name, tc := range map[string]struct {
+		origin, body string
+		want         int
+	}{
+		"other site":     {"https://evil.example", `{"block":"p1","name":"E","body":"x"}`, http.StatusForbidden},
+		"no origin":      {"", `{"block":"p1","name":"E","body":"x"}`, http.StatusForbidden},
+		"unknown block":  {origin, `{"block":"nope","name":"E","body":"x"}`, http.StatusBadRequest},
+		"private thread": {origin, `{"parent":"` + internal.ID + `","name":"E","body":"x"}`, http.StatusBadRequest},
+		"no name":        {origin, `{"block":"p1","name":" ","body":"x"}`, http.StatusBadRequest},
+		"too long":       {origin, `{"block":"p1","name":"E","body":"` + strings.Repeat("x", pubMaxComment+1) + `"}`, http.StatusBadRequest},
+	} {
+		if w := postComment(h, tc.origin, tc.body); w.Code != tc.want {
+			t.Errorf("%s: %d, want %d", name, w.Code, tc.want)
+		}
+	}
+
+	// Four posted; the visitor may post one more this minute.
+	for i := range 1 {
+		if w := postComment(h, origin, `{"block":"p1","name":"Ann","body":"more"}`); w.Code != http.StatusNoContent {
+			t.Fatalf("post %d: %d", i, w.Code)
+		}
+	}
+	if w := postComment(h, origin, `{"block":"p1","name":"Ann","body":"too many"}`); w.Code != http.StatusTooManyRequests {
+		t.Errorf("past the limit: %d", w.Code)
+	}
+
+	a.setPubComments(false)
+	p.posts = map[string][]time.Time{}
+	if w := postComment(h, origin, `{"block":"p1","name":"Ann","body":"x"}`); w.Code != http.StatusForbidden {
+		t.Errorf("comments off: %d", w.Code)
+	}
+}
+
+// A fake cloudflared prints its address and waits: the link goes live,
+// and stopping it ends the process.
+func TestPubTunnelLifecycle(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake cloudflared is a shell script")
+	}
+	a, _, _, pg := pubTest(t)
+	a.stopPub()
+	tool := filepath.Join(t.TempDir(), "cloudflared")
+	script := "#!/bin/sh\necho 'INF |  https://quiet-river.trycloudflare.com  |' >&2\nexec sleep 30\n"
+	if err := os.WriteFile(tool, []byte(script), 0o700); err != nil { // #nosec G306 -- a test's script, run by the test.
+		t.Fatal(err)
+	}
+	posts := make(chan func(), 16)
+	a.post = func(fn func()) { posts <- fn }
+	a.cloudflared = cloudflaredInfo{checked: true, path: tool, version: "2026.10.0"}
+
+	a.startPub(pg.ID, nil, false)
+	p := a.pub
+	deadline := time.After(10 * time.Second)
+	for p.state != "live" {
+		select {
+		case fn := <-posts:
+			fn()
+		case <-deadline:
+			t.Fatalf("still %s: %s", p.state, p.err)
+		}
+	}
+	if !strings.HasPrefix(p.url, "https://quiet-river.trycloudflare.com/") || !strings.HasSuffix(p.url, "/"+p.token+"/") {
+		t.Errorf("url %q", p.url)
+	}
+	// Other emails take a new link, which keeps the visitors' threads.
+	p.threads["t1"] = true
+	proc := p.cmd.Process
+	a.startPub(pg.ID, []string{"ann@example.com"}, false)
+	if a.pub == p || !a.pub.threads["t1"] {
+		t.Error("the new link lost the visitors' threads")
+	}
+	a.stopPub()
+	// The link's own wait reaps the process once it is killed.
+	for start := time.Now(); proc.Signal(syscall.Signal(0)) == nil; time.Sleep(20 * time.Millisecond) {
+		if time.Since(start) > 5*time.Second {
+			t.Fatal("cloudflared still runs after the link stopped")
+		}
+	}
+	if a.pub != nil {
+		t.Error("the link is still set")
+	}
+}

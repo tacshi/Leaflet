@@ -37,9 +37,22 @@ func (a *App) pageView(c *ui.Context) {
 					a.startRecording(ps.id, "")
 				}
 			}
-			// Sharing needs a server; a build without one leaves it out.
-			if a.backend.Configured() && !p.Template && iconButton(c, "share", "share", locales.PageShare()).Clicked() {
-				a.openShare(ps.id)
+			// A public link needs no server, so every page but a template
+			// can be shared. While its link is live the button is a globe
+			// in the accent color: on the web, not pressed.
+			if !p.Template {
+				live := a.pub != nil && a.pub.page == ps.id && a.pub.state == "live"
+				icon, label := "share", locales.PageShare()
+				if live {
+					icon, label = "globe", locales.PageSharedPublicly()
+				}
+				share := iconButton(c, "share", icon, label)
+				if live {
+					share.TextColor(theme.Of(c).Accent)
+				}
+				if share.Clicked() {
+					a.openShare(ps.id)
+				}
 			}
 			more := iconButton(c, "page-more", "ellipsis", locales.PageActions())
 			more.Menu(func(m *ui.Menu) { a.pageMenu(m, *p, true) })

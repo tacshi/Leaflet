@@ -18,8 +18,8 @@ const (
 	calloutPad    = 12
 )
 
-// calloutLook is the tint, border, icon color and icon of a tone.
-func calloutLook(tone string, pal *theme.Palette) (bg, border, fg ui.Color, icon string) {
+// CalloutLook is the tint, border, icon color and icon of a tone.
+func CalloutLook(tone string, pal *theme.Palette) (bg, border, fg ui.Color, icon string) {
 	switch doc.CalloutTone(tone) {
 	case "tip":
 		return pal.OkBg, pal.OkBorder, pal.OkText, "lightbulb"

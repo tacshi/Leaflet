@@ -282,10 +282,15 @@ async function runJob(
       ) names.set(p.id, p.display_name);
     }
     // Anyone who can comment can post an agent comment (agents on devices
-    // reply through their user), so an agent comment names who asked.
+    // reply through their user), so an agent comment names who asked. A
+    // guest is a visitor of the page's public link, posted by its owner.
     const personOf = (c: CommentRow) => (c.author_id && names.get(c.author_id)) || "Someone";
     const authorOf = (c: CommentRow) =>
-      c.author_kind === "agent" ? `${c.agent_name || "Agent"} (agent, asked by ${personOf(c)})` : personOf(c);
+      c.author_kind === "agent"
+        ? `${c.agent_name || "Agent"} (agent, asked by ${personOf(c)})`
+        : c.author_kind === "guest"
+          ? `${c.agent_name || "Guest"} (guest, through the page's public link)`
+          : personOf(c);
 
     const threadsFor = (list: CommentRow[]) => {
       const roots = list.filter((c) => !c.parent_comment_id);

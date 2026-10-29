@@ -203,7 +203,7 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 	// It holds one line: Enter, and Down at its end, go on to the page.
 	in := ui.TextAreaBase(c.Key("title:"+p.ID), &ps.title).Bind(&ps.titleIn).Lines(1, 8).FillWidth().
 		Placeholder(locales.CommonUntitled()).
-		Font(theme.PageFont).FontSize(size).FontWeight(700).TextColor(pal.Text).ReadOnly(ps.editor.ReadOnly).
+		Font(theme.PageFamily(ps.title)).FontSize(size).FontWeight(700).TextColor(pal.Text).ReadOnly(ps.editor.ReadOnly).
 		Label(locales.PageTitleLabel()).Margin(0, 0, 6).
 		OnTextKey(func(k ui.TextKey) bool {
 			leave := k.Mods == 0 && (k.Key == ui.KeyEnter || k.Key == ui.KeyDown && ps.titleAtEnd)

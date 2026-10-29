@@ -140,7 +140,10 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 	if cell != nil && len(cell.Children) > 0 {
 		para = cell.Children[0]
 	}
-	font := ui.Font{Family: e.Family, Size: e.Size * 0.88}
+	font := ui.Font{Family: theme.PageFamily(""), Size: e.Size * 0.88}
+	if para != nil {
+		font.Family = theme.PageFamily(para.Delta().Plain())
+	}
 	if r == 0 {
 		font.Weight = 600
 	}

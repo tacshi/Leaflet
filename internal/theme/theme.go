@@ -1,6 +1,6 @@
 // Package theme is Leaflet's look: the color tokens of the v1 design with a
-// matching dark set and a sepia one, in a choice of accents, Figtree for the interface, Source Serif 4 for pages,
-// and Lucide's icons.
+// matching dark set and a sepia one, in a choice of accents, Figtree for the interface, Source Serif 4 for pages
+// unless the user chose other fonts, and Lucide's icons.
 package theme
 
 import (
@@ -8,6 +8,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"unicode"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -221,6 +222,55 @@ func Apply(c *ui.Context) {
 	t.FontSize = 14
 	t.Font = UIFont
 	c.SetTheme(&t)
+}
+
+// pageFonts is what SetFonts chose, which pages are set in.
+var pageFonts struct{ latin, chinese, japanese, code string }
+
+// SetFonts chooses the families of pages: latin for their text, chinese
+// and japanese for the characters of those languages, and code for code,
+// each "" for Leaflet's own.
+func SetFonts(latin, chinese, japanese, code string) {
+	pageFonts.latin, pageFonts.chinese, pageFonts.japanese, pageFonts.code = latin, chinese, japanese, code
+}
+
+// PageFamily returns the family list of page text: the Latin font, then
+// the font of the language text's Han characters are in, Japanese where it
+// has kana and Chinese otherwise, when one is chosen; the system's fonts
+// draw what they lack.
+func PageFamily(text string) string {
+	return family(pageFonts.latin, PageFont, text)
+}
+
+// CodeFamily returns the family list of code, as PageFamily, with the
+// code font first.
+func CodeFamily(text string) string {
+	return family(pageFonts.code, "monospace", text)
+}
+
+func family(first, fallback, text string) string {
+	if first == "" {
+		first = fallback
+	}
+	cjk := pageFonts.chinese
+	if hasKana(text) {
+		cjk = pageFonts.japanese
+	}
+	if cjk == "" {
+		return first
+	}
+	return first + ", " + cjk
+}
+
+// hasKana reports whether text has Hiragana or Katakana, which only
+// Japanese writes.
+func hasKana(text string) bool {
+	for _, r := range text {
+		if r >= 0x3040 && unicode.In(r, unicode.Hiragana, unicode.Katakana) {
+			return true
+		}
+	}
+	return false
 }
 
 var registerOnce sync.Once

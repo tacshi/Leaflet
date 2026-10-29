@@ -40,7 +40,8 @@ func (e *Editor) depth(id string) int {
 // style returns a text block's font and the room above and below it.
 func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 	size := e.Size
-	font = ui.Font{Family: e.Family, Size: size, LineHeight: leading(n.Delta().Plain())}
+	plain := n.Delta().Plain()
+	font = ui.Font{Family: theme.PageFamily(plain), Size: size, LineHeight: leading(plain)}
 	top, bottom = 3, 3
 	switch n.Type {
 	case "heading":
@@ -61,7 +62,7 @@ func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 	case "bulleted_list", "numbered_list", "todo_list":
 		top, bottom = 2, 2
 	case "code":
-		font.Family, font.Size, font.LineHeight = "monospace", size*0.8, 0
+		font.Family, font.Size, font.LineHeight = theme.CodeFamily(plain), size*0.8, 0
 		top, bottom = codeMargin+codeBar, codePad+codeMargin
 	case "callout":
 		top, bottom = calloutMargin+calloutPad, calloutPad+calloutMargin
@@ -116,6 +117,7 @@ func (e *Editor) spans(n *doc.Node, pal *theme.Palette, font ui.Font) []ui.Span 
 	}
 	d := n.Delta()
 	muted := n.Type == "todo_list" && n.Bool("checked")
+	code := theme.CodeFamily(d.Plain())
 	var out []ui.Span
 	for _, r := range d {
 		s := ui.Span{Text: r.Text}
@@ -135,7 +137,7 @@ func (e *Editor) spans(n *doc.Node, pal *theme.Palette, font ui.Font) []ui.Span 
 			s.Color = pal.TextMuted
 		}
 		if r.Attrs.Code {
-			s.Font = "monospace"
+			s.Font = code
 			s.Size = font.Size * 0.86
 			s.Background = pal.Code
 			s.Radius = 4
@@ -188,7 +190,7 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette, dark bool) *blockLayout
 		width = max(width-calloutPad, 40)
 	}
 	raw, _ := json.Marshal(n.Data)
-	key := n.Type + string(raw) + ftoa(width) + ftoa(font.Size) + ftoa(font.LineHeight) + e.Family
+	key := n.Type + string(raw) + ftoa(width) + ftoa(font.Size) + ftoa(font.LineHeight) + font.Family + theme.CodeFamily(n.Delta().Plain())
 	if dark {
 		key += "d"
 	}

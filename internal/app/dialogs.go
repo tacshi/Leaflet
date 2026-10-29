@@ -873,20 +873,29 @@ func (a *App) publicLink(c *ui.Context) {
 				ui.Text(c, locales.PubStartingLink()).FontSize(13).TextColor(pal.TextMuted)
 			})
 		case "live":
-			ui.Row(c).Padding(6, 6, 6, 10).Gap(8).Radius(8).Border(1, pal.Divider).Background(pal.Ground).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, p.url).FontSize(12.5).TextColor(pal.Text).Selectable().Grow(1).MinWidth(0)
-				tools(c, func() {
-					if iconButton(c, "copy-link", "copy", locales.CommonCopy()).Clicked() {
-						c.WriteClipboard(p.url)
-						c.Toast(locales.DialogShareLinkCopied())
+			// The QR code opens the link on a phone; it is black on white
+			// in either theme, as cameras read best.
+			ui.Row(c).Gap(14).AlignItems(ui.Start).FillWidth().Children(func() {
+				if p.qr != nil {
+					ui.Image(c, p.qr).Size(112, 112).Radius(8).Border(1, pal.Divider).Label(locales.PubQRCode())
+				}
+				ui.Column(c).Grow(1).MinWidth(0).Gap(8).Children(func() {
+					ui.Row(c).Padding(6, 6, 6, 10).Gap(8).Radius(8).Border(1, pal.Divider).Background(pal.Ground).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, p.url).FontSize(12.5).TextColor(pal.Text).Selectable().Grow(1).MinWidth(0)
+						tools(c, func() {
+							if iconButton(c, "copy-link", "copy", locales.CommonCopy()).Clicked() {
+								c.WriteClipboard(p.url)
+								c.Toast(locales.DialogShareLinkCopied())
+							}
+						})
+					})
+					note := locales.PubAnyone()
+					if len(p.emails) > 0 {
+						note = locales.PubOnlyEmails()
 					}
+					ui.Text(c, note).FontSize(12.5).TextColor(pal.TextMuted)
 				})
 			})
-			note := locales.PubAnyone()
-			if len(p.emails) > 0 {
-				note = locales.PubOnlyEmails()
-			}
-			ui.Text(c, note).FontSize(12.5).TextColor(pal.TextMuted)
 		case "failed":
 			notice(c, "danger", "triangle-alert", locales.PubStopped(), func() {
 				if p.err != "" {

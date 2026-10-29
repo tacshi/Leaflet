@@ -262,6 +262,7 @@
   "pubShare": "通过临时公开链接共享",
   "pubShareDesc": "仅在 Leaflet 打开时有效。查看无需账户。",
   "pubStartingLink": "正在启动链接…",
+  "pubQRCode": "链接的二维码，可在手机上打开",
   "pubAnyone": "Leaflet 打开期间，任何拥有此链接的人都能查看此页面。",
   "pubOnlyEmails": "只有这些邮箱的用户在输入发送给他们的验证码后才能查看此页面。",
   "pubStopped": "公开链接已停止。",

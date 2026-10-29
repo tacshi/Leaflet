@@ -1327,6 +1327,10 @@
     "description": "Share dialog: under the public link switch."
   },
   "pubStartingLink": "Starting the link…",
+  "pubQRCode": "QR code of the link, to open it on a phone",
+  "@pubQRCode": {
+    "description": "Share dialog: accessibility label of the QR code beside a live public link."
+  },
   "@pubStartingLink": {
     "description": "Share dialog: shown while cloudflared opens the tunnel."
   },

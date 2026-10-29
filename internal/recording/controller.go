@@ -687,15 +687,9 @@ func (r *Controller) finish(rec store.Recording, path string, soniox *Soniox, st
 		}
 		x.Status, x.Error, x.Transcript = "ready", "", segs
 	})
-	if stt.KeepAudio {
-		if updated.AudioPath == "" && r.uploads() {
-			if err := r.st.QueueUpload(updated); err != nil {
-				log.Printf("recording: %v", err)
-			}
-		}
-	} else if path != "" && updated.Status == "ready" {
-		_ = os.Remove(path)
-		if err := r.st.ClearLocalPath(rec.ID); err != nil {
+	// A recording keeps its audio, whatever transcribed it.
+	if updated.AudioPath == "" && r.uploads() {
+		if err := r.st.QueueUpload(updated); err != nil {
 			log.Printf("recording: %v", err)
 		}
 	}

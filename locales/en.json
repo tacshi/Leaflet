@@ -2440,14 +2440,6 @@
   "@recSttLanguage": {
     "description": "Settings › Speech to text › Recording: the language recordings are in."
   },
-  "recSttKeepAudio": "Keep the audio",
-  "@recSttKeepAudio": {
-    "description": "Settings › Speech to text › Recording: the switch keeping recordings' audio."
-  },
-  "recSttKeepAudioDesc": "Otherwise only the transcript stays",
-  "@recSttKeepAudioDesc": {
-    "description": "Settings › Speech to text: the description of Keep the audio."
-  },
   "recSttMicStarting": "Starting the microphone…",
   "@recSttMicStarting": {
     "description": "Settings › Speech to text › Test with microphone, while the microphone starts."
@@ -3397,11 +3389,15 @@
   "@settingsLocalWhenOfflineDesc": {
     "description": "Settings › Agent providers › Defaults: a switch."
   },
+  "settingsLocalWhenOfflineNone": "Add a provider on this machine to use this",
+  "@settingsLocalWhenOfflineNone": {
+    "description": "Settings › Agent providers › Defaults: the offline switch's description while it is off and disabled, as no provider runs on this machine."
+  },
   "settingsReadOtherPages": "Let agents read your other pages",
   "@settingsReadOtherPages": {
     "description": "Settings › Agent providers › Defaults: a switch."
   },
-  "settingsReadOtherPagesDesc": "They only ever edit the page they are asked on",
+  "settingsReadOtherPagesDesc": "They can use them for context, but only change the page you ask on",
   "@settingsReadOtherPagesDesc": {
     "description": "Settings › Agent providers › Defaults: a switch."
   },

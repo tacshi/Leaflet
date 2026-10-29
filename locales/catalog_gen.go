@@ -6847,36 +6847,6 @@ func (msgs Messages) RecSttLanguage() string {
 	return Catalog.Format(msgs.locale, "recSttLanguage", nil)
 }
 
-// RecSttKeepAudio says "Keep the audio"
-// in the language the app shows.
-//
-// Settings › Speech to text › Recording: the switch keeping recordings'
-// audio.
-func RecSttKeepAudio() string { return In(i18n.Locale()).RecSttKeepAudio() }
-
-// RecSttKeepAudio says "Keep the audio"
-// in the language of msgs.
-//
-// Settings › Speech to text › Recording: the switch keeping recordings'
-// audio.
-func (msgs Messages) RecSttKeepAudio() string {
-	return Catalog.Format(msgs.locale, "recSttKeepAudio", nil)
-}
-
-// RecSttKeepAudioDesc says "Otherwise only the transcript stays"
-// in the language the app shows.
-//
-// Settings › Speech to text: the description of Keep the audio.
-func RecSttKeepAudioDesc() string { return In(i18n.Locale()).RecSttKeepAudioDesc() }
-
-// RecSttKeepAudioDesc says "Otherwise only the transcript stays"
-// in the language of msgs.
-//
-// Settings › Speech to text: the description of Keep the audio.
-func (msgs Messages) RecSttKeepAudioDesc() string {
-	return Catalog.Format(msgs.locale, "recSttKeepAudioDesc", nil)
-}
-
 // RecSttMicStarting says "Starting the microphone…"
 // in the language the app shows.
 //
@@ -9529,6 +9499,24 @@ func (msgs Messages) SettingsLocalWhenOfflineDesc() string {
 	return Catalog.Format(msgs.locale, "settingsLocalWhenOfflineDesc", nil)
 }
 
+// SettingsLocalWhenOfflineNone says "Add a provider on this machine to use this"
+// in the language the app shows.
+//
+// Settings › Agent providers › Defaults: the offline switch's
+// description while it is off and disabled, as no provider runs on this
+// machine.
+func SettingsLocalWhenOfflineNone() string { return In(i18n.Locale()).SettingsLocalWhenOfflineNone() }
+
+// SettingsLocalWhenOfflineNone says "Add a provider on this machine to use this"
+// in the language of msgs.
+//
+// Settings › Agent providers › Defaults: the offline switch's
+// description while it is off and disabled, as no provider runs on this
+// machine.
+func (msgs Messages) SettingsLocalWhenOfflineNone() string {
+	return Catalog.Format(msgs.locale, "settingsLocalWhenOfflineNone", nil)
+}
+
 // SettingsReadOtherPages says "Let agents read your other pages"
 // in the language the app shows.
 //
@@ -9543,13 +9531,13 @@ func (msgs Messages) SettingsReadOtherPages() string {
 	return Catalog.Format(msgs.locale, "settingsReadOtherPages", nil)
 }
 
-// SettingsReadOtherPagesDesc says "They only ever edit the page they are asked on"
+// SettingsReadOtherPagesDesc says "They can use them for context, but only change the page you ask on"
 // in the language the app shows.
 //
 // Settings › Agent providers › Defaults: a switch.
 func SettingsReadOtherPagesDesc() string { return In(i18n.Locale()).SettingsReadOtherPagesDesc() }
 
-// SettingsReadOtherPagesDesc says "They only ever edit the page they are asked on"
+// SettingsReadOtherPagesDesc says "They can use them for context, but only change the page you ask on"
 // in the language of msgs.
 //
 // Settings › Agent providers › Defaults: a switch.

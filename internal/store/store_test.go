@@ -414,6 +414,74 @@ func TestCopyPage(t *testing.T) {
 	}
 }
 
+// A copy's recording blocks have recordings of their own, on the copy, so
+// whoever the copy is shared with can read them. Audio that went up is
+// shared; audio on this device is copied, and goes up as the copy's if the
+// original's was waiting to.
+func TestCopyPageCopiesRecordings(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Meeting"})
+	var blocks []*doc.Node
+	var originals []Recording
+	for i, audioPath := range []string{"u/up.wav", ""} {
+		local := filepath.Join(t.TempDir(), "rec.wav")
+		if err := os.WriteFile(local, []byte("audio "+strconv.Itoa(i)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		blockID := doc.NewBlockID()
+		r, err := s.CreateRecording(p.ID, blockID, "soniox", "m", local, "en")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r, err = s.UpdateRecording(r.ID, func(x *Recording) {
+			x.Status, x.AudioPath, x.Transcript = "ready", audioPath, []Segment{{EndMs: 9, Text: "hello"}}
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if audioPath == "" {
+			if err := s.QueueUpload(r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		originals = append(originals, r)
+		blocks = append(blocks, &doc.Node{ID: blockID, Type: "recording", Data: map[string]any{"recording_id": r.ID}})
+	}
+	if _, _, err := s.SaveContent(p.ID, doc.FromBlocks(blocks)); err != nil {
+		t.Fatal(err)
+	}
+
+	cp, err := s.CopyPage(p.ID, CopyOptions{Title: "Meeting copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, n := range s.Content(cp.ID).Children {
+		orig := originals[i]
+		id := n.Str("recording_id")
+		r, err := s.Recording(id)
+		if id == orig.ID || err != nil {
+			t.Fatalf("block %d: recording %q (%v), the original is %q", i, id, err, orig.ID)
+		}
+		if r.PageID != cp.ID || r.BlockID != n.ID {
+			t.Errorf("block %d: recording on page %s block %s, want %s %s", i, r.PageID, r.BlockID, cp.ID, n.ID)
+		}
+		if r.AudioPath != orig.AudioPath || len(r.Transcript) != 1 || r.Transcript[0].Text != "hello" || r.Status != "ready" {
+			t.Errorf("block %d: copy %+v", i, r)
+		}
+		if data, err := os.ReadFile(r.LocalPath); r.LocalPath == orig.LocalPath || err != nil || string(data) != "audio "+strconv.Itoa(i) {
+			t.Errorf("block %d: audio on this device %q: %q %v", i, r.LocalPath, data, err)
+		}
+		if !s.HasPending("recordings", id) {
+			t.Errorf("block %d: the copy is not queued", i)
+		}
+		if got := s.HasPending("storage", "recordings/"+id); got != (orig.AudioPath == "") {
+			t.Errorf("block %d: upload queued %v", i, got)
+		}
+		if o, _ := s.Recording(orig.ID); o.PageID != p.ID || o.BlockID != orig.BlockID {
+			t.Errorf("block %d: the original moved to %s %s", i, o.PageID, o.BlockID)
+		}
+	}
+}
+
 // Search finds templates by title and text, marked as templates, and
 // leaves them out of the recent pages.
 func TestSearchFindsTemplates(t *testing.T) {

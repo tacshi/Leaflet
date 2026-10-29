@@ -177,6 +177,14 @@ func TestPubFollowsSaves(t *testing.T) {
 	}
 }
 
+func TestPubCommentBody(t *testing.T) {
+	got := pubCommentBody(store.Comment{Body: "**LWT** sets a retained `offline` <b>will</b>\nsee [docs](javascript:x)"})
+	want := "<strong>LWT</strong> sets a retained <code>offline</code> &lt;b&gt;will&lt;/b&gt;<br>see docs"
+	if got != want {
+		t.Errorf("pubCommentBody = %s, want %s", got, want)
+	}
+}
+
 func postComment(h http.Handler, origin, body string) *httptest.ResponseRecorder {
 	r := httptest.NewRequest(http.MethodPost, "/tok/comments", strings.NewReader(body))
 	r.Host = "quiet-river.trycloudflare.com"

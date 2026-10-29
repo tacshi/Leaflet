@@ -239,3 +239,19 @@ func TestCommentAgentMenu(t *testing.T) {
 		t.Errorf("text %q after a click, want %q", nc.text, want)
 	}
 }
+
+// A comment's mentions of agents are marked, and only them: not an email
+// address, a longer word or code.
+func TestMarkMentions(t *testing.T) {
+	names := []string{"agent", "Chat", "ChatGPT"}
+	for _, tc := range []struct{ in, want string }{
+		{"@ChatGPT What is LWT?", "<mark><b>@ChatGPT</b></mark> What is LWT?"},
+		{"ask @chatgpt, then @agent", "ask <mark><b>@chatgpt</b></mark>, then <mark><b>@agent</b></mark>"},
+		{"me@ChatGPT.com @ChatGPTs @Bob", "me@ChatGPT.com @ChatGPTs @Bob"},
+		{"`@ChatGPT` @Chat", "`@ChatGPT` <mark><b>@Chat</b></mark>"},
+	} {
+		if got := markMentions(tc.in, names); got != tc.want {
+			t.Errorf("markMentions(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

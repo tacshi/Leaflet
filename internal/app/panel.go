@@ -2,8 +2,10 @@ package app
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
@@ -656,8 +658,61 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 			ui.Text(c, commentBody(cm)).FontSize(13.5).TextColor(pal.TextMuted).PaddingStart(28)
 			return
 		}
-		ui.Text(c, cm.Body).FontSize(13.5).TextColor(pal.Text).PaddingStart(28).Selectable()
+		a.commentText(c, cm.Body).FontSize(13.5).PaddingStart(28)
 	})
+}
+
+// commentText shows a comment's Markdown as the agents' replies show, its
+// mentions of agents marked as the editor marks mentions.
+func (a *App) commentText(c *ui.Context, body string) ui.Element {
+	pal := theme.Of(c)
+	if a.commentMD.Theme == nil || a.commentMD.Theme.Mark != pal.AccentSoft {
+		a.commentMD.Theme = &markdown.Theme{Mark: pal.AccentSoft}
+	}
+	names := []string{"agent"}
+	for _, o := range a.hub.Options() {
+		names = append(names, o.Name())
+	}
+	return markdown.View(c, markMentions(body, names), &a.commentMD)
+}
+
+// markMentions marks each @ of one of names in md, as an @ menu writes
+// them, outside code, where they stay as written.
+func markMentions(md string, names []string) string {
+	names = slices.Clone(names)
+	slices.SortFunc(names, func(x, y string) int { return len(y) - len(x) })
+	var b strings.Builder
+	code := false
+	for i := 0; i < len(md); i++ {
+		ch := md[i]
+		if ch == '`' {
+			code = !code
+		}
+		if ch == '@' && !code && (i == 0 || md[i-1] == ' ' || md[i-1] == '\n' || md[i-1] == '\t') {
+			if n := mentionLen(md[i+1:], names); n > 0 {
+				b.WriteString("<mark><b>" + md[i:i+1+n] + "</b></mark>")
+				i += n
+				continue
+			}
+		}
+		b.WriteByte(ch)
+	}
+	return b.String()
+}
+
+// mentionLen is how long the name of names that rest starts with is, a
+// whole word, or 0.
+func mentionLen(rest string, names []string) int {
+	for _, name := range names {
+		n := len(name)
+		if n == 0 || len(rest) < n || !strings.EqualFold(rest[:n], name) {
+			continue
+		}
+		if r, _ := utf8.DecodeRuneInString(rest[n:]); !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return n
+		}
+	}
+	return 0
 }
 
 // commentBody is a comment's text, or says it was deleted: a thread whose

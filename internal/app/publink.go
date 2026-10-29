@@ -712,6 +712,15 @@ func calloutIcon(tone string) string {
 	return theme.IconSVG(icon)
 }
 
+// pubCommentBody is a comment as the panel shows it: its Markdown's
+// formatting, escaped, or that it was deleted.
+func pubCommentBody(c store.Comment) string {
+	if !c.DeletedAt.IsZero() {
+		return html.EscapeString(commentBody(c))
+	}
+	return doc.FromMarkdown(c.Body).HTML()
+}
+
 // commentsPanel writes the comments visitors see: a badge for each block
 // with threads, which the script sets in the margin by its block, and the
 // Comments panel it opens, with the threads in the page's order.
@@ -739,7 +748,7 @@ func commentsPanel(c *doc.Content, threads map[string][]store.Thread, comments b
 			}
 			for _, c := range t.All() {
 				groups.WriteString(`<div class="c"><div class="who"><strong>` + html.EscapeString(c.AuthorName) + `</strong> <span class="muted">` +
-					c.CreatedAt.Format("2006-01-02") + `</span></div><div>` + strings.ReplaceAll(html.EscapeString(commentBody(c)), "\n", "<br>") + `</div></div>`)
+					c.CreatedAt.Format("2006-01-02") + `</span></div><div>` + pubCommentBody(c) + `</div></div>`)
 			}
 			if comments {
 				groups.WriteString(`<button type="button" class="creply" data-parent="` + html.EscapeString(t.Root.ID) + `">` +

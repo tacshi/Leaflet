@@ -7921,6 +7921,62 @@ func (msgs Messages) EditorRemoveDate() string {
 	return Catalog.Format(msgs.locale, "editorRemoveDate", nil)
 }
 
+// EditorAddTime says "Add time"
+// in the language the app shows.
+//
+// A to-do's due date popover button that gives it a time of day.
+func EditorAddTime() string { return In(i18n.Locale()).EditorAddTime() }
+
+// EditorAddTime says "Add time"
+// in the language of msgs.
+//
+// A to-do's due date popover button that gives it a time of day.
+func (msgs Messages) EditorAddTime() string {
+	return Catalog.Format(msgs.locale, "editorAddTime", nil)
+}
+
+// EditorDueTime says "Due time"
+// in the language the app shows.
+//
+// Accessibility name of the time field in a to-do's due date popover.
+func EditorDueTime() string { return In(i18n.Locale()).EditorDueTime() }
+
+// EditorDueTime says "Due time"
+// in the language of msgs.
+//
+// Accessibility name of the time field in a to-do's due date popover.
+func (msgs Messages) EditorDueTime() string {
+	return Catalog.Format(msgs.locale, "editorDueTime", nil)
+}
+
+// EditorRemoveTime says "Remove time"
+// in the language the app shows.
+//
+// A to-do's due date popover button that takes its time of day away.
+func EditorRemoveTime() string { return In(i18n.Locale()).EditorRemoveTime() }
+
+// EditorRemoveTime says "Remove time"
+// in the language of msgs.
+//
+// A to-do's due date popover button that takes its time of day away.
+func (msgs Messages) EditorRemoveTime() string {
+	return Catalog.Format(msgs.locale, "editorRemoveTime", nil)
+}
+
+// EditorDueAt says "{day} {due, time, ::jm}"
+// in the language the app shows.
+//
+// A to-do's due date with its time of day, as Tomorrow 3:00 PM.
+func EditorDueAt(day string, due time.Time) string { return In(i18n.Locale()).EditorDueAt(day, due) }
+
+// EditorDueAt says "{day} {due, time, ::jm}"
+// in the language of msgs.
+//
+// A to-do's due date with its time of day, as Tomorrow 3:00 PM.
+func (msgs Messages) EditorDueAt(day string, due time.Time) string {
+	return Catalog.Format(msgs.locale, "editorDueAt", map[string]any{"day": day, "due": due})
+}
+
 // EditorRemoveColor says "Remove color"
 // in the language the app shows.
 //

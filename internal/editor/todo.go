@@ -10,47 +10,70 @@ import (
 	"leaflet/locales"
 )
 
-// SetDue gives a to-do a due date, or takes it away for a zero time, as a
-// step of undo.
-func (e *Editor) SetDue(id string, t time.Time) {
+// SetDue gives a to-do a due date, with its time of day when timed, or
+// takes it away for a zero time, as a step of undo.
+func (e *Editor) SetDue(id string, t time.Time, timed bool) {
 	n := e.node(id)
 	if n == nil || n.Type != "todo_list" || e.ReadOnly {
 		return
 	}
 	e.pushUndo(false)
-	n.SetDue(t)
+	n.SetDue(t, timed)
 	e.invalidate(id)
 	e.changed()
 }
 
 // DueLabel says when a due date is, from now: Today, Tomorrow, Yesterday,
-// or the day, with its year when not this one's.
-func DueLabel(due, now time.Time) string {
+// or the day, with its year when not this one's, and its time when timed.
+func DueLabel(due time.Time, timed bool, now time.Time) string {
 	day := func(t time.Time) time.Time { return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local) }
+	var label string
 	switch int(day(due).Sub(day(now)).Hours() / 24) {
 	case 0:
-		return locales.CommonToday()
+		label = locales.CommonToday()
 	case 1:
-		return locales.EditorTomorrow()
+		label = locales.EditorTomorrow()
 	case -1:
-		return locales.EditorYesterday()
+		label = locales.EditorYesterday()
+	default:
+		if due.Year() == now.Year() {
+			label = locales.EditorDueDay(due)
+		} else {
+			label = locales.EditorDueDate(due)
+		}
 	}
-	if due.Year() == now.Year() {
-		return locales.EditorDueDay(due)
+	if timed {
+		return locales.EditorDueAt(label, due)
 	}
-	return locales.EditorDueDate(due)
+	return label
 }
 
-// Overdue reports whether a due date is a day before now's.
-func Overdue(due, now time.Time) bool {
+// Overdue reports whether a due date has passed: its time when timed, or
+// else its day, once now is a day after it.
+func Overdue(due time.Time, timed bool, now time.Time) bool {
+	if timed {
+		return due.Before(now)
+	}
 	return due.Before(time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local))
 }
 
+// DueToday reports whether a due date is on now's day.
+func DueToday(due, now time.Time) bool {
+	y, m, d := due.In(time.Local).Date()
+	ny, nm, nd := now.In(time.Local).Date()
+	return y == ny && m == nm && d == nd
+}
+
+// dueHour is the time of day a due date takes as it is given one.
+const dueHour = 9
+
 // dueChip builds a to-do's due date after its text, which opens MyGo's
-// calendar to change it; with none, it offers one while the to-do is
-// under the pointer or has the caret.
+// calendar to change it, and a time of day; with none, it offers one
+// while the to-do is under the pointer or has the caret. The popover
+// changes a draft, saved as it closes, as MyGo's calendar chooses a day
+// also as it turns the months.
 func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active bool, pal *theme.Palette) {
-	due, has := n.Due()
+	due, timed, has := n.Due()
 	open := e.dueOpen == n.ID
 	if !has && (e.ReadOnly || !active && !open) {
 		return
@@ -58,11 +81,11 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 	now := time.Now()
 	label, fg, bg := locales.EditorAddDate(), pal.TextMuted, pal.Ground
 	if has {
-		label = DueLabel(due, now)
+		label = DueLabel(due, timed, now)
 		switch {
-		case Overdue(due, now):
+		case Overdue(due, timed, now):
 			fg, bg = pal.DangerText, pal.DangerBg
-		case label == locales.CommonToday():
+		case DueToday(due, now):
 			fg, bg = pal.AccentText, pal.AccentSoft
 		}
 	}
@@ -75,20 +98,40 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 	})
 	if chip.Clicked() && !e.ReadOnly {
 		open = !open
+		if open {
+			e.dueDraft, e.dueTimed, e.dueEdited = due, timed, false
+			if !has {
+				e.dueDraft = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+			}
+		}
 	}
 	ui.Popover(c, chip, &open, func() {
-		date := due
-		if !has {
-			date = now
+		cal := ui.Calendar(c.Key("due-calendar"), &e.dueDraft)
+		// A click on a day, the one chosen too, focuses the calendar.
+		if cal.Changed() || cal.FocusWithin() {
+			e.dueEdited = true
 		}
-		if ui.Calendar(c, &date).Changed() {
-			e.SetDue(n.ID, date)
-			open = false
-			e.Focus()
-		}
-		if has && ui.Button(c, locales.EditorRemoveDate()).Clicked() {
-			e.SetDue(n.ID, time.Time{})
-			open = false
+		ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
+			if !e.dueTimed {
+				if ui.Button(c, locales.EditorAddTime()).Grow(1).Clicked() {
+					y, m, d := e.dueDraft.Date()
+					e.dueDraft = time.Date(y, m, d, dueHour, 0, 0, 0, time.Local)
+					e.dueTimed, e.dueEdited = true, true
+				}
+				return
+			}
+			if ui.TimeInput(c.Key("due-time"), &e.dueDraft).Label(locales.EditorDueTime()).Grow(1).Changed() {
+				e.dueEdited = true
+			}
+			x := ui.Button(c.Key("remove-time"), "").Label(locales.EditorRemoveTime()).Tooltip(locales.EditorRemoveTime())
+			x.Children(func() { ui.Icon(c, theme.Icon("x")).FontSize(13) })
+			if x.Clicked() {
+				e.dueTimed, e.dueEdited = false, true
+			}
+		})
+		if has && ui.Button(c, locales.EditorRemoveDate()).FillWidth().Clicked() {
+			e.SetDue(n.ID, time.Time{}, false)
+			open, e.dueEdited = false, false
 			e.Focus()
 		}
 	})
@@ -96,6 +139,10 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 		e.dueOpen = n.ID
 	} else if e.dueOpen == n.ID {
 		e.dueOpen = ""
+		if e.dueEdited {
+			e.dueEdited = false
+			e.SetDue(n.ID, e.dueDraft, e.dueTimed)
+		}
 	}
 }
 

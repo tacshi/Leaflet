@@ -53,7 +53,7 @@ metadata:
 | `paragraph` | `delta` | |
 | `heading` | `delta`, `level` 1–6 | |
 | `bulleted_list`, `numbered_list` | `delta` | nested items go in `children` |
-| `todo_list` | `delta`, `checked`, `due?` | `due` is the day it is due, `YYYY-MM-DD`, in the user's own time |
+| `todo_list` | `delta`, `checked`, `due?` | `due` is the day it is due, `YYYY-MM-DD`, or the day and time, `YYYY-MM-DDTHH:MM`, in the user's own time |
 | `quote` | `delta` | |
 | `code` | `delta`, `language` | the delta is the code as plain text, line breaks and all; `language` is an ID such as `go`, or `""` for plain text |
 | `callout` | `delta`, `tone` (`info`\|`tip`\|`warning`\|`danger`) | a tinted box; Markdown writes it as a GitHub alert |

@@ -180,11 +180,15 @@ type Editor struct {
 	// colors are open.
 	bar       ui.Handle
 	colorOpen bool
-	// dueOpen is the to-do whose calendar is open; chips are where the
-	// to-dos' dates and the blocks' comment badges show, which take
-	// presses.
-	dueOpen string
-	chips   map[string]ui.Rect
+	// dueOpen is the to-do whose calendar is open, and dueDraft the date
+	// in it, with its time of day when dueTimed, which is saved as it
+	// closes when dueEdited; chips are where the to-dos' dates and the
+	// blocks' comment badges show, which take presses.
+	dueOpen   string
+	dueDraft  time.Time
+	dueTimed  bool
+	dueEdited bool
+	chips     map[string]ui.Rect
 	// peek is the block whose comments show under its badge, peekOver
 	// whether the pointer is on them, and peekLeft when it left both;
 	// peekShut is the badge clicked, which shows none until the pointer

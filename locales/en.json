@@ -2831,6 +2831,31 @@
   "@editorRemoveDate": {
     "description": "A to-do's due date popover button."
   },
+  "editorAddTime": "Add time",
+  "@editorAddTime": {
+    "description": "A to-do's due date popover button that gives it a time of day."
+  },
+  "editorDueTime": "Due time",
+  "@editorDueTime": {
+    "description": "Accessibility name of the time field in a to-do's due date popover."
+  },
+  "editorRemoveTime": "Remove time",
+  "@editorRemoveTime": {
+    "description": "A to-do's due date popover button that takes its time of day away."
+  },
+  "editorDueAt": "{day} {due, time, ::jm}",
+  "@editorDueAt": {
+    "description": "A to-do's due date with its time of day, as Tomorrow 3:00 PM.",
+    "placeholders": {
+      "day": {
+        "type": "String",
+        "example": "Tomorrow"
+      },
+      "due": {
+        "type": "DateTime"
+      }
+    }
+  },
   "editorRemoveColor": "Remove color",
   "@editorRemoveColor": {
     "description": "Page context menu item that takes away the selection's colors."

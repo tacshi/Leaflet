@@ -640,28 +640,44 @@ func (a *App) modelsSettings(c *ui.Context) {
 	if len(a.providers) > 0 {
 		label(c, locales.SettingsDefaults())
 		card(c, "defaults", func() {
+			// The default picks a provider; its model is the one set on the
+			// provider above, so the model is chosen in one place.
 			var choices []string
 			names := map[string]string{}
 			for _, o := range a.hub.Options() {
-				for _, m := range agents.Models(o.Provider) {
-					ch := store.ModelChoice{ProviderID: o.Provider.ID, Model: m}.Encode()
-					choices = append(choices, ch)
-					names[ch] = o.Name() + " · " + m
-				}
+				ch := store.ModelChoice{ProviderID: o.Provider.ID}.Encode()
+				choices = append(choices, ch)
+				names[ch] = o.Name()
 			}
-			cur := a.settings.DefaultModel
-			if cur == "" && len(choices) > 0 {
+			cur := ""
+			if def, ok := a.settings.Default(); ok {
+				cur = store.ModelChoice{ProviderID: def.ProviderID}.Encode()
+			}
+			if !contains(choices, cur) && len(choices) > 0 {
 				cur = choices[0]
 			}
-			settingRow(c, "default", locales.SettingsDefaultAgent(), locales.SettingsDefaultAgentDesc(), true, func() {
-				if selectBox(c, "default", &cur, choices, func(s string) string { return names[s] }, 240); cur != a.settings.DefaultModel {
-					a.settings.DefaultModel = cur
-					a.saveSettings()
-				}
-			})
-			v := a.settings.LocalWhenOffline
-			settingRow(c, "offline", locales.SettingsLocalWhenOffline(), locales.SettingsLocalWhenOfflineDesc(), false, func() {
-				if ui.Switch(c.Key("offline"), &v).Changed() {
+			was := cur
+			if len(choices) > 1 {
+				settingRow(c, "default", locales.SettingsDefaultAgent(), locales.SettingsDefaultAgentDesc(), true, func() {
+					if selectBox(c, "default", &cur, choices, func(s string) string { return names[s] }, 240); cur != was {
+						a.settings.DefaultModel = cur
+						a.saveSettings()
+					}
+				})
+			}
+			// The switch has nothing to switch to until a provider runs on
+			// this machine.
+			offline := false
+			for _, o := range a.hub.Options() {
+				offline = offline || o.Offline()
+			}
+			v := a.settings.LocalWhenOffline && offline
+			desc := locales.SettingsLocalWhenOfflineDesc()
+			if !offline {
+				desc = locales.SettingsLocalWhenOfflineNone()
+			}
+			settingRow(c, "offline", locales.SettingsLocalWhenOffline(), desc, len(choices) < 2, func() {
+				if ui.Switch(c.Key("offline"), &v).Disabled(!offline).Changed() {
 					a.settings.LocalWhenOffline = v
 					a.saveSettings()
 				}
@@ -1076,7 +1092,7 @@ func (a *App) saveProvider() {
 			}
 		}
 		if a.settings.DefaultModel == "" {
-			a.settings.DefaultModel = store.ModelChoice{ProviderID: p.ID, Model: p.DefaultModel}.Encode()
+			a.settings.DefaultModel = store.ModelChoice{ProviderID: p.ID}.Encode()
 			a.saveSettings()
 		}
 		form.open = false
@@ -1130,7 +1146,7 @@ func (a *App) saveProvider() {
 				return
 			}
 			if a.settings.DefaultModel == "" {
-				a.settings.DefaultModel = store.ModelChoice{ProviderID: p.ID, Model: p.DefaultModel}.Encode()
+				a.settings.DefaultModel = store.ModelChoice{ProviderID: p.ID}.Encode()
 				a.saveSettings()
 			}
 			if formIs(gen) {

@@ -407,6 +407,9 @@ func (h *Hub) Resolve(wanted *store.ModelChoice) (Option, error) {
 	option, ok := pick(wanted)
 	if !ok {
 		if def, has := settings.Default(); has {
+			// The default names a provider, which runs its own model; an
+			// older default may name a model too.
+			def.Model = ""
 			option, ok = pick(&def)
 		}
 	}

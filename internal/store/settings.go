@@ -14,7 +14,6 @@ type SttSettings struct {
 	RunOn          string   `json:"run_on"`   // auto | gpu | cpu
 	Language       string   `json:"language"` // auto, or an ISO 639-1 code
 	LiveTranscript bool     `json:"live_transcript"`
-	KeepAudio      bool     `json:"keep_audio"`
 	SpeakerLabels  bool     `json:"speaker_labels"`
 	BaseURL        string   `json:"base_url"`
 	Model          string   `json:"model"`
@@ -85,7 +84,7 @@ func DefaultSettings() Settings {
 		SidebarWidth: 264, PanelWidth: 360,
 		Stt: SttSettings{
 			Provider: "openai-compatible", ModelSize: "qwen3-asr-0.6b", RunOn: "auto", Language: "auto",
-			LiveTranscript: true, KeepAudio: true, SonioxModel: "stt-rt-v5", LanguageHints: []string{"en", "zh"},
+			LiveTranscript: true, SonioxModel: "stt-rt-v5", LanguageHints: []string{"en", "zh"},
 		},
 	}
 }

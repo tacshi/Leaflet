@@ -153,3 +153,74 @@ func TestDevicesThatFailToLoad(t *testing.T) {
 		t.Errorf("error %q", account.devicesErr)
 	}
 }
+
+// A provider's model is chosen in its own dialog; the default agent picks
+// only the provider, and only once there are two to pick from.
+func TestDefaultAgentPicksAProvider(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	put := func(p store.Provider) {
+		t.Helper()
+		if err := a.st.PutProvider(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true})
+	a.reloadAll()
+	tt := ui.NewTester(func(c *ui.Context) { a.modelsSettings(c) }, 900, 800)
+	tt.Frame()
+	if tt.HasText(locales.SettingsDefaultAgent()) {
+		t.Error("a default to pick with one provider")
+	}
+
+	put(store.Provider{ID: "studio", Preset: "ollama", Name: "Studio", AuthKind: "none", DefaultModel: "qwen", IsLocal: true})
+	a.reloadAll()
+	// A default from before names a model, which the provider's own
+	// model now overrides.
+	a.settings.DefaultModel = store.ModelChoice{ProviderID: "studio", Model: "old"}.Encode()
+	tt.Frame()
+	if !tt.HasText(locales.SettingsDefaultAgent()) || !tt.HasText("Studio") {
+		t.Fatalf("no default to pick in %v", tt.Texts())
+	}
+	if tt.HasText("Studio · old") {
+		t.Error("the default still names a model")
+	}
+	o, err := a.hub.Resolve(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Provider.ID != "studio" || o.Model != "qwen" {
+		t.Errorf("default runs %s · %s, want studio · qwen", o.Provider.ID, o.Model)
+	}
+}
+
+// The offline switch is off and can't be turned on until a provider runs
+// on this machine, and says so.
+func TestOfflineSwitchNeedsALocalProvider(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.LocalWhenOffline = true
+	put := func(p store.Provider) {
+		t.Helper()
+		if err := a.st.PutProvider(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put(store.Provider{ID: "cloud", Preset: "openai", Name: "OpenAI", AuthKind: "api_key", DefaultModel: "gpt-5"})
+	a.reloadAll()
+	tt := ui.NewTester(func(c *ui.Context) { a.modelsSettings(c) }, 900, 800)
+	tt.Frame()
+	if !tt.HasText(locales.SettingsLocalWhenOfflineNone()) || tt.HasText(locales.SettingsLocalWhenOfflineDesc()) {
+		t.Errorf("no hint to add a local provider in %v", tt.Texts())
+	}
+	if !a.settings.LocalWhenOffline {
+		t.Error("the setting was cleared while there was nothing to switch to")
+	}
+
+	put(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true})
+	a.reloadAll()
+	tt.Frame()
+	if !tt.HasText(locales.SettingsLocalWhenOfflineDesc()) || tt.HasText(locales.SettingsLocalWhenOfflineNone()) {
+		t.Errorf("the hint stays with a local provider in %v", tt.Texts())
+	}
+}

@@ -561,13 +561,6 @@ func (a *App) speechSettings(c *ui.Context) {
 				changed = true
 			}
 		})
-		keep := stt.KeepAudio
-		settingRow(c, "keep", locales.RecSttKeepAudio(), locales.RecSttKeepAudioDesc(), false, func() {
-			if ui.Switch(c.Key("keep"), &keep).Changed() {
-				stt.KeepAudio = keep
-				changed = true
-			}
-		})
 		desc := s.micText
 		if s.micTesting {
 			switch {
@@ -694,7 +687,7 @@ func (a *App) syncSttSettings() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		row := map[string]any{"user_id": a.backend.UserID(), "provider": stt.Provider, "language": stt.Language,
-			"live_transcript": stt.LiveTranscript, "keep_audio": stt.KeepAudio, "speaker_labels": stt.SpeakerLabels,
+			"live_transcript": stt.LiveTranscript, "speaker_labels": stt.SpeakerLabels,
 			"base_url": stt.BaseURL, "model": stt.Model, "provider_id": nilIfEmpty(stt.ProviderID)}
 		if _, err := a.backend.Upsert(ctx, "stt_settings", row, "user_id"); err != nil {
 			fmt.Println("stt settings:", err)

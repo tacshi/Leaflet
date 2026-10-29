@@ -4,9 +4,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/ui"
+
+	"leaflet/internal/agents"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
+	"leaflet/locales"
 )
 
 // A page shared with the user opens read-only until its members say
@@ -66,5 +70,56 @@ func TestShareMembersStayWithTheirPage(t *testing.T) {
 	a.shareMembersOf("A")
 	if len(a.dialogs.shareMember) != 1 {
 		t.Errorf("page A's dialog lists %+v", a.dialogs.shareMember)
+	}
+}
+
+// What a page is shows after its breadcrumbs as icons, named by their
+// tooltips; that it is shared with the user is in its byline.
+func TestPageMarks(t *testing.T) {
+	a := templatesApp(t)
+	const id = "00000000-0000-0000-0000-0000000000bb"
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := a.st.PutRemotePage(map[string]any{"id": id, "space_id": "00000000-0000-0000-0000-0000000000cc", "title": "Theirs",
+		"sort_key": "V", "created_at": at, "updated_at": at}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(id)
+	p := a.pageByID(id)
+	tt := ui.NewTester(func(c *ui.Context) {
+		a.breadcrumbs(c, *p)
+		a.byline(c, *p)
+	}, 900, 300)
+	tt.Frame()
+	if _, ok := tt.Find(locales.PageViewOnly()); !ok {
+		t.Errorf("no view-only mark in %v", tt.Texts())
+	}
+	if !tt.HasText(locales.PageBylineSharedWithYou()) {
+		t.Errorf("the byline does not say it is shared: %v", tt.Texts())
+	}
+	for _, pill := range []string{"Shared", "Template"} {
+		if _, ok := tt.Find(pill); ok {
+			t.Errorf("a %q pill", pill)
+		}
+	}
+}
+
+// Someone invited to a page who has not accepted yet is no account: the
+// @ menu does not offer to mention them.
+func TestMentionsLeaveOutInvites(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.page = &pageState{id: "p", members: []store.Member{
+		{UserID: "ann", DisplayName: "Ann", Role: "editor", Accepted: true},
+		{UserID: "invite-1", Email: "kim@example.com", Role: "viewer"},
+	}}
+	var people []string
+	for _, it := range (&host{a: a}).MentionItems("") {
+		if it.Group == locales.HostGroupPeople() {
+			people = append(people, it.Label)
+		}
+	}
+	if len(people) != 1 || people[0] != "Ann" {
+		t.Errorf("people %v", people)
 	}
 }

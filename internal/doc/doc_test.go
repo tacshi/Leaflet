@@ -3,7 +3,9 @@ package doc
 import (
 	"encoding/json"
 	"errors"
+	"math/rand/v2"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -325,6 +327,25 @@ func TestDeltaEdits(t *testing.T) {
 	}
 }
 
+// A mention is one unit: text typed inside it goes after it, and taking
+// out or formatting part of it takes all of it.
+func TestMentionIsOneUnit(t *testing.T) {
+	alice := Attrs{Mention: &Mention{Kind: "user", ID: "a", Name: "Alice"}}
+	d := Delta{{Text: "hi "}, {Text: "@Alice", Attrs: alice}}
+	if got := d.Insert(6, "x", Attrs{}); got.Plain() != "hi @Alicex" || len(got) != 3 || got[1].Text != "@Alice" {
+		t.Errorf("typed inside: %+v", got)
+	}
+	if got := d.Delete(7, 8); got.Plain() != "hi " {
+		t.Errorf("deleted part: %+v", got)
+	}
+	if got := d.Format(5, 7, func(a *Attrs) { a.Bold = true }); len(got) != 2 || !got[1].Attrs.Bold || got[1].Text != "@Alice" {
+		t.Errorf("formatted part: %+v", got)
+	}
+	if got := d.Insert(6, "x", Attrs{}).ToMarkdown(); got != "hi @Alicex" {
+		t.Errorf("markdown %q", got)
+	}
+}
+
 func TestRulesAreDividers(t *testing.T) {
 	for _, s := range []string{"---", "***", "___", "- - -", " ----- "} {
 		if !IsRule(s) {
@@ -595,6 +616,54 @@ func TestInlineMarkdownLinks(t *testing.T) {
 	}
 }
 
+// Runs side by side in any formats Markdown can say read back as they
+// were: bold and italic together, one run's markers touching the next's,
+// code beside code, markup characters in the text.
+func TestInlineMarkdownRoundTripsRuns(t *testing.T) {
+	for _, d := range []Delta{
+		{{Text: "x", Attrs: Attrs{Bold: true, Italic: true}}},
+		{{Text: "ab", Attrs: Attrs{Bold: true, Italic: true}}, {Text: " c"}},
+		{{Text: "foo", Attrs: Attrs{Italic: true}}, {Text: "bar", Attrs: Attrs{Bold: true}}},
+		{{Text: "a"}, {Text: "b", Attrs: Attrs{Bold: true}}, {Text: "c", Attrs: Attrs{Bold: true, Italic: true}}},
+		{{Text: "a", Attrs: Attrs{Code: true}}, {Text: "b", Attrs: Attrs{Code: true, Bold: true}}},
+		{{Text: "a*b", Attrs: Attrs{Code: true, Italic: true}}, {Text: "c", Attrs: Attrs{Italic: true}}},
+	} {
+		md := d.ToMarkdown()
+		if got := FromMarkdown(md); !reflect.DeepEqual(got, d.Compact()) {
+			t.Errorf("%+v wrote %q, which reads back as %+v", d, md, got)
+		}
+	}
+	words := []string{"a", "bc", "x_y", "*", "**", "_", "`", "[", "]", "(", ")", "\\", "~", "中文", "@"}
+	hrefs := []string{"https://a.b", "https://c.d/x_(y)"}
+	rng := rand.New(rand.NewPCG(1, 2)) // #nosec G404 -- seeded, for runs a test can repeat.
+	for range 5000 {
+		var d Delta
+		for range 1 + rng.IntN(6) {
+			a := Attrs{Bold: rng.IntN(2) == 0, Italic: rng.IntN(2) == 0, Strike: rng.IntN(4) == 0, Code: rng.IntN(4) == 0}
+			if rng.IntN(4) == 0 {
+				a.Href = hrefs[rng.IntN(len(hrefs))]
+			}
+			var text strings.Builder
+			for i := range 1 + rng.IntN(3) {
+				// Spaces only between words: at the ends of a format they
+				// go outside its markers.
+				if i > 0 {
+					text.WriteString(" ")
+				}
+				text.WriteString(words[rng.IntN(len(words))])
+			}
+			d = append(d, Run{Text: text.String(), Attrs: a})
+		}
+		md := d.ToMarkdown()
+		if got := FromMarkdown(md); !reflect.DeepEqual(got, d.Compact()) {
+			t.Fatalf("%+v wrote %q, which reads back as %+v", d, md, got)
+		}
+	}
+	if got := FromMarkdown("***both***"); len(got) != 1 || !got[0].Attrs.Bold || !got[0].Attrs.Italic {
+		t.Errorf("***both*** reads as %+v", got)
+	}
+}
+
 func TestEscapeBlockStart(t *testing.T) {
 	for in, want := range map[string]string{
 		"# x":       `\# x`,
@@ -636,5 +705,50 @@ func TestReplaceTableWithListDropsCells(t *testing.T) {
 	}
 	if len(list.Children) != 3 {
 		t.Error("the op's node changed")
+	}
+}
+
+// A replace that kept the block's children, applied to the page as it is
+// now, keeps the children it has now: one edited or added since the agent
+// read the page stays. A replace with children of its own sets them.
+func TestReplaceKeepingChildrenKeepsTheirEdits(t *testing.T) {
+	read := &Node{ID: "t", Type: "toggle_list", Children: []*Node{para("a", "A")}}
+	read.SetDelta(Delta{{Text: "T"}})
+	c := FromBlocks([]*Node{read.Clone()})
+	agent := read.Clone()
+	agent.SetDelta(Delta{{Text: "T2"}})
+	op := Op{Op: "replace", ID: "t", Node: agent, PrevNode: read}
+	// Meanwhile, in the editor.
+	tg := c.Find("t")
+	tg.Children[0].SetDelta(Delta{{Text: "A2"}})
+	tg.Children = append(tg.Children, para("b", "B"))
+	if err := c.Apply(op); err != nil {
+		t.Fatal(err)
+	}
+	if got := texts(c); !reflect.DeepEqual(got, []string{"T2", "A2", "B"}) {
+		t.Errorf("kept children: %v", got)
+	}
+	fresh := read.Clone()
+	fresh.Children = []*Node{para("n", "New")}
+	if err := c.Apply(Op{Op: "replace", ID: "t", Node: fresh, PrevNode: c.Find("t").Clone()}); err != nil {
+		t.Fatal(err)
+	}
+	if got := texts(c); !reflect.DeepEqual(got, []string{"T", "New"}) {
+		t.Errorf("new children: %v", got)
+	}
+}
+
+// Rebase takes back what edits changed, on the page as it is since: a
+// block they changed comes back as it was, over a change from outside
+// too; a block they made goes, one they deleted comes back, and the
+// blocks from outside stay.
+func TestRebase(t *testing.T) {
+	old := page(map[string]int64{"a": 1, "b": 1, "d": 1}, para("a", "a"), para("b", "b"), para("d", "gone"))
+	after := page(map[string]int64{"a": 1, "b": 1, "n": 1}, para("a", "a1"), para("b", "b"), para("n", "made"))
+	current := page(map[string]int64{"a": 5, "b": 5, "n": 1, "q": 5},
+		para("a", "a1 from outside"), para("b", "b from outside"), para("n", "made"), para("q", "from outside"))
+	got := texts(Rebase(old, after, current))
+	if want := []string{"a", "b from outside", "gone", "from outside"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("rebased %v, want %v", got, want)
 	}
 }

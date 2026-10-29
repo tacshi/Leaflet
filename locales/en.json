@@ -769,7 +769,7 @@
   },
   "templatePill": "Template",
   "@templatePill": {
-    "description": "A badge marking a template among pages and search results."
+    "description": "A badge marking a template among pages and search results, and the tooltip of the icon after a template's breadcrumbs."
   },
   "templateSectionTitle": "Templates",
   "@templateSectionTitle": {
@@ -1001,6 +1001,14 @@
         "type": "String"
       }
     }
+  },
+  "dialogShareInvalidEmail": "Enter an email address.",
+  "@dialogShareInvalidEmail": {
+    "description": "Share dialog: the server refused an invite because what was typed is no email address."
+  },
+  "dialogShareWithSelf": "That's your own email address.",
+  "@dialogShareWithSelf": {
+    "description": "Share dialog: the server refused an invite to the user's own email address."
   },
   "dialogShareCanEdit": "Can edit",
   "@dialogShareCanEdit": {
@@ -1411,13 +1419,9 @@
   "@pageBreadcrumbsLabel": {
     "description": "Accessibility name of the page's breadcrumbs."
   },
-  "pageSharedBadge": "Shared",
-  "@pageSharedBadge": {
-    "description": "Badge after the breadcrumbs of a shared page."
-  },
   "pageViewOnly": "View only",
   "@pageViewOnly": {
-    "description": "Badge after the breadcrumbs of a page the user cannot edit."
+    "description": "Tooltip of the icon after the breadcrumbs of a page the user cannot edit."
   },
   "pageSyncOffline": "Offline",
   "@pageSyncOffline": {
@@ -1487,6 +1491,10 @@
         "example": "2"
       }
     }
+  },
+  "pageBylineSharedWithYou": "Shared with you",
+  "@pageBylineSharedWithYou": {
+    "description": "Byline under the title of a page someone else shared with the user."
   },
   "pageTimeJustNow": "just now",
   "@pageTimeJustNow": {
@@ -1612,6 +1620,10 @@
       }
     }
   },
+  "pageStopRun": "Stop",
+  "@pageStopRun": {
+    "description": "Where an agent shows at work (the bar at the bottom of the page, the chat, the Ask agent prompt): the button stopping it."
+  },
   "pageConflicts": "{count, plural, one {# block changed here and on another device while apart. One version of each was kept.} other {# blocks changed here and on another device while apart. One version of each was kept.}}",
   "@pageConflicts": {
     "description": "Notice over a page with sync conflicts.",
@@ -1621,6 +1633,10 @@
         "example": "2"
       }
     }
+  },
+  "pageUnreadable": "This page's content could not be read. It opened read-only, so that it is kept as it is.",
+  "@pageUnreadable": {
+    "description": "Notice over a page whose stored content could not be read."
   },
   "pageReview": "Review",
   "@pageReview": {
@@ -1788,6 +1804,10 @@
   "@panelDeleteComment": {
     "description": "Comment menu item."
   },
+  "panelCommentDeleted": "This comment was deleted.",
+  "@panelCommentDeleted": {
+    "description": "Comments panel: shown in place of a thread's first comment once it is deleted, while the thread has replies."
+  },
   "panelCouldNotDelete": "Could not delete: {error}",
   "@panelCouldNotDelete": {
     "description": "Toast after deleting a comment failed.",
@@ -1808,6 +1828,16 @@
   "sidebarHide": "Hide sidebar (⌘\\)",
   "@sidebarHide": {
     "description": "Sidebar: tooltip of the button hiding it."
+  },
+  "sidebarInvites": "{count, plural, one {# page shared with you} other {# pages shared with you}}",
+  "@sidebarInvites": {
+    "description": "Sidebar's top bar: tooltip of the button, shown only while invites wait, that lists the pages shared with the user to accept.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "2"
+      }
+    }
   },
   "sidebarNoPages": "No pages yet",
   "@sidebarNoPages": {
@@ -1922,6 +1952,20 @@
   "@sidebarDeleteFile": {
     "description": "File context menu item."
   },
+  "sidebarDeleteFileTitle": "Delete “{name}”?",
+  "@sidebarDeleteFileTitle": {
+    "description": "The alert asking before a file is deleted from the sidebar: its title.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Budget.xlsx"
+      }
+    }
+  },
+  "sidebarDeleteFileMessage": "It is deleted from every device it syncs to. You can't undo this.",
+  "@sidebarDeleteFileMessage": {
+    "description": "The alert asking before a file is deleted from the sidebar: its message."
+  },
   "sidebarCouldNotMove": "Could not move: {error}",
   "@sidebarCouldNotMove": {
     "description": "Toast after moving a page failed.",
@@ -1982,48 +2026,6 @@
       }
     }
   },
-  "sidebarCheckForUpdates": "Check for Updates",
-  "@sidebarCheckForUpdates": {
-    "description": "Sidebar footer: tooltip of the button that checks for a newer version."
-  },
-  "sidebarCheckingForUpdates": "Checking for updates…",
-  "@sidebarCheckingForUpdates": {
-    "description": "Sidebar footer: tooltip of the update button while a check is under way."
-  },
-  "sidebarDownloadingUpdate": "Downloading {version}…",
-  "@sidebarDownloadingUpdate": {
-    "description": "Sidebar footer: tooltip of the update button while a newer version downloads.",
-    "placeholders": {
-      "version": {
-        "type": "String",
-        "example": "1.2.0"
-      }
-    }
-  },
-  "sidebarUpToDate": "Leaflet {version} is up to date",
-  "@sidebarUpToDate": {
-    "description": "Toast after checking for updates found no newer version.",
-    "placeholders": {
-      "version": {
-        "type": "String",
-        "example": "1.2.0"
-      }
-    }
-  },
-  "sidebarCheckForUpdatesFailed": "Could not check for updates",
-  "@sidebarCheckForUpdatesFailed": {
-    "description": "Toast after checking for updates failed."
-  },
-  "sidebarInstallUpdateFailed": "Could not install Leaflet {version}",
-  "@sidebarInstallUpdateFailed": {
-    "description": "Toast after a newer version was found but downloading or installing it failed.",
-    "placeholders": {
-      "version": {
-        "type": "String",
-        "example": "1.2.0"
-      }
-    }
-  },
   "sidebarSettings": "Settings (⌘,)",
   "@sidebarSettings": {
     "description": "Sidebar footer: tooltip of the settings button."
@@ -2031,6 +2033,10 @@
   "sidebarOnDevice": "On this device",
   "@sidebarOnDevice": {
     "description": "Sidebar footer: account line when not signed in."
+  },
+  "sidebarSignInToSync": "Sign in to sync",
+  "@sidebarSignInToSync": {
+    "description": "Sidebar footer: tooltip of the account row, which opens the sign-in page, while not signed in."
   },
   "sidebarSyncing": "Syncing…",
   "@sidebarSyncing": {
@@ -2527,6 +2533,15 @@
   "recErrLive": "Live transcript unavailable: {error}",
   "@recErrLive": {
     "description": "Error when the live transcript cannot connect.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "recErrLiveStopped": "Live transcription stopped early, so the transcript may be missing the rest; the audio is kept: {error}",
+  "@recErrLiveStopped": {
+    "description": "A recording's error when its live Soniox stream ended before the recording did.",
     "placeholders": {
       "error": {
         "type": "String"
@@ -3046,6 +3061,15 @@
   "@settingsDevicesLoading": {
     "description": "Settings › Account › Devices: while the list loads."
   },
+  "settingsDevicesFailed": "Could not load devices: {error}",
+  "@settingsDevicesFailed": {
+    "description": "Settings › Account › Devices: the list could not be loaded; a Retry button is beside it.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "settingsDeviceLastActive": "Last active {when}",
   "@settingsDeviceLastActive": {
     "description": "Settings › Account › Devices: when a device was last used; when is a relative time such as “5 min ago”.",
@@ -3471,6 +3495,28 @@
         "type": "String"
       }
     }
+  },
+  "settingsRemoveProviderTitle": "Remove “{name}”?",
+  "@settingsRemoveProviderTitle": {
+    "description": "Settings › Models: the alert asking before a model provider is removed: its title.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "OpenAI"
+      }
+    }
+  },
+  "settingsRemoveProviderCloud": "Agents can no longer use it, and its API key is deleted from the server. You can't undo this.",
+  "@settingsRemoveProviderCloud": {
+    "description": "Settings › Models: the alert asking before a provider kept on the server is removed: its message."
+  },
+  "settingsRemoveProviderLocal": "Agents can no longer use it, and its key is deleted from this device.",
+  "@settingsRemoveProviderLocal": {
+    "description": "Settings › Models: the alert asking before a provider on this device is removed: its message."
+  },
+  "settingsRemoveProviderAccount": "Agents can no longer use it, and this device signs out of it.",
+  "@settingsRemoveProviderAccount": {
+    "description": "Settings › Models: the alert asking before a provider signed in with an account (ChatGPT) is removed: its message."
   },
   "settingsDeleteKeyFailed": "Could not delete the key: {error}",
   "@settingsDeleteKeyFailed": {
@@ -3903,13 +3949,21 @@
   "@signinCodeSent": {
     "description": "The sign-in page › Email code: after sending it."
   },
-  "signinRemovedChanges": "{count, plural, one {Removed # change by the previous account that had not uploaded} other {Removed # changes by the previous account that had not uploaded}}",
-  "@signinRemovedChanges": {
-    "description": "A notification after signing in as another account.",
+  "signinAnyway": "Sign in anyway?",
+  "@signinAnyway": {
+    "description": "The title of the alert asking to sign in as another account while the previous one's changes are not uploaded."
+  },
+  "signinRemovesUnsynced": "{count, plural, one {# change of the account signed in here before is not uploaded yet. Signing in as {email} removes it from this device.} other {# changes of the account signed in here before are not uploaded yet. Signing in as {email} removes them from this device.}}",
+  "@signinRemovesUnsynced": {
+    "description": "The alert asking to sign in as another account while the previous one's changes are not uploaded: its message.",
     "placeholders": {
       "count": {
         "type": "int",
         "example": "2"
+      },
+      "email": {
+        "type": "String",
+        "example": "sam@example.com"
       }
     }
   },

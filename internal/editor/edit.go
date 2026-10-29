@@ -128,7 +128,8 @@ func (e *Editor) InsertText(s string) {
 	e.invalidate(n.ID)
 	off := e.focus.Off + utf8.RuneCountInString(s)
 	e.anchor, e.focus = Pos{n.ID, off}, Pos{n.ID, off}
-	if s == " " {
+	// An input method for Chinese or Japanese types a full-width space.
+	if s == " " || s == "\u3000" {
 		e.markdownShortcut(n)
 	}
 	if s == "-" {
@@ -137,7 +138,7 @@ func (e *Editor) InsertText(s string) {
 	if r, _ := utf8.DecodeRuneInString(s); (r == '/' || r == '@') && utf8.RuneCountInString(s) == 1 {
 		runes := []rune(n.Delta().Plain())
 		at := off - 1
-		if at == 0 || unicode.IsSpace(runes[at-1]) {
+		if at == 0 || opensMenu(runes[at-1]) {
 			e.trigger = &Trigger{Kind: r, ID: n.ID, Off: at}
 			e.menuIndex = 0
 		}
@@ -146,6 +147,14 @@ func (e *Editor) InsertText(s string) {
 	e.updateTrigger()
 	e.reveal = n.ID
 	e.changed()
+}
+
+// opensMenu reports whether a / or @ typed after r opens its menu: after
+// a space, or after Chinese or Japanese text or punctuation, which has no
+// spaces between words; not inside a word, as in a@b.com or a/b.
+func opensMenu(r rune) bool {
+	return unicode.IsSpace(r) || unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana) ||
+		r > unicode.MaxASCII && unicode.IsPunct(r)
 }
 
 // markdownShortcut turns "# ", "- ", "1. ", "[] " and "> " typed at the
@@ -160,6 +169,9 @@ func (e *Editor) markdownShortcut(n *doc.Node) {
 		return
 	}
 	prefix := string([]rune(text)[:e.focus.Off])
+	if p, ok := strings.CutSuffix(prefix, "\u3000"); ok {
+		prefix = p + " "
+	}
 	conv := map[string]func(){
 		"# ":   func() { n.Type = "heading"; n.Set("level", 1) },
 		"## ":  func() { n.Type = "heading"; n.Set("level", 2) },
@@ -281,13 +293,10 @@ func (e *Editor) Enter() {
 		return
 	}
 	d := n.Delta()
-	// Enter in an empty list item, quote or callout ends it.
+	// Enter in an empty list item, quote or callout ends it: a nested
+	// item goes up a level, anything else becomes a paragraph where it is.
 	if d.Len() == 0 && n.Type != "paragraph" && n.Type != "heading" {
-		if loc := e.Content.Locate(n.ID); loc != nil && loc.Parent != nil {
-			e.outdent(n)
-		} else {
-			e.toParagraph(n)
-		}
+		e.unstyle(n)
 		e.invalidate(n.ID)
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
 		e.changed()
@@ -386,6 +395,8 @@ func (e *Editor) Backspace(word bool) {
 		} else if l := e.layoutOf(n); l != nil {
 			from = runeOff(n, l.layout.PreviousBoundary(utf16Off(n, off)))
 		}
+		// A mention goes whole.
+		from, _ = n.Delta().Widen(from, off)
 		n.SetDelta(n.Delta().Delete(from, off))
 		e.invalidate(n.ID)
 		e.Select(Pos{n.ID, from}, Pos{n.ID, from})
@@ -396,11 +407,7 @@ func (e *Editor) Backspace(word bool) {
 	e.pushUndo(false)
 	e.coalescing = false
 	if n.Type != "paragraph" {
-		if loc := e.Content.Locate(n.ID); loc != nil && loc.Parent != nil {
-			e.outdent(n)
-		} else {
-			e.toParagraph(n)
-		}
+		e.unstyle(n)
 		e.invalidate(n.ID)
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
 		e.changed()
@@ -456,6 +463,7 @@ func (e *Editor) Delete(word bool) {
 		} else if l := e.layoutOf(n); l != nil {
 			to = runeOff(n, l.layout.NextBoundary(utf16Off(n, off)))
 		}
+		// A mention goes whole, as the caret is never inside one.
 		n.SetDelta(n.Delta().Delete(off, to))
 		e.invalidate(n.ID)
 		e.changed()
@@ -477,6 +485,17 @@ func (e *Editor) Delete(word bool) {
 	e.Content.Remove(next.ID)
 	e.invalidate(n.ID)
 	e.changed()
+}
+
+// unstyle is Backspace at the start of a block other than a paragraph,
+// and Enter in an empty one: a nested list item goes up a level, and any
+// other block becomes a paragraph where it is.
+func (e *Editor) unstyle(n *doc.Node) {
+	if loc := e.Content.Locate(n.ID); loc != nil && loc.Parent != nil && NestableTypes(n) {
+		e.outdent(n)
+	} else {
+		e.toParagraph(n)
+	}
 }
 
 // toParagraph turns a block into a paragraph, without the data of its
@@ -576,8 +595,13 @@ func (e *Editor) outdent(n *doc.Node) {
 	if loc == nil || loc.Parent == nil {
 		return
 	}
-	// Siblings after it become its children, so the order reads the same.
-	after := append([]*doc.Node{}, loc.Siblings[loc.Index+1:]...)
+	// Siblings after a list item become its children, so the order reads
+	// the same. Other blocks take none: the siblings stay in the parent,
+	// and the block goes after it.
+	var after []*doc.Node
+	if NestableTypes(n) {
+		after = append(after, loc.Siblings[loc.Index+1:]...)
+	}
 	for _, s := range after {
 		e.Content.Remove(s.ID)
 	}

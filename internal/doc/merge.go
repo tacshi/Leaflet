@@ -347,6 +347,22 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 	return result, conflicts
 }
 
+// Rebase returns what undoing edits makes of a page that changed from
+// outside since: old is the page before the edits and after the page
+// they made, and current is after with the changes from outside. Each
+// block the edits changed comes back as it was in old, over a change from
+// outside too, as the newer write; the blocks only the outside changed
+// stay as they are in current.
+func Rebase(old, after, current *Content) *Content {
+	// Old's blocks are newer than current's where they differ, and it
+	// deleted nothing: a block it lacks that current has goes only if the
+	// edits made it.
+	undone := old.Copy().Stamped(current, NowMs())
+	undone.Deleted = map[string]int64{}
+	merged, _ := Merge(after, undone, current)
+	return merged
+}
+
 // movedSinceBase reports whether a side really moved the block since base,
 // as opposed to blocks being deleted or added around it: it compares the
 // nearest preceding sibling that both base and the side have.

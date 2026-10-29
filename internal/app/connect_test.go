@@ -522,3 +522,38 @@ func TestWriteAtomicFollowsLinks(t *testing.T) {
 		t.Errorf("linked file %q, mode %v", b, fi.Mode())
 	}
 }
+
+// Claude Code's tool adds no server it has, so Update removes the old one
+// first; when adding the new one fails, the old one comes back as it was.
+func TestConnectClaudeCodeKeepsTheOldEntry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake tool is a shell script")
+	}
+	env := testEnv(t)
+	path, _ := jsonConfig("claude", env)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"command":"/old/Leaflet","args":["mcp"],"env":{"LEAFLET_DATA_DIR":"/old"}}`
+	if err := os.WriteFile(path, []byte(`{"mcpServers": {"leaflet": `+old+`}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	cli := filepath.Join(dir, "claude")
+	// It logs each call, and fails to add.
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '" + calls + "'\n[ \"$2\" = add ] && { echo 'add failed' >&2; exit 1; }\nexit 0\n"
+	if err := os.WriteFile(cli, []byte(script), 0o700); err != nil { // #nosec G306 -- the test's own fake tool, which must run.
+		t.Fatal(err)
+	}
+	err := connectAgent("claude", cli, env, testExe, testDir)
+	if err == nil || !strings.Contains(err.Error(), "add failed") {
+		t.Errorf("error %v", err)
+	}
+	raw, _ := os.ReadFile(calls) // #nosec G304 -- a file in the test's own temporary folder.
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 3 || !strings.HasPrefix(lines[0], "mcp remove") || !strings.HasPrefix(lines[1], "mcp add ") ||
+		lines[2] != "mcp add-json -s user leaflet "+old {
+		t.Errorf("calls:\n%s", raw)
+	}
+}

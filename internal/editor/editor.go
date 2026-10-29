@@ -84,10 +84,15 @@ type Host interface {
 	BlockLink(blockID string) string
 }
 
+// snapshot is a step of undo or redo: the page as it was, to go back to.
+// One with after marks a change from outside, as sync brings: after is
+// the page as the steps under it left it, before that change, which
+// going back to one of them keeps.
 type snapshot struct {
 	content *doc.Content
 	anchor  Pos
 	focus   Pos
+	after   *doc.Content
 }
 
 // Editor is the state of a page's editor, kept from frame to frame.
@@ -114,7 +119,10 @@ type Editor struct {
 	markEnd    int
 	undo, redo []snapshot
 	lastEdit   time.Time
+	// coalescing is set while typing joins the undo step open, which
+	// began in block coalesceIn.
 	coalescing bool
+	coalesceIn string
 
 	layouts map[string]*blockLayout
 	// geom is each block's box in the window, for hit-testing; rel is the
@@ -149,11 +157,23 @@ type Editor struct {
 	cellEdit    string
 	cellFocused bool
 	cellMove    int
+	// cellText is the Markdown typed in the cell being edited, cellFor,
+	// kept as typed: read back from the cell's text, a "[" or a "*" not
+	// yet closed would show escaped under the caret. cellSaved is that
+	// text as the cell stored it, to tell a change made elsewhere (undo,
+	// another device), which the input then shows.
+	cellText, cellFor, cellSaved string
 
 	// hid are the blocks folded headings hide, as the page last built;
 	// menuBlock is the block a context menu was opened on, and menuAt
 	// where in it.
-	hid       map[string]bool
+	hid map[string]bool
+	// order is each unit's place in the page and depths each block's
+	// depth, kept while the blocks build unless a change comes first:
+	// each block asks where it is against the selection and how deep it
+	// is, which walking the page for would make a frame quadratic.
+	order     map[string]int
+	depths    map[string]int
 	menuBlock string
 	menuAt    Pos
 	// bar is the selection toolbar, kept while the focus is in it or its
@@ -235,7 +255,15 @@ func (e *Editor) walkUnits(hidden map[string]bool) []*doc.Node {
 	return out
 }
 
-func (e *Editor) index(id string) int { return indexIn(e.units(), id) }
+func (e *Editor) index(id string) int {
+	if e.order != nil {
+		if i, ok := e.order[id]; ok {
+			return i
+		}
+		return -1
+	}
+	return indexIn(e.units(), id)
+}
 
 func indexIn(nodes []*doc.Node, id string) int {
 	for i, n := range nodes {
@@ -327,6 +355,16 @@ func (e *Editor) clamp(p Pos) Pos {
 		return Pos{h.ID, textLen(h)}
 	}
 	p.Off = min(max(p.Off, 0), textLen(n))
+	// A mention is one unit: the caret goes to its nearer end.
+	if n.IsText() {
+		if start, end, ok := n.Delta().MentionAround(p.Off); ok {
+			if p.Off-start <= end-p.Off {
+				p.Off = start
+			} else {
+				p.Off = end
+			}
+		}
+	}
 	return p
 }
 
@@ -384,19 +422,23 @@ func (e *Editor) SelectedBlocks() []string {
 }
 
 // pushUndo keeps the page as it is before an edit. Typing in one block
-// within a second and a half joins the step before it.
+// within a second and a half joins the step before it, unless the caret
+// was moved in between.
 func (e *Editor) pushUndo(typing bool) {
 	now := time.Now()
-	if typing && e.coalescing && now.Sub(e.lastEdit) < 1500*time.Millisecond {
+	if typing && e.coalescing && e.coalesceIn == e.focus.ID && now.Sub(e.lastEdit) < 1500*time.Millisecond {
 		e.lastEdit = now
 		return
 	}
 	e.undo = append(e.undo, snapshot{content: e.Content.Copy(), anchor: e.anchor, focus: e.focus})
 	if len(e.undo) > 200 {
 		e.undo = e.undo[len(e.undo)-200:]
+		if e.undo[0].after != nil {
+			e.undo = e.undo[1:]
+		}
 	}
 	e.redo = nil
-	e.coalescing = typing
+	e.coalescing, e.coalesceIn = typing, e.focus.ID
 	e.lastEdit = now
 }
 
@@ -408,25 +450,49 @@ func (e *Editor) CanUndo() bool { return len(e.undo) > 0 }
 func (e *Editor) CanRedo() bool { return len(e.redo) > 0 }
 
 // Undo goes back a step.
-func (e *Editor) Undo() {
-	if len(e.undo) == 0 {
+func (e *Editor) Undo() { e.step(&e.undo, &e.redo) }
+
+// Redo goes forward a step.
+func (e *Editor) Redo() { e.step(&e.redo, &e.undo) }
+
+// step goes to the page of the step on top of from, keeping the page as
+// it is on to. Past a change from outside, it takes back only what the
+// step changed, and what came from outside stays.
+func (e *Editor) step(from, to *[]snapshot) {
+	pop := func() (snapshot, bool) {
+		if len(*from) == 0 {
+			return snapshot{}, false
+		}
+		s := (*from)[len(*from)-1]
+		*from = (*from)[:len(*from)-1]
+		return s, true
+	}
+	s, ok := pop()
+	after := s.after
+	if after != nil {
+		s, ok = pop()
+	}
+	if !ok {
 		return
 	}
-	s := e.undo[len(e.undo)-1]
-	e.undo = e.undo[:len(e.undo)-1]
-	e.redo = append(e.redo, snapshot{content: e.Content.Copy(), anchor: e.anchor, focus: e.focus})
+	*to = append(*to, snapshot{content: e.Content.Copy(), anchor: e.anchor, focus: e.focus})
+	if after != nil {
+		old := s.content
+		s.content = doc.Rebase(old, after, e.Content)
+		// The steps under it are now under the page as it was, with
+		// what came from outside.
+		mark(from, old)
+	}
 	e.restore(s)
 }
 
-// Redo goes forward a step.
-func (e *Editor) Redo() {
-	if len(e.redo) == 0 {
-		return
+// mark marks a change from outside on top of steps, made to the page
+// after, as the steps left it. Under a mark already there, the steps are
+// under that one's page, which a change since only adds to.
+func mark(steps *[]snapshot, after *doc.Content) {
+	if n := len(*steps); n > 0 && (*steps)[n-1].after == nil {
+		*steps = append(*steps, snapshot{after: after})
 	}
-	s := e.redo[len(e.redo)-1]
-	e.redo = e.redo[:len(e.redo)-1]
-	e.undo = append(e.undo, snapshot{content: e.Content.Copy(), anchor: e.anchor, focus: e.focus})
-	e.restore(s)
 }
 
 func (e *Editor) restore(s snapshot) {
@@ -439,6 +505,7 @@ func (e *Editor) restore(s snapshot) {
 }
 
 func (e *Editor) changed() {
+	e.order = nil
 	e.blink = time.Now()
 	if e.OnChange != nil {
 		e.OnChange()
@@ -447,14 +514,17 @@ func (e *Editor) changed() {
 }
 
 // Replace swaps in content from outside the editor (sync, restores),
-// keeping the caret where it can. The undo steps go: they are whole pages
-// from before the change, so going back to one would undo it too.
+// keeping the caret where it can, and the undo steps: going back one
+// takes back what it changed on the page as it is, keeping the change.
 func (e *Editor) Replace(c *doc.Content) {
+	before := e.Content.Copy()
+	mark(&e.undo, before)
+	mark(&e.redo, before)
 	e.Content.Children = c.Children
 	e.Content.Blocks, e.Content.Deleted = c.Blocks, c.Deleted
+	e.order = nil
 	e.layouts = map[string]*blockLayout{}
 	e.marked = false
-	e.undo, e.redo = nil, nil
 	e.coalescing = false
 	if len(e.Content.Children) == 0 {
 		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}

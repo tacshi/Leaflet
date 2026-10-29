@@ -23,7 +23,18 @@ func (a *App) sidebar(c *ui.Context) {
 	// The window controls sit at the top left.
 	ui.Row(c.Key("sidebar-top")).Height(max(bar.Height, headerHeight)).Padding(0, 8, 0, bar.Left+8).Gap(2).AlignItems(ui.Center).DragWindow().Children(func() {
 		ui.Spacer(c)
+		var invites ui.Element
 		tools(c, func() {
+			// Only while pages shared with the user wait for them.
+			if len(a.invites) > 0 {
+				invites = iconButton(c, "invites", "share", locales.SidebarInvites(len(a.invites))).TextColor(pal.Accent)
+				if a.invitesOpen {
+					invites.Background(pal.NavSelected)
+				}
+				if invites.Clicked() {
+					a.invitesOpen = !a.invitesOpen
+				}
+			}
 			if iconButton(c, "search", "search", locales.SidebarSearch()).Clicked() {
 				a.openSearch()
 			}
@@ -38,6 +49,11 @@ func (a *App) sidebar(c *ui.Context) {
 				a.toggleSidebar()
 			}
 		})
+		if len(a.invites) == 0 {
+			a.invitesOpen = false
+		} else {
+			ui.Popover(c, invites, &a.invitesOpen, func() { a.inviteList(c) })
+		}
 	})
 	// Room under the tabs, before the list they show.
 	ui.Row(c.Key("sidebar-tabs")).Padding(0, 12).Margin(0, 0, 10).Shrink(0).Children(func() {
@@ -59,6 +75,7 @@ func (a *App) sidebar(c *ui.Context) {
 		}
 	}
 	a.sidebarFooter(c)
+	a.deleteFileAlert(c)
 }
 
 // sidebarTab shows a tab of the sidebar, which Settings keeps.
@@ -276,10 +293,11 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			if open := a.route.Kind == "page" && a.route.ID == id; p.Title == "" && !open {
 				title.TextColor(pal.TextMuted)
 			}
-			// + only while hovered, so a title has the room until then; the
-			// menu button stays built for its menu to report the choice.
+			// + only while hovered, so a title has the room until then, and
+			// only on a page this account can edit; the menu button stays
+			// built for its menu to report the choice.
 			tools(c, func() {
-				if hovered && button("add", "plus", locales.PageAddSubpage()).Clicked() {
+				if hovered && a.canEdit(p.ID) && button("add", "plus", locales.PageAddSubpage()).Clicked() {
 					a.newPage(p.ID, "")
 				}
 				button("more", "ellipsis", locales.PageActions()).Menu(func(m *ui.Menu) { a.pageMenu(m, *p, false) })
@@ -314,11 +332,28 @@ func (a *App) treeItem(c *ui.Context, key string) {
 				a.openFile(f)
 			}
 			if m.Item(locales.SidebarDeleteFile()).Chosen() {
-				if err := a.st.DeleteFile(f); err != nil {
-					a.toast(locales.SidebarCouldNotDelete(err.Error()))
-				}
+				a.fileToDelete = &f
 			}
 		})
+	}
+}
+
+// deleteFileAlert asks before the file chosen in the sidebar goes, from
+// every device, with no undo.
+func (a *App) deleteFileAlert(c *ui.Context) {
+	f := a.fileToDelete
+	if f == nil {
+		return
+	}
+	open := true
+	if ui.AlertDialog(c, &open, locales.SidebarDeleteFileTitle(f.Name), locales.SidebarDeleteFileMessage(),
+		locales.CommonCancel(), locales.CommonDelete()) == 1 {
+		if err := a.st.DeleteFile(*f); err != nil {
+			a.toast(locales.SidebarCouldNotDelete(err.Error()))
+		}
+	}
+	if !open {
+		a.fileToDelete = nil
 	}
 }
 
@@ -585,31 +620,37 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 func (a *App) sidebarFooter(c *ui.Context) {
 	pal := theme.Of(c)
 	ui.Row(c.Key("sidebar-footer")).Padding(8, 8, 8, 12).Gap(10).AlignItems(ui.Center).BorderWidth(1, 0, 0, 0).BorderColor(pal.Separator).Children(func() {
-		avatar(c, a.session.DisplayName, 26, false)
-		ui.Column(c).Grow(1).Children(func() {
-			ui.Text(c, a.session.DisplayName).FontSize(13).FontWeight(600).TextColor(pal.Text).SingleLine()
-			if status := a.accountStatus(); status != "" {
-				ui.Text(c, status).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
+		// Not signed in, the account row is the way to sign in.
+		signIn := !a.syncOn() && a.backend.Configured()
+		var account ui.Element
+		if signIn {
+			account = ui.ButtonBase(c.Key("account")).Grow(1).Gap(10).Padding(4).Margin(-4).Radius(7).AlignItems(ui.Center).Justify(ui.Start).
+				Label(locales.SidebarSignInToSync()).Tooltip(locales.SidebarSignInToSync())
+			if account.Hovered() {
+				account.Background(pal.Hover)
 			}
+		} else {
+			account = ui.Row(c.Key("account")).Grow(1).Gap(10).AlignItems(ui.Center)
+		}
+		account.Children(func() {
+			avatar(c, a.session.DisplayName, 26, false)
+			ui.Column(c).Grow(1).Children(func() {
+				ui.Text(c, a.session.DisplayName).FontSize(13).FontWeight(600).TextColor(pal.Text).SingleLine()
+				if status := a.accountStatus(); status != "" {
+					ui.Text(c, status).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
+				}
+			})
 		})
-		if !a.syncOn() && a.backend.Configured() {
-			if ghost(c, "sign-in", "", locales.CommonSignIn()).Clicked() {
-				a.navigate(Route{Kind: "signin"})
-			}
+		if signIn && account.Clicked() {
+			a.navigate(Route{Kind: "signin"})
 		}
 		tools(c, func() {
-			switch {
-			case a.updateReady != "":
+			// An update shows once it is installed and waits for a restart;
+			// "Check for Updates…" is in the app's and the menu bar's menus.
+			if a.updateReady != "" {
 				tip := locales.SidebarRestartToUpdate(a.updateReady)
 				if iconButton(c, "update", "rotate-cw", tip).TextColor(pal.Accent).Clicked() {
 					a.restartToUpdate()
-				}
-			case a.updateBusy != "":
-				b := ui.Button(c.Key("check-update"), "").Label(a.updateBusy).Tooltip(a.updateBusy).Padding(6).Disabled(true)
-				b.Children(func() { ui.Spinner(c).Size(16, 16) })
-			case a.updatable:
-				if iconButton(c, "check-update", "circle-fading-arrow-up", locales.SidebarCheckForUpdates()).Clicked() {
-					a.findUpdate(true)
 				}
 			}
 			settings := iconButton(c, "settings", "settings", locales.SidebarSettings())

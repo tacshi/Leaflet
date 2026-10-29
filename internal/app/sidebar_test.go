@@ -2,12 +2,16 @@ package app
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/remote"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // The sidebar's tree is MyGo's Outline: choosing a page opens it and is
@@ -407,5 +411,96 @@ func TestRenameAndDeleteTag(t *testing.T) {
 	}
 	if got, _ := a.st.Page(tpl.ID); !slices.Equal(got.Tags, []string{"q4", "keep"}) {
 		t.Errorf("the template after undo %q", got.Tags)
+	}
+}
+
+// A file deleted from the sidebar goes only once the alert asking about
+// it is answered.
+func TestDeleteFileAsksFirst(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.SidebarOpen = true
+	f, err := a.st.CreateFolder("Docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "budget.txt")
+	if err := os.WriteFile(src, []byte("1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.AddFile(src, f.ID, "", "text/plain"); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.treeOpen("folder", f.ID)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 900, 600)
+	tt.Frame()
+	ask := func() {
+		t.Helper()
+		if err := tt.RightClick("budget.txt"); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		if err := tt.Click(locales.SidebarDeleteFile()); err != nil {
+			t.Fatal(err)
+		}
+		tt.Frame()
+		if !tt.HasText(locales.SidebarDeleteFileTitle("budget.txt")) {
+			t.Fatalf("no alert in %v", tt.Texts())
+		}
+	}
+	ask()
+	if err := tt.Click(locales.CommonCancel()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if files, _ := a.st.Files(); len(files) != 1 || a.fileToDelete != nil {
+		t.Fatalf("after Cancel, %d files, asking %v", len(files), a.fileToDelete)
+	}
+	ask()
+	if err := tt.Click(locales.CommonDelete()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if files, _ := a.st.Files(); len(files) != 0 {
+		t.Errorf("after Delete, %d files", len(files))
+	}
+}
+
+// Not signed in, the account row signs in, and the footer has no other
+// way to; nor does it check for updates, which the menus do, or show one
+// until it is installed.
+func TestSidebarFooter(t *testing.T) {
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u1")
+	a.settings.SidebarOpen, a.updatable = true, true
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 260, 600)
+	tt.Frame()
+	if _, ok := tt.Find(locales.CommonSignIn()); ok {
+		t.Errorf("a Sign in button beside the account row: %v", tt.Texts())
+	}
+	a.updateChecking = true
+	tt.Frame()
+	if _, ok := tt.Find(locales.SidebarRestartToUpdate("2.0.0")); ok {
+		t.Error("an update shows before it is installed")
+	}
+	if err := tt.Click(locales.SidebarSignInToSync()); err != nil {
+		t.Fatal(err)
+	}
+	if a.route.Kind != "signin" {
+		t.Errorf("the account row went to %+v", a.route)
+	}
+	a.updateChecking, a.updateReady = false, "2.0.0"
+	tt.Frame()
+	if _, ok := tt.Find(locales.SidebarRestartToUpdate("2.0.0")); !ok {
+		t.Error("no icon for the update installed")
+	}
+	a.session.SignedIn = true
+	tt.Frame()
+	if _, ok := tt.Find(locales.SidebarSignInToSync()); ok {
+		t.Error("signed in, the account row still signs in")
 	}
 }

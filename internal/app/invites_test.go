@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
+	"leaflet/locales"
 )
 
 // invitesApp is an app signed in against a fake server that takes the
@@ -82,35 +84,40 @@ func waitFor(t *testing.T, tt *ui.Tester, ok func() bool) {
 	}
 }
 
-// Home lists the pages shared with the user that wait for them, and
-// accepting or declining one answers the server and takes it off.
-func TestHomeListsInvites(t *testing.T) {
+// The sidebar has a button for the pages shared with the user that wait
+// for them, only while some do; it lists them, and accepting or declining
+// one answers the server and takes it off.
+func TestSidebarListsInvites(t *testing.T) {
 	a, answers, frame := invitesApp(t)
+	a.settings.SidebarOpen = true
+	sidebar := func(c *ui.Context) {
+		frame()
+		ui.Column(c).Width(280).FillHeight().Children(func() { a.sidebar(c) })
+	}
+	none := ui.NewTester(sidebar, 900, 600)
+	none.Frame()
+	if _, ok := none.Find(locales.SidebarInvites(0)); ok || none.HasText("shared with you") {
+		t.Errorf("the sidebar without invites shows %v", none.Texts())
+	}
+
 	at := time.Date(2026, 10, 28, 9, 0, 0, 0, time.UTC)
 	a.invites = []syncsvc.Invite{
 		{PageID: "p1", Title: "Roadmap", Role: "editor", Inviter: "Sam", At: at},
 		{PageID: "p2", Title: "", Role: "viewer", Inviter: "", At: at},
 	}
-	tt := ui.NewTester(func(c *ui.Context) {
-		frame()
-		a.homeView(c)
-	}, 900, 600)
+	tt := ui.NewTester(sidebar, 900, 600)
+	tt.Frame()
+	if tt.HasText("Sam shared") {
+		t.Fatal("the invites show before the button is clicked")
+	}
+	if err := tt.Click(locales.SidebarInvites(2)); err != nil {
+		t.Fatal(err)
+	}
 	tt.Frame()
 	for _, want := range []string{"Sam shared “Roadmap” with you", "Can edit", "Someone shared “Untitled” with you", "Can view"} {
 		if !tt.HasText(want) {
 			t.Errorf("no %q in %v", want, tt.Texts())
 		}
-	}
-	// Without invites, Home shows only what it did.
-	without := ui.NewTester(func(c *ui.Context) {
-		saved := a.invites
-		a.invites = nil
-		a.homeView(c)
-		a.invites = saved
-	}, 900, 600)
-	without.Frame()
-	if without.HasText("shared") || without.HasText("Accept") {
-		t.Errorf("Home without invites shows %v", without.Texts())
 	}
 
 	r, ok := tt.Find("Sam shared “Roadmap” with you")
@@ -134,6 +141,7 @@ func TestHomeListsInvites(t *testing.T) {
 	}
 
 	a.invites = []syncsvc.Invite{{PageID: "p2", Title: "Notes", Role: "viewer", Inviter: "Kim", At: at}}
+	a.invitesOpen = true
 	tt.Frame()
 	if err := tt.Click("Decline"); err != nil {
 		t.Fatal(err)
@@ -145,6 +153,24 @@ func TestHomeListsInvites(t *testing.T) {
 	tt.Frame()
 	if tt.HasText("Kim shared") {
 		t.Error("a declined invite is still listed")
+	}
+	if _, ok := tt.Find(locales.SidebarInvites(0)); ok || a.invitesOpen {
+		t.Error("the button stays with no invites")
+	}
+}
+
+// An invite's notification shows the invites, the sidebar with them.
+func TestShowInvites(t *testing.T) {
+	a, _, _ := invitesApp(t)
+	a.settings.SidebarOpen = false
+	a.showInvites()
+	if a.settings.SidebarOpen || a.invitesOpen {
+		t.Error("showed invites with none")
+	}
+	a.invites = []syncsvc.Invite{{PageID: "p1", Title: "Roadmap", Role: "editor"}}
+	a.showInvites()
+	if !a.settings.SidebarOpen || !a.invitesOpen {
+		t.Errorf("sidebar %v, invites %v", a.settings.SidebarOpen, a.invitesOpen)
 	}
 }
 
@@ -181,5 +207,22 @@ func TestShareDialogMarksInvited(t *testing.T) {
 	mark, _ := tt.Find("Invited")
 	if mark.Y > kim.Y+kim.H || mark.Y+mark.H < kim.Y {
 		t.Errorf("Invited %+v is not on Kim's row %+v", mark, kim)
+	}
+}
+
+// The server's reasons for refusing an invite read as sentences.
+func TestShareFailure(t *testing.T) {
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{&remote.Error{Status: 400, Message: "invalid_email"}, locales.DialogShareInvalidEmail()},
+		{&remote.Error{Status: 400, Message: "cannot_share_with_self"}, locales.DialogShareWithSelf()},
+		{fmt.Errorf("share: %w", &remote.Error{Status: 400, Message: "invalid_email"}), locales.DialogShareInvalidEmail()},
+		{&remote.Error{Status: 500, Message: "boom"}, "boom"},
+	} {
+		if got := shareFailure(c.err); got != c.want {
+			t.Errorf("shareFailure(%v) = %q, want %q", c.err, got, c.want)
+		}
 	}
 }

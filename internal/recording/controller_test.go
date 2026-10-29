@@ -83,3 +83,82 @@ func TestPauseWhileStarting(t *testing.T) {
 		t.Errorf("paused %v, elapsed %v", r.State.Paused, r.Elapsed())
 	}
 }
+
+// A stream that hears no audio, as while a recording is paused, is kept
+// open with keepalives; one that ends before it is finished says why, and
+// one ended on purpose does not.
+func TestSonioxKeepsAliveAndTellsALostStream(t *testing.T) {
+	was := keepAliveAfter
+	keepAliveAfter = 50 * time.Millisecond
+	t.Cleanup(func() { keepAliveAfter = was })
+	texts := make(chan string, 10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		c, err := websocket.Accept(w, req, nil)
+		if err != nil {
+			return
+		}
+		for {
+			kind, data, err := c.Read(context.Background())
+			if err != nil {
+				return
+			}
+			if kind == websocket.MessageText {
+				texts <- string(data)
+				if req.URL.Query().Get("drop") != "" {
+					_ = c.Close(websocket.StatusPolicyViolation, "timeout")
+					return
+				}
+			}
+		}
+	}))
+	defer srv.Close()
+	dial := func(query string) *Soniox {
+		conn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http")+query, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return newSoniox(conn)
+	}
+
+	s := dial("")
+	select {
+	case got := <-texts:
+		if got != `{"type":"keepalive"}` {
+			t.Errorf("sent %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no keepalive")
+	}
+	s.Close()
+	<-s.done
+	if err := s.Lost(); err != nil {
+		t.Errorf("a stream closed here was lost: %v", err)
+	}
+
+	s = dial("?drop=1")
+	<-s.done
+	if s.Lost() == nil {
+		t.Error("a stream the server ended was not lost")
+	}
+}
+
+// Chunks that come in out of order are written in order, each once; one
+// that never comes is given up on.
+func TestChunksGoInOrder(t *testing.T) {
+	var got []byte
+	s := &captureSink{chunk: func(pcm []byte) { got = append(got, pcm...) }}
+	for _, seq := range []int{1, 0, 3, 2, 2, 0} {
+		s.deliver(seq, []byte{byte(seq)})
+	}
+	if !bytes.Equal(got, []byte{0, 1, 2, 3}) {
+		t.Fatalf("wrote %v", got)
+	}
+	// 4 never comes.
+	got = nil
+	for seq := 5; seq <= 5+maxHeld; seq++ {
+		s.deliver(seq, []byte{byte(seq)})
+	}
+	if len(got) != maxHeld+1 || got[0] != 5 {
+		t.Fatalf("wrote %v", got)
+	}
+}

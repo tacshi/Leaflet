@@ -372,3 +372,17 @@ func TestPubTunnelLifecycle(t *testing.T) {
 		t.Error("the link is still set")
 	}
 }
+
+// A page shared through a public link keeps agents to itself, from the
+// moment the link starts until it stops.
+func TestPublicLinkKeepsAgentsToThePage(t *testing.T) {
+	a := &App{}
+	a.setPub(&pubLink{page: "p1", state: "starting"})
+	if !a.publiclyLinked("p1") || a.publiclyLinked("p2") {
+		t.Error("the linked page is not the one shared")
+	}
+	a.setPub(nil)
+	if a.publiclyLinked("p1") {
+		t.Error("a stopped link still counts")
+	}
+}

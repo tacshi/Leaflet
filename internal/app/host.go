@@ -33,9 +33,11 @@ import (
 // Update runs fn on the main thread.
 func (a *App) Update(fn func()) { a.update(fn) }
 
-// Editor returns a page's open editor.
+// Editor returns a page's open editor. A page whose content could not be
+// read has none to change: what changes it reads the stored content,
+// and leaves it.
 func (a *App) Editor(pageID string) *editor.Editor {
-	if a.page != nil && a.page.id == pageID {
+	if a.page != nil && a.page.id == pageID && !a.page.unreadable {
 		return a.page.editor
 	}
 	return nil
@@ -89,7 +91,7 @@ func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	if f, ok := h.a.fileByID(n.Str("file_id")); ok {
 		path := h.a.localFile(f, redraw)
 		if path == "" {
-			return nil, nil, false
+			return nil, nil, h.a.downloadFailed(f.ID)
 		}
 		url = "file://" + path
 	}
@@ -153,7 +155,7 @@ func (h *host) CommentPreview(c *ui.Context, blockID string) {
 								ui.Text(c, cm.AuthorName).FontSize(12.5).FontWeight(600).TextColor(pal.Text).SingleLine()
 								ui.Text(c, humanTime(cm.CreatedAt)).FontSize(11.5).TextColor(pal.TextMuted).SingleLine()
 							})
-							ui.Text(c, cm.Body).FontSize(13).TextColor(pal.Text).Wrap().PaddingStart(24)
+							ui.Text(c, commentBody(cm)).FontSize(13).TextColor(pal.Text).Wrap().PaddingStart(24)
 						})
 					}
 				})
@@ -237,7 +239,9 @@ func (h *host) MentionItems(query string) []editor.MenuItem {
 	}
 	if h.a.page != nil {
 		for _, m := range h.a.page.members {
-			if m.UserID == h.a.session.UserID {
+			// Someone invited who has not accepted is no account yet: their
+			// ID is the invite's.
+			if m.UserID == h.a.session.UserID || !m.Accepted && m.Role != "owner" {
 				continue
 			}
 			if q == "" || strings.Contains(strings.ToLower(m.Name()), q) {
@@ -399,19 +403,10 @@ func (a *App) uploadImage(blockID string) {
 	go func() {
 		paths, _ := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: locales.HostReplaceImageTitle(),
 			Filters: []mygo.FileFilter{{Name: locales.HostImageFiles(), Extensions: exts}}})
-		if len(paths) == 0 {
+		if len(paths) == 0 || !doc.ImageExts[strings.ToLower(filepath.Ext(paths[0]))] {
 			return
 		}
-		a.update(func() {
-			ext := strings.ToLower(filepath.Ext(paths[0]))
-			if !doc.ImageExts[ext] {
-				return
-			}
-			f, err := a.st.AddFile(paths[0], "", pageID, mime.TypeByExtension(ext))
-			if err != nil {
-				a.toast(locales.HostErrorAddFile(err.Error()))
-				return
-			}
+		a.addFiles(paths[:1], "", pageID, func(f store.File) {
 			if a.page == nil || a.page.id != pageID {
 				return
 			}
@@ -428,6 +423,23 @@ func (a *App) uploadImage(blockID string) {
 			})
 		})
 	}()
+}
+
+// addFiles copies files into the app's folder, for a folder or a page;
+// it runs off the main thread, as a large file takes a while to copy.
+// added runs on the main thread for each, in order, once it is in; one
+// that could not be added says so.
+func (a *App) addFiles(paths []string, folderID, pageID string, added func(f store.File)) {
+	for _, path := range paths {
+		f, err := a.st.AddFile(path, folderID, pageID, mime.TypeByExtension(strings.ToLower(filepath.Ext(path))))
+		a.update(func() {
+			if err != nil {
+				a.toast(locales.HostErrorAddFile(err.Error()))
+				return
+			}
+			added(f)
+		})
+	}
 }
 
 // uploadedImage is an image block showing a file of the page.
@@ -447,29 +459,18 @@ func (a *App) uploadIntoPage() {
 	pageID := ps.id
 	go func() {
 		paths, _ := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: locales.HostUploadTitle()})
-		if len(paths) == 0 {
-			return
-		}
-		a.update(func() {
-			for _, path := range paths {
-				ext := strings.ToLower(filepath.Ext(path))
-				f, err := a.st.AddFile(path, "", pageID, mime.TypeByExtension(ext))
-				if err != nil {
-					a.toast(locales.HostErrorAddFile(err.Error()))
-					continue
-				}
-				if a.page == nil || a.page.id != pageID {
-					a.toast(locales.HostAddedToSpace(f.Name))
-					continue
-				}
-				n := &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
-					"url": "file://" + f.LocalPath, "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
-				}}
-				if doc.ImageExts[ext] {
-					n = uploadedImage(f)
-				}
-				a.page.editor.InsertBlocks(n)
+		a.addFiles(paths, "", pageID, func(f store.File) {
+			if a.page == nil || a.page.id != pageID {
+				a.toast(locales.HostAddedToSpace(f.Name))
+				return
 			}
+			n := &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
+				"url": "file://" + f.LocalPath, "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
+			}}
+			if doc.ImageExts[strings.ToLower(filepath.Ext(f.Name))] {
+				n = uploadedImage(f)
+			}
+			a.page.editor.InsertBlocks(n)
 		})
 	}()
 }
@@ -478,20 +479,17 @@ func (a *App) uploadIntoPage() {
 func (a *App) uploadFile(folderID string) {
 	go func() {
 		paths, _ := mygo.Dialog.Open(mygo.OpenDialogOptions{Title: locales.HostUploadTitle()})
-		a.update(func() {
-			for _, path := range paths {
-				if _, err := a.st.AddFile(path, folderID, "", mime.TypeByExtension(filepath.Ext(path))); err != nil {
-					a.toast(locales.HostErrorAddFile(err.Error()))
-				}
-			}
-			a.treeOpen("folder", folderID)
-		})
+		if len(paths) == 0 {
+			return
+		}
+		a.update(func() { a.treeOpen("folder", folderID) })
+		a.addFiles(paths, folderID, "", func(store.File) {})
 	}()
 }
 
 func (a *App) openFile(f store.File) {
 	// A click tries a download that failed again.
-	delete(a.downloads, f.ID)
+	delete(a.downloadFails, f.ID)
 	path := a.localFile(f, func() {
 		if f, ok := a.fileByID(f.ID); ok && f.LocalPath != "" {
 			openSafely(f.LocalPath)
@@ -517,15 +515,22 @@ func openSafely(path string) {
 	_ = mygo.Shell.OpenPath(path)
 }
 
-// programExts are the kinds of file that opening runs: apps, installers,
-// scripts and the shortcuts to them.
+// programExts are the kinds of file that opening runs, or sends where
+// they say: apps, installers, scripts, the shortcuts and links to them,
+// and documents that run what they hold.
 var programExts = map[string]bool{
 	".app": true, ".command": true, ".tool": true, ".terminal": true, ".sh": true, ".bash": true, ".zsh": true, ".csh": true,
-	".pkg": true, ".mpkg": true, ".dmg": true, ".scpt": true, ".scptd": true, ".applescript": true, ".workflow": true,
-	".action": true, ".fileloc": true, ".jar": true, ".py": true, ".pyw": true, ".pl": true, ".rb": true,
-	".exe": true, ".com": true, ".bat": true, ".cmd": true, ".msi": true, ".msix": true, ".appx": true, ".ps1": true,
-	".vbs": true, ".vbe": true, ".js": true, ".jse": true, ".wsf": true, ".wsh": true, ".hta": true, ".scr": true,
-	".cpl": true, ".msc": true, ".lnk": true, ".pif": true, ".reg": true, ".appref-ms": true,
+	".ksh": true, ".fish": true, ".pkg": true, ".mpkg": true, ".dmg": true, ".scpt": true, ".scptd": true, ".applescript": true,
+	".workflow": true, ".action": true, ".fileloc": true, ".webloc": true, ".inetloc": true, ".afploc": true, ".ftploc": true,
+	".mobileconfig": true, ".jar": true, ".jnlp": true, ".py": true, ".pyw": true, ".pl": true, ".rb": true, ".php": true,
+	".exe": true, ".com": true, ".bat": true, ".cmd": true, ".msi": true, ".msp": true, ".msix": true, ".msixbundle": true,
+	".appx": true, ".appxbundle": true, ".appinstaller": true, ".application": true, ".gadget": true, ".ps1": true,
+	".psm1": true, ".psd1": true, ".vb": true, ".vbs": true, ".vbe": true, ".js": true, ".jse": true, ".wsf": true,
+	".wsh": true, ".wsc": true, ".sct": true, ".hta": true, ".scr": true, ".cpl": true, ".msc": true, ".inf": true,
+	".lnk": true, ".pif": true, ".reg": true, ".appref-ms": true, ".url": true, ".website": true, ".scf": true,
+	".library-ms": true, ".search-ms": true, ".searchconnector-ms": true, ".settingcontent-ms": true, ".chm": true,
+	".hlp": true, ".diagcab": true, ".xbap": true, ".desktop": true, ".appimage": true, ".run": true, ".deb": true,
+	".rpm": true, ".flatpakref": true, ".snap": true,
 }
 
 // runsAsProgram reports whether opening the file would run it.
@@ -551,14 +556,15 @@ func (a *App) fileByID(id string) (store.File, bool) {
 
 // localFile returns where a file is on this device, or "" while one
 // uploaded from another device downloads; done runs once it has. A
-// download that fails is not tried again until the file is opened.
+// download that failed is tried again once imageRetry has passed, or
+// when the file is opened.
 func (a *App) localFile(f store.File, done func()) string {
 	if f.LocalPath != "" {
 		if _, err := os.Stat(f.LocalPath); err == nil {
 			return f.LocalPath
 		}
 	}
-	if f.StoragePath == "" || !a.sync.CanFetch() || a.downloads[f.ID] {
+	if f.StoragePath == "" || !a.sync.CanFetch() || a.downloads[f.ID] || a.downloadFailed(f.ID) {
 		return ""
 	}
 	if a.downloads == nil {
@@ -573,16 +579,30 @@ func (a *App) localFile(f store.File, done func()) string {
 			_, err = a.st.DownloadedFile(f.ID, data)
 		}
 		a.update(func() {
+			delete(a.downloads, f.ID)
 			if err != nil {
 				log.Printf("download %s: %v", f.Name, err)
+				if a.downloadFails == nil {
+					a.downloadFails = map[string]time.Time{}
+				}
+				a.downloadFails[f.ID] = time.Now()
+				// The next frame after the wait tries again.
+				time.AfterFunc(imageRetry, func() { a.update(func() {}) })
 				return
 			}
-			delete(a.downloads, f.ID)
+			delete(a.downloadFails, f.ID)
 			a.reload(store.Change{Table: "files"})
 			done()
 		})
 	}()
 	return ""
+}
+
+// downloadFailed reports whether a file's download failed, and waits to be
+// tried again.
+func (a *App) downloadFailed(id string) bool {
+	at, ok := a.downloadFails[id]
+	return ok && time.Since(at) < imageRetry
 }
 
 // exportPage saves a page as Markdown.

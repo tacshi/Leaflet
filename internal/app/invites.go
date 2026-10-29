@@ -14,13 +14,14 @@ import (
 )
 
 // Invites: pages shared with the user that reach them once they accept
-// (docs/protocol.md §6). Sync reads them with each pass; Home lists them.
+// (docs/protocol.md §6). Sync reads them with each pass; a button in the
+// sidebar's top bar, there only while some wait, lists them.
 
 // inviteNotification starts the ID of an invite's notification, which a
-// click on opens Home by.
+// click on shows the invites by.
 const inviteNotification = "invite:"
 
-// startInvites follows the invites sync reads, and shows Home when an
+// startInvites follows the invites sync reads, and shows them when an
 // invite's notification is clicked.
 func (a *App) startInvites() {
 	a.sync.OnInvites = func() {
@@ -35,7 +36,7 @@ func (a *App) startInvites() {
 		}
 		a.update(func() {
 			a.showWindow()
-			a.navigate(Route{Kind: "home"})
+			a.showInvites()
 		})
 	})
 }
@@ -76,20 +77,30 @@ func inviterName(inv syncsvc.Invite) string {
 	return inv.Inviter
 }
 
-// inviteList is Home's list of the invites, over what it shows.
-func (a *App) inviteList(c *ui.Context) {
+// showInvites opens the sidebar's list of the invites, the sidebar with
+// it.
+func (a *App) showInvites() {
 	if len(a.invites) == 0 {
 		return
 	}
+	if !a.settings.SidebarOpen {
+		a.toggleSidebar()
+	}
+	a.invitesOpen = true
+}
+
+// inviteList is the list of the invites below the sidebar's button for
+// them.
+func (a *App) inviteList(c *ui.Context) {
 	pal := theme.Of(c)
-	ui.Column(c.Key("invites")).FillWidth().Padding(16, 20, 0).Gap(6).AlignItems(ui.Center).Children(func() {
+	ui.Column(c.Key("invites")).Width(380).Gap(6).Children(func() {
 		for _, inv := range a.invites {
 			busy := a.inviteBusy[inv.PageID]
-			ui.Row(c.Key(inv.PageID)).FillWidth().MaxWidth(560).Padding(8, 8, 8, 12).Gap(10).Radius(8).
+			ui.Row(c.Key(inv.PageID)).FillWidth().Padding(8, 8, 8, 12).Gap(10).Radius(8).
 				Border(1, pal.Divider).Background(pal.Surface).AlignItems(ui.Center).Children(func() {
 				avatar(c, inviterName(inv), 26, false)
-				ui.Column(c).Grow(1).Gap(1).Children(func() {
-					ui.Text(c, inviteText(inv)).FontSize(13.5).TextColor(pal.Text)
+				ui.Column(c).Grow(1).Shrink(1).Gap(1).Children(func() {
+					ui.Text(c, inviteText(inv)).FontSize(13.5).TextColor(pal.Text).Wrap()
 					ui.Text(c, shareRoleName(inv.Role)).FontSize(12).TextColor(pal.TextMuted)
 				})
 				if primary(c, "accept", "", locales.ShellInviteAccept()).Disabled(busy).Clicked() {

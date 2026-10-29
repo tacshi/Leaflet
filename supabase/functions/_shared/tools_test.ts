@@ -171,6 +171,33 @@ Deno.test("edit session applies tools and records replayable ops", async () => {
   assertEquals(shape(applyOps(session.content, inverse, 2000)), shape(session.before));
 });
 
+Deno.test("a replace that kept children keeps the newer revision's children", async () => {
+  const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false, now: () => 1000 });
+  await session.call("replace_block", { id: "l1", block: { type: "bulleted_list", text: "Create more pages" } });
+
+  // Someone saved the page meanwhile: the child edited, another added.
+  const latest = sample();
+  const l1 = latest.document.children![1];
+  l1.children![0].data = { delta: [{ insert: "nested, edited" }] };
+  l1.children!.push({ id: "l3", type: "bulleted_list", data: { delta: [{ insert: "added" }] } });
+  latest.meta.blocks = { l2: 500, l3: 500 };
+
+  const out = applyOps(latest, session.ops, 2000);
+  const block = out.document.children![1];
+  assertEquals(block.data!.delta, [{ insert: "Create more pages" }]);
+  assertEquals(block.children, l1.children);
+  assertEquals(out.meta.blocks, { l1: 2000, l2: 500, l3: 500 });
+
+  // Children given anew still replace the old ones.
+  const fresh = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false });
+  await fresh.call("replace_block", {
+    id: "l1",
+    block: { type: "bulleted_list", text: "Create pages", children: [{ type: "bulleted_list", text: "new" }] },
+  });
+  const children = applyOps(latest, fresh.ops).document.children![1].children!;
+  assertEquals(children.map((c) => c.data!.delta), [[{ insert: "new" }]]);
+});
+
 Deno.test("invalid calls return errors and change nothing", async () => {
   const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false });
   const cases: [string, unknown][] = [

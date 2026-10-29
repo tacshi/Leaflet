@@ -126,10 +126,7 @@ func writePage(q querier, p Page) error {
 func (s *Store) savePages(label string, pages ...Page) error {
 	err := s.inTx(func(tx *sql.Tx) error {
 		for _, p := range pages {
-			if err := writePage(tx, p); err != nil {
-				return err
-			}
-			if err := queue(tx, "pages", p.ID, PageToRemote(p), label, p.ID); err != nil {
+			if err := savePage(tx, p, label); err != nil {
 				return err
 			}
 		}
@@ -142,6 +139,22 @@ func (s *Store) savePages(label string, pages ...Page) error {
 		s.Notify("outbox", p.ID)
 	}
 	return nil
+}
+
+// savePage stores a page changed here and queues the columns it changed
+// to go up, in the caller's transaction.
+func savePage(tx *sql.Tx, p Page, label string) error {
+	var old map[string]any
+	switch was, err := scanPage(tx.QueryRow(`SELECT `+pageCols+` FROM pages WHERE id = ?`, p.ID)); {
+	case err == nil:
+		old = PageToRemote(was)
+	case !errors.Is(err, sql.ErrNoRows):
+		return err
+	}
+	if err := writePage(tx, p); err != nil {
+		return err
+	}
+	return queueChange(tx, "pages", p.ID, old, PageToRemote(p), label, p.ID)
 }
 
 // NewPageOptions describe a page to create.

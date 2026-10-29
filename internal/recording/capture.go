@@ -25,7 +25,7 @@ const capturePage = `<!doctype html>
 <script>
 const session = new URLSearchParams(location.search).get("s");
 const call = (name, ...args) => window.mygo.call("Recorder." + name, session, ...args);
-let ctx, stream, node, source, paused = false, buf = [], pos = 0;
+let ctx, stream, node, source, paused = false, buf = [], pos = 0, seq = 0;
 function send() {
   if (!buf.length) return;
   let n = 0; for (const b of buf) n += b.length;
@@ -34,7 +34,8 @@ function send() {
   buf = [];
   const bytes = new Uint8Array(out.buffer);
   let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-  call("Chunk", btoa(s));
+  // Calls may run in any order: the number puts the chunks back in it.
+  call("Chunk", seq++, btoa(s));
 }
 async function start() {
   try {
@@ -91,12 +92,51 @@ type captureSink struct {
 	chunk   func([]byte)
 	started func()
 	failed  func(string)
+
+	// The page's calls run each on a goroutine of its own, so chunks can
+	// come in out of order: those ahead of the next one wait in held.
+	mu   sync.Mutex
+	next int
+	held map[int][]byte
+}
+
+// maxHeld is the most chunks that wait for an earlier one, 2 s of audio:
+// past it, one that never came is given up on.
+const maxHeld = 40
+
+// deliver hands on chunk seq, and those after it it held, in order and
+// one at a time.
+func (s *captureSink) deliver(seq int, pcm []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if seq < s.next || s.chunk == nil {
+		return
+	}
+	if s.held == nil {
+		s.held = map[int][]byte{}
+	}
+	s.held[seq] = pcm
+	if len(s.held) > maxHeld {
+		s.next = seq
+		for k := range s.held {
+			s.next = min(s.next, k)
+		}
+	}
+	for {
+		p, ok := s.held[s.next]
+		if !ok {
+			return
+		}
+		delete(s.held, s.next)
+		s.next++
+		s.chunk(p)
+	}
 }
 
 var service = &Recorder{sessions: map[string]*captureSink{}}
 
-// Chunk takes base64 PCM16 audio of a session.
-func (r *Recorder) Chunk(session, data string) error {
+// Chunk takes base64 PCM16 audio of a session, the seq-th chunk of it.
+func (r *Recorder) Chunk(session string, seq int, data string) error {
 	pcm, err := base64.StdEncoding.DecodeString(data)
 	if err != nil {
 		return err
@@ -104,8 +144,8 @@ func (r *Recorder) Chunk(session, data string) error {
 	r.mu.Lock()
 	s := r.sessions[session]
 	r.mu.Unlock()
-	if s != nil && s.chunk != nil {
-		s.chunk(pcm)
+	if s != nil {
+		s.deliver(seq, pcm)
 	}
 	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -174,10 +175,21 @@ type Soniox struct {
 	final   []Token
 	pending []Token
 	err     error
-	done    chan struct{}
+	// lost is why the stream ended before Finish or Close asked it to.
+	lost error
+	done chan struct{}
+	// sent is when audio or a keepalive last went, in Unix milliseconds;
+	// ending is set once Finish or Close ends the stream.
+	sent   atomic.Int64
+	ending atomic.Bool
 	// OnText runs with the live text: final words and the current draft.
 	OnText func(string)
 }
+
+// keepAliveAfter is how long the stream goes without audio, as while a
+// recording is paused, before a keepalive goes: Soniox ends a stream that
+// hears nothing for 20 s. Tests shorten it.
+var keepAliveAfter = 8 * time.Second
 
 // DialSoniox connects and sends the stream's configuration.
 func DialSoniox(ctx context.Context, apiKey, model string, hints []string, speakers bool) (*Soniox, error) {
@@ -194,9 +206,60 @@ func DialSoniox(ctx context.Context, apiKey, model string, hints []string, speak
 		_ = conn.Close(websocket.StatusInternalError, "")
 		return nil, err
 	}
+	return newSoniox(conn), nil
+}
+
+// newSoniox reads and keeps alive a stream that has its configuration.
+func newSoniox(conn *websocket.Conn) *Soniox {
 	s := &Soniox{conn: conn, done: make(chan struct{})}
+	s.sent.Store(time.Now().UnixMilli())
 	go s.read()
-	return s, nil
+	go s.keepAlive()
+	return s
+}
+
+// keepAlive keeps a stream that gets no audio open, until it ends.
+func (s *Soniox) keepAlive() {
+	tick := time.NewTicker(min(time.Second, keepAliveAfter/2))
+	defer tick.Stop()
+	for {
+		select {
+		case <-s.done:
+			return
+		case <-tick.C:
+		}
+		if s.ending.Load() || time.Since(time.UnixMilli(s.sent.Load())) < keepAliveAfter {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := s.conn.Write(ctx, websocket.MessageText, []byte(`{"type":"keepalive"}`))
+		cancel()
+		if err != nil {
+			s.lose(err)
+			return
+		}
+		s.sent.Store(time.Now().UnixMilli())
+	}
+}
+
+// lose records why the stream ended early, unless it was asked to end.
+func (s *Soniox) lose(err error) {
+	if s.ending.Load() {
+		return
+	}
+	s.mu.Lock()
+	if s.lost == nil {
+		s.lost = err
+	}
+	s.mu.Unlock()
+}
+
+// Lost is why the stream ended before it was finished, nil if it did not:
+// what was said after that is in the audio, not the transcript.
+func (s *Soniox) Lost() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.lost
 }
 
 func (s *Soniox) read() {
@@ -204,6 +267,7 @@ func (s *Soniox) read() {
 	for {
 		_, data, err := s.conn.Read(context.Background())
 		if err != nil {
+			s.lose(err)
 			return
 		}
 		var msg struct {
@@ -218,6 +282,7 @@ func (s *Soniox) read() {
 		if msg.ErrorMessage != "" {
 			s.err = fmt.Errorf("%s", msg.ErrorMessage)
 			s.mu.Unlock()
+			s.lose(s.err)
 			return
 		}
 		s.pending = nil
@@ -257,16 +322,22 @@ func (s *Soniox) textLocked() string {
 func (s *Soniox) Send(pcm []byte) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = s.conn.Write(ctx, websocket.MessageBinary, pcm)
+	if err := s.conn.Write(ctx, websocket.MessageBinary, pcm); err != nil {
+		s.lose(err)
+		return
+	}
+	s.sent.Store(time.Now().UnixMilli())
 }
 
 // Close drops the stream, for a recording that needs it no more.
 func (s *Soniox) Close() {
+	s.ending.Store(true)
 	_ = s.conn.Close(websocket.StatusNormalClosure, "")
 }
 
 // Finish ends the stream and waits for the last final words.
 func (s *Soniox) Finish() ([]store.Segment, error) {
+	s.ending.Store(true)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = s.conn.Write(ctx, websocket.MessageBinary, []byte{})
 	cancel()

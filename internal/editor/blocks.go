@@ -163,12 +163,15 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 			return
 		}
 		// The cell's Markdown, wrapping, while it is edited.
-		text := ""
+		stored := ""
 		if para != nil {
-			text = para.Delta().ToMarkdown()
+			stored = para.Delta().ToMarkdown()
 		}
-		before := text
-		in := ui.TextAreaBase(c.Key("in"), &text).Font(font.Family).FontSize(font.Size).FontWeight(font.Weight).
+		if e.cellFor != id || e.cellSaved != stored {
+			e.cellFor, e.cellText, e.cellSaved = id, stored, stored
+		}
+		before := e.cellText
+		in := ui.TextAreaBase(c.Key("in"), &e.cellText).Font(font.Family).FontSize(font.Size).FontWeight(font.Weight).
 			TextColor(pal.Text).FillWidth().AutoFocus().
 			OnTextKey(func(k ui.TextKey) bool {
 				switch {
@@ -191,7 +194,7 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 			e.cellEdit, e.cellFocused = "", false
 			e.services.Invalidate()
 		}
-		if text != before {
+		if text := e.cellText; text != before {
 			e.pushUndo(true)
 			if cell == nil {
 				cell = &doc.Node{ID: doc.NewBlockID(), Type: "table/cell", Data: map[string]any{"colPosition": col, "rowPosition": r}}
@@ -202,11 +205,12 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 				cell.Children = []*doc.Node{newText("paragraph", nil)}
 			}
 			cell.Children[0].SetDelta(doc.FromMarkdown(text))
+			e.cellSaved = cell.Children[0].Delta().ToMarkdown()
 			e.invalidate(table.ID)
 			e.changed()
 		}
 		if from, to := in.TextSelection(); from != to && in.Focused() {
-			e.cellTools(c, in, table.ID, text, from, to, pal)
+			e.cellTools(c, in, table.ID, e.cellText, from, to, pal)
 		}
 	})
 }

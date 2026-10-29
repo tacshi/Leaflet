@@ -127,6 +127,15 @@ func (c *Content) Apply(o Op) error {
 		}
 		n := o.Node.Clone()
 		DropCells(n)
+		// A replace that kept the block's children carries them as the
+		// agent read them: keep the ones the block has here instead, so a
+		// child edited or added since is not undone.
+		if cur := c.Find(o.ID); cur != nil && keptChildren(o) && canHoldChildren(n, cur) {
+			n.Children = nil
+			if len(cur.Children) > 0 {
+				n.Children = cur.Children
+			}
+		}
 		return c.Replace(o.ID, n)
 	case "move":
 		if o.Position == nil {
@@ -236,6 +245,28 @@ func (c *Content) MoveOp(id string, p Position) Op {
 // InsertOp builds an insert.
 func InsertOp(p Position, nodes ...*Node) Op {
 	return Op{Op: "insert", Position: &p, Nodes: nodes}
+}
+
+// keptChildren reports whether a replace left the block's children as
+// they were: its node has the children its previous had, as replace_block
+// without children writes it. Children given anew get new IDs, so they
+// never match.
+func keptChildren(o Op) bool {
+	if o.PrevNode == nil || o.PrevNode.Type == "table" || len(o.Node.Children) != len(o.PrevNode.Children) {
+		return false
+	}
+	for i, k := range o.Node.Children {
+		if k.ID != o.PrevNode.Children[i].ID {
+			return false
+		}
+	}
+	return true
+}
+
+// canHoldChildren reports whether n may take the children cur has: a
+// list takes any, another block those of a block of its own kind.
+func canHoldChildren(n, cur *Node) bool {
+	return cur.Type != "table" && (NestableTypes[n.Type] || n.Type == cur.Type)
 }
 
 // Touched returns the IDs of the blocks ops change.

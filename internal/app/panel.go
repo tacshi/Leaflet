@@ -136,6 +136,14 @@ func (a *App) agentPanel(c *ui.Context) {
 					}
 				})
 				ui.Spacer(c)
+				// While its run works on this device, Send stops it.
+				if run := chatRun(sess); run != nil && run.Stoppable() {
+					stop := primary(c, "stop", "square-stop", "").Size(28, 28).Padding(0).Label(locales.PageStopRun()).Tooltip(locales.PageStopRun())
+					if stop.Clicked() {
+						a.hub.Stop(ps.id, run.ID)
+					}
+					return
+				}
 				b := primary(c, "send", "arrow-up", "").Size(28, 28).Padding(0).Label(locales.PanelSend())
 				b.Disabled(strings.TrimSpace(cs.draft) == "" || sess.Running)
 				if b.Clicked() {
@@ -144,6 +152,16 @@ func (a *App) agentPanel(c *ui.Context) {
 			})
 		})
 	})
+}
+
+// chatRun is the run the chat waits for, or nil.
+func chatRun(sess *agents.Session) *agents.Run {
+	for i := len(sess.Messages) - 1; i >= 0; i-- {
+		if m := sess.Messages[i]; m.Pending {
+			return sess.Run(m.RunID)
+		}
+	}
+	return nil
 }
 
 // focusBlocks are the blocks the editor's selection is on.
@@ -455,7 +473,7 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 			// A guest's comment came through the owner's public link: the
 			// owner may delete it.
 			guest := cm.AuthorKind == "guest" && a.page != nil && a.ownsPage(a.page.id)
-			if mine || guest {
+			if (mine || guest) && cm.DeletedAt.IsZero() {
 				tools(c, func() {
 					more := iconButton(c, "more", "ellipsis", locales.PanelCommentActions()).Size(20, 20).Padding(2)
 					more.Menu(func(m *ui.Menu) {
@@ -468,8 +486,21 @@ func (a *App) commentRow(c *ui.Context, cm store.Comment) {
 				})
 			}
 		})
+		if !cm.DeletedAt.IsZero() {
+			ui.Text(c, commentBody(cm)).FontSize(13.5).TextColor(pal.TextMuted).PaddingStart(28)
+			return
+		}
 		ui.Text(c, cm.Body).FontSize(13.5).TextColor(pal.Text).PaddingStart(28).Selectable()
 	})
+}
+
+// commentBody is a comment's text, or says it was deleted: a thread whose
+// first comment was deleted keeps its replies.
+func commentBody(cm store.Comment) string {
+	if !cm.DeletedAt.IsZero() {
+		return locales.PanelCommentDeleted()
+	}
+	return cm.Body
 }
 
 // askedBy names who asked for an agent's comment, when that was someone

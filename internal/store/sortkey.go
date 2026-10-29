@@ -11,10 +11,16 @@ import (
 const digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 // KeyBetween returns a key that sorts after a ("" for first) and before b
-// ("" for last).
+// ("" for last). No key sorts between a and a followed by 0s, which this
+// never makes but another client may have, as the agent function once
+// made "a0": then it returns one just after b, so the page goes next to
+// where it was put rather than nowhere.
 func KeyBetween(a, b string) string {
 	if a != "" && b != "" && a >= b {
 		panic(fmt.Sprintf("%s must sort before %s", a, b))
+	}
+	if b != "" && strings.HasPrefix(b, a) && strings.Trim(b[len(a):], "0") == "" {
+		return b + mid("", "", false)
 	}
 	return mid(a, b, b != "")
 }

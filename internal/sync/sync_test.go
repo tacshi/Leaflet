@@ -773,6 +773,82 @@ func TestCommentsPushAsUpdates(t *testing.T) {
 	}
 }
 
+// A page changed here sends only what changed, so an offline rename does
+// not undo a move or a deletion made on another device meanwhile; one the
+// server does not have goes up whole.
+func TestPagePushSendsOnlyItsChanges(t *testing.T) {
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clear := func() {
+		entries, _ := st.Pending()
+		for _, e := range entries {
+			_ = st.Dequeue(e)
+		}
+	}
+	clear() // the server has the page now
+	if err := st.RenamePage(p.ID, "Plan for Q3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RenamePage(p.ID, "Plan for Q4"); err != nil {
+		t.Fatal(err)
+	}
+
+	onServer := true
+	var methods []string
+	var sent map[string]any
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		sent = nil
+		_ = json.NewDecoder(r.Body).Decode(&sent)
+		out := []map[string]any{}
+		if r.Method != "PATCH" || onServer {
+			out = append(out, map[string]any{"id": p.ID})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(methods, ",") != "PATCH" || len(sent) != 1 || sent["title"] != "Plan for Q4" {
+		t.Errorf("requests %v, sent %v", methods, sent)
+	}
+	if st.PendingCount() != 0 {
+		t.Errorf("%d still queued", st.PendingCount())
+	}
+
+	// Nothing changed: nothing queued.
+	if err := st.RenamePage(p.ID, "Plan for Q4"); err != nil {
+		t.Fatal(err)
+	}
+	if st.PendingCount() != 0 {
+		t.Errorf("an unchanged page queued")
+	}
+
+	onServer, methods = false, nil
+	if err := st.MovePage(p.ID, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RenamePage(p.ID, "Plan"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(methods, ",") != "PATCH,POST" || sent["space_id"] == nil || sent[store.ChangedKey] != nil {
+		t.Errorf("requests %v, sent %v", methods, sent)
+	}
+}
+
 // Signing in uploads the audio of recordings made before, once they are
 // done, and none whose audio is gone.
 func TestSignInUploadsEarlierRecordings(t *testing.T) {
@@ -819,6 +895,79 @@ func TestSignInUploadsEarlierRecordings(t *testing.T) {
 	}
 	if strings.Join(uploads, ",") != "recordings/"+done.ID {
 		t.Errorf("uploads %v", uploads)
+	}
+}
+
+// Signing in adopts the device's space only once everything in it is
+// queued: a pass that could not queue it all leaves the space to adopt
+// again, and what was not queued is queued before the next pass. What
+// is made meanwhile goes into the account's space.
+func TestSignInAdoptsOnceAllIsQueued(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.CreateFolder("Work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		if err := st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The disk refuses the folder's entry, as one that is full would.
+	if _, err := st.DB().Exec(`CREATE TRIGGER refuse BEFORE INSERT ON outbox WHEN NEW.entity = 'folders'
+		BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	const remoteID = "00000000-0000-0000-0000-0000000000aa"
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": remoteID, "name": "My space"}})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+	if err := svc.resolveSpace(ctx); !errors.Is(err, errNotRequeued) {
+		t.Fatalf("resolveSpace: %v", err)
+	}
+	if _, ok := st.Value("space.u1"); ok {
+		t.Error("the space counts as adopted with the folder not queued")
+	}
+	if !st.HasPending("pages", p.ID) || st.HasPending("folders", f.ID) {
+		t.Errorf("page queued %v, folder queued %v", st.HasPending("pages", p.ID), st.HasPending("folders", f.ID))
+	}
+	if sess := st.Session(); sess.SpaceID != remoteID || !sess.SignedIn {
+		t.Errorf("session %+v", sess)
+	}
+	src := t.TempDir() + "/notes.txt"
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	added, err := st.AddFile(src, "", "", "text/plain")
+	if err != nil || added.SpaceID != remoteID {
+		t.Errorf("file added meanwhile in %q: %v", added.SpaceID, err)
+	}
+
+	if _, err := st.DB().Exec(`DROP TRIGGER refuse`); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.retryMoves(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !st.HasPending("folders", f.ID) {
+		t.Error("the folder is not queued before the next pass")
+	}
+	if v, _ := st.Value(requeueKey); v != "" {
+		t.Errorf("%s is %q after all went", requeueKey, v)
+	}
+	if err := svc.resolveSpace(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := st.Value("space.u1"); v != remoteID {
+		t.Errorf("space.u1 is %q", v)
 	}
 }
 
@@ -990,6 +1139,84 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 	}
 	if row, _ := st.ContentRow(p.ID); row.Content != broken || !st.HasPending("page_content", p.ID) {
 		t.Errorf("content %q, pending %v", row.Content, st.HasPending("page_content", p.ID))
+	}
+}
+
+// Content on the server that this device cannot read, as a newer version
+// of Leaflet may write, is neither merged as an empty page nor saved
+// over: the server keeps its copy, the device keeps its own, the change
+// waits, and the other pages' content still comes.
+func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &doc.Content{Children: []*doc.Node{para("a", "one"), para("b", "two")},
+		Blocks: map[string]int64{"a": 1000, "b": 1000}, Deleted: map[string]int64{}}
+	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
+		t.Fatal(err)
+	}
+	mine := st.Content(p.ID)
+	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
+	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
+		t.Fatal(err)
+	}
+	const unreadable = `{"document": {"type": "page", "id": "root", "children": [{"id": "x", "type": "paragraph", "data": ["of a newer kind"]}]}, "meta": {"v": 1, "blocks": {"x": 5}}}`
+	srv := &contentServer{content: unreadable, revision: 2}
+	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	ctx := context.Background()
+
+	if done, err := svc.pushContent(ctx, p.ID); done || !errors.Is(err, errServerUnreadable) {
+		t.Errorf("push: done %v, %v", done, err)
+	}
+	if srv.updates != 0 || srv.content != unreadable {
+		t.Errorf("server saved over: %d updates, %s", srv.updates, srv.content)
+	}
+	if _, err := svc.RefreshContent(ctx, p.ID); !errors.Is(err, errServerUnreadable) {
+		t.Errorf("refresh: %v", err)
+	}
+	if c := st.Content(p.ID); c == nil || textOf(c, "a") != "one, edited here" || textOf(c, "b") != "two" || !st.HasPending("page_content", p.ID) {
+		t.Errorf("content %v, pending %v", c, st.HasPending("page_content", p.ID))
+	}
+
+	// A pull leaves the page waiting for content it can read, and goes on.
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs := &doc.Content{Children: []*doc.Node{para("c", "from another device")}, Blocks: map[string]int64{"c": 1000}, Deleted: map[string]int64{}}
+	hs2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out := []map[string]any{}
+		switch {
+		case !strings.Contains(r.URL.Query().Get("select"), "content"):
+			out = append(out, map[string]any{"page_id": p.ID, "updated_at": at}, map[string]any{"page_id": other.ID, "updated_at": at})
+		case r.URL.Query().Get("page_id") == "eq."+p.ID:
+			out = append(out, map[string]any{"content": json.RawMessage(unreadable), "revision": 2, "updated_at": at})
+		default:
+			out = append(out, map[string]any{"content": json.RawMessage(theirs.Encode()), "revision": 1, "updated_at": at})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs2.Close()
+	svc = New(st, remote.SignedInForTest(hs2.URL, st, "u1"))
+	if err := svc.pullContents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c := st.Content(p.ID); c == nil || textOf(c, "a") != "one, edited here" {
+		t.Errorf("content %v", c)
+	}
+	if c := st.Content(other.ID); c == nil || textOf(c, "c") != "from another device" {
+		t.Errorf("the other page has %v", c)
+	}
+	if !svc.waiting()[p.ID] {
+		t.Errorf("waiting for %v", svc.waiting())
 	}
 }
 

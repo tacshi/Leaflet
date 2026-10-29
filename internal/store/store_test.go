@@ -51,6 +51,44 @@ func TestKeyBetween(t *testing.T) {
 	}
 }
 
+// No key sorts between a and a followed by 0s, as the agent function once
+// made: one just after it is given, and dragging on from there works.
+func TestKeyBetweenAKeyAndItsZeros(t *testing.T) {
+	for _, pair := range [][2]string{{"a", "a0"}, {"", "0"}, {"a1", "a100"}} {
+		k := KeyBetween(pair[0], pair[1])
+		if k <= pair[1] || strings.HasSuffix(k, "0") {
+			t.Errorf("between %q and %q: %q", pair[0], pair[1], k)
+		}
+	}
+	// Dragging to the top of a list that starts at "a0", again and again.
+	top := "a0"
+	for i := 0; i < 20; i++ {
+		top = KeyBetween("", top)
+	}
+}
+
+// Deleting a thread's first comment keeps its replies; the thread goes
+// once they are deleted too.
+func TestDeletedFirstCommentKeepsItsReplies(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Plan"})
+	root, _ := s.AddComment(p.ID, "b1", "Is this right?", "", "", "", "")
+	reply, _ := s.AddComment(p.ID, "b1", "Yes", root.ID, "", "agent", "Claude")
+	if err := s.DeleteComment(root.ID); err != nil {
+		t.Fatal(err)
+	}
+	threads, _ := s.Threads(p.ID)
+	if len(threads) != 1 || threads[0].Root.DeletedAt.IsZero() || len(threads[0].Replies) != 1 {
+		t.Fatalf("threads %+v", threads)
+	}
+	if err := s.DeleteComment(reply.ID); err != nil {
+		t.Fatal(err)
+	}
+	if threads, _ := s.Threads(p.ID); len(threads) != 0 {
+		t.Errorf("threads %+v", threads)
+	}
+}
+
 func TestPagesAndContent(t *testing.T) {
 	s := open(t)
 	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
@@ -727,6 +765,41 @@ func userVersion(t *testing.T, s *Store) int {
 	return v
 }
 
+// A data folder whose name has a character URIs treat specially opens the
+// database in that folder, with the pragmas, and not one beside it.
+func TestOpensTheDatabaseInAFolderOfAnyName(t *testing.T) {
+	for _, name := range []string{"Notes #1", "What?", "100%", "a%20b", "Notizen ü"} {
+		base := t.TempDir()
+		dir := filepath.Join(base, name)
+		s, err := Open(dir)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if err := s.SetValue("k", "v"); err != nil {
+			t.Fatal(err)
+		}
+		var mode string
+		if err := s.DB().QueryRow(`PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
+			t.Errorf("%s: journal mode %q, %v", name, mode, err)
+		}
+		_ = s.Close()
+		if entries, _ := os.ReadDir(base); len(entries) != 1 || entries[0].Name() != name {
+			t.Errorf("%s: beside the folder %v", name, entries)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "leaflet.db")); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+		s, err = Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v, _ := s.Value("k"); v != "v" {
+			t.Errorf("%s: reopened, the value is %q", name, v)
+		}
+		_ = s.Close()
+	}
+}
+
 func TestOpensADatabaseFromBeforeTheFirstRelease(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "leaflet.db")
@@ -1167,6 +1240,65 @@ func TestReloadSessionFollowsTheApp(t *testing.T) {
 	}
 	if sess.UserID != LocalUserID || sess.SignedIn || sess.SpaceID != app.Session().SpaceID {
 		t.Errorf("signed out: session %+v, app's space %q", sess, app.Session().SpaceID)
+	}
+}
+
+// A file added while the session still names a space that sync has just
+// moved the pages out of fails, as a page does, rather than going into a
+// space that is gone; it leaves no copy behind.
+func TestAddFileInASpaceThatIsGone(t *testing.T) {
+	s := open(t)
+	local := s.Session().SpaceID
+	if err := s.PutSpace("remote-a", "My space", "A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MoveSpace(local, "remote-a"); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "plan.pdf")
+	if err := os.WriteFile(src, []byte("%PDF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddFile(src, "", "", "application/pdf"); !errors.Is(err, ErrNoSpace) {
+		t.Errorf("file in the space that is gone: %v", err)
+	}
+	if files, _ := s.AllFiles(); len(files) != 0 || s.PendingCount() != 0 {
+		t.Errorf("%d files, %d waiting", len(files), s.PendingCount())
+	}
+	if copies, _ := os.ReadDir(filepath.Join(s.Dir, "files")); len(copies) != 0 {
+		t.Errorf("%d copies left", len(copies))
+	}
+}
+
+// Signing out removes the account's files and recordings' audio from the
+// data folder, not only their rows.
+func TestForgetAccountRemovesFiles(t *testing.T) {
+	s := open(t)
+	src := filepath.Join(t.TempDir(), "plan.pdf")
+	if err := os.WriteFile(src, []byte("%PDF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AddFile(src, "", "", "application/pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	audio := filepath.Join(s.Dir, "recordings", "r1.wav")
+	if err := os.MkdirAll(filepath.Dir(audio), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(audio, []byte("RIFF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForgetAccount(); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(s.Dir, "files", f.ID), audio} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("%s left: %v", path, err)
+		}
+	}
+	if _, err := os.Stat(src); err != nil {
+		t.Errorf("the file it copied went too: %v", err)
 	}
 }
 

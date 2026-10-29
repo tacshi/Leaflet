@@ -82,6 +82,9 @@ type Client struct {
 	cfg  Settings
 	st   *store.Store
 	http *http.Client
+	// long is for what can outlast http's timeout: Storage uploads and
+	// downloads, and streamed runs (newLongClient).
+	long *http.Client
 
 	mu   sync.Mutex
 	sess *session
@@ -108,7 +111,23 @@ type refresh struct {
 
 // New returns a client for a project.
 func New(cfg Settings, st *store.Store) *Client {
-	return &Client{cfg: cfg, st: st, http: &http.Client{Timeout: 90 * time.Second}}
+	return &Client{cfg: cfg, st: st, http: &http.Client{Timeout: 90 * time.Second}, long: newLongClient()}
+}
+
+// longHeaderWait is how long the long client waits for a server to start
+// answering, once the request is sent; tests shorten it.
+var longHeaderWait = time.Minute
+
+// newLongClient returns a client with no timeout on a whole request,
+// which a large recording takes longer than to upload: the caller's ctx
+// ends one. It still gives up on a server that does not connect, or
+// does not answer once the request is sent, and on connections left
+// idle.
+func newLongClient() *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = longHeaderWait
+	t.IdleConnTimeout = 90 * time.Second
+	return &http.Client{Transport: t}
 }
 
 // Configured reports whether the build has a server.
@@ -661,7 +680,7 @@ func (c *Client) InvokeStream(ctx context.Context, name string, body map[string]
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	// No overall timeout: runs take a while.
-	res, err := c.requestWith(&http.Client{}, ctx, "POST", "/functions/v1/"+name, bytes.NewReader(raw), nil)
+	res, err := c.requestWith(c.long, ctx, "POST", "/functions/v1/"+name, bytes.NewReader(raw), nil)
 	if err != nil {
 		return err
 	}
@@ -681,9 +700,9 @@ func (c *Client) InvokeStream(ctx context.Context, name string, body map[string]
 	return sc.Err()
 }
 
-// Upload puts a file in a Storage bucket.
+// Upload puts a file in a Storage bucket, taking as long as ctx lets it.
 func (c *Client) Upload(ctx context.Context, bucket, path string, data io.Reader, contentType string) error {
-	res, err := c.request(ctx, "POST", "/storage/v1/object/"+bucket+"/"+escapePath(path), data, map[string]string{
+	res, err := c.requestWith(c.long, ctx, "POST", "/storage/v1/object/"+bucket+"/"+escapePath(path), data, map[string]string{
 		"Content-Type": contentType, "x-upsert": "true",
 	})
 	if err != nil {
@@ -708,9 +727,10 @@ func (c *Client) Remove(ctx context.Context, bucket string, paths ...string) err
 	return nil
 }
 
-// Download reads a file of a Storage bucket.
+// Download reads a file of a Storage bucket, taking as long as ctx lets
+// it.
 func (c *Client) Download(ctx context.Context, bucket, path string) ([]byte, error) {
-	res, err := c.request(ctx, "GET", "/storage/v1/object/authenticated/"+bucket+"/"+escapePath(path), nil, nil)
+	res, err := c.requestWith(c.long, ctx, "GET", "/storage/v1/object/authenticated/"+bucket+"/"+escapePath(path), nil, nil)
 	if err != nil {
 		return nil, err
 	}

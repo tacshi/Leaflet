@@ -23,6 +23,10 @@ type signInState struct {
 	busy     bool
 	err      string
 	info     string
+	// asking is the account signed in as while signInAlert asks about
+	// the previous account's changes that signing in removes, lost.
+	asking *store.User
+	lost   int
 }
 
 var signIn signInState
@@ -31,6 +35,7 @@ func (a *App) signInView(c *ui.Context) {
 	pal := theme.Of(c)
 	s := &signIn
 	a.titleBar(c, func() { ui.Spacer(c) })
+	a.signInAlert(c)
 	ui.Scroll(c).Grow(1).Children(func() {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(64, 24).Children(func() {
 			ui.Column(c).Width(380).Gap(16).Children(func() {
@@ -155,19 +160,37 @@ func (a *App) doVerify() {
 	a.runAuth(func() (*store.User, error) { return a.backend.VerifyCode(email, code) })
 }
 
-// signedIn sets the session up after signing in and starts syncing.
+// signedIn sets the session up after signing in and starts syncing. As
+// someone else than the account whose pages this device keeps, whose
+// changes not uploaded yet would go, it asks first.
 func (a *App) signedIn(user *store.User) {
 	a.flush()
-	// One way of syncing at a time: the server's, now.
-	if a.sync.ICloudOn() {
+	if n := a.lostBySigningIn(user); n > 0 {
+		signIn.asking, signIn.lost = user, n
+		return
+	}
+	a.useAccount(user)
+}
+
+// lostBySigningIn counts the changes signing in as user removes: those of
+// another account this device keeps the pages of, which never went up.
+func (a *App) lostBySigningIn(user *store.User) int {
+	if prev := a.st.CachedAccount(); prev == "" || prev == user.ID {
+		return 0
+	}
+	return a.st.PendingCount()
+}
+
+// useAccount makes user the session: the previous account's pages go, if
+// it was another's.
+func (a *App) useAccount(user *store.User) {
+	// One way of syncing at a time: the server's, now. Settings say so,
+	// so iCloud sync shows off once signed out again.
+	if a.sync.ICloudOn() || a.settings.ICloudSync {
 		a.sync.SetICloud(false)
 		a.watchICloud(false)
-	}
-	// Signing in as someone else removes the previous account's pages,
-	// with any changes of theirs that never went up.
-	lost := 0
-	if prev := a.st.CachedAccount(); prev != "" && prev != user.ID {
-		lost = a.st.PendingCount()
+		a.settings.ICloudSync = false
+		a.saveSettings()
 	}
 	if _, err := a.st.LoadSession(user); err != nil {
 		a.toast(err.Error())
@@ -176,12 +199,31 @@ func (a *App) signedIn(user *store.User) {
 	a.session = a.st.Session()
 	signIn = signInState{}
 	a.toast(locales.SettingsSignedInAs(user.Email))
-	if lost > 0 {
-		a.toast(locales.SigninRemovedChanges(lost))
-	}
 	a.back()
 	if a.route.Kind == "signin" {
 		a.show(Route{Kind: "home"})
 	}
 	a.sync.Kick()
+}
+
+// signInAlert asks before signing in as another account removes the
+// previous one's changes not uploaded yet; not signing in signs the new
+// account out again.
+func (a *App) signInAlert(c *ui.Context) {
+	s := &signIn
+	user := s.asking
+	if user == nil {
+		return
+	}
+	open := true
+	if ui.AlertDialog(c, &open, locales.SigninAnyway(), locales.SigninRemovesUnsynced(s.lost, user.Email),
+		locales.CommonCancel(), locales.CommonSignIn()) == 1 {
+		s.asking = nil
+		a.useAccount(user)
+		return
+	}
+	if !open {
+		s.asking, s.lost = nil, 0
+		go a.backend.SignOut()
+	}
 }

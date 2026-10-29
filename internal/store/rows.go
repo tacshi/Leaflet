@@ -89,10 +89,23 @@ func (s *Store) CreateFolder(name string) (Folder, error) {
 // saveFolder stores a folder changed here and queues it to go up, in the
 // caller's transaction, as savePages does pages.
 func saveFolder(tx *sql.Tx, f Folder, label string) error {
+	var old map[string]any
+	var was Folder
+	var parent sql.NullString
+	var c, u int64
+	var d sql.NullInt64
+	switch err := tx.QueryRow(`SELECT id, space_id, parent_folder_id, name, sort_key, created_at, updated_at, deleted_at FROM folders WHERE id = ?`, f.ID).
+		Scan(&was.ID, &was.SpaceID, &parent, &was.Name, &was.SortKey, &c, &u, &d); {
+	case err == nil:
+		was.ParentFolderID, was.CreatedAt, was.UpdatedAt, was.DeletedAt = parent.String, time.UnixMilli(c), time.UnixMilli(u), fromMs(d)
+		old = FolderToRemote(was)
+	case !errors.Is(err, sql.ErrNoRows):
+		return err
+	}
 	if err := writeFolder(tx, f); err != nil {
 		return err
 	}
-	return queue(tx, "folders", f.ID, FolderToRemote(f), label, "")
+	return queueChange(tx, "folders", f.ID, old, FolderToRemote(f), label, "")
 }
 
 // RenameFolder renames a folder.
@@ -117,10 +130,7 @@ func (s *Store) DeleteFolder(f Folder) error {
 	err = s.inTx(func(tx *sql.Tx) error {
 		for _, p := range pages {
 			p.FolderID, p.UpdatedAt = "", now
-			if err := writePage(tx, p); err != nil {
-				return err
-			}
-			if err := queue(tx, "pages", p.ID, PageToRemote(p), "moved", p.ID); err != nil {
+			if err := savePage(tx, p, "moved"); err != nil {
 				return err
 			}
 		}
@@ -215,19 +225,30 @@ func (s *Store) AddFile(source, folderID, pageID, mime string) (File, error) {
 		f.SizeBytes = info.Size()
 	}
 	f.StoragePath = f.SpaceID + "/" + id + "/" + name
-	if err := s.PutFile(f); err != nil {
-		return File{}, err
-	}
-	if err := s.Queue("files", id, FileToRemote(f), "new file", pageID); err != nil {
-		return File{}, err
-	}
 	ct := mime
 	if ct == "" {
 		ct = "application/octet-stream"
 	}
-	if err := s.Queue("storage", "files/"+id, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": local, "content_type": ct}, "file waiting to upload", pageID); err != nil {
+	// The file and its entries in the outbox are stored together, as a
+	// page is: a file without them would never go to the server.
+	err := s.inTx(func(tx *sql.Tx) error {
+		// As in CreatePage: the app may have changed accounts meanwhile.
+		if f.SpaceID != "" && !hasSpace(tx, f.SpaceID) {
+			return ErrNoSpace
+		}
+		if err := putFile(tx, f); err != nil {
+			return err
+		}
+		if err := queue(tx, "files", id, FileToRemote(f), "new file", pageID); err != nil {
+			return err
+		}
+		return queue(tx, "storage", "files/"+id, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": local, "content_type": ct}, "file waiting to upload", pageID)
+	})
+	if err != nil {
+		_ = os.RemoveAll(dir)
 		return File{}, err
 	}
+	s.Notify("outbox", pageID)
 	s.Notify("files", "")
 	return f, nil
 }
@@ -363,6 +384,14 @@ func (s *Store) Comment(id string) (Comment, error) {
 	return scanComment(s.db.QueryRow(`SELECT `+commentCols+` FROM comments WHERE id = ?`, id))
 }
 
+// HasGuestComments reports whether a page has a comment a visitor of its
+// public link posted, deleted ones too.
+func (s *Store) HasGuestComments(pageID string) bool {
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM comments WHERE page_id = ? AND author_kind = 'guest'`, pageID).Scan(&n)
+	return n > 0
+}
+
 // AllComments returns every comment, deleted ones too.
 func (s *Store) AllComments() ([]Comment, error) {
 	rows, err := s.db.Query(`SELECT ` + commentCols + ` FROM comments ORDER BY created_at`)
@@ -381,9 +410,12 @@ func (s *Store) AllComments() ([]Comment, error) {
 	return out, rows.Err()
 }
 
-// Threads returns a page's comment threads, oldest first.
+// Threads returns a page's comment threads, oldest first. A thread whose
+// first comment was deleted stays while it has replies, that comment with
+// DeletedAt set, so the replies stay readable: show it as deleted, never
+// its text.
 func (s *Store) Threads(pageID string) ([]Thread, error) {
-	rows, err := s.db.Query(`SELECT `+commentCols+` FROM comments WHERE page_id = ? AND deleted_at IS NULL ORDER BY created_at`, pageID)
+	rows, err := s.db.Query(`SELECT `+commentCols+` FROM comments WHERE page_id = ? ORDER BY created_at`, pageID)
 	if err != nil {
 		return nil, err
 	}
@@ -403,9 +435,12 @@ func (s *Store) Threads(pageID string) ([]Thread, error) {
 		}
 		t := Thread{Root: c}
 		for _, r := range all {
-			if r.ParentCommentID == c.ID {
+			if r.ParentCommentID == c.ID && r.DeletedAt.IsZero() {
 				t.Replies = append(t.Replies, r)
 			}
+		}
+		if !c.DeletedAt.IsZero() && len(t.Replies) == 0 {
+			continue
 		}
 		out = append(out, t)
 	}

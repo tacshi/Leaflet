@@ -1,12 +1,16 @@
 package editor
 
 import (
+	"fmt"
+	"math"
 	"reflect"
 	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
@@ -664,6 +668,34 @@ func TestTableCellsTabAndEnter(t *testing.T) {
 	}
 }
 
+// Markdown typed into a cell a key at a time stays as typed: a "[" or a
+// "*" not closed yet is not shown escaped under the caret.
+func TestTableCellKeepsMarkdownAsTyped(t *testing.T) {
+	e, tt, _ := setup(t)
+	table, _ := doc.TableNode([][]string{{"ID"}, {""}}, "")
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table} })
+	tt.Frame()
+	box := e.geom[table.ID]
+	tt.ClickAt(box.X+20, box.Y+box.H*0.75)
+	tt.Frame()
+	for _, r := range "[Go](https://go.dev) and **this**" {
+		tt.Type(string(r))
+		tt.Frame()
+	}
+	if got := e.cellText; got != "[Go](https://go.dev) and **this**" {
+		t.Errorf("input shows %q", got)
+	}
+	if rows := doc.TableRows(table); rows[1][0] != "[Go](https://go.dev) and **this**" {
+		t.Errorf("cell %q", rows[1][0])
+	}
+	// Undo shows the cell as it is then.
+	e.Undo()
+	tt.Frame()
+	if rows := doc.TableRows(e.Content.Children[0]); e.cellText != rows[1][0] {
+		t.Errorf("after undo, input %q, cell %q", e.cellText, rows[1][0])
+	}
+}
+
 func TestPasteMarkdownBlankLinesSeparate(t *testing.T) {
 	nodes := parseLines("## Start\n\n> [!NOTE]\n> Needs Go\n\n1. one\n\n2. two\n\n```go\na := 1\n\nb := 2\n```\n")
 	var types []string
@@ -849,5 +881,194 @@ func TestFontsChangeLayout(t *testing.T) {
 	after := e.layoutOf(n)
 	if after == before || after.font.Family != "Georgia, Hiragino Sans GB" {
 		t.Fatalf("layout after = %+v, same %v", after.font, after == before)
+	}
+}
+
+// A mention is one unit: the caret doesn't stop inside it, what is typed
+// after it isn't part of it, and Backspace takes it out whole.
+func TestMentionIsOneUnit(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("hi @")
+	tr := e.Trigger()
+	if tr == nil {
+		t.Fatal("no @ menu")
+	}
+	e.InsertMention(*tr, doc.Mention{Kind: "user", ID: "a", Name: "Alice"})
+	n := e.Content.Children[0]
+	e.PlaceCaret(n.ID, 5)
+	if off := e.Caret().Off; off != 3 {
+		t.Errorf("caret in the mention at %d", off)
+	}
+	tt.Key(0, ui.KeyRight)
+	if off := e.Caret().Off; off != 9 {
+		t.Errorf("right arrow to %d", off)
+	}
+	tt.Type("x")
+	if d := n.Delta(); d.Plain() != "hi @Alicex " || d[1].Text != "@Alice" || d[2].Attrs.Mention != nil {
+		t.Fatalf("typed after it: %+v", d)
+	}
+	tt.Key(0, ui.KeyBackspace)
+	tt.Key(0, ui.KeyBackspace)
+	if got := n.Delta().Plain(); got != "hi  " || e.Caret().Off != 3 {
+		t.Errorf("after backspace %q, caret %d", got, e.Caret().Off)
+	}
+}
+
+// In a toggle, Backspace at the start of a heading and Enter in an empty
+// quote make them paragraphs where they are, and Shift-Tab takes a
+// paragraph out after the toggle, leaving the blocks after it inside: a
+// block other than a list never gets children.
+func TestBlocksInAToggleBecomeParagraphs(t *testing.T) {
+	e, tt, _ := setup(t)
+	h, q, p, r := newText("heading", doc.Delta{{Text: "H"}}), newText("quote", nil), para("p", "P"), para("r", "R")
+	h.Set("level", 2)
+	tg := newText("toggle_list", doc.Delta{{Text: "T"}})
+	tg.Children = []*doc.Node{h, q, p, r}
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{tg} })
+	tt.Frame()
+	e.PlaceCaret(h.ID, 0)
+	tt.Key(0, ui.KeyBackspace)
+	e.PlaceCaret(q.ID, 0)
+	tt.Key(0, ui.KeyEnter)
+	if h.Type != "paragraph" || q.Type != "paragraph" || len(tg.Children) != 4 {
+		t.Fatalf("heading %s, quote %s, in the toggle %d", h.Type, q.Type, len(tg.Children))
+	}
+	e.PlaceCaret(p.ID, 0)
+	tt.Key(ui.Shift, ui.KeyTab)
+	if top := e.Content.Children; len(top) != 2 || top[1] != p || len(tg.Children) != 3 || tg.Children[2] != r {
+		t.Errorf("after Shift-Tab %v", texts(e))
+	}
+	e.Content.Walk(func(n, _ *doc.Node) {
+		if len(n.Children) > 0 && !NestableTypes(n) {
+			t.Errorf("%s %q has children", n.Type, n.Delta().Plain())
+		}
+	})
+}
+
+// Typing joins the undo step before it only in the same block, and not
+// once the caret has moved.
+func TestUndoStepsBreakWhenTheCaretMoves(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("ab")
+	tt.Key(0, ui.KeyEnter)
+	tt.Type("cd")
+	b := e.Content.Children[1]
+	tt.Key(0, ui.KeyUp)
+	tt.Type("x")
+	tt.Key(0, ui.KeyLeft)
+	tt.Type("y")
+	// Typing in another block without moving there with a key.
+	e.PlaceCaret(b.ID, -1)
+	tt.Type("z")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:abyx", "paragraph:cdz"}) {
+		t.Fatalf("typed %v", got)
+	}
+	for _, want := range [][]string{
+		{"paragraph:abyx", "paragraph:cd"},
+		{"paragraph:abx", "paragraph:cd"},
+		{"paragraph:ab", "paragraph:cd"},
+	} {
+		e.Undo()
+		if got := texts(e); !slices.Equal(got, want) {
+			t.Errorf("after undo %v, want %v", got, want)
+		}
+	}
+}
+
+// A frame with a selection over many blocks takes time in proportion to
+// the blocks, not to their square: each block finds its place and depth
+// without walking the page.
+func TestFrameWithSelectionIsLinear(t *testing.T) {
+	if testing.Short() {
+		t.Skip("times frames")
+	}
+	frame := func(n int) time.Duration {
+		var kids []*doc.Node
+		for i := range n {
+			kids = append(kids, newText("paragraph", doc.Delta{{Text: fmt.Sprintf("line %d with some words", i)}}))
+		}
+		e := New(doc.FromBlocks(kids), &fakeHost{})
+		e.SetWidth(500)
+		tt := ui.NewTester(func(c *ui.Context) {
+			ui.Column(c).Fill().Padding(20).Children(func() { e.View(c) })
+		}, 600, 400)
+		e.Select(Pos{kids[1].ID, 0}, Pos{kids[n-2].ID, 2})
+		tt.Frame()
+		best := time.Duration(math.MaxInt64)
+		for range 5 {
+			start := time.Now()
+			tt.Frame()
+			best = min(best, time.Since(start))
+		}
+		return best
+	}
+	small, large := frame(500), frame(2000)
+	if large > 8*small {
+		t.Errorf("a frame of 500 blocks takes %v, of 2000 %v", small, large)
+	}
+}
+
+// The / and @ menus open after Chinese or Japanese text, which puts no
+// space before them, but not inside a word; a full-width space, as their
+// input methods type, takes Markdown shortcuts.
+func TestMenusAndShortcutsInCJK(t *testing.T) {
+	for _, tc := range []struct {
+		typed string
+		opens bool
+	}{
+		{"我想/", true}, {"会議は@", true}, {"好的，@", true}, {"/", true},
+		{"a@", false}, {"a/", false}, {"./", false},
+	} {
+		e, tt, _ := setup(t)
+		tt.Type(tc.typed)
+		if got := e.Trigger() != nil; got != tc.opens {
+			t.Errorf("%q opens a menu: %v", tc.typed, got)
+		}
+	}
+	e, tt, _ := setup(t)
+	tt.Type("#　标题")
+	if got := texts(e); got[0] != "heading:标题" {
+		t.Errorf("full-width space after # made %v", got)
+	}
+}
+
+// Copied text keeps its formats, within one block too, and goes on the
+// clipboard as HTML for other apps; HTML from another app pastes as blocks
+// in its formats, but HTML without any as its text, which reads as
+// Markdown.
+func TestCopyAndPasteFormats(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("ship **v1** now")
+	n := e.Content.Children[0]
+	e.Select(Pos{n.ID, 2}, Pos{n.ID, 7})
+	tt.Command("copy")
+	html, err := tt.ClipboardData().Read(transfer.HTML)
+	if err != nil || !strings.Contains(string(html), "<b>v1</b>") {
+		t.Errorf("copied HTML %q, %v", html, err)
+	}
+	e.PlaceCaret(n.ID, -1)
+	tt.Command("paste")
+	if d := n.Delta(); d.Plain() != "ship v1 nowip v1" || !d[len(d)-1].Attrs.Bold {
+		t.Errorf("pasted %+v", d)
+	}
+
+	paste := func(html, text string) []*doc.Node {
+		e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{newText("paragraph", nil)} })
+		e.PlaceCaret(e.Content.Children[0].ID, 0)
+		tt.SetClipboardData(transfer.New(transfer.NewItem(
+			transfer.Bytes(transfer.HTML, []byte(html)), transfer.Bytes(transfer.Text, []byte(text)))))
+		tt.Command("paste")
+		return e.Content.Children
+	}
+	got := paste("<h2>Plan</h2><ul><li><b>Ship</b> it<ul><li>soon</li></ul></li></ul><pre>a\nb</pre>", "Plan\nShip it\nsoon\na\nb")
+	// Somewhere to go on writing after the code.
+	if len(got) != 4 || got[0].Type != "heading" || got[0].Int("level", 0) != 2 ||
+		got[1].Type != "bulleted_list" || !got[1].Delta()[0].Attrs.Bold || len(got[1].Children) != 1 ||
+		got[2].Type != "code" || got[2].Delta().Plain() != "a\nb" {
+		t.Errorf("pasted HTML as %v", texts(e))
+	}
+	got = paste("<div>## Title</div><div>- item</div>", "## Title\n- item")
+	if len(got) != 2 || got[0].Type != "heading" || got[1].Type != "bulleted_list" {
+		t.Errorf("pasted plain HTML as %v", texts(e))
 	}
 }

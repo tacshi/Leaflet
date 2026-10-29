@@ -28,6 +28,11 @@ const indentStep = 26
 
 // depth is how deep a block is nested in lists.
 func (e *Editor) depth(id string) int {
+	if e.order != nil {
+		if d, ok := e.depths[id]; ok {
+			return d
+		}
+	}
 	d := 0
 	loc := e.Content.Locate(id)
 	for loc != nil && loc.Parent != nil {
@@ -248,6 +253,8 @@ func runeOff(n *doc.Node, units int) int {
 var clip struct {
 	text   string
 	blocks []*doc.Node
+	// delta is the formatted text of a selection within one block.
+	delta doc.Delta
 }
 
 // copyBlocks returns the blocks of a selection over more than one block,
@@ -650,6 +657,8 @@ func (e *Editor) paste(text string) {
 		text = strings.Join(strings.Fields(strings.ReplaceAll(text, "\n", " ")), " ")
 	} else if clip.blocks != nil && text == clip.text {
 		blocks = freshBlocks(clip.blocks)
+	} else if clip.delta != nil && text == clip.text {
+		blocks = []*doc.Node{newText("paragraph", clip.delta)}
 	}
 	if blocks == nil && !strings.Contains(text, "\n") {
 		// A web link pasted on selected text links it.
@@ -678,6 +687,13 @@ func (e *Editor) paste(text string) {
 	if blocks == nil {
 		blocks = parseLines(strings.TrimRight(text, "\n"))
 	}
+	e.pasteBlocks(blocks)
+}
+
+// pasteBlocks puts blocks at the caret, in place of the selection: the
+// first joins the text before the caret, and the last takes the text
+// after it.
+func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 	if len(blocks) == 0 {
 		return
 	}

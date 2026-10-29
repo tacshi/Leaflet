@@ -147,7 +147,16 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 			for _, t := range threads {
 				var thread []map[string]any
 				for _, c := range t.All() {
-					thread = append(thread, map[string]any{"author": c.AuthorName, "body": c.Body})
+					body := c.Body
+					if !c.DeletedAt.IsZero() {
+						body = "(deleted)"
+					}
+					// A guest names themself: say so, as the agent function does.
+					author := c.AuthorName
+					if c.AuthorKind == "guest" {
+						author += " (guest, through the page's public link)"
+					}
+					thread = append(thread, map[string]any{"author": author, "body": body})
 				}
 				out = append(out, map[string]any{"block_id": t.Root.BlockID, "resolved": t.Root.Resolved, "thread": thread})
 			}

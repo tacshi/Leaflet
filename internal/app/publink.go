@@ -279,7 +279,7 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 	a.stopPub()
 	p := &pubLink{page: page, token: randomToken(), emails: emails, state: "starting",
 		comments: comments, threads: threads, posts: map[string][]time.Time{}}
-	a.pub = p
+	a.setPub(p)
 	fail := func(err error) {
 		p.state, p.err = "failed", err.Error()
 		p.close()
@@ -358,7 +358,7 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 // stopPub stops the public link: its address stops working at once.
 func (a *App) stopPub() {
 	if p := a.pub; p != nil {
-		a.pub = nil
+		a.setPub(nil)
 		p.close()
 	}
 }
@@ -650,7 +650,7 @@ func commentsPanel(c *doc.Content, threads map[string][]store.Thread, comments b
 			}
 			for _, c := range t.All() {
 				groups.WriteString(`<div class="c"><div class="who"><strong>` + html.EscapeString(c.AuthorName) + `</strong> <span class="muted">` +
-					c.CreatedAt.Format("2006-01-02") + `</span></div><div>` + strings.ReplaceAll(html.EscapeString(c.Body), "\n", "<br>") + `</div></div>`)
+					c.CreatedAt.Format("2006-01-02") + `</span></div><div>` + strings.ReplaceAll(html.EscapeString(commentBody(c)), "\n", "<br>") + `</div></div>`)
 			}
 			if comments {
 				groups.WriteString(`<button type="button" class="creply" data-parent="` + html.EscapeString(t.Root.ID) + `">` +

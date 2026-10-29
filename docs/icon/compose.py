@@ -4,6 +4,11 @@
 #
 #   python3 squircle.py > squircle.d && python3 leaf.py && python3 compose.py
 #   rsvg-convert -w 1024 -h 1024 icon.svg -o ../../resources/icon.png
+#
+# A public page's favicon is the tile alone, without the grid's margin:
+#
+#   sed 's|viewBox="0 0 1024 1024"|viewBox="100 100 824 824"|' icon.svg | \
+#     rsvg-convert -w 64 -h 64 -o ../../internal/app/favicon.png
 import json, sys
 leaf = json.load(open("leaf.json"))
 sq = open("squircle.d").read().strip()

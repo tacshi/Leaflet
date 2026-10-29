@@ -128,6 +128,10 @@ func TestPubServesOnlyThePage(t *testing.T) {
 	if w := get(h, "/tok/comments.js"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "leaflet-name") {
 		t.Errorf("comments script: %d", w.Code)
 	}
+	if w := get(h, "/tok/favicon.png"); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" ||
+		!strings.Contains(get(h, "/tok/").Body.String(), `<link rel="icon" type="image/png" href="/tok/favicon.png">`) {
+		t.Errorf("favicon: %d %v", w.Code, w.Header())
+	}
 
 	// An embed runs in its own sandbox, off the network, never in the page.
 	if page := get(h, "/tok/").Body.String(); strings.Contains(page, "play()") || !strings.Contains(page, `<iframe sandbox="allow-scripts" src="/tok/e/e1"`) {

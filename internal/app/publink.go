@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -141,6 +142,12 @@ func cloudflaredPrompt() string {
 	}
 	return locales.PubInstallPromptGuide(system, cloudflaredDownloads)
 }
+
+// pubFavicon is the app's icon, its tile cropped from docs/icon/icon.svg,
+// as the public page's favicon.
+//
+//go:embed favicon.png
+var pubFavicon []byte
 
 // cloudflaredMailVersion is the first cloudflared with --allowed-mail.
 const cloudflaredMailVersion = "2026.9.3"
@@ -423,7 +430,7 @@ func (a *App) pubJob(p *pubLink) pubJob {
 	threads, comments := maps.Clone(p.threads), p.comments
 	p.mu.Unlock()
 	return pubJob{st: a.st, seq: p.seq, page: p.page, title: a.pageTitleOf(p.page), token: p.token, titles: titles,
-		files: slices.Clone(a.files), comments: comments, threads: threads, head: pubHead(comments)}
+		files: slices.Clone(a.files), comments: comments, threads: threads, head: pubHead("/"+p.token+"/", comments)}
 }
 
 // render renders the page for visitors, off the main thread, unless a
@@ -515,10 +522,12 @@ func (p *pubLink) render(job pubJob) {
 	p.snap = pubSnapshot{html: page, files: files, embeds: embeds, blocks: blocks}
 }
 
-// pubHead is the visitor page's look, and its words for the comments
-// script, which lets visitors comment while comments says they may.
-func pubHead(comments bool) string {
+// pubHead is the visitor page's look, with the app's icon under prefix,
+// and its words for the comments script, which lets visitors comment
+// while comments says they may.
+func pubHead(prefix string, comments bool) string {
 	var b strings.Builder
+	b.WriteString(`<link rel="icon" type="image/png" href="` + html.EscapeString(prefix) + `favicon.png">`)
 	if comments {
 		b.WriteString(`<meta name="leaflet-open" content="1"><meta name="leaflet-icon" content="` + html.EscapeString(theme.IconSVG("message-square")) + `">`)
 	}
@@ -729,6 +738,9 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			serve("text/javascript; charset=utf-8", commentsScript)
 		case rest == "embed.js":
 			serve("text/javascript; charset=utf-8", embedScript)
+		case rest == "favicon.png":
+			h.Set("Content-Type", "image/png")
+			_, _ = w.Write(pubFavicon)
 		case strings.HasPrefix(rest, "e/"):
 			src, ok := snap.embeds[strings.TrimPrefix(rest, "e/")]
 			if !ok {

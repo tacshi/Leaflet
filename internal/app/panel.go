@@ -708,7 +708,7 @@ func mentionLen(rest string, names []string) int {
 		if n == 0 || len(rest) < n || !strings.EqualFold(rest[:n], name) {
 			continue
 		}
-		if r, _ := utf8.DecodeRuneInString(rest[n:]); n == len(rest) || !(unicode.IsLetter(r) || unicode.IsDigit(r)) {
+		if r, _ := utf8.DecodeRuneInString(rest[n:]); !unicode.IsLetter(r) && !unicode.IsDigit(r) {
 			return n
 		}
 	}

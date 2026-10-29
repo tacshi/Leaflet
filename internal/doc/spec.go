@@ -5,7 +5,6 @@ import (
 	"slices"
 	"sort"
 	"strings"
-	"time"
 )
 
 // ToolError is a tool call an agent made that cannot be applied. The
@@ -65,8 +64,8 @@ func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 			checked, _ := spec["checked"].(bool)
 			n.Set("checked", checked)
 			if due, _ := spec["due"].(string); due != "" {
-				if t, err := time.ParseInLocation(DueLayout, due, time.Local); err == nil {
-					n.SetDue(t)
+				if t, timed, ok := ParseDue(due); ok {
+					n.SetDue(t, timed)
 				}
 			}
 		}

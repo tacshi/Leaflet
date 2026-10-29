@@ -46,6 +46,29 @@ func TestTodoRowsAndReminders(t *testing.T) {
 	}
 }
 
+// A to-do with a time of day is overdue, and reminded of, from its time.
+func TestTimedTodos(t *testing.T) {
+	at := func(h, m int) time.Time { return time.Date(2026, 10, 26, h, m, 0, 0, time.Local) }
+	todo := func(id string, due time.Time) store.PageTodo {
+		return store.PageTodo{Todo: doc.Todo{BlockID: id, Text: id, Due: due, Timed: true}, PageID: "p"}
+	}
+	todos := []store.PageTodo{todo("meet", at(15, 0)), todo("call", at(8, 30))}
+	var got []string
+	for _, r := range todoRows(todos, at(10, 0)) {
+		got = append(got, r.header+r.todo.BlockID)
+	}
+	if want := "[Overdue call Today meet]"; fmt.Sprint(got) != want {
+		t.Errorf("rows %v, want %s", got, want)
+	}
+	none := func(store.PageTodo) bool { return false }
+	if r := dueReminders(todos, at(10, 0), none); len(r) != 1 || r[0].BlockID != "call" {
+		t.Errorf("reminders at 10:00 %+v", r)
+	}
+	if r := dueReminders(todos, at(15, 0), none); len(r) != 2 {
+		t.Errorf("reminders at 15:00 %+v", r)
+	}
+}
+
 // The To-dos tab lists to-dos from every page; checking one off checks
 // it in its page.
 func TestTodosView(t *testing.T) {
@@ -53,7 +76,7 @@ func TestTodosView(t *testing.T) {
 	n := &doc.Node{ID: "t1", Type: "todo_list"}
 	n.SetDelta(doc.Delta{{Text: "Send the draft"}})
 	n.Set("checked", false)
-	n.SetDue(time.Now())
+	n.SetDue(time.Now(), false)
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Content: doc.FromBlocks([]*doc.Node{n})})
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +121,7 @@ func TestTodosOfAPageToView(t *testing.T) {
 	n := &doc.Node{ID: "t1", Type: "todo_list"}
 	n.SetDelta(doc.Delta{{Text: "Review the budget"}})
 	n.Set("checked", false)
-	n.SetDue(time.Now())
+	n.SetDue(time.Now(), false)
 	if _, _, err := a.st.SaveContent(id, doc.FromBlocks([]*doc.Node{n})); err != nil {
 		t.Fatal(err)
 	}

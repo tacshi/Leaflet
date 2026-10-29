@@ -3,6 +3,8 @@ package editor
 import (
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/ui"
 )
 
 func TestDueDate(t *testing.T) {
@@ -19,7 +21,7 @@ func TestDueDate(t *testing.T) {
 		t.Fatal("the calendar did not open")
 	}
 	tomorrow := time.Now().AddDate(0, 0, 1)
-	e.SetDue(n.ID, tomorrow)
+	e.SetDue(n.ID, tomorrow, false)
 	tt.Frame()
 	if _, ok := tt.Find("Due date: Tomorrow"); !ok {
 		t.Errorf("no Tomorrow chip in %v", tt.Texts())
@@ -29,8 +31,68 @@ func TestDueDate(t *testing.T) {
 		t.Errorf("caret %v", p)
 	}
 	e.Undo()
-	if _, ok := e.Content.Children[0].Due(); ok {
+	if _, _, ok := e.Content.Children[0].Due(); ok {
 		t.Error("undo kept the date")
+	}
+}
+
+// The popover changes a draft, which the to-do takes as it closes:
+// turning the months keeps it open, and adds no date by itself.
+func TestDuePopover(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("[] Send the draft")
+	n := e.Content.Children[0]
+	tt.Frame()
+	click := func(s string) {
+		t.Helper()
+		if err := tt.Click(s); err != nil {
+			t.Fatalf("%v in %v", err, tt.Texts())
+		}
+		tt.Frame()
+	}
+	escape := func() {
+		t.Helper()
+		tt.Key(0, ui.KeyEscape)
+		tt.Frame()
+		if e.dueOpen != "" {
+			t.Fatal("the popover is still open")
+		}
+	}
+	// Opened and closed untouched, it adds no date.
+	click("Due date: Add date")
+	escape()
+	if _, _, ok := n.Due(); ok {
+		t.Fatal("an untouched popover added a date")
+	}
+	click("Due date: Add date")
+	click("Next month")
+	if e.dueOpen != n.ID {
+		t.Fatal("the next month closed the popover")
+	}
+	if _, _, ok := n.Due(); ok {
+		t.Fatal("the date was saved before the popover closed")
+	}
+	click("Add time")
+	escape()
+	now := time.Now()
+	want := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local).AddDate(0, 1, 0)
+	if due, timed, ok := n.Due(); !ok || !timed || !DueToday(due, want) || due.Hour() != dueHour || due.Minute() != 0 {
+		t.Fatalf("due %v, timed %v", due, timed)
+	}
+	// It was one step of undo.
+	e.Undo()
+	if _, _, ok := e.Content.Children[0].Due(); ok {
+		t.Fatal("undo kept the date")
+	}
+	// Today, the day the calendar starts on, is chosen by a click too.
+	n = e.Content.Children[0]
+	e.Focus()
+	tt.Frame()
+	click("Due date: Add date")
+	click(now.Format("January 2, 2006"))
+	escape()
+	if due, timed, ok := n.Due(); !ok || timed || !DueToday(due, now) {
+		t.Fatalf("due %v, timed %v, ok %v", due, timed, ok)
 	}
 }
 
@@ -43,11 +105,18 @@ func TestDueLabel(t *testing.T) {
 		time.Date(2026, 11, 3, 0, 0, 0, 0, time.Local):  "Nov 3",
 		time.Date(2027, 1, 3, 0, 0, 0, 0, time.Local):   "Jan 3, 2027",
 	} {
-		if got := DueLabel(due, now); got != want {
+		if got := DueLabel(due, false, now); got != want {
 			t.Errorf("%v: %q, want %q", due, got, want)
 		}
 	}
-	if !Overdue(time.Date(2026, 10, 25, 0, 0, 0, 0, time.Local), now) || Overdue(time.Date(2026, 10, 26, 0, 0, 0, 0, time.Local), now) {
+	if !Overdue(time.Date(2026, 10, 25, 0, 0, 0, 0, time.Local), false, now) || Overdue(time.Date(2026, 10, 26, 0, 0, 0, 0, time.Local), false, now) {
 		t.Error("overdue")
+	}
+	// With a time of day, it shows, and the to-do is overdue once it passed.
+	if got := DueLabel(time.Date(2026, 10, 27, 15, 0, 0, 0, time.Local), true, now); got != "Tomorrow 3:00 PM" {
+		t.Errorf("timed label %q", got)
+	}
+	if !Overdue(time.Date(2026, 10, 26, 19, 30, 0, 0, time.Local), true, now) || Overdue(time.Date(2026, 10, 26, 20, 30, 0, 0, time.Local), true, now) {
+		t.Error("timed overdue")
 	}
 }

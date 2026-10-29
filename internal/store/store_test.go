@@ -656,7 +656,7 @@ func TestTodos(t *testing.T) {
 	s := open(t)
 	todo := &doc.Node{Type: "todo_list"}
 	todo.SetDelta(doc.Delta{{Text: "Send the draft"}})
-	todo.SetDue(time.Now())
+	todo.SetDue(time.Now(), false)
 	p, _ := s.CreatePage(NewPageOptions{Title: "PRD", Content: doc.FromBlocks([]*doc.Node{todo})})
 	if _, err := s.CopyPage(p.ID, CopyOptions{Title: "PRD", Template: true}); err != nil {
 		t.Fatal(err)

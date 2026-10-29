@@ -29,9 +29,9 @@ func todoRows(todos []store.PageTodo, now time.Time) []todoRow {
 		s := "No date"
 		switch {
 		case t.Due.IsZero():
-		case editor.Overdue(t.Due, now):
+		case editor.Overdue(t.Due, t.Timed, now):
 			s = "Overdue"
-		case dueToday(t.Due, now):
+		case editor.DueToday(t.Due, now):
 			s = "Today"
 		default:
 			s = "Upcoming"
@@ -51,13 +51,6 @@ func todoRows(todos []store.PageTodo, now time.Time) []todoRow {
 		}
 	}
 	return out
-}
-
-// dueToday reports whether a due date is now's day.
-func dueToday(due, now time.Time) bool {
-	y, m, d := due.In(time.Local).Date()
-	ny, nm, nd := now.In(time.Local).Date()
-	return y == ny && m == nm && d == nd
 }
 
 // todoSection is the name a person reads of a section of the To-dos tab.
@@ -144,8 +137,8 @@ func (a *App) todoRowView(c *ui.Context, t store.PageTodo, pal *theme.Palette) {
 		})
 		if !t.Due.IsZero() {
 			now := time.Now()
-			due := ui.Badge(c, editor.DueLabel(t.Due, now)).FontSize(11).Shrink(0)
-			if editor.Overdue(t.Due, now) {
+			due := ui.Badge(c, editor.DueLabel(t.Due, t.Timed, now)).FontSize(11).Shrink(0)
+			if editor.Overdue(t.Due, t.Timed, now) {
 				due.Background(pal.DangerBg).TextColor(pal.DangerText)
 			}
 		}
@@ -191,19 +184,24 @@ func (a *App) finishTodo(t store.PageTodo) {
 	})
 }
 
-// reminderHour is when a to-do due today is reminded of.
+// reminderHour is when a to-do due today is reminded of, without a time
+// of day of its own.
 const reminderHour = 9
 
-// dueReminders are the to-dos to remind of now: due today, from
-// reminderHour, or overdue, and not reminded of for that date yet.
+// dueReminders are the to-dos to remind of now: from their time of day,
+// or else reminderHour of their day, on, and not reminded of for that
+// date yet.
 func dueReminders(todos []store.PageTodo, now time.Time, reminded func(t store.PageTodo) bool) []store.PageTodo {
 	var out []store.PageTodo
 	for _, t := range todos {
 		if t.Due.IsZero() || reminded(t) {
 			continue
 		}
-		today := dueToday(t.Due, now)
-		if editor.Overdue(t.Due, now) || today && now.Hour() >= reminderHour {
+		at := t.Due
+		if !t.Timed {
+			at = time.Date(at.Year(), at.Month(), at.Day(), reminderHour, 0, 0, 0, time.Local)
+		}
+		if !now.Before(at) {
 			out = append(out, t)
 		}
 	}
@@ -213,20 +211,27 @@ func dueReminders(todos []store.PageTodo, now time.Time, reminded func(t store.P
 func reminderKey(t store.PageTodo) string { return "reminded:" + t.PageID + "#" + t.BlockID }
 
 // remind shows a desktop notification for each to-do to remind of now,
-// once for each of its due dates.
+// once for each of its due dates and times.
 func (a *App) remind() {
 	if !mygo.NotificationsSupported() {
 		return
 	}
-	due := func(t store.PageTodo) string { return t.Due.Format("2006-01-02") }
+	due := func(t store.PageTodo) string {
+		if t.Timed {
+			return t.Due.Format(doc.DueTimeLayout)
+		}
+		return t.Due.Format(doc.DueLayout)
+	}
 	reminded := func(t store.PageTodo) bool {
 		v, ok := a.st.Value(reminderKey(t))
 		return ok && v == due(t)
 	}
 	for _, t := range dueReminders(a.todoList(), time.Now(), reminded) {
+		now := time.Now()
 		title := locales.TodosDueToday()
-		if editor.Overdue(t.Due, time.Now()) {
-			title = locales.TodosOverdueOn(editor.DueLabel(t.Due, time.Now()))
+		// A to-do due at a time today is reminded of at it, as due.
+		if editor.Overdue(t.Due, t.Timed, now) && !(t.Timed && editor.DueToday(t.Due, now)) {
+			title = locales.TodosOverdueOn(editor.DueLabel(t.Due, t.Timed, now))
 		}
 		n := mygo.NewNotification(mygo.NotificationOptions{ID: todoNotification + t.PageID + "#" + t.BlockID,
 			Title: title, Subtitle: t.PageTitle, Body: t.Text, Group: "todos"})

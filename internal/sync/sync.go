@@ -551,7 +551,7 @@ func (s *Service) retryMoves(ctx context.Context) error {
 // nothing while the file is in iCloud Drive but does not come here.
 func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string) error {
 	deleted := !f.DeletedAt.IsZero()
-	if !deleted && !onDevice(f.LocalPath) && f.StoragePath != "" && s.keptInICloud("files", f.StoragePath) {
+	if !deleted && s.onlyInICloud("files", f.StoragePath, f.LocalPath) {
 		data, err := s.cloudFetch(ctx, "files", f.StoragePath)
 		if err != nil {
 			return fmt.Errorf("file %s from iCloud Drive: %w", f.Name, err)
@@ -586,7 +586,7 @@ func (s *Service) requeueRecording(ctx context.Context, r store.Recording) error
 	if r.Status != "ready" && r.Status != "failed" {
 		return nil
 	}
-	if !onDevice(r.LocalPath) && r.AudioPath != "" && s.keptInICloud("recordings", r.AudioPath) {
+	if s.onlyInICloud("recordings", r.AudioPath, r.LocalPath) {
 		data, err := s.cloudFetch(ctx, "recordings", r.AudioPath)
 		if err != nil {
 			return fmt.Errorf("recording %s from iCloud Drive: %w", r.ID, err)
@@ -609,6 +609,15 @@ func (s *Service) requeueRecording(ctx context.Context, r store.Recording) error
 		return nil
 	}
 	return s.st.QueueUpload(r)
+}
+
+// onlyInICloud reports whether a file or audio is in iCloud Drive and not
+// on this device, so has to come here before it can go up elsewhere.
+// While sync goes through iCloud Drive, as when a device sends everything
+// again there, it stays where the other devices read it: waiting for it
+// would hold up the pass for nothing.
+func (s *Service) onlyInICloud(bucket, storagePath, local string) bool {
+	return !s.cloudOn.Load() && !onDevice(local) && storagePath != "" && s.keptInICloud(bucket, storagePath)
 }
 
 // onDevice reports whether a file is on this device.
@@ -1292,6 +1301,27 @@ func (s *Service) pullMembers(ctx context.Context) {
 		}
 		if err := s.LoadMembers(ctx, p.ID); err != nil {
 			log.Printf("members of %s: %v", p.ID, err)
+			continue
+		}
+		s.reloadMembersUnder(ctx, p.ID, pages)
+	}
+}
+
+// reloadMembersUnder loads again the members kept of the pages inside a
+// tree's top page, as the app keeps them for a page opened: the nearest
+// page with the user among them says what they may do, so a share
+// changed to view only must not stay editable below the top. Members that
+// do not load are dropped, leaving it to the pages above.
+func (s *Service) reloadMembersUnder(ctx context.Context, topID string, pages []store.Page) {
+	for _, p := range pages {
+		if p.ID == topID || s.st.MembersOrNil(p.ID) == nil || !s.st.IsDescendant(p.ID, topID) {
+			continue
+		}
+		if err := s.LoadMembers(ctx, p.ID); err != nil {
+			log.Printf("members of %s: %v", p.ID, err)
+			if err := s.st.SetMembers(p.ID, nil); err != nil {
+				log.Printf("members of %s: %v", p.ID, err)
+			}
 		}
 	}
 }

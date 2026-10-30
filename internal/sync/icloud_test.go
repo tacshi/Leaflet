@@ -174,6 +174,63 @@ func TestICloudRowsAgree(t *testing.T) {
 	}
 }
 
+// A row goes as the columns changed on a device: an offline rename on one
+// undoes no move or deletion made on another, whichever came first or
+// waited.
+func TestICloudChangesGoColumnByColumn(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p, q, r := a.page("Plan"), a.page("Done"), a.page("Old")
+	syncAll(a, b)
+	check := func(title, parent string) {
+		t.Helper()
+		for _, d := range []*cloudDevice{a, b} {
+			pp, _ := d.st.Page(p.ID)
+			if pp.Title != title || pp.ParentID != parent {
+				t.Errorf("page is %q under %q, want %q under %q", pp.Title, pp.ParentID, title, parent)
+			}
+		}
+	}
+	if err := b.st.RenamePage(p.ID, "Plan B"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.st.RenamePage(r.ID, "Old B"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if err := a.st.MovePage(p.ID, q.ID, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.DeletePage(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	syncAll(b, a)
+	check("Plan B", q.ID)
+	for _, d := range []*cloudDevice{a, b} {
+		if rr, _ := d.st.Page(r.ID); rr.Title != "Old B" || rr.DeletedAt.IsZero() {
+			t.Errorf("deleted page is %q, deleted %v", rr.Title, rr.DeletedAt)
+		}
+	}
+	// A rename still waiting here when the move comes keeps its title, and
+	// takes the move once it has gone.
+	if err := b.st.RenamePage(p.ID, "Plan B2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.MovePage(p.ID, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if err := b.svc.cloudPull(context.Background(), b.st.DeviceID()); err != nil {
+		t.Fatal(err)
+	}
+	if b.title(p.ID) != "Plan B2" {
+		t.Errorf("B's rename waiting was undone: %q", b.title(p.ID))
+	}
+	syncAll(b, a)
+	check("Plan B2", "")
+}
+
 func TestICloudMergesContent(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -286,6 +343,35 @@ func TestICloudCompacts(t *testing.T) {
 	syncAll(c)
 	if c.title(p.ID) != a.title(p.ID) || c.text(p.ID, "x") != a.text(p.ID, "x") {
 		t.Errorf("late device has %q %q, A %q %q", c.title(p.ID), c.text(p.ID, "x"), a.title(p.ID), a.text(p.ID, "x"))
+	}
+}
+
+// A snapshot keeps the change to each column: a device that had the row
+// takes from it the tags set before the renames that came after.
+func TestICloudCompactionKeepsEachColumnsChange(t *testing.T) {
+	old := compactAfter
+	compactAfter = 3
+	t.Cleanup(func() { compactAfter = old })
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Draft")
+	syncAll(a, b)
+	if err := a.st.SetPageTags(p.ID, []string{"work"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 6 {
+		a.sync()
+		if err := a.st.RenamePage(p.ID, "Draft "+string(rune('1'+i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.sync()
+	if seqs, _, _ := a.svc.ICloud.Batches(a.st.DeviceID()); slices.Contains(seqs, 2) {
+		t.Fatalf("not compacted: %v", seqs)
+	}
+	b.sync()
+	if got, _ := b.st.Page(p.ID); got.Title != "Draft 6" || !slices.Equal(got.Tags, []string{"work"}) {
+		t.Errorf("B has %q tagged %q", got.Title, got.Tags)
 	}
 }
 
@@ -523,6 +609,9 @@ func TestICloudWaitsForThePageFileABatchNames(t *testing.T) {
 // A batch that could not be written leaves its page to go again, with
 // the notice the other devices need.
 func TestICloudSendsAgainAfterABatchFailed(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("a folder made read-only stops no one running as root")
+	}
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
 	p := a.page("Notes", para("x", "x0"))
@@ -740,6 +829,8 @@ func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Signing in turns iCloud sync off, and the file goes up from here.
+	a.svc.SetICloud(false)
 	const space = "00000000-0000-0000-0000-0000000000a2"
 	sess := a.st.Session()
 	sess.SpaceID = space
@@ -766,6 +857,57 @@ func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
 	}
 	if len(a.svc.ids(movesKey)) != 0 {
 		t.Errorf("still waiting for %v", a.svc.ids(movesKey))
+	}
+}
+
+// A device that sends everything again to iCloud Drive leaves there what
+// it has only there: a file not downloaded does not hold up the pass.
+func TestICloudSendingAgainLeavesFilesInTheFolder(t *testing.T) {
+	old := moveWait
+	moveWait = 200 * time.Millisecond
+	t.Cleanup(func() { moveWait = old })
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Attachments")
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := a.st.AddFile(src, "", p.ID, "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if f, err = a.st.File(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(f.LocalPath); err != nil {
+		t.Fatal(err)
+	}
+	rel, _ := blobPath("files", f.StoragePath)
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.Rename(path, filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".icloud")); err != nil {
+		t.Fatal(err)
+	}
+	// A's last batch was cut short: it sends everything again.
+	batch, _ := icloud.BatchPath(a.st.DeviceID(), a.svc.intValue("icloud.seq"))
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(batch)), []byte(`{"format":1,"entr`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.svc.ownLogChecked = false
+	if err := a.st.RenamePage(p.ID, "Attachments 2"); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if len(a.svc.ids(movesKey)) != 0 {
+		t.Errorf("waits for %v", a.svc.ids(movesKey))
+	}
+	if got, _ := a.st.File(f.ID); onDevice(got.LocalPath) {
+		t.Error("the file came from iCloud Drive to go back there")
+	}
+	b.sync()
+	if b.title(p.ID) != "Attachments 2" {
+		t.Errorf("B has %q", b.title(p.ID))
 	}
 }
 
@@ -814,18 +956,28 @@ func TestICloudRewritesItsOwnBatchCutShort(t *testing.T) {
 	a.sync()
 	me := a.st.DeviceID()
 	rel, _ := icloud.BatchPath(me, a.svc.intValue("icloud.seq"))
-	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(`{"format":1,"entr`), 0o600); err != nil {
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.WriteFile(path, []byte(`{"format":1,"entr`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	b.sync()
 	if b.title(p.ID) != "Plan" {
 		t.Fatalf("B read a batch cut short: %q", b.title(p.ID))
 	}
-	// A runs again.
+	// A runs again, before iCloud has brought the batch back: it reads it
+	// once it comes.
 	a.svc = New(a.st, remote.New(remote.Settings{}, a.st))
 	a.svc.ICloud = b.svc.ICloud
 	a.svc.ICloud.Temp = filepath.Join(t.TempDir(), "tmp")
 	a.svc.cloudOn.Store(true)
+	hidden := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".icloud")
+	if err := os.Rename(path, hidden); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if err := os.Rename(hidden, path); err != nil {
+		t.Fatal(err)
+	}
 	syncAll(a, b)
 	if a.st.DeviceID() != me {
 		t.Error("took a new ID")
@@ -996,6 +1148,63 @@ func TestICloudCopiesGoUpAsTheirOwn(t *testing.T) {
 		t.Fatalf("A's copy of the file %+v, %v", cf, err)
 	}
 	if data, err := a.svc.Fetch(ctx, "files", cf.StoragePath); err != nil || string(data) != "hello" {
+		t.Errorf("file %q, %v", data, err)
+	}
+}
+
+// A copy whose file iCloud has not downloaded yet goes up on a later pass;
+// the rest of the pass goes meanwhile.
+func TestICloudCopyOfAFileNotDownloadedWaits(t *testing.T) {
+	old := uploadFetchWait
+	uploadFetchWait = 50 * time.Millisecond
+	t.Cleanup(func() { uploadFetchWait = old })
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := a.page("Attachments")
+	f, err := a.st.AddFile(src, "", p.ID, "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.st.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{
+		{ID: "f", Type: "file", Data: map[string]any{"name": f.Name, "file_id": f.ID}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if f, err = a.st.File(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	rel, _ := blobPath("files", f.StoragePath)
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	hidden := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".icloud")
+	if err := os.Rename(path, hidden); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := b.st.CopyPage(p.ID, store.CopyOptions{Title: "Copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileID := b.st.Content(cp.ID).Children[0].Str("file_id")
+	syncAll(b, a)
+	if a.title(cp.ID) != "Copy" {
+		t.Errorf("A has the copy as %q", a.title(cp.ID))
+	}
+	if !b.st.HasPending("storage", "files/"+fileID) {
+		t.Fatal("the copy's file went up before it came")
+	}
+	if err := os.Rename(hidden, path); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(b, a)
+	cf, err := a.st.File(fileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := a.svc.Fetch(context.Background(), "files", cf.StoragePath); err != nil || string(data) != "hello" {
 		t.Errorf("file %q, %v", data, err)
 	}
 }

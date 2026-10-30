@@ -1269,10 +1269,11 @@ func TestPullLoadsSharedPagesMembers(t *testing.T) {
 			_ = json.NewDecoder(r.Body).Decode(&args)
 			mu.Lock()
 			asked = append(asked, args.PageID)
+			role := roles[args.PageID]
 			mu.Unlock()
 			out = []map[string]any{
 				{"user_id": "u2", "role": "owner", "accepted": true},
-				{"user_id": "u1", "role": roles[args.PageID], "accepted": true},
+				{"user_id": "u1", "role": role, "accepted": true},
 			}
 		}
 		_ = json.NewEncoder(w).Encode(out)
@@ -1299,6 +1300,26 @@ func TestPullLoadsSharedPagesMembers(t *testing.T) {
 	}
 	if p, _ := st.Page(earlier); st.CanEdit(p) || len(st.MembersOrNil(earlier)) != 2 {
 		t.Errorf("shared to view: can edit %v, members %+v", st.CanEdit(p), st.MembersOrNil(earlier))
+	}
+
+	// The share changes to view only. The members kept of a page inside
+	// the tree, as for one opened, load again with the top page's.
+	if err := st.SetMembers(child, []store.Member{{PageID: child, UserID: "u1", Role: "editor", Accepted: true}}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	roles[root], roles[child] = "viewer", "viewer"
+	asked = nil
+	mu.Unlock()
+	svc.membersAt[root] = time.Now().Add(-membersEvery)
+	svc.pullMembers(context.Background())
+	if strings.Join(asked, ",") != root+","+child {
+		t.Errorf("members asked of %v, want %s and %s", asked, root, child)
+	}
+	for _, id := range []string{root, child} {
+		if p, _ := st.Page(id); st.CanEdit(p) {
+			t.Errorf("changed to view only, %s is still editable", id)
+		}
 	}
 }
 

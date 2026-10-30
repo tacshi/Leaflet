@@ -31,6 +31,8 @@ import (
 //	                       parse, "<seq>|<first seen, ms>|<passes>"
 //	icloud.cursor.<device> the last batch of another device applied here
 //	icloud.device_at       when device.json was last written (ms)
+//	icloud.held.<table>.<id> other devices' entries of a row with a
+//	                       change waiting here (icloud_rows.go)
 
 type cloudTarget struct{ s *Service }
 
@@ -111,10 +113,11 @@ func (s *Service) cloudPass(ctx context.Context) error {
 		return err
 	}
 	if !s.ownLogChecked {
-		if err := s.checkOwnLog(me); err != nil {
+		checked, err := s.checkOwnLog(me)
+		if err != nil {
 			return err
 		}
-		s.ownLogChecked = true
+		s.ownLogChecked = checked
 	}
 	if err := s.cloudPush(ctx, me); err != nil {
 		return err
@@ -286,22 +289,24 @@ func (s *Service) writeBatch(me string, b icloud.Batch) error {
 // short before it reached the disk would hold up the other devices, which
 // read each device's batches in order, for good: it is written again
 // with nothing in it, and everything is sent again, as what it held is
-// lost.
-func (s *Service) checkOwnLog(me string) error {
+// lost. It reports whether it could read the batch: one iCloud has not
+// downloaded yet is read on a later pass.
+func (s *Service) checkOwnLog(me string) (bool, error) {
 	seqs, _, err := s.ICloud.Batches(me)
 	if err != nil || len(seqs) == 0 {
-		return err
+		return err == nil, err
 	}
 	seq := seqs[len(seqs)-1]
 	if _, err := s.readBatch(me, seq); !errors.Is(err, icloud.ErrDamaged) {
-		return nil // fine, or not here to tell yet
+		// Fine, or not here to tell yet.
+		return err == nil || errors.Is(err, icloud.ErrNewerFormat), nil
 	}
 	log.Printf("icloud: batch %d of this device does not parse; writing it again and sending everything", seq)
 	if err := s.writeBatch(me, icloud.Batch{Format: icloud.Format, Device: me, Seq: seq, WrittenAt: cloudNow().UTC()}); err != nil {
-		return err
+		return false, err
 	}
 	space, _ := s.st.Value("icloud.space")
-	return s.requeueAll(space)
+	return true, s.requeueAll(space)
 }
 
 // writeDevice writes device.json, at most once an hour unless now.
@@ -362,6 +367,8 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 		e       store.OutboxEntry
 		version store.RowVersion
 		row     bool
+		// cols are the columns the row's entry changed, nil for all.
+		cols []string
 		// content is the page's version published, recorded once the
 		// batch that tells the other devices is written.
 		content *store.PeerContent
@@ -384,7 +391,7 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 				continue
 			}
 			batch.Entries = append(batch.Entries, entry)
-			done = append(done, sent{e: e, version: store.RowVersion{At: entry.At, Device: me}, row: true})
+			done = append(done, sent{e: e, version: store.RowVersion{At: entry.At, Device: me}, row: true, cols: entry.Changed})
 		case e.Entity == "page_content":
 			entry, published, err := s.publishContent(me, e.EntityID)
 			if err != nil {
@@ -415,7 +422,7 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 	}
 	for _, d := range done {
 		if d.row {
-			if err := s.st.SetRowVersion(d.e.Entity, d.e.EntityID, d.version); err != nil {
+			if err := s.setVersion(d.e.Entity, d.e.EntityID, d.cols, d.version); err != nil {
 				return err
 			}
 		}
@@ -462,7 +469,8 @@ func (s *Service) cloudRemove(e store.OutboxEntry) {
 	_ = s.st.Dequeue(e)
 }
 
-// rowEntry is a queued row as a batch has it: the row with its time, and
+// rowEntry is a queued row as a batch has it: the row with its time, the
+// columns changed here when the queue names them (store.ChangedKey), and
 // for a comment its author's name, which no server here looks up. Its
 // version is newer than any this device has seen of the row, so a change
 // made here while another device's waited still wins over it.
@@ -471,7 +479,16 @@ func (s *Service) rowEntry(me string, e store.OutboxEntry) (icloud.Entry, error)
 	if err := json.Unmarshal([]byte(e.Payload), &row); err != nil {
 		return icloud.Entry{}, err
 	}
-	// A batch has whole rows, newest wins.
+	// Only the columns changed here apply where the row is, so a change
+	// another device made meanwhile to another column stays.
+	var cols []string
+	if list, ok := row[store.ChangedKey].([]any); ok {
+		for _, c := range list {
+			if k, ok := c.(string); ok {
+				cols = append(cols, k)
+			}
+		}
+	}
 	delete(row, store.ChangedKey)
 	changed, err := s.st.RowUpdatedAt(e.Entity, e.EntityID)
 	if err != nil {
@@ -481,14 +498,14 @@ func (s *Service) rowEntry(me string, e store.OutboxEntry) (icloud.Entry, error)
 	if changed.IsZero() {
 		at = cloudNow().UnixMilli()
 	}
-	at = max(at, s.st.RowVersion(e.Entity, e.EntityID).At+1)
+	at = max(at, s.newestSeen(e.Entity, e.EntityID, row).At+1)
 	row["updated_at"] = time.UnixMilli(at).UTC().Format(time.RFC3339Nano)
 	if e.Entity == "comments" {
 		if c, err := s.st.Comment(e.EntityID); err == nil {
 			row["author_name"] = c.AuthorName
 		}
 	}
-	return icloud.Entry{Kind: "row", Table: e.Entity, ID: e.EntityID, At: at, By: me, Row: row}, nil
+	return icloud.Entry{Kind: "row", Table: e.Entity, ID: e.EntityID, At: at, By: me, Row: row, Changed: cols}, nil
 }
 
 // publishContent writes this device's version of a page to its page file,
@@ -542,6 +559,10 @@ func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerCo
 		&store.PeerContent{Peer: me, Version: version, Content: row.Content}, nil
 }
 
+// uploadFetchWait is how long cloudUpload waits for iCloud to download
+// what a copy was made from; tests shorten it.
+var uploadFetchWait = 15 * time.Second
+
 // cloudUpload copies a file or a recording's audio into the folder.
 func (s *Service) cloudUpload(ctx context.Context, e store.OutboxEntry) error {
 	var payload map[string]any
@@ -550,8 +571,17 @@ func (s *Service) cloudUpload(ctx context.Context, e store.OutboxEntry) error {
 	}
 	local := store.S(payload, "local_path")
 	if !onDevice(local) {
+		// What a copy was made from may not be downloaded yet: it is
+		// waited for a little, then on a later pass, so the rest of this
+		// one goes meanwhile.
+		fctx, cancel := context.WithTimeout(ctx, uploadFetchWait)
 		var err error
-		if local, err = s.fetchCopied(ctx, payload); err != nil || local == "" {
+		local, err = s.fetchCopied(fctx, payload)
+		cancel()
+		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			return icloud.ErrNotReady
+		}
+		if err != nil || local == "" {
 			return err // gone: nothing to upload
 		}
 	}

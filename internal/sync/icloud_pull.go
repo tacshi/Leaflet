@@ -17,9 +17,18 @@ import (
 
 // cloudPull applies the other devices' batches that came since the last
 // pull, in each device's order, then brings up to date the pages whose
-// content changed.
+// content changed. Changes held for a row while one of this device's
+// waited apply first, once it has gone.
 func (s *Service) cloudPull(ctx context.Context, me string) error {
 	peers, err := s.devices(me)
+	if err != nil {
+		return err
+	}
+	changed := map[string]bool{}
+	err = s.applyHeld(changed)
+	for table := range changed {
+		s.st.Notify(table, "")
+	}
 	if err != nil {
 		return err
 	}
@@ -175,11 +184,11 @@ func (s *Service) snapshotAfter(peer string, seqs []int64, i int) int {
 	return -1
 }
 
-// applyEntry applies one change of a device's. A row applies when its
-// version is newer than this device's; when the row has a change waiting
-// here, that change wins, and its version will be newer than the one seen
-// now. A page's content waits to be brought up to date, to at least the
-// version the batch names.
+// applyEntry applies one change of a device's. A row's columns apply
+// where their version is newer than this device's (applyRow); when the
+// row has a change waiting here, that change wins on its columns, and its
+// version will be newer than the one seen now. A page's content waits to
+// be brought up to date, to at least the version the batch names.
 func (s *Service) applyEntry(peer string, e icloud.Entry, waiting, changed map[string]bool) error {
 	switch e.Kind {
 	case "content":
@@ -199,38 +208,7 @@ func (s *Service) applyEntry(peer string, e icloud.Entry, waiting, changed map[s
 	if !syncedRows[e.Table] || !icloud.ValidID(e.ID) || e.Row == nil {
 		return nil
 	}
-	v := store.RowVersion{At: e.At, Device: e.By}
-	if !v.After(s.st.RowVersion(e.Table, e.ID)) {
-		return nil
-	}
-	if s.st.HasPending(e.Table, e.ID) {
-		return s.st.SetRowVersion(e.Table, e.ID, v)
-	}
-	r := e.Row
-	r["id"] = e.ID
-	// The devices sync one space: a row from before a device joined it
-	// has the device's own.
-	if _, ok := r["space_id"]; ok {
-		r["space_id"] = s.st.Session().SpaceID
-	}
-	var err error
-	switch e.Table {
-	case "pages":
-		err = s.putCloudPage(r)
-	case "folders":
-		err = s.st.PutRemoteFolder(r)
-	case "files":
-		err = s.st.PutRemoteFile(r)
-	case "comments":
-		err = s.st.PutRemoteComment(r, store.S(r, "author_name"))
-	case "recordings":
-		err = s.st.PutRemoteRecording(r)
-	}
-	if err != nil {
-		return err
-	}
-	changed[e.Table] = true
-	return s.st.SetRowVersion(e.Table, e.ID, v)
+	return s.applyRow(e, changed)
 }
 
 // putCloudPage stores a page of another device's. Two devices that moved

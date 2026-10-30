@@ -26,7 +26,9 @@ func (e *Editor) SetDue(id string, t time.Time, timed bool) {
 // DueLabel says when a due date is, from now: Today, Tomorrow, Yesterday,
 // or the day, with its year when not this one's, and its time when timed.
 func DueLabel(due time.Time, timed bool, now time.Time) string {
-	day := func(t time.Time) time.Time { return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local) }
+	// The days between are counted on the calendar, in UTC, where each is
+	// 24 hours long: a day that changes the clocks is 23 or 25.
+	day := func(t time.Time) time.Time { return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC) }
 	var label string
 	switch int(day(due).Sub(day(now)).Hours() / 24) {
 	case 0:

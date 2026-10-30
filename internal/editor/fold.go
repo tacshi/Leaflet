@@ -94,15 +94,64 @@ func (e *Editor) ToggleFold(id string) {
 
 // Reveal unfolds the headings that hide a block, so it can be shown.
 func (e *Editor) Reveal(id string) {
+	if e.unfold(id) {
+		e.changed()
+	}
+}
+
+// unfold unfolds the headings that hide a block, and reports whether any
+// did.
+func (e *Editor) unfold(id string) bool {
 	changed := false
 	for h := e.folder(id); h != nil; h = e.folder(id) {
 		h.Set("collapsed", false)
 		e.invalidate(h.ID)
 		changed = true
 	}
-	if changed {
-		e.changed()
+	return changed
+}
+
+// section returns the blocks heading h's section holds, and the blocks
+// under them.
+func (e *Editor) section(h *doc.Node) map[string]bool {
+	out := map[string]bool{}
+	loc := e.Content.Locate(h.ID)
+	if loc == nil {
+		return out
 	}
+	var add func(n *doc.Node)
+	add = func(n *doc.Node) {
+		out[n.ID] = true
+		for _, k := range n.Children {
+			add(k)
+		}
+	}
+	for _, n := range loc.Siblings[loc.Index+1:] {
+		if ends(n, h) {
+			break
+		}
+		add(n)
+	}
+	return out
+}
+
+// selectedUnits are the units from a selection's start, a, with the
+// sections of the folded headings it takes, to copy or delete it. A
+// folded heading it starts inside of stays, and so does its section.
+func (e *Editor) selectedUnits(a Pos) []*doc.Node {
+	us := e.withSections()
+	h := e.node(a.ID)
+	if h == nil || !foldedHeading(h) || a.Off == 0 {
+		return us
+	}
+	keep := e.section(h)
+	out := make([]*doc.Node, 0, len(us))
+	for _, n := range us {
+		if !keep[n.ID] {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 // Headings are the page's headings in order, with their levels and text,

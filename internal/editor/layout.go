@@ -2,6 +2,7 @@ package editor
 
 import (
 	"encoding/json"
+	"maps"
 	"strings"
 	"unicode"
 	"unicode/utf16"
@@ -261,7 +262,7 @@ var clip struct {
 // or of one block selected whole that is not text, cut to the selection,
 // with their nesting; nil for text within one block.
 func (e *Editor) copyBlocks() []*doc.Node {
-	if e.Collapsed() {
+	if e.Collapsed() && !e.blockSelected() {
 		return nil
 	}
 	a, b := e.ordered()
@@ -270,8 +271,8 @@ func (e *Editor) copyBlocks() []*doc.Node {
 			return nil
 		}
 	}
-	// A folded heading's section goes with it.
-	us := e.withSections()
+	// A folded heading's section goes with it, unless the heading stays.
+	us := e.selectedUnits(a)
 	var out []*doc.Node
 	type open struct {
 		depth int
@@ -339,7 +340,7 @@ func freshBlocks(nodes []*doc.Node) []*doc.Node {
 
 // copyText returns the selection as markdown, a line per block.
 func (e *Editor) copyText() string {
-	if e.Collapsed() {
+	if e.Collapsed() && !e.blockSelected() {
 		return ""
 	}
 	a, b := e.ordered()
@@ -349,7 +350,7 @@ func (e *Editor) copyText() string {
 			return n.Delta().Slice(a.Off, b.Off).Plain()
 		}
 	}
-	us := e.withSections()
+	us := e.selectedUnits(a)
 	var lines []string
 	for i := indexIn(us, a.ID); i >= 0 && i <= indexIn(us, b.ID) && i < len(us); i++ {
 		n := us[i]
@@ -692,7 +693,8 @@ func (e *Editor) paste(text string) {
 
 // pasteBlocks puts blocks at the caret, in place of the selection: the
 // first joins the text before the caret, and the last takes the text
-// after it.
+// after it, in the kind of block it was in and with the children that
+// followed it, as other editors keep them.
 func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 	if len(blocks) == 0 {
 		return
@@ -708,75 +710,101 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 	d := n.Delta()
 	head, tail := d.Slice(0, e.focus.Off), d.Slice(e.focus.Off, d.Len())
 	first := blocks[0]
-	if !joins(first) {
+	if !joins(first) && head.Len() == 0 {
 		// A table, chart, code and the like cannot join a line: the blocks
 		// go before the caret's block, or after its text before the caret.
-		if head.Len() == 0 {
-			for _, b := range blocks {
-				_ = e.Content.Insert(doc.Position{Before: n.ID}, b)
-			}
-			e.layouts = map[string]*blockLayout{}
-			e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
-			e.changed()
-			return
+		for _, b := range blocks {
+			_ = e.Content.Insert(doc.Position{Before: n.ID}, b)
 		}
+		e.layouts = map[string]*blockLayout{}
+		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
+		e.changed()
+		return
+	}
+	// The caret's block as it was: what followed the caret, its children
+	// too, goes after what is pasted.
+	typ, data := n.Type, maps.Clone(n.Data)
+	kids := n.Children
+	n.Children = nil
+	var last *doc.Node
+	at := n.ID
+	if !joins(first) {
 		n.SetDelta(head)
-		e.invalidate(n.ID)
-		at := n.ID
 		for _, b := range blocks {
 			_ = e.Content.Insert(doc.Position{After: at}, b)
 			at = b.ID
 		}
-		p := newText("paragraph", tail)
-		_ = e.Content.Insert(doc.Position{After: at}, p)
-		e.layouts = map[string]*blockLayout{}
-		e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
-		e.changed()
-		return
-	}
-	// The first line joins the caret's block, the last takes what followed
-	// the caret, and the lines between become blocks of their own.
-	n.SetDelta(head.Concat(first.Delta()))
-	if head.Len() == 0 && first.Type != "paragraph" {
-		n.Type = first.Type
-		for k, v := range first.Data {
-			if k != "delta" {
-				n.Data[k] = v
+		last = newText("paragraph", nil)
+		_ = e.Content.Insert(doc.Position{After: at}, last)
+	} else {
+		// The first line joins the caret's block, the last takes what
+		// followed the caret, and the lines between become blocks of
+		// their own.
+		n.SetDelta(head.Concat(first.Delta()))
+		if head.Len() == 0 && first.Type != "paragraph" {
+			n.Type = first.Type
+			for k, v := range first.Data {
+				if k != "delta" {
+					n.Data[k] = v
+				}
 			}
 		}
-	}
-	e.invalidate(n.ID)
-	at := n.ID
-	if len(first.Children) > 0 {
-		if NestableTypes(n) {
-			n.Children = append(first.Children, n.Children...)
-		} else {
-			for _, k := range first.Children {
-				_ = e.Content.Insert(doc.Position{After: at}, k)
-				at = k.ID
+		last = n
+		if len(first.Children) > 0 {
+			if NestableTypes(n) {
+				n.Children = first.Children
+			} else {
+				for _, k := range first.Children {
+					_ = e.Content.Insert(doc.Position{After: at}, k)
+					at = k.ID
+				}
 			}
+			last = first.Children[len(first.Children)-1]
+		}
+		for _, b := range blocks[1:] {
+			_ = e.Content.Insert(doc.Position{After: at}, b)
+			at, last = b.ID, b
+		}
+		// What followed the caret goes on the last line pasted.
+		for len(last.Children) > 0 && last.Type != "table" {
+			last = last.Children[len(last.Children)-1]
+		}
+		if !joins(last) {
+			last = newText("paragraph", nil)
+			_ = e.Content.Insert(doc.Position{After: at}, last)
 		}
 	}
-	last := n
-	if len(first.Children) > 0 {
-		last = first.Children[len(first.Children)-1]
-	}
-	for _, b := range blocks[1:] {
-		_ = e.Content.Insert(doc.Position{After: at}, b)
-		at, last = b.ID, b
-	}
-	// What followed the caret goes on the last line pasted.
-	for len(last.Children) > 0 && last.Type != "table" {
-		last = last.Children[len(last.Children)-1]
-	}
-	if !joins(last) {
-		p := newText("paragraph", tail)
-		_ = e.Content.Insert(doc.Position{After: at}, p)
-		last = p
-		tail = nil
+	if last != n {
+		if tail.Len() > 0 && typ != "code" {
+			// The text after the caret stays in its kind of block, folded
+			// or checked as it was; a due date stays with the to-do's first
+			// part.
+			last.Type = typ
+			for _, k := range []string{"checked", "due", "level", "language", "tone", "collapsed"} {
+				delete(last.Data, k)
+			}
+			for k, v := range data {
+				if k != "delta" && k != "due" {
+					last.Set(k, v)
+				}
+			}
+		}
+		// What went after a folded heading shows, as Enter's new line does.
+		if foldedHeading(n) {
+			n.Set("collapsed", false)
+		}
 	}
 	off := textLen(last)
 	last.SetDelta(last.Delta().Concat(tail))
+	if NestableTypes(last) {
+		last.Children = append(last.Children, kids...)
+	} else {
+		at := last.ID
+		for _, k := range kids {
+			_ = e.Content.Insert(doc.Position{After: at}, k)
+			at = k.ID
+		}
+	}
 	e.layouts = map[string]*blockLayout{}
 	e.Select(Pos{last.ID, off}, Pos{last.ID, off})
 	e.changed()

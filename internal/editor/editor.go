@@ -114,9 +114,14 @@ type Editor struct {
 	typing    doc.Attrs
 	hasTyping bool
 	// marked is an input method's composition, in the focus block.
+	// markStep is set while the step of undo on top is the one it began
+	// with and changes nothing but it, and markRedo the steps of redo that
+	// step cleared, to keep when it is given up.
 	marked     bool
 	markStart  int
 	markEnd    int
+	markStep   bool
+	markRedo   []snapshot
 	undo, redo []snapshot
 	lastEdit   time.Time
 	// coalescing is set while typing joins the undo step open, which
@@ -306,6 +311,13 @@ func (e *Editor) ordered() (Pos, Pos) {
 // Collapsed reports whether the selection is a caret.
 func (e *Editor) Collapsed() bool { return e.anchor == e.focus }
 
+// blockSelected reports whether the selection is a block selected whole,
+// one without text: a caret on it, which copies and cuts the block.
+func (e *Editor) blockSelected() bool {
+	n := e.node(e.focus.ID)
+	return e.Collapsed() && n != nil && !n.IsText()
+}
+
 // Range returns the selection's start and end.
 func (e *Editor) Range() (Pos, Pos) { return e.ordered() }
 
@@ -323,6 +335,13 @@ func (e *Editor) FocusBlock() string { return e.focus.ID }
 
 // Select sets the selection.
 func (e *Editor) Select(anchor, focus Pos) {
+	if e.marked {
+		// Moving the caret ends a composition where it is, keeping its
+		// text, as a click does in other editors: composing on starts
+		// afresh at the caret, and never writes over another block.
+		e.marked, e.markStep = false, false
+		e.changed()
+	}
 	e.anchor, e.focus = e.clamp(anchor), e.clamp(focus)
 	e.hasTyping = false
 	e.hasDesired = false
@@ -429,6 +448,7 @@ func (e *Editor) SelectedBlocks() []string {
 // within a second and a half joins the step before it, unless the caret
 // was moved in between.
 func (e *Editor) pushUndo(typing bool) {
+	e.markStep = false
 	now := time.Now()
 	if typing && e.coalescing && e.coalesceIn == e.focus.ID && now.Sub(e.lastEdit) < 1500*time.Millisecond {
 		e.lastEdit = now
@@ -444,6 +464,16 @@ func (e *Editor) pushUndo(typing bool) {
 	e.redo = nil
 	e.coalescing, e.coalesceIn = typing, e.focus.ID
 	e.lastEdit = now
+}
+
+// dropStep takes back the step of undo a composition began with, once the
+// page is as that step keeps it again, and brings back the steps of redo
+// it cleared.
+func (e *Editor) dropStep() {
+	if n := len(e.undo); n > 0 {
+		e.undo = e.undo[:n-1]
+	}
+	e.redo, e.markStep, e.markRedo = e.markRedo, false, nil
 }
 
 // BreakUndo makes the next edit a step of its own.

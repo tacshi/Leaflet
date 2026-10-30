@@ -107,6 +107,15 @@ func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 			n.SetDelta(n.Delta().Delete(from, to))
 			e.invalidate(n.ID)
 			e.anchor, e.focus = Pos{n.ID, from}, Pos{n.ID, from}
+			if e.markStep {
+				// The page is as the step it began with keeps it again:
+				// what it became makes a step of its own, if any.
+				e.dropStep()
+			} else {
+				// It began by replacing text, a step that what it became
+				// joins.
+				e.coalescing, e.coalesceIn, e.lastEdit = true, n.ID, time.Now()
+			}
 			if text == "" {
 				e.changed()
 				return
@@ -136,17 +145,18 @@ func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 	if n == nil {
 		return
 	}
+	if !e.marked {
+		// A composition begins a step of undo, which changes nothing but
+		// it unless it replaces text.
+		redo := e.redo
+		e.pushUndo(false)
+		e.markStep, e.markRedo = e.Collapsed() && (r == nil || r.Start == r.End), redo
+	}
 	from, to, ok := e.target(r)
 	if !ok {
-		if !e.Collapsed() {
-			e.pushUndo(false)
-			e.deleteSelection()
-		}
+		e.deleteSelection()
 		from, to = e.focus.Off, e.focus.Off
 		n = e.focusNode()
-	}
-	if !e.marked {
-		e.pushUndo(false)
 	}
 	attrs := n.Delta().AttrsAt(from)
 	if e.hasTyping {
@@ -157,6 +167,10 @@ func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 	runes := len([]rune(text))
 	if runes == 0 {
 		e.marked = false
+		if e.markStep {
+			// Given up, it leaves no step.
+			e.dropStep()
+		}
 	} else {
 		e.marked, e.markStart, e.markEnd = true, from, from+runes
 	}
@@ -598,7 +612,7 @@ func (e *Editor) command(name string) bool {
 	switch name {
 	case "copy", "cut":
 		e.copySelection()
-		if name == "cut" && !e.Collapsed() {
+		if name == "cut" && (!e.Collapsed() || e.blockSelected()) {
 			e.Backspace(false)
 		}
 		return true

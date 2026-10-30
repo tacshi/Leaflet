@@ -30,12 +30,14 @@ func (e *Editor) deleteSelection() bool {
 		e.anchor, e.focus = a, a
 		return true
 	}
-	// A folded heading's section goes with it.
-	us := e.withSections()
+	// A folded heading's section goes with it, unless the heading stays.
+	us := e.selectedUnits(a)
 	ia, ib := indexIn(us, a.ID), indexIn(us, b.ID)
 	if ia < 0 || ib < 0 {
 		return false
 	}
+	// What shows after the selection still does once it is gone.
+	defer e.keepShown(e.unitAfter(b.ID))
 	first, last := us[ia], us[ib]
 	var tail doc.Delta
 	if last.IsText() {
@@ -403,10 +405,11 @@ func (e *Editor) Backspace(word bool) {
 		e.changed()
 		return
 	}
-	// At the start of a block.
-	e.pushUndo(false)
+	// At the start of a block. What only moves the caret, or does
+	// nothing, is no step of undo.
 	e.coalescing = false
 	if n.Type != "paragraph" {
+		e.pushUndo(false)
 		e.unstyle(n)
 		e.invalidate(n.ID)
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
@@ -420,14 +423,19 @@ func (e *Editor) Backspace(word bool) {
 	}
 	prev := us[i-1]
 	if !prev.IsText() {
-		if n.Delta().Len() == 0 {
-			e.liftChildren(n)
-			e.Content.Remove(n.ID)
+		if n.Delta().Len() > 0 {
+			e.Select(Pos{prev.ID, 0}, Pos{prev.ID, 0})
+			e.services.Invalidate()
+			return
 		}
+		e.pushUndo(false)
+		e.liftChildren(n)
+		e.Content.Remove(n.ID)
 		e.Select(Pos{prev.ID, 0}, Pos{prev.ID, 0})
 		e.changed()
 		return
 	}
+	e.pushUndo(false)
 	at := textLen(prev)
 	prev.SetDelta(joined(prev, n))
 	e.liftChildren(n)
@@ -475,16 +483,39 @@ func (e *Editor) Delete(word bool) {
 		return
 	}
 	next := us[i+1]
-	e.pushUndo(false)
 	if !next.IsText() {
+		// Onto a block selected whole: no step of undo.
+		e.BreakUndo()
 		e.Select(Pos{next.ID, 0}, Pos{next.ID, 0})
+		e.services.Invalidate()
 		return
 	}
+	e.pushUndo(false)
+	after := e.unitAfter(next.ID)
 	n.SetDelta(joined(n, next))
 	e.liftChildren(next)
 	e.Content.Remove(next.ID)
 	e.invalidate(n.ID)
+	e.keepShown(after)
 	e.changed()
+}
+
+// unitAfter is the unit shown after block id, or "" for none.
+func (e *Editor) unitAfter(id string) string {
+	us := e.units()
+	if i := indexIn(us, id); i >= 0 && i+1 < len(us) {
+		return us[i+1].ID
+	}
+	return ""
+}
+
+// keepShown unfolds the headings that an edit made fold block id away:
+// as a heading that ended a folded section goes, or becomes another kind
+// of block, what was after it would join that section, out of sight.
+func (e *Editor) keepShown(id string) {
+	if id != "" && e.node(id) != nil && e.unfold(id) {
+		e.order = nil
+	}
 }
 
 // unstyle is Backspace at the start of a block other than a paragraph,
@@ -506,6 +537,9 @@ func (e *Editor) toParagraph(n *doc.Node) {
 		delete(n.Data, k)
 	}
 	e.liftChildren(n)
+	// A heading after a folded one ended its section, which would now
+	// take the block in.
+	e.keepShown(n.ID)
 }
 
 // joined is the text of a block with the next one's after it: plain when
@@ -620,7 +654,9 @@ func (e *Editor) SetType(typ string, level int) {
 	a, b := e.ordered()
 	us := e.units()
 	var last *doc.Node
-	for i := e.index(a.ID); i >= 0 && i <= e.index(b.ID) && i < len(us); i++ {
+	// The blocks as they showed: a heading changed can unfold a section.
+	ia, ib := indexIn(us, a.ID), indexIn(us, b.ID)
+	for i := ia; i >= 0 && i <= ib && i < len(us); i++ {
 		n := us[i]
 		if !n.IsText() {
 			continue
@@ -647,6 +683,7 @@ func (e *Editor) SetType(typ string, level int) {
 			e.liftChildren(n)
 		}
 		e.invalidate(n.ID)
+		e.keepShown(n.ID)
 	}
 	if typ == "code" && last != nil {
 		e.roomAfterCode(last)

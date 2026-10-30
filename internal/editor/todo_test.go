@@ -120,3 +120,43 @@ func TestDueLabel(t *testing.T) {
 		t.Error("timed overdue")
 	}
 }
+
+// An empty to-do offers its date after its placeholder, where it would
+// be with that text typed, not over it.
+func TestDueChipAfterPlaceholder(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("[] ")
+	n := e.Content.Children[0]
+	tt.Frame()
+	empty, ok := e.chips[n.ID]
+	if !ok {
+		t.Fatalf("no date offered in %v", tt.Texts())
+	}
+	tt.Type(placeholder(n, true))
+	tt.Frame()
+	typed := e.chips[n.ID]
+	if d := empty.X - typed.X; d < -1 || d > 1 {
+		t.Errorf("the date is at %v on the empty to-do, %v after its placeholder's text", empty.X, typed.X)
+	}
+}
+
+// Under the pointer without the caret, an empty to-do offers its date
+// where it does with the caret, off where a click starts typing.
+func TestDueChipStaysPut(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("Intro")
+	tt.Key(0, ui.KeyEnter)
+	tt.Type("[] ")
+	n := e.Content.Children[1]
+	tt.Frame()
+	focused, ok := e.chips[n.ID]
+	if !ok {
+		t.Fatalf("no date offered in %v", tt.Texts())
+	}
+	e.PlaceCaret(e.Content.Children[0].ID, 0)
+	tt.Move(focused.X+focused.W/2, focused.Y+focused.H/2)
+	tt.Frame()
+	if hovered, ok := e.chips[n.ID]; !ok || hovered.X != focused.X {
+		t.Errorf("the date is at %v under the pointer, %v with the caret", hovered.X, focused.X)
+	}
+}

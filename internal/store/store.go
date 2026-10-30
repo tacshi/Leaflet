@@ -294,6 +294,7 @@ func addIndexes(ctx context.Context, c *sql.Conn, indexes [][3]string) error {
 // querier is the database, or a transaction on it.
 type querier interface {
 	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
 	QueryRow(query string, args ...any) *sql.Row
 }
 

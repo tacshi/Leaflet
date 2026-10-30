@@ -2115,3 +2115,126 @@ func TestRemoveSharedPages(t *testing.T) {
 		t.Error("own page's change waiting removed")
 	}
 }
+
+// Pages in a loop of parents, A under B and B under A, as sync may find
+// them before it breaks the loop, are deleted and copied once each.
+func TestDeleteAndCopyALoopOfParents(t *testing.T) {
+	s := open(t)
+	a, _ := s.CreatePage(NewPageOptions{Title: "A"})
+	b, _ := s.CreatePage(NewPageOptions{Title: "B", ParentID: a.ID})
+	if _, err := s.db.Exec(`UPDATE pages SET parent_id = ? WHERE id = ?`, b.ID, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := s.CopyPage(a.ID, CopyOptions{Title: "A copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kids, _ := s.Children(cp.ID, ""); len(kids) != 1 || kids[0].Title != "B" {
+		t.Errorf("the copy has %+v", kids)
+	}
+	ids, err := s.DeletePage(a.ID)
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("deleted %v, %v", ids, err)
+	}
+	for _, id := range ids {
+		if p, _ := s.Page(id); p.DeletedAt.IsZero() {
+			t.Errorf("%s not deleted", p.Title)
+		}
+	}
+	if err := s.RestorePages(ids); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.Page(b.ID); !p.DeletedAt.IsZero() {
+		t.Error("B not restored")
+	}
+}
+
+// A deleted folder's pages move to the top level, and its files go with
+// it, as the sidebar shows files only in their folders; a file of a page
+// stays.
+func TestDeleteFolderDeletesItsFiles(t *testing.T) {
+	s := open(t)
+	f, _ := s.CreateFolder("Folder")
+	p, _ := s.CreatePage(NewPageOptions{Title: "In it", FolderID: f.ID})
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("notes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loose, err := s.AddFile(src, f.ID, "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ofPage, err := s.AddFile(src, f.ID, p.ID, "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteFolder(f); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Page(p.ID); got.FolderID != "" || !got.DeletedAt.IsZero() {
+		t.Errorf("page %+v", got)
+	}
+	if got, _ := s.File(loose.ID); got.DeletedAt.IsZero() || got.LocalPath != "" {
+		t.Errorf("folder's file %+v", got)
+	}
+	if _, err := os.Stat(loose.LocalPath); err == nil {
+		t.Error("the folder's file is still here")
+	}
+	if got, _ := s.File(ofPage.ID); !got.DeletedAt.IsZero() || got.FolderID != "" {
+		t.Errorf("page's file %+v", got)
+	}
+}
+
+// Resolving, deleting or moving a comment queues only what changed, so a
+// resolve made offline does not undo a delete made elsewhere.
+func TestCommentChangesQueueOnlyTheirColumns(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Plan"})
+	c, err := s.AddComment(p.ID, "b1", "Is this right?", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := func() {
+		t.Helper()
+		pending, _ := s.Pending()
+		for _, e := range pending {
+			if err := s.Dequeue(e); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	queued := func() []any {
+		t.Helper()
+		var payload string
+		if err := s.db.QueryRow(`SELECT payload FROM outbox WHERE entity = 'comments' AND entity_id = ?`, c.ID).Scan(&payload); err != nil {
+			t.Fatal(err)
+		}
+		var row map[string]any
+		_ = json.Unmarshal([]byte(payload), &row)
+		cols, _ := row[ChangedKey].([]any)
+		return cols
+	}
+	sent()
+	if err := s.SetResolved(c.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if cols := queued(); fmt.Sprint(cols) != "[resolved]" {
+		t.Errorf("resolve queued %v", cols)
+	}
+	sent()
+	if err := s.Reanchor(p.ID, "b1", "b2"); err != nil {
+		t.Fatal(err)
+	}
+	if cols := queued(); fmt.Sprint(cols) != "[block_id]" {
+		t.Errorf("move queued %v", cols)
+	}
+	if err := s.DeleteComment(c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if cols := queued(); fmt.Sprint(cols) != "[block_id deleted_at]" {
+		t.Errorf("move and delete queued %v", cols)
+	}
+	if err := s.SetResolved("missing", true); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("resolving a missing comment: %v", err)
+	}
+}

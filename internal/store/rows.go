@@ -99,7 +99,7 @@ func (s *Store) CreateFolder(name string) (Folder, error) {
 }
 
 // saveFolder stores a folder changed here and queues it to go up, in the
-// caller's transaction, as savePages does pages.
+// caller's transaction, as savePage does a page.
 func saveFolder(tx *sql.Tx, f Folder, label string) error {
 	var old map[string]any
 	switch was, err := scanFolder(tx.QueryRow(`SELECT `+folderCols+` FROM folders WHERE id = ?`, f.ID)); {
@@ -158,19 +158,45 @@ func (s *Store) SetFolderDefaultTemplate(f Folder, templateID string) error {
 	})
 }
 
-// DeleteFolder deletes a folder; its pages move to the top level.
+// DeleteFolder deletes a folder; its pages move to the top level. Its
+// files are deleted with it, as DeleteFile deletes one: the sidebar shows
+// a file only in its folder, so one left at the top level would be kept,
+// and synced, where nobody can see it. A file of a page stays the page's.
 func (s *Store) DeleteFolder(f Folder) error {
 	now := time.Now()
-	pages, err := s.queryPages(`folder_id = ?`, f.ID)
-	if err != nil {
-		return err
-	}
-	err = s.inTx(func(tx *sql.Tx) error {
+	var deleted []File
+	// What the folder holds is read in the transaction that changes it,
+	// so a change made to a page meanwhile, as a rename, is kept.
+	err := s.inTx(func(tx *sql.Tx) error {
+		pages, err := pagesIn(tx, `folder_id = ?`, f.ID)
+		if err != nil {
+			return err
+		}
 		for _, p := range pages {
 			p.FolderID, p.UpdatedAt = "", now
 			if err := savePage(tx, p, "moved"); err != nil {
 				return err
 			}
+		}
+		files, err := filesIn(tx, `folder_id = ? AND deleted_at IS NULL`, f.ID)
+		if err != nil {
+			return err
+		}
+		for _, file := range files {
+			if file.PageID != "" {
+				file.FolderID, file.UpdatedAt = "", now
+				if err := putFile(tx, file); err != nil {
+					return err
+				}
+				if err := queue(tx, "files", file.ID, FileToRemote(file), "moved file", file.PageID); err != nil {
+					return err
+				}
+				continue
+			}
+			if err := deleteFile(tx, file, now); err != nil {
+				return err
+			}
+			deleted = append(deleted, file)
 		}
 		// As stored, as in changeFolder.
 		f, err := scanFolder(tx.QueryRow(`SELECT `+folderCols+` FROM folders WHERE id = ?`, f.ID))
@@ -183,9 +209,13 @@ func (s *Store) DeleteFolder(f Folder) error {
 	if err != nil {
 		return err
 	}
+	for _, file := range deleted {
+		s.removeCopy(file.ID)
+	}
 	s.Notify("outbox", "")
 	s.Notify("folders", "")
 	s.Notify("pages", "")
+	s.Notify("files", "")
 	return nil
 }
 
@@ -226,7 +256,12 @@ func (s *Store) File(id string) (File, error) {
 }
 
 func (s *Store) queryFiles(where string, args ...any) ([]File, error) {
-	rows, err := s.db.Query(`SELECT id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at FROM files WHERE `+where, args...)
+	return filesIn(s.db, where, args...)
+}
+
+// filesIn is queryFiles in the database or a transaction.
+func filesIn(q querier, where string, args ...any) ([]File, error) {
+	rows, err := q.Query(`SELECT id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at FROM files WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -346,30 +381,32 @@ func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
 // now, and its stored copy (in Storage, or iCloud Drive) once the
 // deletion has gone up. An upload still waiting is dropped.
 func (s *Store) DeleteFile(f File) error {
-	now := time.Now()
-	f.DeletedAt, f.UpdatedAt = now, now
-	err := s.inTx(func(tx *sql.Tx) error {
-		if err := putFile(tx, f); err != nil {
-			return err
-		}
-		if err := queue(tx, "files", f.ID, FileToRemote(f), "deleted file", ""); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'storage' AND entity_id = ?`, "files/"+f.ID); err != nil {
-			return err
-		}
-		if f.StoragePath == "" {
-			return nil
-		}
-		return queue(tx, "storage_delete", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "file_id": f.ID}, "deleted file", "")
-	})
-	if err != nil {
+	if err := s.inTx(func(tx *sql.Tx) error { return deleteFile(tx, f, time.Now()) }); err != nil {
 		return err
 	}
 	s.removeCopy(f.ID)
 	s.Notify("outbox", "")
 	s.Notify("files", "")
 	return nil
+}
+
+// deleteFile is DeleteFile in the caller's transaction, but for the copy
+// here, which the caller removes once it commits.
+func deleteFile(tx *sql.Tx, f File, now time.Time) error {
+	f.DeletedAt, f.UpdatedAt = now, now
+	if err := putFile(tx, f); err != nil {
+		return err
+	}
+	if err := queue(tx, "files", f.ID, FileToRemote(f), "deleted file", ""); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'storage' AND entity_id = ?`, "files/"+f.ID); err != nil {
+		return err
+	}
+	if f.StoragePath == "" {
+		return nil
+	}
+	return queue(tx, "storage_delete", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "file_id": f.ID}, "deleted file", "")
 }
 
 // removeCopy removes a deleted file's copy on this device, if it is one
@@ -528,6 +565,50 @@ func putComment(q querier, c Comment) error {
 	return err
 }
 
+// changeComments changes the comments where says, as stored, and queues
+// the columns fn changed, in one transaction: a resolve made offline then
+// no longer undoes a delete made elsewhere, nor a delete a resolve. It
+// returns how many it changed.
+func (s *Store) changeComments(label string, fn func(*Comment), where string, args ...any) (int, error) {
+	var all []Comment
+	err := s.inTx(func(tx *sql.Tx) error {
+		rows, err := tx.Query(`SELECT `+commentCols+` FROM comments WHERE `+where, args...)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			c, err := scanComment(rows)
+			if err != nil {
+				_ = rows.Close()
+				return err
+			}
+			all = append(all, c)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return err
+		}
+		now := time.Now()
+		for _, c := range all {
+			old := CommentToRemote(c)
+			fn(&c)
+			c.UpdatedAt = now
+			if err := putComment(tx, c); err != nil {
+				return err
+			}
+			if err := queueChange(tx, "comments", c.ID, old, CommentToRemote(c), label, c.PageID); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil || len(all) == 0 {
+		return 0, err
+	}
+	s.Notify("outbox", all[0].PageID)
+	s.Notify("comments", all[0].PageID)
+	return len(all), nil
+}
+
 // saveComment stores a comment changed here and queues it to go up, in one
 // transaction.
 func (s *Store) saveComment(c Comment, label string) error {
@@ -570,46 +651,30 @@ func (s *Store) AddComment(pageID, blockID, body, parentID, quote, authorKind, a
 
 // SetResolved resolves or reopens a thread.
 func (s *Store) SetResolved(rootID string, resolved bool) error {
-	c, err := s.Comment(rootID)
-	if err != nil {
-		return err
-	}
-	c.Resolved, c.UpdatedAt = resolved, time.Now()
 	label := "reopened"
 	if resolved {
 		label = "resolved thread"
 	}
-	return s.saveComment(c, label)
+	n, err := s.changeComments(label, func(c *Comment) { c.Resolved = resolved }, `id = ?`, rootID)
+	if err == nil && n == 0 {
+		err = sql.ErrNoRows
+	}
+	return err
 }
 
 // DeleteComment deletes a comment.
 func (s *Store) DeleteComment(id string) error {
-	c, err := s.Comment(id)
-	if err != nil {
-		return err
+	n, err := s.changeComments("deleted comment", func(c *Comment) { c.DeletedAt = time.Now() }, `id = ?`, id)
+	if err == nil && n == 0 {
+		err = sql.ErrNoRows
 	}
-	now := time.Now()
-	c.DeletedAt, c.UpdatedAt = now, now
-	return s.saveComment(c, "deleted comment")
+	return err
 }
 
 // Reanchor moves threads anchored to one block onto another.
 func (s *Store) Reanchor(pageID, from, to string) error {
-	threads, err := s.Threads(pageID)
-	if err != nil {
-		return err
-	}
-	for _, t := range threads {
-		for _, c := range t.All() {
-			if c.BlockID == from {
-				c.BlockID, c.UpdatedAt = to, time.Now()
-				if err := s.saveComment(c, "comment moved"); err != nil {
-					return err
-				}
-			}
-		}
-	}
-	return nil
+	_, err := s.changeComments("comment moved", func(c *Comment) { c.BlockID = to }, `page_id = ? AND block_id = ?`, pageID, from)
+	return err
 }
 
 // Segment is one timestamped piece of a transcript.
@@ -746,7 +811,10 @@ func (s *Store) QueueUpload(r Recording) error {
 	if r.LocalPath == "" {
 		return nil
 	}
-	return s.Queue("storage", "recordings/"+r.ID, map[string]any{
-		"bucket": "recordings", "local_path": r.LocalPath, "content_type": "audio/wav", "recording_id": r.ID,
-	}, "audio waiting to upload", r.PageID)
+	return s.Queue("storage", "recordings/"+r.ID, uploadOf(r), "audio waiting to upload", r.PageID)
+}
+
+// uploadOf is the entry that uploads a recording's audio on this device.
+func uploadOf(r Recording) map[string]any {
+	return map[string]any{"bucket": "recordings", "local_path": r.LocalPath, "content_type": "audio/wav", "recording_id": r.ID}
 }

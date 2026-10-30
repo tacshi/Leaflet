@@ -772,6 +772,17 @@ func TestCommentsPushAsUpdates(t *testing.T) {
 	if strings.Join(requests, ",") != "PATCH eq.theirs,PATCH eq.new,POST " {
 		t.Errorf("requests %v", requests)
 	}
+	// A resolve made here, of a comment deleted elsewhere, sends only the
+	// resolve, not this device's deleted_at.
+	patched = nil
+	done, err = svc.pushComment(ctx, "u1", map[string]any{"id": "theirs", "author_id": "u1", "body": "Look", "resolved": true,
+		"deleted_at": nil, store.ChangedKey: []any{"resolved", "updated_at"}})
+	if err != nil || !done {
+		t.Fatalf("done %v, %v", done, err)
+	}
+	if len(patched) != 1 || patched["resolved"] != true {
+		t.Errorf("sent %v", patched)
+	}
 }
 
 // A page changed here sends only what changed, so an offline rename does

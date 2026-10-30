@@ -71,7 +71,12 @@ func scanPage(sc interface{ Scan(...any) error }) (Page, error) {
 }
 
 func (s *Store) queryPages(where string, args ...any) ([]Page, error) {
-	rows, err := s.db.Query(`SELECT `+pageCols+` FROM pages WHERE `+where, args...)
+	return pagesIn(s.db, where, args...)
+}
+
+// pagesIn is queryPages in the database or a transaction.
+func pagesIn(q querier, where string, args ...any) ([]Page, error) {
+	rows, err := q.Query(`SELECT `+pageCols+` FROM pages WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -99,17 +104,23 @@ func (s *Store) Templates() ([]Page, error) {
 }
 
 // Page returns one page, deleted or not.
-func (s *Store) Page(id string) (Page, error) {
-	return scanPage(s.db.QueryRow(`SELECT `+pageCols+` FROM pages WHERE id = ?`, id))
+func (s *Store) Page(id string) (Page, error) { return pageIn(s.db, id) }
+
+func pageIn(q querier, id string) (Page, error) {
+	return scanPage(q.QueryRow(`SELECT `+pageCols+` FROM pages WHERE id = ?`, id))
 }
 
 // Children returns the pages under a parent ("" for the top level of the
 // space), in sort order.
 func (s *Store) Children(parentID, spaceID string) ([]Page, error) {
+	return childrenIn(s.db, parentID, spaceID)
+}
+
+func childrenIn(q querier, parentID, spaceID string) ([]Page, error) {
 	if parentID == "" {
-		return s.queryPages(`deleted_at IS NULL AND parent_id IS NULL AND space_id = ? ORDER BY sort_key`, spaceID)
+		return pagesIn(q, `deleted_at IS NULL AND parent_id IS NULL AND space_id = ? ORDER BY sort_key`, spaceID)
 	}
-	return s.queryPages(`deleted_at IS NULL AND parent_id = ? ORDER BY sort_key`, parentID)
+	return pagesIn(q, `deleted_at IS NULL AND parent_id = ? ORDER BY sort_key`, parentID)
 }
 
 func writePage(q querier, p Page) error {
@@ -124,29 +135,10 @@ func writePage(q querier, p Page) error {
 	return err
 }
 
-// savePages stores pages changed here and queues them to go up, in one
-// transaction: a change without its entry would never reach the server,
-// and a retry finding the change stored would not queue it either.
-func (s *Store) savePages(label string, pages ...Page) error {
-	err := s.inTx(func(tx *sql.Tx) error {
-		for _, p := range pages {
-			if err := savePage(tx, p, label); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	for _, p := range pages {
-		s.Notify("outbox", p.ID)
-	}
-	return nil
-}
-
 // savePage stores a page changed here and queues the columns it changed
-// to go up, in the caller's transaction.
+// to go up, in the caller's transaction: a change without its entry would
+// never reach the server, and a retry finding the change stored would not
+// queue it either.
 func savePage(tx *sql.Tx, p Page, label string) error {
 	var old map[string]any
 	switch was, err := scanPage(tx.QueryRow(`SELECT `+pageCols+` FROM pages WHERE id = ?`, p.ID)); {
@@ -159,6 +151,31 @@ func savePage(tx *sql.Tx, p Page, label string) error {
 		return err
 	}
 	return queueChange(tx, "pages", p.ID, old, PageToRemote(p), label, p.ID)
+}
+
+// changePage changes a page as stored, not as the caller last read it,
+// in one transaction, as changeFolder does a folder: a change made since
+// to another of its fields, here or by a pull, is kept. fn reports
+// whether it changed anything.
+func (s *Store) changePage(id, label string, fn func(tx *sql.Tx, p *Page) (bool, error)) error {
+	changed := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		p, err := pageIn(tx, id)
+		if err != nil {
+			return err
+		}
+		if changed, err = fn(tx, &p); err != nil || !changed {
+			return err
+		}
+		p.UpdatedAt = time.Now()
+		return savePage(tx, p, label)
+	})
+	if err != nil || !changed {
+		return err
+	}
+	s.Notify("outbox", id)
+	s.Notify("pages", id)
+	return nil
 }
 
 // NewPageOptions describe a page to create.
@@ -199,7 +216,7 @@ func (s *Store) CreatePage(o NewPageOptions) (Page, error) {
 	if o.ParentID == "" {
 		folderID = o.FolderID
 	}
-	key, err := s.keyAfter(o.ParentID, spaceID, folderID, o.AfterID, "")
+	key, err := keyAfter(s.db, o.ParentID, spaceID, folderID, o.AfterID, "")
 	if err != nil {
 		return Page{}, err
 	}
@@ -248,16 +265,13 @@ func (s *Store) CreatePage(o NewPageOptions) (Page, error) {
 
 // RenamePage changes a page's title.
 func (s *Store) RenamePage(id, title string) error {
-	p, err := s.Page(id)
-	if err != nil || p.Title == title {
-		return err
-	}
-	p.Title, p.UpdatedAt = title, time.Now()
-	if err := s.savePages("renamed", p); err != nil {
-		return err
-	}
-	s.Notify("pages", id)
-	return nil
+	return s.changePage(id, "renamed", func(_ *sql.Tx, p *Page) (bool, error) {
+		if p.Title == title {
+			return false, nil
+		}
+		p.Title = title
+		return true, nil
+	})
 }
 
 // Tags are at most maxTags to a page, each at most maxTagLen characters,
@@ -317,38 +331,26 @@ func (p Page) HasTag(tag string) bool {
 
 // SetPageTags changes a page's tags.
 func (s *Store) SetPageTags(id string, tags []string) error {
-	p, err := s.Page(id)
-	if err != nil {
-		return err
-	}
 	tags = NormalizeTags(tags)
-	if slices.Equal(p.Tags, tags) {
-		return nil
-	}
-	p.Tags, p.UpdatedAt = tags, time.Now()
-	if err := s.savePages("tagged", p); err != nil {
-		return err
-	}
-	s.Notify("pages", id)
-	return nil
+	return s.changePage(id, "tagged", func(_ *sql.Tx, p *Page) (bool, error) {
+		if slices.Equal(p.Tags, tags) {
+			return false, nil
+		}
+		p.Tags = tags
+		return true, nil
+	})
 }
 
 // SetPageDefaultTemplate sets the template a page's new subpages start
 // from, "" for blank ones.
 func (s *Store) SetPageDefaultTemplate(id, templateID string) error {
-	p, err := s.Page(id)
-	if err != nil {
-		return err
-	}
-	if p.DefaultTemplateID == templateID {
-		return nil
-	}
-	p.DefaultTemplateID, p.UpdatedAt = templateID, time.Now()
-	if err := s.savePages("set default template", p); err != nil {
-		return err
-	}
-	s.Notify("pages", id)
-	return nil
+	return s.changePage(id, "set default template", func(_ *sql.Tx, p *Page) (bool, error) {
+		if p.DefaultTemplateID == templateID {
+			return false, nil
+		}
+		p.DefaultTemplateID = templateID
+		return true, nil
+	})
 }
 
 // TagCount is a tag and how many pages have it.
@@ -407,32 +409,54 @@ func (s *Store) retag(tag string, to func(string) string) (map[string][]string, 
 	if err != nil {
 		return nil, err
 	}
-	var changed []Page
-	before := map[string][]string{}
-	now := time.Now()
+	// Which pages the user may change is read first, as CanEdit reads the
+	// database, which the transaction holds; the pages are read again in
+	// it, so a change made to them since is kept.
+	var ids []string
 	for _, p := range pages {
-		if !p.HasTag(tag) || !s.CanEdit(p) {
-			continue
+		if p.HasTag(tag) && s.CanEdit(p) {
+			ids = append(ids, p.ID)
 		}
-		tags := make([]string, 0, len(p.Tags))
-		for _, t := range p.Tags {
-			if strings.EqualFold(t, tag) {
-				t = to(t)
-			}
-			tags = append(tags, t)
-		}
-		if tags = NormalizeTags(tags); slices.Equal(tags, p.Tags) {
-			continue
-		}
-		before[p.ID] = p.Tags
-		p.Tags, p.UpdatedAt = tags, now
-		changed = append(changed, p)
 	}
-	if len(changed) == 0 {
+	if len(ids) == 0 {
 		return nil, nil
 	}
-	if err := s.savePages("tagged", changed...); err != nil {
+	before := map[string][]string{}
+	now := time.Now()
+	err = s.inTx(func(tx *sql.Tx) error {
+		for _, id := range ids {
+			p, err := pageIn(tx, id)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			} else if err != nil {
+				return err
+			}
+			if !p.DeletedAt.IsZero() || !p.HasTag(tag) {
+				continue
+			}
+			tags := make([]string, 0, len(p.Tags))
+			for _, t := range p.Tags {
+				if strings.EqualFold(t, tag) {
+					t = to(t)
+				}
+				tags = append(tags, t)
+			}
+			if tags = NormalizeTags(tags); slices.Equal(tags, p.Tags) {
+				continue
+			}
+			before[p.ID] = p.Tags
+			p.Tags, p.UpdatedAt = tags, now
+			if err := savePage(tx, p, "tagged"); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil || len(before) == 0 {
 		return nil, err
+	}
+	for id := range before {
+		s.Notify("outbox", id)
 	}
 	s.Notify("pages", "")
 	return before, nil
@@ -440,14 +464,16 @@ func (s *Store) retag(tag string, to func(string) string) (map[string][]string, 
 
 // IsDescendant reports whether candidate is page of or one under it. Pages
 // in a loop of parents, which sync breaks, are under none outside it.
-func (s *Store) IsDescendant(candidate, of string) bool {
+func (s *Store) IsDescendant(candidate, of string) bool { return isDescendant(s.db, candidate, of) }
+
+func isDescendant(q querier, candidate, of string) bool {
 	seen := map[string]bool{}
 	for cursor := candidate; cursor != "" && !seen[cursor]; {
 		if cursor == of {
 			return true
 		}
 		seen[cursor] = true
-		p, err := s.Page(cursor)
+		p, err := pageIn(q, cursor)
 		if err != nil {
 			return false
 		}
@@ -493,53 +519,48 @@ var ErrMoveIntoSelf = errors.New("a page cannot move inside itself")
 // MovePage moves a page under parentID (or to the top level, into
 // folderID), after afterID among its new siblings, or last.
 func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
-	return s.movePage(id, parentID, folderID, func(spaceID string) (string, error) {
-		return s.keyAfter(parentID, spaceID, folderID, afterID, id)
+	return s.movePage(id, parentID, folderID, func(q querier, spaceID string) (string, error) {
+		return keyAfter(q, parentID, spaceID, folderID, afterID, id)
 	})
 }
 
 // MovePageBefore moves a page under parentID (or to the top level, into
 // folderID), before beforeID among its new siblings, or first.
 func (s *Store) MovePageBefore(id, parentID, folderID, beforeID string) error {
-	return s.movePage(id, parentID, folderID, func(spaceID string) (string, error) {
-		return s.keyBefore(parentID, spaceID, folderID, beforeID, id)
+	return s.movePage(id, parentID, folderID, func(q querier, spaceID string) (string, error) {
+		return keyBefore(q, parentID, spaceID, folderID, beforeID, id)
 	})
 }
 
 // movePage moves a page under parentID or into folderID, at the sort key
-// key gives for its space.
-func (s *Store) movePage(id, parentID, folderID string, key func(spaceID string) (string, error)) error {
-	p, err := s.Page(id)
-	if err != nil {
-		return err
-	}
-	if parentID != "" && s.IsDescendant(parentID, id) {
-		return ErrMoveIntoSelf
-	}
-	k, err := key(p.SpaceID)
-	if err != nil {
-		return err
-	}
-	if parentID != "" {
-		if parent, err := s.Page(parentID); err == nil {
-			p.SpaceID = parent.SpaceID
+// key gives for its space, reading the page and its new siblings in the
+// transaction that saves it.
+func (s *Store) movePage(id, parentID, folderID string, key func(q querier, spaceID string) (string, error)) error {
+	return s.changePage(id, "moved", func(tx *sql.Tx, p *Page) (bool, error) {
+		if parentID != "" && isDescendant(tx, parentID, id) {
+			return false, ErrMoveIntoSelf
 		}
-		folderID = ""
-	}
-	p.ParentID, p.FolderID = parentID, folderID
-	p.SortKey, p.UpdatedAt = k, time.Now()
-	if err := s.savePages("moved", p); err != nil {
-		return err
-	}
-	s.Notify("pages", id)
-	return nil
+		k, err := key(tx, p.SpaceID)
+		if err != nil {
+			return false, err
+		}
+		folder := folderID
+		if parentID != "" {
+			if parent, err := pageIn(tx, parentID); err == nil {
+				p.SpaceID = parent.SpaceID
+			}
+			folder = ""
+		}
+		p.ParentID, p.FolderID, p.SortKey = parentID, folder, k
+		return true, nil
+	})
 }
 
 // keyAfter is a sort key for a page put after afterID among the pages
 // under parentID, or the top-level pages of folderID, or last when afterID
 // is "". skip, the page being put, is left out of them.
-func (s *Store) keyAfter(parentID, spaceID, folderID, afterID, skip string) (string, error) {
-	siblings, err := s.siblings(parentID, spaceID, folderID, skip)
+func keyAfter(q querier, parentID, spaceID, folderID, afterID, skip string) (string, error) {
+	siblings, err := siblings(q, parentID, spaceID, folderID, skip)
 	if err != nil {
 		return "", err
 	}
@@ -566,8 +587,8 @@ func (s *Store) keyAfter(parentID, spaceID, folderID, afterID, skip string) (str
 
 // keyBefore is a sort key for a page put before beforeID among the pages
 // keyAfter takes, or first when beforeID is "" or not among them.
-func (s *Store) keyBefore(parentID, spaceID, folderID, beforeID, skip string) (string, error) {
-	siblings, err := s.siblings(parentID, spaceID, folderID, skip)
+func keyBefore(q querier, parentID, spaceID, folderID, beforeID, skip string) (string, error) {
+	siblings, err := siblings(q, parentID, spaceID, folderID, skip)
 	if err != nil {
 		return "", err
 	}
@@ -591,8 +612,8 @@ func (s *Store) keyBefore(parentID, spaceID, folderID, beforeID, skip string) (s
 
 // siblings are the pages under parentID, or the top-level pages of
 // folderID, in order, but skip.
-func (s *Store) siblings(parentID, spaceID, folderID, skip string) ([]Page, error) {
-	all, err := s.Children(parentID, spaceID)
+func siblings(q querier, parentID, spaceID, folderID, skip string) ([]Page, error) {
+	all, err := childrenIn(q, parentID, spaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -683,12 +704,18 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 		return pageCopies{}, err
 	}
 	tree := []Page{root}
+	seen := map[string]bool{id: true} // a loop of parents is copied once
 	for i := 0; i < len(tree); i++ {
 		kids, err := s.queryPages(`parent_id = ? AND deleted_at IS NULL ORDER BY sort_key`, tree[i].ID)
 		if err != nil {
 			return pageCopies{}, err
 		}
-		tree = append(tree, kids...)
+		for _, k := range kids {
+			if !seen[k.ID] {
+				seen[k.ID] = true
+				tree = append(tree, k)
+			}
+		}
 	}
 	plan := pageCopies{tree: tree, ids: map[string]string{id: copyID}, contents: make([]*doc.Content, len(tree))}
 	for _, p := range tree[1:] {
@@ -786,24 +813,35 @@ func (s *Store) putRecordingCopies(recs []recordingCopy) error {
 			}
 		}
 		r.UpdatedAt = time.Now()
-		if err := s.PutRecording(r); err != nil {
-			return err
-		}
-		if err := s.Queue("recordings", r.ID, RecordingToRemote(r), "", r.PageID); err != nil {
-			return err
-		}
-		var err error
-		switch {
-		case r.LocalPath != "":
-			err = s.QueueUpload(r)
-		case r.AudioPath != "":
-			err = s.Queue("storage", "recordings/"+r.ID, map[string]any{
-				"bucket": "recordings", "from_path": r.AudioPath, "content_type": "audio/wav", "recording_id": r.ID,
-			}, "audio waiting to upload", r.PageID)
-		}
+		// The recording and its entries in the outbox are stored together,
+		// as a file's are in putFileCopies.
+		err := s.inTx(func(tx *sql.Tx) error {
+			if space := s.Session().SpaceID; space != "" && !hasSpace(tx, space) {
+				return ErrNoSpace
+			}
+			if err := putRecording(tx, r); err != nil {
+				return err
+			}
+			if err := queue(tx, "recordings", r.ID, RecordingToRemote(r), "", r.PageID); err != nil {
+				return err
+			}
+			switch {
+			case r.LocalPath != "":
+				return queue(tx, "storage", "recordings/"+r.ID, uploadOf(r), "audio waiting to upload", r.PageID)
+			case r.AudioPath != "":
+				return queue(tx, "storage", "recordings/"+r.ID, map[string]any{
+					"bucket": "recordings", "from_path": r.AudioPath, "content_type": "audio/wav", "recording_id": r.ID,
+				}, "audio waiting to upload", r.PageID)
+			}
+			return nil
+		})
 		if err != nil {
+			if r.LocalPath != "" {
+				_ = os.Remove(r.LocalPath)
+			}
 			return err
 		}
+		s.Notify("outbox", r.PageID)
 		s.Notify("recordings", r.PageID)
 	}
 	return nil
@@ -871,28 +909,42 @@ func (s *Store) putFileCopies(files []fileCopy) error {
 // DeletePage soft-deletes a page and its subpages, and returns their IDs
 // so the delete can be undone.
 func (s *Store) DeletePage(id string) ([]string, error) {
-	ids := []string{id}
-	for i := 0; i < len(ids); i++ {
-		kids, err := s.queryPages(`parent_id = ? AND deleted_at IS NULL`, ids[i])
-		if err != nil {
-			return nil, err
+	var ids []string
+	// The pages are read in the transaction that saves them, so a change
+	// made to one meanwhile is kept.
+	err := s.inTx(func(tx *sql.Tx) error {
+		ids = []string{id}
+		seen := map[string]bool{id: true} // a loop of parents is deleted once
+		now := time.Now()
+		for i := 0; i < len(ids); i++ {
+			kids, err := pagesIn(tx, `parent_id = ? AND deleted_at IS NULL`, ids[i])
+			if err != nil {
+				return err
+			}
+			for _, k := range kids {
+				if !seen[k.ID] {
+					seen[k.ID] = true
+					ids = append(ids, k.ID)
+				}
+			}
+			p, err := pageIn(tx, ids[i])
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			} else if err != nil {
+				return err
+			}
+			p.DeletedAt, p.UpdatedAt = now, now
+			if err := savePage(tx, p, "deleted"); err != nil {
+				return err
+			}
 		}
-		for _, k := range kids {
-			ids = append(ids, k.ID)
-		}
-	}
-	now := time.Now()
-	var pages []Page
-	for _, pid := range ids {
-		p, err := s.Page(pid)
-		if err != nil {
-			continue
-		}
-		p.DeletedAt, p.UpdatedAt = now, now
-		pages = append(pages, p)
-	}
-	if err := s.savePages("deleted", pages...); err != nil {
+		return nil
+	})
+	if err != nil {
 		return nil, err
+	}
+	for _, pid := range ids {
+		s.Notify("outbox", pid)
 	}
 	s.Notify("pages", id)
 	return ids, nil
@@ -900,17 +952,27 @@ func (s *Store) DeletePage(id string) ([]string, error) {
 
 // RestorePages undoes a delete.
 func (s *Store) RestorePages(ids []string) error {
-	var pages []Page
-	for _, pid := range ids {
-		p, err := s.Page(pid)
-		if err != nil {
-			continue
+	err := s.inTx(func(tx *sql.Tx) error {
+		now := time.Now()
+		for _, pid := range ids {
+			p, err := pageIn(tx, pid)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
+			} else if err != nil {
+				return err
+			}
+			p.DeletedAt, p.UpdatedAt = time.Time{}, now
+			if err := savePage(tx, p, "restored"); err != nil {
+				return err
+			}
 		}
-		p.DeletedAt, p.UpdatedAt = time.Time{}, time.Now()
-		pages = append(pages, p)
-	}
-	if err := s.savePages("restored", pages...); err != nil {
+		return nil
+	})
+	if err != nil {
 		return err
+	}
+	for _, pid := range ids {
+		s.Notify("outbox", pid)
 	}
 	s.Notify("pages", "")
 	return nil

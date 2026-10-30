@@ -102,6 +102,9 @@ func (a *App) folderMenu(m *ui.Menu, f store.Folder) {
 		a.treeOpen("folder", f.ID)
 		a.newPage("", f.ID)
 	}
+	a.defaultTemplateMenu(m, locales.TemplateDefaultForFolder(), f.Name, f.DefaultTemplateID, false, func(id string) error {
+		return a.st.SetFolderDefaultTemplate(f, id)
+	})
 	if m.Item(locales.SidebarUploadFile()).Chosen() {
 		a.uploadFile(f.ID)
 	}
@@ -577,6 +580,11 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 	editable := a.canEdit(p.ID)
 	if m.Item(locales.SidebarAddSubpage()).Disabled(!editable).Chosen() {
 		a.newPage(p.ID, "")
+	}
+	if !p.Template {
+		a.defaultTemplateMenu(m, locales.TemplateDefaultForPage(), p.DisplayTitle(), p.DefaultTemplateID, !editable, func(id string) error {
+			return a.st.SetPageDefaultTemplate(p.ID, id)
+		})
 	}
 	if m.Item(locales.CommonRename()).Disabled(!editable).Chosen() {
 		a.openPage(p.ID)

@@ -266,7 +266,11 @@ Moving a page under a new parent requires edit access to both.
 made under a template is one too); templates stay out of the page list,
 search and `list_pages`. `pages.tags` is a page's tags (`text[]`, at most 50,
 each 1 to 64 characters), tidied by the app: no leading `#`, no repeats in
-any case; they sync with the row as its title does. `model_providers.encrypted_secret` and `refresh_token` hold Vault secret IDs
+any case; they sync with the row as its title does.
+`folders.default_template_id` and `pages.default_template_id` name the
+template a folder's new pages, or a page's new subpages, start from (null
+for blank ones); there is no foreign key, and a template the app can't
+find leaves new pages blank. `model_providers.encrypted_secret` and `refresh_token` hold Vault secret IDs
 and are not selectable by clients.
 
 Storage buckets: `recordings` (`{user_id}/{recording_id}.m4a`), `files`

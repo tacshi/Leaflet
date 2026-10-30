@@ -579,6 +579,20 @@ func (msgs Messages) HostGroupBlocks() string {
 	return Catalog.Format(msgs.locale, "hostGroupBlocks", nil)
 }
 
+// HostGroupTemplates says "Templates"
+// in the language the app shows.
+//
+// The / menu: the group of templates, each putting its blocks at the caret.
+func HostGroupTemplates() string { return In(i18n.Locale()).HostGroupTemplates() }
+
+// HostGroupTemplates says "Templates"
+// in the language of msgs.
+//
+// The / menu: the group of templates, each putting its blocks at the caret.
+func (msgs Messages) HostGroupTemplates() string {
+	return Catalog.Format(msgs.locale, "hostGroupTemplates", nil)
+}
+
 // HostGroupPages says "Pages"
 // in the language the app shows.
 //
@@ -2241,6 +2255,454 @@ func (msgs Messages) TemplateHintSubpages(count int) string {
 	return Catalog.Format(msgs.locale, "templateHintSubpages", map[string]any{"count": count})
 }
 
+// TemplateStarterMeeting says "Meeting notes"
+// in the language the app shows.
+//
+// A starter template that comes with Leaflet: its title, shown on a blank
+// page, in the / menu and search, and given to the page made from it.
+func TemplateStarterMeeting() string { return In(i18n.Locale()).TemplateStarterMeeting() }
+
+// TemplateStarterMeeting says "Meeting notes"
+// in the language of msgs.
+//
+// A starter template that comes with Leaflet: its title, shown on a blank
+// page, in the / menu and search, and given to the page made from it.
+func (msgs Messages) TemplateStarterMeeting() string {
+	return Catalog.Format(msgs.locale, "templateStarterMeeting", nil)
+}
+
+// TemplateStarterMeetingHint says "Agenda, notes and action items"
+// in the language the app shows.
+//
+// A blank page and the / menu: under the Meeting notes starter template,
+// what it holds.
+func TemplateStarterMeetingHint() string { return In(i18n.Locale()).TemplateStarterMeetingHint() }
+
+// TemplateStarterMeetingHint says "Agenda, notes and action items"
+// in the language of msgs.
+//
+// A blank page and the / menu: under the Meeting notes starter template,
+// what it holds.
+func (msgs Messages) TemplateStarterMeetingHint() string {
+	return Catalog.Format(msgs.locale, "templateStarterMeetingHint", nil)
+}
+
+// TemplateStarterAgenda says "Agenda"
+// in the language the app shows.
+//
+// The Meeting notes starter template: a heading.
+func TemplateStarterAgenda() string { return In(i18n.Locale()).TemplateStarterAgenda() }
+
+// TemplateStarterAgenda says "Agenda"
+// in the language of msgs.
+//
+// The Meeting notes starter template: a heading.
+func (msgs Messages) TemplateStarterAgenda() string {
+	return Catalog.Format(msgs.locale, "templateStarterAgenda", nil)
+}
+
+// TemplateStarterNotes says "Notes"
+// in the language the app shows.
+//
+// The Meeting notes starter template: a heading.
+func TemplateStarterNotes() string { return In(i18n.Locale()).TemplateStarterNotes() }
+
+// TemplateStarterNotes says "Notes"
+// in the language of msgs.
+//
+// The Meeting notes starter template: a heading.
+func (msgs Messages) TemplateStarterNotes() string {
+	return Catalog.Format(msgs.locale, "templateStarterNotes", nil)
+}
+
+// TemplateStarterActionItems says "Action items"
+// in the language the app shows.
+//
+// The Meeting notes starter template: a heading over to-dos.
+func TemplateStarterActionItems() string { return In(i18n.Locale()).TemplateStarterActionItems() }
+
+// TemplateStarterActionItems says "Action items"
+// in the language of msgs.
+//
+// The Meeting notes starter template: a heading over to-dos.
+func (msgs Messages) TemplateStarterActionItems() string {
+	return Catalog.Format(msgs.locale, "templateStarterActionItems", nil)
+}
+
+// TemplateStarterTodo says "To-do list"
+// in the language the app shows.
+//
+// A starter template that comes with Leaflet: its title.
+func TemplateStarterTodo() string { return In(i18n.Locale()).TemplateStarterTodo() }
+
+// TemplateStarterTodo says "To-do list"
+// in the language of msgs.
+//
+// A starter template that comes with Leaflet: its title.
+func (msgs Messages) TemplateStarterTodo() string {
+	return Catalog.Format(msgs.locale, "templateStarterTodo", nil)
+}
+
+// TemplateStarterTodoHint says "Today, this week and later"
+// in the language the app shows.
+//
+// A blank page and the / menu: under the To-do list starter template, what
+// it holds.
+func TemplateStarterTodoHint() string { return In(i18n.Locale()).TemplateStarterTodoHint() }
+
+// TemplateStarterTodoHint says "Today, this week and later"
+// in the language of msgs.
+//
+// A blank page and the / menu: under the To-do list starter template, what
+// it holds.
+func (msgs Messages) TemplateStarterTodoHint() string {
+	return Catalog.Format(msgs.locale, "templateStarterTodoHint", nil)
+}
+
+// TemplateStarterToday says "Today"
+// in the language the app shows.
+//
+// The To-do list starter template: a heading over to-dos.
+func TemplateStarterToday() string { return In(i18n.Locale()).TemplateStarterToday() }
+
+// TemplateStarterToday says "Today"
+// in the language of msgs.
+//
+// The To-do list starter template: a heading over to-dos.
+func (msgs Messages) TemplateStarterToday() string {
+	return Catalog.Format(msgs.locale, "templateStarterToday", nil)
+}
+
+// TemplateStarterThisWeek says "This week"
+// in the language the app shows.
+//
+// The To-do list starter template: a heading over to-dos.
+func TemplateStarterThisWeek() string { return In(i18n.Locale()).TemplateStarterThisWeek() }
+
+// TemplateStarterThisWeek says "This week"
+// in the language of msgs.
+//
+// The To-do list starter template: a heading over to-dos.
+func (msgs Messages) TemplateStarterThisWeek() string {
+	return Catalog.Format(msgs.locale, "templateStarterThisWeek", nil)
+}
+
+// TemplateStarterLater says "Later"
+// in the language the app shows.
+//
+// The To-do list starter template: a heading over to-dos.
+func TemplateStarterLater() string { return In(i18n.Locale()).TemplateStarterLater() }
+
+// TemplateStarterLater says "Later"
+// in the language of msgs.
+//
+// The To-do list starter template: a heading over to-dos.
+func (msgs Messages) TemplateStarterLater() string {
+	return Catalog.Format(msgs.locale, "templateStarterLater", nil)
+}
+
+// TemplateStarterProject says "Project brief"
+// in the language the app shows.
+//
+// A starter template that comes with Leaflet: its title.
+func TemplateStarterProject() string { return In(i18n.Locale()).TemplateStarterProject() }
+
+// TemplateStarterProject says "Project brief"
+// in the language of msgs.
+//
+// A starter template that comes with Leaflet: its title.
+func (msgs Messages) TemplateStarterProject() string {
+	return Catalog.Format(msgs.locale, "templateStarterProject", nil)
+}
+
+// TemplateStarterProjectHint says "Overview, goals, milestones and open questions"
+// in the language the app shows.
+//
+// A blank page and the / menu: under the Project brief starter template,
+// what it holds.
+func TemplateStarterProjectHint() string { return In(i18n.Locale()).TemplateStarterProjectHint() }
+
+// TemplateStarterProjectHint says "Overview, goals, milestones and open questions"
+// in the language of msgs.
+//
+// A blank page and the / menu: under the Project brief starter template,
+// what it holds.
+func (msgs Messages) TemplateStarterProjectHint() string {
+	return Catalog.Format(msgs.locale, "templateStarterProjectHint", nil)
+}
+
+// TemplateStarterOverview says "Overview"
+// in the language the app shows.
+//
+// The Project brief starter template: a heading.
+func TemplateStarterOverview() string { return In(i18n.Locale()).TemplateStarterOverview() }
+
+// TemplateStarterOverview says "Overview"
+// in the language of msgs.
+//
+// The Project brief starter template: a heading.
+func (msgs Messages) TemplateStarterOverview() string {
+	return Catalog.Format(msgs.locale, "templateStarterOverview", nil)
+}
+
+// TemplateStarterGoals says "Goals"
+// in the language the app shows.
+//
+// The Project brief starter template: a heading.
+func TemplateStarterGoals() string { return In(i18n.Locale()).TemplateStarterGoals() }
+
+// TemplateStarterGoals says "Goals"
+// in the language of msgs.
+//
+// The Project brief starter template: a heading.
+func (msgs Messages) TemplateStarterGoals() string {
+	return Catalog.Format(msgs.locale, "templateStarterGoals", nil)
+}
+
+// TemplateStarterMilestones says "Milestones"
+// in the language the app shows.
+//
+// The Project brief starter template: a heading over a table.
+func TemplateStarterMilestones() string { return In(i18n.Locale()).TemplateStarterMilestones() }
+
+// TemplateStarterMilestones says "Milestones"
+// in the language of msgs.
+//
+// The Project brief starter template: a heading over a table.
+func (msgs Messages) TemplateStarterMilestones() string {
+	return Catalog.Format(msgs.locale, "templateStarterMilestones", nil)
+}
+
+// TemplateStarterMilestone says "Milestone"
+// in the language the app shows.
+//
+// The Project brief starter template: a column of its milestones table.
+func TemplateStarterMilestone() string { return In(i18n.Locale()).TemplateStarterMilestone() }
+
+// TemplateStarterMilestone says "Milestone"
+// in the language of msgs.
+//
+// The Project brief starter template: a column of its milestones table.
+func (msgs Messages) TemplateStarterMilestone() string {
+	return Catalog.Format(msgs.locale, "templateStarterMilestone", nil)
+}
+
+// TemplateStarterOwner says "Owner"
+// in the language the app shows.
+//
+// The Project brief starter template: a column of its milestones table.
+func TemplateStarterOwner() string { return In(i18n.Locale()).TemplateStarterOwner() }
+
+// TemplateStarterOwner says "Owner"
+// in the language of msgs.
+//
+// The Project brief starter template: a column of its milestones table.
+func (msgs Messages) TemplateStarterOwner() string {
+	return Catalog.Format(msgs.locale, "templateStarterOwner", nil)
+}
+
+// TemplateStarterDue says "Due"
+// in the language the app shows.
+//
+// The Project brief starter template: a column of its milestones table, the
+// date.
+func TemplateStarterDue() string { return In(i18n.Locale()).TemplateStarterDue() }
+
+// TemplateStarterDue says "Due"
+// in the language of msgs.
+//
+// The Project brief starter template: a column of its milestones table, the
+// date.
+func (msgs Messages) TemplateStarterDue() string {
+	return Catalog.Format(msgs.locale, "templateStarterDue", nil)
+}
+
+// TemplateStarterQuestions says "Open questions"
+// in the language the app shows.
+//
+// The Project brief starter template: a heading.
+func TemplateStarterQuestions() string { return In(i18n.Locale()).TemplateStarterQuestions() }
+
+// TemplateStarterQuestions says "Open questions"
+// in the language of msgs.
+//
+// The Project brief starter template: a heading.
+func (msgs Messages) TemplateStarterQuestions() string {
+	return Catalog.Format(msgs.locale, "templateStarterQuestions", nil)
+}
+
+// TemplateStarterJournal says "Journal"
+// in the language the app shows.
+//
+// A starter template that comes with Leaflet: its title.
+func TemplateStarterJournal() string { return In(i18n.Locale()).TemplateStarterJournal() }
+
+// TemplateStarterJournal says "Journal"
+// in the language of msgs.
+//
+// A starter template that comes with Leaflet: its title.
+func (msgs Messages) TemplateStarterJournal() string {
+	return Catalog.Format(msgs.locale, "templateStarterJournal", nil)
+}
+
+// TemplateStarterJournalHint says "Highlights, gratitude and plans for tomorrow"
+// in the language the app shows.
+//
+// A blank page and the / menu: under the Journal starter template, what it
+// holds.
+func TemplateStarterJournalHint() string { return In(i18n.Locale()).TemplateStarterJournalHint() }
+
+// TemplateStarterJournalHint says "Highlights, gratitude and plans for tomorrow"
+// in the language of msgs.
+//
+// A blank page and the / menu: under the Journal starter template, what it
+// holds.
+func (msgs Messages) TemplateStarterJournalHint() string {
+	return Catalog.Format(msgs.locale, "templateStarterJournalHint", nil)
+}
+
+// TemplateStarterHighlights says "Highlights"
+// in the language the app shows.
+//
+// The Journal starter template: a heading over the day's highlights.
+func TemplateStarterHighlights() string { return In(i18n.Locale()).TemplateStarterHighlights() }
+
+// TemplateStarterHighlights says "Highlights"
+// in the language of msgs.
+//
+// The Journal starter template: a heading over the day's highlights.
+func (msgs Messages) TemplateStarterHighlights() string {
+	return Catalog.Format(msgs.locale, "templateStarterHighlights", nil)
+}
+
+// TemplateStarterGrateful says "Grateful for"
+// in the language the app shows.
+//
+// The Journal starter template: a heading.
+func TemplateStarterGrateful() string { return In(i18n.Locale()).TemplateStarterGrateful() }
+
+// TemplateStarterGrateful says "Grateful for"
+// in the language of msgs.
+//
+// The Journal starter template: a heading.
+func (msgs Messages) TemplateStarterGrateful() string {
+	return Catalog.Format(msgs.locale, "templateStarterGrateful", nil)
+}
+
+// TemplateStarterTomorrow says "Tomorrow"
+// in the language the app shows.
+//
+// The Journal starter template: a heading over to-dos.
+func TemplateStarterTomorrow() string { return In(i18n.Locale()).TemplateStarterTomorrow() }
+
+// TemplateStarterTomorrow says "Tomorrow"
+// in the language of msgs.
+//
+// The Journal starter template: a heading over to-dos.
+func (msgs Messages) TemplateStarterTomorrow() string {
+	return Catalog.Format(msgs.locale, "templateStarterTomorrow", nil)
+}
+
+// TemplateDefaultForFolder says "New pages start from"
+// in the language the app shows.
+//
+// A folder's … menu: the submenu choosing the template its new pages
+// start from.
+func TemplateDefaultForFolder() string { return In(i18n.Locale()).TemplateDefaultForFolder() }
+
+// TemplateDefaultForFolder says "New pages start from"
+// in the language of msgs.
+//
+// A folder's … menu: the submenu choosing the template its new pages
+// start from.
+func (msgs Messages) TemplateDefaultForFolder() string {
+	return Catalog.Format(msgs.locale, "templateDefaultForFolder", nil)
+}
+
+// TemplateDefaultForPage says "New subpages start from"
+// in the language the app shows.
+//
+// A page's … menu: the submenu choosing the template its new subpages
+// start from.
+func TemplateDefaultForPage() string { return In(i18n.Locale()).TemplateDefaultForPage() }
+
+// TemplateDefaultForPage says "New subpages start from"
+// in the language of msgs.
+//
+// A page's … menu: the submenu choosing the template its new subpages
+// start from.
+func (msgs Messages) TemplateDefaultForPage() string {
+	return Catalog.Format(msgs.locale, "templateDefaultForPage", nil)
+}
+
+// TemplateDefaultBlank says "Blank page"
+// in the language the app shows.
+//
+// The New pages start from submenu: the item for new pages to start blank.
+func TemplateDefaultBlank() string { return In(i18n.Locale()).TemplateDefaultBlank() }
+
+// TemplateDefaultBlank says "Blank page"
+// in the language of msgs.
+//
+// The New pages start from submenu: the item for new pages to start blank.
+func (msgs Messages) TemplateDefaultBlank() string {
+	return Catalog.Format(msgs.locale, "templateDefaultBlank", nil)
+}
+
+// TemplateDefaultSet says "New pages in {place} start from {title}"
+// in the language the app shows.
+//
+// A toast after choosing the template a folder's new pages, or a page's new
+// subpages, start from.
+func TemplateDefaultSet(place string, title string) string {
+	return In(i18n.Locale()).TemplateDefaultSet(place, title)
+}
+
+// TemplateDefaultSet says "New pages in {place} start from {title}"
+// in the language of msgs.
+//
+// A toast after choosing the template a folder's new pages, or a page's new
+// subpages, start from.
+func (msgs Messages) TemplateDefaultSet(place string, title string) string {
+	return Catalog.Format(msgs.locale, "templateDefaultSet", map[string]any{"place": place, "title": title})
+}
+
+// TemplateDefaultCleared says "New pages in {place} start blank"
+// in the language the app shows.
+//
+// A toast after choosing that a folder's new pages, or a page's new
+// subpages, start blank.
+func TemplateDefaultCleared(place string) string {
+	return In(i18n.Locale()).TemplateDefaultCleared(place)
+}
+
+// TemplateDefaultCleared says "New pages in {place} start blank"
+// in the language of msgs.
+//
+// A toast after choosing that a folder's new pages, or a page's new
+// subpages, start blank.
+func (msgs Messages) TemplateDefaultCleared(place string) string {
+	return Catalog.Format(msgs.locale, "templateDefaultCleared", map[string]any{"place": place})
+}
+
+// TemplateDefaultFailed says "Could not set the template: {error}"
+// in the language the app shows.
+//
+// A toast when choosing the template a folder's or page's new pages start
+// from fails.
+func TemplateDefaultFailed(error string) string {
+	return In(i18n.Locale()).TemplateDefaultFailed(error)
+}
+
+// TemplateDefaultFailed says "Could not set the template: {error}"
+// in the language of msgs.
+//
+// A toast when choosing the template a folder's or page's new pages start
+// from fails.
+func (msgs Messages) TemplateDefaultFailed(error string) string {
+	return Catalog.Format(msgs.locale, "templateDefaultFailed", map[string]any{"error": error})
+}
+
 // DialogSearchPlaceholder says "Search pages, or #tag to filter"
 // in the language the app shows.
 //
@@ -2297,6 +2759,22 @@ func DialogSearchAskAgent() string { return In(i18n.Locale()).DialogSearchAskAge
 // Search dialog: a button, when nothing matches, asking an agent the query.
 func (msgs Messages) DialogSearchAskAgent() string {
 	return Catalog.Format(msgs.locale, "dialogSearchAskAgent", nil)
+}
+
+// DialogSearchTemplateEnter says "Enter starts a new page from this template"
+// in the language the app shows.
+//
+// Search: under the results while a template is chosen, beside an Edit
+// template button.
+func DialogSearchTemplateEnter() string { return In(i18n.Locale()).DialogSearchTemplateEnter() }
+
+// DialogSearchTemplateEnter says "Enter starts a new page from this template"
+// in the language of msgs.
+//
+// Search: under the results while a template is chosen, beside an Edit
+// template button.
+func (msgs Messages) DialogSearchTemplateEnter() string {
+	return Catalog.Format(msgs.locale, "dialogSearchTemplateEnter", nil)
 }
 
 // DialogFolderNew says "New folder"

@@ -176,7 +176,7 @@ func (a *App) openSearch() {
 	a.dialogs.searchOpen = true
 	a.dialogs.query = ""
 	a.dialogs.hitIndex = 0
-	a.dialogs.hits, _ = a.st.Search("", 30)
+	a.dialogs.hits = a.searchHits("")
 }
 
 func (a *App) searchDialog(c *ui.Context) {
@@ -189,7 +189,7 @@ func (a *App) searchDialog(c *ui.Context) {
 			// The header is its frame.
 			in := ui.SearchField(c.Key("q"), &d.query).Placeholder(locales.DialogSearchPlaceholder()).FontSize(16).Grow(1).Padding(0).BorderWidth(0).Background(ui.Transparent).AutoFocus()
 			if in.Changed() {
-				d.hits, _ = a.st.Search(d.query, 30)
+				d.hits = a.searchHits(d.query)
 				d.hitIndex = 0
 			}
 			// The keys stay in the field; Up and Down move the list's
@@ -252,6 +252,18 @@ func (a *App) searchDialog(c *ui.Context) {
 				a.openHit(d.hits[min(d.hitIndex, len(d.hits)-1)])
 			}
 		}
+		// A template chosen starts a page; its own page is a click away.
+		if d.searchOpen && d.hitIndex < len(d.hits) {
+			if t, ok := a.hitTemplate(d.hits[d.hitIndex]); ok {
+				ui.Row(c.Key("template-bar")).Padding(6, 10, 6, 16).Gap(10).AlignItems(ui.Center).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
+					ui.Text(c, locales.DialogSearchTemplateEnter()).FontSize(12).TextColor(pal.TextMuted).Grow(1).SingleLine()
+					if button(c, "edit-template", "pencil", locales.TemplateEdit()).Height(26).Clicked() {
+						d.searchOpen = false
+						a.editTemplate(t)
+					}
+				})
+			}
+		}
 		ui.Box(c).Children(func() {
 			if d.query != "" && len(d.hits) == 0 {
 				ui.Column(c).Padding(24).Gap(10).AlignItems(ui.Center).Children(func() {
@@ -279,8 +291,14 @@ func matchSpans(text, query string, color ui.Color) []ui.Span {
 	return []ui.Span{{Text: text[:i]}, {Text: text[i : i+len(q)], Color: color, Weight: 600}, {Text: text[i+len(q):]}}
 }
 
+// openHit opens what a search hit found; a template, or a starter, starts a
+// new page.
 func (a *App) openHit(h store.SearchHit) {
 	a.dialogs.searchOpen = false
+	if t, ok := a.hitTemplate(h); ok {
+		a.newPageFrom("", "", &t)
+		return
+	}
 	a.openPage(h.PageID)
 	if h.BlockID != "" && a.page != nil {
 		a.page.editor.PlaceCaret(h.BlockID, 0)

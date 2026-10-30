@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -207,5 +208,240 @@ func TestDeleteOpenPageFromItsMenu(t *testing.T) {
 	}
 	if p, _ := a.st.Page(tpl.ID); p.DeletedAt.IsZero() {
 		t.Error("the template was not deleted")
+	}
+}
+
+// A blank page offers the starters too, until the user has a template of
+// the same title: choosing one fills the page, and editing one makes it
+// the user's own.
+func TestStarterTemplates(t *testing.T) {
+	a := templatesApp(t)
+	a.newPage("", "")
+	blank := a.page.id
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Fill().Padding(20).Children(func() { a.emptyActions(c) })
+	}, 600, 900)
+	tt.Frame()
+	for _, s := range []string{"Templates", "Meeting notes", "To-do list", "Project brief", "Journal", "Agenda, notes and action items"} {
+		if _, ok := tt.Find(s); !ok {
+			t.Errorf("no %q on a blank page", s)
+		}
+	}
+	if err := tt.Click("Meeting notes"); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	if got := a.page.editor.Content.PlainText(); !strings.HasPrefix(got, "Agenda") || !strings.Contains(got, "Action items") {
+		t.Errorf("page holds %q", got)
+	}
+	if p := a.pageByID(blank); p.Title != "Meeting notes" {
+		t.Errorf("page %+v", p)
+	}
+
+	journal, _ := a.templateByKey("starter:journal")
+	a.editTemplate(journal)
+	a.reloadAll()
+	roots := a.templateRoots()
+	if len(roots) != 1 || roots[0].Title != "Journal" || a.page.id != roots[0].ID {
+		t.Fatalf("templates %+v, open %s", roots, a.page.id)
+	}
+	if !strings.Contains(a.st.Content(roots[0].ID).PlainText(), "Grateful for") {
+		t.Error("the template lacks the starter's blocks")
+	}
+	if _, ok := a.templateByKey("starter:journal"); ok {
+		t.Error("the starter shows beside the user's template of its title")
+	}
+}
+
+// / lists the templates, by name or for "template"; one chosen puts its
+// blocks at the caret, after what the page holds, and its subpages under
+// the page.
+func TestSlashTemplate(t *testing.T) {
+	a := templatesApp(t)
+	kit, _ := a.st.CreatePage(store.NewPageOptions{Title: "Kit", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("Checklist")})})
+	if _, err := a.st.CreatePage(store.NewPageOptions{ParentID: kit.ID, Title: "FAQ", Template: true}); err != nil {
+		t.Fatal(err)
+	}
+	notes, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{textNode("Intro")})})
+	a.reloadAll()
+	a.openPage(notes.ID)
+	h := &host{a: a}
+	keys := func(q string) []string {
+		var out []string
+		for _, it := range h.SlashItems(q) {
+			if it.Group == "Templates" {
+				out = append(out, it.Key)
+			}
+		}
+		return out
+	}
+	if got := keys("meet"); len(got) != 1 || got[0] != "starter:meeting" {
+		t.Errorf("/meet lists %v", got)
+	}
+	if got := keys("templ"); len(got) != 5 || got[0] != "template:"+kit.ID {
+		t.Errorf("/templ lists %v", got)
+	}
+
+	tc, _ := a.templateByKey("template:" + kit.ID)
+	a.insertTemplate(tc)
+	a.reloadAll()
+	if got := a.page.editor.Content.PlainText(); got != "Intro\nChecklist" {
+		t.Errorf("page holds %q", got)
+	}
+	if kids := a.children(notes.ID, "", false); len(kids) != 1 || kids[0].Title != "FAQ" || kids[0].Template {
+		t.Errorf("subpages %+v", kids)
+	}
+	if p := a.pageByID(notes.ID); p.Title != "Notes" {
+		t.Errorf("title %q", p.Title)
+	}
+
+	// A template doesn't list itself.
+	a.openPage(kit.ID)
+	if got := keys("kit"); len(got) != 0 {
+		t.Errorf("a template lists %v", got)
+	}
+}
+
+// In search, a template or a starter starts a new page; a subpage of a
+// template opens.
+func TestSearchStartsPageFromTemplate(t *testing.T) {
+	a := templatesApp(t)
+	kit, _ := a.st.CreatePage(store.NewPageOptions{Title: "Kit", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("Checklist")})})
+	faq, _ := a.st.CreatePage(store.NewPageOptions{ParentID: kit.ID, Title: "Kit FAQ"})
+	a.reloadAll()
+	hit := func(q, title string) store.SearchHit {
+		t.Helper()
+		for _, h := range a.searchHits(q) {
+			if h.Title == title && h.Kind == "template" {
+				return h
+			}
+		}
+		t.Fatalf("%q finds no %q", q, title)
+		return store.SearchHit{}
+	}
+
+	a.openHit(hit("journ", "Journal"))
+	a.reloadAll()
+	if a.page == nil || a.pageByID(a.page.id).Title != "Journal" || !strings.Contains(a.page.editor.Content.PlainText(), "Highlights") {
+		t.Errorf("Journal did not start a page")
+	}
+	a.openHit(hit("kit", "Kit"))
+	if a.page.id == kit.ID || a.page.editor.Content.PlainText() != "Checklist" {
+		t.Errorf("Kit opened %s holding %q", a.page.id, a.page.editor.Content.PlainText())
+	}
+	a.openHit(hit("kit", "Kit FAQ"))
+	if a.page == nil || a.page.id != faq.ID {
+		t.Errorf("the template's subpage did not open")
+	}
+	for _, h := range a.searchHits("#work journal") {
+		if h.Title == "Journal" {
+			t.Error("a tag search lists a starter")
+		}
+	}
+}
+
+// A folder's new pages, and a page's new subpages, start from the template
+// set for them; a page's menu sets it, making a starter the user's own.
+func TestDefaultTemplate(t *testing.T) {
+	a := templatesApp(t)
+	a.rec = recording.NewController(a.st, a.backend)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.TextSize = 16
+	sync, _ := a.st.CreatePage(store.NewPageOptions{Title: "Weekly sync", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("Shipped")})})
+	f, _ := a.st.CreateFolder("Meetings")
+	if err := a.st.SetFolderDefaultTemplate(f, sync.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.newPage("", f.ID)
+	a.reloadAll()
+	if p := a.pageByID(a.page.id); p.FolderID != f.ID || p.Title != "Weekly sync" || a.page.editor.Content.PlainText() != "Shipped" {
+		t.Errorf("new page %+v holding %q", p, a.page.editor.Content.PlainText())
+	}
+	a.newPage("", "")
+	if a.page.editor.Content.PlainText() != "" {
+		t.Error("a page outside the folder took its template")
+	}
+
+	diary, _ := a.st.CreatePage(store.NewPageOptions{Title: "Diary"})
+	a.reloadAll()
+	a.openPage(diary.ID)
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1200, 800)
+	tt.Frame()
+	if err := tt.Click("Page actions"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("New subpages start from", "Journal"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	journal := a.templateRoots()[0]
+	if journal.Title != "Journal" || a.pageByID(diary.ID).DefaultTemplateID != journal.ID {
+		t.Fatalf("templates %+v, diary %+v", a.templateRoots(), a.pageByID(diary.ID))
+	}
+	a.addSubpageBlock()
+	a.reloadAll()
+	if p := a.pageByID(a.page.id); p.ParentID != diary.ID || p.Title != "Journal" || !strings.Contains(a.page.editor.Content.PlainText(), "Tomorrow") {
+		t.Errorf("subpage %+v holding %q", p, a.page.editor.Content.PlainText())
+	}
+
+	// A template deleted leaves new pages blank.
+	if _, err := a.st.DeletePage(journal.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.newPage(diary.ID, "")
+	if a.page.editor.Content.PlainText() != "" {
+		t.Error("a deleted template filled a page")
+	}
+}
+
+// A starter's menu deletes it on this device, with Undo; a starter made
+// the user's own stays gone once that template is deleted.
+func TestDeleteStarter(t *testing.T) {
+	a := templatesApp(t)
+	a.newPage("", "")
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Fill().Padding(20).Children(func() { a.emptyActions(c) })
+	}, 600, 900)
+	tt.Frame()
+	if err := tt.Click("Template actions"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem("Delete template"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if _, ok := tt.Find("Meeting notes"); ok {
+		t.Error("the deleted starter still shows")
+	}
+	if _, ok := a.templateByKey("starter:meeting"); ok {
+		t.Error("the deleted starter is still a choice")
+	}
+	a.goneStarters = nil // as when the app starts again
+	if _, ok := a.templateByKey("starter:meeting"); ok {
+		t.Error("the deleted starter came back")
+	}
+	undo := a.toasts[len(a.toasts)-1]
+	if undo.text != "Deleted Meeting notes" || undo.fn == nil {
+		t.Fatalf("toast %+v", undo)
+	}
+	undo.fn()
+	tt.Frame()
+	if _, ok := tt.Find("Meeting notes"); !ok {
+		t.Error("Undo did not bring the starter back")
+	}
+
+	todo, _ := a.templateByKey("starter:todo")
+	a.editTemplate(todo)
+	a.reloadAll()
+	own, ok := a.templateByKey("template:" + a.page.id)
+	if !ok {
+		t.Fatal("no template made from the starter")
+	}
+	a.deleteTemplate(own)
+	a.reloadAll()
+	if _, ok := a.templateByKey("starter:todo"); ok {
+		t.Error("deleting the template made from a starter brought the starter back")
 	}
 }

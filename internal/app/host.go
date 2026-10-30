@@ -211,6 +211,19 @@ func (h *host) SlashItems(query string) []editor.MenuItem {
 			out = append(out, it.MenuItem)
 		}
 	}
+	// The templates, to put one's blocks at the caret: all of them for
+	// "template", in the app's language too. A template doesn't go into
+	// itself.
+	group := locales.HostGroupTemplates()
+	all := q != "" && (strings.Contains("template", q) || strings.Contains(strings.ToLower(group), q))
+	for _, t := range h.a.templateChoices() {
+		if h.a.page != nil && t.page != nil && t.page.ID == h.a.page.id {
+			continue
+		}
+		if q == "" || all || strings.Contains(strings.ToLower(t.title()), q) {
+			out = append(out, editor.MenuItem{Key: t.key(), Label: t.title(), Hint: h.a.choiceHint(t), Icon: t.icon(), Group: group})
+		}
+	}
 	return out
 }
 
@@ -295,6 +308,10 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 		return
 	}
 	ed.RemoveTrigger(t)
+	if tc, ok := a.templateByKey(item.Key); ok {
+		a.insertTemplate(tc)
+		return
+	}
 	switch item.Key {
 	case "paragraph", "bulleted_list", "numbered_list", "todo_list", "quote", "code", "callout", "toggle_list":
 		ed.SetType(item.Key, 0)
@@ -370,12 +387,14 @@ func (h *host) EditBlock(blockID string) {
 	}
 }
 
-// addSubpageBlock creates a subpage and links it from the open page.
+// addSubpageBlock creates a subpage, from the template set for the open
+// page's new subpages if it has one, and links it from the page.
 func (a *App) addSubpageBlock() {
 	ps := a.page
 	if ps == nil {
 		return
 	}
+	t := a.defaultTemplate(ps.id, "")
 	p, err := a.st.CreatePage(store.NewPageOptions{ParentID: ps.id})
 	if err != nil {
 		a.toast(locales.HostErrorCreateSubpage(err.Error()))
@@ -387,7 +406,7 @@ func (a *App) addSubpageBlock() {
 	a.treeOpen("page", ps.id)
 	a.savePage()
 	a.openPage(p.ID)
-	a.focusTitle(false)
+	a.startFrom(t)
 }
 
 // uploadImage picks a picture on the device for an image block: a new one

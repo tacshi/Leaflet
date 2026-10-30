@@ -21,7 +21,7 @@ func PageToRemote(p Page) map[string]any {
 		"id": p.ID, "space_id": p.SpaceID, "parent_id": ns(p.ParentID), "folder_id": ns(p.FolderID),
 		"title": p.Title, "icon": ns(p.Icon), "sort_key": p.SortKey, "created_by": ns(p.CreatedBy),
 		"created_at": iso(p.CreatedAt), "deleted_at": iso(p.DeletedAt), "is_template": p.Template,
-		"tags": NormalizeTags(p.Tags),
+		"tags": NormalizeTags(p.Tags), "default_template_id": ns(p.DefaultTemplateID),
 	}
 }
 
@@ -30,6 +30,7 @@ func FolderToRemote(f Folder) map[string]any {
 	return map[string]any{
 		"id": f.ID, "space_id": f.SpaceID, "parent_folder_id": ns(f.ParentFolderID), "name": f.Name,
 		"sort_key": f.SortKey, "created_at": iso(f.CreatedAt), "deleted_at": iso(f.DeletedAt),
+		"default_template_id": ns(f.DefaultTemplateID),
 	}
 }
 
@@ -151,6 +152,7 @@ func PageFromRemote(r map[string]any, keepOffline bool) Page {
 		Title: S(r, "title"), Icon: S(r, "icon"), SortKey: sk, CreatedBy: S(r, "created_by"),
 		CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"]),
 		KeepOffline: keepOffline, Template: r["is_template"] == true, Tags: tagsFromRemote(r["tags"]),
+		DefaultTemplateID: S(r, "default_template_id"),
 	}
 }
 
@@ -193,7 +195,8 @@ func FolderFromRemote(r map[string]any) Folder {
 		sk = "V"
 	}
 	return Folder{ID: S(r, "id"), SpaceID: S(r, "space_id"), ParentFolderID: S(r, "parent_folder_id"), Name: S(r, "name"),
-		SortKey: sk, CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"])}
+		SortKey: sk, CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"]),
+		DefaultTemplateID: S(r, "default_template_id")}
 }
 
 // CommentFromRemote reads a comments row.

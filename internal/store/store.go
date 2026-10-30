@@ -25,13 +25,14 @@ CREATE TABLE IF NOT EXISTS spaces (
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS folders (
   id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_folder_id TEXT, name TEXT NOT NULL,
-  sort_key TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER);
+  sort_key TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
+  default_template_id TEXT);
 CREATE TABLE IF NOT EXISTS pages (
   id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_id TEXT, folder_id TEXT,
   title TEXT NOT NULL DEFAULT '', icon TEXT, sort_key TEXT NOT NULL, created_by TEXT,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
   keep_offline INTEGER NOT NULL DEFAULT 1, is_template INTEGER NOT NULL DEFAULT 0,
-  tags TEXT NOT NULL DEFAULT '[]');
+  tags TEXT NOT NULL DEFAULT '[]', default_template_id TEXT);
 CREATE INDEX IF NOT EXISTS pages_space ON pages (space_id, parent_id);
 CREATE INDEX IF NOT EXISTS pages_parent ON pages (parent_id, sort_key);
 CREATE TABLE IF NOT EXISTS page_contents (
@@ -191,6 +192,14 @@ var migrations = []func(context.Context, *sql.Conn) error{
 	func(ctx context.Context, c *sql.Conn) error {
 		return addColumns(ctx, c, [][3]string{
 			{"pages", "tags", "TEXT NOT NULL DEFAULT '[]'"},
+		})
+	},
+	// 5: the template a folder's new pages, or a page's new subpages,
+	// start from.
+	func(ctx context.Context, c *sql.Conn) error {
+		return addColumns(ctx, c, [][3]string{
+			{"folders", "default_template_id", "TEXT"},
+			{"pages", "default_template_id", "TEXT"},
 		})
 	},
 }

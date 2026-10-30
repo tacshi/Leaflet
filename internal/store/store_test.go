@@ -1597,6 +1597,95 @@ func TestPageTags(t *testing.T) {
 	}
 }
 
+// The template a folder's new pages and a page's new subpages start from
+// is kept, goes up with the row, and comes back from it.
+func TestDefaultTemplates(t *testing.T) {
+	s := open(t)
+	tpl, _ := s.CreatePage(NewPageOptions{Title: "Weekly sync", Template: true})
+	f, _ := s.CreateFolder("Meetings")
+	p, _ := s.CreatePage(NewPageOptions{Title: "Standups"})
+	if err := s.SetFolderDefaultTemplate(f, tpl.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetPageDefaultTemplate(p.ID, tpl.ID); err != nil {
+		t.Fatal(err)
+	}
+	folders, _ := s.Folders()
+	if len(folders) != 1 || folders[0].DefaultTemplateID != tpl.ID {
+		t.Errorf("folders %+v", folders)
+	}
+	got, _ := s.Page(p.ID)
+	if got.DefaultTemplateID != tpl.ID {
+		t.Errorf("page %+v", got)
+	}
+	pending, _ := s.Pending()
+	for _, entity := range []string{"folders", "pages"} {
+		if !slices.ContainsFunc(pending, func(e OutboxEntry) bool {
+			return e.Entity == entity && strings.Contains(e.Payload, `"default_template_id":"`+tpl.ID+`"`)
+		}) {
+			t.Errorf("%s: queued %+v", entity, pending)
+		}
+	}
+	// Rows through JSON, as the server and iCloud send them.
+	var page, folder map[string]any
+	b, _ := json.Marshal(PageToRemote(got))
+	_ = json.Unmarshal(b, &page)
+	b, _ = json.Marshal(FolderToRemote(folders[0]))
+	_ = json.Unmarshal(b, &folder)
+	if back := PageFromRemote(page, true); back.DefaultTemplateID != tpl.ID {
+		t.Errorf("page read back %+v", back)
+	}
+	if back := FolderFromRemote(folder); back.DefaultTemplateID != tpl.ID {
+		t.Errorf("folder read back %+v", back)
+	}
+
+	// Back to blank pages.
+	if err := s.SetFolderDefaultTemplate(folders[0], ""); err != nil {
+		t.Fatal(err)
+	}
+	if folders, _ := s.Folders(); folders[0].DefaultTemplateID != "" {
+		t.Errorf("cleared folder %+v", folders[0])
+	}
+}
+
+// A database from before default templates gains their columns, keeping
+// its folders and pages.
+func TestOpensADatabaseFromBeforeDefaultTemplates(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	writeDB(t, path,
+		`CREATE TABLE folders (
+		  id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_folder_id TEXT, name TEXT NOT NULL,
+		  sort_key TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER)`,
+		`CREATE TABLE pages (
+		  id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_id TEXT, folder_id TEXT,
+		  title TEXT NOT NULL DEFAULT '', icon TEXT, sort_key TEXT NOT NULL, created_by TEXT,
+		  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
+		  keep_offline INTEGER NOT NULL DEFAULT 1, is_template INTEGER NOT NULL DEFAULT 0,
+		  tags TEXT NOT NULL DEFAULT '[]')`,
+		`INSERT INTO folders (id, space_id, name, sort_key, created_at, updated_at) VALUES ('f1', 's1', 'Meetings', 'a', 1, 1)`,
+		`INSERT INTO pages (id, space_id, title, sort_key, created_at, updated_at) VALUES ('p1', 's1', 'Plan', 'a', 1, 1)`,
+		`PRAGMA user_version = 4`,
+	)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if v := userVersion(t, s); v != len(migrations) {
+		t.Errorf("schema %d, want %d", v, len(migrations))
+	}
+	if p, err := s.Page("p1"); err != nil || p.Title != "Plan" || p.DefaultTemplateID != "" {
+		t.Errorf("page %+v, %v", p, err)
+	}
+	if folders, err := s.Folders(); err != nil || len(folders) != 1 || folders[0].Name != "Meetings" {
+		t.Errorf("folders %+v, %v", folders, err)
+	}
+	if err := s.SetPageDefaultTemplate("p1", "t1"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The tags of the pages are counted once in any case, by name, and are
 // renamed, merged and deleted on every page.
 func TestRenameAndDeleteTags(t *testing.T) {

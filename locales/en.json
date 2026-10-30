@@ -213,6 +213,10 @@
   "@hostGroupBlocks": {
     "description": "The / menu: the group of other blocks."
   },
+  "hostGroupTemplates": "Templates",
+  "@hostGroupTemplates": {
+    "description": "The / menu: the group of templates, each putting its blocks at the caret."
+  },
   "hostGroupPages": "Pages",
   "@hostGroupPages": {
     "description": "The @ menu: the group of pages to mention."
@@ -796,6 +800,144 @@
       }
     }
   },
+  "templateStarterMeeting": "Meeting notes",
+  "@templateStarterMeeting": {
+    "description": "A starter template that comes with Leaflet: its title, shown on a blank page, in the / menu and search, and given to the page made from it."
+  },
+  "templateStarterMeetingHint": "Agenda, notes and action items",
+  "@templateStarterMeetingHint": {
+    "description": "A blank page and the / menu: under the Meeting notes starter template, what it holds."
+  },
+  "templateStarterAgenda": "Agenda",
+  "@templateStarterAgenda": {
+    "description": "The Meeting notes starter template: a heading."
+  },
+  "templateStarterNotes": "Notes",
+  "@templateStarterNotes": {
+    "description": "The Meeting notes starter template: a heading."
+  },
+  "templateStarterActionItems": "Action items",
+  "@templateStarterActionItems": {
+    "description": "The Meeting notes starter template: a heading over to-dos."
+  },
+  "templateStarterTodo": "To-do list",
+  "@templateStarterTodo": {
+    "description": "A starter template that comes with Leaflet: its title."
+  },
+  "templateStarterTodoHint": "Today, this week and later",
+  "@templateStarterTodoHint": {
+    "description": "A blank page and the / menu: under the To-do list starter template, what it holds."
+  },
+  "templateStarterToday": "Today",
+  "@templateStarterToday": {
+    "description": "The To-do list starter template: a heading over to-dos."
+  },
+  "templateStarterThisWeek": "This week",
+  "@templateStarterThisWeek": {
+    "description": "The To-do list starter template: a heading over to-dos."
+  },
+  "templateStarterLater": "Later",
+  "@templateStarterLater": {
+    "description": "The To-do list starter template: a heading over to-dos."
+  },
+  "templateStarterProject": "Project brief",
+  "@templateStarterProject": {
+    "description": "A starter template that comes with Leaflet: its title."
+  },
+  "templateStarterProjectHint": "Overview, goals, milestones and open questions",
+  "@templateStarterProjectHint": {
+    "description": "A blank page and the / menu: under the Project brief starter template, what it holds."
+  },
+  "templateStarterOverview": "Overview",
+  "@templateStarterOverview": {
+    "description": "The Project brief starter template: a heading."
+  },
+  "templateStarterGoals": "Goals",
+  "@templateStarterGoals": {
+    "description": "The Project brief starter template: a heading."
+  },
+  "templateStarterMilestones": "Milestones",
+  "@templateStarterMilestones": {
+    "description": "The Project brief starter template: a heading over a table."
+  },
+  "templateStarterMilestone": "Milestone",
+  "@templateStarterMilestone": {
+    "description": "The Project brief starter template: a column of its milestones table."
+  },
+  "templateStarterOwner": "Owner",
+  "@templateStarterOwner": {
+    "description": "The Project brief starter template: a column of its milestones table."
+  },
+  "templateStarterDue": "Due",
+  "@templateStarterDue": {
+    "description": "The Project brief starter template: a column of its milestones table, the date."
+  },
+  "templateStarterQuestions": "Open questions",
+  "@templateStarterQuestions": {
+    "description": "The Project brief starter template: a heading."
+  },
+  "templateStarterJournal": "Journal",
+  "@templateStarterJournal": {
+    "description": "A starter template that comes with Leaflet: its title."
+  },
+  "templateStarterJournalHint": "Highlights, gratitude and plans for tomorrow",
+  "@templateStarterJournalHint": {
+    "description": "A blank page and the / menu: under the Journal starter template, what it holds."
+  },
+  "templateStarterHighlights": "Highlights",
+  "@templateStarterHighlights": {
+    "description": "The Journal starter template: a heading over the day's highlights."
+  },
+  "templateStarterGrateful": "Grateful for",
+  "@templateStarterGrateful": {
+    "description": "The Journal starter template: a heading."
+  },
+  "templateStarterTomorrow": "Tomorrow",
+  "@templateStarterTomorrow": {
+    "description": "The Journal starter template: a heading over to-dos."
+  },
+  "templateDefaultForFolder": "New pages start from",
+  "@templateDefaultForFolder": {
+    "description": "A folder's … menu: the submenu choosing the template its new pages start from."
+  },
+  "templateDefaultForPage": "New subpages start from",
+  "@templateDefaultForPage": {
+    "description": "A page's … menu: the submenu choosing the template its new subpages start from."
+  },
+  "templateDefaultBlank": "Blank page",
+  "@templateDefaultBlank": {
+    "description": "The New pages start from submenu: the item for new pages to start blank."
+  },
+  "templateDefaultSet": "New pages in {place} start from {title}",
+  "@templateDefaultSet": {
+    "description": "A toast after choosing the template a folder's new pages, or a page's new subpages, start from.",
+    "placeholders": {
+      "place": {
+        "type": "String"
+      },
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "templateDefaultCleared": "New pages in {place} start blank",
+  "@templateDefaultCleared": {
+    "description": "A toast after choosing that a folder's new pages, or a page's new subpages, start blank.",
+    "placeholders": {
+      "place": {
+        "type": "String"
+      }
+    }
+  },
+  "templateDefaultFailed": "Could not set the template: {error}",
+  "@templateDefaultFailed": {
+    "description": "A toast when choosing the template a folder's or page's new pages start from fails.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "dialogSearchPlaceholder": "Search pages, or #tag to filter",
   "@dialogSearchPlaceholder": {
     "description": "Search dialog: the search field's placeholder; #tag is typed as is, a # before a tag's name."
@@ -816,6 +958,10 @@
   "dialogSearchAskAgent": "Ask an agent instead",
   "@dialogSearchAskAgent": {
     "description": "Search dialog: a button, when nothing matches, asking an agent the query."
+  },
+  "dialogSearchTemplateEnter": "Enter starts a new page from this template",
+  "@dialogSearchTemplateEnter": {
+    "description": "Search: under the results while a template is chosen, beside an Edit template button."
   },
   "dialogFolderNew": "New folder",
   "@dialogFolderNew": {

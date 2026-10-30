@@ -23,25 +23,37 @@ type Folder struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 	DeletedAt      time.Time
+	// DefaultTemplateID is the template the folder's new pages start
+	// from, or "" for blank ones.
+	DefaultTemplateID string
+}
+
+const folderCols = `id, space_id, parent_folder_id, name, sort_key, created_at, updated_at, deleted_at, default_template_id`
+
+func scanFolder(sc interface{ Scan(...any) error }) (Folder, error) {
+	var f Folder
+	var parent, template sql.NullString
+	var c, u int64
+	var d sql.NullInt64
+	err := sc.Scan(&f.ID, &f.SpaceID, &parent, &f.Name, &f.SortKey, &c, &u, &d, &template)
+	f.ParentFolderID, f.CreatedAt, f.UpdatedAt, f.DeletedAt = parent.String, time.UnixMilli(c), time.UnixMilli(u), fromMs(d)
+	f.DefaultTemplateID = template.String
+	return f, err
 }
 
 // Folders returns the folders not deleted, in sort order.
 func (s *Store) Folders() ([]Folder, error) {
-	rows, err := s.db.Query(`SELECT id, space_id, parent_folder_id, name, sort_key, created_at, updated_at, deleted_at FROM folders WHERE deleted_at IS NULL ORDER BY sort_key`)
+	rows, err := s.db.Query(`SELECT ` + folderCols + ` FROM folders WHERE deleted_at IS NULL ORDER BY sort_key`)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
 	var out []Folder
 	for rows.Next() {
-		var f Folder
-		var parent sql.NullString
-		var c, u int64
-		var d sql.NullInt64
-		if err := rows.Scan(&f.ID, &f.SpaceID, &parent, &f.Name, &f.SortKey, &c, &u, &d); err != nil {
+		f, err := scanFolder(rows)
+		if err != nil {
 			return nil, err
 		}
-		f.ParentFolderID, f.CreatedAt, f.UpdatedAt, f.DeletedAt = parent.String, time.UnixMilli(c), time.UnixMilli(u), fromMs(d)
 		out = append(out, f)
 	}
 	return out, rows.Err()
@@ -51,11 +63,11 @@ func (s *Store) Folders() ([]Folder, error) {
 func (s *Store) PutFolder(f Folder) error { return writeFolder(s.db, f) }
 
 func writeFolder(q querier, f Folder) error {
-	_, err := q.Exec(`INSERT INTO folders (id, space_id, parent_folder_id, name, sort_key, created_at, updated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id,
+	_, err := q.Exec(`INSERT INTO folders (`+folderCols+`)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id,
 		parent_folder_id = excluded.parent_folder_id, name = excluded.name, sort_key = excluded.sort_key,
-		updated_at = excluded.updated_at, deleted_at = excluded.deleted_at`,
-		f.ID, f.SpaceID, ns(f.ParentFolderID), f.Name, f.SortKey, ms(f.CreatedAt), ms(f.UpdatedAt), nt(f.DeletedAt))
+		updated_at = excluded.updated_at, deleted_at = excluded.deleted_at, default_template_id = excluded.default_template_id`,
+		f.ID, f.SpaceID, ns(f.ParentFolderID), f.Name, f.SortKey, ms(f.CreatedAt), ms(f.UpdatedAt), nt(f.DeletedAt), ns(f.DefaultTemplateID))
 	return err
 }
 
@@ -90,14 +102,8 @@ func (s *Store) CreateFolder(name string) (Folder, error) {
 // caller's transaction, as savePages does pages.
 func saveFolder(tx *sql.Tx, f Folder, label string) error {
 	var old map[string]any
-	var was Folder
-	var parent sql.NullString
-	var c, u int64
-	var d sql.NullInt64
-	switch err := tx.QueryRow(`SELECT id, space_id, parent_folder_id, name, sort_key, created_at, updated_at, deleted_at FROM folders WHERE id = ?`, f.ID).
-		Scan(&was.ID, &was.SpaceID, &parent, &was.Name, &was.SortKey, &c, &u, &d); {
+	switch was, err := scanFolder(tx.QueryRow(`SELECT `+folderCols+` FROM folders WHERE id = ?`, f.ID)); {
 	case err == nil:
-		was.ParentFolderID, was.CreatedAt, was.UpdatedAt, was.DeletedAt = parent.String, time.UnixMilli(c), time.UnixMilli(u), fromMs(d)
 		old = FolderToRemote(was)
 	case !errors.Is(err, sql.ErrNoRows):
 		return err
@@ -112,6 +118,21 @@ func saveFolder(tx *sql.Tx, f Folder, label string) error {
 func (s *Store) RenameFolder(f Folder, name string) error {
 	f.Name, f.UpdatedAt = name, time.Now()
 	if err := s.inTx(func(tx *sql.Tx) error { return saveFolder(tx, f, "renamed folder") }); err != nil {
+		return err
+	}
+	s.Notify("outbox", "")
+	s.Notify("folders", "")
+	return nil
+}
+
+// SetFolderDefaultTemplate sets the template a folder's new pages start
+// from, "" for blank ones.
+func (s *Store) SetFolderDefaultTemplate(f Folder, templateID string) error {
+	if f.DefaultTemplateID == templateID {
+		return nil
+	}
+	f.DefaultTemplateID, f.UpdatedAt = templateID, time.Now()
+	if err := s.inTx(func(tx *sql.Tx) error { return saveFolder(tx, f, "set default template") }); err != nil {
 		return err
 	}
 	s.Notify("outbox", "")

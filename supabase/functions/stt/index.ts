@@ -199,8 +199,17 @@ async function openAiCompatible(
   let baseUrl: string;
   let apiKey: string | null = null;
   if (settings.provider_id) {
+    // A provider's key goes only to the provider's own address, which
+    // providers.save checked: the endpoint in the settings, which the
+    // client writes, may name it but not send the key anywhere else.
     const provider = await loadProvider(uc, settings.provider_id);
-    baseUrl = normalizeBaseUrl(settings.base_url || provider.base_url, provider.preset);
+    baseUrl = normalizeBaseUrl(provider.base_url, provider.preset);
+    if (settings.base_url && new URL(normalizeBaseUrl(settings.base_url)).href !== new URL(baseUrl).href) {
+      throw new HttpError(
+        400,
+        `The endpoint is not ${baseUrl}, the address of the provider whose key it uses. Choose no key, or that address.`,
+      );
+    }
     apiKey = await providerSecret(sc, provider.id);
   } else {
     baseUrl = normalizeBaseUrl(settings.base_url!);

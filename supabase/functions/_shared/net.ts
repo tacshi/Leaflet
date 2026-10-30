@@ -153,6 +153,15 @@ export async function checkPublicUrl(raw: string, resolve?: Resolver): Promise<U
  * fetch for addresses someone typed. A redirect is an error rather than
  * followed (it could lead anywhere); network failures say only that the
  * host could not be reached. Aborts and timeouts are thrown as they are.
+ *
+ * fetch looks the name up again after assertPublicHost did, so a name whose
+ * DNS answers change in between (DNS rebinding) can still reach a private
+ * address. The edge runtime gives fetch no resolver to pin the address to,
+ * and connecting to the address itself would check the certificate against
+ * it rather than the name. What keeps this small is https: the request goes
+ * only after the host shows a valid certificate for the name typed, which a
+ * private service does not have, so a rebound name gets no further than a
+ * connection attempt and a failed handshake.
  */
 export async function safeFetch(raw: string, init: RequestInit = {}, resolve?: Resolver): Promise<Response> {
   const url = await checkPublicUrl(raw, resolve);

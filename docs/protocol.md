@@ -258,10 +258,24 @@ subpages once accepted (`accepted_at` set): every access check counts only
 accepted rows. The person invited reads their own rows, pending or not, and
 the space owner reads a page's accepted ones; only the person invited sets
 `accepted_at`, through `accept_page_invite` (a trigger keeps it otherwise).
+Clients never insert or update `page_permissions` rows: shares are made and
+changed through `share_page`; the owner may delete them, as `unshare_page`
+does. Shares and invites go only to an account that has confirmed the
+address, so the project must require email confirmation (see
+`supabase/README.md`).
 `page_history` is the owner's to read in full; anyone else reads the
 snapshots taken from when they accepted a share of the page, or of a page
-it is inside, on.
-Moving a page under a new parent requires edit access to both.
+it is inside, on. A snapshot's `created_at` is never later than when it
+reached the server; each writer keeps their newest 50 unnamed snapshots of
+a page, and each writer but the page's owner their newest 50 named
+(`manual`) ones.
+Moving a page under a new parent requires edit access to both, and anyone
+but the space owner moves a page only between parents that the same shares
+reach (`forbidden_move` otherwise), so a move never shows a page to people
+it was not shared with. A recording stays on its page: an update that
+changes `recordings.page_id` is refused. A comment is emptied as it is
+deleted: once `deleted_at` is set, `body` is empty, `quote` null and
+`mentions` empty.
 `pages.is_template` marks a template and every subpage of one (a subpage
 made under a template is one too); templates stay out of the page list,
 search and `list_pages`. `pages.tags` is a page's tags (`text[]`, at most 50,

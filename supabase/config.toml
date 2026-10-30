@@ -38,7 +38,12 @@ enable_signup = true
 [auth.email]
 enable_signup = true
 double_confirm_changes = true
-enable_confirmations = false
+# An address counts as someone's only once they confirm it: share_page and
+# the invites waiting for an address go to the account that confirmed it.
+# Without confirmations, signing up confirms any address at once. Keep this
+# on in hosted projects too (Authentication > Sign In / Providers > Email >
+# Confirm email). Locally the emails land in Inbucket on :54324.
+enable_confirmations = true
 
 [edge_runtime]
 enabled = true

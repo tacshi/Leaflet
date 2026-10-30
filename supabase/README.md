@@ -75,6 +75,13 @@ limit (Storage settings) must be at least as high for long recordings. The
 `stt` function transcribes recordings up to `STT_MAX_AUDIO_MB` (default 100,
 about 54 minutes of the app's WAV); longer ones transcribe on the device.
 
+Keep email confirmation on (Authentication › Sign In / Providers › Email ›
+Confirm email; `enable_confirmations = true` in `config.toml`, which local
+development uses too, with the emails in Inbucket on :54324). Shares and
+invites waiting for an address go to the account that confirmed it; without
+confirmation, signing up confirms any address at once, so whoever signs up
+with someone else's address gets the pages shared with them.
+
 Supabase Vault (`supabase_vault`) is enabled on every Supabase project; the
 migration relies on `vault.create_secret`, `vault.update_secret` and
 `vault.decrypted_secrets`.
@@ -118,7 +125,13 @@ migration relies on `vault.create_secret`, `vault.update_secret` and
   (`accepted_at` null) that grants nothing until the person accepts it with
   `accept_page_invite` (or removes it with `decline_page_invite`);
   `page_invites()` lists the caller's pending ones. Access checks count only
-  accepted rows.
+  accepted rows. Clients cannot insert or update `page_permissions`: sharing
+  again through `share_page` changes the role.
+- **Moving pages**: anyone but the space owner moves a page only between
+  parents that the same shares reach (`forbidden_move` otherwise).
+- **Speech to text with a provider's key** (`stt_settings.provider_id`) goes
+  only to that provider's base URL; a `base_url` that names another address
+  is refused rather than sent the key.
 - **Storage**: viewers of a shared page can read its recordings, the files
   on it and the images on it; only the space owner writes `files/` and
   `images/`. Images go at `images/{space_id}/{page_id}/{image_id}.{ext}`, the

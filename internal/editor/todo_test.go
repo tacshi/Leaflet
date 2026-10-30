@@ -121,6 +121,31 @@ func TestDueLabel(t *testing.T) {
 	}
 }
 
+// The days are counted on the calendar: the day the clocks go forward is
+// 23 hours long, and the day after it is still tomorrow.
+func TestDueLabelOverAChangeOfClocks(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("no time zone data:", err)
+	}
+	local := time.Local
+	time.Local = ny
+	t.Cleanup(func() { time.Local = local })
+	for _, tc := range []struct {
+		now, due time.Time
+		want     string
+	}{
+		{time.Date(2026, 3, 8, 10, 0, 0, 0, ny), time.Date(2026, 3, 9, 0, 0, 0, 0, ny), "Tomorrow"},
+		{time.Date(2026, 3, 9, 10, 0, 0, 0, ny), time.Date(2026, 3, 8, 0, 0, 0, 0, ny), "Yesterday"},
+		{time.Date(2026, 3, 8, 23, 0, 0, 0, ny), time.Date(2026, 3, 8, 0, 0, 0, 0, ny), "Today"},
+		{time.Date(2026, 11, 1, 10, 0, 0, 0, ny), time.Date(2026, 11, 2, 0, 0, 0, 0, ny), "Tomorrow"},
+	} {
+		if got := DueLabel(tc.due, false, tc.now); got != tc.want {
+			t.Errorf("%v from %v: %q, want %q", tc.due, tc.now, got, tc.want)
+		}
+	}
+}
+
 // An empty to-do offers its date after its placeholder, where it would
 // be with that text typed, not over it.
 func TestDueChipAfterPlaceholder(t *testing.T) {

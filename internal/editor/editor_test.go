@@ -1099,3 +1099,172 @@ func TestCaretIsAsTallAsItsText(t *testing.T) {
 		t.Errorf("caret %+v shorter than the text, %v", cr, font.Size)
 	}
 }
+
+// A click during a composition ends it where it is, keeping what was
+// composed: composing on after it never writes over the block clicked.
+func TestClickEndsComposition(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("hello world")
+	tt.Key(0, ui.KeyEnter)
+	tt.Type("ab")
+	tt.Compose("ni", 2)
+	tt.Frame()
+	first := e.Content.Children[0]
+	r := e.geom[first.ID]
+	tt.ClickAt(r.X+1, r.Y+r.H/2)
+	if e.marked {
+		t.Fatal("the click kept the composition")
+	}
+	tt.Compose("nih", 3)
+	tt.Type("你好")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:你好hello world", "paragraph:abni"}) {
+		t.Errorf("blocks %v", got)
+	}
+	// Moving the caret from code ends it too.
+	tt.Compose("x", 1)
+	e.PlaceCaret(e.Content.Children[1].ID, 0)
+	tt.Compose("y", 1)
+	tt.Type("也")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:你好xhello world", "paragraph:也abni"}) {
+		t.Errorf("blocks after moving the caret %v", got)
+	}
+}
+
+// A composition and what it becomes are one step of undo, and one given
+// up is none.
+func TestCompositionIsOneUndoStep(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("a")
+	tt.Compose("ni", 2)
+	tt.Type("你")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a你"}) {
+		t.Fatalf("typed %v", got)
+	}
+	e.Undo()
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a"}) {
+		t.Errorf("after one undo %v", got)
+	}
+	e.Undo()
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:"}) {
+		t.Errorf("after two undos %v", got)
+	}
+	e.Redo()
+	steps := len(e.undo)
+	tt.Compose("ha", 2)
+	tt.Compose("", 0)
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a"}) || len(e.undo) != steps || !e.CanRedo() {
+		t.Errorf("given up: %v, %d steps, want %d; redo %v", got, len(e.undo), steps, e.CanRedo())
+	}
+	// Over a selection, it is one step with what it replaced.
+	e.Select(Pos{e.Content.Children[0].ID, 0}, Pos{e.Content.Children[0].ID, 1})
+	tt.Compose("ni", 2)
+	tt.Type("你")
+	e.Undo()
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a"}) {
+		t.Errorf("after undoing over a selection %v", got)
+	}
+}
+
+// Delete and Backspace that only move the caret, or do nothing, make no
+// step of undo, and keep the steps of redo.
+func TestNoUndoStepsThatChangeNothing(t *testing.T) {
+	div := &doc.Node{ID: "D", Type: "divider"}
+	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), div, para("B", "b")}), &fakeHost{})
+	e.PlaceCaret("B", -1)
+	e.InsertText("x")
+	e.Undo()
+	check := func(what string, caret Pos) {
+		t.Helper()
+		if e.CanUndo() || !e.CanRedo() {
+			t.Errorf("%s: undo %v, redo %v", what, e.CanUndo(), e.CanRedo())
+		}
+		if e.Caret() != caret {
+			t.Errorf("%s: caret %v, want %v", what, e.Caret(), caret)
+		}
+	}
+	e.PlaceCaret("A", -1)
+	e.Delete(false)
+	check("Delete before a divider", Pos{"D", 0})
+	e.PlaceCaret("A", 0)
+	e.Backspace(false)
+	check("Backspace at the start of the page", Pos{"A", 0})
+	e.PlaceCaret("B", 0)
+	e.Backspace(false)
+	check("Backspace after a divider", Pos{"D", 0})
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "divider:", "paragraph:b"}) {
+		t.Errorf("blocks %v", got)
+	}
+}
+
+// A block selected whole, without text, copies and cuts as itself.
+func TestCopyAndCutABlockSelectedWhole(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("Intro")
+	e.InsertBlocks(&doc.Node{ID: doc.NewBlockID(), Type: "divider"})
+	tt.Frame()
+	div := e.units()[1]
+	r := e.geom[div.ID]
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	if e.Caret() != (Pos{div.ID, 0}) {
+		t.Fatalf("caret %v", e.Caret())
+	}
+	tt.Command("copy")
+	if tt.Clipboard() == "" || len(clip.blocks) != 1 || clip.blocks[0].Type != "divider" {
+		t.Fatalf("copied %q, %v", tt.Clipboard(), clip.blocks)
+	}
+	tt.SetClipboard("")
+	tt.Command("cut")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:Intro", "paragraph:"}) || tt.Clipboard() == "" {
+		t.Fatalf("after cut %v, clipboard %q", got, tt.Clipboard())
+	}
+	tt.Command("paste")
+	if got := texts(e); len(got) < 3 || got[1] != "divider:" {
+		t.Errorf("after paste %v", got)
+	}
+}
+
+// Lines pasted in a list item with children go between its text and its
+// children: the children follow the text after the caret, which stays in
+// its kind of block.
+func TestPasteLinesInAnItemWithChildren(t *testing.T) {
+	for _, tc := range []struct {
+		name, text string
+		want       []string
+	}{
+		{"lines", "x\ny", []string{"bulleted_list:abx", "bulleted_list:ycd", "  bulleted_list:kid"}},
+		{"code", "```\nz\n```", []string{"bulleted_list:ab", "code:z", "bulleted_list:cd", "  bulleted_list:kid"}},
+	} {
+		e, _, _ := setup(t)
+		item := newText("bulleted_list", doc.FromMarkdown("abcd"))
+		kid := newText("bulleted_list", doc.FromMarkdown("kid"))
+		item.Children = []*doc.Node{kid}
+		e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{item} })
+		e.PlaceCaret(item.ID, 2)
+		e.paste(tc.text)
+		var got []string
+		for _, n := range e.units() {
+			got = append(got, strings.Repeat("  ", e.depth(n.ID))+n.Type+":"+n.Delta().Plain())
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: %v, want %v", tc.name, got, tc.want)
+		}
+		if e.Caret().ID != e.units()[len(tc.want)-2].ID {
+			t.Errorf("%s: caret in %v", tc.name, e.node(e.Caret().ID).Delta().Plain())
+		}
+	}
+	// Pasted at the end of the item, the last line keeps its own kind, and
+	// the children follow it.
+	e, _, _ := setup(t)
+	item := newText("bulleted_list", doc.FromMarkdown("ab"))
+	item.Children = []*doc.Node{newText("bulleted_list", doc.FromMarkdown("kid"))}
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{item} })
+	e.PlaceCaret(item.ID, -1)
+	e.paste("x\n- y")
+	var got []string
+	for _, n := range e.units() {
+		got = append(got, strings.Repeat("  ", e.depth(n.ID))+n.Type+":"+n.Delta().Plain())
+	}
+	if want := []string{"bulleted_list:abx", "bulleted_list:y", "  bulleted_list:kid"}; !slices.Equal(got, want) {
+		t.Errorf("at the end: %v, want %v", got, want)
+	}
+}

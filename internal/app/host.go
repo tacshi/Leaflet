@@ -7,6 +7,7 @@ import (
 	"html"
 	"image/gif"
 	"log"
+	"maps"
 	"mime"
 	"os"
 	"path/filepath"
@@ -878,8 +879,21 @@ var embedURL = map[bool]string{true: "https://embed.app.capyvibe.leaflet/", fals
 
 // embedCSP is the policy of an embed's frame: inline scripts and styles,
 // images, fonts and media from data and blob URLs, and nothing from the
-// network.
-const embedCSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:"
+// network. default-src does not cover WebRTC; the webrtc directive does
+// where the web view knows it, and embedNoRTC where it does not.
+const embedCSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; webrtc 'block'"
+
+// embedNoRTC runs first in an embed's frame: it takes away WebRTC, which
+// would reach the network around the policy, before the embed's own
+// script runs. It is best effort: a frame the embed makes itself has them
+// back, which the webrtc directive, where known, still blocks.
+const embedNoRTC = `<script>(function () {
+  ["RTCPeerConnection", "webkitRTCPeerConnection", "mozRTCPeerConnection", "RTCDataChannel",
+   "RTCSessionDescription", "RTCIceCandidate", "RTCRtpSender", "RTCRtpReceiver", "RTCRtpTransceiver",
+   "RTCDtlsTransport", "RTCIceTransport", "RTCSctpTransport", "RTCCertificate"].forEach(function (k) {
+    try { Object.defineProperty(window, k, {value: undefined, writable: false, configurable: false}); } catch (e) {}
+  });
+})();</script>`
 
 // embedWheel runs in an embed's frame: wheel movement the embed cannot
 // use itself, as most embeds do not scroll, goes to the page around it.
@@ -941,30 +955,41 @@ func embedPage(id, src string, pal *theme.Palette) string {
 	if pal.Dark {
 		scheme = "dark"
 	}
-	meta := `<meta http-equiv="Content-Security-Policy" content="` + embedCSP + `">` +
-		`<meta name="color-scheme" content="` + scheme + `">` +
-		`<script>document.documentElement.dataset.theme = "` + scheme + `";</script>` + embedWheel + embedFit
-	inner := src
-	if i := strings.Index(strings.ToLower(inner), "<head>"); i >= 0 {
-		inner = inner[:i+6] + meta + inner[i+6:]
-	} else {
-		inner = meta + inner
-	}
-	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="` + embedCSP + `; frame-src about: data:">` +
+	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="` + embedCSP + `; frame-src about:">` +
 		`<meta name="color-scheme" content="` + scheme + `">` +
 		`<style>html,body{margin:0;height:100%;background:` + bg + `}iframe{border:0;width:100%;height:100%;display:block;background:` + bg + `}</style></head><body>` +
-		`<iframe id="f" sandbox="allow-scripts" srcdoc="` + html.EscapeString(inner) + `"></iframe>` +
+		`<iframe id="f" sandbox="allow-scripts" srcdoc="` + html.EscapeString(embedFrame(src, scheme)) + `"></iframe>` +
 		// Without a wheel listener of its own, WebKit scrolls the wrapper
 		// without telling a frame that could scroll, so it never forwards.
 		`<script>addEventListener("wheel", function () {}, {passive: true});` +
+		`var id = ` + scriptString(id) + `;` +
 		`addEventListener("message", function (e) {` +
 		`if (e.source !== document.getElementById("f").contentWindow || !e.data || !window.mygo) return;` +
 		`if (typeof e.data.leafletWheel === "number") window.mygo.call("Embeds.Scroll", e.data.leafletWheel);` +
 		`var z = e.data.leafletSize;` +
-		`if (z && typeof z[0] === "number" && typeof z[1] === "number") window.mygo.call("Embeds.Size", ` + strconv.Quote(id) + `, z[0], z[1]);` +
-		`if (typeof e.data.leafletZoomed === "boolean") window.mygo.call("Embeds.Zoomed", ` + strconv.Quote(id) + `, e.data.leafletZoomed);` +
-		`if (e.data.leafletExit === true) window.mygo.call("Embeds.Exit", ` + strconv.Quote(id) + `);` +
+		`if (z && typeof z[0] === "number" && typeof z[1] === "number") window.mygo.call("Embeds.Size", id, z[0], z[1]);` +
+		`if (typeof e.data.leafletZoomed === "boolean") window.mygo.call("Embeds.Zoomed", id, e.data.leafletZoomed);` +
+		`if (e.data.leafletExit === true) window.mygo.call("Embeds.Exit", id);` +
 		`});</script></body></html>`
+}
+
+// embedFrame is the document of an embed's frame: its policy, theme and
+// scripts first, then the embed's HTML. They go at the very start rather
+// than after the HTML's "<head>", which may be in a comment or a string;
+// the browser still puts them in the head, and the HTML's own <html> and
+// <head> after them only add to those. A doctype the HTML starts with
+// moves ahead of them, so it keeps the HTML's rendering mode.
+func embedFrame(src, scheme string) string {
+	head := `<meta http-equiv="Content-Security-Policy" content="` + embedCSP + `">` + embedNoRTC +
+		`<meta name="color-scheme" content="` + scheme + `">` +
+		`<script>document.documentElement.dataset.theme = "` + scheme + `";</script>` + embedWheel + embedFit
+	rest := strings.TrimLeft(src, " \t\r\n\f")
+	if len(rest) >= 9 && strings.EqualFold(rest[:9], "<!doctype") {
+		if i := strings.IndexByte(rest, '>'); i >= 0 {
+			return rest[:i+1] + head + rest[i+1:]
+		}
+	}
+	return head + src
 }
 
 // hexOf writes a color as CSS's "#rrggbb".
@@ -1134,6 +1159,24 @@ func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float
 		wv.Opacity(0)
 		ui.Box(c).Height(height).FillWidth().Margin(-height-gap, 0, 0, 0).Radius(6).Background(pal.Ground)
 	}
+}
+
+// dropEmbeds lets go of the web views of embeds, math and diagrams no
+// longer in the open page, and what they said about themselves, as
+// deleting one or undoing its insert leaves it running otherwise.
+func (a *App) dropEmbeds() {
+	gone := func(key string) bool {
+		return a.page == nil || a.page.editor.Content.Find(strings.TrimPrefix(key, "full:")) == nil
+	}
+	for key, v := range a.embeds {
+		if gone(key) {
+			v.Destroy()
+			delete(a.embeds, key)
+		}
+	}
+	maps.DeleteFunc(a.embedSrc, func(key, _ string) bool { return gone(key) })
+	maps.DeleteFunc(a.embedSizes, func(key string, _ embedSize) bool { return gone(key) })
+	maps.DeleteFunc(a.embedZoomed, func(key string, _ bool) bool { return gone(key) })
 }
 
 func abs32(f float32) float32 {

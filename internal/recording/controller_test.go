@@ -162,3 +162,79 @@ func TestChunksGoInOrder(t *testing.T) {
 		t.Fatalf("wrote %v", got)
 	}
 }
+
+// A microphone that answers after the recording stopped while starting
+// brings back no recording; one that answers in time starts it.
+func TestStartedAfterStopIsIgnored(t *testing.T) {
+	r := &Controller{update: func(fn func()) { fn() }, session: "s1"}
+	// Stop clears the state and keeps the session until the page is gone.
+	r.State = State{}
+	r.started("s1", 0)
+	if r.State.Active || r.Active() {
+		t.Errorf("stopped recording came back: %+v", r.State)
+	}
+	r.State = State{Starting: true}
+	r.started("old", 0)
+	if r.State.Active || !r.State.Starting {
+		t.Errorf("another session's microphone started this one: %+v", r.State)
+	}
+	r.started("s1", 0)
+	if !r.State.Active || r.State.Starting || r.resumed.IsZero() {
+		t.Errorf("not started: %+v", r.State)
+	}
+}
+
+// No audio goes after the end of it that Finish sends.
+func TestSonioxSendsNothingAfterFinish(t *testing.T) {
+	heard := make(chan []byte, 10)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		c, err := websocket.Accept(w, req, nil)
+		if err != nil {
+			return
+		}
+		for ended := false; ; {
+			wait := time.Minute
+			if ended {
+				wait = 300 * time.Millisecond
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), wait)
+			_, data, err := c.Read(ctx)
+			cancel()
+			if err != nil {
+				_ = c.Close(websocket.StatusNormalClosure, "")
+				return
+			}
+			heard <- data
+			if len(data) == 0 && !ended {
+				ended = true
+				<-release
+			}
+		}
+	}))
+	defer srv.Close()
+	conn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newSoniox(conn)
+	s.Send([]byte{1})
+	finished := make(chan struct{})
+	go func() {
+		_, _ = s.Finish()
+		close(finished)
+	}()
+	for _, want := range [][]byte{{1}, {}} {
+		if got := <-heard; !bytes.Equal(got, want) {
+			t.Fatalf("heard %v, want %v", got, want)
+		}
+	}
+	s.Send([]byte{7})
+	close(release)
+	<-finished
+	select {
+	case got := <-heard:
+		t.Errorf("heard %v after the end", got)
+	default:
+	}
+}

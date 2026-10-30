@@ -3,6 +3,8 @@ package recording
 import (
 	"encoding/binary"
 	"math"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"leaflet/internal/store"
@@ -83,5 +85,37 @@ func TestMeterWindowsAcrossChunks(t *testing.T) {
 	}
 	if got != 2 {
 		t.Errorf("%d levels", got)
+	}
+}
+
+// A WAV file is the user's alone, and never one that was there already.
+func TestCreateWavIsPrivate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "a.wav")
+	w, err := CreateWav(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = w.Close()
+	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v, %v", fi.Mode(), err)
+	}
+	if _, err := CreateWav(path); err == nil {
+		t.Error("an existing file was written over")
+	}
+}
+
+// Only addresses on this machine or its network are local, not names
+// that start like them.
+func TestIsLocalEndpoint(t *testing.T) {
+	for u, want := range map[string]bool{
+		"http://localhost:8000/v1": true, "http://127.0.0.1:8000": true, "http://[::1]:8000": true,
+		"http://10.0.0.5": true, "http://172.16.3.4": true, "http://172.31.255.1": true, "http://192.168.1.2": true,
+		"http://169.254.1.1": true, "http://[fd00::1]": true, "http://[::ffff:192.168.1.2]": true, "http://studio.local:9000": true,
+		"http://172.32.0.1": false, "https://10.example.com": false, "https://192.168.example.com": false,
+		"https://api.openai.com/v1": false, "http://8.8.8.8": false, "": false,
+	} {
+		if got := IsLocalEndpoint(u); got != want {
+			t.Errorf("IsLocalEndpoint(%q) = %v", u, got)
+		}
 	}
 }

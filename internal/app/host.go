@@ -5,7 +5,7 @@ import (
 	"context"
 	"errors"
 	"html"
-	"image/gif"
+	"image"
 	"log"
 	"maps"
 	"mime"
@@ -638,8 +638,9 @@ func (a *App) downloadFailed(id string) bool {
 
 // exportPage saves a page as Markdown.
 func (a *App) exportPage(id string) {
-	if a.page != nil && a.page.id == id {
-		a.savePage()
+	// As exportAll, not without the edits waiting.
+	if a.page != nil && a.page.id == id && !a.savePage() {
+		return
 	}
 	p := a.pageByID(id)
 	c := a.st.Content(id)
@@ -706,6 +707,9 @@ type imageCache struct {
 	gifs    map[string][]byte
 	players map[string]*gifPlayer
 	making  map[string]bool
+	// closed is set once the cache is let go, as it is cleared: what it
+	// still makes then is closed rather than kept.
+	closed bool
 }
 
 // gifPlayer is a block's player of an animated GIF, nil for one that did
@@ -746,6 +750,9 @@ func (ic *imageCache) get(url string, done func()) ui.ImageSource {
 	go func() {
 		data, err := ic.read(url)
 		var b ui.ImageSource
+		if err == nil {
+			err = checkPixels(data)
+		}
 		if err == nil {
 			b, err = ui.DecodeImage(data)
 		}
@@ -798,7 +805,14 @@ func (ic *imageCache) player(url, block string, done func()) *ui.VideoPlayer {
 		}
 		ic.mu.Lock()
 		delete(ic.making, key)
-		ic.players[key] = &gifPlayer{p: p, shown: time.Now()}
+		if ic.closed {
+			// No one else has this player yet.
+			if p != nil {
+				p.Close()
+			}
+		} else {
+			ic.players[key] = &gifPlayer{p: p, shown: time.Now()}
+		}
 		ic.mu.Unlock()
 		done()
 	}()
@@ -824,13 +838,94 @@ func (ic *imageCache) releasePlayers(now time.Time) {
 	}
 }
 
+// maxPixels is the most pixels a picture may have to be shown, and
+// maxGIFPixels those of all an animated GIF's frames: a small file can
+// say it is far larger, and decoding it would take more memory than the
+// device has.
+const (
+	maxPixels    = 50_000_000
+	maxGIFPixels = 200_000_000
+)
+
+// errTooLarge is for a picture of more pixels than maxPixels.
+var errTooLarge = errors.New("picture too large")
+
+// checkPixels refuses a picture whose header says it has more pixels than
+// it may, before it is decoded. What is no bitmap, as an SVG, passes.
+func checkPixels(data []byte) error {
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil
+	}
+	if cfg.Width*cfg.Height > maxPixels {
+		return errTooLarge
+	}
+	if _, area := gifFrames(data); area > maxGIFPixels {
+		return errTooLarge
+	}
+	return nil
+}
+
+// close closes the players, for a cache let go. Call it on the main
+// thread, as releasePlayers.
+func (ic *imageCache) close() {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	ic.closed = true
+	for key, gp := range ic.players {
+		if gp.p != nil {
+			gp.p.Close()
+		}
+		delete(ic.players, key)
+	}
+}
+
 // animatedGIF reports whether data is a GIF of more than one frame.
 func animatedGIF(data []byte) bool {
-	if !bytes.HasPrefix(data, []byte("GIF8")) {
-		return false
+	n, _ := gifFrames(data)
+	return n > 1
+}
+
+// gifFrames counts a GIF's frames, and their pixels, from its blocks,
+// without decoding them; 0 for what is no GIF. What follows a block cut
+// short is left out.
+func gifFrames(data []byte) (frames, area int) {
+	if !bytes.HasPrefix(data, []byte("GIF8")) || len(data) < 13 {
+		return 0, 0
 	}
-	g, err := gif.DecodeAll(bytes.NewReader(data))
-	return err == nil && len(g.Image) > 1
+	// A color table, after a packed byte saying it is there, of 2^(n+1)
+	// colors of 3 bytes.
+	table := func(packed byte) int {
+		if packed&0x80 == 0 {
+			return 0
+		}
+		return 3 << (packed&7 + 1)
+	}
+	// skip passes over sub-blocks: each its size, then its bytes, till
+	// one of size 0.
+	skip := func(i int) int {
+		for i < len(data) && data[i] != 0 {
+			i += 1 + int(data[i])
+		}
+		return i + 1
+	}
+	i := 13 + table(data[10])
+	for i < len(data) {
+		switch data[i] {
+		case 0x21: // an extension: its label, then sub-blocks
+			i = skip(i + 2)
+		case 0x2C: // a frame: where it is, its size, then its pixels
+			if i+10 > len(data) {
+				return frames, area
+			}
+			w, h := int(data[i+5])|int(data[i+6])<<8, int(data[i+7])|int(data[i+8])<<8
+			frames, area = frames+1, area+w*h
+			i = skip(i + 10 + table(data[i+9]) + 1)
+		default: // the trailer, or what is no block
+			return frames, area
+		}
+	}
+	return frames, area
 }
 
 // hasFailed reports whether a picture failed to load, and is not being

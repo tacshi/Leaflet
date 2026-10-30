@@ -48,6 +48,12 @@ type App struct {
 	sync    *syncsvc.Service
 	hub     *agents.Hub
 	rec     *recording.Controller
+	// winMu guards win, starting and early for update, which other
+	// goroutines call: while start makes the app, before the window is
+	// there, what they hand the main thread waits in early.
+	winMu    sync.Mutex
+	starting bool
+	early    []func()
 
 	settings store.Settings
 	session  store.Session
@@ -239,10 +245,12 @@ type pageState struct {
 	tinted map[string]bool
 	// scroll is where the page is scrolled to, and viewTop where its
 	// scroll area starts in the window. scrollTo is a block to bring to
-	// the top of it once the page has laid it out.
-	scroll   ui.ScrollState
-	viewTop  float32
-	scrollTo string
+	// the top of it once the page has laid it out, scrollWait the frames
+	// it has waited for that.
+	scroll     ui.ScrollState
+	viewTop    float32
+	scrollTo   string
+	scrollWait int
 	// fullDiagram is the diagram block filling the page's body, if one
 	// is.
 	fullDiagram string
@@ -291,6 +299,9 @@ func DataDir() string {
 }
 
 func (a *App) start() error {
+	a.winMu.Lock()
+	a.starting = true
+	a.winMu.Unlock()
 	st, err := store.Open(DataDir())
 	if err != nil {
 		return err
@@ -377,7 +388,7 @@ func (a *App) start() error {
 		})
 	})
 	a.startReminders()
-	a.win = mygo.NewWindow(mygo.WindowOptions{
+	win := mygo.NewWindow(mygo.WindowOptions{
 		Title:         "Leaflet",
 		Width:         1240,
 		Height:        820,
@@ -392,6 +403,13 @@ func (a *App) start() error {
 		Vibrancy:             mygo.VibrancySidebar,
 		Content:              ui.View(a.view),
 	})
+	a.winMu.Lock()
+	a.win, a.starting = win, false
+	for _, fn := range a.early {
+		win.Update(fn)
+	}
+	a.early = nil
+	a.winMu.Unlock()
 	a.startTray()
 	a.win.OnClose(func(e *mygo.CloseEvent) {
 		saved := a.flush()
@@ -436,9 +454,18 @@ func (a *App) start() error {
 	return nil
 }
 
-// update runs fn on the main thread and redraws.
+// update runs fn on the main thread and redraws; while the app starts,
+// once its window is there.
 func (a *App) update(fn func()) {
-	if a.win == nil {
+	a.winMu.Lock()
+	w := a.win
+	if w == nil && a.starting {
+		a.early = append(a.early, fn)
+		a.winMu.Unlock()
+		return
+	}
+	a.winMu.Unlock()
+	if w == nil {
 		if a.post != nil {
 			a.post(fn)
 			return
@@ -446,7 +473,7 @@ func (a *App) update(fn func()) {
 		fn()
 		return
 	}
-	a.win.Update(fn)
+	w.Update(fn)
 }
 
 func (a *App) applyTheme() {
@@ -553,23 +580,34 @@ func (a *App) pageByID(id string) *store.Page {
 }
 
 // children returns the pages under a parent, or the top-level pages of a
-// folder ("" for none) when parent is "".
+// folder ("" for none) when parent is "": pages of a folder that is gone
+// are at the top level, and those shared with the user among
+// sharedRoots instead.
 func (a *App) children(parent, folder string, top bool) []store.Page {
 	var out []store.Page
 	for _, p := range a.pages {
 		if p.ParentID != parent {
 			continue
 		}
-		if top && p.FolderID != folder {
+		if top && a.liveFolder(p.FolderID) != folder {
 			continue
 		}
-		if parent == "" && p.SpaceID != a.session.SpaceID && !a.isShared(p) {
+		if parent == "" && a.isShared(p) {
 			continue
 		}
 		out = append(out, p)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].SortKey < out[j].SortKey })
 	return out
+}
+
+// liveFolder is folder, or "" when no folder of that ID is there, as when
+// another device deleted it.
+func (a *App) liveFolder(folder string) string {
+	if folder == "" || slices.ContainsFunc(a.folders, func(f store.Folder) bool { return f.ID == folder }) {
+		return folder
+	}
+	return ""
 }
 
 // isShared reports whether a page belongs to someone else's space.

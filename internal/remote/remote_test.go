@@ -199,6 +199,34 @@ func TestStorageTransfersOutlastTheCallTimeout(t *testing.T) {
 	}
 }
 
+// A function that works a while before it answers, as transcribing does,
+// is waited for past the other calls' timeout and the long client's wait
+// for an answer, as long as ctx lets it.
+func TestInvokeLongOutlastsTheCallTimeout(t *testing.T) {
+	was := longHeaderWait
+	longHeaderWait = 100 * time.Millisecond
+	t.Cleanup(func() { longHeaderWait = was })
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond)
+		_, _ = io.WriteString(w, `{"segments": []}`)
+	}))
+	t.Cleanup(hs.Close)
+	c := SignedInForTest(hs.URL, nil, "u1")
+	c.http.Timeout = 100 * time.Millisecond
+	if _, err := c.Invoke(context.Background(), "stt", map[string]any{}); err == nil {
+		t.Error("Invoke outlasted its timeout")
+	}
+	res, err := c.InvokeLong(context.Background(), "stt", map[string]any{})
+	if _, ok := res["segments"]; err != nil || !ok {
+		t.Errorf("res %v, %v", res, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := c.InvokeLong(ctx, "stt", map[string]any{}); err == nil {
+		t.Error("InvokeLong outlasted its ctx")
+	}
+}
+
 // A session's expiry goes by how long the server says it lasts, from when
 // it came by this device's clock, not by the server's clock.
 func TestExpiryByThisDevicesClock(t *testing.T) {

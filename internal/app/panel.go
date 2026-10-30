@@ -290,7 +290,7 @@ var replies = map[string]*threadDraft{}
 func (a *App) commentsPanel(c *ui.Context) {
 	pal := theme.Of(c)
 	ps := a.page
-	showResolved := a.dialogs.commentFocus == "resolved"
+	showResolved := a.dialogs.showResolved
 	ui.Scroll(c.Key("comments:" + ps.id)).Grow(1).Padding(12).Children(func() {
 		ui.Column(c).Gap(10).Children(func() {
 			if nc := a.dialogs.newComment; nc != nil {
@@ -324,11 +324,7 @@ func (a *App) commentsPanel(c *ui.Context) {
 					label = locales.PanelHideResolved()
 				}
 				if ghost(c, "toggle-resolved", "", label).Clicked() {
-					if showResolved {
-						a.dialogs.commentFocus = ""
-					} else {
-						a.dialogs.commentFocus = "resolved"
-					}
+					a.dialogs.showResolved = !showResolved
 				}
 			}
 		})
@@ -680,13 +676,29 @@ func (a *App) commentText(c *ui.Context, body string) ui.Element {
 // them, outside code, where they stay as written: fenced code blocks,
 // indented ones, and code spans.
 func markMentions(md string, names []string) string {
+	return scanMentions(md, names, func(m string) string { return "<mark><b>" + m + "</b></mark>" })
+}
+
+// mentioned is which of names md mentions where markMentions marks them,
+// in lower case.
+func mentioned(md string, names []string) map[string]bool {
+	out := map[string]bool{}
+	scanMentions(md, names, func(m string) string {
+		out[strings.ToLower(m[1:])] = true
+		return m
+	})
+	return out
+}
+
+// scanMentions is md with each mention markMentions marks as mark has it.
+func scanMentions(md string, names []string, mark func(mention string) string) string {
 	names = slices.Clone(names)
 	slices.SortFunc(names, func(x, y string) int { return len(y) - len(x) })
 	var b, para strings.Builder
 	// A paragraph's lines are marked together, for a code span may go
 	// over more than one of them.
 	flush := func() {
-		b.WriteString(markInline(para.String(), names))
+		b.WriteString(markInline(para.String(), names, mark))
 		para.Reset()
 	}
 	fence := ""
@@ -727,7 +739,7 @@ func markMentions(md string, names []string) string {
 // markInline marks the mentions in a paragraph, outside its code spans; a
 // backslash keeps the character after it, a backtick too, from starting
 // one.
-func markInline(s string, names []string) string {
+func markInline(s string, names []string, mark func(string) string) string {
 	var b strings.Builder
 	for i := 0; i < len(s); i++ {
 		ch := s[i]
@@ -749,7 +761,7 @@ func markInline(s string, names []string) string {
 			continue
 		case ch == '@' && (i == 0 || s[i-1] == ' ' || s[i-1] == '\n' || s[i-1] == '\t'):
 			if n := mentionLen(s[i+1:], names); n > 0 {
-				b.WriteString("<mark><b>" + s[i:i+1+n] + "</b></mark>")
+				b.WriteString(mark(s[i : i+1+n]))
 				i += n
 				continue
 			}
@@ -859,12 +871,16 @@ func (a *App) askedBy(cm store.Comment) string {
 }
 
 // agentInComment runs an agent mentioned in a comment on the thread's
-// block; its answer is posted in the thread.
+// block, where the comment shows it marked; its answer is posted in the
+// thread.
 func (a *App) agentInComment(root store.Comment, body string) {
-	lower := strings.ToLower(body)
+	names := []string{"agent"}
 	for _, o := range a.hub.Options() {
-		name := "@" + strings.ToLower(o.Name())
-		if strings.Contains(lower, name) || strings.Contains(lower, "@agent") {
+		names = append(names, o.Name())
+	}
+	hit := mentioned(body, names)
+	for _, o := range a.hub.Options() {
+		if hit[strings.ToLower(o.Name())] || hit["agent"] {
 			ch := o.Choice()
 			a.hub.Start(a.page.id, agents.RunOptions{
 				Surface: "comment", Instruction: body, Focus: []string{root.BlockID}, Selection: root.Quote,

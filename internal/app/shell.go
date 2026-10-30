@@ -91,6 +91,7 @@ func (a *App) view(c *ui.Context) {
 	if a.settingsOpen {
 		a.settingsDialog(c)
 	}
+	a.keepName()
 	a.toastView(c)
 }
 

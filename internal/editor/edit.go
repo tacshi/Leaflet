@@ -312,6 +312,9 @@ func (e *Editor) Enter() {
 			p.Set("checked", false)
 		}
 		_ = e.Content.Insert(doc.Position{Before: n.ID}, p)
+		// Before a heading that ends a folded section, the new line
+		// would join it, out of sight.
+		e.keepShown(p.ID)
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
 		e.changed()
 		return
@@ -721,6 +724,9 @@ func (e *Editor) InsertBlocks(nodes ...*doc.Node) {
 	if replace {
 		e.Content.Remove(n.ID)
 	}
+	// After a folded heading, the blocks would go in its section, out of
+	// sight: it shows, as for Enter's new line.
+	e.keepShown(nodes[0].ID)
 	last := nodes[len(nodes)-1]
 	if !last.IsText() {
 		// Leave somewhere to type after a block selected whole at the end
@@ -776,6 +782,7 @@ func (e *Editor) LinkToMedia(p Pos) {
 	rest := string(text[:from]) + string(text[to:])
 	e.pushUndo(false)
 	_ = e.Content.Insert(doc.Position{After: n.ID}, m)
+	e.keepShown(m.ID)
 	if !strings.ContainsFunc(rest, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) && len(n.Children) == 0 {
 		e.Content.Remove(n.ID)
 	}

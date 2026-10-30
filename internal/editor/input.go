@@ -93,6 +93,11 @@ func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 			n.SetDelta(n.Delta().Delete(from, to))
 			e.focus, e.anchor = Pos{n.ID, from}, Pos{n.ID, from}
 		}
+		if wasMarked && e.markStep {
+			// The composition is out again, so its step changes nothing:
+			// Enter makes its own.
+			e.dropStep()
+		}
 		e.Enter()
 		return
 	}
@@ -547,7 +552,10 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 			}
 		}
 		if ev.Mods&ui.Cmd != 0 {
-			if url := e.linkAtPos(p); url != "" {
+			// Only a web or mail link opens: a file, an app or another
+			// scheme, as a shared page or an agent can write one, would
+			// launch what it names.
+			if url := doc.SafeHref(e.linkAtPos(p)); url != "" {
 				e.services.OpenURL(url)
 				return true
 			}

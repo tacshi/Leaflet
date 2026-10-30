@@ -65,11 +65,16 @@ func (a *App) writeExport(file string, allFolders []store.Folder, allFiles []sto
 		return 0, err
 	}
 	localPath, readFile := ownFiles(a.st.Dir, allFiles)
-	if err := exportZip(f, pages, folders, a.st.Content, localPath, readFile); err != nil {
-		_ = f.Close()
+	err = exportZip(f, pages, folders, a.st.Content, localPath, readFile)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	// A zip cut short is no export: it goes.
+	if err != nil {
+		_ = os.Remove(file)
 		return 0, err
 	}
-	return missing, f.Close()
+	return missing, nil
 }
 
 // ownFiles returns where each of files is on this device ("" when it is

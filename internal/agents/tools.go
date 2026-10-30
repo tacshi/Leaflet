@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -228,42 +229,57 @@ type Executor struct {
 	// seen are the URLs the agent has seen since it first read another
 	// page, nil before (fetchedURLs).
 	seen map[string]bool
+	// start are the URLs on this page when the run began, nil before its
+	// first call: what the run wrote since could carry what it read.
+	start map[string]bool
+	// created are the pages this run made, whose URLs are its own too.
+	created map[string]bool
 }
 
 // fetchedURLs are the URLs of the blocks the app loads by itself, as it
 // shows them: an image, a video, a link card. An agent that has read
 // another of the user's pages could write what it read into one, such as
 // https://example.com/x.png?notes=…, and the app would send it to that
-// server without anyone clicking. So once a run reads another page, a
-// block it writes may load only a URL it saw: one on this page then, or
-// on a page it read. Links in text are not loaded, so they stay free.
+// server without anyone clicking. So once a run reads another page, or
+// lists them, a block it writes may load only a URL it saw: one on this
+// page as the run began, or on a page it read that it did not make. Links
+// in text are not loaded, so they stay free.
 var fetchedURLs = map[string]bool{"image": true, "video": true, "link_preview": true}
 
 // urlRe finds the URLs in text the agent read.
 var urlRe = regexp.MustCompile(`https?://[^\s<>"'()\[\]]+`)
 
-// see adds the URLs in v, what the agent read, to x.seen.
-func (x *Executor) see(v any) {
+// see adds the URLs in v, what the agent read, to set.
+func see(set map[string]bool, v any) {
 	switch v := v.(type) {
 	case string:
 		if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
-			x.seen[v] = true
+			set[v] = true
 		}
 		for _, u := range urlRe.FindAllString(v, -1) {
-			x.seen[u] = true
+			set[u] = true
 		}
 	case map[string]any:
 		for _, e := range v {
-			x.see(e)
+			see(set, e)
 		}
 	case []map[string]any:
 		for _, e := range v {
-			x.see(e)
+			see(set, e)
 		}
 	case []any:
 		for _, e := range v {
-			x.see(e)
+			see(set, e)
 		}
+	}
+}
+
+// arm starts checking URLs, as the agent first reads beyond this page: it
+// may then use those on this page as the run found it.
+func (x *Executor) arm() {
+	if x.seen == nil {
+		x.seen = map[string]bool{}
+		maps.Copy(x.seen, x.start)
 	}
 }
 
@@ -321,6 +337,10 @@ func terr(format string, args ...any) error {
 }
 
 func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, error) {
+	if x.start == nil && (x.Ctx.ListPages != nil || x.Ctx.ReadOtherPage != nil) {
+		x.start = map[string]bool{}
+		see(x.start, doc.BlockViews(x.Ctx.Content))
+	}
 	switch name {
 	case "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_subpage":
 		if x.Ctx.ReadOnly {
@@ -344,6 +364,8 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		if x.Ctx.ListPages == nil {
 			return nil, terr("Reading other pages is off.")
 		}
+		// The titles it lists are read too.
+		x.arm()
 		return map[string]any{"pages": x.Ctx.ListPages()}, nil
 	case "read_other_page":
 		if x.Ctx.ReadOtherPage == nil {
@@ -357,11 +379,12 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		if p == nil {
 			return nil, terr("No page %s.", id)
 		}
-		if x.seen == nil {
-			x.seen = map[string]bool{}
-			x.see(doc.BlockViews(x.Ctx.Content))
+		x.arm()
+		// This page and those the run made hold what it wrote, not what
+		// was there: their URLs stay unseen.
+		if id != x.Ctx.PageID && !x.created[id] {
+			see(x.seen, p)
 		}
-		x.see(p)
 		return p, nil
 	}
 	return nil, terr("Unknown tool %q.", name)
@@ -517,11 +540,12 @@ func (x *Executor) replace(args map[string]any) (map[string]any, error) {
 	if err := x.checkURLs([]*doc.Node{n}); err != nil {
 		return nil, err
 	}
-	// A block written without children keeps the nested items it had, as
-	// the server's replace does. It is the spec that says so, not the
-	// node: a table's children are its cells, which no other type keeps,
-	// so a new table has children of its own and still drops the items.
-	if len(prev.Children) > 0 && spec["children"] == nil && prev.Type != "table" {
+	// A block written without children, or with none, keeps the nested
+	// items it had, as the server's replace does. It is the spec that says
+	// so, not the node: a table's children are its cells, which no other
+	// type keeps, so a new table has children of its own and still drops
+	// the items.
+	if kids, _ := spec["children"].([]any); len(prev.Children) > 0 && len(kids) == 0 && prev.Type != "table" {
 		if doc.NestableTypes[n.Type] {
 			for _, k := range prev.Children {
 				n.Children = append(n.Children, k.Clone())
@@ -621,6 +645,10 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if x.created == nil {
+		x.created = map[string]bool{}
+	}
+	x.created[id] = true
 	op := doc.Op{Op: "create_page", Page: &doc.NewPage{ID: id, ParentID: x.Ctx.PageID, Title: title}}
 	summary := "Created subpage “" + title + "”"
 	x.Ops = append(x.Ops, op)

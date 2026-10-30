@@ -144,7 +144,7 @@ func (a *App) tree(c *ui.Context) {
 	}
 	// Files of a folder that was deleted are at the top level.
 	for _, f := range a.files {
-		if f.FolderID == "" && f.PageID == "" {
+		if a.liveFolder(f.FolderID) == "" && f.PageID == "" {
 			roots = append(roots, "file:"+f.ID)
 		}
 	}
@@ -389,7 +389,8 @@ type treeRow struct {
 // folder's row does. Below the last page among its siblings, x left of
 // the content puts it after a page above instead, a level out for each
 // indent; out says how many. A page cannot go inside itself, or into
-// another space.
+// another space, nor beside a page at the top level unless it may go
+// there, as a page shared with the user may not.
 func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (at int, target string, out int, ok bool) {
 	kind, id, _ := strings.Cut(key, ":")
 	p := a.pageByID(d.id)
@@ -403,9 +404,10 @@ func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (
 	if t == nil || t.SpaceID != p.SpaceID || id != d.id && a.st.IsDescendant(id, d.id) {
 		return 0, "", 0, false
 	}
+	top := a.canMoveInside(d.id, "")
 	switch {
 	case y < h/4 && id != d.id:
-		return dropBefore, key, 0, true
+		return dropBefore, key, 0, t.ParentID != "" || top
 	case y > h*3/4:
 		indent := a.treeIndent(c)
 		for levels := int(-x/indent) + 1; x < 0 && levels > 0 && t.ParentID != "" && a.lastSibling(t, d.id); levels-- {
@@ -413,7 +415,10 @@ func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (
 				return 0, "", 0, false
 			}
 		}
-		return dropAfter, "page:" + t.ID, out, t.ID != d.id
+		// After a page showing its subpages is before the first of them.
+		key = "page:" + t.ID
+		first := out == 0 && a.treeState.Open.Has(key) && len(a.children(t.ID, "", false)) > 0
+		return dropAfter, key, out, t.ID != d.id && (t.ParentID != "" || top || first && a.canMoveInside(d.id, key))
 	case id != d.id:
 		return dropInside, key, 0, a.canMoveInside(d.id, key)
 	}
@@ -552,7 +557,7 @@ func dropLine(p *ui.Painter, x, y, right float32, pal *theme.Palette) {
 // lastSibling reports whether page p is the last of its siblings, but
 // page skip, unless that is p.
 func (a *App) lastSibling(p *store.Page, skip string) bool {
-	siblings := a.children(p.ParentID, p.FolderID, p.ParentID == "")
+	siblings := a.children(p.ParentID, a.liveFolder(p.FolderID), p.ParentID == "")
 	for k := len(siblings) - 1; k >= 0; k-- {
 		if siblings[k].ID != skip || skip == p.ID {
 			return siblings[k].ID == p.ID
@@ -597,11 +602,12 @@ func (a *App) dropPage(id, key string, at int, out bool) {
 }
 
 // pageMenu is a page's actions, in the sidebar and the page's header;
-// the header's leaves out Share, whose button is beside it. Share and
-// Keep on this device need a server to share and sync with.
+// the header's leaves out Share, whose button is beside it, and the
+// sidebar's Add subpage, its rows' + button. Share and Keep on this
+// device need a server to share and sync with.
 func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 	editable := a.canEdit(p.ID)
-	if m.Item(locales.SidebarAddSubpage()).Disabled(!editable).Chosen() {
+	if header && m.Item(locales.SidebarAddSubpage()).Disabled(!editable).Chosen() {
 		a.newPage(p.ID, "")
 	}
 	if !p.Template {

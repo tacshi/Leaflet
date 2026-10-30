@@ -145,3 +145,15 @@ func TestAddFilesOffTheMainThread(t *testing.T) {
 		t.Errorf("added %v", got)
 	}
 }
+
+// While the app starts, before its window is there, what other goroutines
+// hand the main thread waits for the window.
+func TestUpdatesWaitForTheWindow(t *testing.T) {
+	a := templatesApp(t)
+	a.starting = true
+	ran := false
+	a.update(func() { ran = true })
+	if ran || len(a.early) != 1 {
+		t.Errorf("ran %v, %d waiting", ran, len(a.early))
+	}
+}

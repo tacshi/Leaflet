@@ -219,8 +219,9 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
   of a page that its History shows, the newest 50 and every named
   (`manual`) one, and removes the others as it takes a new one, with any of
   them still waiting to go up. The server keeps each writer's newest 50
-  unnamed snapshots of a page and all its named ones: a trigger prunes as
-  each is inserted, only among the inserting writer's own, so one editor's
+  unnamed snapshots of a page, and of its named ones all of the page
+  owner's and each other writer's newest 50: a trigger prunes as each is
+  inserted, only among the inserting writer's own, so one editor's
   snapshots never push out anyone else's.
 - Deleting a file cannot be undone, so its bytes go with it. The deleting
   device removes its own copy (only one the app made in its data folder,
@@ -259,23 +260,36 @@ accepted rows. The person invited reads their own rows, pending or not, and
 the space owner reads a page's accepted ones; only the person invited sets
 `accepted_at`, through `accept_page_invite` (a trigger keeps it otherwise).
 Clients never insert or update `page_permissions` rows: shares are made and
-changed through `share_page`; the owner may delete them, as `unshare_page`
-does. Shares and invites go only to an account that has confirmed the
-address, so the project must require email confirmation (see
-`supabase/README.md`).
+changed through `share_page`. The owner may delete the accepted ones, the
+ones they read; a share or invite still waiting is withdrawn only through
+`unshare_page`. Shares and invites go only to an account that has
+confirmed the address, so the project must require email confirmation
+(see `supabase/README.md`).
 `page_history` is the owner's to read in full; anyone else reads the
 snapshots taken from when they accepted a share of the page, or of a page
-it is inside, on. A snapshot's `created_at` is never later than when it
-reached the server; each writer keeps their newest 50 unnamed snapshots of
-a page, and each writer but the page's owner their newest 50 named
-(`manual`) ones.
+it is inside, on, and of a page under the shared one, no earlier than
+when it came under it: the latest `pages.placed_at` of the page and of
+each page between it and the shared one. `placed_at` is when a page was
+put under its parent (when it was made, if it never moved; for a page
+made before migration 20261031000000, when that ran). The server sets
+`placed_at`, and keeps `pages.created_by` as the page was made: a client's
+value for either is ignored on update. A snapshot's `created_at` is never
+later than when it reached the server; each writer keeps their newest 50
+unnamed snapshots of a page, and each writer but the page's owner their
+newest 50 named (`manual`) ones.
 Moving a page under a new parent requires edit access to both, and anyone
 but the space owner moves a page only between parents that the same shares
 reach (`forbidden_move` otherwise), so a move never shows a page to people
 it was not shared with. A recording stays on its page: an update that
-changes `recordings.page_id` is refused. A comment is emptied as it is
-deleted: once `deleted_at` is set, `body` is empty, `quote` null and
-`mentions` empty.
+changes `recordings.page_id` is refused. A `files` row is its space owner's
+to write; its `folder_id` is a folder of its space (`folder_in_other_space`
+otherwise), and its `page_id`, as it is set, a page of its space or one
+its writer can edit, as an editor's upload to a page shared with them is
+(`forbidden_file_page` otherwise). A comment with `author_kind` `guest`,
+which a public link's visitor posts through the owner's device, is
+inserted only by the page's owner (`guest_comment_not_owner` otherwise).
+A comment is emptied as it is deleted: once `deleted_at` is set, `body` is
+empty, `quote` null and `mentions` empty.
 `pages.is_template` marks a template and every subpage of one (a subpage
 made under a template is one too); templates stay out of the page list,
 search and `list_pages`. `pages.tags` is a page's tags (`text[]`, at most 50,

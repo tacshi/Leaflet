@@ -36,7 +36,7 @@ func TestSonioxGetsTheOpeningAudio(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return &Soniox{conn: conn, done: make(chan struct{})}
+		return newSoniox(conn)
 	}
 
 	wav, err := CreateWav(filepath.Join(t.TempDir(), "a.wav"))
@@ -236,5 +236,70 @@ func TestSonioxSendsNothingAfterFinish(t *testing.T) {
 	case got := <-heard:
 		t.Errorf("heard %v after the end", got)
 	default:
+	}
+}
+
+// Sending audio does not wait for the network: a write that stalls, as
+// over a slow connection, holds up neither the chunks nor the WAV file
+// they go to; what was queued goes after, in order.
+func TestSonioxSendDoesNotWaitForTheNetwork(t *testing.T) {
+	heard := make(chan []byte, 10)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		c, err := websocket.Accept(w, req, nil)
+		if err != nil {
+			return
+		}
+		for {
+			_, data, err := c.Read(context.Background())
+			if err != nil {
+				return
+			}
+			heard <- data
+		}
+	}))
+	defer srv.Close()
+	conn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newSoniox(conn)
+	defer s.Close()
+	// A write under way holds the writes up.
+	s.wmu.Lock()
+	sent := make(chan struct{})
+	go func() {
+		s.Send([]byte{1})
+		s.Send([]byte{2})
+		close(sent)
+	}()
+	select {
+	case <-sent:
+	case <-time.After(time.Second):
+		t.Fatal("Send waited for the write")
+	}
+	s.wmu.Unlock()
+	for _, want := range [][]byte{{1}, {2}} {
+		select {
+		case got := <-heard:
+			if !bytes.Equal(got, want) {
+				t.Fatalf("heard %v, want %v", got, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("never heard %v", want)
+		}
+	}
+}
+
+// A microphone that fails late, for a recording stopped since, leaves the
+// next recording starting; one that fails for this one ends it.
+func TestFailedForAnotherRecordingIsIgnored(t *testing.T) {
+	r := &Controller{update: func(fn func()) { fn() }, session: "s2", State: State{Starting: true}}
+	r.failed("s1", "denied")
+	if !r.State.Starting || r.State.Error != "" {
+		t.Errorf("another session's microphone ended this one: %+v", r.State)
+	}
+	r.failed("s2", "denied")
+	if r.State.Starting || r.State.Error == "" {
+		t.Errorf("not ended: %+v", r.State)
 	}
 }

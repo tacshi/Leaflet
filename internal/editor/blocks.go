@@ -15,19 +15,16 @@ import (
 )
 
 func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
-	rows, cols := n.Int("rowsLen", 0), n.Int("colsLen", 0)
 	// A size from another client, negative or huge, draws only the cells
-	// the table has.
-	const most = 1 << 16
-	if rows < 0 || cols < 0 || rows > most || cols > most || rows*cols > most {
-		rows, cols = doc.TableSize(n)
-	}
+	// the table has; the same goes for the rows and columns added or
+	// taken away.
+	rows, cols := doc.TableSize(n)
 	if rows == 0 || cols == 0 {
 		return
 	}
 	if e.cellMove != 0 && strings.HasPrefix(e.cellEdit, n.ID+":") {
 		e.moveCell(n)
-		rows = n.Int("rowsLen", 0)
+		rows, cols = doc.TableSize(n)
 	}
 	colW := max((e.width-float32(e.depth(n.ID))*indentStep-2)/float32(cols), 80)
 	wrap := ui.Column(c.Key("table:" + n.ID)).Gap(6)
@@ -106,7 +103,7 @@ func (e *Editor) moveCell(n *doc.Node) {
 	if _, err := fmt.Sscanf(strings.TrimPrefix(e.cellEdit, n.ID+":"), "%d:%d", &r, &col); err != nil {
 		return
 	}
-	rows, cols := n.Int("rowsLen", 0), n.Int("colsLen", 0)
+	rows, cols := doc.TableSize(n)
 	switch move {
 	case cellNext:
 		if col++; col == cols {
@@ -257,7 +254,7 @@ func (e *Editor) cellTools(c *ui.Context, in ui.Element, table, text string, fro
 }
 
 func addTableRow(n *doc.Node) {
-	rows, cols := n.Int("rowsLen", 0), n.Int("colsLen", 0)
+	rows, cols := doc.TableSize(n)
 	for col := 0; col < cols; col++ {
 		n.Children = append(n.Children, &doc.Node{ID: doc.NewBlockID(), Type: "table/cell",
 			Data: map[string]any{"colPosition": col, "rowPosition": rows}, Children: []*doc.Node{newText("paragraph", nil)}})
@@ -267,7 +264,7 @@ func addTableRow(n *doc.Node) {
 }
 
 func addTableColumn(n *doc.Node) {
-	rows, cols := n.Int("rowsLen", 0), n.Int("colsLen", 0)
+	rows, cols := doc.TableSize(n)
 	for r := 0; r < rows; r++ {
 		n.Children = append(n.Children, &doc.Node{ID: doc.NewBlockID(), Type: "table/cell",
 			Data: map[string]any{"colPosition": cols, "rowPosition": r}, Children: []*doc.Node{newText("paragraph", nil)}})
@@ -277,7 +274,7 @@ func addTableColumn(n *doc.Node) {
 }
 
 func removeTableRow(n *doc.Node) {
-	rows := n.Int("rowsLen", 0)
+	rows, _ := doc.TableSize(n)
 	var kept []*doc.Node
 	for _, cell := range n.Children {
 		if cell.Int("rowPosition", 0) != rows-1 {
@@ -289,7 +286,7 @@ func removeTableRow(n *doc.Node) {
 }
 
 func removeTableColumn(n *doc.Node) {
-	cols := n.Int("colsLen", 0)
+	_, cols := doc.TableSize(n)
 	var kept []*doc.Node
 	for _, cell := range n.Children {
 		if cell.Int("colPosition", 0) != cols-1 {

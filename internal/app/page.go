@@ -107,6 +107,7 @@ func (a *App) pageView(c *ui.Context) {
 					ps.editor.View(c)
 					a.dropVideos()
 					a.dropEmbeds()
+					a.dropGonePlayers()
 					if a.isEmpty() && !ps.editor.ReadOnly && a.dialogs.inline == nil {
 						a.emptyActions(c)
 					}
@@ -356,21 +357,28 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-func humanTime(t time.Time) string {
+func humanTime(t time.Time) string { return humanTimeAt(t, time.Now()) }
+
+// humanTimeAt is humanTime at now: today and yesterday are days of the
+// calendar, here.
+func humanTimeAt(t, now time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	d := time.Since(t)
+	d := now.Sub(t)
+	t, now = t.Local(), now.Local()
+	y, m, day := now.Date()
+	today := time.Date(y, m, day, 0, 0, 0, 0, time.Local)
 	switch {
 	case d < time.Minute:
 		return locales.PageTimeJustNow()
 	case d < time.Hour:
 		return locales.PageTimeMinutesAgo(int(d.Minutes()))
-	case d < 24*time.Hour && t.Day() == time.Now().Day():
+	case !t.Before(today):
 		return locales.PageTimeTodayAt(t)
-	case d < 48*time.Hour:
+	case !t.Before(today.AddDate(0, 0, -1)):
 		return locales.PageTimeYesterdayAt(t)
-	case t.Year() == time.Now().Year():
+	case t.Year() == now.Year():
 		return locales.PageTimeDate(t)
 	}
 	return locales.PageTimeDateYear(t)

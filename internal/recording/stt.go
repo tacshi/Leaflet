@@ -72,7 +72,7 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, 
 	if err := w.Close(); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, transcribeWait(len(wav)))
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", agents.NormalizeBaseURL(baseURL)+"/audio/transcriptions", &body)
 	if err != nil {
@@ -120,6 +120,13 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, 
 		segs = []store.Segment{{EndMs: int(out.Duration * 1000), Text: strings.TrimSpace(out.Text)}}
 	}
 	return segs, nil
+}
+
+// transcribeWait is how long an endpoint gets to transcribe size bytes of
+// the app's WAV (2 bytes a sample): five minutes, and twice the audio's
+// length more, as a server on a CPU can take longer than the audio lasts.
+func transcribeWait(size int) time.Duration {
+	return 5*time.Minute + 2*time.Duration(size/(2*SampleRate))*time.Second
 }
 
 // TestSonioxKey checks a Soniox API key against Soniox's API.
@@ -194,6 +201,13 @@ type Soniox struct {
 	// wmu orders the writes, so no audio follows the end of it that
 	// Finish sends.
 	wmu sync.Mutex
+	// queue is the audio write sends, in order, so a slow connection does
+	// not hold up the recording; qmu guards closing it, once Finish or
+	// Close ends it, and written closes when write is done.
+	queue   chan []byte
+	qmu     sync.Mutex
+	qclosed bool
+	written chan struct{}
 	// OnText runs with the live text: final words and the current draft.
 	OnText func(string)
 }
@@ -221,18 +235,60 @@ func DialSoniox(ctx context.Context, apiKey, model string, hints []string, speak
 	return newSoniox(conn), nil
 }
 
-// newSoniox reads and keeps alive a stream that has its configuration.
+// maxQueued is the most audio waiting to go to a slow stream: 30 s of the
+// capture page's 50 ms chunks.
+const maxQueued = 600
+
+// errBehind is a stream that could not keep up with the audio.
+var errBehind = errors.New("the connection could not keep up")
+
+// newSoniox reads, writes and keeps alive a stream that has its
+// configuration.
 func newSoniox(conn *websocket.Conn) *Soniox {
-	s := &Soniox{conn: conn, done: make(chan struct{})}
+	s := &Soniox{conn: conn, done: make(chan struct{}), queue: make(chan []byte, maxQueued), written: make(chan struct{})}
 	s.sent.Store(time.Now().UnixMilli())
 	go s.read()
-	go s.keepAlive()
+	go s.write()
+	// Read here, so a test that changes it races no stream of another.
+	go s.keepAlive(keepAliveAfter)
 	return s
 }
 
+// write sends the queued audio until the queue closes; once the stream is
+// ending it sends no more.
+func (s *Soniox) write() {
+	defer close(s.written)
+	for pcm := range s.queue {
+		s.wmu.Lock()
+		if s.ending.Load() {
+			s.wmu.Unlock()
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := s.conn.Write(ctx, websocket.MessageBinary, pcm)
+		cancel()
+		s.wmu.Unlock()
+		if err != nil {
+			s.lose(err)
+			continue
+		}
+		s.sent.Store(time.Now().UnixMilli())
+	}
+}
+
+// endQueue closes the queue, once.
+func (s *Soniox) endQueue() {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	if !s.qclosed {
+		s.qclosed = true
+		close(s.queue)
+	}
+}
+
 // keepAlive keeps a stream that gets no audio open, until it ends.
-func (s *Soniox) keepAlive() {
-	tick := time.NewTicker(min(time.Second, keepAliveAfter/2))
+func (s *Soniox) keepAlive(after time.Duration) {
+	tick := time.NewTicker(min(time.Second, after/2))
 	defer tick.Stop()
 	for {
 		select {
@@ -241,7 +297,7 @@ func (s *Soniox) keepAlive() {
 		case <-tick.C:
 		}
 		s.wmu.Lock()
-		if s.ending.Load() || time.Since(time.UnixMilli(s.sent.Load())) < keepAliveAfter {
+		if s.ending.Load() || time.Since(time.UnixMilli(s.sent.Load())) < after {
 			s.wmu.Unlock()
 			continue
 		}
@@ -333,30 +389,36 @@ func (s *Soniox) textLocked() string {
 	return b.String()
 }
 
-// Send streams PCM16 audio; once the stream is ending it sends nothing.
+// Send queues PCM16 audio to stream, without waiting for it to go; once
+// the stream is ending it sends nothing.
 func (s *Soniox) Send(pcm []byte) {
-	s.wmu.Lock()
-	defer s.wmu.Unlock()
-	if s.ending.Load() {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	if s.qclosed || s.ending.Load() {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := s.conn.Write(ctx, websocket.MessageBinary, pcm); err != nil {
-		s.lose(err)
-		return
+	select {
+	case s.queue <- pcm:
+	default:
+		s.lose(errBehind)
 	}
-	s.sent.Store(time.Now().UnixMilli())
 }
 
 // Close drops the stream, for a recording that needs it no more.
 func (s *Soniox) Close() {
 	s.ending.Store(true)
+	s.endQueue()
 	_ = s.conn.Close(websocket.StatusNormalClosure, "")
 }
 
 // Finish ends the stream and waits for the last final words.
 func (s *Soniox) Finish() ([]store.Segment, error) {
+	// The audio queued goes first, as long as the connection takes it.
+	s.endQueue()
+	select {
+	case <-s.written:
+	case <-time.After(15 * time.Second):
+	}
 	s.wmu.Lock()
 	s.ending.Store(true)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

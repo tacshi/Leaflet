@@ -116,9 +116,29 @@ func (c *Content) Apply(o Op) error {
 		if o.Position != nil {
 			p = *o.Position
 		}
-		nodes := make([]*Node, len(o.Nodes))
-		for i, n := range o.Nodes {
-			nodes[i] = n.Clone()
+		// Blocks the page has already, as when an undo run puts back what
+		// an undo or a merge brought back first, stay as they are; an
+		// anchor gone since, as a neighbour deleted after the op, leaves
+		// the blocks at the end of the page rather than not at all, and a
+		// parent that is no longer a list has them after it.
+		have := map[string]bool{}
+		c.Walk(func(n, _ *Node) { have[n.ID] = true })
+		var nodes []*Node
+		for _, n := range o.Nodes {
+			if k := withoutPresent(n.Clone(), have); k != nil {
+				nodes = append(nodes, k)
+			}
+		}
+		if len(nodes) == 0 {
+			return nil
+		}
+		if a := p.Anchor(); a != "" {
+			switch at := c.Find(a); {
+			case at == nil:
+				p = Position{At: "end"}
+			case p.Parent != "" && !NestableTypes[at.Type] && !inTable(at):
+				p = Position{After: a}
+			}
 		}
 		return c.Insert(p, nodes...)
 	case "replace":
@@ -148,6 +168,22 @@ func (c *Content) Apply(o Op) error {
 		}
 	}
 	return nil
+}
+
+// withoutPresent returns n without the blocks in it the page has already
+// (have), or nil when n itself is one.
+func withoutPresent(n *Node, have map[string]bool) *Node {
+	if n.ID != "" && have[n.ID] {
+		return nil
+	}
+	var kids []*Node
+	for _, k := range n.Children {
+		if k := withoutPresent(k, have); k != nil {
+			kids = append(kids, k)
+		}
+	}
+	n.Children = kids
+	return n
 }
 
 // Invert returns the ops that undo o, in the order to apply them.

@@ -3,6 +3,7 @@ package sync
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -236,7 +237,10 @@ func (s *Service) hold(entries ...icloud.Entry) error {
 }
 
 // applyHeld applies the entries held for rows whose change has gone since.
+// A row's that do not apply are held again, and the other rows' still
+// apply.
 func (s *Service) applyHeld(changed map[string]bool) error {
+	var failed error
 	for key, raw := range s.st.ValuesWithPrefix(heldPrefix) {
 		table, id, _ := strings.Cut(key, ".")
 		if s.st.HasPending(table, id) {
@@ -245,18 +249,20 @@ func (s *Service) applyHeld(changed map[string]bool) error {
 		var held []icloud.Entry
 		_ = json.Unmarshal([]byte(raw), &held)
 		if err := s.st.DeleteValue(heldPrefix + key); err != nil {
-			return err
+			failed = errors.Join(failed, err)
+			continue
 		}
 		for i, e := range held {
 			if e.Kind != "row" || e.Table != table || e.ID != id || !syncedRows[table] || e.Row == nil {
 				continue
 			}
 			if err := s.applyRow(e, changed); err != nil {
-				return errors.Join(err, s.hold(held[i:]...))
+				failed = errors.Join(failed, fmt.Errorf("%s %s: %w", table, id, err), s.hold(held[i:]...))
+				break
 			}
 		}
 	}
-	return nil
+	return failed
 }
 
 // foldEntry adds an entry of a row to others of the same row, leaving out

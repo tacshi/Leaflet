@@ -302,12 +302,7 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 	service.add(session, &captureSink{
 		chunk:   func(pcm []byte) { r.chunk(session, pcm) },
 		started: func() { r.started(session, testFor) },
-		failed: func(msg string) {
-			r.update(func() {
-				r.State.Error = locales.RecErrMicDetail(msg)
-				r.abort()
-			})
-		},
+		failed:  func(msg string) { r.failed(session, msg) },
 	})
 	// A test has no Stop button, so one whose microphone never starts ends.
 	if testFor > 0 {
@@ -340,6 +335,22 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 	r.view = v
 	r.mu.Unlock()
 	return nil
+}
+
+// failed ends a recording whose microphone could not start, unless it is
+// another's: a page of a recording stopped since can answer late, while
+// the next one starts.
+func (r *Controller) failed(session, msg string) {
+	r.update(func() {
+		r.mu.Lock()
+		same := r.session == session && r.State.Starting
+		r.mu.Unlock()
+		if !same {
+			return
+		}
+		r.State.Error = locales.RecErrMicDetail(msg)
+		r.abort()
+	})
 }
 
 // started is the microphone of the recording session running. A recording
@@ -777,7 +788,11 @@ func (r *Controller) transcribe(rec store.Recording, path string, soniox *Soniox
 	if stt.Language != "auto" && stt.Language != "" {
 		body["language"] = stt.Language
 	}
-	res, err := r.be.Invoke(ctx, "stt", body)
+	// The function fetches the audio, up to 100 MB, and waits on the
+	// provider for up to two minutes: past the other calls' timeout.
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	res, err := r.be.InvokeLong(ctx, "stt", body)
 	if err != nil {
 		return nil, err
 	}

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // A click on a line of a transcript plays the recording from the line,
@@ -82,5 +84,117 @@ func TestClosingPageDropsPlayers(t *testing.T) {
 	a.closePage()
 	if len(players) != 0 {
 		t.Errorf("players kept: %v", players)
+	}
+}
+
+// A recording whose block is deleted, or undone, stops playing.
+func TestDeletedRecordingStopsPlaying(t *testing.T) {
+	a := templatesApp(t)
+	n := &doc.Node{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": "Recording"}}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{n})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	players["r1"], players["r2"] = &player{}, &player{}
+	t.Cleanup(func() { delete(players, "r1"); delete(players, "r2") })
+	a.dropGonePlayers()
+	if players["r1"] == nil || players["r2"] != nil {
+		t.Fatalf("players %v", players)
+	}
+	a.page.editor.Edit(func(c *doc.Content) { c.Children = c.Children[:0] })
+	a.dropGonePlayers()
+	if len(players) != 0 {
+		t.Errorf("players kept: %v", players)
+	}
+}
+
+// Audio that could not load says why.
+func TestPlaybackFailureShows(t *testing.T) {
+	a := templatesApp(t)
+	rec := store.Recording{ID: "r1", PageID: "p", DurationMs: 2000, Status: "ready"}
+	if err := a.st.PutRecording(rec); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { delete(players, rec.ID) })
+	posted := make(chan func(), 1)
+	a.post = func(fn func()) { posted <- fn }
+	a.play(rec)
+	(<-posted)()
+	if len(a.toasts) != 1 || !strings.HasPrefix(a.toasts[0].text, strings.TrimSuffix(locales.RecCouldNotPlay(""), " ")) {
+		t.Errorf("toasts %+v", a.toasts)
+	}
+}
+
+// On a page that can't be changed, a recording's menu only copies its
+// transcript.
+func TestRecordingMenuOnAViewOnlyPage(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	rec := store.Recording{ID: "r1", PageID: "p", DurationMs: 2000, SttProvider: "soniox", Status: "ready",
+		Transcript: []store.Segment{{StartMs: 0, EndMs: 1000, Text: "Hello."}}}
+	if err := a.st.PutRecording(rec); err != nil {
+		t.Fatal(err)
+	}
+	n := &doc.Node{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": rec.ID, "title": "Recording"}}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{n})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.page.editor.ReadOnly = true
+	tt := ui.NewTester(func(c *ui.Context) { a.recordingBlock(c, n) }, 700, 400)
+	tt.Frame()
+	for _, item := range []string{locales.RecInsertTranscript(), locales.RecSummarize(), locales.RecTranscribeAgain()} {
+		if err := tt.Click(locales.RecActions()); err != nil {
+			t.Fatal(err)
+		}
+		if err := tt.ChooseMenuItem(item); err == nil {
+			t.Errorf("%s is offered", item)
+		}
+		tt.CloseMenu()
+	}
+	if err := tt.Click(locales.RecActions()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem(locales.RecCopyTranscript()); err != nil {
+		t.Error(err)
+	}
+}
+
+// Summarize asks the agent in the app's language, in a short message, as
+// the agent reads the transcript with the block.
+func TestSummarizeRecording(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.post = func(func()) {}
+	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+		t.Fatal(err)
+	}
+	rec := store.Recording{ID: "r1", PageID: "p", DurationMs: 2000, SttProvider: "soniox", Status: "ready",
+		Transcript: []store.Segment{{StartMs: 0, EndMs: 1000, Text: "Hello there."}}}
+	if err := a.st.PutRecording(rec); err != nil {
+		t.Fatal(err)
+	}
+	n := &doc.Node{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": rec.ID, "title": "Weekly sync"}}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{n})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	tt := ui.NewTester(func(c *ui.Context) { a.recordingBlock(c, n) }, 700, 400)
+	tt.Frame()
+	if err := tt.Click(locales.RecActions()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem(locales.RecSummarize()); err != nil {
+		t.Fatal(err)
+	}
+	msgs := a.hub.Session(p.ID).Messages
+	if len(msgs) == 0 || msgs[0].Text != locales.RecSummarizePrompt("Weekly sync") {
+		t.Errorf("asked %+v", msgs)
 	}
 }

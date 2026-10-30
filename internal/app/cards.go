@@ -81,13 +81,18 @@ func readLinkInfo(page, src string) linkInfo {
 
 // linkInfoOf asks a page for its info the first time a card shows it, and
 // keeps it in the page's link cards that lack it, for search, exports and
-// other devices. Until the page answers, the info is empty.
+// other devices, though the page has closed by then. Until the page
+// answers, the info is empty.
 func (a *App) linkInfoOf(link string) linkInfo {
 	if info, ok := a.linkInfo[link]; ok {
 		return info
 	}
 	if !a.linkAsked[link] {
 		a.linkAsked[link] = true
+		pageID := ""
+		if a.page != nil {
+			pageID = a.page.id
+		}
 		go func() {
 			var info linkInfo
 			data, err := fetch(link)
@@ -98,29 +103,60 @@ func (a *App) linkInfoOf(link string) linkInfo {
 			}
 			a.update(func() {
 				a.linkInfo[link] = info
-				a.keepLinkInfo(link, info)
+				a.keepLinkInfo(pageID, link, info)
 			})
 		}()
 	}
 	return linkInfo{}
 }
 
-func (a *App) keepLinkInfo(link string, info linkInfo) {
-	if info.title == "" || a.page == nil || a.page.editor.ReadOnly {
+// keepLinkInfo puts a link's info in page pageID's cards of it that lack
+// it: through its editor while it is open, else in what is stored.
+func (a *App) keepLinkInfo(pageID, link string, info linkInfo) {
+	if info.title == "" || !a.canEdit(pageID) {
 		return
 	}
-	var ids []string
-	a.page.editor.Content.Walk(func(n, _ *doc.Node) {
-		if n.Type == "link_preview" && n.Str("url") == link && n.Str("title") == "" {
-			ids = append(ids, n.ID)
+	lacking := func(n *doc.Node) bool {
+		return n.Type == "link_preview" && n.Str("url") == link && n.Str("title") == ""
+	}
+	if ed := a.Editor(pageID); ed != nil {
+		if ed.ReadOnly {
+			return
 		}
+		var ids []string
+		ed.Content.Walk(func(n, _ *doc.Node) {
+			if lacking(n) {
+				ids = append(ids, n.ID)
+			}
+		})
+		for _, id := range ids {
+			ed.SetData(id, "title", info.title)
+			ed.SetData(id, "description", info.description)
+			ed.SetData(id, "image", info.image)
+			ed.SetData(id, "site", info.site)
+		}
+		return
+	}
+	err := a.saveStored(pageID, func(c *doc.Content) *doc.Content {
+		found := false
+		if c != nil {
+			c.Walk(func(n, _ *doc.Node) {
+				if lacking(n) {
+					n.Set("title", info.title)
+					n.Set("description", info.description)
+					n.Set("image", info.image)
+					n.Set("site", info.site)
+					found = true
+				}
+			})
+		}
+		if !found {
+			return nil
+		}
+		return c
 	})
-	for _, id := range ids {
-		ed := a.page.editor
-		ed.SetData(id, "title", info.title)
-		ed.SetData(id, "description", info.description)
-		ed.SetData(id, "image", info.image)
-		ed.SetData(id, "site", info.site)
+	if err != nil {
+		log.Printf("link %s: %v", link, err)
 	}
 }
 

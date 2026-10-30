@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -89,6 +90,38 @@ func TestChatGPTStreamedItems(t *testing.T) {
 	res, err = g.Chat(context.Background(), "m", []map[string]any{{"role": "user", "content": "go"}}, nil, 0)
 	if err != nil || res.Content != "All set." {
 		t.Errorf("second answer %+v %v", res, err)
+	}
+}
+
+// ChatGPT's answer may send nothing for longer than other models' while
+// the model reasons: it is waited for, though not without end.
+func TestChatGPTWaitsOutReasoning(t *testing.T) {
+	savedIdle, savedStream := idleTimeout, streamIdleTimeout
+	idleTimeout, streamIdleTimeout = 50*time.Millisecond, time.Second
+	t.Cleanup(func() { idleTimeout, streamIdleTimeout = savedIdle, savedStream })
+	var quiet atomic.Int64
+	quiet.Store(int64(300 * time.Millisecond))
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "event: response.created\ndata: {\"type\":\"response.created\"}\n\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-time.After(time.Duration(quiet.Load())):
+		case <-r.Context().Done():
+			return
+		}
+		_, _ = fmt.Fprint(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"Done.\"}\n\n")
+		_, _ = fmt.Fprint(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"output\":[]}}\n\n")
+	}))
+	defer srv.Close()
+	g := &ChatGPT{access: "tok", expires: time.Now().Add(time.Hour), base: srv.URL}
+	res, err := g.Chat(context.Background(), "m", []map[string]any{{"role": "user", "content": "go"}}, nil, 0)
+	if err != nil || res.Content != "Done." {
+		t.Errorf("answer %+v %v", res, err)
+	}
+	quiet.Store(int64(time.Minute))
+	if _, err := g.Chat(context.Background(), "m", []map[string]any{{"role": "user", "content": "go"}}, nil, 0); err == nil {
+		t.Error("waited for an answer that stopped")
 	}
 }
 

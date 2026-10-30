@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"leaflet/internal/store"
 )
@@ -117,5 +118,16 @@ func TestIsLocalEndpoint(t *testing.T) {
 		if got := IsLocalEndpoint(u); got != want {
 			t.Errorf("IsLocalEndpoint(%q) = %v", u, got)
 		}
+	}
+}
+
+// A long recording gets longer to transcribe on an endpoint than a short
+// one: an hour's audio is not given up on at five minutes.
+func TestTranscribeWaitGrowsWithTheAudio(t *testing.T) {
+	if got := transcribeWait(32000 * 60); got < 5*time.Minute || got > 10*time.Minute {
+		t.Errorf("a minute's audio waits %v", got)
+	}
+	if got := transcribeWait(32000 * 3600); got < 90*time.Minute {
+		t.Errorf("an hour's audio waits %v", got)
 	}
 }

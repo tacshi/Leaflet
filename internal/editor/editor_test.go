@@ -680,6 +680,30 @@ func TestTableCellsTabAndEnter(t *testing.T) {
 	}
 }
 
+// A table whose size another client wrote as huge moves between and adds
+// the cells it has, as it draws them.
+func TestTableWithAHugeSize(t *testing.T) {
+	e, tt, _ := setup(t)
+	table, _ := doc.TableNode([][]string{{"ID", "Name"}, {"", ""}}, "")
+	table.Set("colsLen", 1_000_000_000)
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table} })
+	tt.Frame()
+	box := e.geom[table.ID]
+	tt.ClickAt(box.X+20, box.Y+box.H*0.75)
+	tt.Frame()
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	if e.cellEdit != cellKey(table.ID, 2, 0) || len(table.Children) != 6 {
+		t.Fatalf("editing %q, %d cells", e.cellEdit, len(table.Children))
+	}
+	e.Edit(func(*doc.Content) { addTableColumn(table) })
+	if rows, cols := doc.TableSize(table); rows != 3 || cols != 3 || len(table.Children) != 9 {
+		t.Errorf("after a column, %d by %d, %d cells", rows, cols, len(table.Children))
+	}
+}
+
 // Markdown typed into a cell a key at a time stays as typed: a "[" or a
 // "*" not closed yet is not shown escaped under the caret.
 func TestTableCellKeepsMarkdownAsTyped(t *testing.T) {
@@ -722,6 +746,20 @@ func TestPasteMarkdownBlankLinesSeparate(t *testing.T) {
 	}
 	if code := nodes[4].Delta().Plain(); code != "a := 1\n\nb := 2" {
 		t.Errorf("code %q lost its blank line", code)
+	}
+}
+
+// The markers Markdown has for headings and lists all read as blocks, as
+// copying escapes them all, and a line that is a picture is one.
+func TestPasteMarkdownMarkers(t *testing.T) {
+	var got []string
+	for _, n := range parseLines("#### Step\n###### Six\n####### seven\n#tag\n+ plus\n+ [x] done\n- [X] also\n1) one\n2024. year\n![A cat](https://x.dev/cat.png)\n![local](file:///cat.png)") {
+		got = append(got, fmt.Sprintf("%s%d:%s%s", n.Type, n.Int("level", 0), n.Delta().Plain(), n.Str("alt")))
+	}
+	want := []string{"heading4:Step", "heading6:Six", "paragraph0:####### seven", "paragraph0:#tag", "bulleted_list0:plus",
+		"todo_list0:done", "todo_list0:also", "numbered_list0:one", "paragraph0:2024. year", "image0:A cat", "paragraph0:!local"}
+	if !slices.Equal(got, want) {
+		t.Errorf("blocks\n%q\nwant\n%q", got, want)
 	}
 }
 
@@ -1162,6 +1200,34 @@ func TestCompositionIsOneUndoStep(t *testing.T) {
 	e.Undo()
 	if got := texts(e); !slices.Equal(got, []string{"paragraph:a"}) {
 		t.Errorf("after undoing over a selection %v", got)
+	}
+	// Ended by Enter, it leaves only Enter's step.
+	steps = len(e.undo)
+	e.PlaceCaret(e.Content.Children[0].ID, -1)
+	tt.Compose("ni", 2)
+	tt.Type("\n")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "paragraph:"}) || len(e.undo) != steps+1 {
+		t.Errorf("ended by Enter: %v, %d steps, want %d", got, len(e.undo), steps+1)
+	}
+}
+
+// Cmd-click opens a web or mail link, and no other: a file or another
+// app's link, as a shared page or an agent can write, would launch it.
+func TestCmdClickOpensOnlyWebLinks(t *testing.T) {
+	e, tt, _ := setup(t)
+	var blocks []*doc.Node
+	for _, href := range []string{"https://x.dev", "mailto:a@b.c", "file:///tmp/run.command", "x-app://do", "javascript:alert(1)"} {
+		blocks = append(blocks, newText("paragraph", doc.Delta{{Text: "link link link", Attrs: doc.Attrs{Href: href}}}))
+	}
+	e.Edit(func(c *doc.Content) { c.Children = blocks })
+	tt.Frame()
+	for _, n := range blocks {
+		r := e.geom[n.ID]
+		tt.ClickAtWith(ui.Cmd, r.X+10, r.Y+r.H/2)
+		tt.Frame()
+	}
+	if got := tt.OpenedURLs(); !slices.Equal(got, []string{"https://x.dev", "mailto:a@b.c"}) {
+		t.Errorf("opened %q", got)
 	}
 }
 

@@ -560,3 +560,116 @@ func TestSidebarFooter(t *testing.T) {
 		t.Error("signed in, the account row still signs in")
 	}
 }
+
+// sharedTree puts a page of someone else's space, and a subpage of it,
+// that the user may edit, beside a page of the user's own.
+func sharedTree(t *testing.T, a *App) (theirs, kid string) {
+	t.Helper()
+	const space, at = "00000000-0000-0000-0000-0000000000cc", "2026-01-01T00:00:00Z"
+	theirs, kid = "00000000-0000-0000-0000-0000000000bb", "00000000-0000-0000-0000-0000000000be"
+	for _, p := range []map[string]any{
+		{"id": theirs, "space_id": space, "title": "Theirs", "sort_key": "V", "created_at": at, "updated_at": at},
+		{"id": kid, "space_id": space, "parent_id": theirs, "title": "Kid", "sort_key": "V", "created_at": at, "updated_at": at},
+	} {
+		if err := a.st.PutRemotePage(p); err != nil {
+			t.Fatal(err)
+		}
+		id := p["id"].(string)
+		if err := a.st.SetMembers(id, []store.Member{{PageID: id, UserID: a.session.UserID, Role: "editor"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "Mine"}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	return theirs, kid
+}
+
+// A page shared with the user is listed once, under Shared with me, not
+// among the user's own too.
+func TestSharedPageListedOnce(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.SidebarOpen = true
+	theirs, _ := sharedTree(t, a)
+	for _, p := range a.children("", "", true) {
+		if p.ID == theirs {
+			t.Errorf("a shared page is among the user's own")
+		}
+	}
+	tt := ui.NewTester(func(c *ui.Context) { a.tree(c) }, 300, 600)
+	tt.Frame()
+	n := 0
+	for i := 0; i < a.treeState.Rows(); i++ {
+		if a.treeState.Item(i) == "page:"+theirs {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("the shared page has %d rows", n)
+	}
+}
+
+// A shared subpage dragged beside the shared page it is under, a level
+// out or not, would go to the top level of its owner's space, where Move
+// doesn't put it either: it doesn't go there.
+func TestSharedSubpageStaysInside(t *testing.T) {
+	a := templatesApp(t)
+	theirs, kid := sharedTree(t, a)
+	a.treeState.Indent = 16
+	if _, _, _, ok := a.dropSpot(nil, pageDrag{kid}, "page:"+theirs, 10, 1, 26); ok {
+		t.Error("the subpage goes before the shared page")
+	}
+	if _, _, _, ok := a.dropSpot(nil, pageDrag{kid}, "page:"+theirs, 10, 25, 26); ok {
+		t.Error("the subpage goes after the shared page")
+	}
+	if _, _, _, ok := a.dropSpot(nil, pageDrag{kid}, "page:"+kid, -20, 25, 26); ok {
+		t.Error("the subpage goes a level out, after the shared page")
+	}
+	// Open, the shared page takes it first among its subpages.
+	a.treeOpen("page", theirs)
+	if at, target, _, ok := a.dropSpot(nil, pageDrag{kid}, "page:"+theirs, 10, 25, 26); !ok || at != dropAfter || target != "page:"+theirs {
+		t.Errorf("after the open shared page: %d %s %v", at, target, ok)
+	}
+}
+
+// Pages of a folder deleted on another device are at the top level, not
+// lost with it.
+func TestPagesOfAGoneFolder(t *testing.T) {
+	a := templatesApp(t)
+	f, err := a.st.CreateFolder("Gone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Left", FolderID: f.ID})
+	if _, err := a.st.DB().Exec(`UPDATE folders SET deleted_at = 1 WHERE id = ?`, f.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	if top := a.children("", "", true); len(top) == 0 || !slices.ContainsFunc(top, func(x store.Page) bool { return x.ID == p.ID }) {
+		t.Fatalf("top level %+v", top)
+	}
+	if !a.lastSibling(a.pageByID(p.ID), "") {
+		t.Error("the page is not last among the top level's")
+	}
+}
+
+// A page's row in the sidebar adds a subpage with its + button, which its
+// menu doesn't repeat; the page's header menu has it.
+func TestPageRowMenuLeavesOutAddSubpage(t *testing.T) {
+	a := templatesApp(t)
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	a.reloadAll()
+	for _, header := range []bool{false, true} {
+		tt := ui.NewTester(func(c *ui.Context) {
+			ui.Button(c.Key("menu"), "Menu").Menu(func(m *ui.Menu) { a.pageMenu(m, *a.pageByID(p.ID), header) })
+		}, 300, 200)
+		tt.Frame()
+		if err := tt.Click("Menu"); err != nil {
+			t.Fatal(err)
+		}
+		if got := slices.Contains(tt.Menu(), locales.SidebarAddSubpage()); got != header {
+			t.Errorf("header %v: menu %v", header, tt.Menu())
+		}
+	}
+}

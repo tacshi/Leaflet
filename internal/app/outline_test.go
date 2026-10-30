@@ -164,3 +164,45 @@ func TestSidebarSplit(t *testing.T) {
 		t.Errorf("width %v, want at most %v", a.sidebarW, float32(sidebarMax))
 	}
 }
+
+// A link to a block inside a closed toggle opens the toggle to show it,
+// and a block that never shows is not waited for forever.
+func TestBlockLinkOpensToggle(t *testing.T) {
+	a := templatesApp(t)
+	a.rec = recording.NewController(a.st, a.backend)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.SidebarOpen, a.settings.TextSize = true, 16
+	kid := &doc.Node{ID: "kid", Type: "paragraph"}
+	kid.SetDelta(doc.Delta{{Text: "hidden inside"}})
+	tog := &doc.Node{ID: "tog", Type: "toggle_list", Children: []*doc.Node{kid}}
+	tog.SetDelta(doc.Delta{{Text: "Toggle"}})
+	tog.Set("collapsed", true)
+	outer := &doc.Node{ID: "outer", Type: "toggle_list", Children: []*doc.Node{tog}}
+	outer.SetDelta(doc.Delta{{Text: "Outer"}})
+	outer.Set("collapsed", true)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "T", Content: doc.FromBlocks([]*doc.Node{outer})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
+	tt.Frame()
+	a.openBlock(p.ID, "kid")
+	for i := 0; i < 3; i++ {
+		tt.Frame()
+	}
+	c := a.page.editor.Content
+	if _, ok := a.page.editor.BlockTop("kid"); !ok {
+		t.Error("the block is not shown")
+	}
+	if c.Find("tog").Bool("collapsed") || c.Find("outer").Bool("collapsed") || a.page.scrollTo != "" {
+		t.Errorf("toggles closed %v %v, still to scroll to %q", c.Find("outer").Bool("collapsed"), c.Find("tog").Bool("collapsed"), a.page.scrollTo)
+	}
+	a.page.scrollTo = "nowhere"
+	for i := 0; i <= scrollWaitMax; i++ {
+		tt.Frame()
+	}
+	if a.page.scrollTo != "" {
+		t.Error("still waiting for a block that never shows")
+	}
+}

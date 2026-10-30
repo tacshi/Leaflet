@@ -128,7 +128,9 @@ type accountState struct {
 	name string
 	// nameEdited is set once the user changes the name field: until then
 	// it shows the account's name as it is now, and nothing saves from it.
+	// nameShown is set in a frame that showed the field.
 	nameEdited bool
+	nameShown  bool
 	devices    []map[string]any
 	loaded     bool
 	// devicesErr is why the devices could not be loaded, to try again.
@@ -280,6 +282,7 @@ func (a *App) accountSettings(c *ui.Context) {
 	heading(c, locales.SettingsSectionAccount(), locales.SettingsAccountDesc())
 	card(c, "profile", func() {
 		settingRow(c, "name", locales.SettingsName(), locales.SettingsNameDesc(), true, func() {
+			s.nameShown = true
 			in := field(c, "name", &s.name, locales.SettingsYourName()).Width(220)
 			if in.Changed() {
 				s.nameEdited = true
@@ -417,6 +420,17 @@ func (a *App) accountSettings(c *ui.Context) {
 	}
 }
 
+// keepName saves the name typed in Account once a frame no longer shows
+// its field, as Settings closed or went to another section, which the
+// field leaving its focus never says then. Call it after Settings builds.
+func (a *App) keepName() {
+	if account.nameEdited && !account.nameShown {
+		a.saveName(account.name)
+		account.nameEdited = false
+	}
+	account.nameShown = false
+}
+
 func (a *App) saveName(name string) {
 	name = strings.TrimSpace(name)
 	if name == "" || name == a.session.DisplayName {
@@ -458,7 +472,11 @@ func (a *App) loadDevices() {
 }
 
 func (a *App) exportAll() {
-	a.flush()
+	// An export without the edits waiting would miss them; the save said
+	// why.
+	if !a.flush() {
+		return
+	}
 	folders, files := slices.Clone(a.folders), slices.Clone(a.files)
 	go func() {
 		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.SettingsExportAll(), DefaultPath: locales.SettingsExportFileName()})
@@ -1334,6 +1352,7 @@ func (a *App) offlineSettings(c *ui.Context) {
 		})
 		settingRow(c, "images", locales.SettingsImageCache(), locales.SettingsImageCacheDesc(), false, func() {
 			if button(c, "clear", "trash", locales.SettingsClear()).Clicked() {
+				a.images.close()
 				a.images = newImageCache(a.images.root, a.images.dir)
 				_ = os.RemoveAll(a.images.dir)
 				c.Toast(locales.SettingsImageCacheCleared())

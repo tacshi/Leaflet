@@ -45,6 +45,127 @@ func (s *Store) MoveSpace(from, to string) error {
 	return err
 }
 
+// Requeue queues a page (with its content), folder or comment to go up
+// whole, as stored now, in one transaction: sending everything again
+// takes a while, and a change made meanwhile, as a deletion, goes up with
+// it, not under the copy read before. A row that is gone has nothing to
+// send.
+func (s *Store) Requeue(table, id string) error {
+	pageID := ""
+	err := s.inTx(func(tx *sql.Tx) error {
+		switch table {
+		case "pages":
+			p, err := pageIn(tx, id)
+			if err != nil {
+				return err
+			}
+			pageID = p.ID
+			if err := queue(tx, "pages", p.ID, PageToRemote(p), "", p.ID); err != nil {
+				return err
+			}
+			return queue(tx, "page_content", p.ID, map[string]any{"page_id": p.ID}, "page from this device", p.ID)
+		case "folders":
+			f, err := scanFolder(tx.QueryRow(`SELECT `+folderCols+` FROM folders WHERE id = ?`, id))
+			if err != nil {
+				return err
+			}
+			return queue(tx, "folders", f.ID, FolderToRemote(f), "", "")
+		case "comments":
+			c, err := scanComment(tx.QueryRow(`SELECT `+commentCols+` FROM comments WHERE id = ?`, id))
+			if err != nil {
+				return err
+			}
+			pageID = c.PageID
+			return queue(tx, "comments", c.ID, CommentToRemote(c), "", c.PageID)
+		}
+		return errors.New("store: no requeue of " + table)
+	})
+	if IsNotFound(err) {
+		return nil
+	}
+	if err == nil {
+		s.Notify("outbox", pageID)
+	}
+	return err
+}
+
+// RequeueFile queues a file to go up whole in space spaceID, as stored
+// now, as Requeue does a page, with its contents when this device has
+// them (a deleted file's row goes alone).
+func (s *Store) RequeueFile(id, spaceID string) error {
+	var f File
+	err := s.inTx(func(tx *sql.Tx) error {
+		files, err := filesIn(tx, `id = ?`, id)
+		if err != nil || len(files) == 0 {
+			return err
+		}
+		f = files[0]
+		f.SpaceID = spaceID
+		f.StoragePath = spaceID + "/" + f.ID + "/" + f.Name
+		if err := putFile(tx, f); err != nil {
+			return err
+		}
+		if err := queue(tx, "files", f.ID, FileToRemote(f), "file", f.PageID); err != nil {
+			return err
+		}
+		if !f.DeletedAt.IsZero() || !onDevice(f.LocalPath) {
+			return nil
+		}
+		ct := f.MimeType
+		if ct == "" {
+			ct = "application/octet-stream"
+		}
+		return queue(tx, "storage", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": f.LocalPath, "content_type": ct}, "file waiting to upload", f.PageID)
+	})
+	if err != nil || f.ID == "" {
+		return err
+	}
+	// Deleted meanwhile: the copy brought here to send goes too.
+	if !f.DeletedAt.IsZero() {
+		s.removeCopy(f.ID)
+	}
+	s.Notify("outbox", f.PageID)
+	return nil
+}
+
+// RequeueRecording queues a finished recording to go up whole, as stored
+// now, as Requeue does a page, with its audio when this device has it.
+func (s *Store) RequeueRecording(id string) error {
+	var r Recording
+	err := s.inTx(func(tx *sql.Tx) error {
+		var err error
+		if r, err = scanRecording(tx.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, id)); err != nil {
+			return err
+		}
+		if r.Status != "ready" && r.Status != "failed" {
+			return nil
+		}
+		if err := queue(tx, "recordings", r.ID, RecordingToRemote(r), "", r.PageID); err != nil {
+			return err
+		}
+		if !onDevice(r.LocalPath) {
+			return nil
+		}
+		return queue(tx, "storage", "recordings/"+r.ID, uploadOf(r), "audio waiting to upload", r.PageID)
+	})
+	if IsNotFound(err) {
+		return nil
+	}
+	if err == nil {
+		s.Notify("outbox", r.PageID)
+	}
+	return err
+}
+
+// onDevice reports whether a file is on this device.
+func onDevice(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // pulled are the tables a pull from the server stores rows of, by id,
 // with the time each last changed there.
 var pulled = map[string]bool{"pages": true, "folders": true, "files": true, "comments": true, "recordings": true, "model_providers": true}
@@ -184,6 +305,18 @@ func (s *Store) RemoveSharedPages(rootID string) ([]string, error) {
 		}
 		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 			return err
+		}
+		// The files' entries are dropped by the files: ones queued before
+		// they went with their page's have no page_id.
+		files, err := filesIn(tx, `page_id IN (`+in+`)`, args...)
+		if err != nil {
+			return err
+		}
+		for _, f := range files {
+			if _, err := tx.Exec(`DELETE FROM outbox WHERE (entity = 'files' AND entity_id = ?)
+				OR (entity IN ('storage', 'storage_delete') AND entity_id = ?)`, f.ID, "files/"+f.ID); err != nil {
+				return err
+			}
 		}
 		for _, q := range []string{
 			`DELETE FROM pages WHERE id IN (` + in + `)`, `DELETE FROM page_contents WHERE page_id IN (` + in + `)`,

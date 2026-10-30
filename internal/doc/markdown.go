@@ -71,6 +71,7 @@ func (d Delta) ToMarkdown() string {
 	for i := len(open) - 1; i >= 0; i-- {
 		toks = append(toks, mdToken{mark: open[i], close: true})
 	}
+	toks = spacesOutside(toks)
 	var b strings.Builder
 	for i, t := range toks {
 		switch {
@@ -126,6 +127,88 @@ func marksOf(a Attrs) []mdMark {
 	}
 	if a.Strike {
 		out = append(out, mdMark{kind: '~'})
+	}
+	return out
+}
+
+// spacesOutside moves spaces off the inner side of bold, italic and strike
+// markers, where a marker no longer reads as one: those before a closing
+// marker go after it, those after an opening one before it. trimSpans
+// keeps a format's own ends clear, but a format closed at a link's end
+// and opened again past it, as in "[read *this *](u)*and that*", gets new
+// ends. The spaces lose the format there, which they can't show; they
+// never cross a link's brackets, so a link keeps its text.
+func spacesOutside(toks []mdToken) []mdToken {
+	plain := func(t mdToken) bool { return !t.open && !t.close && !t.code }
+	emphasis := func(t mdToken) bool { return (t.open || t.close) && t.mark.kind != '[' }
+	var out []mdToken
+	for i := 0; i < len(toks); {
+		if !toks[i].open && !toks[i].close {
+			out = append(out, toks[i])
+			i++
+			continue
+		}
+		// The markers here, and the spaces among them, each at the
+		// number of markers before it.
+		type space struct {
+			text string
+			at   int
+		}
+		var marks []mdToken
+		var spaces []space
+		j := i
+		for ; j < len(toks); j++ {
+			if t := toks[j]; t.open || t.close {
+				marks = append(marks, t)
+			} else if plain(t) && strings.TrimSpace(t.text) == "" {
+				spaces = append(spaces, space{t.text, len(marks)})
+			} else {
+				break
+			}
+		}
+		if n := len(out); n > 0 && plain(out[n-1]) {
+			t := strings.TrimRightFunc(out[n-1].text, unicode.IsSpace)
+			spaces = append([]space{{out[n-1].text[len(t):], 0}}, spaces...)
+			out[n-1].text = t
+		}
+		if j < len(toks) && plain(toks[j]) {
+			t := strings.TrimLeftFunc(toks[j].text, unicode.IsSpace)
+			spaces = append(spaces, space{toks[j].text[:len(toks[j].text)-len(t)], len(marks)})
+			toks[j].text = t
+		}
+		for k := range spaces {
+			at := &spaces[k].at
+			for *at < len(marks) && emphasis(marks[*at]) && marks[*at].close {
+				*at++
+			}
+			for *at > 0 && emphasis(marks[*at-1]) && marks[*at-1].open {
+				*at--
+			}
+		}
+		var seq []mdToken
+		for k := 0; k <= len(marks); k++ {
+			for _, s := range spaces {
+				if s.at == k && s.text != "" {
+					seq = append(seq, mdToken{text: s.text})
+				}
+			}
+			if k < len(marks) {
+				seq = append(seq, marks[k])
+			}
+		}
+		// With the spaces out, a format can open and close on nothing,
+		// or close and open again on the spot: it needs neither.
+		for k := 0; k+1 < len(seq); {
+			a, b := seq[k], seq[k+1]
+			if (a.open || a.close) && (b.open || b.close) && a.mark == b.mark && a.open != b.open {
+				seq = slices.Delete(seq, k, k+2)
+				k = max(k-1, 0)
+				continue
+			}
+			k++
+		}
+		out = append(out, seq...)
+		i = j
 	}
 	return out
 }

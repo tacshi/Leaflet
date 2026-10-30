@@ -705,8 +705,19 @@ func (c *Client) RPC(ctx context.Context, name string, args map[string]any) (any
 
 // Invoke calls an Edge Function and returns its JSON body.
 func (c *Client) Invoke(ctx context.Context, name string, body map[string]any) (map[string]any, error) {
+	return c.invoke(c.http, ctx, name, body)
+}
+
+// InvokeLong is Invoke for a function that works a while before it
+// answers, longer than the other calls' timeout and the long client's
+// wait for an answer, as transcribing does: ctx ends it.
+func (c *Client) InvokeLong(ctx context.Context, name string, body map[string]any) (map[string]any, error) {
+	return c.invoke(&http.Client{Transport: c.http.Transport}, ctx, name, body)
+}
+
+func (c *Client) invoke(hc *http.Client, ctx context.Context, name string, body map[string]any) (map[string]any, error) {
 	raw, _ := json.Marshal(body)
-	res, err := c.request(ctx, "POST", "/functions/v1/"+name, bytes.NewReader(raw), nil)
+	res, err := c.requestWith(hc, ctx, "POST", "/functions/v1/"+name, bytes.NewReader(raw), nil)
 	if err != nil {
 		return nil, err
 	}

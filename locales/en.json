@@ -2412,6 +2412,15 @@
       }
     }
   },
+  "recCouldNotPlay": "Could not play: {error}",
+  "@recCouldNotPlay": {
+    "description": "Toast when a recording's audio could not be loaded to play.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "recStarting": "Starting…",
   "@recStarting": {
     "description": "The recording pill in the page header, while the microphone starts."
@@ -2473,6 +2482,16 @@
   "recSummarize": "Summarize with agent",
   "@recSummarize": {
     "description": "Recording block menu item."
+  },
+  "recSummarizePrompt": "Summarize the recording “{title}” below it on the page.",
+  "@recSummarizePrompt": {
+    "description": "Chat message sent to the agent, and shown as the user's, by a recording block's Summarize with agent; the agent reads the transcript itself.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Weekly sync"
+      }
+    }
   },
   "recTranscribeAgain": "Transcribe again",
   "@recTranscribeAgain": {

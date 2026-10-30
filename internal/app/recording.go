@@ -103,10 +103,33 @@ type player struct {
 	p       *audio.Player
 	loading bool
 	from    time.Duration
-	err     string
 }
 
 var players = map[string]*player{}
+
+// dropGonePlayers stops the recordings playing whose block is no longer
+// in the open page, as one deleted, and lets their audio go.
+func (a *App) dropGonePlayers() {
+	if len(players) == 0 {
+		return
+	}
+	shown := map[string]bool{}
+	if a.page != nil {
+		a.page.editor.Content.Walk(func(n *doc.Node, _ *doc.Node) {
+			if n.Type == "recording" {
+				shown[n.Str("recording_id")] = true
+			}
+		})
+	}
+	for id, pl := range players {
+		if !shown[id] {
+			if pl.p != nil {
+				pl.p.Close()
+			}
+			delete(players, id)
+		}
+	}
+}
 
 // dropPlayers stops the recordings playing and lets their audio go, as
 // the page that shows them closes.
@@ -154,7 +177,7 @@ func (a *App) play(rec store.Recording) {
 				return // the page closed meanwhile
 			}
 			if err != nil {
-				pl.err = err.Error()
+				a.toast(locales.RecCouldNotPlay(err.Error()))
 				return
 			}
 			pl.sound = snd
@@ -216,23 +239,26 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					}
 					more = iconButton(c, "more", "ellipsis", locales.RecActions())
 				})
+				// On a page that can't be changed, the transcript only copies.
+				ro := a.page == nil || a.page.editor.ReadOnly || !a.canEdit(a.page.id)
 				more.Menu(func(m *ui.Menu) {
 					if m.Item(locales.RecCopyTranscript()).Disabled(len(rec.Transcript) == 0).Chosen() {
 						c.WriteClipboard(transcriptPlain(rec))
 						c.Toast(locales.CommonCopied())
 					}
-					if m.Item(locales.RecInsertTranscript()).Disabled(len(rec.Transcript) == 0).Chosen() {
+					if m.Item(locales.RecInsertTranscript()).Disabled(len(rec.Transcript) == 0 || ro).Chosen() {
 						a.insertTranscript(n.ID, rec)
 					}
-					if m.Item(locales.RecSummarize()).Disabled(len(rec.Transcript) == 0 || !a.hub.Available()).Chosen() {
+					// The agent reads the transcript with the block.
+					if m.Item(locales.RecSummarize()).Disabled(len(rec.Transcript) == 0 || !a.hub.Available() || ro).Chosen() {
 						a.panelOpen, a.panelTab = true, 0
-						a.hub.Chat(a.page.id, "Summarize the recording “"+n.Str("title")+"” below it on the page. Its transcript:\n"+transcriptText(rec), []string{n.ID})
+						a.hub.Chat(a.page.id, locales.RecSummarizePrompt(a.recordingTitle(n, rec, true)), []string{n.ID})
 					}
 					label := locales.RecTranscribeAgain()
 					if len(rec.Transcript) == 0 {
 						label = locales.RecTranscribe()
 					}
-					if m.Item(label).Chosen() {
+					if m.Item(label).Disabled(ro).Chosen() {
 						if err := a.rec.Retranscribe(id, a.settings.Stt, a.online && !a.settings.WorkOffline); err != nil {
 							a.toast(err.Error())
 						}
@@ -329,14 +355,6 @@ func transcriptPlain(rec store.Recording) string {
 	return strings.Join(lines, "\n")
 }
 
-func transcriptText(rec store.Recording) string {
-	var lines []string
-	for _, s := range recording.Tidy(rec.Transcript) {
-		lines = append(lines, "["+fmtDuration(time.Duration(s.StartMs)*time.Millisecond)+"] "+s.Text)
-	}
-	return strings.Join(lines, "\n")
-}
-
 // seek plays a recording from t, once its audio loads if it has not.
 func (a *App) seek(rec store.Recording, t time.Duration) {
 	pl := players[rec.ID]
@@ -398,6 +416,9 @@ func (a *App) levelMeter(c *ui.Context, levels []float64) {
 // insertTranscript puts a recording's transcript after its block as text.
 func (a *App) insertTranscript(blockID string, rec store.Recording) {
 	ed := a.page.editor
+	if ed.ReadOnly {
+		return
+	}
 	var nodes []*doc.Node
 	for _, s := range recording.Tidy(rec.Transcript) {
 		n := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
@@ -479,8 +500,11 @@ func (a *App) speechSettings(c *ui.Context) {
 								a.toast(locales.RecSttKeyNotSaved(err.Error()))
 							}
 						}
+						// The test goes on while the fields change: it has
+						// them as they are now.
+						url, model, key := stt.BaseURL, stt.Model, s.key
 						a.sttTestButton(c, func(ctx context.Context) error {
-							_, err := recording.TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, recording.WavFromPCM(make([]byte, recording.SampleRate)), s.key, "auto")
+							_, err := recording.TranscribeEndpoint(ctx, url, model, recording.WavFromPCM(make([]byte, recording.SampleRate)), key, "auto")
 							return err
 						})
 					})

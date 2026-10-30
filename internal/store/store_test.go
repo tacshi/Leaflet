@@ -744,6 +744,11 @@ func TestFileNamesStayInTheFilesFolder(t *testing.T) {
 			t.Errorf("fileName(%q) = %q, want %q", in, got, want)
 		}
 	}
+	// iCloud Drive's folder takes no name with a backslash, which macOS
+	// allows in one.
+	if got := fileName(`a\b.pdf`); strings.Contains(got, `\`) {
+		t.Errorf("fileName kept a backslash: %q", got)
+	}
 	p, _ := s.CreatePage(NewPageOptions{Title: "Trip"})
 	src := filepath.Join(t.TempDir(), "map.png")
 	if err := os.WriteFile(src, []byte("png"), 0o600); err != nil {
@@ -2142,6 +2147,74 @@ func TestRemoveSharedPages(t *testing.T) {
 	}
 }
 
+// Removing a shared page removes its files' changes waiting too, those
+// queued without its page_id as well: the server would refuse them, and
+// they would keep the account from being forgotten.
+func TestRemoveSharedPagesDropsItsFilesChanges(t *testing.T) {
+	s := open(t)
+	old := "2026-01-01T00:00:00Z"
+	if err := s.PutRemotePage(map[string]any{"id": "root", "space_id": "theirs", "title": "Root", "sort_key": "V", "created_at": old, "updated_at": old}); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "a.txt")
+	if err := os.WriteFile(src, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := s.AddFile(src, "", "root", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, err := s.AddFile(src, "", "root", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := s.Pending()
+	for _, e := range pending {
+		if err := s.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DeleteFile(deleted); err != nil {
+		t.Fatal(err)
+	}
+	// As a version from before queued them.
+	if err := s.Queue("files", waiting.ID, FileToRemote(waiting), "file", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Queue("storage", "files/"+waiting.ID, map[string]any{"bucket": "files", "path": waiting.StoragePath}, "file waiting to upload", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.RemoveSharedPages("root"); err != nil {
+		t.Fatal(err)
+	}
+	pending, _ = s.Pending()
+	for _, e := range pending {
+		t.Errorf("left waiting: %s %s", e.Entity, e.EntityID)
+	}
+}
+
+// A page put after one that is not among its siblings goes last, not at
+// the key rows from the server have.
+func TestPageAfterOneElsewhereGoesLast(t *testing.T) {
+	s := open(t)
+	a, _ := s.CreatePage(NewPageOptions{Title: "A"})
+	b, _ := s.CreatePage(NewPageOptions{Title: "B"})
+	kid, _ := s.CreatePage(NewPageOptions{Title: "Kid", ParentID: a.ID})
+	c, err := s.CreatePage(NewPageOptions{Title: "C", AfterID: kid.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.SortKey <= b.SortKey {
+		t.Errorf("new page's key %q is not after the last's, %q", c.SortKey, b.SortKey)
+	}
+	if err := s.MovePage(a.ID, "", "", kid.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Page(a.ID); got.SortKey <= c.SortKey {
+		t.Errorf("moved page's key %q is not after the last's, %q", got.SortKey, c.SortKey)
+	}
+}
+
 // Pages in a loop of parents, A under B and B under A, as sync may find
 // them before it breaks the loop, are deleted and copied once each.
 func TestDeleteAndCopyALoopOfParents(t *testing.T) {
@@ -2206,6 +2279,55 @@ func TestDeleteFolderKeepsItsFiles(t *testing.T) {
 	}
 	if got, _ := s.File(ofPage.ID); !got.DeletedAt.IsZero() || got.FolderID != "" {
 		t.Errorf("page's file %+v", got)
+	}
+}
+
+// Moving a deleted folder's files, and deleting a file, queue only what
+// changed, over the file as stored: neither undoes a deletion or a move
+// made since.
+func TestFileChangesQueueOnlyTheirColumns(t *testing.T) {
+	s := open(t)
+	folder, _ := s.CreateFolder("Folder")
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("notes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AddFile(src, folder.ID, "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, _ := s.Pending()
+	for _, e := range pending {
+		if err := s.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	queued := func() []any {
+		t.Helper()
+		var payload string
+		if err := s.db.QueryRow(`SELECT payload FROM outbox WHERE entity = 'files' AND entity_id = ?`, f.ID).Scan(&payload); err != nil {
+			t.Fatal(err)
+		}
+		var row map[string]any
+		_ = json.Unmarshal([]byte(payload), &row)
+		cols, _ := row[ChangedKey].([]any)
+		return cols
+	}
+	if err := s.DeleteFolder(folder); err != nil {
+		t.Fatal(err)
+	}
+	if cols := queued(); fmt.Sprint(cols) != "[folder_id]" {
+		t.Errorf("move queued %v", cols)
+	}
+	// f is the file as read before the folder went.
+	if err := s.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	if cols := queued(); fmt.Sprint(cols) != "[deleted_at folder_id]" {
+		t.Errorf("move and delete queued %v", cols)
+	}
+	if got, _ := s.File(f.ID); got.DeletedAt.IsZero() || got.FolderID != "" {
+		t.Errorf("file %+v", got)
 	}
 }
 

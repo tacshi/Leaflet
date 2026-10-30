@@ -693,9 +693,9 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 		if payload["created_by"] == nil {
 			payload["created_by"] = uid
 		}
-		return s.pushChanged(ctx, e.Entity, payload)
+		return s.pushRow(ctx, e, payload)
 	case "folders", "files":
-		return s.pushChanged(ctx, e.Entity, payload)
+		return s.pushRow(ctx, e, payload)
 	case "comments":
 		return s.pushComment(ctx, uid, payload)
 	case "page_history":
@@ -730,6 +730,43 @@ func (s *Service) pushChanged(ctx context.Context, table string, payload map[str
 	}
 	_, err := s.be.Upsert(ctx, table, payload, "")
 	return err == nil, err
+}
+
+// takeServer stores a row from the server over this device's change to it,
+// by table, as the pulls do.
+var takeServer = map[string]func(st *store.Store, row map[string]any) error{
+	"pages":   (*store.Store).PutRemotePage,
+	"folders": (*store.Store).PutRemoteFolder,
+	"files":   (*store.Store).PutRemoteFile,
+}
+
+// pushRow is pushChanged for a row the server may refuse to change: one
+// the user can see there but no longer change, as a page shared with them
+// to view since they changed it. Its change would never go, and the pulls
+// pass over the row while it waits, so every change made to it elsewhere
+// would be missed: the change gives way to the server's row instead. A
+// row the server does not show stays queued, as one under a page not up
+// yet.
+func (s *Service) pushRow(ctx context.Context, e store.OutboxEntry, payload map[string]any) (bool, error) {
+	done, err := s.pushChanged(ctx, e.Entity, payload)
+	if !remote.IsForbidden(err) {
+		return done, err
+	}
+	row, rerr := s.be.SelectOne(ctx, e.Entity, remote.Query{Select: "*", Filters: []string{remote.Eq("id", e.EntityID)}})
+	if rerr != nil || row == nil {
+		return false, err
+	}
+	log.Printf("outbox %s/%s: %v; taking the server's row", e.Entity, e.EntityID, err)
+	// Off the queue first, so the row goes in; a change made here since
+	// keeps it queued, and the row stays out, as the pulls leave it.
+	if err := s.st.Dequeue(e); err != nil {
+		return false, err
+	}
+	if err := takeServer[e.Entity](s.st, row); err != nil {
+		return false, err
+	}
+	s.st.Notify(e.Entity, e.PageID)
+	return true, nil
 }
 
 // pushComment updates a comment the server has with what may change, and

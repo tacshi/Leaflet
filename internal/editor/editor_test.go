@@ -1304,6 +1304,28 @@ func TestAgentOpsAfterAnEditOutliveItsUndo(t *testing.T) {
 	}
 }
 
+// The ops that stream in past the user's edit share its one mark, so each
+// adds no step: undoing the edit keeps them all.
+func TestAgentOpsPastAnEditShareOneMark(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("Hello")
+	e.BreakUndo()
+	first := e.Content.Children[0].ID
+	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("A", "agent A")), true)
+	e.PlaceCaret(first, -1)
+	tt.Type("!")
+	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("C", "agent C")), false)
+	steps := len(e.undo)
+	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("D", "agent D")), false)
+	if len(e.undo) != steps {
+		t.Errorf("%d steps of undo after one more op, want %d", len(e.undo), steps)
+	}
+	e.Undo()
+	if got, want := texts(e), []string{"paragraph:Hello", "paragraph:agent A", "paragraph:agent C", "paragraph:agent D"}; !slices.Equal(got, want) {
+		t.Errorf("after undo %v, want %v", got, want)
+	}
+}
+
 // A block selected whole, without text, copies and cuts as itself.
 func TestCopyAndCutABlockSelectedWhole(t *testing.T) {
 	e, tt, _ := setup(t)

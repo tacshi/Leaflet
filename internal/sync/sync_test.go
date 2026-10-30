@@ -861,6 +861,66 @@ func TestPagePushSendsOnlyItsChanges(t *testing.T) {
 	}
 }
 
+// A change to a page the user may no longer change, as one shared with
+// them to view since, gives way to the server's page, rather than wait
+// forever with every change made to the page elsewhere passed over. One
+// the server does not show stays queued.
+func TestRefusedPageChangeTakesTheServers(t *testing.T) {
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		_ = st.Dequeue(e)
+	}
+	if err := st.RenamePage(p.ID, "My plan"); err != nil {
+		t.Fatal(err)
+	}
+
+	server := store.PageToRemote(p)
+	server["title"], server["deleted_at"] = "Their plan", time.Now().UTC().Format(time.RFC3339Nano)
+	visible := false
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case "PATCH":
+			_, _ = w.Write([]byte("[]")) // not the user's to change
+		case "POST":
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"42501","message":"new row violates row-level security policy"}`))
+		case "GET":
+			out := []map[string]any{}
+			if visible {
+				out = append(out, server)
+			}
+			_ = json.NewEncoder(w).Encode(out)
+		}
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Page(p.ID); st.PendingCount() != 1 || got.Title != "My plan" {
+		t.Errorf("a page the server doesn't show: %d queued, title %q", st.PendingCount(), got.Title)
+	}
+
+	visible = true
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Page(p.ID)
+	if st.PendingCount() != 0 || got.Title != "Their plan" || got.DeletedAt.IsZero() {
+		t.Errorf("%d queued, page %q deleted %v", st.PendingCount(), got.Title, got.DeletedAt)
+	}
+}
+
 // A file's move goes up as only that, so it does not undo a deletion made
 // elsewhere meanwhile.
 func TestFilePushSendsOnlyItsChanges(t *testing.T) {

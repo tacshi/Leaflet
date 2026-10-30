@@ -149,10 +149,15 @@ func (s *Store) PutJob(j Job) error {
 	return err
 }
 
-// SetJobStatus changes an agent run's status.
-func (s *Store) SetJobStatus(id, status string) error {
-	_, err := s.db.Exec(`UPDATE ai_jobs SET status = ?, updated_at = ? WHERE id = ?`, status, time.Now().UnixMilli(), id)
-	return err
+// SetJobStatus changes an agent run's status, and reports whether this
+// device keeps its job: a local run's, which has no row on the server.
+func (s *Store) SetJobStatus(id, status string) (bool, error) {
+	res, err := s.db.Exec(`UPDATE ai_jobs SET status = ?, updated_at = ? WHERE id = ?`, status, time.Now().UnixMilli(), id)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // ConflictRow is a block both sides changed while apart.

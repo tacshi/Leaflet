@@ -123,6 +123,14 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		n.Data = map[string]any{"url": url, "align": "center", "alt": alt}
 	case "table":
 		rows := rowsOf(spec["rows"])
+		// Each cell is a block, and counts as one.
+		cols := 0
+		for _, r := range rows {
+			cols = max(cols, len(r))
+		}
+		if *made += len(rows) * cols; *made > maxSpecNodes {
+			return nil, toolErr("At most %d blocks in all per block.", maxSpecNodes)
+		}
 		t, err := TableNode(rows, id)
 		if err != nil {
 			return nil, err

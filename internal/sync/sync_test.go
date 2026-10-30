@@ -861,6 +861,52 @@ func TestPagePushSendsOnlyItsChanges(t *testing.T) {
 	}
 }
 
+// A file's move goes up as only that, so it does not undo a deletion made
+// elsewhere meanwhile.
+func TestFilePushSendsOnlyItsChanges(t *testing.T) {
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	st := openStore(t)
+	folder, err := st.CreateFolder("Folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := t.TempDir() + "/notes.txt"
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, folder.ID, "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		_ = st.Dequeue(e)
+	}
+	if err := st.DeleteFolder(folder); err != nil {
+		t.Fatal(err)
+	}
+	sent := map[string]map[string]any{}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		sent[r.Method+" "+r.URL.Path] = body
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": f.ID}})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := sent["PATCH /rest/v1/files"]; !ok || len(got) != 1 || got["folder_id"] != nil {
+		t.Errorf("sent %v", sent)
+	}
+	if _, ok := sent["POST /rest/v1/files"]; ok {
+		t.Errorf("the whole file went: %v", sent)
+	}
+}
+
 // Signing in uploads the audio of recordings made before, once they are
 // done, and none whose audio is gone.
 func TestSignInUploadsEarlierRecordings(t *testing.T) {

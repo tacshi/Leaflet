@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"leaflet/internal/doc"
@@ -180,12 +181,15 @@ func (s *Store) DeleteFolder(f Folder) error {
 			return err
 		}
 		// Its files go to the top level too, where the sidebar shows them.
+		// Only the move goes up, so it does not undo a deletion made
+		// elsewhere meanwhile.
 		for _, file := range files {
+			old := FileToRemote(file)
 			file.FolderID, file.UpdatedAt = "", now
 			if err := putFile(tx, file); err != nil {
 				return err
 			}
-			if err := queue(tx, "files", file.ID, FileToRemote(file), "moved file", file.PageID); err != nil {
+			if err := queueChange(tx, "files", file.ID, old, FileToRemote(file), "moved file", file.PageID); err != nil {
 				return err
 			}
 		}
@@ -334,9 +338,12 @@ func (s *Store) AddFile(source, folderID, pageID, mime string) (File, error) {
 
 // fileName is a file's name as it may be kept in its folder here: its last
 // element, so a name from the server such as "../../x" never puts the file
-// outside the app's files folder, or "file" when that is none.
+// outside the app's files folder, or "file" when that is none. A
+// backslash, which a name may have on macOS, becomes "_": the iCloud
+// Drive folder takes no name with one (icloud.Name), so the file would
+// never sync through it.
 func fileName(name string) string {
-	name = filepath.Base(name)
+	name = strings.ReplaceAll(filepath.Base(name), `\`, "_")
 	if name == "." || !filepath.IsLocal(name) {
 		return "file"
 	}
@@ -367,9 +374,11 @@ func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
 
 // DeleteFile deletes a file, which cannot be undone: its copy here goes
 // now, and its stored copy (in Storage, or iCloud Drive) once the
-// deletion has gone up. An upload still waiting is dropped.
+// deletion has gone up. An upload still waiting is dropped. The file is
+// deleted as stored, not as the caller last read it, and only its
+// deletion goes up, so a change made since, here or elsewhere, is kept.
 func (s *Store) DeleteFile(f File) error {
-	if err := s.inTx(func(tx *sql.Tx) error { return deleteFile(tx, f, time.Now()) }); err != nil {
+	if err := s.inTx(func(tx *sql.Tx) error { return deleteFile(tx, f.ID, time.Now()) }); err != nil {
 		return err
 	}
 	s.removeCopy(f.ID)
@@ -379,13 +388,22 @@ func (s *Store) DeleteFile(f File) error {
 }
 
 // deleteFile is DeleteFile in the caller's transaction, but for the copy
-// here, which the caller removes once it commits.
-func deleteFile(tx *sql.Tx, f File, now time.Time) error {
+// here, which the caller removes once it commits. A file that is gone has
+// nothing to delete.
+func deleteFile(tx *sql.Tx, id string, now time.Time) error {
+	files, err := filesIn(tx, `id = ?`, id)
+	if err != nil || len(files) == 0 {
+		return err
+	}
+	f := files[0]
+	old := FileToRemote(f)
 	f.DeletedAt, f.UpdatedAt = now, now
 	if err := putFile(tx, f); err != nil {
 		return err
 	}
-	if err := queue(tx, "files", f.ID, FileToRemote(f), "deleted file", ""); err != nil {
+	// Its entries go with its page's, so removing a shared page removes
+	// them too.
+	if err := queueChange(tx, "files", f.ID, old, FileToRemote(f), "deleted file", f.PageID); err != nil {
 		return err
 	}
 	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'storage' AND entity_id = ?`, "files/"+f.ID); err != nil {
@@ -394,7 +412,7 @@ func deleteFile(tx *sql.Tx, f File, now time.Time) error {
 	if f.StoragePath == "" {
 		return nil
 	}
-	return queue(tx, "storage_delete", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "file_id": f.ID}, "deleted file", "")
+	return queue(tx, "storage_delete", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "file_id": f.ID}, "deleted file", f.PageID)
 }
 
 // removeCopy removes a deleted file's copy on this device, if it is one

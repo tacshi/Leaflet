@@ -25,12 +25,13 @@ func (s *Service) cloudPull(ctx context.Context, me string) error {
 		return err
 	}
 	changed := map[string]bool{}
-	err = s.applyHeld(changed)
+	// One that does not apply is held again, and does not hold up the
+	// other devices' batches.
+	if err := s.applyHeld(changed); err != nil {
+		log.Printf("icloud: changes held: %v", err)
+	}
 	for table := range changed {
 		s.st.Notify(table, "")
-	}
-	if err != nil {
-		return err
 	}
 	waiting := s.waiting()
 	for _, peer := range peers {

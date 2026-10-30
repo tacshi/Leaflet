@@ -330,3 +330,37 @@ func TestOfflineSwitchNeedsALocalProvider(t *testing.T) {
 		t.Errorf("the hint stays with a local provider in %v", tt.Texts())
 	}
 }
+
+// A name being typed saves as Settings closes, before the field is left.
+func TestNameSavesAsSettingsCloses(t *testing.T) {
+	was := account
+	t.Cleanup(func() { account = was })
+	account = accountState{loaded: true}
+	a := templatesApp(t)
+	a.settingsOpen = true
+	tt := ui.NewTester(func(c *ui.Context) {
+		if a.settingsOpen {
+			a.accountSettings(c)
+		}
+		a.keepName()
+	}, 800, 900)
+	tt.Frame()
+	// The field is at the right of its row.
+	r, ok := tt.Find(locales.SettingsName())
+	if !ok {
+		t.Fatal("no name row")
+	}
+	tt.ClickAt(790-110, r.Y+r.H/2)
+	tt.Key(0, ui.KeyEnd)
+	tt.Type(" Lee")
+	tt.Frame()
+	want := locales.CommonYou() + " Lee"
+	if got := a.st.Session().DisplayName; got == want || !account.nameEdited {
+		t.Fatalf("saved %q while typing, edited %v", got, account.nameEdited)
+	}
+	a.settingsOpen = false
+	tt.Frame()
+	if got := a.st.Session().DisplayName; got != want || account.nameEdited {
+		t.Errorf("account's name %q, edited %v", got, account.nameEdited)
+	}
+}

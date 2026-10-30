@@ -175,6 +175,46 @@ func TestNothingFoldsAwayAsAHeadingGoes(t *testing.T) {
 	}
 }
 
+// Nothing goes in out of sight either: blocks put before the heading that
+// ends a folded section, or after a folded heading, would join the
+// section, which unfolds.
+func TestNothingFoldsAwayAsBlocksGoIn(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(e *Editor, tt *ui.Tester, b map[string]*doc.Node)
+		want string
+	}{
+		{"a table pasted at the start of the heading", func(e *Editor, tt *ui.Tester, b map[string]*doc.Node) {
+			e.PlaceCaret(b["C"].ID, 0)
+			tbl, _ := doc.TableNode([][]string{{"h1", "h2"}, {"1", "2"}}, "")
+			e.pasteBlocks([]*doc.Node{tbl})
+		}, "table:"},
+		{"a list pasted at the start of the heading", func(e *Editor, tt *ui.Tester, b map[string]*doc.Node) {
+			e.PlaceCaret(b["C"].ID, 0)
+			e.paste("- x\n- y")
+		}, "bulleted_list:x"},
+		{"Enter at the start of the heading", func(e *Editor, tt *ui.Tester, b map[string]*doc.Node) {
+			e.PlaceCaret(b["C"].ID, 0)
+			tt.Key(0, ui.KeyEnter)
+		}, "paragraph:"},
+		{"a block put after the folded heading", func(e *Editor, tt *ui.Tester, b map[string]*doc.Node) {
+			e.PlaceCaret(b["A"].ID, -1)
+			e.InsertBlocks(&doc.Node{ID: doc.NewBlockID(), Type: "divider"})
+		}, "divider:"},
+	} {
+		e, tt, _, b := foldPage(t)
+		e.ToggleFold(b["A"].ID)
+		tc.edit(e, tt, b)
+		tt.Frame()
+		if foldedHeading(b["A"]) || len(e.hidden()) > 0 || !slices.Contains(texts(e), tc.want) {
+			t.Errorf("%s: A folded %v, shown %v", tc.name, foldedHeading(b["A"]), texts(e))
+		}
+		if e.Caret().ID == b["A"].ID {
+			t.Errorf("%s: the caret went to A", tc.name)
+		}
+	}
+}
+
 func TestBlockLinks(t *testing.T) {
 	e, tt, host, b := foldPage(t)
 	if err := tt.Click("Copy link to heading"); err != nil {

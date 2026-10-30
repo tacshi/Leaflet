@@ -138,15 +138,33 @@ func publicControl(_, address string, _ syscall.RawConn) error {
 }
 
 // sharedSpace is 100.64.0.0/10, carriers' and Tailscale's, and
-// thisNetwork 0.0.0.0/8.
+// thisNetwork 0.0.0.0/8. IPv6 addresses of nat64, sixToFour and v4Compat
+// stand for IPv4 ones, in their last 4 bytes, or 6to4's 2 bytes in;
+// nat64Local's and siteLocal's are a network's own.
 var (
 	sharedSpace = netip.MustParsePrefix("100.64.0.0/10")
 	thisNetwork = netip.MustParsePrefix("0.0.0.0/8")
+	nat64       = netip.MustParsePrefix("64:ff9b::/96")
+	nat64Local  = netip.MustParsePrefix("64:ff9b:1::/48")
+	sixToFour   = netip.MustParsePrefix("2002::/16")
+	v4Compat    = netip.MustParsePrefix("::/96")
+	siteLocal   = netip.MustParsePrefix("fec0::/10")
 )
 
 // publicAddr reports whether ip is on the internet: not this machine, nor
-// its network, nor one of the ranges kept for neither.
+// its network, nor one of the ranges kept for neither, nor an IPv6
+// address standing for an IPv4 one that is not.
 func publicAddr(ip netip.Addr) bool {
 	ip = ip.Unmap()
+	b := ip.As16()
+	switch {
+	case !ip.Is6():
+	case nat64.Contains(ip), v4Compat.Contains(ip):
+		ip = netip.AddrFrom4([4]byte(b[12:16]))
+	case sixToFour.Contains(ip):
+		ip = netip.AddrFrom4([4]byte(b[2:6]))
+	case nat64Local.Contains(ip), siteLocal.Contains(ip):
+		return false
+	}
 	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !sharedSpace.Contains(ip) && !thisNetwork.Contains(ip)
 }

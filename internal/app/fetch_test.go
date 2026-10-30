@@ -2,7 +2,9 @@ package app
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/gif"
@@ -32,6 +34,10 @@ func TestFetchOnlyThePublicWeb(t *testing.T) {
 		"93.184.216.34": true, "2606:4700::1111": true,
 		"127.0.0.1": false, "10.0.0.1": false, "192.168.1.1": false, "172.16.0.1": false, "169.254.169.254": false,
 		"100.100.1.1": false, "0.0.0.0": false, "::1": false, "fe80::1": false, "fd00::1": false, "::ffff:127.0.0.1": false,
+		// IPv6 addresses standing for IPv4 ones are as those are.
+		"64:ff9b::7f00:1": false, "64:ff9b::a9fe:a9fe": false, "64:ff9b::5db8:d822": true, "64:ff9b:1::a00:1": false,
+		"2002:7f00:1::1": false, "2002:c0a8:101::1": false, "2002:5db8:d822::1": true,
+		"::127.0.0.1": false, "::10.0.0.1": false, "fec0::1": false,
 	} {
 		if got := publicAddr(netip.MustParseAddr(addr)); got != public {
 			t.Errorf("publicAddr(%s) = %v", addr, got)
@@ -172,5 +178,95 @@ func TestAnimatedGIFPlays(t *testing.T) {
 	<-again
 	if q := ic.player(moving, "b1", nil); q == nil || q == p {
 		t.Errorf("the block's new player %p, the released one %p", q, p)
+	}
+}
+
+// A picture whose header says it is far larger than it is, as a small
+// file can, is refused before it is decoded, as decoding it would take
+// more memory than the device has: a bitmap by its size, an animated GIF
+// by all its frames'.
+func TestHugePictureRefused(t *testing.T) {
+	png := func(w, h uint32) []byte {
+		ihdr := make([]byte, 17)
+		copy(ihdr, "IHDR")
+		binary.BigEndian.PutUint32(ihdr[4:], w)
+		binary.BigEndian.PutUint32(ihdr[8:], h)
+		ihdr[12], ihdr[13] = 8, 6 // 8 bits a channel, RGBA
+		b := []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\x0d")
+		b = append(b, ihdr...)
+		return binary.BigEndian.AppendUint32(b, crc32.ChecksumIEEE(ihdr))
+	}
+	gifOf := func(w, h, frames int) []byte {
+		b := []byte("GIF89a")
+		b = append(b, byte(w), byte(w>>8), byte(h), byte(h>>8), 0, 0, 0)
+		for range frames {
+			b = append(b, 0x2C, 0, 0, 0, 0, byte(w), byte(w>>8), byte(h), byte(h>>8), 0, 2, 0)
+		}
+		return append(b, 0x3B)
+	}
+	for name, c := range map[string]struct {
+		data []byte
+		ok   bool
+	}{
+		"small png":           {png(64, 64), true},
+		"huge png":            {png(50000, 50000), false},
+		"gif":                 {gifOf(5000, 5000, 2), true},
+		"gif of 9 big frames": {gifOf(5000, 5000, 9), false},
+		"svg":                 {[]byte(`<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9"/>`), true},
+	} {
+		if err := checkPixels(c.data); (err == nil) != c.ok {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if n, area := gifFrames(gifOf(4, 2, 3)); n != 3 || area != 24 {
+		t.Errorf("gifFrames = %d, %d", n, area)
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "bomb.png")
+	if err := os.WriteFile(path, png(50000, 50000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ic := newImageCache(root, filepath.Join(root, "images"))
+	done := make(chan struct{})
+	ic.get("file://"+path, func() { close(done) })
+	<-done
+	if !ic.hasFailed("file://" + path) {
+		t.Error("the huge picture did not fail")
+	}
+}
+
+// Clearing the cache closes its GIFs' players, and those it was still
+// making then as they are made.
+func TestClosedImageCacheClosesPlayers(t *testing.T) {
+	root := t.TempDir()
+	g := &gif.GIF{Config: image.Config{Width: 4, Height: 2}}
+	for i := range 3 {
+		f := image.NewPaletted(image.Rect(0, 0, 4, 2), color.Palette{color.Black, color.White})
+		f.Set(0, 0, color.Gray{Y: uint8(255 * (i % 2))})
+		g.Image, g.Delay = append(g.Image, f), append(g.Delay, 5)
+	}
+	var b bytes.Buffer
+	if err := gif.EncodeAll(&b, g); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "moving.gif")
+	if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	url := "file://" + path
+	ic := newImageCache(root, filepath.Join(root, "images"))
+	loaded := make(chan struct{})
+	ic.get(url, func() { close(loaded) })
+	<-loaded
+	made := make(chan struct{})
+	ic.player(url, "b1", func() { close(made) })
+	<-made
+	p := ic.player(url, "b1", nil)
+	late := make(chan struct{})
+	ic.player(url, "b2", func() { close(late) })
+	ic.close()
+	<-late
+	if p.Playing() || len(ic.players) != 0 {
+		t.Errorf("after closing: playing %v, %d players kept", p.Playing(), len(ic.players))
 	}
 }

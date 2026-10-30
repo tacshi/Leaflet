@@ -132,6 +132,7 @@ type dialogs struct {
 	inline       *inlinePrompt
 	newComment   *newComment
 	commentFocus string
+	showResolved bool
 	focusChat    bool
 	hideRun      string
 }
@@ -306,6 +307,10 @@ func (a *App) openHit(h store.SearchHit) {
 	if h.Kind == "comment" {
 		a.panelOpen, a.panelTab = true, 1
 		a.dialogs.commentFocus = h.BlockID
+		// The comment found may be in a resolved thread.
+		if a.page != nil && slices.ContainsFunc(a.page.threads, func(t store.Thread) bool { return t.Root.BlockID == h.BlockID && t.Root.Resolved }) {
+			a.dialogs.showResolved = true
+		}
 	}
 }
 

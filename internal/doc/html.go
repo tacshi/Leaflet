@@ -542,7 +542,7 @@ func (d Delta) HTML() string {
 			open = append(open, o)
 			close = append([]string{c}, close...)
 		}
-		if href := safeHref(a.Href); href != "" {
+		if href := SafeHref(a.Href); href != "" {
 			wrap(`<a href="`+html.EscapeString(href)+`" rel="noopener noreferrer">`, "</a>")
 		}
 		if a.Bold {
@@ -575,9 +575,9 @@ func (d Delta) HTML() string {
 	return b.String()
 }
 
-// safeHref returns a link a visitor may follow: http, https or mailto,
+// SafeHref returns a link a visitor may follow: http, https or mailto,
 // else "".
-func safeHref(s string) string {
+func SafeHref(s string) string {
 	s = strings.TrimSpace(s)
 	u, err := url.Parse(s)
 	if err != nil {

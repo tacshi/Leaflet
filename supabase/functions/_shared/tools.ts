@@ -482,6 +482,8 @@ function insertSummary(nodes: NodeJSON[]): string {
 export interface SessionOptions {
   canEdit: boolean;
   crossPage: boolean;
+  /** This page's id: reading it back shows what the run wrote. */
+  pageId?: string;
   /** Agent name shown on charts it inserts. */
   author?: string;
   now?: () => number;
@@ -492,9 +494,10 @@ export interface SessionOptions {
  * a link card. An agent that has read another of the user's pages could
  * write what it read into one, such as https://example.com/x.png?notes=…,
  * and the app would send it to that server without anyone clicking. So
- * once a run reads another page, a block it writes may load only a URL it
- * saw: one on this page then, or on a page it read. Links in text are not
- * loaded, so they stay free.
+ * once a run reads another page, or lists them, a block it writes may load
+ * only a URL it saw: one on this page as the run began, or on a page it
+ * read that it did not make. Links in text are not loaded, so they stay
+ * free.
  */
 const FETCHED_URL_TYPES = new Set(["image", "video", "link_preview"]);
 
@@ -508,6 +511,8 @@ export class PageEditSession {
   private readonly now: () => number;
   /** The URLs the agent has seen since it first read another page, null before (FETCHED_URL_TYPES). */
   private seen: Set<string> | null = null;
+  /** The pages this run made, whose URLs are its own. */
+  private readonly created = new Set<string>();
 
   constructor(content: PageContent, private hooks: ToolHooks, private opts: SessionOptions) {
     this.content = clone(content);
@@ -560,21 +565,36 @@ export class PageEditSession {
       case "create_subpage":
         return await this.createSubpage(args.title, args.blocks);
       case "list_pages":
+        // The titles it lists are read too.
+        this.arm();
         return { result: { pages: await this.hooks.listPages() }, ops: [], blockIds: [] };
       case "read_other_page": {
         const pageId = String(args.page_id ?? "");
         if (!pageId) throw new ToolError("page_id is required");
         const page = await this.hooks.readOtherPage(pageId);
-        if (!this.seen) {
-          this.seen = new Set();
-          this.see(pageViews(this.content));
+        this.arm();
+        // This page and those the run made hold what it wrote, not what was
+        // there: their URLs, and the titles of the subpages it made, stay unseen.
+        if (pageId !== this.opts.pageId && !this.created.has(pageId)) {
+          if (isObject(page) && Array.isArray(page.subpages)) {
+            this.see({
+              ...page,
+              subpages: page.subpages.filter((p) => !(isObject(p) && this.created.has(String(p.id)))),
+            });
+          } else this.see(page);
         }
-        this.see(page);
         return { result: page, ops: [], blockIds: [] };
       }
       default:
         throw new ToolError(`Unknown tool "${name}"`);
     }
+  }
+
+  /** Starts checking URLs, as the agent first reads beyond this page: it may use those on this page as the run found it. */
+  private arm(): void {
+    if (this.seen) return;
+    this.seen = new Set();
+    this.see(pageViews(this.before));
   }
 
   /** Adds the URLs in v, what the agent read, to seen. */
@@ -718,7 +738,8 @@ export class PageEditSession {
     const previous = clone(at.node);
     const node = specToNode(spec, { newId: this.idFactory(), author: this.opts.author }, id);
     this.checkUrls([node]);
-    const keepsChildren = !spec.children && (previous.children?.length ?? 0) > 0 &&
+    // Children left out, or none given, keep the ones the block had.
+    const keepsChildren = !spec.children?.length && (previous.children?.length ?? 0) > 0 &&
       previous.type !== "table";
     if (keepsChildren) {
       if (!LIST_TYPES.has(node.type) && node.type !== previous.type) {
@@ -831,6 +852,7 @@ export class PageEditSession {
       });
     }
     const page = await this.hooks.createSubpage(title, content);
+    this.created.add(page.id);
     const op = this.record({ op: "create_page", page, content: clone(content) });
     return { result: { page_id: page.id }, ops: [op], summary: `Created subpage “${title}”`, blockIds: [] };
   }

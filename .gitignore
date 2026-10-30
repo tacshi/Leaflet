@@ -4,3 +4,7 @@
 mygo_windows_*.syso
 .DS_Store
 *.log
+
+# Supabase CLI local state
+supabase/.branches/
+supabase/.temp/

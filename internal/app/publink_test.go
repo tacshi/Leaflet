@@ -536,3 +536,26 @@ func TestPubFollowsRecordings(t *testing.T) {
 		t.Errorf("the page did not follow the recording: %s", w.Body)
 	}
 }
+
+// A comment the app took too long to take is not stored after the
+// visitor was told so, nor counted against them.
+func TestPubCommentTimedOut(t *testing.T) {
+	a, p, h, pg := pubTest(t)
+	wait := pubAnswerWait
+	pubAnswerWait = 10 * time.Millisecond
+	t.Cleanup(func() { pubAnswerWait = wait })
+	var held []func()
+	a.post = func(fn func()) { held = append(held, fn) }
+	if w := postComment(h, "https://quiet-river.trycloudflare.com", `{"block":"p1","name":"Ann","body":"Late"}`); w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("comment: %d %s", w.Code, w.Body)
+	}
+	for _, fn := range held {
+		fn()
+	}
+	if threads, _ := a.st.Threads(pg.ID); len(threads) != 0 {
+		t.Errorf("stored after it timed out: %+v", threads)
+	}
+	if p.total != 0 || len(p.posts["203.0.113.7"]) != 0 {
+		t.Errorf("counted: %d, %v", p.total, p.posts)
+	}
+}

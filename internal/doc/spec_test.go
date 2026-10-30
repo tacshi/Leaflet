@@ -19,6 +19,21 @@ func TestSpecNestingIsBounded(t *testing.T) {
 	if _, err := SpecToNode(map[string]any{"type": "bulleted_list", "text": "x", "children": many}, "", "Agent"); err == nil {
 		t.Error("3000 items")
 	}
+	// A table's cells count, so a table can't be as big as an agent likes.
+	var rows []any
+	for range 100 {
+		row := make([]any, 100)
+		for i := range row {
+			row[i] = "x"
+		}
+		rows = append(rows, row)
+	}
+	if _, err := SpecToNode(map[string]any{"type": "table", "rows": rows}, "", "Agent"); err == nil {
+		t.Error("100 by 100 table")
+	}
+	if _, err := SpecToNode(map[string]any{"type": "table", "rows": rows[:10]}, "", "Agent"); err != nil {
+		t.Error(err)
+	}
 	ok := map[string]any{"type": "bulleted_list", "text": "x", "children": []any{map[string]any{"type": "bulleted_list", "text": "y"}}}
 	if _, err := SpecToNode(ok, "", "Agent"); err != nil {
 		t.Error(err)

@@ -887,6 +887,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 var (
 	errPubStopped  = errors.New("the link stopped")
 	errPubNoThread = errors.New("the thread was resolved or deleted")
+	errPubNoAnswer = errors.New("the app did not answer")
 )
 
 // visitorEmail is the email Cloudflare Access verified for a request, or
@@ -986,7 +987,18 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 		err error
 	}
 	done := make(chan result, 1)
+	// started is set once the main thread takes the comment to store,
+	// abandoned once the visitor was told it was not stored: then it
+	// isn't. Both are under p.mu.
+	started, abandoned := false, false
 	a.update(func() {
+		p.mu.Lock()
+		gone := abandoned
+		started = !gone
+		p.mu.Unlock()
+		if gone {
+			return
+		}
 		if a.pub != p {
 			done <- result{err: errPubStopped}
 			return
@@ -1014,29 +1026,47 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 		}
 		done <- result{job: a.pubJob(p), err: err}
 	})
+	var res result
 	select {
-	case res := <-done:
-		if res.err != nil {
-			// A comment not stored counts against no one's limit.
-			p.mu.Lock()
-			if i := slices.Index(p.posts[visitor], now); i >= 0 {
-				p.posts[visitor] = slices.Delete(p.posts[visitor], i, i+1)
-			}
-			p.total--
-			p.mu.Unlock()
-			status := http.StatusInternalServerError
-			if errors.Is(res.err, errPubNoThread) {
-				status = http.StatusBadRequest
-			}
-			refuse(status, res.err.Error())
-			return
+	case res = <-done:
+	case <-time.After(pubAnswerWait):
+		// Not yet taken to store, the comment never is; taken, it is
+		// waited for, to say how that went.
+		p.mu.Lock()
+		taken := started
+		abandoned = !taken
+		p.mu.Unlock()
+		if taken {
+			res = <-done
+		} else {
+			res.err = errPubNoAnswer
 		}
-		p.render(res.job)
-		w.WriteHeader(http.StatusNoContent)
-	case <-time.After(15 * time.Second):
-		refuse(http.StatusServiceUnavailable, "the app did not answer")
 	}
+	if res.err != nil {
+		// A comment not stored counts against no one's limit.
+		p.mu.Lock()
+		if i := slices.Index(p.posts[visitor], now); i >= 0 {
+			p.posts[visitor] = slices.Delete(p.posts[visitor], i, i+1)
+		}
+		p.total--
+		p.mu.Unlock()
+		status := http.StatusInternalServerError
+		switch {
+		case errors.Is(res.err, errPubNoThread):
+			status = http.StatusBadRequest
+		case errors.Is(res.err, errPubNoAnswer):
+			status = http.StatusServiceUnavailable
+		}
+		refuse(status, res.err.Error())
+		return
+	}
+	p.render(res.job)
+	w.WriteHeader(http.StatusNoContent)
 }
+
+// pubAnswerWait is how long a visitor's comment waits for the main
+// thread to take it.
+var pubAnswerWait = 15 * time.Second
 
 // pubEmbedPage is an embed's HTML for a visitor's sandboxed frame: in the
 // visitor's light or dark, as embedPage gives it the app's, and telling

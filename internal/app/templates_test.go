@@ -537,3 +537,59 @@ func TestTemplateWaitsForRecording(t *testing.T) {
 		t.Errorf("once transcribed the page holds %q", got)
 	}
 }
+
+// A template of no blocks leaves the page its empty paragraph, to type
+// in, and still gives it its subpages and title.
+func TestEmptyTemplate(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.TextSize = 16
+	tp, err := a.st.CreatePage(store.NewPageOptions{Title: "Empty", Template: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.st.SaveContent(tp.ID, &doc.Content{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.CreatePage(store.NewPageOptions{ParentID: tp.ID, Title: "Sub"}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	choice, ok := a.templateByKey("template:" + tp.ID)
+	if !ok {
+		t.Fatal("no template")
+	}
+	a.newPage("", "")
+	a.applyTemplate(choice)
+	if n := len(a.page.editor.Content.Children); n != 1 || !a.isEmpty() {
+		t.Fatalf("%d blocks", n)
+	}
+	if kids := a.children(a.page.id, "", false); len(kids) != 1 || a.page.title != "Empty" {
+		t.Errorf("subpages %+v, title %q", kids, a.page.title)
+	}
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
+	tt.Frame()
+	a.caretAtEnd()
+	a.page.titleLeave = true
+	tt.Frame()
+}
+
+// A page whose edits could not be saved isn't copied without them: no
+// duplicate, nor template, is made.
+func TestCopiesWaitForTheSave(t *testing.T) {
+	a := templatesApp(t)
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.page.title = "Typed title"
+	if _, err := a.st.DB().Exec(`CREATE TRIGGER full BEFORE UPDATE ON pages WHEN OLD.id = '` + p.ID + `' BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	pages, templates := len(a.pages), len(a.templates)
+	a.duplicatePage(*a.pageByID(p.ID))
+	a.saveAsTemplate(*a.pageByID(p.ID))
+	a.reloadAll()
+	if len(a.pages) != pages || len(a.templates) != templates {
+		t.Errorf("%d pages and %d templates, want %d and %d", len(a.pages), len(a.templates), pages, templates)
+	}
+}

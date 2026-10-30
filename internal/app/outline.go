@@ -31,15 +31,20 @@ func (a *App) openBlock(pageID, blockID string) {
 	a.goToBlock(blockID)
 }
 
-// goToBlock shows a block of the open page at the top, unfolding the
-// headings that hide it, puts the caret there and lights it up for a
-// moment.
+// goToBlock shows a block of the open page at the top, opening the
+// toggles and unfolding the headings that hide it, puts the caret there
+// and lights it up for a moment.
 func (a *App) goToBlock(id string) {
 	ps := a.page
+	for loc := ps.editor.Content.Locate(id); loc != nil && loc.Parent != nil; loc = ps.editor.Content.Locate(loc.Parent.ID) {
+		if p := loc.Parent; p.Type == "toggle_list" && p.Bool("collapsed") {
+			ps.editor.ToggleCollapsed(p.ID)
+		}
+	}
 	ps.editor.Reveal(id)
 	ps.editor.PlaceCaret(id, 0)
 	ps.editor.Focus()
-	ps.scrollTo = id
+	ps.scrollTo, ps.scrollWait = id, 0
 	if a.win != nil {
 		a.win.Invalidate()
 	}
@@ -128,6 +133,10 @@ func headingTree(heads []*doc.Node) ([]string, map[string][]string) {
 // page; a heading within twice that of the top is the one the page is at.
 const scrollMargin = 24
 
+// scrollWaitMax is how many frames scrollToBlock waits for a block to be
+// laid out, as one hidden never is.
+const scrollWaitMax = 10
+
 // scrollToBlock brings the block asked for to the top of the page, once
 // the page has laid it out.
 func (a *App) scrollToBlock() {
@@ -138,6 +147,10 @@ func (a *App) scrollToBlock() {
 	top, ok := ps.editor.BlockTop(ps.scrollTo)
 	if !ok || ps.viewTop == 0 {
 		// Not laid out yet: the next frame has it.
+		if ps.scrollWait++; ps.scrollWait > scrollWaitMax {
+			ps.scrollTo = ""
+			return
+		}
 		if a.win != nil {
 			a.win.Invalidate()
 		}

@@ -3,12 +3,14 @@ package app
 import (
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // The byline's tag button edits the page's tags in a token field, which
@@ -51,5 +53,24 @@ func TestBylineTags(t *testing.T) {
 	}
 	if a.settings.SidebarTab != tabTags || !a.tagTree.Open.Has("tag:work") {
 		t.Errorf("a click on the tag showed tab %d, open %v", a.settings.SidebarTab, a.tagTree.Open.Has("tag:work"))
+	}
+}
+
+// Today and yesterday in the byline are days of the calendar, not 24 and
+// 48 hours.
+func TestHumanTimeByTheCalendar(t *testing.T) {
+	now := time.Date(2026, 3, 10, 9, 0, 0, 0, time.Local)
+	for _, c := range []struct {
+		at   time.Time
+		want string
+	}{
+		{time.Date(2026, 3, 10, 1, 0, 0, 0, time.Local), locales.PageTimeTodayAt(time.Date(2026, 3, 10, 1, 0, 0, 0, time.Local))},
+		{time.Date(2026, 3, 9, 23, 0, 0, 0, time.Local), locales.PageTimeYesterdayAt(time.Date(2026, 3, 9, 23, 0, 0, 0, time.Local))},
+		{time.Date(2026, 3, 9, 0, 30, 0, 0, time.Local), locales.PageTimeYesterdayAt(time.Date(2026, 3, 9, 0, 30, 0, 0, time.Local))},
+		{time.Date(2026, 3, 8, 23, 0, 0, 0, time.Local), locales.PageTimeDate(time.Date(2026, 3, 8, 23, 0, 0, 0, time.Local))},
+	} {
+		if got := humanTimeAt(c.at.UTC(), now); got != c.want {
+			t.Errorf("%v: %q, want %q", c.at, got, c.want)
+		}
 	}
 }

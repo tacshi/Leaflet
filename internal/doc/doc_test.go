@@ -402,7 +402,7 @@ func TestColorsRoundTrip(t *testing.T) {
 func TestMergeMoveIntoANewBlock(t *testing.T) {
 	base := page(map[string]int64{"a": 1, "x": 1, "y": 1}, para("a", "one"), para("x", "two"), para("y", "three"))
 	box := para("box", "box")
-	box.Type = "toggle"
+	box.Type = "toggle_list"
 	box.Children = []*Node{para("x", "two"), para("y", "three")}
 	wrapped := page(map[string]int64{"a": 1, "x": 2, "y": 2, "box": 2}, para("a", "one"), box)
 	edited := page(map[string]int64{"a": 3, "x": 1, "y": 1}, para("a", "ONE"), para("x", "two"), para("y", "three"))
@@ -424,7 +424,7 @@ func first(c *Content, _ []Conflict) *Content { return c }
 func TestMergeInsertAfterABlockMovedElsewhere(t *testing.T) {
 	toggle := func(kids ...*Node) *Node {
 		n := para("t", "t")
-		n.Type = "toggle"
+		n.Type = "toggle_list"
 		n.Children = kids
 		return n
 	}
@@ -534,6 +534,96 @@ func TestFailedMoveKeepsTheBlock(t *testing.T) {
 		if got := c.Encode(); got != original {
 			t.Errorf("move to %+v changed the page:\n%s", p, got)
 		}
+	}
+}
+
+// A block moves into a list, but not into a block of another kind, nor
+// into or out of a table.
+func TestMoveOnlyIntoWhatHoldsBlocks(t *testing.T) {
+	table, _ := TableNode([][]string{{"x", "y"}}, "t")
+	cell := table.Children[0]
+	for _, tc := range []struct {
+		id string
+		p  Position
+	}{
+		{"b", Position{Parent: "a"}},
+		{"b", Position{Parent: "t"}},
+		{"b", Position{After: cell.ID}},
+		{"b", Position{Before: cell.Children[0].ID}},
+		{cell.ID, Position{After: "a"}},
+		{cell.Children[0].ID, Position{At: "end"}},
+	} {
+		c := FromBlocks([]*Node{para("a", "a"), para("b", "b"), table.Clone()})
+		original := c.Copy().Encode()
+		if err := c.Move(tc.id, tc.p); err == nil {
+			t.Errorf("move of %s to %+v: no error", tc.id, tc.p)
+		}
+		if got := c.Encode(); got != original {
+			t.Errorf("move of %s to %+v changed the page:\n%s", tc.id, tc.p, got)
+		}
+	}
+	// Cells still move within their table, as a merge moves them.
+	c := FromBlocks([]*Node{table.Clone()})
+	if err := c.Move(cell.ID, Position{After: table.Children[1].ID}); err != nil {
+		t.Error(err)
+	}
+}
+
+// Undo run puts a deleted block back even when the block it went after
+// has gone since, and once only when it is back already.
+func TestUndoRunInsertsWhatIsMissing(t *testing.T) {
+	c := FromBlocks([]*Node{para("a", "a"), para("x", "x"), para("b", "b")})
+	o := c.DeleteOp([]string{"x"})
+	if err := c.Apply(o); err != nil {
+		t.Fatal(err)
+	}
+	c.Remove("a")
+	for _, inv := range InvertRun([]Op{o}) {
+		if err := c.Apply(inv); err != nil {
+			t.Error(err)
+		}
+	}
+	if got := texts(c); !reflect.DeepEqual(got, []string{"b", "x"}) {
+		t.Errorf("anchor gone: %v", got)
+	}
+
+	c = FromBlocks([]*Node{para("a", "a"), para("x", "x"), para("b", "b")})
+	o = c.DeleteOp([]string{"x"})
+	_ = c.Apply(o)
+	_ = c.Insert(Position{After: "a"}, para("x", "x"))
+	for _, inv := range InvertRun([]Op{o}) {
+		_ = c.Apply(inv)
+	}
+	if got := texts(c); !reflect.DeepEqual(got, []string{"a", "x", "b"}) {
+		t.Errorf("back already: %v", got)
+	}
+
+	// A list whose item came back on its own comes back without it.
+	list := &Node{ID: "l", Type: "bulleted_list", Children: []*Node{para("k", "k")}}
+	list.SetDelta(Delta{{Text: "l"}})
+	c = FromBlocks([]*Node{para("a", "a"), list})
+	o = c.DeleteOp([]string{"l"})
+	_ = c.Apply(o)
+	_ = c.Insert(Position{At: "end"}, para("k", "k"))
+	for _, inv := range InvertRun([]Op{o}) {
+		_ = c.Apply(inv)
+	}
+	if got := texts(c); !reflect.DeepEqual(got, []string{"a", "l", "k"}) || len(c.Find("l").Children) != 0 {
+		t.Errorf("child back already: %v", got)
+	}
+
+	// An item whose list became a paragraph since comes back after it.
+	list = &Node{ID: "l", Type: "bulleted_list", Children: []*Node{para("k", "k")}}
+	list.SetDelta(Delta{{Text: "l"}})
+	c = FromBlocks([]*Node{list, para("z", "z")})
+	o = c.DeleteOp([]string{"k"})
+	_ = c.Apply(o)
+	c.Find("l").Type = "paragraph"
+	for _, inv := range InvertRun([]Op{o}) {
+		_ = c.Apply(inv)
+	}
+	if got := texts(c); !reflect.DeepEqual(got, []string{"l", "k", "z"}) || len(c.Find("l").Children) != 0 {
+		t.Errorf("list gone: %v", got)
 	}
 }
 
@@ -677,19 +767,27 @@ func TestInlineMarkdownFormatIntoLink(t *testing.T) {
 			"*[docs](https://x.dev) here*"},
 		{Delta{{Text: "a ", Attrs: Attrs{Italic: true}}, {Text: "b", Attrs: Attrs{Italic: true, Bold: true}}},
 			"*a __b__*"},
+		// A format closed at a link's end and opened again past it keeps
+		// its markers off the spaces there, which lose it.
+		{Delta{{Text: "read ", Attrs: Attrs{Href: "https://x.dev"}}, {Text: "this ", Attrs: Attrs{Href: "https://x.dev", Italic: true}},
+			{Text: "and that", Attrs: Attrs{Italic: true}}},
+			"[read *this* ](https://x.dev)*and that*"},
+		{Delta{{Text: "this", Attrs: Attrs{Href: "https://x.dev", Italic: true}}, {Text: " and that", Attrs: Attrs{Italic: true}}},
+			"*[this](https://x.dev) and that*"},
+		{Delta{{Text: "go ", Attrs: Attrs{Href: "https://x.dev"}}, {Text: "there", Attrs: Attrs{Href: "https://x.dev", Italic: true}},
+			{Text: " now", Attrs: Attrs{Italic: true}}},
+			"[go *there*](https://x.dev) *now*"},
 	} {
 		md := tc.d.ToMarkdown()
 		if md != tc.want {
 			t.Errorf("%+v wrote %q, want %q", tc.d, md, tc.want)
 		}
-		if got := FromMarkdown(md); !reflect.DeepEqual(got, tc.d.Compact()) {
+		if got := FromMarkdown(md); !sameShown(got, tc.d.Compact()) {
 			t.Errorf("%q reads back as %+v", md, got)
 		}
 	}
 	// Runs with spaces at their ends, which go outside the markers of a
-	// format ending there. A link's text keeps its spaces, so one ending
-	// in a space, which a format going on past it would have to close
-	// after, is left out.
+	// format ending there, links' text included.
 	words := []string{"a", "bc", "*", "_", "[", "中文"}
 	hrefs := []string{"https://a.b", "https://c.d"}
 	rng := rand.New(rand.NewPCG(3, 4)) // #nosec G404 -- seeded, for runs a test can repeat.
@@ -701,7 +799,7 @@ func TestInlineMarkdownFormatIntoLink(t *testing.T) {
 				a.Href = hrefs[rng.IntN(len(hrefs))]
 			}
 			text := words[rng.IntN(len(words))]
-			if rng.IntN(2) == 0 && a.Href == "" {
+			if rng.IntN(2) == 0 {
 				text += " "
 			}
 			if rng.IntN(3) == 0 {
@@ -710,10 +808,34 @@ func TestInlineMarkdownFormatIntoLink(t *testing.T) {
 			d = append(d, Run{Text: text, Attrs: a})
 		}
 		md := d.ToMarkdown()
-		if want, got := trimSpans(d.Compact()), FromMarkdown(md); !reflect.DeepEqual(got, want) {
+		if want, got := trimSpans(d.Compact()), FromMarkdown(md); !sameShown(got, want) {
 			t.Fatalf("%+v wrote %q, which reads back as %+v", want, md, got)
 		}
 	}
+}
+
+// sameShown reports whether two texts read the same: the same characters
+// in the same formats, but for bold, italic and strike on spaces, which
+// Markdown can't always say.
+func sameShown(a, b Delta) bool {
+	type char struct {
+		r rune
+		a Attrs
+	}
+	chars := func(d Delta) []char {
+		var out []char
+		for _, r := range d {
+			for _, c := range r.Text {
+				a := r.Attrs
+				if c == ' ' && !a.Code {
+					a.Bold, a.Italic, a.Strike = false, false, false
+				}
+				out = append(out, char{c, a})
+			}
+		}
+		return out
+	}
+	return reflect.DeepEqual(chars(a), chars(b))
 }
 
 func TestEscapeBlockStart(t *testing.T) {

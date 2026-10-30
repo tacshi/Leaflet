@@ -267,3 +267,59 @@ func TestMarkMentions(t *testing.T) {
 		}
 	}
 }
+
+// An agent runs for a comment that mentions it where the comment shows it
+// marked: not in code, an address, a longer word or after a backslash.
+func TestAgentInCommentOnlyWhenMentioned(t *testing.T) {
+	names := []string{"agent", "Ollama"}
+	for in, want := range map[string]bool{
+		"@agent sum it up": true, "ask @Ollama": true,
+		"`@agent`": false, "```\n@agent\n```": false, `\@agent`: false,
+		"me@ollama.com": false, "@agentic": false, "@Ollamas": false,
+	} {
+		if got := len(mentioned(in, names)) > 0; got != want {
+			t.Errorf("mentioned(%q) = %v", in, got)
+		}
+	}
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.agentInComment(store.Comment{ID: "c1", BlockID: "b1"}, "write to me@ollama.com, not `@agent`")
+	if a.hub.Session(p.ID).Running {
+		t.Error("an agent runs for a comment that mentions none")
+	}
+}
+
+// Show resolved stays as chosen when a comment's badge opens its thread,
+// and a search hit in a resolved thread shows the resolved ones.
+func TestShowResolvedApartFromTheFocus(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.TextSize = 16
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	a.reloadAll()
+	a.openPage(p.ID)
+	root, err := a.st.AddComment(p.ID, "b1", "Old question", "", "", "user", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.SetResolved(root.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	a.page.threads, _ = a.st.Threads(p.ID)
+	a.dialogs.showResolved = true
+	(&host{a: a}).OpenComments("b2")
+	if !a.dialogs.showResolved {
+		t.Error("a badge's click turned Show resolved off")
+	}
+	a.dialogs.showResolved = false
+	a.openHit(store.SearchHit{Kind: "comment", PageID: p.ID, BlockID: "b1"})
+	if !a.dialogs.showResolved || a.dialogs.commentFocus != "b1" {
+		t.Errorf("search hit: show resolved %v, focus %q", a.dialogs.showResolved, a.dialogs.commentFocus)
+	}
+}

@@ -9,6 +9,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/store"
 )
 
 func TestReadLinkInfo(t *testing.T) {
@@ -127,5 +128,22 @@ func TestSetMediaLink(t *testing.T) {
 	ed.Undo()
 	if n := ed.Content.Find("vid"); n.Str("url") != "https://youtu.be/dQw4w9WgXcQ" || n.Str("title") != "Old" {
 		t.Errorf("after undo, video %v", n.Data)
+	}
+}
+
+// A link card's info is kept in its page though the page closed before
+// the link's page answered.
+func TestLinkInfoKeptInAClosedPage(t *testing.T) {
+	a := templatesApp(t)
+	card := &doc.Node{ID: "l1", Type: "link_preview", Data: map[string]any{"url": "https://go.dev/"}}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Links", Content: doc.FromBlocks([]*doc.Node{card})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.keepLinkInfo(p.ID, "https://go.dev/", linkInfo{title: "Go", site: "go.dev"})
+	n := a.st.Content(p.ID).Find("l1")
+	if n == nil || n.Str("title") != "Go" || n.Str("site") != "go.dev" {
+		t.Errorf("stored card %+v", n)
 	}
 }

@@ -81,29 +81,37 @@ const (
 // itself; tests shorten it.
 var idleTimeout = 2 * time.Minute
 
+// streamIdleTimeout is idleTimeout for a streamed answer, ChatGPT's: its
+// Responses API sends nothing while the model reasons, which can take
+// minutes before the first word.
+var streamIdleTimeout = 10 * time.Minute
+
 // errIdle is an answer that stopped coming.
 var errIdle = errors.New("the model stopped answering")
 
 // The transports are made on first use, after main gives
 // http.DefaultTransport the system's proxy (netproxy), so they keep it.
 var (
-	answerTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(answerTimeout) })
-	streamTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(streamTimeout) })
+	answerTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(answerTimeout, &idleTimeout) })
+	streamTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(streamTimeout, &streamIdleTimeout) })
 )
 
 // modelTransport is http.DefaultTransport giving up on a server that sends
-// no headers within header, or no more of its answer within idleTimeout.
-func modelTransport(header time.Duration) http.RoundTripper {
+// no headers within header, or no more of its answer within *idle.
+func modelTransport(header time.Duration, idle *time.Duration) http.RoundTripper {
 	base := http.DefaultTransport
 	if t, ok := base.(*http.Transport); ok {
 		t = t.Clone()
 		t.ResponseHeaderTimeout = header
 		base = t
 	}
-	return idleTransport{base}
+	return idleTransport{base, idle}
 }
 
-type idleTransport struct{ base http.RoundTripper }
+type idleTransport struct {
+	base http.RoundTripper
+	idle *time.Duration
+}
 
 func (t idleTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	ctx, cancel := context.WithCancelCause(req.Context())
@@ -112,8 +120,8 @@ func (t idleTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		cancel(nil)
 		return nil, err
 	}
-	b := &idleBody{ReadCloser: res.Body, ctx: ctx, cancel: cancel}
-	b.timer = time.AfterFunc(idleTimeout, func() { cancel(errIdle) })
+	b := &idleBody{ReadCloser: res.Body, ctx: ctx, cancel: cancel, idle: *t.idle}
+	b.timer = time.AfterFunc(b.idle, func() { cancel(errIdle) })
 	res.Body = b
 	return res, nil
 }
@@ -124,12 +132,13 @@ type idleBody struct {
 	ctx    context.Context
 	cancel context.CancelCauseFunc
 	timer  *time.Timer
+	idle   time.Duration
 }
 
 func (b *idleBody) Read(p []byte) (int, error) {
 	n, err := b.ReadCloser.Read(p)
 	if n > 0 {
-		b.timer.Reset(idleTimeout)
+		b.timer.Reset(b.idle)
 	}
 	if err != nil && context.Cause(b.ctx) == errIdle {
 		err = errIdle

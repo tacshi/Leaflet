@@ -449,22 +449,23 @@ func (s *Service) requeueAll(spaceID string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), moveWait)
 	defer cancel()
+	// Each row goes as stored when it is queued, not as read here: a
+	// change made meanwhile, as a deletion, is not undone.
 	var queued error
 	pages, err := s.st.AllPages()
 	queued = errors.Join(queued, err)
 	for _, p := range pages {
-		queued = errors.Join(queued, s.st.Queue("pages", p.ID, store.PageToRemote(p), "", p.ID))
-		queued = errors.Join(queued, s.st.Queue("page_content", p.ID, map[string]any{"page_id": p.ID}, "page from this device", p.ID))
+		queued = errors.Join(queued, s.st.Requeue("pages", p.ID))
 	}
 	folders, err := s.st.Folders()
 	queued = errors.Join(queued, err)
 	for _, f := range folders {
-		queued = errors.Join(queued, s.st.Queue("folders", f.ID, store.FolderToRemote(f), "", ""))
+		queued = errors.Join(queued, s.st.Requeue("folders", f.ID))
 	}
 	comments, err := s.st.AllComments()
 	queued = errors.Join(queued, err)
 	for _, c := range comments {
-		queued = errors.Join(queued, s.st.Queue("comments", c.ID, store.CommentToRemote(c), "", c.PageID))
+		queued = errors.Join(queued, s.st.Requeue("comments", c.ID))
 	}
 	files, err := s.st.AllFiles()
 	queued = errors.Join(queued, err)
@@ -548,40 +549,27 @@ func (s *Service) retryMoves(ctx context.Context) error {
 
 // requeueFile queues a file to go up in space spaceID, with its contents
 // when this device has them (a deleted file's row goes alone). It changes
-// nothing while the file is in iCloud Drive but does not come here.
+// nothing while the file is in iCloud Drive but does not come here. What
+// it queues is the file as stored once it has come, as a change made
+// while it waited for it is not undone.
 func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string) error {
-	deleted := !f.DeletedAt.IsZero()
-	if !deleted && s.onlyInICloud("files", f.StoragePath, f.LocalPath) {
+	if f.DeletedAt.IsZero() && s.onlyInICloud("files", f.StoragePath, f.LocalPath) {
 		data, err := s.cloudFetch(ctx, "files", f.StoragePath)
 		if err != nil {
 			return fmt.Errorf("file %s from iCloud Drive: %w", f.Name, err)
 		}
-		if f.LocalPath, err = s.st.DownloadedFile(f.ID, data); err != nil {
+		if _, err := s.st.DownloadedFile(f.ID, data); err != nil && !store.IsNotFound(err) {
 			return err
 		}
 	}
-	f.SpaceID = spaceID
-	f.StoragePath = spaceID + "/" + f.ID + "/" + f.Name
-	if err := s.st.PutFile(f); err != nil {
-		return err
-	}
-	if err := s.st.Queue("files", f.ID, store.FileToRemote(f), "file", ""); err != nil {
-		return err
-	}
-	if deleted || !onDevice(f.LocalPath) {
-		return nil
-	}
-	ct := f.MimeType
-	if ct == "" {
-		ct = "application/octet-stream"
-	}
-	return s.st.Queue("storage", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": f.LocalPath, "content_type": ct}, "file waiting to upload", "")
+	return s.st.RequeueFile(f.ID, spaceID)
 }
 
 // requeueRecording queues a finished recording to go up with its audio,
 // which keeps the path it has until the upload gives it another. It
 // changes nothing while the audio is in iCloud Drive but does not come
-// here.
+// here. What it queues is the recording as stored once it has come, as
+// requeueFile does a file.
 func (s *Service) requeueRecording(ctx context.Context, r store.Recording) error {
 	if r.Status != "ready" && r.Status != "failed" {
 		return nil
@@ -598,17 +586,11 @@ func (s *Service) requeueRecording(ctx context.Context, r store.Recording) error
 		if err := os.WriteFile(local, data, 0o600); err != nil {
 			return err
 		}
-		if r, err = s.st.UpdateRecording(r.ID, func(x *store.Recording) { x.LocalPath = local }); err != nil {
+		if _, err := s.st.UpdateRecording(r.ID, func(x *store.Recording) { x.LocalPath = local }); err != nil && !store.IsNotFound(err) {
 			return err
 		}
 	}
-	if err := s.st.Queue("recordings", r.ID, store.RecordingToRemote(r), "", r.PageID); err != nil {
-		return err
-	}
-	if !onDevice(r.LocalPath) {
-		return nil
-	}
-	return s.st.QueueUpload(r)
+	return s.st.RequeueRecording(r.ID)
 }
 
 // onlyInICloud reports whether a file or audio is in iCloud Drive and not
@@ -712,7 +694,7 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 			payload["created_by"] = uid
 		}
 		return s.pushChanged(ctx, e.Entity, payload)
-	case "folders":
+	case "folders", "files":
 		return s.pushChanged(ctx, e.Entity, payload)
 	case "comments":
 		return s.pushComment(ctx, uid, payload)

@@ -20,7 +20,10 @@ import (
 // where the page is linked, and opens it. A page shared with the user
 // that they can't add to the parent of is copied into their own space.
 func (a *App) duplicatePage(p store.Page) {
-	a.flush()
+	// A copy without the edits waiting would lose them; the save said why.
+	if !a.flush() {
+		return
+	}
 	if a.recordingIn(p.ID) {
 		a.toast(locales.TemplateWaitForRecording())
 		return
@@ -68,7 +71,10 @@ func copyTitle(title string) string {
 // saveAsTemplate keeps a copy of a page, with its subpages, as a template
 // to start other pages from.
 func (a *App) saveAsTemplate(p store.Page) {
-	a.flush()
+	// A copy without the edits waiting would lose them; the save said why.
+	if !a.flush() {
+		return
+	}
 	if a.recordingIn(p.ID) {
 		a.toast(locales.TemplateWaitForRecording())
 		return
@@ -358,8 +364,11 @@ func (a *App) applyTemplate(t templateChoice) bool {
 	if !ok {
 		return false
 	}
-	ps.editor.Edit(func(cur *doc.Content) { cur.Children = blocks })
-	a.savePage()
+	// A template of no blocks leaves the page its empty paragraph.
+	if len(blocks) > 0 {
+		ps.editor.Edit(func(cur *doc.Content) { cur.Children = blocks })
+		a.savePage()
+	}
 	if strings.TrimSpace(ps.title) != "" || t.name() == "" {
 		return false
 	}

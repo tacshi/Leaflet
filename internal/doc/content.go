@@ -355,18 +355,39 @@ func (c *Content) Replace(id string, n *Node) error {
 // Move moves a block, with its children, to a position. It checks the
 // position first, so a failed move leaves the block where it was.
 func (c *Content) Move(id string, p Position) error {
-	if c.Find(id) == nil {
+	from := c.Locate(id)
+	if from == nil {
 		return fmt.Errorf("no block %s", id)
 	}
 	if a := p.Anchor(); a != "" {
-		if c.Find(a) == nil {
+		loc := c.Locate(a)
+		if loc == nil {
 			return fmt.Errorf("no block %s", a)
 		}
 		if c.IsSelfOrAncestor(id, a) {
 			return fmt.Errorf("block %s can't move next to or inside itself", id)
 		}
+		// Only a list takes nested blocks; a table and its cells keep
+		// theirs, and take no others.
+		to := loc.Parent
+		if p.Parent != "" {
+			to = loc.Node
+		}
+		if p.Parent != "" && !NestableTypes[to.Type] && !inTable(to) {
+			return fmt.Errorf("block %s can't hold blocks", a)
+		}
+		if (inTable(to) || inTable(from.Parent)) && to != from.Parent {
+			return fmt.Errorf("block %s can't move into or out of a table", id)
+		}
+	} else if inTable(from.Parent) {
+		return fmt.Errorf("block %s can't move out of a table", id)
 	}
 	return c.Insert(p, c.Remove(id))
+}
+
+// inTable reports whether n is a table or one of its cells.
+func inTable(n *Node) bool {
+	return n != nil && (n.Type == "table" || n.Type == "table/cell")
 }
 
 // IsSelfOrAncestor reports whether ancestor is id or holds it.

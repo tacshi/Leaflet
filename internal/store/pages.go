@@ -558,25 +558,23 @@ func (s *Store) movePage(id, parentID, folderID string, key func(q querier, spac
 
 // keyAfter is a sort key for a page put after afterID among the pages
 // under parentID, or the top-level pages of folderID, or last when afterID
-// is "". skip, the page being put, is left out of them.
+// is "" or not among them: a key between nothing and nothing is the one
+// rows from the server have, which would sort it anywhere among them.
+// skip, the page being put, is left out of them.
 func keyAfter(q querier, parentID, spaceID, folderID, afterID, skip string) (string, error) {
 	siblings, err := siblings(q, parentID, spaceID, folderID, skip)
 	if err != nil {
 		return "", err
 	}
+	i := slices.IndexFunc(siblings, func(p Page) bool { return p.ID == afterID })
+	if afterID == "" || i < 0 {
+		i = len(siblings) - 1
+	}
 	before, after := "", ""
-	if afterID == "" {
-		if len(siblings) > 0 {
-			before = siblings[len(siblings)-1].SortKey
-		}
-	} else {
-		for i, q := range siblings {
-			if q.ID == afterID {
-				before = q.SortKey
-				if i+1 < len(siblings) {
-					after = siblings[i+1].SortKey
-				}
-			}
+	if i >= 0 {
+		before = siblings[i].SortKey
+		if i+1 < len(siblings) {
+			after = siblings[i+1].SortKey
 		}
 	}
 	if before != "" && after != "" && before >= after {

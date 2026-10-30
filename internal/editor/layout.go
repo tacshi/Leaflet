@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
+	"github.com/egoist/mygo/ui/markdown/parser"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
@@ -510,18 +511,16 @@ func parseLines(text string) []*doc.Node {
 		indent := strings.Count(line[:len(line)-len(trimmed)], " ") + 2*strings.Count(line[:len(line)-len(trimmed)], "\t")
 		typ, rest := "paragraph", trimmed
 		level, checked := 0, false
+		hashes := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
+		bullet := len(trimmed) >= 2 && strings.ContainsRune("-*+", rune(trimmed[0])) && trimmed[1] == ' '
 		switch {
-		case strings.HasPrefix(trimmed, "### "):
-			typ, level, rest = "heading", 3, trimmed[4:]
-		case strings.HasPrefix(trimmed, "## "):
-			typ, level, rest = "heading", 2, trimmed[3:]
-		case strings.HasPrefix(trimmed, "# "):
-			typ, level, rest = "heading", 1, trimmed[2:]
-		case strings.HasPrefix(trimmed, "- [ ] "), strings.HasPrefix(trimmed, "* [ ] "):
+		case hashes >= 1 && hashes <= 6 && strings.HasPrefix(trimmed[hashes:], " "):
+			typ, level, rest = "heading", hashes, trimmed[hashes+1:]
+		case bullet && strings.HasPrefix(trimmed[2:], "[ ] "):
 			typ, rest = "todo_list", trimmed[6:]
-		case strings.HasPrefix(trimmed, "- [x] "), strings.HasPrefix(trimmed, "* [x] "):
+		case bullet && (strings.HasPrefix(trimmed[2:], "[x] ") || strings.HasPrefix(trimmed[2:], "[X] ")):
 			typ, rest, checked = "todo_list", trimmed[6:], true
-		case strings.HasPrefix(trimmed, "- "), strings.HasPrefix(trimmed, "* "):
+		case bullet:
 			typ, rest = "bulleted_list", trimmed[2:]
 		case strings.HasPrefix(trimmed, "> "):
 			typ, rest = "quote", trimmed[2:]
@@ -530,7 +529,12 @@ func parseLines(text string) []*doc.Node {
 			out = append(out, &doc.Node{ID: doc.NewBlockID(), Type: "divider"})
 			continue
 		default:
-			if i := strings.Index(trimmed, ". "); i > 0 && i < 4 && isDigits(trimmed[:i]) {
+			if img := imageLine(trimmed); img != nil {
+				lists = nil
+				out = append(out, img)
+				continue
+			}
+			if i := strings.IndexAny(trimmed, ".)"); i > 0 && i < 4 && isDigits(trimmed[:i]) && strings.HasPrefix(trimmed[i+1:], " ") {
 				typ, rest = "numbered_list", trimmed[i+2:]
 			}
 		}
@@ -603,6 +607,29 @@ func tableRow(line string) []string {
 		return nil
 	}
 	return cells
+}
+
+// imageLine reads a line that is only a picture from the web, as
+// "![alt](https://…/a.png)", as an image block; nil for any other line.
+func imageLine(line string) *doc.Node {
+	if !strings.HasPrefix(line, "![") {
+		return nil
+	}
+	md := parser.New(parser.GFM)
+	md.Set(line)
+	if md.Len() != 2 || md.Block(1).Kind != parser.Paragraph {
+		return nil
+	}
+	in := md.Inlines(1)
+	if len(in) == 0 || in[0].Kind != parser.Image || in[0].Next != len(in) {
+		return nil
+	}
+	n, err := doc.ImageNode(in[0].Dest)
+	if err != nil {
+		return nil
+	}
+	n.Set("alt", parser.PlainText(in[1:]))
+	return n
 }
 
 func isDigits(s string) bool {
@@ -716,6 +743,9 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 		for _, b := range blocks {
 			_ = e.Content.Insert(doc.Position{Before: n.ID}, b)
 		}
+		// Before a heading that ends a folded section, they would join
+		// it, out of sight.
+		e.keepShown(first.ID)
 		e.layouts = map[string]*blockLayout{}
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
 		e.changed()
@@ -804,6 +834,11 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 			_ = e.Content.Insert(doc.Position{After: at}, k)
 			at = k.ID
 		}
+	}
+	// The caret's block turned into a list item no longer ends a folded
+	// section before it, which would take it and what was pasted.
+	for _, id := range []string{n.ID, first.ID, last.ID} {
+		e.keepShown(id)
 	}
 	e.layouts = map[string]*blockLayout{}
 	e.Select(Pos{last.ID, off}, Pos{last.ID, off})

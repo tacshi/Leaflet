@@ -1066,6 +1066,123 @@ func TestICloudDeletedFileLeavesTheFolder(t *testing.T) {
 	}
 }
 
+// A folder deleted on a device that has not yet heard of a deletion of a
+// file in it moves the file to the top level, and the file stays deleted:
+// only the move goes.
+func TestICloudDeletedFolderKeepsAFileDeletedElsewhere(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	folder, err := a.st.CreateFolder("Folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := a.st.AddFile(src, folder.ID, "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if err := b.st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	time.Sleep(3 * time.Millisecond)
+	if err := a.st.DeleteFolder(folder); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	for i, d := range []*cloudDevice{a, b} {
+		if got, _ := d.st.File(f.ID); got.DeletedAt.IsZero() || got.FolderID != "" {
+			t.Errorf("device %d: file in %q, deleted %v", i, got.FolderID, got.DeletedAt)
+		}
+	}
+}
+
+// Sending everything again queues each file as stored once those before
+// it have come from iCloud Drive: a file deleted while it waited for one
+// stays deleted.
+func TestRequeueKeepsAFileDeletedWhileItWaits(t *testing.T) {
+	old := moveWait
+	moveWait = 400 * time.Millisecond
+	t.Cleanup(func() { moveWait = old })
+	root := cloudRoot(t)
+	a := newCloudDevice(t, root)
+	p := a.page("Attachments")
+	add := func(name string) store.File {
+		t.Helper()
+		src := filepath.Join(t.TempDir(), name)
+		if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f, err := a.st.AddFile(src, "", p.ID, "text/plain")
+		if err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(3 * time.Millisecond)
+		return f
+	}
+	// Newest first: the file that waits goes before the other.
+	kept, waits := add("kept.txt"), add("waits.txt")
+	a.sync()
+	w, _ := a.st.File(waits.ID)
+	if err := os.Remove(w.LocalPath); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := blobPath("files", w.StoragePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.Rename(path, filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".icloud")); err != nil {
+		t.Fatal(err)
+	}
+	a.svc.SetICloud(false)
+	deleted := make(chan error)
+	go func() {
+		time.Sleep(moveWait / 4)
+		deleted <- a.st.DeleteFile(kept)
+	}()
+	if err := a.svc.requeueAll("00000000-0000-0000-0000-0000000000a2"); err == nil {
+		t.Error("requeueAll said all went")
+	}
+	if err := <-deleted; err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := a.st.File(kept.ID); got.DeletedAt.IsZero() {
+		t.Error("the file deleted meanwhile came back")
+	}
+}
+
+// A change held for a row that then does not apply is held again, and
+// does not hold up the other devices' batches.
+func TestICloudHeldChangeThatFailsLetsPullsGoOn(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	syncAll(a, b)
+	// A row B cannot read, so the change held for it does not apply.
+	id := doc.NewRowID()
+	if _, err := b.st.DB().Exec(`INSERT INTO comments (id, page_id, block_id, body, created_at, updated_at)
+		VALUES (?, 'p', 'b', 'x', 'bad', 'bad')`, id); err != nil {
+		t.Fatal(err)
+	}
+	held := icloud.Entry{Kind: "row", Table: "comments", ID: id, At: 1, By: a.st.DeviceID(), Row: map[string]any{"id": id, "body": "y"}}
+	if err := b.svc.hold(held); err != nil {
+		t.Fatal(err)
+	}
+	p := a.page("After")
+	a.sync()
+	b.sync()
+	if got := b.title(p.ID); got != "After" {
+		t.Errorf("B has %q", got)
+	}
+	if len(b.svc.held("comments", id)) != 1 {
+		t.Error("the change that did not apply is not held again")
+	}
+}
+
 // Two devices that move pages inside each other at once would leave them
 // in a loop, each under the other: both put the page of it with the least
 // ID back at the top level, and keep the other under it.

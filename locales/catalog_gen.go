@@ -6787,6 +6787,20 @@ func (msgs Messages) RecCouldNotSave(error string) string {
 	return Catalog.Format(msgs.locale, "recCouldNotSave", map[string]any{"error": error})
 }
 
+// RecCouldNotPlay says "Could not play: {error}"
+// in the language the app shows.
+//
+// Toast when a recording's audio could not be loaded to play.
+func RecCouldNotPlay(error string) string { return In(i18n.Locale()).RecCouldNotPlay(error) }
+
+// RecCouldNotPlay says "Could not play: {error}"
+// in the language of msgs.
+//
+// Toast when a recording's audio could not be loaded to play.
+func (msgs Messages) RecCouldNotPlay(error string) string {
+	return Catalog.Format(msgs.locale, "recCouldNotPlay", map[string]any{"error": error})
+}
+
 // RecStarting says "Starting…"
 // in the language the app shows.
 //
@@ -6979,6 +6993,22 @@ func RecSummarize() string { return In(i18n.Locale()).RecSummarize() }
 // Recording block menu item.
 func (msgs Messages) RecSummarize() string {
 	return Catalog.Format(msgs.locale, "recSummarize", nil)
+}
+
+// RecSummarizePrompt says "Summarize the recording “{title}” below it on the page."
+// in the language the app shows.
+//
+// Chat message sent to the agent, and shown as the user's, by a recording
+// block's Summarize with agent; the agent reads the transcript itself.
+func RecSummarizePrompt(title string) string { return In(i18n.Locale()).RecSummarizePrompt(title) }
+
+// RecSummarizePrompt says "Summarize the recording “{title}” below it on the page."
+// in the language of msgs.
+//
+// Chat message sent to the agent, and shown as the user's, by a recording
+// block's Summarize with agent; the agent reads the transcript itself.
+func (msgs Messages) RecSummarizePrompt(title string) string {
+	return Catalog.Format(msgs.locale, "recSummarizePrompt", map[string]any{"title": title})
 }
 
 // RecTranscribeAgain says "Transcribe again"

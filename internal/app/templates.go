@@ -321,34 +321,41 @@ func (a *App) editTemplate(t templateChoice) {
 
 // templateBlocks are the blocks page id takes from a template: a
 // starter's, or a copy of a template's, whose subpages it copies under the
-// page.
-func (a *App) templateBlocks(t templateChoice, id string) ([]*doc.Node, error) {
+// page. When it has none to give it says why, and reports false.
+func (a *App) templateBlocks(t templateChoice, id string) ([]*doc.Node, bool) {
 	if t.starter != nil {
-		return t.starter.nodes(), nil
+		return t.starter.nodes(), true
+	}
+	// A copy would keep a recording still being made in the template
+	// unfinished, as duplicatePage's would.
+	if a.recordingIn(t.page.ID) {
+		a.toast(locales.TemplateWaitForRecording())
+		return nil, false
 	}
 	c, err := a.st.CopyInto(t.page.ID, id)
 	if err != nil {
-		return nil, err
+		a.toast(locales.TemplateUseFailed(err.Error()))
+		return nil, false
 	}
 	a.pages, _ = a.st.Pages()
 	if len(a.children(id, "", false)) > 0 {
 		a.treeOpen("page", id)
 	}
-	return c.Children, nil
+	return c.Children, true
 }
 
 // applyTemplate fills the open, empty page from a template: its content,
 // as one undo step, and copies of its subpages. An untitled page takes the
 // template's title, selected to type over, and applyTemplate reports
-// whether it did.
+// whether it did. A page with something in it already, or that can't be
+// changed, is left as it is.
 func (a *App) applyTemplate(t templateChoice) bool {
 	ps := a.page
-	if ps == nil {
+	if ps == nil || ps.editor.ReadOnly || !a.isEmpty() {
 		return false
 	}
-	blocks, err := a.templateBlocks(t, ps.id)
-	if err != nil {
-		a.toast(locales.TemplateUseFailed(err.Error()))
+	blocks, ok := a.templateBlocks(t, ps.id)
+	if !ok {
 		return false
 	}
 	ps.editor.Edit(func(cur *doc.Content) { cur.Children = blocks })
@@ -374,9 +381,8 @@ func (a *App) insertTemplate(t templateChoice) {
 		a.applyTemplate(t)
 		return
 	}
-	blocks, err := a.templateBlocks(t, ps.id)
-	if err != nil {
-		a.toast(locales.TemplateUseFailed(err.Error()))
+	blocks, ok := a.templateBlocks(t, ps.id)
+	if !ok {
 		return
 	}
 	ps.editor.InsertBlocks(blocks...)

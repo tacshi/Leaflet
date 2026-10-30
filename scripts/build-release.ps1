@@ -9,6 +9,7 @@ update archives, deltas and manifests that installed copies update from.
   scripts\build-release.ps1 -Out out            # another output directory
   scripts\build-release.ps1 -Upload             # and upload to a draft GitHub release
   scripts\build-release.ps1 -Changelog f.md     # notes from f.md, not CHANGELOG.md
+  scripts\build-release.ps1 -Upload -AllowUnsigned  # upload unsigned builds too
 
 The installers go to build\release: Leaflet-<version>-{x64,arm64}-setup.exe,
 beside a folder per platform with the app and its updates. NSIS makes them,
@@ -25,7 +26,9 @@ Its public half is updates.publicKey in mygo.json.
 
 Signs with the .pfx LEAFLET_WINDOWS_CERTIFICATE names, whose password is
 MYGO_WINDOWS_CERTIFICATE_PASSWORD, using signtool from the Windows SDK;
-without it the builds are unsigned and SmartScreen warns about them.
+without it the builds are unsigned and SmartScreen warns about them, and
+-Upload refuses them unless -AllowUnsigned, or LEAFLET_ALLOW_UNSIGNED=1,
+says to upload them anyway.
 
 macOS releases are built on macOS with scripts/build-release.sh. To build a
 Leaflet server in, set MYGO_LDFLAGS as the README says.
@@ -39,6 +42,7 @@ param(
 	[string[]]$Arch = @('x64', 'arm64'),
 	[string]$Out = 'build\release',
 	[switch]$Upload,
+	[switch]$AllowUnsigned,
 	[string]$Changelog
 )
 . "$PSScriptRoot\lib\release.ps1"
@@ -62,6 +66,8 @@ if ($Changelog) { $Config += "updates.changelog=$Changelog" }
 $Certificate = Get-WindowsCertificate
 if ($Certificate) {
 	$Config += "windows.certificate=$Certificate"
+} elseif ($Upload -and -not $AllowUnsigned -and $env:LEAFLET_ALLOW_UNSIGNED -ne '1') {
+	Fail 'LEAFLET_WINDOWS_CERTIFICATE is not set, so -Upload would publish unsigned Windows builds; set it, or add -AllowUnsigned (or LEAFLET_ALLOW_UNSIGNED=1) to upload them anyway'
 } else {
 	Warn 'LEAFLET_WINDOWS_CERTIFICATE is not set, so the Windows builds are unsigned'
 }

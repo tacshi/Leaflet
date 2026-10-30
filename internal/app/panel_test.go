@@ -249,6 +249,18 @@ func TestMarkMentions(t *testing.T) {
 		{"ask @chatgpt, then @agent", "ask <mark><b>@chatgpt</b></mark>, then <mark><b>@agent</b></mark>"},
 		{"me@ChatGPT.com @ChatGPTs @Bob", "me@ChatGPT.com @ChatGPTs @Bob"},
 		{"`@ChatGPT` @Chat", "`@ChatGPT` <mark><b>@Chat</b></mark>"},
+		// Code spans of longer runs, and over lines of a paragraph.
+		{"``a ` @agent`` @agent", "``a ` @agent`` <mark><b>@agent</b></mark>"},
+		{"see `x\n@agent` @agent", "see `x\n@agent` <mark><b>@agent</b></mark>"},
+		// A backtick escaped, or never closed, opens no span.
+		{"\\` @agent \\`", "\\` <mark><b>@agent</b></mark> \\`"},
+		{"a ` @agent", "a ` <mark><b>@agent</b></mark>"},
+		// Fenced and indented code blocks.
+		{"```\n@agent\n```\n@agent", "```\n@agent\n```\n<mark><b>@agent</b></mark>"},
+		{"~~~~go\n@agent\n~~~\n@agent\n~~~~\n@agent", "~~~~go\n@agent\n~~~\n@agent\n~~~~\n<mark><b>@agent</b></mark>"},
+		{"code:\n\n    @agent\n\t@agent\n\n@agent", "code:\n\n    @agent\n\t@agent\n\n<mark><b>@agent</b></mark>"},
+		// An indented line going on with a paragraph is not code.
+		{"ask\n    @agent", "ask\n    <mark><b>@agent</b></mark>"},
 	} {
 		if got := markMentions(tc.in, names); got != tc.want {
 			t.Errorf("markMentions(%q) = %q, want %q", tc.in, got, tc.want)

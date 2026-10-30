@@ -445,3 +445,95 @@ func TestDeleteStarter(t *testing.T) {
 		t.Error("deleting the template made from a starter brought the starter back")
 	}
 }
+
+// A page made from a template while the open page's edits can't be saved
+// is not made: the open page stays as it is, not filled from the
+// template, and no blank page is left behind.
+func TestNewPageWhileTheOpenPageCannotSave(t *testing.T) {
+	a := templatesApp(t)
+	prd, _ := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("Goals")})})
+	if _, err := a.st.CreatePage(store.NewPageOptions{ParentID: prd.ID, Title: "FAQ"}); err != nil {
+		t.Fatal(err)
+	}
+	mine, _ := a.st.CreatePage(store.NewPageOptions{Title: "Before", Content: doc.FromBlocks([]*doc.Node{textNode("Mine")})})
+	a.reloadAll()
+	choice, ok := a.templateByKey("template:" + prd.ID)
+	if !ok {
+		t.Fatal("no template")
+	}
+	a.openPage(mine.ID)
+	a.page.title = "Typed title"
+	if _, err := a.st.DB().Exec(`CREATE TRIGGER full BEFORE UPDATE ON pages WHEN OLD.id = '` + mine.ID + `' BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	before := len(a.pages)
+
+	a.newPageFrom("", "", &choice)
+	if a.page == nil || a.page.id != mine.ID || a.page.title != "Typed title" {
+		t.Fatal("the page that could not save did not stay open")
+	}
+	if got := a.page.editor.Content.PlainText(); got != "Mine" {
+		t.Errorf("the open page holds %q", got)
+	}
+	a.pages, _ = a.st.Pages()
+	if len(a.pages) != before {
+		t.Errorf("%d pages, want %d", len(a.pages), before)
+	}
+	if kids := a.children(mine.ID, "", false); len(kids) != 0 {
+		t.Errorf("the template's subpages went under the open page: %+v", kids)
+	}
+}
+
+// A template fills only an empty page: one with something in it already
+// is left as it is.
+func TestTemplateFillsOnlyAnEmptyPage(t *testing.T) {
+	a := templatesApp(t)
+	prd, _ := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("Goals")})})
+	if _, err := a.st.CreatePage(store.NewPageOptions{ParentID: prd.ID, Title: "FAQ"}); err != nil {
+		t.Fatal(err)
+	}
+	mine, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{textNode("Mine")})})
+	a.reloadAll()
+	choice, _ := a.templateByKey("template:" + prd.ID)
+	a.openPage(mine.ID)
+	if a.applyTemplate(choice) {
+		t.Error("applyTemplate reported it filled a page with text")
+	}
+	if got := a.page.editor.Content.PlainText(); got != "Mine" || a.page.title != "Notes" {
+		t.Errorf("page %q holds %q", a.page.title, got)
+	}
+	if kids := a.children(mine.ID, "", false); len(kids) != 0 {
+		t.Errorf("subpages %+v", kids)
+	}
+}
+
+// A template with a recording still being transcribed in it is not used
+// until it is done, as it is not copied.
+func TestTemplateWaitsForRecording(t *testing.T) {
+	a := templatesApp(t)
+	prd, _ := a.st.CreatePage(store.NewPageOptions{Title: "PRD", Template: true, Content: doc.FromBlocks([]*doc.Node{textNode("Goals")})})
+	call, _ := a.st.CreatePage(store.NewPageOptions{ParentID: prd.ID, Title: "Call"})
+	rec, err := a.st.CreateRecording(call.ID, "b1", "soniox", "m", "", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.rec.Transcribing[rec.ID] = true
+	choice, _ := a.templateByKey("template:" + prd.ID)
+
+	a.newPage("", "")
+	blank := a.page.id
+	a.toasts = nil
+	if a.applyTemplate(choice) || len(a.toasts) != 1 || a.toasts[0].text != locales.TemplateWaitForRecording() {
+		t.Fatalf("toasts %+v", a.toasts)
+	}
+	if !a.isEmpty() || len(a.children(blank, "", false)) != 0 {
+		t.Error("the template was used with its recording unfinished")
+	}
+
+	delete(a.rec.Transcribing, rec.ID)
+	a.applyTemplate(choice)
+	if got := a.page.editor.Content.PlainText(); got != "Goals" {
+		t.Errorf("once transcribed the page holds %q", got)
+	}
+}

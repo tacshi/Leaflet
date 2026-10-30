@@ -814,14 +814,9 @@ func (a *App) closePage() bool {
 
 // discardPage closes the open page, saved or not.
 func (a *App) discardPage() {
-	for id, v := range a.embeds {
-		v.Destroy()
-		delete(a.embeds, id)
-	}
-	clear(a.embedSrc)
-	clear(a.embedZoomed)
 	a.sync.SetOpen(a.page.id, false)
 	a.page = nil
+	a.dropEmbeds()
 	a.dropVideos()
 	dropPlayers()
 }

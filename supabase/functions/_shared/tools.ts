@@ -602,7 +602,9 @@ export class PageEditSession {
     }
     if (bad.length) {
       throw new ToolError(
-        `After reading another page, an image, video or link card may only use a URL from this page or a page you read, which ${bad[0]} is not: the app loads it by itself. Link to it in text instead.`,
+        `After reading another page, an image, video or link card may only use a URL from this page or a page you read, which ${
+          bad[0]
+        } is not: the app loads it by itself. Link to it in text instead.`,
       );
     }
   }

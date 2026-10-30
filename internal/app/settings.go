@@ -125,8 +125,10 @@ func heading(c *ui.Context, title, desc string) {
 // Account ---------------------------------------------------------------
 
 type accountState struct {
-	name       string
-	nameLoaded bool
+	name string
+	// nameEdited is set once the user changes the name field: until then
+	// it shows the account's name as it is now, and nothing saves from it.
+	nameEdited bool
 	devices    []map[string]any
 	loaded     bool
 	// devicesErr is why the devices could not be loaded, to try again.
@@ -272,18 +274,21 @@ func (a *App) accentDots(c *ui.Context) {
 func (a *App) accountSettings(c *ui.Context) {
 	pal := theme.Of(c)
 	s := &account
-	if !s.nameLoaded {
-		s.name, s.nameLoaded = a.session.DisplayName, true
+	if !s.nameEdited {
+		s.name = a.session.DisplayName
 	}
 	heading(c, locales.SettingsSectionAccount(), locales.SettingsAccountDesc())
 	card(c, "profile", func() {
 		settingRow(c, "name", locales.SettingsName(), locales.SettingsNameDesc(), true, func() {
 			in := field(c, "name", &s.name, locales.SettingsYourName()).Width(220)
-			if in.Submitted() || (in.Changed() && false) {
-				a.saveName(s.name)
+			if in.Changed() {
+				s.nameEdited = true
 			}
-			if !in.Focused() && s.name != a.session.DisplayName && strings.TrimSpace(s.name) != "" {
+			// Return, or leaving the field, saves what was typed; the
+			// field then shows the account's name again, as saved.
+			if s.nameEdited && (in.Submitted() || !in.Focused()) {
 				a.saveName(s.name)
+				s.nameEdited = false
 			}
 		})
 		// A build without a server says so once, in Sync and storage;
@@ -525,7 +530,7 @@ func (a *App) leave(clear func() error, synced bool) {
 				a.toast(err.Error())
 			}
 			a.session = a.st.Session()
-			account.loaded, account.devices, account.devicesErr, account.nameLoaded = false, nil, "", false
+			account.loaded, account.devices, account.devicesErr, account.nameEdited = false, nil, "", false
 		})
 	}()
 }
@@ -966,7 +971,7 @@ func (a *App) fetchModels() {
 	case preset.Auth == "key" && key == "" && (id == "" || !a.backend.SignedIn()):
 		return
 	}
-	at := base + "|" + key
+	at, gen := base+"|"+key, form.gen
 	form.fetching, form.fetchedAt = true, at
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -986,8 +991,8 @@ func (a *App) fetchModels() {
 			}
 		}
 		a.update(func() {
-			if form.fetchedAt != at {
-				return // the key or address changed since
+			if !formIs(gen) || form.fetchedAt != at {
+				return // another dialog, or the key or address changed since
 			}
 			form.fetching = false
 			if err != nil {

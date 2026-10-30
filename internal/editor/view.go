@@ -124,6 +124,12 @@ func (e *Editor) inSelection(n *doc.Node) (int, int, bool) {
 	return from, to, true
 }
 
+// placeholderSpan is an empty block's placeholder in the block's font.
+func (l *blockLayout) placeholderSpan(n *doc.Node, only bool, pal *theme.Palette) ui.Span {
+	return ui.Span{Text: placeholder(n, only), Font: l.font.Family, Size: l.font.Size,
+		Weight: l.font.Weight, Italic: l.font.Italic, Color: pal.Placeholder}
+}
+
 func placeholder(n *doc.Node, only bool) string {
 	switch n.Type {
 	case "heading":
@@ -228,8 +234,7 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 		if showPlaceholder {
 			// A span takes its font's own line height: it is centered on
 			// the block's first line, which may be taller.
-			hint := ui.Span{Text: placeholder(n, only), Font: l.font.Family, Size: l.font.Size,
-				Weight: l.font.Weight, Italic: l.font.Italic, Color: pal.Placeholder}
+			hint := l.placeholderSpan(n, only, pal)
 			_, h := p.MeasureText(r.W-l.x, hint)
 			p.RichText(ox, oy+first.Y+(first.H-h)/2, r.W-l.x, hint)
 		}
@@ -265,7 +270,14 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 		}
 		if n.Type == "todo_list" {
 			end := l.layout.Caret(utf16Off(n, textLen(n)))
-			e.dueChip(c, n, l.x+end.X+8, l.y+end.Y+(end.H-20)/2, hovered || isFocus && focused, pal)
+			// An empty to-do's date goes after its placeholder, shown or
+			// not: it stays put as the caret comes, and off where a click
+			// starts typing.
+			x := end.X
+			if empty {
+				x, _ = c.MeasureText(0, l.placeholderSpan(n, only, pal))
+			}
+			e.dueChip(c, n, l.x+x+8, l.y+end.Y+(end.H-20)/2, hovered || isFocus && focused, pal)
 		}
 		if count := e.Host.CommentCount(n.ID); count > 0 {
 			e.commentBadge(c, n.ID, count, l.y, pal)

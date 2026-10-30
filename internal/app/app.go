@@ -58,6 +58,9 @@ type App struct {
 	templates []store.Page
 	// templateHints are templates' first lines, by ID and edit time.
 	templateHints map[string]string
+	// goneStarters are the starter templates deleted on this device, by
+	// key; nil until read.
+	goneStarters map[string]bool
 	// todos are the open to-dos of every page, read again when stale;
 	// todoState is the sidebar's To-dos tab's list.
 	todos      []store.PageTodo
@@ -478,6 +481,9 @@ func (a *App) reload(ch store.Change) {
 	}
 	if all || ch.Table == "folders" {
 		a.folders, _ = a.st.Folders()
+	}
+	if all || ch.Table == "key_values" {
+		a.goneStarters = nil
 	}
 	if all || ch.Table == "files" {
 		a.files, _ = a.st.Files()
@@ -981,8 +987,15 @@ func (a *App) holdRunBar(d time.Duration) {
 	}
 }
 
-// newPage creates a page and opens it.
+// newPage creates a page and opens it: blank, or from the template set for
+// new pages where it goes.
 func (a *App) newPage(parent, folder string) {
+	a.newPageFrom(parent, folder, a.defaultTemplate(parent, folder))
+}
+
+// newPageFrom creates a page from a template, or blank for nil, and opens
+// it.
+func (a *App) newPageFrom(parent, folder string, t *templateChoice) {
 	// A subpage changes its parent, which a page shared to view cannot be.
 	if parent != "" && !a.canEdit(parent) {
 		return
@@ -998,7 +1011,7 @@ func (a *App) newPage(parent, folder string) {
 		a.linkSubpage(parent, p.ID, "")
 	}
 	a.openPage(p.ID)
-	a.focusTitle(false)
+	a.startFrom(t)
 }
 
 // linkSubpage puts a link to subpage id at the end of page parent, as

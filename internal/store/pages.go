@@ -37,6 +37,9 @@ type Page struct {
 	// Tags are the page's tags, in the order they were added, as
 	// NormalizeTags leaves them.
 	Tags []string
+	// DefaultTemplateID is the template the page's new subpages start
+	// from, or "" for blank ones.
+	DefaultTemplateID string
 }
 
 // DisplayTitle is the title, or "Untitled".
@@ -51,17 +54,18 @@ func TitleOr(t string) string {
 	return t
 }
 
-const pageCols = `id, space_id, parent_id, folder_id, title, icon, sort_key, created_by, created_at, updated_at, deleted_at, keep_offline, is_template, tags`
+const pageCols = `id, space_id, parent_id, folder_id, title, icon, sort_key, created_by, created_at, updated_at, deleted_at, keep_offline, is_template, tags, default_template_id`
 
 func scanPage(sc interface{ Scan(...any) error }) (Page, error) {
 	var p Page
-	var parent, folder, icon, by sql.NullString
+	var parent, folder, icon, by, template sql.NullString
 	var created, updated int64
 	var deleted sql.NullInt64
 	var tags string
-	err := sc.Scan(&p.ID, &p.SpaceID, &parent, &folder, &p.Title, &icon, &p.SortKey, &by, &created, &updated, &deleted, &p.KeepOffline, &p.Template, &tags)
+	err := sc.Scan(&p.ID, &p.SpaceID, &parent, &folder, &p.Title, &icon, &p.SortKey, &by, &created, &updated, &deleted, &p.KeepOffline, &p.Template, &tags, &template)
 	p.Tags = decodeTags(tags)
 	p.ParentID, p.FolderID, p.Icon, p.CreatedBy = parent.String, folder.String, icon.String, by.String
+	p.DefaultTemplateID = template.String
 	p.CreatedAt, p.UpdatedAt, p.DeletedAt = time.UnixMilli(created), time.UnixMilli(updated), fromMs(deleted)
 	return p, err
 }
@@ -109,14 +113,14 @@ func (s *Store) Children(parentID, spaceID string) ([]Page, error) {
 }
 
 func writePage(q querier, p Page) error {
-	_, err := q.Exec(`INSERT INTO pages (`+pageCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := q.Exec(`INSERT INTO pages (`+pageCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET space_id = excluded.space_id, parent_id = excluded.parent_id,
 		folder_id = excluded.folder_id, title = excluded.title, icon = excluded.icon, sort_key = excluded.sort_key,
 		created_by = excluded.created_by, created_at = excluded.created_at, updated_at = excluded.updated_at,
 		deleted_at = excluded.deleted_at, keep_offline = excluded.keep_offline, is_template = excluded.is_template,
-		tags = excluded.tags`,
+		tags = excluded.tags, default_template_id = excluded.default_template_id`,
 		p.ID, p.SpaceID, ns(p.ParentID), ns(p.FolderID), p.Title, ns(p.Icon), p.SortKey, ns(p.CreatedBy),
-		ms(p.CreatedAt), ms(p.UpdatedAt), nt(p.DeletedAt), p.KeepOffline, p.Template, encodeTags(p.Tags))
+		ms(p.CreatedAt), ms(p.UpdatedAt), nt(p.DeletedAt), p.KeepOffline, p.Template, encodeTags(p.Tags), ns(p.DefaultTemplateID))
 	return err
 }
 
@@ -323,6 +327,24 @@ func (s *Store) SetPageTags(id string, tags []string) error {
 	}
 	p.Tags, p.UpdatedAt = tags, time.Now()
 	if err := s.savePages("tagged", p); err != nil {
+		return err
+	}
+	s.Notify("pages", id)
+	return nil
+}
+
+// SetPageDefaultTemplate sets the template a page's new subpages start
+// from, "" for blank ones.
+func (s *Store) SetPageDefaultTemplate(id, templateID string) error {
+	p, err := s.Page(id)
+	if err != nil {
+		return err
+	}
+	if p.DefaultTemplateID == templateID {
+		return nil
+	}
+	p.DefaultTemplateID, p.UpdatedAt = templateID, time.Now()
+	if err := s.savePages("set default template", p); err != nil {
 		return err
 	}
 	s.Notify("pages", id)

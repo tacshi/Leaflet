@@ -214,10 +214,11 @@ func CommentFromRemote(r map[string]any, authorName string) Comment {
 		Resolved: resolved, CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"])}
 }
 
-// FileFromRemote reads a files row.
+// FileFromRemote reads a files row. Its name is one the file can be kept
+// by here, whatever the server has.
 func FileFromRemote(r map[string]any) File {
 	size, _ := r["size_bytes"].(float64)
-	return File{ID: S(r, "id"), SpaceID: S(r, "space_id"), FolderID: S(r, "folder_id"), PageID: S(r, "page_id"), Name: S(r, "name"),
+	return File{ID: S(r, "id"), SpaceID: S(r, "space_id"), FolderID: S(r, "folder_id"), PageID: S(r, "page_id"), Name: fileName(S(r, "name")),
 		StoragePath: S(r, "storage_path"), MimeType: S(r, "mime_type"), SizeBytes: int64(size),
 		CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"]), DeletedAt: TimeOrZero(r["deleted_at"])}
 }

@@ -729,7 +729,7 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 			}
 			fc := plan.files[k]
 			n.Set("file_id", fc.to)
-			n.Set("url", "file://"+filepath.Join(s.Dir, "files", fc.to, fc.Name))
+			n.Set("url", "file://"+filepath.Join(s.Dir, "files", fc.to, fileName(fc.Name)))
 		})
 	}
 	return plan, nil
@@ -816,7 +816,7 @@ type fileCopy struct {
 func (s *Store) putFileCopies(files []fileCopy) error {
 	for _, c := range files {
 		now := time.Now()
-		f := File{ID: c.to, SpaceID: s.Session().SpaceID, PageID: c.pageID, Name: c.Name, MimeType: c.MimeType,
+		f := File{ID: c.to, SpaceID: s.Session().SpaceID, PageID: c.pageID, Name: fileName(c.Name), MimeType: c.MimeType,
 			SizeBytes: c.SizeBytes, CreatedAt: now, UpdatedAt: now}
 		f.StoragePath = f.SpaceID + "/" + f.ID + "/" + f.Name
 		dir := filepath.Join(s.Dir, "files", f.ID)

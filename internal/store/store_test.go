@@ -706,6 +706,51 @@ func TestCopyPageCopiesFiles(t *testing.T) {
 	}
 }
 
+// A file's name from the server never puts it, or a copy of it, outside
+// the app's files folder.
+func TestFileNamesStayInTheFilesFolder(t *testing.T) {
+	s := open(t)
+	if f := FileFromRemote(map[string]any{"id": "f1", "name": "../../../x"}); f.Name != "x" {
+		t.Errorf("name from the server %q", f.Name)
+	}
+	for in, want := range map[string]string{"a.pdf": "a.pdf", "../../a.pdf": "a.pdf", "..": "file", "": "file", "/": "file"} {
+		if got := fileName(in); got != want {
+			t.Errorf("fileName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	p, _ := s.CreatePage(NewPageOptions{Title: "Trip"})
+	src := filepath.Join(t.TempDir(), "map.png")
+	if err := os.WriteFile(src, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// As a row stored before names were checked has it.
+	f := File{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, PageID: p.ID, Name: "../../../escaped.png", LocalPath: src,
+		CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := s.PutFile(f); err != nil {
+		t.Fatal(err)
+	}
+	block := &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{"url": "file://" + src, "file_id": f.ID}}
+	if _, _, err := s.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{block})); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := s.CopyPage(p.ID, CopyOptions{Title: "Trip copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := s.Content(cp.ID).Children[0]
+	c, err := s.File(n.Str("file_id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(s.Dir, "files", c.ID)
+	if c.LocalPath != filepath.Join(dir, "escaped.png") || n.Str("url") != "file://"+c.LocalPath || strings.Contains(c.StoragePath, "..") {
+		t.Errorf("copy at %q, url %q, stored at %q", c.LocalPath, n.Str("url"), c.StoragePath)
+	}
+	if _, err := os.Stat(filepath.Join(s.Dir, "..", "escaped.png")); err == nil {
+		t.Error("the copy went outside the files folder")
+	}
+}
+
 // Search finds templates by title and text, marked as templates, and
 // leaves them out of the recent pages.
 func TestSearchFindsTemplates(t *testing.T) {

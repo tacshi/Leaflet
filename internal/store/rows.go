@@ -264,7 +264,7 @@ func putFile(q querier, f File) error {
 // AddFile copies a file into the app and adds it to a folder (or page).
 func (s *Store) AddFile(source, folderID, pageID, mime string) (File, error) {
 	id := doc.NewRowID()
-	name := filepath.Base(source)
+	name := fileName(source)
 	dir := filepath.Join(s.Dir, "files", id)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return File{}, err
@@ -309,6 +309,17 @@ func (s *Store) AddFile(source, folderID, pageID, mime string) (File, error) {
 	return f, nil
 }
 
+// fileName is a file's name as it may be kept in its folder here: its last
+// element, so a name from the server such as "../../x" never puts the file
+// outside the app's files folder, or "file" when that is none.
+func fileName(name string) string {
+	name = filepath.Base(name)
+	if name == "." || !filepath.IsLocal(name) {
+		return "file"
+	}
+	return name
+}
+
 // DownloadedFile keeps a file downloaded from the server at path, which
 // is this device's alone.
 func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
@@ -320,7 +331,7 @@ func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", err
 	}
-	local := filepath.Join(dir, filepath.Base(name))
+	local := filepath.Join(dir, fileName(name))
 	if err := os.WriteFile(local, data, 0o600); err != nil {
 		return "", err
 	}

@@ -114,10 +114,23 @@ func saveFolder(tx *sql.Tx, f Folder, label string) error {
 	return queueChange(tx, "folders", f.ID, old, FolderToRemote(f), label, "")
 }
 
-// RenameFolder renames a folder.
-func (s *Store) RenameFolder(f Folder, name string) error {
-	f.Name, f.UpdatedAt = name, time.Now()
-	if err := s.inTx(func(tx *sql.Tx) error { return saveFolder(tx, f, "renamed folder") }); err != nil {
+// changeFolder changes a folder as stored, not as the caller last read it,
+// so a change made since to another of its fields is kept. fn reports
+// whether it changed anything.
+func (s *Store) changeFolder(id, label string, fn func(*Folder) bool) error {
+	changed := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		f, err := scanFolder(tx.QueryRow(`SELECT `+folderCols+` FROM folders WHERE id = ?`, id))
+		if err != nil {
+			return err
+		}
+		if changed = fn(&f); !changed {
+			return nil
+		}
+		f.UpdatedAt = time.Now()
+		return saveFolder(tx, f, label)
+	})
+	if err != nil || !changed {
 		return err
 	}
 	s.Notify("outbox", "")
@@ -125,19 +138,24 @@ func (s *Store) RenameFolder(f Folder, name string) error {
 	return nil
 }
 
+// RenameFolder renames a folder.
+func (s *Store) RenameFolder(f Folder, name string) error {
+	return s.changeFolder(f.ID, "renamed folder", func(f *Folder) bool {
+		f.Name = name
+		return true
+	})
+}
+
 // SetFolderDefaultTemplate sets the template a folder's new pages start
 // from, "" for blank ones.
 func (s *Store) SetFolderDefaultTemplate(f Folder, templateID string) error {
-	if f.DefaultTemplateID == templateID {
-		return nil
-	}
-	f.DefaultTemplateID, f.UpdatedAt = templateID, time.Now()
-	if err := s.inTx(func(tx *sql.Tx) error { return saveFolder(tx, f, "set default template") }); err != nil {
-		return err
-	}
-	s.Notify("outbox", "")
-	s.Notify("folders", "")
-	return nil
+	return s.changeFolder(f.ID, "set default template", func(f *Folder) bool {
+		if f.DefaultTemplateID == templateID {
+			return false
+		}
+		f.DefaultTemplateID = templateID
+		return true
+	})
 }
 
 // DeleteFolder deletes a folder; its pages move to the top level.
@@ -147,7 +165,6 @@ func (s *Store) DeleteFolder(f Folder) error {
 	if err != nil {
 		return err
 	}
-	f.DeletedAt, f.UpdatedAt = now, now
 	err = s.inTx(func(tx *sql.Tx) error {
 		for _, p := range pages {
 			p.FolderID, p.UpdatedAt = "", now
@@ -155,6 +172,12 @@ func (s *Store) DeleteFolder(f Folder) error {
 				return err
 			}
 		}
+		// As stored, as in changeFolder.
+		f, err := scanFolder(tx.QueryRow(`SELECT `+folderCols+` FROM folders WHERE id = ?`, f.ID))
+		if err != nil {
+			return err
+		}
+		f.DeletedAt, f.UpdatedAt = now, now
 		return saveFolder(tx, f, "deleted folder")
 	})
 	if err != nil {
@@ -481,8 +504,10 @@ func (s *Store) Threads(pageID string) ([]Thread, error) {
 }
 
 // PutComment stores a comment row.
-func (s *Store) PutComment(c Comment) error {
-	_, err := s.db.Exec(`INSERT INTO comments (`+commentCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+func (s *Store) PutComment(c Comment) error { return putComment(s.db, c) }
+
+func putComment(q querier, c Comment) error {
+	_, err := q.Exec(`INSERT INTO comments (`+commentCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET block_id = excluded.block_id, parent_comment_id = excluded.parent_comment_id,
 		author_id = excluded.author_id, author_kind = excluded.author_kind, author_name = excluded.author_name,
 		body = excluded.body, quote = excluded.quote, resolved = excluded.resolved, updated_at = excluded.updated_at,
@@ -492,13 +517,19 @@ func (s *Store) PutComment(c Comment) error {
 	return err
 }
 
+// saveComment stores a comment changed here and queues it to go up, in one
+// transaction.
 func (s *Store) saveComment(c Comment, label string) error {
-	if err := s.PutComment(c); err != nil {
+	err := s.inTx(func(tx *sql.Tx) error {
+		if err := putComment(tx, c); err != nil {
+			return err
+		}
+		return queue(tx, "comments", c.ID, CommentToRemote(c), label, c.PageID)
+	})
+	if err != nil {
 		return err
 	}
-	if err := s.Queue("comments", c.ID, CommentToRemote(c), label, c.PageID); err != nil {
-		return err
-	}
+	s.Notify("outbox", c.PageID)
 	s.Notify("comments", c.PageID)
 	return nil
 }
@@ -636,12 +667,14 @@ func (s *Store) Recordings() ([]Recording, error) {
 }
 
 // PutRecording stores a recording row.
-func (s *Store) PutRecording(r Recording) error {
+func (s *Store) PutRecording(r Recording) error { return putRecording(s.db, r) }
+
+func putRecording(q querier, r Recording) error {
 	transcript, _ := json.Marshal(r.Transcript)
 	if r.Transcript == nil {
 		transcript = []byte("[]")
 	}
-	_, err := s.db.Exec(`INSERT INTO recordings (`+recordingCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	_, err := q.Exec(`INSERT INTO recordings (`+recordingCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET block_id = excluded.block_id, audio_path = excluded.audio_path,
 		local_path = COALESCE(excluded.local_path, recordings.local_path), duration_ms = excluded.duration_ms,
 		stt_provider = excluded.stt_provider, stt_model = excluded.stt_model, status = excluded.status,
@@ -665,25 +698,33 @@ func (s *Store) CreateRecording(pageID, blockID, provider, model, localPath, lan
 }
 
 // UpdateRecording changes a recording and queues it once it is no longer
-// recording.
+// recording, in one transaction, over the recording as stored then.
 func (s *Store) UpdateRecording(id string, fn func(*Recording)) (Recording, error) {
-	r, err := s.Recording(id)
-	if err != nil {
-		return Recording{}, err
-	}
-	fn(&r)
-	r.UpdatedAt = time.Now()
-	if err := s.PutRecording(r); err != nil {
-		return Recording{}, err
-	}
-	if r.Status != "recording" {
+	var r Recording
+	err := s.inTx(func(tx *sql.Tx) error {
+		var err error
+		if r, err = scanRecording(tx.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, id)); err != nil {
+			return err
+		}
+		fn(&r)
+		r.UpdatedAt = time.Now()
+		if err := putRecording(tx, r); err != nil {
+			return err
+		}
+		if r.Status == "recording" {
+			return nil
+		}
 		label := "transcript"
 		if r.AudioPath == "" && r.LocalPath != "" {
 			label = "audio waiting to upload"
 		}
-		if err := s.Queue("recordings", r.ID, RecordingToRemote(r), label, r.PageID); err != nil {
-			return Recording{}, err
-		}
+		return queue(tx, "recordings", r.ID, RecordingToRemote(r), label, r.PageID)
+	})
+	if err != nil {
+		return Recording{}, err
+	}
+	if r.Status != "recording" {
+		s.Notify("outbox", r.PageID)
 	}
 	s.Notify("recordings", r.PageID)
 	return r, nil

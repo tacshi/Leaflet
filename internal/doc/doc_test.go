@@ -752,3 +752,18 @@ func TestRebase(t *testing.T) {
 		t.Errorf("rebased %v, want %v", got, want)
 	}
 }
+
+// JSON that is not a page's content, or is of a newer version, is refused
+// rather than read as an empty page.
+func TestDecodeRefusesWhatIsNotContent(t *testing.T) {
+	for _, s := range []string{"null", "{}", `{"meta":{"v":1}}`, `{"document":null}`, `{"document":{"children":[]},"meta":{"v":2}}`} {
+		if _, err := Decode(s); !errors.Is(err, ErrNotContent) {
+			t.Errorf("%s: %v", s, err)
+		}
+	}
+	for _, s := range []string{"", `{"document":{"children":[]}}`, Empty().Encode()} {
+		if _, err := Decode(s); err != nil {
+			t.Errorf("%q: %v", s, err)
+		}
+	}
+}

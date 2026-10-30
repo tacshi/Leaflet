@@ -1803,3 +1803,198 @@ func TestADatabaseGainsTags(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// A folder renamed from a copy read before its default template changed
+// keeps the template: the rename changes the name alone.
+func TestRenameFolderKeepsChangesSinceRead(t *testing.T) {
+	s := open(t)
+	f, err := s.CreateFolder("Folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tpl, err := s.CreatePage(NewPageOptions{Template: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetFolderDefaultTemplate(f, tpl.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameFolder(f, "Renamed"); err != nil {
+		t.Fatal(err)
+	}
+	folders, err := s.Folders()
+	if err != nil || len(folders) != 1 || folders[0].Name != "Renamed" || folders[0].DefaultTemplateID != tpl.ID {
+		t.Fatalf("folders %+v, %v", folders, err)
+	}
+	if err := s.DeleteFolder(f); err != nil {
+		t.Fatal(err)
+	}
+	var name string
+	if err := s.DB().QueryRow(`SELECT name FROM folders WHERE id = ?`, f.ID).Scan(&name); err != nil || name != "Renamed" {
+		t.Errorf("deleted folder named %q, %v", name, err)
+	}
+}
+
+// A comment or recording whose entry in the queue cannot be stored is not
+// stored either: kept, it would never go up.
+func TestRowsAndTheirQueueEntriesStoreTogether(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.CreateRecording(p.ID, "rec", "local", "model", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().Exec(`CREATE TRIGGER reject_queue BEFORE INSERT ON outbox WHEN NEW.entity IN ('comments', 'recordings')
+		BEGIN SELECT RAISE(ABORT, 'queue failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.AddComment(p.ID, "block", "reply", "", "", "", "")
+	if err == nil {
+		t.Fatal("comment stored though its queue entry failed")
+	}
+	if _, err := s.Comment(c.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("comment kept without its queue entry: %v", err)
+	}
+	if _, err := s.UpdateRecording(r.ID, func(r *Recording) { r.Status = "ready" }); err == nil {
+		t.Fatal("recording stored though its queue entry failed")
+	}
+	if got, _ := s.Recording(r.ID); got.Status != "recording" {
+		t.Errorf("recording %s kept without its queue entry", got.Status)
+	}
+}
+
+// A row from the server stores only over one with no change waiting here,
+// checked as it stores: the change stays, to go up.
+func TestRemoteRowsKeepChangesWaiting(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.CreateRecording(p.ID, "rec", "local", "model", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := RecordingToRemote(r)
+	if _, err := s.UpdateRecording(r.ID, func(r *Recording) {
+		r.Status, r.Transcript = "ready", []Segment{{Text: "finished"}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRemoteRecording(stale); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Recording(r.ID); len(got.Transcript) != 1 {
+		t.Errorf("transcript waiting to go up replaced: %+v", got)
+	}
+	c, err := s.AddComment(p.ID, "block", "mine", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs := CommentToRemote(c)
+	theirs["body"] = "older"
+	if err := s.PutRemoteComment(theirs, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Comment(c.ID); got.Body != "mine" {
+		t.Errorf("comment waiting to go up replaced: %q", got.Body)
+	}
+}
+
+// Signing out removes nothing while a change waits to go up.
+func TestForgetSyncedAccountKeepsChangesWaiting(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{Title: "Waiting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForgetSyncedAccount(); !errors.Is(err, ErrUnsynced) {
+		t.Fatalf("forget with a change waiting: %v", err)
+	}
+	if _, err := s.Page(p.ID); err != nil {
+		t.Fatalf("page removed: %v", err)
+	}
+	entries, err := s.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := s.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.ForgetSyncedAccount(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Page(p.ID); err == nil {
+		t.Error("page kept once everything went up")
+	}
+}
+
+// A withdrawn share's pages leave the device with what is kept of them,
+// their copies here and changes waiting too; the user's own pages stay.
+func TestRemoveSharedPages(t *testing.T) {
+	s := open(t)
+	mine, err := s.CreatePage(NewPageOptions{Title: "Mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := "2026-01-01T00:00:00Z"
+	for _, r := range []map[string]any{
+		{"id": "root", "space_id": "theirs", "title": "Root", "sort_key": "V", "created_at": old, "updated_at": old},
+		{"id": "kid", "space_id": "theirs", "parent_id": "root", "title": "Kid", "sort_key": "V", "created_at": old, "updated_at": old},
+		{"id": "beside", "space_id": "theirs", "title": "Beside", "sort_key": "W", "created_at": old, "updated_at": old},
+	} {
+		if err := s.PutRemotePage(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := s.SaveContent("kid", doc.FromBlocks([]*doc.Node{{ID: "b1", Type: "paragraph"}})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddComment("kid", "b1", "waiting", "", "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	audio := filepath.Join(s.Dir, "recordings", "r1.wav")
+	if err := os.MkdirAll(filepath.Dir(audio), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(audio, []byte("RIFF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateRecording("root", "rec", "local", "model", audio, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	if ids, err := s.RemoveSharedPages(mine.ID); err != nil || len(ids) != 0 {
+		t.Fatalf("own page removed: %v, %v", ids, err)
+	}
+	ids, err := s.RemoveSharedPages("root")
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("removed %v, %v", ids, err)
+	}
+	for _, id := range []string{"root", "kid"} {
+		if _, err := s.Page(id); err == nil {
+			t.Errorf("%s stayed", id)
+		}
+	}
+	for _, id := range []string{mine.ID, "beside"} {
+		if _, err := s.Page(id); err != nil {
+			t.Errorf("%s removed: %v", id, err)
+		}
+	}
+	var left int
+	if err := s.DB().QueryRow(`SELECT (SELECT COUNT(*) FROM page_contents WHERE page_id = 'kid') + (SELECT COUNT(*) FROM comments)
+		+ (SELECT COUNT(*) FROM recordings) + (SELECT COUNT(*) FROM outbox WHERE page_id IN ('root', 'kid'))`).Scan(&left); err != nil || left != 0 {
+		t.Errorf("%d rows of the shared pages left, %v", left, err)
+	}
+	if _, err := os.Stat(audio); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("recording's audio stayed: %v", err)
+	}
+	if !s.HasPending("pages", mine.ID) {
+		t.Error("own page's change waiting removed")
+	}
+}

@@ -291,6 +291,43 @@ function canHoldChildren(node: NodeJSON, current: NodeJSON): boolean {
   return current.type !== "table" && (LIST_TYPES.has(node.type) || node.type === current.type);
 }
 
+/** JSON with each object's keys in order, as jsonb does not keep them. */
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value).filter(([, v]) => v !== undefined).sort(([a], [b]) => (a < b ? -1 : 1));
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonical(v)}`).join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+/**
+ * Whether replaying ops on content (applyOps) takes away a change made
+ * since the agent read the page: a block that a replace or a delete finds
+ * other than the agent read it. A replace that keeps the block's children
+ * looks at the block alone, as it keeps the children found.
+ */
+export function overwrites(content: PageContent, ops: Op[]): boolean {
+  const idx = indexBlocks(content.document);
+  const seen = new Set<string>();
+  // The first op on a block has it as the agent read it.
+  const changed = (read: NodeJSON, own: boolean) => {
+    if (seen.has(read.id)) return false;
+    seen.add(read.id);
+    const at = idx.get(read.id);
+    if (!at) return false;
+    const strip = (n: NodeJSON) => ({ ...n, children: undefined });
+    return own ? canonical(strip(at.node)) !== canonical(strip(read)) : canonical(at.node) !== canonical(read);
+  };
+  let found = false;
+  for (const op of ops) {
+    if (op.op === "insert") op.nodes.forEach((n) => walk(n, (x) => seen.add(x.id)));
+    if (op.op === "replace" && changed(op.previous, keptChildren(op))) found = true;
+    if (op.op === "delete" && op.previous.some((p) => changed(p.node, false))) found = true;
+  }
+  return found;
+}
+
 /**
  * Replays ops on a (possibly newer) version of a page. Ops whose blocks are
  * gone are skipped; inserts whose anchor is gone land at the end.

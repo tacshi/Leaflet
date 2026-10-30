@@ -429,7 +429,7 @@ func (a *App) pubChanged(ch store.Change) {
 	}
 	switch ch.Table {
 	case "*", "pages", "files":
-	case "page_contents", "comments":
+	case "page_contents", "comments", "recordings":
 		if ch.PageID != "" && ch.PageID != p.page {
 			return
 		}

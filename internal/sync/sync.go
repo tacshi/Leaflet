@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -62,11 +63,14 @@ type Service struct {
 	// read them.
 	invites   []Invite
 	invitesOf string
+	// membersAt is when the members of each page shared with the user
+	// were last loaded, for pullMembers to load them again.
+	membersAt map[string]time.Time
 }
 
 // New returns the sync service.
 func New(st *store.Store, be *remote.Client) *Service {
-	return &Service{st: st, be: be, kick: make(chan struct{}, 1), open: map[string]bool{}}
+	return &Service{st: st, be: be, kick: make(chan struct{}, 1), open: map[string]bool{}, membersAt: map[string]time.Time{}}
 }
 
 // Start runs the loop: soon after changes, when asked, and every 30 seconds.
@@ -1193,9 +1197,23 @@ func (s *Service) pullShared(ctx context.Context) error {
 }
 
 // LoadMembers stores who a page is shared with, as the server has them,
-// each with their role on it, which a page above it may give.
+// each with their role on it, which a page above it may give. A page shared
+// with the user that they can no longer see, its share withdrawn, goes
+// from this device with the pages under it (store.RemoveSharedPages).
 func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 	res, err := s.be.RPC(ctx, "page_members", map[string]any{"p_page_id": pageID})
+	re := (*remote.Error)(nil)
+	forbidden := errors.As(err, &re) && re.Status == http.StatusForbidden
+	if err == nil || forbidden {
+		s.mu.Lock()
+		s.membersAt[pageID] = time.Now()
+		s.mu.Unlock()
+	}
+	if forbidden {
+		if gone := s.withdrawn(ctx, pageID); gone != nil {
+			return gone
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -1211,10 +1229,47 @@ func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 	return s.st.SetMembers(pageID, members)
 }
 
+// withdrawn handles members refused for a page: one the server no longer
+// shows the user at all goes from this device; any other keeps no roles,
+// nor do the pages under it, as those kept would still let them be
+// edited here. It returns why it could not.
+func (s *Service) withdrawn(ctx context.Context, pageID string) error {
+	rows, err := s.be.Select(ctx, "pages", remote.Query{Select: "id", Filters: []string{remote.Eq("id", pageID)}})
+	if err == nil && len(rows) == 0 {
+		removed, err := s.st.RemoveSharedPages(pageID)
+		if err == nil && len(removed) > 0 {
+			log.Printf("share of %s withdrawn: removed %d pages", pageID, len(removed))
+		}
+		return err
+	}
+	return s.forgetMembers(pageID)
+}
+
+// forgetMembers drops the members kept of a page and of the pages under it.
+func (s *Service) forgetMembers(pageID string) error {
+	pages, err := s.st.AllPages()
+	if err != nil {
+		return err
+	}
+	for _, p := range pages {
+		if s.st.MembersOrNil(p.ID) != nil && s.st.IsDescendant(p.ID, pageID) {
+			if err := s.st.SetMembers(p.ID, nil); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// membersEvery is how often pullMembers loads members it has again, so a
+// share withdrawn or changed to view only stops letting the user edit.
+const membersEvery = 10 * time.Minute
+
 // pullMembers loads the members of each tree of pages shared with the user
-// that has none here, as for a share accepted before sync loaded them:
-// an agent outside the app (leaflet mcp) edits only what they allow. A
-// tree's top page here has them for the pages inside it.
+// that has none here, as for a share accepted before sync loaded them, and
+// again every membersEvery: an agent outside the app (leaflet mcp) edits
+// only what they allow. A tree's top page here has them for the pages
+// inside it.
 func (s *Service) pullMembers(ctx context.Context) {
 	pages, err := s.st.AllPages()
 	if err != nil {
@@ -1226,7 +1281,13 @@ func (s *Service) pullMembers(ctx context.Context) {
 		here[p.ID] = p.DeletedAt.IsZero()
 	}
 	for _, p := range pages {
-		if p.SpaceID == own || !p.DeletedAt.IsZero() || here[p.ParentID] || s.st.MembersOrNil(p.ID) != nil {
+		if p.SpaceID == own || !p.DeletedAt.IsZero() || here[p.ParentID] {
+			continue
+		}
+		s.mu.Lock()
+		at, loaded := s.membersAt[p.ID]
+		s.mu.Unlock()
+		if loaded && time.Since(at) < membersEvery {
 			continue
 		}
 		if err := s.LoadMembers(ctx, p.ID); err != nil {

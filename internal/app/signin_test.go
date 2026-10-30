@@ -5,6 +5,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/doc"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -59,5 +60,39 @@ func TestSignInAsAnotherAccountAsks(t *testing.T) {
 	// iCloud sync is off for the server's, and says so once signed out.
 	if a.settings.ICloudSync {
 		t.Error("iCloud sync still on in Settings")
+	}
+}
+
+// A change stored while signing out, by leaflet mcp after the upload, is
+// asked about rather than removed with the account's pages.
+func TestSignOutAsksAboutAChangeStoredMeanwhile(t *testing.T) {
+	t.Cleanup(func() { account = accountState{} })
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Uploaded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := a.st.Pending()
+	for _, e := range entries {
+		if err := a.st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	posted := make(chan func(), 4)
+	a.post = func(fn func()) { posted <- fn }
+	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u1")
+	a.signOut()
+	uploaded := <-posted
+	c := a.st.Content(p.ID)
+	late := &doc.Node{ID: "late", Type: "paragraph"}
+	late.SetDelta(doc.FromMarkdown("edited meanwhile"))
+	c.Children = append(c.Children, late)
+	if _, _, err := a.st.SaveContent(p.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	uploaded()
+	(<-posted)()
+	if _, err := a.st.Page(p.ID); err != nil || account.unsynced == 0 || !a.backend.SignedIn() {
+		t.Fatalf("page %v, asked about %d, signed in %v", err, account.unsynced, a.backend.SignedIn())
 	}
 }

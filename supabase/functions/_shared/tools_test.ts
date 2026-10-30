@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   deltaToMarkdown,
+  isPageContent,
   markdownToDelta,
   type NodeJSON,
   type PageContent,
@@ -9,7 +10,7 @@ import {
   specToNode,
   tableRows,
 } from "./blocks.ts";
-import { applyOps, type Op, PageEditSession, type ToolHooks } from "./tools.ts";
+import { applyOps, type Op, overwrites, PageEditSession, type ToolHooks } from "./tools.ts";
 import { tokensToSegments } from "./segments.ts";
 
 const hooks: ToolHooks = {
@@ -379,4 +380,35 @@ Deno.test("embed and image blocks match the Go spec", () => {
     specToNode({ type: "image", image: { url: "https://example.com/a.png" } }, { newId: () => "i" }).data?.alt,
     "",
   );
+});
+
+Deno.test("a replay that replaces or deletes a block changed since is told apart", () => {
+  const para = (id: string, text: string): NodeJSON => ({ id, type: "paragraph", data: { delta: [{ insert: text }] } });
+  const page = (...children: NodeJSON[]): PageContent => ({
+    document: { id: "root", type: "page", children },
+    meta: { v: 1, blocks: {}, deleted: {} },
+  });
+  const read = para("p", "original");
+  const replace: Op = { op: "replace", id: "p", previous: read, node: para("p", "agent edit") };
+  const remove: Op = { op: "delete", ids: ["p"], previous: [{ node: read, position: { at: "end" } }] };
+  const insert: Op = { op: "insert", position: { at: "end" }, nodes: [para("n", "new")] };
+  // jsonb keeps no key order: the same block read back is the same.
+  const reordered: NodeJSON = { data: { delta: [{ insert: "original" }] }, type: "paragraph", id: "p" };
+  assert(!overwrites(page(reordered, para("q", "typed elsewhere")), [replace, insert]));
+  assert(overwrites(page(para("p", "concurrent human edit")), [replace]));
+  assert(overwrites(page(para("p", "concurrent human edit")), [remove]));
+  // Only the agent's first op on a block has it as read.
+  const again: Op = { op: "replace", id: "p", previous: para("p", "agent edit"), node: para("p", "agent edit 2") };
+  assert(!overwrites(page(para("p", "original")), [replace, again]));
+});
+
+Deno.test("stored content is a page's only with its document, of a known version", () => {
+  assert(!isPageContent(null));
+  assert(!isPageContent({}));
+  assert(!isPageContent({ document: null }));
+  assert(!isPageContent({ document: { children: [] }, meta: { v: 2 } }));
+  assert(
+    isPageContent({ document: { id: "root", type: "page", children: [] }, meta: { v: 1, blocks: {}, deleted: {} } }),
+  );
+  assert(isPageContent({ document: { children: [] } }));
 });

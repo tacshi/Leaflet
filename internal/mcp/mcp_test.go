@@ -502,3 +502,34 @@ func toStrings(v any) []string {
 	}
 	return out
 }
+
+// An edit whose history snapshot cannot be kept is not saved either, so
+// trying it again does not make it twice.
+func TestEditNotSavedWithoutItsSnapshot(t *testing.T) {
+	st := newStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`CREATE TRIGGER reject_history BEFORE INSERT ON page_history BEGIN SELECT RAISE(ABORT, 'history failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(st, "test")
+	args := map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"},
+		"blocks": []any{map[string]any{"type": "paragraph", "text": "Inserted once"}}}
+	if out := s.pages.call("insert_blocks", args); out["error"] == nil {
+		t.Fatalf("insert with no snapshot: %v", out)
+	}
+	if strings.Contains(st.Content(p.ID).PlainText(), "Inserted once") {
+		t.Error("insert saved without its snapshot")
+	}
+	if _, err := st.DB().Exec(`DROP TRIGGER reject_history`); err != nil {
+		t.Fatal(err)
+	}
+	if out := s.pages.call("insert_blocks", args); out["error"] != nil {
+		t.Fatalf("insert again: %v", out)
+	}
+	if h, err := st.History(p.ID); err != nil || len(h) != 1 {
+		t.Errorf("history %d, %v", len(h), err)
+	}
+}

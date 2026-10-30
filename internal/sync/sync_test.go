@@ -1536,3 +1536,113 @@ func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 		}
 	}
 }
+
+// A share withdrawn takes the page from this device, with the pages under
+// it and their changes waiting, once pullMembers loads its members again
+// and is refused; the user's own pages stay. A page the server still
+// shows, though refused, stays without the roles that let it be edited.
+func TestWithdrawnShareLeavesTheDevice(t *testing.T) {
+	const (
+		root  = "00000000-0000-0000-0000-0000000000e1"
+		child = "00000000-0000-0000-0000-0000000000e2"
+		other = "00000000-0000-0000-0000-0000000000ff"
+	)
+	for _, shown := range []bool{false, true} {
+		st := openStore(t)
+		if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+			t.Fatal(err)
+		}
+		mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		old := "2026-01-01T00:00:00Z"
+		for _, r := range []map[string]any{
+			{"id": root, "space_id": other, "title": "Root", "sort_key": "V", "created_at": old, "updated_at": old},
+			{"id": child, "space_id": other, "parent_id": root, "title": "Child", "sort_key": "V", "created_at": old, "updated_at": old},
+		} {
+			if err := st.PutRemotePage(r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		editor := []store.Member{{UserID: "u1", Role: "editor", Accepted: true}}
+		for _, id := range []string{root, child} {
+			if err := st.SetMembers(id, editor); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := st.AddComment(child, "b1", "waiting", "", "", "", ""); err != nil {
+			t.Fatal(err)
+		}
+		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/rpc/page_members"):
+				w.WriteHeader(http.StatusForbidden)
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": "42501", "message": "forbidden"})
+			case strings.HasSuffix(r.URL.Path, "/pages") && shown:
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"id": root}})
+			default:
+				_ = json.NewEncoder(w).Encode([]map[string]any{})
+			}
+		}))
+		svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+		svc.pullMembers(context.Background())
+		hs.Close()
+
+		if _, err := st.Page(mine.ID); err != nil {
+			t.Fatalf("shown %v: own page removed: %v", shown, err)
+		}
+		for _, id := range []string{root, child} {
+			p, err := st.Page(id)
+			switch {
+			case !shown && err == nil:
+				t.Errorf("%s stayed after the share went", id)
+			case shown && err != nil:
+				t.Errorf("%s removed though the server still shows it: %v", id, err)
+			case shown && st.CanEdit(p):
+				t.Errorf("%s still editable after the share went", id)
+			}
+		}
+		entries, _ := st.Pending()
+		left := 0
+		for _, e := range entries {
+			if e.PageID == child {
+				left++
+			}
+		}
+		if !shown && left != 0 || shown && left == 0 {
+			t.Errorf("shown %v: %d changes of the shared pages waiting", shown, left)
+		}
+	}
+}
+
+// Content from the server that is not a page's, as null, is refused rather
+// than taken for an empty page in place of the one here.
+func TestRefreshRefusesContentThatIsNotAPage(t *testing.T) {
+	st := openStore(t)
+	base := doc.FromBlocks([]*doc.Node{para("a", "important text")})
+	p, err := st.CreatePage(store.NewPageOptions{Content: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		if err := st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, content := range []string{"null", `{}`} {
+		srv := httptest.NewServer(&contentServer{content: content, revision: 2})
+		s := New(st, remote.SignedInForTest(srv.URL, st, "user"))
+		if _, err := s.refreshRemote(t.Context(), p.ID); err == nil {
+			t.Errorf("%s: refresh took it", content)
+		}
+		srv.Close()
+		if got := textOf(st.Content(p.ID), "a"); got != "important text" {
+			t.Errorf("%s: page now %q", content, got)
+		}
+	}
+}

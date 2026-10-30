@@ -142,6 +142,19 @@ export function emptyContent(): PageContent {
   };
 }
 
+/**
+ * Whether stored content is a page's: an object with its document, of a
+ * version this code knows. What is not would read as an empty page, which
+ * saving would put in place of the real one.
+ */
+export function isPageContent(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  const r = raw as { document?: unknown; meta?: { v?: unknown } };
+  if (!r.document || typeof r.document !== "object" || Array.isArray(r.document)) return false;
+  const v = r.meta && typeof r.meta === "object" ? r.meta.v : undefined;
+  return v === undefined || (typeof v === "number" && v <= 1);
+}
+
 /** Accepts whatever is stored and returns a well-formed content object. */
 export function normalizeContent(raw: unknown): PageContent {
   const content = emptyContent();

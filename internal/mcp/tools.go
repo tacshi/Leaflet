@@ -355,26 +355,26 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		if len(x.Ops) == 0 {
 			return out, nil
 		}
+		// The snapshot goes first: an edit that could not keep one is not
+		// saved, so trying it again does not make it twice.
+		if err := t.snapshot(p.ID, before); err != nil {
+			return nil, err
+		}
 		if _, _, err := st.SaveContentOver(p.ID, row.Content, content); errors.Is(err, store.ErrContentChanged) {
 			continue
 		} else if err != nil {
 			return nil, err
 		}
-		if err := t.snapshot(p.ID, before); err != nil {
-			return nil, err
-		}
+		t.edited[p.ID] = doc.NowMs()
 		return out, nil
 	}
 	return nil, toolErr("The page kept changing while saving. Read it again and retry.")
 }
 
 // snapshot keeps the page as it was before this client's edits, once per
-// stretch of them.
+// stretch of them: none while the last edit saved is recent.
 func (t *pageTools) snapshot(pageID string, before *doc.Content) error {
-	now := doc.NowMs()
-	last, ok := t.edited[pageID]
-	t.edited[pageID] = now
-	if ok && now-last < historyGap.Milliseconds() {
+	if last, ok := t.edited[pageID]; ok && doc.NowMs()-last < historyGap.Milliseconds() {
 		return nil
 	}
 	return t.s.st.AddHistory(pageID, before, "agent_run", "", "Before "+t.s.agent)

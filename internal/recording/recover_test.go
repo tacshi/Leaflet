@@ -104,3 +104,31 @@ func TestRecoverInterruptedUploadsAudio(t *testing.T) {
 		t.Errorf("audio not queued: %+v", entries)
 	}
 }
+
+// fetching stands in for sync, with the audio of other devices.
+type fetching struct{ asked *string }
+
+func (fetching) Uploads() bool  { return true }
+func (fetching) CanFetch() bool { return true }
+func (f fetching) Fetch(_ context.Context, _, path string) ([]byte, error) {
+	*f.asked = path
+	return nil, errors.New("fetched")
+}
+
+// Transcribing again on this device a recording whose audio is not here,
+// made on another device, fetches the audio first.
+func TestRetranscribeLocallyFetchesStoredAudio(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	var asked string
+	c := NewController(st, nil)
+	c.Blobs = fetching{&asked}
+	_, err = c.transcribe(store.Recording{ID: "r1", AudioPath: "u1/r1.wav"}, "", nil,
+		store.SttSettings{Provider: "openai-compatible", BaseURL: "http://localhost:1234/v1"})
+	if asked != "u1/r1.wav" || err == nil || err.Error() != "fetched" {
+		t.Errorf("fetched %q, %v", asked, err)
+	}
+}

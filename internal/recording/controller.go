@@ -695,6 +695,15 @@ func (r *Controller) finish(rec store.Recording, path string, soniox *Soniox, st
 	}
 }
 
+// storedAudio fetches the audio of a recording that is not on this device,
+// recorded on another or removed here once it went up, for an engine on
+// this device to transcribe.
+func (r *Controller) storedAudio(ctx context.Context, rec store.Recording) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	return r.Audio(ctx, rec)
+}
+
 // uploadAudio uploads a recording's audio, given as long as it takes over
 // a slow connection (256 kbit/s) and two minutes more: storage transfers
 // have no whole-request timeout of their own, so a stalled one ends here.
@@ -718,6 +727,9 @@ func (r *Controller) transcribe(rec store.Recording, path string, soniox *Soniox
 	}
 	if stt.Provider == "openai-compatible" && IsLocalEndpoint(stt.BaseURL) {
 		audio, err := readAudio()
+		if err != nil && rec.AudioPath != "" {
+			audio, err = r.storedAudio(ctx, rec)
+		}
 		if err != nil {
 			return nil, err
 		}

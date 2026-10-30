@@ -278,3 +278,86 @@ func TestUnreadablePageOpensReadOnly(t *testing.T) {
 		t.Errorf("unreadable %v, read-only %v, shows %q", a.page.unreadable, a.page.editor.ReadOnly, a.page.editor.Content.PlainText())
 	}
 }
+
+// A title that cannot be saved keeps the page open with it, as its text
+// would.
+func TestLeavingAPageWhoseTitleCannotSave(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.page.title = "Typed title"
+	if _, err := a.st.DB().Exec(`CREATE TRIGGER full BEFORE UPDATE ON pages BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if a.closePage() || a.page == nil || a.page.title != "Typed title" {
+		t.Fatal("the page closed without its title saved")
+	}
+}
+
+// The open page deleted on another device closes, with what was typed and
+// not yet saved stored first, for restoring it to bring back.
+func TestPageDeletedElsewhereKeepsWhatWasTyped(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := a.st.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := a.st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	typed := &doc.Node{ID: "t1", Type: "paragraph"}
+	typed.SetDelta(doc.FromMarkdown("typed"))
+	a.page.editor.Content.Children = append(a.page.editor.Content.Children, typed)
+	a.page.dirty = true
+	row := store.PageToRemote(p)
+	row["deleted_at"] = "2026-10-30T00:00:00Z"
+	if err := a.st.PutRemotePage(row); err != nil {
+		t.Fatal(err)
+	}
+	a.reload(store.Change{Table: "pages", PageID: p.ID})
+	if a.page != nil || a.route.Kind != "home" {
+		t.Fatalf("the deleted page stayed open: %+v", a.route)
+	}
+	if a.st.Content(p.ID).Find("t1") == nil {
+		t.Error("what was typed went with the page")
+	}
+}
+
+// The open page removed from this device, its share withdrawn, closes
+// without being saved back.
+func TestRemovedSharedPageCloses(t *testing.T) {
+	a := templatesApp(t)
+	old := "2026-01-01T00:00:00Z"
+	if err := a.st.PutRemotePage(map[string]any{"id": "shared", "space_id": "theirs", "title": "Shared", "sort_key": "V",
+		"created_at": old, "updated_at": old}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage("shared")
+	if a.page == nil {
+		t.Fatal("the page did not open")
+	}
+	a.page.dirty = true
+	if _, err := a.st.RemoveSharedPages("shared"); err != nil {
+		t.Fatal(err)
+	}
+	a.reload(store.Change{Table: "*"})
+	if a.page != nil || a.route.Kind != "home" {
+		t.Fatalf("the removed page stayed open: %+v", a.route)
+	}
+	if _, err := a.st.ContentRow("shared"); err == nil || a.st.HasPending("page_content", "shared") {
+		t.Error("the removed page was saved back")
+	}
+}

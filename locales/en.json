@@ -2785,6 +2785,10 @@
   "@recErrSonioxSaved": {
     "description": "Error when retranscribing with Soniox while signed out."
   },
+  "recErrTranscribing": "This recording is being transcribed.",
+  "@recErrTranscribing": {
+    "description": "Error when transcribing again a recording still being transcribed."
+  },
   "recErrAudioMissing": "The audio is not on this device.",
   "@recErrAudioMissing": {
     "description": "Error when a recording's audio is missing."

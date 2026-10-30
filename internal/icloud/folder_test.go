@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -141,6 +142,26 @@ func TestCheck(t *testing.T) {
 	}
 	if err := f.Check(true); err != nil {
 		t.Errorf("made: %v", err)
+	}
+}
+
+// A file whose name is as long as the disk takes goes in, though the
+// name it is written under first is longer.
+func TestCopyInTakesALongName(t *testing.T) {
+	f := folder(t)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rel, err := FileBlobPath(page, strings.Repeat("n", 240)+".pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.CopyIn(rel, src); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := f.Read(rel); err != nil || string(data) != "hello" {
+		t.Errorf("copied %q, %v", data, err)
 	}
 }
 

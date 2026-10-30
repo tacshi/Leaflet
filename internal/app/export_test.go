@@ -116,6 +116,51 @@ func TestExportZipDotNames(t *testing.T) {
 	}
 }
 
+// A file named as a page in a folder named "files" is, or as the
+// directory of its subpages, goes in the zip under another name, and the
+// link to it with it.
+func TestExportZipFilesBesidePages(t *testing.T) {
+	pages := []store.Page{
+		{ID: "notes", Title: "notes", FolderID: "f"},
+		{ID: "trip", Title: "Trip", FolderID: "f"},
+		{ID: "hotels", Title: "Hotels", ParentID: "trip"},
+		{ID: "other", Title: "Other"},
+	}
+	md := &doc.Node{ID: "m", Type: "file", Data: map[string]any{"url": "file:///data/files/m/notes.md", "name": "notes.md"}}
+	dir := &doc.Node{ID: "d", Type: "file", Data: map[string]any{"url": "file:///data/files/d/Trip", "name": "Trip"}}
+	contents := map[string]*doc.Content{"other": doc.FromBlocks([]*doc.Node{md, dir})}
+	var buf bytes.Buffer
+	err := exportZip(&buf, pages, map[string]string{"f": "files"}, func(id string) *doc.Content {
+		if c := contents[id]; c != nil {
+			return c
+		}
+		return doc.Empty()
+	}, func(string) string { return "" }, func(string) ([]byte, error) { return []byte("attached"), nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, f := range r.File {
+		if _, ok := got[f.Name]; ok {
+			t.Errorf("%s is in the zip twice", f.Name)
+		}
+		rc, _ := f.Open()
+		b, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		got[f.Name] = string(b)
+	}
+	if got["files/notes.md"] == "attached" || got["files/notes (2).md"] != "attached" || got["files/Trip (2)"] != "attached" {
+		t.Errorf("files %v", keys(got))
+	}
+	if other := got["Other.md"]; !strings.Contains(other, "](files/notes%20%282%29.md)") {
+		t.Errorf("other:\n%s", other)
+	}
+}
+
 // Export All takes the app's own files, and no file elsewhere that a
 // block links to.
 func TestExportOnlyOwnFiles(t *testing.T) {

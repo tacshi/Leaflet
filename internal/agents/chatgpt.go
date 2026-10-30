@@ -432,7 +432,10 @@ func (g *ChatGPT) token(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	t, err := postToken(ctx, d.TokenEndpoint, url.Values{
+	// Not the caller's context: a run stopped while OpenAI rotates the
+	// refresh token would lose the new one, and the old no longer works.
+	// signInHTTP's timeout still applies.
+	t, err := postToken(context.WithoutCancel(ctx), d.TokenEndpoint, url.Values{
 		"grant_type": {"refresh_token"}, "client_id": {acct.ClientID},
 		"refresh_token": {acct.RefreshToken}, "resource": {chatgptResource},
 	})

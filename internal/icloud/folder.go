@@ -389,7 +389,7 @@ func (f Folder) write(rel string, fill func(io.Writer) error) error {
 			last = err
 			continue
 		}
-		tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".*.tmp")
+		tmp, err := os.CreateTemp(dir, tempPattern(filepath.Base(path)))
 		if err != nil {
 			last = err
 			continue
@@ -413,6 +413,16 @@ func (f Folder) write(rel string, fill func(io.Writer) error) error {
 		last = err
 	}
 	return access(last, last)
+}
+
+// tempPattern names the file write writes before it moves into place:
+// the file's name with a dot before it, cut short, as the disk takes no
+// name of more than 255 bytes and a file's own name may be that long.
+func tempPattern(name string) string {
+	if len(name) > 64 {
+		name = strings.ToValidUTF8(name[:64], "")
+	}
+	return "." + name + ".*.tmp"
 }
 
 // syncDir has a move into dir reach the disk, where the system allows it:

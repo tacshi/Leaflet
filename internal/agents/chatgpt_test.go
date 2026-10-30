@@ -281,6 +281,28 @@ func TestChatGPTRenewsARefusedToken(t *testing.T) {
 	}
 }
 
+// A renewal outlasts the run that asked for it, stopped meanwhile: the
+// refresh token OpenAI rotated to is kept, rather than lost with the old
+// one spent.
+func TestChatGPTRenewalOutlastsAStoppedRun(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cancel()
+		time.Sleep(50 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"access_token":"new","refresh_token":"r2","expires_in":3600}`)
+	}))
+	defer srv.Close()
+	fakeDiscovery(t, &chatgptDiscovery{TokenEndpoint: srv.URL + "/token"})
+	var kept atomic.Value
+	g := &ChatGPT{acct: ChatGPTAccount{ClientID: "c", RefreshToken: "r1"}, OnRefresh: func(a ChatGPTAccount) { kept.Store(a.RefreshToken) }}
+	_, _ = g.token(ctx)
+	if got := g.Account().RefreshToken; got != "r2" || kept.Load() != "r2" {
+		t.Errorf("refresh token %q, kept %v", got, kept.Load())
+	}
+}
+
 // A sign-in that another replaced, or that was signed out, keeps its
 // renewals to itself: they do not overwrite the one kept, or bring back
 // the one signed out.

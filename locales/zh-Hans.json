@@ -540,6 +540,7 @@
   "recErrSonioxTimeout": "Soniox 未能及时连接。",
   "recErrNoWords": "没有听到任何话语。请检查麦克风，并在测试时说话。",
   "recErrSonioxSaved": "此处 Soniox 会在录音时实时转写；转写已保存的音频需要 Leaflet 服务器。",
+  "recErrTranscribing": "此录音正在转写中。",
   "recErrAudioMissing": "音频不在此设备上。",
   "recErrSignIn": "登录后即可在云端转写。",
   "recErrEndpoint": "转写失败：{status} {details}",

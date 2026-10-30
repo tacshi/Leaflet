@@ -1381,8 +1381,10 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 	}
 	// Text matches as the titles do, lowered as Go lowers it, and with %
 	// and _ the characters they are: SQLite's lower() and LIKE fold ASCII
-	// alone, and LIKE reads those two as wildcards.
-	rows, err := s.db.Query(`SELECT page_id, plain_text FROM page_contents WHERE instr(`+lowerFunc+`(plain_text), ?) > 0 LIMIT ?`, q, textLimit)
+	// alone, and LIKE reads those two as wildcards. Only pages not deleted
+	// count toward the limit, so deleted ones do not crowd theirs out.
+	rows, err := s.db.Query(`SELECT c.page_id, c.plain_text FROM page_contents c JOIN pages p ON p.id = c.page_id
+		WHERE p.deleted_at IS NULL AND instr(`+lowerFunc+`(c.plain_text), ?) > 0 LIMIT ?`, q, textLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1405,7 +1407,9 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		hits = append(hits, SearchHit{Kind: "page", Title: TitleOr(titles[id]), PageID: id, Snippet: snippet(text, q)})
 	}
 	_ = rows.Close()
-	rows, err = s.db.Query(`SELECT page_id, block_id FROM recordings WHERE instr(`+lowerFunc+`(transcript), ?) > 0 LIMIT ?`, q, otherLimit)
+	// Recordings and comments, as the text, of the pages listed alone.
+	rows, err = s.db.Query(`SELECT r.page_id, r.block_id FROM recordings r JOIN pages p ON p.id = r.page_id
+		WHERE p.deleted_at IS NULL AND p.is_template = 0 AND instr(`+lowerFunc+`(r.transcript), ?) > 0 LIMIT ?`, q, otherLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1420,7 +1424,8 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		}
 	}
 	_ = rows.Close()
-	rows, err = s.db.Query(`SELECT page_id, block_id, body FROM comments WHERE instr(`+lowerFunc+`(body), ?) > 0 AND deleted_at IS NULL LIMIT ?`, q, otherLimit)
+	rows, err = s.db.Query(`SELECT c.page_id, c.block_id, c.body FROM comments c JOIN pages p ON p.id = c.page_id
+		WHERE p.deleted_at IS NULL AND p.is_template = 0 AND instr(`+lowerFunc+`(c.body), ?) > 0 AND c.deleted_at IS NULL LIMIT ?`, q, otherLimit)
 	if err != nil {
 		return nil, err
 	}

@@ -444,8 +444,9 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 // cloudRemove removes a deleted file's copy from the folder once a batch
 // has the file's deletion: a device that reads the batch no longer needs
 // it, and one that reads none of it yet finds the file gone a little
-// sooner. A device that sends everything again sends deleted files too,
-// so a deletion in a batch that was lost still reaches the others.
+// sooner. It stays while a copy of the file waits to go up from it. A
+// device that sends everything again sends deleted files too, so a
+// deletion in a batch that was lost still reaches the others.
 func (s *Service) cloudRemove(e store.OutboxEntry) {
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
@@ -454,6 +455,9 @@ func (s *Service) cloudRemove(e store.OutboxEntry) {
 	}
 	if s.st.HasPending("files", store.S(payload, "file_id")) {
 		return // the deletion is not in a batch yet
+	}
+	if s.copyWaits(store.S(payload, "bucket"), store.S(payload, "path")) {
+		return // a copy still goes up from it
 	}
 	rel, err := blobPath(store.S(payload, "bucket"), store.S(payload, "path"))
 	if err != nil {

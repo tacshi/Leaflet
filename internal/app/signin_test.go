@@ -96,3 +96,38 @@ func TestSignOutAsksAboutAChangeStoredMeanwhile(t *testing.T) {
 		t.Fatalf("page %v, asked about %d, signed in %v", err, account.unsynced, a.backend.SignedIn())
 	}
 }
+
+// Signing in as another account while the open page's edits cannot be
+// saved stops, as signing out does: the previous account's pages stay,
+// with the page open and what was typed in it.
+func TestSignInAsAnotherAccountStopsForAnUnsavedPage(t *testing.T) {
+	t.Cleanup(func() { signIn = signInState{} })
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u2")
+	if err := a.st.SetValue("account", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := a.st.Pending()
+	for _, e := range entries {
+		if err := a.st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.page.title = "Typed title"
+	if _, err := a.st.DB().Exec(`CREATE TRIGGER full BEFORE UPDATE ON pages BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	a.signedIn(&store.User{ID: "u2", Email: "sam@example.com"})
+	if _, err := a.st.Page(p.ID); err != nil {
+		t.Fatalf("the previous account's page went: %v", err)
+	}
+	if a.session.SignedIn || a.page == nil || a.page.title != "Typed title" {
+		t.Errorf("signed in %v, page open %v", a.session.SignedIn, a.page != nil)
+	}
+}

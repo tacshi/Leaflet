@@ -1198,6 +1198,37 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 	if row, _ := st.ContentRow(p.ID); row.Content != broken || !st.HasPending("page_content", p.ID) {
 		t.Errorf("content %q, pending %v", row.Content, st.HasPending("page_content", p.ID))
 	}
+
+	// A pull leaves the page waiting until it can be read, and the other
+	// pages' content still comes.
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out := []map[string]any{}
+		if strings.Contains(r.URL.Query().Get("select"), "content") {
+			out = append(out, map[string]any{"content": json.RawMessage(theirs.Encode()), "revision": 2, "updated_at": at})
+		} else {
+			out = append(out, map[string]any{"page_id": p.ID, "updated_at": at}, map[string]any{"page_id": other.ID, "updated_at": at})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs2.Close()
+	svc = New(st, remote.SignedInForTest(hs2.URL, st, "u1"))
+	if err := svc.pullContents(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if row, _ := st.ContentRow(p.ID); row.Content != broken {
+		t.Errorf("content %q", row.Content)
+	}
+	if c := st.Content(other.ID); c == nil || textOf(c, "b") != "two, added there" {
+		t.Errorf("the other page has %v", c)
+	}
+	if !svc.waiting()[p.ID] {
+		t.Errorf("waiting for %v", svc.waiting())
+	}
 }
 
 // Content on the server that this device cannot read, as a newer version
@@ -1612,6 +1643,80 @@ func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 		if st.HasPending("storage", id) {
 			t.Errorf("%s is still queued", id)
 		}
+	}
+}
+
+// A file deleted while a copy of it waits to go up from it stays in
+// Storage until the copy has gone up.
+func TestDeletedFileStaysForACopyThatWaits(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	space := st.Session().SpaceID
+	f := store.File{ID: "00000000-0000-0000-0000-0000000000f1", SpaceID: space, PageID: p.ID, Name: "plan.pdf",
+		MimeType: "application/pdf", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	f.StoragePath = space + "/" + f.ID + "/plan.pdf"
+	if err := st.PutFile(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{
+		{ID: "b1", Type: "file", Data: map[string]any{"name": f.Name, "file_id": f.ID}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := st.CopyPage(p.ID, store.CopyOptions{Title: "Meeting copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileID := st.Content(cp.ID).Children[0].Str("file_id")
+	if err := st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+
+	var mu gosync.Mutex
+	var removed []string
+	refuse := true
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case req.URL.Path == "/storage/v1/object/authenticated/files/"+f.StoragePath:
+			if refuse {
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]any{"message": "try again"})
+				return
+			}
+			_, _ = w.Write([]byte("%PDF"))
+			return
+		case req.URL.Path == "/storage/v1/object/files" && req.Method == http.MethodDelete:
+			var body struct {
+				Prefixes []string `json:"prefixes"`
+			}
+			_ = json.NewDecoder(req.Body).Decode(&body)
+			removed = append(removed, body.Prefixes...)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(removed) != 0 || !st.HasPending("storage", "files/"+fileID) {
+		t.Fatalf("removed %v before the copy went up", removed)
+	}
+	refuse = false
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(removed, ",") != f.StoragePath || st.PendingCount() != 0 {
+		t.Errorf("removed %v, %d waiting", removed, st.PendingCount())
 	}
 }
 

@@ -162,9 +162,14 @@ func (a *App) doVerify() {
 
 // signedIn sets the session up after signing in and starts syncing. As
 // someone else than the account whose pages this device keeps, whose
-// changes not uploaded yet would go, it asks first.
+// changes not uploaded yet would go, it asks first; an open page that
+// could not be saved stops it, as it stops signing out.
 func (a *App) signedIn(user *store.User) {
-	a.flush()
+	if !a.flush() && a.replacesAccount(user) {
+		// The save said why; the new account signs out again.
+		go a.backend.SignOut()
+		return
+	}
 	if n := a.lostBySigningIn(user); n > 0 {
 		signIn.asking, signIn.lost = user, n
 		return
@@ -172,18 +177,29 @@ func (a *App) signedIn(user *store.User) {
 	a.useAccount(user)
 }
 
+// replacesAccount reports whether signing in as user removes the pages of
+// another account this device keeps.
+func (a *App) replacesAccount(user *store.User) bool {
+	prev := a.st.CachedAccount()
+	return prev != "" && prev != user.ID
+}
+
 // lostBySigningIn counts the changes signing in as user removes: those of
 // another account this device keeps the pages of, which never went up.
 func (a *App) lostBySigningIn(user *store.User) int {
-	if prev := a.st.CachedAccount(); prev == "" || prev == user.ID {
+	if !a.replacesAccount(user) {
 		return 0
 	}
 	return a.st.PendingCount()
 }
 
 // useAccount makes user the session: the previous account's pages go, if
-// it was another's.
+// it was another's, once the open page's edits are saved.
 func (a *App) useAccount(user *store.User) {
+	if a.replacesAccount(user) && !a.flush() {
+		go a.backend.SignOut()
+		return
+	}
 	// One way of syncing at a time: the server's, now. Settings say so,
 	// so iCloud sync shows off once signed out again.
 	if a.sync.ICloudOn() || a.settings.ICloudSync {

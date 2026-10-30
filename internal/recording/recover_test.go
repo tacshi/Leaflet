@@ -132,3 +132,48 @@ func TestRetranscribeLocallyFetchesStoredAudio(t *testing.T) {
 		t.Errorf("fetched %q, %v", asked, err)
 	}
 }
+
+// Transcribing again a recording being transcribed is refused, as is a
+// second ask before the first has finished: the one ending last would
+// write over the other's transcript.
+func TestRetranscribeOneAtATime(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := st.CreateRecording("p", "b1", "", "", "", "auto")
+	if _, err := st.UpdateRecording(rec.ID, func(r *store.Recording) { r.Status = "ready" }); err != nil {
+		t.Fatal(err)
+	}
+	updates := make(chan func(), 4)
+	c := NewController(st, nil)
+	c.update = func(fn func()) { updates <- fn }
+	stt := store.SttSettings{Provider: "openai-compatible", BaseURL: "http://localhost:1/v1"}
+
+	c.Transcribing[rec.ID] = true
+	if err := c.Retranscribe(rec.ID, stt, true); err == nil {
+		t.Error("transcribed again while transcribing")
+	}
+	if r, _ := st.Recording(rec.ID); r.Status != "ready" {
+		t.Errorf("status %s", r.Status)
+	}
+
+	delete(c.Transcribing, rec.ID)
+	if err := c.Retranscribe(rec.ID, stt, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Retranscribe(rec.ID, stt, true); err == nil {
+		t.Error("a second transcription started before the first finished")
+	}
+	// The first runs its course: started, then done.
+	for range 2 {
+		(<-updates)()
+	}
+	if c.Transcribing[rec.ID] {
+		t.Error("still transcribing once done")
+	}
+}

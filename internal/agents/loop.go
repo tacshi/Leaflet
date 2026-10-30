@@ -63,6 +63,7 @@ var thinkRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
 // RunLocal runs the loop on this device against a local model, so agents
 // on them work offline. The tools edit ctx.Content.
 func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev Events) (Result, error) {
+	tc.Request = req.Instruction
 	exec := &Executor{Ctx: tc, OnOp: ev.Op}
 	if ev.Status != nil {
 		ev.Status("running")

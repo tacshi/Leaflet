@@ -657,7 +657,13 @@ func (r *Controller) transcribeTest(path string, soniox *Soniox, stt store.SttSe
 
 // Retranscribe transcribes a recording, again or for the first time,
 // with the current settings; it says why when the engine cannot run now.
+// Call it on the main thread, as Transcribing is the main thread's.
 func (r *Controller) Retranscribe(id string, stt store.SttSettings, online bool) error {
+	// One transcription at a time: the one ending last would write its
+	// transcript and status over the other's.
+	if r.Transcribing[id] {
+		return errors.New(locales.RecErrTranscribing())
+	}
 	if err := Usable(stt, online, r.be.SignedIn()); err != nil {
 		return err
 	}
@@ -676,6 +682,8 @@ func (r *Controller) Retranscribe(id string, stt store.SttSettings, online bool)
 	if err != nil {
 		return err
 	}
+	// Set now, not once finish starts, so a second call refuses at once.
+	r.Transcribing[id] = true
 	go r.finish(rec, rec.LocalPath, nil, stt)
 	return nil
 }

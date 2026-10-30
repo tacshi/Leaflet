@@ -152,6 +152,11 @@ func exportZip(w io.Writer, pages []store.Page, folders map[string]string, conte
 	// files are the pictures written so far, by their URL on this device.
 	files := map[string]string{}
 	usedFiles := map[string]bool{}
+	// A page's file, or the directory of its subpages, may be in files/
+	// too, in a folder of that name: a file there takes another name.
+	for _, p := range paths {
+		usedFiles[strings.ToLower(p)], usedFiles[strings.ToLower(p)+".md"] = true, true
+	}
 	for _, p := range pages {
 		c := content(p.ID)
 		if c == nil {

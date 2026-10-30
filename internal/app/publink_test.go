@@ -143,7 +143,7 @@ func TestPubServesOnlyThePage(t *testing.T) {
 		!strings.Contains(csp, "default-src 'none'") || strings.Contains(csp, "connect-src") {
 		t.Errorf("embed: %d %q", w.Code, csp)
 	}
-	if body := w.Body.String(); !strings.Contains(body, "<head><meta charset") || !strings.Contains(body, "play()") || !strings.Contains(body, "leafletSize") {
+	if body := w.Body.String(); !strings.HasPrefix(body, `<meta charset`) || !strings.Contains(body, "RTCPeerConnection") || !strings.Contains(body, "play()") || !strings.Contains(body, "leafletSize") {
 		t.Errorf("embed page: %s", body)
 	}
 	if w := get(h, "/tok/e/nope"); w.Code != http.StatusNotFound {

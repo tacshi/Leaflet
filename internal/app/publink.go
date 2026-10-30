@@ -1042,12 +1042,9 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 // visitor's light or dark, as embedPage gives it the app's, and telling
 // the page how tall it is, so its frame grows to fit.
 func pubEmbedPage(src string) string {
-	meta := `<meta charset="utf-8"><meta name="color-scheme" content="light dark">` +
+	meta := `<meta charset="utf-8"><meta name="color-scheme" content="light dark">` + embedNoRTC +
 		`<script>document.documentElement.dataset.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";</script>` + embedFit
-	if i := strings.Index(strings.ToLower(src), "<head>"); i >= 0 {
-		return src[:i+6] + meta + src[i+6:]
-	}
-	return meta + src
+	return leadWith(meta, src)
 }
 
 // embedScript grows each embed's frame to the height its content says,

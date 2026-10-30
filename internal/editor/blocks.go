@@ -16,6 +16,12 @@ import (
 
 func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	rows, cols := n.Int("rowsLen", 0), n.Int("colsLen", 0)
+	// A size from another client, negative or huge, draws only the cells
+	// the table has.
+	const most = 1 << 16
+	if rows < 0 || cols < 0 || rows > most || cols > most || rows*cols > most {
+		rows, cols = doc.TableSize(n)
+	}
 	if rows == 0 || cols == 0 {
 		return
 	}

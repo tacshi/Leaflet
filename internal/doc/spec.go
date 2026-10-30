@@ -28,9 +28,27 @@ var chartTypes = map[string]bool{"bar": true, "line": true, "pie": true}
 // maxEmbedHTML caps an embed's source, as the server does.
 const maxEmbedHTML = 200_000
 
+// A block's nested items go at most maxSpecDepth deep, and a block holds
+// at most maxSpecNodes in all, as on the server.
+const (
+	maxSpecDepth = 16
+	maxSpecNodes = 2000
+)
+
 // SpecToNode turns a BlockSpec (docs/protocol.md §2) into a block. id is
 // kept when given.
 func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
+	made := 0
+	return specToNode(spec, id, author, 0, &made)
+}
+
+func specToNode(spec map[string]any, id, author string, depth int, made *int) (*Node, error) {
+	if depth >= maxSpecDepth {
+		return nil, toolErr("Blocks nest at most %d deep.", maxSpecDepth)
+	}
+	if *made++; *made > maxSpecNodes {
+		return nil, toolErr("At most %d blocks in all per block.", maxSpecNodes)
+	}
 	typ, _ := spec["type"].(string)
 	if typ == "" {
 		typ = "paragraph"
@@ -75,7 +93,7 @@ func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 		}
 		if kids, ok := spec["children"].([]any); ok {
 			for _, k := range kids {
-				child, err := SpecToNode(asMap(k), "", author)
+				child, err := specToNode(asMap(k), "", author, depth+1, made)
 				if err != nil {
 					return nil, err
 				}

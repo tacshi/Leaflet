@@ -396,6 +396,11 @@ func (a *App) addSubpageBlock() {
 		return
 	}
 	t := a.defaultTemplate(ps.id, "")
+	// As in newPageFrom: no subpage is made while the page's edits can't
+	// be saved, as it could not open.
+	if !a.flush() {
+		return
+	}
 	p, err := a.st.CreatePage(store.NewPageOptions{ParentID: ps.id})
 	if err != nil {
 		a.toast(locales.HostErrorCreateSubpage(err.Error()))
@@ -407,7 +412,9 @@ func (a *App) addSubpageBlock() {
 	a.treeOpen("page", ps.id)
 	a.savePage()
 	a.openPage(p.ID)
-	a.startFrom(t)
+	if a.page != nil && a.page.id == p.ID {
+		a.startFrom(t)
+	}
 }
 
 // uploadImage picks a picture on the device for an image block: a new one
@@ -983,6 +990,12 @@ func embedFrame(src, scheme string) string {
 	head := `<meta http-equiv="Content-Security-Policy" content="` + embedCSP + `">` + embedNoRTC +
 		`<meta name="color-scheme" content="` + scheme + `">` +
 		`<script>document.documentElement.dataset.theme = "` + scheme + `";</script>` + embedWheel + embedFit
+	return leadWith(head, src)
+}
+
+// leadWith puts head at the very start of the HTML src, after a doctype
+// it starts with.
+func leadWith(head, src string) string {
 	rest := strings.TrimLeft(src, " \t\r\n\f")
 	if len(rest) >= 9 && strings.EqualFold(rest[:9], "<!doctype") {
 		if i := strings.IndexByte(rest, '>'); i >= 0 {

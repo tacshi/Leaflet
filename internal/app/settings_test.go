@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/icloud"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -72,6 +74,39 @@ func TestModelsStayWithTheirDialog(t *testing.T) {
 	second()
 	if len(form.models) != 1 || form.models[0] != "llama-2" {
 		t.Errorf("dialog B lists %v", form.models)
+	}
+}
+
+// iCloud sync turns on or off one turn at a time: one taken while the
+// last still goes is not, so the switch and the syncing agree.
+func TestICloudSwitchWaitsForItsLastTurn(t *testing.T) {
+	a := templatesApp(t)
+	a.sync.ICloud = icloud.Folder{Root: filepath.Join(t.TempDir(), "Leaflet"), Temp: t.TempDir()}
+	t.Cleanup(func() { a.watchICloud(false) })
+	posts := make(chan func(), 2)
+	a.post = func(fn func()) { posts <- fn }
+	next := func() func() {
+		select {
+		case fn := <-posts:
+			return fn
+		case <-time.After(5 * time.Second):
+			t.Fatal("the turn did not finish")
+			return nil
+		}
+	}
+	a.setICloud(true)
+	a.setICloud(false)
+	if !a.settings.ICloudSync {
+		t.Error("turned off while still turning on")
+	}
+	next()()
+	if a.icloudBusy || !a.settings.ICloudSync || !a.sync.ICloudOn() {
+		t.Fatalf("busy %v, setting %v, syncing %v", a.icloudBusy, a.settings.ICloudSync, a.sync.ICloudOn())
+	}
+	a.setICloud(false)
+	next()()
+	if a.settings.ICloudSync || a.sync.ICloudOn() {
+		t.Errorf("setting %v, syncing %v", a.settings.ICloudSync, a.sync.ICloudOn())
 	}
 }
 

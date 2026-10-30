@@ -82,6 +82,9 @@ type App struct {
 	invitesOpen bool
 	// icloudStop stops watching the Leaflet folder in iCloud Drive.
 	icloudStop context.CancelFunc
+	// icloudBusy is set while iCloud sync turns on or off, which the
+	// switch waits for: a turn taken after it would finish first.
+	icloudBusy bool
 
 	route Route
 	// router is MyGo's history of the routes; routerAt is its path the

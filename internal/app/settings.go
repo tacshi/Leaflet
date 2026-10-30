@@ -1359,7 +1359,7 @@ func (a *App) syncSettings(c *ui.Context) {
 				desc = locales.SettingsICloudOnDesc()
 			}
 			settingRow(c, "icloud", locales.SettingsICloud(), desc, true, func() {
-				if ui.Switch(c.Key("icloud"), &on).Changed() {
+				if ui.Switch(c.Key("icloud"), &on).Disabled(a.icloudBusy).Changed() {
 					a.setICloud(on)
 				}
 			})

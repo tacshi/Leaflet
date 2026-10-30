@@ -755,6 +755,8 @@ func (s *Service) pushChanged(ctx context.Context, table string, payload map[str
 // caller as the author, which the server then refuses as a change to the
 // comment, so resolving someone else's comment never went up.
 func (s *Service) pushComment(ctx context.Context, uid string, payload map[string]any) (bool, error) {
+	cols, partial := payload[store.ChangedKey].([]any)
+	delete(payload, store.ChangedKey)
 	changes := map[string]any{"resolved": payload["resolved"]}
 	if author, _ := payload["author_id"].(string); author == "" || author == uid {
 		for _, k := range []string{"body", "quote", "agent_name", "deleted_at"} {
@@ -763,7 +765,19 @@ func (s *Service) pushComment(ctx context.Context, uid string, payload map[strin
 	} else if payload["deleted_at"] != nil {
 		changes["deleted_at"] = payload["deleted_at"]
 	}
+	// Of a comment changed here, only what changed: a resolve made offline
+	// does not undo a delete made elsewhere.
+	if partial {
+		for k := range changes {
+			if !slices.Contains(cols, any(k)) {
+				delete(changes, k)
+			}
+		}
+	}
 	id, _ := payload["id"].(string)
+	if partial && len(changes) == 0 {
+		return true, nil
+	}
 	rows, err := s.be.Update(ctx, "comments", []string{remote.Eq("id", id)}, changes)
 	if err != nil || len(rows) > 0 {
 		return err == nil, err

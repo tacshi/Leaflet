@@ -249,7 +249,9 @@ func (s *Store) PushedContent(pageID, over, content, plain, base string, remoteA
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err != nil || n == 0 {
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
 		return ErrContentChanged
 	}
 	return nil

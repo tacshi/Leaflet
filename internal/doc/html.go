@@ -507,7 +507,7 @@ const shortCell = 20
 
 // tableCells are a stored table's cells, row by row, as rich text.
 func tableCells(n *Node) [][]Delta {
-	cols, rows := n.Int("colsLen", 0), n.Int("rowsLen", 0)
+	rows, cols := TableSize(n)
 	grid := make([][]Delta, rows)
 	for i := range grid {
 		grid[i] = make([]Delta, cols)

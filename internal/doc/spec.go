@@ -326,10 +326,30 @@ func SortTableCells(table *Node) {
 	})
 }
 
+// maxTableCells is the most cells TableSize makes room for.
+const maxTableCells = 1 << 16
+
+// TableSize is a stored table's rows and columns, as far as it has cells
+// for them: a size from another client or a newer app, negative or huge,
+// never makes room for more cells than are there, or than maxTableCells.
+func TableSize(n *Node) (rows, cols int) {
+	lastRow, lastCol := -1, -1
+	for _, cell := range n.Children {
+		if r, c := cell.Int("rowPosition", -1), cell.Int("colPosition", -1); r >= 0 && c >= 0 {
+			lastRow, lastCol = max(lastRow, r), max(lastCol, c)
+		}
+	}
+	rows = min(max(n.Int("rowsLen", 0), 0), lastRow+1)
+	cols = min(max(n.Int("colsLen", 0), 0), lastCol+1, maxTableCells)
+	if rows == 0 || cols == 0 {
+		return 0, 0
+	}
+	return min(rows, maxTableCells/cols), cols
+}
+
 // TableRows rebuilds the rows of a stored table, as inline markdown.
 func TableRows(n *Node) [][]string {
-	cols := n.Int("colsLen", 0)
-	rows := n.Int("rowsLen", 0)
+	rows, cols := TableSize(n)
 	grid := make([][]string, rows)
 	for i := range grid {
 		grid[i] = make([]string, cols)

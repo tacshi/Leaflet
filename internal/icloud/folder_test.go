@@ -143,3 +143,37 @@ func TestCheck(t *testing.T) {
 		t.Errorf("made: %v", err)
 	}
 }
+
+// A copy whose first try fails, as where Temp is on another disk, is
+// written whole by the second; one cut short before is written again.
+func TestCopyInTriesAgainWithTheWholeFile(t *testing.T) {
+	f := folder(t)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := rename
+	rename = func(from, to string) error {
+		if filepath.Dir(from) == f.Temp {
+			return errors.New("cross-device link")
+		}
+		return old(from, to)
+	}
+	t.Cleanup(func() { rename = old })
+	rel, _ := FileBlobPath(page, "notes.txt")
+	if err := f.CopyIn(rel, src); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := f.Read(rel); err != nil || string(data) != "hello" {
+		t.Fatalf("copied %q, %v", data, err)
+	}
+	if err := os.WriteFile(f.abs(rel), []byte("he"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.CopyIn(rel, src); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := f.Read(rel); err != nil || string(data) != "hello" {
+		t.Errorf("a copy cut short stayed: %q, %v", data, err)
+	}
+}

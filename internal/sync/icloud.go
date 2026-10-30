@@ -111,10 +111,11 @@ func (s *Service) cloudPass(ctx context.Context) error {
 		return err
 	}
 	if !s.ownLogChecked {
-		if err := s.checkOwnLog(me); err != nil {
+		checked, err := s.checkOwnLog(me)
+		if err != nil {
 			return err
 		}
-		s.ownLogChecked = true
+		s.ownLogChecked = checked
 	}
 	if err := s.cloudPush(ctx, me); err != nil {
 		return err
@@ -286,22 +287,24 @@ func (s *Service) writeBatch(me string, b icloud.Batch) error {
 // short before it reached the disk would hold up the other devices, which
 // read each device's batches in order, for good: it is written again
 // with nothing in it, and everything is sent again, as what it held is
-// lost.
-func (s *Service) checkOwnLog(me string) error {
+// lost. It reports whether it could read the batch: one iCloud has not
+// downloaded yet is read on a later pass.
+func (s *Service) checkOwnLog(me string) (bool, error) {
 	seqs, _, err := s.ICloud.Batches(me)
 	if err != nil || len(seqs) == 0 {
-		return err
+		return err == nil, err
 	}
 	seq := seqs[len(seqs)-1]
 	if _, err := s.readBatch(me, seq); !errors.Is(err, icloud.ErrDamaged) {
-		return nil // fine, or not here to tell yet
+		// Fine, or not here to tell yet.
+		return err == nil || errors.Is(err, icloud.ErrNewerFormat), nil
 	}
 	log.Printf("icloud: batch %d of this device does not parse; writing it again and sending everything", seq)
 	if err := s.writeBatch(me, icloud.Batch{Format: icloud.Format, Device: me, Seq: seq, WrittenAt: cloudNow().UTC()}); err != nil {
-		return err
+		return false, err
 	}
 	space, _ := s.st.Value("icloud.space")
-	return s.requeueAll(space)
+	return true, s.requeueAll(space)
 }
 
 // writeDevice writes device.json, at most once an hour unless now.
@@ -542,6 +545,10 @@ func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerCo
 		&store.PeerContent{Peer: me, Version: version, Content: row.Content}, nil
 }
 
+// uploadFetchWait is how long cloudUpload waits for iCloud to download
+// what a copy was made from; tests shorten it.
+var uploadFetchWait = 15 * time.Second
+
 // cloudUpload copies a file or a recording's audio into the folder.
 func (s *Service) cloudUpload(ctx context.Context, e store.OutboxEntry) error {
 	var payload map[string]any
@@ -550,8 +557,17 @@ func (s *Service) cloudUpload(ctx context.Context, e store.OutboxEntry) error {
 	}
 	local := store.S(payload, "local_path")
 	if !onDevice(local) {
+		// What a copy was made from may not be downloaded yet: it is
+		// waited for a little, then on a later pass, so the rest of this
+		// one goes meanwhile.
+		fctx, cancel := context.WithTimeout(ctx, uploadFetchWait)
 		var err error
-		if local, err = s.fetchCopied(ctx, payload); err != nil || local == "" {
+		local, err = s.fetchCopied(fctx, payload)
+		cancel()
+		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			return icloud.ErrNotReady
+		}
+		if err != nil || local == "" {
 			return err // gone: nothing to upload
 		}
 	}

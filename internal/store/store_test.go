@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -64,6 +65,51 @@ func TestKeyBetweenAKeyAndItsZeros(t *testing.T) {
 	top := "a0"
 	for i := 0; i < 20; i++ {
 		top = KeyBetween("", top)
+	}
+}
+
+// Keys from the server may hold any characters: a key between them never
+// panics, and sorts strictly between whenever a key of digits can.
+func TestKeyBetweenAnyKeys(t *testing.T) {
+	for _, pair := range [][2]string{{"~", ""}, {"", "~"}, {" ", ""}, {" ", "!"}, {"a~", "b"}, {"~", "~~"},
+		{"Z", "a"}, {"", "1"}, {"!", "1"}, {"", "05"}, {"z", ""}, {"zz", ""}, {"中", ""}, {"a", "中"}, {"V", "V0X"}} {
+		k := KeyBetween(pair[0], pair[1])
+		if k <= pair[0] || pair[1] != "" && k >= pair[1] {
+			t.Errorf("between %q and %q: %q", pair[0], pair[1], k)
+		}
+	}
+	// Nothing of digits sorts before " ": the key goes just after it.
+	if k := KeyBetween("", " "); k <= " " {
+		t.Errorf("before \" \": %q", k)
+	}
+	// Out of order, a key after a.
+	if k := KeyBetween("b", "a"); k <= "b" {
+		t.Errorf("between \"b\" and \"a\": %q", k)
+	}
+	rng := rand.New(rand.NewPCG(5, 6)) // #nosec G404 -- seeded, for keys a test can repeat.
+	chars := "0aZz~ !\x7f\xe4"
+	key := func() string {
+		var b strings.Builder
+		for range 1 + rng.IntN(4) {
+			b.WriteByte(chars[rng.IntN(len(chars))])
+		}
+		return b.String()
+	}
+	for range 20000 {
+		a, b := key(), key()
+		if a > b {
+			a, b = b, a
+		}
+		// No key of digits sorts between a and a followed by 0s and then
+		// nothing or a character before 0.
+		if rest, ok := strings.CutPrefix(b, a); ok {
+			if rest = strings.TrimLeft(rest, "0"); rest == "" || rest[0] < '0' {
+				continue
+			}
+		}
+		if k := KeyBetween(a, b); k <= a || k >= b {
+			t.Fatalf("between %q and %q: %q", a, b, k)
+		}
 	}
 }
 

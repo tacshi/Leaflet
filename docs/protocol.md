@@ -324,13 +324,22 @@ Leaflet/
   stops that device's sync until the user turns iCloud sync off and on.
 - **A batch** is `{format, device, seq, written_at, snapshot, entries}`,
   never changed once written. An entry is a row,
-  `{kind: "row", table, id, at, by, row}`, for `pages`, `folders`, `files`,
-  `comments` and `recordings` in their tables' shape (§7) with `updated_at`
-  and, for a comment, `author_name`; or a page's new content,
+  `{kind: "row", table, id, at, by, row, changed}`, for `pages`, `folders`,
+  `files`, `comments` and `recordings` in their tables' shape (§7) with
+  `updated_at` and, for a comment, `author_name`; or a page's new content,
   `{kind: "content", page_id, version}`. Page history and agent runs stay on
-  each device. A row's version is `(at, by)`, compared by `at` then `by`;
-  the newer applies. A device that changed a row it has not sent yet keeps
-  its change, and sends it with an `at` after every version it has seen.
+  each device. `row` is always the whole row; `changed` lists the columns
+  the device changed, as §6 sends them up, and is left out when the whole
+  row changed (a new row, one sent again whole, and every row of batches
+  from before it). A row's version is `(at, by)`, compared by `at` then
+  `by`, and kept for each column: where a reader has the row, an entry
+  applies only the columns it changed (all, without `changed`) whose
+  version there is older, so an offline rename on one device undoes no
+  move or deletion made on another. A reader without the row takes it
+  whole, its other columns older than any change. A device that changed a
+  row it has not sent yet keeps its change, and sends it with an `at` after
+  every version it has seen; what came for the row's other columns
+  meanwhile applies once its change has gone.
 - **A page file** is `{format, page_id, version, merged, content}`: the
   device's whole version of the page (§1), `version` when it wrote it (ms,
   one more than its last at least), and `merged`, the version of each other
@@ -352,7 +361,8 @@ Leaflet/
   reader skips a batch that stays damaged only when later batches exist,
   after 20 passes and a day.
 - **Compaction.** Past 500 batches, a device writes the latest entry of each
-  row and page of its log as one batch with `snapshot: true`, sets
+  row and page of its log as one batch with `snapshot: true` (for a row, with
+  each earlier entry that changed a column the later ones did not), sets
   `log_from` to its seq, and removes the batches before it. A reader that
   finds batches missing goes on from the first snapshot after the gap, as
   a compaction cut short leaves batches before its snapshot.

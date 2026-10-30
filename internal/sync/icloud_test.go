@@ -174,6 +174,63 @@ func TestICloudRowsAgree(t *testing.T) {
 	}
 }
 
+// A row goes as the columns changed on a device: an offline rename on one
+// undoes no move or deletion made on another, whichever came first or
+// waited.
+func TestICloudChangesGoColumnByColumn(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p, q, r := a.page("Plan"), a.page("Done"), a.page("Old")
+	syncAll(a, b)
+	check := func(title, parent string) {
+		t.Helper()
+		for _, d := range []*cloudDevice{a, b} {
+			pp, _ := d.st.Page(p.ID)
+			if pp.Title != title || pp.ParentID != parent {
+				t.Errorf("page is %q under %q, want %q under %q", pp.Title, pp.ParentID, title, parent)
+			}
+		}
+	}
+	if err := b.st.RenamePage(p.ID, "Plan B"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.st.RenamePage(r.ID, "Old B"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Millisecond)
+	if err := a.st.MovePage(p.ID, q.ID, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.DeletePage(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	syncAll(b, a)
+	check("Plan B", q.ID)
+	for _, d := range []*cloudDevice{a, b} {
+		if rr, _ := d.st.Page(r.ID); rr.Title != "Old B" || rr.DeletedAt.IsZero() {
+			t.Errorf("deleted page is %q, deleted %v", rr.Title, rr.DeletedAt)
+		}
+	}
+	// A rename still waiting here when the move comes keeps its title, and
+	// takes the move once it has gone.
+	if err := b.st.RenamePage(p.ID, "Plan B2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.MovePage(p.ID, "", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if err := b.svc.cloudPull(context.Background(), b.st.DeviceID()); err != nil {
+		t.Fatal(err)
+	}
+	if b.title(p.ID) != "Plan B2" {
+		t.Errorf("B's rename waiting was undone: %q", b.title(p.ID))
+	}
+	syncAll(b, a)
+	check("Plan B2", "")
+}
+
 func TestICloudMergesContent(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -286,6 +343,35 @@ func TestICloudCompacts(t *testing.T) {
 	syncAll(c)
 	if c.title(p.ID) != a.title(p.ID) || c.text(p.ID, "x") != a.text(p.ID, "x") {
 		t.Errorf("late device has %q %q, A %q %q", c.title(p.ID), c.text(p.ID, "x"), a.title(p.ID), a.text(p.ID, "x"))
+	}
+}
+
+// A snapshot keeps the change to each column: a device that had the row
+// takes from it the tags set before the renames that came after.
+func TestICloudCompactionKeepsEachColumnsChange(t *testing.T) {
+	old := compactAfter
+	compactAfter = 3
+	t.Cleanup(func() { compactAfter = old })
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Draft")
+	syncAll(a, b)
+	if err := a.st.SetPageTags(p.ID, []string{"work"}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 6 {
+		a.sync()
+		if err := a.st.RenamePage(p.ID, "Draft "+string(rune('1'+i))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.sync()
+	if seqs, _, _ := a.svc.ICloud.Batches(a.st.DeviceID()); slices.Contains(seqs, 2) {
+		t.Fatalf("not compacted: %v", seqs)
+	}
+	b.sync()
+	if got, _ := b.st.Page(p.ID); got.Title != "Draft 6" || !slices.Equal(got.Tags, []string{"work"}) {
+		t.Errorf("B has %q tagged %q", got.Title, got.Tags)
 	}
 }
 

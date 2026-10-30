@@ -10,7 +10,9 @@ import (
 // more than compactAfter batches, and removes the batches before it. A
 // device that had not read them reads the snapshot instead, which holds
 // the latest of every row and page in them, with their versions: what it
-// already had stays, being no older.
+// already had stays, being no older. A row keeps each entry of it a later
+// one does not hold all of, as one that changed a column alone does not
+// hold the columns an earlier one changed.
 func (s *Service) compact(me string) error {
 	seqs, _, err := s.ICloud.Batches(me)
 	if err != nil || len(seqs) <= compactAfter {
@@ -18,6 +20,9 @@ func (s *Service) compact(me string) error {
 	}
 	last := s.intValue("icloud.seq")
 	snapshot := icloud.Batch{Format: icloud.Format, Device: me, Seq: last + 1, WrittenAt: cloudNow().UTC(), Snapshot: true}
+	// Each row and page has a place in the snapshot, in the order it first
+	// came.
+	var places [][]icloud.Entry
 	rows := map[[2]string]int{}
 	pages := map[string]int{}
 	for _, seq := range seqs {
@@ -40,21 +45,24 @@ func (s *Service) compact(me string) error {
 			case "row":
 				k := [2]string{e.Table, e.ID}
 				if i, ok := rows[k]; ok {
-					snapshot.Entries[i] = e
+					places[i] = foldEntry(places[i], e)
 					continue
 				}
-				rows[k] = len(snapshot.Entries)
+				rows[k] = len(places)
 			case "content":
 				if i, ok := pages[e.PageID]; ok {
-					snapshot.Entries[i] = e
+					places[i] = []icloud.Entry{e}
 					continue
 				}
-				pages[e.PageID] = len(snapshot.Entries)
+				pages[e.PageID] = len(places)
 			default:
 				continue
 			}
-			snapshot.Entries = append(snapshot.Entries, e)
+			places = append(places, []icloud.Entry{e})
 		}
+	}
+	for _, p := range places {
+		snapshot.Entries = append(snapshot.Entries, p...)
 	}
 	if err := s.writeBatch(me, snapshot); err != nil {
 		return err

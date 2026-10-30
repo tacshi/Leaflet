@@ -135,12 +135,32 @@ func (s *Store) CachedAccount() string {
 // audio included. Settings and the device's
 // own model connections stay. The next session starts with an empty space,
 // and the device registers anew, as the server's row is the account's.
-func (s *Store) ForgetAccount() error {
+func (s *Store) ForgetAccount() error { return s.forgetAccount(false) }
+
+// ErrUnsynced is ForgetSyncedAccount finding changes still to go up.
+var ErrUnsynced = errors.New("changes made on this device have not gone up yet")
+
+// ForgetSyncedAccount is ForgetAccount once every change here has gone up:
+// it removes nothing, and returns ErrUnsynced, while one waits. It checks
+// in the transaction that removes, so a change stored meanwhile, by leaflet
+// mcp too, is never removed with the rest.
+func (s *Store) ForgetSyncedAccount() error { return s.forgetAccount(true) }
+
+func (s *Store) forgetAccount(synced bool) error {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if synced {
+		var n int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n); err != nil {
+			return err
+		}
+		if n > 0 {
+			return ErrUnsynced
+		}
+	}
 	for _, q := range []string{
 		`DELETE FROM spaces`, `DELETE FROM folders`, `DELETE FROM pages`, `DELETE FROM page_contents`,
 		`DELETE FROM comments`, `DELETE FROM recordings`, `DELETE FROM files`, `DELETE FROM ai_jobs`,

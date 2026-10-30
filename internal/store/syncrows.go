@@ -3,6 +3,10 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -68,26 +72,41 @@ func (s *Store) PutRemoteFolder(r map[string]any) error {
 	})
 }
 
-// PutRemoteComment stores a comment from the server.
+// PutRemoteComment stores a comment from the server, unless it has a
+// change waiting here, as PutRemotePage does a page.
 func (s *Store) PutRemoteComment(r map[string]any, authorName string) error {
-	return s.PutComment(CommentFromRemote(r, authorName))
+	c := CommentFromRemote(r, authorName)
+	return s.inTx(func(tx *sql.Tx) error {
+		if pending(tx, "comments", c.ID) {
+			return nil
+		}
+		return putComment(tx, c)
+	})
 }
 
-// PutRemoteFile stores a file from the server, keeping its copy here
-// until the file is deleted.
+// PutRemoteFile stores a file from the server, unless it has a change
+// waiting here, keeping its copy here until the file is deleted.
 func (s *Store) PutRemoteFile(r map[string]any) error {
 	f := FileFromRemote(r)
-	if err := s.PutFile(f); err != nil {
+	stored := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		if pending(tx, "files", f.ID) {
+			return nil
+		}
+		stored = true
+		return putFile(tx, f)
+	})
+	if err != nil {
 		return err
 	}
-	if !f.DeletedAt.IsZero() {
+	if stored && !f.DeletedAt.IsZero() {
 		s.removeCopy(f.ID)
 	}
 	return nil
 }
 
-// PutRemoteRecording stores a recording from the server, keeping its
-// audio on this device.
+// PutRemoteRecording stores a recording from the server, unless it has a
+// change waiting here, keeping its audio on this device.
 func (s *Store) PutRemoteRecording(r map[string]any) error {
 	rec := Recording{ID: S(r, "id"), PageID: S(r, "page_id"), BlockID: S(r, "block_id"), AudioPath: S(r, "audio_path"),
 		SttProvider: S(r, "stt_provider"), SttModel: S(r, "stt_model"), Status: S(r, "status"), Language: S(r, "language"),
@@ -101,15 +120,116 @@ func (s *Store) PutRemoteRecording(r map[string]any) error {
 	if raw, err := json.Marshal(r["transcript"]); err == nil {
 		_ = json.Unmarshal(raw, &rec.Transcript)
 	}
-	if old, err := s.Recording(rec.ID); err == nil {
-		rec.LocalPath, rec.UploadedAt = old.LocalPath, old.UploadedAt
-	}
-	return s.PutRecording(rec)
+	return s.inTx(func(tx *sql.Tx) error {
+		if pending(tx, "recordings", rec.ID) {
+			return nil
+		}
+		if old, err := scanRecording(tx.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, rec.ID)); err == nil {
+			rec.LocalPath, rec.UploadedAt = old.LocalPath, old.UploadedAt
+		}
+		return putRecording(tx, rec)
+	})
 }
 
 // PutRemoteProvider stores a cloud model connection from the server.
 func (s *Store) PutRemoteProvider(r map[string]any) error {
 	return s.PutProvider(ProviderFromRemote(r))
+}
+
+// RemoveSharedPages removes from this device a page shared with the user
+// whose share was withdrawn, with the pages under it and everything kept
+// of them: content, history, comments, recordings and files with their
+// copies here, members, conflicts, chats, and changes waiting, which the
+// server would refuse now. A page of the user's own space stays, as does
+// everything when the page is not here. It returns the pages removed.
+func (s *Store) RemoveSharedPages(rootID string) ([]string, error) {
+	own := s.Session().SpaceID
+	var ids, copies []string
+	err := s.inTx(func(tx *sql.Tx) error {
+		rows, err := tx.Query(`WITH RECURSIVE tree(id) AS (
+				SELECT id FROM pages WHERE id = ? AND space_id != ?
+				UNION SELECT p.id FROM pages p JOIN tree t ON p.parent_id = t.id WHERE p.space_id != ?)
+			SELECT id FROM tree`, rootID, own, own)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil || len(ids) == 0 {
+			return err
+		}
+		in := strings.TrimSuffix(strings.Repeat("?, ", len(ids)), ", ")
+		args := make([]any, len(ids))
+		for i, id := range ids {
+			args[i] = id
+		}
+		rows, err = tx.Query(`SELECT local_path FROM files WHERE local_path IS NOT NULL AND page_id IN (`+in+`)
+			UNION ALL SELECT local_path FROM recordings WHERE local_path IS NOT NULL AND page_id IN (`+in+`)`, append(args, args...)...) // #nosec G202 -- placeholders only.
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var path string
+			if err := rows.Scan(&path); err != nil {
+				_ = rows.Close()
+				return err
+			}
+			copies = append(copies, path)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return err
+		}
+		for _, q := range []string{
+			`DELETE FROM pages WHERE id IN (` + in + `)`, `DELETE FROM page_contents WHERE page_id IN (` + in + `)`,
+			`DELETE FROM comments WHERE page_id IN (` + in + `)`, `DELETE FROM recordings WHERE page_id IN (` + in + `)`,
+			`DELETE FROM files WHERE page_id IN (` + in + `)`, `DELETE FROM ai_jobs WHERE page_id IN (` + in + `)`,
+			`DELETE FROM page_history WHERE page_id IN (` + in + `)`, `DELETE FROM conflicts WHERE page_id IN (` + in + `)`,
+			`DELETE FROM page_members WHERE page_id IN (` + in + `)`, `DELETE FROM peer_contents WHERE page_id IN (` + in + `)`,
+			`DELETE FROM outbox WHERE page_id IN (` + in + `)`,
+		} {
+			if _, err := tx.Exec(q, args...); err != nil { // #nosec G202 -- placeholders only.
+				return err
+			}
+		}
+		// The page's own rows may be queued without its page_id.
+		if _, err := tx.Exec(`DELETE FROM outbox WHERE entity IN ('pages', 'page_content', 'page_history') AND entity_id IN (`+in+`)`, args...); err != nil { // #nosec G202 -- placeholders only.
+			return err
+		}
+		for _, id := range ids {
+			if _, err := tx.Exec(`DELETE FROM key_values WHERE key IN (?, ?)`, "chat."+id, "chat.past."+id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil || len(ids) == 0 {
+		return nil, err
+	}
+	for _, path := range copies {
+		s.removeLocalCopy(path)
+	}
+	s.Notify("*", "")
+	return ids, nil
+}
+
+// removeLocalCopy removes a file or recording's copy here, only from the
+// app's folders, where it keeps them.
+func (s *Store) removeLocalCopy(path string) {
+	for _, dir := range []string{filepath.Join(s.Dir, "files"), filepath.Join(s.Dir, "recordings")} {
+		if rel, err := filepath.Rel(dir, path); err == nil && filepath.IsLocal(rel) {
+			_ = os.Remove(path)
+			if parent := filepath.Dir(path); parent != dir {
+				_ = os.Remove(parent) // only once it is empty
+			}
+			return
+		}
+	}
 }
 
 // ClearLocalPath forgets a recording's audio on this device.

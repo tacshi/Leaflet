@@ -2,6 +2,7 @@ package doc
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -67,20 +68,33 @@ func (c *Content) MarshalJSON() ([]byte, error) {
 	return json.Marshal(j)
 }
 
+// ErrNotContent is JSON that is not a page's content: null, or an object
+// without its document, which reading as an empty page would put an empty
+// page in place of the real one; or content of a newer version than this
+// app knows.
+var ErrNotContent = errors.New("not a page's content")
+
+// contentVersion is the newest meta.v this app reads.
+const contentVersion = 1
+
 // UnmarshalJSON reads {document, meta}, tolerating a missing meta and
 // fractional times.
 func (c *Content) UnmarshalJSON(raw []byte) error {
 	var j struct {
-		Document struct {
+		Document *struct {
 			Children []*Node `json:"children"`
 		} `json:"document"`
 		Meta struct {
+			V       int                `json:"v"`
 			Blocks  map[string]float64 `json:"blocks"`
 			Deleted map[string]float64 `json:"deleted"`
 		} `json:"meta"`
 	}
 	if err := json.Unmarshal(raw, &j); err != nil {
 		return err
+	}
+	if j.Document == nil || j.Meta.V > contentVersion {
+		return ErrNotContent
 	}
 	c.Children = j.Document.Children
 	c.Blocks = map[string]int64{}

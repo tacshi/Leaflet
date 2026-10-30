@@ -507,3 +507,32 @@ func TestPubBlocksAsInTheEditor(t *testing.T) {
 		t.Errorf("recording script: %d", w.Code)
 	}
 }
+
+// A recording of the page that finishes shows its transcript to visitors.
+func TestPubFollowsRecordings(t *testing.T) {
+	a, p, h, pg := pubTest(t)
+	r, err := a.st.CreateRecording(pg.ID, "rec", "local", "model", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := a.st.Content(pg.ID)
+	c.Children = append(c.Children, &doc.Node{ID: "rec", Type: "recording", Data: map[string]any{"recording_id": r.ID}})
+	if _, _, err := a.st.SaveContent(pg.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	p.render(a.pubJob(p))
+	if _, err := a.st.UpdateRecording(r.ID, func(r *store.Recording) {
+		r.Status, r.Transcript = "ready", []store.Segment{{Text: "new transcript"}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a.pubChanged(store.Change{Table: "recordings", PageID: pg.ID})
+	if p.timer == nil {
+		t.Fatal("no render after the recording changed")
+	}
+	p.timer.Stop()
+	p.render(a.pubJob(p))
+	if w := get(h, "/tok/"); !strings.Contains(w.Body.String(), "new transcript") {
+		t.Errorf("the page did not follow the recording: %s", w.Body)
+	}
+}

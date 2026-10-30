@@ -372,7 +372,7 @@ func (a *App) accountSettings(c *ui.Context) {
 		open := true
 		if ui.AlertDialog(c, &open, locales.SettingsSignOutAnyway(), locales.SettingsSignOutUnsynced(s.unsynced),
 			locales.CommonCancel(), locales.CommonSignOut()) == 1 {
-			a.leave(a.st.ForgetAccount)
+			a.leave(a.st.ForgetAccount, false)
 		}
 		if !open {
 			s.unsynced = 0
@@ -401,7 +401,7 @@ func (a *App) accountSettings(c *ui.Context) {
 									return
 								}
 								s.deleteOpen = false
-								a.leave(a.st.Wipe)
+								a.leave(a.st.Wipe, false)
 								a.toast(locales.SettingsAccountDeleted())
 							})
 						}()
@@ -476,35 +476,47 @@ func (a *App) exportAll() {
 
 // signOut uploads the changes waiting, then signs out and removes the
 // account's pages from this device. Changes that could not go up are
-// asked about first.
+// asked about first, and an open page that could not be saved stops it.
 func (a *App) signOut() {
-	a.flush()
+	if !a.flush() {
+		return
+	}
 	account.signingOut = true
 	go func() {
 		_ = a.sync.SyncNow()
-		n := a.st.PendingCount()
 		a.update(func() {
 			account.signingOut = false
-			if n > 0 {
-				account.unsynced = n
-				return
-			}
-			a.leave(a.st.ForgetAccount)
+			a.leave(a.st.ForgetSyncedAccount, true)
 		})
 	}()
 }
 
 // leave signs out and clears this device with clear, between sync passes.
-func (a *App) leave(clear func() error) {
-	a.flush()
+// With synced, it does neither while a change waits to go up, or the open
+// page cannot be saved, and asks about the changes instead; clear checks
+// again as it removes, for a change that leaflet mcp stores meanwhile.
+func (a *App) leave(clear func() error, synced bool) {
+	if !a.flush() && synced {
+		return
+	}
 	go func() {
 		var err error
+		unsynced := 0
 		a.sync.Hold(func() {
+			if synced {
+				if unsynced = a.st.PendingCount(); unsynced > 0 {
+					return
+				}
+			}
 			a.backend.SignOut()
 			a.sync.ClearInvites()
 			err = clear()
 		})
 		a.update(func() {
+			if unsynced > 0 {
+				account.unsynced = unsynced
+				return
+			}
 			a.invites = nil
 			if err != nil {
 				a.toast(locales.SettingsRemovePagesFailed(err.Error()))

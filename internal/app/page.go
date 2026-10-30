@@ -264,7 +264,7 @@ func (a *App) saveTitleSoon() {
 	if titleTimer != nil {
 		titleTimer.Stop()
 	}
-	titleTimer = time.AfterFunc(600*time.Millisecond, func() { a.update(a.saveTitle) })
+	titleTimer = time.AfterFunc(600*time.Millisecond, func() { a.update(func() { a.saveTitle() }) })
 }
 
 func (a *App) byline(c *ui.Context, p store.Page) {

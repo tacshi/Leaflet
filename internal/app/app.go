@@ -390,7 +390,7 @@ func (a *App) start() error {
 	})
 	a.startTray()
 	a.win.OnClose(func(e *mygo.CloseEvent) {
-		a.flush()
+		saved := a.flush()
 		// With the menu bar icon, closing the window hides it, and the
 		// icon or the Dock brings it back.
 		if a.tray != nil && !a.quitting {
@@ -398,12 +398,25 @@ func (a *App) start() error {
 			a.win.Hide()
 			return
 		}
+		// Edits that could not be saved keep the window open, with them,
+		// to try again; the save said why.
+		if !saved {
+			e.PreventDefault()
+			a.quitting = false
+			return
+		}
 		// The recording's capture page closes with the window: the
 		// recording ends, keeping what it has. So does a public link.
 		a.rec.Stop()
 		a.stopPub()
 	})
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
+	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
+		// As closing the window: edits not saved stop the quit.
+		if !a.flush() {
+			e.PreventDefault()
+			a.showWindow()
+			return
+		}
 		a.quitting = true
 		a.stopPub()
 	})
@@ -472,7 +485,14 @@ func (a *App) reload(ch store.Change) {
 		a.todosStale = true
 		if a.page != nil {
 			if p := a.pageByID(a.page.id); p == nil {
-				a.page = nil
+				// The page went, deleted elsewhere: what was typed into it
+				// is saved first, for restoring it to bring back. A page
+				// removed from this device, its share withdrawn, has
+				// nothing to restore.
+				if _, err := a.st.Page(a.page.id); err == nil {
+					a.flush()
+				}
+				a.discardPage()
 				a.route = Route{Kind: "home"}
 			} else if !a.page.titleIn.Focused(nil) && p.Title != a.page.title {
 				a.page.title = p.Title
@@ -880,27 +900,32 @@ func (a *App) savePage() bool {
 }
 
 // flush saves what is waiting to be saved. It reports whether the open
-// page's edits are all stored.
+// page's edits, its title's too, are all stored.
 func (a *App) flush() bool {
 	if a.page == nil {
 		return true
 	}
+	title := true
 	if a.page.title != "" || a.pageByID(a.page.id) != nil {
-		a.saveTitle()
+		title = a.saveTitle()
 	}
-	return a.savePage()
+	return a.savePage() && title
 }
 
-func (a *App) saveTitle() {
+// saveTitle stores the open page's title. It reports whether nothing is
+// left to save.
+func (a *App) saveTitle() bool {
 	ps := a.page
 	if ps == nil {
-		return
+		return true
 	}
 	if p := a.pageByID(ps.id); p != nil && p.Title != ps.title && a.canEdit(ps.id) {
 		if err := a.st.RenamePage(ps.id, ps.title); err != nil {
 			a.toast(locales.AppErrorRename(err.Error()))
+			return false
 		}
 	}
+	return true
 }
 
 // externalContent brings content stored from outside the editor (sync,

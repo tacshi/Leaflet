@@ -17,18 +17,28 @@ import {
 } from "../_shared/openai.ts";
 import {
   type BlockView,
+  isPageContent,
   normalizeContent,
   type PageContent,
   pageViews,
   plainText,
   type RecordingInfo,
 } from "../_shared/blocks.ts";
-import { applyOps, type Op, PageEditSession, type PageSummary, toolDefinitions, ToolError } from "../_shared/tools.ts";
+import {
+  applyOps,
+  type Op,
+  overwrites,
+  PageEditSession,
+  type PageSummary,
+  toolDefinitions,
+  ToolError,
+} from "../_shared/tools.ts";
 import { type Surface, systemPrompt, userMessage } from "../_shared/prompt.ts";
 import { isTimeout } from "../_shared/net.ts";
 import { keyAfter, lastKey } from "../_shared/sortkey.ts";
 
 const MAX_ROUNDS = 12;
+const UNREADABLE = "The page's content cannot be read, so the agent left it as it is.";
 const INLINE_PAGE_LIMIT = 40_000;
 const TOOL_RESULT_LIMIT = 60_000;
 const HEARTBEAT_MS = 15_000;
@@ -243,6 +253,7 @@ async function runJob(
       .eq("page_id", page.id)
       .maybeSingle();
     if (contentError) throw new Error(contentError.message);
+    if (contentRow && !isPageContent(contentRow.content)) throw new Error(UNREADABLE);
     const content = normalizeContent(contentRow?.content);
 
     const { data: profile } = await uc
@@ -529,9 +540,12 @@ async function runJob(
 
       // Someone may save the page while the agent runs, or between reading
       // and saving here: replay the agent's ops on what they saved, and save
-      // only over the revision that was read (protocol §1).
+      // only over the revision that was read (protocol §1). A block they
+      // changed that an op then replaces or deletes loses their change, so
+      // what they saved is kept in the page's history first, to restore.
       const ops = session.ops.filter((op: Op) => op.op !== "create_page");
       let saved = false;
+      let kept: number | null = null;
       for (let attempt = 0; attempt < 3 && !saved; attempt++) {
         const { data: latest, error: latestError } = await uc
           .from("page_content")
@@ -539,9 +553,20 @@ async function runJob(
           .eq("page_id", page.id)
           .maybeSingle();
         if (latestError) throw new Error(`Could not save the page: ${latestError.message}`);
-        const finalContent = (latest?.revision ?? null) === (contentRow?.revision ?? null)
-          ? session.content
-          : applyOps(normalizeContent(latest?.content), ops);
+        const replayed = (latest?.revision ?? null) !== (contentRow?.revision ?? null);
+        if (latest && replayed && !isPageContent(latest.content)) throw new Error(UNREADABLE);
+        const latestContent = normalizeContent(latest?.content);
+        if (latest && replayed && kept !== latest.revision && overwrites(latestContent, ops)) {
+          const { error } = await uc.from("page_history").insert({
+            page_id: page.id,
+            content: latest.content,
+            reason: "conflict",
+            ai_job_id: job.id,
+          });
+          if (error) throw new Error(`Could not save the page: ${error.message}`);
+          kept = latest.revision;
+        }
+        const finalContent = replayed ? applyOps(latestContent, ops) : session.content;
         const values = { content: finalContent, plain_text: plainText(finalContent), updated_by: user.id };
         if (latest) {
           const { data, error } = await uc

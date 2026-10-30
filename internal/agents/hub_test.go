@@ -60,7 +60,7 @@ func TestDeliveryToAPageClosedMidRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	ops = append(ops, insertAfter("x1", "x2", "two"))
-	if err := d.save(st, p.ID, ops); err != nil {
+	if err := d.save(st, p.ID, ops, "r1"); err != nil {
 		t.Fatal(err)
 	}
 	if got := ids(st.Content(p.ID)); got != "h1,p1,x1,x2,l1,mine" {
@@ -94,7 +94,7 @@ func TestDeliveryKeepsAConcurrentSave(t *testing.T) {
 	}
 	t.Cleanup(func() { beforeStore = was })
 	d := &delivery{}
-	if err := d.save(st, p.ID, []doc.Op{insertAfter("p1", "x1", "one")}); err != nil {
+	if err := d.save(st, p.ID, []doc.Op{insertAfter("p1", "x1", "one")}, "r1"); err != nil {
 		t.Fatal(err)
 	}
 	if got := ids(st.Content(p.ID)); got != "h1,p1,x1,l1,theirs" {
@@ -115,7 +115,7 @@ func TestDeliveryToAnUnreadablePage(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := &delivery{}
-	if err := d.save(st, p.ID, []doc.Op{insertAfter("", "x1", "one")}); err == nil {
+	if err := d.save(st, p.ID, []doc.Op{insertAfter("", "x1", "one")}, "r1"); err == nil {
 		t.Error("saved over an unreadable page")
 	}
 	if row, err := st.ContentRow(p.ID); err != nil || row.Content != broken {
@@ -148,8 +148,9 @@ func TestFailedSaveFailsTheRun(t *testing.T) {
 	if run.Status != "failed" || !strings.Contains(run.Error, "disk full") {
 		t.Errorf("run %q, error %q", run.Status, run.Error)
 	}
-	if history, _ := st.History(p.ID); len(history) != 0 {
-		t.Errorf("history of edits never stored: %d", len(history))
+	// The snapshot went first: it is the page as it was, still.
+	if history, _ := st.History(p.ID); len(history) > 1 {
+		t.Errorf("history %d", len(history))
 	}
 
 	for _, q := range []string{`DROP TRIGGER full_insert`, `DROP TRIGGER full_update`} {
@@ -157,11 +158,90 @@ func TestFailedSaveFailsTheRun(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := d.save(st, p.ID, run.Ops); err != nil {
+	if err := d.save(st, p.ID, run.Ops, run.ID); err != nil {
 		t.Fatal(err)
 	}
 	if c := st.Content(p.ID); c.Find("x1") == nil {
 		t.Errorf("stored again without the edit: %s", ids(c))
+	}
+}
+
+// A run on a closed page that could not keep its history snapshot leaves
+// the page as it is: there would be nothing to go back to.
+func TestRunNotStoredWithoutItsSnapshot(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`CREATE TRIGGER reject_history BEFORE INSERT ON page_history BEGIN SELECT RAISE(ABORT, 'history failed'); END`); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, stubHost{})
+	run := &Run{ID: "r1", Ops: []doc.Op{insertAfter("", "x1", "one")}}
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	h.finish(h.Session(p.ID), run, Request{Instruction: "Add a line"}, local, st.Content(p.ID), &delivery{}, Result{Reply: "Added a line."}, nil, RunOptions{})
+	if run.Status != "failed" || !strings.Contains(run.Error, "history failed") {
+		t.Errorf("run %q, error %q", run.Status, run.Error)
+	}
+	if c := st.Content(p.ID); c.Find("x1") != nil {
+		t.Error("stored without its snapshot")
+	}
+}
+
+// A run's ops stored over a block changed since the agent read it keep
+// that change in history (reason conflict) before saving over it; ops
+// that leave changed blocks alone keep nothing more.
+func TestRunOverAChangeKeepsIt(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.SaveContent(p.ID, page()); err != nil {
+		t.Fatal(err)
+	}
+	before := st.Content(p.ID)
+	// The agent rewrites p1 as it read it, and adds a line after h1.
+	work := before.Copy()
+	n := &doc.Node{Type: "paragraph"}
+	n.SetDelta(doc.FromMarkdown("Ship the agents first."))
+	ops := []doc.Op{work.ReplaceOp("p1", n), insertAfter("h1", "x1", "one")}
+	// Meanwhile MCP rewrites l1, which the agent leaves alone.
+	theirs := st.Content(p.ID)
+	theirs.Find("l1").SetDelta(doc.FromMarkdown("their item"))
+	if _, _, err := st.SaveContent(p.ID, theirs); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&delivery{}).save(st, p.ID, ops, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if history, _ := st.History(p.ID); len(history) != 0 {
+		t.Errorf("history of a change kept as it was: %d", len(history))
+	}
+
+	// Then MCP rewrites p1, which the next run rewrites as it read it.
+	work = st.Content(p.ID)
+	n = &doc.Node{Type: "paragraph"}
+	n.SetDelta(doc.FromMarkdown("Ship the agent's way."))
+	ops = []doc.Op{work.ReplaceOp("p1", n)}
+	theirs = st.Content(p.ID)
+	theirs.Find("p1").SetDelta(doc.FromMarkdown("Their way."))
+	if _, _, err := st.SaveContent(p.ID, theirs); err != nil {
+		t.Fatal(err)
+	}
+	if err := (&delivery{}).save(st, p.ID, ops, "r2"); err != nil {
+		t.Fatal(err)
+	}
+	history, _ := st.History(p.ID)
+	if len(history) != 1 || history[0].Reason != "conflict" || history[0].AIJobID != "r2" {
+		t.Fatalf("history %+v", history)
+	}
+	if kept := doc.MustDecode(history[0].Content); kept.Find("p1").Delta().Plain() != "Their way." {
+		t.Errorf("kept %q", kept.Find("p1").Delta().Plain())
+	}
+	if got := st.Content(p.ID).Find("p1").Delta().Plain(); got != "Ship the agent's way." {
+		t.Errorf("stored %q", got)
 	}
 }
 

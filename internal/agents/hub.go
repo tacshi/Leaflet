@@ -498,32 +498,49 @@ func (h *Hub) ChatGPT(providerID string) (*ChatGPT, error) {
 		return nil, err
 	}
 	g := NewChatGPT(acct)
-	g.OnRefresh = func(a ChatGPTAccount) {
-		if err := SaveChatGPT(providerID, a); err != nil {
-			log.Printf("keep ChatGPT sign-in: %v", err)
-		}
-	}
+	keepRefreshed(providerID, g)
 	chatgptClients[providerID] = g
 	return g, nil
 }
 
-// UseChatGPT keeps a new ChatGPT sign-in for a provider.
-func UseChatGPT(providerID string, g *ChatGPT) error {
+// keepRefreshed keeps g's account as its refresh token rotates, while g
+// is still the provider's sign-in: a run may hold one that another
+// sign-in replaced, or that was signed out, and its renewal must not
+// put it back. Under chatgptMu, the saves go in the order the sign-ins
+// change, and g renews one at a time, so its saves go in order too.
+func keepRefreshed(providerID string, g *ChatGPT) {
 	g.OnRefresh = func(a ChatGPTAccount) {
+		chatgptMu.Lock()
+		defer chatgptMu.Unlock()
+		if chatgptClients[providerID] != g {
+			return
+		}
 		if err := SaveChatGPT(providerID, a); err != nil {
 			log.Printf("keep ChatGPT sign-in: %v", err)
 		}
 	}
+}
+
+// UseChatGPT keeps a new ChatGPT sign-in for a provider.
+func UseChatGPT(providerID string, g *ChatGPT) error {
+	keepRefreshed(providerID, g)
 	chatgptMu.Lock()
+	defer chatgptMu.Unlock()
 	chatgptClients[providerID] = g
-	chatgptMu.Unlock()
 	return SaveChatGPT(providerID, g.Account())
 }
+
+// keepSecret and forgetSecret write the keychain; tests keep the
+// sign-ins elsewhere.
+var (
+	keepSecret   = keychain.Set
+	forgetSecret = keychain.Delete
+)
 
 // SaveChatGPT keeps a ChatGPT sign-in in the keychain.
 func SaveChatGPT(providerID string, a ChatGPTAccount) error {
 	raw, _ := json.Marshal(a) // #nosec G117 -- the sign-in goes to the keychain.
-	return keychain.Set("chatgpt."+providerID, raw)
+	return keepSecret("chatgpt."+providerID, raw)
 }
 
 // ForgetChatGPT signs a provider out of ChatGPT on this device.
@@ -531,11 +548,11 @@ func ForgetChatGPT(ctx context.Context, providerID string) {
 	chatgptMu.Lock()
 	g := chatgptClients[providerID]
 	delete(chatgptClients, providerID)
+	_ = forgetSecret("chatgpt." + providerID)
 	chatgptMu.Unlock()
 	if g != nil {
 		g.SignOut(ctx)
 	}
-	_ = keychain.Delete("chatgpt." + providerID)
 }
 
 // HostID names this device to OpenAI's sign-in, the same every time.
@@ -765,21 +782,26 @@ func (d *delivery) to(ed *editor.Editor, ops []doc.Op) {
 	d.sent = len(ops)
 }
 
-// save applies the ops the page does not have yet to its stored content,
-// which keeps whatever else changed there during the run. They count as
-// delivered once stored, so a save that fails can be tried again.
-func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op) error {
-	if d.sent == len(ops) {
-		return nil
-	}
-	var missed []doc.Op
+// missed are the block ops the page does not have yet.
+func (d *delivery) missed(ops []doc.Op) []doc.Op {
+	var out []doc.Op
 	for _, op := range ops[d.sent:] {
 		if op.Op != "create_page" && op.Op != "delete_page" {
-			missed = append(missed, op)
+			out = append(out, op)
 		}
 	}
-	if err := storeOps(st, pageID, missed, true, "agent op on a closed page"); err != nil {
-		return err
+	return out
+}
+
+// save applies the ops the page does not have yet to its stored content,
+// which keeps whatever else changed there during the run, and in history
+// what they would take away of it (storeOps), under the run jobID. They
+// count as delivered once stored, so a save that fails can be tried again.
+func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op, jobID string) error {
+	if missed := d.missed(ops); len(missed) > 0 {
+		if err := storeOps(st, pageID, missed, true, jobID, "agent op on a closed page"); err != nil {
+			return err
+		}
 	}
 	d.sent = len(ops)
 	return nil
@@ -792,8 +814,12 @@ var errKeptChanging = errors.New("The page kept changing while saving the agent'
 // storeOps applies ops to a page's stored content, an empty page when
 // there is none and orEmpty, and saves it only over the content it read:
 // what MCP or a sync stores in between is read again and gets the ops,
-// rather than being saved over.
-func storeOps(st *store.Store, pageID string, ops []doc.Op, orEmpty bool, what string) error {
+// rather than being saved over. Ops that replace or delete a block
+// changed since they were made take that change away, so the content
+// they find is kept in history first (reason conflict, under jobID), as
+// the agent function does; one that could not be kept is not saved over.
+func storeOps(st *store.Store, pageID string, ops []doc.Op, orEmpty bool, jobID, what string) error {
+	kept := "" // the stored content history has already
 	for range 3 {
 		c, over, err := storedRow(st, pageID)
 		if err != nil {
@@ -804,6 +830,12 @@ func storeOps(st *store.Store, pageID string, ops []doc.Op, orEmpty bool, what s
 				return nil
 			}
 			c = doc.Empty()
+		}
+		if over != "" && over != kept && overwrites(c, ops) {
+			if err := st.AddHistory(pageID, c, "conflict", jobID, ""); err != nil {
+				return err
+			}
+			kept = over
 		}
 		for _, op := range ops {
 			if err := c.Apply(op); err != nil {
@@ -816,6 +848,79 @@ func storeOps(st *store.Store, pageID string, ops []doc.Op, orEmpty bool, what s
 		}
 	}
 	return errKeptChanging
+}
+
+// overwrites reports whether applying ops to c takes away a change made
+// since they were made: a block that a replace or a delete finds other
+// than the agent read it, as the agent function's overwrites has it. The
+// first op on a block has it as read; a replace that keeps the block's
+// children looks at the block alone, as Apply keeps the children found.
+func overwrites(c *doc.Content, ops []doc.Op) bool {
+	seen := map[string]bool{}
+	changed := func(read *doc.Node, own bool) bool {
+		if read == nil || seen[read.ID] {
+			return false
+		}
+		seen[read.ID] = true
+		at := c.Find(read.ID)
+		if at == nil {
+			return false
+		}
+		if own {
+			return encodeNode(&doc.Node{ID: at.ID, Type: at.Type, Data: at.Data}) != encodeNode(&doc.Node{ID: read.ID, Type: read.Type, Data: read.Data})
+		}
+		return encodeNode(at) != encodeNode(read)
+	}
+	found := false
+	for _, op := range ops {
+		switch op.Op {
+		case "insert":
+			for _, n := range op.Nodes {
+				walk(n, func(k *doc.Node) { seen[k.ID] = true })
+			}
+		case "replace":
+			if changed(op.PrevNode, keepsChildren(op)) {
+				found = true
+			}
+		case "delete":
+			for _, r := range op.Removed {
+				if changed(r.Node, false) {
+					found = true
+				}
+			}
+		}
+	}
+	return found
+}
+
+// keepsChildren reports whether a replace left the block's children as
+// they were, as doc's keptChildren: its node has the children its
+// previous had, as replace_block without children writes it.
+func keepsChildren(op doc.Op) bool {
+	if op.PrevNode == nil || op.Node == nil || op.PrevNode.Type == "table" || len(op.Node.Children) != len(op.PrevNode.Children) {
+		return false
+	}
+	for i, k := range op.Node.Children {
+		if k.ID != op.PrevNode.Children[i].ID {
+			return false
+		}
+	}
+	return true
+}
+
+// encodeNode is a block as JSON, alike for equal blocks: Data holds only
+// JSON values, and maps encode with their keys in order.
+func encodeNode(n *doc.Node) string {
+	raw, _ := json.Marshal(n)
+	return string(raw)
+}
+
+// walk calls fn on n and every block inside it.
+func walk(n *doc.Node, fn func(*doc.Node)) {
+	fn(n)
+	for _, k := range n.Children {
+		walk(k, fn)
+	}
 }
 
 // errUnreadable is a page whose stored content cannot be read.
@@ -865,30 +970,43 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		run.Status = "done"
 	}
 	pageID := s.PageID
-	saved := true
+	label := "Before " + option.Name() + ": " + short(req.Instruction)
+	jobID := ""
+	if option.Local() {
+		jobID = run.ID
+	}
+	saved, kept := true, false
 	if len(run.Ops) > 0 && option.Local() {
 		// The page may have opened or closed during the run: it gets the
 		// ops it missed, open or stored.
 		if live := h.host.Editor(pageID); live != nil {
 			d.to(live, run.Ops)
-		} else if err := d.save(h.st, pageID, run.Ops); err != nil {
-			// The edits are not on the page, whatever the agent said.
-			log.Printf("agent run on a closed page: %v", err)
-			saved = false
-			run.Status = "failed"
-			if run.Error == "" {
-				run.Error = err.Error()
+		} else if len(d.missed(run.Ops)) > 0 {
+			// The snapshot goes first, as an MCP edit's: edits that could
+			// not keep one are not stored, so none is stored that the page
+			// cannot go back from.
+			err := h.st.AddHistory(pageID, before, "agent_run", jobID, label)
+			if kept = err == nil; kept {
+				err = d.save(h.st, pageID, run.Ops, run.ID)
+			}
+			if err != nil {
+				// The edits are not on the page, whatever the agent said.
+				log.Printf("agent run on a closed page: %v", err)
+				saved = false
+				run.Status = "failed"
+				if run.Error == "" {
+					run.Error = err.Error()
+				}
 			}
 		}
 	}
 	if len(run.Ops) > 0 && saved {
-		label := "Before " + option.Name() + ": " + short(req.Instruction)
-		jobID := ""
-		if option.Local() {
-			jobID = run.ID
-		}
-		if err := h.st.AddHistory(pageID, before, "agent_run", jobID, label); err != nil {
-			log.Printf("agent run history: %v", err)
+		// Edits on the page already, in an open editor or saved with it,
+		// get their snapshot after them: the editor's undo has them too.
+		if !kept {
+			if err := h.st.AddHistory(pageID, before, "agent_run", jobID, label); err != nil {
+				log.Printf("agent run history: %v", err)
+			}
 		}
 		h.host.Tint(pageID, run.BlockIDs())
 	}
@@ -1006,7 +1124,7 @@ func (h *Hub) UndoRun(pageID, runID string) {
 	if run == nil || run.Undone {
 		return
 	}
-	h.apply(pageID, doc.InvertRun(run.Ops))
+	h.apply(pageID, runID, doc.InvertRun(run.Ops))
 	run.Undone = true
 	h.saveRun(s, runID)
 	h.host.Tint(pageID, nil)
@@ -1020,14 +1138,14 @@ func (h *Hub) RedoRun(pageID, runID string) {
 	if run == nil || !run.Undone {
 		return
 	}
-	h.apply(pageID, run.Ops)
+	h.apply(pageID, runID, run.Ops)
 	run.Undone = false
 	h.saveRun(s, runID)
 	h.host.Tint(pageID, run.BlockIDs())
 	h.markJob(runID, "done")
 }
 
-func (h *Hub) apply(pageID string, ops []doc.Op) {
+func (h *Hub) apply(pageID, runID string, ops []doc.Op) {
 	var blockOps []doc.Op
 	for _, o := range ops {
 		switch o.Op {
@@ -1054,7 +1172,7 @@ func (h *Hub) apply(pageID string, ops []doc.Op) {
 		}
 		return
 	}
-	if err := storeOps(h.st, pageID, blockOps, false, "undo run"); err != nil {
+	if err := storeOps(h.st, pageID, blockOps, false, runID, "undo run"); err != nil {
 		log.Printf("undo run: %v", err)
 	}
 }

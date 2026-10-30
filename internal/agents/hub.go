@@ -1177,19 +1177,32 @@ func (h *Hub) apply(pageID, runID string, ops []doc.Op) {
 	}
 }
 
+// markJob changes a run's status: in the job this device keeps of a local
+// run, or else in the cloud run's row on the server, whose status the
+// agent function reads to leave an undone run out of the chat's history.
 func (h *Hub) markJob(id, status string) {
-	if err := h.st.SetJobStatus(id, status); err != nil {
+	local, err := h.st.SetJobStatus(id, status)
+	if err != nil {
 		log.Printf("job status: %v", err)
 	}
-	if h.be.SignedIn() && h.host.Online() {
+	if !local && h.be.SignedIn() && h.host.Online() {
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
-			if _, err := h.be.Upsert(ctx, "ai_jobs", map[string]any{"id": id, "status": status}, ""); err != nil {
+			if err := h.sendJobStatus(ctx, id, status); err != nil {
 				log.Printf("job status: %v", err)
 			}
 		}()
 	}
+}
+
+// sendJobStatus changes a cloud run's status on the server. Not as an
+// upsert: the server checks its insert first, and a row of only an ID and
+// a status, without its page or surface, is refused before it finds the
+// row there.
+func (h *Hub) sendJobStatus(ctx context.Context, id, status string) error {
+	_, err := h.be.Update(ctx, "ai_jobs", []string{remote.Eq("id", id)}, map[string]any{"status": status})
+	return err
 }
 
 // Describe is how a run ended, for its reply.

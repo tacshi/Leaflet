@@ -527,9 +527,16 @@ func (e *Editor) step(from, to *[]snapshot) {
 // after, as the steps left it. Under a mark already there, the steps are
 // under that one's page, which a change since only adds to.
 func mark(steps *[]snapshot, after *doc.Content) {
-	if n := len(*steps); n > 0 && (*steps)[n-1].after == nil {
+	if markable(*steps) {
 		*steps = append(*steps, snapshot{after: after})
 	}
+}
+
+// markable reports whether mark would mark steps: they have a step on
+// top that is not a mark.
+func markable(steps []snapshot) bool {
+	n := len(steps)
+	return n > 0 && steps[n-1].after == nil
 }
 
 func (e *Editor) restore(s snapshot) {
@@ -604,9 +611,13 @@ func (e *Editor) ApplyOp(o doc.Op, newStep bool) error {
 		e.coalescing = false
 		e.runStep = e.undo[len(e.undo)-1].content
 	} else if n := len(e.undo); n == 0 || e.undo[n-1].content != e.runStep {
-		before := e.Content.Copy()
-		mark(&e.undo, before)
-		mark(&e.redo, before)
+		// Past the first op since that edit, the steps have their mark
+		// already: the page is copied only for one to take.
+		if markable(e.undo) || markable(e.redo) {
+			before := e.Content.Copy()
+			mark(&e.undo, before)
+			mark(&e.redo, before)
+		}
 		e.coalescing = false
 	}
 	err := e.Content.Apply(o)

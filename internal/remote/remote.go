@@ -668,6 +668,13 @@ func IsConflict(err error) bool {
 	return errors.As(err, &re) && re.Status == http.StatusConflict
 }
 
+// IsForbidden reports whether err is the server refusing a change the
+// user may not make, as its row-level security does.
+func IsForbidden(err error) bool {
+	var re *Error
+	return errors.As(err, &re) && re.Status == http.StatusForbidden
+}
+
 // IsNotFound reports whether err is the server having no such thing.
 func IsNotFound(err error) bool {
 	var re *Error

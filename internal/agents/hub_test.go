@@ -2,11 +2,16 @@ package agents
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/remote"
 	"leaflet/internal/store"
 )
 
@@ -390,6 +395,45 @@ func (stubHost) Tint(string, []string)                   {}
 
 // A run undone from the page's bar after its conversation was left stays
 // undone in that conversation, after a restart too.
+type onlineHost struct{ stubHost }
+
+func (onlineHost) Online() bool { return true }
+
+// An undone cloud run's status changes on the server, its row's alone:
+// as an upsert, of a row with no page, the server refused it, so its chat
+// kept the undone run in the history it gives the model. A local run's
+// job, kept on this device, sends nothing.
+func TestUndoneRunsStatusReachesTheServer(t *testing.T) {
+	st := openStore(t)
+	got := make(chan string, 4)
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		got <- r.Method + " " + r.URL.Path + "?" + r.URL.RawQuery + " " + string(body)
+		_, _ = w.Write([]byte(`[{"id":"cloud"}]`))
+	}))
+	defer hs.Close()
+	h := NewHub(st, remote.SignedInForTest(hs.URL, st, "u1"), onlineHost{})
+	if err := st.PutJob(store.Job{ID: "local", PageID: "p", Surface: "sidebar", Status: "done"}); err != nil {
+		t.Fatal(err)
+	}
+
+	h.markJob("local", "reverted")
+	h.markJob("cloud", "reverted")
+	select {
+	case req := <-got:
+		if req != `PATCH /rest/v1/ai_jobs?id=eq.cloud {"status":"reverted"}` {
+			t.Errorf("sent %s", req)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("nothing sent")
+	}
+	select {
+	case req := <-got:
+		t.Errorf("sent for the local run too: %s", req)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func TestUndoInAnEarlierConversation(t *testing.T) {
 	st := openStore(t)
 	h := NewHub(st, nil, stubHost{})

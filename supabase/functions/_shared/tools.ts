@@ -9,6 +9,7 @@ import {
   LIST_TYPES,
   type NodeJSON,
   type PageContent,
+  pageViews,
   type Position,
   randomId,
   SPEC_TYPES,
@@ -486,11 +487,27 @@ export interface SessionOptions {
   now?: () => number;
 }
 
+/**
+ * The blocks the app loads by itself, as it shows them: an image, a video,
+ * a link card. An agent that has read another of the user's pages could
+ * write what it read into one, such as https://example.com/x.png?notes=…,
+ * and the app would send it to that server without anyone clicking. So
+ * once a run reads another page, a block it writes may load only a URL it
+ * saw: one on this page then, or on a page it read. Links in text are not
+ * loaded, so they stay free.
+ */
+const FETCHED_URL_TYPES = new Set(["image", "video", "link_preview"]);
+
+/** Finds the URLs in text the agent read. */
+const URL_RE = /https?:\/\/[^\s<>"'()\[\]]+/g;
+
 export class PageEditSession {
   content: PageContent;
   readonly before: PageContent;
   readonly ops: Op[] = [];
   private readonly now: () => number;
+  /** The URLs the agent has seen since it first read another page, null before (FETCHED_URL_TYPES). */
+  private seen: Set<string> | null = null;
 
   constructor(content: PageContent, private hooks: ToolHooks, private opts: SessionOptions) {
     this.content = clone(content);
@@ -547,10 +564,48 @@ export class PageEditSession {
       case "read_other_page": {
         const pageId = String(args.page_id ?? "");
         if (!pageId) throw new ToolError("page_id is required");
-        return { result: await this.hooks.readOtherPage(pageId), ops: [], blockIds: [] };
+        const page = await this.hooks.readOtherPage(pageId);
+        if (!this.seen) {
+          this.seen = new Set();
+          this.see(pageViews(this.content));
+        }
+        this.see(page);
+        return { result: page, ops: [], blockIds: [] };
       }
       default:
         throw new ToolError(`Unknown tool "${name}"`);
+    }
+  }
+
+  /** Adds the URLs in v, what the agent read, to seen. */
+  private see(v: unknown): void {
+    if (typeof v === "string") {
+      if (v.startsWith("http://") || v.startsWith("https://")) this.seen!.add(v);
+      for (const u of v.match(URL_RE) ?? []) this.seen!.add(u);
+    } else if (Array.isArray(v)) {
+      for (const e of v) this.see(e);
+    } else if (isObject(v)) {
+      for (const e of Object.values(v)) this.see(e);
+    }
+  }
+
+  /** Refuses blocks that would load a URL the agent did not see, once it has read another page. */
+  private checkUrls(nodes: NodeJSON[]): void {
+    const seen = this.seen;
+    if (!seen) return;
+    const bad: string[] = [];
+    for (const n of nodes) {
+      walk(n, (k) => {
+        const u = String(k.data?.url ?? "");
+        if (FETCHED_URL_TYPES.has(k.type) && !seen.has(u)) bad.push(u);
+      });
+    }
+    if (bad.length) {
+      throw new ToolError(
+        `After reading another page, an image, video or link card may only use a URL from this page or a page you read, which ${
+          bad[0]
+        } is not: the app loads it by itself. Link to it in text instead.`,
+      );
     }
   }
 
@@ -642,8 +697,10 @@ export class PageEditSession {
 
   insert(position: Position, rawBlocks: unknown): ToolOutcome {
     const specs = this.specs(rawBlocks, "blocks");
-    const newId = this.idFactory();
-    const nodes = specs.map((spec) => specToNode(spec, { newId, author: this.opts.author }));
+    // One set of options for all, so the limit on blocks counts them all.
+    const opts = { newId: this.idFactory(), author: this.opts.author };
+    const nodes = specs.map((spec) => specToNode(spec, opts));
+    this.checkUrls(nodes);
     const target = this.resolve(position);
     target.parent.children ??= [];
     target.parent.children.splice(target.index, 0, ...nodes);
@@ -660,6 +717,7 @@ export class PageEditSession {
     const at = this.locate(id);
     const previous = clone(at.node);
     const node = specToNode(spec, { newId: this.idFactory(), author: this.opts.author }, id);
+    this.checkUrls([node]);
     const keepsChildren = !spec.children && (previous.children?.length ?? 0) > 0 &&
       previous.type !== "table";
     if (keepsChildren) {
@@ -765,7 +823,9 @@ export class PageEditSession {
         return id;
       };
       const t = this.now();
-      content.document.children = specs.map((spec) => specToNode(spec, { newId, author: this.opts.author }));
+      const opts = { newId, author: this.opts.author };
+      content.document.children = specs.map((spec) => specToNode(spec, opts));
+      this.checkUrls(content.document.children);
       walk(content.document, (n) => {
         if (n !== content.document) content.meta.blocks[n.id] = t;
       });

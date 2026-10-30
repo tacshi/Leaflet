@@ -1,68 +1,77 @@
 package store
 
-import (
-	"fmt"
-	"strings"
-)
-
 // Fractional sort keys: a string that sorts between two others, so a page
 // can be placed anywhere among its siblings without renumbering them.
 
 const digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 // KeyBetween returns a key that sorts after a ("" for first) and before b
-// ("" for last). No key sorts between a and a followed by 0s, which this
-// never makes but another client may have, as the agent function once
-// made "a0": then it returns one just after b, so the page goes next to
-// where it was put rather than nowhere.
+// ("" for last). Keys from the server may be any text, with characters
+// outside digits, and come in any order: a and b out of order give a key
+// after a. No key of digits sorts between a and a followed by 0s, which
+// this never makes but another client may have, as the agent function
+// once made "a0": then it returns one just after b, so the page goes next
+// to where it was put rather than nowhere.
 func KeyBetween(a, b string) string {
-	if a != "" && b != "" && a >= b {
-		panic(fmt.Sprintf("%s must sort before %s", a, b))
+	if b != "" && a >= b {
+		b = ""
 	}
-	if b != "" && strings.HasPrefix(b, a) && strings.Trim(b[len(a):], "0") == "" {
-		return b + mid("", "", false)
+	if k, ok := mid(a, b, b != ""); ok {
+		return k
 	}
-	return mid(a, b, b != "")
+	return b + string(digits[len(digits)/2])
 }
 
-func mid(a, b string, hasB bool) string {
+// mid returns a key of digits after a and before b (or, without b, after
+// a), or false when there is none.
+func mid(a, b string, hasB bool) (string, bool) {
 	if hasB {
 		n := 0
-		for n < len(b) {
-			ca := byte('0')
-			if n < len(a) {
-				ca = a[n]
-			}
-			if ca != b[n] {
-				break
-			}
+		for n < len(a) && n < len(b) && a[n] == b[n] {
 			n++
 		}
 		if n > 0 {
-			rest := ""
-			if len(a) > n {
-				rest = a[n:]
-			}
-			return b[:n] + mid(rest, b[n:], true)
+			k, ok := mid(a[n:], b[n:], true)
+			return b[:n] + k, ok
 		}
 	}
-	da := 0
+	// Here a and b differ at their first character, a's lower or none.
+	lo, hi := -1, 256
 	if a != "" {
-		da = strings.IndexByte(digits, a[0])
+		lo = int(a[0])
 	}
-	db := len(digits)
 	if hasB {
-		db = strings.IndexByte(digits, b[0])
+		hi = int(b[0])
 	}
-	if db-da > 1 {
-		return string(digits[(da+db+1)/2])
+	// The digits strictly between, but 0: a key ending in 0 leaves none
+	// between it and the key without that 0.
+	i, j := 1, 1
+	for i < len(digits) && int(digits[i]) <= lo {
+		i++
+	}
+	for j < len(digits) && int(digits[j]) < hi {
+		j++
+	}
+	if j > i {
+		return string(digits[(i+j)/2]), true
+	}
+	if lo < '0' && '0' < hi {
+		return "0" + string(digits[len(digits)/2]), true
 	}
 	if hasB && len(b) > 1 {
-		return b[:1]
+		// b's first character sorts after a and before b, and so does
+		// it followed by a key before the rest of b.
+		if b[0] > '0' {
+			return b[:1], true
+		}
+		if k, ok := mid("", b[1:], true); ok {
+			return b[:1] + k, true
+		}
 	}
-	rest := ""
-	if len(a) > 1 {
-		rest = a[1:]
+	if a != "" {
+		// a's first character, then a key after the rest of a.
+		k, _ := mid(a[1:], "", false)
+		return a[:1] + k, true
 	}
-	return string(digits[da]) + mid(rest, "", false)
+	return "", false
 }

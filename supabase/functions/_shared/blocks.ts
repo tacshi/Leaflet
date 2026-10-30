@@ -533,15 +533,30 @@ export interface SpecOptions {
   newId: IdFactory;
   /** Shown on chart blocks ("Inserted by …"). */
   author?: string;
+  /**
+   * Blocks made so far with these options: specs converted with the same
+   * options share it, so a call's blocks stay under MAX_SPEC_NODES in all.
+   */
+  made?: { count: number };
 }
+
+/** How deep a spec's blocks may nest, and how many one call may make. */
+export const MAX_SPEC_DEPTH = 16;
+export const MAX_SPEC_NODES = 2000;
 
 /** Whether a line is a Markdown horizontal rule: three or more of -, * or _. */
 export function isRule(line: string): boolean {
   return /^([-*_])(\s*\1){2,}$/.test(line.trim());
 }
 
-export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()): NodeJSON {
+export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId(), depth = 0): NodeJSON {
   if (!spec || typeof spec !== "object") throw new SpecError("Each block must be an object");
+  if (depth >= MAX_SPEC_DEPTH) throw new SpecError(`Blocks nest at most ${MAX_SPEC_DEPTH} deep`);
+  const made = opts.made ??= { count: 0 };
+  if (++made.count > MAX_SPEC_NODES) throw new SpecError(`At most ${MAX_SPEC_NODES} blocks in all per call`);
+  if (spec.children != null && !Array.isArray(spec.children)) {
+    throw new SpecError("children must be an array of blocks");
+  }
   let type = String(spec.type ?? "paragraph");
   // A Markdown rule written as text is the divider it stands for.
   if (type === "paragraph" && isRule(spec.text ?? "")) type = "divider";
@@ -660,7 +675,7 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
   }
 
   if (spec.children?.length) {
-    node.children = spec.children.map((child) => specToNode(child, opts));
+    node.children = spec.children.map((child) => specToNode(child, opts, opts.newId(), depth + 1));
   }
   return node;
 }

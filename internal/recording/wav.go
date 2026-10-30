@@ -18,9 +18,10 @@ type WavWriter struct {
 	bytes int64
 }
 
-// CreateWav starts a WAV file.
+// CreateWav starts a WAV file, new and readable only by the user: a test
+// recording's goes in the system's shared temporary folder.
 func CreateWav(path string) (*WavWriter, error) {
-	f, err := os.Create(path) // #nosec G304 -- a recording's audio file, which the app names.
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- a recording's audio file, which the app names.
 	if err != nil {
 		return nil, err
 	}

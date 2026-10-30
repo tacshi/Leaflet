@@ -1,15 +1,19 @@
 package app
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/icloud"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -32,6 +36,77 @@ func TestProviderResultsStayWithTheirDialog(t *testing.T) {
 	openForm(providerForm{open: true, name: "B"})
 	if formIs(a) || !formIs(form.gen) {
 		t.Error("dialog B took dialog A's result")
+	}
+}
+
+// Models listed for one provider dialog don't land in another opened
+// since, at the same address.
+func TestModelsStayWithTheirDialog(t *testing.T) {
+	was := form
+	t.Cleanup(func() { form = was })
+	var n atomic.Int32
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintf(w, `{"data":[{"id":"llama-%d"}]}`, n.Add(1))
+	}))
+	t.Cleanup(hs.Close)
+	a := templatesApp(t)
+	posts := make(chan func(), 2)
+	a.post = func(fn func()) { posts <- fn }
+	next := func() func() {
+		select {
+		case fn := <-posts:
+			return fn
+		case <-time.After(5 * time.Second):
+			t.Fatal("no models came")
+			return nil
+		}
+	}
+	openForm(providerForm{open: true, preset: "ollama", name: "A", baseURL: hs.URL})
+	a.fetchModels()
+	first := next()
+	openForm(providerForm{open: true, preset: "ollama", name: "B", baseURL: hs.URL})
+	a.fetchModels()
+	second := next()
+	first()
+	if len(form.models) != 0 {
+		t.Errorf("dialog B took dialog A's models %v", form.models)
+	}
+	second()
+	if len(form.models) != 1 || form.models[0] != "llama-2" {
+		t.Errorf("dialog B lists %v", form.models)
+	}
+}
+
+// iCloud sync turns on or off one turn at a time: one taken while the
+// last still goes is not, so the switch and the syncing agree.
+func TestICloudSwitchWaitsForItsLastTurn(t *testing.T) {
+	a := templatesApp(t)
+	a.sync.ICloud = icloud.Folder{Root: filepath.Join(t.TempDir(), "Leaflet"), Temp: t.TempDir()}
+	t.Cleanup(func() { a.watchICloud(false) })
+	posts := make(chan func(), 2)
+	a.post = func(fn func()) { posts <- fn }
+	next := func() func() {
+		select {
+		case fn := <-posts:
+			return fn
+		case <-time.After(5 * time.Second):
+			t.Fatal("the turn did not finish")
+			return nil
+		}
+	}
+	a.setICloud(true)
+	a.setICloud(false)
+	if !a.settings.ICloudSync {
+		t.Error("turned off while still turning on")
+	}
+	next()()
+	if a.icloudBusy || !a.settings.ICloudSync || !a.sync.ICloudOn() {
+		t.Fatalf("busy %v, setting %v, syncing %v", a.icloudBusy, a.settings.ICloudSync, a.sync.ICloudOn())
+	}
+	a.setICloud(false)
+	next()()
+	if a.settings.ICloudSync || a.sync.ICloudOn() {
+		t.Errorf("setting %v, syncing %v", a.settings.ICloudSync, a.sync.ICloudOn())
 	}
 }
 
@@ -113,6 +188,37 @@ func TestSignInClosesSettings(t *testing.T) {
 	a.navigate(Route{Kind: "signin"})
 	if a.settingsOpen || a.route.Kind != "signin" {
 		t.Errorf("settings %v, route %+v", a.settingsOpen, a.route)
+	}
+}
+
+// The name field shows the account's name until the user types in it:
+// signing in shows the account's, and does not save the name shown before
+// over it.
+func TestNameFieldFollowsTheAccount(t *testing.T) {
+	was := account
+	t.Cleanup(func() { account = was })
+	account = accountState{loaded: true}
+	a := templatesApp(t)
+	tt := ui.NewTester(func(c *ui.Context) { a.accountSettings(c) }, 800, 900)
+	tt.Frame()
+	if account.name != locales.CommonYou() {
+		t.Fatalf("field shows %q", account.name)
+	}
+	if _, err := a.st.LoadSession(&store.User{ID: "u2", Email: "sam@example.com", DisplayName: "Sam"}); err != nil {
+		t.Fatal(err)
+	}
+	a.session = a.st.Session()
+	tt.Frame()
+	tt.Frame()
+	if account.name != "Sam" || a.st.Session().DisplayName != "Sam" {
+		t.Errorf("field %q, account's name %q", account.name, a.st.Session().DisplayName)
+	}
+
+	// A name typed saves once the field is left.
+	account.name, account.nameEdited = "Sam Lee", true
+	tt.Frame()
+	if got := a.st.Session().DisplayName; got != "Sam Lee" || account.nameEdited {
+		t.Errorf("account's name %q, edited %v", got, account.nameEdited)
 	}
 }
 

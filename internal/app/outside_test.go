@@ -279,6 +279,43 @@ func TestUnreadablePageOpensReadOnly(t *testing.T) {
 	}
 }
 
+// Content brought into the open page that can't be read is not shown as
+// an empty page and saved over: the editor keeps what it shows, read-only
+// as an unreadable page opens, with what was typed kept in its history,
+// and the page still closes.
+func TestUnreadableContentBroughtInIsNotSavedOver(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{textNode("mine")})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.page.editor.Content.Children[0].SetDelta(doc.FromMarkdown("typed"))
+	a.page.dirty = true
+	const newer = `{"children": [{"id": "p1", "type": "paragraph", "delta": `
+	if _, err := a.st.DB().Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, newer, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.externalContent(p.ID)
+	if got := a.page.editor.Content.PlainText(); got != "typed" {
+		t.Errorf("the editor shows %q", got)
+	}
+	if !a.page.unreadable || !a.page.editor.ReadOnly {
+		t.Errorf("unreadable %v, read-only %v", a.page.unreadable, a.page.editor.ReadOnly)
+	}
+	if !a.closePage() {
+		t.Fatal("the page would not close")
+	}
+	if row, _ := a.st.ContentRow(p.ID); row.Content != newer {
+		t.Errorf("saved over: %q", row.Content)
+	}
+	h, err := a.st.History(p.ID)
+	if err != nil || len(h) == 0 || !strings.Contains(h[0].Content, "typed") {
+		t.Errorf("what was typed is not in the history: %+v %v", h, err)
+	}
+}
+
 // A title that cannot be saved keeps the page open with it, as its text
 // would.
 func TestLeavingAPageWhoseTitleCannotSave(t *testing.T) {

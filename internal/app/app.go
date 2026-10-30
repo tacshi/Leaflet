@@ -82,6 +82,9 @@ type App struct {
 	invitesOpen bool
 	// icloudStop stops watching the Leaflet folder in iCloud Drive.
 	icloudStop context.CancelFunc
+	// icloudBusy is set while iCloud sync turns on or off, which the
+	// switch waits for: a turn taken after it would finish first.
+	icloudBusy bool
 
 	route Route
 	// router is MyGo's history of the routes; routerAt is its path the
@@ -229,7 +232,8 @@ type pageState struct {
 	threads []store.Thread
 	members []store.Member
 	// unreadable is set while the stored content could not be read: the
-	// page opens empty and read-only, and is never saved over.
+	// page opens empty, or keeps what it showed when such content comes
+	// in, read-only, and is never saved over.
 	unreadable bool
 	// runs are the agent runs of this page, newest last, for Undo.
 	tinted map[string]bool
@@ -814,14 +818,9 @@ func (a *App) closePage() bool {
 
 // discardPage closes the open page, saved or not.
 func (a *App) discardPage() {
-	for id, v := range a.embeds {
-		v.Destroy()
-		delete(a.embeds, id)
-	}
-	clear(a.embedSrc)
-	clear(a.embedZoomed)
 	a.sync.SetOpen(a.page.id, false)
 	a.page = nil
+	a.dropEmbeds()
 	a.dropVideos()
 	dropPlayers()
 }
@@ -870,6 +869,10 @@ func (a *App) savePage() bool {
 	// in between merges on the next try instead of being written over.
 	for range 5 {
 		a.externalContent(ps.id)
+		if ps.unreadable {
+			// What was stored since can't be read: it is not saved over.
+			return true
+		}
 		if ps.timer != nil {
 			ps.timer.Stop()
 		}
@@ -952,7 +955,26 @@ func (a *App) externalContent(pageID string) {
 		ps.loaded, ps.stored, ps.row = c.Copy(), c.Encode(), row.Content
 		return
 	}
-	stored := doc.MustDecode(row.Content)
+	stored, err := doc.Decode(row.Content)
+	if err != nil {
+		// Content this version can't read (damaged, or from a newer
+		// Leaflet) is not shown as an empty page to be saved over: the
+		// editor keeps what it has, read-only with the notice a page
+		// opened so has, and is never saved over it. Edits not yet saved
+		// are kept in the page's history.
+		log.Printf("page %s: %v", pageID, err)
+		if ps.dirty {
+			if err := a.st.AddHistory(pageID, ps.editor.Content, "autosave", "", "Autosave"); err != nil {
+				a.toast(locales.AppErrorSave(err.Error()))
+			}
+		}
+		if ps.timer != nil {
+			ps.timer.Stop()
+		}
+		ps.unreadable, ps.dirty, ps.row = true, false, row.Content
+		ps.editor.ReadOnly = true
+		return
+	}
 	if stored.Encode() == ps.stored {
 		ps.row = row.Content
 		return
@@ -1025,6 +1047,11 @@ func (a *App) newPageFrom(parent, folder string, t *templateChoice) {
 	if parent != "" && !a.canEdit(parent) {
 		return
 	}
+	// The open page saves first: one whose edits can't be saved stays
+	// open, and no page is made that could not take its place.
+	if !a.flush() {
+		return
+	}
 	p, err := a.st.CreatePage(store.NewPageOptions{ParentID: parent, FolderID: folder})
 	if err != nil {
 		a.toast(locales.AppErrorCreatePage(err.Error()))
@@ -1033,9 +1060,20 @@ func (a *App) newPageFrom(parent, folder string, t *templateChoice) {
 	a.pages, _ = a.st.Pages()
 	if parent != "" {
 		a.treeOpen("page", parent)
-		a.linkSubpage(parent, p.ID, "")
 	}
 	a.openPage(p.ID)
+	if a.page == nil || a.page.id != p.ID {
+		// It did not open after all: the template is not put in the
+		// page still open, and the new page is not left behind blank.
+		if _, err := a.st.DeletePage(p.ID); err != nil {
+			log.Printf("page %s: %v", p.ID, err)
+		}
+		a.pages, _ = a.st.Pages()
+		return
+	}
+	if parent != "" {
+		a.linkSubpage(parent, p.ID, "")
+	}
 	a.startFrom(t)
 }
 

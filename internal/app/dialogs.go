@@ -404,15 +404,16 @@ func (a *App) moveDialog(c *ui.Context) {
 						}
 					}
 				}
+				// The places a drag in the sidebar could put the page.
 				q := strings.ToLower(d.moveQuery)
-				if q == "" {
+				if q == "" && a.canMoveInside(d.movePage, "") {
 					target("top", "file-text", locales.DialogMoveTopLevel(), "", "")
 					for _, f := range a.folders {
 						target("folder:"+f.ID, "folder", f.Name, "", f.ID)
 					}
 				}
 				for _, p := range a.pages {
-					if p.ID == d.movePage || a.st.IsDescendant(p.ID, d.movePage) || !a.canEdit(p.ID) {
+					if !a.canMoveInside(d.movePage, "page:"+p.ID) {
 						continue
 					}
 					if q != "" && !strings.Contains(strings.ToLower(p.DisplayTitle()), q) {

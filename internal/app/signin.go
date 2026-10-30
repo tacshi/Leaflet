@@ -198,6 +198,8 @@ func (a *App) useAccount(user *store.User) {
 	}
 	a.session = a.st.Session()
 	signIn = signInState{}
+	// The name field shows the account's name now, not one typed before.
+	account.nameEdited = false
 	a.toast(locales.SettingsSignedInAs(user.Email))
 	a.back()
 	if a.route.Kind == "signin" {

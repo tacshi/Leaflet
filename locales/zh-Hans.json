@@ -397,7 +397,7 @@
   "sidebarRenameEllipsis": "重命名…",
   "sidebarDeleteFolder": "删除文件夹",
   "sidebarCouldNotDelete": "无法删除：{error}",
-  "sidebarFolderDeleted": "已删除“{name}”。其中的页面已移到顶层。",
+  "sidebarFolderDeleted": "已删除“{name}”。其中的页面和文件已移到顶层。",
   "sidebarSharedWithMe": "与我共享",
   "sidebarTabPages": "页面",
   "sidebarTabTags": "标签",

@@ -115,7 +115,13 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 		}
 		var req request
 		if err := json.Unmarshal([]byte(line), &req); err != nil {
-			if err := enc.Encode(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{-32700, "Parse error"}}); err != nil {
+			// JSON that is no request object, a batch among them (which
+			// MCP no longer has), is an invalid request, not a parse error.
+			e := &rpcError{-32700, "Parse error"}
+			if json.Valid([]byte(line)) {
+				e = &rpcError{-32600, "Invalid Request"}
+			}
+			if err := enc.Encode(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: e}); err != nil {
 				return err
 			}
 			continue
@@ -124,6 +130,11 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 		// Notifications get no answer.
 		if len(req.ID) == 0 {
 			continue
+		}
+		// A request answers with a result or an error, even one named as
+		// a notification.
+		if result == nil && rerr == nil {
+			result = map[string]any{}
 		}
 		if err := enc.Encode(response{JSONRPC: "2.0", ID: req.ID, Result: result, Error: rerr}); err != nil {
 			return err

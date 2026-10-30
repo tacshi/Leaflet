@@ -207,7 +207,10 @@ Run any script with `--help` for its options, or `Get-Help` for a `.ps1`
 one. macOS releases need a Developer ID Application identity and a
 `notarytool` keychain profile, Windows installers need NSIS (`brew install
 makensis`), and every release needs the update signing key;
-`scripts/build-release.sh --help` explains each one.
+`scripts/build-release.sh --help` explains each one. Uploads refuse
+unsigned Windows installers, and macOS ones built `--skip-notarize`, unless
+`--allow-unsigned` (`-AllowUnsigned`) or `LEAFLET_ALLOW_UNSIGNED=1` says
+to publish them anyway.
 
 ## Development
 
@@ -256,7 +259,10 @@ Microphone capture runs in a small page on the app's own `leaflet-rec://`
 scheme, a secure context the system's web view lets use the microphone, so
 the app needs no native audio code. Embeds, math and diagrams run in
 sandboxed frames under a content security policy with no network, and can
-never call the app's Go code.
+never call the app's Go code. WebRTC, which such a policy does not cover,
+is blocked where the web view knows CSP's `webrtc` directive and otherwise
+taken away from the frame before the embed's script runs, as best it can
+be.
 
 ## Known limitations
 

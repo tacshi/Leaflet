@@ -336,18 +336,34 @@ func (f Folder) WriteJSON(rel string, v any) error {
 }
 
 // CopyIn copies a file of this device into the folder, whole or not at
-// all. A file already there stays: the folder's copies never change.
+// all. A file already there stays: the folder's copies never change. One
+// of another size than the file is a copy cut short, and goes again.
 func (f Folder) CopyIn(rel, source string) error {
-	if f.Exists(rel) {
-		return nil
-	}
-	in, err := os.Open(source) // #nosec G304 -- a file in the app's own data folder.
+	info, err := os.Stat(source)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = in.Close() }()
+	if f.Exists(rel) {
+		// One iCloud has not downloaded counts as whole.
+		if have, err := os.Lstat(f.abs(rel)); err != nil || have.Size() == info.Size() {
+			return nil
+		}
+	}
 	return f.write(rel, func(w io.Writer) error {
-		_, err := io.Copy(w, in)
+		// Opened for each try: the one before read it to the end.
+		in, err := os.Open(source) // #nosec G304 -- a file in the app's own data folder.
+		if err != nil {
+			return err
+		}
+		defer func() { _ = in.Close() }()
+		size := info.Size()
+		if st, err := in.Stat(); err == nil {
+			size = st.Size()
+		}
+		n, err := io.Copy(w, in)
+		if err == nil && n != size {
+			err = fmt.Errorf("icloud: copied %d of %d bytes of %s", n, size, filepath.Base(source))
+		}
 		return err
 	})
 }
@@ -412,7 +428,8 @@ func syncDir(dir string) {
 
 // rename moves a file into place. Windows refuses while another program,
 // such as iCloud uploading the file, has it open: try again a few times.
-func rename(from, to string) error {
+// Tests stand in for it.
+var rename = func(from, to string) error {
 	var err error
 	for try := 0; try < 5; try++ {
 		if err = os.Rename(from, to); err == nil || runtime.GOOS != "windows" {

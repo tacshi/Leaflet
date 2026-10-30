@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -14,17 +15,38 @@ import (
 func (d Delta) ToMarkdown() string {
 	var toks []mdToken
 	var open []mdMark
-	for _, r := range trimSpans(d.Compact()) {
+	runs := trimSpans(d.Compact())
+	for i, r := range runs {
 		want := marksOf(r.Attrs)
+		// The marks open that this run still has stay open, as far as
+		// the first it hasn't: closing one to open it again inside
+		// another would put its marker after a space, as in "*the *[",
+		// where it no longer reads as one.
 		k := 0
-		for k < len(open) && k < len(want) && open[k] == want[k] {
+		for k < len(open) && slices.Contains(want, open[k]) {
 			k++
 		}
 		for len(open) > k {
 			toks = append(toks, mdToken{mark: open[len(open)-1], close: true})
 			open = open[:len(open)-1]
 		}
-		for _, m := range want[k:] {
+		// Of the marks to open, the one that spans the most runs goes
+		// outermost, so it closes last; in marksOf's order otherwise.
+		var opening []mdMark
+		for _, m := range want {
+			if !slices.Contains(open, m) {
+				opening = append(opening, m)
+			}
+		}
+		spans := func(m mdMark) int {
+			n := 1
+			for n < len(runs)-i && slices.Contains(marksOf(runs[i+n].Attrs), m) {
+				n++
+			}
+			return n
+		}
+		slices.SortStableFunc(opening, func(a, b mdMark) int { return spans(b) - spans(a) })
+		for _, m := range opening {
 			toks = append(toks, mdToken{mark: m, open: true})
 			open = append(open, m)
 		}
@@ -89,8 +111,8 @@ type mdToken struct {
 	code        bool
 }
 
-// marksOf are the marks of a run, outermost first: a link holds the
-// others, as its brackets must.
+// marksOf are the marks of a run, outermost first when they open
+// together: a link holds the others.
 func marksOf(a Attrs) []mdMark {
 	var out []mdMark
 	if a.Href != "" {

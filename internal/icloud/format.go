@@ -51,6 +51,11 @@ type Entry struct {
 	At    int64          `json:"at,omitempty"`
 	By    string         `json:"by,omitempty"`
 	Row   map[string]any `json:"row,omitempty"`
+	// Changed is the columns of the row the device changed, which are all
+	// that apply where the row is; without it, as in batches from before
+	// it, the whole row changed. Row stays whole, for a device that has
+	// none of it.
+	Changed []string `json:"changed,omitempty"`
 	// A page's content: the version of the device's page file.
 	PageID  string `json:"page_id,omitempty"`
 	Version int64  `json:"version,omitempty"`

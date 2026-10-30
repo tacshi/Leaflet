@@ -258,10 +258,24 @@ subpages once accepted (`accepted_at` set): every access check counts only
 accepted rows. The person invited reads their own rows, pending or not, and
 the space owner reads a page's accepted ones; only the person invited sets
 `accepted_at`, through `accept_page_invite` (a trigger keeps it otherwise).
+Clients never insert or update `page_permissions` rows: shares are made and
+changed through `share_page`; the owner may delete them, as `unshare_page`
+does. Shares and invites go only to an account that has confirmed the
+address, so the project must require email confirmation (see
+`supabase/README.md`).
 `page_history` is the owner's to read in full; anyone else reads the
 snapshots taken from when they accepted a share of the page, or of a page
-it is inside, on.
-Moving a page under a new parent requires edit access to both.
+it is inside, on. A snapshot's `created_at` is never later than when it
+reached the server; each writer keeps their newest 50 unnamed snapshots of
+a page, and each writer but the page's owner their newest 50 named
+(`manual`) ones.
+Moving a page under a new parent requires edit access to both, and anyone
+but the space owner moves a page only between parents that the same shares
+reach (`forbidden_move` otherwise), so a move never shows a page to people
+it was not shared with. A recording stays on its page: an update that
+changes `recordings.page_id` is refused. A comment is emptied as it is
+deleted: once `deleted_at` is set, `body` is empty, `quote` null and
+`mentions` empty.
 `pages.is_template` marks a template and every subpage of one (a subpage
 made under a template is one too); templates stay out of the page list,
 search and `list_pages`. `pages.tags` is a page's tags (`text[]`, at most 50,
@@ -324,13 +338,22 @@ Leaflet/
   stops that device's sync until the user turns iCloud sync off and on.
 - **A batch** is `{format, device, seq, written_at, snapshot, entries}`,
   never changed once written. An entry is a row,
-  `{kind: "row", table, id, at, by, row}`, for `pages`, `folders`, `files`,
-  `comments` and `recordings` in their tables' shape (§7) with `updated_at`
-  and, for a comment, `author_name`; or a page's new content,
+  `{kind: "row", table, id, at, by, row, changed}`, for `pages`, `folders`,
+  `files`, `comments` and `recordings` in their tables' shape (§7) with
+  `updated_at` and, for a comment, `author_name`; or a page's new content,
   `{kind: "content", page_id, version}`. Page history and agent runs stay on
-  each device. A row's version is `(at, by)`, compared by `at` then `by`;
-  the newer applies. A device that changed a row it has not sent yet keeps
-  its change, and sends it with an `at` after every version it has seen.
+  each device. `row` is always the whole row; `changed` lists the columns
+  the device changed, as §6 sends them up, and is left out when the whole
+  row changed (a new row, one sent again whole, and every row of batches
+  from before it). A row's version is `(at, by)`, compared by `at` then
+  `by`, and kept for each column: where a reader has the row, an entry
+  applies only the columns it changed (all, without `changed`) whose
+  version there is older, so an offline rename on one device undoes no
+  move or deletion made on another. A reader without the row takes it
+  whole, its other columns older than any change. A device that changed a
+  row it has not sent yet keeps its change, and sends it with an `at` after
+  every version it has seen; what came for the row's other columns
+  meanwhile applies once its change has gone.
 - **A page file** is `{format, page_id, version, merged, content}`: the
   device's whole version of the page (§1), `version` when it wrote it (ms,
   one more than its last at least), and `merged`, the version of each other
@@ -352,7 +375,8 @@ Leaflet/
   reader skips a batch that stays damaged only when later batches exist,
   after 20 passes and a day.
 - **Compaction.** Past 500 batches, a device writes the latest entry of each
-  row and page of its log as one batch with `snapshot: true`, sets
+  row and page of its log as one batch with `snapshot: true` (for a row, with
+  each earlier entry that changed a column the later ones did not), sets
   `log_from` to its seq, and removes the batches before it. A reader that
   finds batches missing goes on from the first snapshot after the gap, as
   a compaction cut short leaves batches before its snapshot.

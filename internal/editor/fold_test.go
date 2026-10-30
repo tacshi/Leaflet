@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -95,6 +96,82 @@ func TestFoldedSectionGoesWithItsHeading(t *testing.T) {
 	e.InsertText("x")
 	if got := texts(e); len(got) != 1 || got[0] != "heading:xC" {
 		t.Errorf("after deleting over the fold %v", got)
+	}
+}
+
+// A selection from inside a folded heading leaves the heading, and so its
+// section: Backspace over it does as Delete at the heading's end does.
+func TestSelectionFromInsideAFoldedHeadingKeepsItsSection(t *testing.T) {
+	for _, key := range []ui.Key{ui.KeyBackspace, ui.KeyDelete} {
+		e, tt, _, b := foldPage(t)
+		e.ToggleFold(b["A"].ID)
+		e.PlaceCaret(b["A"].ID, -1)
+		if key == ui.KeyBackspace {
+			tt.Key(ui.Shift, ui.KeyRight)
+			if a, z := e.Range(); a != (Pos{b["A"].ID, 1}) || z != (Pos{b["C"].ID, 0}) {
+				t.Fatalf("selected %v to %v", a, z)
+			}
+			// Copying it takes no section either.
+			if blocks := e.copyBlocks(); len(blocks) != 2 {
+				t.Errorf("copied %d blocks", len(blocks))
+			}
+		}
+		tt.Key(0, key)
+		var top []string
+		for _, n := range e.Content.Children {
+			top = append(top, n.Delta().Plain())
+		}
+		if !slices.Equal(top, []string{"AC", "a1", "a2", "B", "b1"}) || e.node(b["kid"].ID) == nil {
+			t.Errorf("key %v left %v", key, top)
+		}
+		if !foldedHeading(b["A"]) || len(texts(e)) != 1 {
+			t.Errorf("key %v: A folded %v, shown %v", key, foldedHeading(b["A"]), texts(e))
+		}
+	}
+}
+
+// Nothing goes out of sight into a folded section as the heading that
+// ended it goes, or becomes another kind of block: the section unfolds.
+func TestNothingFoldsAwayAsAHeadingGoes(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(e *Editor, tt *ui.Tester, b map[string]*doc.Node)
+		want []string
+	}{
+		{"Backspace at the start of the heading", func(e *Editor, tt *ui.Tester, b map[string]*doc.Node) {
+			e.PlaceCaret(b["C"].ID, 0)
+			tt.Key(0, ui.KeyBackspace)
+		}, []string{"heading:A", "paragraph:C", "paragraph:c1"}},
+		{"a lower level", func(e *Editor, tt *ui.Tester, b map[string]*doc.Node) {
+			e.PlaceCaret(b["C"].ID, 0)
+			e.SetType("heading", 2)
+		}, []string{"heading:A", "heading:C", "paragraph:c1"}},
+		{"Delete joining it", func(e *Editor, tt *ui.Tester, b map[string]*doc.Node) {
+			e.PlaceCaret(b["A"].ID, -1)
+			tt.Key(0, ui.KeyDelete)
+		}, []string{"heading:AC", "paragraph:c1"}},
+		{"a selection taking it", func(e *Editor, tt *ui.Tester, b map[string]*doc.Node) {
+			e.Select(Pos{b["A"].ID, 1}, Pos{b["C"].ID, 1})
+			tt.Key(0, ui.KeyBackspace)
+		}, []string{"heading:A", "paragraph:c1"}},
+	} {
+		e, tt, _, b := foldPage(t)
+		c1 := para(doc.NewBlockID(), "c1")
+		e.Edit(func(c *doc.Content) { c.Children = append(c.Children, c1) })
+		e.ToggleFold(b["A"].ID)
+		tc.edit(e, tt, b)
+		got := texts(e)
+		if foldedHeading(b["A"]) || len(got) < len(tc.want) || !slices.Equal(got[len(got)-len(tc.want)+1:], tc.want[1:]) {
+			t.Errorf("%s: A folded %v, shown %v", tc.name, foldedHeading(b["A"]), got)
+		}
+		if got[0] != tc.want[0] {
+			t.Errorf("%s: first %v", tc.name, got)
+		}
+		// Undo folds it again, as it was.
+		e.Undo()
+		if !foldedHeading(e.node(b["A"].ID)) || len(texts(e)) != 3 {
+			t.Errorf("%s: undo left A unfolded", tc.name)
+		}
 	}
 }
 

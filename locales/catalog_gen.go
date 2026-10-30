@@ -5759,13 +5759,13 @@ func (msgs Messages) SidebarCouldNotDelete(error string) string {
 	return Catalog.Format(msgs.locale, "sidebarCouldNotDelete", map[string]any{"error": error})
 }
 
-// SidebarFolderDeleted says "Deleted {name}. Its pages moved to the top level."
+// SidebarFolderDeleted says "Deleted {name}. Its pages and files moved to the top level."
 // in the language the app shows.
 //
 // Toast after deleting a folder.
 func SidebarFolderDeleted(name string) string { return In(i18n.Locale()).SidebarFolderDeleted(name) }
 
-// SidebarFolderDeleted says "Deleted {name}. Its pages moved to the top level."
+// SidebarFolderDeleted says "Deleted {name}. Its pages and files moved to the top level."
 // in the language of msgs.
 //
 // Toast after deleting a folder.

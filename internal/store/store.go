@@ -7,6 +7,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"net/url"
@@ -16,8 +17,24 @@ import (
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
 )
+
+// lowerFunc is SQL's name for strings.ToLower, which search matches text
+// with as it does titles: SQLite's lower() lowers ASCII alone.
+const lowerFunc = "leaflet_lower"
+
+func init() {
+	sqlite.MustRegisterDeterministicScalarFunction(lowerFunc, 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+		switch v := args[0].(type) {
+		case string:
+			return strings.ToLower(v), nil
+		case []byte:
+			return strings.ToLower(string(v)), nil
+		}
+		return args[0], nil
+	})
+}
 
 const schema = `
 CREATE TABLE IF NOT EXISTS spaces (
@@ -294,6 +311,7 @@ func addIndexes(ctx context.Context, c *sql.Conn, indexes [][3]string) error {
 // querier is the database, or a transaction on it.
 type querier interface {
 	Exec(query string, args ...any) (sql.Result, error)
+	Query(query string, args ...any) (*sql.Rows, error)
 	QueryRow(query string, args ...any) *sql.Row
 }
 

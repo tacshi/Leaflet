@@ -300,27 +300,8 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 	}
 	r.State = st
 	service.add(session, &captureSink{
-		chunk: func(pcm []byte) { r.chunk(session, pcm) },
-		started: func() {
-			r.mu.Lock()
-			r.resumed = time.Now()
-			r.mu.Unlock()
-			r.update(func() {
-				r.State.Starting, r.State.Active, r.State.StartedAt = false, true, time.Now()
-			})
-			if testFor > 0 {
-				time.AfterFunc(testFor, func() {
-					r.update(func() {
-						r.mu.Lock()
-						same := r.session == session
-						r.mu.Unlock()
-						if same {
-							r.Stop()
-						}
-					})
-				})
-			}
-		},
+		chunk:   func(pcm []byte) { r.chunk(session, pcm) },
+		started: func() { r.started(session, testFor) },
 		failed: func(msg string) {
 			r.update(func() {
 				r.State.Error = locales.RecErrMicDetail(msg)
@@ -359,6 +340,36 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 	r.view = v
 	r.mu.Unlock()
 	return nil
+}
+
+// started is the microphone of the recording session running. A recording
+// stopped or failed while it started stays so: the microphone answering
+// late brings back no pill for it.
+func (r *Controller) started(session string, testFor time.Duration) {
+	r.update(func() {
+		r.mu.Lock()
+		same := r.session == session && r.State.Starting
+		if same {
+			r.resumed = time.Now()
+		}
+		r.mu.Unlock()
+		if !same {
+			return
+		}
+		r.State.Starting, r.State.Active, r.State.StartedAt = false, true, time.Now()
+		if testFor > 0 {
+			time.AfterFunc(testFor, func() {
+				r.update(func() {
+					r.mu.Lock()
+					same := r.session == session
+					r.mu.Unlock()
+					if same {
+						r.Stop()
+					}
+				})
+			})
+		}
+	})
 }
 
 // startSoniox connects the live stream for the recording session.

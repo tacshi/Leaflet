@@ -198,3 +198,97 @@ func TestStorageTransfersOutlastTheCallTimeout(t *testing.T) {
 		t.Errorf("gave up after %v", d)
 	}
 }
+
+// A session's expiry goes by how long the server says it lasts, from when
+// it came by this device's clock, not by the server's clock.
+func TestExpiryByThisDevicesClock(t *testing.T) {
+	s, err := decodeSession(map[string]any{"access_token": "a", "expires_in": 3600.0, "expires_at": float64(time.Now().Add(-time.Hour).Unix())})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left := s.ExpiresAt - time.Now().Unix(); left < 3590 || left > 3600 {
+		t.Errorf("expires in %ds", left)
+	}
+	s, _ = decodeSession(map[string]any{"access_token": "a", "expires_at": 1234.0})
+	if s.ExpiresAt != 1234 {
+		t.Errorf("expires at %d, want the server's without expires_in", s.ExpiresAt)
+	}
+}
+
+// A request the server refuses for an expired token renews the token and
+// goes once more, with its body; one whose body cannot be read again, as
+// an upload's file, fails instead.
+func TestRefusedTokenRenewsAndRetries(t *testing.T) {
+	var refreshes atomic.Int32
+	var mu sync.Mutex
+	var bodies []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/v1/token" {
+			refreshes.Add(1)
+			_, _ = fmt.Fprintf(w, `{"access_token":"new%d","refresh_token":"r2","expires_in":3600}`, refreshes.Load())
+			return
+		}
+		data, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(data))
+		mu.Unlock()
+		if r.Header.Get("Authorization") == "Bearer test" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"code":"PGRST301","message":"JWT expired"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `[{"id":"1"}]`)
+	}))
+	t.Cleanup(hs.Close)
+	c := SignedInForTest(hs.URL, nil, "u1")
+	c.sess.RefreshToken = "r1"
+	rows, err := c.Insert(context.Background(), "pages", map[string]any{"id": "1"})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("rows %v, %v", rows, err)
+	}
+	mu.Lock()
+	if len(bodies) != 2 || bodies[0] != `{"id":"1"}` || bodies[1] != bodies[0] {
+		t.Errorf("bodies %q", bodies)
+	}
+	mu.Unlock()
+	if n := refreshes.Load(); n != 1 {
+		t.Errorf("%d refreshes", n)
+	}
+
+	c.keep(&session{AccessToken: "test", RefreshToken: "r1", ExpiresAt: time.Now().Add(time.Hour).Unix(), User: &authUser{ID: "u1"}})
+	err = c.Upload(context.Background(), "recordings", "u1/r.wav", io.MultiReader(strings.NewReader("RIFF")), "audio/wav")
+	var re *Error
+	if !errors.As(err, &re) || re.Status != http.StatusUnauthorized {
+		t.Errorf("upload of a body read once: %v", err)
+	}
+	if n := refreshes.Load(); n != 1 {
+		t.Errorf("%d refreshes", n)
+	}
+}
+
+// A stream that stops sending, its connection gone half-open, ends rather
+// than holding the run for the rest of its time.
+func TestQuietStreamEnds(t *testing.T) {
+	was := streamIdle
+	streamIdle = 200 * time.Millisecond
+	t.Cleanup(func() { streamIdle = was })
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"type":"status","status":"running"}`+"\n")
+		w.(http.Flusher).Flush()
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	t.Cleanup(hs.Close)
+	c := SignedInForTest(hs.URL, nil, "u1")
+	events := 0
+	start := time.Now()
+	err := c.InvokeStream(context.Background(), "agent", map[string]any{}, func(map[string]any) { events++ })
+	if !errors.Is(err, errStreamIdle) || events != 1 {
+		t.Errorf("err %v, %d events", err, events)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("ended after %v", d)
+	}
+}

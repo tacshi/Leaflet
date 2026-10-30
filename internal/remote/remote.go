@@ -88,6 +88,9 @@ type Client struct {
 
 	mu   sync.Mutex
 	sess *session
+	// refused is an access token the server refused before it expired,
+	// which token renews.
+	refused string
 	// refreshing is the refresh under way, which other callers wait for.
 	refreshing *refresh
 	// keepMu has the keychain written in the order sess changes.
@@ -203,7 +206,7 @@ func (c *Client) replace(old, s *session, force bool) bool {
 		c.mu.Unlock()
 		return false
 	}
-	c.sess = s
+	c.sess, c.refused = s, ""
 	c.mu.Unlock()
 	if c.noKeychain {
 		return true
@@ -275,7 +278,9 @@ func decodeSession(out map[string]any) (*session, error) {
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return nil, err
 	}
-	if exp, ok := out["expires_in"].(float64); ok && s.ExpiresAt == 0 {
+	// How long the token lasts, from when it came, goes by this device's
+	// clock, which may be off from the server's that expires_at is on.
+	if exp, ok := out["expires_in"].(float64); ok && exp > 0 {
 		s.ExpiresAt = time.Now().Unix() + int64(exp)
 	}
 	if s.AccessToken == "" {
@@ -364,7 +369,7 @@ func (c *Client) token(ctx context.Context) (string, error) {
 			c.mu.Unlock()
 			return "", ErrSignedOut
 		}
-		if s.AccessToken != "" && time.Now().Unix() < s.ExpiresAt-60 {
+		if s.AccessToken != "" && s.AccessToken != c.refused && time.Now().Unix() < s.ExpiresAt-60 {
 			c.mu.Unlock()
 			return s.AccessToken, nil
 		}
@@ -469,34 +474,75 @@ func (c *Client) requestWith(hc *http.Client, ctx context.Context, method, path 
 	if !c.Configured() {
 		return nil, ErrNotConfigured
 	}
-	tok, err := c.token(ctx)
-	if err != nil {
-		return nil, err
-	}
 	req, err := http.NewRequestWithContext(ctx, method, c.cfg.URL+path, body)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("apikey", c.cfg.AnonKey)
-	req.Header.Set("Authorization", "Bearer "+tok)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	res, err := hc.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if res.StatusCode >= 400 {
-		defer func() { _ = res.Body.Close() }()
+	// A body that can be read again (bytes, not a file being uploaded)
+	// lets a request refused for its token go again.
+	again := body == nil || req.GetBody != nil
+	for {
+		tok, err := c.token(ctx)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+		res, err := hc.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if res.StatusCode < 400 {
+			return res, nil
+		}
 		data, _ := io.ReadAll(res.Body)
+		_ = res.Body.Close()
+		if again && staleToken(res.StatusCode, data) {
+			// The token expired early, by the server's clock, or was
+			// revoked: renew it and try once more.
+			again = false
+			c.refuse(tok)
+			next := req.Clone(ctx)
+			if req.GetBody != nil {
+				if next.Body, err = req.GetBody(); err != nil {
+					return nil, err
+				}
+			}
+			req = next
+			continue
+		}
 		var m map[string]any
 		_ = json.Unmarshal(data, &m)
 		return nil, &Error{Status: res.StatusCode, Message: message(m, string(data))}
 	}
-	return res, nil
+}
+
+// refuse has token renew tok, which the server refused, unless it has
+// been renewed already.
+func (c *Client) refuse(tok string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.sess != nil && c.sess.AccessToken == tok {
+		c.refused = tok
+	}
+}
+
+// staleToken reports whether the server refused a request for its access
+// token, expired or no longer valid: PostgREST and the Functions gateway
+// answer 401 ("JWT expired", "Invalid JWT"), Storage 400 or 403 ("jwt
+// expired", "exp" claim timestamp check failed).
+func staleToken(status int, body []byte) bool {
+	if status != http.StatusUnauthorized && status != http.StatusBadRequest && status != http.StatusForbidden {
+		return false
+	}
+	b := strings.ToLower(string(body))
+	return strings.Contains(b, "jwt") || strings.Contains(b, "claim timestamp check failed")
 }
 
 func decodeRows(res *http.Response) ([]map[string]any, error) {
@@ -673,21 +719,34 @@ func (c *Client) Invoke(ctx context.Context, name string, body map[string]any) (
 	return out, nil
 }
 
+// streamIdle is how long a stream may go without a line before it is
+// given up on: the agent function sends one at least every 15 seconds,
+// so one quiet for longer is a connection gone half-open. Tests shorten
+// it.
+var streamIdle = time.Minute
+
+// errStreamIdle is a stream that stopped coming.
+var errStreamIdle = errors.New("the server stopped answering")
+
 // InvokeStream calls an Edge Function answering with NDJSON and calls fn
 // with each event.
 func (c *Client) InvokeStream(ctx context.Context, name string, body map[string]any, fn func(map[string]any)) error {
 	raw, _ := json.Marshal(body)
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	// No overall timeout: runs take a while.
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	// No overall timeout: runs take a while. A stream that goes quiet
+	// ends instead.
+	idle := time.AfterFunc(streamIdle, func() { cancel(errStreamIdle) })
+	defer idle.Stop()
 	res, err := c.requestWith(c.long, ctx, "POST", "/functions/v1/"+name, bytes.NewReader(raw), nil)
 	if err != nil {
-		return err
+		return quiet(ctx, err)
 	}
 	defer func() { _ = res.Body.Close() }()
 	sc := bufio.NewScanner(res.Body)
 	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
 	for sc.Scan() {
+		idle.Reset(streamIdle)
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
@@ -697,7 +756,15 @@ func (c *Client) InvokeStream(ctx context.Context, name string, body map[string]
 			fn(ev)
 		}
 	}
-	return sc.Err()
+	return quiet(ctx, sc.Err())
+}
+
+// quiet is err, or errStreamIdle when the stream ended for going quiet.
+func quiet(ctx context.Context, err error) error {
+	if err != nil && context.Cause(ctx) == errStreamIdle {
+		return errStreamIdle
+	}
+	return err
 }
 
 // Upload puts a file in a Storage bucket, taking as long as ctx lets it.

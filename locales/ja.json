@@ -397,7 +397,7 @@
   "sidebarRenameEllipsis": "名前を変更…",
   "sidebarDeleteFolder": "フォルダを削除",
   "sidebarCouldNotDelete": "削除できませんでした：{error}",
-  "sidebarFolderDeleted": "「{name}」を削除しました。中のページは最上位に移動しました。",
+  "sidebarFolderDeleted": "「{name}」を削除しました。中のページとファイルは最上位に移動しました。",
   "sidebarSharedWithMe": "共有されたページ",
   "sidebarTabPages": "ページ",
   "sidebarTabTags": "タグ",

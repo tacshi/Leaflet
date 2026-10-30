@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -33,8 +34,16 @@ func IsLocalEndpoint(baseURL string) bool {
 		return false
 	}
 	h := u.Hostname()
-	return h == "localhost" || h == "127.0.0.1" || h == "::1" || strings.HasSuffix(h, ".local") ||
-		strings.HasPrefix(h, "192.168.") || strings.HasPrefix(h, "10.")
+	if h == "localhost" || strings.HasSuffix(h, ".local") {
+		return true
+	}
+	// An address, not a name that starts like one, as 10.example.com.
+	ip, err := netip.ParseAddr(h)
+	if err != nil {
+		return false
+	}
+	ip = ip.Unmap()
+	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
 }
 
 // TranscribeEndpoint transcribes audio with an OpenAI-style
@@ -182,6 +191,9 @@ type Soniox struct {
 	// ending is set once Finish or Close ends the stream.
 	sent   atomic.Int64
 	ending atomic.Bool
+	// wmu orders the writes, so no audio follows the end of it that
+	// Finish sends.
+	wmu sync.Mutex
 	// OnText runs with the live text: final words and the current draft.
 	OnText func(string)
 }
@@ -228,12 +240,15 @@ func (s *Soniox) keepAlive() {
 			return
 		case <-tick.C:
 		}
+		s.wmu.Lock()
 		if s.ending.Load() || time.Since(time.UnixMilli(s.sent.Load())) < keepAliveAfter {
+			s.wmu.Unlock()
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		err := s.conn.Write(ctx, websocket.MessageText, []byte(`{"type":"keepalive"}`))
 		cancel()
+		s.wmu.Unlock()
 		if err != nil {
 			s.lose(err)
 			return
@@ -318,8 +333,13 @@ func (s *Soniox) textLocked() string {
 	return b.String()
 }
 
-// Send streams PCM16 audio.
+// Send streams PCM16 audio; once the stream is ending it sends nothing.
 func (s *Soniox) Send(pcm []byte) {
+	s.wmu.Lock()
+	defer s.wmu.Unlock()
+	if s.ending.Load() {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := s.conn.Write(ctx, websocket.MessageBinary, pcm); err != nil {
@@ -337,10 +357,12 @@ func (s *Soniox) Close() {
 
 // Finish ends the stream and waits for the last final words.
 func (s *Soniox) Finish() ([]store.Segment, error) {
+	s.wmu.Lock()
 	s.ending.Store(true)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = s.conn.Write(ctx, websocket.MessageBinary, []byte{})
 	cancel()
+	s.wmu.Unlock()
 	select {
 	case <-s.done:
 	case <-time.After(15 * time.Second):

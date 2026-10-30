@@ -11,6 +11,7 @@
 #   scripts/build-release.sh -o out           # another output directory
 #   scripts/build-release.sh --upload         # and upload to a draft GitHub release
 #   scripts/build-release.sh --changelog f.md # notes from f.md, not CHANGELOG.md
+#   scripts/build-release.sh --allow-unsigned # let --upload take unsigned or unnotarized builds
 #
 # The installers go to build/release: Leaflet-<version>-{arm64,x64,universal}.dmg
 # for macOS (Apple silicon, Intel, both) and Leaflet-<version>-{x64,arm64}-setup.exe
@@ -37,8 +38,13 @@
 # MYGO_WINDOWS_CERTIFICATE_PASSWORD, using osslsigncode; without it the
 # builds are unsigned and SmartScreen warns about them.
 #
+# --upload refuses unsigned Windows builds, and macOS ones --skip-notarize
+# leaves unnotarized, which installed copies would update to, unless
+# --allow-unsigned, or LEAFLET_ALLOW_UNSIGNED=1, says to upload them anyway.
+#
 # To build a Leaflet server in, set MYGO_LDFLAGS as the README says.
-# scripts/publish.sh runs this with --changelog, -o and --upload.
+# scripts/publish.sh runs this with --changelog, -o and --upload, and
+# --allow-unsigned when it is given it.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/release.sh"
 cd "$ROOT_DIR"
@@ -49,6 +55,8 @@ WIN=false
 ARCHES=()
 NOTARIZE=true
 UPLOAD=false
+ALLOW_UNSIGNED=false
+if [[ "${LEAFLET_ALLOW_UNSIGNED:-}" == 1 ]]; then ALLOW_UNSIGNED=true; fi
 CHANGELOG=""
 OUT_DIR="$ROOT_DIR/build/release"
 while (($#)); do
@@ -62,6 +70,7 @@ while (($#)); do
 		;;
 	--skip-notarize) NOTARIZE=false ;;
 	--upload) UPLOAD=true ;;
+	--allow-unsigned) ALLOW_UNSIGNED=true ;;
 	--changelog)
 		[[ $# -ge 2 ]] || die "--changelog needs a file"
 		CHANGELOG="$2"
@@ -73,7 +82,7 @@ while (($#)); do
 		shift
 		;;
 	-h | --help)
-		sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
+		sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'
 		exit 0
 		;;
 	-*) die "unknown option: $1" ;;
@@ -142,6 +151,9 @@ if $MAC; then
 	if $NOTARIZE; then
 		CONFIG+=("macos.notarize.keychainProfile=$(notary_profile)")
 	else
+		if $UPLOAD && ! $ALLOW_UNSIGNED; then
+			die "--upload with --skip-notarize would publish macOS builds that are not notarized; add --allow-unsigned (or LEAFLET_ALLOW_UNSIGNED=1) to upload them anyway"
+		fi
 		BUILD_ARGS+=(-skip-notarize)
 	fi
 fi
@@ -151,6 +163,8 @@ if $WIN; then
 	WINDOWS_CERTIFICATE="$(windows_certificate)"
 	if [[ -n "$WINDOWS_CERTIFICATE" ]]; then
 		CONFIG+=("windows.certificate=$WINDOWS_CERTIFICATE")
+	elif $UPLOAD && ! $ALLOW_UNSIGNED; then
+		die "LEAFLET_WINDOWS_CERTIFICATE is not set, so --upload would publish unsigned Windows builds; set it, or add --allow-unsigned (or LEAFLET_ALLOW_UNSIGNED=1) to upload them anyway"
 	else
 		warn "LEAFLET_WINDOWS_CERTIFICATE is not set, so the Windows builds are unsigned"
 	fi

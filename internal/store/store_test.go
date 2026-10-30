@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -64,6 +65,51 @@ func TestKeyBetweenAKeyAndItsZeros(t *testing.T) {
 	top := "a0"
 	for i := 0; i < 20; i++ {
 		top = KeyBetween("", top)
+	}
+}
+
+// Keys from the server may hold any characters: a key between them never
+// panics, and sorts strictly between whenever a key of digits can.
+func TestKeyBetweenAnyKeys(t *testing.T) {
+	for _, pair := range [][2]string{{"~", ""}, {"", "~"}, {" ", ""}, {" ", "!"}, {"a~", "b"}, {"~", "~~"},
+		{"Z", "a"}, {"", "1"}, {"!", "1"}, {"", "05"}, {"z", ""}, {"zz", ""}, {"中", ""}, {"a", "中"}, {"V", "V0X"}} {
+		k := KeyBetween(pair[0], pair[1])
+		if k <= pair[0] || pair[1] != "" && k >= pair[1] {
+			t.Errorf("between %q and %q: %q", pair[0], pair[1], k)
+		}
+	}
+	// Nothing of digits sorts before " ": the key goes just after it.
+	if k := KeyBetween("", " "); k <= " " {
+		t.Errorf("before \" \": %q", k)
+	}
+	// Out of order, a key after a.
+	if k := KeyBetween("b", "a"); k <= "b" {
+		t.Errorf("between \"b\" and \"a\": %q", k)
+	}
+	rng := rand.New(rand.NewPCG(5, 6)) // #nosec G404 -- seeded, for keys a test can repeat.
+	chars := "0aZz~ !\x7f\xe4"
+	key := func() string {
+		var b strings.Builder
+		for range 1 + rng.IntN(4) {
+			b.WriteByte(chars[rng.IntN(len(chars))])
+		}
+		return b.String()
+	}
+	for range 20000 {
+		a, b := key(), key()
+		if a > b {
+			a, b = b, a
+		}
+		// No key of digits sorts between a and a followed by 0s and then
+		// nothing or a character before 0.
+		if rest, ok := strings.CutPrefix(b, a); ok {
+			if rest = strings.TrimLeft(rest, "0"); rest == "" || rest[0] < '0' {
+				continue
+			}
+		}
+		if k := KeyBetween(a, b); k <= a || k >= b {
+			t.Fatalf("between %q and %q: %q", a, b, k)
+		}
 	}
 }
 
@@ -660,8 +706,105 @@ func TestCopyPageCopiesFiles(t *testing.T) {
 	}
 }
 
+// Content this app cannot read, as a newer app's, is not taken for an
+// empty page: not returned, copied, or saved over.
+func TestUnreadableContentIsNotAnEmptyPage(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "From a newer app"})
+	newer := `{"document":{"children":[]},"meta":{"v":2}}`
+	if _, err := s.db.Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, newer, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if c := s.Content(p.ID); c != nil {
+		t.Errorf("content %s", c.Encode())
+	}
+	if _, err := s.CopyPage(p.ID, CopyOptions{Title: "Copy"}); !errors.Is(err, doc.ErrNotContent) {
+		t.Errorf("copied: %v", err)
+	}
+	if pages, _ := s.Pages(); len(pages) != 1 {
+		t.Errorf("pages %v", pages)
+	}
+	if _, _, err := s.SaveContent(p.ID, doc.Empty()); !errors.Is(err, doc.ErrNotContent) {
+		t.Errorf("saved: %v", err)
+	}
+	if row, _ := s.ContentRow(p.ID); row.Content != newer {
+		t.Errorf("stored %s", row.Content)
+	}
+}
+
+// A file's name from the server never puts it, or a copy of it, outside
+// the app's files folder.
+func TestFileNamesStayInTheFilesFolder(t *testing.T) {
+	s := open(t)
+	if f := FileFromRemote(map[string]any{"id": "f1", "name": "../../../x"}); f.Name != "x" {
+		t.Errorf("name from the server %q", f.Name)
+	}
+	for in, want := range map[string]string{"a.pdf": "a.pdf", "../../a.pdf": "a.pdf", "..": "file", "": "file", "/": "file"} {
+		if got := fileName(in); got != want {
+			t.Errorf("fileName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	p, _ := s.CreatePage(NewPageOptions{Title: "Trip"})
+	src := filepath.Join(t.TempDir(), "map.png")
+	if err := os.WriteFile(src, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// As a row stored before names were checked has it.
+	f := File{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, PageID: p.ID, Name: "../../../escaped.png", LocalPath: src,
+		CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := s.PutFile(f); err != nil {
+		t.Fatal(err)
+	}
+	block := &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{"url": "file://" + src, "file_id": f.ID}}
+	if _, _, err := s.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{block})); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := s.CopyPage(p.ID, CopyOptions{Title: "Trip copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := s.Content(cp.ID).Children[0]
+	c, err := s.File(n.Str("file_id"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(s.Dir, "files", c.ID)
+	if c.LocalPath != filepath.Join(dir, "escaped.png") || n.Str("url") != "file://"+c.LocalPath || strings.Contains(c.StoragePath, "..") {
+		t.Errorf("copy at %q, url %q, stored at %q", c.LocalPath, n.Str("url"), c.StoragePath)
+	}
+	if _, err := os.Stat(filepath.Join(s.Dir, "..", "escaped.png")); err == nil {
+		t.Error("the copy went outside the files folder")
+	}
+}
+
 // Search finds templates by title and text, marked as templates, and
 // leaves them out of the recent pages.
+// Search matches text as written: % and _ are no wildcards, and letters
+// beyond ASCII match in any case, as titles do.
+func TestSearchTextAsWritten(t *testing.T) {
+	s := open(t)
+	body := func(text string) *doc.Content {
+		n := &doc.Node{Type: "paragraph"}
+		n.SetDelta(doc.Delta{{Text: text}})
+		return doc.FromBlocks([]*doc.Node{n})
+	}
+	for title, text := range map[string]string{"Rates": "Up 100% this year", "Tables": "the page_contents table",
+		"Other": "Up 1000 times, pageXcontents", "Notes": "Über alles, ÉTÉ"} {
+		if _, err := s.CreatePage(NewPageOptions{Title: title, Content: body(text)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for q, want := range map[string]string{"100%": "Rates", "page_contents": "Tables", "über": "Notes", "été": "Notes"} {
+		hits, err := s.Search(q, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(hits) != 1 || hits[0].Title != want {
+			t.Errorf("%q found %+v", q, hits)
+		}
+	}
+}
+
 func TestSearchFindsTemplates(t *testing.T) {
 	s := open(t)
 	body := func(text string) *doc.Content {
@@ -1996,5 +2139,126 @@ func TestRemoveSharedPages(t *testing.T) {
 	}
 	if !s.HasPending("pages", mine.ID) {
 		t.Error("own page's change waiting removed")
+	}
+}
+
+// Pages in a loop of parents, A under B and B under A, as sync may find
+// them before it breaks the loop, are deleted and copied once each.
+func TestDeleteAndCopyALoopOfParents(t *testing.T) {
+	s := open(t)
+	a, _ := s.CreatePage(NewPageOptions{Title: "A"})
+	b, _ := s.CreatePage(NewPageOptions{Title: "B", ParentID: a.ID})
+	if _, err := s.db.Exec(`UPDATE pages SET parent_id = ? WHERE id = ?`, b.ID, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := s.CopyPage(a.ID, CopyOptions{Title: "A copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kids, _ := s.Children(cp.ID, ""); len(kids) != 1 || kids[0].Title != "B" {
+		t.Errorf("the copy has %+v", kids)
+	}
+	ids, err := s.DeletePage(a.ID)
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("deleted %v, %v", ids, err)
+	}
+	for _, id := range ids {
+		if p, _ := s.Page(id); p.DeletedAt.IsZero() {
+			t.Errorf("%s not deleted", p.Title)
+		}
+	}
+	if err := s.RestorePages(ids); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.Page(b.ID); !p.DeletedAt.IsZero() {
+		t.Error("B not restored")
+	}
+}
+
+// A deleted folder's pages and files move to the top level.
+func TestDeleteFolderKeepsItsFiles(t *testing.T) {
+	s := open(t)
+	f, _ := s.CreateFolder("Folder")
+	p, _ := s.CreatePage(NewPageOptions{Title: "In it", FolderID: f.ID})
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("notes"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loose, err := s.AddFile(src, f.ID, "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ofPage, err := s.AddFile(src, f.ID, p.ID, "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteFolder(f); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Page(p.ID); got.FolderID != "" || !got.DeletedAt.IsZero() {
+		t.Errorf("page %+v", got)
+	}
+	if got, _ := s.File(loose.ID); !got.DeletedAt.IsZero() || got.FolderID != "" {
+		t.Errorf("folder's file %+v", got)
+	}
+	if _, err := os.Stat(loose.LocalPath); err != nil {
+		t.Errorf("the folder's file is gone: %v", err)
+	}
+	if got, _ := s.File(ofPage.ID); !got.DeletedAt.IsZero() || got.FolderID != "" {
+		t.Errorf("page's file %+v", got)
+	}
+}
+
+// Resolving, deleting or moving a comment queues only what changed, so a
+// resolve made offline does not undo a delete made elsewhere.
+func TestCommentChangesQueueOnlyTheirColumns(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Plan"})
+	c, err := s.AddComment(p.ID, "b1", "Is this right?", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := func() {
+		t.Helper()
+		pending, _ := s.Pending()
+		for _, e := range pending {
+			if err := s.Dequeue(e); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	queued := func() []any {
+		t.Helper()
+		var payload string
+		if err := s.db.QueryRow(`SELECT payload FROM outbox WHERE entity = 'comments' AND entity_id = ?`, c.ID).Scan(&payload); err != nil {
+			t.Fatal(err)
+		}
+		var row map[string]any
+		_ = json.Unmarshal([]byte(payload), &row)
+		cols, _ := row[ChangedKey].([]any)
+		return cols
+	}
+	sent()
+	if err := s.SetResolved(c.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if cols := queued(); fmt.Sprint(cols) != "[resolved]" {
+		t.Errorf("resolve queued %v", cols)
+	}
+	sent()
+	if err := s.Reanchor(p.ID, "b1", "b2"); err != nil {
+		t.Fatal(err)
+	}
+	if cols := queued(); fmt.Sprint(cols) != "[block_id]" {
+		t.Errorf("move queued %v", cols)
+	}
+	if err := s.DeleteComment(c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if cols := queued(); fmt.Sprint(cols) != "[block_id deleted_at]" {
+		t.Errorf("move and delete queued %v", cols)
+	}
+	if err := s.SetResolved("missing", true); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("resolving a missing comment: %v", err)
 	}
 }

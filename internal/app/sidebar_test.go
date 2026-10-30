@@ -5,7 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -197,6 +199,54 @@ func TestSidebarDragOut(t *testing.T) {
 	}
 	if a.hasSubpageLink(welcome.ID, sync.ID) {
 		t.Error("Welcome still links to Sync")
+	}
+}
+
+// Move offers the places a drag in the sidebar could put the page: a
+// page shared with the user stays in its own space, out of folders and
+// the user's top level, and the user's pages don't go into it.
+func TestMoveOffersWhatADragCould(t *testing.T) {
+	a := templatesApp(t)
+	mine, _ := a.st.CreatePage(store.NewPageOptions{Title: "Mine"})
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "Other"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.CreateFolder("Work"); err != nil {
+		t.Fatal(err)
+	}
+	const theirs, space = "00000000-0000-0000-0000-0000000000bb", "00000000-0000-0000-0000-0000000000cc"
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, p := range []map[string]any{
+		{"id": theirs, "space_id": space, "title": "Theirs", "sort_key": "V", "created_at": at, "updated_at": at},
+		{"id": "00000000-0000-0000-0000-0000000000bd", "space_id": space, "title": "Their notes", "sort_key": "W", "created_at": at, "updated_at": at},
+	} {
+		if err := a.st.PutRemotePage(p); err != nil {
+			t.Fatal(err)
+		}
+		id := p["id"].(string)
+		if err := a.st.SetMembers(id, []store.Member{{PageID: id, UserID: a.session.UserID, Role: "editor"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.reloadAll()
+	tt := ui.NewTester(func(c *ui.Context) { a.moveDialog(c) }, 600, 700)
+	offers := func(id string) []string {
+		t.Helper()
+		a.dialogs.openMove(id)
+		tt.Frame()
+		var out []string
+		for _, s := range []string{locales.DialogMoveTopLevel(), "Work", "Mine", "Other", "Theirs", "Their notes"} {
+			if _, ok := tt.Find(s); ok && !strings.Contains(locales.DialogMoveTitle(a.pageTitleOf(id)), s) {
+				out = append(out, s)
+			}
+		}
+		return out
+	}
+	if got := fmt.Sprint(offers(mine.ID)); got != "[Top level Work Other]" {
+		t.Errorf("Mine can go to %s", got)
+	}
+	if got := fmt.Sprint(offers(theirs)); got != "[Their notes]" {
+		t.Errorf("Theirs can go to %s", got)
 	}
 }
 

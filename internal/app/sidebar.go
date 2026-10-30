@@ -391,7 +391,7 @@ func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (
 		return 0, "", 0, false
 	}
 	if kind == "folder" {
-		return dropInside, key, 0, !a.isShared(*p)
+		return dropInside, key, 0, a.canMoveInside(d.id, key)
 	}
 	t := a.pageByID(id)
 	if t == nil || t.SpaceID != p.SpaceID || id != d.id && a.st.IsDescendant(id, d.id) {
@@ -409,9 +409,26 @@ func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (
 		}
 		return dropAfter, "page:" + t.ID, out, t.ID != d.id
 	case id != d.id:
-		return dropInside, key, 0, a.canEdit(id)
+		return dropInside, key, 0, a.canMoveInside(d.id, key)
 	}
 	return 0, "", 0, false
+}
+
+// canMoveInside reports whether page id may go inside the item of key, as
+// a drag in the sidebar or Move puts it: the top level of the user's
+// space ("") or a folder, for a page of their own; a page they can edit,
+// in the page's space, but not the page itself or one under it.
+func (a *App) canMoveInside(id, key string) bool {
+	p := a.pageByID(id)
+	if p == nil {
+		return false
+	}
+	kind, target, _ := strings.Cut(key, ":")
+	if kind == "" || kind == "folder" {
+		return !a.isShared(*p)
+	}
+	t := a.pageByID(target)
+	return t != nil && target != id && t.SpaceID == p.SpaceID && !a.st.IsDescendant(target, id) && a.canEdit(target)
 }
 
 // treeIndent is how far in each level of the tree is.
@@ -471,7 +488,7 @@ func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 				return at, target, out, r.box, ok
 			}
 		}
-		if p := a.pageByID(d.id); y >= end && end > 0 && p != nil && !a.isShared(*p) {
+		if y >= end && end > 0 && a.canMoveInside(d.id, "") {
 			return dropAfter, "", 0, ui.Rect{X: left, Y: end, W: lb.X + lb.W - 8 - left}, true
 		}
 		return 0, "", 0, ui.Rect{}, false

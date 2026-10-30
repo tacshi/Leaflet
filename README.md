@@ -207,7 +207,10 @@ Run any script with `--help` for its options, or `Get-Help` for a `.ps1`
 one. macOS releases need a Developer ID Application identity and a
 `notarytool` keychain profile, Windows installers need NSIS (`brew install
 makensis`), and every release needs the update signing key;
-`scripts/build-release.sh --help` explains each one.
+`scripts/build-release.sh --help` explains each one. Uploads refuse
+unsigned Windows installers, and macOS ones built `--skip-notarize`, unless
+`--allow-unsigned` (`-AllowUnsigned`) or `LEAFLET_ALLOW_UNSIGNED=1` says
+to publish them anyway.
 
 ## Development
 

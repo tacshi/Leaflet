@@ -10,6 +10,7 @@
 #   scripts/publish.sh 0.2.0 --dry-run       # check, show the notes and the steps
 #   scripts/publish.sh 0.2.0 --no-upload     # build into build/release only
 #   scripts/publish.sh 0.2.0 --allow-branch  # release from a branch, not main
+#   scripts/publish.sh 0.2.0 --allow-unsigned # publish unsigned Windows builds
 #
 # The notes are the "## <version>" section of CHANGELOG.md, used verbatim
 # when it has one. Otherwise they are drafted from the subjects of the
@@ -21,8 +22,11 @@
 # builds, tags, pushes and uploads nothing, and leaves build/release alone.
 #
 # Signing, notarization, NSIS and the update signing key are as in
-# scripts/build-release.sh. The committed mygo.json and CHANGELOG.md are
-# never edited: the build gets the version and the notes for the run only.
+# scripts/build-release.sh. Without LEAFLET_WINDOWS_CERTIFICATE the Windows
+# builds would be unsigned, which a release refuses unless --allow-unsigned,
+# or LEAFLET_ALLOW_UNSIGNED=1, says to publish them anyway. The committed
+# mygo.json and CHANGELOG.md are never edited: the build gets the version
+# and the notes for the run only.
 set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/release.sh"
 cd "$ROOT_DIR"
@@ -33,6 +37,8 @@ WIN=false
 DRY_RUN=false
 NO_UPLOAD=false
 ALLOW_BRANCH=false
+ALLOW_UNSIGNED=false
+if [[ "${LEAFLET_ALLOW_UNSIGNED:-}" == 1 ]]; then ALLOW_UNSIGNED=true; fi
 for arg in "$@"; do
 	case "$arg" in
 	--mac) MAC=true ;;
@@ -40,8 +46,9 @@ for arg in "$@"; do
 	--dry-run | -n) DRY_RUN=true ;;
 	--no-upload) NO_UPLOAD=true ;;
 	--allow-branch) ALLOW_BRANCH=true ;;
+	--allow-unsigned) ALLOW_UNSIGNED=true ;;
 	-h | --help)
-		sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+		sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
 		exit 0
 		;;
 	-*) die "unknown option: $arg" ;;
@@ -51,7 +58,7 @@ for arg in "$@"; do
 		;;
 	esac
 done
-[[ -n "$VERSION" ]] || die "usage: scripts/publish.sh <version> [--mac] [--win] [--dry-run] [--no-upload] [--allow-branch]"
+[[ -n "$VERSION" ]] || die "usage: scripts/publish.sh <version> [--mac] [--win] [--dry-run] [--no-upload] [--allow-branch] [--allow-unsigned]"
 check_version "$VERSION"
 # Both, unless one is asked for: installed copies on either update only
 # from a release that has their platform's manifest.
@@ -124,7 +131,13 @@ fi
 if $WIN; then
 	check check_nsis
 	check windows_certificate
-	[[ -n "${LEAFLET_WINDOWS_CERTIFICATE:-}" ]] || warn "LEAFLET_WINDOWS_CERTIFICATE is not set, so the Windows builds will be unsigned"
+	if [[ -z "${LEAFLET_WINDOWS_CERTIFICATE:-}" ]]; then
+		if ! $NO_UPLOAD && ! $ALLOW_UNSIGNED; then
+			problem "LEAFLET_WINDOWS_CERTIFICATE is not set, so the Windows builds would be published unsigned; set it, or add --allow-unsigned (or LEAFLET_ALLOW_UNSIGNED=1) to publish them anyway"
+		else
+			warn "LEAFLET_WINDOWS_CERTIFICATE is not set, so the Windows builds will be unsigned"
+		fi
+	fi
 fi
 check load_update_key
 $NO_UPLOAD || check check_gh
@@ -253,6 +266,7 @@ has_notes || problem "the notes for $VERSION are empty; write them in CHANGELOG.
 printf '## %s\n\n%s\n' "$VERSION" "$(cat "$NOTES_FILE")" >"$WORK_DIR/CHANGELOG.md"
 BUILD_ARGS=("$VERSION" "${PLATFORM_ARGS[@]}" -o "$STAGE_DIR/out" --changelog "$STAGE_DIR/CHANGELOG.md")
 $NO_UPLOAD || BUILD_ARGS+=(--upload)
+if $ALLOW_UNSIGNED; then BUILD_ARGS+=(--allow-unsigned); fi
 
 $DRY_RUN || info "building Leaflet $VERSION at $(git rev-parse --short HEAD)"
 run "$ROOT_DIR/scripts/build-release.sh" "${BUILD_ARGS[@]}"

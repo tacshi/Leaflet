@@ -142,6 +142,12 @@ func (a *App) tree(c *ui.Context) {
 	for _, p := range a.children("", "", true) {
 		roots = append(roots, "page:"+p.ID)
 	}
+	// Files of a folder that was deleted are at the top level.
+	for _, f := range a.files {
+		if f.FolderID == "" && f.PageID == "" {
+			roots = append(roots, "file:"+f.ID)
+		}
+	}
 	if shared := a.sharedRoots(); len(shared) > 0 {
 		roots = append(roots, "section:shared")
 		for _, p := range shared {

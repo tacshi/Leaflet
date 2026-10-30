@@ -2175,10 +2175,8 @@ func TestDeleteAndCopyALoopOfParents(t *testing.T) {
 	}
 }
 
-// A deleted folder's pages move to the top level, and its files go with
-// it, as the sidebar shows files only in their folders; a file of a page
-// stays.
-func TestDeleteFolderDeletesItsFiles(t *testing.T) {
+// A deleted folder's pages and files move to the top level.
+func TestDeleteFolderKeepsItsFiles(t *testing.T) {
 	s := open(t)
 	f, _ := s.CreateFolder("Folder")
 	p, _ := s.CreatePage(NewPageOptions{Title: "In it", FolderID: f.ID})
@@ -2200,11 +2198,11 @@ func TestDeleteFolderDeletesItsFiles(t *testing.T) {
 	if got, _ := s.Page(p.ID); got.FolderID != "" || !got.DeletedAt.IsZero() {
 		t.Errorf("page %+v", got)
 	}
-	if got, _ := s.File(loose.ID); got.DeletedAt.IsZero() || got.LocalPath != "" {
+	if got, _ := s.File(loose.ID); !got.DeletedAt.IsZero() || got.FolderID != "" {
 		t.Errorf("folder's file %+v", got)
 	}
-	if _, err := os.Stat(loose.LocalPath); err == nil {
-		t.Error("the folder's file is still here")
+	if _, err := os.Stat(loose.LocalPath); err != nil {
+		t.Errorf("the folder's file is gone: %v", err)
 	}
 	if got, _ := s.File(ofPage.ID); !got.DeletedAt.IsZero() || got.FolderID != "" {
 		t.Errorf("page's file %+v", got)

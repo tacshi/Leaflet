@@ -2022,7 +2022,7 @@
       }
     }
   },
-  "sidebarFolderDeleted": "Deleted {name}. Its pages moved to the top level.",
+  "sidebarFolderDeleted": "Deleted {name}. Its pages and files moved to the top level.",
   "@sidebarFolderDeleted": {
     "description": "Toast after deleting a folder.",
     "placeholders": {

@@ -158,13 +158,10 @@ func (s *Store) SetFolderDefaultTemplate(f Folder, templateID string) error {
 	})
 }
 
-// DeleteFolder deletes a folder; its pages move to the top level. Its
-// files are deleted with it, as DeleteFile deletes one: the sidebar shows
-// a file only in its folder, so one left at the top level would be kept,
-// and synced, where nobody can see it. A file of a page stays the page's.
+// DeleteFolder deletes a folder; its pages and files move to the top
+// level.
 func (s *Store) DeleteFolder(f Folder) error {
 	now := time.Now()
-	var deleted []File
 	// What the folder holds is read in the transaction that changes it,
 	// so a change made to a page meanwhile, as a rename, is kept.
 	err := s.inTx(func(tx *sql.Tx) error {
@@ -182,21 +179,15 @@ func (s *Store) DeleteFolder(f Folder) error {
 		if err != nil {
 			return err
 		}
+		// Its files go to the top level too, where the sidebar shows them.
 		for _, file := range files {
-			if file.PageID != "" {
-				file.FolderID, file.UpdatedAt = "", now
-				if err := putFile(tx, file); err != nil {
-					return err
-				}
-				if err := queue(tx, "files", file.ID, FileToRemote(file), "moved file", file.PageID); err != nil {
-					return err
-				}
-				continue
-			}
-			if err := deleteFile(tx, file, now); err != nil {
+			file.FolderID, file.UpdatedAt = "", now
+			if err := putFile(tx, file); err != nil {
 				return err
 			}
-			deleted = append(deleted, file)
+			if err := queue(tx, "files", file.ID, FileToRemote(file), "moved file", file.PageID); err != nil {
+				return err
+			}
 		}
 		// As stored, as in changeFolder.
 		f, err := scanFolder(tx.QueryRow(`SELECT `+folderCols+` FROM folders WHERE id = ?`, f.ID))
@@ -208,9 +199,6 @@ func (s *Store) DeleteFolder(f Folder) error {
 	})
 	if err != nil {
 		return err
-	}
-	for _, file := range deleted {
-		s.removeCopy(file.ID)
 	}
 	s.Notify("outbox", "")
 	s.Notify("folders", "")

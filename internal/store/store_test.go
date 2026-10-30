@@ -706,6 +706,32 @@ func TestCopyPageCopiesFiles(t *testing.T) {
 	}
 }
 
+// Content this app cannot read, as a newer app's, is not taken for an
+// empty page: not returned, copied, or saved over.
+func TestUnreadableContentIsNotAnEmptyPage(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "From a newer app"})
+	newer := `{"document":{"children":[]},"meta":{"v":2}}`
+	if _, err := s.db.Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, newer, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if c := s.Content(p.ID); c != nil {
+		t.Errorf("content %s", c.Encode())
+	}
+	if _, err := s.CopyPage(p.ID, CopyOptions{Title: "Copy"}); !errors.Is(err, doc.ErrNotContent) {
+		t.Errorf("copied: %v", err)
+	}
+	if pages, _ := s.Pages(); len(pages) != 1 {
+		t.Errorf("pages %v", pages)
+	}
+	if _, _, err := s.SaveContent(p.ID, doc.Empty()); !errors.Is(err, doc.ErrNotContent) {
+		t.Errorf("saved: %v", err)
+	}
+	if row, _ := s.ContentRow(p.ID); row.Content != newer {
+		t.Errorf("stored %s", row.Content)
+	}
+}
+
 // A file's name from the server never puts it, or a copy of it, outside
 // the app's files folder.
 func TestFileNamesStayInTheFilesFolder(t *testing.T) {

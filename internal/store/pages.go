@@ -695,9 +695,16 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 		plan.ids[p.ID] = doc.NewRowID()
 	}
 	for i, p := range tree {
-		c := s.Content(p.ID)
-		if c == nil {
+		row, err := s.ContentRow(p.ID)
+		if IsNotFound(err) {
 			return pageCopies{}, fmt.Errorf("%s is not on this device yet", p.DisplayTitle())
+		} else if err != nil {
+			return pageCopies{}, err
+		}
+		// Content that cannot be read is not copied as an empty page.
+		c, err := doc.Decode(row.Content)
+		if err != nil {
+			return pageCopies{}, fmt.Errorf("%s: %w", p.DisplayTitle(), err)
 		}
 		files := map[string]int{} // the page's files, by where plan.files has their copies
 		plan.contents[i] = c.CopyFor(plan.ids)
@@ -945,13 +952,18 @@ func contentRow(q querier, pageID string) (ContentRow, error) {
 }
 
 // Content returns a page's content on this device, or nil when it is not
-// kept here.
+// kept here or cannot be read, as content of a newer app: read as an empty
+// page, it would be copied or saved as one.
 func (s *Store) Content(pageID string) *doc.Content {
 	r, err := s.ContentRow(pageID)
 	if err != nil {
 		return nil
 	}
-	return doc.MustDecode(r.Content)
+	c, err := doc.Decode(r.Content)
+	if err != nil {
+		return nil
+	}
+	return c
 }
 
 func (s *Store) putContent(pageID string, c *doc.Content, at time.Time, keep *ContentRow) error {
@@ -1081,7 +1093,11 @@ func (s *Store) saveContent(pageID string, c *doc.Content, over *string) (*doc.C
 		var previous *doc.Content
 		switch {
 		case err == nil:
-			previous = doc.MustDecode(row.Content)
+			// Content that cannot be read, as a newer app's, is not saved
+			// over as if it were an empty page.
+			if previous, err = doc.Decode(row.Content); err != nil {
+				return fmt.Errorf("stored content: %w", err)
+			}
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
 		}
@@ -1094,8 +1110,8 @@ func (s *Store) saveContent(pageID string, c *doc.Content, over *string) (*doc.C
 			return err
 		}
 		blocks := len(stamped.Blocks)
-		if row.BaseContent != "" {
-			blocks = len(doc.ChangedBlocks(doc.MustDecode(row.BaseContent), stamped))
+		if base, err := doc.Decode(row.BaseContent); row.BaseContent != "" && err == nil {
+			blocks = len(doc.ChangedBlocks(base, stamped))
 		}
 		label := fmt.Sprintf("%d blocks edited", blocks)
 		if blocks == 1 {

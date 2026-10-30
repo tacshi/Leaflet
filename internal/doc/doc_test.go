@@ -664,6 +664,58 @@ func TestInlineMarkdownRoundTripsRuns(t *testing.T) {
 	}
 }
 
+// A format that runs on into a link stays open around it, rather than
+// closing after a space, where its marker would read as text.
+func TestInlineMarkdownFormatIntoLink(t *testing.T) {
+	for _, tc := range []struct {
+		d    Delta
+		want string
+	}{
+		{Delta{{Text: "Read the ", Attrs: Attrs{Italic: true}}, {Text: "docs", Attrs: Attrs{Italic: true, Href: "https://x.dev"}}},
+			"*Read the [docs](https://x.dev)*"},
+		{Delta{{Text: "docs", Attrs: Attrs{Italic: true, Href: "https://x.dev"}}, {Text: " here", Attrs: Attrs{Italic: true}}},
+			"*[docs](https://x.dev) here*"},
+		{Delta{{Text: "a ", Attrs: Attrs{Italic: true}}, {Text: "b", Attrs: Attrs{Italic: true, Bold: true}}},
+			"*a __b__*"},
+	} {
+		md := tc.d.ToMarkdown()
+		if md != tc.want {
+			t.Errorf("%+v wrote %q, want %q", tc.d, md, tc.want)
+		}
+		if got := FromMarkdown(md); !reflect.DeepEqual(got, tc.d.Compact()) {
+			t.Errorf("%q reads back as %+v", md, got)
+		}
+	}
+	// Runs with spaces at their ends, which go outside the markers of a
+	// format ending there. A link's text keeps its spaces, so one ending
+	// in a space, which a format going on past it would have to close
+	// after, is left out.
+	words := []string{"a", "bc", "*", "_", "[", "中文"}
+	hrefs := []string{"https://a.b", "https://c.d"}
+	rng := rand.New(rand.NewPCG(3, 4)) // #nosec G404 -- seeded, for runs a test can repeat.
+	for range 5000 {
+		var d Delta
+		for range 1 + rng.IntN(5) {
+			a := Attrs{Bold: rng.IntN(2) == 0, Italic: rng.IntN(2) == 0, Strike: rng.IntN(4) == 0}
+			if rng.IntN(3) == 0 {
+				a.Href = hrefs[rng.IntN(len(hrefs))]
+			}
+			text := words[rng.IntN(len(words))]
+			if rng.IntN(2) == 0 && a.Href == "" {
+				text += " "
+			}
+			if rng.IntN(3) == 0 {
+				text = " " + text
+			}
+			d = append(d, Run{Text: text, Attrs: a})
+		}
+		md := d.ToMarkdown()
+		if want, got := trimSpans(d.Compact()), FromMarkdown(md); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%+v wrote %q, which reads back as %+v", want, md, got)
+		}
+	}
+}
+
 func TestEscapeBlockStart(t *testing.T) {
 	for in, want := range map[string]string{
 		"# x":       `\# x`,

@@ -168,3 +168,33 @@ func TestPageHTMLTableShortColumns(t *testing.T) {
 		}
 	}
 }
+
+// A table's stored size, from another client or a newer app, may be
+// negative or huge: it shows the cells it has, and never panics or makes
+// room for cells that are not there.
+func TestTableWithBadSize(t *testing.T) {
+	for _, size := range [][2]any{{-1, 2}, {2, -5}, {1e9, 1e9}, {"x", 2}, {3, 3}} {
+		table, err := TableNode([][]string{{"A", "B"}, {"1", "2"}}, "tb")
+		if err != nil {
+			t.Fatal(err)
+		}
+		table.Data["rowsLen"], table.Data["colsLen"] = size[0], size[1]
+		c := &Content{Children: []*Node{table}}
+		_ = PageHTML("T", c, HTMLOptions{})
+		_ = PageMarkdown("T", c, func(string) string { return "" })
+		_ = BlockViews(c)
+		rows, cols := TableSize(table)
+		if rows < 0 || rows > 2 || cols < 0 || cols > 2 {
+			t.Errorf("size %v is %d×%d", size, rows, cols)
+		}
+	}
+	// Cells far apart make room for no more than maxTableCells.
+	table := &Node{ID: "tb", Type: "table", Data: map[string]any{"rowsLen": 1 << 30, "colsLen": 1 << 30}, Children: []*Node{
+		{ID: "a", Type: "table/cell", Data: map[string]any{"rowPosition": 1 << 29, "colPosition": 0}},
+		{ID: "b", Type: "table/cell", Data: map[string]any{"rowPosition": 0, "colPosition": 1 << 29}},
+	}}
+	if rows, cols := TableSize(table); rows*cols > maxTableCells {
+		t.Errorf("%d×%d cells", rows, cols)
+	}
+	_ = PageHTML("T", &Content{Children: []*Node{table}}, HTMLOptions{})
+}

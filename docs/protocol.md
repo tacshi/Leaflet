@@ -143,6 +143,13 @@ types take children); the invoking user can edit the page (agents act with the
 invoking user's permissions). An invalid call returns `{ "error": "..." }` to
 the model and changes nothing.
 
+`list_pages` and `read_other_page` reach only the pages of the current page's
+space. Once a run has called either, an `image`, `video` or `link_preview`
+block it writes may load only a URL that was on the current page as the run
+began or is in the instruction: the app loads those by itself, and a URL
+seen only on another page, which someone else may have put there, could
+carry what the run read.
+
 ## 3. Ops
 
 Each applied tool call produces one or more ops. Ops are what the server
@@ -229,8 +236,10 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
   copy, which runs once the row with `deleted_at` has gone up: the object
   in the `files` bucket through Storage's `DELETE /storage/v1/object/files`
   (an object already gone counts as removed), or the blob in iCloud Drive
-  once a batch has the deletion. An upload still waiting is dropped. A
-  device that pulls a deleted file removes its copy in its data folder.
+  once a batch has the deletion. An upload still waiting is dropped. The
+  removal waits while a copy of the file, made by duplicating its page,
+  still waits to go up from it. A device that pulls a deleted file removes
+  its copy in its data folder.
 - Sharing a page invites: `share_page` adds a `page_permissions` row with
   `accepted_at` null for the account that has confirmed the address, or,
   when none has, holds the invite for the address (`page_email_invites`)
@@ -280,16 +289,27 @@ newest 50 named (`manual`) ones.
 Moving a page under a new parent requires edit access to both, and anyone
 but the space owner moves a page only between parents that the same shares
 reach (`forbidden_move` otherwise), so a move never shows a page to people
-it was not shared with. A recording stays on its page: an update that
-changes `recordings.page_id` is refused. A `files` row is its space owner's
-to write; its `folder_id` is a folder of its space (`folder_in_other_space`
-otherwise), and its `page_id`, as it is set, a page of its space or one
-its writer can edit, as an editor's upload to a page shared with them is
-(`forbidden_file_page` otherwise). A comment with `author_kind` `guest`,
-which a public link's visitor posts through the owner's device, is
-inserted only by the page's owner (`guest_comment_not_owner` otherwise).
-A comment is emptied as it is deleted: once `deleted_at` is set, `body` is
-empty, `quote` null and `mentions` empty.
+it was not shared with. A move that brings a page under shares its old
+parent was not under moves `updated_at` on for the pages under it and for
+the content, comments, files and recordings of all of them, so the pulls
+of the people it now reaches bring them. A recording stays on its page: an
+update that changes `recordings.page_id` is refused, and its audio is
+written only by its recorder while they can edit its page. A `files` row is
+its space owner's to add; they change or delete one on a page only while
+they can edit that page, and the page's owner may delete one on their page
+(set its `deleted_at`, nothing else: `forbidden_file_change` otherwise, and
+then remove its object). Its `folder_id` is a folder of its space
+(`folder_in_other_space` otherwise), and its `page_id`, as it is set, a
+page of its space or one its writer can edit, as an editor's upload to a
+page shared with them is (`forbidden_file_page` otherwise). A comment with
+`author_kind` `guest`, which a public link's visitor posts through the
+owner's device, is inserted only by the page's owner
+(`guest_comment_not_owner` otherwise). A comment is deleted only by setting
+`deleted_at`, never as a row, so its replies stay and the deletion reaches
+every device; once it is set, `body` is empty, `quote` null and `mentions`
+empty. A profile is read by its owner and by those who share a page with
+them: the space's owner and someone shared one of its pages, or two people
+shared the same page or a page and one inside it.
 `pages.is_template` marks a template and every subpage of one (a subpage
 made under a template is one too); templates stay out of the page list,
 search and `list_pages`. `pages.tags` is a page's tags (`text[]`, at most 50,

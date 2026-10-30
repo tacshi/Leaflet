@@ -731,7 +731,7 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 	e.deleteSelection()
 	n := e.node(e.focus.ID)
 	if n == nil || !n.IsText() {
-		e.InsertBlocks(blocks...)
+		e.insertBlocks(blocks...)
 		return
 	}
 	d := n.Delta()

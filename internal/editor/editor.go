@@ -123,7 +123,10 @@ type Editor struct {
 	markStep   bool
 	markRedo   []snapshot
 	undo, redo []snapshot
-	lastEdit   time.Time
+	// runStep is the page the step of undo an agent run's ops began with
+	// keeps, to tell that step from those made since.
+	runStep  *doc.Content
+	lastEdit time.Time
 	// coalescing is set while typing joins the undo step open, which
 	// began in block coalesceIn.
 	coalescing bool
@@ -592,10 +595,18 @@ func (e *Editor) ApplyOps(ops []doc.Op) error {
 }
 
 // ApplyOp applies one op of an agent run as it streams in. The first op of
-// a run starts an undo step that the rest join.
+// a run starts an undo step that the rest join, while it is the step on
+// top: past an edit of the user's since, the op is a change from outside,
+// which undoing that edit keeps.
 func (e *Editor) ApplyOp(o doc.Op, newStep bool) error {
 	if newStep {
 		e.pushUndo(false)
+		e.coalescing = false
+		e.runStep = e.undo[len(e.undo)-1].content
+	} else if n := len(e.undo); n == 0 || e.undo[n-1].content != e.runStep {
+		before := e.Content.Copy()
+		mark(&e.undo, before)
+		mark(&e.redo, before)
 		e.coalescing = false
 	}
 	err := e.Content.Apply(o)

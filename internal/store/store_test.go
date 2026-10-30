@@ -810,6 +810,52 @@ func TestSearchTextAsWritten(t *testing.T) {
 	}
 }
 
+// Deleted pages, which stay on the device, do not use up the limit: their
+// text, recordings and comments matching never hide a page's.
+func TestSearchPastDeletedPages(t *testing.T) {
+	s := open(t)
+	body := func(text string) *doc.Content {
+		n := &doc.Node{Type: "paragraph"}
+		n.SetDelta(doc.Delta{{Text: text}})
+		return doc.FromBlocks([]*doc.Node{n})
+	}
+	page := func(title string) Page {
+		p, err := s.CreatePage(NewPageOptions{Title: title, Content: body("budget notes")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.AddComment(p.ID, "b", "the budget", "", "", "", ""); err != nil {
+			t.Fatal(err)
+		}
+		now := time.Now()
+		if err := s.PutRecording(Recording{ID: doc.NewRowID(), PageID: p.ID, BlockID: "r", Status: "ready",
+			Transcript: []Segment{{Text: "the budget"}}, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	for range 20 {
+		if _, err := s.DeletePage(page("Old").ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	live := page("Live")
+	hits, err := s.Search("budget", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, h := range hits {
+		if h.PageID != live.ID {
+			t.Errorf("found deleted page %+v", h)
+		}
+		kinds = append(kinds, h.Kind)
+	}
+	if strings.Join(kinds, ",") != "page,recording,comment" {
+		t.Errorf("found %v, want the page, its recording and its comment", kinds)
+	}
+}
+
 func TestSearchFindsTemplates(t *testing.T) {
 	s := open(t)
 	body := func(text string) *doc.Content {
@@ -1441,6 +1487,34 @@ func TestAPulledDeletionRemovesTheCopy(t *testing.T) {
 	}
 	if _, err := os.Stat(local); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("the copy stayed: %v", err)
+	}
+}
+
+// A file deleted before its download lands keeps no copy here, which
+// nothing would remove again.
+func TestADownloadOfADeletedFileKeepsNoCopy(t *testing.T) {
+	s := open(t)
+	id := doc.NewRowID()
+	row := map[string]any{"id": id, "space_id": s.Session().SpaceID, "name": "plan.pdf", "storage_path": "space/" + id + "/plan.pdf",
+		"created_at": "2026-10-01T00:00:00Z", "updated_at": "2026-10-01T00:00:00Z"}
+	if err := s.PutRemoteFile(row); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.File(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DownloadedFile(id, []byte("%PDF")); !IsNotFound(err) {
+		t.Errorf("downloaded a deleted file: %v", err)
+	}
+	if f, _ := s.File(id); f.LocalPath != "" {
+		t.Errorf("the deleted file has a copy at %s", f.LocalPath)
+	}
+	if _, err := os.Stat(filepath.Join(s.Dir, "files", id)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the copy's folder is there: %v", err)
 	}
 }
 

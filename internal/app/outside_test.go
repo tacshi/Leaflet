@@ -335,6 +335,38 @@ func TestLeavingAPageWhoseTitleCannotSave(t *testing.T) {
 	}
 }
 
+// A title typed and not yet saved, its field left before the rename's
+// wait is over, stays as other changes reload the pages; one renamed
+// elsewhere, with nothing typed, shows the new title.
+func TestReloadKeepsATitleNotYetSaved(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.page.title = "Typed title"
+	a.reload(store.Change{Table: "page_contents", PageID: p.ID})
+	if a.page.title != "Typed title" {
+		t.Fatalf("the title went back to %q", a.page.title)
+	}
+	if !a.saveTitle() {
+		t.Fatal("the title did not save")
+	}
+	if q, err := a.st.Page(p.ID); err != nil || q.Title != "Typed title" {
+		t.Fatalf("stored %q, %v", q.Title, err)
+	}
+	a.reload(store.Change{Table: "pages"})
+	if err := a.st.RenamePage(p.ID, "Renamed elsewhere"); err != nil {
+		t.Fatal(err)
+	}
+	a.reload(store.Change{Table: "pages"})
+	if a.page.title != "Renamed elsewhere" {
+		t.Errorf("the title shows %q", a.page.title)
+	}
+}
+
 // The open page deleted on another device closes, with what was typed and
 // not yet saved stored first, for restoring it to bring back.
 func TestPageDeletedElsewhereKeepsWhatWasTyped(t *testing.T) {

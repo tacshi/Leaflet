@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"regexp"
 	"strings"
 
@@ -120,6 +119,9 @@ type ToolContext struct {
 	ReadOtherPage func(id string) map[string]any
 	// Transcript is a recording's transcript as text, "" when there is none.
 	Transcript func(recordingID string) string
+	// Request is what the user asked the run, whose URLs a block may load
+	// as this page's may (fetchedURLs).
+	Request string
 }
 
 // PageTools is the ToolContext of a page in the store: its subpages,
@@ -174,11 +176,15 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 		},
 	}
 	if crossPage {
+		// The other pages are those of this page's space, as the agent
+		// function has them: a page someone else shared is theirs, and
+		// what they wrote in it, its URLs among them, is not the user's.
+		here, _ := st.Page(pageID)
 		tc.ListPages = func() []map[string]any {
 			pages, _ := st.Pages()
 			out := []map[string]any{}
 			for _, p := range pages {
-				if p.ID != pageID {
+				if p.ID != pageID && p.SpaceID == here.SpaceID {
 					out = append(out, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "parent_id": p.ParentID})
 				}
 			}
@@ -187,7 +193,7 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 		tc.ReadOtherPage = func(id string) map[string]any {
 			p, err := st.Page(id)
 			c := st.Content(id)
-			if err != nil || c == nil || !p.DeletedAt.IsZero() {
+			if err != nil || c == nil || !p.DeletedAt.IsZero() || p.SpaceID != here.SpaceID {
 				return nil
 			}
 			return map[string]any{"page": map[string]any{"id": id, "title": p.DisplayTitle()}, "blocks": tc.Views(c)}
@@ -226,14 +232,12 @@ type Executor struct {
 	OnOp  func(op doc.Op, summary string)
 	Ops   []doc.Op
 	Edits []Edit
-	// seen are the URLs the agent has seen since it first read another
-	// page, nil before (fetchedURLs).
-	seen map[string]bool
-	// start are the URLs on this page when the run began, nil before its
-	// first call: what the run wrote since could carry what it read.
-	start map[string]bool
-	// created are the pages this run made, whose URLs are its own too.
-	created map[string]bool
+	// allowed are the URLs a block may load once the run reads beyond
+	// this page (fetchedURLs): those on it when the run began, and in the
+	// user's request; nil before the run's first call.
+	allowed map[string]bool
+	// armed is a run that has read beyond this page.
+	armed bool
 }
 
 // fetchedURLs are the URLs of the blocks the app loads by itself, as it
@@ -241,15 +245,17 @@ type Executor struct {
 // another of the user's pages could write what it read into one, such as
 // https://example.com/x.png?notes=…, and the app would send it to that
 // server without anyone clicking. So once a run reads another page, or
-// lists them, a block it writes may load only a URL it saw: one on this
-// page as the run began, or on a page it read that it did not make. Links
-// in text are not loaded, so they stay free.
+// lists them, a block it writes may load only a URL the user gave it: one
+// on this page as the run began, or in their request. Not one on a page
+// it read, which someone else may have written there for it to use, nor
+// one the run wrote, which could carry what it read. Links in text are
+// not loaded, so they stay free.
 var fetchedURLs = map[string]bool{"image": true, "video": true, "link_preview": true}
 
 // urlRe finds the URLs in text the agent read.
 var urlRe = regexp.MustCompile(`https?://[^\s<>"'()\[\]]+`)
 
-// see adds the URLs in v, what the agent read, to set.
+// see adds the URLs in v to set.
 func see(set map[string]bool, v any) {
 	switch v := v.(type) {
 	case string:
@@ -274,31 +280,22 @@ func see(set map[string]bool, v any) {
 	}
 }
 
-// arm starts checking URLs, as the agent first reads beyond this page: it
-// may then use those on this page as the run found it.
-func (x *Executor) arm() {
-	if x.seen == nil {
-		x.seen = map[string]bool{}
-		maps.Copy(x.seen, x.start)
-	}
-}
-
-// checkURLs refuses blocks that would load a URL the agent did not see,
-// once it has read another page.
+// checkURLs refuses blocks that would load a URL the user did not give
+// the run, once it has read beyond this page.
 func (x *Executor) checkURLs(nodes []*doc.Node) error {
-	if x.seen == nil {
+	if !x.armed {
 		return nil
 	}
 	var bad string
 	for _, n := range nodes {
 		walk(n, func(k *doc.Node) {
-			if u := k.Str("url"); fetchedURLs[k.Type] && bad == "" && !x.seen[u] {
+			if u := k.Str("url"); fetchedURLs[k.Type] && bad == "" && !x.allowed[u] {
 				bad = u
 			}
 		})
 	}
 	if bad != "" {
-		return terr("After reading another page, an image, video or link card may only use a URL from this page or a page you read, which %s is not: the app loads it by itself. Link to it in text instead.", bad)
+		return terr("After reading another page, an image, video or link card may only use a URL that was on this page before you began or is in the user's request, which %s is not: the app loads it by itself. Link to it in text instead.", bad)
 	}
 	return nil
 }
@@ -337,9 +334,10 @@ func terr(format string, args ...any) error {
 }
 
 func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, error) {
-	if x.start == nil && (x.Ctx.ListPages != nil || x.Ctx.ReadOtherPage != nil) {
-		x.start = map[string]bool{}
-		see(x.start, doc.BlockViews(x.Ctx.Content))
+	if x.allowed == nil && (x.Ctx.ListPages != nil || x.Ctx.ReadOtherPage != nil) {
+		x.allowed = map[string]bool{}
+		see(x.allowed, doc.BlockViews(x.Ctx.Content))
+		see(x.allowed, x.Ctx.Request)
 	}
 	switch name {
 	case "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_subpage":
@@ -365,7 +363,7 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 			return nil, terr("Reading other pages is off.")
 		}
 		// The titles it lists are read too.
-		x.arm()
+		x.armed = true
 		return map[string]any{"pages": x.Ctx.ListPages()}, nil
 	case "read_other_page":
 		if x.Ctx.ReadOtherPage == nil {
@@ -379,12 +377,7 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		if p == nil {
 			return nil, terr("No page %s.", id)
 		}
-		x.arm()
-		// This page and those the run made hold what it wrote, not what
-		// was there: their URLs stay unseen.
-		if id != x.Ctx.PageID && !x.created[id] {
-			see(x.seen, p)
-		}
+		x.armed = true
 		return p, nil
 	}
 	return nil, terr("Unknown tool %q.", name)
@@ -645,10 +638,6 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if x.created == nil {
-		x.created = map[string]bool{}
-	}
-	x.created[id] = true
 	op := doc.Op{Op: "create_page", Page: &doc.NewPage{ID: id, ParentID: x.Ctx.PageID, Title: title}}
 	summary := "Created subpage “" + title + "”"
 	x.Ops = append(x.Ops, op)

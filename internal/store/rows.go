@@ -351,10 +351,11 @@ func fileName(name string) string {
 }
 
 // DownloadedFile keeps a file downloaded from the server at path, which
-// is this device's alone.
+// is this device's alone. A file deleted or removed, before or while it
+// came, keeps no copy: nothing would remove it again.
 func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
 	var name string
-	if err := s.db.QueryRow(`SELECT name FROM files WHERE id = ?`, id).Scan(&name); err != nil {
+	if err := s.db.QueryRow(`SELECT name FROM files WHERE id = ? AND deleted_at IS NULL`, id).Scan(&name); err != nil {
 		return "", err
 	}
 	dir := filepath.Join(s.Dir, "files", id)
@@ -365,7 +366,16 @@ func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
 	if err := os.WriteFile(local, data, 0o600); err != nil {
 		return "", err
 	}
-	if _, err := s.db.Exec(`UPDATE files SET local_path = ? WHERE id = ?`, local, id); err != nil {
+	res, err := s.db.Exec(`UPDATE files SET local_path = ? WHERE id = ? AND deleted_at IS NULL`, local, id)
+	if err == nil {
+		var n int64
+		if n, err = res.RowsAffected(); err == nil && n == 0 {
+			err = errNotFound
+		}
+	}
+	if err != nil {
+		_ = os.Remove(local)
+		_ = os.Remove(dir) // only once it is empty
 		return "", err
 	}
 	s.Notify("files", "")

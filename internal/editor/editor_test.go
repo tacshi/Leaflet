@@ -1262,6 +1262,48 @@ func TestNoUndoStepsThatChangeNothing(t *testing.T) {
 	}
 }
 
+// Lines pasted on a block selected whole are one step of undo.
+func TestPasteOnABlockIsOneUndoStep(t *testing.T) {
+	div := &doc.Node{ID: "D", Type: "divider"}
+	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), div, para("B", "b")}), &fakeHost{})
+	e.PlaceCaret("D", 0)
+	e.paste("x\ny")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "divider:", "paragraph:x", "paragraph:y", "paragraph:b"}) {
+		t.Fatalf("pasted %v", got)
+	}
+	e.Undo()
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "divider:", "paragraph:b"}) || e.CanUndo() {
+		t.Errorf("after undo %v, undo %v", got, e.CanUndo())
+	}
+}
+
+// An agent's op that streams in after the user's edit is no part of that
+// edit: undoing it keeps the op, and typing on after the op is a step of
+// its own. Before any edit, the ops join the run's step, and undoing that
+// takes them back.
+func TestAgentOpsAfterAnEditOutliveItsUndo(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("Hello")
+	e.BreakUndo()
+	first := e.Content.Children[0].ID
+	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("A", "agent A")), true)
+	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("B", "agent B")), false)
+	e.PlaceCaret(first, -1)
+	tt.Type("!")
+	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("C", "agent C")), false)
+	tt.Type("?")
+	for _, want := range [][]string{
+		{"paragraph:Hello!", "paragraph:agent A", "paragraph:agent B", "paragraph:agent C"},
+		{"paragraph:Hello", "paragraph:agent A", "paragraph:agent B", "paragraph:agent C"},
+		{"paragraph:Hello", "paragraph:agent C"},
+	} {
+		e.Undo()
+		if got := texts(e); !slices.Equal(got, want) {
+			t.Errorf("after undo %v, want %v", got, want)
+		}
+	}
+}
+
 // A block selected whole, without text, copies and cuts as itself.
 func TestCopyAndCutABlockSelectedWhole(t *testing.T) {
 	e, tt, _ := setup(t)

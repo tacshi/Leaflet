@@ -414,7 +414,7 @@ async function runJob(
           comments: [],
         };
       },
-    }, { canEdit, crossPage, pageId: page.id, author: agentName });
+    }, { canEdit, crossPage, request: instruction, author: agentName });
 
     // --- messages -------------------------------------------------------
     const promptContext = {

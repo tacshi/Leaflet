@@ -474,6 +474,37 @@ func TestCrossPageOnlyOnTheUsersOwnPages(t *testing.T) {
 	}
 }
 
+// The other pages a local agent reads are those of the page's space, as
+// the agent function's: one someone else shared with the user is theirs,
+// and its URLs would pass for ones the user's pages have.
+func TestCrossPageOnlyInThePagesSpace(t *testing.T) {
+	st := openStore(t)
+	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := st.CreatePage(store.NewPageOptions{Title: "Theirs", SpaceID: "someone-else",
+		Content: doc.FromBlocks([]*doc.Node{{ID: "i1", Type: "image", Data: map[string]any{"url": "https://evil.example/x.png"}}})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := &Executor{Ctx: NewHub(st, nil, nil).toolContext(mine.ID, "Mine", "Test", page(), store.Settings{AgentsReadOtherPages: true})}
+	out := x.Call("list_pages", nil)
+	if pages, _ := out["pages"].([]map[string]any); len(pages) != 1 || pages[0]["id"] != other.ID {
+		t.Errorf("listed %v", out)
+	}
+	if out := x.Call("read_other_page", map[string]any{"page_id": theirs.ID}); out["error"] == nil {
+		t.Errorf("read a page of another space: %v", out)
+	}
+	if out := x.Call("read_other_page", map[string]any{"page_id": other.ID}); out["error"] != nil {
+		t.Errorf("read_other_page: %v", out)
+	}
+}
+
 // A page runs one agent at a time: a run asked for while another works on
 // the page fails at once, and the first keeps the page's running state.
 func TestOneRunAtATimeOnAPage(t *testing.T) {

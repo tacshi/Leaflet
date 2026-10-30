@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"math"
 	"math/big"
 	"time"
 )
@@ -128,22 +129,28 @@ func AsInt(v any, def int) int {
 	return def
 }
 
-// AsFloat reads a JSON number as a float64.
+// AsFloat reads a JSON number as a float64. Only a finite one is: JSON
+// has no NaN or infinity, so data holding one could not be stored.
 func AsFloat(v any) (float64, bool) {
+	var f float64
 	switch x := v.(type) {
 	case float64:
-		return x, true
+		f = x
 	case int:
-		return float64(x), true
+		f = float64(x)
 	case int64:
-		return float64(x), true
+		f = float64(x)
 	case string:
-		var f float64
-		if _, err := fmt.Sscan(x, &f); err == nil {
-			return f, true
+		if _, err := fmt.Sscan(x, &f); err != nil {
+			return 0, false
 		}
+	default:
+		return 0, false
 	}
-	return 0, false
+	if math.IsNaN(f) || math.IsInf(f, 0) {
+		return 0, false
+	}
+	return f, true
 }
 
 const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"

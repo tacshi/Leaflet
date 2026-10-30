@@ -211,6 +211,9 @@ type pageState struct {
 	editor  *editor.Editor
 	title   string
 	titleIn ui.Handle
+	// savedTitle is the title as stored when title last was: a title that
+	// differs from it was typed and is not saved yet, which a reload keeps.
+	savedTitle string
 	// focusTitle asks the title to take the focus, for this many more
 	// frames until it has it: a native menu closing, or the page it
 	// replaces, can take it back in the frames between.
@@ -525,8 +528,15 @@ func (a *App) reload(ch store.Change) {
 				}
 				a.discardPage()
 				a.route = Route{Kind: "home"}
-			} else if !a.page.titleIn.Focused(nil) && p.Title != a.page.title {
-				a.page.title = p.Title
+			} else if ps := a.page; p.Title != ps.savedTitle {
+				switch {
+				case ps.title != ps.savedTitle:
+					// Typed and not saved yet: it stays, to be saved over
+					// the new one.
+					ps.savedTitle = p.Title
+				case !ps.titleIn.Focused(nil):
+					ps.title, ps.savedTitle = p.Title, p.Title
+				}
 			}
 		}
 	}
@@ -824,7 +834,7 @@ func (a *App) loadPage(id string) {
 		p, err := a.st.Page(id)
 		return p.DisplayTitle(), err == nil
 	})
-	ps := &pageState{id: id, title: p.Title, loaded: content.Copy(), stored: stored, row: row.Content, unreadable: unreadable, tinted: map[string]bool{}}
+	ps := &pageState{id: id, title: p.Title, savedTitle: p.Title, loaded: content.Copy(), stored: stored, row: row.Content, unreadable: unreadable, tinted: map[string]bool{}}
 	ed := editor.New(content, &host{a: a})
 	ed.Size = float32(a.settings.TextSize)
 	ed.ReadOnly = !a.canEdit(id) || unreadable
@@ -965,6 +975,9 @@ func (a *App) saveTitle() bool {
 			a.toast(locales.AppErrorRename(err.Error()))
 			return false
 		}
+		ps.savedTitle = ps.title
+	} else if p != nil && p.Title == ps.title {
+		ps.savedTitle = ps.title
 	}
 	return true
 }

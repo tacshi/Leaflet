@@ -1008,10 +1008,11 @@ func (s *Service) fetchCopied(ctx context.Context, payload map[string]any) (stri
 
 // removeStored removes a deleted file's object from Storage, once the
 // server has the row that says it is deleted: until then the entry waits,
-// as the file is still there for the other devices. An object the server
-// does not have is gone already.
+// as the file is still there for the other devices, and while a copy of it
+// waits to go up from it (copyWaits). An object the server does not have
+// is gone already.
 func (s *Service) removeStored(ctx context.Context, payload map[string]any) (bool, error) {
-	if s.st.HasPending("files", store.S(payload, "file_id")) {
+	if s.st.HasPending("files", store.S(payload, "file_id")) || s.copyWaits(store.S(payload, "bucket"), store.S(payload, "path")) {
 		return false, nil
 	}
 	err := s.be.Remove(ctx, store.S(payload, "bucket"), store.S(payload, "path"))
@@ -1019,6 +1020,27 @@ func (s *Service) removeStored(ctx context.Context, payload map[string]any) (boo
 		return true, nil
 	}
 	return err == nil, err
+}
+
+// copyWaits reports whether a copy's upload still waits to read a deleted
+// file's stored contents (fetchCopied): until it has, they stay, as the
+// copy would go up with nothing in it. One it cannot tell of waits too.
+func (s *Service) copyWaits(bucket, path string) bool {
+	entries, err := s.st.Pending()
+	if err != nil {
+		return true
+	}
+	for _, e := range entries {
+		if e.Entity != "storage" {
+			continue
+		}
+		var payload map[string]any
+		if json.Unmarshal([]byte(e.Payload), &payload) == nil &&
+			store.S(payload, "bucket") == bucket && store.S(payload, "from_path") == path {
+			return true
+		}
+	}
+	return false
 }
 
 // cursor is where a table's pull resumes: the last row stored here, by
@@ -1486,9 +1508,9 @@ func (s *Service) pullContents(ctx context.Context) error {
 		s.mu.Unlock()
 		if open || allOffline || p.KeepOffline {
 			_, err := s.refreshRemote(ctx, id)
-			if errors.Is(err, errServerUnreadable) {
-				// The page keeps its content here, and waits for one it
-				// can read; the other pages' content still comes.
+			if errors.Is(err, errServerUnreadable) || errors.Is(err, errUnreadable) {
+				// The page keeps its content here, and waits until both
+				// copies can be read; the other pages' content still comes.
 				log.Printf("pull %s: %v", id, err)
 				waiting[id] = true
 				return nil

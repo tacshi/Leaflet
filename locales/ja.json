@@ -540,6 +540,7 @@
   "recErrSonioxTimeout": "Soniox に時間内に接続できませんでした。",
   "recErrNoWords": "音声が聞き取れませんでした。マイクを確認し、テスト中に話してください。",
   "recErrSonioxSaved": "ここでは Soniox は録音中に文字起こしします。保存された音声には Leaflet サーバーが必要です。",
+  "recErrTranscribing": "この録音は文字起こし中です。",
   "recErrAudioMissing": "音声はこのデバイスにありません。",
   "recErrSignIn": "クラウドで文字起こしするにはサインインしてください。",
   "recErrEndpoint": "文字起こしに失敗しました：{status} {details}",

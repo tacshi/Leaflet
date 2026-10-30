@@ -713,6 +713,11 @@ func (e *Editor) InsertBlocks(nodes ...*doc.Node) {
 		return
 	}
 	e.pushUndo(false)
+	e.insertBlocks(nodes...)
+}
+
+// insertBlocks is InsertBlocks in the step of undo open, as a paste's.
+func (e *Editor) insertBlocks(nodes ...*doc.Node) {
 	n := e.node(e.focus.ID)
 	pos := doc.Position{At: "end"}
 	replace := false

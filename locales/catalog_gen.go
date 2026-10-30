@@ -7835,6 +7835,20 @@ func (msgs Messages) RecErrSonioxSaved() string {
 	return Catalog.Format(msgs.locale, "recErrSonioxSaved", nil)
 }
 
+// RecErrTranscribing says "This recording is being transcribed."
+// in the language the app shows.
+//
+// Error when transcribing again a recording still being transcribed.
+func RecErrTranscribing() string { return In(i18n.Locale()).RecErrTranscribing() }
+
+// RecErrTranscribing says "This recording is being transcribed."
+// in the language of msgs.
+//
+// Error when transcribing again a recording still being transcribed.
+func (msgs Messages) RecErrTranscribing() string {
+	return Catalog.Format(msgs.locale, "recErrTranscribing", nil)
+}
+
 // RecErrAudioMissing says "The audio is not on this device."
 // in the language the app shows.
 //

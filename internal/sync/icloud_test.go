@@ -1325,3 +1325,64 @@ func TestICloudCopyOfAFileNotDownloadedWaits(t *testing.T) {
 		t.Errorf("file %q, %v", data, err)
 	}
 }
+
+// A file deleted while a copy of it waits to go up from it stays in the
+// folder until the copy has gone up.
+func TestICloudDeletedFileStaysForACopyThatWaits(t *testing.T) {
+	old := uploadFetchWait
+	uploadFetchWait = 50 * time.Millisecond
+	t.Cleanup(func() { uploadFetchWait = old })
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := a.page("Attachments")
+	f, err := a.st.AddFile(src, "", p.ID, "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.st.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{
+		{ID: "f", Type: "file", Data: map[string]any{"name": f.Name, "file_id": f.ID}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if f, err = b.st.File(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	rel, _ := blobPath("files", f.StoragePath)
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	hidden := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".icloud")
+	if err := os.Rename(path, hidden); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := b.st.CopyPage(p.ID, store.CopyOptions{Title: "Copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileID := b.st.Content(cp.ID).Children[0].Str("file_id")
+	b.sync()
+	if err := b.st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	if !b.st.HasPending("storage", "files/"+fileID) || !b.svc.ICloud.Exists(rel) {
+		t.Fatal("the file went before its copy went up")
+	}
+	if err := os.Rename(hidden, path); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	cf, err := b.st.File(fileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := b.svc.Fetch(context.Background(), "files", cf.StoragePath); err != nil || string(data) != "hello" {
+		t.Errorf("the copy has %q, %v", data, err)
+	}
+	if b.svc.ICloud.Exists(rel) || b.st.PendingCount() != 0 {
+		t.Errorf("the deleted file stayed; %d waiting", b.st.PendingCount())
+	}
+}

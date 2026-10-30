@@ -258,7 +258,8 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					if len(rec.Transcript) == 0 {
 						label = locales.RecTranscribe()
 					}
-					if m.Item(label).Disabled(ro).Chosen() {
+					// Not while a transcription runs, which the new one would race.
+					if m.Item(label).Disabled(ro || a.rec.Transcribing[id]).Chosen() {
 						if err := a.rec.Retranscribe(id, a.settings.Stt, a.online && !a.settings.WorkOffline); err != nil {
 							a.toast(err.Error())
 						}

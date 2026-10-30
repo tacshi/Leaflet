@@ -1,6 +1,27 @@
 package doc
 
-import "testing"
+import (
+	"encoding/json"
+	"math"
+	"testing"
+)
+
+// A chart's value of NaN or infinity, as an agent can write "NaN" or the
+// chart editor read "inf", is no value: JSON has none, and the page
+// holding it could not be saved.
+func TestChartValuesAreFinite(t *testing.T) {
+	for _, v := range []any{"NaN", "inf", "-Inf", math.NaN(), math.Inf(1)} {
+		n, err := SpecToNode(map[string]any{"type": "chart", "chart": map[string]any{
+			"labels": []any{"a", "b"}, "series": []any{map[string]any{"name": "s", "values": []any{v, 2.0}}},
+		}}, "", "Agent")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := json.Marshal(FromBlocks([]*Node{n})); err != nil {
+			t.Errorf("%v: %v", v, err)
+		}
+	}
+}
 
 // Nested items as deep or as many as an agent likes are refused, not
 // recursed into without end.

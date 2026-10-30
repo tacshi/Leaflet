@@ -677,20 +677,79 @@ func (a *App) commentText(c *ui.Context, body string) ui.Element {
 }
 
 // markMentions marks each @ of one of names in md, as an @ menu writes
-// them, outside code, where they stay as written.
+// them, outside code, where they stay as written: fenced code blocks,
+// indented ones, and code spans.
 func markMentions(md string, names []string) string {
 	names = slices.Clone(names)
 	slices.SortFunc(names, func(x, y string) int { return len(y) - len(x) })
-	var b strings.Builder
-	code := false
-	for i := 0; i < len(md); i++ {
-		ch := md[i]
-		if ch == '`' {
-			code = !code
+	var b, para strings.Builder
+	// A paragraph's lines are marked together, for a code span may go
+	// over more than one of them.
+	flush := func() {
+		b.WriteString(markInline(para.String(), names))
+		para.Reset()
+	}
+	fence := ""
+	// inPara is set while a paragraph goes on: an indented line then
+	// goes on with it, not starting a code block.
+	inPara := false
+	for _, line := range strings.SplitAfter(md, "\n") {
+		text := strings.TrimRight(line, "\r\n")
+		switch {
+		case fence != "":
+			b.WriteString(line)
+			if closesFence(text, fence) {
+				fence = ""
+			}
+			continue
+		case opensFence(text) != "":
+			flush()
+			fence, inPara = opensFence(text), false
+			b.WriteString(line)
+			continue
+		case strings.TrimSpace(text) == "":
+			para.WriteString(line)
+			flush()
+			inPara = false
+			continue
+		case !inPara && (strings.HasPrefix(text, "    ") || strings.HasPrefix(text, "\t")):
+			flush()
+			b.WriteString(line)
+			continue
 		}
-		if ch == '@' && !code && (i == 0 || md[i-1] == ' ' || md[i-1] == '\n' || md[i-1] == '\t') {
-			if n := mentionLen(md[i+1:], names); n > 0 {
-				b.WriteString("<mark><b>" + md[i:i+1+n] + "</b></mark>")
+		para.WriteString(line)
+		inPara = true
+	}
+	flush()
+	return b.String()
+}
+
+// markInline marks the mentions in a paragraph, outside its code spans; a
+// backslash keeps the character after it, a backtick too, from starting
+// one.
+func markInline(s string, names []string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		switch {
+		case ch == '\\' && i+1 < len(s):
+			b.WriteString(s[i : i+2])
+			i++
+			continue
+		case ch == '`':
+			// A span opens with a run of backticks and closes with a run
+			// as long; one that never closes is backticks as written.
+			n := backticks(s[i:])
+			end := i + n
+			if j := closingRun(s[end:], n); j >= 0 {
+				end += j + n
+			}
+			b.WriteString(s[i:end])
+			i = end - 1
+			continue
+		case ch == '@' && (i == 0 || s[i-1] == ' ' || s[i-1] == '\n' || s[i-1] == '\t'):
+			if n := mentionLen(s[i+1:], names); n > 0 {
+				b.WriteString("<mark><b>" + s[i:i+1+n] + "</b></mark>")
 				i += n
 				continue
 			}
@@ -698,6 +757,65 @@ func markMentions(md string, names []string) string {
 		b.WriteByte(ch)
 	}
 	return b.String()
+}
+
+// backticks is how many backticks s starts with.
+func backticks(s string) int {
+	n := 0
+	for n < len(s) && s[n] == '`' {
+		n++
+	}
+	return n
+}
+
+// closingRun is where in s a run of exactly n backticks starts, or -1.
+func closingRun(s string, n int) int {
+	for j := 0; j < len(s); {
+		if m := backticks(s[j:]); m > 0 {
+			if m == n {
+				return j
+			}
+			j += m
+			continue
+		}
+		j++
+	}
+	return -1
+}
+
+// opensFence is the fence a line opens a fenced code block with, as ```
+// or ~~~, or "".
+func opensFence(line string) string {
+	line = trimIndent(line)
+	for _, ch := range []byte{'`', '~'} {
+		n := 0
+		for n < len(line) && line[n] == ch {
+			n++
+		}
+		if n >= 3 {
+			return line[:n]
+		}
+	}
+	return ""
+}
+
+// closesFence reports whether a line closes the code block fence opened:
+// a run of its character at least as long, alone on the line.
+func closesFence(line, fence string) bool {
+	line = trimIndent(line)
+	n := 0
+	for n < len(line) && line[n] == fence[0] {
+		n++
+	}
+	return n >= len(fence) && strings.TrimSpace(line[n:]) == ""
+}
+
+// trimIndent drops the up to three spaces a fence may be indented by.
+func trimIndent(line string) string {
+	for i := 0; i < 3 && strings.HasPrefix(line, " "); i++ {
+		line = line[1:]
+	}
+	return line
 }
 
 // mentionLen is how long the name of names that rest starts with is, a

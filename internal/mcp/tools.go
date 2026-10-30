@@ -317,6 +317,11 @@ func (t *pageTools) page(args map[string]any, edit bool) (store.Page, error) {
 	if err != nil || !p.DeletedAt.IsZero() {
 		return store.Page{}, toolErr("No page " + id + ".")
 	}
+	// Templates stay out of agents' page lists, and out of their reach by
+	// ID too: nor does a page go inside one, which would make it one.
+	if p.Template {
+		return store.Page{}, toolErr("Page " + id + " is a template, which agents leave alone.")
+	}
 	if edit && !t.s.st.CanEdit(p) {
 		return store.Page{}, toolErr("The page is shared with the user to view, not to edit.")
 	}
@@ -334,7 +339,9 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	args = maps.Clone(args)
 	delete(args, "page_id")
 	// The app may save the page while the tool runs: then run it again on
-	// what the app saved, rather than save over it.
+	// what the app saved, rather than save over it. The edit keeps one
+	// snapshot, however many times it runs.
+	snapped := false
 	for range 3 {
 		row, err := st.ContentRow(p.ID)
 		if err != nil {
@@ -357,9 +364,13 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		}
 		// The snapshot goes first: an edit that could not keep one is not
 		// saved, so trying it again does not make it twice.
-		if err := t.snapshot(p.ID, before); err != nil {
-			return nil, err
+		if !snapped {
+			if err := t.snapshot(p.ID, before); err != nil {
+				return nil, err
+			}
+			snapped = true
 		}
+		beforeSave(p.ID)
 		if _, _, err := st.SaveContentOver(p.ID, row.Content, content); errors.Is(err, store.ErrContentChanged) {
 			continue
 		} else if err != nil {
@@ -370,6 +381,10 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	}
 	return nil, toolErr("The page kept changing while saving. Read it again and retry.")
 }
+
+// beforeSave runs between an edit and saving it; tests save there,
+// standing in for the app.
+var beforeSave = func(pageID string) {}
 
 // snapshot keeps the page as it was before this client's edits, once per
 // stretch of them: none while the last edit saved is recent.
@@ -422,16 +437,12 @@ func (t *pageTools) movePage(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if p.Template {
-		return nil, toolErr("A template doesn't move among the pages.")
-	}
+	// Neither p nor parent is a template: page refuses them.
 	parent, folderID, err := t.place(args)
 	if err != nil {
 		return nil, err
 	}
 	switch {
-	case parent.Template:
-		return nil, toolErr("A page cannot move inside a template.")
 	case parent.ID != "" && parent.SpaceID != p.SpaceID:
 		return nil, toolErr("A page cannot move inside a page of another space.")
 	case parent.ID == "" && p.SpaceID != st.Session().SpaceID:

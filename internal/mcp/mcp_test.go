@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"leaflet/internal/doc"
 	"leaflet/internal/store"
 )
 
@@ -531,5 +532,79 @@ func TestEditNotSavedWithoutItsSnapshot(t *testing.T) {
 	}
 	if h, err := st.History(p.ID); err != nil || len(h) != 1 {
 		t.Errorf("history %d, %v", len(h), err)
+	}
+}
+
+// An edit the app saves under keeps one snapshot, however many times it
+// runs again on what the app saved.
+func TestEditRunAgainKeepsOneSnapshot(t *testing.T) {
+	st := newStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	saves := 0
+	was := beforeSave
+	beforeSave = func(id string) {
+		if saves++; saves > 1 {
+			return
+		}
+		c := st.Content(id)
+		c.Children = append(c.Children, &doc.Node{ID: "theirs", Type: "paragraph"})
+		if _, _, err := st.SaveContent(id, c); err != nil {
+			t.Error(err)
+		}
+	}
+	t.Cleanup(func() { beforeSave = was })
+	s := NewServer(st, "test")
+	out := s.pages.call("insert_blocks", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"},
+		"blocks": []any{map[string]any{"type": "paragraph", "text": "Inserted"}}})
+	if out["error"] != nil {
+		t.Fatal(out)
+	}
+	if h, err := st.History(p.ID); err != nil || len(h) != 1 {
+		t.Errorf("history %d, %v", len(h), err)
+	}
+	c := st.Content(p.ID)
+	if saves != 2 || c.Find("theirs") == nil || !strings.Contains(c.PlainText(), "Inserted") {
+		t.Errorf("%d saves, stored %q", saves, c.PlainText())
+	}
+}
+
+// A batch, which MCP no longer has, is an invalid request rather than
+// unparsable, and a notification's method sent with an ID still gets an
+// answer, as JSON-RPC asks.
+func TestBatchAndNotificationWithAnID(t *testing.T) {
+	got := session(t, NewServer(newStore(t), "0.1.0"),
+		`[{"jsonrpc":"2.0","id":2,"method":"ping"}]`,
+		`{"jsonrpc":"2.0","id":3,"method":"notifications/initialized"}`)
+	if e, _ := got[0]["error"].(map[string]any); e == nil || e["code"].(float64) != -32600 {
+		t.Errorf("batch %v", got[0])
+	}
+	if r, ok := got[3]["result"].(map[string]any); !ok || r == nil {
+		t.Errorf("notification with an ID %v", got[3])
+	}
+}
+
+// Templates are out of reach by ID too: not read, edited or made a
+// page's parent, which would make the page a template.
+func TestTemplatesOutOfReach(t *testing.T) {
+	st := newStore(t)
+	template, err := st.CreatePage(store.NewPageOptions{Title: "PRD", Template: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := session(t, NewServer(st, "0.1.0"),
+		call(2, "read_page", map[string]any{"page_id": template.ID}),
+		call(3, "insert_blocks", map[string]any{"page_id": template.ID, "position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "paragraph", "text": "x"}}}),
+		call(4, "create_page", map[string]any{"title": "Inside", "parent_id": template.ID}),
+		call(5, "rename_page", map[string]any{"page_id": template.ID, "title": "Mine"}))
+	for id := 2.0; id <= 5; id++ {
+		if out, failed := result(t, got[id]); !failed || !strings.Contains(out["error"].(string), "template") {
+			t.Errorf("call %v: %v", id, out)
+		}
+	}
+	if kids, _ := st.Children(template.ID, ""); len(kids) != 0 {
+		t.Errorf("a page made inside the template: %v", kids)
 	}
 }

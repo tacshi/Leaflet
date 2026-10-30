@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"testing"
@@ -197,5 +198,141 @@ func TestChatGPTRenewsOutsideTheAccount(t *testing.T) {
 	defer mu.Unlock()
 	if posts != 1 || g.Account().RefreshToken != "r2" {
 		t.Errorf("%d renewals, refresh token %q", posts, g.Account().RefreshToken)
+	}
+}
+
+// fakeDiscovery has OpenAI's sign-in answer as d for the test.
+func fakeDiscovery(t *testing.T, d *chatgptDiscovery) {
+	discoveryMu.Lock()
+	saved := discoveryCache
+	discoveryCache = d
+	discoveryMu.Unlock()
+	t.Cleanup(func() {
+		discoveryMu.Lock()
+		discoveryCache = saved
+		discoveryMu.Unlock()
+	})
+}
+
+// An access token the API refuses before it said it would expire is
+// renewed, and the request made again, once.
+func TestChatGPTRenewsARefusedToken(t *testing.T) {
+	var mu sync.Mutex
+	var auths []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"access_token":"new","refresh_token":"r2","expires_in":3600}`)
+			return
+		}
+		mu.Lock()
+		auths = append(auths, r.Header.Get("Authorization"))
+		mu.Unlock()
+		if r.Header.Get("Authorization") != "Bearer new" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"m"}]}`)
+	}))
+	defer srv.Close()
+	fakeDiscovery(t, &chatgptDiscovery{TokenEndpoint: srv.URL + "/token"})
+	g := &ChatGPT{acct: ChatGPTAccount{ClientID: "c", RefreshToken: "r1"}, access: "old", expires: time.Now().Add(time.Hour), base: srv.URL}
+	models, err := g.ListModels(context.Background())
+	if err != nil || len(models) != 1 {
+		t.Fatalf("models %v, %v", models, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(auths) != 2 || auths[0] != "Bearer old" || auths[1] != "Bearer new" {
+		t.Errorf("requests %v", auths)
+	}
+}
+
+// A sign-in that another replaced, or that was signed out, keeps its
+// renewals to itself: they do not overwrite the one kept, or bring back
+// the one signed out.
+func TestOldChatGPTSignInKeepsNothing(t *testing.T) {
+	var mu sync.Mutex
+	kept := map[string]string{}
+	keep, forget := keepSecret, forgetSecret
+	keepSecret = func(name string, v []byte) error {
+		mu.Lock()
+		defer mu.Unlock()
+		kept[name] = string(v)
+		return nil
+	}
+	forgetSecret = func(name string) error {
+		mu.Lock()
+		defer mu.Unlock()
+		delete(kept, name)
+		return nil
+	}
+	t.Cleanup(func() { keepSecret, forgetSecret = keep, forget })
+	fakeDiscovery(t, &chatgptDiscovery{})
+	refresh := func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		var a ChatGPTAccount
+		_ = json.Unmarshal([]byte(kept["chatgpt.p"]), &a)
+		return a.RefreshToken
+	}
+
+	old := NewChatGPT(ChatGPTAccount{RefreshToken: "old"})
+	if err := UseChatGPT("p", old); err != nil {
+		t.Fatal(err)
+	}
+	now := NewChatGPT(ChatGPTAccount{RefreshToken: "new"})
+	if err := UseChatGPT("p", now); err != nil {
+		t.Fatal(err)
+	}
+	old.OnRefresh(ChatGPTAccount{RefreshToken: "old2"})
+	if got := refresh(); got != "new" {
+		t.Errorf("kept %q after an old sign-in renewed", got)
+	}
+	now.OnRefresh(ChatGPTAccount{RefreshToken: "new2"})
+	if got := refresh(); got != "new2" {
+		t.Errorf("kept %q after the sign-in renewed", got)
+	}
+	ForgetChatGPT(context.Background(), "p")
+	now.OnRefresh(ChatGPTAccount{RefreshToken: "new3"})
+	mu.Lock()
+	defer mu.Unlock()
+	if _, ok := kept["chatgpt.p"]; ok {
+		t.Errorf("a sign-out came back: %v", kept)
+	}
+}
+
+// A second answer to the sign-in's callback, such as the tab loaded
+// again, is answered too, rather than waiting for ever.
+func TestSignInCallbackAnsweredTwice(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `{"error":"invalid_grant"}`)
+	}))
+	defer srv.Close()
+	fakeDiscovery(t, &chatgptDiscovery{AuthorizationEndpoint: srv.URL + "/authorize", TokenEndpoint: srv.URL + "/token"})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	open := func(link string) {
+		u, err := url.Parse(link)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		q := u.Query()
+		back := q.Get("redirect_uri") + "?code=x&client_id=client.1&state=" + url.QueryEscape(q.Get("state"))
+		for range 2 {
+			req, _ := http.NewRequestWithContext(ctx, "GET", back, nil)
+			res, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			_ = res.Body.Close()
+		}
+	}
+	if _, err := SignInChatGPT(ctx, "host", "", open); err == nil || ctx.Err() != nil {
+		t.Errorf("sign-in %v, %v", err, ctx.Err())
 	}
 }

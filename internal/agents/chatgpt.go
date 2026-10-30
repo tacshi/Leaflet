@@ -213,6 +213,14 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 		err            error
 	}
 	done := make(chan callback, 1)
+	// The first answer counts: another, such as the tab loaded again,
+	// finds done full and is dropped rather than waiting for ever.
+	finish := func(cb callback) {
+		select {
+		case done <- cb:
+		default:
+		}
+	}
 	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" || r.URL.Path != "/auth/callback" || r.Host != host {
 			http.NotFound(w, r)
@@ -230,11 +238,11 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 			if e != "access_denied" {
 				msg = "ChatGPT sign-in failed: " + e
 			}
-			done <- callback{err: errors.New(msg)}
+			finish(callback{err: errors.New(msg)})
 			return
 		}
 		_, _ = fmt.Fprint(w, signInPage("Signed in to Leaflet", "You can close this tab and go back to Leaflet."))
-		done <- callback{code: v.Get("code"), clientID: v.Get("client_id")}
+		finish(callback{code: v.Get("code"), clientID: v.Get("client_id")})
 	})}
 	go func() { _ = srv.Serve(ln) }()
 	defer func() { _ = srv.Close() }()
@@ -435,15 +443,28 @@ func (g *ChatGPT) token(ctx context.Context) (string, error) {
 		return "", err
 	}
 	g.mu.Lock()
-	defer g.mu.Unlock()
 	g.access, g.expires = t.AccessToken, time.Now().Add(time.Duration(t.ExpiresIn)*time.Second)
 	if t.RefreshToken != "" {
 		g.acct.RefreshToken = t.RefreshToken
-		if g.OnRefresh != nil {
-			go g.OnRefresh(g.acct)
-		}
+		acct = g.acct
 	}
-	return g.access, nil
+	g.mu.Unlock()
+	// Kept before the next renewal, which waits for renewing: the newest
+	// refresh token is the one kept last.
+	if t.RefreshToken != "" && g.OnRefresh != nil {
+		g.OnRefresh(acct)
+	}
+	return t.AccessToken, nil
+}
+
+// drop forgets the access token tok, which the API refused, so the next
+// call renews it.
+func (g *ChatGPT) drop(tok string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.access == tok {
+		g.access = ""
+	}
 }
 
 // SignOut revokes the sign-in.
@@ -463,6 +484,13 @@ func (g *ChatGPT) SignOut(ctx context.Context) {
 }
 
 func (g *ChatGPT) do(ctx context.Context, method, path string, body any, accept string) (*http.Response, error) {
+	return g.doOnce(ctx, method, path, body, accept, true)
+}
+
+// doOnce makes a request of the API; again tries it once more, after
+// renewing the access token, when the API refuses the token: it may have
+// been revoked or expired before the time it said.
+func (g *ChatGPT) doOnce(ctx context.Context, method, path string, body any, accept string, again bool) (*http.Response, error) {
 	tok, err := g.token(ctx)
 	if err != nil {
 		return nil, err
@@ -488,6 +516,11 @@ func (g *ChatGPT) do(ctx context.Context, method, path string, body any, accept 
 	res, err := chatgptHTTP().Do(req)
 	if err != nil {
 		return nil, err
+	}
+	if res.StatusCode == http.StatusUnauthorized && again {
+		_ = res.Body.Close()
+		g.drop(tok)
+		return g.doOnce(ctx, method, path, body, accept, false)
 	}
 	if res.StatusCode >= 400 {
 		defer func() { _ = res.Body.Close() }()

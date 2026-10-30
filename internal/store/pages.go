@@ -1106,7 +1106,9 @@ func putSyncedOver(q querier, pageID, over string, c *doc.Content, base string, 
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err != nil || n == 0 {
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
 		return ErrContentChanged
 	}
 	return nil
@@ -1379,8 +1381,10 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 			seen[t.ID] = true
 		}
 	}
-	like := "%" + q + "%"
-	rows, err := s.db.Query(`SELECT page_id, plain_text FROM page_contents WHERE lower(plain_text) LIKE ? LIMIT ?`, like, textLimit)
+	// Text matches as the titles do, lowered as Go lowers it, and with %
+	// and _ the characters they are: SQLite's lower() and LIKE fold ASCII
+	// alone, and LIKE reads those two as wildcards.
+	rows, err := s.db.Query(`SELECT page_id, plain_text FROM page_contents WHERE instr(`+lowerFunc+`(plain_text), ?) > 0 LIMIT ?`, q, textLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1403,7 +1407,7 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		hits = append(hits, SearchHit{Kind: "page", Title: TitleOr(titles[id]), PageID: id, Snippet: snippet(text, q)})
 	}
 	_ = rows.Close()
-	rows, err = s.db.Query(`SELECT page_id, block_id FROM recordings WHERE lower(transcript) LIKE ? LIMIT ?`, like, otherLimit)
+	rows, err = s.db.Query(`SELECT page_id, block_id FROM recordings WHERE instr(`+lowerFunc+`(transcript), ?) > 0 LIMIT ?`, q, otherLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -1418,7 +1422,7 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		}
 	}
 	_ = rows.Close()
-	rows, err = s.db.Query(`SELECT page_id, block_id, body FROM comments WHERE lower(body) LIKE ? AND deleted_at IS NULL LIMIT ?`, like, otherLimit)
+	rows, err = s.db.Query(`SELECT page_id, block_id, body FROM comments WHERE instr(`+lowerFunc+`(body), ?) > 0 AND deleted_at IS NULL LIMIT ?`, q, otherLimit)
 	if err != nil {
 		return nil, err
 	}

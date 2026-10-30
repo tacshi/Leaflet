@@ -779,6 +779,32 @@ func TestFileNamesStayInTheFilesFolder(t *testing.T) {
 
 // Search finds templates by title and text, marked as templates, and
 // leaves them out of the recent pages.
+// Search matches text as written: % and _ are no wildcards, and letters
+// beyond ASCII match in any case, as titles do.
+func TestSearchTextAsWritten(t *testing.T) {
+	s := open(t)
+	body := func(text string) *doc.Content {
+		n := &doc.Node{Type: "paragraph"}
+		n.SetDelta(doc.Delta{{Text: text}})
+		return doc.FromBlocks([]*doc.Node{n})
+	}
+	for title, text := range map[string]string{"Rates": "Up 100% this year", "Tables": "the page_contents table",
+		"Other": "Up 1000 times, pageXcontents", "Notes": "Über alles, ÉTÉ"} {
+		if _, err := s.CreatePage(NewPageOptions{Title: title, Content: body(text)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for q, want := range map[string]string{"100%": "Rates", "page_contents": "Tables", "über": "Notes", "été": "Notes"} {
+		hits, err := s.Search(q, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(hits) != 1 || hits[0].Title != want {
+			t.Errorf("%q found %+v", q, hits)
+		}
+	}
+}
+
 func TestSearchFindsTemplates(t *testing.T) {
 	s := open(t)
 	body := func(text string) *doc.Content {

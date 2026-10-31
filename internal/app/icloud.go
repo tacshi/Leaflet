@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/icloud"
 	"leaflet/locales"
@@ -16,6 +17,25 @@ import (
 
 // syncOn reports whether pages sync: signed in, or through iCloud Drive.
 func (a *App) syncOn() bool { return a.session.SignedIn || a.sync.ICloudOn() }
+
+// supabaseTip says why signing in with Supabase can't be done: pages sync
+// one way at a time, and iCloud sync is on. It is "" when it can.
+func (a *App) supabaseTip() string {
+	if a.settings.ICloudSync {
+		return locales.SettingsSupabaseICloudOn()
+	}
+	return ""
+}
+
+// signInButton opens the sign-in page, disabled while iCloud sync is on.
+func (a *App) signInButton(c *ui.Context) {
+	tip := a.supabaseTip()
+	tipped(c, "signin-tip", tip, func() {
+		if primary(c, "signin", "", locales.CommonSignIn()).Disabled(tip != "").Clicked() {
+			a.navigate(Route{Kind: "signin"})
+		}
+	})
+}
 
 // offlineNow reports whether syncing waits for the user or a connection.
 // iCloud Drive takes what Leaflet writes without one, and uploads it once

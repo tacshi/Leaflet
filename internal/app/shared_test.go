@@ -54,25 +54,6 @@ func TestSharedPageFollowsTheUsersRole(t *testing.T) {
 	}
 }
 
-// Members fetched for one page do not show in the Share dialog once it
-// is open for another.
-func TestShareMembersStayWithTheirPage(t *testing.T) {
-	a := templatesApp(t)
-	if err := a.st.SetMembers("A", []store.Member{{PageID: "A", UserID: "u1", Role: "editor"}}); err != nil {
-		t.Fatal(err)
-	}
-	a.dialogs.sharePage, a.dialogs.shareMember = "B", nil
-	a.shareMembersOf("A")
-	if len(a.dialogs.shareMember) != 0 {
-		t.Errorf("page B's dialog lists %+v", a.dialogs.shareMember)
-	}
-	a.dialogs.sharePage = "A"
-	a.shareMembersOf("A")
-	if len(a.dialogs.shareMember) != 1 {
-		t.Errorf("page A's dialog lists %+v", a.dialogs.shareMember)
-	}
-}
-
 // What a page is shows after its breadcrumbs as icons, named by their
 // tooltips; that it is shared with the user is in its byline.
 func TestPageMarks(t *testing.T) {

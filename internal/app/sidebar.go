@@ -23,18 +23,7 @@ func (a *App) sidebar(c *ui.Context) {
 	// The window controls sit at the top left.
 	ui.Row(c.Key("sidebar-top")).Height(max(bar.Height, headerHeight)).Padding(0, 8, 0, bar.Left+8).Gap(2).AlignItems(ui.Center).DragWindow().Children(func() {
 		ui.Spacer(c)
-		var invites ui.Element
 		tools(c, func() {
-			// Only while pages shared with the user wait for them.
-			if len(a.invites) > 0 {
-				invites = iconButton(c, "invites", "share", locales.SidebarInvites(len(a.invites))).TextColor(pal.Accent)
-				if a.invitesOpen {
-					invites.Background(pal.NavSelected)
-				}
-				if invites.Clicked() {
-					a.invitesOpen = !a.invitesOpen
-				}
-			}
 			if iconButton(c, "search", "search", locales.SidebarSearch()).Clicked() {
 				a.openSearch()
 			}
@@ -49,11 +38,6 @@ func (a *App) sidebar(c *ui.Context) {
 				a.toggleSidebar()
 			}
 		})
-		if len(a.invites) == 0 {
-			a.invitesOpen = false
-		} else {
-			ui.Popover(c, invites, &a.invitesOpen, func() { a.inviteList(c) })
-		}
 	})
 	// Room under the tabs, before the list they show.
 	ui.Row(c.Key("sidebar-tabs")).Padding(0, 12).Margin(0, 0, 10).Shrink(0).Children(func() {
@@ -640,7 +624,7 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 	if m.Item(locales.SidebarPageHistory()).Chosen() {
 		a.openHistory(p.ID)
 	}
-	server := a.backend.Configured()
+	server := a.hasServer()
 	if !header && server && !p.Template && m.Item(locales.SidebarShareEllipsis()).Chosen() {
 		a.openShare(p.ID)
 	}
@@ -662,7 +646,7 @@ func (a *App) sidebarFooter(c *ui.Context) {
 	pal := theme.Of(c)
 	ui.Row(c.Key("sidebar-footer")).Padding(8, 8, 8, 12).Gap(10).AlignItems(ui.Center).BorderWidth(1, 0, 0, 0).BorderColor(pal.Separator).Children(func() {
 		// Not signed in, the account row is the way to sign in.
-		signIn := !a.syncOn() && a.backend.Configured()
+		signIn := !a.syncOn() && a.hasServer()
 		var account ui.Element
 		if signIn {
 			account = ui.ButtonBase(c.Key("account")).Grow(1).Gap(10).Padding(4).Margin(-4).Radius(7).AlignItems(ui.Center).Justify(ui.Start).

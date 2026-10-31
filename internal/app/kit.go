@@ -135,6 +135,16 @@ func card(c *ui.Context, key string, fn func()) ui.Element {
 	return ui.Column(c.Key(key)).Radius(10).Border(1, pal.Divider).Background(pal.Surface).Children(fn)
 }
 
+// tipped builds control inside an element showing tip, when there is one:
+// a disabled control shows no tip of its own, and tip says why it is.
+func tipped(c *ui.Context, key, tip string, control func()) {
+	if tip == "" {
+		control()
+		return
+	}
+	ui.Row(c.Key(key)).Tooltip(tip).Children(control)
+}
+
 // settingRow is a row of a card: a title and description beside a control.
 func settingRow(c *ui.Context, key, title, desc string, first bool, control func()) {
 	pal := theme.Of(c)

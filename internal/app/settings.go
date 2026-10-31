@@ -294,25 +294,31 @@ func (a *App) accountSettings(c *ui.Context) {
 				s.nameEdited = false
 			}
 		})
-		// A build without a server says so once, in Sync and storage;
-		// iCloud sync is there too.
-		if !a.backend.Configured() || a.sync.ICloudOn() {
+		// A build without a server says so once, in Sync and storage.
+		if !a.hasServer() {
 			return
 		}
 		title, desc := locales.SettingsSync(), locales.SettingsSyncDesc()
+		project := a.backend.Project()
 		if a.session.SignedIn {
 			title, desc = locales.SettingsSignedIn(), a.session.Email
+			if project.Ref != "" {
+				desc = locales.SettingsSignedInProject(a.session.Email, project.Name)
+			}
 		}
 		settingRow(c, "email", title, desc, false, func() {
+			if a.session.SignedIn && project.Ref != "" {
+				if iconButton(c, "dashboard", "external-link", locales.SettingsOpenSupabase()).Clicked() {
+					_ = mygo.Shell.OpenExternal(dashboardURL(project.Ref))
+				}
+			}
 			switch {
 			case a.session.SignedIn:
 				if button(c, "signout", "log-out", locales.CommonSignOut()).Disabled(s.signingOut).Clicked() {
 					a.signOut()
 				}
-			case a.backend.Configured():
-				if primary(c, "signin", "", locales.CommonSignIn()).Clicked() {
-					a.navigate(Route{Kind: "signin"})
-				}
+			case a.hasServer():
+				a.signInButton(c)
 			}
 		})
 	})
@@ -532,7 +538,7 @@ func (a *App) leave(clear func() error, synced bool) {
 				}
 			}
 			a.backend.SignOut()
-			a.sync.ClearInvites()
+			a.forgetProject()
 			err = clear()
 		})
 		a.update(func() {
@@ -540,7 +546,6 @@ func (a *App) leave(clear func() error, synced bool) {
 				account.unsynced = unsynced
 				return
 			}
-			a.invites = nil
 			if err != nil {
 				a.toast(locales.SettingsRemovePagesFailed(err.Error()))
 			}
@@ -771,7 +776,7 @@ func (a *App) providerDialog(c *ui.Context) {
 		desc = locales.SettingsProviderDescAccount()
 	case local:
 		desc = locales.SettingsProviderDescLocal()
-	case !a.backend.Configured():
+	case !a.hasServer():
 		desc = locales.SettingsProviderDescNoServer()
 	case !a.session.SignedIn:
 		desc = locales.SettingsProviderDescSignIn()
@@ -1287,7 +1292,7 @@ var offline offlineState
 
 func (a *App) offlineSettings(c *ui.Context) {
 	heading(c, locales.SettingsSectionOffline(), locales.SettingsOfflineDesc())
-	if a.backend.Configured() || a.session.SignedIn || icloud.Available() || a.settings.ICloudSync {
+	if a.hasServer() || a.session.SignedIn || icloud.Available() || a.settings.ICloudSync {
 		a.syncSettings(c)
 	} else {
 		card(c, "status", func() {
@@ -1371,25 +1376,30 @@ func (a *App) syncSettings(c *ui.Context) {
 	}
 	card(c, "status", func() {
 		first := true
-		if !a.session.SignedIn && (icloud.Available() || a.settings.ICloudSync) {
+		if icloud.Available() || a.settings.ICloudSync {
 			on := a.settings.ICloudSync
 			desc := locales.SettingsICloudDesc()
 			if on {
 				desc = locales.SettingsICloudOnDesc()
 			}
 			settingRow(c, "icloud", locales.SettingsICloud(), desc, true, func() {
-				if ui.Switch(c.Key("icloud"), &on).Disabled(a.icloudBusy).Changed() {
-					a.setICloud(on)
+				// One way of syncing at a time: Supabase's, signed in.
+				tip := ""
+				if a.session.SignedIn {
+					tip = locales.SettingsICloudSupabaseOn()
 				}
+				tipped(c, "icloud-tip", tip, func() {
+					if ui.Switch(c.Key("icloud"), &on).Disabled(a.icloudBusy || a.session.SignedIn).Changed() {
+						a.setICloud(on)
+					}
+				})
 			})
 			first = false
 		}
 		if !a.syncOn() {
-			if a.backend.Configured() {
+			if a.hasServer() {
 				settingRow(c, "sync", locales.SettingsNotSyncing(), locales.SettingsNotSyncingDesc(), first, func() {
-					if primary(c, "signin", "", locales.CommonSignIn()).Clicked() {
-						a.navigate(Route{Kind: "signin"})
-					}
+					a.signInButton(c)
 				})
 			}
 			return

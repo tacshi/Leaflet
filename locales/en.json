@@ -140,39 +140,6 @@
   "@shellNewPage": {
     "description": "Button when no page is open: make a new page."
   },
-  "shellInviteFrom": "{name} shared “{title}” with you",
-  "@shellInviteFrom": {
-    "description": "Home view (and a desktop notification): a page someone shared with the user, waiting for them to accept or decline it.",
-    "placeholders": {
-      "name": {
-        "type": "String"
-      },
-      "title": {
-        "type": "String"
-      }
-    }
-  },
-  "shellInviteSomeone": "Someone",
-  "@shellInviteSomeone": {
-    "description": "Home view: who shared a page, when they have no name."
-  },
-  "shellInviteAccept": "Accept",
-  "@shellInviteAccept": {
-    "description": "Home view: button that accepts a shared page's invite; the page then appears in the sidebar."
-  },
-  "shellInviteDecline": "Decline",
-  "@shellInviteDecline": {
-    "description": "Home view: tooltip of the x button that declines a shared page's invite."
-  },
-  "shellInviteFailed": "Could not answer the invite: {error}",
-  "@shellInviteFailed": {
-    "description": "Toast when accepting or declining an invite failed.",
-    "placeholders": {
-      "error": {
-        "type": "String"
-      }
-    }
-  },
   "trayNewRecording": "New Recording",
   "@trayNewRecording": {
     "description": "The menu bar icon's menu: start a recording in a new page."
@@ -607,10 +574,6 @@
   },
   "commonEmail": "Email",
   "@commonEmail": {
-    "description": "A common word used in several places of the app."
-  },
-  "commonOwner": "Owner",
-  "@commonOwner": {
     "description": "A common word used in several places of the app."
   },
   "commonModel": "Model",
@@ -1135,75 +1098,9 @@
       }
     }
   },
-  "dialogShareSubtitle": "People you add can open this page and its subpages.",
-  "@dialogShareSubtitle": {
-    "description": "Share dialog: the subtitle."
-  },
-  "dialogShareLocalOnly": "This is a temporary, view-only link: visitors can't edit the page. Turning off sharing stops the link working.",
-  "@dialogShareLocalOnly": {
-    "description": "Share dialog: a notice under the public link, in a build with no server: the link is temporary and view-only, and turning sharing off ends it."
-  },
-  "dialogShareSignIn": "Sign in to share pages with other people.",
-  "@dialogShareSignIn": {
-    "description": "Share dialog: a notice when signed out."
-  },
-  "dialogShareOwnerOnly": "Only the owner of this space can change who it is shared with.",
+  "dialogShareOwnerOnly": "Only the page's owner can share it publicly.",
   "@dialogShareOwnerOnly": {
-    "description": "Share dialog: a notice on a page shared with the user."
-  },
-  "dialogShareInvitee": "Name or email",
-  "@dialogShareInvitee": {
-    "description": "Share dialog: the field of the person to invite."
-  },
-  "dialogShareSent": "If {email} has a Leaflet account, they'll get an invite.",
-  "@dialogShareSent": {
-    "description": "Share dialog: shown after inviting someone; it never says whether the email has an account. The page reaches them once they accept the invite.",
-    "placeholders": {
-      "email": {
-        "type": "String"
-      }
-    }
-  },
-  "dialogShareInvalidEmail": "Enter an email address.",
-  "@dialogShareInvalidEmail": {
-    "description": "Share dialog: the server refused an invite because what was typed is no email address."
-  },
-  "dialogShareWithSelf": "That's your own email address.",
-  "@dialogShareWithSelf": {
-    "description": "Share dialog: the server refused an invite to the user's own email address."
-  },
-  "dialogShareCanEdit": "Can edit",
-  "@dialogShareCanEdit": {
-    "description": "Share dialog: the role of a person who can edit."
-  },
-  "dialogShareCanView": "Can view",
-  "@dialogShareCanView": {
-    "description": "Share dialog: the role of a person who can only view."
-  },
-  "dialogShareInherited": "Shared from a page above this one: remove them there.",
-  "@dialogShareInherited": {
-    "description": "Share dialog: removing someone from a subpage did nothing, as their access comes from a page above it."
-  },
-  "dialogShareInvited": "Invited",
-  "@dialogShareInvited": {
-    "description": "Share dialog: beside the role of a person who has not accepted the invite yet."
-  },
-  "dialogShareInvite": "Invite",
-  "@dialogShareInvite": {
-    "description": "Share dialog: the button inviting the person."
-  },
-  "dialogSharePeople": "People with access",
-  "@dialogSharePeople": {
-    "description": "Share dialog: the heading over the people the page is shared with."
-  },
-  "dialogShareYou": "{name} (you)",
-  "@dialogShareYou": {
-    "description": "Share dialog: the user's own row.",
-    "placeholders": {
-      "name": {
-        "type": "String"
-      }
-    }
+    "description": "The Share dialog of a page shared with the user: only its owner shares it through a public link."
   },
   "dialogShareCopyLink": "Copy link",
   "@dialogShareCopyLink": {
@@ -1999,16 +1896,6 @@
   "@sidebarHide": {
     "description": "Sidebar: tooltip of the button hiding it."
   },
-  "sidebarInvites": "{count, plural, one {# page shared with you} other {# pages shared with you}}",
-  "@sidebarInvites": {
-    "description": "Sidebar's top bar: tooltip of the button, shown only while invites wait, that lists the pages shared with the user to accept.",
-    "placeholders": {
-      "count": {
-        "type": "int",
-        "example": "2"
-      }
-    }
-  },
   "sidebarNoPages": "No pages yet",
   "@sidebarNoPages": {
     "description": "Sidebar with no pages."
@@ -2246,7 +2133,7 @@
   "@sidebarOnDevice": {
     "description": "Sidebar footer: account line when not signed in."
   },
-  "sidebarSignInToSync": "Sign in to sync",
+  "sidebarSignInToSync": "Sign in with Supabase to sync",
   "@sidebarSignInToSync": {
     "description": "Sidebar footer: tooltip of the account row, which opens the sign-in page, while not signed in."
   },
@@ -2716,7 +2603,7 @@
   "@recErrNeedsConnection": {
     "description": "Error when offline."
   },
-  "recErrSignInOrServer": "Sign in to transcribe in the cloud, or set a transcription server on your network in Settings › Speech to text.",
+  "recErrSignInOrServer": "Sign in with Supabase to transcribe in the cloud, or set a transcription server on your network in Settings › Speech to text.",
   "@recErrSignInOrServer": {
     "description": "Error when signed out without a local engine."
   },
@@ -2809,7 +2696,7 @@
   "@recErrAudioMissing": {
     "description": "Error when a recording's audio is missing."
   },
-  "recErrSignIn": "Sign in to transcribe in the cloud.",
+  "recErrSignIn": "Sign in with Supabase to transcribe in the cloud.",
   "@recErrSignIn": {
     "description": "Error when the cloud needs signing in."
   },
@@ -3297,13 +3184,31 @@
   "@settingsSync": {
     "description": "Settings › Account: the row to sign in, when signed out."
   },
-  "settingsSyncDesc": "Sign in to sync pages between devices and share them",
+  "settingsSyncDesc": "Sign in with Supabase to sync pages between devices and share them",
   "@settingsSyncDesc": {
     "description": "Settings › Account › Sync: the description."
   },
   "settingsSignedIn": "Signed in",
   "@settingsSignedIn": {
     "description": "Settings › Account: the row's title when signed in; its email shows under it."
+  },
+  "settingsSignedInProject": "{email} · {project} on Supabase",
+  "@settingsSignedInProject": {
+    "description": "Settings › Account: under Signed in, the email and the Supabase project synced through.",
+    "placeholders": {
+      "email": {
+        "type": "String",
+        "example": "me@example.com"
+      },
+      "project": {
+        "type": "String",
+        "example": "Leaflet"
+      }
+    }
+  },
+  "settingsOpenSupabase": "Open in Supabase",
+  "@settingsOpenSupabase": {
+    "description": "Settings › Account: tooltip of the button opening the project in the Supabase dashboard."
   },
   "settingsDevices": "Devices",
   "@settingsDevices": {
@@ -3612,7 +3517,7 @@
   "@settingsProviderDescNoServer": {
     "description": "The provider dialog: a cloud provider in a build without a server."
   },
-  "settingsProviderDescSignIn": "Cloud providers run on the server: sign in first, or add a model server on this machine.",
+  "settingsProviderDescSignIn": "Cloud providers run on the server: sign in with Supabase first, or add a model server on this machine.",
   "@settingsProviderDescSignIn": {
     "description": "The provider dialog: a cloud provider while signed out."
   },
@@ -3898,7 +3803,7 @@
   "@settingsNotSyncing": {
     "description": "Settings › Sync and storage: signed out."
   },
-  "settingsNotSyncingDesc": "Sign in to sync pages between devices",
+  "settingsNotSyncingDesc": "Sign in with Supabase to sync pages between devices",
   "@settingsNotSyncingDesc": {
     "description": "Settings › Sync and storage: signed out."
   },
@@ -3913,6 +3818,14 @@
   "settingsICloudOnDesc": "Pages sync through the Leaflet folder in iCloud Drive",
   "@settingsICloudOnDesc": {
     "description": "Settings › Sync and storage: under iCloud sync, while it is on."
+  },
+  "settingsICloudSupabaseOn": "Sign out of Supabase to sync through iCloud Drive instead",
+  "@settingsICloudSupabaseOn": {
+    "description": "Tooltip on the disabled iCloud sync switch while signed in with Supabase: pages sync one way at a time."
+  },
+  "settingsSupabaseICloudOn": "Turn off iCloud sync to sync through Supabase instead",
+  "@settingsSupabaseICloudOn": {
+    "description": "Tooltip on the disabled Supabase sign-in buttons while iCloud sync is on: pages sync one way at a time."
   },
   "settingsICloudUnavailable": "iCloud Drive isn't available. Sign in to iCloud and turn on iCloud Drive, or turn iCloud sync off and on again.",
   "@settingsICloudUnavailable": {
@@ -4149,33 +4062,131 @@
       }
     }
   },
-  "signinTitle": "Sign in to Leaflet",
+  "signinTitle": "Sync with Supabase",
   "@signinTitle": {
     "description": "The sign-in page's title."
   },
-  "signinSubtitle": "Sync your pages between devices, share them, and use cloud models.",
+  "signinSubtitle": "Leaflet keeps your pages in your own Supabase project and syncs them between your devices.",
   "@signinSubtitle": {
     "description": "The sign-in page, under its title."
   },
-  "signinNoServer": "This build has no server. Set SUPABASE_URL and SUPABASE_ANON_KEY to sign in.",
+  "signinNoServer": "SUPABASE_URL is set without SUPABASE_ANON_KEY. Set both to sign in to that server, or neither to sign in with Supabase.",
   "@signinNoServer": {
-    "description": "The sign-in page in a build without a server."
+    "description": "The sign-in page when the environment sets a server's URL but not its key."
   },
-  "signinPassword": "Password",
-  "@signinPassword": {
-    "description": "The sign-in page: the way of signing in with a password, and the password field."
+  "signinContinueSupabase": "Continue with Supabase",
+  "@signinContinueSupabase": {
+    "description": "The sign-in page's button opening Supabase's sign-in in the browser."
   },
-  "signinCreateAccount": "Create account",
-  "@signinCreateAccount": {
-    "description": "The sign-in page: the way of creating an account, and its button."
+  "signinNoSupabase": "New to Supabase?",
+  "@signinNoSupabase": {
+    "description": "The sign-in page: before the link to make a Supabase account."
   },
-  "signinEmailCode": "Email code",
-  "@signinEmailCode": {
-    "description": "The sign-in page: the way of signing in with a code emailed."
+  "signinCreateSupabase": "Create a free account",
+  "@signinCreateSupabase": {
+    "description": "The sign-in page: the link opening Supabase's sign-up page."
   },
-  "signinPasswordNew": "Password (at least 8 characters)",
-  "@signinPasswordNew": {
-    "description": "The sign-in page › Create account: the password field."
+  "signinWaitingBrowser": "Finish signing in in your browser…",
+  "@signinWaitingBrowser": {
+    "description": "The sign-in page while Supabase's sign-in is open in the browser."
+  },
+  "signinNewOrg": "Made a Supabase organization just now?",
+  "@signinNewOrg": {
+    "description": "The sign-in page while Supabase's sign-in is open: before the link opening it again, which Supabase leaves after a new account makes its first organization."
+  },
+  "signinReopenBrowser": "Open the sign-in page again",
+  "@signinReopenBrowser": {
+    "description": "The sign-in page: the link opening Supabase's sign-in in the browser again."
+  },
+  "signinFindingProject": "Looking for your Leaflet project…",
+  "@signinFindingProject": {
+    "description": "The sign-in page while looking for the account's Leaflet project."
+  },
+  "signinChooseProject": "Choose a project",
+  "@signinChooseProject": {
+    "description": "The sign-in page: the heading over the projects to choose, when there is none or several."
+  },
+  "signinUseProject": "Use",
+  "@signinUseProject": {
+    "description": "The sign-in page: the button using a Leaflet project already in the account."
+  },
+  "signinNewProject": "New project",
+  "@signinNewProject": {
+    "description": "The sign-in page: the row creating a project."
+  },
+  "signinNewProjectDesc": "Leaflet creates it in your Supabase account and sets it up",
+  "@signinNewProjectDesc": {
+    "description": "The sign-in page: the description of the row creating a project."
+  },
+  "signinCreateProject": "Create",
+  "@signinCreateProject": {
+    "description": "The sign-in page: the button creating a project."
+  },
+  "signinCreatingProject": "Creating your project… this takes a minute or two",
+  "@signinCreatingProject": {
+    "description": "The sign-in page while Supabase creates the project."
+  },
+  "signinStartingProject": "Waiting for your project to start… this can take a minute or two",
+  "@signinStartingProject": {
+    "description": "The sign-in page while waiting for a project that is starting, or restoring from paused."
+  },
+  "signinProjectNotSetUp": "Not set up for Leaflet yet",
+  "@signinProjectNotSetUp": {
+    "description": "The sign-in page: under a project named Leaflet that holds no Leaflet tables yet, which may be one Leaflet made and did not finish, or the person's own."
+  },
+  "signinProjectPaused": "Paused; Leaflet restarts it",
+  "@signinProjectPaused": {
+    "description": "The sign-in page: under a project named Leaflet that Supabase paused."
+  },
+  "signinSetUpProject": "Set up",
+  "@signinSetUpProject": {
+    "description": "The sign-in page: the button setting up a project Leaflet made, or restarting a paused one."
+  },
+  "signinSettingUp": "Setting up Leaflet in your project…",
+  "@signinSettingUp": {
+    "description": "The sign-in page while checking what the project needs."
+  },
+  "signinSettingUpSteps": "Setting up Leaflet in your project… {done} of {total}",
+  "@signinSettingUpSteps": {
+    "description": "The sign-in page while setting the project up: steps done of the steps there are.",
+    "placeholders": {
+      "done": {
+        "type": "int",
+        "example": "3"
+      },
+      "total": {
+        "type": "int",
+        "example": "9"
+      }
+    }
+  },
+  "signinSigningIn": "Signing in…",
+  "@signinSigningIn": {
+    "description": "The sign-in page while signing in to the project."
+  },
+  "signinSetupFailed": "Leaflet couldn't set up your project: {error}",
+  "@signinSetupFailed": {
+    "description": "The sign-in page when creating or setting up the project failed.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "network is unreachable"
+      }
+    }
+  },
+  "signinNotYourProject": "{project} belongs to {owner} in Leaflet. Sign in with that Supabase account, or use a project of your own.",
+  "@signinNotYourProject": {
+    "description": "The sign-in page when the project's Leaflet owner is another account than the one signed in to Supabase.",
+    "placeholders": {
+      "project": {
+        "type": "String",
+        "example": "Leaflet"
+      },
+      "owner": {
+        "type": "String",
+        "example": "me@example.com"
+      }
+    }
   },
   "signinCode": "Code from the email",
   "@signinCode": {
@@ -4188,18 +4199,6 @@
   "signinContinueLocal": "Continue on this device",
   "@signinContinueLocal": {
     "description": "The sign-in page: going on without an account."
-  },
-  "signinConfirmEmail": "Check your email to confirm the account, then sign in.",
-  "@signinConfirmEmail": {
-    "description": "The sign-in page, after creating an account."
-  },
-  "signinEnterEmailPassword": "Enter your email and password.",
-  "@signinEnterEmailPassword": {
-    "description": "The sign-in page: signing in without them."
-  },
-  "signinPasswordTooShort": "Use a password of at least 8 characters.",
-  "@signinPasswordTooShort": {
-    "description": "The sign-in page › Create account: a short password."
   },
   "signinCodeSent": "We emailed you a sign-in link and code.",
   "@signinCodeSent": {

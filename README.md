@@ -104,8 +104,9 @@ itself.
   needed. Release builds also need Xcode for macOS, and NSIS for Windows
   installers.
 - iCloud sync needs iCloud Drive turned on.
-- Sign-in, sharing, cloud models and sync with other people need a Leaflet
-  server: a [Supabase](https://supabase.com) project set up from
+- Sync through a server, sharing and cloud models need a
+  [Supabase](https://supabase.com) account: **Continue with Supabase**
+  finds or creates a project in it and sets it up from
   [`supabase/`](supabase/README.md). Without one, Leaflet runs on your
   devices alone.
 
@@ -128,17 +129,15 @@ comments, local models and transcription servers on your network all
 work, and sign-in, sync, sharing, cloud models and cloud transcription are
 hidden or explained in place.
 
-To use a Supabase backend (see [`supabase/README.md`](supabase/README.md)),
-set it at run time:
+Every build can sign in with Supabase: the OAuth app's client ID is built
+in, and its secret stays in Leaflet's sign-in Worker (see
+[`supabase/README.md`](supabase/README.md)).
+
+To work against one server instead, such as the local stack, set it, and
+sign in with a code sent by email:
 
 ```bash
-SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<anon key> go tool mygo dev
-```
-
-or build it in:
-
-```bash
-MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://… -X leaflet/internal/remote.DefaultAnonKey=…" go tool mygo build
+SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key> go tool mygo dev
 ```
 
 To try agents without an API key, run a local model server (for example
@@ -245,6 +244,9 @@ rules.
 | `internal/store` | SQLite (pure Go) tables, the outbox and settings |
 | `internal/remote` | Supabase over HTTP: Auth, PostgREST, Storage and Edge Functions |
 | `internal/sync` | Pushing the outbox, pulls, account adoption and the device heartbeat, through Supabase or iCloud Drive |
+| `internal/supabaseapi` | The Supabase Management API, signed in to with the person's own account |
+| `internal/provision` | Finding, creating and setting up their Leaflet project: migrations and Edge Functions |
+| `internal/oauth` | The part of a browser sign-in on this device: loopback redirect and PKCE |
 | `internal/icloud` | The Leaflet folder in iCloud Drive: its files, written whole, and asking iCloud to download them |
 | `internal/agents` | The OpenAI-compatible client, presets, prompt, page tools, loop and hub |
 | `internal/mcp` | `leaflet mcp`: the page tools for agents outside the app |
@@ -253,6 +255,7 @@ rules.
 | `locales` | The app's texts in each language, and the Go code generated from them |
 | `scripts` | Debug and release builds, and publishing to GitHub Releases |
 | `supabase` | Migrations (tables, row-level security, RPCs, Vault) and Edge Functions |
+| `worker` | The sign-in Worker on Cloudflare: the OAuth redirect page and the token exchange that holds the client secret |
 | `docs` | The protocol, user stories and the icon's sources |
 
 Microphone capture runs in a small page on the app's own `leaflet-rec://`

@@ -46,9 +46,6 @@ type Service struct {
 	// ICloud is the Leaflet folder in iCloud Drive, which sync goes
 	// through instead of Supabase while SetICloud has turned it on.
 	ICloud icloud.Folder
-	// OnInvites runs when the pages shared with the user that wait for
-	// them to accept (Invites) have changed.
-	OnInvites func()
 
 	cloudOn atomic.Bool
 	kick    chan struct{}
@@ -59,10 +56,6 @@ type Service struct {
 	// ownLogChecked is set once a pass has read this device's last batch
 	// in iCloud Drive (checkOwnLog).
 	ownLogChecked bool
-	// invites are the account's invites (invitesOf) as the last pass
-	// read them.
-	invites   []Invite
-	invitesOf string
 	// membersAt is when the members of each page shared with the user
 	// were last loaded, for pullMembers to load them again.
 	membersAt map[string]time.Time
@@ -278,99 +271,7 @@ func (s *Service) pass(ctx context.Context) error {
 	if err := s.push(ctx); err != nil {
 		return err
 	}
-	err := s.pull(ctx)
-	s.readInvites(ctx)
-	return err
-}
-
-// Invite is a page someone shared with the user, which reaches them once
-// they accept it (docs/protocol.md §6).
-type Invite struct {
-	PageID string
-	Title  string
-	// Role is viewer or editor.
-	Role string
-	// Inviter is the name of who shared it, or "".
-	Inviter string
-	At      time.Time
-}
-
-// Invites returns the signed-in account's invites, newest first, as the
-// last pass read them: none once signed out.
-func (s *Service) Invites() []Invite {
-	uid := s.be.UserID()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if uid == "" || s.invitesOf != uid {
-		return nil
-	}
-	return slices.Clone(s.invites)
-}
-
-// readInvites reads the account's invites. One that cannot be read now
-// leaves the list as it was.
-func (s *Service) readInvites(ctx context.Context) {
-	uid := s.be.UserID()
-	res, err := s.be.RPC(ctx, "page_invites", map[string]any{})
-	if err != nil {
-		if !remote.IsNetwork(err) && !errors.Is(err, remote.ErrSignedOut) {
-			log.Printf("sync: invites: %v", err)
-		}
-		return
-	}
-	var list []Invite
-	rows, _ := res.([]any)
-	for _, r := range rows {
-		m, _ := r.(map[string]any)
-		if store.S(m, "page_id") == "" {
-			continue
-		}
-		list = append(list, Invite{PageID: store.S(m, "page_id"), Title: store.S(m, "title"), Role: store.S(m, "role"),
-			Inviter: store.S(m, "inviter_name"), At: store.TimeOrZero(m["created_at"]).UTC()})
-	}
-	s.setInvites(uid, list)
-}
-
-func (s *Service) setInvites(uid string, list []Invite) {
-	s.mu.Lock()
-	same := s.invitesOf == uid && slices.Equal(s.invites, list)
-	s.invites, s.invitesOf = list, uid
-	s.mu.Unlock()
-	if !same && s.OnInvites != nil {
-		s.OnInvites()
-	}
-}
-
-// ClearInvites forgets the invites, as the account signs out.
-func (s *Service) ClearInvites() { s.setInvites("", nil) }
-
-// AcceptInvite accepts an invite: the page comes with the next pass,
-// which it asks for.
-func (s *Service) AcceptInvite(ctx context.Context, pageID string) error {
-	if _, err := s.be.RPC(ctx, "accept_page_invite", map[string]any{"p_page_id": pageID}); err != nil {
-		return err
-	}
-	s.dropInvite(pageID)
-	s.Kick()
-	return nil
-}
-
-// DeclineInvite declines an invite; the page never comes.
-func (s *Service) DeclineInvite(ctx context.Context, pageID string) error {
-	if _, err := s.be.RPC(ctx, "decline_page_invite", map[string]any{"p_page_id": pageID}); err != nil {
-		return err
-	}
-	s.dropInvite(pageID)
-	return nil
-}
-
-// dropInvite takes an invite answered off the list.
-func (s *Service) dropInvite(pageID string) {
-	s.mu.Lock()
-	list := slices.DeleteFunc(slices.Clone(s.invites), func(i Invite) bool { return i.PageID == pageID })
-	uid := s.invitesOf
-	s.mu.Unlock()
-	s.setInvites(uid, list)
+	return s.pull(ctx)
 }
 
 // resolveSpace, after sign-in, moves the pages made on this device into

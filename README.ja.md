@@ -105,9 +105,9 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
   リリースビルドには、macOS では Xcode、Windows インストーラには NSIS も
   必要です。
 - iCloud 同期には iCloud Drive をオンにしておく必要があります。
-- サインイン、共有、クラウドモデル、他の人との同期には Leaflet サーバーが必要です：
-  [`supabase/`](supabase/README.md) の手順で用意した
-  [Supabase](https://supabase.com) プロジェクトです。サーバーがなければ、
+- サーバー経由の同期、共有、クラウドモデルには [Supabase](https://supabase.com)
+  のアカウントが必要です：**Supabase で続ける** がその中のプロジェクトを見つけるか作成し、
+  [`supabase/`](supabase/README.md) の内容で設定します。アカウントがなければ、
   Leaflet はデバイス上だけで動作します。
 
 ## インストール
@@ -129,17 +129,13 @@ go tool mygo dev
 サインイン、同期、共有、クラウドモデル、クラウドの文字起こしは非表示になるか、
 その場で理由が説明されます。
 
-Supabase バックエンドを使うには（[`supabase/README.md`](supabase/README.md)
-を参照）、実行時に指定するか：
+どのビルドでも Supabase でサインインできます。OAuth アプリのクライアント ID は組み込まれ、
+シークレットは Leaflet のサインイン用 Worker が保持しています（[`supabase/README.md`](supabase/README.md) を参照）。
+
+ローカルスタックなど特定のサーバーを使う場合は、それを指定し、メールで届くコードでサインインします：
 
 ```bash
-SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<anon key> go tool mygo dev
-```
-
-ビルドに組み込みます：
-
-```bash
-MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://… -X leaflet/internal/remote.DefaultAnonKey=…" go tool mygo build
+SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key> go tool mygo dev
 ```
 
 API キーなしでエージェントを試すには、ローカルのモデルサーバー（たとえば
@@ -237,6 +233,9 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/store` | SQLite（純 Go）のテーブル、送信トレイ、設定 |
 | `internal/remote` | HTTP 経由の Supabase：Auth、PostgREST、Storage、Edge Functions |
 | `internal/sync` | 送信トレイのプッシュ、プル、アカウントの引き継ぎ、デバイスのハートビート（Supabase または iCloud Drive 経由） |
+| `internal/supabaseapi` | 本人の Supabase アカウントでサインインする Supabase Management API |
+| `internal/provision` | 本人の Leaflet プロジェクトの検索、作成、設定：マイグレーションと Edge Functions |
+| `internal/oauth` | ブラウザでのサインインのうちこのデバイス側の部分：ループバックのリダイレクトと PKCE |
 | `internal/icloud` | iCloud Drive の Leaflet フォルダ：まるごと書き込むファイルと、iCloud へのダウンロードの依頼 |
 | `internal/agents` | OpenAI 互換クライアント、プリセット、プロンプト、ページツール、ループ、ハブ |
 | `internal/mcp` | `leaflet mcp`：アプリ外のエージェント向けページツール |
@@ -245,6 +244,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `locales` | 各言語のアプリのテキストと、そこから生成される Go コード |
 | `scripts` | デバッグビルドとリリースビルド、GitHub Releases への公開 |
 | `supabase` | マイグレーション（テーブル、行レベルセキュリティ、RPC、Vault）と Edge Functions |
+| `worker` | Cloudflare 上のサインイン用 Worker：OAuth のリダイレクトページと、クライアントシークレットを持つトークン交換 |
 | `docs` | プロトコル、ユーザーストーリー、アイコンのソース |
 
 マイクのキャプチャは、アプリ独自の `leaflet-rec://` スキーム上の小さなページで

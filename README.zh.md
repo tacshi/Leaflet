@@ -91,9 +91,9 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 - 从源码构建：Go 1.27.3 或更高版本。不需要 cgo 或 C 编译器。发布构建还
   需要 Xcode（macOS）和 NSIS（Windows 安装程序）。
 - iCloud 同步需要打开 iCloud 云盘。
-- 登录、共享、云端模型以及与他人同步需要一个 Leaflet 服务器：一个按
-  [`supabase/`](supabase/README.md) 配置的 [Supabase](https://supabase.com)
-  项目。没有服务器时，Leaflet 仅在你的设备上运行。
+- 通过服务器同步、共享和云端模型需要一个 [Supabase](https://supabase.com)
+  账户：**使用 Supabase 继续** 会在其中找到或创建一个项目，并按
+  [`supabase/`](supabase/README.md) 完成设置。没有账户时，Leaflet 仅在你的设备上运行。
 
 ## 安装
 
@@ -113,17 +113,13 @@ go tool mygo dev
 中的转写服务都可以使用；登录、同步、共享、云端模型和云端转写会被隐藏，或在
 原处说明原因。
 
-要使用 Supabase 后端（见 [`supabase/README.md`](supabase/README.md)），
-可以在运行时设置：
+每个版本都可以使用 Supabase 登录：OAuth 应用的客户端 ID 已内置，其密钥保存在
+Leaflet 的登录 Worker 中（见 [`supabase/README.md`](supabase/README.md)）。
+
+如果要改用某一台服务器（例如本地栈），设置它，并通过邮件中的验证码登录：
 
 ```bash
-SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<anon key> go tool mygo dev
-```
-
-或者编译进应用：
-
-```bash
-MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://… -X leaflet/internal/remote.DefaultAnonKey=…" go tool mygo build
+SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key> go tool mygo dev
 ```
 
 想在没有 API 密钥的情况下试用智能体，可以运行一个本地模型服务（例如用
@@ -218,6 +214,9 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `internal/store` | SQLite（纯 Go）表、发件箱和设置 |
 | `internal/remote` | 基于 HTTP 的 Supabase：Auth、PostgREST、Storage 和 Edge Functions |
 | `internal/sync` | 推送发件箱、拉取、账户接管和设备心跳，经由 Supabase 或 iCloud 云盘 |
+| `internal/supabaseapi` | Supabase 管理 API，使用用户自己的账户登录 |
+| `internal/provision` | 查找、创建并设置用户的 Leaflet 项目：迁移和 Edge Functions |
+| `internal/oauth` | 浏览器登录在本机上的部分：回环重定向和 PKCE |
 | `internal/icloud` | iCloud 云盘中的 Leaflet 文件夹：完整写入的文件，以及请 iCloud 下载它们 |
 | `internal/agents` | 兼容 OpenAI 的客户端、预设、提示词、页面工具、循环和中枢 |
 | `internal/mcp` | `leaflet mcp`：供应用外智能体使用的页面工具 |
@@ -226,6 +225,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `locales` | 各语言的应用文本，以及由其生成的 Go 代码 |
 | `scripts` | 调试与发布构建，以及发布到 GitHub Releases |
 | `supabase` | 迁移（表、行级安全、RPC、Vault）和 Edge Functions |
+| `worker` | Cloudflare 上的登录 Worker：OAuth 重定向页面，以及持有客户端密钥的令牌交换 |
 | `docs` | 协议、用户故事和图标源文件 |
 
 麦克风采集运行在应用自有的 `leaflet-rec://` 协议下的一个小页面中，系统的

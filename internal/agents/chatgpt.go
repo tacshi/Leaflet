@@ -5,10 +5,8 @@ import (
 	"bytes"
 	"context"
 	"crypto"
-	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -16,13 +14,14 @@ import (
 	"io"
 	"math/big"
 	"mime"
-	"net"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
+
+	"leaflet/internal/oauth"
 )
 
 // Sign in with ChatGPT: the user's ChatGPT Plus or Pro plan pays for agent
@@ -120,14 +119,6 @@ func getSignInJSON(ctx context.Context, u string, v any) error {
 	return nil
 }
 
-func randomString(n int) string {
-	b := make([]byte, n)
-	if _, err := rand.Read(b); err != nil {
-		panic(err)
-	}
-	return base64.RawURLEncoding.EncodeToString(b)
-}
-
 var clientIDRe = regexp.MustCompile(`^[A-Za-z0-9_.\-]{4,200}$`)
 
 type chatgptTokens struct {
@@ -178,28 +169,22 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 	if err != nil {
 		return nil, err
 	}
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", chatgptPort))
+	// Only the port may differ.
+	lb, err := oauth.Listen("ChatGPT", chatgptPort, true)
 	if err != nil {
-		// Only the port may differ.
-		if ln, err = net.Listen("tcp", "127.0.0.1:0"); err != nil {
-			return nil, err
-		}
+		return nil, err
 	}
-	defer func() { _ = ln.Close() }()
-	port := ln.Addr().(*net.TCPAddr).Port
-	host := fmt.Sprintf("127.0.0.1:%d", port)
-	redirect := "http://" + host + "/auth/callback"
-	state, nonce, verifier := randomString(32), randomString(32), randomString(48)
-	sum := sha256.Sum256([]byte(verifier))
+	defer lb.Close()
+	nonce := oauth.RandomString(32)
 	q := url.Values{
 		"response_type":         {"code"},
-		"redirect_uri":          {redirect},
+		"redirect_uri":          {lb.Redirect},
 		"scope":                 {chatgptScopes},
 		"resource":              {chatgptResource},
-		"state":                 {state},
+		"state":                 {lb.State},
 		"nonce":                 {nonce},
 		"code_challenge_method": {"S256"},
-		"code_challenge":        {base64.RawURLEncoding.EncodeToString(sum[:])},
+		"code_challenge":        {lb.Challenge()},
 		"ext_agent_host_id":     {hostID},
 	}
 	if clientID != "" {
@@ -208,55 +193,12 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 		q.Set("client_id", "dynamic_agent_client")
 		q.Set("agent_name_hint", "Leaflet")
 	}
-	type callback struct {
-		code, clientID string
-		err            error
-	}
-	done := make(chan callback, 1)
-	// The first answer counts: another, such as the tab loaded again,
-	// finds done full and is dropped rather than waiting for ever.
-	finish := func(cb callback) {
-		select {
-		case done <- cb:
-		default:
-		}
-	}
-	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "GET" || r.URL.Path != "/auth/callback" || r.Host != host {
-			http.NotFound(w, r)
-			return
-		}
-		v := r.URL.Query()
-		if subtle.ConstantTimeCompare([]byte(v.Get("state")), []byte(state)) != 1 {
-			http.Error(w, "This sign-in link is stale. Start again from Leaflet.", http.StatusBadRequest)
-			return
-		}
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if e := v.Get("error"); e != "" {
-			_, _ = fmt.Fprint(w, signInPage("Sign-in was cancelled", "You can close this tab."))
-			msg := "Sign-in was cancelled."
-			if e != "access_denied" {
-				msg = "ChatGPT sign-in failed: " + e
-			}
-			finish(callback{err: errors.New(msg)})
-			return
-		}
-		_, _ = fmt.Fprint(w, signInPage("Signed in to Leaflet", "You can close this tab and go back to Leaflet."))
-		finish(callback{code: v.Get("code"), clientID: v.Get("client_id")})
-	})}
-	go func() { _ = srv.Serve(ln) }()
-	defer func() { _ = srv.Close() }()
 	open(d.AuthorizationEndpoint + "?" + q.Encode())
-	var cb callback
-	select {
-	case cb = <-done:
-	case <-ctx.Done():
-		return nil, errors.New("Sign-in timed out. Try again.") //nolint:staticcheck // shown to people as a sentence.
+	back, err := lb.Wait(ctx)
+	if err != nil {
+		return nil, err
 	}
-	if cb.err != nil {
-		return nil, cb.err
-	}
-	issued := cb.clientID
+	issued := back.Get("client_id")
 	if issued == "" {
 		issued = clientID
 	}
@@ -267,8 +209,8 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 		return nil, errors.New("ChatGPT answered for another registration. Try again.") //nolint:staticcheck // shown to people as a sentence.
 	}
 	t, err := postToken(ctx, d.TokenEndpoint, url.Values{
-		"grant_type": {"authorization_code"}, "client_id": {issued}, "code": {cb.code},
-		"code_verifier": {verifier}, "redirect_uri": {redirect}, "resource": {chatgptResource},
+		"grant_type": {"authorization_code"}, "client_id": {issued}, "code": {back.Get("code")},
+		"code_verifier": {lb.Verifier}, "redirect_uri": {lb.Redirect}, "resource": {chatgptResource},
 	})
 	if err != nil {
 		return nil, err
@@ -288,11 +230,6 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 		expires: time.Now().Add(time.Duration(t.ExpiresIn) * time.Second),
 	}
 	return g, nil
-}
-
-func signInPage(title, body string) string {
-	return `<!doctype html><meta charset="utf-8"><title>Leaflet</title><body style="font:16px -apple-system,system-ui,sans-serif;display:grid;place-items:center;height:90vh;color:#16181d"><div style="text-align:center"><h2 style="margin:0 0 8px">` +
-		title + `</h2><p style="color:#565c67;margin:0">` + body + `</p></div></body>`
 }
 
 // verifyIDToken checks the ID token's signature against OpenAI's keys, and

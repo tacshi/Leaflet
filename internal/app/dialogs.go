@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"strconv"
@@ -17,7 +16,6 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
-	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -87,14 +85,8 @@ type dialogs struct {
 	naming      bool
 	versionName string
 
-	shareOpen   bool
-	sharePage   string
-	shareEmail  string
-	shareRole   string
-	shareBusy   bool
-	shareError  string
-	shareSent   string
-	shareMember []store.Member
+	shareOpen bool
+	sharePage string
 	// pubEmails is the public link's emails field, and pubComments its
 	// Allow comments switch.
 	pubEmails   string
@@ -662,8 +654,7 @@ func (a *App) restoreVersion(pageID string, c *doc.Content) {
 
 func (a *App) openShare(id string) {
 	d := &a.dialogs
-	d.shareOpen, d.sharePage, d.shareEmail, d.shareRole, d.shareError, d.shareSent = true, id, "", "editor", "", ""
-	d.shareMember, _ = a.st.Members(id)
+	d.shareOpen, d.sharePage = true, id
 	d.pubEmails, d.pubComments = "", false
 	if p := a.pub; p != nil && p.page == id {
 		p.mu.Lock()
@@ -671,152 +662,21 @@ func (a *App) openShare(id string) {
 		p.mu.Unlock()
 	}
 	a.checkCloudflared()
-	if a.backend.SignedIn() {
-		go func() {
-			a.loadMembers(id)
-			a.update(func() { a.shareMembersOf(id) })
-		}()
-	}
-}
-
-// shareMembersOf shows page's members in the Share dialog, while it is
-// still the page the dialog is for: an answer for one before it comes
-// after the dialog opened for another.
-func (a *App) shareMembersOf(page string) {
-	if d := &a.dialogs; d.sharePage == page {
-		d.shareMember, _ = a.st.Members(page)
-	}
 }
 
 func (a *App) shareDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
-	p := a.pageByID(d.sharePage)
 	dialog(c, &d.shareOpen, 480, func() {
-		// The subtitle is about inviting people, which needs a server.
-		subtitle := ""
-		if a.backend.Configured() {
-			subtitle = locales.DialogShareSubtitle()
-		}
-		dialogHeader(c, locales.DialogShareTitle(a.pageTitleOf(d.sharePage)), subtitle, &d.shareOpen)
+		dialogHeader(c, locales.DialogShareTitle(a.pageTitleOf(d.sharePage)), "", &d.shareOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(14).Children(func() {
 			// Only a page's owner opens it to the web.
 			if a.ownsPage(d.sharePage) {
 				a.publicLink(c)
 				ui.Box(c).Height(1).FillWidth().Background(pal.Divider)
-			}
-			switch {
-			case !a.backend.Configured():
-				notice(c, "info", "info", locales.DialogShareLocalOnly(), nil)
-				return
-			case !a.session.SignedIn:
-				notice(c, "info", "info", locales.DialogShareSignIn(), func() {
-					if primary(c, "signin", "", locales.CommonSignIn()).Clicked() {
-						d.shareOpen = false
-						a.navigate(Route{Kind: "signin"})
-					}
-				})
-				return
-			case p != nil && a.isShared(*p):
+			} else {
 				notice(c, "info", "info", locales.DialogShareOwnerOnly(), nil)
-			default:
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					in := growField(c, "email", &d.shareEmail, locales.DialogShareInvitee())
-					selectBox(c, "role", &d.shareRole, []string{"editor", "viewer"}, func(s string) string {
-						return shareRoleName(s)
-					}, 116)
-					invite := func() {
-						email := strings.TrimSpace(d.shareEmail)
-						if email == "" || d.shareBusy {
-							return
-						}
-						d.shareBusy, d.shareError, d.shareSent = true, "", ""
-						page, role := d.sharePage, d.shareRole
-						go func() {
-							ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-							defer cancel()
-							_, err := a.backend.RPC(ctx, "share_page", map[string]any{"p_page_id": page, "p_email": email, "p_role": role})
-							if err == nil {
-								a.loadMembers(page)
-							}
-							a.update(func() {
-								d.shareBusy = false
-								if d.sharePage != page {
-									return
-								}
-								if err != nil {
-									d.shareError = shareFailure(err)
-									return
-								}
-								// The server answers alike whether or not the
-								// email has an account, so this can't say which.
-								d.shareEmail, d.shareSent = "", email
-								a.shareMembersOf(page)
-							})
-						}()
-					}
-					if in.Submitted() {
-						invite()
-					}
-					if primary(c, "invite", "", locales.DialogShareInvite()).Disabled(d.shareBusy).Clicked() {
-						invite()
-					}
-				})
-				if d.shareError != "" {
-					ui.Text(c, d.shareError).FontSize(12.5).TextColor(pal.DangerText)
-				} else if d.shareSent != "" {
-					ui.Text(c, locales.DialogShareSent(d.shareSent)).FontSize(12.5).TextColor(pal.TextMuted)
-				}
 			}
-			label(c, locales.DialogSharePeople())
-			ui.Column(c).Gap(2).Children(func() {
-				ui.Row(c).Padding(6, 0).Gap(10).AlignItems(ui.Center).Children(func() {
-					avatar(c, a.session.DisplayName, 28, false)
-					ui.Text(c, locales.DialogShareYou(a.session.DisplayName)).Grow(1).TextColor(pal.Text)
-					ui.Text(c, locales.CommonOwner()).FontSize(12.5).TextColor(pal.TextMuted)
-				})
-				for _, m := range d.shareMember {
-					if m.UserID == a.session.UserID {
-						continue
-					}
-					ui.Row(c.Key(m.UserID)).Padding(6, 0).Gap(10).AlignItems(ui.Center).Children(func() {
-						avatar(c, m.Name(), 28, false)
-						ui.Column(c).Grow(1).Children(func() {
-							ui.Text(c, m.Name()).TextColor(pal.Text)
-							if m.Email != "" && m.DisplayName != "" {
-								ui.Text(c, m.Email).FontSize(12).TextColor(pal.TextMuted)
-							}
-						})
-						if !m.Accepted && m.Role != "owner" {
-							ui.Text(c, locales.DialogShareInvited()).FontSize(12.5).TextColor(pal.TextMuted)
-							ui.Text(c, "·").FontSize(12.5).TextColor(pal.ChartMuted)
-						}
-						ui.Text(c, shareRoleName(m.Role)).FontSize(12.5).TextColor(pal.TextMuted)
-						if p != nil && !a.isShared(*p) && m.Role != "owner" {
-							remove := false
-							tools(c, func() { remove = iconButton(c, "remove", "x", locales.CommonRemove()).Clicked() })
-							if remove {
-								page, uid := d.sharePage, m.UserID
-								go func() {
-									ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-									defer cancel()
-									if _, err := a.backend.RPC(ctx, "unshare_page", map[string]any{"p_page_id": page, "p_user_id": uid}); err != nil {
-										msg := shareFailure(err)
-										a.update(func() {
-											if d.sharePage == page {
-												d.shareError = msg
-											}
-										})
-										return
-									}
-									a.loadMembers(page)
-									a.update(func() { a.shareMembersOf(page) })
-								}()
-							}
-						}
-					})
-				}
-			})
 			ui.Row(c).Gap(8).Children(func() {
 				if button(c, "copy", "link", locales.DialogShareCopyLink()).Clicked() {
 					c.WriteClipboard(doc.PageLink(d.sharePage))
@@ -825,19 +685,6 @@ func (a *App) shareDialog(c *ui.Context) {
 			})
 		})
 	})
-}
-
-// shareRoleName says a role of a person a page is shared with.
-func shareRoleName(role string) string {
-	switch role {
-	case "editor":
-		return locales.DialogShareCanEdit()
-	case "viewer":
-		return locales.DialogShareCanView()
-	case "owner":
-		return locales.CommonOwner()
-	}
-	return ""
 }
 
 // cloudflaredDownloads is Cloudflare's page of cloudflared's installers.
@@ -1286,25 +1133,6 @@ func (a *App) setMediaLink(id, link string) {
 		wv.Destroy()
 		delete(a.videos, id)
 	}
-}
-
-// shareFailure says why share_page refused an invite, in words for the
-// user where the server names the reason.
-func shareFailure(err error) string {
-	var re *remote.Error
-	if errors.As(err, &re) {
-		switch re.Message {
-		case "invalid_email":
-			return locales.DialogShareInvalidEmail()
-		case "cannot_share_with_self":
-			return locales.DialogShareWithSelf()
-		case "inherited_share":
-			// Removing someone shared with on a page above, which keeps
-			// them.
-			return locales.DialogShareInherited()
-		}
-	}
-	return err.Error()
 }
 
 // Inline agent prompt ---------------------------------------------------

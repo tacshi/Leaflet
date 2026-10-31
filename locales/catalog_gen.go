@@ -363,82 +363,6 @@ func (msgs Messages) ShellNewPage() string {
 	return Catalog.Format(msgs.locale, "shellNewPage", nil)
 }
 
-// ShellInviteFrom says "{name} shared “{title}” with you"
-// in the language the app shows.
-//
-// Home view (and a desktop notification): a page someone shared with the
-// user, waiting for them to accept or decline it.
-func ShellInviteFrom(name string, title string) string {
-	return In(i18n.Locale()).ShellInviteFrom(name, title)
-}
-
-// ShellInviteFrom says "{name} shared “{title}” with you"
-// in the language of msgs.
-//
-// Home view (and a desktop notification): a page someone shared with the
-// user, waiting for them to accept or decline it.
-func (msgs Messages) ShellInviteFrom(name string, title string) string {
-	return Catalog.Format(msgs.locale, "shellInviteFrom", map[string]any{"name": name, "title": title})
-}
-
-// ShellInviteSomeone says "Someone"
-// in the language the app shows.
-//
-// Home view: who shared a page, when they have no name.
-func ShellInviteSomeone() string { return In(i18n.Locale()).ShellInviteSomeone() }
-
-// ShellInviteSomeone says "Someone"
-// in the language of msgs.
-//
-// Home view: who shared a page, when they have no name.
-func (msgs Messages) ShellInviteSomeone() string {
-	return Catalog.Format(msgs.locale, "shellInviteSomeone", nil)
-}
-
-// ShellInviteAccept says "Accept"
-// in the language the app shows.
-//
-// Home view: button that accepts a shared page's invite; the page then
-// appears in the sidebar.
-func ShellInviteAccept() string { return In(i18n.Locale()).ShellInviteAccept() }
-
-// ShellInviteAccept says "Accept"
-// in the language of msgs.
-//
-// Home view: button that accepts a shared page's invite; the page then
-// appears in the sidebar.
-func (msgs Messages) ShellInviteAccept() string {
-	return Catalog.Format(msgs.locale, "shellInviteAccept", nil)
-}
-
-// ShellInviteDecline says "Decline"
-// in the language the app shows.
-//
-// Home view: tooltip of the x button that declines a shared page's invite.
-func ShellInviteDecline() string { return In(i18n.Locale()).ShellInviteDecline() }
-
-// ShellInviteDecline says "Decline"
-// in the language of msgs.
-//
-// Home view: tooltip of the x button that declines a shared page's invite.
-func (msgs Messages) ShellInviteDecline() string {
-	return Catalog.Format(msgs.locale, "shellInviteDecline", nil)
-}
-
-// ShellInviteFailed says "Could not answer the invite: {error}"
-// in the language the app shows.
-//
-// Toast when accepting or declining an invite failed.
-func ShellInviteFailed(error string) string { return In(i18n.Locale()).ShellInviteFailed(error) }
-
-// ShellInviteFailed says "Could not answer the invite: {error}"
-// in the language of msgs.
-//
-// Toast when accepting or declining an invite failed.
-func (msgs Messages) ShellInviteFailed(error string) string {
-	return Catalog.Format(msgs.locale, "shellInviteFailed", map[string]any{"error": error})
-}
-
 // TrayNewRecording says "New Recording"
 // in the language the app shows.
 //
@@ -1797,20 +1721,6 @@ func CommonEmail() string { return In(i18n.Locale()).CommonEmail() }
 // A common word used in several places of the app.
 func (msgs Messages) CommonEmail() string {
 	return Catalog.Format(msgs.locale, "commonEmail", nil)
-}
-
-// CommonOwner says "Owner"
-// in the language the app shows.
-//
-// A common word used in several places of the app.
-func CommonOwner() string { return In(i18n.Locale()).CommonOwner() }
-
-// CommonOwner says "Owner"
-// in the language of msgs.
-//
-// A common word used in several places of the app.
-func (msgs Messages) CommonOwner() string {
-	return Catalog.Format(msgs.locale, "commonOwner", nil)
 }
 
 // CommonModel says "Model"
@@ -3263,226 +3173,20 @@ func (msgs Messages) DialogShareTitle(title string) string {
 	return Catalog.Format(msgs.locale, "dialogShareTitle", map[string]any{"title": title})
 }
 
-// DialogShareSubtitle says "People you add can open this page and its subpages."
+// DialogShareOwnerOnly says "Only the page's owner can share it publicly."
 // in the language the app shows.
 //
-// Share dialog: the subtitle.
-func DialogShareSubtitle() string { return In(i18n.Locale()).DialogShareSubtitle() }
-
-// DialogShareSubtitle says "People you add can open this page and its subpages."
-// in the language of msgs.
-//
-// Share dialog: the subtitle.
-func (msgs Messages) DialogShareSubtitle() string {
-	return Catalog.Format(msgs.locale, "dialogShareSubtitle", nil)
-}
-
-// DialogShareLocalOnly says "This is a temporary, view-only link: visitors can't edit the page. Turning off sharing stops the link working."
-// in the language the app shows.
-//
-// Share dialog: a notice under the public link, in a build with no server:
-// the link is temporary and view-only, and turning sharing off ends it.
-func DialogShareLocalOnly() string { return In(i18n.Locale()).DialogShareLocalOnly() }
-
-// DialogShareLocalOnly says "This is a temporary, view-only link: visitors can't edit the page. Turning off sharing stops the link working."
-// in the language of msgs.
-//
-// Share dialog: a notice under the public link, in a build with no server:
-// the link is temporary and view-only, and turning sharing off ends it.
-func (msgs Messages) DialogShareLocalOnly() string {
-	return Catalog.Format(msgs.locale, "dialogShareLocalOnly", nil)
-}
-
-// DialogShareSignIn says "Sign in to share pages with other people."
-// in the language the app shows.
-//
-// Share dialog: a notice when signed out.
-func DialogShareSignIn() string { return In(i18n.Locale()).DialogShareSignIn() }
-
-// DialogShareSignIn says "Sign in to share pages with other people."
-// in the language of msgs.
-//
-// Share dialog: a notice when signed out.
-func (msgs Messages) DialogShareSignIn() string {
-	return Catalog.Format(msgs.locale, "dialogShareSignIn", nil)
-}
-
-// DialogShareOwnerOnly says "Only the owner of this space can change who it is shared with."
-// in the language the app shows.
-//
-// Share dialog: a notice on a page shared with the user.
+// The Share dialog of a page shared with the user: only its owner shares it
+// through a public link.
 func DialogShareOwnerOnly() string { return In(i18n.Locale()).DialogShareOwnerOnly() }
 
-// DialogShareOwnerOnly says "Only the owner of this space can change who it is shared with."
+// DialogShareOwnerOnly says "Only the page's owner can share it publicly."
 // in the language of msgs.
 //
-// Share dialog: a notice on a page shared with the user.
+// The Share dialog of a page shared with the user: only its owner shares it
+// through a public link.
 func (msgs Messages) DialogShareOwnerOnly() string {
 	return Catalog.Format(msgs.locale, "dialogShareOwnerOnly", nil)
-}
-
-// DialogShareInvitee says "Name or email"
-// in the language the app shows.
-//
-// Share dialog: the field of the person to invite.
-func DialogShareInvitee() string { return In(i18n.Locale()).DialogShareInvitee() }
-
-// DialogShareInvitee says "Name or email"
-// in the language of msgs.
-//
-// Share dialog: the field of the person to invite.
-func (msgs Messages) DialogShareInvitee() string {
-	return Catalog.Format(msgs.locale, "dialogShareInvitee", nil)
-}
-
-// DialogShareSent says "If {email} has a Leaflet account, they'll get an invite."
-// in the language the app shows.
-//
-// Share dialog: shown after inviting someone; it never says whether the
-// email has an account. The page reaches them once they accept the invite.
-func DialogShareSent(email string) string { return In(i18n.Locale()).DialogShareSent(email) }
-
-// DialogShareSent says "If {email} has a Leaflet account, they'll get an invite."
-// in the language of msgs.
-//
-// Share dialog: shown after inviting someone; it never says whether the
-// email has an account. The page reaches them once they accept the invite.
-func (msgs Messages) DialogShareSent(email string) string {
-	return Catalog.Format(msgs.locale, "dialogShareSent", map[string]any{"email": email})
-}
-
-// DialogShareInvalidEmail says "Enter an email address."
-// in the language the app shows.
-//
-// Share dialog: the server refused an invite because what was typed is no
-// email address.
-func DialogShareInvalidEmail() string { return In(i18n.Locale()).DialogShareInvalidEmail() }
-
-// DialogShareInvalidEmail says "Enter an email address."
-// in the language of msgs.
-//
-// Share dialog: the server refused an invite because what was typed is no
-// email address.
-func (msgs Messages) DialogShareInvalidEmail() string {
-	return Catalog.Format(msgs.locale, "dialogShareInvalidEmail", nil)
-}
-
-// DialogShareWithSelf says "That's your own email address."
-// in the language the app shows.
-//
-// Share dialog: the server refused an invite to the user's own email
-// address.
-func DialogShareWithSelf() string { return In(i18n.Locale()).DialogShareWithSelf() }
-
-// DialogShareWithSelf says "That's your own email address."
-// in the language of msgs.
-//
-// Share dialog: the server refused an invite to the user's own email
-// address.
-func (msgs Messages) DialogShareWithSelf() string {
-	return Catalog.Format(msgs.locale, "dialogShareWithSelf", nil)
-}
-
-// DialogShareCanEdit says "Can edit"
-// in the language the app shows.
-//
-// Share dialog: the role of a person who can edit.
-func DialogShareCanEdit() string { return In(i18n.Locale()).DialogShareCanEdit() }
-
-// DialogShareCanEdit says "Can edit"
-// in the language of msgs.
-//
-// Share dialog: the role of a person who can edit.
-func (msgs Messages) DialogShareCanEdit() string {
-	return Catalog.Format(msgs.locale, "dialogShareCanEdit", nil)
-}
-
-// DialogShareCanView says "Can view"
-// in the language the app shows.
-//
-// Share dialog: the role of a person who can only view.
-func DialogShareCanView() string { return In(i18n.Locale()).DialogShareCanView() }
-
-// DialogShareCanView says "Can view"
-// in the language of msgs.
-//
-// Share dialog: the role of a person who can only view.
-func (msgs Messages) DialogShareCanView() string {
-	return Catalog.Format(msgs.locale, "dialogShareCanView", nil)
-}
-
-// DialogShareInherited says "Shared from a page above this one: remove them there."
-// in the language the app shows.
-//
-// Share dialog: removing someone from a subpage did nothing, as their
-// access comes from a page above it.
-func DialogShareInherited() string { return In(i18n.Locale()).DialogShareInherited() }
-
-// DialogShareInherited says "Shared from a page above this one: remove them there."
-// in the language of msgs.
-//
-// Share dialog: removing someone from a subpage did nothing, as their
-// access comes from a page above it.
-func (msgs Messages) DialogShareInherited() string {
-	return Catalog.Format(msgs.locale, "dialogShareInherited", nil)
-}
-
-// DialogShareInvited says "Invited"
-// in the language the app shows.
-//
-// Share dialog: beside the role of a person who has not accepted the invite
-// yet.
-func DialogShareInvited() string { return In(i18n.Locale()).DialogShareInvited() }
-
-// DialogShareInvited says "Invited"
-// in the language of msgs.
-//
-// Share dialog: beside the role of a person who has not accepted the invite
-// yet.
-func (msgs Messages) DialogShareInvited() string {
-	return Catalog.Format(msgs.locale, "dialogShareInvited", nil)
-}
-
-// DialogShareInvite says "Invite"
-// in the language the app shows.
-//
-// Share dialog: the button inviting the person.
-func DialogShareInvite() string { return In(i18n.Locale()).DialogShareInvite() }
-
-// DialogShareInvite says "Invite"
-// in the language of msgs.
-//
-// Share dialog: the button inviting the person.
-func (msgs Messages) DialogShareInvite() string {
-	return Catalog.Format(msgs.locale, "dialogShareInvite", nil)
-}
-
-// DialogSharePeople says "People with access"
-// in the language the app shows.
-//
-// Share dialog: the heading over the people the page is shared with.
-func DialogSharePeople() string { return In(i18n.Locale()).DialogSharePeople() }
-
-// DialogSharePeople says "People with access"
-// in the language of msgs.
-//
-// Share dialog: the heading over the people the page is shared with.
-func (msgs Messages) DialogSharePeople() string {
-	return Catalog.Format(msgs.locale, "dialogSharePeople", nil)
-}
-
-// DialogShareYou says "{name} (you)"
-// in the language the app shows.
-//
-// Share dialog: the user's own row.
-func DialogShareYou(name string) string { return In(i18n.Locale()).DialogShareYou(name) }
-
-// DialogShareYou says "{name} (you)"
-// in the language of msgs.
-//
-// Share dialog: the user's own row.
-func (msgs Messages) DialogShareYou(name string) string {
-	return Catalog.Format(msgs.locale, "dialogShareYou", map[string]any{"name": name})
 }
 
 // DialogShareCopyLink says "Copy link"
@@ -5725,22 +5429,6 @@ func (msgs Messages) SidebarHide() string {
 	return Catalog.Format(msgs.locale, "sidebarHide", nil)
 }
 
-// SidebarInvites says "{count, plural, one {# page shared with you} other {# pages shared with you}}"
-// in the language the app shows.
-//
-// Sidebar's top bar: tooltip of the button, shown only while invites wait,
-// that lists the pages shared with the user to accept.
-func SidebarInvites(count int) string { return In(i18n.Locale()).SidebarInvites(count) }
-
-// SidebarInvites says "{count, plural, one {# page shared with you} other {# pages shared with you}}"
-// in the language of msgs.
-//
-// Sidebar's top bar: tooltip of the button, shown only while invites wait,
-// that lists the pages shared with the user to accept.
-func (msgs Messages) SidebarInvites(count int) string {
-	return Catalog.Format(msgs.locale, "sidebarInvites", map[string]any{"count": count})
-}
-
 // SidebarNoPages says "No pages yet"
 // in the language the app shows.
 //
@@ -6385,14 +6073,14 @@ func (msgs Messages) SidebarOnDevice() string {
 	return Catalog.Format(msgs.locale, "sidebarOnDevice", nil)
 }
 
-// SidebarSignInToSync says "Sign in to sync"
+// SidebarSignInToSync says "Sign in with Supabase to sync"
 // in the language the app shows.
 //
 // Sidebar footer: tooltip of the account row, which opens the sign-in page,
 // while not signed in.
 func SidebarSignInToSync() string { return In(i18n.Locale()).SidebarSignInToSync() }
 
-// SidebarSignInToSync says "Sign in to sync"
+// SidebarSignInToSync says "Sign in with Supabase to sync"
 // in the language of msgs.
 //
 // Sidebar footer: tooltip of the account row, which opens the sign-in page,
@@ -7685,13 +7373,13 @@ func (msgs Messages) RecErrNeedsConnection() string {
 	return Catalog.Format(msgs.locale, "recErrNeedsConnection", nil)
 }
 
-// RecErrSignInOrServer says "Sign in to transcribe in the cloud, or set a transcription server on your network in Settings › Speech to text."
+// RecErrSignInOrServer says "Sign in with Supabase to transcribe in the cloud, or set a transcription server on your network in Settings › Speec…"
 // in the language the app shows.
 //
 // Error when signed out without a local engine.
 func RecErrSignInOrServer() string { return In(i18n.Locale()).RecErrSignInOrServer() }
 
-// RecErrSignInOrServer says "Sign in to transcribe in the cloud, or set a transcription server on your network in Settings › Speech to text."
+// RecErrSignInOrServer says "Sign in with Supabase to transcribe in the cloud, or set a transcription server on your network in Settings › Speec…"
 // in the language of msgs.
 //
 // Error when signed out without a local engine.
@@ -7931,13 +7619,13 @@ func (msgs Messages) RecErrAudioMissing() string {
 	return Catalog.Format(msgs.locale, "recErrAudioMissing", nil)
 }
 
-// RecErrSignIn says "Sign in to transcribe in the cloud."
+// RecErrSignIn says "Sign in with Supabase to transcribe in the cloud."
 // in the language the app shows.
 //
 // Error when the cloud needs signing in.
 func RecErrSignIn() string { return In(i18n.Locale()).RecErrSignIn() }
 
-// RecErrSignIn says "Sign in to transcribe in the cloud."
+// RecErrSignIn says "Sign in with Supabase to transcribe in the cloud."
 // in the language of msgs.
 //
 // Error when the cloud needs signing in.
@@ -9403,13 +9091,13 @@ func (msgs Messages) SettingsSync() string {
 	return Catalog.Format(msgs.locale, "settingsSync", nil)
 }
 
-// SettingsSyncDesc says "Sign in to sync pages between devices and share them"
+// SettingsSyncDesc says "Sign in with Supabase to sync pages between devices and share them"
 // in the language the app shows.
 //
 // Settings › Account › Sync: the description.
 func SettingsSyncDesc() string { return In(i18n.Locale()).SettingsSyncDesc() }
 
-// SettingsSyncDesc says "Sign in to sync pages between devices and share them"
+// SettingsSyncDesc says "Sign in with Supabase to sync pages between devices and share them"
 // in the language of msgs.
 //
 // Settings › Account › Sync: the description.
@@ -9431,6 +9119,40 @@ func SettingsSignedIn() string { return In(i18n.Locale()).SettingsSignedIn() }
 // under it.
 func (msgs Messages) SettingsSignedIn() string {
 	return Catalog.Format(msgs.locale, "settingsSignedIn", nil)
+}
+
+// SettingsSignedInProject says "{email} · {project} on Supabase"
+// in the language the app shows.
+//
+// Settings › Account: under Signed in, the email and the Supabase project
+// synced through.
+func SettingsSignedInProject(email string, project string) string {
+	return In(i18n.Locale()).SettingsSignedInProject(email, project)
+}
+
+// SettingsSignedInProject says "{email} · {project} on Supabase"
+// in the language of msgs.
+//
+// Settings › Account: under Signed in, the email and the Supabase project
+// synced through.
+func (msgs Messages) SettingsSignedInProject(email string, project string) string {
+	return Catalog.Format(msgs.locale, "settingsSignedInProject", map[string]any{"email": email, "project": project})
+}
+
+// SettingsOpenSupabase says "Open in Supabase"
+// in the language the app shows.
+//
+// Settings › Account: tooltip of the button opening the project in the
+// Supabase dashboard.
+func SettingsOpenSupabase() string { return In(i18n.Locale()).SettingsOpenSupabase() }
+
+// SettingsOpenSupabase says "Open in Supabase"
+// in the language of msgs.
+//
+// Settings › Account: tooltip of the button opening the project in the
+// Supabase dashboard.
+func (msgs Messages) SettingsOpenSupabase() string {
+	return Catalog.Format(msgs.locale, "settingsOpenSupabase", nil)
 }
 
 // SettingsDevices says "Devices"
@@ -10207,13 +9929,13 @@ func (msgs Messages) SettingsProviderDescNoServer() string {
 	return Catalog.Format(msgs.locale, "settingsProviderDescNoServer", nil)
 }
 
-// SettingsProviderDescSignIn says "Cloud providers run on the server: sign in first, or add a model server on this machine."
+// SettingsProviderDescSignIn says "Cloud providers run on the server: sign in with Supabase first, or add a model server on this machine."
 // in the language the app shows.
 //
 // The provider dialog: a cloud provider while signed out.
 func SettingsProviderDescSignIn() string { return In(i18n.Locale()).SettingsProviderDescSignIn() }
 
-// SettingsProviderDescSignIn says "Cloud providers run on the server: sign in first, or add a model server on this machine."
+// SettingsProviderDescSignIn says "Cloud providers run on the server: sign in with Supabase first, or add a model server on this machine."
 // in the language of msgs.
 //
 // The provider dialog: a cloud provider while signed out.
@@ -11013,13 +10735,13 @@ func (msgs Messages) SettingsNotSyncing() string {
 	return Catalog.Format(msgs.locale, "settingsNotSyncing", nil)
 }
 
-// SettingsNotSyncingDesc says "Sign in to sync pages between devices"
+// SettingsNotSyncingDesc says "Sign in with Supabase to sync pages between devices"
 // in the language the app shows.
 //
 // Settings › Sync and storage: signed out.
 func SettingsNotSyncingDesc() string { return In(i18n.Locale()).SettingsNotSyncingDesc() }
 
-// SettingsNotSyncingDesc says "Sign in to sync pages between devices"
+// SettingsNotSyncingDesc says "Sign in with Supabase to sync pages between devices"
 // in the language of msgs.
 //
 // Settings › Sync and storage: signed out.
@@ -11069,6 +10791,38 @@ func SettingsICloudOnDesc() string { return In(i18n.Locale()).SettingsICloudOnDe
 // Settings › Sync and storage: under iCloud sync, while it is on.
 func (msgs Messages) SettingsICloudOnDesc() string {
 	return Catalog.Format(msgs.locale, "settingsICloudOnDesc", nil)
+}
+
+// SettingsICloudSupabaseOn says "Sign out of Supabase to sync through iCloud Drive instead"
+// in the language the app shows.
+//
+// Tooltip on the disabled iCloud sync switch while signed in with Supabase:
+// pages sync one way at a time.
+func SettingsICloudSupabaseOn() string { return In(i18n.Locale()).SettingsICloudSupabaseOn() }
+
+// SettingsICloudSupabaseOn says "Sign out of Supabase to sync through iCloud Drive instead"
+// in the language of msgs.
+//
+// Tooltip on the disabled iCloud sync switch while signed in with Supabase:
+// pages sync one way at a time.
+func (msgs Messages) SettingsICloudSupabaseOn() string {
+	return Catalog.Format(msgs.locale, "settingsICloudSupabaseOn", nil)
+}
+
+// SettingsSupabaseICloudOn says "Turn off iCloud sync to sync through Supabase instead"
+// in the language the app shows.
+//
+// Tooltip on the disabled Supabase sign-in buttons while iCloud sync is on:
+// pages sync one way at a time.
+func SettingsSupabaseICloudOn() string { return In(i18n.Locale()).SettingsSupabaseICloudOn() }
+
+// SettingsSupabaseICloudOn says "Turn off iCloud sync to sync through Supabase instead"
+// in the language of msgs.
+//
+// Tooltip on the disabled Supabase sign-in buttons while iCloud sync is on:
+// pages sync one way at a time.
+func (msgs Messages) SettingsSupabaseICloudOn() string {
+	return Catalog.Format(msgs.locale, "settingsSupabaseICloudOn", nil)
 }
 
 // SettingsICloudUnavailable says "iCloud Drive isn't available. Sign in to iCloud and turn on iCloud Drive, or turn iCloud sync off and on again."
@@ -11757,13 +11511,13 @@ func (msgs Messages) ExternalDisconnectFailed(app string, error string) string {
 	return Catalog.Format(msgs.locale, "externalDisconnectFailed", map[string]any{"app": app, "error": error})
 }
 
-// SigninTitle says "Sign in to Leaflet"
+// SigninTitle says "Sync with Supabase"
 // in the language the app shows.
 //
 // The sign-in page's title.
 func SigninTitle() string { return In(i18n.Locale()).SigninTitle() }
 
-// SigninTitle says "Sign in to Leaflet"
+// SigninTitle says "Sync with Supabase"
 // in the language of msgs.
 //
 // The sign-in page's title.
@@ -11771,13 +11525,13 @@ func (msgs Messages) SigninTitle() string {
 	return Catalog.Format(msgs.locale, "signinTitle", nil)
 }
 
-// SigninSubtitle says "Sync your pages between devices, share them, and use cloud models."
+// SigninSubtitle says "Leaflet keeps your pages in your own Supabase project and syncs them between your devices."
 // in the language the app shows.
 //
 // The sign-in page, under its title.
 func SigninSubtitle() string { return In(i18n.Locale()).SigninSubtitle() }
 
-// SigninSubtitle says "Sync your pages between devices, share them, and use cloud models."
+// SigninSubtitle says "Leaflet keeps your pages in your own Supabase project and syncs them between your devices."
 // in the language of msgs.
 //
 // The sign-in page, under its title.
@@ -11785,76 +11539,354 @@ func (msgs Messages) SigninSubtitle() string {
 	return Catalog.Format(msgs.locale, "signinSubtitle", nil)
 }
 
-// SigninNoServer says "This build has no server. Set SUPABASE_URL and SUPABASE_ANON_KEY to sign in."
+// SigninNoServer says "SUPABASE_URL is set without SUPABASE_ANON_KEY. Set both to sign in to that server, or neither to sign in with Supabase."
 // in the language the app shows.
 //
-// The sign-in page in a build without a server.
+// The sign-in page when the environment sets a server's URL but not its
+// key.
 func SigninNoServer() string { return In(i18n.Locale()).SigninNoServer() }
 
-// SigninNoServer says "This build has no server. Set SUPABASE_URL and SUPABASE_ANON_KEY to sign in."
+// SigninNoServer says "SUPABASE_URL is set without SUPABASE_ANON_KEY. Set both to sign in to that server, or neither to sign in with Supabase."
 // in the language of msgs.
 //
-// The sign-in page in a build without a server.
+// The sign-in page when the environment sets a server's URL but not its
+// key.
 func (msgs Messages) SigninNoServer() string {
 	return Catalog.Format(msgs.locale, "signinNoServer", nil)
 }
 
-// SigninPassword says "Password"
+// SigninContinueSupabase says "Continue with Supabase"
 // in the language the app shows.
 //
-// The sign-in page: the way of signing in with a password, and the password
-// field.
-func SigninPassword() string { return In(i18n.Locale()).SigninPassword() }
+// The sign-in page's button opening Supabase's sign-in in the browser.
+func SigninContinueSupabase() string { return In(i18n.Locale()).SigninContinueSupabase() }
 
-// SigninPassword says "Password"
+// SigninContinueSupabase says "Continue with Supabase"
 // in the language of msgs.
 //
-// The sign-in page: the way of signing in with a password, and the password
-// field.
-func (msgs Messages) SigninPassword() string {
-	return Catalog.Format(msgs.locale, "signinPassword", nil)
+// The sign-in page's button opening Supabase's sign-in in the browser.
+func (msgs Messages) SigninContinueSupabase() string {
+	return Catalog.Format(msgs.locale, "signinContinueSupabase", nil)
 }
 
-// SigninCreateAccount says "Create account"
+// SigninNoSupabase says "New to Supabase?"
 // in the language the app shows.
 //
-// The sign-in page: the way of creating an account, and its button.
-func SigninCreateAccount() string { return In(i18n.Locale()).SigninCreateAccount() }
+// The sign-in page: before the link to make a Supabase account.
+func SigninNoSupabase() string { return In(i18n.Locale()).SigninNoSupabase() }
 
-// SigninCreateAccount says "Create account"
+// SigninNoSupabase says "New to Supabase?"
 // in the language of msgs.
 //
-// The sign-in page: the way of creating an account, and its button.
-func (msgs Messages) SigninCreateAccount() string {
-	return Catalog.Format(msgs.locale, "signinCreateAccount", nil)
+// The sign-in page: before the link to make a Supabase account.
+func (msgs Messages) SigninNoSupabase() string {
+	return Catalog.Format(msgs.locale, "signinNoSupabase", nil)
 }
 
-// SigninEmailCode says "Email code"
+// SigninCreateSupabase says "Create a free account"
 // in the language the app shows.
 //
-// The sign-in page: the way of signing in with a code emailed.
-func SigninEmailCode() string { return In(i18n.Locale()).SigninEmailCode() }
+// The sign-in page: the link opening Supabase's sign-up page.
+func SigninCreateSupabase() string { return In(i18n.Locale()).SigninCreateSupabase() }
 
-// SigninEmailCode says "Email code"
+// SigninCreateSupabase says "Create a free account"
 // in the language of msgs.
 //
-// The sign-in page: the way of signing in with a code emailed.
-func (msgs Messages) SigninEmailCode() string {
-	return Catalog.Format(msgs.locale, "signinEmailCode", nil)
+// The sign-in page: the link opening Supabase's sign-up page.
+func (msgs Messages) SigninCreateSupabase() string {
+	return Catalog.Format(msgs.locale, "signinCreateSupabase", nil)
 }
 
-// SigninPasswordNew says "Password (at least 8 characters)"
+// SigninWaitingBrowser says "Finish signing in in your browser…"
 // in the language the app shows.
 //
-// The sign-in page › Create account: the password field.
-func SigninPasswordNew() string { return In(i18n.Locale()).SigninPasswordNew() }
+// The sign-in page while Supabase's sign-in is open in the browser.
+func SigninWaitingBrowser() string { return In(i18n.Locale()).SigninWaitingBrowser() }
 
-// SigninPasswordNew says "Password (at least 8 characters)"
+// SigninWaitingBrowser says "Finish signing in in your browser…"
 // in the language of msgs.
 //
-// The sign-in page › Create account: the password field.
-func (msgs Messages) SigninPasswordNew() string {
-	return Catalog.Format(msgs.locale, "signinPasswordNew", nil)
+// The sign-in page while Supabase's sign-in is open in the browser.
+func (msgs Messages) SigninWaitingBrowser() string {
+	return Catalog.Format(msgs.locale, "signinWaitingBrowser", nil)
+}
+
+// SigninNewOrg says "Made a Supabase organization just now?"
+// in the language the app shows.
+//
+// The sign-in page while Supabase's sign-in is open: before the link
+// opening it again, which Supabase leaves after a new account makes its
+// first organization.
+func SigninNewOrg() string { return In(i18n.Locale()).SigninNewOrg() }
+
+// SigninNewOrg says "Made a Supabase organization just now?"
+// in the language of msgs.
+//
+// The sign-in page while Supabase's sign-in is open: before the link
+// opening it again, which Supabase leaves after a new account makes its
+// first organization.
+func (msgs Messages) SigninNewOrg() string {
+	return Catalog.Format(msgs.locale, "signinNewOrg", nil)
+}
+
+// SigninReopenBrowser says "Open the sign-in page again"
+// in the language the app shows.
+//
+// The sign-in page: the link opening Supabase's sign-in in the browser
+// again.
+func SigninReopenBrowser() string { return In(i18n.Locale()).SigninReopenBrowser() }
+
+// SigninReopenBrowser says "Open the sign-in page again"
+// in the language of msgs.
+//
+// The sign-in page: the link opening Supabase's sign-in in the browser
+// again.
+func (msgs Messages) SigninReopenBrowser() string {
+	return Catalog.Format(msgs.locale, "signinReopenBrowser", nil)
+}
+
+// SigninFindingProject says "Looking for your Leaflet project…"
+// in the language the app shows.
+//
+// The sign-in page while looking for the account's Leaflet project.
+func SigninFindingProject() string { return In(i18n.Locale()).SigninFindingProject() }
+
+// SigninFindingProject says "Looking for your Leaflet project…"
+// in the language of msgs.
+//
+// The sign-in page while looking for the account's Leaflet project.
+func (msgs Messages) SigninFindingProject() string {
+	return Catalog.Format(msgs.locale, "signinFindingProject", nil)
+}
+
+// SigninChooseProject says "Choose a project"
+// in the language the app shows.
+//
+// The sign-in page: the heading over the projects to choose, when there is
+// none or several.
+func SigninChooseProject() string { return In(i18n.Locale()).SigninChooseProject() }
+
+// SigninChooseProject says "Choose a project"
+// in the language of msgs.
+//
+// The sign-in page: the heading over the projects to choose, when there is
+// none or several.
+func (msgs Messages) SigninChooseProject() string {
+	return Catalog.Format(msgs.locale, "signinChooseProject", nil)
+}
+
+// SigninUseProject says "Use"
+// in the language the app shows.
+//
+// The sign-in page: the button using a Leaflet project already in the
+// account.
+func SigninUseProject() string { return In(i18n.Locale()).SigninUseProject() }
+
+// SigninUseProject says "Use"
+// in the language of msgs.
+//
+// The sign-in page: the button using a Leaflet project already in the
+// account.
+func (msgs Messages) SigninUseProject() string {
+	return Catalog.Format(msgs.locale, "signinUseProject", nil)
+}
+
+// SigninNewProject says "New project"
+// in the language the app shows.
+//
+// The sign-in page: the row creating a project.
+func SigninNewProject() string { return In(i18n.Locale()).SigninNewProject() }
+
+// SigninNewProject says "New project"
+// in the language of msgs.
+//
+// The sign-in page: the row creating a project.
+func (msgs Messages) SigninNewProject() string {
+	return Catalog.Format(msgs.locale, "signinNewProject", nil)
+}
+
+// SigninNewProjectDesc says "Leaflet creates it in your Supabase account and sets it up"
+// in the language the app shows.
+//
+// The sign-in page: the description of the row creating a project.
+func SigninNewProjectDesc() string { return In(i18n.Locale()).SigninNewProjectDesc() }
+
+// SigninNewProjectDesc says "Leaflet creates it in your Supabase account and sets it up"
+// in the language of msgs.
+//
+// The sign-in page: the description of the row creating a project.
+func (msgs Messages) SigninNewProjectDesc() string {
+	return Catalog.Format(msgs.locale, "signinNewProjectDesc", nil)
+}
+
+// SigninCreateProject says "Create"
+// in the language the app shows.
+//
+// The sign-in page: the button creating a project.
+func SigninCreateProject() string { return In(i18n.Locale()).SigninCreateProject() }
+
+// SigninCreateProject says "Create"
+// in the language of msgs.
+//
+// The sign-in page: the button creating a project.
+func (msgs Messages) SigninCreateProject() string {
+	return Catalog.Format(msgs.locale, "signinCreateProject", nil)
+}
+
+// SigninCreatingProject says "Creating your project… this takes a minute or two"
+// in the language the app shows.
+//
+// The sign-in page while Supabase creates the project.
+func SigninCreatingProject() string { return In(i18n.Locale()).SigninCreatingProject() }
+
+// SigninCreatingProject says "Creating your project… this takes a minute or two"
+// in the language of msgs.
+//
+// The sign-in page while Supabase creates the project.
+func (msgs Messages) SigninCreatingProject() string {
+	return Catalog.Format(msgs.locale, "signinCreatingProject", nil)
+}
+
+// SigninStartingProject says "Waiting for your project to start… this can take a minute or two"
+// in the language the app shows.
+//
+// The sign-in page while waiting for a project that is starting, or
+// restoring from paused.
+func SigninStartingProject() string { return In(i18n.Locale()).SigninStartingProject() }
+
+// SigninStartingProject says "Waiting for your project to start… this can take a minute or two"
+// in the language of msgs.
+//
+// The sign-in page while waiting for a project that is starting, or
+// restoring from paused.
+func (msgs Messages) SigninStartingProject() string {
+	return Catalog.Format(msgs.locale, "signinStartingProject", nil)
+}
+
+// SigninProjectNotSetUp says "Not set up for Leaflet yet"
+// in the language the app shows.
+//
+// The sign-in page: under a project named Leaflet that holds no Leaflet
+// tables yet, which may be one Leaflet made and did not finish, or the
+// person's own.
+func SigninProjectNotSetUp() string { return In(i18n.Locale()).SigninProjectNotSetUp() }
+
+// SigninProjectNotSetUp says "Not set up for Leaflet yet"
+// in the language of msgs.
+//
+// The sign-in page: under a project named Leaflet that holds no Leaflet
+// tables yet, which may be one Leaflet made and did not finish, or the
+// person's own.
+func (msgs Messages) SigninProjectNotSetUp() string {
+	return Catalog.Format(msgs.locale, "signinProjectNotSetUp", nil)
+}
+
+// SigninProjectPaused says "Paused; Leaflet restarts it"
+// in the language the app shows.
+//
+// The sign-in page: under a project named Leaflet that Supabase paused.
+func SigninProjectPaused() string { return In(i18n.Locale()).SigninProjectPaused() }
+
+// SigninProjectPaused says "Paused; Leaflet restarts it"
+// in the language of msgs.
+//
+// The sign-in page: under a project named Leaflet that Supabase paused.
+func (msgs Messages) SigninProjectPaused() string {
+	return Catalog.Format(msgs.locale, "signinProjectPaused", nil)
+}
+
+// SigninSetUpProject says "Set up"
+// in the language the app shows.
+//
+// The sign-in page: the button setting up a project Leaflet made, or
+// restarting a paused one.
+func SigninSetUpProject() string { return In(i18n.Locale()).SigninSetUpProject() }
+
+// SigninSetUpProject says "Set up"
+// in the language of msgs.
+//
+// The sign-in page: the button setting up a project Leaflet made, or
+// restarting a paused one.
+func (msgs Messages) SigninSetUpProject() string {
+	return Catalog.Format(msgs.locale, "signinSetUpProject", nil)
+}
+
+// SigninSettingUp says "Setting up Leaflet in your project…"
+// in the language the app shows.
+//
+// The sign-in page while checking what the project needs.
+func SigninSettingUp() string { return In(i18n.Locale()).SigninSettingUp() }
+
+// SigninSettingUp says "Setting up Leaflet in your project…"
+// in the language of msgs.
+//
+// The sign-in page while checking what the project needs.
+func (msgs Messages) SigninSettingUp() string {
+	return Catalog.Format(msgs.locale, "signinSettingUp", nil)
+}
+
+// SigninSettingUpSteps says "Setting up Leaflet in your project… {done} of {total}"
+// in the language the app shows.
+//
+// The sign-in page while setting the project up: steps done of the steps
+// there are.
+func SigninSettingUpSteps(done int, total int) string {
+	return In(i18n.Locale()).SigninSettingUpSteps(done, total)
+}
+
+// SigninSettingUpSteps says "Setting up Leaflet in your project… {done} of {total}"
+// in the language of msgs.
+//
+// The sign-in page while setting the project up: steps done of the steps
+// there are.
+func (msgs Messages) SigninSettingUpSteps(done int, total int) string {
+	return Catalog.Format(msgs.locale, "signinSettingUpSteps", map[string]any{"done": done, "total": total})
+}
+
+// SigninSigningIn says "Signing in…"
+// in the language the app shows.
+//
+// The sign-in page while signing in to the project.
+func SigninSigningIn() string { return In(i18n.Locale()).SigninSigningIn() }
+
+// SigninSigningIn says "Signing in…"
+// in the language of msgs.
+//
+// The sign-in page while signing in to the project.
+func (msgs Messages) SigninSigningIn() string {
+	return Catalog.Format(msgs.locale, "signinSigningIn", nil)
+}
+
+// SigninSetupFailed says "Leaflet couldn't set up your project: {error}"
+// in the language the app shows.
+//
+// The sign-in page when creating or setting up the project failed.
+func SigninSetupFailed(error string) string { return In(i18n.Locale()).SigninSetupFailed(error) }
+
+// SigninSetupFailed says "Leaflet couldn't set up your project: {error}"
+// in the language of msgs.
+//
+// The sign-in page when creating or setting up the project failed.
+func (msgs Messages) SigninSetupFailed(error string) string {
+	return Catalog.Format(msgs.locale, "signinSetupFailed", map[string]any{"error": error})
+}
+
+// SigninNotYourProject says "{project} belongs to {owner} in Leaflet. Sign in with that Supabase account, or use a project of your own."
+// in the language the app shows.
+//
+// The sign-in page when the project's Leaflet owner is another account than
+// the one signed in to Supabase.
+func SigninNotYourProject(project string, owner string) string {
+	return In(i18n.Locale()).SigninNotYourProject(project, owner)
+}
+
+// SigninNotYourProject says "{project} belongs to {owner} in Leaflet. Sign in with that Supabase account, or use a project of your own."
+// in the language of msgs.
+//
+// The sign-in page when the project's Leaflet owner is another account than
+// the one signed in to Supabase.
+func (msgs Messages) SigninNotYourProject(project string, owner string) string {
+	return Catalog.Format(msgs.locale, "signinNotYourProject", map[string]any{"project": project, "owner": owner})
 }
 
 // SigninCode says "Code from the email"
@@ -11897,48 +11929,6 @@ func SigninContinueLocal() string { return In(i18n.Locale()).SigninContinueLocal
 // The sign-in page: going on without an account.
 func (msgs Messages) SigninContinueLocal() string {
 	return Catalog.Format(msgs.locale, "signinContinueLocal", nil)
-}
-
-// SigninConfirmEmail says "Check your email to confirm the account, then sign in."
-// in the language the app shows.
-//
-// The sign-in page, after creating an account.
-func SigninConfirmEmail() string { return In(i18n.Locale()).SigninConfirmEmail() }
-
-// SigninConfirmEmail says "Check your email to confirm the account, then sign in."
-// in the language of msgs.
-//
-// The sign-in page, after creating an account.
-func (msgs Messages) SigninConfirmEmail() string {
-	return Catalog.Format(msgs.locale, "signinConfirmEmail", nil)
-}
-
-// SigninEnterEmailPassword says "Enter your email and password."
-// in the language the app shows.
-//
-// The sign-in page: signing in without them.
-func SigninEnterEmailPassword() string { return In(i18n.Locale()).SigninEnterEmailPassword() }
-
-// SigninEnterEmailPassword says "Enter your email and password."
-// in the language of msgs.
-//
-// The sign-in page: signing in without them.
-func (msgs Messages) SigninEnterEmailPassword() string {
-	return Catalog.Format(msgs.locale, "signinEnterEmailPassword", nil)
-}
-
-// SigninPasswordTooShort says "Use a password of at least 8 characters."
-// in the language the app shows.
-//
-// The sign-in page › Create account: a short password.
-func SigninPasswordTooShort() string { return In(i18n.Locale()).SigninPasswordTooShort() }
-
-// SigninPasswordTooShort says "Use a password of at least 8 characters."
-// in the language of msgs.
-//
-// The sign-in page › Create account: a short password.
-func (msgs Messages) SigninPasswordTooShort() string {
-	return Catalog.Format(msgs.locale, "signinPasswordTooShort", nil)
 }
 
 // SigninCodeSent says "We emailed you a sign-in link and code."

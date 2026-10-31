@@ -107,7 +107,12 @@ func (a *App) supabaseSignIn(c *ui.Context) {
 	}
 	switch supa.step {
 	case "":
-		if primary(c, "supabase", "", locales.SigninContinueSupabase()).FillWidth().Clicked() {
+		// One way of syncing at a time: iCloud's, while it is on.
+		if tip := a.supabaseTip(); tip != "" {
+			ui.Column(c.Key("supabase-tip")).FillWidth().Tooltip(tip).Children(func() {
+				primary(c, "supabase", "", locales.SigninContinueSupabase()).FillWidth().Disabled(true)
+			})
+		} else if primary(c, "supabase", "", locales.SigninContinueSupabase()).FillWidth().Clicked() {
 			a.signInWithSupabase()
 		}
 		ui.Row(c).Gap(6).Justify(ui.Center).AlignItems(ui.Center).Children(func() {

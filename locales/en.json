@@ -3932,6 +3932,14 @@
   "@settingsICloudOnDesc": {
     "description": "Settings › Sync and storage: under iCloud sync, while it is on."
   },
+  "settingsICloudSupabaseOn": "Sign out of Supabase to sync through iCloud Drive instead",
+  "@settingsICloudSupabaseOn": {
+    "description": "Tooltip on the disabled iCloud sync switch while signed in with Supabase: pages sync one way at a time."
+  },
+  "settingsSupabaseICloudOn": "Turn off iCloud sync to sync through Supabase instead",
+  "@settingsSupabaseICloudOn": {
+    "description": "Tooltip on the disabled Supabase sign-in buttons while iCloud sync is on: pages sync one way at a time."
+  },
   "settingsICloudUnavailable": "iCloud Drive isn't available. Sign in to iCloud and turn on iCloud Drive, or turn iCloud sync off and on again.",
   "@settingsICloudUnavailable": {
     "description": "iCloud sync cannot run: iCloud Drive is off, or the Leaflet folder in it went."
@@ -4195,14 +4203,6 @@
   "@signinWaitingBrowser": {
     "description": "The sign-in page while Supabase's sign-in is open in the browser."
   },
-  "signinFindingProject": "Looking for your Leaflet project…",
-  "@signinFindingProject": {
-    "description": "The sign-in page while looking for the account's Leaflet project."
-  },
-  "signinChooseProject": "Choose a project",
-  "@signinChooseProject": {
-    "description": "The sign-in page: the heading over the projects to choose, when there is none or several."
-  },
   "signinNewOrg": "Made a Supabase organization just now?",
   "@signinNewOrg": {
     "description": "The sign-in page while Supabase's sign-in is open: before the link opening it again, which Supabase leaves after a new account makes its first organization."
@@ -4210,6 +4210,14 @@
   "signinReopenBrowser": "Open the sign-in page again",
   "@signinReopenBrowser": {
     "description": "The sign-in page: the link opening Supabase's sign-in in the browser again."
+  },
+  "signinFindingProject": "Looking for your Leaflet project…",
+  "@signinFindingProject": {
+    "description": "The sign-in page while looking for the account's Leaflet project."
+  },
+  "signinChooseProject": "Choose a project",
+  "@signinChooseProject": {
+    "description": "The sign-in page: the heading over the projects to choose, when there is none or several."
   },
   "signinUseProject": "Use",
   "@signinUseProject": {

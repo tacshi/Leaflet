@@ -2,6 +2,7 @@ package app
 
 import (
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -129,5 +130,35 @@ func TestSignInAsAnotherAccountStopsForAnUnsavedPage(t *testing.T) {
 	}
 	if a.session.SignedIn || a.page == nil || a.page.title != "Typed title" {
 		t.Errorf("signed in %v, page open %v", a.session.SignedIn, a.page != nil)
+	}
+}
+
+// Pages sync one way at a time: with iCloud sync on, signing in with
+// Supabase is disabled, and its tip says how to use it instead.
+func TestICloudSyncDisablesSupabaseSignIn(t *testing.T) {
+	t.Cleanup(func() { supa = supabaseState{} })
+	a := templatesApp(t)
+	if !a.hasServer() {
+		t.Skip("no server to sign in to")
+	}
+	a.settings.ICloudSync = true
+	tt := ui.NewTester(func(c *ui.Context) { a.signInView(c) }, 900, 700)
+	r, ok := tt.Find(locales.SigninContinueSupabase())
+	if !ok {
+		t.Fatalf("no button in %v", tt.Texts())
+	}
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Advance(time.Second)
+	tt.Frame()
+	if !tt.HasText(locales.SettingsSupabaseICloudOn()) {
+		t.Errorf("no tip in %v", tt.Texts())
+	}
+	if err := tt.Click(locales.SigninContinueSupabase()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if supa.step != "" {
+		supa.cancel()
+		t.Fatalf("signing in with iCloud sync on: step %q", supa.step)
 	}
 }

@@ -11105,6 +11105,38 @@ func (msgs Messages) SettingsICloudOnDesc() string {
 	return Catalog.Format(msgs.locale, "settingsICloudOnDesc", nil)
 }
 
+// SettingsICloudSupabaseOn says "Sign out of Supabase to sync through iCloud Drive instead"
+// in the language the app shows.
+//
+// Tooltip on the disabled iCloud sync switch while signed in with Supabase:
+// pages sync one way at a time.
+func SettingsICloudSupabaseOn() string { return In(i18n.Locale()).SettingsICloudSupabaseOn() }
+
+// SettingsICloudSupabaseOn says "Sign out of Supabase to sync through iCloud Drive instead"
+// in the language of msgs.
+//
+// Tooltip on the disabled iCloud sync switch while signed in with Supabase:
+// pages sync one way at a time.
+func (msgs Messages) SettingsICloudSupabaseOn() string {
+	return Catalog.Format(msgs.locale, "settingsICloudSupabaseOn", nil)
+}
+
+// SettingsSupabaseICloudOn says "Turn off iCloud sync to sync through Supabase instead"
+// in the language the app shows.
+//
+// Tooltip on the disabled Supabase sign-in buttons while iCloud sync is on:
+// pages sync one way at a time.
+func SettingsSupabaseICloudOn() string { return In(i18n.Locale()).SettingsSupabaseICloudOn() }
+
+// SettingsSupabaseICloudOn says "Turn off iCloud sync to sync through Supabase instead"
+// in the language of msgs.
+//
+// Tooltip on the disabled Supabase sign-in buttons while iCloud sync is on:
+// pages sync one way at a time.
+func (msgs Messages) SettingsSupabaseICloudOn() string {
+	return Catalog.Format(msgs.locale, "settingsSupabaseICloudOn", nil)
+}
+
 // SettingsICloudUnavailable says "iCloud Drive isn't available. Sign in to iCloud and turn on iCloud Drive, or turn iCloud sync off and on again."
 // in the language the app shows.
 //
@@ -11891,38 +11923,6 @@ func (msgs Messages) SigninWaitingBrowser() string {
 	return Catalog.Format(msgs.locale, "signinWaitingBrowser", nil)
 }
 
-// SigninFindingProject says "Looking for your Leaflet project…"
-// in the language the app shows.
-//
-// The sign-in page while looking for the account's Leaflet project.
-func SigninFindingProject() string { return In(i18n.Locale()).SigninFindingProject() }
-
-// SigninFindingProject says "Looking for your Leaflet project…"
-// in the language of msgs.
-//
-// The sign-in page while looking for the account's Leaflet project.
-func (msgs Messages) SigninFindingProject() string {
-	return Catalog.Format(msgs.locale, "signinFindingProject", nil)
-}
-
-// SigninChooseProject says "Choose a project"
-// in the language the app shows.
-//
-// The sign-in page: the heading over the projects to choose, when there is
-// none or several.
-func SigninChooseProject() string { return In(i18n.Locale()).SigninChooseProject() }
-
-// SigninChooseProject says "Choose a project"
-// in the language of msgs.
-//
-// The sign-in page: the heading over the projects to choose, when there is
-// none or several.
-func (msgs Messages) SigninChooseProject() string {
-	return Catalog.Format(msgs.locale, "signinChooseProject", nil)
-}
-
-// SigninUseProject says "Use"
-// in the language the app shows.
 // SigninNewOrg says "Made a Supabase organization just now?"
 // in the language the app shows.
 //
@@ -11957,6 +11957,38 @@ func (msgs Messages) SigninReopenBrowser() string {
 	return Catalog.Format(msgs.locale, "signinReopenBrowser", nil)
 }
 
+// SigninFindingProject says "Looking for your Leaflet project…"
+// in the language the app shows.
+//
+// The sign-in page while looking for the account's Leaflet project.
+func SigninFindingProject() string { return In(i18n.Locale()).SigninFindingProject() }
+
+// SigninFindingProject says "Looking for your Leaflet project…"
+// in the language of msgs.
+//
+// The sign-in page while looking for the account's Leaflet project.
+func (msgs Messages) SigninFindingProject() string {
+	return Catalog.Format(msgs.locale, "signinFindingProject", nil)
+}
+
+// SigninChooseProject says "Choose a project"
+// in the language the app shows.
+//
+// The sign-in page: the heading over the projects to choose, when there is
+// none or several.
+func SigninChooseProject() string { return In(i18n.Locale()).SigninChooseProject() }
+
+// SigninChooseProject says "Choose a project"
+// in the language of msgs.
+//
+// The sign-in page: the heading over the projects to choose, when there is
+// none or several.
+func (msgs Messages) SigninChooseProject() string {
+	return Catalog.Format(msgs.locale, "signinChooseProject", nil)
+}
+
+// SigninUseProject says "Use"
+// in the language the app shows.
 //
 // The sign-in page: the button using a Leaflet project already in the
 // account.

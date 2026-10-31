@@ -294,9 +294,8 @@ func (a *App) accountSettings(c *ui.Context) {
 				s.nameEdited = false
 			}
 		})
-		// A build without a server says so once, in Sync and storage;
-		// iCloud sync is there too.
-		if !a.hasServer() || a.sync.ICloudOn() {
+		// A build without a server says so once, in Sync and storage.
+		if !a.hasServer() {
 			return
 		}
 		title, desc := locales.SettingsSync(), locales.SettingsSyncDesc()
@@ -319,9 +318,7 @@ func (a *App) accountSettings(c *ui.Context) {
 					a.signOut()
 				}
 			case a.hasServer():
-				if primary(c, "signin", "", locales.CommonSignIn()).Clicked() {
-					a.navigate(Route{Kind: "signin"})
-				}
+				a.signInButton(c)
 			}
 		})
 	})
@@ -1381,25 +1378,30 @@ func (a *App) syncSettings(c *ui.Context) {
 	}
 	card(c, "status", func() {
 		first := true
-		if !a.session.SignedIn && (icloud.Available() || a.settings.ICloudSync) {
+		if icloud.Available() || a.settings.ICloudSync {
 			on := a.settings.ICloudSync
 			desc := locales.SettingsICloudDesc()
 			if on {
 				desc = locales.SettingsICloudOnDesc()
 			}
 			settingRow(c, "icloud", locales.SettingsICloud(), desc, true, func() {
-				if ui.Switch(c.Key("icloud"), &on).Disabled(a.icloudBusy).Changed() {
-					a.setICloud(on)
+				// One way of syncing at a time: Supabase's, signed in.
+				tip := ""
+				if a.session.SignedIn {
+					tip = locales.SettingsICloudSupabaseOn()
 				}
+				tipped(c, "icloud-tip", tip, func() {
+					if ui.Switch(c.Key("icloud"), &on).Disabled(a.icloudBusy || a.session.SignedIn).Changed() {
+						a.setICloud(on)
+					}
+				})
 			})
 			first = false
 		}
 		if !a.syncOn() {
 			if a.hasServer() {
 				settingRow(c, "sync", locales.SettingsNotSyncing(), locales.SettingsNotSyncingDesc(), first, func() {
-					if primary(c, "signin", "", locales.CommonSignIn()).Clicked() {
-						a.navigate(Route{Kind: "signin"})
-					}
+					a.signInButton(c)
 				})
 			}
 			return

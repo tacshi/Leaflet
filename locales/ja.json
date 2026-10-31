@@ -814,6 +814,7 @@
   "signinSettingUpSteps": "プロジェクトに Leaflet を設定しています…{done}/{total}",
   "signinSigningIn": "サインインしています…",
   "signinSetupFailed": "Leaflet はプロジェクトを設定できませんでした：{error}",
+  "signinNotYourProject": "{project} は Leaflet では {owner} のものです。その Supabase アカウントでサインインするか、自分のプロジェクトを使ってください。",
   "signinCode": "メールに記載されたコード",
   "signinSendCode": "コードをメールで送信",
   "signinContinueLocal": "このデバイスで続ける",

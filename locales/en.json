@@ -4174,6 +4174,20 @@
       }
     }
   },
+  "signinNotYourProject": "{project} belongs to {owner} in Leaflet. Sign in with that Supabase account, or use a project of your own.",
+  "@signinNotYourProject": {
+    "description": "The sign-in page when the project's Leaflet owner is another account than the one signed in to Supabase.",
+    "placeholders": {
+      "project": {
+        "type": "String",
+        "example": "Leaflet"
+      },
+      "owner": {
+        "type": "String",
+        "example": "me@example.com"
+      }
+    }
+  },
   "signinCode": "Code from the email",
   "@signinCode": {
     "description": "The sign-in page › Email code: the code field."

@@ -814,6 +814,7 @@
   "signinSettingUpSteps": "正在你的项目中设置 Leaflet…{done}/{total}",
   "signinSigningIn": "正在登录…",
   "signinSetupFailed": "Leaflet 无法设置你的项目：{error}",
+  "signinNotYourProject": "{project} 在 Leaflet 中属于 {owner}。请使用该 Supabase 账户登录，或使用你自己的项目。",
   "signinCode": "邮件中的验证码",
   "signinSendCode": "向我发送验证码",
   "signinContinueLocal": "在此设备上继续",

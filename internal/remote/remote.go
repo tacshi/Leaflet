@@ -294,7 +294,18 @@ func (c *Client) authRequest(ctx context.Context, path string, body any, withTok
 	if !c.Configured() {
 		return nil, ErrNotConfigured
 	}
-	cfg := c.settings()
+	tok := ""
+	if withToken {
+		var err error
+		if tok, err = c.token(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return c.authRequestTo(ctx, c.settings(), path, body, tok)
+}
+
+// authRequestTo posts to Auth of the project cfg, as tok when it is set.
+func (c *Client) authRequestTo(ctx context.Context, cfg Settings, path string, body any, tok string) (map[string]any, error) {
 	raw, _ := json.Marshal(body)
 	req, err := http.NewRequestWithContext(ctx, "POST", cfg.URL+"/auth/v1/"+path, bytes.NewReader(raw))
 	if err != nil {
@@ -302,11 +313,7 @@ func (c *Client) authRequest(ctx context.Context, path string, body any, withTok
 	}
 	req.Header.Set("apikey", cfg.AnonKey)
 	req.Header.Set("Content-Type", "application/json")
-	if withToken {
-		tok, err := c.token(ctx)
-		if err != nil {
-			return nil, err
-		}
+	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	res, err := c.http.Do(req)
@@ -379,52 +386,59 @@ func (c *Client) SendCode(email string) error {
 }
 
 // ownerFlag marks, in app_metadata, the account SignInAsOwner made: the
-// person who owns the project, whose Supabase account can't tell the API
-// its email.
+// person who owns the project.
 const ownerFlag = "leaflet_owner"
 
-// ProjectOwner returns the email and name of the project's owner, the
-// account SignInAsOwner made, or "" when there is none yet. secret is the
+// ProjectOwner returns the email of project's owner, the account
+// SignInAsOwner made, or "" when there is none yet. secret is the
 // project's secret key, which is not kept.
-func (c *Client) ProjectOwner(ctx context.Context, secret string) (email, name string, err error) {
-	out, err := c.adminRequest(ctx, secret, "GET", "admin/users?per_page=1000", nil)
+func (c *Client) ProjectOwner(ctx context.Context, project Settings, secret string) (string, error) {
+	out, err := c.adminRequest(ctx, project, secret, "GET", "admin/users?per_page=1000", nil)
 	if err != nil {
-		return "", "", err
+		return "", err
 	}
 	raw, _ := json.Marshal(out["users"])
 	var users []struct {
-		authUser
+		Email       string         `json:"email"`
 		AppMetadata map[string]any `json:"app_metadata"`
 	}
 	_ = json.Unmarshal(raw, &users)
 	for _, u := range users {
 		if u.AppMetadata[ownerFlag] == true {
-			return u.Email, toUser(&u.authUser).DisplayName, nil
+			return u.Email, nil
 		}
 	}
-	return "", "", nil
+	return "", nil
 }
 
-// SignInAsOwner signs in to the project as the person who owns it, by
-// email. secret is the project's secret key: it makes their account when
-// there is none, marked as the owner's, then a sign-in link used at once,
-// and is not kept.
-func (c *Client) SignInAsOwner(ctx context.Context, secret, email, name string) (*store.User, error) {
+// Pending is a sign-in to a project that is not the client's yet: Adopt
+// makes it so, Discard throws it away.
+type Pending struct {
+	project Settings
+	s       *session
+}
+
+// SignInAsOwner signs in to project as the person who owns it, by email,
+// leaving the client as it is. secret is the project's secret key: it
+// makes their account when there is none, marked as the owner's, then a
+// sign-in link used at once, and is not kept.
+func (c *Client) SignInAsOwner(ctx context.Context, project Settings, secret, email, name string) (*Pending, error) {
+	project.URL = strings.TrimRight(project.URL, "/")
 	owner := map[string]any{ownerFlag: true}
-	out, err := c.adminRequest(ctx, secret, "POST", "admin/users", map[string]any{
+	out, err := c.adminRequest(ctx, project, secret, "POST", "admin/users", map[string]any{
 		"email": email, "email_confirm": true, "user_metadata": map[string]any{"display_name": name}, "app_metadata": owner,
 	})
 	made := err == nil
 	if err != nil && !accountExists(out) {
 		return nil, err
 	}
-	link, err := c.adminRequest(ctx, secret, "POST", "admin/generate_link", map[string]any{"type": "magiclink", "email": email})
+	link, err := c.adminRequest(ctx, project, secret, "POST", "admin/generate_link", map[string]any{"type": "magiclink", "email": email})
 	if err != nil {
 		return nil, err
 	}
 	if id, _ := link["id"].(string); !made && id != "" {
 		// An account made before it was marked, as by signing up.
-		if _, err := c.adminRequest(ctx, secret, "PUT", "admin/users/"+url.PathEscape(id), map[string]any{"app_metadata": owner}); err != nil {
+		if _, err := c.adminRequest(ctx, project, secret, "PUT", "admin/users/"+url.PathEscape(id), map[string]any{"app_metadata": owner}); err != nil {
 			return nil, err
 		}
 	}
@@ -439,11 +453,38 @@ func (c *Client) SignInAsOwner(ctx context.Context, secret, email, name string) 
 	if kind == "" {
 		kind = "magiclink"
 	}
-	session, err := c.authRequest(ctx, "verify", map[string]any{"type": kind, "token_hash": hash}, false)
+	out, err = c.authRequestTo(ctx, project, "verify", map[string]any{"type": kind, "token_hash": hash}, "")
 	if err != nil {
 		return nil, err
 	}
-	return c.fromToken(session)
+	s, err := decodeSession(out)
+	if err != nil {
+		return nil, err
+	}
+	if s.User == nil {
+		return nil, errNoSession
+	}
+	return &Pending{project: project, s: s}, nil
+}
+
+// Adopt makes p's project the client's and its sign-in the session.
+func (c *Client) Adopt(p *Pending) (*store.User, error) {
+	if err := c.Use(p.project); err != nil {
+		return nil, err
+	}
+	c.keep(p.s)
+	u := toUser(p.s.User)
+	if c.OnAuth != nil {
+		c.OnAuth(u)
+	}
+	return u, nil
+}
+
+// Discard signs p out on the server, leaving the client's session alone.
+func (c *Client) Discard(p *Pending) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _ = c.authRequestTo(ctx, p.project, "logout", map[string]any{}, p.s.AccessToken)
 }
 
 // accountExists reports whether Auth refused to make an account because
@@ -457,15 +498,15 @@ func accountExists(out map[string]any) bool {
 	return code == "email_exists" || code == "user_already_exists"
 }
 
-// adminRequest makes a request of Auth's admin API with the project's
+// adminRequest makes a request of Auth's admin API of project with its
 // secret key.
-func (c *Client) adminRequest(ctx context.Context, secret, method, path string, body any) (map[string]any, error) {
+func (c *Client) adminRequest(ctx context.Context, project Settings, secret, method, path string, body any) (map[string]any, error) {
 	var r io.Reader
 	if body != nil {
 		raw, _ := json.Marshal(body)
 		r = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.settings().URL+"/auth/v1/"+path, r)
+	req, err := http.NewRequestWithContext(ctx, method, project.URL+"/auth/v1/"+path, r)
 	if err != nil {
 		return nil, err
 	}

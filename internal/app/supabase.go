@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 	"leaflet/internal/keychain"
 	"leaflet/internal/provision"
 	"leaflet/internal/remote"
-	"leaflet/internal/store"
 	"leaflet/internal/supabaseapi"
 	"leaflet/locales"
 )
@@ -189,19 +189,24 @@ func (a *App) connectProject(ctx context.Context, run int, api *supabaseapi.Clie
 		return
 	}
 	a.supaStep(run, func() { supa.step = stepSigning })
-	var user *store.User
-	err = a.backend.Use(remote.Settings{URL: p.URL(), AnonKey: publishable, Ref: p.Ref, Name: p.Name})
-	if err == nil {
-		user, err = a.signInAsOwner(ctx, api, p, secret)
-	}
+	project := remote.Settings{URL: p.URL(), AnonKey: publishable, Ref: p.Ref, Name: p.Name}
+	pending, err := a.signInAsOwner(ctx, api, p, project, secret)
 	if err != nil {
 		a.supabaseFailed(run, err)
 		return
 	}
+	// The project and session become the device's only for the run still
+	// under way: one cancelled, or started again since, leaves them as
+	// they are.
 	a.update(func() {
 		if supa.run != run {
-			// Cancelled as it finished: the person stays on this device.
-			go a.backend.SignOut()
+			go a.backend.Discard(pending)
+			return
+		}
+		user, err := a.backend.Adopt(pending)
+		if err != nil {
+			supa = supabaseState{}
+			signIn.err = err.Error()
 			return
 		}
 		supa = supabaseState{}
@@ -209,18 +214,23 @@ func (a *App) connectProject(ctx context.Context, run int, api *supabaseapi.Clie
 	})
 }
 
-// signInAsOwner signs in to p as its owner: the account made by signing
-// in before, from any device, or else one for the person signed in to
-// Supabase.
-func (a *App) signInAsOwner(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project, secret string) (*store.User, error) {
-	email, name, err := a.backend.ProjectOwner(ctx, secret)
-	if err == nil && email == "" {
-		email, name, err = provision.Owner(ctx, api, p.OrganizationSlug)
-	}
+// signInAsOwner signs in to p as the person signed in to Supabase, who
+// owns it: the one member of its organization. A project whose owner is
+// someone else, as one in an organization they were added to, is refused:
+// being able to manage it does not make them its owner in Leaflet.
+func (a *App) signInAsOwner(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project, project remote.Settings, secret string) (*remote.Pending, error) {
+	email, name, err := provision.Owner(ctx, api, p.OrganizationSlug)
 	if err != nil {
 		return nil, err
 	}
-	return a.backend.SignInAsOwner(ctx, secret, email, name)
+	owner, err := a.backend.ProjectOwner(ctx, project, secret)
+	if err != nil {
+		return nil, err
+	}
+	if owner != "" && !strings.EqualFold(owner, email) {
+		return nil, errors.New(locales.SigninNotYourProject(p.Name, owner))
+	}
+	return a.backend.SignInAsOwner(ctx, project, secret, email, name)
 }
 
 // supabaseFailed shows err on the sign-in page, unless the sign-in run was

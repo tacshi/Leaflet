@@ -108,32 +108,67 @@ func TestSignInAsOwner(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := New(Settings{URL: srv.URL, AnonKey: "sb_publishable_p"}, nil)
+	project := Settings{URL: srv.URL, AnonKey: "sb_publishable_p", Ref: "p"}
+	c := New(Settings{}, nil)
 	c.noKeychain = true
-	if email, _, err := c.ProjectOwner(context.Background(), "sb_secret_s"); err != nil || email != "" {
+	ctx := context.Background()
+	if email, err := c.ProjectOwner(ctx, project, "sb_secret_s"); err != nil || email != "" {
 		t.Fatalf("a new project has an owner: %q, %v", email, err)
 	}
 	for range 2 {
-		u, err := c.SignInAsOwner(context.Background(), "sb_secret_s", "me@example.com", "Me")
+		before := c.sess
+		p, err := c.SignInAsOwner(ctx, project, "sb_secret_s", "me@example.com", "Me")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if u.ID != "u1" || u.DisplayName != "Me" || !c.SignedIn() {
-			t.Errorf("signed in as %+v", u)
+		if c.sess != before {
+			t.Error("the session changed before adopting")
+		}
+		u, err := c.Adopt(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if u.ID != "u1" || u.DisplayName != "Me" || !c.SignedIn() || c.Project().Ref != "p" {
+			t.Errorf("signed in as %+v to %+v", u, c.Project())
 		}
 	}
-	if email, name, err := c.ProjectOwner(context.Background(), "sb_secret_s"); err != nil || email != "me@example.com" || name != "Me" {
-		t.Errorf("owner %q %q, %v", email, name, err)
+	if email, err := c.ProjectOwner(ctx, project, "sb_secret_s"); err != nil || email != "me@example.com" {
+		t.Errorf("owner %q, %v", email, err)
 	}
 
 	// Another refusal is not an account that is there.
-	if _, err := c.SignInAsOwner(context.Background(), "sb_secret_s", "not-an-email", "Me"); err == nil || !strings.Contains(err.Error(), "invalid format") {
+	if _, err := c.SignInAsOwner(ctx, project, "sb_secret_s", "not-an-email", "Me"); err == nil || !strings.Contains(err.Error(), "invalid format") {
 		t.Errorf("an invalid email: %v", err)
 	}
 
 	// An account there before, unmarked, becomes the owner's.
 	marked["me@example.com"] = false
-	if _, err := c.SignInAsOwner(context.Background(), "sb_secret_s", "me@example.com", "Me"); err != nil || !marked["me@example.com"] {
+	if _, err := c.SignInAsOwner(ctx, project, "sb_secret_s", "me@example.com", "Me"); err != nil || !marked["me@example.com"] {
 		t.Errorf("not marked: %v", err)
+	}
+}
+
+// A sign-in thrown away, as a cancelled one, leaves the session in use:
+// it signs out only its own.
+func TestDiscardLeavesTheSession(t *testing.T) {
+	var loggedOut []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/v1/logout" {
+			loggedOut = append(loggedOut, r.Header.Get("Authorization"))
+		}
+	}))
+	defer srv.Close()
+	project := Settings{URL: srv.URL, AnonKey: "k"}
+	c := New(Settings{}, nil)
+	c.noKeychain = true
+	if _, err := c.Adopt(&Pending{project: project, s: &session{AccessToken: "new", RefreshToken: "r", User: &authUser{ID: "u"}}}); err != nil {
+		t.Fatal(err)
+	}
+	c.Discard(&Pending{project: project, s: &session{AccessToken: "old", User: &authUser{ID: "u"}}})
+	if !c.SignedIn() || c.sess.AccessToken != "new" {
+		t.Error("the session in use went")
+	}
+	if len(loggedOut) != 1 || loggedOut[0] != "Bearer old" {
+		t.Errorf("signed out %v", loggedOut)
 	}
 }

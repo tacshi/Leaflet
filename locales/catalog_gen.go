@@ -11871,6 +11871,24 @@ func (msgs Messages) SigninSetupFailed(error string) string {
 	return Catalog.Format(msgs.locale, "signinSetupFailed", map[string]any{"error": error})
 }
 
+// SigninNotYourProject says "{project} belongs to {owner} in Leaflet. Sign in with that Supabase account, or use a project of your own."
+// in the language the app shows.
+//
+// The sign-in page when the project's Leaflet owner is another account than
+// the one signed in to Supabase.
+func SigninNotYourProject(project string, owner string) string {
+	return In(i18n.Locale()).SigninNotYourProject(project, owner)
+}
+
+// SigninNotYourProject says "{project} belongs to {owner} in Leaflet. Sign in with that Supabase account, or use a project of your own."
+// in the language of msgs.
+//
+// The sign-in page when the project's Leaflet owner is another account than
+// the one signed in to Supabase.
+func (msgs Messages) SigninNotYourProject(project string, owner string) string {
+	return Catalog.Format(msgs.locale, "signinNotYourProject", map[string]any{"project": project, "owner": owner})
+}
+
 // SigninCode says "Code from the email"
 // in the language the app shows.
 //

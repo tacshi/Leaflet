@@ -80,6 +80,10 @@ A page mention is the page's title with `href` `leaflet://page/<id>` and a
 `[Title](leaflet://page/<id>)`, and such a link read back is a page mention.
 A link to a block of a page is `leaflet://page/<id>#<block id>`, which
 stays a link.
+A person or an agent mentioned is `@` and their name with a `mention` of
+kind `user` or `agent`; in agents' inline Markdown it is
+`[@Name](mention:user:<id>)` or `[@Name](mention:agent:<id>)`, which both
+`internal/doc` and `_shared/blocks.ts` write and read back as the mention.
 Leaflet shows it as a chip, opens the page on a click, and writes the page's
 current title into it when the page opens.
 
@@ -328,7 +332,8 @@ RPCs: `share_page(p_page_id, p_email, p_role)` (an invite to the account
 that confirmed the address, or one waiting for it; it returns no rows
 either way, and sharing again changes only the role),
 `unshare_page(p_page_id, p_user_id)` (also withdraws an invite, by the id
-`page_members` gives it), `page_members(p_page_id)` (`user_id, display_name,
+`page_members` gives it; one on a page above, which `page_members` lists
+too, is withdrawn there, and here raises `inherited_share`), `page_members(p_page_id)` (`user_id, display_name,
 email, role, accepted`; invites still waiting are listed only to the owner,
 and alike whether or not the address has an account: `user_id` is the
 invite's id, not the account's, `email` the address as shared, and
@@ -367,7 +372,9 @@ Leaflet/
   pages, folders and files under that `space_id`, whatever a row says. The
   first device makes it from its own space. When two made it at once, the
   lowest `space_id` among `space*.json` wins; a device that made a losing
-  one moves its pages into the winner, sends them all again, and removes it.
+  one moves its pages into the winner, sends them all again, and removes it
+  30 days later, so a device that joined the losing one finds it beside
+  the winner and moves over too.
   A folder that goes, or whose space changes, after a device joined it
   stops that device's sync until the user turns iCloud sync off and on.
 - **A batch** is `{format, device, seq, written_at, snapshot, entries}`,

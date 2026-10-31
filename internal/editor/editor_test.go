@@ -603,12 +603,13 @@ func TestToggle(t *testing.T) {
 	if len(tg.Children) != 2 || tg.Children[1].Type != "paragraph" || len(e.Content.Children) != 1 {
 		t.Errorf("after Tab %v", texts(e))
 	}
-	// Copying the folded toggle takes its children too.
+	// Copying the folded toggle takes its children too, from between the
+	// first block and the last, as cutting does.
 	e.ToggleCollapsed(tg.ID)
-	end := newText("paragraph", nil)
-	e.Edit(func(c *doc.Content) { c.Children = append(c.Children, end) })
-	e.Select(Pos{tg.ID, 0}, Pos{end.ID, 0})
-	if blocks := e.copyBlocks(); len(blocks) != 2 || len(blocks[0].Children) != 2 || blocks[0].Children[0].ID != inside {
+	start, end := newText("paragraph", nil), newText("paragraph", nil)
+	e.Edit(func(c *doc.Content) { c.Children = append([]*doc.Node{start}, append(c.Children, end)...) })
+	e.Select(Pos{start.ID, 0}, Pos{end.ID, 0})
+	if blocks := e.copyBlocks(); len(blocks) != 3 || len(blocks[1].Children) != 2 || blocks[1].Children[0].ID != inside {
 		t.Errorf("copied %+v", blocks)
 	}
 }
@@ -1396,5 +1397,90 @@ func TestPasteLinesInAnItemWithChildren(t *testing.T) {
 	}
 	if want := []string{"bulleted_list:abx", "bulleted_list:y", "  bulleted_list:kid"}; !slices.Equal(got, want) {
 		t.Errorf("at the end: %v, want %v", got, want)
+	}
+}
+
+// A marker in a mention's title is no marker: typing the closing one
+// after it formats nothing, and never takes the mention out.
+func TestInlineShortcutSkipsMentions(t *testing.T) {
+	for _, tc := range []struct{ title, typed string }{{"A*b", "c*"}, {"A**b", "c**"}, {"x", "*y*"}, {"A`b", "c`"}} {
+		n := &doc.Node{ID: "A", Type: "paragraph"}
+		n.SetDelta(doc.Delta{{Text: "see "}, {Text: tc.title, Attrs: doc.PageMention("p1", tc.title)}})
+		e := New(doc.FromBlocks([]*doc.Node{n}), &fakeHost{})
+		e.PlaceCaret("A", -1)
+		for _, r := range tc.typed {
+			e.InsertText(string(r))
+		}
+		d := e.node("A").Delta()
+		mentions := 0
+		for _, r := range d {
+			if r.Attrs.Mention != nil {
+				mentions++
+			}
+		}
+		if mentions != 1 {
+			t.Errorf("%q then %q: the mention went, %+v", tc.title, tc.typed, d)
+		}
+		// A pair outside the mention still formats.
+		if tc.typed == "*y*" {
+			if last := d[len(d)-1]; last.Text != "y" || !last.Attrs.Italic {
+				t.Errorf("*y* after a mention: %+v", d)
+			}
+		} else if d.Plain() != "see "+tc.title+tc.typed {
+			t.Errorf("%q then %q: %q", tc.title, tc.typed, d.Plain())
+		}
+	}
+}
+
+// Indenting under a folded toggle unfolds it, and undoing it folds it
+// again.
+func TestUndoIndentFoldsTheToggleAgain(t *testing.T) {
+	tg := &doc.Node{ID: "T", Type: "toggle_list", Children: []*doc.Node{para("K", "kid")}}
+	tg.SetDelta(doc.Delta{{Text: "Toggle"}})
+	tg.Set("collapsed", true)
+	item := &doc.Node{ID: "B", Type: "bulleted_list"}
+	item.SetDelta(doc.Delta{{Text: "b"}})
+	e := New(doc.FromBlocks([]*doc.Node{tg, item}), &fakeHost{})
+	e.PlaceCaret("B", 0)
+	e.Indent()
+	if collapsed(e.node("T")) {
+		t.Fatal("Tab kept the toggle folded")
+	}
+	e.Undo()
+	if !collapsed(e.node("T")) {
+		t.Errorf("undo left the toggle unfolded: %v", texts(e))
+	}
+}
+
+// Outdenting code lines with no indent changes nothing: no step of undo,
+// and the steps of redo stay.
+func TestOutdentUnindentedCodeMakesNoStep(t *testing.T) {
+	c := doc.CodeNode("line", "")
+	c.ID = "C"
+	e := New(doc.FromBlocks([]*doc.Node{c}), &fakeHost{})
+	e.PlaceCaret("C", -1)
+	e.InsertText("x")
+	e.Undo()
+	e.PlaceCaret("C", 0)
+	e.indentCode(e.node("C"), true)
+	if e.CanUndo() || !e.CanRedo() {
+		t.Errorf("undo %v, redo %v", e.CanUndo(), e.CanRedo())
+	}
+}
+
+// Typing on a block selected whole starts a paragraph, and the typing is
+// one step of undo.
+func TestTypingOnABlockIsOneUndoStep(t *testing.T) {
+	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), {ID: "D", Type: "divider"}}), &fakeHost{})
+	e.PlaceCaret("D", 0)
+	for _, r := range "hello" {
+		e.InsertText(string(r))
+	}
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "divider:", "paragraph:hello"}) {
+		t.Fatalf("typed %v", got)
+	}
+	e.Undo()
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "divider:"}) {
+		t.Errorf("after one undo %v", got)
 	}
 }

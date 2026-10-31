@@ -9,12 +9,18 @@ type Conflict struct {
 	Local, Remote  *Node
 	LocalEditedAt  int64
 	RemoteEditedAt int64
+	// kept is the side kept when the times don't tell it: a table whose
+	// cell one side deleted and the other changed keeps the deleting
+	// side's cells, however recent the change.
+	kept string
 }
 
 // Kept is the side the merge kept: "local" or "remote". A block one side
 // deleted and the other edited is kept, and the deleted side's node is nil.
 func (c Conflict) Kept() string {
 	switch {
+	case c.kept != "":
+		return c.kept
 	case c.Remote == nil:
 		return "local"
 	case c.Local == nil:
@@ -220,6 +226,52 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		deletedConflict(id, sideFlat[id].node, sideIsPrimary, editedAt, deletedAt)
 		return true
 	}
+	// A table's cells are a grid. A cell one side deleted, taking out a row
+	// or writing the table anew, can't come back into the table the other
+	// side kept, where its place is another cell's or no longer there; nor
+	// can a block in one. It stays deleted. If this side changed it, the
+	// table as each side had it is a conflict, so the user can bring this
+	// side's back.
+	tableConflicts := map[string]bool{}
+	for _, c := range conflicts {
+		tableConflicts[c.BlockID] = true
+	}
+	cellGone := func(side *Content, sideFlat map[string]*flat, deletions map[string]int64, id string, sideIsPrimary bool) bool {
+		if _, inBase := baseFlat[id]; !inBase {
+			return false
+		}
+		table := ""
+		for f := sideFlat[id]; f.parent != ""; f = sideFlat[f.parent] {
+			if sideFlat[f.parent].node.Type == "table" {
+				table = f.parent
+				break
+			}
+		}
+		if table == "" || localFlat[table] == nil || remoteFlat[table] == nil {
+			return false
+		}
+		if tableConflicts[table] || !changed(side, sideFlat, id) {
+			return true
+		}
+		tableConflicts[table] = true
+		var editedAt int64
+		var latest func(*Node)
+		latest = func(n *Node) {
+			editedAt = max(editedAt, timeOf(side, n.ID))
+			for _, k := range n.Children {
+				latest(k)
+			}
+		}
+		latest(sideFlat[id].node)
+		c := Conflict{BlockID: table, Local: localFlat[table].node.Clone(), Remote: remoteFlat[table].node.Clone()}
+		if sideIsPrimary == primaryIsLocal {
+			c.LocalEditedAt, c.RemoteEditedAt, c.kept = editedAt, deletions[id], "remote"
+		} else {
+			c.LocalEditedAt, c.RemoteEditedAt, c.kept = deletions[id], editedAt, "local"
+		}
+		conflicts = append(conflicts, c)
+		return true
+	}
 
 	// Blocks only in the primary, in document order: a block that stays
 	// keeps the blocks under it. One that goes leaves behind, in its
@@ -233,7 +285,7 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 				dropPrimary(n.Children)
 				continue
 			}
-			if stays(primary, primaryFlat, other.Deleted, id, true) {
+			if !cellGone(primary, primaryFlat, other.Deleted, id, true) && stays(primary, primaryFlat, other.Deleted, id, true) {
 				continue
 			}
 			var alive []*Node
@@ -283,7 +335,7 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 				continue // its parent stayed deleted, and it with it
 			}
 		}
-		if !stays(other, otherFlat, primary.Deleted, id, false) {
+		if cellGone(other, otherFlat, primary.Deleted, id, false) || !stays(other, otherFlat, primary.Deleted, id, false) {
 			continue
 		}
 		pos, ok := positionIn(result, o)
@@ -332,6 +384,13 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		}
 	}
 
+	// A block one side gave children while the other made it one that
+	// holds none, such as a list item turned into a paragraph, keeps its
+	// type, and its children come out to right after it, as the editor
+	// lifts them when it changes a block's type: under it, nothing shows
+	// them.
+	result.Children = liftStranded(result.Children)
+
 	live := map[string]bool{}
 	result.Walk(func(n, _ *Node) { live[n.ID] = true })
 	result.Blocks = map[string]int64{}
@@ -345,6 +404,25 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		}
 	}
 	return result, conflicts
+}
+
+// liftStranded moves the children of each block that can't hold them out
+// to right after it, in order, and returns the blocks as they are then.
+// A table and its cells keep theirs.
+func liftStranded(nodes []*Node) []*Node {
+	var out []*Node
+	for _, n := range nodes {
+		out = append(out, n)
+		if inTable(n) {
+			continue
+		}
+		n.Children = liftStranded(n.Children)
+		if !NestableTypes[n.Type] && len(n.Children) > 0 {
+			out = append(out, n.Children...)
+			n.Children = nil
+		}
+	}
+	return out
 }
 
 // Rebase returns what undoing edits makes of a page that changed from

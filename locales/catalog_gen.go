@@ -3359,6 +3359,22 @@ func (msgs Messages) DialogShareCanView() string {
 	return Catalog.Format(msgs.locale, "dialogShareCanView", nil)
 }
 
+// DialogShareInherited says "Shared from a page above this one: remove them there."
+// in the language the app shows.
+//
+// Share dialog: removing someone from a subpage did nothing, as their
+// access comes from a page above it.
+func DialogShareInherited() string { return In(i18n.Locale()).DialogShareInherited() }
+
+// DialogShareInherited says "Shared from a page above this one: remove them there."
+// in the language of msgs.
+//
+// Share dialog: removing someone from a subpage did nothing, as their
+// access comes from a page above it.
+func (msgs Messages) DialogShareInherited() string {
+	return Catalog.Format(msgs.locale, "dialogShareInherited", nil)
+}
+
 // DialogShareInvited says "Invited"
 // in the language the app shows.
 //

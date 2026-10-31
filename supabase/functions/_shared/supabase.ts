@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient, type User } from "jsr:@supabase/supabase-js@2";
 import { HttpError } from "./cors.ts";
+import { expiresBefore } from "./deadline.ts";
 
 function env(name: string): string {
   const value = Deno.env.get(name);
@@ -39,6 +40,20 @@ export async function requireUser(
   const { data, error } = await client.auth.getUser(bearer(req));
   if (error || !data.user) throw new HttpError(401, "Sign in first");
   return data.user;
+}
+
+/**
+ * Refuses a token that runs out before `until` (ms since the epoch), the
+ * end of work that writes as the caller: PostgREST checks the token on
+ * each request, so the work's last writes would fail, its status among
+ * them. The 401 names the JWT, as the gateway's does for an expired one,
+ * so the app renews it and asks again (internal/remote). Call it before
+ * the work claims anything, so asking again finds it as it was.
+ */
+export function requireTokenUntil(req: Request, until: number): void {
+  if (expiresBefore(bearer(req), until)) {
+    throw new HttpError(401, "JWT expires before this would finish: renew it and try again");
+  }
 }
 
 /** Columns of model_providers that clients (and user clients) may read. */

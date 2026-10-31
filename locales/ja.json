@@ -232,6 +232,7 @@
   "dialogShareWithSelf": "それはあなた自身のメールアドレスです。",
   "dialogShareCanEdit": "編集可能",
   "dialogShareCanView": "閲覧のみ",
+  "dialogShareInherited": "上位のページから共有されています。そちらで削除してください。",
   "dialogShareInvited": "招待中",
   "dialogShareInvite": "招待",
   "dialogSharePeople": "アクセスできるユーザー",

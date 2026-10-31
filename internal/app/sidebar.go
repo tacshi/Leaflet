@@ -617,7 +617,11 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 	}
 	if m.Item(locales.CommonRename()).Disabled(!editable).Chosen() {
 		a.openPage(p.ID)
-		a.focusTitle(true)
+		// Not when the open page's edits kept it open: its title would
+		// take the name.
+		if a.page != nil && a.page.id == p.ID {
+			a.focusTitle(true)
+		}
 	}
 	// A template stays out of the page list: it doesn't move among the
 	// pages, and starts copies from a blank page rather than here.

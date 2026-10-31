@@ -792,6 +792,26 @@ func (s *Store) CreateRecording(pageID, blockID, provider, model, localPath, lan
 // UpdateRecording changes a recording and queues it once it is no longer
 // recording, in one transaction, over the recording as stored then.
 func (s *Store) UpdateRecording(id string, fn func(*Recording)) (Recording, error) {
+	return s.updateRecording(id, "", fn)
+}
+
+// IfStatusKey names, in a queued recording, the status the row elsewhere
+// must still have for the change to apply there. A recording settled
+// after a quit stopped its transcription (SettleRecording) goes so: the
+// server may have finished the transcription meanwhile, or the device
+// that started it, and their transcript would be lost under this one.
+const IfStatusKey = "_if_status"
+
+// SettleRecording is UpdateRecording for a recording a quit left at
+// status, which nothing here finishes now: the change it makes for the
+// page applies on the server and the other devices only while the
+// recording is still at status there, and gives way to the row they have
+// otherwise. With status "", it is UpdateRecording.
+func (s *Store) SettleRecording(id, status string, fn func(*Recording)) (Recording, error) {
+	return s.updateRecording(id, status, fn)
+}
+
+func (s *Store) updateRecording(id, ifStatus string, fn func(*Recording)) (Recording, error) {
 	var r Recording
 	err := s.inTx(func(tx *sql.Tx) error {
 		var err error
@@ -810,7 +830,11 @@ func (s *Store) UpdateRecording(id string, fn func(*Recording)) (Recording, erro
 		if r.AudioPath == "" && r.LocalPath != "" {
 			label = "audio waiting to upload"
 		}
-		return queue(tx, "recordings", r.ID, RecordingToRemote(r), label, r.PageID)
+		row := RecordingToRemote(r)
+		if ifStatus != "" {
+			row[IfStatusKey], row["error"] = ifStatus, ns(r.Error)
+		}
+		return queue(tx, "recordings", r.ID, row, label, r.PageID)
 	})
 	if err != nil {
 		return Recording{}, err

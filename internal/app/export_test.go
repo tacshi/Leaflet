@@ -218,3 +218,23 @@ func keys(m map[string]string) []string {
 	}
 	return out
 }
+
+// An exported page has its recordings' transcripts under their blocks:
+// the block alone said only the recording's title.
+func TestExportKeepsTranscripts(t *testing.T) {
+	a := templatesApp(t)
+	rec := store.Recording{ID: "r1", PageID: "p", Status: "ready", DurationMs: 9000,
+		Transcript: []store.Segment{{StartMs: 0, EndMs: 4000, Text: "We ship on Friday."}}}
+	if err := a.st.PutRecording(rec); err != nil {
+		t.Fatal(err)
+	}
+	c := doc.Empty()
+	c.Children = []*doc.Node{{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": "Standup"}}}
+	md := doc.PageMarkdown("Notes", a.withTranscripts(c), nil)
+	if !strings.Contains(md, "Standup") || !strings.Contains(md, "We ship on Friday.") {
+		t.Errorf("markdown %q", md)
+	}
+	if len(c.Children) != 1 {
+		t.Error("the page's own content changed")
+	}
+}

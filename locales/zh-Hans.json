@@ -232,6 +232,7 @@
   "dialogShareWithSelf": "这是你自己的电子邮件地址。",
   "dialogShareCanEdit": "可编辑",
   "dialogShareCanView": "可查看",
+  "dialogShareInherited": "是从上级页面共享的：请在那里移除。",
   "dialogShareInvited": "已邀请",
   "dialogShareInvite": "邀请",
   "dialogSharePeople": "有权访问的人",

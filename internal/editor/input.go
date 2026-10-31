@@ -204,6 +204,89 @@ func (e *Editor) UnmarkText() {
 	}
 }
 
+// lifted is a composition taken out of the page while a change from
+// outside goes in: the block it was in, with it and without.
+type lifted struct {
+	id               string
+	text, full, rest doc.Delta
+	start            int
+	anchor, focus    Pos
+}
+
+// liftComposition takes the composition out of the page before a change
+// from outside, so that neither the change nor the step of undo kept for
+// it holds text the input method is still changing. The composition's own
+// step goes with it while it changes nothing else.
+func (e *Editor) liftComposition() *lifted {
+	n := e.focusNode()
+	if !e.marked || n == nil {
+		e.marked = false
+		return nil
+	}
+	d := n.Delta()
+	l := &lifted{id: n.ID, text: d.Slice(e.markStart, e.markEnd), full: d, start: e.markStart, anchor: e.anchor, focus: e.focus}
+	n.SetDelta(d.Delete(e.markStart, e.markEnd))
+	l.rest = n.Delta()
+	e.invalidate(n.ID)
+	if e.markStep {
+		e.dropStep()
+	}
+	e.marked, e.markStep = false, false
+	e.anchor, e.focus = Pos{n.ID, l.start}, Pos{n.ID, l.start}
+	return l
+}
+
+// putBack puts a lifted composition back once the change from outside is
+// in, after the caret has been placed. MyGo never tells the input method
+// that a composition ended, so it composes on regardless: kept, its next
+// update replaces the composition as before. Only when the change was to
+// the composition's block is it given up and its text taken out, so that
+// the input method, composing on afresh at the caret, leaves none behind.
+func (e *Editor) putBack(l *lifted) {
+	if l == nil {
+		return
+	}
+	n := e.node(l.id)
+	if n == nil || !n.IsText() {
+		return
+	}
+	d, end := n.Delta(), l.start+l.text.Len()
+	// Content from outside can hold the composition already, the page
+	// having been saved with it.
+	held := sameDelta(d, l.full)
+	if e.focus.ID != l.id || !held && !sameDelta(d, l.rest) {
+		if end <= d.Len() && sameDelta(d.Slice(l.start, end), l.text) {
+			n.SetDelta(d.Delete(l.start, end))
+			e.invalidate(n.ID)
+			e.Select(e.anchor, e.focus)
+		}
+		return
+	}
+	// It is a step of its own again, over the change, as when it began.
+	redo := e.redo
+	n.SetDelta(l.rest)
+	e.pushUndo(false)
+	n.SetDelta(l.full)
+	e.invalidate(n.ID)
+	e.markStep, e.markRedo = true, redo
+	e.anchor, e.focus = l.anchor, l.focus
+	e.marked, e.markStart, e.markEnd = true, l.start, end
+}
+
+// sameDelta reports whether two texts are the same, with the same formats.
+func sameDelta(a, b doc.Delta) bool {
+	a, b = a.Compact(), b.Compact()
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Text != b[i].Text || !a[i].Attrs.Equal(b[i].Attrs) {
+			return false
+		}
+	}
+	return true
+}
+
 // BoundsForRange returns where text of the focus block is, relative to the
 // editor.
 func (e *Editor) BoundsForRange(r ui.TextInputRange) (ui.Rect, ui.TextInputRange, bool) {

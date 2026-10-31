@@ -1168,6 +1168,10 @@
   "@dialogShareCanView": {
     "description": "Share dialog: the role of a person who can only view."
   },
+  "dialogShareInherited": "Shared from a page above this one: remove them there.",
+  "@dialogShareInherited": {
+    "description": "Share dialog: removing someone from a subpage did nothing, as their access comes from a page above it."
+  },
   "dialogShareInvited": "Invited",
   "@dialogShareInvited": {
     "description": "Share dialog: beside the role of a person who has not accepted the invite yet."

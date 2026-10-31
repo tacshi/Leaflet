@@ -348,21 +348,147 @@ func TestReplaceKeepsUndo(t *testing.T) {
 	}
 }
 
-// An agent's ops end a composition, as content from outside does.
-func TestOpsEndComposition(t *testing.T) {
+// A change from outside to other blocks keeps a composition: MyGo never
+// tells the input method it ended, so it composes on, and its next update
+// replaces it as before. A change to its block gives it up and takes its
+// text out, leaving none behind.
+func TestChangesFromOutsideKeepComposition(t *testing.T) {
 	e, tt, _ := setup(t)
+	tt.Type("a")
 	tt.Compose("ni", 2)
+	_ = e.ApplyOps([]doc.Op{doc.InsertOp(doc.Position{At: "end"}, para("X", "agent"))})
 	if !e.marked {
-		t.Fatal("not composing")
+		t.Error("ApplyOps ended the composition")
 	}
+	tt.Compose("nih", 3)
+	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("Y", "more")), true)
+	tt.Compose("niha", 4)
+	e.Replace(e.Content.Copy())
+	tt.Compose("nihao", 5)
+	tt.Type("你好")
+	want := []string{"paragraph:a你好", "paragraph:agent", "paragraph:more"}
+	if got := texts(e); !slices.Equal(got, want) {
+		t.Fatalf("composing on over changes elsewhere %v, want %v", got, want)
+	}
+	// The composition and what it became are a step of their own, and the
+	// changes' steps never hold what it was as it went.
+	e.Undo()
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "paragraph:agent", "paragraph:more"}) {
+		t.Errorf("after undoing the composition %v", got)
+	}
+	e.Undo()
+	e.Undo()
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a"}) {
+		t.Errorf("after undoing the changes %v", got)
+	}
+
+	// A change to the composition's block gives it up.
 	id := e.Content.Children[0].ID
-	_ = e.ApplyOps([]doc.Op{doc.InsertOp(doc.Position{After: id}, para("", "agent"))})
+	e.PlaceCaret(id, -1)
+	tt.Compose("ni", 2)
+	repl := para("", "b")
+	_ = e.ApplyOp(e.Content.ReplaceOp(id, repl), true)
 	if e.marked {
-		t.Error("ApplyOps kept the composition")
+		t.Error("a change to its block kept the composition")
 	}
-	tt.Compose("hao", 3)
-	_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, para("", "more")), true)
-	if e.marked {
-		t.Error("ApplyOp kept the composition")
+	e.PlaceCaret(id, -1)
+	tt.Compose("nih", 3)
+	tt.Type("你好")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:b你好"}) {
+		t.Errorf("composing on after a change to its block %v", got)
+	}
+}
+
+// foldedToggle is a folded toggle with a child hidden in it.
+func foldedToggle(id, text, kid string) *doc.Node {
+	n := &doc.Node{ID: id, Type: "toggle_list", Children: []*doc.Node{para(id+"K", kid)}}
+	n.SetDelta(doc.Delta{{Text: text}})
+	n.Set("collapsed", true)
+	return n
+}
+
+// count counts the blocks of a page with a text.
+func count(c *doc.Content, text string) int {
+	k := 0
+	c.Walk(func(n, _ *doc.Node) {
+		if n.Delta().Plain() == text {
+			k++
+		}
+	})
+	return k
+}
+
+// Cutting and pasting back a folded toggle first or last in the
+// selection leaves one of its hidden children: cutting keeps them in the
+// page, so copying leaves them out.
+func TestCutPasteFoldedToggleKeepsOneOfItsChildren(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		blocks   func() []*doc.Node
+		from, to Pos
+	}{
+		{"last", func() []*doc.Node {
+			return []*doc.Node{para("A", "aaa"), foldedToggle("T", "Toggle", "hidden"), para("B", "bbb")}
+		}, Pos{"A", 1}, Pos{"T", 3}},
+		{"first", func() []*doc.Node {
+			return []*doc.Node{foldedToggle("T", "Toggle", "hidden"), para("B", "bbb")}
+		}, Pos{"T", 3}, Pos{"B", 1}},
+	} {
+		e := New(doc.FromBlocks(tc.blocks()), &fakeHost{})
+		e.Select(tc.from, tc.to)
+		text := e.copyText()
+		clip.text, clip.blocks, clip.delta = text, e.copyBlocks(), nil
+		e.Backspace(false)
+		e.PlaceCaret("B", -1)
+		e.paste(text)
+		if k := count(e.Content, "hidden"); k != 1 {
+			t.Errorf("%s: %d hidden children after cut and paste, want 1", tc.name, k)
+		}
+	}
+}
+
+// Shift-Tab on a folded toggle nested in a list item unfolds it, as the
+// siblings after it become its children, which would be hidden in it.
+func TestOutdentFoldedToggleShowsSiblings(t *testing.T) {
+	item := func(id, text string, kids ...*doc.Node) *doc.Node {
+		n := &doc.Node{ID: id, Type: "bulleted_list", Children: kids}
+		n.SetDelta(doc.Delta{{Text: text}})
+		return n
+	}
+	e := New(doc.FromBlocks([]*doc.Node{item("L", "parent", foldedToggle("T", "Toggle", "kid"), item("S", "sibling"))}), &fakeHost{})
+	e.PlaceCaret("T", 0)
+	e.Outdent()
+	want := []string{"bulleted_list:parent", "toggle_list:Toggle", "paragraph:kid", "bulleted_list:sibling"}
+	if got := texts(e); !slices.Equal(got, want) {
+		t.Errorf("after Shift-Tab %v, want %v", got, want)
+	}
+	// Without siblings after it, it stays folded.
+	e = New(doc.FromBlocks([]*doc.Node{item("L", "parent", foldedToggle("T", "Toggle", "kid"))}), &fakeHost{})
+	e.PlaceCaret("T", 0)
+	e.Outdent()
+	if !collapsed(e.node("T")) {
+		t.Error("Shift-Tab unfolded a toggle that took no siblings")
+	}
+}
+
+// Pasting blocks that end in a folded toggle into the middle of a line
+// puts the rest of the line, and the caret, where they show: on a line
+// after the toggle, never among its hidden children.
+func TestPasteEndingInFoldedToggleShowsTheRest(t *testing.T) {
+	kid := para("C", "child")
+	b := para("B", "abcdef")
+	b.Type, b.Children = "bulleted_list", []*doc.Node{kid}
+	e := New(doc.FromBlocks([]*doc.Node{b}), &fakeHost{})
+	e.PlaceCaret("B", 3)
+	e.pasteBlocks(freshBlocks([]*doc.Node{para("P", "xyz"), foldedToggle("T", "Toggle", "hidden")}))
+	shown := texts(e)
+	if !slices.Contains(shown, "bulleted_list:def") || !slices.Contains(shown, "paragraph:child") {
+		t.Errorf("shown %v; the rest of the line or its child is hidden", shown)
+	}
+	if c := e.Caret(); e.node(c.ID).Delta().Plain() != "def" || c.Off != 0 {
+		t.Errorf("caret %v in %q", c, e.node(c.ID).Delta().Plain())
+	}
+	if k := count(e.Content, "hidden"); k != 1 {
+		t.Errorf("%d hidden children, want 1", k)
 	}
 }

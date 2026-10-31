@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	gosync "sync"
 	"testing"
@@ -758,14 +760,14 @@ func TestCommentsPushAsUpdates(t *testing.T) {
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 	ctx := context.Background()
 
-	done, err := svc.pushComment(ctx, "u1", map[string]any{"id": "theirs", "author_id": "u2", "body": "Look", "resolved": true, "deleted_at": nil})
+	done, err := svc.pushComment(ctx, "u1", store.OutboxEntry{Entity: "comments", EntityID: "theirs"}, map[string]any{"id": "theirs", "author_id": "u2", "body": "Look", "resolved": true, "deleted_at": nil})
 	if err != nil || !done {
 		t.Fatalf("done %v, %v", done, err)
 	}
 	if len(patched) != 1 || patched["resolved"] != true {
 		t.Errorf("sent %v", patched)
 	}
-	done, err = svc.pushComment(ctx, "u1", map[string]any{"id": "new", "body": "Mine", "resolved": false})
+	done, err = svc.pushComment(ctx, "u1", store.OutboxEntry{Entity: "comments", EntityID: "new"}, map[string]any{"id": "new", "body": "Mine", "resolved": false})
 	if err != nil || !done {
 		t.Fatalf("done %v, %v", done, err)
 	}
@@ -775,7 +777,7 @@ func TestCommentsPushAsUpdates(t *testing.T) {
 	// A resolve made here, of a comment deleted elsewhere, sends only the
 	// resolve, not this device's deleted_at.
 	patched = nil
-	done, err = svc.pushComment(ctx, "u1", map[string]any{"id": "theirs", "author_id": "u1", "body": "Look", "resolved": true,
+	done, err = svc.pushComment(ctx, "u1", store.OutboxEntry{Entity: "comments", EntityID: "theirs"}, map[string]any{"id": "theirs", "author_id": "u1", "body": "Look", "resolved": true,
 		"deleted_at": nil, store.ChangedKey: []any{"resolved", "updated_at"}})
 	if err != nil || !done {
 		t.Fatalf("done %v, %v", done, err)
@@ -1887,5 +1889,225 @@ func TestRefreshRefusesContentThatIsNotAPage(t *testing.T) {
 		if got := textOf(st.Content(p.ID), "a"); got != "important text" {
 			t.Errorf("%s: page now %q", content, got)
 		}
+	}
+}
+
+// dequeueAll empties the outbox, as after a push the server took whole.
+func dequeueAll(t *testing.T, st *store.Store) {
+	t.Helper()
+	entries, err := st.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// refusing is a server that refuses every insert and upsert, as row-level
+// security does a row the user may not change, changes nothing on a
+// PATCH, and shows rows by table for a GET. It records the requests.
+type refusing struct {
+	mu       gosync.Mutex
+	rows     map[string]map[string]any
+	patch    func(table string, r *http.Request) []map[string]any
+	requests []string
+}
+
+func (s *refusing) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requests = append(s.requests, r.Method+" "+r.URL.Path)
+	table := strings.TrimPrefix(r.URL.Path, "/rest/v1/")
+	out := []map[string]any{}
+	switch r.Method {
+	case "POST":
+		if strings.HasPrefix(r.URL.Path, "/rest/v1/") {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"42501","message":"new row violates row-level security policy"}`))
+			return
+		}
+	case "PATCH":
+		if s.patch != nil {
+			out = s.patch(table, r)
+		}
+	case "GET":
+		if row := s.rows[table]; row != nil {
+			out = append(out, row)
+		}
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// A recording a quit left transcribing, settled at startup, does not go up
+// over the transcript the server finished meanwhile: it takes the
+// server's. One still transcribing there is settled there too, and one
+// the server does not have goes up whole.
+func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := st.CreateRecording(p.ID, "b1", "soniox", "", "", "auto")
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status, x.AudioPath = "transcribing", "u1/"+r.ID+".wav" }); err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	settle := func() {
+		t.Helper()
+		if _, err := st.SettleRecording(r.ID, "transcribing", func(x *store.Recording) { x.Status, x.Error = "failed", "quit" }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settle()
+
+	finished := store.RecordingToRemote(r)
+	finished["status"], finished["transcript"] = "ready", []map[string]any{{"start_ms": 0, "end_ms": 900, "text": "Hello"}}
+	finished["audio_path"], finished["updated_at"] = "u1/"+r.ID+".wav", time.Now().UTC().Format(time.RFC3339Nano)
+	var patched []string
+	srv := &refusing{rows: map[string]map[string]any{"recordings": finished}}
+	srv.patch = func(_ string, r *http.Request) []map[string]any {
+		patched = append(patched, r.URL.Query().Get("status"))
+		return nil // no longer transcribing there
+	}
+	hs := httptest.NewServer(srv)
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Recording(r.ID)
+	if got.Status != "ready" || len(got.Transcript) != 1 || got.Transcript[0].Text != "Hello" || st.PendingCount() != 0 {
+		t.Errorf("recording %s %v, %d queued", got.Status, got.Transcript, st.PendingCount())
+	}
+	if len(patched) != 1 || patched[0] != "eq.transcribing" || slices.Contains(srv.requests, "POST /rest/v1/recordings") {
+		t.Errorf("patched where %v; requests %v", patched, srv.requests)
+	}
+
+	// Still transcribing there: it is settled there too.
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status = "transcribing" }); err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	settle()
+	srv.patch = func(string, *http.Request) []map[string]any { return []map[string]any{{"id": r.ID}} }
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Recording(r.ID); got.Status != "failed" || st.PendingCount() != 0 {
+		t.Errorf("recording %s, %d queued", got.Status, st.PendingCount())
+	}
+}
+
+// A recording's change the server refuses, as on a page the user may no
+// longer edit, gives way to the server's recording, as a page's does.
+func TestRefusedRecordingTakesTheServers(t *testing.T) {
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := st.CreateRecording(p.ID, "b1", "", "", "", "auto")
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status = "failed" }); err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Transcript = []store.Segment{{Text: "Mine"}} }); err != nil {
+		t.Fatal(err)
+	}
+	server := store.RecordingToRemote(r)
+	server["status"], server["transcript"] = "ready", []map[string]any{{"text": "Theirs"}}
+	server["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	hs := httptest.NewServer(&refusing{rows: map[string]map[string]any{"recordings": server}})
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Recording(r.ID)
+	if st.PendingCount() != 0 || got.Status != "ready" || len(got.Transcript) != 1 || got.Transcript[0].Text != "Theirs" {
+		t.Errorf("%d queued; recording %s %v", st.PendingCount(), got.Status, got.Transcript)
+	}
+}
+
+// A change to someone else's comment the server refuses, as resolving it
+// on a page shared to view, gives way to the server's comment: waiting, it
+// would keep the author's later edits from this device.
+func TestRefusedCommentTakesTheServers(t *testing.T) {
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	st := openStore(t)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	theirs := map[string]any{"id": "00000000-0000-0000-0000-0000000000c1", "page_id": "00000000-0000-0000-0000-0000000000a1",
+		"block_id": "b1", "author_id": "u2", "author_kind": "user", "body": "Look", "resolved": false, "created_at": now, "updated_at": now}
+	if err := st.PutRemoteComment(theirs, "Ann"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetResolved(store.S(theirs, "id"), true); err != nil {
+		t.Fatal(err)
+	}
+	edited := maps.Clone(theirs)
+	edited["body"] = "Look again"
+	hs := httptest.NewServer(&refusing{rows: map[string]map[string]any{"comments": edited}})
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Comment(store.S(theirs, "id"))
+	if st.PendingCount() != 0 || got.Body != "Look again" || got.Resolved {
+		t.Errorf("%d queued; comment %q resolved %v", st.PendingCount(), got.Body, got.Resolved)
+	}
+}
+
+// A file's deletion the server refuses gives way to the server's file,
+// which keeps its stored copy: the removal queued with the deletion does
+// not take it.
+func TestRefusedFileDeletionKeepsItsStoredCopy(t *testing.T) {
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	st := openStore(t)
+	src := t.TempDir() + "/notes.txt"
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	if err := st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	server := store.FileToRemote(f)
+	server["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	srv := &refusing{rows: map[string]map[string]any{"files": server}}
+	hs := httptest.NewServer(srv)
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(srv.requests, "DELETE /storage/v1/object/files") || st.PendingCount() != 0 {
+		t.Errorf("requests %v; %d queued", srv.requests, st.PendingCount())
+	}
+	if got, _ := st.File(f.ID); !got.DeletedAt.IsZero() {
+		t.Error("the file is still deleted here")
 	}
 }

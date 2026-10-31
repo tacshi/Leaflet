@@ -439,6 +439,15 @@ func TestICloudTwoDevicesMadeTheSpace(t *testing.T) {
 			t.Errorf("titles %q %q", d.title(pa.ID), d.title(pb.ID))
 		}
 	}
+	// The copy that lost stays a while, for a device that joined its
+	// space, and then goes.
+	if _, losers, _ := a.svc.ICloud.ReadSpace(); len(losers) != 1 {
+		t.Errorf("copies left: %v", losers)
+	}
+	was := cloudNow
+	cloudNow = func() time.Time { return time.Now().Add(loserKept + time.Hour) }
+	t.Cleanup(func() { cloudNow = was })
+	syncAll(a, b)
 	if _, losers, _ := a.svc.ICloud.ReadSpace(); len(losers) != 0 {
 		t.Errorf("copies left: %v", losers)
 	}
@@ -1384,5 +1393,252 @@ func TestICloudDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	}
 	if b.svc.ICloud.Exists(rel) || b.st.PendingCount() != 0 {
 		t.Errorf("the deleted file stayed; %d waiting", b.st.PendingCount())
+	}
+}
+
+// A copy made of a page whose file iCloud Drive does not list yet, as
+// while the device that has it still copies it there, waits for it while
+// the file lives, rather than go without it; the copy's row waits with
+// it, as a batch names only what is in the folder.
+func TestICloudCopyWaitsForAnOriginalNotListedYet(t *testing.T) {
+	old := uploadFetchWait
+	uploadFetchWait = 50 * time.Millisecond
+	t.Cleanup(func() { uploadFetchWait = old })
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := a.page("Attachments")
+	f, err := a.st.AddFile(src, "", p.ID, "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.st.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{{ID: "f", Type: "file", Data: map[string]any{"name": f.Name, "file_id": f.ID}}})); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	f, _ = a.st.File(f.ID)
+	rel, _ := blobPath("files", f.StoragePath)
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	away := filepath.Join(t.TempDir(), "away")
+	if err := os.Rename(path, away); err != nil {
+		t.Fatal(err)
+	}
+	cp, err := b.st.CopyPage(p.ID, store.CopyOptions{Title: "Copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fileID := b.st.Content(cp.ID).Children[0].Str("file_id")
+	syncAll(b, a)
+	if !b.st.HasPending("storage", "files/"+fileID) {
+		t.Fatal("the copy went without its file")
+	}
+	if _, err := a.st.File(fileID); err == nil {
+		t.Error("the copy's file reached A before its contents")
+	}
+	if err := os.Rename(away, path); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(b, a)
+	cf, err := a.st.File(fileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := a.svc.Fetch(context.Background(), "files", cf.StoragePath); err != nil || string(data) != "hello" {
+		t.Errorf("the copy's file %q, %v", data, err)
+	}
+}
+
+// Sending everything again keeps a change of some columns waiting a change
+// of only those: whole, it would undo another device's change to the
+// others, held here meanwhile, on every device.
+func TestICloudSendingAgainKeepsAHeldChange(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p, q := a.page("Plan"), a.page("Done")
+	syncAll(a, b)
+	if err := b.st.MovePage(p.ID, q.ID, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	if err := a.st.RenamePage(p.ID, "Plan A"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.svc.cloudPull(context.Background(), a.st.DeviceID()); err != nil {
+		t.Fatal(err)
+	}
+	if a.svc.held("pages", p.ID) == nil {
+		t.Fatal("B's move is not held")
+	}
+	space, _ := a.st.Value("icloud.space")
+	if err := a.svc.requeueAll(space); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	for _, d := range []*cloudDevice{a, b} {
+		got, _ := d.st.Page(p.ID)
+		if got.Title != "Plan A" || got.ParentID != q.ID {
+			t.Errorf("page is %q under %q, want Plan A under %q", got.Title, got.ParentID, q.ID)
+		}
+	}
+}
+
+// Entries held for a row stay held until they have applied: a stop while
+// they apply leaves them to apply on the next pass.
+func TestICloudHeldEntriesOutlastAStop(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p, q := a.page("Plan"), a.page("Done")
+	syncAll(a, b)
+	if err := b.st.MovePage(p.ID, q.ID, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	if err := a.st.RenamePage(p.ID, "Plan A"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := a.svc.cloudPull(ctx, a.st.DeviceID()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.svc.cloudPush(ctx, a.st.DeviceID()); err != nil {
+		t.Fatal(err)
+	}
+	stopped := errors.New("stopped")
+	applyingHeld = func(icloud.Entry) { panic(stopped) }
+	func() {
+		defer func() {
+			if r := recover(); r != nil && r != stopped {
+				panic(r)
+			}
+		}()
+		_ = a.svc.applyHeld(map[string]bool{})
+	}()
+	applyingHeld = func(icloud.Entry) {}
+	if a.svc.held("pages", p.ID) == nil {
+		t.Fatal("the held move is gone")
+	}
+	a.sync()
+	if got, _ := a.st.Page(p.ID); got.Title != "Plan A" || got.ParentID != q.ID {
+		t.Errorf("page is %q under %q, want Plan A under %q", got.Title, got.ParentID, q.ID)
+	}
+	if a.svc.held("pages", p.ID) != nil {
+		t.Error("still held once applied")
+	}
+}
+
+// A file that went through iCloud Drive but is not listed there yet waits
+// to go up to the server until it is: queued now, it would go up with a
+// path of its own and nothing stored there.
+func TestICloudFileNotListedYetWaitsToGoUp(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := a.page("Attachments")
+	f, err := a.st.AddFile(src, "", p.ID, "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	f, _ = b.st.File(f.ID)
+	rel, _ := blobPath("files", f.StoragePath)
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	away := filepath.Join(t.TempDir(), "away")
+	if err := os.Rename(path, away); err != nil {
+		t.Fatal(err)
+	}
+	b.svc.SetICloud(false)
+	ctx := context.Background()
+	if err := b.svc.requeueFile(ctx, f, "space"); err == nil {
+		t.Error("queued a file it does not have")
+	}
+	if b.st.HasPending("files", f.ID) {
+		t.Error("the file's row is queued without its contents")
+	}
+	if err := os.Rename(away, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.svc.requeueFile(ctx, f, "space"); err != nil {
+		t.Fatal(err)
+	}
+	if !b.st.HasPending("files", f.ID) || !b.st.HasPending("storage", "files/"+f.ID) {
+		t.Error("the file is not queued with its contents")
+	}
+}
+
+// A device that settles at startup a recording it pulled mid-transcription
+// does not undo the transcript the device transcribing it finished.
+func TestICloudSettledRecordingGivesWayToAFinishedOne(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Meeting")
+	rec, err := a.st.CreateRecording(p.ID, "b1", "openai-compatible", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.UpdateRecording(rec.ID, func(r *store.Recording) { r.Status = "transcribing" }); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	time.Sleep(5 * time.Millisecond)
+	if _, err := a.st.UpdateRecording(rec.ID, func(r *store.Recording) {
+		r.Status, r.Transcript = "ready", []store.Segment{{Text: "Hello"}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	time.Sleep(5 * time.Millisecond)
+	if _, err := b.st.SettleRecording(rec.ID, "transcribing", func(r *store.Recording) { r.Status = "failed" }); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(b, a)
+	for _, d := range []*cloudDevice{a, b} {
+		if r, _ := d.st.Recording(rec.ID); r.Status != "ready" || len(r.Transcript) != 1 {
+			t.Errorf("recording %s %v", r.Status, r.Transcript)
+		}
+	}
+}
+
+// A device that joined the space of a space.json that lost, before it
+// lost, joins the one that won, after the device that made the losing
+// one has moved: that one stays a while for it.
+func TestICloudJoinedTheLosingSpace(t *testing.T) {
+	rootA, rootB := cloudRoot(t), cloudRoot(t)
+	a, b := newCloudDevice(t, rootA), newCloudDevice(t, rootB)
+	a.page("A's")
+	b.page("B's")
+	a.sync()
+	b.sync()
+	won, lost, wonRoot, lostRoot := a, b, rootA, rootB
+	if b.st.Session().SpaceID < a.st.Session().SpaceID {
+		won, lost, wonRoot, lostRoot = b, a, rootB, rootA
+	}
+	z := newCloudDevice(t, lostRoot)
+	z.sync()
+	if z.st.Session().SpaceID != lost.st.Session().SpaceID {
+		t.Fatal("Z did not join the space that loses")
+	}
+	if err := os.CopyFS(filepath.Join(wonRoot, "devices"), os.DirFS(filepath.Join(lostRoot, "devices"))); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(lostRoot, "space.json")) // #nosec G304 -- a file of the test's own folder.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wonRoot, "space 2.json"), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lost.svc.ICloud.Root, z.svc.ICloud.Root = wonRoot, wonRoot
+	syncAll(lost, won)
+	if err := z.svc.SyncNow(); err != nil {
+		t.Fatalf("Z: %v", err)
+	}
+	if z.st.Session().SpaceID != won.st.Session().SpaceID {
+		t.Errorf("Z is in %s, not %s", z.st.Session().SpaceID, won.st.Session().SpaceID)
 	}
 }

@@ -340,6 +340,17 @@ func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 		t.Fatalf("A signing back in: %d pages", len(pages))
 	}
 
+	// A's changes not uploaded stay, until the user agrees to lose them:
+	// the app quitting as it asked signed B in all the same.
+	if _, err := s.LoadSession(&User{ID: "B", Email: "b@example.com"}); !errors.Is(err, ErrUnsynced) {
+		t.Fatalf("B signing in over A's changes: %v", err)
+	}
+	if pages, _ := s.Pages(); len(pages) != 1 || s.PendingCount() == 0 {
+		t.Fatalf("A's pages or changes went: %d pages, %d changes", len(pages), s.PendingCount())
+	}
+	if err := s.ForgetAccount(); err != nil {
+		t.Fatal(err)
+	}
 	sess, err := s.LoadSession(&User{ID: "B", Email: "b@example.com"})
 	if err != nil {
 		t.Fatal(err)
@@ -2456,5 +2467,66 @@ func TestCommentChangesQueueOnlyTheirColumns(t *testing.T) {
 	}
 	if err := s.SetResolved("missing", true); !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("resolving a missing comment: %v", err)
+	}
+}
+
+// A copy that fails part way makes nothing: its pages, recordings and
+// files are stored together, or the half made would go up as a copy.
+func TestCopyPageIsAllOrNothing(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Meeting"})
+	if _, err := s.CreatePage(NewPageOptions{Title: "Notes", ParentID: p.ID}); err != nil {
+		t.Fatal(err)
+	}
+	local := filepath.Join(t.TempDir(), "rec.wav")
+	if err := os.WriteFile(local, []byte("audio"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := s.CreateRecording(p.ID, "b1", "", "", local, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateRecording(r.ID, func(x *Recording) { x.Status = "ready" }); err != nil {
+		t.Fatal(err)
+	}
+	// A file whose copy here cannot be read stops the copy, after the
+	// pages and the recording's audio.
+	src := filepath.Join(t.TempDir(), "plan.pdf")
+	if err := os.WriteFile(src, []byte("%PDF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AddFile(src, "", p.ID, "application/pdf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(f.LocalPath, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(f.LocalPath, 0o600) })
+	if _, _, err := s.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{
+		{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": r.ID}},
+		{ID: "b2", Type: "file", Data: map[string]any{"name": f.Name, "file_id": f.ID}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	pages, _ := s.AllPages()
+	recs, _ := s.Recordings()
+	files, _ := s.AllFiles()
+	queued := s.PendingCount()
+	made, _ := os.ReadDir(filepath.Join(s.Dir, "recordings"))
+
+	if _, err := s.CopyPage(p.ID, CopyOptions{Title: "Meeting copy"}); err == nil {
+		t.Fatal("copied a file it cannot read")
+	}
+	pagesAfter, _ := s.AllPages()
+	recsAfter, _ := s.Recordings()
+	filesAfter, _ := s.AllFiles()
+	madeAfter, _ := os.ReadDir(filepath.Join(s.Dir, "recordings"))
+	if len(pagesAfter) != len(pages) || len(recsAfter) != len(recs) || len(filesAfter) != len(files) || s.PendingCount() != queued {
+		t.Errorf("pages %d to %d, recordings %d to %d, files %d to %d, queued %d to %d",
+			len(pages), len(pagesAfter), len(recs), len(recsAfter), len(files), len(filesAfter), queued, s.PendingCount())
+	}
+	if len(madeAfter) != len(made) {
+		t.Errorf("audio left here: %d files, was %d", len(madeAfter), len(made))
 	}
 }

@@ -359,9 +359,28 @@ func (c *Client) SignOut() {
 	}
 }
 
+// tokenLasts is how long an access token must still last for a request:
+// one that runs out sooner is renewed first.
+const tokenLasts = time.Minute
+
+// longTokenLasts is tokenLasts for a function that works a while, an agent
+// run or a transcription: it writes as the caller until it ends, up to the
+// platform's 400 s limit on paid plans, and fails where the token runs out
+// first. The function refuses a token that would (requireTokenUntil); this
+// renews it before asking.
+const longTokenLasts = 8 * time.Minute
+
 // token returns a fresh access token, refreshing it when it is about to
 // expire. Callers that need a refresh at once share one.
 func (c *Client) token(ctx context.Context) (string, error) {
+	return c.tokenLasting(ctx, tokenLasts)
+}
+
+// tokenLasting is token for a token that lasts at least d more. When even
+// a new one lasts less, as the project's tokens may if set that short, the
+// new one goes as it is: the function lets it through, since renewing it
+// again would not help.
+func (c *Client) tokenLasting(ctx context.Context, d time.Duration) (string, error) {
 	for {
 		c.mu.Lock()
 		s := c.sess
@@ -369,7 +388,7 @@ func (c *Client) token(ctx context.Context) (string, error) {
 			c.mu.Unlock()
 			return "", ErrSignedOut
 		}
-		if s.AccessToken != "" && s.AccessToken != c.refused && time.Now().Unix() < s.ExpiresAt-60 {
+		if s.AccessToken != "" && s.AccessToken != c.refused && time.Now().Add(d).Unix() < s.ExpiresAt {
 			c.mu.Unlock()
 			return s.AccessToken, nil
 		}
@@ -467,10 +486,12 @@ func (c *Client) UpdateUser(data map[string]any) error {
 
 // request makes an authenticated request to a path of the project.
 func (c *Client) request(ctx context.Context, method, path string, body io.Reader, headers map[string]string) (*http.Response, error) {
-	return c.requestWith(c.http, ctx, method, path, body, headers)
+	return c.requestWith(c.http, ctx, tokenLasts, method, path, body, headers)
 }
 
-func (c *Client) requestWith(hc *http.Client, ctx context.Context, method, path string, body io.Reader, headers map[string]string) (*http.Response, error) {
+// requestWith is request through hc, with a token that lasts at least
+// lasting more.
+func (c *Client) requestWith(hc *http.Client, ctx context.Context, lasting time.Duration, method, path string, body io.Reader, headers map[string]string) (*http.Response, error) {
 	if !c.Configured() {
 		return nil, ErrNotConfigured
 	}
@@ -489,7 +510,7 @@ func (c *Client) requestWith(hc *http.Client, ctx context.Context, method, path 
 	// lets a request refused for its token go again.
 	again := body == nil || req.GetBody != nil
 	for {
-		tok, err := c.token(ctx)
+		tok, err := c.tokenLasting(ctx, lasting)
 		if err != nil {
 			return nil, err
 		}
@@ -504,8 +525,9 @@ func (c *Client) requestWith(hc *http.Client, ctx context.Context, method, path 
 		data, _ := io.ReadAll(res.Body)
 		_ = res.Body.Close()
 		if again && staleToken(res.StatusCode, data) {
-			// The token expired early, by the server's clock, or was
-			// revoked: renew it and try once more.
+			// The token expired early, by the server's clock, was
+			// revoked, or would run out before a function finished:
+			// renew it and try once more.
 			again = false
 			c.refuse(tok)
 			next := req.Clone(ctx)
@@ -712,19 +734,20 @@ func (c *Client) RPC(ctx context.Context, name string, args map[string]any) (any
 
 // Invoke calls an Edge Function and returns its JSON body.
 func (c *Client) Invoke(ctx context.Context, name string, body map[string]any) (map[string]any, error) {
-	return c.invoke(c.http, ctx, name, body)
+	return c.invoke(c.http, ctx, tokenLasts, name, body)
 }
 
 // InvokeLong is Invoke for a function that works a while before it
 // answers, longer than the other calls' timeout and the long client's
-// wait for an answer, as transcribing does: ctx ends it.
+// wait for an answer, as transcribing does: ctx ends it. Its token lasts
+// as long as a function may run.
 func (c *Client) InvokeLong(ctx context.Context, name string, body map[string]any) (map[string]any, error) {
-	return c.invoke(&http.Client{Transport: c.http.Transport}, ctx, name, body)
+	return c.invoke(&http.Client{Transport: c.http.Transport}, ctx, longTokenLasts, name, body)
 }
 
-func (c *Client) invoke(hc *http.Client, ctx context.Context, name string, body map[string]any) (map[string]any, error) {
+func (c *Client) invoke(hc *http.Client, ctx context.Context, lasting time.Duration, name string, body map[string]any) (map[string]any, error) {
 	raw, _ := json.Marshal(body)
-	res, err := c.requestWith(hc, ctx, "POST", "/functions/v1/"+name, bytes.NewReader(raw), nil)
+	res, err := c.requestWith(hc, ctx, lasting, "POST", "/functions/v1/"+name, bytes.NewReader(raw), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -747,7 +770,7 @@ var streamIdle = time.Minute
 var errStreamIdle = errors.New("the server stopped answering")
 
 // InvokeStream calls an Edge Function answering with NDJSON and calls fn
-// with each event.
+// with each event. Its token lasts as long as a function may run.
 func (c *Client) InvokeStream(ctx context.Context, name string, body map[string]any, fn func(map[string]any)) error {
 	raw, _ := json.Marshal(body)
 	ctx, cancel := context.WithCancelCause(ctx)
@@ -756,7 +779,7 @@ func (c *Client) InvokeStream(ctx context.Context, name string, body map[string]
 	// ends instead.
 	idle := time.AfterFunc(streamIdle, func() { cancel(errStreamIdle) })
 	defer idle.Stop()
-	res, err := c.requestWith(c.long, ctx, "POST", "/functions/v1/"+name, bytes.NewReader(raw), nil)
+	res, err := c.requestWith(c.long, ctx, longTokenLasts, "POST", "/functions/v1/"+name, bytes.NewReader(raw), nil)
 	if err != nil {
 		return quiet(ctx, err)
 	}
@@ -787,7 +810,7 @@ func quiet(ctx context.Context, err error) error {
 
 // Upload puts a file in a Storage bucket, taking as long as ctx lets it.
 func (c *Client) Upload(ctx context.Context, bucket, path string, data io.Reader, contentType string) error {
-	res, err := c.requestWith(c.long, ctx, "POST", "/storage/v1/object/"+bucket+"/"+escapePath(path), data, map[string]string{
+	res, err := c.requestWith(c.long, ctx, tokenLasts, "POST", "/storage/v1/object/"+bucket+"/"+escapePath(path), data, map[string]string{
 		"Content-Type": contentType, "x-upsert": "true",
 	})
 	if err != nil {
@@ -815,7 +838,7 @@ func (c *Client) Remove(ctx context.Context, bucket string, paths ...string) err
 // Download reads a file of a Storage bucket, taking as long as ctx lets
 // it.
 func (c *Client) Download(ctx context.Context, bucket, path string) ([]byte, error) {
-	res, err := c.requestWith(c.long, ctx, "GET", "/storage/v1/object/authenticated/"+bucket+"/"+escapePath(path), nil, nil)
+	res, err := c.requestWith(c.long, ctx, tokenLasts, "GET", "/storage/v1/object/authenticated/"+bucket+"/"+escapePath(path), nil, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -114,6 +114,12 @@ func NewController(st *store.Store, be *remote.Client) *Controller {
 // offers "Transcribe again". Either way its audio, which nothing uploaded,
 // goes up. Call it once, after Blobs is set and before any recording
 // starts.
+//
+// A transcription may have gone on without this run: on the server, which
+// saves its transcript to the recording there, or on the device that
+// started it, when this one only pulled the recording mid-way. What is
+// settled here goes up only over a recording still transcribing there
+// (store.SettleRecording), and gives way to the finished one otherwise.
 func (r *Controller) RecoverInterrupted() {
 	recs, err := r.st.Recordings()
 	if err != nil {
@@ -128,7 +134,12 @@ func (r *Controller) RecoverInterrupted() {
 		if cutOff && rec.LocalPath != "" {
 			duration = repairWav(rec.LocalPath)
 		}
-		updated, err := r.st.UpdateRecording(rec.ID, func(x *store.Recording) {
+		// Cut off while recording, it was on no server or other device.
+		over := "transcribing"
+		if cutOff {
+			over = ""
+		}
+		updated, err := r.st.SettleRecording(rec.ID, over, func(x *store.Recording) {
 			if duration > 0 {
 				x.DurationMs = duration
 			}

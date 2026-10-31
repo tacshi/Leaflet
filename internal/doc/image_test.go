@@ -26,4 +26,11 @@ func TestImageLink(t *testing.T) {
 	if _, err := ImageNode("/Users/x/a.png"); err == nil {
 		t.Error("an image of a path on the device")
 	}
+	// An agent's image spec takes a scheme in any case, as the server does.
+	if n, err := SpecToNode(map[string]any{"type": "image", "image": map[string]any{"url": "HTTPS://example.com/a.png"}}, "", ""); err != nil || n.Str("url") != "HTTPS://example.com/a.png" {
+		t.Errorf("SpecToNode image = %v, %v", n, err)
+	}
+	if _, err := SpecToNode(map[string]any{"type": "image", "image": map[string]any{"url": "file:///a.png"}}, "", ""); err == nil {
+		t.Error("an image spec of a file link")
+	}
 }

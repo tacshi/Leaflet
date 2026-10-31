@@ -2,6 +2,7 @@ package app
 
 import (
 	"hash/fnv"
+	"slices"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -215,10 +216,13 @@ func selectBox(c *ui.Context, key string, value *string, options []string, displ
 	for i, o := range options {
 		names[i] = display(o)
 	}
-	name := display(*value)
+	was := display(*value)
+	name := was
 	sel := ui.Select(c.Key(key), &name, names).Width(width)
-	for i, n := range names {
-		if n == name && options[i] != *value {
+	// Only a name chosen goes back, to its first option: options shown
+	// alike would otherwise change the value with nothing chosen.
+	if name != was {
+		if i := slices.Index(names, name); i >= 0 {
 			*value = options[i]
 		}
 	}

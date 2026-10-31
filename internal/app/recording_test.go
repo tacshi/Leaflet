@@ -1,6 +1,9 @@
 package app
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +14,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
+	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
@@ -196,5 +200,55 @@ func TestSummarizeRecording(t *testing.T) {
 	msgs := a.hub.Session(p.ID).Messages
 	if len(msgs) == 0 || msgs[0].Text != locales.RecSummarizePrompt("Weekly sync") {
 		t.Errorf("asked %+v", msgs)
+	}
+}
+
+// The speech settings sent as each key is typed reach the server one at a
+// time, the last last: sent at once, an earlier one could land after it.
+func TestSpeechSettingsLastSentLast(t *testing.T) {
+	first := make(chan struct{})
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var saved []string
+	var once sync.Once
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var row struct {
+			BaseURL string `json:"base_url"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&row)
+		if row.BaseURL == "https://a" {
+			once.Do(func() { close(first) })
+			<-release
+		}
+		mu.Lock()
+		saved = append(saved, row.BaseURL)
+		mu.Unlock()
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(hs.Close)
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
+	a.settings.Stt.BaseURL = "https://a"
+	a.syncSttSettings()
+	<-first
+	a.settings.Stt.BaseURL = "https://ab"
+	a.syncSttSettings()
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mu.Lock()
+		got := append([]string(nil), saved...)
+		mu.Unlock()
+		if len(got) == 2 {
+			if got[1] != "https://ab" {
+				t.Errorf("the server ended with %q", got[1])
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("saved %v", got)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

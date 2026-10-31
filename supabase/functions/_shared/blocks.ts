@@ -56,7 +56,7 @@ export interface BlockSpec {
   link?: { url: string };
   level?: number;
   checked?: boolean;
-  /** For todo_list: the day it is due, YYYY-MM-DD. */
+  /** For todo_list: the day it is due, YYYY-MM-DD, or the day and time, YYYY-MM-DDTHH:MM. */
   due?: string;
   children?: BlockSpec[];
   rows?: string[][];
@@ -208,16 +208,36 @@ export function deltaOf(node: NodeJSON): DeltaOp[] {
 // ---------------------------------------------------------------------------
 // Inline markdown ⇄ delta
 // ---------------------------------------------------------------------------
+//
+// A port of internal/doc/markdown.go: what one side writes, the other reads
+// back as it was, so a page an agent reads and writes here or through the
+// app keeps its text.
 
-function sameAttrs(a?: Attrs, b?: Attrs): boolean {
-  return JSON.stringify(a ?? {}) === JSON.stringify(b ?? {});
+interface MentionAttr {
+  kind?: string;
+  id?: string;
+  name?: string;
 }
 
+/** Attributes as one string, whatever order their keys are in. */
+function attrsKey(a?: object): string {
+  const sorted = (v: unknown): unknown =>
+    v && typeof v === "object" && !Array.isArray(v)
+      ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])]))
+      : v;
+  return JSON.stringify(sorted(a ?? {}));
+}
+
+function sameAttrs(a?: Attrs, b?: Attrs): boolean {
+  return attrsKey(a) === attrsKey(b);
+}
+
+/** Appends text, joining the run before it in the same formats; a mention is a unit of its own. */
 function pushText(out: DeltaOp[], text: string, attrs: Attrs): void {
   if (!text) return;
   const attributes = Object.keys(attrs).length ? { ...attrs } : undefined;
   const last = out[out.length - 1];
-  if (last && sameAttrs(last.attributes, attributes)) {
+  if (last && !attrs.mention && !last.attributes?.mention && sameAttrs(last.attributes, attributes)) {
     last.insert += text;
     return;
   }
@@ -228,168 +248,552 @@ function isWordChar(ch: string | undefined): boolean {
   return !!ch && /[\p{L}\p{N}]/u.test(ch);
 }
 
-function findClosing(src: string, marker: string, from: number): number {
-  let i = from;
-  while (i < src.length) {
-    if (src[i] === "\\") {
-      i += 2;
+function isSpace(ch: string): boolean {
+  return /\s/u.test(ch);
+}
+
+/** Whether a backslash escapes ch: ASCII punctuation. */
+function isPunct(ch: string | undefined): boolean {
+  return !!ch && /^[!-\/:-@\[-`{-~]$/.test(ch);
+}
+
+// A link to one of the user's pages, as doc.PageLink makes it: a page
+// mention is the page's title linked to it. One to a block of a page,
+// leaflet://page/<id>#<block>, stays a link.
+const PAGE_LINK_PREFIX = "leaflet://page/";
+
+/** The page a page link points to and the block, "" for the page; null for other links. */
+function pageLink(href: string): { id: string; block: string } | null {
+  if (!href.startsWith(PAGE_LINK_PREFIX)) return null;
+  const rest = href.slice(PAGE_LINK_PREFIX.length);
+  const hash = rest.indexOf("#");
+  const id = hash < 0 ? rest : rest.slice(0, hash);
+  return id ? { id, block: hash < 0 ? "" : rest.slice(hash + 1) } : null;
+}
+
+/** A person or agent mentioned, written [@Name](mention:user|agent:<id>). */
+function mentionLink(href: string): { kind: string; id: string } | null {
+  const m = href.match(/^mention:(user|agent):(.+)$/s);
+  return m ? { kind: m[1], id: m[2] } : null;
+}
+
+/** A run in the formats Markdown writes; rest holds the others, which keep runs apart. */
+interface MdRun {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+  strike: boolean;
+  code: boolean;
+  href: string;
+  mention?: MentionAttr;
+  rest: string;
+}
+
+function mdRun(text: string, a: Attrs): MdRun {
+  const { bold, italic, strikethrough, code, href, mention, ...rest } = a;
+  return {
+    text,
+    bold: bold === true,
+    italic: italic === true,
+    strike: strikethrough === true,
+    code: code === true,
+    href: typeof href === "string" ? href : "",
+    mention: mention && typeof mention === "object" ? (mention as MentionAttr) : undefined,
+    rest: attrsKey(rest),
+  };
+}
+
+function sameFormats(a: MdRun, b: MdRun): boolean {
+  return a.bold === b.bold && a.italic === b.italic && a.strike === b.strike && a.code === b.code &&
+    a.href === b.href && a.rest === b.rest && attrsKey(a.mention) === attrsKey(b.mention);
+}
+
+/** Drops empty runs and joins neighbours in equal formats, but mentions (Delta.Compact). */
+function compactRuns(runs: MdRun[]): MdRun[] {
+  const out: MdRun[] = [];
+  for (const r of runs) {
+    if (!r.text) continue;
+    const last = out[out.length - 1];
+    if (last && !r.mention && sameFormats(last, r)) {
+      last.text += r.text;
       continue;
     }
-    if (src[i] === "`") {
-      const end = src.indexOf("`", i + 1);
-      if (end > i) {
-        i = end + 1;
+    out.push({ ...r });
+  }
+  return out;
+}
+
+/**
+ * Takes bold, italic and strike off the spaces at either end of the text
+ * they span, outside code: markers must touch text to read as markers.
+ */
+function trimSpans(runs: MdRun[]): MdRun[] {
+  const cs: { ch: string; r: MdRun; run: number }[] = [];
+  runs.forEach((r, i) => {
+    for (const ch of r.text) cs.push({ ch, r, run: i });
+  });
+  const marks: ("bold" | "italic" | "strike")[] = ["bold", "italic", "strike"];
+  const space = (i: number) => !cs[i].r.code && isSpace(cs[i].ch);
+  for (const mark of marks) {
+    for (let i = 0; i < cs.length;) {
+      if (!cs[i].r[mark]) {
+        i++;
         continue;
       }
+      let j = i;
+      while (j < cs.length && cs[j].r[mark]) j++;
+      let lo = i, hi = j;
+      while (lo < hi && space(lo)) {
+        cs[lo].r = { ...cs[lo].r, [mark]: false };
+        lo++;
+      }
+      while (hi > lo && space(hi - 1)) {
+        cs[hi - 1].r = { ...cs[hi - 1].r, [mark]: false };
+        hi--;
+      }
+      i = j;
     }
-    if (src.startsWith(marker, i)) {
-      // A single * or _ must not be half of a ** or __.
-      if (marker.length === 1 && src[i + 1] === marker) {
-        i += 2;
+  }
+  const out: MdRun[] = [];
+  for (let i = 0; i < cs.length;) {
+    let j = i + 1;
+    while (j < cs.length && cs[j].run === cs[i].run && sameFormats(cs[j].r, cs[i].r)) j++;
+    out.push({ ...cs[i].r, text: cs.slice(i, j).map((c) => c.ch).join("") });
+    i = j;
+  }
+  return compactRuns(out);
+}
+
+/** A format Markdown writes around text: a link to href, bold ("*"), italic ("i") or strike ("~"). */
+interface MdMark {
+  kind: "[" | "*" | "i" | "~";
+  href: string;
+}
+
+/** A mark opening or closing, or text: written out, or code. */
+interface MdToken {
+  mark?: MdMark;
+  open?: boolean;
+  close?: boolean;
+  text: string;
+  code?: boolean;
+}
+
+function sameMark(a?: MdMark, b?: MdMark): boolean {
+  return !!a && !!b && a.kind === b.kind && a.href === b.href;
+}
+
+/** The marks of a run, outermost first when they open together: a link holds the others. */
+function marksOf(r: MdRun): MdMark[] {
+  const out: MdMark[] = [];
+  if (r.href) out.push({ kind: "[", href: r.href });
+  if (r.bold) out.push({ kind: "*", href: "" });
+  if (r.italic) out.push({ kind: "i", href: "" });
+  if (r.strike) out.push({ kind: "~", href: "" });
+  return out;
+}
+
+const hasMark = (marks: MdMark[], m: MdMark) => marks.some((k) => sameMark(k, m));
+const isMarker = (t: MdToken) => !!(t.open || t.close);
+
+/**
+ * Moves spaces off the inner side of bold, italic and strike markers,
+ * where a marker no longer reads as one: those before a closing marker go
+ * after it, those after an opening one before it (doc.spacesOutside).
+ */
+function spacesOutside(toks: MdToken[]): MdToken[] {
+  const plain = (t: MdToken) => !t.open && !t.close && !t.code;
+  const emphasis = (t: MdToken) => isMarker(t) && t.mark!.kind !== "[";
+  const out: MdToken[] = [];
+  for (let i = 0; i < toks.length;) {
+    if (!isMarker(toks[i])) {
+      out.push(toks[i]);
+      i++;
+      continue;
+    }
+    // The markers here, and the spaces among them, each at the number of
+    // markers before it.
+    const marks: MdToken[] = [];
+    const spaces: { text: string; at: number }[] = [];
+    let j = i;
+    for (; j < toks.length; j++) {
+      const t = toks[j];
+      if (isMarker(t)) marks.push(t);
+      else if (plain(t) && t.text.trim() === "") spaces.push({ text: t.text, at: marks.length });
+      else break;
+    }
+    const prev = out[out.length - 1];
+    if (prev && plain(prev)) {
+      const t = prev.text.replace(/\s+$/u, "");
+      spaces.unshift({ text: prev.text.slice(t.length), at: 0 });
+      prev.text = t;
+    }
+    if (j < toks.length && plain(toks[j])) {
+      const t = toks[j].text.replace(/^\s+/u, "");
+      spaces.push({ text: toks[j].text.slice(0, toks[j].text.length - t.length), at: marks.length });
+      toks[j].text = t;
+    }
+    for (const s of spaces) {
+      while (s.at < marks.length && emphasis(marks[s.at]) && marks[s.at].close) s.at++;
+      while (s.at > 0 && emphasis(marks[s.at - 1]) && marks[s.at - 1].open) s.at--;
+    }
+    const seq: MdToken[] = [];
+    for (let k = 0; k <= marks.length; k++) {
+      for (const s of spaces) if (s.at === k && s.text) seq.push({ text: s.text });
+      if (k < marks.length) seq.push(marks[k]);
+    }
+    // With the spaces out, a format can open and close on nothing, or
+    // close and open again on the spot: it needs neither.
+    for (let k = 0; k + 1 < seq.length;) {
+      const a = seq[k], b = seq[k + 1];
+      if (isMarker(a) && isMarker(b) && sameMark(a.mark, b.mark) && !!a.open !== !!b.open) {
+        seq.splice(k, 2);
+        k = Math.max(k - 1, 0);
         continue;
       }
-      return i;
+      k++;
     }
-    i++;
+    out.push(...seq);
+    i = j;
+  }
+  return out;
+}
+
+/** Whether the bold mark toks[i] opens or closes has an italic mark next to either of its ends. */
+function boldTouchesItalic(toks: MdToken[], i: number): boolean {
+  const at = (j: number) => j >= 0 && j < toks.length && isMarker(toks[j]) && toks[j].mark!.kind === "i";
+  // The other end: bold doesn't nest in bold, so it is the next bold mark
+  // after an open, or before a close.
+  const step = toks[i].close ? -1 : 1;
+  let j = i + step;
+  while (!(isMarker(toks[j]) && toks[j].mark!.kind === "*")) j += step;
+  return at(i - 1) || at(i + 1) || at(j - 1) || at(j + 1);
+}
+
+/** Escapes the characters that would read as markup: all the markers but a _ inside a word. */
+function escapeText(s: string): string {
+  const chars = [...s];
+  let out = "";
+  chars.forEach((c, i) => {
+    if ("\\*`~[]".includes(c)) out += "\\";
+    else if (
+      c === "_" && (i === 0 || i + 1 === chars.length || !isWordChar(chars[i - 1]) || !isWordChar(chars[i + 1]))
+    ) out += "\\";
+    out += c;
+  });
+  return out;
+}
+
+/**
+ * Writes code between more backticks than any run of them in it, with a
+ * space inside each end where it starts or ends with a backtick or a
+ * space, as CommonMark reads code spans.
+ */
+function codeSpan(s: string): string {
+  let fence = 1, run = 0;
+  for (const c of s) {
+    if (c === "`") {
+      run++;
+      fence = Math.max(fence, run + 1);
+    } else run = 0;
+  }
+  const ticks = "`".repeat(fence);
+  if (s.startsWith("`") || s.endsWith("`") || (s.startsWith(" ") && s.endsWith(" ") && s.trim() !== "")) {
+    s = ` ${s} `;
+  }
+  return ticks + s + ticks;
+}
+
+/** A link's url, in angle brackets when it holds what would end it or read as markup. */
+function linkDestination(href: string): string {
+  if (!/[()<>\\ \t\n]/.test(href)) return href;
+  return "<" + href.replace(/[\\<>]/g, "\\$&").replace(/\n/g, "%0A") + ">";
+}
+
+/**
+ * Writes rich text in the inline markdown dialect agents read and write
+ * (doc.Delta.ToMarkdown): a format over several runs is one span, the
+ * others nested in it, so runs side by side read back as they were.
+ */
+export function deltaToMarkdown(delta: DeltaOp[]): string {
+  const runs = trimSpans(compactRuns(
+    delta.filter((op) => typeof op.insert === "string").map((op) => mdRun(op.insert, op.attributes ?? {})),
+  ));
+  let toks: MdToken[] = [];
+  let open: MdMark[] = [];
+  runs.forEach((r, i) => {
+    const want = marksOf(r);
+    // The marks open that this run still has stay open, as far as the
+    // first it hasn't: closing one to open it again inside another would
+    // put its marker after a space, where it no longer reads as one.
+    let k = 0;
+    while (k < open.length && hasMark(want, open[k])) k++;
+    while (open.length > k) toks.push({ mark: open.pop(), close: true, text: "" });
+    // Of the marks to open, the one that spans the most runs goes
+    // outermost, so it closes last; in marksOf's order otherwise.
+    const spans = (m: MdMark) => {
+      let n = 1;
+      while (n < runs.length - i && hasMark(marksOf(runs[i + n]), m)) n++;
+      return n;
+    };
+    const opening = want.filter((m) => !hasMark(open, m)).map((m) => ({ m, n: spans(m) }));
+    opening.sort((a, b) => b.n - a.n);
+    for (const { m } of opening) {
+      toks.push({ mark: m, open: true, text: "" });
+      open = [...open, m];
+    }
+    const mention = r.mention;
+    if (mention?.id && mention.kind !== "page") {
+      // A page mention is a link to the page, which reads back as one;
+      // a person or agent is a link to mention:<kind>:<id>.
+      const name = mention.name || r.text.replace(/^@/, "");
+      const kind = mention.kind === "agent" ? "agent" : "user";
+      toks.push({ text: `[@${escapeText(name)}](${linkDestination(`mention:${kind}:${mention.id}`)})` });
+    } else if (r.code) {
+      // Code spans side by side differ only in what Markdown can't say:
+      // they are one span, as backticks touching would not read back.
+      const last = toks[toks.length - 1];
+      if (last?.code) last.text += r.text;
+      else toks.push({ text: r.text, code: true });
+    } else {
+      toks.push({ text: escapeText(r.text) });
+    }
+  });
+  for (let i = open.length - 1; i >= 0; i--) toks.push({ mark: open[i], close: true, text: "" });
+  toks = spacesOutside(toks);
+  let out = "";
+  toks.forEach((t, i) => {
+    if (t.code) out += codeSpan(t.text);
+    else if (!isMarker(t)) out += t.text;
+    else if (t.mark!.kind === "[") out += t.open ? "[" : `](${linkDestination(t.mark!.href)})`;
+    // Bold beside an italic's * is __, as *** reads either way.
+    else if (t.mark!.kind === "*") out += boldTouchesItalic(toks, i) ? "__" : "**";
+    else if (t.mark!.kind === "i") out += "*";
+    else out += "~~";
+  });
+  return out;
+}
+
+/**
+ * Reads [text](url) at the start of s: the text, the url and how many
+ * characters they take. As in CommonMark, the url may be in angle
+ * brackets or hold balanced parentheses, and backslashes escape in both.
+ */
+function link(s: string[]): { text: string[]; href: string; n: number } | null {
+  let i = 1, depth = 0;
+  for (; i < s.length; i++) {
+    if (s[i] === "\\") i++;
+    else if (s[i] === "`") {
+      // A ] in code is the code's.
+      const span = codeSpanAt(s.slice(i));
+      if (span) i += span.n - 1;
+    } else if (s[i] === "[") depth++;
+    else if (s[i] === "]") {
+      if (depth === 0) break;
+      depth--;
+    }
+  }
+  if (i === 1 || i + 1 >= s.length || s[i + 1] !== "(") return null;
+  const text = s.slice(1, i);
+  let href = "";
+  let j = i + 2;
+  let n: number;
+  if (j < s.length && s[j] === "<") {
+    for (j++; j < s.length && s[j] !== ">"; j++) {
+      if (s[j] === "<" || s[j] === "\n") return null;
+      if (s[j] === "\\" && j + 1 < s.length && isPunct(s[j + 1])) j++;
+      href += s[j];
+    }
+    if (j + 1 >= s.length || s[j + 1] !== ")") return null;
+    n = j + 2;
+  } else {
+    depth = 0;
+    for (; j < s.length; j++) {
+      let c = s[j];
+      if (isSpace(c)) return null;
+      if (c === "\\" && j + 1 < s.length && isPunct(s[j + 1])) c = s[++j];
+      else if (c === "(") depth++;
+      else if (c === ")") {
+        if (depth === 0) break;
+        depth--;
+      }
+      href += c;
+    }
+    if (j >= s.length) return null;
+    n = j + 1;
+  }
+  return href ? { text, href, n } : null;
+}
+
+/**
+ * Reads a code span at the start of s, between runs of as many backticks,
+ * and how many characters it takes; null when there is none. A space
+ * inside each end comes off, as CommonMark has it.
+ */
+function codeSpanAt(s: string[]): { code: string; n: number } | null {
+  let open = 0;
+  while (open < s.length && s[open] === "`") open++;
+  for (let j = open; j < s.length;) {
+    if (s[j] !== "`") {
+      j++;
+      continue;
+    }
+    let end = j;
+    while (end < s.length && s[end] === "`") end++;
+    if (end - j === open) {
+      let code = s.slice(open, j).join("");
+      if (code.length >= 2 && code[0] === " " && code[code.length - 1] === " " && code.trim() !== "") {
+        code = code.slice(1, -1);
+      }
+      return code ? { code, n: end } : null;
+    }
+    j = end;
+  }
+  return null;
+}
+
+/** Where a code span or a link at s[j] ends, or j when none starts there. */
+function skipSpan(s: string[], j: number): number {
+  if (s[j] === "`") {
+    const span = codeSpanAt(s.slice(j));
+    if (span) return j + span.n;
+  } else if (s[j] === "[") {
+    const l = link(s.slice(j));
+    if (l) return j + l.n;
+  }
+  return j;
+}
+
+function findSingle(s: string[], marker: string, from: number): number {
+  for (let j = from; j < s.length; j++) {
+    if (s[j] === "\\") {
+      j++;
+      continue;
+    }
+    const k = skipSpan(s, j);
+    if (k > j) {
+      j = k - 1;
+      continue;
+    }
+    if (s[j] !== marker) continue;
+    if (j + 1 < s.length && s[j + 1] === marker) {
+      j++;
+      continue;
+    }
+    if (marker === "_" && j + 1 < s.length && isWordChar(s[j + 1])) continue;
+    if (j > from && s[j - 1] === " ") continue;
+    return j;
   }
   return -1;
 }
 
-const LINK = /^\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)\)/;
-
-function parseMention(href: string): Attrs | null {
-  const m = href.match(/^mention:(user|agent):(.+)$/);
-  return m ? { kind: m[1], id: m[2] } : null;
+function indexOfMarker(s: string[], marker: string, from: number): number {
+  const m = [...marker];
+  for (let j = from; j + m.length <= s.length; j++) {
+    if (s[j] === "\\") {
+      j++;
+      continue;
+    }
+    const k = skipSpan(s, j);
+    if (k > j) {
+      j = k - 1;
+      continue;
+    }
+    if (s.slice(j, j + m.length).join("") === marker) return j;
+  }
+  return -1;
 }
 
-// A link to one of the user's pages, as doc.PageLink makes it: a page
-// mention is the page's title linked to it.
-const PAGE_LINK = /^leaflet:\/\/page\/(.+)$/;
-
-// Parses **bold**, *italic* or _italic_, `code`, ~~strike~~ and [text](url).
-export function markdownToDelta(src: string, attrs: Attrs = {}): DeltaOp[] {
-  const out: DeltaOp[] = [];
-  let buf = "";
+function parseInline(s: string[], attrs: Attrs, out: DeltaOp[]): void {
+  let plain = "";
   const flush = () => {
-    pushText(out, buf, attrs);
-    buf = "";
+    pushText(out, plain, attrs);
+    plain = "";
   };
-  const nest = (inner: string, extra: Attrs) => {
-    flush();
-    for (const op of markdownToDelta(inner, { ...attrs, ...extra })) {
-      pushText(out, op.insert, op.attributes ?? {});
-    }
-  };
-
-  let i = 0;
-  while (i < src.length) {
-    const ch = src[i];
-    if (ch === "\\" && i + 1 < src.length && /[\\`*_~\[\]()@]/.test(src[i + 1])) {
-      buf += src[i + 1];
+  for (let i = 0; i < s.length;) {
+    const c = s[i];
+    if (c === "\\" && i + 1 < s.length && isPunct(s[i + 1])) {
+      plain += s[i + 1];
       i += 2;
       continue;
     }
-    if (ch === "`") {
-      const end = src.indexOf("`", i + 1);
-      if (end > i + 1) {
+    if (c === "`") {
+      const span = codeSpanAt(s.slice(i));
+      if (span) {
         flush();
-        pushText(out, src.slice(i + 1, end), { ...attrs, code: true });
-        i = end + 1;
+        pushText(out, span.code, { ...attrs, code: true });
+        i += span.n;
         continue;
       }
     }
-    if (src.startsWith("**", i) || src.startsWith("__", i)) {
-      const marker = src.slice(i, i + 2);
-      const end = findClosing(src, marker, i + 2);
-      if (end > i + 2) {
-        nest(src.slice(i + 2, end), { bold: true });
-        i = end + 2;
-        continue;
-      }
-    }
-    if (src.startsWith("~~", i)) {
-      const end = findClosing(src, "~~", i + 2);
-      if (end > i + 2) {
-        nest(src.slice(i + 2, end), { strikethrough: true });
-        i = end + 2;
-        continue;
-      }
-    }
-    if (ch === "*" || (ch === "_" && !isWordChar(src[i - 1]))) {
-      const end = findClosing(src, ch, i + 1);
-      if (
-        end > i + 1 && src[i + 1] !== " " &&
-        (ch === "*" || !isWordChar(src[end + 1]))
-      ) {
-        nest(src.slice(i + 1, end), { italic: true });
-        i = end + 1;
-        continue;
-      }
-    }
-    if (ch === "[") {
-      const m = src.slice(i).match(LINK);
-      if (m) {
-        const mention = parseMention(m[2]);
-        if (mention) {
-          const name = m[1].replace(/\\(.)/g, "$1").replace(/^@/, "");
-          flush();
-          pushText(out, `@${name}`, { ...attrs, mention: { ...mention, name } });
-        } else if (PAGE_LINK.test(m[2])) {
-          const name = m[1].replace(/\\(.)/g, "$1");
-          flush();
+    if (c === "[") {
+      const l = link(s.slice(i));
+      if (l) {
+        flush();
+        const page = pageLink(l.href);
+        const mention = mentionLink(l.href);
+        if (page && !page.block) {
+          // A link to a page is a mention of it; one to a block of a page
+          // stays a link, with its own text.
+          const name = deltaToPlain(markdownToDelta(l.text.join("")));
           pushText(out, name, {
             ...attrs,
-            href: m[2],
-            mention: { kind: "page", id: m[2].match(PAGE_LINK)![1], name },
+            href: PAGE_LINK_PREFIX + page.id,
+            mention: { kind: "page", id: page.id, name },
           });
+        } else if (mention) {
+          const name = deltaToPlain(markdownToDelta(l.text.join(""))).replace(/^@/, "");
+          pushText(out, `@${name}`, { ...attrs, mention: { ...mention, name } });
         } else {
-          nest(m[1], { href: m[2] });
+          parseInline(l.text, { ...attrs, href: l.href }, out);
         }
-        i += m[0].length;
+        i += l.n;
         continue;
       }
     }
-    buf += ch;
+    // ***both*** is bold and italic, as agents write it.
+    if (i + 2 < s.length && (c === "*" || c === "_") && s[i + 1] === c && s[i + 2] === c) {
+      const end = indexOfMarker(s, c.repeat(3), i + 3);
+      if (end > i + 3) {
+        flush();
+        parseInline(s.slice(i + 3, end), { ...attrs, bold: true, italic: true }, out);
+        i = end + 3;
+        continue;
+      }
+    }
+    if (i + 1 < s.length && (c === "*" || c === "~" || c === "_") && s[i + 1] === c) {
+      const end = indexOfMarker(s, c.repeat(2), i + 2);
+      if (end > i + 2) {
+        flush();
+        parseInline(s.slice(i + 2, end), { ...attrs, ...(c === "~" ? { strikethrough: true } : { bold: true }) }, out);
+        i = end + 2;
+        continue;
+      }
+    }
+    if ((c === "*" || c === "_") && (c !== "_" || !(i > 0 && isWordChar(s[i - 1])))) {
+      const end = findSingle(s, c, i + 1);
+      if (end > i + 1) {
+        flush();
+        parseInline(s.slice(i + 1, end), { ...attrs, italic: true }, out);
+        i = end + 1;
+        continue;
+      }
+    }
+    plain += c;
     i++;
   }
   flush();
-  return out;
 }
 
-function escapeMarkdown(text: string): string {
-  return text
-    .replace(/([\\`*~\[\]])/g, "\\$1")
-    .replace(/(^|[^\p{L}\p{N}])_/gu, "$1\\_")
-    .replace(/_(?=[^\p{L}\p{N}]|$)/gu, "\\_");
-}
-
-/** The inverse of markdownToDelta, for read_page. */
-export function deltaToMarkdown(delta: DeltaOp[]): string {
-  let out = "";
-  for (const op of delta) {
-    if (typeof op.insert !== "string") continue;
-    const a = op.attributes ?? {};
-    const mention = a.mention as { kind?: string; id?: string; name?: string } | undefined;
-    // A page mention writes as its link, below.
-    if (mention?.id && mention.kind !== "page") {
-      const name = (mention.name ?? op.insert.replace(/^@/, "")).replace(/([\]\\])/g, "\\$1");
-      out += `[@${name}](mention:${mention.kind === "agent" ? "agent" : "user"}:${mention.id})`;
-      continue;
-    }
-    const lead = op.insert.match(/^\s*/)![0];
-    const trail = op.insert.slice(lead.length).match(/\s*$/)![0];
-    const core = op.insert.slice(lead.length, op.insert.length - trail.length);
-    if (!core) {
-      out += op.insert;
-      continue;
-    }
-    let text = a.code ? "`" + core.replace(/`/g, "'") + "`" : escapeMarkdown(core);
-    if (a.strikethrough) text = `~~${text}~~`;
-    if (a.italic) text = `*${text}*`;
-    if (a.bold) text = `**${text}**`;
-    if (typeof a.href === "string" && a.href) text = `[${text}](${a.href})`;
-    out += lead + text + trail;
-  }
+/**
+ * Reads the inline markdown dialect (doc.FromMarkdown): **bold** or
+ * __bold__, *italic* or _italic_, `code`, ~~strike~~, [text](url), page
+ * mentions [Title](leaflet://page/<id>) and person or agent mentions
+ * [@Name](mention:user|agent:<id>).
+ */
+export function markdownToDelta(src: string, attrs: Attrs = {}): DeltaOp[] {
+  const out: DeltaOp[] = [];
+  parseInline([...src], attrs, out);
   return out;
 }
 
@@ -549,6 +953,20 @@ export function isRule(line: string): boolean {
   return /^([-*_])(\s*\1){2,}$/.test(line.trim());
 }
 
+/**
+ * Whether a to-do's due is one doc.ParseDue reads: a day, YYYY-MM-DD, or a
+ * day and its time, YYYY-MM-DDTHH:MM, in the user's own time.
+ */
+export function validDue(due: unknown): due is string {
+  const m = typeof due === "string" ? due.match(/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/) : null;
+  if (!m) return false;
+  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+  return days !== undefined && day >= 1 && day <= days &&
+    (m[4] === undefined || (Number(m[4]) < 24 && Number(m[5]) < 60));
+}
+
 export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId(), depth = 0): NodeJSON {
   if (!spec || typeof spec !== "object") throw new SpecError("Each block must be an object");
   if (depth >= MAX_SPEC_DEPTH) throw new SpecError(`Blocks nest at most ${MAX_SPEC_DEPTH} deep`);
@@ -577,7 +995,7 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
     case "todo_list":
       node = textNode(id, type, spec.text ?? "", {
         checked: spec.checked === true,
-        ...(typeof spec.due === "string" && /^\d{4}-\d{2}-\d{2}$/.test(spec.due) ? { due: spec.due } : {}),
+        ...(validDue(spec.due) ? { due: spec.due } : {}),
       });
       break;
     case "paragraph":
@@ -715,13 +1133,41 @@ export function tableNode(id: string, rows: unknown, newId: IdFactory): NodeJSON
   };
 }
 
+/** The most cells tableSize makes room for (doc.maxTableCells). */
+const MAX_TABLE_CELLS = 1 << 16;
+
+/** A JSON number as an integer, as doc.AsInt reads one; def for anything else. */
+function asInt(v: unknown, def: number): number {
+  return typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : def;
+}
+
+/**
+ * A stored table's rows and columns, as far as it has cells for them
+ * (doc.TableSize): a size from another client or a newer app, negative or
+ * huge, never makes room for more cells than are there, or than
+ * MAX_TABLE_CELLS.
+ */
+export function tableSize(node: NodeJSON): { rows: number; cols: number } {
+  let lastRow = -1, lastCol = -1;
+  for (const cell of node.children ?? []) {
+    const row = asInt(cell.data?.rowPosition, -1), col = asInt(cell.data?.colPosition, -1);
+    if (row >= 0 && col >= 0) {
+      lastRow = Math.max(lastRow, row);
+      lastCol = Math.max(lastCol, col);
+    }
+  }
+  const rows = Math.min(Math.max(asInt(node.data?.rowsLen, 0), 0), lastRow + 1);
+  const cols = Math.min(Math.max(asInt(node.data?.colsLen, 0), 0), lastCol + 1, MAX_TABLE_CELLS);
+  if (rows === 0 || cols === 0) return { rows: 0, cols: 0 };
+  return { rows: Math.min(rows, Math.floor(MAX_TABLE_CELLS / cols)), cols };
+}
+
 export function tableRows(node: NodeJSON): string[][] {
-  const colsLen = Number(node.data?.colsLen ?? 0);
-  const rowsLen = Number(node.data?.rowsLen ?? 0);
+  const { rows: rowsLen, cols: colsLen } = tableSize(node);
   const rows: string[][] = Array.from({ length: rowsLen }, () => Array(colsLen).fill(""));
   for (const cell of node.children ?? []) {
-    const col = Number(cell.data?.colPosition);
-    const row = Number(cell.data?.rowPosition);
+    const col = asInt(cell.data?.colPosition, -1);
+    const row = asInt(cell.data?.rowPosition, -1);
     if (row >= 0 && row < rowsLen && col >= 0 && col < colsLen) {
       rows[row][col] = (cell.children ?? []).map((p) => deltaToMarkdown(deltaOf(p))).join(" ");
     }

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/egoist/mygo/ui"
@@ -174,7 +175,7 @@ func (a *App) signedIn(user *store.User) {
 		signIn.asking, signIn.lost = user, n
 		return
 	}
-	a.useAccount(user)
+	a.useAccount(user, false)
 }
 
 // replacesAccount reports whether signing in as user removes the pages of
@@ -194,11 +195,18 @@ func (a *App) lostBySigningIn(user *store.User) int {
 }
 
 // useAccount makes user the session: the previous account's pages go, if
-// it was another's, once the open page's edits are saved.
-func (a *App) useAccount(user *store.User) {
+// it was another's, once the open page's edits are saved; with their
+// changes not uploaded yet only when drop says the user agreed.
+func (a *App) useAccount(user *store.User, drop bool) {
 	if a.replacesAccount(user) && !a.flush() {
 		go a.backend.SignOut()
 		return
+	}
+	if drop && a.replacesAccount(user) {
+		if err := a.st.ForgetAccount(); err != nil {
+			a.toast(err.Error())
+			return
+		}
 	}
 	// One way of syncing at a time: the server's, now. Settings say so,
 	// so iCloud sync shows off once signed out again.
@@ -209,6 +217,11 @@ func (a *App) useAccount(user *store.User) {
 		a.saveSettings()
 	}
 	if _, err := a.st.LoadSession(user); err != nil {
+		// A change made since it counted, by leaflet mcp: it asks again.
+		if errors.Is(err, store.ErrUnsynced) {
+			signIn.asking, signIn.lost = user, a.st.PendingCount()
+			return
+		}
 		a.toast(err.Error())
 		return
 	}
@@ -237,7 +250,7 @@ func (a *App) signInAlert(c *ui.Context) {
 	if ui.AlertDialog(c, &open, locales.SigninAnyway(), locales.SigninRemovesUnsynced(s.lost, user.Email),
 		locales.CommonCancel(), locales.CommonSignIn()) == 1 {
 		s.asking = nil
-		a.useAccount(user)
+		a.useAccount(user, true)
 		return
 	}
 	if !open {

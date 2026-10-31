@@ -91,6 +91,8 @@ type Run struct {
 	Stopped bool
 	// Restored is a run of an earlier launch, kept with its chat reply.
 	Restored bool `json:"-"`
+	// kept is a run whose "Before" snapshot is in the page's history.
+	kept bool
 	// stop cancels a run on this device while it works; a cloud run goes
 	// on on the server whatever the app does, so it has none.
 	stop context.CancelFunc
@@ -572,29 +574,40 @@ func (h *Hub) Chat(pageID, text string, focus []string) {
 	if t == "" || s.Running {
 		return
 	}
+	// The history is the turns before this one, the request itself aside.
+	history := chatHistory(s)
 	s.Messages = append(s.Messages, &Message{Mine: true, Text: t})
 	reply := &Message{Text: "Reading the page…", Pending: true}
 	s.Messages = append(s.Messages, reply)
-	history := chatHistory(s.Messages)
 	h.Start(pageID, RunOptions{Surface: "sidebar", Instruction: t, Focus: focus, History: history, Reply: reply})
 	h.saveChat(s)
 }
 
-func chatHistory(msgs []*Message) []map[string]string {
-	var turns []map[string]string
-	for _, m := range msgs {
+// chatHistory is the sidebar chat as the model reads it: each request
+// with its reply, as the agent function builds it from the runs that are
+// done. A request whose reply failed, or whose run failed or was undone,
+// goes with it, neither said: the model would take the request for done,
+// and the page for having what its reply says.
+func chatHistory(s *Session) []map[string]string {
+	msgs := s.Messages
+	kept := func(m *Message) bool {
 		if m.Pending || m.Error {
+			return false
+		}
+		r := s.Run(m.RunID)
+		return r == nil || (!r.Undone && r.Status != "failed")
+	}
+	var turns []map[string]string
+	for i, m := range msgs {
+		if m.Mine {
+			if i+1 < len(msgs) && !msgs[i+1].Mine && kept(msgs[i+1]) {
+				turns = append(turns, map[string]string{"role": "user", "content": m.Text})
+			}
 			continue
 		}
-		role := "assistant"
-		if m.Mine {
-			role = "user"
+		if kept(m) {
+			turns = append(turns, map[string]string{"role": "assistant", "content": m.Text})
 		}
-		turns = append(turns, map[string]string{"role": role, "content": m.Text})
-	}
-	// The newest user message is the request itself.
-	if n := len(turns); n > 0 && turns[n-1]["role"] == "user" {
-		turns = turns[:n-1]
 	}
 	if len(turns) > 20 {
 		turns = turns[len(turns)-20:]
@@ -674,25 +687,11 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 	if o.Surface == "sidebar" {
 		req.ConversationID = s.ConversationID
 	}
-	d := &delivery{}
+	d := h.newDelivery(pageID, run, option)
 	events := Events{
 		Status: func(st string) { h.host.Update(func() { run.Status = st }) },
 		Op: func(op doc.Op, summary string) {
-			h.host.Update(func() {
-				run.Ops = append(run.Ops, op)
-				run.Edits = append(run.Edits, Edit{Summary: summary, BlockIDs: OpBlockIDs(op)})
-				if o.Reply != nil {
-					o.Reply.Text = summary + "…"
-				}
-				switch live := h.host.Editor(pageID); {
-				case live != nil:
-					d.to(live, run.Ops)
-				case !option.Local():
-					// The server keeps a cloud run's ops: a page opened
-					// later gets them by syncing.
-					d.sent = len(run.Ops)
-				}
-			})
+			h.host.Update(func() { h.arrived(s, run, option, before, d, o, op, summary) })
 		},
 	}
 	work := before.Copy()
@@ -732,6 +731,60 @@ func (h *Hub) Stop(pageID, runID string) {
 	run.stop()
 }
 
+// chatSaveEvery spaces the saves of a page's chat as a run's ops come.
+const chatSaveEvery = time.Second
+
+// arrived takes a run's op as it comes, on the main thread. An open page
+// gets it at once, and so its editor saves it before the run ends: the
+// page's "Before" snapshot goes first, and the chat keeps the run's ops
+// as they come (a save a second at most), so a run the app quit during
+// can still be undone, and the page still goes back to how it was.
+func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, d *delivery, o RunOptions, op doc.Op, summary string) {
+	run.Ops = append(run.Ops, op)
+	run.Edits = append(run.Edits, Edit{Summary: summary, BlockIDs: OpBlockIDs(op)})
+	if o.Reply != nil {
+		o.Reply.Text = summary + "…"
+	}
+	switch live := h.host.Editor(s.PageID); {
+	case live != nil:
+		if err := h.keepBefore(s.PageID, run, option, before); err != nil {
+			log.Printf("agent run history: %v", err)
+		}
+		d.to(live, run.Ops)
+		if o.Reply != nil && time.Since(d.chatSaved) >= chatSaveEvery {
+			h.saveChat(s)
+			d.chatSaved = time.Now()
+		}
+	case !option.Local():
+		// The server keeps a cloud run's ops: a page opened
+		// later gets them by syncing.
+		d.sent = len(run.Ops)
+	}
+}
+
+// runJobID is the job a run's history names: a local run's own, kept on
+// this device; a cloud run's server job keeps its own history.
+func runJobID(run *Run, option Option) string {
+	if option.Local() {
+		return run.ID
+	}
+	return ""
+}
+
+// keepBefore keeps the page as it was before a run in its history, once
+// a run: when its first op reaches the page, or at its end.
+func (h *Hub) keepBefore(pageID string, run *Run, option Option, before *doc.Content) error {
+	if run.kept {
+		return nil
+	}
+	label := "Before " + option.Name() + ": " + short(run.Instruction)
+	if err := h.st.AddHistory(pageID, before, "agent_run", runJobID(run, option), label); err != nil {
+		return err
+	}
+	run.kept = true
+	return nil
+}
+
 func firstNonNil(a, b *store.ModelChoice) *store.ModelChoice {
 	if a != nil {
 		return a
@@ -764,15 +817,37 @@ func (h *Hub) insertJob(ctx context.Context, req Request) error {
 type delivery struct {
 	sent int
 	ed   *editor.Editor
+	// conflict keeps an open page's content in history before an op takes
+	// a change of it away; nil keeps none.
+	conflict func(*doc.Content) error
+	// chatSaved is when the page's chat last kept the run's ops.
+	chatSaved time.Time
+}
+
+// newDelivery is a run's delivery to its page, which keeps in the page's
+// history what the run's ops take away of the open page, under its job.
+func (h *Hub) newDelivery(pageID string, run *Run, option Option) *delivery {
+	return &delivery{conflict: func(c *doc.Content) error {
+		return h.st.AddHistory(pageID, c, "conflict", runJobID(run, option), "")
+	}}
 }
 
 // to applies the ops ed does not have yet, in order, so an op never comes
 // before the blocks it needs. The first op an editor gets starts an undo
-// step that the rest join.
+// step that the rest join. An op that replaces or deletes a block the
+// user changed since the agent read it keeps the page as it is in history
+// first (conflict), as storeOps does on a closed page. Each op is checked
+// against the page just before it, which has the run's earlier ops by
+// then, so the agent's own edits are no change.
 func (d *delivery) to(ed *editor.Editor, ops []doc.Op) {
 	for _, op := range ops[d.sent:] {
 		if op.Op == "create_page" || op.Op == "delete_page" {
 			continue
+		}
+		if d.conflict != nil && overwrites(ed.Content, []doc.Op{op}) {
+			if err := d.conflict(ed.Content); err != nil {
+				log.Printf("agent op on the open page: %v", err)
+			}
 		}
 		if err := ed.ApplyOp(op, ed != d.ed); err != nil {
 			log.Printf("agent op on the open page: %v", err)
@@ -970,23 +1045,21 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		run.Status = "done"
 	}
 	pageID := s.PageID
-	label := "Before " + option.Name() + ": " + short(req.Instruction)
-	jobID := ""
-	if option.Local() {
-		jobID = run.ID
-	}
-	saved, kept := true, false
+	saved := true
 	if len(run.Ops) > 0 && option.Local() {
 		// The page may have opened or closed during the run: it gets the
 		// ops it missed, open or stored.
 		if live := h.host.Editor(pageID); live != nil {
+			if err := h.keepBefore(pageID, run, option, before); err != nil {
+				log.Printf("agent run history: %v", err)
+			}
 			d.to(live, run.Ops)
 		} else if len(d.missed(run.Ops)) > 0 {
 			// The snapshot goes first, as an MCP edit's: edits that could
 			// not keep one are not stored, so none is stored that the page
 			// cannot go back from.
-			err := h.st.AddHistory(pageID, before, "agent_run", jobID, label)
-			if kept = err == nil; kept {
+			err := h.keepBefore(pageID, run, option, before)
+			if err == nil {
 				err = d.save(h.st, pageID, run.Ops, run.ID)
 			}
 			if err != nil {
@@ -1001,12 +1074,10 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		}
 	}
 	if len(run.Ops) > 0 && saved {
-		// Edits on the page already, in an open editor or saved with it,
-		// get their snapshot after them: the editor's undo has them too.
-		if !kept {
-			if err := h.st.AddHistory(pageID, before, "agent_run", jobID, label); err != nil {
-				log.Printf("agent run history: %v", err)
-			}
+		// A run whose snapshot is not kept yet, a cloud run's ops the page
+		// gets by syncing, gets it now; once a run, whenever it is kept.
+		if err := h.keepBefore(pageID, run, option, before); err != nil {
+			log.Printf("agent run history: %v", err)
 		}
 		h.host.Tint(pageID, run.BlockIDs())
 	}

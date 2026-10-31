@@ -197,11 +197,29 @@ type NewPageOptions struct {
 // CreatePage creates a page, last among its siblings unless AfterID says
 // where.
 func (s *Store) CreatePage(o NewPageOptions) (Page, error) {
-	sess := s.Session()
+	var p Page
+	// The page, its content and their entries in the outbox are stored
+	// together: a page without its entries would never go to the server.
+	err := s.inTx(func(tx *sql.Tx) error {
+		var err error
+		p, err = createPage(tx, s.Session(), o)
+		return err
+	})
+	if err != nil {
+		return Page{}, err
+	}
+	s.Notify("outbox", p.ID)
+	s.Notify("pages", p.ID)
+	return p, nil
+}
+
+// createPage is CreatePage in the caller's transaction, which copying a
+// page makes its copies in, all or none.
+func createPage(tx *sql.Tx, sess Session, o NewPageOptions) (Page, error) {
 	spaceID := o.SpaceID
 	template := o.Template
 	if o.ParentID != "" {
-		if parent, err := s.Page(o.ParentID); err == nil {
+		if parent, err := pageIn(tx, o.ParentID); err == nil {
 			if spaceID == "" {
 				spaceID = parent.SpaceID
 			}
@@ -216,7 +234,7 @@ func (s *Store) CreatePage(o NewPageOptions) (Page, error) {
 	if o.ParentID == "" {
 		folderID = o.FolderID
 	}
-	key, err := keyAfter(s.db, o.ParentID, spaceID, folderID, o.AfterID, "")
+	key, err := keyAfter(tx, o.ParentID, spaceID, folderID, o.AfterID, "")
 	if err != nil {
 		return Page{}, err
 	}
@@ -236,31 +254,21 @@ func (s *Store) CreatePage(o NewPageOptions) (Page, error) {
 		content = doc.Empty()
 	}
 	body := content.Stamped(nil, now.UnixMilli())
-	// The page, its content and their entries in the outbox are stored
-	// together: a page without its entries would never go to the server.
-	err = s.inTx(func(tx *sql.Tx) error {
-		// The app may have changed accounts since the session was read, as
-		// leaflet mcp runs apart from it: the page has nowhere to go then.
-		if spaceID != "" && spaceID == sess.SpaceID && !hasSpace(tx, spaceID) {
-			return ErrNoSpace
-		}
-		if err := writePage(tx, p); err != nil {
-			return err
-		}
-		if err := writeContent(tx, p.ID, body, now, nil); err != nil {
-			return err
-		}
-		if err := queue(tx, "pages", p.ID, PageToRemote(p), "new page", p.ID); err != nil {
-			return err
-		}
-		return queue(tx, "page_content", p.ID, map[string]any{"page_id": p.ID}, "new page", p.ID)
-	})
-	if err != nil {
+	// The app may have changed accounts since the session was read, as
+	// leaflet mcp runs apart from it: the page has nowhere to go then.
+	if spaceID != "" && spaceID == sess.SpaceID && !hasSpace(tx, spaceID) {
+		return Page{}, ErrNoSpace
+	}
+	if err := writePage(tx, p); err != nil {
 		return Page{}, err
 	}
-	s.Notify("outbox", p.ID)
-	s.Notify("pages", p.ID)
-	return p, nil
+	if err := writeContent(tx, p.ID, body, now, nil); err != nil {
+		return Page{}, err
+	}
+	if err := queue(tx, "pages", p.ID, PageToRemote(p), "new page", p.ID); err != nil {
+		return Page{}, err
+	}
+	return p, queue(tx, "page_content", p.ID, map[string]any{"page_id": p.ID}, "new page", p.ID)
 }
 
 // RenamePage changes a page's title.
@@ -643,16 +651,15 @@ func (s *Store) CopyPage(id string, o CopyOptions) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
-	tree, ids, contents := plan.tree, plan.ids, plan.contents
-	p, err := s.CreatePage(NewPageOptions{ID: ids[id], ParentID: o.ParentID, FolderID: o.FolderID, SpaceID: o.SpaceID,
-		AfterID: o.AfterID, Title: o.Title, Icon: tree[0].Icon, Tags: tree[0].Tags, Template: o.Template, Content: contents[0]})
-	if err != nil {
-		return Page{}, err
-	}
-	if err := s.createCopies(tree[1:], ids, contents[1:], o.Template); err != nil {
-		return Page{}, err
-	}
-	return p, s.putCopies(plan)
+	var p Page
+	err = s.storeCopies(plan, func(tx *sql.Tx) (bool, error) {
+		root := plan.tree[0]
+		p, err = createPage(tx, s.Session(), NewPageOptions{ID: plan.ids[id], ParentID: o.ParentID, FolderID: o.FolderID,
+			SpaceID: o.SpaceID, AfterID: o.AfterID, Title: o.Title, Icon: root.Icon, Tags: root.Tags, Template: o.Template,
+			Content: plan.contents[0]})
+		return o.Template, err
+	})
+	return p, err
 }
 
 // CopyInto copies page id's subpages under page into, and returns a copy
@@ -663,21 +670,63 @@ func (s *Store) CopyInto(id, into string) (*doc.Content, error) {
 	if err != nil {
 		return nil, err
 	}
-	tree, ids, contents := plan.tree, plan.ids, plan.contents
-	target, err := s.Page(into)
+	err = s.storeCopies(plan, func(tx *sql.Tx) (bool, error) {
+		target, err := pageIn(tx, into)
+		if err != nil {
+			return false, err
+		}
+		// The page takes the template's tags too, after its own.
+		if tags := NormalizeTags(append(append([]string{}, target.Tags...), plan.tree[0].Tags...)); len(tags) != len(target.Tags) {
+			target.Tags, target.UpdatedAt = tags, time.Now()
+			if err := savePage(tx, target, "tagged"); err != nil {
+				return false, err
+			}
+		}
+		return target.Template, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	// The page takes the template's tags too, after its own.
-	if tags := NormalizeTags(append(append([]string{}, target.Tags...), tree[0].Tags...)); len(tags) != len(target.Tags) {
-		if err := s.SetPageTags(into, tags); err != nil {
-			return nil, err
+	return plan.contents[0], nil
+}
+
+// storeCopies stores what copyPlan planned in one transaction, with the
+// root the caller makes or changes in it first, which reports whether the
+// copies are templates: a copy cut short would be left half made, and
+// queued to go up so. What it copied here of the files and audio goes
+// again when it fails.
+func (s *Store) storeCopies(plan pageCopies, root func(tx *sql.Tx) (bool, error)) error {
+	recs, files, made, err := s.copyLocal(plan)
+	if err == nil {
+		err = s.inTx(func(tx *sql.Tx) error {
+			template, err := root(tx)
+			if err != nil {
+				return err
+			}
+			if err := createCopies(tx, s.Session(), plan.tree[1:], plan.ids, plan.contents[1:], template); err != nil {
+				return err
+			}
+			if err := putRecordingCopies(tx, s.Session().SpaceID, recs); err != nil {
+				return err
+			}
+			return putFileCopies(tx, files)
+		})
+	}
+	if err != nil {
+		for _, path := range made {
+			_ = os.RemoveAll(path)
 		}
+		return err
 	}
-	if err := s.createCopies(tree[1:], ids, contents[1:], target.Template); err != nil {
-		return nil, err
+	s.Notify("outbox", "")
+	s.Notify("pages", "")
+	if len(recs) > 0 {
+		s.Notify("recordings", "")
 	}
-	return contents[0], s.putCopies(plan)
+	if len(files) > 0 {
+		s.Notify("files", "")
+	}
+	return nil
 }
 
 // pageCopies is what copyPlan plans: the pages, parents before their
@@ -769,19 +818,14 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 
 // createCopies makes the copies of subpages that copyPlan planned, each
 // last under its parent's copy, so they keep their order.
-func (s *Store) createCopies(pages []Page, ids map[string]string, contents []*doc.Content, template bool) error {
+func createCopies(tx *sql.Tx, sess Session, pages []Page, ids map[string]string, contents []*doc.Content, template bool) error {
 	for i, p := range pages {
-		if _, err := s.CreatePage(NewPageOptions{ID: ids[p.ID], ParentID: ids[p.ParentID], Title: p.Title,
+		if _, err := createPage(tx, sess, NewPageOptions{ID: ids[p.ID], ParentID: ids[p.ParentID], Title: p.Title,
 			Icon: p.Icon, Tags: p.Tags, Template: template, Content: contents[i]}); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// putCopies stores the recordings and files of copied pages.
-func (s *Store) putCopies(plan pageCopies) error {
-	return errors.Join(s.putRecordingCopies(plan.recs), s.putFileCopies(plan.files))
 }
 
 // recordingCopy is a recording of a copied page, and the ID of the one it
@@ -791,60 +835,6 @@ type recordingCopy struct {
 	from string
 }
 
-// putRecordingCopies stores and queues the recordings of copied pages.
-// Each goes up with audio of its own: only those who can view the page of
-// the recording a stored audio is named for can play it. Audio on this
-// device is copied, as the original's may go once it is up; audio that is
-// only stored comes from the original's as the copy goes up. Until then
-// the copy plays the original's.
-func (s *Store) putRecordingCopies(recs []recordingCopy) error {
-	for _, c := range recs {
-		r := c.Recording
-		r.LocalPath = ""
-		if _, err := os.Stat(c.LocalPath); c.LocalPath != "" && err == nil {
-			r.LocalPath = filepath.Join(s.Dir, "recordings", r.ID+filepath.Ext(c.LocalPath))
-			if err := os.MkdirAll(filepath.Dir(r.LocalPath), 0o750); err != nil {
-				return err
-			}
-			if err := copyFile(c.LocalPath, r.LocalPath); err != nil {
-				return err
-			}
-		}
-		r.UpdatedAt = time.Now()
-		// The recording and its entries in the outbox are stored together,
-		// as a file's are in putFileCopies.
-		err := s.inTx(func(tx *sql.Tx) error {
-			if space := s.Session().SpaceID; space != "" && !hasSpace(tx, space) {
-				return ErrNoSpace
-			}
-			if err := putRecording(tx, r); err != nil {
-				return err
-			}
-			if err := queue(tx, "recordings", r.ID, RecordingToRemote(r), "", r.PageID); err != nil {
-				return err
-			}
-			switch {
-			case r.LocalPath != "":
-				return queue(tx, "storage", "recordings/"+r.ID, uploadOf(r), "audio waiting to upload", r.PageID)
-			case r.AudioPath != "":
-				return queue(tx, "storage", "recordings/"+r.ID, map[string]any{
-					"bucket": "recordings", "from_path": r.AudioPath, "content_type": "audio/wav", "recording_id": r.ID,
-				}, "audio waiting to upload", r.PageID)
-			}
-			return nil
-		})
-		if err != nil {
-			if r.LocalPath != "" {
-				_ = os.Remove(r.LocalPath)
-			}
-			return err
-		}
-		s.Notify("outbox", r.PageID)
-		s.Notify("recordings", r.PageID)
-	}
-	return nil
-}
-
 // fileCopy is a file of a copied page, with the ID of its copy and the
 // page the copy is on.
 type fileCopy struct {
@@ -852,24 +842,56 @@ type fileCopy struct {
 	to, pageID string
 }
 
-// putFileCopies stores and queues the files of copied pages, as AddFile
-// adds one: only those who can view the page a file is on can read it, so
-// each copy has files of its own. A file on this device is copied; one
-// that is only stored comes from the original's as the copy goes up.
-func (s *Store) putFileCopies(files []fileCopy) error {
-	for _, c := range files {
+// newFile is a copied page's file as stored, with the entry that uploads
+// it.
+type newFile struct {
+	File
+	upload map[string]any
+}
+
+// copyLocal copies, for the recordings and files of copied pages, what
+// this device has of their audio and contents, before storeCopies stores
+// them: only those who can view the page of the recording a stored audio
+// is named for, or the page a file is on, can read it, so each copy goes
+// up with its own. Audio and files on this device are copied, as the
+// originals' may go once they are up; what is only stored comes from the
+// original's as the copy goes up, and until then the copy plays or opens
+// the original's. It returns the recordings and files to store, and the
+// paths it made, which go if they are not stored.
+func (s *Store) copyLocal(plan pageCopies) ([]Recording, []newFile, []string, error) {
+	var made []string
+	var recs []Recording
+	for _, c := range plan.recs {
+		r := c.Recording
+		r.LocalPath = ""
+		if _, err := os.Stat(c.LocalPath); c.LocalPath != "" && err == nil {
+			r.LocalPath = filepath.Join(s.Dir, "recordings", r.ID+filepath.Ext(c.LocalPath))
+			if err := os.MkdirAll(filepath.Dir(r.LocalPath), 0o750); err != nil {
+				return nil, nil, made, err
+			}
+			made = append(made, r.LocalPath)
+			if err := copyFile(c.LocalPath, r.LocalPath); err != nil {
+				return nil, nil, made, err
+			}
+		}
+		r.UpdatedAt = time.Now()
+		recs = append(recs, r)
+	}
+	var files []newFile
+	for _, c := range plan.files {
 		now := time.Now()
 		f := File{ID: c.to, SpaceID: s.Session().SpaceID, PageID: c.pageID, Name: fileName(c.Name), MimeType: c.MimeType,
 			SizeBytes: c.SizeBytes, CreatedAt: now, UpdatedAt: now}
 		f.StoragePath = f.SpaceID + "/" + f.ID + "/" + f.Name
-		dir := filepath.Join(s.Dir, "files", f.ID)
 		if _, err := os.Stat(c.LocalPath); c.LocalPath != "" && err == nil {
+			dir := filepath.Join(s.Dir, "files", f.ID)
 			if err := os.MkdirAll(dir, 0o750); err != nil {
-				return err
+				return nil, nil, made, err
 			}
+			made = append(made, dir)
 			f.LocalPath = filepath.Join(dir, f.Name)
 			if err := copyFile(c.LocalPath, f.LocalPath); err != nil {
-				return err
+				return nil, nil, made, err
 			}
 		}
 		ct := f.MimeType
@@ -880,26 +902,57 @@ func (s *Store) putFileCopies(files []fileCopy) error {
 		if f.LocalPath == "" {
 			upload["from_path"] = c.StoragePath
 		}
-		err := s.inTx(func(tx *sql.Tx) error {
-			if f.SpaceID != "" && !hasSpace(tx, f.SpaceID) {
-				return ErrNoSpace
-			}
-			if err := putFile(tx, f); err != nil {
-				return err
-			}
-			if err := queue(tx, "files", f.ID, FileToRemote(f), "new file", f.PageID); err != nil {
-				return err
-			}
-			return queue(tx, "storage", "files/"+f.ID, upload, "file waiting to upload", f.PageID)
-		})
+		files = append(files, newFile{f, upload})
+	}
+	return recs, files, made, nil
+}
+
+// putRecordingCopies stores and queues the recordings of copied pages,
+// each with the upload of its audio, in storeCopies' transaction.
+func putRecordingCopies(tx *sql.Tx, space string, recs []Recording) error {
+	if len(recs) > 0 && space != "" && !hasSpace(tx, space) {
+		return ErrNoSpace
+	}
+	for _, r := range recs {
+		if err := putRecording(tx, r); err != nil {
+			return err
+		}
+		if err := queue(tx, "recordings", r.ID, RecordingToRemote(r), "", r.PageID); err != nil {
+			return err
+		}
+		var err error
+		switch {
+		case r.LocalPath != "":
+			err = queue(tx, "storage", "recordings/"+r.ID, uploadOf(r), "audio waiting to upload", r.PageID)
+		case r.AudioPath != "":
+			err = queue(tx, "storage", "recordings/"+r.ID, map[string]any{
+				"bucket": "recordings", "from_path": r.AudioPath, "content_type": "audio/wav", "recording_id": r.ID,
+			}, "audio waiting to upload", r.PageID)
+		}
 		if err != nil {
-			_ = os.RemoveAll(dir)
 			return err
 		}
 	}
-	if len(files) > 0 {
-		s.Notify("outbox", "")
-		s.Notify("files", "")
+	return nil
+}
+
+// putFileCopies stores and queues the files of copied pages, as AddFile
+// adds one, in storeCopies' transaction.
+func putFileCopies(tx *sql.Tx, files []newFile) error {
+	for _, c := range files {
+		f := c.File
+		if f.SpaceID != "" && !hasSpace(tx, f.SpaceID) {
+			return ErrNoSpace
+		}
+		if err := putFile(tx, f); err != nil {
+			return err
+		}
+		if err := queue(tx, "files", f.ID, FileToRemote(f), "new file", f.PageID); err != nil {
+			return err
+		}
+		if err := queue(tx, "storage", "files/"+f.ID, c.upload, "file waiting to upload", f.PageID); err != nil {
+			return err
+		}
 	}
 	return nil
 }

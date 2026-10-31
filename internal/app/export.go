@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
@@ -65,7 +66,8 @@ func (a *App) writeExport(file string, allFolders []store.Folder, allFiles []sto
 		return 0, err
 	}
 	localPath, readFile := ownFiles(a.st.Dir, allFiles)
-	err = exportZip(f, pages, folders, a.st.Content, localPath, readFile)
+	content := func(id string) *doc.Content { return a.withTranscripts(a.st.Content(id)) }
+	err = exportZip(f, pages, folders, content, localPath, readFile)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -75,6 +77,39 @@ func (a *App) writeExport(file string, allFolders []store.Folder, allFiles []sto
 		return 0, err
 	}
 	return missing, nil
+}
+
+// withTranscripts is a page's content to export: a copy, each recording's
+// transcript after its block as lines of text, as Insert transcript puts
+// them. The block alone names the recording, and its words are the
+// recording's, kept apart from the page.
+func (a *App) withTranscripts(c *doc.Content) *doc.Content {
+	if c == nil {
+		return nil
+	}
+	c = c.Copy()
+	var recs []*doc.Node
+	c.Walk(func(n, _ *doc.Node) {
+		if n.Type == "recording" {
+			recs = append(recs, n)
+		}
+	})
+	for _, n := range recs {
+		rec, err := a.st.Recording(n.Str("recording_id"))
+		if err != nil {
+			continue
+		}
+		var lines []*doc.Node
+		for _, s := range recording.Tidy(rec.Transcript) {
+			l := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
+			l.SetDelta(doc.Delta{{Text: fmtDuration(time.Duration(s.StartMs)*time.Millisecond) + "  ", Attrs: doc.Attrs{Bold: true}}, {Text: s.Text}})
+			lines = append(lines, l)
+		}
+		if len(lines) > 0 {
+			_ = c.Insert(doc.Position{After: n.ID}, lines...)
+		}
+	}
+	return c
 }
 
 // ownFiles returns where each of files is on this device ("" when it is

@@ -72,6 +72,18 @@ func (s *Service) newestSeen(table, id string, row map[string]any) store.RowVers
 	return newest
 }
 
+// newestHad is the newest version this device has of any column of a row,
+// as newestSeen, but without the entries held for it.
+func (s *Service) newestHad(table, id string, row map[string]any) store.RowVersion {
+	newest := s.st.RowVersion(table, id)
+	for c := range row {
+		if v := s.st.RowVersion(table+"."+c, id); v.After(newest) {
+			newest = v
+		}
+	}
+	return newest
+}
+
 // applyRow applies a row entry of another device's: each column it
 // changed whose change here is older. A row this device has none of
 // comes whole; its columns the entry did not change count as older than
@@ -237,8 +249,9 @@ func (s *Service) hold(entries ...icloud.Entry) error {
 }
 
 // applyHeld applies the entries held for rows whose change has gone since.
-// A row's that do not apply are held again, and the other rows' still
-// apply.
+// A row's that do not all apply stay held, and the other rows' still
+// apply. They go once they have applied, not before, as a stop in between
+// would lose them: one applied again changes nothing.
 func (s *Service) applyHeld(changed map[string]bool) error {
 	var failed error
 	for key, raw := range s.st.ValuesWithPrefix(heldPrefix) {
@@ -248,22 +261,30 @@ func (s *Service) applyHeld(changed map[string]bool) error {
 		}
 		var held []icloud.Entry
 		_ = json.Unmarshal([]byte(raw), &held)
-		if err := s.st.DeleteValue(heldPrefix + key); err != nil {
-			failed = errors.Join(failed, err)
-			continue
-		}
-		for i, e := range held {
+		var err error
+		for _, e := range held {
 			if e.Kind != "row" || e.Table != table || e.ID != id || !syncedRows[table] || e.Row == nil {
 				continue
 			}
-			if err := s.applyRow(e, changed); err != nil {
-				failed = errors.Join(failed, fmt.Errorf("%s %s: %w", table, id, err), s.hold(held[i:]...))
+			applyingHeld(e)
+			if err = s.applyRow(e, changed); err != nil {
 				break
 			}
+		}
+		switch {
+		case err != nil:
+			failed = errors.Join(failed, fmt.Errorf("%s %s: %w", table, id, err))
+		case s.st.HasPending(table, id):
+			// Changed here meanwhile: applyRow held the rest again.
+		default:
+			failed = errors.Join(failed, s.st.DeleteValue(heldPrefix+key))
 		}
 	}
 	return failed
 }
+
+// applyingHeld runs before applyHeld applies each entry; tests stop there.
+var applyingHeld = func(icloud.Entry) {}
 
 // foldEntry adds an entry of a row to others of the same row, leaving out
 // any one another of them holds all of.

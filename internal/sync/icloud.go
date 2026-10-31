@@ -150,7 +150,7 @@ func (s *Service) joinSpace(joined string) error {
 		return err
 	}
 	// Two devices made space.json at once: the copy of the space that
-	// lost goes, by the device that made it.
+	// lost goes, by the device that made it, once it is old (loserKept).
 	lost := false
 	for _, l := range losers {
 		copyOf, err := s.ICloud.SpaceOf(l)
@@ -160,7 +160,7 @@ func (s *Service) joinSpace(joined string) error {
 		if copyOf.SpaceID == joined {
 			lost = true
 		}
-		if copyOf.CreatedByDevice == me {
+		if copyOf.CreatedByDevice == me && cloudNow().Sub(copyOf.CreatedAt) > loserKept {
 			_ = s.ICloud.Remove(l)
 		}
 	}
@@ -205,6 +205,12 @@ func (s *Service) joinSpace(joined string) error {
 	}
 	return errors.Join(failed, s.st.SetValue("icloud.space", space.SpaceID))
 }
+
+// loserKept is how long a space.json that lost stays in the folder: a
+// device that joined its space before it lost learns of it by finding it
+// beside the one that won, and would take the folder for another library
+// if it had gone, until the user turned iCloud sync off and on.
+const loserKept = 30 * 24 * time.Hour
 
 // checkDeviceID returns the ID this device writes under. Two devices with
 // one ID, as a backup restored to a new Mac has, would write over each
@@ -362,6 +368,15 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 			return err
 		}
 	}
+	// A file's row waits for its contents: a device that reads the batch
+	// finds what it names, and one whose upload waits, as for what a copy
+	// was made from, is not yet in the folder.
+	uploading := map[string]bool{}
+	for _, e := range entries {
+		if e.Entity == "storage" {
+			uploading[e.EntityID] = true
+		}
+	}
 	batch := icloud.Batch{Format: icloud.Format, Device: me, Seq: s.intValue("icloud.seq") + 1, WrittenAt: cloudNow().UTC()}
 	type sent struct {
 		e       store.OutboxEntry
@@ -383,6 +398,8 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 			continue // failed above; tried again next pass
 		case e.Entity == "storage_delete":
 			continue // once the batch with the deletion is written
+		case e.Entity == "files" && uploading["files/"+e.EntityID]:
+			continue // once its contents are in the folder
 		case syncedRows[e.Entity]:
 			entry, err := s.rowEntry(me, e)
 			if err != nil {
@@ -483,6 +500,12 @@ func (s *Service) rowEntry(me string, e store.OutboxEntry) (icloud.Entry, error)
 	if err := json.Unmarshal([]byte(e.Payload), &row); err != nil {
 		return icloud.Entry{}, err
 	}
+	// A recording settled after a quit (store.IfStatusKey) goes as just
+	// after the version this device had of it, not after every one it has
+	// seen: a transcription another device finished since is newer, and
+	// keeps its transcript.
+	_, settled := row[store.IfStatusKey]
+	delete(row, store.IfStatusKey)
 	// Only the columns changed here apply where the row is, so a change
 	// another device made meanwhile to another column stays.
 	var cols []string
@@ -502,7 +525,11 @@ func (s *Service) rowEntry(me string, e store.OutboxEntry) (icloud.Entry, error)
 	if changed.IsZero() {
 		at = cloudNow().UnixMilli()
 	}
-	at = max(at, s.newestSeen(e.Entity, e.EntityID, row).At+1)
+	if had := s.newestHad(e.Entity, e.EntityID, row); settled && had.At > 0 {
+		at = had.At + 1
+	} else {
+		at = max(at, s.newestSeen(e.Entity, e.EntityID, row).At+1)
+	}
 	row["updated_at"] = time.UnixMilli(at).UTC().Format(time.RFC3339Nano)
 	if e.Entity == "comments" {
 		if c, err := s.st.Comment(e.EntityID); err == nil {
@@ -636,11 +663,40 @@ func blobPath(bucket, storagePath string) (string, error) {
 	return "", errors.New("icloud: nothing kept in " + bucket)
 }
 
+// errNotInICloud is a file or audio that went through iCloud Drive, and
+// is neither on this device nor listed in the folder yet.
+var errNotInICloud = errors.New("not in iCloud Drive yet")
+
+// joinedICloud reports whether this device synced through a Leaflet
+// folder of iCloud Drive it can still read.
+func (s *Service) joinedICloud() bool {
+	joined, _ := s.st.Value("icloud.space")
+	return joined != "" && s.ICloud.Root != ""
+}
+
+// originalLives reports whether what a copy's upload comes from (its
+// from_path) still lives here: a file not deleted, or a recording. Its
+// contents in the folder are only late then, as iCloud Drive lists what
+// another device copies there only once it has come.
+func (s *Service) originalLives(payload map[string]any) bool {
+	from := store.S(payload, "from_path")
+	if store.S(payload, "recording_id") != "" {
+		_, err := s.st.Recording(strings.TrimSuffix(path.Base(from), ".wav"))
+		return err == nil
+	}
+	parts := strings.Split(from, "/")
+	if len(parts) < 2 {
+		return false
+	}
+	f, err := s.st.File(parts[len(parts)-2])
+	return err == nil && f.DeletedAt.IsZero()
+}
+
 // keptInICloud reports whether the Leaflet folder of iCloud Drive this
 // device synced through has a file or audio. It looks only once this
 // device has joined one, so it asks the system for no access before.
 func (s *Service) keptInICloud(bucket, storagePath string) bool {
-	if joined, _ := s.st.Value("icloud.space"); joined == "" || s.ICloud.Root == "" {
+	if !s.joinedICloud() {
 		return false
 	}
 	rel, err := blobPath(bucket, storagePath)

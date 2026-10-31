@@ -1,6 +1,10 @@
 package doc
 
-import "testing"
+import (
+	"reflect"
+	"strings"
+	"testing"
+)
 
 func TestPageMentionMarkdown(t *testing.T) {
 	d := Delta{{Text: "See "}, {Text: "RFC: Sync", Attrs: PageMention("rfc", "RFC: Sync")}}
@@ -17,6 +21,31 @@ func TestPageMentionMarkdown(t *testing.T) {
 	}
 	if id, ok := PageLinkID("https://x.dev"); ok {
 		t.Errorf("web link is page %q", id)
+	}
+}
+
+// A person or an agent mentioned writes as a link to mention:<kind>:<id>,
+// as the server's agents read and write it, and reads back as the mention:
+// an agent rewriting a to-do keeps who it is for.
+func TestPersonMentionMarkdown(t *testing.T) {
+	bob := &Mention{Kind: "user", ID: "u1", Name: "Bob [B]"}
+	d := Delta{{Text: "Call "}, {Text: "@Bob [B]", Attrs: Attrs{Mention: bob}}, {Text: " and "},
+		{Text: "@Helper", Attrs: Attrs{Bold: true, Mention: &Mention{Kind: "agent", ID: "a1", Name: "Helper"}}}}
+	md := d.ToMarkdown()
+	if want := `Call [@Bob \[B\]](mention:user:u1) and **[@Helper](mention:agent:a1)**`; md != want {
+		t.Fatalf("markdown %q, want %q", md, want)
+	}
+	if back := FromMarkdown(md); !reflect.DeepEqual(back, d) {
+		t.Errorf("read back %+v", back)
+	}
+	todo := &Node{ID: "t", Type: "todo_list"}
+	todo.SetDelta(FromMarkdown(Delta{{Text: "Call "}, {Text: "@Bob", Attrs: Attrs{Mention: &Mention{Kind: "user", ID: "u1", Name: "Bob"}}}}.ToMarkdown()))
+	if got := FromBlocks([]*Node{todo}).Todos(); len(got) != 1 || got[0].Owner != "Bob" {
+		t.Errorf("todos %+v", got)
+	}
+	// Other mention: links are links.
+	if back := FromMarkdown("[x](mention:page:p1)"); len(back) != 1 || back[0].Attrs.Mention != nil || back[0].Attrs.Href != "mention:page:p1" {
+		t.Errorf("mention:page read as %+v", back)
 	}
 }
 
@@ -90,5 +119,23 @@ func TestBlockLink(t *testing.T) {
 	}
 	if _, ok := PageLinkID("leaflet://page/#b1"); ok {
 		t.Error("a link with no page")
+	}
+}
+
+// An export or a copy names a person or an agent mentioned, as the page
+// shows them: a mention link means something only to Leaflet's agents.
+func TestReadableMarkdownNamesMentions(t *testing.T) {
+	d := Delta{{Text: "Call "}, {Text: "@Bob", Attrs: Attrs{Mention: &Mention{Kind: "user", ID: "u1", Name: "Bob"}}}, {Text: " and "},
+		{Text: "Plan", Attrs: PageMention("p1", "Plan")}}
+	if got := d.ReadableMarkdown(); !strings.Contains(got, "Call @Bob and ") || strings.Contains(got, "mention:") || !strings.Contains(got, "leaflet://page/p1") {
+		t.Errorf("readable %q", got)
+	}
+	n := &Node{ID: "b1", Type: "paragraph"}
+	n.SetDelta(d)
+	if got := PageMarkdown("", &Content{Children: []*Node{n}}, func(string) string { return "Plan" }); strings.Contains(got, "mention:") {
+		t.Errorf("export %q", got)
+	}
+	if got := d.ToMarkdown(); !strings.Contains(got, "[@Bob](mention:user:u1)") {
+		t.Errorf("agents' markdown %q", got)
 	}
 }

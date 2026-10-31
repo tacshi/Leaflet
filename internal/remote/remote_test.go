@@ -320,3 +320,76 @@ func TestQuietStreamEnds(t *testing.T) {
 		t.Errorf("ended after %v", d)
 	}
 }
+
+// A function that writes as the caller until it ends, an agent run or a
+// transcription, gets a token that lasts as long as it may run: one with
+// less left is renewed first, though it would do for other calls.
+func TestLongCallsRenewATokenRunningOutFirst(t *testing.T) {
+	var refreshes atomic.Int32
+	var mu sync.Mutex
+	var sent []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/v1/token" {
+			refreshes.Add(1)
+			_, _ = fmt.Fprintf(w, `{"access_token":"new%d","refresh_token":"r2","expires_in":3600}`, refreshes.Load())
+			return
+		}
+		mu.Lock()
+		sent = append(sent, r.URL.Path+" "+r.Header.Get("Authorization"))
+		mu.Unlock()
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	t.Cleanup(hs.Close)
+	c := SignedInForTest(hs.URL, nil, "u1")
+	c.sess.RefreshToken = "r1"
+	c.sess.ExpiresAt = time.Now().Add(3 * time.Minute).Unix()
+	ctx := context.Background()
+	if _, err := c.Invoke(ctx, "providers", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.InvokeStream(ctx, "agent", map[string]any{}, func(map[string]any) {}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.InvokeLong(ctx, "stt", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	want := []string{"/functions/v1/providers Bearer test", "/functions/v1/agent Bearer new1", "/functions/v1/stt Bearer new1"}
+	if fmt.Sprint(sent) != fmt.Sprint(want) {
+		t.Errorf("sent %q, want %q", sent, want)
+	}
+	if n := refreshes.Load(); n != 1 {
+		t.Errorf("%d refreshes, want 1", n)
+	}
+}
+
+// A function that refuses a token running out before it would finish has
+// the call renew it and go again, as an expired one does.
+func TestFunctionRefusingAShortTokenRetries(t *testing.T) {
+	var refreshes, calls atomic.Int32
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/v1/token" {
+			refreshes.Add(1)
+			_, _ = io.WriteString(w, `{"access_token":"new","refresh_token":"r2","expires_in":3600}`)
+			return
+		}
+		calls.Add(1)
+		if r.Header.Get("Authorization") == "Bearer test" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"error":"JWT expires before this would finish: renew it and try again"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"segments": []}`)
+	}))
+	t.Cleanup(hs.Close)
+	c := SignedInForTest(hs.URL, nil, "u1")
+	c.sess.RefreshToken = "r1"
+	res, err := c.InvokeLong(context.Background(), "stt", map[string]any{"action": "transcribe"})
+	if _, ok := res["segments"]; err != nil || !ok {
+		t.Fatalf("res %v, %v", res, err)
+	}
+	if refreshes.Load() != 1 || calls.Load() != 2 {
+		t.Errorf("%d refreshes, %d calls", refreshes.Load(), calls.Load())
+	}
+}

@@ -8,8 +8,10 @@ import (
 
 // ToMarkdown writes rich text in the small inline markdown dialect agents
 // read and write: **bold** or __bold__, *italic* or _italic_, `code`,
-// ~~strike~~, and [text](url). Text that would read as markup is escaped with
-// backslashes, so it reads back as written. A format over several runs is
+// ~~strike~~, and [text](url); a page mention is [Title](leaflet://page/<id>),
+// and a person or an agent [@Name](mention:user:<id>) or mention:agent:<id>.
+// Text that would read as markup is escaped with backslashes, so it reads
+// back as written. A format over several runs is
 // one span, the others nested in it, so runs side by side read back as
 // they were.
 func (d Delta) ToMarkdown() string {
@@ -51,10 +53,16 @@ func (d Delta) ToMarkdown() string {
 			open = append(open, m)
 		}
 		switch m := r.Attrs.Mention; {
-		case m != nil && m.Name != "" && m.Kind != "page":
+		case m != nil && m.ID != "" && m.Kind != "page":
 			// A page mention is a link to the page, which reads back as
-			// one; others are their names.
-			toks = append(toks, mdToken{text: "@" + escapeText(m.Name)})
+			// one; a person or an agent is a link to mention:<kind>:<id>,
+			// as the server's agents write it, so it reads back as the
+			// mention and not as text.
+			name := m.Name
+			if name == "" {
+				name = strings.TrimPrefix(r.Text, "@")
+			}
+			toks = append(toks, mdToken{text: "[@" + escapeText(name) + "](" + linkDestination(MentionLink(m.Kind, m.ID)) + ")"})
 		case r.Attrs.Code:
 			// Code spans side by side differ only in what Markdown can't
 			// say: they are one span, as backticks touching would not
@@ -331,6 +339,42 @@ func codeSpan(s string) string {
 	return ticks + s + ticks
 }
 
+// ReadableMarkdown is ToMarkdown for people to read, in an export or a
+// copy for another app: a person or an agent mentioned is the name the
+// page shows, as mention links mean something only to Leaflet's agents.
+func (d Delta) ReadableMarkdown() string {
+	out := make(Delta, len(d))
+	for i, r := range d {
+		if m := r.Attrs.Mention; m != nil && m.Kind != "page" {
+			if m.Name != "" {
+				r.Text = "@" + m.Name
+			}
+			r.Attrs.Mention = nil
+		}
+		out[i] = r
+	}
+	return out.ToMarkdown()
+}
+
+// MentionLink is how inline markdown writes a mention of a person or an
+// agent: [@Name](mention:user:<id>), or mention:agent:<id> for an agent.
+func MentionLink(kind, id string) string {
+	if kind != "agent" {
+		kind = "user"
+	}
+	return "mention:" + kind + ":" + id
+}
+
+// mentionOf reads a mention link: the kind of what it mentions and its ID.
+func mentionOf(href string) (kind, id string, ok bool) {
+	rest, ok := strings.CutPrefix(href, "mention:")
+	if !ok {
+		return "", "", false
+	}
+	kind, id, _ = strings.Cut(rest, ":")
+	return kind, id, (kind == "user" || kind == "agent") && id != ""
+}
+
 // linkDestination writes a link's url, in angle brackets when it holds
 // what would end it or read as markup: parentheses, spaces, backslashes.
 func linkDestination(href string) string {
@@ -483,6 +527,16 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 				if id, ok := PageLinkID(href); ok && LinkBlock(href) == "" {
 					text := FromMarkdown(string(text)).Plain()
 					*out = append(*out, Run{Text: text, Attrs: PageMention(id, text)})
+					i += n
+					continue
+				}
+				// A link to mention:user:<id> or mention:agent:<id> is a
+				// mention of that person or agent, by the name it shows.
+				if kind, id, ok := mentionOf(href); ok {
+					name := strings.TrimPrefix(FromMarkdown(string(text)).Plain(), "@")
+					a := attrs
+					a.Mention = &Mention{Kind: kind, ID: id, Name: name}
+					*out = append(*out, Run{Text: "@" + name, Attrs: a})
 					i += n
 					continue
 				}

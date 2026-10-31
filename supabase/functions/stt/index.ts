@@ -4,15 +4,32 @@
 
 import type { SupabaseClient, User } from "jsr:@supabase/supabase-js@2";
 import { errorResponse, HttpError, json, preflight, readJson } from "../_shared/cors.ts";
-import { loadProvider, providerSecret, requireUser, serviceClient, userClient } from "../_shared/supabase.ts";
+import {
+  loadProvider,
+  providerSecret,
+  requireTokenUntil,
+  requireUser,
+  serviceClient,
+  userClient,
+} from "../_shared/supabase.ts";
 import { normalizeBaseUrl } from "../_shared/openai.ts";
-import { safeFetch } from "../_shared/net.ts";
+import { isTimeout, safeFetch } from "../_shared/net.ts";
+import { envMs, SAVE_MS } from "../_shared/deadline.ts";
 import { type Segment, tokensToSegments } from "../_shared/segments.ts";
 
 const SONIOX_API = "https://api.soniox.com/v1";
 const SONIOX_ASYNC_MODEL = "stt-async-v3";
 const POLL_MS = 2_000;
-const POLL_LIMIT_MS = 110_000;
+// A transcription gives up at its deadline, before the platform stops the
+// function (150 s on the free plan, 400 s on paid plans), keeping time to
+// mark the recording failed and remove what went to Soniox. On a paid
+// plan, raise STT_DEADLINE_MS (at most 380 s).
+const DEADLINE_MS = envMs("STT_DEADLINE_MS", 120_000, 10_000, 380_000);
+// Removing the audio and transcription from Soniox, after the deadline too.
+const CLEANUP_MS = 5_000;
+// The quick calls: a temporary key, checking a key.
+const TIMEOUT_MS = 20_000;
+const TOO_LONG = "The transcription took too long on the server. Try again, or choose an on-device model.";
 // The audio is read into memory to send on; longer recordings transcribe on
 // the device. 100 MiB is about 54 minutes of the app's 16 kHz WAV.
 const MAX_AUDIO_BYTES = (Number(Deno.env.get("STT_MAX_AUDIO_MB")) || 100) * 1024 * 1024;
@@ -35,6 +52,7 @@ interface SttSettings {
 }
 
 Deno.serve(async (req) => {
+  const started = Date.now();
   const pre = preflight(req);
   if (pre) return pre;
   try {
@@ -48,7 +66,9 @@ Deno.serve(async (req) => {
       case "save_key":
         return json(await saveKey(uc, body));
       case "transcribe":
-        return json(await transcribe(uc, sc, user, body));
+        // The recording's transcript, or its failure, is saved as the caller.
+        requireTokenUntil(req, started + DEADLINE_MS + SAVE_MS);
+        return json(await transcribe(uc, sc, user, body, started + DEADLINE_MS));
       default:
         throw new HttpError(400, "Unknown action");
     }
@@ -84,6 +104,7 @@ async function sonioxTemporaryKey(sc: SupabaseClient, user: User) {
       expires_in_seconds: 3600,
       client_reference_id: user.id,
     }),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
   });
   if (!res.ok) throw await sonioxFailure(res, "temporary key");
   const data = await res.json();
@@ -94,7 +115,10 @@ async function saveKey(uc: SupabaseClient, body: Body) {
   if (body.provider !== "soniox") throw new HttpError(400, "Only Soniox keys are saved here");
   const key = (body.api_key ?? "").trim();
   if (key) {
-    const check = await fetch(`${SONIOX_API}/models`, { headers: { Authorization: `Bearer ${key}` } });
+    const check = await fetch(`${SONIOX_API}/models`, {
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
     if (check.status === 401 || check.status === 403) throw new HttpError(400, "Soniox rejected this API key");
   }
   const { error } = await uc.rpc("set_stt_secret", { p_provider: "soniox", p_secret: key });
@@ -107,7 +131,12 @@ function languageCode(raw?: string | null): string | null {
   return /^[a-z]{2,3}$/.test(code) ? code : null;
 }
 
-async function transcribe(uc: SupabaseClient, sc: SupabaseClient, user: User, body: Body) {
+/** A signal that aborts the provider calls at the transcription's deadline. */
+function until(deadline: number): AbortSignal {
+  return AbortSignal.timeout(Math.max(1, deadline - Date.now()));
+}
+
+async function transcribe(uc: SupabaseClient, sc: SupabaseClient, user: User, body: Body, deadline: number) {
   if (!body.recording_id) throw new HttpError(400, "recording_id is required");
   const { data: rec, error } = await uc
     .from("recordings")
@@ -167,8 +196,8 @@ async function transcribe(uc: SupabaseClient, sc: SupabaseClient, user: User, bo
     if (audio.size > MAX_AUDIO_BYTES) throw new Error("This recording is too long to transcribe on the server");
 
     const { segments, model } = useSoniox
-      ? await sonioxFile(await sonioxKey(sc, user), audio, fileName, settings, language)
-      : await openAiCompatible(uc, sc, audio, fileName, settings, language, rec.duration_ms ?? 0);
+      ? await sonioxFile(await sonioxKey(sc, user), audio, fileName, settings, language, deadline)
+      : await openAiCompatible(uc, sc, audio, fileName, settings, language, rec.duration_ms ?? 0, deadline);
 
     const { error: saveError } = await uc.from("recordings").update({
       transcript: segments,
@@ -181,9 +210,12 @@ async function transcribe(uc: SupabaseClient, sc: SupabaseClient, user: User, bo
     if (saveError) throw new Error(saveError.message);
     return { segments };
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    // A provider call stopped at the deadline: the recording fails rather
+    // than staying transcribing when the platform stops the function.
+    const timedOut = isTimeout(e);
+    const message = timedOut ? TOO_LONG : e instanceof Error ? e.message : String(e);
     await uc.from("recordings").update({ status: "failed", error: message }).eq("id", rec.id);
-    throw e;
+    throw timedOut ? new HttpError(504, message) : e;
   }
 }
 
@@ -195,6 +227,7 @@ async function openAiCompatible(
   settings: SttSettings,
   language: string | null,
   durationMs: number,
+  deadline: number,
 ): Promise<{ segments: Segment[]; model: string }> {
   let baseUrl: string;
   let apiKey: string | null = null;
@@ -228,6 +261,7 @@ async function openAiCompatible(
       method: "POST",
       headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
       body: form,
+      signal: until(deadline),
     });
   };
 
@@ -270,13 +304,19 @@ async function sonioxFile(
   fileName: string,
   settings: SttSettings,
   language: string | null,
+  deadline: number,
 ): Promise<{ segments: Segment[]; model: string }> {
   const auth = { Authorization: `Bearer ${key}` };
   const model = settings.model?.startsWith("stt-async") ? settings.model : SONIOX_ASYNC_MODEL;
 
   const form = new FormData();
   form.append("file", audio, fileName);
-  const upload = await fetch(`${SONIOX_API}/files`, { method: "POST", headers: auth, body: form });
+  const upload = await fetch(`${SONIOX_API}/files`, {
+    method: "POST",
+    headers: auth,
+    body: form,
+    signal: until(deadline),
+  });
   if (!upload.ok) throw await sonioxFailure(upload, "upload");
   const fileId: string = (await upload.json()).id;
 
@@ -291,31 +331,38 @@ async function sonioxFile(
         language_hints: language ? [language] : ["en", "zh"],
         enable_speaker_diarization: settings.speaker_labels,
       }),
+      signal: until(deadline),
     });
     if (!create.ok) throw await sonioxFailure(create, "transcription");
     transcriptionId = (await create.json()).id as string;
 
-    const started = Date.now();
     while (true) {
-      const status = await fetch(`${SONIOX_API}/transcriptions/${transcriptionId}`, { headers: auth });
+      const status = await fetch(`${SONIOX_API}/transcriptions/${transcriptionId}`, {
+        headers: auth,
+        signal: until(deadline),
+      });
       if (!status.ok) throw await sonioxFailure(status, "status");
       const info = await status.json();
       if (info.status === "completed") break;
       if (info.status === "error") throw new Error(`Soniox: ${info.error_message ?? "transcription failed"}`);
-      if (Date.now() - started > POLL_LIMIT_MS) throw new Error("Soniox is still transcribing; try again in a minute");
+      if (Date.now() + POLL_MS >= deadline) throw new Error("Soniox is still transcribing; try again in a minute");
       await new Promise((r) => setTimeout(r, POLL_MS));
     }
 
-    const transcript = await fetch(`${SONIOX_API}/transcriptions/${transcriptionId}/transcript`, { headers: auth });
+    const transcript = await fetch(`${SONIOX_API}/transcriptions/${transcriptionId}/transcript`, {
+      headers: auth,
+      signal: until(deadline),
+    });
     if (!transcript.ok) throw await sonioxFailure(transcript, "transcript");
     const data = await transcript.json();
     return { segments: tokensToSegments(data.tokens ?? []), model };
   } finally {
-    if (transcriptionId) {
-      await fetch(`${SONIOX_API}/transcriptions/${transcriptionId}`, { method: "DELETE", headers: auth }).catch(
-        () => {},
-      );
-    }
-    await fetch(`${SONIOX_API}/files/${fileId}`, { method: "DELETE", headers: auth }).catch(() => {});
+    // Past the deadline too, each on its own short timeout.
+    const remove = (path: string) =>
+      fetch(`${SONIOX_API}/${path}`, { method: "DELETE", headers: auth, signal: AbortSignal.timeout(CLEANUP_MS) })
+        .then((res) => res.body?.cancel())
+        .catch(() => {});
+    if (transcriptionId) await remove(`transcriptions/${transcriptionId}`);
+    await remove(`files/${fileId}`);
   }
 }

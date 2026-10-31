@@ -2,6 +2,7 @@ package recording
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -175,5 +176,46 @@ func TestRetranscribeOneAtATime(t *testing.T) {
 	}
 	if c.Transcribing[rec.ID] {
 		t.Error("still transcribing once done")
+	}
+}
+
+// A transcription a quit stopped may have finished without this run, on
+// the server or the device that started it: settling it goes up only over
+// a recording still transcribing there. One cut off while recording was
+// nowhere else, and goes up as it is.
+func TestRecoverInterruptedGivesWayToAFinishedTranscription(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.OpenMemory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	server, _ := st.CreateRecording("p", "b1", "openai-compatible", "", "", "auto")
+	if _, err := st.UpdateRecording(server.ID, func(r *store.Recording) { r.Status = "transcribing" }); err != nil {
+		t.Fatal(err)
+	}
+	cut, _ := st.CreateRecording("p", "b2", "openai-compatible", "", "", "auto")
+	if _, err := st.UpdateRecording(cut.ID, func(r *store.Recording) { r.Status = "recording" }); err != nil {
+		t.Fatal(err)
+	}
+
+	NewController(st, nil).RecoverInterrupted()
+
+	if r, _ := st.Recording(server.ID); r.Status != "failed" {
+		t.Errorf("still %s here", r.Status)
+	}
+	entries, _ := st.Pending()
+	over := map[string]any{}
+	for _, e := range entries {
+		var payload map[string]any
+		if e.Entity == "recordings" && json.Unmarshal([]byte(e.Payload), &payload) == nil {
+			over[e.EntityID] = payload[store.IfStatusKey]
+		}
+	}
+	if over[server.ID] != "transcribing" || over[cut.ID] != nil {
+		t.Errorf("queued over %v", over)
 	}
 }

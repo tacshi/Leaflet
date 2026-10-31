@@ -116,7 +116,8 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 			img = spec
 		}
 		url, _ := img["url"].(string)
-		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		// A scheme is the same in any case, as the server takes it.
+		if scheme := strings.ToLower(url); !strings.HasPrefix(scheme, "http://") && !strings.HasPrefix(scheme, "https://") {
 			return nil, toolErr("An image block needs image.url (http or https).")
 		}
 		alt, _ := img["alt"].(string)

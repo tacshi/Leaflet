@@ -106,11 +106,13 @@ func (e *Editor) InsertText(s string) {
 		return
 	}
 	if !n.IsText() {
-		// Typing on a block selected whole starts a paragraph after it.
+		// Typing on a block selected whole starts a paragraph after it,
+		// where the typing that follows joins this step.
 		p := newText("paragraph", nil)
 		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
 		n = p
 		e.focus = Pos{p.ID, 0}
+		e.coalesceIn = p.ID
 	}
 	attrs := n.Delta().AttrsAt(e.focus.Off)
 	if e.hasTyping {
@@ -221,15 +223,26 @@ func (e *Editor) inlineShortcut(n *doc.Node) {
 	if end < 2 || end > len(runes) {
 		return
 	}
+	// A marker's runes can be in a mention's title, but a mention is one
+	// unit, taken out or formatted whole: a marker in one is no marker,
+	// and a pair outside never cuts one.
+	mentioned := func(from, to int) bool {
+		for _, r := range d.Slice(from, to) {
+			if r.Attrs.Mention != nil {
+				return true
+			}
+		}
+		return false
+	}
 	try := func(marker string, set func(*doc.Attrs)) bool {
 		m := []rune(marker)
-		if end < 2*len(m)+1 || string(runes[end-len(m):end]) != marker {
+		if end < 2*len(m)+1 || string(runes[end-len(m):end]) != marker || mentioned(end-len(m), end) {
 			return false
 		}
 		closeAt := end - len(m)
 		for start := closeAt - 1; start >= len(m)-1; start-- {
 			openAt := start - len(m) + 1
-			if string(runes[openAt:start+1]) != marker {
+			if string(runes[openAt:start+1]) != marker || mentioned(openAt, start+1) {
 				continue
 			}
 			inner := runes[start+1 : closeAt]
@@ -599,11 +612,12 @@ func (e *Editor) Indent() {
 	if !NestableTypes(prev) || !NestableTypes(n) && prev.Type != "toggle_list" {
 		return
 	}
+	// The step keeps the toggle folded, so undoing it folds it again.
+	e.pushUndo(false)
 	if collapsed(prev) {
 		prev.Set("collapsed", false)
 		e.invalidate(prev.ID)
 	}
-	e.pushUndo(false)
 	_ = e.Content.Move(n.ID, doc.Position{Parent: prev.ID})
 	e.Select(e.anchor, e.focus)
 	e.changed()
@@ -645,6 +659,12 @@ func (e *Editor) outdent(n *doc.Node) {
 	parent := loc.Parent.ID
 	_ = e.Content.Move(n.ID, doc.Position{After: parent})
 	n.Children = append(n.Children, after...)
+	// A folded toggle unfolds to take them, as indenting under one does,
+	// or they would be hidden in it.
+	if len(after) > 0 && collapsed(n) {
+		n.Set("collapsed", false)
+		e.invalidate(n.ID)
+	}
 }
 
 // SetType turns the focus block (or the selected blocks) into another

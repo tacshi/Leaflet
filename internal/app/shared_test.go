@@ -123,3 +123,42 @@ func TestMentionsLeaveOutInvites(t *testing.T) {
 		t.Errorf("people %v", people)
 	}
 }
+
+// A viewer is offered no Resolve on someone else's thread, which the
+// server would refuse, and keeps it on their own.
+func TestViewerResolvesOnlyTheirOwnThreads(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	const id = "00000000-0000-0000-0000-0000000000bb"
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := a.st.PutRemotePage(map[string]any{"id": id, "space_id": "00000000-0000-0000-0000-0000000000cc", "title": "Theirs",
+		"sort_key": "V", "created_at": at, "updated_at": at}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.SetMembers(id, []store.Member{{PageID: id, UserID: a.session.UserID, Role: "viewer"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.PutRemoteComment(map[string]any{"id": "c1", "page_id": id, "block_id": "b1", "author_id": "someone",
+		"author_kind": "user", "body": "Their question", "created_at": at, "updated_at": at}, "Sam"); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(id)
+	a.panelOpen, a.panelTab = true, 1
+	tt := ui.NewTester(func(c *ui.Context) { a.commentsPanel(c) }, 400, 800)
+	tt.Frame()
+	if !tt.HasText("Their question") {
+		t.Fatalf("no thread in %v", tt.Texts())
+	}
+	if tt.HasText(locales.PanelResolve()) {
+		t.Error("a viewer may resolve someone else's thread")
+	}
+	if _, err := a.st.AddComment(id, "b2", "My question", "", "", "user", ""); err != nil {
+		t.Fatal(err)
+	}
+	a.page.threads, _ = a.st.Threads(id)
+	tt.Frame()
+	if !tt.HasText(locales.PanelResolve()) {
+		t.Error("a viewer may not resolve their own thread")
+	}
+}

@@ -647,7 +647,7 @@ func (a *App) exportPage(id string) {
 	if p == nil || c == nil {
 		return
 	}
-	md := doc.PageMarkdown(p.DisplayTitle(), c, a.pageTitleOf)
+	md := doc.PageMarkdown(p.DisplayTitle(), a.withTranscripts(c), a.pageTitleOf)
 	name := safeName(p.DisplayTitle()) + ".md"
 	go func() {
 		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportTitle(), DefaultPath: name})

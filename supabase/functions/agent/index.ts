@@ -4,7 +4,14 @@
 
 import type { SupabaseClient, User } from "jsr:@supabase/supabase-js@2";
 import { corsHeaders, errorResponse, HttpError, preflight, readJson } from "../_shared/cors.ts";
-import { loadProvider, providerSecret, requireUser, serviceClient, userClient } from "../_shared/supabase.ts";
+import {
+  loadProvider,
+  providerSecret,
+  requireTokenUntil,
+  requireUser,
+  serviceClient,
+  userClient,
+} from "../_shared/supabase.ts";
 import {
   chatCompletion,
   type ChatMessage,
@@ -35,6 +42,7 @@ import {
 } from "../_shared/tools.ts";
 import { type Surface, systemPrompt, userMessage } from "../_shared/prompt.ts";
 import { isTimeout } from "../_shared/net.ts";
+import { envMs, SAVE_MS } from "../_shared/deadline.ts";
 import { keyAfter, lastKey } from "../_shared/sortkey.ts";
 
 const MAX_ROUNDS = 12;
@@ -42,11 +50,6 @@ const UNREADABLE = "The page's content cannot be read, so the agent left it as i
 const INLINE_PAGE_LIMIT = 40_000;
 const TOOL_RESULT_LIMIT = 60_000;
 const HEARTBEAT_MS = 15_000;
-
-function envMs(name: string, fallback: number, min: number, max: number): number {
-  const n = Number(Deno.env.get(name));
-  return Number.isFinite(n) && n > 0 ? Math.min(max, Math.max(min, n)) : fallback;
-}
 
 // An Edge Function is stopped at its wall-clock limit (150 s on the free
 // plan, 400 s on paid plans), so a run stops calling the model at its
@@ -113,6 +116,8 @@ Deno.serve(async (req) => {
     if (!job_id) throw new HttpError(400, "job_id is required");
     const uc = userClient(req);
     const user = await requireUser(req, uc);
+    // The run saves as the caller up to its end, its failure too.
+    requireTokenUntil(req, started + DEADLINE_MS + SAVE_MS);
 
     const { data: job, error } = await uc
       .from("ai_jobs")

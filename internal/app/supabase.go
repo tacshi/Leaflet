@@ -68,6 +68,10 @@ type supabaseState struct {
 	org       string
 	done, all int
 	cancel    context.CancelFunc
+	// link is Supabase's sign-in page, to open again: a new account makes
+	// its first organization there, and Supabase leaves the sign-in for
+	// that organization's dashboard.
+	link string
 }
 
 var (
@@ -103,7 +107,10 @@ func (a *App) signInWithSupabase() {
 	signIn.err, signIn.info = "", ""
 	go func() {
 		wait, stop := context.WithTimeout(ctx, 5*time.Minute)
-		api, err := supabaseapi.SignIn(wait, func(u string) { _ = mygo.Shell.OpenExternal(u) })
+		api, err := supabaseapi.SignIn(wait, func(u string) {
+			a.supaStep(run, func() { supa.link = u })
+			_ = mygo.Shell.OpenExternal(u)
+		})
 		stop()
 		if err != nil {
 			a.supabaseFailed(run, err)

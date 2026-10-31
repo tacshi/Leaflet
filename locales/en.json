@@ -4203,6 +4203,14 @@
   "@signinChooseProject": {
     "description": "The sign-in page: the heading over the projects to choose, when there is none or several."
   },
+  "signinNewOrg": "Made a Supabase organization just now?",
+  "@signinNewOrg": {
+    "description": "The sign-in page while Supabase's sign-in is open: before the link opening it again, which Supabase leaves after a new account makes its first organization."
+  },
+  "signinReopenBrowser": "Open the sign-in page again",
+  "@signinReopenBrowser": {
+    "description": "The sign-in page: the link opening Supabase's sign-in in the browser again."
+  },
   "signinUseProject": "Use",
   "@signinUseProject": {
     "description": "The sign-in page: the button using a Leaflet project already in the account."

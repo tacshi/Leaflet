@@ -11923,6 +11923,40 @@ func (msgs Messages) SigninChooseProject() string {
 
 // SigninUseProject says "Use"
 // in the language the app shows.
+// SigninNewOrg says "Made a Supabase organization just now?"
+// in the language the app shows.
+//
+// The sign-in page while Supabase's sign-in is open: before the link
+// opening it again, which Supabase leaves after a new account makes its
+// first organization.
+func SigninNewOrg() string { return In(i18n.Locale()).SigninNewOrg() }
+
+// SigninNewOrg says "Made a Supabase organization just now?"
+// in the language of msgs.
+//
+// The sign-in page while Supabase's sign-in is open: before the link
+// opening it again, which Supabase leaves after a new account makes its
+// first organization.
+func (msgs Messages) SigninNewOrg() string {
+	return Catalog.Format(msgs.locale, "signinNewOrg", nil)
+}
+
+// SigninReopenBrowser says "Open the sign-in page again"
+// in the language the app shows.
+//
+// The sign-in page: the link opening Supabase's sign-in in the browser
+// again.
+func SigninReopenBrowser() string { return In(i18n.Locale()).SigninReopenBrowser() }
+
+// SigninReopenBrowser says "Open the sign-in page again"
+// in the language of msgs.
+//
+// The sign-in page: the link opening Supabase's sign-in in the browser
+// again.
+func (msgs Messages) SigninReopenBrowser() string {
+	return Catalog.Format(msgs.locale, "signinReopenBrowser", nil)
+}
+
 //
 // The sign-in page: the button using a Leaflet project already in the
 // account.

@@ -818,6 +818,8 @@
   "signinWaitingBrowser": "ブラウザでサインインを完了してください…",
   "signinFindingProject": "Leaflet のプロジェクトを探しています…",
   "signinChooseProject": "プロジェクトを選択",
+  "signinNewOrg": "Supabase で組織を作成したばかりですか？",
+  "signinReopenBrowser": "サインインページをもう一度開く",
   "signinUseProject": "使う",
   "signinNewProject": "新しいプロジェクト",
   "signinNewProjectDesc": "Leaflet が Supabase のアカウントに作成して設定します",

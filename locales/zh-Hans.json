@@ -818,6 +818,8 @@
   "signinWaitingBrowser": "请在浏览器中完成登录…",
   "signinFindingProject": "正在查找你的 Leaflet 项目…",
   "signinChooseProject": "选择项目",
+  "signinNewOrg": "刚刚在 Supabase 创建了组织？",
+  "signinReopenBrowser": "重新打开登录页面",
   "signinUseProject": "使用",
   "signinNewProject": "新项目",
   "signinNewProjectDesc": "Leaflet 会在你的 Supabase 账户中创建并设置它",

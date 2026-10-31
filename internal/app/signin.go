@@ -116,6 +116,12 @@ func (a *App) supabaseSignIn(c *ui.Context) {
 		})
 	case stepBrowser:
 		busy(locales.SigninWaitingBrowser())
+		if supa.link != "" {
+			ui.Row(c).Gap(6).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, locales.SigninNewOrg()).FontSize(13).TextColor(pal.TextMuted)
+				ui.Link(c, locales.SigninReopenBrowser(), supa.link).FontSize(13)
+			})
+		}
 	case stepFinding:
 		busy(locales.SigninFindingProject())
 	case stepChoose:

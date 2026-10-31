@@ -718,6 +718,10 @@
       }
     }
   },
+  "exportRecording": "Recording",
+  "@exportRecording": {
+    "description": "The name of an exported recording's audio file, for a recording with no title."
+  },
   "exportTemplatesFolder": "Templates",
   "@exportTemplatesFolder": {
     "description": "Export: the name of the folder in the exported zip holding the templates."
@@ -734,6 +738,14 @@
   "templateWaitForRecording": "Wait for the recording on this page to finish, then try again.",
   "@templateWaitForRecording": {
     "description": "A toast when duplicating a page, or saving it as a template, while a recording on it is still being made or transcribed."
+  },
+  "templateFilesUploading": "Some of its files or recordings are still uploading, or can't download now. Try again once they have.",
+  "@templateFilesUploading": {
+    "description": "A toast when duplicating a page, saving it as a template or using a template, while a file or a recording's audio on it is still uploading from the device it was added on, or can't be downloaded to this one."
+  },
+  "templateFetchingFiles": "Downloading its files and recordings first…",
+  "@templateFetchingFiles": {
+    "description": "A toast when duplicating a page, saving it as a template or using a template needs its files or recordings' audio downloaded to this device first; the copy is made once they have."
   },
   "templateCopyTitle": "{title} copy",
   "@templateCopyTitle": {

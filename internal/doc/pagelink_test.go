@@ -135,6 +135,11 @@ func TestReadableMarkdownNamesMentions(t *testing.T) {
 	if got := PageMarkdown("", &Content{Children: []*Node{n}}, func(string) string { return "Plan" }); strings.Contains(got, "mention:") {
 		t.Errorf("export %q", got)
 	}
+	cell := &Node{ID: "c1", Type: "table/cell", Data: map[string]any{"rowPosition": 0, "colPosition": 0}, Children: []*Node{n.Clone()}}
+	table := &Node{ID: "t1", Type: "table", Data: map[string]any{"rowsLen": 1, "colsLen": 1}, Children: []*Node{cell}}
+	if got := PageMarkdown("", &Content{Children: []*Node{table}}, nil); strings.Contains(got, "mention:") || !strings.Contains(got, "@Bob") {
+		t.Errorf("exported table %q", got)
+	}
 	if got := d.ToMarkdown(); !strings.Contains(got, "[@Bob](mention:user:u1)") {
 		t.Errorf("agents' markdown %q", got)
 	}

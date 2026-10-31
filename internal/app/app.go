@@ -139,7 +139,10 @@ type App struct {
 	// downloadFails when those that failed to last did.
 	downloads     map[string]bool
 	downloadFails map[string]time.Time
-	embeds        map[string]*mygo.WebView
+	// fetchingCopy is set while what a copy of a page needs downloads
+	// (copyable).
+	fetchingCopy bool
+	embeds       map[string]*mygo.WebView
 	// embedSrc is the page each embed's web view last loaded, and
 	// embedSizes how tall its content said it is, once it has drawn;
 	// embedZoomed the diagrams zoomed in.

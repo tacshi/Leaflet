@@ -2067,6 +2067,22 @@ func (msgs Messages) CardFileDetail(kind string, size string) string {
 	return Catalog.Format(msgs.locale, "cardFileDetail", map[string]any{"kind": kind, "size": size})
 }
 
+// ExportRecording says "Recording"
+// in the language the app shows.
+//
+// The name of an exported recording's audio file, for a recording with no
+// title.
+func ExportRecording() string { return In(i18n.Locale()).ExportRecording() }
+
+// ExportRecording says "Recording"
+// in the language of msgs.
+//
+// The name of an exported recording's audio file, for a recording with no
+// title.
+func (msgs Messages) ExportRecording() string {
+	return Catalog.Format(msgs.locale, "exportRecording", nil)
+}
+
 // ExportTemplatesFolder says "Templates"
 // in the language the app shows.
 //
@@ -2111,6 +2127,42 @@ func TemplateWaitForRecording() string { return In(i18n.Locale()).TemplateWaitFo
 // recording on it is still being made or transcribed.
 func (msgs Messages) TemplateWaitForRecording() string {
 	return Catalog.Format(msgs.locale, "templateWaitForRecording", nil)
+}
+
+// TemplateFilesUploading says "Some of its files or recordings are still uploading, or can't download now. Try again once they have."
+// in the language the app shows.
+//
+// A toast when duplicating a page, saving it as a template or using a
+// template, while a file or a recording's audio on it is still uploading
+// from the device it was added on, or can't be downloaded to this one.
+func TemplateFilesUploading() string { return In(i18n.Locale()).TemplateFilesUploading() }
+
+// TemplateFilesUploading says "Some of its files or recordings are still uploading, or can't download now. Try again once they have."
+// in the language of msgs.
+//
+// A toast when duplicating a page, saving it as a template or using a
+// template, while a file or a recording's audio on it is still uploading
+// from the device it was added on, or can't be downloaded to this one.
+func (msgs Messages) TemplateFilesUploading() string {
+	return Catalog.Format(msgs.locale, "templateFilesUploading", nil)
+}
+
+// TemplateFetchingFiles says "Downloading its files and recordings first…"
+// in the language the app shows.
+//
+// A toast when duplicating a page, saving it as a template or using a
+// template needs its files or recordings' audio downloaded to this device
+// first; the copy is made once they have.
+func TemplateFetchingFiles() string { return In(i18n.Locale()).TemplateFetchingFiles() }
+
+// TemplateFetchingFiles says "Downloading its files and recordings first…"
+// in the language of msgs.
+//
+// A toast when duplicating a page, saving it as a template or using a
+// template needs its files or recordings' audio downloaded to this device
+// first; the copy is made once they have.
+func (msgs Messages) TemplateFetchingFiles() string {
+	return Catalog.Format(msgs.locale, "templateFetchingFiles", nil)
 }
 
 // TemplateCopyTitle says "{title} copy"

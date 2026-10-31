@@ -663,22 +663,33 @@ func (s *Service) push(ctx context.Context) error {
 		return err
 	}
 	uid := s.be.UserID()
-	for _, e := range entries {
-		if !s.CanSync() {
-			return nil
-		}
-		done, err := s.pushOne(ctx, uid, e)
-		if err != nil {
-			if remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut) {
-				return err
+	// A file's row waits for its contents (pushOne), which come later in
+	// the queue: it goes once they have, in the same pass.
+	var held []store.OutboxEntry
+	for round := 0; round < 2; round++ {
+		for _, e := range entries {
+			if !s.CanSync() {
+				return nil
 			}
-			log.Printf("outbox %s/%s: %v", e.Entity, e.EntityID, err)
-			_ = s.st.MarkFailed(e, err.Error())
-			continue
+			done, err := s.pushOne(ctx, uid, e)
+			if err != nil {
+				if remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut) {
+					return err
+				}
+				log.Printf("outbox %s/%s: %v", e.Entity, e.EntityID, err)
+				_ = s.st.MarkFailed(e, err.Error())
+				continue
+			}
+			if done {
+				_ = s.st.Dequeue(e)
+			} else if e.Entity == "files" {
+				held = append(held, e)
+			}
 		}
-		if done {
-			_ = s.st.Dequeue(e)
+		if len(held) == 0 {
+			break
 		}
+		entries, held = held, nil
 	}
 	return nil
 }
@@ -701,7 +712,15 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 			payload["created_by"] = uid
 		}
 		return s.pushRow(ctx, e, payload)
-	case "folders", "files":
+	case "files":
+		// A file's row goes after its contents, as it does to iCloud
+		// Drive: a device that has the row can fetch them, and never takes
+		// a file still uploading for one that is gone.
+		if s.st.HasPending("storage", "files/"+e.EntityID) {
+			return false, nil
+		}
+		return s.pushRow(ctx, e, payload)
+	case "folders":
 		return s.pushRow(ctx, e, payload)
 	case "recordings":
 		return s.pushRecording(ctx, e, payload)
@@ -1077,6 +1096,8 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 // the page of the row a stored copy belongs to can read it. It returns
 // where the copy is kept here now, or "" when there is nothing to copy:
 // the copy had what it needs, or what it copies or the copy is gone.
+// Copies are made from what is on the device now (store.CopyNeeds): only
+// one an earlier version queued still comes from the original's.
 func (s *Service) fetchCopied(ctx context.Context, payload map[string]any) (string, error) {
 	from := store.S(payload, "from_path")
 	if from == "" {

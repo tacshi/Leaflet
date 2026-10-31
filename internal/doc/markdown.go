@@ -62,7 +62,7 @@ func (d Delta) ToMarkdown() string {
 			if name == "" {
 				name = strings.TrimPrefix(r.Text, "@")
 			}
-			toks = append(toks, mdToken{text: "[@" + escapeText(name) + "](" + linkDestination(MentionLink(m.Kind, m.ID)) + ")"})
+			toks = append(toks, mdToken{text: "[@" + escapeText(name) + "](" + LinkDestination(MentionLink(m.Kind, m.ID)) + ")"})
 		case r.Attrs.Code:
 			// Code spans side by side differ only in what Markdown can't
 			// say: they are one span, as backticks touching would not
@@ -90,7 +90,7 @@ func (d Delta) ToMarkdown() string {
 		case t.mark.kind == '[' && t.open:
 			b.WriteString("[")
 		case t.mark.kind == '[':
-			b.WriteString("](" + linkDestination(t.mark.href) + ")")
+			b.WriteString("](" + LinkDestination(t.mark.href) + ")")
 		case t.mark.kind == '*' && boldTouchesItalic(toks, i):
 			// Bold beside an italic's * is __, as *** reads either way.
 			b.WriteString("__")
@@ -375,9 +375,9 @@ func mentionOf(href string) (kind, id string, ok bool) {
 	return kind, id, (kind == "user" || kind == "agent") && id != ""
 }
 
-// linkDestination writes a link's url, in angle brackets when it holds
+// LinkDestination writes a link's url, in angle brackets when it holds
 // what would end it or read as markup: parentheses, spaces, backslashes.
-func linkDestination(href string) string {
+func LinkDestination(href string) string {
 	if !strings.ContainsAny(href, "()<>\\ \t\n") {
 		return href
 	}

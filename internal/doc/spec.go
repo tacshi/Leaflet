@@ -375,7 +375,13 @@ func TableSize(n *Node) (rows, cols int) {
 }
 
 // TableRows rebuilds the rows of a stored table, as inline markdown.
-func TableRows(n *Node) [][]string {
+func TableRows(n *Node) [][]string { return tableRows(n, Delta.ToMarkdown) }
+
+// ReadableTableRows is TableRows for people to read, its cells written as
+// ReadableMarkdown writes text.
+func ReadableTableRows(n *Node) [][]string { return tableRows(n, Delta.ReadableMarkdown) }
+
+func tableRows(n *Node, markdown func(Delta) string) [][]string {
 	rows, cols := TableSize(n)
 	grid := make([][]string, rows)
 	for i := range grid {
@@ -389,7 +395,7 @@ func TableRows(n *Node) [][]string {
 		}
 		var parts []string
 		for _, k := range cell.Children {
-			parts = append(parts, k.Delta().ToMarkdown())
+			parts = append(parts, markdown(k.Delta()))
 		}
 		grid[r][c] = strings.Join(parts, " ")
 	}

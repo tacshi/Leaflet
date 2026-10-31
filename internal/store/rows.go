@@ -382,6 +382,35 @@ func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
 	return local, nil
 }
 
+// DownloadedAudio keeps a recording's audio downloaded from where it went
+// up, as DownloadedFile keeps a file's, for a copy of its page to copy
+// (CopyNeeds). A recording removed before or while it came keeps none.
+func (s *Store) DownloadedAudio(id string, data []byte) (string, error) {
+	if _, err := s.Recording(id); err != nil {
+		return "", err
+	}
+	local := filepath.Join(s.Dir, "recordings", id+".wav")
+	if err := os.MkdirAll(filepath.Dir(local), 0o750); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(local, data, 0o600); err != nil {
+		return "", err
+	}
+	res, err := s.db.Exec(`UPDATE recordings SET local_path = ? WHERE id = ?`, local, id)
+	if err == nil {
+		var n int64
+		if n, err = res.RowsAffected(); err == nil && n == 0 {
+			err = errNotFound
+		}
+	}
+	if err != nil {
+		_ = os.Remove(local)
+		return "", err
+	}
+	s.Notify("recordings", "")
+	return local, nil
+}
+
 // DeleteFile deletes a file, which cannot be undone: its copy here goes
 // now, and its stored copy (in Storage, or iCloud Drive) once the
 // deletion has gone up. An upload still waiting is dropped. The file is

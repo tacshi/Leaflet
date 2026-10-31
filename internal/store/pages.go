@@ -849,59 +849,92 @@ type newFile struct {
 	upload map[string]any
 }
 
-// copyLocal copies, for the recordings and files of copied pages, what
-// this device has of their audio and contents, before storeCopies stores
-// them: only those who can view the page of the recording a stored audio
-// is named for, or the page a file is on, can read it, so each copy goes
-// up with its own. Audio and files on this device are copied, as the
-// originals' may go once they are up; what is only stored comes from the
-// original's as the copy goes up, and until then the copy plays or opens
-// the original's. It returns the recordings and files to store, and the
-// paths it made, which go if they are not stored.
+// ErrCopyNotHere is a copy refused because a file's contents or a
+// recording's audio it copies is not on this device (CopyNeeds).
+var ErrCopyNotHere = errors.New("store: a file or a recording the copy copies is not on this device")
+
+// CopyNeed is a file's contents or a recording's audio that copying a
+// page needs on this device first: where it is stored, by its bucket and
+// path, which is "" for audio still uploading from where it was made.
+type CopyNeed struct {
+	Bucket, Path        string
+	FileID, RecordingID string
+}
+
+// CopyNeeds lists what copying page id, with its subpages, needs brought
+// to this device first (DownloadedFile, DownloadedAudio): a copy goes up
+// with its own contents and audio, from this device, as it is made, and
+// never comes later from the original's, which another device may delete
+// meanwhile.
+func (s *Store) CopyNeeds(id string) ([]CopyNeed, error) {
+	plan, err := s.copyPlan(id, doc.NewRowID())
+	if err != nil {
+		return nil, err
+	}
+	var out []CopyNeed
+	for _, c := range plan.recs {
+		if !onDevice(c.LocalPath) {
+			out = append(out, CopyNeed{Bucket: "recordings", Path: c.AudioPath, RecordingID: c.from})
+		}
+	}
+	for _, c := range plan.files {
+		if !onDevice(c.LocalPath) {
+			out = append(out, CopyNeed{Bucket: "files", Path: c.StoragePath, FileID: c.ID})
+		}
+	}
+	return out, nil
+}
+
+// copyLocal copies, for the recordings and files of copied pages, their
+// audio and contents on this device, before storeCopies stores them: only
+// those who can view the page of the recording a stored audio is named
+// for, or the page a file is on, can read it, so each copy goes up with
+// its own. One not on this device refuses the copy (ErrCopyNotHere). It
+// returns the recordings and files to store, and the paths it made, which
+// go if they are not stored.
 func (s *Store) copyLocal(plan pageCopies) ([]Recording, []newFile, []string, error) {
 	var made []string
 	var recs []Recording
 	for _, c := range plan.recs {
+		if !onDevice(c.LocalPath) {
+			return nil, nil, made, ErrCopyNotHere
+		}
 		r := c.Recording
-		r.LocalPath = ""
-		if _, err := os.Stat(c.LocalPath); c.LocalPath != "" && err == nil {
-			r.LocalPath = filepath.Join(s.Dir, "recordings", r.ID+filepath.Ext(c.LocalPath))
-			if err := os.MkdirAll(filepath.Dir(r.LocalPath), 0o750); err != nil {
-				return nil, nil, made, err
-			}
-			made = append(made, r.LocalPath)
-			if err := copyFile(c.LocalPath, r.LocalPath); err != nil {
-				return nil, nil, made, err
-			}
+		r.AudioPath, r.UploadedAt = "", time.Time{}
+		r.LocalPath = filepath.Join(s.Dir, "recordings", r.ID+filepath.Ext(c.LocalPath))
+		if err := os.MkdirAll(filepath.Dir(r.LocalPath), 0o750); err != nil {
+			return nil, nil, made, err
+		}
+		made = append(made, r.LocalPath)
+		if err := copyFile(c.LocalPath, r.LocalPath); err != nil {
+			return nil, nil, made, err
 		}
 		r.UpdatedAt = time.Now()
 		recs = append(recs, r)
 	}
 	var files []newFile
 	for _, c := range plan.files {
+		if !onDevice(c.LocalPath) {
+			return nil, nil, made, ErrCopyNotHere
+		}
 		now := time.Now()
 		f := File{ID: c.to, SpaceID: s.Session().SpaceID, PageID: c.pageID, Name: fileName(c.Name), MimeType: c.MimeType,
 			SizeBytes: c.SizeBytes, CreatedAt: now, UpdatedAt: now}
 		f.StoragePath = f.SpaceID + "/" + f.ID + "/" + f.Name
-		if _, err := os.Stat(c.LocalPath); c.LocalPath != "" && err == nil {
-			dir := filepath.Join(s.Dir, "files", f.ID)
-			if err := os.MkdirAll(dir, 0o750); err != nil {
-				return nil, nil, made, err
-			}
-			made = append(made, dir)
-			f.LocalPath = filepath.Join(dir, f.Name)
-			if err := copyFile(c.LocalPath, f.LocalPath); err != nil {
-				return nil, nil, made, err
-			}
+		dir := filepath.Join(s.Dir, "files", f.ID)
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return nil, nil, made, err
+		}
+		made = append(made, dir)
+		f.LocalPath = filepath.Join(dir, f.Name)
+		if err := copyFile(c.LocalPath, f.LocalPath); err != nil {
+			return nil, nil, made, err
 		}
 		ct := f.MimeType
 		if ct == "" {
 			ct = "application/octet-stream"
 		}
 		upload := map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": f.LocalPath, "content_type": ct, "file_id": f.ID}
-		if f.LocalPath == "" {
-			upload["from_path"] = c.StoragePath
-		}
 		files = append(files, newFile{f, upload})
 	}
 	return recs, files, made, nil
@@ -920,16 +953,7 @@ func putRecordingCopies(tx *sql.Tx, space string, recs []Recording) error {
 		if err := queue(tx, "recordings", r.ID, RecordingToRemote(r), "", r.PageID); err != nil {
 			return err
 		}
-		var err error
-		switch {
-		case r.LocalPath != "":
-			err = queue(tx, "storage", "recordings/"+r.ID, uploadOf(r), "audio waiting to upload", r.PageID)
-		case r.AudioPath != "":
-			err = queue(tx, "storage", "recordings/"+r.ID, map[string]any{
-				"bucket": "recordings", "from_path": r.AudioPath, "content_type": "audio/wav", "recording_id": r.ID,
-			}, "audio waiting to upload", r.PageID)
-		}
-		if err != nil {
+		if err := queue(tx, "storage", "recordings/"+r.ID, uploadOf(r), "audio waiting to upload", r.PageID); err != nil {
 			return err
 		}
 	}

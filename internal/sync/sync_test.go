@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	gosync "sync"
@@ -1618,9 +1619,10 @@ func TestUploadWaitsForTheRecordingsPath(t *testing.T) {
 	}
 }
 
-// A copied page's file and recording that this device has only stored go
-// up as the copy's own, from the originals' stored copies; a copy whose
-// original is gone has nothing to send.
+// A copy of a file and a recording queued by an earlier version, from
+// what this device had only stored, goes up as the copy's own, from the
+// originals' stored copies; a copy whose original is gone has nothing to
+// send.
 func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
@@ -1652,12 +1654,12 @@ func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 	})); err != nil {
 		t.Fatal(err)
 	}
-	cp, err := st.CopyPage(p.ID, store.CopyOptions{Title: "Meeting copy"})
+	cp, err := st.CreatePage(store.NewPageOptions{Title: "Meeting copy"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocks := st.Content(cp.ID).Children
-	recID, fileID, goneID := blocks[0].Str("recording_id"), blocks[1].Str("file_id"), blocks[2].Str("file_id")
+	recID := oldRecordingCopy(t, st, cp.ID, r).ID
+	fileID, goneID := oldFileCopy(t, st, cp.ID, f).ID, oldFileCopy(t, st, cp.ID, gone).ID
 
 	var mu gosync.Mutex
 	uploaded := map[string]string{}
@@ -1708,8 +1710,8 @@ func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 	}
 }
 
-// A file deleted while a copy of it waits to go up from it stays in
-// Storage until the copy has gone up.
+// A file deleted while a copy of it an earlier version queued waits to go
+// up from it stays in Storage until the copy has gone up.
 func TestDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
@@ -1728,11 +1730,11 @@ func TestDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	})); err != nil {
 		t.Fatal(err)
 	}
-	cp, err := st.CopyPage(p.ID, store.CopyOptions{Title: "Meeting copy"})
+	cp, err := st.CreatePage(store.NewPageOptions{Title: "Meeting copy"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fileID := st.Content(cp.ID).Children[0].Str("file_id")
+	fileID := oldFileCopy(t, st, cp.ID, f).ID
 	if err := st.DeleteFile(f); err != nil {
 		t.Fatal(err)
 	}
@@ -2109,5 +2111,93 @@ func TestRefusedFileDeletionKeepsItsStoredCopy(t *testing.T) {
 	}
 	if got, _ := st.File(f.ID); !got.DeletedAt.IsZero() {
 		t.Error("the file is still deleted here")
+	}
+}
+
+// oldFileCopy makes on st a copy of a stored file as versions before
+// copies were made only from what is on the device did: its upload reads
+// the original's stored contents later (from_path), and such entries
+// still queued go up so. It returns the copy.
+func oldFileCopy(t *testing.T, st *store.Store, pageID string, orig store.File) store.File {
+	t.Helper()
+	now := time.Now()
+	c := store.File{ID: doc.NewRowID(), SpaceID: st.Session().SpaceID, PageID: pageID, Name: orig.Name, MimeType: orig.MimeType,
+		CreatedAt: now, UpdatedAt: now}
+	c.StoragePath = c.SpaceID + "/" + c.ID + "/" + c.Name
+	if err := st.PutFile(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Queue("files", c.ID, store.FileToRemote(c), "new file", pageID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Queue("storage", "files/"+c.ID, map[string]any{"bucket": "files", "path": c.StoragePath, "local_path": "",
+		"content_type": orig.MimeType, "file_id": c.ID, "from_path": orig.StoragePath}, "file waiting to upload", pageID); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// oldRecordingCopy is oldFileCopy for a recording whose audio is stored:
+// the copy plays the original's until its own has gone up.
+func oldRecordingCopy(t *testing.T, st *store.Store, pageID string, orig store.Recording) store.Recording {
+	t.Helper()
+	c := orig
+	c.ID, c.PageID, c.LocalPath, c.UpdatedAt = doc.NewRowID(), pageID, "", time.Now()
+	if err := st.PutRecording(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Queue("recordings", c.ID, store.RecordingToRemote(c), "", pageID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Queue("storage", "recordings/"+c.ID, map[string]any{"bucket": "recordings", "from_path": orig.AudioPath,
+		"content_type": "audio/wav", "recording_id": c.ID}, "audio waiting to upload", pageID); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// A file's row goes up after its contents, in the same pass: a device
+// that pulls the row can fetch them, and never takes a file still
+// uploading for one that is gone.
+func TestFileRowGoesAfterItsContents(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Trip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "map.png")
+	if err := os.WriteFile(src, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", p.ID, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var order []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case req.URL.Path == "/storage/v1/object/files/"+f.StoragePath && req.Method == http.MethodPost:
+			order = append(order, "contents")
+		case req.URL.Path == "/rest/v1/files" && req.Method == http.MethodPost:
+			order = append(order, "row")
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(order, ",") != "contents,row" {
+		t.Errorf("sent %v", order)
+	}
+	if st.HasPending("files", f.ID) || st.HasPending("storage", "files/"+f.ID) {
+		t.Error("the file still waits after the pass")
 	}
 }

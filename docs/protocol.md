@@ -240,10 +240,23 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
   copy, which runs once the row with `deleted_at` has gone up: the object
   in the `files` bucket through Storage's `DELETE /storage/v1/object/files`
   (an object already gone counts as removed), or the blob in iCloud Drive
-  once a batch has the deletion. An upload still waiting is dropped. The
-  removal waits while a copy of the file, made by duplicating its page,
-  still waits to go up from it. A device that pulls a deleted file removes
-  its copy in its data folder.
+  once a batch has the deletion. An upload still waiting is dropped. A
+  device that pulls a deleted file removes its copy in its data folder.
+- A file's row goes up after its contents, to the server as to iCloud
+  Drive: a device that has the row can fetch them, and never takes a file
+  still uploading for one that is gone. A recording's row goes first, as
+  Storage takes audio only for a recording row, and its `audio_path` is
+  set once its audio is up.
+- A copy of a page (duplicating it, saving it as a template, or starting a
+  page from one) gives each file and recording on it one of its own, which
+  goes up with contents and audio copied on the device that made the copy,
+  as it made it: only those who can view the page a file or recording is
+  on can read it. What the device has only stored downloads first; a copy
+  is not made while a file or recording's audio is still uploading from
+  where it was added, or can't download, so it never reads the original's
+  later, when another device may have deleted it. (A copy queued by an
+  earlier version, which reads the original's as it goes up, still does,
+  and a deleted file's removal waits for it.)
 - Sharing a page invites: `share_page` adds a `page_permissions` row with
   `accepted_at` null for the account that has confirmed the address, or,
   when none has, holds the invite for the address (`page_email_invites`)

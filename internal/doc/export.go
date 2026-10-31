@@ -40,7 +40,7 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 		}
 		b.WriteString("\n")
 	}
-	link := func(text, href string) string { return "[" + escapeText(text) + "](" + linkDestination(href) + ")" }
+	link := func(text, href string) string { return "[" + escapeText(text) + "](" + LinkDestination(href) + ")" }
 	// indent is the room before a block, nested under list items: as much
 	// as each item's marker takes, as CommonMark nests by ("1. " three).
 	var visit func(nodes []*Node, indent string)
@@ -97,7 +97,7 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 			case "image":
 				block(indent, "!"+link(n.Str("alt"), n.Str("url")))
 			case "table":
-				block(indent, tableMarkdown(TableRows(n)))
+				block(indent, tableMarkdown(ReadableTableRows(n)))
 			case "chart":
 				if t := n.Str("title"); t != "" {
 					block(indent, "**"+escapeText(t)+"**")

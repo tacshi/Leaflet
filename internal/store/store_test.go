@@ -577,7 +577,7 @@ func TestCopyPageCopiesRecordings(t *testing.T) {
 		if r.PageID != cp.ID || r.BlockID != n.ID {
 			t.Errorf("block %d: recording on page %s block %s, want %s %s", i, r.PageID, r.BlockID, cp.ID, n.ID)
 		}
-		if r.AudioPath != orig.AudioPath || len(r.Transcript) != 1 || r.Transcript[0].Text != "hello" || r.Status != "ready" {
+		if r.AudioPath != "" || len(r.Transcript) != 1 || r.Transcript[0].Text != "hello" || r.Status != "ready" {
 			t.Errorf("block %d: copy %+v", i, r)
 		}
 		if data, err := os.ReadFile(r.LocalPath); r.LocalPath == orig.LocalPath || err != nil || string(data) != "audio "+strconv.Itoa(i) {
@@ -596,10 +596,11 @@ func TestCopyPageCopiesRecordings(t *testing.T) {
 	}
 }
 
-// A copied recording whose audio is only stored goes up as its own from
-// the original's, which it plays until then: only those who can view the
-// original's page can read the original's.
-func TestCopyPageUploadsStoredAudioAsItsOwn(t *testing.T) {
+// A copied recording whose audio is only stored, or still uploading from
+// where it was made, is not copied until its audio is on this device: the
+// copy goes up with audio of its own, never later from the original's,
+// which another device may delete meanwhile.
+func TestCopyPageWaitsForAudioOnThisDevice(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Meeting"})
 	blockID := doc.NewBlockID()
@@ -607,11 +608,32 @@ func TestCopyPageUploadsStoredAudioAsItsOwn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r, err = s.UpdateRecording(r.ID, func(x *Recording) { x.Status, x.AudioPath = "ready", "u1/"+r.ID+".wav" }); err != nil {
+	if r, err = s.UpdateRecording(r.ID, func(x *Recording) { x.Status = "ready" }); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{{ID: blockID, Type: "recording", Data: map[string]any{"recording_id": r.ID}}})); err != nil {
 		t.Fatal(err)
+	}
+	if needs, err := s.CopyNeeds(p.ID); err != nil || len(needs) != 1 || needs[0].RecordingID != r.ID || needs[0].Path != "" {
+		t.Fatalf("still uploading: needs %+v, %v", needs, err)
+	}
+	if r, err = s.UpdateRecording(r.ID, func(x *Recording) { x.AudioPath = "u1/" + r.ID + ".wav" }); err != nil {
+		t.Fatal(err)
+	}
+	if needs, err := s.CopyNeeds(p.ID); err != nil || len(needs) != 1 || needs[0].Bucket != "recordings" || needs[0].Path != r.AudioPath {
+		t.Fatalf("stored: needs %+v, %v", needs, err)
+	}
+	if _, err := s.CopyPage(p.ID, CopyOptions{Title: "Meeting copy"}); !errors.Is(err, ErrCopyNotHere) {
+		t.Fatalf("copied without the audio: %v", err)
+	}
+	if pages, _ := s.Pages(); len(pages) != 1 {
+		t.Fatalf("%d pages after the copy refused", len(pages))
+	}
+	if _, err := s.DownloadedAudio(r.ID, []byte("audio")); err != nil {
+		t.Fatal(err)
+	}
+	if needs, err := s.CopyNeeds(p.ID); err != nil || len(needs) != 0 {
+		t.Fatalf("downloaded: needs %+v, %v", needs, err)
 	}
 	cp, err := s.CopyPage(p.ID, CopyOptions{Title: "Meeting copy"})
 	if err != nil {
@@ -621,8 +643,8 @@ func TestCopyPageUploadsStoredAudioAsItsOwn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.AudioPath != r.AudioPath || c.LocalPath != "" {
-		t.Errorf("copy plays %q, kept here at %q", c.AudioPath, c.LocalPath)
+	if data, err := os.ReadFile(c.LocalPath); c.AudioPath != "" || err != nil || string(data) != "audio" {
+		t.Errorf("copy stored at %q, here at %q: %q %v", c.AudioPath, c.LocalPath, data, err)
 	}
 	var payload string
 	if err := s.db.QueryRow(`SELECT payload FROM outbox WHERE entity = 'storage' AND entity_id = ?`, "recordings/"+c.ID).Scan(&payload); err != nil {
@@ -630,15 +652,15 @@ func TestCopyPageUploadsStoredAudioAsItsOwn(t *testing.T) {
 	}
 	var up map[string]any
 	_ = json.Unmarshal([]byte(payload), &up)
-	if up["from_path"] != r.AudioPath || up["recording_id"] != c.ID || up["path"] != nil {
+	if up["from_path"] != nil || up["local_path"] != c.LocalPath || up["recording_id"] != c.ID {
 		t.Errorf("upload %v", up)
 	}
 }
 
 // A copied page's pictures and files are files of its own, on the copy,
-// as only those who can view the page a file is on can read it. A file on
-// this device is copied; one only stored goes up from the original's.
-// Starting a page from a template copies them the same way.
+// as only those who can view the page a file is on can read it, copied
+// here: one only stored comes to this device first. Starting a page from
+// a template copies them the same way.
 func TestCopyPageCopiesFiles(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Trip"})
@@ -686,12 +708,13 @@ func TestCopyPageCopiesFiles(t *testing.T) {
 			}
 			var up map[string]any
 			_ = json.Unmarshal([]byte(payload), &up)
-			if orig == here.ID {
-				if data, err := os.ReadFile(f.LocalPath); err != nil || string(data) != "png" || up["local_path"] != f.LocalPath || up["from_path"] != nil {
-					t.Errorf("%s: block %d: here at %q (%q, %v), upload %v", how, i, f.LocalPath, data, err, up)
-				}
-			} else if f.LocalPath != "" || up["from_path"] != stored.StoragePath || up["file_id"] != f.ID || up["path"] != f.StoragePath {
-				t.Errorf("%s: block %d: here at %q, upload %v", how, i, f.LocalPath, up)
+			want := "png"
+			if orig == stored.ID {
+				want = "pdf"
+			}
+			if data, err := os.ReadFile(f.LocalPath); err != nil || string(data) != want || up["local_path"] != f.LocalPath ||
+				up["from_path"] != nil || up["file_id"] != f.ID || up["path"] != f.StoragePath {
+				t.Errorf("%s: block %d: here at %q (%q, %v), upload %v", how, i, f.LocalPath, data, err, up)
 			}
 		}
 		if ids[0] != ids[1] {
@@ -699,6 +722,15 @@ func TestCopyPageCopiesFiles(t *testing.T) {
 		}
 	}
 
+	if needs, err := s.CopyNeeds(p.ID); err != nil || len(needs) != 1 || needs[0].FileID != stored.ID || needs[0].Path != stored.StoragePath {
+		t.Fatalf("needs %+v, %v", needs, err)
+	}
+	if _, err := s.CopyPage(p.ID, CopyOptions{Title: "Trip copy"}); !errors.Is(err, ErrCopyNotHere) {
+		t.Fatalf("copied without the stored file: %v", err)
+	}
+	if _, err := s.DownloadedFile(stored.ID, []byte("pdf")); err != nil {
+		t.Fatal(err)
+	}
 	cp, err := s.CopyPage(p.ID, CopyOptions{Title: "Trip copy"})
 	if err != nil {
 		t.Fatal(err)

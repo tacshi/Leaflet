@@ -1218,7 +1218,7 @@ func TestICloudBreaksALoopOfMoves(t *testing.T) {
 }
 
 // A page copied on a device that has its file and audio only in iCloud
-// Drive gets them as its own there, from the originals'.
+// Drive brings them here first, and the copy gets them as its own there.
 func TestICloudCopiesGoUpAsTheirOwn(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1254,6 +1254,27 @@ func TestICloudCopiesGoUpAsTheirOwn(t *testing.T) {
 	}
 	syncAll(a, b)
 
+	// What B has only in iCloud Drive comes here first: the copy goes up
+	// with its own, never later from the originals'.
+	ctx := context.Background()
+	needs, err := b.st.CopyNeeds(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range needs {
+		data, err := b.svc.Fetch(ctx, n.Bucket, n.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n.FileID != "" {
+			_, err = b.st.DownloadedFile(n.FileID, data)
+		} else {
+			_, err = b.st.DownloadedAudio(n.RecordingID, data)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	cp, err := b.st.CopyPage(p.ID, store.CopyOptions{Title: "Copy"})
 	if err != nil {
 		t.Fatal(err)
@@ -1261,7 +1282,6 @@ func TestICloudCopiesGoUpAsTheirOwn(t *testing.T) {
 	blocks := b.st.Content(cp.ID).Children
 	recID, fileID := blocks[0].Str("recording_id"), blocks[1].Str("file_id")
 	syncAll(b, a)
-	ctx := context.Background()
 	r, err := a.st.Recording(recID)
 	if err != nil || r.AudioPath != recID+".wav" {
 		t.Fatalf("A's copy of the recording %+v, %v", r, err)
@@ -1278,8 +1298,8 @@ func TestICloudCopiesGoUpAsTheirOwn(t *testing.T) {
 	}
 }
 
-// A copy whose file iCloud has not downloaded yet goes up on a later pass;
-// the rest of the pass goes meanwhile.
+// A copy an earlier version queued, whose file iCloud has not downloaded
+// yet, goes up on a later pass; the rest of the pass goes meanwhile.
 func TestICloudCopyOfAFileNotDownloadedWaits(t *testing.T) {
 	old := uploadFetchWait
 	uploadFetchWait = 50 * time.Millisecond
@@ -1310,11 +1330,11 @@ func TestICloudCopyOfAFileNotDownloadedWaits(t *testing.T) {
 	if err := os.Rename(path, hidden); err != nil {
 		t.Fatal(err)
 	}
-	cp, err := b.st.CopyPage(p.ID, store.CopyOptions{Title: "Copy"})
+	cp, err := b.st.CreatePage(store.NewPageOptions{Title: "Copy"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fileID := b.st.Content(cp.ID).Children[0].Str("file_id")
+	fileID := oldFileCopy(t, b.st, cp.ID, f).ID
 	syncAll(b, a)
 	if a.title(cp.ID) != "Copy" {
 		t.Errorf("A has the copy as %q", a.title(cp.ID))
@@ -1335,8 +1355,8 @@ func TestICloudCopyOfAFileNotDownloadedWaits(t *testing.T) {
 	}
 }
 
-// A file deleted while a copy of it waits to go up from it stays in the
-// folder until the copy has gone up.
+// A file deleted while a copy of it an earlier version queued waits to go
+// up from it stays in the folder until the copy has gone up.
 func TestICloudDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	old := uploadFetchWait
 	uploadFetchWait = 50 * time.Millisecond
@@ -1367,11 +1387,11 @@ func TestICloudDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	if err := os.Rename(path, hidden); err != nil {
 		t.Fatal(err)
 	}
-	cp, err := b.st.CopyPage(p.ID, store.CopyOptions{Title: "Copy"})
+	cp, err := b.st.CreatePage(store.NewPageOptions{Title: "Copy"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fileID := b.st.Content(cp.ID).Children[0].Str("file_id")
+	fileID := oldFileCopy(t, b.st, cp.ID, f).ID
 	b.sync()
 	if err := b.st.DeleteFile(f); err != nil {
 		t.Fatal(err)
@@ -1396,10 +1416,10 @@ func TestICloudDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	}
 }
 
-// A copy made of a page whose file iCloud Drive does not list yet, as
-// while the device that has it still copies it there, waits for it while
-// the file lives, rather than go without it; the copy's row waits with
-// it, as a batch names only what is in the folder.
+// A copy an earlier version queued, of a file iCloud Drive does not list
+// yet, as while the device that has it still copies it there, waits for
+// it while the file lives, rather than go without it; the copy's row
+// waits with it, as a batch names only what is in the folder.
 func TestICloudCopyWaitsForAnOriginalNotListedYet(t *testing.T) {
 	old := uploadFetchWait
 	uploadFetchWait = 50 * time.Millisecond
@@ -1426,11 +1446,11 @@ func TestICloudCopyWaitsForAnOriginalNotListedYet(t *testing.T) {
 	if err := os.Rename(path, away); err != nil {
 		t.Fatal(err)
 	}
-	cp, err := b.st.CopyPage(p.ID, store.CopyOptions{Title: "Copy"})
+	cp, err := b.st.CreatePage(store.NewPageOptions{Title: "Copy"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fileID := b.st.Content(cp.ID).Children[0].Str("file_id")
+	fileID := oldFileCopy(t, b.st, cp.ID, f).ID
 	syncAll(b, a)
 	if !b.st.HasPending("storage", "files/"+fileID) {
 		t.Fatal("the copy went without its file")

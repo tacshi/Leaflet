@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math/rand/v2"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -341,7 +342,7 @@ func TestMentionIsOneUnit(t *testing.T) {
 	if got := d.Format(5, 7, func(a *Attrs) { a.Bold = true }); len(got) != 2 || !got[1].Attrs.Bold || got[1].Text != "@Alice" {
 		t.Errorf("formatted part: %+v", got)
 	}
-	if got := d.Insert(6, "x", Attrs{}).ToMarkdown(); got != "hi @Alicex" {
+	if got := d.Insert(6, "x", Attrs{}).ToMarkdown(); got != "hi [@Alice](mention:user:a)x" {
 		t.Errorf("markdown %q", got)
 	}
 }
@@ -939,5 +940,137 @@ func TestDecodeRefusesWhatIsNotContent(t *testing.T) {
 		if _, err := Decode(s); err != nil {
 			t.Errorf("%q: %v", s, err)
 		}
+	}
+}
+
+// A table cell one side deleted, by writing the table anew or taking out
+// its row, stays deleted when the other side edited it: brought back, it
+// would share its row and column with a cell of the table kept. The table
+// as the editing side had it is a conflict, whichever side is newer.
+func TestMergeTableCellDeletedAndEdited(t *testing.T) {
+	table, _ := TableNode([][]string{{"a", "b"}, {"c", "d"}}, "T")
+	base := FromBlocks([]*Node{table})
+	for id := range base.Blocks {
+		base.Blocks[id] = 1000
+	}
+	cellText := func(c *Content, row, col int) string {
+		cell := TableCell(c.Find("T"), row, col)
+		if cell == nil || len(cell.Children) == 0 {
+			return ""
+		}
+		return cell.Children[0].Delta().Plain()
+	}
+	edit := func(at int64) *Content {
+		c := base.Copy()
+		TableCell(c.Find("T"), 1, 1).Children[0].SetDelta(Delta{{Text: "edited"}})
+		return c.Stamped(base, at)
+	}
+	rewritten := base.Copy()
+	fresh, _ := TableNode([][]string{{"x", "y"}, {"z", "w"}}, "T")
+	_ = rewritten.Replace("T", fresh)
+	rewritten = rewritten.Stamped(base, 2000)
+	rowGone := base.Copy()
+	rt := rowGone.Find("T")
+	rt.Children = slices.DeleteFunc(rt.Children, func(k *Node) bool { return k.Int("rowPosition", 0) == 1 })
+	rt.Set("rowsLen", 1)
+	rowGone = rowGone.Stamped(base, 2000)
+	for _, tc := range []struct {
+		name    string
+		deleter *Content
+		want    [][]string
+	}{
+		{"rewritten", rewritten, [][]string{{"x", "y"}, {"z", "w"}}},
+		{"row taken out", rowGone, [][]string{{"a", "b"}}},
+	} {
+		for _, editedAt := range []int64{1500, 2500} {
+			editor := edit(editedAt)
+			for _, sides := range [][2]*Content{{tc.deleter, editor}, {editor, tc.deleter}} {
+				got, conflicts := Merge(base, sides[0], sides[1])
+				tt := got.Find("T")
+				if rows := TableRows(tt); len(tt.Children) != len(tc.want)*2 || !reflect.DeepEqual(rows, tc.want) {
+					t.Errorf("%s, edited at %d: %d cells, rows %v", tc.name, editedAt, len(tt.Children), rows)
+				}
+				if len(conflicts) != 1 || conflicts[0].BlockID != "T" {
+					t.Fatalf("%s, edited at %d: conflicts %+v", tc.name, editedAt, conflicts)
+				}
+				c := conflicts[0]
+				lost, kept := c.Remote, "local"
+				if sides[0] == editor {
+					lost, kept = c.Local, "remote"
+				}
+				if c.Kept() != kept || cellText(&Content{Children: []*Node{lost}}, 1, 1) != "edited" {
+					t.Errorf("%s, edited at %d: kept %s, conflict %+v", tc.name, editedAt, c.Kept(), c)
+				}
+			}
+		}
+	}
+}
+
+// A list item one side nested a block under while the other turned it
+// into a paragraph stays a paragraph, and the nested block comes out to
+// right after it, where it shows.
+func TestMergeChildrenOfABlockThatHoldsNone(t *testing.T) {
+	item := para("A", "item")
+	item.Type = "bulleted_list"
+	base := page(map[string]int64{"A": 1, "B": 1}, item, para("B", "after"))
+	nested := base.Copy()
+	nested.Find("A").Children = []*Node{para("K", "nested")}
+	nested = nested.Stamped(base, 5)
+	retyped := base.Copy()
+	retyped.Find("A").Type = "paragraph"
+	retyped = retyped.Stamped(base, 6)
+	for _, sides := range [][2]*Content{{nested, retyped}, {retyped, nested}} {
+		got, _ := Merge(base, sides[0], sides[1])
+		var shape []string
+		for _, n := range got.Children {
+			shape = append(shape, n.Type+":"+n.Delta().Plain())
+			if len(n.Children) > 0 {
+				t.Errorf("%s still holds %d blocks", n.ID, len(n.Children))
+			}
+		}
+		if want := []string{"paragraph:item", "paragraph:nested", "paragraph:after"}; !reflect.DeepEqual(shape, want) {
+			t.Errorf("merged %v, want %v", shape, want)
+		}
+	}
+}
+
+// A page written as Markdown reads back as the same blocks: each line of a
+// quote or an item is in it and escaped where it would start another
+// block, a heading stays one line, blocks nested under an item stay
+// indented and apart from the item's text, and titles and links of cards
+// are escaped.
+func TestPageMarkdownKeepsBlocksApart(t *testing.T) {
+	n := func(typ, text string, kids ...*Node) *Node {
+		x := &Node{ID: NewBlockID(), Type: typ, Children: kids}
+		x.SetDelta(Delta{{Text: text}})
+		return x
+	}
+	heading := n("heading", "Plan\nfor *now*")
+	heading.Set("level", 2)
+	inner := n("heading", "inner")
+	inner.Set("level", 3)
+	c := FromBlocks([]*Node{
+		heading,
+		n("quote", "said\n- not a list"),
+		n("bulleted_list", "item\n1. not a list", n("bulleted_list", "sub"), n("paragraph", "after sub"), n("quote", "q")),
+		n("numbered_list", "ten", inner),
+		n("paragraph", "end"),
+		{ID: "c", Type: "link_preview", Data: map[string]any{"url": "https://e.com/x_(1) y", "title": "A [b] *c*"}},
+		{ID: "v", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ", "title": "_Never_"}},
+		{ID: "i", Type: "image", Data: map[string]any{"url": "https://e.com/a b.png", "alt": "*a*"}},
+		{ID: "s", Type: "subpage", Data: map[string]any{"page_id": "P1"}},
+	})
+	got := PageMarkdown("", c, func(string) string { return "Sub [page]" })
+	want := "## Plan for \\*now\\*\n\n" +
+		"> said\n> \\- not a list\n\n" +
+		"- item\n  1\\. not a list\n  - sub\n\n  after sub\n\n  > q\n\n" +
+		"1. ten\n\n   ### inner\n\n" +
+		"end\n\n" +
+		"[A \\[b\\] \\*c\\*](<https://e.com/x_(1) y>)\n\n" +
+		"[\\_Never\\_](https://youtu.be/dQw4w9WgXcQ)\n\n" +
+		"![\\*a\\*](<https://e.com/a b.png>)\n\n" +
+		"[Sub \\[page\\]](leaflet://page/P1)\n"
+	if got != want {
+		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}
 }

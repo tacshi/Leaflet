@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -56,8 +57,13 @@ type App struct {
 	early    []func()
 
 	settings store.Settings
-	session  store.Session
-	online   bool
+	// sttSent orders the speech settings sent to the server, one at a
+	// time, and sttLatest numbers the last change: a send overtaken by a
+	// later one is left out, so the server ends with the last.
+	sttSent   sync.Mutex
+	sttLatest atomic.Int64
+	session   store.Session
+	online    bool
 
 	// What the views show, reloaded as the store changes.
 	pages     []store.Page
@@ -133,7 +139,10 @@ type App struct {
 	// downloadFails when those that failed to last did.
 	downloads     map[string]bool
 	downloadFails map[string]time.Time
-	embeds        map[string]*mygo.WebView
+	// fetchingCopy is set while what a copy of a page needs downloads
+	// (copyable).
+	fetchingCopy bool
+	embeds       map[string]*mygo.WebView
 	// embedSrc is the page each embed's web view last loaded, and
 	// embedSizes how tall its content said it is, once it has drawn;
 	// embedZoomed the diagrams zoomed in.
@@ -320,7 +329,15 @@ func (a *App) start() error {
 	if a.backend.Configured() {
 		user = a.backend.RestoreSession()
 	}
-	if _, err := st.LoadSession(user); err != nil {
+	_, err = st.LoadSession(user)
+	if errors.Is(err, store.ErrUnsynced) {
+		// Signed in as another account, and the app quit before the user
+		// agreed to lose the changes of the one whose pages this device
+		// keeps: they stay, and the other account signs in again to ask.
+		a.backend.SignOut()
+		_, err = st.LoadSession(nil)
+	}
+	if err != nil {
 		return err
 	}
 	a.session = st.Session()
@@ -357,8 +374,10 @@ func (a *App) start() error {
 	a.sync.OnPageContent = func(pageID string) {
 		a.update(func() { a.externalContent(pageID) })
 	}
-	a.sync.Offline = func() bool { return a.settings.WorkOffline }
-	a.sync.KeepAudio = func() string { return a.settings.KeepAudioOnDevice }
+	// Sync asks from its own goroutine: the stored settings, which the
+	// main thread's a.settings is not safe to read from.
+	a.sync.Offline = func() bool { return st.Settings().WorkOffline }
+	a.sync.KeepAudio = func() string { return st.Settings().KeepAudioOnDevice }
 	a.startInvites()
 	a.rec.Blobs = a.sync
 	a.startICloud()
@@ -784,6 +803,8 @@ func (a *App) follow() {
 // openPage shows a page.
 func (a *App) openPage(id string) {
 	if a.route.Kind == "page" && a.route.ID == id {
+		// Open already, as from a conflict in Settings: it shows.
+		a.settingsOpen = false
 		return
 	}
 	// Show where it is in the sidebar.
@@ -864,10 +885,16 @@ func (a *App) closePage() bool {
 	return true
 }
 
-// discardPage closes the open page, saved or not.
+// discardPage closes the open page, saved or not. What was started on it,
+// a comment or a prompt not sent yet and the dialogs changing its blocks,
+// goes with it: they would act on the page opened next.
 func (a *App) discardPage() {
 	a.sync.SetOpen(a.page.id, false)
 	a.page = nil
+	d := &a.dialogs
+	d.newComment, d.inline = nil, nil
+	d.chartOpen, d.chartEditor = false, nil
+	d.embedOpen, d.linkOpen, d.sourceOpen = false, false, false
 	a.dropEmbeds()
 	a.dropVideos()
 	dropPlayers()
@@ -970,7 +997,15 @@ func (a *App) saveTitle() bool {
 	if ps == nil {
 		return true
 	}
-	if p := a.pageByID(ps.id); p != nil && p.Title != ps.title && a.canEdit(ps.id) {
+	p := a.pageByID(ps.id)
+	if p == nil {
+		// Deleted elsewhere as it was typed: the title is kept for
+		// restoring the page to bring back.
+		if q, err := a.st.Page(ps.id); err == nil {
+			p = &q
+		}
+	}
+	if p != nil && p.Title != ps.title && a.st.CanEdit(*p) {
 		if err := a.st.RenamePage(ps.id, ps.title); err != nil {
 			a.toast(locales.AppErrorRename(err.Error()))
 			return false

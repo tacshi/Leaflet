@@ -251,9 +251,9 @@ func (e *Editor) indentCode(n *doc.Node, out bool) {
 		unit = []rune("\t")
 	}
 	a, b := e.ordered()
-	e.pushUndo(false)
-	e.coalescing = false
 	if !out && a.Off == b.Off {
+		e.pushUndo(false)
+		e.coalescing = false
 		n.SetDelta(doc.Delta{{Text: string(runes[:a.Off]) + string(unit) + string(runes[a.Off:])}})
 		e.invalidate(n.ID)
 		at := a.Off + len(unit)
@@ -287,9 +287,13 @@ func (e *Editor) indentCode(n *doc.Node, out bool) {
 			edits = append(edits, edit{s, k, 0})
 		}
 	}
+	// Outdenting lines with no indent changes nothing, so it makes no
+	// step of undo, and keeps the steps of redo.
 	if len(edits) == 0 {
 		return
 	}
+	e.pushUndo(false)
+	e.coalescing = false
 	moved := func(x int) int {
 		y := x
 		for _, ed := range edits {

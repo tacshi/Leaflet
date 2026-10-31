@@ -556,7 +556,15 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 				if jump.Clicked() {
 					ps.editor.PlaceCaret(t.Root.BlockID, 0)
 				}
+				// Who may change the thread, as the server allows: its
+				// author, or someone who may edit the page. Another's
+				// resolve would never go up.
+				root := t.Root
+				mayResolve := a.canEdit(ps.id) || root.AuthorKind == "user" && (root.AuthorID == "" || root.AuthorID == a.session.UserID)
 				tools(c, func() {
+					if !mayResolve {
+						return
+					}
 					if t.Root.Resolved {
 						if iconButton(c, "reopen", "rotate-ccw", locales.PanelReopen()).Clicked() {
 							if err := a.st.SetResolved(t.Root.ID, false); err != nil {

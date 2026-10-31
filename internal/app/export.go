@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
@@ -65,7 +66,17 @@ func (a *App) writeExport(file string, allFolders []store.Folder, allFiles []sto
 		return 0, err
 	}
 	localPath, readFile := ownFiles(a.st.Dir, allFiles)
-	err = exportZip(f, pages, folders, a.st.Content, localPath, readFile)
+	// Recordings' audio goes in files/ too, from a folder of the export's
+	// own that goes once the zip is written.
+	audio, err := os.MkdirTemp(a.st.Dir, "export-")
+	if err != nil {
+		_ = f.Close()
+		_ = os.Remove(file)
+		return 0, err
+	}
+	defer func() { _ = os.RemoveAll(audio) }()
+	content := func(id string) *doc.Content { return a.withAudio(a.withTranscripts(a.st.Content(id)), audio) }
+	err = exportZip(f, pages, folders, content, localPath, readFile)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -75,6 +86,106 @@ func (a *App) writeExport(file string, allFolders []store.Folder, allFiles []sto
 		return 0, err
 	}
 	return missing, nil
+}
+
+// withTranscripts is a page's content to export: a copy, each recording's
+// transcript after its block as lines of text, as Insert transcript puts
+// them. The block alone names the recording, and its words are the
+// recording's, kept apart from the page.
+func (a *App) withTranscripts(c *doc.Content) *doc.Content {
+	if c == nil {
+		return nil
+	}
+	c = c.Copy()
+	var recs []*doc.Node
+	c.Walk(func(n, _ *doc.Node) {
+		if n.Type == "recording" {
+			recs = append(recs, n)
+		}
+	})
+	for _, n := range recs {
+		rec, err := a.st.Recording(n.Str("recording_id"))
+		if err != nil {
+			continue
+		}
+		var lines []*doc.Node
+		for _, s := range recording.Tidy(rec.Transcript) {
+			l := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
+			l.SetDelta(doc.Delta{{Text: fmtDuration(time.Duration(s.StartMs)*time.Millisecond) + "  ", Attrs: doc.Attrs{Bold: true}}, {Text: s.Text}})
+			lines = append(lines, l)
+		}
+		if len(lines) > 0 {
+			_ = c.Insert(doc.Position{After: n.ID}, lines...)
+		}
+	}
+	return c
+}
+
+// withAudio is withTranscripts for a zip: each recording's audio follows
+// its block as a file, named for the recording, which the zip takes into
+// files/. Audio not on this device downloads, into dir; a recording whose
+// audio can't come has its block and transcript alone.
+func (a *App) withAudio(c *doc.Content, dir string) *doc.Content {
+	if c == nil || a.rec == nil {
+		return c
+	}
+	var recs []*doc.Node
+	c.Walk(func(n, _ *doc.Node) {
+		if n.Type == "recording" {
+			recs = append(recs, n)
+		}
+	})
+	for _, n := range recs {
+		rec, err := a.st.Recording(n.Str("recording_id"))
+		if err != nil {
+			continue
+		}
+		title := n.Str("title")
+		if strings.TrimSpace(title) == "" {
+			title = locales.ExportRecording()
+		}
+		name := safeName(title) + ".wav"
+		// A folder each, so recordings of one title keep their names.
+		path := filepath.Join(dir, rec.ID, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			continue
+		}
+		if _, err := os.Stat(rec.LocalPath); rec.LocalPath != "" && err == nil {
+			// The audio as it is, under the recording's name, without
+			// copying it: a link where the folder allows one.
+			if os.Link(rec.LocalPath, path) != nil && copyAudio(rec.LocalPath, path) != nil {
+				continue
+			}
+		} else {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			data, err := a.rec.Audio(ctx, rec)
+			cancel()
+			if err != nil || os.WriteFile(path, data, 0o600) != nil {
+				continue
+			}
+		}
+		file := &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{"url": "file://" + path, "name": name}}
+		_ = c.Insert(doc.Position{After: n.ID}, file)
+	}
+	return c
+}
+
+// copyAudio copies a recording's audio to path.
+func copyAudio(from, path string) error {
+	in, err := os.Open(from) // #nosec G304 -- a recording's audio in the app's own folder.
+	if err != nil {
+		return err
+	}
+	defer func() { _ = in.Close() }()
+	out, err := os.Create(path) // #nosec G304 -- a file in the export's own folder.
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		_ = out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // ownFiles returns where each of files is on this device ("" when it is
@@ -209,7 +320,7 @@ func exportZip(w io.Writer, pages []store.Page, folders map[string]string, conte
 				}
 				files[src] = name
 			}
-			md = strings.ReplaceAll(md, "("+src+")", "("+rel(name)+")")
+			md = strings.ReplaceAll(md, "("+doc.LinkDestination(src)+")", "("+rel(name)+")")
 		})
 		if fail != nil {
 			return fail

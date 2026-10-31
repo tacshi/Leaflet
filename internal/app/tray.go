@@ -96,6 +96,11 @@ func (a *App) showWindow() {
 // when it began.
 func (a *App) newRecordingPage() {
 	a.showWindow()
+	// The open page saves first: one whose edits can't be saved stays
+	// open, and the recording would go into a page not shown.
+	if !a.flush() {
+		return
+	}
 	p, err := a.st.CreatePage(store.NewPageOptions{Title: locales.RecBlockTitle(time.Now())})
 	if err != nil {
 		a.toast(locales.AppErrorCreatePage(err.Error()))

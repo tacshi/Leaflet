@@ -43,7 +43,12 @@ func AlertTone(line string) (string, bool) {
 	return "", false
 }
 
-// CalloutMarkdown writes a callout as a GitHub alert.
+// CalloutMarkdown writes a callout as a GitHub alert, each line of its
+// text escaped where it would start another block inside the quote.
 func CalloutMarkdown(n *Node) string {
-	return CalloutAlert(n.Str("tone")) + "\n> " + strings.ReplaceAll(n.Delta().ToMarkdown(), "\n", "\n> ")
+	lines := strings.Split(n.Delta().ReadableMarkdown(), "\n")
+	for i, l := range lines {
+		lines[i] = strings.TrimRight("> "+EscapeBlockStart(l), " ")
+	}
+	return CalloutAlert(n.Str("tone")) + "\n" + strings.Join(lines, "\n")
 }

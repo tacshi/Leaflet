@@ -49,7 +49,8 @@ func (s *Store) MoveSpace(from, to string) error {
 // whole, as stored now, in one transaction: sending everything again
 // takes a while, and a change made meanwhile, as a deletion, goes up with
 // it, not under the copy read before. A row that is gone has nothing to
-// send.
+// send. A row with a change of some columns still queued goes as stored
+// now too, but still as a change of only those (requeueRow).
 func (s *Store) Requeue(table, id string) error {
 	pageID := ""
 	err := s.inTx(func(tx *sql.Tx) error {
@@ -60,7 +61,7 @@ func (s *Store) Requeue(table, id string) error {
 				return err
 			}
 			pageID = p.ID
-			if err := queue(tx, "pages", p.ID, PageToRemote(p), "", p.ID); err != nil {
+			if err := requeueRow(tx, "pages", p.ID, PageToRemote(p), p.ID); err != nil {
 				return err
 			}
 			return queue(tx, "page_content", p.ID, map[string]any{"page_id": p.ID}, "page from this device", p.ID)
@@ -69,14 +70,14 @@ func (s *Store) Requeue(table, id string) error {
 			if err != nil {
 				return err
 			}
-			return queue(tx, "folders", f.ID, FolderToRemote(f), "", "")
+			return requeueRow(tx, "folders", f.ID, FolderToRemote(f), "")
 		case "comments":
 			c, err := scanComment(tx.QueryRow(`SELECT `+commentCols+` FROM comments WHERE id = ?`, id))
 			if err != nil {
 				return err
 			}
 			pageID = c.PageID
-			return queue(tx, "comments", c.ID, CommentToRemote(c), "", c.PageID)
+			return requeueRow(tx, "comments", c.ID, CommentToRemote(c), c.PageID)
 		}
 		return errors.New("store: no requeue of " + table)
 	})
@@ -87,6 +88,32 @@ func (s *Store) Requeue(table, id string) error {
 		s.Notify("outbox", pageID)
 	}
 	return err
+}
+
+// requeueRow queues a row to go up whole, unless a change of some of its
+// columns is still queued (ChangedKey): that change stays one of only
+// those columns, as stored now. Sent whole, it would go as newer than
+// every change to the row this device has seen, and undo one another
+// device made to its other columns, as a move held here while this
+// device's rename waits (sync's iCloud batches). Those columns went with
+// an earlier entry, or come with the row the server or the other devices
+// have.
+func requeueRow(tx *sql.Tx, entity, id string, row map[string]any, pageID string) error {
+	var queued string
+	switch err := tx.QueryRow(`SELECT payload FROM outbox WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, entity, id).Scan(&queued); {
+	case errors.Is(err, sql.ErrNoRows):
+	case err != nil:
+		return err
+	default:
+		var prev map[string]any
+		if err := json.Unmarshal([]byte(queued), &prev); err != nil {
+			return err
+		}
+		if cols, ok := prev[ChangedKey]; ok {
+			row[ChangedKey] = cols
+		}
+	}
+	return queue(tx, entity, id, row, "", pageID)
 }
 
 // RequeueFile queues a file to go up whole in space spaceID, as stored
@@ -215,7 +242,15 @@ func (s *Store) PutRemoteFile(r map[string]any) error {
 			return nil
 		}
 		stored = true
-		return putFile(tx, f)
+		if err := putFile(tx, f); err != nil || !f.DeletedAt.IsZero() {
+			return err
+		}
+		// A file that lives keeps its stored copy: its deletion here gave
+		// way to the server's row, as one the user may no longer delete
+		// (sync's pushRow), and the removal queued with it would take
+		// the copy the row still names.
+		_, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'storage_delete' AND entity_id = ?`, "files/"+f.ID)
+		return err
 	})
 	if err != nil {
 		return err

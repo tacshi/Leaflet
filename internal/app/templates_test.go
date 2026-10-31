@@ -1,8 +1,12 @@
 package app
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -591,5 +595,77 @@ func TestCopiesWaitForTheSave(t *testing.T) {
 	a.reloadAll()
 	if len(a.pages) != pages || len(a.templates) != templates {
 		t.Errorf("%d pages and %d templates, want %d and %d", len(a.pages), len(a.templates), pages, templates)
+	}
+}
+
+// A page whose file is only stored is duplicated once the file has come
+// to this device, the copy with a file of its own made from it; one whose
+// recording's audio is still uploading from where it was made is not
+// duplicated, and says why.
+func TestDuplicateBringsFilesFirst(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/storage/v1/object/authenticated/files/") {
+			_, _ = w.Write([]byte("%PDF"))
+			return
+		}
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(hs.Close)
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
+	a.sync = syncsvc.New(a.st, a.backend)
+	posted := make(chan func(), 4)
+	a.post = func(fn func()) { posted <- fn }
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip"})
+	f := store.File{ID: doc.NewRowID(), SpaceID: a.st.Session().SpaceID, PageID: p.ID, Name: "plan.pdf", MimeType: "application/pdf",
+		CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	f.StoragePath = f.SpaceID + "/" + f.ID + "/plan.pdf"
+	if err := a.st.PutFile(f); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.st.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{
+		{ID: "b1", Type: "file", Data: map[string]any{"name": f.Name, "file_id": f.ID}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	pages := func() int { all, _ := a.st.Pages(); return len(all) }
+	before := pages()
+	a.duplicatePage(*a.pageByID(p.ID))
+	if pages() != before || len(a.toasts) == 0 || a.toasts[len(a.toasts)-1].text != locales.TemplateFetchingFiles() {
+		t.Fatalf("copied before the file came: %d pages; toasts %+v", pages(), a.toasts)
+	}
+	select {
+	case fn := <-posted:
+		fn()
+	case <-time.After(5 * time.Second):
+		t.Fatal("the file never came")
+	}
+	if pages() != before+1 || a.page == nil || a.page.id == p.ID {
+		t.Fatalf("not copied once the file came: %d pages", pages())
+	}
+	cf, err := a.st.File(a.st.Content(a.page.id).Children[0].Str("file_id"))
+	if err != nil || cf.ID == f.ID {
+		t.Fatalf("the copy's file %+v, %v", cf, err)
+	}
+	if data, err := os.ReadFile(cf.LocalPath); err != nil || string(data) != "%PDF" {
+		t.Errorf("the copy's file here: %q, %v", data, err)
+	}
+
+	q, _ := a.st.CreatePage(store.NewPageOptions{Title: "Call"})
+	if _, err := a.st.CreateRecording(q.ID, "r1", "soniox", "m", "", "en"); err != nil {
+		t.Fatal(err)
+	}
+	recs, _ := a.st.Recordings()
+	if _, _, err := a.st.SaveContent(q.ID, doc.FromBlocks([]*doc.Node{
+		{ID: "r1", Type: "recording", Data: map[string]any{"recording_id": recs[0].ID}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	before = pages()
+	a.duplicatePage(*a.pageByID(q.ID))
+	if pages() != before || a.toasts[len(a.toasts)-1].text != locales.TemplateFilesUploading() {
+		t.Errorf("a recording still uploading: %d pages, want %d; toasts %+v", pages(), before, a.toasts)
 	}
 }

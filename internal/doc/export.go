@@ -11,109 +11,142 @@ import (
 func PageMarkdown(title string, c *Content, pageTitle func(id string) string) string {
 	var b strings.Builder
 	if title != "" {
-		b.WriteString("# " + title + "\n\n")
+		b.WriteString("# " + escapeText(title) + "\n\n")
 	}
+	// text writes rich text at an indent a line at a time, the first line
+	// after lead, a list item's marker, and the others after pad, the room
+	// it takes, so they stay in the block. A line that would start another
+	// block, as a line break then "- x" would a list, is escaped.
+	text := func(indent, lead, pad, md string) {
+		for i, l := range strings.Split(md, "\n") {
+			if i > 0 {
+				lead = pad
+			}
+			b.WriteString(strings.TrimRight(indent+lead+EscapeBlockStart(l), " ") + "\n")
+		}
+	}
+	// block writes Markdown that is already a block at an indent, every
+	// line of it, so a block nested under a list item stays in the item,
+	// and a blank line after it.
+	block := func(indent, md string) {
+		if md == "" {
+			return
+		}
+		for _, l := range strings.Split(md, "\n") {
+			if l != "" {
+				l = indent + l
+			}
+			b.WriteString(l + "\n")
+		}
+		b.WriteString("\n")
+	}
+	link := func(text, href string) string { return "[" + escapeText(text) + "](" + LinkDestination(href) + ")" }
 	// indent is the room before a block, nested under list items: as much
 	// as each item's marker takes, as CommonMark nests by ("1. " three).
 	var visit func(nodes []*Node, indent string)
 	visit = func(nodes []*Node, indent string) {
 		number := 0
-		inList := false
 		for _, n := range nodes {
 			marker := 2 // "- ", and a task's "- " before its box
-			text := n.Delta().ToMarkdown()
+			md := n.Delta().ReadableMarkdown()
 			if n.Type != "numbered_list" {
 				number = 0
 			}
-			// A toggle is a <details>, not a list item.
+			// A toggle is a <details>, not a list item. A block other than
+			// an item starts after a blank line, at any depth: right after
+			// an item, it would read as more of the item's text.
 			item := NestableTypes[n.Type] && n.Type != "toggle_list"
-			if indent == "" && inList && !item {
+			if out := b.String(); !item && strings.HasSuffix(out, "\n") && !strings.HasSuffix(out, "\n\n") {
 				b.WriteString("\n")
 			}
-			inList = item
 			switch n.Type {
 			case "paragraph":
-				lines := strings.Split(text, "\n")
-				for i, l := range lines {
-					lines[i] = EscapeBlockStart(l)
-				}
-				b.WriteString(indent + strings.Join(lines, "\n") + "\n\n")
+				text(indent, "", "", md)
+				b.WriteString("\n")
 			case "heading":
-				b.WriteString(strings.Repeat("#", min(max(n.Int("level", 1), 1), 6)) + " " + text + "\n\n")
+				// A heading is one line: a line break in it is a space.
+				hashes := strings.Repeat("#", min(max(n.Int("level", 1), 1), 6))
+				block(indent, hashes+" "+strings.ReplaceAll(md, "\n", " "))
 			case "bulleted_list":
-				b.WriteString(indent + "- " + text + "\n")
+				text(indent, "- ", "  ", md)
 			case "numbered_list":
 				number++
-				fmt.Fprintf(&b, "%s%d. %s\n", indent, number, text)
-				marker = len(strconv.Itoa(number)) + 2
+				lead := strconv.Itoa(number) + ". "
+				marker = len(lead)
+				text(indent, lead, strings.Repeat(" ", marker), md)
 			case "todo_list":
 				box := "[ ]"
 				if n.Bool("checked") {
 					box = "[x]"
 				}
-				b.WriteString(indent + "- " + box + " " + text + "\n")
+				text(indent, "- "+box+" ", "  ", md)
 			case "quote":
-				b.WriteString("> " + text + "\n\n")
+				text(indent, "> ", "> ", md)
+				b.WriteString("\n")
 			case "code":
-				b.WriteString(indent + strings.ReplaceAll(CodeMarkdown(n), "\n", "\n"+indent) + "\n\n")
+				block(indent, CodeMarkdown(n))
 			case "callout":
-				b.WriteString(CalloutMarkdown(n) + "\n\n")
+				block(indent, CalloutMarkdown(n))
 			case "toggle_list":
-				b.WriteString("<details>\n<summary>" + text + "</summary>\n\n")
-				visit(n.Children, "")
-				b.WriteString("</details>\n\n")
+				block(indent, "<details>\n<summary>"+md+"</summary>")
+				visit(n.Children, indent)
+				block(indent, "</details>")
 				continue
 			case "divider":
-				b.WriteString("---\n\n")
+				block(indent, "---")
 			case "image":
-				fmt.Fprintf(&b, "![%s](%s)\n\n", n.Str("alt"), n.Str("url"))
+				block(indent, "!"+link(n.Str("alt"), n.Str("url")))
 			case "table":
-				writeTable(&b, TableRows(n))
+				block(indent, tableMarkdown(ReadableTableRows(n)))
 			case "chart":
 				if t := n.Str("title"); t != "" {
-					b.WriteString("**" + t + "**\n\n")
+					block(indent, "**"+escapeText(t)+"**")
 				}
-				rows := [][]string{append([]string{""}, stringsOf(n.Data["labels"])...)}
+				var labels []string
+				for _, l := range stringsOf(n.Data["labels"]) {
+					labels = append(labels, escapeText(l))
+				}
+				rows := [][]string{append([]string{""}, labels...)}
 				for _, s := range listOf(n.Data["series"]) {
 					m := asMap(s)
-					row := []string{fmt.Sprint(m["name"])}
+					row := []string{escapeText(fmt.Sprint(m["name"]))}
 					for _, v := range listOf(m["values"]) {
 						f, _ := AsFloat(v)
 						row = append(row, trimFloat(f))
 					}
 					rows = append(rows, row)
 				}
-				writeTable(&b, rows)
+				block(indent, tableMarkdown(rows))
 				if cap := n.Str("caption"); cap != "" {
-					b.WriteString("*" + cap + "*\n\n")
+					block(indent, "*"+escapeText(cap)+"*")
 				}
 			case "embed":
 				title := n.Str("title")
 				if title == "" || strings.EqualFold(title, "interactive embed") {
-					b.WriteString("*Interactive embed*\n\n")
+					block(indent, "*Interactive embed*")
 				} else {
-					b.WriteString("*" + title + " (interactive embed)*\n\n")
+					block(indent, "*"+escapeText(title)+" (interactive embed)*")
 				}
 			case "video":
 				title := n.Str("title")
 				if title == "" {
 					title = "Video"
 				}
-				fmt.Fprintf(&b, "[%s](%s)\n\n", title, n.Str("url"))
+				block(indent, link(title, n.Str("url")))
 			case "math_equation":
-				b.WriteString("$$\n" + n.Str("formula") + "\n$$\n\n")
+				block(indent, "$$\n"+n.Str("formula")+"\n$$")
 			case "diagram":
-				b.WriteString(CodeMarkdown(&Node{Type: "code", Data: map[string]any{"language": "mermaid", "delta": Delta{{Text: n.Str("source")}}.JSON()}}) + "\n\n")
+				block(indent, CodeMarkdown(&Node{Type: "code", Data: map[string]any{"language": "mermaid", "delta": Delta{{Text: n.Str("source")}}.JSON()}}))
 			case "link_preview", "file":
-				fmt.Fprintf(&b, "[%s](%s)\n\n", cardTitle(n), n.Str("url"))
+				block(indent, link(cardTitle(n), n.Str("url")))
 			case "recording":
-				b.WriteString("*Recording: " + n.Str("title") + "*\n\n")
+				block(indent, "*Recording: "+escapeText(n.Str("title"))+"*")
 			case "subpage":
 				name := n.Str("page_id")
 				if pageTitle != nil {
 					name = pageTitle(name)
 				}
-				b.WriteString("[" + name + "](" + PageLink(n.Str("page_id")) + ")\n\n")
+				block(indent, link(name, PageLink(n.Str("page_id"))))
 			}
 			if n.Type != "table" && len(n.Children) > 0 {
 				visit(n.Children, indent+strings.Repeat(" ", marker))
@@ -124,29 +157,29 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
-func writeTable(b *strings.Builder, rows [][]string) {
+// tableMarkdown writes rows as a GitHub table, the first its header.
+func tableMarkdown(rows [][]string) string {
 	if len(rows) == 0 {
-		return
+		return ""
 	}
 	cols := 0
 	for _, r := range rows {
 		cols = max(cols, len(r))
 	}
-	line := func(r []string) {
+	line := func(r []string) string {
 		cells := make([]string, cols)
 		for i := range cells {
 			if i < len(r) {
 				cells[i] = strings.ReplaceAll(r[i], "|", `\|`)
 			}
 		}
-		b.WriteString("| " + strings.Join(cells, " | ") + " |\n")
+		return "| " + strings.Join(cells, " | ") + " |"
 	}
-	line(rows[0])
-	b.WriteString("|" + strings.Repeat(" --- |", cols) + "\n")
+	lines := []string{line(rows[0]), "|" + strings.Repeat(" --- |", cols)}
 	for _, r := range rows[1:] {
-		line(r)
+		lines = append(lines, line(r))
 	}
-	b.WriteString("\n")
+	return strings.Join(lines, "\n")
 }
 
 func listOf(v any) []any {

@@ -116,7 +116,8 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 			img = spec
 		}
 		url, _ := img["url"].(string)
-		if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		// A scheme is the same in any case, as the server takes it.
+		if scheme := strings.ToLower(url); !strings.HasPrefix(scheme, "http://") && !strings.HasPrefix(scheme, "https://") {
 			return nil, toolErr("An image block needs image.url (http or https).")
 		}
 		alt, _ := img["alt"].(string)
@@ -374,7 +375,13 @@ func TableSize(n *Node) (rows, cols int) {
 }
 
 // TableRows rebuilds the rows of a stored table, as inline markdown.
-func TableRows(n *Node) [][]string {
+func TableRows(n *Node) [][]string { return tableRows(n, Delta.ToMarkdown) }
+
+// ReadableTableRows is TableRows for people to read, its cells written as
+// ReadableMarkdown writes text.
+func ReadableTableRows(n *Node) [][]string { return tableRows(n, Delta.ReadableMarkdown) }
+
+func tableRows(n *Node, markdown func(Delta) string) [][]string {
 	rows, cols := TableSize(n)
 	grid := make([][]string, rows)
 	for i := range grid {
@@ -388,7 +395,7 @@ func TableRows(n *Node) [][]string {
 		}
 		var parts []string
 		for _, k := range cell.Children {
-			parts = append(parts, k.Delta().ToMarkdown())
+			parts = append(parts, markdown(k.Delta()))
 		}
 		grid[r][c] = strings.Join(parts, " ")
 	}

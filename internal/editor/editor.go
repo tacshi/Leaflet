@@ -561,6 +561,7 @@ func (e *Editor) changed() {
 // keeping the caret where it can, and the undo steps: going back one
 // takes back what it changed on the page as it is, keeping the change.
 func (e *Editor) Replace(c *doc.Content) {
+	l := e.liftComposition()
 	before := e.Content.Copy()
 	mark(&e.undo, before)
 	mark(&e.redo, before)
@@ -568,7 +569,6 @@ func (e *Editor) Replace(c *doc.Content) {
 	e.Content.Blocks, e.Content.Deleted = c.Blocks, c.Deleted
 	e.order = nil
 	e.layouts = map[string]*blockLayout{}
-	e.marked = false
 	e.coalescing = false
 	if len(e.Content.Children) == 0 {
 		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
@@ -576,11 +576,13 @@ func (e *Editor) Replace(c *doc.Content) {
 		e.Content.Children = []*doc.Node{p}
 	}
 	e.Select(e.anchor, e.focus)
+	e.putBack(l)
 	e.services.Invalidate()
 }
 
 // ApplyOps applies an agent run's ops as one undo step.
 func (e *Editor) ApplyOps(ops []doc.Op) error {
+	l := e.liftComposition()
 	e.pushUndo(false)
 	e.coalescing = false
 	var first error
@@ -590,13 +592,13 @@ func (e *Editor) ApplyOps(ops []doc.Op) error {
 		}
 	}
 	e.layouts = map[string]*blockLayout{}
-	e.marked = false
 	if len(e.Content.Children) == 0 {
 		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
 		p.SetDelta(nil)
 		e.Content.Children = []*doc.Node{p}
 	}
 	e.Select(e.anchor, e.focus)
+	e.putBack(l)
 	e.changed()
 	return first
 }
@@ -606,6 +608,7 @@ func (e *Editor) ApplyOps(ops []doc.Op) error {
 // top: past an edit of the user's since, the op is a change from outside,
 // which undoing that edit keeps.
 func (e *Editor) ApplyOp(o doc.Op, newStep bool) error {
+	l := e.liftComposition()
 	if newStep {
 		e.pushUndo(false)
 		e.coalescing = false
@@ -622,13 +625,13 @@ func (e *Editor) ApplyOp(o doc.Op, newStep bool) error {
 	}
 	err := e.Content.Apply(o)
 	e.layouts = map[string]*blockLayout{}
-	e.marked = false
 	if len(e.Content.Children) == 0 {
 		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
 		p.SetDelta(nil)
 		e.Content.Children = []*doc.Node{p}
 	}
 	e.Select(e.anchor, e.focus)
+	e.putBack(l)
 	e.changed()
 	return err
 }

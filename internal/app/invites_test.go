@@ -219,6 +219,7 @@ func TestShareFailure(t *testing.T) {
 		{&remote.Error{Status: 400, Message: "invalid_email"}, locales.DialogShareInvalidEmail()},
 		{&remote.Error{Status: 400, Message: "cannot_share_with_self"}, locales.DialogShareWithSelf()},
 		{fmt.Errorf("share: %w", &remote.Error{Status: 400, Message: "invalid_email"}), locales.DialogShareInvalidEmail()},
+		{&remote.Error{Status: 400, Message: "inherited_share"}, locales.DialogShareInherited()},
 		{&remote.Error{Status: 500, Message: "boom"}, "boom"},
 	} {
 		if got := shareFailure(c.err); got != c.want {

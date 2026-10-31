@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	gosync "sync"
 	"testing"
@@ -758,14 +761,14 @@ func TestCommentsPushAsUpdates(t *testing.T) {
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 	ctx := context.Background()
 
-	done, err := svc.pushComment(ctx, "u1", map[string]any{"id": "theirs", "author_id": "u2", "body": "Look", "resolved": true, "deleted_at": nil})
+	done, err := svc.pushComment(ctx, "u1", store.OutboxEntry{Entity: "comments", EntityID: "theirs"}, map[string]any{"id": "theirs", "author_id": "u2", "body": "Look", "resolved": true, "deleted_at": nil})
 	if err != nil || !done {
 		t.Fatalf("done %v, %v", done, err)
 	}
 	if len(patched) != 1 || patched["resolved"] != true {
 		t.Errorf("sent %v", patched)
 	}
-	done, err = svc.pushComment(ctx, "u1", map[string]any{"id": "new", "body": "Mine", "resolved": false})
+	done, err = svc.pushComment(ctx, "u1", store.OutboxEntry{Entity: "comments", EntityID: "new"}, map[string]any{"id": "new", "body": "Mine", "resolved": false})
 	if err != nil || !done {
 		t.Fatalf("done %v, %v", done, err)
 	}
@@ -775,7 +778,7 @@ func TestCommentsPushAsUpdates(t *testing.T) {
 	// A resolve made here, of a comment deleted elsewhere, sends only the
 	// resolve, not this device's deleted_at.
 	patched = nil
-	done, err = svc.pushComment(ctx, "u1", map[string]any{"id": "theirs", "author_id": "u1", "body": "Look", "resolved": true,
+	done, err = svc.pushComment(ctx, "u1", store.OutboxEntry{Entity: "comments", EntityID: "theirs"}, map[string]any{"id": "theirs", "author_id": "u1", "body": "Look", "resolved": true,
 		"deleted_at": nil, store.ChangedKey: []any{"resolved", "updated_at"}})
 	if err != nil || !done {
 		t.Fatalf("done %v, %v", done, err)
@@ -1616,9 +1619,10 @@ func TestUploadWaitsForTheRecordingsPath(t *testing.T) {
 	}
 }
 
-// A copied page's file and recording that this device has only stored go
-// up as the copy's own, from the originals' stored copies; a copy whose
-// original is gone has nothing to send.
+// A copy of a file and a recording queued by an earlier version, from
+// what this device had only stored, goes up as the copy's own, from the
+// originals' stored copies; a copy whose original is gone has nothing to
+// send.
 func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
@@ -1650,12 +1654,12 @@ func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 	})); err != nil {
 		t.Fatal(err)
 	}
-	cp, err := st.CopyPage(p.ID, store.CopyOptions{Title: "Meeting copy"})
+	cp, err := st.CreatePage(store.NewPageOptions{Title: "Meeting copy"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	blocks := st.Content(cp.ID).Children
-	recID, fileID, goneID := blocks[0].Str("recording_id"), blocks[1].Str("file_id"), blocks[2].Str("file_id")
+	recID := oldRecordingCopy(t, st, cp.ID, r).ID
+	fileID, goneID := oldFileCopy(t, st, cp.ID, f).ID, oldFileCopy(t, st, cp.ID, gone).ID
 
 	var mu gosync.Mutex
 	uploaded := map[string]string{}
@@ -1706,8 +1710,8 @@ func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 	}
 }
 
-// A file deleted while a copy of it waits to go up from it stays in
-// Storage until the copy has gone up.
+// A file deleted while a copy of it an earlier version queued waits to go
+// up from it stays in Storage until the copy has gone up.
 func TestDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
@@ -1726,11 +1730,11 @@ func TestDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	})); err != nil {
 		t.Fatal(err)
 	}
-	cp, err := st.CopyPage(p.ID, store.CopyOptions{Title: "Meeting copy"})
+	cp, err := st.CreatePage(store.NewPageOptions{Title: "Meeting copy"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	fileID := st.Content(cp.ID).Children[0].Str("file_id")
+	fileID := oldFileCopy(t, st, cp.ID, f).ID
 	if err := st.DeleteFile(f); err != nil {
 		t.Fatal(err)
 	}
@@ -1887,5 +1891,313 @@ func TestRefreshRefusesContentThatIsNotAPage(t *testing.T) {
 		if got := textOf(st.Content(p.ID), "a"); got != "important text" {
 			t.Errorf("%s: page now %q", content, got)
 		}
+	}
+}
+
+// dequeueAll empties the outbox, as after a push the server took whole.
+func dequeueAll(t *testing.T, st *store.Store) {
+	t.Helper()
+	entries, err := st.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// refusing is a server that refuses every insert and upsert, as row-level
+// security does a row the user may not change, changes nothing on a
+// PATCH, and shows rows by table for a GET. It records the requests.
+type refusing struct {
+	mu       gosync.Mutex
+	rows     map[string]map[string]any
+	patch    func(table string, r *http.Request) []map[string]any
+	requests []string
+}
+
+func (s *refusing) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requests = append(s.requests, r.Method+" "+r.URL.Path)
+	table := strings.TrimPrefix(r.URL.Path, "/rest/v1/")
+	out := []map[string]any{}
+	switch r.Method {
+	case "POST":
+		if strings.HasPrefix(r.URL.Path, "/rest/v1/") {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"42501","message":"new row violates row-level security policy"}`))
+			return
+		}
+	case "PATCH":
+		if s.patch != nil {
+			out = s.patch(table, r)
+		}
+	case "GET":
+		if row := s.rows[table]; row != nil {
+			out = append(out, row)
+		}
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// A recording a quit left transcribing, settled at startup, does not go up
+// over the transcript the server finished meanwhile: it takes the
+// server's. One still transcribing there is settled there too, and one
+// the server does not have goes up whole.
+func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := st.CreateRecording(p.ID, "b1", "soniox", "", "", "auto")
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status, x.AudioPath = "transcribing", "u1/"+r.ID+".wav" }); err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	settle := func() {
+		t.Helper()
+		if _, err := st.SettleRecording(r.ID, "transcribing", func(x *store.Recording) { x.Status, x.Error = "failed", "quit" }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settle()
+
+	finished := store.RecordingToRemote(r)
+	finished["status"], finished["transcript"] = "ready", []map[string]any{{"start_ms": 0, "end_ms": 900, "text": "Hello"}}
+	finished["audio_path"], finished["updated_at"] = "u1/"+r.ID+".wav", time.Now().UTC().Format(time.RFC3339Nano)
+	var patched []string
+	srv := &refusing{rows: map[string]map[string]any{"recordings": finished}}
+	srv.patch = func(_ string, r *http.Request) []map[string]any {
+		patched = append(patched, r.URL.Query().Get("status"))
+		return nil // no longer transcribing there
+	}
+	hs := httptest.NewServer(srv)
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Recording(r.ID)
+	if got.Status != "ready" || len(got.Transcript) != 1 || got.Transcript[0].Text != "Hello" || st.PendingCount() != 0 {
+		t.Errorf("recording %s %v, %d queued", got.Status, got.Transcript, st.PendingCount())
+	}
+	if len(patched) != 1 || patched[0] != "eq.transcribing" || slices.Contains(srv.requests, "POST /rest/v1/recordings") {
+		t.Errorf("patched where %v; requests %v", patched, srv.requests)
+	}
+
+	// Still transcribing there: it is settled there too.
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status = "transcribing" }); err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	settle()
+	srv.patch = func(string, *http.Request) []map[string]any { return []map[string]any{{"id": r.ID}} }
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Recording(r.ID); got.Status != "failed" || st.PendingCount() != 0 {
+		t.Errorf("recording %s, %d queued", got.Status, st.PendingCount())
+	}
+}
+
+// A recording's change the server refuses, as on a page the user may no
+// longer edit, gives way to the server's recording, as a page's does.
+func TestRefusedRecordingTakesTheServers(t *testing.T) {
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, _ := st.CreateRecording(p.ID, "b1", "", "", "", "auto")
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Status = "failed" }); err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	if _, err := st.UpdateRecording(r.ID, func(x *store.Recording) { x.Transcript = []store.Segment{{Text: "Mine"}} }); err != nil {
+		t.Fatal(err)
+	}
+	server := store.RecordingToRemote(r)
+	server["status"], server["transcript"] = "ready", []map[string]any{{"text": "Theirs"}}
+	server["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	hs := httptest.NewServer(&refusing{rows: map[string]map[string]any{"recordings": server}})
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Recording(r.ID)
+	if st.PendingCount() != 0 || got.Status != "ready" || len(got.Transcript) != 1 || got.Transcript[0].Text != "Theirs" {
+		t.Errorf("%d queued; recording %s %v", st.PendingCount(), got.Status, got.Transcript)
+	}
+}
+
+// A change to someone else's comment the server refuses, as resolving it
+// on a page shared to view, gives way to the server's comment: waiting, it
+// would keep the author's later edits from this device.
+func TestRefusedCommentTakesTheServers(t *testing.T) {
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	st := openStore(t)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	theirs := map[string]any{"id": "00000000-0000-0000-0000-0000000000c1", "page_id": "00000000-0000-0000-0000-0000000000a1",
+		"block_id": "b1", "author_id": "u2", "author_kind": "user", "body": "Look", "resolved": false, "created_at": now, "updated_at": now}
+	if err := st.PutRemoteComment(theirs, "Ann"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetResolved(store.S(theirs, "id"), true); err != nil {
+		t.Fatal(err)
+	}
+	edited := maps.Clone(theirs)
+	edited["body"] = "Look again"
+	hs := httptest.NewServer(&refusing{rows: map[string]map[string]any{"comments": edited}})
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := st.Comment(store.S(theirs, "id"))
+	if st.PendingCount() != 0 || got.Body != "Look again" || got.Resolved {
+		t.Errorf("%d queued; comment %q resolved %v", st.PendingCount(), got.Body, got.Resolved)
+	}
+}
+
+// A file's deletion the server refuses gives way to the server's file,
+// which keeps its stored copy: the removal queued with the deletion does
+// not take it.
+func TestRefusedFileDeletionKeepsItsStoredCopy(t *testing.T) {
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	st := openStore(t)
+	src := t.TempDir() + "/notes.txt"
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	if err := st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	server := store.FileToRemote(f)
+	server["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano)
+	srv := &refusing{rows: map[string]map[string]any{"files": server}}
+	hs := httptest.NewServer(srv)
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(srv.requests, "DELETE /storage/v1/object/files") || st.PendingCount() != 0 {
+		t.Errorf("requests %v; %d queued", srv.requests, st.PendingCount())
+	}
+	if got, _ := st.File(f.ID); !got.DeletedAt.IsZero() {
+		t.Error("the file is still deleted here")
+	}
+}
+
+// oldFileCopy makes on st a copy of a stored file as versions before
+// copies were made only from what is on the device did: its upload reads
+// the original's stored contents later (from_path), and such entries
+// still queued go up so. It returns the copy.
+func oldFileCopy(t *testing.T, st *store.Store, pageID string, orig store.File) store.File {
+	t.Helper()
+	now := time.Now()
+	c := store.File{ID: doc.NewRowID(), SpaceID: st.Session().SpaceID, PageID: pageID, Name: orig.Name, MimeType: orig.MimeType,
+		CreatedAt: now, UpdatedAt: now}
+	c.StoragePath = c.SpaceID + "/" + c.ID + "/" + c.Name
+	if err := st.PutFile(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Queue("files", c.ID, store.FileToRemote(c), "new file", pageID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Queue("storage", "files/"+c.ID, map[string]any{"bucket": "files", "path": c.StoragePath, "local_path": "",
+		"content_type": orig.MimeType, "file_id": c.ID, "from_path": orig.StoragePath}, "file waiting to upload", pageID); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// oldRecordingCopy is oldFileCopy for a recording whose audio is stored:
+// the copy plays the original's until its own has gone up.
+func oldRecordingCopy(t *testing.T, st *store.Store, pageID string, orig store.Recording) store.Recording {
+	t.Helper()
+	c := orig
+	c.ID, c.PageID, c.LocalPath, c.UpdatedAt = doc.NewRowID(), pageID, "", time.Now()
+	if err := st.PutRecording(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Queue("recordings", c.ID, store.RecordingToRemote(c), "", pageID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Queue("storage", "recordings/"+c.ID, map[string]any{"bucket": "recordings", "from_path": orig.AudioPath,
+		"content_type": "audio/wav", "recording_id": c.ID}, "audio waiting to upload", pageID); err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+// A file's row goes up after its contents, in the same pass: a device
+// that pulls the row can fetch them, and never takes a file still
+// uploading for one that is gone.
+func TestFileRowGoesAfterItsContents(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Trip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "map.png")
+	if err := os.WriteFile(src, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", p.ID, "image/png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var order []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case req.URL.Path == "/storage/v1/object/files/"+f.StoragePath && req.Method == http.MethodPost:
+			order = append(order, "contents")
+		case req.URL.Path == "/rest/v1/files" && req.Method == http.MethodPost:
+			order = append(order, "row")
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	was := online
+	online = func() bool { return true }
+	t.Cleanup(func() { online = was })
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(order, ",") != "contents,row" {
+		t.Errorf("sent %v", order)
+	}
+	if st.HasPending("files", f.ID) || st.HasPending("storage", "files/"+f.ID) {
+		t.Error("the file still waits after the pass")
 	}
 }

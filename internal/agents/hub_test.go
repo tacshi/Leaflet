@@ -250,6 +250,164 @@ func TestRunOverAChangeKeepsIt(t *testing.T) {
 	}
 }
 
+// openHost is a host with one page open, in ed.
+type openHost struct {
+	stubHost
+	ed *editor.Editor
+}
+
+func (h openHost) Editor(string) *editor.Editor { return h.ed }
+
+// openPage is a stored page, open in an editor.
+func openPage(t *testing.T, st *store.Store) (store.Page, *editor.Editor) {
+	t.Helper()
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.SaveContent(p.ID, page()); err != nil {
+		t.Fatal(err)
+	}
+	return p, editor.New(st.Content(p.ID), nil)
+}
+
+// A local run on an open page keeps the page as it was in history when
+// its first op reaches the page, and the chat keeps its ops as they come:
+// the editor saves them before the run ends, and an app that quits then
+// leaves a run that can still be undone and a page that can go back. The
+// run's end keeps no second snapshot.
+func TestRunOnAnOpenPageKeepsItsUndoAsItGoes(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	h := NewHub(st, nil, openHost{ed: ed})
+	s := h.Session(p.ID)
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	run := &Run{ID: "r1", AgentName: "Ollama", Instruction: "Add a line", Status: "running"}
+	reply := &Message{Text: "Reading the page…", Pending: true, RunID: run.ID}
+	s.Runs = append(s.Runs, run)
+	s.Messages = append(s.Messages, &Message{Mine: true, Text: "Add a line"}, reply)
+	o := RunOptions{Surface: "sidebar", Instruction: "Add a line", Reply: reply}
+	before := ed.Content.Copy()
+	d := h.newDelivery(p.ID, run, local)
+	h.arrived(s, run, local, before, d, o, insertAfter("p1", "x1", "one"), "Added a line")
+
+	if ed.Content.Find("x1") == nil {
+		t.Fatal("the op is not on the open page")
+	}
+	history, _ := st.History(p.ID)
+	if len(history) != 1 || history[0].Reason != "agent_run" || history[0].AIJobID != "r1" {
+		t.Fatalf("history %+v", history)
+	}
+	if kept := doc.MustDecode(history[0].Content); kept.Find("x1") != nil {
+		t.Error("the snapshot has the run's op")
+	}
+	// The app quits here, mid-run.
+	restored := NewHub(st, nil, stubHost{}).Session(p.ID).Run("r1")
+	if restored == nil || len(restored.Ops) != 1 || len(restored.Edits) != 1 || restored.Status != "failed" {
+		t.Fatalf("restored run %+v", restored)
+	}
+
+	h.finish(s, run, Request{PageID: p.ID, Surface: "sidebar", Instruction: "Add a line"}, local, before, d, Result{Reply: "Added a line."}, nil, o)
+	if history, _ := st.History(p.ID); len(history) != 1 {
+		t.Errorf("%d snapshots after the run", len(history))
+	}
+}
+
+// An agent op that replaces or deletes a block the user changed on the
+// open page since the agent read it keeps the page in history first
+// (reason conflict), as on a closed page; ops on blocks as the agent read
+// them, or as its own earlier ops left them, keep nothing.
+func TestAgentOpOverAnOpenPagesChangeKeepsIt(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	h := NewHub(st, nil, openHost{ed: ed})
+	run := &Run{ID: "r1"}
+	d := h.newDelivery(p.ID, run, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}})
+	// work is the page as the agent has it, with its own ops.
+	work := ed.Content.Copy()
+	var ops []doc.Op
+	agent := func(op doc.Op) {
+		t.Helper()
+		if err := work.Apply(op); err != nil {
+			t.Fatal(err)
+		}
+		ops = append(ops, op)
+		d.to(ed, ops)
+	}
+	block := func(typ, text string) *doc.Node {
+		n := &doc.Node{Type: typ}
+		n.SetDelta(doc.FromMarkdown(text))
+		return n
+	}
+	conflicts := func() []store.HistoryEntry {
+		history, _ := st.History(p.ID)
+		return history
+	}
+
+	agent(work.ReplaceOp("l1", block("bulleted_list", "first")))
+	// The user rewrites p1; the agent rewrites l1 again, as it left it.
+	ed.Content.Find("p1").SetDelta(doc.FromMarkdown("Their way."))
+	agent(work.ReplaceOp("l1", block("bulleted_list", "second")))
+	if got := conflicts(); len(got) != 0 {
+		t.Fatalf("history of the agent's own edits: %+v", got)
+	}
+
+	// Then the agent rewrites p1 as it read it.
+	agent(work.ReplaceOp("p1", block("paragraph", "Ship the agent's way.")))
+	got := conflicts()
+	if len(got) != 1 || got[0].Reason != "conflict" || got[0].AIJobID != "r1" {
+		t.Fatalf("history %+v", got)
+	}
+	if kept := doc.MustDecode(got[0].Content); kept.Find("p1").Delta().Plain() != "Their way." {
+		t.Errorf("kept %q", kept.Find("p1").Delta().Plain())
+	}
+	if text := ed.Content.Find("p1").Delta().Plain(); text != "Ship the agent's way." {
+		t.Errorf("open page has %q", text)
+	}
+
+	// And deletes h1, which the user renamed.
+	ed.Content.Find("h1").SetDelta(doc.FromMarkdown("Their plan"))
+	agent(work.DeleteOp([]string{"h1"}))
+	got = conflicts()
+	if len(got) != 2 || got[0].Reason != "conflict" {
+		t.Fatalf("history %+v", got)
+	}
+	if kept := doc.MustDecode(got[0].Content); kept.Find("h1") == nil || kept.Find("h1").Delta().Plain() != "Their plan" {
+		t.Errorf("kept %s", got[0].Content)
+	}
+	if ed.Content.Find("h1") != nil {
+		t.Error("h1 is still on the open page")
+	}
+}
+
+// The chat history a local model reads leaves out each request whose run
+// was undone or failed, with its reply, as the agent function does for a
+// cloud run: the model would take an undone edit for still on the page.
+func TestChatHistoryLeavesOutUndoneAndFailedRuns(t *testing.T) {
+	s := &Session{Runs: []*Run{
+		{ID: "r1", Status: "done", Undone: true},
+		{ID: "r2", Status: "done"},
+		{ID: "r3", Status: "failed"},
+		{ID: "r4", Status: "done"},
+	}}
+	s.Messages = []*Message{
+		{Mine: true, Text: "Add a table"}, {Text: "Added a table.", RunID: "r1"},
+		{Mine: true, Text: "Summarize"}, {Text: "It is a plan.", RunID: "r2"},
+		// A run of an earlier launch, cut off: failed, its reply too.
+		{Mine: true, Text: "Add a chart"}, {Text: "Added a chart…", RunID: "r3"},
+		{Mine: true, Text: "Fix the typo"}, {Text: "The model is not found.", RunID: "r4", Error: true},
+		{Mine: true, Text: "Hello"}, {Text: "Hi."},
+	}
+	var got []string
+	for _, turn := range chatHistory(s) {
+		got = append(got, turn["role"]+": "+turn["content"])
+	}
+	want := "user: Summarize|assistant: It is a plan.|user: Hello|assistant: Hi."
+	if strings.Join(got, "|") != want {
+		t.Errorf("history %q", got)
+	}
+}
+
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
 	st, err := store.OpenMemory(t.TempDir())

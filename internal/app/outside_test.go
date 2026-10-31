@@ -404,6 +404,89 @@ func TestPageDeletedElsewhereKeepsWhatWasTyped(t *testing.T) {
 	}
 }
 
+// A title typed into the open page as it is deleted elsewhere is saved
+// with what was typed, for restoring the page to bring back.
+func TestPageDeletedElsewhereKeepsTheTypedTitle(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := a.st.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := a.st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.page.title = "New"
+	row := store.PageToRemote(p)
+	row["deleted_at"] = "2026-10-30T00:00:00Z"
+	if err := a.st.PutRemotePage(row); err != nil {
+		t.Fatal(err)
+	}
+	a.reload(store.Change{Table: "pages", PageID: p.ID})
+	if a.page != nil {
+		t.Fatal("the deleted page stayed open")
+	}
+	if got, err := a.st.Page(p.ID); err != nil || got.Title != "New" {
+		t.Errorf("title %q, %v", got.Title, err)
+	}
+}
+
+// What was started on a page, a comment not posted yet and the dialogs
+// changing its blocks, closes with it: posted later, it went on the page
+// opened next.
+func TestClosingAPageDropsWhatWasStartedOnIt(t *testing.T) {
+	a := templatesApp(t)
+	first, err := a.st.CreatePage(store.NewPageOptions{Title: "First"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := a.st.CreatePage(store.NewPageOptions{Title: "Second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(first.ID)
+	(&host{a: a}).Comment("b1", "quoted")
+	a.dialogs.inline = &inlinePrompt{blockID: "b1"}
+	a.dialogs.embedOpen, a.dialogs.linkOpen, a.dialogs.sourceOpen, a.dialogs.chartOpen = true, true, true, true
+	a.dialogs.chartEditor = a.page.editor
+	a.openPage(second.ID)
+	if a.page == nil || a.page.id != second.ID {
+		t.Fatal("the second page did not open")
+	}
+	d := a.dialogs
+	if d.newComment != nil || d.inline != nil {
+		t.Error("the comment or the prompt started on the first page stayed")
+	}
+	if d.embedOpen || d.linkOpen || d.sourceOpen || d.chartOpen || d.chartEditor != nil {
+		t.Error("a dialog changing the first page's blocks stayed open")
+	}
+}
+
+// Settings closes for a page opened from it that is open already, as a
+// conflict's page is.
+func TestOpeningTheOpenPageClosesSettings(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.settingsOpen = true
+	a.openPage(p.ID)
+	if a.settingsOpen {
+		t.Error("Settings stayed open")
+	}
+}
+
 // The open page removed from this device, its share withdrawn, closes
 // without being saved back.
 func TestRemovedSharedPageCloses(t *testing.T) {

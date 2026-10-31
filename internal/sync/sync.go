@@ -553,6 +553,13 @@ func (s *Service) retryMoves(ctx context.Context) error {
 // it queues is the file as stored once it has come, as a change made
 // while it waited for it is not undone.
 func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string) error {
+	// One iCloud Drive does not list yet, as while the device that has it
+	// still copies it there, waits too: queued now, it would go up with a
+	// path of its own and nothing stored there.
+	if f.DeletedAt.IsZero() && !s.cloudOn.Load() && !onDevice(f.LocalPath) && f.StoragePath != "" &&
+		s.joinedICloud() && !s.keptInICloud("files", f.StoragePath) {
+		return fmt.Errorf("file %s: %w", f.Name, errNotInICloud)
+	}
 	if f.DeletedAt.IsZero() && s.onlyInICloud("files", f.StoragePath, f.LocalPath) {
 		data, err := s.cloudFetch(ctx, "files", f.StoragePath)
 		if err != nil {
@@ -656,22 +663,33 @@ func (s *Service) push(ctx context.Context) error {
 		return err
 	}
 	uid := s.be.UserID()
-	for _, e := range entries {
-		if !s.CanSync() {
-			return nil
-		}
-		done, err := s.pushOne(ctx, uid, e)
-		if err != nil {
-			if remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut) {
-				return err
+	// A file's row waits for its contents (pushOne), which come later in
+	// the queue: it goes once they have, in the same pass.
+	var held []store.OutboxEntry
+	for round := 0; round < 2; round++ {
+		for _, e := range entries {
+			if !s.CanSync() {
+				return nil
 			}
-			log.Printf("outbox %s/%s: %v", e.Entity, e.EntityID, err)
-			_ = s.st.MarkFailed(e, err.Error())
-			continue
+			done, err := s.pushOne(ctx, uid, e)
+			if err != nil {
+				if remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut) {
+					return err
+				}
+				log.Printf("outbox %s/%s: %v", e.Entity, e.EntityID, err)
+				_ = s.st.MarkFailed(e, err.Error())
+				continue
+			}
+			if done {
+				_ = s.st.Dequeue(e)
+			} else if e.Entity == "files" {
+				held = append(held, e)
+			}
 		}
-		if done {
-			_ = s.st.Dequeue(e)
+		if len(held) == 0 {
+			break
 		}
+		entries, held = held, nil
 	}
 	return nil
 }
@@ -694,10 +712,20 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 			payload["created_by"] = uid
 		}
 		return s.pushRow(ctx, e, payload)
-	case "folders", "files":
+	case "files":
+		// A file's row goes after its contents, as it does to iCloud
+		// Drive: a device that has the row can fetch them, and never takes
+		// a file still uploading for one that is gone.
+		if s.st.HasPending("storage", "files/"+e.EntityID) {
+			return false, nil
+		}
 		return s.pushRow(ctx, e, payload)
+	case "folders":
+		return s.pushRow(ctx, e, payload)
+	case "recordings":
+		return s.pushRecording(ctx, e, payload)
 	case "comments":
-		return s.pushComment(ctx, uid, payload)
+		return s.pushComment(ctx, uid, e, payload)
 	case "page_history":
 		payload["created_by"] = uid
 	case "ai_jobs":
@@ -732,14 +760,6 @@ func (s *Service) pushChanged(ctx context.Context, table string, payload map[str
 	return err == nil, err
 }
 
-// takeServer stores a row from the server over this device's change to it,
-// by table, as the pulls do.
-var takeServer = map[string]func(st *store.Store, row map[string]any) error{
-	"pages":   (*store.Store).PutRemotePage,
-	"folders": (*store.Store).PutRemoteFolder,
-	"files":   (*store.Store).PutRemoteFile,
-}
-
 // pushRow is pushChanged for a row the server may refuse to change: one
 // the user can see there but no longer change, as a page shared with them
 // to view since they changed it. Its change would never go, and the pulls
@@ -752,28 +772,91 @@ func (s *Service) pushRow(ctx context.Context, e store.OutboxEntry, payload map[
 	if !remote.IsForbidden(err) {
 		return done, err
 	}
-	row, rerr := s.be.SelectOne(ctx, e.Entity, remote.Query{Select: "*", Filters: []string{remote.Eq("id", e.EntityID)}})
-	if rerr != nil || row == nil {
-		return false, err
+	return s.giveWay(ctx, e, err)
+}
+
+// giveWay has a change the server refused give way to the server's row,
+// when the server shows it (pushRow), and returns refused otherwise.
+func (s *Service) giveWay(ctx context.Context, e store.OutboxEntry, refused error) (bool, error) {
+	row, err := s.be.SelectOne(ctx, e.Entity, remote.Query{Select: "*", Filters: []string{remote.Eq("id", e.EntityID)}})
+	if err != nil || row == nil {
+		return false, refused
 	}
-	log.Printf("outbox %s/%s: %v; taking the server's row", e.Entity, e.EntityID, err)
+	log.Printf("outbox %s/%s: %v; taking the server's row", e.Entity, e.EntityID, refused)
+	return s.takeServer(ctx, e, row)
+}
+
+// takeServer stores a row from the server over this device's change to
+// it, as the pulls do, and reports the change done.
+func (s *Service) takeServer(ctx context.Context, e store.OutboxEntry, row map[string]any) (bool, error) {
 	// Off the queue first, so the row goes in; a change made here since
 	// keeps it queued, and the row stays out, as the pulls leave it.
 	if err := s.st.Dequeue(e); err != nil {
 		return false, err
 	}
-	if err := takeServer[e.Entity](s.st, row); err != nil {
+	var err error
+	switch e.Entity {
+	case "pages":
+		err = s.st.PutRemotePage(row)
+	case "folders":
+		err = s.st.PutRemoteFolder(row)
+	case "files":
+		err = s.st.PutRemoteFile(row)
+	case "recordings":
+		err = s.st.PutRemoteRecording(row)
+	case "comments":
+		author := store.S(row, "author_id")
+		err = s.st.PutRemoteComment(row, s.authorNames(ctx, []map[string]any{row})[author])
+	}
+	if err != nil {
 		return false, err
 	}
 	s.st.Notify(e.Entity, e.PageID)
 	return true, nil
 }
 
+// pushRecording sends a recording as pushRow does. One settled after a
+// quit stopped its transcription (store.IfStatusKey) changes the server's
+// only while that is still at the status it was here: the server, or the
+// device that started the transcription, may have finished it meanwhile,
+// and the recording here takes theirs then. One the server does not have
+// goes up whole.
+func (s *Service) pushRecording(ctx context.Context, e store.OutboxEntry, payload map[string]any) (bool, error) {
+	status, _ := payload[store.IfStatusKey].(string)
+	delete(payload, store.IfStatusKey)
+	if status == "" {
+		return s.pushRow(ctx, e, payload)
+	}
+	changes := map[string]any{}
+	for _, k := range []string{"status", "error", "transcript", "duration_ms"} {
+		changes[k] = payload[k]
+	}
+	rows, err := s.be.Update(ctx, "recordings", []string{remote.Eq("id", e.EntityID), remote.Eq("status", status)}, changes)
+	if err != nil && !remote.IsForbidden(err) || len(rows) > 0 {
+		return err == nil, err
+	}
+	row, rerr := s.be.SelectOne(ctx, "recordings", remote.Query{Select: "*", Filters: []string{remote.Eq("id", e.EntityID)}})
+	switch {
+	case rerr != nil:
+		return false, rerr
+	case row == nil && err != nil:
+		return false, err
+	case row == nil:
+		return s.pushRow(ctx, e, payload)
+	}
+	return s.takeServer(ctx, e, row)
+}
+
 // pushComment updates a comment the server has with what may change, and
 // inserts one it has not. An upsert would not do: its insert stamps the
 // caller as the author, which the server then refuses as a change to the
 // comment, so resolving someone else's comment never went up.
-func (s *Service) pushComment(ctx context.Context, uid string, payload map[string]any) (bool, error) {
+//
+// A change the server refuses, as resolving someone else's comment on a
+// page the user may only view, gives way to the server's comment, as
+// pushRow's does to its row: the pulls pass over a comment while it
+// waits, so its author's edits and deletion would never come.
+func (s *Service) pushComment(ctx context.Context, uid string, e store.OutboxEntry, payload map[string]any) (bool, error) {
 	cols, partial := payload[store.ChangedKey].([]any)
 	delete(payload, store.ChangedKey)
 	changes := map[string]any{"resolved": payload["resolved"]}
@@ -807,8 +890,8 @@ func (s *Service) pushComment(ctx context.Context, uid string, payload map[strin
 		payload["author_id"] = uid
 	}
 	if _, err := s.be.Insert(ctx, "comments", payload); err != nil {
-		if remote.IsConflict(err) {
-			return false, errors.New("the comment is someone else's, and you cannot change it")
+		if remote.IsConflict(err) || remote.IsForbidden(err) {
+			return s.giveWay(ctx, e, errors.New("the comment is someone else's, and you cannot change it"))
 		}
 		return false, err
 	}
@@ -1013,6 +1096,8 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 // the page of the row a stored copy belongs to can read it. It returns
 // where the copy is kept here now, or "" when there is nothing to copy:
 // the copy had what it needs, or what it copies or the copy is gone.
+// Copies are made from what is on the device now (store.CopyNeeds): only
+// one an earlier version queued still comes from the original's.
 func (s *Service) fetchCopied(ctx context.Context, payload map[string]any) (string, error) {
 	from := store.S(payload, "from_path")
 	if from == "" {
@@ -1020,6 +1105,11 @@ func (s *Service) fetchCopied(ctx context.Context, payload map[string]any) (stri
 	}
 	data, err := s.Fetch(ctx, store.S(payload, "bucket"), from)
 	if remote.IsNotFound(err) || errors.Is(err, fs.ErrNotExist) {
+		// iCloud Drive may not list it yet, as while the device that has
+		// it still uploads it: it is waited for while the original lives.
+		if s.cloudOn.Load() && s.originalLives(payload) {
+			return "", fmt.Errorf("%w: what this copies is not in iCloud Drive yet", icloud.ErrNotReady)
+		}
 		return "", nil
 	}
 	if err != nil {
@@ -1047,10 +1137,15 @@ func (s *Service) fetchCopied(ctx context.Context, payload map[string]any) (stri
 // server has the row that says it is deleted: until then the entry waits,
 // as the file is still there for the other devices, and while a copy of it
 // waits to go up from it (copyWaits). An object the server does not have
-// is gone already.
+// is gone already. One of a file that lives here, as when its deletion
+// gave way to the server's row, stays.
 func (s *Service) removeStored(ctx context.Context, payload map[string]any) (bool, error) {
-	if s.st.HasPending("files", store.S(payload, "file_id")) || s.copyWaits(store.S(payload, "bucket"), store.S(payload, "path")) {
+	id := store.S(payload, "file_id")
+	if s.st.HasPending("files", id) || s.copyWaits(store.S(payload, "bucket"), store.S(payload, "path")) {
 		return false, nil
+	}
+	if f, err := s.st.File(id); err == nil && f.DeletedAt.IsZero() {
+		return true, nil
 	}
 	err := s.be.Remove(ctx, store.S(payload, "bucket"), store.S(payload, "path"))
 	if remote.IsNotFound(err) {

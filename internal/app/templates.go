@@ -1,16 +1,24 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
+	"log"
 	"maps"
+	"os"
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/icloud"
+	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -28,13 +36,17 @@ func (a *App) duplicatePage(p store.Page) {
 		a.toast(locales.TemplateWaitForRecording())
 		return
 	}
+	failed := func(err error) { a.toast(locales.TemplateDuplicateFailed(err.Error())) }
+	if !a.copyable(p.ID, failed, func() { a.duplicatePage(p) }) {
+		return
+	}
 	o := store.CopyOptions{ParentID: p.ParentID, FolderID: p.FolderID, AfterID: p.ID, Title: copyTitle(p.Title)}
 	if a.isShared(p) && (p.ParentID == "" || !a.canEdit(p.ParentID)) {
 		o = store.CopyOptions{Title: o.Title}
 	}
 	cp, err := a.st.CopyPage(p.ID, o)
 	if err != nil {
-		a.toast(locales.TemplateDuplicateFailed(err.Error()))
+		a.copyFailed(err, failed)
 		return
 	}
 	a.pages, _ = a.st.Pages()
@@ -60,6 +72,87 @@ func (a *App) recordingIn(id string) bool {
 	return false
 }
 
+// copyable reports whether page id, with its subpages, can be copied now:
+// a copy goes up with its own files and recordings' audio, copied from
+// this device as it is made, never later from the originals', which
+// another device may delete meanwhile (store.CopyNeeds). Those only
+// stored download first, and again runs once they have, on the main
+// thread; one still uploading from where it was added, or that can't
+// download now, says so, and nothing is copied.
+func (a *App) copyable(id string, failed func(error), again func()) bool {
+	needs, err := a.st.CopyNeeds(id)
+	if err != nil {
+		failed(err)
+		return false
+	}
+	if len(needs) == 0 {
+		return true
+	}
+	for _, n := range needs {
+		if n.Path == "" || !a.sync.CanFetch() {
+			a.toast(locales.TemplateFilesUploading())
+			return false
+		}
+	}
+	// One copy's downloads at a time: the toast says they are coming.
+	if a.fetchingCopy {
+		return false
+	}
+	a.fetchingCopy = true
+	a.toast(locales.TemplateFetchingFiles())
+	go func() {
+		var audio []string
+		var err error
+		for _, n := range needs {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			var data []byte
+			data, err = a.sync.Fetch(ctx, n.Bucket, n.Path)
+			cancel()
+			if err == nil && n.FileID != "" {
+				_, err = a.st.DownloadedFile(n.FileID, data)
+			} else if err == nil {
+				if _, err = a.st.DownloadedAudio(n.RecordingID, data); err == nil {
+					audio = append(audio, n.RecordingID)
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
+		a.update(func() {
+			a.fetchingCopy = false
+			if err != nil {
+				log.Printf("copy: %v", err)
+				a.copyFailed(err, failed)
+				return
+			}
+			again()
+			// The audio came for the copy, which has its own now: it stays
+			// on this device only as Keep the audio says.
+			if a.settings.KeepAudioOnDevice == "until_uploaded" {
+				for _, id := range audio {
+					if r, err := a.st.Recording(id); err == nil && r.AudioPath != "" && r.LocalPath != "" {
+						_ = os.Remove(r.LocalPath)
+						_ = a.st.ClearLocalPath(id)
+					}
+				}
+			}
+		})
+	}()
+	return false
+}
+
+// copyFailed says why a copy was not made: a file or a recording's audio
+// not on this device, as one still uploading or gone from where it was
+// stored, or what else failed.
+func (a *App) copyFailed(err error, failed func(error)) {
+	if errors.Is(err, store.ErrCopyNotHere) || remote.IsNotFound(err) || errors.Is(err, icloud.ErrNotReady) || errors.Is(err, fs.ErrNotExist) {
+		a.toast(locales.TemplateFilesUploading())
+		return
+	}
+	failed(err)
+}
+
 // copyTitle is the title of a copy, as Finder names one.
 func copyTitle(title string) string {
 	if strings.TrimSpace(title) == "" {
@@ -79,9 +172,13 @@ func (a *App) saveAsTemplate(p store.Page) {
 		a.toast(locales.TemplateWaitForRecording())
 		return
 	}
+	failed := func(err error) { a.toast(locales.TemplateSaveFailed(err.Error())) }
+	if !a.copyable(p.ID, failed, func() { a.saveAsTemplate(p) }) {
+		return
+	}
 	t, err := a.st.CopyPage(p.ID, store.CopyOptions{Title: p.Title, Template: true})
 	if err != nil {
-		a.toast(locales.TemplateSaveFailed(err.Error()))
+		a.copyFailed(err, failed)
 		return
 	}
 	a.templates, _ = a.st.Templates()
@@ -328,7 +425,7 @@ func (a *App) editTemplate(t templateChoice) {
 // templateBlocks are the blocks page id takes from a template: a
 // starter's, or a copy of a template's, whose subpages it copies under the
 // page. When it has none to give it says why, and reports false.
-func (a *App) templateBlocks(t templateChoice, id string) ([]*doc.Node, bool) {
+func (a *App) templateBlocks(t templateChoice, id string, again func()) ([]*doc.Node, bool) {
 	if t.starter != nil {
 		return t.starter.nodes(), true
 	}
@@ -338,9 +435,19 @@ func (a *App) templateBlocks(t templateChoice, id string) ([]*doc.Node, bool) {
 		a.toast(locales.TemplateWaitForRecording())
 		return nil, false
 	}
+	failed := func(err error) { a.toast(locales.TemplateUseFailed(err.Error())) }
+	// What the template's files and recordings need first comes, and the
+	// page takes the template once it has, if it is still open.
+	if !a.copyable(t.page.ID, failed, func() {
+		if a.page != nil && a.page.id == id {
+			again()
+		}
+	}) {
+		return nil, false
+	}
 	c, err := a.st.CopyInto(t.page.ID, id)
 	if err != nil {
-		a.toast(locales.TemplateUseFailed(err.Error()))
+		a.copyFailed(err, failed)
 		return nil, false
 	}
 	a.pages, _ = a.st.Pages()
@@ -360,7 +467,7 @@ func (a *App) applyTemplate(t templateChoice) bool {
 	if ps == nil || ps.editor.ReadOnly || !a.isEmpty() {
 		return false
 	}
-	blocks, ok := a.templateBlocks(t, ps.id)
+	blocks, ok := a.templateBlocks(t, ps.id, func() { a.applyTemplate(t) })
 	if !ok {
 		return false
 	}
@@ -390,7 +497,7 @@ func (a *App) insertTemplate(t templateChoice) {
 		a.applyTemplate(t)
 		return
 	}
-	blocks, ok := a.templateBlocks(t, ps.id)
+	blocks, ok := a.templateBlocks(t, ps.id, func() { a.insertTemplate(t) })
 	if !ok {
 		return
 	}

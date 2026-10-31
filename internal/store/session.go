@@ -47,11 +47,13 @@ type User struct {
 
 // LoadSession sets up the session at startup, creating a space on this
 // device the first time so the app works before, or without, signing in.
+// The device keeps one account's pages: another account's go first, once
+// their changes have all gone up, and ErrUnsynced says one waits. Signing
+// in as another account forgets them itself once the user agrees to.
 func (s *Store) LoadSession(user *User) (Session, error) {
 	if user != nil {
-		// The device keeps one account's pages: another account's go first.
 		if prev := s.CachedAccount(); prev != "" && prev != user.ID {
-			if err := s.ForgetAccount(); err != nil {
+			if err := s.ForgetSyncedAccount(); err != nil {
 				return Session{}, err
 			}
 		}

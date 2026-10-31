@@ -280,10 +280,13 @@ func (e *Editor) copyBlocks() []*doc.Node {
 		n     *doc.Node
 	}
 	var stack []open
-	for i := indexIn(us, a.ID); i >= 0 && i <= indexIn(us, b.ID) && i < len(us); i++ {
+	ia, ib := indexIn(us, a.ID), indexIn(us, b.ID)
+	for i := ia; i >= 0 && i <= ib && i < len(us); i++ {
 		n := us[i].Clone()
-		// A folded toggle takes its hidden children with it.
-		if n.Type != "table" && !collapsed(n) {
+		// A folded toggle takes its hidden children with it, as cutting
+		// takes them: only from between the first block and the last,
+		// which keep theirs in the page.
+		if n.Type != "table" && (!collapsed(n) || i == ia || i == ib) {
 			n.Children = nil
 		}
 		if n.IsText() {
@@ -377,7 +380,7 @@ func (e *Editor) copyText() string {
 			}
 			continue
 		}
-		text := n.Delta().Slice(from, to).ToMarkdown()
+		text := n.Delta().Slice(from, to).ReadableMarkdown()
 		prefix := blockPrefix(n, e.depth(n.ID))
 		if prefix == "" {
 			text = doc.EscapeBlockStart(text)
@@ -789,17 +792,21 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 					at = k.ID
 				}
 			}
-			last = first.Children[len(first.Children)-1]
+			if !collapsed(n) {
+				last = first.Children[len(first.Children)-1]
+			}
 		}
 		for _, b := range blocks[1:] {
 			_ = e.Content.Insert(doc.Position{After: at}, b)
 			at, last = b.ID, b
 		}
-		// What followed the caret goes on the last line pasted.
-		for len(last.Children) > 0 && last.Type != "table" {
+		// What followed the caret goes on the last line pasted, but never
+		// on one hidden in a folded toggle: it goes on a line of its own
+		// after the toggle, where it and the caret show.
+		for len(last.Children) > 0 && last.Type != "table" && !collapsed(last) {
 			last = last.Children[len(last.Children)-1]
 		}
-		if !joins(last) {
+		if !joins(last) || collapsed(last) && len(last.Children) > 0 {
 			last = newText("paragraph", nil)
 			_ = e.Content.Insert(doc.Position{After: at}, last)
 		}

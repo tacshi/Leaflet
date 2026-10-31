@@ -301,7 +301,7 @@ func (a *App) openHit(h store.SearchHit) {
 		return
 	}
 	a.openPage(h.PageID)
-	if h.BlockID != "" && a.page != nil {
+	if h.BlockID != "" && a.page != nil && a.page.id == h.PageID {
 		a.page.editor.PlaceCaret(h.BlockID, 0)
 	}
 	if h.Kind == "comment" {
@@ -801,9 +801,10 @@ func (a *App) shareDialog(c *ui.Context) {
 									ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 									defer cancel()
 									if _, err := a.backend.RPC(ctx, "unshare_page", map[string]any{"p_page_id": page, "p_user_id": uid}); err != nil {
+										msg := shareFailure(err)
 										a.update(func() {
 											if d.sharePage == page {
-												d.shareError = err.Error()
+												d.shareError = msg
 											}
 										})
 										return
@@ -1297,6 +1298,10 @@ func shareFailure(err error) string {
 			return locales.DialogShareInvalidEmail()
 		case "cannot_share_with_self":
 			return locales.DialogShareWithSelf()
+		case "inherited_share":
+			// Removing someone shared with on a page above, which keeps
+			// them.
+			return locales.DialogShareInherited()
 		}
 	}
 	return err.Error()

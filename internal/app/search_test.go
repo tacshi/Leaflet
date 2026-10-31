@@ -86,3 +86,17 @@ func TestSelectBox(t *testing.T) {
 		t.Errorf("value %q", value)
 	}
 }
+
+// Options shown by the same name leave the value as it is until one is
+// chosen: the last of them took it on every frame.
+func TestSelectBoxKeepsOneOfTwoAlike(t *testing.T) {
+	value := "p1"
+	tt := ui.NewTester(func(c *ui.Context) {
+		selectBox(c, "provider", &value, []string{"p1", "p2"}, func(string) string { return "OpenRouter" }, 200)
+	}, 400, 300)
+	tt.Frame()
+	tt.Frame()
+	if value != "p1" {
+		t.Errorf("value %q", value)
+	}
+}

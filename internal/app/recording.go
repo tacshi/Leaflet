@@ -708,7 +708,15 @@ func (a *App) syncSttSettings() {
 		return
 	}
 	stt := a.settings.Stt
+	// Each key typed into a field sends them: the sends go one at a time,
+	// and only the last, or one ending in the server's old settings.
+	n := a.sttLatest.Add(1)
 	go func() {
+		a.sttSent.Lock()
+		defer a.sttSent.Unlock()
+		if a.sttLatest.Load() != n {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		row := map[string]any{"user_id": a.backend.UserID(), "provider": stt.Provider, "language": stt.Language,

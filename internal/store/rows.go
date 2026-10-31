@@ -382,6 +382,35 @@ func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
 	return local, nil
 }
 
+// DownloadedAudio keeps a recording's audio downloaded from where it went
+// up, as DownloadedFile keeps a file's, for a copy of its page to copy
+// (CopyNeeds). A recording removed before or while it came keeps none.
+func (s *Store) DownloadedAudio(id string, data []byte) (string, error) {
+	if _, err := s.Recording(id); err != nil {
+		return "", err
+	}
+	local := filepath.Join(s.Dir, "recordings", id+".wav")
+	if err := os.MkdirAll(filepath.Dir(local), 0o750); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(local, data, 0o600); err != nil {
+		return "", err
+	}
+	res, err := s.db.Exec(`UPDATE recordings SET local_path = ? WHERE id = ?`, local, id)
+	if err == nil {
+		var n int64
+		if n, err = res.RowsAffected(); err == nil && n == 0 {
+			err = errNotFound
+		}
+	}
+	if err != nil {
+		_ = os.Remove(local)
+		return "", err
+	}
+	s.Notify("recordings", "")
+	return local, nil
+}
+
 // DeleteFile deletes a file, which cannot be undone: its copy here goes
 // now, and its stored copy (in Storage, or iCloud Drive) once the
 // deletion has gone up. An upload still waiting is dropped. The file is
@@ -792,6 +821,26 @@ func (s *Store) CreateRecording(pageID, blockID, provider, model, localPath, lan
 // UpdateRecording changes a recording and queues it once it is no longer
 // recording, in one transaction, over the recording as stored then.
 func (s *Store) UpdateRecording(id string, fn func(*Recording)) (Recording, error) {
+	return s.updateRecording(id, "", fn)
+}
+
+// IfStatusKey names, in a queued recording, the status the row elsewhere
+// must still have for the change to apply there. A recording settled
+// after a quit stopped its transcription (SettleRecording) goes so: the
+// server may have finished the transcription meanwhile, or the device
+// that started it, and their transcript would be lost under this one.
+const IfStatusKey = "_if_status"
+
+// SettleRecording is UpdateRecording for a recording a quit left at
+// status, which nothing here finishes now: the change it makes for the
+// page applies on the server and the other devices only while the
+// recording is still at status there, and gives way to the row they have
+// otherwise. With status "", it is UpdateRecording.
+func (s *Store) SettleRecording(id, status string, fn func(*Recording)) (Recording, error) {
+	return s.updateRecording(id, status, fn)
+}
+
+func (s *Store) updateRecording(id, ifStatus string, fn func(*Recording)) (Recording, error) {
 	var r Recording
 	err := s.inTx(func(tx *sql.Tx) error {
 		var err error
@@ -810,7 +859,11 @@ func (s *Store) UpdateRecording(id string, fn func(*Recording)) (Recording, erro
 		if r.AudioPath == "" && r.LocalPath != "" {
 			label = "audio waiting to upload"
 		}
-		return queue(tx, "recordings", r.ID, RecordingToRemote(r), label, r.PageID)
+		row := RecordingToRemote(r)
+		if ifStatus != "" {
+			row[IfStatusKey], row["error"] = ifStatus, ns(r.Error)
+		}
+		return queue(tx, "recordings", r.ID, row, label, r.PageID)
 	})
 	if err != nil {
 		return Recording{}, err

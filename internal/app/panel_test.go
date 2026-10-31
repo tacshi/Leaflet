@@ -323,3 +323,15 @@ func TestShowResolvedApartFromTheFocus(t *testing.T) {
 		t.Errorf("search hit: show resolved %v, focus %q", a.dialogs.showResolved, a.dialogs.commentFocus)
 	}
 }
+
+// waitFor runs frames until ok, or fails.
+func waitFor(t *testing.T, tt *ui.Tester, ok func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); !ok(); {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out")
+		}
+		time.Sleep(10 * time.Millisecond)
+		tt.Frame()
+	}
+}

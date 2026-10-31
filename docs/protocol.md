@@ -261,10 +261,11 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
   `accepted_at` null for the account that has confirmed the address, or,
   when none has, holds the invite for the address (`page_email_invites`)
   until an account confirms it; the page reaches the person only once they
-  accept.
-  Each pass reads the account's pending invites with `page_invites()`, which
-  the sidebar offers while any wait; `accept_page_invite` sets `accepted_at` (moving the row's
-  `updated_at` on), and `decline_page_invite` removes the row. The shares
+  accept, with `accept_page_invite`, which sets `accepted_at` (moving the
+  row's `updated_at` on); `decline_page_invite` removes the row. The app no
+  longer invites or answers invites: each person syncs through their own
+  Supabase project, which the people they would invite have no account in.
+  The functions stay for the shares made before. The shares
   are pulled by `updated_at` like the tables, filtered to
   `accepted_at=not.is.null`, and each one pulled brings its page and the
   pages under it, so a page accepted after the cursor passed its share

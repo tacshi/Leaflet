@@ -363,82 +363,6 @@ func (msgs Messages) ShellNewPage() string {
 	return Catalog.Format(msgs.locale, "shellNewPage", nil)
 }
 
-// ShellInviteFrom says "{name} shared “{title}” with you"
-// in the language the app shows.
-//
-// Home view (and a desktop notification): a page someone shared with the
-// user, waiting for them to accept or decline it.
-func ShellInviteFrom(name string, title string) string {
-	return In(i18n.Locale()).ShellInviteFrom(name, title)
-}
-
-// ShellInviteFrom says "{name} shared “{title}” with you"
-// in the language of msgs.
-//
-// Home view (and a desktop notification): a page someone shared with the
-// user, waiting for them to accept or decline it.
-func (msgs Messages) ShellInviteFrom(name string, title string) string {
-	return Catalog.Format(msgs.locale, "shellInviteFrom", map[string]any{"name": name, "title": title})
-}
-
-// ShellInviteSomeone says "Someone"
-// in the language the app shows.
-//
-// Home view: who shared a page, when they have no name.
-func ShellInviteSomeone() string { return In(i18n.Locale()).ShellInviteSomeone() }
-
-// ShellInviteSomeone says "Someone"
-// in the language of msgs.
-//
-// Home view: who shared a page, when they have no name.
-func (msgs Messages) ShellInviteSomeone() string {
-	return Catalog.Format(msgs.locale, "shellInviteSomeone", nil)
-}
-
-// ShellInviteAccept says "Accept"
-// in the language the app shows.
-//
-// Home view: button that accepts a shared page's invite; the page then
-// appears in the sidebar.
-func ShellInviteAccept() string { return In(i18n.Locale()).ShellInviteAccept() }
-
-// ShellInviteAccept says "Accept"
-// in the language of msgs.
-//
-// Home view: button that accepts a shared page's invite; the page then
-// appears in the sidebar.
-func (msgs Messages) ShellInviteAccept() string {
-	return Catalog.Format(msgs.locale, "shellInviteAccept", nil)
-}
-
-// ShellInviteDecline says "Decline"
-// in the language the app shows.
-//
-// Home view: tooltip of the x button that declines a shared page's invite.
-func ShellInviteDecline() string { return In(i18n.Locale()).ShellInviteDecline() }
-
-// ShellInviteDecline says "Decline"
-// in the language of msgs.
-//
-// Home view: tooltip of the x button that declines a shared page's invite.
-func (msgs Messages) ShellInviteDecline() string {
-	return Catalog.Format(msgs.locale, "shellInviteDecline", nil)
-}
-
-// ShellInviteFailed says "Could not answer the invite: {error}"
-// in the language the app shows.
-//
-// Toast when accepting or declining an invite failed.
-func ShellInviteFailed(error string) string { return In(i18n.Locale()).ShellInviteFailed(error) }
-
-// ShellInviteFailed says "Could not answer the invite: {error}"
-// in the language of msgs.
-//
-// Toast when accepting or declining an invite failed.
-func (msgs Messages) ShellInviteFailed(error string) string {
-	return Catalog.Format(msgs.locale, "shellInviteFailed", map[string]any{"error": error})
-}
-
 // TrayNewRecording says "New Recording"
 // in the language the app shows.
 //
@@ -1797,20 +1721,6 @@ func CommonEmail() string { return In(i18n.Locale()).CommonEmail() }
 // A common word used in several places of the app.
 func (msgs Messages) CommonEmail() string {
 	return Catalog.Format(msgs.locale, "commonEmail", nil)
-}
-
-// CommonOwner says "Owner"
-// in the language the app shows.
-//
-// A common word used in several places of the app.
-func CommonOwner() string { return In(i18n.Locale()).CommonOwner() }
-
-// CommonOwner says "Owner"
-// in the language of msgs.
-//
-// A common word used in several places of the app.
-func (msgs Messages) CommonOwner() string {
-	return Catalog.Format(msgs.locale, "commonOwner", nil)
 }
 
 // CommonModel says "Model"
@@ -3263,226 +3173,20 @@ func (msgs Messages) DialogShareTitle(title string) string {
 	return Catalog.Format(msgs.locale, "dialogShareTitle", map[string]any{"title": title})
 }
 
-// DialogShareSubtitle says "People you add can open this page and its subpages."
+// DialogShareOwnerOnly says "Only the page's owner can share it publicly."
 // in the language the app shows.
 //
-// Share dialog: the subtitle.
-func DialogShareSubtitle() string { return In(i18n.Locale()).DialogShareSubtitle() }
-
-// DialogShareSubtitle says "People you add can open this page and its subpages."
-// in the language of msgs.
-//
-// Share dialog: the subtitle.
-func (msgs Messages) DialogShareSubtitle() string {
-	return Catalog.Format(msgs.locale, "dialogShareSubtitle", nil)
-}
-
-// DialogShareLocalOnly says "This is a temporary, view-only link: visitors can't edit the page. Turning off sharing stops the link working."
-// in the language the app shows.
-//
-// Share dialog: a notice under the public link, in a build with no server:
-// the link is temporary and view-only, and turning sharing off ends it.
-func DialogShareLocalOnly() string { return In(i18n.Locale()).DialogShareLocalOnly() }
-
-// DialogShareLocalOnly says "This is a temporary, view-only link: visitors can't edit the page. Turning off sharing stops the link working."
-// in the language of msgs.
-//
-// Share dialog: a notice under the public link, in a build with no server:
-// the link is temporary and view-only, and turning sharing off ends it.
-func (msgs Messages) DialogShareLocalOnly() string {
-	return Catalog.Format(msgs.locale, "dialogShareLocalOnly", nil)
-}
-
-// DialogShareSignIn says "Sign in with Supabase to share pages with other people."
-// in the language the app shows.
-//
-// Share dialog: a notice when signed out.
-func DialogShareSignIn() string { return In(i18n.Locale()).DialogShareSignIn() }
-
-// DialogShareSignIn says "Sign in with Supabase to share pages with other people."
-// in the language of msgs.
-//
-// Share dialog: a notice when signed out.
-func (msgs Messages) DialogShareSignIn() string {
-	return Catalog.Format(msgs.locale, "dialogShareSignIn", nil)
-}
-
-// DialogShareOwnerOnly says "Only the owner of this space can change who it is shared with."
-// in the language the app shows.
-//
-// Share dialog: a notice on a page shared with the user.
+// The Share dialog of a page shared with the user: only its owner shares it
+// through a public link.
 func DialogShareOwnerOnly() string { return In(i18n.Locale()).DialogShareOwnerOnly() }
 
-// DialogShareOwnerOnly says "Only the owner of this space can change who it is shared with."
+// DialogShareOwnerOnly says "Only the page's owner can share it publicly."
 // in the language of msgs.
 //
-// Share dialog: a notice on a page shared with the user.
+// The Share dialog of a page shared with the user: only its owner shares it
+// through a public link.
 func (msgs Messages) DialogShareOwnerOnly() string {
 	return Catalog.Format(msgs.locale, "dialogShareOwnerOnly", nil)
-}
-
-// DialogShareInvitee says "Name or email"
-// in the language the app shows.
-//
-// Share dialog: the field of the person to invite.
-func DialogShareInvitee() string { return In(i18n.Locale()).DialogShareInvitee() }
-
-// DialogShareInvitee says "Name or email"
-// in the language of msgs.
-//
-// Share dialog: the field of the person to invite.
-func (msgs Messages) DialogShareInvitee() string {
-	return Catalog.Format(msgs.locale, "dialogShareInvitee", nil)
-}
-
-// DialogShareSent says "If {email} has a Leaflet account, they'll get an invite."
-// in the language the app shows.
-//
-// Share dialog: shown after inviting someone; it never says whether the
-// email has an account. The page reaches them once they accept the invite.
-func DialogShareSent(email string) string { return In(i18n.Locale()).DialogShareSent(email) }
-
-// DialogShareSent says "If {email} has a Leaflet account, they'll get an invite."
-// in the language of msgs.
-//
-// Share dialog: shown after inviting someone; it never says whether the
-// email has an account. The page reaches them once they accept the invite.
-func (msgs Messages) DialogShareSent(email string) string {
-	return Catalog.Format(msgs.locale, "dialogShareSent", map[string]any{"email": email})
-}
-
-// DialogShareInvalidEmail says "Enter an email address."
-// in the language the app shows.
-//
-// Share dialog: the server refused an invite because what was typed is no
-// email address.
-func DialogShareInvalidEmail() string { return In(i18n.Locale()).DialogShareInvalidEmail() }
-
-// DialogShareInvalidEmail says "Enter an email address."
-// in the language of msgs.
-//
-// Share dialog: the server refused an invite because what was typed is no
-// email address.
-func (msgs Messages) DialogShareInvalidEmail() string {
-	return Catalog.Format(msgs.locale, "dialogShareInvalidEmail", nil)
-}
-
-// DialogShareWithSelf says "That's your own email address."
-// in the language the app shows.
-//
-// Share dialog: the server refused an invite to the user's own email
-// address.
-func DialogShareWithSelf() string { return In(i18n.Locale()).DialogShareWithSelf() }
-
-// DialogShareWithSelf says "That's your own email address."
-// in the language of msgs.
-//
-// Share dialog: the server refused an invite to the user's own email
-// address.
-func (msgs Messages) DialogShareWithSelf() string {
-	return Catalog.Format(msgs.locale, "dialogShareWithSelf", nil)
-}
-
-// DialogShareCanEdit says "Can edit"
-// in the language the app shows.
-//
-// Share dialog: the role of a person who can edit.
-func DialogShareCanEdit() string { return In(i18n.Locale()).DialogShareCanEdit() }
-
-// DialogShareCanEdit says "Can edit"
-// in the language of msgs.
-//
-// Share dialog: the role of a person who can edit.
-func (msgs Messages) DialogShareCanEdit() string {
-	return Catalog.Format(msgs.locale, "dialogShareCanEdit", nil)
-}
-
-// DialogShareCanView says "Can view"
-// in the language the app shows.
-//
-// Share dialog: the role of a person who can only view.
-func DialogShareCanView() string { return In(i18n.Locale()).DialogShareCanView() }
-
-// DialogShareCanView says "Can view"
-// in the language of msgs.
-//
-// Share dialog: the role of a person who can only view.
-func (msgs Messages) DialogShareCanView() string {
-	return Catalog.Format(msgs.locale, "dialogShareCanView", nil)
-}
-
-// DialogShareInherited says "Shared from a page above this one: remove them there."
-// in the language the app shows.
-//
-// Share dialog: removing someone from a subpage did nothing, as their
-// access comes from a page above it.
-func DialogShareInherited() string { return In(i18n.Locale()).DialogShareInherited() }
-
-// DialogShareInherited says "Shared from a page above this one: remove them there."
-// in the language of msgs.
-//
-// Share dialog: removing someone from a subpage did nothing, as their
-// access comes from a page above it.
-func (msgs Messages) DialogShareInherited() string {
-	return Catalog.Format(msgs.locale, "dialogShareInherited", nil)
-}
-
-// DialogShareInvited says "Invited"
-// in the language the app shows.
-//
-// Share dialog: beside the role of a person who has not accepted the invite
-// yet.
-func DialogShareInvited() string { return In(i18n.Locale()).DialogShareInvited() }
-
-// DialogShareInvited says "Invited"
-// in the language of msgs.
-//
-// Share dialog: beside the role of a person who has not accepted the invite
-// yet.
-func (msgs Messages) DialogShareInvited() string {
-	return Catalog.Format(msgs.locale, "dialogShareInvited", nil)
-}
-
-// DialogShareInvite says "Invite"
-// in the language the app shows.
-//
-// Share dialog: the button inviting the person.
-func DialogShareInvite() string { return In(i18n.Locale()).DialogShareInvite() }
-
-// DialogShareInvite says "Invite"
-// in the language of msgs.
-//
-// Share dialog: the button inviting the person.
-func (msgs Messages) DialogShareInvite() string {
-	return Catalog.Format(msgs.locale, "dialogShareInvite", nil)
-}
-
-// DialogSharePeople says "People with access"
-// in the language the app shows.
-//
-// Share dialog: the heading over the people the page is shared with.
-func DialogSharePeople() string { return In(i18n.Locale()).DialogSharePeople() }
-
-// DialogSharePeople says "People with access"
-// in the language of msgs.
-//
-// Share dialog: the heading over the people the page is shared with.
-func (msgs Messages) DialogSharePeople() string {
-	return Catalog.Format(msgs.locale, "dialogSharePeople", nil)
-}
-
-// DialogShareYou says "{name} (you)"
-// in the language the app shows.
-//
-// Share dialog: the user's own row.
-func DialogShareYou(name string) string { return In(i18n.Locale()).DialogShareYou(name) }
-
-// DialogShareYou says "{name} (you)"
-// in the language of msgs.
-//
-// Share dialog: the user's own row.
-func (msgs Messages) DialogShareYou(name string) string {
-	return Catalog.Format(msgs.locale, "dialogShareYou", map[string]any{"name": name})
 }
 
 // DialogShareCopyLink says "Copy link"
@@ -5723,22 +5427,6 @@ func SidebarHide() string { return In(i18n.Locale()).SidebarHide() }
 // Sidebar: tooltip of the button hiding it.
 func (msgs Messages) SidebarHide() string {
 	return Catalog.Format(msgs.locale, "sidebarHide", nil)
-}
-
-// SidebarInvites says "{count, plural, one {# page shared with you} other {# pages shared with you}}"
-// in the language the app shows.
-//
-// Sidebar's top bar: tooltip of the button, shown only while invites wait,
-// that lists the pages shared with the user to accept.
-func SidebarInvites(count int) string { return In(i18n.Locale()).SidebarInvites(count) }
-
-// SidebarInvites says "{count, plural, one {# page shared with you} other {# pages shared with you}}"
-// in the language of msgs.
-//
-// Sidebar's top bar: tooltip of the button, shown only while invites wait,
-// that lists the pages shared with the user to accept.
-func (msgs Messages) SidebarInvites(count int) string {
-	return Catalog.Format(msgs.locale, "sidebarInvites", map[string]any{"count": count})
 }
 
 // SidebarNoPages says "No pages yet"

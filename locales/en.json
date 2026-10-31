@@ -140,39 +140,6 @@
   "@shellNewPage": {
     "description": "Button when no page is open: make a new page."
   },
-  "shellInviteFrom": "{name} shared “{title}” with you",
-  "@shellInviteFrom": {
-    "description": "Home view (and a desktop notification): a page someone shared with the user, waiting for them to accept or decline it.",
-    "placeholders": {
-      "name": {
-        "type": "String"
-      },
-      "title": {
-        "type": "String"
-      }
-    }
-  },
-  "shellInviteSomeone": "Someone",
-  "@shellInviteSomeone": {
-    "description": "Home view: who shared a page, when they have no name."
-  },
-  "shellInviteAccept": "Accept",
-  "@shellInviteAccept": {
-    "description": "Home view: button that accepts a shared page's invite; the page then appears in the sidebar."
-  },
-  "shellInviteDecline": "Decline",
-  "@shellInviteDecline": {
-    "description": "Home view: tooltip of the x button that declines a shared page's invite."
-  },
-  "shellInviteFailed": "Could not answer the invite: {error}",
-  "@shellInviteFailed": {
-    "description": "Toast when accepting or declining an invite failed.",
-    "placeholders": {
-      "error": {
-        "type": "String"
-      }
-    }
-  },
   "trayNewRecording": "New Recording",
   "@trayNewRecording": {
     "description": "The menu bar icon's menu: start a recording in a new page."
@@ -607,10 +574,6 @@
   },
   "commonEmail": "Email",
   "@commonEmail": {
-    "description": "A common word used in several places of the app."
-  },
-  "commonOwner": "Owner",
-  "@commonOwner": {
     "description": "A common word used in several places of the app."
   },
   "commonModel": "Model",
@@ -1135,75 +1098,9 @@
       }
     }
   },
-  "dialogShareSubtitle": "People you add can open this page and its subpages.",
-  "@dialogShareSubtitle": {
-    "description": "Share dialog: the subtitle."
-  },
-  "dialogShareLocalOnly": "This is a temporary, view-only link: visitors can't edit the page. Turning off sharing stops the link working.",
-  "@dialogShareLocalOnly": {
-    "description": "Share dialog: a notice under the public link, in a build with no server: the link is temporary and view-only, and turning sharing off ends it."
-  },
-  "dialogShareSignIn": "Sign in with Supabase to share pages with other people.",
-  "@dialogShareSignIn": {
-    "description": "Share dialog: a notice when signed out."
-  },
-  "dialogShareOwnerOnly": "Only the owner of this space can change who it is shared with.",
+  "dialogShareOwnerOnly": "Only the page's owner can share it publicly.",
   "@dialogShareOwnerOnly": {
-    "description": "Share dialog: a notice on a page shared with the user."
-  },
-  "dialogShareInvitee": "Name or email",
-  "@dialogShareInvitee": {
-    "description": "Share dialog: the field of the person to invite."
-  },
-  "dialogShareSent": "If {email} has a Leaflet account, they'll get an invite.",
-  "@dialogShareSent": {
-    "description": "Share dialog: shown after inviting someone; it never says whether the email has an account. The page reaches them once they accept the invite.",
-    "placeholders": {
-      "email": {
-        "type": "String"
-      }
-    }
-  },
-  "dialogShareInvalidEmail": "Enter an email address.",
-  "@dialogShareInvalidEmail": {
-    "description": "Share dialog: the server refused an invite because what was typed is no email address."
-  },
-  "dialogShareWithSelf": "That's your own email address.",
-  "@dialogShareWithSelf": {
-    "description": "Share dialog: the server refused an invite to the user's own email address."
-  },
-  "dialogShareCanEdit": "Can edit",
-  "@dialogShareCanEdit": {
-    "description": "Share dialog: the role of a person who can edit."
-  },
-  "dialogShareCanView": "Can view",
-  "@dialogShareCanView": {
-    "description": "Share dialog: the role of a person who can only view."
-  },
-  "dialogShareInherited": "Shared from a page above this one: remove them there.",
-  "@dialogShareInherited": {
-    "description": "Share dialog: removing someone from a subpage did nothing, as their access comes from a page above it."
-  },
-  "dialogShareInvited": "Invited",
-  "@dialogShareInvited": {
-    "description": "Share dialog: beside the role of a person who has not accepted the invite yet."
-  },
-  "dialogShareInvite": "Invite",
-  "@dialogShareInvite": {
-    "description": "Share dialog: the button inviting the person."
-  },
-  "dialogSharePeople": "People with access",
-  "@dialogSharePeople": {
-    "description": "Share dialog: the heading over the people the page is shared with."
-  },
-  "dialogShareYou": "{name} (you)",
-  "@dialogShareYou": {
-    "description": "Share dialog: the user's own row.",
-    "placeholders": {
-      "name": {
-        "type": "String"
-      }
-    }
+    "description": "The Share dialog of a page shared with the user: only its owner shares it through a public link."
   },
   "dialogShareCopyLink": "Copy link",
   "@dialogShareCopyLink": {
@@ -1998,16 +1895,6 @@
   "sidebarHide": "Hide sidebar (⌘\\)",
   "@sidebarHide": {
     "description": "Sidebar: tooltip of the button hiding it."
-  },
-  "sidebarInvites": "{count, plural, one {# page shared with you} other {# pages shared with you}}",
-  "@sidebarInvites": {
-    "description": "Sidebar's top bar: tooltip of the button, shown only while invites wait, that lists the pages shared with the user to accept.",
-    "placeholders": {
-      "count": {
-        "type": "int",
-        "example": "2"
-      }
-    }
   },
   "sidebarNoPages": "No pages yet",
   "@sidebarNoPages": {

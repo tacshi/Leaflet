@@ -539,7 +539,6 @@ func (a *App) leave(clear func() error, synced bool) {
 			}
 			a.backend.SignOut()
 			a.forgetProject()
-			a.sync.ClearInvites()
 			err = clear()
 		})
 		a.update(func() {
@@ -547,7 +546,6 @@ func (a *App) leave(clear func() error, synced bool) {
 				account.unsynced = unsynced
 				return
 			}
-			a.invites = nil
 			if err != nil {
 				a.toast(locales.SettingsRemovePagesFailed(err.Error()))
 			}

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Leaflet</title>
+<script>
+  // Supabase sends people here after they approve Leaflet: redirect URLs
+  // must be https, which the app can't answer. This sends the browser on
+  // to the app, waiting on this computer, with the code and state. The
+  // code is of no use without the verifier, which never leaves the app.
+  location.replace("http://127.0.0.1:51741/auth/callback" + location.search);
+</script>
+<style>
+  body { font: 16px -apple-system, system-ui, sans-serif; display: grid; place-items: center; height: 90vh; margin: 0; color: #16181d; background: #fff; }
+  p { color: #565c67; margin: 0; }
+  @media (prefers-color-scheme: dark) { body { color: #e8e9ec; background: #16181d; } p { color: #9aa0aa; } }
+</style>
+</head>
+<body>
+<div style="text-align:center">
+  <h2 style="margin:0 0 8px">Returning to Leaflet…</h2>
+  <p>If nothing happens, open Leaflet and sign in with Supabase again.</p>
+</div>
+</body>
+</html>

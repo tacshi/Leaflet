@@ -695,7 +695,7 @@ func (a *App) shareDialog(c *ui.Context) {
 	dialog(c, &d.shareOpen, 480, func() {
 		// The subtitle is about inviting people, which needs a server.
 		subtitle := ""
-		if a.backend.Configured() {
+		if a.hasServer() {
 			subtitle = locales.DialogShareSubtitle()
 		}
 		dialogHeader(c, locales.DialogShareTitle(a.pageTitleOf(d.sharePage)), subtitle, &d.shareOpen)
@@ -706,7 +706,7 @@ func (a *App) shareDialog(c *ui.Context) {
 				ui.Box(c).Height(1).FillWidth().Background(pal.Divider)
 			}
 			switch {
-			case !a.backend.Configured():
+			case !a.hasServer():
 				notice(c, "info", "info", locales.DialogShareLocalOnly(), nil)
 				return
 			case !a.session.SignedIn:

@@ -32,12 +32,17 @@ var (
 
 // Settings say which Supabase project to use.
 type Settings struct {
-	URL     string
-	AnonKey string
+	URL     string `json:"url"`
+	AnonKey string `json:"anon_key"`
+	// Ref and Name are the project's, when the person chose it with their
+	// Supabase account; a server the build or environment fixes has none.
+	Ref  string `json:"ref,omitempty"`
+	Name string `json:"name,omitempty"`
 }
 
 // Config reads the project from SUPABASE_URL and SUPABASE_ANON_KEY, or the
-// build's defaults.
+// build's defaults. Without them, New uses the project kept on this
+// device.
 func Config() Settings {
 	s := Settings{URL: DefaultURL, AnonKey: DefaultAnonKey}
 	if v := os.Getenv("SUPABASE_URL"); v != "" {
@@ -49,6 +54,9 @@ func Config() Settings {
 	s.URL = strings.TrimRight(s.URL, "/")
 	return s
 }
+
+// backendKey keeps the project chosen on this device.
+const backendKey = "backend"
 
 // Error is a failed request, with the server's message.
 type Error struct {
@@ -79,9 +87,12 @@ type authUser struct {
 
 // Client is the connection to the server.
 type Client struct {
-	cfg  Settings
-	st   *store.Store
-	http *http.Client
+	// cfg is guarded by mu: Use changes it while requests run.
+	cfg Settings
+	// fixed says the build or environment set cfg, which Use then leaves.
+	fixed bool
+	st    *store.Store
+	http  *http.Client
 	// long is for what can outlast http's timeout: Storage uploads and
 	// downloads, and streamed runs (newLongClient).
 	long *http.Client
@@ -114,7 +125,54 @@ type refresh struct {
 
 // New returns a client for a project.
 func New(cfg Settings, st *store.Store) *Client {
-	return &Client{cfg: cfg, st: st, http: &http.Client{Timeout: 90 * time.Second}, long: newLongClient()}
+	c := &Client{cfg: cfg, fixed: cfg.URL != "", st: st, http: &http.Client{Timeout: 90 * time.Second}, long: newLongClient()}
+	if !c.fixed && st != nil {
+		if raw, ok := st.Value(backendKey); ok {
+			_ = json.Unmarshal([]byte(raw), &c.cfg)
+		}
+	}
+	return c
+}
+
+// settings returns the project in use.
+func (c *Client) settings() Settings {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.cfg
+}
+
+// Fixed reports whether the build or environment sets the server, rather
+// than the person choosing their project.
+func (c *Client) Fixed() bool { return c != nil && c.fixed }
+
+// Project returns the project in use.
+func (c *Client) Project() Settings { return c.settings() }
+
+// Use makes s the project, kept on this device; an empty s forgets it.
+// The session, which belongs to the project before, goes.
+func (c *Client) Use(s Settings) error {
+	if c.fixed {
+		return errors.New("This build's server is fixed.") //nolint:staticcheck // shown to people as a sentence.
+	}
+	s.URL = strings.TrimRight(s.URL, "/")
+	c.mu.Lock()
+	same := c.cfg == s
+	c.mu.Unlock()
+	if same {
+		return nil
+	}
+	c.keep(nil)
+	c.mu.Lock()
+	c.cfg = s
+	c.mu.Unlock()
+	if c.st == nil {
+		return nil
+	}
+	if s.URL == "" {
+		return c.st.DeleteValue(backendKey)
+	}
+	raw, _ := json.Marshal(s)
+	return c.st.SetValue(backendKey, string(raw))
 }
 
 // longHeaderWait is how long the long client waits for a server to start
@@ -134,10 +192,16 @@ func newLongClient() *http.Client {
 }
 
 // Configured reports whether the build has a server.
-func (c *Client) Configured() bool { return c != nil && c.cfg.URL != "" && c.cfg.AnonKey != "" }
+func (c *Client) Configured() bool {
+	if c == nil {
+		return false
+	}
+	cfg := c.settings()
+	return cfg.URL != "" && cfg.AnonKey != ""
+}
 
 // URL is the project's URL.
-func (c *Client) URL() string { return c.cfg.URL }
+func (c *Client) URL() string { return c.settings().URL }
 
 // SignedIn reports whether someone is signed in.
 func (c *Client) SignedIn() bool {
@@ -230,12 +294,13 @@ func (c *Client) authRequest(ctx context.Context, path string, body any, withTok
 	if !c.Configured() {
 		return nil, ErrNotConfigured
 	}
+	cfg := c.settings()
 	raw, _ := json.Marshal(body)
-	req, err := http.NewRequestWithContext(ctx, "POST", c.cfg.URL+"/auth/v1/"+path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, "POST", cfg.URL+"/auth/v1/"+path, bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("apikey", c.cfg.AnonKey)
+	req.Header.Set("apikey", cfg.AnonKey)
 	req.Header.Set("Content-Type", "application/json")
 	if withToken {
 		tok, err := c.token(ctx)
@@ -307,34 +372,124 @@ func (c *Client) fromToken(out map[string]any) (*store.User, error) {
 	return u, nil
 }
 
-// SignIn signs in with an email and password.
-func (c *Client) SignIn(email, password string) (*store.User, error) {
-	out, err := c.authRequest(context.Background(), "token?grant_type=password", map[string]any{"email": email, "password": password}, false)
-	if err != nil {
-		return nil, err
-	}
-	return c.fromToken(out)
-}
-
-// SignUp creates an account. The server may ask to confirm the email
-// first, in which case no user is returned.
-func (c *Client) SignUp(email, password, name string) (*store.User, error) {
-	out, err := c.authRequest(context.Background(), "signup", map[string]any{
-		"email": email, "password": password, "data": map[string]any{"display_name": name},
-	}, false)
-	if err != nil {
-		return nil, err
-	}
-	if _, ok := out["access_token"]; !ok {
-		return nil, nil
-	}
-	return c.fromToken(out)
-}
-
 // SendCode emails a sign-in link and code.
 func (c *Client) SendCode(email string) error {
 	_, err := c.authRequest(context.Background(), "otp", map[string]any{"email": email, "create_user": true}, false)
 	return err
+}
+
+// ownerFlag marks, in app_metadata, the account SignInAsOwner made: the
+// person who owns the project, whose Supabase account can't tell the API
+// its email.
+const ownerFlag = "leaflet_owner"
+
+// ProjectOwner returns the email and name of the project's owner, the
+// account SignInAsOwner made, or "" when there is none yet. secret is the
+// project's secret key, which is not kept.
+func (c *Client) ProjectOwner(ctx context.Context, secret string) (email, name string, err error) {
+	out, err := c.adminRequest(ctx, secret, "GET", "admin/users?per_page=1000", nil)
+	if err != nil {
+		return "", "", err
+	}
+	raw, _ := json.Marshal(out["users"])
+	var users []struct {
+		authUser
+		AppMetadata map[string]any `json:"app_metadata"`
+	}
+	_ = json.Unmarshal(raw, &users)
+	for _, u := range users {
+		if u.AppMetadata[ownerFlag] == true {
+			return u.Email, toUser(&u.authUser).DisplayName, nil
+		}
+	}
+	return "", "", nil
+}
+
+// SignInAsOwner signs in to the project as the person who owns it, by
+// email. secret is the project's secret key: it makes their account when
+// there is none, marked as the owner's, then a sign-in link used at once,
+// and is not kept.
+func (c *Client) SignInAsOwner(ctx context.Context, secret, email, name string) (*store.User, error) {
+	owner := map[string]any{ownerFlag: true}
+	out, err := c.adminRequest(ctx, secret, "POST", "admin/users", map[string]any{
+		"email": email, "email_confirm": true, "user_metadata": map[string]any{"display_name": name}, "app_metadata": owner,
+	})
+	made := err == nil
+	if err != nil && !accountExists(out) {
+		return nil, err
+	}
+	link, err := c.adminRequest(ctx, secret, "POST", "admin/generate_link", map[string]any{"type": "magiclink", "email": email})
+	if err != nil {
+		return nil, err
+	}
+	if id, _ := link["id"].(string); !made && id != "" {
+		// An account made before it was marked, as by signing up.
+		if _, err := c.adminRequest(ctx, secret, "PUT", "admin/users/"+url.PathEscape(id), map[string]any{"app_metadata": owner}); err != nil {
+			return nil, err
+		}
+	}
+	if props, ok := link["properties"].(map[string]any); ok {
+		link = props
+	}
+	hash, _ := link["hashed_token"].(string)
+	kind, _ := link["verification_type"].(string)
+	if hash == "" {
+		return nil, errNoSession
+	}
+	if kind == "" {
+		kind = "magiclink"
+	}
+	session, err := c.authRequest(ctx, "verify", map[string]any{"type": kind, "token_hash": hash}, false)
+	if err != nil {
+		return nil, err
+	}
+	return c.fromToken(session)
+}
+
+// accountExists reports whether Auth refused to make an account because
+// it has one by that email, and not for another reason it also answers
+// 422 for, such as the email being invalid.
+func accountExists(out map[string]any) bool {
+	code, _ := out["error_code"].(string)
+	if code == "" {
+		code, _ = out["code"].(string)
+	}
+	return code == "email_exists" || code == "user_already_exists"
+}
+
+// adminRequest makes a request of Auth's admin API with the project's
+// secret key.
+func (c *Client) adminRequest(ctx context.Context, secret, method, path string, body any) (map[string]any, error) {
+	var r io.Reader
+	if body != nil {
+		raw, _ := json.Marshal(body)
+		r = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.settings().URL+"/auth/v1/"+path, r)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("apikey", secret)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if strings.HasPrefix(secret, "eyJ") {
+		// A legacy service_role key is a JWT, which Auth also wants as
+		// the bearer; a secret key goes in apikey alone.
+		req.Header.Set("Authorization", "Bearer "+secret)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = res.Body.Close() }()
+	var out map[string]any
+	data, _ := io.ReadAll(res.Body)
+	_ = json.Unmarshal(data, &out)
+	if res.StatusCode >= 400 {
+		return out, &Error{Status: res.StatusCode, Message: message(out, string(data))}
+	}
+	return out, nil
 }
 
 // VerifyCode signs in with the code from the email.
@@ -468,9 +623,10 @@ func (c *Client) UpdateUser(data map[string]any) error {
 	if err != nil {
 		return err
 	}
+	cfg := c.settings()
 	raw, _ := json.Marshal(map[string]any{"data": data})
-	req, _ := http.NewRequest("PUT", c.cfg.URL+"/auth/v1/user", bytes.NewReader(raw))
-	req.Header.Set("apikey", c.cfg.AnonKey)
+	req, _ := http.NewRequest("PUT", cfg.URL+"/auth/v1/user", bytes.NewReader(raw))
+	req.Header.Set("apikey", cfg.AnonKey)
 	req.Header.Set("Authorization", "Bearer "+tok)
 	req.Header.Set("Content-Type", "application/json")
 	res, err := c.http.Do(req)
@@ -495,11 +651,12 @@ func (c *Client) requestWith(hc *http.Client, ctx context.Context, lasting time.
 	if !c.Configured() {
 		return nil, ErrNotConfigured
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.cfg.URL+path, body)
+	cfg := c.settings()
+	req, err := http.NewRequestWithContext(ctx, method, cfg.URL+path, body)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("apikey", c.cfg.AnonKey)
+	req.Header.Set("apikey", cfg.AnonKey)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

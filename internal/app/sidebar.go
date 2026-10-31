@@ -640,7 +640,7 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 	if m.Item(locales.SidebarPageHistory()).Chosen() {
 		a.openHistory(p.ID)
 	}
-	server := a.backend.Configured()
+	server := a.hasServer()
 	if !header && server && !p.Template && m.Item(locales.SidebarShareEllipsis()).Chosen() {
 		a.openShare(p.ID)
 	}
@@ -662,7 +662,7 @@ func (a *App) sidebarFooter(c *ui.Context) {
 	pal := theme.Of(c)
 	ui.Row(c.Key("sidebar-footer")).Padding(8, 8, 8, 12).Gap(10).AlignItems(ui.Center).BorderWidth(1, 0, 0, 0).BorderColor(pal.Separator).Children(func() {
 		// Not signed in, the account row is the way to sign in.
-		signIn := !a.syncOn() && a.backend.Configured()
+		signIn := !a.syncOn() && a.hasServer()
 		var account ui.Element
 		if signIn {
 			account = ui.ButtonBase(c.Key("account")).Grow(1).Gap(10).Padding(4).Margin(-4).Radius(7).AlignItems(ui.Center).Justify(ui.Start).

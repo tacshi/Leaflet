@@ -15,15 +15,14 @@ import (
 func remoteQuery(order string) remote.Query { return remote.Query{Order: order} }
 
 type signInState struct {
-	mode     int // 0 sign in, 1 create account, 2 email code
-	email    string
-	password string
-	name     string
-	code     string
-	sent     bool
-	busy     bool
-	err      string
-	info     string
+	// email, code and sent are the email-code form of a server the build
+	// or environment fixes, such as the local stack.
+	email string
+	code  string
+	sent  bool
+	busy  bool
+	err   string
+	info  string
 	// asking is the account signed in as while signInAlert asks about
 	// the previous account's changes that signing in removes, lost.
 	asking *store.User
@@ -41,47 +40,18 @@ func (a *App) signInView(c *ui.Context) {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(64, 24).Children(func() {
 			ui.Column(c).Width(380).Gap(16).Children(func() {
 				ui.Column(c).Gap(6).AlignItems(ui.Center).Children(func() {
-					ui.Box(c).Size(44, 44).Radius(12).Background(pal.Accent).Center().Children(func() {
-						ui.Icon(c, theme.Icon("file-text")).FontSize(22).TextColor(pal.OnAccent)
-					})
+					ui.Image(c, supabaseLogo()).Size(42, 44)
 					ui.Text(c, locales.SigninTitle()).FontSize(22).FontWeight(700).TextColor(pal.Text).Margin(10, 0, 0)
 					ui.Text(c, locales.SigninSubtitle()).FontSize(13.5).TextColor(pal.TextMuted).TextAlign(ui.Center)
 				})
-				if !a.backend.Configured() {
+				if !a.hasServer() {
 					notice(c, "info", "info", locales.SigninNoServer(), nil)
 					return
 				}
-				ui.Segmented(c.Key("mode"), &s.mode, locales.SigninPassword(), locales.SigninCreateAccount(), locales.SigninEmailCode())
-				switch s.mode {
-				case 0:
-					field(c, "email", &s.email, locales.CommonEmail()).AutoFocus()
-					if password(c, "password", &s.password, locales.SigninPassword()).Submitted() {
-						a.doSignIn()
-					}
-					if primary(c, "go", "", locales.CommonSignIn()).Disabled(s.busy).Clicked() {
-						a.doSignIn()
-					}
-				case 1:
-					field(c, "name", &s.name, locales.SettingsYourName()).AutoFocus()
-					field(c, "email", &s.email, locales.CommonEmail())
-					if password(c, "password", &s.password, locales.SigninPasswordNew()).Submitted() {
-						a.doSignUp()
-					}
-					if primary(c, "go", "", locales.SigninCreateAccount()).Disabled(s.busy).Clicked() {
-						a.doSignUp()
-					}
-				case 2:
-					field(c, "email", &s.email, locales.CommonEmail()).AutoFocus()
-					if s.sent {
-						if field(c, "code", &s.code, locales.SigninCode()).Submitted() {
-							a.doVerify()
-						}
-						if primary(c, "verify", "", locales.CommonSignIn()).Disabled(s.busy).Clicked() {
-							a.doVerify()
-						}
-					} else if primary(c, "send", "", locales.SigninSendCode()).Disabled(s.busy).Clicked() {
-						a.doSendCode()
-					}
+				if a.backend.Fixed() {
+					a.emailCodeForm(c)
+				} else {
+					a.supabaseSignIn(c)
 				}
 				if s.err != "" {
 					notice(c, "danger", "circle-alert", s.err, nil)
@@ -91,6 +61,7 @@ func (a *App) signInView(c *ui.Context) {
 				}
 				ui.Divider(c)
 				if ghost(c, "local", "laptop", locales.SigninContinueLocal()).Clicked() {
+					a.cancelSupabase()
 					a.back()
 					if a.route.Kind == "signin" {
 						a.show(Route{Kind: "home"})
@@ -112,31 +83,126 @@ func (a *App) runAuth(fn func() (*store.User, error)) {
 				s.err = err.Error()
 				return
 			}
-			if user == nil {
-				s.info = locales.SigninConfirmEmail()
-				return
-			}
 			a.signedIn(user)
 		})
 	}()
 }
 
-func (a *App) doSignIn() {
-	email, pw := strings.TrimSpace(signIn.email), signIn.password
-	if email == "" || pw == "" {
-		signIn.err = locales.SigninEnterEmailPassword()
-		return
+// supabaseSignIn is signing in with Supabase: one button, then the steps
+// of finding, creating and setting up the project.
+func (a *App) supabaseSignIn(c *ui.Context) {
+	pal := theme.Of(c)
+	// A step under way can be cancelled, to start again: the browser's
+	// wait, the one most often left, holds the sign-in's port till then.
+	busy := func(text string) {
+		ui.Row(c.Key("busy")).Gap(10).AlignItems(ui.Center).Justify(ui.Center).Padding(8, 0).Children(func() {
+			ui.Spinner(c).Size(16, 16)
+			ui.Text(c, text).FontSize(13.5).TextColor(pal.TextMuted)
+		})
+		ui.Row(c.Key("cancel-row")).Justify(ui.Center).Children(func() {
+			if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
+				a.cancelSupabase()
+			}
+		})
 	}
-	a.runAuth(func() (*store.User, error) { return a.backend.SignIn(email, pw) })
+	switch supa.step {
+	case "":
+		if primary(c, "supabase", "", locales.SigninContinueSupabase()).FillWidth().Clicked() {
+			a.signInWithSupabase()
+		}
+		ui.Row(c).Gap(6).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, locales.SigninNoSupabase()).FontSize(13).TextColor(pal.TextMuted)
+			ui.Link(c, locales.SigninCreateSupabase(), supabaseSignUp).FontSize(13)
+		})
+	case stepBrowser:
+		busy(locales.SigninWaitingBrowser())
+	case stepFinding:
+		busy(locales.SigninFindingProject())
+	case stepChoose:
+		a.projectChoice(c)
+	case stepCreating:
+		busy(locales.SigninCreatingProject())
+	case stepStarting:
+		busy(locales.SigninStartingProject())
+	case stepSetup:
+		if supa.all > 0 {
+			busy(locales.SigninSettingUpSteps(supa.done, supa.all))
+		} else {
+			busy(locales.SigninSettingUp())
+		}
+	case stepSigning:
+		busy(locales.SigninSigningIn())
+	}
 }
 
-func (a *App) doSignUp() {
-	email, pw, name := strings.TrimSpace(signIn.email), signIn.password, strings.TrimSpace(signIn.name)
-	if len(pw) < 8 {
-		signIn.err = locales.SigninPasswordTooShort()
-		return
+// supabaseSignUp is where people without a Supabase account make one.
+const supabaseSignUp = "https://supabase.com/dashboard/sign-up"
+
+// projectChoice lists the account's Leaflet projects to use, those
+// Leaflet made and did not finish, and a new project to create.
+func (a *App) projectChoice(c *ui.Context) {
+	f := &supa.found
+	label(c, locales.SigninChooseProject())
+	card(c, "projects", func() {
+		row := 0
+		for _, p := range f.Projects {
+			settingRow(c, "p-"+p.Ref, p.Name, p.Ref+" · "+p.Region, row == 0, func() {
+				if button(c, "use", "", locales.SigninUseProject()).Clicked() {
+					a.chooseProject(&p)
+				}
+			})
+			row++
+		}
+		for _, p := range f.Unfinished {
+			desc := locales.SigninProjectNotSetUp()
+			if p.Status == "INACTIVE" {
+				desc = locales.SigninProjectPaused()
+			}
+			settingRow(c, "u-"+p.Ref, p.Name, desc, row == 0, func() {
+				if button(c, "setup", "", locales.SigninSetUpProject()).Clicked() {
+					a.chooseProject(&p)
+				}
+			})
+			row++
+		}
+		desc := locales.SigninNewProjectDesc()
+		settingRow(c, "new", locales.SigninNewProject(), desc, row == 0, func() {
+			if len(f.Orgs) > 1 {
+				slugs := make([]string, len(f.Orgs))
+				for i, o := range f.Orgs {
+					slugs[i] = o.Slug
+				}
+				selectBox(c, "org", &supa.org, slugs, func(slug string) string {
+					for _, o := range f.Orgs {
+						if o.Slug == slug {
+							return o.Name
+						}
+					}
+					return slug
+				}, 160)
+			}
+			if primary(c, "create", "", locales.SigninCreateProject()).Disabled(supa.org == "").Clicked() {
+				a.chooseProject(nil)
+			}
+		})
+	})
+}
+
+// emailCodeForm signs in to a server the build or environment fixes,
+// such as the local stack, with a code sent by email.
+func (a *App) emailCodeForm(c *ui.Context) {
+	s := &signIn
+	field(c, "email", &s.email, locales.CommonEmail()).AutoFocus()
+	if s.sent {
+		if field(c, "code", &s.code, locales.SigninCode()).Submitted() {
+			a.doVerify()
+		}
+		if primary(c, "verify", "", locales.CommonSignIn()).Disabled(s.busy).Clicked() {
+			a.doVerify()
+		}
+	} else if primary(c, "send", "", locales.SigninSendCode()).Disabled(s.busy).Clicked() {
+		a.doSendCode()
 	}
-	a.runAuth(func() (*store.User, error) { return a.backend.SignUp(email, pw, name) })
 }
 
 func (a *App) doSendCode() {

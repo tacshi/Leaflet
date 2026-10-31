@@ -8,3 +8,6 @@ mygo_windows_*.syso
 # Supabase CLI local state
 supabase/.branches/
 supabase/.temp/
+
+# Wrangler local state
+worker/.wrangler/

@@ -473,6 +473,7 @@ func (a *App) start() error {
 	go a.checkForUpdate()
 	a.rec.Attach(a.win, func(fn func()) { a.update(func() { fn(); a.refreshTray() }) })
 	a.sync.Start()
+	go a.updateProject()
 	return nil
 }
 

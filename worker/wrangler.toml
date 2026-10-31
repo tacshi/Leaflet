@@ -1,0 +1,14 @@
+# Leaflet's sign-in with Supabase: its redirect page and token exchange.
+# Deploy from this folder:
+#   npx wrangler login
+#   npx wrangler secret put CLIENT_SECRET   # the OAuth app's client secret
+#   npx wrangler deploy
+name = "leaflet-auth"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+workers_dev = false
+routes = [{ pattern = "leaflet-auth.capyvibe.app", custom_domain = true }]
+
+[vars]
+# Leaflet's Supabase OAuth app (internal/supabaseapi.ClientID).
+CLIENT_ID = "a587f79b-48d7-41c1-b5ce-cbf87d11a491"

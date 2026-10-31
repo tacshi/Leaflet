@@ -15,10 +15,69 @@ supabase/
     providers/      save / models / test / delete model providers
     stt/            Soniox temporary keys, Soniox key storage, file transcription
     account/        account deletion
+  embed.go          carries migrations/ and functions/ into the app
 ```
 
 Each schema change is a new migration: `supabase db push` never runs one a
 project has applied again, so an edit to it reaches no existing project.
+
+## Sign in with Supabase
+
+People sync through a project in their own Supabase account. **Continue with
+Supabase** signs in to the Management API, uses the account's Leaflet project
+(one whose migration history has `20261025000000`), or creates one named
+Leaflet, then sets it up from this folder, built into the app:
+
+- the migrations it lacks, each recorded in `supabase_migrations` as
+  `supabase db push` records them;
+- the four functions, unless the `LEAFLET_FUNCTIONS_HASH` secret says they
+  are current;
+- a 500 MiB upload limit, where the plan allows it.
+
+It then signs in to the project's Auth as the account's email, making that
+user with the project's secret key, which is used once and not kept. The
+account's refresh token stays in the keychain, and a newer app brings the
+project up to date when it starts.
+
+This needs one OAuth app, registered once in a Supabase organization
+(Organization settings › OAuth Apps):
+
+- Redirect URL: `https://leaflet-auth.capyvibe.app/auth/supabase`, the sign-in
+  Worker's page (below).
+- Scopes: Organizations read; Projects read and write; Database read and
+  write; Edge Functions write; Secrets read and write (the project's API
+  keys are read under Secrets); Storage write.
+
+Its client ID is built in (`ClientID` in
+[`internal/supabaseapi`](../internal/supabaseapi/supabaseapi.go)). Its client
+secret, which Supabase wants with every code and refresh token, PKCE or not,
+ships in no app: the sign-in Worker in [`../worker`](../worker) holds it.
+
+### The sign-in Worker
+
+A Cloudflare Worker with two routes:
+
+- `GET /auth/supabase`, the OAuth app's redirect URL. Supabase takes only
+  https ones, which a desktop app can't answer, so the page sends the browser
+  on to the app waiting on `http://127.0.0.1:51741/auth/callback`, with the
+  code and state.
+- `POST /token`, Supabase's token endpoint with the client secret added. It
+  takes only Leaflet's client ID, codes with their PKCE verifier and its own
+  redirect URL, and refresh tokens.
+
+Deploy it from [`../worker`](../worker):
+
+```bash
+npx wrangler login
+npx wrangler secret put CLIENT_SECRET
+npx wrangler deploy
+```
+
+Its address goes in `Auth` in
+[`internal/supabaseapi`](../internal/supabaseapi/supabaseapi.go), and its
+`/auth/supabase` in the OAuth app's redirect URL. To rotate the secret,
+rotate it in the organization's settings and put it again: no app changes.
+Its tests: `cd worker && deno test --allow-net src/`.
 
 ## Local development
 
@@ -30,10 +89,11 @@ supabase db reset              # apply migrations/ to a fresh database
 supabase functions serve       # serve every function with hot reload
 ```
 
-`supabase start` prints the local API URL and anon key. Run the app against it:
+`supabase start` prints the local API URL and Publishable key (`sb_publishable_…`;
+the older anon key works too). Run the app against it:
 
 ```bash
-SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<anon key from supabase start> go tool mygo dev
+SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key from supabase start> go tool mygo dev
 ```
 
 Without these variables the app runs local-only: pages, editing, recording and
@@ -49,13 +109,20 @@ deno check */index.ts
 deno lint
 ```
 
-## Deploying
+## Deploying by hand
+
+A project the app does not set up, such as one a build fixes with
+`SUPABASE_URL`:
 
 ```bash
 supabase link --project-ref <ref>
 supabase db push
 supabase functions deploy agent providers stt account
 ```
+
+The app takes the project URL and its Publishable key (Project Settings › API
+Keys) as `SUPABASE_URL` and `SUPABASE_ANON_KEY`; it sends the key only as
+`apikey`. The Secret key bypasses row-level security and never goes in the app.
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are
 provided to functions automatically. There is no app-wide Soniox key: each

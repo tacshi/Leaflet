@@ -28,31 +28,6 @@ const videoOrigin = "https://app.capyvibe.leaflet/"
 // web video files, and run nothing of its own.
 const videoCSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; media-src https: http:"
 
-// videoWheel passes the page the wheel over a video, which its player
-// does not scroll: in the player's frame, another site's, it posts the
-// movement to the page that frames it, which hands it on to the app as an
-// embed's frame does. Frames never call Go, only the app's page.
-const videoWheel = `(function () {
-  function dy(e) {
-    var k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
-    return e.ctrlKey ? 0 : e.deltaY * k;
-  }
-  if (window.top !== window) {
-    addEventListener("wheel", function (e) {
-      var d = dy(e);
-      if (d) window.top.postMessage({leafletWheel: d}, "*");
-    }, {passive: true});
-    return;
-  }
-  function scroll(d) {
-    if (d && window.mygo) window.mygo.call("Embeds.Scroll", d);
-  }
-  addEventListener("message", function (e) {
-    if (e.data && typeof e.data.leafletWheel === "number") scroll(e.data.leafletWheel);
-  });
-  addEventListener("wheel", function (e) { scroll(dy(e)); }, {passive: true});
-})();`
-
 // videoSession is the website data of the video players, kept in memory
 // only, which goes as the last player closes.
 var videoSession = sync.OnceValue(mygo.NewEphemeralSession)
@@ -186,11 +161,10 @@ func (a *App) playVideo(id string, v doc.Video) {
 	}
 	// The player's cookies and storage stay in memory, apart from the
 	// other web views'. Its videos may float in picture in picture, which
-	// macOS otherwise keeps to Safari. videoWheel runs in the player's
-	// frame too, to pass the page the wheel over it.
-	wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: "#000000", Page: mygo.PageOptions{
-		TrustedOrigins: []string{strings.TrimSuffix(videoOrigin, "/")}, Session: videoSession(), PictureInPicture: true,
-		PreloadScript: videoWheel, PreloadAllFrames: true}})
+	// macOS otherwise keeps to Safari. The wheel over the player, which
+	// does not scroll, scrolls the page around it.
+	wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: "#000000", ScrollToContainer: true,
+		Page: mygo.PageOptions{Session: videoSession(), PictureInPicture: true}})
 	if err != nil {
 		a.toast(locales.VideoCannotPlay(err.Error()))
 		return

@@ -409,6 +409,37 @@ func TestDeleteStarter(t *testing.T) {
 		ui.Column(c).Fill().Padding(20).Children(func() { a.emptyActions(c) })
 	}, 600, 900)
 	tt.Frame()
+	// Out of sight, the menu button leaves Tab to the rows, until hovered:
+	// from a starter's row, Tab goes to the next one.
+	for range 20 {
+		if tt.Focused("Meeting notes") {
+			break
+		}
+		tt.Key(0, ui.KeyTab)
+		tt.Frame()
+	}
+	if !tt.Focused("Meeting notes") {
+		t.Fatal("Tab never reached the starter")
+	}
+	tt.Key(0, ui.KeyTab)
+	tt.Frame()
+	if !tt.Focused("To-do list") {
+		t.Error("Tab went from the starter to its hidden menu button")
+	}
+	// The menu key opens the focused row's menu instead.
+	tt.Key(0, ui.KeyContextMenu)
+	tt.Frame()
+	if !tt.HasText("Delete template") {
+		t.Errorf("the menu key opened no menu in %q", tt.Texts())
+	}
+	tt.Key(0, ui.KeyEscape)
+	tt.Frame()
+	r, ok := tt.Find("Template actions")
+	if !ok {
+		t.Fatalf("no menu button in %v", tt.Texts())
+	}
+	tt.Move(r.X+r.W/2, r.Y+r.H/2)
+	tt.Frame()
 	if err := tt.Click("Template actions"); err != nil {
 		t.Fatal(err)
 	}

@@ -108,8 +108,10 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 		}
 	}
 	ui.Popover(c, chip, &open, func() {
-		cal := ui.Calendar(c.Key("due-calendar"), &e.dueDraft)
-		// A click on a day, the one chosen too, focuses the calendar.
+		// Its buttons and Page Up and Down only show other months, so
+		// looking at one leaves the date as it was. A click on a day, the
+		// one chosen too, focuses the calendar.
+		cal := ui.Calendar(c.Key("due-calendar"), &e.dueDraft).Browse()
 		if cal.Changed() || cal.FocusWithin() {
 			e.dueEdited = true
 		}

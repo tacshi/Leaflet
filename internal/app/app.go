@@ -139,10 +139,12 @@ type App struct {
 	embeds       map[string]*mygo.WebView
 	// embedSrc is the page each embed's web view last loaded, and
 	// embedSizes how tall its content said it is, once it has drawn;
-	// embedZoomed the diagrams zoomed in.
+	// embedZoomed the diagrams zoomed in; embedToPage the views that give
+	// the page the wheel (sandbox's toPage).
 	embedSrc    map[string]string
 	embedSizes  map[string]embedSize
 	embedZoomed map[string]bool
+	embedToPage map[string]bool
 	// videos are the players of the open page's videos that were played;
 	// videoInfo what each video's site said about it, once asked
 	// (videoAsked), by provider and ID.
@@ -270,7 +272,7 @@ type pageState struct {
 // Run starts the app.
 func Run() {
 	a := &App{embeds: map[string]*mygo.WebView{}, embedSrc: map[string]string{}, embedSizes: map[string]embedSize{},
-		embedZoomed: map[string]bool{}, videos: map[string]*mygo.WebView{}, videoInfo: map[string]videoInfo{}, videoAsked: map[string]bool{},
+		embedZoomed: map[string]bool{}, embedToPage: map[string]bool{}, videos: map[string]*mygo.WebView{}, videoInfo: map[string]videoInfo{}, videoAsked: map[string]bool{},
 		linkInfo: map[string]linkInfo{}, linkAsked: map[string]bool{}}
 	theme.RegisterFonts()
 	recording.Register()

@@ -131,7 +131,7 @@ func (a *App) tagItem(c *ui.Context, key string, counts map[string]int) {
 			tagChip(c, tag)
 			ui.Spacer(c)
 			tools(c, func() {
-				b := iconButton(c, "more", "ellipsis", locales.TagActions()).Size(22, 22).Padding(3)
+				b := iconButton(c, "more", "ellipsis", locales.TagActions()).Size(22, 22).Padding(3).IgnoreInput(!hovered)
 				if !hovered {
 					b.Opacity(0)
 				}

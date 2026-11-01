@@ -266,7 +266,7 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 			}
 			if editable && strings.TrimSpace(source) != "" {
 				b := ui.ButtonBase(c.Key("edit")).Height(24).Padding(0, 8).Gap(4).Radius(6).TextColor(pal.TextMuted).
-					Opacity(shown).AlignItems(ui.Center).Label(edit)
+					Opacity(shown).IgnoreInput(shown == 0).AlignItems(ui.Center).Label(edit)
 				if b.Hovered() {
 					b.Background(pal.Hover).TextColor(pal.Text)
 				}
@@ -299,10 +299,11 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 		if n.Type == "diagram" {
 			height = 220
 		}
-		// The frame takes its content's height.
+		// The frame takes its content's height. Math gives the page the
+		// wheel; a diagram keeps Ctrl and the wheel to zoom.
 		a.sandbox(c, n.ID, page, width-2-2*pad, func(content float32) float32 {
 			return min(max(content, 32), 1600)
-		}, height, 4)
+		}, height, 4, n.Type == "math_equation")
 	})
 }
 
@@ -311,7 +312,7 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 func barButton(c *ui.Context, key, icon, label string, shown float32) ui.Element {
 	pal := theme.Of(c)
 	b := ui.ButtonBase(c.Key(key)).Size(24, 24).Center().Radius(6).TextColor(pal.TextMuted).
-		Opacity(shown).Label(label).Tooltip(label)
+		Opacity(shown).IgnoreInput(shown == 0).Label(label).Tooltip(label)
 	if b.Hovered() {
 		b.Background(pal.Hover).TextColor(pal.Text)
 	}
@@ -347,7 +348,7 @@ func (a *App) fullDiagram(c *ui.Context, n *doc.Node) {
 				a.leaveFullDiagram()
 			}
 		})
-		a.sandbox(c, key, diagramPage(source, pal.Surface, true), 0, nil, 0, 0)
+		a.sandbox(c, key, diagramPage(source, pal.Surface, true), 0, nil, 0, 0, false)
 	})
 	c.OnShortcut(0, ui.KeyEscape, a.leaveFullDiagram)
 }

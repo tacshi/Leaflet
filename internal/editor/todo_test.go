@@ -37,7 +37,7 @@ func TestDueDate(t *testing.T) {
 }
 
 // The popover changes a draft, which the to-do takes as it closes:
-// turning the months keeps it open, and adds no date by itself.
+// turning the months keeps it open, and chooses no day by itself.
 func TestDuePopover(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("[] Send the draft")
@@ -65,17 +65,21 @@ func TestDuePopover(t *testing.T) {
 		t.Fatal("an untouched popover added a date")
 	}
 	click("Due date: Add date")
+	now := time.Now()
 	click("Next month")
 	if e.dueOpen != n.ID {
 		t.Fatal("the next month closed the popover")
 	}
+	if !DueToday(e.dueDraft, now) {
+		t.Fatalf("the next month chose %v", e.dueDraft)
+	}
+	want := time.Date(now.Year(), now.Month()+1, 15, 0, 0, 0, 0, time.Local)
+	click(want.Format("January 2, 2006"))
 	if _, _, ok := n.Due(); ok {
 		t.Fatal("the date was saved before the popover closed")
 	}
 	click("Add time")
 	escape()
-	now := time.Now()
-	want := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local).AddDate(0, 1, 0)
 	if due, timed, ok := n.Due(); !ok || !timed || !DueToday(due, want) || due.Hour() != dueHour || due.Minute() != 0 {
 		t.Fatalf("due %v, timed %v", due, timed)
 	}

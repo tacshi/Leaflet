@@ -1046,24 +1046,29 @@ const embedFit = `<script>(function () {
 // wrapper's policy, so the wrapper has the frame's. The wrapper's own
 // script only passes the frame's leftover wheel movement and its content's
 // size, whether it is zoomed in and its asking to leave full screen to the
-// page, for the embed id.
+// page, for the embed id. Without wheel, for a web view that gives the
+// page all of the wheel, neither passes it.
 //
 // Its background is the page's. In the dark theme the frame's root gets
 // data-theme="dark" and a dark color scheme, so an embed that styles
 // nothing follows the page, and one that does can match it with
 // :root[data-theme="dark"].
-func embedPage(id, src string, pal *theme.Palette) string {
+func embedPage(id, src string, pal *theme.Palette, wheel bool) string {
 	bg, scheme := hexOf(pal.Surface), "light"
 	if pal.Dark {
 		scheme = "dark"
 	}
+	script := `<script>`
+	if wheel {
+		// Without a wheel listener of its own, WebKit scrolls the wrapper
+		// without telling a frame that could scroll, so it never forwards.
+		script += `addEventListener("wheel", function () {}, {passive: true});`
+	}
 	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="` + embedCSP + `; frame-src about:">` +
 		`<meta name="color-scheme" content="` + scheme + `">` +
 		`<style>html,body{margin:0;height:100%;background:` + bg + `}iframe{border:0;width:100%;height:100%;display:block;background:` + bg + `}</style></head><body>` +
-		`<iframe id="f" sandbox="allow-scripts" srcdoc="` + html.EscapeString(embedFrame(src, scheme)) + `"></iframe>` +
-		// Without a wheel listener of its own, WebKit scrolls the wrapper
-		// without telling a frame that could scroll, so it never forwards.
-		`<script>addEventListener("wheel", function () {}, {passive: true});` +
+		`<iframe id="f" sandbox="allow-scripts" srcdoc="` + html.EscapeString(embedFrame(src, scheme, wheel)) + `"></iframe>` +
+		script +
 		`var id = ` + scriptString(id) + `;` +
 		`addEventListener("message", function (e) {` +
 		`if (e.source !== document.getElementById("f").contentWindow || !e.data || !window.mygo) return;` +
@@ -1080,12 +1085,16 @@ func embedPage(id, src string, pal *theme.Palette) string {
 // than after the HTML's "<head>", which may be in a comment or a string;
 // the browser still puts them in the head, and the HTML's own <html> and
 // <head> after them only add to those. A doctype the HTML starts with
-// moves ahead of them, so it keeps the HTML's rendering mode.
-func embedFrame(src, scheme string) string {
+// moves ahead of them, so it keeps the HTML's rendering mode. wheel adds
+// embedWheel.
+func embedFrame(src, scheme string, wheel bool) string {
 	head := `<meta http-equiv="Content-Security-Policy" content="` + embedCSP + `">` + embedNoRTC +
 		`<meta name="color-scheme" content="` + scheme + `">` +
-		`<script>document.documentElement.dataset.theme = "` + scheme + `";</script>` + embedWheel + embedFit
-	return leadWith(head, src)
+		`<script>document.documentElement.dataset.theme = "` + scheme + `";</script>`
+	if wheel {
+		head += embedWheel
+	}
+	return leadWith(head+embedFit, src)
 }
 
 // leadWith puts head at the very start of the HTML src, after a doctype
@@ -1188,7 +1197,7 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 			ui.Text(c, n.Str("title")).FontWeight(650).FontSize(15).TextColor(pal.Text).Grow(1).SingleLine()
 			if a.page != nil && !a.page.editor.ReadOnly {
 				b := ui.ButtonBase(c.Key("edit")).Height(24).Padding(0, 8).Gap(4).Radius(6).TextColor(pal.TextMuted).
-					Opacity(map[bool]float32{true: 1, false: 0}[hovered]).AlignItems(ui.Center).Label(locales.HostEditEmbed())
+					Opacity(map[bool]float32{true: 1, false: 0}[hovered]).IgnoreInput(!hovered).AlignItems(ui.Center).Label(locales.HostEditEmbed())
 				if b.Hovered() {
 					b.Background(pal.Hover)
 				}
@@ -1209,7 +1218,7 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 		// narrow page stacks its layout.
 		a.sandbox(c, n.ID, n.Str("html"), width-2-2*pad, func(content float32) float32 {
 			return max(height, min(content, 1200))
-		}, height, 10)
+		}, height, 10, false)
 	})
 }
 
@@ -1220,16 +1229,31 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 // nil fit has the frame fill the rest of its parent instead.
 // The view loads again when the HTML or the theme changes: by hand, by an
 // agent, by undo or a restored version.
-func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float32) float32, height, gap float32) {
+//
+// toPage gives all of the wheel over the view to the page around it, as
+// MyGo does natively, for HTML that neither scrolls nor takes the wheel
+// itself, as math; otherwise the frame keeps the wheel and passes the
+// page what it leaves.
+func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float32) float32, height, gap float32, toPage bool) {
 	pal := theme.Of(c)
-	src := embedPage(key, html, pal)
+	src := embedPage(key, html, pal, !toPage)
 	size, ready := a.embedSizes[key]
 	if ready && fit != nil && abs32(size.w-w) < 4 {
 		height = fit(size.h)
 	}
 	v := a.embeds[key]
+	if v != nil && a.embedToPage[key] != toPage {
+		// The block was replaced by another kind, keeping its ID, as an
+		// agent's replace_block does: a view takes the wheel as it was
+		// made, so a new one takes it as the new kind needs.
+		v.Destroy()
+		delete(a.embeds, key)
+		delete(a.embedSrc, key)
+		v = nil
+	}
 	if v == nil && a.win != nil {
-		wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: hexOf(pal.Surface), Page: mygo.PageOptions{TrustedOrigins: []string{strings.TrimSuffix(embedURL, "/")}}})
+		wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: hexOf(pal.Surface), ScrollToContainer: toPage,
+			Page: mygo.PageOptions{TrustedOrigins: []string{strings.TrimSuffix(embedURL, "/")}}})
 		if err != nil {
 			ui.Text(c, locales.HostEmbedError(err.Error())).TextColor(pal.TextMuted)
 			return
@@ -1242,6 +1266,11 @@ func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float
 		})
 		page.SetWindowOpenHandler(func(mygo.WindowOpenRequest) *mygo.WindowOptions { return nil })
 		a.embeds[key] = wv
+		if toPage {
+			a.embedToPage[key] = true
+		} else {
+			delete(a.embedToPage, key)
+		}
 		v = wv
 	}
 	if v == nil {
@@ -1285,6 +1314,7 @@ func (a *App) dropEmbeds() {
 	maps.DeleteFunc(a.embedSrc, func(key, _ string) bool { return gone(key) })
 	maps.DeleteFunc(a.embedSizes, func(key string, _ embedSize) bool { return gone(key) })
 	maps.DeleteFunc(a.embedZoomed, func(key string, _ bool) bool { return gone(key) })
+	maps.DeleteFunc(a.embedToPage, func(key string, _ bool) bool { return gone(key) })
 }
 
 func abs32(f float32) float32 {

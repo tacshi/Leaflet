@@ -247,8 +247,10 @@ func (a *App) treeItem(c *ui.Context, key string) {
 	if a.route.Kind == "page" && key == "page:"+a.route.ID {
 		color = pal.OnAccent
 	}
+	// Out of sight, a button leaves the pointer and Tab to the row, whose
+	// menu the menu key opens; assistive technology still presses it.
 	button := func(name, icon, label string) ui.Element {
-		b := iconButton(c, name, icon, label).Size(22, 22).Padding(3).TextColor(color)
+		b := iconButton(c, name, icon, label).Size(22, 22).Padding(3).TextColor(color).IgnoreInput(!hovered)
 		if !hovered {
 			b.Opacity(0)
 		}

@@ -338,8 +338,9 @@ func (a *App) bylineTags(c *ui.Context, p store.Page, hovered bool) {
 		return
 	}
 	tools(c, func() {
+		// Shown as Tab reaches it too, as nothing else adds a tag.
 		b := iconButton(c, "add-tag", "tag", locales.PageAddTag()).Size(24, 24).Padding(4)
-		if !hovered {
+		if !hovered && !b.Focused() {
 			b.Opacity(0)
 		}
 		if b.Clicked() {
@@ -431,7 +432,7 @@ func (a *App) emptyActions(c *ui.Context) {
 				})
 				if menu != nil {
 					tools(c, func() {
-						more := iconButton(c, "more", "ellipsis", locales.PageTemplateActions()).Size(24, 24).Padding(4)
+						more := iconButton(c, "more", "ellipsis", locales.PageTemplateActions()).Size(24, 24).Padding(4).IgnoreInput(!hovered)
 						if !hovered {
 							more.Opacity(0)
 						}

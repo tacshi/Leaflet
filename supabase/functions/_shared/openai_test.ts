@@ -1,0 +1,35 @@
+import { assertEquals, assertRejects } from "jsr:@std/assert@1";
+import { readStream } from "./openai.ts";
+
+function events(...data: string[]): Response {
+  const body = data.map((d) => `data: ${d}\n\n`).join("");
+  return new Response(body, { headers: { "Content-Type": "text/event-stream" } });
+}
+
+Deno.test("a streamed answer comes together from its pieces", async () => {
+  const pieces: string[] = [];
+  const result = await readStream(
+    events(
+      `{"choices":[{"delta":{"content":"Let me "}}]}`,
+      `{"choices":[{"delta":{"content":"look."}}]}`,
+      `{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read_page","arguments":"{\\"a"}}]}}]}`,
+      `{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\":1}"}}]},"finish_reason":"tool_calls"}]}`,
+      "[DONE]",
+    ),
+    (d) => pieces.push(d),
+  );
+  assertEquals(pieces, ["Let me ", "look."]);
+  assertEquals(result.message.content, "Let me look.");
+  assertEquals(result.message.tool_calls, [
+    { id: "c1", type: "function", function: { name: "read_page", arguments: '{"a":1}' } },
+  ]);
+  assertEquals(result.finishReason, "tool_calls");
+});
+
+Deno.test("a streamed answer cut off is no answer", async () => {
+  await assertRejects(() => readStream(events(`{"choices":[{"delta":{"content":"Half"}}]}`), () => {}));
+});
+
+Deno.test("an error in the stream fails the answer", async () => {
+  await assertRejects(() => readStream(events(`{"error":{"message":"overloaded"}}`), () => {}), Error, "overloaded");
+});

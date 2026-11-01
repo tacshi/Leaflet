@@ -5,6 +5,7 @@ import {
   type BlockSpec,
   clone,
   collectIds,
+  deltaOf,
   emptyContent,
   LIST_TYPES,
   type NodeJSON,
@@ -15,8 +16,10 @@ import {
   SPEC_TYPES,
   SpecError,
   specToNode,
+  TEXT_TYPES,
   walk,
 } from "./blocks.ts";
+import { markdownSpecs } from "./lines.ts";
 import type { ToolDef } from "./openai.ts";
 
 export type Op =
@@ -66,6 +69,17 @@ const positionSchema = {
     before: { type: "string", description: "Block id to insert before" },
     parent: { type: "string", description: "Id of a list block; the blocks become its last children" },
     at: { type: "string", enum: ["start", "end"] },
+  },
+};
+
+/** Where write_markdown writes: a position, or an empty block to write in place of. */
+const writeSchema = {
+  type: "object",
+  description:
+    "Where to write. Exactly one key: replace (an empty block to write in place of, as the empty line the person asked from), after/before a block id, parent (a list block id), or at start/end of the page.",
+  properties: {
+    replace: { type: "string", description: "Id of an empty block to write in place of" },
+    ...positionSchema.properties,
   },
 };
 
@@ -178,6 +192,12 @@ export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean }):
   ];
   if (opts.canEdit) {
     defs.push(
+      tool(
+        "write_markdown",
+        "Write into the page in Markdown: the way to write prose, as a story, a draft, notes or a summary. Each line is a block: a paragraph, # to ### headings, - or 1. list items (indent two spaces to nest), - [ ] to-dos, > quotes, ``` fenced code, | tables, --- dividers; blank lines only separate them. Returns the ids of the blocks written.",
+        { position: writeSchema, markdown: { type: "string" } },
+        ["position", "markdown"],
+      ),
       tool(
         "insert_blocks",
         "Insert new blocks at a position. Returns the ids of the inserted blocks.",
@@ -411,10 +431,20 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
+/**
+ * The keys of a position a model gave a value. Models that write every
+ * key of a schema give the others null or "", and at, which takes only
+ * start or end, one of those: at counts only alone.
+ */
+function givenKeys(raw: Record<string, unknown>, keys: string[]): string[] {
+  const set = keys.filter((k) => raw[k] !== undefined && raw[k] !== null && raw[k] !== "");
+  return set.length > 1 ? set.filter((k) => k !== "at") : set;
+}
+
 export function normalizePosition(raw: unknown): Position {
   if (raw === "start" || raw === "end") return { at: raw };
   if (!isObject(raw)) throw new ToolError('position must be an object such as {"after": "<block id>"}');
-  const keys = ["after", "before", "parent", "at"].filter((k) => raw[k] !== undefined && raw[k] !== null);
+  const keys = givenKeys(raw, ["after", "before", "parent", "at"]);
   if (keys.length !== 1) {
     throw new ToolError("position needs exactly one of: after, before, parent, at");
   }
@@ -543,7 +573,14 @@ export class PageEditSession {
   }
 
   private async dispatch(name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
-    const editing = new Set(["insert_blocks", "replace_block", "move_block", "delete_blocks", "create_subpage"]);
+    const editing = new Set([
+      "write_markdown",
+      "insert_blocks",
+      "replace_block",
+      "move_block",
+      "delete_blocks",
+      "create_subpage",
+    ]);
     if (editing.has(name) && !this.opts.canEdit) {
       throw new ToolError("You can read this page but not edit it: the person asking has view access only");
     }
@@ -553,6 +590,8 @@ export class PageEditSession {
     switch (name) {
       case "read_page":
         return { result: await this.hooks.readPage(this.content), ops: [], blockIds: [] };
+      case "write_markdown":
+        return this.write(args.position, args.markdown);
       case "insert_blocks":
         return this.insert(normalizePosition(args.position), args.blocks);
       case "replace_block":
@@ -707,6 +746,37 @@ export class PageEditSession {
   }
 
   // --- tools ---------------------------------------------------------------
+
+  /**
+   * Writes Markdown as blocks: in place of an empty block, the first
+   * taking its id and the rest going after it, or at a position.
+   */
+  write(rawPosition: unknown, markdown: unknown): ToolOutcome {
+    const specs = markdownSpecs(typeof markdown === "string" ? markdown : "");
+    if (!specs.length) throw new ToolError("markdown is empty");
+    if (!isObject(rawPosition) || !givenKeys(rawPosition, ["replace"]).length) {
+      const out = this.insert(normalizePosition(rawPosition), specs);
+      return { ...out, summary: `Wrote ${plural(specs.length, "block")}` };
+    }
+    // An empty block to write in place of says where, whatever else the
+    // position has.
+    const id = String(rawPosition.replace);
+    const at = this.locate(id);
+    // Empty as the app's own agents take it: no text at all, so a block
+    // the person typed even a space in is not written over.
+    const empty = TEXT_TYPES.has(at.node.type) && !at.node.children?.length &&
+      deltaOf(at.node).every((op) => op.insert === "");
+    if (!empty) throw new ToolError("position.replace takes an empty block only; use replace_block to rewrite one");
+    const first = this.replace(id, specs[0]);
+    const ids = [id];
+    const ops = [...first.ops];
+    if (specs.length > 1) {
+      const rest = this.insert({ after: id }, specs.slice(1));
+      ids.push(...rest.blockIds);
+      ops.push(...rest.ops);
+    }
+    return { result: { inserted_ids: ids }, ops, summary: `Wrote ${plural(specs.length, "block")}`, blockIds: ids };
+  }
 
   insert(position: Position, rawBlocks: unknown): ToolOutcome {
     const specs = this.specs(rawBlocks, "blocks");

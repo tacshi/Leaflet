@@ -1,4 +1,4 @@
-// Leaflet's sign-in with Supabase, on Cloudflare Workers. Two routes:
+// Leaflet's sign-in with Supabase, on Cloudflare Workers. Three routes:
 //
 //   GET  /auth/supabase   the OAuth app's redirect URL. Supabase takes only
 //                         https ones, which a desktop app can't answer: the
@@ -7,19 +7,38 @@
 //   POST /token           Supabase's token endpoint, with the OAuth app's
 //                         client secret added, so the secret never ships in
 //                         the app.
+//   GET  /.well-known/apple-app-site-association
+//                         ties this domain to the iOS app, whose web session
+//                         takes /auth/supabase as its https callback, and so
+//                         never loads the page.
 //
 // The secret is CLIENT_SECRET (wrangler secret put CLIENT_SECRET); the app's
-// client ID is CLIENT_ID in wrangler.toml.
+// client ID is CLIENT_ID in wrangler.toml, as is APPLE_TEAM_ID, the team that
+// signs the iOS app.
 
 export interface Env {
   CLIENT_ID: string;
   CLIENT_SECRET: string;
+  APPLE_TEAM_ID?: string;
   // The token endpoint; tests point it elsewhere.
   SUPABASE_TOKEN_URL?: string;
 }
 
 // The port Leaflet waits on for the browser (internal/supabaseapi.Port).
 const LOOPBACK = "http://127.0.0.1:51741/auth/callback";
+
+// The iOS app's bundle IDs: the App Store's, and the debug build's
+// (ios/Config).
+const IOS_APPS = ["app.capyvibe.leaflet", "app.capyvibe.leaflet.debug"];
+
+// siteAssociation lets the iOS app take https callbacks from this domain:
+// ASWebAuthenticationSession asks for the webcredentials service.
+function siteAssociation(env: Env): Response {
+  if (!env.APPLE_TEAM_ID) return new Response("Not found", { status: 404 });
+  return Response.json({ webcredentials: { apps: IOS_APPS.map((id) => `${env.APPLE_TEAM_ID}.${id}`) } }, {
+    headers: { "Cache-Control": "max-age=3600" },
+  });
+}
 
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -107,6 +126,9 @@ export default {
           "Referrer-Policy": "no-referrer",
         },
       });
+    }
+    if (pathname === "/.well-known/apple-app-site-association" && request.method === "GET") {
+      return siteAssociation(env);
     }
     if (pathname === "/token" && request.method === "POST") {
       if (!env.CLIENT_SECRET) return refuse(500, "server_error", "The proxy has no client secret.");

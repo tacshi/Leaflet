@@ -595,3 +595,34 @@ Deno.test("a replace with children: [] keeps the nested items", async () => {
   assert((outcome.result as { error?: string }).error?.includes("nested"), JSON.stringify(outcome.result));
   assertEquals(session.content.document.children![1].children!.map((c) => c.id), ["l2"]);
 });
+
+Deno.test("write_markdown writes in place of an empty block, a block a line", async () => {
+  const content = sample();
+  content.document.children!.splice(3, 0, para("e1", ""));
+  const session = new PageEditSession(content, hooks, { canEdit: true, crossPage: false });
+  const out = await session.call("write_markdown", {
+    // As models that write every key of a schema give it.
+    position: { replace: "e1", after: null, before: "", parent: null, at: "end" },
+    markdown: "## Tide\nThe sea went.\n\nMara ran.",
+  });
+  const ids = (out.result as { inserted_ids: string[] }).inserted_ids;
+  assertEquals(ids.length, 3);
+  assertEquals(ids[0], "e1");
+  assertEquals(out.ops.map((o) => o.op), ["replace", "insert"]);
+  const kids = session.content.document.children!;
+  assertEquals(kids.slice(3, 6).map((n) => [n.type, deltaToMarkdown(n.data!.delta as never)]), [
+    ["heading", "Tide"],
+    ["paragraph", "The sea went."],
+    ["paragraph", "Mara ran."],
+  ]);
+  const over = await session.call("write_markdown", { position: { replace: "p1" }, markdown: "x" });
+  assert((over.result as { error?: string }).error?.includes("empty block"));
+  const end = await session.call("write_markdown", { position: { at: "end" }, markdown: "Last." });
+  assertEquals(end.ops.map((o) => o.op), ["insert"]);
+  // A space is text the person typed, as the app's own agents take it.
+  const spaced = sample();
+  spaced.document.children!.splice(3, 0, para("s1", " "));
+  const other = new PageEditSession(spaced, hooks, { canEdit: true, crossPage: false });
+  const space = await other.call("write_markdown", { position: { replace: "s1" }, markdown: "x" });
+  assert((space.result as { error?: string }).error?.includes("empty block"));
+});

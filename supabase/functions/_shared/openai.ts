@@ -154,15 +154,22 @@ async function failure(res: Response): Promise<ProviderError> {
   return new ProviderError(res.status, `${known} (${res.status})${detail ? `: ${detail}` : ""}`, body);
 }
 
+/**
+ * Asks the model. With onText the answer streams, onText getting each
+ * piece of its text as it comes; a provider that does not stream answers
+ * whole, its text then one piece.
+ */
 export async function chatCompletion(
   conn: Connection,
   request: ChatRequest,
   signal?: AbortSignal,
+  onText?: (delta: string) => void,
 ): Promise<ChatResult> {
   const body: Record<string, unknown> = {
     model: request.model,
     messages: request.messages,
   };
+  if (onText) body.stream = true;
   if (request.tools && request.tools.length > 0) body.tools = request.tools;
   if (request.temperature !== undefined) body.temperature = request.temperature;
   if (request.max_tokens !== undefined) body.max_tokens = request.max_tokens;
@@ -174,6 +181,9 @@ export async function chatCompletion(
     signal,
   });
   if (!res.ok) throw await failure(res);
+  if (onText && res.headers.get("content-type")?.startsWith("text/event-stream")) {
+    return await readStream(res, onText);
+  }
   const data = await res.json();
   const choice = data?.choices?.[0];
   if (!choice?.message) {
@@ -200,7 +210,95 @@ export async function chatCompletion(
       },
     }));
   }
+  if (onText && message.content) onText(message.content);
   return { message, finishReason: choice.finish_reason ?? null };
+}
+
+interface StreamedCall {
+  index?: number;
+  id?: string;
+  function?: { name?: string; arguments?: unknown };
+}
+
+/**
+ * A streamed answer: server-sent events, each a piece of the message, its
+ * tool calls coming in pieces by index.
+ */
+export async function readStream(res: Response, onText: (delta: string) => void): Promise<ChatResult> {
+  let content = "";
+  const calls: { id: string; name: string; arguments: string }[] = [];
+  let finishReason: string | null = null;
+  let done = false;
+  let buffer = "";
+  const take = (line: string) => {
+    if (!line.startsWith("data:")) return;
+    const data = line.slice(5).trim();
+    if (data === "[DONE]") {
+      done = true;
+      return;
+    }
+    let event;
+    try {
+      event = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (event?.error) {
+      const detail = providerMessage(data);
+      throw new ProviderError(502, `The provider had an error${detail ? `: ${detail}` : ""}`, data.slice(0, 2000));
+    }
+    const choice = event?.choices?.[0];
+    if (!choice) return;
+    const delta = choice.delta ?? {};
+    const text = typeof delta.content === "string"
+      ? delta.content
+      : Array.isArray(delta.content)
+      ? delta.content.map((p: { text?: string }) => p?.text ?? "").join("")
+      : "";
+    if (text) {
+      content += text;
+      onText(text);
+    }
+    for (const c of (delta.tool_calls ?? []) as StreamedCall[]) {
+      // A call without an index is a new one, unless it names one that
+      // came before.
+      let i = typeof c.index === "number" ? c.index : calls.findIndex((k) => c.id && k.id === c.id);
+      if (i < 0) i = calls.length;
+      calls[i] ??= { id: "", name: "", arguments: "" };
+      if (c.id) calls[i].id = c.id;
+      if (c.function?.name) calls[i].name = c.function.name;
+      const args = c.function?.arguments;
+      if (typeof args === "string") calls[i].arguments += args;
+      else if (args !== undefined && args !== null) calls[i].arguments += JSON.stringify(args);
+    }
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+  };
+  const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
+  while (!done) {
+    const { value, done: ended } = await reader.read();
+    if (ended) break;
+    buffer += value;
+    let nl;
+    while (!done && (nl = buffer.indexOf("\n")) >= 0) {
+      take(buffer.slice(0, nl).replace(/\r$/, ""));
+      buffer = buffer.slice(nl + 1);
+    }
+  }
+  if (!done) take(buffer.trim());
+  await reader.cancel().catch(() => {});
+  if (!done && !finishReason) {
+    throw new ProviderError(502, "The provider's answer was cut off");
+  }
+  const message: ChatMessage = { role: "assistant", content: content || null };
+  const present = calls.filter(Boolean);
+  if (present.length > 0) {
+    message.tool_calls = present.map((c, i) => ({
+      id: c.id || `call_${i}`,
+      type: "function",
+      function: { name: c.name, arguments: c.arguments || "{}" },
+    }));
+  }
+  return { message, finishReason };
 }
 
 export async function listModels(

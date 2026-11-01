@@ -480,10 +480,13 @@ async function runJob(
       }
       let result;
       try {
+        // The answer streams to the app as it comes, each round's
+        // starting again where tool calls came before it.
         result = await chatCompletion(
           conn,
           { model, messages, tools },
           AbortSignal.timeout(Math.min(CALL_TIMEOUT_MS, left)),
+          (delta) => emit({ type: "text", delta, round }),
         );
       } catch (e) {
         if (isTimeout(e)) {
@@ -531,8 +534,6 @@ async function runJob(
         ? `I ran out of time and stopped.${done ? ` So far: ${done}.` : ""}`
         : `I stopped after ${MAX_ROUNDS} steps.${done ? ` So far: ${done}.` : ""}`;
     }
-    emit({ type: "text", delta: reply });
-
     // --- save -----------------------------------------------------------
     if (session.changed) {
       const { error: historyError } = await uc.from("page_history").insert({

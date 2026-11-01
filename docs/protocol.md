@@ -176,7 +176,9 @@ streams to the client, what the client applies to the open editor, and what
    user's JWT. The response is NDJSON, one event per line:
    - `{ "type": "status", "status": "running" }`
    - `{ "type": "op", "op": Op, "summary": "Inserted chart" }`
-   - `{ "type": "text", "delta": "…" }`
+   - `{ "type": "text", "delta": "…", "round": 0 }`: the model's answer as it
+     streams, a piece at a time; a new `round` (after tool calls) starts it
+     again.
    - `{ "type": "done", "reply": "…", "edits": [{ "summary": "…", "block_ids": [...] }] }`
    - `{ "type": "error", "message": "…" }`
 3. The worker loads the page, focus blocks, the last 10 turns of the

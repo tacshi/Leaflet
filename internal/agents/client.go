@@ -5,6 +5,7 @@
 package agents
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -16,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"leaflet/internal/agents/endpoint"
 )
 
 // APIError is a failed model request.
@@ -59,11 +62,17 @@ type Client struct {
 	BaseURL string
 	APIKey  string
 	HTTP    *http.Client
+	// Stream is the client of streamed answers, HTTP when nil.
+	Stream *http.Client
 }
 
 // NewClient returns a client for an endpoint.
 func NewClient(baseURL, apiKey string) *Client {
-	return &Client{BaseURL: NormalizeBaseURL(baseURL), APIKey: apiKey, HTTP: &http.Client{Transport: answerTransport(), CheckRedirect: noRedirect}}
+	return &Client{
+		BaseURL: endpoint.NormalizeBaseURL(baseURL), APIKey: apiKey,
+		HTTP:   &http.Client{Transport: answerTransport(), CheckRedirect: noRedirect},
+		Stream: &http.Client{Transport: streamedAnswerTransport(), CheckRedirect: noRedirect},
+	}
 }
 
 // Model requests have no overall timeout: a long answer may take most of
@@ -94,6 +103,10 @@ var errIdle = errors.New("the model stopped answering")
 var (
 	answerTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(answerTimeout, &idleTimeout) })
 	streamTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(streamTimeout, &streamIdleTimeout) })
+	// streamedAnswerTransport is an OpenAI-compatible server's streamed
+	// answer: a local server may load the model before it starts, and a
+	// reasoning model may send nothing while it thinks.
+	streamedAnswerTransport = sync.OnceValue(func() http.RoundTripper { return modelTransport(answerTimeout, &streamIdleTimeout) })
 )
 
 // modelTransport is http.DefaultTransport giving up on a server that sends
@@ -159,16 +172,17 @@ func noRedirect(*http.Request, []*http.Request) error {
 	return errors.New("redirected")
 }
 
-// NormalizeBaseURL trims slashes and a pasted /chat/completions or /models.
-func NormalizeBaseURL(u string) string {
-	u = strings.TrimRight(strings.TrimSpace(u), "/")
-	for _, s := range []string{"/chat/completions", "/models"} {
-		u = strings.TrimSuffix(u, s)
+func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte, error) {
+	res, err := c.send(ctx, c.HTTP, method, path, body)
+	if err != nil {
+		return nil, err
 	}
-	return u
+	defer func() { _ = res.Body.Close() }()
+	return io.ReadAll(res.Body)
 }
 
-func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte, error) {
+// send makes a request, its answer an error when it failed.
+func (c *Client) send(ctx context.Context, hc *http.Client, method, path string, body any) (*http.Response, error) {
 	var r io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -189,33 +203,39 @@ func (c *Client) do(ctx context.Context, method, path string, body any) ([]byte,
 			req.Header.Set("anthropic-version", "2023-06-01")
 		}
 	}
-	res, err := c.HTTP.Do(req)
+	res, err := hc.Do(req)
 	if err != nil {
 		return nil, err
+	}
+	if res.StatusCode < 400 {
+		return res, nil
 	}
 	defer func() { _ = res.Body.Close() }()
 	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return nil, err
 	}
-	if res.StatusCode >= 400 {
-		msg := res.Status
-		var m map[string]any
-		if json.Unmarshal(data, &m) == nil {
-			switch e := m["error"].(type) {
-			case map[string]any:
-				if s, ok := e["message"].(string); ok {
-					msg = s
-				}
-			case string:
-				msg = e
+	return nil, &APIError{Status: res.StatusCode, Message: errorMessage(res.Status, data)}
+}
+
+// errorMessage is what a failed answer says went wrong, its status if it
+// says nothing readable.
+func errorMessage(status string, data []byte) string {
+	msg := status
+	var m map[string]any
+	if json.Unmarshal(data, &m) == nil {
+		switch e := m["error"].(type) {
+		case map[string]any:
+			if s, ok := e["message"].(string); ok {
+				msg = s
 			}
-		} else if body := strings.TrimSpace(string(data)); body != "" && len(body) < 200 && !strings.HasPrefix(body, "<") {
-			msg = body
+		case string:
+			msg = e
 		}
-		return nil, &APIError{Status: res.StatusCode, Message: msg}
+	} else if body := strings.TrimSpace(string(data)); body != "" && len(body) < 200 && !strings.HasPrefix(body, "<") {
+		msg = body
 	}
-	return data, nil
+	return msg
 }
 
 // ListModels reads the endpoint's /models.
@@ -260,7 +280,34 @@ func (c *Client) ListModels(ctx context.Context) ([]string, error) {
 
 // Chat sends a conversation, with tools when given.
 func (c *Client) Chat(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int) (ChatResult, error) {
-	body := map[string]any{"model": model, "messages": messages, "stream": false}
+	return c.ChatStream(ctx, model, messages, tools, maxTokens, nil)
+}
+
+// Streamed is told an answer as it streams.
+type Streamed struct {
+	// Text gets the answer's text so far.
+	Text func(text string)
+	// Call gets the i-th tool call so far: its arguments as far as they
+	// came, the calls before it whole.
+	Call func(i int, name, args string)
+}
+
+func (s *Streamed) text(t string) {
+	if s != nil && s.Text != nil {
+		s.Text(t)
+	}
+}
+
+func (s *Streamed) call(i int, name, args string) {
+	if s != nil && s.Call != nil {
+		s.Call(i, name, args)
+	}
+}
+
+// ChatStream is Chat with the answer streamed to on as it comes. A nil on
+// asks for the answer whole.
+func (c *Client) ChatStream(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int, on *Streamed) (ChatResult, error) {
+	body := map[string]any{"model": model, "messages": messages, "stream": on != nil}
 	if len(tools) > 0 {
 		body["tools"] = tools
 		body["tool_choice"] = "auto"
@@ -268,23 +315,27 @@ func (c *Client) Chat(ctx context.Context, model string, messages []map[string]a
 	if maxTokens > 0 {
 		body["max_tokens"] = maxTokens
 	}
-	data, err := c.do(ctx, "POST", "/chat/completions", body)
+	hc := c.HTTP
+	if on != nil && c.Stream != nil {
+		hc = c.Stream
+	}
+	res, err := c.send(ctx, hc, "POST", "/chat/completions", body)
+	if err != nil {
+		return ChatResult{}, err
+	}
+	defer func() { _ = res.Body.Close() }()
+	// A server that does not stream answers whole, as JSON.
+	if on != nil && strings.HasPrefix(res.Header.Get("Content-Type"), "text/event-stream") {
+		return readStream(res.Body, on)
+	}
+	data, err := io.ReadAll(res.Body)
 	if err != nil {
 		return ChatResult{}, err
 	}
 	var resp struct {
 		Choices []struct {
-			Message struct {
-				Content   any `json:"content"`
-				ToolCalls []struct {
-					ID       string `json:"id"`
-					Function struct {
-						Name      string `json:"name"`
-						Arguments any    `json:"arguments"`
-					} `json:"function"`
-				} `json:"tool_calls"`
-			} `json:"message"`
-			FinishReason string `json:"finish_reason"`
+			Message      chatMessage `json:"message"`
+			FinishReason string      `json:"finish_reason"`
 		} `json:"choices"`
 	}
 	if err := json.Unmarshal(data, &resp); err != nil {
@@ -296,21 +347,146 @@ func (c *Client) Chat(ctx context.Context, model string, messages []map[string]a
 	ch := resp.Choices[0]
 	out := ChatResult{Content: textOf(ch.Message.Content), FinishReason: ch.FinishReason}
 	for i, tc := range ch.Message.ToolCalls {
-		args := ""
-		switch a := tc.Function.Arguments.(type) {
-		case string:
-			args = a
-		case nil:
-			args = "{}"
-		default:
-			raw, _ := json.Marshal(a)
-			args = string(raw)
+		out.ToolCalls = append(out.ToolCalls, tc.call(i))
+	}
+	if out.Content != "" {
+		on.text(out.Content)
+	}
+	return out, nil
+}
+
+// chatMessage is a message of an answer, or a streamed piece of one.
+type chatMessage struct {
+	Content   any            `json:"content"`
+	ToolCalls []chatToolCall `json:"tool_calls"`
+}
+
+type chatToolCall struct {
+	// Index places a streamed piece of a call among the answer's calls.
+	Index    *int   `json:"index"`
+	ID       string `json:"id"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments any    `json:"arguments"`
+	} `json:"function"`
+}
+
+func (tc chatToolCall) arguments() string {
+	switch a := tc.Function.Arguments.(type) {
+	case string:
+		return a
+	case nil:
+		return ""
+	default:
+		raw, _ := json.Marshal(a)
+		return string(raw)
+	}
+}
+
+// call is the i-th call of an answer.
+func (tc chatToolCall) call(i int) ToolCall {
+	args := tc.arguments()
+	if args == "" {
+		args = "{}"
+	}
+	id := tc.ID
+	if id == "" {
+		id = fmt.Sprintf("call_%d", i)
+	}
+	return ToolCall{ID: id, Name: tc.Function.Name, Arguments: args}
+}
+
+// readStream reads a streamed answer: server-sent events, each a piece of
+// the message, its calls coming in pieces by index.
+func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 64*1024), 32*1024*1024)
+	var out ChatResult
+	var text strings.Builder
+	var calls []*chatToolCall
+	var args []*strings.Builder
+	// slot numbers the calls by a server's indices in the order they
+	// began, as the answer's ToolCalls are: the indices may start past 0
+	// or leave gaps.
+	slot := map[int]int{}
+	done := false
+	for sc.Scan() {
+		line := sc.Text()
+		if !strings.HasPrefix(line, "data:") {
+			continue
 		}
-		id := tc.ID
-		if id == "" {
-			id = fmt.Sprintf("call_%d", i)
+		data := strings.TrimSpace(line[5:])
+		if data == "[DONE]" {
+			done = true
+			break
 		}
-		out.ToolCalls = append(out.ToolCalls, ToolCall{ID: id, Name: tc.Function.Name, Arguments: args})
+		var ev struct {
+			Choices []struct {
+				Delta        chatMessage `json:"delta"`
+				FinishReason *string     `json:"finish_reason"`
+			} `json:"choices"`
+			Error any `json:"error"`
+		}
+		if json.Unmarshal([]byte(data), &ev) != nil {
+			continue
+		}
+		if ev.Error != nil {
+			return ChatResult{}, &APIError{Message: errorMessage("The model could not answer", []byte(data))}
+		}
+		if len(ev.Choices) == 0 {
+			continue
+		}
+		ch := ev.Choices[0]
+		if s := textOf(ch.Delta.Content); s != "" {
+			text.WriteString(s)
+			on.text(text.String())
+		}
+		for _, tc := range ch.Delta.ToolCalls {
+			// A call without an index is a new one, unless it names one
+			// that came before.
+			i := -1
+			if tc.Index != nil {
+				if j, ok := slot[*tc.Index]; ok {
+					i = j
+				}
+			} else if tc.ID != "" {
+				for j, c := range calls {
+					if c.ID == tc.ID {
+						i = j
+					}
+				}
+			}
+			if i < 0 {
+				i = len(calls)
+				calls = append(calls, &chatToolCall{})
+				args = append(args, &strings.Builder{})
+				if tc.Index != nil {
+					slot[*tc.Index] = i
+				}
+			}
+			if tc.ID != "" {
+				calls[i].ID = tc.ID
+			}
+			if tc.Function.Name != "" {
+				calls[i].Function.Name = tc.Function.Name
+			}
+			args[i].WriteString(tc.arguments())
+			on.call(i, calls[i].Function.Name, args[i].String())
+		}
+		if ch.FinishReason != nil && *ch.FinishReason != "" {
+			out.FinishReason = *ch.FinishReason
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return ChatResult{}, err
+	}
+	if !done && out.FinishReason == "" {
+		return ChatResult{}, &APIError{Message: "The model's answer was cut off."}
+	}
+	out.Content = text.String()
+	for i, c := range calls {
+		c.Function.Arguments = args[i].String()
+		out.ToolCalls = append(out.ToolCalls, c.call(i))
 	}
 	return out, nil
 }

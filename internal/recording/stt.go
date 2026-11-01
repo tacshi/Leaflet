@@ -9,8 +9,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/netip"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,7 +18,7 @@ import (
 
 	"github.com/coder/websocket"
 
-	"leaflet/internal/agents"
+	"leaflet/internal/agents/endpoint"
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -28,23 +26,7 @@ import (
 
 // IsLocalEndpoint reports whether an endpoint is on this machine or
 // network, so audio can go to it straight from the device.
-func IsLocalEndpoint(baseURL string) bool {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return false
-	}
-	h := u.Hostname()
-	if h == "localhost" || strings.HasSuffix(h, ".local") {
-		return true
-	}
-	// An address, not a name that starts like one, as 10.example.com.
-	ip, err := netip.ParseAddr(h)
-	if err != nil {
-		return false
-	}
-	ip = ip.Unmap()
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
-}
+func IsLocalEndpoint(baseURL string) bool { return endpoint.IsLocal(baseURL) }
 
 // TranscribeEndpoint transcribes audio with an OpenAI-style
 // /audio/transcriptions endpoint (OpenAI, DashScope, a self-hosted server).
@@ -74,7 +56,7 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, transcribeWait(len(wav)))
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", agents.NormalizeBaseURL(baseURL)+"/audio/transcriptions", &body)
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint.NormalizeBaseURL(baseURL)+"/audio/transcriptions", &body)
 	if err != nil {
 		return nil, err
 	}

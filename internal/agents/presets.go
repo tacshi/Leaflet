@@ -86,19 +86,22 @@ func Today() string { return time.Now().Format("2006-01-02") }
 // SystemPrompt is the prompt of every agent run, kept in step with
 // supabase/functions/_shared/prompt.ts.
 func SystemPrompt(agentName, pageTitle, surface string, canReadOtherPages, supportsTools, readOnly bool) string {
-	focus := "The user is chatting with you beside the page. The whole page is your focus."
-	done := "When you are done, reply in one to three short sentences: what you changed, or your answer. Do not repeat the content you wrote."
+	// As in a selection, a question gets an answer, not an edit.
+	focus := "The user is chatting with you beside the page. The whole page is your focus. If they ask about the page (summarize it, explain it, find gaps or open questions, suggest a structure or other ideas), answer in your reply and leave the page as it is: they can insert your answer into the page themselves. Edit the page only when they ask you to write, add or change something in it, such as filling in a section, turning numbers into a chart, or applying a structure."
+	answer := "When you are done, reply with your answer, as long as it needs to be and no longer, in paragraphs, - lists and ## headings with inline markdown; or, if you edited the page, say what you changed in one or two sentences without repeating it."
+	done := answer
 	switch surface {
 	case "inline":
 		focus = "The user mentioned you inside a block. That block is your focus: write or change it in place."
+		done = "When you are done, reply in one to three short sentences: what you changed, or your answer. Do not repeat the content you wrote."
 	case "selection":
 		// A question gets an answer, which the user can insert themselves.
 		focus = "The user selected some text and asked about it. The selected blocks are your focus. If they ask a question about it (explain it, what it is, why), answer in your reply and leave the page as it is: they can insert your answer into the page themselves. Edit the page only when they ask for a change, such as making it shorter, fixing its grammar, or turning it into a list or a chart."
-		done = "When you are done, reply with your answer, as long as it needs to be and no longer, in paragraphs, - lists and ## headings with inline markdown; or, if you edited the page, say what you changed in one or two sentences without repeating it."
 	case "comment":
 		// As prompt.ts says it: a question in a thread gets an answer, not
 		// an edit of the page.
 		focus = "The user mentioned you in a comment thread anchored to a block. That block is your focus. Answer in the thread; edit the page only if they ask for a change. Your reply is posted as a comment: keep it short."
+		done = "When you are done, reply in one to three short sentences: what you changed, or your answer. Do not repeat the content you wrote."
 	}
 	var b strings.Builder
 	b.WriteString("You are " + agentName + ", an AI collaborator in Leaflet, an app where people and AI co-write living documents called pages. Today is " + Today() + ". The current page is \"" + pageTitle + "\".\n\n")
@@ -115,7 +118,8 @@ func SystemPrompt(agentName, pageTitle, surface string, canReadOtherPages, suppo
 	case supportsTools:
 		b.WriteString(`How to work:
 - Call read_page first unless the page is already in this conversation.
-- Make every change with the tools (insert_blocks, replace_block, move_block, delete_blocks, create_subpage). Never paste page content into your reply instead of editing.
+- Make every change you are asked for with the tools (write_markdown, insert_blocks, replace_block, move_block, delete_blocks, create_subpage); never paste content meant for the page into your reply instead. An answer to a question is not a change: it goes in your reply.
+- To write text (a story, a draft, notes, a summary, any run of paragraphs, headings and lists), use write_markdown: one block per line, in Markdown, never several paragraphs in one block. Where your focus block is empty, write in its place with position {"replace": its ID}. Keep insert_blocks for charts, embeds, videos, callouts, formulas, diagrams and other blocks Markdown cannot write, and replace_block for rewriting one block.
 - Address blocks by their IDs. Keep edits minimal and in the page's existing style and language.
 - Text fields take inline markdown only (**bold**, *italic*, ` + "`code`" + `, [link](url)). Use block types for structure: heading, bulleted_list, numbered_list, todo_list, quote, table.
 - For numbers worth seeing, insert a chart block (bar, line, or pie) with labels and series.
@@ -124,7 +128,7 @@ func SystemPrompt(agentName, pageTitle, surface string, canReadOtherPages, suppo
 - For code, insert a code block with the code in text, verbatim, and its language; never a fence in a paragraph.
 - For a note, tip or warning to stand out, insert a callout with a tone. To keep long detail out of the way, put it in a toggle_list's children, the summary in its text.
 - For a formula, insert a math_equation with its TeX; for a flowchart, sequence or other diagram, a diagram with its Mermaid source. To point at a web page, insert a link_preview with its url.
-- Recording blocks carry their transcript. To summarize or use a recording, read it there and write the result into the page, for example a heading with key points below the recording.
+- Recording blocks carry their transcript: read it there. Asked to write a recording up in the page, put the result below it, for example a heading with key points.
 - If a tool returns an error, fix the call and try again.
 `)
 		if canReadOtherPages {

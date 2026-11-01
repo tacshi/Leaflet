@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/store"
 )
 
 func page() *doc.Content {
@@ -205,6 +208,21 @@ func TestCommentPromptAnswersRatherThanEdits(t *testing.T) {
 	p := SystemPrompt("ChatGPT", "PRD", "comment", false, true, false)
 	if !strings.Contains(p, "edit the page only if they ask for a change") {
 		t.Error("a comment's prompt lets the agent edit the page unasked")
+	}
+}
+
+// Summarize, explain or find gaps in the chat gets an answer there, at
+// the length it needs, and leaves the page as it is.
+func TestChatPromptAnswersQuestions(t *testing.T) {
+	p := SystemPrompt("ChatGPT", "PRD", "sidebar", false, true, false)
+	if !strings.Contains(p, "summarize it") || !strings.Contains(p, "answer in your reply and leave the page as it is") {
+		t.Error("a question in the chat gets an edit, not an answer")
+	}
+	if strings.Contains(p, "one to three short sentences") {
+		t.Error("an answer in the chat is cut to three sentences")
+	}
+	if strings.Contains(p, "write the result into the page") {
+		t.Error("summarizing a recording edits the page unasked")
 	}
 }
 
@@ -430,6 +448,27 @@ func TestURLsWrittenThisRunStayUnseen(t *testing.T) {
 	}
 }
 
+// A run's first call drafted as it streams puts its URLs in the page
+// before any dispatch: they are not the page's as the run began, and
+// stay unseen once the run reads another page.
+func TestDraftedURLsStayUnseen(t *testing.T) {
+	leak := "https://evil.example/x.png"
+	x := executor(page())
+	x.Ctx.ListPages = func() []map[string]any { return []map[string]any{{"id": "p", "title": "Salary review"}} }
+	raw := `{"position":{"at":"end"},"blocks":[{"type":"image","image":{"url":"` + leak + `"}}]}`
+	x.Draft("insert_blocks", raw)
+	if out, ok := x.FinishDraft("insert_blocks", raw); !ok || out["error"] != nil {
+		t.Fatalf("draft: %v %v", out, ok)
+	}
+	if out := x.Call("list_pages", nil); out["error"] != nil {
+		t.Fatal(out)
+	}
+	image := map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "image", "image": map[string]any{"url": leak}}}}
+	if out := x.Call("insert_blocks", image); out["error"] == nil {
+		t.Error("a drafted URL counts as the page's from before the run")
+	}
+}
+
 // Listing the user's pages counts as reading them: a title could leave in
 // an image's URL too.
 func TestURLsAfterListingPages(t *testing.T) {
@@ -457,5 +496,400 @@ func TestEmbedSizeCap(t *testing.T) {
 	out := x.Call("insert_blocks", map[string]any{"position": map[string]any{"after": "p1"}, "blocks": []any{map[string]any{"type": "embed", "embed": map[string]any{"html": html}}}})
 	if e, _ := out["error"].(string); !strings.Contains(e, "200 KB") || len(x.Ops) != 0 {
 		t.Errorf("out %v", out)
+	}
+}
+
+func TestOfflineOptions(t *testing.T) {
+	for _, tc := range []struct {
+		p    store.Provider
+		want bool
+	}{
+		{store.Provider{Preset: "ollama", AuthKind: "none", IsLocal: true}, true},
+		// A cloud provider kept on this device needs the network.
+		{store.Provider{Preset: "deepseek", AuthKind: "api_key", IsLocal: true}, false},
+		{store.Provider{Preset: "deepseek", AuthKind: "api_key"}, false},
+		{store.Provider{Preset: "chatgpt", AuthKind: "account", IsLocal: true}, false},
+		// A custom endpoint, or one of no preset, on this network works
+		// offline; one on the internet does not.
+		{store.Provider{Preset: "custom", BaseURL: "http://192.168.1.20:8080/v1", AuthKind: "api_key", IsLocal: true}, true},
+		{store.Provider{BaseURL: "http://localhost:11434/v1", AuthKind: "none", IsLocal: true}, true},
+		{store.Provider{Preset: "custom", BaseURL: "https://models.example.com/v1", AuthKind: "api_key", IsLocal: true}, false},
+	} {
+		if got := (Option{Provider: tc.p}).Offline(); got != tc.want {
+			t.Errorf("%s kept here %v: offline %v, want %v", tc.p.Preset, tc.p.IsLocal, got, tc.want)
+		}
+	}
+}
+
+// streamModel answers each request with scripted server-sent events.
+type streamModel struct {
+	mu       sync.Mutex
+	rounds   [][]string
+	requests []map[string]any
+}
+
+func (f *streamModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var body map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	f.requests = append(f.requests, body)
+	w.Header().Set("Content-Type", "text/event-stream")
+	for _, e := range f.rounds[0] {
+		_, _ = io.WriteString(w, "data: "+e+"\n\n")
+	}
+	_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	f.rounds = f.rounds[1:]
+}
+
+// A local run streams each round's answer, its calls put together from
+// their pieces, and the reply leaves the thinking out.
+func TestLocalRunStreams(t *testing.T) {
+	f := &streamModel{rounds: [][]string{
+		{
+			`{"choices":[{"delta":{"content":"Let me look."}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read_page","arguments":""}}]}}]}`,
+			`{"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{}"}}]},"finish_reason":"tool_calls"}]}`,
+		},
+		{
+			`{"choices":[{"delta":{"content":"<think>hm"}}]}`,
+			`{"choices":[{"delta":{"content":"m</think>It is "}}]}`,
+			`{"choices":[{"delta":{"content":"a plan."},"finish_reason":"stop"}]}`,
+		},
+	}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	var seen []string
+	res, err := RunLocal(context.Background(), NewClient(srv.URL, ""), Request{Model: "m", SupportsTools: true}, executor(page()).Ctx,
+		Events{Text: func(s string) { seen = append(seen, shownText(s)) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.requests[0]["stream"] != true {
+		t.Error("the answer was not asked to stream")
+	}
+	msgs := f.requests[1]["messages"].([]any)
+	if calls, _ := msgs[len(msgs)-2].(map[string]any)["tool_calls"].([]any); len(calls) != 1 {
+		t.Errorf("the call did not come together: %v", msgs[len(msgs)-2])
+	}
+	want := []string{"Let me look.", "", "It is", "It is a plan."}
+	if strings.Join(seen, "|") != strings.Join(want, "|") {
+		t.Errorf("streamed %q", seen)
+	}
+	if res.Reply != "It is a plan." {
+		t.Errorf("reply %q", res.Reply)
+	}
+}
+
+// A server that answers whole, though asked to stream, still answers.
+func TestStreamToServerThatDoesNot(t *testing.T) {
+	srv := httptest.NewServer(&fakeModel{replies: []map[string]any{{"content": "Whole."}}})
+	defer srv.Close()
+	var seen []string
+	res, err := NewClient(srv.URL, "").ChatStream(context.Background(), "m", nil, nil, 0, &Streamed{Text: func(s string) { seen = append(seen, s) }})
+	if err != nil || res.Content != "Whole." || len(seen) != 1 {
+		t.Errorf("%v, %q, %q", err, res.Content, seen)
+	}
+}
+
+// A stream that ends before the model finished is no answer.
+func TestStreamCutOff(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"content":"Half"}}]}`+"\n\n")
+	}))
+	defer srv.Close()
+	_, err := NewClient(srv.URL, "").ChatStream(context.Background(), "m", nil, nil, 0, &Streamed{})
+	if err == nil {
+		t.Error("a cut-off answer counted")
+	}
+}
+
+// A cloud run's text starts again with each round of the server's model.
+func TestCloudRunStreamsRounds(t *testing.T) {
+	text := func(delta string, round float64) map[string]any {
+		return map[string]any{"type": "text", "delta": delta, "round": round}
+	}
+	var seen []string
+	_, err := RunCloud(context.Background(), fakeStream{events: []map[string]any{
+		text("Let me ", 0), text("look.", 0), text("It is", 1), text(" a plan.", 1),
+		{"type": "done", "reply": "It is a plan."},
+	}}, "j1", Events{Text: func(s string) { seen = append(seen, s) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "Let me |Let me look.|It is|It is a plan."; strings.Join(seen, "|") != want {
+		t.Errorf("streamed %q", seen)
+	}
+}
+
+func TestShownText(t *testing.T) {
+	for in, want := range map[string]string{
+		"Hello":                    "Hello",
+		"<think>a</think> Hi":      "Hi",
+		"<think>still":             "",
+		"Hi <thi":                  "Hi",
+		"<think>a</think>B<think>": "B",
+	} {
+		if got := shownText(in); got != want {
+			t.Errorf("shownText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCloseJSON(t *testing.T) {
+	for in, want := range map[string]string{
+		``:                                     ``,
+		`{`:                                    `{}`,
+		`{"a":`:                                `{}`,
+		`{"a":12`:                              `{}`,
+		`{"a":"x","b`:                          `{"a":"x"}`,
+		`{"text":"Once upon a ti`:              `{"text":"Once upon a ti"}`,
+		`{"t":"a\`:                             `{"t":"a"}`,
+		`{"t":"\u00`:                           `{"t":""}`,
+		`{"t":"C:\\us`:                         `{"t":"C:\\us"}`,
+		`{"t":"C:\\\u00`:                       `{"t":"C:\\"}`,
+		`{"p":{"after":"x"},"blocks":[{"type"`: `{"p":{"after":"x"},"blocks":[{}]}`,
+		`{"blocks":[{"type":"p"},{"ty`:         `{"blocks":[{"type":"p"},{}]}`,
+		`{"blocks":[{"type":"p"}],"n":1}`:      `{"blocks":[{"type":"p"}],"n":1}`,
+	} {
+		got, _ := closeJSON(in)
+		if got != want {
+			t.Errorf("closeJSON(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// pieces is a call's arguments as a model streams them, in pieces of n.
+func pieces(args string, n int) []string { return piecesAt(args, n, 0) }
+
+// piecesAt is pieces of the call a server numbers index.
+func piecesAt(args string, n, index int) []string {
+	var out []string
+	for i := 0; i < len(args); i += n {
+		piece, _ := json.Marshal(args[i:min(i+n, len(args))])
+		out = append(out, fmt.Sprintf(`{"choices":[{"delta":{"tool_calls":[{"index":%d,"function":{"arguments":%s}}]}}]}`, index, piece))
+	}
+	return out
+}
+
+// streamedInsert runs a round of calls as a server streams them, and
+// returns the run's result, the page, and what the calls' results said.
+func streamedInsert(t *testing.T, round []string) (Result, *doc.Content, []string) {
+	t.Helper()
+	round = append(round, `{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`)
+	f := &streamModel{rounds: [][]string{round, {`{"choices":[{"delta":{"content":"Done."},"finish_reason":"stop"}]}`}}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	saved := draftEvery
+	t.Cleanup(func() { draftEvery = saved })
+	draftEvery = 0
+	c := page()
+	res, err := RunLocal(context.Background(), NewClient(srv.URL, ""), Request{Model: "m", SupportsTools: true}, executor(c).Ctx, Events{
+		Op: func(doc.Op, string) {}, Revise: func(int, *doc.Op, string, []doc.Op) {},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var outs []string
+	for _, m := range f.requests[1]["messages"].([]any) {
+		if m := m.(map[string]any); m["role"] == "tool" {
+			outs = append(outs, m["content"].(string))
+		}
+	}
+	return res, c, outs
+}
+
+// texts are the page's blocks' text, in order.
+func texts(c *doc.Content) []string {
+	var out []string
+	for _, n := range c.Children {
+		out = append(out, n.Delta().ToMarkdown())
+	}
+	return out
+}
+
+// A server that numbers its calls from 1 still has each call run once.
+func TestStreamedCallsNumberedFromOne(t *testing.T) {
+	args := `{"position":{"after":"p1"},"blocks":[{"type":"paragraph","text":"Once upon a time."}]}`
+	round := append([]string{`{"choices":[{"delta":{"tool_calls":[{"index":1,"id":"c1","function":{"name":"insert_blocks","arguments":""}}]}}]}`},
+		piecesAt(args, 4, 1)...)
+	res, c, outs := streamedInsert(t, round)
+	if n := slices.Index(texts(c), "Once upon a time."); n < 0 || slices.Contains(texts(c)[n+1:], "Once upon a time.") {
+		t.Errorf("page %q", texts(c))
+	}
+	if len(res.Ops) != 1 || len(outs) != 1 || !strings.Contains(outs[0], "inserted_ids") {
+		t.Errorf("%d ops, results %q", len(res.Ops), outs)
+	}
+}
+
+// insert_blocks takes no empty block to write in place of, streamed or
+// whole.
+func TestStreamedInsertTakesNoReplace(t *testing.T) {
+	c := emptyPage()
+	before := c.Encode()
+	x := executor(c)
+	x.Draft("insert_blocks", `{"position":{"replace":"e1"},"blocks":[{"type":"paragraph","text":"Once`)
+	if x.draft != nil || c.Encode() != before {
+		t.Errorf("drafted in place of the empty block\n%s", c.Encode())
+	}
+}
+
+// An insert_blocks call's blocks go in the page as the call streams, the
+// run keeping one op for them all.
+func TestInsertGoesInAsItStreams(t *testing.T) {
+	args := `{"position":{"after":"p1"},"blocks":[{"type":"paragraph","text":"Once upon a time."},{"type":"heading","level":2,"text":"The end"}]}`
+	round := append([]string{`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"insert_blocks","arguments":""}}]}}]}`},
+		pieces(args, 4)...)
+	round = append(round, `{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`)
+	f := &streamModel{rounds: [][]string{round, {`{"choices":[{"delta":{"content":"Done."},"finish_reason":"stop"}]}`}}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	saved := draftEvery
+	t.Cleanup(func() { draftEvery = saved })
+	draftEvery = 0
+	c := page()
+	var shown []string
+	ops, revisions := 0, 0
+	res, err := RunLocal(context.Background(), NewClient(srv.URL, ""), Request{Model: "m", SupportsTools: true}, executor(c).Ctx, Events{
+		Op: func(op doc.Op, _ string) {
+			ops++
+			shown = append(shown, op.Nodes[len(op.Nodes)-1].Delta().ToMarkdown())
+		},
+		Revise: func(_ int, op *doc.Op, _ string, _ []doc.Op) {
+			revisions++
+			shown = append(shown, op.Nodes[len(op.Nodes)-1].Delta().ToMarkdown())
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ops != 1 || revisions < 3 || len(res.Ops) != 1 || len(res.Ops[0].Nodes) != 2 {
+		t.Fatalf("%d ops, %d revisions, result %+v", ops, revisions, res.Ops)
+	}
+	// The paragraph showed part way, before it had all come.
+	if !slices.ContainsFunc(shown, func(t string) bool {
+		return t != "" && len(t) < len("Once upon a time.") && strings.HasPrefix("Once upon a time.", t)
+	}) ||
+		shown[len(shown)-1] != "The end" {
+		t.Errorf("shown %q", shown)
+	}
+	msgs := f.requests[1]["messages"].([]any)
+	if out := msgs[len(msgs)-1].(map[string]any)["content"].(string); !strings.Contains(out, "inserted_ids") {
+		t.Errorf("result %s", out)
+	}
+	if got := c.Children[2].Delta().ToMarkdown(); got != "Once upon a time." || c.Children[3].Type != "heading" {
+		t.Errorf("page %s", c.Encode())
+	}
+	for _, o := range doc.InvertRun(res.Ops) {
+		if err := c.Apply(o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.Encode() != page().Encode() {
+		t.Errorf("undo left\n%s", c.Encode())
+	}
+}
+
+// A call cut off takes out what it put in.
+func TestCutOffInsertComesOut(t *testing.T) {
+	args := `{"position":{"after":"p1"},"blocks":[{"type":"paragraph","text":"Once upon a time, there`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"insert_blocks","arguments":""}}]}}]}`+"\n\n")
+		for _, p := range pieces(args, 8) {
+			_, _ = io.WriteString(w, "data: "+p+"\n\n")
+		}
+	}))
+	defer srv.Close()
+	saved := draftEvery
+	t.Cleanup(func() { draftEvery = saved })
+	draftEvery = 0
+	c := page()
+	var last *doc.Op
+	revised := false
+	res, err := RunLocal(context.Background(), NewClient(srv.URL, ""), Request{Model: "m", SupportsTools: true}, executor(c).Ctx, Events{
+		Revise: func(_ int, op *doc.Op, _ string, _ []doc.Op) { revised, last = true, op },
+	})
+	if err == nil || len(res.Ops) != 0 || !revised || last != nil {
+		t.Errorf("err %v, %d ops, revised %v, last %v", err, len(res.Ops), revised, last)
+	}
+	if c.Encode() != page().Encode() {
+		t.Errorf("page %s", c.Encode())
+	}
+}
+
+// emptyPage is page() with an empty paragraph after p1, where the user
+// asked.
+func emptyPage() *doc.Content {
+	c := page()
+	_ = c.Insert(doc.Position{After: "p1"}, &doc.Node{ID: "e1", Type: "paragraph"})
+	return c
+}
+
+// Writing in Markdown streams into the page, in place of the empty line
+// asked from, a block a line.
+func TestWriteMarkdownStreamsInPlace(t *testing.T) {
+	args := `{"position":{"replace":"e1","after":null,"before":"","parent":null,"at":"end"},"markdown":"## Tide\nOn the morning the sea went, Mara drank tea.\n\nShe ran to the quay.\n- one\n  - nested"}`
+	round := append([]string{`{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"write_markdown","arguments":""}}]}}]}`},
+		pieces(args, 5)...)
+	round = append(round, `{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`)
+	f := &streamModel{rounds: [][]string{round, {`{"choices":[{"delta":{"content":"Done."},"finish_reason":"stop"}]}`}}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	saved := draftEvery
+	t.Cleanup(func() { draftEvery = saved })
+	draftEvery = 0
+	c := emptyPage()
+	before := c.Encode()
+	ops, revisions := 0, 0
+	res, err := RunLocal(context.Background(), NewClient(srv.URL, ""), Request{Model: "m", SupportsTools: true}, executor(c).Ctx, Events{
+		Op:     func(doc.Op, string) { ops++ },
+		Revise: func(int, *doc.Op, string, []doc.Op) { revisions++ },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ops != 2 || revisions < 3 || len(res.Ops) != 2 || res.Ops[0].Op != "replace" || res.Ops[1].Op != "insert" {
+		t.Fatalf("%d ops, %d revisions, result %+v", ops, revisions, res.Ops)
+	}
+	var got []string
+	for _, n := range c.Children[2:6] {
+		got = append(got, n.Type+":"+n.Delta().ToMarkdown())
+	}
+	want := []string{"heading:Tide", "paragraph:On the morning the sea went, Mara drank tea.", "paragraph:She ran to the quay.", "bulleted_list:one"}
+	if strings.Join(got, "|") != strings.Join(want, "|") || c.Children[2].ID != "e1" || len(c.Children[5].Children) != 1 {
+		t.Errorf("page %q\n%s", got, c.Encode())
+	}
+	for _, o := range doc.InvertRun(res.Ops) {
+		if err := c.Apply(o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if c.Encode() != before {
+		t.Errorf("undo left\n%s", c.Encode())
+	}
+}
+
+// A model whose answer does not stream writes the same, whole.
+func TestWriteMarkdownWhole(t *testing.T) {
+	x := executor(emptyPage())
+	out := x.Call("write_markdown", map[string]any{"position": map[string]any{"replace": "e1"}, "markdown": "First.\nSecond."})
+	if ids, _ := out["inserted_ids"].([]string); len(ids) != 2 || ids[0] != "e1" || len(x.Ops) != 2 {
+		t.Fatalf("out %v, %d ops", out, len(x.Ops))
+	}
+	// As models that write every key of a schema give it.
+	y := executor(emptyPage())
+	if out := y.Call("write_markdown", map[string]any{"position": map[string]any{"replace": "e1", "after": "p1", "before": "", "parent": nil, "at": "end"}, "markdown": "x"}); out["error"] != nil {
+		t.Errorf("position with the other keys empty: %v", out)
+	}
+	if out := y.Call("insert_blocks", map[string]any{"position": map[string]any{"after": "p1", "before": "", "at": "start"}, "blocks": []any{map[string]any{"type": "paragraph", "text": "y"}}}); out["error"] != nil {
+		t.Errorf("insert with the other keys empty: %v", out)
+	}
+	if out := x.Call("write_markdown", map[string]any{"position": map[string]any{"replace": "p1"}, "markdown": "x"}); out["error"] == nil {
+		t.Error("wrote over a block with text")
+	}
+	if out := x.Call("write_markdown", map[string]any{"position": map[string]any{"at": "end"}, "markdown": "\n\n"}); out["error"] == nil {
+		t.Error("wrote nothing")
 	}
 }

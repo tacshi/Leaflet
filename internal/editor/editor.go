@@ -13,6 +13,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/menu"
 )
 
 // Pos is a place in the page: a block and a rune offset in its text. On a
@@ -23,14 +24,7 @@ type Pos struct {
 }
 
 // MenuItem is a choice of the / or @ menu.
-type MenuItem struct {
-	Key   string
-	Label string
-	Hint  string
-	Icon  string
-	// Group heads a run of items, as "Agents".
-	Group string
-}
+type MenuItem = menu.Item
 
 // Trigger is an open / or @ menu: where its character was typed and what
 // was typed after it.
@@ -136,8 +130,11 @@ type Editor struct {
 	// geom is each block's box in the window, for hit-testing; rel is the
 	// same box relative to root, which keeps blocks scrolled out of view
 	// (and so not drawn) where the page has moved them.
-	geom    map[string]ui.Rect
-	rel     map[string]ui.Rect
+	geom map[string]ui.Rect
+	rel  map[string]ui.Rect
+	// laid is each block's box in the window as the last frame laid it
+	// out, drawn or not: a block never drawn has no geom.
+	laid    map[string]ui.Rect
 	root    ui.Rect
 	width   float32
 	focused bool
@@ -213,7 +210,7 @@ type Editor struct {
 // New returns an editor of content.
 func New(content *doc.Content, host Host) *Editor {
 	e := &Editor{Content: content, Host: host, Size: 17,
-		layouts: map[string]*blockLayout{}, geom: map[string]ui.Rect{}, rel: map[string]ui.Rect{}, chips: map[string]ui.Rect{}, width: 680}
+		layouts: map[string]*blockLayout{}, geom: map[string]ui.Rect{}, rel: map[string]ui.Rect{}, laid: map[string]ui.Rect{}, chips: map[string]ui.Rect{}, width: 680}
 	if len(content.Children) == 0 {
 		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
 		p.SetDelta(nil)
@@ -557,6 +554,10 @@ func (e *Editor) changed() {
 	e.services.Invalidate()
 }
 
+// Doc is the content the editor shows, with what is being typed: Content,
+// for what takes the page as an agents.LiveDoc.
+func (e *Editor) Doc() *doc.Content { return e.Content }
+
 // Replace swaps in content from outside the editor (sync, restores),
 // keeping the caret where it can, and the undo steps: going back one
 // takes back what it changed on the page as it is, keeping the change.
@@ -575,7 +576,7 @@ func (e *Editor) Replace(c *doc.Content) {
 		p.SetDelta(nil)
 		e.Content.Children = []*doc.Node{p}
 	}
-	e.Select(e.anchor, e.focus)
+	e.keepSelection()
 	e.putBack(l)
 	e.services.Invalidate()
 }
@@ -597,10 +598,19 @@ func (e *Editor) ApplyOps(ops []doc.Op) error {
 		p.SetDelta(nil)
 		e.Content.Children = []*doc.Node{p}
 	}
-	e.Select(e.anchor, e.focus)
+	e.keepSelection()
 	e.putBack(l)
 	e.changed()
 	return first
+}
+
+// keepSelection keeps the selection in the page after ops from outside
+// change it, without scrolling to it: the user's view stays theirs while
+// an agent writes elsewhere.
+func (e *Editor) keepSelection() {
+	reveal := e.reveal
+	e.Select(e.anchor, e.focus)
+	e.reveal = reveal
 }
 
 // ApplyOp applies one op of an agent run as it streams in. The first op of
@@ -630,7 +640,7 @@ func (e *Editor) ApplyOp(o doc.Op, newStep bool) error {
 		p.SetDelta(nil)
 		e.Content.Children = []*doc.Node{p}
 	}
-	e.Select(e.anchor, e.focus)
+	e.keepSelection()
 	e.putBack(l)
 	e.changed()
 	return err

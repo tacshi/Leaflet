@@ -1,4 +1,4 @@
-package app
+package core
 
 import (
 	_ "embed"
@@ -28,26 +28,26 @@ var welcomeImage []byte
 // each, so tags show from the start: in their bylines, the sidebar's Tags
 // tab and search. They are written in the language the app shows when they
 // are made.
-func (a *App) createWelcome() error {
-	if _, ok := a.st.Value("welcome.created"); ok {
+func (c *Core) createWelcome() error {
+	if _, ok := c.Store.Value("welcome.created"); ok {
 		return nil
 	}
-	if pages, _ := a.st.Pages(); len(pages) > 0 {
-		return a.st.SetValue("welcome.created", "true")
+	if pages, _ := c.Store.Pages(); len(pages) > 0 {
+		return c.Store.SetValue("welcome.created", "true")
 	}
 	m := locales.In(i18n.Locale())
 	// The picture is a file of the page and the subpage a page inside it,
 	// so the page comes first and its blocks after.
-	p, err := a.st.CreatePage(store.NewPageOptions{Title: m.WelcomeTitle(), Tags: []string{m.WelcomeTagGuide()}})
+	p, err := c.Store.CreatePage(store.NewPageOptions{Title: m.WelcomeTitle(), Tags: []string{m.WelcomeTagGuide()}})
 	if err != nil {
 		return err
 	}
-	image, err := a.welcomeImageFile(p.ID, m.WelcomeImageName()+".jpg")
+	image, err := c.welcomeImageFile(p.ID, m.WelcomeImageName()+".jpg")
 	if err != nil {
 		return err
 	}
 	meetings := []string{m.WelcomeTagMeetings()}
-	sub, err := a.st.CreatePage(store.NewPageOptions{ParentID: p.ID, Title: m.WelcomeSubTitle(), Tags: meetings, Content: welcomeSubpage(m)})
+	sub, err := c.Store.CreatePage(store.NewPageOptions{ParentID: p.ID, Title: m.WelcomeSubTitle(), Tags: meetings, Content: welcomeSubpage(m)})
 	if err != nil {
 		return err
 	}
@@ -55,24 +55,24 @@ func (a *App) createWelcome() error {
 	if err != nil {
 		return err
 	}
-	if _, _, err := a.st.SaveContent(p.ID, doc.FromBlocks(blocks)); err != nil {
+	if _, _, err := c.Store.SaveContent(p.ID, doc.FromBlocks(blocks)); err != nil {
 		return err
 	}
-	if _, err := a.st.AddComment(p.ID, commentsID, m.WelcomeComment(), "", "", "agent", "Leaflet"); err != nil {
+	if _, err := c.Store.AddComment(p.ID, commentsID, m.WelcomeComment(), "", "", "agent", "Leaflet"); err != nil {
 		return err
 	}
-	if _, err := a.st.CreatePage(store.NewPageOptions{Title: m.WelcomeSubTitle(), Template: true, Tags: meetings, Content: doc.FromBlocks(welcomeMeeting(m))}); err != nil {
+	if _, err := c.Store.CreatePage(store.NewPageOptions{Title: m.WelcomeSubTitle(), Template: true, Tags: meetings, Content: doc.FromBlocks(welcomeMeeting(m))}); err != nil {
 		return err
 	}
-	if err := a.st.SetValue("welcome.page", p.ID); err != nil {
+	if err := c.Store.SetValue("welcome.page", p.ID); err != nil {
 		return err
 	}
-	return a.st.SetValue("welcome.created", "true")
+	return c.Store.SetValue("welcome.created", "true")
 }
 
 // welcomeImageFile adds the guide's picture as a file of its page, named
 // name.
-func (a *App) welcomeImageFile(pageID, name string) (store.File, error) {
+func (c *Core) welcomeImageFile(pageID, name string) (store.File, error) {
 	dir, err := os.MkdirTemp("", "leaflet-welcome")
 	if err != nil {
 		return store.File{}, err
@@ -82,7 +82,7 @@ func (a *App) welcomeImageFile(pageID, name string) (store.File, error) {
 	if err := os.WriteFile(path, welcomeImage, 0o600); err != nil {
 		return store.File{}, err
 	}
-	return a.st.AddFile(path, "", pageID, "image/jpeg")
+	return c.Store.AddFile(path, "", pageID, "image/jpeg")
 }
 
 // welcomeBlocks are the guide's blocks in m's language, with its picture

@@ -21,8 +21,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/egoist/mygo"
-
 	"leaflet/internal/doc"
 	"leaflet/internal/icloud"
 	"leaflet/internal/remote"
@@ -46,13 +44,25 @@ type Service struct {
 	// ICloud is the Leaflet folder in iCloud Drive, which sync goes
 	// through instead of Supabase while SetICloud has turned it on.
 	ICloud icloud.Folder
+	// Online reports whether the device has a connection, as the host's
+	// system says; nil counts as online.
+	Online func() bool
+	// DeviceName names this device in Account › Devices and to the other
+	// devices in iCloud Drive; nil is the package's DeviceName.
+	DeviceName func() string
 
 	cloudOn atomic.Bool
 	kick    chan struct{}
 	mu      gosync.Mutex
 	running gosync.Mutex
 	open    map[string]bool
-	started bool
+	// loop is the context of the loop Start started, which Stop cancels,
+	// and stop cancels it; both are nil while no loop runs.
+	loop context.Context
+	stop context.CancelFunc
+	// cut cancels the pass running, loop's or SyncNow's, for Stop to cut
+	// it short; nil between passes.
+	cut context.CancelFunc
 	// ownLogChecked is set once a pass has read this device's last batch
 	// in iCloud Drive (checkOwnLog).
 	ownLogChecked bool
@@ -69,11 +79,12 @@ func New(st *store.Store, be *remote.Client) *Service {
 // Start runs the loop: soon after changes, when asked, and every 30 seconds.
 func (s *Service) Start() {
 	s.mu.Lock()
-	if s.started {
+	if s.stop != nil {
 		s.mu.Unlock()
 		return
 	}
-	s.started = true
+	ctx, cancel := context.WithCancel(context.Background())
+	s.loop, s.stop = ctx, cancel
 	s.mu.Unlock()
 	go func() {
 		tick := time.NewTicker(30 * time.Second)
@@ -81,13 +92,63 @@ func (s *Service) Start() {
 		s.Kick()
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case <-s.kick:
-				time.Sleep(1200 * time.Millisecond)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(1200 * time.Millisecond):
+				}
 			case <-tick.C:
 			}
 			_ = s.SyncNow()
 		}
 	}()
+}
+
+// Stop ends the loop Start started, and the pass running, the loop's or
+// one SyncNow asked for, as an iOS app's background time runs out: what
+// that pass had not done yet, the next one does. Passes asked for with
+// SyncNow after it still run, and Start starts the loop again, as an iOS
+// app does when its scene goes to the background and comes back.
+func (s *Service) Stop() {
+	s.mu.Lock()
+	stop, cut := s.stop, s.cut
+	s.loop, s.stop = nil, nil
+	s.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+	if cut != nil {
+		cut()
+	}
+}
+
+// passContext is the context a pass runs in: the loop's, which Stop
+// cancels, or the background's while no loop runs.
+func (s *Service) passContext() context.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.loop != nil {
+		return s.loop
+	}
+	return context.Background()
+}
+
+// startPass is the context of a pass starting, which Stop cancels until
+// done ends the pass.
+func (s *Service) startPass() (ctx context.Context, done func()) {
+	ctx, cancel := context.WithCancel(s.passContext())
+	s.mu.Lock()
+	s.cut = cancel
+	s.mu.Unlock()
+	return ctx, func() {
+		s.mu.Lock()
+		s.cut = nil
+		s.mu.Unlock()
+		cancel()
+	}
 }
 
 // Kick asks for a pass soon.
@@ -218,12 +279,8 @@ func (s *Service) CanSync() bool {
 	if s.Offline != nil && s.Offline() {
 		return false
 	}
-	return !t.needsNetwork() || online()
+	return !t.needsNetwork() || s.Online == nil || s.Online()
 }
-
-// online reports whether the device has a connection; tests stand in
-// for the system's answer.
-var online = func() bool { return mygo.Network.Status().Online }
 
 // Hold runs fn between passes, so no pass sees its changes half made.
 func (s *Service) Hold(fn func()) {
@@ -242,7 +299,9 @@ func (s *Service) SyncNow() error {
 	if s.OnState != nil {
 		s.OnState(true, nil)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	base, done := s.startPass()
+	defer done()
+	ctx, cancel := context.WithTimeout(base, 5*time.Minute)
 	defer cancel()
 	if err := s.retryMoves(ctx); err != nil {
 		log.Printf("sync: %v", err)
@@ -251,6 +310,9 @@ func (s *Service) SyncNow() error {
 	err := t.pass(ctx)
 	if t.needsNetwork() && remote.IsNetwork(err) {
 		err = nil // offline: try again later
+	}
+	if err != nil && base.Err() != nil {
+		err = nil // stopped: the next pass does the rest
 	}
 	if err != nil && !errors.Is(err, remote.ErrSignedOut) {
 		log.Printf("sync: %v", err)
@@ -519,7 +581,15 @@ func onDevice(path string) bool {
 	return err == nil
 }
 
-// DeviceName names this device in Account › Devices.
+// deviceName names this device in Account › Devices, as the host has it.
+func (s *Service) deviceName() string {
+	if s.DeviceName != nil {
+		return s.DeviceName()
+	}
+	return DeviceName()
+}
+
+// DeviceName names this desktop in Account › Devices.
 func DeviceName() string {
 	host, _ := os.Hostname()
 	switch runtime.GOOS {
@@ -552,7 +622,7 @@ func (s *Service) heartbeat(ctx context.Context) error {
 		return remote.ErrSignedOut
 	}
 	_, err = s.be.Upsert(ctx, "devices", map[string]any{
-		"id": id, "user_id": s.be.UserID(), "name": DeviceName(), "platform": runtime.GOOS,
+		"id": id, "user_id": s.be.UserID(), "name": s.deviceName(), "platform": runtime.GOOS,
 		"last_active_at": time.Now().UTC().Format(time.RFC3339Nano),
 	}, "")
 	return err

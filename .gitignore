@@ -2,6 +2,8 @@
 /.mygo/
 /dist/
 mygo_windows_*.syso
+# The Mac's speech helper, which scripts/build-speech.sh builds
+/resources/darwin-*/leaflet-speech
 .DS_Store
 *.log
 

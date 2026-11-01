@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/shortcut"
 )
 
 func newText(typ string, d doc.Delta) *doc.Node {
@@ -142,7 +143,7 @@ func (e *Editor) InsertText(s string) {
 	if r, _ := utf8.DecodeRuneInString(s); (r == '/' || r == '@') && utf8.RuneCountInString(s) == 1 {
 		runes := []rune(n.Delta().Plain())
 		at := off - 1
-		if at == 0 || opensMenu(runes[at-1]) {
+		if at == 0 || shortcut.OpensMenu(runes[at-1]) {
 			e.trigger = &Trigger{Kind: r, ID: n.ID, Off: at}
 			e.menuIndex = 0
 		}
@@ -153,49 +154,35 @@ func (e *Editor) InsertText(s string) {
 	e.changed()
 }
 
-// opensMenu reports whether a / or @ typed after r opens its menu: after
-// a space, or after Chinese or Japanese text or punctuation, which has no
-// spaces between words; not inside a word, as in a@b.com or a/b.
-func opensMenu(r rune) bool {
-	return unicode.IsSpace(r) || unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana) ||
-		r > unicode.MaxASCII && unicode.IsPunct(r)
-}
-
-// markdownShortcut turns "# ", "- ", "1. ", "[] " and "> " typed at the
-// start of a paragraph into the block they stand for; dividerShortcut
-// takes "---".
+// markdownShortcut turns "# ", "- ", "1. ", "[] ", "> ", "``` " and the
+// like typed at the start of a paragraph into the block they stand for
+// (internal/shortcut); dividerShortcut takes "---".
 func (e *Editor) markdownShortcut(n *doc.Node) {
-	if n.Type != "paragraph" && n.Type != "bulleted_list" {
-		return
-	}
 	text := n.Delta().Plain()
 	if utf8.RuneCountInString(text) < e.focus.Off {
 		return
 	}
-	prefix := string([]rune(text)[:e.focus.Off])
-	if p, ok := strings.CutSuffix(prefix, "\u3000"); ok {
-		prefix = p + " "
-	}
-	conv := map[string]func(){
-		"# ":   func() { n.Type = "heading"; n.Set("level", 1) },
-		"## ":  func() { n.Type = "heading"; n.Set("level", 2) },
-		"### ": func() { n.Type = "heading"; n.Set("level", 3) },
-		"- ":   func() { n.Type = "bulleted_list" },
-		"* ":   func() { n.Type = "bulleted_list" },
-		"1. ":  func() { n.Type = "numbered_list" },
-		"[] ":  func() { n.Type = "todo_list"; n.Set("checked", false) },
-		"[ ] ": func() { n.Type = "todo_list"; n.Set("checked", false) },
-		"[x] ": func() { n.Type = "todo_list"; n.Set("checked", true) },
-		"> ":   func() { n.Type = "quote" },
-	}
-	fn, ok := conv[prefix]
-	if !ok || (n.Type == "bulleted_list" && prefix != "[] " && prefix != "[ ] " && prefix != "[x] ") {
+	typ, data, ok := shortcut.Block(n.Type, string([]rune(text)[:e.focus.Off]))
+	if !ok {
 		return
 	}
 	// Undo goes back to the text as typed.
 	e.pushUndo(false)
-	fn()
-	n.SetDelta(n.Delta().Delete(0, e.focus.Off))
+	n.Type = typ
+	for _, k := range doc.TypedKeys {
+		delete(n.Data, k)
+	}
+	for k, v := range data {
+		n.Set(k, v)
+	}
+	d := n.Delta().Delete(0, e.focus.Off)
+	if typ == "code" {
+		d = doc.Delta{{Text: d.Plain()}}.Compact()
+	}
+	n.SetDelta(d)
+	if typ == "code" {
+		e.roomAfterCode(n)
+	}
 	e.invalidate(n.ID)
 	e.anchor, e.focus = Pos{n.ID, 0}, Pos{n.ID, 0}
 }
@@ -203,7 +190,7 @@ func (e *Editor) markdownShortcut(n *doc.Node) {
 // dividerShortcut turns "---" typed alone in a paragraph into a divider
 // before it, leaving the caret in the emptied paragraph to go on writing.
 func (e *Editor) dividerShortcut(n *doc.Node) {
-	if n.Type != "paragraph" || e.focus.Off != 3 || n.Delta().Plain() != "---" {
+	if e.focus.Off != 3 || !shortcut.Divider(n.Type, n.Delta().Plain()) {
 		return
 	}
 	// Undo goes back to the text as typed.
@@ -218,14 +205,7 @@ func (e *Editor) dividerShortcut(n *doc.Node) {
 // full into their formats.
 func (e *Editor) inlineShortcut(n *doc.Node) {
 	d := n.Delta()
-	runes := []rune(d.Plain())
-	end := e.focus.Off
-	if end < 2 || end > len(runes) {
-		return
-	}
-	// A marker's runes can be in a mention's title, but a mention is one
-	// unit, taken out or formatted whole: a marker in one is no marker,
-	// and a pair outside never cuts one.
+	// A mention is one unit, taken out or formatted whole.
 	mentioned := func(from, to int) bool {
 		for _, r := range d.Slice(from, to) {
 			if r.Attrs.Mention != nil {
@@ -234,42 +214,26 @@ func (e *Editor) inlineShortcut(n *doc.Node) {
 		}
 		return false
 	}
-	try := func(marker string, set func(*doc.Attrs)) bool {
-		m := []rune(marker)
-		if end < 2*len(m)+1 || string(runes[end-len(m):end]) != marker || mentioned(end-len(m), end) {
-			return false
-		}
-		closeAt := end - len(m)
-		for start := closeAt - 1; start >= len(m)-1; start-- {
-			openAt := start - len(m) + 1
-			if string(runes[openAt:start+1]) != marker || mentioned(openAt, start+1) {
-				continue
-			}
-			inner := runes[start+1 : closeAt]
-			if len(inner) == 0 || unicode.IsSpace(inner[0]) || unicode.IsSpace(inner[len(inner)-1]) {
-				return false
-			}
-			if len(m) == 1 && openAt > 0 && runes[openAt-1] == m[0] {
-				return false
-			}
-			e.pushUndo(false)
-			d = d.Delete(closeAt, end)
-			d = d.Format(start+1, closeAt, set)
-			d = d.Delete(openAt, start+1)
-			n.SetDelta(d)
-			e.invalidate(n.ID)
-			off := closeAt - len(m)
-			e.anchor, e.focus = Pos{n.ID, off}, Pos{n.ID, off}
-			e.typing, e.hasTyping = d.AttrsAt(openAt), true
-			e.typing.Bold, e.typing.Italic, e.typing.Code, e.typing.Strike = false, false, false, false
-			return true
-		}
-		return false
+	m, ok := shortcut.Inline([]rune(d.Plain()), e.focus.Off, mentioned)
+	if !ok {
+		return
 	}
-	_ = try("**", func(a *doc.Attrs) { a.Bold = true }) ||
-		try("~~", func(a *doc.Attrs) { a.Strike = true }) ||
-		try("`", func(a *doc.Attrs) { a.Code = true }) ||
-		try("*", func(a *doc.Attrs) { a.Italic = true })
+	set := map[string]func(*doc.Attrs){
+		"bold":   func(a *doc.Attrs) { a.Bold = true },
+		"strike": func(a *doc.Attrs) { a.Strike = true },
+		"code":   func(a *doc.Attrs) { a.Code = true },
+		"italic": func(a *doc.Attrs) { a.Italic = true },
+	}[m.Format]
+	e.pushUndo(false)
+	d = d.Delete(m.Close, m.End)
+	d = d.Format(m.Inner, m.Close, set)
+	d = d.Delete(m.Open, m.Inner)
+	n.SetDelta(d)
+	e.invalidate(n.ID)
+	off := m.Close - (m.Inner - m.Open)
+	e.anchor, e.focus = Pos{n.ID, off}, Pos{n.ID, off}
+	e.typing, e.hasTyping = d.AttrsAt(m.Open), true
+	e.typing.Bold, e.typing.Italic, e.typing.Code, e.typing.Strike = false, false, false, false
 }
 
 // continues is the type a new block after n takes on Enter.
@@ -686,21 +650,14 @@ func (e *Editor) SetType(typ string, level int) {
 		}
 		last = n
 		n.Type = typ
-		for _, k := range []string{"checked", "due", "level", "language", "tone", "collapsed"} {
+		for _, k := range doc.TypedKeys {
 			delete(n.Data, k)
 		}
-		switch typ {
-		case "heading":
-			n.Set("level", level)
-		case "todo_list":
-			n.Set("checked", false)
-		case "code":
+		for k, v := range doc.TypeData(typ, level) {
+			n.Set(k, v)
+		}
+		if typ == "code" {
 			n.SetDelta(doc.Delta{{Text: n.Delta().Plain()}}.Compact())
-			n.Set("language", "")
-		case "callout":
-			n.Set("tone", "info")
-		case "toggle_list":
-			n.Set("collapsed", false)
 		}
 		if !NestableTypes(n) && len(n.Children) > 0 {
 			e.liftChildren(n)

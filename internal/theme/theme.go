@@ -90,7 +90,7 @@ var sepia = Palette{
 func init() { sepia = withAccent(sepia, light.Accent) }
 
 // Accents are the accent colors to choose from, by name, each light and
-// dark; Indigo is Leaflet's own.
+// dark; Indigo is the palettes' own.
 var Accents = []struct {
 	Name        string
 	Light, Dark ui.Color
@@ -111,23 +111,25 @@ var look struct {
 }
 
 // Look chooses sepia paper for the light appearance and the accent: a
-// name of Accents, "system" for the desktop's, or "" for Indigo.
+// name of Accents, or "system" or "" for the desktop's.
 func Look(isSepia bool, accent string) {
 	look.sepia, look.accent = isSepia, accent
 }
 
-// Accent returns the accent named, light or dark, with system the
-// desktop's; ok is false where there is none, as for Indigo.
+// Accent returns the accent named, light or dark, with "system", as "",
+// the desktop's, or Blue where it has none; ok is false for Indigo, the
+// palettes' own.
 func Accent(name string, isDark bool, system ui.Color) (ui.Color, bool) {
-	if name == "system" {
+	if name == "system" || name == "" {
 		if system.A == 0 {
-			return ui.Color{}, false
+			name = "Blue"
+		} else {
+			system.A = 255
+			if isDark {
+				return system.Mix(ui.Hex("#FFFFFF"), 0.12), true
+			}
+			return system, true
 		}
-		system.A = 255
-		if isDark {
-			return system.Mix(ui.Hex("#FFFFFF"), 0.12), true
-		}
-		return system, true
 	}
 	for _, a := range Accents[1:] {
 		if a.Name == name {
@@ -156,13 +158,7 @@ func Of(c *ui.Context) *Palette {
 	if p, ok := palettes[k]; ok {
 		return p
 	}
-	p := *For(isDark)
-	if k.sepia {
-		p = sepia
-	}
-	if accent.A > 0 {
-		p = withAccent(p, accent)
-	}
+	p := made(isDark, k.sepia, accent)
 	palettes[k] = &p
 	return &p
 }
@@ -173,6 +169,29 @@ func For(isDark bool) *Palette {
 		return &dark
 	}
 	return &light
+}
+
+// PaletteFor returns the palette of an appearance with sepia paper or
+// not, in the accent named (a name of Accents, or "" for Blue, there
+// being no desktop's), as Of makes a window's; the iOS app's palettes are
+// made with it (ios/gen).
+// Sepia is light paper: dark is dark with it too.
+func PaletteFor(isDark, isSepia bool, accent string) Palette {
+	color, _ := Accent(accent, isDark, ui.Color{})
+	return made(isDark, isSepia && !isDark, color)
+}
+
+// made is the palette of an appearance, its paper and its accent, or
+// Indigo for none.
+func made(isDark, isSepia bool, accent ui.Color) Palette {
+	p := *For(isDark)
+	if isSepia {
+		p = sepia
+	}
+	if accent.A > 0 {
+		p = withAccent(p, accent)
+	}
+	return p
 }
 
 // withAccent returns p in accent, its tints mixed from its surface as

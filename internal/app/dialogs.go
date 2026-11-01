@@ -16,6 +16,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/menu"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -38,6 +39,8 @@ type inlinePrompt struct {
 	// shown is set once it has.
 	from, to editor.Pos
 	shown    bool
+	// height is the panel's, as last drawn.
+	height float32
 }
 
 type newComment struct {
@@ -211,7 +214,7 @@ func (a *App) searchDialog(c *ui.Context) {
 			hits := ui.List(c, &d.hitList, len(d.hits), func(i int) {
 				h := d.hits[i]
 				ui.Row(c).Padding(8, 10).Gap(12).AlignItems(ui.Center).Children(func() {
-					icon := map[string]string{"page": "file-text", "template": "layout-template", "recording": "mic", "comment": "message-square"}[h.Kind]
+					icon := map[string]string{"page": "file-text", "template": "layout-template", "recording": "audio-lines", "comment": "message-square"}[h.Kind]
 					ui.Icon(c, theme.Icon(icon)).FontSize(15)
 					ui.Column(c).Grow(1).Shrink(1).Children(func() {
 						ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -630,7 +633,7 @@ func (a *App) restoreVersion(pageID string, c *doc.Content) {
 			return
 		}
 	}
-	if ed := a.Editor(pageID); ed != nil {
+	if ed := a.openEditor(pageID); ed != nil {
 		ed.Edit(func(content *doc.Content) { content.Children = c.Copy().Children })
 		a.savePage()
 		// The last run's edits are gone or back with the version: undoing
@@ -863,7 +866,7 @@ func (d *dialogs) openChart(id string, ed *editor.Editor) {
 	if n == nil {
 		return
 	}
-	kind, title, caption, labels, series := editor.ChartOf(n)
+	kind, title, caption, _, _ := editor.ChartOf(n)
 	d.chartOpen, d.chartID, d.chartEditor, d.chartTitle, d.chartCap, d.chartError = true, id, ed, title, caption, ""
 	d.chartKind = 0
 	for i, k := range chartKinds {
@@ -871,59 +874,23 @@ func (d *dialogs) openChart(id string, ed *editor.Editor) {
 			d.chartKind = i
 		}
 	}
-	// One row per label: label, then a value per series.
-	var b strings.Builder
-	b.WriteString(locales.DialogChartLabelColumn())
-	for _, s := range series {
-		b.WriteString(", " + s.Name)
-	}
-	for i, l := range labels {
-		b.WriteString("\n" + l)
-		for _, s := range series {
-			v := 0.0
-			if i < len(s.Values) {
-				v = s.Values[i]
-			}
-			b.WriteString(", " + strconv.FormatFloat(v, 'f', -1, 64))
-		}
-	}
-	d.chartCSV = b.String()
+	d.chartCSV = doc.ChartCSV(n, locales.DialogChartLabelColumn())
 }
 
+// parseChartCSV reads the dialog's data, saying what is wrong with it in
+// the language shown.
 func parseChartCSV(csv string) (labels []any, series []any, err error) {
-	lines := strings.Split(strings.TrimSpace(csv), "\n")
-	if len(lines) < 2 {
-		return nil, nil, errors.New(locales.DialogChartNeedRows())
+	labels, series, err = doc.ParseChartCSV(csv)
+	var number *doc.ChartNumberError
+	switch {
+	case errors.Is(err, doc.ErrChartRows):
+		err = errors.New(locales.DialogChartNeedRows())
+	case errors.Is(err, doc.ErrChartSeries):
+		err = errors.New(locales.DialogChartNeedSeries())
+	case errors.As(err, &number):
+		err = errors.New(locales.DialogChartNotNumber(number.Line, number.Cell))
 	}
-	split := func(s string) []string {
-		parts := strings.Split(s, ",")
-		for i := range parts {
-			parts[i] = strings.TrimSpace(parts[i])
-		}
-		return parts
-	}
-	header := split(lines[0])
-	if len(header) < 2 {
-		return nil, nil, errors.New(locales.DialogChartNeedSeries())
-	}
-	values := make([][]any, len(header)-1)
-	for i, line := range lines[1:] {
-		cells := split(line)
-		labels = append(labels, cells[0])
-		for s := range values {
-			v := 0.0
-			if s+1 < len(cells) && cells[s+1] != "" {
-				if v, err = strconv.ParseFloat(cells[s+1], 64); err != nil {
-					return nil, nil, errors.New(locales.DialogChartNotNumber(i+2, cells[s+1]))
-				}
-			}
-			values[s] = append(values[s], v)
-		}
-	}
-	for s, name := range header[1:] {
-		series = append(series, map[string]any{"name": name, "values": values[s]})
-	}
-	return labels, series, nil
+	return labels, series, err
 }
 
 func (a *App) chartDialog(c *ui.Context) {
@@ -974,7 +941,7 @@ func (a *App) chartDialog(c *ui.Context) {
 
 func (d *dialogs) openEmbed() {
 	d.embedOpen, d.embedID, d.embedTitle, d.embedHeight = true, "", locales.DialogEmbedTitle(), "320"
-	d.embedHTML = "<!doctype html>\n<html><body style=\"font-family: system-ui; padding: 16px\">\n  <button onclick=\"this.textContent = Number(this.textContent) + 1\">0</button>\n</body></html>"
+	d.embedHTML = menu.EmbedStart
 }
 
 // editEmbed opens the dialog on an embed in the page, to change it.
@@ -1004,7 +971,7 @@ func (a *App) embedDialog(c *ui.Context) {
 				}
 				if primary(c, "insert", "", label).Clicked() && a.page != nil {
 					h, _ := strconv.Atoi(d.embedHeight)
-					n, err := doc.SpecToNode(map[string]any{"type": "embed", "embed": map[string]any{"title": d.embedTitle, "html": d.embedHTML, "height": float64(h)}}, "", a.session.DisplayName)
+					n, err := menu.EmbedBlock(d.embedTitle, d.embedHTML, h, a.session.DisplayName)
 					if err != nil {
 						a.toast(err.Error())
 						return
@@ -1059,29 +1026,16 @@ func (a *App) linkDialog(c *ui.Context) {
 			}
 			insert := func() {
 				link := strings.TrimSpace(d.linkURL)
-				valid := doc.WebURL(link)
-				if d.linkKind == "video" {
-					_, valid = doc.ParseVideoURL(link)
-				}
-				if !valid {
-					d.linkError = locales.DialogLinkNotWeb()
-					if d.linkKind == "video" {
-						d.linkError = locales.DialogLinkNotVideo()
-					}
+				n, err := menu.LinkBlock(d.linkKind, link)
+				if err != nil {
+					d.linkError = err.Error()
 					return
 				}
 				switch {
 				case a.page == nil:
 				case d.linkID != "":
 					a.setMediaLink(d.linkID, link)
-				case d.linkKind == "video":
-					n, _ := doc.VideoNode(link, "")
-					a.page.editor.InsertBlocks(n)
-				case d.linkKind == "image":
-					n, _ := doc.ImageNode(link)
-					a.page.editor.InsertBlocks(n)
 				default:
-					n, _ := doc.LinkNode(link)
 					a.page.editor.InsertBlocks(n)
 				}
 				d.linkOpen = false
@@ -1139,7 +1093,8 @@ func (a *App) setMediaLink(id, link string) {
 
 // inlinePrompt asks an agent to work on a block, from @ or a selection:
 // a panel below the text it was asked from, or above it where there is no
-// room below.
+// room below. While the agent writes, the panel stays under what it wrote,
+// in the window: the page stays where the user scrolls it.
 func (a *App) inlinePrompt(c *ui.Context) {
 	pal := theme.Of(c)
 	ip := a.dialogs.inline
@@ -1151,10 +1106,28 @@ func (a *App) inlinePrompt(c *ui.Context) {
 	if !ok {
 		return
 	}
+	// Blocks the agent writes as it works go below it, not under it.
+	if run := a.hub.Session(ps.id).Run(ip.runID); run != nil {
+		for _, id := range run.BlockIDs() {
+			if r, ok := ps.editor.BlockRect(id); ok && r.Y+r.H > at.Y+at.H {
+				at.H = r.Y + r.H - at.Y
+			}
+		}
+	}
+	if ip.working && ps.viewH > 0 {
+		const gap = 8 + 24 // over the panel, and under it
+		end := ps.viewTop + ps.viewH
+		// What it writes past the window, the panel keeps in the window
+		// over the last lines, not below them.
+		if room := end - ip.height - gap - at.Y; room > 0 && at.H > room {
+			at.H = room
+		}
+	}
 	ui.Overlay(c, func() {
 		anchor := ui.Box(c.Key("inline-anchor")).Absolute().Left(at.X).Top(at.Y).Size(at.W, at.H).PassThrough()
 		panel := ui.Column(c.Key("inline-prompt")).AttachTo(anchor, ui.AnchorBottomLeft, ui.AnchorTopLeft).Width(at.W).Margin(8, 0, 0).
-			Padding(12).Gap(10).Radius(10).Background(pal.AgentSection).Border(1, pal.AccentSoftBorder).Shadow(0, 10, 30, 0, pal.Shadow)
+			Padding(12).Gap(10).Radius(10).Background(pal.AgentSection).Border(1, pal.AccentSoftBorder).Shadow(0, 10, 30, 0, pal.Shadow).
+			Draw(func(_ *ui.Painter, r ui.Rect) { ip.height = r.H })
 		// A press elsewhere puts away a prompt with nothing in it yet, but
 		// not the press on Ask agent that opened it.
 		if panel.PressedOutside() && ip.shown && strings.TrimSpace(ip.text) == "" && !ip.working && ip.reply == "" {
@@ -1195,6 +1168,12 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 				label := locales.DialogInlineWorking()
 				if run := a.hub.Session(ps.id).Run(ip.runID); run != nil {
 					label = runProgress(run, label)
+					// An answer in words shows as it comes.
+					if run.Answer != "" {
+						ui.Scroll(c).MaxHeight(320).Children(func() {
+							markdown.View(c, run.Answer, &a.md).FontSize(13.5)
+						})
+					}
 				}
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Spinner(c).Size(14, 14)
@@ -1255,7 +1234,7 @@ func (a *App) insertReply(after, reply string) {
 	if a.page == nil {
 		return
 	}
-	nodes := editor.MarkdownBlocks(reply)
+	nodes := doc.MarkdownBlocks(reply)
 	if len(nodes) == 0 {
 		return
 	}

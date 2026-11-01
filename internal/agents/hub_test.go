@@ -256,7 +256,12 @@ type openHost struct {
 	ed *editor.Editor
 }
 
-func (h openHost) Editor(string) *editor.Editor { return h.ed }
+func (h openHost) Live(string) LiveDoc {
+	if h.ed == nil {
+		return nil
+	}
+	return h.ed
+}
 
 // openPage is a stored page, open in an editor.
 func openPage(t *testing.T, st *store.Store) (store.Page, *editor.Editor) {
@@ -377,6 +382,49 @@ func TestAgentOpOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 	}
 	if ed.Content.Find("h1") != nil {
 		t.Error("h1 is still on the open page")
+	}
+}
+
+// A block the user changes on the open page while an agent's call streams
+// into it is kept in history before the stream's next change takes it
+// away, as an op of its own would keep it.
+func TestStreamOverAnOpenPagesChangeKeepsIt(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	h := NewHub(st, nil, openHost{ed: ed})
+	s := h.Session(p.ID)
+	run := &Run{ID: "r1"}
+	d := h.newDelivery(p.ID, run, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}})
+	work := ed.Content.Copy()
+	block := func(text string) *doc.Node {
+		n := &doc.Node{Type: "paragraph"}
+		n.SetDelta(doc.FromMarkdown(text))
+		return n
+	}
+	first := work.ReplaceOp("p1", block("Ship"))
+	if err := work.Apply(first); err != nil {
+		t.Fatal(err)
+	}
+	run.Ops, run.Edits = []doc.Op{first}, []Edit{{}}
+	d.to(ed, run.Ops)
+
+	// The user types in p1 as the agent's call goes on streaming into it.
+	ed.Content.Find("p1").SetDelta(doc.FromMarkdown("Ship it mine"))
+	delta := work.ReplaceOp("p1", block("Ship the agent's"))
+	if err := work.Apply(delta); err != nil {
+		t.Fatal(err)
+	}
+	h.revised(s, run, d, RunOptions{}, 0, &doc.Op{Op: "replace", ID: "p1", Node: work.Find("p1").Clone()}, "Rewrote a paragraph", []doc.Op{delta})
+
+	history, _ := st.History(p.ID)
+	if len(history) != 1 || history[0].Reason != "conflict" || history[0].AIJobID != "r1" {
+		t.Fatalf("history %+v", history)
+	}
+	if kept := doc.MustDecode(history[0].Content); kept.Find("p1").Delta().Plain() != "Ship it mine" {
+		t.Errorf("kept %q", kept.Find("p1").Delta().Plain())
+	}
+	if text := ed.Content.Find("p1").Delta().Plain(); text != "Ship the agent's" {
+		t.Errorf("open page has %q", text)
 	}
 }
 
@@ -543,7 +591,7 @@ func TestEarlierConversations(t *testing.T) {
 type stubHost struct{}
 
 func (stubHost) Update(fn func())                        { fn() }
-func (stubHost) Editor(string) *editor.Editor            { return nil }
+func (stubHost) Live(string) LiveDoc                     { return nil }
 func (stubHost) SaveNow(string)                          {}
 func (stubHost) Online() bool                            { return false }
 func (stubHost) Settings() store.Settings                { return store.Settings{} }
@@ -725,5 +773,55 @@ func TestOneRunAtATimeOnAPage(t *testing.T) {
 	}
 	if !s.Running || len(s.Runs) != 0 {
 		t.Errorf("running %v, runs %d", s.Running, len(s.Runs))
+	}
+}
+
+// queueHost is a host whose updates wait for the test to run them, as on
+// the main thread.
+type queueHost struct {
+	stubHost
+	q chan func()
+}
+
+func (h queueHost) Update(fn func()) { h.q <- fn }
+
+// A chat reply shows the answer as it streams, its thinking left out, and
+// not an answer an edit of the page went on from.
+func TestReplyStreamShowsTheAnswerSoFar(t *testing.T) {
+	host := queueHost{q: make(chan func(), 4)}
+	reply := &Message{Text: "Reading the page…", Pending: true}
+	run := &Run{Status: "running"}
+	stream := &replyStream{h: NewHub(openStore(t), nil, host), run: run, reply: reply}
+	next := func() {
+		t.Helper()
+		select {
+		case fn := <-host.q:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal("not shown")
+		}
+	}
+	stream.set("<think>planning")
+	next()
+	if reply.Text != "Reading the page…" || reply.Streamed {
+		t.Errorf("thinking shown: %+v", reply)
+	}
+	stream.set("<think>planning</think>Hello")
+	stream.set("<think>planning</think>Hello there")
+	next()
+	if reply.Text != "Hello there" || !reply.Streamed || run.Answer != "Hello there" {
+		t.Errorf("answer so far: %+v, run's %q", reply, run.Answer)
+	}
+	stream.set("I'll add a table.")
+	stream.clear()
+	next()
+	if reply.Text != "Hello there" {
+		t.Errorf("an answer an edit went on from: %+v", reply)
+	}
+	reply.Pending = false
+	stream.set("Late")
+	next()
+	if reply.Text != "Hello there" {
+		t.Errorf("a finished reply changed: %+v", reply)
 	}
 }

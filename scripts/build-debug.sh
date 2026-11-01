@@ -71,6 +71,7 @@ if [[ "$TARGET" == mac ]]; then
 	OUT="build/mac-debug"
 	BUILT="$OUT/darwin-$GOARCH/$NAME.app"
 	APP="$OUT/$NAME.app"
+	"$ROOT_DIR/scripts/build-speech.sh" "$ARCH"
 	info "building $NAME for darwin/$GOARCH"
 	go tool mygo build -debug -skip-dmg -sign - -platform "darwin/$GOARCH" -o "$OUT"
 	[[ -d "$BUILT" ]] || die "expected $BUILT after the build"

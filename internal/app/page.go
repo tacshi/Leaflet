@@ -33,7 +33,7 @@ func (a *App) pageView(c *ui.Context) {
 		}
 		tools(c, func() {
 			if !a.rec.Active() && !ps.editor.ReadOnly {
-				if iconButton(c, "record", "mic", locales.PageRecord()).Clicked() {
+				if iconButton(c, "record", "record", locales.PageRecord()).Clicked() {
 					a.startRecording(ps.id, "")
 				}
 			}
@@ -94,7 +94,7 @@ func (a *App) pageView(c *ui.Context) {
 		}
 		a.scrollToBlock()
 		scroll := ui.Scroll(c.Key("page-scroll:" + ps.id)).TrackScroll(&ps.scroll).Fill().
-			Draw(func(_ *ui.Painter, r ui.Rect) { ps.viewTop = r.Y })
+			Draw(func(_ *ui.Painter, r ui.Rect) { ps.viewTop, ps.viewH = r.Y, r.H })
 		scroll.Children(func() {
 			ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(40, pagePadX, 160).Children(func() {
 				col := ui.Column(c).Width(a.contentWidth(c)).Gap(0)
@@ -282,19 +282,31 @@ func (a *App) byline(c *ui.Context, p store.Page) {
 	hovered := row.Hovered()
 	row.Children(func() {
 		when := humanTime(p.UpdatedAt)
-		if a.page.dirty {
+		if a.page.live.Dirty() {
 			when = locales.PageBylineSaving()
 		}
 		ui.Text(c, locales.PageBylineEdited(who, when)).FontSize(13).TextColor(pal.TextMuted)
 		if a.isShared(p) {
 			ui.Text(c, "·").TextColor(pal.ChartMuted)
 			ui.Text(c, locales.PageBylineSharedWithYou()).FontSize(13).TextColor(pal.TextMuted)
-		} else if n := len(a.page.members); n > 0 {
+		} else if n := a.sharedWith(); n > 0 {
 			ui.Text(c, "·").TextColor(pal.ChartMuted)
 			ui.Text(c, locales.PageBylineSharedWith(n)).FontSize(13).TextColor(pal.TextMuted)
 		}
 		a.bylineTags(c, p, hovered)
 	})
+}
+
+// sharedWith counts who the open page is shared with: its members but
+// the user, who is among them as its owner even on a page only synced.
+func (a *App) sharedWith() int {
+	n := 0
+	for _, m := range a.page.members {
+		if m.UserID != a.session.UserID {
+			n++
+		}
+	}
+	return n
 }
 
 // bylineTags are the page's tags in its byline, a click on one showing
@@ -556,7 +568,7 @@ func uniq(ids []string) []string {
 // pageNotices shows conflicts on the open page, or that its content
 // could not be read.
 func (a *App) pageNotices(c *ui.Context, pageID string) bool {
-	if a.page.unreadable {
+	if a.page.live.Unreadable() {
 		notice(c, "warn", "triangle-alert", locales.PageUnreadable(), nil)
 		return true
 	}

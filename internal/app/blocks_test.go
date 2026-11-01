@@ -9,37 +9,17 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/rendered"
 	"leaflet/internal/store"
+	"leaflet/internal/web"
 )
 
-func TestReadLinkInfo(t *testing.T) {
-	src := `<html><head><title> Fallback  title </title>
-<meta content="The Go &amp; you" property="og:title">
-<meta name="description" content="Plain description">
-<meta property='og:description' content='Build simple, secure, scalable systems'>
-<meta property="og:image" content="/images/go-logo.png">
-<meta property="og:site_name" content="Go">
-</head><body><meta property="og:title" content="not this"></body></html>`
-	got := readLinkInfo("https://go.dev/doc/", src)
-	want := linkInfo{"The Go & you", "Build simple, secure, scalable systems", "https://go.dev/images/go-logo.png", "Go"}
-	if got != want {
-		t.Errorf("got %+v", got)
-	}
-	if got := readLinkInfo("https://x.dev", "<title>Only a title</title>"); got.title != "Only a title" || got.image != "" {
-		t.Errorf("got %+v", got)
-	}
-	// A picture that is not on the web is left out.
-	if got := readLinkInfo("https://x.dev", `<meta property="og:image" content="javascript:alert(1)">`); got.image != "" {
-		t.Errorf("image %q", got.image)
-	}
-}
-
 func TestRenderedPages(t *testing.T) {
-	if !strings.Contains(peleModule, "\nconst peleRender = ") || strings.Contains(peleModule[len(peleModule)-400:], "export{") {
+	if !strings.Contains(rendered.PeleModule, "\nconst peleRender = ") || strings.Contains(rendered.PeleModule[len(rendered.PeleModule)-400:], "export{") {
 		t.Fatal("Pele's render function was not found")
 	}
 	// Source goes in as a string the page cannot break out of.
-	page := diagramPage("graph TD\n  A[</script><b>x</b>]-->B", ui.Hex("#FFFFFF"), false)
+	page := rendered.DiagramPage("graph TD\n  A[</script><b>x</b>]-->B", "#ffffff", false)
 	if strings.Contains(page, "</script><b>") || strings.Contains(page, "<b>x</b>") {
 		t.Error("diagram source not escaped")
 	}
@@ -51,10 +31,10 @@ func TestRenderedPages(t *testing.T) {
 	if !strings.Contains(page, "--pele-bg:#ffffff") {
 		t.Error("diagram labels have no background")
 	}
-	if full := diagramPage("graph TD\n  A-->B", ui.Hex("#FFFFFF"), true); !strings.Contains(full, "const full = true") || !strings.Contains(full, "#v{height:100%}") {
+	if full := rendered.DiagramPage("graph TD\n  A-->B", "#ffffff", true); !strings.Contains(full, "const full = true") || !strings.Contains(full, "#v{height:100%}") {
 		t.Error("full screen diagram page does not fill its frame")
 	}
-	if page := mathPage(`\frac{a}{b}`); !strings.Contains(page, `"\\frac{a}{b}"`) || !strings.Contains(page, "katex.render(") {
+	if page := rendered.MathPage(`\frac{a}{b}`); !strings.Contains(page, `"\\frac{a}{b}"`) || !strings.Contains(page, "katex.render(") {
 		t.Error("math page")
 	}
 }
@@ -141,7 +121,7 @@ func TestLinkInfoKeptInAClosedPage(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.reloadAll()
-	a.keepLinkInfo(p.ID, "https://go.dev/", linkInfo{title: "Go", site: "go.dev"})
+	a.keepLinkInfo(p.ID, "https://go.dev/", web.LinkInfo{Title: "Go", Site: "go.dev"})
 	n := a.st.Content(p.ID).Find("l1")
 	if n == nil || n.Str("title") != "Go" || n.Str("site") != "go.dev" {
 		t.Errorf("stored card %+v", n)

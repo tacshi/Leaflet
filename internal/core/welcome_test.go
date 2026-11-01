@@ -1,4 +1,4 @@
-package app
+package core
 
 import (
 	"encoding/json"
@@ -21,8 +21,8 @@ func TestWelcomePage(t *testing.T) {
 	if _, err := st.LoadSession(nil); err != nil {
 		t.Fatal(err)
 	}
-	a := &App{st: st}
-	if err := a.createWelcome(); err != nil {
+	co := &Core{Store: st}
+	if err := co.createWelcome(); err != nil {
 		t.Fatal(err)
 	}
 	// The guide and the example subpage inside it.
@@ -91,7 +91,7 @@ func TestWelcomePage(t *testing.T) {
 		t.Errorf("the template starts with %q", first.Delta().Plain())
 	}
 	// A second start makes no more pages.
-	if err := a.createWelcome(); err != nil {
+	if err := co.createWelcome(); err != nil {
 		t.Fatal(err)
 	}
 	if pages, _ := st.Pages(); len(pages) != 2 {

@@ -474,7 +474,7 @@ func (w htmlWriter) recording(n *Node) {
 	if w.opts.Recording != nil {
 		v = w.opts.Recording(n)
 	}
-	w.write("<figure", w.attrs(n, "recording"), `><div class="head"><span class="ricon">`, w.icon("mic"), `</span><span class="text"><strong>`, html.EscapeString(v.Title), "</strong>")
+	w.write("<figure", w.attrs(n, "recording"), `><div class="head"><span class="ricon">`, w.icon("audio-lines"), `</span><span class="text"><strong>`, html.EscapeString(v.Title), "</strong>")
 	if v.Length != "" {
 		w.write(`<span class="muted">`, html.EscapeString(v.Length), "</span>")
 	}

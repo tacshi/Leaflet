@@ -22,13 +22,16 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/live"
 	"leaflet/internal/recording"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
 	"leaflet/internal/theme"
+	"leaflet/internal/web"
 	"leaflet/locales"
 )
 
@@ -49,6 +52,8 @@ type App struct {
 	sync    *syncsvc.Service
 	hub     *agents.Hub
 	rec     *recording.Controller
+	// capture is the recordings' microphone, once the window is there.
+	capture *webCapture
 	// winMu guards win, starting and early for update, which other
 	// goroutines call: while start makes the app, before the window is
 	// there, what they hand the main thread waits in early.
@@ -153,7 +158,7 @@ type App struct {
 	videoAsked map[string]bool
 	// linkInfo is what each link card's page said about itself, once
 	// asked (linkAsked), by link.
-	linkInfo  map[string]linkInfo
+	linkInfo  map[string]web.LinkInfo
 	linkAsked map[string]bool
 
 	// The menu bar icon, and the menu it last showed.
@@ -233,32 +238,21 @@ type pageState struct {
 	// loses it.
 	tags                     []string
 	tagsEditing, tagsFocused bool
-	// loaded is the stored content the editor started from or last saved,
-	// and stored that content as the store has it, encoded, before any
-	// change that is no edit (page mentions' new titles). row is the
-	// stored content exactly as the store has it ("" when it has none),
-	// for a save to go only over it.
-	loaded  *doc.Content
-	stored  string
-	row     string
-	dirty   bool
-	timer   *time.Timer
+	// live is the page as it is open: its edits saved shortly after the
+	// typing stops, and what is stored from outside merged into them.
+	live    *live.Page
 	threads []store.Thread
 	members []store.Member
-	// unreadable is set while the stored content could not be read: the
-	// page opens empty, or keeps what it showed when such content comes
-	// in, read-only, and is never saved over.
-	unreadable bool
 	// runs are the agent runs of this page, newest last, for Undo.
 	tinted map[string]bool
-	// scroll is where the page is scrolled to, and viewTop where its
-	// scroll area starts in the window. scrollTo is a block to bring to
-	// the top of it once the page has laid it out, scrollWait the frames
-	// it has waited for that.
-	scroll     ui.ScrollState
-	viewTop    float32
-	scrollTo   string
-	scrollWait int
+	// scroll is where the page is scrolled to, and viewTop and viewH
+	// where its scroll area is in the window. scrollTo is a block to bring
+	// to the top of it once the page has laid it out, scrollWait the
+	// frames it has waited for that.
+	scroll         ui.ScrollState
+	viewTop, viewH float32
+	scrollTo       string
+	scrollWait     int
 	// fullDiagram is the diagram block filling the page's body, if one
 	// is.
 	fullDiagram string
@@ -273,9 +267,9 @@ type pageState struct {
 func Run() {
 	a := &App{embeds: map[string]*mygo.WebView{}, embedSrc: map[string]string{}, embedSizes: map[string]embedSize{},
 		embedZoomed: map[string]bool{}, embedToPage: map[string]bool{}, videos: map[string]*mygo.WebView{}, videoInfo: map[string]videoInfo{}, videoAsked: map[string]bool{},
-		linkInfo: map[string]linkInfo{}, linkAsked: map[string]bool{}}
+		linkInfo: map[string]web.LinkInfo{}, linkAsked: map[string]bool{}}
 	theme.RegisterFonts()
-	recording.Register()
+	registerCapture()
 	mygo.BindAs("Embeds", &embedScroll{a: a})
 	// MyGo's updater, with its window for "Check for Updates…"; the check
 	// as the app starts is checkForUpdate's, which installs quietly.
@@ -310,32 +304,35 @@ func (a *App) start() error {
 	a.winMu.Lock()
 	a.starting = true
 	a.winMu.Unlock()
-	st, err := store.Open(DataDir())
+	c, err := core.Open(core.Config{
+		Platform: core.Platform{
+			DataDir:     DataDir(),
+			Online:      func() bool { return mygo.Network.Status().Online },
+			OpenURL:     func(u string) { _ = mygo.Shell.OpenExternal(u) },
+			WatchICloud: a.watchICloud,
+		},
+		Agents: a,
+		OnSyncState: func(running bool, err error) {
+			a.update(func() {
+				a.syncing = running
+				a.syncErr, a.syncError = err, a.syncMessage(err)
+			})
+		},
+		OnPageContent: func(pageID string) {
+			a.update(func() { a.externalContent(pageID) })
+		},
+		OnChange: func(ch store.Change) { a.update(func() { a.reload(ch) }) },
+	})
 	if err != nil {
 		return err
 	}
-	a.st = st
+	st := c.Store
+	a.st, a.backend, a.sync, a.hub, a.rec = st, c.Remote, c.Sync, c.Hub, c.Rec
 	a.settings = st.Settings()
 	a.sidebarW = a.settings.SidebarWidth
 	a.panelW = a.settings.PanelWidth
 	a.panelOpen = false
 	a.applyTheme()
-	a.backend = remote.New(remote.Config(), st)
-	var user *store.User
-	if a.backend.Configured() {
-		user = a.backend.RestoreSession()
-	}
-	_, err = st.LoadSession(user)
-	if errors.Is(err, store.ErrUnsynced) {
-		// Signed in as another account, and the app quit before the user
-		// agreed to lose the changes of the one whose pages this device
-		// keeps: they stay, and the other account signs in again to ask.
-		a.backend.SignOut()
-		_, err = st.LoadSession(nil)
-	}
-	if err != nil {
-		return err
-	}
 	a.session = st.Session()
 	a.images = newImageCache(st.Dir, filepath.Join(st.Dir, "images"))
 	// Links in agents' replies and previews: a page link opens the page
@@ -348,10 +345,7 @@ func (a *App) start() error {
 		}
 	}
 	a.commentMD.OnLink = a.md.OnLink
-	a.rec = recording.NewController(st, a.backend)
-	a.hub = agents.NewHub(st, a.backend, a)
 	a.hub.PublicLink = a.publiclyLinked
-	a.sync = syncsvc.New(st, a.backend)
 	a.online = mygo.Network.Status().Online
 	mygo.Network.OnChanged(func(s mygo.NetworkStatus) {
 		a.update(func() {
@@ -361,29 +355,8 @@ func (a *App) start() error {
 			}
 		})
 	})
-	a.sync.OnState = func(running bool, err error) {
-		a.update(func() {
-			a.syncing = running
-			a.syncErr, a.syncError = err, a.syncMessage(err)
-		})
-	}
-	a.sync.OnPageContent = func(pageID string) {
-		a.update(func() { a.externalContent(pageID) })
-	}
-	// Sync asks from its own goroutine: the stored settings, which the
-	// main thread's a.settings is not safe to read from.
-	a.sync.Offline = func() bool { return st.Settings().WorkOffline }
-	a.sync.KeepAudio = func() string { return st.Settings().KeepAudioOnDevice }
-	a.rec.Blobs = a.sync
-	a.startICloud()
-	// Once it knows whether audio goes up, to the server or iCloud Drive.
-	a.rec.RecoverInterrupted()
-	st.Subscribe(func(ch store.Change) { a.update(func() { a.reload(ch) }) })
 	// Agents outside the app (leaflet mcp) write to the database too.
 	go st.WatchOthers(time.Second, nil, func() { a.update(a.outsideChange) })
-	if err := a.createWelcome(); err != nil {
-		log.Printf("welcome page: %v", err)
-	}
 	a.reloadAll()
 	a.route = Route{Kind: "home"}
 	if last, ok := st.Value("last.page"); ok && a.pageByID(last) != nil {
@@ -466,10 +439,24 @@ func (a *App) start() error {
 	})
 	a.updatable = mygo.Updater.Enabled()
 	go a.checkForUpdate()
-	a.rec.Attach(a.win, func(fn func()) { a.update(func() { fn(); a.refreshTray() }) })
-	a.sync.Start()
-	go a.updateProject()
+	a.capture = &webCapture{win: a.win}
+	a.rec.Attach(a.capture, func(fn func()) { a.update(func() { fn(); a.refreshTray() }) })
+	go a.findSpeech()
+	a.core().Start()
 	return nil
+}
+
+// core is the app's parts as the core wires them, with the app's hooks:
+// for tests too, which make an App of their own parts.
+func (a *App) core() *core.Core {
+	return &core.Core{
+		Store: a.st, Remote: a.backend, Sync: a.sync, Hub: a.hub, Rec: a.rec,
+		OpenURL:     func(u string) { _ = mygo.Shell.OpenExternal(u) },
+		WatchICloud: a.watchICloud,
+		// On the main thread, the settings as the app shows them.
+		Settings:     func() store.Settings { return a.settings },
+		SaveSettings: func(s store.Settings) { a.settings = s; a.saveSettings() },
+	}
 }
 
 // update runs fn on the main thread and redraws; while the app starts,
@@ -581,7 +568,7 @@ func (a *App) reload(ch store.Change) {
 	}
 	if a.page != nil && (all || ch.Table == "page_members") {
 		a.page.members, _ = a.st.Members(a.page.id)
-		a.page.editor.ReadOnly = !a.canEdit(a.page.id) || a.page.unreadable
+		a.page.live.SetReadOnly(!a.canEdit(a.page.id) || a.page.live.Unreadable())
 	}
 	a.pubChanged(ch)
 	if a.win != nil {
@@ -834,30 +821,20 @@ func (a *App) loadPage(id string) {
 		a.route = Route{Kind: "home"}
 		return
 	}
-	row, _ := a.st.ContentRow(id)
-	// Content that can't be read opens as an empty page, kept from being
-	// saved in its place.
-	content, err := doc.Decode(row.Content)
-	unreadable := err != nil
-	if unreadable {
-		log.Printf("page %s: %v", id, err)
-		content = doc.Empty()
-	}
-	stored := content.Encode()
-	// Mentions of pages show their titles now, as renamed since; this
-	// is no edit, so it saves with the page's next one. The store has
-	// the title the page just closed saved, which a.pages may not yet.
-	content.RefreshPageMentions(func(id string) (string, bool) {
-		p, err := a.st.Page(id)
-		return p.DisplayTitle(), err == nil
+	lp, content := live.Open(a.st, id, live.Options{
+		Post:    a.update,
+		CanEdit: func() bool { return a.canEdit(id) },
+		Notify:  a.toast,
+		Saved:   func() { a.sync.Kick() },
 	})
-	ps := &pageState{id: id, title: p.Title, savedTitle: p.Title, loaded: content.Copy(), stored: stored, row: row.Content, unreadable: unreadable, tinted: map[string]bool{}}
+	ps := &pageState{id: id, title: p.Title, savedTitle: p.Title, live: lp, tinted: map[string]bool{}}
 	ed := editor.New(content, &host{a: a})
 	ed.Size = float32(a.settings.TextSize)
-	ed.ReadOnly = !a.canEdit(id) || unreadable
 	ed.Tinted = ps.tinted
 	ed.OnChange = func() { a.scheduleSave() }
 	ps.editor = ed
+	lp.Attach(pageEditor{ed})
+	lp.SetReadOnly(!a.canEdit(id) || lp.Unreadable())
 	ps.threads, _ = a.st.Threads(id)
 	ps.members, _ = a.st.Members(id)
 	a.page = ps
@@ -886,6 +863,7 @@ func (a *App) closePage() bool {
 // goes with it: they would act on the page opened next.
 func (a *App) discardPage() {
 	a.sync.SetOpen(a.page.id, false)
+	a.page.live.Close()
 	a.page = nil
 	d := &a.dialogs
 	d.newComment, d.inline = nil, nil
@@ -911,66 +889,18 @@ func (a *App) ownsPage(id string) bool {
 
 // scheduleSave saves the open page shortly after the typing stops.
 func (a *App) scheduleSave() {
-	ps := a.page
-	if ps == nil || ps.editor.ReadOnly {
-		return
+	if a.page != nil {
+		a.page.live.Edited()
 	}
-	ps.dirty = true
-	if ps.timer != nil {
-		ps.timer.Stop()
-	}
-	ps.timer = time.AfterFunc(700*time.Millisecond, func() {
-		a.update(func() {
-			if a.page == ps {
-				a.savePage()
-			}
-		})
-	})
 }
 
 // savePage stores the open page's content. It reports whether nothing is
 // left to save.
 func (a *App) savePage() bool {
-	ps := a.page
-	if ps == nil || !ps.dirty || ps.unreadable {
+	if a.page == nil {
 		return true
 	}
-	// What was stored since, by another process, merges in first, so the
-	// save keeps it. The save goes only over what merged: what is stored
-	// in between merges on the next try instead of being written over.
-	for range 5 {
-		a.externalContent(ps.id)
-		if ps.unreadable {
-			// What was stored since can't be read: it is not saved over.
-			return true
-		}
-		if ps.timer != nil {
-			ps.timer.Stop()
-		}
-		// An empty row saves only while the page still has none.
-		stamped, changed, err := a.st.SaveContentOver(ps.id, ps.row, ps.editor.Content)
-		if errors.Is(err, store.ErrContentChanged) {
-			continue
-		}
-		if err != nil {
-			// The edits wait, still to be saved, for the next save or the
-			// page closing.
-			a.toast(locales.AppErrorSave(err.Error()))
-			return false
-		}
-		ps.dirty = false
-		ps.editor.Content.Blocks, ps.editor.Content.Deleted = stamped.Blocks, stamped.Deleted
-		ps.loaded, ps.stored = stamped.Copy(), stamped.Encode()
-		if changed {
-			ps.row = ps.stored
-			_ = a.st.MaybeAutosave(ps.id, stamped)
-			a.sync.Kick()
-		}
-		return true
-	}
-	// Stored over each time, the edits wait for the save that merging
-	// them scheduled.
-	return false
+	return a.page.live.Save()
 }
 
 // flush saves what is waiting to be saved. It reports whether the open
@@ -1017,68 +947,15 @@ func (a *App) saveTitle() bool {
 // agent runs on the server, restores) into the open page, merging what is
 // being typed.
 func (a *App) externalContent(pageID string) {
-	ps := a.page
-	if ps == nil || ps.id != pageID {
-		return
+	if a.page != nil && a.page.id == pageID {
+		a.page.live.External()
 	}
-	row, err := a.st.ContentRow(pageID)
-	if err != nil || row.Content == ps.row {
-		return
-	}
-	if ps.unreadable {
-		// Content that can be read again, as a sync brought it, opens.
-		c, err := doc.Decode(row.Content)
-		if err != nil {
-			return
-		}
-		ps.unreadable = false
-		ps.editor.ReadOnly = !a.canEdit(pageID)
-		ps.editor.Replace(c.Copy())
-		ps.loaded, ps.stored, ps.row = c.Copy(), c.Encode(), row.Content
-		return
-	}
-	stored, err := doc.Decode(row.Content)
-	if err != nil {
-		// Content this version can't read (damaged, or from a newer
-		// Leaflet) is not shown as an empty page to be saved over: the
-		// editor keeps what it has, read-only with the notice a page
-		// opened so has, and is never saved over it. Edits not yet saved
-		// are kept in the page's history.
-		log.Printf("page %s: %v", pageID, err)
-		if ps.dirty {
-			if err := a.st.AddHistory(pageID, ps.editor.Content, "autosave", "", "Autosave"); err != nil {
-				a.toast(locales.AppErrorSave(err.Error()))
-			}
-		}
-		if ps.timer != nil {
-			ps.timer.Stop()
-		}
-		ps.unreadable, ps.dirty, ps.row = true, false, row.Content
-		ps.editor.ReadOnly = true
-		return
-	}
-	if stored.Encode() == ps.stored {
-		ps.row = row.Content
-		return
-	}
-	if ps.dirty {
-		local := ps.editor.Content.Stamped(ps.loaded, doc.NowMs())
-		merged, conflicts := doc.Merge(doc.MustDecode(ps.stored), local, stored)
-		// The side a conflict loses is kept for recovery before the
-		// editor shows the merge.
-		for _, c := range conflicts {
-			if err := a.st.AddConflict(pageID, c); err != nil {
-				a.toast(locales.AppErrorSave(err.Error()))
-			}
-		}
-		ps.editor.Replace(merged)
-		ps.loaded, ps.stored, ps.row = stored.Copy(), stored.Encode(), row.Content
-		a.scheduleSave()
-		return
-	}
-	ps.editor.Replace(stored.Copy())
-	ps.loaded, ps.stored, ps.row = stored.Copy(), stored.Encode(), row.Content
 }
+
+// pageEditor is the editor as the open page's live.Editor.
+type pageEditor struct{ *editor.Editor }
+
+func (e pageEditor) SetReadOnly(readOnly bool) { e.ReadOnly = readOnly }
 
 // outsideChange rereads everything after another process wrote to the
 // database, brings the open page up to date, and syncs what it queued.
@@ -1164,17 +1041,27 @@ func (a *App) newPageFrom(parent, folder string, t *templateChoice) {
 // shows in the page it is inside. A copy goes after the link to the page
 // it copies, after, when parent has one.
 func (a *App) linkSubpage(parent, id, after string) {
-	link := &doc.Node{ID: doc.NewBlockID(), Type: "subpage", Data: map[string]any{"page_id": id}}
-	insert := func(c *doc.Content) {
+	a.linkSubpageAt(parent, id, func(c *doc.Content) doc.Position {
 		at := doc.Position{At: "end"}
 		c.Walk(func(n, _ *doc.Node) {
 			if after != "" && n.Type == "subpage" && n.Str("page_id") == after {
 				at = doc.Position{After: n.ID}
 			}
 		})
-		_ = c.Insert(at, link)
+		return at
+	})
+}
+
+// linkSubpageAt puts a link to subpage id in page parent where at says,
+// or at its end when that place is gone.
+func (a *App) linkSubpageAt(parent, id string, at func(c *doc.Content) doc.Position) {
+	link := doc.SubpageNode(id)
+	insert := func(c *doc.Content) {
+		if c.Insert(at(c), link) != nil {
+			_ = c.Insert(doc.Position{At: "end"}, link)
+		}
 	}
-	if ed := a.Editor(parent); ed != nil {
+	if ed := a.openEditor(parent); ed != nil {
 		ed.Edit(insert)
 		a.savePage()
 		return
@@ -1237,7 +1124,7 @@ func (a *App) unlinkSubpage(parent, id string) {
 			c.Remove(l)
 		}
 	}
-	if ed := a.Editor(parent); ed != nil {
+	if ed := a.openEditor(parent); ed != nil {
 		ed.Edit(remove)
 		a.savePage()
 		return
@@ -1256,7 +1143,7 @@ func (a *App) unlinkSubpage(parent, id string) {
 // hasSubpageLink reports whether page parent links to subpage id.
 func (a *App) hasSubpageLink(parent, id string) bool {
 	c := a.st.Content(parent)
-	if ed := a.Editor(parent); ed != nil {
+	if ed := a.openEditor(parent); ed != nil {
 		c = ed.Content
 	}
 	found := false
@@ -1297,7 +1184,8 @@ func (a *App) focusTitle(selectAll bool) {
 	}
 }
 
-// deletePage deletes a page and offers to undo.
+// deletePage deletes a page, and its link in the page it is in, and
+// offers to undo, which puts the link back where it was.
 func (a *App) deletePage(id string) {
 	title := locales.CommonUntitled()
 	if p := a.pageByID(id); p != nil {
@@ -1308,10 +1196,28 @@ func (a *App) deletePage(id string) {
 	if a.page != nil && a.isUnder(a.page.id, id) && !a.flush() {
 		return
 	}
+	// Its link leaves the page it is in, rather than staying to say the
+	// page is gone; Undo puts it back where it was.
+	parent, at := "", doc.Position{At: "end"}
+	if p := a.pageByID(id); p != nil && p.ParentID != "" && a.canEdit(p.ParentID) {
+		parent = p.ParentID
+		c := a.st.Content(parent)
+		if ed := a.openEditor(parent); ed != nil {
+			c = ed.Content
+		}
+		if c != nil {
+			if place, ok := c.SubpagePlace(id); ok {
+				at = place
+			}
+		}
+	}
 	ids, err := a.st.DeletePage(id)
 	if err != nil {
 		a.toast(locales.AppErrorDelete(err.Error()))
 		return
+	}
+	if parent != "" {
+		a.unlinkSubpage(parent, id)
 	}
 	a.pages, _ = a.st.Pages()
 	if a.route.Kind == "page" {
@@ -1325,8 +1231,12 @@ func (a *App) deletePage(id string) {
 	a.toastAction(locales.AppDeleted(title), locales.CommonUndo(), func() {
 		if err := a.st.RestorePages(ids); err != nil {
 			a.toast(locales.AppErrorRestore(err.Error()))
+			return
 		}
 		a.pages, _ = a.st.Pages()
+		if parent != "" && a.pageByID(parent) != nil && !a.hasSubpageLink(parent, id) {
+			a.linkSubpageAt(parent, id, func(*doc.Content) doc.Position { return at })
+		}
 	})
 }
 

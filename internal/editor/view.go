@@ -157,6 +157,7 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 	l := e.layout(n, pal, dark)
 	depth := e.depth(n.ID)
 	box := ui.Box(c.Key(n.ID)).Height(l.h).FillWidth()
+	e.laid[n.ID] = box.Bounds()
 	tinted := e.Tinted[n.ID]
 	empty := textLen(n) == 0
 	isFocus := e.focus.ID == n.ID
@@ -343,6 +344,7 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	selected := (e.focus.ID == n.ID && e.Collapsed() && e.focused) || inSel
 	depth := e.depth(n.ID)
 	wrap := ui.Column(c.Key(n.ID)).FillWidth().Padding(6, 0).PaddingStart(float32(depth) * indentStep).Cursor(ui.CursorDefault)
+	e.laid[n.ID] = wrap.Bounds()
 	if e.reveal == n.ID {
 		wrap.ScrollIntoView()
 	}

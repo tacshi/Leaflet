@@ -6,6 +6,7 @@ package supabaseapi
 import (
 	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -85,34 +86,68 @@ func (c *Client) RefreshToken() string {
 	return c.refresh
 }
 
-// SignIn signs in through the browser, which open opens.
+// SignIn signs in through the browser, which open opens, and the loopback
+// the Worker's page sends the browser on to: BeginSignIn, then
+// FinishSignIn with the answer the loopback takes.
 func SignIn(ctx context.Context, open func(url string)) (*Client, error) {
-	id := ClientID
-	lb, err := oauth.Listen("Supabase", Port, false)
+	authURL, state, verifier := BeginSignIn()
+	lb, err := oauth.ListenFor("Supabase", Port, false, state, verifier)
 	if err != nil {
 		return nil, err
 	}
 	defer lb.Close()
-	redirect := lb.Redirect
-	if Auth != "" {
-		redirect = Auth + "/auth/supabase"
-	}
-	open(Base + "/v1/oauth/authorize?" + url.Values{
-		"client_id":             {id},
-		"redirect_uri":          {redirect},
-		"response_type":         {"code"},
-		"state":                 {lb.State},
-		"code_challenge":        {lb.Challenge()},
-		"code_challenge_method": {"S256"},
-	}.Encode())
+	open(authURL)
 	back, err := lb.Wait(ctx)
 	if err != nil {
 		return nil, err
 	}
+	return FinishSignIn(ctx, back, state, verifier)
+}
+
+// redirectURI is where Supabase sends the browser with a sign-in's code:
+// the Worker's page, or the loopback itself without the Worker, in tests.
+func redirectURI() string {
+	if Auth == "" {
+		return fmt.Sprintf("http://127.0.0.1:%d/auth/callback", Port)
+	}
+	return Auth + "/auth/supabase"
+}
+
+// BeginSignIn starts signing in through the browser: authURL is Supabase's
+// sign-in page to open, and state and verifier what FinishSignIn takes
+// with the answer. Supabase sends the browser to the Worker's page, which
+// sends it on to the app: to the loopback on the desktop, through the
+// https callback to the iOS app.
+func BeginSignIn() (authURL, state, verifier string) {
+	state, verifier = oauth.NewState(), oauth.NewVerifier()
+	authURL = Base + "/v1/oauth/authorize?" + url.Values{
+		"client_id":             {ClientID},
+		"redirect_uri":          {redirectURI()},
+		"response_type":         {"code"},
+		"state":                 {state},
+		"code_challenge":        {oauth.Challenge(verifier)},
+		"code_challenge_method": {"S256"},
+	}.Encode()
+	return authURL, state, verifier
+}
+
+// FinishSignIn finishes a sign-in BeginSignIn began with state and
+// verifier, with answer, the query the browser came back with: its code
+// is exchanged for the sign-in.
+func FinishSignIn(ctx context.Context, answer url.Values, state, verifier string) (*Client, error) {
+	if subtle.ConstantTimeCompare([]byte(answer.Get("state")), []byte(state)) != 1 {
+		return nil, errors.New("Leaflet couldn't finish this sign-in, which is stale. Sign in with Supabase again.") //nolint:staticcheck // shown to people as a sentence.
+	}
+	if e := answer.Get("error"); e != "" {
+		if e == "access_denied" {
+			return nil, errors.New("Sign-in was cancelled.") //nolint:staticcheck // shown to people as a sentence.
+		}
+		return nil, errors.New("Supabase sign-in failed: " + e) //nolint:staticcheck // shown to people as a sentence.
+	}
 	c := &Client{}
-	err = c.exchange(ctx, url.Values{
-		"grant_type": {"authorization_code"}, "code": {back.Get("code")},
-		"code_verifier": {lb.Verifier}, "redirect_uri": {redirect},
+	err := c.exchange(ctx, url.Values{
+		"grant_type": {"authorization_code"}, "code": {answer.Get("code")},
+		"code_verifier": {verifier}, "redirect_uri": {redirectURI()},
 	})
 	if err != nil {
 		return nil, err

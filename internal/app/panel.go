@@ -238,6 +238,9 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 		body := ui.Column(c).PaddingStart(28).Gap(8)
 		body.Children(func() {
 			switch {
+			case m.Streamed:
+				markdown.View(c, m.Text, &a.md).FontSize(13.5)
+				ui.Spinner(c).Size(11, 11)
 			case m.Pending:
 				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 					ui.Spinner(c).Size(13, 13)

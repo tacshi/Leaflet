@@ -38,6 +38,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
 	"leaflet/internal/recording"
+	"leaflet/internal/rendered"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -829,9 +830,9 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			}
 			serve("text/html; charset=utf-8", page)
 		case rest == "math.js":
-			serve("text/javascript; charset=utf-8", katexJS+"\n"+mathScript)
+			serve("text/javascript; charset=utf-8", rendered.KatexJS+"\n"+mathScript)
 		case rest == "diagram.js":
-			serve("text/javascript; charset=utf-8", peleModule+"\n"+zoomScript+"\n"+diagramScript)
+			serve("text/javascript; charset=utf-8", rendered.PeleModule+"\n"+rendered.ZoomScript+"\n"+diagramScript)
 		case rest == "comments.js":
 			serve("text/javascript; charset=utf-8", commentsScript)
 		case rest == "embed.js":
@@ -849,7 +850,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			}
 			// The embed runs in an opaque origin even when opened alone,
 			// and reaches nothing but itself.
-			h.Set("Content-Security-Policy", embedCSP+"; sandbox allow-scripts; frame-ancestors 'self'")
+			h.Set("Content-Security-Policy", rendered.EmbedCSP+"; sandbox allow-scripts; frame-ancestors 'self'")
 			serve("text/html; charset=utf-8", pubEmbedPage(src))
 		case strings.HasPrefix(rest, "f/"):
 			f, ok := snap.files[strings.TrimPrefix(rest, "f/")]
@@ -1069,12 +1070,12 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 var pubAnswerWait = 15 * time.Second
 
 // pubEmbedPage is an embed's HTML for a visitor's sandboxed frame: in the
-// visitor's light or dark, as embedPage gives it the app's, and telling
+// visitor's light or dark, as rendered.EmbedPage gives it the app's, and telling
 // the page how tall it is, so its frame grows to fit.
 func pubEmbedPage(src string) string {
-	meta := `<meta charset="utf-8"><meta name="color-scheme" content="light dark">` + embedNoRTC +
-		`<script>document.documentElement.dataset.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";</script>` + embedFit
-	return leadWith(meta, src)
+	meta := `<meta charset="utf-8"><meta name="color-scheme" content="light dark">` + rendered.EmbedNoRTC +
+		`<script>document.documentElement.dataset.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";</script>` + rendered.EmbedFit
+	return rendered.LeadWith(meta, src)
 }
 
 // embedScript grows each embed's frame to the height its content says,
@@ -1107,7 +1108,7 @@ const mathScript = `document.querySelectorAll(".math[data-tex]").forEach(functio
 });`
 
 // diagramScript draws the page's diagrams with Pele and zooms them with
-// zoomScript, which come before it. Each has a button that shows it alone,
+// rendered.ZoomScript, which come before it. Each has a button that shows it alone,
 // filling the window, to zoom and move about it with the app's bar.
 const diagramScript = `{
   const word = (n) => document.querySelector('meta[name="leaflet-' + n + '"]')?.content || "";

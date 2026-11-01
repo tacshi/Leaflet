@@ -143,3 +143,34 @@ func TestViewerResolvesOnlyTheirOwnThreads(t *testing.T) {
 		t.Error("a viewer may not resolve their own thread")
 	}
 }
+
+// The user is a member of their own page, as its owner: a page that only
+// syncs between their devices is not shared, and one shared with Ann is
+// shared with 1.
+func TestBylineCountsOthers(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	owner := store.Member{PageID: p.ID, UserID: a.session.UserID, Role: "owner", Accepted: true}
+	for _, c := range []struct {
+		members []store.Member
+		shared  bool
+	}{
+		{[]store.Member{owner}, false},
+		{[]store.Member{owner, {PageID: p.ID, UserID: "ann", DisplayName: "Ann", Role: "editor", Accepted: true}}, true},
+	} {
+		if err := a.st.SetMembers(p.ID, c.members); err != nil {
+			t.Fatal(err)
+		}
+		a.reload(store.Change{Table: "page_members", PageID: p.ID})
+		tt := ui.NewTester(func(c *ui.Context) { a.byline(c, *a.pageByID(p.ID)) }, 900, 100)
+		tt.Frame()
+		if got := tt.HasText(locales.PageBylineSharedWith(1)); got != c.shared {
+			t.Errorf("with %d members, shared with 1 is %v: %v", len(c.members), got, tt.Texts())
+		}
+	}
+}

@@ -60,3 +60,23 @@ func TestSpecNestingIsBounded(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestSetTableRows(t *testing.T) {
+	n, _ := TableNode([][]string{{"A", "B"}, {"**1**", "2"}}, "")
+	bold := TableCell(n, 1, 0)
+	if err := SetTableRows(n, [][]string{{"A", "B", "C"}, {"**1**", "two", ""}, {"", "", ""}}); err != nil {
+		t.Fatal(err)
+	}
+	if rows, cols := TableSize(n); rows != 3 || cols != 3 {
+		t.Fatalf("table is %dx%d, want 3x3", rows, cols)
+	}
+	if TableCell(n, 1, 0) != bold || TableCell(n, 1, 1).Children[0].Delta().Plain() != "two" {
+		t.Errorf("rows are %v", TableRows(n))
+	}
+	if err := SetTableRows(n, [][]string{{"A"}}); err != nil || len(n.Children) != 1 {
+		t.Errorf("shrunk to %d cells, %v", len(n.Children), err)
+	}
+	if err := SetTableRows(n, nil); err == nil {
+		t.Error("a table of no rows was kept")
+	}
+}

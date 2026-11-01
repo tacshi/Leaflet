@@ -1,23 +1,27 @@
-package recording
+package app
 
 import (
 	"encoding/base64"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/egoist/mygo"
+
+	"leaflet/internal/doc"
+	"leaflet/internal/recording"
 )
 
-// Capture runs in a small page of the app's own scheme: such pages are
-// secure contexts that the system's web view lets use the microphone, so
-// the app needs no native audio code. The page resamples to 16 kHz PCM16
-// and hands the chunks to the bound Recorder service.
+// Recordings hear through a small page of the app's own scheme: such pages
+// are secure contexts that the system's web view lets use the microphone,
+// so the app needs no native audio code. The page resamples to 16 kHz
+// PCM16 and hands the chunks to the bound Recorder service.
 
-// Scheme serves the capture page.
-const Scheme = "leaflet-rec"
+// recScheme serves the capture page.
+const recScheme = "leaflet-rec"
 
-// CaptureURL is the capture page of a session.
-func CaptureURL(session string) string { return Scheme + "://localhost/capture?s=" + session }
+// captureURL is the capture page of a session.
+func captureURL(session string) string { return recScheme + "://localhost/capture?s=" + session }
 
 const capturePage = `<!doctype html>
 <html><head><meta charset="utf-8"><title>Recorder</title></head>
@@ -133,7 +137,7 @@ func (s *captureSink) deliver(seq int, pcm []byte) {
 	}
 }
 
-var service = &Recorder{sessions: map[string]*captureSink{}}
+var recorder = &Recorder{sessions: map[string]*captureSink{}}
 
 // Chunk takes base64 PCM16 audio of a session, the seq-th chunk of it.
 func (r *Recorder) Chunk(session string, seq int, data string) error {
@@ -182,12 +186,77 @@ func (r *Recorder) remove(session string) {
 	r.mu.Unlock()
 }
 
-// Register binds the capture service and serves its page. Call it before
-// the app runs.
-func Register() {
-	mygo.Bind(service)
-	_ = mygo.Protocol.HandleFunc(Scheme, func(w http.ResponseWriter, r *http.Request) {
+// registerCapture binds the capture service and serves its page. Call it
+// before the app runs.
+func registerCapture() {
+	mygo.Bind(recorder)
+	_ = mygo.Protocol.HandleFunc(recScheme, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = w.Write([]byte(capturePage))
 	})
+}
+
+// webCapture is the recordings' microphone on the desktop: the capture
+// page, in a web view of the window.
+type webCapture struct {
+	win *mygo.Window
+
+	mu sync.Mutex
+	// view is the capture page started last, which the window must show
+	// (it can be tiny) while it records.
+	view *mygo.WebView
+}
+
+// Start opens a capture page for a recording. It captures at 16 kHz,
+// whatever rate asks.
+func (w *webCapture) Start(rate int, sink recording.Sink) (recording.Mic, error) {
+	session := doc.NewBlockID()
+	recorder.add(session, &captureSink{chunk: sink.Chunk, started: sink.Started, failed: sink.Failed})
+	// The page captures while the window is hidden or minimized too, as
+	// a recording started from the menu bar is: web views slow down then,
+	// unless told not to.
+	v, err := w.win.NewWebView(mygo.WebViewOptions{URL: captureURL(session),
+		Page: mygo.PageOptions{BackgroundThrottling: mygo.ThrottlingOff}})
+	if err != nil {
+		recorder.remove(session)
+		return nil, err
+	}
+	w.mu.Lock()
+	w.view = v
+	w.mu.Unlock()
+	return &webMic{capture: w, session: session, view: v}, nil
+}
+
+// View is the capture page started last, until it closes.
+func (w *webCapture) View() *mygo.WebView {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.view
+}
+
+// webMic is the capture page of one recording.
+type webMic struct {
+	capture *webCapture
+	session string
+	view    *mygo.WebView
+}
+
+func (m *webMic) Pause()  { _, _ = m.view.Page().Eval("window.pauseCapture(true)") }
+func (m *webMic) Resume() { _, _ = m.view.Page().Eval("window.pauseCapture(false)") }
+
+// Stop has the page send the audio it holds, and waits for it to arrive.
+func (m *webMic) Stop() {
+	_, _ = m.view.Page().Eval("return window.stopCapture()")
+	time.Sleep(200 * time.Millisecond)
+}
+
+// Close forgets the page's session and closes it.
+func (m *webMic) Close() {
+	recorder.remove(m.session)
+	m.capture.mu.Lock()
+	if m.capture.view == m.view {
+		m.capture.view = nil
+	}
+	m.capture.mu.Unlock()
+	m.view.Destroy()
 }

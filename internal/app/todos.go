@@ -154,7 +154,7 @@ func (a *App) finishTodo(t store.PageTodo) {
 		return
 	}
 	set := func(checked bool) {
-		if ed := a.Editor(t.PageID); ed != nil {
+		if ed := a.openEditor(t.PageID); ed != nil {
 			if n := ed.Content.Find(t.BlockID); n != nil && n.Bool("checked") != checked {
 				ed.ToggleChecked(t.BlockID)
 				a.savePage()

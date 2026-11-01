@@ -391,3 +391,42 @@ func TestSignInCallbackAnsweredTwice(t *testing.T) {
 		t.Errorf("sign-in %v, %v", err, ctx.Err())
 	}
 }
+
+// ChatGPT's function calls stream too, their blocks going in the page as
+// they come.
+func TestChatGPTInsertStreams(t *testing.T) {
+	args := `{"position":{"after":"p1"},"blocks":[{"type":"paragraph","text":"Once upon a time."}]}`
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		w.Header().Set("Content-Type", "text/event-stream")
+		event := func(v map[string]any) {
+			raw, _ := json.Marshal(v)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", raw)
+		}
+		if n > 1 {
+			event(map[string]any{"type": "response.completed", "response": map[string]any{"output": []any{map[string]any{"type": "message", "content": []any{map[string]any{"type": "output_text", "text": "Done."}}}}}})
+			return
+		}
+		event(map[string]any{"type": "response.output_item.added", "output_index": 0, "item": map[string]any{"type": "function_call", "call_id": "c1", "name": "insert_blocks"}})
+		for i := 0; i < len(args); i += 6 {
+			event(map[string]any{"type": "response.function_call_arguments.delta", "output_index": 0, "delta": args[i:min(i+6, len(args))]})
+		}
+		event(map[string]any{"type": "response.completed", "response": map[string]any{"output": []any{map[string]any{"type": "function_call", "call_id": "c1", "name": "insert_blocks", "arguments": args}}}})
+	}))
+	defer srv.Close()
+	saved := draftEvery
+	t.Cleanup(func() { draftEvery = saved })
+	draftEvery = 0
+	c := page()
+	revisions := 0
+	g := &ChatGPT{access: "tok", expires: time.Now().Add(time.Hour), base: srv.URL}
+	res, err := RunLocal(context.Background(), g, Request{Model: "m", SupportsTools: true, Instruction: "go"}, executor(c).Ctx,
+		Events{Revise: func(int, *doc.Op, string, []doc.Op) { revisions++ }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revisions == 0 || len(res.Ops) != 1 || c.Children[2].Delta().ToMarkdown() != "Once upon a time." {
+		t.Errorf("%d revisions, %d ops, page %s", revisions, len(res.Ops), c.Encode())
+	}
+}

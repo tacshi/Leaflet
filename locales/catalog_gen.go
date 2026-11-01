@@ -7303,6 +7303,86 @@ func (msgs Messages) RecEngineSonioxCloud() string {
 	return Catalog.Format(msgs.locale, "recEngineSonioxCloud", nil)
 }
 
+// RecEngineOnDevice says "On this device"
+// in the language the app shows.
+//
+// Where transcription runs: the device's own speech recognition. In
+// Settings and a recording's status.
+func RecEngineOnDevice() string { return In(i18n.Locale()).RecEngineOnDevice() }
+
+// RecEngineOnDevice says "On this device"
+// in the language of msgs.
+//
+// Where transcription runs: the device's own speech recognition. In
+// Settings and a recording's status.
+func (msgs Messages) RecEngineOnDevice() string {
+	return Catalog.Format(msgs.locale, "recEngineOnDevice", nil)
+}
+
+// RecSttOnDevice says "On device"
+// in the language the app shows.
+//
+// Settings › Speech to text: the engine that is the device's own speech
+// recognition (iPhone and iPad).
+func RecSttOnDevice() string { return In(i18n.Locale()).RecSttOnDevice() }
+
+// RecSttOnDevice says "On device"
+// in the language of msgs.
+//
+// Settings › Speech to text: the engine that is the device's own speech
+// recognition (iPhone and iPad).
+func (msgs Messages) RecSttOnDevice() string {
+	return Catalog.Format(msgs.locale, "recSttOnDevice", nil)
+}
+
+// RecSttOnDeviceDesc says "Transcribed by this device itself: private, offline and without a key. The first recording in a language downloads it…"
+// in the language the app shows.
+//
+// Settings › Speech to text: what transcribing on the device means, below
+// its choice.
+func RecSttOnDeviceDesc() string { return In(i18n.Locale()).RecSttOnDeviceDesc() }
+
+// RecSttOnDeviceDesc says "Transcribed by this device itself: private, offline and without a key. The first recording in a language downloads it…"
+// in the language of msgs.
+//
+// Settings › Speech to text: what transcribing on the device means, below
+// its choice.
+func (msgs Messages) RecSttOnDeviceDesc() string {
+	return Catalog.Format(msgs.locale, "recSttOnDeviceDesc", nil)
+}
+
+// RecErrOnDevice says "This device can't transcribe by itself. Choose Soniox or an endpoint in Settings › Speech to text."
+// in the language the app shows.
+//
+// Error when on-device transcription is chosen on a device without it.
+func RecErrOnDevice() string { return In(i18n.Locale()).RecErrOnDevice() }
+
+// RecErrOnDevice says "This device can't transcribe by itself. Choose Soniox or an endpoint in Settings › Speech to text."
+// in the language of msgs.
+//
+// Error when on-device transcription is chosen on a device without it.
+func (msgs Messages) RecErrOnDevice() string {
+	return Catalog.Format(msgs.locale, "recErrOnDevice", nil)
+}
+
+// RecErrOnDeviceLanguage says "This device can't transcribe {language}. Choose another language in Settings › Speech to text."
+// in the language the app shows.
+//
+// Error when the device's own speech recognition has no model for the
+// recording's language. {language} is the language's name.
+func RecErrOnDeviceLanguage(language string) string {
+	return In(i18n.Locale()).RecErrOnDeviceLanguage(language)
+}
+
+// RecErrOnDeviceLanguage says "This device can't transcribe {language}. Choose another language in Settings › Speech to text."
+// in the language of msgs.
+//
+// Error when the device's own speech recognition has no model for the
+// recording's language. {language} is the language's name.
+func (msgs Messages) RecErrOnDeviceLanguage(language string) string {
+	return Catalog.Format(msgs.locale, "recErrOnDeviceLanguage", map[string]any{"language": language})
+}
+
 // RecEngineServer says "Transcription server"
 // in the language the app shows.
 //
@@ -9575,13 +9655,13 @@ func (msgs Messages) SettingsRemovePagesFailed(error string) string {
 	return Catalog.Format(msgs.locale, "settingsRemovePagesFailed", map[string]any{"error": error})
 }
 
-// SettingsProvidersDesc says "The services agents run on. Cloud keys stay on the server; a model server on your machine works offline."
+// SettingsProvidersDesc says "The services agents run on. Signed in, cloud keys stay on the server, for all your devices; signed out, on this devic…"
 // in the language the app shows.
 //
 // Settings › Agent providers: the description under the heading.
 func SettingsProvidersDesc() string { return In(i18n.Locale()).SettingsProvidersDesc() }
 
-// SettingsProvidersDesc says "The services agents run on. Cloud keys stay on the server; a model server on your machine works offline."
+// SettingsProvidersDesc says "The services agents run on. Signed in, cloud keys stay on the server, for all your devices; signed out, on this devic…"
 // in the language of msgs.
 //
 // Settings › Agent providers: the description under the heading.
@@ -9783,52 +9863,6 @@ func (msgs Messages) SettingsDefaultAgentDesc() string {
 	return Catalog.Format(msgs.locale, "settingsDefaultAgentDesc", nil)
 }
 
-// SettingsLocalWhenOffline says "Use a provider on this machine when offline"
-// in the language the app shows.
-//
-// Settings › Agent providers › Defaults: a switch.
-func SettingsLocalWhenOffline() string { return In(i18n.Locale()).SettingsLocalWhenOffline() }
-
-// SettingsLocalWhenOffline says "Use a provider on this machine when offline"
-// in the language of msgs.
-//
-// Settings › Agent providers › Defaults: a switch.
-func (msgs Messages) SettingsLocalWhenOffline() string {
-	return Catalog.Format(msgs.locale, "settingsLocalWhenOffline", nil)
-}
-
-// SettingsLocalWhenOfflineDesc says "Agents keep working without a connection"
-// in the language the app shows.
-//
-// Settings › Agent providers › Defaults: a switch.
-func SettingsLocalWhenOfflineDesc() string { return In(i18n.Locale()).SettingsLocalWhenOfflineDesc() }
-
-// SettingsLocalWhenOfflineDesc says "Agents keep working without a connection"
-// in the language of msgs.
-//
-// Settings › Agent providers › Defaults: a switch.
-func (msgs Messages) SettingsLocalWhenOfflineDesc() string {
-	return Catalog.Format(msgs.locale, "settingsLocalWhenOfflineDesc", nil)
-}
-
-// SettingsLocalWhenOfflineNone says "Add a provider on this machine to use this"
-// in the language the app shows.
-//
-// Settings › Agent providers › Defaults: the offline switch's
-// description while it is off and disabled, as no provider runs on this
-// machine.
-func SettingsLocalWhenOfflineNone() string { return In(i18n.Locale()).SettingsLocalWhenOfflineNone() }
-
-// SettingsLocalWhenOfflineNone says "Add a provider on this machine to use this"
-// in the language of msgs.
-//
-// Settings › Agent providers › Defaults: the offline switch's
-// description while it is off and disabled, as no provider runs on this
-// machine.
-func (msgs Messages) SettingsLocalWhenOfflineNone() string {
-	return Catalog.Format(msgs.locale, "settingsLocalWhenOfflineNone", nil)
-}
-
 // SettingsReadOtherPages says "Let agents read your other pages"
 // in the language the app shows.
 //
@@ -9915,32 +9949,20 @@ func (msgs Messages) SettingsProviderDescLocal() string {
 	return Catalog.Format(msgs.locale, "settingsProviderDescLocal", nil)
 }
 
-// SettingsProviderDescNoServer says "Cloud providers need a Leaflet server, which this build doesn't have."
+// SettingsProviderDescDevice says "Runs from this device with your key, which stays on this device."
 // in the language the app shows.
 //
-// The provider dialog: a cloud provider in a build without a server.
-func SettingsProviderDescNoServer() string { return In(i18n.Locale()).SettingsProviderDescNoServer() }
+// The provider dialog: a cloud provider kept on this device, as one is when
+// signed out or without a server.
+func SettingsProviderDescDevice() string { return In(i18n.Locale()).SettingsProviderDescDevice() }
 
-// SettingsProviderDescNoServer says "Cloud providers need a Leaflet server, which this build doesn't have."
+// SettingsProviderDescDevice says "Runs from this device with your key, which stays on this device."
 // in the language of msgs.
 //
-// The provider dialog: a cloud provider in a build without a server.
-func (msgs Messages) SettingsProviderDescNoServer() string {
-	return Catalog.Format(msgs.locale, "settingsProviderDescNoServer", nil)
-}
-
-// SettingsProviderDescSignIn says "Cloud providers run on the server: sign in with Supabase first, or add a model server on this machine."
-// in the language the app shows.
-//
-// The provider dialog: a cloud provider while signed out.
-func SettingsProviderDescSignIn() string { return In(i18n.Locale()).SettingsProviderDescSignIn() }
-
-// SettingsProviderDescSignIn says "Cloud providers run on the server: sign in with Supabase first, or add a model server on this machine."
-// in the language of msgs.
-//
-// The provider dialog: a cloud provider while signed out.
-func (msgs Messages) SettingsProviderDescSignIn() string {
-	return Catalog.Format(msgs.locale, "settingsProviderDescSignIn", nil)
+// The provider dialog: a cloud provider kept on this device, as one is when
+// signed out or without a server.
+func (msgs Messages) SettingsProviderDescDevice() string {
+	return Catalog.Format(msgs.locale, "settingsProviderDescDevice", nil)
 }
 
 // SettingsProviderClaudeNote says "{desc} Claude plans only work in Claude's own apps, so this takes an API key."
@@ -10271,6 +10293,22 @@ func SettingsNeedURLAndModel() string { return In(i18n.Locale()).SettingsNeedURL
 // The provider dialog: saving without them.
 func (msgs Messages) SettingsNeedURLAndModel() string {
 	return Catalog.Format(msgs.locale, "settingsNeedURLAndModel", nil)
+}
+
+// SettingsNeedKey says "Paste the provider's API key."
+// in the language the app shows.
+//
+// The provider dialog: saving a cloud provider kept on this device without
+// its key.
+func SettingsNeedKey() string { return In(i18n.Locale()).SettingsNeedKey() }
+
+// SettingsNeedKey says "Paste the provider's API key."
+// in the language of msgs.
+//
+// The provider dialog: saving a cloud provider kept on this device without
+// its key.
+func (msgs Messages) SettingsNeedKey() string {
+	return Catalog.Format(msgs.locale, "settingsNeedKey", nil)
 }
 
 // SettingsKeepSignInFailed says "Could not keep the sign-in: {error}"
@@ -11811,6 +11849,22 @@ func (msgs Messages) SigninSetUpProject() string {
 	return Catalog.Format(msgs.locale, "signinSetUpProject", nil)
 }
 
+// SigninNoProject says "Set up sync in Leaflet on your Mac or PC first"
+// in the language the app shows.
+//
+// The phone's sign-in page, when the Supabase account has no Leaflet
+// project: the phone signs in to the one the desktop app sets up.
+func SigninNoProject() string { return In(i18n.Locale()).SigninNoProject() }
+
+// SigninNoProject says "Set up sync in Leaflet on your Mac or PC first"
+// in the language of msgs.
+//
+// The phone's sign-in page, when the Supabase account has no Leaflet
+// project: the phone signs in to the one the desktop app sets up.
+func (msgs Messages) SigninNoProject() string {
+	return Catalog.Format(msgs.locale, "signinNoProject", nil)
+}
+
 // SigninSettingUp says "Setting up Leaflet in your project…"
 // in the language the app shows.
 //
@@ -12117,13 +12171,13 @@ func (msgs Messages) WelcomeTrySelect() string {
 	return Catalog.Format(msgs.locale, "welcomeTrySelect", nil)
 }
 
-// WelcomeTryRecord says "Press the microphone in the header to record, with a transcript"
+// WelcomeTryRecord says "Press the record button in the header to record, with a transcript"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a to-do of Try it.
 func WelcomeTryRecord() string { return In(i18n.Locale()).WelcomeTryRecord() }
 
-// WelcomeTryRecord says "Press the microphone in the header to record, with a transcript"
+// WelcomeTryRecord says "Press the record button in the header to record, with a transcript"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a to-do of Try it.
@@ -13647,13 +13701,13 @@ func (msgs Messages) WelcomeAgentsPanel() string {
 	return Catalog.Format(msgs.locale, "welcomeAgentsPanel", nil)
 }
 
-// WelcomeAgentsSettings says "**Settings › Agent providers** sets the default agent, a model on this machine for offline use, and whether agents …"
+// WelcomeAgentsSettings says "**Settings › Agent providers** sets the default agent and whether agents may read your other pages"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a bullet (Markdown).
 func WelcomeAgentsSettings() string { return In(i18n.Locale()).WelcomeAgentsSettings() }
 
-// WelcomeAgentsSettings says "**Settings › Agent providers** sets the default agent, a model on this machine for offline use, and whether agents …"
+// WelcomeAgentsSettings says "**Settings › Agent providers** sets the default agent and whether agents may read your other pages"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a bullet (Markdown).

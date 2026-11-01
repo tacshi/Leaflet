@@ -513,6 +513,12 @@ func (g *ChatGPT) ListModels(ctx context.Context) ([]string, error) {
 // Chat sends a chat-completions conversation through the Responses API:
 // system messages become instructions, tool calls function_call items.
 func (g *ChatGPT) Chat(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int) (ChatResult, error) {
+	return g.ChatStream(ctx, model, messages, tools, maxTokens, nil)
+}
+
+// ChatStream is Chat with the answer told to on as it streams, when not
+// nil.
+func (g *ChatGPT) ChatStream(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int, on *Streamed) (ChatResult, error) {
 	var instructions []string
 	var input []any
 	for _, m := range messages {
@@ -565,6 +571,13 @@ func (g *ChatGPT) Chat(ctx context.Context, model string, messages []map[string]
 	// streamed before it, so they are kept as they arrive.
 	var items []any
 	var deltas strings.Builder
+	// The function calls as they stream, by the output item each is.
+	type streaming struct {
+		i    int
+		name string
+		args strings.Builder
+	}
+	calls := map[float64]*streaming{}
 	for sc.Scan() {
 		line := sc.Text()
 		if !strings.HasPrefix(line, "data:") {
@@ -582,6 +595,21 @@ func (g *ChatGPT) Chat(ctx context.Context, model string, messages []map[string]
 		case "response.output_text.delta":
 			if d, ok := ev["delta"].(string); ok {
 				deltas.WriteString(d)
+				on.text(deltas.String())
+			}
+		case "response.output_item.added":
+			item, _ := ev["item"].(map[string]any)
+			if item["type"] == "function_call" {
+				at, _ := ev["output_index"].(float64)
+				name, _ := item["name"].(string)
+				calls[at] = &streaming{i: len(calls), name: name}
+			}
+		case "response.function_call_arguments.delta":
+			at, _ := ev["output_index"].(float64)
+			if c := calls[at]; c != nil {
+				d, _ := ev["delta"].(string)
+				c.args.WriteString(d)
+				on.call(c.i, c.name, c.args.String())
 			}
 		case "response.completed":
 			resp, _ := ev["response"].(map[string]any)
@@ -646,6 +674,11 @@ func parseResponse(resp map[string]any) ChatResult {
 // Model is a chat model the agent loop can run on.
 type Model interface {
 	Chat(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int) (ChatResult, error)
+}
+
+// StreamingModel is a model whose answers stream.
+type StreamingModel interface {
+	ChatStream(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int, on *Streamed) (ChatResult, error)
 }
 
 // TestModel checks a model answers and whether it calls tools.

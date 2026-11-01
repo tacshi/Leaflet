@@ -238,6 +238,8 @@ rules.
 | Path | Contents |
 | --- | --- |
 | `main.go` | Entry point: the app, and `leaflet mcp` |
+| `internal/core` | Opening Leaflet's parts and wiring them together, for the desktop and iOS apps alike, and signing in and out |
+| `internal/live` | A page open in the app: saving what is typed, and merging what arrives meanwhile from sync and agents |
 | `internal/app` | Window, shell, sidebar, page screen, panels, dialogs and settings |
 | `internal/editor` | The block editor: model, editing, layout, input and blocks |
 | `internal/doc` | The page document model: blocks, deltas, inline Markdown, ops, per-block merge and Markdown export |
@@ -286,4 +288,4 @@ Open Font License (`internal/theme/fonts/OFL-*.txt`),
 [Lucide](https://lucide.dev) icons under the ISC license
 (`internal/theme/icons/LICENSE`), and [KaTeX](https://katex.org) and
 [Pele](https://github.com/obsidianmd/pele) under the MIT license for math
-and diagrams ([`internal/app/third_party`](internal/app/third_party/README.md)).
+and diagrams ([`internal/rendered/third_party`](internal/rendered/third_party/README.md)).

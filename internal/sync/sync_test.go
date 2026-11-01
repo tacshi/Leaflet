@@ -177,9 +177,6 @@ func TestRefreshKeepsASaveMadeWhileMerging(t *testing.T) {
 	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	typed := typeWhileStoring(t, st, p.ID)
 
 	if _, err := svc.RefreshContent(context.Background(), p.ID); err != nil {
@@ -439,9 +436,6 @@ func TestOpeningAPageFetchesItsContent(t *testing.T) {
 	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	got := make(chan string, 1)
 	svc.OnPageContent = func(id string) { got <- id }
 	svc.SetOpen(p.ID, true)
@@ -477,9 +471,6 @@ func TestContentWaitsForItsPage(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 
 	ctx := context.Background()
 	if err := svc.pullContents(ctx); err != nil {
@@ -666,9 +657,6 @@ func TestCommentsPushAsUpdates(t *testing.T) {
 // not undo a move or a deletion made on another device meanwhile; one the
 // server does not have goes up whole.
 func TestPagePushSendsOnlyItsChanges(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
 	if err != nil {
@@ -743,9 +731,6 @@ func TestPagePushSendsOnlyItsChanges(t *testing.T) {
 // forever with every change made to the page elsewhere passed over. One
 // the server does not show stays queued.
 func TestRefusedPageChangeTakesTheServers(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
 	if err != nil {
@@ -801,9 +786,6 @@ func TestRefusedPageChangeTakesTheServers(t *testing.T) {
 // A file's move goes up as only that, so it does not undo a deletion made
 // elsewhere meanwhile.
 func TestFilePushSendsOnlyItsChanges(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	folder, err := st.CreateFolder("Folder")
 	if err != nil {
@@ -1012,9 +994,6 @@ func TestDeletedFileLeavesStorageAfterItsRow(t *testing.T) {
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 	ctx := context.Background()
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 
 	if err := svc.push(ctx); err != nil {
 		t.Fatal(err)
@@ -1126,9 +1105,6 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 	theirs.Children = append(theirs.Children, para("b", "two, added there"))
 	theirs.Blocks["b"] = time.Now().UnixMilli()
 	srv.content, srv.revision = theirs.Encode(), 2
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	if _, err := svc.RefreshContent(context.Background(), p.ID); !errors.Is(err, errUnreadable) {
 		t.Errorf("refresh: %v", err)
 	}
@@ -1193,9 +1169,6 @@ func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	ctx := context.Background()
 
 	if done, err := svc.pushContent(ctx, p.ID); done || !errors.Is(err, errServerUnreadable) {
@@ -1470,9 +1443,6 @@ func TestUploadWaitsForTheRecordingsPath(t *testing.T) {
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 	ctx := context.Background()
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 
 	// A failure here ends the pass, as one that stores a page's content does.
 	if err := svc.push(ctx); err == nil {
@@ -1560,9 +1530,6 @@ func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 
 	if err := svc.push(context.Background()); err != nil {
 		t.Fatal(err)
@@ -1639,9 +1606,6 @@ func TestDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 
 	if err := svc.push(context.Background()); err != nil {
 		t.Fatal(err)
@@ -1822,9 +1786,6 @@ func (s *refusing) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // server's. One still transcribing there is settled there too, and one
 // the server does not have goes up whole.
 func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
 	if err != nil {
@@ -1886,9 +1847,6 @@ func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
 // A recording's change the server refuses, as on a page the user may no
 // longer edit, gives way to the server's recording, as a page's does.
 func TestRefusedRecordingTakesTheServers(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
 	if err != nil {
@@ -1922,9 +1880,6 @@ func TestRefusedRecordingTakesTheServers(t *testing.T) {
 // on a page shared to view, gives way to the server's comment: waiting, it
 // would keep the author's later edits from this device.
 func TestRefusedCommentTakesTheServers(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	theirs := map[string]any{"id": "00000000-0000-0000-0000-0000000000c1", "page_id": "00000000-0000-0000-0000-0000000000a1",
@@ -1954,9 +1909,6 @@ func TestRefusedCommentTakesTheServers(t *testing.T) {
 // which keeps its stored copy: the removal queued with the deletion does
 // not take it.
 func TestRefusedFileDeletionKeepsItsStoredCopy(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	src := t.TempDir() + "/notes.txt"
 	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
@@ -2062,9 +2014,6 @@ func TestFileRowGoesAfterItsContents(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	if err := svc.push(context.Background()); err != nil {
 		t.Fatal(err)
 	}

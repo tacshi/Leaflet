@@ -12,10 +12,8 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/egoist/mygo"
-
+	"leaflet/internal/agents/endpoint"
 	"leaflet/internal/doc"
-	"leaflet/internal/editor"
 	"leaflet/internal/keychain"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
@@ -26,8 +24,9 @@ import (
 type Host interface {
 	// Update runs fn on the main thread.
 	Update(fn func())
-	// Editor returns a page's open editor, or nil.
-	Editor(pageID string) *editor.Editor
+	// Live returns the page open with its edits, or nil while it is not
+	// open.
+	Live(pageID string) LiveDoc
 	// SaveNow stores the open editor's pending edits.
 	SaveNow(pageID string)
 	Online() bool
@@ -36,6 +35,18 @@ type Host interface {
 	SyncNow()
 	// Tint marks the blocks the latest run of a page changed.
 	Tint(pageID string, ids []string)
+}
+
+// LiveDoc is a page open in the app, as an agent run changes it: the
+// desktop's editor, or the iOS app's, through package live.
+type LiveDoc interface {
+	// Doc is the content as it is open, with what is being typed.
+	Doc() *doc.Content
+	// ApplyOp applies an op, starting a new undo step with newStep or
+	// joining the one before.
+	ApplyOp(op doc.Op, newStep bool) error
+	// ApplyOps applies ops as one undo step.
+	ApplyOps(ops []doc.Op) error
 }
 
 // Option is an agent people can pick: a provider and a model.
@@ -47,12 +58,17 @@ type Option struct {
 // Name is the agent's name, its provider's.
 func (o Option) Name() string { return o.Provider.Name }
 
-// Local reports whether the model runs on this device or the network.
+// Local reports whether the agent runs from this device: against a model
+// server on it or the network, or a cloud provider whose key is kept here.
 func (o Option) Local() bool { return o.Provider.IsLocal }
 
 // Offline reports whether the agent works without a connection: a model
-// server on this machine or the network, not a signed-in plan.
-func (o Option) Offline() bool { return o.Provider.IsLocal && o.Provider.AuthKind != "account" }
+// server on this machine or the network, a preset's or a custom one, not
+// a signed-in plan or a cloud provider kept on this device.
+func (o Option) Offline() bool {
+	p := o.Provider
+	return p.IsLocal && p.AuthKind != "account" && (PresetByID(p.Preset).Local || endpoint.IsLocal(p.BaseURL))
+}
 
 // Choice is the option as a setting.
 func (o Option) Choice() store.ModelChoice {
@@ -70,6 +86,9 @@ type Message struct {
 	Pending   bool
 	Error     bool
 	AgentName string
+	// Streamed is a pending reply whose Text is the answer as far as it
+	// has come, not what the run is doing.
+	Streamed bool `json:"-"`
 }
 
 // Run is one agent run: one undo step, kept with its ops so it can be
@@ -91,6 +110,9 @@ type Run struct {
 	Stopped bool
 	// Restored is a run of an earlier launch, kept with its chat reply.
 	Restored bool `json:"-"`
+	// Answer is the model's answer as far as it has come, while the run
+	// works and has not edited the page.
+	Answer string `json:"-"`
 	// kept is a run whose "Before" snapshot is in the page's history.
 	kept bool
 	// stop cancels a run on this device while it works; a cloud run goes
@@ -385,7 +407,7 @@ type ErrNoAgent struct{ Message string }
 func (e *ErrNoAgent) Error() string { return e.Message }
 
 // Resolve picks the agent to use: the one asked for, else the default,
-// switching to a local model while offline when the user allows it.
+// switching to a model on this machine while offline.
 func (h *Hub) Resolve(wanted *store.ModelChoice) (Option, error) {
 	all := h.Options()
 	if len(all) == 0 {
@@ -432,7 +454,7 @@ func (h *Hub) Resolve(wanted *store.ModelChoice) (Option, error) {
 			}
 		}
 		switch {
-		case offline != nil && (settings.LocalWhenOffline || (needsServer && !signedIn)):
+		case offline != nil:
 			option = *offline
 		case needsServer && !signedIn:
 			return Option{}, &ErrNoAgent{"Sign in to use " + option.Name() + ", or add a provider on this machine."}
@@ -462,7 +484,7 @@ func LocalKey(providerID string) string {
 func SetLocalKey(providerID, key string) error {
 	if key == "" {
 		err := keychain.Delete("provider." + providerID + ".key")
-		if errors.Is(err, mygo.ErrSecretNotFound) {
+		if errors.Is(err, keychain.ErrNotFound) {
 			return nil
 		}
 		return err
@@ -657,10 +679,10 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		return fail(err)
 	}
 	h.host.SaveNow(pageID)
-	ed := h.host.Editor(pageID)
+	ed := h.host.Live(pageID)
 	var before *doc.Content
 	if ed != nil {
-		before = ed.Content.Copy()
+		before = ed.Doc().Copy()
 	} else if c, err := stored(h.st, pageID); err != nil {
 		return fail(err)
 	} else if c != nil {
@@ -688,10 +710,16 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		req.ConversationID = s.ConversationID
 	}
 	d := h.newDelivery(pageID, run, option)
+	stream := &replyStream{h: h, run: run, reply: o.Reply}
 	events := Events{
 		Status: func(st string) { h.host.Update(func() { run.Status = st }) },
 		Op: func(op doc.Op, summary string) {
+			stream.clear()
 			h.host.Update(func() { h.arrived(s, run, option, before, d, o, op, summary) })
+		},
+		Text: stream.set,
+		Revise: func(at int, op *doc.Op, summary string, delta []doc.Op) {
+			h.host.Update(func() { h.revised(s, run, d, o, at, op, summary, delta) })
 		},
 	}
 	work := before.Copy()
@@ -742,10 +770,11 @@ const chatSaveEvery = time.Second
 func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, d *delivery, o RunOptions, op doc.Op, summary string) {
 	run.Ops = append(run.Ops, op)
 	run.Edits = append(run.Edits, Edit{Summary: summary, BlockIDs: OpBlockIDs(op)})
+	run.Answer = ""
 	if o.Reply != nil {
-		o.Reply.Text = summary + "…"
+		o.Reply.Text, o.Reply.Streamed = summary+"…", false
 	}
-	switch live := h.host.Editor(s.PageID); {
+	switch live := h.host.Live(s.PageID); {
 	case live != nil:
 		if err := h.keepBefore(s.PageID, run, option, before); err != nil {
 			log.Printf("agent run history: %v", err)
@@ -759,6 +788,37 @@ func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, 
 		// The server keeps a cloud run's ops: a page opened
 		// later gets them by syncing.
 		d.sent = len(run.Ops)
+	}
+}
+
+// revised takes a change of a run's op at at as the blocks of the call
+// it is go in while the call streams, on the main thread. A page that has
+// the op gets the change, open or stored; one that does not yet gets the
+// op as it is when it does.
+func (h *Hub) revised(s *Session, run *Run, d *delivery, o RunOptions, at int, op *doc.Op, summary string, delta []doc.Op) {
+	if at < 0 || at >= len(run.Ops) {
+		return
+	}
+	had := d.sent > at
+	if op == nil {
+		run.Ops, run.Edits = run.Ops[:at], run.Edits[:at]
+		d.sent = min(d.sent, len(run.Ops))
+	} else {
+		run.Ops[at] = *op
+		run.Edits[at] = Edit{Summary: summary, BlockIDs: OpBlockIDs(*op)}
+		if o.Reply != nil {
+			o.Reply.Text, o.Reply.Streamed = summary+"…", false
+		}
+	}
+	if !had {
+		return
+	}
+	if live := h.host.Live(s.PageID); live != nil {
+		for _, c := range delta {
+			d.apply(live, c)
+		}
+	} else if err := storeOps(h.st, s.PageID, delta, true, run.ID, "agent op on a closed page"); err != nil {
+		log.Printf("agent op on a closed page: %v", err)
 	}
 }
 
@@ -812,11 +872,67 @@ func (h *Hub) insertJob(ctx context.Context, req Request) error {
 	return err
 }
 
+// streamEvery spaces the showings of a reply as it streams: each is a
+// redraw, and on iOS a fetch of the page's agent state.
+const streamEvery = 50 * time.Millisecond
+
+// replyStream shows a run's answer as it streams in, in its chat reply
+// when it has one, set from the run and shown on the main thread.
+type replyStream struct {
+	h     *Hub
+	run   *Run
+	reply *Message
+	mu    sync.Mutex
+	text  string
+	shown time.Time
+	timer *time.Timer
+}
+
+// set takes the answer so far, to show it streamEvery after the last
+// showing at the soonest.
+func (st *replyStream) set(text string) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	st.text = text
+	if st.timer != nil {
+		return
+	}
+	st.timer = time.AfterFunc(max(0, streamEvery-time.Since(st.shown)), func() {
+		st.mu.Lock()
+		st.timer, st.shown = nil, time.Now()
+		st.mu.Unlock()
+		st.h.host.Update(st.show)
+	})
+}
+
+// clear drops an answer an edit of the page goes on from: the reply says
+// what the run did instead.
+func (st *replyStream) clear() {
+	st.mu.Lock()
+	st.text = ""
+	st.mu.Unlock()
+}
+
+// show puts the answer in the reply while the run works, its thinking
+// left out; an answer still thinking leaves the reply as it was.
+func (st *replyStream) show() {
+	st.mu.Lock()
+	text := shownText(st.text)
+	st.mu.Unlock()
+	if text == "" || st.run.Status == "done" || st.run.Status == "failed" {
+		return
+	}
+	st.run.Answer = text
+	if st.reply != nil && st.reply.Pending {
+		st.reply.Text, st.reply.Streamed = text, true
+	}
+}
+
 // delivery is how far a run's ops have reached the page: those before
 // sent are in an open editor, or were saved with it when it closed.
 type delivery struct {
 	sent int
-	ed   *editor.Editor
+	ed   LiveDoc
 	// conflict keeps an open page's content in history before an op takes
 	// a change of it away; nil keeps none.
 	conflict func(*doc.Content) error
@@ -833,28 +949,34 @@ func (h *Hub) newDelivery(pageID string, run *Run, option Option) *delivery {
 }
 
 // to applies the ops ed does not have yet, in order, so an op never comes
-// before the blocks it needs. The first op an editor gets starts an undo
-// step that the rest join. An op that replaces or deletes a block the
-// user changed since the agent read it keeps the page as it is in history
-// first (conflict), as storeOps does on a closed page. Each op is checked
-// against the page just before it, which has the run's earlier ops by
-// then, so the agent's own edits are no change.
-func (d *delivery) to(ed *editor.Editor, ops []doc.Op) {
+// before the blocks it needs.
+func (d *delivery) to(ed LiveDoc, ops []doc.Op) {
 	for _, op := range ops[d.sent:] {
 		if op.Op == "create_page" || op.Op == "delete_page" {
 			continue
 		}
-		if d.conflict != nil && overwrites(ed.Content, []doc.Op{op}) {
-			if err := d.conflict(ed.Content); err != nil {
-				log.Printf("agent op on the open page: %v", err)
-			}
-		}
-		if err := ed.ApplyOp(op, ed != d.ed); err != nil {
-			log.Printf("agent op on the open page: %v", err)
-		}
-		d.ed = ed
+		d.apply(ed, op)
 	}
 	d.sent = len(ops)
+}
+
+// apply applies one op, or one change of an op as its call streams, to
+// ed. The first op an editor gets starts an undo step that the rest join.
+// An op that replaces or deletes a block the user changed since the agent
+// read it keeps the page as it is in history first (conflict), as
+// storeOps does on a closed page. Each op is checked against the page
+// just before it, which has the run's earlier ops by then, so the agent's
+// own edits are no change.
+func (d *delivery) apply(ed LiveDoc, op doc.Op) {
+	if d.conflict != nil && overwrites(ed.Doc(), []doc.Op{op}) {
+		if err := d.conflict(ed.Doc()); err != nil {
+			log.Printf("agent op on the open page: %v", err)
+		}
+	}
+	if err := ed.ApplyOp(op, ed != d.ed); err != nil {
+		log.Printf("agent op on the open page: %v", err)
+	}
+	d.ed = ed
 }
 
 // missed are the block ops the page does not have yet.
@@ -1030,7 +1152,7 @@ func storedRow(st *store.Store, pageID string) (*doc.Content, string, error) {
 func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *doc.Content, d *delivery, res Result, err error, o RunOptions) {
 	s.Running = false
 	run.stop = nil
-	run.Reply = res.Reply
+	run.Reply, run.Answer = res.Reply, ""
 	if len(run.Ops) == 0 && len(res.Ops) > 0 {
 		run.Ops, run.Edits = res.Ops, res.Edits
 	}
@@ -1049,7 +1171,7 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 	if len(run.Ops) > 0 && option.Local() {
 		// The page may have opened or closed during the run: it gets the
 		// ops it missed, open or stored.
-		if live := h.host.Editor(pageID); live != nil {
+		if live := h.host.Live(pageID); live != nil {
 			if err := h.keepBefore(pageID, run, option, before); err != nil {
 				log.Printf("agent run history: %v", err)
 			}
@@ -1092,7 +1214,7 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		h.host.SyncNow()
 	}
 	if o.Reply != nil {
-		o.Reply.Pending = false
+		o.Reply.Pending, o.Reply.Streamed = false, false
 		o.Reply.Error = run.Error != ""
 		o.Reply.Text = Describe(run)
 		h.saveChat(s)
@@ -1237,7 +1359,7 @@ func (h *Hub) apply(pageID, runID string, ops []doc.Op) {
 	if len(blockOps) == 0 {
 		return
 	}
-	if ed := h.host.Editor(pageID); ed != nil {
+	if ed := h.host.Live(pageID); ed != nil {
 		if err := ed.ApplyOps(blockOps); err != nil {
 			log.Printf("undo run: %v", err)
 		}

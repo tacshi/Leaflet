@@ -673,3 +673,25 @@ func TestPageRowMenuLeavesOutAddSubpage(t *testing.T) {
 		}
 	}
 }
+
+// A page deleted takes its link out of the page it is in, and Undo puts
+// it back where it was.
+func TestDeletedSubpageTakesItsLink(t *testing.T) {
+	a := templatesApp(t)
+	parent, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip"})
+	first, _ := a.st.CreatePage(store.NewPageOptions{Title: "Packing", ParentID: parent.ID})
+	second, _ := a.st.CreatePage(store.NewPageOptions{Title: "Tickets", ParentID: parent.ID})
+	a.reloadAll()
+	a.linkSubpage(parent.ID, first.ID, "")
+	a.linkSubpage(parent.ID, second.ID, "")
+
+	a.deletePage(first.ID)
+	if a.hasSubpageLink(parent.ID, first.ID) {
+		t.Fatal("Trip still links to Packing, deleted")
+	}
+	a.toasts[len(a.toasts)-1].fn()
+	c := a.st.Content(parent.ID)
+	if c == nil || len(c.Children) < 2 || c.Children[len(c.Children)-2].Str("page_id") != first.ID {
+		t.Fatalf("Packing's link is not back before Tickets': %v", c)
+	}
+}

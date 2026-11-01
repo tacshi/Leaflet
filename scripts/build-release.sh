@@ -180,6 +180,19 @@ fi
 # debug builds, which read it too.
 patch_config "${CONFIG[@]}"
 
+# The Mac's speech helper, for each architecture the Mac apps run on: a
+# universal app takes both.
+if $MAC; then
+	SPEECH_ARCHES=()
+	for arch in "${MAC_ARCHES[@]}"; do
+		case "$arch" in
+		universal) SPEECH_ARCHES+=(arm64 x64) ;;
+		*) SPEECH_ARCHES+=("$arch") ;;
+		esac
+	done
+	"$ROOT_DIR/scripts/build-speech.sh" "${SPEECH_ARCHES[@]}"
+fi
+
 info "building Leaflet $VERSION for ${PLATFORMS[*]}"
 go tool mygo build -platform "$(
 	IFS=,

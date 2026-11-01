@@ -18,8 +18,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egoist/mygo"
-
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
 )
@@ -281,7 +279,7 @@ func (c *Client) replace(old, s *session, force bool) bool {
 	}
 	// Keep what fits in the keychain; the access token is fetched again.
 	small := *s
-	if raw, _ := json.Marshal(small); len(raw) > mygo.MaxSecretSize { // #nosec G117 -- the session goes to the keychain.
+	if raw, _ := json.Marshal(small); len(raw) > keychain.MaxSecretSize { // #nosec G117 -- the session goes to the keychain.
 		small.AccessToken = ""
 		small.ExpiresAt = 0
 	}

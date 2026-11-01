@@ -2571,6 +2571,26 @@
   "@recEngineSonioxCloud": {
     "description": "Where transcription runs: Soniox in the cloud. In Settings and a recording's status while recording."
   },
+  "recEngineOnDevice": "On this device",
+  "@recEngineOnDevice": {
+    "description": "Where transcription runs: the device's own speech recognition. In Settings and a recording's status."
+  },
+  "recSttOnDevice": "On device",
+  "@recSttOnDevice": {
+    "description": "Settings › Speech to text: the engine that is the device's own speech recognition (iPhone and iPad)."
+  },
+  "recSttOnDeviceDesc": "Transcribed by this device itself: private, offline and without a key. The first recording in a language downloads its model.",
+  "@recSttOnDeviceDesc": {
+    "description": "Settings › Speech to text: what transcribing on the device means, below its choice."
+  },
+  "recErrOnDevice": "This device can't transcribe by itself. Choose Soniox or an endpoint in Settings › Speech to text.",
+  "@recErrOnDevice": {
+    "description": "Error when on-device transcription is chosen on a device without it."
+  },
+  "recErrOnDeviceLanguage": "This device can't transcribe {language}. Choose another language in Settings › Speech to text.",
+  "@recErrOnDeviceLanguage": {
+    "description": "Error when the device's own speech recognition has no model for the recording's language. {language} is the language's name."
+  },
   "recEngineServer": "Transcription server",
   "@recEngineServer": {
     "description": "The name of a transcription endpoint that has no model set."
@@ -3385,7 +3405,7 @@
       }
     }
   },
-  "settingsProvidersDesc": "The services agents run on. Cloud keys stay on the server; a model server on your machine works offline.",
+  "settingsProvidersDesc": "The services agents run on. Signed in, cloud keys stay on the server, for all your devices; signed out, on this device. A model server on your machine works offline.",
   "@settingsProvidersDesc": {
     "description": "Settings › Agent providers: the description under the heading."
   },
@@ -3471,18 +3491,6 @@
   "@settingsDefaultAgentDesc": {
     "description": "Settings › Agent providers › Defaults › Default agent."
   },
-  "settingsLocalWhenOffline": "Use a provider on this machine when offline",
-  "@settingsLocalWhenOffline": {
-    "description": "Settings › Agent providers › Defaults: a switch."
-  },
-  "settingsLocalWhenOfflineDesc": "Agents keep working without a connection",
-  "@settingsLocalWhenOfflineDesc": {
-    "description": "Settings › Agent providers › Defaults: a switch."
-  },
-  "settingsLocalWhenOfflineNone": "Add a provider on this machine to use this",
-  "@settingsLocalWhenOfflineNone": {
-    "description": "Settings › Agent providers › Defaults: the offline switch's description while it is off and disabled, as no provider runs on this machine."
-  },
   "settingsReadOtherPages": "Let agents read your other pages",
   "@settingsReadOtherPages": {
     "description": "Settings › Agent providers › Defaults: a switch."
@@ -3513,13 +3521,9 @@
   "@settingsProviderDescLocal": {
     "description": "The provider dialog: a model server on this machine."
   },
-  "settingsProviderDescNoServer": "Cloud providers need a Leaflet server, which this build doesn't have.",
-  "@settingsProviderDescNoServer": {
-    "description": "The provider dialog: a cloud provider in a build without a server."
-  },
-  "settingsProviderDescSignIn": "Cloud providers run on the server: sign in with Supabase first, or add a model server on this machine.",
-  "@settingsProviderDescSignIn": {
-    "description": "The provider dialog: a cloud provider while signed out."
+  "settingsProviderDescDevice": "Runs from this device with your key, which stays on this device.",
+  "@settingsProviderDescDevice": {
+    "description": "The provider dialog: a cloud provider kept on this device, as one is when signed out or without a server."
   },
   "settingsProviderClaudeNote": "{desc} Claude plans only work in Claude's own apps, so this takes an API key.",
   "@settingsProviderClaudeNote": {
@@ -3629,6 +3633,10 @@
   "settingsNeedURLAndModel": "A base URL and a model are needed.",
   "@settingsNeedURLAndModel": {
     "description": "The provider dialog: saving without them."
+  },
+  "settingsNeedKey": "Paste the provider's API key.",
+  "@settingsNeedKey": {
+    "description": "The provider dialog: saving a cloud provider kept on this device without its key."
   },
   "settingsKeepSignInFailed": "Could not keep the sign-in: {error}",
   "@settingsKeepSignInFailed": {
@@ -4142,6 +4150,10 @@
   "@signinSetUpProject": {
     "description": "The sign-in page: the button setting up a project Leaflet made, or restarting a paused one."
   },
+  "signinNoProject": "Set up sync in Leaflet on your Mac or PC first",
+  "@signinNoProject": {
+    "description": "The phone's sign-in page, when the Supabase account has no Leaflet project: the phone signs in to the one the desktop app sets up."
+  },
   "signinSettingUp": "Setting up Leaflet in your project…",
   "@signinSettingUp": {
     "description": "The sign-in page while checking what the project needs."
@@ -4258,7 +4270,7 @@
   "@welcomeTrySelect": {
     "description": "The welcome guide page, made once on first run: a to-do of Try it (Markdown)."
   },
-  "welcomeTryRecord": "Press the microphone in the header to record, with a transcript",
+  "welcomeTryRecord": "Press the record button in the header to record, with a transcript",
   "@welcomeTryRecord": {
     "description": "The welcome guide page, made once on first run: a to-do of Try it."
   },
@@ -4686,7 +4698,7 @@
   "@welcomeAgentsPanel": {
     "description": "The welcome guide page, made once on first run: a bullet (Markdown)."
   },
-  "welcomeAgentsSettings": "**Settings › Agent providers** sets the default agent, a model on this machine for offline use, and whether agents may read your other pages",
+  "welcomeAgentsSettings": "**Settings › Agent providers** sets the default agent and whether agents may read your other pages",
   "@welcomeAgentsSettings": {
     "description": "The welcome guide page, made once on first run: a bullet (Markdown)."
   },

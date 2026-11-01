@@ -15,6 +15,19 @@ import (
 	"net/url"
 )
 
+// NewState is a sign-in's random state, which the browser's answer must
+// come back with.
+func NewState() string { return RandomString(32) }
+
+// NewVerifier is a sign-in's random PKCE verifier.
+func NewVerifier() string { return RandomString(48) }
+
+// Challenge is the S256 PKCE challenge of verifier.
+func Challenge(verifier string) string {
+	sum := sha256.Sum256([]byte(verifier))
+	return base64.RawURLEncoding.EncodeToString(sum[:])
+}
+
 // RandomString is n random bytes, base64url.
 func RandomString(n int) string {
 	b := make([]byte, n)
@@ -47,6 +60,12 @@ type answer struct {
 // port; anyPort lets another port do when that one is taken, for providers
 // that take any loopback port.
 func Listen(name string, port int, anyPort bool) (*Loopback, error) {
+	return ListenFor(name, port, anyPort, NewState(), NewVerifier())
+}
+
+// ListenFor starts a loopback as Listen does, for a sign-in begun with
+// state and verifier.
+func ListenFor(name string, port int, anyPort bool, state, verifier string) (*Loopback, error) {
 	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	if err != nil && anyPort {
 		ln, err = net.Listen("tcp", "127.0.0.1:0")
@@ -57,8 +76,8 @@ func Listen(name string, port int, anyPort bool) (*Loopback, error) {
 	host := fmt.Sprintf("127.0.0.1:%d", ln.Addr().(*net.TCPAddr).Port)
 	l := &Loopback{
 		Redirect: "http://" + host + "/auth/callback",
-		State:    RandomString(32),
-		Verifier: RandomString(48),
+		State:    state,
+		Verifier: verifier,
 		name:     name,
 		ln:       ln,
 		done:     make(chan answer, 1),
@@ -99,10 +118,7 @@ func Listen(name string, port int, anyPort bool) (*Loopback, error) {
 }
 
 // Challenge is the S256 PKCE challenge of the verifier.
-func (l *Loopback) Challenge() string {
-	sum := sha256.Sum256([]byte(l.Verifier))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
-}
+func (l *Loopback) Challenge() string { return Challenge(l.Verifier) }
 
 // Wait returns the query the browser came back with, which has the code.
 func (l *Loopback) Wait(ctx context.Context) (url.Values, error) {

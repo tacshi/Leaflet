@@ -1,4 +1,7 @@
-package app
+// Package web reads from the web for both apps: a link's page, a picture
+// or a video's info, from public addresses only, and what a page says
+// about itself, for its link cards.
+package web
 
 import (
 	"context"
@@ -15,16 +18,16 @@ import (
 	"leaflet/internal/remote"
 )
 
-// errNotPublic is fetch's for an address on this machine or its network.
-var errNotPublic = errors.New("not a public address")
+// ErrNotPublic is Fetch's for an address on this machine or its network.
+var ErrNotPublic = errors.New("not a public address")
 
-// fetch reads a link's page, a picture or a video's info from the web.
+// Fetch reads a link's page, a picture or a video's info from the web.
 // The links come from pages other people share and from the web, so only
 // http(s) to a public address goes: never a file on this device, nor a
 // service on it or its network, as a router's page. The address is
 // checked as it is dialed, after the name resolves, so a name that
 // resolves elsewhere the second time cannot get round it.
-func fetch(link string) ([]byte, error) {
+func Fetch(link string) ([]byte, error) {
 	u, err := url.Parse(link)
 	if err != nil {
 		return nil, err
@@ -50,12 +53,12 @@ func fetch(link string) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(res.Body, 20<<20))
 }
 
-// fetchAgent is the User-Agent fetch names, as a browser's: some sites
+// fetchAgent is the User-Agent Fetch names, as a browser's: some sites
 // refuse Go's own, as segmentfault.com's picture links answer it 410 Gone
 // where a browser is sent on to the picture.
 const fetchAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Leaflet"
 
-// publicClient is fetch's: through the system's proxy, as the app's other
+// publicClient is Fetch's: through the system's proxy, as the app's other
 // clients go, and to public addresses only.
 var publicClient = &http.Client{Transport: &http.Transport{
 	Proxy:                 publicProxy,
@@ -85,7 +88,7 @@ func publicProxy(r *http.Request) (*url.URL, error) {
 	host := r.URL.Hostname()
 	if p == nil {
 		if _, ok := proxies.Load(hostPort(r.URL)); ok {
-			return nil, errNotPublic
+			return nil, ErrNotPublic
 		}
 		return nil, nil
 	}
@@ -95,7 +98,7 @@ func publicProxy(r *http.Request) (*url.URL, error) {
 	}
 	for _, ip := range ips {
 		if !publicAddr(ip) {
-			return nil, errNotPublic
+			return nil, ErrNotPublic
 		}
 	}
 	proxies.Store(hostPort(p), true)
@@ -132,7 +135,7 @@ func publicControl(_, address string, _ syscall.RawConn) error {
 	}
 	ip, err := netip.ParseAddr(host)
 	if err != nil || !publicAddr(ip) {
-		return errNotPublic
+		return ErrNotPublic
 	}
 	return nil
 }

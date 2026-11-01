@@ -733,85 +733,6 @@ func TestTableCellKeepsMarkdownAsTyped(t *testing.T) {
 	}
 }
 
-func TestPasteMarkdownBlankLinesSeparate(t *testing.T) {
-	nodes := parseLines("## Start\n\n> [!NOTE]\n> Needs Go\n\n1. one\n\n2. two\n\n```go\na := 1\n\nb := 2\n```\n")
-	var types []string
-	for _, n := range nodes {
-		types = append(types, n.Type)
-		if n.Type == "paragraph" && n.Delta().Len() == 0 {
-			t.Errorf("an empty paragraph in %v", types)
-		}
-	}
-	if got := strings.Join(types, " "); got != "heading callout numbered_list numbered_list code" {
-		t.Fatalf("blocks %s", got)
-	}
-	if code := nodes[4].Delta().Plain(); code != "a := 1\n\nb := 2" {
-		t.Errorf("code %q lost its blank line", code)
-	}
-}
-
-// The markers Markdown has for headings and lists all read as blocks, as
-// copying escapes them all, and a line that is a picture is one.
-func TestPasteMarkdownMarkers(t *testing.T) {
-	var got []string
-	for _, n := range parseLines("#### Step\n###### Six\n####### seven\n#tag\n+ plus\n+ [x] done\n- [X] also\n1) one\n2024. year\n![A cat](https://x.dev/cat.png)\n![local](file:///cat.png)") {
-		got = append(got, fmt.Sprintf("%s%d:%s%s", n.Type, n.Int("level", 0), n.Delta().Plain(), n.Str("alt")))
-	}
-	want := []string{"heading4:Step", "heading6:Six", "paragraph0:####### seven", "paragraph0:#tag", "bulleted_list0:plus",
-		"todo_list0:done", "todo_list0:also", "numbered_list0:one", "paragraph0:2024. year", "image0:A cat", "paragraph0:!local"}
-	if !slices.Equal(got, want) {
-		t.Errorf("blocks\n%q\nwant\n%q", got, want)
-	}
-}
-
-func TestMarkdownBlocksReadsAReply(t *testing.T) {
-	var types []string
-	for _, n := range MarkdownBlocks("It says:\n\n> a quote\n\n- one\n") {
-		types = append(types, n.Type)
-	}
-	if got := strings.Join(types, " "); got != "paragraph quote bulleted_list" {
-		t.Errorf("blocks %q", got)
-	}
-}
-
-// A page exported as Markdown reads back as the same blocks: text that
-// looks like a block's marker stays text, and a | stays in its cell.
-func TestMarkdownExportReadsBack(t *testing.T) {
-	var blocks []*doc.Node
-	for _, s := range []string{"```js", "# not a heading", "2*3*4", "- not an item", "1. not numbered", "> not a quote", "| not a table |", "$$", "---", "[!NOTE]"} {
-		blocks = append(blocks, newText("paragraph", doc.Delta{{Text: s}}))
-	}
-	table, _ := doc.TableNode([][]string{{"a|b", `c\|d`}, {"`x|y`", "e"}}, "")
-	blocks = append(blocks, table, newText("paragraph", doc.Delta{{Text: "last"}}))
-	md := doc.PageMarkdown("", doc.FromBlocks(blocks), nil)
-	got := MarkdownBlocks(md)
-	if len(got) != len(blocks) {
-		t.Fatalf("%q read back as %d blocks", md, len(got))
-	}
-	for i, n := range got {
-		if n.Type != blocks[i].Type || !reflect.DeepEqual(n.Delta(), blocks[i].Delta()) {
-			t.Errorf("block %d: %s %+v, want %s %+v", i, n.Type, n.Delta(), blocks[i].Type, blocks[i].Delta())
-		}
-	}
-	if rows := doc.TableRows(got[len(got)-2]); !reflect.DeepEqual(rows, doc.TableRows(table)) {
-		t.Errorf("table rows %q, want %q", rows, doc.TableRows(table))
-	}
-}
-
-func TestTableRowSplitsOnUnescapedPipes(t *testing.T) {
-	for line, want := range map[string][]string{
-		"| a | b |":       {"a", "b"},
-		`| a\|b | c |`:    {"a|b", "c"},
-		`| a\\| b |`:      {`a\\`, "b"},
-		`| \*x\* | y`:     {`\*x\*`, "y"},
-		"| --- | :---: |": nil,
-	} {
-		if got := tableRow(line); !reflect.DeepEqual(got, want) {
-			t.Errorf("%q split as %q, want %q", line, got, want)
-		}
-	}
-}
-
 func TestLeadingFollowsScript(t *testing.T) {
 	for text, want := range map[string]float32{
 		"":                    1.5,
@@ -1482,5 +1403,28 @@ func TestTypingOnABlockIsOneUndoStep(t *testing.T) {
 	e.Undo()
 	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "divider:"}) {
 		t.Errorf("after one undo %v", got)
+	}
+}
+
+// An agent's ops, and content from outside, keep the caret in the page
+// without scrolling to it: the user's view stays where it is while an
+// agent writes below.
+func TestOpsFromOutsideKeepTheView(t *testing.T) {
+	p := &doc.Node{ID: "p1", Type: "paragraph"}
+	p.SetDelta(doc.Delta{{Text: "Asked here"}})
+	e := New(doc.FromBlocks([]*doc.Node{p}), &fakeHost{})
+	e.PlaceCaret("p1", 3)
+	e.reveal = ""
+	n := &doc.Node{ID: "n1", Type: "paragraph"}
+	n.SetDelta(doc.Delta{{Text: "Written by the agent"}})
+	if err := e.ApplyOp(doc.InsertOp(doc.Position{After: "p1"}, n), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ApplyOps([]doc.Op{e.Content.DeleteOp([]string{"n1"})}); err != nil {
+		t.Fatal(err)
+	}
+	e.Replace(e.Content.Copy())
+	if e.reveal != "" || e.FocusBlock() != "p1" {
+		t.Errorf("reveal %q, caret in %q", e.reveal, e.FocusBlock())
 	}
 }

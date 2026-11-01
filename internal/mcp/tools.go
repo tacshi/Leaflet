@@ -16,7 +16,7 @@ import (
 // each given the page it works on, and tools to find, make and file pages.
 
 // pageToolNames are the in-app tools that work on one page.
-var pageToolNames = []string{"read_page", "insert_blocks", "replace_block", "move_block", "delete_blocks"}
+var pageToolNames = []string{"read_page", "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks"}
 
 // hints are each tool's title, and whether it only reads or may undo
 // what is written (the page history keeps it all the same). Every tool
@@ -25,19 +25,20 @@ var hints = map[string]struct {
 	title                 string
 	readOnly, destructive bool
 }{
-	"list_pages":    {"List Pages", true, false},
-	"search_pages":  {"Search Pages", true, false},
-	"read_page":     {"Read Page", true, false},
-	"insert_blocks": {"Insert Blocks", false, false},
-	"replace_block": {"Replace Block", false, true},
-	"move_block":    {"Move Block", false, false},
-	"delete_blocks": {"Delete Blocks", false, true},
-	"create_page":   {"Create Page", false, false},
-	"rename_page":   {"Rename Page", false, false},
-	"set_page_tags": {"Set Page Tags", false, true},
-	"move_page":     {"Move Page", false, false},
-	"create_folder": {"Create Folder", false, false},
-	"rename_folder": {"Rename Folder", false, false},
+	"list_pages":     {"List Pages", true, false},
+	"search_pages":   {"Search Pages", true, false},
+	"read_page":      {"Read Page", true, false},
+	"write_markdown": {"Write Markdown", false, false},
+	"insert_blocks":  {"Insert Blocks", false, false},
+	"replace_block":  {"Replace Block", false, true},
+	"move_block":     {"Move Block", false, false},
+	"delete_blocks":  {"Delete Blocks", false, true},
+	"create_page":    {"Create Page", false, false},
+	"rename_page":    {"Rename Page", false, false},
+	"set_page_tags":  {"Set Page Tags", false, true},
+	"move_page":      {"Move Page", false, false},
+	"create_folder":  {"Create Folder", false, false},
+	"rename_folder":  {"Rename Folder", false, false},
 }
 
 func toolList() []map[string]any {
@@ -69,7 +70,7 @@ func toolList() []map[string]any {
 	for _, name := range pageToolNames {
 		fn := defs[name]
 		params := fn["parameters"].(map[string]any)
-		props := maps.Clone(params["properties"].(map[string]any))
+		props := agents.Properties(params)
 		props["page_id"] = pageID
 		required := append([]string{"page_id"}, params["required"].([]string)...)
 		desc := fn["description"].(string)
@@ -78,7 +79,7 @@ func toolList() []map[string]any {
 		}
 		add(name, desc, object(props, required...))
 	}
-	sub := defs["create_subpage"]["parameters"].(map[string]any)["properties"].(map[string]any)
+	sub := agents.Properties(defs["create_subpage"]["parameters"].(map[string]any))
 	add("create_page", "Create a page, optionally with content. With parent_id it goes inside that page, and a link to it is added at the end of the parent.",
 		object(map[string]any{
 			"title":     sub["title"],

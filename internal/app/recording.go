@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/keychain"
+	"leaflet/internal/macspeech"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
@@ -21,7 +23,7 @@ import (
 
 // startRecording records into the open page.
 func (a *App) startRecording(pageID, _ string) {
-	ed := a.Editor(pageID)
+	ed := a.openEditor(pageID)
 	err := a.rec.Start(pageID, a.settings.Stt, a.online && !a.settings.WorkOffline, func(n *doc.Node) {
 		if ed != nil {
 			ed.InsertBlocks(n)
@@ -90,10 +92,10 @@ func (a *App) recordingPill(c *ui.Context) {
 
 // recView is the recording's capture page, if one is running.
 func (a *App) recView() *mygo.WebView {
-	if a.rec == nil {
+	if a.rec == nil || a.capture == nil || !a.rec.Active() {
 		return nil
 	}
-	return a.rec.View()
+	return a.capture.View()
 }
 
 // player is the playback of one recording; from is where it starts once
@@ -198,7 +200,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 	ui.Column(c.Key("rec:"+n.ID)).Padding(14, 16).Gap(12).Radius(10).Border(1, pal.Divider).Background(pal.Surface).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Box(c).Size(30, 30).Radius(999).Center().Background(map[bool]ui.Color{true: pal.DangerBg, false: pal.AccentSoft}[live]).Children(func() {
-				ui.Icon(c, theme.Icon("mic")).FontSize(15).TextColor(map[bool]ui.Color{true: pal.Danger, false: pal.AccentText}[live])
+				ui.Icon(c, theme.Icon("audio-lines")).FontSize(15).TextColor(map[bool]ui.Color{true: pal.Danger, false: pal.AccentText}[live])
 			})
 			ui.Column(c).Grow(1).Children(func() {
 				ui.Text(c, a.recordingTitle(n, rec, err == nil)).FontSize(14).FontWeight(600).TextColor(pal.Text)
@@ -217,7 +219,14 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 				case rec.SttProvider == "":
 					status = locales.RecStatus(fmtDuration(time.Duration(rec.DurationMs)*time.Millisecond), locales.RecAudioOnly())
 				default:
-					status = locales.RecStatus(fmtDuration(time.Duration(rec.DurationMs)*time.Millisecond), map[bool]string{true: "Soniox", false: locales.CommonEndpoint()}[rec.SttProvider == "soniox"])
+					engine := locales.CommonEndpoint()
+					switch rec.SttProvider {
+					case "soniox":
+						engine = "Soniox"
+					case recording.OnDevice:
+						engine = locales.RecEngineOnDevice()
+					}
+					status = locales.RecStatus(fmtDuration(time.Duration(rec.DurationMs)*time.Millisecond), engine)
 				}
 				ui.Text(c, status).FontSize(12).TextColor(pal.TextMuted)
 			})
@@ -431,6 +440,28 @@ func (a *App) insertTranscript(blockID string, rec store.Recording) {
 
 // Speech to text ---------------------------------------------------------
 
+// findSpeech gives the recorder the Mac's own speech engine, where the app
+// ships its helper and macOS can transcribe. A Mac that has one
+// transcribes with it unless another engine is set up: speech settings
+// left at an endpoint with no address turn to it, as on the iPad.
+func (a *App) findSpeech() {
+	dir, err := mygo.App.Path(mygo.PathResources)
+	if err != nil {
+		return
+	}
+	h := macspeech.Find(dir)
+	if h == nil {
+		return
+	}
+	a.update(func() {
+		a.rec.Engine = h
+		if a.settings.Stt.Provider == "openai-compatible" && strings.TrimSpace(a.settings.Stt.BaseURL) == "" {
+			a.settings.Stt.Provider = recording.OnDevice
+			a.saveSettings()
+		}
+	})
+}
+
 type speechState struct {
 	key       string
 	keyLoaded bool
@@ -466,19 +497,30 @@ func (a *App) speechSettings(c *ui.Context) {
 	}
 	changed := false
 	heading(c, locales.RecSttTitle(), locales.RecSttSubtitle())
-	prov := map[string]int{"openai-compatible": 0, "soniox": 1}[stt.Provider]
+	// The Mac's own engine comes first where it has one.
+	providers := []string{"openai-compatible", "soniox"}
+	labels := []string{locales.CommonEndpoint(), "Soniox"}
+	if a.rec.Engine != nil || stt.Provider == recording.OnDevice {
+		providers = []string{recording.OnDevice, "soniox", "openai-compatible"}
+		labels = []string{locales.RecSttOnDevice(), "Soniox", locales.CommonEndpoint()}
+	}
+	prov := max(slices.Index(providers, stt.Provider), 0)
 	// One card for the engine and its settings, their controls one width
 	// so their left edges line up.
 	card(c, "engine", func() {
-		settingRow(c, "provider", locales.RecSttTranscription(), engineStatus(*stt, s.sonioxSaved || a.session.SignedIn), true, func() {
-			if ui.Segmented(c.Key("provider"), &prov, locales.CommonEndpoint(), "Soniox"); true {
-				want := []string{"openai-compatible", "soniox"}[prov]
+		settingRow(c, "provider", locales.RecSttTranscription(), engineStatus(*stt, s.sonioxSaved || a.session.SignedIn, a.rec.Engine != nil), true, func() {
+			if ui.Segmented(c.Key("provider"), &prov, labels...); true {
+				want := providers[prov]
 				if want != stt.Provider {
 					stt.Provider = want
 					changed = true
 				}
 			}
 		})
+		if stt.Provider == recording.OnDevice {
+			settingRow(c, "on-device", locales.RecSttOnDevice(), locales.RecSttOnDeviceDesc(), false, nil)
+			return
+		}
 		if stt.Provider == "openai-compatible" {
 			settingRow(c, "url", locales.CommonEndpoint(), locales.RecSttEndpointDesc(), false, func() {
 				if field(c, "url", &stt.BaseURL, "http://localhost:8000/v1").Width(sttControlW - 20).Changed() {
@@ -600,7 +642,7 @@ func (a *App) speechSettings(c *ui.Context) {
 			}
 		}
 		settingRow(c, "test", locales.RecSttTestMic(), desc, false, func() {
-			if v := a.rec.View(); s.micTesting && v != nil {
+			if v := a.recView(); s.micTesting && v != nil {
 				// The capture page must be in the window to keep running.
 				ui.WebView(c, v).Size(1, 1).Opacity(0.01)
 			}
@@ -608,7 +650,7 @@ func (a *App) speechSettings(c *ui.Context) {
 			if s.micTesting {
 				label = locales.RecSttTesting()
 			}
-			if button(c, "test", "mic", label).Disabled(a.rec.Active() || s.micTesting).Clicked() {
+			if button(c, "test", "record", label).Disabled(a.rec.Active() || s.micTesting).Clicked() {
 				s.micTesting, s.micText = true, ""
 				err := a.rec.Test(a.settings.Stt, a.online && !a.settings.WorkOffline, 4*time.Second, func(text string, err error) {
 					s.micTesting, s.micText = false, locales.RecSttHeard(text)
@@ -630,8 +672,10 @@ func (a *App) speechSettings(c *ui.Context) {
 }
 
 // engineStatus says where transcription runs, or that it is not set up.
-func engineStatus(stt store.SttSettings, hasSonioxKey bool) string {
-	if stt.Provider == "soniox" && !hasSonioxKey || stt.Provider != "soniox" && strings.TrimSpace(stt.BaseURL) == "" {
+func engineStatus(stt store.SttSettings, hasSonioxKey, onDevice bool) string {
+	if stt.Provider == recording.OnDevice && !onDevice ||
+		stt.Provider == "soniox" && !hasSonioxKey ||
+		stt.Provider == "openai-compatible" && strings.TrimSpace(stt.BaseURL) == "" {
 		return locales.RecSttNotSetUp()
 	}
 	return recording.EngineLabel(stt)
@@ -704,7 +748,9 @@ func (a *App) saveSttKey(provider, key string) {
 
 // syncSttSettings mirrors the speech settings to the server.
 func (a *App) syncSttSettings() {
-	if !a.backend.SignedIn() {
+	// The Mac's own engine is this Mac's alone: the server's settings stay
+	// those the other devices chose.
+	if !a.backend.SignedIn() || a.settings.Stt.Provider == recording.OnDevice {
 		return
 	}
 	stt := a.settings.Stt

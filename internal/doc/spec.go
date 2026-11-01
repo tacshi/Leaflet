@@ -319,6 +319,49 @@ func TableNode(rows [][]string, id string) (*Node, error) {
 	return n, nil
 }
 
+// SetTableRows makes table n's cells rows, as TableRows reads them: a
+// cell keeps its ID, and its text as it was when its Markdown is the
+// same, so only what changed is new; cells past the new size go, and
+// those it grows to are made.
+func SetTableRows(n *Node, rows [][]string) error {
+	cols := 0
+	for _, r := range rows {
+		cols = max(cols, len(r))
+	}
+	if len(rows) == 0 || cols == 0 {
+		return toolErr("A table needs rows: a list of rows, each a list of cells.")
+	}
+	var kept []*Node
+	for c := 0; c < cols; c++ {
+		for r := range rows {
+			text := ""
+			if c < len(rows[r]) {
+				text = rows[r][c]
+			}
+			cell := TableCell(n, r, c)
+			if cell == nil {
+				cell = &Node{ID: NewBlockID(), Type: "table/cell", Data: map[string]any{"colPosition": c, "rowPosition": r}}
+			}
+			if len(cell.Children) == 0 {
+				cell.Children = []*Node{{ID: NewBlockID(), Type: "paragraph"}}
+			}
+			var parts []string
+			for _, k := range cell.Children {
+				parts = append(parts, k.Delta().ToMarkdown())
+			}
+			if strings.Join(parts, " ") != text {
+				cell.Children = cell.Children[:1]
+				cell.Children[0].SetDelta(FromMarkdown(text))
+			}
+			kept = append(kept, cell)
+		}
+	}
+	n.Children = kept
+	n.Set("rowsLen", len(rows))
+	n.Set("colsLen", cols)
+	return nil
+}
+
 // DropCells takes table cells out of a block that is no longer a table,
 // as when a replace makes a list of one: its nested items, if any, stay.
 func DropCells(n *Node) {

@@ -257,19 +257,11 @@ func (a *App) signedIn(user *store.User) {
 
 // replacesAccount reports whether signing in as user removes the pages of
 // another account this device keeps.
-func (a *App) replacesAccount(user *store.User) bool {
-	prev := a.st.CachedAccount()
-	return prev != "" && prev != user.ID
-}
+func (a *App) replacesAccount(user *store.User) bool { return a.core().ReplacesAccount(user) }
 
 // lostBySigningIn counts the changes signing in as user removes: those of
 // another account this device keeps the pages of, which never went up.
-func (a *App) lostBySigningIn(user *store.User) int {
-	if !a.replacesAccount(user) {
-		return 0
-	}
-	return a.st.PendingCount()
-}
+func (a *App) lostBySigningIn(user *store.User) int { return a.core().LostBySigningIn(user) }
 
 // useAccount makes user the session: the previous account's pages go, if
 // it was another's, once the open page's edits are saved; with their
@@ -279,21 +271,7 @@ func (a *App) useAccount(user *store.User, drop bool) {
 		go a.backend.SignOut()
 		return
 	}
-	if drop && a.replacesAccount(user) {
-		if err := a.st.ForgetAccount(); err != nil {
-			a.toast(err.Error())
-			return
-		}
-	}
-	// One way of syncing at a time: the server's, now. Settings say so,
-	// so iCloud sync shows off once signed out again.
-	if a.sync.ICloudOn() || a.settings.ICloudSync {
-		a.sync.SetICloud(false)
-		a.watchICloud(false)
-		a.settings.ICloudSync = false
-		a.saveSettings()
-	}
-	if _, err := a.st.LoadSession(user); err != nil {
+	if err := a.core().UseAccount(user, drop); err != nil {
 		// A change made since it counted, by leaflet mcp: it asks again.
 		if errors.Is(err, store.ErrUnsynced) {
 			signIn.asking, signIn.lost = user, a.st.PendingCount()

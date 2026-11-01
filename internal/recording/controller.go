@@ -1,7 +1,7 @@
 // Package recording records audio into recording blocks and transcribes
-// it: capture through a page of the app's own (the system's web view hands
-// it the microphone, so no native code is needed), WAV files, Soniox
-// real-time streaming, and OpenAI-compatible /audio/transcriptions.
+// it: the microphone through the host's Capture, WAV files, Soniox
+// real-time streaming, the device's own engine, and OpenAI-compatible
+// /audio/transcriptions.
 package recording
 
 import (
@@ -16,8 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egoist/mygo"
-
 	"leaflet/internal/doc"
 	"leaflet/internal/keychain"
 	"leaflet/internal/remote"
@@ -29,7 +27,7 @@ import (
 type Controller struct {
 	st     *store.Store
 	be     *remote.Client
-	win    *mygo.Window
+	input  Capture
 	update func(func())
 
 	// Blobs is where audio goes up to for the other devices, and comes
@@ -37,19 +35,25 @@ type Controller struct {
 	// audio goes to Supabase when signed in.
 	Blobs Blobs
 
+	// Engine is the device's own speech engine, which transcribes for
+	// OnDevice, or nil where the device has none.
+	Engine Engine
+
 	// The recording in progress, read and written on the main thread.
 	State State
 
 	mu      sync.Mutex
 	wav     *WavWriter
-	soniox  *Soniox
-	view    *mygo.WebView
+	mic     Mic
 	session string
 	paused  bool
 	elapsed time.Duration
 	resumed time.Time
 	stt     store.SttSettings
 	meter   Meter
+	// stream transcribes the recording in progress as it records: Soniox,
+	// or the device's engine.
+	stream Stream
 	// connecting is whether a Soniox stream is on its way for the
 	// recording in progress, and early the audio recorded meanwhile, sent
 	// first once it is there: the transcript's times then match the WAV's.
@@ -68,6 +72,67 @@ type Controller struct {
 	// among them whose words came live, now getting their timestamps.
 	Transcribing map[string]bool
 	Finishing    map[string]bool
+}
+
+// Capture is the microphone recordings hear through: on the desktop a
+// page of the app's own in a web view, which the system hands the
+// microphone; on iOS the app's audio engine.
+type Capture interface {
+	// Start turns the microphone on for a recording, to hand sink 16-bit
+	// mono PCM at rate samples a second. It returns before the microphone
+	// is on: sink's Started or Failed says when it is, or why it is not.
+	Start(rate int, sink Sink) (Mic, error)
+}
+
+// Sink takes what a microphone hears. Its functions may run on any
+// goroutine, but one at a time.
+type Sink struct {
+	// Chunk takes the audio heard next, in order.
+	Chunk func(pcm []byte)
+	// Started says the microphone is on.
+	Started func()
+	// Failed says why the microphone could not start.
+	Failed func(message string)
+}
+
+// OnDevice is the speech-to-text provider that is the device's own
+// engine.
+const OnDevice = "on-device"
+
+// Engine is a speech engine of the device's own, as iOS has.
+type Engine interface {
+	// Stream starts transcribing audio as it is recorded, 16-bit mono PCM
+	// at SampleRate, in language ("auto" for the device's). text takes
+	// the words so far, as they come.
+	Stream(language string, text func(string)) (Stream, error)
+	// File transcribes the WAV file at path.
+	File(path, language string) ([]store.Segment, error)
+}
+
+// Stream transcribes a recording as it is recorded: Soniox, or the
+// device's engine.
+type Stream interface {
+	// Send takes the audio recorded next, in order.
+	Send(pcm []byte)
+	// Finish waits for the words of the audio sent, and ends the stream.
+	Finish() ([]store.Segment, error)
+	// Close ends the stream at once.
+	Close()
+	// Lost says why the stream ended before Finish, if it did.
+	Lost() error
+}
+
+// Mic is the microphone of one recording, which Capture started.
+type Mic interface {
+	// Pause stops handing on audio until Resume; neither waits.
+	Pause()
+	Resume()
+	// Stop hands the sink the audio the microphone still holds, then turns
+	// it off. It may wait for that audio, so it runs off the main thread.
+	Stop()
+	// Close lets the microphone go at once, after Stop or for a recording
+	// that could not start. It runs on the main thread.
+	Close()
 }
 
 // Blobs is where audio goes up to and comes from.
@@ -161,10 +226,11 @@ func (r *Controller) RecoverInterrupted() {
 	}
 }
 
-// Attach gives the recorder its window, and a way to change the view's
-// state from other goroutines.
-func (r *Controller) Attach(win *mygo.Window, update func(func())) {
-	r.win, r.update = win, update
+// Attach gives the recorder its microphone, and a way to change the
+// view's state from other goroutines: update runs a function on the main
+// thread.
+func (r *Controller) Attach(c Capture, update func(func())) {
+	r.input, r.update = c, update
 }
 
 // Active reports whether a recording is in progress.
@@ -181,18 +247,13 @@ func (r *Controller) Elapsed() time.Duration {
 	return d
 }
 
-// View is the web view capturing audio, which the window must show (it
-// can be tiny) while recording.
-func (r *Controller) View() *mygo.WebView {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.view
-}
-
 // EngineLabel names where transcription runs.
 func EngineLabel(s store.SttSettings) string {
 	if s.Provider == "soniox" {
 		return locales.RecEngineSonioxCloud()
+	}
+	if s.Provider == OnDevice {
+		return locales.RecEngineOnDevice()
 	}
 	name := s.Model
 	if name == "" {
@@ -204,10 +265,14 @@ func EngineLabel(s store.SttSettings) string {
 	return locales.RecEngineCloud(name)
 }
 
-// Usable says whether the chosen engine can transcribe now, and why not.
-// Recording never needs it: without it a recording keeps only its audio.
+// Usable says whether the chosen engine can transcribe now, and why not,
+// on a device without an engine of its own; Controller.Usable knows the
+// device's. Recording never needs it: without it a recording keeps only
+// its audio.
 func Usable(s store.SttSettings, online, signedIn bool) error {
 	switch {
+	case s.Provider == OnDevice:
+		return errors.New(locales.RecErrOnDevice())
 	case s.Provider == "openai-compatible" && IsLocalEndpoint(s.BaseURL):
 		if s.BaseURL == "" {
 			return errors.New(locales.RecErrSetUpEndpoint())
@@ -226,6 +291,26 @@ func Usable(s store.SttSettings, online, signedIn bool) error {
 	return nil
 }
 
+// Usable is the package's Usable, on this device: its own engine
+// transcribes offline, without an account.
+func (r *Controller) Usable(s store.SttSettings, online bool) error {
+	if s.Provider == OnDevice && r.Engine != nil {
+		return nil
+	}
+	return Usable(s, online, r.be.SignedIn())
+}
+
+// model is the model a recording made with stt is transcribed by.
+func model(stt store.SttSettings) string {
+	switch stt.Provider {
+	case "soniox":
+		return stt.SonioxModel
+	case OnDevice:
+		return ""
+	}
+	return stt.Model
+}
+
 func (r *Controller) dir() (string, error) {
 	d := filepath.Join(r.st.Dir, "recordings")
 	return d, os.MkdirAll(d, 0o750)
@@ -237,8 +322,8 @@ func (r *Controller) Start(pageID string, stt store.SttSettings, online bool, in
 	if r.Active() {
 		return errors.New(locales.RecErrAlreadyRecording())
 	}
-	transcribe := Usable(stt, online, r.be.SignedIn()) == nil
-	if r.win == nil {
+	transcribe := r.Usable(stt, online) == nil
+	if r.input == nil {
 		return errors.New(locales.RecErrWindowNotReady())
 	}
 	id := doc.NewRowID()
@@ -252,11 +337,7 @@ func (r *Controller) Start(pageID string, stt store.SttSettings, online bool, in
 	if err != nil {
 		return err
 	}
-	model := stt.Model
-	if stt.Provider == "soniox" {
-		model = stt.SonioxModel
-	}
-	rec, err := r.st.CreateRecording(pageID, blockID, stt.Provider, model, path, stt.Language)
+	rec, err := r.st.CreateRecording(pageID, blockID, stt.Provider, model(stt), path, stt.Language)
 	if err != nil {
 		_ = wav.Close()
 		return err
@@ -274,12 +355,12 @@ func (r *Controller) Test(stt store.SttSettings, online bool, d time.Duration, d
 	if r.Active() {
 		return errors.New(locales.RecErrAlreadyRecording())
 	}
-	if r.win == nil {
+	if r.input == nil {
 		return errors.New(locales.RecErrWindowNotReady())
 	}
-	why := Usable(stt, online, r.be.SignedIn())
+	why := r.Usable(stt, online)
 	// The server transcribes for a cloud endpoint only from a saved recording.
-	if why == nil && stt.Provider != "soniox" && !IsLocalEndpoint(stt.BaseURL) {
+	if why == nil && stt.Provider == "openai-compatible" && !IsLocalEndpoint(stt.BaseURL) {
 		why = errors.New(locales.RecErrCloudTest())
 	}
 	wav, err := CreateWav(filepath.Join(os.TempDir(), "leaflet-test-"+doc.NewRowID()+".wav"))
@@ -300,7 +381,7 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 	r.wav, r.session, r.stt, r.paused, r.elapsed, r.resumed = wav, session, stt, false, 0, time.Time{}
 	// A stream still here is the last recording's, which its Stop is
 	// finishing: it hears none of this one.
-	r.soniox, r.connecting, r.early, r.earlyLen = nil, live, nil, 0
+	r.stream, r.connecting, r.early, r.earlyLen = nil, live, nil, 0
 	r.meter = Meter{}
 	r.withText = transcribe
 	testFor := r.testFor
@@ -310,11 +391,6 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 		st.Engine = locales.RecAudioOnly()
 	}
 	r.State = st
-	service.add(session, &captureSink{
-		chunk:   func(pcm []byte) { r.chunk(session, pcm) },
-		started: func() { r.started(session, testFor) },
-		failed:  func(msg string) { r.failed(session, msg) },
-	})
 	// A test has no Stop button, so one whose microphone never starts ends.
 	if testFor > 0 {
 		time.AfterFunc(15*time.Second, func() {
@@ -333,17 +409,38 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 	if live {
 		go r.startSoniox(session, stt)
 	}
-	// The page captures while the window is hidden or minimized too, as
-	// a recording started from the menu bar is: web views slow down then,
-	// unless told not to.
-	v, err := r.win.NewWebView(mygo.WebViewOptions{URL: CaptureURL(session),
-		Page: mygo.PageOptions{BackgroundThrottling: mygo.ThrottlingOff}})
+	// So does the device's engine, which needs no connection. One that
+	// cannot start transcribes the saved audio once it stops.
+	if transcribe && stt.Provider == OnDevice {
+		s, err := r.Engine.Stream(stt.Language, func(text string) {
+			r.update(func() {
+				r.mu.Lock()
+				same := r.session == session
+				r.mu.Unlock()
+				if same {
+					r.State.LiveText = text
+				}
+			})
+		})
+		if err != nil {
+			r.State.Error = locales.RecErrLive(err.Error())
+		} else {
+			r.mu.Lock()
+			r.stream = s
+			r.mu.Unlock()
+		}
+	}
+	m, err := r.input.Start(SampleRate, Sink{
+		Chunk:   func(pcm []byte) { r.chunk(session, pcm) },
+		Started: func() { r.started(session, testFor) },
+		Failed:  func(msg string) { r.failed(session, msg) },
+	})
 	if err != nil {
 		r.abort()
 		return err
 	}
 	r.mu.Lock()
-	r.view = v
+	r.mic = m
 	r.mu.Unlock()
 	return nil
 }
@@ -443,7 +540,7 @@ func (r *Controller) attachSoniox(session string, s *Soniox) {
 		early := r.early
 		r.early, r.earlyLen = nil, 0
 		if len(early) == 0 {
-			r.soniox, r.connecting = s, false
+			r.stream, r.connecting = s, false
 			r.mu.Unlock()
 			return
 		}
@@ -466,7 +563,7 @@ func (r *Controller) chunk(session string, pcm []byte) {
 		return
 	}
 	err := r.wav.Write(pcm)
-	s := r.soniox
+	s := r.stream
 	if s == nil && r.connecting && r.earlyLen+len(pcm) <= maxEarly {
 		r.early = append(r.early, pcm)
 		r.earlyLen += len(pcm)
@@ -510,27 +607,30 @@ func (r *Controller) TogglePause() {
 		r.paused = true
 	}
 	paused := r.paused
-	v := r.view
+	m := r.mic
 	r.mu.Unlock()
 	r.State.Paused = paused
-	if v != nil {
-		go func() { _, _ = v.Page().Eval(fmt.Sprintf("window.pauseCapture(%v)", paused)) }()
+	switch {
+	case m == nil:
+	case paused:
+		go m.Pause()
+	default:
+		go m.Resume()
 	}
 }
 
 // abort ends a recording that could not start.
 func (r *Controller) abort() {
 	r.mu.Lock()
-	v, wav, soniox, session, test := r.view, r.wav, r.soniox, r.session, r.test
-	r.view, r.wav, r.soniox, r.test, r.testFor = nil, nil, nil, nil, 0
+	m, wav, stream, test := r.mic, r.wav, r.stream, r.test
+	r.mic, r.wav, r.stream, r.test, r.testFor = nil, nil, nil, nil, 0
 	r.connecting, r.early, r.earlyLen = false, nil, 0
 	r.mu.Unlock()
-	service.remove(session)
-	if v != nil {
-		v.Destroy()
+	if m != nil {
+		m.Close()
 	}
-	if soniox != nil {
-		soniox.Close()
+	if stream != nil {
+		stream.Close()
 	}
 	if wav != nil {
 		_ = wav.Close()
@@ -561,30 +661,28 @@ func (r *Controller) Stop() {
 	}
 	duration := r.Elapsed()
 	r.mu.Lock()
-	v, wav, soniox, session, stt, withText := r.view, r.wav, r.soniox, r.session, r.stt, r.withText
+	m, wav, stream, stt, withText := r.mic, r.wav, r.stream, r.stt, r.withText
 	test, why := r.test, r.testWhy
-	// The WAV file and the stream stay until the capture page has sent
-	// the audio it still holds: that is the end of what was said. A stream
-	// not there yet is not waited for; the audio is transcribed instead.
-	r.view, r.test, r.testFor = nil, nil, 0
+	// The WAV file and the stream stay until the microphone has sent the
+	// audio it still holds: that is the end of what was said. A stream not
+	// there yet is not waited for; the audio is transcribed instead.
+	r.mic, r.test, r.testFor = nil, nil, 0
 	r.connecting, r.early, r.earlyLen = false, nil, 0
 	r.mu.Unlock()
 	st := r.State
 	r.State = State{}
 	go func() {
-		if v != nil {
-			_, _ = v.Page().Eval("return window.stopCapture()")
-			time.Sleep(200 * time.Millisecond)
+		if m != nil {
+			m.Stop()
 		}
 		r.mu.Lock()
 		if r.wav == wav {
-			r.wav, r.soniox = nil, nil
+			r.wav, r.stream = nil, nil
 		}
 		r.mu.Unlock()
-		service.remove(session)
 		r.update(func() {
-			if v != nil {
-				v.Destroy()
+			if m != nil {
+				m.Close()
 			}
 		})
 		var path string
@@ -595,7 +693,7 @@ func (r *Controller) Stop() {
 			}
 		}
 		if test != nil {
-			text, err := r.transcribeTest(path, soniox, stt, why, st.Error)
+			text, err := r.transcribeTest(path, stream, stt, why, st.Error)
 			r.update(func() { test(text, err) })
 			return
 		}
@@ -622,12 +720,12 @@ func (r *Controller) Stop() {
 			log.Printf("recording: %v", err)
 			return
 		}
-		r.finish(rec, path, soniox, stt)
+		r.finish(rec, path, stream, stt)
 	}()
 }
 
 // transcribeTest transcribes a test recording and removes its audio.
-func (r *Controller) transcribeTest(path string, soniox *Soniox, stt store.SttSettings, why error, liveErr string) (string, error) {
+func (r *Controller) transcribeTest(path string, stream Stream, stt store.SttSettings, why error, liveErr string) (string, error) {
 	defer func() { _ = os.Remove(path) }()
 	if why != nil {
 		return "", errors.New(locales.RecErrMicWorks(why.Error()))
@@ -635,8 +733,10 @@ func (r *Controller) transcribeTest(path string, soniox *Soniox, stt store.SttSe
 	var segs []store.Segment
 	var err error
 	switch {
-	case soniox != nil:
-		segs, err = soniox.Finish()
+	case stream != nil:
+		segs, err = stream.Finish()
+	case stt.Provider == OnDevice:
+		segs, err = r.Engine.File(path, stt.Language)
 	case stt.Provider == "soniox":
 		if liveErr == "" {
 			liveErr = locales.RecErrSonioxTimeout()
@@ -675,7 +775,7 @@ func (r *Controller) Retranscribe(id string, stt store.SttSettings, online bool)
 	if r.Transcribing[id] {
 		return errors.New(locales.RecErrTranscribing())
 	}
-	if err := Usable(stt, online, r.be.SignedIn()); err != nil {
+	if err := r.Usable(stt, online); err != nil {
 		return err
 	}
 	// Soniox transcribes saved audio through the server; with only a key
@@ -683,12 +783,8 @@ func (r *Controller) Retranscribe(id string, stt store.SttSettings, online bool)
 	if stt.Provider == "soniox" && !r.be.SignedIn() {
 		return errors.New(locales.RecErrSonioxSaved())
 	}
-	model := stt.Model
-	if stt.Provider == "soniox" {
-		model = stt.SonioxModel
-	}
 	rec, err := r.st.UpdateRecording(id, func(rec *store.Recording) {
-		rec.Status, rec.Error, rec.SttProvider, rec.SttModel = "transcribing", "", stt.Provider, model
+		rec.Status, rec.Error, rec.SttProvider, rec.SttModel = "transcribing", "", stt.Provider, model(stt)
 	})
 	if err != nil {
 		return err
@@ -699,10 +795,10 @@ func (r *Controller) Retranscribe(id string, stt store.SttSettings, online bool)
 	return nil
 }
 
-func (r *Controller) finish(rec store.Recording, path string, soniox *Soniox, stt store.SttSettings) {
+func (r *Controller) finish(rec store.Recording, path string, stream Stream, stt store.SttSettings) {
 	r.update(func() {
 		r.Transcribing[rec.ID] = true
-		if soniox != nil {
+		if stream != nil {
 			r.Finishing[rec.ID] = true
 		}
 	})
@@ -710,10 +806,10 @@ func (r *Controller) finish(rec store.Recording, path string, soniox *Soniox, st
 		delete(r.Transcribing, rec.ID)
 		delete(r.Finishing, rec.ID)
 	})
-	segs, err := r.transcribe(rec, path, soniox, stt)
+	segs, err := r.transcribe(rec, path, stream, stt)
 	var lost error
-	if soniox != nil {
-		lost = soniox.Lost()
+	if stream != nil {
+		lost = stream.Lost()
 	}
 	updated, _ := r.st.UpdateRecording(rec.ID, func(x *store.Recording) {
 		if err != nil {
@@ -755,9 +851,9 @@ func (r *Controller) uploadAudio(path string, audio []byte) error {
 	return r.be.Upload(ctx, "recordings", path, bytes.NewReader(audio), "audio/wav")
 }
 
-func (r *Controller) transcribe(rec store.Recording, path string, soniox *Soniox, stt store.SttSettings) ([]store.Segment, error) {
-	if soniox != nil {
-		return soniox.Finish()
+func (r *Controller) transcribe(rec store.Recording, path string, stream Stream, stt store.SttSettings) ([]store.Segment, error) {
+	if stream != nil {
+		return stream.Finish()
 	}
 	ctx := context.Background()
 	readAudio := func() ([]byte, error) {
@@ -765,6 +861,9 @@ func (r *Controller) transcribe(rec store.Recording, path string, soniox *Soniox
 			return nil, errors.New(locales.RecErrAudioMissing())
 		}
 		return os.ReadFile(path) // #nosec G304 -- the recording's own audio file.
+	}
+	if stt.Provider == OnDevice {
+		return r.transcribeOnDevice(ctx, rec, path, stt.Language)
 	}
 	if stt.Provider == "openai-compatible" && IsLocalEndpoint(stt.BaseURL) {
 		audio, err := readAudio()
@@ -827,6 +926,27 @@ func (r *Controller) transcribe(rec store.Recording, path string, soniox *Soniox
 		segs = append(segs, seg)
 	}
 	return segs, nil
+}
+
+// transcribeOnDevice transcribes a recording with the device's engine,
+// from its file, or from a copy of its audio fetched from where it went up
+// when the file is not on this device.
+func (r *Controller) transcribeOnDevice(ctx context.Context, rec store.Recording, path, language string) ([]store.Segment, error) {
+	if r.Engine == nil {
+		return nil, errors.New(locales.RecErrOnDevice())
+	}
+	if _, err := os.Stat(path); path == "" || err != nil {
+		audio, err := r.storedAudio(ctx, rec)
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.Join(os.TempDir(), "leaflet-"+rec.ID+".wav")
+		if err := os.WriteFile(path, audio, 0o600); err != nil {
+			return nil, err
+		}
+		defer func() { _ = os.Remove(path) }()
+	}
+	return r.Engine.File(path, language)
 }
 
 // Audio returns a recording's WAV audio: on this device, or from where it

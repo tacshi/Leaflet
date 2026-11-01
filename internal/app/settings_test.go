@@ -300,34 +300,35 @@ func TestDefaultAgentPicksAProvider(t *testing.T) {
 	}
 }
 
-// The offline switch is off and can't be turned on until a provider runs
-// on this machine, and says so.
-func TestOfflineSwitchNeedsALocalProvider(t *testing.T) {
+// Offline, agents run on a provider on this machine, even with settings
+// saved while a switch turned that off.
+func TestOfflineRunsALocalProvider(t *testing.T) {
 	a := templatesApp(t)
+	if err := a.st.SetValue("settings", `{"local_when_offline": false, "agents_read_other_pages": false}`); err != nil {
+		t.Fatal(err)
+	}
+	a.settings = a.st.Settings()
+	if a.settings.AgentsReadOtherPages {
+		t.Error("saved settings did not load")
+	}
 	a.hub = agents.NewHub(a.st, a.backend, a)
-	a.settings.LocalWhenOffline = true
 	put := func(p store.Provider) {
 		t.Helper()
 		if err := a.st.PutProvider(p); err != nil {
 			t.Fatal(err)
 		}
 	}
-	put(store.Provider{ID: "cloud", Preset: "openai", Name: "OpenAI", AuthKind: "api_key", DefaultModel: "gpt-5"})
-	a.reloadAll()
-	tt := ui.NewTester(func(c *ui.Context) { a.modelsSettings(c) }, 900, 800)
-	tt.Frame()
-	if !tt.HasText(locales.SettingsLocalWhenOfflineNone()) || tt.HasText(locales.SettingsLocalWhenOfflineDesc()) {
-		t.Errorf("no hint to add a local provider in %v", tt.Texts())
-	}
-	if !a.settings.LocalWhenOffline {
-		t.Error("the setting was cleared while there was nothing to switch to")
-	}
-
+	// A ChatGPT plan runs from this device but needs the network.
+	put(store.Provider{ID: "plan", Preset: "chatgpt", Name: "ChatGPT", AuthKind: "account", DefaultModel: "gpt-6.1-sol", IsLocal: true})
 	put(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true})
 	a.reloadAll()
-	tt.Frame()
-	if !tt.HasText(locales.SettingsLocalWhenOfflineDesc()) || tt.HasText(locales.SettingsLocalWhenOfflineNone()) {
-		t.Errorf("the hint stays with a local provider in %v", tt.Texts())
+	a.settings.DefaultModel = store.ModelChoice{ProviderID: "plan"}.Encode()
+	o, err := a.hub.Resolve(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Provider.ID != "local" {
+		t.Errorf("offline runs %s, want local", o.Provider.ID)
 	}
 }
 

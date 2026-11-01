@@ -1,0 +1,77 @@
+package keychain
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+)
+
+// memStore is a Store in memory, which counts what it is asked.
+type memStore struct {
+	secrets map[string][]byte
+	reads   int
+}
+
+func (m *memStore) Get(name string) ([]byte, error) {
+	m.reads++
+	v, ok := m.secrets[name]
+	if !ok {
+		return nil, fmt.Errorf("system: %w", ErrNotFound)
+	}
+	return v, nil
+}
+
+func (m *memStore) Set(name string, value []byte) error {
+	m.secrets[name] = value
+	return nil
+}
+
+func (m *memStore) Delete(name string) error {
+	if _, ok := m.secrets[name]; !ok {
+		return ErrNotFound
+	}
+	delete(m.secrets, name)
+	return nil
+}
+
+// A secret is read from the store once a run, missing ones too, and one
+// not there is already deleted.
+func TestSecretsReadOnce(t *testing.T) {
+	m := &memStore{secrets: map[string][]byte{}}
+	Use(m)
+	t.Cleanup(func() { Use(nil) })
+	for range 2 {
+		if _, err := Get("key"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("a missing secret: %v", err)
+		}
+	}
+	if err := Set("key", []byte("v")); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := Get("key"); err != nil || string(v) != "v" {
+		t.Fatalf("got %q, %v", v, err)
+	}
+	if m.reads != 1 {
+		t.Errorf("read the store %d times", m.reads)
+	}
+	if err := Delete("key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Delete("key"); err != nil {
+		t.Errorf("deleting again: %v", err)
+	}
+	if _, err := Get("key"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("after Delete: %v", err)
+	}
+}
+
+// Without a store, nothing is kept, and nothing panics.
+func TestNoStore(t *testing.T) {
+	Use(nil)
+	if _, err := Get("key"); err == nil {
+		t.Error("read a secret from no store")
+	}
+	if err := Set("key", nil); err == nil {
+		t.Error("kept a secret in no store")
+	}
+}

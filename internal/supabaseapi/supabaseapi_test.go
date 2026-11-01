@@ -220,3 +220,32 @@ func TestSignInThroughTheWorker(t *testing.T) {
 		t.Errorf("kept %q, sent %v", c.RefreshToken(), form)
 	}
 }
+
+// Without the loopback, as on iOS, the app takes the browser's answer
+// itself: one with the sign-in's state is exchanged, a stale or cancelled
+// one is refused.
+func TestBeginAndFinishSignIn(t *testing.T) {
+	fakeAPI(t, func(w http.ResponseWriter, r *http.Request) {})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	link, state, verifier := BeginSignIn()
+	req, _ := http.NewRequestWithContext(ctx, "GET", link, nil)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if _, err := FinishSignIn(ctx, url.Values{"code": {"the-code"}, "state": {"another"}}, state, verifier); err == nil {
+		t.Error("a stale answer signed in")
+	}
+	if _, err := FinishSignIn(ctx, url.Values{"error": {"access_denied"}, "state": {state}}, state, verifier); err == nil {
+		t.Error("a cancelled sign-in signed in")
+	}
+	c, err := FinishSignIn(ctx, url.Values{"code": {"the-code"}, "state": {state}}, state, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.RefreshToken() != "refresh-1" {
+		t.Errorf("kept %q", c.RefreshToken())
+	}
+}

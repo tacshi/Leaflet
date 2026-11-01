@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -59,20 +58,6 @@ func (a *App) syncMessage(err error) string {
 		return locales.SettingsICloudNewer()
 	}
 	return err.Error()
-}
-
-// startICloud sets iCloud sync up as the settings have it. Signed in, the
-// pages sync through the server instead, and the setting is off, as
-// signing in turns it off. With iCloud Drive gone, the passes say so.
-func (a *App) startICloud() {
-	a.sync.ICloud = icloud.Folder{Root: icloud.Root(), Temp: filepath.Join(a.st.Dir, "tmp")}
-	if a.session.SignedIn && a.settings.ICloudSync {
-		a.settings.ICloudSync = false
-		a.saveSettings()
-	}
-	on := a.settings.ICloudSync
-	a.sync.SetICloud(on)
-	a.watchICloud(on)
 }
 
 // setICloud turns iCloud sync on or off from Settings, one turn at a

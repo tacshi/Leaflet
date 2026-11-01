@@ -325,7 +325,7 @@ func (s *Service) writeDevice(me string, now bool) error {
 	if err != nil {
 		return err
 	}
-	d := icloud.Device{Format: icloud.Format, ID: me, Name: DeviceName(), Platform: runtime.GOOS,
+	d := icloud.Device{Format: icloud.Format, ID: me, Name: s.deviceName(), Platform: runtime.GOOS,
 		LastActiveAt: at.UTC(), LogFrom: s.intValue("icloud.log_from")}
 	if err := s.ICloud.WriteJSON(rel, d); err != nil {
 		return err

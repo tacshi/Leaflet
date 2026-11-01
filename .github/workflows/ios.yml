@@ -1,0 +1,83 @@
+name: iOS
+
+# The iOS app links the Go core, so it is built and tested whenever the
+# core or the app changes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ios/**"
+      - "mobile/**"
+      - "internal/**"
+      - "locales/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "ios/**"
+      - "mobile/**"
+      - "internal/**"
+      - "locales/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/ios.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Keep MyGo's windowing packages out of the iOS core
+        run: ios/scripts/check-core-deps.sh
+
+  app:
+    name: Build and test
+    needs: core
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Install XcodeGen and make ios-check's tools
+        run: |
+          brew install xcodegen swiftlint osv-scanner
+          pipx install --include-deps mobsfscan==1.1.0
+      - name: make ios-check
+        run: make ios-check
+      - name: Build the Go core for the simulator
+        run: ios/scripts/build-core.sh simulator
+      - name: Make the Xcode project
+        run: make ios-project
+      # The runner's simulators change with its image, so the newest iPhone
+      # and iPad on the newest iOS runtime are picked rather than named.
+      - name: Pick an iPhone and an iPad simulator
+        run: |
+          pick() {
+            xcrun simctl list devices available -j | jq -r --arg kind "$1" '
+              [.devices | to_entries[] | select(.key | test("SimRuntime\\.iOS"))]
+              | sort_by(.key | [scan("[0-9]+") | tonumber]) | last.value
+              | map(select(.name | startswith($kind))) | last.udid'
+          }
+          echo "IPHONE=$(pick iPhone)" >> "$GITHUB_ENV"
+          echo "IPAD=$(pick iPad)" >> "$GITHUB_ENV"
+      - name: Test on an iPhone and an iPad
+        run: >-
+          xcodebuild test -project ios/Leaflet.xcodeproj -scheme Leaflet
+          -destination "id=$IPHONE" -destination "id=$IPAD"
+          CODE_SIGNING_ALLOWED=NO

@@ -1,0 +1,7 @@
+# mobsfscan, for make ios-check. Its INFO findings are what the app does
+# not do, as certificate pinning or jailbreak detection, and the HTML the
+# app draws its own formulas and diagrams with, so only warnings and
+# errors are reported.
+severity-filter:
+  - WARNING
+  - ERROR

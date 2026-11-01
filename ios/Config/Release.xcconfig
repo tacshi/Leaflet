@@ -1,0 +1,3 @@
+// Release builds, for TestFlight and the App Store (ios/scripts/archive.sh).
+
+#include "Base.xcconfig"

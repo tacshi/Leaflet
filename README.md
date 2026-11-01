@@ -12,6 +12,7 @@
   <a href="https://github.com/tacshi/Leaflet/releases/latest"><img src="https://img.shields.io/github/v/release/tacshi/Leaflet?sort=semver&label=release" alt="Latest release"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/macOS-12%2B-000000?logo=apple&logoColor=white" alt="macOS 12 or later"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/Windows-x64%20%7C%20arm64-0078D4?logo=windows&logoColor=white" alt="Windows x64 and arm64"></a>
+  <a href="#ios"><img src="https://img.shields.io/badge/iOS%20%7C%20iPadOS-26%2B%20(in%20progress)-000000?logo=apple&logoColor=white" alt="iOS and iPadOS 26 or later, in progress"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go 1.27"></a>
   <a href="#agents-outside-the-app-mcp"><img src="https://img.shields.io/badge/MCP-supported-6E56CF" alt="MCP supported"></a>
   <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-MyGo-F2545B" alt="Built with MyGo"></a>
@@ -143,6 +144,23 @@ SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key> go tool 
 To try agents without an API key, run a local model server (for example
 `ollama serve` with `qwen3:8b`) and add it in Settings › Agent providers.
 
+### iOS
+
+The iPhone and iPad app is in [`ios/`](ios), and is being built. It
+links the same Go core as the desktop app, which gomobile binds to Swift
+through the [`mobile`](mobile) package. It needs Xcode 27 and
+[XcodeGen](https://github.com/yonaskolb/XcodeGen):
+
+```bash
+make ios-core     # the Go core: ios/build/LeafletCore.xcframework
+make ios-project  # ios/Leaflet.xcodeproj, from ios/project.yml
+make ios-test     # the app's tests on an iPhone and an iPad simulator
+```
+
+Then open `ios/Leaflet.xcodeproj`. To run on a device, set your team in
+`ios/Config/Local.xcconfig`, which git ignores:
+`DEVELOPMENT_TEAM = <team ID>`.
+
 ### Data
 
 Leaflet keeps its database in the app's data folder, such as
@@ -216,6 +234,7 @@ to publish them anyway.
 ```bash
 go test ./...                                # model, merge, store, sync, editor, agents
 make check                                   # gofmt, golangci-lint, govulncheck and gosec
+make ios-check                               # swift-format, SwiftLint, osv-scanner and mobsfscan
 make clean                                   # remove build/ and the binary go build leaves
 cd supabase/functions && deno test _shared/  # the Edge Functions' shared code
 ```
@@ -238,6 +257,7 @@ rules.
 | Path | Contents |
 | --- | --- |
 | `main.go` | Entry point: the app, and `leaflet mcp` |
+| `mobile` | The Go core's API for the iOS app, bound to Swift with gomobile |
 | `internal/core` | Opening Leaflet's parts and wiring them together, for the desktop and iOS apps alike, and signing in and out |
 | `internal/live` | A page open in the app: saving what is typed, and merging what arrives meanwhile from sync and agents |
 | `internal/app` | Window, shell, sidebar, page screen, panels, dialogs and settings |
@@ -259,6 +279,7 @@ rules.
 | `supabase` | Migrations (tables, row-level security, RPCs, Vault) and Edge Functions |
 | `worker` | The sign-in Worker on Cloudflare: the OAuth redirect page and the token exchange that holds the client secret |
 | `docs` | The protocol, user stories and the icon's sources |
+| `ios` | The iPhone and iPad app: SwiftUI and UIKit, its XcodeGen project and build scripts |
 
 Microphone capture runs in a small page on the app's own `leaflet-rec://`
 scheme, a secure context the system's web view lets use the microphone, so

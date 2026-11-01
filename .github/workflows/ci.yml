@@ -1,9 +1,13 @@
 name: CI
 
+# The iOS app's own sources are checked by ios.yml; the Go core it links
+# is checked here as well.
 on:
   push:
     branches: [main]
+    paths-ignore: ["ios/**"]
   pull_request:
+    paths-ignore: ["ios/**"]
 
 permissions:
   contents: read

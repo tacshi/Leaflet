@@ -13,3 +13,13 @@ supabase/.temp/
 
 # Wrangler local state
 worker/.wrangler/
+
+# The iOS app: the framework make ios-core builds, the project XcodeGen
+# makes from ios/project.yml, and Xcode's own state
+/ios/build/
+/ios/*.xcodeproj/
+/ios/Config/Local.xcconfig
+xcuserdata/
+*.xcuserstate
+DerivedData/
+/ios/Leaflet/Generated/

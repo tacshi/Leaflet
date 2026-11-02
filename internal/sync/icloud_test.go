@@ -125,6 +125,33 @@ func TestICloudJoinsOneSpace(t *testing.T) {
 	}
 }
 
+// Every new device makes starter pages: those of the device that starts
+// the folder's library are the library's, and a device joining it leaves
+// its own out, while its other pages go in.
+func TestICloudJoiningLeavesStarterPagesOut(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	starter := func(d *cloudDevice) store.Page {
+		p := d.page("Welcome")
+		if err := d.st.MarkStarterPages([]string{p.ID}); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	wa, wb := starter(a), starter(b)
+	pb := b.page("From B")
+	a.sync()
+	syncAll(b, a)
+	for _, d := range []*cloudDevice{a, b} {
+		if d.title(wa.ID) != "Welcome" || d.title(pb.ID) != "From B" {
+			t.Errorf("titles %q %q", d.title(wa.ID), d.title(pb.ID))
+		}
+		if _, err := d.st.Page(wb.ID); !store.IsNotFound(err) {
+			t.Errorf("the joining device's starter page is here: %v", err)
+		}
+	}
+}
+
 // A page's tags go to the other devices with its row.
 func TestICloudCarriesTags(t *testing.T) {
 	root := cloudRoot(t)

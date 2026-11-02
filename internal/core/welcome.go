@@ -27,7 +27,8 @@ var welcomeImage []byte
 // subpage is also kept as a template. The guide and the meeting carry a tag
 // each, so tags show from the start: in their bylines, the sidebar's Tags
 // tab and search. They are written in the language the app shows when they
-// are made.
+// are made, and are the device's starter pages (store.MarkStarterPages)
+// until it joins a library.
 func (c *Core) createWelcome() error {
 	if _, ok := c.Store.Value("welcome.created"); ok {
 		return nil
@@ -61,10 +62,16 @@ func (c *Core) createWelcome() error {
 	if _, err := c.Store.AddComment(p.ID, commentsID, m.WelcomeComment(), "", "", "agent", "Leaflet"); err != nil {
 		return err
 	}
-	if _, err := c.Store.CreatePage(store.NewPageOptions{Title: m.WelcomeSubTitle(), Template: true, Tags: meetings, Content: doc.FromBlocks(welcomeMeeting(m))}); err != nil {
+	tmpl, err := c.Store.CreatePage(store.NewPageOptions{Title: m.WelcomeSubTitle(), Template: true, Tags: meetings, Content: doc.FromBlocks(welcomeMeeting(m))})
+	if err != nil {
 		return err
 	}
 	if err := c.Store.SetValue("welcome.page", p.ID); err != nil {
+		return err
+	}
+	// A device that goes on to join a library other devices made leaves
+	// them out of it, which has its own.
+	if err := c.Store.MarkStarterPages([]string{p.ID, sub.ID, tmpl.ID}); err != nil {
 		return err
 	}
 	return c.Store.SetValue("welcome.created", "true")

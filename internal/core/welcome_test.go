@@ -97,6 +97,16 @@ func TestWelcomePage(t *testing.T) {
 	if pages, _ := st.Pages(); len(pages) != 2 {
 		t.Errorf("%d pages after a second start", len(pages))
 	}
+	// They are this device's starter pages: joining a library other
+	// devices made, which has its own, they all go, untouched.
+	if err := st.SettleStarterPages(true); err != nil {
+		t.Fatal(err)
+	}
+	pages, _ = st.Pages()
+	templates, _ = st.Templates()
+	if len(pages)+len(templates) != 0 {
+		t.Errorf("%d pages and %d templates stay after joining a library", len(pages), len(templates))
+	}
 }
 
 // TestWelcomeTranslated checks the guide and its subpage say every text in

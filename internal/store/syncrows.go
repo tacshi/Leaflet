@@ -332,61 +332,8 @@ func (s *Store) RemoveSharedPages(rootID string) ([]string, error) {
 		if err := errors.Join(rows.Err(), rows.Close()); err != nil || len(ids) == 0 {
 			return err
 		}
-		in := strings.TrimSuffix(strings.Repeat("?, ", len(ids)), ", ")
-		args := make([]any, len(ids))
-		for i, id := range ids {
-			args[i] = id
-		}
-		rows, err = tx.Query(`SELECT local_path FROM files WHERE local_path IS NOT NULL AND page_id IN (`+in+`)
-			UNION ALL SELECT local_path FROM recordings WHERE local_path IS NOT NULL AND page_id IN (`+in+`)`, append(args, args...)...) // #nosec G202 -- placeholders only.
-		if err != nil {
-			return err
-		}
-		for rows.Next() {
-			var path string
-			if err := rows.Scan(&path); err != nil {
-				_ = rows.Close()
-				return err
-			}
-			copies = append(copies, s.Path(path))
-		}
-		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
-			return err
-		}
-		// The files' entries are dropped by the files: ones queued before
-		// they went with their page's have no page_id.
-		files, err := filesIn(tx, s.Dir, `page_id IN (`+in+`)`, args...)
-		if err != nil {
-			return err
-		}
-		for _, f := range files {
-			if _, err := tx.Exec(`DELETE FROM outbox WHERE (entity = 'files' AND entity_id = ?)
-				OR (entity IN ('storage', 'storage_delete') AND entity_id = ?)`, f.ID, "files/"+f.ID); err != nil {
-				return err
-			}
-		}
-		for _, q := range []string{
-			`DELETE FROM pages WHERE id IN (` + in + `)`, `DELETE FROM page_contents WHERE page_id IN (` + in + `)`,
-			`DELETE FROM comments WHERE page_id IN (` + in + `)`, `DELETE FROM recordings WHERE page_id IN (` + in + `)`,
-			`DELETE FROM files WHERE page_id IN (` + in + `)`, `DELETE FROM ai_jobs WHERE page_id IN (` + in + `)`,
-			`DELETE FROM page_history WHERE page_id IN (` + in + `)`, `DELETE FROM conflicts WHERE page_id IN (` + in + `)`,
-			`DELETE FROM page_members WHERE page_id IN (` + in + `)`, `DELETE FROM peer_contents WHERE page_id IN (` + in + `)`,
-			`DELETE FROM outbox WHERE page_id IN (` + in + `)`,
-		} {
-			if _, err := tx.Exec(q, args...); err != nil { // #nosec G202 -- placeholders only.
-				return err
-			}
-		}
-		// The page's own rows may be queued without its page_id.
-		if _, err := tx.Exec(`DELETE FROM outbox WHERE entity IN ('pages', 'page_content', 'page_history') AND entity_id IN (`+in+`)`, args...); err != nil { // #nosec G202 -- placeholders only.
-			return err
-		}
-		for _, id := range ids {
-			if _, err := tx.Exec(`DELETE FROM key_values WHERE key IN (?, ?)`, "chat."+id, "chat.past."+id); err != nil {
-				return err
-			}
-		}
-		return nil
+		copies, err = s.removePages(tx, ids)
+		return err
 	})
 	if err != nil || len(ids) == 0 {
 		return nil, err
@@ -396,6 +343,70 @@ func (s *Store) RemoveSharedPages(rootID string) ([]string, error) {
 	}
 	s.Notify("*", "")
 	return ids, nil
+}
+
+// removePages removes pages from this device with everything kept of
+// them: content, history, comments, recordings and files, members,
+// conflicts, chats, and changes waiting to go up. It returns the paths of
+// the files' and recordings' copies here, to remove once the transaction
+// is done.
+func (s *Store) removePages(tx *sql.Tx, ids []string) ([]string, error) {
+	in := strings.TrimSuffix(strings.Repeat("?, ", len(ids)), ", ")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := tx.Query(`SELECT local_path FROM files WHERE local_path IS NOT NULL AND page_id IN (`+in+`)
+		UNION ALL SELECT local_path FROM recordings WHERE local_path IS NOT NULL AND page_id IN (`+in+`)`, append(args, args...)...) // #nosec G202 -- placeholders only.
+	if err != nil {
+		return nil, err
+	}
+	var copies []string
+	for rows.Next() {
+		var path string
+		if err := rows.Scan(&path); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		copies = append(copies, s.Path(path))
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
+	// The files' entries are dropped by the files: ones queued before
+	// they went with their page's have no page_id.
+	files, err := filesIn(tx, s.Dir, `page_id IN (`+in+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range files {
+		if _, err := tx.Exec(`DELETE FROM outbox WHERE (entity = 'files' AND entity_id = ?)
+			OR (entity IN ('storage', 'storage_delete') AND entity_id = ?)`, f.ID, "files/"+f.ID); err != nil {
+			return nil, err
+		}
+	}
+	for _, q := range []string{
+		`DELETE FROM pages WHERE id IN (` + in + `)`, `DELETE FROM page_contents WHERE page_id IN (` + in + `)`,
+		`DELETE FROM comments WHERE page_id IN (` + in + `)`, `DELETE FROM recordings WHERE page_id IN (` + in + `)`,
+		`DELETE FROM files WHERE page_id IN (` + in + `)`, `DELETE FROM ai_jobs WHERE page_id IN (` + in + `)`,
+		`DELETE FROM page_history WHERE page_id IN (` + in + `)`, `DELETE FROM conflicts WHERE page_id IN (` + in + `)`,
+		`DELETE FROM page_members WHERE page_id IN (` + in + `)`, `DELETE FROM peer_contents WHERE page_id IN (` + in + `)`,
+		`DELETE FROM outbox WHERE page_id IN (` + in + `)`,
+	} {
+		if _, err := tx.Exec(q, args...); err != nil { // #nosec G202 -- placeholders only.
+			return nil, err
+		}
+	}
+	// The page's own rows may be queued without its page_id.
+	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity IN ('pages', 'page_content', 'page_history') AND entity_id IN (`+in+`)`, args...); err != nil { // #nosec G202 -- placeholders only.
+		return nil, err
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(`DELETE FROM key_values WHERE key IN (?, ?)`, "chat."+id, "chat.past."+id); err != nil {
+			return nil, err
+		}
+	}
+	return copies, nil
 }
 
 // removeLocalCopy removes a file or recording's copy here, only from the

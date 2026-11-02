@@ -145,10 +145,12 @@ func (s *Service) cloudPass(ctx context.Context) error {
 func (s *Service) joinSpace(ctx context.Context, joined string) error {
 	me := s.st.DeviceID()
 	space, losers, err := s.folder().ReadSpace()
+	made := false
 	if errors.Is(err, fs.ErrNotExist) {
 		if joined != "" {
 			return icloud.ErrOtherLibrary
 		}
+		made = true
 		space = icloud.Space{Format: icloud.Format, SpaceID: s.st.Session().SpaceID, CreatedAt: cloudNow().UTC(), CreatedByDevice: me}
 		if err := s.folder().WriteJSON(icloud.SpacePath, space); err != nil {
 			return err
@@ -176,6 +178,11 @@ func (s *Service) joinSpace(ctx context.Context, joined string) error {
 	}
 	if joined != "" && !lost {
 		return icloud.ErrOtherLibrary
+	}
+	// A library another device made has starter pages of its own: this
+	// device's stay out of it, unless the user took them up.
+	if err := s.st.SettleStarterPages(!made && space.CreatedByDevice != me); err != nil {
+		return err
 	}
 	local := s.st.Session().SpaceID
 	if local != space.SpaceID {

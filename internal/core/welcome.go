@@ -187,7 +187,7 @@ func welcomeBlocks(m locales.Messages, image store.File, subID string) ([]*doc.N
 	text("paragraph", m.WelcomeEmbedsIntro())
 	embed(m.WelcomeSolarTitle(), solarSystemEmbed(m), 380)
 	embed(m.WelcomeSavingsTitle(), savingsEmbed(m), 270)
-	embed(m.WelcomePianoTitle(), pianoEmbed(m), 250)
+	embed(m.WelcomePianoTitle(), pianoEmbed(m), 220)
 
 	heading(m.WelcomeTodosHeading())
 	text("todo_list", m.WelcomeDateTodo())
@@ -500,7 +500,8 @@ update();
 </script></body></html>`
 
 // pianoEmbed is an octave and a half to play with the pointer or the
-// keyboard, through the Web Audio API, in m's language.
+// keyboard, through the Web Audio API, in m's language. The keys shrink to
+// a narrow frame, as a phone's, and sit in the middle of what room is left.
 func pianoEmbed(m locales.Messages) string {
 	return fillEmbed(pianoPage, map[string]string{"hint": m.WelcomePianoHint()})
 }
@@ -508,7 +509,7 @@ func pianoEmbed(m locales.Messages) string {
 const pianoPage = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
 html,body{margin:0;height:100%;background:#f5f6f8;font:12px -apple-system,system-ui,sans-serif;user-select:none;-webkit-user-select:none}
-.wrap{display:flex;flex-direction:column;align-items:center;gap:12px;padding:16px;outline:none}
+.wrap{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:16px;min-height:100%;box-sizing:border-box;outline:none}
 .kb{position:relative;display:flex}
 .w{width:44px;height:160px;background:#fff;border:1px solid #c9ccd4;border-radius:0 0 7px 7px;margin-right:-1px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:9px;box-sizing:border-box;color:#9aa1ad;cursor:pointer;box-shadow:inset 0 -4px 0 #eceef2}
 .b{position:absolute;top:0;width:28px;height:100px;background:#1b1e24;border-radius:0 0 5px 5px;z-index:2;cursor:pointer;color:#8a909b;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;box-sizing:border-box;font-size:10px}

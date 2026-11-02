@@ -241,10 +241,7 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 				markdown.View(c, m.Text, &a.md).FontSize(13.5)
 				ui.Spinner(c).Size(11, 11)
 			case m.Pending:
-				ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-					ui.Spinner(c).Size(13, 13)
-					ui.Text(c, m.Text).FontSize(13).TextColor(pal.TextMuted)
-				})
+				shimmer(c, m.Text, 13)
 			case m.Error:
 				ui.Text(c, m.Text).FontSize(13).TextColor(pal.DangerText).Selectable()
 			default:

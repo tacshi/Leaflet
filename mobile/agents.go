@@ -49,6 +49,9 @@ type agentMessage struct {
 	Pending   bool   `json:"pending"`
 	Error     bool   `json:"error"`
 	AgentName string `json:"agent_name,omitempty"`
+	// Streamed is a pending reply whose text is the answer as far as it
+	// has come, not what the run is doing.
+	Streamed bool `json:"streamed"`
 }
 
 type agentRun struct {
@@ -91,6 +94,7 @@ func (c *Core) AgentState(pageID string) (_ string, err error) {
 			for _, m := range s.Messages {
 				out.Messages = append(out.Messages, agentMessage{
 					Mine: m.Mine, Text: m.Text, RunID: m.RunID, Pending: m.Pending, Error: m.Error, AgentName: m.AgentName,
+					Streamed: m.Streamed,
 				})
 			}
 			for _, r := range s.Runs {

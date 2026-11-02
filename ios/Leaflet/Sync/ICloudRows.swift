@@ -2,34 +2,33 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
-/// ICloudSection is iCloud sync in Settings › Sync and storage: the
-/// switch, and the folder in iCloud Drive pages sync through.
-struct ICloudSection: View {
+/// ICloudRows are iCloud sync's rows in Settings › Sync and storage, first
+/// as on the desktop: the switch, and the folder in iCloud Drive pages sync
+/// through.
+struct ICloudRows: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
         let sync = app.iCloud
         let on = app.status?.iCloudOn ?? false
         let signedIn = app.status?.signedIn ?? false
-        Section {
-            Toggle(
-                L.settingsICloud,
-                isOn: Binding(
-                    get: { sync.turning ?? on },
-                    set: { value in
-                        Task {
-                            await sync.set(value)
-                            await app.refreshStatus()
-                        }
-                    })
-            )
-            .disabled(signedIn || sync.turning != nil)
-            LabeledContent(LI.iCloudFolder, value: sync.folderName ?? LI.iCloudNoFolder)
-            Button(LI.iCloudChooseFolder) { sync.choose() }
-                .disabled(signedIn || sync.turning != nil)
-        } footer: {
-            Text(footer(on: on, signedIn: signedIn))
+        Toggle(
+            isOn: Binding(
+                get: { sync.turning ?? on },
+                set: { value in
+                    Task {
+                        await sync.set(value)
+                        await app.refreshStatus()
+                    }
+                })
+        ) {
+            Text(L.settingsICloud)
+            Text(desc(on: on, signedIn: signedIn))
         }
+        .disabled(signedIn || sync.turning != nil)
+        LabeledContent(LI.iCloudFolder, value: sync.folderName ?? LI.iCloudNoFolder)
+        Button(LI.iCloudChooseFolder) { sync.choose() }
+            .disabled(signedIn || sync.turning != nil)
     }
 
     /// picker picks the folder, as Choose Folder asks; Settings shows it,
@@ -44,7 +43,9 @@ struct ICloudSection: View {
         .ignoresSafeArea()
     }
 
-    private func footer(on: Bool, signedIn: Bool) -> String {
+    /// desc is what the switch says under its name: why it can't be turned
+    /// on, what went wrong, or what it does.
+    private func desc(on: Bool, signedIn: Bool) -> String {
         let sync = app.iCloud
         if signedIn { return L.settingsICloudSupabaseOn }
         if let failure = sync.failure { return failure }

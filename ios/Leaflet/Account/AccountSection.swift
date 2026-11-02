@@ -2,8 +2,7 @@ import SwiftUI
 
 /// AccountSection is Settings › Account, as the desktop's: the name shown
 /// on the user's comments and edits, the account and the Supabase project
-/// Leaflet syncs through, with Sign Out, or signing in with Supabase; then,
-/// signed in, the devices signed in to the account.
+/// Leaflet syncs through, with Sign Out, or signing in with Supabase.
 struct AccountSection: View {
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
@@ -67,10 +66,6 @@ struct AccountSection: View {
         } footer: {
             if let failure { Text(failure).foregroundStyle(palette.dangerText) }
         }
-
-        if let account, account.signedIn {
-            DevicesSection()
-        }
     }
 
     /// saveName keeps the name typed; the field then shows the account's
@@ -118,9 +113,10 @@ struct AccountSection: View {
     }
 }
 
-/// DevicesSection is Account › Devices: the devices signed in to the
-/// account, the one active last first, each but this one to sign out.
-private struct DevicesSection: View {
+/// DevicesSection is Settings › Devices, above Your data: the devices
+/// signed in to the account, the one active last first, each but this one
+/// to sign out.
+struct DevicesSection: View {
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
     @State private var devices: [Device]?

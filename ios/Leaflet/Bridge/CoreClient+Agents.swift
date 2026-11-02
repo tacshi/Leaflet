@@ -11,9 +11,12 @@ struct AgentState: Codable, Sendable {
         var pending: Bool
         var error: Bool
         var agentName: String?
+        /// streamed is a pending reply whose text is the answer as far as
+        /// it has come, not what the run is doing.
+        var streamed: Bool
 
         enum CodingKeys: String, CodingKey {
-            case mine, text, pending, error
+            case mine, text, pending, error, streamed
             case runID = "run_id"
             case agentName = "agent_name"
         }

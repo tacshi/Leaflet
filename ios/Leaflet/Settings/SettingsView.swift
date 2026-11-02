@@ -71,15 +71,15 @@ struct SettingsView: View {
 
                     SpeechSection()
 
-                    if app.syncs {
-                        SyncSection()
-                    }
+                    SyncSection()
 
                     if !app.conflicts.isEmpty {
                         ConflictsSection()
                     }
 
-                    ICloudSection()
+                    if app.status?.signedIn ?? false {
+                        DevicesSection()
+                    }
 
                     DataSection(signedIn: app.status?.signedIn ?? false) {
                         await app.reload()
@@ -110,7 +110,7 @@ struct SettingsView: View {
             } onCancellation: {
                 prompt.moved(nil)
             }
-            .sheet(isPresented: $iCloud.picking) { ICloudSection.picker(app) }
+            .sheet(isPresented: $iCloud.picking) { ICloudRows.picker(app) }
             .navigationTitle(L.settingsTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $editingProvider) { draft in
@@ -183,35 +183,39 @@ final class SettingsPrompt {
     }
 }
 
-/// SyncSection is Settings › Sync and storage while pages sync: how sync
-/// stands, and working offline, as on the desktop.
+/// SyncSection is Settings › Sync and storage, in one section as on the
+/// desktop: iCloud sync, then while pages sync, how sync stands, and
+/// working offline.
 private struct SyncSection: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
         @Bindable var app = app
         Section(L.settingsSectionOffline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                Text(status).font(.footnote).foregroundStyle(.secondary)
-            }
-            .accessibilityElement(children: .combine)
-            Button(L.settingsSyncNow) { Task { await app.syncNow() } }
-                .disabled(app.syncing || app.workOffline)
-            Toggle(isOn: $app.workOffline) {
-                Text(L.settingsWorkOffline)
-                Text(L.settingsWorkOfflineDesc)
-            }
-            .onChange(of: app.workOffline) { _, on in
-                app.save(["work_offline": on])
-                if !on { Task { await app.client?.kick() } }
-            }
-            Toggle(isOn: $app.allPagesOffline) {
-                Text(L.settingsAllPagesOffline)
-                Text(L.settingsAllPagesOfflineDesc)
-            }
-            .onChange(of: app.allPagesOffline) { _, on in
-                app.save(["all_pages_offline": on])
+            ICloudRows()
+            if app.syncs {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                    Text(status).font(.footnote).foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                Button(L.settingsSyncNow) { Task { await app.syncNow() } }
+                    .disabled(app.syncing || app.workOffline)
+                Toggle(isOn: $app.workOffline) {
+                    Text(L.settingsWorkOffline)
+                    Text(L.settingsWorkOfflineDesc)
+                }
+                .onChange(of: app.workOffline) { _, on in
+                    app.save(["work_offline": on])
+                    if !on { Task { await app.client?.kick() } }
+                }
+                Toggle(isOn: $app.allPagesOffline) {
+                    Text(L.settingsAllPagesOffline)
+                    Text(L.settingsAllPagesOfflineDesc)
+                }
+                .onChange(of: app.allPagesOffline) { _, on in
+                    app.save(["all_pages_offline": on])
+                }
             }
         }
     }
@@ -332,6 +336,9 @@ struct FieldRow<Field: View>: View {
             field
                 .multilineTextAlignment(.trailing)
                 .frame(minWidth: minWidth, maxWidth: maxWidth)
+                // At the row's end, as wide as the row is: narrower than
+                // the room left, it would stop short of it.
+                .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 }

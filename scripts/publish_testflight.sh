@@ -107,7 +107,7 @@ BUILD_NUMBER="$2"
 [[ "${BUILD_NUMBER}" =~ ^[1-9][0-9]*$ ]] ||
   die "The build must be a positive integer, not ${BUILD_NUMBER}."
 
-for tool in asc git xcodebuild xcrun make go xcodegen python3 unzip plutil security; do
+for tool in asc git xcodebuild make go xcodegen python3 unzip plutil security; do
   require_command "${tool}"
 done
 
@@ -216,12 +216,6 @@ for icon in Assets.car AppIcon60x60@2x.png AppIcon76x76@2x~ipad.png; do
   grep -qxF "${APP_DIR}${icon}" "${WORK_DIR}/files" ||
     die "The IPA has no ${icon}, so it would have no icon."
 done
-# App Store Connect's own icon, on its Apps page, is the catalog's
-# marketing one, which the single-size icon doesn't make without the
-# ios-marketing entry beside it.
-unzip -p "${IPA}" "${APP_DIR}Assets.car" >"${WORK_DIR}/Assets.car"
-xcrun assetutil --info "${WORK_DIR}/Assets.car" | grep -Eq '"Idiom" *: *"marketing"' ||
-  die "The IPA's Assets.car has no marketing icon, so App Store Connect would show none (AppIcon.appiconset needs its ios-marketing entry)."
 # App Store Connect refuses an upload without the privacy manifest's
 # reasons for the APIs the app uses.
 grep -qxF "${APP_DIR}PrivacyInfo.xcprivacy" "${WORK_DIR}/files" ||

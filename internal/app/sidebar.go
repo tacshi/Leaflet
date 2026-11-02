@@ -673,11 +673,12 @@ func (a *App) sidebarFooter(c *ui.Context) {
 		}
 		tools(c, func() {
 			// Check for updates; a spinner while the check or the download
-			// is under way, then the update waiting for a restart.
+			// is under way, then the same icon in the accent to restart into
+			// the update installed.
 			switch {
 			case a.updateReady != "":
 				tip := locales.SidebarRestartToUpdate(a.updateReady)
-				if iconButton(c, "update", "rotate-cw", tip).TextColor(pal.Accent).Clicked() {
+				if iconButton(c, "update", "circle-fading-arrow-up", tip).TextColor(pal.Accent).Clicked() {
 					a.restartToUpdate()
 				}
 			case a.updateBusy != "":

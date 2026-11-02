@@ -125,6 +125,33 @@ func TestICloudJoinsOneSpace(t *testing.T) {
 	}
 }
 
+// Every new device makes starter pages: those of the device that starts
+// the folder's library are the library's, and a device joining it leaves
+// its own out, while its other pages go in.
+func TestICloudJoiningLeavesStarterPagesOut(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	starter := func(d *cloudDevice) store.Page {
+		p := d.page("Welcome")
+		if err := d.st.MarkStarterPages([]string{p.ID}); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	wa, wb := starter(a), starter(b)
+	pb := b.page("From B")
+	a.sync()
+	syncAll(b, a)
+	for _, d := range []*cloudDevice{a, b} {
+		if d.title(wa.ID) != "Welcome" || d.title(pb.ID) != "From B" {
+			t.Errorf("titles %q %q", d.title(wa.ID), d.title(pb.ID))
+		}
+		if _, err := d.st.Page(wb.ID); !store.IsNotFound(err) {
+			t.Errorf("the joining device's starter page is here: %v", err)
+		}
+	}
+}
+
 // A page's tags go to the other devices with its row.
 func TestICloudCarriesTags(t *testing.T) {
 	root := cloudRoot(t)
@@ -353,6 +380,49 @@ func TestICloudWaitsForFilesNotDownloaded(t *testing.T) {
 	b.sync()
 	if b.title(p.ID) != "Later" {
 		t.Errorf("title %q once downloaded", b.title(p.ID))
+	}
+}
+
+// iCloud on iOS downloads only the files asked for. A device catching up
+// on another's log asks for every batch it has not downloaded in one pass,
+// and takes them all on the next, not one batch a pass.
+func TestICloudAsksForEveryBatchNotDownloaded(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	var pages []store.Page
+	for i := range 5 {
+		pages = append(pages, a.page("Page "+strconv.Itoa(i)))
+		a.sync()
+	}
+	me := a.st.DeviceID()
+	seqs, _, err := a.svc.ICloud.Batches(me)
+	if err != nil || len(seqs) < len(pages) {
+		t.Fatalf("A wrote batches %v: %v", seqs, err)
+	}
+	hidden := func(path string) string {
+		return filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+".icloud")
+	}
+	for _, seq := range seqs {
+		rel, _ := icloud.BatchPath(me, seq)
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.Rename(path, hidden(path)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var asked []string
+	was := icloud.StartDownload
+	icloud.StartDownload = func(path string) error { asked = append(asked, path); return nil }
+	t.Cleanup(func() { icloud.StartDownload = was })
+	b.sync()
+	// iCloud brings what B asked for before its next pass.
+	for _, path := range asked {
+		_ = os.Rename(hidden(path), path)
+	}
+	b.sync()
+	for _, p := range pages {
+		if b.title(p.ID) != p.Title {
+			t.Errorf("B has %q of %q after two passes", b.title(p.ID), p.Title)
+		}
 	}
 }
 

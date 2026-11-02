@@ -1105,6 +1105,44 @@ func TestSignInUploadsEarlierRecordings(t *testing.T) {
 // queued: a pass that could not queue it all leaves the space to adopt
 // again, and what was not queued is queued before the next pass. What
 // is made meanwhile goes into the account's space.
+// Signing in to an account whose library other devices made leaves this
+// device's starter pages out of it; signing in to a new one keeps them as
+// its own. The device's other pages go up either way.
+func TestSignInSettlesStarterPages(t *testing.T) {
+	for _, existing := range []bool{true, false} {
+		st := openStore(t)
+		guide, err := st.CreatePage(store.NewPageOptions{Title: "Welcome"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.MarkStarterPages([]string{guide.ID}); err != nil {
+			t.Fatal(err)
+		}
+		mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodGet && !existing {
+				_ = json.NewEncoder(w).Encode([]map[string]any{})
+				return
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "00000000-0000-0000-0000-0000000000aa", "name": "My space"}})
+		}))
+		svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+		if err := svc.resolveSpace(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		hs.Close()
+		if _, err := st.Page(guide.ID); store.IsNotFound(err) != existing {
+			t.Errorf("account with a library %v: the starter page went %v", existing, store.IsNotFound(err))
+		}
+		if !st.HasPending("pages", mine.ID) {
+			t.Errorf("account with a library %v: the device's own page does not go up", existing)
+		}
+	}
+}
+
 func TestSignInAdoptsOnceAllIsQueued(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})

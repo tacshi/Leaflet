@@ -22,7 +22,8 @@ type todoRow struct {
 }
 
 // todoRows sorts open to-dos into sections: overdue, today's, the coming
-// ones, each by date, and those with no date but an owner.
+// ones, each by date, and those with no date but an owner. A section
+// alone has no header, which would only say what the to-dos' dates do.
 func todoRows(todos []store.PageTodo, now time.Time) []todoRow {
 	sections := map[string][]store.PageTodo{}
 	for _, t := range todos {
@@ -45,7 +46,9 @@ func todoRows(todos []store.PageTodo, now time.Time) []todoRow {
 			continue
 		}
 		sort.SliceStable(ts, func(i, j int) bool { return ts[i].Due.Before(ts[j].Due) })
-		out = append(out, todoRow{header: s})
+		if len(sections) > 1 {
+			out = append(out, todoRow{header: s})
+		}
 		for _, t := range ts {
 			out = append(out, todoRow{todo: t})
 		}

@@ -999,3 +999,19 @@ func TestWriteMarkdownBlocksLimit(t *testing.T) {
 		t.Error(out["error"])
 	}
 }
+
+func TestSummaryForArticle(t *testing.T) {
+	for _, c := range []struct {
+		node *doc.Node
+		want string
+	}{
+		{&doc.Node{Type: "embed", Data: map[string]any{"title": "Calculator"}}, "Inserted an interactive embed · Calculator"},
+		{&doc.Node{Type: "image"}, "Inserted an image"},
+		{&doc.Node{Type: "diagram"}, "Inserted a diagram"},
+		{&doc.Node{Type: "paragraph"}, "Inserted a block"},
+	} {
+		if got := summaryFor("Inserted", []*doc.Node{c.node}); got != c.want {
+			t.Errorf("summaryFor(%s) = %q, want %q", c.node.Type, got, c.want)
+		}
+	}
+}

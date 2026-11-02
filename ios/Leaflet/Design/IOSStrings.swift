@@ -35,6 +35,16 @@ enum LI {
             localized: "Hide Subpages", bundle: L.bundle,
             comment: "The sidebar: hide the pages inside this one.")
     }
+    static var showTaggedPages: String {
+        String(
+            localized: "Show Tagged Pages", bundle: L.bundle,
+            comment: "The sidebar's Tags tab: show the pages with this tag.")
+    }
+    static var hideTaggedPages: String {
+        String(
+            localized: "Hide Tagged Pages", bundle: L.bundle,
+            comment: "The sidebar's Tags tab: hide the pages with this tag.")
+    }
     static var coreFailed: String {
         String(
             localized: "Leaflet couldn't open its data",

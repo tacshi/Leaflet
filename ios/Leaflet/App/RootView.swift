@@ -9,6 +9,9 @@ struct RootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var phase
+    /// sizeClass is the window's: compact, the columns stack. (A column's
+    /// own is compact on iPad too.)
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @SceneStorage("page") private var savedPage: String?
     @SceneStorage("inspector.shown") private var savedInspector = false
     @State private var scene = SceneModel()
@@ -28,7 +31,7 @@ struct RootView: View {
                     // Each column makes room for the keyboard on its own: in
                     // neither does a band of background stand behind the
                     // keyboard's floating shortcuts bar.
-                    SidebarView()
+                    SidebarView(stacked: sizeClass == .compact)
                         .ignoresSafeArea(.keyboard, edges: .bottom)
                         .toolbar {
                             ToolbarItem(placement: .topBarLeading) {
@@ -146,6 +149,8 @@ struct RootView: View {
             // read: the last page too.
             if app.libraryLoaded { scene.keep(Set(ids)) }
         }
+        // The page the window still holds closes with it.
+        .onDisappear { scene.closeHeld() }
         .onChange(of: phase) { _, phase in
             switch phase {
             case .active:

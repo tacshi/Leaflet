@@ -187,11 +187,17 @@ struct PageScreen: View {
             let m = PageModel(id: pageID, app: app)
             model = m
             await m.open()
+            // The page stays open while the window shows it. SwiftUI ends
+            // this task as the view goes, but also, on iPhone, as it moves
+            // the page into the navigation stack, where it stays shown: the
+            // window closes it once it has moved on.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(3600))
+            }
+            scene.release(m)
         }
         .onDisappear {
             saveTitle()
-            scene.letGo(model)
-            if let m = model { Task { await m.close() } }
         }
         .onChange(of: row?.title) { _, new in
             if !titleFocused, let new { title = new }

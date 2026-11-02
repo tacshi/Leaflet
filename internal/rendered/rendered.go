@@ -253,7 +253,8 @@ func VideoPage(v doc.Video) string {
 	if v.Provider == "file" {
 		player = `<video src="` + html.EscapeString(v.PlayerURL()) + `" controls autoplay playsinline></video>`
 	}
-	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="` + VideoCSP + `">` +
+	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
+		`<meta http-equiv="Content-Security-Policy" content="` + VideoCSP + `">` +
 		`<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe,video{border:0;width:100%;height:100%;display:block}</style></head><body>` +
 		player + `</body></html>`
 }
@@ -346,7 +347,10 @@ func EmbedPage(id, src, bg string, dark, wheel bool) string {
 		// without telling a frame that could scroll, so it never forwards.
 		script += `addEventListener("wheel", function () {}, {passive: true});`
 	}
-	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="` + EmbedCSP + `; frame-src about:">` +
+	// The viewport has a phone's web view lay the page out at its own
+	// width, not 980 points wide and shrunk to it.
+	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
+		`<meta http-equiv="Content-Security-Policy" content="` + EmbedCSP + `; frame-src about:">` +
 		`<meta name="color-scheme" content="` + scheme + `">` +
 		`<style>html,body{margin:0;height:100%;background:` + bg + `}iframe{border:0;width:100%;height:100%;display:block;background:` + bg + `}</style></head><body>` +
 		`<iframe id="f" sandbox="allow-scripts" srcdoc="` + html.EscapeString(EmbedFrame(src, scheme, wheel)) + `"></iframe>` +

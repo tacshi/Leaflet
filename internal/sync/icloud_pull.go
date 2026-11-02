@@ -151,6 +151,15 @@ func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
 		}
 		if err != nil {
 			if errors.Is(err, icloud.ErrNotReady) {
+				// The batches after it are asked for too, so the next pass
+				// takes them all: on iOS, iCloud downloads only what it is
+				// asked for, and a device catching up on a long log would
+				// take a pass for each batch.
+				for _, later := range seqs[i+1:] {
+					if rel, err := icloud.BatchPath(peer, later); err == nil {
+						s.folder().Download(rel)
+					}
+				}
 				return nil
 			}
 			return err

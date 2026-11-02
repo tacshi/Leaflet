@@ -62,6 +62,34 @@ final class SceneModel {
         saveTitle = nil
     }
 
+    /// held is the open page's model while no view of it runs: SwiftUI
+    /// ends a page view as it moves the page into the navigation stack on
+    /// iPhone, where it stays shown. It closes once the window opens
+    /// another page, or none.
+    @ObservationIgnored private var held: PageModel?
+
+    /// release closes a page's model as its view goes: at once when the
+    /// window shows another page, or once it does.
+    func release(_ model: PageModel) {
+        if model.id == selection {
+            if let held, held !== model { close(held) }
+            held = model
+            return
+        }
+        close(model)
+    }
+
+    /// closeHeld closes the page model the window holds, as it closes.
+    func closeHeld() {
+        if let held { close(held) }
+        held = nil
+    }
+
+    private func close(_ model: PageModel) {
+        letGo(model)
+        Task { await model.close() }
+    }
+
     /// searchRequested asks the sidebar to show and focus its search.
     var searchRequested = 0
     /// editor is the open page's editor, for the Format menu. Weakly: the
@@ -120,6 +148,10 @@ final class SceneModel {
     /// before from its editor, a comment or an ask, goes with it: on
     /// another page it would land on a block that isn't there.
     private func show(_ id: String?) {
+        if let held, held.id != id {
+            close(held)
+            self.held = nil
+        }
         selection = id
         target = nil
         newComment = nil

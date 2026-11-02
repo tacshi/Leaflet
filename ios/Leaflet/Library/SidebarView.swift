@@ -26,14 +26,18 @@ enum SidebarTab: String, CaseIterable, Identifiable {
 /// SidebarView is the library: the pages, the tags or the to-dos, and
 /// search over them all.
 struct SidebarView: View {
+    /// stacked says the sidebar stacks over the page, as on iPhone, rather
+    /// than standing beside it.
+    var stacked = false
     @Environment(AppModel.self) private var app
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.palette) private var palette
     @Environment(SceneModel.self) private var scene
     @FocusState private var searchFocused: Bool
     @SceneStorage("sidebar.tab") private var tab = SidebarTab.pages
-    /// collapsed are the sections folded in the Tags and To-dos tabs, a
-    /// tag's as "tag:" and its name, a to-do group's as "todo:" and its
-    /// own, one a line.
+    /// collapsed are the tags and the to-do groups folded in the Tags and
+    /// To-dos tabs, a tag as "tag:" and its name, a to-do group as "todo:"
+    /// and its own, one a line.
     @SceneStorage("sidebar.collapsed") private var collapsed = ""
     @State private var query = ""
     @State private var hits: [SearchHit] = []
@@ -74,7 +78,10 @@ struct SidebarView: View {
                 }
             }
         }
-        .listStyle(.sidebar)
+        // Stacked, the sidebar's style sets its sections in cards, with
+        // room above them: a plain list has the rows reach the edges right
+        // under the tabs, as the desktop's sidebar has them.
+        .modifier(LibraryListStyle(stacked: stacked))
         .scrollDismissesKeyboard(.interactively)
         // The bar has the desktop's buttons and no title, which they leave
         // no room for: search sits right under it, on iPhone too, with
@@ -179,12 +186,14 @@ struct SidebarView: View {
                 Text(L.sidebarNoPages).foregroundStyle(.secondary)
             }
         }
+        .withoutTopLine()
         if !lib.sharedPages.isEmpty {
             Section(L.sidebarSharedWithMe) {
                 ForEach(lib.sharedPages) { page in
                     PageTree(page: page, actions: actions)
                 }
             }
+            .withoutTopLine()
         }
     }
 
@@ -206,46 +215,104 @@ struct SidebarView: View {
     // MARK: Tags
 
     @ViewBuilder private var tagsTab: some View {
-        if app.library.tags.isEmpty {
-            Text(L.sidebarNoTags).foregroundStyle(.secondary)
-        }
-        ForEach(app.library.tags, id: \.tag) { tag in
-            Section(isExpanded: expanded("tag:" + tag.tag)) {
-                ForEach(app.library.pages(tagged: tag.tag)) { page in
-                    PageLink(page: page, actions: actions)
-                }
-            } header: {
-                // As the desktop's Tags tab: the tag's chip, its actions'
-                // button, renaming it or taking it off every page, and how
-                // many pages have it. (The header's fold takes a long press,
-                // so the menu is a button's.)
-                HStack {
-                    TagChip(name: tag.tag)
-                    Spacer()
-                    Menu {
-                        Button(L.tagRenameEllipsis, systemImage: "pencil") {
-                            newName = tag.tag
-                            renamingTag = tag.tag
-                        }
-                        Divider()
-                        Button(L.tagDelete, systemImage: "trash", role: .destructive) {
-                            Task { await app.deleteTag(tag.tag) }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .frame(width: 28, height: 28)
-                            .contentShape(Rectangle())
+        // Each tag a row of the one section, its pages under it: sections
+        // of their own would leave a section's room between the tags.
+        Section {
+            if app.library.tags.isEmpty {
+                Text(L.sidebarNoTags).foregroundStyle(.secondary)
+            }
+            ForEach(app.library.tags, id: \.tag) { tag in
+                let open = expanded("tag:" + tag.tag)
+                tagHeader(tag, open: open)
+                if open.wrappedValue {
+                    ForEach(app.library.pages(tagged: tag.tag)) { page in
+                        PageLink(page: page, actions: actions)
                     }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(.secondary)
-                    .accessibilityLabel(L.tagActions)
-                    Text("\(tag.count)").font(.caption).foregroundStyle(.secondary)
                 }
             }
         }
+        .withoutTopLine()
     }
 
-    /// expanded is whether a section is open, kept with the window.
+    /// tagHeader is a tag's row, heading its pages as the desktop's Tags
+    /// tab does: the tag's name in its color, its actions' button,
+    /// renaming it or taking it off every page, how many pages have it,
+    /// and its own arrow, on a band of the tag's color that stands it
+    /// apart from the pages. A tap folds it.
+    private func tagHeader(_ tag: TagRow, open: Binding<Bool>) -> some View {
+        let fold = { withAnimation(.snappy) { open.wrappedValue.toggle() } }
+        let band = Color(TagChip<EmptyView>.color(tag.tag).withAlphaComponent(0.1))
+        return HStack {
+            Text(tag.tag)
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(TagChip<EmptyView>.ink(tag.tag, text: palette.text))
+                .lineLimit(1)
+            Spacer()
+            Menu {
+                Button(L.tagRenameEllipsis, systemImage: "pencil") {
+                    newName = tag.tag
+                    renamingTag = tag.tag
+                }
+                Divider()
+                Button(L.tagDelete, systemImage: "trash", role: .destructive) {
+                    Task { await app.deleteTag(tag.tag) }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .accessibilityLabel(L.tagActions)
+            Text("\(tag.count)").font(.caption).foregroundStyle(.secondary)
+            Button(action: fold) {
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .rotationEffect(.degrees(open.wrappedValue ? 90 : 0))
+                    .frame(width: 28, height: 28)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.borderless)
+            .foregroundStyle(.primary)
+            .accessibilityLabel(open.wrappedValue ? LI.hideTaggedPages : LI.showTaggedPages)
+        }
+        .padding(.vertical, 8)
+        // The band reaches past the name and the arrow, which stay in line
+        // with the pages' rows, and fills the row: one tag's band meets the
+        // next.
+        .padding(.horizontal, 8)
+        .background(band, in: .rect(cornerRadius: 10))
+        .padding(.horizontal, -8)
+        .contentShape(.rect)
+        .onTapGesture(perform: fold)
+        .listRowInsets(.vertical, 0)
+        .listRowSeparator(.hidden)
+        .selectionDisabled()
+    }
+
+    /// foldHeader heads a section that folds away, as the sidebar's style
+    /// folds its own on iPad, where a plain list does not: its title and
+    /// an arrow, which a tap turns.
+    private func foldHeader(_ title: String, open: Binding<Bool>) -> some View {
+        Button {
+            withAnimation(.snappy) { open.wrappedValue.toggle() }
+        } label: {
+            HStack {
+                Text(title)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .rotationEffect(.degrees(open.wrappedValue ? 90 : 0))
+            }
+            .contentShape(.rect)
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    /// expanded is whether a tag or a to-do group is open, kept with the
+    /// window.
     private func expanded(_ key: String) -> Binding<Bool> {
         Binding(
             get: { !collapsed.split(separator: "\n").contains(Substring(key)) },
@@ -264,26 +331,52 @@ struct SidebarView: View {
                 L.todosEmptyTitle, systemImage: "checklist", description: Text(L.todosEmptyBody))
         }
         let now = Date.now
-        ForEach(TodoSection.allCases, id: \.self) { section in
-            let todos = app.todos.filter { TodoSection.of($0, now: now) == section }
-            if !todos.isEmpty {
-                Section(section.title, isExpanded: expanded("todo:\(section)")) {
-                    ForEach(todos, id: \.self) { todo in
-                        TodoRowView(todo: todo, section: section) {
-                            scene.open(todo.pageID, at: todo.blockID)
-                        }
+        let groups = TodoSection.allCases.map { section in
+            (section: section, todos: app.todos.filter { TodoSection.of($0, now: now) == section })
+        }.filter { !$0.todos.isEmpty }
+        // A group alone has no header, which would only say what the
+        // to-dos' dates do, nor a fold to hide them all.
+        if groups.count == 1 {
+            Section {
+                todoRows(groups[0].todos, in: groups[0].section)
+            }
+            .withoutTopLine()
+        } else {
+            ForEach(groups, id: \.section) { group in
+                let open = expanded("todo:\(group.section)")
+                Section {
+                    if open.wrappedValue {
+                        todoRows(group.todos, in: group.section)
                     }
+                } header: {
+                    foldHeader(group.section.title, open: open)
                 }
+                .withoutTopLine()
+            }
+        }
+    }
+
+    private func todoRows(_ todos: [Todo], in section: TodoSection) -> some View {
+        ForEach(todos, id: \.self) { todo in
+            TodoRowView(todo: todo, section: section) {
+                scene.open(todo.pageID, at: todo.blockID)
             }
         }
     }
 
     // MARK: Search
 
-    @ViewBuilder private var searchResults: some View {
-        if hits.isEmpty {
-            ContentUnavailableView.search(text: query)
+    private var searchResults: some View {
+        Section {
+            if hits.isEmpty {
+                ContentUnavailableView.search(text: query)
+            }
+            searchHits
         }
+        .withoutTopLine()
+    }
+
+    private var searchHits: some View {
         ForEach(hits, id: \.self) { hit in
             Button {
                 scene.open(hit.pageID, at: hit.blockID)
@@ -322,6 +415,31 @@ struct SidebarView: View {
         try? await Task.sleep(for: .milliseconds(150))
         guard !Task.isCancelled else { return }
         hits = (try? await app.client?.search(q)) ?? []
+    }
+}
+
+/// LibraryListStyle is the library's list: the sidebar's style beside the
+/// page, a plain list stacked over it, as on iPhone, with a little more
+/// room at its sides than a plain list has.
+private struct LibraryListStyle: ViewModifier {
+    let stacked: Bool
+
+    func body(content: Content) -> some View {
+        if stacked {
+            content.listStyle(.plain)
+                .contentMargins(.horizontal, 18, for: .scrollContent)
+        } else {
+            content.listStyle(.sidebar)
+        }
+    }
+}
+
+extension View {
+    /// withoutTopLine leaves out the line a plain list draws over a
+    /// section's first row: under the tabs, or a section's title, it parts
+    /// nothing.
+    fileprivate func withoutTopLine() -> some View {
+        listSectionSeparator(.hidden, edges: .top)
     }
 }
 

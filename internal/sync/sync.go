@@ -444,6 +444,11 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// A library other devices made has starter pages of its own: this
+	// device's stay out of it, unless the user took them up.
+	if err := s.st.SettleStarterPages(space != nil); err != nil {
+		return err
+	}
 	if space == nil {
 		rows, err := s.be.Insert(ctx, "spaces", map[string]any{"name": "My space", "owner_id": uid})
 		if err != nil {

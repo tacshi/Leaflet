@@ -784,7 +784,11 @@ func summaryFor(verb string, nodes []*doc.Node) string {
 		title = n.Str("title")
 	}
 	what := "a block"
-	if kind != "" {
+	switch {
+	case strings.HasPrefix(kind, "i"):
+		// "interactive embed" and "image" take "an".
+		what = "an " + kind
+	case kind != "":
 		what = "a " + kind
 	}
 	if title != "" {

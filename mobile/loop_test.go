@@ -30,7 +30,7 @@ func TestPanicReturnsAnError(t *testing.T) {
 	offQueue := func() (_ string, err error) {
 		defer catch(&err)
 		var m map[string]int
-		m["x"] = 1
+		m["x"] = 1 //nolint:staticcheck // The panic is the point.
 		return "done", nil
 	}
 	if out, err := offQueue(); out != "" || err == nil || !strings.Contains(err.Error(), "nil map") {

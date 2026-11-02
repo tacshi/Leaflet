@@ -31,7 +31,7 @@ func TestTestProvider(t *testing.T) {
 
 	test := func(provider providerJSON) providerTest {
 		t.Helper()
-		in, _ := json.Marshal(provider)
+		in, _ := json.Marshal(provider) // #nosec G117 -- test keys only.
 		raw, err := c.TestProvider(string(in))
 		if err != nil {
 			t.Fatal(err)
@@ -59,7 +59,7 @@ func TestTestProvider(t *testing.T) {
 func TestSaveCloudProviderSignedOut(t *testing.T) {
 	c, _ := open(t)
 	save := func(p providerJSON) error {
-		in, _ := json.Marshal(p)
+		in, _ := json.Marshal(p) // #nosec G117 -- test keys only.
 		return c.SaveProvider(string(in))
 	}
 	deepseek := providerJSON{Preset: "deepseek", BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-v4-flash"}
@@ -92,7 +92,7 @@ func TestSaveCloudProviderSignedOut(t *testing.T) {
 
 func TestRemoveProviderStopsBeingTheDefault(t *testing.T) {
 	c, _ := open(t)
-	in, _ := json.Marshal(providerJSON{Preset: "deepseek", BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-v4-flash", APIKey: "sk-test"})
+	in, _ := json.Marshal(providerJSON{Preset: "deepseek", BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-v4-flash", APIKey: "sk-test"}) // #nosec G117 -- test keys only.
 	if err := c.SaveProvider(string(in)); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestChatGPTPresetAndSave(t *testing.T) {
 	}
 	// Nothing to save before signing in; the address is the preset's, so
 	// the form needs none.
-	in, _ := json.Marshal(providerJSON{Preset: "chatgpt", Name: "ChatGPT", DefaultModel: "gpt-6-astra"})
+	in, _ := json.Marshal(providerJSON{Preset: "chatgpt", Name: "ChatGPT", DefaultModel: "gpt-6-astra"}) // #nosec G117 -- test keys only.
 	if err := c.SaveProvider(string(in)); err == nil || err.Error() != locales.SettingsChatGPTSignInFirst() {
 		t.Fatalf("saved ChatGPT without a sign-in: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestSelectAgentPicksTheChatsAgent(t *testing.T) {
 		{Preset: "deepseek", BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-v4-flash", APIKey: "sk-a"},
 		{Preset: "openai", BaseURL: "https://api.openai.com/v1", DefaultModel: "gpt-6-luna", APIKey: "sk-b"},
 	} {
-		in, _ := json.Marshal(p)
+		in, _ := json.Marshal(p) // #nosec G117 -- test keys only.
 		if err := c.SaveProvider(string(in)); err != nil {
 			t.Fatal(err)
 		}

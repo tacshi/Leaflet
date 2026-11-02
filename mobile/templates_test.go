@@ -176,7 +176,7 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 	// The file is found by its ID, where it is kept here; gone from here
 	// and never uploaded, it can't be had.
 	local, err := c.LocalFile(n.Str("file_id"))
-	if data, _ := os.ReadFile(local); err != nil || string(data) != "hi" {
+	if data, _ := os.ReadFile(local); err != nil || string(data) != "hi" { // #nosec G304 -- the file the core just kept.
 		t.Fatalf("local file %q, %v", local, err)
 	}
 	_ = os.Remove(local)

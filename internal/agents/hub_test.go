@@ -649,14 +649,18 @@ func TestUndoInAnEarlierConversation(t *testing.T) {
 	s.Messages = []*Message{{Mine: true, Text: "Add a line"}, {Text: "Added a line.", RunID: "r1"}}
 	h.saveChat(s)
 	h.NewConversation("p")
-	h.UndoRun("p", "r1")
+	if err := h.UndoRun("p", "r1"); err != nil {
+		t.Fatal(err)
+	}
 
 	again := NewHub(st, nil, stubHost{})
 	again.OpenConversation("p", first)
 	if r := again.Session("p").Run("r1"); r == nil || !r.Undone {
 		t.Fatalf("run after a restart %+v", r)
 	}
-	again.RedoRun("p", "r1")
+	if err := again.RedoRun("p", "r1"); err != nil {
+		t.Fatal(err)
+	}
 	if r := NewHub(st, nil, stubHost{}).Session("p").Run("r1"); r == nil || r.Undone {
 		t.Errorf("redone run after a restart %+v", r)
 	}

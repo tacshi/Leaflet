@@ -18,7 +18,7 @@ struct TagChip<Trailing: View>: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 2)
         .background(Color(color.withAlphaComponent(0.16)), in: .capsule)
-        .foregroundStyle(Color(color.mixed(with: UIColor(palette.text), by: 0.35)))
+        .foregroundStyle(TagChip.ink(name, text: palette.text))
     }
 }
 
@@ -40,6 +40,12 @@ extension TagChip {
             hash = hash &* 16_777_619
         }
         return UIColor(hex: bright[Int(hash % UInt32(bright.count))]) ?? .systemTeal
+    }
+
+    /// ink is the color of a tag's name: its color, darker or, on a dark
+    /// theme, lighter, mixed toward the text's.
+    static func ink(_ name: String, text: Color) -> Color {
+        Color(color(name).mixed(with: UIColor(text), by: 0.35))
     }
 }
 

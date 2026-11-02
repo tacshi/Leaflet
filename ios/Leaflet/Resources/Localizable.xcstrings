@@ -199,6 +199,24 @@
         }
       }
     },
+    "Hide Tagged Pages": {
+      "comment": "The sidebar's Tags tab: hide the pages with this tag.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このタグのページを隠す"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏带此标签的页面"
+          }
+        }
+      }
+    },
     "Indent": {
       "comment": "The editor: nest the block in the one before it.",
       "extractionState": "manual",
@@ -573,6 +591,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "显示子页面"
+          }
+        }
+      }
+    },
+    "Show Tagged Pages": {
+      "comment": "The sidebar's Tags tab: show the pages with this tag.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "このタグのページを表示"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示带此标签的页面"
           }
         }
       }

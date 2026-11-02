@@ -120,15 +120,26 @@ func taggedPage(key string) (string, bool) {
 	return id, ok
 }
 
-// tagItem builds an item of the Tags tab after its arrow: a tag's chip
+// tagItem builds an item of the Tags tab after its arrow: a tag's name
 // and count, with its menu, or a page's icon and title.
 func (a *App) tagItem(c *ui.Context, key string, counts map[string]int) {
 	pal := theme.Of(c)
 	row := ui.Row(c.Key("item:" + key)).Grow(1).Height(26).Gap(6).AlignItems(ui.Center)
 	hovered := row.Hovered()
 	if tag, ok := strings.CutPrefix(key, "tag:"); ok {
+		// A band of the tag's color stands it apart from the pages: over
+		// the whole of the Outline's row, back past its arrow, which shows
+		// through. Painted, it takes none of the arrow's clicks.
+		t := c.Theme()
+		band := tagColor(tag).Alpha(0.1)
+		lead, pad := t.Space(2)+t.Space(4)+t.Space(1), t.Space(1)
+		row.Draw(func(p *ui.Painter, r ui.Rect) {
+			p.Fill(ui.Rect{X: r.X - lead, Y: r.Y - pad + 1, W: r.W + lead + t.Space(2), H: r.H + 2*pad - 2}, band, t.Radius)
+		})
 		row.Children(func() {
-			tagChip(c, tag)
+			// The name in the tag's color, on its band: a chip there too
+			// would be a second band.
+			ui.Text(c, tag).FontSize(13.5).FontWeight(600).TextColor(tagColor(tag).Mix(pal.Text, 0.35)).SingleLine()
 			ui.Spacer(c)
 			tools(c, func() {
 				b := iconButton(c, "more", "ellipsis", locales.TagActions()).Size(22, 22).Padding(3).IgnoreInput(!hovered)

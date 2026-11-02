@@ -1,7 +1,8 @@
 name: CI
 
-# The iOS app's own sources are checked by ios.yml; the Go core it links
-# is checked here as well, and so is ios/gen, which is Go in this module.
+# The iOS app's own Swift is checked on the developer's Mac (make ios-check
+# and make ios-test); the Go core it links is checked here as well, and so
+# is ios/gen, which is Go in this module.
 on:
   push:
     branches: [main]

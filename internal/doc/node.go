@@ -44,6 +44,29 @@ var NestableTypes = map[string]bool{
 	"toggle_list":   true,
 }
 
+// TypedKeys are a text block's data that belong to its type, which it
+// loses as it becomes another kind of block.
+var TypedKeys = []string{"checked", "due", "level", "language", "tone", "collapsed"}
+
+// TypeData is the data a text block takes as it becomes typ: a heading's
+// level, a to-do unchecked, a code block of no language, an info callout
+// and an open toggle.
+func TypeData(typ string, level int) map[string]any {
+	switch typ {
+	case "heading":
+		return map[string]any{"level": level}
+	case "todo_list":
+		return map[string]any{"checked": false}
+	case "code":
+		return map[string]any{"language": ""}
+	case "callout":
+		return map[string]any{"tone": "info"}
+	case "toggle_list":
+		return map[string]any{"collapsed": false}
+	}
+	return map[string]any{}
+}
+
 // IsText reports whether the block holds rich text.
 func (n *Node) IsText() bool { return TextTypes[n.Type] }
 

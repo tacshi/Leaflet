@@ -50,6 +50,7 @@ func (h *fakeHost) BlockLink(id string) string       { return doc.BlockLink("thi
 
 func setup(t *testing.T) (*Editor, *ui.Tester, *fakeHost) {
 	t.Helper()
+	freshClipboard(t)
 	host := &fakeHost{}
 	e := New(doc.Empty(), host)
 	e.SetWidth(500)
@@ -60,6 +61,17 @@ func setup(t *testing.T) (*Editor, *ui.Tester, *fakeHost) {
 		t.Fatal(err)
 	}
 	return e, tt, host
+}
+
+// freshClipboard empties what Leaflet last copied and what Control-K
+// last killed, which are the app's, for a test and again after it.
+func freshClipboard(t *testing.T) {
+	empty := func() {
+		clip.text, clip.blocks, clip.delta, clip.token = "", nil, nil, ""
+		killed = ""
+	}
+	empty()
+	t.Cleanup(empty)
 }
 
 func texts(e *Editor) []string {
@@ -170,9 +182,14 @@ func TestSelectionAcrossBlocksDeletes(t *testing.T) {
 	tt.Key(ui.Shift, ui.KeyUp)
 	tt.Key(ui.Shift, ui.KeyUp)
 	tt.Key(0, ui.KeyBackspace)
+	// From the end of the last block up to the end of the first, the
+	// selection takes the rest, and the caret stays where it began.
 	got := texts(e)
-	if len(got) != 1 {
+	if len(got) != 1 || got[0] != "paragraph:alpha" {
 		t.Fatalf("blocks %v", got)
+	}
+	if p := e.Caret(); p.ID != e.Content.Children[0].ID || p.Off != len("alpha") || !e.Collapsed() {
+		t.Errorf("caret %v, collapsed %v", p, e.Collapsed())
 	}
 }
 
@@ -311,18 +328,34 @@ func TestCopyPasteKeepsBlocks(t *testing.T) {
 	}
 }
 
-func TestPasteLinesInTableCellJoin(t *testing.T) {
-	e, _, _ := setup(t)
-	table, _ := doc.TableNode([][]string{{"a"}}, "")
+// A table's cell is edited in a text area of its own, where text pasted
+// keeps its lines, and a line break in the cell is a <br> in the page's
+// Markdown, which reads back as one.
+func TestPasteLinesInTableCell(t *testing.T) {
+	e, tt, _ := setup(t)
+	table, _ := doc.TableNode([][]string{{"head"}, {"cell"}}, "")
 	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table} })
-	cell := table.Children[0].Children[0]
-	e.PlaceCaret(cell.ID, 1)
-	e.paste("one\ntwo")
-	if got := cell.Delta().Plain(); got != "aone two" {
-		t.Errorf("cell %q", got)
+	tt.Frame()
+	if err := tt.Click("cell"); err != nil {
+		t.Fatalf("%v in %v", err, tt.Texts())
+	}
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.SetClipboard("one\ntwo | three")
+	tt.Key(ui.Cmd, ui.KeyV)
+	tt.Frame()
+	if rows := doc.TableRows(table); len(rows) != 2 || rows[1][0] != "one\ntwo | three" {
+		t.Fatalf("rows %q", rows)
 	}
 	if len(e.Content.Children) != 1 {
 		t.Errorf("blocks %v", texts(e))
+	}
+	md := doc.PageMarkdown("", e.Content, nil)
+	if !strings.Contains(md, "| one<br>two \\| three |") {
+		t.Errorf("markdown %q", md)
+	}
+	if back := doc.MarkdownBlocks(md); len(back) != 1 || !slices.Equal(doc.TableRows(back[0])[1], []string{"one\ntwo | three"}) {
+		t.Errorf("read back as %v", back)
 	}
 }
 
@@ -730,85 +763,6 @@ func TestTableCellKeepsMarkdownAsTyped(t *testing.T) {
 	tt.Frame()
 	if rows := doc.TableRows(e.Content.Children[0]); e.cellText != rows[1][0] {
 		t.Errorf("after undo, input %q, cell %q", e.cellText, rows[1][0])
-	}
-}
-
-func TestPasteMarkdownBlankLinesSeparate(t *testing.T) {
-	nodes := parseLines("## Start\n\n> [!NOTE]\n> Needs Go\n\n1. one\n\n2. two\n\n```go\na := 1\n\nb := 2\n```\n")
-	var types []string
-	for _, n := range nodes {
-		types = append(types, n.Type)
-		if n.Type == "paragraph" && n.Delta().Len() == 0 {
-			t.Errorf("an empty paragraph in %v", types)
-		}
-	}
-	if got := strings.Join(types, " "); got != "heading callout numbered_list numbered_list code" {
-		t.Fatalf("blocks %s", got)
-	}
-	if code := nodes[4].Delta().Plain(); code != "a := 1\n\nb := 2" {
-		t.Errorf("code %q lost its blank line", code)
-	}
-}
-
-// The markers Markdown has for headings and lists all read as blocks, as
-// copying escapes them all, and a line that is a picture is one.
-func TestPasteMarkdownMarkers(t *testing.T) {
-	var got []string
-	for _, n := range parseLines("#### Step\n###### Six\n####### seven\n#tag\n+ plus\n+ [x] done\n- [X] also\n1) one\n2024. year\n![A cat](https://x.dev/cat.png)\n![local](file:///cat.png)") {
-		got = append(got, fmt.Sprintf("%s%d:%s%s", n.Type, n.Int("level", 0), n.Delta().Plain(), n.Str("alt")))
-	}
-	want := []string{"heading4:Step", "heading6:Six", "paragraph0:####### seven", "paragraph0:#tag", "bulleted_list0:plus",
-		"todo_list0:done", "todo_list0:also", "numbered_list0:one", "paragraph0:2024. year", "image0:A cat", "paragraph0:!local"}
-	if !slices.Equal(got, want) {
-		t.Errorf("blocks\n%q\nwant\n%q", got, want)
-	}
-}
-
-func TestMarkdownBlocksReadsAReply(t *testing.T) {
-	var types []string
-	for _, n := range MarkdownBlocks("It says:\n\n> a quote\n\n- one\n") {
-		types = append(types, n.Type)
-	}
-	if got := strings.Join(types, " "); got != "paragraph quote bulleted_list" {
-		t.Errorf("blocks %q", got)
-	}
-}
-
-// A page exported as Markdown reads back as the same blocks: text that
-// looks like a block's marker stays text, and a | stays in its cell.
-func TestMarkdownExportReadsBack(t *testing.T) {
-	var blocks []*doc.Node
-	for _, s := range []string{"```js", "# not a heading", "2*3*4", "- not an item", "1. not numbered", "> not a quote", "| not a table |", "$$", "---", "[!NOTE]"} {
-		blocks = append(blocks, newText("paragraph", doc.Delta{{Text: s}}))
-	}
-	table, _ := doc.TableNode([][]string{{"a|b", `c\|d`}, {"`x|y`", "e"}}, "")
-	blocks = append(blocks, table, newText("paragraph", doc.Delta{{Text: "last"}}))
-	md := doc.PageMarkdown("", doc.FromBlocks(blocks), nil)
-	got := MarkdownBlocks(md)
-	if len(got) != len(blocks) {
-		t.Fatalf("%q read back as %d blocks", md, len(got))
-	}
-	for i, n := range got {
-		if n.Type != blocks[i].Type || !reflect.DeepEqual(n.Delta(), blocks[i].Delta()) {
-			t.Errorf("block %d: %s %+v, want %s %+v", i, n.Type, n.Delta(), blocks[i].Type, blocks[i].Delta())
-		}
-	}
-	if rows := doc.TableRows(got[len(got)-2]); !reflect.DeepEqual(rows, doc.TableRows(table)) {
-		t.Errorf("table rows %q, want %q", rows, doc.TableRows(table))
-	}
-}
-
-func TestTableRowSplitsOnUnescapedPipes(t *testing.T) {
-	for line, want := range map[string][]string{
-		"| a | b |":       {"a", "b"},
-		`| a\|b | c |`:    {"a|b", "c"},
-		`| a\\| b |`:      {`a\\`, "b"},
-		`| \*x\* | y`:     {`\*x\*`, "y"},
-		"| --- | :---: |": nil,
-	} {
-		if got := tableRow(line); !reflect.DeepEqual(got, want) {
-			t.Errorf("%q split as %q, want %q", line, got, want)
-		}
 	}
 }
 
@@ -1482,5 +1436,28 @@ func TestTypingOnABlockIsOneUndoStep(t *testing.T) {
 	e.Undo()
 	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "divider:"}) {
 		t.Errorf("after one undo %v", got)
+	}
+}
+
+// An agent's ops, and content from outside, keep the caret in the page
+// without scrolling to it: the user's view stays where it is while an
+// agent writes below.
+func TestOpsFromOutsideKeepTheView(t *testing.T) {
+	p := &doc.Node{ID: "p1", Type: "paragraph"}
+	p.SetDelta(doc.Delta{{Text: "Asked here"}})
+	e := New(doc.FromBlocks([]*doc.Node{p}), &fakeHost{})
+	e.PlaceCaret("p1", 3)
+	e.reveal = ""
+	n := &doc.Node{ID: "n1", Type: "paragraph"}
+	n.SetDelta(doc.Delta{{Text: "Written by the agent"}})
+	if err := e.ApplyOp(doc.InsertOp(doc.Position{After: "p1"}, n), true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ApplyOps([]doc.Op{e.Content.DeleteOp([]string{"n1"})}); err != nil {
+		t.Fatal(err)
+	}
+	e.Replace(e.Content.Copy())
+	if e.reveal != "" || e.FocusBlock() != "p1" {
+		t.Errorf("reveal %q, caret in %q", e.reveal, e.FocusBlock())
 	}
 }

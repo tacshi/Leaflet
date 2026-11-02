@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -18,6 +17,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/agents/endpoint"
 	"leaflet/internal/doc"
 	"leaflet/internal/icloud"
 	"leaflet/internal/store"
@@ -241,14 +241,18 @@ func (a *App) fontRow(c *ui.Context, key, title string, family *string, mono, fi
 }
 
 // accentDots is a row of dots choosing the accent: the desktop's, where
-// it has one, then Leaflet's.
+// it has one, then Leaflet's. None chosen is the desktop's, or Blue.
 func (a *App) accentDots(c *ui.Context) {
 	pal := theme.Of(c)
 	isDark := c.Theme().Dark
+	def := "Blue"
+	if c.Preferences().Accent.A > 0 {
+		def = "system"
+	}
 	ui.Row(c.Key("accents")).Gap(8).Children(func() {
 		dot := func(name, label string, color ui.Color) {
 			d := ui.ButtonBase(c.Key(name)).Size(20, 20).Radius(999).Background(color).Label(label).Tooltip(label)
-			chosen := a.settings.Accent == name || a.settings.Accent == "" && name == theme.Accents[0].Name
+			chosen := a.settings.Accent == name || a.settings.Accent == "" && name == def
 			if chosen {
 				d.Border(2, pal.Text)
 			} else if d.Hovered() {
@@ -260,7 +264,8 @@ func (a *App) accentDots(c *ui.Context) {
 				a.applyTheme()
 			}
 		}
-		if system, ok := theme.Accent("system", isDark, c.Preferences().Accent); ok {
+		if def == "system" {
+			system, _ := theme.Accent("system", isDark, c.Preferences().Accent)
 			dot("system", locales.SettingsSystem(), system)
 		}
 		for _, acc := range theme.Accents {
@@ -382,16 +387,6 @@ func (a *App) accountSettings(c *ui.Context) {
 			})
 		}
 	})
-	if s.unsynced > 0 {
-		open := true
-		if ui.AlertDialog(c, &open, locales.SettingsSignOutAnyway(), locales.SettingsSignOutUnsynced(s.unsynced),
-			locales.CommonCancel(), locales.CommonSignOut()) == 1 {
-			a.leave(a.st.ForgetAccount, false)
-		}
-		if !open {
-			s.unsynced = 0
-		}
-	}
 	if s.deleteOpen {
 		dialog(c, &s.deleteOpen, 420, func() {
 			dialogHeader(c, locales.SettingsDeleteAccountTitle(), locales.SettingsCannotUndo(), &s.deleteOpen)
@@ -423,6 +418,24 @@ func (a *App) accountSettings(c *ui.Context) {
 				})
 			})
 		})
+	}
+}
+
+// signOutAlert asks before signing out removes changes not uploaded yet.
+// The window shows it over whatever it shows, as the upload before it may
+// finish after Settings has closed.
+func (a *App) signOutAlert(c *ui.Context) {
+	s := &account
+	if s.unsynced == 0 {
+		return
+	}
+	open := true
+	if ui.AlertDialog(c, &open, locales.SettingsSignOutAnyway(), locales.SettingsSignOutUnsynced(s.unsynced),
+		locales.CommonCancel(), locales.CommonSignOut()) == 1 {
+		a.leave(a.st.ForgetAccount, false)
+	}
+	if !open {
+		s.unsynced = 0
 	}
 }
 
@@ -528,19 +541,9 @@ func (a *App) leave(clear func() error, synced bool) {
 	if !a.flush() && synced {
 		return
 	}
+	c := a.core()
 	go func() {
-		var err error
-		unsynced := 0
-		a.sync.Hold(func() {
-			if synced {
-				if unsynced = a.st.PendingCount(); unsynced > 0 {
-					return
-				}
-			}
-			a.backend.SignOut()
-			a.forgetProject()
-			err = clear()
-		})
+		unsynced, err := c.Leave(clear, synced)
 		a.update(func() {
 			if unsynced > 0 {
 				account.unsynced = unsynced
@@ -551,6 +554,20 @@ func (a *App) leave(clear func() error, synced bool) {
 			}
 			if _, err := a.st.LoadSession(nil); err != nil {
 				a.toast(err.Error())
+			}
+			// Wiping the device removes the settings too: those shown, and
+			// saved with the next change, are the ones a new device has.
+			if _, kept := a.st.Value("settings"); !kept {
+				was := a.settings
+				a.settings = a.st.Settings()
+				a.sidebarW, a.panelW = a.settings.SidebarWidth, a.settings.PanelWidth
+				if a.settings.Theme != was.Theme || a.settings.Accent != was.Accent || a.settings.Fonts != was.Fonts {
+					a.applyTheme()
+				}
+				// MyGo keeps the language it was set to apart.
+				if a.settings.Language != was.Language {
+					mygo.App.SetLocale(a.settings.Language)
+				}
 			}
 			a.session = a.st.Session()
 			account.loaded, account.devices, account.devicesErr, account.nameEdited = false, nil, "", false
@@ -705,25 +722,8 @@ func (a *App) modelsSettings(c *ui.Context) {
 					}
 				})
 			}
-			// The switch has nothing to switch to until a provider runs on
-			// this machine.
-			offline := false
-			for _, o := range a.hub.Options() {
-				offline = offline || o.Offline()
-			}
-			v := a.settings.LocalWhenOffline && offline
-			desc := locales.SettingsLocalWhenOfflineDesc()
-			if !offline {
-				desc = locales.SettingsLocalWhenOfflineNone()
-			}
-			settingRow(c, "offline", locales.SettingsLocalWhenOffline(), desc, len(choices) < 2, func() {
-				if ui.Switch(c.Key("offline"), &v).Disabled(!offline).Changed() {
-					a.settings.LocalWhenOffline = v
-					a.saveSettings()
-				}
-			})
 			r := a.settings.AgentsReadOtherPages
-			settingRow(c, "cross", locales.SettingsReadOtherPages(), locales.SettingsReadOtherPagesDesc(), false, func() {
+			settingRow(c, "cross", locales.SettingsReadOtherPages(), locales.SettingsReadOtherPagesDesc(), len(choices) < 2, func() {
 				if ui.Switch(c.Key("cross"), &r).Changed() {
 					a.settings.AgentsReadOtherPages = r
 					a.saveSettings()
@@ -766,6 +766,7 @@ func (a *App) providerDialog(c *ui.Context) {
 	preset := agents.PresetByID(form.preset)
 	account := preset.Auth == "account"
 	local := preset.Local
+	here := a.keptHere(preset)
 	title := locales.SettingsConnectProvider(preset.Name)
 	if form.id != "" {
 		title = locales.SettingsProviderEdit(form.name)
@@ -776,10 +777,8 @@ func (a *App) providerDialog(c *ui.Context) {
 		desc = locales.SettingsProviderDescAccount()
 	case local:
 		desc = locales.SettingsProviderDescLocal()
-	case !a.hasServer():
-		desc = locales.SettingsProviderDescNoServer()
-	case !a.session.SignedIn:
-		desc = locales.SettingsProviderDescSignIn()
+	case here:
+		desc = locales.SettingsProviderDescDevice()
 	}
 	if preset.ID == "claude" {
 		desc = locales.SettingsProviderClaudeNote(desc)
@@ -796,7 +795,10 @@ func (a *App) providerDialog(c *ui.Context) {
 					if ph == "" {
 						ph = preset.BaseURL
 					}
-					field(c, "url", &form.baseURL, ph)
+					// Another address has other models.
+					if field(c, "url", &form.baseURL, ph).Changed() {
+						a.fetchModelsSoon()
+					}
 				})
 			}
 			testButton := func() {
@@ -860,7 +862,9 @@ func (a *App) providerDialog(c *ui.Context) {
 				if signedOut {
 					return
 				}
-				cannot := form.saving || (!local && !a.session.SignedIn) || (account && form.chatgpt == nil) || strings.TrimSpace(form.model) == ""
+				// Only a provider kept on the server needs the account to
+				// save it; one kept here saves signed out too.
+				cannot := form.saving || (!local && !here && !a.session.SignedIn) || (account && form.chatgpt == nil) || strings.TrimSpace(form.model) == ""
 				if primary(c, "save", "", locales.CommonSave()).Disabled(cannot).Clicked() {
 					a.saveProvider()
 				}
@@ -880,7 +884,7 @@ func (a *App) chatgptRow(c *ui.Context) {
 				who = locales.SettingsSignedInAs(form.email)
 			}
 			ui.Text(c, who).FontSize(13.5).TextColor(pal.OkText).Grow(1)
-			if ghost(c, "again", "", locales.SettingsSwitchAccount()).Clicked() {
+			if ghost(c, "again", "", locales.SettingsSwitchAccount()).Disabled(form.signingIn).Clicked() {
 				a.chatgptSignIn()
 			}
 		})
@@ -974,7 +978,8 @@ func (a *App) modelPicker(c *ui.Context) {
 	}
 }
 
-// fetchModelsSoon lists the models once a pasted key settles.
+// fetchModelsSoon lists the models once a pasted key or the address
+// settles.
 func (a *App) fetchModelsSoon() {
 	if form.keyTimer != nil {
 		form.keyTimer.Stop()
@@ -1015,9 +1020,12 @@ func (a *App) fetchModels() {
 		}
 		a.update(func() {
 			if !formIs(gen) || form.fetchedAt != at {
-				return // another dialog, or the key or address changed since
+				return // another dialog, or another fetch since
 			}
 			form.fetching = false
+			if form.baseURL+"|"+strings.TrimSpace(form.apiKey) != at {
+				return // the key or address changed since, not yet fetched for
+			}
 			if err != nil {
 				if !preset.Local || form.id != "" {
 					form.result, form.resultOK = locales.SettingsListModelsFailed(err.Error()), false
@@ -1093,14 +1101,34 @@ func (a *App) testProvider() {
 	}()
 }
 
+// keptHere reports whether the dialog's cloud provider is kept on this
+// device, its key with it, and runs from here: one signed out or without
+// a server, or one already kept here. Signed in, a new one is kept on the
+// server, for every device.
+func (a *App) keptHere(preset agents.Preset) bool {
+	if preset.Local || preset.Auth == "account" {
+		return false
+	}
+	if form.id != "" {
+		p, err := a.st.Provider(form.id)
+		return err == nil && p.IsLocal
+	}
+	return !a.hasServer() || !a.session.SignedIn
+}
+
 func (a *App) saveProvider() {
 	preset := agents.PresetByID(form.preset)
 	if preset.Auth != "account" && strings.TrimSpace(form.baseURL) == "" || strings.TrimSpace(form.model) == "" {
 		form.errorText = locales.SettingsNeedURLAndModel()
 		return
 	}
-	if preset.Local {
-		p := store.Provider{ID: form.id, Preset: form.preset, Name: strings.TrimSpace(form.name), BaseURL: agents.NormalizeBaseURL(form.baseURL),
+	here := a.keptHere(preset)
+	if here && strings.TrimSpace(form.apiKey) == "" {
+		form.errorText = locales.SettingsNeedKey()
+		return
+	}
+	if preset.Local || here {
+		p := store.Provider{ID: form.id, Preset: form.preset, Name: strings.TrimSpace(form.name), BaseURL: endpoint.NormalizeBaseURL(form.baseURL),
 			AuthKind: "none", DefaultModel: form.model, IsLocal: true, SupportsTools: form.tools, Models: form.models}
 		if p.ID == "" {
 			p.ID = doc.NewRowID()
@@ -1138,7 +1166,7 @@ func (a *App) saveProvider() {
 		form.open = false
 		return
 	}
-	body := map[string]any{"preset": form.preset, "name": strings.TrimSpace(form.name), "base_url": agents.NormalizeBaseURL(form.baseURL),
+	body := map[string]any{"preset": form.preset, "name": strings.TrimSpace(form.name), "base_url": endpoint.NormalizeBaseURL(form.baseURL),
 		"auth_kind": "api_key", "default_model": form.model}
 	if form.id != "" {
 		body["id"] = form.id
@@ -1358,8 +1386,7 @@ func (a *App) offlineSettings(c *ui.Context) {
 		settingRow(c, "images", locales.SettingsImageCache(), locales.SettingsImageCacheDesc(), false, func() {
 			if button(c, "clear", "trash", locales.SettingsClear()).Clicked() {
 				a.images.close()
-				a.images = newImageCache(a.images.root, a.images.dir)
-				_ = os.RemoveAll(a.images.dir)
+				a.images = newImageCache(a.images.root)
 				c.Toast(locales.SettingsImageCacheCleared())
 			}
 		})
@@ -1475,7 +1502,7 @@ func (a *App) resolveConflict(cf store.ConflictRow, node *doc.Node) {
 			_ = content.Insert(doc.Position{At: "end"}, node.Clone())
 		}
 	}
-	if ed := a.Editor(cf.PageID); ed != nil {
+	if ed := a.openEditor(cf.PageID); ed != nil {
 		ed.Edit(apply)
 		a.savePage()
 	} else if c := a.st.Content(cf.PageID); c != nil {

@@ -86,6 +86,10 @@ func pubTest(t *testing.T) (*App, *pubLink, http.Handler, store.Page) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The picture is the page's own.
+	if err := st.PutFile(store.File{ID: "dawn", PageID: pg.ID, Name: "dawn.png", LocalPath: pic, MimeType: "image/png"}); err != nil {
+		t.Fatal(err)
+	}
 	be := remote.New(remote.Config(), st)
 	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
 	a.reloadAll()
@@ -505,6 +509,62 @@ func TestPubBlocksAsInTheEditor(t *testing.T) {
 	}
 	if w := get(h, "/tok/recording.js"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "currentTime") {
 		t.Errorf("recording script: %d", w.Code)
+	}
+}
+
+// A block naming another page's file, picture or recording, as an editor
+// of the page could write, serves none of them, nor the recording's
+// transcript, and does not say the file is missing; a file's address
+// keeps to letters and digits whatever its name ends in.
+func TestPubServesOnlyThePagesFiles(t *testing.T) {
+	a, p, h, pg := pubTest(t)
+	dir := a.st.Dir
+	other, err := a.st.CreatePage(store.NewPageOptions{Title: "Private"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"files/mine.a#b", "files/theirs.pdf", "files/theirs.png", "recordings/theirs.wav"} {
+		path := filepath.Join(dir, f)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("secret"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []store.File{
+		{ID: "mine", PageID: pg.ID, Name: "Odd.a#b", LocalPath: filepath.Join(dir, "files/mine.a#b")},
+		{ID: "theirs", PageID: other.ID, Name: "Theirs.pdf", LocalPath: filepath.Join(dir, "files/theirs.pdf")},
+		{ID: "pic", PageID: other.ID, Name: "Theirs.png", LocalPath: filepath.Join(dir, "files/theirs.png")},
+	} {
+		if err := a.st.PutFile(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := a.st.PutRecording(store.Recording{ID: "r9", PageID: other.ID, BlockID: "x", LocalPath: filepath.Join(dir, "recordings/theirs.wav"), Status: "ready",
+		Transcript: []store.Segment{{EndMs: 900, Text: "Private words"}}}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	if _, _, err := a.st.SaveContent(pg.ID, doc.FromBlocks([]*doc.Node{
+		{ID: "f1", Type: "file", Data: map[string]any{"file_id": "mine"}},
+		{ID: "f2", Type: "file", Data: map[string]any{"file_id": "theirs", "name": "Notes"}},
+		{ID: "r1", Type: "recording", Data: map[string]any{"recording_id": "r9"}},
+		{ID: "i1", Type: "image", Data: map[string]any{"url": "file://" + filepath.Join(dir, "files/theirs.png"), "file_id": "pic"}},
+		{ID: "i2", Type: "image", Data: map[string]any{"url": "file://" + filepath.Join(dir, "files/theirs.png")}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	p.render(a.pubJob(p))
+	page := get(h, "/tok/").Body.String()
+	if strings.Count(page, `href="/tok/f/`) != 1 || strings.Contains(page, "<audio") || strings.Contains(page, "<img") ||
+		strings.Contains(page, "Private words") || strings.Contains(page, "Theirs.pdf") || strings.Count(page, locales.CardNotOnDevice()) != 0 {
+		t.Errorf("page:\n%s", page)
+	}
+	_, rest, _ := strings.Cut(page, `href="/tok/f/`)
+	served, _, _ := strings.Cut(rest, `"`)
+	if w := get(h, "/tok/f/"+served); strings.Contains(served, "#") || w.Code != http.StatusOK || w.Body.String() != "secret" {
+		t.Errorf("own file at %q: %d", served, w.Code)
 	}
 }
 

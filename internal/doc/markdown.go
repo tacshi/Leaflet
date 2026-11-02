@@ -82,6 +82,13 @@ func (d Delta) ToMarkdown() string {
 	toks = spacesOutside(toks)
 	var b strings.Builder
 	for i, t := range toks {
+		// A ! before a link would make it a picture: it is escaped.
+		if t.open && t.mark.kind == '[' || plainToken(t) && strings.HasPrefix(t.text, "[") {
+			if out := b.String(); strings.HasSuffix(out, "!") {
+				b.Reset()
+				b.WriteString(out[:len(out)-1] + `\!`)
+			}
+		}
 		switch {
 		case t.code:
 			b.WriteString(codeSpan(t.text))
@@ -120,6 +127,9 @@ type mdToken struct {
 	code        bool
 }
 
+// plainToken reports whether a token is text written out as it is.
+func plainToken(t mdToken) bool { return !t.open && !t.close && !t.code }
+
 // marksOf are the marks of a run, outermost first when they open
 // together: a link holds the others.
 func marksOf(a Attrs) []mdMark {
@@ -147,7 +157,7 @@ func marksOf(a Attrs) []mdMark {
 // ends. The spaces lose the format there, which they can't show; they
 // never cross a link's brackets, so a link keeps its text.
 func spacesOutside(toks []mdToken) []mdToken {
-	plain := func(t mdToken) bool { return !t.open && !t.close && !t.code }
+	plain := plainToken
 	emphasis := func(t mdToken) bool { return (t.open || t.close) && t.mark.kind != '[' }
 	var out []mdToken
 	for i := 0; i < len(toks); {
@@ -241,8 +251,9 @@ func boldTouchesItalic(toks []mdToken, i int) bool {
 }
 
 // trimSpans takes bold, italic and strike off the spaces at either end of
-// the text they span, outside code: markers must touch text to read as
-// markers.
+// the text they span, outside code, and off line breaks in code too:
+// markers must touch text to read as markers, and a line can't start with
+// one that closes, where it can read as a list item's.
 func trimSpans(d Delta) Delta {
 	type char struct {
 		r   rune
@@ -260,7 +271,7 @@ func trimSpans(d Delta) Delta {
 		func(a *Attrs) *bool { return &a.Italic },
 		func(a *Attrs) *bool { return &a.Strike },
 	}
-	space := func(i int) bool { return !cs[i].a.Code && unicode.IsSpace(cs[i].r) }
+	space := func(i int) bool { return (!cs[i].a.Code || cs[i].r == '\n') && unicode.IsSpace(cs[i].r) }
 	for _, mark := range marks {
 		for i := 0; i < len(cs); {
 			if !*mark(&cs[i].a) {
@@ -353,7 +364,18 @@ func (d Delta) ReadableMarkdown() string {
 		}
 		out[i] = r
 	}
-	return out.ToMarkdown()
+	// Text can read back other than it was where Markdown can't say it, as
+	// a format over a space between runs of another: what it reads back as
+	// is written instead, so the same Markdown comes out each time.
+	md := out.ToMarkdown()
+	for range 3 {
+		again := FromMarkdown(md).ToMarkdown()
+		if again == md {
+			break
+		}
+		md = again
+	}
+	return md
 }
 
 // MentionLink is how inline markdown writes a mention of a person or an
@@ -387,7 +409,8 @@ func LinkDestination(href string) string {
 
 // EscapeBlockStart escapes what at the start of a block's text would
 // read as another kind of block: a heading's #, a list item's marker, a
-// quote's >, a table's |, a math block's $$, or a rule.
+// quote's >, a table's |, a math block's $$, a rule, a toggle's
+// <details> or <summary>, or the ! that would make a link a picture.
 func EscapeBlockStart(md string) string {
 	s := strings.TrimLeft(md, " \t")
 	lead := md[:len(md)-len(s)]
@@ -397,7 +420,7 @@ func EscapeBlockStart(md string) string {
 	case s == "":
 		return md
 	case len(hashes) < len(s) && len(s)-len(hashes) <= 6 && (hashes == "" || hashes[0] == ' '),
-		s[0] == '>', s[0] == '|', strings.HasPrefix(s, "$$"), IsRule(s),
+		s[0] == '>', s[0] == '|', strings.HasPrefix(s, "$$"), strings.HasPrefix(s, "!["), IsRule(s), toggleTag(s),
 		(s[0] == '-' || s[0] == '+') && (len(s) == 1 || s[1] == ' '):
 		return lead + "\\" + s
 	case len(digits) < len(s) && len(s)-len(digits) <= 9 && digits != "" && (digits[0] == '.' || digits[0] == ')') &&
@@ -406,6 +429,17 @@ func EscapeBlockStart(md string) string {
 		return lead + s[:n] + "\\" + s[n:]
 	}
 	return md
+}
+
+// toggleTag reports whether s starts with a tag ParseLines reads a toggle
+// by.
+func toggleTag(s string) bool {
+	for _, tag := range []string{"<details", "</details", "<summary"} {
+		if _, ok := cutFold(s, tag); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // FromMarkdown reads the inline markdown dialect.
@@ -522,11 +556,17 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 		if c == '[' {
 			if text, href, n, ok := link(s[i:]); ok {
 				flush()
-				// A link to a page is a mention of it; one to a block of a
-				// page stays a link, with its own text.
+				// A link to a page is a mention of it, in the formats
+				// around the link and those all its text has, as ToMarkdown
+				// writes a mention's own; one to a block of a page stays a
+				// link, with its own text.
 				if id, ok := PageLinkID(href); ok && LinkBlock(href) == "" {
-					text := FromMarkdown(string(text)).Plain()
-					*out = append(*out, Run{Text: text, Attrs: PageMention(id, text)})
+					var inner Delta
+					parseInline(text, attrs, &inner)
+					title := inner.Plain()
+					a, m := sharedAttrs(inner, attrs), PageMention(id, title)
+					a.Href, a.Mention = m.Href, m.Mention
+					*out = append(*out, Run{Text: title, Attrs: a})
 					i += n
 					continue
 				}
@@ -591,6 +631,31 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 		i++
 	}
 	flush()
+}
+
+// sharedAttrs are the formats every run of d has, or attrs when it has
+// none. A run only of spaces counts only when all are: ToMarkdown takes
+// bold, italic and strike off the spaces at a format's ends.
+func sharedAttrs(d Delta, attrs Attrs) Attrs {
+	if text := slices.DeleteFunc(slices.Clone(d), func(r Run) bool { return strings.TrimSpace(r.Text) == "" }); len(text) > 0 {
+		d = text
+	}
+	if len(d) == 0 {
+		return attrs
+	}
+	a := d[0].Attrs
+	for _, r := range d[1:] {
+		b := r.Attrs
+		a.Bold, a.Italic, a.Under = a.Bold && b.Bold, a.Italic && b.Italic, a.Under && b.Under
+		a.Strike, a.Code = a.Strike && b.Strike, a.Code && b.Code
+		if a.Color != b.Color {
+			a.Color = ""
+		}
+		if a.Background != b.Background {
+			a.Background = ""
+		}
+	}
+	return a
 }
 
 // codeSpanAt reads a code span at the start of s, between runs of as many

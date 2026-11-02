@@ -99,9 +99,11 @@ func (s *Store) PutProvider(p Provider) error {
 
 // DeleteProvider removes a model connection from this device.
 func (s *Store) DeleteProvider(id string) error {
-	_, err := s.db.Exec(`DELETE FROM model_providers WHERE id = ?`, id)
+	if _, err := s.db.Exec(`DELETE FROM model_providers WHERE id = ?`, id); err != nil {
+		return err
+	}
 	s.Notify("model_providers", "")
-	return err
+	return nil
 }
 
 // Job is an agent run.
@@ -215,9 +217,11 @@ func (s *Store) Conflicts() ([]ConflictRow, error) {
 
 // ResolveConflict marks a conflict handled.
 func (s *Store) ResolveConflict(id string) error {
-	_, err := s.db.Exec(`UPDATE conflicts SET resolved_at = ? WHERE id = ?`, time.Now().UnixMilli(), id)
+	if _, err := s.db.Exec(`UPDATE conflicts SET resolved_at = ? WHERE id = ?`, time.Now().UnixMilli(), id); err != nil {
+		return err
+	}
 	s.Notify("conflicts", "")
-	return err
+	return nil
 }
 
 // Member is someone a page is shared with.

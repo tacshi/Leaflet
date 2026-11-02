@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,8 +19,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egoist/mygo"
-
+	"leaflet/internal/guard"
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
 )
@@ -281,7 +281,7 @@ func (c *Client) replace(old, s *session, force bool) bool {
 	}
 	// Keep what fits in the keychain; the access token is fetched again.
 	small := *s
-	if raw, _ := json.Marshal(small); len(raw) > mygo.MaxSecretSize { // #nosec G117 -- the session goes to the keychain.
+	if raw, _ := json.Marshal(small); len(raw) > keychain.MaxSecretSize { // #nosec G117 -- the session goes to the keychain.
 		small.AccessToken = ""
 		small.ExpiresAt = 0
 	}
@@ -393,23 +393,35 @@ const ownerFlag = "leaflet_owner"
 // SignInAsOwner made, or "" when there is none yet. secret is the
 // project's secret key, which is not kept.
 func (c *Client) ProjectOwner(ctx context.Context, project Settings, secret string) (string, error) {
-	out, err := c.adminRequest(ctx, project, secret, "GET", "admin/users?per_page=1000", nil)
-	if err != nil {
-		return "", err
-	}
-	raw, _ := json.Marshal(out["users"])
-	var users []struct {
-		Email       string         `json:"email"`
-		AppMetadata map[string]any `json:"app_metadata"`
-	}
-	_ = json.Unmarshal(raw, &users)
-	for _, u := range users {
-		if u.AppMetadata[ownerFlag] == true {
-			return u.Email, nil
+	// Auth lists its users a page at a time: a project with more of them
+	// than a page holds has the owner on any one.
+	for page := 1; page <= maxUserPages; page++ {
+		out, err := c.adminRequest(ctx, project, secret, "GET", fmt.Sprintf("admin/users?page=%d&per_page=%d", page, usersPerPage), nil)
+		if err != nil {
+			return "", err
+		}
+		raw, _ := json.Marshal(out["users"])
+		var users []struct {
+			Email       string         `json:"email"`
+			AppMetadata map[string]any `json:"app_metadata"`
+		}
+		_ = json.Unmarshal(raw, &users)
+		for _, u := range users {
+			if u.AppMetadata[ownerFlag] == true {
+				return u.Email, nil
+			}
+		}
+		if len(users) < usersPerPage {
+			break
 		}
 	}
 	return "", nil
 }
+
+// usersPerPage is how many users ProjectOwner asks Auth for at a time, and
+// maxUserPages how many pages it reads at most, in case a server sends
+// the same page whatever is asked. Tests make the pages smaller.
+var usersPerPage, maxUserPages = 1000, 1000
 
 // Pending is a sign-in to a project that is not the client's yet: Adopt
 // makes it so, Discard throws it away.
@@ -619,6 +631,9 @@ func (c *Client) refresh(r *refresh) {
 		}
 		c.mu.Unlock()
 	}()
+	// A panic is the refresh's failure, which those waiting get, rather
+	// than the app's end.
+	defer guard.RecoverAs(&r.err)
 	// Not a caller's context: others wait for this too, and one giving up
 	// should not fail it for the rest. The client's timeout still applies.
 	out, err := c.authRequest(context.Background(), "token?grant_type=refresh_token", map[string]any{"refresh_token": r.from.RefreshToken}, false)
@@ -658,26 +673,21 @@ func (c *Client) refresh(r *refresh) {
 	r.tok = s.AccessToken
 }
 
-// UpdateUser changes the account's profile data.
+// UpdateUser changes the account's profile data. It goes as the other
+// requests do, so a token the server refused is renewed and the change
+// sent again.
 func (c *Client) UpdateUser(data map[string]any) error {
-	tok, err := c.token(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	raw, err := json.Marshal(map[string]any{"data": data})
 	if err != nil {
 		return err
 	}
-	cfg := c.settings()
-	raw, _ := json.Marshal(map[string]any{"data": data})
-	req, _ := http.NewRequest("PUT", cfg.URL+"/auth/v1/user", bytes.NewReader(raw))
-	req.Header.Set("apikey", cfg.AnonKey)
-	req.Header.Set("Authorization", "Bearer "+tok)
-	req.Header.Set("Content-Type", "application/json")
-	res, err := c.http.Do(req)
+	res, err := c.request(ctx, "PUT", "/auth/v1/user", bytes.NewReader(raw), nil)
 	if err != nil {
 		return err
 	}
 	_ = res.Body.Close()
-	if res.StatusCode >= 400 {
-		return &Error{Status: res.StatusCode, Message: "Could not update the profile"}
-	}
 	return nil
 }
 
@@ -1052,14 +1062,35 @@ func escapePath(p string) string {
 	return strings.Join(parts, "/")
 }
 
-// IsNetwork reports whether err means the server could not be reached.
+// IsNetwork reports whether err means the server could not be reached:
+// the connection failed, broke or timed out, a stream went quiet, or the
+// gateway in front of the server answered that it could not reach it.
+// Anything else, a refusal by the server, an answer that does not parse
+// or a wait of the caller's own that ran out, is no network error, so a
+// caller that counts these as being offline does not stop at it.
 func IsNetwork(err error) bool {
 	if err == nil {
 		return false
 	}
-	var re *Error
-	if errors.As(err, &re) {
+	if re, ok := errors.AsType[*Error](err); ok {
+		return re.Status == http.StatusBadGateway || re.Status == http.StatusServiceUnavailable || re.Status == http.StatusGatewayTimeout
+	}
+	if errors.Is(err, errStreamIdle) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	// A request that failed, its own timeout among the reasons, but not
+	// one the caller's context ended: a wait of its own that ran out, or
+	// that it called off, while the request went. The client's own timeout
+	// is an error of its own kind, which only matches DeadlineExceeded.
+	if ue, ok := errors.AsType[*url.Error](err); ok {
+		return ue.Err != context.DeadlineExceeded && !errors.Is(ue.Err, context.Canceled)
+	}
+	// A context's deadline is a net.Error too, but one that ran out outside
+	// a request is the caller's, not the network's.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return false
 	}
-	return !errors.Is(err, ErrSignedOut) && !errors.Is(err, ErrNotConfigured)
+	// Reading a body after its connection broke.
+	_, ok := errors.AsType[net.Error](err)
+	return ok
 }

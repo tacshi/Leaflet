@@ -35,7 +35,6 @@ func (a *App) signInView(c *ui.Context) {
 	pal := theme.Of(c)
 	s := &signIn
 	a.titleBar(c, func() { ui.Spacer(c) })
-	a.signInAlert(c)
 	ui.Scroll(c).Grow(1).Children(func() {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(64, 24).Children(func() {
 			ui.Column(c).Width(380).Gap(16).Children(func() {
@@ -257,19 +256,11 @@ func (a *App) signedIn(user *store.User) {
 
 // replacesAccount reports whether signing in as user removes the pages of
 // another account this device keeps.
-func (a *App) replacesAccount(user *store.User) bool {
-	prev := a.st.CachedAccount()
-	return prev != "" && prev != user.ID
-}
+func (a *App) replacesAccount(user *store.User) bool { return a.core().ReplacesAccount(user) }
 
 // lostBySigningIn counts the changes signing in as user removes: those of
 // another account this device keeps the pages of, which never went up.
-func (a *App) lostBySigningIn(user *store.User) int {
-	if !a.replacesAccount(user) {
-		return 0
-	}
-	return a.st.PendingCount()
-}
+func (a *App) lostBySigningIn(user *store.User) int { return a.core().LostBySigningIn(user) }
 
 // useAccount makes user the session: the previous account's pages go, if
 // it was another's, once the open page's edits are saved; with their
@@ -279,26 +270,14 @@ func (a *App) useAccount(user *store.User, drop bool) {
 		go a.backend.SignOut()
 		return
 	}
-	if drop && a.replacesAccount(user) {
-		if err := a.st.ForgetAccount(); err != nil {
-			a.toast(err.Error())
-			return
-		}
-	}
-	// One way of syncing at a time: the server's, now. Settings say so,
-	// so iCloud sync shows off once signed out again.
-	if a.sync.ICloudOn() || a.settings.ICloudSync {
-		a.sync.SetICloud(false)
-		a.watchICloud(false)
-		a.settings.ICloudSync = false
-		a.saveSettings()
-	}
-	if _, err := a.st.LoadSession(user); err != nil {
+	if err := a.core().UseAccount(user, drop); err != nil {
 		// A change made since it counted, by leaflet mcp: it asks again.
 		if errors.Is(err, store.ErrUnsynced) {
 			signIn.asking, signIn.lost = user, a.st.PendingCount()
 			return
 		}
+		// The new account signs out again, as when the person says no.
+		go a.backend.SignOut()
 		a.toast(err.Error())
 		return
 	}
@@ -307,16 +286,21 @@ func (a *App) useAccount(user *store.User, drop bool) {
 	// The name field shows the account's name now, not one typed before.
 	account.nameEdited = false
 	a.toast(locales.SettingsSignedInAs(user.Email))
-	a.back()
+	// A sign-in that finished after the person went to a page leaves them
+	// there.
 	if a.route.Kind == "signin" {
-		a.show(Route{Kind: "home"})
+		a.back()
+		if a.route.Kind == "signin" {
+			a.show(Route{Kind: "home"})
+		}
 	}
 	a.sync.Kick()
 }
 
 // signInAlert asks before signing in as another account removes the
 // previous one's changes not uploaded yet; not signing in signs the new
-// account out again.
+// account out again. The window shows it over whatever it shows, as a
+// sign-in may finish after the person has left its page.
 func (a *App) signInAlert(c *ui.Context) {
 	s := &signIn
 	user := s.asking

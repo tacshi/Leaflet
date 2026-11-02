@@ -5,6 +5,7 @@ import {
   type BlockSpec,
   clone,
   collectIds,
+  deltaOf,
   emptyContent,
   LIST_TYPES,
   type NodeJSON,
@@ -12,11 +13,15 @@ import {
   pageViews,
   type Position,
   randomId,
+  SPACES,
   SPEC_TYPES,
   SpecError,
   specToNode,
+  TEXT_TYPES,
+  trimSpace,
   walk,
 } from "./blocks.ts";
+import { markdownSpecs } from "./lines.ts";
 import type { ToolDef } from "./openai.ts";
 
 export type Op =
@@ -69,6 +74,17 @@ const positionSchema = {
   },
 };
 
+/** Where write_markdown writes: a position, or an empty block to write in place of. */
+const writeSchema = {
+  type: "object",
+  description:
+    "Where to write. Exactly one key: replace (an empty block to write in place of, as the empty line the person asked from), after/before a block id, parent (a list block id), or at start/end of the page.",
+  properties: {
+    replace: { type: "string", description: "Id of an empty block to write in place of" },
+    ...positionSchema.properties,
+  },
+};
+
 const blockSpecSchema = {
   type: "object",
   properties: {
@@ -100,7 +116,11 @@ const blockSpecSchema = {
     },
     level: { type: "integer", minimum: 1, maximum: 6, description: "Heading level" },
     checked: { type: "boolean", description: "For todo_list" },
-    due: { type: "string", description: "For todo_list: the day it is due, YYYY-MM-DD" },
+    due: {
+      type: "string",
+      description:
+        "For todo_list: the day it is due, YYYY-MM-DD, or with a time of day, YYYY-MM-DDTHH:MM, in the user's own time",
+    },
     children: {
       type: "array",
       description: "Nested blocks (BlockSpec objects). Only list blocks take children; a toggle_list takes any.",
@@ -178,6 +198,12 @@ export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean }):
   ];
   if (opts.canEdit) {
     defs.push(
+      tool(
+        "write_markdown",
+        "Write into the page in Markdown: the way to write prose, as a story, a draft, notes or a summary. Each line is a block: a paragraph, # to ### headings, - or 1. list items (indent two spaces to nest), - [ ] to-dos, > quotes, ``` fenced code, | tables, --- dividers; blank lines only separate them. Returns the ids of the blocks written.",
+        { position: writeSchema, markdown: { type: "string" } },
+        ["position", "markdown"],
+      ),
       tool(
         "insert_blocks",
         "Insert new blocks at a position. Returns the ids of the inserted blocks.",
@@ -407,14 +433,55 @@ export function applyOps(content: PageContent, ops: Op[], now = Date.now()): Pag
   return out;
 }
 
+/**
+ * Where each block a delete takes out was, so its undo puts it back
+ * (doc.Content.DeleteOp, whose Invert puts them back in this order): in
+ * document order, each after its previous sibling, which is either still
+ * there or put back just before it; a first child goes before the next
+ * sibling that stays. A block inside another deleted one comes back with
+ * it, so it isn't recorded.
+ */
+export function deletedPositions(root: NodeJSON, gone: Set<string>): { node: NodeJSON; position: Position }[] {
+  const out: { node: NodeJSON; position: Position }[] = [];
+  const visit = (nodes: NodeJSON[], parent: NodeJSON) => {
+    nodes.forEach((node, i) => {
+      if (!gone.has(node.id)) {
+        if (node.type !== "table") visit(node.children ?? [], node);
+        return;
+      }
+      const stays = nodes.find((k) => !gone.has(k.id));
+      const position: Position = i > 0
+        ? { after: nodes[i - 1].id }
+        : stays
+        ? { before: stays.id }
+        : parent === root
+        ? { at: "start" }
+        : { parent: parent.id };
+      out.push({ node: clone(node), position });
+    });
+  };
+  visit(root.children ?? [], root);
+  return out;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * The keys of a position a model gave a value. Models that write every
+ * key of a schema give the others null or "", and at, which takes only
+ * start or end, one of those: at counts only alone.
+ */
+function givenKeys(raw: Record<string, unknown>, keys: string[]): string[] {
+  const set = keys.filter((k) => raw[k] !== undefined && raw[k] !== null && raw[k] !== "");
+  return set.length > 1 ? set.filter((k) => k !== "at") : set;
 }
 
 export function normalizePosition(raw: unknown): Position {
   if (raw === "start" || raw === "end") return { at: raw };
   if (!isObject(raw)) throw new ToolError('position must be an object such as {"after": "<block id>"}');
-  const keys = ["after", "before", "parent", "at"].filter((k) => raw[k] !== undefined && raw[k] !== null);
+  const keys = givenKeys(raw, ["after", "before", "parent", "at"]);
   if (keys.length !== 1) {
     throw new ToolError("position needs exactly one of: after, before, parent, at");
   }
@@ -502,8 +569,29 @@ export interface SessionOptions {
  */
 const FETCHED_URL_TYPES = new Set(["image", "video", "link_preview"]);
 
-/** Finds the URLs in text. */
-const URL_RE = /https?:\/\/[^\s<>"'()\[\]]+/g;
+/** Finds the URLs in text, each to the first space as the client has one (SPACES), as its urlRe. */
+export const URL_RE = new RegExp(`https?://[^${SPACES}<>"'()\\[\\]]+`, "gu");
+
+/**
+ * The tools that change the page, which a viewer may not call. Text on the
+ * page, in its comments or in what a tool returns may be written to steer
+ * the agent, and only the prompt has it take that as data; the tools that
+ * delete or rewrite blocks are not refused for it. A run is asked for by
+ * someone who may edit the page, in their own words (a comment's run by
+ * their own comment), and the run saves the page as it was first
+ * (page_history, agent_run), its edits one undo step in the app: what such
+ * text has the agent take away comes back with Undo. Reading the user's
+ * other pages, which could carry them off, is what is refused where others
+ * write (crossPage in the agent function), as in internal/agents/tools.go.
+ */
+const EDITING_TOOLS = new Set([
+  "write_markdown",
+  "insert_blocks",
+  "replace_block",
+  "move_block",
+  "delete_blocks",
+  "create_subpage",
+]);
 
 export class PageEditSession {
   content: PageContent;
@@ -523,7 +611,10 @@ export class PageEditSession {
     return this.ops.some((op) => op.op !== "create_page");
   }
 
-  /** Runs one tool call. Never throws: failures come back as { error }. */
+  /**
+   * Runs one tool call. A call refused comes back as { error }; anything
+   * else it throws, the session left as it was before the call.
+   */
   async call(name: string, rawArgs: string | Record<string, unknown>): Promise<ToolOutcome> {
     let args: Record<string, unknown>;
     try {
@@ -532,9 +623,22 @@ export class PageEditSession {
     } catch {
       return { result: { error: "Arguments must be a JSON object" }, ops: [], blockIds: [] };
     }
+    // A call that fails part way, such as write_markdown whose first block
+    // went in before a later one was refused, leaves the page as it was:
+    // the model is told it failed, so nothing it did may stay.
+    const editing = EDITING_TOOLS.has(name);
+    const content = editing ? clone(this.content) : this.content;
+    const recorded = this.ops.length;
     try {
       return await this.dispatch(name, args);
     } catch (e) {
+      // A call that throws anything else fails the run, whose edits so
+      // far may still be saved: those are the ones streamed, without this
+      // call's.
+      if (editing) {
+        this.content = content;
+        this.ops.length = recorded;
+      }
       if (e instanceof ToolError || e instanceof SpecError) {
         return { result: { error: e.message }, ops: [], blockIds: [] };
       }
@@ -543,8 +647,7 @@ export class PageEditSession {
   }
 
   private async dispatch(name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
-    const editing = new Set(["insert_blocks", "replace_block", "move_block", "delete_blocks", "create_subpage"]);
-    if (editing.has(name) && !this.opts.canEdit) {
+    if (EDITING_TOOLS.has(name) && !this.opts.canEdit) {
       throw new ToolError("You can read this page but not edit it: the person asking has view access only");
     }
     if ((name === "list_pages" || name === "read_other_page") && !this.opts.crossPage) {
@@ -553,6 +656,8 @@ export class PageEditSession {
     switch (name) {
       case "read_page":
         return { result: await this.hooks.readPage(this.content), ops: [], blockIds: [] };
+      case "write_markdown":
+        return this.write(args.position, args.markdown);
       case "insert_blocks":
         return this.insert(normalizePosition(args.position), args.blocks);
       case "replace_block":
@@ -695,9 +800,9 @@ export class PageEditSession {
     });
   }
 
+  /** A call's blocks, which specToNode counts toward MAX_SPEC_NODES all together, as doc.SpecsToNodes does. */
   private specs(raw: unknown, field: string): BlockSpec[] {
     if (!Array.isArray(raw) || raw.length === 0) throw new ToolError(`${field} must be a non-empty array of blocks`);
-    if (raw.length > 200) throw new ToolError(`At most 200 blocks per call`);
     return raw as BlockSpec[];
   }
 
@@ -707,6 +812,37 @@ export class PageEditSession {
   }
 
   // --- tools ---------------------------------------------------------------
+
+  /**
+   * Writes Markdown as blocks: in place of an empty block, the first
+   * taking its id and the rest going after it, or at a position.
+   */
+  write(rawPosition: unknown, markdown: unknown): ToolOutcome {
+    const specs = markdownSpecs(typeof markdown === "string" ? markdown : "");
+    if (!specs.length) throw new ToolError("markdown is empty");
+    if (!isObject(rawPosition) || !givenKeys(rawPosition, ["replace"]).length) {
+      const out = this.insert(normalizePosition(rawPosition), specs);
+      return { ...out, summary: `Wrote ${plural(specs.length, "block")}` };
+    }
+    // An empty block to write in place of says where, whatever else the
+    // position has.
+    const id = String(rawPosition.replace);
+    const at = this.locate(id);
+    // Empty as the app's own agents take it: no text at all, so a block
+    // the person typed even a space in is not written over.
+    const empty = TEXT_TYPES.has(at.node.type) && !at.node.children?.length &&
+      deltaOf(at.node).every((op) => op.insert === "");
+    if (!empty) throw new ToolError("position.replace takes an empty block only; use replace_block to rewrite one");
+    const first = this.replace(id, specs[0]);
+    const ids = [id];
+    const ops = [...first.ops];
+    if (specs.length > 1) {
+      const rest = this.insert({ after: id }, specs.slice(1));
+      ids.push(...rest.blockIds);
+      ops.push(...rest.ops);
+    }
+    return { result: { inserted_ids: ids }, ops, summary: `Wrote ${plural(specs.length, "block")}`, blockIds: ids };
+  }
 
   insert(position: Position, rawBlocks: unknown): ToolOutcome {
     const specs = this.specs(rawBlocks, "blocks");
@@ -807,10 +943,9 @@ export class PageEditSession {
       for (const inner of collectIds(idx.get(id)!.node).slice(1)) covered.add(inner);
     }
     const targets = ids.filter((id) => !covered.has(id));
-    const previous: { node: NodeJSON; position: Position }[] = [];
+    const previous = deletedPositions(this.root, new Set(targets));
     for (const id of targets) {
       const at = this.locate(id);
-      previous.push({ node: clone(at.node), position: this.positionOf(at) });
       at.parent.children!.splice(at.index, 1);
       this.tombstone(at.node);
     }
@@ -824,7 +959,7 @@ export class PageEditSession {
   }
 
   async createSubpage(rawTitle: unknown, rawBlocks: unknown): Promise<ToolOutcome> {
-    const title = String(rawTitle ?? "").trim();
+    const title = trimSpace(String(rawTitle ?? ""));
     if (!title) throw new ToolError("title is required");
     const content = emptyContent();
     if (rawBlocks !== undefined && rawBlocks !== null) {

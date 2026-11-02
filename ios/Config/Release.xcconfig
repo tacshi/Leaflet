@@ -1,0 +1,8 @@
+// Release builds: the app scripts/install-ios.sh installs on devices by
+// default, and later TestFlight's and the App Store's.
+
+#include "Base.xcconfig"
+
+// Info.plist's words in each language, from Resources/Release; Debug's,
+// which name the app Leaflet Debug, stay out.
+EXCLUDED_SOURCE_FILE_NAMES = */Resources/Debug/InfoPlist.xcstrings

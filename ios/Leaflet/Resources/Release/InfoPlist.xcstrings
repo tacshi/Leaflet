@@ -1,0 +1,30 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "NSMicrophoneUsageDescription": {
+      "comment": "Why Leaflet asks for the microphone, as iOS asks the first time a recording starts.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet records audio into recording blocks when you press Record."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「録音」を押すと、Leaflet は録音ブロックに音声を録音します。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "按下“录音”后，Leaflet 会将音频录入录音块。"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

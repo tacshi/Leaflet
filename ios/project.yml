@@ -1,0 +1,108 @@
+# The Xcode project for Leaflet on iPhone and iPad. XcodeGen makes
+# Leaflet.xcodeproj from this file (make ios-project), so only this file
+# is kept in git.
+name: Leaflet
+options:
+  deploymentTarget:
+    iOS: "26.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+# The packages are pinned to a version each, as Package.resolved, kept
+# beside this file, pins them to a commit: make ios-project puts it where
+# Xcode reads it, inside the project git ignores, so every build, and
+# osv-scanner, has the same ones. A new version is taken by changing it
+# here and running make ios-packages.
+packages:
+  # Code blocks' syntax colors: highlight.js, run in JavaScriptCore.
+  Highlightr:
+    url: https://github.com/raspu/Highlightr
+    exactVersion: 2.3.0
+  # Image blocks' SVGs, which UIImage can't read.
+  SwiftDraw:
+    url: https://github.com/swhitty/SwiftDraw
+    exactVersion: 0.29.0
+  # The device's model, which names it in Account › Devices.
+  DeviceKit:
+    url: https://github.com/devicekit/DeviceKit
+    exactVersion: 5.9.0
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+targets:
+  Leaflet:
+    type: application
+    platform: iOS
+    sources:
+      - path: Leaflet
+    configFiles:
+      Debug: Config/Debug.xcconfig
+      Release: Config/Release.xcconfig
+    # The keys Xcode's generated Info.plist can't take, which it merges
+    # in: background refresh, for sync passes while the app is away, and
+    # audio, for a recording to go on with the screen locked. The versions
+    # stay Config's, over XcodeGen's own.
+    info:
+      path: Leaflet/Sync/Info.plist
+      properties:
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UIBackgroundModes: [fetch, audio]
+        BGTaskSchedulerPermittedIdentifiers: ["$(PRODUCT_BUNDLE_IDENTIFIER).sync"]
+    # Signing in with Supabase: the web session takes the Worker's
+    # https redirect as its callback, which needs this domain's
+    # webcredentials (worker/: /.well-known/apple-app-site-association).
+    entitlements:
+      path: Config/Leaflet.entitlements
+      properties:
+        com.apple.developer.associated-domains:
+          - webcredentials:leaflet-auth.capyvibe.app
+    dependencies:
+      # The Go core, built by make ios-core. gomobile makes a static
+      # framework, so it is linked and not embedded.
+      - framework: build/LeafletCore.xcframework
+        embed: false
+      - package: Highlightr
+      - package: SwiftDraw
+      - package: DeviceKit
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # Resources/Assets.xcassets, made from docs/icon/compose.py.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        # In English; Resources/Debug and Resources/Release have it, and
+        # the Debug build's name, in each language.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Leaflet records audio into recording blocks when you press Record.
+        # No NSSpeechRecognitionUsageDescription: SpeechAnalyzer and
+        # SpeechTranscriber, which transcribe on the device, ask for no
+        # permission, as SFSpeechRecognizer does; the desktop's speech
+        # helper runs them with none.
+        # Go's net package resolves names through libresolv.
+        OTHER_LDFLAGS: -lresolv
+  LeafletTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: LeafletTests
+    dependencies:
+      - target: Leaflet
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.capyvibe.leaflet.tests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  Leaflet:
+    build:
+      targets:
+        Leaflet: all
+    test:
+      targets:
+        - LeafletTests

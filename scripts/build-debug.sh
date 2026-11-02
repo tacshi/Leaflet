@@ -71,6 +71,15 @@ if [[ "$TARGET" == mac ]]; then
 	OUT="build/mac-debug"
 	BUILT="$OUT/darwin-$GOARCH/$NAME.app"
 	APP="$OUT/$NAME.app"
+	# A debug build goes on without the Mac's speech helper where Xcode
+	# can't build it: the app then has no on-device engine, and says so
+	# when one is chosen. Release builds need it (build-release.sh).
+	if why="$(speech_toolchain)"; then
+		"$ROOT_DIR/scripts/build-speech.sh" "$ARCH"
+	else
+		rm -f "$ROOT_DIR/resources/darwin-$GOARCH/leaflet-speech"
+		warn "building without leaflet-speech, so On device transcription is off in this build: $why"
+	fi
 	info "building $NAME for darwin/$GOARCH"
 	go tool mygo build -debug -skip-dmg -sign - -platform "darwin/$GOARCH" -o "$OUT"
 	[[ -d "$BUILT" ]] || die "expected $BUILT after the build"

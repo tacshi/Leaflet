@@ -92,7 +92,7 @@ func TestHandshake(t *testing.T) {
 		m := tool.(map[string]any)
 		names[m["name"].(string)] = m
 	}
-	for _, n := range []string{"list_pages", "search_pages", "read_page", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page", "set_page_tags", "move_page", "create_folder", "rename_folder"} {
+	for _, n := range []string{"list_pages", "search_pages", "read_page", "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_page", "rename_page", "set_page_tags", "move_page", "create_folder", "rename_folder"} {
 		if names[n] == nil {
 			t.Errorf("no tool %s", n)
 		}
@@ -178,9 +178,13 @@ func TestCreateAndEditPage(t *testing.T) {
 		call(4, "insert_blocks", map[string]any{"page_id": id, "position": map[string]any{"after": first}, "blocks": []any{map[string]any{"type": "bulleted_list", "text": "Founded 1981"}}}),
 		call(5, "replace_block", map[string]any{"page_id": id, "id": first, "block": map[string]any{"type": "heading", "level": 2, "text": "About Cognex"}}),
 		call(6, "delete_blocks", map[string]any{"page_id": id, "ids": []any{"nope"}}),
-		call(7, "read_page", map[string]any{"page_id": "nope"}))
+		call(7, "read_page", map[string]any{"page_id": "nope"}),
+		call(8, "write_markdown", map[string]any{"page_id": id, "position": map[string]any{"at": "end"}, "markdown": "## History\nStarted in a garage."}))
 	if _, failed := result(t, got[4]); failed {
 		t.Errorf("insert_blocks %v", got[4])
+	}
+	if out, failed := result(t, got[8]); failed || len(out["inserted_ids"].([]any)) != 2 {
+		t.Errorf("write_markdown %v", got[8])
 	}
 	if out, failed := result(t, got[6]); !failed || !strings.Contains(out["error"].(string), "nope") {
 		t.Errorf("delete_blocks of no block %v", out)
@@ -572,14 +576,23 @@ func TestEditRunAgainKeepsOneSnapshot(t *testing.T) {
 }
 
 // A batch, which MCP no longer has, is an invalid request rather than
-// unparsable, and a notification's method sent with an ID still gets an
+// unparsable, as are a request without its method or of another JSON-RPC
+// version, and a notification's method sent with an ID still gets an
 // answer, as JSON-RPC asks.
 func TestBatchAndNotificationWithAnID(t *testing.T) {
 	got := session(t, NewServer(newStore(t), "0.1.0"),
 		`[{"jsonrpc":"2.0","id":2,"method":"ping"}]`,
-		`{"jsonrpc":"2.0","id":3,"method":"notifications/initialized"}`)
+		`{"jsonrpc":"2.0","id":3,"method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":4}`,
+		`{"jsonrpc":"1.0","id":5,"method":"ping"}`,
+		`{"id":6,"method":"ping"}`)
 	if e, _ := got[0]["error"].(map[string]any); e == nil || e["code"].(float64) != -32600 {
 		t.Errorf("batch %v", got[0])
+	}
+	for _, id := range []float64{4, 5, 6} {
+		if e, _ := got[id]["error"].(map[string]any); e == nil || e["code"].(float64) != -32600 {
+			t.Errorf("request %v answered %v", id, got[id])
+		}
 	}
 	if r, ok := got[3]["result"].(map[string]any); !ok || r == nil {
 		t.Errorf("notification with an ID %v", got[3])

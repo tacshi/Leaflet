@@ -38,6 +38,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
 	"leaflet/internal/recording"
+	"leaflet/internal/rendered"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -489,6 +490,17 @@ func (p *pubLink) render(job pubJob) {
 			}
 		}
 	}
+	// Only the page's own files and recordings go out: a block may name
+	// any, as one an editor of the page wrote could.
+	own, ownPaths := map[string]bool{}, map[string]bool{}
+	for _, f := range job.files {
+		if f.PageID == job.page {
+			own[f.ID] = true
+			if lp := localPath(f.ID); lp != "" {
+				ownPaths[lp] = true
+			}
+		}
+	}
 	prefix := "/" + job.token + "/"
 	page := doc.PageHTML(job.title, c, doc.HTMLOptions{
 		Head: job.head,
@@ -498,9 +510,15 @@ func (p *pubLink) render(job pubJob) {
 				return ""
 			}
 			// An uploaded file's url is a path on the device that uploaded
-			// it: this device keeps its copy elsewhere.
-			if lp := localPath(n.Str("file_id")); lp != "" {
-				local = lp
+			// it: this device keeps its copy elsewhere, or none.
+			if id := n.Str("file_id"); id != "" {
+				if !own[id] {
+					return ""
+				}
+				local = localPath(id)
+			}
+			if !ownPaths[local] {
+				return ""
 			}
 			ext := strings.ToLower(filepath.Ext(local))
 			if !doc.ImageExts[ext] {
@@ -548,12 +566,20 @@ func (p *pubLink) render(job pubJob) {
 				if f.ID != n.Str("file_id") {
 					continue
 				}
+				// Another page's file is named as the block names it, and
+				// is neither served nor said to be missing.
+				if !own[f.ID] {
+					if name == "" {
+						name = locales.CardFile()
+					}
+					return "", name, ""
+				}
 				name = f.Name
 				path := localPath(f.ID)
 				if _, err := os.Stat(path); path == "" || err != nil {
 					break
 				}
-				served := strconv.Itoa(len(files)+1) + strings.ToLower(filepath.Ext(f.Name))
+				served := strconv.Itoa(len(files)+1) + servedExt(f.Name)
 				files[served] = pubFile{typ: "application/octet-stream", path: path, name: f.Name}
 				detail = humanSize(f.SizeBytes)
 				if kind := strings.ToUpper(strings.TrimPrefix(filepath.Ext(f.Name), ".")); kind != "" {
@@ -568,6 +594,10 @@ func (p *pubLink) render(job pubJob) {
 		},
 		Recording: func(n *doc.Node) doc.RecordingView {
 			rec, err := job.st.Recording(n.Str("recording_id"))
+			// Another page's recording shows its block's title alone.
+			if err == nil && rec.PageID != job.page {
+				return doc.RecordingView{Title: recordingName(n, store.Recording{}, false, job.title)}
+			}
 			v := doc.RecordingView{Title: recordingName(n, rec, err == nil, job.title)}
 			if err != nil {
 				return v
@@ -604,6 +634,19 @@ func (p *pubLink) render(job pubJob) {
 	}
 	p.shown = job.seq
 	p.snap = pubSnapshot{html: page, files: files, embeds: embeds, blocks: blocks}
+}
+
+// servedExt is the extension a file of name is served with, in lower
+// case: one of letters and digits alone, which its address takes as it
+// is, or none.
+func servedExt(name string) string {
+	ext := strings.ToLower(filepath.Ext(name))
+	for _, r := range strings.TrimPrefix(ext, ".") {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return ""
+		}
+	}
+	return ext
 }
 
 // pubHead is the visitor page's look, with the app's icon under prefix,
@@ -829,9 +872,9 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			}
 			serve("text/html; charset=utf-8", page)
 		case rest == "math.js":
-			serve("text/javascript; charset=utf-8", katexJS+"\n"+mathScript)
+			serve("text/javascript; charset=utf-8", rendered.KatexJS+"\n"+mathScript)
 		case rest == "diagram.js":
-			serve("text/javascript; charset=utf-8", peleModule+"\n"+zoomScript+"\n"+diagramScript)
+			serve("text/javascript; charset=utf-8", rendered.PeleModule+"\n"+rendered.ZoomScript+"\n"+diagramScript)
 		case rest == "comments.js":
 			serve("text/javascript; charset=utf-8", commentsScript)
 		case rest == "embed.js":
@@ -849,7 +892,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			}
 			// The embed runs in an opaque origin even when opened alone,
 			// and reaches nothing but itself.
-			h.Set("Content-Security-Policy", embedCSP+"; sandbox allow-scripts; frame-ancestors 'self'")
+			h.Set("Content-Security-Policy", rendered.EmbedCSP+"; sandbox allow-scripts; frame-ancestors 'self'")
 			serve("text/html; charset=utf-8", pubEmbedPage(src))
 		case strings.HasPrefix(rest, "f/"):
 			f, ok := snap.files[strings.TrimPrefix(rest, "f/")]
@@ -1069,17 +1112,14 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 var pubAnswerWait = 15 * time.Second
 
 // pubEmbedPage is an embed's HTML for a visitor's sandboxed frame: in the
-// visitor's light or dark, as embedPage gives it the app's, and telling
+// visitor's light or dark, as rendered.EmbedPage gives it the app's, and telling
 // the page how tall it is, so its frame grows to fit.
 func pubEmbedPage(src string) string {
-	meta := `<meta charset="utf-8"><meta name="color-scheme" content="light dark">` + embedNoRTC +
-		`<script>document.documentElement.dataset.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";</script>` + embedFit
-	return leadWith(meta, src)
+	meta := `<meta charset="utf-8"><meta name="color-scheme" content="light dark">` + rendered.EmbedNoRTC +
+		`<script>document.documentElement.dataset.theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";</script>` + rendered.EmbedFit
+	return rendered.LeadWith(meta, src)
 }
 
-// embedScript grows each embed's frame to the height its content says,
-// as the app's embed blocks grow, from the height the block keeps up to
-// 1200 pixels.
 // recordingScript plays a recording from a line of its transcript, as a
 // click on one does in the app, unless the click ends selecting text.
 const recordingScript = `document.addEventListener("click", function (e) {
@@ -1093,6 +1133,9 @@ const recordingScript = `document.addEventListener("click", function (e) {
 });
 `
 
+// embedScript grows each embed's frame to the height its content says,
+// as the app's embed blocks grow, from the height the block keeps up to
+// 1200 pixels.
 const embedScript = `addEventListener("message", function (e) {
   var z = e.data && e.data.leafletSize;
   if (!z || typeof z[0] !== "number") return;
@@ -1107,7 +1150,7 @@ const mathScript = `document.querySelectorAll(".math[data-tex]").forEach(functio
 });`
 
 // diagramScript draws the page's diagrams with Pele and zooms them with
-// zoomScript, which come before it. Each has a button that shows it alone,
+// rendered.ZoomScript, which come before it. Each has a button that shows it alone,
 // filling the window, to zoom and move about it with the app's bar.
 const diagramScript = `{
   const word = (n) => document.querySelector('meta[name="leaflet-' + n + '"]')?.content || "";

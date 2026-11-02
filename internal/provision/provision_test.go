@@ -27,6 +27,8 @@ type fakeProject struct {
 	created  string
 	restored []string
 	members  string
+	// broken is a project whose migrations can't be listed.
+	broken string
 }
 
 func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
@@ -57,8 +59,8 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			f.created = body.Name
 			_, _ = io.WriteString(w, `{"ref":"made","name":"Leaflet","status":"COMING_UP"}`)
-		case path == "/v1/projects/paused/restore":
-			f.restored = append(f.restored, "paused")
+		case strings.HasSuffix(path, "/restore"):
+			f.restored = append(f.restored, strings.Split(path, "/")[3])
 		case path == "/v1/projects/paused":
 			_, _ = io.WriteString(w, `{"ref":"paused","name":"Leaflet 2","status":"ACTIVE_HEALTHY"}`)
 		case path == "/v1/projects/made":
@@ -69,6 +71,10 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 			_ = json.NewEncoder(w).Encode(map[string]string{"ref": "made", "name": "Leaflet", "status": st})
 		case strings.HasSuffix(path, "/database/migrations"):
 			ref := strings.Split(path, "/")[3]
+			if ref == f.broken {
+				http.Error(w, "unavailable", http.StatusServiceUnavailable)
+				return
+			}
 			_ = json.NewEncoder(w).Encode(f.applied[ref])
 		case strings.HasSuffix(path, "/database/query"):
 			var body struct{ Query string }
@@ -191,7 +197,10 @@ func TestSetupAppliesWhatIsMissing(t *testing.T) {
 	}
 	api := f.serve(t)
 	var steps [][2]int
-	hash, err := Setup(context.Background(), api, "p", "", func(done, total int) { steps = append(steps, [2]int{done, total}) })
+	if err := Setup(context.Background(), api, "p", func(done, total int) { steps = append(steps, [2]int{done, total}) }); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := FunctionsHash()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +223,7 @@ func TestSetupAppliesWhatIsMissing(t *testing.T) {
 	for _, s := range f.secrets {
 		names = append(names, s.Name)
 	}
-	if strings.Join(names, ",") != "OTHER,"+hashName(hash) {
+	if strings.Join(names, ",") != "OTHER,"+hashName(FunctionsVersion, hash) {
 		t.Errorf("secrets %v", names)
 	}
 
@@ -225,9 +234,113 @@ func TestSetupAppliesWhatIsMissing(t *testing.T) {
 		f.applied["p"] = append(f.applied["p"], supabaseapi.Migration{Version: m.Version})
 	}
 	f.queries, f.deployed = nil, nil
-	again, err := Setup(context.Background(), api, "p", "", nil)
-	if err != nil || again != hash || len(f.queries) != 0 || len(f.deployed) != 0 {
+	if err := Setup(context.Background(), api, "p", nil); err != nil || len(f.queries) != 0 || len(f.deployed) != 0 {
 		t.Errorf("set up again: %v, %d queries, deployed %v", err, len(f.queries), f.deployed)
+	}
+}
+
+// An older build never deploys over newer functions, and a newer one
+// replaces older ones, the one from before the secret named its version
+// too. Functions of the same version stay, whatever their hash, so two
+// builds never take turns; only a development build deploys over them.
+func TestSetupNeverDowngrades(t *testing.T) {
+	all, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := FunctionsHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}}
+	for _, m := range all {
+		f.applied["p"] = append(f.applied["p"], supabaseapi.Migration{Version: m.Version})
+	}
+	api := f.serve(t)
+	setup := func(secret string) []string {
+		t.Helper()
+		f.secrets, f.deployed = []supabaseapi.Secret{{Name: secret, Value: "digest"}}, nil
+		if err := Setup(context.Background(), api, "p", nil); err != nil {
+			t.Fatal(err)
+		}
+		var names []string
+		for _, s := range f.secrets {
+			names = append(names, s.Name)
+		}
+		return names
+	}
+	other := "FEDCBA9876543210"
+	for _, newer := range []string{hashName(FunctionsVersion+1, other), hashName(FunctionsVersion, other)} {
+		if names := setup(newer); len(f.deployed) != 0 || len(names) != 1 || names[0] != newer {
+			t.Errorf("over %s: deployed %v, secrets %v", newer, f.deployed, names)
+		}
+	}
+	for _, older := range []string{hashName(FunctionsVersion-1, other), hashSecret + other} {
+		if names := setup(older); len(f.deployed) != len(Functions) || len(names) != 1 || names[0] != hashName(FunctionsVersion, hash) {
+			t.Errorf("over %s: deployed %v, secrets %v", older, f.deployed, names)
+		}
+	}
+
+	ProjectName = DevProjectName
+	t.Cleanup(func() { ProjectName = "Leaflet" })
+	if setup(hashName(FunctionsVersion, other)); len(f.deployed) != len(Functions) {
+		t.Errorf("a development build left other functions of its version: deployed %v", f.deployed)
+	}
+	if setup(hashName(FunctionsVersion, hash)); len(f.deployed) != 0 {
+		t.Errorf("a development build deployed its own again: %v", f.deployed)
+	}
+}
+
+// functionsHashes are FunctionsHash at each FunctionsVersion. Changing
+// supabase/functions raises FunctionsVersion by one and adds its hash
+// here; a released version's hash never changes.
+var functionsHashes = map[int]string{
+	1: "6c7a63f55f1a88ba9ced2e8085b35cf1e781c73438e276ef73709cefef78836b",
+}
+
+// FunctionsVersion goes up with every change to the functions: a build
+// with other functions at the same version would neither deploy them nor
+// have them deployed.
+func TestFunctionsVersion(t *testing.T) {
+	hash, err := FunctionsHash()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if functionsHashes[FunctionsVersion] != hash {
+		t.Errorf("supabase/functions changed: raise FunctionsVersion to %d and add %d: %q to functionsHashes", FunctionsVersion+1, FunctionsVersion+1, hash)
+	}
+	for v := 1; v <= FunctionsVersion; v++ {
+		if functionsHashes[v] == "" {
+			t.Errorf("no hash for FunctionsVersion %d", v)
+		}
+	}
+}
+
+// A project named as Leaflet's whose migrations can't be listed fails
+// Find, rather than being left out, which would offer to make another;
+// another of the account's is left out.
+func TestFindFailsOnAProjectItCantCheck(t *testing.T) {
+	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"new": {{Version: FirstMigration}}}, broken: "old"}
+	api := f.serve(t)
+	if found, err := Find(context.Background(), api); err == nil {
+		t.Errorf("found %+v", found)
+	}
+	f.broken = "other"
+	if found, err := Find(context.Background(), api); err != nil || len(found.Projects) != 1 || found.Projects[0].Ref != "new" {
+		t.Errorf("found %+v, %v", found, err)
+	}
+}
+
+// A project that was pausing is restored once it has paused.
+func TestReadyRestoresOncePaused(t *testing.T) {
+	old := pollEvery
+	pollEvery = time.Millisecond
+	t.Cleanup(func() { pollEvery = old })
+	f := &fakeProject{status: []string{"PAUSING", "INACTIVE", "INACTIVE", "RESTORING", "ACTIVE_HEALTHY"}}
+	api := f.serve(t)
+	p, err := Ready(context.Background(), api, supabaseapi.Project{Ref: "made", Status: "PAUSING"})
+	if err != nil || !p.Healthy() || strings.Join(f.restored, ",") != "made" {
+		t.Errorf("ready %+v, %v, restored %v", p, err, f.restored)
 	}
 }
 

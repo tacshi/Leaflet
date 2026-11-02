@@ -12,6 +12,7 @@
   <a href="https://github.com/tacshi/Leaflet/releases/latest"><img src="https://img.shields.io/github/v/release/tacshi/Leaflet?sort=semver&label=release" alt="最新リリース"></a>
   <a href="#動作環境"><img src="https://img.shields.io/badge/macOS-12%2B-000000?logo=apple&logoColor=white" alt="macOS 12 以降"></a>
   <a href="#動作環境"><img src="https://img.shields.io/badge/Windows-x64%20%7C%20arm64-0078D4?logo=windows&logoColor=white" alt="Windows x64 と arm64"></a>
+  <a href="#ios"><img src="https://img.shields.io/badge/iOS%20%7C%20iPadOS-26%2B%20(in%20progress)-000000?logo=apple&logoColor=white" alt="iOS と iPadOS 26 以降（開発中）"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go 1.27"></a>
   <a href="#アプリ外のエージェント-mcp"><img src="https://img.shields.io/badge/MCP-supported-6E56CF" alt="MCP 対応"></a>
   <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-MyGo-F2545B" alt="MyGo で構築"></a>
@@ -65,10 +66,11 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 
 - `@agent` で、行内、選択範囲、サイドチャット、コメントスレッドからエージェント
   に頼めます。
-- すべての編集は検証済みのツール呼び出し（`read_page`、`insert_blocks`、
-  `replace_block`、`move_block`、`delete_blocks`、`create_subpage`）で、
-  履歴のスナップショットを取ってからページにストリーミングされ、1 回の取り消し
-  単位になります。
+- すべての編集は検証済みのツール呼び出し（`read_page`、`write_markdown`、
+  `insert_blocks`、`replace_block`、`move_block`、`delete_blocks`、
+  `create_subpage`、ほかのページの読み取りがオンなら `list_pages` と
+  `read_other_page` も）で、履歴のスナップショットを取ってからページに
+  ストリーミングされ、1 回の取り消し単位になります。
 - OpenAI 互換のプロバイダならどれでも使えます：OpenAI、Claude、xAI、
   OpenRouter、DeepSeek、GLM のプリセット、ChatGPT Plus / Pro でのサインイン、
   カスタムエンドポイント、そしてオフラインでエージェントを動かせる Ollama、
@@ -81,11 +83,15 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 - 再生とタイムスタンプ付きの文字起こしを備えた録音ブロック。
 - Soniox、または自分のネットワーク内のものを含む任意の OpenAI 互換
   `/audio/transcriptions` エンドポイントによるリアルタイム文字起こし。
+- システム自身の音声認識による、デバイス上での文字起こし（オフライン、キー
+  不要）：macOS 26 以降の Mac と、iPhone と iPad で使えます。
 
 ### 共有と同期
 
-- ブロックに紐づくコメントスレッドと、閲覧者・編集者とのページ共有（サブページ
-  に継承されます）。
+- ブロックに紐づくコメントスレッドと、Mac と PC で Leaflet を開いている間、
+  リンクを知っている人全員、または指定したアドレスの人だけにページを見せる
+  一時的な公開リンク。サーバーは閲覧者・編集者とのページ共有（サブページに
+  継承されます）にも対応していますが、まだどのアプリからも使えません。
 - オフラインファースト：すべて SQLite に保存され、オンラインになると送信トレイ
   を通じて同期されます。別々に行われた編集はブロック単位でマージされ、競合が
   あれば通知とともにもう一方のバージョンを戻す手段が示されます。
@@ -101,11 +107,15 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 ## 動作環境
 
 - macOS 12 以降（Apple シリコンまたは Intel）、または x64 / arm64 の Windows。
-- ソースからビルドするには Go 1.27.3 以降。cgo や C コンパイラは不要です。
-  リリースビルドには、macOS では Xcode、Windows インストーラには NSIS も
+- ソースからビルドするには Go 1.27.3 以降。Go のコードに cgo や C
+  コンパイラは不要です。Mac アプリのオンデバイス音声認識ヘルパー
+  （[`macos/speech`](macos/speech)）は Swift で書かれ、`scripts/build-speech.sh`
+  が Xcode 26 以降（macOS 26 SDK）でビルドします。Xcode でビルドできない環境
+  では、デバッグビルドはヘルパーなしで続行し、リリースビルドには必須です
+  （署名と公証にも Xcode が必要です）。Windows インストーラには NSIS が
   必要です。
 - iCloud 同期には iCloud Drive をオンにしておく必要があります。
-- サーバー経由の同期、共有、クラウドモデルには [Supabase](https://supabase.com)
+- サーバー経由の同期とクラウドモデルには [Supabase](https://supabase.com)
   のアカウントが必要です：**Supabase で続ける** がその中のプロジェクトを見つけるか作成し、
   [`supabase/`](supabase/README.md) の内容で設定します。アカウントがなければ、
   Leaflet はデバイス上だけで動作します。
@@ -125,8 +135,8 @@ go tool mygo dev
 ```
 
 サーバーがない場合、Leaflet はこのデバイスだけで動作します。ページ、編集、
-コメント、ローカルモデル、ネットワーク内の文字起こしサーバーはすべて使え、
-サインイン、同期、共有、クラウドモデル、クラウドの文字起こしは非表示になるか、
+コメント、公開リンク、ローカルモデル、ネットワーク内の文字起こしサーバーは
+すべて使え、サインイン、同期、クラウドモデル、クラウドの文字起こしは非表示になるか、
 その場で理由が説明されます。
 
 どのビルドでも Supabase でサインインできます。OAuth アプリのクライアント ID は組み込まれ、
@@ -141,11 +151,26 @@ SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key> go tool 
 API キーなしでエージェントを試すには、ローカルのモデルサーバー（たとえば
 `ollama serve` と `qwen3:8b`）を動かし、設定 › エージェントプロバイダ で追加します。
 
-保存されている言語を変えずに、別の言語でアプリを起動するには：
+`go tool mygo dev` で Mac 自身による文字起こしを使うには、先に
+`scripts/build-speech.sh` で音声認識ヘルパーをビルドします（Xcode 26 以降が
+必要です）。
+
+### iOS
+
+iPhone と iPad のアプリは [`ios/`](ios) にあり、開発中です。デスクトップ
+アプリと同じ Go のコアをリンクし、gomobile が [`mobile`](mobile) パッケージ
+を通じて Swift にバインドします。Xcode 27 と
+[XcodeGen](https://github.com/yonaskolb/XcodeGen) が必要です：
 
 ```bash
-go tool mygo dev -lang ja
+make ios-core     # Go のコア：ios/build/LeafletCore.xcframework
+make ios-project  # ios/project.yml から ios/Leaflet.xcodeproj を生成
+make ios-test     # iPhone と iPad のシミュレータでアプリのテストを実行
 ```
+
+そのあと `ios/Leaflet.xcodeproj` を開きます。実機で動かすには、git が無視する
+`ios/Config/Local.xcconfig` にチームを設定します：
+`DEVELOPMENT_TEAM = <チーム ID>`。
 
 ### データ
 
@@ -167,12 +192,13 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 
 | ツール | 内容 |
 | --- | --- |
-| `list_pages`、`search_pages` | タイトルと本文でページを探す |
+| `list_pages`、`search_pages` | タイトル、タグ、本文でページを、また録音やコメントを探す |
 | `read_page` | ページのブロックを ID 付きで読む |
 | `create_page`、`rename_page` | ページの作成と名前の変更 |
+| `set_page_tags` | ページのタグを設定する |
 | `move_page` | ページをフォルダや別のページの中、またはトップレベルへ移動する |
 | `create_folder`、`rename_folder` | フォルダの作成と名前の変更 |
-| `insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | アプリ内のエージェントと同じようにページを編集する |
+| `write_markdown`、`insert_blocks`、`replace_block`、`move_block`、`delete_blocks` | アプリ内のエージェントと同じようにページを編集する |
 
 このサーバーはアプリと同じデータベースを開くので、アプリが開いていても閉じて
 いても動作します。閲覧のみで共有されたページは読み取り専用です。エージェントが
@@ -188,48 +214,83 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 
 ## ビルドとリリース
 
-`go tool mygo build` はアプリを `build/` にビルドします。スクリプトはデフォルト
-で macOS 向けに、`--win` を付けると Windows 向けにビルドします：
+`go tool mygo build` はアプリを `build/` にビルドします。リリース用スクリプトは、
+`--mac` か `--win` でどちらかを選ばない限り macOS と Windows の両方に向けて
+ビルドします。デバッグ用スクリプトは macOS 向けに、`--win` を付けると Windows
+向けにビルドします：
 
 | スクリプト | ビルドするもの |
 | --- | --- |
 | `scripts/build-debug.sh [--mac\|--win] [--open]` | Leaflet Debug という名前のデバッグビルド。独自の識別子とデータフォルダを持ち、自動アップデートしないため、リリース版と並べて動かせます |
 | `scripts/build-release.sh [--mac] [--win] [<version>]` | 署名・公証済みの Apple シリコン用、Intel 用、ユニバーサルのディスクイメージと、Windows x64 / arm64 用インストーラ、署名付きのアップデートアーカイブ |
-| `scripts/publish.sh <version> [--mac] [--win] [--dry-run]` | GitHub リリース：チェック、`CHANGELOG.md` からのリリースノート、ビルド、タグ付け、公開 |
+| `scripts/publish.sh <version> [--mac\|--win] [--dry-run]` | macOS と Windows、または指定した方の GitHub リリース：チェック、`CHANGELOG.md` からのリリースノート、ビルド、タグ付け、公開 |
 
-どのスクリプトも `--help` でオプションを表示します。macOS のリリースには
-Developer ID Application の証明書と `notarytool` のキーチェーンプロファイル、
-Windows インストーラには NSIS（`brew install makensis`）、すべてのリリースには
-アップデート署名鍵が必要です。それぞれ `scripts/build-release.sh --help` で
-説明しています。
+Windows では、PowerShell 7 のスクリプトがそのマシン上で Windows アプリを
+ビルドします。NSIS がインストールされていなければ MyGo がダウンロードし、
+署名には Windows SDK の `signtool` を使います：
+
+| スクリプト | ビルドするもの |
+| --- | --- |
+| `scripts\build-debug.ps1 [-Arch arm64\|x64] [-Open]` | `build-debug.sh --win` と同じく Leaflet Debug |
+| `scripts\build-release.ps1 [<version>] [-Arch …] [-Upload]` | `build-release.sh --win` と同じく、x64 と arm64 のインストーラと署名付きのアップデートアーカイブ |
+
+どのスクリプトも `--help` で、`.ps1` のものは `Get-Help` でオプションを表示
+します。macOS のリリースには Developer ID Application の証明書と
+`notarytool` のキーチェーンプロファイル、Windows インストーラには NSIS
+（`brew install makensis`）、すべてのリリースにはアップデート署名鍵が必要です。
+それぞれ `scripts/build-release.sh --help` で説明しています。署名されていない
+Windows インストーラや `--skip-notarize` でビルドした macOS のものは、
+`--allow-unsigned`（`-AllowUnsigned`）か `LEAFLET_ALLOW_UNSIGNED=1` で
+公開すると明示しない限りアップロードされません。
+
+`SUPABASE_URL` と `SUPABASE_ANON_KEY` が 1 回の実行にサーバーを指定するように、
+ビルドにサーバーを 1 つ組み込むには、その URL と Publishable キーを
+`MYGO_LDFLAGS` でリンカに渡します。`go tool mygo build` とスクリプトはこれを
+そのまま渡します：
+
+```bash
+MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://<ref>.supabase.co -X leaflet/internal/remote.DefaultAnonKey=<publishable key>" scripts/build-release.sh
+```
 
 ## 開発
 
 ```bash
 go test ./...                                # モデル、マージ、ストア、同期、エディタ、エージェント
 make check                                   # gofmt、golangci-lint、govulncheck、gosec
+make ios-check                               # swift-format、SwiftLint、osv-scanner、mobsfscan
 make clean                                   # build/ と go build が残すバイナリを削除
+scripts/check-migrations.sh                  # すべてのマイグレーションを順に Supabase の Postgres に適用（Docker）
 cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 ```
 
 エディタのテストは `ui.NewTester` でビューをヘッドレスに動かします。
-[`docs/protocol.md`](docs/protocol.md) はアプリとバックエンドの取り決めです：
-ドキュメント形式、エージェントのツール、保存と同期のルール。
 
 アプリのテキストは [`locales/`](locales) にある MyGo のカタログで、言語ごとに
 1 ファイル（`en.json`、`zh-Hans.json`、`ja.json`）です。`go tool mygo dev`
 と `go tool mygo build` がここから `locales/catalog_gen.go` を生成するので、
 カタログと一緒にコミットしてください。`go tool mygo i18n check` でカタログを
-検査できます。言語を追加するには、BCP 47 タグを名前にしたカタログを追加します。
+検査でき、`go tool mygo dev -lang ja` を使うと、保存されている言語を変えずに
+別の言語でアプリを起動できます。言語を追加するには、BCP 47 タグを名前にした
+カタログを追加します。
+[`docs/protocol.md`](docs/protocol.md) はアプリとバックエンドの取り決めです：
+ドキュメント形式、エージェントのツール、保存と同期のルール。
 
 ## プロジェクト構成
 
 | パス | 内容 |
 | --- | --- |
 | `main.go` | エントリポイント：アプリと `leaflet mcp` |
+| `mobile` | iOS アプリ向けの Go コアの API。gomobile で Swift にバインドされます |
+| `internal/core` | Leaflet の各部分を開いてつなぐ処理（デスクトップと iOS のアプリで共通）、サインインとサインアウト |
+| `internal/live` | アプリで開いているページ：入力内容の保存と、その間に同期やエージェントから届いた内容のマージ |
 | `internal/app` | ウィンドウ、シェル、サイドバー、ページ画面、パネル、ダイアログ、設定 |
 | `internal/editor` | ブロックエディタ：モデル、編集、レイアウト、入力、ブロック |
 | `internal/doc` | ページのドキュメントモデル：ブロック、差分、インライン Markdown、操作、ブロック単位のマージ、Markdown 書き出し |
+| `internal/menu`、`internal/shortcut` | `/` と `@` のメニューの項目と、ページで入力した Markdown の変換（両アプリのエディタで共通） |
+| `internal/rendered` | 数式（KaTeX）とダイアグラム（Pele）を描画するページ。ネットワークのないフレームで動きます |
+| `internal/starters` | Leaflet に付属するテンプレート |
+| `internal/export` | すべてのページを、画像、ファイル、録音とともに Markdown の zip に書き出す |
+| `internal/web` | リンクカード、画像、動画の情報を、公開アドレスからだけ読み込む |
 | `internal/store` | SQLite（純 Go）のテーブル、送信トレイ、設定 |
 | `internal/remote` | HTTP 経由の Supabase：Auth、PostgREST、Storage、Edge Functions |
 | `internal/sync` | 送信トレイのプッシュ、プル、アカウントの引き継ぎ、デバイスのハートビート（Supabase または iCloud Drive 経由） |
@@ -237,31 +298,40 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/provision` | 本人の Leaflet プロジェクトの検索、作成、設定：マイグレーションと Edge Functions |
 | `internal/oauth` | ブラウザでのサインインのうちこのデバイス側の部分：ループバックのリダイレクトと PKCE |
 | `internal/icloud` | iCloud Drive の Leaflet フォルダ：まるごと書き込むファイルと、iCloud へのダウンロードの依頼 |
+| `internal/keychain` | システムのキーチェーンにあるアプリのシークレット。1 回の起動で読むのは多くても 1 度 |
 | `internal/agents` | OpenAI 互換クライアント、プリセット、プロンプト、ページツール、ループ、ハブ |
 | `internal/mcp` | `leaflet mcp`：アプリ外のエージェント向けページツール |
 | `internal/recording` | キャプチャ、WAV、Soniox ストリーミング、エンドポイントでの文字起こし |
+| `internal/macspeech`、`macos/speech` | Mac 自身の音声認識による文字起こし。Mac アプリに同梱する Swift のヘルパー `leaflet-speech` を通じて行います |
 | `internal/theme` | 色、フォント、アイコン |
 | `locales` | 各言語のアプリのテキストと、そこから生成される Go コード |
-| `scripts` | デバッグビルドとリリースビルド、GitHub Releases への公開 |
+| `scripts` | デバッグビルドとリリースビルド、GitHub Releases への公開、マイグレーションの検査 |
 | `supabase` | マイグレーション（テーブル、行レベルセキュリティ、RPC、Vault）と Edge Functions |
 | `worker` | Cloudflare 上のサインイン用 Worker：OAuth のリダイレクトページと、クライアントシークレットを持つトークン交換 |
 | `docs` | プロトコル、ユーザーストーリー、アイコンのソース |
+| `ios` | iPhone と iPad のアプリ：SwiftUI と UIKit、その XcodeGen プロジェクトとビルドスクリプト |
 
 マイクのキャプチャは、アプリ独自の `leaflet-rec://` スキーム上の小さなページで
 動きます。これはシステムの Web ビューがマイクの使用を許すセキュアコンテキストな
-ので、アプリにネイティブの音声コードは要りません。埋め込み、数式、ダイアグラムは
-ネットワークを許さないコンテンツセキュリティポリシーの下、サンドボックス化された
-フレームで動き、アプリの Go コードを呼び出すことはできません。
+ので、音声のキャプチャにネイティブのコードは要りません。埋め込み、数式、
+ダイアグラムはネットワークを許さないコンテンツセキュリティポリシーの下、
+サンドボックス化されたフレームで動き、アプリの Go コードを呼び出すことは
+できません。このポリシーが対象としない WebRTC は、Web ビューが CSP の
+`webrtc` ディレクティブを理解する場合はそれで遮断し、そうでない場合は埋め込みの
+スクリプトが動く前にフレームから取り除きます（できる限りにおいて）。
 
 ## 既知の制限
 
 - リアルタイムの共同編集は未実装です：ページはブロック単位で同期・マージされます。
-- オンデバイスの音声認識（Qwen3-ASR、sherpa-onnx 経由の SenseVoice）は、
-  sherpa-onnx がネイティブライブラリを必要とするため移植していません。代わりに
-  ネットワーク内の OpenAI 互換エンドポイントでモデルを提供してください。
+- オープンなモデルによるオンデバイスの音声認識（Qwen3-ASR、sherpa-onnx 経由の
+  SenseVoice）は、sherpa-onnx がネイティブライブラリを必要とするため移植して
+  いません。代わりに、macOS 26 以降の Mac と iPhone、iPad では、システム自身の
+  音声認識がデバイス上で文字起こしします。Windows と古い Mac では、ネットワーク
+  内の OpenAI 互換エンドポイントでモデルを提供してください。
   MOSS-Transcribe-Diarize も同様です。
-- サードパーティアプリでの OpenAI と Claude のアカウントによるサインインは確認
-  できていないため、これらのプロバイダは API キーを使います。
+- サードパーティアプリでの Claude のアカウントによるサインインは確認できて
+  いないため、Claude は API キーを使います。OpenAI も API キーを使うか、
+  ChatGPT Plus / Pro でサインインします。
 
 ## 謝辞
 
@@ -272,5 +342,5 @@ SIL Open Font License の [Figtree](https://github.com/erikdkennedy/figtree)
 [Lucide](https://lucide.dev) アイコン（`internal/theme/icons/LICENSE`）、
 数式とダイアグラムのための MIT ライセンスの [KaTeX](https://katex.org) と
 [Pele](https://github.com/obsidianmd/pele)
-（[`internal/app/third_party`](internal/app/third_party/README.md)）を同梱
+（[`internal/rendered/third_party`](internal/rendered/third_party/README.md)）を同梱
 しています。

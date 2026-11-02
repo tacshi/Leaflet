@@ -3,14 +3,21 @@ package recording
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/coder/websocket"
+
+	"leaflet/internal/doc"
+	"leaflet/internal/remote"
+	"leaflet/internal/store"
 )
 
 // Audio recorded while the stream connects reaches it first, in order; a
@@ -50,8 +57,8 @@ func TestSonioxGetsTheOpeningAudio(t *testing.T) {
 	r.chunk("old", []byte{9, 9})
 	s := dial()
 	r.attachSoniox("s1", s)
-	if r.soniox != s || r.connecting || len(r.early) != 0 {
-		t.Fatalf("not attached: %v %v %d", r.soniox == s, r.connecting, len(r.early))
+	if r.stream != s || r.connecting || len(r.early) != 0 {
+		t.Fatalf("not attached: %v %v %d", r.stream == s, r.connecting, len(r.early))
 	}
 	r.chunk("s1", []byte{3, 3})
 	for _, want := range [][]byte{{1, 1}, {2, 2}, {3, 3}} {
@@ -66,10 +73,10 @@ func TestSonioxGetsTheOpeningAudio(t *testing.T) {
 	}
 
 	// The next recording started before this stream connected.
-	r.session, r.soniox, r.connecting = "s2", nil, true
+	r.session, r.stream, r.connecting = "s2", nil, true
 	late := dial()
 	r.attachSoniox("s1", late)
-	if r.soniox != nil || !r.connecting {
+	if r.stream != nil || !r.connecting {
 		t.Error("a stream for the last recording took this one")
 	}
 }
@@ -139,27 +146,6 @@ func TestSonioxKeepsAliveAndTellsALostStream(t *testing.T) {
 	<-s.done
 	if s.Lost() == nil {
 		t.Error("a stream the server ended was not lost")
-	}
-}
-
-// Chunks that come in out of order are written in order, each once; one
-// that never comes is given up on.
-func TestChunksGoInOrder(t *testing.T) {
-	var got []byte
-	s := &captureSink{chunk: func(pcm []byte) { got = append(got, pcm...) }}
-	for _, seq := range []int{1, 0, 3, 2, 2, 0} {
-		s.deliver(seq, []byte{byte(seq)})
-	}
-	if !bytes.Equal(got, []byte{0, 1, 2, 3}) {
-		t.Fatalf("wrote %v", got)
-	}
-	// 4 never comes.
-	got = nil
-	for seq := 5; seq <= 5+maxHeld; seq++ {
-		s.deliver(seq, []byte{byte(seq)})
-	}
-	if len(got) != maxHeld+1 || got[0] != 5 {
-		t.Fatalf("wrote %v", got)
 	}
 }
 
@@ -301,5 +287,353 @@ func TestFailedForAnotherRecordingIsIgnored(t *testing.T) {
 	r.failed("s2", "denied")
 	if r.State.Starting || r.State.Error == "" {
 		t.Errorf("not ended: %+v", r.State)
+	}
+}
+
+// fakeMic is a microphone whose Stop hands on the audio it still holds,
+// once let go.
+type fakeMic struct {
+	sink    Sink
+	held    []byte
+	letGo   chan struct{}
+	stopped chan struct{}
+	// toggles are its Pauses and Resumes, in order.
+	mu      sync.Mutex
+	toggles []string
+}
+
+func (m *fakeMic) Pause()  { m.toggle("pause") }
+func (m *fakeMic) Resume() { m.toggle("resume") }
+
+func (m *fakeMic) toggle(what string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.toggles = append(m.toggles, what)
+}
+func (m *fakeMic) Stop() {
+	<-m.letGo
+	if m.held != nil {
+		m.sink.Chunk(m.held)
+	}
+}
+func (m *fakeMic) Close() { close(m.stopped) }
+
+// fakeCapture starts fakeMics, the latest last.
+type fakeCapture struct{ mics []*fakeMic }
+
+func (c *fakeCapture) Start(_ int, sink Sink) (Mic, error) {
+	m := &fakeMic{sink: sink, letGo: make(chan struct{}), stopped: make(chan struct{})}
+	c.mics = append(c.mics, m)
+	return m, nil
+}
+
+func newTestController(t *testing.T) (*Controller, *store.Store, *fakeCapture) {
+	t.Helper()
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	r := NewController(st, remote.New(remote.Settings{}, st))
+	c := &fakeCapture{}
+	var mu sync.Mutex
+	r.Attach(c, func(fn func()) {
+		mu.Lock()
+		defer mu.Unlock()
+		fn()
+	})
+	return r, st, c
+}
+
+// The audio a microphone still holds as its recording stops goes to that
+// recording, though the next one has started before it came.
+func TestLastAudioGoesToItsRecording(t *testing.T) {
+	r, _, c := newTestController(t)
+	dir := t.TempDir()
+	first, err := CreateWav(filepath.Join(dir, "first.wav"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.capture(first, store.SttSettings{}, false, State{}); err != nil {
+		t.Fatal(err)
+	}
+	mic := c.mics[0]
+	mic.sink.Started()
+	mic.sink.Chunk([]byte{1, 1})
+	mic.held = []byte{2, 2}
+	r.Stop()
+
+	second, err := CreateWav(filepath.Join(dir, "second.wav"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.capture(second, store.SttSettings{}, false, State{}); err != nil {
+		t.Fatal(err)
+	}
+	close(mic.letGo)
+	<-mic.stopped
+	c.mics[1].sink.Chunk([]byte{3, 3})
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		got, _ := ReadWav(first.Path)
+		if bytes.Equal(got, []byte{1, 1, 2, 2}) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the first recording has %v", got)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if second.bytes != 2 {
+		t.Errorf("the second recording has %d bytes", second.bytes)
+	}
+}
+
+// A recording stopped is transcribing from then on: a Retranscribe
+// before its transcription starts refuses, rather than run beside it.
+func TestStoppedRecordingIsTranscribingAtOnce(t *testing.T) {
+	r, st, c := newTestController(t)
+	stt := store.SttSettings{Provider: "openai-compatible", BaseURL: "http://127.0.0.1:1/v1"}
+	if err := r.Start("p1", stt, false, func(*doc.Node) {}); err != nil {
+		t.Fatal(err)
+	}
+	id := r.State.ID
+	mic := c.mics[0]
+	mic.sink.Started()
+	r.Stop()
+	if !r.Transcribing[id] {
+		t.Error("not transcribing once stopped")
+	}
+	if err := r.Retranscribe(id, stt, false); err == nil {
+		t.Error("a second transcription started")
+	}
+	close(mic.letGo)
+	<-mic.stopped
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if rec, _ := st.Recording(id); rec.Status == "failed" || rec.Status == "ready" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("never finished")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A recording transcribed again before the app gave the recorder its
+// microphone says so, rather than end on no main thread.
+func TestRetranscribeBeforeAttach(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	r := NewController(st, remote.New(remote.Settings{}, st))
+	rec, err := st.CreateRecording("p1", "b1", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Retranscribe(rec.ID, store.SttSettings{Provider: "openai-compatible", BaseURL: "http://127.0.0.1:1/v1"}, true); err == nil {
+		t.Error("transcribing with no main thread")
+	}
+}
+
+// fakeEngine transcribes every file as "hello".
+type fakeEngine struct{}
+
+func (fakeEngine) Stream(string, func(string)) (Stream, error) { return nil, errors.New("no stream") }
+func (fakeEngine) File(string, string) ([]store.Segment, error) {
+	return []store.Segment{{Text: "hello"}}, nil
+}
+
+// While the host looks for the device's engine, it counts as usable, and
+// a transcription waits for it; the transcriptions read it from their own
+// goroutines while the main thread gives it.
+func TestEngineFoundLate(t *testing.T) {
+	r := &Controller{}
+	stt := store.SttSettings{Provider: OnDevice}
+	r.FindingEngine()
+	if err := r.Usable(stt, false); err != nil {
+		t.Errorf("not usable while looking: %v", err)
+	}
+	got := make(chan Engine, 1)
+	go func() { got <- r.waitEngine(context.Background()) }()
+	r.SetEngine(fakeEngine{})
+	if e := <-got; e == nil {
+		t.Error("the transcription did not get the engine")
+	}
+	r.SetEngine(nil)
+	if err := r.Usable(stt, false); err == nil {
+		t.Error("usable with no engine")
+	}
+}
+
+// The live text that comes as a stream starts reaches what is set to
+// take it, however soon it comes.
+func TestSonioxTextBeforeItIsTaken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		c, err := websocket.Accept(w, req, nil)
+		if err != nil {
+			return
+		}
+		_ = c.Write(context.Background(), websocket.MessageText, []byte(`{"tokens":[{"text":"hi","is_final":true}]}`))
+		_, _, _ = c.Read(context.Background())
+	}))
+	defer srv.Close()
+	conn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newSoniox(conn)
+	defer s.Close()
+	texts := make(chan string, 2)
+	s.SetOnText(func(text string) { texts <- text })
+	select {
+	case got := <-texts:
+		if got != "hi" {
+			t.Errorf("text %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no text")
+	}
+}
+
+// A recording stopped before its microphone started recorded nothing: it
+// fails as one whose microphone could not start, and nothing transcribes
+// it.
+func TestStopWhileStarting(t *testing.T) {
+	r, st, c := newTestController(t)
+	stt := store.SttSettings{Provider: "openai-compatible", BaseURL: "http://127.0.0.1:1/v1"}
+	if err := r.Start("p1", stt, false, func(*doc.Node) {}); err != nil {
+		t.Fatal(err)
+	}
+	id := r.State.ID
+	r.Stop()
+	select {
+	case <-c.mics[0].stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the microphone was never let go")
+	}
+	if rec, _ := st.Recording(id); rec.Status != "failed" || rec.Error == "" || r.Transcribing[id] || r.Active() {
+		t.Errorf("recording %+v, transcribing %v, active %v", rec, r.Transcribing[id], r.Active())
+	}
+}
+
+// A recording lasts as long as the audio it saved, not the time it ran.
+func TestDurationIsTheAudios(t *testing.T) {
+	r, st, c := newTestController(t)
+	if err := r.Start("p1", store.SttSettings{}, false, func(*doc.Node) {}); err != nil {
+		t.Fatal(err)
+	}
+	id := r.State.ID
+	mic := c.mics[0]
+	mic.sink.Started()
+	mic.sink.Chunk(make([]byte, 2*SampleRate))
+	mic.held = make([]byte, SampleRate)
+	r.Stop()
+	close(mic.letGo)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		rec, _ := st.Recording(id)
+		if rec.Status == "ready" {
+			if rec.DurationMs != 1500 {
+				t.Errorf("lasts %d ms", rec.DurationMs)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("never ready: %+v", rec)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Pause and Resume reach the microphone off the main thread, and it ends
+// as the last asked for, however fast they come.
+func TestTogglesEndWithTheLast(t *testing.T) {
+	r, _, c := newTestController(t)
+	if err := r.Start("p1", store.SttSettings{}, false, func(*doc.Node) {}); err != nil {
+		t.Fatal(err)
+	}
+	mic := c.mics[0]
+	mic.sink.Started()
+	for range 3 {
+		r.TogglePause()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		mic.mu.Lock()
+		toggles := slices.Clone(mic.toggles)
+		mic.mu.Unlock()
+		if len(toggles) == 3 {
+			if toggles[2] != "pause" {
+				t.Errorf("toggled %v", toggles)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("toggled %v", toggles)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	close(mic.letGo)
+	r.Stop()
+	<-mic.stopped
+}
+
+// A microphone that stalls pauses its recording, saying why; another
+// recording's says nothing.
+func TestStalledPauses(t *testing.T) {
+	r, _, c := newTestController(t)
+	if err := r.Start("p1", store.SttSettings{}, false, func(*doc.Node) {}); err != nil {
+		t.Fatal(err)
+	}
+	mic := c.mics[0]
+	mic.sink.Started()
+	r.stalled("another", "taken")
+	if r.State.Paused || r.State.Error != "" {
+		t.Errorf("another session's microphone paused this one: %+v", r.State)
+	}
+	mic.sink.Stalled("taken")
+	if !r.State.Paused || !strings.Contains(r.State.Error, "taken") {
+		t.Errorf("not paused: %+v", r.State)
+	}
+	close(mic.letGo)
+	r.Stop()
+	<-mic.stopped
+}
+
+// lostStream is a live stream that ended before Finish, having heard part
+// of the recording.
+type lostStream struct{}
+
+func (lostStream) Send([]byte) {}
+func (lostStream) Finish() ([]store.Segment, error) {
+	return []store.Segment{{EndMs: 1000, Text: "Hello"}}, nil
+}
+func (lostStream) Close()      {}
+func (lostStream) Lost() error { return errors.New("dropped") }
+
+// A stream lost before Finish keeps the words it heard, but the recording
+// fails, to transcribe again from its audio.
+func TestLostBeforeFinish(t *testing.T) {
+	r, st, _ := newTestController(t)
+	rec, err := st.CreateRecording("p1", "b1", "soniox", "", "", "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.finish(rec, "", lostStream{}, store.SttSettings{Provider: "soniox"})
+	got, _ := st.Recording(rec.ID)
+	if got.Status != "failed" || !strings.Contains(got.Error, "dropped") || len(got.Transcript) != 1 || r.Transcribing[rec.ID] {
+		t.Errorf("recording %+v, transcribing %v", got, r.Transcribing[rec.ID])
 	}
 }

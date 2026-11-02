@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   type BlockSpec,
+  codeLanguage,
   deltaToMarkdown,
   isPageContent,
   markdownToDelta,
@@ -13,8 +14,14 @@ import {
   specToNode,
   tableRows,
 } from "./blocks.ts";
-import { applyOps, type Op, overwrites, PageEditSession, type ToolHooks } from "./tools.ts";
+import { applyOps, type Op, overwrites, PageEditSession, type ToolHooks, URL_RE } from "./tools.ts";
 import { tokensToSegments } from "./segments.ts";
+import runOps from "./testdata/run_ops.json" with { type: "json" };
+import views from "./testdata/views.json" with { type: "json" };
+import specs from "./testdata/specs.json" with { type: "json" };
+import markdown from "./testdata/markdown.json" with { type: "json" };
+import agent from "./testdata/agent.json" with { type: "json" };
+import { markdownSpecs } from "./lines.ts";
 
 const hooks: ToolHooks = {
   readPage: (content) => Promise.resolve({ blocks: pageViews(content) }),
@@ -152,9 +159,18 @@ Deno.test("edit session applies tools and records replayable ops", async () => {
   const replayed = applyOps(session.before, session.ops, 1000);
   assertEquals(shape(replayed), shape(session.content));
 
-  // …and inverting them in reverse order gives the original back (Undo run).
+  // …and inverting them gives the original back (Undo run).
+  assertEquals(shape(applyOps(session.content, invertRun(session.ops), 2000)), shape(session.before));
+});
+
+/**
+ * The ops that undo a run, as doc.InvertRun makes them on the client: the
+ * ops in reverse order, each inverted, a delete's blocks put back in the
+ * order it recorded them.
+ */
+function invertRun(ops: Op[]): Op[] {
   const inverse: Op[] = [];
-  for (const op of [...session.ops].reverse()) {
+  for (const op of [...ops].reverse()) {
     switch (op.op) {
       case "insert":
         inverse.push({ op: "delete", ids: op.nodes.map((n) => n.id), previous: [] });
@@ -166,14 +182,14 @@ Deno.test("edit session applies tools and records replayable ops", async () => {
         inverse.push({ op: "move", id: op.id, position: op.from, from: op.position });
         break;
       case "delete":
-        for (const prev of [...op.previous].reverse()) {
+        for (const prev of op.previous) {
           inverse.push({ op: "insert", position: prev.position, nodes: [prev.node] });
         }
         break;
     }
   }
-  assertEquals(shape(applyOps(session.content, inverse, 2000)), shape(session.before));
-});
+  return inverse;
+}
 
 Deno.test("a replace that kept children keeps the newer revision's children", async () => {
   const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false, now: () => 1000 });
@@ -340,7 +356,7 @@ Deno.test("callouts, toggles, videos, link cards, math and diagrams", () => {
   const views = pageViews(content);
   assertEquals(views.map((v) => v.type), ["toggle_list", "paragraph", "code", "video"]);
   assertEquals(views[0].collapsed, true);
-  assertEquals(views[3].url, "https://youtu.be/dQw4w9WgXcQ");
+  assertEquals(views[3].video?.url, "https://youtu.be/dQw4w9WgXcQ");
 });
 
 Deno.test("a page mention reads and writes as a link to the page", () => {
@@ -594,4 +610,424 @@ Deno.test("a replace with children: [] keeps the nested items", async () => {
   outcome = await session.call("replace_block", { id: "l1", block: { type: "paragraph", text: "Flat", children: [] } });
   assert((outcome.result as { error?: string }).error?.includes("nested"), JSON.stringify(outcome.result));
   assertEquals(session.content.document.children![1].children!.map((c) => c.id), ["l2"]);
+});
+
+Deno.test("write_markdown writes in place of an empty block, a block a line", async () => {
+  const content = sample();
+  content.document.children!.splice(3, 0, para("e1", ""));
+  const session = new PageEditSession(content, hooks, { canEdit: true, crossPage: false });
+  const out = await session.call("write_markdown", {
+    // As models that write every key of a schema give it.
+    position: { replace: "e1", after: null, before: "", parent: null, at: "end" },
+    markdown: "## Tide\nThe sea went.\n\nMara ran.",
+  });
+  const ids = (out.result as { inserted_ids: string[] }).inserted_ids;
+  assertEquals(ids.length, 3);
+  assertEquals(ids[0], "e1");
+  assertEquals(out.ops.map((o) => o.op), ["replace", "insert"]);
+  const kids = session.content.document.children!;
+  assertEquals(kids.slice(3, 6).map((n) => [n.type, deltaToMarkdown(n.data!.delta as never)]), [
+    ["heading", "Tide"],
+    ["paragraph", "The sea went."],
+    ["paragraph", "Mara ran."],
+  ]);
+  const over = await session.call("write_markdown", { position: { replace: "p1" }, markdown: "x" });
+  assert((over.result as { error?: string }).error?.includes("empty block"));
+  const end = await session.call("write_markdown", { position: { at: "end" }, markdown: "Last." });
+  assertEquals(end.ops.map((o) => o.op), ["insert"]);
+  // A space is text the person typed, as the app's own agents take it.
+  const spaced = sample();
+  spaced.document.children!.splice(3, 0, para("s1", " "));
+  const other = new PageEditSession(spaced, hooks, { canEdit: true, crossPage: false });
+  const space = await other.call("write_markdown", { position: { replace: "s1" }, markdown: "x" });
+  assert((space.result as { error?: string }).error?.includes("empty block"));
+});
+
+Deno.test("a write_markdown in place of a block that fails part way changes nothing", async () => {
+  const content = sample();
+  content.document.children!.splice(3, 0, para("e1", ""));
+  const failing: [string, string][] = [
+    // The heading takes e1's place before the table is refused.
+    [
+      "a table too large",
+      "# Title\n| a |\n| - |\n" + Array.from({ length: MAX_SPEC_NODES }, (_, i) => `| ${i} |`).join("\n"),
+    ],
+    ["too many lines", Array.from({ length: MAX_SPEC_NODES + 2 }, (_, i) => `Line ${i}`).join("\n\n")],
+  ];
+  for (const [what, markdown] of failing) {
+    const session = new PageEditSession(content, hooks, { canEdit: true, crossPage: false });
+    const out = await session.call("write_markdown", { position: { replace: "e1" }, markdown });
+    assert((out.result as { error?: string }).error, `${what} should fail`);
+    assertEquals(out.ops, []);
+    assertEquals(session.ops, [], what);
+    assertEquals(session.changed, false, what);
+    assertEquals(session.content, content, what);
+  }
+
+  // A URL refused once the run has read beyond this page.
+  const session = new PageEditSession(content, hooks, { canEdit: true, crossPage: true });
+  await session.call("list_pages", {});
+  const out = await session.call("write_markdown", {
+    position: { replace: "e1" },
+    markdown: "# Title\n\n![x](https://example.com/x.png?notes=secret)",
+  });
+  assert((out.result as { error?: string }).error?.includes("URL"), JSON.stringify(out.result));
+  assertEquals(session.ops, []);
+  assertEquals(session.content, content);
+  // And the next call still works on the page as it was.
+  const ok = await session.call("write_markdown", { position: { replace: "e1" }, markdown: "Done." });
+  assertEquals((ok.result as { inserted_ids: string[] }).inserted_ids, ["e1"]);
+  assertEquals(session.ops.map((o) => o.op), ["replace"]);
+});
+
+// The fixtures in testdata hold what this side makes, for the Go tests to
+// check the client against (internal/doc/parity_test.go): a cloud run's
+// ops, which the client applies and undoes; the blocks as agents read
+// them; and the blocks specs make. Run with --allow-write=_shared/testdata
+// to write them anew.
+
+/** Checks a fixture against what this side makes now, or writes it, when allowed to. */
+async function fixture(name: string, made: unknown, stored: unknown): Promise<void> {
+  const url = new URL(`./testdata/${name}`, import.meta.url);
+  const json = JSON.stringify(made, null, 2) + "\n";
+  if ((await Deno.permissions.query({ name: "write", path: url })).state === "granted") {
+    await Deno.writeTextFile(url, json);
+    return;
+  }
+  assertEquals(
+    stored,
+    JSON.parse(json),
+    `testdata/${name} is out of date: run deno test --allow-write=_shared/testdata`,
+  );
+}
+
+function pageOf(...children: NodeJSON[]): PageContent {
+  return { document: { id: "root", type: "page", children }, meta: { v: 1, blocks: {}, deleted: {} } };
+}
+
+/** Runs fn with block IDs drawn in turn rather than at random, so what it makes is the same each time. */
+async function withSteadyIds<T>(fn: () => Promise<T>): Promise<T> {
+  const random = crypto.getRandomValues;
+  let next = 0;
+  crypto.getRandomValues = (<A extends ArrayBufferView | null>(array: A): A => {
+    if (array) {
+      const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+      for (let i = 0; i < bytes.length; i++) bytes[i] = (next++ * 7) % 251;
+    }
+    return array;
+  }) as typeof crypto.getRandomValues;
+  try {
+    return await fn();
+  } finally {
+    crypto.getRandomValues = random;
+  }
+}
+
+Deno.test("a run's ops undo as the client undoes them (testdata/run_ops.json)", async () => {
+  const item = (id: string, text: string, children?: NodeJSON[]): NodeJSON => ({
+    ...para(id, text, children),
+    type: "bulleted_list",
+  });
+  const before = pageOf(
+    { id: "h1", type: "heading", data: { level: 2, delta: [{ insert: "Goals" }] } },
+    item("l1", "Lists", [item("l2", "first"), item("l3", "second")]),
+    para("p1", "one"),
+    para("p2", "two"),
+    para("p3", "three"),
+  );
+  const session = new PageEditSession(before, hooks, { canEdit: true, crossPage: false, now: () => 1000 });
+  await withSteadyIds(async () => {
+    const inserted = await session.call("insert_blocks", {
+      position: { after: "h1" },
+      blocks: [{ type: "paragraph", text: "Intro" }, { type: "table", rows: [["a", "b"], ["1", "2"]] }],
+    });
+    const [intro] = (inserted.result as { inserted_ids: string[] }).inserted_ids;
+    await session.call("replace_block", { id: "p1", block: { type: "heading", level: 3, text: "One" } });
+    await session.call("move_block", { id: "p3", position: { before: "h1" } });
+    // Blocks side by side, and a list's every child: each goes back after
+    // the one before it.
+    await session.call("delete_blocks", { ids: ["p1", "p2"] });
+    await session.call("delete_blocks", { ids: [intro, "l2", "l3"] });
+    // A first block, which goes back before the next; then all of them,
+    // the first of which goes back at the start.
+    await session.call("delete_blocks", { ids: ["p3"] });
+    await session.call("delete_blocks", { ids: session.content.document.children!.map((n) => n.id) });
+  });
+  const ops = session.ops;
+  assertEquals(ops.length, 7);
+  const positions = ops.flatMap((op) => op.op === "delete" ? op.previous.map((p) => Object.keys(p.position)[0]) : []);
+  for (const key of ["after", "before", "parent", "at"]) assert(positions.includes(key), key);
+  assertEquals(applyOps(session.content, invertRun(ops), 2000).document, before.document);
+  await fixture("run_ops.json", { before, ops, after: session.content }, runOps);
+});
+
+Deno.test("blocks read as the client reads them (testdata/views.json)", async () => {
+  const delta = (text: string) => ({ delta: [{ insert: text }] });
+  const content = pageOf(
+    {
+      id: "a",
+      type: "paragraph",
+      data: { delta: [{ insert: "Ship " }, { insert: "v1", attributes: { bold: true } }] },
+    },
+    { id: "b", type: "heading", data: { level: 2, ...delta("Plan") } },
+    {
+      id: "c",
+      type: "bulleted_list",
+      data: delta("Item"),
+      children: [{ id: "c1", type: "todo_list", data: { ...delta("Do it"), checked: true, due: "2026-10-30" } }],
+    },
+    { id: "d", type: "quote", data: delta("Said") },
+    { id: "e", type: "code", data: { delta: [{ insert: "fmt.Println(1)" }], language: "go" } },
+    { id: "f", type: "callout", data: { ...delta("Careful"), tone: "warning" } },
+    {
+      id: "g",
+      type: "toggle_list",
+      data: { ...delta("More"), collapsed: true },
+      children: [{ id: "g1", type: "paragraph", data: delta("Hidden") }],
+    },
+    { id: "h", type: "divider" },
+    { id: "i", type: "image", data: { url: "https://example.com/a.png", align: "center", alt: "A chart" } },
+    {
+      id: "j",
+      type: "chart",
+      data: {
+        chart_type: "bar",
+        title: "Risks",
+        labels: ["A", "B"],
+        series: [{ name: "n", values: [1, 4] }],
+        caption: "By phase",
+        author: "Claude",
+      },
+    },
+    { id: "k", type: "embed", data: { title: "Timer", height: 320, html: "<p>hi</p>", author: "Claude" } },
+    { id: "l", type: "video", data: { url: "https://youtu.be/dQw4w9WgXcQ", title: "Song" } },
+    { id: "m", type: "link_preview", data: { url: "https://go.dev/", title: "Go", description: "The language" } },
+    { id: "n", type: "file", data: { name: "notes.pdf", mime: "application/pdf", size: 1234 } },
+    { id: "o", type: "math_equation", data: { formula: "e^{i\\pi}+1=0" } },
+    { id: "p", type: "diagram", data: { source: "graph TD\n  A-->B" } },
+    { id: "q", type: "subpage", data: { page_id: "page-2" } },
+    { id: "r", type: "numbered_list", data: delta("First") },
+    { id: "s", type: "recording", data: { recording_id: "rec-1", title: "Standup", duration_ms: 60000 } },
+    // Data a block lacks is left out of its view, not null.
+    { id: "u", type: "image", data: { url: "https://example.com/b.png" } },
+    { id: "v", type: "subpage", data: {} },
+    // A heading's level shows within 1 and 6, however far past it is stored.
+    { id: "w1", type: "heading", data: { level: 1e21, ...delta("Far") } },
+    { id: "w2", type: "heading", data: { level: 1e300, ...delta("Farther") } },
+    { id: "w3", type: "heading", data: { level: -1e21, ...delta("Below") } },
+  );
+  await withSteadyIds(() => {
+    content.document.children!.push(
+      specToNode({ type: "table", rows: [["x", "y"], ["1", "2"]] }, { newId: () => "t" }),
+    );
+    return Promise.resolve();
+  });
+  content.document.children!.at(-1)!.children!.forEach((cell, i) => {
+    cell.id = `t${i}`;
+    cell.children![0].id = `t${i}p`;
+  });
+  await fixture("views.json", { content, views: pageViews(content) }, views);
+});
+
+/** A block without its IDs, which each side draws at random. */
+function withoutIds(node: NodeJSON): unknown {
+  const { id: _, children, ...rest } = node;
+  return children ? { ...rest, children: children.map(withoutIds) } : rest;
+}
+
+Deno.test("specs make the blocks the client makes (testdata/specs.json)", async () => {
+  const cases: unknown[] = [
+    // No type, or an empty one, is a paragraph.
+    { text: "plain" },
+    { type: "", text: "empty type" },
+    // Numbers are cut to their whole part.
+    { type: "heading", level: 1.5, text: "Title" },
+    { type: "embed", embed: { html: "<p>x</p>", height: 500.5 } },
+    // An image, video or link card may give its URL at the top.
+    { type: "image", url: " https://example.com/a.png " },
+    { type: "image", image: { url: "HTTPS://example.com/b.png", alt: "B" } },
+    { type: "image", image: { url: "http:/example.com/c.png" } },
+    { type: "image", image: { url: "https://" } },
+    { type: "video", url: "https://youtu.be/dQw4w9WgXcQ" },
+    { type: "link_preview", url: "https://go.dev/doc" },
+    // A table's empty cells are empty, and its numbers text.
+    { type: "table", rows: [["a", null], [1, true]] },
+    // A series without a name is named by its place.
+    { type: "chart", chart: { chart_type: "line", labels: ["a", null], series: [{ values: [1, "2"] }] } },
+    { type: "chart", chart: { chart_type: "bar", labels: ["a"], series: [{ name: "n", values: ["x"] }] } },
+    // A pie takes one series.
+    { type: "chart", chart: { chart_type: "pie", labels: ["a"], series: [{ values: [1] }, { values: [2] }] } },
+    // Children are blocks.
+    { type: "bulleted_list", text: "list", children: [{ text: "child" }] },
+    { type: "bulleted_list", text: "list", children: ["not a block"] },
+    { type: "paragraph", text: "---" },
+    // Numbers written as JavaScript writes them.
+    { type: "table", rows: [[1250000, 0.1, 1e21, 1e-7, -2.5e-7, 123456789012]] },
+    { type: "chart", chart: { labels: [1250000, 1e21], series: [{ name: 1e-7, values: [1, 2] }] } },
+    // A chart's value is a number, or a string of a decimal one.
+    {
+      type: "chart",
+      chart: {
+        chart_type: "",
+        labels: ["a", "b", "c", "d", "e"],
+        series: [{ values: ["2abc", "0x10", "1_000", " 3.5 ", "1e3"] }],
+      },
+    },
+    // A string field of another kind is empty.
+    { type: "chart", chart: { title: 5, caption: true, labels: ["a"], series: [{ values: [1] }] } },
+    { type: "code", text: 5, language: 7 },
+    { type: "paragraph", text: 5 },
+    { type: "video", video: { url: "https://youtu.be/dQw4w9WgXcQ", title: 5 } },
+    // Children and a table's rows are lists.
+    { type: "bulleted_list", text: "list", children: {} },
+    { type: "table", rows: [["a"], "b"] },
+    // A link's host has a name, and no space of any kind.
+    { type: "image", image: { url: "https://:80/a.png" } },
+    { type: "image", image: { url: "https://exa\u00a0mple.com/a.png" } },
+    { type: "link_preview", link: { url: "https://:80/" } },
+    // A rule is of one mark, with spaces or tabs only.
+    { type: "paragraph", text: "-\t-\t-" },
+    { type: "paragraph", text: " - - - " },
+    { type: "paragraph", text: "\u00a0---" },
+    { type: "paragraph", text: "-*-" },
+    // Spaces are Go's unicode.IsSpace: NEL is one, a BOM is not.
+    { type: "image", image: { url: "\u0085https://example.com/a.png\u2028" } },
+    { type: "image", image: { url: "\ufeffhttps://example.com/a.png" } },
+    { type: "code", text: "x", language: "Visual\u2029Basic\u0085" },
+    { type: "math_equation", formula: "\u0085E = mc^2\u3000" },
+    { type: "callout", text: "x", tone: "\u0085warning\u0085" },
+    { type: "link_preview", link: { url: "https://go.dev/\u0085" } },
+    // A list or an object is no text.
+    { type: "table", rows: [[["a"], { b: 1 }, "x"]] },
+    { type: "chart", chart: { labels: [["a"], { b: 1 }], series: [{ name: ["n"], values: [1, 2] }] } },
+  ];
+  const made = cases.map((spec) => {
+    try {
+      return { spec, node: withoutIds(specToNode(spec as BlockSpec, { newId: () => "x" })) };
+    } catch {
+      return { spec, error: true };
+    }
+  });
+  await fixture("specs.json", made, specs);
+});
+
+Deno.test("a call takes as many blocks, and a table as many cells, as the client's", async () => {
+  const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false });
+  const row = Array.from({ length: 20 }, (_, i) => `c${i}`);
+  const blocks = [
+    ...Array.from({ length: 300 }, () => ({ type: "paragraph", text: "x" })),
+    { type: "table", rows: Array.from({ length: 21 }, () => row) },
+  ];
+  const outcome = await session.call("insert_blocks", { position: { at: "end" }, blocks });
+  assert(!(outcome.result as { error?: string }).error, JSON.stringify(outcome.result));
+  assertEquals(session.content.document.children!.at(-1)!.children!.length, 420);
+});
+
+Deno.test("Markdown reads and writes as the client's does (testdata/markdown.json)", async () => {
+  const blocks = [
+    // Only the line of dashes under the header is no row.
+    "| a | b |\n| --- | --- |\n| --- | x |",
+    "| --- | --- |\n| a | b |",
+    // In a code span only \\| is an escape.
+    "| `a\\b\\|c` | \\* |\n| - | - |",
+    // A number of four digits or more is an item only after the one before it.
+    "998. a\n999. b\n1000. c",
+    "1. a\n\n1000. b",
+    "1999. A year to remember",
+    "123456789. nine digits\n1234567890. ten digits",
+    // A </summary> in a code span is the code's.
+    "<details>\n<summary>`</summary>` and more</summary>\nInside\n</details>",
+    // A lone \r ends a line too.
+    "line one\rline two\r\n\r- item",
+    "```Visual Basic\nx = 1\n```",
+    // A rule is of one mark, with spaces or tabs only; other spaces are text.
+    " ---",
+    "-\t-\t-",
+    "\v---",
+    "a\n\u00a0---",
+    // Only spaces and tabs indent a fence; a line after another space is text.
+    "\u00a0```go\nx := 1\n```",
+    "\u3000```\ncode\n```",
+    // A link's address in a cell holds no <br>, nor a code span.
+    "| [a<br>b](https://x.com/`<br>`) | c |\n| - | - |",
+    "| [x](https://x.com/a<br>b) | `c<br>d` e<br>f |\n| - | - |",
+    // Spaces are Go's unicode.IsSpace: NEL is one, a BOM is not; U+2028
+    // and U+2029 are text in a line.
+    "| a\u0085 | \ufeffb |\n| - | - |",
+    "- item\u2028more\n# Title\u2029x\n1. one\u2028two",
+    "<details>\u0085\n<summary>Sum</summary>\u0085\nInside\n</details>",
+    "```go\u0085\nx\n```",
+    "\ufeff---",
+    // An image may have spaces or tabs after it; only those separate its
+    // title.
+    "![a](https://example.com/a.png) \t",
+    '![a](https://example.com/a.png "t")',
+    "![a](https://example.com/a.png)\u00a0",
+    // A no-break space before a title puts it in the address, which no
+    // picture's may hold.
+    '![a](https://example.com/a.png\u00a0"t")',
+  ];
+  const inline = [
+    "See [**Plan**](leaflet://page/p1) now",
+    "**[Plan](leaflet://page/p2)**",
+    "[**a** b](leaflet://page/p3)",
+    "[*a* *b*](leaflet://page/p4)",
+    "Wow\\![x](https://x.com)",
+    // A run of spaces only has no say in a mention's formats.
+    "[ *0*](leaflet://page/p5)",
+    "*[ 0](leaflet://page/p6)*",
+  ];
+  const deltas: DeltaOpLike[][] = [
+    [{ insert: "Wow!" }, { insert: "site", attributes: { href: "https://x.com" } }],
+    [{ insert: "Hi !" }, { insert: "@Ann", attributes: { mention: { kind: "user", id: "u1", name: "Ann" } } }],
+    [{ insert: "!" }, {
+      insert: "Plan",
+      attributes: { href: "leaflet://page/p1", mention: { kind: "page", id: "p1", name: "Plan" } },
+    }],
+    [{ insert: "![not a picture]" }],
+    // A line break in code at a format's end is off the format.
+    [{ insert: "a" }, { insert: "\nb", attributes: { bold: true, code: true } }],
+    [{ insert: "x\n", attributes: { italic: true, code: true } }, { insert: "y" }],
+  ];
+  const languages = ["Visual Basic", "  Objective   C ", "JS", "c++", "Golang"];
+  const made = {
+    blocks: blocks.map((md) => ({
+      markdown: md,
+      nodes: markdownSpecs(md).map((spec) => withoutIds(specToNode(spec, { newId: () => "x" }))),
+    })),
+    inline: inline.map((md) => ({ markdown: md, delta: markdownToDelta(md) })),
+    deltas: deltas.map((delta) => ({ delta, markdown: deltaToMarkdown(delta as never) })),
+    languages: Object.fromEntries(languages.map((l) => [l, codeLanguage(l)])),
+  };
+  await fixture("markdown.json", made, markdown);
+});
+
+type DeltaOpLike = { insert: string; attributes?: Record<string, unknown> };
+
+Deno.test("agents find URLs and title subpages as the client's do (testdata/agent.json)", async () => {
+  // A URL ends at the first space, as unicode.IsSpace has them.
+  const texts = [
+    "see https://example.com/a.png\u3000then",
+    "see https://example.com/b.png\u0085then",
+    "see https://example.com/c.png\ufeffthen",
+    "(https://example.com/d.png) and <https://example.com/e>",
+  ];
+  const titles = ["  Notes\u3000", "\u0085Plan\u0085", "\ufeffBOM", " \u3000 "];
+  const made: (string | null)[] = [];
+  for (const title of titles) {
+    let got: string | null = null;
+    const session = new PageEditSession(sample(), {
+      ...hooks,
+      createSubpage: (t) => {
+        got = t;
+        return Promise.resolve({ id: "page-2", space_id: "s", parent_id: "page-1", title: t, sort_key: "a0" });
+      },
+    }, { canEdit: true, crossPage: false });
+    await session.call("create_subpage", { title });
+    made.push(got);
+  }
+  await fixture("agent.json", {
+    urls: texts.map((text) => ({ text, urls: [...text.matchAll(URL_RE)].map((m) => m[0]) })),
+    titles: titles.map((title, i) => ({ title, made: made[i] })),
+  }, agent);
 });

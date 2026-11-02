@@ -108,6 +108,7 @@ loop with the same tools. Tool definitions live in
   "source": "flowchart LR\n  Idea --> Draft --> Publish",
   "level": 2,
   "checked": false,
+  "due": "2026-11-02T09:30",
   "children": [ { "type": "bulleted_list", "text": "nested item" } ],
   "rows": [["Header A", "Header B"], ["a", "b"]],
   "chart": { "chart_type": "bar", "title": "Risks by phase", "labels": ["Editor", "Agents"], "series": [{ "name": "Open risks", "values": [1, 4] }] },
@@ -120,15 +121,25 @@ loop with the same tools. Tool definitions live in
 
 ### Position
 
-Exactly one of: `{ "after": "<block id>" }`, `{ "before": "<block id>" }`,
+One of: `{ "after": "<block id>" }`, `{ "before": "<block id>" }`,
 `{ "parent": "<block id>" }` (append as last child), `{ "at": "start" }`,
-`{ "at": "end" }`.
+`{ "at": "end" }`. Only keys given a value count: models that write every
+key of a schema give the others `null` or `""`, and those are left out. `at`,
+which such a model fills with one of its two values, counts only alone, so
+`{ "after": "a1", "at": "end" }` is after `a1`. Any other two keys are an
+error.
+
+`write_markdown` also takes `{ "replace": "<block id>" }`: an empty text
+block (no text at all, not even a space, and no children) to write in place
+of, its first block taking that ID and the rest going after it. `replace`
+says where whatever other keys the position has.
 
 ### Tools
 
 | name | arguments | returns |
 | --- | --- | --- |
 | `read_page` | — | `{ page: {id, title}, blocks: [BlockView], subpages: [{id, title}], comments: [{block_id, resolved, thread: [{author, body}]}] }` |
+| `write_markdown` | `position` (or `{ replace }`), `markdown` | `{ inserted_ids: [...] }` (a block a line: paragraphs, `#` to `###` headings, `-`/`1.` lists, `- [ ]` to-dos, `>` quotes, fenced code, `$$` formulas, ` ```mermaid ` diagrams, `\|` tables, `---` dividers) |
 | `insert_blocks` | `position`, `blocks: [BlockSpec]` | `{ inserted_ids: [...] }` |
 | `replace_block` | `id`, `block: BlockSpec` | `{ id }` (the ID is kept) |
 | `move_block` | `id`, `position` | `{ id }` |
@@ -137,15 +148,26 @@ Exactly one of: `{ "after": "<block id>" }`, `{ "before": "<block id>" }`,
 | `list_pages` | — | `{ pages: [{id, title, parent_id}] }` (only when cross-page reading is on) |
 | `read_other_page` | `page_id` | same shape as `read_page` |
 
-`BlockView` = `{ id, type, text, depth, parent_id?, level?, checked?, language?, tone?, collapsed?, formula?, source?, rows?, chart?, embed?, recording? }`
-(the client's also has `video`, `link` and `file` objects; the server's a `url`);
-a code block's `text` is its code, not markdown.
+`BlockView` = `{ id, type, depth, text?, parent_id?, level?, checked?, due?, language?, tone?, collapsed?, formula?, source?, rows?, chart?, embed?, image?, video?, link?, file?, recording?, page_id? }`,
+the same on the client and the server: `text` only for text blocks and
+code (a code block's is its code, not markdown); `chart` is
+`{chart_type, title, labels, series, caption}`; `embed` `{title, height, html}`;
+`image` `{url, alt}`; `video` `{url, title}`; `link` (a `link_preview`)
+`{url, title, description}`; `file` `{name, mime, size}`; `recording`
+`{recording_id, title, duration_ms}`, as far as the block has them, with
+its `transcript` when it has one; the server adds the recording's `status`,
+and its `duration_ms` when the block has none; and a subpage block's
+`page_id`.
+
+A call writes at most 2000 blocks in all, nested ones counted.
 
 Validation before applying any call: the tool is known; every referenced block
 ID exists in the page; the block type is allowed; nesting is legal (only list
 types take children); the invoking user can edit the page (agents act with the
 invoking user's permissions). An invalid call returns `{ "error": "..." }` to
-the model and changes nothing.
+the model and changes nothing: a call that fails part way, as a
+`write_markdown` in place of a block whose later blocks are refused, leaves
+the page as it was.
 
 `list_pages` and `read_other_page` reach only the pages of the current page's
 space. Once a run has called either, an `image`, `video` or `link_preview`
@@ -174,18 +196,27 @@ streams to the client, what the client applies to the open editor, and what
    `{ id, page_id, user_id, surface, focus_block_ids, comment_id?, conversation_id?, provider_id, model, status: "queued", request: { instruction, selection_text?, allow_cross_page } }`.
 2. Client calls `POST /functions/v1/agent` with `{ "job_id": "…" }` and the
    user's JWT. The response is NDJSON, one event per line:
-   - `{ "type": "status", "status": "running" }`
+   - `{ "type": "status", "status": "running" }`, and again every 15 s
+     while the run goes on, so that nothing between closes a quiet stream
    - `{ "type": "op", "op": Op, "summary": "Inserted chart" }`
-   - `{ "type": "text", "delta": "…" }`
+   - `{ "type": "text", "delta": "…", "round": 0 }`: the model's answer as it
+     streams, a piece at a time; a new `round` (after tool calls) starts it
+     again.
    - `{ "type": "done", "reply": "…", "edits": [{ "summary": "…", "block_ids": [...] }] }`
    - `{ "type": "error", "message": "…" }`
 3. The worker loads the page, focus blocks, the last 10 turns of the
    conversation, and (if allowed) titles of other pages; calls the model with
    the tools above, up to 12 rounds; validates and applies each call; streams
-   the op; finally saves `page_content`, writes a `page_history` row
-   (`reason: "agent_run"`, the content from before the run), updates the job
-   (`status: done`, `result: { reply, ops, edits }`), and for the `comment`
-   surface inserts the reply as a comment by the agent.
+   the op; finally writes a `page_history` row (`reason: "agent_run"`, the
+   content from before the run) and then saves `page_content`, updates the
+   job (`status: done`, `result: { reply, ops, edits }`), and for the
+   `comment` surface inserts the reply as a comment by the agent. A
+   `page_history` row that can't be written stops the save: no edits are
+   saved that the page can't go back from. A run that fails after it changed
+   the page saves what it changed, as above, and its job is `status: failed`
+   with the `error`; only when that save went through does the job have
+   `result: { reply: "", ops, edits }` too, so the client can undo it. One
+   whose save failed as well says so in its `error`.
 4. The client applies streamed ops to the open editor as one undo step.
 
 Local models (`is_local`) run the identical loop on the client against the
@@ -206,6 +237,10 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
 | | `{ action: "transcribe", recording_id, language? }` | `{ segments: [{start_ms, end_ms, text, speaker?}] }` |
 | | `{ action: "save_key", provider: "soniox", api_key }` | `{ ok }` |
 | `account` | `{ action: "delete" }` | `{ ok }` |
+
+`transcribe` saves the transcript, and the recording's status as it goes, as
+the caller: someone who can only view the recording's page is refused (403)
+before any of their key is spent.
 
 ## 6. Sync
 
@@ -277,6 +312,16 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
   into the account's space on its first sync. Signing out uploads what is
   waiting, then removes the account's pages, queue and cursors from the
   device; signing in as another account does the same first.
+- A device whose `devices` row is revoked signs out and forgets its ID:
+  signing in again, it registers as a new device. What iCloud sync kept
+  under the old ID goes too, so a later turn-on joins the folder afresh;
+  only the folder's space stays, to fetch what went up to it.
+- Model connections are deleted on the server, not marked deleted, so the
+  pull by time never brings their removal: each pull lists the ids of the
+  cloud ones there and removes the others here (of those stored before
+  the list was read).
+- A page stays in the space it was made in (`space_immutable`): a device
+  refuses to move one under a page, or into a folder, of another space.
 
 ## 7. Postgres tables
 
@@ -307,13 +352,18 @@ newest 50 named (`manual`) ones.
 Moving a page under a new parent requires edit access to both, and anyone
 but the space owner moves a page only between parents that the same shares
 reach (`forbidden_move` otherwise), so a move never shows a page to people
-it was not shared with. A move that brings a page under shares its old
-parent was not under moves `updated_at` on for the pages under it and for
+it was not shared with. Folders are the space owner's: only they change a
+page's `folder_id`, or insert a page with one (`forbidden_folder`
+otherwise; an upsert of a page already there is no insert). A move that
+brings a page under shares its old parent was not under moves
+`updated_at` on for the pages under it and for
 the content, comments, files and recordings of all of them, so the pulls
 of the people it now reaches bring them. A recording stays on its page: an
 update that changes `recordings.page_id` is refused, and its audio is
-written only by its recorder while they can edit its page. A `files` row is
-its space owner's to add; they change or delete one on a page only while
+written only by its recorder while they can edit its page. Its recorder,
+`recordings.created_by`, is kept as it was inserted: a client's value is
+ignored on update, and only deleting the recorder's account clears it. A
+`files` row is its space owner's to add; they change or delete one on a page only while
 they can edit that page, and the page's owner may delete one on their page
 (set its `deleted_at`, nothing else: `forbidden_file_change` otherwise, and
 then remove its object). Its `folder_id` is a folder of its space
@@ -339,7 +389,7 @@ for blank ones); there is no foreign key, and a template the app can't
 find leaves new pages blank. `model_providers.encrypted_secret` and `refresh_token` hold Vault secret IDs
 and are not selectable by clients.
 
-Storage buckets: `recordings` (`{user_id}/{recording_id}.m4a`), `files`
+Storage buckets: `recordings` (`{user_id}/{recording_id}.wav`, 16 kHz mono WAV), `files`
 (`{space_id}/{file_id}/{name}`), `images` (`{space_id}/{page_id}/{image_id}.{ext}`).
 
 RPCs: `share_page(p_page_id, p_email, p_role)` (an invite to the account
@@ -381,7 +431,8 @@ Leaflet/
   of a newer format, and stops syncing until it is updated. Files are
   written whole: to a temporary file, moved into place. Readers pass over
   names that start with a dot, and names that fit no pattern above, such as
-  the copies iCloud makes ("space 2.json").
+  the copies iCloud makes of a batch or a device's folder
+  ("0000000000000007 2.json"). The copies of space.json are read, as below.
 - **space.json** names the space the devices sync: every device files its
   pages, folders and files under that `space_id`, whatever a row says. The
   first device makes it from its own space. When two made it at once, the
@@ -428,7 +479,8 @@ Leaflet/
 - **A damaged batch.** A device reads its own last batch once a run, and
   rewrites it empty and sends everything again if it does not parse. A
   reader skips a batch that stays damaged only when later batches exist,
-  after 20 passes and a day.
+  after 20 passes and a day; a device compacting its log skips one of its
+  own the same way.
 - **Compaction.** Past 500 batches, a device writes the latest entry of each
   row and page of its log as one batch with `snapshot: true` (for a row, with
   each earlier entry that changed a column the later ones did not), sets

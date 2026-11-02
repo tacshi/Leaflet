@@ -168,7 +168,7 @@ func (s *Store) forgetAccount(synced bool) error {
 		`DELETE FROM comments`, `DELETE FROM recordings`, `DELETE FROM files`, `DELETE FROM ai_jobs`,
 		`DELETE FROM model_providers WHERE is_local = 0`, `DELETE FROM page_history`, `DELETE FROM outbox`,
 		`DELETE FROM conflicts`, `DELETE FROM page_members`, `DELETE FROM peer_contents`, `DELETE FROM row_versions`,
-		`DELETE FROM key_values WHERE key IN ('account', 'profile.name', 'last.page', 'device.id', 'sync.content_waiting', 'sync.requeue_waiting', 'sync.moves_waiting')
+		`DELETE FROM key_values WHERE key IN ('account', 'profile.name', 'last.page', 'device.id', 'sync.content_waiting', 'sync.own_members_at', 'sync.requeue_waiting', 'sync.moves_waiting')
 			OR key LIKE 'space.%' OR key LIKE 'sync.cursor.%' OR key LIKE 'chat.%' OR key LIKE 'icloud.%' OR key LIKE 'invite.%'`,
 	} {
 		if _, err := tx.Exec(q); err != nil {

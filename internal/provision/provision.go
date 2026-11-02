@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"leaflet/internal/guard"
 	"leaflet/internal/supabaseapi"
 	"leaflet/supabase"
 )
@@ -47,13 +48,40 @@ func ownName(name string) bool {
 // Functions are the Edge Functions Leaflet deploys.
 var Functions = []string{"agent", "providers", "stt", "account"}
 
+// FunctionsVersion orders the functions builds deploy: it goes up by one
+// with each change to them, as TestFunctionsVersion holds it to, so a build
+// deploys over older functions only, never over newer ones.
+const FunctionsVersion = 1
+
 // hashSecret begins the name of the project secret that says which
-// functions are deployed: the rest of the name is FunctionsHash's start.
-// The name, not the value, since the API lists values only as digests.
+// functions are deployed: the rest of the name is their FunctionsVersion
+// and FunctionsHash's start. The name, not the value, since the API lists
+// values only as digests.
 const hashSecret = "LEAFLET_FUNCTIONS_"
 
-// hashName is the secret's name for the functions hash.
-func hashName(hash string) string { return hashSecret + strings.ToUpper(hash[:16]) }
+// hashName is the secret's name for the functions hash at version.
+func hashName(version int, hash string) string {
+	return fmt.Sprintf("%sV%d_%s", hashSecret, version, strings.ToUpper(hash[:16]))
+}
+
+var hashNameRe = regexp.MustCompile(`^` + hashSecret + `(?:V(\d+)_)?[0-9A-F]{16}$`)
+
+// deployedVersion is the FunctionsVersion of the functions a project has,
+// by its secrets, and whether one says: 0 for one from before the secret
+// named it, which is older than any that does.
+func deployedVersion(secrets []supabaseapi.Secret) (version int, found bool) {
+	for _, s := range secrets {
+		m := hashNameRe.FindStringSubmatch(s.Name)
+		if m == nil {
+			continue
+		}
+		found = true
+		if n, err := strconv.Atoi(m[1]); err == nil && n > version {
+			version = n
+		}
+	}
+	return version, found
+}
 
 // uploadLimit is the largest upload the buckets take (a long recording);
 // a plan with a lower cap keeps its own.
@@ -187,27 +215,32 @@ func Find(ctx context.Context, api *supabaseapi.Client) (Found, error) {
 	})
 	// Each project's migrations at once: an account may have many.
 	applied := make([][]supabaseapi.Migration, len(projects))
-	failed := make([]bool, len(projects))
+	failed := make([]error, len(projects))
 	var wg sync.WaitGroup
 	for i, p := range projects {
 		if !p.Healthy() {
 			continue
 		}
 		wg.Go(func() {
-			var err error
-			applied[i], err = api.Migrations(ctx, p.Ref)
-			failed[i] = err != nil
+			defer guard.RecoverAs(&failed[i])
+			applied[i], failed[i] = api.Migrations(ctx, p.Ref)
 		})
 	}
 	wg.Wait()
 	for i, p := range projects {
 		switch {
+		case failed[i] != nil && IsLeafletName(p.Name) && ownName(p.Name):
+			// Named as Leaflet names its own, it may be the project:
+			// leaving it out would offer to make another.
+			return f, failed[i]
+		case failed[i] != nil:
+			// Another of the account's, as one in an organization that
+			// keeps it out.
 		case !p.Healthy():
 			// A paused or starting project can't say what it holds.
 			if IsLeafletName(p.Name) {
 				f.Unfinished = append(f.Unfinished, p)
 			}
-		case failed[i]:
 		case IsLeaflet(applied[i]) && ownName(p.Name):
 			f.Projects = append(f.Projects, p)
 		case len(applied[i]) == 0 && IsLeafletName(p.Name):
@@ -261,18 +294,22 @@ func Create(ctx context.Context, api *supabaseapi.Client, org string) (supabasea
 	return Ready(ctx, api, p)
 }
 
-// Ready waits until p is up, restoring it first when it is paused.
+// Ready waits until p is up, restoring it when it is paused, or once it
+// is when it was pausing.
 func Ready(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project) (supabaseapi.Project, error) {
-	if p.Status == "INACTIVE" {
-		if err := api.Restore(ctx, p.Ref); err != nil {
-			return p, err
-		}
-	}
 	var err error
+	restored := false
 	for !p.Healthy() {
 		switch p.Status {
 		case "INIT_FAILED", "REMOVED", "RESTORE_FAILED":
 			return p, errors.New("Supabase couldn't start the project. Try again, or check it in the Supabase dashboard.") //nolint:staticcheck // shown to people as a sentence.
+		case "INACTIVE":
+			if !restored {
+				if err := api.Restore(ctx, p.Ref); err != nil {
+					return p, err
+				}
+				restored = true
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -287,18 +324,19 @@ func Ready(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project) 
 }
 
 // Setup brings a project up to this version of Leaflet: it applies the
-// migrations it lacks and deploys the functions unless deployed, the hash
-// this device deployed last, is current. progress reports steps done of
-// the steps there are. It returns the functions' hash, to keep as
-// deployed.
-func Setup(ctx context.Context, api *supabaseapi.Client, ref, deployed string, progress func(done, total int)) (string, error) {
+// migrations it lacks and deploys the functions when the project's are
+// older, by FunctionsVersion. Ones of the same version stay, whatever
+// their hash, so two builds never take turns deploying; only a
+// development build deploys its own over them, as they change while it is
+// worked on. progress reports steps done of the steps there are.
+func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress func(done, total int)) error {
 	all, err := Migrations()
 	if err != nil {
-		return "", err
+		return err
 	}
 	applied, err := api.Migrations(ctx, ref)
 	if err != nil {
-		return "", err
+		return err
 	}
 	var missing []Migration
 	for _, m := range all {
@@ -308,15 +346,19 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref, deployed string, p
 	}
 	hash, err := FunctionsHash()
 	if err != nil {
-		return "", err
+		return err
 	}
-	deploy := hash != deployed
-	if deploy {
-		secrets, err := api.Secrets(ctx, ref)
-		if err != nil {
-			return "", err
-		}
-		deploy = !hasHash(secrets, hash)
+	secrets, err := api.Secrets(ctx, ref)
+	if err != nil {
+		return err
+	}
+	name := hashName(FunctionsVersion, hash)
+	var deploy bool
+	switch theirs, found := deployedVersion(secrets); {
+	case !found || theirs < FunctionsVersion:
+		deploy = true
+	case theirs == FunctionsVersion:
+		deploy = ProjectName == DevProjectName && !slices.ContainsFunc(secrets, func(s supabaseapi.Secret) bool { return s.Name == name })
 	}
 	total, done := len(missing), 0
 	if deploy {
@@ -330,45 +372,39 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref, deployed string, p
 	}
 	for _, m := range missing {
 		if err := api.Query(ctx, ref, migrationSQL(m)); err != nil {
-			return "", fmt.Errorf("Leaflet couldn't set up the database (%s): %w", m.Name, err) //nolint:staticcheck // shown to people as a sentence.
+			return fmt.Errorf("Leaflet couldn't set up the database (%s): %w", m.Name, err) //nolint:staticcheck // shown to people as a sentence.
 		}
 		step()
 	}
-	if deploy {
-		for _, slug := range Functions {
-			files, err := functionFiles(slug)
-			if err != nil {
-				return "", err
-			}
-			if err := api.DeployFunction(ctx, ref, slug, "supabase/functions/"+slug+"/index.ts", true, files); err != nil {
-				return "", fmt.Errorf("Leaflet couldn't deploy its %s function: %w", slug, err) //nolint:staticcheck // shown to people as a sentence.
-			}
-			step()
-		}
-		var old []string
-		if secrets, err := api.Secrets(ctx, ref); err == nil {
-			for _, s := range secrets {
-				if strings.HasPrefix(s.Name, hashSecret) && s.Name != hashName(hash) {
-					old = append(old, s.Name)
-				}
-			}
-		}
-		if err := api.SetSecrets(ctx, ref, []supabaseapi.Secret{{Name: hashName(hash), Value: hash}}); err != nil {
-			return "", err
-		}
-		if len(old) > 0 {
-			_ = api.DeleteSecrets(ctx, ref, old)
-		}
-		// Best effort: a plan with a lower cap refuses it, and long
-		// recordings then transcribe on the device.
-		_ = api.SetUploadLimit(ctx, ref, uploadLimit)
+	if !deploy {
+		return nil
 	}
-	return hash, nil
-}
-
-// hasHash reports whether the project's functions are hash.
-func hasHash(secrets []supabaseapi.Secret, hash string) bool {
-	return slices.ContainsFunc(secrets, func(s supabaseapi.Secret) bool { return s.Name == hashName(hash) })
+	for _, slug := range Functions {
+		files, err := functionFiles(slug)
+		if err != nil {
+			return err
+		}
+		if err := api.DeployFunction(ctx, ref, slug, "supabase/functions/"+slug+"/index.ts", true, files); err != nil {
+			return fmt.Errorf("Leaflet couldn't deploy its %s function: %w", slug, err) //nolint:staticcheck // shown to people as a sentence.
+		}
+		step()
+	}
+	var old []string
+	for _, s := range secrets {
+		if strings.HasPrefix(s.Name, hashSecret) && s.Name != name {
+			old = append(old, s.Name)
+		}
+	}
+	if err := api.SetSecrets(ctx, ref, []supabaseapi.Secret{{Name: name, Value: hash}}); err != nil {
+		return err
+	}
+	if len(old) > 0 {
+		_ = api.DeleteSecrets(ctx, ref, old)
+	}
+	// Best effort: a plan with a lower cap refuses it, and long
+	// recordings then transcribe on the device.
+	_ = api.SetUploadLimit(ctx, ref, uploadLimit)
+	return nil
 }
 
 // migrationSQL applies m and records it in the migration history the

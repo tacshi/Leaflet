@@ -55,18 +55,7 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 		}
 	})
 	e.hid = e.hidden()
-	e.order, e.depths = map[string]int{}, map[string]int{}
-	for i, n := range e.walkUnits(e.hid) {
-		e.order[n.ID] = i
-	}
-	var deep func([]*doc.Node, int)
-	deep = func(nodes []*doc.Node, d int) {
-		for _, n := range nodes {
-			e.depths[n.ID] = d
-			deep(n.Children, d+1)
-		}
-	}
-	deep(e.Content.Children, 0)
+	e.order, e.depths = unitOrder(e.walkUnits(e.hid)), e.blockDepths()
 	// The chips shown fill this in again as they draw.
 	clear(e.chips)
 	root.Children(func() {
@@ -157,6 +146,7 @@ func (e *Editor) textBlock(c *ui.Context, n *doc.Node, number int, pal *theme.Pa
 	l := e.layout(n, pal, dark)
 	depth := e.depth(n.ID)
 	box := ui.Box(c.Key(n.ID)).Height(l.h).FillWidth()
+	e.laid[n.ID] = box.Bounds()
 	tinted := e.Tinted[n.ID]
 	empty := textLen(n) == 0
 	isFocus := e.focus.ID == n.ID
@@ -343,6 +333,7 @@ func (e *Editor) atomicBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 	selected := (e.focus.ID == n.ID && e.Collapsed() && e.focused) || inSel
 	depth := e.depth(n.ID)
 	wrap := ui.Column(c.Key(n.ID)).FillWidth().Padding(6, 0).PaddingStart(float32(depth) * indentStep).Cursor(ui.CursorDefault)
+	e.laid[n.ID] = wrap.Bounds()
 	if e.reveal == n.ID {
 		wrap.ScrollIntoView()
 	}
@@ -575,9 +566,6 @@ func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 							}
 						})
 					})
-					if row.Hovered() && c.Modifiers() == 0 {
-						_ = i
-					}
 					if row.Clicked() {
 						t := *e.trigger
 						e.trigger = nil

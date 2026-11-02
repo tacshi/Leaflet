@@ -39,6 +39,18 @@ Deno.test("the redirect page sends the browser on to the app", async () => {
   assertEquals(page.includes(`location.replace("http://127.0.0.1:51741/auth/callback" + location.search)`), true);
 });
 
+Deno.test("the site association names the iOS apps for their web sessions", async () => {
+  const req = () => new Request(`${ORIGIN}/.well-known/apple-app-site-association`);
+  const res = await worker.fetch(req(), { APPLE_TEAM_ID: "ABCDE12345" } as Env);
+  assertEquals(res.status, 200);
+  assertEquals(res.headers.get("content-type"), "application/json");
+  assertEquals(await res.json(), {
+    webcredentials: { apps: ["ABCDE12345.app.capyvibe.leaflet", "ABCDE12345.app.capyvibe.leaflet.debug"] },
+  });
+  // Without a team, it names no app.
+  assertEquals((await worker.fetch(req(), {} as Env)).status, 404);
+});
+
 Deno.test("a code goes on with the secret, its verifier and the redirect URL", async () => {
   await withSupabase(async (env, sent) => {
     const res = await worker.fetch(

@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"crypto/rand"
 	"strings"
 
 	"github.com/egoist/mygo/transfer"
@@ -21,7 +22,7 @@ func (e *Editor) copySelection() {
 		return
 	}
 	nodes := e.copyBlocks()
-	clip.text, clip.blocks, clip.delta = text, nodes, nil
+	clip.text, clip.blocks, clip.delta, clip.token = text, nodes, nil, rand.Text()
 	if nodes == nil {
 		// Text within one block keeps its formats too.
 		a, b := e.ordered()
@@ -33,7 +34,8 @@ func (e *Editor) copySelection() {
 	if raw, err := rich.MarshalJSON(); err == nil {
 		reps = append(reps, transfer.Bytes(richtext.Format, raw))
 	}
-	reps = append(reps, transfer.Bytes(transfer.HTML, []byte(rich.HTML())), transfer.Bytes(transfer.Text, []byte(text)))
+	reps = append(reps, transfer.Bytes(transfer.HTML, []byte(rich.HTML())), transfer.Bytes(transfer.Text, []byte(text)),
+		transfer.Bytes(clipFormat, []byte(clip.token)))
 	e.services.WriteClipboardData(transfer.New(transfer.NewItem(reps...)))
 }
 
@@ -41,12 +43,17 @@ func (e *Editor) copySelection() {
 // another app as blocks in its formats, unless plain, and anything else
 // as its text, which reads as Markdown.
 func (e *Editor) pasteClipboard(plain bool) {
-	data := e.services.ReadClipboardData(richtext.Format, transfer.HTML, richtext.RTF, transfer.Text)
+	data := e.services.ReadClipboardData(richtext.Format, transfer.HTML, richtext.RTF, transfer.Text, clipFormat)
 	raw, _ := data.Read(transfer.Text)
 	text := string(raw)
+	if token, err := data.Read(clipFormat); err != nil || string(token) != clip.token {
+		// Another app has copied since, the same text maybe: what Leaflet
+		// copied is no longer on the clipboard, and its blocks are stale.
+		clip.text, clip.blocks, clip.delta, clip.token = "", nil, nil, ""
+	}
 	own := text != "" && text == clip.text && (clip.blocks != nil || clip.delta != nil)
-	// Code and table cells take text as it is.
-	if !plain && !own && !e.ReadOnly && !e.inCode() && !e.inTable(e.focus.ID) {
+	// Code takes text as it is.
+	if !plain && !own && !e.ReadOnly && !e.inCode() {
 		if rich, ok := richOfData(data); ok && formatted(rich) {
 			e.pasteBlocks(blocksOf(rich))
 			return

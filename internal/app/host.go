@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"html"
 	"image"
 	"log"
 	"maps"
@@ -24,8 +23,12 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/export"
+	"leaflet/internal/menu"
+	"leaflet/internal/rendered"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/internal/web"
 	"leaflet/locales"
 )
 
@@ -34,11 +37,19 @@ import (
 // Update runs fn on the main thread.
 func (a *App) Update(fn func()) { a.update(fn) }
 
-// Editor returns a page's open editor. A page whose content could not be
-// read has none to change: what changes it reads the stored content,
+// Live returns a page as it is open, for agent runs to change.
+func (a *App) Live(pageID string) agents.LiveDoc {
+	if a.openEditor(pageID) != nil {
+		return a.page.live
+	}
+	return nil
+}
+
+// openEditor returns a page's open editor. A page whose content could not
+// be read has none to change: what changes it reads the stored content,
 // and leaves it.
-func (a *App) Editor(pageID string) *editor.Editor {
-	if a.page != nil && a.page.id == pageID && !a.page.unreadable {
+func (a *App) openEditor(pageID string) *editor.Editor {
+	if a.page != nil && a.page.id == pageID && !a.page.live.Unreadable() {
 		return a.page.editor
 	}
 	return nil
@@ -73,6 +84,7 @@ func (a *App) Tint(pageID string, ids []string) {
 	for k := range a.page.tinted {
 		delete(a.page.tinted, k)
 	}
+	clear(a.page.lit)
 	for _, id := range ids {
 		a.page.tinted[id] = true
 	}
@@ -169,105 +181,27 @@ func (h *host) CommentPreview(c *ui.Context, blockID string) {
 	})
 }
 
-type slashItem struct {
-	editor.MenuItem
-	keywords string
-}
-
-// slashItems are the / menu's choices, said in the app's language; the
-// keywords stay English, to find a block by its English name too.
-func slashItems() []slashItem {
-	return []slashItem{
-		{editor.MenuItem{Key: "paragraph", Label: locales.HostSlashText(), Hint: locales.HostSlashTextHint(), Icon: "type", Group: locales.HostGroupBasic()}, "text paragraph plain"},
-		{editor.MenuItem{Key: "h1", Label: locales.HostSlashHeading1(), Hint: locales.HostSlashHeading1Hint(), Icon: "heading-1", Group: locales.HostGroupBasic()}, "h1 title heading"},
-		{editor.MenuItem{Key: "h2", Label: locales.HostSlashHeading2(), Hint: locales.HostSlashHeading2Hint(), Icon: "heading-2", Group: locales.HostGroupBasic()}, "h2 heading subtitle"},
-		{editor.MenuItem{Key: "h3", Label: locales.HostSlashHeading3(), Hint: locales.HostSlashHeading3Hint(), Icon: "heading-3", Group: locales.HostGroupBasic()}, "h3 heading"},
-		{editor.MenuItem{Key: "bulleted_list", Label: locales.HostSlashBulleted(), Hint: locales.HostSlashBulletedHint(), Icon: "list", Group: locales.HostGroupBasic()}, "bullet list ul"},
-		{editor.MenuItem{Key: "numbered_list", Label: locales.HostSlashNumbered(), Hint: locales.HostSlashNumberedHint(), Icon: "list-ordered", Group: locales.HostGroupBasic()}, "number ordered ol"},
-		{editor.MenuItem{Key: "todo_list", Label: locales.HostSlashTodo(), Hint: locales.HostSlashTodoHint(), Icon: "square-check", Group: locales.HostGroupBasic()}, "todo task check"},
-		{editor.MenuItem{Key: "quote", Label: locales.HostSlashQuote(), Hint: locales.HostSlashQuoteHint(), Icon: "quote", Group: locales.HostGroupBasic()}, "quote blockquote"},
-		{editor.MenuItem{Key: "callout", Label: locales.HostSlashCallout(), Hint: locales.HostSlashCalloutHint(), Icon: "info", Group: locales.HostGroupBasic()}, "callout note tip warning alert admonition"},
-		{editor.MenuItem{Key: "toggle_list", Label: locales.HostSlashToggle(), Hint: locales.HostSlashToggleHint(), Icon: "chevron-right", Group: locales.HostGroupBasic()}, "toggle collapse fold details disclosure"},
-		{editor.MenuItem{Key: "code", Label: locales.HostSlashCode(), Hint: locales.HostSlashCodeHint(), Icon: "code", Group: locales.HostGroupBasic()}, "code snippet program ```"},
-		{editor.MenuItem{Key: "divider", Label: locales.HostSlashDivider(), Hint: locales.HostSlashDividerHint(), Icon: "minus", Group: locales.HostGroupBasic()}, "divider line hr rule"},
-		{editor.MenuItem{Key: "table", Label: locales.HostSlashTable(), Hint: locales.HostSlashTableHint(), Icon: "table", Group: locales.HostGroupBlocks()}, "table grid"},
-		{editor.MenuItem{Key: "chart", Label: locales.HostSlashChart(), Hint: locales.HostSlashChartHint(), Icon: "chart-column", Group: locales.HostGroupBlocks()}, "chart graph bar line pie"},
-		{editor.MenuItem{Key: "math_equation", Label: locales.HostSlashMath(), Hint: locales.HostSlashMathHint(), Icon: "sigma", Group: locales.HostGroupBlocks()}, "math equation formula latex tex katex"},
-		{editor.MenuItem{Key: "diagram", Label: locales.HostSlashDiagram(), Hint: locales.HostSlashDiagramHint(), Icon: "workflow", Group: locales.HostGroupBlocks()}, "diagram mermaid flowchart sequence chart graph"},
-		{editor.MenuItem{Key: "embed", Label: locales.HostSlashEmbed(), Hint: locales.HostSlashEmbedHint(), Icon: "layout-grid", Group: locales.HostGroupBlocks()}, "embed html widget"},
-		{editor.MenuItem{Key: "subpage", Label: locales.HostSlashSubpage(), Hint: locales.HostSlashSubpageHint(), Icon: "file-plus", Group: locales.HostGroupBlocks()}, "page subpage child"},
-		{editor.MenuItem{Key: "image", Label: locales.HostSlashImage(), Hint: locales.HostSlashImageHint(), Icon: "image", Group: locales.HostGroupBlocks()}, "image picture photo"},
-		{editor.MenuItem{Key: "video", Label: locales.HostSlashVideo(), Hint: locales.HostSlashVideoHint(), Icon: "play", Group: locales.HostGroupBlocks()}, "video youtube vimeo movie film mp4"},
-		{editor.MenuItem{Key: "link_preview", Label: locales.HostSlashLinkCard(), Hint: locales.HostSlashLinkCardHint(), Icon: "globe", Group: locales.HostGroupBlocks()}, "link card bookmark preview url web"},
-		{editor.MenuItem{Key: "file", Label: locales.HostSlashFile(), Hint: locales.HostSlashFileHint(), Icon: "paperclip", Group: locales.HostGroupBlocks()}, "file attach attachment upload document pdf"},
-		{editor.MenuItem{Key: "recording", Label: locales.CommonRecording(), Hint: locales.HostSlashRecordingHint(), Icon: "mic", Group: locales.HostGroupBlocks()}, "record audio voice transcript"},
-	}
-}
-
 func (h *host) SlashItems(query string) []editor.MenuItem {
-	q := strings.ToLower(strings.TrimSpace(query))
-	var out []editor.MenuItem
-	for _, it := range slashItems() {
-		if q == "" || strings.Contains(strings.ToLower(it.Label), q) || strings.Contains(it.keywords, q) {
-			out = append(out, it.MenuItem)
-		}
-	}
-	// The templates, to put one's blocks at the caret: all of them for
-	// "template", in the app's language too. A template doesn't go into
-	// itself.
-	group := locales.HostGroupTemplates()
-	all := q != "" && (strings.Contains("template", q) || strings.Contains(strings.ToLower(group), q))
+	// A template doesn't go into itself.
+	var templates []menu.Item
 	for _, t := range h.a.templateChoices() {
 		if h.a.page != nil && t.page != nil && t.page.ID == h.a.page.id {
 			continue
 		}
-		if q == "" || all || strings.Contains(strings.ToLower(t.title()), q) {
-			out = append(out, editor.MenuItem{Key: t.key(), Label: t.title(), Hint: h.a.choiceHint(t), Icon: t.icon(), Group: group})
-		}
+		templates = append(templates, menu.Item{Key: t.key(), Label: t.title(), Hint: h.a.choiceHint(t), Icon: t.icon()})
 	}
-	return out
+	return menu.Filter(menu.Slash(templates), query)
 }
 
 func (h *host) MentionItems(query string) []editor.MenuItem {
-	q := strings.ToLower(strings.TrimSpace(query))
-	var out []editor.MenuItem
+	m := menu.Mentions{Pages: h.a.pages, Place: h.a.pagePlace, UserID: h.a.session.UserID}
 	for _, o := range h.a.hub.Options() {
-		if q == "" || strings.Contains(strings.ToLower(o.Name()), q) {
-			out = append(out, editor.MenuItem{Key: "agent:" + o.Provider.ID, Label: o.Name(), Hint: o.Model, Icon: "sparkles", Group: locales.CommonAgents()})
-		}
-	}
-	if len(h.a.hub.Options()) == 0 && q == "" {
-		out = append(out, editor.MenuItem{Key: "connect", Label: locales.HostAddAgentProvider(), Hint: locales.HostAddAgentProviderHint(), Icon: "sparkles", Group: locales.CommonAgents()})
-	}
-	// The user's pages, to mention one: most recently edited first.
-	pages := slices.Clone(h.a.pages)
-	slices.SortStableFunc(pages, func(x, y store.Page) int { return y.UpdatedAt.Compare(x.UpdatedAt) })
-	n := 0
-	for _, p := range pages {
-		if n == 8 {
-			break
-		}
-		if h.a.page != nil && p.ID == h.a.page.id {
-			continue
-		}
-		if q == "" || strings.Contains(strings.ToLower(p.DisplayTitle()), q) {
-			out = append(out, editor.MenuItem{Key: "page:" + p.ID, Label: p.DisplayTitle(), Hint: h.a.pagePlace(p), Icon: "file-text", Group: locales.HostGroupPages()})
-			n++
-		}
+		m.Agents = append(m.Agents, menu.Agent{ProviderID: o.Provider.ID, Name: o.Name(), Model: o.Model})
 	}
 	if h.a.page != nil {
-		for _, m := range h.a.page.members {
-			// Someone invited who has not accepted is no account yet: their
-			// ID is the invite's.
-			if m.UserID == h.a.session.UserID || !m.Accepted && m.Role != "owner" {
-				continue
-			}
-			if q == "" || strings.Contains(strings.ToLower(m.Name()), q) {
-				out = append(out, editor.MenuItem{Key: "user:" + m.UserID, Label: m.Name(), Hint: m.Role, Icon: "user", Group: locales.HostGroupPeople()})
-			}
-		}
+		m.PageID, m.Members = h.a.page.id, h.a.page.members
 	}
-	return out
+	return menu.Filter(menu.Mention(m), query)
 }
 
 // pagePlace says where a page is, for a list of pages: in its parent
@@ -313,25 +247,21 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 		a.insertTemplate(tc)
 		return
 	}
+	if typ, level, ok := menu.Turn(item.Key); ok {
+		ed.SetType(typ, level)
+		return
+	}
+	if n, ok := menu.Block(item.Key, a.session.DisplayName); ok {
+		ed.InsertBlocks(n)
+		switch n.Type {
+		case "chart":
+			a.dialogs.openChart(n.ID, ed)
+		case "math_equation", "diagram":
+			a.dialogs.openSource(n)
+		}
+		return
+	}
 	switch item.Key {
-	case "paragraph", "bulleted_list", "numbered_list", "todo_list", "quote", "code", "callout", "toggle_list":
-		ed.SetType(item.Key, 0)
-	case "h1", "h2", "h3":
-		ed.SetType("heading", int(item.Key[1]-'0'))
-	case "divider":
-		ed.InsertBlocks(&doc.Node{ID: doc.NewBlockID(), Type: "divider"})
-	case "table":
-		n, _ := doc.TableNode([][]string{{locales.HostTableColumn(1), locales.HostTableColumn(2), locales.HostTableColumn(3)}, {"", "", ""}, {"", "", ""}}, "")
-		ed.InsertBlocks(n)
-	case "chart":
-		data, _ := doc.ChartData(map[string]any{
-			"chart_type": "bar", "title": locales.HostChartTitle(), "labels": []any{"A", "B", "C"},
-			"series": []any{map[string]any{"name": locales.HostChartSeries(), "values": []any{3.0, 5.0, 2.0}}},
-		})
-		data["author"] = a.session.DisplayName
-		n := &doc.Node{ID: doc.NewBlockID(), Type: "chart", Data: data}
-		ed.InsertBlocks(n)
-		a.dialogs.openChart(n.ID, ed)
 	case "embed":
 		a.dialogs.openEmbed()
 	case "subpage":
@@ -340,15 +270,8 @@ func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
 		a.dialogs.openLinkDialog(item.Key)
 	case "file":
 		a.uploadIntoPage()
-	case "math_equation", "diagram":
-		n := doc.MathNode("")
-		if item.Key == "diagram" {
-			n = doc.DiagramNode("")
-		}
-		ed.InsertBlocks(n)
-		a.dialogs.openSource(n)
 	case "recording":
-		a.startRecording(ps.id, "")
+		a.startRecording(ps.id)
 	}
 }
 
@@ -548,7 +471,8 @@ func openSafely(path string) {
 
 // programExts are the kinds of file that opening runs, or sends where
 // they say: apps, installers, scripts, the shortcuts and links to them,
-// and documents that run what they hold.
+// documents that run what they hold, and disk images and plug-ins, which
+// opening mounts or installs.
 var programExts = map[string]bool{
 	".app": true, ".command": true, ".tool": true, ".terminal": true, ".sh": true, ".bash": true, ".zsh": true, ".csh": true,
 	".ksh": true, ".fish": true, ".pkg": true, ".mpkg": true, ".dmg": true, ".scpt": true, ".scptd": true, ".applescript": true,
@@ -561,7 +485,8 @@ var programExts = map[string]bool{
 	".lnk": true, ".pif": true, ".reg": true, ".appref-ms": true, ".url": true, ".website": true, ".scf": true,
 	".library-ms": true, ".search-ms": true, ".searchconnector-ms": true, ".settingcontent-ms": true, ".chm": true,
 	".hlp": true, ".diagcab": true, ".xbap": true, ".desktop": true, ".appimage": true, ".run": true, ".deb": true,
-	".rpm": true, ".flatpakref": true, ".snap": true,
+	".rpm": true, ".flatpakref": true, ".snap": true, ".iso": true, ".img": true, ".cdr": true, ".sparseimage": true,
+	".sparsebundle": true, ".vhd": true, ".vhdx": true, ".pyz": true, ".pyzw": true, ".prefpane": true, ".saver": true,
 }
 
 // runsAsProgram reports whether opening the file would run it.
@@ -665,22 +590,7 @@ func (a *App) exportPage(id string) {
 	}()
 }
 
-func safeName(s string) string {
-	s = strings.Map(func(r rune) rune {
-		if strings.ContainsRune(`/\:*?"<>|`, r) {
-			return '-'
-		}
-		return r
-	}, s)
-	if strings.TrimSpace(s) == "" {
-		return locales.CommonUntitled()
-	}
-	// "." and ".." name the folder itself and the one above it.
-	if strings.Trim(s, ".") == "" {
-		return strings.ReplaceAll(s, ".", "-")
-	}
-	return s
-}
+func safeName(s string) string { return export.SafeName(s) }
 
 // loadMembers reads who a page is shared with.
 func (a *App) loadMembers(pageID string) {
@@ -693,7 +603,6 @@ func (a *App) loadMembers(pageID string) {
 // folder, the only one it reads files from.
 type imageCache struct {
 	root string
-	dir  string
 	mu   sync.Mutex
 	// pictures are bitmaps, or SVGs, which MyGo draws itself.
 	pictures map[string]ui.ImageSource
@@ -727,8 +636,8 @@ const playerIdle = 30 * time.Second
 // tried again, as the device may have come back online.
 const imageRetry = time.Minute
 
-func newImageCache(root, dir string) *imageCache {
-	return &imageCache{root: root, dir: dir, pictures: map[string]ui.ImageSource{}, loading: map[string]bool{}, failed: map[string]time.Time{},
+func newImageCache(root string) *imageCache {
+	return &imageCache{root: root, pictures: map[string]ui.ImageSource{}, loading: map[string]bool{}, failed: map[string]time.Time{},
 		gifs: map[string][]byte{}, players: map[string]*gifPlayer{}, making: map[string]bool{}}
 }
 
@@ -943,7 +852,7 @@ func (ic *imageCache) hasFailed(url string) bool {
 func (ic *imageCache) read(url string) ([]byte, error) {
 	path, ok := strings.CutPrefix(url, "file://")
 	if !ok {
-		return fetch(url)
+		return web.Fetch(url)
 	}
 	if !inFolder(ic.root, path) {
 		return nil, errNotOwnFile
@@ -952,24 +861,10 @@ func (ic *imageCache) read(url string) ([]byte, error) {
 }
 
 // errNotOwnFile is for a file outside the app's data folder.
-var errNotOwnFile = errors.New("not a file of the app's")
+var errNotOwnFile = export.ErrNotOwnFile
 
 // inFolder reports whether path is in folder dir, links followed.
-func inFolder(dir, path string) bool {
-	if dir == "" || !filepath.IsAbs(path) {
-		return false
-	}
-	root, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		return false
-	}
-	real, err := filepath.EvalSymlinks(path)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(root, real)
-	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
-}
+func inFolder(dir, path string) bool { return export.InFolder(dir, path) }
 
 // embedURL is where an embed's wrapper page loads. WebView2 serves a
 // loaded document only to a URL it requests over the network, and never
@@ -978,136 +873,6 @@ func inFolder(dir, path string) bool {
 // size. Its policy still keeps it off the network, and the embed's own
 // sandboxed frame has an opaque origin either way.
 var embedURL = map[bool]string{true: "https://embed.app.capyvibe.leaflet/", false: "about:blank"}[runtime.GOOS == "windows"]
-
-// embedCSP is the policy of an embed's frame: inline scripts and styles,
-// images, fonts and media from data and blob URLs, and nothing from the
-// network. default-src does not cover WebRTC; the webrtc directive does
-// where the web view knows it, and embedNoRTC where it does not.
-const embedCSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; webrtc 'block'"
-
-// embedNoRTC runs first in an embed's frame: it takes away WebRTC, which
-// would reach the network around the policy, before the embed's own
-// script runs. It is best effort: a frame the embed makes itself has them
-// back, which the webrtc directive, where known, still blocks.
-const embedNoRTC = `<script>(function () {
-  ["RTCPeerConnection", "webkitRTCPeerConnection", "mozRTCPeerConnection", "RTCDataChannel",
-   "RTCSessionDescription", "RTCIceCandidate", "RTCRtpSender", "RTCRtpReceiver", "RTCRtpTransceiver",
-   "RTCDtlsTransport", "RTCIceTransport", "RTCSctpTransport", "RTCCertificate"].forEach(function (k) {
-    try { Object.defineProperty(window, k, {value: undefined, writable: false, configurable: false}); } catch (e) {}
-  });
-})();</script>`
-
-// embedWheel runs in an embed's frame: wheel movement the embed cannot
-// use itself, as most embeds do not scroll, goes to the page around it.
-const embedWheel = `<script>(function () {
-  function scrolls(el, dy) {
-    for (; el && el.nodeType === 1; el = el.parentElement) {
-      var s = getComputedStyle(el), o = s.overflowY;
-      var root = el === document.scrollingElement;
-      if ((root || o === "auto" || o === "scroll") && el.scrollHeight > el.clientHeight + 1) {
-        if (dy < 0 && el.scrollTop > 0) return true;
-        if (dy > 0 && el.scrollTop + el.clientHeight < el.scrollHeight - 1) return true;
-      }
-    }
-    return false;
-  }
-  addEventListener("wheel", function (e) {
-    if (e.ctrlKey) return;
-    var k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
-    var dy = e.deltaY * k;
-    if (dy && !scrolls(e.target, dy)) parent.postMessage({leafletWheel: dy}, "*");
-  }, {passive: true});
-})();</script>`
-
-// embedFit runs in an embed's frame: it tells the page how tall the
-// embed's content is at the frame's width, so a block too short for it,
-// as a page narrows and its layout stacks, grows to show it all.
-const embedFit = `<script>(function () {
-  var last = "";
-  function fit() {
-    var b = document.body;
-    if (!b) return;
-    var s = getComputedStyle(b);
-    var h = Math.ceil(b.scrollHeight + (parseFloat(s.marginTop) || 0) + (parseFloat(s.marginBottom) || 0));
-    var key = h + ":" + innerWidth;
-    if (key === last) return;
-    last = key;
-    parent.postMessage({leafletSize: [h, innerWidth]}, "*");
-  }
-  addEventListener("load", function () {
-    fit();
-    new ResizeObserver(fit).observe(document.body);
-  });
-  addEventListener("resize", fit);
-})();</script>`
-
-// embedPage wraps an embed's HTML in a sandboxed frame: frames never call
-// Go, and the policy keeps it off the network. A srcdoc frame inherits the
-// wrapper's policy, so the wrapper has the frame's. The wrapper's own
-// script only passes the frame's leftover wheel movement and its content's
-// size, whether it is zoomed in and its asking to leave full screen to the
-// page, for the embed id. Without wheel, for a web view that gives the
-// page all of the wheel, neither passes it.
-//
-// Its background is the page's. In the dark theme the frame's root gets
-// data-theme="dark" and a dark color scheme, so an embed that styles
-// nothing follows the page, and one that does can match it with
-// :root[data-theme="dark"].
-func embedPage(id, src string, pal *theme.Palette, wheel bool) string {
-	bg, scheme := hexOf(pal.Surface), "light"
-	if pal.Dark {
-		scheme = "dark"
-	}
-	script := `<script>`
-	if wheel {
-		// Without a wheel listener of its own, WebKit scrolls the wrapper
-		// without telling a frame that could scroll, so it never forwards.
-		script += `addEventListener("wheel", function () {}, {passive: true});`
-	}
-	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="` + embedCSP + `; frame-src about:">` +
-		`<meta name="color-scheme" content="` + scheme + `">` +
-		`<style>html,body{margin:0;height:100%;background:` + bg + `}iframe{border:0;width:100%;height:100%;display:block;background:` + bg + `}</style></head><body>` +
-		`<iframe id="f" sandbox="allow-scripts" srcdoc="` + html.EscapeString(embedFrame(src, scheme, wheel)) + `"></iframe>` +
-		script +
-		`var id = ` + scriptString(id) + `;` +
-		`addEventListener("message", function (e) {` +
-		`if (e.source !== document.getElementById("f").contentWindow || !e.data || !window.mygo) return;` +
-		`if (typeof e.data.leafletWheel === "number") window.mygo.call("Embeds.Scroll", e.data.leafletWheel);` +
-		`var z = e.data.leafletSize;` +
-		`if (z && typeof z[0] === "number" && typeof z[1] === "number") window.mygo.call("Embeds.Size", id, z[0], z[1]);` +
-		`if (typeof e.data.leafletZoomed === "boolean") window.mygo.call("Embeds.Zoomed", id, e.data.leafletZoomed);` +
-		`if (e.data.leafletExit === true) window.mygo.call("Embeds.Exit", id);` +
-		`});</script></body></html>`
-}
-
-// embedFrame is the document of an embed's frame: its policy, theme and
-// scripts first, then the embed's HTML. They go at the very start rather
-// than after the HTML's "<head>", which may be in a comment or a string;
-// the browser still puts them in the head, and the HTML's own <html> and
-// <head> after them only add to those. A doctype the HTML starts with
-// moves ahead of them, so it keeps the HTML's rendering mode. wheel adds
-// embedWheel.
-func embedFrame(src, scheme string, wheel bool) string {
-	head := `<meta http-equiv="Content-Security-Policy" content="` + embedCSP + `">` + embedNoRTC +
-		`<meta name="color-scheme" content="` + scheme + `">` +
-		`<script>document.documentElement.dataset.theme = "` + scheme + `";</script>`
-	if wheel {
-		head += embedWheel
-	}
-	return leadWith(head+embedFit, src)
-}
-
-// leadWith puts head at the very start of the HTML src, after a doctype
-// it starts with.
-func leadWith(head, src string) string {
-	rest := strings.TrimLeft(src, " \t\r\n\f")
-	if len(rest) >= 9 && strings.EqualFold(rest[:9], "<!doctype") {
-		if i := strings.IndexByte(rest, '>'); i >= 0 {
-			return rest[:i+1] + head + rest[i+1:]
-		}
-	}
-	return head + src
-}
 
 // hexOf writes a color as CSS's "#rrggbb".
 func hexOf(c ui.Color) string {
@@ -1236,7 +1001,7 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 // page what it leaves.
 func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float32) float32, height, gap float32, toPage bool) {
 	pal := theme.Of(c)
-	src := embedPage(key, html, pal, !toPage)
+	src := rendered.EmbedPage(key, html, hexOf(pal.Surface), pal.Dark, !toPage)
 	size, ready := a.embedSizes[key]
 	if ready && fit != nil && abs32(size.w-w) < 4 {
 		height = fit(size.h)

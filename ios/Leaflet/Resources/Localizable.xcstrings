@@ -1,0 +1,672 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Agent Options": {
+      "comment": "The Agent panel: the menu of the agent to ask, a new conversation, and the agent providers.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エージェントのオプション"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "智能体选项"
+          }
+        }
+      }
+    },
+    "Choose Folder…": {
+      "comment": "Settings › Sync and storage: pick the folder in iCloud Drive pages sync through.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フォルダを選択…"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择文件夹…"
+          }
+        }
+      }
+    },
+    "Choose the Leaflet folder your Mac syncs through, or iCloud Drive to start one.": {
+      "comment": "Settings › Sync and storage: under iCloud sync, how to pick the folder.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac が同期に使っている Leaflet フォルダを選択するか、iCloud Drive を選択して新しく作成します。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "选择 Mac 用于同步的 Leaflet 文件夹，或选择 iCloud Drive 来新建一个。"
+          }
+        }
+      }
+    },
+    "Collapse": {
+      "comment": "VoiceOver's action on an open toggle in the editor: fold away what is inside it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "折りたたむ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "折叠"
+          }
+        }
+      }
+    },
+    "Collapse Heading": {
+      "comment": "The outline: hide the headings under this one.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "見出しを折りたたむ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "折叠标题"
+          }
+        }
+      }
+    },
+    "Expand": {
+      "comment": "VoiceOver's action on a closed toggle in the editor: show what is inside it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "展開"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "展开"
+          }
+        }
+      }
+    },
+    "Expand Heading": {
+      "comment": "The outline: show the headings under this one.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "見出しを展開"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "展开标题"
+          }
+        }
+      }
+    },
+    "Folder": {
+      "comment": "Settings › Sync and storage: the folder in iCloud Drive pages sync through.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "フォルダ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "文件夹"
+          }
+        }
+      }
+    },
+    "Go": {
+      "comment": "The menu bar: the menu of Back and Forward.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移動"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前往"
+          }
+        }
+      }
+    },
+    "Hide Keyboard": {
+      "comment": "The editor's keyboard bar: put the keyboard away.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "キーボードを隠す"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏键盘"
+          }
+        }
+      }
+    },
+    "Hide Subpages": {
+      "comment": "The sidebar: hide the pages inside this one.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サブページを隠す"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "隐藏子页面"
+          }
+        }
+      }
+    },
+    "Indent": {
+      "comment": "The editor: nest the block in the one before it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "インデント"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "缩进"
+          }
+        }
+      }
+    },
+    "Insert": {
+      "comment": "The editor's keyboard bar: insert a block.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "挿入"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "插入"
+          }
+        }
+      }
+    },
+    "Last sync failed": {
+      "comment": "The sidebar's foot: the last sync pass failed; pulling the list down tries again.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前回の同期に失敗しました"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次同步失败"
+          }
+        }
+      }
+    },
+    "Leaflet can't open the folder it synced through. Choose it again.": {
+      "comment": "Settings › Sync and storage: the folder picked before can't be opened; pick it again.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet は同期に使っていたフォルダを開けません。もう一度選択してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet 无法打开用于同步的文件夹。请重新选择。"
+          }
+        }
+      }
+    },
+    "Leaflet couldn't open its data": {
+      "comment": "Shown when the app's database can't open.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet のデータを開けませんでした"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet 无法打开其数据"
+          }
+        }
+      }
+    },
+    "Leaflet isn't allowed to use it. Turn it on in Settings › Privacy & Security › Microphone.": {
+      "comment": "Why a recording could not start: the user has not let the app use the microphone. Follows 'The microphone did not start: '.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet にマイクの使用が許可されていません。設定 › プライバシーとセキュリティ › マイク でオンにしてください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet 没有使用麦克风的权限。请在“设置 › 隐私与安全性 › 麦克风”中打开。"
+          }
+        }
+      }
+    },
+    "Mark as Done": {
+      "comment": "VoiceOver's action on a to-do in the editor: check it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完了にする"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "标记为完成"
+          }
+        }
+      }
+    },
+    "Mark as Not Done": {
+      "comment": "VoiceOver's action on a checked to-do in the editor: uncheck it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未完了にする"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "标记为未完成"
+          }
+        }
+      }
+    },
+    "Move Block Down": {
+      "comment": "The editor: move the block after the one below it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブロックを下へ移動"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下移块"
+          }
+        }
+      }
+    },
+    "Move Block Up": {
+      "comment": "The editor: move the block before the one above it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブロックを上へ移動"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上移块"
+          }
+        }
+      }
+    },
+    "New Window": {
+      "comment": "The File menu: open another window of the app.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新規ウインドウ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新建窗口"
+          }
+        }
+      }
+    },
+    "None": {
+      "comment": "Settings › Sync and storage: no folder in iCloud Drive is picked yet.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "なし"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "无"
+          }
+        }
+      }
+    },
+    "Open Link": {
+      "comment": "VoiceOver's action on a link in the editor's text: open it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リンクを開く"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开链接"
+          }
+        }
+      }
+    },
+    "Open in New Window": {
+      "comment": "A page's menu: open it in a window of its own.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "新規ウインドウで開く"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "在新窗口中打开"
+          }
+        }
+      }
+    },
+    "Outdent": {
+      "comment": "The editor: take the block out a level.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "インデント解除"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取消缩进"
+          }
+        }
+      }
+    },
+    "Remove %@": {
+      "comment": "The tag editor: VoiceOver's name of the button that takes the tag (%@) off the page.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」を削除"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除“%@”"
+          }
+        }
+      }
+    },
+    "Remove Link": {
+      "comment": "The link editor: take the link off the text.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リンクを削除"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除链接"
+          }
+        }
+      }
+    },
+    "Resume": {
+      "comment": "A recording's pill: go on recording after Pause.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再開"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续"
+          }
+        }
+      }
+    },
+    "Set up sync in Leaflet on your Mac or PC, then sign in here with the same Supabase account.": {
+      "comment": "Signing in: the phone uses the Supabase project the desktop app set up.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Mac または PC の Leaflet で同期を設定してから、同じ Supabase アカウントでここにサインインしてください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "请先在 Mac 或 PC 上的 Leaflet 中设置同步，然后在这里用同一个 Supabase 账户登录。"
+          }
+        }
+      }
+    },
+    "Show Panel": {
+      "comment": "A page's toolbar: show the Agent, Comments and Outline panel.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "パネルを表示"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示面板"
+          }
+        }
+      }
+    },
+    "Show Subpages": {
+      "comment": "The sidebar: show the pages inside this one.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "サブページを表示"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "显示子页面"
+          }
+        }
+      }
+    },
+    "Strikethrough": {
+      "comment": "The editor: strike the selected text through.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "取り消し線"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "删除线"
+          }
+        }
+      }
+    },
+    "The agent didn't start. Try again.": {
+      "comment": "Asking an agent from the editor: the run could not start.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エージェントを開始できませんでした。もう一度お試しください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "智能体未能启动。请重试。"
+          }
+        }
+      }
+    },
+    "Turn Into": {
+      "comment": "The editor: change the block to another kind.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "ブロックの種類を変更"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "转换为"
+          }
+        }
+      }
+    },
+    "Underline": {
+      "comment": "The editor: underline the selected text.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下線"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "下划线"
+          }
+        }
+      }
+    },
+    "a call is using it. Record once the call ends.": {
+      "comment": "Why a recording could not start: a phone or FaceTime call holds the microphone. Follows 'The microphone did not start: '.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通話がマイクを使用中です。通話が終わってから録音してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "通话正在使用麦克风，请在通话结束后录音。"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

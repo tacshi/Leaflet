@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/core"
 	"leaflet/internal/icloud"
 	"leaflet/locales"
 )
@@ -44,35 +44,32 @@ func (a *App) offlineNow() bool {
 	return a.settings.WorkOffline || !a.sync.ICloudOn() && !a.online
 }
 
-// syncMessage says what went wrong syncing, in words for the user.
+// syncMessage says what went wrong syncing, in words for the user. A
+// pass hands on no error of the network, which it waits out; a refusal
+// says what the server said, after words of its own. An error with no
+// words here is as it came, which the status shows after words of its own.
 func (a *App) syncMessage(err error) string {
+	if msg, ok := core.SyncMessage(err); ok {
+		return msg
+	}
+	if msg, ok := core.ICloudMessage(err); ok {
+		return msg
+	}
 	switch {
 	case err == nil:
 		return ""
-	case errors.Is(err, icloud.ErrUnavailable):
-		return locales.SettingsICloudUnavailable()
 	case errors.Is(err, icloud.ErrNoAccess):
 		return locales.SettingsICloudNoAccess()
-	case errors.Is(err, icloud.ErrOtherLibrary):
-		return locales.SettingsICloudOtherLibrary()
-	case errors.Is(err, icloud.ErrNewerFormat):
-		return locales.SettingsICloudNewer()
 	}
 	return err.Error()
 }
 
-// startICloud sets iCloud sync up as the settings have it. Signed in, the
-// pages sync through the server instead, and the setting is off, as
-// signing in turns it off. With iCloud Drive gone, the passes say so.
-func (a *App) startICloud() {
-	a.sync.ICloud = icloud.Folder{Root: icloud.Root(), Temp: filepath.Join(a.st.Dir, "tmp")}
-	if a.session.SignedIn && a.settings.ICloudSync {
-		a.settings.ICloudSync = false
-		a.saveSettings()
+// iCloudFailed says why iCloud sync didn't turn on, in a toast of its own.
+func (a *App) iCloudFailed(err error) string {
+	if msg := a.syncMessage(err); msg != err.Error() {
+		return msg
 	}
-	on := a.settings.ICloudSync
-	a.sync.SetICloud(on)
-	a.watchICloud(on)
+	return locales.SettingsICloudTurnOnFailed(err.Error())
 }
 
 // setICloud turns iCloud sync on or off from Settings, one turn at a
@@ -103,7 +100,7 @@ func (a *App) setICloud(on bool) {
 			if err != nil {
 				a.settings.ICloudSync = false
 				a.saveSettings()
-				a.toast(a.syncMessage(err))
+				a.toast(a.iCloudFailed(err))
 				return
 			}
 			a.watchICloud(on)
@@ -124,7 +121,7 @@ func (a *App) watchICloud(on bool) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.icloudStop = cancel
-	root, own := a.sync.ICloud.Root, "devices/"+a.st.DeviceID()
+	root, own := a.sync.ICloudFolder().Root, "devices/"+a.st.DeviceID()
 	go func() {
 		for ctx.Err() == nil {
 			w, err := mygo.WatchFiles(ctx, root, mygo.FileWatchOptions{

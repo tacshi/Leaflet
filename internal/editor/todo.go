@@ -66,8 +66,20 @@ func DueToday(due, now time.Time) bool {
 	return y == ny && m == nm && d == nd
 }
 
+// clock is the time now, which a to-do's date is shown from.
+var clock = time.Now
+
 // dueHour is the time of day a due date takes as it is given one.
 const dueHour = 9
+
+// A dueDraft is the date in a to-do's calendar, with its time of day when
+// timed, which the to-do takes as the calendar closes when edited. Each
+// to-do has its own: a click on another's date, opening its calendar,
+// closes this one, which still saves what it was given.
+type dueDraft struct {
+	at            time.Time
+	timed, edited bool
+}
 
 // dueChip builds a to-do's due date after its text, which opens MyGo's
 // calendar to change it, and a time of day; with none, it offers one
@@ -76,11 +88,12 @@ const dueHour = 9
 // also as it turns the months.
 func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active bool, pal *theme.Palette) {
 	due, timed, has := n.Due()
-	open := e.dueOpen == n.ID
+	d := e.dues[n.ID]
+	open := d != nil && e.dueOpen == n.ID
 	if !has && (e.ReadOnly || !active && !open) {
 		return
 	}
-	now := time.Now()
+	now := clock()
 	label, fg, bg := locales.EditorAddDate(), pal.TextMuted, pal.Ground
 	if has {
 		label = DueLabel(due, timed, now)
@@ -99,53 +112,65 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 		ui.Text(c, label).FontSize(12).FontWeight(550)
 	})
 	if chip.Clicked() && !e.ReadOnly {
-		open = !open
-		if open {
-			e.dueDraft, e.dueTimed, e.dueEdited = due, timed, false
-			if !has {
-				e.dueDraft = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+		if open = !open; open {
+			if d != nil && d.edited {
+				// Closed by another's calendar and opened again before it
+				// built, it saves what it was given first.
+				e.SetDue(n.ID, d.at, d.timed)
 			}
+			d = &dueDraft{at: due, timed: timed}
+			if !has {
+				d.at = time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local)
+			}
+			if e.dues == nil {
+				e.dues = map[string]*dueDraft{}
+			}
+			e.dues[n.ID] = d
 		}
 	}
 	ui.Popover(c, chip, &open, func() {
 		// Its buttons and Page Up and Down only show other months, so
 		// looking at one leaves the date as it was. A click on a day, the
 		// one chosen too, focuses the calendar.
-		cal := ui.Calendar(c.Key("due-calendar"), &e.dueDraft).Browse()
+		cal := ui.Calendar(c.Key("due-calendar"), &d.at).Browse()
 		if cal.Changed() || cal.FocusWithin() {
-			e.dueEdited = true
+			d.edited = true
 		}
 		ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
-			if !e.dueTimed {
+			if !d.timed {
 				if ui.Button(c, locales.EditorAddTime()).Grow(1).Clicked() {
-					y, m, d := e.dueDraft.Date()
-					e.dueDraft = time.Date(y, m, d, dueHour, 0, 0, 0, time.Local)
-					e.dueTimed, e.dueEdited = true, true
+					y, m, day := d.at.Date()
+					d.at = time.Date(y, m, day, dueHour, 0, 0, 0, time.Local)
+					d.timed, d.edited = true, true
 				}
 				return
 			}
-			if ui.TimeInput(c.Key("due-time"), &e.dueDraft).Label(locales.EditorDueTime()).Grow(1).Changed() {
-				e.dueEdited = true
+			if ui.TimeInput(c.Key("due-time"), &d.at).Label(locales.EditorDueTime()).Grow(1).Changed() {
+				d.edited = true
 			}
 			x := ui.Button(c.Key("remove-time"), "").Label(locales.EditorRemoveTime()).Tooltip(locales.EditorRemoveTime())
 			x.Children(func() { ui.Icon(c, theme.Icon("x")).FontSize(13) })
 			if x.Clicked() {
-				e.dueTimed, e.dueEdited = false, true
+				d.timed, d.edited = false, true
 			}
 		})
 		if has && ui.Button(c, locales.EditorRemoveDate()).FillWidth().Clicked() {
 			e.SetDue(n.ID, time.Time{}, false)
-			open, e.dueEdited = false, false
+			open, d.edited = false, false
 			e.Focus()
 		}
 	})
-	if open {
+	switch {
+	case open:
 		e.dueOpen = n.ID
-	} else if e.dueOpen == n.ID {
-		e.dueOpen = ""
-		if e.dueEdited {
-			e.dueEdited = false
-			e.SetDue(n.ID, e.dueDraft, e.dueTimed)
+	case d != nil:
+		// Closed, by the user or by another to-do's calendar opening.
+		delete(e.dues, n.ID)
+		if e.dueOpen == n.ID {
+			e.dueOpen = ""
+		}
+		if d.edited {
+			e.SetDue(n.ID, d.at, d.timed)
 		}
 	}
 }

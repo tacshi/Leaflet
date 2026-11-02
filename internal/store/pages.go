@@ -76,7 +76,7 @@ func (s *Store) queryPages(where string, args ...any) ([]Page, error) {
 
 // pagesIn is queryPages in the database or a transaction.
 func pagesIn(q querier, where string, args ...any) ([]Page, error) {
-	rows, err := q.Query(`SELECT `+pageCols+` FROM pages WHERE `+where, args...)
+	rows, err := q.Query(`SELECT `+pageCols+` FROM pages WHERE `+where, args...) // #nosec G202 -- where is a literal of this package's, its values args.
 	if err != nil {
 		return nil, err
 	}
@@ -524,6 +524,11 @@ func (s *Store) DetachPage(id string) error {
 // ErrMoveIntoSelf is returned for a move under the page itself.
 var ErrMoveIntoSelf = errors.New("a page cannot move inside itself")
 
+// ErrMoveAcrossSpaces is returned for a move under a page, or into a
+// folder, of another space: a page stays in the space it was made in,
+// and the server would refuse the move every time it went up.
+var ErrMoveAcrossSpaces = errors.New("a page cannot move into another space")
+
 // MovePage moves a page under parentID (or to the top level, into
 // folderID), after afterID among its new siblings, or last.
 func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
@@ -548,16 +553,21 @@ func (s *Store) movePage(id, parentID, folderID string, key func(q querier, spac
 		if parentID != "" && isDescendant(tx, parentID, id) {
 			return false, ErrMoveIntoSelf
 		}
+		folder := folderID
+		if parentID != "" {
+			if parent, err := pageIn(tx, parentID); err == nil && parent.SpaceID != p.SpaceID {
+				return false, ErrMoveAcrossSpaces
+			}
+			folder = ""
+		}
+		if folder != "" {
+			if f, err := scanFolder(tx.QueryRow(`SELECT `+folderCols+` FROM folders WHERE id = ?`, folder)); err == nil && f.SpaceID != p.SpaceID {
+				return false, ErrMoveAcrossSpaces
+			}
+		}
 		k, err := key(tx, p.SpaceID)
 		if err != nil {
 			return false, err
-		}
-		folder := folderID
-		if parentID != "" {
-			if parent, err := pageIn(tx, parentID); err == nil {
-				p.SpaceID = parent.SpaceID
-			}
-			folder = ""
 		}
 		p.ParentID, p.FolderID, p.SortKey = parentID, folder, k
 		return true, nil
@@ -706,10 +716,10 @@ func (s *Store) storeCopies(plan pageCopies, root func(tx *sql.Tx) (bool, error)
 			if err := createCopies(tx, s.Session(), plan.tree[1:], plan.ids, plan.contents[1:], template); err != nil {
 				return err
 			}
-			if err := putRecordingCopies(tx, s.Session().SpaceID, recs); err != nil {
+			if err := putRecordingCopies(tx, s.Dir, s.Session().SpaceID, recs); err != nil {
 				return err
 			}
-			return putFileCopies(tx, files)
+			return putFileCopies(tx, s.Dir, files)
 		})
 	}
 	if err != nil {
@@ -934,7 +944,7 @@ func (s *Store) copyLocal(plan pageCopies) ([]Recording, []newFile, []string, er
 		if ct == "" {
 			ct = "application/octet-stream"
 		}
-		upload := map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": f.LocalPath, "content_type": ct, "file_id": f.ID}
+		upload := map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": relPath(s.Dir, f.LocalPath), "content_type": ct, "file_id": f.ID}
 		files = append(files, newFile{f, upload})
 	}
 	return recs, files, made, nil
@@ -942,18 +952,18 @@ func (s *Store) copyLocal(plan pageCopies) ([]Recording, []newFile, []string, er
 
 // putRecordingCopies stores and queues the recordings of copied pages,
 // each with the upload of its audio, in storeCopies' transaction.
-func putRecordingCopies(tx *sql.Tx, space string, recs []Recording) error {
+func putRecordingCopies(tx *sql.Tx, dir, space string, recs []Recording) error {
 	if len(recs) > 0 && space != "" && !hasSpace(tx, space) {
 		return ErrNoSpace
 	}
 	for _, r := range recs {
-		if err := putRecording(tx, r); err != nil {
+		if err := putRecording(tx, dir, r); err != nil {
 			return err
 		}
 		if err := queue(tx, "recordings", r.ID, RecordingToRemote(r), "", r.PageID); err != nil {
 			return err
 		}
-		if err := queue(tx, "storage", "recordings/"+r.ID, uploadOf(r), "audio waiting to upload", r.PageID); err != nil {
+		if err := queue(tx, "storage", "recordings/"+r.ID, uploadOf(dir, r), "audio waiting to upload", r.PageID); err != nil {
 			return err
 		}
 	}
@@ -962,13 +972,13 @@ func putRecordingCopies(tx *sql.Tx, space string, recs []Recording) error {
 
 // putFileCopies stores and queues the files of copied pages, as AddFile
 // adds one, in storeCopies' transaction.
-func putFileCopies(tx *sql.Tx, files []newFile) error {
+func putFileCopies(tx *sql.Tx, dir string, files []newFile) error {
 	for _, c := range files {
 		f := c.File
 		if f.SpaceID != "" && !hasSpace(tx, f.SpaceID) {
 			return ErrNoSpace
 		}
-		if err := putFile(tx, f); err != nil {
+		if err := putFile(tx, dir, f); err != nil {
 			return err
 		}
 		if err := queue(tx, "files", f.ID, FileToRemote(f), "new file", f.PageID); err != nil {
@@ -1055,9 +1065,11 @@ func (s *Store) RestorePages(ids []string) error {
 
 // SetKeepOffline keeps a page's content on this device, or not.
 func (s *Store) SetKeepOffline(id string, keep bool) error {
-	_, err := s.db.Exec(`UPDATE pages SET keep_offline = ? WHERE id = ?`, keep, id)
+	if _, err := s.db.Exec(`UPDATE pages SET keep_offline = ? WHERE id = ?`, keep, id); err != nil {
+		return err
+	}
 	s.Notify("pages", id)
-	return err
+	return nil
 }
 
 // ContentRow is a page's stored content.
@@ -1103,10 +1115,6 @@ func (s *Store) Content(pageID string) *doc.Content {
 	return c
 }
 
-func (s *Store) putContent(pageID string, c *doc.Content, at time.Time, keep *ContentRow) error {
-	return writeContent(s.db, pageID, c, at, keep)
-}
-
 func writeContent(q querier, pageID string, c *doc.Content, at time.Time, keep *ContentRow) error {
 	var base any
 	var remote any
@@ -1122,21 +1130,11 @@ func writeContent(q querier, pageID string, c *doc.Content, at time.Time, keep *
 	return err
 }
 
-// PutSyncedContent stores content that came from the server, with the
-// base it now agrees on.
-func (s *Store) PutSyncedContent(pageID string, c *doc.Content, base string, remoteAt time.Time, revision int64) error {
-	keep := &ContentRow{BaseContent: base, RemoteUpdatedAt: remoteAt, RemoteRevision: revision}
-	if err := s.putContent(pageID, c, time.Now(), keep); err != nil {
-		return err
-	}
-	s.Notify("page_contents", pageID)
-	return nil
-}
-
-// PutSyncedContentOver is PutSyncedContent for content merged from the
-// stored content over ("" when there was none): it stores only while that
-// is still what is stored, checked in the statement that writes, and
-// returns ErrContentChanged otherwise.
+// PutSyncedContentOver stores content that came from the server, merged
+// from the stored content over ("" when there was none), with the base it
+// now agrees on: it stores only while over is still what is stored,
+// checked in the statement that writes, and returns ErrContentChanged
+// otherwise.
 func (s *Store) PutSyncedContentOver(pageID, over string, c *doc.Content, base string, remoteAt time.Time, revision int64) error {
 	if err := putSyncedOver(s.db, pageID, over, c, base, remoteAt, revision); err != nil {
 		return err
@@ -1187,12 +1185,6 @@ func putSyncedOver(q querier, pageID, over string, c *doc.Content, base string, 
 		return ErrContentChanged
 	}
 	return nil
-}
-
-// SetContentBase records the server version this device agrees with.
-func (s *Store) SetContentBase(pageID, base string, remoteAt time.Time) error {
-	_, err := s.db.Exec(`UPDATE page_contents SET base_content = ?, remote_updated_at = ? WHERE page_id = ?`, base, ms(remoteAt), pageID)
-	return err
 }
 
 // ErrContentChanged is SaveContentOver's when the stored content is no
@@ -1320,10 +1312,10 @@ const newestHistory = `SELECT id FROM page_history WHERE page_id = ? ORDER BY cr
 // up leaves the queue with it, so the server never gets it.
 func pruneHistory(tx *sql.Tx, pageID string) error {
 	old := `SELECT id FROM page_history WHERE page_id = ? AND reason <> 'manual' AND id NOT IN (` + newestHistory + `)`
-	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'page_history' AND entity_id IN (`+old+`)`, pageID, pageID); err != nil {
+	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'page_history' AND entity_id IN (`+old+`)`, pageID, pageID); err != nil { // #nosec G202 -- old is the literal above.
 		return err
 	}
-	_, err := tx.Exec(`DELETE FROM page_history WHERE id IN (`+old+`)`, pageID, pageID)
+	_, err := tx.Exec(`DELETE FROM page_history WHERE id IN (`+old+`)`, pageID, pageID) // #nosec G202 -- old is the literal above.
 	return err
 }
 
@@ -1458,14 +1450,16 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 	}
 	// Text matches as the titles do, lowered as Go lowers it, and with %
 	// and _ the characters they are: SQLite's lower() and LIKE fold ASCII
-	// alone, and LIKE reads those two as wildcards. Only pages not deleted
-	// count toward the limit, so deleted ones do not crowd theirs out.
+	// alone, and LIKE reads those two as wildcards. Only the hits listed
+	// count toward the limits, so pages deleted, found by their titles
+	// already, or left out by the tags do not crowd the others out; the
+	// most recently changed come first.
 	rows, err := s.db.Query(`SELECT c.page_id, c.plain_text FROM page_contents c JOIN pages p ON p.id = c.page_id
-		WHERE p.deleted_at IS NULL AND instr(`+lowerFunc+`(c.plain_text), ?) > 0 LIMIT ?`, q, textLimit)
+		WHERE p.deleted_at IS NULL AND instr(`+lowerFunc+`(c.plain_text), ?) > 0 ORDER BY p.updated_at DESC, p.id`, q)
 	if err != nil {
 		return nil, err
 	}
-	for rows.Next() {
+	for n := 0; n != textLimit && rows.Next(); {
 		var id, text string
 		if err := rows.Scan(&id, &text); err != nil {
 			_ = rows.Close()
@@ -1476,21 +1470,26 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		}
 		if title, ok := templateTitles[id]; ok {
 			hits = append(hits, SearchHit{Kind: "template", Title: TitleOr(title), PageID: id, Snippet: snippet(text, q)})
+			n++
 			continue
 		}
 		if _, ok := titles[id]; !ok {
 			continue
 		}
 		hits = append(hits, SearchHit{Kind: "page", Title: TitleOr(titles[id]), PageID: id, Snippet: snippet(text, q)})
+		n++
 	}
-	_ = rows.Close()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
 	// Recordings and comments, as the text, of the pages listed alone.
 	rows, err = s.db.Query(`SELECT r.page_id, r.block_id FROM recordings r JOIN pages p ON p.id = r.page_id
-		WHERE p.deleted_at IS NULL AND p.is_template = 0 AND instr(`+lowerFunc+`(r.transcript), ?) > 0 LIMIT ?`, q, otherLimit)
+		WHERE p.deleted_at IS NULL AND p.is_template = 0 AND instr(`+lowerFunc+`(r.transcript), ?) > 0
+		ORDER BY r.created_at DESC, r.id`, q)
 	if err != nil {
 		return nil, err
 	}
-	for rows.Next() {
+	for n := 0; n != otherLimit && rows.Next(); {
 		var id, block string
 		if err := rows.Scan(&id, &block); err != nil {
 			_ = rows.Close()
@@ -1498,15 +1497,19 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		}
 		if _, ok := titles[id]; ok {
 			hits = append(hits, SearchHit{Kind: "recording", Title: locales.StoreSearchRecording(TitleOr(titles[id])), PageID: id, BlockID: block})
+			n++
 		}
 	}
-	_ = rows.Close()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
 	rows, err = s.db.Query(`SELECT c.page_id, c.block_id, c.body FROM comments c JOIN pages p ON p.id = c.page_id
-		WHERE p.deleted_at IS NULL AND p.is_template = 0 AND instr(`+lowerFunc+`(c.body), ?) > 0 AND c.deleted_at IS NULL LIMIT ?`, q, otherLimit)
+		WHERE p.deleted_at IS NULL AND p.is_template = 0 AND instr(`+lowerFunc+`(c.body), ?) > 0 AND c.deleted_at IS NULL
+		ORDER BY c.created_at DESC, c.id`, q)
 	if err != nil {
 		return nil, err
 	}
-	for rows.Next() {
+	for n := 0; n != otherLimit && rows.Next(); {
 		var id, block, body string
 		if err := rows.Scan(&id, &block, &body); err != nil {
 			_ = rows.Close()
@@ -1514,9 +1517,12 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		}
 		if _, ok := titles[id]; ok {
 			hits = append(hits, SearchHit{Kind: "comment", Title: body, PageID: id, BlockID: block, Snippet: locales.StoreSearchCommentOn(TitleOr(titles[id]))})
+			n++
 		}
 	}
-	_ = rows.Close()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}

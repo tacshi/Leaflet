@@ -11,6 +11,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/doc"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -518,6 +519,59 @@ func TestDeleteFileAsksFirst(t *testing.T) {
 	}
 }
 
+// A folder that could not be made says so, as a rename that fails does,
+// rather than the dialog closing as if it was.
+func TestFolderNotMadeSaysSo(t *testing.T) {
+	a := templatesApp(t)
+	// A store that is closed takes nothing.
+	if err := a.st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	a.dialogs.openRenameFolder(nil)
+	a.dialogs.folderName = "Product"
+	tt := ui.NewTester(a.folderDialog, 600, 400)
+	tt.Frame()
+	if err := tt.Click(locales.DialogFolderCreate()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(a.toasts) != 1 || !strings.HasPrefix(a.toasts[0].text, strings.TrimSuffix(locales.DialogFolderCreateFailed(""), " ")) {
+		t.Errorf("toasts %+v", a.toasts)
+	}
+}
+
+// Open in a file's menu opens one not yet on this device as a click on
+// it does: it is downloaded first, which the app says.
+func TestOpenFileNotHereDownloadsIt(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.SidebarOpen = true
+	f, err := a.st.CreateFolder("Docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.PutFile(store.File{ID: "00000000-0000-0000-0000-0000000000ef", FolderID: f.ID, Name: "budget.txt",
+		StoragePath: "u1/budget.txt", MimeType: "text/plain", CreatedAt: time.Now(), UpdatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.treeOpen("folder", f.ID)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 900, 600)
+	tt.Frame()
+	if err := tt.RightClick("budget.txt"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if err := tt.Click(locales.CommonOpen()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if len(a.toasts) != 1 || a.toasts[0].text != locales.HostDownloading("budget.txt") {
+		t.Errorf("toasts %+v", a.toasts)
+	}
+}
+
 // Not signed in, the account row signs in, and the footer has no other
 // way to. Beside Settings an icon checks for updates, a spinner shows while
 // the check is under way, and the update shows once it is installed.
@@ -671,5 +725,81 @@ func TestPageRowMenuLeavesOutAddSubpage(t *testing.T) {
 		if got := slices.Contains(tt.Menu(), locales.SidebarAddSubpage()); got != header {
 			t.Errorf("header %v: menu %v", header, tt.Menu())
 		}
+	}
+}
+
+// A page deleted takes its link out of the page it is in, and Undo puts
+// it back where it was.
+func TestDeletedSubpageTakesItsLink(t *testing.T) {
+	a := templatesApp(t)
+	parent, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip"})
+	first, _ := a.st.CreatePage(store.NewPageOptions{Title: "Packing", ParentID: parent.ID})
+	second, _ := a.st.CreatePage(store.NewPageOptions{Title: "Tickets", ParentID: parent.ID})
+	a.reloadAll()
+	a.linkSubpage(parent.ID, first.ID, "")
+	a.linkSubpage(parent.ID, second.ID, "")
+
+	a.deletePage(first.ID)
+	if a.hasSubpageLink(parent.ID, first.ID) {
+		t.Fatal("Trip still links to Packing, deleted")
+	}
+	a.toasts[len(a.toasts)-1].fn()
+	c := a.st.Content(parent.ID)
+	if c == nil || len(c.Children) < 2 || c.Children[len(c.Children)-2].Str("page_id") != first.ID {
+		t.Fatalf("Packing's link is not back before Tickets': %v", c)
+	}
+}
+
+// A subpage deleted from under its open page, whose only block was its
+// link, leaves the page a block to type in, and undoing in the page does
+// not bring the link back: only the toast's Undo does.
+func TestDeletedOnlySubpageLeavesABlock(t *testing.T) {
+	a := templatesApp(t)
+	parent, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip"})
+	child, _ := a.st.CreatePage(store.NewPageOptions{Title: "Packing", ParentID: parent.ID})
+	if _, _, err := a.st.SaveContent(parent.ID, doc.FromBlocks([]*doc.Node{doc.SubpageNode(child.ID)})); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(parent.ID)
+	if a.page == nil {
+		t.Fatal("Trip did not open")
+	}
+	ed := a.page.editor
+	// An edit of the user's before, for undoing to go back past.
+	ed.Edit(func(*doc.Content) {})
+
+	a.deletePage(child.ID)
+	if len(ed.Content.Children) == 0 {
+		t.Fatal("the open page has no block")
+	}
+	if c := a.st.Content(parent.ID); c == nil || len(c.Children) == 0 {
+		t.Fatalf("stored with no block: %v", c)
+	}
+	// A click below the page puts the caret at its end.
+	a.caretAtEnd()
+	ed.Undo()
+	if a.hasSubpageLink(parent.ID, child.ID) {
+		t.Error("undoing in the page brought back the deleted page's link")
+	}
+	a.toasts[len(a.toasts)-1].fn()
+	if !a.hasSubpageLink(parent.ID, child.ID) {
+		t.Error("the toast's Undo did not bring back the link")
+	}
+}
+
+// A click below a page with no blocks gives it one to type in.
+func TestCaretAtEndOfAPageWithNoBlocks(t *testing.T) {
+	a := templatesApp(t)
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	a.reloadAll()
+	a.openPage(p.ID)
+	if a.page == nil {
+		t.Fatal("the page did not open")
+	}
+	a.page.editor.Content.Children = nil
+	a.caretAtEnd()
+	if n := len(a.page.editor.Content.Children); n != 1 {
+		t.Errorf("%d blocks", n)
 	}
 }

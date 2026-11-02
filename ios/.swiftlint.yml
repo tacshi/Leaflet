@@ -1,0 +1,35 @@
+# SwiftLint, for make ios-check: its default rules, less the ones
+# swift-format (.swift-format) decides or lays out otherwise, and the size
+# limits, which golangci-lint's defaults leave out of the Go as well.
+included:
+  - Leaflet
+  - LeafletTests
+excluded:
+  # What ios/gen writes.
+  - Leaflet/Generated
+disabled_rules:
+  # swift-format's: it wraps lines at 100, putting a brace or a closure's
+  # parameters on a line of their own after a wrapped list, and ends a
+  # wrapped collection with a comma.
+  - line_length
+  - opening_brace
+  - closure_parameter_position
+  - trailing_comma
+  # Short names, as L, LI, c and p, are the app's; swift-format checks
+  # their case.
+  - identifier_name
+  - type_name
+  # Sizes.
+  - file_length
+  - type_body_length
+  - function_body_length
+  - function_parameter_count
+  - cyclomatic_complexity
+  - nesting
+  - large_tuple
+  # String(decoding:as:) is kept for JSONEncoder's output, which is always
+  # UTF-8.
+  - optional_data_string_conversion
+  # It takes SwiftUI's multiple trailing closures, as content: and
+  # footer:, for one closure argument and the trailing one.
+  - multiple_closures_with_trailing_closure

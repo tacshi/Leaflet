@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -11,15 +12,24 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	gosync "sync"
 	"testing"
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/icloud"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 )
+
+// TestMain has an entry that failed go again on the next push, as the
+// tests that push again expect; TestFailedEntriesWait has it wait.
+func TestMain(m *testing.M) {
+	retryBase = 0
+	os.Exit(m.Run())
+}
 
 func openStore(t *testing.T) *store.Store {
 	t.Helper()
@@ -41,6 +51,16 @@ func para(id, text string) *doc.Node {
 }
 
 func textOf(c *doc.Content, id string) string { return c.Find(id).Delta().Plain() }
+
+// putSynced stores c as a page's content that came from the server, the
+// base it agrees on, over what the page has.
+func putSynced(t *testing.T, st *store.Store, pageID string, c *doc.Content) {
+	t.Helper()
+	row, _ := st.ContentRow(pageID)
+	if err := st.PutSyncedContentOver(pageID, row.Content, c, c.Encode(), time.Now(), 1); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // contentServer is page_content on a fake PostgREST: one row, saved only
 // over the revision a writer read.
@@ -86,6 +106,58 @@ func (s *contentServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func jsonNumber(n int64) string { raw, _ := json.Marshal(n); return string(raw) }
 
+// fullPass is a service on a server a whole pass runs against: content
+// answers for page_content, and every other table has no rows and takes
+// what is sent. requests are those it had, as "GET /rest/v1/comments".
+func fullPass(t *testing.T, st *store.Store, content http.Handler) (*Service, *[]string) {
+	t.Helper()
+	// The space is adopted, as after the first pass.
+	if err := st.SetValue("space.u1", st.Session().SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var requests []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		if content != nil && r.URL.Path == "/rest/v1/page_content" {
+			content.ServeHTTP(w, r)
+			return
+		}
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(hs.Close)
+	return New(st, remote.SignedInForTest(hs.URL, st, "u1")), &requests
+}
+
+// onlyContent is srv for the reads of a page's content and its saves; the
+// pull's list of changed content is empty.
+func onlyContent(srv *contentServer) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" && !strings.Contains(r.URL.Query().Get("select"), "revision") {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		srv.ServeHTTP(w, r)
+	})
+}
+
+// pendingOf is the queued entry of a row, or nil.
+func pendingOf(t *testing.T, st *store.Store, entity, id string) *store.OutboxEntry {
+	t.Helper()
+	entries, err := st.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Entity == entity && e.EntityID == id {
+			return &e
+		}
+	}
+	return nil
+}
+
 func TestSaveMergesWithASaveInBetween(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -94,9 +166,7 @@ func TestSaveMergesWithASaveInBetween(t *testing.T) {
 	}
 	base := &doc.Content{Children: []*doc.Node{para("a", "one"), para("b", "two")},
 		Blocks: map[string]int64{"a": 1000, "b": 1000}, Deleted: map[string]int64{}}
-	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
-		t.Fatal(err)
-	}
+	putSynced(t, st, p.ID, base)
 	mine := st.Content(p.ID)
 	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
 	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
@@ -162,9 +232,7 @@ func TestRefreshKeepsASaveMadeWhileMerging(t *testing.T) {
 	}
 	base := &doc.Content{Children: []*doc.Node{para("a", "one"), para("b", "two")},
 		Blocks: map[string]int64{"a": 1000, "b": 1000}, Deleted: map[string]int64{}}
-	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
-		t.Fatal(err)
-	}
+	putSynced(t, st, p.ID, base)
 	mine := st.Content(p.ID)
 	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
 	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
@@ -177,9 +245,6 @@ func TestRefreshKeepsASaveMadeWhileMerging(t *testing.T) {
 	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	typed := typeWhileStoring(t, st, p.ID)
 
 	if _, err := svc.RefreshContent(context.Background(), p.ID); err != nil {
@@ -206,9 +271,7 @@ func TestPushKeepsASaveMadeWhileStoring(t *testing.T) {
 	}
 	base := &doc.Content{Children: []*doc.Node{para("a", "one"), para("b", "two")},
 		Blocks: map[string]int64{"a": 1000, "b": 1000}, Deleted: map[string]int64{}}
-	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
-		t.Fatal(err)
-	}
+	putSynced(t, st, p.ID, base)
 	mine := st.Content(p.ID)
 	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
 	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
@@ -249,9 +312,7 @@ func TestPushKeepsAConflictTypedWhileStoring(t *testing.T) {
 	}
 	base := &doc.Content{Children: []*doc.Node{para("a", "one"), para("b", "two")},
 		Blocks: map[string]int64{"a": 1000, "b": 1000}, Deleted: map[string]int64{}}
-	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
-		t.Fatal(err)
-	}
+	putSynced(t, st, p.ID, base)
 	mine := st.Content(p.ID)
 	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
 	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
@@ -398,7 +459,7 @@ func TestPullReadsPastAFullOverlap(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	rows, err := svc.changed(context.Background(), "pages", "id", "*", cursor{at, "b"}, 2)
+	rows, _, err := svc.changed(context.Background(), "pages", "id", "*", cursor{at, "b"}, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -439,9 +500,6 @@ func TestOpeningAPageFetchesItsContent(t *testing.T) {
 	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	got := make(chan string, 1)
 	svc.OnPageContent = func(id string) { got <- id }
 	svc.SetOpen(p.ID, true)
@@ -455,6 +513,168 @@ func TestOpeningAPageFetchesItsContent(t *testing.T) {
 	}
 	if c := st.Content(p.ID); c == nil || textOf(c, "a") != "from another device" {
 		t.Errorf("stored %v", c)
+	}
+}
+
+// An opened page has its time to come once the pass in progress is done,
+// not from when it was opened.
+func TestOpeningAPageWaitsForThePassFirst(t *testing.T) {
+	old := openWait
+	openWait = 200 * time.Millisecond
+	t.Cleanup(func() { openWait = old })
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	theirs := &doc.Content{Children: []*doc.Node{para("a", "from another device")}, Blocks: map[string]int64{"a": 1000}, Deleted: map[string]int64{}}
+	srv := &contentServer{content: theirs.Encode(), revision: 3}
+	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	got := make(chan string, 1)
+	svc.OnPageContent = func(id string) { got <- id }
+	svc.running.Lock()
+	svc.SetOpen(p.ID, true)
+	time.Sleep(2 * openWait)
+	svc.running.Unlock()
+	select {
+	case <-got:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the opened page's content never came")
+	}
+}
+
+// A device revoked in Account › Devices signs out and forgets its ID:
+// signing in again, it registers as a new device, not as the one revoked,
+// which would sign it out again on every pass. What iCloud sync kept of
+// the old ID goes too, so iCloud sync under the new one starts afresh,
+// but for the folder's space, which what went up to it is fetched from.
+func TestRevokedDeviceRegistersAnew(t *testing.T) {
+	st := openStore(t)
+	for k, v := range map[string]string{"icloud.seq": "5", "icloud.space": "s", "icloud.log_from": "3", "icloud.device_at": "1"} {
+		if err := st.SetValue(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"revoked_at": "2026-01-01T00:00:00Z"}})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	svc.ICloud = icloud.Folder{Root: t.TempDir()}
+	was := st.DeviceID()
+	if err := svc.heartbeat(context.Background()); !errors.Is(err, remote.ErrSignedOut) {
+		t.Fatalf("heartbeat: %v", err)
+	}
+	if now := st.DeviceID(); now == was {
+		t.Errorf("the device kept its revoked ID %s", was)
+	}
+	if kept := st.ValuesWithPrefix("icloud."); len(kept) != 1 || kept["fetch_space"] != "s" {
+		t.Errorf("iCloud sync kept %v of the old ID", kept)
+	}
+	if !svc.joinedICloud() {
+		t.Error("what went up to iCloud Drive can no longer be fetched")
+	}
+}
+
+// A cloud model connection deleted on another device, which the server
+// removes outright, goes here too; one kept on this device alone stays.
+func TestPullRemovesDeletedProviders(t *testing.T) {
+	st := openStore(t)
+	for _, p := range []store.Provider{
+		{ID: "kept", Preset: "openai", Name: "Kept", BaseURL: "https://example.com", AuthKind: "api_key"},
+		{ID: "gone", Preset: "openai", Name: "Gone", BaseURL: "https://example.com", AuthKind: "api_key"},
+		{ID: "local", Preset: "ollama", Name: "Local", BaseURL: "http://localhost:11434", AuthKind: "none", IsLocal: true},
+	} {
+		if err := st.PutProvider(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out := []map[string]any{}
+		if r.URL.Path == "/rest/v1/model_providers" && r.URL.Query().Get("select") == "id" {
+			out = append(out, map[string]any{"id": "kept"})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.pullProviderRemovals(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	providers, _ := st.Providers()
+	for _, p := range providers {
+		left = append(left, p.ID)
+	}
+	slices.Sort(left)
+	if strings.Join(left, ",") != "kept,local" {
+		t.Errorf("left %v", left)
+	}
+}
+
+// A page whose share the server could not be asked about keeps its
+// members until it can: forgotten, the page would turn read-only here.
+func TestWithdrawnKeepsMembersWhenTheServerFails(t *testing.T) {
+	st := openStore(t)
+	old := "2026-01-01T00:00:00Z"
+	const page = "00000000-0000-0000-0000-0000000000a1"
+	if err := st.PutRemotePage(map[string]any{"id": page, "space_id": "00000000-0000-0000-0000-0000000000ff", "title": "Shared", "sort_key": "V", "created_at": old, "updated_at": old}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMembers(page, []store.Member{{UserID: "u1", Role: "editor", Accepted: true}}); err != nil {
+		t.Fatal(err)
+	}
+	// The page's members are refused, and the server fails to say more.
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/rpc/page_members") {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": "42501", "message": "forbidden"})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"message": "down"}`))
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.withdrawn(context.Background(), page); err == nil {
+		t.Error("no error from a server that failed")
+	}
+	if st.MembersOrNil(page) == nil {
+		t.Error("members forgotten")
+	}
+	// Nor do they count as loaded, so the next pass tries again.
+	if err := svc.LoadMembers(context.Background(), page); err == nil {
+		t.Error("no error from a server that failed")
+	}
+	svc.mu.Lock()
+	_, stamped := svc.membersAt[page]
+	svc.mu.Unlock()
+	if stamped {
+		t.Error("members taken for loaded")
+	}
+}
+
+// A file that is there but cannot be read now waits to go up again; only
+// one that is gone leaves the queue.
+func TestUploadOfAFileItCannotReadWaits(t *testing.T) {
+	if os.Getuid() == 0 {
+		t.Skip("root reads every file")
+	}
+	st := openStore(t)
+	local := filepath.Join(t.TempDir(), "locked.txt")
+	if err := os.WriteFile(local, []byte("hello"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	svc := New(st, remote.SignedInForTest("http://127.0.0.1:1", st, "u1"))
+	payload := map[string]any{"bucket": "files", "path": "s/f/locked.txt", "local_path": local, "content_type": "text/plain"}
+	if done, err := svc.pushFile(context.Background(), "u1", payload); done || err == nil {
+		t.Errorf("unreadable: done %v, %v", done, err)
+	}
+	payload["local_path"] = filepath.Join(t.TempDir(), "gone.txt")
+	if done, err := svc.pushFile(context.Background(), "u1", payload); !done || err != nil {
+		t.Errorf("gone: done %v, %v", done, err)
 	}
 }
 
@@ -477,9 +697,6 @@ func TestContentWaitsForItsPage(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 
 	ctx := context.Background()
 	if err := svc.pullContents(ctx); err != nil {
@@ -666,9 +883,6 @@ func TestCommentsPushAsUpdates(t *testing.T) {
 // not undo a move or a deletion made on another device meanwhile; one the
 // server does not have goes up whole.
 func TestPagePushSendsOnlyItsChanges(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
 	if err != nil {
@@ -743,9 +957,6 @@ func TestPagePushSendsOnlyItsChanges(t *testing.T) {
 // forever with every change made to the page elsewhere passed over. One
 // the server does not show stays queued.
 func TestRefusedPageChangeTakesTheServers(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
 	if err != nil {
@@ -801,9 +1012,6 @@ func TestRefusedPageChangeTakesTheServers(t *testing.T) {
 // A file's move goes up as only that, so it does not undo a deletion made
 // elsewhere meanwhile.
 func TestFilePushSendsOnlyItsChanges(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	folder, err := st.CreateFolder("Folder")
 	if err != nil {
@@ -1012,9 +1220,6 @@ func TestDeletedFileLeavesStorageAfterItsRow(t *testing.T) {
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 	ctx := context.Background()
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 
 	if err := svc.push(ctx); err != nil {
 		t.Fatal(err)
@@ -1051,8 +1256,9 @@ func TestDeletedFileLeavesStorageAfterItsRow(t *testing.T) {
 }
 
 // Sending everything again sends a deleted file's row, so its deletion
-// still reaches the other devices, but none of its contents.
-func TestRequeueSendsDeletedFiles(t *testing.T) {
+// still reaches the other devices, but none of its contents, and a deleted
+// folder's.
+func TestRequeueSendsDeletedFilesAndFolders(t *testing.T) {
 	st := openStore(t)
 	src := t.TempDir() + "/notes.txt"
 	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
@@ -1065,6 +1271,13 @@ func TestRequeueSendsDeletedFiles(t *testing.T) {
 	if err := st.DeleteFile(f); err != nil {
 		t.Fatal(err)
 	}
+	folder, err := st.CreateFolder("Old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.DeleteFolder(folder); err != nil {
+		t.Fatal(err)
+	}
 	entries, _ := st.Pending()
 	for _, e := range entries {
 		if err := st.Dequeue(e); err != nil {
@@ -1072,7 +1285,7 @@ func TestRequeueSendsDeletedFiles(t *testing.T) {
 		}
 	}
 	svc := New(st, remote.New(remote.Settings{}, st))
-	if err := svc.requeueAll(st.Session().SpaceID); err != nil {
+	if err := svc.requeueAll(context.Background(), st.Session().SpaceID); err != nil {
 		t.Fatal(err)
 	}
 	var queued []string
@@ -1084,6 +1297,9 @@ func TestRequeueSendsDeletedFiles(t *testing.T) {
 	}
 	if strings.Join(queued, ",") != "files" {
 		t.Errorf("queued %v for the deleted file", queued)
+	}
+	if pendingOf(t, st, "folders", folder.ID) == nil {
+		t.Error("the deleted folder is not queued")
 	}
 }
 
@@ -1097,9 +1313,7 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 		t.Fatal(err)
 	}
 	base := &doc.Content{Children: []*doc.Node{para("a", "one")}, Blocks: map[string]int64{"a": 1000}, Deleted: map[string]int64{}}
-	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
-		t.Fatal(err)
-	}
+	putSynced(t, st, p.ID, base)
 	mine := st.Content(p.ID)
 	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
 	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
@@ -1110,15 +1324,20 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 		t.Fatal(err)
 	}
 	srv := &contentServer{content: base.Encode(), revision: 1}
-	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
-	defer hs.Close()
-	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	svc, requests := fullPass(t, st, onlyContent(srv))
 
-	if done, err := svc.pushContent(context.Background(), p.ID); done || !errors.Is(err, errUnreadable) {
-		t.Errorf("push: done %v, %v", done, err)
+	// A whole pass: the page waits, and the rest of it goes on.
+	if err := svc.pass(context.Background()); err != nil {
+		t.Fatalf("pass: %v", err)
 	}
 	if srv.updates != 0 || srv.content != base.Encode() {
 		t.Errorf("server saved over: %d updates, %s", srv.updates, srv.content)
+	}
+	if e := pendingOf(t, st, "page_content", p.ID); e == nil || e.Attempts != 1 || !strings.Contains(e.LastError, errUnreadable.Error()) {
+		t.Errorf("queued %+v", e)
+	}
+	if !slices.Contains(*requests, "GET /rest/v1/comments") {
+		t.Errorf("the pass stopped before the pulls: %v", *requests)
 	}
 
 	// The server moves on: the change waiting here is not merged either.
@@ -1126,9 +1345,6 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 	theirs.Children = append(theirs.Children, para("b", "two, added there"))
 	theirs.Blocks["b"] = time.Now().UnixMilli()
 	srv.content, srv.revision = theirs.Encode(), 2
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	if _, err := svc.RefreshContent(context.Background(), p.ID); !errors.Is(err, errUnreadable) {
 		t.Errorf("refresh: %v", err)
 	}
@@ -1153,8 +1369,8 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(out)
 	}))
 	defer hs2.Close()
-	svc = New(st, remote.SignedInForTest(hs2.URL, st, "u1"))
-	if err := svc.pullContents(context.Background()); err != nil {
+	svc, _ = fullPass(t, st, hs2.Config.Handler)
+	if err := svc.pass(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if row, _ := st.ContentRow(p.ID); row.Content != broken {
@@ -1180,9 +1396,7 @@ func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 	}
 	base := &doc.Content{Children: []*doc.Node{para("a", "one"), para("b", "two")},
 		Blocks: map[string]int64{"a": 1000, "b": 1000}, Deleted: map[string]int64{}}
-	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
-		t.Fatal(err)
-	}
+	putSynced(t, st, p.ID, base)
 	mine := st.Content(p.ID)
 	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
 	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
@@ -1190,19 +1404,20 @@ func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 	}
 	const unreadable = `{"document": {"type": "page", "id": "root", "children": [{"id": "x", "type": "paragraph", "data": ["of a newer kind"]}]}, "meta": {"v": 1, "blocks": {"x": 5}}}`
 	srv := &contentServer{content: unreadable, revision: 2}
-	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
-	defer hs.Close()
-	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
+	svc, requests := fullPass(t, st, onlyContent(srv))
 	ctx := context.Background()
 
-	if done, err := svc.pushContent(ctx, p.ID); done || !errors.Is(err, errServerUnreadable) {
-		t.Errorf("push: done %v, %v", done, err)
+	if err := svc.pass(ctx); err != nil {
+		t.Fatalf("pass: %v", err)
 	}
 	if srv.updates != 0 || srv.content != unreadable {
 		t.Errorf("server saved over: %d updates, %s", srv.updates, srv.content)
+	}
+	if e := pendingOf(t, st, "page_content", p.ID); e == nil || e.Attempts != 1 || !strings.Contains(e.LastError, errServerUnreadable.Error()) {
+		t.Errorf("queued %+v", e)
+	}
+	if !slices.Contains(*requests, "GET /rest/v1/comments") {
+		t.Errorf("the pass stopped before the pulls: %v", *requests)
 	}
 	if _, err := svc.RefreshContent(ctx, p.ID); !errors.Is(err, errServerUnreadable) {
 		t.Errorf("refresh: %v", err)
@@ -1231,8 +1446,8 @@ func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(out)
 	}))
 	defer hs2.Close()
-	svc = New(st, remote.SignedInForTest(hs2.URL, st, "u1"))
-	if err := svc.pullContents(ctx); err != nil {
+	svc, _ = fullPass(t, st, hs2.Config.Handler)
+	if err := svc.pass(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if c := st.Content(p.ID); c == nil || textOf(c, "a") != "one, edited here" {
@@ -1470,16 +1685,14 @@ func TestUploadWaitsForTheRecordingsPath(t *testing.T) {
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 	ctx := context.Background()
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 
-	// A failure here ends the pass, as one that stores a page's content does.
-	if err := svc.push(ctx); err == nil {
-		t.Error("the pass went on")
+	// A failure here is the upload's own: it stays queued, and the rest of
+	// the queue goes on.
+	if err := svc.push(ctx); err != nil {
+		t.Errorf("the pass stopped: %v", err)
 	}
-	if !st.HasPending("storage", "recordings/"+r.ID) {
-		t.Fatal("the upload left the queue without the recording's path")
+	if entries, _ := st.Pending(); len(entries) != 1 || entries[0].Attempts != 1 {
+		t.Fatalf("the upload left the queue without the recording's path: %+v", entries)
 	}
 	if _, err := st.DB().Exec(`DROP TRIGGER refuse`); err != nil {
 		t.Fatal(err)
@@ -1560,9 +1773,6 @@ func TestCopiesGoUpFromTheOriginals(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 
 	if err := svc.push(context.Background()); err != nil {
 		t.Fatal(err)
@@ -1639,9 +1849,6 @@ func TestDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 
 	if err := svc.push(context.Background()); err != nil {
 		t.Fatal(err)
@@ -1746,9 +1953,7 @@ func TestRefreshRefusesContentThatIsNotAPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.PutSyncedContent(p.ID, base, base.Encode(), time.Now(), 1); err != nil {
-		t.Fatal(err)
-	}
+	putSynced(t, st, p.ID, base)
 	entries, _ := st.Pending()
 	for _, e := range entries {
 		if err := st.Dequeue(e); err != nil {
@@ -1822,9 +2027,6 @@ func (s *refusing) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // server's. One still transcribing there is settled there too, and one
 // the server does not have goes up whole.
 func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
 	if err != nil {
@@ -1886,9 +2088,6 @@ func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
 // A recording's change the server refuses, as on a page the user may no
 // longer edit, gives way to the server's recording, as a page's does.
 func TestRefusedRecordingTakesTheServers(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Meeting"})
 	if err != nil {
@@ -1922,9 +2121,6 @@ func TestRefusedRecordingTakesTheServers(t *testing.T) {
 // on a page shared to view, gives way to the server's comment: waiting, it
 // would keep the author's later edits from this device.
 func TestRefusedCommentTakesTheServers(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	theirs := map[string]any{"id": "00000000-0000-0000-0000-0000000000c1", "page_id": "00000000-0000-0000-0000-0000000000a1",
@@ -1954,9 +2150,6 @@ func TestRefusedCommentTakesTheServers(t *testing.T) {
 // which keeps its stored copy: the removal queued with the deletion does
 // not take it.
 func TestRefusedFileDeletionKeepsItsStoredCopy(t *testing.T) {
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	st := openStore(t)
 	src := t.TempDir() + "/notes.txt"
 	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
@@ -2062,9 +2255,6 @@ func TestFileRowGoesAfterItsContents(t *testing.T) {
 	}))
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
-	was := online
-	online = func() bool { return true }
-	t.Cleanup(func() { online = was })
 	if err := svc.push(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -2073,5 +2263,357 @@ func TestFileRowGoesAfterItsContents(t *testing.T) {
 	}
 	if st.HasPending("files", f.ID) || st.HasPending("storage", "files/"+f.ID) {
 		t.Error("the file still waits after the pass")
+	}
+}
+
+// A cloud agent's job refers to the page, the pages it is inside, and the
+// comment its thread starts with: flushing the page sends them all first,
+// and leaves another page's changes queued.
+func TestFlushSendsWhatTheJobRefersTo(t *testing.T) {
+	st := openStore(t)
+	parent, err := st.CreatePage(store.NewPageOptions{Title: "Projects"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", ParentID: parent.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	thread, err := st.AddComment(p.ID, "b1", "@Agent sum this up", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	aside, err := st.AddComment(other.ID, "b1", "later", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, _ := fullPass(t, st, nil)
+
+	if err := svc.FlushPage(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range [][2]string{{"pages", parent.ID}, {"pages", p.ID}, {"page_content", p.ID}, {"comments", thread.ID}} {
+		if st.HasPending(e[0], e[1]) {
+			t.Errorf("%s %s still waits", e[0], e[1])
+		}
+	}
+	if !st.HasPending("pages", other.ID) || !st.HasPending("comments", aside.ID) {
+		t.Error("another page's changes went")
+	}
+}
+
+// Content the server refuses to save, as the user may only view the page
+// now, gives way to the server's: else it would go, and fail, on every
+// pass, and the pulls would pass over the page for good.
+func TestRefusedContentTakesTheServers(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	const (
+		shared = "00000000-0000-0000-0000-0000000000e1"
+		space  = "00000000-0000-0000-0000-0000000000ff"
+	)
+	old := "2026-01-01T00:00:00Z"
+	if err := st.PutRemotePage(map[string]any{"id": shared, "space_id": space, "title": "Shared", "sort_key": "V", "created_at": old, "updated_at": old}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMembers(shared, []store.Member{{PageID: shared, UserID: "u1", Role: "editor", Accepted: true}}); err != nil {
+		t.Fatal(err)
+	}
+	base := &doc.Content{Children: []*doc.Node{para("a", "one")}, Blocks: map[string]int64{"a": 1000}, Deleted: map[string]int64{}}
+	putSynced(t, st, shared, base)
+	mine := st.Content(shared)
+	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
+	if _, _, err := st.SaveContent(shared, mine); err != nil {
+		t.Fatal(err)
+	}
+	theirs := base.Copy()
+	theirs.Find("a").SetDelta(doc.Delta{{Text: "one, edited by the owner"}})
+	theirs.Blocks["a"] = 2000
+	var mu gosync.Mutex
+	patches := 0
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		var out any = []map[string]any{}
+		switch {
+		case r.URL.Path == "/rest/v1/rpc/page_members":
+			out = []map[string]any{{"user_id": "u2", "role": "owner", "accepted": true}, {"user_id": "u1", "role": "viewer", "accepted": true}}
+		case r.URL.Path == "/rest/v1/page_content" && r.Method == "PATCH":
+			patches++ // row-level security matches no row
+		case r.URL.Path == "/rest/v1/page_content":
+			out = []map[string]any{{"content": json.RawMessage(theirs.Encode()), "revision": 3, "updated_at": time.Now().UTC().Format(time.RFC3339Nano)}}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if st.HasPending("page_content", shared) {
+		t.Error("the refused change still waits")
+	}
+	if got := textOf(st.Content(shared), "a"); got != "one, edited by the owner" {
+		t.Errorf("content %q", got)
+	}
+	if row, _ := st.ContentRow(shared); row.RemoteRevision != 3 {
+		t.Errorf("revision %d", row.RemoteRevision)
+	}
+	if patches != 3 {
+		t.Errorf("%d saves tried", patches)
+	}
+}
+
+// Merged content the server took is stored here before its change leaves
+// the queue: one that cannot be stored goes again.
+func TestSaveKeepsTheChangeQueuedWhenItCannotStore(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := &doc.Content{Children: []*doc.Node{para("a", "one")}, Blocks: map[string]int64{"a": 1000}, Deleted: map[string]int64{}}
+	putSynced(t, st, p.ID, base)
+	mine := st.Content(p.ID)
+	mine.Find("a").SetDelta(doc.Delta{{Text: "one, edited here"}})
+	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
+		t.Fatal(err)
+	}
+	// The row cannot be read once the server has saved, as a database that
+	// is busy may not be.
+	srv := &contentServer{content: base.Encode(), revision: 1, between: func(*contentServer) {
+		if _, err := st.DB().Exec(`UPDATE page_contents SET updated_at = 'busy' WHERE page_id = ?`, p.ID); err != nil {
+			t.Error(err)
+		}
+	}}
+	hs := httptest.NewServer(http.StripPrefix("/rest/v1/page_content", srv))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if done, err := svc.pushContent(context.Background(), p.ID); done || err == nil {
+		t.Errorf("push: done %v, %v", done, err)
+	}
+}
+
+// An entry that failed waits before it goes again, longer each time, as a
+// pass runs after every save; a change to it goes at once.
+func TestFailedEntriesWait(t *testing.T) {
+	retryBase = time.Minute
+	t.Cleanup(func() { retryBase = 0 })
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &refusing{}
+	hs := httptest.NewServer(srv)
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+	sent := func() int {
+		srv.mu.Lock()
+		defer srv.mu.Unlock()
+		n := 0
+		for _, r := range srv.requests {
+			if r == "POST /rest/v1/pages" {
+				n++
+			}
+		}
+		return n
+	}
+
+	for range 2 {
+		if err := svc.push(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := sent(); n != 1 {
+		t.Errorf("the page went %d times", n)
+	}
+	if e := pendingOf(t, st, "pages", p.ID); e == nil || e.Attempts != 1 {
+		t.Errorf("queued %+v", e)
+	}
+	if err := st.RenamePage(p.ID, "My plan"); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.push(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := sent(); n != 2 {
+		t.Errorf("the changed page went %d times", n)
+	}
+	if backoff(1) != time.Minute || backoff(3) != 4*time.Minute || backoff(40) != retryMax {
+		t.Errorf("backoff %v, %v, %v", backoff(1), backoff(3), backoff(40))
+	}
+}
+
+// The passes, the app and uploads read the iCloud folder from goroutines
+// of their own while the user picks another.
+func TestICloudFolderMovesWhileRead(t *testing.T) {
+	st := openStore(t)
+	svc := New(st, remote.New(remote.Settings{}, st))
+	svc.SetICloud(true)
+	var wg gosync.WaitGroup
+	wg.Go(func() {
+		for range 200 {
+			_ = svc.CanSync()
+			_ = svc.CanFetch()
+			_ = svc.joinedICloud()
+		}
+	})
+	for i := range 200 {
+		svc.Hold(func() { svc.SetICloudRoot(filepath.Join(t.TempDir(), strconv.Itoa(i))) })
+	}
+	wg.Wait()
+}
+
+// A first sync of many rows reads them all in one pass, a page at a time,
+// rather than a page each pass.
+func TestPullReadsEveryPageOfChanges(t *testing.T) {
+	st := openStore(t)
+	pullRows = 2
+	t.Cleanup(func() { pullRows = 500 })
+	const space = "00000000-0000-0000-0000-0000000000ff"
+	var rows []map[string]any
+	for i := range 5 {
+		at := time.Date(2026, 10, 1, 9, i, 0, 0, time.UTC).Format(time.RFC3339Nano)
+		rows = append(rows, map[string]any{"id": fmt.Sprintf("00000000-0000-0000-0000-00000000000%d", i), "space_id": space,
+			"title": strconv.Itoa(i), "sort_key": "V", "created_at": at, "updated_at": at})
+	}
+	calls := 0
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		from := min(calls*2, len(rows))
+		calls++
+		_ = json.NewEncoder(w).Encode(rows[from:min(from+2, len(rows))])
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if err := svc.pullTable(context.Background(), "pages", "*", st.PutRemotePage); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		if _, err := st.Page(store.S(r, "id")); err != nil {
+			t.Errorf("page %s: %v", store.S(r, "title"), err)
+		}
+	}
+}
+
+// A share withdrawn while it was pulled is handled once its page is gone:
+// the pull goes on past it to the comments and the content.
+func TestPullGoesOnPastAWithdrawnShare(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	const gone = "00000000-0000-0000-0000-0000000000e1"
+	var mu gosync.Mutex
+	var asked []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		asked = append(asked, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		q := r.URL.Query()
+		switch {
+		case r.URL.Path == "/rest/v1/rpc/page_members":
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"42501","message":"forbidden"}`))
+		case r.URL.Path == "/rest/v1/page_permissions" && q.Get("user_id") == "eq.u1" && q.Get("updated_at") == "gt.1970-01-01T00:00:00Z":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"page_id": gone, "updated_at": time.Now().UTC().Format(time.RFC3339Nano)}})
+		default:
+			_, _ = w.Write([]byte("[]"))
+		}
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	if err := svc.pull(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(asked, "GET /rest/v1/page_content") {
+		t.Errorf("the pull stopped at the share: %v", asked)
+	}
+	if c := svc.cursor("page_permissions"); c.key != gone {
+		t.Errorf("cursor %+v", c)
+	}
+}
+
+// Sync keeps who the user's own pages are shared with, so an agent on one
+// knows whether someone else writes in it: the shares the server lists
+// load the page's members, or stand for them when they do not load, and
+// members of a share withdrawn go.
+func TestPullKeepsOwnPagesMembers(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	shares := []map[string]any{{"page_id": p.ID, "user_id": "u2", "role": "editor"}}
+	membersLoad := false
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		var out any = []map[string]any{}
+		switch r.URL.Path {
+		case "/rest/v1/page_permissions":
+			if r.URL.Query().Get("user_id") == "neq.u1" {
+				out = shares
+			}
+		case "/rest/v1/rpc/page_members":
+			if !membersLoad {
+				http.Error(w, `{"message":"try again"}`, http.StatusInternalServerError)
+				return
+			}
+			list := []map[string]any{{"user_id": "u1", "role": "owner", "accepted": true}}
+			for _, s := range shares {
+				list = append(list, map[string]any{"user_id": s["user_id"], "role": s["role"], "display_name": "Ana", "accepted": true})
+			}
+			out = list
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+	others := func() []string {
+		var ids []string
+		for _, m := range st.MembersOrNil(p.ID) {
+			if m.UserID != "u1" {
+				ids = append(ids, m.UserID)
+			}
+		}
+		return ids
+	}
+
+	if err := svc.pullOwnMembers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := others(); !slices.Equal(got, []string{"u2"}) {
+		t.Errorf("members that did not load: %v", got)
+	}
+	if v, _ := st.Value(OwnMembersKey); v == "" {
+		t.Error("not kept as known")
+	}
+
+	mu.Lock()
+	shares, membersLoad = nil, true
+	mu.Unlock()
+	svc.membersAt[ownSwept] = time.Now().Add(-membersEvery)
+	if err := svc.pullOwnMembers(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got := others(); len(got) != 0 {
+		t.Errorf("the share went, members %v stayed", got)
 	}
 }

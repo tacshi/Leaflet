@@ -126,6 +126,18 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 			}
 			continue
 		}
+		// An object that is no JSON-RPC 2.0 request, without its method,
+		// is an invalid request too, answered under its ID if it has one.
+		if req.JSONRPC != "2.0" || req.Method == "" {
+			id := req.ID
+			if len(id) == 0 {
+				id = json.RawMessage("null")
+			}
+			if err := enc.Encode(response{JSONRPC: "2.0", ID: id, Error: &rpcError{-32600, "Invalid Request"}}); err != nil {
+				return err
+			}
+			continue
+		}
 		result, rerr := s.handle(req)
 		// Notifications get no answer.
 		if len(req.ID) == 0 {
@@ -232,8 +244,9 @@ func agentName(title, name string) string {
 	return strings.Join(words, " ")
 }
 
-const instructions = `Leaflet keeps the user's pages: living documents of blocks (headings, lists, to-dos, tables, charts, code, callouts, embeds and more). Find pages with list_pages or search_pages, read one with read_page, and change it with insert_blocks, replace_block, move_block and delete_blocks, addressing blocks by the IDs read_page returns. create_page makes a new page, with its content. Folders group top-level pages: create_folder and rename_folder make and name them, and move_page puts a page into a folder, inside another page, or at the top level. Pages carry tags: set_page_tags sets them, list_pages and read_page show them, and search_pages takes #tag words to keep to those tags.
+const instructions = `Leaflet keeps the user's pages: living documents of blocks (headings, lists, to-dos, tables, charts, code, callouts, embeds and more). Find pages with list_pages or search_pages, read one with read_page, and change it with write_markdown, insert_blocks, replace_block, move_block and delete_blocks, addressing blocks by the IDs read_page returns. create_page makes a new page, with its content. Folders group top-level pages: create_folder and rename_folder make and name them, and move_page puts a page into a folder, inside another page, or at the top level. Pages carry tags: set_page_tags sets them, list_pages and read_page show them, and search_pages takes #tag words to keep to those tags.
 
+- To write text (paragraphs, headings, lists, to-dos, quotes, code, tables), use write_markdown: a block a line, in Markdown. Use insert_blocks for charts, embeds, videos, callouts, formulas, diagrams and link cards, and replace_block to rewrite one block.
 - Text fields take inline markdown only (**bold**, *italic*, ` + "`code`" + `, [link](url)). Use block types for structure: heading, bulleted_list, numbered_list, todo_list, quote, table, never # or - in text.
 - For numbers worth seeing, a chart block; for code, a code block with its language; for a note or warning, a callout; for a formula, math_equation; for a diagram, a diagram with Mermaid source; for a web page, link_preview.
 - Link another page with [Title](leaflet://page/<id>), or a block of one with [text](leaflet://page/<id>#<block_id>).

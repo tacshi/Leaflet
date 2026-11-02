@@ -1,0 +1,47 @@
+{
+  "urls": [
+    {
+      "text": "see https://example.com/a.png　then",
+      "urls": [
+        "https://example.com/a.png"
+      ]
+    },
+    {
+      "text": "see https://example.com/b.pngthen",
+      "urls": [
+        "https://example.com/b.png"
+      ]
+    },
+    {
+      "text": "see https://example.com/c.png﻿then",
+      "urls": [
+        "https://example.com/c.png﻿then"
+      ]
+    },
+    {
+      "text": "(https://example.com/d.png) and <https://example.com/e>",
+      "urls": [
+        "https://example.com/d.png",
+        "https://example.com/e"
+      ]
+    }
+  ],
+  "titles": [
+    {
+      "title": "  Notes　",
+      "made": "Notes"
+    },
+    {
+      "title": "Plan",
+      "made": "Plan"
+    },
+    {
+      "title": "﻿BOM",
+      "made": "﻿BOM"
+    },
+    {
+      "title": " 　 ",
+      "made": null
+    }
+  ]
+}

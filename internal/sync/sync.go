@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -21,9 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/egoist/mygo"
-
 	"leaflet/internal/doc"
+	"leaflet/internal/guard"
 	"leaflet/internal/icloud"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
@@ -44,50 +44,193 @@ type Service struct {
 	// KeepAudio is the setting for audio after upload.
 	KeepAudio func() string
 	// ICloud is the Leaflet folder in iCloud Drive, which sync goes
-	// through instead of Supabase while SetICloud has turned it on.
-	ICloud icloud.Folder
+	// through instead of Supabase while SetICloud has turned it on. It is
+	// set before the service runs; SetICloudRoot moves it after, as the
+	// passes, the app and uploads read it from goroutines of their own.
+	ICloud  icloud.Folder
+	cloudMu gosync.Mutex
+	// Online reports whether the device has a connection, as the host's
+	// system says; nil counts as online.
+	Online func() bool
+	// DeviceName names this device in Account › Devices and to the other
+	// devices in iCloud Drive; nil is the package's DeviceName.
+	DeviceName func() string
 
 	cloudOn atomic.Bool
 	kick    chan struct{}
 	mu      gosync.Mutex
 	running gosync.Mutex
 	open    map[string]bool
-	started bool
+	// loop is the context of the loop Start started, which Stop cancels,
+	// and stop cancels it; both are nil while no loop runs.
+	loop context.Context
+	stop context.CancelFunc
+	// cut cancels the pass running, loop's or SyncNow's, for Stop to cut
+	// it short; nil between passes.
+	cut context.CancelFunc
 	// ownLogChecked is set once a pass has read this device's last batch
 	// in iCloud Drive (checkOwnLog).
 	ownLogChecked bool
 	// membersAt is when the members of each page shared with the user
 	// were last loaded, for pullMembers to load them again.
 	membersAt map[string]time.Time
+	// retryAt is when each outbox entry that failed may go again, by its
+	// ID and revision: a replaced entry goes at once. Guarded by mu; it
+	// starts empty with each run, which tries every entry once more.
+	retryAt map[outboxKey]time.Time
 }
+
+// outboxKey names an outbox entry as queued: a new payload is a new key.
+type outboxKey struct{ id, revision int64 }
 
 // New returns the sync service.
 func New(st *store.Store, be *remote.Client) *Service {
-	return &Service{st: st, be: be, kick: make(chan struct{}, 1), open: map[string]bool{}, membersAt: map[string]time.Time{}}
+	return &Service{st: st, be: be, kick: make(chan struct{}, 1), open: map[string]bool{},
+		membersAt: map[string]time.Time{}, retryAt: map[outboxKey]time.Time{}}
+}
+
+// folder is the Leaflet folder in iCloud Drive as it is now.
+func (s *Service) folder() icloud.Folder {
+	s.cloudMu.Lock()
+	defer s.cloudMu.Unlock()
+	return s.ICloud
+}
+
+// ICloudFolder is the Leaflet folder in iCloud Drive sync goes through
+// while iCloud sync is on.
+func (s *Service) ICloudFolder() icloud.Folder { return s.folder() }
+
+// SetICloudRoot moves the Leaflet folder to root, as when the user picks
+// another. Call it under Hold, so no pass reads half of one folder and
+// half of the other.
+func (s *Service) SetICloudRoot(root string) {
+	s.cloudMu.Lock()
+	defer s.cloudMu.Unlock()
+	s.ICloud.Root = root
+}
+
+// retryBase is how long an outbox entry that failed waits before it goes
+// again, doubling with each failure up to retryMax: a pass runs after
+// every save, and an entry the server keeps refusing would otherwise go
+// with each of them. Tests shorten them.
+var retryBase, retryMax = 15 * time.Second, 30 * time.Minute
+
+// backoff is how long an entry waits after its attempts-th failure.
+func backoff(attempts int) time.Duration {
+	return min(retryBase<<min(max(attempts-1, 0), 16), retryMax)
+}
+
+// due reports whether an outbox entry may go now: it never failed, or
+// waited long enough since it last did.
+func (s *Service) due(e store.OutboxEntry) bool {
+	if e.Attempts == 0 {
+		return true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	at, ok := s.retryAt[outboxKey{e.ID, e.Revision}]
+	return !ok || !time.Now().Before(at)
+}
+
+// failed records an outbox entry's failure, and when it may go again.
+func (s *Service) failed(e store.OutboxEntry, err error) {
+	_ = s.st.MarkFailed(e, err.Error())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retryAt[outboxKey{e.ID, e.Revision}] = time.Now().Add(backoff(e.Attempts + 1))
+}
+
+// forgetRetries drops the waits of entries no longer queued as they were.
+func (s *Service) forgetRetries(entries []store.OutboxEntry) {
+	queued := make(map[outboxKey]bool, len(entries))
+	for _, e := range entries {
+		queued[outboxKey{e.ID, e.Revision}] = true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	maps.DeleteFunc(s.retryAt, func(k outboxKey, _ time.Time) bool { return !queued[k] })
 }
 
 // Start runs the loop: soon after changes, when asked, and every 30 seconds.
 func (s *Service) Start() {
 	s.mu.Lock()
-	if s.started {
+	if s.stop != nil {
 		s.mu.Unlock()
 		return
 	}
-	s.started = true
+	ctx, cancel := context.WithCancel(context.Background())
+	s.loop, s.stop = ctx, cancel
 	s.mu.Unlock()
-	go func() {
+	guard.Go(func() {
 		tick := time.NewTicker(30 * time.Second)
 		defer tick.Stop()
 		s.Kick()
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case <-s.kick:
-				time.Sleep(1200 * time.Millisecond)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(1200 * time.Millisecond):
+				}
 			case <-tick.C:
 			}
-			_ = s.SyncNow()
+			s.loopPass()
 		}
-	}()
+	})
+}
+
+// loopPass is a pass of the loop's: one that panics is logged, and the
+// loop goes on to the next.
+func (s *Service) loopPass() {
+	defer guard.Recover()
+	_ = s.SyncNow()
+}
+
+// Stop ends the loop Start started, and the pass running, the loop's or
+// one SyncNow asked for, as an iOS app's background time runs out: what
+// that pass had not done yet, the next one does. Passes asked for with
+// SyncNow after it still run, and Start starts the loop again, as an iOS
+// app does when its scene goes to the background and comes back.
+func (s *Service) Stop() {
+	s.mu.Lock()
+	stop, cut := s.stop, s.cut
+	s.loop, s.stop = nil, nil
+	s.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
+	if cut != nil {
+		cut()
+	}
+}
+
+// passContext is the context a pass runs in: the loop's, which Stop
+// cancels, or the background's while no loop runs.
+func (s *Service) passContext() context.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.loop != nil {
+		return s.loop
+	}
+	return context.Background()
+}
+
+// startPass is the context of a pass starting, which Stop cancels until
+// done ends the pass.
+func (s *Service) startPass() (ctx context.Context, done func()) {
+	ctx, cancel := context.WithCancel(s.passContext())
+	s.mu.Lock()
+	s.cut = cancel
+	s.mu.Unlock()
+	return ctx, func() {
+		s.mu.Lock()
+		s.cut = nil
+		s.mu.Unlock()
+		cancel()
+	}
 }
 
 // Kick asks for a pass soon.
@@ -155,11 +298,7 @@ func (s *Service) Uploads() bool { return s.target().ready() }
 // uploaded from: signed in, iCloud sync on, or the Leaflet folder of
 // iCloud Drive this device synced through before.
 func (s *Service) CanFetch() bool {
-	if s.target().ready() {
-		return true
-	}
-	joined, _ := s.st.Value("icloud.space")
-	return joined != "" && s.ICloud.Root != ""
+	return s.target().ready() || s.joinedICloud()
 }
 
 // Fetch reads a file (bucket "files") or a recording's audio
@@ -183,6 +322,10 @@ func (s *Service) Fetch(ctx context.Context, bucket, path string) ([]byte, error
 	return nil, errors.New("sync: not signed in, and not in iCloud Drive")
 }
 
+// openWait is how long SetOpen has to bring an opened page up to date;
+// tests shorten it.
+var openWait = time.Minute
+
 // SetOpen marks a page as open, so its content is always pulled, and
 // brings an opened page up to date in the background.
 func (s *Service) SetOpen(pageID string, open bool) {
@@ -193,18 +336,28 @@ func (s *Service) SetOpen(pageID string, open bool) {
 		return
 	}
 	s.open[pageID] = true
-	go func() {
+	guard.Go(func() {
 		if !s.CanSync() {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
+		// The time it has starts once the pass in progress is done.
 		s.running.Lock()
 		defer s.running.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), openWait)
+		defer cancel()
+		// Who else has one of the user's pages is known before what they
+		// wrote in it comes, for the agents that run on it.
+		if _, server := s.target().(supabaseTarget); server {
+			if p, err := s.st.Page(pageID); err == nil && p.SpaceID == s.st.Session().SpaceID {
+				if err := s.LoadMembers(ctx, pageID); err != nil {
+					log.Printf("open page %s: members: %v", pageID, err)
+				}
+			}
+		}
 		if _, err := s.RefreshContent(ctx, pageID); err != nil {
 			log.Printf("open page %s: %v", pageID, err)
 		}
-	}()
+	})
 }
 
 // CanSync reports whether a pass can run: signed in and online, or with
@@ -218,12 +371,8 @@ func (s *Service) CanSync() bool {
 	if s.Offline != nil && s.Offline() {
 		return false
 	}
-	return !t.needsNetwork() || online()
+	return !t.needsNetwork() || s.Online == nil || s.Online()
 }
-
-// online reports whether the device has a connection; tests stand in
-// for the system's answer.
-var online = func() bool { return mygo.Network.Status().Online }
 
 // Hold runs fn between passes, so no pass sees its changes half made.
 func (s *Service) Hold(fn func()) {
@@ -232,8 +381,9 @@ func (s *Service) Hold(fn func()) {
 	fn()
 }
 
-// SyncNow runs one pass, after the one in progress.
-func (s *Service) SyncNow() error {
+// SyncNow runs one pass, after the one in progress. A pass that panics
+// is logged and fails, so it is never taken for one still running.
+func (s *Service) SyncNow() (err error) {
 	if !s.CanSync() {
 		return nil
 	}
@@ -241,22 +391,26 @@ func (s *Service) SyncNow() error {
 	defer s.running.Unlock()
 	if s.OnState != nil {
 		s.OnState(true, nil)
+		defer func() { s.OnState(false, err) }()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer guard.RecoverAs(&err)
+	base, done := s.startPass()
+	defer done()
+	ctx, cancel := context.WithTimeout(base, 5*time.Minute)
 	defer cancel()
 	if err := s.retryMoves(ctx); err != nil {
 		log.Printf("sync: %v", err)
 	}
 	t := s.target()
-	err := t.pass(ctx)
+	err = t.pass(ctx)
 	if t.needsNetwork() && remote.IsNetwork(err) {
 		err = nil // offline: try again later
 	}
+	if err != nil && base.Err() != nil {
+		err = nil // stopped: the next pass does the rest
+	}
 	if err != nil && !errors.Is(err, remote.ErrSignedOut) {
 		log.Printf("sync: %v", err)
-	}
-	if s.OnState != nil {
-		s.OnState(false, err)
 	}
 	return err
 }
@@ -328,7 +482,7 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 	// adopted only once it is all queued: a device that stops before then,
 	// or could not queue it all, adopts it again on the next pass, so
 	// nothing is left out of the queue that signing out checks.
-	failed := s.requeueAll(remoteID)
+	failed := s.requeueAll(ctx, remoteID)
 	if errors.Is(failed, errNotRequeued) {
 		return failed
 	}
@@ -343,12 +497,13 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 // again before each pass.
 //
 // What it could not read or queue it does all again before the next pass
-// (requeueKey), so nothing is left behind for good.
-func (s *Service) requeueAll(spaceID string) error {
+// (requeueKey), so nothing is left behind for good. It waits for iCloud
+// Drive no longer than ctx lets it, so stopping the pass stops it too.
+func (s *Service) requeueAll(ctx context.Context, spaceID string) error {
 	if err := s.st.SetValue(requeueKey, spaceID); err != nil {
 		return fmt.Errorf("%w: %w", errNotRequeued, err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), moveWait)
+	ctx, cancel := context.WithTimeout(ctx, moveWait)
 	defer cancel()
 	// Each row goes as stored when it is queued, not as read here: a
 	// change made meanwhile, as a deletion, is not undone.
@@ -358,7 +513,7 @@ func (s *Service) requeueAll(spaceID string) error {
 	for _, p := range pages {
 		queued = errors.Join(queued, s.st.Requeue("pages", p.ID))
 	}
-	folders, err := s.st.Folders()
+	folders, err := s.st.AllFolders()
 	queued = errors.Join(queued, err)
 	for _, f := range folders {
 		queued = errors.Join(queued, s.st.Requeue("folders", f.ID))
@@ -417,7 +572,7 @@ const movesKey = "sync.moves_waiting"
 // not finish.
 func (s *Service) retryMoves(ctx context.Context) error {
 	if space, _ := s.st.Value(requeueKey); space != "" {
-		return s.requeueAll(space)
+		return s.requeueAll(ctx, space)
 	}
 	moves := s.ids(movesKey)
 	if len(moves) == 0 {
@@ -519,7 +674,15 @@ func onDevice(path string) bool {
 	return err == nil
 }
 
-// DeviceName names this device in Account › Devices.
+// deviceName names this device in Account › Devices, as the host has it.
+func (s *Service) deviceName() string {
+	if s.DeviceName != nil {
+		return s.DeviceName()
+	}
+	return DeviceName()
+}
+
+// DeviceName names this desktop in Account › Devices.
 func DeviceName() string {
 	host, _ := os.Hostname()
 	switch runtime.GOOS {
@@ -547,12 +710,26 @@ func (s *Service) heartbeat(ctx context.Context) error {
 		return err
 	}
 	if row != nil && row["revoked_at"] != nil {
-		_ = s.st.SetValue("device.revoked", "true")
+		// The row stays revoked: signing in again, this device registers
+		// as a new one. What iCloud sync kept goes with the old ID, as its
+		// log is that ID's: under the new one, a later turn-on joins the
+		// folder afresh rather than going on from the old one's last batch,
+		// which the other devices would wait before for good. Its space
+		// stays, for what went up to the folder to be fetched from it.
+		space, _ := s.st.Value("icloud.space")
+		if space == "" {
+			space, _ = s.st.Value(fetchSpaceKey)
+		}
+		_ = s.st.ForgetICloud()
+		if space != "" {
+			_ = s.st.SetValue(fetchSpaceKey, space)
+		}
+		_ = s.st.DeleteValue("device.id")
 		s.be.SignOut()
 		return remote.ErrSignedOut
 	}
 	_, err = s.be.Upsert(ctx, "devices", map[string]any{
-		"id": id, "user_id": s.be.UserID(), "name": DeviceName(), "platform": runtime.GOOS,
+		"id": id, "user_id": s.be.UserID(), "name": s.deviceName(), "platform": runtime.GOOS,
 		"last_active_at": time.Now().UTC().Format(time.RFC3339Nano),
 	}, "")
 	return err
@@ -563,6 +740,7 @@ func (s *Service) push(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	s.forgetRetries(entries)
 	uid := s.be.UserID()
 	// A file's row waits for its contents (pushOne), which come later in
 	// the queue: it goes once they have, in the same pass.
@@ -572,13 +750,22 @@ func (s *Service) push(ctx context.Context) error {
 			if !s.CanSync() {
 				return nil
 			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if !s.due(e) {
+				continue
+			}
 			done, err := s.pushOne(ctx, uid, e)
 			if err != nil {
-				if remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut) {
+				// Offline, signed out or stopped, the rest would fail
+				// alike; anything else is this entry's own, which waits
+				// while the others go.
+				if remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut) || ctx.Err() != nil {
 					return err
 				}
 				log.Printf("outbox %s/%s: %v", e.Entity, e.EntityID, err)
-				_ = s.st.MarkFailed(e, err.Error())
+				s.failed(e, err)
 				continue
 			}
 			if done {
@@ -603,7 +790,11 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 	}
 	switch e.Entity {
 	case "page_content":
-		return s.pushContent(ctx, e.EntityID)
+		done, err := s.pushContent(ctx, e.EntityID)
+		if errors.Is(err, errCannotEdit) {
+			return s.takeServerContent(ctx, e, err)
+		}
+		return done, err
 	case "storage":
 		return s.pushFile(ctx, uid, payload)
 	case "storage_delete":
@@ -629,8 +820,6 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 		return s.pushComment(ctx, uid, e, payload)
 	case "page_history":
 		payload["created_by"] = uid
-	case "ai_jobs":
-		payload["user_id"] = uid
 	}
 	_, err := s.be.Upsert(ctx, e.Entity, payload, "")
 	return err == nil, err
@@ -831,7 +1020,90 @@ func (s *Service) pushContent(ctx context.Context, pageID string) (bool, error) 
 			return done, err
 		}
 	}
-	return false, errors.New("the page kept changing on the server, or you cannot edit it")
+	// The server saves over no row for someone who may no longer edit the
+	// page, as for a save that lost the race: its members, as the server
+	// has them now, tell which.
+	if cannot, err := s.cannotEdit(ctx, pageID); err != nil {
+		return false, err
+	} else if cannot {
+		return false, errCannotEdit
+	}
+	return false, errors.New("the page kept changing on the server")
+}
+
+// errCannotEdit is page content the server will not save, as the user may
+// no longer edit the page: the change gives way to the server's content.
+var errCannotEdit = errors.New("you can no longer edit the page")
+
+// cannotEdit reports whether the user may not edit a page shared with
+// them, by its members loaded again from the server. Their own pages they
+// may always edit.
+func (s *Service) cannotEdit(ctx context.Context, pageID string) (bool, error) {
+	p, err := s.st.Page(pageID)
+	if err != nil || p.SpaceID == s.st.Session().SpaceID {
+		return false, err
+	}
+	if err := s.LoadMembers(ctx, pageID); err != nil {
+		return false, err
+	}
+	// A share withdrawn takes the page from this device.
+	if p, err = s.st.Page(pageID); store.IsNotFound(err) {
+		return true, nil
+	} else if err != nil {
+		return false, err
+	}
+	return !s.st.CanEdit(p), nil
+}
+
+// takeServerContent has a page's content the server refused give way to
+// the server's, as pushRow's change does to its row: the pulls pass over
+// a page while its change waits, so the edits of those who may edit it
+// would never come. A change made here since stays queued, and merges.
+func (s *Service) takeServerContent(ctx context.Context, e store.OutboxEntry, refused error) (bool, error) {
+	pageID := e.EntityID
+	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: "content, revision, updated_at", Filters: []string{remote.Eq("page_id", pageID)}})
+	if err != nil {
+		return false, err
+	}
+	var theirs *doc.Content
+	if remoteRow != nil {
+		if theirs, err = contentOf(remoteRow["content"]); err != nil {
+			return false, errServerUnreadable
+		}
+	}
+	// Off the queue first, so the content goes in, as takeServer has it.
+	if err := s.st.Dequeue(e); err != nil {
+		return false, err
+	}
+	log.Printf("outbox %s/%s: %v; taking the server's content", e.Entity, pageID, refused)
+	if theirs == nil {
+		return true, nil
+	}
+	for range 3 {
+		local, err := s.st.ContentRow(pageID)
+		if store.IsNotFound(err) || err == nil && s.st.HasPending("page_content", pageID) {
+			return true, nil // gone, or changed since: that change merges on the next push
+		}
+		if err != nil {
+			return false, err
+		}
+		beforeStore(pageID)
+		err = s.st.PutSyncedContentOver(pageID, local.Content, theirs, theirs.Encode(), store.Time(remoteRow["updated_at"]), store.Int(remoteRow, "revision"))
+		if errors.Is(err, store.ErrContentChanged) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		if local.Content != theirs.Encode() {
+			s.st.Notify("page_contents", pageID)
+			if s.OnPageContent != nil {
+				s.OnPageContent(pageID)
+			}
+		}
+		return true, nil
+	}
+	return false, errors.New("the page kept changing here while it synced")
 }
 
 // saveContent merges this device's content with the server's and saves the
@@ -890,8 +1162,12 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	next := merged
 	var meanwhile []doc.Conflict
 	for tries := 1; ; tries++ {
-		if now, err = s.st.ContentRow(pageID); err != nil {
-			break
+		// The server has the merge now: unless it is stored here, with its
+		// revision, the change stays queued, and goes again over it.
+		if now, err = s.st.ContentRow(pageID); store.IsNotFound(err) {
+			return true, nil // the page went meanwhile
+		} else if err != nil {
+			return false, err
 		}
 		next, meanwhile = merged, nil
 		if now.Content != row.Content {
@@ -947,7 +1223,7 @@ func contentOf(v any) (*doc.Content, error) {
 }
 
 func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]any) (bool, error) {
-	local, _ := payload["local_path"].(string)
+	local := s.st.Path(store.S(payload, "local_path"))
 	if !onDevice(local) {
 		var err error
 		if local, err = s.fetchCopied(ctx, payload); err != nil || local == "" {
@@ -956,7 +1232,10 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 	}
 	f, err := os.Open(local) // #nosec G304 -- a file in the app's own data folder.
 	if err != nil {
-		return true, nil // gone: nothing to upload
+		if errors.Is(err, fs.ErrNotExist) {
+			return true, nil // gone: nothing to upload
+		}
+		return false, err // there, but not to be read now: tried again
 	}
 	defer func() { _ = f.Close() }()
 	bucket, _ := payload["bucket"].(string)
@@ -1119,7 +1398,8 @@ func (c cursor) passed(r map[string]any, key string) bool {
 // changed reads up to limit rows changed after the cursor, oldest first,
 // after the rows of the overlap behind it. Rows of the same time come in
 // key order, so a pull that stops among them resumes at the next one.
-func (s *Service) changed(ctx context.Context, table, key, columns string, cur cursor, limit int, filters ...string) ([]map[string]any, error) {
+// full reports whether the last page read was full: more may follow.
+func (s *Service) changed(ctx context.Context, table, key, columns string, cur cursor, limit int, filters ...string) (rows []map[string]any, full bool, err error) {
 	from := cur
 	if at, err := time.Parse(time.RFC3339Nano, cur.at); err == nil && at.Unix() > 0 {
 		from = cursor{at: at.Add(-overlap).UTC().Format(time.RFC3339Nano)}
@@ -1130,17 +1410,17 @@ func (s *Service) changed(ctx context.Context, table, key, columns string, cur c
 		if from.key != "" {
 			after = "or=(updated_at.gt." + quote(from.at) + ",and(updated_at.eq." + quote(from.at) + "," + key + ".gt." + quote(from.key) + "))"
 		}
-		rows, err := s.be.Select(ctx, table, remote.Query{Select: columns, Filters: append([]string{after}, filters...), Order: "updated_at," + key, Limit: limit})
+		page, err := s.be.Select(ctx, table, remote.Query{Select: columns, Filters: append([]string{after}, filters...), Order: "updated_at," + key, Limit: limit})
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		out = append(out, rows...)
+		out = append(out, page...)
 		// An overlap fuller than a page reads on, so it does not hold the
 		// pull there.
-		if len(rows) < limit || !cur.passed(rows[len(rows)-1], key) {
-			return out, nil
+		if len(page) < limit || !cur.passed(page[len(page)-1], key) {
+			return out, len(page) == limit, nil
 		}
-		last := rows[len(rows)-1]
+		last := page[len(page)-1]
 		from = cursor{store.S(last, "updated_at"), store.S(last, key)}
 	}
 }
@@ -1182,18 +1462,41 @@ func (s *Service) store(table, key string, rows []map[string]any, have func(map[
 	}
 }
 
-func (s *Service) pullTable(ctx context.Context, table, columns string, apply func(map[string]any) error) error {
-	rows, err := s.changed(ctx, table, "id", columns, s.cursor(table), 500)
-	if err != nil {
-		return err
+// pullPages is how many pages of rows a pull reads of a table in one
+// pass, and pullRows how many rows a page holds: a first sync of many
+// pages reads on at once, rather than a page each pass. Tests make them
+// smaller.
+var pullPages, pullRows = 20, 500
+
+// paged runs a pull of a table's rows a page at a time, while pages come
+// back full and the cursor moves on, up to pullPages. With more still to
+// come then, the next pass runs soon.
+func (s *Service) paged(table string, page func(first bool) (full bool, err error)) error {
+	for i := range pullPages {
+		start := s.cursor(table)
+		full, err := page(i == 0)
+		if err != nil || !full || s.cursor(table) == start {
+			return err
+		}
 	}
+	s.Kick()
+	return nil
+}
+
+func (s *Service) pullTable(ctx context.Context, table, columns string, apply func(map[string]any) error) error {
 	have := func(r map[string]any) bool {
 		// A local model's connection stays on its device, never stored.
 		local, _ := r["is_local"].(bool)
 		return local || s.st.HasRowAt(table, store.S(r, "id"), store.Time(r["updated_at"]))
 	}
-	s.store(table, "id", rows, have, apply)
-	return nil
+	return s.paged(table, func(bool) (bool, error) {
+		rows, full, err := s.changed(ctx, table, "id", columns, s.cursor(table), pullRows)
+		if err != nil {
+			return false, err
+		}
+		s.store(table, "id", rows, have, apply)
+		return full, nil
+	})
 }
 
 func (s *Service) pull(ctx context.Context) error {
@@ -1218,7 +1521,14 @@ func (s *Service) pull(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.pullProviderRemovals(ctx); err != nil {
+		return err
+	}
 	if err := s.pullShared(ctx); err != nil {
+		return err
+	}
+	// Before the comments and content that others write come.
+	if err := s.pullOwnMembers(ctx); err != nil {
 		return err
 	}
 	s.pullMembers(ctx)
@@ -1228,16 +1538,48 @@ func (s *Service) pull(ctx context.Context) error {
 	return s.pullContents(ctx)
 }
 
+// pullProviderRemovals removes the cloud model connections the server no
+// longer has: one removed on another device is deleted there, and leaves
+// no row for the pull by time to bring. Only those stored here before the
+// server listed its own go, so one added meanwhile stays.
+func (s *Service) pullProviderRemovals(ctx context.Context) error {
+	here, err := s.st.Providers()
+	if err != nil {
+		return err
+	}
+	rows, err := s.be.Select(ctx, "model_providers", remote.Query{Select: "id"})
+	if err != nil {
+		return err
+	}
+	there := map[string]bool{}
+	for _, r := range rows {
+		there[store.S(r, "id")] = true
+	}
+	for _, p := range here {
+		if !p.IsLocal && !there[p.ID] {
+			if err := s.st.DeleteProvider(p.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // pullShared brings the pages newly shared with the user, once they have
 // accepted them, with the pages under them and what they hold. Sharing
 // changes no page, so the pulls that go by time pass over a page that last
 // changed before them. Accepting moves the share's updated_at on, so a
 // share accepted after the cursor passed it comes then.
 func (s *Service) pullShared(ctx context.Context) error {
-	rows, err := s.changed(ctx, "page_permissions", "page_id", "page_id, updated_at", s.cursor("page_permissions"), 100,
+	return s.paged("page_permissions", func(bool) (bool, error) { return s.pullSharedPage(ctx) })
+}
+
+// pullSharedPage is a page of pullShared.
+func (s *Service) pullSharedPage(ctx context.Context) (bool, error) {
+	rows, full, err := s.changed(ctx, "page_permissions", "page_id", "page_id, updated_at", s.cursor("page_permissions"), 100,
 		remote.Eq("user_id", s.be.UserID()), remote.NotNull("accepted_at"))
 	if err != nil {
-		return err
+		return false, err
 	}
 	var failed error
 	// A share seen again is of a page this device has, with what is under
@@ -1253,7 +1595,7 @@ func (s *Service) pullShared(ctx context.Context) error {
 		}
 		return failed
 	})
-	return failed
+	return full, failed
 }
 
 // LoadMembers stores who a page is shared with, as the server has them,
@@ -1264,15 +1606,20 @@ func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 	res, err := s.be.RPC(ctx, "page_members", map[string]any{"p_page_id": pageID})
 	re := (*remote.Error)(nil)
 	forbidden := errors.As(err, &re) && re.Status == http.StatusForbidden
-	if err == nil || forbidden {
-		s.mu.Lock()
-		s.membersAt[pageID] = time.Now()
-		s.mu.Unlock()
+	// They count as loaded (pullMembers) only once they are handled: one
+	// that failed is tried again on the next pass.
+	loaded := func(err error) error {
+		if err == nil {
+			s.mu.Lock()
+			s.membersAt[pageID] = time.Now()
+			s.mu.Unlock()
+		}
+		return err
 	}
 	if forbidden {
-		if gone := s.withdrawn(ctx, pageID); gone != nil {
-			return gone
-		}
+		// Withdrawn, the page is handled once it is gone or keeps no
+		// roles: the pulls go on past it.
+		return loaded(s.withdrawn(ctx, pageID))
 	}
 	if err != nil {
 		return err
@@ -1286,7 +1633,7 @@ func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 		members = append(members, store.Member{PageID: pageID, UserID: store.S(m, "user_id"), Role: store.S(m, "role"),
 			DisplayName: store.S(m, "display_name"), Email: store.S(m, "email"), Accepted: accepted || !ok})
 	}
-	return s.st.SetMembers(pageID, members)
+	return loaded(s.st.SetMembers(pageID, members))
 }
 
 // withdrawn handles members refused for a page: one the server no longer
@@ -1295,7 +1642,10 @@ func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 // edited here. It returns why it could not.
 func (s *Service) withdrawn(ctx context.Context, pageID string) error {
 	rows, err := s.be.Select(ctx, "pages", remote.Query{Select: "id", Filters: []string{remote.Eq("id", pageID)}})
-	if err == nil && len(rows) == 0 {
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
 		removed, err := s.st.RemoveSharedPages(pageID)
 		if err == nil && len(removed) > 0 {
 			log.Printf("share of %s withdrawn: removed %d pages", pageID, len(removed))
@@ -1356,6 +1706,131 @@ func (s *Service) pullMembers(ctx context.Context) {
 		}
 		s.reloadMembersUnder(ctx, p.ID, pages)
 	}
+}
+
+// OwnMembersKey keeps when sync last read who the user's own pages are
+// shared with (pullOwnMembers). Until it has, as on a device that never
+// synced since signing in, an agent takes each of them for shared
+// (agents.sharedWithOthers), so it does not read the user's other pages
+// on one where what someone else wrote could ask it to copy them there.
+const OwnMembersKey = "sync.own_members_at"
+
+// pullOwnMembers keeps who the user's own pages are shared with current:
+// the server lists the shares they accepted of the pages the user owns,
+// and a page whose members here leave out someone it lists loads them
+// again, or takes the share's people as they are when they do not load.
+// Every membersEvery, an own page whose members here name others no share
+// of it or of a page it is inside does loads them again, so a share
+// withdrawn goes.
+func (s *Service) pullOwnMembers(ctx context.Context) error {
+	uid := s.be.UserID()
+	shared := map[string]map[string]string{} // page → user → role
+	var from cursor
+	for {
+		filters := []string{"user_id=neq." + uid, remote.NotNull("accepted_at")}
+		if from.at != "" {
+			filters = append(filters, "or=(page_id.gt."+quote(from.at)+",and(page_id.eq."+quote(from.at)+",user_id.gt."+quote(from.key)+"))")
+		}
+		rows, err := s.be.Select(ctx, "page_permissions", remote.Query{Select: "page_id, user_id, role", Filters: filters, Order: "page_id,user_id", Limit: treeRows})
+		if err != nil {
+			return err
+		}
+		for _, r := range rows {
+			page := store.S(r, "page_id")
+			if shared[page] == nil {
+				shared[page] = map[string]string{}
+			}
+			shared[page][store.S(r, "user_id")] = store.S(r, "role")
+		}
+		if len(rows) < treeRows {
+			break
+		}
+		last := rows[len(rows)-1]
+		from = cursor{store.S(last, "page_id"), store.S(last, "user_id")}
+	}
+	own := s.st.Session().SpaceID
+	for id, users := range shared {
+		p, err := s.st.Page(id)
+		if err != nil || p.SpaceID != own {
+			continue // not here yet, or not the user's
+		}
+		if s.hasMembers(id, users) {
+			continue
+		}
+		if err := s.LoadMembers(ctx, id); err == nil && s.hasMembers(id, users) {
+			continue
+		} else if err != nil {
+			log.Printf("members of %s: %v", id, err)
+		}
+		members := []store.Member{{PageID: id, UserID: uid, Role: "owner", Accepted: true}}
+		for user, role := range users {
+			members = append(members, store.Member{PageID: id, UserID: user, Role: role, Accepted: true})
+		}
+		if err := s.st.SetMembers(id, members); err != nil {
+			return err
+		}
+	}
+	if err := s.dropOwnMembers(ctx, shared); err != nil {
+		return err
+	}
+	return s.st.SetValue(OwnMembersKey, time.Now().UTC().Format(time.RFC3339Nano))
+}
+
+// hasMembers reports whether the members kept of a page name each of
+// users.
+func (s *Service) hasMembers(pageID string, users map[string]string) bool {
+	kept := map[string]bool{}
+	for _, m := range s.st.MembersOrNil(pageID) {
+		kept[m.UserID] = true
+	}
+	for u := range users {
+		if !kept[u] {
+			return false
+		}
+	}
+	return true
+}
+
+// ownSwept is the key of membersAt for the last sweep of dropOwnMembers.
+const ownSwept = "own pages"
+
+// dropOwnMembers loads again, every membersEvery, the members of the
+// user's own pages that name others while no share the server lists
+// (shared) is of the page or a page it is inside. Members that do not
+// load stay, and the page counts as shared meanwhile.
+func (s *Service) dropOwnMembers(ctx context.Context, shared map[string]map[string]string) error {
+	s.mu.Lock()
+	at, swept := s.membersAt[ownSwept]
+	s.mu.Unlock()
+	if swept && time.Since(at) < membersEvery {
+		return nil
+	}
+	pages, err := s.st.AllPages()
+	if err != nil {
+		return err
+	}
+	uid, own := s.be.UserID(), s.st.Session().SpaceID
+	for _, p := range pages {
+		if p.SpaceID != own || !slices.ContainsFunc(s.st.MembersOrNil(p.ID), func(m store.Member) bool { return m.UserID != uid }) {
+			continue
+		}
+		under := false
+		for top := range shared {
+			if s.st.IsDescendant(p.ID, top) {
+				under = true
+				break
+			}
+		}
+		if !under {
+			if err := s.LoadMembers(ctx, p.ID); err != nil {
+				log.Printf("members of %s: %v", p.ID, err)
+			}
+		}
+	}
+	s.mu.Lock()
+	s.membersAt[ownSwept] = time.Now()
+	s.mu.Unlock()
+	return nil
 }
 
 // reloadMembersUnder loads again the members kept of the pages inside a
@@ -1478,18 +1953,20 @@ func (s *Service) selectIn(ctx context.Context, table, col string, ids []string)
 }
 
 func (s *Service) pullComments(ctx context.Context) error {
-	rows, err := s.changed(ctx, "comments", "id", "*", s.cursor("comments"), 500)
-	if err != nil || len(rows) == 0 {
-		return err
-	}
-	names := s.authorNames(ctx, rows)
 	have := func(r map[string]any) bool {
 		return s.st.HasRowAt("comments", store.S(r, "id"), store.Time(r["updated_at"]))
 	}
-	s.store("comments", "id", rows, have, func(r map[string]any) error {
-		return s.st.PutRemoteComment(r, names[store.S(r, "author_id")])
+	return s.paged("comments", func(bool) (bool, error) {
+		rows, full, err := s.changed(ctx, "comments", "id", "*", s.cursor("comments"), pullRows)
+		if err != nil || len(rows) == 0 {
+			return false, err
+		}
+		names := s.authorNames(ctx, rows)
+		s.store("comments", "id", rows, have, func(r map[string]any) error {
+			return s.st.PutRemoteComment(r, names[store.S(r, "author_id")])
+		})
+		return full, nil
 	})
-	return nil
 }
 
 // authorNames are the names of comments' authors, by their IDs, with
@@ -1521,9 +1998,15 @@ func (s *Service) authorNames(ctx context.Context, comments []map[string]any) ma
 }
 
 func (s *Service) pullContents(ctx context.Context) error {
-	rows, err := s.changed(ctx, "page_content", "page_id", "page_id, updated_at", s.cursor("page_content"), 200)
+	return s.paged("page_content", func(first bool) (bool, error) { return s.pullContentsPage(ctx, first) })
+}
+
+// pullContentsPage is a page of pullContents; the first of a pass also
+// fetches the pages that wait.
+func (s *Service) pullContentsPage(ctx context.Context, first bool) (bool, error) {
+	rows, full, err := s.changed(ctx, "page_content", "page_id", "page_id, updated_at", s.cursor("page_content"), 200)
 	if err != nil {
-		return err
+		return false, err
 	}
 	allOffline := s.st.Settings().AllPagesOffline
 	// refresh fetches a page's content if this device keeps it. A page
@@ -1557,6 +2040,9 @@ func (s *Service) pullContents(ctx context.Context) error {
 	}
 	var failed error
 	for id := range waiting {
+		if !first {
+			break
+		}
 		if failed = refresh(id); failed != nil {
 			break
 		}
@@ -1584,12 +2070,12 @@ func (s *Service) pullContents(ctx context.Context) error {
 	// The pages that wait are kept before the cursor passes them: the
 	// other way round, a crash between would lose them.
 	if err := s.setWaiting(waiting); err != nil {
-		return errors.Join(failed, err)
+		return false, errors.Join(failed, err)
 	}
 	if cur != start {
 		s.setCursor("page_content", cur)
 	}
-	return failed
+	return full, failed
 }
 
 // hasContentAt reports whether this device has merged the server's
@@ -1726,38 +2212,42 @@ func (s *Service) flushRemote(ctx context.Context, pageID string) error {
 	if err != nil {
 		return err
 	}
-	uid := s.be.UserID()
-	for _, e := range entries {
-		if (e.Entity == "pages" || e.Entity == "page_content") && e.EntityID == pageID {
-			done, err := s.pushOne(ctx, uid, e)
-			if err != nil {
-				return err
-			}
-			if done {
-				_ = s.st.Dequeue(e)
+	// What the job's row refers to must be on the server before it: the
+	// page, under the pages it is inside, its content, and its comments, as
+	// the thread a comment's run answers in. The pages go from the top.
+	var chain []string
+	seen := map[string]bool{}
+	for id := pageID; id != "" && !seen[id]; {
+		seen[id] = true
+		chain = append(chain, id)
+		p, err := s.st.Page(id)
+		if err != nil {
+			break
+		}
+		id = p.ParentID
+	}
+	slices.Reverse(chain)
+	var order []store.OutboxEntry
+	for _, id := range chain {
+		for _, e := range entries {
+			if e.Entity == "pages" && e.EntityID == id {
+				order = append(order, e)
 			}
 		}
 	}
-	return nil
-}
-
-// Push sends one queued row right away, as a job must exist before the
-// agent function runs it.
-func (s *Service) Push(ctx context.Context, entity, id string) error {
-	entries, err := s.st.Pending()
-	if err != nil {
-		return err
+	for _, e := range entries {
+		if e.Entity == "page_content" && e.EntityID == pageID || e.Entity == "comments" && e.PageID == pageID {
+			order = append(order, e)
+		}
 	}
 	uid := s.be.UserID()
-	for _, e := range entries {
-		if e.Entity == entity && e.EntityID == id {
-			done, err := s.pushOne(ctx, uid, e)
-			if err != nil {
-				return err
-			}
-			if done {
-				_ = s.st.Dequeue(e)
-			}
+	for _, e := range order {
+		done, err := s.pushOne(ctx, uid, e)
+		if err != nil {
+			return err
+		}
+		if done {
+			_ = s.st.Dequeue(e)
 		}
 	}
 	return nil

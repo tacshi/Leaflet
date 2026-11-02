@@ -1,0 +1,27 @@
+package app
+
+import (
+	"bytes"
+	"testing"
+)
+
+// Chunks that come in out of order are written in order, each once; one
+// that never comes is given up on.
+func TestChunksGoInOrder(t *testing.T) {
+	var got []byte
+	s := &captureSink{chunk: func(pcm []byte) { got = append(got, pcm...) }}
+	for _, seq := range []int{1, 0, 3, 2, 2, 0} {
+		s.deliver(seq, []byte{byte(seq)})
+	}
+	if !bytes.Equal(got, []byte{0, 1, 2, 3}) {
+		t.Fatalf("wrote %v", got)
+	}
+	// 4 never comes.
+	got = nil
+	for seq := 5; seq <= 5+maxHeld; seq++ {
+		s.deliver(seq, []byte{byte(seq)})
+	}
+	if len(got) != maxHeld+1 || got[0] != 5 {
+		t.Fatalf("wrote %v", got)
+	}
+}

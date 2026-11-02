@@ -65,9 +65,10 @@ var (
 
 // passDamaged records that batch seq of a device's does not parse, and
 // reports whether to pass over it now. later says whether the device has
-// written batches after it.
+// written batches after it. Each batch is counted on its own, as a log
+// being compacted may have more than one.
 func (s *Service) passDamaged(peer string, seq int64, later bool, err error) bool {
-	key := "icloud.damaged." + peer
+	key := damagedPrefix + peer + "." + strconv.FormatInt(seq, 10)
 	v, _ := s.st.Value(key)
 	parts := strings.Split(v, "|")
 	now := cloudNow().UnixMilli()
@@ -83,9 +84,27 @@ func (s *Service) passDamaged(peer string, seq int64, later bool, err error) boo
 		_ = s.st.SetValue(key, fmt.Sprintf("%d|%d|%d", seq, first, tries))
 		return false
 	}
+	// The count stays until the batch is read past or gone (forgetDamaged):
+	// a compaction that stops after it passes over it again at once.
 	log.Printf("icloud: batch %d of %s still does not parse, and batches came after it; passing over it", seq, peer)
-	_ = s.st.DeleteValue(key)
+	_ = s.st.SetValue(key, fmt.Sprintf("%d|%d|%d", seq, first, tries))
 	return true
+}
+
+// damagedPrefix starts the keys passDamaged counts a device's batches
+// under, "<device>.<seq>".
+const damagedPrefix = "icloud.damaged."
+
+// forgetDamaged drops what passDamaged kept of a device's batches up to
+// seq, which are read or gone now, and the one key an earlier version
+// kept for the device.
+func (s *Service) forgetDamaged(peer string, upTo int64) {
+	for k := range s.st.ValuesWithPrefix(damagedPrefix + peer) {
+		n, err := strconv.ParseInt(strings.TrimPrefix(k, "."), 10, 64)
+		if k == "" || strings.HasPrefix(k, ".") && err == nil && n <= upTo {
+			_ = s.st.DeleteValue(damagedPrefix + peer + k)
+		}
+	}
 }
 
 // pullDevice applies a device's batches after its cursor. It stops at
@@ -94,7 +113,7 @@ func (s *Service) passDamaged(peer string, seq int64, later bool, err error) boo
 // the batches folded into it: a compaction cut short leaves batches
 // before its snapshot.
 func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
-	seqs, _, err := s.ICloud.Batches(peer)
+	seqs, _, err := s.folder().Batches(peer)
 	if err != nil {
 		return err
 	}
@@ -105,6 +124,7 @@ func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
 		for table := range changed {
 			s.st.Notify(table, "")
 		}
+		s.forgetDamaged(peer, s.intValue(key))
 	}()
 	for i := 0; i < len(seqs); i++ {
 		seq := seqs[i]
@@ -171,7 +191,7 @@ func (s *Service) readBatch(peer string, seq int64) (icloud.Batch, error) {
 	if err != nil {
 		return b, err
 	}
-	return b, s.ICloud.ReadJSON(rel, &b)
+	return b, s.folder().ReadJSON(rel, &b)
 }
 
 // snapshotAfter is the index of the first snapshot among a device's
@@ -240,6 +260,8 @@ func (s *Service) putCloudPage(r map[string]any) error {
 func (s *Service) refreshWaiting(ctx context.Context) error {
 	waiting := s.waiting()
 	allOffline := s.st.Settings().AllPagesOffline
+	// A page whose file iCloud has not brought yet waits for it, and is no
+	// failure; another page's error still is.
 	var failed error
 	for id := range waiting {
 		p, err := s.st.Page(id)
@@ -253,16 +275,20 @@ func (s *Service) refreshWaiting(ctx context.Context) error {
 			continue
 		}
 		if _, err := s.cloudRefresh(ctx, id); err != nil {
-			failed = errors.Join(failed, err)
+			switch {
+			case errors.Is(err, errPeerUnreadable) || errors.Is(err, errUnreadable):
+				// The page keeps its content here, and waits until every
+				// version can be read; the other pages still come.
+				log.Printf("icloud: merge %s: %v", id, err)
+			case !errors.Is(err, icloud.ErrNotReady):
+				failed = errors.Join(failed, err)
+			}
 			continue
 		}
 		delete(waiting, id)
 	}
 	if err := s.setWaiting(waiting); err != nil {
 		return errors.Join(failed, err)
-	}
-	if errors.Is(failed, icloud.ErrNotReady) {
-		return nil
 	}
 	return failed
 }
@@ -274,16 +300,19 @@ func wantKey(peer, pageID string) string { return "icloud.want." + peer + "." + 
 // cloudRefresh merges into this device's version of a page every other
 // device's version that is newer than the one it last merged, which is
 // the base of the merge. A page file older than its batch named, or not
-// here yet, is ErrNotReady, and the page waits for it. It then queues its own version when that differs
-// from the one merged and from what it published, so the devices end up
-// with one version, the same whichever merged first.
+// here yet, is ErrNotReady, and the page waits for it. A version that
+// cannot be read, its or this device's, is errPeerUnreadable or
+// errUnreadable, and the page waits too, while the other devices' still
+// merge. It then queues its own version when that differs from the one
+// merged and from what it published, so the devices end up with one
+// version, the same whichever merged first.
 func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content, error) {
 	me := s.st.DeviceID()
 	peers, err := s.devices(me)
 	if err != nil {
 		return nil, err
 	}
-	var notReady error
+	var notReady, unreadable error
 	for _, peer := range peers {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -293,14 +322,14 @@ func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content
 			return nil, err
 		}
 		want := s.intValue(wantKey(peer, pageID))
-		if !s.ICloud.Exists(rel) {
+		if !s.folder().Exists(rel) {
 			if want > 0 {
 				notReady = icloud.ErrNotReady
 			}
 			continue
 		}
 		var file icloud.PageFile
-		if err := s.ICloud.ReadJSON(rel, &file); err != nil {
+		if err := s.folder().ReadJSON(rel, &file); err != nil {
 			if errors.Is(err, icloud.ErrNotReady) {
 				notReady = err
 				continue
@@ -312,6 +341,10 @@ func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content
 			continue
 		}
 		if err := s.mergePeer(me, peer, pageID, file); err != nil {
+			if errors.Is(err, errPeerUnreadable) || errors.Is(err, errUnreadable) {
+				unreadable = err
+				continue
+			}
 			return nil, err
 		}
 		if want > 0 {
@@ -320,11 +353,20 @@ func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content
 			}
 		}
 	}
+	if unreadable != nil {
+		return s.st.Content(pageID), unreadable
+	}
 	if notReady != nil {
 		return s.st.Content(pageID), notReady
 	}
 	return s.st.Content(pageID), nil
 }
+
+// errPeerUnreadable is a page whose version from another device cannot be
+// read here, as one a newer version of Leaflet wrote may not be. It is
+// not merged, as an empty page would take this device's place, and waits
+// until it can be read, as errServerUnreadable does.
+var errPeerUnreadable = errors.New("the page's content from another device could not be read, so it was not synced")
 
 // mergePeer merges one device's version of a page into this device's.
 func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error {
@@ -334,7 +376,7 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 	}
 	theirs, err := doc.Decode(string(file.Content))
 	if err != nil {
-		return nil // not a page this Leaflet can read
+		return fmt.Errorf("%w: %w", errPeerUnreadable, err)
 	}
 	var base *doc.Content
 	if hasBase {
@@ -366,8 +408,7 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 			if err != nil {
 				// Merging into an empty page would drop this device's
 				// version: it is left for when it can be read.
-				log.Printf("merge %s from %s: %v", pageID, peer, errUnreadable)
-				return nil
+				return errUnreadable
 			}
 			next, conflicts = doc.Merge(base, mine, theirs)
 			if next.Encode() == local.Content {

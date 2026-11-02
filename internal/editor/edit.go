@@ -5,7 +5,10 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/go-text/typesetting/segmenter"
+
 	"leaflet/internal/doc"
+	"leaflet/internal/shortcut"
 )
 
 func newText(typ string, d doc.Delta) *doc.Node {
@@ -43,17 +46,40 @@ func (e *Editor) deleteSelection() bool {
 	if last.IsText() {
 		tail = last.Delta().Slice(b.Off, textLen(last))
 	}
-	// Remove everything after the first block, last first, so children
-	// outside the selection move up to their parent's place as it goes.
-	for i := ib; i > ia; i-- {
-		n := us[i]
-		if !collapsed(n) || i == ib {
-			e.liftChildren(n)
-		}
-		e.Content.Remove(n.ID)
+	// Remove everything after the first block, its children outside the
+	// selection moving up to its place, but a folded toggle's from between
+	// the first block and the last, which go with it. One walk of the page
+	// takes them all out: removed one at a time, each would look for its
+	// place in the page.
+	gone := make(map[string]bool, ib-ia)
+	for _, n := range us[ia+1 : ib+1] {
+		gone[n.ID] = true
 		e.invalidate(n.ID)
 	}
+	var without func([]*doc.Node) []*doc.Node
+	without = func(nodes []*doc.Node) []*doc.Node {
+		var out []*doc.Node
+		for _, n := range nodes {
+			lift := n.Type != "table" && (!collapsed(n) || n == last)
+			if n.Type != "table" && (!gone[n.ID] || lift) {
+				n.Children = without(n.Children)
+			}
+			switch {
+			case !gone[n.ID]:
+				out = append(out, n)
+			case lift:
+				out = append(out, n.Children...)
+				n.Children = nil
+			}
+		}
+		return out
+	}
+	e.Content.Children = without(e.Content.Children)
 	if first.IsText() {
+		if first.Type == "code" {
+			// Code holds plain text: what joins it loses its formats.
+			tail = doc.Delta{{Text: tail.Plain()}}.Compact()
+		}
 		first.SetDelta(first.Delta().Slice(0, a.Off).Concat(tail))
 		e.invalidate(first.ID)
 		e.anchor, e.focus = a, a
@@ -93,7 +119,14 @@ func (e *Editor) InsertText(s string) {
 	}
 	if n := utf8.RuneCountInString(s); n > 1 && n <= 64 {
 		// Text typed at once goes in as keystrokes would, so shortcuts and
-		// menus still follow it.
+		// menus still follow it. In place of a selection, as an input
+		// method's commit or autocorrect puts it, it is one step: the
+		// selection goes as the step begins, and the keystrokes join it.
+		if !e.Collapsed() {
+			e.pushUndo(false)
+			e.deleteSelection()
+			e.coalescing, e.coalesceIn = true, e.focus.ID
+		}
 		for _, r := range s {
 			e.InsertText(string(r))
 		}
@@ -142,7 +175,7 @@ func (e *Editor) InsertText(s string) {
 	if r, _ := utf8.DecodeRuneInString(s); (r == '/' || r == '@') && utf8.RuneCountInString(s) == 1 {
 		runes := []rune(n.Delta().Plain())
 		at := off - 1
-		if at == 0 || opensMenu(runes[at-1]) {
+		if at == 0 || shortcut.OpensMenu(runes[at-1]) {
 			e.trigger = &Trigger{Kind: r, ID: n.ID, Off: at}
 			e.menuIndex = 0
 		}
@@ -153,49 +186,35 @@ func (e *Editor) InsertText(s string) {
 	e.changed()
 }
 
-// opensMenu reports whether a / or @ typed after r opens its menu: after
-// a space, or after Chinese or Japanese text or punctuation, which has no
-// spaces between words; not inside a word, as in a@b.com or a/b.
-func opensMenu(r rune) bool {
-	return unicode.IsSpace(r) || unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana) ||
-		r > unicode.MaxASCII && unicode.IsPunct(r)
-}
-
-// markdownShortcut turns "# ", "- ", "1. ", "[] " and "> " typed at the
-// start of a paragraph into the block they stand for; dividerShortcut
-// takes "---".
+// markdownShortcut turns "# ", "- ", "1. ", "[] ", "> ", "``` " and the
+// like typed at the start of a paragraph into the block they stand for
+// (internal/shortcut); dividerShortcut takes "---".
 func (e *Editor) markdownShortcut(n *doc.Node) {
-	if n.Type != "paragraph" && n.Type != "bulleted_list" {
-		return
-	}
 	text := n.Delta().Plain()
 	if utf8.RuneCountInString(text) < e.focus.Off {
 		return
 	}
-	prefix := string([]rune(text)[:e.focus.Off])
-	if p, ok := strings.CutSuffix(prefix, "\u3000"); ok {
-		prefix = p + " "
-	}
-	conv := map[string]func(){
-		"# ":   func() { n.Type = "heading"; n.Set("level", 1) },
-		"## ":  func() { n.Type = "heading"; n.Set("level", 2) },
-		"### ": func() { n.Type = "heading"; n.Set("level", 3) },
-		"- ":   func() { n.Type = "bulleted_list" },
-		"* ":   func() { n.Type = "bulleted_list" },
-		"1. ":  func() { n.Type = "numbered_list" },
-		"[] ":  func() { n.Type = "todo_list"; n.Set("checked", false) },
-		"[ ] ": func() { n.Type = "todo_list"; n.Set("checked", false) },
-		"[x] ": func() { n.Type = "todo_list"; n.Set("checked", true) },
-		"> ":   func() { n.Type = "quote" },
-	}
-	fn, ok := conv[prefix]
-	if !ok || (n.Type == "bulleted_list" && prefix != "[] " && prefix != "[ ] " && prefix != "[x] ") {
+	typ, data, ok := shortcut.Block(n.Type, string([]rune(text)[:e.focus.Off]))
+	if !ok {
 		return
 	}
 	// Undo goes back to the text as typed.
 	e.pushUndo(false)
-	fn()
-	n.SetDelta(n.Delta().Delete(0, e.focus.Off))
+	n.Type = typ
+	for _, k := range doc.TypedKeys {
+		delete(n.Data, k)
+	}
+	for k, v := range data {
+		n.Set(k, v)
+	}
+	d := n.Delta().Delete(0, e.focus.Off)
+	if typ == "code" {
+		d = doc.Delta{{Text: d.Plain()}}.Compact()
+	}
+	n.SetDelta(d)
+	if typ == "code" {
+		e.roomAfterCode(n)
+	}
 	e.invalidate(n.ID)
 	e.anchor, e.focus = Pos{n.ID, 0}, Pos{n.ID, 0}
 }
@@ -203,7 +222,7 @@ func (e *Editor) markdownShortcut(n *doc.Node) {
 // dividerShortcut turns "---" typed alone in a paragraph into a divider
 // before it, leaving the caret in the emptied paragraph to go on writing.
 func (e *Editor) dividerShortcut(n *doc.Node) {
-	if n.Type != "paragraph" || e.focus.Off != 3 || n.Delta().Plain() != "---" {
+	if e.focus.Off != 3 || !shortcut.Divider(n.Type, n.Delta().Plain()) {
 		return
 	}
 	// Undo goes back to the text as typed.
@@ -218,14 +237,7 @@ func (e *Editor) dividerShortcut(n *doc.Node) {
 // full into their formats.
 func (e *Editor) inlineShortcut(n *doc.Node) {
 	d := n.Delta()
-	runes := []rune(d.Plain())
-	end := e.focus.Off
-	if end < 2 || end > len(runes) {
-		return
-	}
-	// A marker's runes can be in a mention's title, but a mention is one
-	// unit, taken out or formatted whole: a marker in one is no marker,
-	// and a pair outside never cuts one.
+	// A mention is one unit, taken out or formatted whole.
 	mentioned := func(from, to int) bool {
 		for _, r := range d.Slice(from, to) {
 			if r.Attrs.Mention != nil {
@@ -234,42 +246,26 @@ func (e *Editor) inlineShortcut(n *doc.Node) {
 		}
 		return false
 	}
-	try := func(marker string, set func(*doc.Attrs)) bool {
-		m := []rune(marker)
-		if end < 2*len(m)+1 || string(runes[end-len(m):end]) != marker || mentioned(end-len(m), end) {
-			return false
-		}
-		closeAt := end - len(m)
-		for start := closeAt - 1; start >= len(m)-1; start-- {
-			openAt := start - len(m) + 1
-			if string(runes[openAt:start+1]) != marker || mentioned(openAt, start+1) {
-				continue
-			}
-			inner := runes[start+1 : closeAt]
-			if len(inner) == 0 || unicode.IsSpace(inner[0]) || unicode.IsSpace(inner[len(inner)-1]) {
-				return false
-			}
-			if len(m) == 1 && openAt > 0 && runes[openAt-1] == m[0] {
-				return false
-			}
-			e.pushUndo(false)
-			d = d.Delete(closeAt, end)
-			d = d.Format(start+1, closeAt, set)
-			d = d.Delete(openAt, start+1)
-			n.SetDelta(d)
-			e.invalidate(n.ID)
-			off := closeAt - len(m)
-			e.anchor, e.focus = Pos{n.ID, off}, Pos{n.ID, off}
-			e.typing, e.hasTyping = d.AttrsAt(openAt), true
-			e.typing.Bold, e.typing.Italic, e.typing.Code, e.typing.Strike = false, false, false, false
-			return true
-		}
-		return false
+	m, ok := shortcut.Inline([]rune(d.Plain()), e.focus.Off, mentioned)
+	if !ok {
+		return
 	}
-	_ = try("**", func(a *doc.Attrs) { a.Bold = true }) ||
-		try("~~", func(a *doc.Attrs) { a.Strike = true }) ||
-		try("`", func(a *doc.Attrs) { a.Code = true }) ||
-		try("*", func(a *doc.Attrs) { a.Italic = true })
+	set := map[string]func(*doc.Attrs){
+		"bold":   func(a *doc.Attrs) { a.Bold = true },
+		"strike": func(a *doc.Attrs) { a.Strike = true },
+		"code":   func(a *doc.Attrs) { a.Code = true },
+		"italic": func(a *doc.Attrs) { a.Italic = true },
+	}[m.Format]
+	e.pushUndo(false)
+	d = d.Delete(m.Close, m.End)
+	d = d.Format(m.Inner, m.Close, set)
+	d = d.Delete(m.Open, m.Inner)
+	n.SetDelta(d)
+	e.invalidate(n.ID)
+	off := m.Close - (m.Inner - m.Open)
+	e.anchor, e.focus = Pos{n.ID, off}, Pos{n.ID, off}
+	e.typing, e.hasTyping = d.AttrsAt(m.Open), true
+	e.typing.Bold, e.typing.Italic, e.typing.Code, e.typing.Strike = false, false, false, false
 }
 
 // continues is the type a new block after n takes on Enter.
@@ -367,9 +363,10 @@ func (e *Editor) Enter() {
 // NestableTypes reports whether a block takes children.
 func NestableTypes(n *doc.Node) bool { return doc.NestableTypes[n.Type] }
 
-// SoftBreak inserts a line break within the block.
+// SoftBreak inserts a line break within the block; on a block selected
+// whole, which has no line to break, it does nothing.
 func (e *Editor) SoftBreak() {
-	if e.ReadOnly {
+	if e.ReadOnly || e.blockSelected() {
 		return
 	}
 	e.pushUndo(false)
@@ -407,17 +404,17 @@ func (e *Editor) Backspace(word bool) {
 	off := e.focus.Off
 	if off > 0 {
 		e.pushUndo(true)
-		from := off - 1
+		var from int
 		if word {
 			from = wordStart([]rune(n.Delta().Plain()), off)
-		} else if l := e.layoutOf(n); l != nil {
-			from = runeOff(n, l.layout.PreviousBoundary(utf16Off(n, off)))
+		} else {
+			from = e.prevStop(n, off)
 		}
 		// A mention goes whole.
 		from, _ = n.Delta().Widen(from, off)
 		n.SetDelta(n.Delta().Delete(from, off))
 		e.invalidate(n.ID)
-		e.Select(Pos{n.ID, from}, Pos{n.ID, from})
+		e.setSelection(Pos{n.ID, from}, Pos{n.ID, from})
 		e.changed()
 		return
 	}
@@ -481,11 +478,11 @@ func (e *Editor) Delete(word bool) {
 	off := e.focus.Off
 	if off < textLen(n) {
 		e.pushUndo(true)
-		to := off + 1
+		var to int
 		if word {
 			to = wordEnd([]rune(n.Delta().Plain()), off)
-		} else if l := e.layoutOf(n); l != nil {
-			to = runeOff(n, l.layout.NextBoundary(utf16Off(n, off)))
+		} else {
+			to = e.nextStop(n, off)
 		}
 		// A mention goes whole, as the caret is never inside one.
 		n.SetDelta(n.Delta().Delete(off, to))
@@ -549,7 +546,7 @@ func (e *Editor) unstyle(n *doc.Node) {
 // kind; the children a paragraph cannot hold move up after it.
 func (e *Editor) toParagraph(n *doc.Node) {
 	n.Type = "paragraph"
-	for _, k := range []string{"checked", "due", "level", "language", "tone", "collapsed"} {
+	for _, k := range doc.TypedKeys {
 		delete(n.Data, k)
 	}
 	e.liftChildren(n)
@@ -686,21 +683,14 @@ func (e *Editor) SetType(typ string, level int) {
 		}
 		last = n
 		n.Type = typ
-		for _, k := range []string{"checked", "due", "level", "language", "tone", "collapsed"} {
+		for _, k := range doc.TypedKeys {
 			delete(n.Data, k)
 		}
-		switch typ {
-		case "heading":
-			n.Set("level", level)
-		case "todo_list":
-			n.Set("checked", false)
-		case "code":
+		for k, v := range doc.TypeData(typ, level) {
+			n.Set(k, v)
+		}
+		if typ == "code" {
 			n.SetDelta(doc.Delta{{Text: n.Delta().Plain()}}.Compact())
-			n.Set("language", "")
-		case "callout":
-			n.Set("tone", "info")
-		case "toggle_list":
-			n.Set("collapsed", false)
 		}
 		if !NestableTypes(n) && len(n.Children) > 0 {
 			e.liftChildren(n)
@@ -919,12 +909,19 @@ func (e *Editor) ToggleCode() {
 	e.Format(func(a doc.Attrs) bool { return a.Code }, func(a *doc.Attrs, on bool) { a.Code = on })
 }
 
-// SetLink links the selection to url, or unlinks it when url is empty.
+// SetLink links the selection to url, or unlinks it when url is empty. A
+// page mention is a link to its page: linked elsewhere, or not at all, it
+// is the text it showed.
 func (e *Editor) SetLink(url string) {
 	if e.Collapsed() {
 		return
 	}
-	e.Format(func(a doc.Attrs) bool { return a.Href == url }, func(a *doc.Attrs, _ bool) { a.Href = url })
+	e.Format(func(a doc.Attrs) bool { return a.Href == url }, func(a *doc.Attrs, _ bool) {
+		a.Href = url
+		if m := a.Mention; m != nil && m.Kind == "page" && url != doc.PageLink(m.ID) {
+			a.Mention = nil
+		}
+	})
 }
 
 // LinkAt returns the link under the selection's start.
@@ -997,6 +994,50 @@ func (e *Editor) SelectAll() {
 	us := e.units()
 	first, last := us[0], us[len(us)-1]
 	e.Select(Pos{first.ID, 0}, Pos{last.ID, textLen(last)})
+}
+
+// prevStop and nextStop are where the caret stops before and after off in
+// a text block, a grapheme cluster away, as its layout has them, so an
+// emoji, a flag or a letter with its marks goes whole. A block not laid
+// out since it changed, as a second key before the next frame finds it,
+// has them from Unicode's rules.
+func (e *Editor) prevStop(n *doc.Node, off int) int {
+	if l := e.layoutOf(n); l != nil {
+		return runeOff(n, l.layout.PreviousBoundary(utf16Off(n, off)))
+	}
+	prev := 0
+	for _, b := range clusters(n) {
+		if b >= off {
+			break
+		}
+		prev = b
+	}
+	return prev
+}
+
+func (e *Editor) nextStop(n *doc.Node, off int) int {
+	if l := e.layoutOf(n); l != nil {
+		return runeOff(n, l.layout.NextBoundary(utf16Off(n, off)))
+	}
+	for _, b := range clusters(n) {
+		if b > off {
+			return b
+		}
+	}
+	return textLen(n)
+}
+
+// clusters are the rune offsets where a text block's grapheme clusters
+// start, and its end.
+func clusters(n *doc.Node) []int {
+	rs := []rune(n.Delta().Plain())
+	var seg segmenter.Segmenter
+	seg.Init(rs)
+	var out []int
+	for it := seg.GraphemeIterator(); it.Next(); {
+		out = append(out, it.Grapheme().Offset)
+	}
+	return append(out, len(rs))
 }
 
 func wordStart(rs []rune, off int) int {

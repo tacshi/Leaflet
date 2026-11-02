@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -256,7 +257,12 @@ type openHost struct {
 	ed *editor.Editor
 }
 
-func (h openHost) Editor(string) *editor.Editor { return h.ed }
+func (h openHost) Live(string) LiveDoc {
+	if h.ed == nil {
+		return nil
+	}
+	return h.ed
+}
 
 // openPage is a stored page, open in an editor.
 func openPage(t *testing.T, st *store.Store) (store.Page, *editor.Editor) {
@@ -377,6 +383,49 @@ func TestAgentOpOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 	}
 	if ed.Content.Find("h1") != nil {
 		t.Error("h1 is still on the open page")
+	}
+}
+
+// A block the user changes on the open page while an agent's call streams
+// into it is kept in history before the stream's next change takes it
+// away, as an op of its own would keep it.
+func TestStreamOverAnOpenPagesChangeKeepsIt(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	h := NewHub(st, nil, openHost{ed: ed})
+	s := h.Session(p.ID)
+	run := &Run{ID: "r1"}
+	d := h.newDelivery(p.ID, run, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}})
+	work := ed.Content.Copy()
+	block := func(text string) *doc.Node {
+		n := &doc.Node{Type: "paragraph"}
+		n.SetDelta(doc.FromMarkdown(text))
+		return n
+	}
+	first := work.ReplaceOp("p1", block("Ship"))
+	if err := work.Apply(first); err != nil {
+		t.Fatal(err)
+	}
+	run.Ops, run.Edits = []doc.Op{first}, []Edit{{}}
+	d.to(ed, run.Ops)
+
+	// The user types in p1 as the agent's call goes on streaming into it.
+	ed.Content.Find("p1").SetDelta(doc.FromMarkdown("Ship it mine"))
+	delta := work.ReplaceOp("p1", block("Ship the agent's"))
+	if err := work.Apply(delta); err != nil {
+		t.Fatal(err)
+	}
+	h.revised(s, run, d, RunOptions{}, 0, &doc.Op{Op: "replace", ID: "p1", Node: work.Find("p1").Clone()}, "Rewrote a paragraph", []doc.Op{delta})
+
+	history, _ := st.History(p.ID)
+	if len(history) != 1 || history[0].Reason != "conflict" || history[0].AIJobID != "r1" {
+		t.Fatalf("history %+v", history)
+	}
+	if kept := doc.MustDecode(history[0].Content); kept.Find("p1").Delta().Plain() != "Ship it mine" {
+		t.Errorf("kept %q", kept.Find("p1").Delta().Plain())
+	}
+	if text := ed.Content.Find("p1").Delta().Plain(); text != "Ship the agent's" {
+		t.Errorf("open page has %q", text)
 	}
 }
 
@@ -543,7 +592,7 @@ func TestEarlierConversations(t *testing.T) {
 type stubHost struct{}
 
 func (stubHost) Update(fn func())                        { fn() }
-func (stubHost) Editor(string) *editor.Editor            { return nil }
+func (stubHost) Live(string) LiveDoc                     { return nil }
 func (stubHost) SaveNow(string)                          {}
 func (stubHost) Online() bool                            { return false }
 func (stubHost) Settings() store.Settings                { return store.Settings{} }
@@ -601,14 +650,18 @@ func TestUndoInAnEarlierConversation(t *testing.T) {
 	s.Messages = []*Message{{Mine: true, Text: "Add a line"}, {Text: "Added a line.", RunID: "r1"}}
 	h.saveChat(s)
 	h.NewConversation("p")
-	h.UndoRun("p", "r1")
+	if err := h.UndoRun("p", "r1"); err != nil {
+		t.Fatal(err)
+	}
 
 	again := NewHub(st, nil, stubHost{})
 	again.OpenConversation("p", first)
 	if r := again.Session("p").Run("r1"); r == nil || !r.Undone {
 		t.Fatalf("run after a restart %+v", r)
 	}
-	again.RedoRun("p", "r1")
+	if err := again.RedoRun("p", "r1"); err != nil {
+		t.Fatal(err)
+	}
 	if r := NewHub(st, nil, stubHost{}).Session("p").Run("r1"); r == nil || r.Undone {
 		t.Errorf("redone run after a restart %+v", r)
 	}
@@ -725,5 +778,210 @@ func TestOneRunAtATimeOnAPage(t *testing.T) {
 	}
 	if !s.Running || len(s.Runs) != 0 {
 		t.Errorf("running %v, runs %d", s.Running, len(s.Runs))
+	}
+}
+
+// queueHost is a host whose updates wait for the test to run them, as on
+// the main thread.
+type queueHost struct {
+	stubHost
+	q chan func()
+}
+
+func (h queueHost) Update(fn func()) { h.q <- fn }
+
+// A chat reply shows the answer as it streams, its thinking left out, and
+// not an answer an edit of the page went on from.
+func TestReplyStreamShowsTheAnswerSoFar(t *testing.T) {
+	host := queueHost{q: make(chan func(), 4)}
+	reply := &Message{Text: "Reading the page…", Pending: true}
+	run := &Run{Status: "running"}
+	stream := &replyStream{h: NewHub(openStore(t), nil, host), run: run, reply: reply}
+	next := func() {
+		t.Helper()
+		select {
+		case fn := <-host.q:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal("not shown")
+		}
+	}
+	stream.set("<think>planning")
+	next()
+	if reply.Text != "Reading the page…" || reply.Streamed {
+		t.Errorf("thinking shown: %+v", reply)
+	}
+	stream.set("<think>planning</think>Hello")
+	stream.set("<think>planning</think>Hello there")
+	next()
+	if reply.Text != "Hello there" || !reply.Streamed || run.Answer != "Hello there" {
+		t.Errorf("answer so far: %+v, run's %q", reply, run.Answer)
+	}
+	stream.set("I'll add a table.")
+	stream.clear()
+	next()
+	if reply.Text != "Hello there" {
+		t.Errorf("an answer an edit went on from: %+v", reply)
+	}
+	reply.Pending = false
+	stream.set("Late")
+	next()
+	if reply.Text != "Hello there" {
+		t.Errorf("a finished reply changed: %+v", reply)
+	}
+}
+
+// Undo that cannot revert the run's edits, as on content that cannot be
+// read, says so and leaves the run as it was: not undone, its job not
+// sent as reverted.
+func TestUndoThatFailsChangesNothing(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE page_contents SET content = '{"children": [' WHERE page_id = ?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutJob(store.Job{ID: "r1", PageID: p.ID, Surface: "sidebar", Status: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, stubHost{})
+	s := h.Session(p.ID)
+	s.Runs = []*Run{{ID: "r1", Status: "done", Ops: []doc.Op{insertAfter("p1", "x1", "one")}}}
+
+	if err := h.UndoRun(p.ID, "r1"); err == nil {
+		t.Error("undo said it reverted the run")
+	}
+	if s.Run("r1").Undone {
+		t.Error("the run counts as undone")
+	}
+	var status string
+	if err := st.DB().QueryRow(`SELECT status FROM ai_jobs WHERE id = 'r1'`).Scan(&status); err != nil || status != "done" {
+		t.Errorf("job %q, %v", status, err)
+	}
+}
+
+// Signed in, an agent takes the user's own page for shared until sync has
+// read who their pages are shared with: before then, no members kept of
+// it says nothing.
+func TestCrossPageWaitsForOwnPagesMembers(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, nil)
+	on := store.Settings{AgentsReadOtherPages: true}
+	if h.crossPage(mine, on) {
+		t.Error("read other pages before sync knew who has the page")
+	}
+	if err := st.SetValue(ownMembersKey, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if !h.crossPage(mine, on) {
+		t.Error("no other pages once sync knew no one else has it")
+	}
+}
+
+// A run stopped after it had finished, before it ended on the main
+// thread, ends as it finished, with its answer.
+func TestStopAfterTheRunFinishedKeepsItsReply(t *testing.T) {
+	h := NewHub(openStore(t), nil, stubHost{})
+	s := h.Session("p1")
+	run := &Run{ID: "r1", Status: "running", Stopped: true}
+	s.Runs, s.Running = []*Run{run}, true
+	reply := &Message{Pending: true}
+	option := Option{Provider: store.Provider{Name: "Local", IsLocal: true}}
+	h.finish(s, run, Request{PageID: "p1"}, option, doc.Empty(), h.newDelivery("p1", run, option),
+		Result{Reply: "It is a plan."}, nil, RunOptions{Reply: reply})
+	if run.Status != "done" || run.Stopped || run.Reply != "It is a plan." || reply.Text != "It is a plan." {
+		t.Errorf("run %+v, reply %+v", run, reply)
+	}
+}
+
+// A cloud run's subpage this device does not have yet stops its undo
+// before anything changes: deleting it would miss it, and it would come
+// back with the sync. Once sync has pulled the pages made since the run
+// began, one still missing is gone for good, and the undo goes on
+// without it.
+func TestUndoWaitsForTheRunsSubpage(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	c := page()
+	if err := c.Insert(doc.Position{After: "p1"}, &doc.Node{ID: "x1", Type: "paragraph"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, stubHost{})
+	s := h.Session(p.ID)
+	made := doc.Op{Op: "create_page", Page: &doc.NewPage{ID: "sub1", ParentID: p.ID, Title: "Notes"}}
+	at := time.Now()
+	s.Runs = []*Run{{ID: "r1", Status: "done", At: at, Ops: []doc.Op{insertAfter("p1", "x1", ""), made}}}
+	if err := st.SetValue(pagesCursorKey, at.Add(-time.Minute).UTC().Format(time.RFC3339Nano)+"|k"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.UndoRun(p.ID, "r1"); err == nil {
+		t.Error("undo said it reverted the run")
+	}
+	if s.Run("r1").Undone || st.Content(p.ID).Find("x1") == nil {
+		t.Errorf("undone %v, page %s", s.Run("r1").Undone, st.Content(p.ID).Encode())
+	}
+
+	if err := st.SetValue(pagesCursorKey, at.Add(time.Minute).UTC().Format(time.RFC3339Nano)+"|k"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.UndoRun(p.ID, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Run("r1").Undone || st.Content(p.ID).Find("x1") != nil {
+		t.Errorf("undone %v, page %s", s.Run("r1").Undone, st.Content(p.ID).Encode())
+	}
+}
+
+// readingHost is a host whose settings let agents read other pages.
+type readingHost struct{ stubHost }
+
+func (readingHost) Settings() store.Settings { return store.Settings{AgentsReadOtherPages: true} }
+
+// A run that panics fails, saying so, and ends as a failed run does: its
+// page takes another run.
+func TestPanicInARunFailsIt(t *testing.T) {
+	st := openStore(t)
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: "http://127.0.0.1:1/v1", AuthKind: "none", DefaultModel: "m", IsLocal: true}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, readingHost{})
+	// The run asks whether the page has a public link as it starts, and
+	// again on its goroutine, which panics.
+	var asked atomic.Int32
+	h.PublicLink = func(string) bool {
+		if asked.Add(1) > 1 {
+			panic("boom")
+		}
+		return false
+	}
+	done := make(chan *Run, 1)
+	h.Start(p.ID, RunOptions{Surface: "sidebar", Instruction: "go", Done: func(r *Run) { done <- r }})
+	select {
+	case r := <-done:
+		if r.Status != "failed" || !strings.Contains(r.Error, "boom") || h.Session(p.ID).Running {
+			t.Errorf("run %+v, running %v", r, h.Session(p.ID).Running)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the run never ended")
 	}
 }

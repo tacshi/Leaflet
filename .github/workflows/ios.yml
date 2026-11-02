@@ -1,0 +1,48 @@
+name: iOS
+
+# The iOS app links the Go core, ./mobile and every package it imports,
+# leaflet/supabase among them, so a change to any of them is checked to
+# keep MyGo's windowing packages out of it. The app's own Swift is checked
+# and tested on the developer's Mac, with make ios-check and make ios-test:
+# building and testing it on CI's simulators took too long.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "mobile/**"
+      - "internal/**"
+      - "locales/**"
+      - "supabase/**"
+      - "go.mod"
+      - "go.sum"
+      - "ios/scripts/check-core-deps.sh"
+      - ".github/workflows/ios.yml"
+  pull_request:
+    paths:
+      - "mobile/**"
+      - "internal/**"
+      - "locales/**"
+      - "supabase/**"
+      - "go.mod"
+      - "go.sum"
+      - "ios/scripts/check-core-deps.sh"
+      - ".github/workflows/ios.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Keep MyGo's windowing packages out of the iOS core
+        run: ios/scripts/check-core-deps.sh

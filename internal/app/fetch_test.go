@@ -8,44 +8,12 @@ import (
 	"image"
 	"image/color"
 	"image/gif"
-	"net/http"
-	"net/http/httptest"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
-// Links from shared pages reach only the web: not files on this device,
-// nor services on it or its network.
-func TestFetchOnlyThePublicWeb(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("<title>secret</title>"))
-	}))
-	defer srv.Close()
-	if _, err := fetch(srv.URL); !errors.Is(err, errNotPublic) {
-		t.Errorf("fetched a service on this machine: %v", err)
-	}
-	if _, err := fetch("file:///etc/hosts"); err == nil {
-		t.Error("fetched a file")
-	}
-	for addr, public := range map[string]bool{
-		"93.184.216.34": true, "2606:4700::1111": true,
-		"127.0.0.1": false, "10.0.0.1": false, "192.168.1.1": false, "172.16.0.1": false, "169.254.169.254": false,
-		"100.100.1.1": false, "0.0.0.0": false, "::1": false, "fe80::1": false, "fd00::1": false, "::ffff:127.0.0.1": false,
-		// IPv6 addresses standing for IPv4 ones are as those are.
-		"64:ff9b::7f00:1": false, "64:ff9b::a9fe:a9fe": false, "64:ff9b::5db8:d822": true, "64:ff9b:1::a00:1": false,
-		"2002:7f00:1::1": false, "2002:c0a8:101::1": false, "2002:5db8:d822::1": true,
-		"::127.0.0.1": false, "::10.0.0.1": false, "fec0::1": false,
-	} {
-		if got := publicAddr(netip.MustParseAddr(addr)); got != public {
-			t.Errorf("publicAddr(%s) = %v", addr, got)
-		}
-	}
-}
-
-// Pictures load from files in the data folder only, links followed.
 func TestImagesReadOnlyTheirOwnFiles(t *testing.T) {
 	root, outside := t.TempDir(), t.TempDir()
 	own := filepath.Join(root, "files", "f1", "a.png")
@@ -60,7 +28,7 @@ func TestImagesReadOnlyTheirOwnFiles(t *testing.T) {
 	if err := os.Symlink(secret, link); err != nil {
 		t.Fatal(err)
 	}
-	ic := newImageCache(root, filepath.Join(root, "images"))
+	ic := newImageCache(root)
 	if _, err := ic.read("file://" + own); err != nil {
 		t.Errorf("own file: %v", err)
 	}
@@ -75,7 +43,7 @@ func TestImagesReadOnlyTheirOwnFiles(t *testing.T) {
 // forever, and is tried again later.
 func TestImageCacheFailure(t *testing.T) {
 	root := t.TempDir()
-	ic := newImageCache(root, filepath.Join(root, "images"))
+	ic := newImageCache(root)
 	url := "file://" + filepath.Join(root, "missing.png")
 	done := make(chan struct{})
 	if ic.get(url, func() { close(done) }) != nil || ic.hasFailed(url) {
@@ -104,7 +72,7 @@ func TestImageCacheFailure(t *testing.T) {
 // made off the main thread; a GIF of one frame stays a picture.
 func TestAnimatedGIFPlays(t *testing.T) {
 	root := t.TempDir()
-	ic := newImageCache(root, filepath.Join(root, "images"))
+	ic := newImageCache(root)
 	frame := func(c color.Gray) *image.Paletted {
 		f := image.NewPaletted(image.Rect(0, 0, 4, 2), color.Palette{color.Black, color.White})
 		f.Set(0, 0, c)
@@ -226,7 +194,7 @@ func TestHugePictureRefused(t *testing.T) {
 	if err := os.WriteFile(path, png(50000, 50000), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ic := newImageCache(root, filepath.Join(root, "images"))
+	ic := newImageCache(root)
 	done := make(chan struct{})
 	ic.get("file://"+path, func() { close(done) })
 	<-done
@@ -254,7 +222,7 @@ func TestClosedImageCacheClosesPlayers(t *testing.T) {
 		t.Fatal(err)
 	}
 	url := "file://" + path
-	ic := newImageCache(root, filepath.Join(root, "images"))
+	ic := newImageCache(root)
 	loaded := make(chan struct{})
 	ic.get(url, func() { close(loaded) })
 	<-loaded

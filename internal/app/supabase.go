@@ -3,27 +3,20 @@ package app
 import (
 	"context"
 	_ "embed"
-	"errors"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
-	"leaflet/internal/keychain"
+	"leaflet/internal/core"
 	"leaflet/internal/provision"
-	"leaflet/internal/remote"
 	"leaflet/internal/supabaseapi"
 	"leaflet/locales"
 )
 
 // Signing in with Supabase: the person's own Supabase account holds the
 // project Leaflet syncs through, which this finds, or creates, and sets up.
-
-// managementKey keeps the Supabase account's sign-in, so a newer Leaflet
-// can bring the project up to date.
-const managementKey = "supabase.management"
 
 //go:embed supabase.svg
 var supabaseLogoSVG []byte
@@ -38,9 +31,6 @@ func init() {
 	}
 }
 
-// deployedKey keeps the functions' hash deployed last to a project.
-func deployedKey(ref string) string { return "supabase.functions." + ref }
-
 // hasServer reports whether Leaflet can sync through a server here: the
 // project chosen, or one to choose by signing in with Supabase, unless the
 // environment fixes a server it gives no key for.
@@ -52,9 +42,9 @@ const (
 	stepFinding  = "finding"
 	stepChoose   = "choose"
 	stepCreating = "creating"
-	stepStarting = "starting"
-	stepSetup    = "setup"
-	stepSigning  = "signing"
+	stepStarting = core.StepStarting
+	stepSetup    = core.StepSetup
+	stepSigning  = core.StepSigning
 )
 
 // supabaseState is a sign-in with Supabase under way.
@@ -94,9 +84,6 @@ func (a *App) supaStep(run int, fn func()) {
 	})
 }
 
-// keepManagement keeps the Supabase account's sign-in as it rotates.
-func keepManagement(refresh string) { _ = keychain.Set(managementKey, []byte(refresh)) }
-
 // signInWithSupabase opens Supabase's sign-in in the browser, then finds
 // the account's Leaflet project: one is used at once; otherwise the person
 // chooses on the page.
@@ -107,17 +94,14 @@ func (a *App) signInWithSupabase() {
 	signIn.err, signIn.info = "", ""
 	go func() {
 		wait, stop := context.WithTimeout(ctx, 5*time.Minute)
-		api, err := supabaseapi.SignIn(wait, func(u string) {
+		api, err := a.core().SignInWithSupabase(wait, func(u string) {
 			a.supaStep(run, func() { supa.link = u })
-			_ = mygo.Shell.OpenExternal(u)
 		})
 		stop()
 		if err != nil {
 			a.supabaseFailed(run, err)
 			return
 		}
-		api.OnRefresh = keepManagement
-		keepManagement(api.RefreshToken())
 		a.supaStep(run, func() { supa.api, supa.step = api, stepFinding })
 		found, err := provision.Find(ctx, api)
 		if err != nil {
@@ -142,12 +126,22 @@ func (a *App) signInWithSupabase() {
 // chooseProject uses p, or creates a project in the organization chosen
 // when p is nil.
 func (a *App) chooseProject(p *supabaseapi.Project) {
+	// One setup at a time: a second click before the projects' list goes
+	// does nothing.
+	if supa.step != stepChoose {
+		return
+	}
+	if supa.cancel != nil {
+		supa.cancel()
+	}
 	api, org := supa.api, supa.org
 	ctx, cancel := context.WithCancel(context.Background())
 	run := nextRun()
 	supa.run, supa.cancel = run, cancel
 	signIn.err = ""
 	if p != nil {
+		// The list goes at once; the setup says its steps as they come.
+		supa.step = stepSetup
 		go a.connectProject(ctx, run, api, *p)
 		return
 	}
@@ -165,32 +159,14 @@ func (a *App) chooseProject(p *supabaseapi.Project) {
 // connectProject sets p up for this version of Leaflet, once it is up,
 // makes it the project, and signs in to it as its owner.
 func (a *App) connectProject(ctx context.Context, run int, api *supabaseapi.Client, p supabaseapi.Project) {
-	if !p.Healthy() {
-		a.supaStep(run, func() { supa.step = stepStarting })
-		var err error
-		if p, err = provision.Ready(ctx, api, p); err != nil {
-			a.supabaseFailed(run, err)
-			return
-		}
-	}
-	a.supaStep(run, func() { supa.step, supa.done, supa.all = stepSetup, 0, 0 })
-	deployed, _ := a.st.Value(deployedKey(p.Ref))
-	hash, err := provision.Setup(ctx, api, p.Ref, deployed, func(done, all int) {
-		a.supaStep(run, func() { supa.done, supa.all = done, all })
+	pending, err := a.core().ConnectProject(ctx, api, p, func(step string, done, all int) {
+		a.supaStep(run, func() {
+			supa.step = step
+			if step == stepSetup {
+				supa.done, supa.all = done, all
+			}
+		})
 	})
-	if err != nil {
-		a.supabaseFailed(run, err)
-		return
-	}
-	_ = a.st.SetValue(deployedKey(p.Ref), hash)
-	publishable, secret, err := provision.Keys(ctx, api, p.Ref)
-	if err != nil {
-		a.supabaseFailed(run, err)
-		return
-	}
-	a.supaStep(run, func() { supa.step = stepSigning })
-	project := remote.Settings{URL: p.URL(), AnonKey: publishable, Ref: p.Ref, Name: p.Name}
-	pending, err := a.signInAsOwner(ctx, api, p, project, secret)
 	if err != nil {
 		a.supabaseFailed(run, err)
 		return
@@ -203,7 +179,7 @@ func (a *App) connectProject(ctx context.Context, run int, api *supabaseapi.Clie
 			go a.backend.Discard(pending)
 			return
 		}
-		user, err := a.backend.Adopt(pending)
+		user, err := a.core().AdoptProject(pending, api)
 		if err != nil {
 			supa = supabaseState{}
 			signIn.err = err.Error()
@@ -212,25 +188,6 @@ func (a *App) connectProject(ctx context.Context, run int, api *supabaseapi.Clie
 		supa = supabaseState{}
 		a.signedIn(user)
 	})
-}
-
-// signInAsOwner signs in to p as the person signed in to Supabase, who
-// owns it: the one member of its organization. A project whose owner is
-// someone else, as one in an organization they were added to, is refused:
-// being able to manage it does not make them its owner in Leaflet.
-func (a *App) signInAsOwner(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project, project remote.Settings, secret string) (*remote.Pending, error) {
-	email, name, err := provision.Owner(ctx, api, p.OrganizationSlug)
-	if err != nil {
-		return nil, err
-	}
-	owner, err := a.backend.ProjectOwner(ctx, project, secret)
-	if err != nil {
-		return nil, err
-	}
-	if owner != "" && !strings.EqualFold(owner, email) {
-		return nil, errors.New(locales.SigninNotYourProject(p.Name, owner))
-	}
-	return a.backend.SignInAsOwner(ctx, project, secret, email, name)
 }
 
 // supabaseFailed shows err on the sign-in page, unless the sign-in run was
@@ -253,43 +210,6 @@ func (a *App) cancelSupabase() {
 		supa.cancel()
 	}
 	supa = supabaseState{}
-}
-
-// forgetProject forgets the project chosen and the Supabase account's
-// sign-in, on signing out: signing in again finds the project anew.
-func (a *App) forgetProject() {
-	if a.backend.Fixed() {
-		return
-	}
-	_ = keychain.Delete(managementKey)
-	_ = a.backend.Use(remote.Settings{})
-}
-
-// updateProject brings the project up to this version of Leaflet, when a
-// newer one adds migrations or changes the functions, with the Supabase
-// account's sign-in kept from signing in.
-func (a *App) updateProject() {
-	ref := a.backend.Project().Ref
-	if ref == "" || !a.backend.SignedIn() {
-		return
-	}
-	raw, err := keychain.Get(managementKey)
-	if err != nil || len(raw) == 0 {
-		return
-	}
-	api := supabaseapi.Resume(string(raw))
-	api.OnRefresh = keepManagement
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	deployed, _ := a.st.Value(deployedKey(ref))
-	hash, err := provision.Setup(ctx, api, ref, deployed, nil)
-	if err != nil {
-		if errors.Is(err, supabaseapi.ErrSignedOut) {
-			_ = keychain.Delete(managementKey)
-		}
-		return
-	}
-	_ = a.st.SetValue(deployedKey(ref), hash)
 }
 
 // dashboardURL is the project's page in the Supabase dashboard.

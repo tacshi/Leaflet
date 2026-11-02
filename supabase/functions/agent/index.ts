@@ -216,6 +216,13 @@ async function runJob(
   deadline: number,
 ): Promise<void> {
   emit({ type: "status", status: "running" });
+  // What a run that fails part way did: its edits streamed to the app as
+  // they came, so they are saved still, as the app has them.
+  let session: PageEditSession | undefined;
+  const edits: { summary: string; block_ids: string[] }[] = [];
+  let save: (() => Promise<void>) | undefined;
+  let saveTried = false;
+  let savedEdits = false;
   try {
     const instruction = String(job.request?.instruction ?? "").trim();
     if (!instruction) throw new Error("The request has no instruction");
@@ -233,17 +240,17 @@ async function runJob(
     const canEdit = editable === true;
 
     // --- provider -------------------------------------------------------
-    if (!job.provider_id) throw new Error("Choose a model in Settings › Models first");
+    if (!job.provider_id) throw new Error("Choose a model in Settings › Agent providers first");
     const provider = await loadProvider(uc, job.provider_id);
     if (provider.is_local || LOCAL_PRESETS.has(provider.preset)) {
       throw new Error("Local models run on your device, not on the server");
     }
     const apiKey = await providerSecret(sc, provider.id);
     if (provider.auth_kind !== "none" && !apiKey) {
-      throw new Error(`Add an API key for ${provider.name || provider.preset} in Settings › Models`);
+      throw new Error(`Add an API key for ${provider.name || provider.preset} in Settings › Agent providers`);
     }
     const model = job.model || provider.default_model;
-    if (!model) throw new Error(`Choose a model for ${provider.name || provider.preset} in Settings › Models`);
+    if (!model) throw new Error(`Choose a model for ${provider.name || provider.preset} in Settings › Agent providers`);
     const conn: Connection = {
       baseUrl: normalizeBaseUrl(provider.base_url, provider.preset),
       apiKey,
@@ -355,7 +362,7 @@ async function runJob(
     let toolsEnabled = provider.supports_tools !== false;
 
     // --- tools ----------------------------------------------------------
-    const session = new PageEditSession(content, {
+    session = new PageEditSession(content, {
       readPage: (current: PageContent) =>
         Promise.resolve({
           page: { id: page.id, title: page.title },
@@ -387,7 +394,14 @@ async function runJob(
           plain_text: plainText(subContent),
           updated_by: user.id,
         });
-        if (subContentError) throw new ToolError(`Could not save the subpage: ${subContentError.message}`);
+        if (subContentError) {
+          // A page without its content would stay, empty, with no op to
+          // undo it by: it goes too. Only its space's owner may delete a
+          // page, so the service role deletes the one the run just made.
+          const { error: removeError } = await sc.from("pages").delete().eq("id", id);
+          if (removeError) console.error("subpage without its content:", removeError.message);
+          throw new ToolError(`Could not save the subpage: ${subContentError.message}`);
+        }
         subpages.push({ id, title });
         return { id, space_id: page.space_id, parent_id: page.id, title, sort_key: sortKey };
       },
@@ -420,6 +434,70 @@ async function runJob(
         };
       },
     }, { canEdit, crossPage, request: instruction, author: agentName });
+
+    // Saves the run's edits, once: on its end, or on its failure after it
+    // made some.
+    const run = session;
+    save = async () => {
+      saveTried = true;
+      // The page as it was goes first: edits that could not keep it are
+      // not saved, so none is saved that the page cannot go back from.
+      const { error: historyError } = await uc.from("page_history").insert({
+        page_id: page.id,
+        content: run.before,
+        reason: "agent_run",
+        ai_job_id: job.id,
+      });
+      if (historyError) throw new Error(`Could not save the page: ${historyError.message}`);
+
+      // Someone may save the page while the agent runs, or between reading
+      // and saving here: replay the agent's ops on what they saved, and save
+      // only over the revision that was read (protocol §1). A block they
+      // changed that an op then replaces or deletes loses their change, so
+      // what they saved is kept in the page's history first, to restore.
+      const ops = run.ops.filter((op: Op) => op.op !== "create_page");
+      let saved = false;
+      let kept: number | null = null;
+      for (let attempt = 0; attempt < 3 && !saved; attempt++) {
+        const { data: latest, error: latestError } = await uc
+          .from("page_content")
+          .select("content, revision")
+          .eq("page_id", page.id)
+          .maybeSingle();
+        if (latestError) throw new Error(`Could not save the page: ${latestError.message}`);
+        const replayed = (latest?.revision ?? null) !== (contentRow?.revision ?? null);
+        if (latest && replayed && !isPageContent(latest.content)) throw new Error(UNREADABLE);
+        const latestContent = normalizeContent(latest?.content);
+        if (latest && replayed && kept !== latest.revision && overwrites(latestContent, ops)) {
+          const { error } = await uc.from("page_history").insert({
+            page_id: page.id,
+            content: latest.content,
+            reason: "conflict",
+            ai_job_id: job.id,
+          });
+          if (error) throw new Error(`Could not save the page: ${error.message}`);
+          kept = latest.revision;
+        }
+        const finalContent = replayed ? applyOps(latestContent, ops) : run.content;
+        const values = { content: finalContent, plain_text: plainText(finalContent), updated_by: user.id };
+        if (latest) {
+          const { data, error } = await uc
+            .from("page_content")
+            .update(values)
+            .eq("page_id", page.id)
+            .eq("revision", latest.revision)
+            .select("revision");
+          if (error) throw new Error(`Could not save the page: ${error.message}`);
+          saved = (data?.length ?? 0) > 0;
+        } else {
+          const { error } = await uc.from("page_content").insert({ page_id: page.id, ...values });
+          if (error && error.code !== "23505") throw new Error(`Could not save the page: ${error.message}`);
+          saved = !error;
+        }
+      }
+      if (!saved) throw new Error("Could not save the page: it kept changing, or you cannot edit it.");
+      savedEdits = true;
+    };
 
     // --- messages -------------------------------------------------------
     const promptContext = {
@@ -468,7 +546,6 @@ async function runJob(
 
     // --- loop -----------------------------------------------------------
     let tools: ToolDef[] = toolsEnabled ? toolDefinitions({ canEdit, crossPage }) : [];
-    const edits: { summary: string; block_ids: string[] }[] = [];
     let reply = "";
     let finished = false;
     let outOfTime = false;
@@ -480,10 +557,13 @@ async function runJob(
       }
       let result;
       try {
+        // The answer streams to the app as it comes, each round's
+        // starting again where tool calls came before it.
         result = await chatCompletion(
           conn,
           { model, messages, tools },
           AbortSignal.timeout(Math.min(CALL_TIMEOUT_MS, left)),
+          (delta) => emit({ type: "text", delta, round }),
         );
       } catch (e) {
         if (isTimeout(e)) {
@@ -531,65 +611,8 @@ async function runJob(
         ? `I ran out of time and stopped.${done ? ` So far: ${done}.` : ""}`
         : `I stopped after ${MAX_ROUNDS} steps.${done ? ` So far: ${done}.` : ""}`;
     }
-    emit({ type: "text", delta: reply });
-
     // --- save -----------------------------------------------------------
-    if (session.changed) {
-      const { error: historyError } = await uc.from("page_history").insert({
-        page_id: page.id,
-        content: session.before,
-        reason: "agent_run",
-        ai_job_id: job.id,
-      });
-      if (historyError) console.error("page_history:", historyError.message);
-
-      // Someone may save the page while the agent runs, or between reading
-      // and saving here: replay the agent's ops on what they saved, and save
-      // only over the revision that was read (protocol §1). A block they
-      // changed that an op then replaces or deletes loses their change, so
-      // what they saved is kept in the page's history first, to restore.
-      const ops = session.ops.filter((op: Op) => op.op !== "create_page");
-      let saved = false;
-      let kept: number | null = null;
-      for (let attempt = 0; attempt < 3 && !saved; attempt++) {
-        const { data: latest, error: latestError } = await uc
-          .from("page_content")
-          .select("content, revision")
-          .eq("page_id", page.id)
-          .maybeSingle();
-        if (latestError) throw new Error(`Could not save the page: ${latestError.message}`);
-        const replayed = (latest?.revision ?? null) !== (contentRow?.revision ?? null);
-        if (latest && replayed && !isPageContent(latest.content)) throw new Error(UNREADABLE);
-        const latestContent = normalizeContent(latest?.content);
-        if (latest && replayed && kept !== latest.revision && overwrites(latestContent, ops)) {
-          const { error } = await uc.from("page_history").insert({
-            page_id: page.id,
-            content: latest.content,
-            reason: "conflict",
-            ai_job_id: job.id,
-          });
-          if (error) throw new Error(`Could not save the page: ${error.message}`);
-          kept = latest.revision;
-        }
-        const finalContent = replayed ? applyOps(latestContent, ops) : session.content;
-        const values = { content: finalContent, plain_text: plainText(finalContent), updated_by: user.id };
-        if (latest) {
-          const { data, error } = await uc
-            .from("page_content")
-            .update(values)
-            .eq("page_id", page.id)
-            .eq("revision", latest.revision)
-            .select("revision");
-          if (error) throw new Error(`Could not save the page: ${error.message}`);
-          saved = (data?.length ?? 0) > 0;
-        } else {
-          const { error } = await uc.from("page_content").insert({ page_id: page.id, ...values });
-          if (error && error.code !== "23505") throw new Error(`Could not save the page: ${error.message}`);
-          saved = !error;
-        }
-      }
-      if (!saved) throw new Error("Could not save the page: it kept changing, or you cannot edit it.");
-    }
+    if (session.changed) await save();
 
     const { error: jobError } = await uc
       .from("ai_jobs")
@@ -614,9 +637,26 @@ async function runJob(
 
     emit({ type: "done", reply, edits });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    let message = e instanceof Error ? e.message : String(e);
     console.error("agent job failed:", message);
-    await uc.from("ai_jobs").update({ status: "failed", error: message }).eq("id", job.id);
+    // A run that failed after it edited the page, as when a later call of
+    // the model fails, saves its edits: the app has them already, open or
+    // as delivered, and undoes them by the job's ops. Edits it could not
+    // save either, it says so of.
+    if (session?.changed && save && !saveTried) {
+      try {
+        await save();
+      } catch (saveError) {
+        const why = saveError instanceof Error ? saveError.message : String(saveError);
+        console.error("agent job's edits:", why);
+        message = `${message} Its edits were not saved either: ${why}`;
+      }
+    }
+    const result = savedEdits ? { reply: "", ops: session!.ops, edits } : undefined;
+    await uc.from("ai_jobs").update({ status: "failed", error: message, ...(result ? { result } : {}) }).eq(
+      "id",
+      job.id,
+    );
     emit({ type: "error", message });
   }
 }

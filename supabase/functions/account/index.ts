@@ -1,6 +1,7 @@
 // Account (protocol §5): delete the caller's account, their storage objects,
 // and (by cascade) their space, pages, recordings and model connections.
-// Pages shared with them stay with their owners.
+// Pages shared with them stay with their owners, with the recordings the
+// caller made on them, audio and all.
 
 import type { SupabaseClient } from "jsr:@supabase/supabase-js@2";
 import { errorResponse, HttpError, json, preflight, readJson } from "../_shared/cors.ts";
@@ -19,8 +20,12 @@ Deno.serve(async (req) => {
     if (error) throw new Error(error.message);
 
     // Storage objects are removed through the Storage API before the rows
-    // that name them go with the account.
-    await removePrefix(sc, "recordings", user.id);
+    // that name them go with the account: the account is not deleted while
+    // it owns any. The audio of recordings that stay, on others' pages, is
+    // no longer the account's, in place, and stays.
+    const { data: kept, error: keptError } = await sc.rpc("release_kept_recordings", { p_user_id: user.id });
+    if (keptError) throw new Error(`recordings: ${keptError.message}`);
+    await removePrefix(sc, "recordings", user.id, new Set((kept ?? []) as string[]));
     for (const space of spaces ?? []) {
       // Others' recordings on this user's pages go with the pages.
       await removePaths(sc, "recordings", await othersRecordings(sc, space.id, user.id));
@@ -36,8 +41,13 @@ Deno.serve(async (req) => {
   }
 });
 
-/** Removes every object under `prefix/` in a bucket, folders included. */
-async function removePrefix(sc: SupabaseClient, bucket: string, prefix: string): Promise<void> {
+/** Removes every object under `prefix/` in a bucket, folders included, but those in keep. */
+async function removePrefix(
+  sc: SupabaseClient,
+  bucket: string,
+  prefix: string,
+  keep: Set<string> = new Set(),
+): Promise<void> {
   const paths: string[] = [];
   const visit = async (folder: string) => {
     for (let offset = 0;; offset += 1000) {
@@ -47,7 +57,7 @@ async function removePrefix(sc: SupabaseClient, bucket: string, prefix: string):
         const path = `${folder}/${item.name}`;
         // Folders come back without an id.
         if (item.id === null) await visit(path);
-        else paths.push(path);
+        else if (!keep.has(path)) paths.push(path);
       }
       if (!data || data.length < 1000) break;
     }
@@ -74,7 +84,7 @@ async function othersRecordings(sc: SupabaseClient, spaceId: string, userId: str
       .range(from, from + 999);
     if (error) throw new Error(`recordings: ${error.message}`);
     for (const r of data ?? []) {
-      if (r.audio_path && r.created_by && r.created_by !== userId && ownAudioPath(r.audio_path, r.created_by, r.id)) {
+      if (r.audio_path && r.created_by !== userId && ownAudioPath(r.audio_path, r.created_by, r.id)) {
         paths.push(r.audio_path);
       }
     }
@@ -83,10 +93,14 @@ async function othersRecordings(sc: SupabaseClient, spaceId: string, userId: str
   return paths;
 }
 
-/** Whether path is recording id's own: {createdBy}/{id}.{ext}. */
-function ownAudioPath(path: string, createdBy: string, id: string): boolean {
+/**
+ * Whether path is recording id's own: {createdBy}/{id}.{ext}. A recording
+ * whose recorder's account went (createdBy null) keeps the path it had,
+ * which no one can change since, in its recorder's folder.
+ */
+function ownAudioPath(path: string, createdBy: string | null, id: string): boolean {
   const [folder, name, ...rest] = path.split("/");
-  if (rest.length > 0 || folder !== createdBy || !name) return false;
+  if (rest.length > 0 || !folder || (createdBy !== null && folder !== createdBy) || !name) return false;
   const dot = name.indexOf(".");
   return (dot < 0 ? name : name.slice(0, dot)) === id;
 }

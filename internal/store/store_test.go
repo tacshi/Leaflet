@@ -64,7 +64,11 @@ func TestKeyBetweenAKeyAndItsZeros(t *testing.T) {
 	// Dragging to the top of a list that starts at "a0", again and again.
 	top := "a0"
 	for i := 0; i < 20; i++ {
-		top = KeyBetween("", top)
+		next := KeyBetween("", top)
+		if next == "" || next >= top || strings.HasSuffix(next, "0") {
+			t.Fatalf("step %d: %q not a key before %q", i, next, top)
+		}
+		top = next
 	}
 }
 
@@ -652,7 +656,7 @@ func TestCopyPageWaitsForAudioOnThisDevice(t *testing.T) {
 	}
 	var up map[string]any
 	_ = json.Unmarshal([]byte(payload), &up)
-	if up["from_path"] != nil || up["local_path"] != c.LocalPath || up["recording_id"] != c.ID {
+	if up["from_path"] != nil || s.Path(S(up, "local_path")) != c.LocalPath || up["recording_id"] != c.ID {
 		t.Errorf("upload %v", up)
 	}
 }
@@ -712,7 +716,7 @@ func TestCopyPageCopiesFiles(t *testing.T) {
 			if orig == stored.ID {
 				want = "pdf"
 			}
-			if data, err := os.ReadFile(f.LocalPath); err != nil || string(data) != want || up["local_path"] != f.LocalPath ||
+			if data, err := os.ReadFile(f.LocalPath); err != nil || string(data) != want || s.Path(S(up, "local_path")) != f.LocalPath ||
 				up["from_path"] != nil || up["file_id"] != f.ID || up["path"] != f.StoragePath {
 				t.Errorf("%s: block %d: here at %q (%q, %v), upload %v", how, i, f.LocalPath, data, err, up)
 			}
@@ -896,6 +900,38 @@ func TestSearchPastDeletedPages(t *testing.T) {
 	}
 	if strings.Join(kinds, ",") != "page,recording,comment" {
 		t.Errorf("found %v, want the page, its recording and its comment", kinds)
+	}
+}
+
+// Text found on more pages than the limit lists the most recently changed
+// of them, whichever order the rows are in.
+func TestSearchTextListsTheLatestFirst(t *testing.T) {
+	s := open(t)
+	var ids []string
+	for _, title := range []string{"A", "B", "C"} {
+		n := &doc.Node{Type: "paragraph"}
+		n.SetDelta(doc.Delta{{Text: "budget notes"}})
+		p, err := s.CreatePage(NewPageOptions{Title: title, Content: doc.FromBlocks([]*doc.Node{n})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, p.ID)
+		time.Sleep(2 * time.Millisecond)
+	}
+	// The first page changed last.
+	if err := s.RenamePage(ids[0], "A again"); err != nil {
+		t.Fatal(err)
+	}
+	hits, err := s.Search("budget", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, h := range hits {
+		got = append(got, h.PageID)
+	}
+	if want := []string{ids[0], ids[2]}; !slices.Equal(got, want) {
+		t.Errorf("found %v, want %v", got, want)
 	}
 }
 
@@ -1122,6 +1158,38 @@ func userVersion(t *testing.T, s *Store) int {
 		t.Fatal(err)
 	}
 	return v
+}
+
+// A data folder named relative to the working folder, as LEAFLET_DATA_DIR
+// may be, keeps the files in it found: their paths are joined to it once.
+func TestARelativeDataFolderFindsItsFiles(t *testing.T) {
+	t.Chdir(t.TempDir())
+	s, err := Open("data")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	if _, err := s.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(s.Dir) {
+		t.Errorf("Dir is %q", s.Dir)
+	}
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.File(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(got.LocalPath); err != nil || string(data) != "hello" {
+		t.Errorf("file at %q: %q, %v", got.LocalPath, data, err)
+	}
 }
 
 // A data folder whose name has a character URIs treat specially opens the
@@ -1510,6 +1578,96 @@ func TestDeletingAFileRemovesItsCopy(t *testing.T) {
 	}
 }
 
+// The data folder can move, as an iOS app's does when it is updated: the
+// files and audio kept in it are found where it is now, whether their rows
+// were stored by this version (by where they are in it) or by an earlier
+// one (by their whole paths in the folder as it was).
+func TestFilesAreFoundAfterTheDataFolderMoves(t *testing.T) {
+	root := t.TempDir()
+	was, now := filepath.Join(root, "old", "Leaflet"), filepath.Join(root, "new", "Leaflet")
+	s, err := Open(was)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	audio := filepath.Join(was, "recordings", "a.wav")
+	if err := os.MkdirAll(filepath.Dir(audio), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(audio, []byte("RIFF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := s.CreateRecording("p", "b", "", "", audio, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stored string
+	if err := s.db.QueryRow(`SELECT local_path FROM files WHERE id = ?`, f.ID).Scan(&stored); err != nil || stored != "files/"+f.ID+"/notes.txt" {
+		t.Errorf("the file's row names %q (%v)", stored, err)
+	}
+	// As an earlier version stored it.
+	if _, err := s.db.Exec(`UPDATE recordings SET local_path = ? WHERE id = ?`, audio, rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.QueueUpload(rec); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	if err := os.MkdirAll(filepath.Dir(now), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(was, now); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err = Open(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close() }()
+	got, err := s.File(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if data, err := os.ReadFile(got.LocalPath); err != nil || string(data) != "hello" {
+		t.Errorf("file at %q: %q, %v", got.LocalPath, data, err)
+	}
+	r, err := s.Recording(rec.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(now, "recordings", "a.wav"); r.LocalPath != want {
+		t.Errorf("audio at %q, want %q", r.LocalPath, want)
+	}
+	var payload string
+	if err := s.db.QueryRow(`SELECT payload FROM outbox WHERE entity = 'storage' AND entity_id = ?`, "files/"+f.ID).Scan(&payload); err != nil {
+		t.Fatal(err)
+	}
+	var up map[string]any
+	_ = json.Unmarshal([]byte(payload), &up)
+	if s.Path(S(up, "local_path")) != got.LocalPath {
+		t.Errorf("the upload names %v", up["local_path"])
+	}
+	// Changed, the recording's row names its audio by where it is in the
+	// folder from then on.
+	if _, err := s.UpdateRecording(rec.ID, func(r *Recording) { r.Status = "ready" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow(`SELECT local_path FROM recordings WHERE id = ?`, rec.ID).Scan(&stored); err != nil || stored != "recordings/a.wav" {
+		t.Errorf("the recording's row names %q (%v)", stored, err)
+	}
+}
+
 // A file deleted on another device loses its copy here as the deletion
 // arrives.
 func TestAPulledDeletionRemovesTheCopy(t *testing.T) {
@@ -1686,6 +1844,70 @@ func TestForgetAccountRemovesFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(src); err != nil {
 		t.Errorf("the file it copied went too: %v", err)
+	}
+}
+
+// Forgetting the account forgets when sync last read who its pages are
+// shared with, as it does those it read: the next account's pages count
+// as shared until sync has read theirs.
+func TestForgetAccountForgetsOwnMembersRead(t *testing.T) {
+	s := open(t)
+	const key = "sync.own_members_at"
+	if err := s.SetValue(key, "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ForgetAccount(); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := s.Value(key); ok {
+		t.Errorf("%s kept: %q", key, v)
+	}
+}
+
+// A page stays in its space: one moved under a page, or into a folder, of
+// another space would be refused by the server every time it went up.
+func TestMovePageStaysInItsSpace(t *testing.T) {
+	s := open(t)
+	old := "2026-01-01T00:00:00Z"
+	if err := s.PutRemotePage(map[string]any{"id": "theirs", "space_id": "other", "title": "Shared", "sort_key": "V", "created_at": old, "updated_at": old}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRemoteFolder(map[string]any{"id": "their-folder", "space_id": "other", "name": "Theirs", "sort_key": "V", "created_at": old, "updated_at": old}); err != nil {
+		t.Fatal(err)
+	}
+	mine, _ := s.CreatePage(NewPageOptions{Title: "Mine"})
+	parent, _ := s.CreatePage(NewPageOptions{Title: "Parent"})
+	if err := s.MovePage(mine.ID, "theirs", "", ""); !errors.Is(err, ErrMoveAcrossSpaces) {
+		t.Errorf("move under a page of another space: %v", err)
+	}
+	if err := s.MovePageBefore(mine.ID, "", "their-folder", ""); !errors.Is(err, ErrMoveAcrossSpaces) {
+		t.Errorf("move into a folder of another space: %v", err)
+	}
+	if got, _ := s.Page(mine.ID); got.SpaceID != s.Session().SpaceID || got.ParentID != "" || got.FolderID != "" {
+		t.Errorf("page moved to %q under %q in %q", got.SpaceID, got.ParentID, got.FolderID)
+	}
+	if err := s.MovePage(mine.ID, parent.ID, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Page(mine.ID); got.ParentID != parent.ID {
+		t.Errorf("page under %q, want %q", got.ParentID, parent.ID)
+	}
+}
+
+// A recording's error goes up and comes back with it.
+func TestRecordingErrorSyncs(t *testing.T) {
+	s := open(t)
+	r := Recording{ID: doc.NewRowID(), PageID: "p", BlockID: "b", Status: "failed", Error: "no network", CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	row := RecordingToRemote(r)
+	if row["error"] != "no network" {
+		t.Errorf("row %v", row)
+	}
+	row["updated_at"] = time.Now().Add(time.Second).UTC().Format(time.RFC3339Nano)
+	if err := s.PutRemoteRecording(row); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.Recording(r.ID); err != nil || got.Error != "no network" {
+		t.Errorf("stored %+v, %v", got, err)
 	}
 }
 
@@ -2448,7 +2670,7 @@ func TestFileChangesQueueOnlyTheirColumns(t *testing.T) {
 	}
 }
 
-// Resolving, deleting or moving a comment queues only what changed, so a
+// Resolving or deleting a comment queues only what changed, so a
 // resolve made offline does not undo a delete made elsewhere.
 func TestCommentChangesQueueOnlyTheirColumns(t *testing.T) {
 	s := open(t)
@@ -2484,18 +2706,11 @@ func TestCommentChangesQueueOnlyTheirColumns(t *testing.T) {
 	if cols := queued(); fmt.Sprint(cols) != "[resolved]" {
 		t.Errorf("resolve queued %v", cols)
 	}
-	sent()
-	if err := s.Reanchor(p.ID, "b1", "b2"); err != nil {
-		t.Fatal(err)
-	}
-	if cols := queued(); fmt.Sprint(cols) != "[block_id]" {
-		t.Errorf("move queued %v", cols)
-	}
 	if err := s.DeleteComment(c.ID); err != nil {
 		t.Fatal(err)
 	}
-	if cols := queued(); fmt.Sprint(cols) != "[block_id deleted_at]" {
-		t.Errorf("move and delete queued %v", cols)
+	if cols := queued(); fmt.Sprint(cols) != "[deleted_at resolved]" {
+		t.Errorf("resolve and delete queued %v", cols)
 	}
 	if err := s.SetResolved("missing", true); !errors.Is(err, sql.ErrNoRows) {
 		t.Errorf("resolving a missing comment: %v", err)

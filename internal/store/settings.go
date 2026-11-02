@@ -8,7 +8,8 @@ import (
 // SttSettings are the speech-to-text choice and recording options, which
 // the server mirrors in stt_settings.
 type SttSettings struct {
-	// Provider is soniox | openai-compatible (on-device engines come later).
+	// Provider is soniox | openai-compatible | on-device, the device's own
+	// engine, which only iOS has.
 	Provider       string   `json:"provider"`
 	ModelSize      string   `json:"model_size"`
 	RunOn          string   `json:"run_on"`   // auto | gpu | cpu
@@ -50,18 +51,17 @@ type Fonts struct {
 // Settings are the app's settings on this device.
 type Settings struct {
 	Theme string `json:"theme"` // system | light | sepia | dark
-	// Accent is a name of theme.Accents, "system" or "" for Indigo.
+	// Accent is a name of theme.Accents, or "system" or "" for the
+	// desktop's, Blue where it has none.
 	Accent   string  `json:"accent,omitempty"`
 	TextSize float64 `json:"text_size"`
 	Fonts    Fonts   `json:"fonts"`
 	// Language is the tag of the language the app shows, as App.SetLocale
 	// keeps it, or "" to follow the system's.
-	Language     string `json:"language,omitempty"`
-	DefaultModel string `json:"default_model,omitempty"`
-	// LocalWhenOffline switches to a local model when offline.
-	LocalWhenOffline     bool `json:"local_when_offline"`
-	AgentsReadOtherPages bool `json:"agents_read_other_pages"`
-	AllPagesOffline      bool `json:"all_pages_offline"`
+	Language             string `json:"language,omitempty"`
+	DefaultModel         string `json:"default_model,omitempty"`
+	AgentsReadOtherPages bool   `json:"agents_read_other_pages"`
+	AllPagesOffline      bool   `json:"all_pages_offline"`
 	// WorkOffline treats the app as offline even with a connection.
 	WorkOffline bool `json:"work_offline"`
 	// ICloudSync syncs pages through the Leaflet folder in iCloud Drive.
@@ -79,7 +79,7 @@ type Settings struct {
 // DefaultSettings are the settings of a new install.
 func DefaultSettings() Settings {
 	return Settings{
-		Theme: "system", TextSize: 17, LocalWhenOffline: true, AgentsReadOtherPages: true,
+		Theme: "system", TextSize: 17, AgentsReadOtherPages: true,
 		AllPagesOffline: true, KeepAudioOnDevice: "until_uploaded", SidebarOpen: true,
 		SidebarWidth: 264, PanelWidth: 360,
 		Stt: SttSettings{
@@ -109,8 +109,16 @@ func (s *Store) Settings() Settings {
 	if out.PanelWidth == 0 {
 		out.PanelWidth = 360
 	}
-	if out.Stt.Provider != "soniox" && out.Stt.Provider != "openai-compatible" {
+	if out.Stt.Provider != "soniox" && out.Stt.Provider != "openai-compatible" && out.Stt.Provider != "on-device" {
 		out.Stt.Provider = "openai-compatible"
+	}
+	// A default whose provider is gone, as one removed on another device,
+	// is none: the next provider added becomes the default.
+	if def, ok := out.Default(); ok {
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM model_providers WHERE id = ?`, def.ProviderID).Scan(&n); err == nil && n == 0 {
+			out.DefaultModel = ""
+		}
 	}
 	return out
 }

@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +16,7 @@ import (
 
 	"leaflet/internal/agents"
 	"leaflet/internal/icloud"
+	"leaflet/internal/keychain"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -74,6 +77,70 @@ func TestModelsStayWithTheirDialog(t *testing.T) {
 	second()
 	if len(form.models) != 1 || form.models[0] != "llama-2" {
 		t.Errorf("dialog B lists %v", form.models)
+	}
+}
+
+// Models listed for one address don't land in the list once the address
+// has changed, and a changed address lists its own.
+func TestModelsFollowTheAddress(t *testing.T) {
+	was := form
+	t.Cleanup(func() {
+		if form.keyTimer != nil {
+			form.keyTimer.Stop()
+		}
+		form = was
+	})
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprint(w, `{"data":[{"id":"llama"}]}`)
+	}))
+	t.Cleanup(hs.Close)
+	a := templatesApp(t)
+	posts := make(chan func(), 2)
+	a.post = func(fn func()) { posts <- fn }
+	openForm(providerForm{open: true, preset: "ollama", name: "A", baseURL: hs.URL})
+	a.fetchModels()
+	form.baseURL = "http://127.0.0.1:1"
+	select {
+	case fn := <-posts:
+		fn()
+	case <-time.After(5 * time.Second):
+		t.Fatal("no models came")
+	}
+	if len(form.models) != 0 || form.fetching {
+		t.Errorf("the old address's models %v, fetching %v", form.models, form.fetching)
+	}
+
+	// Typing an address lists its models once it settles.
+	form.baseURL = ""
+	tt := ui.NewTester(func(c *ui.Context) { a.providerDialog(c) }, 900, 700)
+	tt.Frame()
+	if err := tt.Click(locales.SettingsBaseURL()); err != nil {
+		t.Fatalf("no address field in %v: %v", tt.Texts(), err)
+	}
+	tt.Type("h")
+	tt.Frame()
+	if form.baseURL != "h" || form.keyTimer == nil {
+		t.Errorf("address %q, fetch to come %v", form.baseURL, form.keyTimer != nil)
+	}
+}
+
+// Switch account does nothing while a ChatGPT sign-in is under way: a
+// second would wait in the browser beside the first.
+func TestSwitchAccountWaitsForTheSignIn(t *testing.T) {
+	was := form
+	t.Cleanup(func() { form = was })
+	a := templatesApp(t)
+	openForm(providerForm{open: true, preset: "chatgpt", chatgpt: agents.NewChatGPT(agents.ChatGPTAccount{Email: "sam@example.com"}), signingIn: true})
+	gen := form.gen
+	// The app has no hub: a sign-in started would stop the test there.
+	tt := ui.NewTester(func(c *ui.Context) { a.chatgptRow(c) }, 600, 200)
+	tt.Frame()
+	if err := tt.Click(locales.SettingsSwitchAccount()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if form.gen != gen || form.result != "" {
+		t.Errorf("a second sign-in started: %+v", form)
 	}
 }
 
@@ -300,34 +367,35 @@ func TestDefaultAgentPicksAProvider(t *testing.T) {
 	}
 }
 
-// The offline switch is off and can't be turned on until a provider runs
-// on this machine, and says so.
-func TestOfflineSwitchNeedsALocalProvider(t *testing.T) {
+// Offline, agents run on a provider on this machine, even with settings
+// saved while a switch turned that off.
+func TestOfflineRunsALocalProvider(t *testing.T) {
 	a := templatesApp(t)
+	if err := a.st.SetValue("settings", `{"local_when_offline": false, "agents_read_other_pages": false}`); err != nil {
+		t.Fatal(err)
+	}
+	a.settings = a.st.Settings()
+	if a.settings.AgentsReadOtherPages {
+		t.Error("saved settings did not load")
+	}
 	a.hub = agents.NewHub(a.st, a.backend, a)
-	a.settings.LocalWhenOffline = true
 	put := func(p store.Provider) {
 		t.Helper()
 		if err := a.st.PutProvider(p); err != nil {
 			t.Fatal(err)
 		}
 	}
-	put(store.Provider{ID: "cloud", Preset: "openai", Name: "OpenAI", AuthKind: "api_key", DefaultModel: "gpt-5"})
-	a.reloadAll()
-	tt := ui.NewTester(func(c *ui.Context) { a.modelsSettings(c) }, 900, 800)
-	tt.Frame()
-	if !tt.HasText(locales.SettingsLocalWhenOfflineNone()) || tt.HasText(locales.SettingsLocalWhenOfflineDesc()) {
-		t.Errorf("no hint to add a local provider in %v", tt.Texts())
-	}
-	if !a.settings.LocalWhenOffline {
-		t.Error("the setting was cleared while there was nothing to switch to")
-	}
-
+	// A ChatGPT plan runs from this device but needs the network.
+	put(store.Provider{ID: "plan", Preset: "chatgpt", Name: "ChatGPT", AuthKind: "account", DefaultModel: "gpt-6.1-sol", IsLocal: true})
 	put(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true})
 	a.reloadAll()
-	tt.Frame()
-	if !tt.HasText(locales.SettingsLocalWhenOfflineDesc()) || tt.HasText(locales.SettingsLocalWhenOfflineNone()) {
-		t.Errorf("the hint stays with a local provider in %v", tt.Texts())
+	a.settings.DefaultModel = store.ModelChoice{ProviderID: "plan"}.Encode()
+	o, err := a.hub.Resolve(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if o.Provider.ID != "local" {
+		t.Errorf("offline runs %s, want local", o.Provider.ID)
 	}
 }
 
@@ -362,5 +430,171 @@ func TestNameSavesAsSettingsCloses(t *testing.T) {
 	tt.Frame()
 	if got := a.st.Session().DisplayName; got != want || account.nameEdited {
 		t.Errorf("account's name %q, edited %v", got, account.nameEdited)
+	}
+}
+
+// keys is a keychain in memory, for tests that keep a provider's key.
+type keys map[string][]byte
+
+func (k keys) Get(name string) ([]byte, error) {
+	v, ok := k[name]
+	if !ok {
+		return nil, keychain.ErrNotFound
+	}
+	return v, nil
+}
+
+func (k keys) Set(name string, value []byte) error {
+	k[name] = value
+	return nil
+}
+
+func (k keys) Delete(name string) error {
+	delete(k, name)
+	return nil
+}
+
+// Signed out, a cloud provider is kept on this device with its key, and
+// saves; one kept on the server waits for the account.
+func TestSignedOutSavesAProviderKeptHere(t *testing.T) {
+	was := form
+	t.Cleanup(func() { form = was })
+	keychain.Use(keys{})
+	// The package's own store comes back for the tests after this one.
+	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
+	a := templatesApp(t)
+	if a.session.SignedIn {
+		t.Fatal("the test app is signed in")
+	}
+	// The models listed as it is edited come from no server out there,
+	// and are not waited for.
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	t.Cleanup(hs.Close)
+	a.post = func(func()) {}
+	tt := ui.NewTester(a.providerDialog, 900, 800)
+	a.newProvider(agents.PresetByID("deepseek"))
+	form.baseURL, form.apiKey = hs.URL, "sk-test"
+	tt.Frame()
+	if !tt.HasText(locales.SettingsProviderDescDevice()) {
+		t.Errorf("the dialog does not say the provider stays here: %v", tt.Texts())
+	}
+	if err := tt.Click(locales.CommonSave()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	ps, err := a.st.Providers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 1 || !ps[0].IsLocal || ps[0].Preset != "deepseek" {
+		t.Fatalf("saved %+v", ps)
+	}
+	if form.open {
+		t.Errorf("the dialog stayed open: %q", form.errorText)
+	}
+	if got := agents.LocalKey(ps[0].ID); got != "sk-test" {
+		t.Errorf("key %q", got)
+	}
+
+	// Edited signed out, it saves again.
+	a.editProvider(&ps[0])
+	form.model = "deepseek-v4-flash"
+	tt.Frame()
+	if err := tt.Click(locales.CommonSave()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if p, err := a.st.Provider(ps[0].ID); err != nil || p.DefaultModel != "deepseek-v4-flash" {
+		t.Errorf("edited to %+v, %v", p, err)
+	}
+
+	// One on the server is not saved signed out.
+	server := store.Provider{ID: "00000000-0000-0000-0000-0000000000cd", Preset: "openai", Name: "OpenAI", BaseURL: "https://api.openai.com/v1",
+		AuthKind: "api_key", DefaultModel: "gpt-6-astra"}
+	if err := a.st.PutProvider(server); err != nil {
+		t.Fatal(err)
+	}
+	a.editProvider(&server)
+	form.model = "gpt-6-luna"
+	tt.Frame()
+	if err := tt.Click(locales.CommonSave()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if form.saving || !form.open {
+		t.Errorf("a server's provider saved signed out: saving %v, open %v", form.saving, form.open)
+	}
+}
+
+// Sync errors are in words for the user, as a pass hands them on: the
+// session ended, the pass ran out of time, or the server refused it; and
+// iCloud sync failing to turn on says what failed.
+func TestSyncMessages(t *testing.T) {
+	a := templatesApp(t)
+	done := make(chan struct{})
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/rest/v1/slow" {
+			select {
+			case <-r.Context().Done():
+			case <-done:
+			}
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"new row violates row-level security policy"}`))
+	}))
+	t.Cleanup(hs.Close)
+	t.Cleanup(func() { close(done) })
+	be := remote.SignedInForTest(hs.URL, a.st, "u1")
+	_, refused := be.Insert(t.Context(), "pages", map[string]any{"id": "p"})
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	_, late := be.Insert(ctx, "slow", map[string]any{"id": "p"})
+	_, out := remote.New(remote.Settings{URL: hs.URL, AnonKey: "test"}, a.st).Insert(t.Context(), "pages", map[string]any{"id": "p"})
+	for _, c := range []struct {
+		err  error
+		want string
+	}{
+		{fmt.Errorf("push: %w", out), locales.SettingsSyncSignedOut()},
+		{fmt.Errorf("push: %w", late), locales.SettingsSyncTimedOut()},
+		{fmt.Errorf("push: %w", refused), locales.SettingsSyncRefused(http.StatusForbidden, "new row violates row-level security policy")},
+	} {
+		// Each is one a pass hands on, not one of the network it waits out.
+		if c.err == nil || remote.IsNetwork(c.err) {
+			t.Fatalf("not an error a pass hands on: %v", c.err)
+		}
+		if got := a.syncMessage(c.err); got != c.want {
+			t.Errorf("syncMessage(%v) = %q, want %q", c.err, got, c.want)
+		}
+	}
+	disk := errors.New("mkdir Leaflet: permission denied")
+	for err, want := range map[error]string{
+		disk:                  locales.SettingsICloudTurnOnFailed(disk.Error()),
+		icloud.ErrUnavailable: locales.SettingsICloudUnavailable(),
+		icloud.ErrNewerFormat: locales.SettingsICloudNewer(),
+	} {
+		if got := a.iCloudFailed(err); got != want {
+			t.Errorf("iCloudFailed(%v) = %q, want %q", err, got, want)
+		}
+	}
+}
+
+// A provider removed on another device takes the default with it: the
+// app reads the default as none, as the store does.
+func TestDefaultGoesWithItsProvider(t *testing.T) {
+	a := templatesApp(t)
+	if err := a.st.PutProvider(store.Provider{ID: "p1", Preset: "openai", Name: "OpenAI", AuthKind: "api_key"}); err != nil {
+		t.Fatal(err)
+	}
+	a.reload(store.Change{Table: "model_providers"})
+	a.settings.DefaultModel = store.ModelChoice{ProviderID: "p1"}.Encode()
+	if err := a.st.DeleteProvider("p1"); err != nil {
+		t.Fatal(err)
+	}
+	a.reload(store.Change{Table: "model_providers"})
+	if _, ok := a.settings.Default(); ok {
+		t.Errorf("default %q after its provider went", a.settings.DefaultModel)
 	}
 }

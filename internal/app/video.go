@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"html"
 	"log"
 	"strings"
 	"sync"
@@ -11,38 +10,18 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/rendered"
 	"leaflet/internal/theme"
+	"leaflet/internal/web"
 	"leaflet/locales"
 )
 
 // Video blocks show the video's picture until play is clicked, and then
 // its site's player, or a player of the file, in a web view of its own.
 
-// videoOrigin is the origin of the page a video's player is framed in.
-// YouTube's player wants the page that frames it named in the Referer, as
-// an https origin of the app's bundle ID for an app; from about:blank it
-// gets none, and refuses to play.
-const videoOrigin = "https://app.capyvibe.leaflet/"
-
-// videoCSP lets a video's page frame only the two players, or play only
-// web video files, and run nothing of its own.
-const videoCSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; media-src https: http:"
-
 // videoSession is the website data of the video players, kept in memory
 // only, which goes as the last player closes.
 var videoSession = sync.OnceValue(mygo.NewEphemeralSession)
-
-// videoPage frames a video's player, or plays the file, to fill the web
-// view.
-func videoPage(v doc.Video) string {
-	player := `<iframe src="` + html.EscapeString(v.PlayerURL()) + `" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`
-	if v.Provider == "file" {
-		player = `<video src="` + html.EscapeString(v.PlayerURL()) + `" controls autoplay playsinline></video>`
-	}
-	return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="` + videoCSP + `">` +
-		`<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe,video{border:0;width:100%;height:100%;display:block}</style></head><body>` +
-		player + `</body></html>`
-}
 
 // videoInfo is what a video's site tells about it: its title and picture.
 type videoInfo struct{ title, thumbnail string }
@@ -65,7 +44,7 @@ func (a *App) videoInfoOf(v doc.Video) videoInfo {
 		a.videoAsked[key] = true
 		go func() {
 			var info videoInfo
-			data, err := fetch(v.OEmbedURL())
+			data, err := web.Fetch(v.OEmbedURL())
 			if err == nil {
 				var o struct {
 					Title     string `json:"title"`
@@ -185,7 +164,7 @@ func (a *App) playVideo(id string, v doc.Video) {
 		}
 		return nil
 	})
-	page.LoadHTML(videoPage(v), videoOrigin)
+	page.LoadHTML(rendered.VideoPage(v), rendered.VideoOrigin)
 	a.videos[id] = wv
 }
 

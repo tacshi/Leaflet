@@ -301,10 +301,11 @@ func foldEntry(entries []icloud.Entry, e icloud.Entry) []icloud.Entry {
 	return append(out, e)
 }
 
-// covers reports whether row entry a holds all of b: it is newer, and
-// changed every column b changed.
+// covers reports whether row entry a holds all of b: it is no older, and
+// changed every column b changed. An entry covers itself, so one held
+// again is held once.
 func covers(a, b icloud.Entry) bool {
-	if !version(a).After(version(b)) {
+	if version(b).After(version(a)) {
 		return false
 	}
 	if a.Changed == nil {

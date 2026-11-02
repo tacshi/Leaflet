@@ -1,0 +1,241 @@
+package mobile
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"leaflet/internal/agents"
+	"leaflet/internal/doc"
+	"leaflet/locales"
+)
+
+func TestTestProvider(t *testing.T) {
+	c, _ := open(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer sk-test" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"text-embedding-3"},{"id":"deepseek-v4-pro"},{"id":"deepseek-v4-flash"}]}`))
+		case "/v1/chat/completions":
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","tool_calls":[{"id":"1","type":"function","function":{"name":"ping","arguments":"{\"value\":\"ok\"}"}}]}}]}`))
+		}
+	}))
+	defer srv.Close()
+
+	test := func(provider providerJSON) providerTest {
+		t.Helper()
+		in, _ := json.Marshal(provider) // #nosec G117 -- test keys only.
+		raw, err := c.TestProvider(string(in))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out providerTest
+		_ = json.Unmarshal([]byte(raw), &out)
+		return out
+	}
+
+	// A cloud provider's key typed in is tried from here, signed in or not.
+	got := test(providerJSON{Preset: "deepseek", BaseURL: srv.URL + "/v1", APIKey: "sk-test", DefaultModel: "deepseek-v4-flash"})
+	if !got.OK || !got.SupportsTools {
+		t.Fatalf("test with a key: %+v", got)
+	}
+	if !slices.Contains(got.Models, "deepseek-v4-pro") || slices.Contains(got.Models, "text-embedding-3") {
+		t.Fatalf("chat models: %v", got.Models)
+	}
+
+	// Without one there is nothing to try it with.
+	if got := test(providerJSON{Preset: "deepseek", BaseURL: srv.URL + "/v1"}); got.OK || got.Message == "" {
+		t.Fatalf("test without a key: %+v", got)
+	}
+}
+
+func TestSaveCloudProviderSignedOut(t *testing.T) {
+	c, _ := open(t)
+	save := func(p providerJSON) error {
+		in, _ := json.Marshal(p) // #nosec G117 -- test keys only.
+		return c.SaveProvider(string(in))
+	}
+	deepseek := providerJSON{Preset: "deepseek", BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-v4-flash"}
+	if err := save(deepseek); err == nil {
+		t.Fatal("saved a cloud provider kept here without its key")
+	}
+	deepseek.APIKey = "sk-test"
+	if err := save(deepseek); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, _ := c.Providers()
+	var ps []providerJSON
+	_ = json.Unmarshal([]byte(raw), &ps)
+	if len(ps) != 1 || !ps[0].IsLocal || !ps[0].HasKey || ps[0].Name != "DeepSeek" {
+		t.Fatalf("providers: %+v", ps)
+	}
+
+	// Changed without its key, it keeps the one it has.
+	ps[0].DefaultModel = "deepseek-v4-pro"
+	if err := save(ps[0]); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = c.Providers()
+	_ = json.Unmarshal([]byte(raw), &ps)
+	if ps[0].DefaultModel != "deepseek-v4-pro" || !ps[0].HasKey {
+		t.Fatalf("changed: %+v", ps)
+	}
+}
+
+func TestRemoveProviderStopsBeingTheDefault(t *testing.T) {
+	c, _ := open(t)
+	in, _ := json.Marshal(providerJSON{Preset: "deepseek", BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-v4-flash", APIKey: "sk-test"}) // #nosec G117 -- test keys only.
+	if err := c.SaveProvider(string(in)); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := c.Providers()
+	var ps []providerJSON
+	_ = json.Unmarshal([]byte(raw), &ps)
+	if s := c.core.Store.Settings(); s.DefaultModel != ps[0].ID+"|" {
+		t.Fatalf("default agent: %q", s.DefaultModel)
+	}
+	if err := c.RemoveProvider(ps[0].ID); err != nil {
+		t.Fatal(err)
+	}
+	if s := c.core.Store.Settings(); s.DefaultModel != "" {
+		t.Fatalf("default agent after removing it: %q", s.DefaultModel)
+	}
+}
+
+func TestChatGPTPresetAndSave(t *testing.T) {
+	c, _ := open(t)
+	raw, _ := c.Presets()
+	var presets []presetJSON
+	_ = json.Unmarshal([]byte(raw), &presets)
+	if !slices.ContainsFunc(presets, func(p presetJSON) bool { return p.ID == "chatgpt" && p.Auth == "account" }) {
+		t.Fatalf("no ChatGPT preset: %+v", presets)
+	}
+	// Nothing to save before signing in; the address is the preset's, so
+	// the form needs none.
+	in, _ := json.Marshal(providerJSON{Preset: "chatgpt", Name: "ChatGPT", DefaultModel: "gpt-6-astra"}) // #nosec G117 -- test keys only.
+	if err := c.SaveProvider(string(in)); err == nil || err.Error() != locales.SettingsChatGPTSignInFirst() {
+		t.Fatalf("saved ChatGPT without a sign-in: %v", err)
+	}
+	if _, err := c.FinishChatGPTSignIn(); err == nil {
+		t.Fatal("finished a sign-in never begun")
+	}
+}
+
+func TestClosingTheChatGPTPageKeepsTheSignIn(t *testing.T) {
+	c, _ := open(t)
+	c.chatgpt.g = agents.NewChatGPT(agents.ChatGPTAccount{Email: "a@example.com"})
+	// The page closed after OpenAI answered: the sign-in stays to save.
+	c.CancelChatGPTSignIn()
+	if c.madeChatGPT() == nil {
+		t.Fatal("closing the page forgot the sign-in made")
+	}
+	// The form closed without saving: it goes.
+	c.ForgetChatGPTSignIn()
+	if c.madeChatGPT() != nil {
+		t.Fatal("the form closed and kept the sign-in")
+	}
+}
+
+func TestSelectAgentPicksTheChatsAgent(t *testing.T) {
+	c, _ := open(t)
+	for _, p := range []providerJSON{
+		{Preset: "deepseek", BaseURL: "https://api.deepseek.com/v1", DefaultModel: "deepseek-v4-flash", APIKey: "sk-a"},
+		{Preset: "openai", BaseURL: "https://api.openai.com/v1", DefaultModel: "gpt-6-luna", APIKey: "sk-b"},
+	} {
+		in, _ := json.Marshal(p) // #nosec G117 -- test keys only.
+		if err := c.SaveProvider(string(in)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state := func() agentState {
+		raw, _ := c.AgentState("p")
+		var s agentState
+		_ = json.Unmarshal([]byte(raw), &s)
+		return s
+	}
+	s := state()
+	if len(s.Options) != 2 {
+		t.Fatalf("before picking: %+v", s)
+	}
+	other := s.Options[1]
+	c.SelectAgent("p", other.ProviderID, other.Model)
+	if s := state(); s.Current == nil || s.Current.ProviderID != other.ProviderID || s.Current.Model != other.Model {
+		t.Fatalf("after picking: %+v", s.Current)
+	}
+}
+
+// An agent run whose edits can't be taken back, as on content that can't
+// be read, says why to the app, and stays as it was.
+func TestUndoRunThatFailsSaysWhy(t *testing.T) {
+	c, _ := open(t)
+	row := create(t, c, `{"title":"Plan"}`)
+	if _, err := c.core.Store.DB().Exec(`UPDATE page_contents SET content = '{"children": [' WHERE page_id = ?`, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	var run *agents.Run
+	c.q.do(func() {
+		run = &agents.Run{ID: "r1", AgentName: "Claude", Status: "done",
+			Ops: []doc.Op{doc.InsertOp(doc.Position{At: "end"}, paragraph("x1", "one"))}}
+		s := c.core.Hub.Session(row.ID)
+		s.Runs = append(s.Runs, run)
+	})
+	err := c.UndoRun(row.ID, "r1")
+	if err == nil || !strings.HasPrefix(err.Error(), "Could not undo Claude's edits: ") {
+		t.Fatalf("undo failed with %v", err)
+	}
+	c.q.do(func() {
+		if run.Undone {
+			t.Error("the run counts as undone")
+		}
+	})
+}
+
+// Ask says why a run could not start, rather than returning an ID the
+// page's runs never have; one that starts is among them.
+func TestAskFailsToStart(t *testing.T) {
+	c, _ := open(t)
+	row := create(t, c, `{"title":"Plan"}`)
+	if id, err := c.Ask(row.ID, "inline", "sum it up", `[]`, "", "", ""); err == nil || id != "" {
+		t.Fatalf("asked with no agent: %q, %v", id, err)
+	}
+	// A model server that answers once the test is done with the run.
+	answer := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-answer
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	if err := c.SaveProvider(`{"preset":"ollama","name":"Ollama","base_url":"` + srv.URL + `","default_model":"llama3"}`); err != nil {
+		t.Fatal(err)
+	}
+	id, err := c.Ask(row.ID, "inline", "sum it up", `[]`, "", "", "")
+	if err != nil || id == "" {
+		t.Fatalf("asked: %q, %v", id, err)
+	}
+	c.q.do(func() {
+		if c.core.Hub.Session(row.ID).Run(id) == nil {
+			t.Errorf("run %s is not the page's", id)
+		}
+	})
+	if again, err := c.Ask(row.ID, "inline", "and again", `[]`, "", "", ""); err == nil || again != "" {
+		t.Errorf("asked while a run works: %q, %v", again, err)
+	}
+	close(answer)
+	deadline := time.Now().Add(30 * time.Second)
+	for running := true; running; {
+		if time.Now().After(deadline) {
+			t.Fatal("the run never ended")
+		}
+		c.q.do(func() { running = c.core.Hub.Session(row.ID).Running })
+		time.Sleep(10 * time.Millisecond)
+	}
+}

@@ -25,18 +25,35 @@ func CreateWav(path string) (*WavWriter, error) {
 	if err != nil {
 		return nil, err
 	}
+	return newWav(f)
+}
+
+// newWav starts a WAV file in f, new and empty; it closes f when it
+// cannot.
+func newWav(f *os.File) (*WavWriter, error) {
 	if _, err := f.Write(wavHeader(0)); err != nil {
 		_ = f.Close()
 		return nil, err
 	}
-	return &WavWriter{Path: path, f: f}, nil
+	return &WavWriter{Path: f.Name(), f: f}, nil
 }
+
+// maxWavData is the most audio a WAV file holds: its header counts it in
+// 32 bits, with the 36 bytes of header after the count. A recording that
+// long, past 37 hours, keeps what fits.
+const maxWavData = math.MaxUint32 - 36
+
+// errWavFull is audio past what a WAV file holds.
+var errWavFull = errors.New("the recording is as long as a WAV file can be")
 
 // DurationMs is how long the audio written so far lasts.
 func (w *WavWriter) DurationMs() int { return int(w.bytes * 1000 / 2 / SampleRate) }
 
 // Write adds PCM16 little-endian samples.
 func (w *WavWriter) Write(pcm []byte) error {
+	if w.bytes+int64(len(pcm)) > maxWavData {
+		return errWavFull
+	}
 	n, err := w.f.Write(pcm)
 	w.bytes += int64(n)
 	return err
@@ -76,9 +93,16 @@ func repairWav(path string) int {
 }
 
 func wavHeader(dataBytes int64) []byte {
+	// What does not fit the header's count is left out of it.
+	var data uint32 = maxWavData
+	if dataBytes < 0 {
+		data = 0
+	} else if dataBytes < maxWavData {
+		data = uint32(dataBytes)
+	}
 	b := make([]byte, 44)
 	copy(b[0:], "RIFF")
-	binary.LittleEndian.PutUint32(b[4:], uint32(36+dataBytes))
+	binary.LittleEndian.PutUint32(b[4:], 36+data)
 	copy(b[8:], "WAVE")
 	copy(b[12:], "fmt ")
 	binary.LittleEndian.PutUint32(b[16:], 16)
@@ -89,7 +113,7 @@ func wavHeader(dataBytes int64) []byte {
 	binary.LittleEndian.PutUint16(b[32:], 2)
 	binary.LittleEndian.PutUint16(b[34:], 16)
 	copy(b[36:], "data")
-	binary.LittleEndian.PutUint32(b[40:], uint32(dataBytes))
+	binary.LittleEndian.PutUint32(b[40:], data)
 	return b
 }
 
@@ -98,47 +122,29 @@ func WavFromPCM(pcm []byte) []byte {
 	return append(wavHeader(int64(len(pcm))), pcm...)
 }
 
-// ReadWav reads the PCM16 samples of a simple WAV file.
-func ReadWav(path string) ([]byte, error) {
-	data, err := os.ReadFile(path) // #nosec G304 -- a recording's audio file, which the app names.
-	if err != nil {
-		return nil, err
-	}
-	for off := 12; off+8 <= len(data); {
-		id := string(data[off : off+4])
-		size := int(binary.LittleEndian.Uint32(data[off+4:]))
-		if id == "data" {
-			end := min(off+8+size, len(data))
-			return data[off+8 : end], nil
-		}
-		off += 8 + size + size%2
-	}
-	return nil, errors.New("no audio in the file")
-}
-
 // LevelWindow is the samples each bar of the meter measures: 50 ms.
 const LevelWindow = SampleRate / 20
 
-// Level is the loudness of a PCM16 chunk from 0 to 1, for the meter.
-func Level(pcm []byte) float64 {
-	var m Meter
-	if l := m.levels(pcm, len(pcm)/2); len(l) > 0 {
-		return l[0]
-	}
-	return 0
-}
-
 // Meter turns the audio as it comes into one level per LevelWindow,
-// however the audio is split into chunks.
+// however the audio is split into chunks, inside a sample too.
 type Meter struct {
 	sum float64
 	n   int
+	// half is the first byte of a sample the last chunk ended inside.
+	half []byte
 }
 
 // Levels adds a chunk and returns the levels of the windows it completed.
 func (m *Meter) Levels(pcm []byte) []float64 { return m.levels(pcm, LevelWindow) }
 
 func (m *Meter) levels(pcm []byte, window int) []float64 {
+	if len(m.half) > 0 && len(pcm) > 0 {
+		pcm = append(m.half, pcm...)
+		m.half = nil
+	}
+	if len(pcm)%2 == 1 {
+		m.half = []byte{pcm[len(pcm)-1]}
+	}
 	var out []float64
 	for i := 0; i+1 < len(pcm); i += 2 {
 		s := float64(int16(binary.LittleEndian.Uint16(pcm[i:]))) / 32768

@@ -9,8 +9,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
-	"net/netip"
-	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,7 +18,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"leaflet/internal/agents"
+	"leaflet/internal/agents/endpoint"
+	"leaflet/internal/guard"
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -28,22 +27,13 @@ import (
 
 // IsLocalEndpoint reports whether an endpoint is on this machine or
 // network, so audio can go to it straight from the device.
-func IsLocalEndpoint(baseURL string) bool {
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return false
-	}
-	h := u.Hostname()
-	if h == "localhost" || strings.HasSuffix(h, ".local") {
-		return true
-	}
-	// An address, not a name that starts like one, as 10.example.com.
-	ip, err := netip.ParseAddr(h)
-	if err != nil {
-		return false
-	}
-	ip = ip.Unmap()
-	return ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast()
+func IsLocalEndpoint(baseURL string) bool { return endpoint.IsLocal(baseURL) }
+
+// TestEndpoint tries an OpenAI-compatible endpoint with a second of
+// silence, as Settings does on the desktop and the phone.
+func TestEndpoint(ctx context.Context, baseURL, model, apiKey string) error {
+	_, err := TranscribeEndpoint(ctx, baseURL, model, WavFromPCM(make([]byte, 2*SampleRate)), apiKey, "auto")
+	return err
 }
 
 // TranscribeEndpoint transcribes audio with an OpenAI-style
@@ -74,7 +64,7 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, 
 	}
 	ctx, cancel := context.WithTimeout(ctx, transcribeWait(len(wav)))
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", agents.NormalizeBaseURL(baseURL)+"/audio/transcriptions", &body)
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint.NormalizeBaseURL(baseURL)+"/audio/transcriptions", &body)
 	if err != nil {
 		return nil, err
 	}
@@ -208,8 +198,21 @@ type Soniox struct {
 	qmu     sync.Mutex
 	qclosed bool
 	written chan struct{}
-	// OnText runs with the live text: final words and the current draft.
-	OnText func(string)
+	// onText runs with the live text, final words and the current draft;
+	// SetOnText sets it, guarded by mu, as read runs from the start.
+	onText func(string)
+}
+
+// SetOnText has fn run with the live text, final words and the current
+// draft, as it comes, starting with what came before it was set.
+func (s *Soniox) SetOnText(fn func(string)) {
+	s.mu.Lock()
+	s.onText = fn
+	text := s.textLocked()
+	s.mu.Unlock()
+	if fn != nil && text != "" {
+		fn(text)
+	}
 }
 
 // keepAliveAfter is how long the stream goes without audio, as while a
@@ -247,10 +250,11 @@ var errBehind = errors.New("the connection could not keep up")
 func newSoniox(conn *websocket.Conn) *Soniox {
 	s := &Soniox{conn: conn, done: make(chan struct{}), queue: make(chan []byte, maxQueued), written: make(chan struct{})}
 	s.sent.Store(time.Now().UnixMilli())
-	go s.read()
-	go s.write()
+	guard.Go(s.read)
+	guard.Go(s.write)
 	// Read here, so a test that changes it races no stream of another.
-	go s.keepAlive(keepAliveAfter)
+	after := keepAliveAfter
+	guard.Go(func() { s.keepAlive(after) })
 	return s
 }
 
@@ -367,7 +371,7 @@ func (s *Soniox) read() {
 			}
 		}
 		text := s.textLocked()
-		fn := s.OnText
+		fn := s.onText
 		s.mu.Unlock()
 		if fn != nil {
 			fn(text)

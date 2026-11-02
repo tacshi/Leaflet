@@ -1,9 +1,14 @@
 name: CI
 
+# The iOS app's own Swift is checked on the developer's Mac (make ios-check
+# and make ios-test); the Go core it links is checked here as well, and so
+# is ios/gen, which is Go in this module.
 on:
   push:
     branches: [main]
+    paths: ["**", "!ios/**", "ios/gen/**"]
   pull_request:
+    paths: ["**", "!ios/**", "ios/gen/**"]
 
 permissions:
   contents: read
@@ -32,6 +37,17 @@ jobs:
         run: go test ./...
       - name: Vet the app
         run: go tool mygo vet .
+      # The Windows-only files are compiled above, and vetted here.
+      - name: Vet for Windows
+        run: GOOS=windows go vet ./...
+      - name: Check the locale catalogs
+        run: go tool mygo i18n check
+      # locales/catalog_gen.go is written from the catalogs: a catalog
+      # changed without it fails here.
+      - name: Check the catalogs' accessors are generated
+        run: |
+          go tool mygo generate
+          git diff --exit-code -- locales/catalog_gen.go
 
   check:
     name: Check
@@ -51,6 +67,8 @@ jobs:
           go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
       - name: make check
         run: make check
+      - name: Lint for Windows
+        run: GOOS=windows golangci-lint run --no-config ./...
 
   functions:
     name: Edge Functions
@@ -67,8 +85,20 @@ jobs:
         run: deno fmt --check
       - name: Lint
         run: deno lint
+      - name: Type-check
+        run: deno check */index.ts
       - name: Test
         run: deno test _shared/
+
+  # The app applies these to each person's own Supabase project, so each
+  # is applied here, oldest first, on the Postgres image those projects run.
+  migrations:
+    name: Migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Apply and check the migrations
+        run: scripts/check-migrations.sh
 
   worker:
     name: Sign-in Worker

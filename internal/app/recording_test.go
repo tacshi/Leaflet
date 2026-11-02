@@ -252,3 +252,23 @@ func TestSpeechSettingsLastSentLast(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// Saving the Soniox key on the server empties its field alone: an
+// endpoint's key typed beside it stays.
+func TestSavingSonioxKeyKeepsEndpointKey(t *testing.T) {
+	t.Cleanup(func() { speech = speechState{} })
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("{}"))
+	}))
+	t.Cleanup(hs.Close)
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
+	posted := make(chan func(), 1)
+	a.post = func(fn func()) { posted <- fn }
+	speech.key, speech.soniox = "endpoint-key", "soniox-key"
+	a.saveSttKey("soniox", speech.soniox)
+	(<-posted)()
+	if speech.soniox != "" || speech.key != "endpoint-key" {
+		t.Errorf("soniox %q, endpoint key %q", speech.soniox, speech.key)
+	}
+}

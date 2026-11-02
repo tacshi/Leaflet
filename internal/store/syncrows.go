@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -41,8 +42,11 @@ func (s *Store) MoveSpace(from, to string) error {
 		_, err := tx.Exec(`DELETE FROM spaces WHERE id = ?`, from)
 		return err
 	})
+	if err != nil {
+		return err
+	}
 	s.Notify("*", "")
-	return err
+	return nil
 }
 
 // Requeue queues a page (with its content), folder or comment to go up
@@ -61,7 +65,7 @@ func (s *Store) Requeue(table, id string) error {
 				return err
 			}
 			pageID = p.ID
-			if err := requeueRow(tx, "pages", p.ID, PageToRemote(p), p.ID); err != nil {
+			if err := requeueRow(tx, "pages", p.ID, nil, PageToRemote(p), "", p.ID); err != nil {
 				return err
 			}
 			return queue(tx, "page_content", p.ID, map[string]any{"page_id": p.ID}, "page from this device", p.ID)
@@ -70,14 +74,14 @@ func (s *Store) Requeue(table, id string) error {
 			if err != nil {
 				return err
 			}
-			return requeueRow(tx, "folders", f.ID, FolderToRemote(f), "")
+			return requeueRow(tx, "folders", f.ID, nil, FolderToRemote(f), "", "")
 		case "comments":
 			c, err := scanComment(tx.QueryRow(`SELECT `+commentCols+` FROM comments WHERE id = ?`, id))
 			if err != nil {
 				return err
 			}
 			pageID = c.PageID
-			return requeueRow(tx, "comments", c.ID, CommentToRemote(c), c.PageID)
+			return requeueRow(tx, "comments", c.ID, nil, CommentToRemote(c), "", c.PageID)
 		}
 		return errors.New("store: no requeue of " + table)
 	})
@@ -97,8 +101,9 @@ func (s *Store) Requeue(table, id string) error {
 // device made to its other columns, as a move held here while this
 // device's rename waits (sync's iCloud batches). Those columns went with
 // an earlier entry, or come with the row the server or the other devices
-// have.
-func requeueRow(tx *sql.Tx, entity, id string, row map[string]any, pageID string) error {
+// have. old is the row as stored before the requeue changed it, or nil:
+// the columns it changed go with that change too.
+func requeueRow(tx *sql.Tx, entity, id string, old, row map[string]any, label, pageID string) error {
 	var queued string
 	switch err := tx.QueryRow(`SELECT payload FROM outbox WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, entity, id).Scan(&queued); {
 	case errors.Is(err, sql.ErrNoRows):
@@ -109,30 +114,37 @@ func requeueRow(tx *sql.Tx, entity, id string, row map[string]any, pageID string
 		if err := json.Unmarshal([]byte(queued), &prev); err != nil {
 			return err
 		}
-		if cols, ok := prev[ChangedKey]; ok {
+		if cols, ok := prev[ChangedKey].([]any); ok {
+			for k, v := range row {
+				if old != nil && !sameJSON(v, old[k]) && !slices.Contains(cols, any(k)) {
+					cols = append(cols, k)
+				}
+			}
 			row[ChangedKey] = cols
 		}
 	}
-	return queue(tx, entity, id, row, "", pageID)
+	return queue(tx, entity, id, row, label, pageID)
 }
 
 // RequeueFile queues a file to go up whole in space spaceID, as stored
 // now, as Requeue does a page, with its contents when this device has
-// them (a deleted file's row goes alone).
+// them (a deleted file's row goes alone). A change of some of its columns
+// still queued stays one of those, as in requeueRow, and of the space.
 func (s *Store) RequeueFile(id, spaceID string) error {
 	var f File
 	err := s.inTx(func(tx *sql.Tx) error {
-		files, err := filesIn(tx, `id = ?`, id)
+		files, err := filesIn(tx, s.Dir, `id = ?`, id)
 		if err != nil || len(files) == 0 {
 			return err
 		}
 		f = files[0]
+		old := FileToRemote(f)
 		f.SpaceID = spaceID
 		f.StoragePath = spaceID + "/" + f.ID + "/" + f.Name
-		if err := putFile(tx, f); err != nil {
+		if err := putFile(tx, s.Dir, f); err != nil {
 			return err
 		}
-		if err := queue(tx, "files", f.ID, FileToRemote(f), "file", f.PageID); err != nil {
+		if err := requeueRow(tx, "files", f.ID, old, FileToRemote(f), "file", f.PageID); err != nil {
 			return err
 		}
 		if !f.DeletedAt.IsZero() || !onDevice(f.LocalPath) {
@@ -142,7 +154,7 @@ func (s *Store) RequeueFile(id, spaceID string) error {
 		if ct == "" {
 			ct = "application/octet-stream"
 		}
-		return queue(tx, "storage", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": f.LocalPath, "content_type": ct}, "file waiting to upload", f.PageID)
+		return queue(tx, "storage", "files/"+f.ID, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": relPath(s.Dir, f.LocalPath), "content_type": ct}, "file waiting to upload", f.PageID)
 	})
 	if err != nil || f.ID == "" {
 		return err
@@ -161,7 +173,7 @@ func (s *Store) RequeueRecording(id string) error {
 	var r Recording
 	err := s.inTx(func(tx *sql.Tx) error {
 		var err error
-		if r, err = scanRecording(tx.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, id)); err != nil {
+		if r, err = scanRecording(s.Dir, tx.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, id)); err != nil {
 			return err
 		}
 		if r.Status != "ready" && r.Status != "failed" {
@@ -173,7 +185,7 @@ func (s *Store) RequeueRecording(id string) error {
 		if !onDevice(r.LocalPath) {
 			return nil
 		}
-		return queue(tx, "storage", "recordings/"+r.ID, uploadOf(r), "audio waiting to upload", r.PageID)
+		return queue(tx, "storage", "recordings/"+r.ID, uploadOf(s.Dir, r), "audio waiting to upload", r.PageID)
 	})
 	if IsNotFound(err) {
 		return nil
@@ -242,7 +254,7 @@ func (s *Store) PutRemoteFile(r map[string]any) error {
 			return nil
 		}
 		stored = true
-		if err := putFile(tx, f); err != nil || !f.DeletedAt.IsZero() {
+		if err := putFile(tx, s.Dir, f); err != nil || !f.DeletedAt.IsZero() {
 			return err
 		}
 		// A file that lives keeps its stored copy: its deletion here gave
@@ -266,7 +278,7 @@ func (s *Store) PutRemoteFile(r map[string]any) error {
 func (s *Store) PutRemoteRecording(r map[string]any) error {
 	rec := Recording{ID: S(r, "id"), PageID: S(r, "page_id"), BlockID: S(r, "block_id"), AudioPath: S(r, "audio_path"),
 		SttProvider: S(r, "stt_provider"), SttModel: S(r, "stt_model"), Status: S(r, "status"), Language: S(r, "language"),
-		CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"])}
+		Error: S(r, "error"), CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"])}
 	if d, ok := r["duration_ms"].(float64); ok {
 		rec.DurationMs = int(d)
 	}
@@ -280,10 +292,10 @@ func (s *Store) PutRemoteRecording(r map[string]any) error {
 		if pending(tx, "recordings", rec.ID) {
 			return nil
 		}
-		if old, err := scanRecording(tx.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, rec.ID)); err == nil {
+		if old, err := scanRecording(s.Dir, tx.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, rec.ID)); err == nil {
 			rec.LocalPath, rec.UploadedAt = old.LocalPath, old.UploadedAt
 		}
-		return putRecording(tx, rec)
+		return putRecording(tx, s.Dir, rec)
 	})
 }
 
@@ -336,14 +348,14 @@ func (s *Store) RemoveSharedPages(rootID string) ([]string, error) {
 				_ = rows.Close()
 				return err
 			}
-			copies = append(copies, path)
+			copies = append(copies, s.Path(path))
 		}
 		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 			return err
 		}
 		// The files' entries are dropped by the files: ones queued before
 		// they went with their page's have no page_id.
-		files, err := filesIn(tx, `page_id IN (`+in+`)`, args...)
+		files, err := filesIn(tx, s.Dir, `page_id IN (`+in+`)`, args...)
 		if err != nil {
 			return err
 		}

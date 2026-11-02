@@ -8,12 +8,12 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
-	"leaflet/internal/theme"
+	"leaflet/internal/rendered"
 )
 
 // An embed's ID goes into the wrapper's script as a string it cannot end.
 func TestEmbedPageQuotesID(t *testing.T) {
-	page := embedPage("x</script><script>window.mygo.call(1)//\u2028", "<p>hi</p>", theme.For(false), true)
+	page := rendered.EmbedPage("x</script><script>window.mygo.call(1)//\u2028", "<p>hi</p>", "#ffffff", false, true)
 	// The frame's HTML is in an attribute, so the wrapper's own script is
 	// the only one.
 	if n := strings.Count(page, "<script>"); n != 1 {
@@ -30,9 +30,9 @@ func TestEmbedPageQuotesID(t *testing.T) {
 // The frame's policy and WebRTC guard come before anything of the embed's,
 // even a "<head>" the embed only mentions.
 func TestEmbedFrameLeadsWithPolicy(t *testing.T) {
-	csp := `<meta http-equiv="Content-Security-Policy" content="` + embedCSP + `">`
-	got := embedFrame(`<!-- <head> --><script>new RTCPeerConnection()</script>`, "dark", true)
-	if !strings.HasPrefix(got, csp+embedNoRTC) {
+	csp := `<meta http-equiv="Content-Security-Policy" content="` + rendered.EmbedCSP + `">`
+	got := rendered.EmbedFrame(`<!-- <head> --><script>new RTCPeerConnection()</script>`, "dark", true)
+	if !strings.HasPrefix(got, csp+rendered.EmbedNoRTC) {
 		t.Errorf("frame starts %q", got[:min(len(got), 120)])
 	}
 	if !strings.Contains(got, `dataset.theme = "dark"`) || !strings.Contains(got, "leafletWheel") || !strings.Contains(got, "leafletSize") {
@@ -42,11 +42,11 @@ func TestEmbedFrameLeadsWithPolicy(t *testing.T) {
 		t.Errorf("embed's HTML not last: %q", got)
 	}
 	// A doctype stays first, keeping the embed's rendering mode.
-	got = embedFrame("\n<!DOCTYPE html><html><head><title>t</title></head><body>b</body></html>", "light", true)
-	if !strings.HasPrefix(got, "<!DOCTYPE html>"+csp+embedNoRTC) || !strings.HasSuffix(got, "<html><head><title>t</title></head><body>b</body></html>") {
+	got = rendered.EmbedFrame("\n<!DOCTYPE html><html><head><title>t</title></head><body>b</body></html>", "light", true)
+	if !strings.HasPrefix(got, "<!DOCTYPE html>"+csp+rendered.EmbedNoRTC) || !strings.HasSuffix(got, "<html><head><title>t</title></head><body>b</body></html>") {
 		t.Errorf("frame with doctype: %q", got)
 	}
-	if !strings.Contains(embedCSP, "webrtc 'block'") {
+	if !strings.Contains(rendered.EmbedCSP, "webrtc 'block'") {
 		t.Error("policy does not block WebRTC")
 	}
 }
@@ -54,13 +54,13 @@ func TestEmbedFrameLeadsWithPolicy(t *testing.T) {
 // A view that gives the page the wheel, as math's, has no script for it:
 // the frame keeps its theme, policy and fit, and neither passes the wheel.
 func TestEmbedPageWithoutWheel(t *testing.T) {
-	page := embedPage("m", "<p>x</p>", theme.For(true), false)
+	page := rendered.EmbedPage("m", "<p>x</p>", "#000000", true, false)
 	if strings.Contains(page, `addEventListener("wheel"`) || strings.Contains(page, "deltaMode") {
 		t.Errorf("a wheel script in %s", page)
 	}
-	frame := embedFrame("<p>x</p>", "dark", false)
-	csp := `<meta http-equiv="Content-Security-Policy" content="` + embedCSP + `">`
-	if !strings.HasPrefix(frame, csp+embedNoRTC) || !strings.Contains(frame, `dataset.theme = "dark"`) ||
+	frame := rendered.EmbedFrame("<p>x</p>", "dark", false)
+	csp := `<meta http-equiv="Content-Security-Policy" content="` + rendered.EmbedCSP + `">`
+	if !strings.HasPrefix(frame, csp+rendered.EmbedNoRTC) || !strings.Contains(frame, `dataset.theme = "dark"`) ||
 		!strings.Contains(frame, "leafletSize") || strings.Contains(frame, "leafletWheel") {
 		t.Errorf("frame %q", frame)
 	}

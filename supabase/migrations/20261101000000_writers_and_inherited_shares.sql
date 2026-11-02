@@ -1,10 +1,10 @@
 -- Four rules a fifth review found loose:
 -- * unshare_page deletes the rows on the page it is given, but page_members
 --   lists the grants on the pages above it and the invites waiting on them
---   too, and the app offers to remove each: removing one of those from a
+--   too, which a client would offer to remove: removing one of those from a
 --   subpage did nothing and said nothing. It now refuses with
 --   'inherited_share' when what it was asked to remove is on a page above,
---   so the app can say to remove it there.
+--   so a client can say to remove it there.
 -- * page_content.updated_by was stamped only when the content changed, and
 --   an update that left the content as it was kept what the client sent,
 --   so an editor could name anyone as its last writer. Now such an update

@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -34,6 +36,9 @@ var external struct {
 	// disconnecting; waiting is the app asked by its install link, until
 	// its settings have Leaflet.
 	busy, waiting string
+	// waitUntil is when waiting gives up, in Unix nanoseconds: the link
+	// opened again waits longer, with the same watch on the settings.
+	waitUntil     atomic.Int64
 	disconnecting bool
 	byHand        bool
 	client        int
@@ -195,13 +200,19 @@ func (a *App) foundAgents(found []agentStatus) {
 // app, so the section waits to see its settings change; or here.
 func (a *App) connectAgent(s agentStatus, exe, dir string) {
 	if link := installLink(s.app.id, exe, dir); link != "" {
+		// The link opened again, as when its question in the app was
+		// closed, waits longer with the watch already on the settings.
+		again := external.waiting == s.app.id
 		external.waiting = s.app.id
-		if err := mygo.Shell.OpenExternal(link); err != nil {
+		external.waitUntil.Store(time.Now().Add(agentWait).UnixNano())
+		if err := openInstallLink(link); err != nil {
 			external.waiting = ""
 			a.toast(locales.ExternalConnectFailed(s.app.label, err.Error()))
 			return
 		}
-		go a.awaitAgent(s.app.id)
+		if !again {
+			go a.awaitAgent(s.app.id)
+		}
 		return
 	}
 	external.disconnecting = false
@@ -231,11 +242,18 @@ func (a *App) changeAgent(s agentStatus, fn func() error, failed func(app, err s
 	}()
 }
 
+// openInstallLink opens an install link in the app it is for.
+var openInstallLink = func(link string) error { return mygo.Shell.OpenExternal(link) }
+
+// agentWait is how long the section waits for an app's settings to change
+// after its install link opened.
+const agentWait = 3 * time.Minute
+
 // awaitAgent watches an app's settings for a few minutes after its
 // install link opened, as the window may not redraw meanwhile.
 func (a *App) awaitAgent(id string) {
 	env := currentAgentEnv()
-	for range 90 {
+	for time.Now().UnixNano() < external.waitUntil.Load() {
 		time.Sleep(2 * time.Second)
 		if e, _ := readEntry(id, env); e != nil {
 			a.update(a.checkAgents)
@@ -243,7 +261,12 @@ func (a *App) awaitAgent(id string) {
 		}
 	}
 	a.update(func() {
-		if external.waiting == id {
+		switch {
+		case external.waiting != id:
+		case time.Now().UnixNano() < external.waitUntil.Load():
+			// The link opened again as the watch ended.
+			go a.awaitAgent(id)
+		default:
 			external.waiting = ""
 		}
 	})
@@ -271,9 +294,9 @@ func agentSetup(client, exe, dir string) (where, snippet string) {
       "env": { "LEAFLET_DATA_DIR": ` + jsonString(dir) + ` }`
 	switch client {
 	case "claude":
-		return locales.ExternalRunInTerminal(), "claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=" + shellQuote(dir) + " -- " + shellQuote(exe) + " mcp"
+		return locales.ExternalRunInTerminal(), "claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=" + shellWord(dir) + " -- " + shellWord(exe) + " mcp"
 	case "opencode":
-		return locales.ExternalRunInTerminal(), "opencode mcp add --global leaflet --env LEAFLET_DATA_DIR=" + shellQuote(dir) + " -- " + shellQuote(exe) + " mcp"
+		return locales.ExternalRunInTerminal(), "opencode mcp add --global leaflet --env LEAFLET_DATA_DIR=" + shellWord(dir) + " -- " + shellWord(exe) + " mcp"
 	case "codex":
 		return locales.ExternalAddTo("~/.codex/config.toml"), `[mcp_servers.leaflet]
 command = ` + jsonString(exe) + `
@@ -313,6 +336,26 @@ func jsonString(s string) string {
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(s)
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// shellWord is s as one word of the shell a terminal here opens: a POSIX
+// shell, or on Windows PowerShell or cmd.exe.
+func shellWord(s string) string {
+	if runtime.GOOS == "windows" {
+		return windowsQuote(s)
+	}
+	return shellQuote(s)
+}
+
+// windowsQuote is s as one word of PowerShell and of cmd.exe, which keeps
+// single quotes as they are: in double quotes, which a Windows path never
+// has in it. No quoting keeps both shells from a $ or a % in it, which
+// paths on Windows hardly ever have.
+func windowsQuote(s string) string {
+	if s != "" && !strings.ContainsAny(s, " '\"$`&|<>()[]{}^;,=!%@#~+\t") {
+		return s
+	}
+	return `"` + s + `"`
 }
 
 // shellQuote is s as one word of a POSIX shell.

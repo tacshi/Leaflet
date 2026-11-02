@@ -1,4 +1,5 @@
-# Leaflet's sign-in with Supabase: its redirect page and token exchange.
+# Leaflet's sign-in with Supabase: its redirect page, its token exchange, and
+# the iOS app's site association.
 # Deploy from this folder:
 #   npx wrangler login
 #   npx wrangler secret put CLIENT_SECRET   # the OAuth app's client secret
@@ -12,3 +13,6 @@ routes = [{ pattern = "leaflet-auth.capyvibe.app", custom_domain = true }]
 [vars]
 # Leaflet's Supabase OAuth app (internal/supabaseapi.ClientID).
 CLIENT_ID = "a587f79b-48d7-41c1-b5ce-cbf87d11a491"
+# The Apple team that signs the iOS app, for
+# /.well-known/apple-app-site-association; left empty, that 404s.
+APPLE_TEAM_ID = "X5X4TD477G"

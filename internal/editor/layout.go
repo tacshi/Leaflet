@@ -8,8 +8,8 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
-	"github.com/egoist/mygo/ui/markdown/parser"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
@@ -27,6 +27,21 @@ type blockLayout struct {
 }
 
 const indentStep = 26
+
+// blockDepths is how deep each block is nested in lists, found in one
+// walk of the page.
+func (e *Editor) blockDepths() map[string]int {
+	depths := map[string]int{}
+	var deep func([]*doc.Node, int)
+	deep = func(nodes []*doc.Node, d int) {
+		for _, n := range nodes {
+			depths[n.ID] = d
+			deep(n.Children, d+1)
+		}
+	}
+	deep(e.Content.Children, 0)
+	return depths
+}
 
 // depth is how deep a block is nested in lists.
 func (e *Editor) depth(id string) int {
@@ -257,7 +272,13 @@ var clip struct {
 	blocks []*doc.Node
 	// delta is the formatted text of a selection within one block.
 	delta doc.Delta
+	// token is the copy's own mark, on the clipboard beside its text in
+	// clipFormat: the same text copied in another app since has none.
+	token string
 }
+
+// clipFormat is the clipboard's format for clip's token.
+const clipFormat transfer.Format = "application/x-leaflet-copy"
 
 // copyBlocks returns the blocks of a selection over more than one block,
 // or of one block selected whole that is not text, cut to the selection,
@@ -280,6 +301,7 @@ func (e *Editor) copyBlocks() []*doc.Node {
 		n     *doc.Node
 	}
 	var stack []open
+	depths := e.blockDepths()
 	ia, ib := indexIn(us, a.ID), indexIn(us, b.ID)
 	for i := ia; i >= 0 && i <= ib && i < len(us); i++ {
 		n := us[i].Clone()
@@ -299,7 +321,7 @@ func (e *Editor) copyBlocks() []*doc.Node {
 			}
 			n.SetDelta(n.Delta().Slice(from, to))
 		}
-		depth := e.depth(n.ID)
+		depth := depths[n.ID]
 		for len(stack) > 0 && stack[len(stack)-1].depth >= depth {
 			stack = stack[:len(stack)-1]
 		}
@@ -314,14 +336,14 @@ func (e *Editor) copyBlocks() []*doc.Node {
 	return out
 }
 
-// inTable reports whether a block is inside a table's cell.
-func (e *Editor) inTable(id string) bool {
+// tableOf is the table a block is in a cell of, or nil.
+func (e *Editor) tableOf(id string) *doc.Node {
 	for loc := e.Content.Locate(id); loc != nil && loc.Parent != nil; loc = e.Content.Locate(loc.Parent.ID) {
 		if loc.Parent.Type == "table" {
-			return true
+			return loc.Parent
 		}
 	}
-	return false
+	return nil
 }
 
 // freshBlocks copies blocks with new IDs, to paste them again.
@@ -355,8 +377,9 @@ func (e *Editor) copyText() string {
 		}
 	}
 	us := e.selectedUnits(a)
+	depths := e.blockDepths()
 	var lines []string
-	for i := indexIn(us, a.ID); i >= 0 && i <= indexIn(us, b.ID) && i < len(us); i++ {
+	for i, ib := indexIn(us, a.ID), indexIn(us, b.ID); i >= 0 && i <= ib && i < len(us); i++ {
 		n := us[i]
 		if !n.IsText() {
 			sub := &doc.Content{Children: []*doc.Node{n.Clone()}}
@@ -380,268 +403,42 @@ func (e *Editor) copyText() string {
 			}
 			continue
 		}
-		text := n.Delta().Slice(from, to).ReadableMarkdown()
-		prefix := blockPrefix(n, e.depth(n.ID))
-		if prefix == "" {
-			text = doc.EscapeBlockStart(text)
+		// A line break is a hard break, and a line that would start another
+		// block is escaped, as in an export; a heading is one line.
+		d := n.Delta().Slice(from, to)
+		if n.Type == "heading" {
+			d = doc.OneLine(d)
 		}
-		lines = append(lines, prefix+text)
+		text := d.ReadableMarkdown()
+		indent, lead, pad := blockPrefix(n, depths[n.ID])
+		lines = append(lines, strings.TrimSuffix(doc.TextMarkdown(indent, lead, pad, text), "\n"))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func blockPrefix(n *doc.Node, depth int) string {
+// blockPrefix is how a block's line starts in a copy: its indent, nested
+// in list items, and its marker; pad is what starts the lines after its
+// first, so they stay in it.
+func blockPrefix(n *doc.Node, depth int) (indent, lead, pad string) {
 	ind := strings.Repeat("  ", depth)
 	switch n.Type {
 	case "heading":
-		return strings.Repeat("#", min(max(n.Int("level", 1), 1), 6)) + " "
+		return "", strings.Repeat("#", min(max(n.Int("level", 1), 1), 6)) + " ", ""
 	case "bulleted_list":
-		return ind + "- "
+		return ind, "- ", "  "
 	case "numbered_list":
-		return ind + "1. "
+		return ind, "1. ", "   "
 	case "todo_list":
 		if n.Bool("checked") {
-			return ind + "- [x] "
+			return ind, "- [x] ", "  "
 		}
-		return ind + "- [ ] "
+		return ind, "- [ ] ", "  "
 	case "quote":
-		return "> "
+		return "", "> ", "> "
 	case "toggle_list":
-		return ind + "▸ "
+		return ind, "▸ ", "  "
 	}
-	return ""
-}
-
-// MarkdownBlocks reads Markdown as blocks, as pasting it does.
-func MarkdownBlocks(text string) []*doc.Node {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	return parseLines(strings.Trim(text, "\n"))
-}
-
-// parseLines reads pasted text as blocks: a line each, with markdown
-// block prefixes. List items indented under one nest in it, lines of a
-// markdown table make a table, and a fenced block a code block.
-func parseLines(text string) []*doc.Node {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	var out []*doc.Node
-	// lists are the list items open at each depth, for nesting.
-	var lists []*doc.Node
-	var table [][]string
-	flushTable := func() {
-		if len(table) > 0 {
-			if t, err := doc.TableNode(table, ""); err == nil {
-				out = append(out, t)
-			}
-			table = nil
-		}
-	}
-	// code is the fenced block open, and fence the backticks it opened
-	// with; its indent comes off each of its lines.
-	// A Mermaid fence makes a diagram, and lines between "$$" math: the
-	// block in its place in out, at codeAt, once it closes.
-	var code *doc.Node
-	var codeLines []string
-	fence, fenceIndent := "", ""
-	codeAt := 0
-	closeCode := func() {
-		text := strings.Join(codeLines, "\n")
-		switch {
-		case fence == "$$":
-			out[codeAt] = doc.MathNode(text)
-		case code.Str("language") == "mermaid":
-			out[codeAt] = doc.DiagramNode(text)
-		default:
-			code.SetDelta(doc.Delta{{Text: text}}.Compact())
-		}
-		code = nil
-	}
-	// callout is the GitHub alert being read: its lines go in it.
-	var callout *doc.Node
-	for _, line := range strings.Split(text, "\n") {
-		trimmed := strings.TrimLeft(line, " \t")
-		if code != nil {
-			if fence == "$$" && strings.TrimSpace(trimmed) == "$$" || fence != "$$" && strings.HasPrefix(trimmed, fence) && strings.Trim(trimmed, "` ") == "" {
-				closeCode()
-				continue
-			}
-			codeLines = append(codeLines, strings.TrimPrefix(line, fenceIndent))
-			continue
-		}
-		if tone, ok := doc.AlertTone(trimmed); ok {
-			flushTable()
-			lists = nil
-			callout = newText("callout", nil)
-			callout.Set("tone", tone)
-			out = append(out, callout)
-			continue
-		}
-		if rest, ok := strings.CutPrefix(trimmed, ">"); ok && callout != nil {
-			d := callout.Delta()
-			if d.Len() > 0 {
-				d = d.Concat(doc.Delta{{Text: "\n"}})
-			}
-			callout.SetDelta(d.Concat(doc.FromMarkdown(strings.TrimPrefix(rest, " "))))
-			continue
-		}
-		callout = nil
-		if strings.TrimSpace(line) == "" {
-			// A blank line only separates blocks, as in Markdown; it makes
-			// no empty paragraph. A list goes on across it.
-			flushTable()
-			continue
-		}
-		if language, ok := doc.CodeFence(trimmed); ok || strings.TrimSpace(trimmed) == "$$" {
-			flushTable()
-			lists = nil
-			code, codeLines = doc.CodeNode("", language), nil
-			fenceIndent = line[:len(line)-len(trimmed)]
-			fence = trimmed[:len(trimmed)-len(strings.TrimLeft(trimmed, "`"))]
-			if !ok {
-				fence = "$$"
-			}
-			codeAt = len(out)
-			out = append(out, code)
-			continue
-		}
-		if strings.HasPrefix(trimmed, "|") {
-			lists = nil
-			if row := tableRow(trimmed); row != nil {
-				table = append(table, row)
-			}
-			continue
-		}
-		flushTable()
-		indent := strings.Count(line[:len(line)-len(trimmed)], " ") + 2*strings.Count(line[:len(line)-len(trimmed)], "\t")
-		typ, rest := "paragraph", trimmed
-		level, checked := 0, false
-		hashes := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
-		bullet := len(trimmed) >= 2 && strings.ContainsRune("-*+", rune(trimmed[0])) && trimmed[1] == ' '
-		switch {
-		case hashes >= 1 && hashes <= 6 && strings.HasPrefix(trimmed[hashes:], " "):
-			typ, level, rest = "heading", hashes, trimmed[hashes+1:]
-		case bullet && strings.HasPrefix(trimmed[2:], "[ ] "):
-			typ, rest = "todo_list", trimmed[6:]
-		case bullet && (strings.HasPrefix(trimmed[2:], "[x] ") || strings.HasPrefix(trimmed[2:], "[X] ")):
-			typ, rest, checked = "todo_list", trimmed[6:], true
-		case bullet:
-			typ, rest = "bulleted_list", trimmed[2:]
-		case strings.HasPrefix(trimmed, "> "):
-			typ, rest = "quote", trimmed[2:]
-		case doc.IsRule(trimmed):
-			lists = nil
-			out = append(out, &doc.Node{ID: doc.NewBlockID(), Type: "divider"})
-			continue
-		default:
-			if img := imageLine(trimmed); img != nil {
-				lists = nil
-				out = append(out, img)
-				continue
-			}
-			if i := strings.IndexAny(trimmed, ".)"); i > 0 && i < 4 && isDigits(trimmed[:i]) && strings.HasPrefix(trimmed[i+1:], " ") {
-				typ, rest = "numbered_list", trimmed[i+2:]
-			}
-		}
-		n := newText(typ, doc.FromMarkdown(rest))
-		if level > 0 {
-			n.Set("level", level)
-		}
-		if typ == "todo_list" {
-			n.Set("checked", checked)
-		}
-		if !doc.NestableTypes[typ] {
-			lists = nil
-			out = append(out, n)
-			continue
-		}
-		// Two spaces, or a tab, a level: under the item open one level up.
-		depth := min(indent/2, len(lists))
-		lists = append(lists[:depth], n)
-		if depth == 0 {
-			out = append(out, n)
-		} else {
-			parent := lists[depth-1]
-			parent.Children = append(parent.Children, n)
-		}
-	}
-	flushTable()
-	if code != nil {
-		// A fence left open runs to the end.
-		closeCode()
-	}
-	return out
-}
-
-// tableRow reads a line of a markdown table, or nil for the line under the
-// header ("| --- | --- |"). As in GitHub's tables, a backslash keeps the
-// character after it in the cell, and \| is a | of the cell's text.
-func tableRow(line string) []string {
-	line = strings.TrimSpace(line)
-	line = strings.TrimPrefix(line, "|")
-	var cells []string
-	var cell strings.Builder
-	for i := 0; i < len(line); i++ {
-		switch {
-		case line[i] == '\\' && i+1 < len(line):
-			i++
-			if line[i] != '|' {
-				cell.WriteByte('\\')
-			}
-			cell.WriteByte(line[i])
-		case line[i] == '|':
-			cells = append(cells, cell.String())
-			cell.Reset()
-		default:
-			cell.WriteByte(line[i])
-		}
-	}
-	// A closing | ends the last cell; without one, what is after the last
-	// | is a cell.
-	if rest := cell.String(); rest != "" || len(cells) == 0 {
-		cells = append(cells, rest)
-	}
-	rule := true
-	for i, c := range cells {
-		cells[i] = strings.TrimSpace(c)
-		if strings.Trim(cells[i], "-: ") != "" || cells[i] == "" {
-			rule = false
-		}
-	}
-	if rule {
-		return nil
-	}
-	return cells
-}
-
-// imageLine reads a line that is only a picture from the web, as
-// "![alt](https://…/a.png)", as an image block; nil for any other line.
-func imageLine(line string) *doc.Node {
-	if !strings.HasPrefix(line, "![") {
-		return nil
-	}
-	md := parser.New(parser.GFM)
-	md.Set(line)
-	if md.Len() != 2 || md.Block(1).Kind != parser.Paragraph {
-		return nil
-	}
-	in := md.Inlines(1)
-	if len(in) == 0 || in[0].Kind != parser.Image || in[0].Next != len(in) {
-		return nil
-	}
-	n, err := doc.ImageNode(in[0].Dest)
-	if err != nil {
-		return nil
-	}
-	n.Set("alt", parser.PlainText(in[1:]))
-	return n
-}
-
-func isDigits(s string) bool {
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return s != ""
+	return "", "", ""
 }
 
 // joins reports whether a pasted block's text joins the line it is pasted
@@ -671,7 +468,7 @@ func (e *Editor) paste(text string) {
 		e.changed()
 		return
 	}
-	if n := e.node(e.focus.ID); n != nil && n.Type == "paragraph" && textLen(n) == 0 && e.Collapsed() && !e.inTable(n.ID) {
+	if n := e.node(e.focus.ID); n != nil && n.Type == "paragraph" && textLen(n) == 0 && e.Collapsed() {
 		if v, err := doc.VideoNode(text, ""); err == nil {
 			e.InsertBlocks(v)
 			return
@@ -683,10 +480,7 @@ func (e *Editor) paste(text string) {
 		}
 	}
 	var blocks []*doc.Node
-	if e.inTable(e.focus.ID) {
-		// A cell holds one line: the lines join.
-		text = strings.Join(strings.Fields(strings.ReplaceAll(text, "\n", " ")), " ")
-	} else if clip.blocks != nil && text == clip.text {
+	if clip.blocks != nil && text == clip.text {
 		blocks = freshBlocks(clip.blocks)
 	} else if clip.delta != nil && text == clip.text {
 		blocks = []*doc.Node{newText("paragraph", clip.delta)}
@@ -697,28 +491,52 @@ func (e *Editor) paste(text string) {
 			e.SetLink(strings.TrimSpace(text))
 			return
 		}
-		e.pushUndo(false)
-		e.coalescing = false
-		e.deleteSelection()
-		n := e.node(e.focus.ID)
-		if n != nil && n.IsText() {
-			attrs := n.Delta().AttrsAt(e.focus.Off)
-			if doc.WebURL(text) {
-				// A web link pasted goes in as a link to itself.
-				attrs.Href = strings.TrimSpace(text)
-			}
-			n.SetDelta(n.Delta().Insert(e.focus.Off, text, attrs))
-			e.invalidate(n.ID)
-			off := e.focus.Off + utf8.RuneCountInString(text)
-			e.Select(Pos{n.ID, off}, Pos{n.ID, off})
-			e.changed()
+		href := ""
+		if doc.WebURL(text) {
+			// A web link pasted goes in as a link to itself.
+			href = strings.TrimSpace(text)
 		}
+		e.insertInline(text, href)
 		return
 	}
 	if blocks == nil {
-		blocks = parseLines(strings.TrimRight(text, "\n"))
+		blocks = doc.ParseLines(strings.TrimRight(text, "\n"))
 	}
 	e.pasteBlocks(blocks)
+}
+
+// insertInline puts text in the block at the caret, in place of the
+// selection, as it is, in one step: in the formats typing there takes,
+// linked to href unless it is "", or plain in code. On a block selected
+// whole, it starts a paragraph after it, as typing does.
+func (e *Editor) insertInline(text, href string) {
+	if e.ReadOnly || text == "" {
+		return
+	}
+	e.pushUndo(false)
+	e.coalescing = false
+	e.deleteSelection()
+	n := e.node(e.focus.ID)
+	if n == nil {
+		return
+	}
+	if !n.IsText() {
+		p := newText("paragraph", nil)
+		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
+		n = p
+		e.focus = Pos{p.ID, 0}
+	}
+	// Code holds plain text: no formats, nor a link.
+	attrs := doc.Attrs{}
+	if n.Type != "code" {
+		attrs = n.Delta().AttrsAt(e.focus.Off)
+		attrs.Href = href
+	}
+	n.SetDelta(n.Delta().Insert(e.focus.Off, text, attrs))
+	e.invalidate(n.ID)
+	off := e.focus.Off + utf8.RuneCountInString(text)
+	e.Select(Pos{n.ID, off}, Pos{n.ID, off})
+	e.changed()
 }
 
 // pasteBlocks puts blocks at the caret, in place of the selection: the
@@ -775,7 +593,12 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 		// their own.
 		n.SetDelta(head.Concat(first.Delta()))
 		if head.Len() == 0 && first.Type != "paragraph" {
+			// It takes the pasted block's kind, and none of what was its
+			// own kind's: an empty heading's level, a folded toggle's fold.
 			n.Type = first.Type
+			for _, k := range doc.TypedKeys {
+				delete(n.Data, k)
+			}
 			for k, v := range first.Data {
 				if k != "delta" {
 					n.Data[k] = v
@@ -817,7 +640,7 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 			// or checked as it was; a due date stays with the to-do's first
 			// part.
 			last.Type = typ
-			for _, k := range []string{"checked", "due", "level", "language", "tone", "collapsed"} {
+			for _, k := range doc.TypedKeys {
 				delete(last.Data, k)
 			}
 			for k, v := range data {

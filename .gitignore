@@ -1,7 +1,12 @@
 /build/
+# The binary go build . leaves here (make clean removes it)
+/leaflet
+/leaflet.exe
 /.mygo/
 /dist/
 mygo_windows_*.syso
+# The Mac's speech helper, which scripts/build-speech.sh builds
+/resources/darwin-*/leaflet-speech
 .DS_Store
 *.log
 
@@ -11,3 +16,13 @@ supabase/.temp/
 
 # Wrangler local state
 worker/.wrangler/
+
+# The iOS app: the framework make ios-core builds, the project XcodeGen
+# makes from ios/project.yml, and Xcode's own state
+/ios/build/
+/ios/*.xcodeproj/
+/ios/Config/Local.xcconfig
+xcuserdata/
+*.xcuserstate
+DerivedData/
+/ios/Leaflet/Generated/

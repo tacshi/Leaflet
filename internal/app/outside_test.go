@@ -43,7 +43,7 @@ func TestSaveKeepsOutsideEdits(t *testing.T) {
 
 	// The user types in p1, not yet saved.
 	a.page.editor.Content.Find("p1").SetDelta(doc.FromMarkdown("one, typed"))
-	a.page.dirty = true
+	a.page.live.Changed()
 	// Meanwhile the agent rewrites p2 in the store.
 	outside := st.Content(p.ID)
 	outside.Find("p2").SetDelta(doc.FromMarkdown("two, by the agent"))
@@ -166,10 +166,10 @@ func TestSaveFailsAndRaces(t *testing.T) {
 
 	a.openPage(p.ID)
 	a.page.editor.Content.Find("p1").SetDelta(doc.FromMarkdown("one, typed"))
-	a.page.dirty = true
+	a.page.live.Changed()
 	_ = st.Close()
 	a.savePage()
-	if !a.page.dirty {
+	if !a.page.live.Dirty() {
 		t.Error("a save that failed dropped the edits")
 	}
 }
@@ -203,7 +203,7 @@ func TestLeavingAPageThatCannotSave(t *testing.T) {
 	typed := &doc.Node{ID: "t1", Type: "paragraph"}
 	typed.SetDelta(doc.FromMarkdown("typed"))
 	a.page.editor.Content.Children = append(a.page.editor.Content.Children, typed)
-	a.page.dirty = true
+	a.page.live.Changed()
 
 	full := []string{
 		`CREATE TRIGGER full_insert BEFORE INSERT ON page_contents BEGIN SELECT RAISE(ABORT, 'disk full'); END`,
@@ -247,7 +247,7 @@ func TestUnreadablePageOpensReadOnly(t *testing.T) {
 	}
 	a.reloadAll()
 	a.openPage(p.ID)
-	if a.page == nil || !a.page.unreadable || !a.page.editor.ReadOnly || a.Editor(p.ID) != nil {
+	if a.page == nil || !a.page.live.Unreadable() || !a.page.editor.ReadOnly || a.Live(p.ID) != nil {
 		t.Fatalf("opened as %+v", a.page)
 	}
 	tt := ui.NewTester(func(c *ui.Context) { a.pageNotices(c, p.ID) }, 800, 200)
@@ -256,7 +256,7 @@ func TestUnreadablePageOpensReadOnly(t *testing.T) {
 		t.Errorf("no notice in %v", tt.Texts())
 	}
 	a.page.editor.Content.Children[0].SetDelta(doc.FromMarkdown("typed"))
-	a.page.dirty = true
+	a.page.live.Changed()
 	a.reload(store.Change{Table: "page_members", PageID: p.ID})
 	if !a.page.editor.ReadOnly {
 		t.Error("editable again after its members were read")
@@ -274,8 +274,8 @@ func TestUnreadablePageOpensReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.externalContent(p.ID)
-	if a.page.unreadable || a.page.editor.ReadOnly || !strings.Contains(a.page.editor.Content.PlainText(), "restored") {
-		t.Errorf("unreadable %v, read-only %v, shows %q", a.page.unreadable, a.page.editor.ReadOnly, a.page.editor.Content.PlainText())
+	if a.page.live.Unreadable() || a.page.editor.ReadOnly || !strings.Contains(a.page.editor.Content.PlainText(), "restored") {
+		t.Errorf("unreadable %v, read-only %v, shows %q", a.page.live.Unreadable(), a.page.editor.ReadOnly, a.page.editor.Content.PlainText())
 	}
 }
 
@@ -292,7 +292,7 @@ func TestUnreadableContentBroughtInIsNotSavedOver(t *testing.T) {
 	a.reloadAll()
 	a.openPage(p.ID)
 	a.page.editor.Content.Children[0].SetDelta(doc.FromMarkdown("typed"))
-	a.page.dirty = true
+	a.page.live.Changed()
 	const newer = `{"children": [{"id": "p1", "type": "paragraph", "delta": `
 	if _, err := a.st.DB().Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, newer, p.ID); err != nil {
 		t.Fatal(err)
@@ -301,8 +301,8 @@ func TestUnreadableContentBroughtInIsNotSavedOver(t *testing.T) {
 	if got := a.page.editor.Content.PlainText(); got != "typed" {
 		t.Errorf("the editor shows %q", got)
 	}
-	if !a.page.unreadable || !a.page.editor.ReadOnly {
-		t.Errorf("unreadable %v, read-only %v", a.page.unreadable, a.page.editor.ReadOnly)
+	if !a.page.live.Unreadable() || !a.page.editor.ReadOnly {
+		t.Errorf("unreadable %v, read-only %v", a.page.live.Unreadable(), a.page.editor.ReadOnly)
 	}
 	if !a.closePage() {
 		t.Fatal("the page would not close")
@@ -389,7 +389,7 @@ func TestPageDeletedElsewhereKeepsWhatWasTyped(t *testing.T) {
 	typed := &doc.Node{ID: "t1", Type: "paragraph"}
 	typed.SetDelta(doc.FromMarkdown("typed"))
 	a.page.editor.Content.Children = append(a.page.editor.Content.Children, typed)
-	a.page.dirty = true
+	a.page.live.Changed()
 	row := store.PageToRemote(p)
 	row["deleted_at"] = "2026-10-30T00:00:00Z"
 	if err := a.st.PutRemotePage(row); err != nil {
@@ -501,7 +501,7 @@ func TestRemovedSharedPageCloses(t *testing.T) {
 	if a.page == nil {
 		t.Fatal("the page did not open")
 	}
-	a.page.dirty = true
+	a.page.live.Changed()
 	if _, err := a.st.RemoveSharedPages("shared"); err != nil {
 		t.Fatal(err)
 	}

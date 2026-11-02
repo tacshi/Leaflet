@@ -89,9 +89,18 @@ async function sonioxKey(sc: SupabaseClient, user: User): Promise<string> {
   return key;
 }
 
+/**
+ * A Soniox call that failed, said by its status. What Soniox wrote goes to
+ * the log only: a failed transcription keeps its error in the recording,
+ * which everyone who can view the page reads.
+ */
 async function sonioxFailure(res: Response, what: string): Promise<HttpError> {
   const text = await res.text().catch(() => "");
-  return new HttpError(res.status === 401 ? 400 : 502, `Soniox ${what} failed: ${res.status} ${text.slice(0, 300)}`);
+  console.error(`Soniox ${what}: ${res.status} ${text.slice(0, 300)}`);
+  const why = res.status === 401 || res.status === 403
+    ? "Soniox rejected the API key"
+    : `Soniox ${what} failed: ${res.status} ${res.statusText}`.trim();
+  return new HttpError(res.status === 401 ? 400 : 502, why);
 }
 
 async function sonioxTemporaryKey(sc: SupabaseClient, user: User) {
@@ -119,6 +128,8 @@ async function saveKey(uc: SupabaseClient, body: Body) {
       headers: { Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
+    // Only its status says anything; the body goes unread, so closed.
+    await check.body?.cancel().catch(() => {});
     if (check.status === 401 || check.status === 403) throw new HttpError(400, "Soniox rejected this API key");
   }
   const { error } = await uc.rpc("set_stt_secret", { p_provider: "soniox", p_secret: key });
@@ -145,7 +156,10 @@ async function transcribe(uc: SupabaseClient, sc: SupabaseClient, user: User, bo
     .maybeSingle();
   if (error) throw new Error(error.message);
   if (!rec) throw new HttpError(404, "Recording not found");
-  if (!rec.audio_path) throw new HttpError(400, "This recording's audio has not been uploaded");
+  // recordings/{user_id}/{recording_id}.wav, as the app uploads it.
+  const slash = rec.audio_path?.lastIndexOf("/") ?? -1;
+  const fileName = rec.audio_path?.slice(slash + 1) ?? "";
+  if (!fileName) throw new HttpError(400, "This recording's audio has not been uploaded");
 
   const { data: settingsRow } = await uc
     .from("stt_settings")
@@ -169,9 +183,7 @@ async function transcribe(uc: SupabaseClient, sc: SupabaseClient, user: User, bo
   }
   const language = languageCode(body.language ?? settings.language);
 
-  const slash = rec.audio_path.lastIndexOf("/");
   const folder = rec.audio_path.slice(0, Math.max(slash, 0));
-  const fileName = rec.audio_path.slice(slash + 1) || "audio.m4a";
   const { data: listed, error: listError } = await uc.storage.from("recordings").list(folder, {
     search: fileName,
     limit: 100,
@@ -189,7 +201,14 @@ async function transcribe(uc: SupabaseClient, sc: SupabaseClient, user: User, bo
     );
   }
 
-  await uc.from("recordings").update({ status: "transcribing", error: null }).eq("id", rec.id);
+  // The transcript is saved as the caller, which RLS allows only an editor
+  // of the recording's page: for a viewer the update matches no row and
+  // says nothing, so they would spend their key on a transcript that is
+  // not saved. Marking it transcribing, before any of that, asks first.
+  const { data: marked, error: markError } = await uc.from("recordings")
+    .update({ status: "transcribing", error: null }).eq("id", rec.id).select("id");
+  if (markError) throw new Error(markError.message);
+  if (!marked?.length) throw new HttpError(403, "You can view this recording but not edit its page");
   try {
     const { data: audio, error: downloadError } = await uc.storage.from("recordings").download(rec.audio_path);
     if (downloadError || !audio) throw new Error(`Could not read the audio: ${downloadError?.message ?? "missing"}`);
@@ -199,15 +218,19 @@ async function transcribe(uc: SupabaseClient, sc: SupabaseClient, user: User, bo
       ? await sonioxFile(await sonioxKey(sc, user), audio, fileName, settings, language, deadline)
       : await openAiCompatible(uc, sc, audio, fileName, settings, language, rec.duration_ms ?? 0, deadline);
 
-    const { error: saveError } = await uc.from("recordings").update({
+    const { data: saved, error: saveError } = await uc.from("recordings").update({
       transcript: segments,
       status: "ready",
       stt_provider: useSoniox ? "soniox" : "openai-compatible",
       stt_model: model,
       language,
       error: null,
-    }).eq("id", rec.id);
+    }).eq("id", rec.id).select("id");
     if (saveError) throw new Error(saveError.message);
+    // Its page was shared view-only, or the recording deleted, meanwhile.
+    if (!saved?.length) {
+      throw new HttpError(403, "The transcript could not be saved: the recording is no longer yours to edit");
+    }
     return { segments };
   } catch (e) {
     // A provider call stopped at the deadline: the recording fails rather

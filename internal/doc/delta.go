@@ -298,7 +298,8 @@ func (d Delta) Format(start, end int, fn func(*Attrs)) Delta {
 }
 
 // AttrsAt returns the formats typing at a rune offset continues: those of
-// the rune before it, without links or mentions.
+// the rune before it, or at the start those of the first, without links
+// or mentions.
 func (d Delta) AttrsAt(at int) Attrs {
 	pos := 0
 	var last Attrs

@@ -3,6 +3,7 @@ package app
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/doc"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -240,47 +242,10 @@ func TestCommentAgentMenu(t *testing.T) {
 	}
 }
 
-// A comment's mentions of agents are marked, and only them: not an email
-// address, a longer word or code.
-func TestMarkMentions(t *testing.T) {
-	names := []string{"agent", "Chat", "ChatGPT"}
-	for _, tc := range []struct{ in, want string }{
-		{"@ChatGPT What is LWT?", "<mark><b>@ChatGPT</b></mark> What is LWT?"},
-		{"ask @chatgpt, then @agent", "ask <mark><b>@chatgpt</b></mark>, then <mark><b>@agent</b></mark>"},
-		{"me@ChatGPT.com @ChatGPTs @Bob", "me@ChatGPT.com @ChatGPTs @Bob"},
-		{"`@ChatGPT` @Chat", "`@ChatGPT` <mark><b>@Chat</b></mark>"},
-		// Code spans of longer runs, and over lines of a paragraph.
-		{"``a ` @agent`` @agent", "``a ` @agent`` <mark><b>@agent</b></mark>"},
-		{"see `x\n@agent` @agent", "see `x\n@agent` <mark><b>@agent</b></mark>"},
-		// A backtick escaped, or never closed, opens no span.
-		{"\\` @agent \\`", "\\` <mark><b>@agent</b></mark> \\`"},
-		{"a ` @agent", "a ` <mark><b>@agent</b></mark>"},
-		// Fenced and indented code blocks.
-		{"```\n@agent\n```\n@agent", "```\n@agent\n```\n<mark><b>@agent</b></mark>"},
-		{"~~~~go\n@agent\n~~~\n@agent\n~~~~\n@agent", "~~~~go\n@agent\n~~~\n@agent\n~~~~\n<mark><b>@agent</b></mark>"},
-		{"code:\n\n    @agent\n\t@agent\n\n@agent", "code:\n\n    @agent\n\t@agent\n\n<mark><b>@agent</b></mark>"},
-		// An indented line going on with a paragraph is not code.
-		{"ask\n    @agent", "ask\n    <mark><b>@agent</b></mark>"},
-	} {
-		if got := markMentions(tc.in, names); got != tc.want {
-			t.Errorf("markMentions(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
 // An agent runs for a comment that mentions it where the comment shows it
-// marked: not in code, an address, a longer word or after a backslash.
+// marked, and not for one that only names it in an address or code; which
+// mentions count is core.Mentioned's, tested there.
 func TestAgentInCommentOnlyWhenMentioned(t *testing.T) {
-	names := []string{"agent", "Ollama"}
-	for in, want := range map[string]bool{
-		"@agent sum it up": true, "ask @Ollama": true,
-		"`@agent`": false, "```\n@agent\n```": false, `\@agent`: false,
-		"me@ollama.com": false, "@agentic": false, "@Ollamas": false,
-	} {
-		if got := len(mentioned(in, names)) > 0; got != want {
-			t.Errorf("mentioned(%q) = %v", in, got)
-		}
-	}
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
 	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
@@ -333,5 +298,35 @@ func waitFor(t *testing.T, tt *ui.Tester, ok func() bool) {
 		}
 		time.Sleep(10 * time.Millisecond)
 		tt.Frame()
+	}
+}
+
+// Undo of a run that cannot revert its edits, as on content that cannot
+// be read, says so, and the run stays as it was.
+func TestUndoRunThatFailsSaysSo(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.DB().Exec(`UPDATE page_contents SET content = '{"children": [' WHERE page_id = ?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	if a.page == nil {
+		t.Fatal("the page did not open")
+	}
+	n := &doc.Node{ID: "x1", Type: "paragraph"}
+	n.SetDelta(doc.FromMarkdown("one"))
+	run := &agents.Run{ID: "r1", Status: "done", AgentName: "Ollama", Ops: []doc.Op{{Op: "insert", Position: &doc.Position{At: "end"}, Nodes: []*doc.Node{n}}}}
+	a.hub.Session(p.ID).Runs = []*agents.Run{run}
+	a.undoRun(run)
+	if run.Undone {
+		t.Error("the run counts as undone")
+	}
+	if len(a.toasts) != 1 || !strings.HasPrefix(a.toasts[0].text, strings.TrimSuffix(locales.PageUndoRunFailed("Ollama", ""), " ")) {
+		t.Errorf("toasts %+v", a.toasts)
 	}
 }

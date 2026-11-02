@@ -85,6 +85,62 @@ func TestPageMarks(t *testing.T) {
 	}
 }
 
+// A page shared through the page it is under can be edited while it is
+// there, and only viewed once it moves under one shared for viewing.
+func TestReadOnlyFollowsWhereThePageIs(t *testing.T) {
+	a := templatesApp(t)
+	const space = "00000000-0000-0000-0000-0000000000cc"
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	put := func(id, parent string) {
+		t.Helper()
+		row := map[string]any{"id": id, "space_id": space, "title": id, "sort_key": "V", "created_at": at, "updated_at": at}
+		if parent != "" {
+			row["parent_id"] = parent
+		}
+		if err := a.st.PutRemotePage(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const edit, view, page = "00000000-0000-0000-0000-0000000000e1", "00000000-0000-0000-0000-0000000000e2", "00000000-0000-0000-0000-0000000000e3"
+	put(edit, "")
+	put(view, "")
+	put(page, edit)
+	for id, role := range map[string]string{edit: "editor", view: "viewer"} {
+		if err := a.st.SetMembers(id, []store.Member{{PageID: id, UserID: a.session.UserID, Role: role, Accepted: true}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.reloadAll()
+	a.openPage(page)
+	if a.page.editor.ReadOnly {
+		t.Fatal("a page under one shared for editing is read-only")
+	}
+	put(page, view)
+	a.reload(store.Change{Table: "pages", PageID: page})
+	if !a.page.editor.ReadOnly {
+		t.Error("the page moved under one shared for viewing can still be edited")
+	}
+}
+
+// The byline says who created the page, which is all a page keeps, and
+// apart from it when the page was edited.
+func TestBylineSaysWhoCreated(t *testing.T) {
+	a := templatesApp(t)
+	const id = "00000000-0000-0000-0000-0000000000bd"
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := a.st.PutRemotePage(map[string]any{"id": id, "space_id": "00000000-0000-0000-0000-0000000000cc", "title": "Theirs",
+		"sort_key": "V", "created_by": "00000000-0000-0000-0000-0000000000ee", "created_at": at, "updated_at": at}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(id)
+	tt := ui.NewTester(func(c *ui.Context) { a.byline(c, *a.pageByID(id)) }, 900, 100)
+	tt.Frame()
+	if !tt.HasText(locales.PageBylineCreated(locales.PageBylineSomeone())) || !tt.HasText(locales.PageBylineEditedAt(locales.PageTimeJustNow())) {
+		t.Errorf("byline %v", tt.Texts())
+	}
+}
+
 // Someone invited to a page who has not accepted yet is no account: the
 // @ menu does not offer to mention them.
 func TestMentionsLeaveOutInvites(t *testing.T) {
@@ -141,5 +197,36 @@ func TestViewerResolvesOnlyTheirOwnThreads(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText(locales.PanelResolve()) {
 		t.Error("a viewer may not resolve their own thread")
+	}
+}
+
+// The user is a member of their own page, as its owner: a page that only
+// syncs between their devices is not shared, and one shared with Ann is
+// shared with 1.
+func TestBylineCountsOthers(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	owner := store.Member{PageID: p.ID, UserID: a.session.UserID, Role: "owner", Accepted: true}
+	for _, c := range []struct {
+		members []store.Member
+		shared  bool
+	}{
+		{[]store.Member{owner}, false},
+		{[]store.Member{owner, {PageID: p.ID, UserID: "ann", DisplayName: "Ann", Role: "editor", Accepted: true}}, true},
+	} {
+		if err := a.st.SetMembers(p.ID, c.members); err != nil {
+			t.Fatal(err)
+		}
+		a.reload(store.Change{Table: "page_members", PageID: p.ID})
+		tt := ui.NewTester(func(c *ui.Context) { a.byline(c, *a.pageByID(p.ID)) }, 900, 100)
+		tt.Frame()
+		if got := tt.HasText(locales.PageBylineSharedWith(1)); got != c.shared {
+			t.Errorf("with %d members, shared with 1 is %v: %v", len(c.members), got, tt.Texts())
+		}
 	}
 }

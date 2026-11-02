@@ -173,6 +173,18 @@ func (e *Editor) BlockTop(id string) (float32, bool) {
 	return r.Y, ok && !e.hid[id] && e.folder(id) == nil
 }
 
+// BlockRect is a block's box in window coordinates, as last drawn, or
+// as laid out for one out of view and never drawn; false for one not in
+// the page, or that a folded heading hides.
+func (e *Editor) BlockRect(id string) (ui.Rect, bool) {
+	r, ok := e.geom[id]
+	if !ok {
+		r = e.laid[id]
+		ok = r.H > 0
+	}
+	return r, ok && e.node(id) != nil && !e.hid[id] && e.folder(id) == nil
+}
+
 // gutterWidth is the room left of a heading for its fold and link
 // buttons.
 const gutterWidth = 52

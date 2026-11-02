@@ -1,23 +1,12 @@
 package editor
 
 import (
-	"fmt"
-
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
 	"leaflet/locales"
 )
-
-// colorHex is a color as runs keep it, "" for a clear one, which takes
-// the color away.
-func colorHex(c ui.Color) string {
-	if c.A == 0 {
-		return ""
-	}
-	return fmt.Sprintf("#%02x%02x%02x%02x", c.R, c.G, c.B, c.A)
-}
 
 // hexColor reads a color runs keep, clear for none.
 func hexColor(s string) ui.Color {

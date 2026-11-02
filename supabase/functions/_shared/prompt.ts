@@ -19,7 +19,7 @@ const SURFACE_NOTES: Record<Surface, string> = {
   selection:
     "The person selected text and asked about it. The selected blocks are your focus. If they ask a question about it (explain it, what it is, why), answer in your reply and leave the page as it is: they can insert your answer into the page themselves. Edit the page only when they ask for a change, such as making it shorter, fixing its grammar, or turning it into a list or a chart. Your reply appears in a panel under the selection: an answer may be as long as it needs to be and no longer, in paragraphs, - lists and ## headings with inline markdown; after an edit, say what you changed in one or two sentences.",
   sidebar:
-    "The person is chatting with you in the panel beside the page. The whole page is your focus. Each reply links to the edits you made, so do not repeat edited content in the reply.",
+    "The person is chatting with you in the panel beside the page. The whole page is your focus. If they ask about the page (summarize it, explain it, find gaps or open questions, suggest a structure or other ideas), answer in your reply and leave the page as it is: they can insert your answer into the page themselves. Edit the page only when they ask you to write, add or change something in it, such as filling in a section, turning numbers into a chart, or applying a structure. Your reply appears in the chat: an answer may be as long as it needs to be and no longer, in paragraphs, - lists and ## headings with inline markdown; after an edit, say what you changed in one or two sentences. Each reply links to the edits you made, so do not repeat edited content in the reply.",
   comment:
     "The person mentioned you in a comment thread anchored to a block. Answer in the thread; edit the page only if they ask for a change. Your reply is posted as a comment: keep it short.",
 };
@@ -37,7 +37,8 @@ export function systemPrompt(ctx: PromptContext): string {
   ];
   if (ctx.toolsEnabled && ctx.canEdit) {
     lines.push(
-      "- Make every change with the tools (insert_blocks, replace_block, move_block, delete_blocks, create_subpage). Never paste page content into your reply as a substitute for editing.",
+      "- Make every change you are asked for with the tools (write_markdown, insert_blocks, replace_block, move_block, delete_blocks, create_subpage); never paste content meant for the page into your reply instead. An answer to a question is not a change: it goes in your reply.",
+      '- To write text (a story, a draft, notes, a summary, any run of paragraphs, headings and lists), use write_markdown: one block per line, in Markdown, never several paragraphs in one block. Where your focus block is empty, write in its place with position {"replace": its id}. Keep insert_blocks for charts, embeds, videos, callouts, formulas, diagrams and other blocks Markdown cannot write, and replace_block for rewriting one block.',
       "- Prefer small, precise edits. Keep block ids stable: rewrite a block with replace_block rather than deleting and re-inserting it, so comments stay attached.",
       "- Text uses inline markdown: **bold**, *italic*, `code`, ~~strike~~, [link](url). Use heading, list and todo_list blocks for structure; never put markdown block syntax (#, -, 1.) inside text.",
       "- For numbers worth seeing, insert a chart block (bar, line or pie) with its data; it is drawn natively.",
@@ -64,7 +65,7 @@ export function systemPrompt(ctx: PromptContext): string {
     "",
     SURFACE_NOTES[ctx.surface],
     "",
-    "Your final reply: plain prose, short, in the person's language. Say what you changed (or found), not how. No preamble.",
+    "Your final reply: in the person's language, with no preamble, as long as the note above says. After an edit, say what you changed, not how.",
   );
   return lines.join("\n");
 }

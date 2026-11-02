@@ -6,9 +6,11 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
+	"leaflet/internal/supabaseapi"
 	"leaflet/locales"
 )
 
@@ -32,7 +34,7 @@ func TestSignInAsAnotherAccountAsks(t *testing.T) {
 		t.Fatal("nothing waits to upload")
 	}
 	other := &store.User{ID: "u2", Email: "sam@example.com"}
-	tt := ui.NewTester(func(c *ui.Context) { a.signInView(c) }, 900, 700)
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 900, 700)
 	a.signedIn(other)
 	tt.Frame()
 	if !tt.HasText(locales.SigninRemovesUnsynced(n, "sam@example.com")) {
@@ -61,6 +63,80 @@ func TestSignInAsAnotherAccountAsks(t *testing.T) {
 	// iCloud sync is off for the server's, and says so once signed out.
 	if a.settings.ICloudSync {
 		t.Error("iCloud sync still on in Settings")
+	}
+}
+
+// A sign-in that finishes after the person has gone to a page asks there,
+// and once done leaves them on the page.
+func TestSignInFinishedOnAPage(t *testing.T) {
+	t.Cleanup(func() { signIn = signInState{} })
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u2")
+	if err := a.st.SetValue("account", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Not uploaded"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.reloadAll()
+	a.route = Route{Kind: "signin"}
+	a.router = ui.NewRouter("/signin")
+	a.routerAt = a.router.Path()
+	a.navigate(Route{Kind: "page", ID: p.ID})
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1200, 800)
+	tt.Frame()
+	a.signedIn(&store.User{ID: "u2", Email: "sam@example.com"})
+	tt.Frame()
+	if !tt.HasText(locales.SigninRemovesUnsynced(a.st.PendingCount(), "sam@example.com")) {
+		t.Fatalf("no alert on the page: %v", tt.Texts())
+	}
+	if err := tt.Click(locales.CommonCancel()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+
+	// Signing in with nothing to lose leaves the page open.
+	if err := a.st.SetValue("account", ""); err != nil {
+		t.Fatal(err)
+	}
+	a.signedIn(&store.User{ID: "u2", Email: "sam@example.com"})
+	tt.Frame()
+	if !a.session.SignedIn || a.route != (Route{Kind: "page", ID: p.ID}) {
+		t.Errorf("signed in %v, at %+v", a.session.SignedIn, a.route)
+	}
+}
+
+// Signing in as another account that fails to become the session, as when
+// the previous account's pages cannot be removed, signs it out again.
+func TestSignInThatFailsSignsOut(t *testing.T) {
+	t.Cleanup(func() { signIn = signInState{} })
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u2")
+	if err := a.st.SetValue("account", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "Uploaded"}); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := a.st.Pending()
+	for _, e := range entries {
+		if err := a.st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := a.st.DB().Exec(`CREATE TRIGGER full BEFORE DELETE ON pages BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	a.signedIn(&store.User{ID: "u2", Email: "sam@example.com"})
+	for deadline := time.Now().Add(5 * time.Second); a.backend.SignedIn(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the new account is still signed in")
+		}
+	}
+	if a.session.SignedIn {
+		t.Error("the session is the new account's")
 	}
 }
 
@@ -95,6 +171,39 @@ func TestSignOutAsksAboutAChangeStoredMeanwhile(t *testing.T) {
 	(<-posted)()
 	if _, err := a.st.Page(p.ID); err != nil || account.unsynced == 0 || !a.backend.SignedIn() {
 		t.Fatalf("page %v, asked about %d, signed in %v", err, account.unsynced, a.backend.SignedIn())
+	}
+}
+
+// A change stored as signing out removes the account's pages, which the
+// removal finds and stops for, is asked about, not shown as an error, and
+// leaves the device signed in, as a change found before does.
+func TestSignOutAsksAboutAChangeFoundAsItRemoves(t *testing.T) {
+	t.Cleanup(func() { account = accountState{} })
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest("http://127.0.0.1:1", a.st, "u1")
+	posted := make(chan func(), 1)
+	a.post = func(fn func()) { posted <- fn }
+	a.leave(func() error { return store.ErrUnsynced }, true)
+	(<-posted)()
+	if account.unsynced == 0 || len(a.toasts) != 0 || !a.backend.SignedIn() {
+		t.Errorf("asked about %d, toasts %+v, signed in %v", account.unsynced, a.toasts, a.backend.SignedIn())
+	}
+}
+
+// Deleting the account wipes the device's settings with it: those the app
+// shows then are a new device's, not the ones gone.
+func TestWipeResetsSettings(t *testing.T) {
+	t.Cleanup(func() { account = accountState{} })
+	a := templatesApp(t)
+	a.settings = a.st.Settings()
+	a.settings.TextSize = 21
+	a.saveSettings()
+	posted := make(chan func(), 1)
+	a.post = func(fn func()) { posted <- fn }
+	a.leave(a.st.Wipe, false)
+	(<-posted)()
+	if a.settings.TextSize != store.DefaultSettings().TextSize {
+		t.Errorf("text size %v after the wipe", a.settings.TextSize)
 	}
 }
 
@@ -160,5 +269,31 @@ func TestICloudSyncDisablesSupabaseSignIn(t *testing.T) {
 	if supa.step != "" {
 		supa.cancel()
 		t.Fatalf("signing in with iCloud sync on: step %q", supa.step)
+	}
+}
+
+// A second click on a project while the first one's setup starts does
+// nothing: one setup runs at a time.
+func TestChooseProjectOnce(t *testing.T) {
+	auth, base := supabaseapi.Auth, supabaseapi.Base
+	supabaseapi.Auth, supabaseapi.Base = "http://127.0.0.1:1", "http://127.0.0.1:1"
+	t.Cleanup(func() {
+		supabaseapi.Auth, supabaseapi.Base = auth, base
+		supa, signIn = supabaseState{}, signInState{}
+	})
+	a := templatesApp(t)
+	posted := make(chan func(), 4)
+	a.post = func(fn func()) { posted <- fn }
+	supa = supabaseState{run: nextRun(), step: stepChoose, api: supabaseapi.Resume(""), org: "org"}
+	a.chooseProject(nil)
+	run := supa.run
+	a.chooseProject(nil)
+	if supa.run != run || supa.step != stepCreating {
+		t.Errorf("run %d, want %d; step %q", supa.run, run, supa.step)
+	}
+	supa.cancel()
+	(<-posted)()
+	if supa.step != "" || signIn.err == "" {
+		t.Errorf("after the setup failed: step %q, error %q", supa.step, signIn.err)
 	}
 }

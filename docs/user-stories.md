@@ -137,6 +137,9 @@ title.
 
 ## Missing features
 
+Built since: M1, as the `@` menu now lists pages and links the one picked,
+and M7, as Duplicate in a page's menu in the sidebar.
+
 - **M1.** `@` in the page only lists agents. There's no way to mention or link
   another page.
 - **M2.** Comments have no `@` autocomplete. You have to type the agent's exact

@@ -71,10 +71,15 @@ export type Position =
   | { parent: string }
   | { at: "start" | "end" };
 
+/**
+ * A block as agents read it, with the keys doc.BlockViews gives it on the
+ * client: an agent sees the same page in the cloud as on a device.
+ */
 export interface BlockView {
   id: string;
   type: string;
-  text: string;
+  /** For text blocks, as inline markdown; for code, the code. */
+  text?: string;
   depth: number;
   parent_id?: string;
   level?: number;
@@ -85,11 +90,16 @@ export interface BlockView {
   collapsed?: boolean;
   formula?: string;
   source?: string;
-  url?: string;
   rows?: string[][];
   chart?: Record<string, unknown>;
-  embed?: { title: string; height: number; html_length: number };
+  /** The source too, so an agent can change an embed with replace_block rather than write a new one blind. */
+  embed?: { title: unknown; height: unknown; html: unknown };
+  image?: { url: unknown; alt: unknown };
+  video?: { url: unknown; title: unknown };
+  link?: { url: unknown; title: unknown; description: unknown };
+  file?: { name: unknown; mime: unknown; size: unknown };
   recording?: Record<string, unknown>;
+  page_id?: unknown;
 }
 
 export const TEXT_TYPES = new Set([
@@ -248,8 +258,31 @@ function isWordChar(ch: string | undefined): boolean {
   return !!ch && /[\p{L}\p{N}]/u.test(ch);
 }
 
-function isSpace(ch: string): boolean {
-  return /\s/u.test(ch);
+/**
+ * The characters Go's unicode.IsSpace takes for spaces, as a regular
+ * expression's class: what the client trims or reads as space, this side
+ * does too. U+0085 is one; U+FEFF, which JavaScript's \s has, is not.
+ */
+export const SPACES = "\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
+const spaceRe = new RegExp(`[${SPACES}]`, "u");
+const spaceRunRe = new RegExp(`[${SPACES}]+`, "u");
+const edgeSpacesRe = new RegExp(`^[${SPACES}]+|[${SPACES}]+$`, "gu");
+const leadSpacesRe = new RegExp(`^[${SPACES}]+`, "u");
+const tailSpacesRe = new RegExp(`[${SPACES}]+$`, "u");
+
+/** Whether s holds a space, as unicode.IsSpace has one; for one character, whether it is one. */
+export function isSpace(s: string): boolean {
+  return spaceRe.test(s);
+}
+
+/** s without the spaces at its ends (strings.TrimSpace). */
+export function trimSpace(s: string): string {
+  return s.replace(edgeSpacesRe, "");
+}
+
+/** The words of s between runs of spaces (strings.Fields). */
+export function fields(s: string): string[] {
+  return s.split(spaceRunRe).filter(Boolean);
 }
 
 /** Whether a backslash escapes ch: ASCII punctuation. */
@@ -333,7 +366,9 @@ function trimSpans(runs: MdRun[]): MdRun[] {
     for (const ch of r.text) cs.push({ ch, r, run: i });
   });
   const marks: ("bold" | "italic" | "strike")[] = ["bold", "italic", "strike"];
-  const space = (i: number) => !cs[i].r.code && isSpace(cs[i].ch);
+  // Off line breaks in code too: a line can't start with a marker that
+  // closes, where it can read as a list item's.
+  const space = (i: number) => (!cs[i].r.code || cs[i].ch === "\n") && isSpace(cs[i].ch);
   for (const mark of marks) {
     for (let i = 0; i < cs.length;) {
       if (!cs[i].r[mark]) {
@@ -419,17 +454,17 @@ function spacesOutside(toks: MdToken[]): MdToken[] {
     for (; j < toks.length; j++) {
       const t = toks[j];
       if (isMarker(t)) marks.push(t);
-      else if (plain(t) && t.text.trim() === "") spaces.push({ text: t.text, at: marks.length });
+      else if (plain(t) && trimSpace(t.text) === "") spaces.push({ text: t.text, at: marks.length });
       else break;
     }
     const prev = out[out.length - 1];
     if (prev && plain(prev)) {
-      const t = prev.text.replace(/\s+$/u, "");
+      const t = prev.text.replace(tailSpacesRe, "");
       spaces.unshift({ text: prev.text.slice(t.length), at: 0 });
       prev.text = t;
     }
     if (j < toks.length && plain(toks[j])) {
-      const t = toks[j].text.replace(/^\s+/u, "");
+      const t = toks[j].text.replace(leadSpacesRe, "");
       spaces.push({ text: toks[j].text.slice(0, toks[j].text.length - t.length), at: marks.length });
       toks[j].text = t;
     }
@@ -498,7 +533,7 @@ function codeSpan(s: string): string {
     } else run = 0;
   }
   const ticks = "`".repeat(fence);
-  if (s.startsWith("`") || s.endsWith("`") || (s.startsWith(" ") && s.endsWith(" ") && s.trim() !== "")) {
+  if (s.startsWith("`") || s.endsWith("`") || (s.startsWith(" ") && s.endsWith(" ") && trimSpace(s) !== "")) {
     s = ` ${s} `;
   }
   return ticks + s + ticks;
@@ -563,6 +598,10 @@ export function deltaToMarkdown(delta: DeltaOp[]): string {
   toks = spacesOutside(toks);
   let out = "";
   toks.forEach((t, i) => {
+    // A ! before a link would make it a picture: it is escaped.
+    if ((t.open && t.mark!.kind === "[" || !isMarker(t) && !t.code && t.text.startsWith("[")) && out.endsWith("!")) {
+      out = out.slice(0, -1) + "\\!";
+    }
     if (t.code) out += codeSpan(t.text);
     else if (!isMarker(t)) out += t.text;
     else if (t.mark!.kind === "[") out += t.open ? "[" : `](${linkDestination(t.mark!.href)})`;
@@ -579,7 +618,7 @@ export function deltaToMarkdown(delta: DeltaOp[]): string {
  * characters they take. As in CommonMark, the url may be in angle
  * brackets or hold balanced parentheses, and backslashes escape in both.
  */
-function link(s: string[]): { text: string[]; href: string; n: number } | null {
+export function link(s: string[]): { text: string[]; href: string; n: number } | null {
   let i = 1, depth = 0;
   for (; i < s.length; i++) {
     if (s[i] === "\\") i++;
@@ -630,7 +669,7 @@ function link(s: string[]): { text: string[]; href: string; n: number } | null {
  * and how many characters it takes; null when there is none. A space
  * inside each end comes off, as CommonMark has it.
  */
-function codeSpanAt(s: string[]): { code: string; n: number } | null {
+export function codeSpanAt(s: string[]): { code: string; n: number } | null {
   let open = 0;
   while (open < s.length && s[open] === "`") open++;
   for (let j = open; j < s.length;) {
@@ -642,7 +681,7 @@ function codeSpanAt(s: string[]): { code: string; n: number } | null {
     while (end < s.length && s[end] === "`") end++;
     if (end - j === open) {
       let code = s.slice(open, j).join("");
-      if (code.length >= 2 && code[0] === " " && code[code.length - 1] === " " && code.trim() !== "") {
+      if (code.length >= 2 && code[0] === " " && code[code.length - 1] === " " && trimSpace(code) !== "") {
         code = code.slice(1, -1);
       }
       return code ? { code, n: end } : null;
@@ -704,6 +743,27 @@ function indexOfMarker(s: string[], marker: string, from: number): number {
   return -1;
 }
 
+/** The formats a run keeps of its own (doc.Attrs), which sharedAttrs looks at. */
+const FLAGS = ["bold", "italic", "underline", "strikethrough", "code"];
+const COLORS = ["color", "background"];
+
+/** The formats every run of d has, or attrs when it has none (doc.sharedAttrs). */
+function sharedAttrs(d: DeltaOp[], attrs: Attrs): Attrs {
+  // Runs of spaces only have no say: Markdown writes no format over them.
+  const words = d.filter((r) => trimSpace(r.insert) !== "");
+  if (words.length) d = words;
+  if (d.length === 0) return attrs;
+  const out: Attrs = {};
+  for (const k of FLAGS) {
+    if (d.every((r) => r.attributes?.[k] === true)) out[k] = true;
+  }
+  for (const k of COLORS) {
+    const v = d[0].attributes?.[k];
+    if (v !== undefined && d.every((r) => r.attributes?.[k] === v)) out[k] = v;
+  }
+  return out;
+}
+
 function parseInline(s: string[], attrs: Attrs, out: DeltaOp[]): void {
   let plain = "";
   const flush = () => {
@@ -733,11 +793,15 @@ function parseInline(s: string[], attrs: Attrs, out: DeltaOp[]): void {
         const page = pageLink(l.href);
         const mention = mentionLink(l.href);
         if (page && !page.block) {
-          // A link to a page is a mention of it; one to a block of a page
-          // stays a link, with its own text.
-          const name = deltaToPlain(markdownToDelta(l.text.join("")));
+          // A link to a page is a mention of it, in the formats around the
+          // link and those all its text has, as deltaToMarkdown writes a
+          // mention's own; one to a block of a page stays a link, with its
+          // own text.
+          const inner: DeltaOp[] = [];
+          parseInline(l.text, attrs, inner);
+          const name = deltaToPlain(inner);
           pushText(out, name, {
-            ...attrs,
+            ...sharedAttrs(inner, attrs),
             href: PAGE_LINK_PREFIX + page.id,
             mention: { kind: "page", id: page.id, name },
           });
@@ -845,7 +909,7 @@ const CALLOUT_TONES = new Set(["info", "tip", "warning", "danger"]);
 
 /** A callout's tone, or info (doc.CalloutTone). */
 export function calloutTone(tone: unknown): string {
-  const t = String(tone ?? "").trim().toLowerCase();
+  const t = trimSpace(String(tone ?? "")).toLowerCase();
   return CALLOUT_TONES.has(t) ? t : "info";
 }
 
@@ -856,7 +920,7 @@ const VIDEO_EXTS = new Set([".mp4", ".m4v", ".mov", ".webm", ".ogv"]);
 export function isVideoURL(link: string): boolean {
   let u: URL;
   try {
-    u = new URL(link.trim());
+    u = new URL(trimSpace(link));
   } catch {
     return false;
   }
@@ -881,9 +945,12 @@ export function isVideoURL(link: string): boolean {
   return VIDEO_EXTS.has(ext);
 }
 
-/** A code block's language as the ID it keeps (doc.CodeLanguageID). */
+/**
+ * A code block's language as the ID it keeps (doc.CodeLanguageID): its
+ * spaces dashes, as a fence, which ends a language at a space, can write it.
+ */
 export function codeLanguage(name: unknown): string {
-  const id = String(name ?? "").trim().toLowerCase();
+  const id = fields(String(name ?? "")).join("-").toLowerCase();
   return Object.hasOwn(LANGUAGE_ALIASES, id) ? LANGUAGE_ALIASES[id] : id;
 }
 
@@ -891,9 +958,57 @@ function textNode(id: string, type: string, text: string, extra: Record<string, 
   return { id, type, data: { ...extra, delta: markdownToDelta(text ?? "") } };
 }
 
+/** A JSON number as an integer within min and max, as doc.AsInt reads one: cut to its whole part. */
 function clampInt(value: unknown, min: number, max: number, fallback: number): number {
-  const n = typeof value === "number" ? Math.round(value) : Number.NaN;
+  const n = typeof value === "number" ? Math.trunc(value) : Number.NaN;
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+}
+
+/** A spec's value as text (doc.specText): a string as it is, null as nothing, a number or a boolean as it reads. */
+function specText(value: unknown): string {
+  // A list or an object is no text, as on the client.
+  return value == null || typeof value === "object" ? "" : String(value);
+}
+
+/** A spec's string, or nothing for a value of another kind, as doc.SpecToNode reads one. */
+function str(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * A chart's value (doc.chartValue): a JSON number, or a string of a
+ * decimal one. What is not one, NaN and infinity among them, is no value: 0.
+ */
+function specNumber(value: unknown): number {
+  const s = typeof value === "string" ? trimSpace(value) : "";
+  const n = typeof value === "number"
+    ? value
+    : /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)
+    ? Number(s)
+    : Number.NaN;
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * Whether an agent's link for a block the app loads by itself is a web link
+ * with a host's name and no space of any kind (doc.agentURL).
+ */
+function webURL(link: string): boolean {
+  if (isSpace(link) || !/^https?:\/\/[^/?#]+/i.test(link)) return false;
+  try {
+    new URL(link);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A spec's own object for a block, or the spec itself when it has none, as doc.SpecToNode reads image, video and link. */
+function specPart(spec: BlockSpec, key: "image" | "video" | "link"): Record<string, unknown> {
+  const part = spec[key];
+  return part && typeof part === "object" && !Array.isArray(part)
+    ? part as Record<string, unknown>
+    : spec as unknown as Record<string, unknown>;
 }
 
 function validateChart(chart: unknown): ChartSpec {
@@ -901,7 +1016,8 @@ function validateChart(chart: unknown): ChartSpec {
     throw new SpecError("A chart block needs a `chart` object");
   }
   const c = chart as Partial<ChartSpec>;
-  const chartType = c.chart_type ?? "bar";
+  // No type, or an empty one, is a bar chart, as doc.ChartData has it.
+  const chartType = typeof c.chart_type === "string" && c.chart_type ? c.chart_type : "bar";
   if (!["bar", "line", "pie"].includes(chartType)) {
     throw new SpecError("chart.chart_type must be bar, line or pie");
   }
@@ -911,25 +1027,25 @@ function validateChart(chart: unknown): ChartSpec {
   if (!Array.isArray(c.series) || c.series.length === 0) {
     throw new SpecError("chart.series must be a non-empty array");
   }
-  const labels = c.labels.map((l) => String(l));
+  const labels = c.labels.map(specText);
   const series = c.series.map((s, i) => {
-    const values = Array.isArray(s?.values) ? s.values.map(Number) : [];
-    if (values.length !== labels.length || values.some((v) => !Number.isFinite(v))) {
+    const values = Array.isArray(s?.values) ? s.values.map(specNumber) : [];
+    if (values.length !== labels.length) {
       throw new SpecError(
         `chart.series[${i}].values must hold ${labels.length} numbers, one per label`,
       );
     }
-    return { name: String(s?.name ?? `Series ${i + 1}`), values };
+    return { name: s?.name == null ? `Series ${i + 1}` : specText(s.name), values };
   });
   if (chartType === "pie" && series.length > 1) {
     throw new SpecError("A pie chart takes exactly one series");
   }
   return {
     chart_type: chartType,
-    title: c.title ? String(c.title) : "",
+    title: str(c.title),
     labels,
     series,
-    caption: c.caption ? String(c.caption) : "",
+    caption: str(c.caption),
   };
 }
 
@@ -948,9 +1064,13 @@ export interface SpecOptions {
 export const MAX_SPEC_DEPTH = 16;
 export const MAX_SPEC_NODES = 2000;
 
-/** Whether a line is a Markdown horizontal rule: three or more of -, * or _. */
+/**
+ * Whether a line is a Markdown horizontal rule (doc.IsRule): three or more
+ * of the same one of -, * or _, with spaces or tabs between them and around
+ * them, as CommonMark has it.
+ */
 export function isRule(line: string): boolean {
-  return /^([-*_])(\s*\1){2,}$/.test(line.trim());
+  return /^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/.test(line);
 }
 
 /**
@@ -975,9 +1095,11 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
   if (spec.children != null && !Array.isArray(spec.children)) {
     throw new SpecError("children must be an array of blocks");
   }
-  let type = String(spec.type ?? "paragraph");
+  // No type, or an empty one, is a paragraph, as doc.SpecToNode has it.
+  let type = typeof spec.type === "string" && spec.type ? spec.type : "paragraph";
   // A Markdown rule written as text is the divider it stands for.
-  if (type === "paragraph" && isRule(spec.text ?? "")) type = "divider";
+  const text = str(spec.text);
+  if (type === "paragraph" && isRule(text)) type = "divider";
   if (!SPEC_TYPES.has(type)) {
     throw new SpecError(
       `Unknown block type "${type}". Use one of: ${[...SPEC_TYPES].join(", ")}`,
@@ -990,10 +1112,10 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
   let node: NodeJSON;
   switch (type) {
     case "heading":
-      node = textNode(id, type, spec.text ?? "", { level: clampInt(spec.level, 1, 6, 2) });
+      node = textNode(id, type, text, { level: clampInt(spec.level, 1, 6, 2) });
       break;
     case "todo_list":
-      node = textNode(id, type, spec.text ?? "", {
+      node = textNode(id, type, text, {
         checked: spec.checked === true,
         ...(validDue(spec.due) ? { due: spec.due } : {}),
       });
@@ -1002,49 +1124,50 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
     case "bulleted_list":
     case "numbered_list":
     case "quote":
-      node = textNode(id, type, spec.text ?? "");
+      node = textNode(id, type, text);
       break;
     case "callout":
-      node = textNode(id, type, spec.text ?? "", { tone: calloutTone(spec.tone) });
+      node = textNode(id, type, text, { tone: calloutTone(spec.tone) });
       break;
     case "toggle_list":
-      node = textNode(id, type, spec.text ?? "", { collapsed: spec.collapsed === true });
+      node = textNode(id, type, text, { collapsed: spec.collapsed === true });
       break;
     case "video": {
-      const url = String(spec.video?.url ?? "").trim();
+      const video = specPart(spec, "video");
+      const url = trimSpace(str(video.url));
       if (!isVideoURL(url)) {
         throw new SpecError("A video block needs `video.url`, a YouTube or Vimeo link or a link to a video file");
       }
-      node = { id, type, data: { url, title: String(spec.video?.title ?? "").trim() } };
+      node = { id, type, data: { url, title: trimSpace(str(video.title)) } };
       break;
     }
     case "link_preview": {
-      const url = String(spec.link?.url ?? "").trim();
-      if (!/^https?:\/\/[^\s/]+/i.test(url) || /\s/.test(url)) {
+      const url = trimSpace(str(specPart(spec, "link").url));
+      if (!webURL(url)) {
         throw new SpecError("A link_preview block needs `link.url`, an http(s) link");
       }
       node = { id, type, data: { url } };
       break;
     }
     case "math_equation": {
-      const formula = String(spec.formula ?? "").trim();
+      const formula = trimSpace(str(spec.formula));
       if (!formula) throw new SpecError("A math_equation block needs `formula`, in TeX");
       node = { id, type, data: { formula } };
       break;
     }
     case "diagram": {
-      const source = String(spec.source ?? "").replace(/^\n+|\n+$/g, "");
-      if (!source.trim()) throw new SpecError("A diagram block needs `source`, in Mermaid");
+      const source = str(spec.source).replace(/^\n+|\n+$/g, "");
+      if (!trimSpace(source)) throw new SpecError("A diagram block needs `source`, in Mermaid");
       node = { id, type, data: { source } };
       break;
     }
     case "code": {
       // The code as it is, not markdown; data.delta is its plain text.
-      const code = String(spec.text ?? "").replace(/\n$/, "");
+      const code = text.replace(/\n$/, "");
       node = {
         id,
         type,
-        data: { delta: code ? [{ insert: code }] : [], language: codeLanguage(spec.language) },
+        data: { delta: code ? [{ insert: code }] : [], language: codeLanguage(str(spec.language)) },
       };
       break;
     }
@@ -1052,15 +1175,23 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
       node = { id, type };
       break;
     case "image": {
-      const url = spec.image?.url ?? "";
-      if (!/^https?:\/\//i.test(url)) throw new SpecError("image.url must be an http(s) URL");
-      const alt = typeof spec.image?.alt === "string" ? spec.image.alt : "";
+      const image = specPart(spec, "image");
+      // The app loads it by itself.
+      const url = typeof image.url === "string" ? trimSpace(image.url) : "";
+      if (!webURL(url)) throw new SpecError("image.url must be an http(s) URL");
+      const alt = typeof image.alt === "string" ? image.alt : "";
       node = { id, type, data: { url, align: "center", alt } };
       break;
     }
-    case "table":
+    case "table": {
+      // Each cell is a block, and counts as one, as in doc.SpecToNode.
+      const rows = Array.isArray(spec.rows) ? spec.rows as unknown[] : [];
+      const cols = rows.reduce((n: number, r) => Math.max(n, Array.isArray(r) ? r.length : 0), 0);
+      made.count += rows.length * cols;
+      if (made.count > MAX_SPEC_NODES) throw new SpecError(`At most ${MAX_SPEC_NODES} blocks in all per call`);
       node = tableNode(id, spec.rows, opts.newId);
       break;
+    }
     case "chart":
       node = {
         id,
@@ -1070,7 +1201,7 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
       break;
     case "embed": {
       const html = spec.embed?.html;
-      if (typeof html !== "string" || !html.trim()) {
+      if (typeof html !== "string" || !trimSpace(html)) {
         throw new SpecError("An embed block needs `embed.html`");
       }
       if (html.length > 200_000) throw new SpecError("embed.html must be under 200 KB");
@@ -1104,18 +1235,16 @@ export function tableNode(id: string, rows: unknown, newId: IdFactory): NodeJSON
     throw new SpecError("A table block needs `rows`: an array of rows, each an array of cell strings");
   }
   const rowsLen = rows.length;
-  const colsLen = Math.max(...rows.map((r) => (r as unknown[]).length));
+  const colsLen = rows.reduce((n: number, r) => Math.max(n, (r as unknown[]).length), 0);
   if (colsLen === 0) throw new SpecError("Table rows must have at least one cell");
-  if (rowsLen * colsLen > 400) throw new SpecError("Tables are limited to 400 cells");
   const children: NodeJSON[] = [];
   for (let col = 0; col < colsLen; col++) {
     for (let row = 0; row < rowsLen; row++) {
-      const value = (rows[row] as unknown[])[col];
       children.push({
         id: newId(),
         type: "table/cell",
         data: { colPosition: col, rowPosition: row },
-        children: [textNode(newId(), "paragraph", value == null ? "" : String(value))],
+        children: [textNode(newId(), "paragraph", specText((rows[row] as unknown[])[col]))],
       });
     }
   }
@@ -1198,17 +1327,14 @@ export function nodeView(
   parentId: string | undefined,
   recordings: Map<string, RecordingInfo>,
 ): BlockView {
-  const view: BlockView = { id: node.id, type: node.type, text: "", depth };
+  const view: BlockView = { id: node.id, type: node.type, depth };
   if (parentId) view.parent_id = parentId;
   const data = node.data ?? {};
   if (TEXT_TYPES.has(node.type)) view.text = deltaToMarkdown(deltaOf(node));
   switch (node.type) {
-    case "heading":
-      view.level = Number(data.level ?? 1);
-      break;
     case "code":
       view.text = deltaToPlain(deltaOf(node));
-      view.language = String(data.language ?? "");
+      view.language = typeof data.language === "string" ? data.language : "";
       break;
     case "callout":
       view.tone = calloutTone(data.tone);
@@ -1216,65 +1342,76 @@ export function nodeView(
     case "toggle_list":
       view.collapsed = data.collapsed === true;
       break;
-    case "video":
-    case "link_preview":
-      view.text = String(data.title ?? data.url ?? "");
-      view.url = String(data.url ?? "");
-      break;
-    case "file":
-      view.text = String(data.name ?? "");
-      break;
-    case "math_equation":
-      view.formula = String(data.formula ?? "");
-      view.text = view.formula;
-      break;
-    case "diagram":
-      view.source = String(data.source ?? "");
-      view.text = view.source;
+    case "heading":
+      // Within 1 and 6, however far past them it is stored, as on the client.
+      view.level = Math.min(Math.max(asInt(data.level, 1), 1), 6);
       break;
     case "todo_list":
       view.checked = data.checked === true;
-      if (typeof data.due === "string") view.due = data.due;
+      if (typeof data.due === "string" && data.due) view.due = data.due;
       break;
     case "table":
       view.rows = tableRows(node);
       break;
     case "chart":
-      view.text = String(data.title ?? "");
       view.chart = {
         chart_type: data.chart_type,
         title: data.title,
         labels: data.labels,
         series: data.series,
+        caption: data.caption,
       };
       break;
     case "embed":
-      view.text = String(data.title ?? "");
-      view.embed = {
-        title: String(data.title ?? ""),
-        height: Number(data.height ?? 360),
-        html_length: String(data.html ?? "").length,
-      };
+      view.embed = { title: data.title, height: data.height, html: data.html };
       break;
     case "image":
-      view.text = String(data.url ?? "");
+      view.image = { url: data.url, alt: data.alt };
+      break;
+    case "video":
+      view.video = { url: data.url, title: data.title };
+      break;
+    case "math_equation":
+      view.formula = typeof data.formula === "string" ? data.formula : "";
+      break;
+    case "diagram":
+      view.source = typeof data.source === "string" ? data.source : "";
+      break;
+    case "link_preview":
+      view.link = { url: data.url, title: data.title, description: data.description };
+      break;
+    case "file":
+      view.file = { name: data.name, mime: data.mime, size: data.size };
       break;
     case "recording": {
+      // What the block has, as doc.BlockViews gives it, and what the
+      // server knows of the recording besides: how long it is, whether its
+      // transcript is done, and the transcript, which the client adds too.
       const rid = String(data.recording_id ?? "");
       const info = recordings.get(rid);
-      view.text = String(data.title ?? info?.title ?? "Recording");
       view.recording = {
-        recording_id: rid,
-        duration_ms: data.duration_ms ?? info?.duration_ms,
-        status: info?.status,
-        transcript: (info?.transcript ?? [])
-          .map((s) => `${clock(s.start_ms ?? 0)}${s.speaker ? ` ${s.speaker}:` : ""} ${s.text ?? ""}`.trim())
-          .join("\n"),
+        recording_id: data.recording_id,
+        title: data.title,
+        // The block's own, null too, as on the client; else the server's.
+        duration_ms: "duration_ms" in data ? data.duration_ms : info?.duration_ms,
+        ...(info
+          ? {
+            status: info.status,
+            transcript: (info.transcript ?? [])
+              .map((s) =>
+                `${clock(s.start_ms ?? 0)}${s.speaker ? ` ${s.speaker}:` : ""} ${s.text ?? ""}`.replace(
+                  edgeSpacesRe,
+                  "",
+                )
+              )
+              .join("\n"),
+          }
+          : {}),
       };
       break;
     }
     case "subpage":
-      view.text = String(data.title ?? data.page_id ?? "");
+      view.page_id = data.page_id;
       break;
   }
   return view;

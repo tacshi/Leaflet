@@ -19,6 +19,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/icloud"
 	"leaflet/internal/remote"
+	"leaflet/internal/starters"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -96,6 +97,7 @@ func (a *App) copyable(id string, failed func(error), again func()) bool {
 	}
 	// One copy's downloads at a time: the toast says they are coming.
 	if a.fetchingCopy {
+		a.toast(locales.TemplateFetchingOther())
 		return false
 	}
 	a.fetchingCopy = true
@@ -211,66 +213,10 @@ func (a *App) templateKids(id string) []store.Page {
 	return out
 }
 
-// A starter is a template that comes with Leaflet, in the app's language
-// when it is used. It shows until the user has a template of its title, as
-// editing it makes.
-type starter struct {
-	key, icon   string
-	title, hint func() string
-	blocks      func() []map[string]any
-}
+// A starter is a template that comes with Leaflet (internal/starters).
+type starter = starters.Starter
 
-// starters are the templates that come with Leaflet.
-func starters() []starter {
-	heading := func(s string) map[string]any { return map[string]any{"type": "heading", "level": 2.0, "text": s} }
-	empty := func(typ string) map[string]any { return map[string]any{"type": typ, "text": ""} }
-	return []starter{
-		{"meeting", "calendar", locales.TemplateStarterMeeting, locales.TemplateStarterMeetingHint, func() []map[string]any {
-			return []map[string]any{
-				heading(locales.TemplateStarterAgenda()), empty("numbered_list"),
-				heading(locales.TemplateStarterNotes()), empty("bulleted_list"),
-				heading(locales.TemplateStarterActionItems()), empty("todo_list"),
-			}
-		}},
-		{"todo", "square-check", locales.TemplateStarterTodo, locales.TemplateStarterTodoHint, func() []map[string]any {
-			return []map[string]any{
-				heading(locales.TemplateStarterToday()), empty("todo_list"),
-				heading(locales.TemplateStarterThisWeek()), empty("todo_list"),
-				heading(locales.TemplateStarterLater()), empty("todo_list"),
-			}
-		}},
-		{"project", "lightbulb", locales.TemplateStarterProject, locales.TemplateStarterProjectHint, func() []map[string]any {
-			return []map[string]any{
-				heading(locales.TemplateStarterOverview()), empty("paragraph"),
-				heading(locales.TemplateStarterGoals()), empty("bulleted_list"),
-				heading(locales.TemplateStarterMilestones()),
-				{"type": "table", "rows": []any{
-					[]any{locales.TemplateStarterMilestone(), locales.TemplateStarterOwner(), locales.TemplateStarterDue()},
-					[]any{"", "", ""},
-				}},
-				heading(locales.TemplateStarterQuestions()), empty("bulleted_list"),
-			}
-		}},
-		{"journal", "square-pen", locales.TemplateStarterJournal, locales.TemplateStarterJournalHint, func() []map[string]any {
-			return []map[string]any{
-				heading(locales.TemplateStarterHighlights()), empty("bulleted_list"),
-				heading(locales.TemplateStarterGrateful()), empty("numbered_list"),
-				heading(locales.TemplateStarterTomorrow()), empty("todo_list"),
-			}
-		}},
-	}
-}
-
-// nodes are a starter's blocks.
-func (s starter) nodes() []*doc.Node {
-	var out []*doc.Node
-	for _, spec := range s.blocks() {
-		if n, err := doc.SpecToNode(spec, "", "Leaflet"); err == nil {
-			out = append(out, n)
-		}
-	}
-	return out
-}
+func starterList() []starter { return starters.All() }
 
 // A templateChoice is a template to start a page from: one of the user's,
 // or a starter.
@@ -284,7 +230,7 @@ func (t templateChoice) key() string {
 	if t.page != nil {
 		return "template:" + t.page.ID
 	}
-	return "starter:" + t.starter.key
+	return "starter:" + t.starter.Key
 }
 
 // name is the title a page takes from the template, "" for none.
@@ -292,7 +238,7 @@ func (t templateChoice) name() string {
 	if t.page != nil {
 		return t.page.Title
 	}
-	return t.starter.title()
+	return t.starter.Title()
 }
 
 func (t templateChoice) title() string { return store.TitleOr(t.name()) }
@@ -301,7 +247,7 @@ func (t templateChoice) icon() string {
 	if t.page != nil {
 		return "layout-template"
 	}
-	return t.starter.icon
+	return t.starter.Icon
 }
 
 // choiceHint tells a template apart under its name.
@@ -309,7 +255,7 @@ func (a *App) choiceHint(t templateChoice) string {
 	if t.page != nil {
 		return a.templateHint(*t.page)
 	}
-	return t.starter.hint()
+	return t.starter.Hint()
 }
 
 // templateChoices are the user's templates, by title, then the starters
@@ -323,9 +269,9 @@ func (a *App) templateChoices() []templateChoice {
 		out = append(out, templateChoice{page: &roots[i]})
 	}
 	gone := a.deletedStarters()
-	ss := starters()
+	ss := starterList()
 	for i := range ss {
-		if !gone[ss[i].key] && !titles[strings.ToLower(ss[i].title())] {
+		if !gone[ss[i].Key] && !titles[strings.ToLower(ss[i].Title())] {
 			out = append(out, templateChoice{starter: &ss[i]})
 		}
 	}
@@ -374,7 +320,7 @@ func (a *App) deleteTemplate(t templateChoice) {
 		a.deletePage(t.page.ID)
 		return
 	}
-	key := t.starter.key
+	key := t.starter.Key
 	if err := a.setStarterDeleted(key, true); err != nil {
 		a.toast(locales.AppErrorDelete(err.Error()))
 		return
@@ -403,12 +349,12 @@ func (a *App) ownTemplate(t templateChoice) (store.Page, error) {
 	if t.page != nil {
 		return *t.page, nil
 	}
-	p, err := a.st.CreatePage(store.NewPageOptions{Title: t.starter.title(), Template: true, Content: doc.FromBlocks(t.starter.nodes())})
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: t.starter.Title(), Template: true, Content: doc.FromBlocks(t.starter.Nodes())})
 	if err != nil {
 		return store.Page{}, err
 	}
 	a.templates, _ = a.st.Templates()
-	return p, a.setStarterDeleted(t.starter.key, true)
+	return p, a.setStarterDeleted(t.starter.Key, true)
 }
 
 // editTemplate opens a template to change it; a starter becomes the
@@ -427,7 +373,7 @@ func (a *App) editTemplate(t templateChoice) {
 // page. When it has none to give it says why, and reports false.
 func (a *App) templateBlocks(t templateChoice, id string, again func()) ([]*doc.Node, bool) {
 	if t.starter != nil {
-		return t.starter.nodes(), true
+		return t.starter.Nodes(), true
 	}
 	// A copy would keep a recording still being made in the template
 	// unfinished, as duplicatePage's would.
@@ -642,7 +588,7 @@ func (a *App) searchHits(query string) []store.SearchHit {
 	}
 	for _, t := range a.templateChoices() {
 		if t.starter != nil && strings.Contains(strings.ToLower(t.title()), q) {
-			hits = append(hits, store.SearchHit{Kind: "template", Title: t.title(), PageID: t.key(), Snippet: t.starter.hint()})
+			hits = append(hits, store.SearchHit{Kind: "template", Title: t.title(), PageID: t.key(), Snippet: t.starter.Hint()})
 		}
 	}
 	return hits

@@ -9,19 +9,34 @@
 #
 #   sed 's|viewBox="0 0 1024 1024"|viewBox="100 100 824 824"|' icon.svg | \
 #     rsvg-convert -w 64 -h 64 -o ../../internal/app/favicon.png
+#
+# The iPhone and iPad icon fills the square, which iOS rounds itself, and
+# has no alpha; it has a dark variant too:
+#
+#   for v in "" -dark; do rsvg-convert -w 1024 -h 1024 ios-icon$v.svg |
+#     magick - -background white -alpha remove -alpha off \
+#     ../../ios/Leaflet/Resources/Assets.xcassets/AppIcon.appiconset/icon$v.png; done
 import json, sys
 leaf = json.load(open("leaf.json"))
-sq = open("squircle.d").read().strip()
+squircle = open("squircle.d").read().strip()
 
-def icon():
-    tile = '''<linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#EEF0EA"/></linearGradient>'''
-    lines = "".join(f'<path d="M150 {y} H874" stroke="#D8E1EE" stroke-width="5"/>' for y in range(300, 860, 92))
-    paper = f'<g clip-path="url(#clip)">{lines}<path d="M262 100 V924" stroke="#F4C7C3" stroke-width="5"/></g>'
+def icon(ios=False, dark=False):
+    """The macOS icon, or with ios the full square iOS rounds, in light or
+    dark paper."""
+    sq = "M100 100 H924 V924 H100 Z" if ios else squircle
+    top, bottom, ruled, margin = ("#2B2F33", "#1B1D20", "#3A4452", "#7A4A46") if dark else ("#FFFFFF", "#EEF0EA", "#D8E1EE", "#F4C7C3")
+    tile = f'''<linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="{top}"/><stop offset="1" stop-color="{bottom}"/></linearGradient>'''
+    lines = "".join(f'<path d="M150 {y} H874" stroke="{ruled}" stroke-width="5"/>' for y in range(300, 860, 92))
+    paper = f'<g clip-path="url(#clip)">{lines}<path d="M262 100 V924" stroke="{margin}" stroke-width="5"/></g>'
     light, deep, vein, rim, shadow = "#B6E36A", "#2E8B47", "#F3FFD9", "#1F6B35", "#264d1c"
     glow = "#FFF6B0"
     veins = "".join(f'<path d="{d}"/>' for d in leaf["veins"])
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+    view = "100 100 824 824" if ios else "0 0 1024 1024"
+    # iOS draws its own shadow and edge.
+    under = "" if ios else f'<path d="{sq}" transform="translate(0 12)" fill="#000" opacity=".28" filter="url(#tileShadow)"/>\n'
+    edge = "" if ios else f'\n<path d="{sq}" fill="none" stroke="url(#rim)" stroke-width="4"/>'
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" viewBox="{view}">
 <defs>
   {tile}
   <radialGradient id="gloss" cx=".28" cy=".16" r=".8">
@@ -46,8 +61,7 @@ def icon():
   <clipPath id="clip"><path d="{sq}"/></clipPath>
   <clipPath id="leafclip"><path d="{leaf["outline"]}"/></clipPath>
 </defs>
-<path d="{sq}" transform="translate(0 12)" fill="#000" opacity=".28" filter="url(#tileShadow)"/>
-<path d="{sq}" fill="url(#tile)"/>
+{under}<path d="{sq}" fill="url(#tile)"/>
 {paper}
 <g clip-path="url(#clip)">
   <g transform="translate(540 566) rotate(38) scale(1.02)" opacity=".30" filter="url(#soft)"><path d="{leaf["outline"]}" fill="{shadow}"/></g>
@@ -64,8 +78,9 @@ def icon():
     <path d="{leaf["outline"]}" fill="none" stroke="{rim}" stroke-opacity=".35" stroke-width="3"/>
     <path d="M-10 286 C-118 248 -226 130 -222 -24 C-216 -168 -120 -276 30 -326" stroke="#fff" stroke-opacity=".7" stroke-width="5" stroke-linecap="round" fill="none"/>
   </g>
-</g>
-<path d="{sq}" fill="none" stroke="url(#rim)" stroke-width="4"/>
+</g>{edge}
 </svg>'''
 
 open("icon.svg", "w").write(icon())
+open("ios-icon.svg", "w").write(icon(ios=True))
+open("ios-icon-dark.svg", "w").write(icon(ios=True, dark=True))

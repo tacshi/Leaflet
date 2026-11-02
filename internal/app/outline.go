@@ -48,9 +48,22 @@ func (a *App) goToBlock(id string) {
 	if a.win != nil {
 		a.win.Invalidate()
 	}
-	ps.tinted[id] = true
+	// A block an agent run tinted stays so, as it does once an agent run
+	// tints it meanwhile.
+	if ps.tinted[id] {
+		return
+	}
+	if ps.lit == nil {
+		ps.lit = map[string]bool{}
+	}
+	ps.tinted[id], ps.lit[id] = true, true
 	time.AfterFunc(1500*time.Millisecond, func() {
-		a.update(func() { delete(ps.tinted, id) })
+		a.update(func() {
+			if ps.lit[id] {
+				delete(ps.lit, id)
+				delete(ps.tinted, id)
+			}
+		})
 	})
 }
 

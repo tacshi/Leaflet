@@ -1,0 +1,1026 @@
+[
+  {
+    "spec": {
+      "text": "plain"
+    },
+    "node": {
+      "type": "paragraph",
+      "data": {
+        "delta": [
+          {
+            "insert": "plain"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "",
+      "text": "empty type"
+    },
+    "node": {
+      "type": "paragraph",
+      "data": {
+        "delta": [
+          {
+            "insert": "empty type"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "heading",
+      "level": 1.5,
+      "text": "Title"
+    },
+    "node": {
+      "type": "heading",
+      "data": {
+        "level": 1,
+        "delta": [
+          {
+            "insert": "Title"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "embed",
+      "embed": {
+        "html": "<p>x</p>",
+        "height": 500.5
+      }
+    },
+    "node": {
+      "type": "embed",
+      "data": {
+        "title": "Interactive embed",
+        "html": "<p>x</p>",
+        "height": 500,
+        "author": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "image",
+      "url": " https://example.com/a.png "
+    },
+    "node": {
+      "type": "image",
+      "data": {
+        "url": "https://example.com/a.png",
+        "align": "center",
+        "alt": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "HTTPS://example.com/b.png",
+        "alt": "B"
+      }
+    },
+    "node": {
+      "type": "image",
+      "data": {
+        "url": "HTTPS://example.com/b.png",
+        "align": "center",
+        "alt": "B"
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "http:/example.com/c.png"
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "https://"
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "video",
+      "url": "https://youtu.be/dQw4w9WgXcQ"
+    },
+    "node": {
+      "type": "video",
+      "data": {
+        "url": "https://youtu.be/dQw4w9WgXcQ",
+        "title": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "link_preview",
+      "url": "https://go.dev/doc"
+    },
+    "node": {
+      "type": "link_preview",
+      "data": {
+        "url": "https://go.dev/doc"
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "table",
+      "rows": [
+        [
+          "a",
+          null
+        ],
+        [
+          1,
+          true
+        ]
+      ]
+    },
+    "node": {
+      "type": "table",
+      "data": {
+        "colsLen": 2,
+        "rowsLen": 2,
+        "colDefaultWidth": 160,
+        "rowDefaultHeight": 40,
+        "colMinimumWidth": 40
+      },
+      "children": [
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 0,
+            "rowPosition": 0
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "a"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 0,
+            "rowPosition": 1
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "1"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 1,
+            "rowPosition": 0
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": []
+              }
+            }
+          ]
+        },
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 1,
+            "rowPosition": 1
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "true"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "spec": {
+      "type": "chart",
+      "chart": {
+        "chart_type": "line",
+        "labels": [
+          "a",
+          null
+        ],
+        "series": [
+          {
+            "values": [
+              1,
+              "2"
+            ]
+          }
+        ]
+      }
+    },
+    "node": {
+      "type": "chart",
+      "data": {
+        "chart_type": "line",
+        "title": "",
+        "labels": [
+          "a",
+          ""
+        ],
+        "series": [
+          {
+            "name": "Series 1",
+            "values": [
+              1,
+              2
+            ]
+          }
+        ],
+        "caption": "",
+        "author": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "chart",
+      "chart": {
+        "chart_type": "bar",
+        "labels": [
+          "a"
+        ],
+        "series": [
+          {
+            "name": "n",
+            "values": [
+              "x"
+            ]
+          }
+        ]
+      }
+    },
+    "node": {
+      "type": "chart",
+      "data": {
+        "chart_type": "bar",
+        "title": "",
+        "labels": [
+          "a"
+        ],
+        "series": [
+          {
+            "name": "n",
+            "values": [
+              0
+            ]
+          }
+        ],
+        "caption": "",
+        "author": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "chart",
+      "chart": {
+        "chart_type": "pie",
+        "labels": [
+          "a"
+        ],
+        "series": [
+          {
+            "values": [
+              1
+            ]
+          },
+          {
+            "values": [
+              2
+            ]
+          }
+        ]
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "bulleted_list",
+      "text": "list",
+      "children": [
+        {
+          "text": "child"
+        }
+      ]
+    },
+    "node": {
+      "type": "bulleted_list",
+      "data": {
+        "delta": [
+          {
+            "insert": "list"
+          }
+        ]
+      },
+      "children": [
+        {
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "child"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "spec": {
+      "type": "bulleted_list",
+      "text": "list",
+      "children": [
+        "not a block"
+      ]
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "paragraph",
+      "text": "---"
+    },
+    "node": {
+      "type": "divider"
+    }
+  },
+  {
+    "spec": {
+      "type": "table",
+      "rows": [
+        [
+          1250000,
+          0.1,
+          1e+21,
+          1e-7,
+          -2.5e-7,
+          123456789012
+        ]
+      ]
+    },
+    "node": {
+      "type": "table",
+      "data": {
+        "colsLen": 6,
+        "rowsLen": 1,
+        "colDefaultWidth": 160,
+        "rowDefaultHeight": 40,
+        "colMinimumWidth": 40
+      },
+      "children": [
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 0,
+            "rowPosition": 0
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "1250000"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 1,
+            "rowPosition": 0
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "0.1"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 2,
+            "rowPosition": 0
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "1e+21"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 3,
+            "rowPosition": 0
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "1e-7"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 4,
+            "rowPosition": 0
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "-2.5e-7"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 5,
+            "rowPosition": 0
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "123456789012"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "spec": {
+      "type": "chart",
+      "chart": {
+        "labels": [
+          1250000,
+          1e+21
+        ],
+        "series": [
+          {
+            "name": 1e-7,
+            "values": [
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    "node": {
+      "type": "chart",
+      "data": {
+        "chart_type": "bar",
+        "title": "",
+        "labels": [
+          "1250000",
+          "1e+21"
+        ],
+        "series": [
+          {
+            "name": "1e-7",
+            "values": [
+              1,
+              2
+            ]
+          }
+        ],
+        "caption": "",
+        "author": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "chart",
+      "chart": {
+        "chart_type": "",
+        "labels": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "e"
+        ],
+        "series": [
+          {
+            "values": [
+              "2abc",
+              "0x10",
+              "1_000",
+              " 3.5 ",
+              "1e3"
+            ]
+          }
+        ]
+      }
+    },
+    "node": {
+      "type": "chart",
+      "data": {
+        "chart_type": "bar",
+        "title": "",
+        "labels": [
+          "a",
+          "b",
+          "c",
+          "d",
+          "e"
+        ],
+        "series": [
+          {
+            "name": "Series 1",
+            "values": [
+              0,
+              0,
+              0,
+              3.5,
+              1000
+            ]
+          }
+        ],
+        "caption": "",
+        "author": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "chart",
+      "chart": {
+        "title": 5,
+        "caption": true,
+        "labels": [
+          "a"
+        ],
+        "series": [
+          {
+            "values": [
+              1
+            ]
+          }
+        ]
+      }
+    },
+    "node": {
+      "type": "chart",
+      "data": {
+        "chart_type": "bar",
+        "title": "",
+        "labels": [
+          "a"
+        ],
+        "series": [
+          {
+            "name": "Series 1",
+            "values": [
+              1
+            ]
+          }
+        ],
+        "caption": "",
+        "author": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "code",
+      "text": 5,
+      "language": 7
+    },
+    "node": {
+      "type": "code",
+      "data": {
+        "delta": [],
+        "language": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "paragraph",
+      "text": 5
+    },
+    "node": {
+      "type": "paragraph",
+      "data": {
+        "delta": []
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "video",
+      "video": {
+        "url": "https://youtu.be/dQw4w9WgXcQ",
+        "title": 5
+      }
+    },
+    "node": {
+      "type": "video",
+      "data": {
+        "url": "https://youtu.be/dQw4w9WgXcQ",
+        "title": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "bulleted_list",
+      "text": "list",
+      "children": {}
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "table",
+      "rows": [
+        [
+          "a"
+        ],
+        "b"
+      ]
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "https://:80/a.png"
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "https://exa mple.com/a.png"
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "link_preview",
+      "link": {
+        "url": "https://:80/"
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "paragraph",
+      "text": "-\t-\t-"
+    },
+    "node": {
+      "type": "divider"
+    }
+  },
+  {
+    "spec": {
+      "type": "paragraph",
+      "text": " - - - "
+    },
+    "node": {
+      "type": "divider"
+    }
+  },
+  {
+    "spec": {
+      "type": "paragraph",
+      "text": " ---"
+    },
+    "node": {
+      "type": "paragraph",
+      "data": {
+        "delta": [
+          {
+            "insert": " ---"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "paragraph",
+      "text": "-*-"
+    },
+    "node": {
+      "type": "paragraph",
+      "data": {
+        "delta": [
+          {
+            "insert": "-*-"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "https://example.com/a.png "
+      }
+    },
+    "node": {
+      "type": "image",
+      "data": {
+        "url": "https://example.com/a.png",
+        "align": "center",
+        "alt": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "﻿https://example.com/a.png"
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "code",
+      "text": "x",
+      "language": "Visual Basic"
+    },
+    "node": {
+      "type": "code",
+      "data": {
+        "delta": [
+          {
+            "insert": "x"
+          }
+        ],
+        "language": "visual-basic"
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "math_equation",
+      "formula": "E = mc^2　"
+    },
+    "node": {
+      "type": "math_equation",
+      "data": {
+        "formula": "E = mc^2"
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "callout",
+      "text": "x",
+      "tone": "warning"
+    },
+    "node": {
+      "type": "callout",
+      "data": {
+        "tone": "warning",
+        "delta": [
+          {
+            "insert": "x"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "link_preview",
+      "link": {
+        "url": "https://go.dev/"
+      }
+    },
+    "node": {
+      "type": "link_preview",
+      "data": {
+        "url": "https://go.dev/"
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "table",
+      "rows": [
+        [
+          [
+            "a"
+          ],
+          {
+            "b": 1
+          },
+          "x"
+        ]
+      ]
+    },
+    "node": {
+      "type": "table",
+      "data": {
+        "colsLen": 3,
+        "rowsLen": 1,
+        "colDefaultWidth": 160,
+        "rowDefaultHeight": 40,
+        "colMinimumWidth": 40
+      },
+      "children": [
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 0,
+            "rowPosition": 0
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": []
+              }
+            }
+          ]
+        },
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 1,
+            "rowPosition": 0
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": []
+              }
+            }
+          ]
+        },
+        {
+          "type": "table/cell",
+          "data": {
+            "colPosition": 2,
+            "rowPosition": 0
+          },
+          "children": [
+            {
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "x"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
+    "spec": {
+      "type": "chart",
+      "chart": {
+        "labels": [
+          [
+            "a"
+          ],
+          {
+            "b": 1
+          }
+        ],
+        "series": [
+          {
+            "name": [
+              "n"
+            ],
+            "values": [
+              1,
+              2
+            ]
+          }
+        ]
+      }
+    },
+    "node": {
+      "type": "chart",
+      "data": {
+        "chart_type": "bar",
+        "title": "",
+        "labels": [
+          "",
+          ""
+        ],
+        "series": [
+          {
+            "name": "",
+            "values": [
+              1,
+              2
+            ]
+          }
+        ],
+        "caption": "",
+        "author": ""
+      }
+    }
+  }
+]

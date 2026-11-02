@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"strings"
 
@@ -22,6 +23,20 @@ var positionSchema = map[string]any{
 		"before": map[string]any{"type": "string", "description": "Block ID to insert before."},
 		"parent": map[string]any{"type": "string", "description": "List block ID to nest under."},
 		"at":     map[string]any{"type": "string", "enum": []string{"start", "end"}},
+	},
+}
+
+// writeSchema is where write_markdown writes: a position, or an empty
+// block to write in place of.
+var writeSchema = map[string]any{
+	"type":        "object",
+	"description": "Where to write. Exactly one of: replace (an empty block to write in place of, as the empty line the user asked from), after, before, parent (append as last children of a list block), at (\"start\" or \"end\").",
+	"properties": map[string]any{
+		"replace": map[string]any{"type": "string", "description": "ID of an empty block to write in place of."},
+		"after":   map[string]any{"type": "string", "description": "Block ID to write after."},
+		"before":  map[string]any{"type": "string", "description": "Block ID to write before."},
+		"parent":  map[string]any{"type": "string", "description": "List block ID to nest under."},
+		"at":      map[string]any{"type": "string", "enum": []string{"start", "end"}},
 	},
 }
 
@@ -64,7 +79,45 @@ var blockSchema = map[string]any{
 	"required": []string{"type"},
 }
 
-func tool(name, desc string, props map[string]any, required ...string) map[string]any {
+// ordered are a schema's properties in the order a model should write
+// them, as a map's are not.
+type ordered []struct {
+	key   string
+	value any
+}
+
+func (o ordered) MarshalJSON() ([]byte, error) {
+	b := []byte{'{'}
+	for i, p := range o {
+		if i > 0 {
+			b = append(b, ',')
+		}
+		k, _ := json.Marshal(p.key)
+		v, err := json.Marshal(p.value)
+		if err != nil {
+			return nil, err
+		}
+		b = append(append(append(b, k...), ':'), v...)
+	}
+	return append(b, '}'), nil
+}
+
+// Properties are a tool's parameters' properties, as a map.
+func Properties(params map[string]any) map[string]any {
+	switch p := params["properties"].(type) {
+	case ordered:
+		m := map[string]any{}
+		for _, kv := range p {
+			m[kv.key] = kv.value
+		}
+		return m
+	case map[string]any:
+		return maps.Clone(p)
+	}
+	return map[string]any{}
+}
+
+func tool(name, desc string, props any, required ...string) map[string]any {
 	if required == nil {
 		required = []string{}
 	}
@@ -93,8 +146,12 @@ func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 
 func editTools() []map[string]any {
 	return []map[string]any{
-		tool("insert_blocks", "Insert new blocks at a position.", map[string]any{"position": positionSchema, "blocks": map[string]any{"type": "array", "items": blockSchema}}, "position", "blocks"),
-		tool("replace_block", "Replace one block with a new one, keeping its ID (and its nested items when it stays a list).", map[string]any{"id": map[string]any{"type": "string"}, "block": blockSchema}, "id", "block"),
+		// Writing streams into the page as the model writes it.
+		tool("write_markdown", "Write into the page in Markdown: the way to write prose, as a story, a draft, notes or a summary. Each line is a block: a paragraph, # to ### headings, - or 1. list items (indent two spaces to nest), - [ ] to-dos, > quotes, ``` fenced code, | tables, --- dividers; blank lines only separate them. It goes into the page as you write it.",
+			ordered{{"position", writeSchema}, {"markdown", map[string]any{"type": "string"}}}, "position", "markdown"),
+		// The position first, so the blocks can go in as they stream.
+		tool("insert_blocks", "Insert new blocks at a position.", ordered{{"position", positionSchema}, {"blocks", map[string]any{"type": "array", "items": blockSchema}}}, "position", "blocks"),
+		tool("replace_block", "Replace one block with a new one, keeping its ID (and its nested items when it stays a list).", ordered{{"id", map[string]any{"type": "string"}}, {"block", blockSchema}}, "id", "block"),
 		tool("move_block", "Move a block (with its nested items) to a new position.", map[string]any{"id": map[string]any{"type": "string"}, "position": positionSchema}, "id", "position"),
 		tool("delete_blocks", "Delete blocks by ID, with their nested items.", map[string]any{"ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "ids"),
 		tool("create_subpage", "Create a subpage of this page, optionally with content.", map[string]any{"title": map[string]any{"type": "string"}, "blocks": map[string]any{"type": "array", "items": blockSchema}}, "title"),
@@ -228,10 +285,15 @@ type Edit struct {
 
 // Executor validates and applies tool calls, recording each as an op.
 type Executor struct {
-	Ctx   ToolContext
-	OnOp  func(op doc.Op, summary string)
-	Ops   []doc.Op
-	Edits []Edit
+	Ctx  ToolContext
+	OnOp func(op doc.Op, summary string)
+	// OnRevise changes the op at at, as a draft grows: delta is what it
+	// changes in the page. A nil op takes it away, the last.
+	OnRevise func(at int, op *doc.Op, summary string, delta []doc.Op)
+	Ops      []doc.Op
+	Edits    []Edit
+	// draft is an insert_blocks call going in as it streams.
+	draft *draft
 	// allowed are the URLs a block may load once the run reads beyond
 	// this page (fetchedURLs): those on it when the run began, and in the
 	// user's request; nil before the run's first call.
@@ -252,8 +314,9 @@ type Executor struct {
 // not loaded, so they stay free.
 var fetchedURLs = map[string]bool{"image": true, "video": true, "link_preview": true}
 
-// urlRe finds the URLs in text the agent read.
-var urlRe = regexp.MustCompile(`https?://[^\s<>"'()\[\]]+`)
+// urlRe finds the URLs in text the agent read, each to the first space
+// of unicode.IsSpace's, as the server's URL_RE.
+var urlRe = regexp.MustCompile(`https?://[^\t\n\v\f\r \x{85}\x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}<>"'()\[\]]+`)
 
 // see adds the URLs in v to set.
 func see(set map[string]bool, v any) {
@@ -333,14 +396,30 @@ func terr(format string, args ...any) error {
 	return &doc.ToolError{Message: fmt.Sprintf(format, args...)}
 }
 
-func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, error) {
+// begin keeps the URLs a block may load once the run reads beyond this
+// page, before its first call changes the page: those on it, and in the
+// user's request.
+func (x *Executor) begin() {
 	if x.allowed == nil && (x.Ctx.ListPages != nil || x.Ctx.ReadOtherPage != nil) {
 		x.allowed = map[string]bool{}
 		see(x.allowed, doc.BlockViews(x.Ctx.Content))
 		see(x.allowed, x.Ctx.Request)
 	}
+}
+
+func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, error) {
+	x.begin()
+	// Text on the page, in its comments or in what a tool returns may be
+	// written to steer the agent, and only the prompt has it take that as
+	// data. The tools that delete or rewrite blocks are not refused for
+	// it: a run is asked for by the user, who may edit the page, in their
+	// own words (a comment's run by their own comment), and its edits are
+	// one undo step over a snapshot of the page kept before them, so what
+	// such text has the agent take away comes back with Undo. Reading the
+	// user's other pages, which could carry them off, is what is refused
+	// where others write (crossPage).
 	switch name {
-	case "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_subpage":
+	case "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_subpage":
 		if x.Ctx.ReadOnly {
 			return nil, terr("You can read this page but not edit it: the user has view access only.")
 		}
@@ -348,6 +427,8 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 	switch name {
 	case "read_page":
 		return x.readPage(), nil
+	case "write_markdown":
+		return x.write(args)
 	case "insert_blocks":
 		return x.insert(args)
 	case "replace_block":
@@ -401,17 +482,28 @@ func (x *Executor) readPage() map[string]any {
 
 func (x *Executor) has(id string) bool { return x.Ctx.Content.Find(id) != nil }
 
-func (x *Executor) position(raw any) (doc.Position, error) {
-	m, ok := raw.(map[string]any)
-	if !ok {
-		return doc.Position{}, terr("position must be an object.")
-	}
+// given are the keys of a position a model gave a value. Models that
+// write every key of a schema give the others null or "", and at, which
+// takes only start or end, one of those: at counts only alone.
+func given(raw any) map[string]any {
+	m, _ := raw.(map[string]any)
 	set := map[string]any{}
 	for k, v := range m {
-		if v != nil {
+		if v != nil && v != "" {
 			set[k] = v
 		}
 	}
+	if len(set) > 1 {
+		delete(set, "at")
+	}
+	return set
+}
+
+func (x *Executor) position(raw any) (doc.Position, error) {
+	if _, ok := raw.(map[string]any); !ok {
+		return doc.Position{}, terr("position must be an object.")
+	}
+	set := given(raw)
 	if len(set) != 1 {
 		return doc.Position{}, terr("position needs exactly one of after, before, parent, at.")
 	}
@@ -455,19 +547,7 @@ func Specs(raw any, author string) ([]*doc.Node, error) {
 	if !ok || len(list) == 0 {
 		return nil, terr("blocks must be a non-empty list.")
 	}
-	var out []*doc.Node
-	for _, s := range list {
-		m, ok := s.(map[string]any)
-		if !ok {
-			return nil, terr("Each block must be an object.")
-		}
-		n, err := doc.SpecToNode(m, "", author)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, nil
+	return doc.SpecsToNodes(list, author)
 }
 
 func (x *Executor) emit(op doc.Op, summary string, ids []string) error {
@@ -505,6 +585,30 @@ func (x *Executor) insert(args map[string]any) (map[string]any, error) {
 	return map[string]any{"inserted_ids": ids}, nil
 }
 
+// write writes Markdown in the page, as its call does streaming, whole.
+func (x *Executor) write(args map[string]any) (map[string]any, error) {
+	d, err := x.newDraft(args["position"], true)
+	if err != nil {
+		return nil, err
+	}
+	md, _ := args["markdown"].(string)
+	nodes := doc.MarkdownBlocks(md)
+	if len(nodes) == 0 {
+		return nil, terr("markdown is empty.")
+	}
+	// As many blocks as a call of blocks makes, as on the server.
+	if err := doc.CallNodes(nodes); err != nil {
+		return nil, err
+	}
+	d.verb, x.draft = "Wrote", d
+	if err := x.syncDraft(nodes, len(nodes)); err != nil {
+		x.DropDraft()
+		return nil, err
+	}
+	x.draft = nil
+	return map[string]any{"inserted_ids": d.ids}, nil
+}
+
 func cloneAll(nodes []*doc.Node) []*doc.Node {
 	out := make([]*doc.Node, len(nodes))
 	for i, n := range nodes {
@@ -526,6 +630,20 @@ func (x *Executor) replace(args map[string]any) (map[string]any, error) {
 	if !ok {
 		return nil, terr("block must be an object.")
 	}
+	n, err := x.replacement(prev, spec)
+	if err != nil {
+		return nil, err
+	}
+	op := doc.Op{Op: "replace", ID: id, Node: n, PrevNode: prev.Clone()}
+	if err := x.emit(op, summaryFor("Rewrote", []*doc.Node{n}), []string{id}); err != nil {
+		return nil, err
+	}
+	return map[string]any{"id": id}, nil
+}
+
+// replacement is the block spec gives to replace prev with.
+func (x *Executor) replacement(prev *doc.Node, spec map[string]any) (*doc.Node, error) {
+	id := prev.ID
 	n, err := doc.SpecToNode(spec, id, x.Ctx.AgentName)
 	if err != nil {
 		return nil, err
@@ -547,11 +665,7 @@ func (x *Executor) replace(args map[string]any) (map[string]any, error) {
 			return nil, terr("Block %s has nested items. Move or delete them first, or keep a list type.", id)
 		}
 	}
-	op := doc.Op{Op: "replace", ID: id, Node: n, PrevNode: prev.Clone()}
-	if err := x.emit(op, summaryFor("Rewrote", []*doc.Node{n}), []string{id}); err != nil {
-		return nil, err
-	}
-	return map[string]any{"id": id}, nil
+	return n, nil
 }
 
 func (x *Executor) move(args map[string]any) (map[string]any, error) {
@@ -622,6 +736,8 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Without the spaces around it, as the server keeps it.
+	title = strings.TrimSpace(title)
 	var nodes []*doc.Node
 	if args["blocks"] != nil {
 		if nodes, err = x.specs(args["blocks"]); err != nil {

@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -204,5 +205,42 @@ func TestBlockLinkOpensToggle(t *testing.T) {
 	}
 	if a.page.scrollTo != "" {
 		t.Error("still waiting for a block that never shows")
+	}
+}
+
+// Going to a block lights it for a moment, which leaves the tint of an
+// agent run that changed it, whether it ran before or meanwhile.
+func TestGoToBlockKeepsAgentTint(t *testing.T) {
+	a := templatesApp(t)
+	para := &doc.Node{ID: "p1", Type: "paragraph"}
+	para.SetDelta(doc.Delta{{Text: "Changed by an agent"}})
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan", Content: doc.FromBlocks([]*doc.Node{para})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	posted := make(chan func(), 2)
+	a.post = func(fn func()) { posted <- fn }
+	a.goToBlock("p1")
+	a.Tint(p.ID, []string{"p1"})
+	select {
+	case fn := <-posted:
+		fn()
+	case <-time.After(5 * time.Second):
+		t.Fatal("the moment never ended")
+	}
+	if !a.page.tinted["p1"] {
+		t.Error("the agent run's tint went with the moment")
+	}
+	a.goToBlock("p1")
+	select {
+	case fn := <-posted:
+		fn()
+		t.Error("going to a tinted block lit it for a moment of its own")
+	case <-time.After(2 * time.Second):
+	}
+	if !a.page.tinted["p1"] {
+		t.Error("the agent run's tint went")
 	}
 }

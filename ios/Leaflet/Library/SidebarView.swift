@@ -331,22 +331,35 @@ struct SidebarView: View {
                 L.todosEmptyTitle, systemImage: "checklist", description: Text(L.todosEmptyBody))
         }
         let now = Date.now
-        ForEach(TodoSection.allCases, id: \.self) { section in
-            let todos = app.todos.filter { TodoSection.of($0, now: now) == section }
-            if !todos.isEmpty {
-                let open = expanded("todo:\(section)")
+        let groups = TodoSection.allCases.map { section in
+            (section: section, todos: app.todos.filter { TodoSection.of($0, now: now) == section })
+        }.filter { !$0.todos.isEmpty }
+        // A group alone has no header, which would only say what the
+        // to-dos' dates do, nor a fold to hide them all.
+        if groups.count == 1 {
+            Section {
+                todoRows(groups[0].todos, in: groups[0].section)
+            }
+            .withoutTopLine()
+        } else {
+            ForEach(groups, id: \.section) { group in
+                let open = expanded("todo:\(group.section)")
                 Section {
                     if open.wrappedValue {
-                        ForEach(todos, id: \.self) { todo in
-                            TodoRowView(todo: todo, section: section) {
-                                scene.open(todo.pageID, at: todo.blockID)
-                            }
-                        }
+                        todoRows(group.todos, in: group.section)
                     }
                 } header: {
-                    foldHeader(section.title, open: open)
+                    foldHeader(group.section.title, open: open)
                 }
                 .withoutTopLine()
+            }
+        }
+    }
+
+    private func todoRows(_ todos: [Todo], in section: TodoSection) -> some View {
+        ForEach(todos, id: \.self) { todo in
+            TodoRowView(todo: todo, section: section) {
+                scene.open(todo.pageID, at: todo.blockID)
             }
         }
     }

@@ -31,6 +31,10 @@ func TestTodoRowsAndReminders(t *testing.T) {
 	if s := fmt.Sprint(got); s != want {
 		t.Errorf("rows %s, want %s", s, want)
 	}
+	// One section alone has no header: the to-dos' dates say as much.
+	if rows := todoRows(todos[:1], now); len(rows) != 1 || rows[0].header != "" {
+		t.Errorf("one section's rows %+v", rows)
+	}
 	reminded := map[string]bool{"late": true}
 	var due []string
 	for _, r := range dueReminders(todos, now, func(t store.PageTodo) bool { return reminded[t.BlockID] }) {

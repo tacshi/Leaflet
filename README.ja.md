@@ -172,6 +172,11 @@ make ios-test     # iPhone と iPad のシミュレータでアプリのテス�
 `ios/Config/Local.xcconfig` にチームを設定します：
 `DEVELOPMENT_TEAM = <チーム ID>`。
 
+`scripts/publish_testflight.sh <バージョン> <ビルド>` は App Store 用にアプリ
+をビルドし、TestFlight の内部グループに公開します。App Store Connect に
+サインインした [asc](https://asccli.sh) が必要です。
+必要なものは `--help` で説明しています。
+
 ### データ
 
 Leaflet はデータベースをアプリのデータフォルダ（macOS では

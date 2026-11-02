@@ -153,6 +153,10 @@ make ios-test     # 在 iPhone 和 iPad 模拟器上运行应用的测试
 `ios/Config/Local.xcconfig` 中设置你的团队：
 `DEVELOPMENT_TEAM = <团队 ID>`。
 
+`scripts/publish_testflight.sh <版本> <构建号>` 为 App Store 构建应用，并发布
+到 TestFlight 的内部群组，需要已登录 App Store Connect 的
+[asc](https://asccli.sh)；`--help` 说明了它需要的一切。
+
 ### 数据
 
 Leaflet 把数据库保存在应用的数据文件夹中，例如 macOS 上的

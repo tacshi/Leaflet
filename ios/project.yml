@@ -85,6 +85,10 @@ targets:
         # SpeechTranscriber, which transcribe on the device, ask for no
         # permission, as SFSpeechRecognizer does; the desktop's speech
         # helper runs them with none.
+        # The app's only cryptography is HTTPS, hashes and checking
+        # signatures, which export rules exempt, so App Store Connect
+        # doesn't ask about it for each build.
+        INFOPLIST_KEY_ITSAppUsesNonExemptEncryption: NO
         # Go's net package resolves names through libresolv.
         OTHER_LDFLAGS: -lresolv
   LeafletTests:

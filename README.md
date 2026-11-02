@@ -175,6 +175,11 @@ Then open `ios/Leaflet.xcodeproj`. To run on a device, set your team in
 `ios/Config/Local.xcconfig`, which git ignores:
 `DEVELOPMENT_TEAM = <team ID>`.
 
+`scripts/publish_testflight.sh <version> <build>` builds the app for the
+App Store and publishes it to its internal TestFlight group, with
+[asc](https://asccli.sh) signed in to App Store Connect; `--help` explains
+what it needs.
+
 ### Data
 
 Leaflet keeps its database in the app's data folder, such as

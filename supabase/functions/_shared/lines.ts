@@ -8,7 +8,18 @@
 // block (a Mermaid fence a diagram, lines between $$ a formula), a GitHub
 // alert a callout, and a line that is only a picture an image.
 
-import { type BlockSpec, codeLanguage, deltaToPlain, isRule, markdownToDelta } from "./blocks.ts";
+import {
+  type BlockSpec,
+  codeLanguage,
+  codeSpanAt,
+  deltaToPlain,
+  fields,
+  isRule,
+  isSpace,
+  link,
+  markdownToDelta,
+  trimSpace,
+} from "./blocks.ts";
 
 const ALERT_TONES: Record<string, string> = {
   "[!NOTE]": "info",
@@ -20,36 +31,51 @@ const ALERT_TONES: Record<string, string> = {
 
 /** The tone of a line opening a GitHub alert, as "> [!TIP]". */
 function alertTone(line: string): string | null {
-  const t = line.trim();
+  const t = trimSpace(line);
   if (!t.startsWith(">")) return null;
-  return ALERT_TONES[t.slice(1).trim().toUpperCase()] ?? null;
-}
-
-/** The language of a line opening a code fence, as the ID a code block keeps; null for another line. */
-function codeFence(line: string): string | null {
-  const t = line.trim();
-  const rest = t.replace(/^`+/, "");
-  if (t.length - rest.length < 3 || rest.includes("`")) return null;
-  return codeLanguage(rest.trim().split(/\s+/)[0] ?? "");
+  return ALERT_TONES[trimSpace(t.slice(1)).toUpperCase()] ?? null;
 }
 
 /**
- * A line of a table, its cells, or null for the line under the header.
- * As in GitHub's tables, a backslash keeps the character after it in the
- * cell, and \| is a | of the cell's text; a <br> is a line break.
+ * The language of a line opening a code fence, as the ID a code block
+ * keeps; null for another line. Only spaces and tabs indent a fence, as
+ * CommonMark has it: one after another space is text.
  */
-export function tableRow(line: string): string[] | null {
-  const s = line.trim().replace(/^\|/, "");
+function codeFence(line: string): string | null {
+  const t = line.replace(/^[ \t]+|[ \t]+$/g, "");
+  const rest = t.replace(/^`+/, "");
+  if (t.length - rest.length < 3 || rest.includes("`")) return null;
+  return codeLanguage(fields(rest)[0] ?? "");
+}
+
+/**
+ * A line of a table: its cells, and whether it is a line of dashes, as the
+ * one under the header ("| --- | --- |") (doc.tableRow). As in GitHub's
+ * tables, a backslash keeps the character after it in the cell, and \| is
+ * a | of the cell's text, even in a code span; there, where a backslash is
+ * the code's, one before anything else is only itself. A <br> is a line
+ * break.
+ */
+export function tableRow(line: string): { cells: string[]; rule: boolean } {
+  const s = [...trimSpace(line).replace(/^\|/, "")];
   const cells: string[] = [];
   let cell = "";
+  // Where the code span the line is read in ends.
+  let code = 0;
   for (let i = 0; i < s.length; i++) {
-    if (s[i] === "\\" && i + 1 < s.length) {
+    if (s[i] === "\\" && i + 1 < s.length && s[i + 1] === "|") {
       i++;
-      if (s[i] !== "|") cell += "\\";
-      cell += s[i];
+      cell += "|";
+    } else if (s[i] === "\\" && i + 1 < s.length && i >= code) {
+      cell += s[i] + s[i + 1];
+      i++;
     } else if (s[i] === "|") {
       cells.push(cell);
       cell = "";
+    } else if (s[i] === "`" && i >= code) {
+      const span = codeSpanAt(s.slice(i));
+      if (span) code = i + span.n;
+      cell += s[i];
     } else {
       cell += s[i];
     }
@@ -57,56 +83,62 @@ export function tableRow(line: string): string[] | null {
   // A closing | ends the last cell; without one, what is after the last
   // | is a cell.
   if (cell !== "" || cells.length === 0) cells.push(cell);
-  const trimmed = cells.map((c) => c.trim());
+  const trimmed = cells.map(trimSpace);
   const rule = trimmed.every((c) => c !== "" && c.replace(/[-: ]/g, "") === "");
-  return rule ? null : trimmed.map(cellBreaks);
+  return { cells: trimmed.map(cellBreaks), rule };
 }
 
-const BR_TAG = /^<br(?: ?\/)?>/i;
+/** How a line break is written in a table's cell (doc.brTags). */
+const BR_TAGS = ["<br>", "<br/>", "<br />"];
 
-/** A table cell's Markdown with its <br>s as line breaks; one in a code span, or escaped, is text. */
+/**
+ * A table cell's Markdown with its <br>s as line breaks; one in a code
+ * span, or escaped, is text (doc.cellBreaks). A link's address holds no
+ * code span, nor a <br>.
+ */
 function cellBreaks(md: string): string {
-  if (!/<br/i.test(md)) return md;
+  if (!md.toLowerCase().includes("<br")) return md;
+  const s = [...md];
   let out = "";
-  for (let i = 0; i < md.length;) {
-    if (md[i] === "\\") {
-      out += md.slice(i, i + 2);
+  for (let i = 0; i < s.length;) {
+    if (s[i] === "\\") {
+      out += s.slice(i, i + 2).join("");
       i += 2;
-    } else if (md[i] === "`") {
-      const n = codeSpanLength(md, i);
-      out += md.slice(i, i + n);
-      i += n;
-    } else if (md[i] === "<" && BR_TAG.test(md.slice(i))) {
-      out += "\n";
-      i += md.slice(i).match(BR_TAG)![0].length;
-    } else {
-      out += md[i++];
+      continue;
     }
+    if (s[i] === "[") {
+      const l = link(s.slice(i));
+      if (l) {
+        out += "[" + cellBreaks(l.text.join("")) + s.slice(i + 1 + l.text.length, i + l.n).join("");
+        i += l.n;
+        continue;
+      }
+    }
+    if (s[i] === "`") {
+      const span = codeSpanAt(s.slice(i));
+      let j = i + (span?.n ?? 0);
+      if (!span) { while (j < s.length && s[j] === "`") j++; }
+      out += s.slice(i, j).join("");
+      i = j;
+      continue;
+    }
+    if (s[i] === "<") {
+      const rest = s.slice(i).join("").toLowerCase();
+      const tag = BR_TAGS.find((t) => rest.startsWith(t));
+      if (tag) {
+        out += "\n";
+        i += tag.length;
+        continue;
+      }
+    }
+    out += s[i++];
   }
   return out;
 }
 
-/**
- * How long the code span at md[i] is, between runs of as many backticks;
- * or, when none closes, the run of backticks there.
- */
-function codeSpanLength(md: string, i: number): number {
-  const open = md.slice(i).match(/^`+/)![0].length;
-  for (let j = i + open; j < md.length;) {
-    if (md[j] !== "`") {
-      j++;
-      continue;
-    }
-    const run = md.slice(j).match(/^`+/)![0].length;
-    if (run === open && md.slice(i + open, j) !== "") return j + run - i;
-    j += run;
-  }
-  return open;
-}
-
 /** Whether a link is to a picture on the web, as doc.WebURL has it. */
 function webURL(link: string): boolean {
-  if (/\s/.test(link)) return false;
+  if (isSpace(link)) return false;
   try {
     const u = new URL(link);
     return (u.protocol === "http:" || u.protocol === "https:") && u.host !== "";
@@ -116,6 +148,16 @@ function webURL(link: string): boolean {
 }
 
 const unescape = (s: string) => s.replace(/\\([!-/:-@[-`{-~])/g, "$1");
+
+/**
+ * An image's optional title, and the ) that ends the line, with spaces or
+ * tabs after it. As in CommonMark, only spaces and tabs, and at most one
+ * line break, separate the title; another space is no separator.
+ */
+const titleEnd = new RegExp(
+  `^(?:(?:[ \\t]+|[ \\t]*\\n[ \\t]*)(?:"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'|\\((?:[^()\\\\]|\\\\.)*\\)))?[ \\t]*\\n?[ \\t]*\\)[ \\t]*$`,
+  "su",
+);
 
 /**
  * A line that is only a picture from the web, as ![alt](https://…/a.png)
@@ -150,51 +192,68 @@ function imageLine(line: string): { url: string; alt: string } | null {
     rest = rest.slice(j);
   }
   // An optional title, and the ) that ends the line.
-  if (!/^(?:\s+(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\((?:[^()\\]|\\.)*\)))?\s*\)$/.test(rest)) return null;
-  url = unescape(url).trim();
+  if (!titleEnd.test(rest)) return null;
+  url = trimSpace(unescape(url));
   if (!webURL(url)) return null;
   return { url, alt: deltaToPlain(markdownToDelta(alt)) };
 }
 
 /** A list item's marker at the start of a line: its type, its text, and whether a to-do is checked. */
 function listItem(s: string): { type: string; rest: string; checked: boolean } | null {
-  const bullet = s.match(/^[-*+](?: |$)(.*)$/);
+  // The text may hold any character, U+2028 and U+2029 among them.
+  const bullet = s.match(/^[-*+](?: |$)(.*)$/s);
   if (bullet) {
-    const todo = bullet[1].match(/^\[([ xX])\](?: |$)(.*)$/);
+    const todo = bullet[1].match(/^\[([ xX])\](?: |$)(.*)$/s);
     if (todo) return { type: "todo_list", rest: todo[2], checked: todo[1] !== " " };
     return { type: "bulleted_list", rest: bullet[1], checked: false };
   }
-  const numbered = s.match(/^\d{1,3}[.)](?: |$)(.*)$/);
+  // A number of up to nine digits, as CommonMark's.
+  const numbered = s.match(/^\d{1,9}[.)](?: |$)(.*)$/s);
   return numbered ? { type: "numbered_list", rest: numbered[1], checked: false } : null;
 }
 
+/** The number a numbered item's line starts with. */
+const itemNumber = (line: string) => parseInt(line, 10);
+
+/** Whether a numbered item's line starts with a number of four digits or more. */
+const longNumber = (line: string) => /^\d{4}/.test(line);
+
 /** A heading's #s at the start of a line: its level and text. */
 function headingLine(s: string): { level: number; rest: string } | null {
-  const m = s.match(/^(#{1,6})(?: |$)(.*)$/);
+  const m = s.match(/^(#{1,6})(?: |$)(.*)$/s);
   return m ? { level: m[1].length, rest: m[2] } : null;
 }
 
 /** A line opening a toggle, <details> or <details open>: whether it is open, and what follows on the line. */
 function detailsOpen(s: string): { open: boolean; rest: string } | null {
-  const m = s.match(/^<details( open)?>(.*)$/i);
-  return m ? { open: m[1] !== undefined, rest: m[2].trim() } : null;
+  const m = s.match(/^<details( open)?>(.*)$/is);
+  return m ? { open: m[1] !== undefined, rest: trimSpace(m[2]) } : null;
 }
 
-const isDetailsClose = (s: string) => s.trim().toLowerCase() === "</details>";
+const isDetailsClose = (s: string) => trimSpace(s).toLowerCase() === "</details>";
 
-/** Where the </summary> that ends a toggle's summary is in s, one not escaped, or -1. */
+/** Where the </summary> that ends a toggle's summary is in s, one not escaped nor in a code span, or -1. */
 function summaryEnd(s: string): number {
-  for (let i = 0; i < s.length; i++) {
-    if (s[i] === "\\") i++;
-    else if (s.slice(i, i + 10).toLowerCase() === "</summary>") return i;
+  const r = [...s];
+  for (let i = 0; i < r.length; i++) {
+    if (r[i] === "\\") i++;
+    else if (r[i] === "`") {
+      const span = codeSpanAt(r.slice(i));
+      if (span) i += span.n - 1;
+    } else if (r[i] === "<" && r.slice(i, i + 10).join("").toLowerCase() === "</summary>") {
+      return r.slice(0, i).join("").length;
+    }
   }
   return -1;
 }
 
 /** Whether a line starts a block of its own, so it cannot go on in the block before it. */
 function startsBlock(s: string): boolean {
-  return listItem(s) !== null || headingLine(s) !== null || detailsOpen(s) !== null || codeFence(s) !== null ||
-    s.startsWith(">") || s.startsWith("|") || s.trim() === "$$" || isRule(s) || isDetailsClose(s) ||
+  // A long number starts a list item only after the one before it.
+  const item = listItem(s);
+  return item !== null && (item.type !== "numbered_list" || !longNumber(s)) || headingLine(s) !== null ||
+    detailsOpen(s) !== null || codeFence(s) !== null ||
+    s.startsWith(">") || s.startsWith("|") || trimSpace(s) === "$$" || isRule(s) || isDetailsClose(s) ||
     imageLine(s) !== null;
 }
 
@@ -229,7 +288,8 @@ interface Text {
 
 /** Reads Markdown as block specs, as pasting it in the app does. */
 export function markdownSpecs(markdown: string): BlockSpec[] {
-  const text = markdown.replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");
+  // The ends of lines Markdown has, \r\n and \r, are \n.
+  const text = markdown.replace(/\r\n?/g, "\n").replace(/^\n+|\n+$/g, "");
   const out: BlockSpec[] = [];
   let open: Open[] = [];
   // The text blocks read, their text set at the end, and the one the
@@ -240,8 +300,13 @@ export function markdownSpecs(markdown: string): BlockSpec[] {
   // opened, whose summary may follow.
   let summary: Text | null = null;
   let awaiting: Text | null = null;
+  // The rows of the table being read, into tableIn, and whether the line
+  // under its header has been.
   let table: string[][] = [];
   let tableIn: BlockSpec[] | null = null;
+  let ruled = false;
+  // The numbered items read, by their numbers.
+  const numbers = new Map<BlockSpec, number>();
   // The fenced block open: its fence, its language, its indent and lines,
   // and the blocks it goes last in.
   let code: { fence: string; language: string; indent: string; lines: string[]; into: BlockSpec[] } | null = null;
@@ -271,13 +336,14 @@ export function markdownSpecs(markdown: string): BlockSpec[] {
     if (table.length) tableIn!.push({ type: "table", rows: table });
     table = [];
     tableIn = null;
+    ruled = false;
   };
   const closeCode = () => {
     const c = code!;
     const body = c.lines.join("\n");
     // An empty formula or diagram has nothing to draw: it makes no block,
     // as a spec of one would be refused.
-    if ((c.fence === "$$" || c.language === "mermaid") && body.trim() === "") {
+    if ((c.fence === "$$" || c.language === "mermaid") && trimSpace(body) === "") {
       // nothing
     } else if (c.fence === "$$") c.into.push({ type: "math_equation", formula: body });
     else if (c.language === "mermaid") c.into.push({ type: "diagram", source: body });
@@ -296,7 +362,15 @@ export function markdownSpecs(markdown: string): BlockSpec[] {
     t.lines.push(s.slice(0, end));
     summary = null;
     const rest = s.slice(end + "</summary>".length);
-    if (rest.trim() !== "") readLine(rest);
+    if (trimSpace(rest) !== "") readLine(rest);
+  };
+  // Whether a numbered item's line is one: a number of four digits or
+  // more, as a year that starts a line, is one only right after the item
+  // before it, as the app numbers a long list.
+  const counts = (line: string, indent: number): boolean => {
+    if (!longNumber(line)) return true;
+    const kids = container(indent);
+    return kids.length > 0 && numbers.get(kids[kids.length - 1]) === itemNumber(line) - 1;
   };
   // Puts a line in the text block before it when it goes on there.
   const continues = (trimmed: string, indent: number): boolean => {
@@ -318,8 +392,11 @@ export function markdownSpecs(markdown: string): BlockSpec[] {
   const readLine = (line: string) => {
     const trimmed = line.replace(/^[ \t]+/, "");
     if (code) {
-      const t = trimmed.trim();
-      if (code.fence === "$$" ? t === "$$" : t.startsWith(code.fence) && t.replace(/[` ]/g, "") === "") {
+      // As the client closes one: a $$ line, or the fence's backticks
+      // with only more of them and spaces.
+      if (
+        code.fence === "$$" ? trimSpace(trimmed) === "$$" : trimmed.startsWith(code.fence) && /^[` ]*$/.test(trimmed)
+      ) {
         closeCode();
       } else {
         code.lines.push(line.startsWith(code.indent) ? line.slice(code.indent.length) : line);
@@ -330,7 +407,7 @@ export function markdownSpecs(markdown: string): BlockSpec[] {
       summaryLine(trimmed);
       return;
     }
-    if (line.trim() === "") {
+    if (trimSpace(line) === "") {
       // A blank line only separates blocks; a list goes on across it.
       flushTable();
       last = null;
@@ -358,7 +435,7 @@ export function markdownSpecs(markdown: string): BlockSpec[] {
       return;
     }
     const language = codeFence(trimmed);
-    if (language !== null || trimmed.trim() === "$$") {
+    if (language !== null || trimSpace(trimmed) === "$$") {
       flushTable();
       const fence = language !== null ? trimmed.match(/^`+/)![0] : "$$";
       code = { fence, language: language ?? "", indent: lead, lines: [], into: container(indent) };
@@ -366,8 +443,11 @@ export function markdownSpecs(markdown: string): BlockSpec[] {
     }
     if (trimmed.startsWith("|")) {
       tableIn ??= container(indent);
+      // The line of dashes under the header is no row; one further down
+      // is, of cells that are dashes.
       const row = tableRow(trimmed);
-      if (row) table.push(row);
+      if (row.rule && table.length === 1 && !ruled) ruled = true;
+      else table.push(row.cells);
       return;
     }
     flushTable();
@@ -398,10 +478,11 @@ export function markdownSpecs(markdown: string): BlockSpec[] {
       return;
     }
     const item = listItem(trimmed);
-    if (item) {
+    if (item && (item.type !== "numbered_list" || counts(trimmed, indent))) {
       const spec: BlockSpec = item.type === "todo_list"
         ? { type: item.type, checked: item.checked, text: "" }
         : { type: item.type, text: "" };
+      if (item.type === "numbered_list") numbers.set(spec, itemNumber(trimmed));
       add(spec, indent);
       open.push({ spec, toggle: false, min: indent + 2 });
       last = newText(spec, false, true, indent + 2);

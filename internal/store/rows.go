@@ -44,7 +44,14 @@ func scanFolder(sc interface{ Scan(...any) error }) (Folder, error) {
 
 // Folders returns the folders not deleted, in sort order.
 func (s *Store) Folders() ([]Folder, error) {
-	rows, err := s.db.Query(`SELECT ` + folderCols + ` FROM folders WHERE deleted_at IS NULL ORDER BY sort_key`)
+	return s.queryFolders(`deleted_at IS NULL ORDER BY sort_key`)
+}
+
+// AllFolders returns every folder, deleted ones too.
+func (s *Store) AllFolders() ([]Folder, error) { return s.queryFolders(`1 = 1 ORDER BY sort_key`) }
+
+func (s *Store) queryFolders(where string) ([]Folder, error) {
+	rows, err := s.db.Query(`SELECT ` + folderCols + ` FROM folders WHERE ` + where) // #nosec G202 -- where is a literal of this package's.
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +183,7 @@ func (s *Store) DeleteFolder(f Folder) error {
 				return err
 			}
 		}
-		files, err := filesIn(tx, `folder_id = ? AND deleted_at IS NULL`, f.ID)
+		files, err := filesIn(tx, s.Dir, `folder_id = ? AND deleted_at IS NULL`, f.ID)
 		if err != nil {
 			return err
 		}
@@ -186,7 +193,7 @@ func (s *Store) DeleteFolder(f Folder) error {
 		for _, file := range files {
 			old := FileToRemote(file)
 			file.FolderID, file.UpdatedAt = "", now
-			if err := putFile(tx, file); err != nil {
+			if err := putFile(tx, s.Dir, file); err != nil {
 				return err
 			}
 			if err := queueChange(tx, "files", file.ID, old, FileToRemote(file), "moved file", file.PageID); err != nil {
@@ -248,11 +255,11 @@ func (s *Store) File(id string) (File, error) {
 }
 
 func (s *Store) queryFiles(where string, args ...any) ([]File, error) {
-	return filesIn(s.db, where, args...)
+	return filesIn(s.db, s.Dir, where, args...)
 }
 
 // filesIn is queryFiles in the database or a transaction.
-func filesIn(q querier, where string, args ...any) ([]File, error) {
+func filesIn(q querier, dir, where string, args ...any) ([]File, error) {
 	rows, err := q.Query(`SELECT id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at FROM files WHERE `+where, args...) // #nosec G202 -- where is a literal of this package's, its values args.
 	if err != nil {
 		return nil, err
@@ -267,7 +274,7 @@ func filesIn(q querier, where string, args ...any) ([]File, error) {
 		if err := rows.Scan(&f.ID, &f.SpaceID, &folder, &page, &f.Name, &sp, &lp, &f.MimeType, &f.SizeBytes, &c, &u, &d); err != nil {
 			return nil, err
 		}
-		f.FolderID, f.PageID, f.StoragePath, f.LocalPath = folder.String, page.String, sp.String, lp.String
+		f.FolderID, f.PageID, f.StoragePath, f.LocalPath = folder.String, page.String, sp.String, absPath(dir, lp.String)
 		f.CreatedAt, f.UpdatedAt, f.DeletedAt = time.UnixMilli(c), time.UnixMilli(u), fromMs(d)
 		out = append(out, f)
 	}
@@ -275,15 +282,15 @@ func filesIn(q querier, where string, args ...any) ([]File, error) {
 }
 
 // PutFile stores a file row.
-func (s *Store) PutFile(f File) error { return putFile(s.db, f) }
+func (s *Store) PutFile(f File) error { return putFile(s.db, s.Dir, f) }
 
-func putFile(q querier, f File) error {
+func putFile(q querier, dir string, f File) error {
 	_, err := q.Exec(`INSERT INTO files (id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET folder_id = excluded.folder_id,
 		page_id = excluded.page_id, name = excluded.name, storage_path = excluded.storage_path,
 		local_path = COALESCE(excluded.local_path, files.local_path), mime_type = excluded.mime_type,
 		size_bytes = excluded.size_bytes, updated_at = excluded.updated_at, deleted_at = excluded.deleted_at`,
-		f.ID, f.SpaceID, ns(f.FolderID), ns(f.PageID), f.Name, ns(f.StoragePath), ns(f.LocalPath), f.MimeType, f.SizeBytes,
+		f.ID, f.SpaceID, ns(f.FolderID), ns(f.PageID), f.Name, ns(f.StoragePath), ns(relPath(dir, f.LocalPath)), f.MimeType, f.SizeBytes,
 		ms(f.CreatedAt), ms(f.UpdatedAt), nt(f.DeletedAt))
 	return err
 }
@@ -319,13 +326,13 @@ func (s *Store) AddFile(source, folderID, pageID, mime string) (File, error) {
 		if f.SpaceID != "" && !hasSpace(tx, f.SpaceID) {
 			return ErrNoSpace
 		}
-		if err := putFile(tx, f); err != nil {
+		if err := putFile(tx, s.Dir, f); err != nil {
 			return err
 		}
 		if err := queue(tx, "files", id, FileToRemote(f), "new file", pageID); err != nil {
 			return err
 		}
-		return queue(tx, "storage", "files/"+id, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": local, "content_type": ct}, "file waiting to upload", pageID)
+		return queue(tx, "storage", "files/"+id, map[string]any{"bucket": "files", "path": f.StoragePath, "local_path": relPath(s.Dir, local), "content_type": ct}, "file waiting to upload", pageID)
 	})
 	if err != nil {
 		_ = os.RemoveAll(dir)
@@ -366,7 +373,7 @@ func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
 	if err := os.WriteFile(local, data, 0o600); err != nil {
 		return "", err
 	}
-	res, err := s.db.Exec(`UPDATE files SET local_path = ? WHERE id = ? AND deleted_at IS NULL`, local, id)
+	res, err := s.db.Exec(`UPDATE files SET local_path = ? WHERE id = ? AND deleted_at IS NULL`, relPath(s.Dir, local), id)
 	if err == nil {
 		var n int64
 		if n, err = res.RowsAffected(); err == nil && n == 0 {
@@ -396,7 +403,7 @@ func (s *Store) DownloadedAudio(id string, data []byte) (string, error) {
 	if err := os.WriteFile(local, data, 0o600); err != nil {
 		return "", err
 	}
-	res, err := s.db.Exec(`UPDATE recordings SET local_path = ? WHERE id = ?`, local, id)
+	res, err := s.db.Exec(`UPDATE recordings SET local_path = ? WHERE id = ?`, relPath(s.Dir, local), id)
 	if err == nil {
 		var n int64
 		if n, err = res.RowsAffected(); err == nil && n == 0 {
@@ -417,7 +424,7 @@ func (s *Store) DownloadedAudio(id string, data []byte) (string, error) {
 // deleted as stored, not as the caller last read it, and only its
 // deletion goes up, so a change made since, here or elsewhere, is kept.
 func (s *Store) DeleteFile(f File) error {
-	if err := s.inTx(func(tx *sql.Tx) error { return deleteFile(tx, f.ID, time.Now()) }); err != nil {
+	if err := s.inTx(func(tx *sql.Tx) error { return deleteFile(tx, s.Dir, f.ID, time.Now()) }); err != nil {
 		return err
 	}
 	s.removeCopy(f.ID)
@@ -429,15 +436,15 @@ func (s *Store) DeleteFile(f File) error {
 // deleteFile is DeleteFile in the caller's transaction, but for the copy
 // here, which the caller removes once it commits. A file that is gone has
 // nothing to delete.
-func deleteFile(tx *sql.Tx, id string, now time.Time) error {
-	files, err := filesIn(tx, `id = ?`, id)
+func deleteFile(tx *sql.Tx, dir, id string, now time.Time) error {
+	files, err := filesIn(tx, dir, `id = ?`, id)
 	if err != nil || len(files) == 0 {
 		return err
 	}
 	f := files[0]
 	old := FileToRemote(f)
 	f.DeletedAt, f.UpdatedAt = now, now
-	if err := putFile(tx, f); err != nil {
+	if err := putFile(tx, dir, f); err != nil {
 		return err
 	}
 	// Its entries go with its page's, so removing a shared page removes
@@ -461,6 +468,7 @@ func (s *Store) removeCopy(id string) {
 	if err := s.db.QueryRow(`SELECT local_path FROM files WHERE id = ? AND deleted_at IS NOT NULL`, id).Scan(&local); err != nil || local.String == "" {
 		return
 	}
+	local.String = s.Path(local.String)
 	dir := filepath.Join(s.Dir, "files", id)
 	if rel, err := filepath.Rel(dir, local.String); err != nil || !filepath.IsLocal(rel) {
 		return
@@ -716,12 +724,6 @@ func (s *Store) DeleteComment(id string) error {
 	return err
 }
 
-// Reanchor moves threads anchored to one block onto another.
-func (s *Store) Reanchor(pageID, from, to string) error {
-	_, err := s.changeComments("comment moved", func(c *Comment) { c.BlockID = to }, `page_id = ? AND block_id = ?`, pageID, from)
-	return err
-}
-
 // Segment is one timestamped piece of a transcript.
 type Segment struct {
 	StartMs int    `json:"start_ms"`
@@ -751,14 +753,14 @@ type Recording struct {
 
 const recordingCols = `id, page_id, block_id, audio_path, local_path, duration_ms, stt_provider, stt_model, status, transcript, language, error, created_at, updated_at, uploaded_at`
 
-func scanRecording(sc interface{ Scan(...any) error }) (Recording, error) {
+func scanRecording(dir string, sc interface{ Scan(...any) error }) (Recording, error) {
 	var r Recording
 	var audio, local, lang, errText sql.NullString
 	var transcript string
 	var c, u int64
 	var up sql.NullInt64
 	err := sc.Scan(&r.ID, &r.PageID, &r.BlockID, &audio, &local, &r.DurationMs, &r.SttProvider, &r.SttModel, &r.Status, &transcript, &lang, &errText, &c, &u, &up)
-	r.AudioPath, r.LocalPath, r.Language, r.Error = audio.String, local.String, lang.String, errText.String
+	r.AudioPath, r.LocalPath, r.Language, r.Error = audio.String, absPath(dir, local.String), lang.String, errText.String
 	r.CreatedAt, r.UpdatedAt, r.UploadedAt = time.UnixMilli(c), time.UnixMilli(u), fromMs(up)
 	_ = json.Unmarshal([]byte(transcript), &r.Transcript)
 	return r, err
@@ -766,7 +768,7 @@ func scanRecording(sc interface{ Scan(...any) error }) (Recording, error) {
 
 // Recording returns one recording.
 func (s *Store) Recording(id string) (Recording, error) {
-	return scanRecording(s.db.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, id))
+	return scanRecording(s.Dir, s.db.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, id))
 }
 
 // Recordings returns every recording, newest first.
@@ -778,7 +780,7 @@ func (s *Store) Recordings() ([]Recording, error) {
 	defer func() { _ = rows.Close() }()
 	var out []Recording
 	for rows.Next() {
-		r, err := scanRecording(rows)
+		r, err := scanRecording(s.Dir, rows)
 		if err != nil {
 			return nil, err
 		}
@@ -788,9 +790,9 @@ func (s *Store) Recordings() ([]Recording, error) {
 }
 
 // PutRecording stores a recording row.
-func (s *Store) PutRecording(r Recording) error { return putRecording(s.db, r) }
+func (s *Store) PutRecording(r Recording) error { return putRecording(s.db, s.Dir, r) }
 
-func putRecording(q querier, r Recording) error {
+func putRecording(q querier, dir string, r Recording) error {
 	transcript, _ := json.Marshal(r.Transcript)
 	if r.Transcript == nil {
 		transcript = []byte("[]")
@@ -801,7 +803,7 @@ func putRecording(q querier, r Recording) error {
 		stt_provider = excluded.stt_provider, stt_model = excluded.stt_model, status = excluded.status,
 		transcript = excluded.transcript, language = excluded.language, error = excluded.error,
 		updated_at = excluded.updated_at, uploaded_at = excluded.uploaded_at`,
-		r.ID, r.PageID, r.BlockID, ns(r.AudioPath), ns(r.LocalPath), r.DurationMs, r.SttProvider, r.SttModel, r.Status,
+		r.ID, r.PageID, r.BlockID, ns(r.AudioPath), ns(relPath(dir, r.LocalPath)), r.DurationMs, r.SttProvider, r.SttModel, r.Status,
 		string(transcript), ns(r.Language), ns(r.Error), ms(r.CreatedAt), ms(r.UpdatedAt), nt(r.UploadedAt))
 	return err
 }
@@ -844,12 +846,12 @@ func (s *Store) updateRecording(id, ifStatus string, fn func(*Recording)) (Recor
 	var r Recording
 	err := s.inTx(func(tx *sql.Tx) error {
 		var err error
-		if r, err = scanRecording(tx.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, id)); err != nil {
+		if r, err = scanRecording(s.Dir, tx.QueryRow(`SELECT `+recordingCols+` FROM recordings WHERE id = ?`, id)); err != nil {
 			return err
 		}
 		fn(&r)
 		r.UpdatedAt = time.Now()
-		if err := putRecording(tx, r); err != nil {
+		if err := putRecording(tx, s.Dir, r); err != nil {
 			return err
 		}
 		if r.Status == "recording" {
@@ -861,7 +863,7 @@ func (s *Store) updateRecording(id, ifStatus string, fn func(*Recording)) (Recor
 		}
 		row := RecordingToRemote(r)
 		if ifStatus != "" {
-			row[IfStatusKey], row["error"] = ifStatus, ns(r.Error)
+			row[IfStatusKey] = ifStatus
 		}
 		return queue(tx, "recordings", r.ID, row, label, r.PageID)
 	})
@@ -880,10 +882,10 @@ func (s *Store) QueueUpload(r Recording) error {
 	if r.LocalPath == "" {
 		return nil
 	}
-	return s.Queue("storage", "recordings/"+r.ID, uploadOf(r), "audio waiting to upload", r.PageID)
+	return s.Queue("storage", "recordings/"+r.ID, uploadOf(s.Dir, r), "audio waiting to upload", r.PageID)
 }
 
 // uploadOf is the entry that uploads a recording's audio on this device.
-func uploadOf(r Recording) map[string]any {
-	return map[string]any{"bucket": "recordings", "local_path": r.LocalPath, "content_type": "audio/wav", "recording_id": r.ID}
+func uploadOf(dir string, r Recording) map[string]any {
+	return map[string]any{"bucket": "recordings", "local_path": relPath(dir, r.LocalPath), "content_type": "audio/wav", "recording_id": r.ID}
 }

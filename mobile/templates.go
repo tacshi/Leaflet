@@ -555,8 +555,14 @@ func copyError(err error) error {
 // fetchNeeds brings to this device what copying page id, with its
 // subpages, needs first (store.CopyNeeds), off the core's queue. It
 // returns the recordings whose audio came, for dropFetchedAudio once the
-// copy is made.
+// copy is made; failing, it drops what came itself, as no copy needs it.
 func (c *Core) fetchNeeds(id string) (audio []string, err error) {
+	defer func() {
+		if err != nil && len(audio) > 0 {
+			c.q.do(func() { c.dropFetchedAudio(audio) })
+			audio = nil
+		}
+	}()
 	var needs []store.CopyNeed
 	canFetch := false
 	c.q.do(func() {

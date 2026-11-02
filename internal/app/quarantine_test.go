@@ -28,4 +28,12 @@ func TestRunsAsProgram(t *testing.T) {
 			t.Errorf("runsAsProgram(%s) = false", name)
 		}
 	}
+	// Disk images, which open mounted, and plug-ins and zipped Python
+	// apps, which install or run.
+	for _, name := range []string{"disk.iso", "disk.img", "disk.cdr", "disk.sparseimage", "disk.sparsebundle", "disk.vhd", "disk.VHDX",
+		"app.pyz", "app.pyzw", "pane.prefpane", "screen.saver"} {
+		if !runsAsProgram(filepath.Join(dir, name)) {
+			t.Errorf("runsAsProgram(%s) = false", name)
+		}
+	}
 }

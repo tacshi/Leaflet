@@ -15,7 +15,7 @@ final class EditorTextView: UITextView {
         didSet {
             oldValue?.removeFromSuperview()
             if let header { addSubview(header) }
-            setNeedsLayout()
+            remeasure()
         }
     }
     /// measureHeader returns the header's height at a width: SwiftUI's,
@@ -28,7 +28,7 @@ final class EditorTextView: UITextView {
         didSet {
             oldValue?.removeFromSuperview()
             if let footer { addSubview(footer) }
-            setNeedsLayout()
+            remeasure()
         }
     }
     var measureFooter: ((CGFloat) -> CGFloat)?
@@ -125,7 +125,9 @@ final class EditorTextView: UITextView {
         guard let window,
             let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
         else { return }
-        let keyboard = convert(window.convert(end, from: nil), from: window)
+        // The keyboard's frame is the screen's: a window on iPad, in
+        // Stage Manager or Split View, is only part of it.
+        let keyboard = convert(end, from: window.screen.coordinateSpace)
         let hidden = note.name == UIResponder.keyboardWillHideNotification
         let visibleBottom = bounds.maxY
         let covered = hidden ? 0 : max(0, visibleBottom - keyboard.minY)
@@ -179,12 +181,16 @@ final class EditorTextView: UITextView {
         var top: CGFloat = 12
         if let header {
             let width = bounds.width - side * 2
-            let size = CGSize(width: width, height: measureHeader?(width) ?? header.bounds.height)
-            header.frame = CGRect(
-                x: side, y: 12, width: bounds.width - side * 2, height: size.height)
+            let height =
+                height(of: header, width: width, measure: measureHeader, &headerSize)
+                ?? header.bounds.height
+            header.frame = CGRect(x: side, y: 12, width: width, height: height)
             top = header.frame.maxY + 8
         }
-        let footerHeight = footer == nil ? 0 : measureFooter?(bounds.width - side * 2) ?? 0
+        let footerHeight =
+            footer.flatMap {
+                height(of: $0, width: bounds.width - side * 2, measure: measureFooter, &footerSize)
+            } ?? 0
         let inset = UIEdgeInsets(
             top: top, left: side, bottom: max(120, footerHeight + 40), right: side)
         if textContainerInset != inset { textContainerInset = inset }
@@ -228,6 +234,43 @@ final class EditorTextView: UITextView {
                 x: side, y: end + 16, width: bounds.width - side * 2, height: footerHeight)
             footer.isHidden = footerHeight < 1
         }
+    }
+
+    /// Measured is the header's or the footer's height at a width, measured
+    /// as it would take ideal on its own.
+    private struct Measured {
+        let width: CGFloat
+        let ideal: CGSize
+        let height: CGFloat
+    }
+    /// headerSize and footerSize are the header's and the footer's heights
+    /// as last measured, kept while the width and what they show stay: the
+    /// text view lays out on each frame it scrolls, and SwiftUI measuring
+    /// them each time slows it.
+    private var headerSize: Measured?
+    private var footerSize: Measured?
+
+    /// height is view's height at width, as measure says, or as last
+    /// measured: its own ideal size, which its hosting controller keeps as
+    /// what it shows changes, is as it was then. It is nil without measure.
+    private func height(
+        of view: UIView, width: CGFloat, measure: ((CGFloat) -> CGFloat)?,
+        _ kept: inout Measured?
+    ) -> CGFloat? {
+        guard let measure else { return nil }
+        let ideal = view.intrinsicContentSize
+        if let kept, kept.width == width, kept.ideal == ideal { return kept.height }
+        let height = measure(width)
+        kept = Measured(width: width, ideal: ideal, height: height)
+        return height
+    }
+
+    /// remeasure has the header and the footer measured again as they lay
+    /// out next, as what they show changed.
+    func remeasure() {
+        headerSize = nil
+        footerSize = nil
+        setNeedsLayout()
     }
 
     /// The text takes the keyboard by a tap, not by the focus system's
@@ -334,6 +377,20 @@ final class EditorTextView: UITextView {
     override func deleteBackward() {
         if controller?.backspaceAtPageStart() == true { return }
         super.deleteBackward()
+    }
+
+    /// setMarkedText starts a composition by a block without text in a new
+    /// paragraph after it, as text typed there goes.
+    override func setMarkedText(_ markedText: String?, selectedRange: NSRange) {
+        if markedTextRange == nil, !(markedText ?? "").isEmpty { controller?.roomToCompose() }
+        super.setMarkedText(markedText, selectedRange: selectedRange)
+    }
+
+    override func setAttributedMarkedText(
+        _ markedText: NSAttributedString?, selectedRange: NSRange
+    ) {
+        if markedTextRange == nil, (markedText?.length ?? 0) > 0 { controller?.roomToCompose() }
+        super.setAttributedMarkedText(markedText, selectedRange: selectedRange)
     }
 
     override var isEditable: Bool {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/store"
 	"leaflet/locales"
 )
 
@@ -18,6 +19,8 @@ type fakePlatform struct {
 	t       *testing.T
 	mu      sync.Mutex
 	secrets map[string][]byte
+	// ended says the test is over, which Log then no longer logs to.
+	ended bool
 }
 
 func (p *fakePlatform) SecretGet(name string) ([]byte, error) {
@@ -45,7 +48,26 @@ func (p *fakePlatform) DeviceName() string              { return "Test iPhone" }
 func (p *fakePlatform) OpenURL(string)                  {}
 func (p *fakePlatform) WatchICloud(bool)                {}
 func (p *fakePlatform) StartDownload(path string) error { return nil }
-func (p *fakePlatform) Log(line string)                 { p.t.Log(strings.TrimSpace(line)) }
+
+// Log logs to the test while it runs: the core's goroutines can log after
+// it ended, which t.Log would panic on.
+func (p *fakePlatform) Log(line string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.ended {
+		p.t.Log(strings.TrimSpace(line))
+	}
+}
+
+// logUntilEnd has Log stop logging as the test ends, once the cleanups
+// registered after it have run, and a Log under way is done.
+func (p *fakePlatform) logUntilEnd() {
+	p.t.Cleanup(func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		p.ended = true
+	})
+}
 
 // update is a PageUpdated event, and when it came.
 type update struct {
@@ -102,7 +124,9 @@ func open(t *testing.T) (*Core, *fakeEvents) {
 	t.Helper()
 	cfg, _ := json.Marshal(config{DataDir: t.TempDir(), Locale: "en"})
 	ev := &fakeEvents{updates: make(chan update, 16), saving: make(chan bool, 64), readOnly: make(chan bool, 16), notices: make(chan string, 16)}
-	c, err := Open(string(cfg), &fakePlatform{t: t, secrets: map[string][]byte{}}, ev)
+	p := &fakePlatform{t: t, secrets: map[string][]byte{}}
+	p.logUntilEnd()
+	c, err := Open(string(cfg), p, ev)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +203,7 @@ func TestEditSavesAndReopens(t *testing.T) {
 	}
 
 	edit := doc.FromBlocks([]*doc.Node{paragraph("a", "Milk")})
-	if err := c.EditPage(row.ID, pg.Editor, edit.Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, pg.Editor, edit.Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 	c.ClosePage(row.ID, pg.Editor)
@@ -202,7 +226,7 @@ func TestEditOverAnAgentsChangeMerges(t *testing.T) {
 	raw, _ = c.OpenPage(row.ID)
 	var pg openedPage
 	_ = json.Unmarshal([]byte(raw), &pg)
-	if err := c.EditPage(row.ID, pg.Editor, start.Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, pg.Editor, start.Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 
@@ -218,7 +242,7 @@ func TestEditOverAnAgentsChangeMerges(t *testing.T) {
 
 	// Meanwhile the app, not having heard of it, changes the first block.
 	edit := doc.FromBlocks([]*doc.Node{paragraph("a", "One!")})
-	if err := c.EditPage(row.ID, pg.Editor, edit.Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, pg.Editor, edit.Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 	merge := wait(t, ev, "merge")
@@ -232,7 +256,7 @@ func TestEditOverAnAgentsChangeMerges(t *testing.T) {
 	// The app, now at the merge's rev, edits on without another merge.
 	edit = doc.MustDecode(merge.content)
 	edit.Find("b").SetDelta(doc.Delta{{Text: "Two!"}})
-	if err := c.EditPage(row.ID, pg.Editor, edit.Encode(), merge.rev); err != nil {
+	if _, err := c.EditPage(row.ID, pg.Editor, edit.Encode(), merge.rev); err != nil {
 		t.Fatal(err)
 	}
 	c.ClosePage(row.ID, pg.Editor)
@@ -250,7 +274,7 @@ func TestStreamingAgentEditsReachTheAppSpaced(t *testing.T) {
 	c, ev := open(t)
 	row := create(t, c, `{"title":"Plan"}`)
 	pg := openEditor(t, c, row.ID)
-	if err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "One")}).Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "One")}).Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 	// The blocks of a call stream in every few hundredths of a second.
@@ -268,7 +292,7 @@ func TestStreamingAgentEditsReachTheAppSpaced(t *testing.T) {
 	// The last of them reach the app too.
 	time.Sleep(2 * agentEvery)
 	// The app, not having heard of them, changes the first block.
-	if err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "One!")}).Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "One!")}).Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 	var shown []time.Time
@@ -333,7 +357,7 @@ func TestTwoWindowsKeepEachOthersEdits(t *testing.T) {
 	_ = json.Unmarshal([]byte(raw), &row)
 	a := openEditor(t, c, row.ID)
 	start := doc.FromBlocks([]*doc.Node{paragraph("a", "One"), paragraph("b", "Two")})
-	if err := c.EditPage(row.ID, a.Editor, start.Encode(), a.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, a.Editor, start.Encode(), a.Rev); err != nil {
 		t.Fatal(err)
 	}
 	b := openEditor(t, c, row.ID)
@@ -343,7 +367,7 @@ func TestTwoWindowsKeepEachOthersEdits(t *testing.T) {
 
 	edit := start.Copy()
 	edit.Find("a").SetDelta(doc.Delta{{Text: "One!"}})
-	if err := c.EditPage(row.ID, a.Editor, edit.Encode(), a.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, a.Editor, edit.Encode(), a.Rev); err != nil {
 		t.Fatal(err)
 	}
 	if u := wait(t, ev, "merge"); u.rev <= b.Rev || texts(doc.MustDecode(u.content)) != "One!|Two" {
@@ -351,7 +375,7 @@ func TestTwoWindowsKeepEachOthersEdits(t *testing.T) {
 	}
 	edit = b.Content.Copy()
 	edit.Find("b").SetDelta(doc.Delta{{Text: "Two!"}})
-	if err := c.EditPage(row.ID, b.Editor, edit.Encode(), b.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, b.Editor, edit.Encode(), b.Rev); err != nil {
 		t.Fatal(err)
 	}
 	if u := wait(t, ev, "merge"); texts(doc.MustDecode(u.content)) != "One!|Two!" {
@@ -362,7 +386,7 @@ func TestTwoWindowsKeepEachOthersEdits(t *testing.T) {
 	b = openEditor(t, c, row.ID)
 	edit = b.Content.Copy()
 	edit.Find("b").SetDelta(doc.Delta{{Text: "Two!!"}})
-	if err := c.EditPage(row.ID, b.Editor, edit.Encode(), b.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, b.Editor, edit.Encode(), b.Rev); err != nil {
 		t.Fatalf("edit after the other window closed: %v", err)
 	}
 	closeEditors(c, row.ID)
@@ -380,19 +404,19 @@ func TestTwoWindowsEditingOneBlockKeepTheConflict(t *testing.T) {
 	_ = json.Unmarshal([]byte(raw), &row)
 	a := openEditor(t, c, row.ID)
 	start := doc.FromBlocks([]*doc.Node{paragraph("a", "One")})
-	if err := c.EditPage(row.ID, a.Editor, start.Encode(), a.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, a.Editor, start.Encode(), a.Rev); err != nil {
 		t.Fatal(err)
 	}
 	b := openEditor(t, c, row.ID)
 	edit := start.Copy()
 	edit.Find("a").SetDelta(doc.Delta{{Text: "first window"}})
-	if err := c.EditPage(row.ID, a.Editor, edit.Encode(), a.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, a.Editor, edit.Encode(), a.Rev); err != nil {
 		t.Fatal(err)
 	}
 	wait(t, ev, "merge")
 	edit = start.Copy()
 	edit.Find("a").SetDelta(doc.Delta{{Text: "second window"}})
-	if err := c.EditPage(row.ID, b.Editor, edit.Encode(), b.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, b.Editor, edit.Encode(), b.Rev); err != nil {
 		t.Fatal(err)
 	}
 	wait(t, ev, "merge")
@@ -419,7 +443,7 @@ func TestDeletingAnOpenPageKeepsItsEditsForUndo(t *testing.T) {
 	var row pageRow
 	_ = json.Unmarshal([]byte(raw), &row)
 	pg := openEditor(t, c, row.ID)
-	if err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "Milk")}).Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "Milk")}).Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 	ids, err := c.DeletePage(row.ID)
@@ -442,7 +466,7 @@ func TestDeletingAPageKeepsItsOpenSubpagesEdits(t *testing.T) {
 	parent := create(t, c, `{"title":"Trip"}`)
 	child := create(t, c, `{"title":"Packing","link":true,"parent_id":"`+parent.ID+`"}`)
 	pg := openEditor(t, c, child.ID)
-	if err := c.EditPage(child.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "Socks")}).Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(child.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "Socks")}).Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 	ids, err := c.DeletePage(parent.ID)
@@ -468,7 +492,7 @@ func TestPageClosedUnsavedKeepsItsEdits(t *testing.T) {
 	var row pageRow
 	_ = json.Unmarshal([]byte(raw), &row)
 	pg := openEditor(t, c, row.ID)
-	if err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "Milk")}).Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "Milk")}).Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 	db := c.core.Store.DB()
@@ -660,5 +684,66 @@ func TestCommentMentionsRunAgents(t *testing.T) {
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("no notice of the failed run")
+	}
+}
+
+// @agent runs the default agent, not the first, and an agent the comment
+// names runs before it.
+func TestCommentMentionsRunTheDefaultForAgent(t *testing.T) {
+	c, ev := open(t)
+	row := create(t, c, `{"title":"Plan"}`)
+	for _, name := range []string{"Ollama", "Studio"} {
+		if err := c.SaveProvider(`{"preset":"ollama","name":"` + name + `","base_url":"http://127.0.0.1:1","default_model":"llama3"}`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c.q.do(func() {
+		ps, _ := c.core.Store.Providers()
+		s := c.core.Store.Settings()
+		for _, p := range ps {
+			if p.Name == "Studio" {
+				s.DefaultModel = store.ModelChoice{ProviderID: p.ID}.Encode()
+			}
+		}
+		_ = c.core.Store.SaveSettings(s)
+	})
+	for body, want := range map[string]string{"@agent sum it up": "Studio", "@agent ask @Ollama": "Ollama"} {
+		if err := c.AddComment(row.ID, "b1", body, "", ""); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case msg := <-ev.notices:
+			if !strings.HasPrefix(msg, want+":") {
+				t.Errorf("%q: notice %q, want %s's", body, msg, want)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatalf("%q: no notice of the failed run", body)
+		}
+	}
+}
+
+// The zone given before a core opens is time.Local, by name or else by
+// offset; once one is open, time.Local stays as it was.
+func TestSetTimeZoneOnlyBeforeOpen(t *testing.T) {
+	zone.Lock()
+	fixed, set := zone.fixed, setLocal
+	zone.fixed = false
+	var got []string
+	setLocal = func(loc *time.Location) {
+		_, offset := time.Date(2026, 1, 1, 0, 0, 0, 0, loc).Zone()
+		got = append(got, fmt.Sprintf("%s %d", loc, offset))
+	}
+	zone.Unlock()
+	t.Cleanup(func() {
+		zone.Lock()
+		zone.fixed, setLocal = fixed, set
+		zone.Unlock()
+	})
+	SetTimeZone("Pacific/Auckland", 0)
+	SetTimeZone("Nowhere/Else", 3600)
+	fixZone()
+	SetTimeZone("Asia/Tokyo", 9*3600)
+	if want := "Pacific/Auckland 46800,Nowhere/Else 3600"; strings.Join(got, ",") != want {
+		t.Errorf("set %v, want %s", got, want)
 	}
 }

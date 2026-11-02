@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/guard"
 	"leaflet/internal/icloud"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
@@ -160,7 +161,7 @@ func (s *Service) Start() {
 	ctx, cancel := context.WithCancel(context.Background())
 	s.loop, s.stop = ctx, cancel
 	s.mu.Unlock()
-	go func() {
+	guard.Go(func() {
 		tick := time.NewTicker(30 * time.Second)
 		defer tick.Stop()
 		s.Kick()
@@ -176,9 +177,16 @@ func (s *Service) Start() {
 				}
 			case <-tick.C:
 			}
-			_ = s.SyncNow()
+			s.loopPass()
 		}
-	}()
+	})
+}
+
+// loopPass is a pass of the loop's: one that panics is logged, and the
+// loop goes on to the next.
+func (s *Service) loopPass() {
+	defer guard.Recover()
+	_ = s.SyncNow()
 }
 
 // Stop ends the loop Start started, and the pass running, the loop's or
@@ -290,11 +298,7 @@ func (s *Service) Uploads() bool { return s.target().ready() }
 // uploaded from: signed in, iCloud sync on, or the Leaflet folder of
 // iCloud Drive this device synced through before.
 func (s *Service) CanFetch() bool {
-	if s.target().ready() {
-		return true
-	}
-	joined, _ := s.st.Value("icloud.space")
-	return joined != "" && s.folder().Root != ""
+	return s.target().ready() || s.joinedICloud()
 }
 
 // Fetch reads a file (bucket "files") or a recording's audio
@@ -318,6 +322,10 @@ func (s *Service) Fetch(ctx context.Context, bucket, path string) ([]byte, error
 	return nil, errors.New("sync: not signed in, and not in iCloud Drive")
 }
 
+// openWait is how long SetOpen has to bring an opened page up to date;
+// tests shorten it.
+var openWait = time.Minute
+
 // SetOpen marks a page as open, so its content is always pulled, and
 // brings an opened page up to date in the background.
 func (s *Service) SetOpen(pageID string, open bool) {
@@ -328,14 +336,15 @@ func (s *Service) SetOpen(pageID string, open bool) {
 		return
 	}
 	s.open[pageID] = true
-	go func() {
+	guard.Go(func() {
 		if !s.CanSync() {
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cancel()
+		// The time it has starts once the pass in progress is done.
 		s.running.Lock()
 		defer s.running.Unlock()
+		ctx, cancel := context.WithTimeout(context.Background(), openWait)
+		defer cancel()
 		// Who else has one of the user's pages is known before what they
 		// wrote in it comes, for the agents that run on it.
 		if _, server := s.target().(supabaseTarget); server {
@@ -348,7 +357,7 @@ func (s *Service) SetOpen(pageID string, open bool) {
 		if _, err := s.RefreshContent(ctx, pageID); err != nil {
 			log.Printf("open page %s: %v", pageID, err)
 		}
-	}()
+	})
 }
 
 // CanSync reports whether a pass can run: signed in and online, or with
@@ -372,8 +381,9 @@ func (s *Service) Hold(fn func()) {
 	fn()
 }
 
-// SyncNow runs one pass, after the one in progress.
-func (s *Service) SyncNow() error {
+// SyncNow runs one pass, after the one in progress. A pass that panics
+// is logged and fails, so it is never taken for one still running.
+func (s *Service) SyncNow() (err error) {
 	if !s.CanSync() {
 		return nil
 	}
@@ -381,7 +391,9 @@ func (s *Service) SyncNow() error {
 	defer s.running.Unlock()
 	if s.OnState != nil {
 		s.OnState(true, nil)
+		defer func() { s.OnState(false, err) }()
 	}
+	defer guard.RecoverAs(&err)
 	base, done := s.startPass()
 	defer done()
 	ctx, cancel := context.WithTimeout(base, 5*time.Minute)
@@ -390,7 +402,7 @@ func (s *Service) SyncNow() error {
 		log.Printf("sync: %v", err)
 	}
 	t := s.target()
-	err := t.pass(ctx)
+	err = t.pass(ctx)
 	if t.needsNetwork() && remote.IsNetwork(err) {
 		err = nil // offline: try again later
 	}
@@ -399,9 +411,6 @@ func (s *Service) SyncNow() error {
 	}
 	if err != nil && !errors.Is(err, remote.ErrSignedOut) {
 		log.Printf("sync: %v", err)
-	}
-	if s.OnState != nil {
-		s.OnState(false, err)
 	}
 	return err
 }
@@ -504,7 +513,7 @@ func (s *Service) requeueAll(ctx context.Context, spaceID string) error {
 	for _, p := range pages {
 		queued = errors.Join(queued, s.st.Requeue("pages", p.ID))
 	}
-	folders, err := s.st.Folders()
+	folders, err := s.st.AllFolders()
 	queued = errors.Join(queued, err)
 	for _, f := range folders {
 		queued = errors.Join(queued, s.st.Requeue("folders", f.ID))
@@ -701,7 +710,21 @@ func (s *Service) heartbeat(ctx context.Context) error {
 		return err
 	}
 	if row != nil && row["revoked_at"] != nil {
-		_ = s.st.SetValue("device.revoked", "true")
+		// The row stays revoked: signing in again, this device registers
+		// as a new one. What iCloud sync kept goes with the old ID, as its
+		// log is that ID's: under the new one, a later turn-on joins the
+		// folder afresh rather than going on from the old one's last batch,
+		// which the other devices would wait before for good. Its space
+		// stays, for what went up to the folder to be fetched from it.
+		space, _ := s.st.Value("icloud.space")
+		if space == "" {
+			space, _ = s.st.Value(fetchSpaceKey)
+		}
+		_ = s.st.ForgetICloud()
+		if space != "" {
+			_ = s.st.SetValue(fetchSpaceKey, space)
+		}
+		_ = s.st.DeleteValue("device.id")
 		s.be.SignOut()
 		return remote.ErrSignedOut
 	}
@@ -797,8 +820,6 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 		return s.pushComment(ctx, uid, e, payload)
 	case "page_history":
 		payload["created_by"] = uid
-	case "ai_jobs":
-		payload["user_id"] = uid
 	}
 	_, err := s.be.Upsert(ctx, e.Entity, payload, "")
 	return err == nil, err
@@ -1202,7 +1223,7 @@ func contentOf(v any) (*doc.Content, error) {
 }
 
 func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]any) (bool, error) {
-	local, _ := payload["local_path"].(string)
+	local := s.st.Path(store.S(payload, "local_path"))
 	if !onDevice(local) {
 		var err error
 		if local, err = s.fetchCopied(ctx, payload); err != nil || local == "" {
@@ -1211,7 +1232,10 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 	}
 	f, err := os.Open(local) // #nosec G304 -- a file in the app's own data folder.
 	if err != nil {
-		return true, nil // gone: nothing to upload
+		if errors.Is(err, fs.ErrNotExist) {
+			return true, nil // gone: nothing to upload
+		}
+		return false, err // there, but not to be read now: tried again
 	}
 	defer func() { _ = f.Close() }()
 	bucket, _ := payload["bucket"].(string)
@@ -1497,6 +1521,9 @@ func (s *Service) pull(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := s.pullProviderRemovals(ctx); err != nil {
+		return err
+	}
 	if err := s.pullShared(ctx); err != nil {
 		return err
 	}
@@ -1509,6 +1536,33 @@ func (s *Service) pull(ctx context.Context) error {
 		return err
 	}
 	return s.pullContents(ctx)
+}
+
+// pullProviderRemovals removes the cloud model connections the server no
+// longer has: one removed on another device is deleted there, and leaves
+// no row for the pull by time to bring. Only those stored here before the
+// server listed its own go, so one added meanwhile stays.
+func (s *Service) pullProviderRemovals(ctx context.Context) error {
+	here, err := s.st.Providers()
+	if err != nil {
+		return err
+	}
+	rows, err := s.be.Select(ctx, "model_providers", remote.Query{Select: "id"})
+	if err != nil {
+		return err
+	}
+	there := map[string]bool{}
+	for _, r := range rows {
+		there[store.S(r, "id")] = true
+	}
+	for _, p := range here {
+		if !p.IsLocal && !there[p.ID] {
+			if err := s.st.DeleteProvider(p.ID); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // pullShared brings the pages newly shared with the user, once they have
@@ -1552,15 +1606,20 @@ func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 	res, err := s.be.RPC(ctx, "page_members", map[string]any{"p_page_id": pageID})
 	re := (*remote.Error)(nil)
 	forbidden := errors.As(err, &re) && re.Status == http.StatusForbidden
-	if err == nil || forbidden {
-		s.mu.Lock()
-		s.membersAt[pageID] = time.Now()
-		s.mu.Unlock()
+	// They count as loaded (pullMembers) only once they are handled: one
+	// that failed is tried again on the next pass.
+	loaded := func(err error) error {
+		if err == nil {
+			s.mu.Lock()
+			s.membersAt[pageID] = time.Now()
+			s.mu.Unlock()
+		}
+		return err
 	}
 	if forbidden {
 		// Withdrawn, the page is handled once it is gone or keeps no
 		// roles: the pulls go on past it.
-		return s.withdrawn(ctx, pageID)
+		return loaded(s.withdrawn(ctx, pageID))
 	}
 	if err != nil {
 		return err
@@ -1574,7 +1633,7 @@ func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 		members = append(members, store.Member{PageID: pageID, UserID: store.S(m, "user_id"), Role: store.S(m, "role"),
 			DisplayName: store.S(m, "display_name"), Email: store.S(m, "email"), Accepted: accepted || !ok})
 	}
-	return s.st.SetMembers(pageID, members)
+	return loaded(s.st.SetMembers(pageID, members))
 }
 
 // withdrawn handles members refused for a page: one the server no longer
@@ -1583,7 +1642,10 @@ func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 // edited here. It returns why it could not.
 func (s *Service) withdrawn(ctx context.Context, pageID string) error {
 	rows, err := s.be.Select(ctx, "pages", remote.Query{Select: "id", Filters: []string{remote.Eq("id", pageID)}})
-	if err == nil && len(rows) == 0 {
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
 		removed, err := s.st.RemoveSharedPages(pageID)
 		if err == nil && len(removed) > 0 {
 			log.Printf("share of %s withdrawn: removed %d pages", pageID, len(removed))
@@ -2186,28 +2248,6 @@ func (s *Service) flushRemote(ctx context.Context, pageID string) error {
 		}
 		if done {
 			_ = s.st.Dequeue(e)
-		}
-	}
-	return nil
-}
-
-// Push sends one queued row right away, as a job must exist before the
-// agent function runs it.
-func (s *Service) Push(ctx context.Context, entity, id string) error {
-	entries, err := s.st.Pending()
-	if err != nil {
-		return err
-	}
-	uid := s.be.UserID()
-	for _, e := range entries {
-		if e.Entity == entity && e.EntityID == id {
-			done, err := s.pushOne(ctx, uid, e)
-			if err != nil {
-				return err
-			}
-			if done {
-				_ = s.st.Dequeue(e)
-			}
 		}
 	}
 	return nil

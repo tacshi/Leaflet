@@ -19,6 +19,7 @@ import (
 	"github.com/coder/websocket"
 
 	"leaflet/internal/agents/endpoint"
+	"leaflet/internal/guard"
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -27,6 +28,13 @@ import (
 // IsLocalEndpoint reports whether an endpoint is on this machine or
 // network, so audio can go to it straight from the device.
 func IsLocalEndpoint(baseURL string) bool { return endpoint.IsLocal(baseURL) }
+
+// TestEndpoint tries an OpenAI-compatible endpoint with a second of
+// silence, as Settings does on the desktop and the phone.
+func TestEndpoint(ctx context.Context, baseURL, model, apiKey string) error {
+	_, err := TranscribeEndpoint(ctx, baseURL, model, WavFromPCM(make([]byte, 2*SampleRate)), apiKey, "auto")
+	return err
+}
 
 // TranscribeEndpoint transcribes audio with an OpenAI-style
 // /audio/transcriptions endpoint (OpenAI, DashScope, a self-hosted server).
@@ -242,10 +250,11 @@ var errBehind = errors.New("the connection could not keep up")
 func newSoniox(conn *websocket.Conn) *Soniox {
 	s := &Soniox{conn: conn, done: make(chan struct{}), queue: make(chan []byte, maxQueued), written: make(chan struct{})}
 	s.sent.Store(time.Now().UnixMilli())
-	go s.read()
-	go s.write()
+	guard.Go(s.read)
+	guard.Go(s.write)
 	// Read here, so a test that changes it races no stream of another.
-	go s.keepAlive(keepAliveAfter)
+	after := keepAliveAfter
+	guard.Go(func() { s.keepAlive(after) })
 	return s
 }
 

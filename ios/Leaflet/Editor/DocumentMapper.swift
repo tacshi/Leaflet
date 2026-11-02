@@ -34,6 +34,12 @@ enum DocumentMapper {
                 }
                 if BlockInfo.nestable.contains(node.type) {
                     add(node.children ?? [], depth: depth + 1)
+                } else if BlockInfo.textTypes.contains(node.type) {
+                    // Text that holds no blocks has its children after it,
+                    // as the core's merge lifts them (doc.liftStranded):
+                    // left out, they would be deleted as the page is sent.
+                    // A block without text keeps its own, a table's cells.
+                    add(node.children ?? [], depth: depth)
                 }
             }
         }
@@ -181,14 +187,19 @@ enum DocumentMapper {
     }
 
     static func node(for info: BlockInfo, text: NSAttributedString) -> DocNode {
-        if !info.isText,
-            let attachment = text.length > 0
+        if !info.isText {
+            if let attachment = text.length > 0
                 ? text.attribute(.attachment, at: 0, effectiveRange: nil) as? BlockAttachment : nil
-        {
-            var n = attachment.node
-            n.id = info.id
-            // A table's cells and the like stay as they were.
-            return n
+            {
+                var n = attachment.node
+                n.id = info.id
+                // A table's cells and the like stay as they were.
+                return n
+            }
+            // A block without text whose attachment went is a paragraph, as
+            // the editor shows it: the block it was is gone.
+            return DocNode(
+                id: info.id, type: "paragraph", data: ["delta": delta(text)], children: nil)
         }
         var data = info.data
         data["delta"] = delta(text)

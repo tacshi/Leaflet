@@ -126,6 +126,18 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 			}
 			continue
 		}
+		// An object that is no JSON-RPC 2.0 request, without its method,
+		// is an invalid request too, answered under its ID if it has one.
+		if req.JSONRPC != "2.0" || req.Method == "" {
+			id := req.ID
+			if len(id) == 0 {
+				id = json.RawMessage("null")
+			}
+			if err := enc.Encode(response{JSONRPC: "2.0", ID: id, Error: &rpcError{-32600, "Invalid Request"}}); err != nil {
+				return err
+			}
+			continue
+		}
 		result, rerr := s.handle(req)
 		// Notifications get no answer.
 		if len(req.ID) == 0 {

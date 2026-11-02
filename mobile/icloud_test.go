@@ -36,6 +36,7 @@ func openWatching(t *testing.T) (*Core, *watchingPlatform) {
 	t.Helper()
 	cfg, _ := json.Marshal(config{DataDir: t.TempDir(), Locale: "en"})
 	p := &watchingPlatform{fakePlatform: fakePlatform{t: t, secrets: map[string][]byte{}}}
+	p.logUntilEnd()
 	c, err := Open(string(cfg), p, &fakeEvents{updates: make(chan update, 16)})
 	if err != nil {
 		t.Fatal(err)

@@ -7,9 +7,15 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editingProvider: ProviderForm.Draft?
     @State private var providersVersion = 0
+    @State private var prompt = SettingsPrompt()
 
     var body: some View {
         @Bindable var app = app
+        @Bindable var prompt = prompt
+        @Bindable var iCloud = app.iCloud
+        // Read here, for the body to follow it as it is typed: the alert's
+        // actions aren't drawn where a read of it would be.
+        let wordTyped = prompt.question?.typed.map { prompt.typed == $0 } ?? true
         NavigationStack {
             Form {
                 Group {
@@ -82,6 +88,29 @@ struct SettingsView: View {
                 .listRowBackground(palette.surface)
             }
             .themedForm(palette)
+            // The sections' questions and files, on the form: on a row, or
+            // a section's header, they would go as the list scrolls it away.
+            .alert(
+                prompt.question?.title ?? "", isPresented: $prompt.asking,
+                presenting: prompt.question
+            ) { q in
+                if let word = q.typed {
+                    TextField(word, text: $prompt.typed)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                }
+                Button(L.commonCancel, role: .cancel) {}
+                Button(q.action, role: .destructive) { Task { await q.confirm() } }
+                    .disabled(!wordTyped)
+            } message: { q in
+                Text(q.message)
+            }
+            .fileMover(isPresented: $prompt.moving, file: prompt.move?.file) {
+                prompt.moved($0)
+            } onCancellation: {
+                prompt.moved(nil)
+            }
+            .sheet(isPresented: $iCloud.picking) { ICloudSection.picker(app) }
             .navigationTitle(L.settingsTitle)
             .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(item: $editingProvider) { draft in
@@ -97,8 +126,60 @@ struct SettingsView: View {
             .onChange(of: app.accent) { app.saveLook() }
             .onChange(of: app.textSize) { app.saveLook() }
         }
+        .environment(prompt)
         // Drawn again in a language chosen here.
         .id(app.shown)
+    }
+}
+
+/// SettingsPrompt is what a section of Settings asks, or a file it offers
+/// to move, which the form shows: a section's rows come and go as the
+/// list scrolls, and what they present would go with them.
+@MainActor
+@Observable
+final class SettingsPrompt {
+    /// Ask is a question with an action besides Cancel, which typed, when
+    /// set, is a word to type for, as DELETE.
+    struct Ask {
+        var title: String
+        var message: String
+        var action: String
+        var typed: String?
+        var confirm: @MainActor () async -> Void
+    }
+
+    /// Move offers a file the app made, to move where the user picks; done
+    /// hears where it went, or why it didn't, and cancelled that it stays.
+    struct Move {
+        var file: URL
+        var done: @MainActor (Result<URL, any Error>) -> Void
+        var cancelled: @MainActor () -> Void
+    }
+
+    var asking = false
+    private(set) var question: Ask?
+    /// typed is what is typed for the question's word.
+    var typed = ""
+    var moving = false
+    private(set) var move: Move?
+
+    func ask(_ question: Ask) {
+        self.question = question
+        typed = ""
+        asking = true
+    }
+
+    func offer(_ move: Move) {
+        self.move = move
+        moving = true
+    }
+
+    /// moved tells the move's section how it ended, once: nil if the user
+    /// kept the file where it was.
+    func moved(_ result: Result<URL, any Error>?) {
+        let m = move
+        move = nil
+        if let result { m?.done(result) } else { m?.cancelled() }
     }
 }
 

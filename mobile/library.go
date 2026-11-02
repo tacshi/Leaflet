@@ -231,6 +231,8 @@ func (c *Core) DeletePage(id string) (_ string, err error) {
 		// is gone.
 		c.unlinkDeleted(id)
 		if ids, err = c.core.Store.DeletePage(id); err != nil {
+			// The page stays, and so does its card.
+			c.relinkRestored([]string{id})
 			return
 		}
 		for _, pid := range ids {

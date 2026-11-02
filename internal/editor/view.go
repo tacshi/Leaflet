@@ -566,9 +566,6 @@ func (e *Editor) menu(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 							}
 						})
 					})
-					if row.Hovered() && c.Modifiers() == 0 {
-						_ = i
-					}
 					if row.Clicked() {
 						t := *e.trigger
 						e.trigger = nil

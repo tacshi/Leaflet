@@ -1,4 +1,7 @@
 /build/
+# The binary go build . leaves here (make clean removes it)
+/leaflet
+/leaflet.exe
 /.mygo/
 /dist/
 mygo_windows_*.syso

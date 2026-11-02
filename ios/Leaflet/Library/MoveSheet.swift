@@ -1,7 +1,9 @@
 import SwiftUI
 
 /// MoveSheet moves a page, as the desktop's Move to dialog: to the top
-/// level, into a folder, or under another page, found by its title.
+/// level or into a folder, for one of the user's own, or under another
+/// page of its space, found by its title. A page stays in its space: the
+/// server refuses a move out of it.
 struct MoveSheet: View {
     let page: PageRow
     @Environment(AppModel.self) private var app
@@ -11,7 +13,7 @@ struct MoveSheet: View {
     var body: some View {
         NavigationStack {
             List {
-                if query.isEmpty {
+                if query.isEmpty, app.library.own(page) {
                     target(L.dialogMoveTopLevel, systemImage: "doc.text") {
                         await app.move(page, parentID: "", folderID: "")
                     }
@@ -55,14 +57,14 @@ struct MoveSheet: View {
         .tint(.primary)
     }
 
-    /// parents are the pages the page can go under: the user's own, which
-    /// they may change, but not the page itself or one inside it.
+    /// parents are the pages the page can go under: those of its space the
+    /// user may change, but not the page itself or one inside it.
     private var parents: [PageRow] {
         let lib = app.library
         let q = query.lowercased()
         return lib.pages
             .filter { p in
-                p.canEdit && !p.template && lib.own(p) && !inside(p, lib)
+                p.canEdit && !p.template && p.spaceID == page.spaceID && !inside(p, lib)
                     && (q.isEmpty || p.displayTitle.lowercased().contains(q))
             }
             .sorted { $0.updatedAt > $1.updatedAt }

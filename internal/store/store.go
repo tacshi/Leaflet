@@ -135,8 +135,18 @@ func OpenMemory(dir string) (*Store, error) {
 	return OpenPath(":memory:", dir)
 }
 
-// OpenPath opens the database at a path.
+// OpenPath opens the database at a path, for the data folder dir. A dir
+// given relative to the working folder is kept whole: the paths of the
+// files in it are joined to it (absPath), and would otherwise be joined
+// twice, or to another working folder.
 func OpenPath(path, dir string) (*Store, error) {
+	if dir != "" {
+		abs, err := filepath.Abs(dir)
+		if err != nil {
+			return nil, err
+		}
+		dir = abs
+	}
 	// Transactions take the write lock as they begin (_txlock), so what one
 	// reads stays as it read it until it commits, and one that cannot have
 	// the lock waits for it, up to the busy timeout, before doing anything.
@@ -457,6 +467,58 @@ func (s *Store) Wipe() error {
 func (s *Store) removeCopies() error {
 	return errors.Join(os.RemoveAll(filepath.Join(s.Dir, "files")), os.RemoveAll(filepath.Join(s.Dir, "recordings")))
 }
+
+// The copies of files and the recordings' audio the app keeps in its data
+// folder are named in their rows by where they are in it, not by their
+// whole paths: the folder can move, as an iOS app's does when it is
+// updated, and a whole path would name a file that is gone. Paths go in
+// through relPath and come out through absPath.
+
+// relPath is how a row names the file at path: by where it is in dir, when
+// it is in it, or by its whole path.
+func relPath(dir, path string) string {
+	if path == "" || !filepath.IsAbs(path) {
+		return path
+	}
+	if rel, err := filepath.Rel(dir, path); err == nil && filepath.IsLocal(rel) {
+		return filepath.ToSlash(rel)
+	}
+	return path
+}
+
+// absPath is the file a row names, with relPath, as it is in dir now. A
+// whole path an earlier version kept, of a file that is no longer there,
+// names one in a data folder that has moved since: the part after the
+// folder ("Leaflet") is looked for in dir.
+func absPath(dir, path string) string {
+	if path == "" {
+		return ""
+	}
+	if !filepath.IsAbs(path) {
+		return filepath.Join(dir, filepath.FromSlash(path))
+	}
+	if _, err := os.Stat(path); err == nil {
+		return path
+	}
+	slashed := filepath.ToSlash(path)
+	i := strings.LastIndex(slashed, "/Leaflet/")
+	if i < 0 {
+		return path
+	}
+	rel := filepath.FromSlash(slashed[i+len("/Leaflet/"):])
+	if !filepath.IsLocal(rel) {
+		return path
+	}
+	moved := filepath.Join(dir, rel)
+	if _, err := os.Stat(moved); err != nil {
+		return path
+	}
+	return moved
+}
+
+// Path is the file at path as an entry in the outbox names it (as a row
+// does), on this device now.
+func (s *Store) Path(path string) string { return absPath(s.Dir, path) }
 
 // Helpers for nullable columns: "" and zero times are NULL.
 

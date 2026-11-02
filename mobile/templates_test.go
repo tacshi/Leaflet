@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/icloud"
+	"leaflet/internal/store"
 	"leaflet/locales"
 )
 
@@ -218,5 +220,62 @@ func TestNoCopyWhileRecording(t *testing.T) {
 	recording(false, "")
 	if _, err := c.ApplyTemplate(page.ID, "template:"+tpl.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A copy that fails while it fetches what it needs leaves none of what
+// came on this device, as Keep the audio says, as a copy made would.
+func TestFailedCopyDropsTheAudioItFetched(t *testing.T) {
+	c, _ := open(t)
+	row := create(t, c, `{"title":"Standup"}`)
+	root := t.TempDir()
+	var ids []string
+	var err error
+	c.q.do(func() {
+		st := c.core.Store
+		s := st.Settings()
+		s.KeepAudioOnDevice = "until_uploaded"
+		if err = st.SaveSettings(s); err != nil {
+			return
+		}
+		if err = st.SetValue("icloud.space", "s1"); err != nil {
+			return
+		}
+		c.core.Sync.SetICloudRoot(root)
+		var blocks []*doc.Node
+		for range 2 {
+			blockID := doc.NewBlockID()
+			var rec store.Recording
+			if rec, err = st.CreateRecording(row.ID, blockID, "", "", filepath.Join(root, "gone.wav"), "auto"); err != nil {
+				return
+			}
+			if _, err = st.UpdateRecording(rec.ID, func(r *store.Recording) {
+				r.Status, r.AudioPath = "ready", "u1/"+rec.ID+".wav"
+			}); err != nil {
+				return
+			}
+			ids = append(ids, rec.ID)
+			blocks = append(blocks, &doc.Node{ID: blockID, Type: "recording", Data: map[string]any{"recording_id": rec.ID}})
+		}
+		_, _, err = st.SaveContent(row.ID, &doc.Content{Children: blocks})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The first one's audio is in iCloud Drive; the second's never came.
+	rel, _ := icloud.RecordingBlobPath(ids[0])
+	if err := os.MkdirAll(filepath.Dir(filepath.Join(root, rel)), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, rel), make([]byte, 64), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.DuplicatePage(row.ID); err == nil {
+		t.Fatal("copied without the second recording's audio")
+	}
+	var rec store.Recording
+	c.q.do(func() { rec, err = c.core.Store.Recording(ids[0]) })
+	if err != nil || rec.LocalPath != "" {
+		t.Errorf("the first recording's audio stays at %q, %v", rec.LocalPath, err)
 	}
 }

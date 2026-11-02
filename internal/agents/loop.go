@@ -157,9 +157,10 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 			}}
 			res, err = sm.ChatStream(ctx, req.Model, messages, tools, 0, on)
 			switch {
-			case err != nil && ctx.Err() == nil:
-				// A call cut off is no call: what it put in goes. One
-				// the user stopped stays, as edits made before do.
+			case err != nil && !errors.Is(ctx.Err(), context.Canceled):
+				// A call cut off is no call: what it put in goes, a call
+				// the run's deadline cut off too. One the user stopped
+				// stays, as edits made before do.
 				exec.DropDraft()
 			case err == nil && current >= 0 && current < len(res.ToolCalls):
 				if out, ok := exec.FinishDraft(name, res.ToolCalls[current].Arguments); ok {

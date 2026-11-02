@@ -19,7 +19,7 @@ struct LeafletCommands: Commands {
                 }
             }
             .keyboardShortcut("n")
-            Button(L.appMenuNewFolder) { scene?.newFolderShown = true }
+            Button(L.appMenuNewFolder) { scene?.newFolder() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
                 .disabled(scene == nil)
             Button(LI.newWindow) { openWindow(id: "main") }
@@ -31,7 +31,7 @@ struct LeafletCommands: Commands {
         }
 
         CommandGroup(replacing: .appSettings) {
-            Button(L.settingsTitle + "…") { scene?.settingsShown = true }
+            Button(L.settingsTitle + "…") { scene?.openSettings() }
                 .keyboardShortcut(",")
                 .disabled(scene == nil)
         }

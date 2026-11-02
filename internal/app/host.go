@@ -84,6 +84,7 @@ func (a *App) Tint(pageID string, ids []string) {
 	for k := range a.page.tinted {
 		delete(a.page.tinted, k)
 	}
+	clear(a.page.lit)
 	for _, id := range ids {
 		a.page.tinted[id] = true
 	}
@@ -470,7 +471,8 @@ func openSafely(path string) {
 
 // programExts are the kinds of file that opening runs, or sends where
 // they say: apps, installers, scripts, the shortcuts and links to them,
-// and documents that run what they hold.
+// documents that run what they hold, and disk images and plug-ins, which
+// opening mounts or installs.
 var programExts = map[string]bool{
 	".app": true, ".command": true, ".tool": true, ".terminal": true, ".sh": true, ".bash": true, ".zsh": true, ".csh": true,
 	".ksh": true, ".fish": true, ".pkg": true, ".mpkg": true, ".dmg": true, ".scpt": true, ".scptd": true, ".applescript": true,
@@ -483,7 +485,8 @@ var programExts = map[string]bool{
 	".lnk": true, ".pif": true, ".reg": true, ".appref-ms": true, ".url": true, ".website": true, ".scf": true,
 	".library-ms": true, ".search-ms": true, ".searchconnector-ms": true, ".settingcontent-ms": true, ".chm": true,
 	".hlp": true, ".diagcab": true, ".xbap": true, ".desktop": true, ".appimage": true, ".run": true, ".deb": true,
-	".rpm": true, ".flatpakref": true, ".snap": true,
+	".rpm": true, ".flatpakref": true, ".snap": true, ".iso": true, ".img": true, ".cdr": true, ".sparseimage": true,
+	".sparsebundle": true, ".vhd": true, ".vhdx": true, ".pyz": true, ".pyzw": true, ".prefpane": true, ".saver": true,
 }
 
 // runsAsProgram reports whether opening the file would run it.
@@ -600,7 +603,6 @@ func (a *App) loadMembers(pageID string) {
 // folder, the only one it reads files from.
 type imageCache struct {
 	root string
-	dir  string
 	mu   sync.Mutex
 	// pictures are bitmaps, or SVGs, which MyGo draws itself.
 	pictures map[string]ui.ImageSource
@@ -634,8 +636,8 @@ const playerIdle = 30 * time.Second
 // tried again, as the device may have come back online.
 const imageRetry = time.Minute
 
-func newImageCache(root, dir string) *imageCache {
-	return &imageCache{root: root, dir: dir, pictures: map[string]ui.ImageSource{}, loading: map[string]bool{}, failed: map[string]time.Time{},
+func newImageCache(root string) *imageCache {
+	return &imageCache{root: root, pictures: map[string]ui.ImageSource{}, loading: map[string]bool{}, failed: map[string]time.Time{},
 		gifs: map[string][]byte{}, players: map[string]*gifPlayer{}, making: map[string]bool{}}
 }
 

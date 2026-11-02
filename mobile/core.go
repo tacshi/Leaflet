@@ -77,6 +77,7 @@ func Open(settings string, platform Platform, ev Events) (_ *Core, err error) {
 		provision.ProjectName = provision.DevProjectName
 	}
 	useDownloads(platform)
+	fixZone()
 	c := &Core{
 		plat:      platform,
 		ev:        &events{to: ev, q: newQueue()},

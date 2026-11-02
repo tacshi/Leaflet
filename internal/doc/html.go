@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"leaflet/locales"
 )
 
 // HTMLOptions are what a page written as HTML gets from the app around it.
@@ -324,17 +326,16 @@ func (w htmlWriter) block(n *Node) {
 				break
 			}
 		}
+		chart := ChartOf(n)
 		w.write("<div class=\"table\"><table><tr><th></th>")
-		for _, l := range stringsOf(n.Data["labels"]) {
+		for _, l := range chart.Labels {
 			w.write("<th>", html.EscapeString(l), "</th>")
 		}
 		w.write("</tr>")
-		for _, s := range listOf(n.Data["series"]) {
-			m := asMap(s)
-			w.write("<tr><th>", html.EscapeString(fmt.Sprint(m["name"])), "</th>")
-			for _, v := range listOf(m["values"]) {
-				f, _ := AsFloat(v)
-				w.write("<td>", trimFloat(f), "</td>")
+		for _, s := range chart.Series {
+			w.write("<tr><th>", html.EscapeString(s.Name), "</th>")
+			for _, v := range s.Values {
+				w.write("<td>", trimFloat(v), "</td>")
 			}
 			w.write("</tr>")
 		}
@@ -346,7 +347,7 @@ func (w htmlWriter) block(n *Node) {
 	case "embed":
 		title := n.Str("title")
 		if title == "" {
-			title = "Interactive embed"
+			title = locales.ExportEmbed()
 		}
 		src := ""
 		if w.opts.Embed != nil {
@@ -534,7 +535,9 @@ func (d Delta) HTML() string {
 	for _, r := range d {
 		text := strings.ReplaceAll(html.EscapeString(r.Text), "\n", "<br>")
 		a := r.Attrs
-		if a.Mention != nil {
+		// A person or an agent shows as @ and their name; a page, as its
+		// title.
+		if a.Mention != nil && a.Mention.Kind != "page" {
 			text = "@" + html.EscapeString(a.Mention.Name)
 		}
 		var open, close []string

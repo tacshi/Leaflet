@@ -298,37 +298,12 @@ func removeTableColumn(n *doc.Node) {
 }
 
 // ChartSeries is one series of a chart block.
-type ChartSeries struct {
-	Name   string
-	Values []float64
-}
+type ChartSeries = doc.ChartSeries
 
-// ChartOf reads a chart block's data.
+// ChartOf reads a chart block's data, as doc.ChartOf does.
 func ChartOf(n *doc.Node) (kind, title, caption string, labels []string, series []ChartSeries) {
-	kind, title, caption = n.Str("chart_type"), n.Str("title"), n.Str("caption")
-	if kind == "" {
-		kind = "bar"
-	}
-	if ls, ok := n.Data["labels"].([]any); ok {
-		for _, l := range ls {
-			labels = append(labels, fmt.Sprint(l))
-		}
-	}
-	if ss, ok := n.Data["series"].([]any); ok {
-		for _, s := range ss {
-			m, _ := s.(map[string]any)
-			cs := ChartSeries{}
-			cs.Name, _ = m["name"].(string)
-			if vs, ok := m["values"].([]any); ok {
-				for _, v := range vs {
-					f, _ := doc.AsFloat(v)
-					cs.Values = append(cs.Values, f)
-				}
-			}
-			series = append(series, cs)
-		}
-	}
-	return
+	ch := doc.ChartOf(n)
+	return ch.Kind, ch.Title, ch.Caption, ch.Labels, ch.Series
 }
 
 // FormatValue writes a chart's value as its bars show it.

@@ -7,6 +7,8 @@ package keychain
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -36,22 +38,41 @@ var ErrNotFound = errors.New("keychain: no secret kept under this name")
 // match it with errors.Is.
 var ErrDenied = errors.New("keychain: the user did not allow reading the secret")
 
-// deniedStatuses are how MyGo's Secrets ends its errors on macOS when the
-// user denies its prompt (errSecAuthFailed) or cancels it
-// (errSecUserCanceled): it gives no error of its own to match.
-var deniedStatuses = []string{"(OSStatus -25293)", "(OSStatus -128)"}
+// Denied wraps err in ErrDenied when it says the user turned the system's
+// prompt down, as macOS's keychain says it: MyGo's Secrets on the desktop
+// and the iOS app's keychain end their errors with the Security
+// framework's status, and give no error of their own to match. Any other
+// error is returned as it is.
+func Denied(err error) error {
+	if s, ok := OSStatus(err); ok && (s == errSecAuthFailed || s == errSecUserCanceled) {
+		return fmt.Errorf("%w: %w", ErrDenied, err)
+	}
+	return err
+}
 
-// denied reports whether err is the user's refusal, not the store failing.
-func denied(err error) bool {
-	if errors.Is(err, ErrDenied) {
-		return true
+// The Security framework's statuses for the user denying its prompt
+// (errSecAuthFailed) or cancelling it (errSecUserCanceled).
+const (
+	errSecAuthFailed   = -25293
+	errSecUserCanceled = -128
+)
+
+// OSStatus is the Security framework's status err ends with, as
+// "(OSStatus -25308)", if it ends with one.
+func OSStatus(err error) (int, bool) {
+	if err == nil {
+		return 0, false
 	}
-	for _, s := range deniedStatuses {
-		if strings.HasSuffix(err.Error(), s) {
-			return true
-		}
+	rest, ok := strings.CutSuffix(err.Error(), ")")
+	if !ok {
+		return 0, false
 	}
-	return false
+	_, code, ok := strings.CutLast(rest, "(OSStatus ")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(code)
+	return n, err == nil
 }
 
 // MaxSecretSize is the largest secret kept, in bytes: the most the
@@ -104,7 +125,7 @@ func Get(name string) ([]byte, error) {
 		case err == nil:
 		case errors.Is(err, ErrNotFound):
 			err = ErrNotFound
-		case !denied(err):
+		case !errors.Is(err, ErrDenied):
 			return nil, err
 		}
 		e = entry{value: v, err: err}

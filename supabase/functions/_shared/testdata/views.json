@@ -1,0 +1,611 @@
+{
+  "content": {
+    "document": {
+      "id": "root",
+      "type": "page",
+      "children": [
+        {
+          "id": "a",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "Ship "
+              },
+              {
+                "insert": "v1",
+                "attributes": {
+                  "bold": true
+                }
+              }
+            ]
+          }
+        },
+        {
+          "id": "b",
+          "type": "heading",
+          "data": {
+            "level": 2,
+            "delta": [
+              {
+                "insert": "Plan"
+              }
+            ]
+          }
+        },
+        {
+          "id": "c",
+          "type": "bulleted_list",
+          "data": {
+            "delta": [
+              {
+                "insert": "Item"
+              }
+            ]
+          },
+          "children": [
+            {
+              "id": "c1",
+              "type": "todo_list",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "Do it"
+                  }
+                ],
+                "checked": true,
+                "due": "2026-10-30"
+              }
+            }
+          ]
+        },
+        {
+          "id": "d",
+          "type": "quote",
+          "data": {
+            "delta": [
+              {
+                "insert": "Said"
+              }
+            ]
+          }
+        },
+        {
+          "id": "e",
+          "type": "code",
+          "data": {
+            "delta": [
+              {
+                "insert": "fmt.Println(1)"
+              }
+            ],
+            "language": "go"
+          }
+        },
+        {
+          "id": "f",
+          "type": "callout",
+          "data": {
+            "delta": [
+              {
+                "insert": "Careful"
+              }
+            ],
+            "tone": "warning"
+          }
+        },
+        {
+          "id": "g",
+          "type": "toggle_list",
+          "data": {
+            "delta": [
+              {
+                "insert": "More"
+              }
+            ],
+            "collapsed": true
+          },
+          "children": [
+            {
+              "id": "g1",
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "Hidden"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "h",
+          "type": "divider"
+        },
+        {
+          "id": "i",
+          "type": "image",
+          "data": {
+            "url": "https://example.com/a.png",
+            "align": "center",
+            "alt": "A chart"
+          }
+        },
+        {
+          "id": "j",
+          "type": "chart",
+          "data": {
+            "chart_type": "bar",
+            "title": "Risks",
+            "labels": [
+              "A",
+              "B"
+            ],
+            "series": [
+              {
+                "name": "n",
+                "values": [
+                  1,
+                  4
+                ]
+              }
+            ],
+            "caption": "By phase",
+            "author": "Claude"
+          }
+        },
+        {
+          "id": "k",
+          "type": "embed",
+          "data": {
+            "title": "Timer",
+            "height": 320,
+            "html": "<p>hi</p>",
+            "author": "Claude"
+          }
+        },
+        {
+          "id": "l",
+          "type": "video",
+          "data": {
+            "url": "https://youtu.be/dQw4w9WgXcQ",
+            "title": "Song"
+          }
+        },
+        {
+          "id": "m",
+          "type": "link_preview",
+          "data": {
+            "url": "https://go.dev/",
+            "title": "Go",
+            "description": "The language"
+          }
+        },
+        {
+          "id": "n",
+          "type": "file",
+          "data": {
+            "name": "notes.pdf",
+            "mime": "application/pdf",
+            "size": 1234
+          }
+        },
+        {
+          "id": "o",
+          "type": "math_equation",
+          "data": {
+            "formula": "e^{i\\pi}+1=0"
+          }
+        },
+        {
+          "id": "p",
+          "type": "diagram",
+          "data": {
+            "source": "graph TD\n  A-->B"
+          }
+        },
+        {
+          "id": "q",
+          "type": "subpage",
+          "data": {
+            "page_id": "page-2"
+          }
+        },
+        {
+          "id": "r",
+          "type": "numbered_list",
+          "data": {
+            "delta": [
+              {
+                "insert": "First"
+              }
+            ]
+          }
+        },
+        {
+          "id": "s",
+          "type": "recording",
+          "data": {
+            "recording_id": "rec-1",
+            "title": "Standup",
+            "duration_ms": 60000
+          }
+        },
+        {
+          "id": "u",
+          "type": "image",
+          "data": {
+            "url": "https://example.com/b.png"
+          }
+        },
+        {
+          "id": "v",
+          "type": "subpage",
+          "data": {}
+        },
+        {
+          "id": "w1",
+          "type": "heading",
+          "data": {
+            "level": 1e+21,
+            "delta": [
+              {
+                "insert": "Far"
+              }
+            ]
+          }
+        },
+        {
+          "id": "w2",
+          "type": "heading",
+          "data": {
+            "level": 1e+300,
+            "delta": [
+              {
+                "insert": "Farther"
+              }
+            ]
+          }
+        },
+        {
+          "id": "w3",
+          "type": "heading",
+          "data": {
+            "level": -1e+21,
+            "delta": [
+              {
+                "insert": "Below"
+              }
+            ]
+          }
+        },
+        {
+          "id": "t",
+          "type": "table",
+          "data": {
+            "colsLen": 2,
+            "rowsLen": 2,
+            "colDefaultWidth": 160,
+            "rowDefaultHeight": 40,
+            "colMinimumWidth": 40
+          },
+          "children": [
+            {
+              "id": "t0",
+              "type": "table/cell",
+              "data": {
+                "colPosition": 0,
+                "rowPosition": 0
+              },
+              "children": [
+                {
+                  "id": "t0p",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "x"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "t1",
+              "type": "table/cell",
+              "data": {
+                "colPosition": 0,
+                "rowPosition": 1
+              },
+              "children": [
+                {
+                  "id": "t1p",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "1"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "t2",
+              "type": "table/cell",
+              "data": {
+                "colPosition": 1,
+                "rowPosition": 0
+              },
+              "children": [
+                {
+                  "id": "t2p",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "y"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "t3",
+              "type": "table/cell",
+              "data": {
+                "colPosition": 1,
+                "rowPosition": 1
+              },
+              "children": [
+                {
+                  "id": "t3p",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "2"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "meta": {
+      "v": 1,
+      "blocks": {},
+      "deleted": {}
+    }
+  },
+  "views": [
+    {
+      "id": "a",
+      "type": "paragraph",
+      "depth": 0,
+      "text": "Ship **v1**"
+    },
+    {
+      "id": "b",
+      "type": "heading",
+      "depth": 0,
+      "text": "Plan",
+      "level": 2
+    },
+    {
+      "id": "c",
+      "type": "bulleted_list",
+      "depth": 0,
+      "text": "Item"
+    },
+    {
+      "id": "c1",
+      "type": "todo_list",
+      "depth": 1,
+      "parent_id": "c",
+      "text": "Do it",
+      "checked": true,
+      "due": "2026-10-30"
+    },
+    {
+      "id": "d",
+      "type": "quote",
+      "depth": 0,
+      "text": "Said"
+    },
+    {
+      "id": "e",
+      "type": "code",
+      "depth": 0,
+      "text": "fmt.Println(1)",
+      "language": "go"
+    },
+    {
+      "id": "f",
+      "type": "callout",
+      "depth": 0,
+      "text": "Careful",
+      "tone": "warning"
+    },
+    {
+      "id": "g",
+      "type": "toggle_list",
+      "depth": 0,
+      "text": "More",
+      "collapsed": true
+    },
+    {
+      "id": "g1",
+      "type": "paragraph",
+      "depth": 1,
+      "parent_id": "g",
+      "text": "Hidden"
+    },
+    {
+      "id": "h",
+      "type": "divider",
+      "depth": 0
+    },
+    {
+      "id": "i",
+      "type": "image",
+      "depth": 0,
+      "image": {
+        "url": "https://example.com/a.png",
+        "alt": "A chart"
+      }
+    },
+    {
+      "id": "j",
+      "type": "chart",
+      "depth": 0,
+      "chart": {
+        "chart_type": "bar",
+        "title": "Risks",
+        "labels": [
+          "A",
+          "B"
+        ],
+        "series": [
+          {
+            "name": "n",
+            "values": [
+              1,
+              4
+            ]
+          }
+        ],
+        "caption": "By phase"
+      }
+    },
+    {
+      "id": "k",
+      "type": "embed",
+      "depth": 0,
+      "embed": {
+        "title": "Timer",
+        "height": 320,
+        "html": "<p>hi</p>"
+      }
+    },
+    {
+      "id": "l",
+      "type": "video",
+      "depth": 0,
+      "video": {
+        "url": "https://youtu.be/dQw4w9WgXcQ",
+        "title": "Song"
+      }
+    },
+    {
+      "id": "m",
+      "type": "link_preview",
+      "depth": 0,
+      "link": {
+        "url": "https://go.dev/",
+        "title": "Go",
+        "description": "The language"
+      }
+    },
+    {
+      "id": "n",
+      "type": "file",
+      "depth": 0,
+      "file": {
+        "name": "notes.pdf",
+        "mime": "application/pdf",
+        "size": 1234
+      }
+    },
+    {
+      "id": "o",
+      "type": "math_equation",
+      "depth": 0,
+      "formula": "e^{i\\pi}+1=0"
+    },
+    {
+      "id": "p",
+      "type": "diagram",
+      "depth": 0,
+      "source": "graph TD\n  A-->B"
+    },
+    {
+      "id": "q",
+      "type": "subpage",
+      "depth": 0,
+      "page_id": "page-2"
+    },
+    {
+      "id": "r",
+      "type": "numbered_list",
+      "depth": 0,
+      "text": "First"
+    },
+    {
+      "id": "s",
+      "type": "recording",
+      "depth": 0,
+      "recording": {
+        "recording_id": "rec-1",
+        "title": "Standup",
+        "duration_ms": 60000
+      }
+    },
+    {
+      "id": "u",
+      "type": "image",
+      "depth": 0,
+      "image": {
+        "url": "https://example.com/b.png"
+      }
+    },
+    {
+      "id": "v",
+      "type": "subpage",
+      "depth": 0
+    },
+    {
+      "id": "w1",
+      "type": "heading",
+      "depth": 0,
+      "text": "Far",
+      "level": 6
+    },
+    {
+      "id": "w2",
+      "type": "heading",
+      "depth": 0,
+      "text": "Farther",
+      "level": 6
+    },
+    {
+      "id": "w3",
+      "type": "heading",
+      "depth": 0,
+      "text": "Below",
+      "level": 1
+    },
+    {
+      "id": "t",
+      "type": "table",
+      "depth": 0,
+      "rows": [
+        [
+          "x",
+          "y"
+        ],
+        [
+          "1",
+          "2"
+        ]
+      ]
+    }
+  ]
+}

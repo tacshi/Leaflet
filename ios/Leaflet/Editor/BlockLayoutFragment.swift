@@ -345,9 +345,13 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
                 shape.fill()
                 let bar = Self.codeBarParts(card)
                 let muted = UIColor(palette.textMuted)
+                // In the text size chosen in Settings, as far as the bar
+                // has room.
+                let labelFont = UIFontMetrics(forTextStyle: .caption1).scaledFont(
+                    for: .systemFont(ofSize: 12), maximumPointSize: 17)
                 let label = NSAttributedString(
                     string: CodeLanguage.name(info.data["language"]?.string ?? ""),
-                    attributes: [.font: UIFont.systemFont(ofSize: 12), .foregroundColor: muted])
+                    attributes: [.font: labelFont, .foregroundColor: muted])
                 let size = label.size()
                 label.draw(
                     at: CGPoint(x: bar.language.minX, y: bar.language.midY - size.height / 2))

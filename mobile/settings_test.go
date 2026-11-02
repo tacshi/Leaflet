@@ -47,7 +47,7 @@ func TestExportAll(t *testing.T) {
 	var pg openedPage
 	_ = json.Unmarshal([]byte(raw), &pg)
 	pg.Content.Children = []*doc.Node{paragraph("p", "Socks")}
-	if err := c.EditPage(trip.ID, pg.Editor, pg.Content.Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(trip.ID, pg.Editor, pg.Content.Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.SaveAsTemplate(trip.ID); err != nil {
@@ -197,6 +197,10 @@ func TestResolveConflicts(t *testing.T) {
 	if got := texts(content(t, c, p.ID)); strings.Contains(got, "Edited there") {
 		t.Fatalf("deleted again, still %q", got)
 	}
+	// One resolved already, as in another window, says so.
+	if err := c.ResolveConflict(list[0].ID, resolveKeep); err == nil {
+		t.Error("resolved a conflict that is gone")
+	}
 }
 
 // An edit says the page is saving, and the save shortly after says it no
@@ -211,7 +215,7 @@ func TestPageSavingAndMembers(t *testing.T) {
 	var pg openedPage
 	_ = json.Unmarshal([]byte(raw), &pg)
 	pg.Content.Children = []*doc.Node{paragraph("p", "Hello")}
-	if err := c.EditPage(p.ID, pg.Editor, pg.Content.Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(p.ID, pg.Editor, pg.Content.Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []bool{true, false} {
@@ -241,7 +245,7 @@ func TestEverySaveTellsTheByline(t *testing.T) {
 	var pg openedPage
 	_ = json.Unmarshal([]byte(raw), &pg)
 	pg.Content.Children = []*doc.Node{paragraph("p", "Hello")}
-	if err := c.EditPage(p.ID, pg.Editor, pg.Content.Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(p.ID, pg.Editor, pg.Content.Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.NameVersion(p.ID, "Draft"); err != nil {
@@ -284,8 +288,13 @@ func TestSharingChangesReadOnly(t *testing.T) {
 		t.Fatal("an editor's page opened read-only")
 	}
 	// Opening says so too.
-	if got := <-ev.readOnly; got {
-		t.Fatal("an editor's page opened read-only")
+	select {
+	case got := <-ev.readOnly:
+		if got {
+			t.Fatal("an editor's page opened read-only")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no PageReadOnly as it opened")
 	}
 	for _, role := range []string{"viewer", "editor"} {
 		if err := st.SetMembers(id, []store.Member{{PageID: id, UserID: user, Role: role, Accepted: true}}); err != nil {

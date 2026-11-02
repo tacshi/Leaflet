@@ -48,23 +48,37 @@ struct PageScreen: View {
                     onController: { [scene, model] c in
                         scene.editor = c
                         scene.page = model
-                        c.onBlank = { [weak model] in model?.blank = $0 }
-                        c.onComment = { blockID, quote in
-                            scene.newComment = NewComment(blockID: blockID, quote: quote)
-                            scene.inspectorTab = .comments
-                            scene.inspectorShown = true
+                        // The title's binding and not the view: the view
+                        // holds the window, which would hold it back.
+                        scene.saveTitle = { [app, pageID, title = $title] in
+                            await Self.keep(title.wrappedValue, of: pageID, app: app)
                         }
-                        c.onAsk = { focus, selection, agent in
-                            scene.asking = AskRequest(
+                        if let block = scene.target {
+                            scene.target = nil
+                            goTo(block, in: c)
+                        }
+                        // The window holds the editor weakly: the editor's
+                        // view keeps it, as long as the page shows. So
+                        // onMenuItem may hold this view, and through it the
+                        // window, with no cycle; the others take the window
+                        // and the page weakly all the same.
+                        c.onBlank = { [weak model] in model?.blank = $0 }
+                        c.onComment = { [weak scene] blockID, quote in
+                            scene?.newComment = NewComment(blockID: blockID, quote: quote)
+                            scene?.inspectorTab = .comments
+                            scene?.inspectorShown = true
+                        }
+                        c.onAsk = { [weak scene] focus, selection, agent in
+                            scene?.asking = AskRequest(
                                 focus: focus, selection: selection, agent: agent)
                         }
-                        c.onAddAgent = { scene.settingsShown = true }
-                        c.onEditBlock = { scene.editingBlock = $0 }
-                        c.onEditing = { scene.writing = $0 }
-                        c.onHeading = { scene.heading = $0 }
+                        c.onAddAgent = { [weak scene] in scene?.openSettings() }
+                        c.onEditBlock = { [weak scene] in scene?.editingBlock = $0 }
+                        c.onEditing = { [weak scene] in scene?.writing = $0 }
+                        c.onHeading = { [weak scene] in scene?.heading = $0 }
                         c.pageLinks = PageLinks(
                             title: { [app] id in app.library.page(id)?.title },
-                            open: { [scene] id in scene.open(id) })
+                            open: { [weak scene] id in scene?.open(id) })
                         c.menuItems = { [app, pageID] trigger, give in
                             Task {
                                 if let items = try? await app.client?.menuItems(
@@ -74,7 +88,7 @@ struct PageScreen: View {
                                 }
                             }
                         }
-                        c.agents = { [model] in model.agents.options }
+                        c.agents = { [weak model] in model?.agents.options ?? [] }
                         c.author = { [app] in app.status?.displayName ?? "" }
                         c.onMenuItem = { key, blockID in menuItem(key, at: blockID) }
                     }
@@ -175,6 +189,7 @@ struct PageScreen: View {
         }
         .onDisappear {
             saveTitle()
+            scene.letGo(model)
             if let m = model { Task { await m.close() } }
         }
         .onChange(of: row?.title) { _, new in
@@ -342,9 +357,38 @@ struct PageScreen: View {
     private func saveTitle() {
         Task { @MainActor in
             await Task.yield()
-            guard let row = app.library.page(pageID), row.canEdit, title != row.title
-            else { return }
-            await app.rename(row, to: title)
+            await keepTitle()
+        }
+    }
+
+    /// keepTitle keeps the title as the field has it now, if it changed:
+    /// as the page leaves the screen, or before a copy or an export of it.
+    private func keepTitle() async {
+        await Self.keep(title, of: pageID, app: app)
+    }
+
+    /// keep renames page id to title, if it may and the title changed.
+    private static func keep(_ title: String, of id: String, app: AppModel) async {
+        guard let row = app.library.page(id), row.canEdit, title != row.title else { return }
+        await app.rename(row, to: title)
+    }
+
+    /// goTo shows the block the window opened the page at, once the
+    /// editor is in the window and laid out: it scrolls to it then.
+    private func goTo(_ blockID: String, in editor: EditorController) {
+        Task { @MainActor [weak editor] in
+            // Its first layout comes as the window draws it, a moment
+            // after the editor is made.
+            for _ in 0..<40 {
+                guard let editor else { return }
+                let view = editor.textView
+                if view.window != nil, view.bounds.height > 0 {
+                    view.layoutIfNeeded()
+                    editor.reveal(blockID: blockID, atTop: true)
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
         }
     }
 }
@@ -377,6 +421,9 @@ struct Inspector: View {
     /// isSheet says it is a sheet over the page, as on iPhone, rather than
     /// a column beside it.
     var isSheet = false
+    @Environment(SceneModel.self) private var scene
+    /// counted is what the window was told the panel is, as it showed.
+    @State private var counted = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -393,6 +440,20 @@ struct Inspector: View {
             case .comments: if let model { CommentsPanel(model: model) }
             }
         }
+        // Settings, or a new folder, asked for while the panel is a sheet
+        // shows once it goes.
+        .onAppear {
+            counted = isSheet
+            scene.panelShown(asSheet: counted)
+        }
+        .onChange(of: isSheet) {
+            // A window made narrow or wide turns the panel into a sheet, or
+            // back.
+            scene.panelGone(asSheet: counted)
+            counted = isSheet
+            scene.panelShown(asSheet: counted)
+        }
+        .onDisappear { scene.panelGone(asSheet: counted) }
     }
 }
 

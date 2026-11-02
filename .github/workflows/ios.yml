@@ -71,20 +71,31 @@ jobs:
       - name: Make the Xcode project
         run: make ios-project
       # The runner's simulators change with its image, so the newest iPhone
-      # and iPad on the newest iOS runtime are picked rather than named.
+      # and iPad on the newest iOS runtime are picked rather than named. An
+      # image with no such simulator fails here, not as an id of "null".
       - name: Pick an iPhone and an iPad simulator
         run: |
           pick() {
             xcrun simctl list devices available -j | jq -r --arg kind "$1" '
               [.devices | to_entries[] | select(.key | test("SimRuntime\\.iOS"))]
-              | sort_by(.key | [scan("[0-9]+") | tonumber]) | last.value
-              | map(select(.name | startswith($kind))) | last.udid'
+              | sort_by(.key | [scan("[0-9]+") | tonumber]) | (last.value // [])
+              | map(select(.name | startswith($kind))) | last.udid // empty'
           }
-          echo "IPHONE=$(pick iPhone)" >> "$GITHUB_ENV"
-          echo "IPAD=$(pick iPad)" >> "$GITHUB_ENV"
+          iphone="$(pick iPhone)"
+          ipad="$(pick iPad)"
+          if [ -z "$iphone" ] || [ -z "$ipad" ]; then
+            echo "::error::The runner has no iPhone or no iPad simulator on its newest iOS runtime."
+            exit 1
+          fi
+          echo "IPHONE=$iphone" >> "$GITHUB_ENV"
+          echo "IPAD=$ipad" >> "$GITHUB_ENV"
+      # Signed to run locally, as Xcode signs a simulator build with no team,
+      # and not left unsigned: the tests reach the keychain through the core,
+      # and the simulator's keychain can refuse an app with no entitlements
+      # (errSecMissingEntitlement), as it never does make ios-test's.
       - name: Test on an iPhone and an iPad
         run: >-
           xcodebuild test -project ios/Leaflet.xcodeproj -scheme Leaflet
           -onlyUsePackageVersionsFromResolvedFile
           -destination "id=$IPHONE" -destination "id=$IPAD"
-          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM=

@@ -87,7 +87,6 @@ struct SidebarView: View {
         )
         .searchFocused($searchFocused)
         .onChange(of: scene.searchRequested) { searchFocused = true }
-        .onChange(of: scene.newFolderShown) { if scene.newFolderShown { newName = "" } }
         .task(id: query) { await search() }
         .refreshable { await app.syncNow() }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -108,22 +107,9 @@ struct SidebarView: View {
                 Button(L.shellNewPage, systemImage: "square.and.pencil") { newPage() }
                     .tint(Color.primary)
                 Button(L.sidebarNewFolder, systemImage: "folder.badge.plus") {
-                    scene.newFolderShown = true
+                    scene.newFolder()
                 }
                 .tint(Color.primary)
-            }
-        }
-        // The menu bar's New Folder asks too, each time with no name yet.
-        .onChange(of: scene.newFolderShown) { if scene.newFolderShown { newName = "" } }
-        .alert(
-            L.dialogFolderNew,
-            isPresented: Binding(get: { scene.newFolderShown }, set: { scene.newFolderShown = $0 })
-        ) {
-            TextField(L.dialogFolderName, text: $newName)
-            Button(L.commonCancel, role: .cancel) {}
-            Button(L.commonSave) {
-                let name = newName.trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty { Task { await app.createFolder(named: name) } }
             }
         }
         // As the desktop's Rename tag dialog: the name, chosen to type
@@ -283,7 +269,9 @@ struct SidebarView: View {
             if !todos.isEmpty {
                 Section(section.title, isExpanded: expanded("todo:\(section)")) {
                     ForEach(todos, id: \.self) { todo in
-                        TodoRowView(todo: todo, section: section) { scene.open(todo.pageID) }
+                        TodoRowView(todo: todo, section: section) {
+                            scene.open(todo.pageID, at: todo.blockID)
+                        }
                     }
                 }
             }
@@ -298,7 +286,7 @@ struct SidebarView: View {
         }
         ForEach(hits, id: \.self) { hit in
             Button {
-                scene.open(hit.pageID)
+                scene.open(hit.pageID, at: hit.blockID)
             } label: {
                 VStack(alignment: .leading, spacing: 2) {
                     Label(
@@ -530,15 +518,24 @@ struct SyncStatusBar: View {
 
     private var signedIn: Bool { app.syncs }
 
+    private var pending: Int { app.status?.pending ?? 0 }
+
+    /// text says how sync stands, as the desktop's account line does:
+    /// working offline, or a pass that failed, before what waits to go.
     private var text: String {
         if app.syncing { return L.sidebarSyncing }
         if !signedIn { return L.sidebarOnDevice }
-        if let pending = app.status?.pending, pending > 0 { return L.sidebarToSync(count: pending) }
+        if app.workOffline {
+            return pending > 0 ? L.pageSyncOfflineQueued(count: pending) : L.pageSyncOffline
+        }
+        if app.syncFailure != nil { return LI.syncFailed }
+        if pending > 0 { return L.sidebarToSync(count: pending) }
         return L.sidebarSynced
     }
 
     private var symbol: String {
         if !signedIn { return "iphone" }
+        if app.workOffline { return "icloud.slash" }
         if app.syncFailure != nil { return "exclamationmark.icloud" }
         return "checkmark.icloud"
     }

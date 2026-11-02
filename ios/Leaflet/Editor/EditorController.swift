@@ -101,6 +101,10 @@ final class EditorController: NSObject, UITextViewDelegate,
     private var trailing: BlockInfo?
     /// bypass lets the controller's own insertions through the rules.
     private var bypass = false
+    /// updating says a change from outside is going in: the selection it
+    /// moves on the way says nothing of the menu at the caret, whose "/" or
+    /// "@" moves with it once it is in.
+    private var updating = false
     private var sendTask: Task<Void, Never>?
     /// typing are the block and formats what is typed next takes. The
     /// text view's own typing attributes drop the editor's keys, so the
@@ -218,6 +222,11 @@ final class EditorController: NSObject, UITextViewDelegate,
     /// joined the view controller the page is in, which outlives it.
     func close() {
         closeMenu()
+        // The page's videos stop with it: opened again, they show their
+        // pictures.
+        VideoPlayback.shared.playing.subtract(
+            DocumentMapper.paragraphs(storage, trailing: trailing)
+                .filter { $0.info.type == "video" }.map(\.info.id))
         textView.blocks.reset()
     }
 
@@ -298,9 +307,19 @@ final class EditorController: NSObject, UITextViewDelegate,
     /// it, the user does.
     func update(_ content: DocContent, tinted: Set<String>) {
         defer { reportBlank() }
+        updating = true
+        defer { updating = false }
+        // What was typed is in content, or given up: the page can't be
+        // changed. Nothing waits to be sent.
         sendTask?.cancel()
+        sendTask = nil
         meta = content.meta
-        let caret = caretPosition()
+        // The selection, and the menu's "/" or "@", as places in their
+        // blocks, which keep them as the text around them changes.
+        let sel = textView.selectedRange
+        let start = position(at: sel.location)
+        let end = position(at: NSMaxRange(sel))
+        let anchor = menu.map { position(at: $0.anchor) }
         let offset = textView.contentOffset
         let (text, newTrailing) = DocumentMapper.attributedString(content, tinted: tinted)
         let old = DocumentMapper.paragraphs(storage, trailing: trailing)
@@ -346,7 +365,17 @@ final class EditorController: NSObject, UITextViewDelegate,
         redrawEnd()
         textView.undoManager?.removeAllActions()
         tellKeyboard()
-        restoreCaret(caret)
+        if let menu, let anchor {
+            // The menu goes on from its "/" or "@" where it now is, or
+            // closes once it is gone.
+            if let at = place(anchor) { menu.anchor = at } else { closeMenu() }
+        }
+        if let s = place(start) {
+            textView.selectedRange = NSRange(location: s, length: max((place(end) ?? s) - s, 0))
+        }
+        // The selection back where it was, the menu goes by it.
+        updating = false
+        updateMenu()
         updateFolds()
         updateTypingAttributes()
         hold(offset)
@@ -500,9 +529,6 @@ final class EditorController: NSObject, UITextViewDelegate,
         return ids
     }
 
-    /// reveal scrolls to a block and puts the caret at its start.
-    /// atTop brings the block to the top of the page, as the outline goes
-    /// to a heading, rather than only into view.
     /// setData gives a block without text new data, as its editor saved
     /// it, in its place.
     func setData(_ data: [String: JSONValue], ofBlock id: String) {
@@ -525,6 +551,9 @@ final class EditorController: NSObject, UITextViewDelegate,
         }
     }
 
+    /// reveal scrolls to a block and puts the caret at its start.
+    /// atTop brings the block to the top of the page, as the outline goes
+    /// to a heading, rather than only into view.
     func reveal(blockID: String, atTop: Bool = false) {
         let all = DocumentMapper.paragraphs(storage, trailing: trailing)
         guard var at = all.firstIndex(where: { $0.info.id == blockID }) else { return }
@@ -609,7 +638,32 @@ final class EditorController: NSObject, UITextViewDelegate,
     func send() {
         sendTask?.cancel()
         sendTask = nil
+        uniqueIDs()
         onEdit?(DocumentMapper.content(storage, trailing: trailing, meta: meta))
+    }
+
+    /// uniqueIDs gives a block whose ID a block before it has a new one, in
+    /// the text: DocumentMapper.content would give it another each time
+    /// the page is sent, a new block to the core each time.
+    private func uniqueIDs() {
+        var seen = Set<String>()
+        for p in DocumentMapper.paragraphs(storage, trailing: trailing) {
+            guard seen.contains(p.info.id) else {
+                seen.insert(p.info.id)
+                continue
+            }
+            let info = p.info.with(id: BlockInfo.newID())
+            seen.insert(info.id)
+            // The separator after the paragraph is its block's too.
+            var whole = p.range
+            if NSMaxRange(whole) < storage.length { whole.length += 1 }
+            if whole.length > 0 {
+                storage.addAttribute(.leafletBlock, value: info, range: whole)
+            } else {
+                trailing = info
+                redrawEnd()
+            }
+        }
     }
 
     var hasPendingEdit: Bool { sendTask != nil }
@@ -631,8 +685,12 @@ final class EditorController: NSObject, UITextViewDelegate,
             else {
                 break
             }
-            style.apply(to: storage, in: para)
             at = NSMaxRange(para)
+        }
+        // At once, for each item's number to go on from the one before.
+        if at > rest.location {
+            style.apply(
+                to: storage, in: NSRange(location: rest.location, length: at - rest.location))
         }
     }
 
@@ -719,8 +777,25 @@ final class EditorController: NSObject, UITextViewDelegate,
         guard let start = tlm.location(tlm.documentRange.location, offsetBy: last.location),
             let range = NSTextRange(location: start, end: tlm.documentRange.endLocation)
         else { return }
+        // Its fragment stays as the layout is made again: it draws the
+        // block as it now is, and a tap on its marker goes by it.
+        let look = trailingLook()
+        tlm.enumerateTextLayoutFragments(from: start, options: []) { f in
+            (f as? BlockLayoutFragment)?.trailing = look
+            return false
+        }
         tlm.invalidateLayout(for: range)
         textView.setNeedsLayout()
+    }
+
+    /// trailingLook is the empty block the fragment of the page's last
+    /// paragraph draws after it: the trailing block.
+    private func trailingLook() -> BlockLayoutFragment.Trailing? {
+        guard let trailing else { return nil }
+        return BlockLayoutFragment.Trailing(
+            info: trailing, font: style.baseFont(trailing),
+            ordinal: trailing.type == "numbered_list"
+                ? EditorStyle.ordinal(storage, at: storage.length, trailing) : 1)
     }
 
     /// normalize keeps each paragraph in and near range one block: the
@@ -797,10 +872,17 @@ final class EditorController: NSObject, UITextViewDelegate,
         if ns.length > 0, ns.character(at: ns.length - 1) != 0x0A {
             let last = ns.paragraphRange(for: NSRange(location: ns.length - 1, length: 0))
             trailing = blockAt(last.location) ?? trailing
-        } else if let emptied {
-            trailing = emptied
-        } else if trailing == nil {
-            trailing = ns.length > 0 ? blockAt(ns.length - 1).map(derived) : BlockInfo.paragraph()
+        } else {
+            if let emptied {
+                trailing = emptied
+            } else if trailing == nil {
+                trailing =
+                    ns.length > 0 ? blockAt(ns.length - 1).map(derived) : BlockInfo.paragraph()
+            }
+            // An empty block without text, its attachment gone, as the
+            // page's last image deleted, is an empty paragraph, as
+            // normalize has it: it would be saved as the block it was.
+            if let t = trailing, !t.isText { trailing = t.with(type: "paragraph", data: [:]) }
         }
         emptied = nil
         if trailing !== before { redrawEnd() }
@@ -897,20 +979,30 @@ final class EditorController: NSObject, UITextViewDelegate,
 
     // MARK: Caret
 
-    private func caretPosition() -> (id: String, offset: Int)? {
-        let sel = textView.selectedRange
-        let (range, info) = paragraph(at: sel.location)
-        return (info.id, sel.location - range.location)
+    /// Position is a place in the text as its block and the offset in it,
+    /// which stays the same place as the text around the block changes.
+    private typealias Position = (id: String, offset: Int)
+
+    private func caretPosition() -> Position? { position(at: textView.selectedRange.location) }
+
+    private func position(at location: Int) -> Position {
+        let (range, info) = paragraph(at: location)
+        return (info.id, location - range.location)
     }
 
-    private func restoreCaret(_ caret: (id: String, offset: Int)?) {
-        guard let caret else { return }
-        for p in DocumentMapper.paragraphs(storage, trailing: trailing) where p.info.id == caret.id
-        {
-            textView.selectedRange = NSRange(
-                location: p.range.location + min(caret.offset, p.range.length), length: 0)
-            return
+    /// place is where position is in the text now, or nil once its block
+    /// is gone.
+    private func place(_ position: Position) -> Int? {
+        for p in DocumentMapper.paragraphs(storage, trailing: trailing)
+        where p.info.id == position.id {
+            return p.range.location + min(position.offset, p.range.length)
         }
+        return nil
+    }
+
+    private func restoreCaret(_ caret: Position?) {
+        guard let caret, let at = place(caret) else { return }
+        textView.selectedRange = NSRange(location: at, length: 0)
     }
 
     // MARK: Rules
@@ -1014,7 +1106,10 @@ final class EditorController: NSObject, UITextViewDelegate,
                 return false
             }
         }
-        typed = (NSRange(location: range.location, length: length), typing)
+        typed = (
+            NSRange(location: range.location, length: length),
+            range.length > 0 ? replacing(range) : typing
+        )
         if text == "/" || text == "@", info.type != "code",
             startsWord(at: range.location, in: para)
         {
@@ -1037,6 +1132,28 @@ final class EditorController: NSObject, UITextViewDelegate,
             return false
         }
         return true
+    }
+
+    /// replacing is what text put in place of range takes, as autocorrect,
+    /// a text replacement or dictation puts a word in place of another, or
+    /// a composition goes on: the formats, link and mention of the text it
+    /// replaces, which the caret's typing would take off.
+    private func replacing(_ range: NSRange) -> [NSAttributedString.Key: Any] {
+        var out = typing
+        let replaced = storage.attributes(at: range.location, effectiveRange: nil)
+        for k in Self.formatKeys + [.leafletHref, .leafletMention] { out[k] = replaced[k] }
+        // A mention is its name, and its page's link: text put in place of
+        // all of it is neither.
+        var run = NSRange()
+        if storage.attribute(
+            .leafletMention, at: range.location, longestEffectiveRange: &run,
+            in: NSRange(location: 0, length: storage.length)) != nil,
+            NSIntersectionRange(run, range) == run
+        {
+            out[.leafletMention] = nil
+            out[.leafletHref] = nil
+        }
+        return out
     }
 
     /// takeTyping gives text typed in range the block and formats it was
@@ -1110,7 +1227,10 @@ final class EditorController: NSObject, UITextViewDelegate,
                 : derived(info)
             storage.addAttribute(
                 .leafletBlock, value: before, range: NSRange(location: para.location, length: 1))
-            setBlock(info, at: next)
+            // The text keeps its block. The one normalize gave it for a
+            // moment, as the line went in before it, is no step to undo:
+            // undone first, it would leave the text a new ID, and no type.
+            setBlock(info, at: next, undoable: false)
             // Before a heading that ends a folded section, the new line
             // would join it, out of sight.
             keepShown(before.id)
@@ -1177,6 +1297,18 @@ final class EditorController: NSObject, UITextViewDelegate,
         _ = backspaceAtStart(para, info)
         tellKeyboard()
         return true
+    }
+
+    /// roomToCompose puts the caret in a new paragraph after a block
+    /// without text it is by, as a composition starts there (Chinese,
+    /// Japanese or Korean input): text typed by such a block goes in a new
+    /// block after it, which the rules can't do for marked text, the
+    /// keyboard keeping it where it began.
+    func roomToCompose() {
+        guard textView.isEditable, textView.markedTextRange == nil else { return }
+        let (para, info) = paragraph(at: textView.selectedRange.location)
+        guard !info.isText else { return }
+        insertParagraph(after: para, info: BlockInfo.paragraph(), text: "")
     }
 
     private func backspaceAtStart(_ para: NSRange, _ info: BlockInfo) -> Bool {
@@ -1373,7 +1505,7 @@ final class EditorController: NSObject, UITextViewDelegate,
 
     func textViewDidChangeSelection(_ textView: UITextView) {
         updateTypingAttributes()
-        updateMenu()
+        if !updating { updateMenu() }
         updateDateOffer()
     }
 
@@ -1409,9 +1541,7 @@ final class EditorController: NSObject, UITextViewDelegate,
         guard let menu else { return }
         let ns = storage.string as NSString
         let caret = textView.selectedRange
-        guard caret.length == 0, menu.anchor < ns.length, caret.location > menu.anchor,
-            Character(UnicodeScalar(ns.character(at: menu.anchor)) ?? " ") == menu.trigger
-        else { return closeMenu() }
+        guard anchored(menu) else { return closeMenu() }
         let query = ns.substring(
             with: NSRange(location: menu.anchor + 1, length: caret.location - menu.anchor - 1))
         if query.contains("\n") || query.contains(String(lineBreak)) || query.count > 30
@@ -1423,6 +1553,15 @@ final class EditorController: NSObject, UITextViewDelegate,
         if menu.items.isEmpty, query.hasSuffix(" ") { return closeMenu() }
         guard let end = textView.selectedTextRange?.end else { return }
         menu.place(in: textView, caret: textView.caretRect(for: end))
+    }
+
+    /// anchored reports whether the menu's "/" or "@" is still where it
+    /// was, before the caret.
+    private func anchored(_ menu: CaretMenu) -> Bool {
+        let ns = storage.string as NSString
+        let caret = textView.selectedRange
+        return caret.length == 0 && menu.anchor < ns.length && caret.location > menu.anchor
+            && Character(UnicodeScalar(ns.character(at: menu.anchor)) ?? " ") == menu.trigger
     }
 
     func closeMenu() {
@@ -1438,6 +1577,9 @@ final class EditorController: NSObject, UITextViewDelegate,
     /// what was typed after it.
     private func pick(_ item: MenuItem) {
         guard let menu else { return }
+        // A menu whose "/" or "@" went, as a change from outside took it,
+        // only closes: it would take the place of other text.
+        guard anchored(menu) else { return closeMenu() }
         let caret = textView.selectedRange.location
         closeMenu()
         delete(NSRange(location: menu.anchor, length: max(caret - menu.anchor, 1)))
@@ -2310,15 +2452,12 @@ final class EditorController: NSObject, UITextViewDelegate,
         f.palette = style.palette
         f.dateOffer = dateOffer
         // The last paragraph's fragment draws an empty block after it.
-        if let trailing, let range = textElement.elementRange,
+        if let range = textElement.elementRange,
             textLayoutManager.offset(
                 from: range.endLocation, to: textLayoutManager.documentRange.endLocation)
                 == 0
         {
-            f.trailing = BlockLayoutFragment.Trailing(
-                info: trailing, font: style.baseFont(trailing),
-                ordinal: trailing.type == "numbered_list"
-                    ? EditorStyle.ordinal(storage, at: storage.length, trailing) : 1)
+            f.trailing = trailingLook()
         }
         return f
     }

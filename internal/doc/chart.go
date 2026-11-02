@@ -32,45 +32,61 @@ func (e *ChartNumberError) Error() string {
 	return fmt.Sprintf("chart: line %d: %q is not a number", e.Line, e.Cell)
 }
 
+// A Chart is a chart block's data, as ChartOf reads it.
+type Chart struct {
+	Kind, Title, Caption string
+	Labels               []string
+	Series               []ChartSeries
+}
+
+// ChartSeries is one series of a chart.
+type ChartSeries struct {
+	Name   string
+	Values []float64
+}
+
+// ChartOf reads a chart block's data, as everything that shows one does:
+// a bar chart unless it is another, a value that is no number 0, a label
+// as specText writes it, and a series with no name, or one that is no
+// text, nameless.
+func ChartOf(n *Node) Chart {
+	ch := Chart{Kind: n.Str("chart_type"), Title: n.Str("title"), Caption: n.Str("caption")}
+	if ch.Kind == "" {
+		ch.Kind = "bar"
+	}
+	for _, l := range listOf(n.Data["labels"]) {
+		// A label is text as the server writes it: a number as JavaScript
+		// writes one, null, a list or an object nothing.
+		ch.Labels = append(ch.Labels, specText(l))
+	}
+	for _, s := range listOf(n.Data["series"]) {
+		m := asMap(s)
+		cs := ChartSeries{}
+		cs.Name, _ = m["name"].(string)
+		for _, v := range listOf(m["values"]) {
+			f, _ := AsFloat(v)
+			cs.Values = append(cs.Values, f)
+		}
+		ch.Series = append(ch.Series, cs)
+	}
+	return ch
+}
+
 // ChartCSV is a chart block's labels and series as ParseChartCSV reads
 // them, its first line headed labelColumn.
 func ChartCSV(n *Node, labelColumn string) string {
-	var labels []string
-	if ls, ok := n.Data["labels"].([]any); ok {
-		for _, l := range ls {
-			labels = append(labels, fmt.Sprint(l))
-		}
-	}
-	type series struct {
-		name   string
-		values []float64
-	}
-	var all []series
-	if ss, ok := n.Data["series"].([]any); ok {
-		for _, s := range ss {
-			m, _ := s.(map[string]any)
-			cs := series{}
-			cs.name, _ = m["name"].(string)
-			if vs, ok := m["values"].([]any); ok {
-				for _, v := range vs {
-					f, _ := AsFloat(v)
-					cs.values = append(cs.values, f)
-				}
-			}
-			all = append(all, cs)
-		}
-	}
+	ch := ChartOf(n)
 	var b strings.Builder
 	b.WriteString(csvField(labelColumn))
-	for _, s := range all {
-		b.WriteString(", " + csvField(s.name))
+	for _, s := range ch.Series {
+		b.WriteString(", " + csvField(s.Name))
 	}
-	for i, l := range labels {
+	for i, l := range ch.Labels {
 		b.WriteString("\n" + csvField(l))
-		for _, s := range all {
+		for _, s := range ch.Series {
 			v := 0.0
-			if i < len(s.values) {
-				v = s.values[i]
+			if i < len(s.Values) {
+				v = s.Values[i]
 			}
 			b.WriteString(", " + strconv.FormatFloat(v, 'f', -1, 64))
 		}

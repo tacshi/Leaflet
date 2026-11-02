@@ -93,10 +93,13 @@ type panicked struct {
 
 func (p *panicked) String() string { return fmt.Sprint(p.value) }
 
-// catch, deferred first in each of the package's exported functions and
-// the goroutines it starts, keeps a panic in the core from taking the app
-// down with it, as gomobile would: it is logged, with where it happened,
-// and the function returns it as an error to err, when it returns one.
+// catch, deferred first in each of the package's exported functions,
+// keeps a panic in the core from taking the app down with it, as gomobile
+// would: it is logged, with where it happened, and the function returns it
+// as an error to err, when it returns one. The goroutines the package
+// starts run through guard.Go, which logs theirs; one that answers with
+// its error defers catch itself, as ChatGPT's sign-in does, and the
+// queue's catches each function it runs (call).
 func catch(err *error) {
 	r := recover()
 	if r == nil {
@@ -110,12 +113,4 @@ func catch(err *error) {
 	if err != nil {
 		*err = errors.New(locales.AppErrorInternal(fmt.Sprint(r)))
 	}
-}
-
-// spawn runs fn on a goroutine of its own, catching a panic in it.
-func spawn(fn func()) {
-	go func() {
-		defer catch(nil)
-		fn()
-	}()
 }

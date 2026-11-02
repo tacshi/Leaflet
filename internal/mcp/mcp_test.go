@@ -576,14 +576,23 @@ func TestEditRunAgainKeepsOneSnapshot(t *testing.T) {
 }
 
 // A batch, which MCP no longer has, is an invalid request rather than
-// unparsable, and a notification's method sent with an ID still gets an
+// unparsable, as are a request without its method or of another JSON-RPC
+// version, and a notification's method sent with an ID still gets an
 // answer, as JSON-RPC asks.
 func TestBatchAndNotificationWithAnID(t *testing.T) {
 	got := session(t, NewServer(newStore(t), "0.1.0"),
 		`[{"jsonrpc":"2.0","id":2,"method":"ping"}]`,
-		`{"jsonrpc":"2.0","id":3,"method":"notifications/initialized"}`)
+		`{"jsonrpc":"2.0","id":3,"method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":4}`,
+		`{"jsonrpc":"1.0","id":5,"method":"ping"}`,
+		`{"id":6,"method":"ping"}`)
 	if e, _ := got[0]["error"].(map[string]any); e == nil || e["code"].(float64) != -32600 {
 		t.Errorf("batch %v", got[0])
+	}
+	for _, id := range []float64{4, 5, 6} {
+		if e, _ := got[id]["error"].(map[string]any); e == nil || e["code"].(float64) != -32600 {
+			t.Errorf("request %v answered %v", id, got[id])
+		}
 	}
 	if r, ok := got[3]["result"].(map[string]any); !ok || r == nil {
 		t.Errorf("notification with an ID %v", got[3])

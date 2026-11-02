@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/guard"
 	"leaflet/internal/menu"
 	"leaflet/internal/store"
 	"leaflet/internal/web"
@@ -170,8 +171,7 @@ func (c *Core) fillLinks(id string, content *doc.Content) {
 			continue
 		}
 		c.linkAsked[link] = true
-		go func() {
-			defer catch(nil)
+		guard.Go(func() {
 			info, err := web.LookUp(link)
 			if err != nil || info.Title == "" {
 				return
@@ -179,6 +179,6 @@ func (c *Core) fillLinks(id string, content *doc.Content) {
 			c.q.post(func() {
 				_ = c.editContent(id, func(content *doc.Content) bool { return info.Fill(content, link) })
 			})
-		}()
+		})
 	}
 }

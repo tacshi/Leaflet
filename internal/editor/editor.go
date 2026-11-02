@@ -361,8 +361,18 @@ func (e *Editor) place(id string, r ui.Rect) {
 // FocusBlock is the block the caret is in.
 func (e *Editor) FocusBlock() string { return e.focus.ID }
 
-// Select sets the selection.
+// Select sets the selection. A caret moved elsewhere ends the step of
+// undo typing makes, as a click or an arrow key does.
 func (e *Editor) Select(anchor, focus Pos) {
+	if anchor, focus = e.clamp(anchor), e.clamp(focus); anchor != e.anchor || focus != e.focus {
+		e.BreakUndo()
+	}
+	e.setSelection(anchor, focus)
+}
+
+// setSelection sets the selection, keeping the step of undo typing makes:
+// as typing that takes text out moves the caret.
+func (e *Editor) setSelection(anchor, focus Pos) {
 	if e.marked {
 		// Moving the caret ends a composition where it is, keeping its
 		// text, as a click does in other editors: composing on starts
@@ -762,7 +772,7 @@ func (e *Editor) updateTrigger() {
 		return
 	}
 	q := string(runes[t.Off+1 : min(e.focus.Off, len(runes))])
-	if utf8.RuneCountInString(q) > 40 || (t.Kind == '@' && len(q) > 0 && q[len(q)-1] == ' ' && len(q) > 24) {
+	if utf8.RuneCountInString(q) > 40 || (t.Kind == '@' && len(q) > 0 && q[len(q)-1] == ' ' && utf8.RuneCountInString(q) > 24) {
 		e.trigger = nil
 		return
 	}

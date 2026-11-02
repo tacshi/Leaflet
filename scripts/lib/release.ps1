@@ -15,6 +15,9 @@ function Info([string]$Message) { Write-Host "==> $Message" }
 function Warn([string]$Message) { [Console]::Error.WriteLine("warning: $Message") }
 
 $RootDir = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+# The directory the script was run from, which the paths it is given are
+# relative to, though it then works in $RootDir.
+$CallerDir = (Get-Location -PSProvider FileSystem).ProviderPath
 $ConfigPath = Join-Path $RootDir 'mygo.json'
 $ConfigBackup = $null
 
@@ -79,6 +82,10 @@ function Restore-Config {
 	}
 }
 
+# Get-FullPath returns $Path in full: as it is when it is, else from the
+# directory the script was run from.
+function Get-FullPath([string]$Path) { [IO.Path]::GetFullPath($Path, $CallerDir) }
+
 # Get-GoArch maps arm64 and x64 to Go's names.
 function Get-GoArch([string]$Arch) {
 	switch ($Arch) {
@@ -114,12 +121,13 @@ function Find-Signtool {
 function Get-WindowsCertificate {
 	$cert = $env:LEAFLET_WINDOWS_CERTIFICATE
 	if (-not $cert) { return }
+	$cert = Get-FullPath $cert
 	if (-not (Test-Path -PathType Leaf $cert)) { Fail "no Windows certificate at $cert (LEAFLET_WINDOWS_CERTIFICATE)" }
 	if (-not (Find-Signtool)) { Fail 'signing Windows builds needs signtool from the Windows SDK' }
 	if (-not $env:MYGO_WINDOWS_CERTIFICATE_PASSWORD) {
 		Warn 'MYGO_WINDOWS_CERTIFICATE_PASSWORD is not set; the certificate must have no password'
 	}
-	(Resolve-Path $cert).Path
+	$cert
 }
 
 # Import-UpdateKey sets MYGO_UPDATER_PRIVATE_KEY, which signs updates, from
@@ -130,6 +138,7 @@ function Import-UpdateKey {
 	if ($env:MYGO_UPDATER_PRIVATE_KEY) { return }
 	$file = $env:LEAFLET_UPDATE_KEY
 	if (-not $file) { $file = Join-Path $env:APPDATA 'mygo\update-keys\Leaflet\mygo-update.key' }
+	$file = Get-FullPath $file
 	if (-not (Test-Path -PathType Leaf $file)) {
 		Fail "no update signing key at $file; set LEAFLET_UPDATE_KEY or MYGO_UPDATER_PRIVATE_KEY"
 	}

@@ -29,7 +29,10 @@ const capturePage = `<!doctype html>
 <script>
 const session = new URLSearchParams(location.search).get("s");
 const call = (name, ...args) => window.mygo.call("Recorder." + name, session, ...args);
-let ctx, stream, node, source, paused = false, buf = [], pos = 0, seq = 0;
+let ctx, stream, node, source, paused = false, buf = [], seq = 0;
+// tail is what the last buffer left over, which the next output sample
+// starts in, and pos is where in it that sample starts.
+let tail = new Float32Array(0), pos = 0;
 function send() {
   if (!buf.length) return;
   let n = 0; for (const b of buf) n += b.length;
@@ -52,9 +55,13 @@ async function start() {
     const ratio = ctx.sampleRate / 16000;
     node.onaudioprocess = (e) => {
       if (paused) return;
-      const input = e.inputBuffer.getChannelData(0);
-      const n = Math.floor((input.length - pos) / ratio);
-      const out = new Int16Array(Math.max(n, 0));
+      // The last buffer's tail goes first, so an output sample that
+      // spans two buffers hears both, and no sample is lost.
+      const fresh = e.inputBuffer.getChannelData(0);
+      const input = new Float32Array(tail.length + fresh.length);
+      input.set(tail);
+      input.set(fresh, tail.length);
+      const out = new Int16Array(Math.max(0, Math.floor((input.length - pos) / ratio)));
       for (let i = 0; i < out.length; i++) {
         // Average the input samples this output sample covers.
         const a = pos + i * ratio, b = Math.min(a + ratio, input.length);
@@ -63,7 +70,9 @@ async function start() {
         const v = Math.max(-1, Math.min(1, cnt ? sum / cnt : 0));
         out[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
       }
-      pos = pos + out.length * ratio - input.length;
+      const next = pos + out.length * ratio, keep = Math.floor(next);
+      tail = input.slice(keep);
+      pos = next - keep;
       buf.push(out);
     };
     source.connect(node);

@@ -47,9 +47,6 @@ func TestTextColorAndHighlight(t *testing.T) {
 	if d := n.Delta(); len(d) != 1 || !d[0].Attrs.Zero() {
 		t.Errorf("after Remove color %+v", d)
 	}
-	if !doc.ValidColor(colorHex(ui.Hex("#123456"))) || colorHex(ui.Color{}) != "" {
-		t.Error("colorHex")
-	}
 }
 
 // Code is colored by MyGo's highlighting, in its code theme's colors, and

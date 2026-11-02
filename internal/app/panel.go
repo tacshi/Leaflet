@@ -710,27 +710,24 @@ func (a *App) askedBy(cm store.Comment) string {
 }
 
 // agentInComment runs an agent mentioned in a comment on the thread's
-// block, where the comment shows it marked; its answer is posted in the
-// thread.
+// block, where the comment shows it marked: one named, or the default for
+// @agent. Its answer is posted in the thread.
 func (a *App) agentInComment(root store.Comment, body string) {
-	names := []string{"agent"}
-	for _, o := range a.hub.Options() {
-		names = append(names, o.Name())
+	agent, err := core.CommentAgent(a.hub, body)
+	if err != nil {
+		a.toast(err.Error())
+		return
 	}
-	hit := core.Mentioned(body, names)
-	for _, o := range a.hub.Options() {
-		if hit[strings.ToLower(o.Name())] || hit["agent"] {
-			ch := o.Choice()
-			a.hub.Start(a.page.id, agents.RunOptions{
-				Surface: "comment", Instruction: body, Focus: []string{root.BlockID}, Selection: root.Quote,
-				CommentID: root.ID, Agent: &ch,
-				Done: func(r *agents.Run) {
-					if r.Error != "" {
-						a.toast(r.AgentName + ": " + r.Error)
-					}
-				},
-			})
-			return
-		}
+	if agent == nil {
+		return
 	}
+	a.hub.Start(a.page.id, agents.RunOptions{
+		Surface: "comment", Instruction: body, Focus: []string{root.BlockID}, Selection: root.Quote,
+		CommentID: root.ID, Agent: agent,
+		Done: func(r *agents.Run) {
+			if r.Error != "" {
+				a.toast(r.AgentName + ": " + r.Error)
+			}
+		},
+	})
 }

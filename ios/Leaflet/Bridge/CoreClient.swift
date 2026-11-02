@@ -285,12 +285,18 @@ final class CoreClient: Sendable {
     }
 
     /// editPage gives the core the page's content after an edit in
-    /// editor, made over rev.
+    /// editor, made over rev, and returns the rev it left the page at,
+    /// which has the edit: a change at an older one is from before it.
+    @discardableResult
     nonisolated(nonsending) func editPage(
         _ id: String, editor: Int64, content: DocContent, rev: Int64
-    ) async throws {
+    ) async throws -> Int64 {
         let json = try encode(content)
-        try await call { try $0.editPage(id, editor: editor, content: json, rev: rev) }
+        return try await call { core in
+            var left: Int64 = 0
+            try core.editPage(id, editor: editor, content: json, rev: rev, left: &left)
+            return left
+        }
     }
 
     /// members are who a page is shared with, as this device knows.

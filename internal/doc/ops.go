@@ -120,7 +120,9 @@ func (c *Content) Apply(o Op) error {
 		// an undo or a merge brought back first, stay as they are; an
 		// anchor gone since, as a neighbour deleted after the op, leaves
 		// the blocks at the end of the page rather than not at all, and a
-		// parent that is no longer a list has them after it.
+		// parent that is no longer a list has them after it. A table holds
+		// only its cells: other blocks put in it or next to one of its
+		// cells go after the table.
 		have := map[string]bool{}
 		c.Walk(func(n, _ *Node) { have[n.ID] = true })
 		var nodes []*Node
@@ -133,11 +135,15 @@ func (c *Content) Apply(o Op) error {
 			return nil
 		}
 		if a := p.Anchor(); a != "" {
-			switch at := c.Find(a); {
+			switch at := c.Locate(a); {
 			case at == nil:
 				p = Position{At: "end"}
-			case p.Parent != "" && !NestableTypes[at.Type] && !inTable(at):
+			case p.Parent != "" && at.Node.Type == "table" && !allCells(nodes):
 				p = Position{After: a}
+			case p.Parent != "" && !NestableTypes[at.Node.Type] && !inTable(at.Node):
+				p = Position{After: a}
+			case p.Parent == "" && at.Parent != nil && at.Parent.Type == "table" && !allCells(nodes):
+				p = Position{After: at.Parent.ID}
 			}
 		}
 		return c.Insert(p, nodes...)
@@ -168,6 +174,12 @@ func (c *Content) Apply(o Op) error {
 		}
 	}
 	return nil
+}
+
+// allCells reports whether nodes are all table cells, which only a table
+// holds.
+func allCells(nodes []*Node) bool {
+	return !slices.ContainsFunc(nodes, func(n *Node) bool { return n.Type != "table/cell" })
 }
 
 // withoutPresent returns n without the blocks in it the page has already

@@ -83,8 +83,9 @@ func PresetByID(id string) Preset {
 // Today is the date for the prompt.
 func Today() string { return time.Now().Format("2006-01-02") }
 
-// SystemPrompt is the prompt of every agent run, kept in step with
-// supabase/functions/_shared/prompt.ts.
+// SystemPrompt is the prompt of a run on this device. A cloud run has the
+// agent function's own (supabase/functions/_shared/prompt.ts), worded
+// apart from this one: a rule added to one belongs in the other too.
 func SystemPrompt(agentName, pageTitle, surface string, canReadOtherPages, supportsTools, readOnly bool) string {
 	// As in a selection, a question gets an answer, not an edit.
 	focus := "The user is chatting with you beside the page. The whole page is your focus. If they ask about the page (summarize it, explain it, find gaps or open questions, suggest a structure or other ideas), answer in your reply and leave the page as it is: they can insert your answer into the page themselves. Edit the page only when they ask you to write, add or change something in it, such as filling in a section, turning numbers into a chart, or applying a structure."

@@ -30,8 +30,10 @@ Deno.test("an open fence runs to the end, and math and Mermaid make their blocks
 });
 
 Deno.test("table rows split on unescaped pipes", () => {
-  assertEquals(tableRow("| a\\|b | c |"), ["a|b", "c"]);
-  assertEquals(tableRow("| --- | :---: |"), null);
+  assertEquals(tableRow("| a\\|b | c |"), { cells: ["a|b", "c"], rule: false });
+  assertEquals(tableRow("| --- | :---: |"), { cells: ["---", ":---:"], rule: true });
+  // In a code span only \| is an escape: a backslash is the code's.
+  assertEquals(tableRow("| `a\\b\\|c` | \\* |").cells, ["`a\\b|c`", "\\*"]);
 });
 
 // The cases internal/doc/lines_test.go reads, read the same way.
@@ -164,7 +166,11 @@ Deno.test("a picture line may have a title and a link with parentheses", () => {
 });
 
 Deno.test("a <br> in a table cell is a line break, but escaped or in code it is text", () => {
-  assertEquals(tableRow("| x<br>y \\<br> `a<br>b` | a<BR/>b | c<br />d |"), ["x\ny \\<br> `a<br>b`", "a\nb", "c\nd"]);
+  assertEquals(tableRow("| x<br>y \\<br> `a<br>b` | a<BR/>b | c<br />d |").cells, [
+    "x\ny \\<br> `a<br>b`",
+    "a\nb",
+    "c\nd",
+  ]);
 });
 
 // What PageMarkdown writes for a page of every kind of block Markdown has
@@ -297,4 +303,13 @@ Deno.test("a page's Markdown from the app reads back as its blocks", () => {
     { type: "diagram", source: "graph TD\n  A-->B" },
     { type: "paragraph", text: "\\<details> is text, and <summary>" },
   ]);
+});
+
+Deno.test("only spaces and tabs indent a fence, as CommonMark has it", () => {
+  assertEquals(markdownSpecs("\u00a0```go\nx"), [
+    { type: "paragraph", text: "\u00a0```go" },
+    { type: "paragraph", text: "x" },
+  ]);
+  assertEquals(markdownSpecs("\u3000```"), [{ type: "paragraph", text: "\u3000```" }]);
+  assertEquals(markdownSpecs("  ```go\nx\n```"), [{ type: "code", text: "x", language: "go" }]);
 });

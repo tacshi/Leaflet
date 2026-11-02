@@ -551,8 +551,7 @@ func (a *App) speechSettings(c *ui.Context) {
 						// them as they are now.
 						url, model, key := stt.BaseURL, stt.Model, s.key
 						a.sttTestButton(c, func(ctx context.Context) error {
-							_, err := recording.TranscribeEndpoint(ctx, url, model, recording.WavFromPCM(make([]byte, recording.SampleRate)), key, "auto")
-							return err
+							return recording.TestEndpoint(ctx, url, model, key)
 						})
 					})
 				})
@@ -743,7 +742,7 @@ func (a *App) saveSttKey(provider, key string) {
 				a.toast(locales.RecSttKeyNotSaved(err.Error()))
 				return
 			}
-			speech.soniox, speech.key = "", ""
+			speech.soniox = ""
 			a.toast(locales.RecSttSavedOnServer())
 		})
 	}()

@@ -30,9 +30,14 @@ Leaflet, then sets it up from this folder, built into the app:
 
 - the migrations it lacks, each recorded in `supabase_migrations` as
   `supabase db push` records them;
-- the four functions, unless they are current: a project secret named
-  `LEAFLET_FUNCTIONS_` and the first 16 hex digits of their sources' hash
-  says so (the name, since the API lists secrets' values only as digests);
+- the four functions, when the project's are older: a project secret
+  named `LEAFLET_FUNCTIONS_V`, their version (`FunctionsVersion` in
+  `internal/provision`, raised by one with every change to them), `_` and
+  the first 16 hex digits of their sources' hash says which they are (the
+  name, since the API lists secrets' values only as digests). A build
+  never deploys over functions of its version or a newer one, so two
+  builds never take turns; a development build replaces those of its own
+  version, as they change while it is worked on;
 - a 500 MiB upload limit, where the plan allows it.
 
 It then signs in to the project's Auth as the account's email, making that
@@ -101,9 +106,11 @@ the older anon key works too). Run the app against it:
 SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key from supabase start> go tool mygo dev
 ```
 
-Without these variables the app runs local-only: pages, editing, recording and
-local models work; sign-in, sync, sharing, cloud models and cloud speech to
-text are off.
+Without these variables the app uses the project it was built with
+([`MYGO_LDFLAGS`](../README.md#build-and-release)), else the one chosen with
+**Continue with Supabase** and kept on the device. With none, it runs on the
+device only until then: pages, editing, recording, public links and local
+models work; sync, cloud models and cloud speech to text are off.
 
 ### Tests
 
@@ -113,6 +120,11 @@ deno test _shared/             # blocks, inline markdown, tools, op replay/undo
 deno check */index.ts
 deno lint
 ```
+
+`scripts/check-migrations.sh` applies every migration, oldest first, to a
+throwaway container of the `supabase/postgres` image, as the app applies them
+to a project, then runs the checks in `scripts/migrations/test.sql`; it needs
+only Docker, and CI runs it.
 
 ## Deploying by hand
 
@@ -202,9 +214,13 @@ migration relies on `vault.create_secret`, `vault.update_secret` and
   `accept_page_invite` (or removes it with `decline_page_invite`);
   `page_invites()` lists the caller's pending ones. Access checks count only
   accepted rows. Clients cannot insert or update `page_permissions`: sharing
-  again through `share_page` changes the role.
+  again through `share_page` changes the role. No app calls these RPCs yet:
+  the apps pull the pages shared with their account, and the desktop app
+  shares a page otherwise only through a public link, which needs no server.
 - **Moving pages**: anyone but the space owner moves a page only between
-  parents that the same shares reach (`forbidden_move` otherwise).
+  parents that the same shares reach (`forbidden_move` otherwise), and only
+  the owner puts a page in a folder, as it is made or moved
+  (`forbidden_folder`).
 - **Speech to text with a provider's key** (`stt_settings.provider_id`) goes
   only to that provider's base URL; a `base_url` that names another address
   is refused rather than sent the key.

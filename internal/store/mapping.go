@@ -58,7 +58,7 @@ func RecordingToRemote(r Recording) map[string]any {
 	return map[string]any{
 		"id": r.ID, "page_id": r.PageID, "block_id": r.BlockID, "audio_path": ns(r.AudioPath),
 		"duration_ms": r.DurationMs, "stt_provider": r.SttProvider, "stt_model": r.SttModel, "status": r.Status,
-		"transcript": transcript, "language": ns(r.Language), "created_at": iso(r.CreatedAt),
+		"transcript": transcript, "language": ns(r.Language), "error": ns(r.Error), "created_at": iso(r.CreatedAt),
 	}
 }
 
@@ -68,24 +68,6 @@ func FileToRemote(f File) map[string]any {
 		"id": f.ID, "space_id": f.SpaceID, "folder_id": ns(f.FolderID), "page_id": ns(f.PageID), "name": f.Name,
 		"storage_path": ns(f.StoragePath), "mime_type": f.MimeType, "size_bytes": f.SizeBytes,
 		"created_at": iso(f.CreatedAt), "deleted_at": iso(f.DeletedAt),
-	}
-}
-
-// JobToRemote is an agent run as the ai_jobs table has it.
-func JobToRemote(j Job, userID string) map[string]any {
-	focus := j.FocusBlockIDs
-	if focus == nil {
-		focus = []string{}
-	}
-	var result any
-	if j.Result != nil {
-		result = j.Result
-	}
-	return map[string]any{
-		"id": j.ID, "page_id": j.PageID, "user_id": userID, "surface": j.Surface, "focus_block_ids": focus,
-		"comment_id": ns(j.CommentID), "conversation_id": ns(j.ConversationID), "provider_id": j.ProviderID,
-		"model": j.Model, "status": j.Status, "request": j.Request, "result": result, "error": ns(j.Error),
-		"created_at": iso(j.CreatedAt),
 	}
 }
 

@@ -16,6 +16,15 @@ final class SceneModel {
     /// inspectorTab is the panel's tab shown: Agent first, as on the desktop.
     var inspectorTab = InspectorTab.agent
     var settingsShown = false
+    /// afterPanel is what shows once the panel as a sheet has gone.
+    @ObservationIgnored private var afterPanel: AfterPanel?
+    /// panelSheets counts the panels showing as a sheet, as on iPhone: one,
+    /// or for a moment two as the page changes under it.
+    @ObservationIgnored private var panelSheets = 0
+
+    /// AfterPanel is what the window shows over itself, which can't show
+    /// over the panel as a sheet.
+    private enum AfterPanel { case settings, newFolder }
     var newFolderShown = false
     /// moving is the page the Move to sheet is moving.
     var moving: PageRow?
@@ -25,19 +34,40 @@ final class SceneModel {
     var exported: ExportedPage?
     /// page is the open page's model, for its edits to reach the core.
     @ObservationIgnored weak var page: PageModel?
+    /// saveTitle keeps the open page's title as typed, which the page sets:
+    /// the title is otherwise kept only as its field lets the keyboard go.
+    @ObservationIgnored var saveTitle: (() async -> Void)?
+    /// target is a block the page opening goes to once it shows, as a
+    /// to-do's or a search hit's.
+    @ObservationIgnored var target: String?
     /// toasts shows the app's toasts over the window and its sheets.
     @ObservationIgnored let toasts = ToastWindow()
 
-    /// flush gives the core what was typed in the open page, and waits
-    /// until it has it: a copy, an export or the history then has it too.
+    /// flush gives the core what was typed in the open page, its title
+    /// too, and waits until it has it: a copy, an export or the history
+    /// then has it too.
     func flush() async {
         if editor?.hasPendingEdit == true { editor?.send() }
+        await saveTitle?()
         await page?.flush()
     }
+
+    /// letGo drops the page's editor and model, as the page leaves the
+    /// window, unless the next page's took their place already: the Format
+    /// menu then acts on no page, and the window doesn't keep it.
+    func letGo(_ model: PageModel?) {
+        guard let model, page === model else { return }
+        editor = nil
+        page = nil
+        saveTitle = nil
+    }
+
     /// searchRequested asks the sidebar to show and focus its search.
     var searchRequested = 0
-    /// editor is the open page's editor, for the Format menu.
-    var editor: EditorController?
+    /// editor is the open page's editor, for the Format menu. Weakly: the
+    /// editor's view keeps it, and its closures reach the page's view,
+    /// which reaches the window.
+    weak var editor: EditorController?
     /// newComment is a comment being started from the editor.
     var newComment: NewComment?
     /// asking is an agent being asked from the editor.
@@ -57,6 +87,18 @@ final class SceneModel {
         if let current = selection { back.append(current) }
         forward.removeAll()
         show(id)
+    }
+
+    /// open opens a page at a block, as a to-do or a search hit does: the
+    /// page open goes to it at once, another once it shows.
+    func open(_ id: String, at blockID: String?) {
+        guard let blockID, !blockID.isEmpty else { return open(id) }
+        if id == selection, let editor {
+            editor.reveal(blockID: blockID, atTop: true)
+            return
+        }
+        open(id)
+        target = blockID
     }
 
     var canGoBack: Bool { !back.isEmpty }
@@ -79,6 +121,7 @@ final class SceneModel {
     /// another page it would land on a block that isn't there.
     private func show(_ id: String?) {
         selection = id
+        target = nil
         newComment = nil
         asking = nil
         editingBlock = nil
@@ -101,6 +144,50 @@ final class SceneModel {
             inspectorTab = tab
             inspectorShown = true
         }
+    }
+
+    /// openSettings shows Settings. With the panel a sheet, as on iPhone,
+    /// the panel goes first: Settings, a sheet of the window's, can't show
+    /// over it. It shows once the panel has gone.
+    func openSettings() { showOverPanel(.settings) }
+
+    /// newFolder asks for a new folder's name, the panel as a sheet gone
+    /// first, as for Settings.
+    func newFolder() { showOverPanel(.newFolder) }
+
+    private func showOverPanel(_ what: AfterPanel) {
+        guard panelSheets > 0 else { return show(what) }
+        // A sheet still closing, a heading picked in it, is waited for as
+        // well; one whose going was never heard, not for long.
+        afterPanel = what
+        inspectorShown = false
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1))
+            guard let self, self.afterPanel == what else { return }
+            self.panelSheets = 0
+            self.panelGone(asSheet: false)
+        }
+    }
+
+    private func show(_ what: AfterPanel) {
+        switch what {
+        case .settings: settingsShown = true
+        case .newFolder: newFolderShown = true
+        }
+    }
+
+    /// panelShown hears that the panel shows, as a sheet or not.
+    func panelShown(asSheet: Bool) {
+        if asSheet { panelSheets += 1 }
+    }
+
+    /// panelGone hears that the panel has gone, and shows what waited for
+    /// it once no sheet of it is left.
+    func panelGone(asSheet: Bool) {
+        if asSheet { panelSheets = max(panelSheets - 1, 0) }
+        guard panelSheets == 0, let what = afterPanel else { return }
+        afterPanel = nil
+        show(what)
     }
 
     func search() {

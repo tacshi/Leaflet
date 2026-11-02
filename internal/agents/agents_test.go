@@ -869,6 +869,42 @@ func TestCutOffInsertComesOut(t *testing.T) {
 	}
 }
 
+// A call the run's deadline cuts off takes out what it put in too; one
+// the user stopped keeps it, as the edits before it.
+func TestDeadlineTakesTheDraftOut(t *testing.T) {
+	args := `{"position":{"after":"p1"},"blocks":[{"type":"paragraph","text":"Once upon a time, there`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"insert_blocks","arguments":""}}]}}]}`+"\n\n")
+		for _, p := range pieces(args, 8) {
+			_, _ = io.WriteString(w, "data: "+p+"\n\n")
+		}
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+	saved := draftEvery
+	t.Cleanup(func() { draftEvery = saved })
+	draftEvery = 0
+	for _, stopped := range []bool{false, true} {
+		ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+		c := page()
+		res, err := RunLocal(ctx, NewClient(srv.URL, ""), Request{Model: "m", SupportsTools: true}, executor(c).Ctx, Events{
+			Op: func(doc.Op, string) {
+				if stopped {
+					cancel()
+				}
+			},
+			Revise: func(int, *doc.Op, string, []doc.Op) {},
+		})
+		cancel()
+		drafted := slices.ContainsFunc(texts(c), func(s string) bool { return strings.HasPrefix(s, "Once") })
+		if err == nil || drafted != stopped || (len(res.Ops) == 1) != stopped {
+			t.Errorf("stopped %v: err %v, %d ops, page %q", stopped, err, len(res.Ops), texts(c))
+		}
+	}
+}
+
 // emptyPage is page() with an empty paragraph after p1, where the user
 // asked.
 func emptyPage() *doc.Content {
@@ -941,5 +977,25 @@ func TestWriteMarkdownWhole(t *testing.T) {
 	}
 	if out := x.Call("write_markdown", map[string]any{"position": map[string]any{"at": "end"}, "markdown": "\n\n"}); out["error"] == nil {
 		t.Error("wrote nothing")
+	}
+}
+
+// write_markdown makes as many blocks as a call of blocks makes, as the
+// server's does, and no more.
+func TestWriteMarkdownBlocksLimit(t *testing.T) {
+	lines := func(n int) string {
+		var b strings.Builder
+		for i := range n {
+			fmt.Fprintf(&b, "Line %d\n\n", i)
+		}
+		return b.String()
+	}
+	x := executor(page())
+	before := x.Ctx.Content.Encode()
+	if out := x.Call("write_markdown", map[string]any{"position": map[string]any{"at": "end"}, "markdown": lines(2001)}); out["error"] == nil || x.Ctx.Content.Encode() != before {
+		t.Errorf("wrote 2001 blocks: %v", out["error"])
+	}
+	if out := x.Call("write_markdown", map[string]any{"position": map[string]any{"at": "end"}, "markdown": lines(300)}); out["error"] != nil {
+		t.Error(out["error"])
 	}
 }

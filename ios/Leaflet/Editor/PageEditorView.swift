@@ -100,7 +100,8 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
         let c = context.coordinator
         c.host?.rootView = AnyView(header())
         c.footer?.rootView = AnyView(footer())
-        view.setNeedsLayout()
+        // They may take another height, showing what they now do.
+        view.remeasure()
         c.controller.style = style
         c.controller.createSubpage = createSubpage
         view.isEditable = !model.readOnly

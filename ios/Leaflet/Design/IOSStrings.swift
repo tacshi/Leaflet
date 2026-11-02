@@ -162,4 +162,23 @@ enum LI {
             localized: "Open Link", bundle: L.bundle,
             comment: "VoiceOver's action on a link in the editor's text: open it.")
     }
+    static var syncFailed: String {
+        String(
+            localized: "Last sync failed", bundle: L.bundle,
+            comment:
+                "The sidebar's foot: the last sync pass failed; pulling the list down tries again."
+        )
+    }
+    static var agentNotStarted: String {
+        String(
+            localized: "The agent didn't start. Try again.", bundle: L.bundle,
+            comment: "Asking an agent from the editor: the run could not start.")
+    }
+    static func removeTag(_ tag: String) -> String {
+        String(
+            localized: "Remove \(tag)", bundle: L.bundle,
+            comment:
+                "The tag editor: VoiceOver's name of the button that takes the tag (%@) off the page."
+        )
+    }
 }

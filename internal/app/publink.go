@@ -490,6 +490,17 @@ func (p *pubLink) render(job pubJob) {
 			}
 		}
 	}
+	// Only the page's own files and recordings go out: a block may name
+	// any, as one an editor of the page wrote could.
+	own, ownPaths := map[string]bool{}, map[string]bool{}
+	for _, f := range job.files {
+		if f.PageID == job.page {
+			own[f.ID] = true
+			if lp := localPath(f.ID); lp != "" {
+				ownPaths[lp] = true
+			}
+		}
+	}
 	prefix := "/" + job.token + "/"
 	page := doc.PageHTML(job.title, c, doc.HTMLOptions{
 		Head: job.head,
@@ -499,9 +510,15 @@ func (p *pubLink) render(job pubJob) {
 				return ""
 			}
 			// An uploaded file's url is a path on the device that uploaded
-			// it: this device keeps its copy elsewhere.
-			if lp := localPath(n.Str("file_id")); lp != "" {
-				local = lp
+			// it: this device keeps its copy elsewhere, or none.
+			if id := n.Str("file_id"); id != "" {
+				if !own[id] {
+					return ""
+				}
+				local = localPath(id)
+			}
+			if !ownPaths[local] {
+				return ""
 			}
 			ext := strings.ToLower(filepath.Ext(local))
 			if !doc.ImageExts[ext] {
@@ -549,12 +566,20 @@ func (p *pubLink) render(job pubJob) {
 				if f.ID != n.Str("file_id") {
 					continue
 				}
+				// Another page's file is named as the block names it, and
+				// is neither served nor said to be missing.
+				if !own[f.ID] {
+					if name == "" {
+						name = locales.CardFile()
+					}
+					return "", name, ""
+				}
 				name = f.Name
 				path := localPath(f.ID)
 				if _, err := os.Stat(path); path == "" || err != nil {
 					break
 				}
-				served := strconv.Itoa(len(files)+1) + strings.ToLower(filepath.Ext(f.Name))
+				served := strconv.Itoa(len(files)+1) + servedExt(f.Name)
 				files[served] = pubFile{typ: "application/octet-stream", path: path, name: f.Name}
 				detail = humanSize(f.SizeBytes)
 				if kind := strings.ToUpper(strings.TrimPrefix(filepath.Ext(f.Name), ".")); kind != "" {
@@ -569,6 +594,10 @@ func (p *pubLink) render(job pubJob) {
 		},
 		Recording: func(n *doc.Node) doc.RecordingView {
 			rec, err := job.st.Recording(n.Str("recording_id"))
+			// Another page's recording shows its block's title alone.
+			if err == nil && rec.PageID != job.page {
+				return doc.RecordingView{Title: recordingName(n, store.Recording{}, false, job.title)}
+			}
 			v := doc.RecordingView{Title: recordingName(n, rec, err == nil, job.title)}
 			if err != nil {
 				return v
@@ -605,6 +634,19 @@ func (p *pubLink) render(job pubJob) {
 	}
 	p.shown = job.seq
 	p.snap = pubSnapshot{html: page, files: files, embeds: embeds, blocks: blocks}
+}
+
+// servedExt is the extension a file of name is served with, in lower
+// case: one of letters and digits alone, which its address takes as it
+// is, or none.
+func servedExt(name string) string {
+	ext := strings.ToLower(filepath.Ext(name))
+	for _, r := range strings.TrimPrefix(ext, ".") {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return ""
+		}
+	}
+	return ext
 }
 
 // pubHead is the visitor page's look, with the app's icon under prefix,
@@ -1078,9 +1120,6 @@ func pubEmbedPage(src string) string {
 	return rendered.LeadWith(meta, src)
 }
 
-// embedScript grows each embed's frame to the height its content says,
-// as the app's embed blocks grow, from the height the block keeps up to
-// 1200 pixels.
 // recordingScript plays a recording from a line of its transcript, as a
 // click on one does in the app, unless the click ends selecting text.
 const recordingScript = `document.addEventListener("click", function (e) {
@@ -1094,6 +1133,9 @@ const recordingScript = `document.addEventListener("click", function (e) {
 });
 `
 
+// embedScript grows each embed's frame to the height its content says,
+// as the app's embed blocks grow, from the height the block keeps up to
+// 1200 pixels.
 const embedScript = `addEventListener("message", function (e) {
   var z = e.data && e.data.leafletSize;
   if (!z || typeof z[0] !== "number") return;

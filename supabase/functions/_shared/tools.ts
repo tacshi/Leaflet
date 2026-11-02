@@ -13,10 +13,12 @@ import {
   pageViews,
   type Position,
   randomId,
+  SPACES,
   SPEC_TYPES,
   SpecError,
   specToNode,
   TEXT_TYPES,
+  trimSpace,
   walk,
 } from "./blocks.ts";
 import { markdownSpecs } from "./lines.ts";
@@ -431,6 +433,37 @@ export function applyOps(content: PageContent, ops: Op[], now = Date.now()): Pag
   return out;
 }
 
+/**
+ * Where each block a delete takes out was, so its undo puts it back
+ * (doc.Content.DeleteOp, whose Invert puts them back in this order): in
+ * document order, each after its previous sibling, which is either still
+ * there or put back just before it; a first child goes before the next
+ * sibling that stays. A block inside another deleted one comes back with
+ * it, so it isn't recorded.
+ */
+export function deletedPositions(root: NodeJSON, gone: Set<string>): { node: NodeJSON; position: Position }[] {
+  const out: { node: NodeJSON; position: Position }[] = [];
+  const visit = (nodes: NodeJSON[], parent: NodeJSON) => {
+    nodes.forEach((node, i) => {
+      if (!gone.has(node.id)) {
+        if (node.type !== "table") visit(node.children ?? [], node);
+        return;
+      }
+      const stays = nodes.find((k) => !gone.has(k.id));
+      const position: Position = i > 0
+        ? { after: nodes[i - 1].id }
+        : stays
+        ? { before: stays.id }
+        : parent === root
+        ? { at: "start" }
+        : { parent: parent.id };
+      out.push({ node: clone(node), position });
+    });
+  };
+  visit(root.children ?? [], root);
+  return out;
+}
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -536,10 +569,21 @@ export interface SessionOptions {
  */
 const FETCHED_URL_TYPES = new Set(["image", "video", "link_preview"]);
 
-/** Finds the URLs in text. */
-const URL_RE = /https?:\/\/[^\s<>"'()\[\]]+/g;
+/** Finds the URLs in text, each to the first space as the client has one (SPACES), as its urlRe. */
+export const URL_RE = new RegExp(`https?://[^${SPACES}<>"'()\\[\\]]+`, "gu");
 
-/** The tools that change the page, which a viewer may not call. */
+/**
+ * The tools that change the page, which a viewer may not call. Text on the
+ * page, in its comments or in what a tool returns may be written to steer
+ * the agent, and only the prompt has it take that as data; the tools that
+ * delete or rewrite blocks are not refused for it. A run is asked for by
+ * someone who may edit the page, in their own words (a comment's run by
+ * their own comment), and the run saves the page as it was first
+ * (page_history, agent_run), its edits one undo step in the app: what such
+ * text has the agent take away comes back with Undo. Reading the user's
+ * other pages, which could carry them off, is what is refused where others
+ * write (crossPage in the agent function), as in internal/agents/tools.go.
+ */
 const EDITING_TOOLS = new Set([
   "write_markdown",
   "insert_blocks",
@@ -567,7 +611,10 @@ export class PageEditSession {
     return this.ops.some((op) => op.op !== "create_page");
   }
 
-  /** Runs one tool call. Never throws: failures come back as { error }. */
+  /**
+   * Runs one tool call. A call refused comes back as { error }; anything
+   * else it throws, the session left as it was before the call.
+   */
   async call(name: string, rawArgs: string | Record<string, unknown>): Promise<ToolOutcome> {
     let args: Record<string, unknown>;
     try {
@@ -585,11 +632,14 @@ export class PageEditSession {
     try {
       return await this.dispatch(name, args);
     } catch (e) {
+      // A call that throws anything else fails the run, whose edits so
+      // far may still be saved: those are the ones streamed, without this
+      // call's.
+      if (editing) {
+        this.content = content;
+        this.ops.length = recorded;
+      }
       if (e instanceof ToolError || e instanceof SpecError) {
-        if (editing) {
-          this.content = content;
-          this.ops.length = recorded;
-        }
         return { result: { error: e.message }, ops: [], blockIds: [] };
       }
       throw e;
@@ -750,9 +800,9 @@ export class PageEditSession {
     });
   }
 
+  /** A call's blocks, which specToNode counts toward MAX_SPEC_NODES all together, as doc.SpecsToNodes does. */
   private specs(raw: unknown, field: string): BlockSpec[] {
     if (!Array.isArray(raw) || raw.length === 0) throw new ToolError(`${field} must be a non-empty array of blocks`);
-    if (raw.length > 200) throw new ToolError(`At most 200 blocks per call`);
     return raw as BlockSpec[];
   }
 
@@ -893,10 +943,9 @@ export class PageEditSession {
       for (const inner of collectIds(idx.get(id)!.node).slice(1)) covered.add(inner);
     }
     const targets = ids.filter((id) => !covered.has(id));
-    const previous: { node: NodeJSON; position: Position }[] = [];
+    const previous = deletedPositions(this.root, new Set(targets));
     for (const id of targets) {
       const at = this.locate(id);
-      previous.push({ node: clone(at.node), position: this.positionOf(at) });
       at.parent.children!.splice(at.index, 1);
       this.tombstone(at.node);
     }
@@ -910,7 +959,7 @@ export class PageEditSession {
   }
 
   async createSubpage(rawTitle: unknown, rawBlocks: unknown): Promise<ToolOutcome> {
-    const title = String(rawTitle ?? "").trim();
+    const title = trimSpace(String(rawTitle ?? ""));
     if (!title) throw new ToolError("title is required");
     const content = emptyContent();
     if (rawBlocks !== undefined && rawBlocks !== null) {

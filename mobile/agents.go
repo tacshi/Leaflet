@@ -11,6 +11,7 @@ import (
 	"leaflet/internal/agents/endpoint"
 	"leaflet/internal/core"
 	"leaflet/internal/doc"
+	"leaflet/internal/guard"
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
@@ -153,9 +154,11 @@ func (c *Core) Chat(pageID, text, focus string) {
 
 // Ask starts an agent run from the editor: surface is "inline" or
 // "selection", focus a JSON array of block IDs, and agent the provider
-// and model to run, or "" for the default. It returns the run's ID.
-func (c *Core) Ask(pageID, surface, instruction, focus, selection, providerID, model string) string {
-	defer catch(nil)
+// and model to run, or "" for the default. It returns the run's ID, or why
+// it could not start, as when another run of the page's is working or no
+// agent can run: such a run is never one of the page's runs.
+func (c *Core) Ask(pageID, surface, instruction, focus, selection, providerID, model string) (_ string, err error) {
+	defer catch(&err)
 	var ids []string
 	_ = json.Unmarshal([]byte(focus), &ids)
 	var id string
@@ -167,11 +170,15 @@ func (c *Core) Ask(pageID, surface, instruction, focus, selection, providerID, m
 		run := c.core.Hub.Start(pageID, agents.RunOptions{
 			Surface: surface, Instruction: instruction, Focus: ids, Selection: selection, Agent: agent,
 		})
-		if run != nil {
-			id = run.ID
+		// The run reports from its goroutine through the queue, after this:
+		// failed now, it failed to start.
+		if run.Status == "failed" {
+			err = errors.New(run.Error)
+			return
 		}
+		id = run.ID
 	})
-	return id
+	return id, err
 }
 
 // StopAgent stops a page's run that is still working.
@@ -293,30 +300,27 @@ func (c *Core) AddComment(pageID, blockID, body, parentID, quote string) (err er
 }
 
 // agentInComment runs the agent a comment mentions on its thread's block,
-// where the comment shows it marked, as the desktop does: @agent runs the
-// first. A run that fails says why in a notice, as the desktop's toast.
+// where the comment shows it marked, as the desktop does: one named, or
+// the default for @agent. A run that fails says why in a notice, as the
+// desktop's toast.
 func (c *Core) agentInComment(pageID string, root store.Comment, body string) {
-	options := c.core.Hub.Options()
-	names := []string{"agent"}
-	for _, o := range options {
-		names = append(names, o.Name())
+	agent, err := core.CommentAgent(c.core.Hub, body)
+	if err != nil {
+		c.ev.notice(err.Error())
+		return
 	}
-	hit := core.Mentioned(body, names)
-	for _, o := range options {
-		if hit[strings.ToLower(o.Name())] || hit["agent"] {
-			ch := o.Choice()
-			c.core.Hub.Start(pageID, agents.RunOptions{
-				Surface: "comment", Instruction: body, Focus: []string{root.BlockID}, Selection: root.Quote,
-				CommentID: root.ID, Agent: &ch,
-				Done: func(r *agents.Run) {
-					if r.Error != "" {
-						c.ev.notice(r.AgentName + ": " + r.Error)
-					}
-				},
-			})
-			return
-		}
+	if agent == nil {
+		return
 	}
+	c.core.Hub.Start(pageID, agents.RunOptions{
+		Surface: "comment", Instruction: body, Focus: []string{root.BlockID}, Selection: root.Quote,
+		CommentID: root.ID, Agent: agent,
+		Done: func(r *agents.Run) {
+			if r.Error != "" {
+				c.ev.notice(r.AgentName + ": " + r.Error)
+			}
+		},
+	})
 }
 
 // ResolveThread resolves a thread, or opens it again.
@@ -381,7 +385,7 @@ func (c *Core) keptHere(in providerJSON) bool {
 			here = err == nil && p.IsLocal
 			return
 		}
-		here = c.core.Remote == nil || !c.core.Store.Session().SignedIn
+		here = !c.core.Store.Session().SignedIn
 	})
 	return here
 }
@@ -430,7 +434,7 @@ func (c *Core) TestProvider(provider string) (_ string, err error) {
 		}
 	case preset.Local || key != "":
 		res = agents.NewClient(endpoint.NormalizeBaseURL(in.BaseURL), key).Test(ctx, in.DefaultModel)
-	case in.ID != "" && c.core.Remote != nil && c.core.Store.Session().SignedIn:
+	case in.ID != "" && c.core.Store.Session().SignedIn:
 		r, err := c.core.Remote.Invoke(ctx, "providers", map[string]any{
 			"action": "test", "provider_id": in.ID, "model": in.DefaultModel,
 		})
@@ -553,10 +557,6 @@ func (c *Core) SaveProvider(provider string) (err error) {
 		})
 		return err
 	}
-	if c.core.Remote == nil {
-		// A provider on the server is only there signed in.
-		return errors.New("no Leaflet server")
-	}
 	body := map[string]any{
 		"preset": in.Preset, "name": name, "base_url": endpoint.NormalizeBaseURL(in.BaseURL),
 		"auth_kind": "api_key", "default_model": in.DefaultModel,
@@ -647,7 +647,7 @@ func (c *Core) RemoveProvider(id string) (err error) {
 	if err != nil {
 		return err
 	}
-	if !p.IsLocal && c.core.Remote != nil {
+	if !p.IsLocal {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		if _, err := c.core.Remote.Invoke(ctx, "providers", map[string]any{"action": "delete", "id": id}); err != nil {
@@ -655,23 +655,17 @@ func (c *Core) RemoveProvider(id string) (err error) {
 		}
 	}
 	if p.AuthKind == "account" {
-		go func() {
-			defer catch(nil)
+		guard.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			agents.ForgetChatGPT(ctx, id)
-		}()
+		})
 	}
+	// A default it was is none from now on, as Store.Settings reads one
+	// whose provider is gone.
 	c.q.do(func() {
 		_ = agents.SetLocalKey(id, "")
-		if err = c.core.Store.DeleteProvider(id); err != nil {
-			return
-		}
-		s := c.core.Store.Settings()
-		if ch, ok := s.Default(); ok && ch.ProviderID == id {
-			s.DefaultModel = ""
-			err = c.core.Store.SaveSettings(s)
-		}
+		err = c.core.Store.DeleteProvider(id)
 	})
 	return err
 }

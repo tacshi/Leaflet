@@ -5,12 +5,15 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/recording"
 	"leaflet/internal/store"
 )
 
@@ -204,5 +207,98 @@ func TestExportZipNestedFolders(t *testing.T) {
 	want := []string{"Home/Notes/Plan.md", "Home/notes (2)/Plan.md", "Work (2).md", "Work/Notes/Plan.md", "Work/Notes/a-b/Plan.md"}
 	if !slices.Equal(names, want) {
 		t.Errorf("names %q, want %q", names, want)
+	}
+}
+
+func TestSafeName(t *testing.T) {
+	long := strings.Repeat("旅", 100) // 300 bytes
+	for in, want := range map[string]string{
+		"Trip: day 1":        "Trip- day 1",
+		"tab\there\n":        "tab-here-",
+		"Notes. ":            "Notes",
+		"CON":                "CON-",
+		"nul.txt":            "nul-.txt",
+		"Com1 .md":           "Com1 -.md",
+		"Console":            "Console",
+		"..":                 "--",
+		long + ".jpeg":       strings.Repeat("旅", 65) + ".jpeg",
+		long + ".Next steps": strings.Repeat("旅", 66),
+	} {
+		if got := SafeName(in); got != want {
+			t.Errorf("SafeName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := SafeName(long); len(got) > 200 || !utf8.ValidString(got) {
+		t.Errorf("SafeName of a long name is %d bytes: %q", len(got), got)
+	}
+}
+
+// Two blocks of one recording, as a copied block keeps its recording_id,
+// take its audio into the zip once, and leave the recording's own audio
+// as it was.
+func TestWithAudioOneRecordingTwice(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.OpenMemory(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	wav := filepath.Join(dir, "r1.wav")
+	if err := os.WriteFile(wav, []byte("RIFF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutRecording(store.Recording{ID: "r1", PageID: "p", BlockID: "b1", Status: "ready", LocalPath: wav}); err != nil {
+		t.Fatal(err)
+	}
+	c := doc.FromBlocks([]*doc.Node{
+		{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": "Standup"}},
+		{ID: "b2", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": "Standup"}},
+	})
+	src := Source{Store: st, Rec: recording.NewController(st, nil)}
+	got := withAudio(src, c, t.TempDir())
+	var files []string
+	got.Walk(func(n, _ *doc.Node) {
+		if n.Type == "file" {
+			files = append(files, n.Str("url"))
+		}
+	})
+	if len(files) != 2 || files[0] != files[1] {
+		t.Errorf("files %q", files)
+	}
+	if data, err := os.ReadFile(wav); err != nil || string(data) != "RIFF" { // #nosec G304 -- the test's own file.
+		t.Errorf("the recording's audio is now %q, %v", data, err)
+	}
+}
+
+// copyAudio leaves a file already at its path, which may be a link to
+// the audio it copies.
+func TestCopyAudioKeepsALink(t *testing.T) {
+	dir := t.TempDir()
+	from, to := filepath.Join(dir, "a.wav"), filepath.Join(dir, "b.wav")
+	if err := os.WriteFile(from, []byte("RIFF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(from, to); err != nil {
+		t.Skip(err)
+	}
+	if err := copyAudio(from, to); err == nil {
+		t.Error("copied over a file there")
+	}
+	if data, _ := os.ReadFile(from); string(data) != "RIFF" { // #nosec G304 -- the test's own file.
+		t.Errorf("the audio is now %q", data)
+	}
+}
+
+// A copy of the audio that fails part way goes, so no other block of the
+// recording takes it as it is.
+func TestCopyAudioCutShortGoes(t *testing.T) {
+	dir := t.TempDir()
+	to := filepath.Join(dir, "b.wav")
+	// A folder opens, and fails as it is read.
+	if err := copyAudio(dir, to); err == nil {
+		t.Fatal("copied a folder")
+	}
+	if _, err := os.Stat(to); !os.IsNotExist(err) {
+		t.Errorf("the copy cut short stayed: %v", err)
 	}
 }

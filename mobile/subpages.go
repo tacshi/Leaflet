@@ -100,6 +100,11 @@ func (c *Core) unlinkSubpage(parent, id string) error {
 		for _, l := range links {
 			content.Remove(l)
 		}
+		// A page whose only block was the card keeps one to type in, as
+		// on the desktop.
+		if len(links) > 0 && len(content.Children) == 0 {
+			content.Children = doc.Empty().Children
+		}
 		return len(links) > 0
 	})
 }

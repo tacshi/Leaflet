@@ -122,47 +122,29 @@ func WavFromPCM(pcm []byte) []byte {
 	return append(wavHeader(int64(len(pcm))), pcm...)
 }
 
-// ReadWav reads the PCM16 samples of a simple WAV file.
-func ReadWav(path string) ([]byte, error) {
-	data, err := os.ReadFile(path) // #nosec G304 -- a recording's audio file, which the app names.
-	if err != nil {
-		return nil, err
-	}
-	for off := 12; off+8 <= len(data); {
-		id := string(data[off : off+4])
-		size := int(binary.LittleEndian.Uint32(data[off+4:]))
-		if id == "data" {
-			end := min(off+8+size, len(data))
-			return data[off+8 : end], nil
-		}
-		off += 8 + size + size%2
-	}
-	return nil, errors.New("no audio in the file")
-}
-
 // LevelWindow is the samples each bar of the meter measures: 50 ms.
 const LevelWindow = SampleRate / 20
 
-// Level is the loudness of a PCM16 chunk from 0 to 1, for the meter.
-func Level(pcm []byte) float64 {
-	var m Meter
-	if l := m.levels(pcm, len(pcm)/2); len(l) > 0 {
-		return l[0]
-	}
-	return 0
-}
-
 // Meter turns the audio as it comes into one level per LevelWindow,
-// however the audio is split into chunks.
+// however the audio is split into chunks, inside a sample too.
 type Meter struct {
 	sum float64
 	n   int
+	// half is the first byte of a sample the last chunk ended inside.
+	half []byte
 }
 
 // Levels adds a chunk and returns the levels of the windows it completed.
 func (m *Meter) Levels(pcm []byte) []float64 { return m.levels(pcm, LevelWindow) }
 
 func (m *Meter) levels(pcm []byte, window int) []float64 {
+	if len(m.half) > 0 && len(pcm) > 0 {
+		pcm = append(m.half, pcm...)
+		m.half = nil
+	}
+	if len(pcm)%2 == 1 {
+		m.half = []byte{pcm[len(pcm)-1]}
+	}
 	var out []float64
 	for i := 0; i+1 < len(pcm); i += 2 {
 		s := float64(int16(binary.LittleEndian.Uint16(pcm[i:]))) / 32768

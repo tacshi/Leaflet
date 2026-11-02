@@ -149,6 +149,9 @@ func (x *Executor) FinishDraft(name, raw string) (map[string]any, bool) {
 		if nodes = doc.MarkdownBlocks(md); len(nodes) == 0 {
 			return fail(terr("markdown is empty."))
 		}
+		if err := doc.CallNodes(nodes); err != nil {
+			return fail(err)
+		}
 	} else {
 		var err error
 		if nodes, err = x.specs(args["blocks"]); err != nil {

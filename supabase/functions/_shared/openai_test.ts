@@ -48,3 +48,19 @@ Deno.test("an error in the stream closes the connection", async () => {
   await assertRejects(() => readStream(new Response(body), () => {}), Error, "overloaded");
   assertEquals(cancelled, true);
 });
+
+Deno.test("calls numbered with gaps, and one after them without its number, come together", async () => {
+  const result = await readStream(
+    events(
+      `{"choices":[{"delta":{"tool_calls":[{"index":2,"id":"c2","function":{"name":"read_page","arguments":"{}"}}]}}]}`,
+      `{"choices":[{"delta":{"tool_calls":[{"id":"c3","function":{"name":"list_pages","arguments":"{}"}}]}}]}`,
+      `{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}`,
+      "[DONE]",
+    ),
+    () => {},
+  );
+  assertEquals(result.message.tool_calls?.map((c) => [c.id, c.function.name]), [
+    ["c2", "read_page"],
+    ["c3", "list_pages"],
+  ]);
+});

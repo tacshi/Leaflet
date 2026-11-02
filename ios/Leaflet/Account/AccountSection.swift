@@ -8,10 +8,8 @@ struct AccountSection: View {
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
     @State private var account: AccountInfo?
+    @Environment(SettingsPrompt.self) private var prompt
     @State private var signingOut = false
-    /// unsynced counts the changes that could not go up before signing
-    /// out, to ask about.
-    @State private var unsynced = 0
     @State private var failure: String?
     /// name is the name as typed, saved as Return or leaving the field
     /// does on the desktop.
@@ -59,22 +57,15 @@ struct AccountSection: View {
                 .disabled(app.client == nil)
             }
         } header: {
+            // On the header, a view of its own: on the section, it would go
+            // on each of its rows, a read of the account each.
             Text(L.settingsSectionAccount)
+                .task(id: app.status?.signedIn) {
+                    account = try? await app.client?.account()
+                    if !naming { name = app.status?.displayName ?? "" }
+                }
         } footer: {
             if let failure { Text(failure).foregroundStyle(palette.dangerText) }
-        }
-        .task(id: app.status?.signedIn) {
-            account = try? await app.client?.account()
-            if !naming { name = app.status?.displayName ?? "" }
-        }
-        .alert(
-            L.settingsSignOutAnyway,
-            isPresented: Binding(get: { unsynced > 0 }, set: { if !$0 { unsynced = 0 } })
-        ) {
-            Button(L.commonCancel, role: .cancel) {}
-            Button(L.commonSignOut, role: .destructive) { Task { await signOut(anyway: true) } }
-        } message: {
-            Text(L.settingsSignOutUnsynced(count: unsynced))
         }
 
         if let account, account.signedIn {
@@ -110,7 +101,13 @@ struct AccountSection: View {
         do {
             let left = try await client.signOut(anyway: anyway)
             if left > 0 {
-                unsynced = left
+                // The changes that could not go up first, asked about.
+                prompt.ask(
+                    SettingsPrompt.Ask(
+                        title: L.settingsSignOutAnyway,
+                        message: L.settingsSignOutUnsynced(count: left),
+                        action: L.commonSignOut,
+                        confirm: { await signOut(anyway: true) }))
                 return
             }
         } catch {
@@ -150,9 +147,11 @@ private struct DevicesSection: View {
                 Text(L.settingsDevicesLoading).foregroundStyle(.secondary)
             }
         } header: {
+            // On the header, as the account's section has it: on the
+            // section, each device's row would read them all again.
             Text(L.settingsDevices)
+                .task { await load() }
         }
-        .task { await load() }
     }
 
     private func desc(_ d: Device) -> String {
@@ -192,10 +191,11 @@ struct DataSection: View {
     let left: () async -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.palette) private var palette
+    @Environment(SettingsPrompt.self) private var prompt
     @State private var exporting = false
-    @State private var exported: ExportedAll?
-    @State private var deleteShown = false
-    @State private var confirm = ""
+    /// folder is the export's own folder, which goes once the zip is
+    /// moved out of it, or not kept.
+    @State private var folder: URL?
     @State private var deleting = false
     /// note says how the export or deleting went; failed, in the danger
     /// color.
@@ -211,8 +211,12 @@ struct DataSection: View {
             if signedIn {
                 ActionRow(label: L.settingsDeleteAccount, desc: L.settingsDeleteAccountDesc) {
                     Button(L.settingsDeleteButton, role: .destructive) {
-                        confirm = ""
-                        deleteShown = true
+                        prompt.ask(
+                            SettingsPrompt.Ask(
+                                title: L.settingsDeleteAccountTitle,
+                                message: L.settingsCannotUndo + " " + L.settingsTypeDelete,
+                                action: L.settingsDeleteAccount, typed: "DELETE",
+                                confirm: { await deleteAccount() }))
                     }
                     .disabled(deleting)
                 }
@@ -221,36 +225,6 @@ struct DataSection: View {
             Text(L.settingsYourData)
         } footer: {
             if let note { Text(note).foregroundStyle(failed ? palette.dangerText : .secondary) }
-        }
-        .fileMover(
-            isPresented: Binding(get: { exported != nil }, set: { if !$0 { exported = nil } }),
-            file: exported?.url
-        ) { result in
-            let done = exported
-            switch result {
-            case .success(let url):
-                let name = url.lastPathComponent
-                let missing = done?.missing ?? 0
-                say(
-                    missing > 0
-                        ? L.settingsExportedMissing(count: missing, name: name)
-                        : L.settingsExported(name: name))
-            case .failure(let error):
-                say(L.settingsExportFailed(error: error.localizedDescription), failed: true)
-            }
-        } onCancellation: {
-            // The zip the user did not keep goes.
-            if let url = exported?.url { try? FileManager.default.removeItem(at: url) }
-        }
-        .alert(L.settingsDeleteAccountTitle, isPresented: $deleteShown) {
-            TextField("DELETE", text: $confirm)
-                .textInputAutocapitalization(.characters)
-                .autocorrectionDisabled()
-            Button(L.commonCancel, role: .cancel) {}
-            Button(L.settingsDeleteAccount, role: .destructive) { Task { await deleteAccount() } }
-                .disabled(confirm != "DELETE")
-        } message: {
-            Text(L.settingsCannotUndo + " " + L.settingsTypeDelete)
         }
     }
 
@@ -267,15 +241,45 @@ struct DataSection: View {
         // A folder of its own each time, which the move then empties.
         let dir = FileManager.default.temporaryDirectory.appending(
             path: "Export-" + UUID().uuidString, directoryHint: .isDirectory)
+        clear()
+        folder = dir
+        let exported: ExportedAll
         do {
             exported = try await client.exportAll(into: dir)
         } catch {
             say(error.localizedDescription, failed: true)
+            clear()
+            return
         }
+        prompt.offer(
+            SettingsPrompt.Move(
+                file: exported.url,
+                done: { result in
+                    switch result {
+                    case .success(let url):
+                        let name = url.lastPathComponent
+                        say(
+                            exported.missing > 0
+                                ? L.settingsExportedMissing(count: exported.missing, name: name)
+                                : L.settingsExported(name: name))
+                    case .failure(let error):
+                        say(L.settingsExportFailed(error: error.localizedDescription), failed: true)
+                    }
+                    clear()
+                },
+                // The zip the user did not keep goes, with its folder.
+                cancelled: { clear() }))
+    }
+
+    /// clear takes the export's folder away, and the zip if it is still
+    /// in it.
+    private func clear() {
+        if let folder { try? FileManager.default.removeItem(at: folder) }
+        folder = nil
     }
 
     private func deleteAccount() async {
-        guard confirm == "DELETE", let client = app.client else { return }
+        guard let client = app.client else { return }
         deleting = true
         note = nil
         defer { deleting = false }
@@ -284,6 +288,10 @@ struct DataSection: View {
             say(L.settingsAccountDeleted)
         } catch {
             say(error.localizedDescription, failed: true)
+            // Deleted with this device's pages left behind, the account has
+            // gone all the same; still signed in, it hasn't.
+            await app.refreshStatus()
+            if app.status?.signedIn ?? true { return }
         }
         await left()
     }

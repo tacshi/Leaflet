@@ -89,8 +89,11 @@ itself.
 
 ### Share and sync
 
-- Comment threads anchored to blocks, and sharing a page with viewers or
-  editors, inherited by its subpages.
+- Comment threads anchored to blocks, and a temporary public link on the
+  Mac and PC that shares a page with anyone who has it, or only with the
+  addresses you name, while Leaflet is open. The server can also share a
+  page with viewers or editors, inherited by its subpages, but no app
+  offers that yet.
 - Offline first: everything is saved to SQLite, and changes sync through
   an outbox when online. Edits made apart merge block by block, with a
   conflict notice and a way to bring back the other version.
@@ -113,7 +116,7 @@ itself.
   it, and release builds need it, as they need Xcode to sign and notarize.
   Windows installers need NSIS.
 - iCloud sync needs iCloud Drive turned on.
-- Sync through a server, sharing and cloud models need a
+- Sync through a server and cloud models need a
   [Supabase](https://supabase.com) account: **Continue with Supabase**
   finds or creates a project in it and sets it up from
   [`supabase/`](supabase/README.md). Without one, Leaflet runs on your
@@ -134,9 +137,9 @@ go tool mygo dev
 ```
 
 Without a server, Leaflet runs on this device only: pages, editing,
-comments, local models and transcription servers on your network all
-work, and sign-in, sync, sharing, cloud models and cloud transcription are
-hidden or explained in place.
+comments, public links, local models and transcription servers on your
+network all work, and sign-in, sync, cloud models and cloud transcription
+are hidden or explained in place.
 
 Every build can sign in with Supabase: the OAuth app's client ID is built
 in, and its secret stays in Leaflet's sign-in Worker (see
@@ -241,6 +244,14 @@ unsigned Windows installers, and macOS ones built `--skip-notarize`, unless
 `--allow-unsigned` (`-AllowUnsigned`) or `LEAFLET_ALLOW_UNSIGNED=1` says
 to publish them anyway.
 
+To build one server in, as `SUPABASE_URL` and `SUPABASE_ANON_KEY` set one
+for a run, give its URL and Publishable key to the linker through
+`MYGO_LDFLAGS`, which `go tool mygo build` and the scripts pass on:
+
+```bash
+MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://<ref>.supabase.co -X leaflet/internal/remote.DefaultAnonKey=<publishable key>" scripts/build-release.sh
+```
+
 ## Development
 
 ```bash
@@ -248,6 +259,7 @@ go test ./...                                # model, merge, store, sync, editor
 make check                                   # gofmt, golangci-lint, govulncheck and gosec
 make ios-check                               # swift-format, SwiftLint, osv-scanner and mobsfscan
 make clean                                   # remove build/ and the binary go build leaves
+scripts/check-migrations.sh                  # every migration, in order, on Supabase's Postgres (Docker)
 cd supabase/functions && deno test _shared/  # the Edge Functions' shared code
 ```
 
@@ -294,7 +306,7 @@ rules.
 | `internal/macspeech`, `macos/speech` | Transcription with the Mac's own speech recognition, through `leaflet-speech`, a Swift helper the Mac app ships |
 | `internal/theme` | Colors, fonts and icons |
 | `locales` | The app's texts in each language, and the Go code generated from them |
-| `scripts` | Debug and release builds, and publishing to GitHub Releases |
+| `scripts` | Debug and release builds, publishing to GitHub Releases, and the migrations' check |
 | `supabase` | Migrations (tables, row-level security, RPCs, Vault) and Edge Functions |
 | `worker` | The sign-in Worker on Cloudflare: the OAuth redirect page and the token exchange that holds the client secret |
 | `docs` | The protocol, user stories and the icon's sources |
@@ -318,8 +330,9 @@ be.
   instead, on a Mac with macOS 26 or later and on iPhone and iPad. On
   Windows and older Macs, serve a model behind an OpenAI-compatible
   endpoint on your network; the same goes for MOSS-Transcribe-Diarize.
-- OpenAI and Claude account sign-in for third-party apps is unconfirmed,
-  so those providers take API keys.
+- Claude account sign-in for third-party apps is unconfirmed, so Claude
+  takes an API key; OpenAI takes one too, or a ChatGPT Plus or Pro
+  sign-in.
 
 ## Acknowledgments
 

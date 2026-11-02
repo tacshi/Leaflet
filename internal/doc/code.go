@@ -36,9 +36,10 @@ var languageAliases = map[string]string{
 
 // CodeLanguageID reads a language's name, as a fence or an agent gives it,
 // as the ID a code block keeps: "JS" is "javascript", and a language not
-// listed keeps its name in lower case.
+// listed keeps its name in lower case, its spaces dashes, as a fence,
+// which ends a language at a space, can write it.
 func CodeLanguageID(name string) string {
-	id := strings.ToLower(strings.TrimSpace(name))
+	id := strings.ToLower(strings.Join(strings.Fields(name), "-"))
 	if a, ok := languageAliases[id]; ok {
 		return a
 	}
@@ -64,9 +65,11 @@ func CodeNode(code, language string) *Node {
 }
 
 // CodeFence reads a line that opens a Markdown code fence, three or more
-// backticks and a language, and reports whether it is one.
+// backticks and a language, and reports whether it is one. As in
+// CommonMark, only spaces and tabs may be around it: a line that starts
+// with another space is text.
 func CodeFence(line string) (language string, ok bool) {
-	line = strings.TrimSpace(line)
+	line = strings.Trim(line, " \t")
 	rest := strings.TrimLeft(line, "`")
 	if len(line)-len(rest) < 3 || strings.Contains(rest, "`") {
 		return "", false
@@ -79,12 +82,13 @@ func CodeFence(line string) (language string, ok bool) {
 }
 
 // CodeMarkdown writes a code block as a fenced block, with a fence longer
-// than any run of backticks in the code.
+// than any run of backticks in the code, and its language as CodeFence
+// reads it back.
 func CodeMarkdown(n *Node) string {
 	code := n.Delta().Plain()
 	fence := "```"
 	for strings.Contains(code, fence) {
 		fence += "`"
 	}
-	return fence + n.Str("language") + "\n" + code + "\n" + fence
+	return fence + CodeLanguageID(n.Str("language")) + "\n" + code + "\n" + fence
 }

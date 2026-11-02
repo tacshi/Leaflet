@@ -2,6 +2,7 @@ package web
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"leaflet/internal/doc"
@@ -26,6 +27,15 @@ func TestReadLinkInfo(t *testing.T) {
 	// A picture that is not on the web is left out.
 	if got := ReadLinkInfo("https://x.dev", `<meta property="og:image" content="javascript:alert(1)">`); got.Image != "" {
 		t.Errorf("image %q", got.Image)
+	}
+}
+
+// Lowering some letters makes them longer (Ⱥ is 2 bytes, ⱥ is 3), so the
+// end of the head must be found in the page as it is.
+func TestReadLinkInfoLongerWhenLowered(t *testing.T) {
+	src := strings.Repeat("Ⱥ", 50) + "<title>Kept</title></HEAD><title>Not this</title>"
+	if got := ReadLinkInfo("https://x.dev", src); got.Title != "Kept" {
+		t.Errorf("got %+v", got)
 	}
 }
 

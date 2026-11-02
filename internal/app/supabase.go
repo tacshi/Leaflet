@@ -126,12 +126,22 @@ func (a *App) signInWithSupabase() {
 // chooseProject uses p, or creates a project in the organization chosen
 // when p is nil.
 func (a *App) chooseProject(p *supabaseapi.Project) {
+	// One setup at a time: a second click before the projects' list goes
+	// does nothing.
+	if supa.step != stepChoose {
+		return
+	}
+	if supa.cancel != nil {
+		supa.cancel()
+	}
 	api, org := supa.api, supa.org
 	ctx, cancel := context.WithCancel(context.Background())
 	run := nextRun()
 	supa.run, supa.cancel = run, cancel
 	signIn.err = ""
 	if p != nil {
+		// The list goes at once; the setup says its steps as they come.
+		supa.step = stepSetup
 		go a.connectProject(ctx, run, api, *p)
 		return
 	}
@@ -169,7 +179,7 @@ func (a *App) connectProject(ctx context.Context, run int, api *supabaseapi.Clie
 			go a.backend.Discard(pending)
 			return
 		}
-		user, err := a.backend.Adopt(pending)
+		user, err := a.core().AdoptProject(pending, api)
 		if err != nil {
 			supa = supabaseState{}
 			signIn.err = err.Error()

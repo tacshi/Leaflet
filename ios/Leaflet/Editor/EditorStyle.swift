@@ -119,12 +119,16 @@ struct EditorStyle {
         let whole = ns.paragraphRange(
             for: NSIntersectionRange(range, NSRange(location: 0, length: ns.length)))
         var at = whole.location
+        // The numbers given so far, by where their items are, for the
+        // next item to go on from its last: counted from the list's start
+        // each time, a long list's numbering would take as many walks.
+        var numbers: [Int: Int] = [:]
         while at < NSMaxRange(whole) {
             let para = ns.paragraphRange(for: NSRange(location: at, length: 0))
             if let info = storage.attribute(.leafletBlock, at: para.location, effectiveRange: nil)
                 as? BlockInfo
             {
-                style(storage, para, info)
+                style(storage, para, info, &numbers)
             }
             at = NSMaxRange(para)
             if para.length == 0 { break }
@@ -132,9 +136,15 @@ struct EditorStyle {
     }
 
     @MainActor
-    private func style(_ s: NSMutableAttributedString, _ para: NSRange, _ info: BlockInfo) {
+    private func style(
+        _ s: NSMutableAttributedString, _ para: NSRange, _ info: BlockInfo,
+        _ numbers: inout [Int: Int]
+    ) {
         let base = baseFont(info)
-        let ordinal = info.type == "numbered_list" ? Self.ordinal(s, at: para.location, info) : nil
+        let ordinal =
+            info.type == "numbered_list"
+            ? Self.ordinal(s, at: para.location, info, known: numbers) : nil
+        if let ordinal { numbers[para.location] = ordinal }
         s.addAttribute(
             .paragraphStyle,
             value: paragraphStyle(
@@ -259,8 +269,12 @@ struct EditorStyle {
     }
 
     /// ordinal is a numbered item's number: one more than the numbered
-    /// item before it at its depth, with nothing shallower between.
-    static func ordinal(_ s: NSAttributedString, at location: Int, _ info: BlockInfo) -> Int {
+    /// item before it at its depth, with nothing shallower between. known
+    /// are numbers already given, by where their items are, which the
+    /// count goes on from.
+    static func ordinal(
+        _ s: NSAttributedString, at location: Int, _ info: BlockInfo, known: [Int: Int] = [:]
+    ) -> Int {
         let ns = s.string as NSString
         var n = 1
         var at = location
@@ -273,6 +287,7 @@ struct EditorStyle {
             if p.depth < info.depth { break }
             if p.depth == info.depth {
                 guard p.type == "numbered_list" else { break }
+                if let k = known[prev.location] { return n + k }
                 n += 1
             }
             at = prev.location

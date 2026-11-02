@@ -5,6 +5,9 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"leaflet/internal/agents"
+	"leaflet/internal/store"
 )
 
 // Mentions of agents in comments, the same on the desktop and the phone:
@@ -20,6 +23,34 @@ func Mentioned(md string, names []string) map[string]bool {
 		return m
 	})
 	return out
+}
+
+// CommentAgent is the agent a comment mentions, to answer in its thread:
+// one it names, the first as hub.Options lists them, or else the default
+// for @agent, as Hub.Resolve picks it. It is nil when the comment mentions
+// none, and the error says why the default can't run.
+func CommentAgent(hub *agents.Hub, body string) (*store.ModelChoice, error) {
+	options := hub.Options()
+	names := []string{"agent"}
+	for _, o := range options {
+		names = append(names, o.Name())
+	}
+	hit := Mentioned(body, names)
+	for _, o := range options {
+		if hit[strings.ToLower(o.Name())] {
+			ch := o.Choice()
+			return &ch, nil
+		}
+	}
+	if !hit["agent"] {
+		return nil, nil
+	}
+	o, err := hub.Resolve(nil)
+	if err != nil {
+		return nil, err
+	}
+	ch := o.Choice()
+	return &ch, nil
 }
 
 // MarkMentions is md with each mention of one of names as mark has it:

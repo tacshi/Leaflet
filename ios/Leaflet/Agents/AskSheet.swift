@@ -25,6 +25,9 @@ struct AskSheet: View {
     /// asking says an ask is on its way to the core, before it has its
     /// run: a second tap meanwhile asks nothing more.
     @State private var asking = false
+    /// failure says why the ask didn't start a run: the field stays, to
+    /// ask again.
+    @State private var failure: String?
     @FocusState private var focused: Bool
     /// fit is the sheet's height for what it shows, as the desktop's
     /// prompt is no taller than its content; detent is the height shown,
@@ -66,6 +69,11 @@ struct AskSheet: View {
                             HStack(spacing: 8) { quickAsks }
                             VStack(alignment: .leading, spacing: 8) { quickAsks }
                         }
+                    }
+                }
+                if let failure {
+                    Section {
+                        Text(failure).foregroundStyle(palette.dangerText)
                     }
                 }
                 if let run {
@@ -164,12 +172,26 @@ struct AskSheet: View {
         let surface = request.selection.isEmpty ? "inline" : "selection"
         Task {
             defer { asking = false }
-            let id = await app.client?.ask(
-                model.id, surface: surface, instruction: t, focus: request.focus,
-                selection: request.selection,
-                agent: request.agent)
-            runID = id
-            await model.refreshAgents()
+            guard let client = app.client else { return }
+            do {
+                let id = try await client.ask(
+                    model.id, surface: surface, instruction: t, focus: request.focus,
+                    selection: request.selection,
+                    agent: request.agent)
+                await model.refreshAgents()
+                // A run the page doesn't have would leave the sheet waiting
+                // on it, with nothing to show and nothing to ask. The core
+                // says, as the page's runs may be a later read's, not in yet.
+                let runs = try? await client.agentState(model.id).runs
+                guard !id.isEmpty, runs?.contains(where: { $0.id == id }) ?? true else {
+                    failure = LI.agentNotStarted
+                    return
+                }
+                failure = nil
+                runID = id
+            } catch {
+                failure = error.localizedDescription
+            }
         }
     }
 }

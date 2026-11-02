@@ -235,6 +235,24 @@
         }
       }
     },
+    "Last sync failed": {
+      "comment": "The sidebar's foot: the last sync pass failed; pulling the list down tries again.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "前回の同期に失敗しました"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "上次同步失败"
+          }
+        }
+      }
+    },
     "Leaflet can't open the folder it synced through. Choose it again.": {
       "comment": "Settings › Sync and storage: the folder picked before can't be opened; pick it again.",
       "extractionState": "manual",
@@ -451,6 +469,24 @@
         }
       }
     },
+    "Remove %@": {
+      "comment": "The tag editor: VoiceOver's name of the button that takes the tag (%@) off the page.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "「%@」を削除"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "移除“%@”"
+          }
+        }
+      }
+    },
     "Remove Link": {
       "comment": "The link editor: take the link off the text.",
       "extractionState": "manual",
@@ -555,6 +591,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "删除线"
+          }
+        }
+      }
+    },
+    "The agent didn't start. Try again.": {
+      "comment": "Asking an agent from the editor: the run could not start.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "エージェントを開始できませんでした。もう一度お試しください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "智能体未能启动。请重试。"
           }
         }
       }

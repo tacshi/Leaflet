@@ -111,8 +111,9 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
                 return supported
             }
         }
+        // Named in the language the app shows, as the message around it.
         let name =
-            Locale.current.localizedString(forIdentifier: wanted[0].identifier)
+            Locale(identifier: L.language).localizedString(forIdentifier: wanted[0].identifier)
             ?? wanted[0].identifier
         throw TranscriptionError(message: L.recErrOnDeviceLanguage(language: name))
     }

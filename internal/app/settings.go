@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -388,16 +387,6 @@ func (a *App) accountSettings(c *ui.Context) {
 			})
 		}
 	})
-	if s.unsynced > 0 {
-		open := true
-		if ui.AlertDialog(c, &open, locales.SettingsSignOutAnyway(), locales.SettingsSignOutUnsynced(s.unsynced),
-			locales.CommonCancel(), locales.CommonSignOut()) == 1 {
-			a.leave(a.st.ForgetAccount, false)
-		}
-		if !open {
-			s.unsynced = 0
-		}
-	}
 	if s.deleteOpen {
 		dialog(c, &s.deleteOpen, 420, func() {
 			dialogHeader(c, locales.SettingsDeleteAccountTitle(), locales.SettingsCannotUndo(), &s.deleteOpen)
@@ -429,6 +418,24 @@ func (a *App) accountSettings(c *ui.Context) {
 				})
 			})
 		})
+	}
+}
+
+// signOutAlert asks before signing out removes changes not uploaded yet.
+// The window shows it over whatever it shows, as the upload before it may
+// finish after Settings has closed.
+func (a *App) signOutAlert(c *ui.Context) {
+	s := &account
+	if s.unsynced == 0 {
+		return
+	}
+	open := true
+	if ui.AlertDialog(c, &open, locales.SettingsSignOutAnyway(), locales.SettingsSignOutUnsynced(s.unsynced),
+		locales.CommonCancel(), locales.CommonSignOut()) == 1 {
+		a.leave(a.st.ForgetAccount, false)
+	}
+	if !open {
+		s.unsynced = 0
 	}
 }
 
@@ -547,6 +554,20 @@ func (a *App) leave(clear func() error, synced bool) {
 			}
 			if _, err := a.st.LoadSession(nil); err != nil {
 				a.toast(err.Error())
+			}
+			// Wiping the device removes the settings too: those shown, and
+			// saved with the next change, are the ones a new device has.
+			if _, kept := a.st.Value("settings"); !kept {
+				was := a.settings
+				a.settings = a.st.Settings()
+				a.sidebarW, a.panelW = a.settings.SidebarWidth, a.settings.PanelWidth
+				if a.settings.Theme != was.Theme || a.settings.Accent != was.Accent || a.settings.Fonts != was.Fonts {
+					a.applyTheme()
+				}
+				// MyGo keeps the language it was set to apart.
+				if a.settings.Language != was.Language {
+					mygo.App.SetLocale(a.settings.Language)
+				}
 			}
 			a.session = a.st.Session()
 			account.loaded, account.devices, account.devicesErr, account.nameEdited = false, nil, "", false
@@ -774,7 +795,10 @@ func (a *App) providerDialog(c *ui.Context) {
 					if ph == "" {
 						ph = preset.BaseURL
 					}
-					field(c, "url", &form.baseURL, ph)
+					// Another address has other models.
+					if field(c, "url", &form.baseURL, ph).Changed() {
+						a.fetchModelsSoon()
+					}
 				})
 			}
 			testButton := func() {
@@ -860,7 +884,7 @@ func (a *App) chatgptRow(c *ui.Context) {
 				who = locales.SettingsSignedInAs(form.email)
 			}
 			ui.Text(c, who).FontSize(13.5).TextColor(pal.OkText).Grow(1)
-			if ghost(c, "again", "", locales.SettingsSwitchAccount()).Clicked() {
+			if ghost(c, "again", "", locales.SettingsSwitchAccount()).Disabled(form.signingIn).Clicked() {
 				a.chatgptSignIn()
 			}
 		})
@@ -954,7 +978,8 @@ func (a *App) modelPicker(c *ui.Context) {
 	}
 }
 
-// fetchModelsSoon lists the models once a pasted key settles.
+// fetchModelsSoon lists the models once a pasted key or the address
+// settles.
 func (a *App) fetchModelsSoon() {
 	if form.keyTimer != nil {
 		form.keyTimer.Stop()
@@ -995,9 +1020,12 @@ func (a *App) fetchModels() {
 		}
 		a.update(func() {
 			if !formIs(gen) || form.fetchedAt != at {
-				return // another dialog, or the key or address changed since
+				return // another dialog, or another fetch since
 			}
 			form.fetching = false
+			if form.baseURL+"|"+strings.TrimSpace(form.apiKey) != at {
+				return // the key or address changed since, not yet fetched for
+			}
 			if err != nil {
 				if !preset.Local || form.id != "" {
 					form.result, form.resultOK = locales.SettingsListModelsFailed(err.Error()), false
@@ -1358,8 +1386,7 @@ func (a *App) offlineSettings(c *ui.Context) {
 		settingRow(c, "images", locales.SettingsImageCache(), locales.SettingsImageCacheDesc(), false, func() {
 			if button(c, "clear", "trash", locales.SettingsClear()).Clicked() {
 				a.images.close()
-				a.images = newImageCache(a.images.root, a.images.dir)
-				_ = os.RemoveAll(a.images.dir)
+				a.images = newImageCache(a.images.root)
 				c.Toast(locales.SettingsImageCacheCleared())
 			}
 		})

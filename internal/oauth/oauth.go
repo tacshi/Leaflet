@@ -13,6 +13,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+
+	"leaflet/internal/guard"
 )
 
 // NewState is a sign-in's random state, which the browser's answer must
@@ -113,7 +115,7 @@ func ListenFor(name string, port int, anyPort bool, state, verifier string) (*Lo
 		_, _ = fmt.Fprint(w, page("Signed in to Leaflet", "You can close this tab and go back to Leaflet."))
 		finish(answer{query: v})
 	})}
-	go func() { _ = l.srv.Serve(ln) }()
+	guard.Go(func() { _ = l.srv.Serve(ln) })
 	return l, nil
 }
 

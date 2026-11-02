@@ -62,7 +62,8 @@ struct TableSheet: View {
     }
 
     private func field(_ r: Int, _ c: Int) -> some View {
-        TextField("", text: $rows[r][c])
+        TextField("", text: cell(r, c))
+            .accessibilityLabel(L.editorTableCell(row: r + 1, column: c + 1))
             .focused($focused, equals: Cell(row: r, col: c))
             .font(Fonts.pageText(size: BlockLook.textSize * 0.88))
             .fontWeight(r == 0 ? .semibold : .regular)
@@ -77,6 +78,15 @@ struct TableSheet: View {
             .onSubmit { focused = r + 1 < rows.count ? Cell(row: r + 1, col: c) : nil }
     }
 
+    /// cell is the text of a cell, as long as the table has it: a row or a
+    /// column taken away, SwiftUI may still read its fields once, past
+    /// the end of rows.
+    private func cell(_ r: Int, _ c: Int) -> Binding<String> {
+        Binding(
+            get: { r < rows.count && c < rows[r].count ? rows[r][c] : "" },
+            set: { if r < rows.count && c < rows[r].count { rows[r][c] = $0 } })
+    }
+
     /// controls add and take away the last row or column, as the desktop's
     /// buttons under a table being edited.
     private var controls: some View {
@@ -84,20 +94,24 @@ struct TableSheet: View {
             Button(L.editorTableRow, systemImage: "plus") {
                 rows.append(Array(repeating: "", count: cols))
             }
+            .accessibilityLabel(L.editorTableAddRow)
             Button(L.editorTableColumn, systemImage: "plus") {
                 for r in rows.indices { rows[r].append("") }
             }
+            .accessibilityLabel(L.editorTableAddColumn)
             if rows.count > 1 {
                 Button(L.editorTableRow, systemImage: "minus") {
                     focused = nil
                     rows.removeLast()
                 }
+                .accessibilityLabel(L.editorTableRemoveRow)
             }
             if cols > 1 {
                 Button(L.editorTableColumn, systemImage: "minus") {
                     focused = nil
                     for r in rows.indices { rows[r].removeLast() }
                 }
+                .accessibilityLabel(L.editorTableRemoveColumn)
             }
         }
         .buttonStyle(.bordered)

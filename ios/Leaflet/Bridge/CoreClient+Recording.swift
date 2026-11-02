@@ -81,7 +81,7 @@ struct RecordingRow: Codable, Equatable, Sendable {
 
 /// SttSettings are the speech-to-text choice, as the core keeps it.
 struct SttSettings: Codable, Equatable, Sendable {
-    /// provider is "openai-compatible" or "soniox".
+    /// provider is "openai-compatible", "soniox" or "on-device".
     var provider: String
     var modelSize: String
     var runOn: String

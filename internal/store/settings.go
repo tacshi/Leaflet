@@ -112,6 +112,14 @@ func (s *Store) Settings() Settings {
 	if out.Stt.Provider != "soniox" && out.Stt.Provider != "openai-compatible" && out.Stt.Provider != "on-device" {
 		out.Stt.Provider = "openai-compatible"
 	}
+	// A default whose provider is gone, as one removed on another device,
+	// is none: the next provider added becomes the default.
+	if def, ok := out.Default(); ok {
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM model_providers WHERE id = ?`, def.ProviderID).Scan(&n); err == nil && n == 0 {
+			out.DefaultModel = ""
+		}
+	}
 	return out
 }
 

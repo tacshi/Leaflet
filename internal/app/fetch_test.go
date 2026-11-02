@@ -28,7 +28,7 @@ func TestImagesReadOnlyTheirOwnFiles(t *testing.T) {
 	if err := os.Symlink(secret, link); err != nil {
 		t.Fatal(err)
 	}
-	ic := newImageCache(root, filepath.Join(root, "images"))
+	ic := newImageCache(root)
 	if _, err := ic.read("file://" + own); err != nil {
 		t.Errorf("own file: %v", err)
 	}
@@ -43,7 +43,7 @@ func TestImagesReadOnlyTheirOwnFiles(t *testing.T) {
 // forever, and is tried again later.
 func TestImageCacheFailure(t *testing.T) {
 	root := t.TempDir()
-	ic := newImageCache(root, filepath.Join(root, "images"))
+	ic := newImageCache(root)
 	url := "file://" + filepath.Join(root, "missing.png")
 	done := make(chan struct{})
 	if ic.get(url, func() { close(done) }) != nil || ic.hasFailed(url) {
@@ -72,7 +72,7 @@ func TestImageCacheFailure(t *testing.T) {
 // made off the main thread; a GIF of one frame stays a picture.
 func TestAnimatedGIFPlays(t *testing.T) {
 	root := t.TempDir()
-	ic := newImageCache(root, filepath.Join(root, "images"))
+	ic := newImageCache(root)
 	frame := func(c color.Gray) *image.Paletted {
 		f := image.NewPaletted(image.Rect(0, 0, 4, 2), color.Palette{color.Black, color.White})
 		f.Set(0, 0, c)
@@ -194,7 +194,7 @@ func TestHugePictureRefused(t *testing.T) {
 	if err := os.WriteFile(path, png(50000, 50000), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ic := newImageCache(root, filepath.Join(root, "images"))
+	ic := newImageCache(root)
 	done := make(chan struct{})
 	ic.get("file://"+path, func() { close(done) })
 	<-done
@@ -222,7 +222,7 @@ func TestClosedImageCacheClosesPlayers(t *testing.T) {
 		t.Fatal(err)
 	}
 	url := "file://" + path
-	ic := newImageCache(root, filepath.Join(root, "images"))
+	ic := newImageCache(root)
 	loaded := make(chan struct{})
 	ic.get(url, func() { close(loaded) })
 	<-loaded

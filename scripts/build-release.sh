@@ -17,9 +17,15 @@
 # for macOS (Apple silicon, Intel, both) and Leaflet-<version>-{x64,arm64}-setup.exe
 # for Windows, beside a folder per platform with the app and its updates.
 # --arch picks among each platform's: universal is macOS only, so
-# --arch universal alone builds macOS only. --upload puts
-# them all in the draft release v<version> of tacshi/Leaflet, with gh;
-# installed copies see the update once the draft is published.
+# --arch universal alone builds macOS only.
+#
+# --upload, once every installer is built and every disk image notarized,
+# puts the installers and updates in the draft release v<version> of
+# tacshi/Leaflet, with gh, before the installers are renamed: there they
+# keep MyGo's names, leaflet-<version>-<arch>.dmg (leaflet-<version>.dmg
+# for universal) and leaflet-setup-<version>-<arch>.exe, by which
+# SHA256SUMS lists them and install.ps1 finds its installer. Installed
+# copies see the update once the draft is published.
 #
 # Signs updates with MYGO_UPDATER_PRIVATE_KEY, else the key in the file
 # LEAFLET_UPDATE_KEY, by default
@@ -44,7 +50,11 @@
 # leaves unnotarized, which installed copies would update to, unless
 # --allow-unsigned, or LEAFLET_ALLOW_UNSIGNED=1, says to upload them anyway.
 #
-# To build a Leaflet server in, set MYGO_LDFLAGS as the README says.
+# Paths given, -o, --changelog and those in LEAFLET_WINDOWS_CERTIFICATE and
+# LEAFLET_UPDATE_KEY, are from where this is run.
+#
+# To build a server in, set MYGO_LDFLAGS as README.md's Build and release
+# shows.
 # scripts/publish.sh runs this with --changelog, -o and --upload, and
 # --allow-unsigned when it is given it.
 set -euo pipefail
@@ -84,7 +94,7 @@ while (($#)); do
 		shift
 		;;
 	-h | --help)
-		sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'
+		sed -n '/^set -euo pipefail/q;2,$p' "$0" | sed 's/^# \{0,1\}//'
 		exit 0
 		;;
 	-*) die "unknown option: $1" ;;
@@ -109,8 +119,10 @@ for tool in go python3; do
 done
 [[ -n "$VERSION" ]] || VERSION="$(config_value version)"
 check_version "$VERSION"
-case "$OUT_DIR" in /*) ;; *) OUT_DIR="$ROOT_DIR/$OUT_DIR" ;; esac
+# The paths given are from where this was run, not ROOT_DIR.
+OUT_DIR="$(abs_path "$OUT_DIR")"
 if [[ -n "$CHANGELOG" ]]; then
+	CHANGELOG="$(abs_path "$CHANGELOG")"
 	[[ -f "$CHANGELOG" ]] || die "no changelog $CHANGELOG"
 	CHANGELOG="$(cd "$(dirname "$CHANGELOG")" && pwd)/$(basename "$CHANGELOG")"
 fi
@@ -174,10 +186,9 @@ if $WIN; then
 	fi
 fi
 load_update_key
-if $UPLOAD; then
-	check_gh
-	BUILD_ARGS+=(-upload)
-fi
+# Uploaded here after the checks below, not by mygo build -upload, which
+# uploads as it finishes.
+if $UPLOAD; then check_gh; fi
 
 # The version, the changelog, notarization and the Windows certificate go
 # into mygo.json for this build only: notarizing would fail the ad hoc
@@ -205,26 +216,46 @@ go tool mygo build -platform "$(
 
 # MyGo names installers "leaflet-<version>-<arch>.dmg" ("leaflet-<version>.dmg"
 # for universal) and "leaflet-setup-<version>-<arch>.exe", in a folder per
-# platform; they are moved out beside those folders under the usual names.
+# platform. Each is checked, and uploaded under that name, before it is
+# moved out beside those folders under the usual name.
+BUILT=()
+NAMES=()
+DIRS=()
 if $MAC; then
 	for arch in "${MAC_ARCHES[@]}"; do
 		case "$arch" in
-		universal) dmg="$OUT_DIR/darwin-universal/leaflet-$VERSION.dmg" ;;
-		*) dmg="$OUT_DIR/darwin-$(goarch "$arch")/leaflet-$VERSION-$(goarch "$arch").dmg" ;;
+		universal) dir=darwin-universal dmg="leaflet-$VERSION.dmg" ;;
+		*) dir="darwin-$(goarch "$arch")" dmg="leaflet-$VERSION-$(goarch "$arch").dmg" ;;
 		esac
-		[[ -f "$dmg" ]] || die "expected $dmg after the build"
+		[[ -f "$OUT_DIR/$dir/$dmg" ]] || die "expected $OUT_DIR/$dir/$dmg after the build"
 		if $NOTARIZE; then
-			xcrun stapler validate "$dmg" >/dev/null || die "$dmg is not notarized"
+			xcrun stapler validate "$OUT_DIR/$dir/$dmg" >/dev/null || die "$OUT_DIR/$dir/$dmg is not notarized"
 		fi
-		mv -f "$dmg" "$OUT_DIR/Leaflet-$VERSION-$arch.dmg"
-		info "$OUT_DIR/Leaflet-$VERSION-$arch.dmg"
+		BUILT+=("$OUT_DIR/$dir/$dmg")
+		NAMES+=("Leaflet-$VERSION-$arch.dmg")
+		DIRS+=("$dir")
 	done
 fi
 if $WIN; then
 	for arch in "${WIN_ARCHES[@]}"; do
-		setup="$OUT_DIR/windows-$(goarch "$arch")/leaflet-setup-$VERSION-$(goarch "$arch").exe"
+		dir="windows-$(goarch "$arch")"
+		setup="$OUT_DIR/$dir/leaflet-setup-$VERSION-$(goarch "$arch").exe"
 		[[ -f "$setup" ]] || die "expected $setup after the build"
-		mv -f "$setup" "$OUT_DIR/Leaflet-$VERSION-$arch-setup.exe"
-		info "$OUT_DIR/Leaflet-$VERSION-$arch-setup.exe"
+		BUILT+=("$setup")
+		NAMES+=("Leaflet-$VERSION-$arch-setup.exe")
+		DIRS+=("$dir")
 	done
 fi
+
+if $UPLOAD; then
+	NOTES="$(mktemp)"
+	changelog_notes "${CHANGELOG:-$ROOT_DIR/CHANGELOG.md}" "$VERSION" >"$NOTES"
+	upload_release "$VERSION" "$OUT_DIR" "$NOTES" "${DIRS[@]}"
+	rm -f "$NOTES"
+	info "uploaded to the draft release v$VERSION of $(config_value updates.github); publish it once every platform is there"
+fi
+
+for i in "${!BUILT[@]}"; do
+	mv -f "${BUILT[$i]}" "$OUT_DIR/${NAMES[$i]}"
+	info "$OUT_DIR/${NAMES[$i]}"
+done

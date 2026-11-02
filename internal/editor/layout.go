@@ -403,36 +403,42 @@ func (e *Editor) copyText() string {
 			}
 			continue
 		}
-		text := n.Delta().Slice(from, to).ReadableMarkdown()
-		prefix := blockPrefix(n, depths[n.ID])
-		if prefix == "" {
-			text = doc.EscapeBlockStart(text)
+		// A line break is a hard break, and a line that would start another
+		// block is escaped, as in an export; a heading is one line.
+		d := n.Delta().Slice(from, to)
+		if n.Type == "heading" {
+			d = doc.OneLine(d)
 		}
-		lines = append(lines, prefix+text)
+		text := d.ReadableMarkdown()
+		indent, lead, pad := blockPrefix(n, depths[n.ID])
+		lines = append(lines, strings.TrimSuffix(doc.TextMarkdown(indent, lead, pad, text), "\n"))
 	}
 	return strings.Join(lines, "\n")
 }
 
-func blockPrefix(n *doc.Node, depth int) string {
+// blockPrefix is how a block's line starts in a copy: its indent, nested
+// in list items, and its marker; pad is what starts the lines after its
+// first, so they stay in it.
+func blockPrefix(n *doc.Node, depth int) (indent, lead, pad string) {
 	ind := strings.Repeat("  ", depth)
 	switch n.Type {
 	case "heading":
-		return strings.Repeat("#", min(max(n.Int("level", 1), 1), 6)) + " "
+		return "", strings.Repeat("#", min(max(n.Int("level", 1), 1), 6)) + " ", ""
 	case "bulleted_list":
-		return ind + "- "
+		return ind, "- ", "  "
 	case "numbered_list":
-		return ind + "1. "
+		return ind, "1. ", "   "
 	case "todo_list":
 		if n.Bool("checked") {
-			return ind + "- [x] "
+			return ind, "- [x] ", "  "
 		}
-		return ind + "- [ ] "
+		return ind, "- [ ] ", "  "
 	case "quote":
-		return "> "
+		return "", "> ", "> "
 	case "toggle_list":
-		return ind + "▸ "
+		return ind, "▸ ", "  "
 	}
-	return ""
+	return "", "", ""
 }
 
 // joins reports whether a pasted block's text joins the line it is pasted
@@ -485,28 +491,52 @@ func (e *Editor) paste(text string) {
 			e.SetLink(strings.TrimSpace(text))
 			return
 		}
-		e.pushUndo(false)
-		e.coalescing = false
-		e.deleteSelection()
-		n := e.node(e.focus.ID)
-		if n != nil && n.IsText() {
-			attrs := n.Delta().AttrsAt(e.focus.Off)
-			if doc.WebURL(text) {
-				// A web link pasted goes in as a link to itself.
-				attrs.Href = strings.TrimSpace(text)
-			}
-			n.SetDelta(n.Delta().Insert(e.focus.Off, text, attrs))
-			e.invalidate(n.ID)
-			off := e.focus.Off + utf8.RuneCountInString(text)
-			e.Select(Pos{n.ID, off}, Pos{n.ID, off})
-			e.changed()
+		href := ""
+		if doc.WebURL(text) {
+			// A web link pasted goes in as a link to itself.
+			href = strings.TrimSpace(text)
 		}
+		e.insertInline(text, href)
 		return
 	}
 	if blocks == nil {
 		blocks = doc.ParseLines(strings.TrimRight(text, "\n"))
 	}
 	e.pasteBlocks(blocks)
+}
+
+// insertInline puts text in the block at the caret, in place of the
+// selection, as it is, in one step: in the formats typing there takes,
+// linked to href unless it is "", or plain in code. On a block selected
+// whole, it starts a paragraph after it, as typing does.
+func (e *Editor) insertInline(text, href string) {
+	if e.ReadOnly || text == "" {
+		return
+	}
+	e.pushUndo(false)
+	e.coalescing = false
+	e.deleteSelection()
+	n := e.node(e.focus.ID)
+	if n == nil {
+		return
+	}
+	if !n.IsText() {
+		p := newText("paragraph", nil)
+		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
+		n = p
+		e.focus = Pos{p.ID, 0}
+	}
+	// Code holds plain text: no formats, nor a link.
+	attrs := doc.Attrs{}
+	if n.Type != "code" {
+		attrs = n.Delta().AttrsAt(e.focus.Off)
+		attrs.Href = href
+	}
+	n.SetDelta(n.Delta().Insert(e.focus.Off, text, attrs))
+	e.invalidate(n.ID)
+	off := e.focus.Off + utf8.RuneCountInString(text)
+	e.Select(Pos{n.ID, off}, Pos{n.ID, off})
+	e.changed()
 }
 
 // pasteBlocks puts blocks at the caret, in place of the selection: the

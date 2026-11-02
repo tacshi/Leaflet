@@ -761,7 +761,9 @@ func (e *Editor) emacsKey(key ui.Key, shift bool) bool {
 			e.Delete(false) // at the end, join the next block
 		}
 	case ui.KeyY:
-		e.InsertText(killed)
+		// What was killed comes back as it was: no Markdown is read in
+		// it, nor shortcuts typed.
+		e.insertInline(killed, "")
 	case ui.KeyL:
 		e.reveal = e.focus.ID
 	default:
@@ -785,7 +787,6 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 	shift := ev.Mods&ui.Shift != 0
 	cmd := ev.Mods&ui.Cmd != 0
 	alt := ev.Mods&ui.Alt != 0
-	plain := ev.Mods&^ui.Shift == 0
 	switch ev.Key {
 	case ui.KeyEnter:
 		if cmd {
@@ -864,7 +865,6 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 		return false
 	}
 	if !cmd || alt {
-		_ = plain
 		return false
 	}
 	switch ev.Key {
@@ -882,7 +882,7 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 		}
 		e.ToggleStrike()
 	case ui.KeyK:
-		if e.Collapsed() {
+		if e.Collapsed() || e.ReadOnly {
 			return false
 		}
 		e.linkDraft = e.LinkAt()

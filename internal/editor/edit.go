@@ -76,6 +76,10 @@ func (e *Editor) deleteSelection() bool {
 	}
 	e.Content.Children = without(e.Content.Children)
 	if first.IsText() {
+		if first.Type == "code" {
+			// Code holds plain text: what joins it loses its formats.
+			tail = doc.Delta{{Text: tail.Plain()}}.Compact()
+		}
 		first.SetDelta(first.Delta().Slice(0, a.Off).Concat(tail))
 		e.invalidate(first.ID)
 		e.anchor, e.focus = a, a
@@ -359,9 +363,10 @@ func (e *Editor) Enter() {
 // NestableTypes reports whether a block takes children.
 func NestableTypes(n *doc.Node) bool { return doc.NestableTypes[n.Type] }
 
-// SoftBreak inserts a line break within the block.
+// SoftBreak inserts a line break within the block; on a block selected
+// whole, which has no line to break, it does nothing.
 func (e *Editor) SoftBreak() {
-	if e.ReadOnly {
+	if e.ReadOnly || e.blockSelected() {
 		return
 	}
 	e.pushUndo(false)
@@ -409,7 +414,7 @@ func (e *Editor) Backspace(word bool) {
 		from, _ = n.Delta().Widen(from, off)
 		n.SetDelta(n.Delta().Delete(from, off))
 		e.invalidate(n.ID)
-		e.Select(Pos{n.ID, from}, Pos{n.ID, from})
+		e.setSelection(Pos{n.ID, from}, Pos{n.ID, from})
 		e.changed()
 		return
 	}
@@ -541,7 +546,7 @@ func (e *Editor) unstyle(n *doc.Node) {
 // kind; the children a paragraph cannot hold move up after it.
 func (e *Editor) toParagraph(n *doc.Node) {
 	n.Type = "paragraph"
-	for _, k := range []string{"checked", "due", "level", "language", "tone", "collapsed"} {
+	for _, k := range doc.TypedKeys {
 		delete(n.Data, k)
 	}
 	e.liftChildren(n)
@@ -904,12 +909,19 @@ func (e *Editor) ToggleCode() {
 	e.Format(func(a doc.Attrs) bool { return a.Code }, func(a *doc.Attrs, on bool) { a.Code = on })
 }
 
-// SetLink links the selection to url, or unlinks it when url is empty.
+// SetLink links the selection to url, or unlinks it when url is empty. A
+// page mention is a link to its page: linked elsewhere, or not at all, it
+// is the text it showed.
 func (e *Editor) SetLink(url string) {
 	if e.Collapsed() {
 		return
 	}
-	e.Format(func(a doc.Attrs) bool { return a.Href == url }, func(a *doc.Attrs, _ bool) { a.Href = url })
+	e.Format(func(a doc.Attrs) bool { return a.Href == url }, func(a *doc.Attrs, _ bool) {
+		a.Href = url
+		if m := a.Mention; m != nil && m.Kind == "page" && url != doc.PageLink(m.ID) {
+			a.Mention = nil
+		}
+	})
 }
 
 // LinkAt returns the link under the selection's start.

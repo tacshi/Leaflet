@@ -261,6 +261,43 @@ func TestICloudMergesContent(t *testing.T) {
 	}
 }
 
+// A device's version of a page that cannot be read here, as one a newer
+// Leaflet wrote, is not merged, and the page waits for it rather than
+// being taken for up to date: once it can be read, it merges.
+func TestICloudUnreadablePageWaits(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Notes", para("x", "x0"))
+	syncAll(a, b)
+	b.edit(p.ID, "x", "xb")
+	b.sync()
+	rel, err := icloud.PagePath(b.st.DeviceID(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file icloud.PageFile
+	if err := b.svc.ICloud.ReadJSON(rel, &file); err != nil {
+		t.Fatal(err)
+	}
+	good := file.Content
+	file.Content = []byte(`{"children": 5}`)
+	if err := b.svc.ICloud.WriteJSON(rel, file); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if a.text(p.ID, "x") != "x0" || !a.svc.waiting()[p.ID] {
+		t.Fatalf("A has %q, waiting %v", a.text(p.ID, "x"), a.svc.waiting()[p.ID])
+	}
+	file.Content = good
+	if err := b.svc.ICloud.WriteJSON(rel, file); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	if a.text(p.ID, "x") != "xb" {
+		t.Errorf("A has %q once it can read B's", a.text(p.ID, "x"))
+	}
+}
+
 func TestICloudRelayedEditIsNoConflict(t *testing.T) {
 	root := cloudRoot(t)
 	a, b, c := newCloudDevice(t, root), newCloudDevice(t, root), newCloudDevice(t, root)
@@ -375,6 +412,57 @@ func TestICloudCompactionKeepsEachColumnsChange(t *testing.T) {
 	}
 }
 
+// A log with batches cut short before its last still compacts, once each
+// has stayed so as long as the other devices wait to pass over it.
+func TestICloudCompactsPastABatchCutShort(t *testing.T) {
+	old, tries, wait := compactAfter, damagedTries, damagedWait
+	compactAfter, damagedTries, damagedWait = 3, 2, 0
+	t.Cleanup(func() { compactAfter, damagedTries, damagedWait = old, tries, wait })
+	root := cloudRoot(t)
+	a := newCloudDevice(t, root)
+	p := a.page("Draft")
+	a.sync()
+	if err := a.st.RenamePage(p.ID, "Draft 0"); err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	// Two of them, each counted on its own.
+	for _, seq := range []int64{1, 2} {
+		rel, _ := icloud.BatchPath(a.st.DeviceID(), seq)
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(rel)), []byte(`{"format":1,"entr`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 6 {
+		if err := a.st.RenamePage(p.ID, "Draft "+string(rune('1'+i))); err != nil {
+			t.Fatal(err)
+		}
+		a.sync()
+	}
+	seqs, _, _ := a.svc.ICloud.Batches(a.st.DeviceID())
+	if slices.Contains(seqs, 1) || slices.Contains(seqs, 2) || len(seqs) > compactAfter+1 {
+		t.Errorf("not compacted: %v", seqs)
+	}
+	if kept := a.st.ValuesWithPrefix("icloud.damaged."); len(kept) > 0 {
+		t.Errorf("kept %v of batches gone", kept)
+	}
+}
+
+// The same entry held again is held once.
+func TestHoldingAnEntryAgainHoldsItOnce(t *testing.T) {
+	e := icloud.Entry{Kind: "row", Table: "pages", ID: "p", At: 5, By: "b", Changed: []string{"title"}}
+	held := foldEntry(nil, e)
+	held = foldEntry(held, e)
+	if len(held) != 1 {
+		t.Errorf("held %d entries", len(held))
+	}
+	// One of other columns, of the same version, is held beside it.
+	other := icloud.Entry{Kind: "row", Table: "pages", ID: "p", At: 5, By: "b", Changed: []string{"parent_id"}}
+	if held = foldEntry(held, other); len(held) != 2 {
+		t.Errorf("held %d entries", len(held))
+	}
+}
+
 func TestICloudFolderGoneOrReplaced(t *testing.T) {
 	root := cloudRoot(t)
 	a := newCloudDevice(t, root)
@@ -465,8 +553,8 @@ func TestICloudDeviceWithAnotherDevicesID(t *testing.T) {
 	a.sync()
 	old := a.st.DeviceID()
 	// A backup of A from before its last sync, restored: its log goes on
-	// past what the device knows.
-	for k, v := range map[string]string{"icloud.seq": "1", "icloud.writing": writing} {
+	// past what the device knows, compacted from its second batch.
+	for k, v := range map[string]string{"icloud.seq": "1", "icloud.writing": writing, "icloud.log_from": "2"} {
 		if err := a.st.SetValue(k, v); err != nil {
 			t.Fatal(err)
 		}
@@ -477,6 +565,10 @@ func TestICloudDeviceWithAnotherDevicesID(t *testing.T) {
 	a.sync()
 	if a.st.DeviceID() == old {
 		t.Fatal("kept the ID another device writes under")
+	}
+	// The new ID's log is read from its first batch.
+	if from := a.svc.intValue("icloud.log_from"); from != 0 {
+		t.Errorf("the new log starts at %d", from)
 	}
 	syncAll(b, a, b)
 	if b.title(p.ID) != "Plan 3" || a.title(p.ID) != "Plan 3" {
@@ -1514,6 +1606,50 @@ func TestICloudSendingAgainKeepsAHeldChange(t *testing.T) {
 		got, _ := d.st.Page(p.ID)
 		if got.Title != "Plan A" || got.ParentID != q.ID {
 			t.Errorf("page is %q under %q, want Plan A under %q", got.Title, got.ParentID, q.ID)
+		}
+	}
+}
+
+// As TestICloudSendingAgainKeepsAHeldChange, for a file: sent again whole,
+// a file moved here would undo its deletion on another device.
+func TestICloudSendingAgainKeepsAHeldFileChange(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	folder, err := a.st.CreateFolder("Folder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := a.st.AddFile(src, folder.ID, "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if err := b.st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	b.sync()
+	time.Sleep(3 * time.Millisecond)
+	if err := a.st.DeleteFolder(folder); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.svc.cloudPull(context.Background(), a.st.DeviceID()); err != nil {
+		t.Fatal(err)
+	}
+	if a.svc.held("files", f.ID) == nil {
+		t.Fatal("B's deletion is not held")
+	}
+	space, _ := a.st.Value("icloud.space")
+	if err := a.svc.requeueAll(context.Background(), space); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	for i, d := range []*cloudDevice{a, b} {
+		if got, _ := d.st.File(f.ID); got.DeletedAt.IsZero() || got.FolderID != "" {
+			t.Errorf("device %d: file in %q, deleted %v", i, got.FolderID, got.DeletedAt)
 		}
 	}
 }

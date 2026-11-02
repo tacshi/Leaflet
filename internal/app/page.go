@@ -286,11 +286,14 @@ func (a *App) byline(c *ui.Context, p store.Page) {
 	row := ui.Row(c.Key("byline")).Gap(8).AlignItems(ui.Center).Margin(0, 0, 22).Wrap()
 	hovered := row.Hovered()
 	row.Children(func() {
-		when := humanTime(p.UpdatedAt)
+		// The page keeps who created it, not who edited it last.
+		when := locales.PageBylineEditedAt(humanTime(p.UpdatedAt))
 		if a.page.live.Dirty() {
 			when = locales.PageBylineSaving()
 		}
-		ui.Text(c, locales.PageBylineEdited(who, when)).FontSize(13).TextColor(pal.TextMuted)
+		ui.Text(c, locales.PageBylineCreated(who)).FontSize(13).TextColor(pal.TextMuted)
+		ui.Text(c, "·").TextColor(pal.ChartMuted)
+		ui.Text(c, when).FontSize(13).TextColor(pal.TextMuted)
 		if a.isShared(p) {
 			ui.Text(c, "·").TextColor(pal.ChartMuted)
 			ui.Text(c, locales.PageBylineSharedWithYou()).FontSize(13).TextColor(pal.TextMuted)

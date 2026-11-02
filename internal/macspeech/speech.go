@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"os/exec"
@@ -16,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"leaflet/internal/guard"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -101,7 +101,7 @@ func read(r io.Reader, language string, text func(string)) ([]store.Segment, err
 		var a answer
 		if err := dec.Decode(&a); err != nil {
 			if errors.Is(err, io.EOF) {
-				return nil, fmt.Errorf("%s ended without a transcript", Name)
+				return nil, errors.New(locales.RecErrOnDeviceEnded())
 			}
 			return nil, err
 		}
@@ -132,17 +132,19 @@ func (h *Helper) Stream(language string, text func(string)) (recording.Stream, e
 	}
 	s := &stream{cmd: cmd, done: make(chan struct{})}
 	s.wake = sync.NewCond(&s.mu)
-	go s.write(in)
-	go func() {
+	guard.Go(func() { s.write(in) })
+	guard.Go(func() {
 		segs, err := read(out, language, text)
 		if werr := cmd.Wait(); err == nil && werr != nil {
 			err = werr
 		}
 		s.mu.Lock()
 		s.segs, s.err = segs, err
+		s.stopped, s.queue = true, nil
+		s.wake.Signal()
 		s.mu.Unlock()
 		close(s.done)
-	}()
+	})
 	return s, nil
 }
 
@@ -153,18 +155,23 @@ type stream struct {
 	cmd  *exec.Cmd
 	mu   sync.Mutex
 	wake *sync.Cond
-	// queue is the audio not yet written; ended, that Finish was called.
-	queue [][]byte
-	ended bool
-	done  chan struct{}
-	segs  []store.Segment
-	err   error
+	// queue is the audio not yet written; ended, that Finish was called;
+	// stopped, that the helper takes no more, as it ended or its input
+	// failed; sent, how many bytes of audio Send was given.
+	queue   [][]byte
+	ended   bool
+	stopped bool
+	sent    int
+	done    chan struct{}
+	segs    []store.Segment
+	err     error
 }
 
 func (s *stream) Send(pcm []byte) {
 	s.mu.Lock()
-	if !s.ended {
+	if !s.ended && !s.stopped {
 		s.queue = append(s.queue, pcm)
+		s.sent += len(pcm)
 		s.wake.Signal()
 	}
 	s.mu.Unlock()
@@ -176,7 +183,7 @@ func (s *stream) write(in io.WriteCloser) {
 	defer func() { _ = in.Close() }()
 	for {
 		s.mu.Lock()
-		for len(s.queue) == 0 && !s.ended {
+		for len(s.queue) == 0 && !s.ended && !s.stopped {
 			s.wake.Wait()
 		}
 		if len(s.queue) == 0 {
@@ -189,19 +196,36 @@ func (s *stream) write(in io.WriteCloser) {
 		s.mu.Unlock()
 		if _, err := in.Write(pcm); err != nil {
 			log.Printf("macspeech: %v", err)
+			s.mu.Lock()
+			s.stopped, s.queue = true, nil
+			s.mu.Unlock()
 			return
 		}
 	}
 }
 
+// finishSlack is how much longer than the audio sent Finish waits for the
+// helper; tests shorten it.
+var finishSlack = time.Minute
+
 // Finish waits for the words of the audio sent: as long as the helper
-// takes to catch up, which is about as long as the recording at worst.
+// takes to catch up, which is about as long as the recording at worst. A
+// helper that takes longer still, stuck, is ended.
 func (s *stream) Finish() ([]store.Segment, error) {
 	s.mu.Lock()
 	s.ended = true
 	s.wake.Signal()
+	wait := time.Duration(s.sent/2)*time.Second/recording.SampleRate + finishSlack
 	s.mu.Unlock()
-	<-s.done
+	select {
+	case <-s.done:
+	case <-time.After(wait):
+		if s.cmd.Process != nil {
+			_ = s.cmd.Process.Kill()
+		}
+		<-s.done
+		return nil, errors.New(locales.RecErrOnDeviceStuck())
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return recording.Tidy(s.segs), s.err
@@ -232,5 +256,5 @@ func (s *stream) Lost() error {
 	if s.err != nil {
 		return s.err
 	}
-	return fmt.Errorf("%s stopped", Name)
+	return errors.New(locales.RecErrOnDeviceStopped())
 }

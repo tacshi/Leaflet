@@ -62,7 +62,7 @@ func TestInsertTemplate(t *testing.T) {
 	raw, _ := c.OpenPage(page.ID)
 	var pg openedPage
 	_ = json.Unmarshal([]byte(raw), &pg)
-	if err := c.EditPage(page.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "Hi")}).Encode(), pg.Rev); err != nil {
+	if _, err := c.EditPage(page.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "Hi")}).Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
 	title, err := c.InsertTemplate(page.ID, "a", "starter:meeting")

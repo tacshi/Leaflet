@@ -79,7 +79,9 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 
 ### 共享与同步
 
-- 锚定在块上的评论串，以及与查看者或编辑者共享页面，子页面会继承共享设置。
+- 锚定在块上的评论串，以及 Mac 和 PC 上的临时公开链接：在 Leaflet 打开期间，
+  把页面分享给任何拿到链接的人，或只分享给你指定的地址。服务器也支持与查看者
+  或编辑者共享页面（子页面会继承共享设置），但目前还没有应用提供这一功能。
 - 离线优先：所有内容都保存在 SQLite 中，联网后通过发件箱同步。分开进行的
   编辑会按块合并，出现冲突时会给出提示，并可以恢复另一个版本。
 - iCloud 同步：你的 Mac 和 PC 通过 iCloud 云盘中的 Leaflet 文件夹同步，
@@ -98,7 +100,7 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
   构建：在 Xcode 无法构建它的环境中，调试构建会跳过它继续进行，发布构建则
   必须有它（签名和公证也需要 Xcode）。Windows 安装程序需要 NSIS。
 - iCloud 同步需要打开 iCloud 云盘。
-- 通过服务器同步、共享和云端模型需要一个 [Supabase](https://supabase.com)
+- 通过服务器同步和云端模型需要一个 [Supabase](https://supabase.com)
   账户：**使用 Supabase 继续** 会在其中找到或创建一个项目，并按
   [`supabase/`](supabase/README.md) 完成设置。没有账户时，Leaflet 仅在你的设备上运行。
 
@@ -116,9 +118,9 @@ cd Leaflet
 go tool mygo dev
 ```
 
-没有服务器时，Leaflet 只在本机运行：页面、编辑、评论、本地模型以及你网络
-中的转写服务都可以使用；登录、同步、共享、云端模型和云端转写会被隐藏，或在
-原处说明原因。
+没有服务器时，Leaflet 只在本机运行：页面、编辑、评论、公开链接、本地模型
+以及你网络中的转写服务都可以使用；登录、同步、云端模型和云端转写会被隐藏，
+或在原处说明原因。
 
 每个版本都可以使用 Supabase 登录：OAuth 应用的客户端 ID 已内置，其密钥保存在
 Leaflet 的登录 Worker 中（见 [`supabase/README.md`](supabase/README.md)）。
@@ -217,6 +219,14 @@ Windows 安装程序，以及用 `--skip-notarize` 构建的 macOS 安装包，�
 上传，除非用 `--allow-unsigned`（`-AllowUnsigned`）或
 `LEAFLET_ALLOW_UNSIGNED=1` 表明仍要发布它们。
 
+就像 `SUPABASE_URL` 和 `SUPABASE_ANON_KEY` 为一次运行指定服务器一样，要把一个
+服务器内置进构建，可以通过 `MYGO_LDFLAGS` 把它的 URL 和 Publishable key 传给
+链接器，`go tool mygo build` 和这些脚本会原样传递它：
+
+```bash
+MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://<ref>.supabase.co -X leaflet/internal/remote.DefaultAnonKey=<publishable key>" scripts/build-release.sh
+```
+
 ## 开发
 
 ```bash
@@ -224,6 +234,7 @@ go test ./...                                # 模型、合并、存储、同步
 make check                                   # gofmt、golangci-lint、govulncheck 和 gosec
 make ios-check                               # swift-format、SwiftLint、osv-scanner 和 mobsfscan
 make clean                                   # 删除 build/ 和 go build 留下的二进制文件
+scripts/check-migrations.sh                  # 按顺序把所有迁移应用到 Supabase 的 Postgres（Docker）
 cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 ```
 
@@ -268,7 +279,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `internal/macspeech`、`macos/speech` | 用 Mac 自带的语音识别转写，通过 Mac 应用附带的 Swift 助手 `leaflet-speech` |
 | `internal/theme` | 颜色、字体和图标 |
 | `locales` | 各语言的应用文本，以及由其生成的 Go 代码 |
-| `scripts` | 调试与发布构建，以及发布到 GitHub Releases |
+| `scripts` | 调试与发布构建、发布到 GitHub Releases，以及迁移的检查 |
 | `supabase` | 迁移（表、行级安全、RPC、Vault）和 Edge Functions |
 | `worker` | Cloudflare 上的登录 Worker：OAuth 重定向页面，以及持有客户端密钥的令牌交换 |
 | `docs` | 协议、用户故事和图标源文件 |
@@ -288,8 +299,8 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
   iPhone 和 iPad 上，改由系统自带的语音识别在设备上转写。在 Windows 和较旧的
   Mac 上，可以在你的网络中通过兼容 OpenAI 的端点提供模型；
   MOSS-Transcribe-Diarize 同理。
-- OpenAI 和 Claude 账户能否用于第三方应用登录尚未确认，因此这些服务商使用
-  API 密钥。
+- Claude 账户能否用于第三方应用登录尚未确认，因此 Claude 使用 API 密钥；
+  OpenAI 也可使用 API 密钥，或用 ChatGPT Plus 或 Pro 登录。
 
 ## 致谢
 

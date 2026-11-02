@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// Byline is the line under a page's title, as the desktop's: who edited
-/// it and when, or that it is saving, whether it is shared, with the user
-/// or with how many, its tags, and a button to change them.
+/// Byline is the line under a page's title, as the desktop's: who created
+/// it, when it was edited or that it is saving, whether it is shared, with
+/// the user or with how many, its tags, and a button to change them.
 struct Byline: View {
     let page: PageRow
     /// saving says the page's edits wait to be saved.
@@ -17,12 +17,14 @@ struct Byline: View {
         // The time ("just now", "5 min ago") moves on as the page stays open.
         TimelineView(.everyMinute) { context in
             FlowRow {
+                // The page keeps who created it, not who edited it last.
+                Text(L.pageBylineCreated(name: creator))
+                dot
                 Text(
-                    L.pageBylineEdited(
-                        name: editor,
-                        when: saving
-                            ? L.pageBylineSaving
-                            : Self.humanTime(page.updated, now: context.date)))
+                    saving
+                        ? L.pageBylineSaving
+                        : L.pageBylineEditedAt(
+                            when: Self.humanTime(page.updated, now: context.date)))
                 if shared {
                     dot
                     Text(L.pageBylineSharedWithYou)
@@ -58,9 +60,9 @@ struct Byline: View {
 
     private var dot: some View { Text("·").foregroundStyle(palette.chartMuted) }
 
-    /// editor is who the byline names: the user, for their own pages, as
+    /// creator is who the byline names: the user, for their own pages, as
     /// the desktop names them.
-    private var editor: String {
+    private var creator: String {
         let me = app.status
         if page.createdBy == nil || page.createdBy == me?.userID, let name = me?.displayName,
             !name.isEmpty
@@ -157,7 +159,7 @@ struct TagEditor: View {
                 FlowRow {
                     ForEach(tags, id: \.self) { tag in
                         TagChip(name: tag) {
-                            Button(L.commonRemove, systemImage: "xmark") {
+                            Button(LI.removeTag(tag), systemImage: "xmark") {
                                 save(tags.filter { $0 != tag })
                             }
                             .labelStyle(.iconOnly)
@@ -176,10 +178,7 @@ struct TagEditor: View {
                 .submitLabel(.done)
                 .focused($typing)
                 .onSubmit {
-                    // Return adds what is typed; tags typed or pasted with
-                    // commas between them go in each on its own.
-                    for part in draft.split(separator: ",") { add(String(part)) }
-                    draft = ""
+                    addDraft()
                     typing = true
                 }
             if !suggestions.isEmpty {
@@ -206,6 +205,17 @@ struct TagEditor: View {
             tags = page.tags
             typing = true
         }
+        // A tag typed and not yet added goes on as the editor closes:
+        // closing it is no reason to lose it.
+        .onDisappear(perform: addDraft)
+    }
+
+    /// addDraft adds what is typed; tags typed or pasted with commas
+    /// between them go in each on its own.
+    private func addDraft() {
+        let parts = draft.split(separator: ",")
+        draft = ""
+        for part in parts { add(String(part)) }
     }
 
     /// suggestions are the user's other tags, those starting with what is
@@ -232,11 +242,19 @@ struct TagEditor: View {
         save(tags + [tag])
     }
 
+    /// save keeps the tags as next has them; failing, they go back to
+    /// what they were, and a toast says why.
     private func save(_ next: [String]) {
+        let before = tags
         tags = next
         let id = page.id
         Task {
-            try? await app.client?.setTags(id, tags: next)
+            do {
+                try await app.client?.setTags(id, tags: next)
+            } catch {
+                tags = before
+                app.show(Toast(message: L.appErrorSave(error: error.localizedDescription)))
+            }
             await app.reload()
         }
     }

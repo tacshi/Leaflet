@@ -74,16 +74,20 @@ struct ChartSheet: View {
     private func apply() {
         var error: NSError?
         let raw = MobileChartData(kind, title, caption, text, &error)
-        guard error == nil,
-            var data = try? JSONDecoder().decode(
-                [String: JSONValue].self, from: Data(raw.utf8))
-        else {
-            failure = error?.localizedDescription
+        if let error {
+            failure = error.localizedDescription
             return
         }
-        // Who made it stays, as on the desktop.
-        data["author"] = node.data?["author"]
-        save(data)
-        dismiss()
+        do {
+            var data = try JSONDecoder().decode([String: JSONValue].self, from: Data(raw.utf8))
+            // Who made it stays, as on the desktop.
+            data["author"] = node.data?["author"]
+            save(data)
+            dismiss()
+        } catch {
+            // The core's answer could not be read: Save says so, rather
+            // than doing nothing.
+            failure = L.appErrorInternal(error: error.localizedDescription)
+        }
     }
 }

@@ -8,7 +8,9 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
+	"leaflet/internal/keychain"
 	"leaflet/internal/provision"
 	"leaflet/internal/remote"
 	"leaflet/internal/supabaseapi"
@@ -152,6 +154,34 @@ func TestLeafletProjectWakesAPausedOne(t *testing.T) {
 	}
 }
 
+// A sign-in with Supabase that fails before it signs in leaves the
+// Supabase sign-in kept for the project in use as it was.
+func TestFailedSignInKeepsTheManagementSignIn(t *testing.T) {
+	c, _ := open(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/oauth/token" {
+			_, _ = io.WriteString(w, `{"access_token":"a","refresh_token":"new","expires_in":3600,"token_type":"Bearer"}`)
+			return
+		}
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	old, auth := supabaseapi.Base, supabaseapi.Auth
+	supabaseapi.Base, supabaseapi.Auth = srv.URL, ""
+	t.Cleanup(func() { supabaseapi.Base, supabaseapi.Auth = old, auth })
+	if err := keychain.Set("supabase.management", []byte("working")); err != nil {
+		t.Fatal(err)
+	}
+
+	callback := "https://leaflet-auth.capyvibe.app/auth/supabase?" + url.Values{"state": {"s"}, "code": {"c"}}.Encode()
+	if _, err := c.FinishSupabaseSignIn(callback, "s", "v"); err == nil {
+		t.Fatal("signed in")
+	}
+	if kept, err := keychain.Get("supabase.management"); err != nil || string(kept) != "working" {
+		t.Errorf("kept %q, %v", kept, err)
+	}
+}
+
 // Signed in for real, to a server that takes nothing up: signing out
 // counts the changes still to go up and leaves all as it is; once they
 // have gone, it signs out and removes the account's pages, and the
@@ -241,4 +271,57 @@ func hasPage(t *testing.T, c *Core, id string) bool {
 		}
 	}
 	return false
+}
+
+// Signing in as another account that fails other than for changes not up
+// yet signs that account out again, rather than leave it signed in over
+// the pages of the one before.
+func TestFailedUseAccountSignsOut(t *testing.T) {
+	c, _ := open(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/v1/verify":
+			_, _ = io.WriteString(w, `{"access_token":"a","refresh_token":"r","expires_in":3600,
+				"user":{"id":"00000000-0000-0000-0000-0000000000a2","email":"sam@example.com"}}`)
+		case "/auth/v1/logout":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "down", http.StatusServiceUnavailable)
+		}
+	}))
+	defer srv.Close()
+	if err := c.core.Remote.Use(remote.Settings{URL: srv.URL, AnonKey: "anon"}); err != nil {
+		t.Fatal(err)
+	}
+	// The pages of another account, all gone up, which can't be removed.
+	create(t, c, `{"title":"Uploaded"}`)
+	st := c.core.Store
+	entries, err := st.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SetValue("account", "00000000-0000-0000-0000-0000000000a1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`CREATE TRIGGER full BEFORE DELETE ON pages BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	user, err := c.core.Remote.VerifyCode("sam@example.com", "123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.q.do(func() { _, err = c.signedIn(user) })
+	if err == nil {
+		t.Fatal("signed in over pages that could not go")
+	}
+	for deadline := time.Now().Add(5 * time.Second); c.core.Remote.SignedIn(); time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the new account is still signed in")
+		}
+	}
 }

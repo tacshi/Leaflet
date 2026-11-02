@@ -155,3 +155,24 @@ func TestSearchFailsWithItsRows(t *testing.T) {
 		t.Errorf("hits %+v, no error", hits)
 	}
 }
+
+// A default model whose provider is gone, as one removed on another
+// device, reads as none, so the next provider added becomes the default;
+// it reads as set again once the provider is back.
+func TestDefaultModelOfAProviderGoneIsNone(t *testing.T) {
+	s := open(t)
+	settings := s.Settings()
+	settings.DefaultModel = ModelChoice{ProviderID: "p1"}.Encode()
+	if err := s.SaveSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.Settings().Default(); ok {
+		t.Error("a default with no provider")
+	}
+	if err := s.PutProvider(Provider{ID: "p1", Preset: "openai", Name: "OpenAI", AuthKind: "api_key"}); err != nil {
+		t.Fatal(err)
+	}
+	if def, ok := s.Settings().Default(); !ok || def.ProviderID != "p1" {
+		t.Errorf("default %v, %v", def, ok)
+	}
+}

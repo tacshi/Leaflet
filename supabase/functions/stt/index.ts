@@ -89,9 +89,18 @@ async function sonioxKey(sc: SupabaseClient, user: User): Promise<string> {
   return key;
 }
 
+/**
+ * A Soniox call that failed, said by its status. What Soniox wrote goes to
+ * the log only: a failed transcription keeps its error in the recording,
+ * which everyone who can view the page reads.
+ */
 async function sonioxFailure(res: Response, what: string): Promise<HttpError> {
   const text = await res.text().catch(() => "");
-  return new HttpError(res.status === 401 ? 400 : 502, `Soniox ${what} failed: ${res.status} ${text.slice(0, 300)}`);
+  console.error(`Soniox ${what}: ${res.status} ${text.slice(0, 300)}`);
+  const why = res.status === 401 || res.status === 403
+    ? "Soniox rejected the API key"
+    : `Soniox ${what} failed: ${res.status} ${res.statusText}`.trim();
+  return new HttpError(res.status === 401 ? 400 : 502, why);
 }
 
 async function sonioxTemporaryKey(sc: SupabaseClient, user: User) {
@@ -119,6 +128,8 @@ async function saveKey(uc: SupabaseClient, body: Body) {
       headers: { Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
+    // Only its status says anything; the body goes unread, so closed.
+    await check.body?.cancel().catch(() => {});
     if (check.status === 401 || check.status === 403) throw new HttpError(400, "Soniox rejected this API key");
   }
   const { error } = await uc.rpc("set_stt_secret", { p_provider: "soniox", p_secret: key });

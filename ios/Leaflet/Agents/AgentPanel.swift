@@ -27,7 +27,7 @@ struct AgentPanel: View {
             } description: {
                 Text(L.panelNoProviderBody)
             } actions: {
-                Button(L.panelOpenProviders) { scene.settingsShown = true }
+                Button(L.panelOpenProviders) { openProviders() }
                     .buttonStyle(.borderedProminent)
             }
         } else {
@@ -111,7 +111,7 @@ struct AgentPanel: View {
                 Button(L.panelNewConversation, systemImage: "square.and.pencil") {
                     Task { await app.client?.newConversation(model.id) }
                 }
-                Button(L.panelManageProviders) { scene.settingsShown = true }
+                Button(L.panelManageProviders) { openProviders() }
             } label: {
                 Image(systemName: "ellipsis.circle").imageScale(.large)
                     .frame(minWidth: 28, minHeight: line)
@@ -143,6 +143,12 @@ struct AgentPanel: View {
             }
         }
         .padding(10)
+    }
+
+    /// openProviders opens Settings, for its agent providers: over the
+    /// panel beside the page, or once the panel as a sheet has gone.
+    private func openProviders() {
+        scene.openSettings()
     }
 
     private func send(_ text: String) {

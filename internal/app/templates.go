@@ -97,6 +97,7 @@ func (a *App) copyable(id string, failed func(error), again func()) bool {
 	}
 	// One copy's downloads at a time: the toast says they are coming.
 	if a.fetchingCopy {
+		a.toast(locales.TemplateFetchingOther())
 		return false
 	}
 	a.fetchingCopy = true

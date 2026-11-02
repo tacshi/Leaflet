@@ -66,6 +66,9 @@ func DueToday(due, now time.Time) bool {
 	return y == ny && m == nm && d == nd
 }
 
+// clock is the time now, which a to-do's date is shown from.
+var clock = time.Now
+
 // dueHour is the time of day a due date takes as it is given one.
 const dueHour = 9
 
@@ -90,7 +93,7 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 	if !has && (e.ReadOnly || !active && !open) {
 		return
 	}
-	now := time.Now()
+	now := clock()
 	label, fg, bg := locales.EditorAddDate(), pal.TextMuted, pal.Ground
 	if has {
 		label = DueLabel(due, timed, now)

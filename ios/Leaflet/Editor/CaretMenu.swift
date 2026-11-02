@@ -22,8 +22,9 @@ struct MenuItem: Decodable, Identifiable {
 /// from with the arrow keys and Return or Tab, or a tap.
 @MainActor
 final class CaretMenu {
-    /// anchor is where the "/" or "@" is in the text.
-    let anchor: Int
+    /// anchor is where the "/" or "@" is in the text, which a change from
+    /// outside moves.
+    var anchor: Int
     let trigger: Character
     private(set) var items: [MenuItem] = []
     private(set) var selected = 0

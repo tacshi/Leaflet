@@ -1,5 +1,6 @@
 import BackgroundTasks
 import Foundation
+import Synchronization
 import os
 
 /// BackgroundSync runs a sync pass now and then while the app is in the
@@ -38,27 +39,53 @@ enum BackgroundSync {
     }
 
     /// run runs a pass and asks for the next. Out of time, the pass is
-    /// cut short; what it didn't send goes on the next.
+    /// cut short; what it didn't send goes on the next. The system calls
+    /// the task's expiration handler on a queue of its own, so its
+    /// closures belong to no actor.
     @MainActor
     private static func run(_ task: BGTask, _ opened: @escaping @MainActor () async -> CoreClient?)
     {
         schedule()
+        let done = Completion(task)
         let pass = Task {
             guard let client = await opened(), !Task.isCancelled else {
-                task.setTaskCompleted(success: false)
+                done.complete(success: false)
                 return
             }
-            task.expirationHandler = {
+            // Out of time now, sync stops, and the pass ends as it does.
+            task.expirationHandler = { @Sendable in
                 Task { await client.stop() }
             }
             do {
                 try await client.syncNow()
-                task.setTaskCompleted(success: true)
+                done.complete(success: true)
             } catch {
-                task.setTaskCompleted(success: false)
+                done.complete(success: false)
             }
         }
-        // Out of time before the core opened, the pass gives up.
-        task.expirationHandler = { pass.cancel() }
+        // Out of time before the core opened, the pass gives up at once:
+        // opening the core doesn't stop for it.
+        task.expirationHandler = { @Sendable in
+            pass.cancel()
+            done.complete(success: false)
+        }
+    }
+}
+
+/// Completion completes a background task once, from any thread: as its
+/// pass ends, or as its time runs out first.
+private final class Completion: @unchecked Sendable {
+    // The task is only told it is complete, once, under the lock.
+    private let task: BGTask
+    private let completed = Mutex(false)
+
+    init(_ task: BGTask) { self.task = task }
+
+    func complete(success: Bool) {
+        let first = completed.withLock { done in
+            defer { done = true }
+            return !done
+        }
+        if first { task.setTaskCompleted(success: success) }
     }
 }

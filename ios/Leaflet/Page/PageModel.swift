@@ -36,6 +36,17 @@ final class PageModel {
     /// editing is the latest edit on its way to the core, or the page's
     /// closing, after them.
     @ObservationIgnored private var editing: Task<Void, Never>?
+    /// sending counts the edits on their way to the core. A change from
+    /// outside waits behind them: shown over them, it would take away what
+    /// was just typed, until the core's merge of them came.
+    @ObservationIgnored private var sending = 0
+    /// held is the newest change from outside that came while edits were
+    /// on their way, which the editor shows once they are there.
+    @ObservationIgnored private var held: (content: DocContent, rev: Int64)?
+    /// edited is the newest rev an edit left the page at, which has it: a
+    /// change from outside at an older one, though it comes after the
+    /// edit was taken, is from before it, and would take it away.
+    @ObservationIgnored private var edited: Int64 = 0
     /// closed says the window let the page go, opened yet or not.
     @ObservationIgnored private var closed = false
     /// blank says the page is one empty paragraph, which offers ways to
@@ -112,14 +123,36 @@ final class PageModel {
         self.content = content
         let rev = shown
         let id = self.id
-        editing = Task { [previous = editing, app] in
+        sending += 1
+        editing = Task { [previous = editing, app, weak self] in
             await previous?.value
+            var left: Int64?
             do {
-                try await client.editPage(id, editor: editor, content: content, rev: rev)
+                left = try await client.editPage(id, editor: editor, content: content, rev: rev)
             } catch {
                 app.show(Toast(message: L.appErrorSave(error: error.localizedDescription)))
             }
+            self?.sent(left)
         }
+    }
+
+    /// sent follows an edit the core has, which left the page at rev left:
+    /// once none is on its way, the change from outside held for them
+    /// shows, unless it is from before them. The core's merge of them, at
+    /// left or after, shows instead as it comes, if it hasn't.
+    private func sent(_ left: Int64?) {
+        sending -= 1
+        if let left { edited = max(edited, left) }
+        guard sending == 0, let held else { return }
+        self.held = nil
+        if held.rev >= edited { show(held.content, at: held.rev) }
+    }
+
+    /// show has the editor show content, the page at rev.
+    private func show(_ content: DocContent, at rev: Int64) {
+        self.content = content
+        self.rev = rev
+        external += 1
     }
 
     /// flush waits for the core to have the edits given it.
@@ -143,12 +176,14 @@ final class PageModel {
     private func handle(_ event: CoreEvent) {
         switch event {
         case .pageUpdated(let pageID, let json, let newRev, _, _) where pageID == id:
-            guard newRev > rev,
+            guard newRev > (held?.rev ?? rev), newRev >= edited,
                 let c = try? JSONDecoder().decode(DocContent.self, from: Data(json.utf8))
             else { return }
-            content = c
-            rev = newRev
-            external += 1
+            if sending > 0 {
+                held = (c, newRev)
+            } else {
+                show(c, at: newRev)
+            }
         case .pageReadOnly(let pageID, let ro) where pageID == id:
             readOnly = ro
         case .pageSaving(let pageID, let on) where pageID == id:

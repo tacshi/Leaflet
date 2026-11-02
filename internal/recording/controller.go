@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/guard"
 	"leaflet/internal/keychain"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
@@ -48,15 +49,18 @@ type Controller struct {
 	// The recording in progress, read and written on the main thread.
 	State State
 
-	mu      sync.Mutex
-	wav     *WavWriter
-	mic     Mic
-	session string
-	paused  bool
-	elapsed time.Duration
-	resumed time.Time
-	stt     store.SttSettings
-	meter   Meter
+	mu sync.Mutex
+	// toggling orders the microphone's Pause and Resume, which run off the
+	// main thread, so the last one asked for is the one it ends with.
+	toggling sync.Mutex
+	wav      *WavWriter
+	mic      Mic
+	session  string
+	paused   bool
+	elapsed  time.Duration
+	resumed  time.Time
+	stt      store.SttSettings
+	meter    Meter
 	// stream transcribes the recording in progress as it records: Soniox,
 	// or the device's engine.
 	stream Stream
@@ -158,6 +162,11 @@ type Sink struct {
 	Started func()
 	// Failed says why the microphone could not start.
 	Failed func(message string)
+	// Stalled says why the microphone, once on, stopped and could not go
+	// on, as when it is not given back after a call: the recording pauses,
+	// to resume or stop. A microphone that never stalls, as the desktop's,
+	// never calls it.
+	Stalled func(message string)
 }
 
 // OnDevice is the speech-to-text provider that is the device's own
@@ -477,7 +486,7 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 	}
 	// Soniox streams as it records, and its final words are the transcript.
 	if live {
-		go r.startSoniox(session, stt)
+		guard.Go(func() { r.startSoniox(session, stt) })
 	}
 	// So does the device's engine, which needs no connection. One that
 	// cannot start, or that the host is still looking for, transcribes the
@@ -505,6 +514,7 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 		Chunk:   func(pcm []byte) { r.chunk(session, pcm) },
 		Started: func() { r.started(session, testFor) },
 		Failed:  func(msg string) { r.failed(session, msg) },
+		Stalled: func(msg string) { r.stalled(session, msg) },
 	})
 	if err != nil {
 		r.abort()
@@ -712,13 +722,47 @@ func (r *Controller) TogglePause() {
 	m := r.mic
 	r.mu.Unlock()
 	r.State.Paused = paused
-	switch {
-	case m == nil:
-	case paused:
-		go m.Pause()
-	default:
-		go m.Resume()
+	if m != nil {
+		guard.Go(func() { r.toggleMic(m) })
 	}
+}
+
+// toggleMic has m paused or not as the recording is now, while it is the
+// recording's: toggles one after another each end with the latest.
+func (r *Controller) toggleMic(m Mic) {
+	r.toggling.Lock()
+	defer r.toggling.Unlock()
+	r.mu.Lock()
+	paused, same := r.paused, r.mic == m
+	r.mu.Unlock()
+	switch {
+	case !same:
+	case paused:
+		m.Pause()
+	default:
+		m.Resume()
+	}
+}
+
+// stalled pauses the recording session, whose microphone stopped and could
+// not go on, saying why; it goes on with Resume, should the microphone
+// come back.
+func (r *Controller) stalled(session, msg string) {
+	r.update(func() {
+		r.mu.Lock()
+		same := r.session == session && r.State.Active && r.mic != nil
+		r.mu.Unlock()
+		if !same {
+			return
+		}
+		r.State.Error = locales.RecErrMicStalled(msg)
+		r.mu.Lock()
+		paused := r.paused
+		r.mu.Unlock()
+		if !paused {
+			r.TogglePause()
+		}
+	})
 }
 
 // abort ends a recording that could not start.
@@ -756,12 +800,18 @@ func (r *Controller) abort() {
 	r.State.Active, r.State.Starting = false, false
 }
 
-// Stop ends the recording, saves the audio and writes the transcript.
+// Stop ends the recording, saves the audio and writes the transcript. One
+// whose microphone has not started yet has recorded nothing: it ends as
+// one whose microphone could not start.
 func (r *Controller) Stop() {
 	if !r.Active() {
 		return
 	}
-	duration := r.Elapsed()
+	if r.State.Starting {
+		r.State.Error = locales.RecErrMic()
+		r.abort()
+		return
+	}
 	r.mu.Lock()
 	m, wav, stream, stt, withText := r.mic, r.wav, r.stream, r.stt, r.withText
 	test, why, session := r.test, r.testWhy, r.session
@@ -787,7 +837,7 @@ func (r *Controller) Stop() {
 			r.Finishing[st.ID] = true
 		}
 	}
-	go func() {
+	guard.Go(func() {
 		if m != nil {
 			m.Stop()
 		}
@@ -799,9 +849,13 @@ func (r *Controller) Stop() {
 				m.Close()
 			}
 		})
+		// It lasts as long as the audio it saved: the time it ran counts
+		// a stretch the microphone was taken, by a call, too.
 		var path string
+		var duration time.Duration
 		if wav != nil {
 			path = wav.Path
+			duration = time.Duration(wav.DurationMs()) * time.Millisecond
 			if err := wav.Close(); err != nil {
 				log.Printf("recording: %v", err)
 			}
@@ -839,7 +893,7 @@ func (r *Controller) Stop() {
 			return
 		}
 		r.finish(rec, path, stream, stt)
-	}()
+	})
 }
 
 // transcribeTest transcribes a test recording and removes its audio.
@@ -917,7 +971,7 @@ func (r *Controller) Retranscribe(id string, stt store.SttSettings, online bool)
 	}
 	// Set now, not once finish starts, so a second call refuses at once.
 	r.Transcribing[id] = true
-	go r.finish(rec, rec.LocalPath, nil, stt)
+	guard.Go(func() { r.finish(rec, rec.LocalPath, nil, stt) })
 	return nil
 }
 

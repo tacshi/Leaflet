@@ -296,15 +296,17 @@ func (msgs Messages) AppErrorRestore(error string) string {
 // AppErrorInternal says "Something went wrong in Leaflet: {error}"
 // in the language the app shows.
 //
-// The iOS app: an error when something in Leaflet's core failed
-// unexpectedly, as a bug would.
+// An error when something in Leaflet failed unexpectedly, as a bug would:
+// in the iOS app's core, or in a sync pass, an agent run or a sign-in on
+// either app.
 func AppErrorInternal(error string) string { return In(i18n.Locale()).AppErrorInternal(error) }
 
 // AppErrorInternal says "Something went wrong in Leaflet: {error}"
 // in the language of msgs.
 //
-// The iOS app: an error when something in Leaflet's core failed
-// unexpectedly, as a bug would.
+// An error when something in Leaflet failed unexpectedly, as a bug would:
+// in the iOS app's core, or in a sync pass, an agent run or a sign-in on
+// either app.
 func (msgs Messages) AppErrorInternal(error string) string {
 	return Catalog.Format(msgs.locale, "appErrorInternal", map[string]any{"error": error})
 }
@@ -2041,6 +2043,68 @@ func (msgs Messages) ExportTemplatesFolder() string {
 	return Catalog.Format(msgs.locale, "exportTemplatesFolder", nil)
 }
 
+// ExportEmbed says "Interactive embed"
+// in the language the app shows.
+//
+// Exported Markdown and shared web pages: what stands for an interactive
+// embed with no title of its own, which cannot run there.
+func ExportEmbed() string { return In(i18n.Locale()).ExportEmbed() }
+
+// ExportEmbed says "Interactive embed"
+// in the language of msgs.
+//
+// Exported Markdown and shared web pages: what stands for an interactive
+// embed with no title of its own, which cannot run there.
+func (msgs Messages) ExportEmbed() string {
+	return Catalog.Format(msgs.locale, "exportEmbed", nil)
+}
+
+// ExportEmbedTitled says "{title} (interactive embed)"
+// in the language the app shows.
+//
+// Exported Markdown: what stands for an interactive embed with a title,
+// which cannot run there.
+func ExportEmbedTitled(title string) string { return In(i18n.Locale()).ExportEmbedTitled(title) }
+
+// ExportEmbedTitled says "{title} (interactive embed)"
+// in the language of msgs.
+//
+// Exported Markdown: what stands for an interactive embed with a title,
+// which cannot run there.
+func (msgs Messages) ExportEmbedTitled(title string) string {
+	return Catalog.Format(msgs.locale, "exportEmbedTitled", map[string]any{"title": title})
+}
+
+// ExportVideo says "Video"
+// in the language the app shows.
+//
+// Exported Markdown: the text of the link to a video with no title.
+func ExportVideo() string { return In(i18n.Locale()).ExportVideo() }
+
+// ExportVideo says "Video"
+// in the language of msgs.
+//
+// Exported Markdown: the text of the link to a video with no title.
+func (msgs Messages) ExportVideo() string {
+	return Catalog.Format(msgs.locale, "exportVideo", nil)
+}
+
+// ExportRecordingTitled says "Recording: {title}"
+// in the language the app shows.
+//
+// Exported Markdown: what stands for a recording, by its title.
+func ExportRecordingTitled(title string) string {
+	return In(i18n.Locale()).ExportRecordingTitled(title)
+}
+
+// ExportRecordingTitled says "Recording: {title}"
+// in the language of msgs.
+//
+// Exported Markdown: what stands for a recording, by its title.
+func (msgs Messages) ExportRecordingTitled(title string) string {
+	return Catalog.Format(msgs.locale, "exportRecordingTitled", map[string]any{"title": title})
+}
+
 // TemplateDuplicateFailed says "Could not duplicate: {error}"
 // in the language the app shows.
 //
@@ -2107,6 +2171,24 @@ func TemplateFetchingFiles() string { return In(i18n.Locale()).TemplateFetchingF
 // first; the copy is made once they have.
 func (msgs Messages) TemplateFetchingFiles() string {
 	return Catalog.Format(msgs.locale, "templateFetchingFiles", nil)
+}
+
+// TemplateFetchingOther says "Still downloading files for another copy. Try again once it's made."
+// in the language the app shows.
+//
+// A toast when duplicating a page, saving it as a template or using a
+// template while another such copy is still downloading its files or
+// recordings' audio: one copy downloads at a time.
+func TemplateFetchingOther() string { return In(i18n.Locale()).TemplateFetchingOther() }
+
+// TemplateFetchingOther says "Still downloading files for another copy. Try again once it's made."
+// in the language of msgs.
+//
+// A toast when duplicating a page, saving it as a template or using a
+// template while another such copy is still downloading its files or
+// recordings' audio: one copy downloads at a time.
+func (msgs Messages) TemplateFetchingOther() string {
+	return Catalog.Format(msgs.locale, "templateFetchingOther", nil)
 }
 
 // TemplateCopyTitle says "{title} copy"
@@ -4544,13 +4626,13 @@ func (msgs Messages) PageTitleLabel() string {
 // PageBylineSomeone says "Someone"
 // in the language the app shows.
 //
-// Byline under the title: who edited, when unknown.
+// Byline under the title: who created the page, when unknown.
 func PageBylineSomeone() string { return In(i18n.Locale()).PageBylineSomeone() }
 
 // PageBylineSomeone says "Someone"
 // in the language of msgs.
 //
-// Byline under the title: who edited, when unknown.
+// Byline under the title: who created the page, when unknown.
 func (msgs Messages) PageBylineSomeone() string {
 	return Catalog.Format(msgs.locale, "pageBylineSomeone", nil)
 }
@@ -4558,31 +4640,47 @@ func (msgs Messages) PageBylineSomeone() string {
 // PageBylineSaving says "Saving…"
 // in the language the app shows.
 //
-// Byline under the title, in place of the time, while saving.
+// Byline under the title, in place of when the page was edited, while
+// saving.
 func PageBylineSaving() string { return In(i18n.Locale()).PageBylineSaving() }
 
 // PageBylineSaving says "Saving…"
 // in the language of msgs.
 //
-// Byline under the title, in place of the time, while saving.
+// Byline under the title, in place of when the page was edited, while
+// saving.
 func (msgs Messages) PageBylineSaving() string {
 	return Catalog.Format(msgs.locale, "pageBylineSaving", nil)
 }
 
-// PageBylineEdited says "Edited by {name} · {when}"
+// PageBylineCreated says "Created by {name}"
 // in the language the app shows.
 //
-// Byline under the page title: who edited and when (a relative time).
-func PageBylineEdited(name string, when string) string {
-	return In(i18n.Locale()).PageBylineEdited(name, when)
-}
+// Byline under the page title: who created the page.
+func PageBylineCreated(name string) string { return In(i18n.Locale()).PageBylineCreated(name) }
 
-// PageBylineEdited says "Edited by {name} · {when}"
+// PageBylineCreated says "Created by {name}"
 // in the language of msgs.
 //
-// Byline under the page title: who edited and when (a relative time).
-func (msgs Messages) PageBylineEdited(name string, when string) string {
-	return Catalog.Format(msgs.locale, "pageBylineEdited", map[string]any{"name": name, "when": when})
+// Byline under the page title: who created the page.
+func (msgs Messages) PageBylineCreated(name string) string {
+	return Catalog.Format(msgs.locale, "pageBylineCreated", map[string]any{"name": name})
+}
+
+// PageBylineEditedAt says "Edited {when}"
+// in the language the app shows.
+//
+// Byline under the page title, after who created it: when the page was last
+// edited (a relative time).
+func PageBylineEditedAt(when string) string { return In(i18n.Locale()).PageBylineEditedAt(when) }
+
+// PageBylineEditedAt says "Edited {when}"
+// in the language of msgs.
+//
+// Byline under the page title, after who created it: when the page was last
+// edited (a relative time).
+func (msgs Messages) PageBylineEditedAt(when string) string {
+	return Catalog.Format(msgs.locale, "pageBylineEditedAt", map[string]any{"when": when})
 }
 
 // PageBylineSharedWith says "Shared with {count}"
@@ -4889,6 +4987,84 @@ func PageRedoRunFailed(agent string, error string) string {
 // they stay undone.
 func (msgs Messages) PageRedoRunFailed(agent string, error string) string {
 	return Catalog.Format(msgs.locale, "pageRedoRunFailed", map[string]any{"agent": agent, "error": error})
+}
+
+// PageRunSubpageNotHere says "the subpage it made has not reached this device yet; try again once it syncs"
+// in the language the app shows.
+//
+// Why undoing or redoing an agent's edits failed, in the toast's error: a
+// subpage the cloud agent made has not synced to this device yet, so
+// nothing changed.
+func PageRunSubpageNotHere() string { return In(i18n.Locale()).PageRunSubpageNotHere() }
+
+// PageRunSubpageNotHere says "the subpage it made has not reached this device yet; try again once it syncs"
+// in the language of msgs.
+//
+// Why undoing or redoing an agent's edits failed, in the toast's error: a
+// subpage the cloud agent made has not synced to this device yet, so
+// nothing changed.
+func (msgs Messages) PageRunSubpageNotHere() string {
+	return Catalog.Format(msgs.locale, "pageRunSubpageNotHere", nil)
+}
+
+// AgentNoProvider says "Add an agent provider in Settings › Agent providers to use agents."
+// in the language the app shows.
+//
+// Why an agent can't run: no agent provider has been added.
+func AgentNoProvider() string { return In(i18n.Locale()).AgentNoProvider() }
+
+// AgentNoProvider says "Add an agent provider in Settings › Agent providers to use agents."
+// in the language of msgs.
+//
+// Why an agent can't run: no agent provider has been added.
+func (msgs Messages) AgentNoProvider() string {
+	return Catalog.Format(msgs.locale, "agentNoProvider", nil)
+}
+
+// AgentSignInToUse says "Sign in to use {agent}, or add a provider on this machine."
+// in the language the app shows.
+//
+// Why an agent can't run: its provider runs on the server, and the user is
+// signed out.
+func AgentSignInToUse(agent string) string { return In(i18n.Locale()).AgentSignInToUse(agent) }
+
+// AgentSignInToUse says "Sign in to use {agent}, or add a provider on this machine."
+// in the language of msgs.
+//
+// Why an agent can't run: its provider runs on the server, and the user is
+// signed out.
+func (msgs Messages) AgentSignInToUse(agent string) string {
+	return Catalog.Format(msgs.locale, "agentSignInToUse", map[string]any{"agent": agent})
+}
+
+// AgentNeedsConnection says "Agents need a connection. You can keep editing; agents return when you are back online."
+// in the language the app shows.
+//
+// Why an agent can't run: the device is offline, and no provider works
+// offline.
+func AgentNeedsConnection() string { return In(i18n.Locale()).AgentNeedsConnection() }
+
+// AgentNeedsConnection says "Agents need a connection. You can keep editing; agents return when you are back online."
+// in the language of msgs.
+//
+// Why an agent can't run: the device is offline, and no provider works
+// offline.
+func (msgs Messages) AgentNeedsConnection() string {
+	return Catalog.Format(msgs.locale, "agentNeedsConnection", nil)
+}
+
+// AgentRunning says "An agent is already working on this page. Try again when it is done."
+// in the language the app shows.
+//
+// Why an agent can't run: another agent is working on the same page.
+func AgentRunning() string { return In(i18n.Locale()).AgentRunning() }
+
+// AgentRunning says "An agent is already working on this page. Try again when it is done."
+// in the language of msgs.
+//
+// Why an agent can't run: another agent is working on the same page.
+func (msgs Messages) AgentRunning() string {
+	return Catalog.Format(msgs.locale, "agentRunning", nil)
 }
 
 // PageDismiss says "Dismiss"
@@ -7485,6 +7661,54 @@ func (msgs Messages) RecErrOnDeviceLanguage(language string) string {
 	return Catalog.Format(msgs.locale, "recErrOnDeviceLanguage", map[string]any{"language": language})
 }
 
+// RecErrOnDeviceEnded says "This device's speech recognition ended without a transcript."
+// in the language the app shows.
+//
+// Error of a transcription on the device (the Mac's speech recognition)
+// that ended without giving a transcript.
+func RecErrOnDeviceEnded() string { return In(i18n.Locale()).RecErrOnDeviceEnded() }
+
+// RecErrOnDeviceEnded says "This device's speech recognition ended without a transcript."
+// in the language of msgs.
+//
+// Error of a transcription on the device (the Mac's speech recognition)
+// that ended without giving a transcript.
+func (msgs Messages) RecErrOnDeviceEnded() string {
+	return Catalog.Format(msgs.locale, "recErrOnDeviceEnded", nil)
+}
+
+// RecErrOnDeviceStuck says "This device's speech recognition did not finish."
+// in the language the app shows.
+//
+// Error of a transcription on the device (the Mac's speech recognition)
+// that stopped answering and was ended.
+func RecErrOnDeviceStuck() string { return In(i18n.Locale()).RecErrOnDeviceStuck() }
+
+// RecErrOnDeviceStuck says "This device's speech recognition did not finish."
+// in the language of msgs.
+//
+// Error of a transcription on the device (the Mac's speech recognition)
+// that stopped answering and was ended.
+func (msgs Messages) RecErrOnDeviceStuck() string {
+	return Catalog.Format(msgs.locale, "recErrOnDeviceStuck", nil)
+}
+
+// RecErrOnDeviceStopped says "This device's speech recognition stopped."
+// in the language the app shows.
+//
+// Why live transcription on the device (the Mac's speech recognition)
+// stopped part way through a recording.
+func RecErrOnDeviceStopped() string { return In(i18n.Locale()).RecErrOnDeviceStopped() }
+
+// RecErrOnDeviceStopped says "This device's speech recognition stopped."
+// in the language of msgs.
+//
+// Why live transcription on the device (the Mac's speech recognition)
+// stopped part way through a recording.
+func (msgs Messages) RecErrOnDeviceStopped() string {
+	return Catalog.Format(msgs.locale, "recErrOnDeviceStopped", nil)
+}
+
 // RecEngineServer says "Transcription server"
 // in the language the app shows.
 //
@@ -7669,6 +7893,22 @@ func RecErrMic() string { return In(i18n.Locale()).RecErrMic() }
 // Error when the microphone fails.
 func (msgs Messages) RecErrMic() string {
 	return Catalog.Format(msgs.locale, "recErrMic", nil)
+}
+
+// RecErrMicStalled says "The microphone stopped: {error} Resume to try again."
+// in the language the app shows.
+//
+// Error when the microphone stops mid-recording and cannot go on, as after
+// a phone call, with the system's reason; the recording is paused.
+func RecErrMicStalled(error string) string { return In(i18n.Locale()).RecErrMicStalled(error) }
+
+// RecErrMicStalled says "The microphone stopped: {error} Resume to try again."
+// in the language of msgs.
+//
+// Error when the microphone stops mid-recording and cannot go on, as after
+// a phone call, with the system's reason; the recording is paused.
+func (msgs Messages) RecErrMicStalled(error string) string {
+	return Catalog.Format(msgs.locale, "recErrMicStalled", map[string]any{"error": error})
 }
 
 // RecErrLive says "Live transcript unavailable: {error}"
@@ -7917,6 +8157,88 @@ func EditorTableColumn() string { return In(i18n.Locale()).EditorTableColumn() }
 // Table block buttons (with + or − icons) that add or remove a column.
 func (msgs Messages) EditorTableColumn() string {
 	return Catalog.Format(msgs.locale, "editorTableColumn", nil)
+}
+
+// EditorTableAddRow says "Add row"
+// in the language the app shows.
+//
+// Table editor (iPhone and iPad): the button under the cells that adds a
+// row at the end, as VoiceOver reads it.
+func EditorTableAddRow() string { return In(i18n.Locale()).EditorTableAddRow() }
+
+// EditorTableAddRow says "Add row"
+// in the language of msgs.
+//
+// Table editor (iPhone and iPad): the button under the cells that adds a
+// row at the end, as VoiceOver reads it.
+func (msgs Messages) EditorTableAddRow() string {
+	return Catalog.Format(msgs.locale, "editorTableAddRow", nil)
+}
+
+// EditorTableRemoveRow says "Remove last row"
+// in the language the app shows.
+//
+// Table editor (iPhone and iPad): the button under the cells that takes
+// away the last row, as VoiceOver reads it.
+func EditorTableRemoveRow() string { return In(i18n.Locale()).EditorTableRemoveRow() }
+
+// EditorTableRemoveRow says "Remove last row"
+// in the language of msgs.
+//
+// Table editor (iPhone and iPad): the button under the cells that takes
+// away the last row, as VoiceOver reads it.
+func (msgs Messages) EditorTableRemoveRow() string {
+	return Catalog.Format(msgs.locale, "editorTableRemoveRow", nil)
+}
+
+// EditorTableAddColumn says "Add column"
+// in the language the app shows.
+//
+// Table editor (iPhone and iPad): the button under the cells that adds a
+// column at the end, as VoiceOver reads it.
+func EditorTableAddColumn() string { return In(i18n.Locale()).EditorTableAddColumn() }
+
+// EditorTableAddColumn says "Add column"
+// in the language of msgs.
+//
+// Table editor (iPhone and iPad): the button under the cells that adds a
+// column at the end, as VoiceOver reads it.
+func (msgs Messages) EditorTableAddColumn() string {
+	return Catalog.Format(msgs.locale, "editorTableAddColumn", nil)
+}
+
+// EditorTableRemoveColumn says "Remove last column"
+// in the language the app shows.
+//
+// Table editor (iPhone and iPad): the button under the cells that takes
+// away the last column, as VoiceOver reads it.
+func EditorTableRemoveColumn() string { return In(i18n.Locale()).EditorTableRemoveColumn() }
+
+// EditorTableRemoveColumn says "Remove last column"
+// in the language of msgs.
+//
+// Table editor (iPhone and iPad): the button under the cells that takes
+// away the last column, as VoiceOver reads it.
+func (msgs Messages) EditorTableRemoveColumn() string {
+	return Catalog.Format(msgs.locale, "editorTableRemoveColumn", nil)
+}
+
+// EditorTableCell says "Row {row}, column {column}"
+// in the language the app shows.
+//
+// Table editor (iPhone and iPad): what VoiceOver calls a cell's field. Row
+// 1 is the header row.
+func EditorTableCell(row int, column int) string {
+	return In(i18n.Locale()).EditorTableCell(row, column)
+}
+
+// EditorTableCell says "Row {row}, column {column}"
+// in the language of msgs.
+//
+// Table editor (iPhone and iPad): what VoiceOver calls a cell's field. Row
+// 1 is the header row.
+func (msgs Messages) EditorTableCell(row int, column int) string {
+	return Catalog.Format(msgs.locale, "editorTableCell", map[string]any{"row": row, "column": column})
 }
 
 // EditorAskAgent says "Ask agent"
@@ -10528,8 +10850,8 @@ func (msgs Messages) SettingsDeleteFailed(error string) string {
 // SettingsRemoveProviderTitle says "Remove “{name}”?"
 // in the language the app shows.
 //
-// Settings › Models: the alert asking before a model provider is removed:
-// its title.
+// Settings › Agent providers: the alert asking before a model provider is
+// removed: its title.
 func SettingsRemoveProviderTitle(name string) string {
 	return In(i18n.Locale()).SettingsRemoveProviderTitle(name)
 }
@@ -10537,8 +10859,8 @@ func SettingsRemoveProviderTitle(name string) string {
 // SettingsRemoveProviderTitle says "Remove “{name}”?"
 // in the language of msgs.
 //
-// Settings › Models: the alert asking before a model provider is removed:
-// its title.
+// Settings › Agent providers: the alert asking before a model provider is
+// removed: its title.
 func (msgs Messages) SettingsRemoveProviderTitle(name string) string {
 	return Catalog.Format(msgs.locale, "settingsRemoveProviderTitle", map[string]any{"name": name})
 }
@@ -10546,15 +10868,15 @@ func (msgs Messages) SettingsRemoveProviderTitle(name string) string {
 // SettingsRemoveProviderCloud says "Agents can no longer use it, and its API key is deleted from the server. You can't undo this."
 // in the language the app shows.
 //
-// Settings › Models: the alert asking before a provider kept on the
-// server is removed: its message.
+// Settings › Agent providers: the alert asking before a provider kept on
+// the server is removed: its message.
 func SettingsRemoveProviderCloud() string { return In(i18n.Locale()).SettingsRemoveProviderCloud() }
 
 // SettingsRemoveProviderCloud says "Agents can no longer use it, and its API key is deleted from the server. You can't undo this."
 // in the language of msgs.
 //
-// Settings › Models: the alert asking before a provider kept on the
-// server is removed: its message.
+// Settings › Agent providers: the alert asking before a provider kept on
+// the server is removed: its message.
 func (msgs Messages) SettingsRemoveProviderCloud() string {
 	return Catalog.Format(msgs.locale, "settingsRemoveProviderCloud", nil)
 }
@@ -10562,15 +10884,15 @@ func (msgs Messages) SettingsRemoveProviderCloud() string {
 // SettingsRemoveProviderLocal says "Agents can no longer use it, and its key is deleted from this device."
 // in the language the app shows.
 //
-// Settings › Models: the alert asking before a provider on this device is
-// removed: its message.
+// Settings › Agent providers: the alert asking before a provider on this
+// device is removed: its message.
 func SettingsRemoveProviderLocal() string { return In(i18n.Locale()).SettingsRemoveProviderLocal() }
 
 // SettingsRemoveProviderLocal says "Agents can no longer use it, and its key is deleted from this device."
 // in the language of msgs.
 //
-// Settings › Models: the alert asking before a provider on this device is
-// removed: its message.
+// Settings › Agent providers: the alert asking before a provider on this
+// device is removed: its message.
 func (msgs Messages) SettingsRemoveProviderLocal() string {
 	return Catalog.Format(msgs.locale, "settingsRemoveProviderLocal", nil)
 }
@@ -10578,15 +10900,15 @@ func (msgs Messages) SettingsRemoveProviderLocal() string {
 // SettingsRemoveProviderAccount says "Agents can no longer use it, and this device signs out of it."
 // in the language the app shows.
 //
-// Settings › Models: the alert asking before a provider signed in with an
-// account (ChatGPT) is removed: its message.
+// Settings › Agent providers: the alert asking before a provider signed
+// in with an account (ChatGPT) is removed: its message.
 func SettingsRemoveProviderAccount() string { return In(i18n.Locale()).SettingsRemoveProviderAccount() }
 
 // SettingsRemoveProviderAccount says "Agents can no longer use it, and this device signs out of it."
 // in the language of msgs.
 //
-// Settings › Models: the alert asking before a provider signed in with an
-// account (ChatGPT) is removed: its message.
+// Settings › Agent providers: the alert asking before a provider signed
+// in with an account (ChatGPT) is removed: its message.
 func (msgs Messages) SettingsRemoveProviderAccount() string {
 	return Catalog.Format(msgs.locale, "settingsRemoveProviderAccount", nil)
 }
@@ -10811,6 +11133,22 @@ func SettingsResolveFailed(error string) string {
 // A notification when resolving a conflict failed.
 func (msgs Messages) SettingsResolveFailed(error string) string {
 	return Catalog.Format(msgs.locale, "settingsResolveFailed", map[string]any{"error": error})
+}
+
+// SettingsConflictGone says "the conflict is no longer there. It may have been resolved on another device."
+// in the language the app shows.
+//
+// Why resolving a conflict failed, shown after 'Could not resolve:': the
+// conflict was already resolved, as on another device.
+func SettingsConflictGone() string { return In(i18n.Locale()).SettingsConflictGone() }
+
+// SettingsConflictGone says "the conflict is no longer there. It may have been resolved on another device."
+// in the language of msgs.
+//
+// Why resolving a conflict failed, shown after 'Could not resolve:': the
+// conflict was already resolved, as on another device.
+func (msgs Messages) SettingsConflictGone() string {
+	return Catalog.Format(msgs.locale, "settingsConflictGone", nil)
 }
 
 // SettingsStorage says "Storage"
@@ -11061,6 +11399,24 @@ func (msgs Messages) SettingsICloudNoAccess() string {
 	return Catalog.Format(msgs.locale, "settingsICloudNoAccess", nil)
 }
 
+// SettingsICloudFolderLost says "Leaflet can't open the folder it synced through. Choose it again in Settings."
+// in the language the app shows.
+//
+// iOS: iCloud sync cannot run because the app can no longer open the folder
+// in iCloud Drive the user picked; they pick it again in Settings › Sync
+// and storage.
+func SettingsICloudFolderLost() string { return In(i18n.Locale()).SettingsICloudFolderLost() }
+
+// SettingsICloudFolderLost says "Leaflet can't open the folder it synced through. Choose it again in Settings."
+// in the language of msgs.
+//
+// iOS: iCloud sync cannot run because the app can no longer open the folder
+// in iCloud Drive the user picked; they pick it again in Settings › Sync
+// and storage.
+func (msgs Messages) SettingsICloudFolderLost() string {
+	return Catalog.Format(msgs.locale, "settingsICloudFolderLost", nil)
+}
+
 // SettingsICloudOpenPrivacy says "Open Settings"
 // in the language the app shows.
 //
@@ -11105,6 +11461,76 @@ func SettingsICloudNewer() string { return In(i18n.Locale()).SettingsICloudNewer
 // iCloud sync cannot run: a newer version of Leaflet wrote to the folder.
 func (msgs Messages) SettingsICloudNewer() string {
 	return Catalog.Format(msgs.locale, "settingsICloudNewer", nil)
+}
+
+// SettingsICloudTurnOnFailed says "Couldn't turn on iCloud sync: {error}"
+// in the language the app shows.
+//
+// A toast when turning on iCloud sync fails for a reason other than those
+// the app words itself; the error follows.
+func SettingsICloudTurnOnFailed(error string) string {
+	return In(i18n.Locale()).SettingsICloudTurnOnFailed(error)
+}
+
+// SettingsICloudTurnOnFailed says "Couldn't turn on iCloud sync: {error}"
+// in the language of msgs.
+//
+// A toast when turning on iCloud sync fails for a reason other than those
+// the app words itself; the error follows.
+func (msgs Messages) SettingsICloudTurnOnFailed(error string) string {
+	return Catalog.Format(msgs.locale, "settingsICloudTurnOnFailed", map[string]any{"error": error})
+}
+
+// SettingsSyncTimedOut says "It took too long. It tries again soon."
+// in the language the app shows.
+//
+// Why the last sync failed, after "Last sync failed:": the pass ran out of
+// time.
+func SettingsSyncTimedOut() string { return In(i18n.Locale()).SettingsSyncTimedOut() }
+
+// SettingsSyncTimedOut says "It took too long. It tries again soon."
+// in the language of msgs.
+//
+// Why the last sync failed, after "Last sync failed:": the pass ran out of
+// time.
+func (msgs Messages) SettingsSyncTimedOut() string {
+	return Catalog.Format(msgs.locale, "settingsSyncTimedOut", nil)
+}
+
+// SettingsSyncSignedOut says "You were signed out. Sign in again to sync."
+// in the language the app shows.
+//
+// Why the last sync failed, after "Last sync failed:": the account's
+// session ended.
+func SettingsSyncSignedOut() string { return In(i18n.Locale()).SettingsSyncSignedOut() }
+
+// SettingsSyncSignedOut says "You were signed out. Sign in again to sync."
+// in the language of msgs.
+//
+// Why the last sync failed, after "Last sync failed:": the account's
+// session ended.
+func (msgs Messages) SettingsSyncSignedOut() string {
+	return Catalog.Format(msgs.locale, "settingsSyncSignedOut", nil)
+}
+
+// SettingsSyncRefused says "The server refused it ({status}): {message}"
+// in the language the app shows.
+//
+// Why the last sync failed, after "Last sync failed:": the server answered
+// with an error; its HTTP status and its own message, which may be in
+// English, follow.
+func SettingsSyncRefused(status int, message string) string {
+	return In(i18n.Locale()).SettingsSyncRefused(status, message)
+}
+
+// SettingsSyncRefused says "The server refused it ({status}): {message}"
+// in the language of msgs.
+//
+// Why the last sync failed, after "Last sync failed:": the server answered
+// with an error; its HTTP status and its own message, which may be in
+// English, follow.
+func (msgs Messages) SettingsSyncRefused(status int, message string) string {
+	return Catalog.Format(msgs.locale, "settingsSyncRefused", map[string]any{"status": status, "message": message})
 }
 
 // SettingsUpToDate says "Up to date"

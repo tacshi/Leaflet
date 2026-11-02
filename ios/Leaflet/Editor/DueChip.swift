@@ -12,7 +12,9 @@ struct Due: Equatable {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.calendar = Calendar(identifier: .gregorian)
-        f.timeZone = .current
+        // The user's time zone as it is when a date is read or written,
+        // not as the app started in: they travel.
+        f.timeZone = .autoupdatingCurrent
         f.dateFormat = format
         return f
     }

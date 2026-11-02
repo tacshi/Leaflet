@@ -13,17 +13,43 @@ final class BlockAttachment: NSTextAttachment, @unchecked Sendable {
         self.node = node
         super.init(data: nil, ofType: nil)
         allowsTextAttachmentView = false
-        // What VoiceOver reads for the block, as it reads the text: an
-        // image's description, or what the block is and its title.
-        let d = node.data ?? [:]
-        let alt = d["alt"]?.string ?? ""
-        let title = d["title"]?.string ?? ""
-        let kind = CardBlock.name(node.type)
-        accessibilityLabel =
-            node.type == "image" && !alt.isEmpty ? alt : title.isEmpty ? kind : kind + ", " + title
     }
 
-    required init?(coder: NSCoder) { fatalError("not coded") }
+    /// accessibilityLabel is what VoiceOver reads for the block, as it
+    /// reads the text: an image's description, or what the block is and
+    /// its title, as the block has them.
+    override var accessibilityLabel: String? {
+        get {
+            let d = node.data ?? [:]
+            let alt = d["alt"]?.string ?? ""
+            let title = d["title"]?.string ?? ""
+            let kind = CardBlock.name(node.type)
+            return node.type == "image" && !alt.isEmpty
+                ? alt : title.isEmpty ? kind : kind + ", " + title
+        }
+        set {}
+    }
+
+    // UIKit archives the text it copies or drags, its attachments with
+    // it, and reads it back as it is pasted or dropped: the block goes
+    // with them, as JSON.
+    private static let nodeKey = "leaflet.node"
+
+    override static var supportsSecureCoding: Bool { true }
+
+    override func encode(with coder: NSCoder) {
+        super.encode(with: coder)
+        if let json = try? JSONEncoder().encode(node) { coder.encode(json, forKey: Self.nodeKey) }
+    }
+
+    required init?(coder: NSCoder) {
+        guard let json = coder.decodeObject(of: NSData.self, forKey: Self.nodeKey) as Data?,
+            let node = try? JSONDecoder().decode(DocNode.self, from: json)
+        else { return nil }
+        self.node = node
+        super.init(coder: coder)
+        allowsTextAttachmentView = false
+    }
 
     override func attachmentBounds(
         for attributes: [NSAttributedString.Key: Any], location: any NSTextLocation,

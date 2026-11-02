@@ -75,15 +75,19 @@ func TestPasteMarkdownMarkers(t *testing.T) {
 
 func TestTableRowSplitsOnUnescapedPipes(t *testing.T) {
 	for line, want := range map[string][]string{
-		"| a | b |":       {"a", "b"},
-		`| a\|b | c |`:    {"a|b", "c"},
-		`| a\\| b |`:      {`a\\`, "b"},
-		`| \*x\* | y`:     {`\*x\*`, "y"},
-		"| --- | :---: |": nil,
+		"| a | b |":         {"a", "b"},
+		`| a\|b | c |`:      {"a|b", "c"},
+		`| a\\| b |`:        {`a\\`, "b"},
+		`| \*x\* | y`:       {`\*x\*`, "y"},
+		"| `a\\|b` | c |":   {"`a|b`", "c"},
+		"| `a\\\\|b` | c |": {"`a\\|b`", "c"},
 	} {
-		if got := tableRow(line); !reflect.DeepEqual(got, want) {
-			t.Errorf("%q split as %q, want %q", line, got, want)
+		if got, rule := tableRow(line); !reflect.DeepEqual(got, want) || rule {
+			t.Errorf("%q split as %q, %v, want %q", line, got, rule, want)
 		}
+	}
+	if _, rule := tableRow("| --- | :---: |"); !rule {
+		t.Error("the line under the header is not read as one")
 	}
 }
 

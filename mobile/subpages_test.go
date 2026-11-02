@@ -77,3 +77,42 @@ func TestSubpagesKeepTheirCards(t *testing.T) {
 		t.Fatalf("links after undo %v", got)
 	}
 }
+
+// A page whose only block was a subpage's card keeps a block to type in
+// once the card goes.
+func TestUnlinkingTheOnlyCardLeavesABlock(t *testing.T) {
+	c, _ := open(t)
+	parent := create(t, c, `{"title":"Trip"}`)
+	child := create(t, c, `{"title":"Packing","parent_id":"`+parent.ID+`"}`)
+	var err error
+	c.q.do(func() {
+		_, _, err = c.core.Store.SaveContent(parent.ID, &doc.Content{Children: []*doc.Node{doc.SubpageNode(child.ID)}})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.DeletePage(child.ID); err != nil {
+		t.Fatal(err)
+	}
+	var blocks int
+	c.q.do(func() { blocks = len(c.core.Store.Content(parent.ID).Children) })
+	if got := links(t, c, parent.ID); len(got) != 0 || blocks != 1 {
+		t.Errorf("links %v, %d blocks", got, blocks)
+	}
+}
+
+// A page that could not be deleted keeps its card.
+func TestFailedDeleteKeepsTheCard(t *testing.T) {
+	c, _ := open(t)
+	parent := create(t, c, `{"title":"Trip"}`)
+	child := create(t, c, `{"title":"Packing","link":true,"parent_id":"`+parent.ID+`"}`)
+	if _, err := c.core.Store.DB().Exec(`CREATE TRIGGER full BEFORE UPDATE ON pages WHEN OLD.id = '` + child.ID + `' BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.DeletePage(child.ID); err == nil {
+		t.Fatal("deleted")
+	}
+	if got := links(t, c, parent.ID); len(got) != 1 || got[0] != child.ID {
+		t.Errorf("links %v", got)
+	}
+}

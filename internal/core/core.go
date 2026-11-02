@@ -14,6 +14,7 @@ import (
 	"github.com/egoist/mygo/i18n"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/guard"
 	"leaflet/internal/icloud"
 	"leaflet/internal/keychain"
 	"leaflet/internal/recording"
@@ -154,7 +155,7 @@ func Open(cfg Config) (*Core, error) {
 func (c *Core) Start() {
 	c.watch(c.Sync.ICloudOn())
 	c.Sync.Start()
-	go c.UpdateProject()
+	guard.Go(c.UpdateProject)
 }
 
 // startICloud sets iCloud sync up as the settings have it. Signed in, the

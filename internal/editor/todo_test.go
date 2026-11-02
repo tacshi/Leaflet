@@ -7,7 +7,18 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+// fixClock sets the time a to-do's date is shown from to a day's noon,
+// for a test, whose dates then don't change at midnight; it returns it.
+func fixClock(t *testing.T) time.Time {
+	at := time.Date(2026, 10, 26, 12, 0, 0, 0, time.Local)
+	was := clock
+	clock = func() time.Time { return at }
+	t.Cleanup(func() { clock = was })
+	return at
+}
+
 func TestDueDate(t *testing.T) {
+	now := fixClock(t)
 	e, tt, _ := setup(t)
 	tt.Type("[] Send the draft")
 	n := e.Content.Children[0]
@@ -20,7 +31,7 @@ func TestDueDate(t *testing.T) {
 	if e.dueOpen != n.ID {
 		t.Fatal("the calendar did not open")
 	}
-	tomorrow := time.Now().AddDate(0, 0, 1)
+	tomorrow := now.AddDate(0, 0, 1)
 	e.SetDue(n.ID, tomorrow, false)
 	tt.Frame()
 	if _, ok := tt.Find("Due date: Tomorrow"); !ok {
@@ -39,6 +50,7 @@ func TestDueDate(t *testing.T) {
 // The popover changes a draft, which the to-do takes as it closes:
 // turning the months keeps it open, and chooses no day by itself.
 func TestDuePopover(t *testing.T) {
+	now := fixClock(t)
 	e, tt, _ := setup(t)
 	tt.Type("[] Send the draft")
 	n := e.Content.Children[0]
@@ -65,7 +77,6 @@ func TestDuePopover(t *testing.T) {
 		t.Fatal("an untouched popover added a date")
 	}
 	click("Due date: Add date")
-	now := time.Now()
 	click("Next month")
 	if e.dueOpen != n.ID {
 		t.Fatal("the next month closed the popover")
@@ -132,9 +143,6 @@ func TestDueLabelOverAChangeOfClocks(t *testing.T) {
 	if err != nil {
 		t.Skip("no time zone data:", err)
 	}
-	local := time.Local
-	time.Local = ny
-	t.Cleanup(func() { time.Local = local })
 	for _, tc := range []struct {
 		now, due time.Time
 		want     string
@@ -194,12 +202,13 @@ func TestDueChipStaysPut(t *testing.T) {
 // above, while another's calendar is open, opens its calendar, and the
 // other still takes the date it was given.
 func TestDuePopoversKeepTheirDrafts(t *testing.T) {
+	now := fixClock(t)
 	e, tt, _ := setup(t)
 	tt.Type("[] Above")
 	tt.Key(0, ui.KeyEnter)
 	tt.Type("Below")
 	above, below := e.Content.Children[0], e.Content.Children[1]
-	e.SetDue(above.ID, time.Now().AddDate(0, 0, 1), false)
+	e.SetDue(above.ID, now.AddDate(0, 0, 1), false)
 	tt.Frame()
 	click := func(s string) {
 		t.Helper()
@@ -212,7 +221,6 @@ func TestDuePopoversKeepTheirDrafts(t *testing.T) {
 	if e.dueOpen != below.ID {
 		t.Fatal("the calendar did not open")
 	}
-	now := time.Now()
 	day := time.Date(now.Year(), now.Month(), 15, 0, 0, 0, 0, time.Local)
 	click(day.Format("January 2, 2006"))
 	click("Due date: Tomorrow")

@@ -16,6 +16,7 @@ type LinkInfo struct{ Title, Description, Image, Site string }
 var (
 	metaTag   = regexp.MustCompile(`(?is)<meta\s[^>]*>`)
 	titleTag  = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
+	headEnd   = regexp.MustCompile(`(?i)</head>`)
 	attribute = regexp.MustCompile(`(?is)([a-z:_-]+)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)`)
 )
 
@@ -23,8 +24,10 @@ var (
 // from its Open Graph tags, or its title and description tags. A picture
 // given relative to the page is made whole.
 func ReadLinkInfo(page, src string) LinkInfo {
-	if i := strings.Index(strings.ToLower(src), "</head>"); i >= 0 {
-		src = src[:i]
+	// The end of the head is found in src itself: lowering it first can
+	// change its length, so an index into the lowered copy may not fit src.
+	if loc := headEnd.FindStringIndex(src); loc != nil {
+		src = src[:loc[0]]
 	}
 	meta := map[string]string{}
 	for _, tag := range metaTag.FindAllString(src, -1) {

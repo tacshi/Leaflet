@@ -1,10 +1,16 @@
 package mobile
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"testing"
+	"time"
 
+	"leaflet/internal/icloud"
 	"leaflet/internal/keychain"
+	"leaflet/internal/remote"
+	"leaflet/locales"
 )
 
 // failingKeychain is the app's keychain failing each call with err, as
@@ -49,5 +55,43 @@ func TestKeychainStatuses(t *testing.T) {
 	s := secrets{&fakePlatform{t: t, secrets: map[string][]byte{}}}
 	if _, err := s.Get("session"); !errors.Is(err, keychain.ErrNotFound) {
 		t.Errorf("an empty answer: %v", err)
+	}
+}
+
+// syncEvents is the app, keeping the failures SyncState says.
+type syncEvents struct {
+	fakeEvents
+	failures chan string
+}
+
+func (e *syncEvents) SyncState(running bool, failure string) { e.failures <- failure }
+
+// A sync pass the server or iCloud Drive failed reaches the app in the
+// desktop's words for it, no access as the folder picked, lost; another
+// error as it came.
+func TestSyncStateWordsTheServersFailures(t *testing.T) {
+	to := &syncEvents{failures: make(chan string, 1)}
+	e := &events{to: to, q: newQueue()}
+	other := errors.New("disk full")
+	for err, want := range map[error]string{
+		fmt.Errorf("push: %w", remote.ErrSignedOut):                       locales.SettingsSyncSignedOut(),
+		fmt.Errorf("push: %w", context.DeadlineExceeded):                  locales.SettingsSyncTimedOut(),
+		fmt.Errorf("push: %w", &remote.Error{Status: 403, Message: "no"}): locales.SettingsSyncRefused(403, "no"),
+		fmt.Errorf("pass: %w", icloud.ErrUnavailable):                     locales.SettingsICloudUnavailable(),
+		fmt.Errorf("pass: %w", icloud.ErrOtherLibrary):                    locales.SettingsICloudOtherLibrary(),
+		fmt.Errorf("pass: %w", icloud.ErrNewerFormat):                     locales.SettingsICloudNewer(),
+		fmt.Errorf("pass: %w", icloud.ErrNoAccess):                        locales.SettingsICloudFolderLost(),
+		other: "disk full",
+		nil:   "",
+	} {
+		e.syncState(false, err)
+		select {
+		case got := <-to.failures:
+			if got != want {
+				t.Errorf("%v: %q, want %q", err, got, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%v: no SyncState", err)
+		}
 	}
 }

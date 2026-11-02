@@ -243,8 +243,10 @@ type pageState struct {
 	live    *live.Page
 	threads []store.Thread
 	members []store.Member
-	// runs are the agent runs of this page, newest last, for Undo.
+	// tinted are the blocks the page shows lit: those an agent run
+	// changed, and lit those of them goToBlock lit for a moment.
 	tinted map[string]bool
+	lit    map[string]bool
 	// scroll is where the page is scrolled to, and viewTop and viewH
 	// where its scroll area is in the window. scrollTo is a block to bring
 	// to the top of it once the page has laid it out, scrollWait the
@@ -334,7 +336,7 @@ func (a *App) start() error {
 	a.panelOpen = false
 	a.applyTheme()
 	a.session = st.Session()
-	a.images = newImageCache(st.Dir, filepath.Join(st.Dir, "images"))
+	a.images = newImageCache(st.Dir)
 	// Links in agents' replies and previews: a page link opens the page
 	// here, a web link the browser.
 	a.md.OnLink = func(url string) {
@@ -552,7 +554,15 @@ func (a *App) reload(ch store.Change) {
 		a.files, _ = a.st.Files()
 	}
 	if all || ch.Table == "model_providers" {
-		a.providers, _ = a.st.Providers()
+		// A default whose provider is gone, removed on another device, is
+		// no default, as the store reads it; a read that failed says
+		// nothing of it.
+		if providers, err := a.st.Providers(); err == nil {
+			a.providers = providers
+			if c, ok := a.settings.Default(); ok && !slices.ContainsFunc(providers, func(p store.Provider) bool { return p.ID == c.ProviderID }) {
+				a.settings.DefaultModel = ""
+			}
+		}
 	}
 	if all || ch.Table == "outbox" {
 		a.pending = a.st.PendingCount()
@@ -568,6 +578,10 @@ func (a *App) reload(ch store.Change) {
 	}
 	if a.page != nil && (all || ch.Table == "page_members") {
 		a.page.members, _ = a.st.Members(a.page.id)
+	}
+	// Whether the page can be edited follows its members, the pages it is
+	// under, which may share it, and whose the session is.
+	if a.page != nil && (all || ch.Table == "page_members" || ch.Table == "pages" || ch.Table == "session") {
 		a.page.live.SetReadOnly(!a.canEdit(a.page.id) || a.page.live.Unreadable())
 	}
 	a.pubChanged(ch)

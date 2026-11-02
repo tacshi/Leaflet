@@ -198,19 +198,21 @@ extension CoreClient {
         try? await call { $0.chat(pageID, text: text, focus: f) }
     }
 
-    /// ask starts a run from the editor, and returns its ID.
+    /// ask starts a run from the editor, and returns its ID, or throws why
+    /// it could not start, as when another run of the page's is working.
     nonisolated(nonsending) func ask(
         _ pageID: String, surface: String, instruction: String, focus: [String], selection: String,
         agent: AgentState.Option?
-    ) async -> String {
+    ) async throws -> String {
         let f = json(focus)
-        return
-            (try? await call {
-                $0.ask(
+        return try await call { core in
+            try Self.answer { e in
+                core.ask(
                     pageID, surface: surface, instruction: instruction, focus: f,
                     selection: selection,
-                    providerID: agent?.providerID ?? "", model: agent?.model ?? "")
-            }) ?? ""
+                    providerID: agent?.providerID ?? "", model: agent?.model ?? "", error: e)
+            }
+        }
     }
 
     nonisolated(nonsending) func stopAgent(_ pageID: String, runID: String) async {

@@ -96,7 +96,8 @@ final class AppModel {
         let root = folder.root?.path(percentEncoded: false)
         opening = Task { [weak self] in await self?.open(iCloudRoot: root) }
         // The zone the device is in changes as it travels, and its offset
-        // as the clocks change; the core's dates follow both.
+        // as the clocks change. The core's dates follow the clocks at once,
+        // and a new zone from the next time the core opens.
         for name in [
             NSNotification.Name.NSSystemTimeZoneDidChange,
             UIApplication.significantTimeChangeNotification,
@@ -109,7 +110,10 @@ final class AppModel {
         }
     }
 
-    /// useTimeZone gives the core the zone the device is in now.
+    /// useTimeZone gives the core the zone the device is in now. Once the
+    /// core is open it keeps the zone it opened with: a new one applies
+    /// from the next time it opens, though a zone known by name follows
+    /// its own clock changes meanwhile.
     private static func useTimeZone() {
         NSTimeZone.resetSystemTimeZone()
         let zone = TimeZone.current
@@ -285,12 +289,20 @@ final class AppModel {
     }
 
     func rename(_ page: PageRow, to title: String) async {
-        try? await client?.renamePage(page.id, title: title)
+        do {
+            try await client?.renamePage(page.id, title: title)
+        } catch {
+            show(Toast(message: L.appErrorRename(error: error.localizedDescription)))
+        }
         await reload()
     }
 
     func renameFolder(_ folder: FolderRow, to name: String) async {
-        try? await client?.renameFolder(folder.id, name: name)
+        do {
+            try await client?.renameFolder(folder.id, name: name)
+        } catch {
+            show(Toast(message: L.dialogFolderRenameFailed(error: error.localizedDescription)))
+        }
         await reload()
     }
 
@@ -309,7 +321,12 @@ final class AppModel {
                         title: page.title.isEmpty ? L.commonUntitled : page.title),
                     actionLabel: L.commonUndo,
                     action: { [weak self] in
-                        try? await client.restorePages(ids)
+                        do {
+                            try await client.restorePages(ids)
+                        } catch {
+                            let message = L.appErrorRestore(error: error.localizedDescription)
+                            self?.show(Toast(message: message))
+                        }
                         await self?.reload()
                     }))
         } catch {
@@ -505,12 +522,18 @@ final class AppModel {
     var syncs: Bool { status?.signedIn ?? false || status?.iCloudOn ?? false }
 
     func setKeepOffline(_ page: PageRow, _ keep: Bool) async {
-        try? await client?.setKeepOffline(page.id, keep: keep)
+        do {
+            try await client?.setKeepOffline(page.id, keep: keep)
+        } catch {
+            show(Toast(message: L.sidebarCouldNotSave(error: error.localizedDescription)))
+        }
         await reload()
     }
 
+    /// show shows toast in every window, and VoiceOver says it, once.
     func show(_ toast: Toast) {
         self.toast = toast
+        AccessibilityNotification.Announcement(toast.message).post()
         let id = toast.id
         Task {
             try? await Task.sleep(for: .seconds(toast.action == nil ? 3 : 6))
@@ -616,6 +639,10 @@ final class AppModel {
                 task.end()
                 return
             }
+            // What each window's editor holds back for a moment, and a
+            // title being typed, go first: killed while away, the app
+            // would lose them.
+            for scene in self?.scenes.allObjects ?? [] { await scene.flush() }
             _ = await client.saveOpenPages()
             try? await client.syncNow()
             self?.turn { [weak self] client in

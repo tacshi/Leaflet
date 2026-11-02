@@ -12,6 +12,8 @@ struct RootView: View {
     @SceneStorage("page") private var savedPage: String?
     @SceneStorage("inspector.shown") private var savedInspector = false
     @State private var scene = SceneModel()
+    /// folderName is the name typed for a new folder.
+    @State private var folderName = ""
 
     var body: some View {
         let palette = Palette.of(accent: app.accent, mode: app.theme, scheme: scheme)
@@ -76,6 +78,17 @@ struct RootView: View {
             // chosen in it comes as the scheme it shows, the system's too.
             SettingsView().preferredColorScheme(app.theme.colorScheme ?? scheme)
         }
+        // The window's, not the sidebar's, for ⇧⌘N to ask with the sidebar
+        // hidden, or behind the page on iPhone; each time with no name yet.
+        .alert(L.dialogFolderNew, isPresented: $scene.newFolderShown) {
+            TextField(L.dialogFolderName, text: $folderName)
+            Button(L.commonCancel, role: .cancel) {}
+            Button(L.commonSave) {
+                let name = folderName.trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty { Task { await app.createFolder(named: name) } }
+            }
+        }
+        .onChange(of: scene.newFolderShown) { if scene.newFolderShown { folderName = "" } }
         .sheet(item: $scene.moving) { MoveSheet(page: $0) }
         .sheet(item: $scene.history) { HistorySheet(page: $0).presentationSizing(.page) }
         .fileExporter(
@@ -156,9 +169,10 @@ final class ToastWindow {
     /// show puts the window up in scene, once.
     func show(in scene: UIWindowScene, app: AppModel) {
         guard window == nil else { return }
-        let host = UIHostingController(rootView: ToastHost().environment(app))
-        host.view.backgroundColor = .clear
         let w = PassThroughWindow(windowScene: scene)
+        let host = UIHostingController(
+            rootView: ToastHost { [weak w] in w?.toast = $0 }.environment(app))
+        host.view.backgroundColor = .clear
         w.rootViewController = host
         // Over the scene's window and the sheets in it, under the alerts.
         w.windowLevel = .normal + 1
@@ -167,24 +181,34 @@ final class ToastWindow {
     }
 }
 
-/// PassThroughWindow takes only the touches on its views, as the toast:
-/// the others go to the window under it.
+/// PassThroughWindow takes only the touches on the toast, where its view
+/// says the toast is: the others go to the window under it. From iOS 18,
+/// SwiftUI's hit test finds the hosting view for its buttons too, so what
+/// is under a touch says nothing of whether the toast is.
 private final class PassThroughWindow: UIWindow {
+    /// toast is where the toast is in the window, or null with none.
+    var toast = CGRect.null
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let hit = super.hitTest(point, with: event)
-        return hit === rootViewController?.view ? nil : hit
+        toast.contains(point) ? super.hitTest(point, with: event) : nil
     }
 }
 
 /// ToastHost is the toast window's view: the toast at its foot, in the
-/// app's theme, as the windows have it.
+/// app's theme, as the windows have it. It says where the toast is, for
+/// the window to take its touches.
 private struct ToastHost: View {
+    /// placed hears where the toast is, in the window.
+    var placed: (CGRect) -> Void
     @Environment(AppModel.self) private var app
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         let palette = Palette.of(accent: app.accent, mode: app.theme, scheme: scheme)
-        ToastView()
+        ToastView(placed: placed)
+            .onChange(of: app.toast == nil) { _, gone in
+                if gone { placed(.null) }
+            }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .environment(\.palette, palette)
             .tint(palette.accent)
@@ -218,6 +242,8 @@ private struct SceneReader: UIViewRepresentable {
 /// ToastView shows the app's toast, with its action, at the foot of the
 /// window.
 struct ToastView: View {
+    /// placed hears where the toast is in the window, as it shows.
+    var placed: (CGRect) -> Void = { _ in }
     @Environment(AppModel.self) private var app
 
     var body: some View {
@@ -235,6 +261,9 @@ struct ToastView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .glassEffect(.regular, in: .capsule)
+            // The toast window's hosting view fills it, so the global
+            // space is the window's.
+            .onGeometryChange(for: CGRect.self, of: { $0.frame(in: .global) }, action: placed)
             .padding(.bottom, 24)
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .accessibilityElement(children: .combine)

@@ -2,9 +2,14 @@ package doc
 
 import (
 	"fmt"
+	"math"
+	"net/url"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 )
 
 // ToolError is a tool call an agent made that cannot be applied. The
@@ -28,8 +33,9 @@ var chartTypes = map[string]bool{"bar": true, "line": true, "pie": true}
 // maxEmbedHTML caps an embed's source, as the server does.
 const maxEmbedHTML = 200_000
 
-// A block's nested items go at most maxSpecDepth deep, and a block holds
-// at most maxSpecNodes in all, as on the server.
+// A block's nested items go at most maxSpecDepth deep, and a call makes
+// at most maxSpecNodes in all, its blocks and those nested in them, as on
+// the server.
 const (
 	maxSpecDepth = 16
 	maxSpecNodes = 2000
@@ -42,16 +48,40 @@ func SpecToNode(spec map[string]any, id, author string) (*Node, error) {
 	return specToNode(spec, id, author, 0, &made)
 }
 
+// SpecsToNodes turns a call's list of BlockSpecs into blocks, which count
+// together toward maxSpecNodes, as the server counts a call's.
+func SpecsToNodes(specs []any, author string) ([]*Node, error) {
+	made := 0
+	var out []*Node
+	for _, s := range specs {
+		m, ok := s.(map[string]any)
+		if !ok {
+			return nil, toolErr("Each block must be an object.")
+		}
+		n, err := specToNode(m, "", author, 0, &made)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, nil
+}
+
 func specToNode(spec map[string]any, id, author string, depth int, made *int) (*Node, error) {
 	if depth >= maxSpecDepth {
 		return nil, toolErr("Blocks nest at most %d deep.", maxSpecDepth)
 	}
 	if *made++; *made > maxSpecNodes {
-		return nil, toolErr("At most %d blocks in all per block.", maxSpecNodes)
+		return nil, toolErr("At most %d blocks in all per call.", maxSpecNodes)
 	}
 	typ, _ := spec["type"].(string)
 	if typ == "" {
 		typ = "paragraph"
+	}
+	if kids, ok := spec["children"]; ok && kids != nil {
+		if _, ok := kids.([]any); !ok {
+			return nil, toolErr("children must be a list of blocks.")
+		}
 	}
 	allowed := false
 	for _, t := range AgentTypes {
@@ -73,7 +103,7 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 	case "paragraph", "quote":
 		n.SetDelta(FromMarkdown(text))
 	case "heading":
-		level := min(max(AsInt(spec["level"], 2), 1), 6)
+		level := clampInt(spec["level"], 2, 1, 6)
 		n.SetDelta(FromMarkdown(text))
 		n.Set("level", level)
 	case "bulleted_list", "numbered_list", "todo_list", "toggle_list":
@@ -93,7 +123,11 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		}
 		if kids, ok := spec["children"].([]any); ok {
 			for _, k := range kids {
-				child, err := specToNode(asMap(k), "", author, depth+1, made)
+				m, ok := k.(map[string]any)
+				if !ok {
+					return nil, toolErr("Each block must be an object.")
+				}
+				child, err := specToNode(m, "", author, depth+1, made)
 				if err != nil {
 					return nil, err
 				}
@@ -116,21 +150,25 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 			img = spec
 		}
 		url, _ := img["url"].(string)
-		// A scheme is the same in any case, as the server takes it.
-		if scheme := strings.ToLower(url); !strings.HasPrefix(scheme, "http://") && !strings.HasPrefix(scheme, "https://") {
+		// A web link with a host, its scheme in any case, as the server
+		// takes it: the app loads it by itself.
+		if url = strings.TrimSpace(url); !agentURL(url) {
 			return nil, toolErr("An image block needs image.url (http or https).")
 		}
 		alt, _ := img["alt"].(string)
 		n.Data = map[string]any{"url": url, "align": "center", "alt": alt}
 	case "table":
-		rows := rowsOf(spec["rows"])
+		rows, ok := rowsOf(spec["rows"])
+		if !ok {
+			return nil, toolErr("A table needs rows: a list of rows, each a list of cells.")
+		}
 		// Each cell is a block, and counts as one.
 		cols := 0
 		for _, r := range rows {
 			cols = max(cols, len(r))
 		}
 		if *made += len(rows) * cols; *made > maxSpecNodes {
-			return nil, toolErr("At most %d blocks in all per block.", maxSpecNodes)
+			return nil, toolErr("At most %d blocks in all per call.", maxSpecNodes)
 		}
 		t, err := TableNode(rows, id)
 		if err != nil {
@@ -141,6 +179,9 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		data, err := ChartData(asMap(spec["chart"]))
 		if err != nil {
 			return nil, err
+		}
+		if series, _ := data["series"].([]any); data["chart_type"] == "pie" && len(series) > 1 {
+			return nil, toolErr("A pie chart takes exactly one series.")
 		}
 		data["author"] = author
 		n.Data = data
@@ -160,7 +201,7 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		n.Data = map[string]any{
 			"title":  title,
 			"html":   html,
-			"height": min(max(AsInt(e["height"], 320), 120), 1200),
+			"height": clampInt(e["height"], 320, 120, 1200),
 			"author": author,
 		}
 	case "math_equation":
@@ -181,6 +222,9 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 			l = spec
 		}
 		link, _ := l["url"].(string)
+		if !agentURL(strings.TrimSpace(link)) {
+			link = ""
+		}
 		ln, err := LinkNode(link)
 		if err != nil {
 			return nil, err
@@ -206,13 +250,23 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 }
 
 // IsRule tells whether a line is a Markdown horizontal rule: three or
-// more of -, * or _, spaces between them allowed.
+// more of the same one of -, * or _, with spaces or tabs between them and
+// around them, as CommonMark has it, and the server's isRule.
 func IsRule(line string) bool {
-	s := strings.ReplaceAll(strings.TrimSpace(line), " ", "")
-	if len(s) < 3 || strings.Trim(s, s[:1]) != "" {
+	s := strings.Trim(line, " \t")
+	if s == "" || !strings.ContainsRune("-*_", rune(s[0])) {
 		return false
 	}
-	return s[0] == '-' || s[0] == '*' || s[0] == '_'
+	marks := 0
+	for _, c := range s {
+		switch {
+		case c == rune(s[0]):
+			marks++
+		case c != ' ' && c != '\t':
+			return false
+		}
+	}
+	return marks >= 3
 }
 
 // ChartData validates a chart spec and returns its stored data.
@@ -227,21 +281,25 @@ func ChartData(chart map[string]any) (map[string]any, error) {
 	var labels []any
 	if raw, ok := chart["labels"].([]any); ok {
 		for _, l := range raw {
-			labels = append(labels, fmt.Sprint(l))
+			labels = append(labels, specText(l))
 		}
 	}
 	var series []any
 	if raw, ok := chart["series"].([]any); ok {
-		for _, r := range raw {
+		for i, r := range raw {
 			s := asMap(r)
 			var values []any
 			if vs, ok := s["values"].([]any); ok {
 				for _, v := range vs {
-					f, _ := AsFloat(v)
-					values = append(values, f)
+					values = append(values, chartValue(v))
 				}
 			}
-			name, _ := s["name"].(string)
+			// A series without a name is named by its place, as the
+			// server names it.
+			name := fmt.Sprintf("Series %d", i+1)
+			if v, ok := s["name"]; ok && v != nil {
+				name = specText(v)
+			}
 			series = append(series, map[string]any{"name": name, "values": values})
 		}
 	}
@@ -266,18 +324,127 @@ func ChartData(chart map[string]any) (map[string]any, error) {
 	}, nil
 }
 
-func rowsOf(v any) [][]string {
+// rowsOf reads a table spec's rows, and reports whether they are a list
+// of lists, as the server takes only.
+func rowsOf(v any) ([][]string, bool) {
+	raw, ok := v.([]any)
+	if !ok {
+		return nil, false
+	}
 	var rows [][]string
-	raw, _ := v.([]any)
 	for _, r := range raw {
-		cells, _ := r.([]any)
+		cells, ok := r.([]any)
+		if !ok {
+			return nil, false
+		}
 		row := []string{}
 		for _, c := range cells {
-			row = append(row, fmt.Sprint(c))
+			row = append(row, specText(c))
 		}
 		rows = append(rows, row)
 	}
-	return rows
+	return rows, true
+}
+
+// specText is a spec's value as text, as the server writes it: a string
+// as it is, null as nothing, and a number or a boolean as it reads, a
+// number as JavaScript writes one.
+func specText(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return x
+	case float64:
+		return jsNumber(x)
+	case []any, map[string]any:
+		// A list or an object is no text, as on the server.
+		return ""
+	}
+	return fmt.Sprint(v)
+}
+
+// jsNumber writes a number as JavaScript's String does: in decimals from
+// 1e-6 to below 1e21, and as 1.5e+21 or 1e-7 past them.
+func jsNumber(f float64) string {
+	if f == 0 {
+		return "0"
+	}
+	if a := math.Abs(f); a >= 1e-6 && a < 1e21 {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
+	mant, exp, _ := strings.Cut(strconv.FormatFloat(f, 'e', -1, 64), "e")
+	sign, digits := exp[:1], strings.TrimLeft(exp[1:], "0")
+	return mant + "e" + sign + digits
+}
+
+// decimal is a number written as text, as a chart's value may be.
+var decimal = regexp.MustCompile(`^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$`)
+
+// chartValue reads a chart's value, as the server does: a JSON number, or
+// a string of a decimal one. What is not one, NaN and infinity among them,
+// is no value: 0.
+func chartValue(v any) float64 {
+	if s, ok := v.(string); ok {
+		s = strings.TrimSpace(s)
+		if !decimal.MatchString(s) {
+			return 0
+		}
+		v = s
+	}
+	f, _ := AsFloat(v)
+	return f
+}
+
+// agentURL reports whether an agent's link for a block the app loads by
+// itself, an image or a link card, is a web link with a host's name and no
+// space of any kind, as the server takes one.
+func agentURL(s string) bool {
+	if !WebURL(s) || strings.ContainsFunc(s, unicode.IsSpace) {
+		return false
+	}
+	u, err := url.Parse(s)
+	return err == nil && u.Hostname() != ""
+}
+
+// CallNodes checks blocks a call writes against the most a call makes,
+// and how deep they nest, as SpecsToNodes counts them: each block once,
+// and a table's cells too.
+func CallNodes(nodes []*Node) error {
+	made, deep := 0, 0
+	var count func([]*Node, int)
+	count = func(nodes []*Node, depth int) {
+		for _, n := range nodes {
+			made++
+			deep = max(deep, depth+1)
+			if n.Type == "table" {
+				made += len(n.Children)
+				continue
+			}
+			count(n.Children, depth+1)
+		}
+	}
+	count(nodes, 0)
+	if deep > maxSpecDepth {
+		return toolErr("Blocks nest at most %d deep.", maxSpecDepth)
+	}
+	if made > maxSpecNodes {
+		return toolErr("At most %d blocks in all per call.", maxSpecNodes)
+	}
+	return nil
+}
+
+// clampInt reads a spec's whole number between lo and hi, def when it has
+// none: a number cut to its whole part, as the server reads it, however
+// far past them it is.
+func clampInt(v any, def, lo, hi int) int {
+	if f, ok := v.(float64); ok {
+		if math.IsNaN(f) {
+			return def
+		}
+		return int(min(max(math.Trunc(f), float64(lo)), float64(hi)))
+	}
+	return min(max(AsInt(v, def), lo), hi)
 }
 
 // TableNode builds a table block from rows of cells, in appflowy's order:
@@ -494,7 +661,8 @@ func BlockViews(c *Content) []map[string]any {
 			case "toggle_list":
 				v["collapsed"] = n.Bool("collapsed")
 			case "heading":
-				v["level"] = n.Int("level", 1)
+				// Within 1 and 6, however far past them it is stored.
+				v["level"] = clampInt(n.Data["level"], 1, 1, 6)
 			case "todo_list":
 				v["checked"] = n.Bool("checked")
 				if due := n.Str("due"); due != "" {
@@ -503,31 +671,29 @@ func BlockViews(c *Content) []map[string]any {
 			case "table":
 				v["rows"] = TableRows(n)
 			case "chart":
-				ch := map[string]any{}
-				for _, k := range []string{"chart_type", "title", "labels", "series", "caption"} {
-					ch[k] = n.Data[k]
-				}
-				v["chart"] = ch
+				v["chart"] = present(n, "chart_type", "title", "labels", "series", "caption")
 			case "embed":
 				// The source too, so an agent can change an embed with
 				// replace_block rather than write a new one blind.
-				v["embed"] = map[string]any{"title": n.Data["title"], "height": n.Data["height"], "html": n.Data["html"]}
+				v["embed"] = present(n, "title", "height", "html")
 			case "image":
-				v["image"] = map[string]any{"url": n.Data["url"]}
+				v["image"] = present(n, "url", "alt")
 			case "video":
-				v["video"] = map[string]any{"url": n.Data["url"], "title": n.Data["title"]}
+				v["video"] = present(n, "url", "title")
 			case "math_equation":
 				v["formula"] = n.Str("formula")
 			case "diagram":
 				v["source"] = n.Str("source")
 			case "link_preview":
-				v["link"] = map[string]any{"url": n.Data["url"], "title": n.Data["title"], "description": n.Data["description"]}
+				v["link"] = present(n, "url", "title", "description")
 			case "file":
-				v["file"] = map[string]any{"name": n.Data["name"], "mime": n.Data["mime"], "size": n.Data["size"]}
+				v["file"] = present(n, "name", "mime", "size")
 			case "recording":
-				v["recording"] = map[string]any{"recording_id": n.Data["recording_id"], "title": n.Data["title"]}
+				v["recording"] = present(n, "recording_id", "title", "duration_ms")
 			case "subpage":
-				v["page_id"] = n.Data["page_id"]
+				if id, ok := n.Data["page_id"]; ok {
+					v["page_id"] = id
+				}
 			}
 			out = append(out, v)
 			if n.Type != "table" && len(n.Children) > 0 {
@@ -536,6 +702,18 @@ func BlockViews(c *Content) []map[string]any {
 		}
 	}
 	visit(c.Children, 0, "")
+	return out
+}
+
+// present are the keys of a block's data it has, with their values: one
+// it lacks is left out, not null, as the server's views have it.
+func present(n *Node, keys ...string) map[string]any {
+	out := map[string]any{}
+	for _, k := range keys {
+		if v, ok := n.Data[k]; ok {
+			out[k] = v
+		}
+	}
 	return out
 }
 

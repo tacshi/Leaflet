@@ -116,7 +116,7 @@
   },
   "appErrorInternal": "Something went wrong in Leaflet: {error}",
   "@appErrorInternal": {
-    "description": "The iOS app: an error when something in Leaflet's core failed unexpectedly, as a bug would.",
+    "description": "An error when something in Leaflet failed unexpectedly, as a bug would: in the iOS app's core, or in a sync pass, an agent run or a sign-in on either app.",
     "placeholders": {
       "error": {
         "type": "String",
@@ -703,6 +703,34 @@
   "@exportTemplatesFolder": {
     "description": "Export: the name of the folder in the exported zip holding the templates."
   },
+  "exportEmbed": "Interactive embed",
+  "@exportEmbed": {
+    "description": "Exported Markdown and shared web pages: what stands for an interactive embed with no title of its own, which cannot run there."
+  },
+  "exportEmbedTitled": "{title} (interactive embed)",
+  "@exportEmbedTitled": {
+    "description": "Exported Markdown: what stands for an interactive embed with a title, which cannot run there.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Sales calculator"
+      }
+    }
+  },
+  "exportVideo": "Video",
+  "@exportVideo": {
+    "description": "Exported Markdown: the text of the link to a video with no title."
+  },
+  "exportRecordingTitled": "Recording: {title}",
+  "@exportRecordingTitled": {
+    "description": "Exported Markdown: what stands for a recording, by its title.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Weekly sync"
+      }
+    }
+  },
   "templateDuplicateFailed": "Could not duplicate: {error}",
   "@templateDuplicateFailed": {
     "description": "A toast when duplicating a page fails.",
@@ -723,6 +751,10 @@
   "templateFetchingFiles": "Downloading its files and recordings first…",
   "@templateFetchingFiles": {
     "description": "A toast when duplicating a page, saving it as a template or using a template needs its files or recordings' audio downloaded to this device first; the copy is made once they have."
+  },
+  "templateFetchingOther": "Still downloading files for another copy. Try again once it's made.",
+  "@templateFetchingOther": {
+    "description": "A toast when duplicating a page, saving it as a template or using a template while another such copy is still downloading its files or recordings' audio: one copy downloads at a time."
   },
   "templateCopyTitle": "{title} copy",
   "@templateCopyTitle": {
@@ -1557,20 +1589,26 @@
   },
   "pageBylineSomeone": "Someone",
   "@pageBylineSomeone": {
-    "description": "Byline under the title: who edited, when unknown."
+    "description": "Byline under the title: who created the page, when unknown."
   },
   "pageBylineSaving": "Saving…",
   "@pageBylineSaving": {
-    "description": "Byline under the title, in place of the time, while saving."
+    "description": "Byline under the title, in place of when the page was edited, while saving."
   },
-  "pageBylineEdited": "Edited by {name} · {when}",
-  "@pageBylineEdited": {
-    "description": "Byline under the page title: who edited and when (a relative time).",
+  "pageBylineCreated": "Created by {name}",
+  "@pageBylineCreated": {
+    "description": "Byline under the page title: who created the page.",
     "placeholders": {
       "name": {
         "type": "String",
         "example": "Ada"
-      },
+      }
+    }
+  },
+  "pageBylineEditedAt": "Edited {when}",
+  "@pageBylineEditedAt": {
+    "description": "Byline under the page title, after who created it: when the page was last edited (a relative time).",
+    "placeholders": {
       "when": {
         "type": "String",
         "example": "5 min ago"
@@ -1728,6 +1766,32 @@
         "example": "the block it changed is gone"
       }
     }
+  },
+  "pageRunSubpageNotHere": "the subpage it made has not reached this device yet; try again once it syncs",
+  "@pageRunSubpageNotHere": {
+    "description": "Why undoing or redoing an agent's edits failed, in the toast's error: a subpage the cloud agent made has not synced to this device yet, so nothing changed."
+  },
+  "agentNoProvider": "Add an agent provider in Settings › Agent providers to use agents.",
+  "@agentNoProvider": {
+    "description": "Why an agent can't run: no agent provider has been added."
+  },
+  "agentSignInToUse": "Sign in to use {agent}, or add a provider on this machine.",
+  "@agentSignInToUse": {
+    "description": "Why an agent can't run: its provider runs on the server, and the user is signed out.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "Claude"
+      }
+    }
+  },
+  "agentNeedsConnection": "Agents need a connection. You can keep editing; agents return when you are back online.",
+  "@agentNeedsConnection": {
+    "description": "Why an agent can't run: the device is offline, and no provider works offline."
+  },
+  "agentRunning": "An agent is already working on this page. Try again when it is done.",
+  "@agentRunning": {
+    "description": "Why an agent can't run: another agent is working on the same page."
   },
   "pageDismiss": "Dismiss",
   "@pageDismiss": {
@@ -2647,6 +2711,18 @@
   "@recErrOnDeviceLanguage": {
     "description": "Error when the device's own speech recognition has no model for the recording's language. {language} is the language's name."
   },
+  "recErrOnDeviceEnded": "This device's speech recognition ended without a transcript.",
+  "@recErrOnDeviceEnded": {
+    "description": "Error of a transcription on the device (the Mac's speech recognition) that ended without giving a transcript."
+  },
+  "recErrOnDeviceStuck": "This device's speech recognition did not finish.",
+  "@recErrOnDeviceStuck": {
+    "description": "Error of a transcription on the device (the Mac's speech recognition) that stopped answering and was ended."
+  },
+  "recErrOnDeviceStopped": "This device's speech recognition stopped.",
+  "@recErrOnDeviceStopped": {
+    "description": "Why live transcription on the device (the Mac's speech recognition) stopped part way through a recording."
+  },
   "recEngineServer": "Transcription server",
   "@recEngineServer": {
     "description": "The name of a transcription endpoint that has no model set."
@@ -2715,6 +2791,15 @@
   "recErrMic": "The microphone did not start.",
   "@recErrMic": {
     "description": "Error when the microphone fails."
+  },
+  "recErrMicStalled": "The microphone stopped: {error} Resume to try again.",
+  "@recErrMicStalled": {
+    "description": "Error when the microphone stops mid-recording and cannot go on, as after a phone call, with the system's reason; the recording is paused.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
   },
   "recErrLive": "Live transcript unavailable: {error}",
   "@recErrLive": {
@@ -2818,6 +2903,34 @@
   "editorTableColumn": "Column",
   "@editorTableColumn": {
     "description": "Table block buttons (with + or − icons) that add or remove a column."
+  },
+  "editorTableAddRow": "Add row",
+  "@editorTableAddRow": {
+    "description": "Table editor (iPhone and iPad): the button under the cells that adds a row at the end, as VoiceOver reads it."
+  },
+  "editorTableRemoveRow": "Remove last row",
+  "@editorTableRemoveRow": {
+    "description": "Table editor (iPhone and iPad): the button under the cells that takes away the last row, as VoiceOver reads it."
+  },
+  "editorTableAddColumn": "Add column",
+  "@editorTableAddColumn": {
+    "description": "Table editor (iPhone and iPad): the button under the cells that adds a column at the end, as VoiceOver reads it."
+  },
+  "editorTableRemoveColumn": "Remove last column",
+  "@editorTableRemoveColumn": {
+    "description": "Table editor (iPhone and iPad): the button under the cells that takes away the last column, as VoiceOver reads it."
+  },
+  "editorTableCell": "Row {row}, column {column}",
+  "@editorTableCell": {
+    "description": "Table editor (iPhone and iPad): what VoiceOver calls a cell's field. Row 1 is the header row.",
+    "placeholders": {
+      "row": {
+        "type": "int"
+      },
+      "column": {
+        "type": "int"
+      }
+    }
   },
   "editorAskAgent": "Ask agent",
   "@editorAskAgent": {
@@ -3739,7 +3852,7 @@
   },
   "settingsRemoveProviderTitle": "Remove “{name}”?",
   "@settingsRemoveProviderTitle": {
-    "description": "Settings › Models: the alert asking before a model provider is removed: its title.",
+    "description": "Settings › Agent providers: the alert asking before a model provider is removed: its title.",
     "placeholders": {
       "name": {
         "type": "String",
@@ -3749,15 +3862,15 @@
   },
   "settingsRemoveProviderCloud": "Agents can no longer use it, and its API key is deleted from the server. You can't undo this.",
   "@settingsRemoveProviderCloud": {
-    "description": "Settings › Models: the alert asking before a provider kept on the server is removed: its message."
+    "description": "Settings › Agent providers: the alert asking before a provider kept on the server is removed: its message."
   },
   "settingsRemoveProviderLocal": "Agents can no longer use it, and its key is deleted from this device.",
   "@settingsRemoveProviderLocal": {
-    "description": "Settings › Models: the alert asking before a provider on this device is removed: its message."
+    "description": "Settings › Agent providers: the alert asking before a provider on this device is removed: its message."
   },
   "settingsRemoveProviderAccount": "Agents can no longer use it, and this device signs out of it.",
   "@settingsRemoveProviderAccount": {
-    "description": "Settings › Models: the alert asking before a provider signed in with an account (ChatGPT) is removed: its message."
+    "description": "Settings › Agent providers: the alert asking before a provider signed in with an account (ChatGPT) is removed: its message."
   },
   "settingsDeleteKeyFailed": "Could not delete the key: {error}",
   "@settingsDeleteKeyFailed": {
@@ -3847,6 +3960,10 @@
       }
     }
   },
+  "settingsConflictGone": "the conflict is no longer there. It may have been resolved on another device.",
+  "@settingsConflictGone": {
+    "description": "Why resolving a conflict failed, shown after 'Could not resolve:': the conflict was already resolved, as on another device."
+  },
   "settingsStorage": "Storage",
   "@settingsStorage": {
     "description": "Settings › Sync and storage: the heading over storage."
@@ -3914,7 +4031,11 @@
   "settingsICloudNoAccess": "Leaflet can't open iCloud Drive. Allow it in System Settings › Privacy & Security › Files and Folders.",
   "@settingsICloudNoAccess": {
     "description": "iCloud sync cannot run: macOS keeps Leaflet out of iCloud Drive."
+  },  "settingsICloudFolderLost": "Leaflet can't open the folder it synced through. Choose it again in Settings.",
+  "@settingsICloudFolderLost": {
+    "description": "iOS: iCloud sync cannot run because the app can no longer open the folder in iCloud Drive the user picked; they pick it again in Settings › Sync and storage."
   },
+
   "settingsICloudOpenPrivacy": "Open Settings",
   "@settingsICloudOpenPrivacy": {
     "description": "Settings › Sync and storage: a button that opens macOS's privacy settings."
@@ -3926,6 +4047,38 @@
   "settingsICloudNewer": "A newer Leaflet synced through iCloud Drive. Update Leaflet to keep syncing.",
   "@settingsICloudNewer": {
     "description": "iCloud sync cannot run: a newer version of Leaflet wrote to the folder."
+  },
+  "settingsICloudTurnOnFailed": "Couldn't turn on iCloud sync: {error}",
+  "@settingsICloudTurnOnFailed": {
+    "description": "A toast when turning on iCloud sync fails for a reason other than those the app words itself; the error follows.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "permission denied"
+      }
+    }
+  },
+  "settingsSyncTimedOut": "It took too long. It tries again soon.",
+  "@settingsSyncTimedOut": {
+    "description": "Why the last sync failed, after \"Last sync failed:\": the pass ran out of time."
+  },
+  "settingsSyncSignedOut": "You were signed out. Sign in again to sync.",
+  "@settingsSyncSignedOut": {
+    "description": "Why the last sync failed, after \"Last sync failed:\": the account's session ended."
+  },
+  "settingsSyncRefused": "The server refused it ({status}): {message}",
+  "@settingsSyncRefused": {
+    "description": "Why the last sync failed, after \"Last sync failed:\": the server answered with an error; its HTTP status and its own message, which may be in English, follow.",
+    "placeholders": {
+      "status": {
+        "type": "int",
+        "example": "403"
+      },
+      "message": {
+        "type": "String",
+        "example": "new row violates row-level security policy"
+      }
+    }
   },
   "settingsUpToDate": "Up to date",
   "@settingsUpToDate": {

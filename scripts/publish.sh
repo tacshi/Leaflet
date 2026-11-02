@@ -183,32 +183,6 @@ NOTES_FILE="$WORK_DIR/notes.md"
 $DRY_RUN || rm -rf "$STAGE_DIR"
 mkdir -p "$WORK_DIR"
 
-# changelog_notes prints the section of CHANGELOG.md under "## <version>" (or
-# "## [<version>]"), as MyGo reads it, or nothing.
-changelog_notes() {
-	[[ -f "$ROOT_DIR/CHANGELOG.md" ]] || return 0
-	python3 -I - "$ROOT_DIR/CHANGELOG.md" "$VERSION" <<'EOF'
-import sys
-path, version = sys.argv[1:]
-notes, inside = [], False
-with open(path, encoding="utf-8") as f:
-    lines = f.read().replace("\r\n", "\n").split("\n")
-for line in lines:
-    if line.startswith("## "):
-        if inside:
-            break
-        fields = line[3:].split()
-        heading = fields[0] if fields else ""
-        if heading.startswith("["):
-            heading = heading[1:].split("]", 1)[0]
-        inside = heading.removeprefix("v") == version
-        continue
-    if inside:
-        notes.append(line)
-print("\n".join(notes).strip())
-EOF
-}
-
 has_notes() { grep -qE '[^[:space:]]' "$NOTES_FILE"; }
 
 show_notes() {
@@ -217,7 +191,7 @@ show_notes() {
 	printf -- '---\n'
 }
 
-changelog_notes >"$NOTES_FILE"
+changelog_notes "$ROOT_DIR/CHANGELOG.md" "$VERSION" >"$NOTES_FILE"
 if has_notes; then
 	info "notes:    the $VERSION section of CHANGELOG.md"
 	if $DRY_RUN; then show_notes; fi
@@ -261,8 +235,8 @@ has_notes || problem "the notes for $VERSION are empty; write them in CHANGELOG.
 
 # ------------------------------------------------------------------- build
 
-# MyGo takes the "## <version>" section of a changelog as the notes, and
-# uploads to a draft release that it creates.
+# MyGo, and build-release.sh's draft release, take the "## <version>"
+# section of a changelog as the notes.
 printf '## %s\n\n%s\n' "$VERSION" "$(cat "$NOTES_FILE")" >"$WORK_DIR/CHANGELOG.md"
 BUILD_ARGS=("$VERSION" "${PLATFORM_ARGS[@]}" -o "$STAGE_DIR/out" --changelog "$STAGE_DIR/CHANGELOG.md")
 $NO_UPLOAD || BUILD_ARGS+=(--upload)

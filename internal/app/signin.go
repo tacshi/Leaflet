@@ -35,7 +35,6 @@ func (a *App) signInView(c *ui.Context) {
 	pal := theme.Of(c)
 	s := &signIn
 	a.titleBar(c, func() { ui.Spacer(c) })
-	a.signInAlert(c)
 	ui.Scroll(c).Grow(1).Children(func() {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(64, 24).Children(func() {
 			ui.Column(c).Width(380).Gap(16).Children(func() {
@@ -277,6 +276,8 @@ func (a *App) useAccount(user *store.User, drop bool) {
 			signIn.asking, signIn.lost = user, a.st.PendingCount()
 			return
 		}
+		// The new account signs out again, as when the person says no.
+		go a.backend.SignOut()
 		a.toast(err.Error())
 		return
 	}
@@ -285,16 +286,21 @@ func (a *App) useAccount(user *store.User, drop bool) {
 	// The name field shows the account's name now, not one typed before.
 	account.nameEdited = false
 	a.toast(locales.SettingsSignedInAs(user.Email))
-	a.back()
+	// A sign-in that finished after the person went to a page leaves them
+	// there.
 	if a.route.Kind == "signin" {
-		a.show(Route{Kind: "home"})
+		a.back()
+		if a.route.Kind == "signin" {
+			a.show(Route{Kind: "home"})
+		}
 	}
 	a.sync.Kick()
 }
 
 // signInAlert asks before signing in as another account removes the
 // previous one's changes not uploaded yet; not signing in signs the new
-// account out again.
+// account out again. The window shows it over whatever it shows, as a
+// sign-in may finish after the person has left its page.
 func (a *App) signInAlert(c *ui.Context) {
 	s := &signIn
 	user := s.asking

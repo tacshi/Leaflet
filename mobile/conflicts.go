@@ -105,6 +105,7 @@ func (c *Core) ResolveConflict(id, how string) (err error) {
 			}
 		}
 		if cf == nil {
+			err = errors.New(locales.SettingsConflictGone())
 			return
 		}
 		if how != resolveKeep {

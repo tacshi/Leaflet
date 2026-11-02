@@ -50,6 +50,7 @@ func (h *fakeHost) BlockLink(id string) string       { return doc.BlockLink("thi
 
 func setup(t *testing.T) (*Editor, *ui.Tester, *fakeHost) {
 	t.Helper()
+	freshClipboard(t)
 	host := &fakeHost{}
 	e := New(doc.Empty(), host)
 	e.SetWidth(500)
@@ -60,6 +61,17 @@ func setup(t *testing.T) (*Editor, *ui.Tester, *fakeHost) {
 		t.Fatal(err)
 	}
 	return e, tt, host
+}
+
+// freshClipboard empties what Leaflet last copied and what Control-K
+// last killed, which are the app's, for a test and again after it.
+func freshClipboard(t *testing.T) {
+	empty := func() {
+		clip.text, clip.blocks, clip.delta, clip.token = "", nil, nil, ""
+		killed = ""
+	}
+	empty()
+	t.Cleanup(empty)
 }
 
 func texts(e *Editor) []string {
@@ -170,9 +182,14 @@ func TestSelectionAcrossBlocksDeletes(t *testing.T) {
 	tt.Key(ui.Shift, ui.KeyUp)
 	tt.Key(ui.Shift, ui.KeyUp)
 	tt.Key(0, ui.KeyBackspace)
+	// From the end of the last block up to the end of the first, the
+	// selection takes the rest, and the caret stays where it began.
 	got := texts(e)
-	if len(got) != 1 {
+	if len(got) != 1 || got[0] != "paragraph:alpha" {
 		t.Fatalf("blocks %v", got)
+	}
+	if p := e.Caret(); p.ID != e.Content.Children[0].ID || p.Off != len("alpha") || !e.Collapsed() {
+		t.Errorf("caret %v, collapsed %v", p, e.Collapsed())
 	}
 }
 

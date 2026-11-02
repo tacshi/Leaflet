@@ -121,10 +121,11 @@ const ZoomScript = `function leafletZoom(view, box, on, full, zoomed) {
     e.preventDefault();
     if (!pinch) zoomAt(...at(e), Math.exp(-e.deltaY * (e.deltaMode ? 0.1 : 0.01)));
   }, {passive: false});
-  // Filling the page, the wheel is the diagram's alone.
+  // Filling the page, the wheel is the diagram's alone. With Ctrl, or as a
+  // pinch, it goes on to zoom it.
   if (full) view.addEventListener("wheel", e => {
-    e.stopPropagation();
     if (e.ctrlKey) return;
+    e.stopPropagation();
     e.preventDefault();
     x -= e.deltaX;
     y -= e.deltaY;

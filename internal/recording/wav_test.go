@@ -2,6 +2,7 @@ package recording
 
 import (
 	"encoding/binary"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -129,5 +130,86 @@ func TestTranscribeWaitGrowsWithTheAudio(t *testing.T) {
 	}
 	if got := transcribeWait(32000 * 3600); got < 90*time.Minute {
 		t.Errorf("an hour's audio waits %v", got)
+	}
+}
+
+// ReadWav reads the PCM16 samples of a simple WAV file.
+func ReadWav(path string) ([]byte, error) {
+	data, err := os.ReadFile(path) // #nosec G304 -- a test's own file.
+	if err != nil {
+		return nil, err
+	}
+	for off := 12; off+8 <= len(data); {
+		id := string(data[off : off+4])
+		size := int(binary.LittleEndian.Uint32(data[off+4:]))
+		if id == "data" {
+			end := min(off+8+size, len(data))
+			return data[off+8 : end], nil
+		}
+		off += 8 + size + size%2
+	}
+	return nil, errors.New("no audio in the file")
+}
+
+// Level is the loudness of a PCM16 chunk from 0 to 1, as one window of
+// the meter.
+func Level(pcm []byte) float64 {
+	var m Meter
+	if l := m.levels(pcm, len(pcm)/2); len(l) > 0 {
+		return l[0]
+	}
+	return 0
+}
+
+// A WAV file as long as one can be takes no more audio, and its header
+// counts what fits.
+func TestWavCap(t *testing.T) {
+	w, err := CreateWav(filepath.Join(t.TempDir(), "full.wav"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.bytes = maxWavData - 2
+	if err := w.Write(make([]byte, 4)); err == nil {
+		t.Error("wrote past what a WAV file holds")
+	}
+	if err := w.Write(make([]byte, 2)); err != nil {
+		t.Errorf("the last samples: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if h := wavHeader(maxWavData + 10); binary.LittleEndian.Uint32(h[40:]) != maxWavData {
+		t.Errorf("header counts %d", binary.LittleEndian.Uint32(h[40:]))
+	}
+}
+
+// A WAV file cut off inside a sample is repaired to its whole samples.
+func TestRepairOddWav(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "cut.wav")
+	if err := os.WriteFile(path, append(wavHeader(0), make([]byte, 2*SampleRate+1)...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if ms := repairWav(path); ms != 1000 {
+		t.Errorf("lasts %d ms", ms)
+	}
+	if pcm, err := ReadWav(path); err != nil || len(pcm) != 2*SampleRate {
+		t.Errorf("repaired: %d bytes, %v", len(pcm), err)
+	}
+}
+
+// The meter measures the same audio the same, split into chunks of an odd
+// number of bytes as it may come.
+func TestMeterOddChunks(t *testing.T) {
+	pcm := append(tone(-35), tone(-35)...)
+	var whole, split Meter
+	want := whole.Levels(pcm)
+	var got []float64
+	for len(pcm) > 0 {
+		n := min(1601, len(pcm))
+		got = append(got, split.Levels(pcm[:n])...)
+		pcm = pcm[n:]
+	}
+	if len(got) != len(want) || len(got) == 0 || got[0] != want[0] {
+		t.Errorf("levels %v, want %v", got, want)
 	}
 }

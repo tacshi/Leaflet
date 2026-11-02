@@ -15,7 +15,7 @@ struct ProvidersSection: View {
     @State private var providers: [AgentProvider] = []
     @State private var presets: [ProviderPreset] = []
     @State private var defaultAgent = ""
-    @State private var removing: AgentProvider?
+    @Environment(SettingsPrompt.self) private var prompt
     @State private var failure: String?
 
     var body: some View {
@@ -32,7 +32,7 @@ struct ProvidersSection: View {
                     }
                 }
                 .swipeActions {
-                    Button(L.commonRemove, role: .destructive) { removing = p }
+                    Button(L.commonRemove, role: .destructive) { askRemove(p) }
                         .tint(.red)
                 }
             }
@@ -52,24 +52,16 @@ struct ProvidersSection: View {
                 }
             }
         } header: {
+            // On the header, a view of its own: on the section, it would go
+            // on each of its rows, a read of the providers each.
             Text(L.settingsSectionProviders)
+                .task(id: version) { await load() }
         } footer: {
             if let failure {
                 Text(failure).foregroundStyle(palette.dangerText)
             } else {
                 Text(L.settingsProvidersDesc)
             }
-        }
-        .task(id: version) { await load() }
-        .alert(
-            L.settingsRemoveProviderTitle(name: removing?.name ?? ""),
-            isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }),
-            presenting: removing
-        ) { p in
-            Button(L.commonCancel, role: .cancel) {}
-            Button(L.commonRemove, role: .destructive) { Task { await remove(p) } }
-        } message: { p in
-            Text(Self.removeMessage(for: p))
         }
 
         if !providers.isEmpty {
@@ -159,6 +151,15 @@ struct ProvidersSection: View {
                     $0.id + "|"
                 } ?? ""
         }
+    }
+
+    /// askRemove asks before removing p, as the desktop does.
+    private func askRemove(_ p: AgentProvider) {
+        prompt.ask(
+            SettingsPrompt.Ask(
+                title: L.settingsRemoveProviderTitle(name: p.name),
+                message: Self.removeMessage(for: p), action: L.commonRemove,
+                confirm: { await remove(p) }))
     }
 
     private func remove(_ p: AgentProvider) async {
@@ -408,7 +409,7 @@ struct ProviderForm: View {
                 let url = try await client.beginChatGPTSignIn(draft.provider.id)
                 let session = ChatGPTWebSession()
                 webSession = session
-                session.open(url) {
+                let shown = session.open(url) {
                     // Closed before OpenAI answered, the sign-in is given
                     // up, and that is no failure. Its page says to close it
                     // once OpenAI has answered: the sign-in then has a
@@ -418,6 +419,13 @@ struct ProviderForm: View {
                         try? await Task.sleep(for: .seconds(5))
                         if !signedIn { client.cancelChatGPTSignIn() }
                     }
+                }
+                // A page that can't show leaves nothing to sign in with.
+                guard shown else {
+                    client.cancelChatGPTSignIn()
+                    webSession = nil
+                    failure = L.settingsChatGPTSignInFailed
+                    return
                 }
                 let account = try await client.finishChatGPTSignIn()
                 session.close()
@@ -508,9 +516,20 @@ struct ProviderForm: View {
 @MainActor
 final class ChatGPTWebSession: NSObject, ASWebAuthenticationPresentationContextProviding {
     private var session: ASWebAuthenticationSession?
+    /// anchor is the window the page opens over.
+    private var anchor: ASPresentationAnchor?
 
-    /// open shows url; closed runs if the person closes the page.
-    func open(_ url: URL, closed: @escaping @MainActor () -> Void) {
+    /// open shows url, and reports whether it could; closed runs if the
+    /// person closes the page.
+    func open(_ url: URL, closed: @escaping @MainActor () -> Void) -> Bool {
+        // The settings' window, which the page opens over.
+        let windows = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+        guard let anchor = windows.first(where: \.isKeyWindow) ?? windows.first else {
+            return false
+        }
+        self.anchor = anchor
         let session = ASWebAuthenticationSession(
             url: url, callback: .customScheme("leaflet-chatgpt")
         ) { [weak self] _, error in
@@ -524,7 +543,11 @@ final class ChatGPTWebSession: NSObject, ASWebAuthenticationPresentationContextP
         }
         session.presentationContextProvider = self
         self.session = session
-        session.start()
+        guard session.start() else {
+            self.session = nil
+            return false
+        }
+        return true
     }
 
     /// close takes the page away, as the sign-in is done.
@@ -538,11 +561,9 @@ final class ChatGPTWebSession: NSObject, ASWebAuthenticationPresentationContextP
         -> ASPresentationAnchor
     {
         MainActor.assumeIsolated {
-            // The settings' window, which the page opens over.
-            let windows = UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .flatMap(\.windows)
-            return windows.first { $0.isKeyWindow } ?? windows[0]
+            // open found it before it started the session, which asks.
+            guard let anchor else { fatalError("ChatGPTWebSession asked for a window before open") }
+            return anchor
         }
     }
 }

@@ -634,14 +634,24 @@ func TestCopiesWaitForTheSave(t *testing.T) {
 // recording's audio is still uploading from where it was made is not
 // duplicated, and says why.
 func TestDuplicateBringsFilesFirst(t *testing.T) {
+	// The file comes once the test lets it, after a second copy is tried.
+	release := make(chan struct{})
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.HasPrefix(r.URL.Path, "/storage/v1/object/authenticated/files/") {
+			<-release
 			_, _ = w.Write([]byte("%PDF"))
 			return
 		}
 		_, _ = w.Write([]byte("[]"))
 	}))
 	t.Cleanup(hs.Close)
+	t.Cleanup(func() {
+		select {
+		case <-release:
+		default:
+			close(release)
+		}
+	})
 	a := templatesApp(t)
 	a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
 	a.sync = syncsvc.New(a.st, a.backend)
@@ -666,6 +676,12 @@ func TestDuplicateBringsFilesFirst(t *testing.T) {
 	if pages() != before || len(a.toasts) == 0 || a.toasts[len(a.toasts)-1].text != locales.TemplateFetchingFiles() {
 		t.Fatalf("copied before the file came: %d pages; toasts %+v", pages(), a.toasts)
 	}
+	// A second copy meanwhile says why it waits.
+	a.duplicatePage(*a.pageByID(p.ID))
+	if pages() != before || a.toasts[len(a.toasts)-1].text != locales.TemplateFetchingOther() {
+		t.Fatalf("a second copy while the first downloads: %d pages; toasts %+v", pages(), a.toasts)
+	}
+	close(release)
 	select {
 	case fn := <-posted:
 		fn()

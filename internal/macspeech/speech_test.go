@@ -1,6 +1,7 @@
 package macspeech
 
 import (
+	"encoding/binary"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,8 +14,16 @@ import (
 
 // fake is a helper that answers as leaflet-speech does: a stream's words
 // say how many bytes it was sent, a file's are its path, and language "xx"
-// is one it cannot transcribe.
+// is one it cannot transcribe. In language "stuck" it never answers, and
+// in "dies" it ends at once.
 const fake = `#!/bin/sh
+if [ "$2" = stuck ]; then
+	cat >/dev/null
+	exec sleep 60
+fi
+if [ "$2" = dies ]; then
+	exit 3
+fi
 if [ "$2" = xx ]; then
 	echo '{"error":"unsupported language: xx","code":"language","language":"xx"}'
 	exit 1
@@ -112,7 +121,7 @@ func TestTheMacTranscribes(t *testing.T) {
 		t.Fatal(err)
 	}
 	var streamed string
-	// What follows the WAV header, in the microphone's chunks of 100 ms;
+	// The WAV file's samples, in the microphone's chunks of 100 ms;
 	// then as it comes, in chunks that end inside a sample, as a pipe may
 	// split what is written, which the helper reads one at a time.
 	for _, chunk := range []struct {
@@ -123,7 +132,7 @@ func TestTheMacTranscribes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		pcm := audio[44:]
+		pcm := samples(t, audio)
 		for len(pcm) > 0 {
 			n := min(chunk.size, len(pcm))
 			s.Send(pcm[:n])
@@ -148,5 +157,65 @@ func TestTheMacTranscribes(t *testing.T) {
 	segs, err := h.File(wav, "en")
 	if err != nil || len(segs) == 0 || !strings.Contains(strings.ToLower(segs[0].Text), "notes") {
 		t.Fatalf("file %+v, %v", segs, err)
+	}
+}
+
+// samples are the samples of a WAV file: its data chunk, wherever it is,
+// as say may put another chunk before it.
+func samples(t *testing.T, wav []byte) []byte {
+	t.Helper()
+	for off := 12; off+8 <= len(wav); {
+		size := int(binary.LittleEndian.Uint32(wav[off+4:]))
+		if string(wav[off:off+4]) == "data" {
+			return wav[off+8 : min(off+8+size, len(wav))]
+		}
+		off += 8 + size + size%2
+	}
+	t.Fatal("no audio in the file")
+	return nil
+}
+
+// A helper that never answers is ended once Finish has waited longer than
+// the audio lasts, rather than waited for forever.
+func TestFinishEndsAStuckHelper(t *testing.T) {
+	was := finishSlack
+	finishSlack = 100 * time.Millisecond
+	t.Cleanup(func() { finishSlack = was })
+	s, err := helper(t).Stream("stuck", func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Send(make([]byte, 3200))
+	done := make(chan error, 1)
+	go func() {
+		_, err := s.Finish()
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("a helper that never answered finished")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Finish waits on a stuck helper")
+	}
+}
+
+// Audio sent to a helper that ended is not kept for it.
+func TestSendToAnEndedHelperKeepsNothing(t *testing.T) {
+	rs, err := helper(t).Stream("dies", func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := rs.(*stream)
+	<-s.done
+	for range 100 {
+		s.Send(make([]byte, 3200))
+	}
+	s.mu.Lock()
+	queued := len(s.queue)
+	s.mu.Unlock()
+	if queued != 0 || s.Lost() == nil {
+		t.Errorf("%d chunks queued, lost %v", queued, s.Lost())
 	}
 }

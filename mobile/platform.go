@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 
+	"leaflet/internal/core"
+	"leaflet/internal/icloud"
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // Platform is what the iOS app gives the core, implemented in Swift. The
@@ -104,13 +105,9 @@ func (s secrets) Delete(name string) error {
 	return nil
 }
 
-// SecItem's statuses the core tells apart, as the app's errors end with
-// them: "(OSStatus -25300)".
-const (
-	errSecItemNotFound = -25300
-	errSecAuthFailed   = -25293
-	errSecUserCanceled = -128
-)
+// errSecItemNotFound is SecItem's status for no such item, as the app's
+// errors end with it: "(OSStatus -25300)".
+const errSecItemNotFound = -25300
 
 // keychainError is an error of the app's keychain as package keychain
 // reads it: no such item is keychain.ErrNotFound, and the user turning a
@@ -120,30 +117,10 @@ const (
 // the device is first unlocked after a restart, as a background sync may
 // run then.
 func keychainError(err error) error {
-	switch status, ok := osStatus(err); {
-	case !ok:
-		return err
-	case status == errSecItemNotFound:
+	if status, ok := keychain.OSStatus(err); ok && status == errSecItemNotFound {
 		return fmt.Errorf("%w: %w", keychain.ErrNotFound, err)
-	case status == errSecAuthFailed, status == errSecUserCanceled:
-		return fmt.Errorf("%w: %w", keychain.ErrDenied, err)
 	}
-	return err
-}
-
-// osStatus is the SecItem status an error of the app's keychain ends
-// with, as "(OSStatus -25308)", if it ends with one.
-func osStatus(err error) (int, bool) {
-	rest, ok := strings.CutSuffix(err.Error(), ")")
-	if !ok {
-		return 0, false
-	}
-	_, code, ok := strings.CutLast(rest, "(OSStatus ")
-	if !ok {
-		return 0, false
-	}
-	n, err := strconv.Atoi(code)
-	return n, err == nil
+	return keychain.Denied(err)
 }
 
 // events delivers events to the app in order, off the core's goroutine,
@@ -157,9 +134,18 @@ func (e *events) changed(c store.Change) {
 	e.q.post(func() { e.to.Changed(c.Table, c.PageID) })
 }
 
+// syncState says how sync stands, a failure with the server or iCloud
+// Drive in the words the desktop has for it; no access to iCloud Drive is
+// the folder picked, lost, as Settings shows it.
 func (e *events) syncState(running bool, err error) {
 	failure := ""
-	if err != nil {
+	if msg, ok := core.SyncMessage(err); ok {
+		failure = msg
+	} else if msg, ok := core.ICloudMessage(err); ok {
+		failure = msg
+	} else if errors.Is(err, icloud.ErrNoAccess) {
+		failure = locales.SettingsICloudFolderLost()
+	} else if err != nil {
 		failure = err.Error()
 	}
 	e.q.post(func() { e.to.SyncState(running, failure) })

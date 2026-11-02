@@ -148,9 +148,18 @@ says where whatever other keys the position has.
 | `list_pages` | — | `{ pages: [{id, title, parent_id}] }` (only when cross-page reading is on) |
 | `read_other_page` | `page_id` | same shape as `read_page` |
 
-`BlockView` = `{ id, type, text, depth, parent_id?, level?, checked?, language?, tone?, collapsed?, formula?, source?, rows?, chart?, embed?, recording? }`
-(the client's also has `video`, `link` and `file` objects; the server's a `url`);
-a code block's `text` is its code, not markdown.
+`BlockView` = `{ id, type, depth, text?, parent_id?, level?, checked?, due?, language?, tone?, collapsed?, formula?, source?, rows?, chart?, embed?, image?, video?, link?, file?, recording?, page_id? }`,
+the same on the client and the server: `text` only for text blocks and
+code (a code block's is its code, not markdown); `chart` is
+`{chart_type, title, labels, series, caption}`; `embed` `{title, height, html}`;
+`image` `{url, alt}`; `video` `{url, title}`; `link` (a `link_preview`)
+`{url, title, description}`; `file` `{name, mime, size}`; `recording`
+`{recording_id, title, duration_ms}`, as far as the block has them, with
+its `transcript` when it has one; the server adds the recording's `status`,
+and its `duration_ms` when the block has none; and a subpage block's
+`page_id`.
+
+A call writes at most 2000 blocks in all, nested ones counted.
 
 Validation before applying any call: the tool is known; every referenced block
 ID exists in the page; the block type is allowed; nesting is legal (only list
@@ -198,10 +207,16 @@ streams to the client, what the client applies to the open editor, and what
 3. The worker loads the page, focus blocks, the last 10 turns of the
    conversation, and (if allowed) titles of other pages; calls the model with
    the tools above, up to 12 rounds; validates and applies each call; streams
-   the op; finally saves `page_content`, writes a `page_history` row
-   (`reason: "agent_run"`, the content from before the run), updates the job
-   (`status: done`, `result: { reply, ops, edits }`), and for the `comment`
-   surface inserts the reply as a comment by the agent.
+   the op; finally writes a `page_history` row (`reason: "agent_run"`, the
+   content from before the run) and then saves `page_content`, updates the
+   job (`status: done`, `result: { reply, ops, edits }`), and for the
+   `comment` surface inserts the reply as a comment by the agent. A
+   `page_history` row that can't be written stops the save: no edits are
+   saved that the page can't go back from. A run that fails after it changed
+   the page saves what it changed, as above, and its job is `status: failed`
+   with the `error`; only when that save went through does the job have
+   `result: { reply: "", ops, edits }` too, so the client can undo it. One
+   whose save failed as well says so in its `error`.
 4. The client applies streamed ops to the open editor as one undo step.
 
 Local models (`is_local`) run the identical loop on the client against the
@@ -297,6 +312,16 @@ before any of their key is spent.
   into the account's space on its first sync. Signing out uploads what is
   waiting, then removes the account's pages, queue and cursors from the
   device; signing in as another account does the same first.
+- A device whose `devices` row is revoked signs out and forgets its ID:
+  signing in again, it registers as a new device. What iCloud sync kept
+  under the old ID goes too, so a later turn-on joins the folder afresh;
+  only the folder's space stays, to fetch what went up to it.
+- Model connections are deleted on the server, not marked deleted, so the
+  pull by time never brings their removal: each pull lists the ids of the
+  cloud ones there and removes the others here (of those stored before
+  the list was read).
+- A page stays in the space it was made in (`space_immutable`): a device
+  refuses to move one under a page, or into a folder, of another space.
 
 ## 7. Postgres tables
 
@@ -327,8 +352,11 @@ newest 50 named (`manual`) ones.
 Moving a page under a new parent requires edit access to both, and anyone
 but the space owner moves a page only between parents that the same shares
 reach (`forbidden_move` otherwise), so a move never shows a page to people
-it was not shared with. A move that brings a page under shares its old
-parent was not under moves `updated_at` on for the pages under it and for
+it was not shared with. Folders are the space owner's: only they change a
+page's `folder_id`, or insert a page with one (`forbidden_folder`
+otherwise; an upsert of a page already there is no insert). A move that
+brings a page under shares its old parent was not under moves
+`updated_at` on for the pages under it and for
 the content, comments, files and recordings of all of them, so the pulls
 of the people it now reaches bring them. A recording stays on its page: an
 update that changes `recordings.page_id` is refused, and its audio is
@@ -403,7 +431,8 @@ Leaflet/
   of a newer format, and stops syncing until it is updated. Files are
   written whole: to a temporary file, moved into place. Readers pass over
   names that start with a dot, and names that fit no pattern above, such as
-  the copies iCloud makes ("space 2.json").
+  the copies iCloud makes of a batch or a device's folder
+  ("0000000000000007 2.json"). The copies of space.json are read, as below.
 - **space.json** names the space the devices sync: every device files its
   pages, folders and files under that `space_id`, whatever a row says. The
   first device makes it from its own space. When two made it at once, the
@@ -450,7 +479,8 @@ Leaflet/
 - **A damaged batch.** A device reads its own last batch once a run, and
   rewrites it empty and sends everything again if it does not parse. A
   reader skips a batch that stays damaged only when later batches exist,
-  after 20 passes and a day.
+  after 20 passes and a day; a device compacting its log skips one of its
+  own the same way.
 - **Compaction.** Past 500 batches, a device writes the latest entry of each
   row and page of its log as one batch with `snapshot: true` (for a row, with
   each earlier entry that changed a column the later ones did not), sets

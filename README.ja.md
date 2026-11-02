@@ -88,8 +88,10 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 
 ### 共有と同期
 
-- ブロックに紐づくコメントスレッドと、閲覧者・編集者とのページ共有（サブページ
-  に継承されます）。
+- ブロックに紐づくコメントスレッドと、Mac と PC で Leaflet を開いている間、
+  リンクを知っている人全員、または指定したアドレスの人だけにページを見せる
+  一時的な公開リンク。サーバーは閲覧者・編集者とのページ共有（サブページに
+  継承されます）にも対応していますが、まだどのアプリからも使えません。
 - オフラインファースト：すべて SQLite に保存され、オンラインになると送信トレイ
   を通じて同期されます。別々に行われた編集はブロック単位でマージされ、競合が
   あれば通知とともにもう一方のバージョンを戻す手段が示されます。
@@ -113,7 +115,7 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
   （署名と公証にも Xcode が必要です）。Windows インストーラには NSIS が
   必要です。
 - iCloud 同期には iCloud Drive をオンにしておく必要があります。
-- サーバー経由の同期、共有、クラウドモデルには [Supabase](https://supabase.com)
+- サーバー経由の同期とクラウドモデルには [Supabase](https://supabase.com)
   のアカウントが必要です：**Supabase で続ける** がその中のプロジェクトを見つけるか作成し、
   [`supabase/`](supabase/README.md) の内容で設定します。アカウントがなければ、
   Leaflet はデバイス上だけで動作します。
@@ -133,8 +135,8 @@ go tool mygo dev
 ```
 
 サーバーがない場合、Leaflet はこのデバイスだけで動作します。ページ、編集、
-コメント、ローカルモデル、ネットワーク内の文字起こしサーバーはすべて使え、
-サインイン、同期、共有、クラウドモデル、クラウドの文字起こしは非表示になるか、
+コメント、公開リンク、ローカルモデル、ネットワーク内の文字起こしサーバーは
+すべて使え、サインイン、同期、クラウドモデル、クラウドの文字起こしは非表示になるか、
 その場で理由が説明されます。
 
 どのビルドでも Supabase でサインインできます。OAuth アプリのクライアント ID は組み込まれ、
@@ -241,6 +243,15 @@ Windows インストーラや `--skip-notarize` でビルドした macOS のも�
 `--allow-unsigned`（`-AllowUnsigned`）か `LEAFLET_ALLOW_UNSIGNED=1` で
 公開すると明示しない限りアップロードされません。
 
+`SUPABASE_URL` と `SUPABASE_ANON_KEY` が 1 回の実行にサーバーを指定するように、
+ビルドにサーバーを 1 つ組み込むには、その URL と Publishable キーを
+`MYGO_LDFLAGS` でリンカに渡します。`go tool mygo build` とスクリプトはこれを
+そのまま渡します：
+
+```bash
+MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://<ref>.supabase.co -X leaflet/internal/remote.DefaultAnonKey=<publishable key>" scripts/build-release.sh
+```
+
 ## 開発
 
 ```bash
@@ -248,6 +259,7 @@ go test ./...                                # モデル、マージ、ストア
 make check                                   # gofmt、golangci-lint、govulncheck、gosec
 make ios-check                               # swift-format、SwiftLint、osv-scanner、mobsfscan
 make clean                                   # build/ と go build が残すバイナリを削除
+scripts/check-migrations.sh                  # すべてのマイグレーションを順に Supabase の Postgres に適用（Docker）
 cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 ```
 
@@ -293,7 +305,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/macspeech`、`macos/speech` | Mac 自身の音声認識による文字起こし。Mac アプリに同梱する Swift のヘルパー `leaflet-speech` を通じて行います |
 | `internal/theme` | 色、フォント、アイコン |
 | `locales` | 各言語のアプリのテキストと、そこから生成される Go コード |
-| `scripts` | デバッグビルドとリリースビルド、GitHub Releases への公開 |
+| `scripts` | デバッグビルドとリリースビルド、GitHub Releases への公開、マイグレーションの検査 |
 | `supabase` | マイグレーション（テーブル、行レベルセキュリティ、RPC、Vault）と Edge Functions |
 | `worker` | Cloudflare 上のサインイン用 Worker：OAuth のリダイレクトページと、クライアントシークレットを持つトークン交換 |
 | `docs` | プロトコル、ユーザーストーリー、アイコンのソース |
@@ -317,8 +329,9 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
   音声認識がデバイス上で文字起こしします。Windows と古い Mac では、ネットワーク
   内の OpenAI 互換エンドポイントでモデルを提供してください。
   MOSS-Transcribe-Diarize も同様です。
-- サードパーティアプリでの OpenAI と Claude のアカウントによるサインインは確認
-  できていないため、これらのプロバイダは API キーを使います。
+- サードパーティアプリでの Claude のアカウントによるサインインは確認できて
+  いないため、Claude は API キーを使います。OpenAI も API キーを使うか、
+  ChatGPT Plus / Pro でサインインします。
 
 ## 謝辞
 

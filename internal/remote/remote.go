@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"leaflet/internal/guard"
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
 )
@@ -630,6 +631,9 @@ func (c *Client) refresh(r *refresh) {
 		}
 		c.mu.Unlock()
 	}()
+	// A panic is the refresh's failure, which those waiting get, rather
+	// than the app's end.
+	defer guard.RecoverAs(&r.err)
 	// Not a caller's context: others wait for this too, and one giving up
 	// should not fail it for the rest. The client's timeout still applies.
 	out, err := c.authRequest(context.Background(), "token?grant_type=refresh_token", map[string]any{"refresh_token": r.from.RefreshToken}, false)
@@ -1074,9 +1078,12 @@ func IsNetwork(err error) bool {
 	if errors.Is(err, errStreamIdle) || errors.Is(err, io.ErrUnexpectedEOF) {
 		return true
 	}
-	// A request that failed, its own timeout among the reasons.
-	if _, ok := errors.AsType[*url.Error](err); ok {
-		return true
+	// A request that failed, its own timeout among the reasons, but not
+	// one the caller's context ended: a wait of its own that ran out, or
+	// that it called off, while the request went. The client's own timeout
+	// is an error of its own kind, which only matches DeadlineExceeded.
+	if ue, ok := errors.AsType[*url.Error](err); ok {
+		return ue.Err != context.DeadlineExceeded && !errors.Is(ue.Err, context.Canceled)
 	}
 	// A context's deadline is a net.Error too, but one that ran out outside
 	// a request is the caller's, not the network's.

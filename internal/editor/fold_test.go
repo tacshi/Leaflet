@@ -422,6 +422,7 @@ func count(c *doc.Content, text string) int {
 // selection leaves one of its hidden children: cutting keeps them in the
 // page, so copying leaves them out.
 func TestCutPasteFoldedToggleKeepsOneOfItsChildren(t *testing.T) {
+	freshClipboard(t)
 	for _, tc := range []struct {
 		name     string
 		blocks   func() []*doc.Node

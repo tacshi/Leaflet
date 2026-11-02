@@ -91,6 +91,9 @@ func (a *App) view(c *ui.Context) {
 	if a.settingsOpen {
 		a.settingsDialog(c)
 	}
+	// Signing in or out asks over whatever the window shows.
+	a.signInAlert(c)
+	a.signOutAlert(c)
 	a.keepName()
 	a.toastView(c)
 }

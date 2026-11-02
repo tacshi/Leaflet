@@ -13,9 +13,12 @@ update archives, deltas and manifests that installed copies update from.
 
 The installers go to build\release: Leaflet-<version>-{x64,arm64}-setup.exe,
 beside a folder per platform with the app and its updates. NSIS makes them,
-which MyGo downloads when it is not installed. -Upload puts them all in the
-draft release v<version> of tacshi/Leaflet, with gh; installed copies see
-the update once the draft is published.
+which MyGo downloads when it is not installed. -Upload has MyGo put the
+installers and updates in the draft release v<version> of tacshi/Leaflet,
+with gh, as the build ends and before the installers are renamed: there
+they keep MyGo's names, leaflet-setup-<version>-<arch>.exe, by which
+SHA256SUMS lists them and install.ps1 finds its installer. Installed copies
+see the update once the draft is published.
 
 Signs updates with MYGO_UPDATER_PRIVATE_KEY, else the key in the file
 LEAFLET_UPDATE_KEY, by default
@@ -30,8 +33,11 @@ without it the builds are unsigned and SmartScreen warns about them, and
 -Upload refuses them unless -AllowUnsigned, or LEAFLET_ALLOW_UNSIGNED=1,
 says to upload them anyway.
 
+Paths given, -Out, -Changelog and those in LEAFLET_WINDOWS_CERTIFICATE and
+LEAFLET_UPDATE_KEY, are from where this is run.
+
 macOS releases are built on macOS with scripts/build-release.sh. To build a
-Leaflet server in, set MYGO_LDFLAGS as the README says.
+server in, set MYGO_LDFLAGS as README.md's Build and release shows.
 #>
 #Requires -Version 7
 [CmdletBinding()]
@@ -53,10 +59,12 @@ Need go
 if (-not $Version) { $Version = Get-ConfigValue version }
 $Version = $Version.TrimStart('v')
 Check-Version $Version
-$Out = [IO.Path]::GetFullPath($Out, $RootDir)
+# The paths given are from where this was run; the default -Out is in the
+# repository.
+$Out = if ($PSBoundParameters.ContainsKey('Out')) { Get-FullPath $Out } else { [IO.Path]::GetFullPath($Out, $RootDir) }
 if ($Changelog) {
+	$Changelog = Get-FullPath $Changelog
 	if (-not (Test-Path -PathType Leaf $Changelog)) { Fail "no changelog $Changelog" }
-	$Changelog = (Resolve-Path $Changelog).Path
 }
 $Arches = @($Arch | ForEach-Object { if ($_ -eq 'amd64') { 'x64' } else { $_ } } | Select-Object -Unique)
 $Platforms = @($Arches | ForEach-Object { "windows/$(Get-GoArch $_)" })
@@ -89,7 +97,8 @@ try {
 }
 
 # MyGo names installers "leaflet-setup-<version>-<arch>.exe", in a folder
-# per platform; they are moved out beside those folders under the usual names.
+# per platform, and -Upload has uploaded them under that name; they are
+# moved out beside those folders under the usual names.
 foreach ($a in $Arches) {
 	$goArch = Get-GoArch $a
 	$setup = Join-Path $Out "windows-$goArch\leaflet-setup-$Version-$goArch.exe"

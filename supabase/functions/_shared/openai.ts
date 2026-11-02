@@ -261,8 +261,9 @@ export async function readStream(res: Response, onText: (delta: string) => void)
     }
     for (const c of (delta.tool_calls ?? []) as StreamedCall[]) {
       // A call without an index is a new one, unless it names one that
-      // came before.
-      let i = typeof c.index === "number" ? c.index : calls.findIndex((k) => c.id && k.id === c.id);
+      // came before. Servers may number calls from 1, or skip numbers,
+      // so calls has holes.
+      let i = Number.isInteger(c.index) && c.index! >= 0 ? c.index! : calls.findIndex((k) => !!c.id && k?.id === c.id);
       if (i < 0) i = calls.length;
       calls[i] ??= { id: "", name: "", arguments: "" };
       if (c.id) calls[i].id = c.id;

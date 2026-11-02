@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
@@ -196,4 +197,45 @@ func TestUndoRunThatFailsSaysWhy(t *testing.T) {
 			t.Error("the run counts as undone")
 		}
 	})
+}
+
+// Ask says why a run could not start, rather than returning an ID the
+// page's runs never have; one that starts is among them.
+func TestAskFailsToStart(t *testing.T) {
+	c, _ := open(t)
+	row := create(t, c, `{"title":"Plan"}`)
+	if id, err := c.Ask(row.ID, "inline", "sum it up", `[]`, "", "", ""); err == nil || id != "" {
+		t.Fatalf("asked with no agent: %q, %v", id, err)
+	}
+	// A model server that answers once the test is done with the run.
+	answer := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-answer
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	if err := c.SaveProvider(`{"preset":"ollama","name":"Ollama","base_url":"` + srv.URL + `","default_model":"llama3"}`); err != nil {
+		t.Fatal(err)
+	}
+	id, err := c.Ask(row.ID, "inline", "sum it up", `[]`, "", "", "")
+	if err != nil || id == "" {
+		t.Fatalf("asked: %q, %v", id, err)
+	}
+	c.q.do(func() {
+		if c.core.Hub.Session(row.ID).Run(id) == nil {
+			t.Errorf("run %s is not the page's", id)
+		}
+	})
+	if again, err := c.Ask(row.ID, "inline", "and again", `[]`, "", "", ""); err == nil || again != "" {
+		t.Errorf("asked while a run works: %q, %v", again, err)
+	}
+	close(answer)
+	deadline := time.Now().Add(30 * time.Second)
+	for running := true; running; {
+		if time.Now().After(deadline) {
+			t.Fatal("the run never ended")
+		}
+		c.q.do(func() { running = c.core.Hub.Session(row.ID).Running })
+		time.Sleep(10 * time.Millisecond)
+	}
 }

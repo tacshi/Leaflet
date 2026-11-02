@@ -4,7 +4,7 @@ import (
 	"errors"
 	gosync "sync"
 
-	"leaflet/internal/icloud"
+	"leaflet/internal/core"
 	"leaflet/locales"
 )
 
@@ -62,13 +62,8 @@ var setICloudMu gosync.Mutex
 // where the desktop has them. No access is left as it is: on iOS it means
 // the app lost the folder, and asks for it again.
 func iCloudError(err error) error {
-	switch {
-	case errors.Is(err, icloud.ErrUnavailable):
-		return errors.New(locales.SettingsICloudUnavailable())
-	case errors.Is(err, icloud.ErrOtherLibrary):
-		return errors.New(locales.SettingsICloudOtherLibrary())
-	case errors.Is(err, icloud.ErrNewerFormat):
-		return errors.New(locales.SettingsICloudNewer())
+	if msg, ok := core.ICloudMessage(err); ok {
+		return errors.New(msg)
 	}
 	return err
 }

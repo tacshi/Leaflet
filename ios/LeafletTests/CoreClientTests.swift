@@ -7,12 +7,11 @@ import Testing
 /// their own, as the app does.
 @MainActor
 struct CoreClientTests {
-    let client: CoreClient
+    let core: ScratchCore
+    var client: CoreClient { core.client }
 
     init() throws {
-        let dir = FileManager.default.temporaryDirectory
-            .appending(path: "CoreClientTests-\(UUID().uuidString)", directoryHint: .isDirectory)
-        client = try CoreClient.open(dataDir: dir, iCloudRoot: nil, locale: "en")
+        core = try ScratchCore("CoreClientTests")
     }
 
     @Test func createsAndListsPages() async throws {

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"leaflet/internal/core"
+	"leaflet/internal/guard"
 	"leaflet/internal/provision"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
@@ -78,7 +78,6 @@ func (c *Core) FinishSupabaseSignIn(callbackURL, state, verifier string) (_ stri
 	if err != nil {
 		return "", err
 	}
-	core.KeepManagement(api)
 	project, err := leafletProject(ctx, api)
 	if err != nil {
 		return "", err
@@ -90,7 +89,7 @@ func (c *Core) FinishSupabaseSignIn(callbackURL, state, verifier string) (_ stri
 	var out signedIn
 	c.q.do(func() {
 		var user *store.User
-		if user, err = c.core.Remote.Adopt(pending); err != nil {
+		if user, err = c.core.AdoptProject(pending, api); err != nil {
 			return
 		}
 		out.Email = user.Email
@@ -141,7 +140,7 @@ func leafletProject(ctx context.Context, api *supabaseapi.Client) (supabaseapi.P
 // many, to ask first; an open page that could not be saved stops it.
 func (c *Core) signedIn(user *store.User) (lost int, err error) {
 	if !c.saveOpen() && c.core.ReplacesAccount(user) {
-		spawn(c.core.Remote.SignOut)
+		guard.Go(c.core.Remote.SignOut)
 		return 0, errNotSaved()
 	}
 	if n := c.core.LostBySigningIn(user); n > 0 {
@@ -157,13 +156,16 @@ func (c *Core) signedIn(user *store.User) (lost int, err error) {
 func (c *Core) useAccount(user *store.User, drop bool) (lost int, err error) {
 	replaces := c.core.ReplacesAccount(user)
 	if replaces && !c.saveOpen() {
-		spawn(c.core.Remote.SignOut)
+		guard.Go(c.core.Remote.SignOut)
 		return 0, errNotSaved()
 	}
 	if err := c.core.UseAccount(user, drop); err != nil {
 		if errors.Is(err, store.ErrUnsynced) {
 			return c.core.Store.PendingCount(), nil
 		}
+		// The session stays the one before: signed in as user, sync would
+		// send its pages to user's account.
+		guard.Go(c.core.Remote.SignOut)
 		return 0, err
 	}
 	if replaces {
@@ -184,7 +186,7 @@ func (c *Core) ConfirmSignIn(anyway bool) (err error) {
 			return
 		}
 		if !anyway {
-			spawn(c.core.Remote.SignOut)
+			guard.Go(c.core.Remote.SignOut)
 			return
 		}
 		var lost int

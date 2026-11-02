@@ -2,6 +2,7 @@ package sync
 
 import (
 	"testing"
+	"time"
 
 	"leaflet/internal/remote"
 )
@@ -48,5 +49,54 @@ func TestStopCutsAPassAskedFor(t *testing.T) {
 		t.Error("a pass after Stop starts stopped")
 	} else {
 		end()
+	}
+}
+
+// A pass of the loop's that panics is logged, and the loop runs the next.
+func TestTheLoopOutlastsAPassThatPanics(t *testing.T) {
+	root := cloudRoot(t)
+	d := newCloudDevice(t, root)
+	starts, ends := make(chan int, 4), make(chan bool, 4)
+	n := 0
+	d.svc.OnState = func(running bool, _ error) {
+		if !running {
+			ends <- true
+			return
+		}
+		n++
+		starts <- n
+		if n == 1 {
+			panic("a pass's bug")
+		}
+	}
+	d.svc.Start()
+	defer d.svc.Stop()
+	if got := <-starts; got != 1 {
+		t.Fatalf("pass %d first", got)
+	}
+	d.svc.Kick()
+	select {
+	case <-ends:
+	case <-time.After(10 * time.Second):
+		t.Fatal("no pass after the one that panicked")
+	}
+	// The loop is stopped before its folders go.
+	d.svc.Stop()
+	d.svc.Hold(func() {})
+}
+
+// A pass that panics ends as one that failed: the app is told it stopped,
+// and never shows it syncing for good.
+func TestAPassThatPanicsEnds(t *testing.T) {
+	d := newCloudDevice(t, cloudRoot(t))
+	d.svc.DeviceName = func() string { panic("a pass's bug") }
+	var states []bool
+	var last error
+	d.svc.OnState = func(running bool, err error) { states, last = append(states, running), err }
+	if err := d.svc.SyncNow(); err == nil {
+		t.Error("the pass that panicked did not fail")
+	}
+	if len(states) != 2 || states[1] || last == nil {
+		t.Errorf("states %v, last error %v", states, last)
 	}
 }

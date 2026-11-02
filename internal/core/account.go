@@ -28,9 +28,6 @@ const managementKey = "supabase.management"
 // core again each time it comes to the front.
 var updating sync.Mutex
 
-// deployedKey keeps the functions' hash deployed last to a project.
-func deployedKey(ref string) string { return "supabase.functions." + ref }
-
 // ReplacesAccount reports whether signing in as user removes the pages of
 // another account this device keeps.
 func (c *Core) ReplacesAccount(user *store.User) bool {
@@ -74,8 +71,8 @@ func (c *Core) UseAccount(user *store.User, drop bool) error {
 // store.ForgetSyncedAccount, ForgetAccount or Wipe, between sync passes.
 // With synced, it does neither while a change waits to go up, and returns
 // how many do; clear checks again as it removes, for a change that leaflet
-// mcp stores meanwhile. The session is then the device's own, once
-// store.LoadSession(nil) loads it.
+// mcp stores meanwhile, and so clears before signing out. The session is
+// then the device's own, once store.LoadSession(nil) loads it.
 func (c *Core) Leave(clear func() error, synced bool) (unsynced int, err error) {
 	c.Sync.Hold(func() {
 		if synced {
@@ -83,9 +80,12 @@ func (c *Core) Leave(clear func() error, synced bool) (unsynced int, err error) 
 				return
 			}
 		}
+		if err = clear(); errors.Is(err, store.ErrUnsynced) {
+			unsynced, err = max(c.Store.PendingCount(), 1), nil
+			return
+		}
 		c.Remote.SignOut()
 		c.ForgetProject()
-		err = clear()
 	})
 	return unsynced, err
 }
@@ -102,7 +102,7 @@ func (c *Core) ForgetProject() {
 
 // SignInWithSupabase signs in to the person's Supabase account through
 // the browser: opened hears Supabase's sign-in page, which OpenURL then
-// opens. The sign-in is kept for UpdateProject.
+// opens. AdoptProject keeps the sign-in for UpdateProject.
 func (c *Core) SignInWithSupabase(ctx context.Context, opened func(url string)) (*supabaseapi.Client, error) {
 	api, err := supabaseapi.SignIn(ctx, func(u string) {
 		if opened != nil {
@@ -115,13 +115,12 @@ func (c *Core) SignInWithSupabase(ctx context.Context, opened func(url string)) 
 	if err != nil {
 		return nil, err
 	}
-	KeepManagement(api)
 	return api, nil
 }
 
-// KeepManagement keeps the Supabase account's sign-in in the keychain, as
-// it is now and as it rotates, for UpdateProject.
-func KeepManagement(api *supabaseapi.Client) {
+// keepManagementOf keeps the Supabase account's sign-in in the keychain,
+// as it is now and as it rotates, for UpdateProject.
+func keepManagementOf(api *supabaseapi.Client) {
 	api.OnRefresh = keepManagement
 	keepManagement(api.RefreshToken())
 }
@@ -141,7 +140,7 @@ const (
 
 // ConnectProject sets p up for this version of Leaflet, once it is up, and
 // signs in to it as its owner. It returns the session pending, which
-// Remote.Adopt makes the project and session the device's, or
+// AdoptProject makes the project and session the device's, or
 // Remote.Discard drops. progress hears each step as it starts, and how
 // many of the setup's steps are done.
 func (c *Core) ConnectProject(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project, progress func(step string, done, all int)) (*remote.Pending, error) {
@@ -156,12 +155,9 @@ func (c *Core) ConnectProject(ctx context.Context, api *supabaseapi.Client, p su
 		}
 	}
 	progress(StepSetup, 0, 0)
-	deployed, _ := c.Store.Value(deployedKey(p.Ref))
-	hash, err := provision.Setup(ctx, api, p.Ref, deployed, func(done, all int) { progress(StepSetup, done, all) })
-	if err != nil {
+	if err := provision.Setup(ctx, api, p.Ref, func(done, all int) { progress(StepSetup, done, all) }); err != nil {
 		return nil, err
 	}
-	_ = c.Store.SetValue(deployedKey(p.Ref), hash)
 	publishable, secret, err := provision.Keys(ctx, api, p.Ref)
 	if err != nil {
 		return nil, err
@@ -169,6 +165,19 @@ func (c *Core) ConnectProject(ctx context.Context, api *supabaseapi.Client, p su
 	progress(StepSigning, 0, 0)
 	project := remote.Settings{URL: p.URL(), AnonKey: publishable, Ref: p.Ref, Name: p.Name}
 	return c.signInAsOwner(ctx, api, p, project, secret)
+}
+
+// AdoptProject makes pending, as ConnectProject returned it, the device's
+// project and session, and keeps api, the Supabase account's sign-in, for
+// UpdateProject. Only then: a sign-in that fails or is cancelled before
+// leaves the project in use with the sign-in kept for it.
+func (c *Core) AdoptProject(pending *remote.Pending, api *supabaseapi.Client) (*store.User, error) {
+	user, err := c.Remote.Adopt(pending)
+	if err != nil {
+		return nil, err
+	}
+	keepManagementOf(api)
+	return user, nil
 }
 
 // signInAsOwner signs in to p as the person signed in to Supabase, who
@@ -218,18 +227,12 @@ func (c *Core) UpdateProject() {
 	api.OnRefresh = keepManagement
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	deployed, _ := c.Store.Value(deployedKey(ref))
-	hash, err := provision.Setup(ctx, api, ref, deployed, nil)
-	if err != nil {
+	if err := provision.Setup(ctx, api, ref, nil); err != nil {
 		log.Printf("update project %s: %v", ref, err)
 		if errors.Is(err, supabaseapi.ErrSignedOut) {
 			if err := keychain.Delete(managementKey); err != nil {
 				log.Printf("update project %s: forget the Supabase sign-in: %v", ref, err)
 			}
 		}
-		return
-	}
-	if err := c.Store.SetValue(deployedKey(ref), hash); err != nil {
-		log.Printf("update project %s: %v", ref, err)
 	}
 }

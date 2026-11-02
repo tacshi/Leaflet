@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -883,5 +884,104 @@ func TestCrossPageWaitsForOwnPagesMembers(t *testing.T) {
 	}
 	if !h.crossPage(mine, on) {
 		t.Error("no other pages once sync knew no one else has it")
+	}
+}
+
+// A run stopped after it had finished, before it ended on the main
+// thread, ends as it finished, with its answer.
+func TestStopAfterTheRunFinishedKeepsItsReply(t *testing.T) {
+	h := NewHub(openStore(t), nil, stubHost{})
+	s := h.Session("p1")
+	run := &Run{ID: "r1", Status: "running", Stopped: true}
+	s.Runs, s.Running = []*Run{run}, true
+	reply := &Message{Pending: true}
+	option := Option{Provider: store.Provider{Name: "Local", IsLocal: true}}
+	h.finish(s, run, Request{PageID: "p1"}, option, doc.Empty(), h.newDelivery("p1", run, option),
+		Result{Reply: "It is a plan."}, nil, RunOptions{Reply: reply})
+	if run.Status != "done" || run.Stopped || run.Reply != "It is a plan." || reply.Text != "It is a plan." {
+		t.Errorf("run %+v, reply %+v", run, reply)
+	}
+}
+
+// A cloud run's subpage this device does not have yet stops its undo
+// before anything changes: deleting it would miss it, and it would come
+// back with the sync. Once sync has pulled the pages made since the run
+// began, one still missing is gone for good, and the undo goes on
+// without it.
+func TestUndoWaitsForTheRunsSubpage(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	c := page()
+	if err := c.Insert(doc.Position{After: "p1"}, &doc.Node{ID: "x1", Type: "paragraph"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: c})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, stubHost{})
+	s := h.Session(p.ID)
+	made := doc.Op{Op: "create_page", Page: &doc.NewPage{ID: "sub1", ParentID: p.ID, Title: "Notes"}}
+	at := time.Now()
+	s.Runs = []*Run{{ID: "r1", Status: "done", At: at, Ops: []doc.Op{insertAfter("p1", "x1", ""), made}}}
+	if err := st.SetValue(pagesCursorKey, at.Add(-time.Minute).UTC().Format(time.RFC3339Nano)+"|k"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := h.UndoRun(p.ID, "r1"); err == nil {
+		t.Error("undo said it reverted the run")
+	}
+	if s.Run("r1").Undone || st.Content(p.ID).Find("x1") == nil {
+		t.Errorf("undone %v, page %s", s.Run("r1").Undone, st.Content(p.ID).Encode())
+	}
+
+	if err := st.SetValue(pagesCursorKey, at.Add(time.Minute).UTC().Format(time.RFC3339Nano)+"|k"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.UndoRun(p.ID, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.Run("r1").Undone || st.Content(p.ID).Find("x1") != nil {
+		t.Errorf("undone %v, page %s", s.Run("r1").Undone, st.Content(p.ID).Encode())
+	}
+}
+
+// readingHost is a host whose settings let agents read other pages.
+type readingHost struct{ stubHost }
+
+func (readingHost) Settings() store.Settings { return store.Settings{AgentsReadOtherPages: true} }
+
+// A run that panics fails, saying so, and ends as a failed run does: its
+// page takes another run.
+func TestPanicInARunFailsIt(t *testing.T) {
+	st := openStore(t)
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: "http://127.0.0.1:1/v1", AuthKind: "none", DefaultModel: "m", IsLocal: true}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, readingHost{})
+	// The run asks whether the page has a public link as it starts, and
+	// again on its goroutine, which panics.
+	var asked atomic.Int32
+	h.PublicLink = func(string) bool {
+		if asked.Add(1) > 1 {
+			panic("boom")
+		}
+		return false
+	}
+	done := make(chan *Run, 1)
+	h.Start(p.ID, RunOptions{Surface: "sidebar", Instruction: "go", Done: func(r *Run) { done <- r }})
+	select {
+	case r := <-done:
+		if r.Status != "failed" || !strings.Contains(r.Error, "boom") || h.Session(p.ID).Running {
+			t.Errorf("run %+v, running %v", r, h.Session(p.ID).Running)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the run never ended")
 	}
 }

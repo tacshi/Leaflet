@@ -53,15 +53,28 @@ struct SpeechSettingsView: View {
         .navigationTitle(L.recSttTitle)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
-        .onDisappear { saveKey() }
+        .onDisappear {
+            saveKey()
+            // What changed in the moment before Back, which the wait below
+            // would drop as the view goes.
+            if let stt, loaded != nil, stt != loaded?.stt {
+                Task { await save(stt) }
+            }
+        }
         // Kept as it changes, once typing stops for a moment.
         .task(id: stt) {
             guard let stt, loaded != nil, stt != loaded?.stt else { return }
             try? await Task.sleep(for: .milliseconds(400))
             guard !Task.isCancelled else { return }
-            try? await app.client?.saveSpeechSettings(stt)
-            await refresh()
+            await save(stt)
         }
+    }
+
+    /// save keeps the settings as stt has them, and reads again what they
+    /// make of themselves.
+    private func save(_ stt: SttSettings) async {
+        try? await app.client?.saveSpeechSettings(stt)
+        await refresh()
     }
 
     private func load() async {

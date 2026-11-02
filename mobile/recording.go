@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/guard"
 	"leaflet/internal/keychain"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
@@ -20,22 +21,26 @@ import (
 
 // Microphone is the device's microphone, which recordings hear through,
 // implemented in Swift with the app's audio engine. The core calls it
-// from its own goroutines.
+// from its own goroutines. Each call names the recording it is for by the
+// session Start was given: one recording's Stop or Close, late, leaves
+// the next one's alone, and each one's audio goes to its own sink.
 type Microphone interface {
-	// Start turns the microphone on, to hand sink 16-bit mono PCM at rate
-	// samples a second. It returns before the microphone is on, as asking
-	// for it may wait for the user: sink's Started or Failed says when it
-	// is, or why it is not.
-	Start(rate int, sink *AudioSink) error
-	// Pause stops handing on audio until Resume; neither waits.
-	Pause()
-	Resume()
+	// Start turns the microphone on for recording session, to hand sink
+	// 16-bit mono PCM at rate samples a second. It returns before the
+	// microphone is on, as asking for it may wait for the user: sink's
+	// Started or Failed says when it is, or why it is not.
+	Start(session, rate int, sink *AudioSink) error
+	// Pause stops handing on audio until Resume; neither waits. A Resume
+	// that cannot turn the microphone back on says why with sink's
+	// Stalled.
+	Pause(session int)
+	Resume(session int)
 	// Stop hands the sink the audio the microphone still holds, then
 	// turns it off.
-	Stop()
+	Stop(session int)
 	// Close lets the microphone go at once, after Stop or for a recording
 	// that could not start.
-	Close()
+	Close(session int)
 }
 
 // AudioSink takes what the microphone hears. The app calls it from any
@@ -61,15 +66,37 @@ func (a *AudioSink) Failed(message string) {
 	a.s.Failed(message)
 }
 
+// Stalled says why the microphone, once on, stopped and could not go on,
+// as when a call ended without giving it back: the recording pauses.
+func (a *AudioSink) Stalled(message string) {
+	defer catch(nil)
+	a.s.Stalled(message)
+}
+
 // capture is the app's microphone as the recorder's Capture.
 type capture struct{ m Microphone }
 
+// micSessions numbers the recordings the microphone starts.
+var micSessions atomic.Int64
+
 func (c capture) Start(rate int, sink recording.Sink) (recording.Mic, error) {
-	if err := c.m.Start(rate, &AudioSink{s: sink}); err != nil {
+	session := int(micSessions.Add(1))
+	if err := c.m.Start(session, rate, &AudioSink{s: sink}); err != nil {
 		return nil, err
 	}
-	return c.m, nil
+	return mic{m: c.m, session: session}, nil
 }
+
+// mic is the app's microphone as one recording's Mic.
+type mic struct {
+	m       Microphone
+	session int
+}
+
+func (m mic) Pause()  { m.m.Pause(m.session) }
+func (m mic) Resume() { m.m.Resume(m.session) }
+func (m mic) Stop()   { m.m.Stop(m.session) }
+func (m mic) Close()  { m.m.Close(m.session) }
 
 // Transcriber is the device's own speech engine, implemented in Swift
 // with iOS's speech recognition: what OnDevice transcribes with. Streams
@@ -215,7 +242,7 @@ type recordingState struct {
 // widest page shows.
 const levelsSent = 240
 
-// state returns the recording's state; on the queue.
+// recState returns the recording's state; on the queue.
 func (c *Core) recState() recordingState {
 	r := c.core.Rec
 	st := r.State
@@ -516,8 +543,7 @@ func (c *Core) mirrorStt(stt store.SttSettings) {
 		return
 	}
 	n := sttLatest.Add(1)
-	go func() {
-		defer catch(nil)
+	guard.Go(func() {
 		// Only the last change waits for its turn.
 		time.Sleep(500 * time.Millisecond)
 		if sttLatest.Load() != n {
@@ -540,7 +566,7 @@ func (c *Core) mirrorStt(stt store.SttSettings) {
 		if _, err := be.Upsert(ctx, "stt_settings", row, "user_id"); err != nil {
 			log.Printf("stt settings: %v", err)
 		}
-	}()
+	})
 }
 
 // SetEndpointKey keeps the key of an endpoint on this device's network
@@ -582,8 +608,7 @@ func (c *Core) TestEndpoint(url, model, key string) (_ string, err error) {
 	defer catch(&err)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	silence := recording.WavFromPCM(make([]byte, recording.SampleRate))
-	if _, err := recording.TranscribeEndpoint(ctx, url, model, silence, key, "auto"); err != nil {
+	if err := recording.TestEndpoint(ctx, url, model, key); err != nil {
 		return "", err
 	}
 	return locales.RecSttItWorks(), nil

@@ -87,6 +87,16 @@ func TestTokenRefreshesOnceForAll(t *testing.T) {
 	}
 }
 
+// A refresh that panics fails for those waiting on it, and the app goes
+// on.
+func TestRefreshThatPanicsFails(t *testing.T) {
+	c := expiredClient(t, &refreshServer{status: 400, body: `{"error":"invalid_grant"}`})
+	c.OnAuth = func(*store.User) { panic("boom") }
+	if _, err := c.token(context.Background()); err == nil || !strings.Contains(err.Error(), "boom") {
+		t.Errorf("token after a panic: %v", err)
+	}
+}
+
 func TestSignOutDuringRefreshStays(t *testing.T) {
 	rs := &refreshServer{status: 200, body: newSession, started: make(chan struct{}), release: make(chan struct{})}
 	c := expiredClient(t, rs)
@@ -405,6 +415,20 @@ func TestIsNetwork(t *testing.T) {
 	expired, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancel()
 	<-expired.Done()
+	// A request the caller's wait ended, and one the client's own timeout
+	// did.
+	slow := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer slow.Close()
+	waited, stop := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer stop()
+	req, _ := http.NewRequestWithContext(waited, http.MethodGet, slow.URL, nil)
+	_, callersWait := http.DefaultClient.Do(req)
+	req, _ = http.NewRequest(http.MethodGet, slow.URL, nil)
+	_, clientsTimeout := (&http.Client{Timeout: 20 * time.Millisecond}).Do(req)
+	called, callOff := context.WithCancel(context.Background())
+	callOff()
+	req, _ = http.NewRequestWithContext(called, http.MethodGet, slow.URL, nil)
+	_, calledOff := http.DefaultClient.Do(req)
 	for _, tc := range []struct {
 		err  error
 		want bool
@@ -416,6 +440,9 @@ func TestIsNetwork(t *testing.T) {
 		{&Error{Status: http.StatusConflict}, false},
 		{errors.New("the page's content on this device could not be read"), false},
 		{expired.Err(), false},
+		{callersWait, false},
+		{calledOff, false},
+		{clientsTimeout, true},
 		{fmt.Errorf("fetch: %w", context.DeadlineExceeded), false},
 		{ErrSignedOut, false},
 		{nil, false},

@@ -24,12 +24,19 @@ import (
 // devices'. What it keeps of them is in key_values under "icloud.":
 //
 //	icloud.space           the space of the folder this device joined
+//	icloud.fetch_space     the space of one it synced through under an ID
+//	                       it gave up, only to fetch from (fetchSpaceKey)
 //	icloud.seq             the last batch this device wrote
 //	icloud.writing         the batch it writes, "<seq>|<written_at>", kept
 //	                       before it writes it
-//	icloud.damaged.<device> a batch of another device's that does not
-//	                       parse, "<seq>|<first seen, ms>|<passes>"
+//	icloud.log_from        the first batch of this device's log, its
+//	                       snapshot once it has compacted (device.json)
+//	icloud.damaged.<device>.<seq> a batch of a device's that does not
+//	                       parse, "<seq>|<first seen, ms>|<passes>":
+//	                       another's, or this one's own as it compacts
 //	icloud.cursor.<device> the last batch of another device applied here
+//	icloud.want.<device>.<page> the version of a device's page file a
+//	                       batch named, until it has merged here
 //	icloud.device_at       when device.json was last written (ms)
 //	icloud.held.<table>.<id> other devices' entries of a row with a
 //	                       change waiting here (icloud_rows.go)
@@ -244,10 +251,14 @@ func (s *Service) checkDeviceID(ctx context.Context) (string, error) {
 	}
 	next := doc.NewRowID()
 	log.Printf("icloud: another device writes as %s; this one is %s now", me, next)
-	for _, kv := range [][2]string{{"device.id", next}, {"icloud.seq", "0"}, {"icloud.cursor." + me, "0"}, {"icloud.device_at", "0"}} {
+	// The new ID's log starts at its first batch, with nothing written.
+	for _, kv := range [][2]string{{"device.id", next}, {"icloud.seq", "0"}, {"icloud.log_from", "0"}, {"icloud.cursor." + me, "0"}, {"icloud.device_at", "0"}} {
 		if err := s.st.SetValue(kv[0], kv[1]); err != nil {
 			return "", err
 		}
+	}
+	if err := s.st.DeleteValue("icloud.writing"); err != nil {
+		return "", err
 	}
 	space, _ := s.st.Value("icloud.space")
 	return next, s.requeueAll(ctx, space)
@@ -603,7 +614,7 @@ func (s *Service) cloudUpload(ctx context.Context, e store.OutboxEntry) error {
 	if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
 		return err
 	}
-	local := store.S(payload, "local_path")
+	local := s.st.Path(store.S(payload, "local_path"))
 	if !onDevice(local) {
 		// What a copy was made from may not be downloaded yet: it is
 		// waited for a little, then on a later pass, so the rest of this
@@ -674,8 +685,16 @@ var errNotInICloud = errors.New("not in iCloud Drive yet")
 // folder of iCloud Drive it can still read.
 func (s *Service) joinedICloud() bool {
 	joined, _ := s.st.Value("icloud.space")
+	if joined == "" {
+		joined, _ = s.st.Value(fetchSpaceKey)
+	}
 	return joined != "" && s.folder().Root != ""
 }
+
+// fetchSpaceKey keeps the space of the folder this device synced through
+// under an ID it has given up (sync's heartbeat): it joins the folder
+// afresh, but what went up there is still fetched from it meanwhile.
+const fetchSpaceKey = "icloud.fetch_space"
 
 // originalLives reports whether what a copy's upload comes from (its
 // from_path) still lives here: a file not deleted, or a recording. Its

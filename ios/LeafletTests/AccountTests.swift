@@ -7,12 +7,11 @@ import Testing
 /// they go offline: the sign-in itself needs Supabase and a device.
 @MainActor
 struct AccountTests {
-    let client: CoreClient
+    let core: ScratchCore
+    var client: CoreClient { core.client }
 
     init() throws {
-        let dir = FileManager.default.temporaryDirectory
-            .appending(path: "AccountTests-\(UUID().uuidString)", directoryHint: .isDirectory)
-        client = try CoreClient.open(dataDir: dir, iCloudRoot: nil, locale: "en")
+        core = try ScratchCore("AccountTests")
     }
 
     @Test func beginsAtSupabaseWithTheWorkersRedirect() throws {

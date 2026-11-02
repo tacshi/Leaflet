@@ -3,7 +3,11 @@ package mobile
 import (
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -13,23 +17,53 @@ import (
 	"leaflet/internal/store"
 )
 
-// fakeMic is the app's microphone: on at once, it hands on a second of
-// silence as it stops.
+// fakeMic is the app's microphone, one for all recordings: on at once,
+// it hands on a second of silence to the recording stopping, once hold
+// lets it, and keeps the calls it was given.
 type fakeMic struct {
-	sink   *AudioSink
+	mu     sync.Mutex
+	sinks  map[int]*AudioSink
+	calls  []string
+	hold   chan struct{}
 	closed chan struct{}
 }
 
-func (m *fakeMic) Start(rate int, sink *AudioSink) error {
-	m.sink = sink
+func (m *fakeMic) call(what string, session int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls = append(m.calls, fmt.Sprintf("%s %d", what, session))
+}
+
+func (m *fakeMic) Start(session, rate int, sink *AudioSink) error {
+	m.call("start", session)
+	m.mu.Lock()
+	if m.sinks == nil {
+		m.sinks = map[int]*AudioSink{}
+	}
+	m.sinks[session] = sink
+	m.mu.Unlock()
 	go sink.Started()
 	return nil
 }
 
-func (m *fakeMic) Pause()  {}
-func (m *fakeMic) Resume() {}
-func (m *fakeMic) Stop()   { m.sink.Chunk(make([]byte, 32000)) }
-func (m *fakeMic) Close()  { close(m.closed) }
+func (m *fakeMic) Pause(session int)  { m.call("pause", session) }
+func (m *fakeMic) Resume(session int) { m.call("resume", session) }
+
+func (m *fakeMic) Stop(session int) {
+	m.call("stop", session)
+	if m.hold != nil {
+		<-m.hold
+	}
+	m.mu.Lock()
+	sink := m.sinks[session]
+	m.mu.Unlock()
+	sink.Chunk(make([]byte, 32000))
+}
+
+func (m *fakeMic) Close(session int) {
+	m.call("close", session)
+	m.closed <- struct{}{}
+}
 
 func TestRecordingKeepsAudioWithoutAnEngine(t *testing.T) {
 	c, _ := open(t)
@@ -48,7 +82,7 @@ func TestRecordingKeepsAudioWithoutAnEngine(t *testing.T) {
 	if _, err := c.StartRecording(row.ID); err == nil {
 		t.Fatal("recorded without a microphone")
 	}
-	mic := &fakeMic{closed: make(chan struct{})}
+	mic := &fakeMic{closed: make(chan struct{}, 1)}
 	c.UseMicrophone(mic)
 
 	raw, err = c.StartRecording(row.ID)
@@ -103,6 +137,93 @@ func TestRecordingKeepsAudioWithoutAnEngine(t *testing.T) {
 	}
 }
 
+// A recording started before the last one's microphone has stopped gets
+// a session of its own: the last one's Stop and Close, late, are for it
+// alone, and its last audio goes to its own file.
+func TestRecordingsShareTheMicrophoneApart(t *testing.T) {
+	c, _ := open(t)
+	raw, _ := c.CreatePage(`{"title":"Standup"}`)
+	var row pageRow
+	_ = json.Unmarshal([]byte(raw), &row)
+	if _, err := c.OpenPage(row.ID); err != nil {
+		t.Fatal(err)
+	}
+	mic := &fakeMic{hold: make(chan struct{}), closed: make(chan struct{}, 2)}
+	c.UseMicrophone(mic)
+	record := func() string {
+		t.Helper()
+		raw, err := c.StartRecording(row.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var block doc.Node
+		_ = json.Unmarshal([]byte(raw), &block)
+		var st recordingState
+		for deadline := time.Now().Add(5 * time.Second); !st.Active; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("never started: %+v", st)
+			}
+			raw, _ = c.RecordingState()
+			_ = json.Unmarshal([]byte(raw), &st)
+		}
+		return block.Str("recording_id")
+	}
+	closed := func() {
+		t.Helper()
+		select {
+		case <-mic.closed:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the microphone was never let go")
+		}
+	}
+	first := record()
+	c.StopRecording()
+	second := record()
+	close(mic.hold)
+	closed()
+	c.StopRecording()
+	closed()
+
+	mic.mu.Lock()
+	calls := slices.Clone(mic.calls)
+	mic.mu.Unlock()
+	var starts []int
+	for _, call := range calls {
+		var n int
+		if _, err := fmt.Sscanf(call, "start %d", &n); err == nil {
+			starts = append(starts, n)
+		}
+	}
+	if len(starts) != 2 || starts[0] == starts[1] {
+		t.Fatalf("calls %v", calls)
+	}
+	// Each recording's own, and nothing else.
+	for _, n := range starts {
+		for _, what := range []string{"stop", "close"} {
+			if want := fmt.Sprintf("%s %d", what, n); !slices.Contains(calls, want) {
+				t.Errorf("calls %v, want %s", calls, want)
+			}
+		}
+	}
+	if len(calls) != 6 {
+		t.Errorf("calls %v", calls)
+	}
+	for _, id := range []string{first, second} {
+		var rec recordingRow
+		for deadline := time.Now().Add(5 * time.Second); rec.Status != "ready"; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("never ready: %+v", rec)
+			}
+			raw, _ := c.Recording(id)
+			_ = json.Unmarshal([]byte(raw), &rec)
+		}
+		// Each has the second its own Stop handed on.
+		if rec.DurationMs != 1000 {
+			t.Errorf("recording %s lasts %d ms", id, rec.DurationMs)
+		}
+	}
+}
+
 // fakeTranscriber is the device's engine: a stream's words say how many
 // bytes it was sent, and every file says "from the file".
 type fakeTranscriber struct {
@@ -140,7 +261,7 @@ func (f *fakeTranscriber) File(path, language string) (string, error) {
 
 func TestRecordingTranscribedOnTheDevice(t *testing.T) {
 	c, _ := open(t)
-	c.UseMicrophone(&fakeMic{closed: make(chan struct{})})
+	c.UseMicrophone(&fakeMic{closed: make(chan struct{}, 1)})
 	c.UseTranscriber(&fakeTranscriber{heard: map[string]int{}, sinks: map[string]*TranscriptSink{}})
 	raw, err := c.SpeechSettings()
 	if err != nil {
@@ -218,5 +339,28 @@ func TestSaveSpeechSettingsClearsWhatItLeavesOut(t *testing.T) {
 	c.q.do(func() { stt = c.core.Store.Settings().Stt })
 	if stt.ProviderID != "" || len(stt.LanguageHints) != 0 || stt.Model != "whisper-1" {
 		t.Fatalf("saved %+v", stt)
+	}
+}
+
+// TestEndpoint sends the endpoint a second of silence.
+func TestTestEndpointSendsASecond(t *testing.T) {
+	c, _ := open(t)
+	sent := make(chan int, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f, _, err := r.FormFile("file")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		data, _ := io.ReadAll(f)
+		sent <- len(data)
+		_, _ = io.WriteString(w, `{"text":""}`)
+	}))
+	defer srv.Close()
+	if _, err := c.TestEndpoint(srv.URL+"/v1", "whisper-1", ""); err != nil {
+		t.Fatal(err)
+	}
+	if n := <-sent; n != 44+2*recording.SampleRate {
+		t.Errorf("sent %d bytes", n)
 	}
 }

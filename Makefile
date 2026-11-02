@@ -16,7 +16,7 @@ export CGO_ENABLED := 0
 # Where scripts/ and go tool mygo build put the apps, installers and
 # updates; and the binary go build . leaves here.
 BUILD_DIR ?= build
-BINARIES := leaflet
+BINARIES := leaflet leaflet.exe
 
 .PHONY: check clean ios-check ios-core ios-project ios-packages ios-test
 

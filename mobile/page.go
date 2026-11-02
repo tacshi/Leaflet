@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/guard"
 	"leaflet/internal/live"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -141,12 +142,11 @@ func (c *Core) OpenPage(id string) (_ string, err error) {
 			// Who the page is shared with comes from the server, for its
 			// byline, as the desktop reads it as a page opens.
 			if c.core.Remote.SignedIn() {
-				go func() {
-					defer catch(nil)
+				guard.Go(func() {
 					ctx, cancel := context.WithTimeout(context.Background(), remoteTimeout)
 					defer cancel()
 					_ = c.core.Sync.LoadMembers(ctx, id)
-				}()
+				})
 			}
 		}
 		c.editors++
@@ -164,11 +164,16 @@ func (c *Core) OpenPage(id string) (_ string, err error) {
 // after the typing stops. Made over an older rev, or with the page open in
 // another window too, it is merged with what changed since, and the merge
 // comes back as PageUpdated, for every editor of the page to show.
-func (c *Core) EditPage(id string, editor int64, content string, rev int64) (err error) {
+//
+// It returns the rev it left the page at, which has the edit: a change at
+// an older one, which PageUpdated may bring after EditPage returns, is
+// from before it, and the editor shows the merge at this rev, or after,
+// instead.
+func (c *Core) EditPage(id string, editor int64, content string, rev int64) (left int64, err error) {
 	defer catch(&err)
 	edit, err := doc.Decode(content)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	c.q.do(func() {
 		p := c.pages[id]
@@ -178,9 +183,10 @@ func (c *Core) EditPage(id string, editor int64, content string, rev int64) (err
 		}
 		if err = p.edit(p.editors[editor], edit, rev); err == nil {
 			c.fillLinks(id, p.cur)
+			left = p.rev
 		}
 	})
-	return err
+	return left, err
 }
 
 func (p *openPage) edit(e *pageEditor, edit *doc.Content, rev int64) error {

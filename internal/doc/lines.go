@@ -1,16 +1,20 @@
 package doc
 
 import (
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/egoist/mygo/ui/markdown/parser"
 )
 
 // MarkdownBlocks reads Markdown as blocks, as pasting it does.
 func MarkdownBlocks(text string) []*Node {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	return ParseLines(strings.Trim(text, "\n"))
+	return ParseLines(strings.Trim(lineEnds.Replace(text), "\n"))
 }
+
+// lineEnds writes the ends of lines Markdown has, \r\n and \r, as \n.
+var lineEnds = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 
 // ParseLines reads pasted text as blocks: a line each, with Markdown
 // block prefixes, as PageMarkdown writes them. A line ending in a hard
@@ -21,7 +25,7 @@ func MarkdownBlocks(text string) []*Node {
 // </details>, the lines of a Markdown table make a table, and a fenced
 // block a code block.
 func ParseLines(text string) []*Node {
-	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = lineEnds.Replace(text)
 	var p lineParser
 	for _, line := range strings.Split(text, "\n") {
 		p.line(line)
@@ -52,8 +56,14 @@ type lineParser struct {
 	// awaiting one just opened, whose summary may follow.
 	summary, awaiting *textBlock
 
+	// table are the rows of the table being read, into tableIn, and ruled
+	// is set once the line under its header is.
 	table   [][]string
 	tableIn *[]*Node
+	ruled   bool
+
+	// numbers are the numbered items read, by their numbers.
+	numbers map[*Node]int
 
 	// code is the fenced block open, and fence the backticks it opened
 	// with, or "$$" for math; its indent comes off each of its lines. A
@@ -151,7 +161,11 @@ func (p *lineParser) line(line string) {
 		if p.tableIn == nil {
 			p.tableIn = p.container(indent)
 		}
-		if row := tableRow(trimmed); row != nil {
+		// The line of dashes under the header is no row; one further down
+		// is, of cells that are dashes.
+		if row, rule := tableRow(trimmed); rule && len(p.table) == 1 && !p.ruled {
+			p.ruled = true
+		} else {
 			p.table = append(p.table, row)
 		}
 		return
@@ -181,10 +195,16 @@ func (p *lineParser) line(line string) {
 		p.add(&Node{ID: NewBlockID(), Type: "divider"}, indent)
 		return
 	}
-	if typ, rest, checked, ok := listItem(trimmed); ok {
+	if typ, rest, checked, ok := listItem(trimmed); ok && (typ != "numbered_list" || p.counts(trimmed, indent)) {
 		n := textNode(typ, nil)
 		if typ == "todo_list" {
 			n.Set("checked", checked)
+		}
+		if typ == "numbered_list" {
+			if p.numbers == nil {
+				p.numbers = map[*Node]int{}
+			}
+			p.numbers[n] = itemNumber(trimmed)
 		}
 		p.add(n, indent)
 		p.open = append(p.open, openBlock{n: n, min: indent + 2})
@@ -238,6 +258,17 @@ func (p *lineParser) continues(trimmed string, indent int) bool {
 		return false
 	}
 	return true
+}
+
+// counts reports whether a numbered item's line is one. A number of four
+// digits or more, as a year that starts a line, is one only right after
+// the item before it, as PageMarkdown numbers a long list.
+func (p *lineParser) counts(line string, indent int) bool {
+	if !longNumber(line) {
+		return true
+	}
+	kids := *p.container(indent)
+	return len(kids) > 0 && p.numbers[kids[len(kids)-1]] == itemNumber(line)-1
 }
 
 // add puts a block in what holds the blocks at an indent, and a list
@@ -314,7 +345,7 @@ func (p *lineParser) flushTable() {
 			*p.tableIn = append(*p.tableIn, t)
 		}
 	}
-	p.table, p.tableIn = nil, nil
+	p.table, p.tableIn, p.ruled = nil, nil, false
 }
 
 func (p *lineParser) closeCode() {
@@ -358,7 +389,8 @@ func hardBreak(s string) bool {
 // startsBlock reports whether a line starts a block of its own, so it
 // cannot go on in the block before it.
 func startsBlock(s string) bool {
-	_, _, _, item := listItem(s)
+	typ, _, _, item := listItem(s)
+	item = item && (typ != "numbered_list" || !longNumber(s))
 	_, _, heading := headingLine(s)
 	_, _, toggle := detailsOpen(s)
 	_, fence := CodeFence(s)
@@ -380,11 +412,22 @@ func listItem(s string) (typ, rest string, checked, ok bool) {
 		}
 		return "bulleted_list", rest, false, true
 	}
-	if i := strings.IndexAny(s, ".)"); i > 0 && i < 4 && isDigits(s[:i]) && (len(s) == i+1 || s[i+1] == ' ') {
+	// A number of up to nine digits, as CommonMark's, and EscapeBlockStart's.
+	if i := strings.IndexAny(s, ".)"); i > 0 && i <= 9 && isDigits(s[:i]) && (len(s) == i+1 || s[i+1] == ' ') {
 		return "numbered_list", strings.TrimPrefix(s[i+1:], " "), false, true
 	}
 	return "", "", false, false
 }
+
+// itemNumber is the number a numbered item's line starts with.
+func itemNumber(line string) int {
+	n, _ := strconv.Atoi(line[:strings.IndexAny(line, ".)")])
+	return n
+}
+
+// longNumber reports whether a numbered item's line starts with a number
+// of four digits or more.
+func longNumber(line string) bool { return strings.IndexAny(line, ".)") > 3 }
 
 // headingLine reads a heading's #s at the start of a line: its level and
 // text.
@@ -417,14 +460,21 @@ func detailsOpen(s string) (open bool, rest string, ok bool) {
 }
 
 // summaryEnd is where the </summary> that ends a toggle's summary is in
-// s, one not escaped, or -1.
+// s, one not escaped nor in a code span, or -1.
 func summaryEnd(s string) int {
-	for i := 0; i < len(s); i++ {
-		switch {
-		case s[i] == '\\':
+	r := []rune(s)
+	for i := 0; i < len(r); i++ {
+		switch r[i] {
+		case '\\':
 			i++
-		case len(s)-i >= len("</summary>") && strings.EqualFold(s[i:i+len("</summary>")], "</summary>"):
-			return i
+		case '`':
+			if _, n := codeSpanAt(r[i:]); n > 0 {
+				i += n - 1
+			}
+		case '<':
+			if _, ok := cutFold(string(r[i:]), "</summary>"); ok {
+				return len(string(r[:i]))
+			}
 		}
 	}
 	return -1
@@ -438,28 +488,35 @@ func cutFold(s, prefix string) (string, bool) {
 	return s, false
 }
 
-// tableRow reads a line of a markdown table, or nil for the line under the
-// header ("| --- | --- |"). As in GitHub's tables, a backslash keeps the
-// character after it in the cell, and \| is a | of the cell's text; a
+// tableRow reads a line of a markdown table, and reports whether it is
+// a line of dashes, as the one under the header ("| --- | --- |"). As in
+// GitHub's tables, a backslash keeps the character after it in the cell,
+// and \| is a | of the cell's text, even in a code span; there, where a
+// backslash is the code's, one before anything else is only itself. A
 // <br> is a line break, as PageMarkdown writes one.
-func tableRow(line string) []string {
-	line = strings.TrimSpace(line)
-	line = strings.TrimPrefix(line, "|")
-	var cells []string
+func tableRow(line string) (cells []string, rule bool) {
+	s := []rune(strings.TrimPrefix(strings.TrimSpace(line), "|"))
 	var cell strings.Builder
-	for i := 0; i < len(line); i++ {
+	// code is where the code span the line is read in ends.
+	code := 0
+	for i := 0; i < len(s); i++ {
 		switch {
-		case line[i] == '\\' && i+1 < len(line):
+		case s[i] == '\\' && i+1 < len(s) && s[i+1] == '|':
 			i++
-			if line[i] != '|' {
-				cell.WriteByte('\\')
-			}
-			cell.WriteByte(line[i])
-		case line[i] == '|':
+			cell.WriteRune('|')
+		case s[i] == '\\' && i+1 < len(s) && i >= code:
+			cell.WriteString(string(s[i : i+2]))
+			i++
+		case s[i] == '|':
 			cells = append(cells, cell.String())
 			cell.Reset()
+		case s[i] == '`' && i >= code:
+			if _, n := codeSpanAt(s[i:]); n > 0 {
+				code = i + n
+			}
+			cell.WriteRune(s[i])
 		default:
-			cell.WriteByte(line[i])
+			cell.WriteRune(s[i])
 		}
 	}
 	// A closing | ends the last cell; without one, what is after the last
@@ -467,27 +524,23 @@ func tableRow(line string) []string {
 	if rest := cell.String(); rest != "" || len(cells) == 0 {
 		cells = append(cells, rest)
 	}
-	rule := true
+	rule = true
 	for i, c := range cells {
 		cells[i] = strings.TrimSpace(c)
 		if strings.Trim(cells[i], "-: ") != "" || cells[i] == "" {
 			rule = false
 		}
+		cells[i] = cellBreaks(cells[i])
 	}
-	if rule {
-		return nil
-	}
-	for i, c := range cells {
-		cells[i] = cellBreaks(c)
-	}
-	return cells
+	return cells, rule
 }
 
 // brTags are how a line break is written in a table's cell.
 var brTags = []string{"<br>", "<br/>", "<br />"}
 
 // cellBreaks reads the <br>s in a table cell's Markdown as line breaks;
-// one in a code span, or escaped, is text.
+// one in a code span, or escaped, is text. A link's address holds no
+// code span, nor a <br>.
 func cellBreaks(md string) string {
 	if !strings.Contains(strings.ToLower(md), "<br") {
 		return md
@@ -500,6 +553,12 @@ func cellBreaks(md string) string {
 			b.WriteString(string(s[i:min(i+2, len(s))]))
 			i += 2
 			continue
+		case '[':
+			if text, _, n, ok := link(s[i:]); ok {
+				b.WriteString("[" + cellBreaks(string(text)) + string(s[i+1+len(text):i+n]))
+				i += n
+				continue
+			}
 		case '`':
 			if _, n := codeSpanAt(s[i:]); n > 0 {
 				b.WriteString(string(s[i : i+n]))
@@ -550,6 +609,11 @@ func imageLine(line string) *Node {
 	}
 	in := md.Inlines(1)
 	if len(in) == 0 || in[0].Kind != parser.Image || in[0].Next != len(in) {
+		return nil
+	}
+	// An address with a space in it, a title after a no-break space
+	// among them, is no picture's: the server reads the line as text.
+	if strings.IndexFunc(in[0].Dest, unicode.IsSpace) >= 0 {
 		return nil
 	}
 	n, err := ImageNode(in[0].Dest)

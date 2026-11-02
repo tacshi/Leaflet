@@ -14,9 +14,12 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
@@ -172,19 +175,8 @@ func withAudio(src Source, c *doc.Content, dir string) *doc.Content {
 		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 			continue
 		}
-		if _, err := os.Stat(rec.LocalPath); rec.LocalPath != "" && err == nil {
-			// The audio as it is, under the recording's name, without
-			// copying it: a link where the folder allows one.
-			if os.Link(rec.LocalPath, path) != nil && copyAudio(rec.LocalPath, path) != nil {
-				continue
-			}
-		} else {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			data, err := src.Rec.Audio(ctx, rec)
-			cancel()
-			if err != nil || os.WriteFile(path, data, 0o600) != nil {
-				continue
-			}
+		if putAudio(src, rec, path) != nil {
+			continue
 		}
 		file := &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{"url": "file://" + path, "name": name}}
 		_ = c.Insert(doc.Position{After: n.ID}, file)
@@ -192,22 +184,56 @@ func withAudio(src Source, c *doc.Content, dir string) *doc.Content {
 	return c
 }
 
-// copyAudio copies a recording's audio to path.
+// putAudio puts rec's audio at path. Another block of the recording, as
+// one copied with its page, may have put it there already, and the zip
+// then takes it once.
+func putAudio(src Source, rec store.Recording, path string) error {
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	}
+	if _, err := os.Stat(rec.LocalPath); rec.LocalPath != "" && err == nil {
+		// The audio as it is, under the recording's name, without
+		// copying it: a link where the folder allows one.
+		if os.Link(rec.LocalPath, path) == nil {
+			return nil
+		}
+		return copyAudio(rec.LocalPath, path)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	data, err := src.Rec.Audio(ctx, rec)
+	if err != nil {
+		return err
+	}
+	// Audio cut short goes, or another block would take it as it is.
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		_ = os.Remove(path)
+		return err
+	}
+	return nil
+}
+
+// copyAudio copies a recording's audio to a new file at path. A file
+// there already is left as it is: it may be a link to the recording's own
+// audio, which writing over would empty. A copy cut short goes.
 func copyAudio(from, path string) error {
 	in, err := os.Open(from) // #nosec G304 -- a recording's audio in the app's own folder.
 	if err != nil {
 		return err
 	}
 	defer func() { _ = in.Close() }()
-	out, err := os.Create(path) // #nosec G304 -- a file in the export's own folder.
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) // #nosec G304 -- a file in the export's own folder.
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
-		_ = out.Close()
-		return err
+	_, err = io.Copy(out, in)
+	if cerr := out.Close(); err == nil {
+		err = cerr
 	}
-	return out.Close()
+	if err != nil {
+		_ = os.Remove(path)
+	}
+	return err
 }
 
 // ErrNotOwnFile is for a file outside the app's data folder.
@@ -252,10 +278,11 @@ func InFolder(dir, path string) bool {
 }
 
 // SafeName is s as a file's name: no character a file system keeps out,
-// and never "", "." or "..".
+// short enough for any of them, and never "", "." or ".." or a name
+// Windows keeps for a device.
 func SafeName(s string) string {
 	s = strings.Map(func(r rune) rune {
-		if strings.ContainsRune(`/\:*?"<>|`, r) {
+		if strings.ContainsRune(`/\:*?"<>|`, r) || unicode.IsControl(r) {
 			return '-'
 		}
 		return r
@@ -267,8 +294,40 @@ func SafeName(s string) string {
 	if strings.Trim(s, ".") == "" {
 		return strings.ReplaceAll(s, ".", "-")
 	}
+	// File systems take names of up to 255 bytes; a name here leaves room
+	// for the " (2)" and ".md" that may follow it, and keeps its extension.
+	const maxName = 200
+	if len(s) > maxName {
+		// An extension is short, and of letters and digits alone: what
+		// follows the last dot of "Notes v2.Next steps" is no extension.
+		ext := path.Ext(s)
+		if len(ext) > 16 || strings.ContainsFunc(ext[min(len(ext), 1):], func(r rune) bool {
+			return (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9')
+		}) {
+			ext = ""
+		}
+		cut := maxName - len(ext)
+		for !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + ext
+	}
+	// Windows drops dots and spaces at a name's end.
+	if s = strings.TrimRight(s, ". "); s == "" {
+		return locales.CommonUntitled()
+	}
+	// Nor does it take a device's name, with an extension or without.
+	if stem, rest, dot := strings.Cut(s, "."); windowsDevice.MatchString(strings.TrimRight(stem, " ")) {
+		s = stem + "-"
+		if dot {
+			s += "." + rest
+		}
+	}
 	return s
 }
+
+// windowsDevice matches the names Windows keeps for its devices.
+var windowsDevice = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])$`)
 
 // Zip writes the pages as Markdown files in a zip: a folder is a
 // directory, in the directory of the folder it is in, and so is a page

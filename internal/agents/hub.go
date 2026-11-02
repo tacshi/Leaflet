@@ -14,9 +14,11 @@ import (
 
 	"leaflet/internal/agents/endpoint"
 	"leaflet/internal/doc"
+	"leaflet/internal/guard"
 	"leaflet/internal/keychain"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // Host is what the hub needs from the app. Its methods run on the main
@@ -401,7 +403,8 @@ func (h *Hub) Options() []Option {
 	return out
 }
 
-// ErrNoAgent is returned when no model can run.
+// ErrNoAgent is returned when no model can run, saying why in the app's
+// language.
 type ErrNoAgent struct{ Message string }
 
 func (e *ErrNoAgent) Error() string { return e.Message }
@@ -411,7 +414,7 @@ func (e *ErrNoAgent) Error() string { return e.Message }
 func (h *Hub) Resolve(wanted *store.ModelChoice) (Option, error) {
 	all := h.Options()
 	if len(all) == 0 {
-		return Option{}, &ErrNoAgent{"Add an agent provider in Settings › Agent providers to use agents."}
+		return Option{}, &ErrNoAgent{locales.AgentNoProvider()}
 	}
 	settings := h.host.Settings()
 	pick := func(c *store.ModelChoice) (Option, bool) {
@@ -457,9 +460,9 @@ func (h *Hub) Resolve(wanted *store.ModelChoice) (Option, error) {
 		case offline != nil:
 			option = *offline
 		case needsServer && !signedIn:
-			return Option{}, &ErrNoAgent{"Sign in to use " + option.Name() + ", or add a provider on this machine."}
+			return Option{}, &ErrNoAgent{locales.AgentSignInToUse(option.Name())}
 		default:
-			return Option{}, &ErrNoAgent{"Agents need a connection. You can keep editing; agents return when you are back online."}
+			return Option{}, &ErrNoAgent{locales.AgentNeedsConnection()}
 		}
 	}
 	return option, nil
@@ -652,8 +655,13 @@ type RunOptions struct {
 	Done func(*Run)
 }
 
-// ErrRunning is a run asked for on a page an agent is already working on.
-var ErrRunning = errors.New("An agent is already working on this page. Try again when it is done.") //nolint:staticcheck // shown to people as a sentence.
+// ErrRunning is a run asked for on a page an agent is already working on,
+// said in the app's language.
+var ErrRunning error = errRunning{}
+
+type errRunning struct{}
+
+func (errRunning) Error() string { return locales.AgentRunning() }
 
 // Start runs an agent from any surface, in the background. Problems end
 // up in Run.Error; a page runs one agent at a time, so a run asked for
@@ -662,7 +670,8 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 	s := h.Session(pageID)
 	run := &Run{ID: doc.NewRowID(), Surface: o.Surface, Instruction: o.Instruction, Status: "running", At: time.Now()}
 	fail := func(err error) *Run {
-		run.AgentName, run.Status, run.Error = "Agent", "failed", err.Error()
+		// An agent that never resolved is named for what it is.
+		run.AgentName, run.Status, run.Error = locales.CommonAgent(), "failed", err.Error()
 		if o.Reply != nil {
 			o.Reply.Pending, o.Reply.Error, o.Reply.Text = false, true, run.Error
 		}
@@ -728,21 +737,26 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		run.stop = cancel
 	}
 	go func() {
+		defer guard.Recover()
 		defer cancel()
-		var res Result
-		var err error
-		if option.Local() {
-			var client Model
-			if client, err = h.ModelFor(option.Provider); err == nil {
-				res, err = RunLocal(ctx, client, req, h.toolContext(pageID, page.DisplayTitle(), option.Name(), work, settings), events)
-			}
-		} else {
-			if err = h.host.FlushPage(ctx, pageID); err == nil {
-				if err = h.insertJob(ctx, req); err == nil {
-					res, err = RunCloud(ctx, h.be, run.ID, events)
+		// A panic in the run fails it, as an error does: the run still
+		// ends, and the page is no longer taken as working.
+		res, err := func() (res Result, err error) {
+			defer guard.RecoverAs(&err)
+			if option.Local() {
+				var client Model
+				if client, err = h.ModelFor(option.Provider); err == nil {
+					res, err = RunLocal(ctx, client, req, h.toolContext(pageID, page.DisplayTitle(), option.Name(), work, settings), events)
+				}
+			} else {
+				if err = h.host.FlushPage(ctx, pageID); err == nil {
+					if err = h.insertJob(ctx, req); err == nil {
+						res, err = RunCloud(ctx, h.be, run.ID, events)
+					}
 				}
 			}
-		}
+			return res, err
+		}()
 		h.host.Update(func() { h.finish(s, run, req, option, before, d, res, err, o) })
 	}()
 	return run
@@ -1158,7 +1172,12 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 	if len(res.Ops) > len(run.Ops) {
 		run.Ops, run.Edits = res.Ops, res.Edits
 	}
-	if run.Stopped {
+	switch {
+	case run.Stopped && err == nil:
+		// Stopped after it had finished, before it ended here: it ends as
+		// it finished, with its answer.
+		run.Stopped = false
+	case run.Stopped:
 		// What it said before it stopped is no answer, and what it edited
 		// stays, for Undo.
 		run.Reply, err = "", nil
@@ -1330,7 +1349,7 @@ func (h *Hub) UndoRun(pageID, runID string) error {
 	if run == nil || run.Undone {
 		return nil
 	}
-	if err := h.apply(pageID, runID, doc.InvertRun(run.Ops)); err != nil {
+	if err := h.apply(pageID, run, doc.InvertRun(run.Ops)); err != nil {
 		log.Printf("undo run: %v", err)
 		return err
 	}
@@ -1349,7 +1368,7 @@ func (h *Hub) RedoRun(pageID, runID string) error {
 	if run == nil || !run.Undone {
 		return nil
 	}
-	if err := h.apply(pageID, runID, run.Ops); err != nil {
+	if err := h.apply(pageID, run, run.Ops); err != nil {
 		log.Printf("redo run: %v", err)
 		return err
 	}
@@ -1361,15 +1380,27 @@ func (h *Hub) RedoRun(pageID, runID string) error {
 }
 
 // apply makes a run's ops, or their inverse, on its page and on the pages
-// it made or deleted. The page's blocks go first, all at once or not at
-// all: when they cannot, nothing changed.
-func (h *Hub) apply(pageID, runID string, ops []doc.Op) error {
+// it made or deleted. A page it made that this device does not have yet,
+// as a cloud run's before it syncs, stops it before anything changes:
+// deleting it would miss it, and it would come back with the sync. One
+// that is not coming, as sync has pulled the pages made since the run
+// began, is gone for good, and passed over. The page's blocks go next,
+// all at once or not at all: when they cannot, nothing changed. Only the
+// database failing leaves the pages after them as they were.
+func (h *Hub) apply(pageID string, run *Run, ops []doc.Op) error {
 	var blockOps, pageOps []doc.Op
 	for _, o := range ops {
-		if o.Op == "delete_page" || o.Op == "create_page" {
-			pageOps = append(pageOps, o)
-		} else {
+		id := o.PageID
+		if o.Page != nil {
+			id = o.Page.ID
+		}
+		switch _, err := h.st.Page(id); {
+		case o.Op != "delete_page" && o.Op != "create_page":
 			blockOps = append(blockOps, o)
+		case err == nil:
+			pageOps = append(pageOps, o)
+		case id != "" && h.awaited(run):
+			return errors.New(locales.PageRunSubpageNotHere())
 		}
 	}
 	if len(blockOps) > 0 {
@@ -1377,7 +1408,7 @@ func (h *Hub) apply(pageID, runID string, ops []doc.Op) error {
 		if ed := h.host.Live(pageID); ed != nil {
 			err = ed.ApplyOps(blockOps)
 		} else {
-			err = storeOps(h.st, pageID, blockOps, false, runID, "undo run")
+			err = storeOps(h.st, pageID, blockOps, false, run.ID, "undo run")
 		}
 		if err != nil {
 			return err
@@ -1397,6 +1428,26 @@ func (h *Hub) apply(pageID, runID string, ops []doc.Op) error {
 	return failed
 }
 
+// pagesCursorKey is internal/sync's cursor of the pages pulled: the
+// time, then the key, of the last.
+const pagesCursorKey = "sync.cursor.pages"
+
+// awaited reports whether a page run made, which this device does not
+// have, may still come with a sync: signed in, sync has not pulled pages
+// made since the run began.
+func (h *Hub) awaited(run *Run) bool {
+	if run.At.IsZero() || !h.st.Session().SignedIn {
+		return false
+	}
+	v, ok := h.st.Value(pagesCursorKey)
+	if !ok {
+		return true
+	}
+	at, _, _ := strings.Cut(v, "|")
+	pulled, err := time.Parse(time.RFC3339Nano, at)
+	return err != nil || pulled.Before(run.At)
+}
+
 // markJob changes a run's status: in the job this device keeps of a local
 // run, or else in the cloud run's row on the server, whose status the
 // agent function reads to leave an undone run out of the chat's history.
@@ -1406,13 +1457,13 @@ func (h *Hub) markJob(id, status string) {
 		log.Printf("job status: %v", err)
 	}
 	if !local && h.be.SignedIn() && h.host.Online() {
-		go func() {
+		guard.Go(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			if err := h.sendJobStatus(ctx, id, status); err != nil {
 				log.Printf("job status: %v", err)
 			}
-		}()
+		})
 	}
 }
 
@@ -1425,7 +1476,6 @@ func (h *Hub) sendJobStatus(ctx context.Context, id, status string) error {
 	return err
 }
 
-// Describe is how a run ended, for its reply.
 // maxTranscript bounds the transcript an agent reads of one recording.
 const maxTranscript = 40000
 
@@ -1456,6 +1506,7 @@ func TranscriptText(segs []store.Segment) string {
 	return out
 }
 
+// Describe is how a run ended, for its reply.
 func Describe(r *Run) string {
 	switch {
 	case r.Error != "":

@@ -8,7 +8,7 @@ struct ICloudSection: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        @Bindable var sync = app.iCloud
+        let sync = app.iCloud
         let on = app.status?.iCloudOn ?? false
         let signedIn = app.status?.signedIn ?? false
         Section {
@@ -30,15 +30,18 @@ struct ICloudSection: View {
         } footer: {
             Text(footer(on: on, signedIn: signedIn))
         }
-        .sheet(isPresented: $sync.picking) {
-            FolderPicker { url in
-                Task {
-                    await sync.picked(url, syncing: on)
-                    await app.refreshStatus()
-                }
+    }
+
+    /// picker picks the folder, as Choose Folder asks; Settings shows it,
+    /// over the whole form, as a row's sheet would go with the row.
+    static func picker(_ app: AppModel) -> some View {
+        FolderPicker { url in
+            Task {
+                await app.iCloud.picked(url, syncing: app.status?.iCloudOn ?? false)
+                await app.refreshStatus()
             }
-            .ignoresSafeArea()
         }
+        .ignoresSafeArea()
     }
 
     private func footer(on: Bool, signedIn: Bool) -> String {

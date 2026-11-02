@@ -96,8 +96,9 @@ func TestOnlyRefusalsKept(t *testing.T) {
 		reads int
 	}{
 		{fmt.Errorf("system: %w", ErrDenied), 1},
-		{errors.New("mygo: secrets: keychain: read: The user name or passphrase you entered is not correct. (OSStatus -25293)"), 1},
-		{errors.New("mygo: secrets: keychain: read: User canceled the operation. (OSStatus -128)"), 1},
+		{Denied(errors.New("mygo: secrets: keychain: read: The user name or passphrase you entered is not correct. (OSStatus -25293)")), 1},
+		{Denied(errors.New("mygo: secrets: keychain: read: User canceled the operation. (OSStatus -128)")), 1},
+		{Denied(errors.New("Interaction is not allowed with the Security Server. (OSStatus -25308)")), 2},
 		{errors.New("Interaction is not allowed with the Security Server."), 2},
 	} {
 		f := &failingStore{err: c.err}
@@ -110,5 +111,30 @@ func TestOnlyRefusalsKept(t *testing.T) {
 		if f.reads != c.reads {
 			t.Errorf("%v: read the store %d times, want %d", c.err, f.reads, c.reads)
 		}
+	}
+}
+
+// The status an error ends with is read, and the user's refusal of the
+// prompt, failed or cancelled, becomes ErrDenied, still the error it was.
+func TestDenied(t *testing.T) {
+	for _, c := range []struct {
+		err    error
+		status int
+		denied bool
+	}{
+		{errors.New("read: The user name or passphrase you entered is not correct. (OSStatus -25293)"), -25293, true},
+		{errors.New("read: User canceled the operation. (OSStatus -128)"), -128, true},
+		{errors.New("read: The specified item could not be found in the keychain. (OSStatus -25300)"), -25300, false},
+		{errors.New("read: (OSStatus x)"), 0, false},
+		{errors.New("read: failed"), 0, false},
+	} {
+		status, _ := OSStatus(c.err)
+		got := Denied(c.err)
+		if status != c.status || errors.Is(got, ErrDenied) != c.denied || !errors.Is(got, c.err) {
+			t.Errorf("%v: status %d, Denied %v", c.err, status, got)
+		}
+	}
+	if Denied(nil) != nil {
+		t.Error("no error became one")
 	}
 }

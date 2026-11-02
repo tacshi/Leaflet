@@ -314,8 +314,9 @@ type Executor struct {
 // not loaded, so they stay free.
 var fetchedURLs = map[string]bool{"image": true, "video": true, "link_preview": true}
 
-// urlRe finds the URLs in text the agent read.
-var urlRe = regexp.MustCompile(`https?://[^\s<>"'()\[\]]+`)
+// urlRe finds the URLs in text the agent read, each to the first space
+// of unicode.IsSpace's, as the server's URL_RE.
+var urlRe = regexp.MustCompile(`https?://[^\t\n\v\f\r \x{85}\x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}<>"'()\[\]]+`)
 
 // see adds the URLs in v to set.
 func see(set map[string]bool, v any) {
@@ -408,6 +409,15 @@ func (x *Executor) begin() {
 
 func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, error) {
 	x.begin()
+	// Text on the page, in its comments or in what a tool returns may be
+	// written to steer the agent, and only the prompt has it take that as
+	// data. The tools that delete or rewrite blocks are not refused for
+	// it: a run is asked for by the user, who may edit the page, in their
+	// own words (a comment's run by their own comment), and its edits are
+	// one undo step over a snapshot of the page kept before them, so what
+	// such text has the agent take away comes back with Undo. Reading the
+	// user's other pages, which could carry them off, is what is refused
+	// where others write (crossPage).
 	switch name {
 	case "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_subpage":
 		if x.Ctx.ReadOnly {
@@ -537,19 +547,7 @@ func Specs(raw any, author string) ([]*doc.Node, error) {
 	if !ok || len(list) == 0 {
 		return nil, terr("blocks must be a non-empty list.")
 	}
-	var out []*doc.Node
-	for _, s := range list {
-		m, ok := s.(map[string]any)
-		if !ok {
-			return nil, terr("Each block must be an object.")
-		}
-		n, err := doc.SpecToNode(m, "", author)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, nil
+	return doc.SpecsToNodes(list, author)
 }
 
 func (x *Executor) emit(op doc.Op, summary string, ids []string) error {
@@ -597,6 +595,10 @@ func (x *Executor) write(args map[string]any) (map[string]any, error) {
 	nodes := doc.MarkdownBlocks(md)
 	if len(nodes) == 0 {
 		return nil, terr("markdown is empty.")
+	}
+	// As many blocks as a call of blocks makes, as on the server.
+	if err := doc.CallNodes(nodes); err != nil {
+		return nil, err
 	}
 	d.verb, x.draft = "Wrote", d
 	if err := x.syncDraft(nodes, len(nodes)); err != nil {
@@ -734,6 +736,8 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Without the spaces around it, as the server keeps it.
+	title = strings.TrimSpace(title)
 	var nodes []*doc.Node
 	if args["blocks"] != nil {
 		if nodes, err = x.specs(args["blocks"]); err != nil {

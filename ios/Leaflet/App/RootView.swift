@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// RootView is a window: the library in the sidebar, and the page chosen
 /// in it. On iPhone, and in a narrow window on iPad, the two stack.
@@ -67,7 +68,8 @@ struct RootView: View {
         // text clear of them itself, and the sidebar scrolls under them.
         .ignoresSafeArea(.keyboard, edges: .bottom)
         .preferredColorScheme(app.theme.colorScheme)
-        .overlay(alignment: .bottom) { ToastView() }
+        // The toast shows in a window of its own, over the sheets.
+        .background(SceneReader { scene.toasts.show(in: $0, app: app) })
         .sheet(isPresented: $scene.settingsShown) {
             // A sheet open keeps the scheme it opened with, and one let go
             // to follow the system keeps the last it was given: the theme
@@ -90,7 +92,7 @@ struct RootView: View {
                 app.show(Toast(message: L.hostErrorExport(error: error.localizedDescription)))
             }
         }
-        // After the sheets and the toast, for them to take the theme too.
+        // After the sheets, for them to take the theme too.
         .environment(\.palette, palette)
         .tint(palette.accent)
         .environment(scene)
@@ -139,6 +141,76 @@ struct RootView: View {
             case .background: app.background(scene)
             default: break
             }
+        }
+    }
+}
+
+/// ToastWindow shows the app's toast in a window of its own, over the
+/// window scene's: drawn in the scene's window, it would go under the
+/// sheets, as Settings and History, which raise toasts too. The window
+/// lets touches through, but on the toast.
+@MainActor
+final class ToastWindow {
+    private var window: UIWindow?
+
+    /// show puts the window up in scene, once.
+    func show(in scene: UIWindowScene, app: AppModel) {
+        guard window == nil else { return }
+        let host = UIHostingController(rootView: ToastHost().environment(app))
+        host.view.backgroundColor = .clear
+        let w = PassThroughWindow(windowScene: scene)
+        w.rootViewController = host
+        // Over the scene's window and the sheets in it, under the alerts.
+        w.windowLevel = .normal + 1
+        w.isHidden = false
+        window = w
+    }
+}
+
+/// PassThroughWindow takes only the touches on its views, as the toast:
+/// the others go to the window under it.
+private final class PassThroughWindow: UIWindow {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        return hit === rootViewController?.view ? nil : hit
+    }
+}
+
+/// ToastHost is the toast window's view: the toast at its foot, in the
+/// app's theme, as the windows have it.
+private struct ToastHost: View {
+    @Environment(AppModel.self) private var app
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let palette = Palette.of(accent: app.accent, mode: app.theme, scheme: scheme)
+        ToastView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .environment(\.palette, palette)
+            .tint(palette.accent)
+            .preferredColorScheme(app.theme.colorScheme)
+            .animation(.default, value: app.toast?.id)
+    }
+}
+
+/// SceneReader gives the window scene the view is in, once it is in one.
+private struct SceneReader: UIViewRepresentable {
+    var found: (UIWindowScene) -> Void
+
+    func makeUIView(context: Context) -> SceneView {
+        let view = SceneView()
+        view.found = found
+        return view
+    }
+
+    func updateUIView(_ view: SceneView, context: Context) { view.found = found }
+
+    final class SceneView: UIView {
+        var found: ((UIWindowScene) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if let scene = window?.windowScene { found?(scene) }
         }
     }
 }

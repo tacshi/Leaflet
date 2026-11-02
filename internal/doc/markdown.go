@@ -387,7 +387,8 @@ func LinkDestination(href string) string {
 
 // EscapeBlockStart escapes what at the start of a block's text would
 // read as another kind of block: a heading's #, a list item's marker, a
-// quote's >, a table's |, a math block's $$, or a rule.
+// quote's >, a table's |, a math block's $$, a rule, or a toggle's
+// <details> or <summary>.
 func EscapeBlockStart(md string) string {
 	s := strings.TrimLeft(md, " \t")
 	lead := md[:len(md)-len(s)]
@@ -397,7 +398,7 @@ func EscapeBlockStart(md string) string {
 	case s == "":
 		return md
 	case len(hashes) < len(s) && len(s)-len(hashes) <= 6 && (hashes == "" || hashes[0] == ' '),
-		s[0] == '>', s[0] == '|', strings.HasPrefix(s, "$$"), IsRule(s),
+		s[0] == '>', s[0] == '|', strings.HasPrefix(s, "$$"), IsRule(s), toggleTag(s),
 		(s[0] == '-' || s[0] == '+') && (len(s) == 1 || s[1] == ' '):
 		return lead + "\\" + s
 	case len(digits) < len(s) && len(s)-len(digits) <= 9 && digits != "" && (digits[0] == '.' || digits[0] == ')') &&
@@ -406,6 +407,17 @@ func EscapeBlockStart(md string) string {
 		return lead + s[:n] + "\\" + s[n:]
 	}
 	return md
+}
+
+// toggleTag reports whether s starts with a tag ParseLines reads a toggle
+// by.
+func toggleTag(s string) bool {
+	for _, tag := range []string{"<details", "</details", "<summary"} {
+		if _, ok := cutFold(s, tag); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // FromMarkdown reads the inline markdown dialect.

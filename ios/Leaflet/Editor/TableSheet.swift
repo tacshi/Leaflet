@@ -12,6 +12,9 @@ struct TableSheet: View {
     @Environment(\.palette) private var palette
     @State private var rows: [[String]] = []
     @FocusState private var focused: Cell?
+    /// failure is why the cells could not be put in the table, which the
+    /// sheet stays open to say, keeping them.
+    @State private var failure: String?
 
     struct Cell: Hashable {
         let row: Int
@@ -50,6 +53,12 @@ struct TableSheet: View {
             }
         }
         .onAppear(perform: load)
+        .alert(
+            failure ?? "",
+            isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })
+        ) {
+            Button(L.commonClose) {}
+        }
     }
 
     private func field(_ r: Int, _ c: Int) -> some View {
@@ -114,9 +123,13 @@ struct TableSheet: View {
         var error: NSError?
         let raw = MobileSetTableRows(
             String(decoding: table, as: UTF8.self), String(decoding: cells, as: UTF8.self), &error)
-        if error == nil, let saved = try? JSONDecoder().decode(DocNode.self, from: Data(raw.utf8)) {
-            save(saved)
+        guard error == nil,
+            let saved = try? JSONDecoder().decode(DocNode.self, from: Data(raw.utf8))
+        else {
+            failure = L.appErrorSave(error: error?.localizedDescription ?? "")
+            return
         }
+        save(saved)
         dismiss()
     }
 }

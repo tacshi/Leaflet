@@ -26,11 +26,19 @@ struct EditorTests {
         return try await client.openPage(page.id).content
     }
 
+    /// The welcome page goes into the editor, styled as it shows, and back
+    /// unchanged: what only shows, as a link's underline and a checked
+    /// to-do's line through, is not saved as a format.
     @Test func welcomePageRoundTrips() async throws {
         let content = try await welcome()
         let (text, trailing) = DocumentMapper.attributedString(content)
         let back = DocumentMapper.content(text, trailing: trailing, meta: content.meta)
         #expect(back.document.children == content.document.children)
+        let c = editor(content.document.children ?? [])
+        var sent: DocContent?
+        c.onEdit = { sent = $0 }
+        c.send()
+        #expect(sent?.document.children == content.document.children)
     }
 
     /// A closed toggle folds what is in it out of the page's layout, and
@@ -100,6 +108,9 @@ struct EditorTests {
         let (range, _) = c.paragraph(at: c.textView.textStorage.length)
         c.textView.selectedRange = NSRange(
             location: caretIn == "top" ? 0 : range.location, length: 0)
+        // Once an iPhone's keyboard has come up, which moves the page as it
+        // does: a page moved by the keyboard is not one an agent moved.
+        try await settle(c)
         c.textView.scrollRangeToVisible(c.textView.selectedRange)
         try await Task.sleep(for: .milliseconds(100))
         let start = c.textView.contentOffset.y
@@ -264,7 +275,7 @@ struct EditorTests {
     @Test func tabNestsInTheItemBefore() {
         let c = editor([block("a", "bulleted_list", "One"), block("b", "bulleted_list", "Two")])
         c.textView.selectedRange = NSRange(location: 5, length: 0)
-        c.indent(by: 1)
+        c.type("\t")
         var sent: DocContent?
         c.onEdit = { sent = $0 }
         c.send()
@@ -299,9 +310,12 @@ struct EditorTests {
     @Test func slashMenuInsertsATableAfterText() {
         let c = editor([block("a", "paragraph", "Plan")])
         c.textView.selectedRange = NSRange(location: 4, length: 0)
-        offer(c, [("table", "Table"), ("chart", "Chart")])
-        c.type(" /table")
-        c.moveInMenu(0)
+        // The second item, chosen with the down arrow.
+        offer(c, [("chart", "Chart"), ("table", "Table")])
+        c.type(" /")
+        #expect(c.menu?.current?.id == "chart")
+        c.press(UIKeyCommand.inputDownArrow)
+        #expect(c.menu?.current?.id == "table")
         c.type("\t")
         var sent: DocContent?
         c.onEdit = { sent = $0 }
@@ -396,7 +410,7 @@ struct EditorTests {
         let c = editor([block("a", "paragraph", "")])
         c.type("/")
         #expect(c.menu != nil)
-        c.closeMenu()
+        c.press(UIKeyCommand.inputEscape)
         #expect(c.menu == nil)
         #expect(blocks(c).first?.text == "/")
     }
@@ -507,28 +521,483 @@ struct EditorTests {
         // A day without a time is due all of it.
         #expect(!day.overdue(now: now.addingTimeInterval(86400)))
     }
+
+    /// runs is a block's text as runs of text and their formats.
+    private func runs(_ node: DocNode?) -> [(String, JSONValue?)] {
+        (node?.data?["delta"]?.array ?? []).map { ($0["insert"]?.string ?? "", $0["attributes"]) }
+    }
+
+    /// A checked to-do shows its text struck through, which is not a format
+    /// of its text: edited, it saves none, and unchecked it shows none.
+    @Test func aCheckedToDosLineIsNoFormat() {
+        let c = editor([block("a", "todo_list", "Milk", data: ["checked": .bool(true)])])
+        c.textView.selectedRange = NSRange(location: 4, length: 0)
+        c.type("s")
+        #expect(runs(blocks(c).first).map(\.1) == [nil])
+        let (_, todo) = c.paragraph(at: 0)
+        c.setBlock(todo.setting("checked", .bool(false)), at: 0)
+        let text = c.textView.textStorage
+        var struck = false
+        text.enumerateAttribute(
+            .strikethroughStyle, in: NSRange(location: 0, length: text.length)
+        ) { v, _, _ in if v != nil { struck = true } }
+        #expect(!struck)
+        #expect(runs(blocks(c).first).map(\.1) == [nil])
+    }
+
+    /// A link shows underlined, which is not a format either: the text
+    /// typed after it is plain.
+    @Test func textTypedAfterALinkIsPlain() {
+        var d: [String: JSONValue] = [:]
+        d["delta"] = .array([
+            .object([
+                "insert": .string("Site"),
+                "attributes": .object(["href": .string("https://example.com")]),
+            ])
+        ])
+        let c = editor([DocNode(id: "a", type: "paragraph", data: d, children: nil)])
+        c.textView.selectedRange = NSRange(location: 4, length: 0)
+        c.type(" x")
+        let r = runs(blocks(c).first)
+        #expect(r.map(\.0) == ["Site", " x"])
+        #expect(r.first?.1?["underline"] == nil)
+        #expect(r.last?.1 == nil)
+    }
+
+    /// A format toggled at the caret is the next character's, though the
+    /// selection's change comes before the text's.
+    @Test func boldToggledAtTheCaretTakesTheNextCharacter() {
+        let c = editor([block("a", "paragraph", "Hi ")])
+        c.textView.selectedRange = NSRange(location: 3, length: 0)
+        c.toggleInline(.leafletBold)
+        c.type("yo")
+        let r = runs(blocks(c).first)
+        #expect(r.map(\.0) == ["Hi ", "yo"])
+        #expect(r.last?.1?["bold"]?.bool == true)
+    }
+
+    /// A change from outside that only nests a block shows, and is kept.
+    @Test func aChangeThatOnlyNestsABlockShows() {
+        let c = editor([block("a", "bulleted_list", "One"), block("b", "bulleted_list", "Two")])
+        c.update(
+            DocContent(
+                document: DocNode(
+                    id: "root", type: "page", data: nil,
+                    children: [
+                        block(
+                            "a", "bulleted_list", "One",
+                            children: [block("b", "bulleted_list", "Two")])
+                    ]),
+                meta: nil),
+            tinted: [])
+        #expect(c.paragraph(at: 5).info.depth == 1)
+        c.textView.selectedRange = NSRange(location: 7, length: 0)
+        c.type("!")
+        var sent: DocContent?
+        c.onEdit = { sent = $0 }
+        c.send()
+        #expect(sent?.blocks.map(\.id) == ["a"])
+        #expect(sent?.blocks.first?.children?.map(\.text) == ["Two!"])
+    }
+
+    /// Lines pasted are a block each, which keep their IDs as the page is
+    /// sent again; in code they are the block's lines.
+    @Test func pastedLinesAreABlockEach() {
+        let c = editor([block("a", "bulleted_list", "x")])
+        c.textView.selectedRange = NSRange(location: 1, length: 0)
+        c.paste("a\nb\nc\nd")
+        let first = blocks(c)
+        #expect(first.map(\.text) == ["xa", "b", "c", "d"])
+        #expect(first.map(\.type) == Array(repeating: "bulleted_list", count: 4))
+        #expect(Set(first.map(\.id)).count == 4)
+        #expect(blocks(c).map(\.id) == first.map(\.id))
+
+        let code = editor([block("k", "code", "")])
+        code.paste("let a = 1\r\nlet b = 2")
+        #expect(blocks(code).map(\.type) == ["code"])
+        #expect(blocks(code).first?.text == "let a = 1\nlet b = 2")
+    }
+
+    /// A space typed by an image, before or after it, goes in a paragraph
+    /// of its own: the image stays.
+    @Test func aSpaceTypedByAnImageKeepsIt() {
+        let image = DocNode(
+            id: "i", type: "image", data: ["url": .string("https://example.com/a.png")],
+            children: nil)
+        for at in [0, 1] {
+            let c = editor([image, block("p", "paragraph", "After")])
+            c.textView.selectedRange = NSRange(location: at, length: 0)
+            c.type(" ")
+            let b = blocks(c)
+            #expect(b.map(\.type) == ["image", "paragraph", "paragraph"])
+            #expect(b.first?.id == "i")
+        }
+    }
+
+    /// The last block emptied stays the block it was: its checkbox stays,
+    /// and its ID.
+    @Test func theLastBlockEmptiedStaysItself() {
+        let c = editor([
+            block("a", "paragraph", "One"),
+            block("t", "todo_list", "abc", data: ["checked": .bool(false)]),
+        ])
+        c.textView.selectedRange = NSRange(location: 7, length: 0)
+        for _ in 0..<3 { c.backspace() }
+        let b = blocks(c)
+        #expect(b.map(\.type) == ["paragraph", "todo_list"])
+        #expect(b.map(\.id) == ["a", "t"])
+        #expect(blocks(c).map(\.id) == ["a", "t"])
+        c.type("x")
+        #expect(blocks(c).last?.text == "x")
+        #expect(blocks(c).last?.id == "t")
+    }
+
+    /// Enter at the end of a folded heading starts its section, which
+    /// shows; at the end of a closed toggle it makes one after what is
+    /// folded in it, which stays in it.
+    @Test func enterKeepsWhatIsFolded() {
+        let c = editor([
+            block("h", "heading", "Plan", data: ["level": .int(2), "collapsed": .bool(true)]),
+            block("p", "paragraph", "Body"),
+        ])
+        c.textView.selectedRange = NSRange(location: 4, length: 0)
+        c.type("\nNew")
+        let b = blocks(c)
+        #expect(b.map(\.text) == ["Plan", "New", "Body"])
+        #expect(b.first?.data?["collapsed"]?.bool != true)
+
+        let t = editor([
+            block(
+                "t", "toggle_list", "Details", data: ["collapsed": .bool(true)],
+                children: [block("in", "paragraph", "Hidden")]),
+            block("after", "paragraph", "After"),
+        ])
+        t.textView.selectedRange = NSRange(location: 4, length: 0)
+        t.type("\n")
+        var sent: DocContent?
+        t.onEdit = { sent = $0 }
+        t.send()
+        let top = sent?.blocks ?? []
+        #expect(top.map(\.text) == ["Deta", "ils", "After"])
+        #expect(top.first?.children?.map(\.id) == ["in"])
+        #expect(top[1].type == "toggle_list")
+        #expect(t.paragraph(at: t.textView.selectedRange.location).info.id == top[1].id)
+
+        // In an open toggle, the new line is its first block.
+        let o = editor([block("t", "toggle_list", "Open")])
+        o.textView.selectedRange = NSRange(location: 4, length: 0)
+        o.type("\nIn")
+        o.onEdit = { sent = $0 }
+        o.send()
+        #expect(sent?.blocks.first?.children?.map(\.text) == ["In"])
+    }
+
+    /// A block moves with the blocks nested in it, past the block before
+    /// or after it at its depth; indented, they go in with it.
+    @Test func blocksMoveAndNestWithWhatIsInThem() {
+        let c = editor([
+            block("a", "bulleted_list", "A", children: [block("b", "bulleted_list", "B")]),
+            block("c", "bulleted_list", "C"),
+        ])
+        c.textView.selectedRange = NSRange(location: 4, length: 0)
+        c.moveBlock(by: -1)
+        var sent: DocContent?
+        c.onEdit = { sent = $0 }
+        c.send()
+        #expect(sent?.blocks.map(\.id) == ["c", "a"])
+        #expect(sent?.blocks.last?.children?.map(\.id) == ["b"])
+        #expect(c.paragraph(at: c.textView.selectedRange.location).info.id == "c")
+
+        // A child moved above its parent goes out before it.
+        c.textView.selectedRange = NSRange(location: 4, length: 0)
+        c.moveBlock(by: -1)
+        c.send()
+        #expect(sent?.blocks.map(\.id) == ["c", "b", "a"])
+        #expect(c.paragraph(at: 2).info.depth == 0)
+
+        let n = editor([
+            block("a", "bulleted_list", "A"),
+            block("b", "bulleted_list", "B", children: [block("x", "bulleted_list", "X")]),
+        ])
+        n.textView.selectedRange = NSRange(location: 2, length: 0)
+        n.type("\t")
+        n.onEdit = { sent = $0 }
+        n.send()
+        #expect(sent?.blocks.map(\.id) == ["a"])
+        #expect(sent?.blocks.first?.children?.map(\.id) == ["b"])
+        #expect(sent?.blocks.first?.children?.first?.children?.map(\.id) == ["x"])
+    }
+
+    /// A selection ending at a paragraph's start does not choose it.
+    @Test func aSelectionEndingAtABlocksStartLeavesIt() {
+        let c = editor([block("a", "paragraph", "One"), block("b", "paragraph", "Two")])
+        c.textView.selectedRange = NSRange(location: 0, length: 4)
+        c.setType("quote")
+        #expect(blocks(c).map(\.type) == ["quote", "paragraph"])
+    }
+
+    /// Delete at a block's end joins the block after it, as Backspace at
+    /// that one's start does not.
+    @Test func deleteAtTheEndJoinsTheNextBlock() {
+        let c = editor([
+            block("a", "paragraph", "One"),
+            block("b", "todo_list", "Two", data: ["checked": .bool(false)]),
+        ])
+        c.textView.selectedRange = NSRange(location: 3, length: 0)
+        c.forwardDelete()
+        let b = blocks(c)
+        #expect(b.map(\.text) == ["OneTwo"])
+        #expect(b.map(\.id) == ["a"])
+    }
+
+    /// Backspace at the start of the page turns a heading into text, which
+    /// UIKit asks no rule about.
+    @Test func backspaceAtThePagesStartTurnsAHeadingIntoText() {
+        let c = editor([block("h", "heading", "Title", data: ["level": .int(1)])])
+        c.textView.selectedRange = NSRange(location: 0, length: 0)
+        c.backspace()
+        #expect(blocks(c).map(\.type) == ["paragraph"])
+        #expect(blocks(c).first?.id == "h")
+    }
+
+    /// Return before the menu has its items is a new line.
+    @Test func returnBeforeTheMenuLoadsIsANewLine() {
+        let c = editor([block("a", "paragraph", "")])
+        c.menuItems = { _, _ in }
+        c.type("/")
+        #expect(c.menu != nil)
+        c.type("\n")
+        #expect(c.menu == nil)
+        #expect(blocks(c).map(\.text) == ["/", ""])
+    }
+
+    /// A subpage made from "/" goes where the "/" was, though the caret
+    /// moved on while the page was made.
+    @Test func aSubpageGoesWhereTheSlashWas() async throws {
+        let c = editor([block("a", "paragraph", ""), block("b", "paragraph", "Later")])
+        offer(c, [("subpage", "Subpage")])
+        c.createSubpage = {
+            try? await Task.sleep(for: .milliseconds(50))
+            return "page1"
+        }
+        c.type("/sub")
+        c.type("\n")
+        c.textView.selectedRange = NSRange(location: c.textView.textStorage.length, length: 0)
+        try await Task.sleep(for: .milliseconds(200))
+        let b = blocks(c)
+        #expect(b.map(\.type) == ["subpage", "paragraph", "paragraph"])
+        #expect(b.last?.text == "Later")
+    }
+
+    /// VoiceOver checks a to-do from the actions at the caret.
+    @Test func voiceOverChecksAToDo() throws {
+        let c = editor([block("t", "todo_list", "Milk", data: ["checked": .bool(false)])])
+        c.textView.selectedRange = NSRange(location: 2, length: 0)
+        let check = try #require(
+            c.textView.accessibilityCustomActions?.first { $0.name == LI.markDone })
+        _ = check.actionHandler?(check)
+        #expect(blocks(c).first?.data?["checked"]?.bool == true)
+    }
+
+    /// The editor's format commands are offered, which UIKit offers only
+    /// to a text view that edits its attributes itself.
+    @Test func theFormatCommandsAreOffered() throws {
+        let c = editor([block("a", "paragraph", "Hello")])
+        let (window, done) = try show(c)
+        defer { done() }
+        _ = window
+        #expect(
+            c.textView.canPerformAction(#selector(UIResponder.toggleBoldface(_:)), withSender: nil))
+        c.textView.isEditable = false
+        #expect(
+            !c.textView.canPerformAction(#selector(UIResponder.toggleBoldface(_:)), withSender: nil)
+        )
+    }
+
+    /// Undo after a mention, a divider and a rule's change gives the text
+    /// back as it was before each, the text view's own steps with them.
+    @Test func undoFollowsTheEditorsChanges() async throws {
+        let c = editor([block("a", "paragraph", "Hi"), block("b", "paragraph", "")])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        let undo = try #require(c.textView.undoManager)
+        offer(c, [("page:p1", "Groceries")])
+        c.textView.selectedRange = NSRange(location: 3, length: 0)
+        for ch in "@gro" {
+            c.type(String(ch))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        c.type("\n")
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(c.textView.text == "Hi\nGroceries ")
+        undo.undo()
+        #expect(c.textView.text == "Hi\n@gro" || c.textView.text == "Hi\n")
+        undoAll(undo)
+        #expect(c.textView.text == "Hi\n")
+
+        for ch in "---" {
+            c.type(String(ch))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(blocks(c).map(\.type) == ["paragraph", "divider", "paragraph"])
+        undo.undo()
+        #expect(blocks(c).map(\.type) == ["paragraph", "paragraph"])
+        undoAll(undo)
+        #expect(c.textView.text == "Hi\n")
+        #expect(blocks(c).map(\.id) == ["a", "b"])
+    }
+
+    /// Typing after the editor's own change is a step after it: undone
+    /// first, and the change after it, each over the text it was made on.
+    @Test func undoKeepsItsOrderAroundTheEditorsChanges() async throws {
+        let c = editor([block("a", "paragraph", "")])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        let undo = try #require(c.textView.undoManager)
+        offer(c, [("page:p1", "Groceries")])
+        func slowly(_ text: String) async throws {
+            for ch in text {
+                c.type(String(ch))
+                try await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        try await slowly("x @gro\nyz")
+        #expect(c.textView.text == "x Groceries yz")
+        var texts: [String] = []
+        while undo.canUndo, texts.count < 20 {
+            undo.undo()
+            texts.append(c.textView.text)
+        }
+        // The typing after the mention goes first, then the mention, which
+        // gives back what it took the place of.
+        let mention = try #require(texts.firstIndex(of: "x Groceries "))
+        #expect(texts[..<mention].allSatisfy { $0.hasPrefix("x Groceries ") })
+        #expect(texts.dropFirst(mention + 1).first == "x @gro")
+        #expect(texts.last == "")
+        #expect(!texts.contains { $0.contains("Groceries") && $0.contains("@") })
+
+        // A to-do checked between typing is a step of its own.
+        let t = editor([block("t", "todo_list", "", data: ["checked": .bool(false)])])
+        let (_, gone) = try show(t)
+        try await settle(t)
+        defer { gone() }
+        let tUndo = try #require(t.textView.undoManager)
+        for ch in "ab" {
+            t.type(String(ch))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        t.setBlock(t.paragraph(at: 0).info.setting("checked", .bool(true)), at: 0)
+        try await Task.sleep(for: .milliseconds(20))
+        t.type("c")
+        try await Task.sleep(for: .milliseconds(20))
+        tUndo.undo()
+        #expect(t.textView.text == "ab")
+        #expect(t.paragraph(at: 0).info.checked)
+        tUndo.undo()
+        #expect(t.textView.text == "ab")
+        #expect(!t.paragraph(at: 0).info.checked)
+    }
+
+    /// settle waits for the keyboard to come up, as an iPhone's software
+    /// keyboard does, in steps, and to stop changing the room the page has.
+    private func settle(_ c: EditorController) async throws {
+        var last = c.textView.adjustedContentInset
+        var still = 0
+        for _ in 0..<40 where still < 3 {
+            try await Task.sleep(for: .milliseconds(100))
+            let now = c.textView.adjustedContentInset
+            still = now == last ? still + 1 : 0
+            last = now
+        }
+    }
+
+    /// undoAll undoes every step there is, a bounded number of them: an
+    /// undo that made one more would otherwise never end the test.
+    private func undoAll(_ undo: UndoManager) {
+        for _ in 0..<100 where undo.canUndo { undo.undo() }
+        #expect(!undo.canUndo)
+    }
+
+    /// show puts the editor in a window with the keyboard, as the app does,
+    /// and returns what takes it away again.
+    private func show(_ c: EditorController) throws -> (UIWindow, () -> Void) {
+        let scene = try #require(
+            UIApplication.shared.connectedScenes.first { $0 is UIWindowScene } as? UIWindowScene)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1000, height: 700)
+        window.addSubview(c.textView)
+        c.textView.frame = window.bounds
+        window.makeKeyAndVisible()
+        c.textView.layoutIfNeeded()
+        _ = c.textView.becomeFirstResponder()
+        return (
+            window,
+            {
+                _ = c.textView.resignFirstResponder()
+                c.textView.removeFromSuperview()
+                window.isHidden = true
+                window.windowScene = nil
+            }
+        )
+    }
 }
 
 extension EditorController {
     /// type types text a character at a time as the keyboard does: through
-    /// the editor's rules, which a text view not on screen leaves out.
+    /// the editor's rules, which a text view not on screen leaves out, and
+    /// in UIKit's order, the selection's change before the text's.
     func type(_ text: String) {
-        for ch in text {
-            let s = String(ch)
-            if textView(textView, shouldChangeTextIn: textView.selectedRange, replacementText: s) {
-                textView.insertText(s)
-                textViewDidChange(textView)
-            }
+        for ch in text { paste(String(ch)) }
+    }
+
+    /// paste puts text in at once, as a paste or dictation does.
+    func paste(_ text: String) {
+        if textView(textView, shouldChangeTextIn: textView.selectedRange, replacementText: text) {
+            textView.insertText(text)
+            textViewDidChangeSelection(textView)
+            textViewDidChange(textView)
         }
     }
 
-    /// backspace deletes as the keyboard's Backspace does.
+    /// backspace deletes as the keyboard's Backspace does: at the start of
+    /// the page, UIKit asks no rule, and the text view's own takes it.
     func backspace() {
         let sel = textView.selectedRange
+        guard sel.length > 0 || sel.location > 0 else { return textView.deleteBackward() }
         let range = sel.length > 0 ? sel : NSRange(location: sel.location - 1, length: 1)
         if textView(textView, shouldChangeTextIn: range, replacementText: "") {
             textView.deleteBackward()
+            textViewDidChangeSelection(textView)
             textViewDidChange(textView)
         }
+    }
+
+    /// forwardDelete deletes after the caret, as a keyboard's Delete does.
+    func forwardDelete() {
+        let range = NSRange(location: textView.selectedRange.location, length: 1)
+        guard textView(textView, shouldChangeTextIn: range, replacementText: ""),
+            let start = textView.position(
+                from: textView.beginningOfDocument, offset: range.location),
+            let end = textView.position(from: start, offset: 1),
+            let r = textView.textRange(from: start, to: end)
+        else { return }
+        textView.replace(r, withText: "")
+        textViewDidChangeSelection(textView)
+        textViewDidChange(textView)
+    }
+
+    /// press presses a key the text view has a command for.
+    func press(_ input: String, _ flags: UIKeyModifierFlags = []) {
+        guard
+            let command = textView.keyCommands?.first(where: {
+                $0.input == input && $0.modifierFlags == flags
+            }), let action = command.action
+        else {
+            Issue.record("no command for \(input)")
+            return
+        }
+        textView.perform(action, with: command)
     }
 }

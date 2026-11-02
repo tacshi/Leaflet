@@ -14,6 +14,7 @@ import (
 
 	"leaflet/internal/agents"
 	"leaflet/internal/icloud"
+	"leaflet/internal/keychain"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -363,5 +364,99 @@ func TestNameSavesAsSettingsCloses(t *testing.T) {
 	tt.Frame()
 	if got := a.st.Session().DisplayName; got != want || account.nameEdited {
 		t.Errorf("account's name %q, edited %v", got, account.nameEdited)
+	}
+}
+
+// keys is a keychain in memory, for tests that keep a provider's key.
+type keys map[string][]byte
+
+func (k keys) Get(name string) ([]byte, error) {
+	v, ok := k[name]
+	if !ok {
+		return nil, keychain.ErrNotFound
+	}
+	return v, nil
+}
+
+func (k keys) Set(name string, value []byte) error {
+	k[name] = value
+	return nil
+}
+
+func (k keys) Delete(name string) error {
+	delete(k, name)
+	return nil
+}
+
+// Signed out, a cloud provider is kept on this device with its key, and
+// saves; one kept on the server waits for the account.
+func TestSignedOutSavesAProviderKeptHere(t *testing.T) {
+	was := form
+	t.Cleanup(func() { form = was })
+	keychain.Use(keys{})
+	t.Cleanup(func() { keychain.Use(nil) })
+	a := templatesApp(t)
+	if a.session.SignedIn {
+		t.Fatal("the test app is signed in")
+	}
+	// The models listed as it is edited come from no server out there,
+	// and are not waited for.
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	t.Cleanup(hs.Close)
+	a.post = func(func()) {}
+	tt := ui.NewTester(a.providerDialog, 900, 800)
+	a.newProvider(agents.PresetByID("deepseek"))
+	form.baseURL, form.apiKey = hs.URL, "sk-test"
+	tt.Frame()
+	if !tt.HasText(locales.SettingsProviderDescDevice()) {
+		t.Errorf("the dialog does not say the provider stays here: %v", tt.Texts())
+	}
+	if err := tt.Click(locales.CommonSave()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	ps, err := a.st.Providers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ps) != 1 || !ps[0].IsLocal || ps[0].Preset != "deepseek" {
+		t.Fatalf("saved %+v", ps)
+	}
+	if form.open {
+		t.Errorf("the dialog stayed open: %q", form.errorText)
+	}
+	if got := agents.LocalKey(ps[0].ID); got != "sk-test" {
+		t.Errorf("key %q", got)
+	}
+
+	// Edited signed out, it saves again.
+	a.editProvider(&ps[0])
+	form.model = "deepseek-v4-flash"
+	tt.Frame()
+	if err := tt.Click(locales.CommonSave()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if p, err := a.st.Provider(ps[0].ID); err != nil || p.DefaultModel != "deepseek-v4-flash" {
+		t.Errorf("edited to %+v, %v", p, err)
+	}
+
+	// One on the server is not saved signed out.
+	server := store.Provider{ID: "00000000-0000-0000-0000-0000000000cd", Preset: "openai", Name: "OpenAI", BaseURL: "https://api.openai.com/v1",
+		AuthKind: "api_key", DefaultModel: "gpt-6-astra"}
+	if err := a.st.PutProvider(server); err != nil {
+		t.Fatal(err)
+	}
+	a.editProvider(&server)
+	form.model = "gpt-6-luna"
+	tt.Frame()
+	if err := tt.Click(locales.CommonSave()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if form.saving || !form.open {
+		t.Errorf("a server's provider saved signed out: saving %v, open %v", form.saving, form.open)
 	}
 }

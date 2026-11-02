@@ -25,6 +25,8 @@ final class SceneModel {
     var exported: ExportedPage?
     /// page is the open page's model, for its edits to reach the core.
     @ObservationIgnored weak var page: PageModel?
+    /// toasts shows the app's toasts over the window and its sheets.
+    @ObservationIgnored let toasts = ToastWindow()
 
     /// flush gives the core what was typed in the open page, and waits
     /// until it has it: a copy, an export or the history then has it too.
@@ -54,7 +56,7 @@ final class SceneModel {
         guard id != selection else { return }
         if let current = selection { back.append(current) }
         forward.removeAll()
-        selection = id
+        show(id)
     }
 
     var canGoBack: Bool { !back.isEmpty }
@@ -63,13 +65,23 @@ final class SceneModel {
     func goBack() {
         guard let previous = back.popLast() else { return }
         if let current = selection { forward.append(current) }
-        selection = previous
+        show(previous)
     }
 
     func goForward() {
         guard let next = forward.popLast() else { return }
         if let current = selection { back.append(current) }
-        selection = next
+        show(next)
+    }
+
+    /// show opens a page in the window. What was started on the page
+    /// before from its editor, a comment or an ask, goes with it: on
+    /// another page it would land on a block that isn't there.
+    private func show(_ id: String?) {
+        selection = id
+        newComment = nil
+        asking = nil
+        editingBlock = nil
     }
 
     /// keep drops the pages not among ids from the history, as they are
@@ -77,7 +89,7 @@ final class SceneModel {
     func keep(_ ids: Set<String>) {
         back.removeAll { !ids.contains($0) }
         forward.removeAll { !ids.contains($0) }
-        if let id = selection, !ids.contains(id) { selection = back.popLast() }
+        if let id = selection, !ids.contains(id) { show(back.popLast()) }
     }
 
     /// showPanel shows the panel at tab, or hides it when it already shows

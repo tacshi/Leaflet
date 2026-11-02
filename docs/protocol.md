@@ -108,6 +108,7 @@ loop with the same tools. Tool definitions live in
   "source": "flowchart LR\n  Idea --> Draft --> Publish",
   "level": 2,
   "checked": false,
+  "due": "2026-11-02T09:30",
   "children": [ { "type": "bulleted_list", "text": "nested item" } ],
   "rows": [["Header A", "Header B"], ["a", "b"]],
   "chart": { "chart_type": "bar", "title": "Risks by phase", "labels": ["Editor", "Agents"], "series": [{ "name": "Open risks", "values": [1, 4] }] },
@@ -120,15 +121,25 @@ loop with the same tools. Tool definitions live in
 
 ### Position
 
-Exactly one of: `{ "after": "<block id>" }`, `{ "before": "<block id>" }`,
+One of: `{ "after": "<block id>" }`, `{ "before": "<block id>" }`,
 `{ "parent": "<block id>" }` (append as last child), `{ "at": "start" }`,
-`{ "at": "end" }`.
+`{ "at": "end" }`. Only keys given a value count: models that write every
+key of a schema give the others `null` or `""`, and those are left out. `at`,
+which such a model fills with one of its two values, counts only alone, so
+`{ "after": "a1", "at": "end" }` is after `a1`. Any other two keys are an
+error.
+
+`write_markdown` also takes `{ "replace": "<block id>" }`: an empty text
+block (no text at all, not even a space, and no children) to write in place
+of, its first block taking that ID and the rest going after it. `replace`
+says where whatever other keys the position has.
 
 ### Tools
 
 | name | arguments | returns |
 | --- | --- | --- |
 | `read_page` | — | `{ page: {id, title}, blocks: [BlockView], subpages: [{id, title}], comments: [{block_id, resolved, thread: [{author, body}]}] }` |
+| `write_markdown` | `position` (or `{ replace }`), `markdown` | `{ inserted_ids: [...] }` (a block a line: paragraphs, `#` to `###` headings, `-`/`1.` lists, `- [ ]` to-dos, `>` quotes, fenced code, `$$` formulas, ` ```mermaid ` diagrams, `\|` tables, `---` dividers) |
 | `insert_blocks` | `position`, `blocks: [BlockSpec]` | `{ inserted_ids: [...] }` |
 | `replace_block` | `id`, `block: BlockSpec` | `{ id }` (the ID is kept) |
 | `move_block` | `id`, `position` | `{ id }` |
@@ -145,7 +156,9 @@ Validation before applying any call: the tool is known; every referenced block
 ID exists in the page; the block type is allowed; nesting is legal (only list
 types take children); the invoking user can edit the page (agents act with the
 invoking user's permissions). An invalid call returns `{ "error": "..." }` to
-the model and changes nothing.
+the model and changes nothing: a call that fails part way, as a
+`write_markdown` in place of a block whose later blocks are refused, leaves
+the page as it was.
 
 `list_pages` and `read_other_page` reach only the pages of the current page's
 space. Once a run has called either, an `image`, `video` or `link_preview`
@@ -174,7 +187,8 @@ streams to the client, what the client applies to the open editor, and what
    `{ id, page_id, user_id, surface, focus_block_ids, comment_id?, conversation_id?, provider_id, model, status: "queued", request: { instruction, selection_text?, allow_cross_page } }`.
 2. Client calls `POST /functions/v1/agent` with `{ "job_id": "…" }` and the
    user's JWT. The response is NDJSON, one event per line:
-   - `{ "type": "status", "status": "running" }`
+   - `{ "type": "status", "status": "running" }`, and again every 15 s
+     while the run goes on, so that nothing between closes a quiet stream
    - `{ "type": "op", "op": Op, "summary": "Inserted chart" }`
    - `{ "type": "text", "delta": "…", "round": 0 }`: the model's answer as it
      streams, a piece at a time; a new `round` (after tool calls) starts it
@@ -208,6 +222,10 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
 | | `{ action: "transcribe", recording_id, language? }` | `{ segments: [{start_ms, end_ms, text, speaker?}] }` |
 | | `{ action: "save_key", provider: "soniox", api_key }` | `{ ok }` |
 | `account` | `{ action: "delete" }` | `{ ok }` |
+
+`transcribe` saves the transcript, and the recording's status as it goes, as
+the caller: someone who can only view the recording's page is refused (403)
+before any of their key is spent.
 
 ## 6. Sync
 
@@ -314,8 +332,10 @@ parent was not under moves `updated_at` on for the pages under it and for
 the content, comments, files and recordings of all of them, so the pulls
 of the people it now reaches bring them. A recording stays on its page: an
 update that changes `recordings.page_id` is refused, and its audio is
-written only by its recorder while they can edit its page. A `files` row is
-its space owner's to add; they change or delete one on a page only while
+written only by its recorder while they can edit its page. Its recorder,
+`recordings.created_by`, is kept as it was inserted: a client's value is
+ignored on update, and only deleting the recorder's account clears it. A
+`files` row is its space owner's to add; they change or delete one on a page only while
 they can edit that page, and the page's owner may delete one on their page
 (set its `deleted_at`, nothing else: `forbidden_file_change` otherwise, and
 then remove its object). Its `folder_id` is a folder of its space
@@ -341,7 +361,7 @@ for blank ones); there is no foreign key, and a template the app can't
 find leaves new pages blank. `model_providers.encrypted_secret` and `refresh_token` hold Vault secret IDs
 and are not selectable by clients.
 
-Storage buckets: `recordings` (`{user_id}/{recording_id}.m4a`), `files`
+Storage buckets: `recordings` (`{user_id}/{recording_id}.wav`, 16 kHz mono WAV), `files`
 (`{space_id}/{file_id}/{name}`), `images` (`{space_id}/{page_id}/{image_id}.{ext}`).
 
 RPCs: `share_page(p_page_id, p_email, p_role)` (an invite to the account

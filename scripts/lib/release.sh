@@ -9,6 +9,23 @@ warn() { printf 'warning: %s\n' "$*" >&2; }
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
+# speech_toolchain fails, printing why, unless this Mac can build
+# leaflet-speech (scripts/build-speech.sh): swiftc and the macOS 26 SDK or
+# later, whose SpeechTranscriber it uses, from Xcode 26 or its command line
+# tools. xcrun is there without them too, as a stub that offers to install
+# them, so it asks for the SDK.
+speech_toolchain() {
+	local sdk
+	if ! sdk="$(xcrun --sdk macosx --show-sdk-version 2>/dev/null)" || ! xcrun --find swiftc >/dev/null 2>&1; then
+		echo "it needs Xcode 26 or later, or its command line tools (xcode-select --install)"
+		return 1
+	fi
+	if ((${sdk%%.*} < 26)); then
+		echo "it needs the macOS 26 SDK or later, for SpeechTranscriber, from Xcode 26 or later; this one is macOS $sdk"
+		return 1
+	fi
+}
+
 # check_version fails unless $1 looks like 1.2.3.
 check_version() {
 	[[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "the version must look like 1.2.3, not $1"

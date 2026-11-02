@@ -1,13 +1,13 @@
 name: CI
 
 # The iOS app's own sources are checked by ios.yml; the Go core it links
-# is checked here as well.
+# is checked here as well, and so is ios/gen, which is Go in this module.
 on:
   push:
     branches: [main]
-    paths-ignore: ["ios/**"]
+    paths: ["**", "!ios/**", "ios/gen/**"]
   pull_request:
-    paths-ignore: ["ios/**"]
+    paths: ["**", "!ios/**", "ios/gen/**"]
 
 permissions:
   contents: read
@@ -71,6 +71,8 @@ jobs:
         run: deno fmt --check
       - name: Lint
         run: deno lint
+      - name: Type-check
+        run: deno check */index.ts
       - name: Test
         run: deno test _shared/
 

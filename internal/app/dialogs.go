@@ -201,7 +201,7 @@ func (a *App) searchDialog(c *ui.Context) {
 			if in.Submitted() && d.hitIndex < len(d.hits) {
 				a.openHit(d.hits[d.hitIndex])
 			}
-			ui.Text(c, "esc").FontSize(11).TextColor(pal.TextMuted).Padding(2, 6).Radius(4).Border(1, pal.Divider)
+			ui.Text(c, locales.DialogSearchEscKey()).FontSize(11).TextColor(pal.TextMuted).Padding(2, 6).Radius(4).Border(1, pal.Divider)
 		})
 		if d.query == "" && len(d.hits) > 0 {
 			ui.Box(c).Padding(6, 6, 0).Children(func() { label(c, locales.DialogSearchRecent()) })
@@ -339,7 +339,9 @@ func (a *App) folderDialog(c *ui.Context) {
 					return
 				}
 				if d.folder == nil {
-					if f, err := a.st.CreateFolder(name); err == nil {
+					if f, err := a.st.CreateFolder(name); err != nil {
+						a.toast(locales.DialogFolderCreateFailed(err.Error()))
+					} else {
 						a.treeOpen("folder", f.ID)
 					}
 				} else {
@@ -634,7 +636,13 @@ func (a *App) restoreVersion(pageID string, c *doc.Content) {
 		}
 	}
 	if ed := a.openEditor(pageID); ed != nil {
-		ed.Edit(func(content *doc.Content) { content.Children = c.Copy().Children })
+		ed.Edit(func(content *doc.Content) {
+			content.Children = c.Copy().Children
+			// A version saved with no blocks leaves one to type in.
+			if len(content.Children) == 0 {
+				content.Children = doc.Empty().Children
+			}
+		})
 		a.savePage()
 		// The last run's edits are gone or back with the version: undoing
 		// it now would do nothing, or something else.
@@ -901,8 +909,7 @@ func (a *App) chartDialog(c *ui.Context) {
 		ui.Column(c).Padding(0, 20, 20).Gap(12).Children(func() {
 			field(c, "title", &d.chartTitle, locales.DialogFieldTitle())
 			ui.Segmented(c.Key("kind"), &d.chartKind, locales.DialogChartBar(), locales.DialogChartLine(), locales.DialogChartPie())
-			area := ui.TextArea(c.Key("csv"), &d.chartCSV).Height(180).Font("monospace").FontSize(13)
-			_ = area
+			ui.TextArea(c.Key("csv"), &d.chartCSV).Height(180).Font("monospace").FontSize(13)
 			field(c, "caption", &d.chartCap, locales.DialogChartCaption())
 			if d.chartError != "" {
 				ui.Text(c, d.chartError).FontSize(12.5).TextColor(pal.DangerText)

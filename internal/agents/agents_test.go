@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/remote"
 	"leaflet/internal/store"
 )
 
@@ -249,6 +250,10 @@ func TestPromptTreatsContentAsData(t *testing.T) {
 type fakeStream struct {
 	events []map[string]any
 	err    error
+	// jobs are the job's rows the server has, read one after another, the
+	// last again once they are read.
+	jobs []map[string]any
+	read *int
 }
 
 func (f fakeStream) InvokeStream(_ context.Context, _ string, _ map[string]any, fn func(map[string]any)) error {
@@ -258,11 +263,56 @@ func (f fakeStream) InvokeStream(_ context.Context, _ string, _ map[string]any, 
 	return f.err
 }
 
+func (f fakeStream) SelectOne(_ context.Context, table string, _ remote.Query) (map[string]any, error) {
+	if table != "ai_jobs" || len(f.jobs) == 0 {
+		return nil, nil
+	}
+	i := min(*f.read, len(f.jobs)-1)
+	*f.read++
+	return f.jobs[i], nil
+}
+
+// A cloud run whose stream the network cut ends as the server's job says:
+// the server goes on with it, and saves its edits, after the cut too.
+func TestCloudRunCutOffEndsAsTheServerSays(t *testing.T) {
+	was := jobPollEvery
+	jobPollEvery = time.Millisecond
+	t.Cleanup(func() { jobPollEvery = was })
+	op := func(id string) map[string]any { return map[string]any{"op": "delete", "ids": []any{id}} }
+	streamed := map[string]any{"type": "op", "op": op("p1")}
+	running := map[string]any{"status": "running"}
+	done := map[string]any{"status": "done", "result": map[string]any{"reply": "Cleaned up.", "ops": []any{op("p1"), op("p2")},
+		"edits": []any{map[string]any{"summary": "Deleted a block", "block_ids": []any{"p1"}}, map[string]any{"summary": "Deleted a block", "block_ids": []any{"p2"}}}}}
+	read := 0
+	res, err := RunCloud(context.Background(), fakeStream{events: []map[string]any{streamed}, err: io.ErrUnexpectedEOF,
+		jobs: []map[string]any{running, running, done}, read: &read}, "j1", Events{})
+	if err != nil || res.Reply != "Cleaned up." || len(res.Ops) != 2 || len(res.Edits) != 2 {
+		t.Errorf("run %+v, %v", res, err)
+	}
+
+	read = 0
+	failed := map[string]any{"status": "failed", "error": "The model took too long to answer."}
+	res, err = RunCloud(context.Background(), fakeStream{events: []map[string]any{streamed}, err: io.ErrUnexpectedEOF,
+		jobs: []map[string]any{failed}, read: &read}, "j1", Events{})
+	if err == nil || err.Error() != "The model took too long to answer." || len(res.Ops) != 1 {
+		t.Errorf("failed run %+v, %v", res, err)
+	}
+
+	// A refusal is the server's answer, not a cut: its job is not waited for.
+	read = 0
+	_, err = RunCloud(context.Background(), fakeStream{err: &remote.Error{Status: http.StatusConflict, Message: "Job is already running"},
+		jobs: []map[string]any{done}, read: &read}, "j1", Events{})
+	if err == nil || read != 0 {
+		t.Errorf("refused run: %v, %d reads", err, read)
+	}
+}
+
 // A cloud run counts as done only when the server says so: a stream cut
 // off before then is a failure, whatever ops came first.
 func TestCloudRunCutOff(t *testing.T) {
 	op := map[string]any{"type": "op", "op": map[string]any{"op": "delete", "ids": []any{"p1"}}}
-	res, err := RunCloud(context.Background(), fakeStream{events: []map[string]any{op}}, "j1", Events{})
+	read := 0
+	res, err := RunCloud(context.Background(), fakeStream{events: []map[string]any{op}, read: &read}, "j1", Events{})
 	if err == nil || len(res.Ops) != 1 {
 		t.Errorf("cut-off run: %v, %d ops", err, len(res.Ops))
 	}

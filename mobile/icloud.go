@@ -2,6 +2,7 @@ package mobile
 
 import (
 	"errors"
+	gosync "sync"
 
 	"leaflet/internal/icloud"
 	"leaflet/locales"
@@ -13,27 +14,34 @@ import (
 // has. Signed in with Supabase, pages sync through the server instead,
 // and it fails to turn on. Turning on fails, and stays off, when the
 // folder can't be used, with why in words for the user.
-func (c *Core) SetICloud(root string, on bool) error {
-	var err error
+//
+// Moving to another folder waits for the pass under way, which can take
+// minutes, and turning on reads iCloud Drive: both happen here, off the
+// core's queue, so the library and the open page stay usable meanwhile;
+// the setting and the watch go back on the queue after.
+func (c *Core) SetICloud(root string, on bool) (err error) {
+	defer catch(&err)
+	setICloudMu.Lock()
+	defer setICloudMu.Unlock()
+	sync := c.core.Sync
+	if root != "" && root != sync.ICloudFolder().Root {
+		// Between passes, so none reads half of one folder and half of
+		// the other.
+		sync.Hold(func() { sync.SetICloudRoot(root) })
+	}
+	if on && c.core.Store.Session().SignedIn {
+		return errors.New(locales.SettingsICloudSupabaseOn())
+	}
+	if on {
+		if err = sync.EnableICloud(); err != nil {
+			err = iCloudError(err)
+			on = false
+		}
+	}
+	if !on {
+		sync.SetICloud(false)
+	}
 	c.q.do(func() {
-		if root != "" && root != c.core.Sync.ICloud.Root {
-			// Between passes, so none reads half of one folder and half
-			// of the other.
-			c.core.Sync.Hold(func() { c.core.Sync.ICloud.Root = root })
-		}
-		if on && c.core.Store.Session().SignedIn {
-			err = errors.New(locales.SettingsICloudSupabaseOn())
-			return
-		}
-		if on {
-			if err = c.core.Sync.EnableICloud(); err != nil {
-				err = iCloudError(err)
-				on = false
-			}
-		}
-		if !on {
-			c.core.Sync.SetICloud(false)
-		}
 		s := c.core.Store.Settings()
 		if s.ICloudSync != on {
 			s.ICloudSync = on
@@ -45,6 +53,10 @@ func (c *Core) SetICloud(root string, on bool) error {
 	})
 	return err
 }
+
+// setICloudMu has one SetICloud at a time, in the order they came, as
+// the queue had them when they ran on it.
+var setICloudMu gosync.Mutex
 
 // iCloudError says why iCloud sync can't turn on, in words for the user,
 // where the desktop has them. No access is left as it is: on iOS it means

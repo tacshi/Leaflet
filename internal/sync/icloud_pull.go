@@ -94,7 +94,7 @@ func (s *Service) passDamaged(peer string, seq int64, later bool, err error) boo
 // the batches folded into it: a compaction cut short leaves batches
 // before its snapshot.
 func (s *Service) pullDevice(peer string, waiting map[string]bool) error {
-	seqs, _, err := s.ICloud.Batches(peer)
+	seqs, _, err := s.folder().Batches(peer)
 	if err != nil {
 		return err
 	}
@@ -171,7 +171,7 @@ func (s *Service) readBatch(peer string, seq int64) (icloud.Batch, error) {
 	if err != nil {
 		return b, err
 	}
-	return b, s.ICloud.ReadJSON(rel, &b)
+	return b, s.folder().ReadJSON(rel, &b)
 }
 
 // snapshotAfter is the index of the first snapshot among a device's
@@ -240,6 +240,8 @@ func (s *Service) putCloudPage(r map[string]any) error {
 func (s *Service) refreshWaiting(ctx context.Context) error {
 	waiting := s.waiting()
 	allOffline := s.st.Settings().AllPagesOffline
+	// A page whose file iCloud has not brought yet waits for it, and is no
+	// failure; another page's error still is.
 	var failed error
 	for id := range waiting {
 		p, err := s.st.Page(id)
@@ -253,16 +255,15 @@ func (s *Service) refreshWaiting(ctx context.Context) error {
 			continue
 		}
 		if _, err := s.cloudRefresh(ctx, id); err != nil {
-			failed = errors.Join(failed, err)
+			if !errors.Is(err, icloud.ErrNotReady) {
+				failed = errors.Join(failed, err)
+			}
 			continue
 		}
 		delete(waiting, id)
 	}
 	if err := s.setWaiting(waiting); err != nil {
 		return errors.Join(failed, err)
-	}
-	if errors.Is(failed, icloud.ErrNotReady) {
-		return nil
 	}
 	return failed
 }
@@ -293,14 +294,14 @@ func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content
 			return nil, err
 		}
 		want := s.intValue(wantKey(peer, pageID))
-		if !s.ICloud.Exists(rel) {
+		if !s.folder().Exists(rel) {
 			if want > 0 {
 				notReady = icloud.ErrNotReady
 			}
 			continue
 		}
 		var file icloud.PageFile
-		if err := s.ICloud.ReadJSON(rel, &file); err != nil {
+		if err := s.folder().ReadJSON(rel, &file); err != nil {
 			if errors.Is(err, icloud.ErrNotReady) {
 				notReady = err
 				continue

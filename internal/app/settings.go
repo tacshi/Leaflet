@@ -745,6 +745,7 @@ func (a *App) providerDialog(c *ui.Context) {
 	preset := agents.PresetByID(form.preset)
 	account := preset.Auth == "account"
 	local := preset.Local
+	here := a.keptHere(preset)
 	title := locales.SettingsConnectProvider(preset.Name)
 	if form.id != "" {
 		title = locales.SettingsProviderEdit(form.name)
@@ -755,7 +756,7 @@ func (a *App) providerDialog(c *ui.Context) {
 		desc = locales.SettingsProviderDescAccount()
 	case local:
 		desc = locales.SettingsProviderDescLocal()
-	case a.keptHere(preset):
+	case here:
 		desc = locales.SettingsProviderDescDevice()
 	}
 	if preset.ID == "claude" {
@@ -837,7 +838,9 @@ func (a *App) providerDialog(c *ui.Context) {
 				if signedOut {
 					return
 				}
-				cannot := form.saving || (!local && !a.session.SignedIn) || (account && form.chatgpt == nil) || strings.TrimSpace(form.model) == ""
+				// Only a provider kept on the server needs the account to
+				// save it; one kept here saves signed out too.
+				cannot := form.saving || (!local && !here && !a.session.SignedIn) || (account && form.chatgpt == nil) || strings.TrimSpace(form.model) == ""
 				if primary(c, "save", "", locales.CommonSave()).Disabled(cannot).Clicked() {
 					a.saveProvider()
 				}

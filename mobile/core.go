@@ -64,7 +64,8 @@ type config struct {
 
 // Open opens the core with settings, a config as JSON. Start then starts
 // what runs in the background.
-func Open(settings string, platform Platform, ev Events) (*Core, error) {
+func Open(settings string, platform Platform, ev Events) (_ *Core, err error) {
+	defer catch(&err)
 	var cfg config
 	if err := json.Unmarshal([]byte(settings), &cfg); err != nil {
 		return nil, err
@@ -89,7 +90,6 @@ func Open(settings string, platform Platform, ev Events) (*Core, error) {
 		c.locale.Store(cfg.Locale)
 		locale = func() string { return c.locale.Load().(string) }
 	}
-	var err error
 	c.q.do(func() {
 		c.core, err = core.Open(core.Config{
 			Platform: core.Platform{
@@ -108,7 +108,13 @@ func Open(settings string, platform Platform, ev Events) (*Core, error) {
 			OnPageContent: func(id string) {
 				c.q.post(func() { c.external(id) })
 			},
-			OnChange: c.ev.changed,
+			OnChange: func(ch store.Change) {
+				c.ev.changed(ch)
+				// Who may change a page comes with whom it is shared.
+				if ch.Table == "*" || ch.Table == "page_members" {
+					c.q.post(c.sharingChanged)
+				}
+			},
 		})
 	})
 	if err != nil {
@@ -117,10 +123,22 @@ func Open(settings string, platform Platform, ev Events) (*Core, error) {
 	return c, nil
 }
 
+// sharingChanged lets the user change the open pages, or keeps them from
+// it, as the desktop does as who a page is shared with changes: the app
+// hears PageReadOnly for each page that changes so. Run on the queue.
+func (c *Core) sharingChanged() {
+	for id, p := range c.pages {
+		if readOnly := !c.canEdit(id) || p.live.Unreadable(); readOnly != p.live.ReadOnly() {
+			p.live.SetReadOnly(readOnly)
+		}
+	}
+}
+
 // SetLocale says the core's messages in locale, a tag of the catalogs, as
 // the app's language changes in its settings. A core opened without a
 // locale keeps the catalogs' own.
 func (c *Core) SetLocale(locale string) {
+	defer catch(nil)
 	if locale != "" && c.locale.Load() != nil {
 		c.locale.Store(locale)
 	}
@@ -129,19 +147,31 @@ func (c *Core) SetLocale(locale string) {
 // Start starts what runs in the background: sync, and watching iCloud
 // Drive while iCloud sync is on. The app calls it as it comes to the
 // foreground; Stop, as it goes to the background.
-func (c *Core) Start() { c.q.do(c.core.Start) }
+func (c *Core) Start() {
+	defer catch(nil)
+	c.q.do(c.core.Start)
+}
 
 // Stop stops the sync loop. A pass running, the loop's or SyncNow's, is
 // cut short; the changes it didn't send go on the next.
-func (c *Core) Stop() { c.core.Sync.Stop() }
+func (c *Core) Stop() {
+	defer catch(nil)
+	c.core.Sync.Stop()
+}
 
 // Kick asks for a sync pass soon, as another device writing to iCloud
 // Drive does.
-func (c *Core) Kick() { c.core.Sync.Kick() }
+func (c *Core) Kick() {
+	defer catch(nil)
+	c.core.Sync.Kick()
+}
 
 // SyncNow runs a sync pass now and waits for it, for pull to refresh and
 // the app's background refresh.
-func (c *Core) SyncNow() error { return c.core.Sync.SyncNow() }
+func (c *Core) SyncNow() (err error) {
+	defer catch(&err)
+	return c.core.Sync.SyncNow()
+}
 
 // status is who uses the app and how sync stands, as Status returns it.
 type status struct {
@@ -158,7 +188,8 @@ type status struct {
 }
 
 // Status returns who is signed in and how sync stands, as a status in JSON.
-func (c *Core) Status() (string, error) {
+func (c *Core) Status() (_ string, err error) {
+	defer catch(&err)
 	var s status
 	c.q.do(func() {
 		se := c.core.Store.Session()

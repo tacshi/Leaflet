@@ -1123,9 +1123,19 @@ func (a *App) unlinkSubpage(parent, id string) {
 		for _, l := range links {
 			c.Remove(l)
 		}
+		// A page whose only block was the link keeps one to type in.
+		if len(c.Children) == 0 {
+			c.Children = doc.Empty().Children
+		}
 	}
 	if ed := a.openEditor(parent); ed != nil {
-		ed.Edit(remove)
+		// The link goes as a change from outside the editor, not as an
+		// undo step: undoing in the page would bring back a link to a page
+		// that is gone or elsewhere, apart from the toast's Undo.
+		c := ed.Content.Copy()
+		remove(c)
+		ed.Replace(c)
+		a.page.live.Changed()
 		a.savePage()
 		return
 	}

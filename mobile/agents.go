@@ -9,6 +9,7 @@ import (
 
 	"leaflet/internal/agents"
 	"leaflet/internal/agents/endpoint"
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -77,7 +78,8 @@ type agentOption struct {
 
 // AgentState returns a page's agent state: its chat, its runs, and the
 // agents to pick from, as JSON.
-func (c *Core) AgentState(pageID string) (string, error) {
+func (c *Core) AgentState(pageID string) (_ string, err error) {
+	defer catch(&err)
 	var out agentState
 	c.q.do(func() {
 		s := c.core.Hub.Session(pageID)
@@ -133,6 +135,7 @@ func (c *Core) options() []agentOption {
 // SelectAgent picks the agent and model the page's chat asks, as the
 // desktop panel's picker does.
 func (c *Core) SelectAgent(pageID, providerID, model string) {
+	defer catch(nil)
 	c.q.do(func() {
 		c.core.Hub.Session(pageID).Selected = &store.ModelChoice{ProviderID: providerID, Model: model}
 	})
@@ -142,6 +145,7 @@ func (c *Core) SelectAgent(pageID, providerID, model string) {
 // Chat sends a message to the page's agent chat, about the blocks in
 // focus, a JSON array of IDs.
 func (c *Core) Chat(pageID, text, focus string) {
+	defer catch(nil)
 	var ids []string
 	_ = json.Unmarshal([]byte(focus), &ids)
 	c.q.do(func() { c.core.Hub.Chat(pageID, text, ids) })
@@ -151,6 +155,7 @@ func (c *Core) Chat(pageID, text, focus string) {
 // "selection", focus a JSON array of block IDs, and agent the provider
 // and model to run, or "" for the default. It returns the run's ID.
 func (c *Core) Ask(pageID, surface, instruction, focus, selection, providerID, model string) string {
+	defer catch(nil)
 	var ids []string
 	_ = json.Unmarshal([]byte(focus), &ids)
 	var id string
@@ -171,21 +176,50 @@ func (c *Core) Ask(pageID, surface, instruction, focus, selection, providerID, m
 
 // StopAgent stops a page's run that is still working.
 func (c *Core) StopAgent(pageID, runID string) {
+	defer catch(nil)
 	c.q.do(func() { c.core.Hub.Stop(pageID, runID) })
 }
 
-// UndoRun takes a run's edits back off the page, as one step.
-func (c *Core) UndoRun(pageID, runID string) {
-	c.q.do(func() { c.core.Hub.UndoRun(pageID, runID) })
+// UndoRun takes a run's edits back off the page, as one step. Edits it
+// can't take back, as later ones changed their blocks, leave the run as it
+// was, and it fails saying why.
+func (c *Core) UndoRun(pageID, runID string) (err error) {
+	defer catch(&err)
+	agent := ""
+	c.q.do(func() {
+		if err = c.core.Hub.UndoRun(pageID, runID); err != nil {
+			if run := c.core.Hub.Session(pageID).Run(runID); run != nil {
+				agent = run.AgentName
+			}
+		}
+	})
+	if err != nil {
+		return errors.New(locales.PageUndoRunFailed(agent, err.Error()))
+	}
+	return nil
 }
 
-// RedoRun puts an undone run's edits back.
-func (c *Core) RedoRun(pageID, runID string) {
-	c.q.do(func() { c.core.Hub.RedoRun(pageID, runID) })
+// RedoRun puts an undone run's edits back. Edits it can't put back leave
+// the run undone, and it fails saying why.
+func (c *Core) RedoRun(pageID, runID string) (err error) {
+	defer catch(&err)
+	agent := ""
+	c.q.do(func() {
+		if err = c.core.Hub.RedoRun(pageID, runID); err != nil {
+			if run := c.core.Hub.Session(pageID).Run(runID); run != nil {
+				agent = run.AgentName
+			}
+		}
+	})
+	if err != nil {
+		return errors.New(locales.PageRedoRunFailed(agent, err.Error()))
+	}
+	return nil
 }
 
 // NewConversation starts the page's agent chat over.
 func (c *Core) NewConversation(pageID string) {
+	defer catch(nil)
 	c.q.do(func() { c.core.Hub.NewConversation(pageID) })
 }
 
@@ -217,9 +251,9 @@ func commentOf(m store.Comment) commentJSON {
 }
 
 // Threads returns a page's comment threads, as JSON.
-func (c *Core) Threads(pageID string) (string, error) {
+func (c *Core) Threads(pageID string) (_ string, err error) {
+	defer catch(&err)
 	var ts []store.Thread
-	var err error
 	c.q.do(func() { ts, err = c.core.Store.Threads(pageID) })
 	if err != nil {
 		return "", err
@@ -238,8 +272,8 @@ func (c *Core) Threads(pageID string) (string, error) {
 // AddComment adds a comment on a block, quoting the text it is on, or a
 // reply to the thread of parentID. A comment that mentions @agent, or an
 // agent by name, has that agent answer in the thread, as on the desktop.
-func (c *Core) AddComment(pageID, blockID, body, parentID, quote string) error {
-	var err error
+func (c *Core) AddComment(pageID, blockID, body, parentID, quote string) (err error) {
+	defer catch(&err)
 	c.q.do(func() {
 		var m store.Comment
 		m, err = c.core.Store.AddComment(pageID, blockID, body, parentID, quote, "", "")
@@ -258,15 +292,27 @@ func (c *Core) AddComment(pageID, blockID, body, parentID, quote string) error {
 	return err
 }
 
-// agentInComment runs the agent a comment mentions on its thread's block.
+// agentInComment runs the agent a comment mentions on its thread's block,
+// where the comment shows it marked, as the desktop does: @agent runs the
+// first. A run that fails says why in a notice, as the desktop's toast.
 func (c *Core) agentInComment(pageID string, root store.Comment, body string) {
-	lower := strings.ToLower(body)
-	for _, o := range c.core.Hub.Options() {
-		if strings.Contains(lower, "@agent") || strings.Contains(lower, "@"+strings.ToLower(o.Name())) {
+	options := c.core.Hub.Options()
+	names := []string{"agent"}
+	for _, o := range options {
+		names = append(names, o.Name())
+	}
+	hit := core.Mentioned(body, names)
+	for _, o := range options {
+		if hit[strings.ToLower(o.Name())] || hit["agent"] {
 			ch := o.Choice()
 			c.core.Hub.Start(pageID, agents.RunOptions{
 				Surface: "comment", Instruction: body, Focus: []string{root.BlockID}, Selection: root.Quote,
 				CommentID: root.ID, Agent: &ch,
+				Done: func(r *agents.Run) {
+					if r.Error != "" {
+						c.ev.notice(r.AgentName + ": " + r.Error)
+					}
+				},
 			})
 			return
 		}
@@ -274,15 +320,15 @@ func (c *Core) agentInComment(pageID string, root store.Comment, body string) {
 }
 
 // ResolveThread resolves a thread, or opens it again.
-func (c *Core) ResolveThread(rootID string, resolved bool) error {
-	var err error
+func (c *Core) ResolveThread(rootID string, resolved bool) (err error) {
+	defer catch(&err)
 	c.q.do(func() { err = c.core.Store.SetResolved(rootID, resolved) })
 	return err
 }
 
 // DeleteComment deletes a comment.
-func (c *Core) DeleteComment(id string) error {
-	var err error
+func (c *Core) DeleteComment(id string) (err error) {
+	defer catch(&err)
 	c.q.do(func() { err = c.core.Store.DeleteComment(id) })
 	return err
 }
@@ -354,7 +400,8 @@ type providerTest struct {
 // tried from this device, before it goes to the server; a saved cloud
 // provider is tried by the server, which keeps its key; as on the
 // desktop.
-func (c *Core) TestProvider(provider string) (string, error) {
+func (c *Core) TestProvider(provider string) (_ string, err error) {
+	defer catch(&err)
 	var in providerJSON
 	if err := json.Unmarshal([]byte(provider), &in); err != nil {
 		return "", err
@@ -412,7 +459,8 @@ func (c *Core) TestProvider(provider string) (string, error) {
 
 // Presets returns the providers to add, as JSON, as the desktop offers
 // them.
-func (c *Core) Presets() (string, error) {
+func (c *Core) Presets() (_ string, err error) {
+	defer catch(&err)
 	out := []presetJSON{}
 	for _, p := range agents.Presets {
 		out = append(out, presetJSON{
@@ -424,9 +472,9 @@ func (c *Core) Presets() (string, error) {
 }
 
 // Providers returns the agent providers, as JSON.
-func (c *Core) Providers() (string, error) {
+func (c *Core) Providers() (_ string, err error) {
+	defer catch(&err)
 	var ps []store.Provider
-	var err error
 	c.q.do(func() { ps, err = c.core.Store.Providers() })
 	if err != nil {
 		return "", err
@@ -453,7 +501,8 @@ func (c *Core) Providers() (string, error) {
 // while signed out; signed in, a cloud one is kept on the server, which
 // keeps its key; as on the desktop. The first provider is the default
 // agent.
-func (c *Core) SaveProvider(provider string) error {
+func (c *Core) SaveProvider(provider string) (err error) {
+	defer catch(&err)
 	var in providerJSON
 	if err := json.Unmarshal([]byte(provider), &in); err != nil {
 		return err
@@ -463,7 +512,9 @@ func (c *Core) SaveProvider(provider string) error {
 	if name == "" {
 		name = preset.Name
 	}
-	if strings.TrimSpace(in.BaseURL) == "" || strings.TrimSpace(in.DefaultModel) == "" {
+	// An account's provider goes to its preset's address, as on the
+	// desktop, whatever the form says.
+	if preset.Auth != "account" && strings.TrimSpace(in.BaseURL) == "" || strings.TrimSpace(in.DefaultModel) == "" {
 		return errors.New(locales.SettingsNeedURLAndModel())
 	}
 	if preset.Auth == "account" {
@@ -553,7 +604,7 @@ func (c *Core) defaultAgent(providerID string) {
 func (c *Core) saveChatGPT(in providerJSON, name string) error {
 	g := c.madeChatGPT()
 	if g == nil && in.ID == "" {
-		return errors.New("Sign in with ChatGPT first.") //nolint:staticcheck // shown to people as a sentence.
+		return errors.New(locales.SettingsChatGPTSignInFirst())
 	}
 	var err error
 	c.q.do(func() {
@@ -589,9 +640,9 @@ func (c *Core) saveChatGPT(in providerJSON, name string) error {
 // desktop does: one kept on the server goes there first, since removed
 // only here, sync would bring it back. The default agent it was stops
 // being one.
-func (c *Core) RemoveProvider(id string) error {
+func (c *Core) RemoveProvider(id string) (err error) {
+	defer catch(&err)
 	var p store.Provider
-	var err error
 	c.q.do(func() { p, err = c.core.Store.Provider(id) })
 	if err != nil {
 		return err
@@ -605,6 +656,7 @@ func (c *Core) RemoveProvider(id string) error {
 	}
 	if p.AuthKind == "account" {
 		go func() {
+			defer catch(nil)
 			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 			defer cancel()
 			agents.ForgetChatGPT(ctx, id)

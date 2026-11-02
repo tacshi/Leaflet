@@ -12,7 +12,7 @@ set -euo pipefail
 source "$(dirname "${BASH_SOURCE[0]}")/lib/release.sh"
 
 [[ "$(uname -s)" == "Darwin" ]] || die "leaflet-speech is built on macOS"
-command -v xcrun >/dev/null 2>&1 || die "needs Xcode's command line tools"
+why="$(speech_toolchain)" || die "leaflet-speech can't be built here: $why"
 
 ARCHES=("$@")
 if ((${#ARCHES[@]} == 0)); then

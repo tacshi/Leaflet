@@ -141,93 +141,100 @@ extension CoreClient {
     // MARK: Recording
 
     /// useMicrophone gives the core's recorder the device's microphone.
-    func useMicrophone(_ mic: Microphone) async {
+    nonisolated(nonsending) func useMicrophone(_ mic: Microphone) async {
         try? await call { $0.use(mic) }
     }
 
     /// useTranscriber gives the core's recorder the device's own speech
     /// engine.
-    func useTranscriber(_ transcriber: DeviceTranscriber) async {
+    nonisolated(nonsending) func useTranscriber(_ transcriber: DeviceTranscriber) async {
         try? await call { $0.use(transcriber) }
     }
 
-    func recordingState() async throws -> RecordingState {
-        try decode(
-            RecordingState.self,
-            try await call { core in try Self.answer { e in core.recordingState(e) } })
+    nonisolated(nonsending) func recordingState() async throws -> RecordingState {
+        try await call(RecordingState.self) { core in
+            try Self.answer { e in core.recordingState(e) }
+        }
     }
 
     /// startRecording records into an open page, returning the block for
     /// the editor to put at the caret.
-    func startRecording(_ pageID: String) async throws -> DocNode {
-        try decode(
-            DocNode.self,
-            try await call { core in try Self.answer { e in core.startRecording(pageID, error: e) }
-            })
+    nonisolated(nonsending) func startRecording(_ pageID: String) async throws -> DocNode {
+        try await call(DocNode.self) { core in
+            try Self.answer { e in core.startRecording(pageID, error: e) }
+        }
     }
 
-    func stopRecording() async { try? await call { $0.stopRecording() } }
+    nonisolated(nonsending) func stopRecording() async { try? await call { $0.stopRecording() } }
 
-    func togglePauseRecording() async { try? await call { $0.togglePauseRecording() } }
+    nonisolated(nonsending) func togglePauseRecording() async {
+        try? await call { $0.togglePauseRecording() }
+    }
 
-    func recording(_ id: String) async throws -> RecordingRow {
-        try decode(
-            RecordingRow.self,
-            try await call { core in try Self.answer { e in core.recording(id, error: e) } })
+    nonisolated(nonsending) func recording(_ id: String) async throws -> RecordingRow {
+        try await call(RecordingRow.self) { core in
+            try Self.answer { e in core.recording(id, error: e) }
+        }
     }
 
     /// recordingAudio returns a recording's WAV audio on this device,
     /// downloaded first when it is not.
-    func recordingAudio(_ id: String) async throws -> URL {
-        let path = try await call { core in
+    nonisolated(nonsending) func recordingAudio(_ id: String) async throws -> URL {
+        let path = try await call(waiting: true) { core in
             try Self.answer { e in core.recordingAudio(id, error: e) }
         }
         return URL(fileURLWithPath: path)
     }
 
-    func retranscribe(_ id: String) async throws {
+    nonisolated(nonsending) func retranscribe(_ id: String) async throws {
         try await call { try $0.retranscribe(id) }
     }
 
     /// insertTranscript puts a recording's transcript after its block.
-    func insertTranscript(_ id: String) async throws {
+    nonisolated(nonsending) func insertTranscript(_ id: String) async throws {
         try await call { try $0.insertTranscript(id) }
     }
 
     // MARK: Speech to text
 
-    func speechSettings() async throws -> SpeechSettings {
-        try decode(
-            SpeechSettings.self,
-            try await call { core in try Self.answer { e in core.speechSettings(e) } })
+    nonisolated(nonsending) func speechSettings() async throws -> SpeechSettings {
+        try await call(SpeechSettings.self) { core in
+            try Self.answer { e in core.speechSettings(e) }
+        }
     }
 
-    func saveSpeechSettings(_ stt: SttSettings) async throws {
+    nonisolated(nonsending) func saveSpeechSettings(_ stt: SttSettings) async throws {
         let json = String(decoding: try JSONEncoder().encode(stt), as: UTF8.self)
-        try await call { try $0.saveSpeechSettings(json) }
+        try await call(waiting: true) { try $0.saveSpeechSettings(json) }
     }
 
-    func setEndpointKey(_ key: String) async throws {
+    nonisolated(nonsending) func setEndpointKey(_ key: String) async throws {
         try await call { try $0.setEndpointKey(key) }
     }
 
     /// saveSonioxKey keeps a Soniox key, returning where it went.
-    func saveSonioxKey(_ key: String) async throws -> String {
-        try await call { core in try Self.answer { e in core.saveSonioxKey(key, error: e) } }
+    nonisolated(nonsending) func saveSonioxKey(_ key: String) async throws -> String {
+        try await call(waiting: true) { core in
+            try Self.answer { e in core.saveSonioxKey(key, error: e) }
+        }
     }
 
     /// testEndpoint and testSoniox return words for the engine working.
-    func testEndpoint(url: String, model: String, key: String) async throws -> String {
-        try await call { core in
+    nonisolated(nonsending) func testEndpoint(url: String, model: String, key: String) async throws
+        -> String
+    {
+        try await call(waiting: true) { core in
             try Self.answer { e in core.testEndpoint(url, model: model, key: key, error: e) }
         }
     }
 
-    func testSoniox(_ key: String) async throws -> String {
-        try await call { core in try Self.answer { e in core.testSoniox(key, error: e) } }
+    nonisolated(nonsending) func testSoniox(_ key: String) async throws -> String {
+        try await call(waiting: true) { core in
+            try Self.answer { e in core.testSoniox(key, error: e) }
+        }
     }
 
-    func testMicrophone() async throws {
+    nonisolated(nonsending) func testMicrophone() async throws {
         try await call { try $0.testMicrophone() }
     }
 }

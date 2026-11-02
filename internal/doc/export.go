@@ -15,14 +15,21 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 	}
 	// text writes rich text at an indent a line at a time, the first line
 	// after lead, a list item's marker, and the others after pad, the room
-	// it takes, so they stay in the block. A line that would start another
-	// block, as a line break then "- x" would a list, is escaped.
+	// it takes, so they stay in the block. A line break is a hard break, a
+	// backslash ending the line, as ParseLines reads one, and a line that
+	// would start another block, as a line break then "- x" would a list,
+	// is escaped.
 	text := func(indent, lead, pad, md string) {
-		for i, l := range strings.Split(md, "\n") {
+		lines := strings.Split(md, "\n")
+		for i, l := range lines {
 			if i > 0 {
 				lead = pad
 			}
-			b.WriteString(strings.TrimRight(indent+lead+EscapeBlockStart(l), " ") + "\n")
+			if i < len(lines)-1 {
+				b.WriteString(indent + lead + EscapeBlockStart(l) + "\\\n")
+			} else {
+				b.WriteString(strings.TrimRight(indent+lead+EscapeBlockStart(l), " ") + "\n")
+			}
 		}
 	}
 	// block writes Markdown that is already a block at an indent, every
@@ -88,8 +95,17 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 			case "callout":
 				block(indent, CalloutMarkdown(n))
 			case "toggle_list":
-				block(indent, "<details>\n<summary>"+md+"</summary>")
+				// A toggle open on the page is open where the Markdown shows.
+				details := "<details>"
+				if !n.Bool("collapsed") {
+					details = "<details open>"
+				}
+				block(indent, details+"\n<summary>"+strings.ReplaceAll(md, "</summary>", `\</summary>`)+"</summary>")
 				visit(n.Children, indent)
+				// After a blank line, so it ends the toggle, not a list in it.
+				if out := b.String(); !strings.HasSuffix(out, "\n\n") {
+					b.WriteString("\n")
+				}
 				block(indent, "</details>")
 				continue
 			case "divider":
@@ -170,7 +186,7 @@ func tableMarkdown(rows [][]string) string {
 		cells := make([]string, cols)
 		for i := range cells {
 			if i < len(r) {
-				cells[i] = strings.ReplaceAll(r[i], "|", `\|`)
+				cells[i] = cellMarkdown(r[i])
 			}
 		}
 		return "| " + strings.Join(cells, " | ") + " |"
@@ -180,6 +196,49 @@ func tableMarkdown(rows [][]string) string {
 		lines = append(lines, line(r))
 	}
 	return strings.Join(lines, "\n")
+}
+
+// cellMarkdown writes a table cell's Markdown to stay in its cell of a
+// GitHub table: a | escaped, even in a code span, and a line break a
+// <br>, as ParseLines reads them, a <br> of the text escaped. In a code
+// span, where a <br> is text, a line break is a space, as CommonMark
+// reads one there.
+func cellMarkdown(md string) string {
+	if !strings.ContainsAny(md, "|\n<") {
+		return md
+	}
+	s := []rune(md)
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		switch s[i] {
+		case '\\':
+			b.WriteString(strings.ReplaceAll(string(s[i:min(i+2, len(s))]), "|", `\|`))
+			i += 2
+			continue
+		case '`':
+			if _, n := codeSpanAt(s[i:]); n > 0 {
+				span := strings.ReplaceAll(string(s[i:i+n]), "\n", " ")
+				b.WriteString(strings.ReplaceAll(span, "|", `\|`))
+				i += n
+				continue
+			}
+		case '|':
+			b.WriteString(`\|`)
+			i++
+			continue
+		case '\n':
+			b.WriteString("<br>")
+			i++
+			continue
+		case '<':
+			if brTagAt(string(s[i:])) != "" {
+				b.WriteByte('\\')
+			}
+		}
+		b.WriteRune(s[i])
+		i++
+	}
+	return b.String()
 }
 
 func listOf(v any) []any {

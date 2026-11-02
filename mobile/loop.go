@@ -1,9 +1,13 @@
 package mobile
 
 import (
+	"errors"
+	"fmt"
 	"log"
 	"runtime/debug"
 	"sync"
+
+	"leaflet/locales"
 )
 
 // queue runs functions one at a time, in the order they came, on a
@@ -55,14 +59,63 @@ func (q *queue) post(fn func()) {
 	q.wake.Signal()
 }
 
-// do runs fn after what was posted before it, and waits for it. It must
-// not be called from the queue's own functions, which would wait on
-// themselves.
+// do runs fn after what was posted before it, and waits for it. A panic
+// in fn goes on in the caller, as if fn ran there, for the exported
+// function that called it to return as an error (catch); the queue goes on
+// to the next function. It must not be called from the queue's own
+// functions, which would wait on themselves.
 func (q *queue) do(fn func()) {
-	done := make(chan struct{})
+	done := make(chan *panicked, 1)
 	q.post(func() {
-		defer close(done)
+		ok := false
+		defer func() {
+			if ok {
+				done <- nil
+				return
+			}
+			// recover is nil for a runtime.Goexit, which still ends fn.
+			done <- &panicked{value: recover(), stack: debug.Stack()}
+		}()
 		fn()
+		ok = true
 	})
-	<-done
+	if p := <-done; p != nil {
+		panic(p)
+	}
+}
+
+// panicked is a panic on the queue, with where it happened, as do passes
+// it on to its caller.
+type panicked struct {
+	value any
+	stack []byte
+}
+
+func (p *panicked) String() string { return fmt.Sprint(p.value) }
+
+// catch, deferred first in each of the package's exported functions and
+// the goroutines it starts, keeps a panic in the core from taking the app
+// down with it, as gomobile would: it is logged, with where it happened,
+// and the function returns it as an error to err, when it returns one.
+func catch(err *error) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	stack := debug.Stack()
+	if p, ok := r.(*panicked); ok {
+		r, stack = p.value, p.stack
+	}
+	log.Printf("mobile: %v\n%s", r, stack)
+	if err != nil {
+		*err = errors.New(locales.AppErrorInternal(fmt.Sprint(r)))
+	}
+}
+
+// spawn runs fn on a goroutine of its own, catching a panic in it.
+func spawn(fn func()) {
+	go func() {
+		defer catch(nil)
+		fn()
+	}()
 }

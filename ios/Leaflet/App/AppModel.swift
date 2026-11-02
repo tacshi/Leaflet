@@ -17,9 +17,11 @@ struct Toast: Identifiable {
 @MainActor
 @Observable
 final class AppModel {
-    let client: CoreClient?
+    /// client is the core, once it is open: it opens off the main thread,
+    /// as the app launches, and opened waits for it.
+    private(set) var client: CoreClient?
     /// openFailure says why the core could not open, when it couldn't.
-    let openFailure: String?
+    private(set) var openFailure: String?
     let iCloud: ICloudSync
 
     var library = LibrarySnapshot.empty
@@ -67,31 +69,75 @@ final class AppModel {
 
     /// pageListeners hear the events of the pages open in the windows.
     @ObservationIgnored private var pageListeners: [UUID: (CoreEvent) -> Void] = [:]
-    @ObservationIgnored private var reloading = false
+    /// opening opens the core, and gives it, or nil when it couldn't.
+    @ObservationIgnored private var opening: Task<CoreClient?, Never>?
+    /// reloading is the read of the library running, and reloadAgain
+    /// asks it to read once more, for a change that came meanwhile.
+    @ObservationIgnored private var reloading: Task<Void, Never>?
     @ObservationIgnored private var reloadAgain = false
+    /// saving is the last of the settings on their way to the core, which
+    /// go one after another, as they were changed.
+    @ObservationIgnored private var saving: Task<Void, Never>?
+    /// lifecycle is the last of sync's starts and stops, as the windows
+    /// come and go, which run in that order: a stop runs after a start
+    /// asked for before it, and the other way round.
+    @ObservationIgnored private var lifecycle: Task<Void, Never>?
+    @ObservationIgnored private var clockChanges: [any NSObjectProtocol] = []
 
     init() {
         Fonts.register()
         // Before the core starts: it can't find the device's zone itself.
+        Self.useTimeZone()
+        let folder = ICloudFolder()
+        iCloud = ICloudSync(folder: folder)
+        // As the app launches, as the system has it, for passes that run
+        // once the core is open.
+        BackgroundSync.register { [weak self] in await self?.opened() }
+        let root = folder.root?.path(percentEncoded: false)
+        opening = Task { [weak self] in await self?.open(iCloudRoot: root) }
+        // The zone the device is in changes as it travels, and its offset
+        // as the clocks change; the core's dates follow both.
+        for name in [
+            NSNotification.Name.NSSystemTimeZoneDidChange,
+            UIApplication.significantTimeChangeNotification,
+        ] {
+            clockChanges.append(
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) {
+                    _ in
+                    MainActor.assumeIsolated { Self.useTimeZone() }
+                })
+        }
+    }
+
+    /// useTimeZone gives the core the zone the device is in now.
+    private static func useTimeZone() {
+        NSTimeZone.resetSystemTimeZone()
         let zone = TimeZone.current
         MobileSetTimeZone(zone.identifier, zone.secondsFromGMT())
-        let folder = ICloudFolder()
-        do {
-            let dir = try FileManager.default.url(
-                for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil,
-                create: true
-            ).appending(path: "Leaflet", directoryHint: .isDirectory)
-            client = try CoreClient.open(
-                dataDir: dir, iCloudRoot: folder.root?.path(percentEncoded: false),
-                locale: L.language)
-            openFailure = nil
-        } catch {
-            client = nil
+    }
+
+    /// open opens the core over the database in Application Support, off
+    /// the main thread, which opening and migrating it would hold up.
+    private func open(iCloudRoot: String?) async -> CoreClient? {
+        let locale = L.language
+        let opened = await Task.detached(priority: .userInitiated) {
+            Result {
+                let dir = try FileManager.default.url(
+                    for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil,
+                    create: true
+                ).appending(path: "Leaflet", directoryHint: .isDirectory)
+                return try CoreClient.open(dataDir: dir, iCloudRoot: iCloudRoot, locale: locale)
+            }
+        }.value
+        let client: CoreClient
+        switch opened {
+        case .success(let c): client = c
+        case .failure(let error):
             openFailure = error.localizedDescription
+            return nil
         }
-        iCloud = ICloudSync(client: client, folder: folder)
-        guard let client else { return }
-        BackgroundSync.register(client)
+        self.client = client
+        iCloud.attach(client)
         Recorder.shared.attach(client) { [weak self] in self?.show(Toast(message: $0)) }
         ImageBlock.client = client
         Task { [weak self] in
@@ -103,6 +149,14 @@ final class AppModel {
             await loadSettings()
             await reload()
         }
+        return client
+    }
+
+    /// opened returns the core, once it is open, or nil when it couldn't
+    /// open: what runs as the app launches waits for it.
+    func opened() async -> CoreClient? {
+        if let client { return client }
+        return await opening?.value
     }
 
     // MARK: Events
@@ -124,7 +178,16 @@ final class AppModel {
                 Task { await reload() }
             } else if table == "conflicts" {
                 Task { await refreshConflicts() }
-            } else if table == "recordings" || table == "*" {
+            } else if table == "recordings" {
+                Recorder.shared.reload()
+            } else if table == "*" {
+                // Everything at once: shared pages taken off, a space
+                // moved, or the account's pages gone as it signed out or
+                // the device was wiped. The settings may have gone too.
+                Task {
+                    await loadSettings()
+                    await reload()
+                }
                 Recorder.shared.reload()
             }
         case .syncState(let running, let failure):
@@ -145,27 +208,35 @@ final class AppModel {
 
     // MARK: Library
 
-    /// reload reads the library, the to-dos and the status again. Changes
-    /// that come while it reads read once more after.
+    /// reload reads the library, the to-dos and the status again, and
+    /// returns once they are read as they are now: called while a read
+    /// runs, which may have begun before the change it is called for, it
+    /// has that read go once more, and waits for it.
     func reload() async {
-        guard let client else { return }
-        if reloading {
+        guard let client = await opened() else { return }
+        if let running = reloading {
             reloadAgain = true
+            await running.value
             return
         }
-        reloading = true
-        defer { reloading = false }
-        repeat {
-            reloadAgain = false
-            if let lib = try? await client.library() {
-                libraryLoaded = true
-                library = lib
-            }
-            if let list = try? await client.todos() { todos = list }
-            if let list = try? await client.templates() { templates = list }
-            await refreshConflicts()
-            await refreshStatus()
-        } while reloadAgain
+        let task = Task {
+            repeat {
+                reloadAgain = false
+                if let lib = try? await client.library() {
+                    libraryLoaded = true
+                    library = lib
+                }
+                if let list = try? await client.todos() { todos = list }
+                if let list = try? await client.templates() { templates = list }
+                await refreshConflicts()
+                await refreshStatus()
+            } while reloadAgain
+            // At once, as it ends: a reload called after can't find it
+            // running and wait on it for nothing.
+            reloading = nil
+        }
+        reloading = task
+        await task.value
     }
 
     func refreshConflicts() async {
@@ -297,25 +368,32 @@ final class AppModel {
 
     // MARK: Templates and copies
 
-    /// applyTemplate fills a blank page from a template; an untitled page
-    /// takes its title.
-    func applyTemplate(_ key: String, to pageID: String) async {
+    /// applyTemplate fills a blank page from a template, and returns the
+    /// title an untitled page took from it, or nil when it took none.
+    func applyTemplate(_ key: String, to pageID: String) async -> String? {
         do {
-            _ = try await client?.applyTemplate(pageID, key: key)
+            let title = try await client?.applyTemplate(pageID, key: key) ?? ""
             await reload()
+            return title.isEmpty ? nil : title
         } catch {
             show(Toast(message: L.templateUseFailed(error: error.localizedDescription)))
+            return nil
         }
     }
 
     /// insertTemplate puts a template's blocks in a page after a block, as
-    /// the / menu does.
-    func insertTemplate(_ key: String, into pageID: String, after blockID: String) async {
+    /// the / menu does, and returns the title an empty, untitled page took
+    /// from it, or nil.
+    func insertTemplate(_ key: String, into pageID: String, after blockID: String) async
+        -> String?
+    {
         do {
-            _ = try await client?.insertTemplate(pageID, after: blockID, key: key)
+            let title = try await client?.insertTemplate(pageID, after: blockID, key: key) ?? ""
             await reload()
+            return title.isEmpty ? nil : title
         } catch {
             show(Toast(message: L.templateUseFailed(error: error.localizedDescription)))
+            return nil
         }
     }
 
@@ -494,7 +572,13 @@ final class AppModel {
         guard let client,
             let data = try? JSONSerialization.data(withJSONObject: settings)
         else { return }
-        Task { try? await client.saveSettings(String(decoding: data, as: UTF8.self)) }
+        let json = String(decoding: data, as: UTF8.self)
+        // After the ones before, for a slider's last value to be the one
+        // kept.
+        saving = Task { [previous = saving] in
+            await previous?.value
+            try? await client.saveSettings(json)
+        }
     }
 
     // MARK: Lifecycle
@@ -503,11 +587,8 @@ final class AppModel {
     func foreground(_ scene: SceneModel) {
         scenes.add(scene)
         front.add(scene)
-        guard let client else { return }
-        Task {
-            await client.start()
-            await reload()
-        }
+        turn { client in await client.start() }
+        Task { await reload() }
     }
 
     /// background saves what is being typed and sends what waits to go up,
@@ -516,20 +597,41 @@ final class AppModel {
     /// window came back to the front meanwhile.
     func background(_ scene: SceneModel) {
         front.remove(scene)
-        guard front.allObjects.isEmpty, let client else { return }
+        guard front.allObjects.isEmpty else { return }
         let task = BackgroundTask()
         // Out of time, the pass is cut short, and what it didn't send goes
         // on the next; the system ends an app whose task outlives it.
-        task.begin("Save and sync") {
+        task.begin("Save and sync") { [weak self] in
+            guard let self, front.allObjects.isEmpty, let client else { return }
             Task.detached { await client.stop() }
         }
-        client.stopWatchingICloud()
         BackgroundSync.schedule()
-        Task {
+        // After a start asked for before, which watches iCloud again.
+        turn { [weak self] client in
+            guard self?.front.allObjects.isEmpty ?? true else { return }
+            client.stopWatchingICloud()
+        }
+        Task { [weak self] in
+            guard let client = await self?.opened() else {
+                task.end()
+                return
+            }
             _ = await client.saveOpenPages()
             try? await client.syncNow()
-            if front.allObjects.isEmpty { await client.stop() }
-            task.end()
+            self?.turn { [weak self] client in
+                if self?.front.allObjects.isEmpty ?? true { await client.stop() }
+                task.end()
+            }
+        }
+    }
+
+    /// turn runs body with the core after sync's starts and stops asked for
+    /// before it, once the core is open.
+    private func turn(_ body: @escaping @MainActor (CoreClient) async -> Void) {
+        lifecycle = Task { [previous = lifecycle, weak self] in
+            await previous?.value
+            guard let client = await self?.opened() else { return }
+            await body(client)
         }
     }
 }

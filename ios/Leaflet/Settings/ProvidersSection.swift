@@ -77,16 +77,23 @@ struct ProvidersSection: View {
             // agents run.
             Section(L.settingsDefaults) {
                 if providers.count > 1 {
-                    Picker(selection: $defaultAgent) {
+                    // Kept as the user picks it, and only then: load()
+                    // showing the first provider for a default the core
+                    // cleared, its provider removed, keeps none.
+                    Picker(
+                        selection: Binding(
+                            get: { defaultAgent },
+                            set: { value in
+                                defaultAgent = value
+                                if !value.isEmpty { app.save(["default_model": value]) }
+                            })
+                    ) {
                         ForEach(providers) { p in
                             Text("\(p.name) · \(p.defaultModel)").tag(p.id + "|")
                         }
                     } label: {
                         Text(L.settingsDefaultAgent)
                         Text(L.settingsDefaultAgentDesc)
-                    }
-                    .onChange(of: defaultAgent) { old, value in
-                        if !old.isEmpty, !value.isEmpty { app.save(["default_model": value]) }
                     }
                 }
                 Toggle(isOn: $app.agentsReadOtherPages) {

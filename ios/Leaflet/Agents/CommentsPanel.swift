@@ -17,6 +17,8 @@ struct CommentsPanel: View {
     @Environment(\.palette) private var palette
     @State private var showResolved = false
     @State private var draft = ""
+    /// sending says the new comment is on its way to the core.
+    @State private var sending = false
 
     private var open: [CommentThread] { model.threads.filter { !$0.root.resolved } }
     private var resolved: [CommentThread] { model.threads.filter { $0.root.resolved } }
@@ -67,15 +69,28 @@ struct CommentsPanel: View {
                 }
                 Button(L.panelSend) {
                     let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !body.isEmpty else { return }
+                    guard !body.isEmpty, !sending else { return }
+                    sending = true
                     Task {
-                        try? await app.client?.addComment(
-                            model.id, blockID: new.blockID, body: body, quote: new.quote)
+                        defer { sending = false }
+                        // The comment stays, to send again, until the core
+                        // has it.
+                        do {
+                            try await app.client?.addComment(
+                                model.id, blockID: new.blockID, body: body, quote: new.quote)
+                        } catch {
+                            app.show(
+                                Toast(message: L.appErrorSave(error: error.localizedDescription)))
+                            return
+                        }
+                        if scene.newComment == new {
+                            scene.newComment = nil
+                            draft = ""
+                        }
                         await model.refreshThreads()
                     }
-                    scene.newComment = nil
-                    draft = ""
                 }
+                .disabled(sending)
                 .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.return, modifiers: .command)
             }
@@ -110,9 +125,18 @@ struct ThreadCard: View {
                 .buttonStyle(.plain)
                 Spacer()
                 Button(thread.root.resolved ? L.panelReopen : L.panelResolve) {
+                    let reopen = thread.root.resolved
                     Task {
-                        try? await app.client?.resolveThread(
-                            thread.root.id, resolved: !thread.root.resolved)
+                        do {
+                            try await app.client?.resolveThread(thread.root.id, resolved: !reopen)
+                        } catch {
+                            let why = error.localizedDescription
+                            app.show(
+                                Toast(
+                                    message: reopen
+                                        ? L.panelCouldNotReopen(error: why)
+                                        : L.panelCouldNotResolve(error: why)))
+                        }
                         await model.refreshThreads()
                     }
                 }
@@ -143,8 +167,15 @@ struct ThreadCard: View {
         guard !body.isEmpty else { return }
         reply = ""
         Task {
-            try? await app.client?.addComment(
-                model.id, blockID: thread.root.blockID, body: body, parentID: thread.root.id)
+            do {
+                try await app.client?.addComment(
+                    model.id, blockID: thread.root.blockID, body: body, parentID: thread.root.id)
+            } catch {
+                // The reply comes back, to send again, unless another was
+                // begun meanwhile.
+                if reply.isEmpty { reply = body }
+                app.show(Toast(message: L.appErrorSave(error: error.localizedDescription)))
+            }
             await model.refreshThreads()
         }
     }
@@ -179,7 +210,13 @@ struct CommentRow: View {
         .contextMenu {
             Button(L.panelDeleteComment, systemImage: "trash", role: .destructive) {
                 Task {
-                    try? await app.client?.deleteComment(comment.id)
+                    do {
+                        try await app.client?.deleteComment(comment.id)
+                    } catch {
+                        app.show(
+                            Toast(message: L.panelCouldNotDelete(error: error.localizedDescription))
+                        )
+                    }
                     await model.refreshThreads()
                 }
             }

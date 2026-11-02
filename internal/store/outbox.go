@@ -54,7 +54,7 @@ func queue(q querier, entity, id string, payload map[string]any, label, pageID s
 		set += `, label = ?`
 		args = append(args, label)
 	}
-	res, err := q.Exec(`UPDATE outbox SET `+set+` WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, append(args, entity, id)...)
+	res, err := q.Exec(`UPDATE outbox SET `+set+` WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, append(args, entity, id)...) // #nosec G202 -- set is made of the literals above.
 	if err != nil {
 		return err
 	}

@@ -22,6 +22,9 @@ struct AskSheet: View {
     @Environment(\.palette) private var palette
     @State private var text = ""
     @State private var runID: String?
+    /// asking says an ask is on its way to the core, before it has its
+    /// run: a second tap meanwhile asks nothing more.
+    @State private var asking = false
     @FocusState private var focused: Bool
     /// fit is the sheet's height for what it shows, as the desktop's
     /// prompt is no taller than its content; detent is the height shown,
@@ -104,7 +107,9 @@ struct AskSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     if runID == nil {
                         Button(L.dialogInlineSend) { send(text) }
-                            .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(
+                                asking
+                                    || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
             }
@@ -154,9 +159,11 @@ struct AskSheet: View {
 
     private func send(_ instruction: String) {
         let t = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty, runID == nil else { return }
+        guard !t.isEmpty, runID == nil, !asking else { return }
+        asking = true
         let surface = request.selection.isEmpty ? "inline" : "selection"
         Task {
+            defer { asking = false }
             let id = await app.client?.ask(
                 model.id, surface: surface, instruction: t, focus: request.focus,
                 selection: request.selection,

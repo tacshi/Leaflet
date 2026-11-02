@@ -16,6 +16,7 @@ import (
 // space is typed after prefix, its text before the caret with the space,
 // as JSON {"type", "data"}; "" for text that is no shortcut.
 func MarkdownShortcut(typ, prefix string) string {
+	defer catch(nil)
 	t, data, ok := shortcut.Block(typ, prefix)
 	if !ok {
 		return ""
@@ -26,11 +27,15 @@ func MarkdownShortcut(typ, prefix string) string {
 
 // DividerShortcut reports whether a block of type typ whose text is text,
 // as its last "-" is typed, becomes a divider.
-func DividerShortcut(typ, text string) bool { return shortcut.Divider(typ, text) }
+func DividerShortcut(typ, text string) bool {
+	defer catch(nil)
+	return shortcut.Divider(typ, text)
+}
 
 // OpensMenu reports whether "/" or "@" typed after before, the character
 // before it, opens its menu.
 func OpensMenu(before string) bool {
+	defer catch(nil)
 	r, _ := utf8.DecodeLastRuneInString(before)
 	return shortcut.OpensMenu(r)
 }
@@ -40,6 +45,7 @@ func OpensMenu(before string) bool {
 // "close", "end", "format"} in UTF-16 offsets; "" for none. mentions are
 // the runs of text that are mentions, a JSON array of [from, to].
 func InlineShortcut(text, mentions string) string {
+	defer catch(nil)
 	var runs [][2]int
 	_ = json.Unmarshal([]byte(mentions), &runs)
 	mentioned := func(from, to int) bool {

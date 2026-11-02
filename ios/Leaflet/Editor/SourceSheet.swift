@@ -55,8 +55,10 @@ struct CodeTextEditor: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
-        view.font = .monospacedSystemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .callout).pointSize, weight: .regular)
+        // Scaled with the text size chosen in Settings, and again as it
+        // changes: the callout style's size at the default size.
+        view.font = UIFontMetrics(forTextStyle: .callout).scaledFont(
+            for: .monospacedSystemFont(ofSize: 16, weight: .regular))
         view.adjustsFontForContentSizeCategory = true
         view.backgroundColor = .clear
         view.autocapitalizationType = .none

@@ -41,6 +41,10 @@ final class PageModel {
     /// blank says the page is one empty paragraph, which offers ways to
     /// start it.
     var blank = false
+    /// asked numbers the reads of the agents, the threads and the members,
+    /// as each is asked again on every change: an answer older than the
+    /// one shown is dropped.
+    @ObservationIgnored private var asked = Newest()
 
     init(id: String, app: AppModel) {
         self.id = id
@@ -49,7 +53,8 @@ final class PageModel {
 
     /// open opens the page in the core and listens for its changes.
     func open() async {
-        guard let client = app.client, !closed else { return }
+        // A page open as the app launches waits for the core to open.
+        guard let client = await app.opened(), !closed else { return }
         token = app.listen { [weak self] in self?.handle($0) }
         do {
             let page = try await client.openPage(id)
@@ -121,15 +126,18 @@ final class PageModel {
     func flush() async { await editing?.value }
 
     func refreshAgents() async {
-        if let s = try? await app.client?.agentState(id) { agents = s }
+        let n = asked.ask("agents")
+        if let s = try? await app.client?.agentState(id), asked.answered(n, "agents") { agents = s }
     }
 
     func refreshThreads() async {
-        if let t = try? await app.client?.threads(id) { threads = t }
+        let n = asked.ask("threads")
+        if let t = try? await app.client?.threads(id), asked.answered(n, "threads") { threads = t }
     }
 
     func refreshMembers() async {
-        if let m = try? await app.client?.members(id) { members = m }
+        let n = asked.ask("members")
+        if let m = try? await app.client?.members(id), asked.answered(n, "members") { members = m }
     }
 
     private func handle(_ event: CoreEvent) {
@@ -163,6 +171,31 @@ final class PageModel {
         default:
             break
         }
+    }
+}
+
+/// Newest numbers the reads of what the core keeps, by what is read, for
+/// an answer not to replace a newer one: a read asked as one change comes,
+/// and another as the next does, may answer in either order. Each answer
+/// newer than the one kept is kept, so reads asked faster than they
+/// answer still show as they come.
+struct Newest {
+    private var asked: [String: Int] = [:]
+    private var kept: [String: Int] = [:]
+
+    /// ask numbers a read of what.
+    mutating func ask(_ what: String) -> Int {
+        let n = (asked[what] ?? 0) + 1
+        asked[what] = n
+        return n
+    }
+
+    /// answered says read n of what answered newer than the answer kept,
+    /// to keep instead.
+    mutating func answered(_ n: Int, _ what: String) -> Bool {
+        guard n > kept[what] ?? 0 else { return false }
+        kept[what] = n
+        return true
     }
 }
 

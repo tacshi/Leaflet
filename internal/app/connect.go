@@ -23,6 +23,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/pelletier/go-toml/v2/unstable"
 	"github.com/tailscale/hujson"
+
+	"leaflet/locales"
 )
 
 // Connecting AI apps on this computer to `leaflet mcp` for the user, so
@@ -181,7 +183,7 @@ func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 	switch id {
 	case "claude":
 		if cli == "" {
-			return errors.New("claude: command not found")
+			return errors.New(locales.ExternalClaudeNotFound())
 		}
 		// It will not add a server it has, so the old one goes first, and
 		// comes back as it was if the new one could not be added.
@@ -259,7 +261,7 @@ func installLink(id, exe, dir string) string {
 // readEntry is the leaflet server in an app's settings, or nil.
 func readEntry(id string, env agentEnv) (*serverEntry, error) {
 	if id == "codex" {
-		raw, err := os.ReadFile(codexConfig(env))
+		raw, err := os.ReadFile(codexConfig(env)) // #nosec G304 -- Codex's own settings file.
 		if err != nil {
 			return nil, ignoreMissing(err)
 		}
@@ -520,7 +522,7 @@ func editCodex(path string, want *serverEntry, fn func(string) (string, error)) 
 	}
 	after, err := decodeTOML([]byte(text))
 	if err != nil {
-		return fmt.Errorf("%s: could not change it safely: %w", path, err)
+		return fmt.Errorf("%s: %s: %w", path, locales.ExternalCouldNotChangeSafely(), err)
 	}
 	got := tomlEntry(after)
 	for _, doc := range []map[string]any{before, after} {
@@ -532,7 +534,7 @@ func editCodex(path string, want *serverEntry, fn func(string) (string, error)) 
 		}
 	}
 	if !reflect.DeepEqual(before, after) || (want == nil) != (got == nil) || want != nil && !reflect.DeepEqual(*want, *got) {
-		return fmt.Errorf("%s: could not change it safely", path)
+		return fmt.Errorf("%s: %s", path, locales.ExternalCouldNotChangeSafely())
 	}
 	return writeAtomic(path, []byte(text))
 }

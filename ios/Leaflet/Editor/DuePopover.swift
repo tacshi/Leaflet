@@ -17,13 +17,14 @@ final class DuePopover: UIViewController, UICalendarSelectionSingleDateDelegate,
     private var timed: Bool
     private var edited = false
     private var done = false
-    /// onClose takes the date chosen, or none to take it away.
-    private let onClose: (Due?) -> Void
+    /// onClose takes the date chosen, or none to take it away, and whether
+    /// it changed: it is told as the popover closes untouched too.
+    private let onClose: (_ due: Due?, _ changed: Bool) -> Void
 
     private let calendar = UICalendarView()
     private let timeRow = UIStackView()
 
-    init(_ due: Due?, onClose: @escaping (Due?) -> Void) {
+    init(_ due: Due?, onClose: @escaping (_ due: Due?, _ changed: Bool) -> Void) {
         had = due != nil
         let cal = Calendar.current
         day = due.map { cal.dateComponents([.year, .month, .day], from: $0.date) }
@@ -72,17 +73,29 @@ final class DuePopover: UIViewController, UICalendarSelectionSingleDateDelegate,
         stack.axis = .vertical
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
+        // It scrolls where the screen is lower than it, as an iPhone on its
+        // side: the popover is as tall as there is room.
+        let scroll = UIScrollView()
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.alwaysBounceVertical = false
+        scroll.addSubview(stack)
+        view.addSubview(scroll)
+        let content = scroll.contentLayoutGuide
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            stack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            stack.bottomAnchor.constraint(
-                lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor),
+            stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 8),
+            stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
             stack.widthAnchor.constraint(equalToConstant: 320),
+            content.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor),
         ])
-        preferredContentSize = view.systemLayoutSizeFitting(
-            CGSize(width: 344, height: UIView.layoutFittingCompressedSize.height))
+        let fitting = stack.systemLayoutSizeFitting(
+            CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height))
+        preferredContentSize = CGSize(width: 344, height: fitting.height + 20)
     }
 
     /// fillTimeRow shows Add time, or the time of day with a button that
@@ -145,7 +158,7 @@ final class DuePopover: UIViewController, UICalendarSelectionSingleDateDelegate,
 
     private func remove() {
         done = true
-        onClose(nil)
+        onClose(nil, true)
         dismiss(animated: true)
     }
 
@@ -164,7 +177,7 @@ final class DuePopover: UIViewController, UICalendarSelectionSingleDateDelegate,
         super.viewDidDisappear(animated)
         guard !done else { return }
         done = true
-        if edited, let chosen { onClose(chosen) }
+        onClose(chosen, edited && chosen != nil)
     }
 
     func dateSelection(

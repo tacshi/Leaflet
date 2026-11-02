@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"slices"
 	"strings"
 	"time"
@@ -11,7 +12,6 @@ import (
 	"github.com/egoist/mygo/audio"
 	"github.com/egoist/mygo/ui"
 
-	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/keychain"
 	"leaflet/internal/macspeech"
@@ -22,7 +22,7 @@ import (
 )
 
 // startRecording records into the open page.
-func (a *App) startRecording(pageID, _ string) {
+func (a *App) startRecording(pageID string) {
 	ed := a.openEditor(pageID)
 	err := a.rec.Start(pageID, a.settings.Stt, a.online && !a.settings.WorkOffline, func(n *doc.Node) {
 		if ed != nil {
@@ -445,16 +445,21 @@ func (a *App) insertTranscript(blockID string, rec store.Recording) {
 // transcribes with it unless another engine is set up: speech settings
 // left at an endpoint with no address turn to it, as on the iPad.
 func (a *App) findSpeech() {
+	// Finding it takes up to 10 s: a recording meanwhile waits for it to
+	// transcribe, rather than keeping only its audio.
+	a.rec.FindingEngine()
 	dir, err := mygo.App.Path(mygo.PathResources)
 	if err != nil {
+		a.update(func() { a.rec.SetEngine(nil) })
 		return
 	}
 	h := macspeech.Find(dir)
 	if h == nil {
+		a.update(func() { a.rec.SetEngine(nil) })
 		return
 	}
 	a.update(func() {
-		a.rec.Engine = h
+		a.rec.SetEngine(h)
 		if a.settings.Stt.Provider == "openai-compatible" && strings.TrimSpace(a.settings.Stt.BaseURL) == "" {
 			a.settings.Stt.Provider = recording.OnDevice
 			a.saveSettings()
@@ -485,7 +490,6 @@ var speech speechState
 const sttControlW = 280
 
 func (a *App) speechSettings(c *ui.Context) {
-	pal := theme.Of(c)
 	s := &speech
 	stt := &a.settings.Stt
 	if !s.keyLoaded {
@@ -668,7 +672,6 @@ func (a *App) speechSettings(c *ui.Context) {
 		a.saveSettings()
 		a.syncSttSettings()
 	}
-	_ = pal
 }
 
 // engineStatus says where transcription runs, or that it is not set up.
@@ -769,12 +772,10 @@ func (a *App) syncSttSettings() {
 			"live_transcript": stt.LiveTranscript, "speaker_labels": stt.SpeakerLabels,
 			"base_url": stt.BaseURL, "model": stt.Model, "provider_id": nilIfEmpty(stt.ProviderID)}
 		if _, err := a.backend.Upsert(ctx, "stt_settings", row, "user_id"); err != nil {
-			fmt.Println("stt settings:", err)
+			log.Printf("stt settings: %v", err)
 		}
 	}()
 }
-
-var _ = agents.Describe
 
 func nilIfEmpty(s string) any {
 	if s == "" {

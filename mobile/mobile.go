@@ -12,5 +12,6 @@ import "runtime"
 // Version returns the Go release the framework was built with, which the
 // app logs at launch to show the framework linked and answers.
 func Version() string {
+	defer catch(nil)
 	return runtime.Version()
 }

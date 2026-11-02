@@ -109,7 +109,7 @@ func (a *App) watchICloud(on bool) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.icloudStop = cancel
-	root, own := a.sync.ICloud.Root, "devices/"+a.st.DeviceID()
+	root, own := a.sync.ICloudFolder().Root, "devices/"+a.st.DeviceID()
 	go func() {
 		for ctx.Err() == nil {
 			w, err := mygo.WatchFiles(ctx, root, mygo.FileWatchOptions{

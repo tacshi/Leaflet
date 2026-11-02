@@ -28,9 +28,11 @@
 #   go tool mygo keygen -o ~/Library/Application\ Support/mygo/update-keys/Leaflet
 # Its public half is updates.publicKey in mygo.json.
 #
-# macOS: signs with DEVELOPER_ID_APPLICATION, or the keychain's one Developer
-# ID Application identity when it is not set, and notarizes with a notarytool
-# keychain profile: LEAFLET_NOTARY_PROFILE, "Leaflet" by default, made with
+# macOS: needs Xcode 26 or later, whose macOS 26 SDK builds leaflet-speech,
+# the on-device speech helper (scripts/build-speech.sh). Signs with
+# DEVELOPER_ID_APPLICATION, or the keychain's one Developer ID Application
+# identity when it is not set, and notarizes with a notarytool keychain
+# profile: LEAFLET_NOTARY_PROFILE, "Leaflet" by default, made with
 #   xcrun notarytool store-credentials Leaflet --apple-id <id> --team-id <team>
 #
 # Windows: needs NSIS (brew install makensis) for the installers. Signs with
@@ -82,7 +84,7 @@ while (($#)); do
 		shift
 		;;
 	-h | --help)
-		sed -n '2,47p' "$0" | sed 's/^# \{0,1\}//'
+		sed -n '2,49p' "$0" | sed 's/^# \{0,1\}//'
 		exit 0
 		;;
 	-*) die "unknown option: $1" ;;
@@ -146,6 +148,8 @@ if $MAC; then
 	for tool in xcrun security; do
 		command -v "$tool" >/dev/null 2>&1 || die "needs $tool"
 	done
+	# Before the long builds: the Mac apps ship leaflet-speech.
+	why="$(speech_toolchain)" || die "the Mac apps ship leaflet-speech, which can't be built here: $why"
 	DEVELOPER_ID_APPLICATION="$(signing_identity)"
 	BUILD_ARGS+=(-sign "$DEVELOPER_ID_APPLICATION")
 	if $NOTARIZE; then

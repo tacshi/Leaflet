@@ -252,7 +252,7 @@ func tagColor(name string) ui.Color {
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(strings.ToLower(name)))
 	colors := editor.BrightColors()
-	return colors[h.Sum32()%uint32(len(colors))]
+	return colors[h.Sum32()%uint32(len(colors))] // #nosec G115 -- a handful of colors.
 }
 
 // tagLook gives e a tag's look: a pill tinted in its color, its name in

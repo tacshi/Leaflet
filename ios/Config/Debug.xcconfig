@@ -5,3 +5,7 @@
 
 PRODUCT_BUNDLE_IDENTIFIER = app.capyvibe.leaflet.debug
 INFOPLIST_KEY_CFBundleDisplayName = Leaflet Debug
+
+// Info.plist's words in each language, the name above among them, from
+// Resources/Debug; Release's, which leave the name as it is, stay out.
+EXCLUDED_SOURCE_FILE_NAMES = */Resources/Release/InfoPlist.xcstrings

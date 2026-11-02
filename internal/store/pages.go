@@ -76,7 +76,7 @@ func (s *Store) queryPages(where string, args ...any) ([]Page, error) {
 
 // pagesIn is queryPages in the database or a transaction.
 func pagesIn(q querier, where string, args ...any) ([]Page, error) {
-	rows, err := q.Query(`SELECT `+pageCols+` FROM pages WHERE `+where, args...)
+	rows, err := q.Query(`SELECT `+pageCols+` FROM pages WHERE `+where, args...) // #nosec G202 -- where is a literal of this package's, its values args.
 	if err != nil {
 		return nil, err
 	}
@@ -1055,9 +1055,11 @@ func (s *Store) RestorePages(ids []string) error {
 
 // SetKeepOffline keeps a page's content on this device, or not.
 func (s *Store) SetKeepOffline(id string, keep bool) error {
-	_, err := s.db.Exec(`UPDATE pages SET keep_offline = ? WHERE id = ?`, keep, id)
+	if _, err := s.db.Exec(`UPDATE pages SET keep_offline = ? WHERE id = ?`, keep, id); err != nil {
+		return err
+	}
 	s.Notify("pages", id)
-	return err
+	return nil
 }
 
 // ContentRow is a page's stored content.
@@ -1320,10 +1322,10 @@ const newestHistory = `SELECT id FROM page_history WHERE page_id = ? ORDER BY cr
 // up leaves the queue with it, so the server never gets it.
 func pruneHistory(tx *sql.Tx, pageID string) error {
 	old := `SELECT id FROM page_history WHERE page_id = ? AND reason <> 'manual' AND id NOT IN (` + newestHistory + `)`
-	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'page_history' AND entity_id IN (`+old+`)`, pageID, pageID); err != nil {
+	if _, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'page_history' AND entity_id IN (`+old+`)`, pageID, pageID); err != nil { // #nosec G202 -- old is the literal above.
 		return err
 	}
-	_, err := tx.Exec(`DELETE FROM page_history WHERE id IN (`+old+`)`, pageID, pageID)
+	_, err := tx.Exec(`DELETE FROM page_history WHERE id IN (`+old+`)`, pageID, pageID) // #nosec G202 -- old is the literal above.
 	return err
 }
 
@@ -1483,7 +1485,9 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 		}
 		hits = append(hits, SearchHit{Kind: "page", Title: TitleOr(titles[id]), PageID: id, Snippet: snippet(text, q)})
 	}
-	_ = rows.Close()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
 	// Recordings and comments, as the text, of the pages listed alone.
 	rows, err = s.db.Query(`SELECT r.page_id, r.block_id FROM recordings r JOIN pages p ON p.id = r.page_id
 		WHERE p.deleted_at IS NULL AND p.is_template = 0 AND instr(`+lowerFunc+`(r.transcript), ?) > 0 LIMIT ?`, q, otherLimit)
@@ -1500,7 +1504,9 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 			hits = append(hits, SearchHit{Kind: "recording", Title: locales.StoreSearchRecording(TitleOr(titles[id])), PageID: id, BlockID: block})
 		}
 	}
-	_ = rows.Close()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
 	rows, err = s.db.Query(`SELECT c.page_id, c.block_id, c.body FROM comments c JOIN pages p ON p.id = c.page_id
 		WHERE p.deleted_at IS NULL AND p.is_template = 0 AND instr(`+lowerFunc+`(c.body), ?) > 0 AND c.deleted_at IS NULL LIMIT ?`, q, otherLimit)
 	if err != nil {
@@ -1516,7 +1522,9 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 			hits = append(hits, SearchHit{Kind: "comment", Title: body, PageID: id, BlockID: block, Snippet: locales.StoreSearchCommentOn(TitleOr(titles[id]))})
 		}
 	}
-	_ = rows.Close()
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return nil, err
+	}
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}

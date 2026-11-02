@@ -43,6 +43,8 @@ final class CaretMenu {
     }
 
     var view: UIView { host.view }
+    /// loaded says the core has said what the menu offers.
+    var loaded: Bool { all != nil }
 
     /// load gives the menu what it offers, once the core has said.
     func load(_ items: String) {

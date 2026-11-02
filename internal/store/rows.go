@@ -74,21 +74,21 @@ func writeFolder(q querier, f Folder) error {
 
 // CreateFolder creates a folder last in the space.
 func (s *Store) CreateFolder(name string) (Folder, error) {
-	existing, err := s.Folders()
-	if err != nil {
-		return Folder{}, err
-	}
-	last := ""
-	if len(existing) > 0 {
-		last = existing[len(existing)-1].SortKey
-	}
 	now := time.Now()
-	f := Folder{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, Name: name, SortKey: KeyBetween(last, ""), CreatedAt: now, UpdatedAt: now}
-	err = s.inTx(func(tx *sql.Tx) error {
+	f := Folder{ID: doc.NewRowID(), SpaceID: s.Session().SpaceID, Name: name, CreatedAt: now, UpdatedAt: now}
+	err := s.inTx(func(tx *sql.Tx) error {
 		// As in CreatePage: the app may have changed accounts meanwhile.
 		if f.SpaceID != "" && !hasSpace(tx, f.SpaceID) {
 			return ErrNoSpace
 		}
+		// The last key, read in the transaction that holds the write lock:
+		// read before it, `leaflet mcp` making a folder at the same time
+		// could give its folder the same key.
+		var last sql.NullString
+		if err := tx.QueryRow(`SELECT MAX(sort_key) FROM folders WHERE deleted_at IS NULL`).Scan(&last); err != nil {
+			return err
+		}
+		f.SortKey = KeyBetween(last.String, "")
 		return saveFolder(tx, f, "new folder")
 	})
 	if err != nil {
@@ -253,7 +253,7 @@ func (s *Store) queryFiles(where string, args ...any) ([]File, error) {
 
 // filesIn is queryFiles in the database or a transaction.
 func filesIn(q querier, where string, args ...any) ([]File, error) {
-	rows, err := q.Query(`SELECT id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at FROM files WHERE `+where, args...)
+	rows, err := q.Query(`SELECT id, space_id, folder_id, page_id, name, storage_path, local_path, mime_type, size_bytes, created_at, updated_at, deleted_at FROM files WHERE `+where, args...) // #nosec G202 -- where is a literal of this package's, its values args.
 	if err != nil {
 		return nil, err
 	}
@@ -617,7 +617,7 @@ func putComment(q querier, c Comment) error {
 func (s *Store) changeComments(label string, fn func(*Comment), where string, args ...any) (int, error) {
 	var all []Comment
 	err := s.inTx(func(tx *sql.Tx) error {
-		rows, err := tx.Query(`SELECT `+commentCols+` FROM comments WHERE `+where, args...)
+		rows, err := tx.Query(`SELECT `+commentCols+` FROM comments WHERE `+where, args...) // #nosec G202 -- where is a literal of this package's, its values args.
 		if err != nil {
 			return err
 		}

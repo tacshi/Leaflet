@@ -311,18 +311,34 @@ func TestCopyPasteKeepsBlocks(t *testing.T) {
 	}
 }
 
-func TestPasteLinesInTableCellJoin(t *testing.T) {
-	e, _, _ := setup(t)
-	table, _ := doc.TableNode([][]string{{"a"}}, "")
+// A table's cell is edited in a text area of its own, where text pasted
+// keeps its lines, and a line break in the cell is a <br> in the page's
+// Markdown, which reads back as one.
+func TestPasteLinesInTableCell(t *testing.T) {
+	e, tt, _ := setup(t)
+	table, _ := doc.TableNode([][]string{{"head"}, {"cell"}}, "")
 	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table} })
-	cell := table.Children[0].Children[0]
-	e.PlaceCaret(cell.ID, 1)
-	e.paste("one\ntwo")
-	if got := cell.Delta().Plain(); got != "aone two" {
-		t.Errorf("cell %q", got)
+	tt.Frame()
+	if err := tt.Click("cell"); err != nil {
+		t.Fatalf("%v in %v", err, tt.Texts())
+	}
+	tt.Frame()
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.SetClipboard("one\ntwo | three")
+	tt.Key(ui.Cmd, ui.KeyV)
+	tt.Frame()
+	if rows := doc.TableRows(table); len(rows) != 2 || rows[1][0] != "one\ntwo | three" {
+		t.Fatalf("rows %q", rows)
 	}
 	if len(e.Content.Children) != 1 {
 		t.Errorf("blocks %v", texts(e))
+	}
+	md := doc.PageMarkdown("", e.Content, nil)
+	if !strings.Contains(md, "| one<br>two \\| three |") {
+		t.Errorf("markdown %q", md)
+	}
+	if back := doc.MarkdownBlocks(md); len(back) != 1 || !slices.Equal(doc.TableRows(back[0])[1], []string{"one\ntwo | three"}) {
+		t.Errorf("read back as %v", back)
 	}
 }
 

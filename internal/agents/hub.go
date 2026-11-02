@@ -1153,7 +1153,9 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 	s.Running = false
 	run.stop = nil
 	run.Reply, run.Answer = res.Reply, ""
-	if len(run.Ops) == 0 && len(res.Ops) > 0 {
+	// A cloud run whose stream was cut off has its ops from the server's
+	// job, those after the cut too: all of them are the run's, to undo.
+	if len(res.Ops) > len(run.Ops) {
 		run.Ops, run.Edits = res.Ops, res.Edits
 	}
 	if run.Stopped {
@@ -1251,11 +1253,20 @@ func (h *Hub) crossPage(p store.Page, settings store.Settings) bool {
 		!h.st.HasGuestComments(p.ID) && (h.PublicLink == nil || !h.PublicLink(p.ID))
 }
 
+// ownMembersKey is internal/sync's OwnMembersKey: when sync last read who
+// the user's own pages are shared with.
+const ownMembersKey = "sync.own_members_at"
+
 // sharedWithOthers reports whether anyone but the user has a page: it is
 // in someone else's space, or it or a page it is inside has members other
-// than the user.
+// than the user. Signed in, the user's own pages count as shared until
+// sync has read who they are shared with: members are kept of a page only
+// once something loaded them, so none kept says nothing before then.
 func sharedWithOthers(st *store.Store, p store.Page) bool {
 	sess := st.Session()
+	if known, _ := st.Value(ownMembersKey); sess.SignedIn && known == "" {
+		return true
+	}
 	seen := map[string]bool{}
 	for p.ID != "" && !seen[p.ID] {
 		seen[p.ID] = true
@@ -1310,64 +1321,80 @@ func (h *Hub) saveRun(s *Session, runID string) {
 	h.saveChat(s)
 }
 
-// UndoRun reverts a whole run, even after later edits elsewhere on the page.
-func (h *Hub) UndoRun(pageID, runID string) {
+// UndoRun reverts a whole run, even after later edits elsewhere on the
+// page. One whose edits could not be reverted stays as it was, and says
+// why.
+func (h *Hub) UndoRun(pageID, runID string) error {
 	s := h.Session(pageID)
 	run := s.Run(runID)
 	if run == nil || run.Undone {
-		return
+		return nil
 	}
-	h.apply(pageID, runID, doc.InvertRun(run.Ops))
+	if err := h.apply(pageID, runID, doc.InvertRun(run.Ops)); err != nil {
+		log.Printf("undo run: %v", err)
+		return err
+	}
 	run.Undone = true
 	h.saveRun(s, runID)
 	h.host.Tint(pageID, nil)
 	h.markJob(runID, "reverted")
+	return nil
 }
 
-// RedoRun applies an undone run again.
-func (h *Hub) RedoRun(pageID, runID string) {
+// RedoRun applies an undone run again. One whose edits could not be
+// applied stays undone, and says why.
+func (h *Hub) RedoRun(pageID, runID string) error {
 	s := h.Session(pageID)
 	run := s.Run(runID)
 	if run == nil || !run.Undone {
-		return
+		return nil
 	}
-	h.apply(pageID, runID, run.Ops)
+	if err := h.apply(pageID, runID, run.Ops); err != nil {
+		log.Printf("redo run: %v", err)
+		return err
+	}
 	run.Undone = false
 	h.saveRun(s, runID)
 	h.host.Tint(pageID, run.BlockIDs())
 	h.markJob(runID, "done")
+	return nil
 }
 
-func (h *Hub) apply(pageID, runID string, ops []doc.Op) {
-	var blockOps []doc.Op
+// apply makes a run's ops, or their inverse, on its page and on the pages
+// it made or deleted. The page's blocks go first, all at once or not at
+// all: when they cannot, nothing changed.
+func (h *Hub) apply(pageID, runID string, ops []doc.Op) error {
+	var blockOps, pageOps []doc.Op
 	for _, o := range ops {
-		switch o.Op {
-		case "delete_page":
-			if _, err := h.st.DeletePage(o.PageID); err != nil {
-				log.Printf("undo run: %v", err)
-			}
-		case "create_page":
-			if o.Page != nil {
-				if err := h.st.RestorePages([]string{o.Page.ID}); err != nil {
-					log.Printf("undo run: %v", err)
-				}
-			}
-		default:
+		if o.Op == "delete_page" || o.Op == "create_page" {
+			pageOps = append(pageOps, o)
+		} else {
 			blockOps = append(blockOps, o)
 		}
 	}
-	if len(blockOps) == 0 {
-		return
-	}
-	if ed := h.host.Live(pageID); ed != nil {
-		if err := ed.ApplyOps(blockOps); err != nil {
-			log.Printf("undo run: %v", err)
+	if len(blockOps) > 0 {
+		var err error
+		if ed := h.host.Live(pageID); ed != nil {
+			err = ed.ApplyOps(blockOps)
+		} else {
+			err = storeOps(h.st, pageID, blockOps, false, runID, "undo run")
 		}
-		return
+		if err != nil {
+			return err
+		}
 	}
-	if err := storeOps(h.st, pageID, blockOps, false, runID, "undo run"); err != nil {
-		log.Printf("undo run: %v", err)
+	var failed error
+	for _, o := range pageOps {
+		switch {
+		case o.Op == "delete_page":
+			if _, err := h.st.DeletePage(o.PageID); err != nil {
+				failed = errors.Join(failed, err)
+			}
+		case o.Page != nil:
+			failed = errors.Join(failed, h.st.RestorePages([]string{o.Page.ID}))
+		}
 	}
+	return failed
 }
 
 // markJob changes a run's status: in the job this device keeps of a local

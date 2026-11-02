@@ -5,6 +5,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/go-text/typesetting/segmenter"
+
 	"leaflet/internal/doc"
 	"leaflet/internal/shortcut"
 )
@@ -44,16 +46,35 @@ func (e *Editor) deleteSelection() bool {
 	if last.IsText() {
 		tail = last.Delta().Slice(b.Off, textLen(last))
 	}
-	// Remove everything after the first block, last first, so children
-	// outside the selection move up to their parent's place as it goes.
-	for i := ib; i > ia; i-- {
-		n := us[i]
-		if !collapsed(n) || i == ib {
-			e.liftChildren(n)
-		}
-		e.Content.Remove(n.ID)
+	// Remove everything after the first block, its children outside the
+	// selection moving up to its place, but a folded toggle's from between
+	// the first block and the last, which go with it. One walk of the page
+	// takes them all out: removed one at a time, each would look for its
+	// place in the page.
+	gone := make(map[string]bool, ib-ia)
+	for _, n := range us[ia+1 : ib+1] {
+		gone[n.ID] = true
 		e.invalidate(n.ID)
 	}
+	var without func([]*doc.Node) []*doc.Node
+	without = func(nodes []*doc.Node) []*doc.Node {
+		var out []*doc.Node
+		for _, n := range nodes {
+			lift := n.Type != "table" && (!collapsed(n) || n == last)
+			if n.Type != "table" && (!gone[n.ID] || lift) {
+				n.Children = without(n.Children)
+			}
+			switch {
+			case !gone[n.ID]:
+				out = append(out, n)
+			case lift:
+				out = append(out, n.Children...)
+				n.Children = nil
+			}
+		}
+		return out
+	}
+	e.Content.Children = without(e.Content.Children)
 	if first.IsText() {
 		first.SetDelta(first.Delta().Slice(0, a.Off).Concat(tail))
 		e.invalidate(first.ID)
@@ -94,7 +115,14 @@ func (e *Editor) InsertText(s string) {
 	}
 	if n := utf8.RuneCountInString(s); n > 1 && n <= 64 {
 		// Text typed at once goes in as keystrokes would, so shortcuts and
-		// menus still follow it.
+		// menus still follow it. In place of a selection, as an input
+		// method's commit or autocorrect puts it, it is one step: the
+		// selection goes as the step begins, and the keystrokes join it.
+		if !e.Collapsed() {
+			e.pushUndo(false)
+			e.deleteSelection()
+			e.coalescing, e.coalesceIn = true, e.focus.ID
+		}
 		for _, r := range s {
 			e.InsertText(string(r))
 		}
@@ -371,11 +399,11 @@ func (e *Editor) Backspace(word bool) {
 	off := e.focus.Off
 	if off > 0 {
 		e.pushUndo(true)
-		from := off - 1
+		var from int
 		if word {
 			from = wordStart([]rune(n.Delta().Plain()), off)
-		} else if l := e.layoutOf(n); l != nil {
-			from = runeOff(n, l.layout.PreviousBoundary(utf16Off(n, off)))
+		} else {
+			from = e.prevStop(n, off)
 		}
 		// A mention goes whole.
 		from, _ = n.Delta().Widen(from, off)
@@ -445,11 +473,11 @@ func (e *Editor) Delete(word bool) {
 	off := e.focus.Off
 	if off < textLen(n) {
 		e.pushUndo(true)
-		to := off + 1
+		var to int
 		if word {
 			to = wordEnd([]rune(n.Delta().Plain()), off)
-		} else if l := e.layoutOf(n); l != nil {
-			to = runeOff(n, l.layout.NextBoundary(utf16Off(n, off)))
+		} else {
+			to = e.nextStop(n, off)
 		}
 		// A mention goes whole, as the caret is never inside one.
 		n.SetDelta(n.Delta().Delete(off, to))
@@ -954,6 +982,50 @@ func (e *Editor) SelectAll() {
 	us := e.units()
 	first, last := us[0], us[len(us)-1]
 	e.Select(Pos{first.ID, 0}, Pos{last.ID, textLen(last)})
+}
+
+// prevStop and nextStop are where the caret stops before and after off in
+// a text block, a grapheme cluster away, as its layout has them, so an
+// emoji, a flag or a letter with its marks goes whole. A block not laid
+// out since it changed, as a second key before the next frame finds it,
+// has them from Unicode's rules.
+func (e *Editor) prevStop(n *doc.Node, off int) int {
+	if l := e.layoutOf(n); l != nil {
+		return runeOff(n, l.layout.PreviousBoundary(utf16Off(n, off)))
+	}
+	prev := 0
+	for _, b := range clusters(n) {
+		if b >= off {
+			break
+		}
+		prev = b
+	}
+	return prev
+}
+
+func (e *Editor) nextStop(n *doc.Node, off int) int {
+	if l := e.layoutOf(n); l != nil {
+		return runeOff(n, l.layout.NextBoundary(utf16Off(n, off)))
+	}
+	for _, b := range clusters(n) {
+		if b > off {
+			return b
+		}
+	}
+	return textLen(n)
+}
+
+// clusters are the rune offsets where a text block's grapheme clusters
+// start, and its end.
+func clusters(n *doc.Node) []int {
+	rs := []rune(n.Delta().Plain())
+	var seg segmenter.Segmenter
+	seg.Init(rs)
+	var out []int
+	for it := seg.GraphemeIterator(); it.Next(); {
+		out = append(out, it.Grapheme().Offset)
+	}
+	return append(out, len(rs))
 }
 
 func wordStart(rs []rune, off int) int {

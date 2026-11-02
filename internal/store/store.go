@@ -283,7 +283,7 @@ func addColumns(ctx context.Context, c *sql.Conn, cols [][3]string) error {
 		if tables == 0 || n > 0 {
 			continue
 		}
-		if _, err := c.ExecContext(ctx, "ALTER TABLE "+col[0]+" ADD COLUMN "+col[1]+" "+col[2]); err != nil {
+		if _, err := c.ExecContext(ctx, "ALTER TABLE "+col[0]+" ADD COLUMN "+col[1]+" "+col[2]); err != nil { // #nosec G202 -- the migrations' own names and definitions.
 			return err
 		}
 	}
@@ -301,7 +301,7 @@ func addIndexes(ctx context.Context, c *sql.Conn, indexes [][3]string) error {
 		if n == 0 {
 			continue
 		}
-		if _, err := c.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS "+ix[0]+" ON "+ix[1]+" ("+ix[2]+")"); err != nil {
+		if _, err := c.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS "+ix[0]+" ON "+ix[1]+" ("+ix[2]+")"); err != nil { // #nosec G202 -- the migrations' own names and columns.
 			return err
 		}
 	}
@@ -430,13 +430,21 @@ func (s *Store) DeleteValue(key string) error {
 }
 
 // Wipe removes everything stored on this device.
+// It is one transaction: a table left behind by a failure part way, as
+// the outbox with the pages gone, would go up as the next account's.
 func (s *Store) Wipe() error {
-	for _, t := range []string{"spaces", "folders", "pages", "page_contents", "comments", "recordings",
-		"files", "ai_jobs", "model_providers", "page_history", "outbox", "conflicts", "page_members", "key_values",
-		"peer_contents", "row_versions"} {
-		if _, err := s.db.Exec("DELETE FROM " + t); err != nil {
-			return err
+	err := s.inTx(func(tx *sql.Tx) error {
+		for _, t := range []string{"spaces", "folders", "pages", "page_contents", "comments", "recordings",
+			"files", "ai_jobs", "model_providers", "page_history", "outbox", "conflicts", "page_members", "key_values",
+			"peer_contents", "row_versions"} {
+			if _, err := tx.Exec("DELETE FROM " + t); err != nil { // #nosec G202 -- one of the tables listed here.
+				return err
+			}
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	s.Notify("*", "")
 	return s.removeCopies()

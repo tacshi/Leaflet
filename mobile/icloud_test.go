@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"leaflet/internal/icloud"
 	"leaflet/locales"
@@ -95,8 +96,8 @@ func TestSetICloudSyncsThroughThePickedFolder(t *testing.T) {
 	if c.core.Store.Settings().ICloudSync {
 		t.Fatal("the setting stayed on")
 	}
-	if c.core.Sync.ICloud.Root != root {
-		t.Fatalf("turning off forgot the folder: %q", c.core.Sync.ICloud.Root)
+	if got := c.core.Sync.ICloudFolder().Root; got != root {
+		t.Fatalf("turning off forgot the folder: %q", got)
 	}
 	if got := p.watched(); !slices.Equal(got, []bool{true, false}) {
 		t.Fatalf("watched %v", got)
@@ -119,5 +120,43 @@ func TestSetICloudStaysOffWithoutTheFolder(t *testing.T) {
 	}
 	if got := p.watched(); !slices.Equal(got, []bool{false}) {
 		t.Fatalf("watched %v", got)
+	}
+}
+
+// Picking another folder waits for the pass under way, which can take
+// minutes, but the rest of the core does not wait with it.
+func TestSetICloudDuringAPassLeavesTheCoreFree(t *testing.T) {
+	c, _ := openWatching(t)
+	root := filepath.Join(t.TempDir(), "Leaflet")
+	if err := os.Mkdir(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	inPass, endPass := make(chan struct{}), make(chan struct{})
+	go c.core.Sync.Hold(func() {
+		close(inPass)
+		<-endPass
+	})
+	<-inPass
+	set := make(chan error, 1)
+	go func() { set <- c.SetICloud(root, false) }()
+	status := make(chan error, 1)
+	go func() {
+		_, err := c.Status()
+		status <- err
+	}()
+	select {
+	case err := <-status:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the core waited for the pass")
+	}
+	close(endPass)
+	if err := <-set; err != nil {
+		t.Fatal(err)
+	}
+	if got := c.core.Sync.ICloudFolder().Root; got != root {
+		t.Errorf("folder %q", got)
 	}
 }

@@ -3,6 +3,7 @@ package app
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/egoist/mygo"
 
@@ -27,10 +28,24 @@ func (mygoSecrets) Set(name string, value []byte) error { return mygo.Secrets.Se
 
 func (mygoSecrets) Delete(name string) error { return secretErr(mygo.Secrets.Delete(name)) }
 
-// secretErr makes MyGo's "no such secret" the keychain's.
+// deniedStatuses are how MyGo's Secrets ends its errors on macOS when the
+// user denies its prompt (errSecAuthFailed) or cancels it
+// (errSecUserCanceled): it gives no error of its own to match.
+var deniedStatuses = []string{"(OSStatus -25293)", "(OSStatus -128)"}
+
+// secretErr makes MyGo's "no such secret" the keychain's, and the user's
+// refusal of the system's prompt the keychain's ErrDenied.
 func secretErr(err error) error {
+	if err == nil {
+		return nil
+	}
 	if errors.Is(err, mygo.ErrSecretNotFound) {
 		return fmt.Errorf("%w: %w", keychain.ErrNotFound, err)
+	}
+	for _, s := range deniedStatuses {
+		if strings.HasSuffix(err.Error(), s) {
+			return fmt.Errorf("%w: %w", keychain.ErrDenied, err)
+		}
 	}
 	return err
 }

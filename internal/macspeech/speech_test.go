@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // fake is a helper that answers as leaflet-speech does: a stream's words
@@ -110,25 +111,41 @@ func TestTheMacTranscribes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := h.Stream("en", func(string) {})
-	if err != nil {
-		t.Fatal(err)
+	var streamed string
+	// What follows the WAV header, in the microphone's chunks of 100 ms;
+	// then as it comes, in chunks that end inside a sample, as a pipe may
+	// split what is written, which the helper reads one at a time.
+	for _, chunk := range []struct {
+		size int
+		pace time.Duration
+	}{{3200, 0}, {1601, 50 * time.Millisecond}} {
+		s, err := h.Stream("en", func(string) {})
+		if err != nil {
+			t.Fatal(err)
+		}
+		pcm := audio[44:]
+		for len(pcm) > 0 {
+			n := min(chunk.size, len(pcm))
+			s.Send(pcm[:n])
+			pcm = pcm[n:]
+			time.Sleep(chunk.pace)
+		}
+		segs, err := s.Finish()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(segs) == 0 || !strings.Contains(strings.ToLower(segs[0].Text), "notes") {
+			t.Fatalf("streamed in chunks of %d bytes: %+v", chunk.size, segs)
+		}
+		// A sample split between chunks keeps its bytes together: the
+		// words are the same however the audio came.
+		if text := segs[0].Text; streamed == "" {
+			streamed = text
+		} else if text != streamed {
+			t.Fatalf("streamed in chunks of %d bytes: %q, not %q", chunk.size, text, streamed)
+		}
 	}
-	// What follows the WAV header, in the microphone's chunks of 100 ms.
-	pcm := audio[44:]
-	for len(pcm) > 0 {
-		n := min(3200, len(pcm))
-		s.Send(pcm[:n])
-		pcm = pcm[n:]
-	}
-	segs, err := s.Finish()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(segs) == 0 || !strings.Contains(strings.ToLower(segs[0].Text), "notes") {
-		t.Fatalf("streamed %+v", segs)
-	}
-	segs, err = h.File(wav, "en")
+	segs, err := h.File(wav, "en")
 	if err != nil || len(segs) == 0 || !strings.Contains(strings.ToLower(segs[0].Text), "notes") {
 		t.Fatalf("file %+v, %v", segs, err)
 	}

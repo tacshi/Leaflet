@@ -14,7 +14,7 @@ import (
 // one does not hold all of, as one that changed a column alone does not
 // hold the columns an earlier one changed.
 func (s *Service) compact(me string) error {
-	seqs, _, err := s.ICloud.Batches(me)
+	seqs, _, err := s.folder().Batches(me)
 	if err != nil || len(seqs) <= compactAfter {
 		return err
 	}
@@ -34,7 +34,7 @@ func (s *Service) compact(me string) error {
 			return err
 		}
 		var b icloud.Batch
-		if err := s.ICloud.ReadJSON(rel, &b); err != nil {
+		if err := s.folder().ReadJSON(rel, &b); err != nil {
 			if errors.Is(err, icloud.ErrNotReady) {
 				return nil // try once iCloud has it again
 			}
@@ -78,7 +78,7 @@ func (s *Service) compact(me string) error {
 			break
 		}
 		old, _ := icloud.BatchPath(me, seq)
-		if err := s.ICloud.Remove(old); err != nil {
+		if err := s.folder().Remove(old); err != nil {
 			return err
 		}
 	}

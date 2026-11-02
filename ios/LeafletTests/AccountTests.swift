@@ -34,9 +34,13 @@ struct AccountTests {
         #expect(try await client.account().signedIn == false)
     }
 
-    @Test func signingOutLeavesTheDevicesOwnPages() async throws {
+    /// Signed out, signing out does nothing: the device's pages stay. A
+    /// sign-out from an account takes a session Supabase gave, which the
+    /// core has no stand-in for here.
+    @Test func signingOutWhileSignedOutKeepsThePages() async throws {
         let page = try await client.createPage(NewPage(title: "Mine"))
         #expect(try await client.signOut(anyway: true) == 0)
+        #expect(try await client.account().signedIn == false)
         #expect(try await client.library().pages.contains { $0.id == page.id })
     }
 }

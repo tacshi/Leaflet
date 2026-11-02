@@ -2,6 +2,7 @@ package mobile
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"leaflet/internal/doc"
@@ -28,9 +29,9 @@ type conflictRow struct {
 
 // Conflicts returns the conflicts not resolved yet, newest first, as a
 // JSON array of conflictRow.
-func (c *Core) Conflicts() (string, error) {
+func (c *Core) Conflicts() (_ string, err error) {
+	defer catch(&err)
 	var out []conflictRow
-	var err error
 	c.q.do(func() {
 		var rows []store.ConflictRow
 		if rows, err = c.core.Store.Conflicts(); err != nil {
@@ -84,8 +85,14 @@ const (
 // ResolveConflict settles a conflict, as the desktop's Resolve menu does,
 // how says: resolveKeep, resolveThisDevice or resolveDelete. A page not
 // open keeps a version from before in its history first.
-func (c *Core) ResolveConflict(id, how string) error {
-	var err error
+func (c *Core) ResolveConflict(id, how string) (err error) {
+	defer catch(&err)
+	// Any other how would delete the block.
+	switch how {
+	case resolveKeep, resolveThisDevice, resolveDelete:
+	default:
+		return fmt.Errorf("no way to resolve a conflict named %q", how)
+	}
 	c.q.do(func() {
 		var rows []store.ConflictRow
 		if rows, err = c.core.Store.Conflicts(); err != nil {

@@ -190,8 +190,21 @@ type Soniox struct {
 	qmu     sync.Mutex
 	qclosed bool
 	written chan struct{}
-	// OnText runs with the live text: final words and the current draft.
-	OnText func(string)
+	// onText runs with the live text, final words and the current draft;
+	// SetOnText sets it, guarded by mu, as read runs from the start.
+	onText func(string)
+}
+
+// SetOnText has fn run with the live text, final words and the current
+// draft, as it comes, starting with what came before it was set.
+func (s *Soniox) SetOnText(fn func(string)) {
+	s.mu.Lock()
+	s.onText = fn
+	text := s.textLocked()
+	s.mu.Unlock()
+	if fn != nil && text != "" {
+		fn(text)
+	}
 }
 
 // keepAliveAfter is how long the stream goes without audio, as while a
@@ -349,7 +362,7 @@ func (s *Soniox) read() {
 			}
 		}
 		text := s.textLocked()
-		fn := s.OnText
+		fn := s.onText
 		s.mu.Unlock()
 		if fn != nil {
 			fn(text)

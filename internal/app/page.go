@@ -34,7 +34,7 @@ func (a *App) pageView(c *ui.Context) {
 		tools(c, func() {
 			if !a.rec.Active() && !ps.editor.ReadOnly {
 				if iconButton(c, "record", "record", locales.PageRecord()).Clicked() {
-					a.startRecording(ps.id, "")
+					a.startRecording(ps.id)
 				}
 			}
 			// A public link needs no server, so every page but a template
@@ -255,8 +255,13 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 	if ps.titleLeave {
 		ps.titleLeave = false
 		a.saveTitle()
-		ps.editor.PlaceCaret(ps.editor.Content.Children[0].ID, 0)
-		ps.editor.Focus()
+		// A page left with no blocks gets one to type in.
+		if ch := ps.editor.Content.Children; len(ch) > 0 {
+			ps.editor.PlaceCaret(ch[0].ID, 0)
+			ps.editor.Focus()
+		} else {
+			a.caretAtEnd()
+		}
 	}
 }
 
@@ -398,15 +403,17 @@ func humanTimeAt(t, now time.Time) string {
 }
 
 // caretAtEnd puts the caret at the end of the page, after a new paragraph
-// when the last block has no text.
+// when the last block has no text or there is no block.
 func (a *App) caretAtEnd() {
 	ed := a.page.editor
-	children := ed.Content.Children
-	last := children[len(children)-1]
-	for len(last.Children) > 0 && last.Type != "table" {
-		last = last.Children[len(last.Children)-1]
+	var last *doc.Node
+	if children := ed.Content.Children; len(children) > 0 {
+		last = children[len(children)-1]
+		for len(last.Children) > 0 && last.Type != "table" {
+			last = last.Children[len(last.Children)-1]
+		}
 	}
-	if !last.IsText() {
+	if last == nil || !last.IsText() {
 		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
 		p.SetDelta(nil)
 		ed.Edit(func(c *doc.Content) { c.Children = append(c.Children, p) })
@@ -418,7 +425,7 @@ func (a *App) caretAtEnd() {
 
 func (a *App) isEmpty() bool {
 	ch := a.page.editor.Content.Children
-	return len(ch) == 1 && ch[0].Type == "paragraph" && ch[0].Delta().Len() == 0 && len(ch[0].Children) == 0
+	return len(ch) == 0 || len(ch) == 1 && ch[0].Type == "paragraph" && ch[0].Delta().Len() == 0 && len(ch[0].Children) == 0
 }
 
 // emptyActions are the ways to start an empty page.
@@ -472,6 +479,22 @@ func (a *App) emptyActions(c *ui.Context) {
 	})
 }
 
+// undoRun takes back an agent's run on the open page, or says why it
+// could not: the run is then left as it was.
+func (a *App) undoRun(run *agents.Run) {
+	if err := a.hub.UndoRun(a.page.id, run.ID); err != nil {
+		a.toast(locales.PageUndoRunFailed(run.AgentName, err.Error()))
+	}
+}
+
+// redoRun makes an undone run's edits again, or says why it could not:
+// the run then stays undone.
+func (a *App) redoRun(run *agents.Run) {
+	if err := a.hub.RedoRun(a.page.id, run.ID); err != nil {
+		a.toast(locales.PageRedoRunFailed(run.AgentName, err.Error()))
+	}
+}
+
 // runBar offers to undo the latest agent run.
 func (a *App) runBar(c *ui.Context, run *agents.Run) {
 	pal := theme.Of(c)
@@ -495,10 +518,10 @@ func (a *App) runBar(c *ui.Context, run *agents.Run) {
 			return b.Clicked()
 		}
 		if !run.Undone && btn("undo-run", locales.CommonUndo()) {
-			a.hub.UndoRun(a.page.id, run.ID)
+			a.undoRun(run)
 		}
 		if run.Undone && btn("redo-run", locales.PageRedo()) {
-			a.hub.RedoRun(a.page.id, run.ID)
+			a.redoRun(run)
 		}
 		x := ui.ButtonBase(c.Key("hide-run")).Size(24, 24).Center().Radius(6).Label(locales.PageDismiss())
 		x.Children(func() { ui.Icon(c, theme.Icon("x")).FontSize(13).TextColor(pal.OnInverse.Alpha(0.7)) })

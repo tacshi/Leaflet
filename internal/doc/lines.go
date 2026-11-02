@@ -12,162 +12,436 @@ func MarkdownBlocks(text string) []*Node {
 	return ParseLines(strings.Trim(text, "\n"))
 }
 
-// ParseLines reads pasted text as blocks: a line each, with markdown
-// block prefixes. List items indented under one nest in it, lines of a
-// markdown table make a table, and a fenced block a code block.
+// ParseLines reads pasted text as blocks: a line each, with Markdown
+// block prefixes, as PageMarkdown writes them. A line ending in a hard
+// break, a backslash, goes on in the block on the next line, a
+// line of a quote or an alert after another is more of it, and a line
+// right after a list item's, indented under it, more of the item. A list
+// item holds the blocks indented under it, a <details> those up to its
+// </details>, the lines of a Markdown table make a table, and a fenced
+// block a code block.
 func ParseLines(text string) []*Node {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
-	var out []*Node
-	// lists are the list items open at each depth, for nesting.
-	var lists []*Node
-	var table [][]string
-	flushTable := func() {
-		if len(table) > 0 {
-			if t, err := TableNode(table, ""); err == nil {
-				out = append(out, t)
-			}
-			table = nil
-		}
-	}
-	// code is the fenced block open, and fence the backticks it opened
-	// with; its indent comes off each of its lines.
-	// A Mermaid fence makes a diagram, and lines between "$$" math: the
-	// block in its place in out, at codeAt, once it closes.
-	var code *Node
-	var codeLines []string
-	fence, fenceIndent := "", ""
-	codeAt := 0
-	closeCode := func() {
-		text := strings.Join(codeLines, "\n")
-		switch {
-		case fence == "$$":
-			out[codeAt] = MathNode(text)
-		case code.Str("language") == "mermaid":
-			out[codeAt] = DiagramNode(text)
-		default:
-			code.SetDelta(Delta{{Text: text}}.Compact())
-		}
-		code = nil
-	}
-	// callout is the GitHub alert being read: its lines go in it.
-	var callout *Node
+	var p lineParser
 	for _, line := range strings.Split(text, "\n") {
-		trimmed := strings.TrimLeft(line, " \t")
-		if code != nil {
-			if fence == "$$" && strings.TrimSpace(trimmed) == "$$" || fence != "$$" && strings.HasPrefix(trimmed, fence) && strings.Trim(trimmed, "` ") == "" {
-				closeCode()
-				continue
-			}
-			codeLines = append(codeLines, strings.TrimPrefix(line, fenceIndent))
-			continue
+		p.line(line)
+	}
+	p.flushTable()
+	if p.code != nil {
+		// A fence left open runs to the end.
+		p.closeCode()
+	}
+	for _, t := range p.texts {
+		t.n.SetDelta(FromMarkdown(strings.Join(t.md, "\n")))
+	}
+	return p.out
+}
+
+// lineParser is ParseLines reading text a line at a time.
+type lineParser struct {
+	out []*Node
+	// open are the blocks that hold what follows, outermost first: list
+	// items, which hold the lines indented under them, and toggles, which
+	// hold all up to their </details>.
+	open []openBlock
+	// texts are the text blocks read, their Markdown set at the end, and
+	// text the one the next line may go on in.
+	texts []*textBlock
+	text  *textBlock
+	// summary is the toggle whose <summary> is being read, over lines, and
+	// awaiting one just opened, whose summary may follow.
+	summary, awaiting *textBlock
+
+	table   [][]string
+	tableIn *[]*Node
+
+	// code is the fenced block open, and fence the backticks it opened
+	// with, or "$$" for math; its indent comes off each of its lines. A
+	// Mermaid fence makes a diagram, and lines between "$$" math: the
+	// block in code's place, last in codeIn, once it closes.
+	code              *Node
+	codeLines         []string
+	fence, codeIndent string
+	codeIn            *[]*Node
+}
+
+// An openBlock is a list item or a toggle that holds the blocks after it.
+type openBlock struct {
+	n *Node
+	// toggle is true for a toggle, which holds all up to its </details>.
+	toggle bool
+	// min is how far a line is indented to be in it: two columns past a
+	// list item's marker, as CommonMark's "- " takes, and as people indent
+	// under "1. " too; for a toggle, as far as its <details>.
+	min int
+}
+
+// A textBlock is a text block being read, a line of Markdown at a time.
+type textBlock struct {
+	n  *Node
+	md []string
+	// quoted is true for a quote or an alert, which lines starting with >
+	// go on; item for a list item, which lines indented under it right
+	// after its own go on.
+	quoted, item bool
+	// min is how far a line is indented to go on in it.
+	min int
+	// hard is true when its last line ends in a hard break, so the next
+	// goes on in it.
+	hard bool
+}
+
+func (p *lineParser) line(line string) {
+	trimmed := strings.TrimLeft(line, " \t")
+	if p.code != nil {
+		if p.fence == "$$" && strings.TrimSpace(trimmed) == "$$" || p.fence != "$$" && strings.HasPrefix(trimmed, p.fence) && strings.Trim(trimmed, "` ") == "" {
+			p.closeCode()
+			return
 		}
-		if tone, ok := AlertTone(trimmed); ok {
-			flushTable()
-			lists = nil
-			callout = textNode("callout", nil)
-			callout.Set("tone", tone)
-			out = append(out, callout)
-			continue
+		p.codeLines = append(p.codeLines, strings.TrimPrefix(line, p.codeIndent))
+		return
+	}
+	if p.summary != nil {
+		p.summaryLine(trimmed)
+		return
+	}
+	if strings.TrimSpace(line) == "" {
+		// A blank line only separates blocks, as in Markdown; it makes no
+		// empty paragraph. A list goes on across it.
+		p.flushTable()
+		p.text = nil
+		return
+	}
+	lead := line[:len(line)-len(trimmed)]
+	indent := strings.Count(lead, " ") + 2*strings.Count(lead, "\t")
+	if p.awaiting != nil {
+		t := p.awaiting
+		p.awaiting = nil
+		if rest, ok := cutFold(trimmed, "<summary>"); ok {
+			p.summary = t
+			p.summaryLine(rest)
+			return
 		}
-		if rest, ok := strings.CutPrefix(trimmed, ">"); ok && callout != nil {
-			d := callout.Delta()
-			if d.Len() > 0 {
-				d = d.Concat(Delta{{Text: "\n"}})
-			}
-			callout.SetDelta(d.Concat(FromMarkdown(strings.TrimPrefix(rest, " "))))
-			continue
+	}
+	if p.continues(trimmed, indent) {
+		return
+	}
+	p.text = nil
+	if tone, ok := AlertTone(trimmed); ok {
+		p.flushTable()
+		n := textNode("callout", nil)
+		n.Set("tone", tone)
+		p.add(n, indent)
+		p.text = p.newText(n, true, false, p.min())
+		return
+	}
+	if language, ok := CodeFence(trimmed); ok || strings.TrimSpace(trimmed) == "$$" {
+		p.flushTable()
+		p.code, p.codeLines = CodeNode("", language), nil
+		p.codeIndent = lead
+		p.fence = trimmed[:len(trimmed)-len(strings.TrimLeft(trimmed, "`"))]
+		if !ok {
+			p.fence = "$$"
 		}
-		callout = nil
-		if strings.TrimSpace(line) == "" {
-			// A blank line only separates blocks, as in Markdown; it makes
-			// no empty paragraph. A list goes on across it.
-			flushTable()
-			continue
+		p.add(p.code, indent)
+		p.codeIn = p.kids()
+		return
+	}
+	if strings.HasPrefix(trimmed, "|") {
+		if p.tableIn == nil {
+			p.tableIn = p.container(indent)
 		}
-		if language, ok := CodeFence(trimmed); ok || strings.TrimSpace(trimmed) == "$$" {
-			flushTable()
-			lists = nil
-			code, codeLines = CodeNode("", language), nil
-			fenceIndent = line[:len(line)-len(trimmed)]
-			fence = trimmed[:len(trimmed)-len(strings.TrimLeft(trimmed, "`"))]
-			if !ok {
-				fence = "$$"
-			}
-			codeAt = len(out)
-			out = append(out, code)
-			continue
+		if row := tableRow(trimmed); row != nil {
+			p.table = append(p.table, row)
 		}
-		if strings.HasPrefix(trimmed, "|") {
-			lists = nil
-			if row := tableRow(trimmed); row != nil {
-				table = append(table, row)
-			}
-			continue
+		return
+	}
+	p.flushTable()
+	if open, rest, ok := detailsOpen(trimmed); ok {
+		n := textNode("toggle_list", nil)
+		n.Set("collapsed", !open)
+		p.add(n, indent)
+		p.open = append(p.open, openBlock{n: n, toggle: true, min: indent})
+		t := p.newText(n, false, false, 0)
+		if summary, ok := cutFold(rest, "<summary>"); ok {
+			p.summary = t
+			p.summaryLine(summary)
+		} else if p.awaiting = t; rest != "" {
+			p.line(rest)
 		}
-		flushTable()
-		indent := strings.Count(line[:len(line)-len(trimmed)], " ") + 2*strings.Count(line[:len(line)-len(trimmed)], "\t")
-		typ, rest := "paragraph", trimmed
-		level, checked := 0, false
-		hashes := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
-		bullet := len(trimmed) >= 2 && strings.ContainsRune("-*+", rune(trimmed[0])) && trimmed[1] == ' '
-		switch {
-		case hashes >= 1 && hashes <= 6 && strings.HasPrefix(trimmed[hashes:], " "):
-			typ, level, rest = "heading", hashes, trimmed[hashes+1:]
-		case bullet && strings.HasPrefix(trimmed[2:], "[ ] "):
-			typ, rest = "todo_list", trimmed[6:]
-		case bullet && (strings.HasPrefix(trimmed[2:], "[x] ") || strings.HasPrefix(trimmed[2:], "[X] ")):
-			typ, rest, checked = "todo_list", trimmed[6:], true
-		case bullet:
-			typ, rest = "bulleted_list", trimmed[2:]
-		case strings.HasPrefix(trimmed, "> "):
-			typ, rest = "quote", trimmed[2:]
-		case IsRule(trimmed):
-			lists = nil
-			out = append(out, &Node{ID: NewBlockID(), Type: "divider"})
-			continue
-		default:
-			if img := imageLine(trimmed); img != nil {
-				lists = nil
-				out = append(out, img)
-				continue
-			}
-			if i := strings.IndexAny(trimmed, ".)"); i > 0 && i < 4 && isDigits(trimmed[:i]) && strings.HasPrefix(trimmed[i+1:], " ") {
-				typ, rest = "numbered_list", trimmed[i+2:]
-			}
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(trimmed), "</details>") {
+		if i := p.lastToggle(); i >= 0 {
+			p.open = p.open[:i]
+			return
 		}
-		n := textNode(typ, FromMarkdown(rest))
-		if level > 0 {
-			n.Set("level", level)
-		}
+	}
+	if IsRule(trimmed) {
+		p.add(&Node{ID: NewBlockID(), Type: "divider"}, indent)
+		return
+	}
+	if typ, rest, checked, ok := listItem(trimmed); ok {
+		n := textNode(typ, nil)
 		if typ == "todo_list" {
 			n.Set("checked", checked)
 		}
-		if !NestableTypes[typ] {
-			lists = nil
-			out = append(out, n)
-			continue
+		p.add(n, indent)
+		p.open = append(p.open, openBlock{n: n, min: indent + 2})
+		p.text = p.newText(n, false, true, indent+2)
+		p.text.addLine(rest)
+		return
+	}
+	if level, rest, ok := headingLine(trimmed); ok {
+		n := textNode("heading", nil)
+		n.Set("level", level)
+		p.add(n, indent)
+		// A heading is one line.
+		p.newText(n, false, false, 0).md = []string{rest}
+		return
+	}
+	if rest, ok := quoteLine(trimmed); ok {
+		n := textNode("quote", nil)
+		p.add(n, indent)
+		p.text = p.newText(n, true, false, p.min())
+		p.text.addLine(rest)
+		return
+	}
+	if img := imageLine(trimmed); img != nil {
+		p.add(img, indent)
+		return
+	}
+	n := textNode("paragraph", nil)
+	p.add(n, indent)
+	p.text = p.newText(n, false, false, 0)
+	p.text.addLine(trimmed)
+}
+
+// continues puts a line in the text block before it when it goes on
+// there, and reports whether it did.
+func (p *lineParser) continues(trimmed string, indent int) bool {
+	t := p.text
+	if t == nil {
+		return false
+	}
+	switch rest, quoted := strings.CutPrefix(trimmed, ">"); {
+	case t.quoted && quoted && indent >= t.min:
+		if _, alert := AlertTone(trimmed); alert {
+			return false
 		}
-		// Two spaces, or a tab, a level: under the item open one level up.
-		depth := min(indent/2, len(lists))
-		lists = append(lists[:depth], n)
-		if depth == 0 {
-			out = append(out, n)
-		} else {
-			parent := lists[depth-1]
-			parent.Children = append(parent.Children, n)
+		t.addLine(strings.TrimPrefix(rest, " "))
+	case startsBlock(trimmed):
+		return false
+	case t.hard, t.item && indent >= t.min:
+		t.addLine(trimmed)
+	default:
+		return false
+	}
+	return true
+}
+
+// add puts a block in what holds the blocks at an indent, and a list
+// item or a toggle in what is open.
+func (p *lineParser) add(n *Node, indent int) {
+	kids := p.container(indent)
+	*kids = append(*kids, n)
+}
+
+// container closes the list items a line at indent is not under, and
+// returns the blocks the line's block goes in.
+func (p *lineParser) container(indent int) *[]*Node {
+	for len(p.open) > 0 {
+		top := p.open[len(p.open)-1]
+		if top.toggle || indent >= top.min {
+			break
+		}
+		p.open = p.open[:len(p.open)-1]
+	}
+	return p.kids()
+}
+
+// kids are the blocks the innermost open block holds, or the page's.
+func (p *lineParser) kids() *[]*Node {
+	if len(p.open) == 0 {
+		return &p.out
+	}
+	return &p.open[len(p.open)-1].n.Children
+}
+
+// min is how far a line is indented to be in the innermost open block.
+func (p *lineParser) min() int {
+	if len(p.open) == 0 {
+		return 0
+	}
+	return p.open[len(p.open)-1].min
+}
+
+// lastToggle is where in open the innermost toggle is, or -1.
+func (p *lineParser) lastToggle() int {
+	for i := len(p.open) - 1; i >= 0; i-- {
+		if p.open[i].toggle {
+			return i
 		}
 	}
-	flushTable()
-	if code != nil {
-		// A fence left open runs to the end.
-		closeCode()
+	return -1
+}
+
+func (p *lineParser) newText(n *Node, quoted, item bool, min int) *textBlock {
+	t := &textBlock{n: n, quoted: quoted, item: item, min: min}
+	p.texts = append(p.texts, t)
+	return t
+}
+
+// summaryLine reads a line of a toggle's <summary>, up to its </summary>;
+// what follows that on the line is a line of its own.
+func (p *lineParser) summaryLine(s string) {
+	t := p.summary
+	i := summaryEnd(s)
+	if i < 0 {
+		t.md = append(t.md, s)
+		return
 	}
-	return out
+	t.md = append(t.md, s[:i])
+	p.summary = nil
+	if rest := s[i+len("</summary>"):]; strings.TrimSpace(rest) != "" {
+		p.line(rest)
+	}
+}
+
+func (p *lineParser) flushTable() {
+	if len(p.table) > 0 {
+		if t, err := TableNode(p.table, ""); err == nil {
+			*p.tableIn = append(*p.tableIn, t)
+		}
+	}
+	p.table, p.tableIn = nil, nil
+}
+
+func (p *lineParser) closeCode() {
+	text := strings.Join(p.codeLines, "\n")
+	kids := *p.codeIn
+	last := len(kids) - 1
+	switch {
+	case (p.fence == "$$" || p.code.Str("language") == "mermaid") && strings.TrimSpace(text) == "":
+		// An empty formula or diagram has nothing to draw: it makes no
+		// block, as a spec of one makes none.
+		*p.codeIn = kids[:last]
+	case p.fence == "$$":
+		kids[last] = MathNode(text)
+	case p.code.Str("language") == "mermaid":
+		kids[last] = DiagramNode(text)
+	default:
+		p.code.SetDelta(Delta{{Text: text}}.Compact())
+	}
+	p.code, p.codeIn = nil, nil
+}
+
+// addLine puts a line of Markdown in the block: a hard break that ended
+// the line before is the line break between them.
+func (t *textBlock) addLine(s string) {
+	if t.hard {
+		last := len(t.md) - 1
+		t.md[last] = strings.TrimSuffix(t.md[last], `\`)
+	}
+	t.md = append(t.md, s)
+	t.hard = hardBreak(s)
+}
+
+// hardBreak reports whether a line of Markdown ends in a hard line break,
+// a backslash not itself escaped. Two spaces, Markdown's other hard
+// break, are too often only what pasted text has left at a line's end.
+func hardBreak(s string) bool {
+	slashes := len(s) - len(strings.TrimRight(s, `\`))
+	return slashes%2 == 1
+}
+
+// startsBlock reports whether a line starts a block of its own, so it
+// cannot go on in the block before it.
+func startsBlock(s string) bool {
+	_, _, _, item := listItem(s)
+	_, _, heading := headingLine(s)
+	_, _, toggle := detailsOpen(s)
+	_, fence := CodeFence(s)
+	return item || heading || toggle || fence || strings.HasPrefix(s, ">") || strings.HasPrefix(s, "|") ||
+		strings.TrimSpace(s) == "$$" || IsRule(s) || strings.EqualFold(strings.TrimSpace(s), "</details>") ||
+		imageLine(s) != nil
+}
+
+// listItem reads a list item's marker at the start of a line: its type,
+// the text after the marker, and whether a to-do is checked. A marker
+// that ends the line is an empty item, as PageMarkdown writes one.
+func listItem(s string) (typ, rest string, checked, ok bool) {
+	if len(s) >= 1 && strings.ContainsRune("-*+", rune(s[0])) && (len(s) == 1 || s[1] == ' ') {
+		rest = strings.TrimPrefix(s[1:], " ")
+		for _, box := range []string{"[ ]", "[x]", "[X]"} {
+			if r, ok := strings.CutPrefix(rest, box); ok && (r == "" || r[0] == ' ') {
+				return "todo_list", strings.TrimPrefix(r, " "), box != "[ ]", true
+			}
+		}
+		return "bulleted_list", rest, false, true
+	}
+	if i := strings.IndexAny(s, ".)"); i > 0 && i < 4 && isDigits(s[:i]) && (len(s) == i+1 || s[i+1] == ' ') {
+		return "numbered_list", strings.TrimPrefix(s[i+1:], " "), false, true
+	}
+	return "", "", false, false
+}
+
+// headingLine reads a heading's #s at the start of a line: its level and
+// text.
+func headingLine(s string) (level int, rest string, ok bool) {
+	hashes := len(s) - len(strings.TrimLeft(s, "#"))
+	if hashes < 1 || hashes > 6 || len(s) > hashes && s[hashes] != ' ' {
+		return 0, "", false
+	}
+	return hashes, strings.TrimPrefix(s[hashes:], " "), true
+}
+
+// quoteLine reads a quote's > at the start of a line, and the text after.
+func quoteLine(s string) (string, bool) {
+	if s == ">" {
+		return "", true
+	}
+	return strings.CutPrefix(s, "> ")
+}
+
+// detailsOpen reads a line that opens a toggle, "<details>" or "<details
+// open>": whether it is open, and what follows on the line.
+func detailsOpen(s string) (open bool, rest string, ok bool) {
+	if rest, ok := cutFold(s, "<details>"); ok {
+		return false, strings.TrimSpace(rest), true
+	}
+	if rest, ok := cutFold(s, "<details open>"); ok {
+		return true, strings.TrimSpace(rest), true
+	}
+	return false, "", false
+}
+
+// summaryEnd is where the </summary> that ends a toggle's summary is in
+// s, one not escaped, or -1.
+func summaryEnd(s string) int {
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '\\':
+			i++
+		case len(s)-i >= len("</summary>") && strings.EqualFold(s[i:i+len("</summary>")], "</summary>"):
+			return i
+		}
+	}
+	return -1
+}
+
+// cutFold is strings.CutPrefix, ignoring case.
+func cutFold(s, prefix string) (string, bool) {
+	if len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix) {
+		return s[len(prefix):], true
+	}
+	return s, false
 }
 
 // tableRow reads a line of a markdown table, or nil for the line under the
 // header ("| --- | --- |"). As in GitHub's tables, a backslash keeps the
-// character after it in the cell, and \| is a | of the cell's text.
+// character after it in the cell, and \| is a | of the cell's text; a
+// <br> is a line break, as PageMarkdown writes one.
 func tableRow(line string) []string {
 	line = strings.TrimSpace(line)
 	line = strings.TrimPrefix(line, "|")
@@ -203,7 +477,64 @@ func tableRow(line string) []string {
 	if rule {
 		return nil
 	}
+	for i, c := range cells {
+		cells[i] = cellBreaks(c)
+	}
 	return cells
+}
+
+// brTags are how a line break is written in a table's cell.
+var brTags = []string{"<br>", "<br/>", "<br />"}
+
+// cellBreaks reads the <br>s in a table cell's Markdown as line breaks;
+// one in a code span, or escaped, is text.
+func cellBreaks(md string) string {
+	if !strings.Contains(strings.ToLower(md), "<br") {
+		return md
+	}
+	s := []rune(md)
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		switch s[i] {
+		case '\\':
+			b.WriteString(string(s[i:min(i+2, len(s))]))
+			i += 2
+			continue
+		case '`':
+			if _, n := codeSpanAt(s[i:]); n > 0 {
+				b.WriteString(string(s[i : i+n]))
+				i += n
+				continue
+			}
+			j := i
+			for j < len(s) && s[j] == '`' {
+				j++
+			}
+			b.WriteString(string(s[i:j]))
+			i = j
+			continue
+		case '<':
+			rest := string(s[i:])
+			if tag := brTagAt(rest); tag != "" {
+				b.WriteByte('\n')
+				i += len([]rune(tag))
+				continue
+			}
+		}
+		b.WriteRune(s[i])
+		i++
+	}
+	return b.String()
+}
+
+// brTagAt is the <br> at the start of s, or "".
+func brTagAt(s string) string {
+	for _, tag := range brTags {
+		if _, ok := cutFold(s, tag); ok {
+			return s[:len(tag)]
+		}
+	}
+	return ""
 }
 
 // imageLine reads a line that is only a picture from the web, as

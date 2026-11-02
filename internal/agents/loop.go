@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/remote"
 )
 
 // MaxRounds bounds the tool rounds of one run.
@@ -203,6 +204,7 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 // Streamer is the server's client as RunCloud uses it: *remote.Client.
 type Streamer interface {
 	InvokeStream(ctx context.Context, name string, body map[string]any, fn func(map[string]any)) error
+	SelectOne(ctx context.Context, table string, q remote.Query) (map[string]any, error)
 }
 
 // errCutOff is a run whose stream ended before the server said how.
@@ -260,13 +262,92 @@ func RunCloud(ctx context.Context, be Streamer, jobID string, ev Events) (Result
 	if failure != nil {
 		return res, failure
 	}
-	// A stream that ends without done was cut off, by the network or the
-	// server, and is no success.
-	if !done {
-		if err == nil {
-			err = errCutOff
-		}
-		return res, err
+	if done {
+		return res, nil
 	}
+	// A stream that ends without done was cut off, and is no success as
+	// it is. The server goes on with a run whose caller went, and saves
+	// it: one cut off by the network, or by going quiet, ends as the job
+	// the server keeps says, with the edits it made after the cut.
+	if err == nil || remote.IsNetwork(err) {
+		if job, ok := awaitJob(ctx, be, jobID); ok {
+			return job.result(res)
+		}
+	}
+	if err == nil {
+		err = errCutOff
+	}
+	return res, err
+}
+
+// jobPollEvery spaces the reads of a job whose stream was cut off;
+// jobWait is how long a running one is waited for, longer than the
+// server lets a run go on, and jobQueuedWait how long one the server
+// has not taken yet, as when the request never reached it. Tests
+// shorten them.
+var jobPollEvery, jobWait, jobQueuedWait = 2 * time.Second, 8 * time.Minute, 30 * time.Second
+
+// cloudJob is a cloud run's ai_jobs row, as far as RunCloud reads it.
+type cloudJob struct {
+	Status string `json:"status"`
+	Error  string `json:"error"`
+	Result struct {
+		Reply string   `json:"reply"`
+		Ops   []doc.Op `json:"ops"`
+		Edits []Edit   `json:"edits"`
+	} `json:"result"`
+}
+
+// result is how a run whose stream was cut off ended, by its job: the
+// server's ops and edits are all of the run's, those streamed before the
+// cut among them.
+func (j cloudJob) result(streamed Result) (Result, error) {
+	res := streamed
+	if len(j.Result.Ops) >= len(res.Ops) {
+		res.Ops, res.Edits = j.Result.Ops, j.Result.Edits
+	}
+	if j.Status == "failed" {
+		msg := j.Error
+		if msg == "" {
+			msg = errCutOff.Error()
+		}
+		return res, errors.New(msg)
+	}
+	res.Reply = j.Result.Reply
 	return res, nil
+}
+
+// awaitJob reads a cloud run's job until the server has ended it, and
+// reports whether it did: one still queued after jobQueuedWait never
+// started, and one still running after jobWait is given up on.
+func awaitJob(ctx context.Context, be Streamer, jobID string) (cloudJob, bool) {
+	start := time.Now()
+	for {
+		row, err := be.SelectOne(ctx, "ai_jobs", remote.Query{Select: "status, error, result", Filters: []string{remote.Eq("id", jobID)}})
+		if err == nil && row == nil {
+			return cloudJob{}, false // no such job: nothing to wait for
+		}
+		if err == nil {
+			var job cloudJob
+			raw, _ := json.Marshal(row)
+			if json.Unmarshal(raw, &job) == nil {
+				switch job.Status {
+				case "done", "failed", "reverted":
+					return job, true
+				case "queued":
+					if time.Since(start) >= jobQueuedWait {
+						return cloudJob{}, false
+					}
+				}
+			}
+		}
+		if time.Since(start) >= jobWait {
+			return cloudJob{}, false
+		}
+		select {
+		case <-ctx.Done():
+			return cloudJob{}, false
+		case <-time.After(jobPollEvery):
+		}
+	}
 }

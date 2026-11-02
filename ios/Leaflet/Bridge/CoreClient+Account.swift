@@ -82,22 +82,22 @@ extension CoreClient {
     /// finishSupabaseSignIn finishes the sign-in begun with the URL the web
     /// session came back to: it finds the Leaflet project the desktop app
     /// set up and signs in to it.
-    func finishSupabaseSignIn(_ begun: SupabaseSignIn, callback: URL) async throws -> SignedIn {
+    nonisolated(nonsending) func finishSupabaseSignIn(_ begun: SupabaseSignIn, callback: URL)
+        async throws -> SignedIn
+    {
         let url = callback.absoluteString
-        return try decode(
-            SignedIn.self,
-            try await call { core in
-                try Self.answer { e in
-                    core.finishSupabaseSign(
-                        in: url, state: begun.state, verifier: begun.verifier, error: e)
-                }
-            })
+        return try await call(SignedIn.self, waiting: true) { core in
+            try Self.answer { e in
+                core.finishSupabaseSign(
+                    in: url, state: begun.state, verifier: begun.verifier, error: e)
+            }
+        }
     }
 
     /// confirmSignIn answers a sign-in that waits: anyway signs in,
     /// removing the changes it counted; otherwise the new account signs
     /// out again.
-    func confirmSignIn(anyway: Bool) async throws {
+    nonisolated(nonsending) func confirmSignIn(anyway: Bool) async throws {
         try await call { try $0.confirmSign(in: anyway) }
     }
 
@@ -105,47 +105,48 @@ extension CoreClient {
     /// account's pages from this device. It returns how many changes could
     /// not go up, without signing out, to ask; anyway signs out all the
     /// same.
-    func signOut(anyway: Bool) async throws -> Int {
-        try await call { core in
+    nonisolated(nonsending) func signOut(anyway: Bool) async throws -> Int {
+        try await call(waiting: true) { core in
             var unsynced = 0
-            try core.signOut(anyway, ret0_: &unsynced)
+            // gomobile labels the count as Go names it.
+            try core.signOut(anyway, unsynced: &unsynced)
             return unsynced
         }
     }
 
-    func account() async throws -> AccountInfo {
-        try decode(
-            AccountInfo.self, try await call { core in try Self.answer { e in core.account(e) } })
+    nonisolated(nonsending) func account() async throws -> AccountInfo {
+        try await call(AccountInfo.self) { core in try Self.answer { e in core.account(e) } }
     }
 
     /// setDisplayName changes the name shown on the user's comments and
     /// edits, here and, signed in, on the server.
-    func setDisplayName(_ name: String) async throws {
-        try await call { try $0.setDisplayName(name) }
+    nonisolated(nonsending) func setDisplayName(_ name: String) async throws {
+        try await call(waiting: true) { try $0.setDisplayName(name) }
     }
 
     /// devices are the devices signed in to the account, the one active
     /// last first.
-    func devices() async throws -> [Device] {
-        try decode(
-            [Device].self, try await call { core in try Self.answer { e in core.devices(e) } })
+    nonisolated(nonsending) func devices() async throws -> [Device] {
+        try await call([Device].self, waiting: true) { core in
+            try Self.answer { e in core.devices(e) }
+        }
     }
 
-    func signOutDevice(_ id: String) async throws {
-        try await call { try $0.signOutDevice(id) }
+    nonisolated(nonsending) func signOutDevice(_ id: String) async throws {
+        try await call(waiting: true) { try $0.signOutDevice(id) }
     }
 
     /// deleteAccount deletes the account on the server, then signs out
     /// and wipes this device.
-    func deleteAccount() async throws {
-        try await call { try $0.deleteAccount() }
+    nonisolated(nonsending) func deleteAccount() async throws {
+        try await call(waiting: true) { try $0.deleteAccount() }
     }
 
     /// exportAll writes every page as Markdown in a zip, into dir.
-    func exportAll(into dir: URL) async throws -> ExportedAll {
+    nonisolated(nonsending) func exportAll(into dir: URL) async throws -> ExportedAll {
         let path = dir.path(percentEncoded: false)
-        return try decode(
-            ExportedAll.self,
-            try await call { core in try Self.answer { e in core.exportAll(path, error: e) } })
+        return try await call(ExportedAll.self, waiting: true) { core in
+            try Self.answer { e in core.exportAll(path, error: e) }
+        }
     }
 }

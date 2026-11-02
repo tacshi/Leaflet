@@ -1,6 +1,7 @@
 package live
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -72,5 +73,39 @@ func TestTypedAndOutsideEditsAreBothKept(t *testing.T) {
 	(<-posted)()
 	if strings.Contains(st.Content(pg.ID).PlainText(), "after closing") {
 		t.Error("a closed page saved")
+	}
+}
+
+// Dirty hears edits come to wait and stop waiting, whoever saves them: a
+// save called directly, as a version named or an export runs one, stops
+// the timer, and must still say so.
+func TestDirtyHearsEverySave(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	pg, err := st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{para("p1", "one")})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var heard []bool
+	p, content := Open(st, pg.ID, Options{Post: func(func()) {}, Dirty: func(dirty bool) { heard = append(heard, dirty) }})
+	ed := &textEditor{c: content}
+	p.Attach(ed)
+
+	ed.set("p1", "one, typed")
+	p.Edited()
+	p.Edited()
+	if !p.Save() {
+		t.Fatal("not saved")
+	}
+	p.Changed()
+	p.Save()
+	if got := fmt.Sprint(heard); got != "[true false true false]" {
+		t.Errorf("heard %s", got)
 	}
 }

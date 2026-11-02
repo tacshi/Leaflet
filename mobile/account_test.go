@@ -2,9 +2,16 @@ package mobile
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+
+	"leaflet/internal/provision"
+	"leaflet/internal/remote"
+	"leaflet/internal/supabaseapi"
 )
 
 func TestBeginSupabaseSignIn(t *testing.T) {
@@ -103,4 +110,135 @@ func account0(t *testing.T, c *Core) account {
 		t.Fatal(err)
 	}
 	return a
+}
+
+// A free project Supabase paused is woken, and signed in to once it says
+// it is Leaflet's; a project up with nothing of Leaflet's is passed over.
+func TestLeafletProjectWakesAPausedOne(t *testing.T) {
+	restored := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch path := r.URL.Path; {
+		case path == "/v1/oauth/token":
+			_, _ = io.WriteString(w, `{"access_token":"a","expires_in":3600,"token_type":"Bearer"}`)
+		case path == "/v1/organizations":
+			_, _ = io.WriteString(w, `[{"id":"1","slug":"me","name":"Me"}]`)
+		case path == "/v1/projects":
+			_, _ = io.WriteString(w, `[
+				{"ref":"empty","name":"Leaflet 2","status":"ACTIVE_HEALTHY","created_at":"2026-08-01","organization_slug":"me"},
+				{"ref":"paused","name":"Leaflet","status":"INACTIVE","created_at":"2026-08-02","organization_slug":"me"}]`)
+		case path == "/v1/projects/paused/restore":
+			restored = true
+		case path == "/v1/projects/paused":
+			_, _ = io.WriteString(w, `{"ref":"paused","name":"Leaflet","status":"ACTIVE_HEALTHY","organization_slug":"me"}`)
+		case path == "/v1/projects/paused/database/migrations":
+			_ = json.NewEncoder(w).Encode([]supabaseapi.Migration{{Version: provision.FirstMigration, Name: "init"}})
+		case strings.HasSuffix(path, "/database/migrations"):
+			_, _ = io.WriteString(w, `[]`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	old, auth := supabaseapi.Base, supabaseapi.Auth
+	supabaseapi.Base, supabaseapi.Auth = srv.URL, ""
+	t.Cleanup(func() { supabaseapi.Base, supabaseapi.Auth = old, auth })
+
+	p, err := leafletProject(t.Context(), supabaseapi.Resume("r"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Ref != "paused" || !p.Healthy() || !restored {
+		t.Fatalf("project %+v, restored %v", p, restored)
+	}
+}
+
+// Signed in for real, to a server that takes nothing up: signing out
+// counts the changes still to go up and leaves all as it is; once they
+// have gone, it signs out and removes the account's pages, and the
+// device's own pages, made signed out, stay through signing out again.
+func TestSignOutOfAnAccount(t *testing.T) {
+	c, _ := open(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/v1/verify":
+			_, _ = io.WriteString(w, `{"access_token":"a","refresh_token":"r","expires_in":3600,
+				"user":{"id":"00000000-0000-0000-0000-0000000000a1","email":"rocky@example.com"}}`)
+		case "/auth/v1/logout":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "down", http.StatusServiceUnavailable)
+		}
+	}))
+	defer srv.Close()
+	if err := c.core.Remote.Use(remote.Settings{URL: srv.URL, AnonKey: "anon"}); err != nil {
+		t.Fatal(err)
+	}
+	user, err := c.core.Remote.VerifyCode("rocky@example.com", "123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.q.do(func() {
+		var lost int
+		if lost, err = c.signedIn(user); err == nil && lost != 0 {
+			t.Errorf("signing in loses %d changes", lost)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acct := account0(t, c); !acct.SignedIn || acct.Email != "rocky@example.com" {
+		t.Fatalf("account %+v: want signed in", acct)
+	}
+	plan := create(t, c, `{"title":"Plan"}`)
+
+	// Not up yet: nothing goes.
+	n, err := c.SignOut(false)
+	if err != nil || n == 0 {
+		t.Fatalf("SignOut: %d, %v; want the changes counted", n, err)
+	}
+	if !account0(t, c).SignedIn || !hasPage(t, c, plan.ID) {
+		t.Fatal("signed out with changes not up")
+	}
+
+	// Gone up, as a pass would take them.
+	entries, err := c.core.Store.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := c.core.Store.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n, err := c.SignOut(false); err != nil || n != 0 {
+		t.Fatalf("SignOut: %d, %v", n, err)
+	}
+	if acct := account0(t, c); acct.SignedIn || acct.Project != "" {
+		t.Fatalf("account %+v: want signed out, with no project", acct)
+	}
+	if hasPage(t, c, plan.ID) {
+		t.Fatal("the account's page stayed")
+	}
+
+	// The device's own page stays: there is no account to leave.
+	own := create(t, c, `{"title":"Mine"}`)
+	if n, err := c.SignOut(false); err != nil || n != 0 || !hasPage(t, c, own.ID) {
+		t.Fatalf("SignOut signed out: %d, %v; the page stayed %v", n, err, hasPage(t, c, own.ID))
+	}
+}
+
+func hasPage(t *testing.T, c *Core, id string) bool {
+	t.Helper()
+	raw, err := c.Library()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lib library
+	_ = json.Unmarshal([]byte(raw), &lib)
+	for _, p := range lib.Pages {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
 }

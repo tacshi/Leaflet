@@ -30,6 +30,11 @@ struct SpeechSettingsView: View {
     @State private var loaded: SpeechSettings?
     @State private var stt: SttSettings?
     @State private var endpointKey = ""
+    /// savedKey is the endpoint's key as kept, and keyFocused says its field
+    /// has the keyboard: the key is kept as the field lets it go, not as
+    /// each letter comes, which would keep the first letters of it.
+    @State private var savedKey = ""
+    @FocusState private var keyFocused: Bool
     @State private var sonioxKey = ""
     @State private var providers: [AgentProvider] = []
     @State private var testing = false
@@ -48,6 +53,7 @@ struct SpeechSettingsView: View {
         .navigationTitle(L.recSttTitle)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        .onDisappear { saveKey() }
         // Kept as it changes, once typing stops for a moment.
         .task(id: stt) {
             guard let stt, loaded != nil, stt != loaded?.stt else { return }
@@ -63,6 +69,7 @@ struct SpeechSettingsView: View {
         loaded = s
         stt = s.stt
         endpointKey = s.endpointKey
+        savedKey = s.endpointKey
         status = s.status
         providers = ((try? await client.providers()) ?? []).filter { !$0.isLocal }
     }
@@ -124,13 +131,9 @@ struct SpeechSettingsView: View {
             SecureField(L.recSttApiKey, text: $endpointKey, prompt: Text(L.recSttOptional))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
-                .onChange(of: endpointKey) { _, key in
-                    Task {
-                        do { try await app.client?.setEndpointKey(key) } catch {
-                            result = (false, L.recSttKeyNotSaved(error: error.localizedDescription))
-                        }
-                    }
-                }
+                .focused($keyFocused)
+                .onSubmit(saveKey)
+                .onChange(of: keyFocused) { if !keyFocused { saveKey() } }
             // The test has the fields as they are now.
             let (model, key) = (stt.wrappedValue.model, endpointKey)
             testButton { try await $0.testEndpoint(url: url, model: model, key: key) }
@@ -147,6 +150,20 @@ struct SpeechSettingsView: View {
             }
             Text(providers.isEmpty ? L.recSttAddProvider : L.recSttKeyFromDesc)
                 .font(.footnote).foregroundStyle(.secondary)
+        }
+    }
+
+    /// saveKey keeps the endpoint's key as the field has it, if it
+    /// changed.
+    private func saveKey() {
+        let (key, before) = (endpointKey, savedKey)
+        guard loaded != nil, key != before else { return }
+        savedKey = key
+        Task {
+            do { try await app.client?.setEndpointKey(key) } catch {
+                savedKey = before
+                result = (false, L.recSttKeyNotSaved(error: error.localizedDescription))
+            }
         }
     }
 

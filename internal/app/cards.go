@@ -144,7 +144,7 @@ func humanSize(n int64) string {
 	case n >= 1<<10:
 		return locales.CardSizeKB(int(math.Round(float64(n) / (1 << 10))))
 	}
-	return locales.CardSizeBytes(int(n))
+	return locales.CardSizeBytes(int(n)) // #nosec G115 -- under a kilobyte here.
 }
 
 func (a *App) fileBlock(c *ui.Context, n *doc.Node) {

@@ -66,9 +66,16 @@ struct SignInView: View {
             L.signinAnyway,
             isPresented: Binding(get: { waiting != nil }, set: { if !$0 { waiting = nil } }),
             presenting: waiting
-        ) { _ in
-            Button(L.commonCancel, role: .cancel) { Task { await confirm(anyway: false) } }
-            Button(L.commonSignIn, role: .destructive) { Task { await confirm(anyway: true) } }
+        ) { asked in
+            // The sign-in asked about comes as the alert gives it: the
+            // alert lets waiting go as it closes, before a button's task
+            // runs.
+            Button(L.commonCancel, role: .cancel) {
+                Task { await confirm(asked, anyway: false) }
+            }
+            Button(L.commonSignIn, role: .destructive) {
+                Task { await confirm(asked, anyway: true) }
+            }
         } message: { waiting in
             Text(L.signinRemovesUnsynced(count: waiting.lost, email: waiting.email))
         }
@@ -96,8 +103,8 @@ struct SignInView: View {
         }
     }
 
-    private func confirm(anyway: Bool) async {
-        guard let client = app.client, let asked = waiting else { return }
+    private func confirm(_ asked: SignedIn, anyway: Bool) async {
+        guard let client = app.client else { return }
         waiting = nil
         busy = true
         defer { busy = false }

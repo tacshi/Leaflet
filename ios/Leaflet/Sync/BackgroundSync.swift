@@ -11,15 +11,16 @@ enum BackgroundSync {
 
     @MainActor private static var registered = false
 
-    /// register has the system run sync passes through client. It must
-    /// run before the app finishes launching, once.
+    /// register has the system run sync passes through the core opened
+    /// gives, once it is open. It must run before the app finishes
+    /// launching, once, which may be before the core is open.
     @MainActor
-    static func register(_ client: CoreClient) {
+    static func register(_ opened: @escaping @MainActor () async -> CoreClient?) {
         guard !registered else { return }
         registered = BGTaskScheduler.shared.register(
             forTaskWithIdentifier: identifier, using: .main
         ) { task in
-            MainActor.assumeIsolated { run(task, client) }
+            MainActor.assumeIsolated { run(task, opened) }
         }
     }
 
@@ -39,12 +40,17 @@ enum BackgroundSync {
     /// run runs a pass and asks for the next. Out of time, the pass is
     /// cut short; what it didn't send goes on the next.
     @MainActor
-    private static func run(_ task: BGTask, _ client: CoreClient) {
+    private static func run(_ task: BGTask, _ opened: @escaping @MainActor () async -> CoreClient?)
+    {
         schedule()
-        task.expirationHandler = {
-            Task { await client.stop() }
-        }
-        Task {
+        let pass = Task {
+            guard let client = await opened(), !Task.isCancelled else {
+                task.setTaskCompleted(success: false)
+                return
+            }
+            task.expirationHandler = {
+                Task { await client.stop() }
+            }
             do {
                 try await client.syncNow()
                 task.setTaskCompleted(success: true)
@@ -52,5 +58,7 @@ enum BackgroundSync {
                 task.setTaskCompleted(success: false)
             }
         }
+        // Out of time before the core opened, the pass gives up.
+        task.expirationHandler = { pass.cancel() }
     }
 }

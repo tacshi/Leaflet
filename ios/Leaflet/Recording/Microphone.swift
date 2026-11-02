@@ -13,16 +13,24 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
     private var engine: AVAudioEngine?
     private var sink: MobileAudioSink?
     private var paused = false
+    /// stopped says the recording's audio is all handed on: nothing turns
+    /// the engine back on.
+    private var stopped = false
     /// session counts the recordings started, so a permission answered
     /// late starts none of an earlier one's.
     private var session = 0
-    private var interruptions: NSObjectProtocol?
+    /// rate is the rate the core asked for.
+    private var rate = 16000
+    /// observers hear calls taking the microphone, and the engine's
+    /// input changing under it.
+    private var observers: [any NSObjectProtocol] = []
 
     func start(_ rate: Int, sink: MobileAudioSink?) throws {
         let session = queue.sync {
             self.session += 1
             self.sink = sink
             paused = false
+            stopped = false
             return self.session
         }
         AVAudioApplication.requestRecordPermission { granted in
@@ -49,7 +57,39 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
         try audio.setCategory(
             .playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try audio.setActive(true)
+        self.rate = rate
         let engine = AVAudioEngine()
+        try tap(engine)
+        engine.prepare()
+        try engine.start()
+        self.engine = engine
+        let center = NotificationCenter.default
+        // A call or Siri takes the microphone; it comes back after.
+        observers.append(
+            center.addObserver(
+                forName: AVAudioSession.interruptionNotification, object: audio, queue: nil
+            ) { [weak self] note in
+                let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
+                guard raw == AVAudioSession.InterruptionType.ended.rawValue, let mic = self else {
+                    return
+                }
+                mic.queue.async { [weak mic] in mic?.restart(engine, rewire: false) }
+            })
+        // AirPods or a headset coming or going change the input, its rate
+        // and channels with it: the engine stops, and the tap, made for the
+        // input before, must be made again for the audio to go on.
+        observers.append(
+            center.addObserver(
+                forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
+            ) { [weak self] _ in
+                guard let mic = self else { return }
+                mic.queue.async { [weak mic] in mic?.restart(engine, rewire: true) }
+            })
+    }
+
+    /// tap hands the core what engine's input hears, converted from the
+    /// input's format as it is now; on queue.
+    private func tap(_ engine: AVAudioEngine) throws {
         let input = engine.inputNode
         let from = input.outputFormat(forBus: 0)
         guard from.sampleRate > 0, from.channelCount > 0,
@@ -70,26 +110,28 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
                 self.sink?.chunk(pcm)
             }
         }
-        engine.prepare()
-        try engine.start()
-        self.engine = engine
-        // A call or Siri takes the microphone; it comes back after.
-        interruptions = NotificationCenter.default.addObserver(
-            forName: AVAudioSession.interruptionNotification, object: audio, queue: nil
-        ) { [weak self] note in
-            let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-            guard raw == AVAudioSession.InterruptionType.ended.rawValue, let mic = self else {
+    }
+
+    /// restart turns engine back on after something stopped it, while it
+    /// is the recording's and not paused, with its tap made again for an
+    /// input that changed (rewire); on queue. A paused one is rewired too,
+    /// and Resume starts it.
+    private func restart(_ engine: AVAudioEngine, rewire: Bool) {
+        guard self.engine === engine, !stopped else { return }
+        if rewire {
+            engine.inputNode.removeTap(onBus: 0)
+            do {
+                try tap(engine)
+            } catch {
+                // An input with no audio, as it changes: the next change
+                // brings one.
                 return
             }
-            mic.queue.async { [weak mic] in
-                guard let self = mic, let engine = self.engine, !self.paused, !engine.isRunning
-                else {
-                    return
-                }
-                try? AVAudioSession.sharedInstance().setActive(true)
-                try? engine.start()
-            }
         }
+        guard !paused, !engine.isRunning else { return }
+        try? AVAudioSession.sharedInstance().setActive(true)
+        engine.prepare()
+        try? engine.start()
     }
 
     /// why says why the microphone could not start. A call holds it, and
@@ -146,6 +188,7 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
     /// the queue runs the audio already on its way first.
     func stop() {
         queue.sync {
+            stopped = true
             engine?.inputNode.removeTap(onBus: 0)
             engine?.stop()
         }
@@ -160,8 +203,8 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
 
     /// release lets the microphone go; on queue.
     private func release() {
-        if let interruptions { NotificationCenter.default.removeObserver(interruptions) }
-        interruptions = nil
+        for o in observers { NotificationCenter.default.removeObserver(o) }
+        observers = []
         engine?.inputNode.removeTap(onBus: 0)
         engine?.stop()
         engine = nil

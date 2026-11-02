@@ -7,6 +7,7 @@ package keychain
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"sync"
 )
 
@@ -15,7 +16,9 @@ import (
 // it as the app starts.
 type Store interface {
 	// Get returns the secret kept under name, or an error for which
-	// errors.Is(err, ErrNotFound) holds when there is none.
+	// errors.Is(err, ErrNotFound) holds when there is none, and
+	// errors.Is(err, ErrDenied) when the user turned the system's prompt
+	// for it down.
 	Get(name string) ([]byte, error)
 	// Set keeps value under name, in place of what it had.
 	Set(name string, value []byte) error
@@ -28,6 +31,29 @@ type Store interface {
 // A Store's own error for it must match it with errors.Is.
 var ErrNotFound = errors.New("keychain: no secret kept under this name")
 
+// ErrDenied is what a Store's Get fails with when the user turned down the
+// system's prompt to read the secret. A Store's own error for it must
+// match it with errors.Is.
+var ErrDenied = errors.New("keychain: the user did not allow reading the secret")
+
+// deniedStatuses are how MyGo's Secrets ends its errors on macOS when the
+// user denies its prompt (errSecAuthFailed) or cancels it
+// (errSecUserCanceled): it gives no error of its own to match.
+var deniedStatuses = []string{"(OSStatus -25293)", "(OSStatus -128)"}
+
+// denied reports whether err is the user's refusal, not the store failing.
+func denied(err error) bool {
+	if errors.Is(err, ErrDenied) {
+		return true
+	}
+	for _, s := range deniedStatuses {
+		if strings.HasSuffix(err.Error(), s) {
+			return true
+		}
+	}
+	return false
+}
+
 // MaxSecretSize is the largest secret kept, in bytes: the most the
 // Windows Credential Manager keeps, so that the app behaves the same on
 // every system.
@@ -35,7 +61,7 @@ const MaxSecretSize = 2560
 
 type entry struct {
 	value []byte
-	err   error // ErrNotFound, or why the keychain refused
+	err   error // ErrNotFound, or the user's refusal
 }
 
 var (
@@ -57,8 +83,11 @@ func Use(s Store) {
 	cache = map[string]entry{}
 }
 
-// Get returns a secret, or ErrNotFound. A refusal is kept for the run too,
-// so a denied prompt is not asked again at once.
+// Get returns a secret, or ErrNotFound. The user's refusal is kept for
+// the run too, so a denied prompt is not asked again at once; any other
+// failure is not, so a read the system turned down for now, such as the
+// iOS keychain's before the device is first unlocked when the app starts
+// in the background, is tried again the next time.
 func Get(name string) ([]byte, error) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -71,8 +100,12 @@ func Get(name string) ([]byte, error) {
 		if v == nil && err == nil {
 			v = []byte{}
 		}
-		if err != nil && errors.Is(err, ErrNotFound) {
+		switch {
+		case err == nil:
+		case errors.Is(err, ErrNotFound):
 			err = ErrNotFound
+		case !denied(err):
+			return nil, err
 		}
 		e = entry{value: v, err: err}
 		cache[name] = e

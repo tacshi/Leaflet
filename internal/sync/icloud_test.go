@@ -429,7 +429,7 @@ func TestICloudTwoDevicesMadeTheSpace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "space 2.json"), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	b.svc.ICloud.Root = root
+	b.svc.SetICloudRoot(root)
 	syncAll(a, b, a)
 	if a.st.Session().SpaceID != b.st.Session().SpaceID {
 		t.Fatalf("spaces %s and %s", a.st.Session().SpaceID, b.st.Session().SpaceID)
@@ -722,7 +722,7 @@ func TestICloudJoiningAfreshSendsEverything(t *testing.T) {
 		t.Fatal(err)
 	}
 	// What only the old folder had stays reachable while A moves it.
-	a.svc.ICloud.Root = moved
+	a.svc.SetICloudRoot(moved)
 	a.svc.SetICloud(false)
 	if !a.svc.CanFetch() {
 		t.Fatal("audio in the folder left is out of reach")
@@ -731,10 +731,10 @@ func TestICloudJoiningAfreshSendsEverything(t *testing.T) {
 		t.Fatalf("audio %q, %v", data, err)
 	}
 	space, _ := a.st.Value("icloud.space")
-	if err := a.svc.requeueAll(space); err != nil {
+	if err := a.svc.requeueAll(context.Background(), space); err != nil {
 		t.Fatal(err)
 	}
-	a.svc.ICloud.Root = root
+	a.svc.SetICloudRoot(root)
 	if err := a.svc.EnableICloud(); err != nil {
 		t.Fatal(err)
 	}
@@ -776,7 +776,7 @@ func TestICloudJoinsOnceAllIsQueued(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := b.svc.joinSpace(""); !errors.Is(err, errNotRequeued) {
+	if err := b.svc.joinSpace(context.Background(), ""); !errors.Is(err, errNotRequeued) {
 		t.Fatalf("joinSpace: %v", err)
 	}
 	if joined, _ := b.st.Value("icloud.space"); joined != "" {
@@ -844,12 +844,25 @@ func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
 	sess := a.st.Session()
 	sess.SpaceID = space
 	a.st.SetSession(sess)
-	if err := a.svc.requeueAll(space); err == nil {
+	if err := a.svc.requeueAll(context.Background(), space); err == nil {
 		t.Error("requeueAll said all went")
 	}
 	if got := file(); got.StoragePath != f.StoragePath || a.st.HasPending("files", f.ID) {
 		t.Errorf("file moved before it came: %+v", got)
 	}
+	// Stopping the pass, as when an iOS app's background time runs out,
+	// stops the wait too.
+	moveWait = time.Minute
+	stopped, stop := context.WithCancel(context.Background())
+	stop()
+	start := time.Now()
+	if err := a.svc.requeueAll(stopped, space); err == nil {
+		t.Error("requeueAll said all went")
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("waited %v after the pass stopped", d)
+	}
+	moveWait = 200 * time.Millisecond
 
 	if err := os.Rename(hidden, path); err != nil {
 		t.Fatal(err)
@@ -1154,7 +1167,7 @@ func TestRequeueKeepsAFileDeletedWhileItWaits(t *testing.T) {
 		time.Sleep(moveWait / 4)
 		deleted <- a.st.DeleteFile(kept)
 	}()
-	if err := a.svc.requeueAll("00000000-0000-0000-0000-0000000000a2"); err == nil {
+	if err := a.svc.requeueAll(context.Background(), "00000000-0000-0000-0000-0000000000a2"); err == nil {
 		t.Error("requeueAll said all went")
 	}
 	if err := <-deleted; err != nil {
@@ -1493,7 +1506,7 @@ func TestICloudSendingAgainKeepsAHeldChange(t *testing.T) {
 		t.Fatal("B's move is not held")
 	}
 	space, _ := a.st.Value("icloud.space")
-	if err := a.svc.requeueAll(space); err != nil {
+	if err := a.svc.requeueAll(context.Background(), space); err != nil {
 		t.Fatal(err)
 	}
 	syncAll(a, b)
@@ -1653,7 +1666,8 @@ func TestICloudJoinedTheLosingSpace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wonRoot, "space 2.json"), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	lost.svc.ICloud.Root, z.svc.ICloud.Root = wonRoot, wonRoot
+	lost.svc.SetICloudRoot(wonRoot)
+	z.svc.SetICloudRoot(wonRoot)
 	syncAll(lost, won)
 	if err := z.svc.SyncNow(); err != nil {
 		t.Fatalf("Z: %v", err)

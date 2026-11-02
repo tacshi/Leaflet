@@ -55,18 +55,7 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 		}
 	})
 	e.hid = e.hidden()
-	e.order, e.depths = map[string]int{}, map[string]int{}
-	for i, n := range e.walkUnits(e.hid) {
-		e.order[n.ID] = i
-	}
-	var deep func([]*doc.Node, int)
-	deep = func(nodes []*doc.Node, d int) {
-		for _, n := range nodes {
-			e.depths[n.ID] = d
-			deep(n.Children, d+1)
-		}
-	}
-	deep(e.Content.Children, 0)
+	e.order, e.depths = unitOrder(e.walkUnits(e.hid)), e.blockDepths()
 	// The chips shown fill this in again as they draw.
 	clear(e.chips)
 	root.Children(func() {

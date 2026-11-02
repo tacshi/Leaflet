@@ -29,9 +29,16 @@ final class Recorder {
     @ObservationIgnored private var client: CoreClient?
     @ObservationIgnored private var toast: ((String) -> Void)?
     @ObservationIgnored private var asked: Set<String> = []
+    /// reads numbers the reads of each recording, as a stop and the end of
+    /// its transcription each read it: "transcribing" read first doesn't
+    /// replace "ready" read after.
+    @ObservationIgnored private var reads = Newest()
     @ObservationIgnored private let microphone = Microphone()
     /// ended hears the player reach the end, which it holds weakly.
-    @ObservationIgnored private lazy var ended = PlayerEnded { [weak self] in self?.changes += 1 }
+    @ObservationIgnored private lazy var ended = PlayerEnded { [weak self] in
+        self?.changes += 1
+        self?.letAudioGo()
+    }
 
     private init() {}
 
@@ -119,7 +126,9 @@ final class Recorder {
     }
 
     private func load(_ id: String) async {
-        guard let client, let row = try? await client.recording(id) else { return }
+        guard let client else { return }
+        let n = reads.ask(id)
+        guard let row = try? await client.recording(id), reads.answered(n, id) else { return }
         if rows[id] != row { rows[id] = row }
     }
 
@@ -152,6 +161,10 @@ final class Recorder {
     /// playing, it pauses it.
     func play(_ id: String, from at: TimeInterval? = nil) {
         if playing == id, let player {
+            // Played to its end, the player let the session go.
+            if at != nil || !player.isPlaying {
+                try? AVAudioSession.sharedInstance().setActive(true)
+            }
             if let at {
                 player.currentTime = at
                 player.play()
@@ -192,9 +205,18 @@ final class Recorder {
     }
 
     func stopPlaying() {
+        let was = player
         player?.stop()
         player = nil
         playing = nil
+        if was != nil { letAudioGo() }
+    }
+
+    /// letAudioGo gives up the audio session once playing is done, for the
+    /// music or podcast it interrupted to go on.
+    private func letAudioGo() {
+        try? AVAudioSession.sharedInstance().setActive(
+            false, options: .notifyOthersOnDeactivation)
     }
 }
 

@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -47,13 +48,9 @@ func All(file string, src Source, allFolders []store.Folder, allFiles []store.Fi
 	if err != nil {
 		return 0, err
 	}
-	folders := map[string]string{}
-	for _, fo := range allFolders {
-		folders[fo.ID] = fo.Name
-	}
 	// Templates go in a folder of their own.
 	const templatesFolder = "\x00templates"
-	folders[templatesFolder] = locales.ExportTemplatesFolder()
+	folders := append(slices.Clip(allFolders), store.Folder{ID: templatesFolder, Name: locales.ExportTemplatesFolder()})
 	for _, t := range templates {
 		if t.ParentID == "" {
 			t.FolderID = templatesFolder
@@ -274,19 +271,56 @@ func SafeName(s string) string {
 }
 
 // Zip writes the pages as Markdown files in a zip: a folder is a
-// directory, and so is a page with subpages, which go in it beside the
-// page's own file. Pictures kept on this device go in files/, and links to
-// them and to subpages are relative, so the zip reads anywhere. localPath
-// is where a file is on this device, or "" when it is not.
-func Zip(w io.Writer, pages []store.Page, folders map[string]string, content func(id string) *doc.Content,
+// directory, in the directory of the folder it is in, and so is a page
+// with subpages, which go in it beside the page's own file. Pictures kept
+// on this device go in files/, and links to them and to subpages are
+// relative, so the zip reads anywhere. localPath is where a file is on
+// this device, or "" when it is not.
+func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(id string) *doc.Content,
 	localPath func(fileID string) string, readFile func(string) ([]byte, error)) error {
 	byID := map[string]store.Page{}
 	for _, p := range pages {
 		byID[p.ID] = p
 	}
+	// used are the paths taken in the zip, in lower case, as file systems
+	// that ignore case take them: a folder's, a page's own and that of
+	// the directory of its subpages. One taken already gets a number.
+	used := map[string]bool{}
+	claim := func(base string) string {
+		name := base
+		for n := 2; used[strings.ToLower(name)]; n++ {
+			name = fmt.Sprintf("%s (%d)", base, n)
+		}
+		used[strings.ToLower(name)] = true
+		return name
+	}
+	// folderPaths are each folder's directory in the zip, each of its
+	// names safe on its own: two folders of one name in different folders
+	// stay apart, and so do two in the same one.
+	folderByID := map[string]store.Folder{}
+	for _, fo := range folders {
+		folderByID[fo.ID] = fo
+	}
+	folderPaths := map[string]string{}
+	var folderPath func(id string, seen map[string]bool) string
+	folderPath = func(id string, seen map[string]bool) string {
+		if p, ok := folderPaths[id]; ok {
+			return p
+		}
+		fo := folderByID[id]
+		seen[id] = true
+		dir := ""
+		if _, ok := folderByID[fo.ParentFolderID]; ok && !seen[fo.ParentFolderID] {
+			dir = folderPath(fo.ParentFolderID, seen) + "/"
+		}
+		folderPaths[id] = claim(dir + SafeName(fo.Name))
+		return folderPaths[id]
+	}
+	for _, fo := range folders {
+		folderPath(fo.ID, map[string]bool{})
+	}
 	// paths are each page's path in the zip, without ".md".
 	paths := map[string]string{}
-	used := map[string]bool{}
 	var pathOf func(id string, seen map[string]bool) string
 	pathOf = func(id string, seen map[string]bool) string {
 		if p, ok := paths[id]; ok {
@@ -297,17 +331,11 @@ func Zip(w io.Writer, pages []store.Page, folders map[string]string, content fun
 		dir := ""
 		if _, ok := byID[p.ParentID]; ok && !seen[p.ParentID] {
 			dir = pathOf(p.ParentID, seen) + "/"
-		} else if name, ok := folders[p.FolderID]; ok {
-			dir = SafeName(name) + "/"
+		} else if dirOf, ok := folderPaths[p.FolderID]; ok {
+			dir = dirOf + "/"
 		}
-		base := dir + SafeName(p.DisplayTitle())
-		name := base
-		for n := 2; used[strings.ToLower(name)]; n++ {
-			name = fmt.Sprintf("%s (%d)", base, n)
-		}
-		used[strings.ToLower(name)] = true
-		paths[id] = name
-		return name
+		paths[id] = claim(dir + SafeName(p.DisplayTitle()))
+		return paths[id]
 	}
 	for _, p := range pages {
 		pathOf(p.ID, map[string]bool{})
@@ -327,10 +355,14 @@ func Zip(w io.Writer, pages []store.Page, folders map[string]string, content fun
 	// files are the pictures written so far, by their URL on this device.
 	files := map[string]string{}
 	usedFiles := map[string]bool{}
-	// A page's file, or the directory of its subpages, may be in files/
-	// too, in a folder of that name: a file there takes another name.
+	// A page's file, or the directory of its subpages or of a folder,
+	// may be in files/ too, in a folder of that name: a file there takes
+	// another name.
 	for _, p := range paths {
 		usedFiles[strings.ToLower(p)], usedFiles[strings.ToLower(p)+".md"] = true, true
+	}
+	for _, p := range folderPaths {
+		usedFiles[strings.ToLower(p)] = true
 	}
 	for _, p := range pages {
 		c := content(p.ID)

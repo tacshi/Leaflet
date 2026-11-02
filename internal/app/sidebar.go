@@ -323,7 +323,7 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			ui.Text(c, f.Name).FontSize(13.5).Grow(1).SingleLine().Tooltip(f.Name)
 		})
 		row.PopoverMenu(func(m *ui.Menu) {
-			if m.Item(locales.CommonOpen()).Chosen() && f.LocalPath != "" {
+			if m.Item(locales.CommonOpen()).Chosen() {
 				a.openFile(f)
 			}
 			if m.Item(locales.SidebarDeleteFile()).Chosen() {

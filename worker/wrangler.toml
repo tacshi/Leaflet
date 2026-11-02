@@ -1,4 +1,5 @@
-# Leaflet's sign-in with Supabase: its redirect page and token exchange.
+# Leaflet's sign-in with Supabase: its redirect page, its token exchange, and
+# the iOS app's site association.
 # Deploy from this folder:
 #   npx wrangler login
 #   npx wrangler secret put CLIENT_SECRET   # the OAuth app's client secret

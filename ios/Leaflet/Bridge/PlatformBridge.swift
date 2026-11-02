@@ -1,3 +1,4 @@
+import DeviceKit
 import Foundation
 import LeafletCore
 import Network
@@ -17,10 +18,9 @@ final class PlatformBridge: NSObject, MobilePlatformProtocol, Sendable {
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "Leaflet", category: "core")
 
-    @MainActor
     init(service: String) {
         keychain = Keychain(service: service)
-        name = UIDevice.current.name
+        name = Self.label(of: DeviceKit.Device.current)
         super.init()
         monitor.pathUpdateHandler = { [reachable] path in
             reachable.online.withLock { $0 = path.status == .satisfied }
@@ -46,6 +46,20 @@ final class PlatformBridge: NSObject, MobilePlatformProtocol, Sendable {
     func online() -> Bool { reachable.online.withLock { $0 } }
 
     func deviceName() -> String { name }
+
+    /// label names the device in Account › Devices by its model, as
+    /// "iPad Pro (13-inch) (M5)": UIDevice's name is only "iPad" since
+    /// iOS 16, for apps without an entitlement Apple grants few, and the
+    /// list says which one is this one, and when each was last active. A
+    /// model newer than DeviceKit knows goes by its kind, from its
+    /// identifier ("iPad17,9": iPad).
+    static func label(of device: DeviceKit.Device) -> String {
+        if case .unknown(let identifier) = device {
+            let kind = identifier.prefix { $0.isLetter }
+            return kind.isEmpty ? "iOS" : String(kind)
+        }
+        return device.description
+    }
 
     func openURL(_ url: String?) {
         guard let url = url.flatMap(URL.init(string:)) else { return }

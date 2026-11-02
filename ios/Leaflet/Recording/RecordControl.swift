@@ -44,7 +44,7 @@ struct RecordControl: View {
                     .font(.footnote)
                     .frame(width: 28, height: 28)
             }
-            .accessibilityLabel(L.commonPause)
+            .accessibilityLabel(state.paused ? LI.resumeRecording : L.commonPause)
             .disabled(state.starting)
             Button {
                 recorder.stop()

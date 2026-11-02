@@ -70,8 +70,8 @@ func TestDuePopover(t *testing.T) {
 	if e.dueOpen != n.ID {
 		t.Fatal("the next month closed the popover")
 	}
-	if !DueToday(e.dueDraft, now) {
-		t.Fatalf("the next month chose %v", e.dueDraft)
+	if !DueToday(e.dues[n.ID].at, now) {
+		t.Fatalf("the next month chose %v", e.dues[n.ID].at)
 	}
 	want := time.Date(now.Year(), now.Month()+1, 15, 0, 0, 0, 0, time.Local)
 	click(want.Format("January 2, 2006"))
@@ -187,5 +187,43 @@ func TestDueChipStaysPut(t *testing.T) {
 	tt.Frame()
 	if hovered, ok := e.chips[n.ID]; !ok || hovered.X != focused.X {
 		t.Errorf("the date is at %v under the pointer, %v with the caret", hovered.X, focused.X)
+	}
+}
+
+// Each to-do's calendar has its own draft: a click on the date of one
+// above, while another's calendar is open, opens its calendar, and the
+// other still takes the date it was given.
+func TestDuePopoversKeepTheirDrafts(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("[] Above")
+	tt.Key(0, ui.KeyEnter)
+	tt.Type("Below")
+	above, below := e.Content.Children[0], e.Content.Children[1]
+	e.SetDue(above.ID, time.Now().AddDate(0, 0, 1), false)
+	tt.Frame()
+	click := func(s string) {
+		t.Helper()
+		if err := tt.Click(s); err != nil {
+			t.Fatalf("%v in %v", err, tt.Texts())
+		}
+		tt.Frame()
+	}
+	click("Due date: Add date")
+	if e.dueOpen != below.ID {
+		t.Fatal("the calendar did not open")
+	}
+	now := time.Now()
+	day := time.Date(now.Year(), now.Month(), 15, 0, 0, 0, 0, time.Local)
+	click(day.Format("January 2, 2006"))
+	click("Due date: Tomorrow")
+	tt.Frame()
+	if due, _, ok := below.Due(); !ok || !DueToday(due, day) {
+		t.Errorf("below is due %v, %v; want %v", due, ok, day)
+	}
+	if e.dueOpen != above.ID || e.dues[above.ID] == nil {
+		t.Errorf("open is %q, drafts %v", e.dueOpen, e.dues)
+	}
+	if due, _, _ := above.Due(); !DueToday(due, now.AddDate(0, 0, 1)) {
+		t.Errorf("above is due %v", due)
 	}
 }

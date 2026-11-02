@@ -2,6 +2,7 @@ package remote
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -391,5 +392,96 @@ func TestFunctionRefusingAShortTokenRetries(t *testing.T) {
 	}
 	if refreshes.Load() != 1 || calls.Load() != 2 {
 		t.Errorf("%d refreshes, %d calls", refreshes.Load(), calls.Load())
+	}
+}
+
+// Only what says the server could not be reached counts as the network's:
+// a failed connection, one that broke or went quiet, a gateway that could
+// not reach the server. The server's refusals, answers that do not parse
+// and the caller's own waits running out are not.
+func TestIsNetwork(t *testing.T) {
+	c := SignedInForTest("http://127.0.0.1:1", nil, "u1")
+	_, refused := c.Select(context.Background(), "pages", Query{})
+	expired, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-expired.Done()
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{refused, true},
+		{fmt.Errorf("reading: %w", io.ErrUnexpectedEOF), true},
+		{errStreamIdle, true},
+		{&Error{Status: http.StatusServiceUnavailable}, true},
+		{&Error{Status: http.StatusConflict}, false},
+		{errors.New("the page's content on this device could not be read"), false},
+		{expired.Err(), false},
+		{fmt.Errorf("fetch: %w", context.DeadlineExceeded), false},
+		{ErrSignedOut, false},
+		{nil, false},
+	} {
+		if got := IsNetwork(tc.err); got != tc.want {
+			t.Errorf("IsNetwork(%v) = %v", tc.err, got)
+		}
+	}
+}
+
+// The owner is found on any page of the project's users.
+func TestProjectOwnerReadsEveryPage(t *testing.T) {
+	was, wasPages := usersPerPage, maxUserPages
+	usersPerPage = 2
+	t.Cleanup(func() { usersPerPage, maxUserPages = was, wasPages })
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var users []map[string]any
+		switch r.URL.Query().Get("page") {
+		case "1":
+			users = []map[string]any{{"email": "a@example.com"}, {"email": "b@example.com"}}
+		case "2":
+			users = []map[string]any{{"email": "c@example.com"}, {"email": "me@example.com", "app_metadata": map[string]any{"leaflet_owner": true}}}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"users": users})
+	}))
+	t.Cleanup(hs.Close)
+	got, err := New(Settings{}, nil).ProjectOwner(context.Background(), Settings{URL: hs.URL, AnonKey: "k"}, "sb_secret_s")
+	if err != nil || got != "me@example.com" {
+		t.Errorf("owner %q, %v", got, err)
+	}
+	maxUserPages = 1
+	if got, _ := New(Settings{}, nil).ProjectOwner(context.Background(), Settings{URL: hs.URL, AnonKey: "k"}, "sb_secret_s"); got != "" {
+		t.Errorf("read past the last page it may: %q", got)
+	}
+}
+
+// A profile change refused for an expired token renews the token and goes
+// again, as the other requests do.
+func TestUpdateUserRenewsARefusedToken(t *testing.T) {
+	var mu sync.Mutex
+	var sent []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/v1/token" {
+			_, _ = io.WriteString(w, `{"access_token":"new","refresh_token":"r2","expires_in":3600}`)
+			return
+		}
+		data, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		sent = append(sent, r.Method+" "+r.URL.Path+" "+string(data))
+		mu.Unlock()
+		if r.Header.Get("Authorization") == "Bearer test" {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = io.WriteString(w, `{"msg":"invalid JWT: token is expired"}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"u1"}`)
+	}))
+	t.Cleanup(hs.Close)
+	c := SignedInForTest(hs.URL, nil, "u1")
+	c.sess.RefreshToken = "r1"
+	if err := c.UpdateUser(map[string]any{"display_name": "Ana"}); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if want := `PUT /auth/v1/user {"data":{"display_name":"Ana"}}`; len(sent) != 2 || sent[1] != want {
+		t.Errorf("sent %q", sent)
 	}
 }

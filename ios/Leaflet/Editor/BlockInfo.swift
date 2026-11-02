@@ -88,6 +88,11 @@ extension NSAttributedString.Key {
     static let leafletBold = NSAttributedString.Key("leaflet.bold")
     static let leafletItalic = NSAttributedString.Key("leaflet.italic")
     static let leafletCode = NSAttributedString.Key("leaflet.code")
+    /// leafletUnderline and leafletStrike are the text's own underline and
+    /// strikethrough: the style draws a link's underline and a checked
+    /// to-do's line through too, which are not the text's.
+    static let leafletUnderline = NSAttributedString.Key("leaflet.underline")
+    static let leafletStrike = NSAttributedString.Key("leaflet.strike")
     static let leafletHref = NSAttributedString.Key("leaflet.href")
     static let leafletMention = NSAttributedString.Key("leaflet.mention")
     /// leafletColor and leafletBackground are the text's color and

@@ -10,6 +10,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
+	"leaflet/internal/store"
 )
 
 // fakeMic is the app's microphone: on at once, it hands on a second of
@@ -200,4 +201,22 @@ func TestRecordingTranscribedOnTheDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	ready("from the file")
+}
+
+// The speech settings the app saves are the whole of them: a provider or
+// language hints it leaves out are cleared, not kept from before.
+func TestSaveSpeechSettingsClearsWhatItLeavesOut(t *testing.T) {
+	c, _ := open(t)
+	if err := c.SaveSpeechSettings(`{"provider":"openai-compatible","base_url":"https://api.example.com/v1","model":"whisper-1","provider_id":"p1","language_hints":["en","ja"]}`); err != nil {
+		t.Fatal(err)
+	}
+	// "No key", and no hints.
+	if err := c.SaveSpeechSettings(`{"provider":"openai-compatible","base_url":"https://api.example.com/v1","model":"whisper-1"}`); err != nil {
+		t.Fatal(err)
+	}
+	var stt store.SttSettings
+	c.q.do(func() { stt = c.core.Store.Settings().Stt })
+	if stt.ProviderID != "" || len(stt.LanguageHints) != 0 || stt.Model != "whisper-1" {
+		t.Fatalf("saved %+v", stt)
+	}
 }

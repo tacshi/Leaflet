@@ -2,15 +2,14 @@ package app
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 	"github.com/egoist/mygo/ui/markdown"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/core"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -269,10 +268,10 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 				ui.Row(c).Gap(6).Margin(4, 0, 0).Children(func() {
 					if run.Undone {
 						if ghost(c, "redo", "redo-2", locales.PageRedo()).Clicked() {
-							a.hub.RedoRun(a.page.id, run.ID)
+							a.redoRun(run)
 						}
 					} else if ghost(c, "undo", "undo-2", locales.CommonUndo()).Clicked() {
-						a.hub.UndoRun(a.page.id, run.ID)
+						a.undoRun(run)
 					}
 				})
 			})
@@ -680,180 +679,9 @@ func (a *App) commentText(c *ui.Context, body string) ui.Element {
 	for _, o := range a.hub.Options() {
 		names = append(names, o.Name())
 	}
-	return markdown.View(c, markMentions(body, names), &a.commentMD)
-}
-
-// markMentions marks each @ of one of names in md, as an @ menu writes
-// them, outside code, where they stay as written: fenced code blocks,
-// indented ones, and code spans.
-func markMentions(md string, names []string) string {
-	return scanMentions(md, names, func(m string) string { return "<mark><b>" + m + "</b></mark>" })
-}
-
-// mentioned is which of names md mentions where markMentions marks them,
-// in lower case.
-func mentioned(md string, names []string) map[string]bool {
-	out := map[string]bool{}
-	scanMentions(md, names, func(m string) string {
-		out[strings.ToLower(m[1:])] = true
-		return m
-	})
-	return out
-}
-
-// scanMentions is md with each mention markMentions marks as mark has it.
-func scanMentions(md string, names []string, mark func(mention string) string) string {
-	names = slices.Clone(names)
-	slices.SortFunc(names, func(x, y string) int { return len(y) - len(x) })
-	var b, para strings.Builder
-	// A paragraph's lines are marked together, for a code span may go
-	// over more than one of them.
-	flush := func() {
-		b.WriteString(markInline(para.String(), names, mark))
-		para.Reset()
-	}
-	fence := ""
-	// inPara is set while a paragraph goes on: an indented line then
-	// goes on with it, not starting a code block.
-	inPara := false
-	for _, line := range strings.SplitAfter(md, "\n") {
-		text := strings.TrimRight(line, "\r\n")
-		switch {
-		case fence != "":
-			b.WriteString(line)
-			if closesFence(text, fence) {
-				fence = ""
-			}
-			continue
-		case opensFence(text) != "":
-			flush()
-			fence, inPara = opensFence(text), false
-			b.WriteString(line)
-			continue
-		case strings.TrimSpace(text) == "":
-			para.WriteString(line)
-			flush()
-			inPara = false
-			continue
-		case !inPara && (strings.HasPrefix(text, "    ") || strings.HasPrefix(text, "\t")):
-			flush()
-			b.WriteString(line)
-			continue
-		}
-		para.WriteString(line)
-		inPara = true
-	}
-	flush()
-	return b.String()
-}
-
-// markInline marks the mentions in a paragraph, outside its code spans; a
-// backslash keeps the character after it, a backtick too, from starting
-// one.
-func markInline(s string, names []string, mark func(string) string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		ch := s[i]
-		switch {
-		case ch == '\\' && i+1 < len(s):
-			b.WriteString(s[i : i+2])
-			i++
-			continue
-		case ch == '`':
-			// A span opens with a run of backticks and closes with a run
-			// as long; one that never closes is backticks as written.
-			n := backticks(s[i:])
-			end := i + n
-			if j := closingRun(s[end:], n); j >= 0 {
-				end += j + n
-			}
-			b.WriteString(s[i:end])
-			i = end - 1
-			continue
-		case ch == '@' && (i == 0 || s[i-1] == ' ' || s[i-1] == '\n' || s[i-1] == '\t'):
-			if n := mentionLen(s[i+1:], names); n > 0 {
-				b.WriteString(mark(s[i : i+1+n]))
-				i += n
-				continue
-			}
-		}
-		b.WriteByte(ch)
-	}
-	return b.String()
-}
-
-// backticks is how many backticks s starts with.
-func backticks(s string) int {
-	n := 0
-	for n < len(s) && s[n] == '`' {
-		n++
-	}
-	return n
-}
-
-// closingRun is where in s a run of exactly n backticks starts, or -1.
-func closingRun(s string, n int) int {
-	for j := 0; j < len(s); {
-		if m := backticks(s[j:]); m > 0 {
-			if m == n {
-				return j
-			}
-			j += m
-			continue
-		}
-		j++
-	}
-	return -1
-}
-
-// opensFence is the fence a line opens a fenced code block with, as ```
-// or ~~~, or "".
-func opensFence(line string) string {
-	line = trimIndent(line)
-	for _, ch := range []byte{'`', '~'} {
-		n := 0
-		for n < len(line) && line[n] == ch {
-			n++
-		}
-		if n >= 3 {
-			return line[:n]
-		}
-	}
-	return ""
-}
-
-// closesFence reports whether a line closes the code block fence opened:
-// a run of its character at least as long, alone on the line.
-func closesFence(line, fence string) bool {
-	line = trimIndent(line)
-	n := 0
-	for n < len(line) && line[n] == fence[0] {
-		n++
-	}
-	return n >= len(fence) && strings.TrimSpace(line[n:]) == ""
-}
-
-// trimIndent drops the up to three spaces a fence may be indented by.
-func trimIndent(line string) string {
-	for i := 0; i < 3 && strings.HasPrefix(line, " "); i++ {
-		line = line[1:]
-	}
-	return line
-}
-
-// mentionLen is how long the name of names that rest starts with is, a
-// whole word, or 0.
-func mentionLen(rest string, names []string) int {
-	for _, name := range names {
-		n := len(name)
-		if n == 0 || len(rest) < n || !strings.EqualFold(rest[:n], name) {
-			continue
-		}
-		if r, _ := utf8.DecodeRuneInString(rest[n:]); !unicode.IsLetter(r) && !unicode.IsDigit(r) {
-			return n
-		}
-	}
-	return 0
+	// Marked as bold in the accent, as the editor marks mentions.
+	md := core.MarkMentions(body, names, func(m string) string { return "<mark><b>" + m + "</b></mark>" })
+	return markdown.View(c, md, &a.commentMD)
 }
 
 // commentBody is a comment's text, or says it was deleted: a thread whose
@@ -889,7 +717,7 @@ func (a *App) agentInComment(root store.Comment, body string) {
 	for _, o := range a.hub.Options() {
 		names = append(names, o.Name())
 	}
-	hit := mentioned(body, names)
+	hit := core.Mentioned(body, names)
 	for _, o := range a.hub.Options() {
 		if hit[strings.ToLower(o.Name())] || hit["agent"] {
 			ch := o.Choice()

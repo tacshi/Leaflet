@@ -1,7 +1,9 @@
 name: iOS
 
 # The iOS app links the Go core, so it is built and tested whenever the
-# core or the app changes.
+# core or the app changes: the core is ./mobile and every package it
+# imports, leaflet/supabase among them, and the Makefile has the app's
+# checks and builds.
 on:
   push:
     branches: [main]
@@ -10,6 +12,8 @@ on:
       - "mobile/**"
       - "internal/**"
       - "locales/**"
+      - "supabase/**"
+      - "Makefile"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/ios.yml"
@@ -19,6 +23,8 @@ on:
       - "mobile/**"
       - "internal/**"
       - "locales/**"
+      - "supabase/**"
+      - "Makefile"
       - "go.mod"
       - "go.sum"
       - ".github/workflows/ios.yml"
@@ -79,5 +85,6 @@ jobs:
       - name: Test on an iPhone and an iPad
         run: >-
           xcodebuild test -project ios/Leaflet.xcodeproj -scheme Leaflet
+          -onlyUsePackageVersionsFromResolvedFile
           -destination "id=$IPHONE" -destination "id=$IPAD"
           CODE_SIGNING_ALLOWED=NO

@@ -17,18 +17,23 @@ final class ICloudSync {
     /// picking shows the folder picker.
     var picking = false
 
-    @ObservationIgnored private let client: CoreClient?
+    /// client is the core, once it is open.
+    @ObservationIgnored private var client: CoreClient?
     @ObservationIgnored private let folder: ICloudFolder
     /// onAfterPicking turns sync on once the folder is picked, when
     /// turning it on asked for one.
     @ObservationIgnored private var onAfterPicking = false
 
-    init(client: CoreClient?, folder: ICloudFolder) {
-        self.client = client
+    init(folder: ICloudFolder) {
         self.folder = folder
         folderName = folder.picked?.lastPathComponent
         lost = folder.lost
-        client?.useICloudFolder(folder.root)
+    }
+
+    /// attach gives sync the core, as it opens, and the core the folder.
+    func attach(_ client: CoreClient) {
+        self.client = client
+        client.useICloudFolder(folder.root)
     }
 
     /// set turns iCloud sync on or off. On with no folder to sync

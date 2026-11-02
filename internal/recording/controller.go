@@ -36,8 +36,14 @@ type Controller struct {
 	Blobs Blobs
 
 	// Engine is the device's own speech engine, which transcribes for
-	// OnDevice, or nil where the device has none.
+	// OnDevice, or nil where the device has none. Read it on the main
+	// thread, and give it with SetEngine there: the transcriptions read
+	// it from goroutines of their own, under mu.
 	Engine Engine
+	// finding is open while the host looks for the device's engine
+	// (FindingEngine), and closes once SetEngine gives what it found.
+	// Guarded by mu.
+	finding chan struct{}
 
 	// The recording in progress, read and written on the main thread.
 	State State
@@ -60,6 +66,10 @@ type Controller struct {
 	connecting bool
 	early      [][]byte
 	earlyLen   int
+	// ending are the recordings stopped whose microphone still hands on
+	// the audio it held, by session: it goes to their own file and
+	// stream, though the next recording has started meanwhile.
+	ending map[string]ending
 	// withText is whether the recording in progress gets a transcript;
 	// without an engine that can run, it keeps only its audio.
 	withText bool
@@ -72,6 +82,61 @@ type Controller struct {
 	// among them whose words came live, now getting their timestamps.
 	Transcribing map[string]bool
 	Finishing    map[string]bool
+}
+
+// ending is where the last audio of a recording stopped goes.
+type ending struct {
+	wav    *WavWriter
+	stream Stream
+	paused bool
+}
+
+// SetEngine gives the recorder the device's own engine, nil for none, and
+// ends the search FindingEngine began. Call it on the main thread.
+func (r *Controller) SetEngine(e Engine) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.Engine = e
+	if r.finding != nil {
+		close(r.finding)
+		r.finding = nil
+	}
+}
+
+// FindingEngine says the host is looking for the device's engine, which
+// it gives with SetEngine once it knows: meanwhile the device's engine
+// counts as usable, and what it is to transcribe waits for it, rather
+// than a recording started then keeping only its audio.
+func (r *Controller) FindingEngine() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.finding == nil {
+		r.finding = make(chan struct{})
+	}
+}
+
+// engineNow is the device's engine, and whether the host is still looking
+// for it.
+func (r *Controller) engineNow() (Engine, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.Engine, r.finding != nil
+}
+
+// waitEngine is the device's engine, once the host's search for it under
+// way has ended, or ctx has.
+func (r *Controller) waitEngine(ctx context.Context) Engine {
+	r.mu.Lock()
+	finding := r.finding
+	r.mu.Unlock()
+	if finding != nil {
+		select {
+		case <-finding:
+		case <-ctx.Done():
+		}
+	}
+	e, _ := r.engineNow()
+	return e
 }
 
 // Capture is the microphone recordings hear through: on the desktop a
@@ -294,7 +359,7 @@ func Usable(s store.SttSettings, online, signedIn bool) error {
 // Usable is the package's Usable, on this device: its own engine
 // transcribes offline, without an account.
 func (r *Controller) Usable(s store.SttSettings, online bool) error {
-	if s.Provider == OnDevice && r.Engine != nil {
+	if e, finding := r.engineNow(); s.Provider == OnDevice && (e != nil || finding) {
 		return nil
 	}
 	return Usable(s, online, r.be.SignedIn())
@@ -363,8 +428,13 @@ func (r *Controller) Test(stt store.SttSettings, online bool, d time.Duration, d
 	if why == nil && stt.Provider == "openai-compatible" && !IsLocalEndpoint(stt.BaseURL) {
 		why = errors.New(locales.RecErrCloudTest())
 	}
-	wav, err := CreateWav(filepath.Join(os.TempDir(), "leaflet-test-"+doc.NewRowID()+".wav"))
+	f, err := os.CreateTemp("", "leaflet-test-*.wav")
 	if err != nil {
+		return err
+	}
+	wav, err := newWav(f)
+	if err != nil {
+		_ = os.Remove(f.Name())
 		return err
 	}
 	r.mu.Lock()
@@ -410,9 +480,10 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 		go r.startSoniox(session, stt)
 	}
 	// So does the device's engine, which needs no connection. One that
-	// cannot start transcribes the saved audio once it stops.
-	if transcribe && stt.Provider == OnDevice {
-		s, err := r.Engine.Stream(stt.Language, func(text string) {
+	// cannot start, or that the host is still looking for, transcribes the
+	// saved audio once it stops.
+	if e, _ := r.engineNow(); transcribe && stt.Provider == OnDevice && e != nil {
+		s, err := e.Stream(stt.Language, func(text string) {
 			r.update(func() {
 				r.mu.Lock()
 				same := r.session == session
@@ -512,7 +583,18 @@ func (r *Controller) startSoniox(session string, stt store.SttSettings) {
 		}
 		s, err = DialSoniox(ctx, key, stt.SonioxModel, hints, stt.SpeakerLabels)
 		if err == nil {
-			s.OnText = func(text string) { r.update(func() { r.State.LiveText = text }) }
+			// The words of a stream still finishing after the next
+			// recording started are not that one's.
+			s.SetOnText(func(text string) {
+				r.update(func() {
+					r.mu.Lock()
+					same := r.session == session
+					r.mu.Unlock()
+					if same {
+						r.State.LiveText = text
+					}
+				})
+			})
 			r.attachSoniox(session, s)
 			return
 		}
@@ -558,6 +640,11 @@ const maxEarly = 30 * SampleRate * 2
 
 func (r *Controller) chunk(session string, pcm []byte) {
 	r.mu.Lock()
+	if e, ok := r.ending[session]; ok {
+		r.mu.Unlock()
+		r.lateChunk(e, pcm)
+		return
+	}
 	if r.paused || r.wav == nil || r.session != session {
 		r.mu.Unlock()
 		return
@@ -587,6 +674,21 @@ func (r *Controller) chunk(session string, pcm []byte) {
 			r.State.Levels = r.State.Levels[n-MaxLevels:]
 		}
 	})
+}
+
+// lateChunk takes audio a stopped recording's microphone handed on after
+// Stop: the end of what was said, which goes to that recording's file and
+// stream. The meter shows the recording in progress, so it does not move.
+func (r *Controller) lateChunk(e ending, pcm []byte) {
+	if e.paused || e.wav == nil {
+		return
+	}
+	if err := e.wav.Write(pcm); err != nil {
+		log.Printf("recording: %v", err)
+	}
+	if e.stream != nil {
+		e.stream.Send(pcm)
+	}
 }
 
 // MaxLevels is how many of the latest levels State keeps: 20 s.
@@ -662,23 +764,35 @@ func (r *Controller) Stop() {
 	duration := r.Elapsed()
 	r.mu.Lock()
 	m, wav, stream, stt, withText := r.mic, r.wav, r.stream, r.stt, r.withText
-	test, why := r.test, r.testWhy
+	test, why, session := r.test, r.testWhy, r.session
 	// The WAV file and the stream stay until the microphone has sent the
-	// audio it still holds: that is the end of what was said. A stream not
+	// audio it still holds: that is the end of what was said, which goes
+	// to them though the next recording starts meanwhile. A stream not
 	// there yet is not waited for; the audio is transcribed instead.
-	r.mic, r.test, r.testFor = nil, nil, 0
+	if r.ending == nil {
+		r.ending = map[string]ending{}
+	}
+	r.ending[session] = ending{wav: wav, stream: stream, paused: r.paused}
+	r.mic, r.wav, r.stream, r.test, r.testFor = nil, nil, nil, nil, 0
 	r.connecting, r.early, r.earlyLen = false, nil, 0
 	r.mu.Unlock()
 	st := r.State
 	r.State = State{}
+	transcribes := test == nil && withText && st.ID != ""
+	if transcribes {
+		// Now, not once the transcription starts, so a Retranscribe
+		// meanwhile refuses.
+		r.Transcribing[st.ID] = true
+		if stream != nil {
+			r.Finishing[st.ID] = true
+		}
+	}
 	go func() {
 		if m != nil {
 			m.Stop()
 		}
 		r.mu.Lock()
-		if r.wav == wav {
-			r.wav, r.stream = nil, nil
-		}
+		delete(r.ending, session)
 		r.mu.Unlock()
 		r.update(func() {
 			if m != nil {
@@ -718,6 +832,10 @@ func (r *Controller) Stop() {
 		})
 		if err != nil {
 			log.Printf("recording: %v", err)
+			r.update(func() {
+				delete(r.Transcribing, st.ID)
+				delete(r.Finishing, st.ID)
+			})
 			return
 		}
 		r.finish(rec, path, stream, stt)
@@ -736,7 +854,11 @@ func (r *Controller) transcribeTest(path string, stream Stream, stt store.SttSet
 	case stream != nil:
 		segs, err = stream.Finish()
 	case stt.Provider == OnDevice:
-		segs, err = r.Engine.File(path, stt.Language)
+		if e := r.waitEngine(context.Background()); e != nil {
+			segs, err = e.File(path, stt.Language)
+		} else {
+			err = errors.New(locales.RecErrOnDevice())
+		}
 	case stt.Provider == "soniox":
 		if liveErr == "" {
 			liveErr = locales.RecErrSonioxTimeout()
@@ -774,6 +896,10 @@ func (r *Controller) Retranscribe(id string, stt store.SttSettings, online bool)
 	// transcript and status over the other's.
 	if r.Transcribing[id] {
 		return errors.New(locales.RecErrTranscribing())
+	}
+	// Its end goes to the main thread, which Attach gives the way to.
+	if r.update == nil {
+		return errors.New(locales.RecErrWindowNotReady())
 	}
 	if err := r.Usable(stt, online); err != nil {
 		return err
@@ -932,7 +1058,8 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 // from its file, or from a copy of its audio fetched from where it went up
 // when the file is not on this device.
 func (r *Controller) transcribeOnDevice(ctx context.Context, rec store.Recording, path, language string) ([]store.Segment, error) {
-	if r.Engine == nil {
+	e := r.waitEngine(ctx)
+	if e == nil {
 		return nil, errors.New(locales.RecErrOnDevice())
 	}
 	if _, err := os.Stat(path); path == "" || err != nil {
@@ -940,13 +1067,30 @@ func (r *Controller) transcribeOnDevice(ctx context.Context, rec store.Recording
 		if err != nil {
 			return nil, err
 		}
-		path = filepath.Join(os.TempDir(), "leaflet-"+rec.ID+".wav")
-		if err := os.WriteFile(path, audio, 0o600); err != nil {
+		if path, err = tempAudio(audio); err != nil {
 			return nil, err
 		}
 		defer func() { _ = os.Remove(path) }()
 	}
-	return r.Engine.File(path, language)
+	return e.File(path, language)
+}
+
+// tempAudio writes audio to a file of its own in the system's temporary
+// folder, readable only by the user, and returns its path.
+func tempAudio(audio []byte) (string, error) {
+	f, err := os.CreateTemp("", "leaflet-*.wav")
+	if err != nil {
+		return "", err
+	}
+	_, err = f.Write(audio)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 // Audio returns a recording's WAV audio: on this device, or from where it

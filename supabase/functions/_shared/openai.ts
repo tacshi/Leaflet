@@ -274,18 +274,23 @@ export async function readStream(res: Response, onText: (delta: string) => void)
     if (choice.finish_reason) finishReason = choice.finish_reason;
   };
   const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
-  while (!done) {
-    const { value, done: ended } = await reader.read();
-    if (ended) break;
-    buffer += value;
-    let nl;
-    while (!done && (nl = buffer.indexOf("\n")) >= 0) {
-      take(buffer.slice(0, nl).replace(/\r$/, ""));
-      buffer = buffer.slice(nl + 1);
+  // An error event, or a read that fails, ends the answer too: the
+  // connection to the provider is closed then as well, not left open.
+  try {
+    while (!done) {
+      const { value, done: ended } = await reader.read();
+      if (ended) break;
+      buffer += value;
+      let nl;
+      while (!done && (nl = buffer.indexOf("\n")) >= 0) {
+        take(buffer.slice(0, nl).replace(/\r$/, ""));
+        buffer = buffer.slice(nl + 1);
+      }
     }
+    if (!done) take(buffer.trim());
+  } finally {
+    await reader.cancel().catch(() => {});
   }
-  if (!done) take(buffer.trim());
-  await reader.cancel().catch(() => {});
   if (!done && !finishReason) {
     throw new ProviderError(502, "The provider's answer was cut off");
   }

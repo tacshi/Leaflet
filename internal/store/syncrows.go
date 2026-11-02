@@ -41,8 +41,11 @@ func (s *Store) MoveSpace(from, to string) error {
 		_, err := tx.Exec(`DELETE FROM spaces WHERE id = ?`, from)
 		return err
 	})
+	if err != nil {
+		return err
+	}
 	s.Notify("*", "")
-	return err
+	return nil
 }
 
 // Requeue queues a page (with its content), folder or comment to go up

@@ -108,7 +108,7 @@ func (a *App) newRecordingPage() {
 	}
 	a.pages, _ = a.st.Pages()
 	a.openPage(p.ID)
-	a.startRecording(p.ID, "")
+	a.startRecording(p.ID)
 }
 
 // checkForUpdate looks for a newer version as the app starts and installs

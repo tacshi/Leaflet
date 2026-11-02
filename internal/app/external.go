@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -271,9 +272,9 @@ func agentSetup(client, exe, dir string) (where, snippet string) {
       "env": { "LEAFLET_DATA_DIR": ` + jsonString(dir) + ` }`
 	switch client {
 	case "claude":
-		return locales.ExternalRunInTerminal(), "claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=" + shellQuote(dir) + " -- " + shellQuote(exe) + " mcp"
+		return locales.ExternalRunInTerminal(), "claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=" + shellWord(dir) + " -- " + shellWord(exe) + " mcp"
 	case "opencode":
-		return locales.ExternalRunInTerminal(), "opencode mcp add --global leaflet --env LEAFLET_DATA_DIR=" + shellQuote(dir) + " -- " + shellQuote(exe) + " mcp"
+		return locales.ExternalRunInTerminal(), "opencode mcp add --global leaflet --env LEAFLET_DATA_DIR=" + shellWord(dir) + " -- " + shellWord(exe) + " mcp"
 	case "codex":
 		return locales.ExternalAddTo("~/.codex/config.toml"), `[mcp_servers.leaflet]
 command = ` + jsonString(exe) + `
@@ -313,6 +314,26 @@ func jsonString(s string) string {
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(s)
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// shellWord is s as one word of the shell a terminal here opens: a POSIX
+// shell, or on Windows PowerShell or cmd.exe.
+func shellWord(s string) string {
+	if runtime.GOOS == "windows" {
+		return windowsQuote(s)
+	}
+	return shellQuote(s)
+}
+
+// windowsQuote is s as one word of PowerShell and of cmd.exe, which keeps
+// single quotes as they are: in double quotes, which a Windows path never
+// has in it. No quoting keeps both shells from a $ or a % in it, which
+// paths on Windows hardly ever have.
+func windowsQuote(s string) string {
+	if s != "" && !strings.ContainsAny(s, " '\"$`&|<>()[]{}^;,=!%@#~+\t") {
+		return s
+	}
+	return `"` + s + `"`
 }
 
 // shellQuote is s as one word of a POSIX shell.

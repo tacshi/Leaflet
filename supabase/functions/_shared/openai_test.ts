@@ -33,3 +33,18 @@ Deno.test("a streamed answer cut off is no answer", async () => {
 Deno.test("an error in the stream fails the answer", async () => {
   await assertRejects(() => readStream(events(`{"error":{"message":"overloaded"}}`), () => {}), Error, "overloaded");
 });
+
+Deno.test("an error in the stream closes the connection", async () => {
+  let cancelled = false;
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(`data: {"error":{"message":"overloaded"}}\n\n`));
+      // The provider keeps the connection open after the error.
+    },
+    cancel() {
+      cancelled = true;
+    },
+  });
+  await assertRejects(() => readStream(new Response(body), () => {}), Error, "overloaded");
+  assertEquals(cancelled, true);
+});

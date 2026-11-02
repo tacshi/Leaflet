@@ -293,6 +293,54 @@ func (msgs Messages) AppErrorRestore(error string) string {
 	return Catalog.Format(msgs.locale, "appErrorRestore", map[string]any{"error": error})
 }
 
+// AppErrorInternal says "Something went wrong in Leaflet: {error}"
+// in the language the app shows.
+//
+// The iOS app: an error when something in Leaflet's core failed
+// unexpectedly, as a bug would.
+func AppErrorInternal(error string) string { return In(i18n.Locale()).AppErrorInternal(error) }
+
+// AppErrorInternal says "Something went wrong in Leaflet: {error}"
+// in the language of msgs.
+//
+// The iOS app: an error when something in Leaflet's core failed
+// unexpectedly, as a bug would.
+func (msgs Messages) AppErrorInternal(error string) string {
+	return Catalog.Format(msgs.locale, "appErrorInternal", map[string]any{"error": error})
+}
+
+// AppErrorNotSaved says "Leaflet couldn't save the page open here."
+// in the language the app shows.
+//
+// The iOS app: signing in or out, deleting, copying or exporting stopped as
+// an open page's edits could not be saved; a toast said why.
+func AppErrorNotSaved() string { return In(i18n.Locale()).AppErrorNotSaved() }
+
+// AppErrorNotSaved says "Leaflet couldn't save the page open here."
+// in the language of msgs.
+//
+// The iOS app: signing in or out, deleting, copying or exporting stopped as
+// an open page's edits could not be saved; a toast said why.
+func (msgs Messages) AppErrorNotSaved() string {
+	return Catalog.Format(msgs.locale, "appErrorNotSaved", nil)
+}
+
+// AppErrorReadOnly says "This page can't be changed."
+// in the language the app shows.
+//
+// The iOS app: an error when a version is restored or a template used on a
+// page the user may only read.
+func AppErrorReadOnly() string { return In(i18n.Locale()).AppErrorReadOnly() }
+
+// AppErrorReadOnly says "This page can't be changed."
+// in the language of msgs.
+//
+// The iOS app: an error when a version is restored or a template used on a
+// page the user may only read.
+func (msgs Messages) AppErrorReadOnly() string {
+	return Catalog.Format(msgs.locale, "appErrorReadOnly", nil)
+}
+
 // AppDeleted says "Deleted {title}"
 // in the language the app shows.
 //
@@ -1807,20 +1855,6 @@ func (msgs Messages) CommonOpen() string {
 	return Catalog.Format(msgs.locale, "commonOpen", nil)
 }
 
-// CommonAdd says "Add"
-// in the language the app shows.
-//
-// A common word used in several places of the app.
-func CommonAdd() string { return In(i18n.Locale()).CommonAdd() }
-
-// CommonAdd says "Add"
-// in the language of msgs.
-//
-// A common word used in several places of the app.
-func (msgs Messages) CommonAdd() string {
-	return Catalog.Format(msgs.locale, "commonAdd", nil)
-}
-
 // CommonComment says "Comment"
 // in the language the app shows.
 //
@@ -2739,6 +2773,22 @@ func (msgs Messages) DialogSearchTemplateEnter() string {
 	return Catalog.Format(msgs.locale, "dialogSearchTemplateEnter", nil)
 }
 
+// DialogSearchEscKey says "esc"
+// in the language the app shows.
+//
+// Search: the label of the key that closes it, at the end of the search
+// field, as the key is printed.
+func DialogSearchEscKey() string { return In(i18n.Locale()).DialogSearchEscKey() }
+
+// DialogSearchEscKey says "esc"
+// in the language of msgs.
+//
+// Search: the label of the key that closes it, at the end of the search
+// field, as the key is printed.
+func (msgs Messages) DialogSearchEscKey() string {
+	return Catalog.Format(msgs.locale, "dialogSearchEscKey", nil)
+}
+
 // DialogFolderNew says "New folder"
 // in the language the app shows.
 //
@@ -2809,6 +2859,22 @@ func DialogFolderRenameFailed(error string) string {
 // A toast when renaming a folder fails.
 func (msgs Messages) DialogFolderRenameFailed(error string) string {
 	return Catalog.Format(msgs.locale, "dialogFolderRenameFailed", map[string]any{"error": error})
+}
+
+// DialogFolderCreateFailed says "Could not create the folder: {error}"
+// in the language the app shows.
+//
+// A toast when creating a folder fails.
+func DialogFolderCreateFailed(error string) string {
+	return In(i18n.Locale()).DialogFolderCreateFailed(error)
+}
+
+// DialogFolderCreateFailed says "Could not create the folder: {error}"
+// in the language of msgs.
+//
+// A toast when creating a folder fails.
+func (msgs Messages) DialogFolderCreateFailed(error string) string {
+	return Catalog.Format(msgs.locale, "dialogFolderCreateFailed", map[string]any{"error": error})
 }
 
 // DialogFolderCreate says "Create"
@@ -4787,6 +4853,42 @@ func PageRedo() string { return In(i18n.Locale()).PageRedo() }
 // Button redoing an agent's undone edits (page bar and chat).
 func (msgs Messages) PageRedo() string {
 	return Catalog.Format(msgs.locale, "pageRedo", nil)
+}
+
+// PageUndoRunFailed says "Could not undo {agent}'s edits: {error}"
+// in the language the app shows.
+//
+// Toast when undoing an agent's edits failed (page bar and chat); the edits
+// stay.
+func PageUndoRunFailed(agent string, error string) string {
+	return In(i18n.Locale()).PageUndoRunFailed(agent, error)
+}
+
+// PageUndoRunFailed says "Could not undo {agent}'s edits: {error}"
+// in the language of msgs.
+//
+// Toast when undoing an agent's edits failed (page bar and chat); the edits
+// stay.
+func (msgs Messages) PageUndoRunFailed(agent string, error string) string {
+	return Catalog.Format(msgs.locale, "pageUndoRunFailed", map[string]any{"agent": agent, "error": error})
+}
+
+// PageRedoRunFailed says "Could not redo {agent}'s edits: {error}"
+// in the language the app shows.
+//
+// Toast when redoing an agent's undone edits failed (page bar and chat);
+// they stay undone.
+func PageRedoRunFailed(agent string, error string) string {
+	return In(i18n.Locale()).PageRedoRunFailed(agent, error)
+}
+
+// PageRedoRunFailed says "Could not redo {agent}'s edits: {error}"
+// in the language of msgs.
+//
+// Toast when redoing an agent's undone edits failed (page bar and chat);
+// they stay undone.
+func (msgs Messages) PageRedoRunFailed(agent string, error string) string {
+	return Catalog.Format(msgs.locale, "pageRedoRunFailed", map[string]any{"agent": agent, "error": error})
 }
 
 // PageDismiss says "Dismiss"
@@ -10167,6 +10269,72 @@ func (msgs Messages) SettingsChatGPTNote() string {
 	return Catalog.Format(msgs.locale, "settingsChatGPTNote", nil)
 }
 
+// SettingsChatGPTSignInFirst says "Sign in with ChatGPT first."
+// in the language the app shows.
+//
+// The iOS app's provider form for ChatGPT: saved or asked for its models
+// before signing in.
+func SettingsChatGPTSignInFirst() string { return In(i18n.Locale()).SettingsChatGPTSignInFirst() }
+
+// SettingsChatGPTSignInFirst says "Sign in with ChatGPT first."
+// in the language of msgs.
+//
+// The iOS app's provider form for ChatGPT: saved or asked for its models
+// before signing in.
+func (msgs Messages) SettingsChatGPTSignInFirst() string {
+	return Catalog.Format(msgs.locale, "settingsChatGPTSignInFirst", nil)
+}
+
+// SettingsChatGPTSignInFailed says "ChatGPT sign-in failed"
+// in the language the app shows.
+//
+// The iOS app's provider form for ChatGPT: signing in ended without an
+// account or a reason.
+func SettingsChatGPTSignInFailed() string { return In(i18n.Locale()).SettingsChatGPTSignInFailed() }
+
+// SettingsChatGPTSignInFailed says "ChatGPT sign-in failed"
+// in the language of msgs.
+//
+// The iOS app's provider form for ChatGPT: signing in ended without an
+// account or a reason.
+func (msgs Messages) SettingsChatGPTSignInFailed() string {
+	return Catalog.Format(msgs.locale, "settingsChatGPTSignInFailed", nil)
+}
+
+// SettingsChatGPTSignInAgain says "Sign in with ChatGPT again."
+// in the language the app shows.
+//
+// The iOS app's provider form for ChatGPT: finishing a sign-in that was
+// never begun, or was forgotten.
+func SettingsChatGPTSignInAgain() string { return In(i18n.Locale()).SettingsChatGPTSignInAgain() }
+
+// SettingsChatGPTSignInAgain says "Sign in with ChatGPT again."
+// in the language of msgs.
+//
+// The iOS app's provider form for ChatGPT: finishing a sign-in that was
+// never begun, or was forgotten.
+func (msgs Messages) SettingsChatGPTSignInAgain() string {
+	return Catalog.Format(msgs.locale, "settingsChatGPTSignInAgain", nil)
+}
+
+// SettingsChatGPTSignInCancelled says "Sign-in was cancelled."
+// in the language the app shows.
+//
+// The iOS app's provider form for ChatGPT: the sign-in was given up before
+// it finished.
+func SettingsChatGPTSignInCancelled() string {
+	return In(i18n.Locale()).SettingsChatGPTSignInCancelled()
+}
+
+// SettingsChatGPTSignInCancelled says "Sign-in was cancelled."
+// in the language of msgs.
+//
+// The iOS app's provider form for ChatGPT: the sign-in was given up before
+// it finished.
+func (msgs Messages) SettingsChatGPTSignInCancelled() string {
+	return Catalog.Format(msgs.locale, "settingsChatGPTSignInCancelled", nil)
+}
+
 // SettingsModelID says "Model ID"
 // in the language the app shows.
 //
@@ -11513,6 +11681,44 @@ func ExternalByHand() string { return In(i18n.Locale()).ExternalByHand() }
 // an AI app's settings.
 func (msgs Messages) ExternalByHand() string {
 	return Catalog.Format(msgs.locale, "externalByHand", nil)
+}
+
+// ExternalClaudeNotFound says "claude command not found"
+// in the language the app shows.
+//
+// Settings › External agents: why Claude Code could not be connected, its
+// command-line tool not found on this computer. Shown inside the
+// externalConnectFailed toast; `claude` is the command's name, not
+// translated.
+func ExternalClaudeNotFound() string { return In(i18n.Locale()).ExternalClaudeNotFound() }
+
+// ExternalClaudeNotFound says "claude command not found"
+// in the language of msgs.
+//
+// Settings › External agents: why Claude Code could not be connected, its
+// command-line tool not found on this computer. Shown inside the
+// externalConnectFailed toast; `claude` is the command's name, not
+// translated.
+func (msgs Messages) ExternalClaudeNotFound() string {
+	return Catalog.Format(msgs.locale, "externalClaudeNotFound", nil)
+}
+
+// ExternalCouldNotChangeSafely says "could not change it safely"
+// in the language the app shows.
+//
+// Settings › External agents: why an AI app's settings file was left as
+// it was, after its path and a colon, inside the externalConnectFailed
+// toast. Lowercase, as part of a sentence.
+func ExternalCouldNotChangeSafely() string { return In(i18n.Locale()).ExternalCouldNotChangeSafely() }
+
+// ExternalCouldNotChangeSafely says "could not change it safely"
+// in the language of msgs.
+//
+// Settings › External agents: why an AI app's settings file was left as
+// it was, after its path and a colon, inside the externalConnectFailed
+// toast. Lowercase, as part of a sentence.
+func (msgs Messages) ExternalCouldNotChangeSafely() string {
+	return Catalog.Format(msgs.locale, "externalCouldNotChangeSafely", nil)
 }
 
 // ExternalConnectFailed says "Could not connect {app}: {error}"

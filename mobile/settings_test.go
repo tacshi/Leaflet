@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/live"
+	"leaflet/internal/store"
 )
 
 // Settings › Account, Sync and storage, the Tags tab and the byline, as
@@ -182,6 +184,13 @@ func TestResolveConflicts(t *testing.T) {
 	if len(list) != 1 || list[0].Deleted != "there" || list[0].Kept != "Edited there" {
 		t.Fatalf("conflicts %+v", list)
 	}
+	// A way it doesn't know deletes nothing.
+	if err := c.ResolveConflict(list[0].ID, "this-device"); err == nil {
+		t.Fatal("resolved a conflict a way it doesn't know")
+	}
+	if got := texts(content(t, c, p.ID)); !strings.Contains(got, "Edited there") || len(conflicts(t, c)) != 1 {
+		t.Fatalf("resolved a way it doesn't know: %q", got)
+	}
 	if err := c.ResolveConflict(list[0].ID, resolveDelete); err != nil {
 		t.Fatal(err)
 	}
@@ -217,5 +226,78 @@ func TestPageSavingAndMembers(t *testing.T) {
 	}
 	if raw, err := c.Members(p.ID); err != nil || raw != "[]" {
 		t.Errorf("members %s, %v", raw, err)
+	}
+}
+
+// A save the timer doesn't run, as naming a version runs one, still says
+// the page is no longer saving.
+func TestEverySaveTellsTheByline(t *testing.T) {
+	c, ev := open(t)
+	p := create(t, c, `{"title":"Notes"}`)
+	raw, err := c.OpenPage(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pg openedPage
+	_ = json.Unmarshal([]byte(raw), &pg)
+	pg.Content.Children = []*doc.Node{paragraph("p", "Hello")}
+	if err := c.EditPage(p.ID, pg.Editor, pg.Content.Encode(), pg.Rev); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.NameVersion(p.ID, "Draft"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []bool{true, false} {
+		select {
+		case got := <-ev.saving:
+			if got != want {
+				t.Fatalf("saving %v, want %v", got, want)
+			}
+		case <-time.After(live.SaveDelay / 2):
+			t.Fatalf("no PageSaving(%v) before the timer's save", want)
+		}
+	}
+}
+
+// A page shared with the user turns read-only while open as they are made
+// a viewer of it, and back as they are made an editor, as on the desktop.
+func TestSharingChangesReadOnly(t *testing.T) {
+	c, ev := open(t)
+	const id = "00000000-0000-0000-0000-0000000000bb"
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	st := c.core.Store
+	user := st.Session().UserID
+	if err := st.PutRemotePage(map[string]any{"id": id, "space_id": "00000000-0000-0000-0000-0000000000cc", "title": "Theirs",
+		"sort_key": "V", "created_at": at, "updated_at": at}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMembers(id, []store.Member{{PageID: id, UserID: user, Role: "editor", Accepted: true}}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.OpenPage(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pg openedPage
+	_ = json.Unmarshal([]byte(raw), &pg)
+	if pg.ReadOnly {
+		t.Fatal("an editor's page opened read-only")
+	}
+	// Opening says so too.
+	if got := <-ev.readOnly; got {
+		t.Fatal("an editor's page opened read-only")
+	}
+	for _, role := range []string{"viewer", "editor"} {
+		if err := st.SetMembers(id, []store.Member{{PageID: id, UserID: user, Role: role, Accepted: true}}); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case got := <-ev.readOnly:
+			if got != (role == "viewer") {
+				t.Fatalf("as %s, read-only %v", role, got)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no PageReadOnly as %s", role)
+		}
 	}
 }

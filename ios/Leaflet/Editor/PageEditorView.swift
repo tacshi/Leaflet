@@ -124,6 +124,7 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
     static func dismantleUIView(_ view: EditorTextView, coordinator: Coordinator) {
         // What was typed in the last moment goes before the page closes.
         if coordinator.controller.hasPendingEdit { coordinator.controller.send() }
+        coordinator.controller.close()
     }
 
     @MainActor

@@ -141,10 +141,17 @@ enum Transcription {
     private static func standardInput() -> AsyncStream<Data> {
         let (stream, input) = AsyncStream.makeStream(of: Data.self)
         Thread.detachNewThread {
+            // A read may end inside a sample, as a pipe splits what is
+            // written where it likes: its odd byte waits for the next
+            // read, so that every later sample keeps its two bytes.
+            var carry = Data()
             while true {
                 let data = FileHandle.standardInput.availableData
                 if data.isEmpty { break }
-                input.yield(data)
+                var pcm = carry + data
+                carry = pcm.count % 2 == 1 ? Data(pcm.suffix(1)) : Data()
+                pcm.removeLast(carry.count)
+                if !pcm.isEmpty { input.yield(pcm) }
             }
             input.finish()
         }

@@ -626,3 +626,40 @@ Deno.test("write_markdown writes in place of an empty block, a block a line", as
   const space = await other.call("write_markdown", { position: { replace: "s1" }, markdown: "x" });
   assert((space.result as { error?: string }).error?.includes("empty block"));
 });
+
+Deno.test("a write_markdown in place of a block that fails part way changes nothing", async () => {
+  const content = sample();
+  content.document.children!.splice(3, 0, para("e1", ""));
+  const failing: [string, string][] = [
+    // The heading takes e1's place before the table is refused.
+    [
+      "a table too large",
+      "# Title\n| a |\n| - |\n" + Array.from({ length: 400 }, (_, i) => `| ${i} |`).join("\n"),
+    ],
+    ["too many lines", Array.from({ length: 202 }, (_, i) => `Line ${i}`).join("\n\n")],
+  ];
+  for (const [what, markdown] of failing) {
+    const session = new PageEditSession(content, hooks, { canEdit: true, crossPage: false });
+    const out = await session.call("write_markdown", { position: { replace: "e1" }, markdown });
+    assert((out.result as { error?: string }).error, `${what} should fail`);
+    assertEquals(out.ops, []);
+    assertEquals(session.ops, [], what);
+    assertEquals(session.changed, false, what);
+    assertEquals(session.content, content, what);
+  }
+
+  // A URL refused once the run has read beyond this page.
+  const session = new PageEditSession(content, hooks, { canEdit: true, crossPage: true });
+  await session.call("list_pages", {});
+  const out = await session.call("write_markdown", {
+    position: { replace: "e1" },
+    markdown: "# Title\n\n![x](https://example.com/x.png?notes=secret)",
+  });
+  assert((out.result as { error?: string }).error?.includes("URL"), JSON.stringify(out.result));
+  assertEquals(session.ops, []);
+  assertEquals(session.content, content);
+  // And the next call still works on the page as it was.
+  const ok = await session.call("write_markdown", { position: { replace: "e1" }, markdown: "Done." });
+  assertEquals((ok.result as { inserted_ids: string[] }).inserted_ids, ["e1"]);
+  assertEquals(session.ops.map((o) => o.op), ["replace"]);
+});

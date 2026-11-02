@@ -56,9 +56,9 @@ type library struct {
 }
 
 // Library returns the library, as a library in JSON.
-func (c *Core) Library() (string, error) {
+func (c *Core) Library() (_ string, err error) {
+	defer catch(&err)
 	var lib library
-	var err error
 	c.q.do(func() {
 		st := c.core.Store
 		lib.SpaceID = st.Session().SpaceID
@@ -136,13 +136,13 @@ type newPage struct {
 
 // CreatePage creates a page from page, a newPage as JSON, and returns it as a
 // pageRow.
-func (c *Core) CreatePage(page string) (string, error) {
+func (c *Core) CreatePage(page string) (_ string, err error) {
+	defer catch(&err)
 	var n newPage
 	if err := json.Unmarshal([]byte(page), &n); err != nil {
 		return "", err
 	}
 	var row pageRow
-	var err error
 	start := ""
 	c.q.do(func() {
 		var p store.Page
@@ -178,8 +178,8 @@ func (c *Core) CreatePage(page string) (string, error) {
 }
 
 // RenamePage renames a page.
-func (c *Core) RenamePage(id, title string) error {
-	var err error
+func (c *Core) RenamePage(id, title string) (err error) {
+	defer catch(&err)
 	c.q.do(func() { err = c.core.Store.RenamePage(id, title) })
 	return err
 }
@@ -188,8 +188,8 @@ func (c *Core) RenamePage(id, title string) error {
 // level, with neither), after afterID among its siblings, or first with
 // "". As on the desktop, a parent it leaves loses its card, and one it
 // goes into gets one at its end.
-func (c *Core) MovePage(id, parentID, folderID, afterID string) error {
-	var err error
+func (c *Core) MovePage(id, parentID, folderID, afterID string) (err error) {
+	defer catch(&err)
 	c.q.do(func() {
 		old := ""
 		if p, perr := c.core.Store.Page(id); perr == nil {
@@ -217,14 +217,13 @@ func (c *Core) MovePage(id, parentID, folderID, afterID string) error {
 // the card going back where it was. The edits of those open, in any
 // window, are saved first, for Undo to bring them back with them; a page
 // one of whose edits can't be saved is not deleted.
-func (c *Core) DeletePage(id string) (string, error) {
+func (c *Core) DeletePage(id string) (_ string, err error) {
+	defer catch(&err)
 	var ids []string
-	var err error
 	c.q.do(func() {
 		for pid, p := range c.pages {
 			if c.within(pid, id) && !p.live.Save() {
-				p.tellSaving()
-				err = errNotSaved
+				err = errNotSaved()
 				return
 			}
 		}
@@ -268,12 +267,12 @@ func (c *Core) within(id, root string) bool {
 
 // RestorePages brings back pages DeletePage deleted, given ids as it
 // returned them.
-func (c *Core) RestorePages(ids string) error {
+func (c *Core) RestorePages(ids string) (err error) {
+	defer catch(&err)
 	var list []string
 	if err := json.Unmarshal([]byte(ids), &list); err != nil {
 		return err
 	}
-	var err error
 	c.q.do(func() {
 		if err = c.core.Store.RestorePages(list); err == nil {
 			c.relinkRestored(list)
@@ -283,12 +282,12 @@ func (c *Core) RestorePages(ids string) error {
 }
 
 // SetPageTags sets a page's tags, given as a JSON array.
-func (c *Core) SetPageTags(id, tags string) error {
+func (c *Core) SetPageTags(id, tags string) (err error) {
+	defer catch(&err)
 	var list []string
 	if err := json.Unmarshal([]byte(tags), &list); err != nil {
 		return err
 	}
-	var err error
 	c.q.do(func() { err = c.core.Store.SetPageTags(id, list) })
 	return err
 }
@@ -297,12 +296,12 @@ func (c *Core) SetPageTags(id, tags string) error {
 // too, merging it into a tag of the new name a page has already, as the
 // desktop's Tags tab does. It returns the name as kept, "#" and extra
 // spaces gone; a name of nothing changes nothing and returns "".
-func (c *Core) RenameTag(old, name string) (string, error) {
+func (c *Core) RenameTag(old, name string) (_ string, err error) {
+	defer catch(&err)
 	tags := store.NormalizeTags([]string{name})
 	if len(tags) == 0 {
 		return "", nil
 	}
-	var err error
 	c.q.do(func() { _, err = c.core.Store.RenameTag(old, tags[0]) })
 	if err != nil {
 		return "", err
@@ -313,9 +312,9 @@ func (c *Core) RenameTag(old, name string) (string, error) {
 // DeleteTag takes a tag off every page the user may change, templates
 // too, and returns what RestoreTags takes to put each page's tags back as
 // they were, for Undo.
-func (c *Core) DeleteTag(tag string) (string, error) {
+func (c *Core) DeleteTag(tag string) (_ string, err error) {
+	defer catch(&err)
 	var before map[string][]string
-	var err error
 	c.q.do(func() { before, err = c.core.Store.DeleteTag(tag) })
 	if err != nil {
 		return "", err
@@ -324,12 +323,12 @@ func (c *Core) DeleteTag(tag string) (string, error) {
 }
 
 // RestoreTags puts back the pages' tags as DeleteTag returned them.
-func (c *Core) RestoreTags(before string) error {
+func (c *Core) RestoreTags(before string) (err error) {
+	defer catch(&err)
 	var tags map[string][]string
 	if err := json.Unmarshal([]byte(before), &tags); err != nil {
 		return err
 	}
-	var err error
 	c.q.do(func() {
 		for id, list := range tags {
 			if err = c.core.Store.SetPageTags(id, list); err != nil {
@@ -342,16 +341,16 @@ func (c *Core) RestoreTags(before string) error {
 
 // SetKeepOffline keeps a page's content on this device, or lets it go
 // until the page is opened.
-func (c *Core) SetKeepOffline(id string, keep bool) error {
-	var err error
+func (c *Core) SetKeepOffline(id string, keep bool) (err error) {
+	defer catch(&err)
 	c.q.do(func() { err = c.core.Store.SetKeepOffline(id, keep) })
 	return err
 }
 
 // CreateFolder creates a folder, returning it as a folderRow.
-func (c *Core) CreateFolder(name string) (string, error) {
+func (c *Core) CreateFolder(name string) (_ string, err error) {
+	defer catch(&err)
 	var f store.Folder
-	var err error
 	c.q.do(func() { f, err = c.core.Store.CreateFolder(name) })
 	if err != nil {
 		return "", err
@@ -360,8 +359,8 @@ func (c *Core) CreateFolder(name string) (string, error) {
 }
 
 // RenameFolder renames a folder.
-func (c *Core) RenameFolder(id, name string) error {
-	var err error
+func (c *Core) RenameFolder(id, name string) (err error) {
+	defer catch(&err)
 	c.q.do(func() {
 		var f store.Folder
 		if f, err = c.core.Store.Folder(id); err == nil {
@@ -372,8 +371,8 @@ func (c *Core) RenameFolder(id, name string) error {
 }
 
 // DeleteFolder deletes a folder.
-func (c *Core) DeleteFolder(id string) error {
-	var err error
+func (c *Core) DeleteFolder(id string) (err error) {
+	defer catch(&err)
 	c.q.do(func() {
 		var f store.Folder
 		if f, err = c.core.Store.Folder(id); err == nil {
@@ -394,9 +393,9 @@ type searchHit struct {
 
 // Search searches titles, text, transcripts and comments, returning up to
 // limit hits as a JSON array of searchHit. #tag words keep to those tags.
-func (c *Core) Search(query string, limit int) (string, error) {
+func (c *Core) Search(query string, limit int) (_ string, err error) {
+	defer catch(&err)
 	var hits []store.SearchHit
-	var err error
 	c.q.do(func() { hits, err = c.core.Store.Search(query, limit) })
 	if err != nil {
 		return "", err
@@ -423,9 +422,9 @@ type todo struct {
 
 // Todos returns the open to-dos with a due date or an owner, as a JSON
 // array of todo.
-func (c *Core) Todos() (string, error) {
+func (c *Core) Todos() (_ string, err error) {
+	defer catch(&err)
 	var todos []store.PageTodo
-	var err error
 	c.q.do(func() { todos, err = c.core.Store.Todos() })
 	if err != nil {
 		return "", err
@@ -438,15 +437,16 @@ func (c *Core) Todos() (string, error) {
 }
 
 // Settings returns the settings on this device as JSON.
-func (c *Core) Settings() (string, error) {
+func (c *Core) Settings() (_ string, err error) {
+	defer catch(&err)
 	var s store.Settings
 	c.q.do(func() { s = c.core.Store.Settings() })
 	return encode(s)
 }
 
 // SaveSettings keeps settings, as Settings returns them.
-func (c *Core) SaveSettings(settings string) error {
-	var err error
+func (c *Core) SaveSettings(settings string) (err error) {
+	defer catch(&err)
 	c.q.do(func() {
 		s := c.core.Store.Settings()
 		if err = json.Unmarshal([]byte(settings), &s); err == nil {

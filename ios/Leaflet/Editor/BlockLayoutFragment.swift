@@ -117,16 +117,40 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
         return out
     }
 
+    /// trailingLine is the empty line the trailing block is laid out on,
+    /// after the paragraph's own.
+    private var trailingLine: NSTextLineFragment? {
+        guard trailing != nil, textLineFragments.count > 1, let line = textLineFragments.last,
+            line.characterRange.length == 0
+        else { return nil }
+        return line
+    }
+
+    /// trailingBaseline is where the trailing block's line stands.
+    var trailingBaseline: CGFloat? {
+        trailingLine.map { $0.typographicBounds.minY + $0.glyphOrigin.y }
+    }
+
     override func draw(at point: CGPoint, in context: CGContext) {
-        if let info, let palette { drawDecoration(info, palette, at: point, in: context) }
-        if let trailing, let palette, textLineFragments.count > 1,
-            let line = textLineFragments.last, line.characterRange.length == 0,
-            BlockInfo.nestable.contains(trailing.info.type)
-        {
-            let base = line.typographicBounds.minY + line.glyphOrigin.y
-            drawDecoration(
-                trailing.info, palette, at: point, in: context,
-                line: (base, trailing.font, trailing.ordinal))
+        let left = layoutFragmentFrame.minX
+        if let info, let palette {
+            let lines = ownLines
+            let font = attributes[.font] as? UIFont ?? .preferredFont(forTextStyle: .body)
+            Self.drawDecoration(
+                info, palette, in: context, at: point, left: left, width: columnWidth,
+                line: Line(
+                    baseline: baseline, font: font,
+                    ordinal: attributes[.leafletOrdinal] as? Int ?? 1,
+                    top: lines.first?.typographicBounds.minY ?? 0,
+                    bottom: lines.last?.typographicBounds.maxY ?? layoutFragmentFrame.height))
+        }
+        if let trailing, let palette, let line = trailingLine {
+            Self.drawDecoration(
+                trailing.info, palette, in: context, at: point, left: left, width: columnWidth,
+                line: Line(
+                    baseline: line.typographicBounds.minY + line.glyphOrigin.y, font: trailing.font,
+                    ordinal: trailing.ordinal, top: line.typographicBounds.minY,
+                    bottom: line.typographicBounds.maxY))
         }
         super.draw(at: point, in: context)
         if let palette {
@@ -142,14 +166,23 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
     /// markerRect is where a block's marker goes: in the room before its
     /// text, centered on its first line, or on the line at baseline.
     func markerRect(_ info: BlockInfo, baseline: CGFloat? = nil, font: UIFont? = nil) -> CGRect {
-        let lead = EditorStyle.leading(info) - layoutFragmentFrame.minX
+        Self.markerRect(
+            info, left: layoutFragmentFrame.minX, baseline: baseline ?? self.baseline,
+            font: font ?? attributes[.font] as? UIFont ?? .preferredFont(forTextStyle: .body))
+    }
+
+    /// markerRect is where a block's marker goes in a fragment whose left
+    /// edge is at left in the text column.
+    static func markerRect(_ info: BlockInfo, left: CGFloat, baseline: CGFloat, font: UIFont)
+        -> CGRect
+    {
+        let lead = EditorStyle.leading(info) - left
         // A heading's fold arrow stands in the page's margin, which is
         // narrower than a list's room for its marker.
         let side = info.type == "heading" ? 20 : EditorStyle.marker
         // Centered on the first line's capitals, as the text's own marks
         // would be, whatever room the line spacing adds above them.
-        let font = font ?? attributes[.font] as? UIFont ?? .preferredFont(forTextStyle: .body)
-        let midY = (baseline ?? self.baseline) - font.capHeight / 2
+        let midY = baseline - font.capHeight / 2
         return CGRect(x: lead - side, y: midY - side / 2, width: side, height: side)
     }
 
@@ -170,9 +203,17 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
         )
     }
 
+    /// ownLines are the paragraph's own lines, without the trailing
+    /// block's.
+    private var ownLines: [NSTextLineFragment] {
+        var lines = textLineFragments
+        if trailingLine != nil { lines.removeLast() }
+        return lines
+    }
+
     /// codeCard is a code block's card, in the fragment's coordinates.
     var codeCard: CGRect {
-        let lines = textLineFragments
+        let lines = ownLines
         let top = lines.first?.typographicBounds.minY ?? 0
         let bottom = lines.last?.typographicBounds.maxY ?? layoutFragmentFrame.height
         let depthX = CGFloat(info?.depth ?? 0) * EditorStyle.indent - layoutFragmentFrame.minX
@@ -183,20 +224,30 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
             height: bottom - top + pad * 2 + Self.codeBar)
     }
 
-    /// drawDecoration draws a block's marker or card; line is a trailing
-    /// block's: its baseline in the fragment, its font and its number.
-    private func drawDecoration(
-        _ info: BlockInfo, _ palette: Palette, at point: CGPoint, in ctx: CGContext,
-        line: (baseline: CGFloat, font: UIFont, ordinal: Int)? = nil
+    /// Line is where a block's text stands in a fragment: its first line's
+    /// baseline, its font, the number a numbered item shows, and the top
+    /// and bottom of its lines, which a quote's bar and a card go beside.
+    struct Line {
+        let baseline: CGFloat
+        let font: UIFont
+        let ordinal: Int
+        let top: CGFloat
+        let bottom: CGFloat
+    }
+
+    /// drawDecoration draws a block's marker or card, for a fragment drawn
+    /// at point whose left edge is at left in a text column width wide: a
+    /// paragraph's, or the empty page's (EditorTextView), which has none.
+    static func drawDecoration(
+        _ info: BlockInfo, _ palette: Palette, in ctx: CGContext, at point: CGPoint,
+        left: CGFloat, width columnWidth: CGFloat, line: Line
     ) {
-        let frame = CGRect(origin: point, size: layoutFragmentFrame.size)
-        let depthX = point.x + CGFloat(info.depth) * EditorStyle.indent - layoutFragmentFrame.minX
-        var marker = markerRect(info, baseline: line?.baseline, font: line?.font)
+        let depthX = point.x + CGFloat(info.depth) * EditorStyle.indent - left
+        var marker = markerRect(info, left: left, baseline: line.baseline, font: line.font)
         marker.origin.x += point.x
         marker.origin.y += point.y
-        let font =
-            line?.font ?? (attributes[.font] as? UIFont) ?? .preferredFont(forTextStyle: .body)
-        let baseline = line?.baseline ?? self.baseline
+        let font = line.font
+        let baseline = line.baseline
         UIGraphicsPushContext(ctx)
         defer { UIGraphicsPopContext() }
 
@@ -216,7 +267,7 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
             default: UIBezierPath(rect: dot.insetBy(dx: 0.4, dy: 0.4)).fill()
             }
         case "numbered_list":
-            let n = line?.ordinal ?? attributes[.leafletOrdinal] as? Int ?? 1
+            let n = line.ordinal
             let label = NSAttributedString(
                 string: "\(n).",
                 attributes: [
@@ -269,9 +320,7 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
         case "quote":
             // Beside the text's lines, in the accent's soft border, as the
             // desktop's.
-            let lines = textLineFragments
-            let top = lines.first?.typographicBounds.minY ?? 0
-            let bottom = lines.last?.typographicBounds.maxY ?? frame.height
+            let (top, bottom) = (line.top, line.bottom)
             UIColor(palette.accentSoftBorder).setFill()
             UIBezierPath(
                 roundedRect: CGRect(
@@ -283,10 +332,8 @@ final class BlockLayoutFragment: NSTextLayoutFragment {
             // Across the column, and around the text's own lines rather
             // than the paragraph's spacing, which keeps it apart from the
             // next block.
-            let lines = textLineFragments
-            let top = lines.first?.typographicBounds.minY ?? 0
-            let bottom = lines.last?.typographicBounds.maxY ?? frame.height
-            let right = point.x - layoutFragmentFrame.minX + columnWidth
+            let (top, bottom) = (line.top, line.bottom)
+            let right = point.x - left + columnWidth
             let pad = Self.cardPadding
             let bar = info.type == "code" ? Self.codeBar : 0
             let card = CGRect(

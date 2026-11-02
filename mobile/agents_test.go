@@ -5,9 +5,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/doc"
+	"leaflet/locales"
 )
 
 func TestTestProvider(t *testing.T) {
@@ -115,10 +118,11 @@ func TestChatGPTPresetAndSave(t *testing.T) {
 	if !slices.ContainsFunc(presets, func(p presetJSON) bool { return p.ID == "chatgpt" && p.Auth == "account" }) {
 		t.Fatalf("no ChatGPT preset: %+v", presets)
 	}
-	// Nothing to save before signing in.
+	// Nothing to save before signing in; the address is the preset's, so
+	// the form needs none.
 	in, _ := json.Marshal(providerJSON{Preset: "chatgpt", Name: "ChatGPT", DefaultModel: "gpt-6-astra"})
-	if err := c.SaveProvider(string(in)); err == nil {
-		t.Fatal("saved ChatGPT without a sign-in")
+	if err := c.SaveProvider(string(in)); err == nil || err.Error() != locales.SettingsChatGPTSignInFirst() {
+		t.Fatalf("saved ChatGPT without a sign-in: %v", err)
 	}
 	if _, err := c.FinishChatGPTSignIn(); err == nil {
 		t.Fatal("finished a sign-in never begun")
@@ -166,4 +170,30 @@ func TestSelectAgentPicksTheChatsAgent(t *testing.T) {
 	if s := state(); s.Current == nil || s.Current.ProviderID != other.ProviderID || s.Current.Model != other.Model {
 		t.Fatalf("after picking: %+v", s.Current)
 	}
+}
+
+// An agent run whose edits can't be taken back, as on content that can't
+// be read, says why to the app, and stays as it was.
+func TestUndoRunThatFailsSaysWhy(t *testing.T) {
+	c, _ := open(t)
+	row := create(t, c, `{"title":"Plan"}`)
+	if _, err := c.core.Store.DB().Exec(`UPDATE page_contents SET content = '{"children": [' WHERE page_id = ?`, row.ID); err != nil {
+		t.Fatal(err)
+	}
+	var run *agents.Run
+	c.q.do(func() {
+		run = &agents.Run{ID: "r1", AgentName: "Claude", Status: "done",
+			Ops: []doc.Op{doc.InsertOp(doc.Position{At: "end"}, paragraph("x1", "one"))}}
+		s := c.core.Hub.Session(row.ID)
+		s.Runs = append(s.Runs, run)
+	})
+	err := c.UndoRun(row.ID, "r1")
+	if err == nil || !strings.HasPrefix(err.Error(), "Could not undo Claude's edits: ") {
+		t.Fatalf("undo failed with %v", err)
+	}
+	c.q.do(func() {
+		if run.Undone {
+			t.Error("the run counts as undone")
+		}
+	})
 }

@@ -34,7 +34,8 @@ type supabaseSignIn struct {
 // BeginSupabaseSignIn begins signing in with Supabase, returning a
 // supabaseSignIn as JSON. The redirect is the Worker's /auth/supabase,
 // which the app's web session takes as its https callback.
-func BeginSupabaseSignIn() (string, error) {
+func BeginSupabaseSignIn() (_ string, err error) {
+	defer catch(&err)
 	u, state, verifier := supabaseapi.BeginSignIn()
 	return encode(supabaseSignIn{URL: u, State: state, Verifier: verifier})
 }
@@ -44,8 +45,9 @@ func BeginSupabaseSignIn() (string, error) {
 const signInTimeout = 10 * time.Minute
 
 // errNotSaved stops signing in or out while an open page's edits could
-// not be saved; the save said why.
-var errNotSaved = errors.New("Leaflet couldn't save the page open here.") //nolint:staticcheck // shown to people as a sentence.
+// not be saved; the save said why. It is made as it is returned, to be in
+// the language the app shows then.
+func errNotSaved() error { return errors.New(locales.AppErrorNotSaved()) }
 
 // signedIn is how a sign-in ended, as FinishSupabaseSignIn returns it.
 type signedIn struct {
@@ -62,7 +64,8 @@ type signedIn struct {
 // version of Leaflet and signs in to it as its owner, returning a
 // signedIn as JSON. An account with no Leaflet project fails: the phone
 // signs in to the one the desktop set up.
-func (c *Core) FinishSupabaseSignIn(callbackURL, state, verifier string) (string, error) {
+func (c *Core) FinishSupabaseSignIn(callbackURL, state, verifier string) (_ string, err error) {
+	defer catch(&err)
 	answer, err := url.Parse(callbackURL)
 	if err != nil {
 		return "", err
@@ -76,16 +79,11 @@ func (c *Core) FinishSupabaseSignIn(callbackURL, state, verifier string) (string
 		return "", err
 	}
 	core.KeepManagement(api)
-	found, err := provision.Find(ctx, api)
+	project, err := leafletProject(ctx, api)
 	if err != nil {
 		return "", err
 	}
-	// The oldest, when there are more: the desktop asks which, and the
-	// phone signs in to what it set up.
-	if len(found.Projects) == 0 {
-		return "", errors.New(locales.SigninNoProject())
-	}
-	pending, err := c.core.ConnectProject(ctx, api, found.Projects[0], nil)
+	pending, err := c.core.ConnectProject(ctx, api, project, nil)
 	if err != nil {
 		return "", err
 	}
@@ -104,14 +102,47 @@ func (c *Core) FinishSupabaseSignIn(callbackURL, state, verifier string) (string
 	return encode(out)
 }
 
+// leafletProject finds the Leaflet project the desktop set up in the
+// account, to sign in to: the oldest, when there are more, as the desktop
+// asks which. One that is paused, as Supabase pauses a free project left
+// unused, or still starting, can't say what it holds until it is up, so
+// it is woken first, the oldest first; one that turns out not to be set
+// up for Leaflet is left as it is, since the phone never sets one up.
+func leafletProject(ctx context.Context, api *supabaseapi.Client) (supabaseapi.Project, error) {
+	found, err := provision.Find(ctx, api)
+	if err != nil {
+		return supabaseapi.Project{}, err
+	}
+	if len(found.Projects) > 0 {
+		return found.Projects[0], nil
+	}
+	for _, p := range found.Unfinished {
+		if p.Healthy() {
+			// Up, with no migrations of Leaflet's: not set up by the desktop.
+			continue
+		}
+		if p, err = provision.Ready(ctx, api, p); err != nil {
+			return supabaseapi.Project{}, err
+		}
+		applied, err := api.Migrations(ctx, p.Ref)
+		if err != nil {
+			return supabaseapi.Project{}, err
+		}
+		if provision.IsLeaflet(applied) {
+			return p, nil
+		}
+	}
+	return supabaseapi.Project{}, errors.New(locales.SigninNoProject())
+}
+
 // signedIn sets the session up after signing in as user and starts
 // syncing, on the queue. As someone else than the account whose pages this
 // device keeps, whose changes not uploaded yet would go, it returns how
 // many, to ask first; an open page that could not be saved stops it.
 func (c *Core) signedIn(user *store.User) (lost int, err error) {
 	if !c.saveOpen() && c.core.ReplacesAccount(user) {
-		go c.core.Remote.SignOut()
-		return 0, errNotSaved
+		spawn(c.core.Remote.SignOut)
+		return 0, errNotSaved()
 	}
 	if n := c.core.LostBySigningIn(user); n > 0 {
 		return n, nil
@@ -126,8 +157,8 @@ func (c *Core) signedIn(user *store.User) (lost int, err error) {
 func (c *Core) useAccount(user *store.User, drop bool) (lost int, err error) {
 	replaces := c.core.ReplacesAccount(user)
 	if replaces && !c.saveOpen() {
-		go c.core.Remote.SignOut()
-		return 0, errNotSaved
+		spawn(c.core.Remote.SignOut)
+		return 0, errNotSaved()
 	}
 	if err := c.core.UseAccount(user, drop); err != nil {
 		if errors.Is(err, store.ErrUnsynced) {
@@ -145,15 +176,15 @@ func (c *Core) useAccount(user *store.User, drop bool) (lost int, err error) {
 // ConfirmSignIn answers a sign-in that waits, as FinishSupabaseSignIn
 // left it: anyway signs in, removing the changes it counted; otherwise the
 // new account signs out again. With no sign-in waiting it does nothing.
-func (c *Core) ConfirmSignIn(anyway bool) error {
-	var err error
+func (c *Core) ConfirmSignIn(anyway bool) (err error) {
+	defer catch(&err)
 	c.q.do(func() {
 		user := c.core.Remote.User()
 		if user == nil || c.core.Store.Session().UserID == user.ID {
 			return
 		}
 		if !anyway {
-			go c.core.Remote.SignOut()
+			spawn(c.core.Remote.SignOut)
 			return
 		}
 		var lost int
@@ -168,8 +199,10 @@ func (c *Core) ConfirmSignIn(anyway bool) error {
 // account's pages from this device. When some could not go up it does
 // neither and returns how many, to ask; anyway signs out all the same,
 // removing them. An open page that could not be saved stops it, unless
-// anyway. Pages that are this device's own, never signed in, stay.
-func (c *Core) SignOut(anyway bool) (int, error) {
+// anyway. Pages that are this device's own, never signed in, stay. The
+// count is named for the label Swift calls it by.
+func (c *Core) SignOut(anyway bool) (unsynced int, err error) {
+	defer catch(&err)
 	var saved, held bool
 	c.q.do(func() {
 		held = c.core.Remote.SignedIn() || c.core.Store.CachedAccount() != ""
@@ -179,15 +212,22 @@ func (c *Core) SignOut(anyway bool) (int, error) {
 		return 0, nil
 	}
 	if !saved && !anyway {
-		return 0, errNotSaved
+		return 0, errNotSaved()
 	}
 	forget := c.core.Store.ForgetAccount
 	if !anyway {
 		_ = c.core.Sync.SyncNow()
 		forget = c.core.Store.ForgetSyncedAccount
+		// What was typed during the pass is saved now, as the desktop
+		// saves again before it leaves, for Leave to count it among the
+		// changes not uploaded rather than drop it.
+		c.q.do(func() { saved = c.saveOpen() })
+		if !saved {
+			return 0, errNotSaved()
+		}
 	}
 	// Between sync passes, which Leave waits for, off the queue.
-	unsynced, err := c.core.Leave(forget, !anyway)
+	unsynced, err = c.core.Leave(forget, !anyway)
 	if unsynced > 0 {
 		return unsynced, nil
 	}
@@ -217,7 +257,8 @@ type account struct {
 
 // Account returns who is signed in, and to which project, as an account in
 // JSON.
-func (c *Core) Account() (string, error) {
+func (c *Core) Account() (_ string, err error) {
+	defer catch(&err)
 	var a account
 	c.q.do(func() {
 		se := c.core.Store.Session()
@@ -238,7 +279,6 @@ func (c *Core) saveOpen() bool {
 		if !p.live.Save() {
 			all = false
 		}
-		p.tellSaving()
 	}
 	return all
 }
@@ -258,9 +298,9 @@ func (c *Core) closePages() {
 // as the desktop's Account › Name does: on this device, then on the
 // server while signed in. A name left empty or as it was changes nothing.
 // Saved here but not on the server, it fails saying so.
-func (c *Core) SetDisplayName(name string) error {
+func (c *Core) SetDisplayName(name string) (err error) {
+	defer catch(&err)
 	name = strings.TrimSpace(name)
-	var err error
 	var signedIn bool
 	c.q.do(func() {
 		if name == "" || name == c.core.Store.Session().DisplayName {
@@ -307,7 +347,8 @@ type device struct {
 
 // Devices returns the devices signed in to the account, the one active
 // last first, as a JSON array of device: Account › Devices.
-func (c *Core) Devices() (string, error) {
+func (c *Core) Devices() (_ string, err error) {
+	defer catch(&err)
 	ctx, cancel := context.WithTimeout(context.Background(), remoteTimeout)
 	defer cancel()
 	rows, err := c.core.Remote.Select(ctx, "devices", remote.Query{Order: "last_active_at.desc"})
@@ -328,11 +369,12 @@ func (c *Core) Devices() (string, error) {
 
 // SignOutDevice signs another device out of the account: it signs itself
 // out the next time it syncs.
-func (c *Core) SignOutDevice(id string) error {
+func (c *Core) SignOutDevice(id string) (err error) {
+	defer catch(&err)
 	ctx, cancel := context.WithTimeout(context.Background(), remoteTimeout)
 	defer cancel()
 	be := c.core.Remote
-	_, err := be.Upsert(ctx, "devices", map[string]any{"id": id, "user_id": be.UserID(), "revoked_at": time.Now().UTC().Format(time.RFC3339)}, "")
+	_, err = be.Upsert(ctx, "devices", map[string]any{"id": id, "user_id": be.UserID(), "revoked_at": time.Now().UTC().Format(time.RFC3339)}, "")
 	if err != nil {
 		return errors.New(locales.SettingsDeviceSignOutFailed(err.Error()))
 	}
@@ -345,7 +387,8 @@ const deleteTimeout = 60 * time.Second
 // DeleteAccount deletes the account on the server, its space, pages,
 // recordings and keys, then signs out and wipes this device, as the
 // desktop's Delete account does once DELETE is typed.
-func (c *Core) DeleteAccount() error {
+func (c *Core) DeleteAccount() (err error) {
+	defer catch(&err)
 	var signedIn bool
 	c.q.do(func() { signedIn = c.core.Remote.SignedIn() })
 	if !signedIn {
@@ -357,7 +400,7 @@ func (c *Core) DeleteAccount() error {
 		return errors.New(locales.SettingsDeleteAccountFailed(err.Error()))
 	}
 	// Nothing of the account is left to keep: the open pages go unsaved.
-	_, err := c.core.Leave(c.core.Store.Wipe, false)
+	_, err = c.core.Leave(c.core.Store.Wipe, false)
 	if err != nil {
 		err = errors.New(locales.SettingsRemovePagesFailed(err.Error()))
 	}

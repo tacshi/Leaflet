@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -125,7 +126,11 @@ func KeepManagement(api *supabaseapi.Client) {
 	keepManagement(api.RefreshToken())
 }
 
-func keepManagement(refresh string) { _ = keychain.Set(managementKey, []byte(refresh)) }
+func keepManagement(refresh string) {
+	if err := keychain.Set(managementKey, []byte(refresh)); err != nil {
+		log.Printf("keep the Supabase sign-in: %v", err)
+	}
+}
 
 // Steps of ConnectProject, which its progress hears.
 const (
@@ -200,7 +205,13 @@ func (c *Core) UpdateProject() {
 		return
 	}
 	raw, err := keychain.Get(managementKey)
-	if err != nil || len(raw) == 0 {
+	if errors.Is(err, keychain.ErrNotFound) || err == nil && len(raw) == 0 {
+		// Signed in without the Supabase account, as to a server of one's
+		// own: there is nothing to bring up to date with.
+		return
+	}
+	if err != nil {
+		log.Printf("update project %s: the Supabase sign-in: %v", ref, err)
 		return
 	}
 	api := supabaseapi.Resume(string(raw))
@@ -210,10 +221,15 @@ func (c *Core) UpdateProject() {
 	deployed, _ := c.Store.Value(deployedKey(ref))
 	hash, err := provision.Setup(ctx, api, ref, deployed, nil)
 	if err != nil {
+		log.Printf("update project %s: %v", ref, err)
 		if errors.Is(err, supabaseapi.ErrSignedOut) {
-			_ = keychain.Delete(managementKey)
+			if err := keychain.Delete(managementKey); err != nil {
+				log.Printf("update project %s: forget the Supabase sign-in: %v", ref, err)
+			}
 		}
 		return
 	}
-	_ = c.Store.SetValue(deployedKey(ref), hash)
+	if err := c.Store.SetValue(deployedKey(ref), hash); err != nil {
+		log.Printf("update project %s: %v", ref, err)
+	}
 }

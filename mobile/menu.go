@@ -16,9 +16,9 @@ import (
 
 // MenuItems returns what the menu trigger, "/" or "@", offers in page
 // pageID, as a JSON array of menu.Item for FilterMenu to filter.
-func (c *Core) MenuItems(pageID, trigger string) (string, error) {
+func (c *Core) MenuItems(pageID, trigger string) (_ string, err error) {
+	defer catch(&err)
 	var items []menu.Item
-	var err error
 	c.q.do(func() {
 		switch trigger {
 		case "/":
@@ -99,7 +99,8 @@ func (c *Core) mentionItems(pageID string) ([]menu.Item, error) {
 
 // FilterMenu returns the items, a JSON array as MenuItems returns it, that
 // query, what is typed after the "/" or "@", finds.
-func FilterMenu(items, query string) (string, error) {
+func FilterMenu(items, query string) (_ string, err error) {
+	defer catch(&err)
 	var all []menu.Item
 	if err := json.Unmarshal([]byte(items), &all); err != nil {
 		return "", err
@@ -119,7 +120,8 @@ type menuBlock struct {
 // MenuBlock returns what the / menu's item key makes, as JSON: the type
 // and data the block at the caret takes, or a block to put there, a chart
 // signed by author. It returns "" for an item the app does itself.
-func MenuBlock(key, author string) (string, error) {
+func MenuBlock(key, author string) (_ string, err error) {
+	defer catch(&err)
 	if typ, level, ok := menu.Turn(key); ok {
 		return encode(menuBlock{Type: typ, Data: doc.TypeData(typ, level)})
 	}
@@ -132,7 +134,8 @@ func MenuBlock(key, author string) (string, error) {
 // LinkBlock returns the block of kind "image", "video" or "link_preview"
 // for link, as JSON, or what is wrong with the link, in the app's
 // language.
-func LinkBlock(kind, link string) (string, error) {
+func LinkBlock(kind, link string) (_ string, err error) {
+	defer catch(&err)
 	n, err := menu.LinkBlock(kind, link)
 	if err != nil {
 		return "", err
@@ -141,11 +144,15 @@ func LinkBlock(kind, link string) (string, error) {
 }
 
 // EmbedStart returns the page a new embed starts from, to change.
-func EmbedStart() string { return menu.EmbedStart }
+func EmbedStart() string {
+	defer catch(nil)
+	return menu.EmbedStart
+}
 
 // EmbedBlock returns an embed of html, as tall as height, that author
 // made, as JSON.
-func EmbedBlock(title, html string, height int, author string) (string, error) {
+func EmbedBlock(title, html string, height int, author string) (_ string, err error) {
+	defer catch(&err)
 	n, err := menu.EmbedBlock(title, html, height, author)
 	if err != nil {
 		return "", err
@@ -164,6 +171,7 @@ func (c *Core) fillLinks(id string, content *doc.Content) {
 		}
 		c.linkAsked[link] = true
 		go func() {
+			defer catch(nil)
 			info, err := web.LookUp(link)
 			if err != nil || info.Title == "" {
 				return

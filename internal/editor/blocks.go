@@ -27,6 +27,7 @@ func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 		rows, cols = doc.TableSize(n)
 	}
 	colW := max((e.width-float32(e.depth(n.ID))*indentStep-2)/float32(cols), 80)
+	cells := doc.TableCells(n)
 	wrap := ui.Column(c.Key("table:" + n.ID)).Gap(6)
 	editing := wrap.FocusWithin()
 	wrap.Children(func() {
@@ -43,8 +44,7 @@ func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 					}
 					row.Children(func() {
 						for col := 0; col < cols; col++ {
-							cell := doc.TableCell(n, r, col)
-							e.tableCell(c, n, cell, r, col, colW, pal)
+							e.tableCell(c, n, cells[r][col], r, col, colW, pal)
 						}
 					})
 				}

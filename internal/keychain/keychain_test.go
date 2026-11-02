@@ -75,3 +75,40 @@ func TestNoStore(t *testing.T) {
 		t.Error("kept a secret in no store")
 	}
 }
+
+// failingStore fails each Get with err.
+type failingStore struct {
+	memStore
+	err error
+}
+
+func (f *failingStore) Get(string) ([]byte, error) {
+	f.reads++
+	return nil, f.err
+}
+
+// Only the user's refusal is kept for the run: another failure, such as
+// the iOS keychain's before the device is first unlocked, is asked again.
+func TestOnlyRefusalsKept(t *testing.T) {
+	t.Cleanup(func() { Use(nil) })
+	for _, c := range []struct {
+		err   error
+		reads int
+	}{
+		{fmt.Errorf("system: %w", ErrDenied), 1},
+		{errors.New("mygo: secrets: keychain: read: The user name or passphrase you entered is not correct. (OSStatus -25293)"), 1},
+		{errors.New("mygo: secrets: keychain: read: User canceled the operation. (OSStatus -128)"), 1},
+		{errors.New("Interaction is not allowed with the Security Server."), 2},
+	} {
+		f := &failingStore{err: c.err}
+		Use(f)
+		for range 2 {
+			if _, err := Get("key"); err == nil {
+				t.Fatalf("%v: no error", c.err)
+			}
+		}
+		if f.reads != c.reads {
+			t.Errorf("%v: read the store %d times, want %d", c.err, f.reads, c.reads)
+		}
+	}
+}

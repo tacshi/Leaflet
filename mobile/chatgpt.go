@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"leaflet/internal/agents"
+	"leaflet/locales"
 )
 
 // Signing in with ChatGPT, on the phone, as on the desktop: the core
@@ -37,7 +38,8 @@ type chatgptAccount struct {
 // BeginChatGPTSignIn begins signing in with ChatGPT, for the provider
 // providerID ("" for a new one), and returns the page for the app to
 // open. A sign-in begun or made before is given up.
-func (c *Core) BeginChatGPTSignIn(providerID string) (string, error) {
+func (c *Core) BeginChatGPTSignIn(providerID string) (_ string, err error) {
+	defer catch(&err)
 	c.ForgetChatGPTSignIn()
 	var host, clientID string
 	c.q.do(func() {
@@ -60,16 +62,23 @@ func (c *Core) BeginChatGPTSignIn(providerID string) (string, error) {
 	opened := make(chan string, 1)
 	go func() {
 		defer cancel()
-		g, err := agents.SignInChatGPT(ctx, host, clientID, func(u string) { opened <- u })
+		var g *agents.ChatGPT
+		var err error
+		// The sign-in ends however it ends, a panic too, for those
+		// waiting on done.
+		defer func() {
+			s.mu.Lock()
+			if s.done == done {
+				s.g, s.err = g, err
+			}
+			s.mu.Unlock()
+			close(done)
+		}()
+		defer catch(&err)
+		g, err = agents.SignInChatGPT(ctx, host, clientID, func(u string) { opened <- u })
 		if err == nil {
 			c.q.do(func() { _ = c.core.Store.SetValue("chatgpt.client", g.Account().ClientID) })
 		}
-		s.mu.Lock()
-		if s.done == done {
-			s.g, s.err = g, err
-		}
-		s.mu.Unlock()
-		close(done)
 	}()
 	select {
 	case u := <-opened:
@@ -78,7 +87,7 @@ func (c *Core) BeginChatGPTSignIn(providerID string) (string, error) {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if s.err == nil {
-			return "", errors.New("ChatGPT sign-in failed") //nolint:staticcheck // shown to people as a sentence.
+			return "", errors.New(locales.SettingsChatGPTSignInFailed())
 		}
 		return "", s.err
 	}
@@ -87,13 +96,14 @@ func (c *Core) BeginChatGPTSignIn(providerID string) (string, error) {
 // FinishChatGPTSignIn waits for the sign-in BeginChatGPTSignIn began, and
 // returns a chatgptAccount as JSON, without its models: the app closes
 // OpenAI's page as soon as it answers, then asks ChatGPTModels.
-func (c *Core) FinishChatGPTSignIn() (string, error) {
+func (c *Core) FinishChatGPTSignIn() (_ string, err error) {
+	defer catch(&err)
 	s := &c.chatgpt
 	s.mu.Lock()
 	done := s.done
 	s.mu.Unlock()
 	if done == nil {
-		return "", errors.New("Sign in with ChatGPT again.") //nolint:staticcheck // shown to people as a sentence.
+		return "", errors.New(locales.SettingsChatGPTSignInAgain())
 	}
 	<-done
 	s.mu.Lock()
@@ -104,17 +114,18 @@ func (c *Core) FinishChatGPTSignIn() (string, error) {
 	}
 	if g == nil {
 		// Given up meanwhile.
-		return "", errors.New("Sign-in was cancelled.") //nolint:staticcheck // shown to people as a sentence.
+		return "", errors.New(locales.SettingsChatGPTSignInCancelled())
 	}
 	return encode(chatgptAccount{Email: g.Account().Email, Models: []string{}})
 }
 
 // ChatGPTModels returns the models the plan signed in to in the form
 // serves, chat models first, as a JSON array.
-func (c *Core) ChatGPTModels() (string, error) {
+func (c *Core) ChatGPTModels() (_ string, err error) {
+	defer catch(&err)
 	g := c.madeChatGPT()
 	if g == nil {
-		return "", errors.New("Sign in with ChatGPT first.") //nolint:staticcheck // shown to people as a sentence.
+		return "", errors.New(locales.SettingsChatGPTSignInFirst())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -129,6 +140,7 @@ func (c *Core) ChatGPTModels() (string, error) {
 // closed before OpenAI answered. One already made stays, for the form to
 // save: the page may be closed after it said so.
 func (c *Core) CancelChatGPTSignIn() {
+	defer catch(nil)
 	s := &c.chatgpt
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -144,6 +156,7 @@ func (c *Core) CancelChatGPTSignIn() {
 // ForgetChatGPTSignIn gives up the sign-in being made, and forgets one
 // made and not saved, as the form closes.
 func (c *Core) ForgetChatGPTSignIn() {
+	defer catch(nil)
 	s := &c.chatgpt
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -168,7 +181,7 @@ func (c *Core) chatgptFor(providerID string) (*agents.ChatGPT, error) {
 		return g, nil
 	}
 	if providerID == "" {
-		return nil, errors.New("Sign in with ChatGPT first.") //nolint:staticcheck // shown to people as a sentence.
+		return nil, errors.New(locales.SettingsChatGPTSignInFirst())
 	}
 	var g *agents.ChatGPT
 	var err error

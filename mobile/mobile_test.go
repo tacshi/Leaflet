@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/locales"
 )
 
 // fakePlatform is the app, offline, with its keychain in memory.
@@ -46,24 +47,25 @@ func (p *fakePlatform) WatchICloud(bool)                {}
 func (p *fakePlatform) StartDownload(path string) error { return nil }
 func (p *fakePlatform) Log(line string)                 { p.t.Log(strings.TrimSpace(line)) }
 
-// update is a PageUpdated event.
+// update is a PageUpdated event, and when it came.
 type update struct {
 	pageID, content, reason string
 	rev                     int64
+	at                      time.Time
 }
 
-// fakeEvents keeps the pages' updates, and what PageSaving said, for the
-// test to wait on.
+// fakeEvents keeps the pages' updates, and what PageSaving and
+// PageReadOnly said, for the test to wait on.
 type fakeEvents struct {
-	updates chan update
-	saving  chan bool
+	updates  chan update
+	saving   chan bool
+	readOnly chan bool
+	notices  chan string
 }
 
 func (e *fakeEvents) Changed(table, pageID string)           {}
 func (e *fakeEvents) SyncState(running bool, failure string) {}
-func (e *fakeEvents) PageReadOnly(string, bool)              {}
 func (e *fakeEvents) Tint(string, string)                    {}
-func (e *fakeEvents) Notice(message string)                  {}
 func (e *fakeEvents) AgentsChanged()                         {}
 func (e *fakeEvents) RecordingChanged(string)                {}
 
@@ -76,14 +78,30 @@ func (e *fakeEvents) PageSaving(_ string, saving bool) {
 	}
 }
 
+// Notice drops what a test not waiting on it says.
+func (e *fakeEvents) Notice(message string) {
+	select {
+	case e.notices <- message:
+	default:
+	}
+}
+
+// PageReadOnly drops what a test not waiting on it says.
+func (e *fakeEvents) PageReadOnly(_ string, readOnly bool) {
+	select {
+	case e.readOnly <- readOnly:
+	default:
+	}
+}
+
 func (e *fakeEvents) PageUpdated(pageID, content string, rev int64, reason string, newStep bool) {
-	e.updates <- update{pageID, content, reason, rev}
+	e.updates <- update{pageID: pageID, content: content, reason: reason, rev: rev, at: time.Now()}
 }
 
 func open(t *testing.T) (*Core, *fakeEvents) {
 	t.Helper()
 	cfg, _ := json.Marshal(config{DataDir: t.TempDir(), Locale: "en"})
-	ev := &fakeEvents{updates: make(chan update, 16), saving: make(chan bool, 64)}
+	ev := &fakeEvents{updates: make(chan update, 16), saving: make(chan bool, 64), readOnly: make(chan bool, 16), notices: make(chan string, 16)}
 	c, err := Open(string(cfg), &fakePlatform{t: t, secrets: map[string][]byte{}}, ev)
 	if err != nil {
 		t.Fatal(err)
@@ -225,8 +243,9 @@ func TestEditOverAnAgentsChangeMerges(t *testing.T) {
 	}
 }
 
-// An agent's edits streaming in reach the app spaced, not one whole page
-// each, and an edit the app makes meanwhile merges with all of them.
+// An agent's edits streaming in reach the app spaced, agentEvery apart
+// rather than one whole page each, and an edit the app makes over a rev
+// before them merges with all of them.
 func TestStreamingAgentEditsReachTheAppSpaced(t *testing.T) {
 	c, ev := open(t)
 	row := create(t, c, `{"title":"Plan"}`)
@@ -234,29 +253,50 @@ func TestStreamingAgentEditsReachTheAppSpaced(t *testing.T) {
 	if err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "One")}).Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
+	// The blocks of a call stream in every few hundredths of a second.
 	const n = 30
-	var err error
-	c.q.do(func() {
-		live := host{c}.Live(row.ID)
-		for i := range n {
-			if err == nil {
-				err = live.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, paragraph(fmt.Sprint("b", i), "x")), i == 0)
-			}
+	for i := range n {
+		var err error
+		c.q.do(func() {
+			err = host{c}.Live(row.ID).ApplyOp(doc.InsertOp(doc.Position{At: "end"}, paragraph(fmt.Sprint("b", i), "x")), i == 0)
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
-	})
-	if err != nil {
-		t.Fatal(err)
+		time.Sleep(10 * time.Millisecond)
 	}
+	// The last of them reach the app too.
+	time.Sleep(2 * agentEvery)
 	// The app, not having heard of them, changes the first block.
 	if err := c.EditPage(row.ID, pg.Editor, doc.FromBlocks([]*doc.Node{paragraph("a", "One!")}).Encode(), pg.Rev); err != nil {
 		t.Fatal(err)
 	}
-	merge := wait(t, ev, "merge")
+	var shown []time.Time
+	var merge update
+	for merge.reason == "" {
+		select {
+		case u := <-ev.updates:
+			switch u.reason {
+			case "agent":
+				shown = append(shown, u.at)
+			case "merge":
+				merge = u
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("no merge update")
+		}
+	}
 	if got := len(doc.MustDecode(merge.content).Children); got != n+1 {
 		t.Fatalf("merged %d blocks", got)
 	}
-	if len(ev.updates) > 2 {
-		t.Errorf("%d updates for %d edits", len(ev.updates)+2, n)
+	if len(shown) < 2 || len(shown) > n/4 {
+		t.Fatalf("%d updates for %d edits over %v", len(shown), n, n*10*time.Millisecond)
+	}
+	// Some slack for the events' own goroutine.
+	for i := 1; i < len(shown); i++ {
+		if gap := shown[i].Sub(shown[i-1]); gap < agentEvery*2/3 {
+			t.Errorf("updates %d and %d %v apart, want %v", i-1, i, gap, agentEvery)
+		}
 	}
 }
 
@@ -547,8 +587,10 @@ func TestCommentsAndAgents(t *testing.T) {
 	if len(st.Options) != 1 || st.Options[0].Model != "llama3" {
 		t.Fatalf("agents after a provider %+v", st)
 	}
-	if err := c.SaveProvider(`{"preset":"openai","base_url":"https://api.openai.com/v1","default_model":"gpt-5"}`); err == nil {
-		t.Error("a cloud provider saved without signing in")
+	// Signed out, a cloud provider is kept on this device, with its key:
+	// without one it is not saved.
+	if err := c.SaveProvider(`{"preset":"openai","base_url":"https://api.openai.com/v1","default_model":"gpt-5"}`); err == nil || err.Error() != locales.SettingsNeedKey() {
+		t.Errorf("a cloud provider saved without its key: %v", err)
 	}
 }
 
@@ -586,5 +628,37 @@ func TestTableRows(t *testing.T) {
 	_ = json.Unmarshal([]byte(out), &got)
 	if got.ID != n.ID || got.Int("rowsLen", 0) != 3 || doc.TableRows(&got)[1][0] != "*x*" {
 		t.Errorf("table %+v", doc.TableRows(&got))
+	}
+}
+
+// A comment runs an agent only where it shows the agent marked, not in
+// code or an address; a run that fails says why in a notice.
+func TestCommentMentionsRunAgents(t *testing.T) {
+	c, ev := open(t)
+	row := create(t, c, `{"title":"Plan"}`)
+	// Nothing listens there.
+	if err := c.SaveProvider(`{"preset":"ollama","name":"Ollama","base_url":"http://127.0.0.1:1","default_model":"llama3"}`); err != nil {
+		t.Fatal(err)
+	}
+	running := func() (on bool) {
+		c.q.do(func() { on = c.core.Hub.Session(row.ID).Running })
+		return on
+	}
+	if err := c.AddComment(row.ID, "b1", "write to me@ollama.com, not `@agent`", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if running() {
+		t.Fatal("an agent runs for a comment that mentions none")
+	}
+	if err := c.AddComment(row.ID, "b1", "@Ollama sum it up", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case msg := <-ev.notices:
+		if !strings.HasPrefix(msg, "Ollama") {
+			t.Errorf("notice %q", msg)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("no notice of the failed run")
 	}
 }

@@ -48,9 +48,9 @@ func historyLabel(h store.HistoryEntry) string {
 
 // History returns the versions kept of a page, newest first, as a JSON
 // array of version. The page's edits are saved first.
-func (c *Core) History(pageID string) (string, error) {
+func (c *Core) History(pageID string) (_ string, err error) {
+	defer catch(&err)
 	var out []version
-	var err error
 	c.q.do(func() {
 		if p := c.pages[pageID]; p != nil {
 			p.live.Save()
@@ -78,9 +78,9 @@ func (c *Core) History(pageID string) (string, error) {
 }
 
 // NameVersion keeps a page as it is now as a version named name.
-func (c *Core) NameVersion(pageID, name string) error {
+func (c *Core) NameVersion(pageID, name string) (err error) {
+	defer catch(&err)
 	name = strings.TrimSpace(name)
-	var err error
 	c.q.do(func() {
 		if p := c.pages[pageID]; p != nil {
 			p.live.Save()
@@ -96,12 +96,12 @@ func (c *Core) NameVersion(pageID, name string) error {
 
 // RestoreVersion puts version id back as page pageID's content, keeping
 // the page as it was as a version first, as the desktop does.
-func (c *Core) RestoreVersion(pageID, id string) error {
-	var err error
+func (c *Core) RestoreVersion(pageID, id string) (err error) {
+	defer catch(&err)
 	c.q.do(func() {
 		st := c.core.Store
 		if !c.canEdit(pageID) {
-			err = errors.New("the page can't be changed")
+			err = errors.New(locales.AppErrorReadOnly())
 			return
 		}
 		var entries []store.HistoryEntry
@@ -153,9 +153,9 @@ type exported struct {
 
 // ExportMarkdown returns a page as Markdown, with its recordings'
 // transcripts, as an exported in JSON. The page's edits are saved first.
-func (c *Core) ExportMarkdown(pageID string) (string, error) {
+func (c *Core) ExportMarkdown(pageID string) (_ string, err error) {
+	defer catch(&err)
 	var out exported
-	var err error
 	c.q.do(func() {
 		if p := c.pages[pageID]; p != nil {
 			p.live.Save()
@@ -179,9 +179,9 @@ func (c *Core) ExportMarkdown(pageID string) (string, error) {
 // AddFile keeps the file at path with page pageID, as the desktop's
 // Upload does, and returns the block that shows it, as JSON: a picture as
 // an image, another file as a file card.
-func (c *Core) AddFile(pageID, path string) (string, error) {
+func (c *Core) AddFile(pageID, path string) (_ string, err error) {
+	defer catch(&err)
 	var n *doc.Node
-	var err error
 	c.q.do(func() {
 		var f store.File
 		f, err = c.core.Store.AddFile(path, "", pageID, mime.TypeByExtension(strings.ToLower(filepath.Ext(path))))
@@ -209,9 +209,9 @@ func (c *Core) AddFile(pageID, path string) (string, error) {
 // by the file_id of the block that shows it, downloading it first when
 // another device uploaded it, as the desktop's image blocks do: the
 // block's url is a path on the device that added it.
-func (c *Core) LocalFile(id string) (string, error) {
+func (c *Core) LocalFile(id string) (_ string, err error) {
+	defer catch(&err)
 	var f store.File
-	var err error
 	c.q.do(func() { f, err = c.core.Store.File(id) })
 	if err != nil {
 		return "", err

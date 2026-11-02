@@ -116,7 +116,7 @@ struct AgentPanel: View {
                 Image(systemName: "ellipsis.circle").imageScale(.large)
                     .frame(minWidth: 28, minHeight: line)
             }
-            .accessibilityLabel(L.panelNewConversation)
+            .accessibilityLabel(LI.agentOptions)
             TextField(L.panelAskPlaceholder, text: $draft, axis: .vertical)
                 .lineLimit(1...6)
                 .textFieldStyle(.plain)
@@ -250,17 +250,20 @@ struct RunCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            ForEach(run.edits, id: \.self) { e in
+            // By place: two edits can say the same.
+            ForEach(Array(run.edits.enumerated()), id: \.offset) { _, e in
                 Label(e, systemImage: "pencil.line").font(.footnote)
             }
             // What the agent said is in its message above.
             HStack {
                 Spacer()
                 if run.undone {
-                    Button(L.pageRedo) { Task { await app.client?.redoRun(pageID, runID: run.id) } }
+                    Button(L.pageRedo) {
+                        step { try await $0.redoRun(pageID, runID: run.id) }
+                    }
                 } else if !run.running {
                     Button(L.commonUndo) {
-                        Task { await app.client?.undoRun(pageID, runID: run.id) }
+                        step { try await $0.undoRun(pageID, runID: run.id) }
                     }
                 }
             }
@@ -268,5 +271,18 @@ struct RunCard: View {
         }
         .padding(10)
         .background(palette.agentSection, in: .rect(cornerRadius: 10))
+    }
+
+    /// step undoes or redoes the run, saying in a toast why it couldn't:
+    /// the core says, and leaves the run as it was.
+    private func step(_ body: @escaping @MainActor (CoreClient) async throws -> Void) {
+        guard let client = app.client else { return }
+        Task {
+            do {
+                try await body(client)
+            } catch {
+                app.show(Toast(message: error.localizedDescription))
+            }
+        }
     }
 }

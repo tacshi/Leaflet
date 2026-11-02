@@ -41,6 +41,9 @@ final class EditorTextView: UITextView {
     /// refusesFocus keeps the focus from coming back to the text while an
     /// embed that had it is taken out (BlockViews.takeOut).
     var refusesFocus = false
+    /// emptyMark draws the block of an empty page, a list's bullet or a
+    /// quote's bar, as the page's text has no paragraph to draw it.
+    private let emptyMark = EmptyPageMark()
 
     /// relayout lays all of the page out again, as a block's room changed:
     /// the blocks are placed once the text in view is laid out, not on
@@ -101,6 +104,10 @@ final class EditorTextView: UITextView {
         // divider and "- " a bullet.
         smartDashesType = .no
         dataDetectorTypes = []
+        // Links keep the style's look: the text view's own would recolor
+        // them.
+        linkTextAttributes = [:]
+        blocks.editable = isEditable
         backgroundColor = .clear
         accessibilityIdentifier = "pageText"
         NotificationCenter.default.addObserver(
@@ -197,6 +204,23 @@ final class EditorTextView: UITextView {
         }
         // Each scroll and layout puts the blocks in view where they are.
         blocks.layout(in: self)
+        if textStorage.length == 0, let (info, font, palette) = controller?.emptyPageBlock {
+            if emptyMark.superview !== self { insertSubview(emptyMark, at: 0) }
+            // In the text's own space, which the scroll offsets the bounds
+            // from.
+            emptyMark.frame = CGRect(origin: .zero, size: bounds.size)
+            emptyMark.mark = (info, font, palette, inset)
+            // Where the caret stands once the empty line is laid out, as
+            // it is by the time the mark draws.
+            emptyMark.caret = { [weak self] in
+                guard let self else { return .zero }
+                return self.caretRect(for: self.beginningOfDocument)
+            }
+            emptyMark.isHidden = false
+            emptyMark.setNeedsDisplay()
+        } else if !emptyMark.isHidden {
+            emptyMark.isHidden = true
+        }
         if let footer {
             // Under the text's last line.
             let end = caretRect(for: endOfDocument).maxY
@@ -215,6 +239,9 @@ final class EditorTextView: UITextView {
     // MARK: Keyboard
 
     override var keyCommands: [UIKeyCommand]? {
+        // The title, in the header, has these too, up its responder chain:
+        // they are the text's alone.
+        guard !(header?.holdsFirstResponder ?? false) else { return super.keyCommands }
         if controller?.menu != nil {
             // The menu at the caret takes the arrows and Escape while it
             // shows; Return and Tab come as text, which it takes too.
@@ -273,7 +300,7 @@ final class EditorTextView: UITextView {
     @objc func indent() { controller?.indent(by: 1) }
     @objc func outdent() { controller?.indent(by: -1) }
     @objc func toggleCode() { controller?.toggleInline(.leafletCode) }
-    @objc func toggleStrike() { controller?.toggleInline(.strikethroughStyle) }
+    @objc func toggleStrike() { controller?.toggleInline(.leafletStrike) }
     @objc func editLink() { controller?.editLink() }
     @objc func moveBlockUp() { controller?.moveBlock(by: -1) }
     @objc func moveBlockDown() { controller?.moveBlock(by: 1) }
@@ -287,5 +314,74 @@ final class EditorTextView: UITextView {
     // which the style then shows, rather than the fonts themselves.
     override func toggleBoldface(_ sender: Any?) { controller?.toggleInline(.leafletBold) }
     override func toggleItalics(_ sender: Any?) { controller?.toggleInline(.leafletItalic) }
-    override func toggleUnderline(_ sender: Any?) { controller?.toggleInline(.underlineStyle) }
+    override func toggleUnderline(_ sender: Any?) { controller?.toggleInline(.leafletUnderline) }
+
+    /// canPerformAction offers the format commands while the text can be
+    /// changed: UIKit offers them only to a text view that edits its
+    /// attributes itself, which this one leaves to the editor.
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        switch action {
+        case #selector(toggleBoldface(_:)), #selector(toggleItalics(_:)),
+            #selector(toggleUnderline(_:)):
+            return isEditable && isFirstResponder
+        default:
+            return super.canPerformAction(action, withSender: sender)
+        }
+    }
+
+    /// deleteBackward follows Backspace at the start of the page too, which
+    /// UIKit doesn't ask about, there being nothing before it to delete.
+    override func deleteBackward() {
+        if controller?.backspaceAtPageStart() == true { return }
+        super.deleteBackward()
+    }
+
+    override var isEditable: Bool {
+        didSet { if isEditable != oldValue { blocks.editable = isEditable } }
+    }
+
+    // VoiceOver can't reach the views and markers in the text: what a tap
+    // on them does is offered as actions at the caret.
+    override var accessibilityCustomActions: [UIAccessibilityCustomAction]? {
+        get {
+            (controller?.accessibilityActions() ?? []) + (super.accessibilityCustomActions ?? [])
+        }
+        set { super.accessibilityCustomActions = newValue }
+    }
+}
+
+/// EmptyPageMark draws an empty page's block, as BlockLayoutFragment draws
+/// a paragraph's, on the line the caret stands on.
+private final class EmptyPageMark: UIView {
+    var mark: (info: BlockInfo, font: UIFont, palette: Palette, inset: UIEdgeInsets)?
+    var caret: () -> CGRect = { .zero }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = false
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) { fatalError("not coded") }
+
+    override func draw(_ rect: CGRect) {
+        guard let mark, let ctx = UIGraphicsGetCurrentContext() else { return }
+        let top = mark.inset.top
+        let caret = caret()
+        BlockLayoutFragment.drawDecoration(
+            mark.info, mark.palette, in: ctx, at: CGPoint(x: mark.inset.left, y: top), left: 0,
+            width: bounds.width - mark.inset.left - mark.inset.right,
+            line: BlockLayoutFragment.Line(
+                baseline: caret.maxY + mark.font.descender - top, font: mark.font, ordinal: 1,
+                top: caret.minY - top, bottom: caret.maxY - top))
+    }
+}
+
+extension UIView {
+    /// holdsFirstResponder reports whether the view or one in it has the
+    /// keyboard.
+    var holdsFirstResponder: Bool {
+        isFirstResponder || subviews.contains { $0.holdsFirstResponder }
+    }
 }

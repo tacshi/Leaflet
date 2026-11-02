@@ -6,9 +6,9 @@ The contract with the Go client is [`../docs/protocol.md`](../docs/protocol.md).
 ```
 supabase/
   config.toml
-  migrations/20261025000000_init.sql   tables, RLS, RPCs, Vault helpers, buckets
-  migrations/20261027000000_bind_attachment_paths.sql   attachment paths bound to their rows
-  migrations/20261027120000_catch_up_init.sql           what init gained after it shipped
+  migrations/        one file per schema change, oldest first: 20261025000000_init.sql
+                     has the tables, RLS, RPCs, Vault helpers and buckets, and each
+                     later one says at its top what it changes and why
   functions/
     _shared/        cors, clients, OpenAI-compatible client, blocks, tools, prompt
     agent/          NDJSON agent worker (protocol §4)
@@ -30,8 +30,9 @@ Leaflet, then sets it up from this folder, built into the app:
 
 - the migrations it lacks, each recorded in `supabase_migrations` as
   `supabase db push` records them;
-- the four functions, unless the `LEAFLET_FUNCTIONS_HASH` secret says they
-  are current;
+- the four functions, unless they are current: a project secret named
+  `LEAFLET_FUNCTIONS_` and the first 16 hex digits of their sources' hash
+  says so (the name, since the API lists secrets' values only as digests);
 - a 500 MiB upload limit, where the plan allows it.
 
 It then signs in to the project's Auth as the account's email, making that
@@ -55,7 +56,7 @@ ships in no app: the sign-in Worker in [`../worker`](../worker) holds it.
 
 ### The sign-in Worker
 
-A Cloudflare Worker with two routes:
+A Cloudflare Worker with three routes:
 
 - `GET /auth/supabase`, the OAuth app's redirect URL. Supabase takes only
   https ones, which a desktop app can't answer, so the page sends the browser
@@ -64,6 +65,10 @@ A Cloudflare Worker with two routes:
 - `POST /token`, Supabase's token endpoint with the client secret added. It
   takes only Leaflet's client ID, codes with their PKCE verifier and its own
   redirect URL, and refresh tokens.
+- `GET /.well-known/apple-app-site-association`, which ties the domain to the
+  iOS app: its sign-in takes `/auth/supabase` as its https callback, so it
+  never loads the page. It names the team in `APPLE_TEAM_ID` (in
+  `wrangler.toml`), and is not found without one.
 
 Deploy it from [`../worker`](../worker):
 
@@ -182,12 +187,16 @@ migration relies on `vault.create_secret`, `vault.update_secret` and
 - **ai_jobs**: viewers may create jobs; the worker then runs without edit
   tools. The worker claims a job by moving it from `queued` to `running`; a
   second call returns 409.
-- **Subpages created by agents** get `sort_key` = the last sibling's key + `m`
-  (or `a0` for the first child), which sorts after every existing sibling.
-- **stt_settings.provider** values: `qwen3-asr`, `moss-transcribe-diarize`,
-  `sensevoice`, `soniox`, `openai-compatible`. The server transcribes only
-  `soniox` and OpenAI-compatible endpoints (`provider_id` or `base_url` set);
-  on-device models transcribe on the device.
+- **Subpages created by agents** get a `sort_key` after the last sibling's, as
+  the app makes one (`functions/_shared/sortkey.ts`, `internal/store/sortkey.go`):
+  the digit halfway between that key's first digit and the last one, so the
+  first child gets `V` and the next `l`.
+- **stt_settings.provider** values: `on-device` (the device's own speech
+  recognition), `soniox`, `openai-compatible`; rows from earlier versions may
+  have `qwen3-asr`, `moss-transcribe-diarize` or `sensevoice`. The server
+  transcribes only `soniox` and OpenAI-compatible endpoints (`provider_id` or
+  `base_url` set); the others transcribe on the device. It saves the
+  transcript as the caller, so only an editor of the recording's page may ask.
 - **Sharing** invites: `share_page` adds a pending `page_permissions` row
   (`accepted_at` null) that grants nothing until the person accepts it with
   `accept_page_invite` (or removes it with `decline_page_invite`);
@@ -200,9 +209,11 @@ migration relies on `vault.create_secret`, `vault.update_secret` and
   only to that provider's base URL; a `base_url` that names another address
   is refused rather than sent the key.
 - **Storage**: viewers of a shared page can read its recordings, the files
-  on it and the images on it; only the space owner writes `files/` and
-  `images/`. Images go at `images/{space_id}/{page_id}/{image_id}.{ext}`, the
+  on it and the images on it; only the space owner writes `files/` (a file
+  on a page only while they can edit that page) and `images/`. Images go at `images/{space_id}/{page_id}/{image_id}.{ext}`, the
   page they are on; an image at `{space_id}/{image_id}.{ext}` is the owner's
   alone.
-  `recordings/{user_id}/{recording_id}.{ext}` is written only by the user who
-  made that `recordings` row, so upsert the row before uploading its audio.
+  `recordings/{user_id}/{recording_id}.wav` is written only by the user who
+  made that `recordings` row, while they can edit its page, so upsert the
+  row before uploading its audio. The row's `created_by` stays theirs: an
+  update cannot change it, and only deleting their account clears it.

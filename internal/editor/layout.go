@@ -8,6 +8,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
@@ -26,6 +27,21 @@ type blockLayout struct {
 }
 
 const indentStep = 26
+
+// blockDepths is how deep each block is nested in lists, found in one
+// walk of the page.
+func (e *Editor) blockDepths() map[string]int {
+	depths := map[string]int{}
+	var deep func([]*doc.Node, int)
+	deep = func(nodes []*doc.Node, d int) {
+		for _, n := range nodes {
+			depths[n.ID] = d
+			deep(n.Children, d+1)
+		}
+	}
+	deep(e.Content.Children, 0)
+	return depths
+}
 
 // depth is how deep a block is nested in lists.
 func (e *Editor) depth(id string) int {
@@ -256,7 +272,13 @@ var clip struct {
 	blocks []*doc.Node
 	// delta is the formatted text of a selection within one block.
 	delta doc.Delta
+	// token is the copy's own mark, on the clipboard beside its text in
+	// clipFormat: the same text copied in another app since has none.
+	token string
 }
+
+// clipFormat is the clipboard's format for clip's token.
+const clipFormat transfer.Format = "application/x-leaflet-copy"
 
 // copyBlocks returns the blocks of a selection over more than one block,
 // or of one block selected whole that is not text, cut to the selection,
@@ -279,6 +301,7 @@ func (e *Editor) copyBlocks() []*doc.Node {
 		n     *doc.Node
 	}
 	var stack []open
+	depths := e.blockDepths()
 	ia, ib := indexIn(us, a.ID), indexIn(us, b.ID)
 	for i := ia; i >= 0 && i <= ib && i < len(us); i++ {
 		n := us[i].Clone()
@@ -298,7 +321,7 @@ func (e *Editor) copyBlocks() []*doc.Node {
 			}
 			n.SetDelta(n.Delta().Slice(from, to))
 		}
-		depth := e.depth(n.ID)
+		depth := depths[n.ID]
 		for len(stack) > 0 && stack[len(stack)-1].depth >= depth {
 			stack = stack[:len(stack)-1]
 		}
@@ -313,14 +336,14 @@ func (e *Editor) copyBlocks() []*doc.Node {
 	return out
 }
 
-// inTable reports whether a block is inside a table's cell.
-func (e *Editor) inTable(id string) bool {
+// tableOf is the table a block is in a cell of, or nil.
+func (e *Editor) tableOf(id string) *doc.Node {
 	for loc := e.Content.Locate(id); loc != nil && loc.Parent != nil; loc = e.Content.Locate(loc.Parent.ID) {
 		if loc.Parent.Type == "table" {
-			return true
+			return loc.Parent
 		}
 	}
-	return false
+	return nil
 }
 
 // freshBlocks copies blocks with new IDs, to paste them again.
@@ -354,8 +377,9 @@ func (e *Editor) copyText() string {
 		}
 	}
 	us := e.selectedUnits(a)
+	depths := e.blockDepths()
 	var lines []string
-	for i := indexIn(us, a.ID); i >= 0 && i <= indexIn(us, b.ID) && i < len(us); i++ {
+	for i, ib := indexIn(us, a.ID), indexIn(us, b.ID); i >= 0 && i <= ib && i < len(us); i++ {
 		n := us[i]
 		if !n.IsText() {
 			sub := &doc.Content{Children: []*doc.Node{n.Clone()}}
@@ -380,7 +404,7 @@ func (e *Editor) copyText() string {
 			continue
 		}
 		text := n.Delta().Slice(from, to).ReadableMarkdown()
-		prefix := blockPrefix(n, e.depth(n.ID))
+		prefix := blockPrefix(n, depths[n.ID])
 		if prefix == "" {
 			text = doc.EscapeBlockStart(text)
 		}
@@ -438,7 +462,7 @@ func (e *Editor) paste(text string) {
 		e.changed()
 		return
 	}
-	if n := e.node(e.focus.ID); n != nil && n.Type == "paragraph" && textLen(n) == 0 && e.Collapsed() && !e.inTable(n.ID) {
+	if n := e.node(e.focus.ID); n != nil && n.Type == "paragraph" && textLen(n) == 0 && e.Collapsed() {
 		if v, err := doc.VideoNode(text, ""); err == nil {
 			e.InsertBlocks(v)
 			return
@@ -450,10 +474,7 @@ func (e *Editor) paste(text string) {
 		}
 	}
 	var blocks []*doc.Node
-	if e.inTable(e.focus.ID) {
-		// A cell holds one line: the lines join.
-		text = strings.Join(strings.Fields(strings.ReplaceAll(text, "\n", " ")), " ")
-	} else if clip.blocks != nil && text == clip.text {
+	if clip.blocks != nil && text == clip.text {
 		blocks = freshBlocks(clip.blocks)
 	} else if clip.delta != nil && text == clip.text {
 		blocks = []*doc.Node{newText("paragraph", clip.delta)}
@@ -542,7 +563,12 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 		// their own.
 		n.SetDelta(head.Concat(first.Delta()))
 		if head.Len() == 0 && first.Type != "paragraph" {
+			// It takes the pasted block's kind, and none of what was its
+			// own kind's: an empty heading's level, a folded toggle's fold.
 			n.Type = first.Type
+			for _, k := range doc.TypedKeys {
+				delete(n.Data, k)
+			}
 			for k, v := range first.Data {
 				if k != "delta" {
 					n.Data[k] = v
@@ -584,7 +610,7 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 			// or checked as it was; a due date stays with the to-do's first
 			// part.
 			last.Type = typ
-			for _, k := range []string{"checked", "due", "level", "language", "tone", "collapsed"} {
+			for _, k := range doc.TypedKeys {
 				delete(last.Data, k)
 			}
 			for k, v := range data {

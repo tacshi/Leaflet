@@ -185,15 +185,13 @@ type Editor struct {
 	// colors are open.
 	bar       ui.Handle
 	colorOpen bool
-	// dueOpen is the to-do whose calendar is open, and dueDraft the date
-	// in it, with its time of day when dueTimed, which is saved as it
-	// closes when dueEdited; chips are where the to-dos' dates and the
-	// blocks' comment badges show, which take presses.
-	dueOpen   string
-	dueDraft  time.Time
-	dueTimed  bool
-	dueEdited bool
-	chips     map[string]ui.Rect
+	// dueOpen is the to-do whose calendar is open, and dues the drafts of
+	// the to-dos whose calendars are open or closing, saved as they close;
+	// chips are where the to-dos' dates and the blocks' comment badges
+	// show, which take presses.
+	dueOpen string
+	dues    map[string]*dueDraft
+	chips   map[string]ui.Rect
 	// peek is the block whose comments show under its badge, peekOver
 	// whether the pointer is on them, and peekLeft when it left both;
 	// peekShut is the badge clicked, which shows none until the pointer
@@ -211,14 +209,20 @@ type Editor struct {
 func New(content *doc.Content, host Host) *Editor {
 	e := &Editor{Content: content, Host: host, Size: 17,
 		layouts: map[string]*blockLayout{}, geom: map[string]ui.Rect{}, rel: map[string]ui.Rect{}, laid: map[string]ui.Rect{}, chips: map[string]ui.Rect{}, width: 680}
-	if len(content.Children) == 0 {
-		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
-		p.SetDelta(nil)
-		content.Children = append(content.Children, p)
-	}
+	refill(content)
 	first := e.units()[0]
 	e.anchor, e.focus = Pos{first.ID, 0}, Pos{first.ID, 0}
 	return e
+}
+
+// refill puts an empty paragraph in a page that has no blocks left: the
+// caret is always in one.
+func refill(c *doc.Content) {
+	if len(c.Children) == 0 {
+		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
+		p.SetDelta(nil)
+		c.Children = []*doc.Node{p}
+	}
 }
 
 // Focus asks for the keyboard focus.
@@ -272,6 +276,30 @@ func (e *Editor) index(id string) int {
 		return -1
 	}
 	return indexIn(e.units(), id)
+}
+
+// unitOrder is each unit's place among units.
+func unitOrder(units []*doc.Node) map[string]int {
+	order := make(map[string]int, len(units))
+	for i, n := range units {
+		order[n.ID] = i
+	}
+	return order
+}
+
+// indexed runs fn with each unit's place in the page known, as it is while
+// the blocks build: what asks where many blocks are against the selection,
+// as the selection toolbar's Comment and Ask agent do, then walks the page
+// once, not once for each block.
+func (e *Editor) indexed(fn func()) {
+	if e.order != nil {
+		fn()
+		return
+	}
+	// The depths of the frame before may be out of date.
+	e.order, e.depths = unitOrder(e.units()), nil
+	defer func() { e.order = nil }()
+	fn()
 }
 
 func indexIn(nodes []*doc.Node, id string) int {
@@ -372,6 +400,11 @@ func (e *Editor) clamp(p Pos) Pos {
 		last := us[len(us)-1]
 		return Pos{last.ID, textLen(last)}
 	}
+	// A table's cells are edited in an input of their own, never with the
+	// caret: one asked for in a cell selects its table.
+	if t := e.tableOf(p.ID); t != nil {
+		return Pos{t.ID, 0}
+	}
 	// A change from outside can fold the block away: the caret goes to the
 	// end of what folds it, as folding does.
 	if h := e.folding(p.ID); h != nil {
@@ -415,18 +448,20 @@ func (e *Editor) folding(id string) *doc.Node {
 
 // SelectedText returns the selection's first block, and the selected text
 // of the blocks it spans, a line each.
-func (e *Editor) SelectedText() (string, string) {
-	a, _ := e.ordered()
-	var lines []string
-	for _, id := range e.SelectedBlocks() {
-		n := e.node(id)
-		if n == nil || !n.IsText() {
-			continue
+func (e *Editor) SelectedText() (first, text string) {
+	e.indexed(func() {
+		a, _ := e.ordered()
+		var lines []string
+		for _, n := range e.selectedNodes() {
+			if !n.IsText() {
+				continue
+			}
+			from, to, _ := e.inSelection(n)
+			lines = append(lines, n.Delta().Slice(from, to).Plain())
 		}
-		from, to, _ := e.inSelection(n)
-		lines = append(lines, n.Delta().Slice(from, to).Plain())
-	}
-	return a.ID, strings.Join(lines, "\n")
+		first, text = a.ID, strings.Join(lines, "\n")
+	})
+	return first, text
 }
 
 // SelectedBlocks returns the blocks the selection spans, in order: the
@@ -436,9 +471,26 @@ func (e *Editor) SelectedBlocks() []string {
 		return []string{e.focus.ID}
 	}
 	var out []string
+	e.indexed(func() {
+		for _, n := range e.selectedNodes() {
+			out = append(out, n.ID)
+		}
+	})
+	return out
+}
+
+// selectedNodes are the blocks of SelectedBlocks.
+func (e *Editor) selectedNodes() []*doc.Node {
+	if e.Collapsed() {
+		if n := e.node(e.focus.ID); n != nil {
+			return []*doc.Node{n}
+		}
+		return nil
+	}
+	var out []*doc.Node
 	for _, n := range e.units() {
 		if _, _, ok := e.inSelection(n); ok {
-			out = append(out, n.ID)
+			out = append(out, n)
 		}
 	}
 	return out
@@ -479,15 +531,26 @@ func (e *Editor) dropStep() {
 // BreakUndo makes the next edit a step of its own.
 func (e *Editor) BreakUndo() { e.coalescing = false }
 
-// CanUndo and CanRedo report whether there are steps to go back or forward.
-func (e *Editor) CanUndo() bool { return len(e.undo) > 0 }
-func (e *Editor) CanRedo() bool { return len(e.redo) > 0 }
+// CanUndo and CanRedo report whether there are steps to go back or
+// forward, as there are none on a page that has become read-only.
+func (e *Editor) CanUndo() bool { return len(e.undo) > 0 && !e.ReadOnly }
+func (e *Editor) CanRedo() bool { return len(e.redo) > 0 && !e.ReadOnly }
 
-// Undo goes back a step.
-func (e *Editor) Undo() { e.step(&e.undo, &e.redo) }
+// Undo goes back a step. On a page that has become read-only it changes
+// nothing, as every other edit: the steps kept from before would put back
+// the page as it was then, and a later save would store it.
+func (e *Editor) Undo() {
+	if !e.ReadOnly {
+		e.step(&e.undo, &e.redo)
+	}
+}
 
-// Redo goes forward a step.
-func (e *Editor) Redo() { e.step(&e.redo, &e.undo) }
+// Redo goes forward a step, as Undo goes back.
+func (e *Editor) Redo() {
+	if !e.ReadOnly {
+		e.step(&e.redo, &e.undo)
+	}
+}
 
 // step goes to the page of the step on top of from, keeping the page as
 // it is on to. Past a change from outside, it takes back only what the
@@ -571,11 +634,7 @@ func (e *Editor) Replace(c *doc.Content) {
 	e.order = nil
 	e.layouts = map[string]*blockLayout{}
 	e.coalescing = false
-	if len(e.Content.Children) == 0 {
-		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
-		p.SetDelta(nil)
-		e.Content.Children = []*doc.Node{p}
-	}
+	refill(e.Content)
 	e.keepSelection()
 	e.putBack(l)
 	e.services.Invalidate()
@@ -593,11 +652,7 @@ func (e *Editor) ApplyOps(ops []doc.Op) error {
 		}
 	}
 	e.layouts = map[string]*blockLayout{}
-	if len(e.Content.Children) == 0 {
-		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
-		p.SetDelta(nil)
-		e.Content.Children = []*doc.Node{p}
-	}
+	refill(e.Content)
 	e.keepSelection()
 	e.putBack(l)
 	e.changed()
@@ -635,11 +690,7 @@ func (e *Editor) ApplyOp(o doc.Op, newStep bool) error {
 	}
 	err := e.Content.Apply(o)
 	e.layouts = map[string]*blockLayout{}
-	if len(e.Content.Children) == 0 {
-		p := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
-		p.SetDelta(nil)
-		e.Content.Children = []*doc.Node{p}
-	}
+	refill(e.Content)
 	e.keepSelection()
 	e.putBack(l)
 	e.changed()
@@ -652,6 +703,9 @@ func (e *Editor) Edit(fn func(c *doc.Content)) {
 	e.coalescing = false
 	fn(e.Content)
 	e.layouts = map[string]*blockLayout{}
+	// Taking out the page's only block, as its one subpage's card, leaves
+	// it none.
+	refill(e.Content)
 	e.Select(e.anchor, e.focus)
 	e.changed()
 }

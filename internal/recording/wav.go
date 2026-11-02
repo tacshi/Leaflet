@@ -25,18 +25,35 @@ func CreateWav(path string) (*WavWriter, error) {
 	if err != nil {
 		return nil, err
 	}
+	return newWav(f)
+}
+
+// newWav starts a WAV file in f, new and empty; it closes f when it
+// cannot.
+func newWav(f *os.File) (*WavWriter, error) {
 	if _, err := f.Write(wavHeader(0)); err != nil {
 		_ = f.Close()
 		return nil, err
 	}
-	return &WavWriter{Path: path, f: f}, nil
+	return &WavWriter{Path: f.Name(), f: f}, nil
 }
+
+// maxWavData is the most audio a WAV file holds: its header counts it in
+// 32 bits, with the 36 bytes of header after the count. A recording that
+// long, past 37 hours, keeps what fits.
+const maxWavData = math.MaxUint32 - 36
+
+// errWavFull is audio past what a WAV file holds.
+var errWavFull = errors.New("the recording is as long as a WAV file can be")
 
 // DurationMs is how long the audio written so far lasts.
 func (w *WavWriter) DurationMs() int { return int(w.bytes * 1000 / 2 / SampleRate) }
 
 // Write adds PCM16 little-endian samples.
 func (w *WavWriter) Write(pcm []byte) error {
+	if w.bytes+int64(len(pcm)) > maxWavData {
+		return errWavFull
+	}
 	n, err := w.f.Write(pcm)
 	w.bytes += int64(n)
 	return err
@@ -76,9 +93,16 @@ func repairWav(path string) int {
 }
 
 func wavHeader(dataBytes int64) []byte {
+	// What does not fit the header's count is left out of it.
+	var data uint32 = maxWavData
+	if dataBytes < 0 {
+		data = 0
+	} else if dataBytes < maxWavData {
+		data = uint32(dataBytes)
+	}
 	b := make([]byte, 44)
 	copy(b[0:], "RIFF")
-	binary.LittleEndian.PutUint32(b[4:], uint32(36+dataBytes))
+	binary.LittleEndian.PutUint32(b[4:], 36+data)
 	copy(b[8:], "WAVE")
 	copy(b[12:], "fmt ")
 	binary.LittleEndian.PutUint32(b[16:], 16)
@@ -89,7 +113,7 @@ func wavHeader(dataBytes int64) []byte {
 	binary.LittleEndian.PutUint16(b[32:], 2)
 	binary.LittleEndian.PutUint16(b[34:], 16)
 	copy(b[36:], "data")
-	binary.LittleEndian.PutUint32(b[40:], uint32(dataBytes))
+	binary.LittleEndian.PutUint32(b[40:], data)
 	return b
 }
 

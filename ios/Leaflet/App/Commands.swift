@@ -72,7 +72,7 @@ struct FormatCommands: View {
 
     var body: some View {
         Group {
-            Button(LI.strikethrough) { editor?.toggleInline(.strikethroughStyle) }
+            Button(LI.strikethrough) { editor?.toggleInline(.leafletStrike) }
                 .keyboardShortcut("x", modifiers: [.command, .shift])
             Button(L.editorInlineCode) { editor?.toggleInline(.leafletCode) }
                 .keyboardShortcut("e")

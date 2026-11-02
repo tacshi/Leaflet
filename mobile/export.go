@@ -26,11 +26,11 @@ type exportedAll struct {
 // desktop's Account › Export all does, and returns an exportedAll in
 // JSON. The open pages' edits are saved first: an export without them
 // would miss them.
-func (c *Core) ExportAll(dir string) (string, error) {
+func (c *Core) ExportAll(dir string) (_ string, err error) {
+	defer catch(&err)
 	var saved bool
 	var folders []store.Folder
 	var files []store.File
-	var err error
 	c.q.do(func() {
 		if saved = c.saveOpen(); !saved {
 			return
@@ -40,7 +40,7 @@ func (c *Core) ExportAll(dir string) (string, error) {
 		}
 	})
 	if !saved {
-		return "", errNotSaved
+		return "", errNotSaved()
 	}
 	if err != nil {
 		return "", err

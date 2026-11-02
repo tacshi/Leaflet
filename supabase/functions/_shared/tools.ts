@@ -114,7 +114,11 @@ const blockSpecSchema = {
     },
     level: { type: "integer", minimum: 1, maximum: 6, description: "Heading level" },
     checked: { type: "boolean", description: "For todo_list" },
-    due: { type: "string", description: "For todo_list: the day it is due, YYYY-MM-DD" },
+    due: {
+      type: "string",
+      description:
+        "For todo_list: the day it is due, YYYY-MM-DD, or with a time of day, YYYY-MM-DDTHH:MM, in the user's own time",
+    },
     children: {
       type: "array",
       description: "Nested blocks (BlockSpec objects). Only list blocks take children; a toggle_list takes any.",
@@ -535,6 +539,16 @@ const FETCHED_URL_TYPES = new Set(["image", "video", "link_preview"]);
 /** Finds the URLs in text. */
 const URL_RE = /https?:\/\/[^\s<>"'()\[\]]+/g;
 
+/** The tools that change the page, which a viewer may not call. */
+const EDITING_TOOLS = new Set([
+  "write_markdown",
+  "insert_blocks",
+  "replace_block",
+  "move_block",
+  "delete_blocks",
+  "create_subpage",
+]);
+
 export class PageEditSession {
   content: PageContent;
   readonly before: PageContent;
@@ -562,10 +576,20 @@ export class PageEditSession {
     } catch {
       return { result: { error: "Arguments must be a JSON object" }, ops: [], blockIds: [] };
     }
+    // A call that fails part way, such as write_markdown whose first block
+    // went in before a later one was refused, leaves the page as it was:
+    // the model is told it failed, so nothing it did may stay.
+    const editing = EDITING_TOOLS.has(name);
+    const content = editing ? clone(this.content) : this.content;
+    const recorded = this.ops.length;
     try {
       return await this.dispatch(name, args);
     } catch (e) {
       if (e instanceof ToolError || e instanceof SpecError) {
+        if (editing) {
+          this.content = content;
+          this.ops.length = recorded;
+        }
         return { result: { error: e.message }, ops: [], blockIds: [] };
       }
       throw e;
@@ -573,15 +597,7 @@ export class PageEditSession {
   }
 
   private async dispatch(name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
-    const editing = new Set([
-      "write_markdown",
-      "insert_blocks",
-      "replace_block",
-      "move_block",
-      "delete_blocks",
-      "create_subpage",
-    ]);
-    if (editing.has(name) && !this.opts.canEdit) {
+    if (EDITING_TOOLS.has(name) && !this.opts.canEdit) {
       throw new ToolError("You can read this page but not edit it: the person asking has view access only");
     }
     if ((name === "list_pages" || name === "read_other_page") && !this.opts.crossPage) {

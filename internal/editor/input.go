@@ -90,8 +90,16 @@ func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 	if text == "\n" || text == "\r" {
 		if ok && from != to {
 			n := e.focusNode()
-			n.SetDelta(n.Delta().Delete(from, to))
-			e.focus, e.anchor = Pos{n.ID, from}, Pos{n.ID, from}
+			if wasMarked {
+				// The composition was never the page's: it goes before
+				// Enter keeps the page.
+				n.SetDelta(n.Delta().Delete(from, to))
+				e.focus, e.anchor = Pos{n.ID, from}, Pos{n.ID, from}
+			} else {
+				// Text the line break replaces goes in Enter's step, which
+				// keeps it, as Enter on a selection does.
+				e.anchor, e.focus = Pos{n.ID, from}, Pos{n.ID, to}
+			}
 		}
 		if wasMarked && e.markStep {
 			// The composition is out again, so its step changes nothing:
@@ -446,10 +454,8 @@ func (e *Editor) horizontal(dir int, word, line, extend bool) {
 	case dir < 0 && p.Off > 0:
 		if word {
 			p.Off = wordStart([]rune(n.Delta().Plain()), p.Off)
-		} else if l := e.layoutOf(n); l != nil {
-			p.Off = runeOff(n, l.layout.PreviousBoundary(utf16Off(n, p.Off)))
 		} else {
-			p.Off--
+			p.Off = e.prevStop(n, p.Off)
 		}
 		// A mention is passed over whole.
 		if start, _, ok := n.Delta().MentionAround(p.Off); ok {
@@ -458,10 +464,8 @@ func (e *Editor) horizontal(dir int, word, line, extend bool) {
 	case dir > 0 && p.Off < textLen(n):
 		if word {
 			p.Off = wordEnd([]rune(n.Delta().Plain()), p.Off)
-		} else if l := e.layoutOf(n); l != nil {
-			p.Off = runeOff(n, l.layout.NextBoundary(utf16Off(n, p.Off)))
 		} else {
-			p.Off++
+			p.Off = e.nextStop(n, p.Off)
 		}
 		if _, end, ok := n.Delta().MentionAround(p.Off); ok {
 			p.Off = end

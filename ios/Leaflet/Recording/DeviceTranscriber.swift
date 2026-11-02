@@ -145,7 +145,9 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
 }
 
 /// LiveTranscription is one recording transcribed as it records. Audio
-/// sent while the model downloads waits for it, in order.
+/// sent while the model downloads waits for it, in order. Once the
+/// transcription fails, as with no model for the language, the audio goes
+/// nowhere: kept for nothing, it would fill the memory over an hour.
 private final class LiveTranscription: Sendable {
     private let audio: AsyncStream<Data>.Continuation
     private let task: Task<[Segment], any Error>
@@ -154,34 +156,47 @@ private final class LiveTranscription: Sendable {
         let (audio, input) = AsyncStream.makeStream(of: Data.self)
         self.audio = input
         task = Task.detached {
-            let transcriber = try await DeviceTranscriber.transcriber(for: language)
-            guard
-                let format = await SpeechAnalyzer.bestAvailableAudioFormat(
-                    compatibleWith: [transcriber]),
-                let from = AVAudioFormat(
-                    commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1,
-                    interleaved: true),
-                let converter = AVAudioConverter(from: from, to: format)
-            else {
-                throw CocoaError(.featureUnsupported)
+            do {
+                return try await Self.transcribe(audio, language: language, sink: sink)
+            } catch {
+                // The audio waiting goes, and what comes after isn't kept.
+                input.finish()
+                throw error
             }
-            let analyzer = SpeechAnalyzer(modules: [transcriber])
-            let (buffers, analyze) = AsyncStream.makeStream(of: AnalyzerInput.self)
-            let collect = Task { try await DeviceTranscriber.collect(transcriber, sink: sink) }
-            try await analyzer.start(inputSequence: buffers)
-            for await pcm in audio {
-                if let buffer = Self.buffer(pcm, from: from, with: converter, to: format) {
-                    analyze.yield(AnalyzerInput(buffer: buffer))
-                }
-            }
-            analyze.finish()
-            if Task.isCancelled {
-                await analyzer.cancelAndFinishNow()
-            } else {
-                try await analyzer.finalizeAndFinishThroughEndOfInput()
-            }
-            return try await collect.value
         }
+    }
+
+    /// transcribe transcribes audio as it comes, until it ends.
+    private static func transcribe(
+        _ audio: AsyncStream<Data>, language: String, sink: SinkRef
+    ) async throws -> [Segment] {
+        let transcriber = try await DeviceTranscriber.transcriber(for: language)
+        guard
+            let format = await SpeechAnalyzer.bestAvailableAudioFormat(
+                compatibleWith: [transcriber]),
+            let from = AVAudioFormat(
+                commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1,
+                interleaved: true),
+            let converter = AVAudioConverter(from: from, to: format)
+        else {
+            throw CocoaError(.featureUnsupported)
+        }
+        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let (buffers, analyze) = AsyncStream.makeStream(of: AnalyzerInput.self)
+        let collect = Task { try await DeviceTranscriber.collect(transcriber, sink: sink) }
+        try await analyzer.start(inputSequence: buffers)
+        for await pcm in audio {
+            if let buffer = Self.buffer(pcm, from: from, with: converter, to: format) {
+                analyze.yield(AnalyzerInput(buffer: buffer))
+            }
+        }
+        analyze.finish()
+        if Task.isCancelled {
+            await analyzer.cancelAndFinishNow()
+        } else {
+            try await analyzer.finalizeAndFinishThroughEndOfInput()
+        }
+        return try await collect.value
     }
 
     func send(_ pcm: Data) { audio.yield(pcm) }

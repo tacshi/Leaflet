@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"leaflet/internal/doc"
+	"leaflet/locales"
 )
 
 func templates(t *testing.T, c *Core) []templateRow {
@@ -181,5 +182,41 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 	_ = os.Remove(local)
 	if _, err := c.LocalFile(n.Str("file_id")); err == nil {
 		t.Fatal("a file neither here nor uploaded was found")
+	}
+}
+
+// A page with a recording still being made in it is not copied, as on the
+// desktop: the copy would stay without what the recording gets.
+func TestNoCopyWhileRecording(t *testing.T) {
+	c, _ := open(t)
+	p := create(t, c, `{"title":"Interview"}`)
+	recording := func(on bool, id string) {
+		c.q.do(func() { c.core.Rec.State.Active, c.core.Rec.State.PageID = on, id })
+	}
+	wait := locales.TemplateWaitForRecording()
+	recording(true, p.ID)
+	if _, err := c.DuplicatePage(p.ID); err == nil || err.Error() != wait {
+		t.Fatalf("duplicated while recording: %v", err)
+	}
+	if _, err := c.SaveAsTemplate(p.ID); err == nil || err.Error() != wait {
+		t.Fatalf("saved as a template while recording: %v", err)
+	}
+	recording(false, "")
+	raw, err := c.SaveAsTemplate(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tpl pageRow
+	_ = json.Unmarshal([]byte(raw), &tpl)
+
+	// Nor is a template a recording is being made in used.
+	recording(true, tpl.ID)
+	page := create(t, c, `{}`)
+	if _, err := c.ApplyTemplate(page.ID, "template:"+tpl.ID); err == nil || err.Error() != wait {
+		t.Fatalf("used while recording: %v", err)
+	}
+	recording(false, "")
+	if _, err := c.ApplyTemplate(page.ID, "template:"+tpl.ID); err != nil {
+		t.Fatal(err)
 	}
 }

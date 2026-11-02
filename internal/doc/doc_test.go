@@ -1062,8 +1062,8 @@ func TestPageMarkdownKeepsBlocksApart(t *testing.T) {
 	})
 	got := PageMarkdown("", c, func(string) string { return "Sub [page]" })
 	want := "## Plan for \\*now\\*\n\n" +
-		"> said\n> \\- not a list\n\n" +
-		"- item\n  1\\. not a list\n  - sub\n\n  after sub\n\n  > q\n\n" +
+		"> said\\\n> \\- not a list\n\n" +
+		"- item\\\n  1\\. not a list\n  - sub\n\n  after sub\n\n  > q\n\n" +
 		"1. ten\n\n   ### inner\n\n" +
 		"end\n\n" +
 		"[A \\[b\\] \\*c\\*](<https://e.com/x_(1) y>)\n\n" +

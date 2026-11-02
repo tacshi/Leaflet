@@ -1,15 +1,18 @@
 package doc
 
 import (
+	"encoding/csv"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 )
 
 // A chart's data as people edit it: one line per label, its label then a
 // value for each series, after a first line naming the series, the
-// values apart by commas.
+// values apart by commas: CSV, a label or a name in quotes where it holds
+// a comma.
 
 // ErrChartRows and ErrChartSeries are what ParseChartCSV finds missing:
 // a label under the first line, or a series beside the labels.
@@ -58,12 +61,12 @@ func ChartCSV(n *Node, labelColumn string) string {
 		}
 	}
 	var b strings.Builder
-	b.WriteString(labelColumn)
+	b.WriteString(csvField(labelColumn))
 	for _, s := range all {
-		b.WriteString(", " + s.name)
+		b.WriteString(", " + csvField(s.name))
 	}
 	for i, l := range labels {
-		b.WriteString("\n" + l)
+		b.WriteString("\n" + csvField(l))
 		for _, s := range all {
 			v := 0.0
 			if i < len(s.values) {
@@ -75,33 +78,62 @@ func ChartCSV(n *Node, labelColumn string) string {
 	return b.String()
 }
 
+// csvField writes a label or a series' name as a field of CSV, in quotes
+// when it holds a comma, a quote or a line break, or starts with a space.
+func csvField(s string) string {
+	var b strings.Builder
+	w := csv.NewWriter(&b)
+	_ = w.Write([]string{s})
+	w.Flush()
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
 // ParseChartCSV reads a chart's labels and series, as ChartData takes
-// them, from text as ChartCSV writes it. An empty value is 0.
-func ParseChartCSV(csv string) (labels []any, series []any, err error) {
-	lines := strings.Split(strings.TrimSpace(csv), "\n")
-	if len(lines) < 2 {
+// them, from text as ChartCSV writes it: CSV, with spaces after the
+// commas, a field in quotes where it holds a comma, and a quote in a field
+// not quoted as it is, as people type one. An empty value is 0.
+func ParseChartCSV(text string) (labels []any, series []any, err error) {
+	r := csv.NewReader(strings.NewReader(text))
+	r.FieldsPerRecord = -1
+	r.TrimLeadingSpace = true
+	r.LazyQuotes = true
+	// lines are where each row's fields start, counting from 1, for what
+	// is wrong in one.
+	var rows [][]string
+	var lines [][]int
+	for {
+		row, err := r.Read()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		at := make([]int, len(row))
+		for i := range row {
+			row[i] = strings.TrimSpace(row[i])
+			at[i], _ = r.FieldPos(i)
+		}
+		// A line of only spaces is no row, as a blank one is none.
+		if len(row) > 1 || row[0] != "" {
+			rows, lines = append(rows, row), append(lines, at)
+		}
+	}
+	if len(rows) < 2 {
 		return nil, nil, ErrChartRows
 	}
-	split := func(s string) []string {
-		parts := strings.Split(s, ",")
-		for i := range parts {
-			parts[i] = strings.TrimSpace(parts[i])
-		}
-		return parts
-	}
-	header := split(lines[0])
+	header := rows[0]
 	if len(header) < 2 {
 		return nil, nil, ErrChartSeries
 	}
 	values := make([][]any, len(header)-1)
-	for i, line := range lines[1:] {
-		cells := split(line)
+	for i, cells := range rows[1:] {
 		labels = append(labels, cells[0])
 		for s := range values {
 			v := 0.0
 			if s+1 < len(cells) && cells[s+1] != "" {
 				if v, err = strconv.ParseFloat(cells[s+1], 64); err != nil {
-					return nil, nil, &ChartNumberError{Line: i + 2, Cell: cells[s+1]}
+					return nil, nil, &ChartNumberError{Line: lines[i+1][s+1], Cell: cells[s+1]}
 				}
 			}
 			values[s] = append(values[s], v)

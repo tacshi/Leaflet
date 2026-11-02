@@ -185,25 +185,21 @@ extension CoreClient {
         String(decoding: (try? JSONEncoder().encode(v)) ?? Data("null".utf8), as: UTF8.self)
     }
 
-    private func value<T: Decodable>(_ type: T.Type, _ raw: String) throws -> T {
-        try JSONDecoder().decode(type, from: Data(raw.utf8))
-    }
-
     // MARK: Agents
 
-    func agentState(_ pageID: String) async throws -> AgentState {
-        try value(
-            AgentState.self,
-            try await call { core in try Self.answer { e in core.agentState(pageID, error: e) } })
+    nonisolated(nonsending) func agentState(_ pageID: String) async throws -> AgentState {
+        try await call(AgentState.self) { core in
+            try Self.answer { e in core.agentState(pageID, error: e) }
+        }
     }
 
-    func chat(_ pageID: String, text: String, focus: [String]) async {
+    nonisolated(nonsending) func chat(_ pageID: String, text: String, focus: [String]) async {
         let f = json(focus)
         try? await call { $0.chat(pageID, text: text, focus: f) }
     }
 
     /// ask starts a run from the editor, and returns its ID.
-    func ask(
+    nonisolated(nonsending) func ask(
         _ pageID: String, surface: String, instruction: String, focus: [String], selection: String,
         agent: AgentState.Option?
     ) async -> String {
@@ -217,36 +213,42 @@ extension CoreClient {
             }) ?? ""
     }
 
-    func stopAgent(_ pageID: String, runID: String) async {
+    nonisolated(nonsending) func stopAgent(_ pageID: String, runID: String) async {
         try? await call { $0.stopAgent(pageID, runID: runID) }
     }
 
-    func undoRun(_ pageID: String, runID: String) async {
-        try? await call { $0.undoRun(pageID, runID: runID) }
+    /// undoRun takes a run's edits back off the page, as one step. Edits
+    /// later ones changed leave the run as it was, and it throws why.
+    nonisolated(nonsending) func undoRun(_ pageID: String, runID: String) async throws {
+        try await call { try $0.undoRun(pageID, runID: runID) }
     }
 
-    func redoRun(_ pageID: String, runID: String) async {
-        try? await call { $0.redoRun(pageID, runID: runID) }
+    /// redoRun puts an undone run's edits back, or leaves it undone and
+    /// throws why.
+    nonisolated(nonsending) func redoRun(_ pageID: String, runID: String) async throws {
+        try await call { try $0.redoRun(pageID, runID: runID) }
     }
 
     /// selectAgent picks the agent and model the page's chat asks.
-    func selectAgent(_ pageID: String, providerID: String, model: String) async {
+    nonisolated(nonsending) func selectAgent(_ pageID: String, providerID: String, model: String)
+        async
+    {
         try? await call { $0.selectAgent(pageID, providerID: providerID, model: model) }
     }
 
-    func newConversation(_ pageID: String) async {
+    nonisolated(nonsending) func newConversation(_ pageID: String) async {
         try? await call { $0.newConversation(pageID) }
     }
 
     // MARK: Comments
 
-    func threads(_ pageID: String) async throws -> [CommentThread] {
-        try value(
-            [CommentThread].self,
-            try await call { core in try Self.answer { e in core.threads(pageID, error: e) } })
+    nonisolated(nonsending) func threads(_ pageID: String) async throws -> [CommentThread] {
+        try await call([CommentThread].self) { core in
+            try Self.answer { e in core.threads(pageID, error: e) }
+        }
     }
 
-    func addComment(
+    nonisolated(nonsending) func addComment(
         _ pageID: String, blockID: String, body: String, parentID: String = "", quote: String = ""
     )
         async throws
@@ -257,50 +259,48 @@ extension CoreClient {
         }
     }
 
-    func resolveThread(_ rootID: String, resolved: Bool) async throws {
+    nonisolated(nonsending) func resolveThread(_ rootID: String, resolved: Bool) async throws {
         try await call { try $0.resolveThread(rootID, resolved: resolved) }
     }
 
-    func deleteComment(_ id: String) async throws {
+    nonisolated(nonsending) func deleteComment(_ id: String) async throws {
         try await call { try $0.deleteComment(id) }
     }
 
     // MARK: Providers
 
-    func presets() async throws -> [ProviderPreset] {
-        try value(
-            [ProviderPreset].self,
-            try await call { core in try Self.answer { e in core.presets(e) } })
+    nonisolated(nonsending) func presets() async throws -> [ProviderPreset] {
+        try await call([ProviderPreset].self) { core in try Self.answer { e in core.presets(e) } }
     }
 
-    func providers() async throws -> [AgentProvider] {
-        try value(
-            [AgentProvider].self,
-            try await call { core in try Self.answer { e in core.providers(e) } })
+    nonisolated(nonsending) func providers() async throws -> [AgentProvider] {
+        try await call([AgentProvider].self) { core in try Self.answer { e in core.providers(e) } }
     }
 
-    func saveProvider(_ provider: AgentProvider) async throws {
+    nonisolated(nonsending) func saveProvider(_ provider: AgentProvider) async throws {
         let raw = json(provider)
-        try await call { try $0.saveProvider(raw) }
+        try await call(waiting: true) { try $0.saveProvider(raw) }
     }
 
     /// testProvider tries a provider, with the key typed in its apiKey or
     /// the one kept for it.
-    func testProvider(_ provider: AgentProvider) async throws -> ProviderTest {
+    nonisolated(nonsending) func testProvider(_ provider: AgentProvider) async throws
+        -> ProviderTest
+    {
         let raw = json(provider)
-        return try value(
-            ProviderTest.self,
-            try await call { core in try Self.answer { e in core.testProvider(raw, error: e) } })
+        return try await call(ProviderTest.self, waiting: true) { core in
+            try Self.answer { e in core.testProvider(raw, error: e) }
+        }
     }
 
-    func removeProvider(_ id: String) async throws {
-        try await call { try $0.removeProvider(id) }
+    nonisolated(nonsending) func removeProvider(_ id: String) async throws {
+        try await call(waiting: true) { try $0.removeProvider(id) }
     }
 
     /// beginChatGPTSignIn begins signing in with ChatGPT for the provider
     /// providerID ("" for a new one), and returns OpenAI's page to open.
-    func beginChatGPTSignIn(_ providerID: String) async throws -> URL {
-        let raw = try await call { core in
+    nonisolated(nonsending) func beginChatGPTSignIn(_ providerID: String) async throws -> URL {
+        let raw = try await call(waiting: true) { core in
             try Self.answer { e in core.beginChatGPTSign(in: providerID, error: e) }
         }
         guard let url = URL(string: raw) else { throw URLError(.badURL) }
@@ -308,29 +308,29 @@ extension CoreClient {
     }
 
     /// finishChatGPTSignIn waits for the sign-in begun to come back.
-    func finishChatGPTSignIn() async throws -> ChatGPTAccount {
-        try value(
-            ChatGPTAccount.self,
-            try await call { core in try Self.answer { e in core.finishChatGPTSign(in: e) } })
+    nonisolated(nonsending) func finishChatGPTSignIn() async throws -> ChatGPTAccount {
+        try await call(ChatGPTAccount.self, waiting: true) { core in
+            try Self.answer { e in core.finishChatGPTSign(in: e) }
+        }
     }
 
     /// chatGPTModels are the models the plan signed in to serves.
-    func chatGPTModels() async throws -> [String] {
-        try value(
-            [String].self,
-            try await call { core in try Self.answer { e in core.chatGPTModels(e) } })
+    nonisolated(nonsending) func chatGPTModels() async throws -> [String] {
+        try await call([String].self, waiting: true) { core in
+            try Self.answer { e in core.chatGPTModels(e) }
+        }
     }
 
     /// cancelChatGPTSignIn gives up the sign-in being made, as its page
     /// closes; one already made stays, to save.
     func cancelChatGPTSignIn() {
-        Task { try? await call { $0.cancelChatGPTSignIn() } }
+        Task { try? await call(waiting: true) { $0.cancelChatGPTSignIn() } }
     }
 
     /// forgetChatGPTSignIn gives up the sign-in being made, and forgets one
     /// made and not saved, as the form closes.
     func forgetChatGPTSignIn() {
-        Task { try? await call { $0.forgetChatGPTSignIn() } }
+        Task { try? await call(waiting: true) { $0.forgetChatGPTSignIn() } }
     }
 }
 

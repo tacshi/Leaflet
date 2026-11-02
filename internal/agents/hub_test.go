@@ -825,3 +825,59 @@ func TestReplyStreamShowsTheAnswerSoFar(t *testing.T) {
 		t.Errorf("a finished reply changed: %+v", reply)
 	}
 }
+
+// Undo that cannot revert the run's edits, as on content that cannot be
+// read, says so and leaves the run as it was: not undone, its job not
+// sent as reverted.
+func TestUndoThatFailsChangesNothing(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE page_contents SET content = '{"children": [' WHERE page_id = ?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutJob(store.Job{ID: "r1", PageID: p.ID, Surface: "sidebar", Status: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, stubHost{})
+	s := h.Session(p.ID)
+	s.Runs = []*Run{{ID: "r1", Status: "done", Ops: []doc.Op{insertAfter("p1", "x1", "one")}}}
+
+	if err := h.UndoRun(p.ID, "r1"); err == nil {
+		t.Error("undo said it reverted the run")
+	}
+	if s.Run("r1").Undone {
+		t.Error("the run counts as undone")
+	}
+	var status string
+	if err := st.DB().QueryRow(`SELECT status FROM ai_jobs WHERE id = 'r1'`).Scan(&status); err != nil || status != "done" {
+		t.Errorf("job %q, %v", status, err)
+	}
+}
+
+// Signed in, an agent takes the user's own page for shared until sync has
+// read who their pages are shared with: before then, no members kept of
+// it says nothing.
+func TestCrossPageWaitsForOwnPagesMembers(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, nil)
+	on := store.Settings{AgentsReadOtherPages: true}
+	if h.crossPage(mine, on) {
+		t.Error("read other pages before sync knew who has the page")
+	}
+	if err := st.SetValue(ownMembersKey, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if !h.crossPage(mine, on) {
+		t.Error("no other pages once sync knew no one else has it")
+	}
+}

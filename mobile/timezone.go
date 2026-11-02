@@ -13,6 +13,7 @@ import (
 // the zone's offset. offset, in seconds east of UTC, stands in for a name
 // the core doesn't know.
 func SetTimeZone(name string, offset int) {
+	defer catch(nil)
 	if loc, err := time.LoadLocation(name); err == nil && name != "" {
 		time.Local = loc
 		return

@@ -7,15 +7,24 @@ options:
     iOS: "26.0"
   createIntermediateGroups: true
   developmentLanguage: en
+# The packages are pinned to a version each, as Package.resolved, kept
+# beside this file, pins them to a commit: make ios-project puts it where
+# Xcode reads it, inside the project git ignores, so every build, and
+# osv-scanner, has the same ones. A new version is taken by changing it
+# here and running make ios-packages.
 packages:
   # Code blocks' syntax colors: highlight.js, run in JavaScriptCore.
   Highlightr:
     url: https://github.com/raspu/Highlightr
-    from: 2.3.0
+    exactVersion: 2.3.0
   # Image blocks' SVGs, which UIImage can't read.
   SwiftDraw:
     url: https://github.com/swhitty/SwiftDraw
-    from: 0.29.0
+    exactVersion: 0.29.0
+  # The device's model, which names it in Account › Devices.
+  DeviceKit:
+    url: https://github.com/devicekit/DeviceKit
+    exactVersion: 5.9.0
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -56,6 +65,7 @@ targets:
         embed: false
       - package: Highlightr
       - package: SwiftDraw
+      - package: DeviceKit
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -68,6 +78,8 @@ targets:
         INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
         INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        # In English; Resources/Debug and Resources/Release have it, and
+        # the Debug build's name, in each language.
         INFOPLIST_KEY_NSMicrophoneUsageDescription: Leaflet records audio into recording blocks when you press Record.
         # Go's net package resolves names through libresolv.
         OTHER_LDFLAGS: -lresolv

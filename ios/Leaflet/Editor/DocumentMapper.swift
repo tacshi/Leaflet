@@ -69,10 +69,8 @@ enum DocumentMapper {
         var out: [NSAttributedString.Key: Any] = [:]
         if a["bold"]?.bool == true { out[.leafletBold] = true }
         if a["italic"]?.bool == true { out[.leafletItalic] = true }
-        if a["underline"]?.bool == true { out[.underlineStyle] = NSUnderlineStyle.single.rawValue }
-        if a["strikethrough"]?.bool == true {
-            out[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
-        }
+        if a["underline"]?.bool == true { out[.leafletUnderline] = true }
+        if a["strikethrough"]?.bool == true { out[.leafletStrike] = true }
         if a["code"]?.bool == true { out[.leafletCode] = true }
         if let href = a["href"]?.string, !href.isEmpty { out[.leafletHref] = href }
         if let color = a["color"]?.string { out[.leafletColor] = color }
@@ -133,7 +131,8 @@ enum DocumentMapper {
         -> DocContent
     {
         var roots: [DocNode] = []
-        // chain is the path to the last block at each depth so far.
+        // chain is the path to the last block that holds blocks at each
+        // depth so far, and the depth it is at.
         var chain: [(depth: Int, path: [Int])] = []
         var seen = Set<String>()
         for p in paragraphs(s, trailing: trailing) {
@@ -144,15 +143,18 @@ enum DocumentMapper {
             while let top = chain.last, top.depth >= info.depth { chain.removeLast() }
             // A nested block goes in the block before it that holds blocks;
             // one deeper than that can be goes as deep as it can.
-            if let parent = chain.last, BlockInfo.nestable.contains(nodeAt(roots, parent.path).type)
-            {
+            let path: [Int]
+            let depth: Int
+            if let parent = chain.last {
                 insert(node, into: &roots, at: parent.path)
-                let index = (nodeAt(roots, parent.path).children?.count ?? 1) - 1
-                chain.append((parent.depth + 1, parent.path + [index]))
+                path = parent.path + [(nodeAt(roots, parent.path).children?.count ?? 1) - 1]
+                depth = parent.depth + 1
             } else {
                 roots.append(node)
-                chain = [(0, [roots.count - 1])]
+                path = [roots.count - 1]
+                depth = 0
             }
+            if BlockInfo.nestable.contains(node.type) { chain.append((depth, path)) }
         }
         return DocContent(
             document: DocNode(id: "root", type: "page", data: nil, children: roots), meta: meta)
@@ -204,8 +206,8 @@ enum DocumentMapper {
             var a: [String: JSONValue] = [:]
             if attrs[.leafletBold] as? Bool == true { a["bold"] = .bool(true) }
             if attrs[.leafletItalic] as? Bool == true { a["italic"] = .bool(true) }
-            if attrs[.underlineStyle] != nil { a["underline"] = .bool(true) }
-            if attrs[.strikethroughStyle] != nil { a["strikethrough"] = .bool(true) }
+            if attrs[.leafletUnderline] as? Bool == true { a["underline"] = .bool(true) }
+            if attrs[.leafletStrike] as? Bool == true { a["strikethrough"] = .bool(true) }
             if attrs[.leafletCode] as? Bool == true { a["code"] = .bool(true) }
             if let href = attrs[.leafletHref] as? String { a["href"] = .string(href) }
             if let c = attrs[.leafletColor] as? String { a["color"] = .string(c) }

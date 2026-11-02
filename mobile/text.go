@@ -16,6 +16,7 @@ import (
 // says the messages it shares with the desktop through it, so both say
 // them alike, plurals and dates included.
 func Text(locale, key, args string) string {
+	defer catch(nil)
 	var values map[string]any
 	if args != "" {
 		if err := json.Unmarshal([]byte(args), &values); err != nil {
@@ -42,6 +43,7 @@ func Text(locale, key, args string) string {
 // languages the user reads best, given as a JSON array of BCP 47 tags in
 // the order they prefer them.
 func Language(preferred string) string {
+	defer catch(nil)
 	var tags []string
 	_ = json.Unmarshal([]byte(preferred), &tags)
 	return i18n.Match(tags, locales.Catalog.Languages())
@@ -57,6 +59,7 @@ type language struct {
 // Languages returns the languages of the app's catalogs, as JSON, each
 // with its name in itself, as the desktop's settings list them.
 func Languages() string {
+	defer catch(nil)
 	tags := locales.Catalog.Languages()
 	out := make([]language, 0, len(tags))
 	for _, tag := range tags {

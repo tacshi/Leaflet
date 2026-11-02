@@ -331,6 +331,14 @@ func SetTableRows(n *Node, rows [][]string) error {
 	if len(rows) == 0 || cols == 0 {
 		return toolErr("A table needs rows: a list of rows, each a list of cells.")
 	}
+	// The cells by where they are, found once rather than for each cell.
+	at := map[[2]int]*Node{}
+	for _, cell := range n.Children {
+		pos := [2]int{cell.Int("rowPosition", -1), cell.Int("colPosition", -1)}
+		if _, ok := at[pos]; !ok {
+			at[pos] = cell
+		}
+	}
 	var kept []*Node
 	for c := 0; c < cols; c++ {
 		for r := range rows {
@@ -338,7 +346,7 @@ func SetTableRows(n *Node, rows [][]string) error {
 			if c < len(rows[r]) {
 				text = rows[r][c]
 			}
-			cell := TableCell(n, r, c)
+			cell := at[[2]int{r, c}]
 			if cell == nil {
 				cell = &Node{ID: NewBlockID(), Type: "table/cell", Data: map[string]any{"colPosition": c, "rowPosition": r}}
 			}
@@ -382,6 +390,24 @@ func TableCell(table *Node, row, col int) *Node {
 		}
 	}
 	return nil
+}
+
+// TableCells is a table's cells by row and column, as many as TableSize
+// makes room for, nil where one is missing: for every cell, it is
+// TableCell without looking through the table for each.
+func TableCells(table *Node) [][]*Node {
+	rows, cols := TableSize(table)
+	grid := make([][]*Node, rows)
+	for r := range grid {
+		grid[r] = make([]*Node, cols)
+	}
+	for _, cell := range table.Children {
+		r, c := cell.Int("rowPosition", -1), cell.Int("colPosition", -1)
+		if r >= 0 && c >= 0 && r < rows && c < cols && grid[r][c] == nil {
+			grid[r][c] = cell
+		}
+	}
+	return grid
 }
 
 // SortTableCells puts a table's cells in appflowy's column-major order.

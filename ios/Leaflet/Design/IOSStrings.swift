@@ -35,11 +35,6 @@ enum LI {
             localized: "Hide Subpages", bundle: L.bundle,
             comment: "The sidebar: hide the pages inside this one.")
     }
-    static var appearance: String {
-        String(
-            localized: "Appearance",
-            bundle: L.bundle, comment: "Settings: the section of the theme, accent and text size.")
-    }
     static var coreFailed: String {
         String(
             localized: "Leaflet couldn't open its data",
@@ -116,10 +111,23 @@ enum LI {
     static var microphoneDenied: String {
         String(
             localized:
-                "Leaflet can't use the microphone. Turn it on in Settings › Privacy & Security › Microphone.",
+                "Leaflet isn't allowed to use it. Turn it on in Settings › Privacy & Security › Microphone.",
             bundle: L.bundle,
-            comment: "A recording could not start: the user has not let the app use the microphone."
+            comment:
+                "Why a recording could not start: the user has not let the app use the microphone. Follows 'The microphone did not start: '."
         )
+    }
+    static var agentOptions: String {
+        String(
+            localized: "Agent Options", bundle: L.bundle,
+            comment:
+                "The Agent panel: the menu of the agent to ask, a new conversation, and the agent providers."
+        )
+    }
+    static var resumeRecording: String {
+        String(
+            localized: "Resume", bundle: L.bundle,
+            comment: "A recording's pill: go on recording after Pause.")
     }
     static var microphoneInCall: String {
         String(
@@ -127,5 +135,31 @@ enum LI {
             comment:
                 "Why a recording could not start: a phone or FaceTime call holds the microphone. Follows 'The microphone did not start: '."
         )
+    }
+    static var markDone: String {
+        String(
+            localized: "Mark as Done", bundle: L.bundle,
+            comment: "VoiceOver's action on a to-do in the editor: check it.")
+    }
+    static var markNotDone: String {
+        String(
+            localized: "Mark as Not Done", bundle: L.bundle,
+            comment: "VoiceOver's action on a checked to-do in the editor: uncheck it.")
+    }
+    static var expand: String {
+        String(
+            localized: "Expand", bundle: L.bundle,
+            comment: "VoiceOver's action on a closed toggle in the editor: show what is inside it.")
+    }
+    static var collapse: String {
+        String(
+            localized: "Collapse", bundle: L.bundle,
+            comment:
+                "VoiceOver's action on an open toggle in the editor: fold away what is inside it.")
+    }
+    static var openLink: String {
+        String(
+            localized: "Open Link", bundle: L.bundle,
+            comment: "VoiceOver's action on a link in the editor's text: open it.")
     }
 }

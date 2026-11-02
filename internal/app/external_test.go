@@ -55,6 +55,21 @@ func TestAgentSetup(t *testing.T) {
 	}
 }
 
+// On Windows the paths go in double quotes, which PowerShell and cmd.exe
+// both take one word from; cmd.exe keeps single quotes as they are.
+func TestWindowsQuote(t *testing.T) {
+	for in, want := range map[string]string{
+		`C:\Program Files\Leaflet\Leaflet.exe`: `"C:\Program Files\Leaflet\Leaflet.exe"`,
+		`C:\Users\rocky\AppData\Local\Leaflet`: `C:\Users\rocky\AppData\Local\Leaflet`,
+		`C:\Users\O'Brien\Leaflet`:             `"C:\Users\O'Brien\Leaflet"`,
+		"":                                     `""`,
+	} {
+		if got := windowsQuote(in); got != want {
+			t.Errorf("windowsQuote(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
 func TestShellQuote(t *testing.T) {
 	for in, want := range map[string]string{"/usr/bin/leaflet": "/usr/bin/leaflet", "/a b": "'/a b'", "it's": `'it'\''s'`, "": "''"} {
 		if got := shellQuote(in); got != want {

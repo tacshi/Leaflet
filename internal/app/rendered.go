@@ -1,7 +1,6 @@
 package app
 
 import (
-	_ "embed"
 	"strings"
 
 	"github.com/egoist/mygo/ui"

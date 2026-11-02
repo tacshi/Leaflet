@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"math/big"
 	"mime"
 	"net/http"
@@ -103,7 +104,10 @@ var signInHTTP = &http.Client{Timeout: 30 * time.Second}
 
 // getSignInJSON reads one of the sign-in's JSON documents.
 func getSignInJSON(ctx context.Context, u string, v any) error {
-	req, _ := http.NewRequestWithContext(ctx, "GET", u, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", u, nil)
+	if err != nil {
+		return err
+	}
 	req.Header.Set("Accept", "application/json")
 	res, err := signInHTTP.Do(req)
 	if err != nil {
@@ -132,7 +136,10 @@ type chatgptTokens struct {
 }
 
 func postToken(ctx context.Context, endpoint string, form url.Values) (*chatgptTokens, error) {
-	req, _ := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 	res, err := signInHTTP.Do(req)
@@ -263,8 +270,12 @@ func verifyIDToken(ctx context.Context, d *chatgptDiscovery, token, clientID, no
 		if k.Kid == header.Kid && k.Kty == "RSA" {
 			n, err1 := base64.RawURLEncoding.DecodeString(k.N)
 			e, err2 := base64.RawURLEncoding.DecodeString(k.E)
-			if err1 == nil && err2 == nil {
-				key = &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(new(big.Int).SetBytes(e).Int64())}
+			// An exponent is small, 65537 as a rule: one that does not fit
+			// an int32 is no key's.
+			if exp := new(big.Int).SetBytes(e); err1 == nil && err2 == nil && exp.IsInt64() {
+				if v := exp.Int64(); v > 0 && v <= math.MaxInt32 {
+					key = &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: int(v)}
+				}
 			}
 		}
 	}
@@ -414,9 +425,12 @@ func (g *ChatGPT) SignOut(ctx context.Context) {
 		return
 	}
 	acct := g.Account()
-	req, _ := http.NewRequestWithContext(ctx, "POST", d.RevocationEndpoint, strings.NewReader(url.Values{
+	req, err := http.NewRequestWithContext(ctx, "POST", d.RevocationEndpoint, strings.NewReader(url.Values{
 		"token": {acct.RefreshToken}, "token_type_hint": {"refresh_token"}, "client_id": {acct.ClientID},
 	}.Encode()))
+	if err != nil {
+		return
+	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	if res, err := signInHTTP.Do(req); err == nil {
 		_ = res.Body.Close()

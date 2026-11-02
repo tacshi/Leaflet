@@ -66,9 +66,11 @@ itself.
 
 - Ask an agent inline with `@agent`, from a selection, in the side chat or
   in a comment thread.
-- Every edit is a validated tool call (`read_page`, `insert_blocks`,
-  `replace_block`, `move_block`, `delete_blocks`, `create_subpage`) that
-  streams into the page as one undo step, after a history snapshot.
+- Every edit is a validated tool call (`read_page`, `write_markdown`,
+  `insert_blocks`, `replace_block`, `move_block`, `delete_blocks`,
+  `create_subpage`, and `list_pages` and `read_other_page` where reading
+  other pages is on) that streams into the page as one undo step, after a
+  history snapshot.
 - Any OpenAI-compatible provider: presets for OpenAI, Claude, xAI,
   OpenRouter, DeepSeek and GLM, a ChatGPT Plus or Pro sign-in, custom
   endpoints, and local servers such as Ollama, LM Studio, llama.cpp and
@@ -81,6 +83,9 @@ itself.
 - Recording blocks with playback and a timestamped transcript.
 - Real-time transcription with Soniox, or any OpenAI-compatible
   `/audio/transcriptions` endpoint, including one on your own network.
+- Transcription on the device itself, offline and without a key, with the
+  system's own speech recognition: on a Mac with macOS 26 or later, and on
+  iPhone and iPad.
 
 ### Share and sync
 
@@ -101,9 +106,12 @@ itself.
 ## Requirements
 
 - macOS 12 or later, on Apple silicon or Intel; or Windows on x64 or arm64.
-- To build from source: Go 1.27.3 or later. No cgo or C compiler is
-  needed. Release builds also need Xcode for macOS, and NSIS for Windows
-  installers.
+- To build from source: Go 1.27.3 or later; the Go code needs no cgo or C
+  compiler. The Mac app's on-device speech helper ([`macos/speech`](macos/speech))
+  is Swift, which `scripts/build-speech.sh` builds with Xcode 26 or later
+  (the macOS 26 SDK): debug builds go on without it where Xcode can't build
+  it, and release builds need it, as they need Xcode to sign and notarize.
+  Windows installers need NSIS.
 - iCloud sync needs iCloud Drive turned on.
 - Sync through a server, sharing and cloud models need a
   [Supabase](https://supabase.com) account: **Continue with Supabase**
@@ -144,6 +152,9 @@ SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key> go tool 
 To try agents without an API key, run a local model server (for example
 `ollama serve` with `qwen3:8b`) and add it in Settings › Agent providers.
 
+To transcribe on the Mac itself under `go tool mygo dev`, build its speech
+helper first with `scripts/build-speech.sh`, which needs Xcode 26 or later.
+
 ### iOS
 
 The iPhone and iPad app is in [`ios/`](ios), and is being built. It
@@ -180,12 +191,13 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<data folder> -- <executable>
 
 | Tool | What it does |
 | --- | --- |
-| `list_pages`, `search_pages` | Find pages by title and text |
+| `list_pages`, `search_pages` | Find pages by title, tag and text, and recordings and comments |
 | `read_page` | Read a page's blocks, with their IDs |
 | `create_page`, `rename_page` | Make and rename pages |
+| `set_page_tags` | Set a page's tags |
 | `move_page` | Move a page into a folder, inside another page, or to the top level |
 | `create_folder`, `rename_folder` | Make and rename folders |
-| `insert_blocks`, `replace_block`, `move_block`, `delete_blocks` | Edit a page, as the in-app agents do |
+| `write_markdown`, `insert_blocks`, `replace_block`, `move_block`, `delete_blocks` | Edit a page, as the in-app agents do |
 
 The server opens the same database as the app, so it works with the app
 open or closed. Pages shared with you to view are read-only. Edits keep a
@@ -263,6 +275,11 @@ rules.
 | `internal/app` | Window, shell, sidebar, page screen, panels, dialogs and settings |
 | `internal/editor` | The block editor: model, editing, layout, input and blocks |
 | `internal/doc` | The page document model: blocks, deltas, inline Markdown, ops, per-block merge and Markdown export |
+| `internal/menu`, `internal/shortcut` | What the `/` and `@` menus offer, and what Markdown typed in a page becomes, for both apps' editors |
+| `internal/rendered` | The pages that draw math (KaTeX) and diagrams (Pele), in frames with no network |
+| `internal/starters` | The templates that come with Leaflet |
+| `internal/export` | Exporting every page as Markdown in a zip, with its pictures, files and recordings |
+| `internal/web` | Link cards, pictures and video info, read from public addresses only |
 | `internal/store` | SQLite (pure Go) tables, the outbox and settings |
 | `internal/remote` | Supabase over HTTP: Auth, PostgREST, Storage and Edge Functions |
 | `internal/sync` | Pushing the outbox, pulls, account adoption and the device heartbeat, through Supabase or iCloud Drive |
@@ -270,9 +287,11 @@ rules.
 | `internal/provision` | Finding, creating and setting up their Leaflet project: migrations and Edge Functions |
 | `internal/oauth` | The part of a browser sign-in on this device: loopback redirect and PKCE |
 | `internal/icloud` | The Leaflet folder in iCloud Drive: its files, written whole, and asking iCloud to download them |
+| `internal/keychain` | The app's secrets in the system keychain, read at most once a run |
 | `internal/agents` | The OpenAI-compatible client, presets, prompt, page tools, loop and hub |
 | `internal/mcp` | `leaflet mcp`: the page tools for agents outside the app |
 | `internal/recording` | Capture, WAV, Soniox streaming and endpoint transcription |
+| `internal/macspeech`, `macos/speech` | Transcription with the Mac's own speech recognition, through `leaflet-speech`, a Swift helper the Mac app ships |
 | `internal/theme` | Colors, fonts and icons |
 | `locales` | The app's texts in each language, and the Go code generated from them |
 | `scripts` | Debug and release builds, and publishing to GitHub Releases |
@@ -283,9 +302,9 @@ rules.
 
 Microphone capture runs in a small page on the app's own `leaflet-rec://`
 scheme, a secure context the system's web view lets use the microphone, so
-the app needs no native audio code. Embeds, math and diagrams run in
-sandboxed frames under a content security policy with no network, and can
-never call the app's Go code. WebRTC, which such a policy does not cover,
+the app needs no native code to capture audio. Embeds, math and diagrams
+run in sandboxed frames under a content security policy with no network,
+and can never call the app's Go code. WebRTC, which such a policy does not cover,
 is blocked where the web view knows CSP's `webrtc` directive and otherwise
 taken away from the frame before the embed's script runs, as best it can
 be.
@@ -293,10 +312,12 @@ be.
 ## Known limitations
 
 - Real-time co-editing is not built: pages sync and merge block by block.
-- On-device speech recognition (Qwen3-ASR, SenseVoice through sherpa-onnx)
-  is not ported, as sherpa-onnx needs native libraries. Serve a model
-  behind an OpenAI-compatible endpoint on your network instead; the same
-  goes for MOSS-Transcribe-Diarize.
+- On-device speech recognition with open models (Qwen3-ASR, SenseVoice
+  through sherpa-onnx) is not ported, as sherpa-onnx needs native
+  libraries: the system's own speech recognition transcribes on the device
+  instead, on a Mac with macOS 26 or later and on iPhone and iPad. On
+  Windows and older Macs, serve a model behind an OpenAI-compatible
+  endpoint on your network; the same goes for MOSS-Transcribe-Diarize.
 - OpenAI and Claude account sign-in for third-party apps is unconfirmed,
   so those providers take API keys.
 

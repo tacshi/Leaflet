@@ -4,9 +4,9 @@ extension CoreClient {
     /// setICloud turns iCloud sync on or off, through the Leaflet folder
     /// at root; nil keeps the folder the core has. It fails, with why in
     /// words for the user, when iCloud sync can't turn on.
-    func setICloud(root: URL?, on: Bool) async throws {
+    nonisolated(nonsending) func setICloud(root: URL?, on: Bool) async throws {
         let path = root?.path(percentEncoded: false) ?? ""
-        try await call { try $0.setICloud(path, on: on) }
+        try await call(waiting: true) { try $0.setICloud(path, on: on) }
     }
 
     /// useICloudFolder gives the Leaflet folder the core watches while

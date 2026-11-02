@@ -29,9 +29,6 @@ type openPage struct {
 	// the number OpenPage gave each. The page stays open until the last
 	// of them closes it, and its edits are saved.
 	editors map[int64]*pageEditor
-	// saving is whether edits wait to be saved, as PageSaving last told
-	// the app, for its byline to say "Saving…".
-	saving bool
 	// shown is whether the app has the page as cur is: an agent's edits
 	// go to it agentEvery at the most, and newStep whether those not
 	// shown yet start an undo step. shownAt is when it last got them,
@@ -110,9 +107,9 @@ type openedPage struct {
 // OpenPage opens a page for an editor of the app's, returning it as
 // openedPage. A page already open, in another window or kept open to save
 // its edits, is returned as it is now.
-func (c *Core) OpenPage(id string) (string, error) {
-	var out openedPage
-	var err error
+func (c *Core) OpenPage(id string) (_ string, err error) {
+	defer catch(&err)
+	var raw string
 	c.q.do(func() {
 		p := c.pages[id]
 		if p == nil {
@@ -125,7 +122,6 @@ func (c *Core) OpenPage(id string) (string, error) {
 				Post: func(fn func()) {
 					c.q.post(func() {
 						fn()
-						p.tellSaving()
 						p.retryIfUnused()
 						p.closeIfUnused()
 					})
@@ -133,6 +129,10 @@ func (c *Core) OpenPage(id string) (string, error) {
 				CanEdit: func() bool { return c.canEdit(id) },
 				Notify:  c.ev.notice,
 				Saved:   c.core.Sync.Kick,
+				// Every save says whether edits still wait, the timer's or
+				// another's (a version named, an export, a copy), for
+				// the byline to say "Saving…" meanwhile.
+				Dirty: func(saving bool) { c.ev.pageSaving(id, saving) },
 			})
 			p.live.Attach(p)
 			p.live.SetReadOnly(!c.canEdit(id) || p.live.Unreadable())
@@ -142,6 +142,7 @@ func (c *Core) OpenPage(id string) (string, error) {
 			// byline, as the desktop reads it as a page opens.
 			if c.core.Remote.SignedIn() {
 				go func() {
+					defer catch(nil)
 					ctx, cancel := context.WithTimeout(context.Background(), remoteTimeout)
 					defer cancel()
 					_ = c.core.Sync.LoadMembers(ctx, id)
@@ -150,13 +151,12 @@ func (c *Core) OpenPage(id string) (string, error) {
 		}
 		c.editors++
 		p.editors[c.editors] = &pageEditor{seen: map[int64]*doc.Content{p.rev: p.cur.Copy()}, last: p.rev}
-		out = openedPage{ID: id, Editor: c.editors, Content: p.cur, Rev: p.rev, ReadOnly: p.live.ReadOnly(), Unreadable: p.live.Unreadable()}
 		c.fillLinks(id, p.cur)
+		// Encoded here, on the queue: a save changes the content in
+		// place, stamping its blocks.
+		raw, err = encode(openedPage{ID: id, Editor: c.editors, Content: p.cur, Rev: p.rev, ReadOnly: p.live.ReadOnly(), Unreadable: p.live.Unreadable()})
 	})
-	if err != nil {
-		return "", err
-	}
-	return encode(out)
+	return raw, err
 }
 
 // EditPage gives the core the content of an open page as one of the
@@ -164,7 +164,8 @@ func (c *Core) OpenPage(id string) (string, error) {
 // after the typing stops. Made over an older rev, or with the page open in
 // another window too, it is merged with what changed since, and the merge
 // comes back as PageUpdated, for every editor of the page to show.
-func (c *Core) EditPage(id string, editor int64, content string, rev int64) error {
+func (c *Core) EditPage(id string, editor int64, content string, rev int64) (err error) {
+	defer catch(&err)
 	edit, err := doc.Decode(content)
 	if err != nil {
 		return err
@@ -220,17 +221,7 @@ func (p *openPage) edit(e *pageEditor, edit *doc.Content, rev int64) error {
 		}
 	}
 	p.live.Edited()
-	p.tellSaving()
 	return nil
-}
-
-// tellSaving tells the app whether the page's edits wait to be saved, as
-// that changes.
-func (p *openPage) tellSaving() {
-	if saving := p.live.Dirty(); saving != p.saving {
-		p.saving = saving
-		p.c.ev.pageSaving(p.id, saving)
-	}
 }
 
 // bump makes c the page's content at a new rev, which each of its editors
@@ -250,6 +241,7 @@ func (p *openPage) bump(c *doc.Content) {
 // app goes to the background, and closes once they are saved. Opened
 // again before then, it shows them.
 func (c *Core) ClosePage(id string, editor int64) {
+	defer catch(nil)
 	c.q.do(func() {
 		p := c.pages[id]
 		if p == nil {
@@ -262,7 +254,6 @@ func (c *Core) ClosePage(id string, editor int64) {
 		if !p.live.Save() {
 			p.live.Edited()
 		}
-		p.tellSaving()
 		p.closeIfUnused()
 	})
 }
@@ -305,13 +296,13 @@ func (p *openPage) closeIfUnused() {
 // SaveOpenPages saves the open pages' edits now, as the app goes to the
 // background. It reports whether all of them were saved.
 func (c *Core) SaveOpenPages() bool {
+	defer catch(nil)
 	all := true
 	c.q.do(func() {
 		for _, p := range c.pages {
 			if !p.live.Save() {
 				all = false
 			}
-			p.tellSaving()
 			p.closeIfUnused()
 		}
 	})
@@ -372,7 +363,6 @@ func (p *openPage) apply(ops []doc.Op, newStep bool) error {
 	}
 	// Saved as the desktop's editor saves an agent's edit, shortly after.
 	p.live.Edited()
-	p.tellSaving()
 	return nil
 }
 
@@ -405,9 +395,9 @@ type member struct {
 // JSON array of member: the byline's "Shared with" counts them. Opening
 // the page reads them from the server, and Changed says "page_members"
 // once they come.
-func (c *Core) Members(pageID string) (string, error) {
+func (c *Core) Members(pageID string) (_ string, err error) {
+	defer catch(&err)
 	var list []store.Member
-	var err error
 	c.q.do(func() { list, err = c.core.Store.Members(pageID) })
 	if err != nil {
 		return "", err

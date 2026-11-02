@@ -220,11 +220,21 @@ struct ImageBlock: View {
     }
 }
 
+/// VideoPlayback is which videos play in place of their pictures, by
+/// block: play is pressed on the block, or chosen from VoiceOver's actions
+/// at the caret, which can't reach the block's button.
+@MainActor
+@Observable
+final class VideoPlayback {
+    static let shared = VideoPlayback()
+    var playing: Set<String> = []
+}
+
 /// VideoBlock shows a video's picture and title, and its player in place
 /// once play is pressed.
 struct VideoBlock: View {
     let node: DocNode
-    @State private var playing = false
+    private var playing: Bool { VideoPlayback.shared.playing.contains(node.id) }
 
     private struct Player: Decodable {
         let page: String
@@ -256,7 +266,7 @@ struct VideoBlock: View {
                 .overlay {
                     if !playing {
                         Button {
-                            playing = true
+                            VideoPlayback.shared.playing.insert(node.id)
                         } label: {
                             Image(systemName: "play.fill")
                                 .font(.title)
@@ -266,7 +276,7 @@ struct VideoBlock: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(player == nil)
-                        .accessibilityLabel(L.editorShowAsVideo)
+                        .accessibilityLabel(L.recPlay)
                     }
                 }
                 .clipped()
@@ -294,8 +304,9 @@ struct ChartBlock: View {
     var body: some View {
         let d = node.data ?? [:]
         let kind = d["chart_type"]?.string ?? "bar"
+        // A year or a count is a whole number, shown without a fraction.
         let labels = (d["labels"]?.array ?? []).map {
-            $0.string ?? ($0.double.map { "\($0)" } ?? "")
+            $0.string ?? ($0.int.map { "\($0)" } ?? $0.double.map { "\($0)" } ?? "")
         }
         var points: [Point] = []
         for (s, series) in (d["series"]?.array ?? []).enumerated() {
@@ -375,8 +386,25 @@ struct CardBlock: View {
 
     private var title: String {
         let d = node.data ?? [:]
-        return d["title"]?.string ?? d["name"]?.string ?? d["url"]?.string
-            ?? node.type.replacingOccurrences(of: "_", with: " ").capitalized
+        return d["title"]?.string ?? d["name"]?.string ?? d["url"]?.string ?? Self.name(node.type)
+    }
+
+    /// name is what a block of type is called, as the "/" menu names it.
+    nonisolated static func name(_ type: String) -> String {
+        switch type {
+        case "embed": L.hostSlashEmbed
+        case "link_preview": L.hostSlashLinkCard
+        case "file": L.hostSlashFile
+        case "subpage": L.hostSlashSubpage
+        case "image": L.hostSlashImage
+        case "video": L.hostSlashVideo
+        case "table": L.hostSlashTable
+        case "chart": L.hostSlashChart
+        case "math_equation": L.hostSlashMath
+        case "diagram": L.hostSlashDiagram
+        case "divider": L.hostSlashDivider
+        default: L.editorUnsupported(type: type)
+        }
     }
 }
 

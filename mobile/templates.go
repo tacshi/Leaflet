@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"maps"
+	"os"
 	"slices"
 	"sort"
 	"strings"
@@ -162,9 +163,9 @@ func (c *Core) hint(t store.Page) string {
 
 // Templates returns the templates to start a page from, as a JSON array
 // of templateRow.
-func (c *Core) Templates() (string, error) {
+func (c *Core) Templates() (_ string, err error) {
+	defer catch(&err)
 	var out []templateRow
-	var err error
 	c.q.do(func() {
 		var all []choice
 		if all, err = c.choices(); err != nil {
@@ -205,9 +206,9 @@ func (c *Core) ownTemplate(t choice) (store.Page, error) {
 
 // EditTemplate returns the page of the template key to open and change;
 // a starter becomes the user's own first.
-func (c *Core) EditTemplate(key string) (string, error) {
+func (c *Core) EditTemplate(key string) (_ string, err error) {
+	defer catch(&err)
 	var id string
-	var err error
 	c.q.do(func() {
 		var t choice
 		if t, err = c.choice(key); err != nil {
@@ -222,8 +223,8 @@ func (c *Core) EditTemplate(key string) (string, error) {
 
 // SetStarterDeleted deletes a starter on this device, or brings it back,
 // as Undo does. The user's own templates are deleted as pages are.
-func (c *Core) SetStarterDeleted(key string, deleted bool) error {
-	var err error
+func (c *Core) SetStarterDeleted(key string, deleted bool) (err error) {
+	defer catch(&err)
 	c.q.do(func() { err = c.setStarterDeleted(strings.TrimPrefix(key, "starter:"), deleted) })
 	return err
 }
@@ -232,9 +233,9 @@ func (c *Core) SetStarterDeleted(key string, deleted bool) error {
 // pageID, or at the top of folder folderID, start from: key, or "" for
 // blank pages. A starter becomes the user's own template first. It returns
 // the message that says so.
-func (c *Core) SetDefaultTemplate(pageID, folderID, key string) (string, error) {
+func (c *Core) SetDefaultTemplate(pageID, folderID, key string) (_ string, err error) {
+	defer catch(&err)
 	var msg string
-	var err error
 	c.q.do(func() {
 		st := c.core.Store
 		id, title := "", ""
@@ -330,7 +331,8 @@ func (c *Core) content(id string) *doc.Content {
 // its blocks, and copies of its subpages under the page. An untitled page
 // takes the template's title, which ApplyTemplate returns; "" for none.
 // It runs off the core's queue while a template's files come down.
-func (c *Core) ApplyTemplate(pageID, key string) (string, error) {
+func (c *Core) ApplyTemplate(pageID, key string) (_ string, err error) {
+	defer catch(&err)
 	return c.useTemplate(pageID, "", key, false)
 }
 
@@ -338,7 +340,8 @@ func (c *Core) ApplyTemplate(pageID, key string) (string, error) {
 // blockID, or in its place when it is an empty paragraph, as the / menu's
 // templates do, with copies of its subpages under the page. An empty page
 // is filled as ApplyTemplate fills it, and the title it took returned.
-func (c *Core) InsertTemplate(pageID, blockID, key string) (string, error) {
+func (c *Core) InsertTemplate(pageID, blockID, key string) (_ string, err error) {
+	defer catch(&err)
 	return c.useTemplate(pageID, blockID, key, true)
 }
 
@@ -349,20 +352,29 @@ func (c *Core) useTemplate(pageID, blockID, key string, insert bool) (string, er
 	var t choice
 	var err error
 	c.q.do(func() {
-		if t, err = c.choice(key); err == nil && !c.canEdit(pageID) {
-			err = errors.New("the page can't be changed")
+		if t, err = c.choice(key); err != nil {
+			return
+		}
+		if !c.canEdit(pageID) {
+			err = errors.New(locales.AppErrorReadOnly())
+			return
+		}
+		if t.page != nil {
+			err = c.readyToCopy(t.page.ID)
 		}
 	})
 	if err != nil {
 		return "", err
 	}
+	var audio []string
 	if t.page != nil {
-		if err := c.fetchNeeds(t.page.ID); err != nil {
+		if audio, err = c.fetchNeeds(t.page.ID); err != nil {
 			return "", err
 		}
 	}
 	var title string
 	c.q.do(func() {
+		defer c.dropFetchedAudio(audio)
 		empty := isEmpty(c.content(pageID))
 		if !empty && !insert {
 			return
@@ -424,7 +436,8 @@ func insertAt(content *doc.Content, id string, blocks []*doc.Node) bool {
 // after the page's card in its parent, and returns the copy as a pageRow.
 // A page shared with the user that they can't add to the parent of is
 // copied into their own space.
-func (c *Core) DuplicatePage(id string) (string, error) {
+func (c *Core) DuplicatePage(id string) (_ string, err error) {
+	defer catch(&err)
 	return c.copyPage(id, func(p store.Page) store.CopyOptions {
 		o := store.CopyOptions{ParentID: p.ParentID, FolderID: p.FolderID, AfterID: p.ID, Title: copyTitle(p.Title)}
 		if p.SpaceID != c.core.Store.Session().SpaceID && (p.ParentID == "" || !c.canEdit(p.ParentID)) {
@@ -436,25 +449,26 @@ func (c *Core) DuplicatePage(id string) (string, error) {
 
 // SaveAsTemplate keeps a copy of a page, with its subpages, as a template,
 // and returns it as a pageRow.
-func (c *Core) SaveAsTemplate(id string) (string, error) {
+func (c *Core) SaveAsTemplate(id string) (_ string, err error) {
+	defer catch(&err)
 	return c.copyPage(id, func(p store.Page) store.CopyOptions {
 		return store.CopyOptions{Title: p.Title, Template: true}
 	})
 }
 
 func (c *Core) copyPage(id string, options func(store.Page) store.CopyOptions) (string, error) {
-	// A copy goes over the edits the app has sent.
-	c.q.do(func() {
-		for _, p := range c.pages {
-			p.live.Save()
-		}
-	})
-	if err := c.fetchNeeds(id); err != nil {
+	var err error
+	c.q.do(func() { err = c.readyToCopy(id) })
+	if err != nil {
+		return "", err
+	}
+	audio, err := c.fetchNeeds(id)
+	if err != nil {
 		return "", err
 	}
 	var row pageRow
-	var err error
 	c.q.do(func() {
+		defer c.dropFetchedAudio(audio)
 		st := c.core.Store
 		var p store.Page
 		if p, err = st.Page(id); err != nil {
@@ -486,35 +500,75 @@ func copyTitle(title string) string {
 	return locales.TemplateCopyTitle(title)
 }
 
+// readyToCopy reports why page id, with its subpages, can't be copied
+// now, as the desktop's duplicating, saving as a template and using a
+// template refuse to: the edits the app has sent to one of them could not
+// be saved, so the copy would go without them (the save said why), or a
+// recording in one is still being made or transcribed here, so the copy
+// would stay without what the recording gets once it finishes. Run on the
+// core's queue.
+func (c *Core) readyToCopy(id string) error {
+	saved := true
+	for pid, p := range c.pages {
+		if c.within(pid, id) && !p.live.Save() {
+			saved = false
+		}
+	}
+	if !saved {
+		return errNotSaved()
+	}
+	if c.recordingIn(id) {
+		return errors.New(locales.TemplateWaitForRecording())
+	}
+	return nil
+}
+
+// recordingIn reports whether a recording on page id or its subpages is
+// still being made or transcribed here. Run on the core's queue.
+func (c *Core) recordingIn(id string) bool {
+	r := c.core.Rec
+	if r.Active() && c.within(r.State.PageID, id) {
+		return true
+	}
+	for rid := range r.Transcribing {
+		if rec, err := c.core.Store.Recording(rid); err == nil && c.within(rec.PageID, id) {
+			return true
+		}
+	}
+	return false
+}
+
 // errFilesUploading says a copy waits for files still going up from
-// another device.
-var errFilesUploading = errors.New(locales.TemplateFilesUploading())
+// another device. It is made as it is returned, to be in the language the
+// app shows then.
+func errFilesUploading() error { return errors.New(locales.TemplateFilesUploading()) }
 
 // copyError says why a copy was not made: a file or a recording's audio
 // not on this device, as one still uploading, or what else failed.
 func copyError(err error) error {
 	if errors.Is(err, store.ErrCopyNotHere) || remote.IsNotFound(err) || errors.Is(err, icloud.ErrNotReady) || errors.Is(err, fs.ErrNotExist) {
-		return errors.New(locales.TemplateFilesUploading())
+		return errFilesUploading()
 	}
 	return err
 }
 
 // fetchNeeds brings to this device what copying page id, with its
-// subpages, needs first (store.CopyNeeds), off the core's queue.
-func (c *Core) fetchNeeds(id string) error {
+// subpages, needs first (store.CopyNeeds), off the core's queue. It
+// returns the recordings whose audio came, for dropFetchedAudio once the
+// copy is made.
+func (c *Core) fetchNeeds(id string) (audio []string, err error) {
 	var needs []store.CopyNeed
-	var err error
 	canFetch := false
 	c.q.do(func() {
 		needs, err = c.core.Store.CopyNeeds(id)
 		canFetch = c.core.Sync.CanFetch()
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	for _, n := range needs {
 		if n.Path == "" || !canFetch {
-			return errFilesUploading
+			return nil, errFilesUploading()
 		}
 	}
 	for _, n := range needs {
@@ -522,18 +576,34 @@ func (c *Core) fetchNeeds(id string) error {
 		data, ferr := c.core.Sync.Fetch(ctx, n.Bucket, n.Path)
 		cancel()
 		if ferr != nil {
-			return copyError(ferr)
+			return audio, copyError(ferr)
 		}
 		c.q.do(func() {
 			if n.FileID != "" {
 				_, err = c.core.Store.DownloadedFile(n.FileID, data)
-			} else {
-				_, err = c.core.Store.DownloadedAudio(n.RecordingID, data)
+			} else if _, err = c.core.Store.DownloadedAudio(n.RecordingID, data); err == nil {
+				audio = append(audio, n.RecordingID)
 			}
 		})
 		if err != nil {
-			return err
+			return audio, err
 		}
 	}
-	return nil
+	return audio, nil
+}
+
+// dropFetchedAudio removes from this device the recordings' audio that
+// fetchNeeds brought for a copy, as the desktop does: the copy has its
+// own now, and the audio stays only as Keep the audio says. Run on the
+// core's queue.
+func (c *Core) dropFetchedAudio(audio []string) {
+	if len(audio) == 0 || c.core.Store.Settings().KeepAudioOnDevice != "until_uploaded" {
+		return
+	}
+	for _, id := range audio {
+		if r, err := c.core.Store.Recording(id); err == nil && r.AudioPath != "" && r.LocalPath != "" {
+			_ = os.Remove(r.LocalPath)
+			_ = c.core.Store.ClearLocalPath(id)
+		}
+	}
 }

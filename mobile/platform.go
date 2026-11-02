@@ -3,6 +3,9 @@ package mobile
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strconv"
+	"strings"
 
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
@@ -22,8 +25,9 @@ type Platform interface {
 	SecretDelete(name string) error
 	// Online reports whether the device has a connection.
 	Online() bool
-	// DeviceName names this device in Account › Devices, such as
-	// "Rocky's iPad".
+	// DeviceName names this device in Account › Devices, by its model,
+	// such as "iPad Pro (13-inch) (M5)": iOS keeps the name the user gave
+	// it from apps.
 	DeviceName() string
 	// OpenURL opens a web page outside the app.
 	OpenURL(url string)
@@ -80,12 +84,67 @@ func (s secrets) Get(name string) ([]byte, error) {
 	if err == nil && len(v) == 0 {
 		return nil, keychain.ErrNotFound
 	}
-	return v, err
+	if err != nil {
+		return nil, keychainError(err)
+	}
+	return v, nil
 }
 
-func (s secrets) Set(name string, value []byte) error { return s.p.SecretSet(name, value) }
+func (s secrets) Set(name string, value []byte) error {
+	if err := s.p.SecretSet(name, value); err != nil {
+		return keychainError(err)
+	}
+	return nil
+}
 
-func (s secrets) Delete(name string) error { return s.p.SecretDelete(name) }
+func (s secrets) Delete(name string) error {
+	if err := s.p.SecretDelete(name); err != nil {
+		return keychainError(err)
+	}
+	return nil
+}
+
+// SecItem's statuses the core tells apart, as the app's errors end with
+// them: "(OSStatus -25300)".
+const (
+	errSecItemNotFound = -25300
+	errSecAuthFailed   = -25293
+	errSecUserCanceled = -128
+)
+
+// keychainError is an error of the app's keychain as package keychain
+// reads it: no such item is keychain.ErrNotFound, and the user turning a
+// prompt down (failing it, or cancelling) keychain.ErrDenied, both kept
+// for the run. Any other status stays a plain error, to try again:
+// errSecInteractionNotAllowed above all, which the keychain says before
+// the device is first unlocked after a restart, as a background sync may
+// run then.
+func keychainError(err error) error {
+	switch status, ok := osStatus(err); {
+	case !ok:
+		return err
+	case status == errSecItemNotFound:
+		return fmt.Errorf("%w: %w", keychain.ErrNotFound, err)
+	case status == errSecAuthFailed, status == errSecUserCanceled:
+		return fmt.Errorf("%w: %w", keychain.ErrDenied, err)
+	}
+	return err
+}
+
+// osStatus is the SecItem status an error of the app's keychain ends
+// with, as "(OSStatus -25308)", if it ends with one.
+func osStatus(err error) (int, bool) {
+	rest, ok := strings.CutSuffix(err.Error(), ")")
+	if !ok {
+		return 0, false
+	}
+	_, code, ok := strings.CutLast(rest, "(OSStatus ")
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.Atoi(code)
+	return n, err == nil
+}
 
 // events delivers events to the app in order, off the core's goroutine,
 // so a handler that calls the core back can't wait on it.

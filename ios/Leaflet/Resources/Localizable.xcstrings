@@ -1,20 +1,20 @@
 {
   "sourceLanguage": "en",
   "strings": {
-    "Appearance": {
-      "comment": "Settings: the section of the theme, accent and text size.",
+    "Agent Options": {
+      "comment": "The Agent panel: the menu of the agent to ask, a new conversation, and the agent providers.",
       "extractionState": "manual",
       "localizations": {
         "ja": {
           "stringUnit": {
             "state": "translated",
-            "value": "外観"
+            "value": "エージェントのオプション"
           }
         },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
-            "value": "外观"
+            "value": "智能体选项"
           }
         }
       }
@@ -55,6 +55,24 @@
         }
       }
     },
+    "Collapse": {
+      "comment": "VoiceOver's action on an open toggle in the editor: fold away what is inside it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "折りたたむ"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "折叠"
+          }
+        }
+      }
+    },
     "Collapse Heading": {
       "comment": "The outline: hide the headings under this one.",
       "extractionState": "manual",
@@ -69,6 +87,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "折叠标题"
+          }
+        }
+      }
+    },
+    "Expand": {
+      "comment": "VoiceOver's action on a closed toggle in the editor: show what is inside it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "展開"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "展开"
           }
         }
       }
@@ -217,24 +253,6 @@
         }
       }
     },
-    "Leaflet can't use the microphone. Turn it on in Settings › Privacy & Security › Microphone.": {
-      "comment": "A recording could not start: the user has not let the app use the microphone.",
-      "extractionState": "manual",
-      "localizations": {
-        "ja": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Leaflet はマイクを使えません。設定 › プライバシーとセキュリティ › マイク でオンにしてください。"
-          }
-        },
-        "zh-Hans": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Leaflet 无法使用麦克风。请在“设置 › 隐私与安全性 › 麦克风”中打开。"
-          }
-        }
-      }
-    },
     "Leaflet couldn't open its data": {
       "comment": "Shown when the app's database can't open.",
       "extractionState": "manual",
@@ -249,6 +267,60 @@
           "stringUnit": {
             "state": "translated",
             "value": "Leaflet 无法打开其数据"
+          }
+        }
+      }
+    },
+    "Leaflet isn't allowed to use it. Turn it on in Settings › Privacy & Security › Microphone.": {
+      "comment": "Why a recording could not start: the user has not let the app use the microphone. Follows 'The microphone did not start: '.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet にマイクの使用が許可されていません。設定 › プライバシーとセキュリティ › マイク でオンにしてください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet 没有使用麦克风的权限。请在“设置 › 隐私与安全性 › 麦克风”中打开。"
+          }
+        }
+      }
+    },
+    "Mark as Done": {
+      "comment": "VoiceOver's action on a to-do in the editor: check it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "完了にする"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "标记为完成"
+          }
+        }
+      }
+    },
+    "Mark as Not Done": {
+      "comment": "VoiceOver's action on a checked to-do in the editor: uncheck it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "未完了にする"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "标记为未完成"
           }
         }
       }
@@ -325,6 +397,24 @@
         }
       }
     },
+    "Open Link": {
+      "comment": "VoiceOver's action on a link in the editor's text: open it.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "リンクを開く"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "打开链接"
+          }
+        }
+      }
+    },
     "Open in New Window": {
       "comment": "A page's menu: open it in a window of its own.",
       "extractionState": "manual",
@@ -375,6 +465,24 @@
           "stringUnit": {
             "state": "translated",
             "value": "移除链接"
+          }
+        }
+      }
+    },
+    "Resume": {
+      "comment": "A recording's pill: go on recording after Pause.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "再開"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "继续"
           }
         }
       }

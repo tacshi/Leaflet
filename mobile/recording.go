@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"leaflet/internal/doc"
@@ -43,15 +44,22 @@ type AudioSink struct{ s recording.Sink }
 
 // Chunk takes the audio heard next, in order.
 func (a *AudioSink) Chunk(pcm []byte) {
+	defer catch(nil)
 	// The app's bytes are its own once the call returns.
 	a.s.Chunk(append([]byte(nil), pcm...))
 }
 
 // Started says the microphone is on.
-func (a *AudioSink) Started() { a.s.Started() }
+func (a *AudioSink) Started() {
+	defer catch(nil)
+	a.s.Started()
+}
 
 // Failed says why the microphone could not start.
-func (a *AudioSink) Failed(message string) { a.s.Failed(message) }
+func (a *AudioSink) Failed(message string) {
+	defer catch(nil)
+	a.s.Failed(message)
+}
 
 // capture is the app's microphone as the recorder's Capture.
 type capture struct{ m Microphone }
@@ -88,7 +96,10 @@ type Transcriber interface {
 type TranscriptSink struct{ text func(string) }
 
 // Text takes the words so far.
-func (s *TranscriptSink) Text(text string) { s.text(text) }
+func (s *TranscriptSink) Text(text string) {
+	defer catch(nil)
+	s.text(text)
+}
 
 // engine is the app's Transcriber as the recorder's Engine.
 type engine struct{ t Transcriber }
@@ -142,8 +153,10 @@ func (s *stream) Lost() error { return nil }
 // with it unless another engine is set up: speech settings left at an
 // endpoint with no address turn to it.
 func (c *Core) UseTranscriber(t Transcriber) {
+	defer catch(nil)
 	c.q.do(func() {
-		c.core.Rec.Engine = engine{t}
+		// Through its lock: transcriptions running read it.
+		c.core.Rec.SetEngine(engine{t})
 		s := c.core.Store.Settings()
 		if s.Stt.Provider != "openai-compatible" || strings.TrimSpace(s.Stt.BaseURL) != "" {
 			return
@@ -159,6 +172,7 @@ func (c *Core) UseTranscriber(t Transcriber) {
 // one, recording says the window isn't ready. RecordingChanged tells the
 // app each change of the recording in progress after.
 func (c *Core) UseMicrophone(m Microphone) {
+	defer catch(nil)
 	c.q.do(func() {
 		c.core.Rec.Attach(capture{m}, func(fn func()) {
 			c.q.post(func() {
@@ -234,7 +248,8 @@ func (c *Core) tellRecording() {
 
 // RecordingState returns the recording in progress, as RecordingChanged
 // gives it.
-func (c *Core) RecordingState() (string, error) {
+func (c *Core) RecordingState() (_ string, err error) {
+	defer catch(&err)
 	var st recordingState
 	c.q.do(func() { st = c.recState() })
 	return encode(st)
@@ -246,9 +261,9 @@ func (c *Core) online(s store.Settings) bool { return c.plat.Online() && !s.Work
 // StartRecording records into an open page, with a transcript when the
 // speech settings can make one. It returns the recording's block, as
 // JSON, for the app's editor to put in the page at the caret.
-func (c *Core) StartRecording(pageID string) (string, error) {
+func (c *Core) StartRecording(pageID string) (_ string, err error) {
+	defer catch(&err)
 	var node *doc.Node
-	var err error
 	c.q.do(func() {
 		if c.pages[pageID] == nil {
 			err = errNotOpen
@@ -266,6 +281,7 @@ func (c *Core) StartRecording(pageID string) (string, error) {
 
 // StopRecording ends the recording, saves its audio and transcribes it.
 func (c *Core) StopRecording() {
+	defer catch(nil)
 	c.q.do(func() {
 		c.core.Rec.Stop()
 		c.tellRecording()
@@ -274,6 +290,7 @@ func (c *Core) StopRecording() {
 
 // TogglePauseRecording pauses the recording, or goes on with it.
 func (c *Core) TogglePauseRecording() {
+	defer catch(nil)
 	c.q.do(func() {
 		c.core.Rec.TogglePause()
 		c.tellRecording()
@@ -294,9 +311,9 @@ type recordingRow struct {
 
 // Recording returns a recording block's recording as recordingRow, its
 // transcript tidied as the block shows it.
-func (c *Core) Recording(id string) (string, error) {
+func (c *Core) Recording(id string) (_ string, err error) {
+	defer catch(&err)
 	var rec store.Recording
-	var err error
 	c.q.do(func() { rec, err = c.core.Store.Recording(id) })
 	if err != nil {
 		return "", err
@@ -322,9 +339,9 @@ func (c *Core) Recording(id string) (string, error) {
 
 // RecordingAudio returns the path of a recording's WAV audio on this
 // device, downloading it first from where it went up when it is not.
-func (c *Core) RecordingAudio(id string) (string, error) {
+func (c *Core) RecordingAudio(id string) (_ string, err error) {
+	defer catch(&err)
 	var rec store.Recording
-	var err error
 	c.q.do(func() { rec, err = c.core.Store.Recording(id) })
 	if err != nil {
 		return "", err
@@ -347,8 +364,8 @@ func (c *Core) RecordingAudio(id string) (string, error) {
 
 // Retranscribe transcribes a recording again, or for the first time,
 // with the speech settings as they are.
-func (c *Core) Retranscribe(id string) error {
-	var err error
+func (c *Core) Retranscribe(id string) (err error) {
+	defer catch(&err)
 	c.q.do(func() {
 		s := c.core.Store.Settings()
 		err = c.core.Rec.Retranscribe(id, s.Stt, c.online(s))
@@ -359,8 +376,8 @@ func (c *Core) Retranscribe(id string) error {
 
 // InsertTranscript puts a recording's transcript in its page, open,
 // after its block: a paragraph a line, each after its time in bold.
-func (c *Core) InsertTranscript(id string) error {
-	var err error
+func (c *Core) InsertTranscript(id string) (err error) {
+	defer catch(&err)
 	c.q.do(func() {
 		var rec store.Recording
 		if rec, err = c.core.Store.Recording(id); err != nil {
@@ -390,7 +407,6 @@ func (c *Core) InsertTranscript(id string) error {
 		p.bump(content)
 		c.ev.pageUpdated(p.id, content.Encode(), p.rev, "agent", true)
 		p.live.Edited()
-		p.tellSaving()
 	})
 	return err
 }
@@ -432,7 +448,8 @@ type speechSettings struct {
 }
 
 // SpeechSettings returns the speech settings as speechSettings.
-func (c *Core) SpeechSettings() (string, error) {
+func (c *Core) SpeechSettings() (_ string, err error) {
+	defer catch(&err)
 	var out speechSettings
 	c.q.do(func() {
 		out.Stt = c.core.Store.Settings().Stt
@@ -460,29 +477,34 @@ func (c *Core) SpeechSettings() (string, error) {
 }
 
 // SaveSpeechSettings keeps the speech settings, a store.SttSettings as
-// JSON, and mirrors them to the server, signed in.
-func (c *Core) SaveSpeechSettings(stt string) error {
-	var err error
-	var s store.Settings
+// JSON, and mirrors them to the server, signed in. The JSON is the whole
+// of the settings: a field it leaves out is cleared, as the app leaves
+// out a provider ID it chose none for, and language hints it emptied.
+func (c *Core) SaveSpeechSettings(stt string) (err error) {
+	defer catch(&err)
+	var next store.SttSettings
+	if err := json.Unmarshal([]byte(stt), &next); err != nil {
+		return err
+	}
 	c.q.do(func() {
-		s = c.core.Store.Settings()
-		if err = json.Unmarshal([]byte(stt), &s.Stt); err == nil {
-			err = c.core.Store.SaveSettings(s)
-		}
+		s := c.core.Store.Settings()
+		s.Stt = next
+		err = c.core.Store.SaveSettings(s)
 	})
 	if err == nil {
-		c.mirrorStt(s.Stt)
+		c.mirrorStt(next)
 	}
 	return err
 }
 
-// sttSent orders the mirrors of the speech settings: each change sends
-// them, one at a time, and only the last goes, so the server never ends
-// with older ones.
-var sttSent struct {
-	sync.Mutex
-	latest int
-}
+// sttLatest numbers the changes of the speech settings, and sttSent
+// orders their mirrors: each change sends them, one at a time, and only
+// the last goes, so the server never ends with older ones. A change only
+// counts, never waiting for a send on the network.
+var (
+	sttLatest atomic.Int64
+	sttSent   sync.Mutex
+)
 
 // mirrorStt sends the speech settings to the server, signed in, as the
 // desktop does: it transcribes with them.
@@ -493,16 +515,17 @@ func (c *Core) mirrorStt(stt store.SttSettings) {
 	if !be.SignedIn() || stt.Provider == recording.OnDevice {
 		return
 	}
-	sttSent.Lock()
-	sttSent.latest++
-	n := sttSent.latest
-	sttSent.Unlock()
+	n := sttLatest.Add(1)
 	go func() {
+		defer catch(nil)
 		// Only the last change waits for its turn.
 		time.Sleep(500 * time.Millisecond)
+		if sttLatest.Load() != n {
+			return
+		}
 		sttSent.Lock()
 		defer sttSent.Unlock()
-		if sttSent.latest != n {
+		if sttLatest.Load() != n {
 			return
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), remoteTimeout)
@@ -522,7 +545,8 @@ func (c *Core) mirrorStt(stt store.SttSettings) {
 
 // SetEndpointKey keeps the key of an endpoint on this device's network
 // in its keychain; "" removes it.
-func (c *Core) SetEndpointKey(key string) error {
+func (c *Core) SetEndpointKey(key string) (err error) {
+	defer catch(&err)
 	if key == "" {
 		return keychain.Delete("stt.endpoint.key")
 	}
@@ -531,7 +555,8 @@ func (c *Core) SetEndpointKey(key string) error {
 
 // SaveSonioxKey keeps a Soniox key on the server, signed in, or else in
 // this device's keychain. It returns where it went, in words for the user.
-func (c *Core) SaveSonioxKey(key string) (string, error) {
+func (c *Core) SaveSonioxKey(key string) (_ string, err error) {
+	defer catch(&err)
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return "", nil
@@ -553,7 +578,8 @@ func (c *Core) SaveSonioxKey(key string) (string, error) {
 
 // TestEndpoint tries an OpenAI-compatible endpoint with a second of
 // silence. It returns words to show for it working.
-func (c *Core) TestEndpoint(url, model, key string) (string, error) {
+func (c *Core) TestEndpoint(url, model, key string) (_ string, err error) {
+	defer catch(&err)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	silence := recording.WavFromPCM(make([]byte, recording.SampleRate))
@@ -565,7 +591,8 @@ func (c *Core) TestEndpoint(url, model, key string) (string, error) {
 
 // TestSoniox tries a Soniox key, or this device's saved one when key is
 // "". It returns words to show for it working.
-func (c *Core) TestSoniox(key string) (string, error) {
+func (c *Core) TestSoniox(key string) (_ string, err error) {
+	defer catch(&err)
 	if key = strings.TrimSpace(key); key == "" {
 		key = recording.LocalSonioxKey()
 	}
@@ -580,8 +607,8 @@ func (c *Core) TestSoniox(key string) (string, error) {
 // TestMicrophone records four seconds into no page and transcribes them,
 // for Settings to try the microphone and the engine. RecordingChanged
 // says it is testing, and then what it heard.
-func (c *Core) TestMicrophone() error {
-	var err error
+func (c *Core) TestMicrophone() (err error) {
+	defer catch(&err)
 	c.q.do(func() {
 		s := c.core.Store.Settings()
 		c.micTesting, c.micHeard = true, ""

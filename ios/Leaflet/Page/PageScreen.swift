@@ -209,10 +209,10 @@ struct PageScreen: View {
             apply: { [app, scene, pageID] t in
                 Task {
                     await scene.flush()
-                    await app.applyTemplate(t.key, to: pageID)
                     // The title it took shows, though the title has the
-                    // caret, as a new page's has.
-                    if let taken = app.library.page(pageID)?.title, !taken.isEmpty {
+                    // caret, as a new page's has: the field keeps it, and
+                    // doesn't put back the empty one it had.
+                    if let taken = await app.applyTemplate(t.key, to: pageID) {
                         title = taken
                     }
                 }
@@ -240,8 +240,7 @@ struct PageScreen: View {
                 // What was typed, the "/" taken out, goes first, for the
                 // core to put the blocks in.
                 await scene.flush()
-                await app.insertTemplate(key, into: pageID, after: blockID)
-                if let taken = app.library.page(pageID)?.title, !taken.isEmpty {
+                if let taken = await app.insertTemplate(key, into: pageID, after: blockID) {
                     title = taken
                 }
             }

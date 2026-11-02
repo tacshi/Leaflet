@@ -46,6 +46,11 @@ type Options struct {
 	Notify func(message string)
 	// Saved runs after edits were stored, for sync to send them.
 	Saved func()
+	// Dirty runs as edits come to wait to be saved, and as they stop
+	// waiting, however that comes: typing, a save the timer or anyone
+	// else runs, or content that can't be read coming in. It runs on the
+	// main thread.
+	Dirty func(dirty bool)
 }
 
 // SaveDelay is how long after the typing stops the edits are saved.
@@ -127,7 +132,19 @@ func (p *Page) SetReadOnly(readOnly bool) {
 }
 
 // Changed marks the content as edited, to be saved by the next Save.
-func (p *Page) Changed() { p.dirty = true }
+func (p *Page) Changed() { p.setDirty(true) }
+
+// setDirty says whether edits wait to be saved, telling Options.Dirty as
+// that changes.
+func (p *Page) setDirty(dirty bool) {
+	if dirty == p.dirty {
+		return
+	}
+	p.dirty = dirty
+	if p.opt.Dirty != nil {
+		p.opt.Dirty(dirty)
+	}
+}
 
 // Edited marks the content as edited, and saves it shortly after the
 // typing stops. A page the user can't change saves nothing.
@@ -135,7 +152,7 @@ func (p *Page) Edited() {
 	if p.readOnly {
 		return
 	}
-	p.dirty = true
+	p.setDirty(true)
 	if p.timer != nil {
 		p.timer.Stop()
 	}
@@ -191,9 +208,9 @@ func (p *Page) Save() bool {
 			p.notify(locales.AppErrorSave(err.Error()))
 			return false
 		}
-		p.dirty = false
 		content.Blocks, content.Deleted = stamped.Blocks, stamped.Deleted
 		p.loaded, p.stored = stamped.Copy(), stamped.Encode()
+		p.setDirty(false)
 		if changed {
 			p.row = p.stored
 			_ = p.st.MaybeAutosave(p.ID, stamped)
@@ -244,7 +261,8 @@ func (p *Page) External() {
 		if p.timer != nil {
 			p.timer.Stop()
 		}
-		p.unreadable, p.dirty, p.row = true, false, row.Content
+		p.unreadable, p.row = true, row.Content
+		p.setDirty(false)
 		p.SetReadOnly(true)
 		return
 	}

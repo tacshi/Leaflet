@@ -13,6 +13,14 @@ final class BlockAttachment: NSTextAttachment, @unchecked Sendable {
         self.node = node
         super.init(data: nil, ofType: nil)
         allowsTextAttachmentView = false
+        // What VoiceOver reads for the block, as it reads the text: an
+        // image's description, or what the block is and its title.
+        let d = node.data ?? [:]
+        let alt = d["alt"]?.string ?? ""
+        let title = d["title"]?.string ?? ""
+        let kind = CardBlock.name(node.type)
+        accessibilityLabel =
+            node.type == "image" && !alt.isEmpty ? alt : title.isEmpty ? kind : kind + ", " + title
     }
 
     required init?(coder: NSCoder) { fatalError("not coded") }
@@ -64,7 +72,14 @@ final class BlockViews {
     var links: PageLinks?
     /// edit opens a block's editor, from its long press's menu, while the
     /// page can be changed.
-    var edit: (@MainActor (DocNode) -> Void)?
+    var edit: (@MainActor (DocNode) -> Void)? {
+        didSet { refresh() }
+    }
+    /// editable says the page can be changed, which the blocks' views
+    /// follow as it changes: a table opens its sheet only then.
+    var editable = false {
+        didSet { if editable != oldValue { refresh() } }
+    }
     /// kept is how many views out of view are kept.
     private let kept = 40
 
@@ -150,16 +165,7 @@ final class BlockViews {
             shown[id] = Shown(node: node, view: web, host: nil)
             return web
         }
-        let canEdit = (textView as? UITextView)?.isEditable ?? false
-        let host = UIHostingController(
-            rootView: BlockCard(
-                node: node, links: links, edit: canEdit ? edit : nil,
-                onHeight: { [weak textView] h in
-                    // The block's room follows its view, laid out again once.
-                    guard BlockHeights.set(node.id, h), let tv = textView as? EditorTextView
-                    else { return }
-                    tv.relayout(block: node.id)
-                }))
+        let host = UIHostingController(rootView: card(node, in: textView))
         host.view.backgroundColor = .clear
         // A block draws within its room in the text, never over the text.
         host.view.clipsToBounds = true
@@ -176,13 +182,34 @@ final class BlockViews {
         return host.view
     }
 
+    /// card is a block's view, as the page can be changed or not.
+    private func card(_ node: DocNode, in textView: UIView) -> BlockCard {
+        BlockCard(
+            node: node, links: links, edit: editable ? edit : nil,
+            onHeight: { [weak textView] h in
+                // The block's room follows its view, laid out again once.
+                guard BlockHeights.set(node.id, h), let tv = textView as? EditorTextView
+                else { return }
+                tv.relayout(block: node.id)
+            })
+    }
+
+    /// refresh gives the blocks' views shown the page's links and edit as
+    /// they are now, keeping what each shows.
+    private func refresh() {
+        for s in shown.values {
+            guard let host = s.host, let textView = s.view.superview else { continue }
+            host.rootView = card(s.node, in: textView)
+        }
+    }
+
     /// editable are the blocks a long press offers to edit.
     static let editable: Set = ["chart", "math_equation", "diagram", "embed"]
 
     /// menuHit returns the block at point, in the text view's space, with
     /// its view, when a long press there offers to edit it.
     func menuHit(_ point: CGPoint) -> (node: DocNode, view: UIView)? {
-        guard edit != nil else { return nil }
+        guard editable, edit != nil else { return nil }
         for s in shown.values where Self.editable.contains(s.node.type) {
             if !s.view.isHidden, s.view.superview != nil, s.view.frame.contains(point) {
                 return (s.node, s.view)
@@ -197,10 +224,12 @@ final class BlockViews {
         return view
     }
 
-    /// reset lets every block's view go, for each to be made again as it
-    /// shows, as the theme changes.
-    func reset() {
-        for id in Array(shown.keys) { drop(id) }
+    /// reset lets the blocks' views go, every one or those of the blocks
+    /// chosen, for each to be made again as it shows: as the theme
+    /// changes, or the text size tables' cells are in, and as the page
+    /// closes, whose view controller would keep them.
+    func reset(where chosen: (DocNode) -> Bool = { _ in true }) {
+        for (id, s) in shown where chosen(s.node) { drop(id) }
     }
 
     /// takeOut takes a block's view out of the text view. An embed used

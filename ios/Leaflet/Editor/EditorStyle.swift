@@ -172,18 +172,29 @@ struct EditorStyle {
             } else if a[.leafletTinted] as? Bool == true {
                 update[.backgroundColor] = UIColor(palette.agentSection)
             }
-            s.addAttributes(update, range: r)
-            if update[.backgroundColor] == nil { s.removeAttribute(.backgroundColor, range: r) }
-            if checked {
-                s.addAttribute(
-                    .strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: r)
-                s.addAttribute(.strikethroughColor, value: UIColor(palette.textMuted), range: r)
+            // The lines under and through the text show its formats, a
+            // link and a checked to-do: they are drawn here alone, so
+            // what no longer asks for one loses it.
+            let link = a[.leafletHref] != nil
+            if a[.leafletUnderline] as? Bool == true || link {
+                update[.underlineStyle] = NSUnderlineStyle.single.rawValue
+                if !(a[.leafletUnderline] as? Bool == true) {
+                    update[.underlineColor] = UIColor(palette.accentText).withAlphaComponent(0.4)
+                }
             }
-            if a[.leafletHref] != nil {
-                s.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: r)
-                s.addAttribute(
-                    .underlineColor, value: UIColor(palette.accentText).withAlphaComponent(0.4),
-                    range: r)
+            if a[.leafletStrike] as? Bool == true || checked {
+                update[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+                if checked { update[.strikethroughColor] = UIColor(palette.textMuted) }
+            }
+            // A link the page can open is one to VoiceOver and to a tap
+            // on a page that can't be changed: a page's, or the web's.
+            if let target = Self.linkTarget(a) { update[.link] = target }
+            s.addAttributes(update, range: r)
+            for key: NSAttributedString.Key in [
+                .backgroundColor, .underlineStyle, .underlineColor, .strikethroughStyle,
+                .strikethroughColor, .link,
+            ] where update[key] == nil {
+                s.removeAttribute(key, range: r)
             }
         }
         if info.type == "code", para.length > 0 {
@@ -199,6 +210,24 @@ struct EditorStyle {
                     .foregroundColor, value: color,
                     range: NSRange(location: para.location + range.location, length: range.length))
             }
+        }
+    }
+
+    /// linkTarget is where text of attributes a links to, when it is a link
+    /// the page opens: a page, by its mention or its leaflet:// link, or a
+    /// web or mail link, as doc.SafeHref lets through. A link to a file or
+    /// an app, as a shared page or an agent can write one, opens nothing.
+    static func linkTarget(_ a: [NSAttributedString.Key: Any]) -> URL? {
+        if let m = a[.leafletMention] as? Mention {
+            return m.kind == "page" ? URL(string: "leaflet://page/\(m.id)") : nil
+        }
+        guard let href = a[.leafletHref] as? String,
+            let url = URL(string: href.trimmingCharacters(in: .whitespaces))
+        else { return nil }
+        switch url.scheme?.lowercased() {
+        case "http", "https", "mailto": return url
+        case "leaflet": return url.host == "page" ? url : nil
+        default: return nil
         }
     }
 

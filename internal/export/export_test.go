@@ -35,7 +35,7 @@ func TestExportZip(t *testing.T) {
 			"url": "file:///elsewhere/files/sun/sun.jpg", "alt": "sun", "file_id": "sun"}}}),
 	}
 	var buf bytes.Buffer
-	err := Zip(&buf, pages, map[string]string{"f": "Travel"}, func(id string) *doc.Content { return contents[id] },
+	err := Zip(&buf, pages, []store.Folder{{ID: "f", Name: "Travel"}}, func(id string) *doc.Content { return contents[id] },
 		func(id string) string {
 			if id == "sun" {
 				return "/data/files/sun/sun.jpg"
@@ -94,7 +94,7 @@ func TestExportZipDotNames(t *testing.T) {
 		{ID: "here", Title: ".", FolderID: "f"},
 	}
 	var buf bytes.Buffer
-	err := Zip(&buf, pages, map[string]string{"f": ".."}, func(string) *doc.Content { return doc.Empty() },
+	err := Zip(&buf, pages, []store.Folder{{ID: "f", Name: ".."}}, func(string) *doc.Content { return doc.Empty() },
 		func(string) string { return "" }, os.ReadFile)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,8 @@ func TestExportZipDotNames(t *testing.T) {
 		names = append(names, f.Name)
 	}
 	slices.Sort(names)
-	if want := []string{"--.md", "--/-.md", "--/Notes.md"}; !slices.Equal(names, want) {
+	// The folder and the page of one name stay apart.
+	if want := []string{"-- (2).md", "-- (2)/Notes.md", "--/-.md"}; !slices.Equal(names, want) {
 		t.Errorf("names %q, want %q", names, want)
 	}
 }
@@ -127,7 +128,7 @@ func TestExportZipFilesBesidePages(t *testing.T) {
 	dir := &doc.Node{ID: "d", Type: "file", Data: map[string]any{"url": "file:///data/files/d/Trip", "name": "Trip"}}
 	contents := map[string]*doc.Content{"other": doc.FromBlocks([]*doc.Node{md, dir})}
 	var buf bytes.Buffer
-	err := Zip(&buf, pages, map[string]string{"f": "files"}, func(id string) *doc.Content {
+	err := Zip(&buf, pages, []store.Folder{{ID: "f", Name: "files"}}, func(id string) *doc.Content {
 		if c := contents[id]; c != nil {
 			return c
 		}
@@ -164,4 +165,44 @@ func keys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// A folder in another is a directory in that folder's; folders of one
+// name, in different folders or the same one, stay apart.
+func TestExportZipNestedFolders(t *testing.T) {
+	folders := []store.Folder{
+		{ID: "work", Name: "Work"},
+		{ID: "home", Name: "Home"},
+		{ID: "work-notes", Name: "Notes", ParentFolderID: "work"},
+		{ID: "home-notes", Name: "Notes", ParentFolderID: "home"},
+		{ID: "home-notes2", Name: "notes", ParentFolderID: "home"},
+		{ID: "deep", Name: "a/b", ParentFolderID: "work-notes"},
+	}
+	pages := []store.Page{
+		{ID: "1", Title: "Plan", FolderID: "work-notes"},
+		{ID: "2", Title: "Plan", FolderID: "home-notes"},
+		{ID: "3", Title: "Plan", FolderID: "home-notes2"},
+		{ID: "4", Title: "Plan", FolderID: "deep"},
+		// A page named as a folder beside it takes another name.
+		{ID: "5", Title: "Work"},
+	}
+	var buf bytes.Buffer
+	err := Zip(&buf, pages, folders, func(string) *doc.Content { return doc.Empty() },
+		func(string) string { return "" }, os.ReadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, f := range r.File {
+		names = append(names, f.Name)
+	}
+	slices.Sort(names)
+	want := []string{"Home/Notes/Plan.md", "Home/notes (2)/Plan.md", "Work (2).md", "Work/Notes/Plan.md", "Work/Notes/a-b/Plan.md"}
+	if !slices.Equal(names, want) {
+		t.Errorf("names %q, want %q", names, want)
+	}
 }

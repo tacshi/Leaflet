@@ -7,10 +7,15 @@ import Security
 struct Keychain: Sendable {
     var service: String
 
+    /// Failure is a status SecItem failed with. Its description always
+    /// ends with the status, as "(OSStatus -128)": the core tells a prompt
+    /// turned down, which it doesn't ask again, from a device still locked,
+    /// which it tries again, by it (mobile's keychainError).
     struct Failure: LocalizedError {
         var status: OSStatus
         var errorDescription: String? {
-            SecCopyErrorMessageString(status, nil) as String? ?? "Keychain error \(status)"
+            let message = SecCopyErrorMessageString(status, nil) as String? ?? "Keychain error"
+            return "\(message) (OSStatus \(status))"
         }
     }
 

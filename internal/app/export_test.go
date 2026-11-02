@@ -10,11 +10,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/transfer"
+	"github.com/egoist/mygo/ui"
+
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
+	"leaflet/internal/editor"
 	"leaflet/internal/recording"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
+	"leaflet/locales"
 )
 
 // Export All takes the app's own files, and no file elsewhere that a
@@ -167,4 +174,47 @@ func readZip(t *testing.T, path string) map[string]string {
 		out[f.Name] = string(data)
 	}
 	return out
+}
+
+// The Edit menu's Copy as Plain Text copies the page's selection as text
+// alone, while the page has the focus.
+func TestEditMenuCopiesPlainText(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	head := &doc.Node{ID: "h", Type: "heading", Data: map[string]any{"level": 1}}
+	head.SetDelta(doc.FromMarkdown("Trip **plan**"))
+	item := &doc.Node{ID: "i", Type: "bulleted_list"}
+	item.SetDelta(doc.FromMarkdown("[Kyoto](https://kyoto.travel)"))
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Trip", Content: doc.FromBlocks([]*doc.Node{head, item})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
+	tt.Frame()
+	var copyPlain *mygo.MenuItem
+	for _, it := range a.editMenu() {
+		if it.Label == locales.EditorCopyPlainText() {
+			copyPlain = it
+		}
+	}
+	if copyPlain == nil {
+		t.Fatal("no Copy as Plain Text in the Edit menu")
+	}
+	a.page.editor.Select(editor.Pos{ID: "h"}, editor.Pos{ID: "i", Off: 5})
+	tt.Frame()
+	copyPlain.Click(copyPlain, nil)
+	if got := tt.Clipboard(); got != "" {
+		t.Errorf("copied %q without the focus", got)
+	}
+	a.page.editor.Focus()
+	tt.Frame()
+	copyPlain.Click(copyPlain, nil)
+	if formats := tt.ClipboardData().Formats(); len(formats) != 1 || formats[0] != transfer.Text {
+		t.Errorf("copied as %v", formats)
+	}
+	if got := tt.Clipboard(); got != "Trip plan\nKyoto" {
+		t.Errorf("copied %q", got)
+	}
 }

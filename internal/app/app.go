@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -1299,7 +1300,7 @@ func (a *App) setMenu() {
 			{Type: mygo.MenuItemSeparator},
 			{Role: mygo.RoleClose},
 		}},
-		{Role: mygo.RoleEditMenu},
+		{Role: mygo.RoleEditMenu, Submenu: a.editMenu()},
 		{Label: locales.AppMenuView(), Submenu: []*mygo.MenuItem{
 			{Label: locales.AppMenuToggleSidebar(), Accelerator: "CmdOrCtrl+\\", Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.update(func() { a.toggleSidebar() })
@@ -1318,6 +1319,45 @@ func (a *App) setMenu() {
 		}},
 		{Role: mygo.RoleWindowMenu},
 	}))
+}
+
+// editMenu is MyGo's Edit menu with Copy as Plain Text after Copy: ⌥⇧⌘C
+// on macOS, beside Paste and Match Style's ⌥⇧⌘V, and Ctrl+Shift+C
+// elsewhere, beside the Ctrl+Shift+V that pastes plain text.
+func (a *App) editMenu() []*mygo.MenuItem {
+	mac := runtime.GOOS == "darwin"
+	accel := "Shift+CmdOrCtrl+C"
+	if mac {
+		accel = "Shift+Alt+CmdOrCtrl+C"
+	}
+	items := []*mygo.MenuItem{
+		{Role: mygo.RoleUndo},
+		{Role: mygo.RoleRedo},
+		mygo.Separator(),
+		{Role: mygo.RoleCut},
+		{Role: mygo.RoleCopy},
+		{Label: locales.EditorCopyPlainText(), Accelerator: accel, Click: func(*mygo.MenuItem, *mygo.Window) {
+			a.update(func() {
+				if a.page != nil && a.page.editor.Focused() {
+					a.page.editor.CopyPlainText()
+				}
+			})
+		}},
+		{Role: mygo.RolePaste},
+	}
+	if !mac {
+		return append(items, &mygo.MenuItem{Role: mygo.RoleDelete}, mygo.Separator(), &mygo.MenuItem{Role: mygo.RoleSelectAll})
+	}
+	return append(items,
+		&mygo.MenuItem{Role: mygo.RolePasteAndMatchStyle},
+		&mygo.MenuItem{Role: mygo.RoleDelete},
+		&mygo.MenuItem{Role: mygo.RoleSelectAll},
+		mygo.Separator(),
+		&mygo.MenuItem{Label: locales.AppMenuSpeech(), Submenu: []*mygo.MenuItem{
+			{Role: mygo.RoleStartSpeaking},
+			{Role: mygo.RoleStopSpeaking},
+		}},
+	)
 }
 
 func (a *App) toggleSidebar() {

@@ -320,6 +320,9 @@ final class EditorTextView: UITextView {
                 key("2", [.command, .alternate], #selector(makeHeading2), L.hostSlashHeading2),
                 key("3", [.command, .alternate], #selector(makeHeading3), L.hostSlashHeading3),
                 key("l", [.command, .shift], #selector(makeTodo), L.hostSlashTodo),
+                key(
+                    "c", [.command, .alternate, .shift], #selector(copyPlainText),
+                    L.editorCopyPlainText),
             ]
         }
         commands.append(contentsOf: super.keyCommands ?? [])
@@ -352,6 +355,7 @@ final class EditorTextView: UITextView {
     @objc func makeHeading2() { controller?.setType("heading", ["level": .int(2)]) }
     @objc func makeHeading3() { controller?.setType("heading", ["level": .int(3)]) }
     @objc func makeTodo() { controller?.setType("todo_list", ["checked": .bool(false)]) }
+    @objc func copyPlainText() { controller?.copyPlainText() }
 
     // The system's format commands (⌘B, ⌘I, ⌘U) set the block's formats,
     // which the style then shows, rather than the fonts themselves.

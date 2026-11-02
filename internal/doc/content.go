@@ -415,21 +415,77 @@ func (c *Content) IsSelfOrAncestor(ancestor, id string) bool {
 func (c *Content) PlainText() string {
 	var lines []string
 	c.Walk(func(n, _ *Node) {
-		var s string
-		switch n.Type {
-		case "chart", "embed", "video":
-			s = n.Str("title")
-		case "link_preview", "file":
-			s = cardTitle(n)
-		case "math_equation", "diagram":
-			_, s = BlockSource(n)
-		default:
-			s = n.Delta().Plain()
-		}
-		if strings.TrimSpace(s) != "" {
+		if s := blockText(n); strings.TrimSpace(s) != "" {
 			lines = append(lines, s)
 		}
 	})
+	return strings.Join(lines, "\n")
+}
+
+// blockText is a block's own text without formats: for a block without
+// text, the title or source it shows.
+func blockText(n *Node) string {
+	switch n.Type {
+	case "chart", "embed", "video":
+		return n.Str("title")
+	case "link_preview", "file":
+		return cardTitle(n)
+	case "math_equation", "diagram":
+		_, s := BlockSource(n)
+		return s
+	}
+	return n.Delta().Plain()
+}
+
+// PlainCopy is blocks as a copy as plain text gives them: a line per
+// block with no Markdown, list markers or boxes, nested blocks a tab
+// further in. A table is a line per row, its cells apart by tabs; a link
+// card is its link; a picture its alt text; a subpage the page's title,
+// by pageTitle. An empty paragraph is an empty line, and a block with
+// nothing to read, as a divider, none.
+func PlainCopy(nodes []*Node, pageTitle func(id string) string) string {
+	var lines []string
+	// A cell's line breaks would start another row.
+	cell := func(d Delta) string { return strings.ReplaceAll(d.Plain(), "\n", " ") }
+	var visit func(nodes []*Node, indent string)
+	visit = func(nodes []*Node, indent string) {
+		for _, n := range nodes {
+			var s string
+			switch n.Type {
+			case "table":
+				var rows []string
+				for _, r := range tableRows(n, cell) {
+					rows = append(rows, strings.Join(r, "\t"))
+				}
+				s = strings.Join(rows, "\n")
+			case "link_preview":
+				s = n.Str("url")
+			case "image":
+				s = n.Str("alt")
+			case "recording":
+				s = n.Str("title")
+			case "subpage":
+				s = n.Str("page_id")
+				if pageTitle != nil {
+					s = pageTitle(s)
+				}
+			default:
+				s = blockText(n)
+			}
+			if s != "" || n.IsText() {
+				for _, l := range strings.Split(s, "\n") {
+					if l != "" {
+						l = indent + l
+					}
+					lines = append(lines, l)
+				}
+			}
+			if n.Type != "table" {
+				visit(n.Children, indent+"\t")
+			}
+		}
+	}
+	visit(nodes, "")
 	return strings.Join(lines, "\n")
 }
 

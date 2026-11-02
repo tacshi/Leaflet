@@ -153,6 +153,9 @@ type Editor struct {
 	// copied is the code block whose code was copied last, at copiedAt.
 	copied   string
 	copiedAt time.Time
+	// plainCopiedAt is when the toolbar last copied the selection as
+	// plain text.
+	plainCopiedAt time.Time
 
 	// cellEdit is the table cell being edited, as cellKey names it: it
 	// shows its Markdown in an input, and the others their text

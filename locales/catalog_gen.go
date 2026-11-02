@@ -121,6 +121,22 @@ func (msgs Messages) AppMenuExportMarkdown() string {
 	return Catalog.Format(msgs.locale, "appMenuExportMarkdown", nil)
 }
 
+// AppMenuSpeech says "Speech"
+// in the language the app shows.
+//
+// The Edit menu on macOS: the submenu with Start Speaking and Stop
+// Speaking, as in other Mac apps.
+func AppMenuSpeech() string { return In(i18n.Locale()).AppMenuSpeech() }
+
+// AppMenuSpeech says "Speech"
+// in the language of msgs.
+//
+// The Edit menu on macOS: the submenu with Start Speaking and Stop
+// Speaking, as in other Mac apps.
+func (msgs Messages) AppMenuSpeech() string {
+	return Catalog.Format(msgs.locale, "appMenuSpeech", nil)
+}
+
 // AppMenuToggleSidebar says "Toggle Sidebar"
 // in the language the app shows.
 //
@@ -8323,6 +8339,24 @@ func EditorCopyCode() string { return In(i18n.Locale()).EditorCopyCode() }
 // Code block button.
 func (msgs Messages) EditorCopyCode() string {
 	return Catalog.Format(msgs.locale, "editorCopyCode", nil)
+}
+
+// EditorCopyPlainText says "Copy as Plain Text"
+// in the language the app shows.
+//
+// The Edit menu, and the iOS editor's menu for selected text: copy the
+// selection as text alone, without its formats, so other apps paste it
+// unformatted.
+func EditorCopyPlainText() string { return In(i18n.Locale()).EditorCopyPlainText() }
+
+// EditorCopyPlainText says "Copy as Plain Text"
+// in the language of msgs.
+//
+// The Edit menu, and the iOS editor's menu for selected text: copy the
+// selection as text alone, without its formats, so other apps paste it
+// unformatted.
+func (msgs Messages) EditorCopyPlainText() string {
+	return Catalog.Format(msgs.locale, "editorCopyPlainText", nil)
 }
 
 // EditorColor says "Color"

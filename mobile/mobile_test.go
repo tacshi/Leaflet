@@ -747,3 +747,21 @@ func TestSetTimeZoneOnlyBeforeOpen(t *testing.T) {
 		t.Errorf("set %v, want %s", got, want)
 	}
 }
+
+// Copy as plain text takes the blocks the app has selected, a subpage
+// as its page's title.
+func TestPlainCopy(t *testing.T) {
+	c, _ := open(t)
+	sub := create(t, c, `{"title":"Kyoto"}`)
+	head := &doc.Node{ID: "h", Type: "heading", Data: map[string]any{"level": 1}}
+	head.SetDelta(doc.FromMarkdown("Trip **plan**"))
+	link := &doc.Node{ID: "s", Type: "subpage", Data: map[string]any{"page_id": sub.ID}}
+	raw, _ := json.Marshal([]*doc.Node{head, link})
+	got, err := c.PlainCopy(string(raw))
+	if err != nil || got != "Trip plan\nKyoto" {
+		t.Errorf("copied %q, %v", got, err)
+	}
+	if _, err := c.PlainCopy("not json"); err == nil {
+		t.Error("copied blocks that are not JSON")
+	}
+}

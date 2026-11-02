@@ -79,6 +79,7 @@ struct PageScreen: View {
                         c.pageLinks = PageLinks(
                             title: { [app] id in app.library.page(id)?.title },
                             open: { [weak scene] id in scene?.open(id) })
+                        c.plainCopy = { [app] nodes in try? await app.client?.plainCopy(nodes) }
                         c.menuItems = { [app, pageID] trigger, give in
                             Task {
                                 if let items = try? await app.client?.menuItems(

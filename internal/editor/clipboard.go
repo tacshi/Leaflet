@@ -14,6 +14,27 @@ import (
 // rich text and as HTML, which MyGo's rich text writes, besides its
 // Markdown; a paste from another app reads those, or RTF, as blocks of
 // their formats. Leaflet's own copy pastes as the blocks it came from.
+// Copy as plain text offers only text, without formats or Markdown.
+
+// CopyPlainText puts the selection on the clipboard as text alone, for
+// apps that would paste formats: a line per block, as doc.PlainCopy
+// writes them. It pastes in Leaflet as text another app copied.
+func (e *Editor) CopyPlainText() {
+	if e.Collapsed() && !e.blockSelected() {
+		return
+	}
+	var text string
+	if nodes := e.copyBlocks(); nodes != nil {
+		text = doc.PlainCopy(nodes, e.Host.PageTitle)
+	} else {
+		a, b := e.ordered()
+		text = e.node(a.ID).Delta().Slice(a.Off, b.Off).Plain()
+	}
+	if text == "" {
+		return
+	}
+	e.services.WriteClipboardData(transfer.New(transfer.NewItem(transfer.Bytes(transfer.Text, []byte(text)))))
+}
 
 // copySelection puts the selection on the clipboard.
 func (e *Editor) copySelection() {

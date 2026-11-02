@@ -2,6 +2,7 @@ package editor
 
 import (
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 	codeeditor "github.com/egoist/mygo/ui/editor"
@@ -98,5 +99,44 @@ func TestSelectionToolbar(t *testing.T) {
 	// The keys stayed in the page.
 	if !e.Focused() {
 		t.Error("the toolbar took the focus")
+	}
+}
+
+// The selection toolbar's first button copies the selection as plain
+// text, says it did, and leaves the selection and the focus in the page;
+// in code, which takes no formats, it is the toolbar's one copy button.
+func TestSelectionToolbarCopiesPlainText(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("ship **it** now")
+	n := e.Content.Children[0]
+	e.Select(Pos{n.ID, 0}, Pos{n.ID, 7})
+	tt.Frame()
+	if err := tt.Click("Copy as Plain Text"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if got, formats := tt.Clipboard(), tt.ClipboardData().Formats(); got != "ship it" || len(formats) != 1 {
+		t.Errorf("copied %q as %v", got, formats)
+	}
+	if _, ok := tt.Find("Copied"); !ok {
+		t.Error("the button does not say it copied")
+	}
+	if e.Collapsed() || !e.Focused() {
+		t.Error("copying lost the selection or the focus")
+	}
+
+	code := doc.CodeNode("a := 1", "go")
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{code} })
+	e.Select(Pos{code.ID, 0}, Pos{code.ID, 1})
+	e.plainCopiedAt = time.Time{}
+	tt.Frame()
+	if _, ok := tt.Find("Bold"); ok {
+		t.Error("code offers formats")
+	}
+	if err := tt.Click("Copy as Plain Text"); err != nil {
+		t.Fatal(err)
+	}
+	if got := tt.Clipboard(); got != "a" {
+		t.Errorf("copied %q from code", got)
 	}
 }

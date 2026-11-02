@@ -1074,3 +1074,28 @@ func TestPageMarkdownKeepsBlocksApart(t *testing.T) {
 		t.Errorf("got\n%s\nwant\n%s", got, want)
 	}
 }
+
+func TestPlainCopy(t *testing.T) {
+	heading := &Node{ID: "h", Type: "heading", Data: map[string]any{"level": 2}}
+	heading.SetDelta(FromMarkdown("Trip **plan** with [map](https://x.dev)"))
+	item := &Node{ID: "i", Type: "bulleted_list"}
+	item.SetDelta(FromMarkdown("Day *1*"))
+	todo := &Node{ID: "t", Type: "todo_list", Data: map[string]any{"checked": true}}
+	todo.SetDelta(Delta{{Text: "Kiyomizu-dera"}})
+	item.Children = []*Node{todo}
+	table, err := TableNode([][]string{{"Item", "Cost"}, {"**Hotel**", "800"}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nodes := []*Node{
+		heading, item, para("e", ""), {ID: "d", Type: "divider"}, table,
+		CodeNode("a()\n\nb()", "go"),
+		{ID: "l", Type: "link_preview", Data: map[string]any{"url": "https://x.dev", "title": "X"}},
+		{ID: "s", Type: "subpage", Data: map[string]any{"page_id": "P1"}},
+	}
+	got := PlainCopy(nodes, func(id string) string { return "Kyoto (" + id + ")" })
+	want := "Trip plan with map\nDay 1\n\tKiyomizu-dera\n\nItem\tCost\nHotel\t800\na()\n\nb()\nhttps://x.dev\nKyoto (P1)"
+	if got != want {
+		t.Errorf("got\n%q\nwant\n%q", got, want)
+	}
+}

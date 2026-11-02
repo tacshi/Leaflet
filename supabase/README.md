@@ -161,7 +161,7 @@ about 54 minutes of the app's WAV); longer ones transcribe on the device.
 
 Keep email confirmation on (Authentication › Sign In / Providers › Email ›
 Confirm email; `enable_confirmations = true` in `config.toml`, which local
-development uses too, with the emails in Inbucket on :54324). Shares and
+development uses too, with the emails in Mailpit on :54324). Shares and
 invites waiting for an address go to the account that confirmed it; without
 confirmation, signing up confirms any address at once, so whoever signs up
 with someone else's address gets the pages shared with them.

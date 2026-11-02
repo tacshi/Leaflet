@@ -2,8 +2,10 @@ package app
 
 import (
 	"hash/fnv"
+	"math"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -102,6 +104,56 @@ func passwordBox(c *ui.Context, key string, value *string, placeholder string, g
 func label(c *ui.Context, text string) {
 	pal := theme.Of(c)
 	ui.Text(c, text).FontSize(12).FontWeight(600).TextColor(pal.TextMuted)
+}
+
+// The band shimmer sweeps across its text: its half width, as a share of
+// the text, and how long it takes to cross it.
+const (
+	shimmerBand  = 0.3
+	shimmerCycle = 2 * time.Second
+)
+
+// shimmer is a status line of work going on, as a terminal agent's
+// "Thinking…": muted text that a brighter band sweeps across, over and
+// over; still where the desktop asks for less motion.
+func shimmer(c *ui.Context, text string, size float32) ui.Element {
+	pal := theme.Of(c)
+	t := ui.Text(c, text).FontSize(size).TextColor(pal.TextMuted)
+	if c.Preferences().ReduceMotion {
+		return t
+	}
+	runes := []rune(text)
+	spans := make([]ui.Span, len(runes))
+	// Its own glyphs hidden, the text keeps its layout, and what assistive
+	// technology reads; Draw paints it again, each rune in its color, and
+	// again each frame without building the view.
+	return t.TextColor(pal.TextMuted.Alpha(0)).Draw(func(p *ui.Painter, r ui.Rect) {
+		at := shimmerAt(p.Now())
+		for i, ch := range runes {
+			x := (float32(i) + 0.5) / float32(len(runes))
+			spans[i] = ui.Span{Text: string(ch), Size: size, Color: pal.TextMuted.Mix(pal.Text, shimmerGlow(x, at))}
+		}
+		p.RichText(r.X, r.Y, r.W, spans...)
+		p.AnimationFrameRate(30)
+	})
+}
+
+// shimmerAt is where the band's middle is at now, as a share of the text:
+// from wholly before it to wholly past it, each cycle.
+func shimmerAt(now time.Time) float32 {
+	cycle := shimmerCycle.Milliseconds()
+	t := float32(now.UnixMilli()%cycle) / float32(cycle)
+	return -shimmerBand + (1+2*shimmerBand)*t
+}
+
+// shimmerGlow is how bright the text is at x with the band's middle at
+// at: 1 there, easing to 0 at its edges.
+func shimmerGlow(x, at float32) float32 {
+	d := math.Abs(float64(x-at)) / shimmerBand
+	if d >= 1 {
+		return 0
+	}
+	return float32(0.5 + 0.5*math.Cos(math.Pi*d))
 }
 
 // notice is a tinted box of information: info, warn, ok or danger.

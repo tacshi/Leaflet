@@ -330,3 +330,58 @@ func TestUndoRunThatFailsSaysSo(t *testing.T) {
 		t.Errorf("toasts %+v", a.toasts)
 	}
 }
+
+// A run's status line shimmers: its text drawn, a band of it brighter
+// that moves on as time does, and still where the desktop asks for less
+// motion.
+func TestStatusLineShimmers(t *testing.T) {
+	const status = "Reading the page…"
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Fill().Padding(20).Children(func() { shimmer(c, status, 13) })
+	}, 300, 60)
+	tt.Frame()
+	r, ok := tt.Find(status)
+	if !ok {
+		t.Fatal("no status line")
+	}
+	// The pixels of the line, and how many of them are inked.
+	line := func() ([]byte, int) {
+		img := tt.Image()
+		scale := float32(img.Bounds().Dx()) / 300
+		ground := img.RGBAAt(int(5*scale), int(5*scale))
+		var px []byte
+		inked := 0
+		for y := int(r.Y * scale); y < int((r.Y+r.H)*scale); y++ {
+			for x := int(r.X * scale); x < int((r.X+r.W)*scale); x++ {
+				p := img.RGBAAt(x, y)
+				px = append(px, p.R, p.G, p.B)
+				if p != ground {
+					inked++
+				}
+			}
+		}
+		return px, inked
+	}
+	before, inked := line()
+	if inked == 0 {
+		t.Fatal("the status line's text isn't drawn")
+	}
+	if !tt.FramePending() {
+		t.Error("the status line asks for no frame to move its band")
+	}
+	tt.Advance(500 * time.Millisecond)
+	if after, _ := line(); string(after) == string(before) {
+		t.Error("the status line's band didn't move")
+	}
+
+	tt.SetPreferences(ui.Preferences{ReduceMotion: true, TextScale: 1})
+	tt.Frame()
+	still, inked := line()
+	if inked == 0 {
+		t.Fatal("with less motion, the status line's text isn't drawn")
+	}
+	tt.Advance(500 * time.Millisecond)
+	if after, _ := line(); string(after) != string(still) {
+		t.Error("with less motion, the status line still moves")
+	}
+}

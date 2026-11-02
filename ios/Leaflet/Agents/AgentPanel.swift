@@ -174,25 +174,62 @@ struct MessageView: View {
             if !message.mine, let name = message.agentName, !name.isEmpty {
                 Text(name).font(.caption.weight(.semibold)).foregroundStyle(palette.textMuted)
             }
-            Group {
-                if message.pending && message.text.isEmpty {
+            if message.pending && !message.streamed {
+                // What the run is doing, bare, as the desktop shows it.
+                if message.text.isEmpty {
                     ProgressView().controlSize(.small)
                 } else {
-                    MarkdownText(text: message.text)
+                    StatusLine(text: message.text)
                 }
+            } else {
+                MarkdownText(text: message.text)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        message.mine ? palette.accentSoft : palette.panel,
+                        in: .rect(cornerRadius: 12)
+                    )
+                    .foregroundStyle(message.error ? palette.dangerText : palette.text)
+                    .textSelection(.enabled)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                message.mine ? palette.accentSoft : palette.panel, in: .rect(cornerRadius: 12)
-            )
-            .foregroundStyle(message.error ? palette.dangerText : palette.text)
-            .textSelection(.enabled)
             if let run, !run.edits.isEmpty {
                 RunCard(run: run, pageID: model.id)
             }
         }
         .frame(maxWidth: .infinity, alignment: message.mine ? .trailing : .leading)
+    }
+}
+
+/// StatusLine is what an agent's run is doing, as a terminal agent's
+/// "Thinking…" line: muted text that a brighter band sweeps across, over
+/// and over, as on the desktop; still where motion is reduced.
+struct StatusLine: View {
+    let text: String
+    @Environment(\.palette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// band is the band's half width, as a share of the text; cycle, the
+    /// seconds it takes to cross it.
+    private static let band = 0.3
+    private static let cycle = 2.0
+
+    var body: some View {
+        if reduceMotion {
+            Text(text).foregroundStyle(palette.textMuted)
+        } else {
+            TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+                let t =
+                    context.date.timeIntervalSinceReferenceDate
+                    .truncatingRemainder(dividingBy: Self.cycle) / Self.cycle
+                // From wholly before the text to wholly past it.
+                let at = -Self.band + (1 + 2 * Self.band) * t
+                Text(text).foregroundStyle(
+                    LinearGradient(
+                        colors: [palette.textMuted, palette.text, palette.textMuted],
+                        startPoint: UnitPoint(x: at - Self.band, y: 0.5),
+                        endPoint: UnitPoint(x: at + Self.band, y: 0.5)))
+            }
+        }
     }
 }
 

@@ -149,6 +149,8 @@ struct RootView: View {
             // read: the last page too.
             if app.libraryLoaded { scene.keep(Set(ids)) }
         }
+        // The page the window still holds closes with it.
+        .onDisappear { scene.closeHeld() }
         .onChange(of: phase) { _, phase in
             switch phase {
             case .active:

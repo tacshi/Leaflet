@@ -8,4 +8,5 @@ import "io/fs"
 // downloaded downloads it.
 func notReady(fs.FileInfo) bool { return false }
 
-var startDownload = func(string) error { return nil }
+// StartDownload has nothing to ask for. Tests stand in for it.
+var StartDownload = func(string) error { return nil }

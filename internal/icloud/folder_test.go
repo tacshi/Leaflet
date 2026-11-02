@@ -84,14 +84,29 @@ func TestBatchesListsPlaceholdersAndSpotsCopies(t *testing.T) {
 	}
 	// A batch iCloud has not downloaded is not ready, and is asked for.
 	asked := ""
-	startDownload = func(p string) error { asked = p; return nil }
-	t.Cleanup(func() { startDownload = func(string) error { return nil } })
+	was := StartDownload
+	StartDownload = func(p string) error { asked = p; return nil }
+	t.Cleanup(func() { StartDownload = was })
 	rel, _ := BatchPath(dev, 1)
 	if err := f.ReadJSON(rel, &Batch{}); !errors.Is(err, ErrNotReady) || asked != f.abs(rel) {
 		t.Errorf("placeholder: %v, asked for %q", err, asked)
 	}
 	if !f.Exists(rel) {
 		t.Error("a placeholder's file does not exist")
+	}
+	// Download asks for it too, and not for a file downloaded or missing.
+	asked = ""
+	f.Download(rel)
+	if asked != f.abs(rel) {
+		t.Errorf("Download asked for %q", asked)
+	}
+	asked = ""
+	for _, seq := range []int64{2, 9} {
+		other, _ := BatchPath(dev, seq)
+		f.Download(other)
+	}
+	if asked != "" {
+		t.Errorf("Download asked for %q, downloaded or missing", asked)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "0000000000000002 2.json"), []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)

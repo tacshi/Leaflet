@@ -497,4 +497,7 @@ Leaflet/
   files' rows too, so a deletion in a batch that was lost goes again.
 - **Not downloaded.** A file iCloud has not downloaded (on macOS before 14,
   `.<name>.icloud` beside where it goes; after, a file flagged dataless) is
-  asked for, and read on a later pass.
+  asked for, and read on a later pass. A reader that stops at a batch not
+  downloaded asks for the device's later batches too: iCloud on iOS
+  downloads only what it is asked for, and a batch a pass would take a
+  long log hours to catch up on.

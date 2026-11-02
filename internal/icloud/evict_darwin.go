@@ -47,9 +47,9 @@ func loadFoundation() bool {
 	return nsOK
 }
 
-// startDownload asks iCloud to download the file at path, named as it
-// will be once downloaded.
-var startDownload = func(path string) error {
+// StartDownload asks iCloud to download the file at path, named as it
+// will be once downloaded. Tests stand in for it.
+var StartDownload = func(path string) error {
 	if !loadFoundation() {
 		return errors.New("the Foundation framework is not available")
 	}

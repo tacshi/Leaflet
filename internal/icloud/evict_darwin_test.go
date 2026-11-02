@@ -15,7 +15,7 @@ func TestStartDownloadOutsideICloud(t *testing.T) {
 	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := startDownload(path); err == nil {
+	if err := StartDownload(path); err == nil {
 		t.Log("iCloud started a download outside iCloud Drive")
 	} else {
 		t.Logf("as expected: %v", err)

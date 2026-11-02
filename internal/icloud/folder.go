@@ -291,10 +291,25 @@ func (f Folder) Read(rel string) ([]byte, error) {
 }
 
 func (f Folder) download(path string) error {
-	if err := startDownload(path); err != nil {
+	if StartDownload == nil {
+		return fmt.Errorf("%w: the app can't ask iCloud for the file", ErrNotReady)
+	}
+	if err := StartDownload(path); err != nil {
 		return fmt.Errorf("%w: %v", ErrNotReady, err)
 	}
 	return ErrNotReady
+}
+
+// Download asks iCloud to download a file it has not, without waiting for
+// it, so a later Read finds it here. iCloud on iOS downloads only what it
+// is asked for, and asked one file at a time, many come one by one. A
+// file downloaded already, or not in the folder, is left as it is.
+func (f Folder) Download(rel string) {
+	path := f.abs(rel)
+	info, err := os.Lstat(path)
+	if err == nil && notReady(info) || errors.Is(err, fs.ErrNotExist) && f.Exists(rel) {
+		_ = f.download(path)
+	}
 }
 
 // header is what every file of the folder starts with.

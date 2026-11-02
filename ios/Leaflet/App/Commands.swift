@@ -30,6 +30,13 @@ struct LeafletCommands: Commands {
                 .disabled(scene == nil)
         }
 
+        // ⌥⇧⌘C, as on the desktop, beside Paste and Match Style's ⌥⇧⌘V.
+        CommandGroup(after: .pasteboard) {
+            Button(L.editorCopyPlainText) { scene?.editor?.copyPlainText() }
+                .keyboardShortcut("c", modifiers: [.command, .option, .shift])
+                .disabled(scene?.editor == nil)
+        }
+
         CommandGroup(replacing: .appSettings) {
             Button(L.settingsTitle + "…") { scene?.openSettings() }
                 .keyboardShortcut(",")

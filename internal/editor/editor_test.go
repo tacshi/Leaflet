@@ -1081,6 +1081,45 @@ func TestCopyAndPasteFormats(t *testing.T) {
 	}
 }
 
+// Copy as plain text puts only text on the clipboard, without formats or
+// Markdown, and it pastes as that text, not as the blocks it came from.
+func TestCopyPlainText(t *testing.T) {
+	e, tt, _ := setup(t)
+	item := newText("bulleted_list", doc.FromMarkdown("Day **1**"))
+	item.Children = []*doc.Node{newText("todo_list", doc.FromMarkdown("Kiyomizu-dera"))}
+	table, _ := doc.TableNode([][]string{{"Item", "Cost"}, {"Hotel", "800"}}, "")
+	end := newText("paragraph", doc.FromMarkdown("*end* here"))
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{item, table, end} })
+	e.Select(Pos{item.ID, 4}, Pos{end.ID, 3})
+	e.CopyPlainText()
+	data := tt.ClipboardData()
+	if formats := data.Formats(); len(formats) != 1 || formats[0] != transfer.Text {
+		t.Errorf("copied as %v", formats)
+	}
+	if got, want := tt.Clipboard(), "1\n\tKiyomizu-dera\nItem\tCost\nHotel\t800\nend"; got != want {
+		t.Errorf("copied %q, want %q", got, want)
+	}
+
+	// Within one block, the text selected.
+	e.Select(Pos{end.ID, 0}, Pos{end.ID, 8})
+	e.CopyPlainText()
+	if got := tt.Clipboard(); got != "end here" {
+		t.Errorf("copied %q", got)
+	}
+	e.PlaceCaret(end.ID, -1)
+	tt.Command("paste")
+	if d := end.Delta(); d.Plain() != "end hereend here" || d[len(d)-1].Attrs.Italic {
+		t.Errorf("pasted %+v", d)
+	}
+
+	// Nothing selected copies nothing.
+	tt.SetClipboard("before")
+	e.CopyPlainText()
+	if got := tt.Clipboard(); got != "before" {
+		t.Errorf("copied %q at the caret", got)
+	}
+}
+
 func TestCaretIsAsTallAsItsText(t *testing.T) {
 	font := ui.Font{Size: 16, LineHeight: 1.8}
 	l := ui.ShapeRichText([]ui.Span{{Text: "也就是「波形」：", Size: font.Size}}, font, 400)

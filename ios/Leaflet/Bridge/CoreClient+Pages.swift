@@ -99,6 +99,15 @@ extension CoreClient {
         }
     }
 
+    /// plainCopy returns blocks as Copy as Plain Text puts them on the
+    /// clipboard, as the desktop's: text alone, a line per block.
+    nonisolated(nonsending) func plainCopy(_ nodes: [DocNode]) async throws -> String {
+        let json = String(decoding: try JSONEncoder().encode(nodes), as: UTF8.self)
+        return try await call { core in
+            try Self.answer { e in core.plainCopy(json, error: e) }
+        }
+    }
+
     /// addFile keeps a file with a page, and returns the block that shows
     /// it.
     nonisolated(nonsending) func addFile(_ pageID: String, path: String) async throws -> DocNode {

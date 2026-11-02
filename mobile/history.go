@@ -2,6 +2,7 @@ package mobile
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"mime"
 	"os"
@@ -174,6 +175,20 @@ func (c *Core) ExportMarkdown(pageID string) (_ string, err error) {
 		return "", err
 	}
 	return encode(out)
+}
+
+// PlainCopy returns blocks as Copy as Plain Text puts them on the
+// clipboard, as the desktop's: text alone, a line per block, a subpage
+// as its page's title. nodes is a JSON array of the blocks.
+func (c *Core) PlainCopy(nodes string) (_ string, err error) {
+	defer catch(&err)
+	var ns []*doc.Node
+	if err := json.Unmarshal([]byte(nodes), &ns); err != nil {
+		return "", err
+	}
+	var out string
+	c.q.do(func() { out = doc.PlainCopy(ns, c.titleOf) })
+	return out, nil
 }
 
 // AddFile keeps the file at path with page pageID, as the desktop's

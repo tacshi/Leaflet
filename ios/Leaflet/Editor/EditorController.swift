@@ -128,6 +128,9 @@ final class EditorController: NSObject, UITextViewDelegate,
     /// createSubpage makes a page in this one, for the / menu's Subpage,
     /// and returns its ID.
     var createSubpage: (() async -> String?)?
+    /// plainCopy writes blocks as text alone, for Copy as Plain Text, as
+    /// the core's PlainCopy does (CoreClient.plainCopy).
+    var plainCopy: (([DocNode]) async -> String?)?
     /// menuItems gives the menu for "/" or "@" what it offers, as the
     /// core's JSON (CoreClient.menuItems), once it has it.
     var menuItems: ((Character, @escaping @MainActor (String) -> Void) -> Void)?
@@ -513,6 +516,49 @@ final class EditorController: NSObject, UITextViewDelegate,
                     self.onComment?(info.id, self.selectedText())
                 },
             ])
+    }
+
+    /// copyPlainText copies the selection as text alone, without its
+    /// formats, as the desktop's Copy as Plain Text: a line per block, for
+    /// apps that would paste the formats the system's Copy keeps.
+    func copyPlainText() {
+        let range = textView.selectedRange
+        guard textView.isFirstResponder, range.length > 0, let plainCopy else { return }
+        let nodes =
+            DocumentMapper.content(storage.attributedSubstring(from: range), meta: nil)
+            .document.children ?? []
+        Task {
+            if let text = await plainCopy(nodes), !text.isEmpty {
+                UIPasteboard.general.string = text
+            }
+        }
+    }
+
+    /// withCopyPlainText puts Copy as Plain Text after the system's Copy
+    /// in an edit menu's actions, or first when they have no Copy: a page
+    /// of plain text, not Copy's own symbol.
+    private func withCopyPlainText(_ actions: [UIMenuElement]) -> [UIMenuElement] {
+        let item = UIAction(
+            title: L.editorCopyPlainText, image: UIImage(systemName: "doc.plaintext")
+        ) { [weak self] _ in self?.copyPlainText() }
+        var placed = false
+        func place(_ elements: [UIMenuElement]) -> [UIMenuElement] {
+            elements.flatMap { element -> [UIMenuElement] in
+                if placed { return [element] }
+                if let menu = element as? UIMenu {
+                    return [menu.replacingChildren(place(menu.children))]
+                }
+                if let command = element as? UICommand,
+                    command.action == #selector(UIResponderStandardEditActions.copy(_:))
+                {
+                    placed = true
+                    return [command, item]
+                }
+                return [element]
+            }
+        }
+        let out = place(actions)
+        return placed ? out : [item] + out
     }
 
     /// selectedText is the text chosen, its line breaks as newlines.
@@ -2468,6 +2514,8 @@ final class EditorController: NSObject, UITextViewDelegate,
         _ textView: UITextView, editMenuForTextIn range: NSRange, suggestedActions: [UIMenuElement]
     ) -> UIMenu? {
         guard textView.isEditable, range.length > 0 else {
+            // Text chosen on a page that can't change is copied.
+            if range.length > 0 { return UIMenu(children: withCopyPlainText(suggestedActions)) }
             // At the caret in a to-do, its due date, which its chip may
             // have no room to offer.
             let (_, info) = paragraph(at: range.location)
@@ -2483,7 +2531,9 @@ final class EditorController: NSObject, UITextViewDelegate,
             }
             return UIMenu(children: [date] + suggestedActions)
         }
-        return UIMenu(children: [agentMenu(), formatMenu(), colorMenu()] + suggestedActions)
+        return UIMenu(
+            children: [agentMenu(), formatMenu(), colorMenu()] + withCopyPlainText(suggestedActions)
+        )
     }
 
     private func formatMenu() -> UIMenu {

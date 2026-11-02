@@ -24,6 +24,10 @@
   "@appMenuExportMarkdown": {
     "description": "The File menu: save the open page as a Markdown file."
   },
+  "appMenuSpeech": "Speech",
+  "@appMenuSpeech": {
+    "description": "The Edit menu on macOS: the submenu with Start Speaking and Stop Speaking, as in other Mac apps."
+  },
   "appMenuToggleSidebar": "Toggle Sidebar",
   "@appMenuToggleSidebar": {
     "description": "The View menu: show or hide the sidebar."
@@ -2967,6 +2971,10 @@
   "editorCopyCode": "Copy code",
   "@editorCopyCode": {
     "description": "Code block button."
+  },
+  "editorCopyPlainText": "Copy as Plain Text",
+  "@editorCopyPlainText": {
+    "description": "The Edit menu, and the iOS editor's menu for selected text: copy the selection as text alone, without its formats, so other apps paste it unformatted."
   },
   "editorColor": "Color",
   "@editorColor": {

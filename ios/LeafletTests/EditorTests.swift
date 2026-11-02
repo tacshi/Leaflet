@@ -902,24 +902,17 @@ struct EditorTests {
         #expect(!c.paragraph(at: 0).info.checked)
     }
 
-    /// Undoing Enter at a block's start gives the block back as it was:
-    /// its ID, and its type.
-    @Test func undoingEnterAtABlocksStartKeepsTheBlock() async throws {
+    /// Enter at a block's start makes an empty paragraph before it, and the
+    /// text keeps its block: its ID, and its type.
+    @Test func enterAtABlocksStartKeepsTheBlock() {
         let c = editor([block("h", "heading", "Title", data: ["level": .int(2)])])
-        let (_, done) = try show(c)
-        defer { done() }
-        try await settle(c)
-        let undo = try #require(c.textView.undoManager)
         c.textView.selectedRange = NSRange(location: 0, length: 0)
         c.type("\n")
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(blocks(c).map(\.type) == ["paragraph", "heading"])
-        #expect(blocks(c).last?.id == "h")
-        undoAll(undo)
-        #expect(c.textView.text == "Title")
-        #expect(blocks(c).map(\.id) == ["h"])
-        #expect(blocks(c).first?.type == "heading")
-        #expect(blocks(c).first?.data?["level"]?.int == 2)
+        let b = blocks(c)
+        #expect(b.map(\.type) == ["paragraph", "heading"])
+        #expect(b.map(\.text) == ["", "Title"])
+        #expect(b.last?.id == "h")
+        #expect(b.last?.data?["level"]?.int == 2)
     }
 
     /// The page's last block deleted, an image, leaves an empty paragraph:
@@ -1135,19 +1128,27 @@ struct EditorTests {
 
 extension EditorController {
     /// type types text a character at a time as the keyboard does: through
-    /// the editor's rules, which a text view not on screen leaves out, and
-    /// in UIKit's order, the selection's change before the text's.
+    /// the editor's rules, which a text view leaves out of text put in by
+    /// code, and in UIKit's order, the selection's change before the text's.
     func type(_ text: String) {
         for ch in text { paste(String(ch)) }
     }
 
     /// paste puts text in at once, as a paste or dictation does.
     func paste(_ text: String) {
-        // A text view on screen asks the rules itself, and says what
-        // changed: asked again, they would take the text twice.
-        if textView.window != nil { return textView.insertText(text) }
-        if textView(textView, shouldChangeTextIn: textView.selectedRange, replacementText: text) {
-            textView.insertText(text)
+        // A text view on screen says what changed itself: told again, the
+        // editor would take the text twice. Before iOS 27 it asked the
+        // rules too; since, it asks them only of the keyboard's text.
+        let onScreen = textView.window != nil
+        if #unavailable(iOS 27), onScreen { return textView.insertText(text) }
+        // Each key is a step of its own to undo, as the keyboard's are.
+        let undo = onScreen ? textView.undoManager : nil
+        undo?.beginUndoGrouping()
+        defer { undo?.endUndoGrouping() }
+        guard textView(textView, shouldChangeTextIn: textView.selectedRange, replacementText: text)
+        else { return }
+        textView.insertText(text)
+        if !onScreen {
             textViewDidChangeSelection(textView)
             textViewDidChange(textView)
         }

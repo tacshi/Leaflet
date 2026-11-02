@@ -595,14 +595,35 @@ func (e *Editor) toolbar(c *ui.Context, at ui.Rect, pal *theme.Palette) {
 						fn()
 					}
 				}
+				// Copy as plain text comes first, apart from the formats,
+				// with its own icon: a clipboard of text, not Copy's.
+				copied := time.Since(e.plainCopiedAt) < 1500*time.Millisecond
+				icon, label := "clipboard-type", locales.EditorCopyPlainText()
+				if copied {
+					icon, label = "check", locales.CommonCopied()
+				}
+				plain := ui.Button(c, "").Label(label).Tooltip(label).KeepFocus()
+				plain.Children(func() { ui.Icon(c, theme.Icon(icon)).FontSize(15) })
+				if copied {
+					// Show its icon again once the check has been seen.
+					wait := 1500*time.Millisecond - time.Since(e.plainCopiedAt)
+					plain.Draw(func(p *ui.Painter, _ ui.Rect) { p.After(wait) })
+				}
+				if plain.Clicked() {
+					e.CopyPlainText()
+					e.plainCopiedAt = time.Now()
+				}
 				// Code takes no formats.
 				if !e.inCode() {
+					ui.Divider(c)
 					toggle("bold", locales.EditorBold(), e.Has(func(a doc.Attrs) bool { return a.Bold }), e.ToggleBold)
 					toggle("italic", locales.EditorItalic(), e.Has(func(a doc.Attrs) bool { return a.Italic }), e.ToggleItalic)
 					toggle("code", locales.EditorInlineCode(), e.Has(func(a doc.Attrs) bool { return a.Code }), e.ToggleCode)
 					toggle("link", locales.EditorLink(), e.LinkAt() != "", func() { e.linkDraft, e.linkOpen = e.LinkAt(), true })
 					e.colorButton(c, pal)
 				}
+				// Comment and Ask agent apart, as the copy is.
+				ui.Divider(c)
 				comment := ui.Button(c, "").Label(locales.CommonComment()).Tooltip(locales.CommonComment()).KeepFocus()
 				comment.Children(func() { ui.Icon(c, theme.Icon("message-square")).FontSize(15) })
 				if comment.Clicked() {

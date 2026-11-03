@@ -8340,13 +8340,15 @@ func (msgs Messages) RecStarting() string {
 // RecStop says "Stop"
 // in the language the app shows.
 //
-// The recording pill's button that stops recording.
+// Accessibility name and tooltip of the recording pill's ■ button that
+// stops recording.
 func RecStop() string { return In(i18n.Locale()).RecStop() }
 
 // RecStop says "Stop"
 // in the language of msgs.
 //
-// The recording pill's button that stops recording.
+// Accessibility name and tooltip of the recording pill's ■ button that
+// stops recording.
 func (msgs Messages) RecStop() string {
 	return Catalog.Format(msgs.locale, "recStop", nil)
 }
@@ -8559,6 +8561,82 @@ func RecTranscribe() string { return In(i18n.Locale()).RecTranscribe() }
 // Recording block menu item, for a recording without a transcript.
 func (msgs Messages) RecTranscribe() string {
 	return Catalog.Format(msgs.locale, "recTranscribe", nil)
+}
+
+// RecRename says "Rename…"
+// in the language the app shows.
+//
+// Recording block menu item: opens the dialog that renames the recording.
+func RecRename() string { return In(i18n.Locale()).RecRename() }
+
+// RecRename says "Rename…"
+// in the language of msgs.
+//
+// Recording block menu item: opens the dialog that renames the recording.
+func (msgs Messages) RecRename() string {
+	return Catalog.Format(msgs.locale, "recRename", nil)
+}
+
+// RecRenameTitle says "Rename recording"
+// in the language the app shows.
+//
+// Title of the dialog that renames a recording block.
+func RecRenameTitle() string { return In(i18n.Locale()).RecRenameTitle() }
+
+// RecRenameTitle says "Rename recording"
+// in the language of msgs.
+//
+// Title of the dialog that renames a recording block.
+func (msgs Messages) RecRenameTitle() string {
+	return Catalog.Format(msgs.locale, "recRenameTitle", nil)
+}
+
+// RecName says "Name"
+// in the language the app shows.
+//
+// Rename recording dialog: the name field's placeholder. Left empty, the
+// block is named Recording with when it was made.
+func RecName() string { return In(i18n.Locale()).RecName() }
+
+// RecName says "Name"
+// in the language of msgs.
+//
+// Rename recording dialog: the name field's placeholder. Left empty, the
+// block is named Recording with when it was made.
+func (msgs Messages) RecName() string {
+	return Catalog.Format(msgs.locale, "recName", nil)
+}
+
+// RecShowAll says "{count, plural, one {Show # line} other {Show all # lines}}"
+// in the language the app shows.
+//
+// Under the first lines of a long transcript in a recording block, and on a
+// shared page: shows all its lines.
+func RecShowAll(count int) string { return In(i18n.Locale()).RecShowAll(count) }
+
+// RecShowAll says "{count, plural, one {Show # line} other {Show all # lines}}"
+// in the language of msgs.
+//
+// Under the first lines of a long transcript in a recording block, and on a
+// shared page: shows all its lines.
+func (msgs Messages) RecShowAll(count int) string {
+	return Catalog.Format(msgs.locale, "recShowAll", map[string]any{"count": count})
+}
+
+// RecShowLess says "Show less"
+// in the language the app shows.
+//
+// Under a long transcript shown whole in a recording block: shows only its
+// first lines again.
+func RecShowLess() string { return In(i18n.Locale()).RecShowLess() }
+
+// RecShowLess says "Show less"
+// in the language of msgs.
+//
+// Under a long transcript shown whole in a recording block: shows only its
+// first lines again.
+func (msgs Messages) RecShowLess() string {
+	return Catalog.Format(msgs.locale, "recShowLess", nil)
 }
 
 // RecSpeaker says "Speaker {name}"
@@ -9459,6 +9537,42 @@ func RecErrLiveStopped(error string) string { return In(i18n.Locale()).RecErrLiv
 // recording did.
 func (msgs Messages) RecErrLiveStopped(error string) string {
 	return Catalog.Format(msgs.locale, "recErrLiveStopped", map[string]any{"error": error})
+}
+
+// RecLostBehind says "the connection could not keep up"
+// in the language the app shows.
+//
+// Why live transcription stopped early, after the colon of
+// recErrLiveStopped: the connection was too slow for the audio. Lowercase,
+// as part of a sentence.
+func RecLostBehind() string { return In(i18n.Locale()).RecLostBehind() }
+
+// RecLostBehind says "the connection could not keep up"
+// in the language of msgs.
+//
+// Why live transcription stopped early, after the colon of
+// recErrLiveStopped: the connection was too slow for the audio. Lowercase,
+// as part of a sentence.
+func (msgs Messages) RecLostBehind() string {
+	return Catalog.Format(msgs.locale, "recLostBehind", nil)
+}
+
+// RecLostNoEnd says "the last words did not arrive in time"
+// in the language the app shows.
+//
+// Why live transcription stopped early, after the colon of
+// recErrLiveStopped: once the recording stopped, the engine did not send
+// its last words in time. Lowercase, as part of a sentence.
+func RecLostNoEnd() string { return In(i18n.Locale()).RecLostNoEnd() }
+
+// RecLostNoEnd says "the last words did not arrive in time"
+// in the language of msgs.
+//
+// Why live transcription stopped early, after the colon of
+// recErrLiveStopped: once the recording stopped, the engine did not send
+// its last words in time. Lowercase, as part of a sentence.
+func (msgs Messages) RecLostNoEnd() string {
+	return Catalog.Format(msgs.locale, "recLostNoEnd", nil)
 }
 
 // RecErrAudioNotSaved says "The audio could not be saved: {error}"

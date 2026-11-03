@@ -20,6 +20,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // Audio recorded while the stream connects reaches it first, in order; a
@@ -708,8 +709,9 @@ func (lostStream) Finish() ([]store.Segment, error) {
 func (lostStream) Close()      {}
 func (lostStream) Lost() error { return errors.New("dropped") }
 
-// A stream lost before Finish keeps the words it heard, but the recording
-// fails, to transcribe again from its audio.
+// A stream lost before Finish keeps the words it heard: the recording is
+// ready, and its error warns they may end too soon, to transcribe again
+// from its audio.
 func TestLostBeforeFinish(t *testing.T) {
 	r, st, _ := newTestController(t)
 	rec, err := st.CreateRecording("p1", "b1", "soniox", "", "", "auto")
@@ -718,10 +720,42 @@ func TestLostBeforeFinish(t *testing.T) {
 	}
 	r.finish(rec, "", lostStream{}, store.SttSettings{Provider: "soniox"})
 	got, _ := st.Recording(rec.ID)
-	if got.Status != "failed" || !strings.Contains(got.Error, "dropped") || len(got.Transcript) != 1 || r.Transcribing[rec.ID] {
+	if got.Status != "ready" || !strings.Contains(got.Error, "dropped") || len(got.Transcript) != 1 || r.Transcribing[rec.ID] {
 		t.Errorf("recording %+v, transcribing %v", got, r.Transcribing[rec.ID])
 	}
 }
+
+// A stream lost before it heard a word leaves the recording failed, and
+// its own reasons are said in the app's language; the block's notice of
+// either closes for good.
+func TestLostWithoutWordsFails(t *testing.T) {
+	r, st, _ := newTestController(t)
+	rec, err := st.CreateRecording("p1", "b1", "soniox", "", "", "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.finish(rec, "", silentLost{}, store.SttSettings{Provider: "soniox"})
+	got, _ := st.Recording(rec.ID)
+	if want := locales.RecErrLiveStopped(locales.RecLostNoEnd()); got.Status != "failed" || got.Error != want || len(got.Transcript) != 0 {
+		t.Fatalf("recording %+v, want the error %q", got, want)
+	}
+	if err := r.DismissError(rec.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Recording(rec.ID); got.Error != "" || got.Status != "failed" {
+		t.Errorf("dismissed, recording %+v", got)
+	}
+	if got := lostReason(errBehind); got != locales.RecLostBehind() {
+		t.Errorf("a slow connection says %q", got)
+	}
+}
+
+// silentLost is a live stream whose last words never came, having heard
+// none before.
+type silentLost struct{ lostStream }
+
+func (silentLost) Finish() ([]store.Segment, error) { return nil, nil }
+func (silentLost) Lost() error                      { return errNoEnd }
 
 // Audio still queued when Finish stops waiting for a slow connection, or
 // last words that never come, leave the stream lost: the recording keeps

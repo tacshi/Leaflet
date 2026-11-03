@@ -1,8 +1,11 @@
 package doc
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"leaflet/locales"
 )
 
 func TestDeltaHTMLEscapes(t *testing.T) {
@@ -197,4 +200,30 @@ func TestTableWithBadSize(t *testing.T) {
 		t.Errorf("%d×%d cells", rows, cols)
 	}
 	_ = PageHTML("T", &Content{Children: []*Node{table}}, HTMLOptions{})
+}
+
+// A long transcript shows its first lines on a web page, and the rest
+// under Show all; a short one shows whole.
+func TestPageHTMLFoldsLongTranscript(t *testing.T) {
+	n := &Node{ID: "r1", Type: "recording", Data: map[string]any{"recording_id": "rec", "title": "Call"}}
+	lines := func(count int) []TranscriptLine {
+		var out []TranscriptLine
+		for i := range count {
+			out = append(out, TranscriptLine{Start: float64(i), Time: fmt.Sprintf("0:%02d", i), Text: fmt.Sprintf("Line %c.", 'A'+i)})
+		}
+		return out
+	}
+	page := func(count int) string {
+		return PageHTML("Notes", FromBlocks([]*Node{n}), HTMLOptions{Lang: "en", Recording: func(*Node) RecordingView {
+			return RecordingView{Title: "Call", Lines: lines(count)}
+		}})
+	}
+	long := page(FoldedLines + 4)
+	before, after, ok := strings.Cut(long, "<details><summary>"+locales.In("en").RecShowAll(FoldedLines+4))
+	if !ok || strings.Count(before, "<p>") != FoldedLines || strings.Count(after, "<p>") != 4 || !strings.Contains(after, "Line J.</span></p></details></div>") {
+		t.Errorf("a long transcript:\n%s", long)
+	}
+	if short := page(FoldedLines + 2); strings.Contains(short, "<details>") || strings.Count(short, "<p>") != FoldedLines+2 {
+		t.Errorf("a short transcript:\n%s", short)
+	}
 }

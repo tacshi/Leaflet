@@ -78,9 +78,12 @@ struct RecordingRow: Codable, Equatable, Sendable {
     /// it was made in, for its block's title (MobileRecordingTitle).
     var createdMs: Int64 = 0
     var pageTitle = ""
+    /// folded is how many lines its transcript shows until it is opened,
+    /// 0 for all of them.
+    var folded = 0
 
     enum CodingKeys: String, CodingKey {
-        case id, status, error, transcript, plain, label
+        case id, status, error, transcript, plain, label, folded
         case durationMs = "duration_ms"
         case sttProvider = "stt_provider"
         case createdMs = "created_ms"
@@ -203,6 +206,12 @@ extension CoreClient {
 
     nonisolated(nonsending) func retranscribe(_ id: String) async throws {
         try await call { try $0.retranscribe(id) }
+    }
+
+    /// dismissRecordingError lets go of what went wrong with a recording,
+    /// which its block shows until it is closed.
+    nonisolated(nonsending) func dismissRecordingError(_ id: String) async throws {
+        try await call { try $0.dismissRecordingError(id) }
     }
 
     /// transcriptBlocks is a recording's transcript as the blocks its

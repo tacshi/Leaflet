@@ -75,6 +75,10 @@ struct PageScreen: View {
                         }
                         c.onAddAgent = { [weak scene] in scene?.openSettings() }
                         c.onEditBlock = { [weak scene] in scene?.editingBlock = $0 }
+                        c.onRenameBlock = { [weak scene] node, name in
+                            scene?.blockName = name
+                            scene?.renamingBlock = node
+                        }
                         c.onUndoRun = { [weak model, app] in
                             guard let model,
                                 let run = model.agents.runs.last(where: {
@@ -179,6 +183,18 @@ struct PageScreen: View {
         }
         .sheet(item: Binding(get: { scene.editingBlock }, set: { scene.editingBlock = $0 })) {
             blockSheet($0)
+        }
+        .alert(
+            L.recRenameTitle,
+            isPresented: Binding(
+                get: { scene.renamingBlock != nil },
+                set: { if !$0 { scene.renamingBlock = nil } }),
+            presenting: scene.renamingBlock
+        ) { node in
+            TextField(
+                L.recName, text: Binding(get: { scene.blockName }, set: { scene.blockName = $0 }))
+            Button(L.commonCancel, role: .cancel) {}
+            Button(L.commonRename) { rename(node) }
         }
         .sheet(
             item: $linking,
@@ -302,6 +318,16 @@ struct PageScreen: View {
                 app.show(Toast(message: L.hostErrorAddFile(error: error.localizedDescription)))
             }
         }
+    }
+
+    /// rename names node as typed, unless nothing is: a recording block's
+    /// title.
+    private func rename(_ node: DocNode) {
+        let name = scene.blockName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name != node.data?["title"]?.string else { return }
+        var data = node.data ?? [:]
+        data["title"] = .string(name)
+        scene.editor?.setData(data, ofBlock: node.id)
     }
 
     /// blockSheet edits a block without text: a chart's data, a table's

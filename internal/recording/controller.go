@@ -1076,15 +1076,39 @@ func (r *Controller) finish(rec store.Recording, path string, stream Stream, stt
 			return
 		}
 		// A stream that ended early heard only part of the recording: its
-		// words stay, and so does the audio, to transcribe again.
+		// words stay, and so does the audio, to transcribe again. With
+		// words, it is ready, and its error a warning that they may end
+		// too soon.
 		if lost != nil {
-			x.Status, x.Error, x.Transcript = "failed", locales.RecErrLiveStopped(lost.Error()), segs
+			x.Status, x.Error, x.Transcript = "failed", locales.RecErrLiveStopped(lostReason(lost)), segs
+			if len(segs) > 0 {
+				x.Status = "ready"
+			}
 			return
 		}
 		x.Status, x.Error, x.Transcript = "ready", "", segs
 	}); err != nil && !store.IsNotFound(err) {
 		log.Printf("recording: %v", err)
 	}
+}
+
+// lostReason is why a stream ended early, in the app's language where it
+// is the stream's own reason.
+func lostReason(err error) string {
+	switch {
+	case errors.Is(err, errBehind):
+		return locales.RecLostBehind()
+	case errors.Is(err, errNoEnd):
+		return locales.RecLostNoEnd()
+	}
+	return err.Error()
+}
+
+// DismissError lets go of what went wrong with a recording, which its
+// block shows until it is read and closed.
+func (r *Controller) DismissError(id string) error {
+	_, err := r.st.UpdateRecording(id, func(rec *store.Recording) { rec.Error = "" })
+	return err
 }
 
 // storedAudio fetches the audio of a recording that is not on this device,

@@ -418,6 +418,9 @@ type recordingRow struct {
 	// it was made in, for RecordingTitle.
 	CreatedMs int64  `json:"created_ms"`
 	PageTitle string `json:"page_title"`
+	// Folded are the lines its transcript shows until it is opened, 0 for
+	// all of them (doc.FoldsTranscript).
+	Folded int `json:"folded"`
 }
 
 // Recording returns a recording block's recording as recordingRow, its
@@ -444,6 +447,9 @@ func (c *Core) Recording(id string) (_ string, err error) {
 	}
 	if row.Transcript == nil {
 		row.Transcript = []store.Segment{}
+	}
+	if doc.FoldsTranscript(len(row.Transcript)) {
+		row.Folded = doc.FoldedLines
 	}
 	row.Plain = recording.TranscriptText(rec)
 	return encode(row)
@@ -492,6 +498,14 @@ func (c *Core) Retranscribe(id string) (err error) {
 		err = c.core.Rec.Retranscribe(id, s.Stt, c.online(s))
 		c.tellRecording()
 	})
+	return err
+}
+
+// DismissRecordingError lets go of what went wrong with a recording, which
+// its block shows until it is read and closed.
+func (c *Core) DismissRecordingError(id string) (err error) {
+	defer catch(&err)
+	c.q.do(func() { err = c.core.Rec.DismissError(id) })
 	return err
 }
 

@@ -102,6 +102,10 @@ final class SceneModel {
     var asking: AskRequest?
     /// editingBlock is a block being edited in a sheet, as a chart's data.
     var editingBlock: DocNode?
+    /// renamingBlock is a block being renamed, as a recording, and
+    /// blockName the name being typed for it.
+    var renamingBlock: DocNode?
+    var blockName = ""
     /// heading is the heading the open page is at, which the outline shows.
     var heading: String?
     /// writing says the page's text or title has the keyboard, which the
@@ -157,6 +161,7 @@ final class SceneModel {
         newComment = nil
         asking = nil
         editingBlock = nil
+        renamingBlock = nil
     }
 
     /// keep drops the pages not among ids from the history, as they are

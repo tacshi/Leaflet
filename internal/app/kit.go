@@ -156,6 +156,12 @@ func shimmerGlow(x, at float32) float32 {
 
 // notice is a tinted box of information: info, warn, ok or danger.
 func notice(c *ui.Context, kind, icon, text string, children func()) {
+	closableNotice(c, kind, icon, text, children, nil)
+}
+
+// closableNotice is notice with a × at its end, which calls close; nil
+// leaves it out.
+func closableNotice(c *ui.Context, kind, icon, text string, children, close func()) {
 	pal := theme.Of(c)
 	bg, border, fg := pal.AccentSoft, pal.AccentSoftBorder, pal.AccentText
 	switch kind {
@@ -176,6 +182,16 @@ func notice(c *ui.Context, kind, icon, text string, children func()) {
 				children()
 			}
 		})
+		if close != nil {
+			x := ui.ButtonBase(c.Key("close")).Size(20, 20).Center().Radius(5).Shrink(0).Label(locales.PageDismiss()).Tooltip(locales.PageDismiss())
+			if x.Hovered() {
+				x.Background(fg.Alpha(0.1))
+			}
+			x.Children(func() { ui.Icon(c, theme.Icon("x")).FontSize(13).TextColor(fg) })
+			if x.Clicked() {
+				close()
+			}
+		}
 	})
 }
 

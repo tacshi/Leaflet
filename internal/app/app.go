@@ -102,7 +102,10 @@ type App struct {
 	// recs is what recording blocks show of their recordings, read once
 	// until the recordings change, as each frame draws them
 	// (recordingView); on the main thread only.
-	recs      map[string]recView
+	recs map[string]recView
+	// recOpen are the recording blocks whose long transcripts show whole,
+	// by block ID; on the main thread only.
+	recOpen   map[string]bool
 	pending   int
 	conflicts []store.ConflictRow
 	syncing   bool

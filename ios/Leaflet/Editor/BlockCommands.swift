@@ -209,6 +209,32 @@ final class BlockCommands {
         }
     }
 
+    /// removeBlock takes the block without text of id out of the page, with
+    /// the blocks in it, as one step to undo, the page staying where it is:
+    /// a recording's, from its menu.
+    func removeBlock(_ id: String) {
+        guard textView.isEditable else { return }
+        let all = text.paragraphs()
+        guard let i = all.firstIndex(where: { $0.info.id == id }), !all[i].info.isText else {
+            return
+        }
+        let last = BlockText.subtree(all, i)
+        let caret = text.position(at: textView.selectedRange.location)
+        edits.keepingScroll {
+            if last + 1 < all.count {
+                edits.rewrite(all, i, last, [])
+            } else if i > 0 {
+                // Last on the page, it goes with the separator before it.
+                edits.rewrite(all, i - 1, last, [(all[i - 1].info, all[i - 1].text)])
+            } else {
+                // The page keeps a block to write on.
+                let blank = BlockInfo(id: BlockInfo.newID(), type: "paragraph", depth: 0)
+                edits.rewrite(all, i, last, [(blank, NSAttributedString())])
+            }
+        }
+        restoreCaret(caret)
+    }
+
     /// insertBlock puts a block without text at the caret, or in the
     /// paragraph at location: in place of an empty block, or after the
     /// block there, with an empty block after it to write on, where the

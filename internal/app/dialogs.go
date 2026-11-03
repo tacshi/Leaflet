@@ -74,6 +74,12 @@ type dialogs struct {
 	tagName   string
 	tagSelect bool
 
+	// The dialog renaming a recording block of the open page.
+	recOpen   bool
+	recBlock  string
+	recName   string
+	recSelect bool
+
 	moveOpen  bool
 	movePage  string
 	moveQuery string
@@ -159,6 +165,9 @@ func (d *dialogs) view(c *ui.Context, a *App) {
 	}
 	if d.tagOpen {
 		a.tagDialog(c)
+	}
+	if d.recOpen {
+		a.recordingDialog(c)
 	}
 	if d.moveOpen {
 		a.moveDialog(c)

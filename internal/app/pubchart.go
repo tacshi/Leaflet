@@ -42,6 +42,9 @@ func chartHTML(n *doc.Node) string {
 			}
 		}
 		colors := chartColors(len(names))
+		if kind == "pie" {
+			colors = sliceColors(len(names))
+		}
 		b.WriteString(`<div class="legend">`)
 		for i, name := range names {
 			fmt.Fprintf(&b, `<span><i style="background:%s"></i>%s</span>`, colors[i], html.EscapeString(name))
@@ -58,6 +61,18 @@ func chartColors(n int) []string {
 	out := make([]string, n)
 	for i := range out {
 		out[i] = base[i%len(base)]
+	}
+	return out
+}
+
+// sliceColors are the colors of a pie's n slices, as the editor's: those
+// of as many series, but never the first's on the last slice, which is
+// beside it.
+func sliceColors(n int) []string {
+	base := chartColors(1 + len(editor.ChartColors))
+	out := make([]string, n)
+	for i := range out {
+		out[i] = base[editor.SliceColor(i, n, len(base))]
 	}
 	return out
 }
@@ -180,7 +195,7 @@ func pieHTML(b *strings.Builder, series []editor.ChartSeries) bool {
 		return false
 	}
 	const cx, cy, radius = 100, 100, 90
-	colors := chartColors(len(vals))
+	colors := sliceColors(len(vals))
 	fmt.Fprintf(b, `<svg class="pie" viewBox="0 0 200 200" role="img" aria-label="%s">`, html.EscapeString(locales.EditorPieChart()))
 	for i, s := range chart.Pie(vals, 0.015) {
 		// The gap between slices, as MyGo's Sector leaves it on a pie.

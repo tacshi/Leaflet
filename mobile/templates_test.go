@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/icloud"
@@ -13,7 +14,7 @@ import (
 	"leaflet/locales"
 )
 
-func templates(t *testing.T, c *Core) []templateRow {
+func templateRows(t *testing.T, c *Core) []templateRow {
 	t.Helper()
 	raw, err := c.Templates()
 	if err != nil {
@@ -54,7 +55,7 @@ func closeEditors(c *Core, id string) {
 func TestTemplatesStartPages(t *testing.T) {
 	c, _ := open(t)
 	var meeting templateRow
-	for _, r := range templates(t, c) {
+	for _, r := range templateRows(t, c) {
 		if r.Key == "starter:meeting" {
 			meeting = r
 		}
@@ -82,7 +83,7 @@ func TestTemplatesStartPages(t *testing.T) {
 	if err != nil || id == "" {
 		t.Fatal(err)
 	}
-	for _, r := range templates(t, c) {
+	for _, r := range templateRows(t, c) {
 		if r.Key == meeting.Key {
 			t.Fatal("the starter still shows beside its template")
 		}
@@ -146,7 +147,7 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.RestoreVersion(child.ID, versions[0].ID); err != nil {
+	if _, err := c.RestoreVersion(child.ID, versions[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	if got := texts(content(t, c, child.ID)); strings.Contains(got, "Socks") {
@@ -177,12 +178,12 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 
 	// The file is found by its ID, where it is kept here; gone from here
 	// and never uploaded, it can't be had.
-	local, err := c.LocalFile(n.Str("file_id"))
+	local, err := c.LocalFile(n.Str("file_id"), 0)
 	if data, _ := os.ReadFile(local); err != nil || string(data) != "hi" { // #nosec G304 -- the file the core just kept.
 		t.Fatalf("local file %q, %v", local, err)
 	}
 	_ = os.Remove(local)
-	if _, err := c.LocalFile(n.Str("file_id")); err == nil {
+	if _, err := c.LocalFile(n.Str("file_id"), 0); err == nil {
 		t.Fatal("a file neither here nor uploaded was found")
 	}
 }
@@ -220,6 +221,44 @@ func TestNoCopyWhileRecording(t *testing.T) {
 	recording(false, "")
 	if _, err := c.ApplyTemplate(page.ID, "template:"+tpl.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// One copy is made at a time, as on the desktop: another asked for while
+// one is made says so, and makes nothing. A starter, which copies nothing,
+// still fills a page meanwhile.
+func TestOneCopyAtATime(t *testing.T) {
+	c, _ := open(t)
+	p := create(t, c, `{"title":"Notes"}`)
+	raw, err := c.SaveAsTemplate(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tpl pageRow
+	_ = json.Unmarshal([]byte(raw), &tpl)
+	page := create(t, c, `{}`)
+
+	c.copying.Store(true)
+	other := locales.TemplateFetchingOther()
+	if _, err := c.DuplicatePage(p.ID); err == nil || err.Error() != other {
+		t.Errorf("duplicated while another copy is made: %v", err)
+	}
+	if _, err := c.SaveAsTemplate(p.ID); err == nil || err.Error() != other {
+		t.Errorf("saved as a template while another copy is made: %v", err)
+	}
+	if _, err := c.ApplyTemplate(page.ID, "template:"+tpl.ID); err == nil || err.Error() != other {
+		t.Errorf("used a template while another copy is made: %v", err)
+	}
+	if !content(t, c, page.ID).IsEmpty() {
+		t.Fatal("the page took the template while another copy was made")
+	}
+	if title, err := c.ApplyTemplate(page.ID, "starter:meeting"); err != nil || title == "" {
+		t.Errorf("a starter while a copy is made: %q, %v", title, err)
+	}
+
+	c.copying.Store(false)
+	if _, err := c.DuplicatePage(p.ID); err != nil {
+		t.Errorf("not duplicated once the other copy is made: %v", err)
 	}
 }
 
@@ -277,5 +316,63 @@ func TestFailedCopyDropsTheAudioItFetched(t *testing.T) {
 	c.q.do(func() { rec, err = c.core.Store.Recording(ids[0]) })
 	if err != nil || rec.LocalPath != "" {
 		t.Errorf("the first recording's audio stays at %q, %v", rec.LocalPath, err)
+	}
+}
+
+// A call the app gives up on ends at once, whether it runs already or has
+// yet to begin.
+func TestCancel(t *testing.T) {
+	c, _ := open(t)
+	ctx, done := c.cancellable(1, time.Minute)
+	defer done()
+	c.Cancel(1)
+	if ctx.Err() == nil {
+		t.Error("a call running was not given up on")
+	}
+	c.Cancel(2)
+	ctx, done2 := c.cancellable(2, time.Minute)
+	defer done2()
+	if ctx.Err() == nil {
+		t.Error("a call given up on before it began runs")
+	}
+	ctx, done3 := c.cancellable(3, time.Minute)
+	defer done3()
+	if ctx.Err() != nil {
+		t.Error("a call no one gave up on was cancelled")
+	}
+}
+
+// A copy whose card can't be put in its parent, unreadable, is still made
+// and given back once, and says the card is missing.
+func TestDuplicateKeepsTheCopyWithoutItsCard(t *testing.T) {
+	c, ev := open(t)
+	parent := create(t, c, `{"title":"Trip"}`)
+	child := create(t, c, `{"title":"Packing","link":true,"parent_id":"`+parent.ID+`"}`)
+	if _, err := c.core.Store.DB().Exec(`UPDATE page_contents SET content = '{"children": [' WHERE page_id = ?`, parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The notices told so far, which go to the app on a queue of their
+	// own, are passed over.
+	c.ev.q.do(func() {})
+	for len(ev.notices) > 0 {
+		<-ev.notices
+	}
+	raw, err := c.DuplicatePage(child.ID)
+	if err != nil {
+		t.Fatalf("the copy was made and said it wasn't: %v", err)
+	}
+	c.ev.q.do(func() {})
+	var cp pageRow
+	_ = json.Unmarshal([]byte(raw), &cp)
+	if cp.ID == "" || cp.ParentID != parent.ID {
+		t.Fatalf("copy %+v", cp)
+	}
+	select {
+	case n := <-ev.notices:
+		if n == "" {
+			t.Error("an empty notice")
+		}
+	default:
+		t.Error("no notice of the card missing")
 	}
 }

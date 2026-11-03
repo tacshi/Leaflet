@@ -100,3 +100,31 @@ func TestSelectBoxKeepsOneOfTwoAlike(t *testing.T) {
 		t.Errorf("value %q", value)
 	}
 }
+
+// A search's match is marked in a result's text whatever its case, in
+// other scripts too; where folding the case changes the text's length,
+// the text shows unmarked rather than marked in the wrong place.
+func TestMatchSpansFoldCase(t *testing.T) {
+	color := ui.RGB(200, 0, 0)
+	for _, tc := range []struct{ text, query, want string }{
+		{"Café au lait", "CAFÉ", "Café"},
+		{"ΣΟΦΙΑ notes", "σοφια", "ΣΟΦΙΑ"},
+		{"Привет мир", "МИР", "мир"},
+		{"日本語のメモ", "メモ", "メモ"},
+		{"İstanbul trip", "trip", ""},
+		{"Plan", "  ", ""},
+		{"Plan", "budget", ""},
+	} {
+		spans := matchSpans(tc.text, tc.query, color)
+		whole, marked := "", ""
+		for _, s := range spans {
+			whole += s.Text
+			if s.Weight == 600 && s.Color == color {
+				marked += s.Text
+			}
+		}
+		if whole != tc.text || marked != tc.want {
+			t.Errorf("%q in %q: shows %q, marks %q, want %q", tc.query, tc.text, whole, marked, tc.want)
+		}
+	}
+}

@@ -16,7 +16,6 @@ struct CommentsPanel: View {
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
     @State private var showResolved = false
-    @State private var draft = ""
     /// sending says the new comment is on its way to the core.
     @State private var sending = false
 
@@ -59,16 +58,18 @@ struct CommentsPanel: View {
                     palette.textMuted
                 ).lineLimit(2)
             }
-            TextField(L.panelCommentPlaceholder, text: $draft, axis: .vertical)
-                .lineLimit(2...8)
+            TextField(
+                L.panelCommentPlaceholder, text: Bindable(model).commentDraft, axis: .vertical
+            )
+            .lineLimit(2...8)
             HStack {
                 Spacer()
                 Button(L.commonCancel) {
                     scene.newComment = nil
-                    draft = ""
+                    model.commentDraft = ""
                 }
                 Button(L.panelSend) {
-                    let body = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let body = model.commentDraft.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !body.isEmpty, !sending else { return }
                     sending = true
                     Task {
@@ -85,7 +86,7 @@ struct CommentsPanel: View {
                         }
                         if scene.newComment == new {
                             scene.newComment = nil
-                            draft = ""
+                            model.commentDraft = ""
                         }
                         await model.refreshThreads()
                     }
@@ -108,7 +109,12 @@ struct ThreadCard: View {
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
-    @State private var reply = ""
+
+    /// reply is the reply being written, which the page keeps.
+    private var reply: String {
+        get { model.replies[thread.root.id] ?? "" }
+        nonmutating set { model.replies[thread.root.id] = newValue.isEmpty ? nil : newValue }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -124,32 +130,21 @@ struct ThreadCard: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                Button(thread.root.resolved ? L.panelReopen : L.panelResolve) {
-                    let reopen = thread.root.resolved
-                    Task {
-                        do {
-                            try await app.client?.resolveThread(thread.root.id, resolved: !reopen)
-                        } catch {
-                            let why = error.localizedDescription
-                            app.show(
-                                Toast(
-                                    message: reopen
-                                        ? L.panelCouldNotReopen(error: why)
-                                        : L.panelCouldNotResolve(error: why)))
-                        }
-                        await model.refreshThreads()
-                    }
+                if thread.mayResolve {
+                    resolveButton
                 }
-                .font(.footnote)
             }
             ForEach([thread.root] + thread.replies) { c in
                 CommentRow(comment: c, model: model)
             }
             if !thread.root.resolved {
                 HStack(alignment: .lastTextBaseline) {
-                    TextField(L.panelReplyPlaceholder, text: $reply, axis: .vertical)
-                        .lineLimit(1...6)
-                        .onSubmit(send)
+                    TextField(
+                        L.panelReplyPlaceholder,
+                        text: Binding(get: { reply }, set: { reply = $0 }), axis: .vertical
+                    )
+                    .lineLimit(1...6)
+                    .onSubmit(send)
                     Button(L.panelReply, action: send)
                         .disabled(reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         .keyboardShortcut(.return, modifiers: .command)
@@ -160,6 +155,27 @@ struct ThreadCard: View {
         .padding(12)
         .background(palette.surface, in: .rect(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(palette.border, lineWidth: 0.5))
+    }
+
+    /// resolveButton resolves the thread, or reopens it.
+    private var resolveButton: some View {
+        Button(thread.root.resolved ? L.panelReopen : L.panelResolve) {
+            let reopen = thread.root.resolved
+            Task {
+                do {
+                    try await app.client?.resolveThread(thread.root.id, resolved: !reopen)
+                } catch {
+                    let why = error.localizedDescription
+                    app.show(
+                        Toast(
+                            message: reopen
+                                ? L.panelCouldNotReopen(error: why)
+                                : L.panelCouldNotResolve(error: why)))
+                }
+                await model.refreshThreads()
+            }
+        }
+        .font(.footnote)
     }
 
     private func send() {
@@ -195,30 +211,47 @@ struct CommentRow: View {
                     .foregroundStyle(palette.accent)
                 Text(comment.authorName.isEmpty ? L.pageBylineSomeone : comment.authorName)
                     .font(.footnote.weight(.semibold))
-                Text(comment.created, format: .relative(presentation: .named))
-                    .font(.caption).foregroundStyle(palette.textMuted)
+                // As the byline says when, in the app's language, moving on
+                // as the panel stays open.
+                TimelineView(.everyMinute) { context in
+                    Text(Byline.humanTime(comment.created, now: context.date))
+                        .font(.caption).foregroundStyle(palette.textMuted)
+                }
             }
-            Text(
-                (try? AttributedString(
-                    markdown: comment.body,
-                    options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                    ?? AttributedString(comment.body)
-            )
-            .font(.subheadline)
-            .textSelection(.enabled)
+            if comment.deleted == true {
+                // A first comment deleted stays for its replies, as the
+                // desktop shows it.
+                Text(L.panelCommentDeleted).font(.subheadline).foregroundStyle(palette.textMuted)
+            } else {
+                Text(
+                    (try? AttributedString(
+                        markdown: comment.body,
+                        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+                        ?? AttributedString(comment.body)
+                )
+                .font(.subheadline)
+                .textSelection(.enabled)
+            }
         }
         .contextMenu {
-            Button(L.panelDeleteComment, systemImage: "trash", role: .destructive) {
-                Task {
-                    do {
-                        try await app.client?.deleteComment(comment.id)
-                    } catch {
-                        app.show(
-                            Toast(message: L.panelCouldNotDelete(error: error.localizedDescription))
-                        )
-                    }
-                    await model.refreshThreads()
+            if comment.mayDelete {
+                deleteButton
+            }
+        }
+    }
+
+    /// deleteButton deletes the comment.
+    private var deleteButton: some View {
+        Button(L.panelDeleteComment, systemImage: "trash", role: .destructive) {
+            Task {
+                do {
+                    try await app.client?.deleteComment(comment.id)
+                } catch {
+                    app.show(
+                        Toast(message: L.panelCouldNotDelete(error: error.localizedDescription))
+                    )
                 }
+                await model.refreshThreads()
             }
         }
     }

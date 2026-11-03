@@ -20,10 +20,12 @@ enum BlockLook {
 }
 
 /// PageLinks are what a subpage's card needs of the app: its page's
-/// title, read where the app's pages are observed, and opening it.
+/// title, read where the app's pages are observed, and opening it; openAt
+/// opens a page at one of its blocks, for a link to it.
 struct PageLinks {
     let title: @MainActor (String) -> String?
     let open: @MainActor (String) -> Void
+    var openAt: (@MainActor (String, String) -> Void)?
 }
 
 /// BlockCard shows a block without text.
@@ -33,9 +35,11 @@ struct BlockCard: View {
     /// edit opens the block's editor, or is nil on a page that can't be
     /// changed.
     var edit: (@MainActor (DocNode) -> Void)?
-    /// onHeight takes the height a block measured itself at, as a
+    /// editor is the page's, which a recording's transcript goes in by.
+    weak var editor: EditorController?
+    /// onHeight takes the size a block measured itself at, as a
     /// recording does, which grows with its transcript.
-    var onHeight: (@MainActor (CGFloat) -> Void)?
+    var onHeight: (@MainActor (CGSize) -> Void)?
     /// page returns the web page that draws a block, or nil for one SwiftUI
     /// draws. BlockViews shows a web block in a web view of its own.
     @MainActor static func page(for node: DocNode) -> String? {
@@ -43,9 +47,10 @@ struct BlockCard: View {
         let palette = BlockLook.palette
         switch node.type {
         case "math_equation":
-            return MobileMathPage(d["formula"]?.string ?? "")
+            return MobileMathPage(d[MobileSourceKey(node.type)]?.string ?? "")
         case "diagram":
-            return MobileDiagramPage(d["source"]?.string ?? "", palette.surface.hex)
+            return MobileDiagramPage(
+                d[MobileSourceKey(node.type)]?.string ?? "", palette.surface.hex)
         case "embed":
             return MobileEmbedPage(d["html"]?.string ?? "", palette.surface.hex, palette.isDark)
         default:
@@ -53,25 +58,39 @@ struct BlockCard: View {
         }
     }
 
+    /// scaled is a height that holds text, as the text size the person
+    /// chose scales the page's text: a table's rows, a card, a chart's
+    /// labels. The size is the traits' the page lays out in, which its
+    /// fonts follow, not the app's.
+    static func scaled(_ height: CGFloat) -> CGFloat {
+        UIFontMetrics(forTextStyle: .body).scaledValue(
+            for: height, compatibleWith: UITraitCollection.current)
+    }
+
     /// height is the room a block takes at width.
     static func height(_ node: DocNode, width: CGFloat) -> CGFloat {
         switch node.type {
         case "divider": 24
         case "image": min(width * 0.6, 420)
-        case "table": CGFloat(max(TableGrid.rows(node).count, 1)) * 40 + 2
+        case "table": CGFloat(max(TableGrid.rows(node).count, 1)) * scaled(40) + 2
         // Math and diagrams take the height their page measures, once it
         // has; until then, a guess.
         // At least the room of their Edit, an empty formula too.
-        case "math_equation": max(BlockHeights.of(node.id) ?? 96, 44)
-        case "diagram": max(BlockHeights.of(node.id) ?? min(max(width * 0.3, 160), 320), 44)
+        case "math_equation": max(BlockHeights.of(node.id, width: width) ?? 96, 44)
+        case "diagram":
+            max(BlockHeights.of(node.id, width: width) ?? min(max(width * 0.3, 160), 320), 44)
         case "video": min(width * 9 / 16, 420) + 44
-        case "chart": 300
+        case "chart": scaled(300)
         // As tall as it measured itself, or its header alone until then.
-        case "recording": BlockHeights.of(node.id) ?? 64
-        // As tall as it was made, or as its content, when that is taller:
-        // an embed never scrolls within itself, as on the desktop.
-        case "embed": max(CGFloat(node.data?["height"]?.int ?? 320), BlockHeights.of(node.id) ?? 0)
-        default: 64
+        case "recording": BlockHeights.of(node.id, width: width) ?? scaled(64)
+        // As tall as it was made, or as its content, when that is taller,
+        // up to 1200: an embed never scrolls within itself, as on the
+        // desktop.
+        case "embed":
+            max(
+                CGFloat(min(max(node.data?["height"]?.int ?? 320, 120), 1200)),
+                min(BlockHeights.of(node.id, width: width) ?? 0, 1200))
+        default: scaled(64)
         }
     }
 
@@ -84,13 +103,13 @@ struct BlockCard: View {
         case "video":
             VideoBlock(node: node)
         case "chart":
-            ChartBlock(node: node, edit: edit)
+            ChartBlock(node: node)
         case "table":
             TableGrid(node: node, edit: edit)
         case "subpage":
             SubpageBlock(node: node, links: links)
         case "recording":
-            RecordingBlock(node: node, canEdit: edit != nil, onHeight: onHeight)
+            RecordingBlock(node: node, canEdit: edit != nil, editor: editor, onHeight: onHeight)
         default:
             CardBlock(node: node)
         }
@@ -138,7 +157,6 @@ struct SubpageBlock: View {
         .buttonStyle(.plain)
         .hoverEffect(.highlight)
         .disabled(pageID.isEmpty || links == nil || title == nil)
-        .accessibilityHint(L.commonOpen)
     }
 }
 
@@ -174,7 +192,6 @@ struct ImageBlock: View {
         }
         .clipShape(.rect(cornerRadius: 8))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .accessibilityLabel(node.data?["alt"]?.string ?? "")
         .task(id: [fileID, link]) {
             picture = nil
             var data: Data?
@@ -190,24 +207,17 @@ struct ImageBlock: View {
                 let path = LocalFiles.resolve(String(link.dropFirst("file://".count)))
                 data = await Task.detached { FileManager.default.contents(atPath: path) }.value
             } else {
-                data = await Self.download(link)
+                // From the web through the core, as the desktop reads one:
+                // http too, and never this device's network.
+                data = try? await Self.client?.picture(link)
             }
-            guard let data else { return }
+            guard let data, !data.isEmpty else { return }
             picture = await Task.detached { Self.picture(data) }.value
         }
     }
 
     private var placeholder: some View {
         RoundedRectangle(cornerRadius: 8).fill(.quaternary)
-    }
-
-    /// download fetches a picture from the web, or nil when it can't.
-    private nonisolated static func download(_ link: String) async -> Data? {
-        guard let url = URL(string: link), url.scheme == "https" || url.scheme == "http",
-            let (data, response) = try? await URLSession.shared.data(from: url),
-            let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status)
-        else { return nil }
-        return data
     }
 
     /// picture is data as it shows: a bitmap, an SVG, or nil when it is
@@ -276,7 +286,6 @@ struct VideoBlock: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(player == nil)
-                        .accessibilityLabel(L.recPlay)
                     }
                 }
                 .clipped()
@@ -292,7 +301,6 @@ struct VideoBlock: View {
 /// series, with its title and caption.
 struct ChartBlock: View {
     let node: DocNode
-    var edit: (@MainActor (DocNode) -> Void)?
 
     private struct Point: Identifiable {
         let id: Int
@@ -345,11 +353,6 @@ struct ChartBlock: View {
         }
         .padding(12)
         .background(.quaternary.opacity(0.35), in: .rect(cornerRadius: 10))
-        // A long press offers Edit data, as the editor's block menu; this
-        // is it for VoiceOver.
-        .accessibilityActions {
-            if let edit { Button(L.editorEditData) { edit(node) } }
-        }
     }
 }
 
@@ -478,19 +481,20 @@ struct TableGrid: View {
     /// the desktop; nil on a page that can't be changed.
     var edit: (@MainActor (DocNode) -> Void)?
 
-    /// rows are the table's cells' text, by row, from its column-major
-    /// cells (table/cell blocks with data.rowPosition and colPosition).
+    /// rows are the table's cells' text, by row, as the core reads its
+    /// cells (mobile.TableText): the rows and columns it says it has, as
+    /// far as it has cells for them. The table's last are kept, as it is
+    /// laid out and drawn again and again.
     static func rows(_ node: DocNode) -> [[String]] {
-        var cells: [Int: [Int: String]] = [:]
-        var cols = 0
-        for cell in node.children ?? [] {
-            let r = Int(cell.data?["rowPosition"]?.int ?? 0)
-            let c = Int(cell.data?["colPosition"]?.int ?? 0)
-            cells[r, default: [:]][c] = (cell.children ?? []).map(\.text).joined(separator: " ")
-            cols = max(cols, c + 1)
-        }
-        return cells.keys.sorted().map { r in (0..<cols).map { cells[r]?[$0] ?? "" } }
+        if let (table, rows) = read[node.id], table == node { return rows }
+        let raw = (try? JSONEncoder().encode(node)).map { String(decoding: $0, as: UTF8.self) }
+        var error: NSError?
+        let json = MobileTableText(raw ?? "{}", &error)
+        let rows = (try? JSONDecoder().decode([[String]].self, from: Data(json.utf8))) ?? []
+        read[node.id] = (node, rows)
+        return rows
     }
+    @MainActor private static var read: [String: (DocNode, [[String]])] = [:]
 
     var body: some View {
         if let edit {
@@ -500,7 +504,6 @@ struct TableGrid: View {
                 grid
             }
             .buttonStyle(.plain)
-            .accessibilityHint(L.commonEdit)
         } else {
             grid
         }
@@ -521,7 +524,10 @@ struct TableGrid: View {
                             .foregroundStyle(palette.text)
                             .lineLimit(1)
                             .padding(.horizontal, 10)
-                            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+                            .frame(
+                                maxWidth: .infinity, minHeight: BlockCard.scaled(40),
+                                alignment: .leading
+                            )
                             .background(r == 0 ? palette.panel : .clear)
                             .border(palette.divider, width: 0.5)
                     }
@@ -562,18 +568,32 @@ enum LocalFiles {
     }
 }
 
-/// BlockHeights are the heights web blocks measured their pages at, by
-/// block, which their room in the text takes.
+/// BlockHeights are the heights blocks measured themselves at, as a web
+/// block its page, by block and the width they had, which their room in
+/// the text takes: the same page in two windows of different widths, or
+/// a window resized, has a height for each width.
 enum BlockHeights {
-    private static let heights = Mutex<[String: CGFloat]>([:])
+    private static let heights = Mutex<[String: [(width: CGFloat, height: CGFloat)]]>([:])
+    /// widths is how many widths a block keeps a height for, the latest:
+    /// a window resized goes through many on its way.
+    private static let widths = 4
 
-    static func of(_ id: String) -> CGFloat? { heights.withLock { $0[id] } }
+    /// of is the height block id measured itself at, at width.
+    static func of(_ id: String, width: CGFloat) -> CGFloat? {
+        heights.withLock { $0[id]?.last { abs($0.width - width) < 2 }?.height }
+    }
 
-    /// set keeps a block's height, and reports whether it changed.
-    static func set(_ id: String, _ height: CGFloat) -> Bool {
+    /// set keeps the height a block measured itself at, at its width, and
+    /// reports whether it changed.
+    static func set(_ id: String, _ size: CGSize) -> Bool {
         heights.withLock {
-            if let h = $0[id], abs(h - height) < 1 { return false }
-            $0[id] = height
+            var kept = $0[id] ?? []
+            if let i = kept.lastIndex(where: { abs($0.width - size.width) < 2 }) {
+                if abs(kept[i].height - size.height) < 1 { return false }
+                kept.remove(at: i)
+            }
+            kept.append((size.width, size.height))
+            $0[id] = Array(kept.suffix(widths))
             return true
         }
     }
@@ -583,7 +603,7 @@ enum BlockHeights {
 /// no data kept and no links followed. It tells onHeight how tall its page
 /// is, or an embed's content, to grow to it.
 final class WebBlockView: WKWebView, WKNavigationDelegate {
-    var onHeight: ((CGFloat) -> Void)?
+    var onHeight: ((CGSize) -> Void)?
     /// pinned keeps the page at its top.
     private var pinned: NSKeyValueObservation?
 
@@ -598,14 +618,14 @@ final class WebBlockView: WKWebView, WKNavigationDelegate {
         """
 
     /// embedSize posts an embed's content height, as its frame says it
-    /// to the page, when it is taller than the frame: the desktop grows
-    /// the block to it, up to 1200. Content that fills the frame, as a
-    /// page as tall as its window, is no taller, margins aside, and
-    /// would otherwise grow the block without end.
+    /// to the page, when it is taller than the frame, or shorter: the
+    /// desktop grows the block to it, up to 1200, and back. Content that
+    /// fills the frame, as a page as tall as its window, is as tall,
+    /// margins aside, and would otherwise grow the block without end.
     private static let embedSize = """
         addEventListener("message", function (e) {
           var z = e.data && e.data.leafletSize;
-          if (z && typeof z[0] === "number" && z[0] > innerHeight + 24)
+          if (z && typeof z[0] === "number" && Math.abs(z[0] - innerHeight) > 24)
             webkit.messageHandlers.size.postMessage(Math.min(z[0], 1200));
         });
         """
@@ -672,7 +692,10 @@ final class WebBlockView: WKWebView, WKNavigationDelegate {
             _ c: WKUserContentController, didReceive message: WKScriptMessage
         ) {
             guard let h = message.body as? Double, h > 0 else { return }
-            MainActor.assumeIsolated { view?.onHeight?(CGFloat(h)) }
+            MainActor.assumeIsolated {
+                guard let view else { return }
+                view.onHeight?(CGSize(width: view.bounds.width, height: CGFloat(h)))
+            }
         }
     }
 }

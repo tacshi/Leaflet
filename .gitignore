@@ -5,8 +5,11 @@
 /.mygo/
 /dist/
 mygo_windows_*.syso
-# The Mac's speech helper, which scripts/build-speech.sh builds
+# The Mac's speech helper, which scripts/build-speech.sh builds, and what
+# Xcode and swift build keep of the speech package
 /resources/darwin-*/leaflet-speech
+/speech/.build/
+/speech/.swiftpm/
 .DS_Store
 *.log
 

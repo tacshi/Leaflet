@@ -1,5 +1,5 @@
 // Package macspeech transcribes recordings with the Mac's own speech
-// recognition, through leaflet-speech (macos/speech), the helper the Mac
+// recognition, through leaflet-speech (speech/), the helper the Mac
 // app ships in its resources: the recorder's on-device engine there.
 package macspeech
 
@@ -43,37 +43,6 @@ func Find(dir string) *Helper {
 	return &Helper{path: path}
 }
 
-// answer is a line the helper writes: the words so far, the transcript
-// once done, or why it could not transcribe.
-type answer struct {
-	Text     *string         `json:"text"`
-	Done     bool            `json:"done"`
-	Segments []store.Segment `json:"segments"`
-	Error    string          `json:"error"`
-	// Code is "language" when the Mac cannot transcribe the language,
-	// which Language names.
-	Code     string `json:"code"`
-	Language string `json:"language"`
-}
-
-// failure is the error of an answer, in the user's language where the
-// helper names the reason.
-func failure(a answer, language string) error {
-	if a.Code == "language" {
-		// "auto" is the Mac's own language, which the helper names.
-		code := language
-		if a.Language != "" {
-			code = a.Language
-		}
-		name := code
-		if _, ok := recording.Languages[code]; ok {
-			name = recording.LanguageName(code)
-		}
-		return errors.New(locales.RecErrOnDeviceLanguage(name))
-	}
-	return errors.New(a.Error)
-}
-
 // File transcribes the WAV file at path.
 func (h *Helper) File(path, language string) ([]store.Segment, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -98,7 +67,7 @@ func (h *Helper) File(path, language string) ([]store.Segment, error) {
 func read(r io.Reader, language string, text func(string)) ([]store.Segment, error) {
 	dec := json.NewDecoder(r)
 	for {
-		var a answer
+		var a recording.OnDeviceAnswer
 		if err := dec.Decode(&a); err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil, errors.New(locales.RecErrOnDeviceEnded())
@@ -107,7 +76,7 @@ func read(r io.Reader, language string, text func(string)) ([]store.Segment, err
 		}
 		switch {
 		case a.Error != "":
-			return nil, failure(a, language)
+			return nil, a.Err(language)
 		case a.Done:
 			return a.Segments, nil
 		case a.Text != nil && text != nil:

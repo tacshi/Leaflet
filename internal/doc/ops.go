@@ -151,12 +151,16 @@ func (c *Content) Apply(o Op) error {
 		if o.Node == nil {
 			return fmt.Errorf("replace without a node")
 		}
+		cur := c.Addressable(o.ID)
+		if cur == nil {
+			return fmt.Errorf("no block %s", o.ID)
+		}
 		n := o.Node.Clone()
 		DropCells(n)
 		// A replace that kept the block's children carries them as the
 		// agent read them: keep the ones the block has here instead, so a
 		// child edited or added since is not undone.
-		if cur := c.Find(o.ID); cur != nil && keptChildren(o) && canHoldChildren(n, cur) {
+		if keptChildren(o) && canHoldChildren(n, cur) {
 			n.Children = nil
 			if len(cur.Children) > 0 {
 				n.Children = cur.Children
@@ -170,10 +174,34 @@ func (c *Content) Apply(o Op) error {
 		return c.Move(o.ID, *o.Position)
 	case "delete":
 		for _, id := range o.IDs {
-			c.Remove(id)
+			if c.Addressable(id) != nil {
+				c.Remove(id)
+			}
 		}
 	}
 	return nil
+}
+
+// Addressable is the block of ID id that agents' tools and a replace or a
+// delete may name: not a table's cell, nor a block in one, which change
+// with their table, whole, as the server's ops pass them over too
+// (indexBlocks). nil when there is none.
+func (c *Content) Addressable(id string) *Node {
+	var find func([]*Node) *Node
+	find = func(nodes []*Node) *Node {
+		for _, n := range nodes {
+			if n.ID == id {
+				return n
+			}
+			if n.Type != "table" {
+				if hit := find(n.Children); hit != nil {
+					return hit
+				}
+			}
+		}
+		return nil
+	}
+	return find(c.Children)
 }
 
 // allCells reports whether nodes are all table cells, which only a table
@@ -315,23 +343,4 @@ func keptChildren(o Op) bool {
 // list takes any, another block those of a block of its own kind.
 func canHoldChildren(n, cur *Node) bool {
 	return cur.Type != "table" && (NestableTypes[n.Type] || n.Type == cur.Type)
-}
-
-// Touched returns the IDs of the blocks ops change.
-func Touched(ops []Op) []string {
-	seen := map[string]bool{}
-	var out []string
-	add := func(id string) {
-		if id != "" && !seen[id] {
-			seen[id] = true
-			out = append(out, id)
-		}
-	}
-	for _, o := range ops {
-		for _, n := range o.Nodes {
-			add(n.ID)
-		}
-		add(o.ID)
-	}
-	return out
 }

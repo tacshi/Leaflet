@@ -51,29 +51,36 @@ func (e *Editor) tableBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 			})
 		})
 		// The row and column buttons show while a cell is being edited, so
-		// they take no room otherwise.
-		if !e.ReadOnly && editing {
+		// they take no room otherwise, and act on its row and column: they
+		// leave it the focus, which stays in the cell, as the cell at its
+		// place after the change.
+		r, col, ok := e.editedCell(n)
+		if !e.ReadOnly && editing && ok {
 			ui.Row(c).Gap(6).Children(func() {
-				if small(c, "add-row", "plus", locales.EditorTableRow(), pal) {
-					e.Edit(func(*doc.Content) { addTableRow(n) })
+				if small(c, "add-row", "plus", locales.EditorTableRow(), locales.EditorTableRowBelow(), pal) {
+					e.Edit(func(*doc.Content) { insertTableRow(n, r+1) })
 				}
-				if small(c, "add-col", "plus", locales.EditorTableColumn(), pal) {
-					e.Edit(func(*doc.Content) { addTableColumn(n) })
+				if small(c, "add-col", "plus", locales.EditorTableColumn(), locales.EditorTableColumnAfter(), pal) {
+					e.Edit(func(*doc.Content) { insertTableColumn(n, col+1) })
 				}
-				if rows > 1 && small(c, "del-row", "minus", locales.EditorTableRow(), pal) {
-					e.Edit(func(*doc.Content) { removeTableRow(n) })
+				if rows > 1 && small(c, "del-row", "minus", locales.EditorTableRow(), locales.EditorTableRemoveThisRow(), pal) {
+					e.Edit(func(*doc.Content) { removeTableRow(n, r) })
+					e.cellEdit = cellKey(n.ID, min(r, rows-2), col)
 				}
-				if cols > 1 && small(c, "del-col", "minus", locales.EditorTableColumn(), pal) {
-					e.Edit(func(*doc.Content) { removeTableColumn(n) })
+				if cols > 1 && small(c, "del-col", "minus", locales.EditorTableColumn(), locales.EditorTableRemoveThisColumn(), pal) {
+					e.Edit(func(*doc.Content) { removeTableColumn(n, col) })
+					e.cellEdit = cellKey(n.ID, r, min(col, cols-2))
 				}
 			})
 		}
 	})
 }
 
-func small(c *ui.Context, key, icon, label string, pal *theme.Palette) bool {
+// small is a table's button, showing an icon and label, that does what
+// hint says.
+func small(c *ui.Context, key, icon, label, hint string, pal *theme.Palette) bool {
 	b := ui.ButtonBase(c.Key(key)).Height(24).Padding(0, 8).Gap(4).Radius(6).Border(1, pal.Divider).
-		Background(pal.Surface).TextColor(pal.TextMuted).AlignItems(ui.Center)
+		Background(pal.Surface).TextColor(pal.TextMuted).AlignItems(ui.Center).Label(hint).Tooltip(hint).KeepFocus()
 	if b.Hovered() {
 		b.TextColor(pal.Text)
 	}
@@ -93,14 +100,26 @@ const (
 
 func cellKey(table string, r, col int) string { return fmt.Sprintf("%s:%d:%d", table, r, col) }
 
+// editedCell is the row and column of the cell of table n being edited;
+// ok is false when none is.
+func (e *Editor) editedCell(n *doc.Node) (r, col int, ok bool) {
+	rest, in := strings.CutPrefix(e.cellEdit, n.ID+":")
+	if !in {
+		return 0, 0, false
+	}
+	_, err := fmt.Sscanf(rest, "%d:%d", &r, &col)
+	return r, col, err == nil
+}
+
 // moveCell makes the move asked for in a cell of table n: Tab past the
 // last cell adds a row, as other editors do, and Enter on the last row
-// leaves the table for the block after it.
+// leaves the table for the block after it, a new paragraph when the table
+// ends the page.
 func (e *Editor) moveCell(n *doc.Node) {
 	move := e.cellMove
 	e.cellMove = 0
-	var r, col int
-	if _, err := fmt.Sscanf(strings.TrimPrefix(e.cellEdit, n.ID+":"), "%d:%d", &r, &col); err != nil {
+	r, col, ok := e.editedCell(n)
+	if !ok {
 		return
 	}
 	rows, cols := doc.TableSize(n)
@@ -110,7 +129,7 @@ func (e *Editor) moveCell(n *doc.Node) {
 			col, r = 0, r+1
 		}
 		if r == rows {
-			e.Edit(func(*doc.Content) { addTableRow(n) })
+			e.Edit(func(*doc.Content) { insertTableRow(n, rows) })
 		}
 	case cellPrev:
 		if col--; col < 0 {
@@ -122,11 +141,14 @@ func (e *Editor) moveCell(n *doc.Node) {
 	case cellDown:
 		if r++; r == rows {
 			e.cellEdit = ""
-			us := e.units()
-			if i := e.index(n.ID); i >= 0 && i+1 < len(us) {
-				e.PlaceCaret(us[i+1].ID, 0)
-				e.Focus()
+			next := e.unitAfter(n.ID)
+			if next == "" {
+				p := newText("paragraph", nil)
+				e.Edit(func(c *doc.Content) { _ = c.Insert(doc.Position{After: n.ID}, p) })
+				next = p.ID
 			}
+			e.PlaceCaret(next, 0)
+			e.Focus()
 			return
 		}
 	}
@@ -200,7 +222,7 @@ func (e *Editor) tableCell(c *ui.Context, table, cell *doc.Node, r, col int, w f
 		if text := e.cellText; text != before {
 			e.pushUndo(true)
 			if cell == nil {
-				cell = &doc.Node{ID: doc.NewBlockID(), Type: "table/cell", Data: map[string]any{"colPosition": col, "rowPosition": r}}
+				cell = doc.TableCellNode(r, col, nil)
 				table.Children = append(table.Children, cell)
 				doc.SortTableCells(table)
 			}
@@ -253,47 +275,61 @@ func (e *Editor) cellTools(c *ui.Context, in ui.Element, table, text string, fro
 	})
 }
 
-func addTableRow(n *doc.Node) {
+// shiftCells moves the cells of table n whose place at key, a row or a
+// column, is at or after at, by by; with by -1, those at at go.
+func shiftCells(n *doc.Node, key string, at, by int) {
+	kept := n.Children[:0]
+	for _, cell := range n.Children {
+		switch p := cell.Int(key, 0); {
+		case by < 0 && p == at:
+			continue
+		case p >= at:
+			cell.Set(key, p+by)
+		}
+		kept = append(kept, cell)
+	}
+	n.Children = kept
+}
+
+// insertTableRow puts an empty row in table n at row at, the rows from it
+// on going one down.
+func insertTableRow(n *doc.Node, at int) {
 	rows, cols := doc.TableSize(n)
+	at = min(max(at, 0), rows)
+	shiftCells(n, "rowPosition", at, 1)
 	for col := 0; col < cols; col++ {
-		n.Children = append(n.Children, &doc.Node{ID: doc.NewBlockID(), Type: "table/cell",
-			Data: map[string]any{"colPosition": col, "rowPosition": rows}, Children: []*doc.Node{newText("paragraph", nil)}})
+		n.Children = append(n.Children, doc.TableCellNode(at, col, nil))
 	}
 	n.Set("rowsLen", rows+1)
 	doc.SortTableCells(n)
 }
 
-func addTableColumn(n *doc.Node) {
+// insertTableColumn puts an empty column in table n at column at, the
+// columns from it on going one right.
+func insertTableColumn(n *doc.Node, at int) {
 	rows, cols := doc.TableSize(n)
+	at = min(max(at, 0), cols)
+	shiftCells(n, "colPosition", at, 1)
 	for r := 0; r < rows; r++ {
-		n.Children = append(n.Children, &doc.Node{ID: doc.NewBlockID(), Type: "table/cell",
-			Data: map[string]any{"colPosition": cols, "rowPosition": r}, Children: []*doc.Node{newText("paragraph", nil)}})
+		n.Children = append(n.Children, doc.TableCellNode(r, at, nil))
 	}
 	n.Set("colsLen", cols+1)
 	doc.SortTableCells(n)
 }
 
-func removeTableRow(n *doc.Node) {
+// removeTableRow takes row at out of table n, the rows after it going one
+// up.
+func removeTableRow(n *doc.Node, at int) {
 	rows, _ := doc.TableSize(n)
-	var kept []*doc.Node
-	for _, cell := range n.Children {
-		if cell.Int("rowPosition", 0) != rows-1 {
-			kept = append(kept, cell)
-		}
-	}
-	n.Children = kept
+	shiftCells(n, "rowPosition", at, -1)
 	n.Set("rowsLen", rows-1)
 }
 
-func removeTableColumn(n *doc.Node) {
+// removeTableColumn takes column at out of table n, the columns after it
+// going one left.
+func removeTableColumn(n *doc.Node, at int) {
 	_, cols := doc.TableSize(n)
-	var kept []*doc.Node
-	for _, cell := range n.Children {
-		if cell.Int("colPosition", 0) != cols-1 {
-			kept = append(kept, cell)
-		}
-	}
-	n.Children = kept
+	shiftCells(n, "colPosition", at, -1)
 	n.Set("colsLen", cols-1)
 }
 
@@ -341,7 +377,7 @@ func (e *Editor) chartBlock(c *ui.Context, n *doc.Node, pal *theme.Palette) {
 			case "line":
 				lineChart(c, labels, series, pal)
 			case "pie":
-				pieChart(c, labels, series, pal)
+				pieChart(c, series, pal)
 			default:
 				barChart(c, labels, series, pal)
 			}
@@ -372,6 +408,28 @@ func seriesColors(pal *theme.Palette, n int) []ui.Color {
 	return out
 }
 
+// sliceColors are the colors of a pie's n slices: those of as many series,
+// but never the first's on the last slice, which is beside it.
+func sliceColors(pal *theme.Palette, n int) []ui.Color {
+	base := seriesColors(pal, 1+len(ChartColors))
+	out := make([]ui.Color, n)
+	for i := range out {
+		out[i] = base[SliceColor(i, n, len(base))]
+	}
+	return out
+}
+
+// SliceColor is which of k colors, taken in turn, slice i of a pie of n
+// slices takes: the last slice, beside the first, takes the second when
+// the turn would give it the first's. A shared page's pies take theirs so
+// too.
+func SliceColor(i, n, k int) int {
+	if i == n-1 && i > 0 && i%k == 0 {
+		return 1 % k
+	}
+	return i % k
+}
+
 func legend(c *ui.Context, kind string, labels []string, series []ChartSeries, pal *theme.Palette) {
 	names := []string{}
 	if kind == "pie" {
@@ -382,6 +440,9 @@ func legend(c *ui.Context, kind string, labels []string, series []ChartSeries, p
 		}
 	}
 	colors := seriesColors(pal, len(names))
+	if kind == "pie" {
+		colors = sliceColors(pal, len(names))
+	}
 	ui.Row(c).Wrap().GapX(14).GapY(4).Children(func() {
 		for i, name := range names {
 			ui.Row(c.Key(i)).Gap(6).AlignItems(ui.Center).Children(func() {
@@ -490,7 +551,7 @@ func lineChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.
 
 // pieChart shows the first series' shares as slices, with the share of
 // each one large enough on it.
-func pieChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.Palette) {
+func pieChart(c *ui.Context, series []ChartSeries, pal *theme.Palette) {
 	vals := series[0].Values
 	total := 0.0
 	for _, v := range vals {
@@ -500,7 +561,7 @@ func pieChart(c *ui.Context, labels []string, series []ChartSeries, pal *theme.P
 		return
 	}
 	slices := chart.Pie(vals, 0.015)
-	colors := seriesColors(pal, len(vals))
+	colors := sliceColors(pal, len(vals))
 	ui.Box(c).Height(200).FillWidth().Role(ui.RoleImage).Label(locales.EditorPieChart()).Draw(func(p *ui.Painter, r ui.Rect) {
 		radius := min(r.H, r.W) / 2 * 0.9
 		cx, cy := r.X+r.W/2, r.Y+r.H/2

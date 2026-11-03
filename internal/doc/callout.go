@@ -1,6 +1,9 @@
 package doc
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // A callout is a text block set off in a tinted box with an icon; its
 // tone, data.tone, picks the tint: info, tip, warning or danger. In
@@ -18,6 +21,14 @@ func CalloutTone(tone string) string {
 		return tone
 	}
 	return "info"
+}
+
+// NextTone is the tone a callout takes after tone, as a click on its icon
+// cycles them: the first after the last, and the second after one not
+// known, which reads as the first.
+func NextTone(tone string) string {
+	i := slices.Index(CalloutTones, CalloutTone(tone))
+	return CalloutTones[(i+1)%len(CalloutTones)]
 }
 
 // CalloutAlert is the GitHub alert line that opens a callout of a tone.

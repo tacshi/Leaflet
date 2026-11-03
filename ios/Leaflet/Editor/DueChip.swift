@@ -1,3 +1,4 @@
+import LeafletCore
 import SwiftUI
 import UIKit
 
@@ -42,36 +43,30 @@ struct Due: Equatable {
     /// value is the date as the block keeps it, as doc.Node.SetDue.
     var value: JSONValue { .string((timed ? Self.time : Self.day).string(from: date)) }
 
-    /// label says when it is, from now, as the desktop's DueLabel: Today,
-    /// Tomorrow, Yesterday, or the day, with its year when not this one's,
-    /// and its time when timed.
-    func label(now: Date = .now) -> String {
-        let cal = Calendar.current
-        let days = cal.dateComponents(
-            [.day], from: cal.startOfDay(for: now), to: cal.startOfDay(for: date)
-        ).day
-        let day: String =
-            switch days {
-            case 0: L.commonToday
-            case 1: L.editorTomorrow
-            case -1: L.editorYesterday
-            default:
-                if cal.component(.year, from: date) == cal.component(.year, from: now) {
-                    L.editorDueDay(due: date)
-                } else {
-                    L.editorDueDate(due: date)
-                }
-            }
-        return timed ? L.editorDueAt(day: day, due: date) : day
+    /// Chip is what the date says at a time, as the core has it, the
+    /// desktop's (mobile.Due): when it is, Today, Tomorrow, Yesterday, or
+    /// the day, with its year when not this one's, and its time when timed;
+    /// whether it has passed, its time when timed, or else its day; and
+    /// whether it is today.
+    struct Chip: Decodable {
+        var label: String
+        var overdue: Bool?
+        var today: Bool?
     }
 
-    /// overdue reports whether it has passed: its time when timed, or else
-    /// its day, once now is a day after it, as the desktop's Overdue.
-    func overdue(now: Date = .now) -> Bool {
-        timed ? date < now : date < Calendar.current.startOfDay(for: now)
+    func chip(_ now: Date = .now) -> Chip? {
+        guard case .string(let s) = value else { return nil }
+        let raw = MobileDue(L.language, s, Int64(now.timeIntervalSince1970 * 1000))
+        return try? JSONDecoder().decode(Chip.self, from: Data(raw.utf8))
     }
 
-    func today(now: Date = .now) -> Bool { Calendar.current.isDate(date, inSameDayAs: now) }
+    /// label says when it is, from now.
+    func label(now: Date = .now) -> String { chip(now)?.label ?? "" }
+
+    /// overdue reports whether it has passed.
+    func overdue(now: Date = .now) -> Bool { chip(now)?.overdue == true }
+
+    func today(now: Date = .now) -> Bool { chip(now)?.today == true }
 
     /// widest is the longest its label grows to as the days go by: the
     /// room the to-do's text leaves for its chip.
@@ -128,10 +123,11 @@ enum DueChip {
 
     static func draw(_ info: BlockInfo, in rect: CGRect, palette: Palette) {
         let due = Due(info)
+        let chip = due?.chip()
         var (fg, bg) = (palette.textMuted, palette.ground)
-        if let due, due.overdue() {
+        if chip?.overdue == true {
             (fg, bg) = (palette.dangerText, palette.dangerBg)
-        } else if let due, due.today() {
+        } else if chip?.today == true {
             (fg, bg) = (palette.accentText, palette.accentSoft)
         }
         let shape = UIBezierPath(roundedRect: rect, cornerRadius: 6)
@@ -150,7 +146,7 @@ enum DueChip {
             x += img.size.width + iconGap
         }
         let text = NSAttributedString(
-            string: label(info),
+            string: chip?.label ?? L.editorAddDate,
             attributes: [.font: font, .foregroundColor: UIColor(fg)])
         text.draw(at: CGPoint(x: x, y: rect.midY - text.size().height / 2))
     }

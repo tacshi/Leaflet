@@ -9,6 +9,8 @@ struct RecordControl: View {
     let canRecord: Bool
     let editor: EditorController?
     @Environment(\.palette) private var palette
+    /// pause is the size of Pause, as the text size scales it.
+    @ScaledMetric(relativeTo: .footnote) private var pause: CGFloat = 28
 
     var body: some View {
         let recorder = Recorder.shared
@@ -42,7 +44,8 @@ struct RecordControl: View {
             } label: {
                 Image(systemName: state.paused ? "play.fill" : "pause.fill")
                     .font(.footnote)
-                    .frame(width: 28, height: 28)
+                    .frame(width: pause, height: pause)
+                    .contentShape(.rect)
             }
             .accessibilityLabel(state.paused ? LI.resumeRecording : L.commonPause)
             .disabled(state.starting)

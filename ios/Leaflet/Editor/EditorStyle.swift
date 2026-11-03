@@ -1,3 +1,4 @@
+import LeafletCore
 import SwiftUI
 import UIKit
 
@@ -225,48 +226,22 @@ struct EditorStyle {
 
     /// linkTarget is where text of attributes a links to, when it is a link
     /// the page opens: a page, by its mention or its leaflet:// link, or a
-    /// web or mail link, as doc.SafeHref lets through. A link to a file or
-    /// an app, as a shared page or an agent can write one, opens nothing.
+    /// web or mail link, as the core has it (mobile.LinkTarget). A link to
+    /// a file or an app, as a shared page or an agent can write one, opens
+    /// nothing.
     static func linkTarget(_ a: [NSAttributedString.Key: Any]) -> URL? {
         if let m = a[.leafletMention] as? Mention {
             return m.kind == "page" ? URL(string: "leaflet://page/\(m.id)") : nil
         }
-        guard let href = a[.leafletHref] as? String,
-            let url = URL(string: href.trimmingCharacters(in: .whitespaces))
-        else { return nil }
-        switch url.scheme?.lowercased() {
-        case "http", "https", "mailto": return url
-        case "leaflet": return url.host == "page" ? url : nil
-        default: return nil
-        }
+        guard let href = a[.leafletHref] as? String else { return nil }
+        let target = MobileLinkTarget(href)
+        return target.isEmpty ? nil : URL(string: target)
     }
 
     /// mostlyCJK reports whether text is mostly Chinese, Japanese or
-    /// Korean, whose lines the desktop sets higher: one of their
-    /// characters counts as much as a word of four letters.
-    static func mostlyCJK(_ text: String) -> Bool {
-        var cjk = 0
-        var other = 0
-        for scalar in text.unicodeScalars {
-            switch scalar.properties.generalCategory {
-            case .otherLetter where Self.isCJK(scalar): cjk += 1
-            case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter,
-                .otherLetter:
-                other += 1
-            default: break
-            }
-        }
-        return cjk > 0 && cjk * 4 >= other
-    }
-
-    private static func isCJK(_ s: Unicode.Scalar) -> Bool {
-        switch s.value {
-        case 0x3040...0x30FF, 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF,
-            0xAC00...0xD7AF, 0x1100...0x11FF, 0x3130...0x318F, 0x20000...0x2FA1F:
-            true
-        default: false
-        }
-    }
+    /// Korean, whose lines the desktop sets higher, as the core has it
+    /// (mobile.MostlyCJK).
+    static func mostlyCJK(_ text: String) -> Bool { MobileMostlyCJK(text) }
 
     /// ordinal is a numbered item's number: one more than the numbered
     /// item before it at its depth, with nothing shallower between. known

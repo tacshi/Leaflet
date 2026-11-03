@@ -3,7 +3,6 @@ package app
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -108,7 +107,11 @@ func TestOutlineScrollsHeadingToTop(t *testing.T) {
 	a.reloadAll()
 	a.openPage(p.ID)
 	a.panelOpen, a.panelTab = true, 2
-	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 700)
+	var ctx *ui.Context
+	tt := ui.NewTester(func(c *ui.Context) {
+		ctx = c
+		a.view(c)
+	}, 1300, 700)
 	tt.Frame()
 	if err := tt.Click("Products"); err != nil {
 		t.Fatal(err)
@@ -118,23 +121,34 @@ func TestOutlineScrollsHeadingToTop(t *testing.T) {
 	}
 	ed := a.page.editor
 	top, ok := ed.BlockTop("h1")
-	if !ok || top-a.page.viewTop < 0 || top-a.page.viewTop > 2*scrollMargin {
-		t.Errorf("Products is %v below the top of the page (shown %v)", top-a.page.viewTop, ok)
+	viewTop := a.page.view.Bounds(ctx).Y
+	if !ok || viewTop == 0 || top-viewTop < 0 || top-viewTop > 2*scrollMargin {
+		t.Errorf("Products is %v below the top of the page at %v (shown %v)", top-viewTop, viewTop, ok)
 	}
-	if got := currentHeading(ed.Headings(), ed.BlockTop, a.page.viewTop+2*scrollMargin); got != "h1" {
+	if got := currentHeading(ed.Headings(), ed.BlockTop, viewTop+2*scrollMargin); got != "h1" {
 		t.Errorf("current heading %q", got)
 	}
-}
-
-func TestHeadingTree(t *testing.T) {
-	h := func(id string, level int) *doc.Node {
-		n := &doc.Node{ID: id, Type: "heading"}
-		n.Set("level", level)
-		return n
+	// The arrows go from heading to heading in the outline, which keeps the
+	// keyboard: the page shows each, and Enter goes into it.
+	if ed.Focused() {
+		t.Fatal("a click in the outline gave the page the keyboard")
 	}
-	roots, kids := headingTree([]*doc.Node{h("a", 2), h("b", 3), h("c", 3), h("d", 1), h("e", 3), h("f", 2)})
-	if fmt.Sprint(roots) != "[a d]" || fmt.Sprint(kids["a"]) != "[b c]" || fmt.Sprint(kids["d"]) != "[e f]" || kids["b"] != nil {
-		t.Errorf("roots %v kids %v", roots, kids)
+	tt.Key(0, ui.KeyDown)
+	tt.Frame()
+	tt.Key(0, ui.KeyUp)
+	tt.Frame()
+	tt.Key(0, ui.KeyUp)
+	for i := 0; i < 3; i++ {
+		tt.Frame()
+	}
+	if ed.Focused() || a.page.outlineRow != 0 || ed.Caret().ID != "h0" {
+		t.Errorf("after Down, Up, Up: page focused %v, row %d, caret in %s", ed.Focused(), a.page.outlineRow, ed.Caret().ID)
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	tt.Frame()
+	if !ed.Focused() {
+		t.Error("Enter left the keyboard in the outline")
 	}
 }
 
@@ -208,38 +222,47 @@ func TestBlockLinkOpensToggle(t *testing.T) {
 	}
 }
 
-// Going to a block lights it for a moment, which leaves the tint of an
-// agent run that changed it, whether it ran before or meanwhile.
+// Going to a block lights it for a moment, from the frame it shows lit,
+// which leaves the tint of an agent run that changed it, whether it ran
+// before or meanwhile.
 func TestGoToBlockKeepsAgentTint(t *testing.T) {
 	a := templatesApp(t)
-	para := &doc.Node{ID: "p1", Type: "paragraph"}
-	para.SetDelta(doc.Delta{{Text: "Changed by an agent"}})
-	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan", Content: doc.FromBlocks([]*doc.Node{para})})
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.TextSize = 16
+	agent, other := textNode("Changed by an agent"), textNode("Not changed")
+	agent.ID, other.ID = "p1", "p2"
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan", Content: doc.FromBlocks([]*doc.Node{agent, other})})
 	if err != nil {
 		t.Fatal(err)
 	}
 	a.reloadAll()
 	a.openPage(p.ID)
-	posted := make(chan func(), 2)
-	a.post = func(fn func()) { posted <- fn }
-	a.goToBlock("p1")
-	a.Tint(p.ID, []string{"p1"})
-	select {
-	case fn := <-posted:
-		fn()
-	case <-time.After(5 * time.Second):
-		t.Fatal("the moment never ended")
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
+	tt.Frame()
+	a.goToBlock("p2", true)
+	tt.Frame()
+	tt.Advance(blockLit / 2)
+	if !a.page.tinted["p2"] {
+		t.Error("the block went dark before its moment was over")
 	}
+	tt.Advance(blockLit)
+	if a.page.tinted["p2"] {
+		t.Error("the block stayed lit after its moment")
+	}
+
+	a.goToBlock("p1", true)
+	a.Tint(p.ID, []string{"p1"})
+	tt.Frame()
+	tt.Advance(2 * blockLit)
 	if !a.page.tinted["p1"] {
 		t.Error("the agent run's tint went with the moment")
 	}
-	a.goToBlock("p1")
-	select {
-	case fn := <-posted:
-		fn()
+	a.goToBlock("p1", true)
+	if len(a.page.lit) != 0 {
 		t.Error("going to a tinted block lit it for a moment of its own")
-	case <-time.After(2 * time.Second):
 	}
+	tt.Frame()
+	tt.Advance(2 * blockLit)
 	if !a.page.tinted["p1"] {
 		t.Error("the agent run's tint went")
 	}

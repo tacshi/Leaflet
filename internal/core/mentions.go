@@ -27,9 +27,9 @@ func Mentioned(md string, names []string) map[string]bool {
 
 // CommentAgent is the agent a comment mentions, to answer in its thread:
 // one it names, the first as hub.Options lists them, or else the default
-// for @agent, as Hub.Resolve picks it. It is nil when the comment mentions
-// none, and the error says why the default can't run.
-func CommentAgent(hub *agents.Hub, body string) (*store.ModelChoice, error) {
+// for @agent, as Hub.Resolve picks it. mentioned is false when the comment
+// mentions none, and the error says why the default can't run.
+func CommentAgent(hub *agents.Hub, body string) (agent store.ModelChoice, mentioned bool, err error) {
 	options := hub.Options()
 	names := []string{"agent"}
 	for _, o := range options {
@@ -38,19 +38,17 @@ func CommentAgent(hub *agents.Hub, body string) (*store.ModelChoice, error) {
 	hit := Mentioned(body, names)
 	for _, o := range options {
 		if hit[strings.ToLower(o.Name())] {
-			ch := o.Choice()
-			return &ch, nil
+			return o.Choice(), true, nil
 		}
 	}
 	if !hit["agent"] {
-		return nil, nil
+		return store.ModelChoice{}, false, nil
 	}
 	o, err := hub.Resolve(nil)
 	if err != nil {
-		return nil, err
+		return store.ModelChoice{}, true, err
 	}
-	ch := o.Choice()
-	return &ch, nil
+	return o.Choice(), true, nil
 }
 
 // MarkMentions is md with each mention of one of names as mark has it:

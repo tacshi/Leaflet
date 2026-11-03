@@ -8,6 +8,10 @@
   "@appMenuView": {
     "description": "The menu bar: the View menu."
   },
+  "appMenuSettings": "Settings…",
+  "@appMenuSettings": {
+    "description": "The menu bar's app menu (named Leaflet): open the Settings window, at ⌘, as in other Mac apps."
+  },
   "appMenuNewPage": "New Page",
   "@appMenuNewPage": {
     "description": "The File menu and the menu bar icon's menu: make a new page."
@@ -57,6 +61,10 @@
         "example": "disk full"
       }
     }
+  },
+  "appPageRemoved": "This page is no longer on this device, so the edits not saved yet were lost.",
+  "@appPageRemoved": {
+    "description": "Toast when the open page was removed from this device (its share withdrawn, or the device left the account) while edits to it still waited to be saved."
   },
   "appErrorRename": "Could not rename: {error}",
   "@appErrorRename": {
@@ -796,6 +804,10 @@
       }
     }
   },
+  "templateGone": "the template is no longer there",
+  "@templateGone": {
+    "description": "Why a template could not be used or chosen, after the colon of templateUseFailed or templateDefaultFailed: it was deleted, here or on another device. Lowercase, as part of a sentence."
+  },
   "templatePill": "Template",
   "@templatePill": {
     "description": "A badge marking a template among pages and search results, and the tooltip of the icon after a template's breadcrumbs."
@@ -1017,6 +1029,10 @@
       }
     }
   },
+  "dialogFolderGone": "the folder is no longer there",
+  "@dialogFolderGone": {
+    "description": "Why a folder could not be changed, after the colon of a toast such as templateDefaultFailed: it was deleted, here or on another device. Lowercase, as part of a sentence."
+  },
   "dialogFolderCreateFailed": "Could not create the folder: {error}",
   "@dialogFolderCreateFailed": {
     "description": "A toast when creating a folder fails.",
@@ -1149,6 +1165,10 @@
       }
     }
   },
+  "dialogHistoryVersionGone": "the version is no longer kept",
+  "@dialogHistoryVersionGone": {
+    "description": "Why a version could not be restored, after the colon of dialogHistoryRestoreFailed: it is no longer among the page's kept versions. Lowercase, as part of a sentence."
+  },
   "dialogHistoryRestored": "Restored the earlier version",
   "@dialogHistoryRestored": {
     "description": "A toast after a version is restored."
@@ -1242,9 +1262,26 @@
   "@dialogEmbedHeight": {
     "description": "Embed dialog: the label of the height field."
   },
+  "dialogEmbedFailed": "Could not make the embed: {error}",
+  "@dialogEmbedFailed": {
+    "description": "Embed dialog: shown under the HTML when the embed could not be inserted or saved, as when its HTML is too long.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "dialogInsert": "Insert",
   "@dialogInsert": {
     "description": "Embed and link dialogs: the button inserting the block."
+  },
+  "dialogDiscardChanges": "Discard Changes",
+  "@dialogDiscardChanges": {
+    "description": "iOS: asked on Cancel in a block's sheet (a chart's, a table's, a formula's, a link's, an embed's) with changes: close it without keeping them."
+  },
+  "dialogKeepEditing": "Keep Editing",
+  "@dialogKeepEditing": {
+    "description": "iOS: asked on Cancel in a block's sheet with changes: go back to the sheet, keeping them."
   },
   "dialogLinkCardTitle": "Link card",
   "@dialogLinkCardTitle": {
@@ -1468,6 +1505,16 @@
   "pubStopped": "The public link stopped.",
   "@pubStopped": {
     "description": "Share dialog: the public link failed or cloudflared quit; cloudflared's own message follows."
+  },
+  "pubLinkStopped": "The public link to “{title}” stopped.",
+  "@pubLinkStopped": {
+    "description": "A notification when a page's public link stopped, as cloudflared quit, while the Share dialog doesn't show it; its button opens the dialog, which says why.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Trip"
+      }
+    }
   },
   "pubEmails": "Only these emails (optional)",
   "@pubEmails": {
@@ -1793,9 +1840,427 @@
   "@agentNeedsConnection": {
     "description": "Why an agent can't run: the device is offline, and no provider works offline."
   },
+  "agentChatgptUnreachable": "Leaflet couldn't reach ChatGPT's sign-in ({status}). Check your network or proxy, then try again.",
+  "@agentChatgptUnreachable": {
+    "description": "Settings › Agent providers: signing in with ChatGPT could not reach OpenAI; status is what the network or OpenAI answered, such as an HTTP status.",
+    "placeholders": {
+      "status": {
+        "type": "String",
+        "example": "503 Service Unavailable"
+      }
+    }
+  },
+  "agentChatgptNotRegistered": "ChatGPT did not register Leaflet. Try again.",
+  "@agentChatgptNotRegistered": {
+    "description": "Settings › Agent providers: signing in with ChatGPT failed, as OpenAI did not register Leaflet as an app."
+  },
+  "agentChatgptOtherRegistration": "ChatGPT answered for another registration. Try again.",
+  "@agentChatgptOtherRegistration": {
+    "description": "Settings › Agent providers: signing in with ChatGPT failed, as OpenAI answered for another registration of Leaflet than the one asked for."
+  },
+  "agentChatgptNoPlan": "ChatGPT didn't let Leaflet use your plan. Using a plan needs ChatGPT Plus or Pro.",
+  "@agentChatgptNoPlan": {
+    "description": "Settings › Agent providers: signing in with ChatGPT failed, as the account's plan can't be used by apps. ChatGPT Plus and Pro are plan names, not translated."
+  },
+  "agentChatgptSignInAgain": "Sign in with ChatGPT again in Settings › Agent providers.",
+  "@agentChatgptSignInAgain": {
+    "description": "An agent run or Settings › Agent providers: the ChatGPT sign-in kept on this device could not be read."
+  },
+  "agentChatgptSignInEnded": "Your ChatGPT sign-in ended. Sign in again in Settings › Agent providers.",
+  "@agentChatgptSignInEnded": {
+    "description": "An agent run or Settings › Agent providers: ChatGPT no longer accepts the sign-in kept on this device."
+  },
+  "oauthPortTaken": "Leaflet couldn't wait for {name}'s sign-in on port {port}, which another app is using. Quit it, then try again.",
+  "@oauthPortTaken": {
+    "description": "Signing in through the browser, as with ChatGPT: the port the browser comes back to is taken by another app; name is the service signed in to.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "ChatGPT"
+      },
+      "port": {
+        "type": "int",
+        "example": "1455"
+      }
+    }
+  },
+  "oauthTimedOut": "Sign-in timed out. Try again.",
+  "@oauthTimedOut": {
+    "description": "Signing in through the browser, as with ChatGPT: the browser didn't come back in time, or the sign-in was stopped."
+  },
+  "remoteSignedOut": "Sign in to use this.",
+  "@remoteSignedOut": {
+    "description": "Why something that needs an account can't be done: no one is signed in to the server."
+  },
+  "remoteNotConfigured": "This build has no server; it works on this device only.",
+  "@remoteNotConfigured": {
+    "description": "Why something that needs the server can't be done: this build of the app has none, and keeps everything on the device."
+  },
+  "remoteServerFixed": "This build's server is fixed.",
+  "@remoteServerFixed": {
+    "description": "Why the server can't be changed in Settings: this build of the app comes with its own."
+  },
+  "remoteNoSession": "The server did not sign you in.",
+  "@remoteNoSession": {
+    "description": "Signing in, as with a link or a code: the server answered without a sign-in."
+  },
+  "supabaseSignedOut": "Your Supabase sign-in ended. Sign in with Supabase again.",
+  "@supabaseSignedOut": {
+    "description": "Signed in with Supabase to set up or update a project: Supabase no longer accepts the sign-in kept on this device."
+  },
+  "supabaseSignInStale": "Leaflet couldn't finish this sign-in, which is stale. Sign in with Supabase again.",
+  "@supabaseSignInStale": {
+    "description": "Signing in with Supabase: the browser came back from a sign-in other than the one Leaflet is waiting for, as an old tab."
+  },
+  "supabaseSignInCancelled": "Sign-in was cancelled.",
+  "@supabaseSignInCancelled": {
+    "description": "Signing in with Supabase: the user declined in the browser."
+  },
+  "supabaseSignInFailed": "Supabase sign-in failed: {error}",
+  "@supabaseSignInFailed": {
+    "description": "Signing in with Supabase failed; error is what Supabase or the network said.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "invalid_request"
+      }
+    }
+  },
+  "supabaseNoSignIn": "Supabase did not sign you in.",
+  "@supabaseNoSignIn": {
+    "description": "Signing in with Supabase: Supabase answered without a sign-in."
+  },
+  "provisionProjectFailed": "Supabase couldn't start the project. Try again, or check it in the Supabase dashboard.",
+  "@provisionProjectFailed": {
+    "description": "Setting up a Supabase project for Leaflet: Supabase reports the project failed to start or restore."
+  },
+  "provisionMigrationFailed": "Leaflet couldn't set up the database ({migration}): {error}",
+  "@provisionMigrationFailed": {
+    "description": "Setting up or updating a Supabase project for Leaflet: a step of the database's setup failed; migration names the step, error says what went wrong.",
+    "placeholders": {
+      "migration": {
+        "type": "String",
+        "example": "20260101000000_init"
+      },
+      "error": {
+        "type": "String",
+        "example": "permission denied"
+      }
+    }
+  },
+  "provisionDeployFailed": "Leaflet couldn't deploy its {function} function: {error}",
+  "@provisionDeployFailed": {
+    "description": "Setting up or updating a Supabase project for Leaflet: putting one of Leaflet's server functions on the project failed; function is its name, error says what went wrong.",
+    "placeholders": {
+      "function": {
+        "type": "String",
+        "example": "agent"
+      },
+      "error": {
+        "type": "String",
+        "example": "bundle too large"
+      }
+    }
+  },
+  "provisionWhichMember": "Leaflet couldn't tell which member of the organization you are. Use a project in an organization of your own.",
+  "@provisionWhichMember": {
+    "description": "Setting up a Supabase project for Leaflet: the project's organization has several members, so Leaflet can't tell whose it is."
+  },
+  "provisionNoKeys": "Supabase didn't give Leaflet the project's API keys.",
+  "@provisionNoKeys": {
+    "description": "Setting up a Supabase project for Leaflet: Supabase did not hand over the keys apps use to reach the project."
+  },
+  "oauthStale": "This sign-in link is stale. Start again from Leaflet.",
+  "@oauthStale": {
+    "description": "The browser tab a sign-in comes back to: it belongs to a sign-in other than the one Leaflet is waiting for."
+  },
+  "oauthCancelledTitle": "Sign-in was cancelled",
+  "@oauthCancelledTitle": {
+    "description": "Heading of the browser tab a sign-in comes back to, when it was declined or failed."
+  },
+  "oauthCloseTab": "You can close this tab.",
+  "@oauthCloseTab": {
+    "description": "The browser tab a sign-in comes back to, under oauthCancelledTitle."
+  },
+  "oauthCancelled": "Sign-in was cancelled.",
+  "@oauthCancelled": {
+    "description": "Signing in through the browser, as with ChatGPT: the user declined in the browser."
+  },
+  "oauthFailed": "{name} sign-in failed: {error}",
+  "@oauthFailed": {
+    "description": "Signing in through the browser, as with ChatGPT, failed; name is the service, error what it said.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "ChatGPT"
+      },
+      "error": {
+        "type": "String",
+        "example": "server_error"
+      }
+    }
+  },
+  "oauthSignedIn": "Signed in to Leaflet",
+  "@oauthSignedIn": {
+    "description": "Heading of the browser tab a sign-in comes back to, when it worked."
+  },
+  "oauthCloseTabBack": "You can close this tab and go back to Leaflet.",
+  "@oauthCloseTabBack": {
+    "description": "The browser tab a sign-in comes back to, under oauthSignedIn."
+  },
   "agentRunning": "An agent is already working on this page. Try again when it is done.",
   "@agentRunning": {
     "description": "Why an agent can't run: another agent is working on the same page."
+  },
+  "agentAccountLeft": "Stopped: its account signed out of this device.",
+  "@agentAccountLeft": {
+    "description": "Why an agent run ended: the account whose page it worked on signed out of this device, removing its pages, before it finished."
+  },
+  "agentReplyCutOff": "(This answer was cut off at the model's length limit.)",
+  "@agentReplyCutOff": {
+    "description": "Added after an agent's answer that the model stopped writing because it reached the most it may write at once."
+  },
+  "agentReadingPage": "Reading the page…",
+  "@agentReadingPage": {
+    "description": "The agent chat's reply while an agent starts on a request, before it has said or done anything."
+  },
+  "agentAppClosed": "The app closed before the agent finished.",
+  "@agentAppClosed": {
+    "description": "An agent chat reply kept from an earlier launch: the app quit while the agent was still working on it."
+  },
+  "agentStoppedAfter": "Stopped after: {edit}.",
+  "@agentStoppedAfter": {
+    "description": "An agent's reply when the user stopped it after it edited the page; edit is its last edit, as agentEditInserted and the others say it.",
+    "placeholders": {
+      "edit": {
+        "type": "String",
+        "example": "Inserted a chart"
+      }
+    }
+  },
+  "agentStoppedBefore": "Stopped before making any changes.",
+  "@agentStoppedBefore": {
+    "description": "An agent's reply when the user stopped it before it edited the page."
+  },
+  "agentEditMade": "{edit}.",
+  "@agentEditMade": {
+    "description": "An agent's reply when it edited the page and answered nothing: its last edit, as agentEditInserted and the others say it, made a sentence.",
+    "placeholders": {
+      "edit": {
+        "type": "String",
+        "example": "Inserted a chart"
+      }
+    }
+  },
+  "agentNoChanges": "The agent made no changes.",
+  "@agentNoChanges": {
+    "description": "An agent's reply when it answered nothing and left the page as it was."
+  },
+  "agentStoppedAfterRounds": "{count, plural, one {I stopped after # round of edits. Ask me to continue if there is more to do.} other {I stopped after # rounds of edits. Ask me to continue if there is more to do.}}",
+  "@agentStoppedAfterRounds": {
+    "description": "An agent's reply, in its own voice, when it used up the rounds of edits one request may take.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "12"
+      }
+    }
+  },
+  "agentEditedPage": "Edited the page",
+  "@agentEditedPage": {
+    "description": "An edit a cloud agent made that came without saying what it was, in the agent's reply and the list of its edits."
+  },
+  "agentEditInserted": "Inserted {what}",
+  "@agentEditInserted": {
+    "description": "An edit an agent made, in its reply and the list of its edits: it inserted blocks; what is agentEditBlocks, or a block's kind as agentEditChart and the others name it, maybe with its title after a ·.",
+    "placeholders": {
+      "what": {
+        "type": "String",
+        "example": "a chart"
+      }
+    }
+  },
+  "agentEditWrote": "Wrote {what}",
+  "@agentEditWrote": {
+    "description": "An edit an agent made, in its reply and the list of its edits: it wrote text in the page, as Markdown; what is agentEditBlocks, or a block's kind as agentEditChart and the others name it, maybe with its title after a ·.",
+    "placeholders": {
+      "what": {
+        "type": "String",
+        "example": "3 blocks"
+      }
+    }
+  },
+  "agentEditRewrote": "Rewrote {what}",
+  "@agentEditRewrote": {
+    "description": "An edit an agent made, in its reply and the list of its edits: it rewrote a block; what is agentEditBlocks, or a block's kind as agentEditChart and the others name it, maybe with its title after a ·.",
+    "placeholders": {
+      "what": {
+        "type": "String",
+        "example": "a heading"
+      }
+    }
+  },
+  "agentEditMoved": "Moved a block",
+  "@agentEditMoved": {
+    "description": "An edit an agent made, in its reply and the list of its edits: it moved a block."
+  },
+  "agentEditDeleted": "{count, plural, one {Deleted a block} other {Deleted # blocks}}",
+  "@agentEditDeleted": {
+    "description": "An edit an agent made, in its reply and the list of its edits: it deleted blocks.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "3"
+      }
+    }
+  },
+  "agentEditCreatedSubpage": "Created subpage “{title}”",
+  "@agentEditCreatedSubpage": {
+    "description": "An edit an agent made, in its reply and the list of its edits: it made a subpage of the page, titled title.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Notes"
+      }
+    }
+  },
+  "agentEditBlocks": "{count, plural, one {a block} other {# blocks}}",
+  "@agentEditBlocks": {
+    "description": "The blocks an agent's edit wrote, in agentEditInserted, agentEditWrote and agentEditRewrote: how many, or a block of a kind they don't name.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "3"
+      }
+    }
+  },
+  "agentEditChart": "a chart",
+  "@agentEditChart": {
+    "description": "A chart block, in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditTable": "a table",
+  "@agentEditTable": {
+    "description": "A table block, in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditEmbed": "an interactive embed",
+  "@agentEditEmbed": {
+    "description": "An interactive embed block (HTML running sandboxed), in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditHeading": "a heading",
+  "@agentEditHeading": {
+    "description": "A heading block, in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditImage": "an image",
+  "@agentEditImage": {
+    "description": "An image block, in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditVideo": "a video",
+  "@agentEditVideo": {
+    "description": "A video block, in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditCode": "a code block",
+  "@agentEditCode": {
+    "description": "A code block, in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditCallout": "a callout",
+  "@agentEditCallout": {
+    "description": "A callout block (a note, tip or warning that stands out), in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditToggle": "a toggle",
+  "@agentEditToggle": {
+    "description": "A toggle list block, whose children fold away, in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditLinkCard": "a link card",
+  "@agentEditLinkCard": {
+    "description": "A link card block (a web page's title and picture), in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditFormula": "a formula",
+  "@agentEditFormula": {
+    "description": "A math equation block, in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditDiagram": "a diagram",
+  "@agentEditDiagram": {
+    "description": "A diagram block (Mermaid), in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentPageKeptChanging": "The page kept changing while saving the agent's edits.",
+  "@agentPageKeptChanging": {
+    "description": "Why an agent run failed: something else kept saving the page, closed in the app, while the agent's edits were saved, so they were not."
+  },
+  "agentPageUnreadable": "The page's content could not be read, so agents leave it as it is.",
+  "@agentPageUnreadable": {
+    "description": "Why an agent can't run or undo its edits: the page's content on this device can't be read, as one saved by a newer version of the app."
+  },
+  "agentConnectionEnded": "The connection to the agent ended before it finished.",
+  "@agentConnectionEnded": {
+    "description": "Why a cloud agent run failed: the connection to the server ended before it said how the run went."
+  },
+  "agentModelNoChoices": "The model returned no choices.",
+  "@agentModelNoChoices": {
+    "description": "Why an agent run or a connection test failed: the model's server answered with no answer in it."
+  },
+  "agentModelCouldNotAnswer": "The model could not answer",
+  "@agentModelCouldNotAnswer": {
+    "description": "Why an agent run failed: the model's server reported an error it gave no words for."
+  },
+  "agentModelCutOff": "The model's answer was cut off.",
+  "@agentModelCutOff": {
+    "description": "Why an agent run failed: the model's streamed answer ended before it was complete."
+  },
+  "agentChatgptCouldNotAnswer": "ChatGPT could not answer",
+  "@agentChatgptCouldNotAnswer": {
+    "description": "Why an agent run on a ChatGPT plan failed: ChatGPT reported an error it gave no words for."
+  },
+  "agentChatgptCutOff": "ChatGPT's answer was cut off",
+  "@agentChatgptCutOff": {
+    "description": "Why an agent run on a ChatGPT plan failed: ChatGPT's streamed answer ended before it was complete."
+  },
+  "agentChatgptStoppedAtLimit": "ChatGPT stopped at the most it may write in one answer.",
+  "@agentChatgptStoppedAtLimit": {
+    "description": "Why an agent run on a ChatGPT plan failed: ChatGPT reached the longest answer it may write."
+  },
+  "agentChatgptStoppedFiltered": "ChatGPT stopped: its content filter held back the rest of the answer.",
+  "@agentChatgptStoppedFiltered": {
+    "description": "Why an agent run on a ChatGPT plan failed: OpenAI's content filter stopped the answer."
+  },
+  "agentChatgptStoppedPlan": "ChatGPT stopped before finishing; your plan's limit may have been reached.",
+  "@agentChatgptStoppedPlan": {
+    "description": "Why an agent run on a ChatGPT plan failed: ChatGPT stopped without saying why, as when the plan's usage limit is reached."
+  },
+  "agentTestUnreachable": "Could not reach {url}: {error}",
+  "@agentTestUnreachable": {
+    "description": "Settings › Agent providers, testing a connection: the provider's server could not be reached; error is what went wrong, as the system says it.",
+    "placeholders": {
+      "url": {
+        "type": "String",
+        "example": "http://localhost:11434/v1"
+      },
+      "error": {
+        "type": "String",
+        "example": "connection refused"
+      }
+    }
+  },
+  "agentTestChooseModel": "Choose a model to test with",
+  "@agentTestChooseModel": {
+    "description": "Settings › Agent providers, testing a connection: the provider lists no models, so the test needs one chosen."
+  },
+  "agentTestChatOnly": "Connected, but this model did not call tools: it will be chat-only.",
+  "@agentTestChatOnly": {
+    "description": "Settings › Agent providers, testing a connection: the model answered but did not call the test's tool, so agents on it answer in the chat and don't edit pages."
+  },
+  "agentTestToolsWork": "Connected · tool calling works",
+  "@agentTestToolsWork": {
+    "description": "Settings › Agent providers, testing a connection: the model answered and called the test's tool."
+  },
+  "agentTestModels": "{count, plural, one {Connected · # model available} other {Connected · # models available}}",
+  "@agentTestModels": {
+    "description": "Settings › Agent providers, testing a connection: the model answered and called the test's tool, and the provider lists count models.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "5"
+      }
+    }
   },
   "pageDismiss": "Dismiss",
   "@pageDismiss": {
@@ -1828,6 +2293,10 @@
   "pageUnreadable": "This page's content could not be read. It opened read-only, so that it is kept as it is.",
   "@pageUnreadable": {
     "description": "Notice over a page whose stored content could not be read."
+  },
+  "dialogHistoryUnreadable": "This version could not be read, so it cannot be shown or restored.",
+  "@dialogHistoryUnreadable": {
+    "description": "Page history: in place of a version whose saved content this version of Leaflet cannot read."
   },
   "pageReview": "Review",
   "@pageReview": {
@@ -2008,6 +2477,27 @@
       }
     }
   },
+  "panelCouldNotPost": "Could not post: {error}",
+  "@panelCouldNotPost": {
+    "description": "Toast after posting a comment or a reply to a thread failed.",
+    "placeholders": {
+      "error": {
+        "type": "String"
+      }
+    }
+  },
+  "panelAgentFailed": "{agent} could not answer: {error}",
+  "@panelAgentFailed": {
+    "description": "Toast when an agent mentioned in a comment failed to answer in its thread, with the agent's name and why.",
+    "placeholders": {
+      "agent": {
+        "type": "String"
+      },
+      "error": {
+        "type": "String"
+      }
+    }
+  },
   "sidebarSearch": "Search (⌘P)",
   "@sidebarSearch": {
     "description": "Sidebar: tooltip of the search button."
@@ -2078,6 +2568,15 @@
   "sidebarNoTags": "Add tags to a page to group it here.",
   "@sidebarNoTags": {
     "description": "Sidebar Tags tab with no tags yet."
+  },
+  "sidebarTagPages": "{count, plural, one {# page} other {# pages}}",
+  "@sidebarTagPages": {
+    "description": "Sidebar Tags tab: how many pages have a tag, as VoiceOver reads the count beside its name.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "tagActions": "Tag actions",
   "@tagActions": {
@@ -2721,7 +3220,7 @@
   },
   "recErrOnDeviceStuck": "This device's speech recognition did not finish.",
   "@recErrOnDeviceStuck": {
-    "description": "Error of a transcription on the device (the Mac's speech recognition) that stopped answering and was ended."
+    "description": "Error of a transcription on the device (the Mac's, iPhone's or iPad's own speech recognition) that stopped answering and was ended."
   },
   "recErrOnDeviceStopped": "This device's speech recognition stopped.",
   "@recErrOnDeviceStopped": {
@@ -2907,6 +3406,22 @@
   "editorTableColumn": "Column",
   "@editorTableColumn": {
     "description": "Table block buttons (with + or − icons) that add or remove a column."
+  },
+  "editorTableRowBelow": "Add a row below",
+  "@editorTableRowBelow": {
+    "description": "Table block: what the + Row button does, as its tooltip and VoiceOver say: add an empty row under the row of the cell being edited."
+  },
+  "editorTableColumnAfter": "Add a column to the right",
+  "@editorTableColumnAfter": {
+    "description": "Table block: what the + Column button does, as its tooltip and VoiceOver say: add an empty column right of the column of the cell being edited."
+  },
+  "editorTableRemoveThisRow": "Remove this row",
+  "@editorTableRemoveThisRow": {
+    "description": "Table block: what the − Row button does, as its tooltip and VoiceOver say: take away the row of the cell being edited."
+  },
+  "editorTableRemoveThisColumn": "Remove this column",
+  "@editorTableRemoveThisColumn": {
+    "description": "Table block: what the − Column button does, as its tooltip and VoiceOver say: take away the column of the cell being edited."
   },
   "editorTableAddRow": "Add row",
   "@editorTableAddRow": {
@@ -3128,6 +3643,14 @@
   "editorCopyBlockLink": "Copy link to block",
   "@editorCopyBlockLink": {
     "description": "Page context menu item."
+  },
+  "editorCut": "Cut",
+  "@editorCut": {
+    "description": "Page context menu item: cut the selection to the clipboard."
+  },
+  "editorPaste": "Paste",
+  "@editorPaste": {
+    "description": "Page context menu item: paste what is on the clipboard at the caret."
   },
   "editorCopiedBlockLink": "Copied a link to the block",
   "@editorCopiedBlockLink": {
@@ -3415,6 +3938,10 @@
   "@settingsDevicesLoading": {
     "description": "Settings › Account › Devices: while the list loads."
   },
+  "settingsDevicesNone": "No devices yet.",
+  "@settingsDevicesNone": {
+    "description": "Settings › Account › Devices: the account has no devices listed yet."
+  },
   "settingsDevicesFailed": "Could not load devices: {error}",
   "@settingsDevicesFailed": {
     "description": "Settings › Account › Devices: the list could not be loaded; a Retry button is beside it.",
@@ -3541,6 +4068,10 @@
   "settingsTypeDelete": "Type DELETE to confirm.",
   "@settingsTypeDelete": {
     "description": "The dialog confirming deleting the account; DELETE is typed as is, in English."
+  },
+  "settingsDeletingAccount": "Deleting…",
+  "@settingsDeletingAccount": {
+    "description": "Delete account dialog: its delete button while the server deletes the account."
   },
   "settingsDeleteAccountFailed": "Could not delete the account: {error}",
   "@settingsDeleteAccountFailed": {
@@ -3951,6 +4482,10 @@
   "@settingsUseThisDevice": {
     "description": "Settings › Conflicts › Resolve."
   },
+  "settingsUseOtherDevice": "Use the other device's version",
+  "@settingsUseOtherDevice": {
+    "description": "Settings › Conflicts › Resolve: put back the version from the other device, which the merge did not keep."
+  },
   "settingsKeepNewer": "Keep the newer version",
   "@settingsKeepNewer": {
     "description": "Settings › Conflicts › Resolve."
@@ -4297,6 +4832,20 @@
       }
     }
   },
+  "externalOldEntryNotBack": "{error}; the old entry could not be put back either: {restoreError}",
+  "@externalOldEntryNotBack": {
+    "description": "Settings › External agents: why Claude Code could not be connected, when adding Leaflet failed and Leaflet's entry from before could not be put back; shown inside the externalConnectFailed toast. Both are what Claude Code's command said.",
+    "placeholders": {
+      "error": {
+        "type": "String",
+        "example": "add failed"
+      },
+      "restoreError": {
+        "type": "String",
+        "example": "invalid JSON"
+      }
+    }
+  },
   "externalDisconnectFailed": "Could not disconnect {app}: {error}",
   "@externalDisconnectFailed": {
     "description": "Settings › External agents: a toast when disconnecting an AI app failed.",
@@ -4456,6 +5005,14 @@
   "signinCodeSent": "We emailed you a sign-in link and code.",
   "@signinCodeSent": {
     "description": "The sign-in page › Email code: after sending it."
+  },
+  "signinResendCode": "Send a new code",
+  "@signinResendCode": {
+    "description": "Sign-in with an emailed code: sends another code to the same email, as when the one sent was mistyped or is too old."
+  },
+  "signinChangeEmail": "Use another email",
+  "@signinChangeEmail": {
+    "description": "Sign-in with an emailed code: goes back to type another email address, to send a code to."
   },
   "signinAnyway": "Sign in anyway?",
   "@signinAnyway": {

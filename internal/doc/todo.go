@@ -1,6 +1,9 @@
 package doc
 
-import "time"
+import (
+	"regexp"
+	"time"
+)
 
 // DueLayout is how a to-do keeps its due date: a day, in the user's own
 // time zone; DueTimeLayout is a day with its time of day.
@@ -17,6 +20,19 @@ func ParseDue(s string) (t time.Time, timed, ok bool) {
 	}
 	t, err := time.ParseInLocation(DueLayout, s, time.Local)
 	return t, false, err == nil
+}
+
+// dueForm is a due date as a to-do keeps one: its day, and its time of
+// day, in digits of their full width.
+var dueForm = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$`)
+
+// validDue reports whether s is a due date as a to-do keeps one, a day of
+// the calendar or one with its time of day, as the server's validDue
+// takes it. Kept as it is written, a time a clock change skips here stays
+// the time it was given.
+func validDue(s string) bool {
+	_, _, ok := ParseDue(s)
+	return ok && dueForm.MatchString(s)
 }
 
 // Due returns a to-do's due date, at the start of that day here or at its
@@ -47,6 +63,7 @@ type Todo struct {
 	Due     time.Time // zero for none
 	Timed   bool      // whether Due has a time of day
 	Owner   string
+	OwnerID string // the user Owner names
 }
 
 // Todos returns a page's open to-dos with a due date or an owner, in
@@ -61,7 +78,7 @@ func (c *Content) Todos() []Todo {
 		t.Due, t.Timed, _ = n.Due()
 		for _, r := range n.Delta() {
 			if m := r.Attrs.Mention; m != nil && m.Kind == "user" {
-				t.Owner = m.Name
+				t.Owner, t.OwnerID = m.Name, m.ID
 				break
 			}
 		}

@@ -4,13 +4,12 @@ package app
 
 import (
 	"context"
-	"errors"
 	"log"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,11 +25,14 @@ import (
 	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/guard"
+	"leaflet/internal/library"
 	"leaflet/internal/live"
 	"leaflet/internal/recording"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
+	"leaflet/internal/templates"
 	"leaflet/internal/theme"
 	"leaflet/internal/web"
 	"leaflet/locales"
@@ -63,13 +65,13 @@ type App struct {
 	early    []func()
 
 	settings store.Settings
-	// sttSent orders the speech settings sent to the server, one at a
-	// time, and sttLatest numbers the last change: a send overtaken by a
-	// later one is left out, so the server ends with the last.
-	sttSent   sync.Mutex
-	sttLatest atomic.Int64
-	session   store.Session
-	online    bool
+	// endpointKeyMu orders the endpoint keys kept in the keychain, and
+	// endpointKeys numbers the last typed: a write overtaken by a later
+	// one is left out, so the keychain ends with the last.
+	endpointKeyMu sync.Mutex
+	endpointKeys  atomic.Int64
+	session       store.Session
+	online        bool
 
 	// What the views show, reloaded as the store changes.
 	pages     []store.Page
@@ -87,11 +89,25 @@ type App struct {
 	folders    []store.Folder
 	files      []store.File
 	providers  []store.Provider
-	pending    int
-	conflicts  []store.ConflictRow
-	syncing    bool
-	syncError  string
-	syncErr    error
+	// lib is the library as the sidebar arranges it, and libFrom what it
+	// was arranged from (library).
+	lib     *library.Tree
+	libFrom arrangedFrom
+	// editable is canEdit as it was read, by page, until the pages, their
+	// members or the session change: the sidebar asks it of every row as
+	// it draws, and each ask walks the page's parents in the database.
+	// Guarded by editableMu, as an open page asks it as it saves.
+	editableMu sync.Mutex
+	editable   map[string]bool
+	// recs is what recording blocks show of their recordings, read once
+	// until the recordings change, as each frame draws them
+	// (recordingView); on the main thread only.
+	recs      map[string]recView
+	pending   int
+	conflicts []store.ConflictRow
+	syncing   bool
+	syncError string
+	syncErr   error
 	// icloudStop stops watching the Leaflet folder in iCloud Drive.
 	icloudStop context.CancelFunc
 	// icloudBusy is set while iCloud sync turns on or off, which the
@@ -107,15 +123,18 @@ type App struct {
 
 	// Shell.
 	sidebarW float32
-	// treeState is the sidebar's tree, its items open and its row chosen.
+	// treeState is the sidebar's tree, its items open and its row chosen,
+	// and treeIn its input (treeInput).
 	treeState ui.OutlineState[string]
 	treeRow   int
+	treeIn    treeInput
 	// treeRows are the tree's rows built this frame, for drops beside them.
 	treeRows []treeRow
-	// tagTree is the Tags tab's tree of tags with their pages, and
-	// tagRow its row chosen.
+	// tagTree is the Tags tab's tree of tags with their pages, tagRow
+	// its row chosen, and tagIn its input.
 	tagTree   ui.OutlineState[string]
 	tagRow    int
+	tagIn     treeInput
 	panelOpen bool
 	panelW    float32
 	panelTab  int
@@ -129,6 +148,22 @@ type App struct {
 	// toastUntil is when the last toast goes, for the run bar to wait
 	// rather than show under it.
 	toastUntil time.Time
+	// What Settings' sections and signing in show and have under way:
+	// the account, the provider dialog (form, formGen numbering those
+	// opened) and the ChatGPT sign-ins read for it (chatgptRead), speech
+	// to text, the external agents, and a sign-in by email code or with
+	// Supabase (supaRuns numbering those started).
+	account     accountState
+	form        providerForm
+	formGen     int
+	chatgptRead map[string]bool
+	speech      speechState
+	external    externalState
+	signIn      signInState
+	supa        supabaseState
+	supaRuns    int
+	// players are the recordings played on the open page, by recording.
+	players map[string]*player
 
 	dialogs dialogs
 	md      markdown.Options
@@ -139,28 +174,36 @@ type App struct {
 	// downloadFails when those that failed to last did.
 	downloads     map[string]bool
 	downloadFails map[string]time.Time
-	// fetchingCopy is set while what a copy of a page needs downloads
-	// (copyable).
+	// fetchingCopy is set while a copy of a page is being made: what it
+	// needs downloading (copyable), then its files and recordings' audio
+	// copying (copyPage), one copy at a time. fetchedAudio is the audio
+	// downloaded for it, which goes once the copy has its own.
 	fetchingCopy bool
+	fetchedAudio []string
 	embeds       map[string]*mygo.WebView
 	// embedSrc is the page each embed's web view last loaded, and
 	// embedSizes how tall its content said it is, once it has drawn;
 	// embedZoomed the diagrams zoomed in; embedToPage the views that give
-	// the page the wheel (sandbox's toPage).
+	// the page the wheel (sandbox's toPage); embedFailed why a view could
+	// not be made, which is not tried again while the block stays.
 	embedSrc    map[string]string
 	embedSizes  map[string]embedSize
 	embedZoomed map[string]bool
 	embedToPage map[string]bool
+	embedFailed map[string]string
 	// videos are the players of the open page's videos that were played;
-	// videoInfo what each video's site said about it, once asked
-	// (videoAsked), by provider and ID.
-	videos     map[string]*mygo.WebView
-	videoInfo  map[string]videoInfo
-	videoAsked map[string]bool
-	// linkInfo is what each link card's page said about itself, once
-	// asked (linkAsked), by link.
-	linkInfo  map[string]web.LinkInfo
-	linkAsked map[string]bool
+	// videoInfo what each video's site said about it, by provider and ID.
+	videos    map[string]*mygo.WebView
+	videoInfo webAnswers[videoInfo]
+	// linkInfo is what each link card's page said about itself, by link.
+	linkInfo webAnswers[web.LinkInfo]
+	// drafts are what was typed on each page and not sent yet, kept as it
+	// closes and opens again (draftsOf); those of a page gone go as the
+	// pages are read again.
+	drafts map[string]*pageDrafts
+	// widthsTimer keeps the sidebar's and the panel's widths once they
+	// stop moving (saveWidthsSoon).
+	widthsTimer *time.Timer
 
 	// The menu bar icon, and the menu it last showed.
 	tray      *mygo.Tray
@@ -231,6 +274,9 @@ type pageState struct {
 	focusTitle int
 	// selectTitle selects the title as it takes the focus, to rename.
 	selectTitle bool
+	// titleTimer renames the page shortly after the title's typing stops
+	// (saveTitleSoon).
+	titleTimer *time.Timer
 	// titleAtEnd is whether the title's caret was at its end in the last
 	// frame; titleLeave asks the caret to move from the title to the page.
 	titleAtEnd, titleLeave bool
@@ -243,40 +289,51 @@ type pageState struct {
 	// typing stops, and what is stored from outside merged into them.
 	live    *live.Page
 	threads []store.Thread
+	// open is how many open threads each block has, as its badge shows,
+	// counted once as the threads are read (setThreads), not as each
+	// block draws.
+	open    map[string]int
 	members []store.Member
 	// tinted are the blocks the page shows lit: those an agent run
-	// changed, and lit those of them goToBlock lit for a moment.
+	// changed, and lit those of them goToBlock lit for a moment, since
+	// the frame they first showed lit in (zero until then, dimLit).
 	tinted map[string]bool
-	lit    map[string]bool
-	// scroll is where the page is scrolled to, and viewTop and viewH
-	// where its scroll area is in the window. scrollTo is a block to bring
-	// to the top of it once the page has laid it out, scrollWait the
+	lit    map[string]time.Time
+	// caretSet is set once the caret has been in the page since it opened:
+	// a chat asks about where it is then, from the composer too.
+	caretSet bool
+	// scroll is where the page is scrolled to, and view its scroll area,
+	// whose box in the window its Bounds gives. scrollTo is a block to
+	// bring to the top of it once the page has laid it out, scrollWait the
 	// frames it has waited for that.
-	scroll         ui.ScrollState
-	viewTop, viewH float32
-	scrollTo       string
-	scrollWait     int
+	scroll     ui.ScrollState
+	view       ui.Handle
+	scrollTo   string
+	scrollWait int
 	// fullDiagram is the diagram block filling the page's body, if one
 	// is.
 	fullDiagram string
 	// outline is the Outline tab's list of headings, outlineRow its row
-	// chosen, and outlineSeen the headings it has opened once.
+	// chosen, outlineSeen the headings it has opened once, and outlineKeys
+	// whether it had the keyboard as it last built.
 	outline     ui.OutlineState[string]
 	outlineRow  int
 	outlineSeen map[string]bool
+	outlineKeys bool
 }
 
 // Run starts the app.
 func Run() {
 	a := &App{embeds: map[string]*mygo.WebView{}, embedSrc: map[string]string{}, embedSizes: map[string]embedSize{},
-		embedZoomed: map[string]bool{}, embedToPage: map[string]bool{}, videos: map[string]*mygo.WebView{}, videoInfo: map[string]videoInfo{}, videoAsked: map[string]bool{},
-		linkInfo: map[string]web.LinkInfo{}, linkAsked: map[string]bool{}}
+		embedZoomed: map[string]bool{}, embedToPage: map[string]bool{}, embedFailed: map[string]string{}, videos: map[string]*mygo.WebView{}}
 	theme.RegisterFonts()
 	registerCapture()
 	mygo.BindAs("Embeds", &embedScroll{a: a})
 	// MyGo's updater, with its window for "Check for Updates…"; the check
 	// as the app starts is checkForUpdate's, which installs quietly.
 	mygo.Use(native.New(updater.Options{DisableAutomaticChecks: true}))
+	// Before Run, to hear the click on a reminder that launched the app.
+	mygo.App.OnNotificationClick(a.notificationClicked)
 	mygo.App.WhenReady(func() {
 		if err := a.start(); err != nil {
 			mygo.Dialog.Error(locales.AppStartFailed(), err.Error())
@@ -385,7 +442,7 @@ func (a *App) start() error {
 		Title:         "Leaflet",
 		Width:         1240,
 		Height:        820,
-		MinWidth:      720,
+		MinWidth:      windowMinW,
 		MinHeight:     480,
 		StateKey:      "main",
 		TitleBarStyle: mygo.TitleBarHidden,
@@ -462,6 +519,44 @@ func (a *App) core() *core.Core {
 	}
 }
 
+// headless reports whether the app has no window, nor one on its way, nor
+// a post standing in for one, as in tests: what would go to the main
+// thread then runs at once, on the goroutine that asks, for none other
+// to run beside the test's.
+func (a *App) headless() bool {
+	a.winMu.Lock()
+	defer a.winMu.Unlock()
+	return a.win == nil && a.post == nil && !a.starting
+}
+
+// offMain runs work off the main thread, as a copy of files that takes a
+// while, then then on it. Headless, both run at once, as an update then
+// does.
+func (a *App) offMain(work, then func()) {
+	if a.headless() {
+		work()
+		then()
+		return
+	}
+	go func() {
+		defer guard.Recover()
+		work()
+		a.update(then)
+	}()
+}
+
+// later runs fn on the main thread once d has passed, as a save once the
+// typing stops, or a frame once a wait is over; stopping the timer it
+// returns keeps fn from running. Headless, fn runs at once and there is
+// no timer, as offMain's work runs at once.
+func (a *App) later(d time.Duration, fn func()) *time.Timer {
+	if a.headless() {
+		fn()
+		return nil
+	}
+	return time.AfterFunc(d, func() { a.update(fn) })
+}
+
 // update runs fn on the main thread and redraws; while the app starts,
 // once its window is there.
 func (a *App) update(fn func()) {
@@ -504,6 +599,17 @@ func (a *App) saveSettings() {
 	}
 }
 
+// setThreads keeps the page's threads as read, and how many of them are
+// open on each block.
+func (ps *pageState) setThreads(ts []store.Thread, _ error) {
+	ps.threads, ps.open = ts, map[string]int{}
+	for _, t := range ts {
+		if !t.Root.Resolved {
+			ps.open[t.Root.BlockID]++
+		}
+	}
+}
+
 // reloadAll reads everything the views show.
 func (a *App) reloadAll() {
 	for _, t := range []string{"pages", "folders", "files", "model_providers", "outbox", "conflicts", "session"} {
@@ -514,6 +620,15 @@ func (a *App) reloadAll() {
 // reload rereads what a change touched.
 func (a *App) reload(ch store.Change) {
 	all := ch.Table == "*"
+	switch ch.Table {
+	case "*", "pages", "page_members", "session":
+		a.editableMu.Lock()
+		a.editable = nil
+		a.editableMu.Unlock()
+	}
+	if all || ch.Table == "recordings" {
+		a.recs = nil
+	}
 	if all || ch.Table == "pages" || ch.Table == "page_contents" {
 		if pages, err := a.st.Pages(); err == nil {
 			a.pages = pages
@@ -521,6 +636,8 @@ func (a *App) reload(ch store.Change) {
 		if templates, err := a.st.Templates(); err == nil {
 			a.templates = templates
 		}
+		// What was typed on a page gone, and not sent, goes with it.
+		maps.DeleteFunc(a.drafts, func(id string, _ *pageDrafts) bool { return a.pageByID(id) == nil })
 		a.todosStale = true
 		if a.page != nil {
 			if p := a.pageByID(a.page.id); p == nil {
@@ -534,14 +651,13 @@ func (a *App) reload(ch store.Change) {
 				a.discardPage()
 				a.route = Route{Kind: "home"}
 			} else if ps := a.page; p.Title != ps.savedTitle {
-				switch {
-				case ps.title != ps.savedTitle:
-					// Typed and not saved yet: it stays, to be saved over
-					// the new one.
-					ps.savedTitle = p.Title
-				case !ps.titleIn.Focused(nil):
-					ps.title, ps.savedTitle = p.Title, p.Title
+				// A title typed and not saved yet stays, to be saved over
+				// the new one; with nothing typed, the new one shows, in
+				// the title's field with the caret too.
+				if ps.title == ps.savedTitle {
+					ps.title = p.Title
 				}
+				ps.savedTitle = p.Title
 			}
 		}
 	}
@@ -568,14 +684,14 @@ func (a *App) reload(ch store.Change) {
 	if all || ch.Table == "outbox" {
 		a.pending = a.st.PendingCount()
 	}
-	if all || ch.Table == "conflicts" {
+	if all || ch.Table == "conflicts" || ch.Table == "pages" {
 		a.conflicts, _ = a.st.Conflicts()
 	}
 	if all || ch.Table == "session" {
 		a.session = a.st.Session()
 	}
 	if a.page != nil && (all || ch.Table == "comments" && (ch.PageID == "" || ch.PageID == a.page.id)) {
-		a.page.threads, _ = a.st.Threads(a.page.id)
+		a.page.setThreads(a.st.Threads(a.page.id))
 	}
 	if a.page != nil && (all || ch.Table == "page_members") {
 		a.page.members, _ = a.st.Members(a.page.id)
@@ -606,53 +722,41 @@ func (a *App) pageByID(id string) *store.Page {
 	return nil
 }
 
-// children returns the pages under a parent, or the top-level pages of a
-// folder ("" for none) when parent is "": pages of a folder that is gone
-// are at the top level, and those shared with the user among
-// sharedRoots instead.
-func (a *App) children(parent, folder string, top bool) []store.Page {
-	var out []store.Page
-	for _, p := range a.pages {
-		if p.ParentID != parent {
-			continue
-		}
-		if top && a.liveFolder(p.FolderID) != folder {
-			continue
-		}
-		if parent == "" && a.isShared(p) {
-			continue
-		}
-		out = append(out, p)
-	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].SortKey < out[j].SortKey })
-	return out
+// arrangedFrom is what the library was arranged from: the pages, the
+// templates and the folders, each as read by its first, which a new read
+// makes another, and the user's space.
+type arrangedFrom struct {
+	pages, templates   *store.Page
+	nPages, nTemplates int
+	folders            *store.Folder
+	nFolders           int
+	space              string
 }
 
-// liveFolder is folder, or "" when no folder of that ID is there, as when
-// another device deleted it.
-func (a *App) liveFolder(folder string) string {
-	if folder == "" || slices.ContainsFunc(a.folders, func(f store.Folder) bool { return f.ID == folder }) {
-		return folder
+// library is the library as the sidebar arranges it (library.Arrange),
+// arranged again once the pages, the templates, the folders or the
+// user's space are others than it was arranged from.
+func (a *App) library() *library.Tree {
+	from := arrangedFrom{firstOf(a.pages), firstOf(a.templates), len(a.pages), len(a.templates), firstOf(a.folders), len(a.folders), a.session.SpaceID}
+	if a.lib == nil || from != a.libFrom {
+		a.lib, a.libFrom = library.Arrange(a.session.SpaceID, slices.Concat(a.pages, a.templates), a.folders), from
 	}
-	return ""
+	return a.lib
+}
+
+// children are the pages under a page, in order.
+func (a *App) children(id string) []store.Page { return a.library().Children[id] }
+
+// firstOf is the first of a list, or nil for none.
+func firstOf[T any](list []T) *T {
+	if len(list) == 0 {
+		return nil
+	}
+	return &list[0]
 }
 
 // isShared reports whether a page belongs to someone else's space.
 func (a *App) isShared(p store.Page) bool { return p.SpaceID != a.session.SpaceID }
-
-// sharedRoots are pages shared with the user whose parent is not.
-func (a *App) sharedRoots() []store.Page {
-	var out []store.Page
-	for _, p := range a.pages {
-		if !a.isShared(p) {
-			continue
-		}
-		if p.ParentID == "" || a.pageByID(p.ParentID) == nil {
-			out = append(out, p)
-		}
-	}
-	return out
-}
 
 // ancestors returns a page's parents, the root first.
 func (a *App) ancestors(id string) []store.Page {
@@ -722,7 +826,8 @@ func (a *App) openSettings(section string) {
 	a.settingsSection, a.settingsOpen = section, true
 }
 
-// toggleSettings opens Settings at Account, or closes it, as ⌘, does.
+// toggleSettings opens Settings at Account, or closes it, as the app
+// menu's Settings… does, at ⌘,.
 func (a *App) toggleSettings() {
 	if a.settingsOpen {
 		a.settingsOpen = false
@@ -850,7 +955,7 @@ func (a *App) loadPage(id string) {
 	ps.editor = ed
 	lp.Attach(pageEditor{ed})
 	lp.SetReadOnly(!a.canEdit(id) || lp.Unreadable())
-	ps.threads, _ = a.st.Threads(id)
+	ps.setThreads(a.st.Threads(id))
 	ps.members, _ = a.st.Members(id)
 	a.page = ps
 	a.sync.SetOpen(id, true)
@@ -879,6 +984,9 @@ func (a *App) closePage() bool {
 func (a *App) discardPage() {
 	a.sync.SetOpen(a.page.id, false)
 	a.page.live.Close()
+	if t := a.page.titleTimer; t != nil {
+		t.Stop()
+	}
 	a.page = nil
 	d := &a.dialogs
 	d.newComment, d.inline = nil, nil
@@ -886,13 +994,26 @@ func (a *App) discardPage() {
 	d.embedOpen, d.linkOpen, d.sourceOpen = false, false, false
 	a.dropEmbeds()
 	a.dropVideos()
-	dropPlayers()
+	a.dropPlayers()
 }
 
 // canEdit reports whether the user may change a page.
 func (a *App) canEdit(id string) bool {
+	a.editableMu.Lock()
+	v, ok := a.editable[id]
+	a.editableMu.Unlock()
+	if ok {
+		return v
+	}
 	p := a.pageByID(id)
-	return p != nil && a.st.CanEdit(*p)
+	v = p != nil && a.st.CanEdit(*p)
+	a.editableMu.Lock()
+	if a.editable == nil {
+		a.editable = map[string]bool{}
+	}
+	a.editable[id] = v
+	a.editableMu.Unlock()
+	return v
 }
 
 // ownsPage reports whether a page is in the user's own space, not shared
@@ -991,9 +1112,13 @@ func (a *App) toast(text string) {
 	}
 }
 
+// actionToastTime is how long a toast with an action shows, as MyGo's
+// ToastAction shows one.
+const actionToastTime = 8 * time.Second
+
 func (a *App) toastAction(text, action string, fn func()) {
 	a.toasts = append(a.toasts, toast{text: text, action: action, fn: fn})
-	a.holdRunBar(8 * time.Second)
+	a.holdRunBar(actionToastTime)
 	if a.win != nil {
 		a.win.Invalidate()
 	}
@@ -1004,7 +1129,7 @@ func (a *App) toastAction(text, action string, fn func()) {
 func (a *App) holdRunBar(d time.Duration) {
 	if until := time.Now().Add(d); until.After(a.toastUntil) {
 		a.toastUntil = until
-		time.AfterFunc(d+50*time.Millisecond, func() { a.update(func() {}) })
+		a.later(d+50*time.Millisecond, func() {})
 	}
 }
 
@@ -1016,7 +1141,7 @@ func (a *App) newPage(parent, folder string) {
 
 // newPageFrom creates a page from a template, or blank for nil, and opens
 // it.
-func (a *App) newPageFrom(parent, folder string, t *templateChoice) {
+func (a *App) newPageFrom(parent, folder string, t *templates.Choice) {
 	// A subpage changes its parent, which a page shared to view cannot be.
 	if parent != "" && !a.canEdit(parent) {
 		return
@@ -1056,147 +1181,24 @@ func (a *App) newPageFrom(parent, folder string, t *templateChoice) {
 // shows in the page it is inside. A copy goes after the link to the page
 // it copies, after, when parent has one.
 func (a *App) linkSubpage(parent, id, after string) {
-	a.linkSubpageAt(parent, id, func(c *doc.Content) doc.Position {
-		at := doc.Position{At: "end"}
-		c.Walk(func(n, _ *doc.Node) {
-			if after != "" && n.Type == "subpage" && n.Str("page_id") == after {
-				at = doc.Position{After: n.ID}
-			}
-		})
-		return at
-	})
-}
-
-// linkSubpageAt puts a link to subpage id in page parent where at says,
-// or at its end when that place is gone.
-func (a *App) linkSubpageAt(parent, id string, at func(c *doc.Content) doc.Position) {
-	link := doc.SubpageNode(id)
-	insert := func(c *doc.Content) {
-		if c.Insert(at(c), link) != nil {
-			_ = c.Insert(doc.Position{At: "end"}, link)
-		}
-	}
-	if ed := a.openEditor(parent); ed != nil {
-		ed.Edit(insert)
-		a.savePage()
-		return
-	}
-	err := a.saveStored(parent, func(c *doc.Content) *doc.Content {
-		if c == nil {
-			c = doc.Empty()
-		}
-		insert(c)
-		return c
-	})
-	if err != nil {
+	if err := a.pageCore().LinkSubpage(parent, id, after); err != nil {
 		a.toast(locales.AppErrorLinkSubpage(err.Error()))
 	}
 }
 
-// saveStored changes the stored content of a page the editor does not
-// have open: edit is given it (nil when this device has none) and returns
-// it changed, or nil to leave it. The save goes only over what edit was
-// given, so content synced in between is not written over: edit runs
-// again on that.
-func (a *App) saveStored(pageID string, edit func(c *doc.Content) *doc.Content) error {
-	err := store.ErrContentChanged
-	for range 5 {
-		var over string
-		var c *doc.Content
-		row, rowErr := a.st.ContentRow(pageID)
-		switch {
-		case rowErr == nil:
-			// Content that can't be read is left alone, not saved over.
-			if c, err = doc.Decode(row.Content); err != nil {
-				return err
-			}
-			over = row.Content
-		case !store.IsNotFound(rowErr):
-			return rowErr
-		}
-		if c = edit(c); c == nil {
-			return nil
-		}
-		_, _, err = a.st.SaveContentOver(pageID, over, c)
-		if !errors.Is(err, store.ErrContentChanged) {
-			return err
-		}
-	}
-	return err
+// pageCore is the core as it changes pages: the open page through its
+// editor, as a change from outside it, not an undo step. A subpage's link
+// comes and goes as the subpage moves, is deleted or comes back: undoing
+// in the page would take a link from a page still inside, or bring back
+// one to a page gone or elsewhere, apart from the toast's Undo.
+func (a *App) pageCore() core.Pages {
+	return core.Pages{Core: a.core(), Open: a.openLive, Notify: a.toast}
 }
 
-// unlinkSubpage takes the links to subpage id out of page parent, as when
-// the subpage moves out of it.
-func (a *App) unlinkSubpage(parent, id string) {
-	remove := func(c *doc.Content) {
-		var links []string
-		c.Walk(func(n, _ *doc.Node) {
-			if n.Type == "subpage" && n.Str("page_id") == id {
-				links = append(links, n.ID)
-			}
-		})
-		for _, l := range links {
-			c.Remove(l)
-		}
-		// A page whose only block was the link keeps one to type in.
-		if len(c.Children) == 0 {
-			c.Children = doc.Empty().Children
-		}
-	}
-	if ed := a.openEditor(parent); ed != nil {
-		// The link goes as a change from outside the editor, not as an
-		// undo step: undoing in the page would bring back a link to a page
-		// that is gone or elsewhere, apart from the toast's Undo.
-		c := ed.Content.Copy()
-		remove(c)
-		ed.Replace(c)
-		a.page.live.Changed()
-		a.savePage()
-		return
-	}
-	err := a.saveStored(parent, func(c *doc.Content) *doc.Content {
-		if c != nil {
-			remove(c)
-		}
-		return c
-	})
-	if err != nil {
-		a.toast(locales.AppErrorUnlinkSubpage(err.Error()))
-	}
-}
-
-// hasSubpageLink reports whether page parent links to subpage id.
-func (a *App) hasSubpageLink(parent, id string) bool {
-	c := a.st.Content(parent)
-	if ed := a.openEditor(parent); ed != nil {
-		c = ed.Content
-	}
-	found := false
-	if c != nil {
-		c.Walk(func(n, _ *doc.Node) { found = found || n.Type == "subpage" && n.Str("page_id") == id })
-	}
-	return found
-}
-
-// movePage moves page id under page parent, or to the top level, by
-// move, and keeps the links to it in step: a page it leaves loses its
-// link, and a page it goes into links to it at its end.
-func (a *App) movePage(id, parent string, move func() error) error {
-	old := ""
-	if p := a.pageByID(id); p != nil {
-		old = p.ParentID
-	}
-	if err := move(); err != nil {
-		return err
-	}
-	if old == parent {
-		return nil
-	}
-	if old != "" && a.canEdit(old) {
-		a.unlinkSubpage(old, id)
-	}
-	if parent != "" && a.canEdit(parent) && !a.hasSubpageLink(parent, id) {
-		a.linkSubpage(parent, id, "")
+// openLive returns page id's live page while it is open.
+func (a *App) openLive(id string) *live.Page {
+	if a.page != nil && a.page.id == id {
+		return a.page.live
 	}
 	return nil
 }
@@ -1221,28 +1223,10 @@ func (a *App) deletePage(id string) {
 	if a.page != nil && a.isUnder(a.page.id, id) && !a.flush() {
 		return
 	}
-	// Its link leaves the page it is in, rather than staying to say the
-	// page is gone; Undo puts it back where it was.
-	parent, at := "", doc.Position{At: "end"}
-	if p := a.pageByID(id); p != nil && p.ParentID != "" && a.canEdit(p.ParentID) {
-		parent = p.ParentID
-		c := a.st.Content(parent)
-		if ed := a.openEditor(parent); ed != nil {
-			c = ed.Content
-		}
-		if c != nil {
-			if place, ok := c.SubpagePlace(id); ok {
-				at = place
-			}
-		}
-	}
-	ids, err := a.st.DeletePage(id)
+	ids, card, err := a.pageCore().DeletePage(id)
 	if err != nil {
 		a.toast(locales.AppErrorDelete(err.Error()))
 		return
-	}
-	if parent != "" {
-		a.unlinkSubpage(parent, id)
 	}
 	a.pages, _ = a.st.Pages()
 	if a.route.Kind == "page" {
@@ -1254,22 +1238,27 @@ func (a *App) deletePage(id string) {
 		}
 	}
 	a.toastAction(locales.AppDeleted(title), locales.CommonUndo(), func() {
-		if err := a.st.RestorePages(ids); err != nil {
+		if err := a.pageCore().RestorePages(ids, card); err != nil {
 			a.toast(locales.AppErrorRestore(err.Error()))
 			return
 		}
 		a.pages, _ = a.st.Pages()
-		if parent != "" && a.pageByID(parent) != nil && !a.hasSubpageLink(parent, id) {
-			a.linkSubpageAt(parent, id, func(*doc.Content) doc.Position { return at })
-		}
 	})
 }
 
-func (a *App) setMenu() {
-	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{
+func (a *App) setMenu() { mygo.App.SetMenu(mygo.NewMenu(a.menu(updater.MenuItem()))) }
+
+// menu is the menu bar, with update, the updater's item. Its accelerators
+// are the app's shortcuts: the menu takes them before the window does.
+func (a *App) menu(update *mygo.MenuItem) []*mygo.MenuItem {
+	return []*mygo.MenuItem{
 		{Label: "Leaflet", Submenu: []*mygo.MenuItem{
 			{Role: mygo.RoleAbout},
-			updater.MenuItem(),
+			update,
+			mygo.Separator(),
+			{Label: locales.AppMenuSettings(), Accelerator: "CmdOrCtrl+,", Click: func(*mygo.MenuItem, *mygo.Window) {
+				a.update(a.toggleSettings)
+			}},
 			mygo.Separator(),
 			{Role: mygo.RoleServices},
 			mygo.Separator(),
@@ -1318,7 +1307,7 @@ func (a *App) setMenu() {
 			{Role: mygo.RoleToggleFullScreen},
 		}},
 		{Role: mygo.RoleWindowMenu},
-	}))
+	}
 }
 
 // editMenu is MyGo's Edit menu with Copy as Plain Text after Copy: ⌥⇧⌘C

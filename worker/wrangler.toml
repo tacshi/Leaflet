@@ -16,3 +16,16 @@ CLIENT_ID = "a587f79b-48d7-41c1-b5ce-cbf87d11a491"
 # The Apple team that signs the iOS app, for
 # /.well-known/apple-app-site-association; left empty, that 404s.
 APPLE_TEAM_ID = "X5X4TD477G"
+
+# /token, at most 30 exchanges a minute from one address: the app makes a
+# few an hour, a sign-in and its refreshes.
+[[ratelimits]]
+name = "TOKEN_LIMIT"
+namespace_id = "1001"
+  [ratelimits.simple]
+  limit = 30
+  period = 60
+
+# Its logs, with the failures it meets, in the Workers dashboard.
+[observability]
+enabled = true

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"leaflet/internal/editor"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
+	syncsvc "leaflet/internal/sync"
 )
 
 func insertAfter(after, id, text string) doc.Op {
@@ -589,9 +591,53 @@ func TestEarlierConversations(t *testing.T) {
 }
 
 // stubHost is a host with no page open.
+// A run that ends after its account signed out of this device stores
+// nothing: its pages are gone, and its snapshot, job, chat and content
+// would come back for the next account to upload.
+func TestRunEndingAfterSignOutStoresNothing(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Secret", Content: page()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, stubHost{})
+	s := h.Session(p.ID)
+	run := &Run{ID: "r1", Status: "running", Instruction: "x"}
+	s.Runs, s.Running = []*Run{run}, true
+	before := st.Content(p.ID)
+	reply := &Message{Pending: true, RunID: "r1"}
+	s.Messages = []*Message{{Mine: true, Text: "summarise my secret"}, reply}
+	done := false
+	h.Forget()
+	if err := st.ForgetAccount(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	option := Option{Provider: store.Provider{Name: "Local", IsLocal: true}}
+	h.finish(s, run, Request{PageID: p.ID}, option, before, h.newDelivery(p.ID, run, option),
+		Result{Reply: "done", Ops: []doc.Op{insertAfter("p1", "x1", "one")}, Edits: []Edit{{Summary: "x"}}}, nil,
+		RunOptions{Reply: reply, Done: func(*Run) { done = true }})
+	hist, _ := st.History(p.ID)
+	_, chat := st.Value(chatKey(p.ID))
+	var jobs, contents int
+	_ = st.DB().QueryRow(`SELECT COUNT(*) FROM ai_jobs`).Scan(&jobs)
+	_ = st.DB().QueryRow(`SELECT COUNT(*) FROM page_contents WHERE page_id = ?`, p.ID).Scan(&contents)
+	if len(hist) > 0 || chat || jobs > 0 || contents > 0 || st.PendingCount() > 0 {
+		t.Errorf("stored after sign-out: %d snapshots, chat %v, %d jobs, %d contents, %d to upload", len(hist), chat, jobs, contents, st.PendingCount())
+	}
+	if !done || reply.Pending || run.Status != "failed" {
+		t.Errorf("the run ended as %q, reply pending %v, done %v", run.Status, reply.Pending, done)
+	}
+	if len(h.sessions) != 0 {
+		t.Error("the pages' agent state stayed")
+	}
+}
+
 type stubHost struct{}
 
-func (stubHost) Update(fn func())                        { fn() }
+func (stubHost) Update(_ string, fn func())              { fn() }
 func (stubHost) Live(string) LiveDoc                     { return nil }
 func (stubHost) SaveNow(string)                          {}
 func (stubHost) Online() bool                            { return false }
@@ -788,7 +834,7 @@ type queueHost struct {
 	q chan func()
 }
 
-func (h queueHost) Update(fn func()) { h.q <- fn }
+func (h queueHost) Update(_ string, fn func()) { h.q <- fn }
 
 // A chat reply shows the answer as it streams, its thinking left out, and
 // not an answer an edit of the page went on from.
@@ -862,6 +908,62 @@ func TestUndoThatFailsChangesNothing(t *testing.T) {
 	}
 }
 
+// An undo some of whose ops no longer apply, as the user deleted a block
+// the run rewrote, changes nothing, open or closed: it is all at once or
+// not at all, and the run stays done, to undo by hand.
+func TestUndoOfARunPartlyGoneChangesNothing(t *testing.T) {
+	rewrite := func(c *doc.Content) []doc.Op {
+		repl := &doc.Node{ID: "l1", Type: "paragraph"}
+		repl.SetDelta(doc.FromMarkdown("rewritten"))
+		return []doc.Op{insertAfter("p1", "x1", "one"), {Op: "replace", ID: "l1", Node: repl, PrevNode: c.Find("l1").Clone()}}
+	}
+	t.Run("open", func(t *testing.T) {
+		st := openStore(t)
+		p, ed := openPage(t, st)
+		h := NewHub(st, nil, openHost{ed: ed})
+		s := h.Session(p.ID)
+		ops := rewrite(ed.Content)
+		if err := ed.ApplyOps(ops); err != nil {
+			t.Fatal(err)
+		}
+		s.Runs = []*Run{{ID: "r1", Status: "done", Ops: ops}}
+		_ = ed.ApplyOps([]doc.Op{ed.Content.DeleteOp([]string{"l1"})})
+		before := ids(ed.Content)
+		if err := h.UndoRun(p.ID, "r1"); err == nil || s.Run("r1").Undone {
+			t.Errorf("undo: %v, undone %v", err, s.Run("r1").Undone)
+		}
+		if got := ids(ed.Content); got != before {
+			t.Errorf("the page went from %s to %s", before, got)
+		}
+	})
+	t.Run("closed", func(t *testing.T) {
+		st := openStore(t)
+		p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := NewHub(st, nil, stubHost{})
+		s := h.Session(p.ID)
+		c := st.Content(p.ID)
+		ops := rewrite(c)
+		for _, o := range ops {
+			_ = c.Apply(o)
+		}
+		c.Remove("l1")
+		if _, _, err := st.SaveContent(p.ID, c); err != nil {
+			t.Fatal(err)
+		}
+		s.Runs = []*Run{{ID: "r1", Status: "done", Ops: ops}}
+		before := ids(st.Content(p.ID))
+		if err := h.UndoRun(p.ID, "r1"); err == nil || s.Run("r1").Undone {
+			t.Errorf("undo: %v, undone %v", err, s.Run("r1").Undone)
+		}
+		if got := ids(st.Content(p.ID)); got != before {
+			t.Errorf("the page went from %s to %s", before, got)
+		}
+	})
+}
+
 // Signed in, an agent takes the user's own page for shared until sync has
 // read who their pages are shared with: before then, no members kept of
 // it says nothing.
@@ -879,7 +981,7 @@ func TestCrossPageWaitsForOwnPagesMembers(t *testing.T) {
 	if h.crossPage(mine, on) {
 		t.Error("read other pages before sync knew who has the page")
 	}
-	if err := st.SetValue(ownMembersKey, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	if err := st.SetValue(syncsvc.OwnMembersKey, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 		t.Fatal(err)
 	}
 	if !h.crossPage(mine, on) {
@@ -926,7 +1028,7 @@ func TestUndoWaitsForTheRunsSubpage(t *testing.T) {
 	made := doc.Op{Op: "create_page", Page: &doc.NewPage{ID: "sub1", ParentID: p.ID, Title: "Notes"}}
 	at := time.Now()
 	s.Runs = []*Run{{ID: "r1", Status: "done", At: at, Ops: []doc.Op{insertAfter("p1", "x1", ""), made}}}
-	if err := st.SetValue(pagesCursorKey, at.Add(-time.Minute).UTC().Format(time.RFC3339Nano)+"|k"); err != nil {
+	if err := st.SetValue("sync.cursor.pages", at.Add(-time.Minute).UTC().Format(time.RFC3339Nano)+"|k"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -937,7 +1039,7 @@ func TestUndoWaitsForTheRunsSubpage(t *testing.T) {
 		t.Errorf("undone %v, page %s", s.Run("r1").Undone, st.Content(p.ID).Encode())
 	}
 
-	if err := st.SetValue(pagesCursorKey, at.Add(time.Minute).UTC().Format(time.RFC3339Nano)+"|k"); err != nil {
+	if err := st.SetValue("sync.cursor.pages", at.Add(time.Minute).UTC().Format(time.RFC3339Nano)+"|k"); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.UndoRun(p.ID, "r1"); err != nil {
@@ -983,5 +1085,60 @@ func TestPanicInARunFailsIt(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the run never ended")
+	}
+}
+
+// The agents to pick come from the providers read once, until they change:
+// the app asks for them as it draws, for every comment.
+func TestOptionsReadOnceUntilProvidersChange(t *testing.T) {
+	st := openStore(t)
+	h := NewHub(st, nil, stubHost{})
+	if got := h.Options(); len(got) != 0 {
+		t.Fatalf("options %v", got)
+	}
+	if err := st.PutProvider(store.Provider{ID: "p1", Preset: "ollama", Name: "Local", BaseURL: "http://127.0.0.1:1/v1", AuthKind: "none", DefaultModel: "m", IsLocal: true}); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.Options(); len(got) != 1 || got[0].Model != "m" {
+		t.Fatalf("after adding a provider %v", got)
+	}
+	// Read from the cache: the table going is not seen until it says so.
+	if _, err := st.DB().Exec(`DELETE FROM model_providers`); err != nil {
+		t.Fatal(err)
+	}
+	if got := h.Options(); len(got) != 1 {
+		t.Errorf("read the providers again: %v", got)
+	}
+	st.Notify("model_providers", "")
+	if got := h.Options(); len(got) != 0 {
+		t.Errorf("after the change %v", got)
+	}
+}
+
+// A comment run reads the thread it answers in, as the server's runs do:
+// its first comment and the replies kept, by who wrote them.
+func TestCommentRunReadsItsThread(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, err := st.AddComment(p.ID, "b1", "Which date works?", "", "", "user", "Sam")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gone, _ := st.AddComment(p.ID, "b1", "Never mind", root.ID, "", "user", "Sam")
+	if err := st.DeleteComment(gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	ask, _ := st.AddComment(p.ID, "b1", "@agent answer Sam's question", root.ID, "", "user", "Ana")
+	h := NewHub(st, nil, stubHost{})
+	got := h.thread(p.ID, ask.ID)
+	want := []ThreadComment{{Author: "Sam", Body: "Which date works?"}, {Author: "Ana", Body: "@agent answer Sam's question"}}
+	if !slices.Equal(got, want) {
+		t.Errorf("thread %q, want %q", got, want)
+	}
+	if h.thread(p.ID, "") != nil {
+		t.Error("a run on no comment has a thread")
 	}
 }

@@ -25,3 +25,22 @@ func TestChunksGoInOrder(t *testing.T) {
 		t.Fatalf("wrote %v", got)
 	}
 }
+
+// As the microphone stops, the chunks held for one that never came go on
+// in order, and one that comes after is not written twice.
+func TestHeldChunksGoOnAsTheMicStops(t *testing.T) {
+	var got []byte
+	s := &captureSink{chunk: func(pcm []byte) { got = append(got, pcm...) }}
+	for _, seq := range []int{0, 4, 2, 3} {
+		s.deliver(seq, []byte{byte(seq)})
+	}
+	if !bytes.Equal(got, []byte{0}) {
+		t.Fatalf("wrote %v before stopping", got)
+	}
+	s.flush()
+	s.deliver(3, []byte{3})
+	s.deliver(1, []byte{1})
+	if !bytes.Equal(got, []byte{0, 2, 3, 4}) {
+		t.Fatalf("wrote %v", got)
+	}
+}

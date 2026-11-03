@@ -85,7 +85,7 @@ func TestExportKeepsTranscripts(t *testing.T) {
 	}
 	c := doc.Empty()
 	c.Children = []*doc.Node{{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": "Standup"}}}
-	md := doc.PageMarkdown("Notes", a.withTranscripts(c), nil)
+	md := doc.PageMarkdown("Notes", a.withTranscripts(c), doc.MarkdownOptions{})
 	if !strings.Contains(md, "Standup") || !strings.Contains(md, "We ship on Friday.") {
 		t.Errorf("markdown %q", md)
 	}

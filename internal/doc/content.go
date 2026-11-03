@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -25,6 +26,13 @@ func Empty() *Content {
 		Blocks:   map[string]int64{id: NowMs()},
 		Deleted:  map[string]int64{},
 	}
+}
+
+// IsEmpty reports whether c is a blank page, as Empty makes one: one
+// empty paragraph, or nothing. A template fills only such a page.
+func (c *Content) IsEmpty() bool {
+	ch := c.Children
+	return len(ch) == 0 || len(ch) == 1 && ch[0].Type == "paragraph" && ch[0].Delta().Len() == 0 && len(ch[0].Children) == 0
 }
 
 // FromBlocks returns a page of the given blocks, all stamped now.
@@ -78,8 +86,19 @@ var ErrNotContent = errors.New("not a page's content")
 const contentVersion = 1
 
 // UnmarshalJSON reads {document, meta}, tolerating a missing meta and
-// fractional times.
+// fractional times. It reads stored content, whose blocks without an ID,
+// or with one another has, it gives the IDs every reader gives them
+// (repairIDs).
 func (c *Content) UnmarshalJSON(raw []byte) error {
+	if err := c.read(raw); err != nil {
+		return err
+	}
+	c.repairIDs()
+	return nil
+}
+
+// read reads {document, meta}, the blocks' IDs as they are.
+func (c *Content) read(raw []byte) error {
 	var j struct {
 		Document *struct {
 			Children []*Node `json:"children"`
@@ -106,7 +125,6 @@ func (c *Content) UnmarshalJSON(raw []byte) error {
 		c.Deleted[k] = int64(v)
 	}
 	c.dropNil()
-	c.EnsureIDs()
 	return nil
 }
 
@@ -135,6 +153,23 @@ func Decode(source string) (*Content, error) {
 	if err := json.Unmarshal([]byte(source), c); err != nil {
 		return nil, err
 	}
+	return c, nil
+}
+
+// DecodeEdit reads content an editor made, as the iOS app sends a page
+// it edited: a block without an ID, or with one an earlier block has, is
+// a new one, and gets an ID of its own (EnsureIDs), not the one every
+// reader of stored content gives it, which another device's new block
+// would get too. Blank content is an empty page.
+func DecodeEdit(source string) (*Content, error) {
+	if strings.TrimSpace(source) == "" {
+		return Empty(), nil
+	}
+	c := &Content{}
+	if err := c.read([]byte(source)); err != nil {
+		return nil, err
+	}
+	c.EnsureIDs()
 	return c, nil
 }
 
@@ -191,13 +226,49 @@ func (c *Content) All() []*Node {
 	return out
 }
 
-// EnsureIDs gives every block an ID and replaces duplicates, which copy and
-// paste can make.
+// EnsureIDs gives every block without an ID, or with one an earlier block
+// has, as copy and paste can make, a new one of its own: blocks made on
+// two devices never share one, which a merge would take for one block.
 func (c *Content) EnsureIDs() {
-	seen := map[string]bool{}
+	seen := map[string]bool{"root": true}
 	c.Walk(func(n, _ *Node) {
 		if n.ID == "" || seen[n.ID] {
 			n.ID = NewBlockID()
+		}
+		seen[n.ID] = true
+	})
+}
+
+// repairIDs gives stored content's blocks without an ID, or with one an
+// earlier block or the page has, IDs every reader gives them alike: its
+// ID and how many blocks had it so far, the second "a" "a-2" and the
+// first without one "block-1", skipping IDs the page has. Every device,
+// and every read of the page, base and all, makes the same, as the
+// server's normalizeContent does, so a merge matches the blocks up rather
+// than keeping each reader's copy. Blocks an app makes have IDs of their
+// own (EnsureIDs) before they are stored.
+func (c *Content) repairIDs() {
+	taken := map[string]bool{"root": true}
+	c.Walk(func(n, _ *Node) { taken[n.ID] = true })
+	seen := map[string]bool{"root": true}
+	count := map[string]int{}
+	c.Walk(func(n, _ *Node) {
+		was := n.ID
+		if count[was]++; was != "" && !seen[was] {
+			seen[was] = true
+			return
+		}
+		base := was
+		if base == "" {
+			base = "block"
+		}
+		for {
+			id := base + "-" + strconv.Itoa(count[was])
+			if !taken[id] && !seen[id] {
+				n.ID = id
+				break
+			}
+			count[was]++
 		}
 		seen[n.ID] = true
 	})
@@ -213,7 +284,7 @@ func (c *Content) Find(id string) *Node {
 
 // Location is where a block sits in the tree.
 type Location struct {
-	// Siblings is the list holding the block; Set replaces it.
+	// Siblings is the list holding the block.
 	Siblings []*Node
 	Index    int
 	Node     *Node
@@ -221,9 +292,6 @@ type Location struct {
 	Parent *Node
 	set    func([]*Node)
 }
-
-// SetSiblings replaces the list holding the block.
-func (l *Location) SetSiblings(nodes []*Node) { l.set(nodes) }
 
 // Locate finds a block.
 func (c *Content) Locate(id string) *Location {
@@ -263,17 +331,6 @@ func (p Position) Anchor() string {
 		return p.Before
 	}
 	return p.Parent
-}
-
-// Valid reports whether exactly one field is set.
-func (p Position) Valid() bool {
-	n := 0
-	for _, s := range []string{p.After, p.Before, p.Parent, p.At} {
-		if s != "" {
-			n++
-		}
-	}
-	return n == 1 && (p.At == "" || p.At == "start" || p.At == "end")
 }
 
 // PositionOf describes where a block is now, so it can be put back there.
@@ -579,5 +636,18 @@ func (c *Content) Stamped(previous *Content, now int64) *Content {
 	for id := range sigs {
 		delete(deleted, id)
 	}
+	// A tombstone goes once it is old: merge needs one only for a block a
+	// side has that both the other and the base they agree on lack, which
+	// a device would have to be away that long to bring back, and each
+	// travels in every save, upload and merge.
+	for id, t := range deleted {
+		if t < now-TombstoneLife {
+			delete(deleted, id)
+		}
+	}
 	return &Content{Children: c.Children, Blocks: blocks, Deleted: deleted}
 }
+
+// TombstoneLife is how long, in milliseconds, a page keeps the tombstone
+// of a block deleted from it (Stamped).
+const TombstoneLife = 180 * 24 * 60 * 60 * 1000

@@ -109,7 +109,7 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 - macOS 12 以降（Apple シリコンまたは Intel）、または x64 / arm64 の Windows。
 - ソースからビルドするには Go 1.27.3 以降。Go のコードに cgo や C
   コンパイラは不要です。Mac アプリのオンデバイス音声認識ヘルパー
-  （[`macos/speech`](macos/speech)）は Swift で書かれ、`scripts/build-speech.sh`
+  （[`speech`](speech)）は Swift で書かれ、`scripts/build-speech.sh`
   が Xcode 26 以降（macOS 26 SDK）でビルドします。Xcode でビルドできない環境
   では、デバッグビルドはヘルパーなしで続行し、リリースビルドには必須です
   （署名と公証にも Xcode が必要です）。Windows インストーラには NSIS が
@@ -307,7 +307,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/agents` | OpenAI 互換クライアント、プリセット、プロンプト、ページツール、ループ、ハブ |
 | `internal/mcp` | `leaflet mcp`：アプリ外のエージェント向けページツール |
 | `internal/recording` | キャプチャ、WAV、Soniox ストリーミング、エンドポイントでの文字起こし |
-| `internal/macspeech`、`macos/speech` | Mac 自身の音声認識による文字起こし。Mac アプリに同梱する Swift のヘルパー `leaflet-speech` を通じて行います |
+| `internal/macspeech`、`speech` | デバイス自身の音声認識による文字起こし。`speech` は Swift パッケージで、iOS アプリと、Mac アプリに同梱するヘルパー `leaflet-speech` がこれでビルドされます |
 | `internal/theme` | 色、フォント、アイコン |
 | `locales` | 各言語のアプリのテキストと、そこから生成される Go コード |
 | `scripts` | デバッグビルドとリリースビルド、GitHub Releases への公開、マイグレーションの検査 |

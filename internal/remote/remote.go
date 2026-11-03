@@ -11,10 +11,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +24,7 @@ import (
 	"leaflet/internal/guard"
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // Build-time defaults, set with -ldflags "-X leaflet/internal/remote.DefaultURL=…".
@@ -62,15 +65,29 @@ const backendKey = "backend"
 type Error struct {
 	Status  int
 	Message string
+	// Code is the error code in the answer, or "": the database's, which
+	// PostgREST answers with, as "23514" for a check the change fails, or
+	// Storage's status, as "413" for an object too large.
+	Code string
+	// RetryAfter is how long the server asked to be left before it is
+	// asked again (Retry-After), 0 when it did not say.
+	RetryAfter time.Duration
 }
 
 func (e *Error) Error() string { return e.Message }
 
-// ErrSignedOut is returned by calls that need an account.
-var ErrSignedOut = errors.New("Sign in to use this.") //nolint:staticcheck // shown to people as a sentence.
+// ErrSignedOut is returned by calls that need an account. Errors such as
+// it say themselves in the app's language, as they are shown.
+var ErrSignedOut error = &sentence{locales.RemoteSignedOut}
 
 // ErrNotConfigured is returned when the build has no server.
-var ErrNotConfigured = errors.New("This build has no server; it works on this device only.") //nolint:staticcheck // shown to people as a sentence.
+var ErrNotConfigured error = &sentence{locales.RemoteNotConfigured}
+
+// sentence is an error shown to people as it is, said in the app's
+// language when it is shown.
+type sentence struct{ say func() string }
+
+func (s *sentence) Error() string { return s.say() }
 
 type session struct {
 	AccessToken  string    `json:"access_token"`
@@ -108,8 +125,6 @@ type Client struct {
 	keepMu sync.Mutex
 	// noKeychain keeps the session in memory only, for tests.
 	noKeychain bool
-	// OnAuth runs after signing in or out.
-	OnAuth func(user *store.User)
 }
 
 // refresh is one exchange of a refresh token for a new session.
@@ -152,7 +167,7 @@ func (c *Client) Project() Settings { return c.settings() }
 // The session, which belongs to the project before, goes.
 func (c *Client) Use(s Settings) error {
 	if c.fixed {
-		return errors.New("This build's server is fixed.") //nolint:staticcheck // shown to people as a sentence.
+		return errors.New(locales.RemoteServerFixed())
 	}
 	s.URL = strings.TrimRight(s.URL, "/")
 	c.mu.Lock()
@@ -325,7 +340,7 @@ func (c *Client) authRequestTo(ctx context.Context, cfg Settings, path string, b
 	data, _ := io.ReadAll(res.Body)
 	_ = json.Unmarshal(data, &out)
 	if res.StatusCode >= 400 {
-		return out, &Error{Status: res.StatusCode, Message: message(out, string(data))}
+		return out, &Error{Status: res.StatusCode, Message: message(out, string(data)), RetryAfter: retryAfter(res.Header)}
 	}
 	return out, nil
 }
@@ -361,7 +376,7 @@ func decodeSession(out map[string]any) (*session, error) {
 	return &s, nil
 }
 
-var errNoSession = errors.New("The server did not sign you in.") //nolint:staticcheck // shown to people as a sentence.
+var errNoSession error = &sentence{locales.RemoteNoSession}
 
 func (c *Client) fromToken(out map[string]any) (*store.User, error) {
 	s, err := decodeSession(out)
@@ -372,11 +387,7 @@ func (c *Client) fromToken(out map[string]any) (*store.User, error) {
 		return nil, errNoSession
 	}
 	c.keep(s)
-	u := toUser(s.User)
-	if c.OnAuth != nil {
-		c.OnAuth(u)
-	}
-	return u, nil
+	return toUser(s.User), nil
 }
 
 // SendCode emails a sign-in link and code.
@@ -485,18 +496,18 @@ func (c *Client) Adopt(p *Pending) (*store.User, error) {
 		return nil, err
 	}
 	c.keep(p.s)
-	u := toUser(p.s.User)
-	if c.OnAuth != nil {
-		c.OnAuth(u)
-	}
-	return u, nil
+	return toUser(p.s.User), nil
 }
+
+// logoutHere ends only the session the token is of: Auth's logout ends
+// every session of the user, on every device, unless told otherwise.
+const logoutHere = "logout?scope=local"
 
 // Discard signs p out on the server, leaving the client's session alone.
 func (c *Client) Discard(p *Pending) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_, _ = c.authRequestTo(ctx, p.project, "logout", map[string]any{}, p.s.AccessToken)
+	_, _ = c.authRequestTo(ctx, p.project, logoutHere, map[string]any{}, p.s.AccessToken)
 }
 
 // accountExists reports whether Auth refused to make an account because
@@ -540,7 +551,7 @@ func (c *Client) adminRequest(ctx context.Context, project Settings, secret, met
 	data, _ := io.ReadAll(res.Body)
 	_ = json.Unmarshal(data, &out)
 	if res.StatusCode >= 400 {
-		return out, &Error{Status: res.StatusCode, Message: message(out, string(data))}
+		return out, &Error{Status: res.StatusCode, Message: message(out, string(data)), RetryAfter: retryAfter(res.Header)}
 	}
 	return out, nil
 }
@@ -554,16 +565,31 @@ func (c *Client) VerifyCode(email, code string) (*store.User, error) {
 	return c.fromToken(out)
 }
 
-// SignOut signs out on this device.
+// SignOut signs out on this device, and the store's session follows
+// (signedOut).
 func (c *Client) SignOut() {
 	if c.SignedIn() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		_, _ = c.authRequest(ctx, "logout", map[string]any{}, true)
+		_, _ = c.authRequest(ctx, logoutHere, map[string]any{}, true)
 		cancel()
 	}
 	c.keep(nil)
-	if c.OnAuth != nil {
-		c.OnAuth(nil)
+	c.signedOut()
+}
+
+// signedOut makes the store's session the device's own once the client's
+// has ended, as the next launch loads it: signed out on purpose, or on its
+// own, as when the server refused the refresh token or sync found the
+// device revoked. The account's pages stay, for signing in again, until
+// the caller clears them. A sign-in, which may replace another account's
+// pages, becomes the store's session only once the user agrees to that
+// (core.UseAccount); one made meanwhile is left alone.
+func (c *Client) signedOut() {
+	if c.st == nil || c.SignedIn() {
+		return
+	}
+	if _, err := c.st.LoadSession(nil); err != nil {
+		log.Printf("sign out: %v", err)
 	}
 }
 
@@ -651,9 +677,7 @@ func (c *Client) refresh(r *refresh) {
 				r.stale = true
 				return
 			}
-			if c.OnAuth != nil {
-				c.OnAuth(nil)
-			}
+			c.signedOut()
 			r.err = ErrSignedOut
 			return
 		}
@@ -749,7 +773,13 @@ func (c *Client) requestWith(hc *http.Client, ctx context.Context, lasting time.
 		}
 		var m map[string]any
 		_ = json.Unmarshal(data, &m)
-		return nil, &Error{Status: res.StatusCode, Message: message(m, string(data))}
+		// Storage says its own status in the body, which may differ from
+		// the response's, as a 400 for an object too large.
+		code, _ := m["code"].(string)
+		if code == "" {
+			code, _ = m["statusCode"].(string)
+		}
+		return nil, &Error{Status: res.StatusCode, Message: message(m, string(data)), Code: code, RetryAfter: retryAfter(res.Header)}
 	}
 }
 
@@ -898,6 +928,16 @@ func IsConflict(err error) bool {
 	return errors.As(err, &re) && re.Status == http.StatusConflict
 }
 
+// IsInvalid reports whether err is the server refusing for good what it
+// was sent, whoever sends it: a change that breaks a rule of its rows (a
+// check, 23514), as moving a page under one another device moved under it
+// meanwhile, or a body larger than it takes (413). Sent again, it fails
+// again.
+func IsInvalid(err error) bool {
+	var re *Error
+	return errors.As(err, &re) && (re.Code == "23514" || re.Code == "413" || re.Status == http.StatusRequestEntityTooLarge)
+}
+
 // IsForbidden reports whether err is the server refusing a change the
 // user may not make, as its row-level security does.
 func IsForbidden(err error) bool {
@@ -922,6 +962,23 @@ func (c *Client) Insert(ctx context.Context, table string, rows any) ([]map[stri
 		return nil, err
 	}
 	return decodeRows(res)
+}
+
+// InsertNew inserts rows the server may have already, as an upload whose
+// answer was lost and goes again: one it has is left as it is, and no row
+// comes back, so no rule of who may change or read the row stands in the
+// way of a row that is up.
+func (c *Client) InsertNew(ctx context.Context, table string, rows any) error {
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		return err
+	}
+	res, err := c.request(ctx, "POST", "/rest/v1/"+table, bytes.NewReader(raw), map[string]string{"Prefer": "resolution=ignore-duplicates,return=minimal"})
+	if err != nil {
+		return err
+	}
+	_ = res.Body.Close()
+	return nil
 }
 
 // RPC calls a database function.
@@ -1010,7 +1067,7 @@ func (c *Client) InvokeStream(ctx context.Context, name string, body map[string]
 
 // quiet is err, or errStreamIdle when the stream ended for going quiet.
 func quiet(ctx context.Context, err error) error {
-	if err != nil && context.Cause(ctx) == errStreamIdle {
+	if err != nil && errors.Is(context.Cause(ctx), errStreamIdle) {
 		return errStreamIdle
 	}
 	return err
@@ -1062,6 +1119,30 @@ func escapePath(p string) string {
 	return strings.Join(parts, "/")
 }
 
+// retryAfter is the wait a response's Retry-After asks for, in seconds or
+// until a time, 0 for none.
+func retryAfter(h http.Header) time.Duration {
+	v := strings.TrimSpace(h.Get("Retry-After"))
+	if v == "" {
+		return 0
+	}
+	if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		return time.Duration(n) * time.Second
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		return max(time.Until(t), 0)
+	}
+	return 0
+}
+
+// IsBusy reports whether err is the server's trouble, not the request's:
+// one it failed on (5xx), or asked to be left a while for (429). What is
+// sent next would fare alike, so none of it is the request's to count.
+func IsBusy(err error) bool {
+	re, ok := errors.AsType[*Error](err)
+	return ok && (re.Status == http.StatusTooManyRequests || re.Status >= 500)
+}
+
 // IsNetwork reports whether err means the server could not be reached:
 // the connection failed, broke or timed out, a stream went quiet, or the
 // gateway in front of the server answered that it could not reach it.
@@ -1081,9 +1162,11 @@ func IsNetwork(err error) bool {
 	// A request that failed, its own timeout among the reasons, but not
 	// one the caller's context ended: a wait of its own that ran out, or
 	// that it called off, while the request went. The client's own timeout
-	// is an error of its own kind, which only matches DeadlineExceeded.
+	// is an error of its own kind, which errors.Is takes for
+	// DeadlineExceeded too: only the caller's deadline is that error itself.
 	if ue, ok := errors.AsType[*url.Error](err); ok {
-		return ue.Err != context.DeadlineExceeded && !errors.Is(ue.Err, context.Canceled)
+		callers := ue.Err == context.DeadlineExceeded //nolint:errorlint // the error itself, not one that matches it.
+		return !callers && !errors.Is(ue.Err, context.Canceled)
 	}
 	// A context's deadline is a net.Error too, but one that ran out outside
 	// a request is the caller's, not the network's.

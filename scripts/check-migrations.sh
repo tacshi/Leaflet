@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Applies every migration in supabase/migrations, oldest first, to a new
 # database, as the app does to each person's own project, then runs the
-# checks in scripts/migrations/test.sql on it. The database is a throwaway
-# container of the supabase/postgres image, which hosted projects run, made
-# and removed here: only Docker is needed.
+# checks in scripts/migrations/seeded.sql, test.sql and access.sql on it.
+# The database is a throwaway container of the supabase/postgres image,
+# which hosted projects run, made and removed here: only Docker is needed.
 #
 #   scripts/check-migrations.sh
 #
@@ -11,7 +11,11 @@
 # Supabase's Auth and Storage services fill in a project: first
 # scripts/migrations/services.sql adds what the migrations use of them.
 # Each migration then runs in a transaction of its own, as the app sends it,
-# and as postgres, who in a Supabase project is not a superuser.
+# and as postgres, who in a Supabase project is not a superuser. A
+# project's tables are not empty when a migration comes, so rows go in
+# along the way: scripts/migrations/seed/<version>.sql, where there is one,
+# runs right after the migration of that version, and seeded.sql checks
+# what the later migrations made of its rows.
 # SUPABASE_POSTGRES_IMAGE picks another image.
 set -euo pipefail
 
@@ -41,11 +45,27 @@ for _ in $(seq 120); do
 done
 echo "select 1" | sql postgres --output /dev/null
 
+# A seed named for no migration would never run.
+for seed in "$root"/scripts/migrations/seed/*.sql; do
+	version="${seed##*/}"
+	if ! compgen -G "$root/supabase/migrations/${version%.sql}_*.sql" >/dev/null; then
+		echo "scripts/migrations/seed/$version is named for no migration" >&2
+		exit 1
+	fi
+done
+
 sql supabase_admin <"$root/scripts/migrations/services.sql"
 for f in "$root"/supabase/migrations/*.sql; do
 	echo "${f##*/}"
 	sql postgres --single-transaction --output /dev/null <"$f"
+	seed="$root/scripts/migrations/seed/$(basename "$f" | cut -d_ -f1).sql"
+	if [[ -f "$seed" ]]; then
+		echo "  seed/${seed##*/}"
+		sql postgres --single-transaction --output /dev/null <"$seed"
+	fi
 done
-echo "test.sql"
-sql postgres --output /dev/null <"$root/scripts/migrations/test.sql"
+for f in seeded.sql test.sql access.sql; do
+	echo "$f"
+	sql postgres --output /dev/null <"$root/scripts/migrations/$f"
+done
 echo "Every migration applies, and the checks pass."

@@ -3,6 +3,7 @@ package core
 import (
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"html"
 	"os"
 	"path/filepath"
@@ -28,14 +29,23 @@ var welcomeImage []byte
 // each, so tags show from the start: in their bylines, the sidebar's Tags
 // tab and search. They are written in the language the app shows when they
 // are made, and are the device's starter pages (store.MarkStarterPages)
-// until it joins a library.
-func (c *Core) createWelcome() error {
+// until it joins a library. Pages that could not all be made go again:
+// a guide half made would not be a starter page, to join a library with,
+// and the next launch would take the device for one with pages of its
+// own, and make none.
+func (c *Core) createWelcome() (err error) {
 	if _, ok := c.Store.Value("welcome.created"); ok {
 		return nil
 	}
 	if pages, _ := c.Store.Pages(); len(pages) > 0 {
 		return c.Store.SetValue("welcome.created", "true")
 	}
+	var made []string
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, c.Store.RemovePages(made))
+		}
+	}()
 	m := locales.In(i18n.Locale())
 	// The picture is a file of the page and the subpage a page inside it,
 	// so the page comes first and its blocks after.
@@ -43,6 +53,7 @@ func (c *Core) createWelcome() error {
 	if err != nil {
 		return err
 	}
+	made = append(made, p.ID)
 	image, err := c.welcomeImageFile(p.ID, m.WelcomeImageName()+".jpg")
 	if err != nil {
 		return err
@@ -52,6 +63,7 @@ func (c *Core) createWelcome() error {
 	if err != nil {
 		return err
 	}
+	made = append(made, sub.ID)
 	blocks, commentsID, err := welcomeBlocks(m, image, sub.ID)
 	if err != nil {
 		return err
@@ -66,6 +78,7 @@ func (c *Core) createWelcome() error {
 	if err != nil {
 		return err
 	}
+	made = append(made, tmpl.ID)
 	if err := c.Store.SetValue("welcome.page", p.ID); err != nil {
 		return err
 	}

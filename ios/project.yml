@@ -25,6 +25,11 @@ packages:
   DeviceKit:
     url: https://github.com/devicekit/DeviceKit
     exactVersion: 5.9.0
+  # Transcription with the device's own speech recognition, which the
+  # Mac's speech helper is built with too: the repository's own, so not
+  # pinned.
+  LeafletSpeech:
+    path: ../speech
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -66,6 +71,7 @@ targets:
       - package: Highlightr
       - package: SwiftDraw
       - package: DeviceKit
+      - package: LeafletSpeech
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "1,2"
@@ -81,6 +87,11 @@ targets:
         # In English; Resources/Debug and Resources/Release have it, and
         # the Debug build's name, in each language.
         INFOPLIST_KEY_NSMicrophoneUsageDescription: Leaflet records audio into recording blocks when you press Record.
+        # Agents and speech to text can run on a computer on the same
+        # network (Ollama, LM Studio, a speech server), which iOS asks
+        # about the first time one is reached; so do Resources/Debug and
+        # Resources/Release, in each language.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Leaflet connects to the AI models and speech-to-text servers you set up on your local network.
         # No NSSpeechRecognitionUsageDescription: SpeechAnalyzer and
         # SpeechTranscriber, which transcribe on the device, ask for no
         # permission, as SFSpeechRecognizer does; the desktop's speech

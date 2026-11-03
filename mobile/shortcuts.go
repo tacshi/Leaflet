@@ -32,12 +32,38 @@ func DividerShortcut(typ, text string) bool {
 	return shortcut.Divider(typ, text)
 }
 
-// OpensMenu reports whether "/" or "@" typed after before, the character
-// before it, opens its menu.
-func OpensMenu(before string) bool {
+// Menu returns the menu typed opens, "/" or "@", typed after before, the
+// character before it, or "" at a block's start, as the desktop's editor
+// opens them (shortcut.Menu): "/" and "@" in full width too, and "、" at
+// a block's start or after a space. It returns "" for none.
+func Menu(typed, before string) string {
 	defer catch(nil)
-	r, _ := utf8.DecodeLastRuneInString(before)
-	return shortcut.OpensMenu(r)
+	r, n := utf8.DecodeRuneInString(typed)
+	if n == 0 || n != len(typed) {
+		return ""
+	}
+	var b rune
+	if before != "" {
+		b, _ = utf8.DecodeLastRuneInString(before)
+	}
+	if m := shortcut.Menu(r, b); m != 0 {
+		return string(m)
+	}
+	return ""
+}
+
+// MenuKind returns the menu a character stands for, "/" or "@", as one
+// that opened it does (shortcut.MenuKind), or "".
+func MenuKind(char string) string {
+	defer catch(nil)
+	r, n := utf8.DecodeRuneInString(char)
+	if n == 0 || n != len(char) {
+		return ""
+	}
+	if m := shortcut.MenuKind(r); m != 0 {
+		return string(m)
+	}
+	return ""
 }
 
 // InlineShortcut returns the marker pair typing text's last character

@@ -1,8 +1,11 @@
 package mcp
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -75,7 +78,9 @@ func toolList() []map[string]any {
 		required := append([]string{"page_id"}, params["required"].([]string)...)
 		desc := fn["description"].(string)
 		if name == "read_page" {
-			desc = "Read a page: its tags, every block with its ID, subpage titles, and comment threads."
+			desc = "Read a page: its tags, every block with its ID, subpage titles, and comment threads. A long page comes in parts: total_blocks says how many blocks it has, and next_offset, while there are more, is the offset to read on from. An embed's html longer than 30,000 characters is left out, its html_length given instead: to change such an embed, write its html whole."
+			props["offset"] = map[string]any{"type": "integer", "minimum": 0, "description": "The block to start from, as next_offset gives it; the first when not given."}
+			props["limit"] = map[string]any{"type": "integer", "minimum": 1, "description": "The most blocks to read; as many as fit when not given."}
 		}
 		add(name, desc, object(props, required...))
 	}
@@ -110,24 +115,20 @@ type pageTools struct {
 	s *Server
 	// edited is when this client last edited each page.
 	edited map[string]int64
+	// read is each page as this client last read or edited it: a block it
+	// replaces or deletes that changed since, as the user typed in the
+	// app, is kept in a snapshot first (conflictSince).
+	read map[string]*doc.Content
 }
 
 func (t *pageTools) call(name string, args map[string]any) map[string]any {
-	out, err := t.dispatch(name, args)
-	if err != nil {
-		var te *doc.ToolError
-		if errors.As(err, &te) {
-			return map[string]any{"error": te.Message}
-		}
-		return map[string]any{"error": err.Error()}
-	}
-	return out
+	return agents.ToolAnswer(t.dispatch(name, args))
 }
 
 func toolErr(msg string) error { return &doc.ToolError{Message: msg} }
 
-// errUnreadable is a page whose stored content cannot be read: it is left
-// as it is.
+// errUnreadable is a page whose stored content cannot be read
+// (store.ErrUnreadable), as the client is told: it is left as it is.
 var errUnreadable = toolErr("The page's content could not be read, so it was left as it is.")
 
 func (t *pageTools) dispatch(name string, args map[string]any) (map[string]any, error) {
@@ -338,49 +339,162 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		return nil, err
 	}
 	args = maps.Clone(args)
+	offset, limit, err := readPart(args)
+	if err != nil {
+		return nil, err
+	}
 	delete(args, "page_id")
-	// The app may save the page while the tool runs: then run it again on
-	// what the app saved, rather than save over it. The edit keeps one
-	// snapshot, however many times it runs.
+	delete(args, "offset")
+	delete(args, "limit")
+	// The app may save the page while the tool runs: then it runs again on
+	// what the app saved, rather than save over it (UpdateContent). The
+	// edit keeps one snapshot, however many times it runs.
+	var out map[string]any
+	var saved *doc.Content
 	snapped := false
-	for range 3 {
-		row, err := st.ContentRow(p.ID)
-		if err != nil {
-			return nil, toolErr("The page's content is not kept on this device.")
-		}
-		// What cannot be read is refused rather than taken for an empty
-		// page, which saving would then put in its place.
-		content, err := doc.Decode(row.Content)
-		if err != nil {
-			return nil, errUnreadable
+	err = st.UpdateContent(p.ID, func(content *doc.Content, kept bool) (bool, error) {
+		if !kept {
+			return false, toolErr("The page's content is not kept on this device.")
 		}
 		before := content.Copy()
-		x := &agents.Executor{Ctx: agents.PageTools(st, p.ID, p.DisplayTitle(), t.s.agent, content, true)}
-		out := x.Call(name, args)
+		// Not with the user's other pages, which MCP's own tools read.
+		x := &agents.Executor{Ctx: agents.PageTools(st, p.ID, p.DisplayTitle(), t.s.agent, content, false)}
+		out = x.Call(name, args)
 		if page, ok := out["page"].(map[string]any); ok && name == "read_page" {
 			page["tags"] = p.Tags
+			if out["error"] == nil {
+				t.read[p.ID] = before
+				keepPart(out, offset, limit)
+			}
 		}
 		if len(x.Ops) == 0 {
-			return out, nil
+			return false, nil
 		}
 		// The snapshot goes first: an edit that could not keep one is not
 		// saved, so trying it again does not make it twice.
 		if !snapped {
 			if err := t.snapshot(p.ID, before); err != nil {
-				return nil, err
+				return false, err
 			}
 			snapped = true
 		}
-		beforeSave(p.ID)
-		if _, _, err := st.SaveContentOver(p.ID, row.Content, content); errors.Is(err, store.ErrContentChanged) {
-			continue
-		} else if err != nil {
-			return nil, err
+		if conflictSince(t.read[p.ID], before, x.Ops) {
+			if err := t.s.st.AddHistory(p.ID, before, "conflict", "", "Before "+t.s.agent); err != nil {
+				return false, err
+			}
 		}
-		t.edited[p.ID] = doc.NowMs()
-		return out, nil
+		beforeSave(p.ID)
+		saved = content
+		return true, nil
+	})
+	switch {
+	case errors.Is(err, store.ErrUnreadable):
+		// What cannot be read is refused rather than taken for an empty
+		// page, which saving would then put in its place.
+		return nil, errUnreadable
+	case errors.Is(err, store.ErrContentChanged):
+		return nil, toolErr("The page kept changing while saving. Read it again and retry.")
+	case err != nil:
+		return nil, err
 	}
-	return nil, toolErr("The page kept changing while saving. Read it again and retry.")
+	if saved != nil {
+		t.edited[p.ID] = doc.NowMs()
+		t.read[p.ID] = saved.Copy()
+	}
+	return out, nil
+}
+
+// maxRead bounds a read_page answer's blocks, in bytes of JSON: what MCP
+// clients take from a tool is limited (Claude Code's 25,000 tokens, say),
+// and a longer page, of a few embeds, would not be read at all. It comes
+// in parts instead, each saying where the next starts.
+const maxRead = 60_000
+
+// readPart is the part of a page read_page's args ask for: from the block
+// at offset, at most limit blocks (0, as many as fit in maxRead).
+func readPart(args map[string]any) (offset, limit int, err error) {
+	count := func(key string, least int) (int, error) {
+		v, ok := args[key]
+		if !ok || v == nil {
+			return 0, nil
+		}
+		f, ok := v.(float64)
+		if !ok || f != math.Trunc(f) || f < float64(least) || f > math.MaxInt32 {
+			return 0, toolErr(fmt.Sprintf("%s must be a whole number, %d or more.", key, least))
+		}
+		return int(f), nil
+	}
+	if offset, err = count("offset", 0); err != nil {
+		return 0, 0, err
+	}
+	limit, err = count("limit", 1)
+	return offset, limit, err
+}
+
+// keepPart keeps to the part of a read_page answer out asks for, from the
+// block at offset, at most limit of them, or as many as fit in maxRead,
+// though always one: it says how many blocks the page has, and where the
+// next part starts, when there is more. The page's subpages and comments
+// come with the first part.
+func keepPart(out map[string]any, offset, limit int) {
+	blocks, _ := out["blocks"].([]map[string]any)
+	size := 0
+	if offset > 0 {
+		delete(out, "subpages")
+		delete(out, "comments")
+	} else {
+		for _, k := range []string{"page", "subpages", "comments"} {
+			raw, _ := json.Marshal(out[k])
+			size += len(raw)
+		}
+	}
+	start := min(offset, len(blocks))
+	end := start
+	for end < len(blocks) && (limit == 0 || end-start < limit) {
+		raw, _ := json.Marshal(blocks[end])
+		if end > start && size+len(raw) > maxRead {
+			break
+		}
+		size += len(raw)
+		end++
+	}
+	out["blocks"] = blocks[start:end]
+	out["total_blocks"] = len(blocks)
+	if end < len(blocks) {
+		out["next_offset"] = end
+	}
+}
+
+// conflictSince reports whether ops replace or delete a block that changed
+// in now since read, the page as the client last had it: the client
+// writes over a change it never saw, as the user's in the app, which a
+// snapshot then keeps to restore. A page it never read tells nothing.
+func conflictSince(read, now *doc.Content, ops []doc.Op) bool {
+	if read == nil {
+		return false
+	}
+	changed := func(id string) bool {
+		was, is := read.Find(id), now.Find(id)
+		if was == nil || is == nil {
+			return false
+		}
+		a, _ := json.Marshal(was)
+		b, _ := json.Marshal(is)
+		return string(a) != string(b)
+	}
+	for _, op := range ops {
+		switch op.Op {
+		case "replace":
+			if changed(op.ID) {
+				return true
+			}
+		case "delete":
+			if slices.ContainsFunc(op.IDs, changed) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // beforeSave runs between an edit and saving it; tests save there,
@@ -399,7 +513,9 @@ func (t *pageTools) snapshot(pageID string, before *doc.Content) error {
 func (t *pageTools) createPage(args map[string]any) (map[string]any, error) {
 	st := t.s.st
 	title, _ := args["title"].(string)
-	if strings.TrimSpace(title) == "" {
+	// Without the spaces around it, as create_subpage keeps a title.
+	title = strings.TrimSpace(title)
+	if title == "" {
 		return nil, toolErr("title is required.")
 	}
 	parent, folderID, err := t.place(args)
@@ -507,31 +623,18 @@ func subpageLinks(c *doc.Content, id string) []string {
 }
 
 // editLinks saves parent's content changed by edit, which reports whether
-// it changed it.
+// it changed it. A parent whose content is not on this device, or cannot
+// be read, is left as it is: the page is inside it all the same, in the
+// sidebar.
 func (t *pageTools) editLinks(parent store.Page, edit func(c *doc.Content) bool) error {
-	st := t.s.st
-	for range 3 {
-		row, err := st.ContentRow(parent.ID)
-		if err != nil {
-			// The parent's content is not on this device: the page is
-			// still inside it, in the sidebar.
-			return nil
-		}
-		c, err := doc.Decode(row.Content)
-		if err != nil {
-			// Nor is a parent whose content cannot be read written over:
-			// the page is inside it all the same.
-			return nil
-		}
-		if !edit(c) {
-			return nil
-		}
-		if _, _, err := st.SaveContentOver(parent.ID, row.Content, c); errors.Is(err, store.ErrContentChanged) {
-			continue
-		} else if err != nil {
-			return err
-		}
+	err := t.s.st.UpdateContent(parent.ID, func(c *doc.Content, kept bool) (bool, error) {
+		return kept && edit(c), nil
+	})
+	switch {
+	case errors.Is(err, store.ErrUnreadable):
 		return nil
+	case errors.Is(err, store.ErrContentChanged):
+		return toolErr("The parent page kept changing while saving.")
 	}
-	return toolErr("The parent page kept changing while saving.")
+	return err
 }

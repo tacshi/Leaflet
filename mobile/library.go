@@ -3,9 +3,14 @@ package mobile
 import (
 	"encoding/json"
 	"log"
+	"slices"
+	"strings"
 	"time"
 
+	"leaflet/internal/doc"
+	libtree "leaflet/internal/library"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // pageRow is a page as the library lists it.
@@ -39,20 +44,36 @@ type folderRow struct {
 	DefaultTemplateID string `json:"default_template_id,omitempty"`
 }
 
-// tagRow is a tag and how many pages have it.
-type tagRow struct {
-	Tag   string `json:"tag"`
-	Count int    `json:"count"`
+// TagColor returns a tag's color, as hex, as the desktop colors it: the
+// same on every device, whatever the name's case.
+func TagColor(name string) string {
+	defer catch(nil)
+	return doc.TagColor(name)
 }
 
-// library is what the sidebar shows, as Library returns it: the
-// pages, templates among them, the folders and the tags. Pages of another
-// space are those shared with the user.
+// tagRow is a tag, how many pages have it, and their IDs, by title.
+type tagRow struct {
+	Tag   string   `json:"tag"`
+	Count int      `json:"count"`
+	Pages []string `json:"pages"`
+}
+
+// library is what the sidebar shows, as Library returns it: the pages,
+// templates among them, the folders of the user's space in order, and
+// the tags, by name. Pages of another space are those shared with the
+// user. The rest is the tree of them, as the desktop's sidebar arranges
+// it (library.Arrange), by page ID, each list in order: the user's pages
+// at the top level in no folder, those of each folder, those under each
+// page, and those shared with the user whose parent the user has not.
 type library struct {
-	SpaceID string      `json:"space_id"`
-	Pages   []pageRow   `json:"pages"`
-	Folders []folderRow `json:"folders"`
-	Tags    []tagRow    `json:"tags"`
+	SpaceID  string              `json:"space_id"`
+	Pages    []pageRow           `json:"pages"`
+	Folders  []folderRow         `json:"folders"`
+	Tags     []tagRow            `json:"tags"`
+	Top      []string            `json:"top"`
+	InFolder map[string][]string `json:"in_folder"`
+	Children map[string][]string `json:"children"`
+	Shared   []string            `json:"shared"`
 }
 
 // Library returns the library, as a library in JSON.
@@ -69,33 +90,51 @@ func (c *Core) Library() (_ string, err error) {
 		if templates, err = st.Templates(); err != nil {
 			return
 		}
-		lib.Pages = make([]pageRow, 0, len(pages)+len(templates))
-		for _, p := range append(pages, templates...) {
-			lib.Pages = append(lib.Pages, c.rowOf(p))
-		}
 		var folders []store.Folder
 		if folders, err = st.Folders(); err != nil {
 			return
 		}
-		lib.Folders = make([]folderRow, 0, len(folders))
-		for _, f := range folders {
+		all := slices.Concat(pages, templates)
+		lib.Pages = make([]pageRow, 0, len(all))
+		for _, p := range all {
+			lib.Pages = append(lib.Pages, c.rowOf(p))
+		}
+		tree := libtree.Arrange(lib.SpaceID, all, folders)
+		lib.Folders = make([]folderRow, 0, len(tree.Folders))
+		for _, f := range tree.Folders {
 			lib.Folders = append(lib.Folders, folderRow{
 				ID: f.ID, ParentID: f.ParentFolderID, Name: f.Name, SortKey: f.SortKey, DefaultTemplateID: f.DefaultTemplateID,
 			})
 		}
-		var tags []store.TagCount
-		if tags, err = st.Tags(); err != nil {
-			return
+		lib.Tags = make([]tagRow, 0, len(tree.Tags))
+		for _, t := range tree.Tags {
+			lib.Tags = append(lib.Tags, tagRow{Tag: t.Name, Count: t.Count, Pages: pageIDs(tree.Tagged(t.Name))})
 		}
-		lib.Tags = make([]tagRow, 0, len(tags))
-		for _, t := range tags {
-			lib.Tags = append(lib.Tags, tagRow{Tag: t.Name, Count: t.Count})
-		}
+		lib.Top, lib.Shared = pageIDs(tree.Top), pageIDs(tree.Shared)
+		lib.InFolder, lib.Children = idsBy(tree.InFolder), idsBy(tree.Children)
 	})
 	if err != nil {
 		return "", err
 	}
 	return encode(lib)
+}
+
+// pageIDs are the IDs of pages, in their order.
+func pageIDs(pages []store.Page) []string {
+	out := make([]string, 0, len(pages))
+	for _, p := range pages {
+		out = append(out, p.ID)
+	}
+	return out
+}
+
+// idsBy is pages by a key, as their IDs.
+func idsBy(pages map[string][]store.Page) map[string][]string {
+	out := make(map[string][]string, len(pages))
+	for k, ps := range pages {
+		out[k] = pageIDs(ps)
+	}
+	return out
 }
 
 func (c *Core) rowOf(p store.Page) pageRow {
@@ -154,9 +193,11 @@ func (c *Core) CreatePage(page string) (_ string, err error) {
 		}
 		row = c.rowOf(p)
 		if n.Link && n.ParentID != "" {
-			// The page is made: a card that can't be saved leaves it be.
-			if lerr := c.linkSubpage(n.ParentID, p.ID); lerr != nil {
+			// The page is made: a card that can't be saved says so, as on
+			// the desktop, and leaves it be.
+			if lerr := c.pageCore().LinkSubpage(n.ParentID, p.ID, ""); lerr != nil {
 				log.Printf("page %s: link in %s: %v", p.ID, n.ParentID, lerr)
+				c.ev.notice(locales.AppErrorLinkSubpage(lerr.Error()))
 			}
 		}
 		if n.Start {
@@ -185,56 +226,69 @@ func (c *Core) RenamePage(id, title string) (err error) {
 }
 
 // MovePage moves a page under parentID or into folderID (or to the top
-// level, with neither), after afterID among its siblings, or first with
+// level, with neither), after afterID among its siblings, or last with
 // "". As on the desktop, a parent it leaves loses its card, and one it
-// goes into gets one at its end.
+// goes into gets one at its end (core.Pages.MovePage).
 func (c *Core) MovePage(id, parentID, folderID, afterID string) (err error) {
 	defer catch(&err)
 	c.q.do(func() {
-		old := ""
-		if p, perr := c.core.Store.Page(id); perr == nil {
-			old = p.ParentID
-		}
-		if err = c.core.Store.MovePage(id, parentID, folderID, afterID); err != nil || old == parentID {
-			return
-		}
-		if old != "" {
-			if lerr := c.unlinkSubpage(old, id); lerr != nil {
-				log.Printf("page %s: unlink from %s: %v", id, old, lerr)
-			}
-		}
-		if parentID != "" {
-			if lerr := c.linkSubpage(parentID, id); lerr != nil {
-				log.Printf("page %s: link in %s: %v", id, parentID, lerr)
-			}
-		}
+		err = c.pageCore().MovePage(id, parentID, func() error {
+			return c.core.Store.MovePage(id, parentID, folderID, afterID)
+		})
 	})
 	return err
 }
 
+// MoveTargets returns the pages page id can move under, as the desktop's
+// Move to dialog offers them, the one changed last first, as a JSON array
+// of their IDs: those of its space the user may change, but templates,
+// the page itself and the pages inside it.
+func (c *Core) MoveTargets(id string) (_ string, err error) {
+	defer catch(&err)
+	var out []string
+	c.q.do(func() {
+		var p store.Page
+		if p, err = c.core.Store.Page(id); err != nil {
+			return
+		}
+		var pages []store.Page
+		if pages, err = c.core.Store.Pages(); err != nil {
+			return
+		}
+		slices.SortStableFunc(pages, func(a, b store.Page) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+		out = []string{}
+		for _, t := range pages {
+			if t.SpaceID == p.SpaceID && !t.Template && c.core.Store.CanEdit(t) && !c.core.Store.IsDescendant(t.ID, id) {
+				out = append(out, t.ID)
+			}
+		}
+	})
+	if err != nil {
+		return "", err
+	}
+	return encode(out)
+}
+
 // DeletePage deletes a page and its subpages, and the page's card in its
-// parent, returning their IDs as a JSON array for RestorePages to undo it,
-// the card going back where it was. The edits of those open, in any
-// window, are saved first, for Undo to bring them back with them; a page
-// one of whose edits can't be saved is not deleted.
+// parent (core.Pages.DeletePage), returning their IDs as a JSON array for
+// RestorePages to undo it, the card going back where it was. The edits of
+// those open, in any window, are saved first, for Undo to bring them back
+// with them; a page one of whose edits can't be saved is not deleted.
 func (c *Core) DeletePage(id string) (_ string, err error) {
 	defer catch(&err)
 	var ids []string
 	c.q.do(func() {
 		for pid, p := range c.pages {
-			if c.within(pid, id) && !p.live.Save() {
+			if c.core.Store.IsDescendant(pid, id) && !p.live.Save() {
 				err = errNotSaved()
 				return
 			}
 		}
-		// Its card leaves its parent, rather than staying to say the page
-		// is gone.
-		c.unlinkDeleted(id)
-		if ids, err = c.core.Store.DeletePage(id); err != nil {
-			// The page stays, and so does its card.
-			c.relinkRestored([]string{id})
+		var card doc.Position
+		if ids, card, err = c.pageCore().DeletePage(id); err != nil {
 			return
 		}
+		c.cards[id] = card
 		for _, pid := range ids {
 			if p := c.pages[pid]; p != nil {
 				p.live.Close()
@@ -249,26 +303,8 @@ func (c *Core) DeletePage(id string) (_ string, err error) {
 	return encode(ids)
 }
 
-// within reports whether page id is root or one of its subpages, however
-// deep.
-func (c *Core) within(id, root string) bool {
-	seen := map[string]bool{}
-	for id != "" && !seen[id] {
-		if id == root {
-			return true
-		}
-		seen[id] = true
-		p, err := c.core.Store.Page(id)
-		if err != nil {
-			return false
-		}
-		id = p.ParentID
-	}
-	return false
-}
-
 // RestorePages brings back pages DeletePage deleted, given ids as it
-// returned them.
+// returned them, and the page's card where it was.
 func (c *Core) RestorePages(ids string) (err error) {
 	defer catch(&err)
 	var list []string
@@ -276,9 +312,14 @@ func (c *Core) RestorePages(ids string) (err error) {
 		return err
 	}
 	c.q.do(func() {
-		if err = c.core.Store.RestorePages(list); err == nil {
-			c.relinkRestored(list)
+		card := doc.Position{At: "end"}
+		if len(list) > 0 {
+			if at, ok := c.cards[list[0]]; ok {
+				card = at
+			}
+			delete(c.cards, list[0])
 		}
+		err = c.pageCore().RestorePages(list, card)
 	})
 	return err
 }
@@ -345,13 +386,15 @@ func (c *Core) RestoreTags(before string) (err error) {
 // until the page is opened.
 func (c *Core) SetKeepOffline(id string, keep bool) (err error) {
 	defer catch(&err)
-	c.q.do(func() { err = c.core.Store.SetKeepOffline(id, keep) })
+	c.q.do(func() { err = c.core.SetKeepOffline(id, keep) })
 	return err
 }
 
-// CreateFolder creates a folder, returning it as a folderRow.
+// CreateFolder creates a folder, returning it as a folderRow. Its name
+// is kept without the spaces around it.
 func (c *Core) CreateFolder(name string) (_ string, err error) {
 	defer catch(&err)
+	name = strings.TrimSpace(name)
 	var f store.Folder
 	c.q.do(func() { f, err = c.core.Store.CreateFolder(name) })
 	if err != nil {
@@ -360,9 +403,14 @@ func (c *Core) CreateFolder(name string) (_ string, err error) {
 	return encode(folderRow{ID: f.ID, ParentID: f.ParentFolderID, Name: f.Name, SortKey: f.SortKey})
 }
 
-// RenameFolder renames a folder.
+// RenameFolder renames a folder, as the desktop's Rename folder does:
+// without the spaces around the name, and a name left empty changes
+// nothing.
 func (c *Core) RenameFolder(id, name string) (err error) {
 	defer catch(&err)
+	if name = strings.TrimSpace(name); name == "" {
+		return nil
+	}
 	c.q.do(func() {
 		var f store.Folder
 		if f, err = c.core.Store.Folder(id); err == nil {
@@ -422,8 +470,31 @@ type todo struct {
 	Owner string `json:"owner,omitempty"`
 }
 
-// Todos returns the open to-dos with a due date or an owner, as a JSON
-// array of todo.
+// todoGroup is a section of the To-dos tab, as the desktop's: its name,
+// its key ("overdue", "today", "upcoming" or "no_date") and its to-dos,
+// by date.
+type todoGroup struct {
+	Section string `json:"section"`
+	Title   string `json:"title"`
+	Todos   []todo `json:"todos"`
+}
+
+// todoSections are the To-dos tab's sections, by doc.TodoSection: their
+// keys and names.
+var todoSections = [...]struct {
+	key   string
+	title func() string
+}{
+	doc.TodoOverdue:  {"overdue", locales.TodosSectionOverdue},
+	doc.TodoToday:    {"today", locales.CommonToday},
+	doc.TodoUpcoming: {"upcoming", locales.TodosSectionUpcoming},
+	doc.TodoNoDate:   {"no_date", locales.TodosSectionNoDate},
+}
+
+// Todos returns the open to-dos with a due date or an owner, in the
+// To-dos tab's sections as the desktop has them now, as a JSON array of
+// todoGroup: overdue, today's, the coming ones, each by date, and those
+// with no date. A section with none is left out.
 func (c *Core) Todos() (_ string, err error) {
 	defer catch(&err)
 	var todos []store.PageTodo
@@ -431,9 +502,16 @@ func (c *Core) Todos() (_ string, err error) {
 	if err != nil {
 		return "", err
 	}
-	out := make([]todo, 0, len(todos))
-	for _, t := range todos {
-		out = append(out, todo{PageID: t.PageID, PageTitle: t.PageTitle, BlockID: t.BlockID, Text: t.Text, Due: millis(t.Due), Timed: t.Timed, Owner: t.Owner})
+	out := []todoGroup{}
+	for _, g := range doc.TodoGroups(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, time.Now()) {
+		section := todoSections[g.Section]
+		group := todoGroup{Section: section.key, Title: section.title(), Todos: make([]todo, 0, len(g.Todos))}
+		for _, t := range g.Todos {
+			group.Todos = append(group.Todos, todo{
+				PageID: t.PageID, PageTitle: t.PageTitle, BlockID: t.BlockID, Text: t.Text, Due: millis(t.Due), Timed: t.Timed, Owner: t.Owner,
+			})
+		}
+		out = append(out, group)
 	}
 	return encode(out)
 }
@@ -451,8 +529,16 @@ func (c *Core) SaveSettings(settings string) (err error) {
 	defer catch(&err)
 	c.q.do(func() {
 		s := c.core.Store.Settings()
-		if err = json.Unmarshal([]byte(settings), &s); err == nil {
-			err = c.core.Store.SaveSettings(s)
+		all := s.AllPagesOffline
+		if err = json.Unmarshal([]byte(settings), &s); err != nil {
+			return
+		}
+		// Keeping all pages changes through the core, which brings the
+		// pages kept from now on.
+		keepAll := s.AllPagesOffline
+		s.AllPagesOffline = all
+		if err = c.core.Store.SaveSettings(s); err == nil && keepAll != all {
+			c.core.SetAllPagesOffline(keepAll)
 		}
 	})
 	return err

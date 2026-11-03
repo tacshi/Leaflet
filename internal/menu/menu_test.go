@@ -65,6 +65,26 @@ func TestMention(t *testing.T) {
 	}
 }
 
+// A page the @ menu offers says where it is: in its parent page, else its
+// folder, else nothing at the top of the space.
+func TestMentionPlace(t *testing.T) {
+	m := Mentions{
+		Pages: []store.Page{
+			{ID: "trip", Title: "Trip", FolderID: "f"},
+			{ID: "packing", Title: "Packing", ParentID: "trip", FolderID: "f"},
+			{ID: "inbox", Title: "Inbox"},
+		},
+		Folders: []store.Folder{{ID: "f", Name: "Travel"}},
+	}
+	places := map[string]string{}
+	for _, it := range Mention(m) {
+		places[it.Key] = it.Hint
+	}
+	if places["page:packing"] != "Trip" || places["page:trip"] != "Travel" || places["page:inbox"] != "" {
+		t.Errorf("places %v", places)
+	}
+}
+
 func TestTurnAndBlock(t *testing.T) {
 	if typ, level, ok := Turn("h2"); typ != "heading" || level != 2 || !ok {
 		t.Errorf("h2 turns into %q level %d (%v)", typ, level, ok)
@@ -81,5 +101,26 @@ func TestTurnAndBlock(t *testing.T) {
 	}
 	if _, ok := Block("subpage", ""); ok {
 		t.Error("a subpage is made by the app, not as a block here")
+	}
+}
+
+// What is typed finds the items whose labels start with it first, for
+// Enter to take, each group whole; full-width letters find what ASCII
+// does.
+func TestFilterRanks(t *testing.T) {
+	all := Slash(nil)
+	for q, want := range map[string]string{"h": "h1", "c": "callout", "chec": "todo_list", "pla": "paragraph", "ｈ２": "h2"} {
+		if got := Filter(all, q); len(got) == 0 || got[0].Key != want {
+			t.Errorf("%q first finds %v, want %s", q, keys(got), want)
+		}
+	}
+	// The groups stay whole.
+	got := Filter(all, "l")
+	seen := map[string]bool{}
+	for i, it := range got {
+		if seen[it.Group] && got[i-1].Group != it.Group {
+			t.Fatalf("group %s split: %v", it.Group, keys(got))
+		}
+		seen[it.Group] = true
 	}
 }

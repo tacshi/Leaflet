@@ -3,6 +3,7 @@ package core
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -106,6 +107,37 @@ func TestWelcomePage(t *testing.T) {
 	templates, _ = st.Templates()
 	if len(pages)+len(templates) != 0 {
 		t.Errorf("%d pages and %d templates stay after joining a library", len(pages), len(templates))
+	}
+}
+
+// A guide that could not all be made leaves nothing behind, and the next
+// start makes it whole.
+func TestWelcomeHalfMadeGoes(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	co := &Core{Store: st}
+	// No folder to write the guide's picture in, once the guide is made.
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "gone"))
+	if err := co.createWelcome(); err == nil {
+		t.Fatal("the guide was made without its picture")
+	}
+	pages, _ := st.Pages()
+	files, _ := st.Files()
+	if pending := st.PendingCount(); len(pages) != 0 || len(files) != 0 || pending != 0 {
+		t.Errorf("%d pages, %d files and %d changes to go up stay", len(pages), len(files), pending)
+	}
+	t.Setenv("TMPDIR", t.TempDir())
+	if err := co.createWelcome(); err != nil {
+		t.Fatal(err)
+	}
+	if pages, _ := st.Pages(); len(pages) != 2 {
+		t.Errorf("%d pages after the next start", len(pages))
 	}
 }
 

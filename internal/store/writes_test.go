@@ -1,6 +1,8 @@
 package store
 
 import (
+	"os"
+	"path/filepath"
 	gosync "sync"
 	"testing"
 
@@ -104,7 +106,7 @@ func TestFailedWritesNotifyNoOne(t *testing.T) {
 	}
 	fail(t, s, "UPDATE", "pages")
 	fail(t, s, "DELETE", "model_providers")
-	fail(t, s, "UPDATE", "conflicts")
+	fail(t, s, "DELETE", "conflicts")
 	fail(t, s, "DELETE", "spaces")
 	var told []string
 	s.Subscribe(func(c Change) { told = append(told, c.Table) })
@@ -174,5 +176,35 @@ func TestDefaultModelOfAProviderGoneIsNone(t *testing.T) {
 	}
 	if def, ok := s.Settings().Default(); !ok || def.ProviderID != "p1" {
 		t.Errorf("default %v, %v", def, ok)
+	}
+}
+
+// A file copied into the app is whole or not there: one that cannot be
+// read to the end leaves nothing, and one that can leaves only itself, as
+// does one downloaded over it.
+func TestFileCopiesAreWholeOrNone(t *testing.T) {
+	s := open(t)
+	// A folder opens as a file does, and fails as it is read.
+	if _, err := s.AddFile(t.TempDir(), "", "", ""); err == nil {
+		t.Fatal("added a folder")
+	}
+	if left, _ := os.ReadDir(filepath.Join(s.Dir, "files")); len(left) != 0 {
+		t.Errorf("left %v", left)
+	}
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DownloadedFile(f.ID, []byte("hello again")); err != nil {
+		t.Fatal(err)
+	}
+	left, _ := os.ReadDir(filepath.Dir(f.LocalPath))
+	data, _ := os.ReadFile(f.LocalPath)
+	if len(left) != 1 || string(data) != "hello again" || f.SizeBytes != 5 {
+		t.Errorf("left %v, %q, size %d", left, data, f.SizeBytes)
 	}
 }

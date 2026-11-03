@@ -281,6 +281,57 @@
           }
         },
         {
+          "id": "x1",
+          "type": "link_preview",
+          "data": {
+            "url": "https://example.com/untitled"
+          }
+        },
+        {
+          "id": "x2",
+          "type": "link_preview",
+          "data": {
+            "url": "https://go.dev/doc",
+            "title": "  Docs  "
+          }
+        },
+        {
+          "id": "x3",
+          "type": "file",
+          "data": {
+            "title": " Report ",
+            "name": "r.pdf",
+            "url": "file:///x/r.pdf"
+          }
+        },
+        {
+          "id": "x4",
+          "type": "file",
+          "data": {
+            "url": "file:///x/only.pdf"
+          }
+        },
+        {
+          "id": "x5",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": " \t "
+              }
+            ]
+          }
+        },
+        {
+          "id": "x6",
+          "type": "embed",
+          "data": {
+            "title": " ",
+            "height": 200,
+            "html": "<p>x</p>"
+          }
+        },
+        {
           "id": "t",
           "type": "table",
           "data": {
@@ -369,6 +420,58 @@
                     "delta": [
                       {
                         "insert": "2"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "far",
+          "type": "table",
+          "data": {
+            "rowsLen": 2,
+            "colsLen": 1
+          },
+          "children": [
+            {
+              "id": "far0",
+              "type": "table/cell",
+              "data": {
+                "rowPosition": 0,
+                "colPosition": 0
+              },
+              "children": [
+                {
+                  "id": "far0p",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "Kept"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "far1",
+              "type": "table/cell",
+              "data": {
+                "rowPosition": 10000000000000000000,
+                "colPosition": 0
+              },
+              "children": [
+                {
+                  "id": "far1p",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "Far"
                       }
                     ]
                   }
@@ -593,6 +696,53 @@
       "level": 1
     },
     {
+      "id": "x1",
+      "type": "link_preview",
+      "depth": 0,
+      "link": {
+        "url": "https://example.com/untitled"
+      }
+    },
+    {
+      "id": "x2",
+      "type": "link_preview",
+      "depth": 0,
+      "link": {
+        "url": "https://go.dev/doc",
+        "title": "  Docs  "
+      }
+    },
+    {
+      "id": "x3",
+      "type": "file",
+      "depth": 0,
+      "file": {
+        "name": "r.pdf"
+      }
+    },
+    {
+      "id": "x4",
+      "type": "file",
+      "depth": 0,
+      "file": {}
+    },
+    {
+      "id": "x5",
+      "type": "paragraph",
+      "depth": 0,
+      "text": " \t "
+    },
+    {
+      "id": "x6",
+      "type": "embed",
+      "depth": 0,
+      "embed": {
+        "title": " ",
+        "height": 200,
+        "html": "<p>x</p>"
+      }
+    },
+    {
       "id": "t",
       "type": "table",
       "depth": 0,
@@ -606,6 +756,17 @@
           "2"
         ]
       ]
+    },
+    {
+      "id": "far",
+      "type": "table",
+      "depth": 0,
+      "rows": [
+        [
+          "Kept"
+        ]
+      ]
     }
-  ]
+  ],
+  "plain": "Ship v1\nPlan\nItem\nDo it\nSaid\nfmt.Println(1)\nCareful\nMore\nHidden\nRisks\nTimer\nSong\nGo\nnotes.pdf\ne^{i\\pi}+1=0\ngraph TD\n  A-->B\nFirst\nFar\nFarther\nBelow\nhttps://example.com/untitled\nDocs\nReport\nfile:///x/only.pdf\nx\n1\ny\n2\nKept\nFar"
 }

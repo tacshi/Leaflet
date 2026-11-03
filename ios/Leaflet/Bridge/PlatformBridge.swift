@@ -75,17 +75,29 @@ final class PlatformBridge: NSObject, MobilePlatformProtocol, Sendable {
         }
     }
 
+    /// watchICloud watches the folder, or stops, as the core asks: only
+    /// while the app is in front. A watch asked for in the background, as
+    /// turning iCloud sync on finishes once the app went away, waits for
+    /// the app to come back, as the core's Start watches again then.
     func watchICloud(_ on: Bool) {
         let (old, new) = iCloud.withLock { w in
             let old = w.watcher
             w.watcher = nil
-            if on, let folder = w.folder, let onChange = w.onChange {
+            if on, w.inFront, let folder = w.folder, let onChange = w.onChange {
                 w.watcher = FolderWatcher(folder, onChange: onChange)
             }
             return (old, w.watcher)
         }
         old?.stop()
         new?.start()
+    }
+
+    /// setInFront says whether the app is in front, where alone the folder
+    /// is watched: in the background a file presenter must not stay.
+    /// Going away stops the watch.
+    func setInFront(_ front: Bool) {
+        iCloud.withLock { $0.inFront = front }
+        if !front { watchICloud(false) }
     }
 
     func startDownload(_ path: String?) throws {
@@ -99,11 +111,12 @@ final class PlatformBridge: NSObject, MobilePlatformProtocol, Sendable {
 }
 
 /// ICloudWatch is the Leaflet folder in iCloud Drive and its watcher,
-/// while watching it.
+/// while watching it, and whether the app is in front, as it must be to.
 private struct ICloudWatch {
     var folder: URL?
     var onChange: (@Sendable () -> Void)?
     var watcher: FolderWatcher?
+    var inFront = false
 }
 
 /// Reachable is whether the network can be reached, as the path monitor

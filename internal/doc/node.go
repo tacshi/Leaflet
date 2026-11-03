@@ -135,22 +135,40 @@ func (n *Node) Set(key string, v any) {
 	n.Data[key] = normalize(v)
 }
 
-// AsInt reads a JSON number as an int.
+// AsInt reads a JSON number as an int, whole numbers only being kept of a
+// fraction. One beyond the integers a JSON number holds exactly (±2^53),
+// as another client, or a hostile one, can write, is def: as an int it
+// would be the platform's to choose, the largest on arm64, and a table
+// sized from it overflows.
 func AsInt(v any, def int) int {
+	var i int64
 	switch x := v.(type) {
 	case float64:
-		return int(x)
-	case int:
-		return x
-	case int64:
-		return int(x)
-	case json.Number:
-		if i, err := x.Int64(); err == nil {
-			return int(i)
+		if math.IsNaN(x) || math.Abs(x) > maxExactInt {
+			return def
 		}
+		i = int64(x)
+	case int:
+		i = int64(x)
+	case int64:
+		i = x
+	case json.Number:
+		var err error
+		if i, err = x.Int64(); err != nil {
+			return def
+		}
+	default:
+		return def
 	}
-	return def
+	if i > maxExactInt || i < -maxExactInt {
+		return def
+	}
+	return int(i)
 }
+
+// maxExactInt is the largest integer a JSON number, a float64, holds
+// exactly.
+const maxExactInt = 1 << 53
 
 // AsFloat reads a JSON number as a float64. Only a finite one is: JSON
 // has no NaN or infinity, so data holding one could not be stored.

@@ -1,3 +1,4 @@
+import LeafletCore
 import SwiftUI
 
 /// InspectorTab is the panel beside a page: the agent, the comments, or
@@ -74,12 +75,29 @@ struct PageScreen: View {
                         }
                         c.onAddAgent = { [weak scene] in scene?.openSettings() }
                         c.onEditBlock = { [weak scene] in scene?.editingBlock = $0 }
+                        c.onUndoRun = { [weak model, app] in
+                            guard let model,
+                                let run = model.agents.runs.last(where: {
+                                    !$0.edits.isEmpty && !$0.undone && !$0.running
+                                })
+                            else { return }
+                            Task {
+                                do {
+                                    try await app.client?.undoRun(model.id, runID: run.id)
+                                } catch {
+                                    app.show(Toast(message: error.localizedDescription))
+                                }
+                                await model.refreshAgents()
+                            }
+                        }
                         c.onEditing = { [weak scene] in scene?.writing = $0 }
                         c.onHeading = { [weak scene] in scene?.heading = $0 }
                         c.pageLinks = PageLinks(
                             title: { [app] id in app.library.page(id)?.title },
-                            open: { [weak scene] id in scene?.open(id) })
+                            open: { [weak scene] id in scene?.open(id) },
+                            openAt: { [weak scene] id, block in scene?.open(id, at: block) })
                         c.plainCopy = { [app] nodes in try? await app.client?.plainCopy(nodes) }
+                        c.copyText = { [app] nodes in try? await app.client?.copyText(nodes) }
                         c.menuItems = { [app, pageID] trigger, give in
                             Task {
                                 if let items = try? await app.client?.menuItems(
@@ -464,30 +482,29 @@ struct Inspector: View {
     }
 }
 
-/// OutlineRow is a heading in the outline: how deep it nests, the heading
-/// it is in, and whether others are in it. Apart from the view, it is
-/// worked out on any thread.
-struct OutlineRow: Identifiable {
-    let node: DocNode
+/// OutlineRow is a heading in the outline, as the core nests it for the
+/// desktop's outline too (MobileOutline): its text and level, how deep it
+/// nests, the heading it is in, and whether others are in it. Apart from
+/// the view, it is worked out on any thread.
+struct OutlineRow: Identifiable, Decodable {
+    let id: String
+    let text: String
     let level: Int
     let depth: Int
     let parent: String?
-    var hasChildren = false
-    var id: String { node.id }
+    let hasChildren: Bool
 
-    /// rows nests headings as the desktop does: a heading is in the last
-    /// one before it of a higher level.
-    static func rows(_ headings: [(node: DocNode, level: Int)]) -> [OutlineRow] {
-        var rows: [OutlineRow] = []
-        var open: [(level: Int, index: Int)] = []
-        for h in headings {
-            while let last = open.last, last.level >= h.level { open.removeLast() }
-            if let last = open.last { rows[last.index].hasChildren = true }
-            let parent = open.last.map { rows[$0.index].id }
-            rows.append(OutlineRow(node: h.node, level: h.level, depth: open.count, parent: parent))
-            open.append((h.level, rows.count - 1))
-        }
-        return rows
+    enum CodingKeys: String, CodingKey {
+        case id, text, level, depth, parent
+        case hasChildren = "has_children"
+    }
+
+    /// rows are a page's headings, given in their order, nested.
+    static func rows(_ headings: [DocNode]) -> [OutlineRow] {
+        guard !headings.isEmpty, let data = try? JSONEncoder().encode(headings) else { return [] }
+        var error: NSError?
+        let raw = MobileOutline(String(decoding: data, as: UTF8.self), &error)
+        return (try? JSONDecoder().decode([OutlineRow].self, from: Data(raw.utf8))) ?? []
     }
 }
 
@@ -577,7 +594,7 @@ struct OutlineList: View {
                 // As a sheet, it is in the way of the page it went to.
                 if isSheet { scene.inspectorShown = false }
             } label: {
-                Text(row.node.text.isEmpty ? L.outlineUntitledHeading : row.node.text)
+                Text(row.text.isEmpty ? L.outlineUntitledHeading : row.text)
                     .font(row.level == 1 || current ? .body.weight(.semibold) : .body)
                     .foregroundStyle(current ? palette.accent : palette.text)
                     .frame(maxWidth: .infinity, alignment: .leading)

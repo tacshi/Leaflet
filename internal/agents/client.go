@@ -14,17 +14,22 @@ import (
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"leaflet/internal/agents/endpoint"
+	"leaflet/locales"
 )
 
 // APIError is a failed model request.
 type APIError struct {
 	Status  int
 	Message string
+	// RetryAfter is how long the server asked to be left before trying
+	// again, 0 when it did not say.
+	RetryAfter time.Duration
 }
 
 func (e *APIError) Error() string { return e.Message }
@@ -153,7 +158,7 @@ func (b *idleBody) Read(p []byte) (int, error) {
 	if n > 0 {
 		b.timer.Reset(b.idle)
 	}
-	if err != nil && context.Cause(b.ctx) == errIdle {
+	if err != nil && errors.Is(context.Cause(b.ctx), errIdle) {
 		err = errIdle
 	}
 	return n, err
@@ -215,7 +220,20 @@ func (c *Client) send(ctx context.Context, hc *http.Client, method, path string,
 	if err != nil {
 		return nil, err
 	}
-	return nil, &APIError{Status: res.StatusCode, Message: errorMessage(res.Status, data)}
+	return nil, &APIError{Status: res.StatusCode, Message: errorMessage(res.Status, data), RetryAfter: retryAfter(res.Header)}
+}
+
+// retryAfter is the wait a busy server's Retry-After asks for, in seconds
+// or until a time; 0 when it asks none.
+func retryAfter(h http.Header) time.Duration {
+	v := strings.TrimSpace(h.Get("Retry-After"))
+	if s, err := strconv.Atoi(v); err == nil {
+		return max(0, time.Duration(s)*time.Second)
+	}
+	if t, err := http.ParseTime(v); err == nil {
+		return max(0, time.Until(t))
+	}
+	return 0
 }
 
 // errorMessage is what a failed answer says went wrong, its status if it
@@ -342,7 +360,7 @@ func (c *Client) ChatStream(ctx context.Context, model string, messages []map[st
 		return ChatResult{}, err
 	}
 	if len(resp.Choices) == 0 {
-		return ChatResult{}, &APIError{Message: "The model returned no choices."}
+		return ChatResult{}, &APIError{Message: locales.AgentModelNoChoices()}
 	}
 	ch := resp.Choices[0]
 	out := ChatResult{Content: textOf(ch.Message.Content), FinishReason: ch.FinishReason}
@@ -431,7 +449,7 @@ func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
 			continue
 		}
 		if ev.Error != nil {
-			return ChatResult{}, &APIError{Message: errorMessage("The model could not answer", []byte(data))}
+			return ChatResult{}, &APIError{Message: errorMessage(locales.AgentModelCouldNotAnswer(), []byte(data))}
 		}
 		if len(ev.Choices) == 0 {
 			continue
@@ -446,7 +464,10 @@ func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
 			// that came before.
 			i := -1
 			if tc.Index != nil {
-				if j, ok := slot[*tc.Index]; ok {
+				// An index a server gives again with another ID starts
+				// another call: merged, the two would be one, of the
+				// second's name and both's arguments run together.
+				if j, ok := slot[*tc.Index]; ok && (tc.ID == "" || calls[j].ID == "" || calls[j].ID == tc.ID) {
 					i = j
 				}
 			} else if tc.ID != "" {
@@ -481,7 +502,7 @@ func readStream(r io.Reader, on *Streamed) (ChatResult, error) {
 		return ChatResult{}, err
 	}
 	if !done && out.FinishReason == "" {
-		return ChatResult{}, &APIError{Message: "The model's answer was cut off."}
+		return ChatResult{}, &APIError{Message: locales.AgentModelCutOff()}
 	}
 	out.Content = text.String()
 	for i, c := range calls {
@@ -519,19 +540,33 @@ type TestResult struct {
 	Models        []string
 }
 
-// Test checks the endpoint answers and whether the model calls tools.
+// Test checks the endpoint answers and whether the model calls tools: the
+// one given, else the first the endpoint lists.
 func (c *Client) Test(ctx context.Context, model string) TestResult {
 	models, listErr := c.ListModels(ctx)
 	if model == "" {
 		if listErr != nil {
-			return TestResult{Message: fmt.Sprintf("Could not reach %s: %v", c.BaseURL, listErr)}
+			return TestResult{Message: locales.AgentTestUnreachable(c.BaseURL, listErr.Error())}
 		}
 		if len(models) == 0 {
-			return TestResult{Message: "Choose a model to test with"}
+			return TestResult{Message: locales.AgentTestChooseModel()}
 		}
 		model = models[0]
 	}
-	res, err := c.Chat(ctx, model, []map[string]any{{
+	return testModel(ctx, c, model, models, c.BaseURL)
+}
+
+// TestModel checks a model answers and whether it calls tools; models are
+// those its provider lists, nil when it lists none.
+func TestModel(ctx context.Context, m Model, model string, models []string) TestResult {
+	return testModel(ctx, m, model, models, "")
+}
+
+// testModel is TestModel of a model at the endpoint at, which a failure
+// other than the model's own answer says could not be reached; "" says
+// the failure as it is.
+func testModel(ctx context.Context, m Model, model string, models []string, at string) TestResult {
+	res, err := m.Chat(ctx, model, []map[string]any{{
 		"role": "user", "content": `Call the ping tool with {"value": "ok"}. Do not reply with text.`,
 	}}, []map[string]any{{
 		"type": "function",
@@ -539,27 +574,27 @@ func (c *Client) Test(ctx context.Context, model string) TestResult {
 			"name": "ping", "description": "Health check.",
 			"parameters": map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}, "required": []string{"value"}},
 		},
-	}}, 64)
+		// No cap on the answer: a model that thinks first spends a small
+		// one thinking, and would seem not to call tools, and reasoning
+		// models refuse max_tokens. The server's test sets none either.
+	}}, 0)
 	if err != nil {
-		if _, ok := err.(*APIError); ok {
+		var api *APIError
+		if errors.As(err, &api) || at == "" {
 			return TestResult{Message: err.Error(), Models: models}
 		}
-		return TestResult{Message: fmt.Sprintf("Could not reach %s: %v", c.BaseURL, err), Models: models}
+		return TestResult{Message: locales.AgentTestUnreachable(at, err.Error()), Models: models}
 	}
 	tools := false
 	for _, tc := range res.ToolCalls {
 		tools = tools || tc.Name == "ping"
 	}
-	msg := "Connected, but this model did not call tools: it will be chat-only."
-	if tools {
-		switch len(models) {
-		case 0:
-			msg = "Connected · tool calling works"
-		case 1:
-			msg = "Connected · 1 model available"
-		default:
-			msg = fmt.Sprintf("Connected · %d models available", len(models))
-		}
+	msg := locales.AgentTestChatOnly()
+	switch {
+	case tools && len(models) == 0:
+		msg = locales.AgentTestToolsWork()
+	case tools:
+		msg = locales.AgentTestModels(len(models))
 	}
 	return TestResult{OK: true, SupportsTools: tools, Message: msg, Models: models}
 }

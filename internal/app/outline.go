@@ -28,13 +28,14 @@ func (a *App) openBlock(pageID, blockID string) {
 		a.toast(locales.OutlineBlockGone())
 		return
 	}
-	a.goToBlock(blockID)
+	a.goToBlock(blockID, true)
 }
 
 // goToBlock shows a block of the open page at the top, opening the
 // toggles and unfolding the headings that hide it, puts the caret there
-// and lights it up for a moment.
-func (a *App) goToBlock(id string) {
+// and lights it up for a moment; focus gives the page the keyboard, which
+// the outline keeps while its arrows go from heading to heading.
+func (a *App) goToBlock(id string, focus bool) {
 	ps := a.page
 	for loc := ps.editor.Content.Locate(id); loc != nil && loc.Parent != nil; loc = ps.editor.Content.Locate(loc.Parent.ID) {
 		if p := loc.Parent; p.Type == "toggle_list" && p.Bool("collapsed") {
@@ -43,7 +44,9 @@ func (a *App) goToBlock(id string) {
 	}
 	ps.editor.Reveal(id)
 	ps.editor.PlaceCaret(id, 0)
-	ps.editor.Focus()
+	if focus {
+		ps.editor.Focus()
+	}
 	ps.scrollTo, ps.scrollWait = id, 0
 	if a.win != nil {
 		a.win.Invalidate()
@@ -54,17 +57,37 @@ func (a *App) goToBlock(id string) {
 		return
 	}
 	if ps.lit == nil {
-		ps.lit = map[string]bool{}
+		ps.lit = map[string]time.Time{}
 	}
-	ps.tinted[id], ps.lit[id] = true, true
-	time.AfterFunc(1500*time.Millisecond, func() {
-		a.update(func() {
-			if ps.lit[id] {
-				delete(ps.lit, id)
-				delete(ps.tinted, id)
-			}
-		})
-	})
+	ps.tinted[id], ps.lit[id] = true, time.Time{}
+}
+
+// blockLit is how long goToBlock lights a block.
+const blockLit = 1500 * time.Millisecond
+
+// dimLit takes the light off the blocks goToBlock lit once their moment
+// is over, from the frame they first showed lit in.
+func (a *App) dimLit(c *ui.Context) {
+	ps := a.page
+	now := c.Now()
+	var next time.Duration
+	for id, at := range ps.lit {
+		if at.IsZero() {
+			ps.lit[id], at = now, now
+		}
+		left := blockLit - now.Sub(at)
+		if left <= 0 {
+			delete(ps.lit, id)
+			delete(ps.tinted, id)
+			continue
+		}
+		if next == 0 || left < next {
+			next = left
+		}
+	}
+	if next > 0 {
+		c.After(next)
+	}
 }
 
 // outlinePanel lists the open page's headings, those under a heading
@@ -93,11 +116,15 @@ func (a *App) outlinePanel(c *ui.Context) {
 			ps.outline.Open.Add(id)
 		}
 	}
-	current := currentHeading(heads, ps.editor.BlockTop, ps.viewTop+2*scrollMargin)
-	ps.outlineRow = -1
-	for i := 0; i < ps.outline.Rows(); i++ {
-		if ps.outline.Item(i) == current {
-			ps.outlineRow = i
+	// The heading chosen is the one the page is at, but while the list
+	// has the keyboard, which chooses as it scrolls the page there.
+	if !ps.outlineKeys {
+		current := currentHeading(heads, ps.editor.BlockTop, ps.view.Bounds(c).Y+2*scrollMargin)
+		ps.outlineRow = -1
+		for i := 0; i < ps.outline.Rows(); i++ {
+			if ps.outline.Item(i) == current {
+				ps.outlineRow = i
+			}
 		}
 	}
 	ps.outline.List.Selected = &ps.outlineRow
@@ -110,34 +137,26 @@ func (a *App) outlinePanel(c *ui.Context) {
 		}
 		ui.Text(c, text).FontSize(13.5).SingleLine()
 	}).Grow(1).Padding(8)
-	if list.Changed() && ps.outlineRow >= 0 && ps.outlineRow < ps.outline.Rows() {
-		a.goToBlock(ps.outline.Item(ps.outlineRow))
+	ps.outlineKeys = list.Focused()
+	// Enter or a double click goes into the page; a row chosen, by the
+	// arrows too, only shows it.
+	submitted := list.Submitted()
+	if (list.Changed() || submitted) && ps.outlineRow >= 0 && ps.outlineRow < ps.outline.Rows() {
+		a.goToBlock(ps.outline.Item(ps.outlineRow), submitted)
 	}
 }
 
-// headingTree nests each heading under the nearest heading before it of a
-// higher level: the headings at the top, and those under each, nil for a
-// heading with none.
+// headingTree is the outline's tree, as doc.Outline nests the headings:
+// those at the top, and those in each, nil for a heading with none.
 func headingTree(heads []*doc.Node) ([]string, map[string][]string) {
 	var roots []string
 	kids := map[string][]string{}
-	type open struct {
-		level int
-		id    string
-	}
-	var stack []open
-	for _, h := range heads {
-		level := h.Int("level", 1)
-		for len(stack) > 0 && stack[len(stack)-1].level >= level {
-			stack = stack[:len(stack)-1]
-		}
-		if len(stack) == 0 {
+	for _, h := range doc.Outline(heads) {
+		if h.Parent == "" {
 			roots = append(roots, h.ID)
 		} else {
-			parent := stack[len(stack)-1].id
-			kids[parent] = append(kids[parent], h.ID)
+			kids[h.Parent] = append(kids[h.Parent], h.ID)
 		}
-		stack = append(stack, open{level, h.ID})
 	}
 	return roots, kids
 }
@@ -152,13 +171,14 @@ const scrollWaitMax = 10
 
 // scrollToBlock brings the block asked for to the top of the page, once
 // the page has laid it out.
-func (a *App) scrollToBlock() {
+func (a *App) scrollToBlock(c *ui.Context) {
 	ps := a.page
 	if ps.scrollTo == "" {
 		return
 	}
 	top, ok := ps.editor.BlockTop(ps.scrollTo)
-	if !ok || ps.viewTop == 0 {
+	view := ps.view.Bounds(c)
+	if !ok || view.H == 0 {
 		// Not laid out yet: the next frame has it.
 		if ps.scrollWait++; ps.scrollWait > scrollWaitMax {
 			ps.scrollTo = ""
@@ -169,7 +189,7 @@ func (a *App) scrollToBlock() {
 		}
 		return
 	}
-	ps.scroll.Y = max(ps.scroll.Y+top-ps.viewTop-scrollMargin, 0)
+	ps.scroll.Y = max(ps.scroll.Y+top-view.Y-scrollMargin, 0)
 	ps.scrollTo = ""
 }
 

@@ -151,11 +151,7 @@ func (e *Editor) ReplaceText(r *ui.TextInputRange, text string) {
 
 // SetMarkedText shows an input method's composition in the text.
 func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.TextInputRange) {
-	if e.ReadOnly {
-		return
-	}
-	n := e.focusNode()
-	if n == nil {
+	if e.ReadOnly || e.node(e.focus.ID) == nil {
 		return
 	}
 	if !e.marked {
@@ -164,6 +160,23 @@ func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 		redo := e.redo
 		e.pushUndo(false)
 		e.markStep, e.markRedo = e.Collapsed() && (r == nil || r.Start == r.End), redo
+		if e.focusNode() == nil {
+			// On a block selected whole, or a selection ending on one, it
+			// starts a paragraph, as typing does: in place of what is
+			// selected, or after the block.
+			e.markStep = false
+			e.deleteSelection()
+			if n := e.node(e.focus.ID); n != nil && !n.IsText() {
+				p := newText("paragraph", nil)
+				_ = e.Content.Insert(doc.Position{After: n.ID}, p)
+				e.anchor, e.focus = Pos{p.ID, 0}, Pos{p.ID, 0}
+			}
+			r = nil
+		}
+	}
+	n := e.focusNode()
+	if n == nil {
+		return
 	}
 	from, to, ok := e.target(r)
 	if !ok {
@@ -303,7 +316,7 @@ func (e *Editor) BoundsForRange(r ui.TextInputRange) (ui.Rect, ui.TextInputRange
 		return ui.Rect{}, r, false
 	}
 	l := e.layouts[n.ID]
-	box, ok := e.geom[n.ID]
+	box, ok := e.box(n.ID)
 	if l == nil || !ok {
 		return ui.Rect{}, r, false
 	}
@@ -325,7 +338,7 @@ func (e *Editor) IndexForPoint(p ui.Point) (int, bool) {
 		return 0, false
 	}
 	l := e.layouts[n.ID]
-	box, ok := e.geom[n.ID]
+	box, ok := e.box(n.ID)
 	if l == nil || !ok {
 		return 0, false
 	}
@@ -333,12 +346,13 @@ func (e *Editor) IndexForPoint(p ui.Point) (int, bool) {
 	return l.layout.IndexAt(ui.Point{X: wx - box.X - l.x, Y: wy - box.Y - l.y}), true
 }
 
-// hit finds the place under a point of the window.
-func (e *Editor) hit(wx, wy float32) (Pos, bool) {
+// hit finds the place under a point of the window, and the side of it
+// the point is on where the place shows twice (affinity).
+func (e *Editor) hit(wx, wy float32) (Pos, ui.TextAffinity, bool) {
 	var best *doc.Node
 	bestDist := float32(1e9)
 	for _, n := range e.units() {
-		r, ok := e.geom[n.ID]
+		r, ok := e.box(n.ID)
 		if !ok {
 			continue
 		}
@@ -357,26 +371,27 @@ func (e *Editor) hit(wx, wy float32) (Pos, bool) {
 		}
 	}
 	if best == nil {
-		return Pos{}, false
+		return Pos{}, ui.TextDownstream, false
 	}
 	if !best.IsText() {
-		return Pos{best.ID, 0}, true
+		return Pos{best.ID, 0}, ui.TextDownstream, true
 	}
 	l := e.layouts[best.ID]
-	r := e.geom[best.ID]
+	r, _ := e.box(best.ID)
 	if l == nil {
-		return Pos{best.ID, 0}, true
+		return Pos{best.ID, 0}, ui.TextDownstream, true
 	}
 	_, h := l.layout.Size()
 	y := min(max(wy-r.Y-l.y, 0), max(h-1, 0))
-	idx := l.layout.IndexAt(ui.Point{X: wx - r.X - l.x, Y: y})
-	return Pos{best.ID, runeOff(best, idx)}, true
+	at := l.layout.PositionAt(ui.Point{X: wx - r.X - l.x, Y: y})
+	return Pos{best.ID, runeOff(best, at.Index)}, at.Affinity, true
 }
 
-// caretRect is the caret of a place, in window coordinates.
+// caretRect is the caret of a place, in window coordinates: on the side
+// of it the caret is on, for the caret's.
 func (e *Editor) caretRect(p Pos) (ui.Rect, bool) {
 	n := e.node(p.ID)
-	box, ok := e.geom[p.ID]
+	box, ok := e.box(p.ID)
 	if n == nil || !ok {
 		return ui.Rect{}, false
 	}
@@ -387,17 +402,27 @@ func (e *Editor) caretRect(p Pos) (ui.Rect, bool) {
 	if l == nil {
 		return ui.Rect{}, false
 	}
-	c := l.layout.Caret(utf16Off(n, p.Off))
+	c := l.layout.CaretAt(e.caretPosition(n, p))
 	c.X += box.X + l.x
 	c.Y += box.Y + l.y
 	return c, true
+}
+
+// caretPosition is place p of text block n in its layout, on the caret's
+// side when it is the caret's place.
+func (e *Editor) caretPosition(n *doc.Node, p Pos) ui.TextCaretPosition {
+	at := ui.TextCaretPosition{Index: utf16Off(n, p.Off)}
+	if p == e.focus {
+		at.Affinity = e.affinity
+	}
+	return at
 }
 
 // RangeRect is the box in the window of the text from one position to
 // another: the lines it is on, across its first block's width. A block
 // that isn't text gives its whole box.
 func (e *Editor) RangeRect(from, to Pos) (ui.Rect, bool) {
-	box, ok := e.geom[from.ID]
+	box, ok := e.box(from.ID)
 	if !ok {
 		return ui.Rect{}, false
 	}
@@ -410,14 +435,18 @@ func (e *Editor) RangeRect(from, to Pos) (ui.Rect, bool) {
 		a = box
 	}
 	if n := e.node(to.ID); n == nil || !n.IsText() {
-		b = e.geom[to.ID]
+		b, _ = e.box(to.ID)
 	}
 	return ui.Rect{X: box.X, Y: a.Y, W: box.W, H: b.Y + b.H - a.Y}, true
 }
 
 // moveTo moves the caret, extending the selection with Shift. Typing
 // after it is an undo step of its own.
-func (e *Editor) moveTo(p Pos, extend bool) {
+func (e *Editor) moveTo(p Pos, extend bool) { e.moveToSide(p, ui.TextDownstream, extend) }
+
+// moveToSide is moveTo with the side of p the caret shows on where p
+// shows twice (affinity).
+func (e *Editor) moveToSide(p Pos, side ui.TextAffinity, extend bool) {
 	e.BreakUndo()
 	desired, has := e.desiredX, e.hasDesired
 	if extend {
@@ -425,60 +454,164 @@ func (e *Editor) moveTo(p Pos, extend bool) {
 	} else {
 		e.Select(p, p)
 	}
+	e.affinity = side
 	e.desiredX, e.hasDesired = desired, has
 }
 
+// rtl reports whether text block n reads right to left, as its first
+// line does.
+func (e *Editor) rtl(n *doc.Node) bool {
+	l := e.layoutOf(n)
+	if l == nil {
+		return false
+	}
+	lines := l.layout.Lines()
+	return len(lines) > 0 && lines[0].RTL
+}
+
+// lineEdges are the start and the end of the line of text block n the
+// caret shows on at off, on side: at a line's wrap, upstream, the line
+// it ends, else the one it starts; and whether that line wraps, its end
+// being the next one's start. A block not laid out has its own.
+func (e *Editor) lineEdges(n *doc.Node, off int, side ui.TextAffinity) (start, end int, wraps bool) {
+	l := e.layoutOf(n)
+	if l == nil {
+		return 0, textLen(n), false
+	}
+	u := utf16Off(n, off)
+	lines := l.layout.Lines()
+	for i, line := range lines {
+		wraps = i+1 < len(lines) && lines[i+1].Start == line.End
+		if u < line.End || u == line.End && (!wraps || side == ui.TextUpstream) || i == len(lines)-1 {
+			return runeOff(n, line.Start), runeOff(n, line.End), wraps
+		}
+	}
+	return 0, textLen(n), false
+}
+
+// horizontal moves the caret left (dir -1) or right: a character, a
+// word, or to the line's end, the way the arrow points as the text is
+// shown, which is back in a block reading right to left. Past a block's
+// edge, it goes on into the next block in the page's order.
 func (e *Editor) horizontal(dir int, word, line, extend bool) {
+	n := e.node(e.focus.ID)
+	if n == nil {
+		return
+	}
+	// forward is the way the arrow goes in the text.
+	forward := dir
+	if e.rtl(n) {
+		forward = -dir
+	}
 	if !extend && !e.Collapsed() && !word && !line {
 		a, b := e.ordered()
-		if dir < 0 {
+		back := dir < 0
+		if a.ID == b.ID {
+			back = forward < 0
+		}
+		if back {
 			e.moveTo(a, false)
 		} else {
 			e.moveTo(b, false)
 		}
 		return
 	}
+	if line {
+		e.lineEdge(forward, extend)
+		return
+	}
+	p, side := e.focus, ui.TextDownstream
+	us := e.units()
+	i := e.index(p.ID)
+	edge := forward < 0 && p.Off == 0 || forward > 0 && p.Off == textLen(n)
+	switch {
+	case word && !edge:
+		if forward < 0 {
+			p.Off = wordStart([]rune(n.Delta().Plain()), p.Off)
+		} else {
+			p.Off = wordEnd([]rune(n.Delta().Plain()), p.Off)
+		}
+	case !word && e.layoutOf(n) != nil:
+		// A character the way the arrow points, as the line shows them, or
+		// past the block's edge where it stops.
+		l := e.layoutOf(n).layout
+		from := e.caretPosition(n, p)
+		to := l.MoveCaret(from, dir)
+		if edge = to == from; !edge {
+			p.Off, side = runeOff(n, to.Index), to.Affinity
+		}
+	case !word && !edge && forward < 0:
+		p.Off = e.prevStop(n, p.Off)
+	case !word && !edge:
+		p.Off = e.nextStop(n, p.Off)
+	}
+	switch {
+	case !edge:
+	case forward < 0 && i > 0:
+		prev := us[i-1]
+		p = Pos{prev.ID, textLen(prev)}
+	case forward > 0 && i+1 < len(us):
+		p = Pos{us[i+1].ID, 0}
+	}
+	// A mention is passed over whole.
+	if m := e.node(p.ID); m != nil && m.IsText() && p.ID == e.focus.ID {
+		if start, end, ok := m.Delta().MentionAround(p.Off); ok {
+			if p.Off < e.focus.Off {
+				p.Off = start
+			} else {
+				p.Off = end
+			}
+		}
+	}
+	e.hasDesired = false
+	e.moveToSide(p, side, extend)
+	e.hasDesired = false
+}
+
+// lineEdge moves the caret to the start of the line it shows on, or with
+// forward 1 to its end, in the line's text, as Home and End do.
+func (e *Editor) lineEdge(forward int, extend bool) {
+	n := e.node(e.focus.ID)
+	if n == nil {
+		return
+	}
+	p, side := e.focus, ui.TextDownstream
+	start, end, wraps := e.lineEdges(n, p.Off, e.affinity)
+	if forward < 0 {
+		p.Off = start
+	} else if p.Off = end; wraps {
+		// The end of a line that wraps shows there, not at the start of
+		// the next.
+		side = ui.TextUpstream
+	}
+	e.hasDesired = false
+	e.moveToSide(p, side, extend)
+}
+
+// blockEdge moves the caret to the start of its block, or with dir 1 to
+// its end; already there, with further, to the start of the block before
+// or the end of the one after, as Alt-Up and Alt-Down do on the Mac.
+func (e *Editor) blockEdge(dir int, further, extend bool) {
+	n := e.node(e.focus.ID)
+	if n == nil {
+		return
+	}
 	p := e.focus
-	n := e.node(p.ID)
 	us := e.units()
 	i := e.index(p.ID)
 	switch {
-	case n == nil:
-		return
-	case line:
-		if dir < 0 {
-			p.Off = 0
-		} else {
-			p.Off = textLen(n)
-		}
-	case dir < 0 && p.Off > 0:
-		if word {
-			p.Off = wordStart([]rune(n.Delta().Plain()), p.Off)
-		} else {
-			p.Off = e.prevStop(n, p.Off)
-		}
-		// A mention is passed over whole.
-		if start, _, ok := n.Delta().MentionAround(p.Off); ok {
-			p.Off = start
-		}
-	case dir > 0 && p.Off < textLen(n):
-		if word {
-			p.Off = wordEnd([]rune(n.Delta().Plain()), p.Off)
-		} else {
-			p.Off = e.nextStop(n, p.Off)
-		}
-		if _, end, ok := n.Delta().MentionAround(p.Off); ok {
-			p.Off = end
-		}
-	case dir < 0 && i > 0:
-		prev := us[i-1]
-		p = Pos{prev.ID, textLen(prev)}
-	case dir > 0 && i+1 < len(us):
-		p = Pos{us[i+1].ID, 0}
+	case dir < 0 && (p.Off > 0 || !further || i <= 0):
+		p.Off = 0
+	case dir < 0:
+		p = Pos{us[i-1].ID, 0}
+	case p.Off < textLen(n) || !further || i+1 >= len(us):
+		p.Off = textLen(n)
+	default:
+		next := us[i+1]
+		p = Pos{next.ID, textLen(next)}
 	}
 	e.hasDesired = false
 	e.moveTo(p, extend)
-	e.hasDesired = false
 }
 
 func (e *Editor) vertical(dir int, extend bool) {
@@ -493,6 +626,11 @@ func (e *Editor) vertical(dir int, extend bool) {
 	}
 	caret, ok := e.caretRect(e.focus)
 	if !ok {
+		// A step back or on in the text, the arrow's way as the block
+		// reads.
+		if e.rtl(e.node(e.focus.ID)) {
+			dir = -dir
+		}
 		e.horizontal(dir, false, false, extend)
 		return
 	}
@@ -504,12 +642,12 @@ func (e *Editor) vertical(dir int, extend bool) {
 	// Within the block, to the line above or below.
 	if n.IsText() {
 		if l := e.layouts[n.ID]; l != nil {
-			box := e.geom[n.ID]
+			box, _ := e.box(n.ID)
 			_, h := l.layout.Size()
 			y := caret.Y - box.Y - l.y + caret.H/2 + float32(dir)*caret.H
 			if y >= 0 && y < h {
-				idx := l.layout.IndexAt(ui.Point{X: x - box.X - l.x, Y: y})
-				e.moveTo(Pos{n.ID, runeOff(n, idx)}, extend)
+				at := l.layout.PositionAt(ui.Point{X: x - box.X - l.x, Y: y})
+				e.moveToSide(Pos{n.ID, runeOff(n, at.Index)}, at.Affinity, extend)
 				return
 			}
 		}
@@ -530,7 +668,7 @@ func (e *Editor) vertical(dir int, extend bool) {
 		return
 	}
 	l := e.layouts[next.ID]
-	box, ok := e.geom[next.ID]
+	box, ok := e.box(next.ID)
 	if l == nil || !ok {
 		off := 0
 		if dir < 0 {
@@ -544,14 +682,20 @@ func (e *Editor) vertical(dir int, extend bool) {
 	if dir < 0 {
 		y = max(h-2, 0)
 	}
-	idx := l.layout.IndexAt(ui.Point{X: x - box.X - l.x, Y: y})
-	e.moveTo(Pos{next.ID, runeOff(next, idx)}, extend)
+	at := l.layout.PositionAt(ui.Point{X: x - box.X - l.x, Y: y})
+	e.moveToSide(Pos{next.ID, runeOff(next, at.Index)}, at.Affinity, extend)
 }
 
 // menuKey handles keys while the / or @ menu is open.
 func (e *Editor) menuKey(ev ui.InputEvent) bool {
 	if e.trigger == nil {
 		return false
+	}
+	if k := ev.Key; (k == ui.KeyDown || k == ui.KeyUp || k == ui.KeyEnter || k == ui.KeyTab) && e.menuFor != *e.trigger {
+		// The menu opened, or its query changed, since it was last built:
+		// the keys choose among its choices as they are now, not those it
+		// showed before, or another menu's.
+		e.findMenuItems()
 	}
 	switch ev.Key {
 	case ui.KeyDown:
@@ -588,12 +732,12 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 		if ev.Button != 0 {
 			// The context menu acts on the block it opened on.
 			e.menuBlock, e.menuAt = "", Pos{}
-			if p, ok := e.hit(wx, wy); ok {
+			if p, _, ok := e.hit(wx, wy); ok {
 				e.menuBlock, e.menuAt = p.ID, p
 			}
 			return false
 		}
-		p, ok := e.hit(wx, wy)
+		p, side, ok := e.hit(wx, wy)
 		if !ok {
 			return false
 		}
@@ -618,7 +762,7 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 		// A press on a block such as a subpage, chart or table selects it
 		// and goes on to the block's own controls: its card, buttons, cells.
 		if n := e.node(p.ID); n != nil && !n.IsText() && ev.Mods&ui.Shift == 0 {
-			if box, ok := e.geom[n.ID]; ok && wy >= box.Y && wy < box.Y+box.H {
+			if box, ok := e.box(n.ID); ok && wy >= box.Y && wy < box.Y+box.H {
 				e.Select(p, p)
 				e.reveal = "" // it is under the pointer; scrolling would lose the click
 				e.BreakUndo()
@@ -628,7 +772,7 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 		// A page link opens the page, as a click on a page in the sidebar
 		// does; a web link wants Cmd, so that a click can place the caret.
 		if ev.Clicks == 1 && (ev.Mods == 0 || ev.Mods == ui.Cmd) {
-			link := e.linkAtPos(p)
+			link := e.linkUnder(p.ID, wx, wy)
 			if id, ok := doc.PageLinkID(link); ok {
 				if block := doc.LinkBlock(link); block != "" {
 					e.Host.OpenBlock(id, block)
@@ -642,7 +786,7 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 			// Only a web or mail link opens: a file, an app or another
 			// scheme, as a shared page or an agent can write one, would
 			// launch what it names.
-			if url := doc.SafeHref(e.linkAtPos(p)); url != "" {
+			if url := doc.SafeHref(e.linkUnder(p.ID, wx, wy)); url != "" {
 				e.services.OpenURL(url)
 				return true
 			}
@@ -659,8 +803,10 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 			}
 		case ev.Mods&ui.Shift != 0:
 			e.Select(e.anchor, p)
+			e.affinity = side
 		default:
 			e.Select(p, p)
+			e.affinity = side
 		}
 		e.BreakUndo()
 		e.dragging = ev.Clicks < 2
@@ -669,8 +815,9 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 		if !e.dragging {
 			return false
 		}
-		if p, ok := e.hit(ev.X+e.root.X, ev.Y+e.root.Y); ok && p != e.focus {
+		if p, side, ok := e.hit(ev.X+e.root.X, ev.Y+e.root.Y); ok && (p != e.focus || side != e.affinity) {
 			e.Select(e.anchor, p)
+			e.affinity = side
 		}
 		return true
 	case ui.InputPointerUp:
@@ -685,6 +832,32 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 		return e.key(ev)
 	}
 	return false
+}
+
+// linkUnder is the link of the text of block id under the pointer, at wx,
+// wy in the window, or "": the link's letters as they are drawn, not the
+// caret place nearest the pointer, which is as much beside a link's last
+// letter, outside it, as on it.
+func (e *Editor) linkUnder(id string, wx, wy float32) string {
+	n, l := e.node(id), e.layouts[id]
+	r, ok := e.box(id)
+	if n == nil || !n.IsText() || l == nil || !ok {
+		return ""
+	}
+	x, y := wx-r.X-l.x, wy-r.Y-l.y
+	at := 0
+	for _, run := range n.Delta() {
+		k := len([]rune(run.Text))
+		if run.Attrs.Href != "" {
+			for _, b := range l.layout.SelectionRects(ui.TextInputRange{Start: utf16Off(n, at), End: utf16Off(n, at+k)}) {
+				if b.Contains(x, y) {
+					return run.Attrs.Href
+				}
+			}
+		}
+		at += k
+	}
+	return ""
 }
 
 func (e *Editor) linkAtPos(p Pos) string {
@@ -744,9 +917,9 @@ var killed string
 func (e *Editor) emacsKey(key ui.Key, shift bool) bool {
 	switch key {
 	case ui.KeyA:
-		e.horizontal(-1, false, true, shift)
+		e.blockEdge(-1, false, shift)
 	case ui.KeyE:
-		e.horizontal(1, false, true, shift)
+		e.blockEdge(1, false, shift)
 	case ui.KeyK:
 		n := e.focusNode()
 		if e.ReadOnly || n == nil {
@@ -773,7 +946,32 @@ func (e *Editor) emacsKey(key ui.Key, shift bool) bool {
 	return true
 }
 
+// ctrlKeys has a key off macOS mean what it does there, where Ctrl is the
+// word and page key: Ctrl with Left or Right steps a word, with Backspace
+// or Delete takes one, with Up or Down goes to the block's start or end,
+// and with Home or End to the page's. The editor's own keys are the
+// Mac's: Alt for a word and the block's ends, Cmd for the line's ends and
+// the page's.
+func ctrlKeys(ev ui.InputEvent) ui.InputEvent {
+	if ev.Mods&^ui.Shift != ui.Ctrl {
+		return ev
+	}
+	shift := ev.Mods & ui.Shift
+	switch ev.Key {
+	case ui.KeyLeft, ui.KeyRight, ui.KeyBackspace, ui.KeyDelete, ui.KeyUp, ui.KeyDown:
+		ev.Mods = shift | ui.Alt
+	case ui.KeyHome:
+		ev.Key, ev.Mods = ui.KeyUp, shift|ui.Cmd
+	case ui.KeyEnd:
+		ev.Key, ev.Mods = ui.KeyDown, shift|ui.Cmd
+	}
+	return ev
+}
+
 func (e *Editor) key(ev ui.InputEvent) bool {
+	if runtime.GOOS != "darwin" {
+		ev = ctrlKeys(ev)
+	}
 	if runtime.GOOS == "darwin" && ev.Mods&^ui.Shift == ui.Ctrl {
 		if to, ok := emacsKeys[ev.Key]; ok {
 			ev.Key, ev.Mods = to, ev.Mods&ui.Shift
@@ -790,7 +988,7 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 	switch ev.Key {
 	case ui.KeyEnter:
 		if cmd {
-			return false
+			return !shift && !alt && e.checkOrFold()
 		}
 		if shift {
 			e.SoftBreak()
@@ -800,8 +998,10 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 		return true
 	case ui.KeyBackspace:
 		if cmd {
+			// To the start of the line the caret is on.
 			if n := e.focusNode(); n != nil && e.Collapsed() {
-				e.Select(Pos{n.ID, 0}, e.focus)
+				start, _, _ := e.lineEdges(n, e.focus.Off, e.affinity)
+				e.Select(Pos{n.ID, start}, e.focus)
 			}
 		}
 		e.Backspace(alt)
@@ -835,7 +1035,8 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 		if ev.Key == ui.KeyDown {
 			dir = 1
 		}
-		if cmd {
+		switch {
+		case cmd:
 			us := e.units()
 			if dir < 0 {
 				e.moveTo(Pos{us[0].ID, 0}, shift)
@@ -843,15 +1044,17 @@ func (e *Editor) key(ev ui.InputEvent) bool {
 				last := us[len(us)-1]
 				e.moveTo(Pos{last.ID, textLen(last)}, shift)
 			}
-			return true
+		case alt:
+			e.blockEdge(dir, true, shift)
+		default:
+			e.vertical(dir, shift)
 		}
-		e.vertical(dir, shift)
 		return true
 	case ui.KeyHome:
-		e.horizontal(-1, false, true, shift)
+		e.lineEdge(-1, shift)
 		return true
 	case ui.KeyEnd:
-		e.horizontal(1, false, true, shift)
+		e.lineEdge(1, shift)
 		return true
 	case ui.KeyEscape:
 		if e.linkOpen {

@@ -56,6 +56,13 @@ struct ProvidersSection: View {
             // on each of its rows, a read of the providers each.
             Text(L.settingsSectionProviders)
                 .task(id: version) { await load() }
+                // Signed in or out here, or a provider changed on another
+                // device: signing out takes the account's providers away.
+                .task {
+                    for await _ in app.changes(of: ["model_providers", "session", "*"]) {
+                        await load()
+                    }
+                }
         } footer: {
             if let failure {
                 Text(failure).foregroundStyle(palette.dangerText)
@@ -170,6 +177,23 @@ struct ProvidersSection: View {
             failure = error.localizedDescription
         }
         await load()
+    }
+}
+
+extension AppModel {
+    /// changes yields as the core says one of tables changed, until the
+    /// task reading it ends: Settings reads again what it shows of them.
+    func changes(of tables: Set<String>) -> AsyncStream<Void> {
+        AsyncStream(bufferingPolicy: .bufferingNewest(1)) { changed in
+            let token = listen { event in
+                if case .changed(let table, _) = event, tables.contains(table) {
+                    changed.yield()
+                }
+            }
+            changed.onTermination = { [weak self] _ in
+                Task { @MainActor in self?.stopListening(token) }
+            }
+        }
     }
 }
 

@@ -1,3 +1,4 @@
+import LeafletCore
 import UIKit
 
 /// BlockInfo is the block a paragraph of the editor is: its ID, type and
@@ -42,22 +43,41 @@ final class BlockInfo: NSObject, @unchecked Sendable {
     var isText: Bool { Self.textTypes.contains(type) }
     var isList: Bool { Self.nestable.contains(type) }
 
-    static let textTypes: Set<String> = [
-        "paragraph", "heading", "bulleted_list", "numbered_list", "todo_list", "quote", "code",
-        "callout", "toggle_list",
-    ]
-    /// nestable are the types that hold nested blocks, as doc.NestableTypes.
-    static let nestable: Set<String> = [
-        "bulleted_list", "numbered_list", "todo_list", "toggle_list",
-    ]
+    /// textTypes are the types that hold text, and nestable those that
+    /// hold nested blocks, as the core has them (mobile.BlockTypes), read
+    /// once.
+    static let textTypes = types.text
+    static let nestable = types.nestable
+    private static let types: (text: Set<String>, nestable: Set<String>) = {
+        struct Types: Decodable {
+            var text: [String]
+            var nestable: [String]
+        }
+        let t = try? JSONDecoder().decode(Types.self, from: Data(MobileBlockTypes().utf8))
+        return (Set(t?.text ?? []), Set(t?.nestable ?? []))
+    }()
 
-    /// newID returns a block ID as the core's doc.NewBlockID makes them.
-    static func newID() -> String {
-        let alphabet = Array("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-        return String((0..<8).map { _ in alphabet.randomElement()! })
-    }
+    /// newID returns a block ID as the core makes them.
+    static func newID() -> String { MobileNewBlockID() }
 
     static func paragraph() -> BlockInfo { BlockInfo(id: newID(), type: "paragraph") }
+
+    /// newLine is the block a new line after this one starts as, as the
+    /// core's rules have it (mobile.NewLine): a list goes on as a list, a
+    /// to-do unchecked, and anything else ends with the line, for a
+    /// paragraph.
+    func newLine() -> BlockInfo {
+        let made = try? JSONDecoder().decode(NewBlock.self, from: Data(MobileNewLine(type).utf8))
+        return BlockInfo(
+            id: Self.newID(), type: made?.type ?? "paragraph", data: made?.data ?? [:],
+            depth: depth)
+    }
+}
+
+/// NewBlock is a new block's type and data, as the core's rules give them.
+struct NewBlock: Decodable {
+    var type: String?
+    var data: [String: JSONValue]?
 }
 
 /// Mention is a mention of a person, an agent or a page in a block's text.

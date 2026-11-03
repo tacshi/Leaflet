@@ -65,6 +65,22 @@ func (msgs Messages) AppMenuView() string {
 	return Catalog.Format(msgs.locale, "appMenuView", nil)
 }
 
+// AppMenuSettings says "Settings…"
+// in the language the app shows.
+//
+// The menu bar's app menu (named Leaflet): open the Settings window, at
+// ⌘, as in other Mac apps.
+func AppMenuSettings() string { return In(i18n.Locale()).AppMenuSettings() }
+
+// AppMenuSettings says "Settings…"
+// in the language of msgs.
+//
+// The menu bar's app menu (named Leaflet): open the Settings window, at
+// ⌘, as in other Mac apps.
+func (msgs Messages) AppMenuSettings() string {
+	return Catalog.Format(msgs.locale, "appMenuSettings", nil)
+}
+
 // AppMenuNewPage says "New Page"
 // in the language the app shows.
 //
@@ -219,6 +235,24 @@ func AppErrorSave(error string) string { return In(i18n.Locale()).AppErrorSave(e
 // Toast when the open page could not be saved.
 func (msgs Messages) AppErrorSave(error string) string {
 	return Catalog.Format(msgs.locale, "appErrorSave", map[string]any{"error": error})
+}
+
+// AppPageRemoved says "This page is no longer on this device, so the edits not saved yet were lost."
+// in the language the app shows.
+//
+// Toast when the open page was removed from this device (its share
+// withdrawn, or the device left the account) while edits to it still waited
+// to be saved.
+func AppPageRemoved() string { return In(i18n.Locale()).AppPageRemoved() }
+
+// AppPageRemoved says "This page is no longer on this device, so the edits not saved yet were lost."
+// in the language of msgs.
+//
+// Toast when the open page was removed from this device (its share
+// withdrawn, or the device left the account) while edits to it still waited
+// to be saved.
+func (msgs Messages) AppPageRemoved() string {
+	return Catalog.Format(msgs.locale, "appPageRemoved", nil)
 }
 
 // AppErrorRename says "Could not rename: {error}"
@@ -2263,6 +2297,24 @@ func (msgs Messages) TemplateUseFailed(error string) string {
 	return Catalog.Format(msgs.locale, "templateUseFailed", map[string]any{"error": error})
 }
 
+// TemplateGone says "the template is no longer there"
+// in the language the app shows.
+//
+// Why a template could not be used or chosen, after the colon of
+// templateUseFailed or templateDefaultFailed: it was deleted, here or on
+// another device. Lowercase, as part of a sentence.
+func TemplateGone() string { return In(i18n.Locale()).TemplateGone() }
+
+// TemplateGone says "the template is no longer there"
+// in the language of msgs.
+//
+// Why a template could not be used or chosen, after the colon of
+// templateUseFailed or templateDefaultFailed: it was deleted, here or on
+// another device. Lowercase, as part of a sentence.
+func (msgs Messages) TemplateGone() string {
+	return Catalog.Format(msgs.locale, "templateGone", nil)
+}
+
 // TemplatePill says "Template"
 // in the language the app shows.
 //
@@ -2959,6 +3011,24 @@ func (msgs Messages) DialogFolderRenameFailed(error string) string {
 	return Catalog.Format(msgs.locale, "dialogFolderRenameFailed", map[string]any{"error": error})
 }
 
+// DialogFolderGone says "the folder is no longer there"
+// in the language the app shows.
+//
+// Why a folder could not be changed, after the colon of a toast such as
+// templateDefaultFailed: it was deleted, here or on another device.
+// Lowercase, as part of a sentence.
+func DialogFolderGone() string { return In(i18n.Locale()).DialogFolderGone() }
+
+// DialogFolderGone says "the folder is no longer there"
+// in the language of msgs.
+//
+// Why a folder could not be changed, after the colon of a toast such as
+// templateDefaultFailed: it was deleted, here or on another device.
+// Lowercase, as part of a sentence.
+func (msgs Messages) DialogFolderGone() string {
+	return Catalog.Format(msgs.locale, "dialogFolderGone", nil)
+}
+
 // DialogFolderCreateFailed says "Could not create the folder: {error}"
 // in the language the app shows.
 //
@@ -3309,6 +3379,24 @@ func (msgs Messages) DialogHistoryRestoreFailed(error string) string {
 	return Catalog.Format(msgs.locale, "dialogHistoryRestoreFailed", map[string]any{"error": error})
 }
 
+// DialogHistoryVersionGone says "the version is no longer kept"
+// in the language the app shows.
+//
+// Why a version could not be restored, after the colon of
+// dialogHistoryRestoreFailed: it is no longer among the page's kept
+// versions. Lowercase, as part of a sentence.
+func DialogHistoryVersionGone() string { return In(i18n.Locale()).DialogHistoryVersionGone() }
+
+// DialogHistoryVersionGone says "the version is no longer kept"
+// in the language of msgs.
+//
+// Why a version could not be restored, after the colon of
+// dialogHistoryRestoreFailed: it is no longer among the page's kept
+// versions. Lowercase, as part of a sentence.
+func (msgs Messages) DialogHistoryVersionGone() string {
+	return Catalog.Format(msgs.locale, "dialogHistoryVersionGone", nil)
+}
+
 // DialogHistoryRestored says "Restored the earlier version"
 // in the language the app shows.
 //
@@ -3595,6 +3683,22 @@ func (msgs Messages) DialogEmbedHeight() string {
 	return Catalog.Format(msgs.locale, "dialogEmbedHeight", nil)
 }
 
+// DialogEmbedFailed says "Could not make the embed: {error}"
+// in the language the app shows.
+//
+// Embed dialog: shown under the HTML when the embed could not be inserted
+// or saved, as when its HTML is too long.
+func DialogEmbedFailed(error string) string { return In(i18n.Locale()).DialogEmbedFailed(error) }
+
+// DialogEmbedFailed says "Could not make the embed: {error}"
+// in the language of msgs.
+//
+// Embed dialog: shown under the HTML when the embed could not be inserted
+// or saved, as when its HTML is too long.
+func (msgs Messages) DialogEmbedFailed(error string) string {
+	return Catalog.Format(msgs.locale, "dialogEmbedFailed", map[string]any{"error": error})
+}
+
 // DialogInsert says "Insert"
 // in the language the app shows.
 //
@@ -3607,6 +3711,40 @@ func DialogInsert() string { return In(i18n.Locale()).DialogInsert() }
 // Embed and link dialogs: the button inserting the block.
 func (msgs Messages) DialogInsert() string {
 	return Catalog.Format(msgs.locale, "dialogInsert", nil)
+}
+
+// DialogDiscardChanges says "Discard Changes"
+// in the language the app shows.
+//
+// iOS: asked on Cancel in a block's sheet (a chart's, a table's, a
+// formula's, a link's, an embed's) with changes: close it without keeping
+// them.
+func DialogDiscardChanges() string { return In(i18n.Locale()).DialogDiscardChanges() }
+
+// DialogDiscardChanges says "Discard Changes"
+// in the language of msgs.
+//
+// iOS: asked on Cancel in a block's sheet (a chart's, a table's, a
+// formula's, a link's, an embed's) with changes: close it without keeping
+// them.
+func (msgs Messages) DialogDiscardChanges() string {
+	return Catalog.Format(msgs.locale, "dialogDiscardChanges", nil)
+}
+
+// DialogKeepEditing says "Keep Editing"
+// in the language the app shows.
+//
+// iOS: asked on Cancel in a block's sheet with changes: go back to the
+// sheet, keeping them.
+func DialogKeepEditing() string { return In(i18n.Locale()).DialogKeepEditing() }
+
+// DialogKeepEditing says "Keep Editing"
+// in the language of msgs.
+//
+// iOS: asked on Cancel in a block's sheet with changes: go back to the
+// sheet, keeping them.
+func (msgs Messages) DialogKeepEditing() string {
+	return Catalog.Format(msgs.locale, "dialogKeepEditing", nil)
 }
 
 // DialogLinkCardTitle says "Link card"
@@ -4269,6 +4407,24 @@ func PubStopped() string { return In(i18n.Locale()).PubStopped() }
 // own message follows.
 func (msgs Messages) PubStopped() string {
 	return Catalog.Format(msgs.locale, "pubStopped", nil)
+}
+
+// PubLinkStopped says "The public link to “{title}” stopped."
+// in the language the app shows.
+//
+// A notification when a page's public link stopped, as cloudflared quit,
+// while the Share dialog doesn't show it; its button opens the dialog,
+// which says why.
+func PubLinkStopped(title string) string { return In(i18n.Locale()).PubLinkStopped(title) }
+
+// PubLinkStopped says "The public link to “{title}” stopped."
+// in the language of msgs.
+//
+// A notification when a page's public link stopped, as cloudflared quit,
+// while the Share dialog doesn't show it; its button opens the dialog,
+// which says why.
+func (msgs Messages) PubLinkStopped(title string) string {
+	return Catalog.Format(msgs.locale, "pubLinkStopped", map[string]any{"title": title})
 }
 
 // PubEmails says "Only these emails (optional)"
@@ -5069,6 +5225,476 @@ func (msgs Messages) AgentNeedsConnection() string {
 	return Catalog.Format(msgs.locale, "agentNeedsConnection", nil)
 }
 
+// AgentChatgptUnreachable says "Leaflet couldn't reach ChatGPT's sign-in ({status}). Check your network or proxy, then try again."
+// in the language the app shows.
+//
+// Settings › Agent providers: signing in with ChatGPT could not reach
+// OpenAI; status is what the network or OpenAI answered, such as an HTTP
+// status.
+func AgentChatgptUnreachable(status string) string {
+	return In(i18n.Locale()).AgentChatgptUnreachable(status)
+}
+
+// AgentChatgptUnreachable says "Leaflet couldn't reach ChatGPT's sign-in ({status}). Check your network or proxy, then try again."
+// in the language of msgs.
+//
+// Settings › Agent providers: signing in with ChatGPT could not reach
+// OpenAI; status is what the network or OpenAI answered, such as an HTTP
+// status.
+func (msgs Messages) AgentChatgptUnreachable(status string) string {
+	return Catalog.Format(msgs.locale, "agentChatgptUnreachable", map[string]any{"status": status})
+}
+
+// AgentChatgptNotRegistered says "ChatGPT did not register Leaflet. Try again."
+// in the language the app shows.
+//
+// Settings › Agent providers: signing in with ChatGPT failed, as OpenAI
+// did not register Leaflet as an app.
+func AgentChatgptNotRegistered() string { return In(i18n.Locale()).AgentChatgptNotRegistered() }
+
+// AgentChatgptNotRegistered says "ChatGPT did not register Leaflet. Try again."
+// in the language of msgs.
+//
+// Settings › Agent providers: signing in with ChatGPT failed, as OpenAI
+// did not register Leaflet as an app.
+func (msgs Messages) AgentChatgptNotRegistered() string {
+	return Catalog.Format(msgs.locale, "agentChatgptNotRegistered", nil)
+}
+
+// AgentChatgptOtherRegistration says "ChatGPT answered for another registration. Try again."
+// in the language the app shows.
+//
+// Settings › Agent providers: signing in with ChatGPT failed, as OpenAI
+// answered for another registration of Leaflet than the one asked for.
+func AgentChatgptOtherRegistration() string { return In(i18n.Locale()).AgentChatgptOtherRegistration() }
+
+// AgentChatgptOtherRegistration says "ChatGPT answered for another registration. Try again."
+// in the language of msgs.
+//
+// Settings › Agent providers: signing in with ChatGPT failed, as OpenAI
+// answered for another registration of Leaflet than the one asked for.
+func (msgs Messages) AgentChatgptOtherRegistration() string {
+	return Catalog.Format(msgs.locale, "agentChatgptOtherRegistration", nil)
+}
+
+// AgentChatgptNoPlan says "ChatGPT didn't let Leaflet use your plan. Using a plan needs ChatGPT Plus or Pro."
+// in the language the app shows.
+//
+// Settings › Agent providers: signing in with ChatGPT failed, as the
+// account's plan can't be used by apps. ChatGPT Plus and Pro are plan
+// names, not translated.
+func AgentChatgptNoPlan() string { return In(i18n.Locale()).AgentChatgptNoPlan() }
+
+// AgentChatgptNoPlan says "ChatGPT didn't let Leaflet use your plan. Using a plan needs ChatGPT Plus or Pro."
+// in the language of msgs.
+//
+// Settings › Agent providers: signing in with ChatGPT failed, as the
+// account's plan can't be used by apps. ChatGPT Plus and Pro are plan
+// names, not translated.
+func (msgs Messages) AgentChatgptNoPlan() string {
+	return Catalog.Format(msgs.locale, "agentChatgptNoPlan", nil)
+}
+
+// AgentChatgptSignInAgain says "Sign in with ChatGPT again in Settings › Agent providers."
+// in the language the app shows.
+//
+// An agent run or Settings › Agent providers: the ChatGPT sign-in kept on
+// this device could not be read.
+func AgentChatgptSignInAgain() string { return In(i18n.Locale()).AgentChatgptSignInAgain() }
+
+// AgentChatgptSignInAgain says "Sign in with ChatGPT again in Settings › Agent providers."
+// in the language of msgs.
+//
+// An agent run or Settings › Agent providers: the ChatGPT sign-in kept on
+// this device could not be read.
+func (msgs Messages) AgentChatgptSignInAgain() string {
+	return Catalog.Format(msgs.locale, "agentChatgptSignInAgain", nil)
+}
+
+// AgentChatgptSignInEnded says "Your ChatGPT sign-in ended. Sign in again in Settings › Agent providers."
+// in the language the app shows.
+//
+// An agent run or Settings › Agent providers: ChatGPT no longer accepts
+// the sign-in kept on this device.
+func AgentChatgptSignInEnded() string { return In(i18n.Locale()).AgentChatgptSignInEnded() }
+
+// AgentChatgptSignInEnded says "Your ChatGPT sign-in ended. Sign in again in Settings › Agent providers."
+// in the language of msgs.
+//
+// An agent run or Settings › Agent providers: ChatGPT no longer accepts
+// the sign-in kept on this device.
+func (msgs Messages) AgentChatgptSignInEnded() string {
+	return Catalog.Format(msgs.locale, "agentChatgptSignInEnded", nil)
+}
+
+// OauthPortTaken says "Leaflet couldn't wait for {name}'s sign-in on port {port}, which another app is using. Quit it, then try again."
+// in the language the app shows.
+//
+// Signing in through the browser, as with ChatGPT: the port the browser
+// comes back to is taken by another app; name is the service signed in to.
+func OauthPortTaken(name string, port int) string {
+	return In(i18n.Locale()).OauthPortTaken(name, port)
+}
+
+// OauthPortTaken says "Leaflet couldn't wait for {name}'s sign-in on port {port}, which another app is using. Quit it, then try again."
+// in the language of msgs.
+//
+// Signing in through the browser, as with ChatGPT: the port the browser
+// comes back to is taken by another app; name is the service signed in to.
+func (msgs Messages) OauthPortTaken(name string, port int) string {
+	return Catalog.Format(msgs.locale, "oauthPortTaken", map[string]any{"name": name, "port": port})
+}
+
+// OauthTimedOut says "Sign-in timed out. Try again."
+// in the language the app shows.
+//
+// Signing in through the browser, as with ChatGPT: the browser didn't come
+// back in time, or the sign-in was stopped.
+func OauthTimedOut() string { return In(i18n.Locale()).OauthTimedOut() }
+
+// OauthTimedOut says "Sign-in timed out. Try again."
+// in the language of msgs.
+//
+// Signing in through the browser, as with ChatGPT: the browser didn't come
+// back in time, or the sign-in was stopped.
+func (msgs Messages) OauthTimedOut() string {
+	return Catalog.Format(msgs.locale, "oauthTimedOut", nil)
+}
+
+// RemoteSignedOut says "Sign in to use this."
+// in the language the app shows.
+//
+// Why something that needs an account can't be done: no one is signed in to
+// the server.
+func RemoteSignedOut() string { return In(i18n.Locale()).RemoteSignedOut() }
+
+// RemoteSignedOut says "Sign in to use this."
+// in the language of msgs.
+//
+// Why something that needs an account can't be done: no one is signed in to
+// the server.
+func (msgs Messages) RemoteSignedOut() string {
+	return Catalog.Format(msgs.locale, "remoteSignedOut", nil)
+}
+
+// RemoteNotConfigured says "This build has no server; it works on this device only."
+// in the language the app shows.
+//
+// Why something that needs the server can't be done: this build of the app
+// has none, and keeps everything on the device.
+func RemoteNotConfigured() string { return In(i18n.Locale()).RemoteNotConfigured() }
+
+// RemoteNotConfigured says "This build has no server; it works on this device only."
+// in the language of msgs.
+//
+// Why something that needs the server can't be done: this build of the app
+// has none, and keeps everything on the device.
+func (msgs Messages) RemoteNotConfigured() string {
+	return Catalog.Format(msgs.locale, "remoteNotConfigured", nil)
+}
+
+// RemoteServerFixed says "This build's server is fixed."
+// in the language the app shows.
+//
+// Why the server can't be changed in Settings: this build of the app comes
+// with its own.
+func RemoteServerFixed() string { return In(i18n.Locale()).RemoteServerFixed() }
+
+// RemoteServerFixed says "This build's server is fixed."
+// in the language of msgs.
+//
+// Why the server can't be changed in Settings: this build of the app comes
+// with its own.
+func (msgs Messages) RemoteServerFixed() string {
+	return Catalog.Format(msgs.locale, "remoteServerFixed", nil)
+}
+
+// RemoteNoSession says "The server did not sign you in."
+// in the language the app shows.
+//
+// Signing in, as with a link or a code: the server answered without a
+// sign-in.
+func RemoteNoSession() string { return In(i18n.Locale()).RemoteNoSession() }
+
+// RemoteNoSession says "The server did not sign you in."
+// in the language of msgs.
+//
+// Signing in, as with a link or a code: the server answered without a
+// sign-in.
+func (msgs Messages) RemoteNoSession() string {
+	return Catalog.Format(msgs.locale, "remoteNoSession", nil)
+}
+
+// SupabaseSignedOut says "Your Supabase sign-in ended. Sign in with Supabase again."
+// in the language the app shows.
+//
+// Signed in with Supabase to set up or update a project: Supabase no longer
+// accepts the sign-in kept on this device.
+func SupabaseSignedOut() string { return In(i18n.Locale()).SupabaseSignedOut() }
+
+// SupabaseSignedOut says "Your Supabase sign-in ended. Sign in with Supabase again."
+// in the language of msgs.
+//
+// Signed in with Supabase to set up or update a project: Supabase no longer
+// accepts the sign-in kept on this device.
+func (msgs Messages) SupabaseSignedOut() string {
+	return Catalog.Format(msgs.locale, "supabaseSignedOut", nil)
+}
+
+// SupabaseSignInStale says "Leaflet couldn't finish this sign-in, which is stale. Sign in with Supabase again."
+// in the language the app shows.
+//
+// Signing in with Supabase: the browser came back from a sign-in other than
+// the one Leaflet is waiting for, as an old tab.
+func SupabaseSignInStale() string { return In(i18n.Locale()).SupabaseSignInStale() }
+
+// SupabaseSignInStale says "Leaflet couldn't finish this sign-in, which is stale. Sign in with Supabase again."
+// in the language of msgs.
+//
+// Signing in with Supabase: the browser came back from a sign-in other than
+// the one Leaflet is waiting for, as an old tab.
+func (msgs Messages) SupabaseSignInStale() string {
+	return Catalog.Format(msgs.locale, "supabaseSignInStale", nil)
+}
+
+// SupabaseSignInCancelled says "Sign-in was cancelled."
+// in the language the app shows.
+//
+// Signing in with Supabase: the user declined in the browser.
+func SupabaseSignInCancelled() string { return In(i18n.Locale()).SupabaseSignInCancelled() }
+
+// SupabaseSignInCancelled says "Sign-in was cancelled."
+// in the language of msgs.
+//
+// Signing in with Supabase: the user declined in the browser.
+func (msgs Messages) SupabaseSignInCancelled() string {
+	return Catalog.Format(msgs.locale, "supabaseSignInCancelled", nil)
+}
+
+// SupabaseSignInFailed says "Supabase sign-in failed: {error}"
+// in the language the app shows.
+//
+// Signing in with Supabase failed; error is what Supabase or the network
+// said.
+func SupabaseSignInFailed(error string) string { return In(i18n.Locale()).SupabaseSignInFailed(error) }
+
+// SupabaseSignInFailed says "Supabase sign-in failed: {error}"
+// in the language of msgs.
+//
+// Signing in with Supabase failed; error is what Supabase or the network
+// said.
+func (msgs Messages) SupabaseSignInFailed(error string) string {
+	return Catalog.Format(msgs.locale, "supabaseSignInFailed", map[string]any{"error": error})
+}
+
+// SupabaseNoSignIn says "Supabase did not sign you in."
+// in the language the app shows.
+//
+// Signing in with Supabase: Supabase answered without a sign-in.
+func SupabaseNoSignIn() string { return In(i18n.Locale()).SupabaseNoSignIn() }
+
+// SupabaseNoSignIn says "Supabase did not sign you in."
+// in the language of msgs.
+//
+// Signing in with Supabase: Supabase answered without a sign-in.
+func (msgs Messages) SupabaseNoSignIn() string {
+	return Catalog.Format(msgs.locale, "supabaseNoSignIn", nil)
+}
+
+// ProvisionProjectFailed says "Supabase couldn't start the project. Try again, or check it in the Supabase dashboard."
+// in the language the app shows.
+//
+// Setting up a Supabase project for Leaflet: Supabase reports the project
+// failed to start or restore.
+func ProvisionProjectFailed() string { return In(i18n.Locale()).ProvisionProjectFailed() }
+
+// ProvisionProjectFailed says "Supabase couldn't start the project. Try again, or check it in the Supabase dashboard."
+// in the language of msgs.
+//
+// Setting up a Supabase project for Leaflet: Supabase reports the project
+// failed to start or restore.
+func (msgs Messages) ProvisionProjectFailed() string {
+	return Catalog.Format(msgs.locale, "provisionProjectFailed", nil)
+}
+
+// ProvisionMigrationFailed says "Leaflet couldn't set up the database ({migration}): {error}"
+// in the language the app shows.
+//
+// Setting up or updating a Supabase project for Leaflet: a step of the
+// database's setup failed; migration names the step, error says what went
+// wrong.
+func ProvisionMigrationFailed(migration string, error string) string {
+	return In(i18n.Locale()).ProvisionMigrationFailed(migration, error)
+}
+
+// ProvisionMigrationFailed says "Leaflet couldn't set up the database ({migration}): {error}"
+// in the language of msgs.
+//
+// Setting up or updating a Supabase project for Leaflet: a step of the
+// database's setup failed; migration names the step, error says what went
+// wrong.
+func (msgs Messages) ProvisionMigrationFailed(migration string, error string) string {
+	return Catalog.Format(msgs.locale, "provisionMigrationFailed", map[string]any{"migration": migration, "error": error})
+}
+
+// ProvisionDeployFailed says "Leaflet couldn't deploy its {function} function: {error}"
+// in the language the app shows.
+//
+// Setting up or updating a Supabase project for Leaflet: putting one of
+// Leaflet's server functions on the project failed; function is its name,
+// error says what went wrong.
+func ProvisionDeployFailed(function string, error string) string {
+	return In(i18n.Locale()).ProvisionDeployFailed(function, error)
+}
+
+// ProvisionDeployFailed says "Leaflet couldn't deploy its {function} function: {error}"
+// in the language of msgs.
+//
+// Setting up or updating a Supabase project for Leaflet: putting one of
+// Leaflet's server functions on the project failed; function is its name,
+// error says what went wrong.
+func (msgs Messages) ProvisionDeployFailed(function string, error string) string {
+	return Catalog.Format(msgs.locale, "provisionDeployFailed", map[string]any{"function": function, "error": error})
+}
+
+// ProvisionWhichMember says "Leaflet couldn't tell which member of the organization you are. Use a project in an organization of your own."
+// in the language the app shows.
+//
+// Setting up a Supabase project for Leaflet: the project's organization has
+// several members, so Leaflet can't tell whose it is.
+func ProvisionWhichMember() string { return In(i18n.Locale()).ProvisionWhichMember() }
+
+// ProvisionWhichMember says "Leaflet couldn't tell which member of the organization you are. Use a project in an organization of your own."
+// in the language of msgs.
+//
+// Setting up a Supabase project for Leaflet: the project's organization has
+// several members, so Leaflet can't tell whose it is.
+func (msgs Messages) ProvisionWhichMember() string {
+	return Catalog.Format(msgs.locale, "provisionWhichMember", nil)
+}
+
+// ProvisionNoKeys says "Supabase didn't give Leaflet the project's API keys."
+// in the language the app shows.
+//
+// Setting up a Supabase project for Leaflet: Supabase did not hand over the
+// keys apps use to reach the project.
+func ProvisionNoKeys() string { return In(i18n.Locale()).ProvisionNoKeys() }
+
+// ProvisionNoKeys says "Supabase didn't give Leaflet the project's API keys."
+// in the language of msgs.
+//
+// Setting up a Supabase project for Leaflet: Supabase did not hand over the
+// keys apps use to reach the project.
+func (msgs Messages) ProvisionNoKeys() string {
+	return Catalog.Format(msgs.locale, "provisionNoKeys", nil)
+}
+
+// OauthStale says "This sign-in link is stale. Start again from Leaflet."
+// in the language the app shows.
+//
+// The browser tab a sign-in comes back to: it belongs to a sign-in other
+// than the one Leaflet is waiting for.
+func OauthStale() string { return In(i18n.Locale()).OauthStale() }
+
+// OauthStale says "This sign-in link is stale. Start again from Leaflet."
+// in the language of msgs.
+//
+// The browser tab a sign-in comes back to: it belongs to a sign-in other
+// than the one Leaflet is waiting for.
+func (msgs Messages) OauthStale() string {
+	return Catalog.Format(msgs.locale, "oauthStale", nil)
+}
+
+// OauthCancelledTitle says "Sign-in was cancelled"
+// in the language the app shows.
+//
+// Heading of the browser tab a sign-in comes back to, when it was declined
+// or failed.
+func OauthCancelledTitle() string { return In(i18n.Locale()).OauthCancelledTitle() }
+
+// OauthCancelledTitle says "Sign-in was cancelled"
+// in the language of msgs.
+//
+// Heading of the browser tab a sign-in comes back to, when it was declined
+// or failed.
+func (msgs Messages) OauthCancelledTitle() string {
+	return Catalog.Format(msgs.locale, "oauthCancelledTitle", nil)
+}
+
+// OauthCloseTab says "You can close this tab."
+// in the language the app shows.
+//
+// The browser tab a sign-in comes back to, under oauthCancelledTitle.
+func OauthCloseTab() string { return In(i18n.Locale()).OauthCloseTab() }
+
+// OauthCloseTab says "You can close this tab."
+// in the language of msgs.
+//
+// The browser tab a sign-in comes back to, under oauthCancelledTitle.
+func (msgs Messages) OauthCloseTab() string {
+	return Catalog.Format(msgs.locale, "oauthCloseTab", nil)
+}
+
+// OauthCancelled says "Sign-in was cancelled."
+// in the language the app shows.
+//
+// Signing in through the browser, as with ChatGPT: the user declined in the
+// browser.
+func OauthCancelled() string { return In(i18n.Locale()).OauthCancelled() }
+
+// OauthCancelled says "Sign-in was cancelled."
+// in the language of msgs.
+//
+// Signing in through the browser, as with ChatGPT: the user declined in the
+// browser.
+func (msgs Messages) OauthCancelled() string {
+	return Catalog.Format(msgs.locale, "oauthCancelled", nil)
+}
+
+// OauthFailed says "{name} sign-in failed: {error}"
+// in the language the app shows.
+//
+// Signing in through the browser, as with ChatGPT, failed; name is the
+// service, error what it said.
+func OauthFailed(name string, error string) string { return In(i18n.Locale()).OauthFailed(name, error) }
+
+// OauthFailed says "{name} sign-in failed: {error}"
+// in the language of msgs.
+//
+// Signing in through the browser, as with ChatGPT, failed; name is the
+// service, error what it said.
+func (msgs Messages) OauthFailed(name string, error string) string {
+	return Catalog.Format(msgs.locale, "oauthFailed", map[string]any{"name": name, "error": error})
+}
+
+// OauthSignedIn says "Signed in to Leaflet"
+// in the language the app shows.
+//
+// Heading of the browser tab a sign-in comes back to, when it worked.
+func OauthSignedIn() string { return In(i18n.Locale()).OauthSignedIn() }
+
+// OauthSignedIn says "Signed in to Leaflet"
+// in the language of msgs.
+//
+// Heading of the browser tab a sign-in comes back to, when it worked.
+func (msgs Messages) OauthSignedIn() string {
+	return Catalog.Format(msgs.locale, "oauthSignedIn", nil)
+}
+
+// OauthCloseTabBack says "You can close this tab and go back to Leaflet."
+// in the language the app shows.
+//
+// The browser tab a sign-in comes back to, under oauthSignedIn.
+func OauthCloseTabBack() string { return In(i18n.Locale()).OauthCloseTabBack() }
+
+// OauthCloseTabBack says "You can close this tab and go back to Leaflet."
+// in the language of msgs.
+//
+// The browser tab a sign-in comes back to, under oauthSignedIn.
+func (msgs Messages) OauthCloseTabBack() string {
+	return Catalog.Format(msgs.locale, "oauthCloseTabBack", nil)
+}
+
 // AgentRunning says "An agent is already working on this page. Try again when it is done."
 // in the language the app shows.
 //
@@ -5081,6 +5707,730 @@ func AgentRunning() string { return In(i18n.Locale()).AgentRunning() }
 // Why an agent can't run: another agent is working on the same page.
 func (msgs Messages) AgentRunning() string {
 	return Catalog.Format(msgs.locale, "agentRunning", nil)
+}
+
+// AgentAccountLeft says "Stopped: its account signed out of this device."
+// in the language the app shows.
+//
+// Why an agent run ended: the account whose page it worked on signed out of
+// this device, removing its pages, before it finished.
+func AgentAccountLeft() string { return In(i18n.Locale()).AgentAccountLeft() }
+
+// AgentAccountLeft says "Stopped: its account signed out of this device."
+// in the language of msgs.
+//
+// Why an agent run ended: the account whose page it worked on signed out of
+// this device, removing its pages, before it finished.
+func (msgs Messages) AgentAccountLeft() string {
+	return Catalog.Format(msgs.locale, "agentAccountLeft", nil)
+}
+
+// AgentReplyCutOff says "(This answer was cut off at the model's length limit.)"
+// in the language the app shows.
+//
+// Added after an agent's answer that the model stopped writing because it
+// reached the most it may write at once.
+func AgentReplyCutOff() string { return In(i18n.Locale()).AgentReplyCutOff() }
+
+// AgentReplyCutOff says "(This answer was cut off at the model's length limit.)"
+// in the language of msgs.
+//
+// Added after an agent's answer that the model stopped writing because it
+// reached the most it may write at once.
+func (msgs Messages) AgentReplyCutOff() string {
+	return Catalog.Format(msgs.locale, "agentReplyCutOff", nil)
+}
+
+// AgentReadingPage says "Reading the page…"
+// in the language the app shows.
+//
+// The agent chat's reply while an agent starts on a request, before it has
+// said or done anything.
+func AgentReadingPage() string { return In(i18n.Locale()).AgentReadingPage() }
+
+// AgentReadingPage says "Reading the page…"
+// in the language of msgs.
+//
+// The agent chat's reply while an agent starts on a request, before it has
+// said or done anything.
+func (msgs Messages) AgentReadingPage() string {
+	return Catalog.Format(msgs.locale, "agentReadingPage", nil)
+}
+
+// AgentAppClosed says "The app closed before the agent finished."
+// in the language the app shows.
+//
+// An agent chat reply kept from an earlier launch: the app quit while the
+// agent was still working on it.
+func AgentAppClosed() string { return In(i18n.Locale()).AgentAppClosed() }
+
+// AgentAppClosed says "The app closed before the agent finished."
+// in the language of msgs.
+//
+// An agent chat reply kept from an earlier launch: the app quit while the
+// agent was still working on it.
+func (msgs Messages) AgentAppClosed() string {
+	return Catalog.Format(msgs.locale, "agentAppClosed", nil)
+}
+
+// AgentStoppedAfter says "Stopped after: {edit}."
+// in the language the app shows.
+//
+// An agent's reply when the user stopped it after it edited the page; edit
+// is its last edit, as agentEditInserted and the others say it.
+func AgentStoppedAfter(edit string) string { return In(i18n.Locale()).AgentStoppedAfter(edit) }
+
+// AgentStoppedAfter says "Stopped after: {edit}."
+// in the language of msgs.
+//
+// An agent's reply when the user stopped it after it edited the page; edit
+// is its last edit, as agentEditInserted and the others say it.
+func (msgs Messages) AgentStoppedAfter(edit string) string {
+	return Catalog.Format(msgs.locale, "agentStoppedAfter", map[string]any{"edit": edit})
+}
+
+// AgentStoppedBefore says "Stopped before making any changes."
+// in the language the app shows.
+//
+// An agent's reply when the user stopped it before it edited the page.
+func AgentStoppedBefore() string { return In(i18n.Locale()).AgentStoppedBefore() }
+
+// AgentStoppedBefore says "Stopped before making any changes."
+// in the language of msgs.
+//
+// An agent's reply when the user stopped it before it edited the page.
+func (msgs Messages) AgentStoppedBefore() string {
+	return Catalog.Format(msgs.locale, "agentStoppedBefore", nil)
+}
+
+// AgentEditMade says "{edit}."
+// in the language the app shows.
+//
+// An agent's reply when it edited the page and answered nothing: its last
+// edit, as agentEditInserted and the others say it, made a sentence.
+func AgentEditMade(edit string) string { return In(i18n.Locale()).AgentEditMade(edit) }
+
+// AgentEditMade says "{edit}."
+// in the language of msgs.
+//
+// An agent's reply when it edited the page and answered nothing: its last
+// edit, as agentEditInserted and the others say it, made a sentence.
+func (msgs Messages) AgentEditMade(edit string) string {
+	return Catalog.Format(msgs.locale, "agentEditMade", map[string]any{"edit": edit})
+}
+
+// AgentNoChanges says "The agent made no changes."
+// in the language the app shows.
+//
+// An agent's reply when it answered nothing and left the page as it was.
+func AgentNoChanges() string { return In(i18n.Locale()).AgentNoChanges() }
+
+// AgentNoChanges says "The agent made no changes."
+// in the language of msgs.
+//
+// An agent's reply when it answered nothing and left the page as it was.
+func (msgs Messages) AgentNoChanges() string {
+	return Catalog.Format(msgs.locale, "agentNoChanges", nil)
+}
+
+// AgentStoppedAfterRounds says "{count, plural, one {I stopped after # round of edits. Ask me to continue if there is more to do.} other {I stopped a…"
+// in the language the app shows.
+//
+// An agent's reply, in its own voice, when it used up the rounds of edits
+// one request may take.
+func AgentStoppedAfterRounds(count int) string {
+	return In(i18n.Locale()).AgentStoppedAfterRounds(count)
+}
+
+// AgentStoppedAfterRounds says "{count, plural, one {I stopped after # round of edits. Ask me to continue if there is more to do.} other {I stopped a…"
+// in the language of msgs.
+//
+// An agent's reply, in its own voice, when it used up the rounds of edits
+// one request may take.
+func (msgs Messages) AgentStoppedAfterRounds(count int) string {
+	return Catalog.Format(msgs.locale, "agentStoppedAfterRounds", map[string]any{"count": count})
+}
+
+// AgentEditedPage says "Edited the page"
+// in the language the app shows.
+//
+// An edit a cloud agent made that came without saying what it was, in the
+// agent's reply and the list of its edits.
+func AgentEditedPage() string { return In(i18n.Locale()).AgentEditedPage() }
+
+// AgentEditedPage says "Edited the page"
+// in the language of msgs.
+//
+// An edit a cloud agent made that came without saying what it was, in the
+// agent's reply and the list of its edits.
+func (msgs Messages) AgentEditedPage() string {
+	return Catalog.Format(msgs.locale, "agentEditedPage", nil)
+}
+
+// AgentEditInserted says "Inserted {what}"
+// in the language the app shows.
+//
+// An edit an agent made, in its reply and the list of its edits: it
+// inserted blocks; what is agentEditBlocks, or a block's kind as
+// agentEditChart and the others name it, maybe with its title after a ·.
+func AgentEditInserted(what string) string { return In(i18n.Locale()).AgentEditInserted(what) }
+
+// AgentEditInserted says "Inserted {what}"
+// in the language of msgs.
+//
+// An edit an agent made, in its reply and the list of its edits: it
+// inserted blocks; what is agentEditBlocks, or a block's kind as
+// agentEditChart and the others name it, maybe with its title after a ·.
+func (msgs Messages) AgentEditInserted(what string) string {
+	return Catalog.Format(msgs.locale, "agentEditInserted", map[string]any{"what": what})
+}
+
+// AgentEditWrote says "Wrote {what}"
+// in the language the app shows.
+//
+// An edit an agent made, in its reply and the list of its edits: it wrote
+// text in the page, as Markdown; what is agentEditBlocks, or a block's kind
+// as agentEditChart and the others name it, maybe with its title after a
+// ·.
+func AgentEditWrote(what string) string { return In(i18n.Locale()).AgentEditWrote(what) }
+
+// AgentEditWrote says "Wrote {what}"
+// in the language of msgs.
+//
+// An edit an agent made, in its reply and the list of its edits: it wrote
+// text in the page, as Markdown; what is agentEditBlocks, or a block's kind
+// as agentEditChart and the others name it, maybe with its title after a
+// ·.
+func (msgs Messages) AgentEditWrote(what string) string {
+	return Catalog.Format(msgs.locale, "agentEditWrote", map[string]any{"what": what})
+}
+
+// AgentEditRewrote says "Rewrote {what}"
+// in the language the app shows.
+//
+// An edit an agent made, in its reply and the list of its edits: it rewrote
+// a block; what is agentEditBlocks, or a block's kind as agentEditChart and
+// the others name it, maybe with its title after a ·.
+func AgentEditRewrote(what string) string { return In(i18n.Locale()).AgentEditRewrote(what) }
+
+// AgentEditRewrote says "Rewrote {what}"
+// in the language of msgs.
+//
+// An edit an agent made, in its reply and the list of its edits: it rewrote
+// a block; what is agentEditBlocks, or a block's kind as agentEditChart and
+// the others name it, maybe with its title after a ·.
+func (msgs Messages) AgentEditRewrote(what string) string {
+	return Catalog.Format(msgs.locale, "agentEditRewrote", map[string]any{"what": what})
+}
+
+// AgentEditMoved says "Moved a block"
+// in the language the app shows.
+//
+// An edit an agent made, in its reply and the list of its edits: it moved a
+// block.
+func AgentEditMoved() string { return In(i18n.Locale()).AgentEditMoved() }
+
+// AgentEditMoved says "Moved a block"
+// in the language of msgs.
+//
+// An edit an agent made, in its reply and the list of its edits: it moved a
+// block.
+func (msgs Messages) AgentEditMoved() string {
+	return Catalog.Format(msgs.locale, "agentEditMoved", nil)
+}
+
+// AgentEditDeleted says "{count, plural, one {Deleted a block} other {Deleted # blocks}}"
+// in the language the app shows.
+//
+// An edit an agent made, in its reply and the list of its edits: it deleted
+// blocks.
+func AgentEditDeleted(count int) string { return In(i18n.Locale()).AgentEditDeleted(count) }
+
+// AgentEditDeleted says "{count, plural, one {Deleted a block} other {Deleted # blocks}}"
+// in the language of msgs.
+//
+// An edit an agent made, in its reply and the list of its edits: it deleted
+// blocks.
+func (msgs Messages) AgentEditDeleted(count int) string {
+	return Catalog.Format(msgs.locale, "agentEditDeleted", map[string]any{"count": count})
+}
+
+// AgentEditCreatedSubpage says "Created subpage “{title}”"
+// in the language the app shows.
+//
+// An edit an agent made, in its reply and the list of its edits: it made a
+// subpage of the page, titled title.
+func AgentEditCreatedSubpage(title string) string {
+	return In(i18n.Locale()).AgentEditCreatedSubpage(title)
+}
+
+// AgentEditCreatedSubpage says "Created subpage “{title}”"
+// in the language of msgs.
+//
+// An edit an agent made, in its reply and the list of its edits: it made a
+// subpage of the page, titled title.
+func (msgs Messages) AgentEditCreatedSubpage(title string) string {
+	return Catalog.Format(msgs.locale, "agentEditCreatedSubpage", map[string]any{"title": title})
+}
+
+// AgentEditBlocks says "{count, plural, one {a block} other {# blocks}}"
+// in the language the app shows.
+//
+// The blocks an agent's edit wrote, in agentEditInserted, agentEditWrote
+// and agentEditRewrote: how many, or a block of a kind they don't name.
+func AgentEditBlocks(count int) string { return In(i18n.Locale()).AgentEditBlocks(count) }
+
+// AgentEditBlocks says "{count, plural, one {a block} other {# blocks}}"
+// in the language of msgs.
+//
+// The blocks an agent's edit wrote, in agentEditInserted, agentEditWrote
+// and agentEditRewrote: how many, or a block of a kind they don't name.
+func (msgs Messages) AgentEditBlocks(count int) string {
+	return Catalog.Format(msgs.locale, "agentEditBlocks", map[string]any{"count": count})
+}
+
+// AgentEditChart says "a chart"
+// in the language the app shows.
+//
+// A chart block, in agentEditInserted, agentEditWrote and agentEditRewrote.
+func AgentEditChart() string { return In(i18n.Locale()).AgentEditChart() }
+
+// AgentEditChart says "a chart"
+// in the language of msgs.
+//
+// A chart block, in agentEditInserted, agentEditWrote and agentEditRewrote.
+func (msgs Messages) AgentEditChart() string {
+	return Catalog.Format(msgs.locale, "agentEditChart", nil)
+}
+
+// AgentEditTable says "a table"
+// in the language the app shows.
+//
+// A table block, in agentEditInserted, agentEditWrote and agentEditRewrote.
+func AgentEditTable() string { return In(i18n.Locale()).AgentEditTable() }
+
+// AgentEditTable says "a table"
+// in the language of msgs.
+//
+// A table block, in agentEditInserted, agentEditWrote and agentEditRewrote.
+func (msgs Messages) AgentEditTable() string {
+	return Catalog.Format(msgs.locale, "agentEditTable", nil)
+}
+
+// AgentEditEmbed says "an interactive embed"
+// in the language the app shows.
+//
+// An interactive embed block (HTML running sandboxed), in
+// agentEditInserted, agentEditWrote and agentEditRewrote.
+func AgentEditEmbed() string { return In(i18n.Locale()).AgentEditEmbed() }
+
+// AgentEditEmbed says "an interactive embed"
+// in the language of msgs.
+//
+// An interactive embed block (HTML running sandboxed), in
+// agentEditInserted, agentEditWrote and agentEditRewrote.
+func (msgs Messages) AgentEditEmbed() string {
+	return Catalog.Format(msgs.locale, "agentEditEmbed", nil)
+}
+
+// AgentEditHeading says "a heading"
+// in the language the app shows.
+//
+// A heading block, in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func AgentEditHeading() string { return In(i18n.Locale()).AgentEditHeading() }
+
+// AgentEditHeading says "a heading"
+// in the language of msgs.
+//
+// A heading block, in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func (msgs Messages) AgentEditHeading() string {
+	return Catalog.Format(msgs.locale, "agentEditHeading", nil)
+}
+
+// AgentEditImage says "an image"
+// in the language the app shows.
+//
+// An image block, in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func AgentEditImage() string { return In(i18n.Locale()).AgentEditImage() }
+
+// AgentEditImage says "an image"
+// in the language of msgs.
+//
+// An image block, in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func (msgs Messages) AgentEditImage() string {
+	return Catalog.Format(msgs.locale, "agentEditImage", nil)
+}
+
+// AgentEditVideo says "a video"
+// in the language the app shows.
+//
+// A video block, in agentEditInserted, agentEditWrote and agentEditRewrote.
+func AgentEditVideo() string { return In(i18n.Locale()).AgentEditVideo() }
+
+// AgentEditVideo says "a video"
+// in the language of msgs.
+//
+// A video block, in agentEditInserted, agentEditWrote and agentEditRewrote.
+func (msgs Messages) AgentEditVideo() string {
+	return Catalog.Format(msgs.locale, "agentEditVideo", nil)
+}
+
+// AgentEditCode says "a code block"
+// in the language the app shows.
+//
+// A code block, in agentEditInserted, agentEditWrote and agentEditRewrote.
+func AgentEditCode() string { return In(i18n.Locale()).AgentEditCode() }
+
+// AgentEditCode says "a code block"
+// in the language of msgs.
+//
+// A code block, in agentEditInserted, agentEditWrote and agentEditRewrote.
+func (msgs Messages) AgentEditCode() string {
+	return Catalog.Format(msgs.locale, "agentEditCode", nil)
+}
+
+// AgentEditCallout says "a callout"
+// in the language the app shows.
+//
+// A callout block (a note, tip or warning that stands out), in
+// agentEditInserted, agentEditWrote and agentEditRewrote.
+func AgentEditCallout() string { return In(i18n.Locale()).AgentEditCallout() }
+
+// AgentEditCallout says "a callout"
+// in the language of msgs.
+//
+// A callout block (a note, tip or warning that stands out), in
+// agentEditInserted, agentEditWrote and agentEditRewrote.
+func (msgs Messages) AgentEditCallout() string {
+	return Catalog.Format(msgs.locale, "agentEditCallout", nil)
+}
+
+// AgentEditToggle says "a toggle"
+// in the language the app shows.
+//
+// A toggle list block, whose children fold away, in agentEditInserted,
+// agentEditWrote and agentEditRewrote.
+func AgentEditToggle() string { return In(i18n.Locale()).AgentEditToggle() }
+
+// AgentEditToggle says "a toggle"
+// in the language of msgs.
+//
+// A toggle list block, whose children fold away, in agentEditInserted,
+// agentEditWrote and agentEditRewrote.
+func (msgs Messages) AgentEditToggle() string {
+	return Catalog.Format(msgs.locale, "agentEditToggle", nil)
+}
+
+// AgentEditLinkCard says "a link card"
+// in the language the app shows.
+//
+// A link card block (a web page's title and picture), in agentEditInserted,
+// agentEditWrote and agentEditRewrote.
+func AgentEditLinkCard() string { return In(i18n.Locale()).AgentEditLinkCard() }
+
+// AgentEditLinkCard says "a link card"
+// in the language of msgs.
+//
+// A link card block (a web page's title and picture), in agentEditInserted,
+// agentEditWrote and agentEditRewrote.
+func (msgs Messages) AgentEditLinkCard() string {
+	return Catalog.Format(msgs.locale, "agentEditLinkCard", nil)
+}
+
+// AgentEditFormula says "a formula"
+// in the language the app shows.
+//
+// A math equation block, in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func AgentEditFormula() string { return In(i18n.Locale()).AgentEditFormula() }
+
+// AgentEditFormula says "a formula"
+// in the language of msgs.
+//
+// A math equation block, in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func (msgs Messages) AgentEditFormula() string {
+	return Catalog.Format(msgs.locale, "agentEditFormula", nil)
+}
+
+// AgentEditDiagram says "a diagram"
+// in the language the app shows.
+//
+// A diagram block (Mermaid), in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func AgentEditDiagram() string { return In(i18n.Locale()).AgentEditDiagram() }
+
+// AgentEditDiagram says "a diagram"
+// in the language of msgs.
+//
+// A diagram block (Mermaid), in agentEditInserted, agentEditWrote and
+// agentEditRewrote.
+func (msgs Messages) AgentEditDiagram() string {
+	return Catalog.Format(msgs.locale, "agentEditDiagram", nil)
+}
+
+// AgentPageKeptChanging says "The page kept changing while saving the agent's edits."
+// in the language the app shows.
+//
+// Why an agent run failed: something else kept saving the page, closed in
+// the app, while the agent's edits were saved, so they were not.
+func AgentPageKeptChanging() string { return In(i18n.Locale()).AgentPageKeptChanging() }
+
+// AgentPageKeptChanging says "The page kept changing while saving the agent's edits."
+// in the language of msgs.
+//
+// Why an agent run failed: something else kept saving the page, closed in
+// the app, while the agent's edits were saved, so they were not.
+func (msgs Messages) AgentPageKeptChanging() string {
+	return Catalog.Format(msgs.locale, "agentPageKeptChanging", nil)
+}
+
+// AgentPageUnreadable says "The page's content could not be read, so agents leave it as it is."
+// in the language the app shows.
+//
+// Why an agent can't run or undo its edits: the page's content on this
+// device can't be read, as one saved by a newer version of the app.
+func AgentPageUnreadable() string { return In(i18n.Locale()).AgentPageUnreadable() }
+
+// AgentPageUnreadable says "The page's content could not be read, so agents leave it as it is."
+// in the language of msgs.
+//
+// Why an agent can't run or undo its edits: the page's content on this
+// device can't be read, as one saved by a newer version of the app.
+func (msgs Messages) AgentPageUnreadable() string {
+	return Catalog.Format(msgs.locale, "agentPageUnreadable", nil)
+}
+
+// AgentConnectionEnded says "The connection to the agent ended before it finished."
+// in the language the app shows.
+//
+// Why a cloud agent run failed: the connection to the server ended before
+// it said how the run went.
+func AgentConnectionEnded() string { return In(i18n.Locale()).AgentConnectionEnded() }
+
+// AgentConnectionEnded says "The connection to the agent ended before it finished."
+// in the language of msgs.
+//
+// Why a cloud agent run failed: the connection to the server ended before
+// it said how the run went.
+func (msgs Messages) AgentConnectionEnded() string {
+	return Catalog.Format(msgs.locale, "agentConnectionEnded", nil)
+}
+
+// AgentModelNoChoices says "The model returned no choices."
+// in the language the app shows.
+//
+// Why an agent run or a connection test failed: the model's server answered
+// with no answer in it.
+func AgentModelNoChoices() string { return In(i18n.Locale()).AgentModelNoChoices() }
+
+// AgentModelNoChoices says "The model returned no choices."
+// in the language of msgs.
+//
+// Why an agent run or a connection test failed: the model's server answered
+// with no answer in it.
+func (msgs Messages) AgentModelNoChoices() string {
+	return Catalog.Format(msgs.locale, "agentModelNoChoices", nil)
+}
+
+// AgentModelCouldNotAnswer says "The model could not answer"
+// in the language the app shows.
+//
+// Why an agent run failed: the model's server reported an error it gave no
+// words for.
+func AgentModelCouldNotAnswer() string { return In(i18n.Locale()).AgentModelCouldNotAnswer() }
+
+// AgentModelCouldNotAnswer says "The model could not answer"
+// in the language of msgs.
+//
+// Why an agent run failed: the model's server reported an error it gave no
+// words for.
+func (msgs Messages) AgentModelCouldNotAnswer() string {
+	return Catalog.Format(msgs.locale, "agentModelCouldNotAnswer", nil)
+}
+
+// AgentModelCutOff says "The model's answer was cut off."
+// in the language the app shows.
+//
+// Why an agent run failed: the model's streamed answer ended before it was
+// complete.
+func AgentModelCutOff() string { return In(i18n.Locale()).AgentModelCutOff() }
+
+// AgentModelCutOff says "The model's answer was cut off."
+// in the language of msgs.
+//
+// Why an agent run failed: the model's streamed answer ended before it was
+// complete.
+func (msgs Messages) AgentModelCutOff() string {
+	return Catalog.Format(msgs.locale, "agentModelCutOff", nil)
+}
+
+// AgentChatgptCouldNotAnswer says "ChatGPT could not answer"
+// in the language the app shows.
+//
+// Why an agent run on a ChatGPT plan failed: ChatGPT reported an error it
+// gave no words for.
+func AgentChatgptCouldNotAnswer() string { return In(i18n.Locale()).AgentChatgptCouldNotAnswer() }
+
+// AgentChatgptCouldNotAnswer says "ChatGPT could not answer"
+// in the language of msgs.
+//
+// Why an agent run on a ChatGPT plan failed: ChatGPT reported an error it
+// gave no words for.
+func (msgs Messages) AgentChatgptCouldNotAnswer() string {
+	return Catalog.Format(msgs.locale, "agentChatgptCouldNotAnswer", nil)
+}
+
+// AgentChatgptCutOff says "ChatGPT's answer was cut off"
+// in the language the app shows.
+//
+// Why an agent run on a ChatGPT plan failed: ChatGPT's streamed answer
+// ended before it was complete.
+func AgentChatgptCutOff() string { return In(i18n.Locale()).AgentChatgptCutOff() }
+
+// AgentChatgptCutOff says "ChatGPT's answer was cut off"
+// in the language of msgs.
+//
+// Why an agent run on a ChatGPT plan failed: ChatGPT's streamed answer
+// ended before it was complete.
+func (msgs Messages) AgentChatgptCutOff() string {
+	return Catalog.Format(msgs.locale, "agentChatgptCutOff", nil)
+}
+
+// AgentChatgptStoppedAtLimit says "ChatGPT stopped at the most it may write in one answer."
+// in the language the app shows.
+//
+// Why an agent run on a ChatGPT plan failed: ChatGPT reached the longest
+// answer it may write.
+func AgentChatgptStoppedAtLimit() string { return In(i18n.Locale()).AgentChatgptStoppedAtLimit() }
+
+// AgentChatgptStoppedAtLimit says "ChatGPT stopped at the most it may write in one answer."
+// in the language of msgs.
+//
+// Why an agent run on a ChatGPT plan failed: ChatGPT reached the longest
+// answer it may write.
+func (msgs Messages) AgentChatgptStoppedAtLimit() string {
+	return Catalog.Format(msgs.locale, "agentChatgptStoppedAtLimit", nil)
+}
+
+// AgentChatgptStoppedFiltered says "ChatGPT stopped: its content filter held back the rest of the answer."
+// in the language the app shows.
+//
+// Why an agent run on a ChatGPT plan failed: OpenAI's content filter
+// stopped the answer.
+func AgentChatgptStoppedFiltered() string { return In(i18n.Locale()).AgentChatgptStoppedFiltered() }
+
+// AgentChatgptStoppedFiltered says "ChatGPT stopped: its content filter held back the rest of the answer."
+// in the language of msgs.
+//
+// Why an agent run on a ChatGPT plan failed: OpenAI's content filter
+// stopped the answer.
+func (msgs Messages) AgentChatgptStoppedFiltered() string {
+	return Catalog.Format(msgs.locale, "agentChatgptStoppedFiltered", nil)
+}
+
+// AgentChatgptStoppedPlan says "ChatGPT stopped before finishing; your plan's limit may have been reached."
+// in the language the app shows.
+//
+// Why an agent run on a ChatGPT plan failed: ChatGPT stopped without saying
+// why, as when the plan's usage limit is reached.
+func AgentChatgptStoppedPlan() string { return In(i18n.Locale()).AgentChatgptStoppedPlan() }
+
+// AgentChatgptStoppedPlan says "ChatGPT stopped before finishing; your plan's limit may have been reached."
+// in the language of msgs.
+//
+// Why an agent run on a ChatGPT plan failed: ChatGPT stopped without saying
+// why, as when the plan's usage limit is reached.
+func (msgs Messages) AgentChatgptStoppedPlan() string {
+	return Catalog.Format(msgs.locale, "agentChatgptStoppedPlan", nil)
+}
+
+// AgentTestUnreachable says "Could not reach {url}: {error}"
+// in the language the app shows.
+//
+// Settings › Agent providers, testing a connection: the provider's server
+// could not be reached; error is what went wrong, as the system says it.
+func AgentTestUnreachable(url string, error string) string {
+	return In(i18n.Locale()).AgentTestUnreachable(url, error)
+}
+
+// AgentTestUnreachable says "Could not reach {url}: {error}"
+// in the language of msgs.
+//
+// Settings › Agent providers, testing a connection: the provider's server
+// could not be reached; error is what went wrong, as the system says it.
+func (msgs Messages) AgentTestUnreachable(url string, error string) string {
+	return Catalog.Format(msgs.locale, "agentTestUnreachable", map[string]any{"url": url, "error": error})
+}
+
+// AgentTestChooseModel says "Choose a model to test with"
+// in the language the app shows.
+//
+// Settings › Agent providers, testing a connection: the provider lists no
+// models, so the test needs one chosen.
+func AgentTestChooseModel() string { return In(i18n.Locale()).AgentTestChooseModel() }
+
+// AgentTestChooseModel says "Choose a model to test with"
+// in the language of msgs.
+//
+// Settings › Agent providers, testing a connection: the provider lists no
+// models, so the test needs one chosen.
+func (msgs Messages) AgentTestChooseModel() string {
+	return Catalog.Format(msgs.locale, "agentTestChooseModel", nil)
+}
+
+// AgentTestChatOnly says "Connected, but this model did not call tools: it will be chat-only."
+// in the language the app shows.
+//
+// Settings › Agent providers, testing a connection: the model answered
+// but did not call the test's tool, so agents on it answer in the chat and
+// don't edit pages.
+func AgentTestChatOnly() string { return In(i18n.Locale()).AgentTestChatOnly() }
+
+// AgentTestChatOnly says "Connected, but this model did not call tools: it will be chat-only."
+// in the language of msgs.
+//
+// Settings › Agent providers, testing a connection: the model answered
+// but did not call the test's tool, so agents on it answer in the chat and
+// don't edit pages.
+func (msgs Messages) AgentTestChatOnly() string {
+	return Catalog.Format(msgs.locale, "agentTestChatOnly", nil)
+}
+
+// AgentTestToolsWork says "Connected · tool calling works"
+// in the language the app shows.
+//
+// Settings › Agent providers, testing a connection: the model answered
+// and called the test's tool.
+func AgentTestToolsWork() string { return In(i18n.Locale()).AgentTestToolsWork() }
+
+// AgentTestToolsWork says "Connected · tool calling works"
+// in the language of msgs.
+//
+// Settings › Agent providers, testing a connection: the model answered
+// and called the test's tool.
+func (msgs Messages) AgentTestToolsWork() string {
+	return Catalog.Format(msgs.locale, "agentTestToolsWork", nil)
+}
+
+// AgentTestModels says "{count, plural, one {Connected · # model available} other {Connected · # models available}}"
+// in the language the app shows.
+//
+// Settings › Agent providers, testing a connection: the model answered
+// and called the test's tool, and the provider lists count models.
+func AgentTestModels(count int) string { return In(i18n.Locale()).AgentTestModels(count) }
+
+// AgentTestModels says "{count, plural, one {Connected · # model available} other {Connected · # models available}}"
+// in the language of msgs.
+//
+// Settings › Agent providers, testing a connection: the model answered
+// and called the test's tool, and the provider lists count models.
+func (msgs Messages) AgentTestModels(count int) string {
+	return Catalog.Format(msgs.locale, "agentTestModels", map[string]any{"count": count})
 }
 
 // PageDismiss says "Dismiss"
@@ -5153,6 +6503,22 @@ func PageUnreadable() string { return In(i18n.Locale()).PageUnreadable() }
 // Notice over a page whose stored content could not be read.
 func (msgs Messages) PageUnreadable() string {
 	return Catalog.Format(msgs.locale, "pageUnreadable", nil)
+}
+
+// DialogHistoryUnreadable says "This version could not be read, so it cannot be shown or restored."
+// in the language the app shows.
+//
+// Page history: in place of a version whose saved content this version of
+// Leaflet cannot read.
+func DialogHistoryUnreadable() string { return In(i18n.Locale()).DialogHistoryUnreadable() }
+
+// DialogHistoryUnreadable says "This version could not be read, so it cannot be shown or restored."
+// in the language of msgs.
+//
+// Page history: in place of a version whose saved content this version of
+// Leaflet cannot read.
+func (msgs Messages) DialogHistoryUnreadable() string {
+	return Catalog.Format(msgs.locale, "dialogHistoryUnreadable", nil)
 }
 
 // PageReview says "Review"
@@ -5681,6 +7047,38 @@ func (msgs Messages) PanelCouldNotDelete(error string) string {
 	return Catalog.Format(msgs.locale, "panelCouldNotDelete", map[string]any{"error": error})
 }
 
+// PanelCouldNotPost says "Could not post: {error}"
+// in the language the app shows.
+//
+// Toast after posting a comment or a reply to a thread failed.
+func PanelCouldNotPost(error string) string { return In(i18n.Locale()).PanelCouldNotPost(error) }
+
+// PanelCouldNotPost says "Could not post: {error}"
+// in the language of msgs.
+//
+// Toast after posting a comment or a reply to a thread failed.
+func (msgs Messages) PanelCouldNotPost(error string) string {
+	return Catalog.Format(msgs.locale, "panelCouldNotPost", map[string]any{"error": error})
+}
+
+// PanelAgentFailed says "{agent} could not answer: {error}"
+// in the language the app shows.
+//
+// Toast when an agent mentioned in a comment failed to answer in its
+// thread, with the agent's name and why.
+func PanelAgentFailed(agent string, error string) string {
+	return In(i18n.Locale()).PanelAgentFailed(agent, error)
+}
+
+// PanelAgentFailed says "{agent} could not answer: {error}"
+// in the language of msgs.
+//
+// Toast when an agent mentioned in a comment failed to answer in its
+// thread, with the agent's name and why.
+func (msgs Messages) PanelAgentFailed(agent string, error string) string {
+	return Catalog.Format(msgs.locale, "panelAgentFailed", map[string]any{"agent": agent, "error": error})
+}
+
 // SidebarSearch says "Search (⌘P)"
 // in the language the app shows.
 //
@@ -5891,6 +7289,22 @@ func SidebarNoTags() string { return In(i18n.Locale()).SidebarNoTags() }
 // Sidebar Tags tab with no tags yet.
 func (msgs Messages) SidebarNoTags() string {
 	return Catalog.Format(msgs.locale, "sidebarNoTags", nil)
+}
+
+// SidebarTagPages says "{count, plural, one {# page} other {# pages}}"
+// in the language the app shows.
+//
+// Sidebar Tags tab: how many pages have a tag, as VoiceOver reads the count
+// beside its name.
+func SidebarTagPages(count int) string { return In(i18n.Locale()).SidebarTagPages(count) }
+
+// SidebarTagPages says "{count, plural, one {# page} other {# pages}}"
+// in the language of msgs.
+//
+// Sidebar Tags tab: how many pages have a tag, as VoiceOver reads the count
+// beside its name.
+func (msgs Messages) SidebarTagPages(count int) string {
+	return Catalog.Format(msgs.locale, "sidebarTagPages", map[string]any{"count": count})
 }
 
 // TagActions says "Tag actions"
@@ -7696,15 +9110,15 @@ func (msgs Messages) RecErrOnDeviceEnded() string {
 // RecErrOnDeviceStuck says "This device's speech recognition did not finish."
 // in the language the app shows.
 //
-// Error of a transcription on the device (the Mac's speech recognition)
-// that stopped answering and was ended.
+// Error of a transcription on the device (the Mac's, iPhone's or iPad's own
+// speech recognition) that stopped answering and was ended.
 func RecErrOnDeviceStuck() string { return In(i18n.Locale()).RecErrOnDeviceStuck() }
 
 // RecErrOnDeviceStuck says "This device's speech recognition did not finish."
 // in the language of msgs.
 //
-// Error of a transcription on the device (the Mac's speech recognition)
-// that stopped answering and was ended.
+// Error of a transcription on the device (the Mac's, iPhone's or iPad's own
+// speech recognition) that stopped answering and was ended.
 func (msgs Messages) RecErrOnDeviceStuck() string {
 	return Catalog.Format(msgs.locale, "recErrOnDeviceStuck", nil)
 }
@@ -8173,6 +9587,70 @@ func EditorTableColumn() string { return In(i18n.Locale()).EditorTableColumn() }
 // Table block buttons (with + or − icons) that add or remove a column.
 func (msgs Messages) EditorTableColumn() string {
 	return Catalog.Format(msgs.locale, "editorTableColumn", nil)
+}
+
+// EditorTableRowBelow says "Add a row below"
+// in the language the app shows.
+//
+// Table block: what the + Row button does, as its tooltip and VoiceOver
+// say: add an empty row under the row of the cell being edited.
+func EditorTableRowBelow() string { return In(i18n.Locale()).EditorTableRowBelow() }
+
+// EditorTableRowBelow says "Add a row below"
+// in the language of msgs.
+//
+// Table block: what the + Row button does, as its tooltip and VoiceOver
+// say: add an empty row under the row of the cell being edited.
+func (msgs Messages) EditorTableRowBelow() string {
+	return Catalog.Format(msgs.locale, "editorTableRowBelow", nil)
+}
+
+// EditorTableColumnAfter says "Add a column to the right"
+// in the language the app shows.
+//
+// Table block: what the + Column button does, as its tooltip and VoiceOver
+// say: add an empty column right of the column of the cell being edited.
+func EditorTableColumnAfter() string { return In(i18n.Locale()).EditorTableColumnAfter() }
+
+// EditorTableColumnAfter says "Add a column to the right"
+// in the language of msgs.
+//
+// Table block: what the + Column button does, as its tooltip and VoiceOver
+// say: add an empty column right of the column of the cell being edited.
+func (msgs Messages) EditorTableColumnAfter() string {
+	return Catalog.Format(msgs.locale, "editorTableColumnAfter", nil)
+}
+
+// EditorTableRemoveThisRow says "Remove this row"
+// in the language the app shows.
+//
+// Table block: what the − Row button does, as its tooltip and VoiceOver
+// say: take away the row of the cell being edited.
+func EditorTableRemoveThisRow() string { return In(i18n.Locale()).EditorTableRemoveThisRow() }
+
+// EditorTableRemoveThisRow says "Remove this row"
+// in the language of msgs.
+//
+// Table block: what the − Row button does, as its tooltip and VoiceOver
+// say: take away the row of the cell being edited.
+func (msgs Messages) EditorTableRemoveThisRow() string {
+	return Catalog.Format(msgs.locale, "editorTableRemoveThisRow", nil)
+}
+
+// EditorTableRemoveThisColumn says "Remove this column"
+// in the language the app shows.
+//
+// Table block: what the − Column button does, as its tooltip and
+// VoiceOver say: take away the column of the cell being edited.
+func EditorTableRemoveThisColumn() string { return In(i18n.Locale()).EditorTableRemoveThisColumn() }
+
+// EditorTableRemoveThisColumn says "Remove this column"
+// in the language of msgs.
+//
+// Table block: what the − Column button does, as its tooltip and
+// VoiceOver say: take away the column of the cell being edited.
+func (msgs Messages) EditorTableRemoveThisColumn() string {
+	return Catalog.Format(msgs.locale, "editorTableRemoveThisColumn", nil)
 }
 
 // EditorTableAddRow says "Add row"
@@ -8805,6 +10283,34 @@ func EditorCopyBlockLink() string { return In(i18n.Locale()).EditorCopyBlockLink
 // Page context menu item.
 func (msgs Messages) EditorCopyBlockLink() string {
 	return Catalog.Format(msgs.locale, "editorCopyBlockLink", nil)
+}
+
+// EditorCut says "Cut"
+// in the language the app shows.
+//
+// Page context menu item: cut the selection to the clipboard.
+func EditorCut() string { return In(i18n.Locale()).EditorCut() }
+
+// EditorCut says "Cut"
+// in the language of msgs.
+//
+// Page context menu item: cut the selection to the clipboard.
+func (msgs Messages) EditorCut() string {
+	return Catalog.Format(msgs.locale, "editorCut", nil)
+}
+
+// EditorPaste says "Paste"
+// in the language the app shows.
+//
+// Page context menu item: paste what is on the clipboard at the caret.
+func EditorPaste() string { return In(i18n.Locale()).EditorPaste() }
+
+// EditorPaste says "Paste"
+// in the language of msgs.
+//
+// Page context menu item: paste what is on the clipboard at the caret.
+func (msgs Messages) EditorPaste() string {
+	return Catalog.Format(msgs.locale, "editorPaste", nil)
 }
 
 // EditorCopiedBlockLink says "Copied a link to the block"
@@ -9721,6 +11227,20 @@ func (msgs Messages) SettingsDevicesLoading() string {
 	return Catalog.Format(msgs.locale, "settingsDevicesLoading", nil)
 }
 
+// SettingsDevicesNone says "No devices yet."
+// in the language the app shows.
+//
+// Settings › Account › Devices: the account has no devices listed yet.
+func SettingsDevicesNone() string { return In(i18n.Locale()).SettingsDevicesNone() }
+
+// SettingsDevicesNone says "No devices yet."
+// in the language of msgs.
+//
+// Settings › Account › Devices: the account has no devices listed yet.
+func (msgs Messages) SettingsDevicesNone() string {
+	return Catalog.Format(msgs.locale, "settingsDevicesNone", nil)
+}
+
 // SettingsDevicesFailed says "Could not load devices: {error}"
 // in the language the app shows.
 //
@@ -10035,6 +11555,22 @@ func SettingsTypeDelete() string { return In(i18n.Locale()).SettingsTypeDelete()
 // English.
 func (msgs Messages) SettingsTypeDelete() string {
 	return Catalog.Format(msgs.locale, "settingsTypeDelete", nil)
+}
+
+// SettingsDeletingAccount says "Deleting…"
+// in the language the app shows.
+//
+// Delete account dialog: its delete button while the server deletes the
+// account.
+func SettingsDeletingAccount() string { return In(i18n.Locale()).SettingsDeletingAccount() }
+
+// SettingsDeletingAccount says "Deleting…"
+// in the language of msgs.
+//
+// Delete account dialog: its delete button while the server deletes the
+// account.
+func (msgs Messages) SettingsDeletingAccount() string {
+	return Catalog.Format(msgs.locale, "settingsDeletingAccount", nil)
 }
 
 // SettingsDeleteAccountFailed says "Could not delete the account: {error}"
@@ -11125,6 +12661,22 @@ func (msgs Messages) SettingsUseThisDevice() string {
 	return Catalog.Format(msgs.locale, "settingsUseThisDevice", nil)
 }
 
+// SettingsUseOtherDevice says "Use the other device's version"
+// in the language the app shows.
+//
+// Settings › Conflicts › Resolve: put back the version from the other
+// device, which the merge did not keep.
+func SettingsUseOtherDevice() string { return In(i18n.Locale()).SettingsUseOtherDevice() }
+
+// SettingsUseOtherDevice says "Use the other device's version"
+// in the language of msgs.
+//
+// Settings › Conflicts › Resolve: put back the version from the other
+// device, which the merge did not keep.
+func (msgs Messages) SettingsUseOtherDevice() string {
+	return Catalog.Format(msgs.locale, "settingsUseOtherDevice", nil)
+}
+
 // SettingsKeepNewer says "Keep the newer version"
 // in the language the app shows.
 //
@@ -12197,6 +13749,28 @@ func (msgs Messages) ExternalConnectFailed(app string, error string) string {
 	return Catalog.Format(msgs.locale, "externalConnectFailed", map[string]any{"app": app, "error": error})
 }
 
+// ExternalOldEntryNotBack says "{error}; the old entry could not be put back either: {restoreError}"
+// in the language the app shows.
+//
+// Settings › External agents: why Claude Code could not be connected,
+// when adding Leaflet failed and Leaflet's entry from before could not be
+// put back; shown inside the externalConnectFailed toast. Both are what
+// Claude Code's command said.
+func ExternalOldEntryNotBack(error string, restoreError string) string {
+	return In(i18n.Locale()).ExternalOldEntryNotBack(error, restoreError)
+}
+
+// ExternalOldEntryNotBack says "{error}; the old entry could not be put back either: {restoreError}"
+// in the language of msgs.
+//
+// Settings › External agents: why Claude Code could not be connected,
+// when adding Leaflet failed and Leaflet's entry from before could not be
+// put back; shown inside the externalConnectFailed toast. Both are what
+// Claude Code's command said.
+func (msgs Messages) ExternalOldEntryNotBack(error string, restoreError string) string {
+	return Catalog.Format(msgs.locale, "externalOldEntryNotBack", map[string]any{"error": error, "restoreError": restoreError})
+}
+
 // ExternalDisconnectFailed says "Could not disconnect {app}: {error}"
 // in the language the app shows.
 //
@@ -12663,6 +14237,38 @@ func SigninCodeSent() string { return In(i18n.Locale()).SigninCodeSent() }
 // The sign-in page › Email code: after sending it.
 func (msgs Messages) SigninCodeSent() string {
 	return Catalog.Format(msgs.locale, "signinCodeSent", nil)
+}
+
+// SigninResendCode says "Send a new code"
+// in the language the app shows.
+//
+// Sign-in with an emailed code: sends another code to the same email, as
+// when the one sent was mistyped or is too old.
+func SigninResendCode() string { return In(i18n.Locale()).SigninResendCode() }
+
+// SigninResendCode says "Send a new code"
+// in the language of msgs.
+//
+// Sign-in with an emailed code: sends another code to the same email, as
+// when the one sent was mistyped or is too old.
+func (msgs Messages) SigninResendCode() string {
+	return Catalog.Format(msgs.locale, "signinResendCode", nil)
+}
+
+// SigninChangeEmail says "Use another email"
+// in the language the app shows.
+//
+// Sign-in with an emailed code: goes back to type another email address, to
+// send a code to.
+func SigninChangeEmail() string { return In(i18n.Locale()).SigninChangeEmail() }
+
+// SigninChangeEmail says "Use another email"
+// in the language of msgs.
+//
+// Sign-in with an emailed code: goes back to type another email address, to
+// send a code to.
+func (msgs Messages) SigninChangeEmail() string {
+	return Catalog.Format(msgs.locale, "signinChangeEmail", nil)
 }
 
 // SigninAnyway says "Sign in anyway?"

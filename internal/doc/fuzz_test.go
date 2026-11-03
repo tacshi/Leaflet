@@ -48,9 +48,9 @@ func FuzzMarkdownBlocksRoundTrip(f *testing.F) {
 			t.Skip()
 		}
 		once := MarkdownBlocks(md)
-		written := PageMarkdown("", FromBlocks(once), nil)
+		written := PageMarkdown("", FromBlocks(once), MarkdownOptions{})
 		twice := MarkdownBlocks(written)
-		again := PageMarkdown("", FromBlocks(twice), nil)
+		again := PageMarkdown("", FromBlocks(twice), MarkdownOptions{})
 		if got, want := shape(MarkdownBlocks(again)), shape(twice); !slices.Equal(got, want) {
 			t.Errorf("%q wrote\n%s\nread back as\n%q\nwant\n%q", md, again, got, want)
 		}
@@ -135,7 +135,7 @@ func FuzzPageMarkdownRoundTrip(f *testing.F) {
 		if len(got) != 3 || got[0].Delta().Plain() != "before" || got[2].Delta().Plain() != "after" ||
 			got[1].Type != want.Type || got[1].Delta().Plain() != wantText {
 			t.Errorf("%s %q (code from %d) wrote\n%s\nread back as %q, want %q", typ, text, cut,
-				PageMarkdown("", FromBlocks([]*Node{n}), nil), shape(got), wantText)
+				PageMarkdown("", FromBlocks([]*Node{n}), MarkdownOptions{}), shape(got), wantText)
 		}
 	})
 }
@@ -242,7 +242,7 @@ func FuzzTableCellRoundTrip(f *testing.F) {
 		}
 		want, rows := cells(ReadableTableRows(table)), cells(TableRows(got[0]))
 		if !slices.EqualFunc(rows, want, slices.Equal) {
-			t.Errorf("%q wrote\n%s\nread back as %q, want %q", md, PageMarkdown("", FromBlocks([]*Node{table}), nil), rows, want)
+			t.Errorf("%q wrote\n%s\nread back as %q, want %q", md, PageMarkdown("", FromBlocks([]*Node{table}), MarkdownOptions{}), rows, want)
 		}
 	})
 }
@@ -307,4 +307,177 @@ func tree(c *Content) []string {
 	}
 	visit(c.Children, "")
 	return out
+}
+
+// fuzzBytes reads a fuzz input a byte at a time, 0 once it runs out.
+type fuzzBytes []byte
+
+func (b *fuzzBytes) next() int {
+	if len(*b) == 0 {
+		return 0
+	}
+	v := (*b)[0]
+	*b = (*b)[1:]
+	return int(v)
+}
+
+// twoSidedBase is a page for two sides to change: lists nested in lists,
+// paragraphs, a toggle and a table, its blocks named by their places so
+// that a merge's ties come out alike each run.
+func twoSidedBase() *Content {
+	md := "# Plan\n\n- one\n  - one.a\n  - one.b\n- two\n\npara x\n\npara y\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n" +
+		"<details>\n<summary>more</summary>\n\nhidden\n\n</details>\n\nlast"
+	c := FromBlocks(MarkdownBlocks(md))
+	i := 0
+	c.Walk(func(n, _ *Node) {
+		n.ID = fmt.Sprintf("b%d", i)
+		i++
+	})
+	c.Blocks = map[string]int64{}
+	c.Walk(func(n, _ *Node) { c.Blocks[n.ID] = 1000 })
+	return c
+}
+
+// editSide makes up to four edits to c as one side would, as b says:
+// deleting, editing, moving and adding blocks, and growing the table and
+// editing its cells. It returns the blocks whose text it edited.
+func editSide(c *Content, b *fuzzBytes, side string) map[string]string {
+	edited := map[string]string{}
+	pick := func(ok func(n, parent *Node) bool) *Node {
+		var all []*Node
+		var visit func(nodes []*Node, parent *Node)
+		visit = func(nodes []*Node, parent *Node) {
+			for _, n := range nodes {
+				if ok(n, parent) {
+					all = append(all, n)
+				}
+				if n.Type != "table" {
+					visit(n.Children, n)
+				}
+			}
+		}
+		visit(c.Children, nil)
+		if len(all) == 0 {
+			return nil
+		}
+		return all[b.next()%len(all)]
+	}
+	any := func(n, _ *Node) bool { return true }
+	var table *Node
+	for _, n := range c.Children {
+		if n.Type == "table" {
+			table = n
+		}
+	}
+	for k := range b.next()%4 + 1 {
+		switch b.next() % 8 {
+		case 0:
+			if n := pick(any); n != nil {
+				c.Remove(n.ID)
+			}
+		case 1:
+			if n := pick(func(n, _ *Node) bool { return n.IsText() }); n != nil {
+				text := fmt.Sprintf("%s edit %d", side, k)
+				n.SetDelta(Delta{{Text: text}})
+				edited[n.ID] = text
+			}
+		case 2:
+			if n, to := pick(any), pick(any); n != nil && to != nil {
+				_ = c.Move(n.ID, Position{After: to.ID})
+			}
+		case 3:
+			if n, to := pick(any), pick(func(n, _ *Node) bool { return NestableTypes[n.Type] }); n != nil && to != nil {
+				_ = c.Move(n.ID, Position{Parent: to.ID})
+			}
+		case 4:
+			if n := pick(any); n != nil {
+				_ = c.Insert(Position{After: n.ID}, para(fmt.Sprintf("%s new %d", side, k), "new"))
+			}
+		case 5, 6:
+			if table == nil || c.Find(table.ID) == nil {
+				continue
+			}
+			rows, cols := TableSize(table)
+			if b.next()%2 == 0 {
+				for col := range cols {
+					table.Children = append(table.Children, TableCellNode(rows, col, Delta{{Text: side}}))
+				}
+				table.Set("rowsLen", rows+1)
+			} else {
+				for r := range rows {
+					table.Children = append(table.Children, TableCellNode(r, cols, Delta{{Text: side}}))
+				}
+				table.Set("colsLen", cols+1)
+			}
+			SortTableCells(table)
+		case 7:
+			if table == nil || c.Find(table.ID) == nil || len(table.Children) == 0 {
+				continue
+			}
+			cell := table.Children[b.next()%len(table.Children)]
+			if len(cell.Children) > 0 {
+				text := fmt.Sprintf("%s cell %d", side, k)
+				cell.Children[0].SetDelta(Delta{{Text: text}})
+				edited[cell.Children[0].ID] = text
+			}
+		}
+	}
+	return edited
+}
+
+// Changes made on both sides at once merge to the same page whichever
+// side is local, with no block twice and no table's cells at one place,
+// keeping every block both sides kept and every edit only one side made.
+func FuzzMergeTwoSides(f *testing.F) {
+	for _, s := range []string{"", "\x01\x02\x03\x04\x05", "\x03\x02\x00\x01\x03\x05\x00\x02\x06\x01", "\x00\x05\x00\x00\x00\x05\x00\x00",
+		"\x02\x03\x01\x02\x03\x02\x02\x00", "\x03\x07\x04\x07\x09\x03\x07\x04\x07\x02", "\x01\x01\x03\x01\x01\x02\x05\x01"} {
+		f.Add([]byte(s))
+	}
+	f.Fuzz(func(t *testing.T, data []byte) {
+		b := fuzzBytes(data)
+		base := twoSidedBase()
+		local, remote := base.Copy(), base.Copy()
+		localEdits := editSide(local, &b, "local")
+		remoteEdits := editSide(remote, &b, "remote")
+		local = local.Stamped(base, 2000)
+		remote = remote.Stamped(base, int64(2000+b.next()%2*10))
+		got, _ := Merge(base, local, remote)
+		swapped, _ := Merge(base, remote, local)
+		if g, s := tree(got), tree(swapped); !slices.Equal(g, s) {
+			t.Fatalf("merged\n%s\nas the sides swap\n%s", strings.Join(g, "\n"), strings.Join(s, "\n"))
+		}
+		ids := map[string]bool{}
+		got.Walk(func(n, _ *Node) {
+			if ids[n.ID] {
+				t.Errorf("%s is in the page twice", n.ID)
+			}
+			ids[n.ID] = true
+			if n.Type != "table" {
+				return
+			}
+			at := map[[2]int]bool{}
+			for _, cell := range n.Children {
+				pos := [2]int{cell.Int("rowPosition", -1), cell.Int("colPosition", -1)}
+				if at[pos] {
+					t.Errorf("table %s has two cells at %v", n.ID, pos)
+				}
+				at[pos] = true
+			}
+		})
+		remote.Walk(func(n, _ *Node) {
+			if local.Find(n.ID) != nil && !ids[n.ID] {
+				t.Errorf("%s, which both sides kept, is gone", n.ID)
+			}
+		})
+		for edits, other := range map[*map[string]string]map[string]string{&localEdits: remoteEdits, &remoteEdits: localEdits} {
+			for id, text := range *edits {
+				if _, both := other[id]; both || local.Find(id) == nil || remote.Find(id) == nil {
+					continue
+				}
+				if n := got.Find(id); n == nil || n.Delta().Plain() != text {
+					t.Errorf("%s's edit %q is lost: %q", id, text, n.Delta().Plain())
+				}
+			}
+		}
+	})
 }

@@ -1,15 +1,13 @@
 package app
 
 import (
-	"hash/fnv"
 	"math"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
 
-	"leaflet/internal/editor"
+	"leaflet/internal/doc"
 	"leaflet/internal/theme"
 	"leaflet/locales"
 )
@@ -18,8 +16,8 @@ import (
 
 // tools is MyGo's Toolbar of icon buttons: they take no face until
 // hovered. It keeps its size, so that none goes into its overflow menu.
-func tools(c *ui.Context, fn func()) ui.Element {
-	return ui.Toolbar(c, fn).Padding(0).Gap(2).Shrink(0)
+func tools(c *ui.Context, fn func()) {
+	ui.Toolbar(c, fn).Padding(0).Gap(2).Shrink(0)
 }
 
 // iconButton is MyGo's Button showing an icon, named for assistive
@@ -116,18 +114,18 @@ const (
 // shimmer is a status line of work going on, as a terminal agent's
 // "Thinking…": muted text that a brighter band sweeps across, over and
 // over; still where the desktop asks for less motion.
-func shimmer(c *ui.Context, text string, size float32) ui.Element {
+func shimmer(c *ui.Context, text string, size float32) {
 	pal := theme.Of(c)
 	t := ui.Text(c, text).FontSize(size).TextColor(pal.TextMuted)
 	if c.Preferences().ReduceMotion {
-		return t
+		return
 	}
 	runes := []rune(text)
 	spans := make([]ui.Span, len(runes))
 	// Its own glyphs hidden, the text keeps its layout, and what assistive
 	// technology reads; Draw paints it again, each rune in its color, and
 	// again each frame without building the view.
-	return t.TextColor(pal.TextMuted.Alpha(0)).Draw(func(p *ui.Painter, r ui.Rect) {
+	t.TextColor(pal.TextMuted.Alpha(0)).Draw(func(p *ui.Painter, r ui.Rect) {
 		at := shimmerAt(p.Now())
 		for i, ch := range runes {
 			x := (float32(i) + 0.5) / float32(len(runes))
@@ -243,7 +241,10 @@ func dialog(c *ui.Context, open *bool, width float32, fn func()) ui.Element {
 	pal := theme.Of(c)
 	return ui.DialogBase(c, open, func(backdrop, panel ui.Element) {
 		backdrop.Background(ui.RGBA(10, 12, 16, 0.32))
-		panel.Width(width).MaxHeightPercent(86).Radius(12).Background(pal.Surface).Border(1, pal.Border).
+		// No wider than the window, less a margin, which a narrow one
+		// would cut it off at, its close button too.
+		w, _ := c.Size()
+		panel.Width(min(width, max(w-32, 240))).MaxHeightPercent(86).Radius(12).Background(pal.Surface).Border(1, pal.Border).
 			Shadow(0, 24, 60, 0, pal.Shadow).Clip()
 		fn()
 	})
@@ -298,14 +299,8 @@ func accentBadge(c *ui.Context, text string) ui.Element {
 	return ui.Badge(c, text).Background(pal.AccentSoft).TextColor(pal.AccentText)
 }
 
-// tagColor is a tag's color: one of the editor's bright colors, chosen by
-// its name in any case, so a tag has the same one on every device.
-func tagColor(name string) ui.Color {
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(strings.ToLower(name)))
-	colors := editor.BrightColors()
-	return colors[h.Sum32()%uint32(len(colors))] // #nosec G115 -- a handful of colors.
-}
+// tagColor is a tag's color, as doc.TagColor chooses it on every device.
+func tagColor(name string) ui.Color { return ui.Hex(doc.TagColor(name)) }
 
 // tagLook gives e a tag's look: a pill tinted in its color, its name in
 // a darker or, on a dark theme, lighter shade of it.

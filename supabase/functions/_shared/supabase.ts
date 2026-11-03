@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient, type User } from "jsr:@supabase/supabase-js@2";
+import { createClient, type SupabaseClient, type User } from "jsr:@supabase/supabase-js@2.118.0";
 import { HttpError } from "./cors.ts";
 import { expiresBefore } from "./deadline.ts";
 
@@ -32,6 +32,18 @@ export function serviceClient(): SupabaseClient {
     { auth: { persistSession: false, autoRefreshToken: false } },
   );
 }
+
+/**
+ * How a function reaches the project: as the caller, and as itself. Tests
+ * give their own, on a project of their own.
+ */
+export interface Clients {
+  user(req: Request): SupabaseClient;
+  service(): SupabaseClient;
+}
+
+/** The project the function runs in, from the environment the platform gives it. */
+export const projectClients: Clients = { user: userClient, service: serviceClient };
 
 export async function requireUser(
   req: Request,

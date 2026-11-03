@@ -24,11 +24,15 @@ func (v RowVersion) After(o RowVersion) bool {
 }
 
 // RowVersion returns the version of a row this device has, or the zero
-// version.
-func (s *Store) RowVersion(table, id string) RowVersion {
+// version for one it has none of. One that cannot be read is an error, as
+// the zero version would let any other device's change go over the row.
+func (s *Store) RowVersion(table, id string) (RowVersion, error) {
 	var v RowVersion
-	_ = s.db.QueryRow(`SELECT at, device FROM row_versions WHERE tbl = ? AND id = ?`, table, id).Scan(&v.At, &v.Device)
-	return v
+	err := s.db.QueryRow(`SELECT at, device FROM row_versions WHERE tbl = ? AND id = ?`, table, id).Scan(&v.At, &v.Device)
+	if errors.Is(err, sql.ErrNoRows) {
+		return RowVersion{}, nil
+	}
+	return v, err
 }
 
 // SetRowVersion records the version of a row this device has.
@@ -66,30 +70,27 @@ type PeerContent struct {
 }
 
 // PeerContent returns what a device last published of a page that this
-// one has merged, or false.
-func (s *Store) PeerContent(peer, pageID string) (PeerContent, bool) {
+// one has merged, or false when it has merged none. One that cannot be
+// read is an error, not none: a merge with no base would bring back what
+// either side deleted.
+func (s *Store) PeerContent(peer, pageID string) (PeerContent, bool, error) {
 	p := PeerContent{Peer: peer}
 	err := s.db.QueryRow(`SELECT version, content FROM peer_contents WHERE peer_id = ? AND page_id = ?`, peer, pageID).Scan(&p.Version, &p.Content)
-	return p, err == nil
+	if errors.Is(err, sql.ErrNoRows) {
+		return p, false, nil
+	}
+	return p, err == nil, err
 }
 
 // PeerContents returns what every device last published of a page, as far
 // as this one has merged it.
 func (s *Store) PeerContents(pageID string) ([]PeerContent, error) {
 	rows, err := s.db.Query(`SELECT peer_id, version, content FROM peer_contents WHERE page_id = ? ORDER BY peer_id`, pageID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []PeerContent
-	for rows.Next() {
+	return collect(rows, err, func(sc scanner) (PeerContent, error) {
 		var p PeerContent
-		if err := rows.Scan(&p.Peer, &p.Version, &p.Content); err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
+		err := sc.Scan(&p.Peer, &p.Version, &p.Content)
+		return p, err
+	})
 }
 
 // PutPeerContent records what a device published of a page.

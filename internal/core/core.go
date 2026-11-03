@@ -10,6 +10,7 @@ import (
 	"errors"
 	"log"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/egoist/mygo/i18n"
 
@@ -78,6 +79,11 @@ type Core struct {
 	Sync   *syncsvc.Service
 	Hub    *agents.Hub
 	Rec    *recording.Controller
+	// updatingProject is set while the project is first brought up to
+	// date as the app starts (Start), as sync reads through Updating.
+	updatingProject atomic.Bool
+	// retryingUpdate is set while keepProjectUpdated tries again.
+	retryingUpdate atomic.Bool
 
 	// OpenURL and WatchICloud are the Platform's.
 	OpenURL     func(url string)
@@ -131,6 +137,7 @@ func Open(cfg Config) (*Core, error) {
 	c.Sync = syncsvc.New(st, c.Remote)
 	c.Sync.Online, c.Sync.DeviceName = cfg.Online, cfg.DeviceName
 	c.Sync.OnState, c.Sync.OnPageContent = cfg.OnSyncState, cfg.OnPageContent
+	c.Sync.Updating = c.updatingProject.Load
 	// Sync asks from its own goroutine: the stored settings, which the
 	// app's own copy is not safe to read from.
 	c.Sync.Offline = func() bool { return st.Settings().WorkOffline }
@@ -154,8 +161,11 @@ func Open(cfg Config) (*Core, error) {
 // to this version of Leaflet.
 func (c *Core) Start() {
 	c.watch(c.Sync.ICloudOn())
+	// The changes wait to go up while the project is brought up to date,
+	// a try that failed tried again later.
+	c.updatingProject.Store(true)
 	c.Sync.Start()
-	guard.Go(c.UpdateProject)
+	guard.Go(c.keepProjectUpdated)
 }
 
 // startICloud sets iCloud sync up as the settings have it. Signed in, the

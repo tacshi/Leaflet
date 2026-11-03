@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -37,7 +38,7 @@ func TestPasteAndSoftBreakOnABlockSelectedWhole(t *testing.T) {
 	e := New(doc.FromBlocks([]*doc.Node{para("A", "a"), div}), &fakeHost{})
 	e.PlaceCaret("D", 0)
 	e.SoftBreak()
-	if e.CanUndo() {
+	if len(e.undo) > 0 {
 		t.Fatal("Shift-Enter on a divider made a step of undo")
 	}
 	e.paste("pasted")
@@ -45,8 +46,8 @@ func TestPasteAndSoftBreakOnABlockSelectedWhole(t *testing.T) {
 		t.Fatalf("pasted %v", got)
 	}
 	e.Undo()
-	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "divider:"}) || e.CanUndo() {
-		t.Errorf("after undo %v, undo %v", got, e.CanUndo())
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "divider:"}) || len(e.undo) > 0 {
+		t.Errorf("after undo %v, %d steps", got, len(e.undo))
 	}
 }
 
@@ -169,7 +170,7 @@ func TestTableCellsShiftTab(t *testing.T) {
 	table, _ := doc.TableNode([][]string{{"ID", "Name"}, {"", ""}}, "")
 	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table} })
 	tt.Frame()
-	box := e.geom[table.ID]
+	box := boxOf(e, table.ID)
 	tt.ClickAt(box.X+20, box.Y+box.H*0.75)
 	tt.Frame()
 	for _, want := range []string{cellKey(table.ID, 0, 1), cellKey(table.ID, 0, 0), cellKey(table.ID, 0, 0)} {
@@ -195,7 +196,7 @@ func TestTableMissingACell(t *testing.T) {
 	})
 	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table} })
 	tt.Frame()
-	box := e.geom[table.ID]
+	box := boxOf(e, table.ID)
 	tt.ClickAt(box.X+20, box.Y+box.H*0.75)
 	tt.Frame()
 	tt.Key(0, ui.KeyTab)
@@ -222,5 +223,89 @@ func TestLinkInCodeIsPlain(t *testing.T) {
 	e.insertInline("https://x.dev", "https://x.dev")
 	if d := e.Content.Children[0].Delta(); len(d) != 1 || !d[0].Attrs.Zero() || d.Plain() != "xhttps://x.dev" {
 		t.Errorf("code is %+v", d)
+	}
+}
+
+// Leaflet's own blocks pasted into code go in as text, where the caret is:
+// as blocks they split the code, and took their formats into it.
+func TestOwnBlocksPasteIntoCodeAsText(t *testing.T) {
+	freshClipboard(t)
+	src := New(doc.FromBlocks([]*doc.Node{newText("paragraph", doc.FromMarkdown("**bold** one")), newText("paragraph", doc.FromMarkdown("two"))}), &fakeHost{})
+	us := src.units()
+	src.Select(Pos{us[0].ID, 0}, Pos{us[1].ID, 3})
+	text := src.copyText()
+	clip.text, clip.blocks, clip.delta = text, src.copyBlocks(), nil
+
+	code := doc.CodeNode("x = 1", "")
+	e := New(doc.FromBlocks([]*doc.Node{code}), &fakeHost{})
+	e.PlaceCaret(code.ID, 2)
+	e.paste(text)
+	if got := e.Content.Children; len(got) != 1 || got[0].Type != "code" {
+		t.Fatalf("blocks %v", texts(e))
+	}
+	d := code.Delta()
+	if want := "x " + text + "= 1"; d.Plain() != want || len(d) != 1 || !d[0].Attrs.Zero() {
+		t.Errorf("code %q (%d runs), want %q in one plain run", d.Plain(), len(d), want)
+	}
+}
+
+// Text pasted with the breaks other apps end a paragraph at, as a lone
+// "\r", goes in as lines, a block each: none stays in a block's text.
+func TestPastedParagraphBreaksAreLines(t *testing.T) {
+	for _, brk := range []string{"\r", "\r\n", "\u2029", "\u0085"} {
+		e, _, _ := setup(t)
+		e.paste("one" + brk + "two")
+		if got := texts(e); len(got) != 2 || got[0] != "paragraph:one" || got[1] != "paragraph:two" {
+			t.Errorf("%q: %v", brk, got)
+		}
+	}
+}
+
+// A click on a page link's letters opens the page, its last letter too; a
+// click past its end, beside it, places the caret.
+func TestClickOnALinkOpensIt(t *testing.T) {
+	e, tt, host := setup(t)
+	n := e.units()[0]
+	e.Edit(func(c *doc.Content) {
+		c.Find(n.ID).SetDelta(doc.Delta{{Text: "Plan", Attrs: doc.Attrs{Href: doc.PageLink("p1")}}})
+	})
+	tt.Frame()
+	l, box := e.layouts[n.ID], boxOf(e, n.ID)
+	last := l.layout.SelectionRects(ui.TextInputRange{Start: 3, End: 4})[0]
+	y := box.Y + l.y + last.Y + last.H/2
+	tt.ClickAt(box.X+l.x+last.X+last.W*0.8, y)
+	tt.Frame()
+	if len(host.opened) != 1 || host.opened[0] != "p1" {
+		t.Fatalf("a click on its last letter opened %v", host.opened)
+	}
+	tt.Advance(time.Second)
+	tt.ClickAt(box.X+l.x+last.X+last.W+6, y)
+	tt.Frame()
+	if len(host.opened) != 1 {
+		t.Errorf("a click beside it opened %v", host.opened)
+	}
+}
+
+// Paste and Match Style takes Leaflet's own copy without its formats, as
+// it takes another app's: bold copied pastes plain.
+func TestPasteAndMatchStyleOwnCopy(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("v1 and more")
+	n := e.units()[0]
+	e.Select(Pos{n.ID, 0}, Pos{n.ID, 2})
+	e.ToggleBold()
+	tt.Command("copy")
+	e.Select(Pos{n.ID, textLen(n)}, Pos{n.ID, textLen(n)})
+	tt.Command("pasteAndMatchStyle")
+	d := e.node(n.ID).Delta()
+	if d.Plain() != "v1 and morev1" {
+		t.Fatalf("pasted %q", d.Plain())
+	}
+	if last := d[len(d)-1]; last.Attrs.Bold {
+		t.Errorf("pasted bold: %+v", d)
+	}
+	tt.Command("paste")
+	if d := e.node(n.ID).Delta(); !d[len(d)-1].Attrs.Bold {
+		t.Errorf("a plain paste lost its bold: %+v", d)
 	}
 }

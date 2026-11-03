@@ -12,11 +12,18 @@ final class Recorder {
     static let shared = Recorder()
 
     /// state is the recording in progress, as the core last said; at is
-    /// when it said it, which its time counts on from.
+    /// when it said it, which its time counts on from. Its levels and the
+    /// words heard, which change many times a second, are apart, levels
+    /// and liveText, for only the live block to read: each view that reads
+    /// state draws again as it changes.
     private(set) var state = RecordingState.idle
     private(set) var at = Date()
-    /// rows are the recordings the blocks asked for, by ID.
+    private(set) var levels: [Double] = []
+    private(set) var liveText = ""
+    /// rows are the recordings the blocks asked for, by ID; missing, those
+    /// not on this device, as one made on another not synced yet.
     private(set) var rows: [String: RecordingRow] = [:]
+    private(set) var missing: Set<String> = []
     /// playing is the recording the player plays, or nil; loading, the one
     /// whose audio is coming.
     private(set) var playing: String?
@@ -52,7 +59,10 @@ final class Recorder {
                 await client.useTranscriber(DeviceTranscriber())
             }
             await client.useMicrophone(microphone)
-            if let s = try? await client.recordingState() { update(s) }
+            if let s = try? await client.recordingState() {
+                update(s)
+                update(levels: s.levels)
+            }
         }
     }
 
@@ -64,13 +74,26 @@ final class Recorder {
 
     /// update takes the core's state of the recording.
     func update(_ s: RecordingState) {
+        if s.liveText != liveText { liveText = s.liveText }
+        var s = s
+        s.levels = []
+        s.liveText = ""
         let old = state
+        // As only its time goes on, which elapsed counts on, it stays.
+        var same = s
+        same.elapsedMs = old.elapsedMs
+        guard same != old else { return }
         state = s
         at = Date()
         if !s.error.isEmpty, s.error != old.error { toast?(s.error) }
         // A recording stopped, or a transcription ended: their rows change.
         let done = Set(old.transcribing + [old.id]).subtracting(s.transcribing + [s.id])
         for id in done where !id.isEmpty { Task { await load(id) } }
+    }
+
+    /// update takes the latest levels of the recording in progress.
+    func update(levels: [Double]) {
+        if levels != self.levels { self.levels = levels }
     }
 
     // MARK: Recording
@@ -110,10 +133,10 @@ final class Recorder {
 
     // MARK: Recordings
 
-    /// row returns a recording a block shows, reading it the first time.
+    /// row returns a recording a block shows, reading it the first time,
+    /// and again while it is missing.
     func row(_ id: String) -> RecordingRow? {
-        if !asked.contains(id) {
-            asked.insert(id)
+        if asked.insert(id).inserted || missing.contains(id) {
             Task { await load(id) }
         }
         return rows[id]
@@ -128,8 +151,18 @@ final class Recorder {
     private func load(_ id: String) async {
         guard let client else { return }
         let n = reads.ask(id)
-        guard let row = try? await client.recording(id), reads.answered(n, id) else { return }
-        if rows[id] != row { rows[id] = row }
+        do {
+            let row = try await client.recording(id)
+            guard reads.answered(n, id) else { return }
+            if rows[id] != row { rows[id] = row }
+            if missing.contains(id) { missing.remove(id) }
+        } catch {
+            // Its block says so, as the desktop's does; it is read again as
+            // the recordings change, or the block shows again.
+            guard reads.answered(n, id) else { return }
+            rows[id] = nil
+            if !missing.contains(id) { missing.insert(id) }
+        }
     }
 
     func retranscribe(_ id: String) {
@@ -144,15 +177,25 @@ final class Recorder {
         }
     }
 
-    func insertTranscript(_ id: String) {
+    /// insertTranscript has editor, its page's, put recording id's
+    /// transcript after block, the recording's block it was asked from, as
+    /// one step to undo.
+    func insertTranscript(_ id: String, after block: String, into editor: EditorController?) {
         guard let client else { return }
         Task {
             do {
-                try await client.insertTranscript(id)
+                Self.put(try await client.transcriptBlocks(id), after: block, in: editor)
             } catch {
                 toast?(error.localizedDescription)
             }
         }
+    }
+
+    /// put puts a transcript in editor's page after block, the recording's
+    /// block it was asked from, as the desktop does: the block a recording
+    /// was made in may be another, as a copied page's has an ID of its own.
+    static func put(_ transcript: Transcript, after block: String, in editor: EditorController?) {
+        editor?.insertBlocks(transcript.blocks, after: block)
     }
 
     // MARK: Playing

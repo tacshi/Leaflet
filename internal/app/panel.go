@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/egoist/mygo/ui"
@@ -48,22 +49,37 @@ type chatState struct {
 	sendNow bool // Enter was pressed in the composer
 }
 
-var chat = map[string]*chatState{}
+// pageDrafts is what was typed on a page and not sent yet: in its chat,
+// and in its threads' reply boxes, by thread.
+type pageDrafts struct {
+	chat    chatState
+	replies map[string]*threadDraft
+}
 
-func chatOf(pageID string) *chatState {
-	s := chat[pageID]
-	if s == nil {
-		s = &chatState{}
-		chat[pageID] = s
+// draftsOf is what was typed on a page and not sent yet.
+func (a *App) draftsOf(pageID string) *pageDrafts {
+	d := a.drafts[pageID]
+	if d == nil {
+		if a.drafts == nil {
+			a.drafts = map[string]*pageDrafts{}
+		}
+		d = &pageDrafts{replies: map[string]*threadDraft{}}
+		a.drafts[pageID] = d
 	}
-	return s
+	return d
+}
+
+// sends reports whether a key sends what a box holds, a chat's message, a
+// comment or a reply: Enter, or Cmd+Enter; Shift+Enter breaks the line.
+func sends(k ui.TextKey) bool {
+	return k.Key == ui.KeyEnter && (k.Mods == 0 || k.Mods == ui.Cmd)
 }
 
 func (a *App) agentPanel(c *ui.Context) {
 	pal := theme.Of(c)
 	ps := a.page
 	sess := a.hub.Session(ps.id)
-	cs := chatOf(ps.id)
+	cs := &a.draftsOf(ps.id).chat
 	options := a.hub.Options()
 	if len(options) == 0 {
 		ui.Column(c).Grow(1).Padding(24).Gap(12).Justify(ui.Center).Children(func() {
@@ -105,7 +121,7 @@ func (a *App) agentPanel(c *ui.Context) {
 			// still breaks the line.
 			ui.TextArea(c.Key("draft"), &cs.draft).Bind(&cs.input).Placeholder(locales.PanelAskPlaceholder()).MinHeight(64).MaxHeight(180).
 				OnTextKey(func(k ui.TextKey) bool {
-					if k.Key != ui.KeyEnter || k.Mods != 0 {
+					if !sends(k) {
 						return false
 					}
 					cs.sendNow = true
@@ -166,9 +182,11 @@ func chatRun(sess *agents.Session) *agents.Run {
 	return nil
 }
 
-// focusBlocks are the blocks the editor's selection is on.
+// focusBlocks are the blocks the editor's selection is on, as the user
+// left it: the focus is in the composer as a chat is sent. A page whose
+// caret the user hasn't placed has none.
 func (a *App) focusBlocks() []string {
-	if a.page == nil || !a.page.editor.Focused() {
+	if a.page == nil || !a.page.editor.Focused() && !a.page.caretSet {
 		return nil
 	}
 	return []string{a.page.editor.FocusBlock()}
@@ -284,12 +302,42 @@ type threadDraft struct {
 	agents  agentPicker
 }
 
-var replies = map[string]*threadDraft{}
+// commentLit is how long the threads of a block asked for stay lit in
+// the comments panel, from when they show.
+const commentLit = 1500 * time.Millisecond
+
+// showComments shows a block's threads in the comments panel: lit for a
+// moment, the first of them brought into view.
+func (a *App) showComments(blockID string) {
+	a.panelOpen, a.panelTab = true, 1
+	d := &a.dialogs
+	d.commentFocus, d.commentAt, d.commentShown = blockID, time.Time{}, false
+}
+
+// litComments is the block whose threads show lit, or "": the one asked
+// for, for commentLit from the frame its threads first showed in.
+func (a *App) litComments(c *ui.Context) string {
+	d := &a.dialogs
+	if d.commentFocus == "" {
+		return ""
+	}
+	if d.commentAt.IsZero() {
+		d.commentAt = c.Now()
+	}
+	left := commentLit - c.Now().Sub(d.commentAt)
+	if left <= 0 {
+		d.commentFocus = ""
+		return ""
+	}
+	c.After(left)
+	return d.commentFocus
+}
 
 func (a *App) commentsPanel(c *ui.Context) {
 	pal := theme.Of(c)
 	ps := a.page
 	showResolved := a.dialogs.showResolved
+	lit := a.litComments(c)
 	ui.Scroll(c.Key("comments:" + ps.id)).Grow(1).Padding(12).Children(func() {
 		ui.Column(c).Gap(10).Children(func() {
 			if nc := a.dialogs.newComment; nc != nil {
@@ -314,7 +362,7 @@ func (a *App) commentsPanel(c *ui.Context) {
 			}
 			for _, t := range ps.threads {
 				if !t.Root.Resolved || showResolved {
-					a.threadCard(c, t)
+					a.threadCard(c, t, lit != "" && t.Root.BlockID == lit)
 				}
 			}
 			if resolved > 0 {
@@ -337,8 +385,18 @@ func (a *App) newCommentCard(c *ui.Context, nc *newComment) {
 			if nc.quote != "" {
 				quoteChip(c, nc.quote)
 			}
+			// Enter posts, as it sends a reply or a chat.
 			in := ui.TextArea(c.Key("text"), &nc.text).Placeholder(locales.PanelCommentPlaceholder()).MinHeight(64).AutoFocus().
-				OnTextKey(nc.agents.key)
+				OnTextKey(func(k ui.TextKey) bool {
+					if nc.agents.key(k) {
+						return true
+					}
+					if !sends(k) {
+						return false
+					}
+					nc.postNow = true
+					return true
+				})
 			a.agentMenu(c, in, &nc.agents, &nc.text)
 			post := func() {
 				body := strings.TrimSpace(nc.text)
@@ -347,13 +405,14 @@ func (a *App) newCommentCard(c *ui.Context, nc *newComment) {
 				}
 				root, err := a.st.AddComment(ps.id, nc.blockID, body, "", nc.quote, "", "")
 				if err != nil {
-					a.toast(err.Error())
+					a.toast(locales.PanelCouldNotPost(err.Error()))
 					return
 				}
 				a.dialogs.newComment = nil
 				a.agentInComment(root, body)
 			}
-			if in.Shortcut(ui.Cmd, ui.KeyEnter) {
+			if nc.postNow {
+				nc.postNow = false
 				post()
 			}
 			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
@@ -532,15 +591,16 @@ func (a *App) agentMenu(c *ui.Context, in ui.Element, p *agentPicker, text *stri
 	}
 }
 
-func (a *App) threadCard(c *ui.Context, t store.Thread) {
+// threadCard is a thread of the open page's, lit when asked for.
+func (a *App) threadCard(c *ui.Context, t store.Thread, lit bool) {
 	pal := theme.Of(c)
 	ps := a.page
+	replies := a.draftsOf(ps.id).replies
 	draft := replies[t.Root.ID]
 	if draft == nil {
 		draft = &threadDraft{}
 		replies[t.Root.ID] = draft
 	}
-	focused := a.dialogs.commentFocus == t.Root.BlockID
 	k := card(c, "thread:"+t.Root.ID, func() {
 		ui.Column(c).Padding(12).Gap(10).Children(func() {
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
@@ -587,7 +647,7 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 							if draft.agents.key(k) {
 								return true
 							}
-							if k.Key != ui.KeyEnter || (k.Mods != 0 && k.Mods != ui.Cmd) {
+							if !sends(k) {
 								return false
 							}
 							draft.sendNow = true
@@ -600,7 +660,7 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 							return
 						}
 						if _, err := a.st.AddComment(ps.id, t.Root.BlockID, body, t.Root.ID, "", "", ""); err != nil {
-							a.toast(err.Error())
+							a.toast(locales.PanelCouldNotPost(err.Error()))
 							return
 						}
 						draft.text = ""
@@ -621,9 +681,13 @@ func (a *App) threadCard(c *ui.Context, t store.Thread) {
 			}
 		})
 	})
-	if focused {
-		k.Border(1.5, pal.WarnBorder).ScrollIntoView()
-		a.dialogs.commentFocus = ""
+	if lit {
+		k.Border(1.5, pal.WarnBorder)
+		// The first of the block's threads comes into view, once.
+		if !a.dialogs.commentShown {
+			a.dialogs.commentShown = true
+			k.ScrollIntoView()
+		}
 	}
 }
 
@@ -710,20 +774,20 @@ func (a *App) askedBy(cm store.Comment) string {
 // block, where the comment shows it marked: one named, or the default for
 // @agent. Its answer is posted in the thread.
 func (a *App) agentInComment(root store.Comment, body string) {
-	agent, err := core.CommentAgent(a.hub, body)
+	agent, mentioned, err := core.CommentAgent(a.hub, body)
 	if err != nil {
 		a.toast(err.Error())
 		return
 	}
-	if agent == nil {
+	if !mentioned {
 		return
 	}
 	a.hub.Start(a.page.id, agents.RunOptions{
 		Surface: "comment", Instruction: body, Focus: []string{root.BlockID}, Selection: root.Quote,
-		CommentID: root.ID, Agent: agent,
+		CommentID: root.ID, Agent: &agent,
 		Done: func(r *agents.Run) {
 			if r.Error != "" {
-				a.toast(r.AgentName + ": " + r.Error)
+				a.toast(locales.PanelAgentFailed(r.AgentName, r.Error))
 			}
 		},
 	})

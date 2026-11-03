@@ -1,6 +1,7 @@
 package editor
 
 import (
+	"net/url"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -8,6 +9,7 @@ import (
 	"github.com/go-text/typesetting/segmenter"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/rules"
 	"leaflet/internal/shortcut"
 )
 
@@ -18,10 +20,10 @@ func newText(typ string, d doc.Delta) *doc.Node {
 }
 
 // deleteSelection removes what is selected and leaves a caret at its
-// start. It reports whether anything was selected.
-func (e *Editor) deleteSelection() bool {
+// start.
+func (e *Editor) deleteSelection() {
 	if e.Collapsed() {
-		return false
+		return
 	}
 	a, b := e.ordered()
 	if a.ID == b.ID {
@@ -31,19 +33,19 @@ func (e *Editor) deleteSelection() bool {
 			e.invalidate(n.ID)
 		}
 		e.anchor, e.focus = a, a
-		return true
+		return
 	}
 	// A folded heading's section goes with it, unless the heading stays.
 	us := e.selectedUnits(a)
-	ia, ib := indexIn(us, a.ID), indexIn(us, b.ID)
+	ia, ib := indexIn(us, a.ID), e.selectedEnd(us, b)
 	if ia < 0 || ib < 0 {
-		return false
+		return
 	}
 	// What shows after the selection still does once it is gone.
 	defer e.keepShown(e.unitAfter(b.ID))
 	first, last := us[ia], us[ib]
 	var tail doc.Delta
-	if last.IsText() {
+	if last.IsText() && last.ID == b.ID {
 		tail = last.Delta().Slice(b.Off, textLen(last))
 	}
 	// Remove everything after the first block, its children outside the
@@ -83,7 +85,7 @@ func (e *Editor) deleteSelection() bool {
 		first.SetDelta(first.Delta().Slice(0, a.Off).Concat(tail))
 		e.invalidate(first.ID)
 		e.anchor, e.focus = a, a
-		return true
+		return
 	}
 	// The selection started on a block selected whole: replace it with an
 	// empty paragraph holding what was after the selection.
@@ -91,7 +93,6 @@ func (e *Editor) deleteSelection() bool {
 	_ = e.Content.Insert(doc.Position{After: first.ID}, p)
 	e.Content.Remove(first.ID)
 	e.anchor, e.focus = Pos{p.ID, 0}, Pos{p.ID, 0}
-	return true
 }
 
 // liftChildren moves a block's children up to its place, before removing it.
@@ -153,30 +154,36 @@ func (e *Editor) InsertText(s string) {
 	}
 	if n.Type == "code" {
 		// Code is typed as it is: no formats, shortcuts or menus.
-		n.SetDelta(n.Delta().Insert(e.focus.Off, s, doc.Attrs{}))
-		e.invalidate(n.ID)
-		off := e.focus.Off + utf8.RuneCountInString(s)
-		e.anchor, e.focus = Pos{n.ID, off}, Pos{n.ID, off}
-		e.reveal = n.ID
-		e.changed()
-		return
+		attrs = doc.Attrs{}
 	}
 	n.SetDelta(n.Delta().Insert(e.focus.Off, s, attrs))
 	e.invalidate(n.ID)
 	off := e.focus.Off + utf8.RuneCountInString(s)
 	e.anchor, e.focus = Pos{n.ID, off}, Pos{n.ID, off}
+	e.typed++
+	r, _ := utf8.DecodeRuneInString(s)
+	if endsWord(n, off, r) {
+		// The step of undo goes on to the end of the word, the space too:
+		// the next word is a step of its own.
+		e.coalescing = false
+	}
+	if n.Type == "code" {
+		e.reveal = n.ID
+		e.changed()
+		return
+	}
 	// An input method for Chinese or Japanese types a full-width space.
 	if s == " " || s == "\u3000" {
 		e.markdownShortcut(n)
 	}
-	if s == "-" {
-		e.dividerShortcut(n)
-	}
-	if r, _ := utf8.DecodeRuneInString(s); (r == '/' || r == '@') && utf8.RuneCountInString(s) == 1 {
-		runes := []rune(n.Delta().Plain())
-		at := off - 1
-		if at == 0 || shortcut.OpensMenu(runes[at-1]) {
-			e.trigger = &Trigger{Kind: r, ID: n.ID, Off: at}
+	e.dividerShortcut(n)
+	if shortcut.MenuKind(r) != 0 {
+		before := rune(0)
+		if at := off - 1; at > 0 {
+			before = []rune(n.Delta().Plain())[at-1]
+		}
+		if kind := shortcut.Menu(r, before); kind != 0 {
+			e.trigger = &Trigger{Kind: kind, ID: n.ID, Off: off - 1}
 			e.menuIndex = 0
 		}
 	}
@@ -184,6 +191,20 @@ func (e *Editor) InsertText(s string) {
 	e.updateTrigger()
 	e.reveal = n.ID
 	e.changed()
+}
+
+// endsWord reports whether r, typed in block n before off, ends a word:
+// a space after one, or the punctuation that ends a clause in Chinese or
+// Japanese, which put no spaces between words.
+func endsWord(n *doc.Node, off int, r rune) bool {
+	if r > unicode.MaxASCII && unicode.IsPunct(r) {
+		return true
+	}
+	if !unicode.IsSpace(r) || off < 2 {
+		return false
+	}
+	rs := []rune(n.Delta().Plain())
+	return off <= len(rs) && !unicode.IsSpace(rs[off-2])
 }
 
 // markdownShortcut turns "# ", "- ", "1. ", "[] ", "> ", "``` " and the
@@ -219,8 +240,9 @@ func (e *Editor) markdownShortcut(n *doc.Node) {
 	e.anchor, e.focus = Pos{n.ID, 0}, Pos{n.ID, 0}
 }
 
-// dividerShortcut turns "---" typed alone in a paragraph into a divider
-// before it, leaving the caret in the emptied paragraph to go on writing.
+// dividerShortcut turns "---" typed alone in a paragraph, full-width too,
+// into a divider before it, leaving the caret in the emptied paragraph to
+// go on writing.
 func (e *Editor) dividerShortcut(n *doc.Node) {
 	if e.focus.Off != 3 || !shortcut.Divider(n.Type, n.Delta().Plain()) {
 		return
@@ -268,13 +290,27 @@ func (e *Editor) inlineShortcut(n *doc.Node) {
 	e.typing.Bold, e.typing.Italic, e.typing.Code, e.typing.Strike = false, false, false, false
 }
 
-// continues is the type a new block after n takes on Enter.
-func continues(n *doc.Node) string {
-	switch n.Type {
-	case "bulleted_list", "numbered_list", "todo_list", "toggle_list":
-		return n.Type
+// ruleBlock is block n as the editing rules know it.
+func (e *Editor) ruleBlock(n *doc.Node) rules.Block {
+	b := rules.Block{
+		Type:      n.Type,
+		Collapsed: (n.Type == "toggle_list" || n.Type == "heading") && n.Bool("collapsed"),
+		Empty:     n.IsText() && n.Delta().Len() == 0,
+		Holds:     len(n.Children) > 0,
 	}
-	return "paragraph"
+	if loc := e.Content.Locate(n.ID); loc != nil && loc.Parent != nil && loc.Parent.Type != "table/cell" {
+		b.Nested, b.Last = true, loc.Index == len(loc.Siblings)-1
+	}
+	return b
+}
+
+// newLine is the new block Enter makes, as line says, with text d.
+func newLine(line rules.Line, d doc.Delta) *doc.Node {
+	p := newText(line.Type, d)
+	for k, v := range line.Data {
+		p.Set(k, v)
+	}
+	return p
 }
 
 // Enter splits the block at the caret.
@@ -289,37 +325,31 @@ func (e *Editor) Enter() {
 	if n == nil {
 		return
 	}
-	if !n.IsText() {
-		p := newText("paragraph", nil)
-		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
-		e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
-		e.changed()
-		return
-	}
-	if n.Type == "code" {
-		e.codeEnter(n)
-		return
-	}
+	// A paragraph of a Markdown fence becomes its block first.
 	if e.fenceEnter(n) {
 		return
 	}
 	d := n.Delta()
-	// Enter in an empty list item, quote or callout ends it: a nested
-	// item goes up a level, anything else becomes a paragraph where it is.
-	if d.Len() == 0 && n.Type != "paragraph" && n.Type != "heading" {
-		e.unstyle(n)
+	off := e.focus.Off
+	line := rules.Enter(e.ruleBlock(n), off == 0)
+	switch line.Action {
+	case rules.LineAfter:
+		p := newLine(line, nil)
+		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
+		e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
+		e.changed()
+		return
+	case rules.CodeLine:
+		e.codeEnter(n)
+		return
+	case rules.Outdent, rules.Plain:
+		e.unstyle(n, line.Action)
 		e.invalidate(n.ID)
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
 		e.changed()
 		return
-	}
-	off := e.focus.Off
-	if off == 0 && d.Len() > 0 {
-		// At the start, a new empty block goes before.
-		p := newText(continues(n), nil)
-		if p.Type == "todo_list" {
-			p.Set("checked", false)
-		}
+	case rules.LineBefore:
+		p := newLine(line, nil)
 		_ = e.Content.Insert(doc.Position{Before: n.ID}, p)
 		// Before a heading that ends a folded section, the new line
 		// would join it, out of sight.
@@ -328,29 +358,12 @@ func (e *Editor) Enter() {
 		e.changed()
 		return
 	}
-	head, tail := d.Slice(0, off), d.Slice(off, d.Len())
-	if n.Type == "toggle_list" && !collapsed(n) {
-		// In an open toggle, the new line is its first child.
-		n.SetDelta(head)
-		p := newText("paragraph", tail)
-		n.Children = append([]*doc.Node{p}, n.Children...)
-		e.invalidate(n.ID)
-		e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
-		e.changed()
-		return
-	}
-	n.SetDelta(head)
-	p := newText(continues(n), tail)
-	if p.Type == "todo_list" {
-		p.Set("checked", false)
-	}
-	if NestableTypes(n) && len(n.Children) > 0 && !collapsed(n) {
-		// The new item comes first among the children.
+	n.SetDelta(d.Slice(0, off))
+	p := newLine(line, d.Slice(off, d.Len()))
+	if line.Action == rules.SplitInside {
 		n.Children = append([]*doc.Node{p}, n.Children...)
 	} else {
-		// A new line after a folded heading starts its section, which
-		// shows.
-		if foldedHeading(n) {
+		if line.Unfold {
 			n.Set("collapsed", false)
 		}
 		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
@@ -360,8 +373,8 @@ func (e *Editor) Enter() {
 	e.changed()
 }
 
-// NestableTypes reports whether a block takes children.
-func NestableTypes(n *doc.Node) bool { return doc.NestableTypes[n.Type] }
+// nestable reports whether a block takes children.
+func nestable(n *doc.Node) bool { return doc.NestableTypes[n.Type] }
 
 // SoftBreak inserts a line break within the block; on a block selected
 // whole, which has no line to break, it does nothing.
@@ -419,28 +432,32 @@ func (e *Editor) Backspace(word bool) {
 		return
 	}
 	// At the start of a block. What only moves the caret, or does
-	// nothing, is no step of undo.
+	// nothing, is no step of undo. A paragraph last in a toggle goes out
+	// of it, as a nested list item goes up a level.
 	e.coalescing = false
-	if n.Type != "paragraph" {
+	us := e.units()
+	i := e.index(n.ID)
+	var prev *doc.Node
+	var before rules.Block
+	if i > 0 {
+		prev = us[i-1]
+		before = rules.Block{Type: prev.Type}
+	}
+	switch action := rules.Backspace(e.ruleBlock(n), before, prev != nil); action {
+	case rules.Outdent, rules.Plain:
 		e.pushUndo(false)
-		e.unstyle(n)
+		e.unstyle(n, action)
 		e.invalidate(n.ID)
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
 		e.changed()
 		return
-	}
-	us := e.units()
-	i := e.index(n.ID)
-	if i <= 0 {
+	case rules.Nothing:
 		return
-	}
-	prev := us[i-1]
-	if !prev.IsText() {
-		if n.Delta().Len() > 0 {
-			e.Select(Pos{prev.ID, 0}, Pos{prev.ID, 0})
-			e.services.Invalidate()
-			return
-		}
+	case rules.SelectBefore:
+		e.Select(Pos{prev.ID, 0}, Pos{prev.ID, 0})
+		e.services.Invalidate()
+		return
+	case rules.Remove:
 		e.pushUndo(false)
 		e.liftChildren(n)
 		e.Content.Remove(n.ID)
@@ -496,7 +513,7 @@ func (e *Editor) Delete(word bool) {
 		return
 	}
 	next := us[i+1]
-	if !next.IsText() {
+	if rules.Delete(rules.Block{Type: n.Type}, rules.Block{Type: next.Type}) == rules.SelectAfter {
 		// Onto a block selected whole: no step of undo.
 		e.BreakUndo()
 		e.Select(Pos{next.ID, 0}, Pos{next.ID, 0})
@@ -526,16 +543,16 @@ func (e *Editor) unitAfter(id string) string {
 // as a heading that ended a folded section goes, or becomes another kind
 // of block, what was after it would join that section, out of sight.
 func (e *Editor) keepShown(id string) {
-	if id != "" && e.node(id) != nil && e.unfold(id) {
+	if id != "" && e.node(id) != nil && len(e.unfold(id)) > 0 {
 		e.order = nil
 	}
 }
 
-// unstyle is Backspace at the start of a block other than a paragraph,
-// and Enter in an empty one: a nested list item goes up a level, and any
-// other block becomes a paragraph where it is.
-func (e *Editor) unstyle(n *doc.Node) {
-	if loc := e.Content.Locate(n.ID); loc != nil && loc.Parent != nil && NestableTypes(n) {
+// unstyle ends block n as action, rules.Unstyle's, says, as Backspace at
+// its start and Enter in it empty do: it goes up a level (Outdent), or
+// becomes a paragraph where it is (Plain).
+func (e *Editor) unstyle(n *doc.Node, action rules.Action) {
+	if action == rules.Outdent {
 		e.outdent(n)
 	} else {
 		e.toParagraph(n)
@@ -590,52 +607,100 @@ func (e *Editor) removeBlock(n *doc.Node, back bool) {
 	e.changed()
 }
 
-// Indent nests the focus block under the block before it, when both are
-// list items or the block before takes children.
+// Indent nests the focus block, or each block selected with what is in
+// it, under the block before it, when both are list items or the block
+// before takes children. The blocks go in together: none does when the
+// first can't.
 func (e *Editor) Indent() {
 	if e.ReadOnly {
 		return
 	}
-	n := e.node(e.focus.ID)
-	if n == nil || !n.IsText() {
+	nodes := e.topSelected()
+	hid := e.hidden()
+	if len(nodes) == 0 || e.indentUnder(nodes[0], hid) == nil {
 		return
 	}
-	loc := e.Content.Locate(n.ID)
-	if loc == nil || loc.Index == 0 {
-		return
-	}
-	// List items nest in list items; any text nests in a toggle.
-	prev := loc.Siblings[loc.Index-1]
-	if !NestableTypes(prev) || !NestableTypes(n) && prev.Type != "toggle_list" {
-		return
-	}
-	// The step keeps the toggle folded, so undoing it folds it again.
+	// The step keeps the toggles folded, so undoing it folds them again.
 	e.pushUndo(false)
-	if collapsed(prev) {
-		prev.Set("collapsed", false)
-		e.invalidate(prev.ID)
+	for _, n := range nodes {
+		prev := e.indentUnder(n, hid)
+		if prev == nil {
+			continue
+		}
+		if collapsed(prev) {
+			prev.Set("collapsed", false)
+			e.invalidate(prev.ID)
+		}
+		_ = e.Content.Move(n.ID, doc.Position{Parent: prev.ID})
 	}
-	_ = e.Content.Move(n.ID, doc.Position{Parent: prev.ID})
 	e.Select(e.anchor, e.focus)
 	e.changed()
 }
 
-// Outdent moves the focus block out of its parent, after it.
+// indentUnder is the block n would go in as it is indented, or nil when it
+// can't: list items nest in list items, and any text in a toggle, but not
+// in a block a folded heading hides (hid), where it would be hidden too.
+func (e *Editor) indentUnder(n *doc.Node, hid map[string]bool) *doc.Node {
+	if n == nil {
+		return nil
+	}
+	loc := e.Content.Locate(n.ID)
+	if loc == nil || loc.Index == 0 {
+		return nil
+	}
+	prev := loc.Siblings[loc.Index-1]
+	if hid[prev.ID] || !rules.Nests(n.Type, prev.Type) {
+		return nil
+	}
+	return prev
+}
+
+// Outdent moves the focus block, or each block selected with what is in
+// it, out of its parent, after it.
 func (e *Editor) Outdent() {
 	if e.ReadOnly {
 		return
 	}
-	n := e.node(e.focus.ID)
-	if n == nil {
-		return
+	var nodes []*doc.Node
+	for _, n := range e.topSelected() {
+		if loc := e.Content.Locate(n.ID); loc != nil && loc.Parent != nil {
+			nodes = append(nodes, n)
+		}
 	}
-	if loc := e.Content.Locate(n.ID); loc == nil || loc.Parent == nil {
+	if len(nodes) == 0 {
 		return
 	}
 	e.pushUndo(false)
-	e.outdent(n)
+	// In order: each takes those after it as its children, which then
+	// come out after it in turn.
+	for _, n := range nodes {
+		e.outdent(n)
+	}
 	e.Select(e.anchor, e.focus)
 	e.changed()
+}
+
+// topSelected are the blocks selected that no block selected holds, in
+// order, as a command on the selection moves them, with what is in them:
+// the focus block alone for a caret.
+func (e *Editor) topSelected() []*doc.Node {
+	in := map[string]bool{}
+	for _, n := range e.selectedNodes() {
+		in[n.ID] = true
+	}
+	var out []*doc.Node
+	var visit func([]*doc.Node)
+	visit = func(nodes []*doc.Node) {
+		for _, n := range nodes {
+			if in[n.ID] {
+				out = append(out, n)
+				continue
+			}
+			visit(n.Children)
+		}
+	}
+	visit(e.Content.Children)
+	return out
 }
 
 func (e *Editor) outdent(n *doc.Node) {
@@ -647,7 +712,7 @@ func (e *Editor) outdent(n *doc.Node) {
 	// the same. Other blocks take none: the siblings stay in the parent,
 	// and the block goes after it.
 	var after []*doc.Node
-	if NestableTypes(n) {
+	if nestable(n) {
 		after = append(after, loc.Siblings[loc.Index+1:]...)
 	}
 	for _, s := range after {
@@ -692,7 +757,7 @@ func (e *Editor) SetType(typ string, level int) {
 		if typ == "code" {
 			n.SetDelta(doc.Delta{{Text: n.Delta().Plain()}}.Compact())
 		}
-		if !NestableTypes(n) && len(n.Children) > 0 {
+		if !nestable(n) && len(n.Children) > 0 {
 			e.liftChildren(n)
 		}
 		e.invalidate(n.ID)
@@ -714,6 +779,47 @@ func (e *Editor) ToggleChecked(id string) {
 	n.Set("checked", !n.Bool("checked"))
 	e.invalidate(id)
 	e.changed()
+}
+
+// checkOrFold is Cmd-Enter: it checks the to-dos selected, or unchecks
+// them when all are, as one step of undo, or else folds the toggle or the
+// heading at the caret, or unfolds it. It reports whether there was one.
+func (e *Editor) checkOrFold() bool {
+	var todos []*doc.Node
+	e.indexed(func() {
+		for _, n := range e.selectedNodes() {
+			if n.Type == "todo_list" {
+				todos = append(todos, n)
+			}
+		}
+	})
+	if len(todos) > 0 {
+		if e.ReadOnly {
+			return true
+		}
+		all := true
+		for _, n := range todos {
+			all = all && n.Bool("checked")
+		}
+		e.pushUndo(false)
+		for _, n := range todos {
+			n.Set("checked", !all)
+			e.invalidate(n.ID)
+		}
+		e.changed()
+		return true
+	}
+	switch n := e.node(e.focus.ID); {
+	case n == nil:
+		return false
+	case n.Type == "toggle_list":
+		e.ToggleCollapsed(n.ID)
+	case n.Type == "heading":
+		e.ToggleFold(n.ID)
+	default:
+		return false
+	}
+	return true
 }
 
 // InsertBlocks puts blocks after the focus block, or in its place when it
@@ -924,6 +1030,36 @@ func (e *Editor) SetLink(url string) {
 	})
 }
 
+// linkHref is the link what was typed in the link editor makes, as the
+// link opens: a web, mail or page link as it is, a web address without
+// its scheme ("example.com") over https, a mail address as one to mail,
+// and nothing, or only spaces, "", which takes the link away. ok is false
+// for what no link opens, as a file's, an app's or words.
+func linkHref(typed string) (href string, ok bool) {
+	s := strings.TrimSpace(typed)
+	lower := strings.ToLower(s)
+	if _, page := doc.PageLinkID(s); s == "" || page || doc.WebURL(s) {
+		return s, true
+	}
+	if strings.ContainsAny(s, " \t\n") {
+		return "", false
+	}
+	if strings.HasPrefix(lower, "mailto:") {
+		return s, len(s) > len("mailto:")
+	}
+	if user, host, at := strings.Cut(s, "@"); at && user != "" && strings.Contains(host, ".") && !strings.ContainsAny(s, "/:") {
+		return "mailto:" + s, true
+	}
+	if strings.Contains(s, "://") {
+		return "", false
+	}
+	u, err := url.Parse("https://" + s)
+	if err != nil || !doc.WebURL(u.String()) || !strings.Contains(u.Hostname(), ".") && u.Hostname() != "localhost" {
+		return "", false
+	}
+	return "https://" + s, true
+}
+
 // LinkAt returns the link under the selection's start.
 func (e *Editor) LinkAt() string {
 	a, _ := e.ordered()
@@ -1029,8 +1165,11 @@ func (e *Editor) nextStop(n *doc.Node, off int) int {
 
 // clusters are the rune offsets where a text block's grapheme clusters
 // start, and its end.
-func clusters(n *doc.Node) []int {
-	rs := []rune(n.Delta().Plain())
+func clusters(n *doc.Node) []int { return graphemes([]rune(n.Delta().Plain())) }
+
+// graphemes are the offsets where the grapheme clusters of rs start, and
+// its end.
+func graphemes(rs []rune) []int {
 	var seg segmenter.Segmenter
 	seg.Init(rs)
 	var out []int
@@ -1068,18 +1207,31 @@ func wordEnd(rs []rune, off int) int {
 	return i
 }
 
-// wordAt returns the word around an offset.
+// wordAt returns the word around an offset, in whole grapheme clusters,
+// so a letter keeps its marks, as an "e" its accent: the clusters of
+// letters, digits and "_" on either side; between none, the cluster
+// after it, as an emoji or a flag.
 func wordAt(rs []rune, off int) (int, int) {
-	isWord := func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' }
-	a, b := off, off
-	for a > 0 && isWord(rs[a-1]) {
+	gs := graphemes(rs)
+	last := len(gs) - 1 // the end, which starts no cluster
+	isWord := func(i int) bool {
+		r := rs[gs[i]]
+		return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_'
+	}
+	// The cluster off starts, or is in.
+	at := 0
+	for at < last && gs[at+1] <= off {
+		at++
+	}
+	a, b := at, at
+	for a > 0 && isWord(a-1) {
 		a--
 	}
-	for b < len(rs) && isWord(rs[b]) {
+	for b < last && isWord(b) {
 		b++
 	}
-	if a == b && b < len(rs) {
+	if a == b && b < last {
 		b++
 	}
-	return a, b
+	return gs[a], gs[b]
 }

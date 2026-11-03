@@ -3,8 +3,8 @@ package editor
 import (
 	"encoding/json"
 	"maps"
+	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -12,13 +12,18 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/rules"
 	"leaflet/internal/theme"
 )
 
 // blockLayout is a text block laid out: its text's layout and where the
 // text sits in the block's box.
 type blockLayout struct {
+	// key is the block's look as it was laid out, text the text it held
+	// then, and pal the palette its colors are of, as the links' accent.
 	key    string
+	text   textID
+	pal    *theme.Palette
 	layout *ui.TextLayout
 	// x and y are the text's origin in the block's box; h the box's height.
 	x, y, h float32
@@ -59,11 +64,63 @@ func (e *Editor) depth(id string) int {
 	return d
 }
 
+// textID tells a block's stored text from another without reading it:
+// the slice it is stored as, which SetDelta makes anew for each change.
+// Every empty text has the same.
+type textID struct {
+	ops  *any
+	runs *doc.Run
+	n    int
+}
+
+func textIDOf(n *doc.Node) textID {
+	switch s := n.Data["delta"].(type) {
+	case []any:
+		if len(s) > 0 {
+			return textID{ops: &s[0], n: len(s)}
+		}
+	case doc.Delta:
+		if len(s) > 0 {
+			return textID{runs: &s[0], n: len(s)}
+		}
+	}
+	return textID{}
+}
+
+// look is what a text block's text gives its layout, worked out once for
+// each text it holds: each frame lays out every block, and reading each
+// one's text again would make a frame cost the whole page's text.
+type look struct {
+	// text is the text it is of, and fonts theme.FontsChosen as it was.
+	text  textID
+	fonts int
+	plain string
+	// family and code are its prose and code fonts, and leading its
+	// prose's line height.
+	family, code string
+	leading      float32
+}
+
+// lookOf is n's look, as it is now.
+func (e *Editor) lookOf(n *doc.Node) *look {
+	id, fonts := textIDOf(n), theme.FontsChosen()
+	if l := e.looks[n.ID]; l != nil && l.text == id && l.fonts == fonts {
+		return l
+	}
+	plain := n.Delta().Plain()
+	l := &look{text: id, fonts: fonts, plain: plain, family: theme.PageFamily(plain), code: theme.CodeFamily(plain), leading: leading(plain)}
+	if e.looks == nil {
+		e.looks = map[string]*look{}
+	}
+	e.looks[n.ID] = l
+	return l
+}
+
 // style returns a text block's font and the room above and below it.
 func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 	size := e.Size
-	plain := n.Delta().Plain()
-	font = ui.Font{Family: theme.PageFamily(plain), Size: size, LineHeight: leading(plain)}
+	lk := e.lookOf(n)
+	font = ui.Font{Family: lk.family, Size: size, LineHeight: lk.leading}
 	top, bottom = 3, 3
 	switch n.Type {
 	case "heading":
@@ -84,7 +141,7 @@ func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 	case "bulleted_list", "numbered_list", "todo_list":
 		top, bottom = 2, 2
 	case "code":
-		font.Family, font.Size, font.LineHeight = theme.CodeFamily(plain), size*0.8, 1.5
+		font.Family, font.Size, font.LineHeight = lk.code, size*0.8, 1.5
 		top, bottom = codeMargin+codeBar, codePad+codeMargin
 	case "callout":
 		top, bottom = calloutMargin+calloutPad, calloutPad+calloutMargin
@@ -95,21 +152,10 @@ func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 }
 
 // leading is the height of a line of prose, as a multiple of its size:
-// more for text mostly in Chinese, Japanese or Korean, whose characters
-// fill the em square, than for Latin text. One of those characters counts
-// as much as a word of four letters, so a few English terms or a link in
-// a Chinese paragraph leave it Chinese.
+// more for text mostly in Chinese, Japanese or Korean (rules.MostlyCJK)
+// than for Latin text.
 func leading(text string) float32 {
-	cjk, other := 0, 0
-	for _, r := range text {
-		switch {
-		case unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul):
-			cjk++
-		case unicode.IsLetter(r):
-			other++
-		}
-	}
-	if cjk > 0 && cjk*4 >= other {
+	if rules.MostlyCJK(text) {
 		return 1.8
 	}
 	return 1.5
@@ -170,7 +216,7 @@ func (e *Editor) spans(n *doc.Node, pal *theme.Palette, font ui.Font) []ui.Span 
 			s.DecorationColor = pal.AccentSoftBorder
 		}
 		if r.Attrs.Color != "" {
-			s.Color = hexColor(r.Attrs.Color)
+			s.Color = textColor(r.Attrs.Color, pal)
 		}
 		if r.Attrs.Background != "" {
 			s.Background = hexColor(r.Attrs.Background)
@@ -198,9 +244,11 @@ func (e *Editor) layoutOf(n *doc.Node) *blockLayout {
 	return e.layouts[n.ID]
 }
 
-// layout lays a text block out at the editor's width, reusing the last
-// layout while the block and its look stay the same.
-func (e *Editor) layout(n *doc.Node, pal *theme.Palette, dark bool) *blockLayout {
+// layout lays a text block out at the editor's width, in pal's colors,
+// reusing the last layout while the block, its look and the palette stay
+// the same: theme.Of keeps one palette for each look, appearance, paper
+// and accent.
+func (e *Editor) layout(n *doc.Node, pal *theme.Palette) *blockLayout {
 	font, top, bottom := e.style(n)
 	depth := e.depth(n.ID)
 	x := float32(depth)*indentStep + markerWidth(n)
@@ -211,12 +259,11 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette, dark bool) *blockLayout
 	case "callout":
 		width = max(width-calloutPad, 40)
 	}
-	raw, _ := json.Marshal(n.Data)
-	key := n.Type + string(raw) + ftoa(width) + ftoa(font.Size) + ftoa(font.LineHeight) + font.Family + theme.CodeFamily(n.Delta().Plain())
-	if dark {
-		key += "d"
-	}
-	if l := e.layouts[n.ID]; l != nil && l.key == key {
+	// The text is told by its slice, not read (look); the rest of the
+	// data is small.
+	text := textIDOf(n)
+	key := n.Type + dataKey(n) + ftoa(width) + ftoa(font.Size) + ftoa(font.LineHeight) + font.Family + e.lookOf(n).code
+	if l := e.layouts[n.ID]; l != nil && l.key == key && l.text == text && l.pal == pal {
 		return l
 	}
 	spans := e.spans(n, pal, font)
@@ -225,15 +272,28 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette, dark bool) *blockLayout
 	if h == 0 {
 		h = font.Size * max(font.LineHeight, 1.3)
 	}
-	l := &blockLayout{key: key, layout: tl, x: x, y: top, h: top + h + bottom, font: font}
+	l := &blockLayout{key: key, text: text, pal: pal, layout: tl, x: x, y: top, h: top + h + bottom, font: font}
 	e.layouts[n.ID] = l
 	return l
 }
 
-func ftoa(f float32) string {
-	raw, _ := json.Marshal(f)
+// dataKey is a block's data but its text, for its layout's key: its
+// level, check, color and the like.
+func dataKey(n *doc.Node) string {
+	if _, ok := n.Data["delta"]; len(n.Data) == 0 || ok && len(n.Data) == 1 {
+		return ""
+	}
+	rest := make(map[string]any, len(n.Data))
+	for k, v := range n.Data {
+		if k != "delta" {
+			rest[k] = v
+		}
+	}
+	raw, _ := json.Marshal(rest)
 	return string(raw)
 }
+
+func ftoa(f float32) string { return strconv.FormatFloat(float64(f), 'g', -1, 32) }
 
 // utf16Off converts a rune offset in a block's text to UTF-16 units.
 func utf16Off(n *doc.Node, off int) int {
@@ -302,7 +362,7 @@ func (e *Editor) copyBlocks() []*doc.Node {
 	}
 	var stack []open
 	depths := e.blockDepths()
-	ia, ib := indexIn(us, a.ID), indexIn(us, b.ID)
+	ia, ib := indexIn(us, a.ID), e.selectedEnd(us, b)
 	for i := ia; i >= 0 && i <= ib && i < len(us); i++ {
 		n := us[i].Clone()
 		// A folded toggle takes its hidden children with it, as cutting
@@ -364,99 +424,54 @@ func freshBlocks(nodes []*doc.Node) []*doc.Node {
 	return out
 }
 
-// copyText returns the selection as markdown, a line per block.
-func (e *Editor) copyText() string {
-	if e.Collapsed() && !e.blockSelected() {
-		return ""
-	}
-	a, b := e.ordered()
-	if a.ID == b.ID {
-		n := e.node(a.ID)
-		if n.IsText() {
-			return n.Delta().Slice(a.Off, b.Off).Plain()
-		}
-	}
-	us := e.selectedUnits(a)
-	depths := e.blockDepths()
-	var lines []string
-	for i, ib := indexIn(us, a.ID), indexIn(us, b.ID); i >= 0 && i <= ib && i < len(us); i++ {
-		n := us[i]
-		if !n.IsText() {
-			sub := &doc.Content{Children: []*doc.Node{n.Clone()}}
-			lines = append(lines, strings.TrimRight(doc.PageMarkdown("", sub, e.Host.PageTitle), "\n"))
-			continue
-		}
-		from, to := 0, textLen(n)
-		if n.ID == a.ID {
-			from = a.Off
-		}
-		if n.ID == b.ID {
-			to = b.Off
-		}
-		if n.Type == "code" || n.Type == "callout" {
-			part := n.Clone()
-			part.SetDelta(n.Delta().Slice(from, to))
-			if n.Type == "code" {
-				lines = append(lines, doc.CodeMarkdown(part))
-			} else {
-				lines = append(lines, doc.CalloutMarkdown(part))
-			}
-			continue
-		}
-		// A line break is a hard break, and a line that would start another
-		// block is escaped, as in an export; a heading is one line.
-		d := n.Delta().Slice(from, to)
-		if n.Type == "heading" {
-			d = doc.OneLine(d)
-		}
-		text := d.ReadableMarkdown()
-		indent, lead, pad := blockPrefix(n, depths[n.ID])
-		lines = append(lines, strings.TrimSuffix(doc.TextMarkdown(indent, lead, pad, text), "\n"))
-	}
-	return strings.Join(lines, "\n")
-}
+// copyText returns the selection as Copy puts it on the clipboard: the
+// text selected within a block as it is, or else the blocks selected,
+// cut to the selection, as Markdown (markdownOf).
+func (e *Editor) copyText() string { return e.markdownOf(e.copyBlocks()) }
 
-// blockPrefix is how a block's line starts in a copy: its indent, nested
-// in list items, and its marker; pad is what starts the lines after its
-// first, so they stay in it.
-func blockPrefix(n *doc.Node, depth int) (indent, lead, pad string) {
-	ind := strings.Repeat("  ", depth)
-	switch n.Type {
-	case "heading":
-		return "", strings.Repeat("#", min(max(n.Int("level", 1), 1), 6)) + " ", ""
-	case "bulleted_list":
-		return ind, "- ", "  "
-	case "numbered_list":
-		return ind, "1. ", "   "
-	case "todo_list":
-		if n.Bool("checked") {
-			return ind, "- [x] ", "  "
+// markdownOf is copyText of nodes, the blocks copyBlocks gives: as an
+// export writes them (doc.PageMarkdown), list items nested as CommonMark
+// nests them, under "1. " three columns in, and toggles as <details>,
+// as the iOS app's Copy writes them too.
+func (e *Editor) markdownOf(nodes []*doc.Node) string {
+	if nodes == nil {
+		if e.Collapsed() {
+			return ""
 		}
-		return ind, "- [ ] ", "  "
-	case "quote":
-		return "", "> ", "> "
-	case "toggle_list":
-		return ind, "▸ ", "  "
+		a, b := e.ordered()
+		return e.node(a.ID).Delta().Slice(a.Off, b.Off).Plain()
 	}
-	return "", "", ""
+	md := doc.PageMarkdown("", &doc.Content{Children: nodes}, markdownOptions(e.Host.PageTitle))
+	return strings.TrimRight(md, "\n")
 }
 
 // joins reports whether a pasted block's text joins the line it is pasted
 // on.
 func joins(n *doc.Node) bool { return n.IsText() && n.Type != "code" }
 
+// lineBreaks makes "\n" of the breaks that end a paragraph.
+var lineBreaks = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\u2029", "\n", "\u0085", "\n")
+
 // paste inserts text at the caret: a line inline, several as blocks. The
 // text Leaflet itself last copied pastes as the blocks it came from, a
 // YouTube or Vimeo link or a link to a video file pasted on an empty line
 // as a video, and a link to
 // a picture there as an image.
-func (e *Editor) paste(text string) {
+func (e *Editor) paste(text string) { e.pasteAs(text, false) }
+
+// pasteAs is paste, and plain is Paste and Match Style: what Leaflet
+// copied keeps its blocks then, but not its text's formats, which the
+// text takes from where it goes, as another app's text does.
+func (e *Editor) pasteAs(text string, plain bool) {
 	if e.ReadOnly || text == "" {
 		return
 	}
-	text = strings.ReplaceAll(text, "\r\n", "\n")
-	if a, _ := e.ordered(); e.node(a.ID) != nil && e.node(a.ID).Type == "code" && (clip.blocks == nil || text != clip.text) {
-		// Into code, text goes as it is.
+	// Every break that ends a paragraph is a line: one left in a block's
+	// text, as a lone "\r", splits the block on iOS, whose text does.
+	text = lineBreaks.Replace(text)
+	if a, _ := e.ordered(); e.node(a.ID) != nil && e.node(a.ID).Type == "code" {
+		// Into code, text goes as it is, Leaflet's own blocks too: as
+		// blocks they would split the code, and take formats into it.
 		e.pushUndo(false)
 		e.coalescing = false
 		e.deleteSelection()
@@ -482,7 +497,10 @@ func (e *Editor) paste(text string) {
 	var blocks []*doc.Node
 	if clip.blocks != nil && text == clip.text {
 		blocks = freshBlocks(clip.blocks)
-	} else if clip.delta != nil && text == clip.text {
+		if plain {
+			plainText(blocks)
+		}
+	} else if clip.delta != nil && text == clip.text && !plain {
 		blocks = []*doc.Node{newText("paragraph", clip.delta)}
 	}
 	if blocks == nil && !strings.Contains(text, "\n") {
@@ -503,6 +521,17 @@ func (e *Editor) paste(text string) {
 		blocks = doc.ParseLines(strings.TrimRight(text, "\n"))
 	}
 	e.pasteBlocks(blocks)
+}
+
+// plainText drops the formats of the text of blocks, and of the blocks in
+// them, links and colors too.
+func plainText(blocks []*doc.Node) {
+	for _, b := range blocks {
+		if b.IsText() {
+			b.SetDelta(doc.Delta{{Text: b.Delta().Plain()}})
+		}
+		plainText(b.Children)
+	}
 }
 
 // insertInline puts text in the block at the caret, in place of the
@@ -607,7 +636,7 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 		}
 		last = n
 		if len(first.Children) > 0 {
-			if NestableTypes(n) {
+			if nestable(n) {
 				n.Children = first.Children
 			} else {
 				for _, k := range first.Children {
@@ -656,7 +685,7 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 	}
 	off := textLen(last)
 	last.SetDelta(last.Delta().Concat(tail))
-	if NestableTypes(last) {
+	if nestable(last) {
 		last.Children = append(last.Children, kids...)
 	} else {
 		at := last.ID

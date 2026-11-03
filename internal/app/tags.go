@@ -1,7 +1,6 @@
 package app
 
 import (
-	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -18,7 +17,7 @@ import (
 // and the tag it is under, for a page is under each of its tags.
 
 // tagCounts are the tags of the pages, by name.
-func (a *App) tagCounts() []store.TagCount { return store.TagsOf(a.pages) }
+func (a *App) tagCounts() []store.TagCount { return a.library().Tags }
 
 // tagNames are the tags of the pages, by name, as suggestions.
 func (a *App) tagNames() []string {
@@ -29,31 +28,14 @@ func (a *App) tagNames() []string {
 	return out
 }
 
-// tagged are the pages with a tag, by title.
-func (a *App) tagged(tag string) []store.Page {
-	var out []store.Page
-	for _, p := range a.pages {
-		if p.HasTag(tag) {
-			out = append(out, p)
-		}
-	}
-	slices.SortStableFunc(out, func(x, y store.Page) int {
-		return strings.Compare(strings.ToLower(x.DisplayTitle()), strings.ToLower(y.DisplayTitle()))
-	})
-	return out
-}
-
 // showTag shows a tag's pages in the Tags tab.
 func (a *App) showTag(tag string) {
-	a.sidebarTab(tabTags)
 	for _, t := range a.tagCounts() {
 		if strings.EqualFold(t.Name, tag) {
 			a.tagTree.Open.Add("tag:" + t.Name)
 		}
 	}
-	if !a.settings.SidebarOpen {
-		a.toggleSidebar()
-	}
+	a.showSidebar(tabTags)
 }
 
 // tagsTree builds the Tags tab: the tags, each with how many pages have
@@ -77,17 +59,19 @@ func (a *App) tagsTree(c *ui.Context) {
 			return nil
 		}
 		var out []string
-		for _, p := range a.tagged(tag) {
+		for _, p := range a.library().Tagged(tag) {
 			out = append(out, "tagged:"+p.ID+"|"+tag)
 		}
 		return out
 	}
 	s := &a.tagTree
-	a.tagRow = -1
-	for i := 0; i < s.Rows(); i++ {
-		if id, _ := taggedPage(s.Item(i)); a.route.Kind == "page" && id == a.route.ID {
-			a.tagRow = i
-			break
+	if a.tagIn.follows(a.route.Kind + ":" + a.route.ID) {
+		a.tagRow = -1
+		for i := 0; i < s.Rows(); i++ {
+			if id, _ := taggedPage(s.Item(i)); a.route.Kind == "page" && id == a.route.ID {
+				a.tagRow = i
+				break
+			}
 		}
 	}
 	s.List.Selected = &a.tagRow
@@ -101,10 +85,13 @@ func (a *App) tagsTree(c *ui.Context) {
 	}
 	opened := s.Open.Len()
 	list := ui.Outline(c, s, roots, children, func(key string) { a.tagItem(c, key, counts) }).Grow(1).Padding(0, 8, 12)
-	if list.Changed() && s.Open.Len() == opened && a.tagRow >= 0 && a.tagRow < s.Rows() {
+	pressed, submitted := a.tagIn.after(list), list.Submitted()
+	if (list.Changed() || submitted) && s.Open.Len() == opened && a.tagRow >= 0 && a.tagRow < s.Rows() {
 		key := s.Item(a.tagRow)
 		if id, ok := taggedPage(key); ok {
 			a.openPage(id)
+		} else if !pressed && !submitted {
+			// A click or Enter opens or closes a tag; the arrows only go by.
 		} else if s.Open.Has(key) {
 			s.Open.Remove(key)
 		} else {

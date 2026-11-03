@@ -213,3 +213,99 @@ func TestCopyInTriesAgainWithTheWholeFile(t *testing.T) {
 		t.Errorf("a copy cut short stayed: %q, %v", data, err)
 	}
 }
+
+// A placeholder of a file that starts with a dot is left out as the file
+// is, and a file listed both as itself and as its placeholder, as while
+// iCloud brings it, is listed once: neither reads as a copy iCloud made.
+func TestBatchesPassOverDotPlaceholders(t *testing.T) {
+	f := folder(t)
+	dir := filepath.Join(f.Root, "devices", dev, "log")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"0000000000000001.json", "0000000000000003.json", ".0000000000000003.json.icloud",
+		"..0000000000000004.json.x.tmp.icloud", ".icloud", "..icloud"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte(`{}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seqs, copies, err := f.Batches(dev)
+	if err != nil || !reflect.DeepEqual(seqs, []int64{1, 3}) || copies {
+		t.Errorf("seqs %v copies %v err %v", seqs, copies, err)
+	}
+}
+
+// A file made only where none is fails, leaving the one there, downloaded
+// or not.
+func TestCreateJSONLeavesAFileThere(t *testing.T) {
+	f := folder(t)
+	if err := f.CreateJSON(SpacePath, Space{Format: Format, SpaceID: page}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.CreateJSON(SpacePath, Space{Format: Format, SpaceID: dev}); !errors.Is(err, fs.ErrExist) {
+		t.Errorf("made over one there: %v", err)
+	}
+	if s, err := f.SpaceOf(SpacePath); err != nil || s.SpaceID != page {
+		t.Errorf("space %+v, %v", s, err)
+	}
+	if err := os.WriteFile(f.abs(placeholder("other.json")), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.CreateJSON("other.json", Space{Format: Format}); !errors.Is(err, fs.ErrExist) {
+		t.Errorf("made over one not downloaded: %v", err)
+	}
+	if left, _ := os.ReadDir(f.Temp); len(left) != 0 {
+		t.Errorf("left %d files in Temp", len(left))
+	}
+}
+
+// Every system with iCloud Drive can hold a file's name in the folder; a
+// copy an earlier Leaflet kept by the name it had is still found.
+func TestFileBlobsHaveNamesWindowsHolds(t *testing.T) {
+	for in, want := range map[string]string{"Q3: report.pdf": "Q3_ report.pdf", "aux.txt": "_aux.txt", "LPT¹": "_LPT¹",
+		"notes.pdf ": "notes.pdf", `a\b`: "a_b", "fine.pdf": "fine.pdf", "COM10": "COM10"} {
+		if got := PortableName(in); got != want || PortableName(got) != got {
+			t.Errorf("PortableName(%q) = %q, want %q", in, got, want)
+		}
+	}
+	f := folder(t)
+	rel, err := FileBlobPath(page, "Q3: report.pdf")
+	if err != nil || rel != "blobs/files/"+page+"/Q3_ report.pdf" {
+		t.Fatalf("path %q, %v", rel, err)
+	}
+	old := f.abs("blobs/files/" + page + "/Q3: report.pdf")
+	if err := os.MkdirAll(filepath.Dir(old), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(old, []byte("q3"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := f.Read(rel); err != nil || string(data) != "q3" || !f.Exists(rel) {
+		t.Errorf("read %q, %v", data, err)
+	}
+}
+
+// A file's copy goes with the copies iCloud made of it beside it.
+func TestRemoveBlobTakesItsCopies(t *testing.T) {
+	f := folder(t)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rel, _ := FileBlobPath(page, "notes.txt")
+	if err := f.CopyIn(rel, src); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(f.abs(rel)), "notes 2.txt"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.RemoveBlob(rel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Dir(f.abs(rel))); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("its folder stayed: %v", err)
+	}
+	if err := f.RemoveBlob(rel); err != nil {
+		t.Errorf("removed again: %v", err)
+	}
+}

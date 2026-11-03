@@ -165,6 +165,21 @@ Deno.test("a picture line may have a title and a link with parentheses", () => {
   }]);
 });
 
+// A line is a picture only when an image block takes its link (doc's
+// agentURL): one the block refuses is a paragraph with a link, as in the
+// app, not a picture that fails the whole write_markdown.
+Deno.test("a picture line's link is one an image block takes", () => {
+  for (
+    const line of ["![a](http:/example.com/c.png)", "![a](https://example.com/%zz.png)", "![a](https://:80/a.png)"]
+  ) {
+    assertEquals(markdownSpecs(line), [{ type: "paragraph", text: line }], line);
+  }
+  assertEquals(markdownSpecs("![a](https://256.0.0.1/a.png)"), [{
+    type: "image",
+    image: { url: "https://256.0.0.1/a.png", alt: "a" },
+  }]);
+});
+
 Deno.test("a <br> in a table cell is a line break, but escaped or in code it is text", () => {
   assertEquals(tableRow("| x<br>y \\<br> `a<br>b` | a<BR/>b | c<br />d |").cells, [
     "x\ny \\<br> `a<br>b`",

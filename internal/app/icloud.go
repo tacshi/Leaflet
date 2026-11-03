@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -12,6 +14,7 @@ import (
 
 	"leaflet/internal/core"
 	"leaflet/internal/icloud"
+	"leaflet/internal/store"
 	"leaflet/locales"
 )
 
@@ -73,7 +76,8 @@ func (a *App) iCloudFailed(err error) string {
 }
 
 // setICloud turns iCloud sync on or off from Settings, one turn at a
-// time: turning it off while it still turns on could leave it on.
+// time: turning it off while it still turns on could leave it on. The
+// switch shows the turn asked for while it goes.
 func (a *App) setICloud(on bool) {
 	if a.icloudBusy {
 		return
@@ -82,28 +86,15 @@ func (a *App) setICloud(on bool) {
 	a.settings.ICloudSync = on
 	a.saveSettings()
 	a.syncErr, a.syncError = nil, ""
+	c := a.core()
 	go func() {
-		var err error
-		if on {
-			err = a.sync.EnableICloud()
-		} else {
-			a.sync.SetICloud(false)
-		}
+		err := c.SwitchICloud(on)
 		a.update(func() {
 			a.icloudBusy = false
-			if a.settings.ICloudSync != on {
-				// Signing in turned it off meanwhile: it stays off.
-				a.sync.SetICloud(a.settings.ICloudSync)
-				a.watchICloud(a.settings.ICloudSync)
-				return
-			}
+			c.KeepICloud(on && err == nil)
 			if err != nil {
-				a.settings.ICloudSync = false
-				a.saveSettings()
 				a.toast(a.iCloudFailed(err))
-				return
 			}
-			a.watchICloud(on)
 		})
 	}()
 }
@@ -121,23 +112,23 @@ func (a *App) watchICloud(on bool) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.icloudStop = cancel
-	root, own := a.sync.ICloudFolder().Root, "devices/"+a.st.DeviceID()
+	root, own := a.sync.ICloudFolder().Root, &icloudOwn{st: a.st}
 	go func() {
 		for ctx.Err() == nil {
+			own.read()
 			w, err := mygo.WatchFiles(ctx, root, mygo.FileWatchOptions{
 				Recursive: true, HintsOnly: true, Debounce: 2 * time.Second,
-				// This device's own writes, and copies of files, which the
-				// batches that name them follow.
-				Ignore: func(p string, _ bool) bool {
-					return p == own || strings.HasPrefix(p, own+"/") || p == "blobs" || strings.HasPrefix(p, "blobs/")
-				},
+				Ignore: own.ignores,
 			})
 			if err == nil {
 				for {
-					if _, err := w.Next(ctx); err != nil {
+					hints, err := w.Next(ctx)
+					if err != nil {
 						break
 					}
-					a.sync.Kick()
+					if own.othersWrote(hints) {
+						a.sync.Kick()
+					}
 				}
 				_ = w.Close()
 			}
@@ -149,6 +140,41 @@ func (a *App) watchICloud(on bool) {
 			}
 		}
 	}()
+}
+
+// icloudOwn is what the watcher of the Leaflet folder ignores: this
+// device's own writes, under its ID, and copies of files, which the
+// batches that name them follow. A sync pass can give the device a new
+// ID, as when it finds another device writing as it (a backup restored
+// to a new Mac): its folder is read again after each change, off the
+// watch's own goroutine, which must be quick.
+type icloudOwn struct {
+	st  *store.Store
+	dir atomic.Pointer[string]
+}
+
+// read reads the device's folder again.
+func (o *icloudOwn) read() {
+	dir := "devices/" + o.st.DeviceID()
+	o.dir.Store(&dir)
+}
+
+// ignores reports whether a change at p, a path in the Leaflet folder, is
+// one the watcher ignores.
+func (o *icloudOwn) ignores(p string, _ bool) bool {
+	own := ""
+	if dir := o.dir.Load(); dir != nil {
+		own = *dir
+	}
+	under := func(dir string) bool { return dir != "" && (p == dir || strings.HasPrefix(p, dir+"/")) }
+	return under(own) || under("blobs")
+}
+
+// othersWrote reports whether hints are of a change another device made:
+// a change under the folder of this device's ID since then is its own.
+func (o *icloudOwn) othersWrote(hints []mygo.FileEvent) bool {
+	o.read()
+	return slices.ContainsFunc(hints, func(h mygo.FileEvent) bool { return !o.ignores(h.Path, true) })
 }
 
 // openPrivacySettings opens the privacy settings where macOS lets Leaflet

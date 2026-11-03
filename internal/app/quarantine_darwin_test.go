@@ -22,3 +22,16 @@ func TestMarkDownloaded(t *testing.T) {
 		t.Fatalf("quarantine %q, %v", buf[:max(n, 0)], err)
 	}
 }
+
+// An exported zip is quarantined, so what is unpacked from it, the pages'
+// files from other devices and people among it, is too.
+func TestExportIsQuarantined(t *testing.T) {
+	a := templatesApp(t)
+	out := filepath.Join(t.TempDir(), "export.zip")
+	if _, err := a.writeExport(out, a.folders, a.files); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := unix.Getxattr(out, "com.apple.quarantine", nil); err != nil {
+		t.Errorf("not quarantined: %v", err)
+	}
+}

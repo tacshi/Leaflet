@@ -84,7 +84,7 @@ func TestVideoBlocks(t *testing.T) {
 	if views := BlockViews(c); views[0]["video"].(map[string]any)["url"] != "https://youtu.be/dQw4w9WgXcQ" {
 		t.Errorf("view %v", views[0])
 	}
-	if md := PageMarkdown("P", c, nil); !strings.Contains(md, "[Never](https://youtu.be/dQw4w9WgXcQ)") {
+	if md := PageMarkdown("P", c, MarkdownOptions{}); !strings.Contains(md, "[Never](https://youtu.be/dQw4w9WgXcQ)") {
 		t.Errorf("markdown %q", md)
 	}
 	if c.PlainText() != "Never" {

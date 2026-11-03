@@ -115,7 +115,9 @@ struct RootView: View {
         .focusedSceneValue(\.scene, scene)
         .onAppear {
             app.activeScene = scene
-            scene.open(opening ?? savedPage)
+            // The page the window was left at, as it comes back, over the
+            // one it opened for, which it keeps as its own.
+            scene.open(savedPage ?? opening)
             #if DEBUG
                 // -LeafletOpen <title> opens the page of that title, to
                 // look at it on a simulator without a tap.

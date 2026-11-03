@@ -154,6 +154,17 @@ function Test-Gh {
 	}
 }
 
+# Test-Draft fails when the GitHub release v$Version of updates.github is
+# published: an upload to it would replace, under the same version, the
+# files installed copies have taken. A draft, or no release yet, passes.
+function Test-Draft([string]$Version) {
+	$repo = Get-ConfigValue updates.github
+	$draft = & gh release view "v$Version" --repo $repo --json isDraft --jq .isDraft 2>$null
+	if ($LASTEXITCODE -eq 0 -and "$draft".Trim() -ne 'true') {
+		Fail "the release v$Version of $repo is already published; a new build needs a new version"
+	}
+}
+
 # Invoke-Mygo runs go tool mygo with $Arguments and fails when it does.
 function Invoke-Mygo([string[]]$Arguments) {
 	& go tool mygo @Arguments

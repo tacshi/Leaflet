@@ -47,13 +47,16 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
             if let controller, controller.hasPendingEdit { controller.send() }
         }
         c.controller.createSubpage = createSubpage
-        onController(c.controller)
         if let content = model.content {
             c.controller.load(content, tinted: model.tinted)
             c.loaded = model.external
+            c.tinted = model.tinted
             model.shown = model.rev
         }
         view.isEditable = !model.readOnly
+        // The window hears of the editor once this update is done: what it
+        // keeps of it, the window's views read.
+        Task { @MainActor [onController] in onController(c.controller) }
         #if DEBUG
             // -LeafletAutoScroll YES scrolls the page down and up for good,
             // to profile scrolling on a simulator.
@@ -105,20 +108,11 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
         c.controller.style = style
         c.controller.createSubpage = createSubpage
         view.isEditable = !model.readOnly
-        if let content = model.content, c.loaded != model.external {
-            if c.loaded == nil {
-                c.controller.load(content, tinted: model.tinted)
-                model.shown = model.rev
-            } else if c.controller.hasPendingEdit, !model.readOnly {
-                // What was typed and not yet sent goes first, over the rev
-                // the editor shows: the core merges it with this change,
-                // and the editor shows the merge as it comes instead.
-                c.controller.send()
-            } else {
-                c.controller.update(content, tinted: model.tinted)
-                model.shown = model.rev
-            }
-            c.loaded = model.external
+        // Read here, for SwiftUI to update the view as they change; shown
+        // once this update is done, as what the editor does then tells
+        // the page and the window, whose views this update reads.
+        if model.content != nil, c.loaded != model.external || c.tinted != model.tinted {
+            Task { @MainActor [model] in c.show(model) }
         }
     }
 
@@ -126,6 +120,7 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
         // What was typed in the last moment goes before the page closes.
         if coordinator.controller.hasPendingEdit { coordinator.controller.send() }
         coordinator.controller.close()
+        coordinator.closed = true
     }
 
     @MainActor
@@ -134,9 +129,43 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
         var host: UIHostingController<AnyView>?
         var footer: UIHostingController<AnyView>?
         /// loaded is the count of the model's outside changes the editor
-        /// shows, or nil before it shows any.
+        /// shows, or nil before it shows any; tinted the blocks it shows
+        /// lit.
         var loaded: Int?
+        var tinted: Set<String> = []
+        /// closed says the view went: a change shown after would go to a
+        /// page closed.
+        var closed = false
 
         init(controller: EditorController) { self.controller = controller }
+
+        /// show has the editor show the model's content and its blocks lit,
+        /// as they now are, if it doesn't.
+        func show(_ model: PageModel) {
+            guard !closed, let content = model.content else { return }
+            if loaded != model.external {
+                if loaded == nil {
+                    controller.load(content, tinted: model.tinted)
+                    tinted = model.tinted
+                    model.shown = model.rev
+                } else if controller.hasPendingEdit, !model.readOnly {
+                    // What was typed and not yet sent goes first, over the
+                    // rev the editor shows: the core merges it with this
+                    // change, and the editor shows the merge as it comes
+                    // instead.
+                    controller.send()
+                } else {
+                    controller.update(content, tinted: model.tinted, byAgent: model.byAgent)
+                    tinted = model.tinted
+                    model.shown = model.rev
+                }
+                loaded = model.external
+            }
+            // The blocks lit change apart from the content too.
+            if loaded != nil, tinted != model.tinted {
+                controller.tint(model.tinted)
+                tinted = model.tinted
+            }
+        }
     }
 }

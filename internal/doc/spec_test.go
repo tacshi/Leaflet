@@ -3,6 +3,7 @@ package doc
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -63,14 +64,14 @@ func TestSpecNestingIsBounded(t *testing.T) {
 
 func TestSetTableRows(t *testing.T) {
 	n, _ := TableNode([][]string{{"A", "B"}, {"**1**", "2"}}, "")
-	bold := TableCell(n, 1, 0)
+	bold := tableCell(n, 1, 0)
 	if err := SetTableRows(n, [][]string{{"A", "B", "C"}, {"**1**", "two", ""}, {"", "", ""}}); err != nil {
 		t.Fatal(err)
 	}
 	if rows, cols := TableSize(n); rows != 3 || cols != 3 {
 		t.Fatalf("table is %dx%d, want 3x3", rows, cols)
 	}
-	if TableCell(n, 1, 0) != bold || TableCell(n, 1, 1).Children[0].Delta().Plain() != "two" {
+	if tableCell(n, 1, 0) != bold || tableCell(n, 1, 1).Children[0].Delta().Plain() != "two" {
 		t.Errorf("rows are %v", TableRows(n))
 	}
 	if err := SetTableRows(n, [][]string{{"A"}}); err != nil || len(n.Children) != 1 {
@@ -78,5 +79,21 @@ func TestSetTableRows(t *testing.T) {
 	}
 	if err := SetTableRows(n, nil); err == nil {
 		t.Error("a table of no rows was kept")
+	}
+}
+
+// An embed's HTML is held to 200 KB as stored, in UTF-8's bytes, as on
+// the server: HTML of Chinese text a third as long as the limit in
+// characters is over it.
+func TestEmbedSizeInBytes(t *testing.T) {
+	embed := func(html string) error {
+		_, err := SpecToNode(map[string]any{"type": "embed", "embed": map[string]any{"html": html}}, "", "")
+		return err
+	}
+	if err := embed(strings.Repeat("x", maxEmbedHTML)); err != nil {
+		t.Errorf("HTML of %d bytes refused: %v", maxEmbedHTML, err)
+	}
+	if err := embed(strings.Repeat("字", maxEmbedHTML/3+1)); err == nil {
+		t.Errorf("HTML of %d characters, %d bytes, taken", maxEmbedHTML/3+1, 3*(maxEmbedHTML/3+1))
 	}
 }

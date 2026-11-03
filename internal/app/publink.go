@@ -31,6 +31,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 	codeeditor "github.com/egoist/mygo/ui/editor"
 	"rsc.io/qr"
@@ -59,8 +60,7 @@ type pubLink struct {
 	page, token string
 	// emails, when set, are who may open the link, by cloudflared's
 	// --allowed-mail: each signs in with a code Cloudflare emails them.
-	// They are set as the link starts and never change, so the server
-	// reads them too.
+	// They are set as the link starts and never change.
 	emails []string
 	// state is "starting", "live" or "failed"; url is the link once live,
 	// and err why it failed.
@@ -101,12 +101,12 @@ type pubSnapshot struct {
 	blocks map[string]string
 }
 
-// pubFile is a file the shared page serves: a picture's data, or the
-// path of a file or a recording's audio, which is read as it is asked
-// for, a part at a time for a player. One with a name downloads as it.
+// pubFile is a file the shared page serves, a picture, a file or a
+// recording's audio, by its path: it is read as it is asked for, a part
+// at a time for a player, never kept with the page. One with a name
+// downloads as it; one with no type is served as its content says.
 type pubFile struct {
 	typ  string
-	data []byte
 	path string
 	name string
 }
@@ -171,9 +171,6 @@ const (
 	pubPostsPerLink   = 200
 	pubMaxComment     = 4000
 	pubMaxName        = 80
-	// accessEmailHeader is the email Cloudflare Access verified, when the
-	// link has emails.
-	accessEmailHeader = "Cf-Access-Authenticated-User-Email"
 )
 
 // pubCSP lets the page run only its own scripts, and frame only the
@@ -313,10 +310,7 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 	p := &pubLink{page: page, token: randomToken(), emails: emails, state: "starting",
 		comments: comments, threads: threads, posts: map[string][]time.Time{}}
 	a.setPub(p)
-	fail := func(err error) {
-		p.state, p.err = "failed", err.Error()
-		p.close()
-	}
+	fail := func(err error) { a.pubFailed(p, err.Error()) }
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		fail(err)
@@ -375,8 +369,7 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 			if msg == "" && err != nil {
 				msg = err.Error()
 			}
-			p.state, p.err = "failed", msg
-			p.close()
+			a.pubFailed(p, msg)
 		})
 	}()
 	// A tunnel that has no address by now will not get one.
@@ -396,6 +389,20 @@ func (a *App) stopPub() {
 		p.close()
 	}
 }
+
+// pubFailed stops the link p, which failed for why: it stays, failed, for
+// the Share dialog to say why and start it again, and renders no more. A
+// link that stops while the dialog doesn't show it says so in a toast.
+func (a *App) pubFailed(p *pubLink, why string) {
+	p.state, p.err = "failed", why
+	p.close()
+	if d := &a.dialogs; !d.shareOpen || d.sharePage != p.page {
+		a.toastAction(locales.PubLinkStopped(a.pageTitleOf(p.page)), locales.PageShare(), func() { a.openShare(p.page) })
+	}
+}
+
+// serving says whether the link still serves the page, or will once live.
+func (p *pubLink) serving() bool { return p.state != "failed" }
 
 func (p *pubLink) close() {
 	if p.timer != nil {
@@ -418,7 +425,9 @@ func (a *App) setPubComments(on bool) {
 	p.mu.Lock()
 	p.comments = on
 	p.mu.Unlock()
-	go p.render(a.pubJob(p))
+	if p.serving() {
+		go p.render(a.pubJob(p))
+	}
 }
 
 // pubChanged renders the shared page again once a change to it settles,
@@ -441,12 +450,16 @@ func (a *App) pubChanged(ch store.Change) {
 		a.stopPub()
 		return
 	}
+	// A link that failed shows the page to no one.
+	if !p.serving() {
+		return
+	}
 	if p.timer != nil {
 		p.timer.Stop()
 	}
 	p.timer = time.AfterFunc(300*time.Millisecond, func() {
 		a.update(func() {
-			if a.pub == p {
+			if a.pub == p && p.serving() {
 				go p.render(a.pubJob(p))
 			}
 		})
@@ -474,7 +487,7 @@ func (p *pubLink) render(job pubJob) {
 	if c == nil {
 		c = doc.Empty()
 	}
-	localPath, read := ownFiles(job.st.Dir, job.files)
+	localPath := ownFiles(job.files)
 	files := map[string]pubFile{}
 	names := map[string]string{}
 	blocks := map[string]string{}
@@ -503,6 +516,7 @@ func (p *pubLink) render(job pubJob) {
 	}
 	prefix := "/" + job.token + "/"
 	page := doc.PageHTML(job.title, c, doc.HTMLOptions{
+		Lang: i18n.Locale(),
 		Head: job.head,
 		Image: func(n *doc.Node) string {
 			local, ok := strings.CutPrefix(n.Str("url"), "file://")
@@ -527,16 +541,11 @@ func (p *pubLink) render(job pubJob) {
 			if name, ok := names[local]; ok {
 				return prefix + "f/" + name
 			}
-			data, err := read(local)
-			if err != nil {
+			if info, err := os.Stat(local); err != nil || !info.Mode().IsRegular() {
 				return ""
 			}
 			name := strconv.Itoa(len(files)+1) + ext
-			typ := mime.TypeByExtension(ext)
-			if typ == "" {
-				typ = http.DetectContentType(data)
-			}
-			files[name], names[local] = pubFile{typ: typ, data: data}, name
+			files[name], names[local] = pubFile{typ: mime.TypeByExtension(ext), path: local}, name
 			return prefix + "f/" + name
 		},
 		Script: func(name string) string {
@@ -556,7 +565,7 @@ func (p *pubLink) render(job pubJob) {
 			return prefix + "e/" + url.PathEscape(n.ID)
 		},
 		Code:        codeHTML,
-		CalloutIcon: func(tone string) string { return calloutIcon(tone) },
+		CalloutIcon: calloutIcon,
 		Icon:        theme.IconSVG,
 		Chart:       chartHTML,
 		Due:         dueText,
@@ -602,7 +611,7 @@ func (p *pubLink) render(job pubJob) {
 			if err != nil {
 				return v
 			}
-			v.Length = fmtDuration(time.Duration(rec.DurationMs) * time.Millisecond)
+			v.Length = recording.FormatDuration(time.Duration(rec.DurationMs) * time.Millisecond)
 			// Audio still being recorded, or not on this device, has no player.
 			if path := rec.LocalPath; rec.Status != "recording" && inFolder(job.st.Dir, path) {
 				if _, err := os.Stat(path); err == nil {
@@ -612,7 +621,7 @@ func (p *pubLink) render(job pubJob) {
 				}
 			}
 			for _, s := range recording.Tidy(rec.Transcript) {
-				l := doc.TranscriptLine{Start: float64(s.StartMs) / 1000, Time: fmtDuration(time.Duration(s.StartMs) * time.Millisecond), Text: s.Text}
+				l := doc.TranscriptLine{Start: float64(s.StartMs) / 1000, Time: recording.FormatDuration(time.Duration(s.StartMs) * time.Millisecond), Text: s.Text}
 				if s.Speaker != "" {
 					l.Speaker = locales.RecSpeaker(s.Speaker)
 				}
@@ -832,6 +841,9 @@ func blockQuote(n *doc.Node) string {
 // else.
 func (a *App) pubHandler(p *pubLink) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// What is refused is answered with its status and no words: a
+		// visitor's browser says what it means in their language.
+		refuse := func(status int) { w.WriteHeader(status) }
 		h := w.Header()
 		h.Set("Content-Security-Policy", pubCSP)
 		h.Set("X-Robots-Tag", "noindex, nofollow")
@@ -840,7 +852,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 		h.Set("Cache-Control", "no-store")
 		first, rest, _ := strings.Cut(strings.TrimPrefix(r.URL.Path, "/"), "/")
 		if subtle.ConstantTimeCompare([]byte(first), []byte(p.token)) != 1 {
-			http.NotFound(w, r)
+			refuse(http.StatusNotFound)
 			return
 		}
 		if rest == "comments" {
@@ -849,7 +861,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.Header().Set("Allow", "GET, HEAD")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			refuse(http.StatusMethodNotAllowed)
 			return
 		}
 		p.mu.Lock()
@@ -865,12 +877,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 				http.Error(w, locales.PubStarting(), http.StatusServiceUnavailable)
 				return
 			}
-			page := snap.html
-			// A visitor Cloudflare signed in comments as their email.
-			if email := p.visitorEmail(r); email != "" {
-				page = strings.Replace(page, "</head>", `<meta name="leaflet-visitor" content="`+html.EscapeString(email)+`"></head>`, 1)
-			}
-			serve("text/html; charset=utf-8", page)
+			serve("text/html; charset=utf-8", snap.html)
 		case rest == "math.js":
 			serve("text/javascript; charset=utf-8", rendered.KatexJS+"\n"+mathScript)
 		case rest == "diagram.js":
@@ -887,7 +894,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 		case strings.HasPrefix(rest, "e/"):
 			src, ok := snap.embeds[strings.TrimPrefix(rest, "e/")]
 			if !ok {
-				http.NotFound(w, r)
+				refuse(http.StatusNotFound)
 				return
 			}
 			// The embed runs in an opaque origin even when opened alone,
@@ -897,24 +904,23 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 		case strings.HasPrefix(rest, "f/"):
 			f, ok := snap.files[strings.TrimPrefix(rest, "f/")]
 			if !ok {
-				http.NotFound(w, r)
-				return
-			}
-			h.Set("Content-Type", f.typ)
-			if f.path == "" {
-				_, _ = w.Write(f.data)
+				refuse(http.StatusNotFound)
 				return
 			}
 			file, err := os.Open(f.path) // #nosec G304 -- a file of the app's own.
 			if err != nil {
-				http.NotFound(w, r)
+				refuse(http.StatusNotFound)
 				return
 			}
 			defer func() { _ = file.Close() }()
 			info, err := file.Stat()
-			if err != nil {
-				http.NotFound(w, r)
+			if err != nil || !info.Mode().IsRegular() {
+				refuse(http.StatusNotFound)
 				return
+			}
+			// Without a type, the file's first bytes say it.
+			if f.typ != "" {
+				h.Set("Content-Type", f.typ)
 			}
 			// A file downloads, never opens as a page of the link's.
 			if f.name != "" {
@@ -922,7 +928,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			}
 			http.ServeContent(w, r, "", info.ModTime(), file)
 		default:
-			http.NotFound(w, r)
+			refuse(http.StatusNotFound)
 		}
 	})
 }
@@ -933,24 +939,14 @@ var (
 	errPubNoAnswer = errors.New("the app did not answer")
 )
 
-// visitorEmail is the email Cloudflare Access verified for a request, or
-// "": only a link kept to emails is behind Access, and on any other a
-// visitor could send the header themselves.
-func (p *pubLink) visitorEmail(r *http.Request) string {
-	if len(p.emails) == 0 {
-		return ""
-	}
-	return r.Header.Get(accessEmailHeader)
-}
-
 // pubComment takes a visitor's comment, or reply, and stores it on the
 // main thread; the page renders again with it before the answer.
 func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 	// A refusal says why in the app's log, for its owner, quoted: much of
-	// it is the visitor's.
+	// it is the visitor's. The page words it by its status alone.
 	refuse := func(status int, why string) {
 		log.Printf("public link: comment refused (%d): %q", status, why)
-		http.Error(w, http.StatusText(status), status)
+		w.WriteHeader(status)
 	}
 	if r.Method != http.MethodPost {
 		w.Header().Set("Allow", "POST")
@@ -976,10 +972,10 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 		refuse(http.StatusBadRequest, err.Error())
 		return
 	}
+	// A visitor comments as the name they give, on a link kept to emails
+	// too: cloudflared checks a visitor's email itself and tells the page
+	// none, so a header that names one is the visitor's own.
 	in.Name, in.Body, in.Quote = strings.TrimSpace(in.Name), strings.TrimSpace(in.Body), squash(in.Quote)
-	if email := p.visitorEmail(r); email != "" {
-		in.Name = email
-	}
 	if in.Body == "" || in.Name == "" || utf8.RuneCountInString(in.Body) > pubMaxComment || utf8.RuneCountInString(in.Name) > pubMaxName {
 		refuse(http.StatusBadRequest, "no name or text, or too long")
 		return
@@ -1297,7 +1293,6 @@ const commentsScript = `(function () {
   function word(n) { var m = document.querySelector('meta[name="leaflet-' + n + '"]'); return m ? m.content : ""; }
   var main = document.querySelector("main");
   var token = location.pathname.split("/")[1];
-  var visitor = word("visitor");
   var panel = document.getElementById("cpanel");
   var open = null;
 
@@ -1383,15 +1378,12 @@ const commentsScript = `(function () {
       q.textContent = quote;
       f.appendChild(q);
     }
-    var name = null;
-    if (!visitor) {
-      name = document.createElement("input");
-      name.placeholder = word("name");
-      name.maxLength = 80;
-      name.required = true;
-      try { name.value = localStorage.getItem("leaflet-name") || ""; } catch (e) {}
-      f.appendChild(name);
-    }
+    var name = document.createElement("input");
+    name.placeholder = word("name");
+    name.maxLength = 80;
+    name.required = true;
+    try { name.value = localStorage.getItem("leaflet-name") || ""; } catch (e) {}
+    f.appendChild(name);
     var text = document.createElement("textarea");
     text.placeholder = word("text");
     text.maxLength = 4000;
@@ -1414,14 +1406,14 @@ const commentsScript = `(function () {
       e.preventDefault();
       send.disabled = true;
       note.textContent = "";
-      var who = name ? name.value.trim() : visitor;
+      var who = name.value.trim();
       fetch("/" + token + "/comments", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({block: block, parent: parent, name: who, body: text.value, quote: quote || ""})
       }).then(function (r) {
         if (!r.ok) throw r.status;
-        try { if (name) localStorage.setItem("leaflet-name", who); } catch (e) {}
+        try { localStorage.setItem("leaflet-name", who); } catch (e) {}
         // The page comes back with the panel open where the comment is.
         location.hash = parent ? "t-" + parent : "c-" + block;
         location.reload();
@@ -1432,7 +1424,7 @@ const commentsScript = `(function () {
     };
     if (inside) after.appendChild(f); else after.after(f);
     open = f;
-    (name && !name.value ? name : text).focus();
+    (name.value ? text : name).focus();
   }
 
   if (word("open") === "1") {

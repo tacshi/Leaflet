@@ -9,6 +9,7 @@ import (
 	codeeditor "github.com/egoist/mygo/ui/editor"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/rules"
 	"leaflet/internal/theme"
 	"leaflet/locales"
 )
@@ -132,7 +133,7 @@ func (e *Editor) codeBarView(c *ui.Context, n *doc.Node, left float32, hovered b
 // inCodeBar reports whether a point in the window is on a code block's
 // bar, whose controls take the press.
 func (e *Editor) inCodeBar(n *doc.Node, wy float32) bool {
-	box, ok := e.geom[n.ID]
+	box, ok := e.box(n.ID)
 	return ok && n.Type == "code" && wy >= box.Y && wy < box.Y+codeMargin+codeBar
 }
 
@@ -162,10 +163,9 @@ func (e *Editor) inCode() bool {
 func (e *Editor) codeEnter(n *doc.Node) {
 	runes := []rune(n.Delta().Plain())
 	off := e.focus.Off
-	lines := strings.Split(string(runes), "\n")
-	last := len(lines) - 1
-	if off == len(runes) && last >= 2 && strings.TrimSpace(lines[last]) == "" && strings.TrimSpace(lines[last-1]) == "" {
-		n.SetDelta(doc.Delta{{Text: strings.Join(lines[:last-1], "\n")}}.Compact())
+	leave, keep, ins := rules.CodeEnter(string(runes), off)
+	if leave {
+		n.SetDelta(doc.Delta{{Text: string(runes[:keep])}}.Compact())
 		e.invalidate(n.ID)
 		var p *doc.Node
 		if loc := e.Content.Locate(n.ID); loc != nil && loc.Index+1 < len(loc.Siblings) {
@@ -181,12 +181,6 @@ func (e *Editor) codeEnter(n *doc.Node) {
 		e.changed()
 		return
 	}
-	start := lineStart(runes, off)
-	indent := start
-	for indent < off && (runes[indent] == ' ' || runes[indent] == '\t') {
-		indent++
-	}
-	ins := "\n" + string(runes[start:indent])
 	n.SetDelta(n.Delta().Insert(off, ins, doc.Attrs{}))
 	e.invalidate(n.ID)
 	at := off + utf8.RuneCountInString(ins)
@@ -234,86 +228,21 @@ func (e *Editor) roomAfterCode(n *doc.Node) {
 	}
 }
 
-func lineStart(runes []rune, off int) int {
-	for off > 0 && runes[off-1] != '\n' {
-		off--
-	}
-	return off
-}
-
 // indentCode indents the lines of the selection in a code block, or
-// outdents them, by the block's own step: a tab when its lines are
-// indented with tabs, else two spaces. Tab at a caret puts a step there.
+// outdents them, by the block's own step (rules.IndentCode). Tab at a
+// caret puts a step there.
 func (e *Editor) indentCode(n *doc.Node, out bool) {
-	runes := []rune(n.Delta().Plain())
-	unit := []rune("  ")
-	if strings.Contains("\n"+string(runes), "\n\t") {
-		unit = []rune("\t")
-	}
-	a, b := e.ordered()
-	if !out && a.Off == b.Off {
-		e.pushUndo(false)
-		e.coalescing = false
-		n.SetDelta(doc.Delta{{Text: string(runes[:a.Off]) + string(unit) + string(runes[a.Off:])}})
-		e.invalidate(n.ID)
-		at := a.Off + len(unit)
-		e.Select(Pos{n.ID, at}, Pos{n.ID, at})
-		e.changed()
-		return
-	}
-	// The lines from the selection's first to its last, leaving out a line
-	// the selection only reaches the start of.
-	starts := []int{lineStart(runes, a.Off)}
-	for i := starts[0]; i < len(runes); i++ {
-		if runes[i] == '\n' && i+1 < b.Off {
-			starts = append(starts, i+1)
-		}
-	}
-	type edit struct{ at, removed, added int }
-	var edits []edit
-	for _, s := range starts {
-		if !out {
-			edits = append(edits, edit{s, 0, len(unit)})
-			continue
-		}
-		k := 0
-		for k < len(unit) && s+k < len(runes) && (runes[s+k] == ' ' || runes[s+k] == '\t') {
-			k++
-			if runes[s+k-1] == '\t' {
-				break
-			}
-		}
-		if k > 0 {
-			edits = append(edits, edit{s, k, 0})
-		}
-	}
+	code, anchor, focus, ok := rules.IndentCode(n.Delta().Plain(), e.anchor.Off, e.focus.Off, out)
 	// Outdenting lines with no indent changes nothing, so it makes no
 	// step of undo, and keeps the steps of redo.
-	if len(edits) == 0 {
+	if !ok {
 		return
 	}
 	e.pushUndo(false)
 	e.coalescing = false
-	moved := func(x int) int {
-		y := x
-		for _, ed := range edits {
-			if ed.at <= x {
-				y += ed.added - min(ed.removed, x-ed.at)
-			}
-		}
-		return y
-	}
-	for i := len(edits) - 1; i >= 0; i-- {
-		ed := edits[i]
-		var add []rune
-		if ed.added > 0 {
-			add = unit
-		}
-		runes = append(runes[:ed.at], append(add, runes[ed.at+ed.removed:]...)...)
-	}
-	n.SetDelta(doc.Delta{{Text: string(runes)}}.Compact())
+	n.SetDelta(doc.Delta{{Text: code}}.Compact())
 	e.invalidate(n.ID)
-	e.Select(Pos{n.ID, moved(e.anchor.Off)}, Pos{n.ID, moved(e.focus.Off)})
+	e.Select(Pos{n.ID, anchor}, Pos{n.ID, focus})
 	e.changed()
 }
 

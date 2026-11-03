@@ -261,7 +261,13 @@ private struct ConflictsSection: View {
                             }
                             Button(L.settingsKeepIt) { resolve(cf, .keep) }
                         } else {
-                            Button(L.settingsUseThisDevice) { resolve(cf, .thisDevice) }
+                            // The version the merge did not keep can come
+                            // back, whichever device's it is.
+                            if cf.keptHere {
+                                Button(L.settingsUseOtherDevice) { resolve(cf, .otherDevice) }
+                            } else {
+                                Button(L.settingsUseThisDevice) { resolve(cf, .thisDevice) }
+                            }
                             Button(L.settingsKeepNewer) { resolve(cf, .keep) }
                         }
                         Button(L.settingsOpenPage) {

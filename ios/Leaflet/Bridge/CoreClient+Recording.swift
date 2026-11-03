@@ -62,7 +62,7 @@ struct Segment: Codable, Hashable, Sendable {
 /// its transcript.
 struct RecordingRow: Codable, Equatable, Sendable {
     var id: String
-    /// status is recording, uploading, transcribing, ready or failed.
+    /// status is recording, transcribing, ready or failed.
     var status: String
     var durationMs: Int
     /// sttProvider is what transcribed it, or "" for audio alone.
@@ -71,12 +71,27 @@ struct RecordingRow: Codable, Equatable, Sendable {
     var transcript: [Segment]
     /// plain is the transcript to copy.
     var plain: String
+    /// label is the line under the block's title while nothing runs for
+    /// it here, as the core words it.
+    var label = ""
+    /// createdMs is when it was made, and pageTitle the title of the page
+    /// it was made in, for its block's title (MobileRecordingTitle).
+    var createdMs: Int64 = 0
+    var pageTitle = ""
 
     enum CodingKeys: String, CodingKey {
-        case id, status, error, transcript, plain
+        case id, status, error, transcript, plain, label
         case durationMs = "duration_ms"
         case sttProvider = "stt_provider"
+        case createdMs = "created_ms"
+        case pageTitle = "page_title"
     }
+}
+
+/// Transcript is a recording's transcript as blocks, a paragraph a line,
+/// to put after the recording's block it was asked from.
+struct Transcript: Decodable, Sendable {
+    var blocks: [DocNode]
 }
 
 /// SttSettings are the speech-to-text choice, as the core keeps it.
@@ -180,8 +195,8 @@ extension CoreClient {
     /// recordingAudio returns a recording's WAV audio on this device,
     /// downloaded first when it is not.
     nonisolated(nonsending) func recordingAudio(_ id: String) async throws -> URL {
-        let path = try await call(waiting: true) { core in
-            try Self.answer { e in core.recordingAudio(id, error: e) }
+        let path = try await cancellable { core, token in
+            try Self.answer { e in core.recordingAudio(id, token: token, error: e) }
         }
         return URL(fileURLWithPath: path)
     }
@@ -190,9 +205,12 @@ extension CoreClient {
         try await call { try $0.retranscribe(id) }
     }
 
-    /// insertTranscript puts a recording's transcript after its block.
-    nonisolated(nonsending) func insertTranscript(_ id: String) async throws {
-        try await call { try $0.insertTranscript(id) }
+    /// transcriptBlocks is a recording's transcript as the blocks its
+    /// page's editor puts after its block.
+    nonisolated(nonsending) func transcriptBlocks(_ id: String) async throws -> Transcript {
+        try await call(Transcript.self) { core in
+            try Self.answer { e in core.transcriptBlocks(id, error: e) }
+        }
     }
 
     // MARK: Speech to text
@@ -203,9 +221,12 @@ extension CoreClient {
         }
     }
 
+    /// saveSpeechSettings keeps the speech settings, in line with the
+    /// other calls, for the last saved to be the one kept: the core sends
+    /// them to the server on its own, waiting for nothing.
     nonisolated(nonsending) func saveSpeechSettings(_ stt: SttSettings) async throws {
         let json = String(decoding: try JSONEncoder().encode(stt), as: UTF8.self)
-        try await call(waiting: true) { try $0.saveSpeechSettings(json) }
+        try await call { try $0.saveSpeechSettings(json) }
     }
 
     nonisolated(nonsending) func setEndpointKey(_ key: String) async throws {

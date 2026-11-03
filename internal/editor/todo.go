@@ -3,6 +3,7 @@ package editor
 import (
 	"time"
 
+	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
@@ -23,48 +24,17 @@ func (e *Editor) SetDue(id string, t time.Time, timed bool) {
 	e.changed()
 }
 
-// DueLabel says when a due date is, from now: Today, Tomorrow, Yesterday,
-// or the day, with its year when not this one's, and its time when timed.
+// DueLabel says when a due date is, from now, in the language the app
+// shows, as doc.DueLabel.
 func DueLabel(due time.Time, timed bool, now time.Time) string {
-	// The days between are counted on the calendar, in UTC, where each is
-	// 24 hours long: a day that changes the clocks is 23 or 25.
-	day := func(t time.Time) time.Time { return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC) }
-	var label string
-	switch int(day(due).Sub(day(now)).Hours() / 24) {
-	case 0:
-		label = locales.CommonToday()
-	case 1:
-		label = locales.EditorTomorrow()
-	case -1:
-		label = locales.EditorYesterday()
-	default:
-		if due.Year() == now.Year() {
-			label = locales.EditorDueDay(due)
-		} else {
-			label = locales.EditorDueDate(due)
-		}
-	}
-	if timed {
-		return locales.EditorDueAt(label, due)
-	}
-	return label
+	return doc.DueLabel(locales.In(i18n.Locale()), due, timed, now)
 }
 
-// Overdue reports whether a due date has passed: its time when timed, or
-// else its day, once now is a day after it.
-func Overdue(due time.Time, timed bool, now time.Time) bool {
-	if timed {
-		return due.Before(now)
-	}
-	return due.Before(time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local))
-}
+// Overdue reports whether a due date has passed, as doc.Overdue.
+func Overdue(due time.Time, timed bool, now time.Time) bool { return doc.Overdue(due, timed, now) }
 
-// DueToday reports whether a due date is on now's day.
-func DueToday(due, now time.Time) bool {
-	y, m, d := due.In(time.Local).Date()
-	ny, nm, nd := now.In(time.Local).Date()
-	return y == ny && m == nm && d == nd
-}
+// DueToday reports whether a due date is on now's day, as doc.DueToday.
+func DueToday(due, now time.Time) bool { return doc.DueToday(due, now) }
 
 // clock is the time now, which a to-do's date is shown from.
 var clock = time.Now
@@ -138,7 +108,7 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 		}
 		ui.Row(c).FillWidth().Gap(6).AlignItems(ui.Center).Children(func() {
 			if !d.timed {
-				if ui.Button(c, locales.EditorAddTime()).Grow(1).Clicked() {
+				if ui.Button(c.Key("add-time"), locales.EditorAddTime()).Grow(1).Clicked() {
 					y, m, day := d.at.Date()
 					d.at = time.Date(y, m, day, dueHour, 0, 0, 0, time.Local)
 					d.timed, d.edited = true, true
@@ -154,7 +124,7 @@ func (e *Editor) dueChip(c *ui.Context, n *doc.Node, left, top float32, active b
 				d.timed, d.edited = false, true
 			}
 		})
-		if has && ui.Button(c, locales.EditorRemoveDate()).FillWidth().Clicked() {
+		if has && ui.Button(c.Key("remove-date"), locales.EditorRemoveDate()).FillWidth().Clicked() {
 			e.SetDue(n.ID, time.Time{}, false)
 			open, d.edited = false, false
 			e.Focus()

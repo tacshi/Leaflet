@@ -1,6 +1,7 @@
 import AVFoundation
 import CallKit
 import LeafletCore
+import UIKit
 
 /// Microphone is the device's microphone as the core's recordings hear
 /// it: the audio engine's input, turned into 16-bit mono PCM at the rate
@@ -16,13 +17,15 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
     private var recordings: [Int: Recording] = [:]
 
     /// Recording is one recording's engine and sink; touched only on queue.
-    private final class Recording: @unchecked Sendable {
+    final class Recording: @unchecked Sendable {
         let rate: Int
         let sink: MobileAudioSink
         var engine: AVAudioEngine?
+        /// resampler turns what the engine's tap hears into the core's PCM.
+        var resampler: Resampler?
         var paused = false
-        /// stopped says the recording's audio is all handed on: nothing
-        /// turns the engine back on.
+        /// stopped says the recording stopped: nothing turns the engine
+        /// back on, and the tap is gone.
         var stopped = false
         /// observers hear calls taking the microphone, and the engine's
         /// input changing under it.
@@ -64,7 +67,7 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
     private func run(_ session: Int, _ rec: Recording) throws {
         for (other, earlier) in recordings where other != session {
             earlier.stopped = true
-            earlier.engine?.inputNode.removeTap(onBus: 0)
+            endTap(other, earlier)
             earlier.engine?.stop()
         }
         let audio = AVAudioSession.sharedInstance()
@@ -72,61 +75,139 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
             .playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
         try audio.setActive(true)
         let engine = AVAudioEngine()
-        try tap(engine, session: session, rate: rec.rate)
+        try tap(engine, session: session, rec)
         engine.prepare()
         try engine.start()
         rec.engine = engine
+        guard rec.observers.isEmpty else { return }
         let center = NotificationCenter.default
-        // A call or Siri takes the microphone; it comes back after.
+        // A call, Siri or another app's audio takes the microphone: the
+        // recording pauses, saying so, as it hears nothing meanwhile, and
+        // goes on once it is given back. One never given back, as iOS may
+        // leave it, stays paused, to resume or stop.
         rec.observers.append(
             center.addObserver(
                 forName: AVAudioSession.interruptionNotification, object: audio, queue: nil
             ) { [weak self] note in
-                let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
-                guard raw == AVAudioSession.InterruptionType.ended.rawValue, let mic = self else {
-                    return
+                guard let mic = self,
+                    let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                    let kind = AVAudioSession.InterruptionType(rawValue: raw)
+                else { return }
+                let options = AVAudioSession.InterruptionOptions(
+                    rawValue: note.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0)
+                mic.queue.async { [weak mic] in
+                    mic?.interrupted(
+                        session, ended: kind == .ended, resume: options.contains(.shouldResume))
                 }
-                mic.queue.async { [weak mic] in mic?.restart(session, engine, rewire: false) }
+            })
+        // The media services restarting take every engine with them: the
+        // recording's starts anew.
+        rec.observers.append(
+            center.addObserver(
+                forName: AVAudioSession.mediaServicesWereResetNotification, object: audio,
+                queue: nil
+            ) { [weak self] _ in
+                guard let mic = self else { return }
+                mic.queue.async { [weak mic] in mic?.rebuild(session) }
+            })
+        // Back in front, an engine something stopped without saying, as an
+        // interruption whose end never came, goes on, or says why not.
+        rec.observers.append(
+            center.addObserver(
+                forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil
+            ) { [weak self] _ in
+                guard let mic = self else { return }
+                mic.queue.async { [weak mic] in mic?.wake(session) }
             })
         // AirPods or a headset coming or going change the input, its rate
         // and channels with it: the engine stops, and the tap, made for the
         // input before, must be made again for the audio to go on.
         rec.observers.append(
             center.addObserver(
-                forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil
-            ) { [weak self] _ in
-                guard let mic = self else { return }
-                mic.queue.async { [weak mic] in mic?.restart(session, engine, rewire: true) }
+                forName: .AVAudioEngineConfigurationChange, object: nil, queue: nil
+            ) { [weak self] note in
+                guard let mic = self, let changed = note.object as? AVAudioEngine else { return }
+                mic.queue.async { [weak mic] in mic?.restart(session, changed, rewire: true) }
             })
     }
 
-    /// tap hands recording session what engine's input hears, converted
-    /// from the input's format as it is now; on queue.
-    private func tap(_ engine: AVAudioEngine, session: Int, rate: Int) throws {
+    /// interrupted pauses recording session as something takes the
+    /// microphone, and resumes it as that ends, when iOS says to; on queue.
+    private func interrupted(_ session: Int, ended: Bool, resume: Bool) {
+        guard let rec = recordings[session], !rec.stopped else { return }
+        if !ended {
+            rec.sink.stalled(LI.microphoneTaken)
+        } else if resume {
+            rec.sink.recovered()
+        }
+    }
+
+    /// rebuild makes recording session a new engine, as the media services
+    /// restarted, and starts it unless the recording is paused, which
+    /// Resume then starts; on queue.
+    private func rebuild(_ session: Int) {
+        guard let rec = recordings[session], !rec.stopped else { return }
+        endTap(session, rec)
+        rec.engine = nil
+        guard !rec.paused else { return }
+        do {
+            try run(session, rec)
+        } catch {
+            rec.sink.stalled(Self.why(error))
+        }
+    }
+
+    /// wake turns recording session's engine back on when it is recording
+    /// and something stopped it, as the app comes to the front; on queue.
+    private func wake(_ session: Int) {
+        guard let rec = recordings[session], !rec.stopped, !rec.paused else { return }
+        guard let engine = rec.engine else { return rebuild(session) }
+        if !engine.isRunning { turnOn(rec, engine) }
+    }
+
+    /// tap hands recording session, rec, what engine's input hears,
+    /// converted from the input's format as it is now; on queue.
+    private func tap(_ engine: AVAudioEngine, session: Int, _ rec: Recording) throws {
         let input = engine.inputNode
         let from = input.outputFormat(forBus: 0)
-        guard from.sampleRate > 0, from.channelCount > 0,
-            let to = AVAudioFormat(
-                commonFormat: .pcmFormatInt16, sampleRate: Double(rate), channels: 1,
-                interleaved: true),
-            let converter = AVAudioConverter(from: from, to: to)
-        else {
+        guard let resampler = Resampler(from: from, rate: rec.rate) else {
             throw CocoaError(.featureUnsupported)
         }
+        rec.resampler = resampler
         input.installTap(onBus: 0, bufferSize: 4096, format: from) { [weak self] buffer, _ in
             // Converted here, as the engine may use the buffer again.
-            guard let mic = self, let pcm = Self.convert(buffer, with: converter, to: to) else {
-                return
-            }
-            // What comes after Stop, the audio all handed on, is not the
-            // recording's.
-            mic.queue.async { [weak mic] in
-                guard let rec = mic?.recordings[session], !rec.paused, !rec.stopped,
-                    rec.engine === engine
-                else { return }
-                rec.sink.chunk(pcm)
+            resampler.convert(buffer) { pcm in
+                self?.queue.async { [weak self] in self?.hand(pcm, session: session, from: engine) }
             }
         }
+    }
+
+    /// endTap takes recording session's tap away, rec's, and hands on what
+    /// its converter held back of the stream, after a buffer the tap was
+    /// converting as it went; on queue.
+    private func endTap(_ session: Int, _ rec: Recording) {
+        rec.engine?.inputNode.removeTap(onBus: 0)
+        guard let resampler = rec.resampler, let engine = rec.engine else { return }
+        rec.resampler = nil
+        // The buffer being converted is handed on as finish waits for it:
+        // its audio goes on the queue before the end.
+        guard let end = resampler.finish() else { return }
+        queue.async { [weak self] in self?.hand(end, session: session, from: engine) }
+    }
+
+    /// hand gives recording session the audio engine heard, as hands
+    /// says; on queue.
+    private func hand(_ pcm: Data, session: Int, from engine: AVAudioEngine) {
+        guard let rec = recordings[session], Self.hands(rec, from: engine) else { return }
+        rec.sink.chunk(pcm)
+    }
+
+    /// hands says whether audio engine heard goes to rec's sink: while the
+    /// engine is rec's and it is not paused, after Stop too, until Close.
+    /// Stop takes the tap away, but a buffer being converted as it does is
+    /// heard before it, and the core takes it as the recording's last.
+    static func hands(_ rec: Recording, from engine: AVAudioEngine) -> Bool {
+        rec.engine === engine && !rec.paused
     }
 
     /// restart turns engine back on after something stopped it, while it
@@ -137,9 +218,9 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
     private func restart(_ session: Int, _ engine: AVAudioEngine, rewire: Bool) {
         guard let rec = recordings[session], rec.engine === engine, !rec.stopped else { return }
         if rewire {
-            engine.inputNode.removeTap(onBus: 0)
+            endTap(session, rec)
             do {
-                try tap(engine, session: session, rate: rec.rate)
+                try tap(engine, session: session, rec)
             } catch {
                 // An input with no audio, as it changes: the next change
                 // brings one.
@@ -168,13 +249,36 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
     /// of too low a priority, or fails to activate.
     private static func why(_ error: any Error) -> String {
         let inCall = CXCallObserver().calls.contains { !$0.hasEnded }
-        let refused =
-            (error as NSError).code == AVAudioSession.ErrorCode.insufficientPriority.rawValue
-        return inCall || refused ? LI.microphoneInCall : error.localizedDescription
+        let code = (error as NSError).code
+        if inCall || code == AVAudioSession.ErrorCode.insufficientPriority.rawValue {
+            return LI.microphoneInCall
+        }
+        // iOS lets no app start recording again from the background.
+        if code == AVAudioSession.ErrorCode.cannotStartRecording.rawValue {
+            return LI.microphoneInBackground
+        }
+        return error.localizedDescription
+    }
+
+    /// end is what converter held back of the stream it converted to
+    /// format, as the stream ends.
+    static func end(_ converter: AVAudioConverter, to format: AVAudioFormat) -> Data? {
+        guard let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 4096) else {
+            return nil
+        }
+        var error: NSError?
+        converter.convert(to: out, error: &error) { _, status in
+            status.pointee = .endOfStream
+            return nil
+        }
+        guard error == nil, out.frameLength > 0, let samples = out.int16ChannelData else {
+            return nil
+        }
+        return Data(bytes: samples[0], count: Int(out.frameLength) * 2)
     }
 
     /// convert turns what the engine heard into the core's PCM.
-    private static func convert(
+    static func convert(
         _ buffer: AVAudioPCMBuffer, with converter: AVAudioConverter, to format: AVAudioFormat
     ) -> Data? {
         let ratio = format.sampleRate / buffer.format.sampleRate
@@ -211,21 +315,27 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
         queue.async {
             guard let rec = self.recordings[session], !rec.stopped else { return }
             rec.paused = false
-            if let engine = rec.engine, !engine.isRunning {
-                self.turnOn(rec, engine)
+            if let engine = rec.engine {
+                if !engine.isRunning { self.turnOn(rec, engine) }
+            } else {
+                self.rebuild(session)
             }
         }
     }
 
-    /// stop hands on what the engine heard before it, then turns it off:
-    /// the queue runs the audio already on its way first.
+    /// stop hands on all the engine heard before it, then turns it off:
+    /// the audio on its way, a buffer the tap was converting, and what the
+    /// converter held back, before it returns, as the core takes the
+    /// recording's last audio until then.
     func stop(_ session: Int) {
         queue.sync {
             guard let rec = recordings[session] else { return }
             rec.stopped = true
-            rec.engine?.inputNode.removeTap(onBus: 0)
+            endTap(session, rec)
             rec.engine?.stop()
         }
+        // The end, endTap put on the queue, handed on.
+        queue.sync {}
     }
 
     func close(_ session: Int) {
@@ -239,10 +349,54 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
         for o in rec.observers { NotificationCenter.default.removeObserver(o) }
         rec.observers = []
         rec.engine?.inputNode.removeTap(onBus: 0)
+        _ = rec.resampler?.finish()
+        rec.resampler = nil
         rec.engine?.stop()
         rec.engine = nil
         guard !recordings.values.contains(where: { $0.engine != nil }) else { return }
         try? AVAudioSession.sharedInstance().setActive(
             false, options: .notifyOthersOnDeactivation)
+    }
+}
+
+/// Resampler turns what the engine hears into the core's PCM as it
+/// streams, from the tap's thread: the converter holds back a little of
+/// each buffer for the next, which finish gives as the stream ends. One
+/// call at a time, so finish waits for a buffer being converted, and what
+/// it hands on goes first.
+final class Resampler: @unchecked Sendable {
+    private let lock = NSLock()
+    private let converter: AVAudioConverter
+    private let format: AVAudioFormat
+    private var ended = false
+
+    init?(from: AVAudioFormat, rate: Int) {
+        guard from.sampleRate > 0, from.channelCount > 0,
+            let to = AVAudioFormat(
+                commonFormat: .pcmFormatInt16, sampleRate: Double(rate), channels: 1,
+                interleaved: true),
+            let converter = AVAudioConverter(from: from, to: to)
+        else { return nil }
+        self.converter = converter
+        format = to
+    }
+
+    /// convert hands buffer on, as the core's PCM, until the stream ends.
+    func convert(_ buffer: AVAudioPCMBuffer, hand: (Data) -> Void) {
+        lock.withLock {
+            guard !ended, let pcm = Microphone.convert(buffer, with: converter, to: format)
+            else { return }
+            hand(pcm)
+        }
+    }
+
+    /// finish ends the stream and returns what the converter held back,
+    /// once a buffer being converted is handed on.
+    func finish() -> Data? {
+        lock.withLock {
+            guard !ended else { return nil }
+            ended = true
+            return Microphone.end(converter, to: format)
+        }
     }
 }

@@ -88,8 +88,9 @@ type fakeEvents struct {
 func (e *fakeEvents) Changed(table, pageID string)           {}
 func (e *fakeEvents) SyncState(running bool, failure string) {}
 func (e *fakeEvents) Tint(string, string)                    {}
-func (e *fakeEvents) AgentsChanged()                         {}
+func (e *fakeEvents) AgentsChanged(string)                   {}
 func (e *fakeEvents) RecordingChanged(string)                {}
+func (e *fakeEvents) RecordingLevels(string)                 {}
 
 // PageSaving drops what a test without a channel for it, or not waiting
 // on it, says.
@@ -541,6 +542,18 @@ func wait(t *testing.T, ev *fakeEvents, reason string) update {
 	}
 }
 
+// When says a time as the desktop does, in the language asked for, and
+// nothing for none.
+func TestWhen(t *testing.T) {
+	now := time.Now()
+	if got := When("ja", now.Add(-5*time.Minute).UnixMilli(), now.UnixMilli()); got != locales.In("ja").PageTimeMinutesAgo(5) {
+		t.Errorf("five minutes ago: %q", got)
+	}
+	if got := When("en", 0, now.UnixMilli()); got != "" {
+		t.Errorf("no time: %q", got)
+	}
+}
+
 func TestText(t *testing.T) {
 	for _, c := range []struct{ locale, key, args, want string }{
 		{"en", "commonCancel", "", "Cancel"},
@@ -594,6 +607,21 @@ func TestCommentsAndAgents(t *testing.T) {
 	_ = json.Unmarshal([]byte(raw), &threads)
 	if len(threads[0].Replies) != 1 || !threads[0].Root.Resolved {
 		t.Fatalf("after a reply and resolving %+v", threads[0])
+	}
+	if !threads[0].MayResolve || !threads[0].Root.MayDelete || !threads[0].Replies[0].MayDelete {
+		t.Fatalf("the user's own thread %+v", threads[0])
+	}
+	// The first comment deleted stays for its reply, without its words.
+	if err := c.DeleteComment(threads[0].Root.ID); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = c.Threads(row.ID)
+	if strings.Contains(raw, "Is this right?") || strings.Contains(raw, "the plan") {
+		t.Fatalf("a deleted comment's words are listed: %s", raw)
+	}
+	_ = json.Unmarshal([]byte(raw), &threads)
+	if len(threads) != 1 || !threads[0].Root.Deleted || threads[0].Root.MayDelete || len(threads[0].Replies) != 1 {
+		t.Fatalf("after deleting the first comment %+v", threads)
 	}
 
 	// No agent until a provider is added; a local one is kept here.
@@ -763,5 +791,69 @@ func TestPlainCopy(t *testing.T) {
 	}
 	if _, err := c.PlainCopy("not json"); err == nil {
 		t.Error("copied blocks that are not JSON")
+	}
+}
+
+// The library comes arranged as the desktop's sidebar arranges it: pages
+// in their folders and under their parents, in order, and each tag's
+// pages by title. A page whose folder is gone, as another device deleted
+// the folder while this one moved the page into it, is at the top level:
+// the sidebar shows no page with no place.
+func TestLibraryTree(t *testing.T) {
+	c, _ := open(t)
+	var f folderRow
+	raw, _ := c.CreateFolder("Work")
+	_ = json.Unmarshal([]byte(raw), &f)
+	plan := create(t, c, `{"title":"Plan","tags":["work"]}`)
+	notes := create(t, c, `{"title":"notes","tags":["Work"],"folder_id":"`+f.ID+`"}`)
+	second := create(t, c, `{"title":"Second","parent_id":"`+plan.ID+`"}`)
+	first := create(t, c, `{"title":"First","parent_id":"`+plan.ID+`"}`)
+	left := create(t, c, `{"title":"Left"}`)
+	if _, err := c.core.Store.DB().Exec(`UPDATE pages SET folder_id = 'gone' WHERE id = ?`, left.ID); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.Library()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lib library
+	_ = json.Unmarshal([]byte(raw), &lib)
+	if !slices.Contains(lib.Top, plan.ID) || !slices.Contains(lib.Top, left.ID) || slices.Contains(lib.Top, notes.ID) {
+		t.Errorf("top %v", lib.Top)
+	}
+	if !slices.Equal(lib.InFolder[f.ID], []string{notes.ID}) || len(lib.Folders) != 1 || lib.Folders[0].ID != f.ID {
+		t.Errorf("in folder %v, folders %+v", lib.InFolder, lib.Folders)
+	}
+	if !slices.Equal(lib.Children[plan.ID], []string{second.ID, first.ID}) {
+		t.Errorf("under Plan %v, want Second, First", lib.Children[plan.ID])
+	}
+	i := slices.IndexFunc(lib.Tags, func(tg tagRow) bool { return strings.EqualFold(tg.Tag, "work") })
+	if i < 0 || lib.Tags[i].Count != 2 || !slices.Equal(lib.Tags[i].Pages, []string{notes.ID, plan.ID}) {
+		t.Errorf("tags %+v", lib.Tags)
+	}
+	if lib.Shared == nil {
+		t.Error("no pages shared is null, not an empty list")
+	}
+}
+
+// Copy puts blocks on the clipboard as their Markdown, which reads back
+// as the blocks.
+func TestCopyText(t *testing.T) {
+	c, _ := open(t)
+	item := func(text string) *doc.Node {
+		n := &doc.Node{ID: doc.NewBlockID(), Type: "bulleted_list"}
+		n.SetDelta(doc.FromMarkdown(text))
+		return n
+	}
+	raw, _ := json.Marshal([]*doc.Node{item("abcd"), item("**efgh**")})
+	got, err := c.CopyText(string(raw))
+	if err != nil || got != "- abcd\n- **efgh**" {
+		t.Fatalf("copied %q, %v", got, err)
+	}
+	if back := doc.ParseLines(got); len(back) != 2 || back[1].Type != "bulleted_list" || !back[1].Delta()[0].Attrs.Bold {
+		t.Errorf("read back %+v", back)
+	}
+	if _, err := c.CopyText("not json"); err == nil {
+		t.Error("copied what isn't blocks")
 	}
 }

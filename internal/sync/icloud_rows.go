@@ -7,7 +7,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"time"
 
 	"leaflet/internal/icloud"
 	"leaflet/internal/store"
@@ -34,11 +33,12 @@ func version(e icloud.Entry) store.RowVersion { return store.RowVersion{At: e.At
 
 // colVersion is the version of a column of a row here: of the change to
 // it alone, or of the whole row, whichever is newer.
-func (s *Service) colVersion(table, id, col string, whole store.RowVersion) store.RowVersion {
-	if v := s.st.RowVersion(table+"."+col, id); v.After(whole) {
-		return v
+func (s *Service) colVersion(table, id, col string, whole store.RowVersion) (store.RowVersion, error) {
+	v, err := s.st.RowVersion(table+"."+col, id)
+	if err != nil || !v.After(whole) {
+		return whole, err
 	}
-	return whole
+	return v, nil
 }
 
 // setVersion records a change this device has of a row: of cols, or of
@@ -57,31 +57,30 @@ func (s *Service) setVersion(table, id string, cols []string, v store.RowVersion
 
 // newestSeen is the newest version this device has seen of any column of
 // a row, with the entries held for it.
-func (s *Service) newestSeen(table, id string, row map[string]any) store.RowVersion {
-	newest := s.st.RowVersion(table, id)
-	for c := range row {
-		if v := s.st.RowVersion(table+"."+c, id); v.After(newest) {
-			newest = v
-		}
+func (s *Service) newestSeen(table, id string, row map[string]any) (store.RowVersion, error) {
+	newest, err := s.newestHad(table, id, row)
+	if err != nil {
+		return newest, err
 	}
 	for _, e := range s.held(table, id) {
 		if v := version(e); v.After(newest) {
 			newest = v
 		}
 	}
-	return newest
+	return newest, nil
 }
 
 // newestHad is the newest version this device has of any column of a row,
 // as newestSeen, but without the entries held for it.
-func (s *Service) newestHad(table, id string, row map[string]any) store.RowVersion {
-	newest := s.st.RowVersion(table, id)
+func (s *Service) newestHad(table, id string, row map[string]any) (store.RowVersion, error) {
+	newest, err := s.st.RowVersion(table, id)
 	for c := range row {
-		if v := s.st.RowVersion(table+"."+c, id); v.After(newest) {
-			newest = v
+		if err != nil {
+			break
 		}
+		newest, err = s.colVersion(table, id, c, newest)
 	}
-	return newest
+	return newest, err
 }
 
 // applyRow applies a row entry of another device's: each column it
@@ -90,7 +89,10 @@ func (s *Service) newestHad(table, id string, row map[string]any) store.RowVersi
 // any change, so whichever comes applies.
 func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 	v := version(e)
-	whole := s.st.RowVersion(e.Table, e.ID)
+	whole, err := s.st.RowVersion(e.Table, e.ID)
+	if err != nil {
+		return err
+	}
 	cols := e.Changed
 	if cols == nil {
 		if !v.After(whole) {
@@ -103,7 +105,11 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 		if _, ok := e.Row[c]; !ok || c == "id" || c == "updated_at" {
 			continue
 		}
-		if v.After(s.colVersion(e.Table, e.ID, c, whole)) {
+		had, err := s.colVersion(e.Table, e.ID, c, whole)
+		if err != nil {
+			return err
+		}
+		if v.After(had) {
 			newer = append(newer, c)
 		}
 	}
@@ -115,12 +121,12 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 	if s.st.HasPending(e.Table, e.ID) {
 		return s.hold(e)
 	}
-	local, err := s.localRow(e.Table, e.ID)
+	local, here, err := s.localRow(e.Table, e.ID)
 	if err != nil {
 		return err
 	}
 	r := maps.Clone(e.Row)
-	if local != nil {
+	if here {
 		r = local
 		for _, c := range newer {
 			r[c] = e.Row[c]
@@ -135,7 +141,7 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 	if _, ok := r["space_id"]; ok {
 		r["space_id"] = s.st.Session().SpaceID
 	}
-	if err := s.putRow(e.Table, r); err != nil {
+	if err := s.putRow(e.Table, r, s.putCloudPage); err != nil {
 		return err
 	}
 	// A change made here meanwhile kept the row from being stored.
@@ -147,74 +153,6 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 		return s.st.SetRowVersion(e.Table, e.ID, v)
 	}
 	return s.setVersion(e.Table, e.ID, newer, v)
-}
-
-// putRow stores a row of another device's.
-func (s *Service) putRow(table string, r map[string]any) error {
-	switch table {
-	case "pages":
-		return s.putCloudPage(r)
-	case "folders":
-		return s.st.PutRemoteFolder(r)
-	case "files":
-		return s.st.PutRemoteFile(r)
-	case "comments":
-		return s.st.PutRemoteComment(r, store.S(r, "author_name"))
-	case "recordings":
-		return s.st.PutRemoteRecording(r)
-	}
-	return nil
-}
-
-// localRow is this device's row as a batch has it, decoded from JSON, or
-// nil when it has none.
-func (s *Service) localRow(table, id string) (map[string]any, error) {
-	var row map[string]any
-	var at time.Time
-	var err error
-	switch table {
-	case "pages":
-		var p store.Page
-		if p, err = s.st.Page(id); err == nil {
-			row, at = store.PageToRemote(p), p.UpdatedAt
-		}
-	case "folders":
-		var f store.Folder
-		if f, err = s.st.Folder(id); err == nil {
-			row, at = store.FolderToRemote(f), f.UpdatedAt
-		}
-	case "files":
-		var f store.File
-		if f, err = s.st.File(id); err == nil {
-			row, at = store.FileToRemote(f), f.UpdatedAt
-		}
-	case "comments":
-		var c store.Comment
-		if c, err = s.st.Comment(id); err == nil {
-			row, at = store.CommentToRemote(c), c.UpdatedAt
-			row["author_name"] = c.AuthorName
-		}
-	case "recordings":
-		var r store.Recording
-		if r, err = s.st.Recording(id); err == nil {
-			row, at = store.RecordingToRemote(r), r.UpdatedAt
-		}
-	default:
-		return nil, nil
-	}
-	if store.IsNotFound(err) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	row["updated_at"] = at.UTC().Format(time.RFC3339Nano)
-	raw, err := json.Marshal(row)
-	if err != nil {
-		return nil, err
-	}
-	var out map[string]any
-	return out, json.Unmarshal(raw, &out)
 }
 
 func heldKey(table, id string) string { return heldPrefix + table + "." + id }
@@ -263,7 +201,7 @@ func (s *Service) applyHeld(changed map[string]bool) error {
 		_ = json.Unmarshal([]byte(raw), &held)
 		var err error
 		for _, e := range held {
-			if e.Kind != "row" || e.Table != table || e.ID != id || !syncedRows[table] || e.Row == nil {
+			if e.Kind != "row" || e.Table != table || e.ID != id || !synced(table) || e.Row == nil {
 				continue
 			}
 			applyingHeld(e)

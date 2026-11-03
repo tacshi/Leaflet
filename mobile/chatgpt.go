@@ -41,19 +41,11 @@ type chatgptAccount struct {
 func (c *Core) BeginChatGPTSignIn(providerID string) (_ string, err error) {
 	defer catch(&err)
 	c.ForgetChatGPTSignIn()
-	var host, clientID string
-	c.q.do(func() {
-		host = c.core.Hub.HostID()
-		if providerID != "" {
-			if g, err := c.core.Hub.ChatGPT(providerID); err == nil {
-				clientID = g.Account().ClientID
-			}
-		}
-		if id, ok := c.core.Store.Value("chatgpt.client"); ok && clientID == "" {
-			clientID = id
-		}
-	})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	var had *agents.ChatGPT
+	if providerID != "" {
+		c.q.do(func() { had, _ = c.core.Hub.ChatGPT(providerID) })
+	}
+	ctx, cancel := context.WithCancel(context.Background())
 	s := &c.chatgpt
 	s.mu.Lock()
 	done := make(chan struct{})
@@ -75,10 +67,7 @@ func (c *Core) BeginChatGPTSignIn(providerID string) (_ string, err error) {
 			close(done)
 		}()
 		defer catch(&err)
-		g, err = agents.SignInChatGPT(ctx, host, clientID, func(u string) { opened <- u })
-		if err == nil {
-			c.q.do(func() { _ = c.core.Store.SetValue("chatgpt.client", g.Account().ClientID) })
-		}
+		g, err = c.core.Hub.SignInWithChatGPT(ctx, had, func(u string) { opened <- u })
 	}()
 	select {
 	case u := <-opened:

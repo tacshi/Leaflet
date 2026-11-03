@@ -35,6 +35,17 @@ func templatesApp(t *testing.T) *App {
 	return a
 }
 
+// ownTemplates are the user's templates, without their subpages, by title.
+func ownTemplates(a *App) []store.Page {
+	var out []store.Page
+	for _, t := range a.templateChoices() {
+		if t.Page != nil {
+			out = append(out, *t.Page)
+		}
+	}
+	return out
+}
+
 func textNode(text string) *doc.Node {
 	n := &doc.Node{Type: "paragraph"}
 	n.SetDelta(doc.FromMarkdown(text))
@@ -57,7 +68,7 @@ func TestDuplicatePage(t *testing.T) {
 	a.reloadAll()
 
 	a.duplicatePage(*a.pageByID(prd.ID))
-	kids := a.children(product.ID, "", false)
+	kids := a.children(product.ID)
 	if len(kids) != 3 || kids[0].ID != prd.ID || kids[1].Title != "PRD copy" || kids[2].ID != roadmap.ID {
 		t.Fatalf("pages under Product %+v", kids)
 	}
@@ -128,7 +139,7 @@ func TestStartFromTemplate(t *testing.T) {
 	a.reloadAll()
 	a.saveAsTemplate(*a.pageByID(prd.ID))
 	a.reloadAll()
-	roots := a.templateRoots()
+	roots := ownTemplates(a)
 	if len(roots) != 1 || roots[0].Title != "PRD" || roots[0].ID == prd.ID {
 		t.Fatalf("templates %+v", roots)
 	}
@@ -171,7 +182,7 @@ func TestStartFromTemplate(t *testing.T) {
 	if p := a.pageByID(blank); p.Title != "PRD" || p.Template {
 		t.Errorf("page %+v", p)
 	}
-	kids := a.children(blank, "", false)
+	kids := a.children(blank)
 	if len(kids) != 1 || kids[0].Title != "FAQ" || kids[0].Template {
 		t.Errorf("subpages %+v", kids)
 	}
@@ -245,7 +256,7 @@ func TestStarterTemplates(t *testing.T) {
 	journal, _ := a.templateByKey("starter:journal")
 	a.editTemplate(journal)
 	a.reloadAll()
-	roots := a.templateRoots()
+	roots := ownTemplates(a)
 	if len(roots) != 1 || roots[0].Title != "Journal" || a.page.id != roots[0].ID {
 		t.Fatalf("templates %+v, open %s", roots, a.page.id)
 	}
@@ -292,7 +303,7 @@ func TestSlashTemplate(t *testing.T) {
 	if got := a.page.editor.Content.PlainText(); got != "Intro\nChecklist" {
 		t.Errorf("page holds %q", got)
 	}
-	if kids := a.children(notes.ID, "", false); len(kids) != 1 || kids[0].Title != "FAQ" || kids[0].Template {
+	if kids := a.children(notes.ID); len(kids) != 1 || kids[0].Title != "FAQ" || kids[0].Template {
 		t.Errorf("subpages %+v", kids)
 	}
 	if p := a.pageByID(notes.ID); p.Title != "Notes" {
@@ -379,9 +390,9 @@ func TestDefaultTemplate(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	journal := a.templateRoots()[0]
+	journal := ownTemplates(a)[0]
 	if journal.Title != "Journal" || a.pageByID(diary.ID).DefaultTemplateID != journal.ID {
-		t.Fatalf("templates %+v, diary %+v", a.templateRoots(), a.pageByID(diary.ID))
+		t.Fatalf("templates %+v, diary %+v", ownTemplates(a), a.pageByID(diary.ID))
 	}
 	a.addSubpageBlock()
 	a.reloadAll()
@@ -514,7 +525,7 @@ func TestNewPageWhileTheOpenPageCannotSave(t *testing.T) {
 	if len(a.pages) != before {
 		t.Errorf("%d pages, want %d", len(a.pages), before)
 	}
-	if kids := a.children(mine.ID, "", false); len(kids) != 0 {
+	if kids := a.children(mine.ID); len(kids) != 0 {
 		t.Errorf("the template's subpages went under the open page: %+v", kids)
 	}
 }
@@ -537,7 +548,7 @@ func TestTemplateFillsOnlyAnEmptyPage(t *testing.T) {
 	if got := a.page.editor.Content.PlainText(); got != "Mine" || a.page.title != "Notes" {
 		t.Errorf("page %q holds %q", a.page.title, got)
 	}
-	if kids := a.children(mine.ID, "", false); len(kids) != 0 {
+	if kids := a.children(mine.ID); len(kids) != 0 {
 		t.Errorf("subpages %+v", kids)
 	}
 }
@@ -562,7 +573,7 @@ func TestTemplateWaitsForRecording(t *testing.T) {
 	if a.applyTemplate(choice) || len(a.toasts) != 1 || a.toasts[0].text != locales.TemplateWaitForRecording() {
 		t.Fatalf("toasts %+v", a.toasts)
 	}
-	if !a.isEmpty() || len(a.children(blank, "", false)) != 0 {
+	if !a.page.editor.Content.IsEmpty() || len(a.children(blank)) != 0 {
 		t.Error("the template was used with its recording unfinished")
 	}
 
@@ -596,10 +607,10 @@ func TestEmptyTemplate(t *testing.T) {
 	}
 	a.newPage("", "")
 	a.applyTemplate(choice)
-	if n := len(a.page.editor.Content.Children); n != 1 || !a.isEmpty() {
+	if n := len(a.page.editor.Content.Children); n != 1 || !a.page.editor.Content.IsEmpty() {
 		t.Fatalf("%d blocks", n)
 	}
-	if kids := a.children(a.page.id, "", false); len(kids) != 1 || a.page.title != "Empty" {
+	if kids := a.children(a.page.id); len(kids) != 1 || a.page.title != "Empty" {
 		t.Errorf("subpages %+v, title %q", kids, a.page.title)
 	}
 	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
@@ -681,13 +692,19 @@ func TestDuplicateBringsFilesFirst(t *testing.T) {
 	if pages() != before || a.toasts[len(a.toasts)-1].text != locales.TemplateFetchingOther() {
 		t.Fatalf("a second copy while the first downloads: %d pages; toasts %+v", pages(), a.toasts)
 	}
-	close(release)
-	select {
-	case fn := <-posted:
-		fn()
-	case <-time.After(5 * time.Second):
-		t.Fatal("the file never came")
+	next := func(what string) {
+		t.Helper()
+		select {
+		case fn := <-posted:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal(what)
+		}
 	}
+	close(release)
+	next("the file never came")
+	// The copy is made off the main thread, and opens once it is.
+	next("the copy was never made")
 	if pages() != before+1 || a.page == nil || a.page.id == p.ID {
 		t.Fatalf("not copied once the file came: %d pages", pages())
 	}
@@ -714,5 +731,90 @@ func TestDuplicateBringsFilesFirst(t *testing.T) {
 	a.duplicatePage(*a.pageByID(q.ID))
 	if pages() != before || a.toasts[len(a.toasts)-1].text != locales.TemplateFilesUploading() {
 		t.Errorf("a recording still uploading: %d pages, want %d; toasts %+v", pages(), before, a.toasts)
+	}
+}
+
+// Audio that comes for a copy stays until the copy has its own, then goes
+// as Keep the audio says, though another copy is refused meanwhile; and
+// the copy is of the page as it is once the audio has come, here moved
+// into a folder meanwhile.
+func TestCopyKeepsFetchedAudioUntilMade(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/storage/v1/object/authenticated/recordings/") {
+			_, _ = w.Write([]byte("RIFF"))
+			return
+		}
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(hs.Close)
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
+	a.sync = syncsvc.New(a.st, a.backend)
+	a.settings.KeepAudioOnDevice = "until_uploaded"
+	posted := make(chan func(), 4)
+	a.post = func(fn func()) { posted <- fn }
+	next := func(what string) {
+		t.Helper()
+		select {
+		case fn := <-posted:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal(what)
+		}
+	}
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Call"})
+	r, err := a.st.CreateRecording(p.ID, "r1", "soniox", "m", "", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.AudioPath, r.Status, r.UploadedAt = a.st.Session().SpaceID+"/"+r.ID+".wav", "done", time.Now()
+	if err := a.st.PutRecording(r); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.st.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{
+		{ID: "r1", Type: "recording", Data: map[string]any{"recording_id": r.ID}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := a.st.CreateFolder("Work")
+	other, _ := a.st.CreatePage(store.NewPageOptions{Title: "Other"})
+	a.reloadAll()
+
+	a.duplicatePage(*a.pageByID(p.ID))
+	if err := a.st.MovePage(p.ID, "", f.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	next("the audio never came")
+	if got, _ := a.st.Recording(r.ID); got.LocalPath == "" {
+		t.Fatal("the audio went before the copy was made")
+	}
+	// Another copy asked for while it is made is not, and leaves the
+	// audio to it.
+	a.duplicatePage(*a.pageByID(other.ID))
+	if a.toasts[len(a.toasts)-1].text != locales.TemplateFetchingOther() {
+		t.Errorf("a second copy while the first is made: toasts %+v", a.toasts)
+	}
+	if got, _ := a.st.Recording(r.ID); got.LocalPath == "" {
+		t.Fatal("the copy refused took the audio from the copy being made")
+	}
+	next("the copy was never made")
+	if a.page == nil || a.page.id == p.ID {
+		t.Fatal("no copy opened")
+	}
+	cp, _ := a.st.Page(a.page.id)
+	if cp.FolderID != f.ID {
+		t.Errorf("the copy is in folder %q, not where the page is now", cp.FolderID)
+	}
+	if got, _ := a.st.Recording(r.ID); got.LocalPath != "" {
+		t.Errorf("the original's audio stayed at %q", got.LocalPath)
+	}
+	recs, _ := a.st.Recordings()
+	for _, c := range recs {
+		if c.ID == r.ID {
+			continue
+		}
+		if data, err := os.ReadFile(c.LocalPath); err != nil || string(data) != "RIFF" {
+			t.Errorf("the copy's audio: %q, %v", data, err)
+		}
 	}
 }

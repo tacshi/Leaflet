@@ -14,15 +14,27 @@
 //
 // The secret is CLIENT_SECRET (wrangler secret put CLIENT_SECRET); the app's
 // client ID is CLIENT_ID in wrangler.toml, as is APPLE_TEAM_ID, the team that
-// signs the iOS app.
+// signs the iOS app, and TOKEN_LIMIT, the rate limit on /token.
+
+// A Workers rate limit (wrangler.toml [[ratelimits]]).
+export interface RateLimit {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
+}
 
 export interface Env {
   CLIENT_ID: string;
   CLIENT_SECRET: string;
   APPLE_TEAM_ID?: string;
+  // How often one address may exchange tokens. The client secret is in
+  // every app that signs in, in effect, so anyone may call /token: the
+  // limit keeps one caller from spending the OAuth app's own limits.
+  TOKEN_LIMIT?: RateLimit;
   // The token endpoint; tests point it elsewhere.
   SUPABASE_TOKEN_URL?: string;
 }
+
+// How long Supabase's token endpoint may take.
+const TOKEN_TIMEOUT_MS = 20_000;
 
 // The port Leaflet waits on for the browser (internal/supabaseapi.Port).
 const LOOPBACK = "http://127.0.0.1:51741/auth/callback";
@@ -98,15 +110,25 @@ async function token(request: Request, env: Env): Promise<Response> {
     default:
       return refuse(400, "unsupported_grant_type", "Only codes and refresh tokens.");
   }
-  const res = await fetch(env.SUPABASE_TOKEN_URL ?? "https://api.supabase.com/v1/oauth/token", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Accept": "application/json",
-      "Authorization": "Basic " + btoa(`${env.CLIENT_ID}:${env.CLIENT_SECRET}`),
-    },
-    body: out,
-  });
+  // Supabase out of reach fails as OAuth does, in JSON, which the app
+  // reads, not as the platform's page of an exception; and not as 400,
+  // which the app takes for a refresh token refused, and signs out.
+  let res: Response;
+  try {
+    res = await fetch(env.SUPABASE_TOKEN_URL ?? "https://api.supabase.com/v1/oauth/token", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "Accept": "application/json",
+        "Authorization": "Basic " + btoa(`${env.CLIENT_ID}:${env.CLIENT_SECRET}`),
+      },
+      body: out,
+      signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
+    });
+  } catch (e) {
+    console.error("token endpoint:", e);
+    return refuse(502, "server_error", "Supabase could not be reached. Try again.");
+  }
   // Supabase's answer as it is, but for headers that are not the proxy's
   // to pass on.
   return new Response(res.body, {
@@ -132,6 +154,11 @@ export default {
     }
     if (pathname === "/token" && request.method === "POST") {
       if (!env.CLIENT_SECRET) return refuse(500, "server_error", "The proxy has no client secret.");
+      // 429, not 400, which the app would take for its sign-in ended.
+      const caller = request.headers.get("CF-Connecting-IP") ?? "";
+      if (env.TOKEN_LIMIT && !(await env.TOKEN_LIMIT.limit({ key: caller })).success) {
+        return refuse(429, "slow_down", "Too many sign-ins from here. Try again in a minute.");
+      }
       return await token(request, env);
     }
     return new Response("Not found", { status: 404 });

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"sort"
 	"strings"
 	"time"
 
@@ -25,36 +24,21 @@ type todoRow struct {
 // ones, each by date, and those with no date but an owner. A section
 // alone has no header, which would only say what the to-dos' dates do.
 func todoRows(todos []store.PageTodo, now time.Time) []todoRow {
-	sections := map[string][]store.PageTodo{}
-	for _, t := range todos {
-		s := "No date"
-		switch {
-		case t.Due.IsZero():
-		case editor.Overdue(t.Due, t.Timed, now):
-			s = "Overdue"
-		case editor.DueToday(t.Due, now):
-			s = "Today"
-		default:
-			s = "Upcoming"
-		}
-		sections[s] = append(sections[s], t)
-	}
+	groups := doc.TodoGroups(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, now)
 	var out []todoRow
-	for _, s := range []string{"Overdue", "Today", "Upcoming", "No date"} {
-		ts := sections[s]
-		if len(ts) == 0 {
-			continue
+	for _, g := range groups {
+		if len(groups) > 1 {
+			out = append(out, todoRow{header: todoHeaders[g.Section]})
 		}
-		sort.SliceStable(ts, func(i, j int) bool { return ts[i].Due.Before(ts[j].Due) })
-		if len(sections) > 1 {
-			out = append(out, todoRow{header: s})
-		}
-		for _, t := range ts {
+		for _, t := range g.Todos {
 			out = append(out, todoRow{todo: t})
 		}
 	}
 	return out
 }
+
+// todoHeaders are the To-dos tab's sections, as todoSection names them.
+var todoHeaders = [...]string{doc.TodoOverdue: "Overdue", doc.TodoToday: "Today", doc.TodoUpcoming: "Upcoming", doc.TodoNoDate: "No date"}
 
 // todoSection is the name a person reads of a section of the To-dos tab.
 func todoSection(header string) string {
@@ -164,16 +148,13 @@ func (a *App) finishTodo(t store.PageTodo) {
 			}
 			return
 		}
-		err := a.saveStored(t.PageID, func(c *doc.Content) *doc.Content {
-			if c == nil {
-				return nil
-			}
+		err := a.pageCore().EditPage(t.PageID, func(c *doc.Content) bool {
 			n := c.Find(t.BlockID)
 			if n == nil {
-				return nil
+				return false
 			}
 			n.Set("checked", checked)
-			return c
+			return true
 		})
 		if err != nil {
 			a.toast(locales.SidebarCouldNotSave(err.Error()))
@@ -191,9 +172,15 @@ func (a *App) finishTodo(t store.PageTodo) {
 // of day of its own.
 const reminderHour = 9
 
+// reminderWindow is how long after its time a to-do is still reminded
+// of. One later than that, as on a device that was off, or one new to
+// the library, is among the To-dos tab's Overdue, not one notification of
+// many at once.
+const reminderWindow = 24 * time.Hour
+
 // dueReminders are the to-dos to remind of now: from their time of day,
-// or else reminderHour of their day, on, and not reminded of for that
-// date yet.
+// or else reminderHour of their day, on, for reminderWindow, and not
+// reminded of for that date yet.
 func dueReminders(todos []store.PageTodo, now time.Time, reminded func(t store.PageTodo) bool) []store.PageTodo {
 	var out []store.PageTodo
 	for _, t := range todos {
@@ -204,33 +191,56 @@ func dueReminders(todos []store.PageTodo, now time.Time, reminded func(t store.P
 		if !t.Timed {
 			at = time.Date(at.Year(), at.Month(), at.Day(), reminderHour, 0, 0, 0, time.Local)
 		}
-		if !now.Before(at) {
+		if !now.Before(at) && now.Sub(at) < reminderWindow {
 			out = append(out, t)
 		}
 	}
 	return out
 }
 
+// remindsOf reports whether the user is reminded of a to-do: one given to
+// them, or one given to no one on a page of their own. Another's to-do is
+// that person's to be reminded of, on their devices, as is one on a page
+// shared with the user that names no one.
+func (a *App) remindsOf(t store.PageTodo) bool {
+	if t.Owner != "" {
+		return t.OwnerID != "" && t.OwnerID == a.session.UserID
+	}
+	return a.ownsPage(t.PageID)
+}
+
+// reminders are the to-dos to remind the user of now, each once for each
+// of its due dates and times.
+func (a *App) reminders(now time.Time) []store.PageTodo {
+	var todos []store.PageTodo
+	for _, t := range a.todoList() {
+		if a.remindsOf(t) {
+			todos = append(todos, t)
+		}
+	}
+	return dueReminders(todos, now, func(t store.PageTodo) bool {
+		v, ok := a.st.Value(reminderKey(t))
+		return ok && v == dueValue(t)
+	})
+}
+
+// dueValue is a to-do's due date and time as its reminder is kept by.
+func dueValue(t store.PageTodo) string {
+	if t.Timed {
+		return t.Due.Format(doc.DueTimeLayout)
+	}
+	return t.Due.Format(doc.DueLayout)
+}
+
 func reminderKey(t store.PageTodo) string { return "reminded:" + t.PageID + "#" + t.BlockID }
 
-// remind shows a desktop notification for each to-do to remind of now,
-// once for each of its due dates and times.
+// remind shows a desktop notification for each to-do to remind of now.
 func (a *App) remind() {
 	if !mygo.NotificationsSupported() {
 		return
 	}
-	due := func(t store.PageTodo) string {
-		if t.Timed {
-			return t.Due.Format(doc.DueTimeLayout)
-		}
-		return t.Due.Format(doc.DueLayout)
-	}
-	reminded := func(t store.PageTodo) bool {
-		v, ok := a.st.Value(reminderKey(t))
-		return ok && v == due(t)
-	}
-	for _, t := range dueReminders(a.todoList(), time.Now(), reminded) {
-		now := time.Now()
+	now := time.Now()
+	for _, t := range a.reminders(now) {
 		title := locales.TodosDueToday()
 		// A to-do due at a time today is reminded of at it, as due.
 		if editor.Overdue(t.Due, t.Timed, now) && (!t.Timed || !editor.DueToday(t.Due, now)) {
@@ -239,7 +249,7 @@ func (a *App) remind() {
 		n := mygo.NewNotification(mygo.NotificationOptions{ID: todoNotification + t.PageID + "#" + t.BlockID,
 			Title: title, Subtitle: t.PageTitle, Body: t.Text, Group: "todos"})
 		if err := n.Show(); err == nil {
-			_ = a.st.SetValue(reminderKey(t), due(t))
+			_ = a.st.SetValue(reminderKey(t), dueValue(t))
 		}
 	}
 }
@@ -248,17 +258,33 @@ func (a *App) remind() {
 // it, also after the app quit, opens the to-do by.
 const todoNotification = "todo:"
 
-// startReminders checks for to-dos to remind of each minute, and opens a
-// to-do when its reminder is clicked.
+// notificationClicked opens the to-do of a reminder clicked, showing the
+// window, which may have been closed to the menu bar. Run has it hear the
+// clicks before the app runs, for one that launched the app, whose to-do
+// opens once the window has been made.
+func (a *App) notificationClicked(id string) {
+	target, ok := strings.CutPrefix(id, todoNotification)
+	if !ok {
+		return
+	}
+	page, block, _ := strings.Cut(target, "#")
+	open := func() {
+		a.showWindow()
+		a.openBlock(page, block)
+	}
+	a.winMu.Lock()
+	if a.win == nil {
+		// Not started yet: start runs it with the window made.
+		a.early = append(a.early, open)
+		a.winMu.Unlock()
+		return
+	}
+	a.winMu.Unlock()
+	a.update(open)
+}
+
+// startReminders checks for to-dos to remind of each minute.
 func (a *App) startReminders() {
-	mygo.App.OnNotificationClick(func(id string) {
-		target, ok := strings.CutPrefix(id, todoNotification)
-		if !ok {
-			return
-		}
-		page, block, _ := strings.Cut(target, "#")
-		a.update(func() { a.openBlock(page, block) })
-	})
 	var tick func()
 	tick = func() {
 		a.update(a.remind)

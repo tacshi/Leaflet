@@ -111,53 +111,6 @@ func TestDuePopover(t *testing.T) {
 	}
 }
 
-func TestDueLabel(t *testing.T) {
-	now := time.Date(2026, 10, 26, 20, 0, 0, 0, time.Local)
-	for due, want := range map[time.Time]string{
-		time.Date(2026, 10, 26, 0, 0, 0, 0, time.Local): "Today",
-		time.Date(2026, 10, 27, 0, 0, 0, 0, time.Local): "Tomorrow",
-		time.Date(2026, 10, 25, 0, 0, 0, 0, time.Local): "Yesterday",
-		time.Date(2026, 11, 3, 0, 0, 0, 0, time.Local):  "Nov 3",
-		time.Date(2027, 1, 3, 0, 0, 0, 0, time.Local):   "Jan 3, 2027",
-	} {
-		if got := DueLabel(due, false, now); got != want {
-			t.Errorf("%v: %q, want %q", due, got, want)
-		}
-	}
-	if !Overdue(time.Date(2026, 10, 25, 0, 0, 0, 0, time.Local), false, now) || Overdue(time.Date(2026, 10, 26, 0, 0, 0, 0, time.Local), false, now) {
-		t.Error("overdue")
-	}
-	// With a time of day, it shows, and the to-do is overdue once it passed.
-	if got := DueLabel(time.Date(2026, 10, 27, 15, 0, 0, 0, time.Local), true, now); got != "Tomorrow 3:00 PM" {
-		t.Errorf("timed label %q", got)
-	}
-	if !Overdue(time.Date(2026, 10, 26, 19, 30, 0, 0, time.Local), true, now) || Overdue(time.Date(2026, 10, 26, 20, 30, 0, 0, time.Local), true, now) {
-		t.Error("timed overdue")
-	}
-}
-
-// The days are counted on the calendar: the day the clocks go forward is
-// 23 hours long, and the day after it is still tomorrow.
-func TestDueLabelOverAChangeOfClocks(t *testing.T) {
-	ny, err := time.LoadLocation("America/New_York")
-	if err != nil {
-		t.Skip("no time zone data:", err)
-	}
-	for _, tc := range []struct {
-		now, due time.Time
-		want     string
-	}{
-		{time.Date(2026, 3, 8, 10, 0, 0, 0, ny), time.Date(2026, 3, 9, 0, 0, 0, 0, ny), "Tomorrow"},
-		{time.Date(2026, 3, 9, 10, 0, 0, 0, ny), time.Date(2026, 3, 8, 0, 0, 0, 0, ny), "Yesterday"},
-		{time.Date(2026, 3, 8, 23, 0, 0, 0, ny), time.Date(2026, 3, 8, 0, 0, 0, 0, ny), "Today"},
-		{time.Date(2026, 11, 1, 10, 0, 0, 0, ny), time.Date(2026, 11, 2, 0, 0, 0, 0, ny), "Tomorrow"},
-	} {
-		if got := DueLabel(tc.due, false, tc.now); got != tc.want {
-			t.Errorf("%v from %v: %q, want %q", tc.due, tc.now, got, tc.want)
-		}
-	}
-}
-
 // An empty to-do offers its date after its placeholder, where it would
 // be with that text typed, not over it.
 func TestDueChipAfterPlaceholder(t *testing.T) {

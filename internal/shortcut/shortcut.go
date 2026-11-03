@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode"
 
+	"golang.org/x/text/width"
+
 	"leaflet/internal/doc"
 )
 
@@ -35,14 +37,12 @@ var blocks = map[string]struct {
 
 // Block is the kind of block a block of type typ becomes as a space is
 // typed after prefix, all of its text before the caret, the space
-// included: a full-width one too, as an input method for Chinese or
-// Japanese types it. A paragraph becomes any kind; a bullet, a to-do. ok
-// is false for text that is no shortcut.
+// included: in full width too, the prefix and the space, as an input
+// method for Chinese or Japanese types them ("＃　", "１．　"). A
+// paragraph becomes any kind; a bullet, a to-do. ok is false for text
+// that is no shortcut.
 func Block(typ, prefix string) (newType string, data map[string]any, ok bool) {
-	p, spaced := strings.CutSuffix(prefix, " ")
-	if !spaced {
-		p, spaced = strings.CutSuffix(prefix, "　")
-	}
+	p, spaced := strings.CutSuffix(width.Fold.String(prefix), " ")
 	b, found := blocks[p]
 	if !spaced || !found || typ != "paragraph" && (typ != "bulleted_list" || b.typ != "todo_list") {
 		return "", nil, false
@@ -55,8 +55,9 @@ func Block(typ, prefix string) (newType string, data map[string]any, ok bool) {
 }
 
 // Divider reports whether a block of type typ whose text is text, as its
-// last "-" is typed at the end, becomes a divider: a paragraph of "---".
-func Divider(typ, text string) bool { return typ == "paragraph" && text == "---" }
+// last "-" is typed at the end, becomes a divider: a paragraph of "---",
+// or of full-width "－－－".
+func Divider(typ, text string) bool { return typ == "paragraph" && width.Fold.String(text) == "---" }
 
 // OpensMenu reports whether a "/" or "@" typed after r opens its menu:
 // after a space, or after Chinese or Japanese text or punctuation, which
@@ -64,6 +65,40 @@ func Divider(typ, text string) bool { return typ == "paragraph" && text == "---"
 func OpensMenu(r rune) bool {
 	return unicode.IsSpace(r) || unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana) ||
 		r > unicode.MaxASCII && unicode.IsPunct(r)
+}
+
+// MenuKind is the menu a character stands for, '/' or '@', or 0 for
+// none: "/" and "@", their full-width forms "／" and "＠", which input
+// methods for Chinese and Japanese type, and "、", which a Chinese one
+// types for "/".
+func MenuKind(r rune) rune {
+	switch r {
+	case '/', '／', '、':
+		return '/'
+	case '@', '＠':
+		return '@'
+	}
+	return 0
+}
+
+// Menu is the menu r typed opens, '/' or '@' as MenuKind has it, after
+// before, the character before it, or 0 at a block's start; 0 for none.
+// It opens where OpensMenu says, but "、", a comma in Chinese and
+// Japanese text, only at a block's start or after a space, where it is
+// none.
+func Menu(r, before rune) rune {
+	kind := MenuKind(r)
+	switch {
+	case kind == 0:
+		return 0
+	case r == '、':
+		if before != 0 && !unicode.IsSpace(before) {
+			return 0
+		}
+	case before != 0 && !OpensMenu(before):
+		return 0
+	}
+	return kind
 }
 
 // Match is a pair of markers an inline shortcut formats what is between:

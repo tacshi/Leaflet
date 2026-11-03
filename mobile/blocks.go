@@ -2,9 +2,9 @@ package mobile
 
 import (
 	"encoding/json"
-	"errors"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/menu"
 	"leaflet/locales"
 )
 
@@ -41,21 +41,7 @@ func ChartText(data string) string {
 // writes it. What is wrong with the text, it says in the app's language.
 func ChartData(kind, title, caption, text string) (_ string, err error) {
 	defer catch(&err)
-	labels, series, err := doc.ParseChartCSV(text)
-	var number *doc.ChartNumberError
-	switch {
-	case errors.Is(err, doc.ErrChartRows):
-		return "", errors.New(locales.DialogChartNeedRows())
-	case errors.Is(err, doc.ErrChartSeries):
-		return "", errors.New(locales.DialogChartNeedSeries())
-	case errors.As(err, &number):
-		return "", errors.New(locales.DialogChartNotNumber(number.Line, number.Cell))
-	case err != nil:
-		return "", err
-	}
-	data, err := doc.ChartData(map[string]any{
-		"chart_type": kind, "title": title, "labels": labels, "series": series, "caption": caption,
-	})
+	data, err := menu.ChartData(kind, title, caption, text)
 	if err != nil {
 		return "", err
 	}

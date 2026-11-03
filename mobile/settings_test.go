@@ -164,7 +164,7 @@ func TestResolveConflicts(t *testing.T) {
 	if len(list) != 1 || list[0].Kept != "Theirs" || list[0].Other != "Mine" || list[0].Deleted != "" || list[0].PageTitle != "Plans" {
 		t.Fatalf("conflicts %+v", list)
 	}
-	if err := c.ResolveConflict(list[0].ID, resolveThisDevice); err != nil {
+	if err := c.ResolveConflict(list[0].ID, "this_device"); err != nil {
 		t.Fatal(err)
 	}
 	if got := texts(content(t, c, p.ID)); !strings.Contains(got, "Mine") || strings.Contains(got, "Theirs") {
@@ -191,14 +191,14 @@ func TestResolveConflicts(t *testing.T) {
 	if got := texts(content(t, c, p.ID)); !strings.Contains(got, "Edited there") || len(conflicts(t, c)) != 1 {
 		t.Fatalf("resolved a way it doesn't know: %q", got)
 	}
-	if err := c.ResolveConflict(list[0].ID, resolveDelete); err != nil {
+	if err := c.ResolveConflict(list[0].ID, "delete"); err != nil {
 		t.Fatal(err)
 	}
 	if got := texts(content(t, c, p.ID)); strings.Contains(got, "Edited there") {
 		t.Fatalf("deleted again, still %q", got)
 	}
 	// One resolved already, as in another window, says so.
-	if err := c.ResolveConflict(list[0].ID, resolveKeep); err == nil {
+	if err := c.ResolveConflict(list[0].ID, "keep"); err == nil {
 		t.Error("resolved a conflict that is gone")
 	}
 }

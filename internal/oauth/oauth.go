@@ -15,6 +15,7 @@ import (
 	"net/url"
 
 	"leaflet/internal/guard"
+	"leaflet/locales"
 )
 
 // NewState is a sign-in's random state, which the browser's answer must
@@ -73,7 +74,7 @@ func ListenFor(name string, port int, anyPort bool, state, verifier string) (*Lo
 		ln, err = net.Listen("tcp", "127.0.0.1:0")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("Leaflet couldn't wait for %s's sign-in on port %d, which another app is using. Quit it, then try again.", name, port) //nolint:staticcheck // shown to people as a sentence.
+		return nil, errors.New(locales.OauthPortTaken(name, port))
 	}
 	host := fmt.Sprintf("127.0.0.1:%d", ln.Addr().(*net.TCPAddr).Port)
 	l := &Loopback{
@@ -99,20 +100,20 @@ func ListenFor(name string, port int, anyPort bool, state, verifier string) (*Lo
 		}
 		v := r.URL.Query()
 		if subtle.ConstantTimeCompare([]byte(v.Get("state")), []byte(l.State)) != 1 {
-			http.Error(w, "This sign-in link is stale. Start again from Leaflet.", http.StatusBadRequest)
+			http.Error(w, locales.OauthStale(), http.StatusBadRequest)
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		if e := v.Get("error"); e != "" {
-			_, _ = fmt.Fprint(w, page("Sign-in was cancelled", "You can close this tab."))
-			msg := "Sign-in was cancelled."
+			_, _ = fmt.Fprint(w, page(locales.OauthCancelledTitle(), locales.OauthCloseTab()))
+			msg := locales.OauthCancelled()
 			if e != "access_denied" {
-				msg = name + " sign-in failed: " + e
+				msg = locales.OauthFailed(name, e)
 			}
 			finish(answer{err: errors.New(msg)})
 			return
 		}
-		_, _ = fmt.Fprint(w, page("Signed in to Leaflet", "You can close this tab and go back to Leaflet."))
+		_, _ = fmt.Fprint(w, page(locales.OauthSignedIn(), locales.OauthCloseTabBack()))
 		finish(answer{query: v})
 	})}
 	guard.Go(func() { _ = l.srv.Serve(ln) })
@@ -128,7 +129,7 @@ func (l *Loopback) Wait(ctx context.Context) (url.Values, error) {
 	case a := <-l.done:
 		return a.query, a.err
 	case <-ctx.Done():
-		return nil, errors.New("Sign-in timed out. Try again.") //nolint:staticcheck // shown to people as a sentence.
+		return nil, errors.New(locales.OauthTimedOut())
 	}
 }
 

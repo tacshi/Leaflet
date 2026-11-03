@@ -27,7 +27,7 @@ func TestMarkdownExportReadsBack(t *testing.T) {
 	}
 	table, _ := TableNode([][]string{{"a|b", `c\|d`}, {"`x|y`", "e"}}, "")
 	blocks = append(blocks, table, textNode("paragraph", Delta{{Text: "last"}}))
-	md := PageMarkdown("", FromBlocks(blocks), nil)
+	md := PageMarkdown("", FromBlocks(blocks), MarkdownOptions{})
 	got := MarkdownBlocks(md)
 	if len(got) != len(blocks) {
 		t.Fatalf("%q read back as %d blocks", md, len(got))
@@ -170,7 +170,7 @@ func TestPageMarkdownRoundTrips(t *testing.T) {
 		n("paragraph", "<details> is text, and <summary>", nil),
 		n("paragraph", "last", nil),
 	}
-	md := PageMarkdown("", FromBlocks(blocks), nil)
+	md := PageMarkdown("", FromBlocks(blocks), MarkdownOptions{})
 	got, want := shape(MarkdownBlocks(md)), shape(blocks)
 	if !slices.Equal(got, want) {
 		t.Errorf("%s\nread back as\n%s\nwant\n%s", md, strings.Join(got, "\n"), strings.Join(want, "\n"))
@@ -264,6 +264,12 @@ func TestParseLinesImages(t *testing.T) {
 			t.Errorf("%q read as %v", text, shape(got))
 		}
 	}
+	// A link an image block refuses, without a host's name, is text.
+	for _, text := range []string{"![a](https://:80/a.png)", "![a](http:///a.png)"} {
+		if got := ParseLines(text); len(got) != 1 || got[0].Type != "paragraph" {
+			t.Errorf("%q read as %v", text, shape(got))
+		}
+	}
 }
 
 // A line break in a table's cell is a <br>, and reads back as one; a <br>
@@ -271,7 +277,7 @@ func TestParseLinesImages(t *testing.T) {
 func TestTableCellLineBreaks(t *testing.T) {
 	table, _ := TableNode([][]string{{"h"}, {"a\nb"}}, "")
 	table.Children[1].Children[0].SetDelta(Delta{{Text: "x\ny <br> "}, {Text: "a<br>b", Attrs: Attrs{Code: true}}})
-	md := PageMarkdown("", FromBlocks([]*Node{table}), nil)
+	md := PageMarkdown("", FromBlocks([]*Node{table}), MarkdownOptions{})
 	if !strings.Contains(md, "| x<br>y \\<br> `a<br>b` |") {
 		t.Errorf("markdown %q", md)
 	}

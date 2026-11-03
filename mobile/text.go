@@ -39,6 +39,17 @@ func Text(locale, key, args string) string {
 	return locales.Catalog.Format(locale, key, values)
 }
 
+// When says when something was, in the language locale, as the desktop
+// says it in bylines, comments and settings (locales.When): at and now
+// are in milliseconds since 1970, and at 0 says nothing.
+func When(locale string, at, now int64) string {
+	defer catch(nil)
+	if at == 0 {
+		return ""
+	}
+	return locales.In(locale).When(time.UnixMilli(at), time.UnixMilli(now))
+}
+
 // Language returns the language of the app's catalogs that suits the
 // languages the user reads best, given as a JSON array of BCP 47 tags in
 // the order they prefer them.

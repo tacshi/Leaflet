@@ -19,8 +19,15 @@ func DiagramNode(source string) *Node {
 // BlockSource is the source a math or diagram block is drawn from, and
 // the key it is kept under.
 func BlockSource(n *Node) (key, source string) {
-	if n.Type == "math_equation" {
-		return "formula", n.Str("formula")
+	key = SourceKey(n.Type)
+	return key, n.Str(key)
+}
+
+// SourceKey is the key a block of type typ keeps its source under: a
+// formula for math, Mermaid for a diagram.
+func SourceKey(typ string) string {
+	if typ == "math_equation" {
+		return "formula"
 	}
-	return "source", n.Str("source")
+	return "source"
 }

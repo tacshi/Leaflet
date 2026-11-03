@@ -1,4 +1,5 @@
 import AVFoundation
+import LeafletCore
 import SwiftUI
 import UIKit
 
@@ -12,7 +13,12 @@ struct RecordingBlock: View {
     /// canEdit says the page can be changed: the transcript only copies
     /// otherwise.
     let canEdit: Bool
-    var onHeight: (@MainActor (CGFloat) -> Void)?
+    /// editor is the page's, which puts the transcript in.
+    weak var editor: EditorController?
+    var onHeight: (@MainActor (CGSize) -> Void)?
+    /// control is the size of Play and the menu's button, as the text
+    /// size scales them.
+    @ScaledMetric(relativeTo: .subheadline) private var control: CGFloat = 32
 
     private var id: String { node.data?["recording_id"]?.string ?? "" }
 
@@ -25,10 +31,11 @@ struct RecordingBlock: View {
         VStack(alignment: .leading, spacing: 12) {
             header(recorder, row, live: live)
             if live {
-                LevelMeter(levels: state.levels, color: palette.danger, idle: palette.divider)
+                LevelMeter(levels: recorder.levels, color: palette.danger, idle: palette.divider)
                     .frame(height: 36)
-                if !state.liveText.isEmpty {
-                    Text(state.liveText).font(.subheadline).foregroundStyle(palette.textSecondary)
+                if !recorder.liveText.isEmpty {
+                    Text(recorder.liveText).font(.subheadline).foregroundStyle(
+                        palette.textSecondary)
                 }
             } else if let row {
                 if recorder.playing == id, let player = recorder.player {
@@ -52,10 +59,10 @@ struct RecordingBlock: View {
         .background(palette.surface, in: .rect(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(palette.divider))
         .fixedSize(horizontal: false, vertical: true)
-        .onGeometryChange(for: CGFloat.self) {
-            $0.size.height
+        .onGeometryChange(for: CGSize.self) {
+            $0.size
         } action: {
-            onHeight?($0 + 2)
+            onHeight?(CGSize(width: $0.width, height: $0.height + 2))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task(id: id) { _ = recorder.row(id) }
@@ -70,7 +77,7 @@ struct RecordingBlock: View {
                 .frame(width: 30, height: 30)
                 .background(live ? palette.dangerBg : palette.accentSoft, in: .circle)
             VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.subheadline.weight(.semibold)).foregroundStyle(palette.text)
+                Text(title(row)).font(.subheadline.weight(.semibold)).foregroundStyle(palette.text)
                     .lineLimit(1)
                 Text(status(recorder, row, live: live)).font(.caption)
                     .foregroundStyle(palette.textMuted)
@@ -84,29 +91,76 @@ struct RecordingBlock: View {
         }
     }
 
-    private var title: String {
-        let t = node.data?["title"]?.string ?? ""
-        return t.isEmpty ? L.commonRecording : t
+    /// title is the block's title as the core names it: an older one's in
+    /// the app's language, or Recording on a page of the same title.
+    private func title(_ row: RecordingRow?) -> String {
+        MobileRecordingTitle(
+            node.data?["title"]?.string ?? "", row?.createdMs ?? 0, row?.pageTitle ?? "")
     }
 
+    /// status is the line under the title: what runs for the recording
+    /// here, else what the core says of it.
     private func status(_ recorder: Recorder, _ row: RecordingRow?, live: Bool) -> String {
         let state = recorder.state
-        guard let row else { return live ? state.engine : "" }
-        let duration = RecordControl.time(TimeInterval(row.durationMs) / 1000)
         if live { return state.engine }
+        guard let row else { return recorder.missing.contains(id) ? L.recNotFound : "" }
         if state.finishing.contains(id) { return L.recAddingTimestamps }
-        if row.status == "transcribing" || state.transcribing.contains(id) {
-            return L.recTranscribing
+        if state.transcribing.contains(id) { return L.recTranscribing }
+        return row.label
+    }
+
+    /// Action is something the block offers: Play or Pause, or an item of
+    /// its menu.
+    struct Action {
+        let title: String
+        var symbol = ""
+        var enabled = true
+        let run: @MainActor () -> Void
+    }
+
+    /// actions are what block, of recording id, offers now, for VoiceOver
+    /// at the caret, which can't reach the block in the text: Play or
+    /// Pause, and its menu's items.
+    static func actions(_ id: String, block: String, canEdit: Bool, editor: EditorController?)
+        -> [Action]
+    {
+        let recorder = Recorder.shared
+        let state = recorder.state
+        guard let row = recorder.rows[id], !(state.recording && state.id == id),
+            row.status != "recording"
+        else { return [] }
+        var out: [Action] = []
+        if recorder.loading == nil, !state.recording {
+            let playing = recorder.playing == id && recorder.player?.isPlaying == true
+            out.append(Action(title: playing ? L.commonPause : L.recPlay) { recorder.play(id) })
         }
-        if row.status == "failed" { return L.recTranscriptionFailed }
-        let engine =
-            switch row.sttProvider {
-            case "": L.recAudioOnly
-            case "soniox": "Soniox"
-            case "on-device": L.recEngineOnDevice
-            default: L.commonEndpoint
-            }
-        return L.recStatus(duration: duration, engine: engine)
+        return out
+            + menuItems(id, block: block, row, canEdit: canEdit, editor: editor).filter(\.enabled)
+    }
+
+    /// menuItems are the items of the menu of block, of recording id, in
+    /// editor's page.
+    private static func menuItems(
+        _ id: String, block: String, _ row: RecordingRow, canEdit: Bool, editor: EditorController?
+    ) -> [Action] {
+        let recorder = Recorder.shared
+        let empty = row.transcript.isEmpty
+        return [
+            Action(title: L.recCopyTranscript, symbol: "doc.on.doc", enabled: !empty) {
+                UIPasteboard.general.string = row.plain
+            },
+            Action(title: L.recInsertTranscript, symbol: "text.insert", enabled: !empty && canEdit)
+            {
+                recorder.insertTranscript(id, after: block, into: editor)
+            },
+            // Not while a transcription runs, which the new one would race.
+            Action(
+                title: empty ? L.recTranscribe : L.recTranscribeAgain, symbol: "captions.bubble",
+                enabled: canEdit && !recorder.state.transcribing.contains(id)
+            ) {
+                recorder.retranscribe(id)
+            },
+        ]
     }
 
     private func play(_ recorder: Recorder) -> some View {
@@ -123,57 +177,52 @@ struct RecordingBlock: View {
                     Image(systemName: playing ? "pause.fill" : "play.fill")
                 }
             }
-            .frame(width: 32, height: 32)
+            .frame(width: control, height: control)
             .contentShape(.rect)
         }
         .buttonStyle(.plain)
         .foregroundStyle(palette.icon)
-        .accessibilityLabel(playing ? L.commonPause : L.recPlay)
         .disabled(recorder.loading != nil || recorder.state.recording)
     }
 
     private func menu(_ recorder: Recorder, _ row: RecordingRow) -> some View {
         let palette = BlockLook.palette
-        let empty = row.transcript.isEmpty
         return Menu {
-            Button(L.recCopyTranscript, systemImage: "doc.on.doc") {
-                UIPasteboard.general.string = row.plain
-            }
-            .disabled(empty)
-            Button(L.recInsertTranscript, systemImage: "text.insert") {
-                recorder.insertTranscript(id)
-            }
-            .disabled(empty || !canEdit)
-            // Not while a transcription runs, which the new one would race.
-            Button(
-                empty ? L.recTranscribe : L.recTranscribeAgain, systemImage: "captions.bubble"
+            ForEach(
+                Self.menuItems(id, block: node.id, row, canEdit: canEdit, editor: editor),
+                id: \.title
             ) {
-                recorder.retranscribe(id)
+                item in
+                Button(item.title, systemImage: item.symbol, action: item.run)
+                    .disabled(!item.enabled)
             }
-            .disabled(!canEdit || recorder.state.transcribing.contains(id))
         } label: {
             Image(systemName: "ellipsis")
-                .frame(width: 32, height: 32)
+                .frame(width: control, height: control)
                 .contentShape(.rect)
         }
         .foregroundStyle(palette.icon)
-        .accessibilityLabel(L.recActions)
     }
 
     /// transcript is the recording's lines, each after its time: a tap on
-    /// either plays from it.
+    /// either plays from it. The times are as wide as the longest they
+    /// can be, as the text size has them, for the lines to start together.
     private func transcript(_ row: RecordingRow) -> some View {
         let palette = BlockLook.palette
+        let widest = row.durationMs >= 3_600_000 ? "0:00:00" : "00:00"
         return VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(row.transcript.enumerated()), id: \.offset) { _, s in
                 Button {
                     Recorder.shared.play(id, from: TimeInterval(s.startMs) / 1000)
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(RecordControl.time(TimeInterval(s.startMs) / 1000))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(palette.accent)
-                            .frame(width: 46, alignment: .leading)
+                        ZStack(alignment: .leading) {
+                            Text(verbatim: widest).hidden()
+                            Text(RecordControl.time(TimeInterval(s.startMs) / 1000))
+                                .foregroundStyle(palette.accent)
+                        }
+                        .font(.caption.monospacedDigit())
+                        .fixedSize()
                         VStack(alignment: .leading, spacing: 2) {
                             if let speaker = s.speaker, !speaker.isEmpty {
                                 Text(L.recSpeaker(name: speaker))

@@ -16,11 +16,13 @@ const (
 
 // view builds the window.
 func (a *App) view(c *ui.Context) {
-	// Once the frame has built its blocks, GIF players none of them
-	// showed for a while go.
+	// Once the frame has built its blocks, GIF players and pictures none
+	// of them showed for a while go.
 	defer func() {
 		if a.images != nil {
-			a.images.releasePlayers(time.Now())
+			now := time.Now()
+			a.images.releasePlayers(now)
+			a.images.releasePictures(now)
 		}
 	}()
 	theme.Apply(c)
@@ -28,7 +30,6 @@ func (a *App) view(c *ui.Context) {
 	if c.Vibrancy() {
 		c.Root().Background(ui.Transparent)
 	}
-	a.shortcuts(c)
 	a.refreshTray()
 	a.follow()
 	// The page, and beside it the agent and comments panel when open.
@@ -56,7 +57,7 @@ func (a *App) view(c *ui.Context) {
 		room := a.pageRoom(c)
 		minW := a.panelMinW(c)
 		a.panelW = min(max(a.panelW, minW), panelMax)
-		mainW := room - a.panelW - 1
+		mainW := room - a.panelWidth(c) - 1
 		split := ui.Split(c, &mainW, main, func() {
 			ui.Column(c.Key("panel")).Fill().Background(pal.Panel).Children(func() { a.panel(c) })
 		}).Fill()
@@ -70,7 +71,10 @@ func (a *App) view(c *ui.Context) {
 	} else {
 		// MyGo's split: its line, dragged or moved with the arrows,
 		// resizes the sidebar.
-		split := ui.Split(c, &a.sidebarW, func() {
+		// It is as wide as the user made it where the page keeps its room
+		// beside it, and narrower in a narrow window.
+		sw := a.sidebarWidth(c)
+		split := ui.Split(c, &sw, func() {
 			bar := ui.Column(c.Key("sidebar")).Fill()
 			if !c.Vibrancy() || pal.Opaque {
 				bar.Background(pal.Sidebar)
@@ -78,7 +82,7 @@ func (a *App) view(c *ui.Context) {
 			bar.Children(func() { a.sidebar(c) })
 		}, page).Fill()
 		if split.Changed() {
-			a.sidebarW = min(max(a.sidebarW, sidebarMin), sidebarMax)
+			a.sidebarW = min(max(sw, sidebarMin), sidebarMax)
 			a.saveWidthsSoon()
 		}
 	}
@@ -102,11 +106,33 @@ func (a *App) view(c *ui.Context) {
 // title bar the window controls sit in.
 const headerHeight = 46
 
-// The sidebar's and the panel's widths stay between these.
+// The sidebar's and the panel's widths stay between these. pageMin is
+// the narrowest the page goes beside them, which they give up their
+// widths to keep, down to their least: the window is never narrower than
+// the three (windowMinW).
 const (
 	sidebarMin, sidebarMax = 200, 420
 	panelMin, panelMax     = 280, 640
+	pageMin                = 320
+	windowMinW             = sidebarMin + panelMin + pageMin + 2
 )
+
+// sidebarWidth is the sidebar's width as shown: the user's, less what the
+// page and the panel, when shown, need of it in a narrow window.
+func (a *App) sidebarWidth(c *ui.Context) float32 {
+	w, _ := c.Size()
+	keep := float32(pageMin)
+	if a.panelShown() {
+		keep += a.panelMinW(c) + 1
+	}
+	return max(min(a.sidebarW, w-keep-1), sidebarMin)
+}
+
+// panelWidth is the panel's width as shown: the user's, less what the page
+// needs of it in a narrow window.
+func (a *App) panelWidth(c *ui.Context) float32 {
+	return max(min(a.panelW, a.pageRoom(c)-pageMin-1), a.panelMinW(c))
+}
 
 // The panel's top bar pads its tabs by these.
 const panelTopPadL, panelTopPadR = 12, 10
@@ -119,20 +145,16 @@ func (a *App) panelMinW(c *ui.Context) float32 {
 	return min(max(panelMin, top), panelMax)
 }
 
-var widthsTimer *time.Timer
-
 // saveWidthsSoon keeps the sidebar's and the panel's widths once they stop
 // moving.
 func (a *App) saveWidthsSoon() {
-	if widthsTimer != nil {
-		widthsTimer.Stop()
+	if a.widthsTimer != nil {
+		a.widthsTimer.Stop()
 	}
-	widthsTimer = time.AfterFunc(400*time.Millisecond, func() {
-		a.update(func() {
-			a.settings.SidebarWidth = a.sidebarW
-			a.settings.PanelWidth = a.panelW
-			a.saveSettings()
-		})
+	a.widthsTimer = a.later(400*time.Millisecond, func() {
+		a.settings.SidebarWidth = a.sidebarW
+		a.settings.PanelWidth = a.panelW
+		a.saveSettings()
 	})
 }
 
@@ -147,7 +169,7 @@ func (a *App) panelShown() bool {
 func (a *App) pageRoom(c *ui.Context) float32 {
 	w, _ := c.Size()
 	if a.settings.SidebarOpen {
-		w -= a.sidebarW + 1
+		w -= a.sidebarWidth(c) + 1
 	}
 	return w
 }
@@ -156,7 +178,7 @@ func (a *App) pageRoom(c *ui.Context) float32 {
 func (a *App) contentWidth(c *ui.Context) float32 {
 	w := a.pageRoom(c)
 	if a.panelOpen {
-		w -= a.panelW + 1
+		w -= a.panelWidth(c) + 1
 	}
 	return max(min(w-2*pagePadX, pageMaxWidth), 280)
 }
@@ -206,14 +228,6 @@ func (a *App) titleBar(c *ui.Context, fn func()) {
 	})
 }
 
-func (a *App) shortcuts(c *ui.Context) {
-	c.OnShortcut(ui.Cmd, ui.KeyP, a.openSearch)
-	c.OnShortcut(ui.Cmd, ui.KeyBackslash, a.toggleSidebar)
-	c.OnShortcut(ui.Cmd, ui.KeyN, func() { a.newPage("", "") })
-	c.OnShortcut(ui.Cmd, ui.KeyJ, func() { a.togglePanel(0) })
-	c.OnShortcut(ui.Cmd, ui.KeyComma, a.toggleSettings)
-}
-
 // homeView shows when no page is open.
 func (a *App) homeView(c *ui.Context) {
 	pal := theme.Of(c)
@@ -231,8 +245,10 @@ func (a *App) homeView(c *ui.Context) {
 func (a *App) toastView(c *ui.Context) {
 	for _, t := range a.toasts {
 		if t.action != "" {
-			fn := t.fn
-			c.ToastAction(t.text, t.action, fn)
+			// Each its own toast, which ToastAction, naming one by its
+			// text, would not make it: the second of two pages called
+			// alike deleted would take the first's place, and its Undo.
+			c.AddToast(ui.Toast{Title: t.text, Timeout: actionToastTime, Action: t.action, OnAction: t.fn})
 		} else {
 			c.Toast(t.text)
 		}

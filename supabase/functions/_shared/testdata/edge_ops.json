@@ -1,0 +1,754 @@
+{
+  "before": {
+    "document": {
+      "id": "root",
+      "type": "page",
+      "children": [
+        {
+          "id": "l",
+          "type": "bulleted_list",
+          "data": {
+            "delta": [
+              {
+                "insert": "l"
+              }
+            ]
+          },
+          "children": [
+            {
+              "id": "l1",
+              "type": "bulleted_list",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "l1"
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "p"
+              }
+            ]
+          }
+        },
+        {
+          "id": "t",
+          "type": "table",
+          "data": {
+            "colsLen": 2,
+            "rowsLen": 1,
+            "colDefaultWidth": 160,
+            "rowDefaultHeight": 40,
+            "colMinimumWidth": 40
+          },
+          "children": [
+            {
+              "id": "c0",
+              "type": "table/cell",
+              "data": {
+                "colPosition": 0,
+                "rowPosition": 0
+              },
+              "children": [
+                {
+                  "id": "c0p",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "a"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "c1",
+              "type": "table/cell",
+              "data": {
+                "colPosition": 1,
+                "rowPosition": 0
+              },
+              "children": [
+                {
+                  "id": "c1p",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "b"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "q",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "q"
+              }
+            ]
+          },
+          "children": [
+            {
+              "id": "q1",
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "q1"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "q2",
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "q2"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "meta": {
+      "v": 1,
+      "blocks": {},
+      "deleted": {}
+    }
+  },
+  "ops": [
+    {
+      "op": "insert",
+      "position": {
+        "parent": "p"
+      },
+      "nodes": [
+        {
+          "id": "x1",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x1"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "op": "insert",
+      "position": {
+        "parent": "t"
+      },
+      "nodes": [
+        {
+          "id": "x2",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x2"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "op": "insert",
+      "position": {
+        "after": "c0"
+      },
+      "nodes": [
+        {
+          "id": "x3",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x3"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "op": "insert",
+      "position": {
+        "before": "c1"
+      },
+      "nodes": [
+        {
+          "id": "x4",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x4"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "op": "insert",
+      "position": {
+        "parent": "c0"
+      },
+      "nodes": [
+        {
+          "id": "x5",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x5"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "op": "insert",
+      "position": {
+        "after": "c0p"
+      },
+      "nodes": [
+        {
+          "id": "x6",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x6"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "op": "insert",
+      "position": {
+        "after": "gone"
+      },
+      "nodes": [
+        {
+          "id": "x7",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x7"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "op": "insert",
+      "position": {
+        "parent": "l"
+      },
+      "nodes": [
+        {
+          "id": "x8",
+          "type": "bulleted_list",
+          "data": {
+            "delta": [
+              {
+                "insert": "x8"
+              }
+            ]
+          },
+          "children": [
+            {
+              "id": "p",
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "p"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "x9",
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "x9"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "op": "insert",
+      "position": {
+        "after": "l"
+      },
+      "nodes": [
+        {
+          "id": "l1",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "again"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "op": "move",
+      "id": "c1",
+      "position": {
+        "before": "c0"
+      },
+      "from": {
+        "at": "end"
+      }
+    },
+    {
+      "op": "move",
+      "id": "p",
+      "position": {
+        "after": "c0"
+      },
+      "from": {
+        "at": "end"
+      }
+    },
+    {
+      "op": "move",
+      "id": "c0p",
+      "position": {
+        "parent": "l"
+      },
+      "from": {
+        "at": "end"
+      }
+    },
+    {
+      "op": "move",
+      "id": "x1",
+      "position": {
+        "parent": "p"
+      },
+      "from": {
+        "at": "end"
+      }
+    },
+    {
+      "op": "move",
+      "id": "l",
+      "position": {
+        "parent": "x8"
+      },
+      "from": {
+        "at": "end"
+      }
+    },
+    {
+      "op": "move",
+      "id": "x7",
+      "position": {
+        "at": "start"
+      },
+      "from": {
+        "at": "end"
+      }
+    },
+    {
+      "op": "delete",
+      "ids": [
+        "q2"
+      ],
+      "previous": []
+    },
+    {
+      "op": "replace",
+      "id": "q",
+      "node": {
+        "id": "q",
+        "type": "paragraph",
+        "data": {
+          "delta": [
+            {
+              "insert": "Q"
+            }
+          ]
+        },
+        "children": [
+          {
+            "id": "q1",
+            "type": "paragraph",
+            "data": {
+              "delta": [
+                {
+                  "insert": "q1"
+                }
+              ]
+            }
+          },
+          {
+            "id": "q2",
+            "type": "paragraph",
+            "data": {
+              "delta": [
+                {
+                  "insert": "q2"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "previous": {
+        "id": "q",
+        "type": "paragraph",
+        "data": {
+          "delta": [
+            {
+              "insert": "q"
+            }
+          ]
+        },
+        "children": [
+          {
+            "id": "q1",
+            "type": "paragraph",
+            "data": {
+              "delta": [
+                {
+                  "insert": "q1"
+                }
+              ]
+            }
+          },
+          {
+            "id": "q2",
+            "type": "paragraph",
+            "data": {
+              "delta": [
+                {
+                  "insert": "q2"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "op": "delete",
+      "ids": [
+        "c1",
+        "x5"
+      ],
+      "previous": []
+    },
+    {
+      "op": "replace",
+      "id": "c0p",
+      "node": {
+        "id": "c0p",
+        "type": "paragraph",
+        "data": {
+          "delta": [
+            {
+              "insert": "replaced"
+            }
+          ]
+        }
+      },
+      "previous": {
+        "id": "c0p",
+        "type": "paragraph",
+        "data": {
+          "delta": [
+            {
+              "insert": "a"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "after": {
+    "document": {
+      "id": "root",
+      "type": "page",
+      "children": [
+        {
+          "id": "x7",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x7"
+              }
+            ]
+          }
+        },
+        {
+          "id": "l",
+          "type": "bulleted_list",
+          "data": {
+            "delta": [
+              {
+                "insert": "l"
+              }
+            ]
+          },
+          "children": [
+            {
+              "id": "l1",
+              "type": "bulleted_list",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "l1"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "x8",
+              "type": "bulleted_list",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "x8"
+                  }
+                ]
+              },
+              "children": [
+                {
+                  "id": "x9",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "x9"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "p",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "p"
+              }
+            ]
+          }
+        },
+        {
+          "id": "x1",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x1"
+              }
+            ]
+          }
+        },
+        {
+          "id": "t",
+          "type": "table",
+          "data": {
+            "colsLen": 2,
+            "rowsLen": 1,
+            "colDefaultWidth": 160,
+            "rowDefaultHeight": 40,
+            "colMinimumWidth": 40
+          },
+          "children": [
+            {
+              "id": "c1",
+              "type": "table/cell",
+              "data": {
+                "colPosition": 1,
+                "rowPosition": 0
+              },
+              "children": [
+                {
+                  "id": "c1p",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "b"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "id": "c0",
+              "type": "table/cell",
+              "data": {
+                "colPosition": 0,
+                "rowPosition": 0
+              },
+              "children": [
+                {
+                  "id": "c0p",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "a"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "x6",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "x6"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "id": "x5",
+                  "type": "paragraph",
+                  "data": {
+                    "delta": [
+                      {
+                        "insert": "x5"
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "x4",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x4"
+              }
+            ]
+          }
+        },
+        {
+          "id": "x3",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x3"
+              }
+            ]
+          }
+        },
+        {
+          "id": "x2",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "x2"
+              }
+            ]
+          }
+        },
+        {
+          "id": "q",
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "Q"
+              }
+            ]
+          },
+          "children": [
+            {
+              "id": "q1",
+              "type": "paragraph",
+              "data": {
+                "delta": [
+                  {
+                    "insert": "q1"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "meta": {
+      "v": 1,
+      "blocks": {
+        "x1": 1000,
+        "x2": 1000,
+        "x3": 1000,
+        "x4": 1000,
+        "x5": 1000,
+        "x6": 1000,
+        "x7": 1000,
+        "x8": 1000,
+        "x9": 1000,
+        "c1": 1000,
+        "q": 1000
+      },
+      "deleted": {
+        "q2": 1000
+      }
+    }
+  }
+}

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"leaflet/internal/oauth"
+	"leaflet/locales"
 )
 
 // Sign in with ChatGPT: the user's ChatGPT Plus or Pro plan pays for agent
@@ -88,7 +89,7 @@ func discover(ctx context.Context) (*chatgptDiscovery, error) {
 // with JSON: a block page for the region, or the network's own page when
 // a proxy is not used.
 func errSignInUnreachable(status string) error {
-	return fmt.Errorf("Leaflet couldn't reach ChatGPT's sign-in (%s). Check your network or proxy, then try again.", status) //nolint:staticcheck // shown to people as a sentence.
+	return errors.New(locales.AgentChatgptUnreachable(status))
 }
 
 // isJSON is application/json, or a type of it such as jwk-set+json.
@@ -211,9 +212,9 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 	}
 	switch {
 	case issued == "" || issued == "dynamic_agent_client" || !clientIDRe.MatchString(issued):
-		return nil, errors.New("ChatGPT did not register Leaflet. Try again.") //nolint:staticcheck // shown to people as a sentence.
+		return nil, errors.New(locales.AgentChatgptNotRegistered())
 	case clientID != "" && issued != clientID:
-		return nil, errors.New("ChatGPT answered for another registration. Try again.") //nolint:staticcheck // shown to people as a sentence.
+		return nil, errors.New(locales.AgentChatgptOtherRegistration())
 	}
 	t, err := postToken(ctx, d.TokenEndpoint, url.Values{
 		"grant_type": {"authorization_code"}, "client_id": {issued}, "code": {back.Get("code")},
@@ -227,7 +228,7 @@ func SignInChatGPT(ctx context.Context, hostID, clientID string, open func(url s
 		return nil, err
 	}
 	if !strings.Contains(" "+t.Scope+" ", " "+chatgptPlan+" ") {
-		return nil, errors.New("ChatGPT didn't let Leaflet use your plan. Using a plan needs ChatGPT Plus or Pro.") //nolint:staticcheck // shown to people as a sentence.
+		return nil, errors.New(locales.AgentChatgptNoPlan())
 	}
 	email, _ := claims["email"].(string)
 	sub, _ := claims["sub"].(string)
@@ -374,7 +375,7 @@ func (g *ChatGPT) token(ctx context.Context) (string, error) {
 	}
 	acct := g.Account()
 	if acct.RefreshToken == "" {
-		return "", errors.New("Sign in with ChatGPT again in Settings › Agent providers.") //nolint:staticcheck // shown to people as a sentence.
+		return "", errors.New(locales.AgentChatgptSignInAgain())
 	}
 	d, err := discover(ctx)
 	if err != nil {
@@ -389,7 +390,7 @@ func (g *ChatGPT) token(ctx context.Context) (string, error) {
 	})
 	if err != nil {
 		if t != nil && t.Error == "invalid_grant" {
-			return "", errors.New("Your ChatGPT sign-in ended. Sign in again in Settings › Agent providers.") //nolint:staticcheck // shown to people as a sentence.
+			return "", errors.New(locales.AgentChatgptSignInEnded())
 		}
 		return "", err
 	}
@@ -488,7 +489,7 @@ func (g *ChatGPT) doOnce(ctx context.Context, method, path string, body any, acc
 				}
 			}
 		}
-		return nil, &APIError{Status: res.StatusCode, Message: msg}
+		return nil, &APIError{Status: res.StatusCode, Message: msg, RetryAfter: retryAfter(res.Header)}
 	}
 	return res, nil
 }
@@ -636,7 +637,7 @@ func (g *ChatGPT) ChatStream(ctx context.Context, model string, messages []map[s
 			}
 			return out, nil
 		case "response.failed", "error":
-			msg := "ChatGPT could not answer"
+			msg := locales.AgentChatgptCouldNotAnswer()
 			if resp, ok := ev["response"].(map[string]any); ok {
 				if e, ok := resp["error"].(map[string]any); ok {
 					if s, ok := e["message"].(string); ok {
@@ -649,13 +650,27 @@ func (g *ChatGPT) ChatStream(ctx context.Context, model string, messages []map[s
 			}
 			return ChatResult{}, &APIError{Message: msg}
 		case "response.incomplete":
-			return ChatResult{}, &APIError{Message: "ChatGPT stopped before finishing; your plan's limit may have been reached."}
+			return ChatResult{}, &APIError{Message: incompleteMessage(ev)}
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return ChatResult{}, err
 	}
-	return ChatResult{}, &APIError{Message: "ChatGPT's answer was cut off"}
+	return ChatResult{}, &APIError{Message: locales.AgentChatgptCutOff()}
+}
+
+// incompleteMessage says why ChatGPT stopped before finishing, as its
+// response.incomplete event's incomplete_details give the reason.
+func incompleteMessage(ev map[string]any) string {
+	resp, _ := ev["response"].(map[string]any)
+	details, _ := resp["incomplete_details"].(map[string]any)
+	switch details["reason"] {
+	case "max_output_tokens":
+		return locales.AgentChatgptStoppedAtLimit()
+	case "content_filter":
+		return locales.AgentChatgptStoppedFiltered()
+	}
+	return locales.AgentChatgptStoppedPlan()
 }
 
 func parseResponse(resp map[string]any) ChatResult {
@@ -693,29 +708,4 @@ type Model interface {
 // StreamingModel is a model whose answers stream.
 type StreamingModel interface {
 	ChatStream(ctx context.Context, model string, messages []map[string]any, tools []map[string]any, maxTokens int, on *Streamed) (ChatResult, error)
-}
-
-// TestModel checks a model answers and whether it calls tools.
-func TestModel(ctx context.Context, m Model, model string, models []string) TestResult {
-	res, err := m.Chat(ctx, model, []map[string]any{{
-		"role": "user", "content": `Call the ping tool with {"value": "ok"}. Do not reply with text.`,
-	}}, []map[string]any{{
-		"type": "function",
-		"function": map[string]any{
-			"name": "ping", "description": "Health check.",
-			"parameters": map[string]any{"type": "object", "properties": map[string]any{"value": map[string]any{"type": "string"}}, "required": []string{"value"}},
-		},
-	}}, 64)
-	if err != nil {
-		return TestResult{Message: err.Error(), Models: models}
-	}
-	tools := false
-	for _, tc := range res.ToolCalls {
-		tools = tools || tc.Name == "ping"
-	}
-	msg := "Connected, but this model did not call tools: it will be chat-only."
-	if tools {
-		msg = "Connected · tool calling works"
-	}
-	return TestResult{OK: true, SupportsTools: tools, Message: msg, Models: models}
 }

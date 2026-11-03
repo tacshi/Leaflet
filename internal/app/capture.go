@@ -1,8 +1,11 @@
 package app
 
 import (
+	"context"
 	"encoding/base64"
+	"maps"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -30,6 +33,8 @@ const capturePage = `<!doctype html>
 const session = new URLSearchParams(location.search).get("s");
 const call = (name, ...args) => window.mygo.call("Recorder." + name, session, ...args);
 let ctx, stream, node, source, paused = false, buf = [], seq = 0;
+// sending are the chunks' calls not answered yet.
+const sending = new Set();
 // tail is what the last buffer left over, which the next output sample
 // starts in, and pos is where in it that sample starts.
 let tail = new Float32Array(0), pos = 0;
@@ -42,7 +47,9 @@ function send() {
   const bytes = new Uint8Array(out.buffer);
   let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
   // Calls may run in any order: the number puts the chunks back in it.
-  call("Chunk", seq++, btoa(s));
+  const sent = call("Chunk", seq++, btoa(s)).catch(() => {});
+  sending.add(sent);
+  sent.then(() => sending.delete(sent));
 }
 async function start() {
   try {
@@ -84,11 +91,14 @@ async function start() {
   }
 }
 window.pauseCapture = (p) => { paused = p; };
-window.stopCapture = () => {
+// stopCapture sends what is left, and is done once every chunk's call
+// has been answered: the app has them all then.
+window.stopCapture = async () => {
   send();
   try { node && node.disconnect(); source && source.disconnect(); } catch (_) {}
   stream && stream.getTracks().forEach((t) => t.stop());
   ctx && ctx.close();
+  await Promise.all([...sending]);
   return true;
 };
 start();
@@ -146,6 +156,21 @@ func (s *captureSink) deliver(seq int, pcm []byte) {
 	}
 }
 
+// flush hands on, in order, the chunks held for one that never came, as
+// the microphone stops: none comes after.
+func (s *captureSink) flush() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.chunk == nil {
+		return
+	}
+	for _, seq := range slices.Sorted(maps.Keys(s.held)) {
+		s.chunk(s.held[seq])
+		s.next = seq + 1
+	}
+	s.held = nil
+}
+
 var recorder = &Recorder{sessions: map[string]*captureSink{}}
 
 // Chunk takes base64 PCM16 audio of a session, the seq-th chunk of it.
@@ -187,6 +212,12 @@ func (r *Recorder) add(session string, s *captureSink) {
 	r.mu.Lock()
 	r.sessions[session] = s
 	r.mu.Unlock()
+}
+
+func (r *Recorder) sink(session string) *captureSink {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.sessions[session]
 }
 
 func (r *Recorder) remove(session string) {
@@ -253,11 +284,20 @@ type webMic struct {
 func (m *webMic) Pause()  { _, _ = m.view.Page().Eval("window.pauseCapture(true)") }
 func (m *webMic) Resume() { _, _ = m.view.Page().Eval("window.pauseCapture(false)") }
 
-// Stop has the page send the audio it holds, and waits for it to arrive.
+// Stop has the page send the audio it holds, and waits until each chunk
+// has arrived, or for stopWait at most, as from a page that hangs; those
+// held for one that never came go on after it.
 func (m *webMic) Stop() {
-	_, _ = m.view.Page().Eval("return window.stopCapture()")
-	time.Sleep(200 * time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), stopWait)
+	defer cancel()
+	_, _ = m.view.Page().EvalContext(ctx, "return window.stopCapture()")
+	if s := recorder.sink(m.session); s != nil {
+		s.flush()
+	}
 }
+
+// stopWait is how long a capture page has to hand on its last audio.
+const stopWait = 5 * time.Second
 
 // Close forgets the page's session and closes it.
 func (m *webMic) Close() {

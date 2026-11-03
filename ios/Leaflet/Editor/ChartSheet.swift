@@ -15,6 +15,11 @@ struct ChartSheet: View {
     @State private var text = ""
     @State private var caption = ""
     @State private var failure: String?
+    /// original is the chart as the sheet opened with it.
+    @State private var original: [String]?
+
+    private var fields: [String] { [title, kind, text, caption] }
+    private var dirty: Bool { original.map { $0 != fields } ?? false }
 
     var body: some View {
         NavigationStack {
@@ -50,13 +55,14 @@ struct ChartSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L.commonCancel) { dismiss() }
+                    CancelButton(dirty: dirty)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L.dialogChartSave, action: apply)
                 }
             }
         }
+        .interactiveDismissDisabled(dirty)
         .onAppear(perform: load)
     }
 
@@ -67,6 +73,7 @@ struct ChartSheet: View {
         caption = d["caption"]?.string ?? ""
         let raw = (try? JSONEncoder().encode(d)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         text = MobileChartText(raw)
+        original = fields
     }
 
     /// apply reads the chart as the core does, and saves it, or says what

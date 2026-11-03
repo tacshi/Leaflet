@@ -1,8 +1,11 @@
 package app
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -24,14 +27,14 @@ func TestRenderedPages(t *testing.T) {
 		t.Error("diagram source not escaped")
 	}
 	// Only the full screen page fills its frame and asks to leave.
-	if strings.Contains(page, "const full = true") || strings.Contains(page, "#v{height:100%}") {
+	if strings.Contains(page, `"full":true`) || strings.Contains(page, "#v{height:100%}") {
 		t.Error("inline diagram page fills its frame")
 	}
 	// Edge labels sit on the color behind the diagram, over the lines.
 	if !strings.Contains(page, "--pele-bg:#ffffff") {
 		t.Error("diagram labels have no background")
 	}
-	if full := rendered.DiagramPage("graph TD\n  A-->B", "#ffffff", true); !strings.Contains(full, "const full = true") || !strings.Contains(full, "#v{height:100%}") {
+	if full := rendered.DiagramPage("graph TD\n  A-->B", "#ffffff", true); !strings.Contains(full, `"full":true`) || !strings.Contains(full, "#v{height:100%}") {
 		t.Error("full screen diagram page does not fill its frame")
 	}
 	if page := rendered.MathPage(`\frac{a}{b}`); !strings.Contains(page, `"\\frac{a}{b}"`) || !strings.Contains(page, "katex.render(") {
@@ -125,5 +128,33 @@ func TestLinkInfoKeptInAClosedPage(t *testing.T) {
 	n := a.st.Content(p.ID).Find("l1")
 	if n == nil || n.Str("title") != "Go" || n.Str("site") != "go.dev" {
 		t.Errorf("stored card %+v", n)
+	}
+}
+
+// A question to the web that failed, as offline, is asked again once a
+// while has passed, not at each frame that shows its card, nor never; an
+// answer is kept.
+func TestWebAnswersAskAgainAfterAFailure(t *testing.T) {
+	a := &App{}
+	var w webAnswers[string]
+	asked := 0
+	ask := func() (string, error) {
+		if asked++; asked == 1 {
+			return "", errors.New("offline")
+		}
+		return "Go", nil
+	}
+	var got []string
+	keep := func(s string) { got = append(got, s) }
+	if v := w.get(a, "go.dev", ask, keep); v != "" || asked != 1 || !w.settled("go.dev") {
+		t.Fatalf("first: %q, asked %d, settled %v", v, asked, w.settled("go.dev"))
+	}
+	if v := w.get(a, "go.dev", ask, keep); v != "" || asked != 1 {
+		t.Fatalf("right after it failed: %q, asked %d", v, asked)
+	}
+	w.failed["go.dev"] = time.Now().Add(-imageRetry)
+	w.get(a, "go.dev", ask, keep)
+	if v := w.get(a, "go.dev", ask, keep); v != "Go" || asked != 2 || fmt.Sprint(got) != "[Go]" {
+		t.Errorf("once the wait was over: %q, asked %d, got %v", v, asked, got)
 	}
 }

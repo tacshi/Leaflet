@@ -1,3 +1,4 @@
+import LeafletCore
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -150,6 +151,9 @@ struct HistorySheet: View {
     @State private var chosen: PageVersion.ID?
     @State private var naming = false
     @State private var name = ""
+    /// sizeClass is the sheet's: compact, as on iPhone, it shows the list
+    /// alone, which a version chosen would push away.
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         NavigationSplitView {
@@ -187,6 +191,7 @@ struct HistorySheet: View {
             if let v = versions?.first(where: { $0.id == chosen }) {
                 ScrollView {
                     MarkdownPreview(markdown: v.markdown, size: app.textSize)
+                        .foregroundStyle(palette.text)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(24)
                 }
@@ -209,11 +214,18 @@ struct HistorySheet: View {
             Button(L.commonSave) { Task { await keep() } }
         }
         .task { await load() }
+        .onChange(of: sizeClass) { chooseFirst() }
     }
 
     private func load() async {
         versions = (try? await app.client?.history(page.id)) ?? []
-        if chosen == nil { chosen = versions?.first?.id }
+        chooseFirst()
+    }
+
+    /// chooseFirst shows the latest version beside the list, where there
+    /// is room for both.
+    private func chooseFirst() {
+        if chosen == nil, sizeClass == .regular { chosen = versions?.first?.id }
     }
 
     private func keep() async {
@@ -226,10 +238,27 @@ struct HistorySheet: View {
         }
     }
 
+    /// restore puts the version back, with Undo in the toast, which
+    /// restores the page as it was, kept as a version first: the editor's
+    /// own Undo has only the typing and agents' runs.
     private func restore(_ v: PageVersion) async {
+        guard let client = app.client else { return }
         do {
-            try await app.client?.restoreVersion(page.id, id: v.id)
-            app.show(Toast(message: L.dialogHistoryRestored))
+            let kept = try await client.restoreVersion(page.id, id: v.id)
+            var toast = Toast(message: L.dialogHistoryRestored)
+            if !kept.isEmpty {
+                let pageID = page.id
+                toast.actionLabel = L.commonUndo
+                toast.action = { [app] in
+                    do {
+                        try await client.restoreVersion(pageID, id: kept)
+                    } catch {
+                        let why = error.localizedDescription
+                        app.show(Toast(message: L.dialogHistoryRestoreFailed(error: why)))
+                    }
+                }
+            }
+            app.show(toast)
             dismiss()
         } catch {
             app.show(
@@ -238,168 +267,165 @@ struct HistorySheet: View {
     }
 }
 
-/// MarkdownPreview shows a page's Markdown as the page shows its blocks,
-/// as the desktop's History dialog does: headings, lists, to-dos, quotes
-/// and code, with their inline formats.
+/// MarkdownPreview shows Markdown as the page shows its blocks, read as
+/// the core reads it pasted (MobileMarkdownBlocks): headings, lists,
+/// to-dos, quotes, code and tables, with their inline formats. History
+/// shows a version of a page so, and the Agent panel an answer, a fence
+/// still open as it streams in running to its end.
 struct MarkdownPreview: View {
     let markdown: String
-    let size: Double
+    /// size is the page's text size, which a version shows in, or nil
+    /// for the text styles', as a chat's.
+    var size: Double?
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(Self.lines(markdown).enumerated()), id: \.offset) { _, line in
-                view(line)
+            ForEach(Array(Self.rows(Self.blocks(markdown)).enumerated()), id: \.offset) { _, row in
+                view(row)
             }
         }
-        .foregroundStyle(palette.text)
         .textSelection(.enabled)
     }
 
-    enum Line {
-        case heading(Int, String)
-        case item(String, String, Int)
-        case quote(String)
-        case code(String)
-        case table([[String]])
-        case text(String)
+    /// Row is a block as it shows: at its depth, and its number in a
+    /// numbered list.
+    struct Row {
+        let node: DocNode
+        let depth: Int
+        let number: Int
     }
 
-    /// lines reads the Markdown a block a line, a fenced code block whole.
-    static func lines(_ md: String) -> [Line] {
-        var out: [Line] = []
-        var code: [String]?
-        for raw in md.components(separatedBy: "\n") {
-            if raw.hasPrefix("```") {
-                if let c = code {
-                    out.append(.code(c.joined(separator: "\n")))
-                    code = nil
-                } else {
-                    code = []
-                }
-                continue
-            }
-            if code != nil {
-                code?.append(raw)
-                continue
-            }
-            let trimmed = raw.drop { $0 == " " }
-            let depth = (raw.count - trimmed.count) / 2
-            let line = String(trimmed)
-            if line.isEmpty || line == "<details>" || line == "</details>" { continue }
-            if line.hasPrefix("|") {
-                // A table's rows, its separator left out.
-                var row = line.trimmingCharacters(in: .whitespaces)
-                if row.hasPrefix("|") { row.removeFirst() }
-                if row.hasSuffix("|") { row.removeLast() }
-                let cells = row.components(separatedBy: "|")
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                if cells.contains(where: { $0.contains("-") }),
-                    cells.allSatisfy({ $0.allSatisfy { $0 == "-" || $0 == ":" } })
-                {
-                    continue
-                }
-                if case .table(var rows) = out.last {
-                    rows.append(cells)
-                    out[out.count - 1] = .table(rows)
-                } else {
-                    out.append(.table([cells]))
-                }
-                continue
-            }
-            if line.hasPrefix("<summary>"), line.hasSuffix("</summary>") {
-                out.append(.item("▾", String(line.dropFirst(9).dropLast(10)), depth))
-                continue
-            }
-            // A callout's tone, as GitHub's alerts mark it.
-            if line.hasPrefix("> [!"), line.hasSuffix("]") { continue }
-            if let hashes = line.firstIndex(of: " "), line[..<hashes].allSatisfy({ $0 == "#" }) {
-                out.append(
-                    .heading(
-                        line.distance(from: line.startIndex, to: hashes),
-                        String(line[line.index(after: hashes)...])))
-            } else if line.hasPrefix("- [ ] ") || line == "- [ ]" {
-                out.append(.item("☐", String(line.dropFirst(6)), depth))
-            } else if line.hasPrefix("- [x] ") || line == "- [x]" {
-                out.append(.item("☑", String(line.dropFirst(6)), depth))
-            } else if line.hasPrefix("- ") || line == "-" {
-                out.append(.item("•", String(line.dropFirst(2)), depth))
-            } else if let dot = line.firstIndex(of: "."), line[..<dot].allSatisfy(\.isNumber),
-                !line[..<dot].isEmpty
-            {
-                out.append(
-                    .item(
-                        String(line[...dot]),
-                        String(line[line.index(after: dot)...]).trimmingCharacters(
-                            in: .whitespaces), depth))
-            } else if line.hasPrefix("> ") {
-                out.append(.quote(String(line.dropFirst(2))))
-            } else {
-                out.append(.text(line))
-            }
+    /// blocks reads markdown as the core does.
+    static func blocks(_ markdown: String) -> [DocNode] {
+        var error: NSError?
+        let raw = MobileMarkdownBlocks(markdown, &error)
+        return (try? JSONDecoder().decode([DocNode].self, from: Data(raw.utf8))) ?? []
+    }
+
+    /// rows are blocks one after another, those in a block after it, one
+    /// deeper; a numbered item goes on from the one before it at its depth,
+    /// as on the page.
+    static func rows(_ blocks: [DocNode], depth: Int = 0) -> [Row] {
+        var out: [Row] = []
+        var number = 0
+        for n in blocks {
+            number = n.type == "numbered_list" ? number + 1 : 0
+            out.append(Row(node: n, depth: depth, number: number))
+            // A table's children are its cells.
+            if n.type != "table" { out += rows(n.children ?? [], depth: depth + 1) }
         }
-        if let c = code { out.append(.code(c.joined(separator: "\n"))) }
         return out
     }
 
-    @ViewBuilder private func view(_ line: Line) -> some View {
-        switch line {
-        case .heading(let level, let text):
-            inline(text)
-                .font(
-                    Fonts.pageText(size: size * [1.75, 1.4, 1.18, 1.05][min(max(level, 1), 4) - 1])
-                )
+    /// text is a block's text with its formats and links, as the page has
+    /// them.
+    static func text(_ node: DocNode) -> AttributedString {
+        var out = AttributedString()
+        for op in node.data?["delta"]?.array ?? [] {
+            guard let insert = op["insert"]?.string else { continue }
+            let a = DocumentMapper.inline(op["attributes"])
+            var run = AttributedString(insert)
+            var intent: InlinePresentationIntent = []
+            if a[.leafletBold] != nil { intent.insert(.stronglyEmphasized) }
+            if a[.leafletItalic] != nil { intent.insert(.emphasized) }
+            if a[.leafletCode] != nil { intent.insert(.code) }
+            if a[.leafletStrike] != nil { intent.insert(.strikethrough) }
+            if !intent.isEmpty { run.inlinePresentationIntent = intent }
+            if a[.leafletUnderline] != nil { run.underlineStyle = .single }
+            if let url = EditorStyle.linkTarget(a) { run.link = url }
+            out += run
+        }
+        return out
+    }
+
+    /// font is the font of the text of a block of kind, scaled by scale
+    /// from the page's size, or the text style's.
+    private func font(_ scale: Double = 1, style: Font.TextStyle = .body) -> Font {
+        size.map { Fonts.pageText(size: $0 * scale) } ?? .system(style)
+    }
+
+    @ViewBuilder private func view(_ row: Row) -> some View {
+        let n = row.node
+        let text = Text(Self.text(n))
+        let indent = CGFloat(row.depth) * (size == nil ? 14 : EditorStyle.indent)
+        switch n.type {
+        case "heading":
+            let level = min(max(Int(n.data?["level"]?.int ?? 1), 1), 4)
+            text
+                .font(font([1.75, 1.4, 1.18, 1.05][level - 1], style: .headline))
                 .fontWeight(.semibold)
-                .padding(.top, 8)
-        case .item(let marker, let text, let depth):
+                .padding(.top, size == nil ? 2 : 8)
+                .padding(.leading, indent)
+        case "bulleted_list", "numbered_list", "todo_list", "toggle_list":
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(marker).foregroundStyle(palette.textSecondary)
-                inline(text)
+                Text(Self.marker(row)).foregroundStyle(palette.textSecondary).monospacedDigit()
+                text
             }
-            .font(Fonts.pageText(size: size))
-            .padding(.leading, CGFloat(depth) * EditorStyle.indent)
-        case .quote(let text):
-            inline(text)
-                .font(Fonts.pageText(size: size)).italic()
+            .font(font())
+            .padding(.leading, indent)
+        case "quote", "callout":
+            text
+                .font(font()).italic(n.type == "quote")
                 .padding(.leading, 12)
                 .overlay(alignment: .leading) {
                     Capsule().fill(palette.accentSoftBorder).frame(width: 3)
                 }
-        case .code(let text):
-            Text(text)
-                .font(.system(size: size * 0.85, design: .monospaced))
+                .padding(.leading, indent)
+        case "code", "math_equation", "diagram":
+            Text(Self.source(n))
+                .font(.system(size: (size ?? 17) * 0.85, design: .monospaced))
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(palette.code, in: .rect(cornerRadius: 8))
-        case .table(let rows):
-            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-                ForEach(rows.indices, id: \.self) { r in
-                    GridRow {
-                        ForEach(rows[r].indices, id: \.self) { c in
-                            inline(rows[r][c])
-                                .font(Fonts.pageText(size: size * 0.88))
-                                .fontWeight(r == 0 ? .semibold : .regular)
-                                .padding(.vertical, 8)
-                                .padding(.horizontal, 10)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(r == 0 ? palette.panel : .clear)
-                                .border(palette.divider, width: 0.5)
-                        }
-                    }
-                }
-            }
-            .clipShape(.rect(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border))
-        case .text(let text):
-            inline(text).font(Fonts.pageText(size: size))
+                .padding(.leading, indent)
+        case "table":
+            table(TableGrid.rows(n))
+                .padding(.leading, indent)
+        case "divider":
+            Divider().padding(.vertical, 4)
+        default:
+            text.font(font()).padding(.leading, indent)
         }
     }
 
-    private func inline(_ text: String) -> Text {
-        Text(
-            (try? AttributedString(
-                markdown: text,
-                options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                ?? AttributedString(text))
+    /// marker is what goes before a list item, as the page draws it.
+    static func marker(_ row: Row) -> String {
+        switch row.node.type {
+        case "numbered_list": "\(row.number)."
+        case "todo_list": row.node.data?["checked"]?.bool == true ? "☑" : "☐"
+        case "toggle_list": "▾"
+        default: "•"
+        }
+    }
+
+    /// source is a code block's, a formula's or a diagram's text.
+    static func source(_ node: DocNode) -> String {
+        switch node.type {
+        case "math_equation", "diagram":
+            node.data?[MobileSourceKey(node.type)]?.string ?? node.text
+        default: node.text
+        }
+    }
+
+    private func table(_ rows: [[String]]) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+            ForEach(rows.indices, id: \.self) { r in
+                GridRow {
+                    ForEach(rows[r].indices, id: \.self) { c in
+                        Text(rows[r][c])
+                            .font(font(0.88, style: .subheadline))
+                            .fontWeight(r == 0 ? .semibold : .regular)
+                            .padding(.vertical, 8)
+                            .padding(.horizontal, 10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(r == 0 ? palette.panel : .clear)
+                            .border(palette.divider, width: 0.5)
+                    }
+                }
+            }
+        }
+        .clipShape(.rect(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border))
     }
 }

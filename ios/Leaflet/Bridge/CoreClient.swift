@@ -1,5 +1,7 @@
 import Foundation
 import LeafletCore
+import Synchronization
+import os
 
 /// CoreEvent is what changes in the core, as the app hears it.
 enum CoreEvent: Sendable {
@@ -8,8 +10,10 @@ enum CoreEvent: Sendable {
     /// syncState says a pass started or ended, with why it failed.
     case syncState(running: Bool, failure: String?)
     /// pageUpdated gives an open page's content after a change from
-    /// outside the editor: "external", "agent" or "merge".
-    case pageUpdated(pageID: String, content: String, rev: Int64, reason: String, newStep: Bool)
+    /// outside the editor: "external", "agent" or "merge". Its JSON is
+    /// read as it comes, on the core's thread, not the main one.
+    case pageUpdated(
+        pageID: String, content: DocContent, rev: Int64, reason: String, newStep: Bool)
     case pageReadOnly(pageID: String, readOnly: Bool)
     /// pageSaving says whether an open page's edits wait to be saved.
     case pageSaving(pageID: String, saving: Bool)
@@ -17,11 +21,13 @@ enum CoreEvent: Sendable {
     case tint(pageID: String, ids: [String])
     /// notice tells the user something.
     case notice(String)
-    /// agentsChanged says an agent's state changed, on some page.
-    case agentsChanged
+    /// agentsChanged says the agent state of a page changed, or of every
+    /// page for "".
+    case agentsChanged(pageID: String)
     /// recording gives the recording in progress, and the transcriptions
-    /// running, as they change.
+    /// running, as they change; recordingLevels its latest levels.
     case recording(RecordingState)
+    case recordingLevels([Double])
 }
 
 /// CoreClient is the Go core, as the app calls it. Every call blocks
@@ -29,9 +35,11 @@ enum CoreEvent: Sendable {
 /// Swift's own threads, which must not wait. Calls reach the core one at
 /// a time, in the order they are made, as the core runs them on its own
 /// queue: a later read can't come back with what was there before an
-/// earlier write, nor an earlier read land after a later one. Only calls
-/// that wait on the network or on the user step out of line (waiting),
-/// for the others not to wait behind them.
+/// earlier write, nor an earlier read land after a later one. The calls
+/// that can take long step out of line (waiting), for the others not to
+/// wait behind them: those that wait on the network or the user, and
+/// those that copy a file or read many versions; their order among the
+/// others is then not kept.
 final class CoreClient: Sendable {
     let events: AsyncStream<CoreEvent>
     private let core: CoreRef
@@ -114,6 +122,24 @@ final class CoreClient: Sendable {
         }
     }
 
+    /// cancellable runs body as a waiting call, with a token by which the
+    /// core gives up on it as the task that called it is cancelled: a
+    /// download for a page that closed holds a thread no longer.
+    nonisolated(nonsending) func cancellable<T: Sendable>(
+        _ body: @escaping @Sendable (MobileCore, Int64) throws -> T
+    ) async throws -> T {
+        let token = Self.tokens.add(1, ordering: .relaxed).newValue
+        let ref = core
+        return try await withTaskCancellationHandler {
+            try await call(waiting: true) { core in try body(core, token) }
+        } onCancel: {
+            ref.core.cancel(token)
+        }
+    }
+
+    /// tokens numbers the calls that may be given up on.
+    private static let tokens = Atomic<Int64>(0)
+
     /// inOrder runs the calls one at a time, as they are made; beside, the
     /// calls that wait, at once.
     private static let inOrder = DispatchQueue(
@@ -140,7 +166,12 @@ final class CoreClient: Sendable {
 
     // MARK: Lifecycle and sync
 
-    nonisolated(nonsending) func start() async { try? await call { $0.start() } }
+    /// start starts sync and watching iCloud Drive's folder, as the app
+    /// comes to the front: the folder may be watched from now on.
+    nonisolated(nonsending) func start() async {
+        platform.setInFront(true)
+        try? await call { $0.start() }
+    }
     /// stop cuts short a pass running, SyncNow's too, so it doesn't wait
     /// behind one.
     nonisolated(nonsending) func stop() async { try? await call(waiting: true) { $0.stop() } }
@@ -174,9 +205,11 @@ final class CoreClient: Sendable {
         try await call(LibrarySnapshot.self) { core in try Self.answer { e in core.library(e) } }
     }
 
+    /// A page that starts from a template waits beside the other calls,
+    /// as applyTemplate does: what its files need may download first.
     nonisolated(nonsending) func createPage(_ page: NewPage) async throws -> PageRow {
         let json = try encode(page)
-        return try await call(PageRow.self) { core in
+        return try await call(PageRow.self, waiting: page.start) { core in
             try Self.answer { e in core.createPage(json, error: e) }
         }
     }
@@ -253,8 +286,18 @@ final class CoreClient: Sendable {
         }
     }
 
-    nonisolated(nonsending) func todos() async throws -> [Todo] {
-        try await call([Todo].self) { core in try Self.answer { e in core.todos(e) } }
+    /// todos are the open to-dos with a due date or an owner, in the
+    /// To-dos tab's sections, as the desktop sorts them.
+    nonisolated(nonsending) func todos() async throws -> [TodoGroup] {
+        try await call([TodoGroup].self) { core in try Self.answer { e in core.todos(e) } }
+    }
+
+    /// moveTargets are the pages a page can move under, the one changed
+    /// last first, by ID.
+    nonisolated(nonsending) func moveTargets(_ id: String) async throws -> [String] {
+        try await call([String].self) { core in
+            try Self.answer { e in core.moveTargets(id, error: e) }
+        }
     }
 
     // MARK: Settings
@@ -291,8 +334,9 @@ final class CoreClient: Sendable {
     nonisolated(nonsending) func editPage(
         _ id: String, editor: Int64, content: DocContent, rev: Int64
     ) async throws -> Int64 {
-        let json = try encode(content)
-        return try await call { core in
+        // Encoded off the caller's thread, the main one, with the call.
+        try await call { core in
+            let json = try self.encode(content)
             var left: Int64 = 0
             try core.editPage(id, editor: editor, content: json, rev: rev, left: &left)
             return left
@@ -336,9 +380,10 @@ private final class EventBridge: NSObject, MobileEventsProtocol, Sendable {
     func pageUpdated(
         _ pageID: String?, content: String?, rev: Int64, reason: String?, newStep: Bool
     ) {
+        guard let c = Self.decode(DocContent.self, content, "page") else { return }
         to.yield(
             .pageUpdated(
-                pageID: pageID ?? "", content: content ?? "", rev: rev, reason: reason ?? "",
+                pageID: pageID ?? "", content: c, rev: rev, reason: reason ?? "",
                 newStep: newStep))
     }
 
@@ -351,7 +396,7 @@ private final class EventBridge: NSObject, MobileEventsProtocol, Sendable {
     }
 
     func tint(_ pageID: String?, ids: String?) {
-        let list = (try? JSONDecoder().decode([String].self, from: Data((ids ?? "[]").utf8))) ?? []
+        let list = Self.decode([String].self, ids ?? "[]", "tint") ?? []
         to.yield(.tint(pageID: pageID ?? "", ids: list))
     }
 
@@ -359,15 +404,31 @@ private final class EventBridge: NSObject, MobileEventsProtocol, Sendable {
         to.yield(.notice(message ?? ""))
     }
 
-    func agentsChanged() {
-        to.yield(.agentsChanged)
+    func agentsChanged(_ pageID: String?) {
+        to.yield(.agentsChanged(pageID: pageID ?? ""))
     }
 
     func recordingChanged(_ state: String?) {
-        guard
-            let s = try? JSONDecoder().decode(
-                RecordingState.self, from: Data((state ?? "").utf8))
-        else { return }
+        guard let s = Self.decode(RecordingState.self, state, "recording") else { return }
         to.yield(.recording(s))
+    }
+
+    func recordingLevels(_ levels: String?) {
+        guard let l = Self.decode([Double].self, levels, "recording levels") else { return }
+        to.yield(.recordingLevels(l))
+    }
+
+    /// decode reads an event's JSON as type, or logs why it can't, for the
+    /// event that is dropped then: one the app can't read means the core
+    /// and the app disagree on its form.
+    private static func decode<T: Decodable>(_ type: T.Type, _ json: String?, _ what: String)
+        -> T?
+    {
+        do {
+            return try JSONDecoder().decode(type, from: Data((json ?? "").utf8))
+        } catch {
+            Logger.app.error("The core's \(what, privacy: .public) event can't be read: \(error)")
+            return nil
+        }
     }
 }

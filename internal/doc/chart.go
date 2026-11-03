@@ -47,7 +47,7 @@ type ChartSeries struct {
 
 // ChartOf reads a chart block's data, as everything that shows one does:
 // a bar chart unless it is another, a value that is no number 0, a label
-// as specText writes it, and a series with no name, or one that is no
+// as JSONText writes it, and a series with no name, or one that is no
 // text, nameless.
 func ChartOf(n *Node) Chart {
 	ch := Chart{Kind: n.Str("chart_type"), Title: n.Str("title"), Caption: n.Str("caption")}
@@ -57,7 +57,7 @@ func ChartOf(n *Node) Chart {
 	for _, l := range listOf(n.Data["labels"]) {
 		// A label is text as the server writes it: a number as JavaScript
 		// writes one, null, a list or an object nothing.
-		ch.Labels = append(ch.Labels, specText(l))
+		ch.Labels = append(ch.Labels, JSONText(l))
 	}
 	for _, s := range listOf(n.Data["series"]) {
 		m := asMap(s)

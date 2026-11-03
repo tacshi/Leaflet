@@ -3,8 +3,10 @@ package export
 import (
 	"archive/zip"
 	"bytes"
+	"errors"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -45,9 +47,9 @@ func TestExportZip(t *testing.T) {
 			}
 			return ""
 		},
-		func(p string) ([]byte, error) {
+		func(p string) (io.ReadCloser, error) {
 			if p == "/data/files/x/dawn.jpg" || p == "/data/files/sun/sun.jpg" {
-				return []byte("jpeg"), nil
+				return io.NopCloser(strings.NewReader("jpeg")), nil
 			}
 			return nil, os.ErrNotExist
 		})
@@ -98,7 +100,7 @@ func TestExportZipDotNames(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	err := Zip(&buf, pages, []store.Folder{{ID: "f", Name: ".."}}, func(string) *doc.Content { return doc.Empty() },
-		func(string) string { return "" }, os.ReadFile)
+		func(string) string { return "" }, openFile)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +138,7 @@ func TestExportZipFilesBesidePages(t *testing.T) {
 			return c
 		}
 		return doc.Empty()
-	}, func(string) string { return "" }, func(string) ([]byte, error) { return []byte("attached"), nil })
+	}, func(string) string { return "" }, func(string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("attached")), nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,6 +161,116 @@ func TestExportZipFilesBesidePages(t *testing.T) {
 	}
 	if other := got["Other.md"]; !strings.Contains(other, "](files/notes%20%282%29.md)") {
 		t.Errorf("other:\n%s", other)
+	}
+}
+
+// openFile opens a test's file as Zip reads one.
+func openFile(path string) (io.ReadCloser, error) { return os.Open(path) } // #nosec G304 -- the test's own files.
+
+// unzip reads a zip's files by name, failing t on one that is there twice.
+func unzip(t *testing.T, b []byte) map[string]string {
+	t.Helper()
+	r, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, f := range r.File {
+		if _, ok := got[f.Name]; ok {
+			t.Errorf("%s is in the zip twice", f.Name)
+		}
+		rc, _ := f.Open()
+		data, _ := io.ReadAll(rc)
+		_ = rc.Close()
+		got[f.Name] = string(data)
+	}
+	return got
+}
+
+// A page named as another page's file is, "X.md" beside "X", has a file
+// and a directory of its subpages apart from that file, whichever comes
+// first: a zip with a file and a directory of one name opens nowhere.
+func TestExportZipNoFileNamedAsADirectory(t *testing.T) {
+	for _, pages := range [][]store.Page{
+		{{ID: "x", Title: "X"}, {ID: "xmd", Title: "X.md"}, {ID: "child", Title: "Child", ParentID: "xmd"}},
+		{{ID: "xmd", Title: "x.MD"}, {ID: "child", Title: "Child", ParentID: "xmd"}, {ID: "x", Title: "X"}},
+	} {
+		var buf bytes.Buffer
+		if err := Zip(&buf, pages, nil, func(string) *doc.Content { return doc.Empty() }, func(string) string { return "" }, openFile); err != nil {
+			t.Fatal(err)
+		}
+		got := unzip(t, buf.Bytes())
+		dirs := map[string]bool{}
+		for name := range got {
+			for d := path.Dir(name); d != "."; d = path.Dir(d) {
+				dirs[strings.ToLower(d)] = true
+			}
+		}
+		for name := range got {
+			if dirs[strings.ToLower(name)] {
+				t.Errorf("%s is a file and a directory in %v", name, keys(got))
+			}
+		}
+		if len(got) != 3 {
+			t.Errorf("files %v", keys(got))
+		}
+	}
+}
+
+// Links are written to the zip's files where the page has them, in its
+// text and its blocks; text that only reads as a link, in code or not,
+// stays as it is.
+func TestExportZipLinksOnlyLinks(t *testing.T) {
+	pages := []store.Page{{ID: "e", Title: "Notes"}, {ID: "p", Title: "Plan"}}
+	code := doc.CodeNode("see (leaflet://page/e) and (file:///data/files/x/dawn.jpg) here", "")
+	code.ID = "c"
+	text := &doc.Node{ID: "t", Type: "paragraph"}
+	text.SetDelta(doc.Delta{{Text: "Notes", Attrs: doc.Attrs{Href: doc.PageLink("e")}}, {Text: " or (leaflet://page/e#b)"}})
+	img := &doc.Node{ID: "i", Type: "image", Data: map[string]any{"url": "file:///data/files/x/dawn.jpg", "alt": "dawn"}}
+	contents := map[string]*doc.Content{"e": doc.Empty(), "p": doc.FromBlocks([]*doc.Node{code, text, img})}
+	var buf bytes.Buffer
+	err := Zip(&buf, pages, nil, func(id string) *doc.Content { return contents[id] }, func(string) string { return "" },
+		func(p string) (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("jpeg")), nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan := unzip(t, buf.Bytes())["Plan.md"]
+	for _, want := range []string{"see (leaflet://page/e) and (file:///data/files/x/dawn.jpg) here", "[Notes](Notes.md) or (leaflet://page/e#b)", "![dawn](files/dawn.jpg)"} {
+		if !strings.Contains(plan, want) {
+			t.Errorf("no %q in\n%s", want, plan)
+		}
+	}
+}
+
+// Export takes only the files the store keeps: a block that names another
+// file in the app's own folder, as its database, leaves it out of the zip.
+func TestOwnFilesOpensOnlyTheStoresFiles(t *testing.T) {
+	dir := t.TempDir()
+	own, db := filepath.Join(dir, "files", "f1", "a.png"), filepath.Join(dir, "leaflet.db")
+	if err := os.MkdirAll(filepath.Dir(own), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{own, db} {
+		if err := os.WriteFile(p, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	localPath, open := OwnFiles([]store.File{{ID: "f1", LocalPath: own}, {ID: "dir", LocalPath: dir}})
+	if localPath("f1") != own {
+		t.Errorf("f1 is at %q", localPath("f1"))
+	}
+	f, err := open(own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+	for _, p := range []string{db, dir} {
+		if f, err := open(p); !errors.Is(err, ErrNotOwnFile) {
+			t.Errorf("opened %s: %v", p, err)
+			if f != nil {
+				_ = f.Close()
+			}
+		}
 	}
 }
 
@@ -191,7 +303,7 @@ func TestExportZipNestedFolders(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	err := Zip(&buf, pages, folders, func(string) *doc.Content { return doc.Empty() },
-		func(string) string { return "" }, os.ReadFile)
+		func(string) string { return "" }, openFile)
 	if err != nil {
 		t.Fatal(err)
 	}

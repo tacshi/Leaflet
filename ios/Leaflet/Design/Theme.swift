@@ -61,11 +61,10 @@ extension EnvironmentValues {
     @Entry var palette: Palette = Palette.palettes["Blue"]!["light"]!
 }
 
-/// Fonts are Leaflet's own: Figtree for the interface's titles, Source
-/// Serif 4 for pages, scaled with Dynamic Type.
+/// Fonts are Leaflet's own: Source Serif 4 for pages, scaled with Dynamic
+/// Type. The interface is in the system's font, as iOS apps are.
 enum Fonts {
     static let page = "Source Serif 4"
-    static let ui = "Figtree"
 
     /// register makes the bundled fonts usable by name, once, at launch.
     static func register() {

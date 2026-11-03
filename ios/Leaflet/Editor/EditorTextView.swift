@@ -297,6 +297,8 @@ final class EditorTextView: UITextView {
         var commands: [UIKeyCommand] = [
             key("\t", [], #selector(indent), LI.indent),
             key("\t", .shift, #selector(outdent), LI.outdent),
+            // A line break within the block, as on the desktop.
+            key("\r", .shift, #selector(softBreak), ""),
         ]
         // Escape ends a selection, as on the desktop.
         if selectedRange.length > 0 {
@@ -344,6 +346,7 @@ final class EditorTextView: UITextView {
         selectedRange = NSRange(location: NSMaxRange(selectedRange), length: 0)
     }
     @objc func indent() { controller?.indent(by: 1) }
+    @objc func softBreak() { controller?.softBreak() }
     @objc func outdent() { controller?.indent(by: -1) }
     @objc func toggleCode() { controller?.toggleInline(.leafletCode) }
     @objc func toggleStrike() { controller?.toggleInline(.leafletStrike) }
@@ -356,6 +359,20 @@ final class EditorTextView: UITextView {
     @objc func makeHeading3() { controller?.setType("heading", ["level": .int(3)]) }
     @objc func makeTodo() { controller?.setType("todo_list", ["checked": .bool(false)]) }
     @objc func copyPlainText() { controller?.copyPlainText() }
+
+    /// Copy and Cut take the selection as the system does, and the editor
+    /// keeps it as Leaflet's own copy, which pastes back as it was.
+    override func copy(_ sender: Any?) {
+        controller?.copied()
+        super.copy(sender)
+        controller?.copiedOut()
+    }
+
+    override func cut(_ sender: Any?) {
+        controller?.copied()
+        super.cut(sender)
+        controller?.copiedOut()
+    }
 
     // The system's format commands (⌘B, ⌘I, ⌘U) set the block's formats,
     // which the style then shows, rather than the fonts themselves.

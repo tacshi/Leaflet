@@ -21,6 +21,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/egoist/mygo/i18n"
+
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
@@ -81,7 +83,7 @@ func All(file string, src Source, allFolders []store.Folder, allFiles []store.Fi
 	if err != nil {
 		return 0, err
 	}
-	localPath, readFile := OwnFiles(st.Dir, allFiles)
+	localPath, open := OwnFiles(allFiles)
 	// Recordings' audio goes in files/ too, from a folder of the export's
 	// own that goes once the zip is written.
 	audio, err := os.MkdirTemp(st.Dir, "export-")
@@ -94,7 +96,13 @@ func All(file string, src Source, allFolders []store.Folder, allFiles []store.Fi
 	content := func(id string) *doc.Content {
 		return withAudio(src, WithTranscripts(st, st.Content(id)), audio)
 	}
-	err = Zip(f, pages, folders, content, localPath, readFile)
+	openFile := func(path string) (io.ReadCloser, error) {
+		if InFolder(audio, path) {
+			return openRegular(path)
+		}
+		return open(path)
+	}
+	err = Zip(f, pages, folders, content, localPath, openFile)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -236,14 +244,15 @@ func copyAudio(from, path string) error {
 	return err
 }
 
-// ErrNotOwnFile is for a file outside the app's data folder.
+// ErrNotOwnFile is for a file that is not one of the app's own.
 var ErrNotOwnFile = errors.New("not a file of the app's")
 
 // OwnFiles returns where each of files is on this device ("" when it is
-// not), and a reader of the app's own files only: those the store keeps,
-// or in its data folder dir. A block's link to a file elsewhere, as from
-// another device or person, is no reason to read it.
-func OwnFiles(dir string, files []store.File) (localPath func(fileID string) string, read func(path string) ([]byte, error)) {
+// not), and an opener of those files alone. A block's link to any other
+// file, as from another device or person, is no reason to read it, even
+// one in the app's own folder, as its database: it could go out in an
+// export or a page shared by link.
+func OwnFiles(files []store.File) (localPath func(fileID string) string, open func(path string) (io.ReadCloser, error)) {
 	known := map[string]string{}
 	owned := map[string]bool{}
 	for _, f := range files {
@@ -251,13 +260,27 @@ func OwnFiles(dir string, files []store.File) (localPath func(fileID string) str
 		owned[f.LocalPath] = f.LocalPath != ""
 	}
 	localPath = func(fileID string) string { return known[fileID] }
-	read = func(path string) ([]byte, error) {
-		if !owned[path] && !InFolder(dir, path) {
+	open = func(path string) (io.ReadCloser, error) {
+		if !owned[path] {
 			return nil, ErrNotOwnFile
 		}
-		return os.ReadFile(path) // #nosec G304 -- a file of the app's own.
+		return openRegular(path)
 	}
-	return localPath, read
+	return localPath, open
+}
+
+// openRegular opens a file to read, if it is a file and not a folder or
+// a device.
+func openRegular(path string) (*os.File, error) {
+	f, err := os.Open(path) // #nosec G304 -- a file of the app's own, as its callers check.
+	if err != nil {
+		return nil, err
+	}
+	if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+		_ = f.Close()
+		return nil, ErrNotOwnFile
+	}
+	return f, nil
 }
 
 // InFolder reports whether path is in folder dir, links followed.
@@ -331,26 +354,29 @@ var windowsDevice = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com[0-9¹²³]|lpt
 
 // Zip writes the pages as Markdown files in a zip: a folder is a
 // directory, in the directory of the folder it is in, and so is a page
-// with subpages, which go in it beside the page's own file. Pictures kept
-// on this device go in files/, and links to them and to subpages are
-// relative, so the zip reads anywhere. localPath is where a file is on
-// this device, or "" when it is not.
+// with subpages, which go in it beside the page's own file. Pictures and
+// files kept on this device go in files/, and links to them and to pages
+// are relative, so the zip reads anywhere. localPath is where a file is
+// on this device, or "" when it is not; open opens one there.
 func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(id string) *doc.Content,
-	localPath func(fileID string) string, readFile func(string) ([]byte, error)) error {
+	localPath func(fileID string) string, open func(string) (io.ReadCloser, error)) error {
 	byID := map[string]store.Page{}
 	for _, p := range pages {
 		byID[p.ID] = p
 	}
 	// used are the paths taken in the zip, in lower case, as file systems
-	// that ignore case take them: a folder's, a page's own and that of
-	// the directory of its subpages. One taken already gets a number.
+	// that ignore case take them: of files and directories alike, so no
+	// file has a directory's name. A folder or a page takes its path, for
+	// a directory, and that with ".md", for a page's file, and a picture
+	// its own; one taken already gets a number.
 	used := map[string]bool{}
+	free := func(name string) bool { return !used[strings.ToLower(name)] && !used[strings.ToLower(name)+".md"] }
 	claim := func(base string) string {
 		name := base
-		for n := 2; used[strings.ToLower(name)]; n++ {
+		for n := 2; !free(name); n++ {
 			name = fmt.Sprintf("%s (%d)", base, n)
 		}
-		used[strings.ToLower(name)] = true
+		used[strings.ToLower(name)], used[strings.ToLower(name)+".md"] = true, true
 		return name
 	}
 	// folderPaths are each folder's directory in the zip, each of its
@@ -401,28 +427,9 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 	}
 
 	z := zip.NewWriter(w)
-	create := func(name string, at time.Time) (io.Writer, error) {
-		// Every name stays inside the folder the zip opens into.
-		if name != path.Clean(name) || path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
-			return nil, fmt.Errorf("export: unsafe name %q", name)
-		}
-		if at.IsZero() {
-			at = time.Now()
-		}
-		return z.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: at})
-	}
-	// files are the pictures written so far, by their URL on this device.
+	// files are the pictures and files written so far, by their URL on
+	// this device.
 	files := map[string]string{}
-	usedFiles := map[string]bool{}
-	// A page's file, or the directory of its subpages or of a folder,
-	// may be in files/ too, in a folder of that name: a file there takes
-	// another name.
-	for _, p := range paths {
-		usedFiles[strings.ToLower(p)], usedFiles[strings.ToLower(p)+".md"] = true, true
-	}
-	for _, p := range folderPaths {
-		usedFiles[strings.ToLower(p)] = true
-	}
 	for _, p := range pages {
 		c := content(p.ID)
 		if c == nil {
@@ -430,12 +437,8 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 		}
 		own := paths[p.ID]
 		rel := func(to string) string { return (&url.URL{Path: relPath(path.Dir(own), to)}).String() }
-		md := doc.PageMarkdown(p.DisplayTitle(), c, func(id string) string {
-			if q, ok := byID[id]; ok {
-				return q.DisplayTitle()
-			}
-			return locales.CommonUntitled()
-		})
+		// The page's pictures and files go in first, for its links to go
+		// to them.
 		var fail error
 		c.Walk(func(n, _ *doc.Node) {
 			if n.Type != "image" && n.Type != "file" || fail != nil {
@@ -443,7 +446,7 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 			}
 			src := n.Str("url")
 			local, ok := strings.CutPrefix(src, "file://")
-			if !ok {
+			if _, done := files[src]; done || !ok {
 				return
 			}
 			// An uploaded file's url is a path on the device that uploaded
@@ -451,42 +454,44 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 			if p := localPath(n.Str("file_id")); p != "" {
 				local = p
 			}
-			name, done := files[src]
-			if !done {
-				data, err := readFile(local)
-				if err != nil {
-					return // gone from this device: the link stays as it was
-				}
-				base := SafeName(filepath.Base(local))
-				name = "files/" + base
-				for n := 2; usedFiles[strings.ToLower(name)]; n++ {
-					ext := path.Ext(base)
-					name = fmt.Sprintf("files/%s (%d)%s", strings.TrimSuffix(base, ext), n, ext)
-				}
-				usedFiles[strings.ToLower(name)] = true
-				fw, err := create(name, p.UpdatedAt)
-				if err != nil {
-					fail = err
-					return
-				}
-				if _, err := fw.Write(data); err != nil {
-					fail = err
-					return
-				}
+			name, err := putFile(z, open, local, used, p.UpdatedAt)
+			switch {
+			case errors.Is(err, errNotRead):
+				// Gone from this device, or not the app's: the link stays as
+				// it was.
+			case err != nil:
+				fail = err
+			default:
 				files[src] = name
 			}
-			md = strings.ReplaceAll(md, "("+doc.LinkDestination(src)+")", "("+rel(name)+")")
 		})
 		if fail != nil {
 			return fail
 		}
 		// Links to pages, of subpage blocks and page mentions alike, and
 		// links to their blocks, go to the pages' files.
-		for id, to := range paths {
-			md = strings.ReplaceAll(md, "("+doc.PageLink(id)+")", "("+rel(to+".md")+")")
-			md = strings.ReplaceAll(md, "("+doc.PageLink(id)+"#", "("+rel(to+".md")+"#")
-		}
-		fw, err := create(own+".md", p.UpdatedAt)
+		md := doc.PageMarkdown(p.DisplayTitle(), c, doc.MarkdownOptions{
+			Lang: i18n.Locale(),
+			PageTitle: func(id string) string {
+				if q, ok := byID[id]; ok {
+					return q.DisplayTitle()
+				}
+				return locales.CommonUntitled()
+			},
+			Link: func(href string) string {
+				if name, ok := files[href]; ok {
+					return rel(name)
+				}
+				if id, ok := doc.PageLinkID(href); ok && paths[id] != "" {
+					if block := doc.LinkBlock(href); block != "" {
+						return rel(paths[id]+".md") + "#" + block
+					}
+					return rel(paths[id] + ".md")
+				}
+				return href
+			},
+		})
+		fw, err := create(z, own+".md", p.UpdatedAt)
 		if err != nil {
 			return err
 		}
@@ -495,6 +500,48 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 		}
 	}
 	return z.Close()
+}
+
+// errNotRead is a file putFile could not read, which the zip goes
+// without.
+var errNotRead = errors.New("export: file not read")
+
+// putFile copies a file kept on this device into the zip's files/, under
+// its own name or, where that is taken, one with a number, and returns
+// the name.
+func putFile(z *zip.Writer, open func(string) (io.ReadCloser, error), local string, used map[string]bool, at time.Time) (string, error) {
+	in, err := open(local)
+	if err != nil {
+		return "", errors.Join(errNotRead, err)
+	}
+	defer func() { _ = in.Close() }()
+	base := SafeName(filepath.Base(local))
+	name := "files/" + base
+	for n := 2; used[strings.ToLower(name)]; n++ {
+		ext := path.Ext(base)
+		name = fmt.Sprintf("files/%s (%d)%s", strings.TrimSuffix(base, ext), n, ext)
+	}
+	used[strings.ToLower(name)] = true
+	fw, err := create(z, name, at)
+	if err != nil {
+		return "", err
+	}
+	if _, err := io.Copy(fw, in); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// create adds a file to the zip, modified at, or now for a zero time.
+// Every name stays inside the folder the zip opens into.
+func create(z *zip.Writer, name string, at time.Time) (io.Writer, error) {
+	if name != path.Clean(name) || path.IsAbs(name) || name == ".." || strings.HasPrefix(name, "../") {
+		return nil, fmt.Errorf("export: unsafe name %q", name)
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	return z.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: at})
 }
 
 // relPath is the path of file to from directory dir, both in the zip.

@@ -18,7 +18,8 @@ installers and updates in the draft release v<version> of tacshi/Leaflet,
 with gh, as the build ends and before the installers are renamed: there
 they keep MyGo's names, leaflet-setup-<version>-<arch>.exe, by which
 SHA256SUMS lists them and install.ps1 finds its installer. Installed copies
-see the update once the draft is published.
+see the update once the draft is published. A release that is published
+already is refused: its files are what installed copies took.
 
 Signs updates with MYGO_UPDATER_PRIVATE_KEY, else the key in the file
 LEAFLET_UPDATE_KEY, by default
@@ -81,8 +82,11 @@ if ($Certificate) {
 }
 Import-UpdateKey
 $BuildArgs = @('build', '-platform', ($Platforms -join ','), '-o', $Out)
+# MyGo uploads once every platform is built, to a release that it does
+# not check is a draft: a published one is refused here, before the build.
 if ($Upload) {
 	Test-Gh
+	Test-Draft $Version
 	$BuildArgs += '-upload'
 }
 

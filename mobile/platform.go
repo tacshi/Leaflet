@@ -68,13 +68,19 @@ type Events interface {
 	Tint(pageID, ids string)
 	// Notice tells the user something, in words for them.
 	Notice(message string)
-	// AgentsChanged says an agent's state changed, on some page: the app
-	// reads the open pages' AgentState and Threads again.
-	AgentsChanged()
+	// AgentsChanged says the agent state of page pageID changed, or of
+	// every page for "": the app reads its AgentState again.
+	AgentsChanged(pageID string)
 	// RecordingChanged gives the recording in progress and the
 	// transcriptions running, as RecordingState returns them, as they
-	// change.
+	// change: not their levels, which RecordingLevels gives, nor as
+	// only the time recorded goes on, which the app counts on from the
+	// last.
 	RecordingChanged(state string)
+	// RecordingLevels gives the latest loudness levels of the recording
+	// in progress, as a JSON array, one each 50 ms, newest last, as
+	// they come.
+	RecordingLevels(levels string)
 }
 
 // secrets keeps the core's secrets in the iOS keychain, through the app.
@@ -175,10 +181,14 @@ func (e *events) notice(message string) {
 // errNotOpen is the error for a page the app edits without opening it.
 var errNotOpen = errors.New("the page isn't open")
 
-func (e *events) agentsChanged() {
-	e.q.post(func() { e.to.AgentsChanged() })
+func (e *events) agentsChanged(pageID string) {
+	e.q.post(func() { e.to.AgentsChanged(pageID) })
 }
 
 func (e *events) recordingChanged(state string) {
 	e.q.post(func() { e.to.RecordingChanged(state) })
+}
+
+func (e *events) recordingLevels(levels string) {
+	e.q.post(func() { e.to.RecordingLevels(levels) })
 }

@@ -37,32 +37,22 @@ func (a *App) videoInfoOf(v doc.Video) videoInfo {
 		return videoInfo{title: v.FileName()}
 	}
 	key := videoKey(v)
-	if info, ok := a.videoInfo[key]; ok {
-		return info
-	}
-	if !a.videoAsked[key] {
-		a.videoAsked[key] = true
-		go func() {
-			var info videoInfo
-			data, err := web.Fetch(v.OEmbedURL())
-			if err == nil {
-				var o struct {
-					Title     string `json:"title"`
-					Thumbnail string `json:"thumbnail_url"`
-				}
-				err = json.Unmarshal(data, &o)
-				info = videoInfo{strings.TrimSpace(o.Title), o.Thumbnail}
+	return a.videoInfo.get(a, key, func() (videoInfo, error) {
+		var info videoInfo
+		data, err := web.Fetch(v.OEmbedURL())
+		if err == nil {
+			var o struct {
+				Title     string `json:"title"`
+				Thumbnail string `json:"thumbnail_url"`
 			}
-			if err != nil {
-				log.Printf("video %s: %v", v.WatchURL(), err)
-			}
-			a.update(func() {
-				a.videoInfo[key] = info
-				a.nameVideos(key, info.title)
-			})
-		}()
-	}
-	return videoInfo{}
+			err = json.Unmarshal(data, &o)
+			info = videoInfo{strings.TrimSpace(o.Title), o.Thumbnail}
+		}
+		if err != nil {
+			log.Printf("video %s: %v", v.WatchURL(), err)
+		}
+		return info, err
+	}, func(info videoInfo) { a.nameVideos(key, info.title) })
 }
 
 // nameVideos gives the open page's blocks of a video without a title the
@@ -99,7 +89,7 @@ func (a *App) videoBlock(c *ui.Context, n *doc.Node, width float32) {
 	if title == "" {
 		title = info.title
 	}
-	if _, answered := a.videoInfo[videoKey(v)]; answered && title == "" {
+	if key := videoKey(v); title == "" && a.videoInfo.settled(key) {
 		// The site does not know the video, or could not be reached: the
 		// link at least says what it was.
 		title = n.Str("url")

@@ -3,6 +3,7 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -575,20 +576,133 @@ func TestEditRunAgainKeepsOneSnapshot(t *testing.T) {
 	}
 }
 
-// A batch, which MCP no longer has, is an invalid request rather than
-// unparsable, as are a request without its method or of another JSON-RPC
-// version, and a notification's method sent with an ID still gets an
-// answer, as JSON-RPC asks.
-func TestBatchAndNotificationWithAnID(t *testing.T) {
+// A block the user changed in the app after the client read the page,
+// which the client then replaces or deletes, is kept in a snapshot first,
+// to restore; one the client wrote itself, or read as it is, keeps none.
+func TestEditOverAChangeNotReadKeepsIt(t *testing.T) {
+	for _, op := range []string{"replace_block", "delete_blocks"} {
+		st := newStore(t)
+		b1 := &doc.Node{ID: "b1", Type: "paragraph"}
+		b1.SetDelta(doc.Delta{{Text: "draft"}})
+		p, err := st.CreatePage(store.NewPageOptions{Content: doc.FromBlocks([]*doc.Node{b1})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := NewServer(st, "test")
+		if out := s.pages.call("read_page", map[string]any{"page_id": p.ID}); out["error"] != nil {
+			t.Fatal(out)
+		}
+		args := map[string]any{"page_id": p.ID, "id": "b1", "block": map[string]any{"type": "paragraph", "text": "agent's"}}
+		if op == "delete_blocks" {
+			args = map[string]any{"page_id": p.ID, "ids": []any{"b1"}}
+		}
+		// Its own edit first, which it knows of.
+		if out := s.pages.call("replace_block", map[string]any{"page_id": p.ID, "id": "b1", "block": map[string]any{"type": "paragraph", "text": "first"}}); out["error"] != nil {
+			t.Fatal(out)
+		}
+		conflicts := func() int {
+			h, _ := st.History(p.ID)
+			n := 0
+			for _, e := range h {
+				if e.Reason == "conflict" {
+					n++
+				}
+			}
+			return n
+		}
+		if n := conflicts(); n != 0 {
+			t.Fatalf("%s: %d conflict snapshots after its own edit", op, n)
+		}
+		// The user types in the app.
+		c := st.Content(p.ID)
+		c.Find("b1").SetDelta(doc.Delta{{Text: "the user's fix"}})
+		if _, _, err := st.SaveContent(p.ID, c); err != nil {
+			t.Fatal(err)
+		}
+		if out := s.pages.call(op, args); out["error"] != nil {
+			t.Fatal(out)
+		}
+		h, _ := st.History(p.ID)
+		if conflicts() != 1 || !strings.Contains(h[0].Content, "the user's fix") {
+			t.Errorf("%s: %d conflict snapshots, newest %q", op, conflicts(), h[0].Content)
+		}
+	}
+}
+
+// A page of a few long embeds is read in parts each within what MCP
+// clients take from a tool, together all of it, and an embed too long to
+// read says how long it is instead.
+func TestLongPageComesInParts(t *testing.T) {
+	st := newStore(t)
+	var blocks []*doc.Node
+	for i := range 40 {
+		n := &doc.Node{ID: fmt.Sprintf("p%d", i), Type: "paragraph"}
+		n.SetDelta(doc.Delta{{Text: strings.Repeat("words ", 50)}})
+		blocks = append(blocks, n)
+		if i%8 == 0 {
+			blocks = append(blocks, &doc.Node{ID: fmt.Sprintf("e%d", i), Type: "embed", Data: map[string]any{"title": "Sim", "html": strings.Repeat("<p>x</p>", 3000)}})
+		}
+	}
+	blocks = append(blocks, &doc.Node{ID: "huge", Type: "embed", Data: map[string]any{"title": "Huge", "html": strings.Repeat("y", 40_000)}})
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Long", Content: doc.FromBlocks(blocks)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewServer(st, "test")
+	var read []string
+	for offset, parts := 0.0, 0; ; parts++ {
+		out := s.pages.call("read_page", map[string]any{"page_id": p.ID, "offset": offset})
+		if out["error"] != nil || parts > len(blocks) {
+			t.Fatal(out)
+		}
+		if size := len(jsonText(out)); size > maxRead+2_000 {
+			t.Errorf("part %d is %d bytes", parts, size)
+		}
+		if out["total_blocks"] != len(blocks) {
+			t.Errorf("total_blocks %v, want %d", out["total_blocks"], len(blocks))
+		}
+		for _, b := range out["blocks"].([]map[string]any) {
+			read = append(read, b["id"].(string))
+			if b["id"] == "huge" {
+				e := b["embed"].(map[string]any)
+				if _, ok := e["html"]; ok || e["html_length"] != 40_000 {
+					t.Errorf("the huge embed reads %v", e["html_length"])
+				}
+			}
+		}
+		next, ok := out["next_offset"].(int)
+		if !ok {
+			break
+		}
+		if parts == 0 && out["comments"] == nil || parts > 0 && out["comments"] != nil {
+			t.Errorf("part %d: comments %v", parts, out["comments"])
+		}
+		offset = float64(next)
+	}
+	var want []string
+	for _, b := range blocks {
+		want = append(want, b.ID)
+	}
+	if !slices.Equal(read, want) {
+		t.Errorf("read %v\nwant %v", read, want)
+	}
+	if out := s.pages.call("read_page", map[string]any{"page_id": p.ID, "offset": 3.0, "limit": 2.0}); len(out["blocks"].([]map[string]any)) != 2 || out["next_offset"] != 5 {
+		t.Errorf("limit 2 from 3: %v blocks, next %v", len(out["blocks"].([]map[string]any)), out["next_offset"])
+	}
+	if out := s.pages.call("read_page", map[string]any{"page_id": p.ID, "offset": -1.0}); out["error"] == nil {
+		t.Error("read from offset -1")
+	}
+}
+
+// A request without its method or of another JSON-RPC version is an
+// invalid request, and a notification's method sent with an ID still gets
+// an answer, as JSON-RPC asks.
+func TestInvalidRequestsAndNotificationWithAnID(t *testing.T) {
 	got := session(t, NewServer(newStore(t), "0.1.0"),
-		`[{"jsonrpc":"2.0","id":2,"method":"ping"}]`,
 		`{"jsonrpc":"2.0","id":3,"method":"notifications/initialized"}`,
 		`{"jsonrpc":"2.0","id":4}`,
 		`{"jsonrpc":"1.0","id":5,"method":"ping"}`,
 		`{"id":6,"method":"ping"}`)
-	if e, _ := got[0]["error"].(map[string]any); e == nil || e["code"].(float64) != -32600 {
-		t.Errorf("batch %v", got[0])
-	}
 	for _, id := range []float64{4, 5, 6} {
 		if e, _ := got[id]["error"].(map[string]any); e == nil || e["code"].(float64) != -32600 {
 			t.Errorf("request %v answered %v", id, got[id])
@@ -596,6 +710,43 @@ func TestBatchAndNotificationWithAnID(t *testing.T) {
 	}
 	if r, ok := got[3]["result"].(map[string]any); !ok || r == nil {
 		t.Errorf("notification with an ID %v", got[3])
+	}
+}
+
+// A batch, as protocol 2025-03-26 has them, is answered by a batch of the
+// answers to its requests, its notifications getting none, and what in it
+// is no request getting an error; a batch of notifications alone gets no
+// answer, and an empty one is an invalid request.
+func TestBatch(t *testing.T) {
+	var out bytes.Buffer
+	in := strings.Join([]string{
+		`[{"jsonrpc":"2.0","id":2,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","id":3,"method":"tools/list"},5]`,
+		`[{"jsonrpc":"2.0","method":"notifications/initialized"}]`,
+		`[]`,
+	}, "\n")
+	if err := NewServer(newStore(t), "0.1.0").Serve(strings.NewReader(in), &out); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("%d answers: %s", len(lines), out.String())
+	}
+	var batch []map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &batch); err != nil {
+		t.Fatalf("batch answer %s: %v", lines[0], err)
+	}
+	if len(batch) != 3 || batch[0]["id"] != 2.0 || batch[0]["result"] == nil || batch[1]["id"] != 3.0 || batch[1]["result"] == nil {
+		t.Fatalf("batch answered %v", batch)
+	}
+	if e, _ := batch[2]["error"].(map[string]any); e == nil || e["code"] != -32600.0 || batch[2]["id"] != nil {
+		t.Errorf("a number in a batch answered %v", batch[2])
+	}
+	var empty map[string]any
+	if err := json.Unmarshal([]byte(lines[1]), &empty); err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := empty["error"].(map[string]any); e == nil || e["code"] != -32600.0 {
+		t.Errorf("an empty batch answered %v", empty)
 	}
 }
 

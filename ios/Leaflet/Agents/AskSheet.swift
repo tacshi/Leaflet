@@ -18,6 +18,7 @@ struct AskSheet: View {
     let request: AskRequest
     let model: PageModel
     @Environment(AppModel.self) private var app
+    @Environment(SceneModel.self) private var scene
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
     @State private var text = ""
@@ -82,14 +83,21 @@ struct AskSheet: View {
                             // The answer as it streams in, until there is
                             // some.
                             if let answer = run.answer, !answer.isEmpty {
-                                MarkdownText(text: answer)
+                                MarkdownPreview(markdown: answer)
                             } else {
                                 Label(L.dialogInlineWorking, systemImage: "sparkles")
                             }
+                        } else if let e = run.error, !e.isEmpty {
+                            // The summary is the error then: once is enough.
+                            Text(e).foregroundStyle(palette.dangerText)
                         } else {
-                            MarkdownText(text: run.summary)
-                            if let e = run.error, !e.isEmpty {
-                                Text(e).foregroundStyle(palette.dangerText)
+                            MarkdownPreview(markdown: run.summary)
+                            // An answer in words can go in the page, as the
+                            // desktop's prompt offers; edits are there already.
+                            if run.edits.isEmpty, !run.undone {
+                                Button(L.dialogInlineInsert, systemImage: "plus") {
+                                    insertReply(run)
+                                }
                             }
                         }
                     }
@@ -132,16 +140,17 @@ struct AskSheet: View {
             if detent != .large { detent = .height(height) }
         }
         .onAppear { focused = true }
-        .onChange(of: run?.status) {
-            // What it made is in the page, with Undo in the Agent panel.
-            if let run, !run.running, run.error == nil || run.error == "" { dismiss() }
-        }
-        .onChange(of: run?.edits.count) {
-            // Once it writes in the page, the sheet goes, for the page to
-            // show the writing as it comes, as the desktop's prompt sits
-            // below it: the Agent panel has Stop and Undo.
-            if let run, run.running, !run.edits.isEmpty { dismiss() }
-        }
+        .onChange(of: run?.status) { if let run, Self.closes(run) { dismiss() } }
+        .onChange(of: run?.edits.count) { if let run, Self.closes(run) { dismiss() } }
+    }
+
+    /// closes says the sheet goes for run: once it writes in the page, for
+    /// the page to show the writing as it comes, as the desktop's prompt
+    /// sits below it, with Stop and Undo in the Agent panel; and once it
+    /// is done with edits. An answer in words stays, with Insert, as no
+    /// message keeps it, and so does an error.
+    static func closes(_ run: AgentState.Run) -> Bool {
+        !run.edits.isEmpty && (run.running || (run.error ?? "").isEmpty)
     }
 
     /// quickAsks are the asks about a selection to send with a tap.
@@ -162,6 +171,20 @@ struct AskSheet: View {
             }
             // Each chip its own button: a row's button would take the row.
             .buttonStyle(.borderless)
+        }
+    }
+
+    /// insertReply has the page's editor put the run's answer after the
+    /// last block it was about, as one step to undo, and the sheet goes.
+    private func insertReply(_ run: AgentState.Run) {
+        Task {
+            do {
+                let blocks = try await app.client?.replyBlocks(model.id, runID: run.id) ?? []
+                scene.editor?.insertBlocks(blocks, after: request.focus.last ?? "")
+                dismiss()
+            } catch {
+                failure = error.localizedDescription
+            }
         }
     }
 

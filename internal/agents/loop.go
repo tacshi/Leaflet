@@ -1,17 +1,21 @@
 package agents
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf16"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
+	"leaflet/locales"
 )
 
 // MaxRounds bounds the tool rounds of one run.
@@ -39,6 +43,16 @@ type Request struct {
 	// History holds earlier turns of the conversation: {role, content}.
 	History        []map[string]string
 	AllowCrossPage bool
+	// Thread is the comment thread a comment run answers in, its first
+	// comment first.
+	Thread []ThreadComment
+}
+
+// ThreadComment is a comment of the thread a run answers in, as the model
+// reads it.
+type ThreadComment struct {
+	Author string `json:"author"`
+	Body   string `json:"body"`
 }
 
 // JobRequest is the request as ai_jobs.request stores it.
@@ -70,18 +84,37 @@ type Result struct {
 	Ops   []doc.Op
 }
 
-var thinkRe = regexp.MustCompile(`(?s)<think>.*?</think>`)
+// Models that think aloud write their thinking in <think> tags, in any
+// case: thinkRe finds a whole block of it, and openRe and closeRe a tag of
+// one left open or closed alone.
+var (
+	thinkRe = regexp.MustCompile(`(?is)<think>.*?</think>`)
+	openRe  = regexp.MustCompile(`(?i)<think>`)
+	closeRe = regexp.MustCompile(`(?i)</think>`)
+)
+
+// withoutThinking is an answer with the model's thinking left out: each
+// block of it; all before a closing tag that none opened, as models whose
+// chat template opens the tag write it (DeepSeek-R1's distills); and all
+// after an opening tag the answer ends without closing.
+func withoutThinking(s string) string {
+	s = thinkRe.ReplaceAllString(s, "")
+	if at := closeRe.FindAllStringIndex(s, -1); len(at) > 0 {
+		s = s[at[len(at)-1][1]:]
+	}
+	if at := openRe.FindStringIndex(s); at != nil {
+		s = s[:at[0]]
+	}
+	return strings.TrimSpace(s)
+}
 
 // shownText is an answer as far as it has come, as it can be shown: its
 // thinking left out, finished or not.
 func shownText(s string) string {
-	s = thinkRe.ReplaceAllString(s, "")
-	if i := strings.Index(s, "<think>"); i >= 0 {
-		s = s[:i]
-	}
+	s = withoutThinking(s)
 	// The start of a tag still coming.
 	for n := len("<think>") - 1; n > 0; n-- {
-		if strings.HasSuffix(s, "<think>"[:n]) {
+		if len(s) >= n && strings.EqualFold(s[len(s)-n:], "<think>"[:n]) {
 			s = s[:len(s)-n]
 			break
 		}
@@ -94,6 +127,11 @@ func shownText(s string) string {
 func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev Events) (Result, error) {
 	tc.Request = req.Instruction
 	exec := &Executor{Ctx: tc, OnOp: ev.Op, OnRevise: ev.Revise}
+	exec.begin()
+	// Earlier turns of the conversation may hold what a run read on
+	// another page: what this one writes keeps to the URLs the user gave,
+	// as after reading one (checkURLs).
+	exec.armed = len(req.History) > 0 && (tc.ListPages != nil || tc.ReadOtherPage != nil)
 	if ev.Status != nil {
 		ev.Status("running")
 	}
@@ -106,81 +144,101 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 			}
 		}
 	}
-	var parts []string
-	if note := FocusNote(focus, req.SelectionText); note != "" {
-		parts = append(parts, note)
-	}
-	if !req.SupportsTools {
-		raw, _ := json.Marshal(views)
-		parts = append(parts, "Page content:\n"+string(raw))
-	}
-	parts = append(parts, req.Instruction)
-	messages := []map[string]any{{"role": "system", "content": SystemPrompt(req.AgentName, req.PageTitle, req.Surface, tc.ListPages != nil, req.SupportsTools, tc.ReadOnly)}}
+	messages := []map[string]any{{"role": "system", "content": SystemPrompt(req.AgentName, req.Surface, tc.ListPages != nil, req.SupportsTools, tc.ReadOnly)}}
 	for _, t := range req.History {
 		messages = append(messages, map[string]any{"role": t["role"], "content": t["content"]})
 	}
-	messages = append(messages, map[string]any{"role": "user", "content": strings.Join(parts, "\n\n")})
+	messages = append(messages, map[string]any{"role": "user", "content": userMessage(req, views, focus)})
 	var tools []map[string]any
 	if req.SupportsTools {
 		tools = ToolDefinitions(tc.ListPages != nil, tc.ReadOnly)
 	}
 	sm, streams := client.(StreamingModel)
 	streams = streams && (ev.Text != nil || ev.Revise != nil)
-	for round := 0; round < MaxRounds; round++ {
-		var res ChatResult
-		var err error
-		// The round's calls that write blocks go in the page as they
-		// stream, while the calls before them did too, so they still
-		// run in turn: drafted are the results of those that did.
-		drafted := map[int]map[string]any{}
-		if streams {
-			current, name, args, drafting := -1, "", "", true
-			var shown time.Time
-			on := &Streamed{Text: ev.Text, Call: func(i int, n, a string) {
-				if i != current {
-					// The call before has all come.
-					if current >= 0 {
-						out, ok := exec.FinishDraft(name, args)
-						if ok {
-							drafted[current] = out
-						}
-						drafting = drafting && ok
-					}
-					current, name = i, n
-					drafting = drafting && drafts[n]
-				}
-				args = a
-				if drafting && time.Since(shown) >= draftEvery {
-					shown = time.Now()
-					exec.Draft(name, a)
-				}
-			}}
-			res, err = sm.ChatStream(ctx, req.Model, messages, tools, 0, on)
-			switch {
-			case err != nil && !errors.Is(ctx.Err(), context.Canceled):
-				// A call cut off is no call: what it put in goes, a call
-				// the run's deadline cut off too. One the user stopped
-				// stays, as edits made before do.
-				exec.DropDraft()
-			case err == nil && current >= 0 && current < len(res.ToolCalls):
-				if out, ok := exec.FinishDraft(name, res.ToolCalls[current].Arguments); ok {
-					drafted[current] = out
-				}
-			}
-		} else {
+	// answer asks the model for the round's answer. The round's calls that
+	// write blocks go in the page as they stream, while the calls before
+	// them did too, so they still run in turn: drafted are the results of
+	// those that did.
+	answer := func() (res ChatResult, drafted map[int]map[string]any, err error) {
+		drafted = map[int]map[string]any{}
+		if !streams {
 			res, err = client.Chat(ctx, req.Model, messages, tools, 0)
+			return res, drafted, err
+		}
+		current, name, args, drafting := -1, "", "", true
+		var shown time.Time
+		on := &Streamed{Text: ev.Text, Call: func(i int, n, a string) {
+			if i != current {
+				// The call before has all come.
+				if current >= 0 {
+					out, ok := exec.FinishDraft(name, args)
+					if ok {
+						drafted[current] = out
+					}
+					drafting = drafting && ok
+				}
+				current, name = i, n
+				// A call past the most an answer makes does not run.
+				drafting = drafting && drafts[n] && i < maxRoundCalls
+			}
+			args = a
+			if drafting && time.Since(shown) >= draftEvery {
+				shown = time.Now()
+				exec.Draft(name, a)
+			}
+		}}
+		res, err = sm.ChatStream(ctx, req.Model, messages, tools, 0, on)
+		switch {
+		case err != nil && !errors.Is(ctx.Err(), context.Canceled),
+			err == nil && res.FinishReason == "length":
+			// A call cut off is no call: what it put in goes, a call the
+			// run's deadline or the model's length limit cut off too. One
+			// the user stopped stays, as edits made before do.
+			exec.DropDraft()
+		case err == nil && current >= 0 && current < len(res.ToolCalls):
+			if out, ok := exec.FinishDraft(name, res.ToolCalls[current].Arguments); ok {
+				drafted[current] = out
+			}
+		}
+		return res, drafted, err
+	}
+	for round := 0; round < MaxRounds; round++ {
+		made := len(exec.Ops)
+		res, drafted, err := answer()
+		// A model that was busy or failing is asked once more, after a
+		// while, when its answer put nothing in the page: the calls that
+		// did would come again.
+		if wait, ok := retryable(err); ok && len(exec.Ops) == made {
+			log.Printf("agent model: %v; asking again in %v", err, wait)
+			select {
+			case <-ctx.Done():
+			case <-time.After(wait):
+				res, drafted, err = answer()
+			}
 		}
 		if err != nil {
 			return Result{Edits: exec.Edits, Ops: exec.Ops}, err
 		}
+		// The model stopped at the most it may write at once: its answer
+		// says so, and its last call, cut off, is not made.
+		cut := res.FinishReason == "length"
 		if len(res.ToolCalls) == 0 {
-			reply := strings.TrimSpace(thinkRe.ReplaceAllString(res.Content, ""))
+			reply := withoutThinking(res.Content)
+			if cut {
+				reply = strings.TrimSpace(reply + "\n\n" + locales.AgentReplyCutOff())
+			}
 			return Result{Reply: reply, Edits: exec.Edits, Ops: exec.Ops}, nil
 		}
 		messages = append(messages, res.AssistantMessage())
 		for i, call := range res.ToolCalls {
 			out, ok := drafted[i]
-			if !ok {
+			switch {
+			case ok:
+			case cut && i == len(res.ToolCalls)-1:
+				out = map[string]any{"error": errCallCutOff}
+			case i >= maxRoundCalls:
+				out = map[string]any{"error": fmt.Sprintf(errTooManyCalls, maxRoundCalls)}
+			default:
 				out = exec.CallRaw(call.Name, call.Arguments)
 			}
 			if e, ok := out["error"].(string); ok {
@@ -196,11 +254,80 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": call.ID, "content": string(raw)})
 		}
 	}
-	return Result{
-		Reply: fmt.Sprintf("I stopped after %d rounds of edits. Ask me to continue if there is more to do.", MaxRounds),
-		Edits: exec.Edits, Ops: exec.Ops,
-	}, nil
+	return Result{Reply: locales.AgentStoppedAfterRounds(MaxRounds), Edits: exec.Edits, Ops: exec.Ops}, nil
 }
+
+// inlinePageLimit is the longest page, in UTF-16 units of its blocks as
+// JSON, the request carries, as on the server; a longer one the model
+// reads with read_page.
+const inlinePageLimit = 40_000
+
+// userMessage is the user's turn of a run: what others may have written,
+// the page's title, its blocks, the focus, the selection and the comment
+// thread, as JSON on one line each, and last the request, the user's own
+// words, as the server's runs have it (prompt.ts userMessage). None of the
+// rest can break out into a line of its own, a "Request:" of its own say,
+// nor, in the system prompt, be taken as the app's. A model that cannot
+// read the page with a tool gets it whatever its length.
+func userMessage(req Request, views, focus []map[string]any) string {
+	parts := []string{"Page title: " + asData(req.PageTitle)}
+	if page := asData(views); len(utf16.Encode([]rune(page))) <= inlinePageLimit || !req.SupportsTools {
+		parts = append(parts, "Current page blocks (JSON):\n"+page)
+	} else {
+		parts = append(parts, "The page is long; call read_page to see all of it.")
+	}
+	if len(focus) > 0 {
+		parts = append(parts, "Focus blocks (JSON):\n"+asData(focus))
+	}
+	if req.SelectionText != "" {
+		parts = append(parts, "Selected text (JSON):\n"+asData(req.SelectionText))
+	}
+	// An "@agent answer Sam's question above" needs Sam's question.
+	if len(req.Thread) > 0 {
+		parts = append(parts, "Comment thread (JSON):\n"+asData(req.Thread))
+	}
+	parts = append(parts, "Request:\n"+req.Instruction)
+	return strings.Join(parts, "\n\n")
+}
+
+// asData is v as JSON on one line, as the server's asData has it: the line
+// separators JSON leaves as they are, which models read as breaks, are
+// escaped too.
+func asData(v any) string {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
+	return strings.ReplaceAll(strings.TrimSuffix(b.String(), "\n"), "\u0085", `\u0085`)
+}
+
+// maxRoundCalls bounds the tool calls of one answer that run: those past
+// it are refused, for the model to make in its next.
+const maxRoundCalls = 50
+
+// errTooManyCalls is what the model is told of a call past maxRoundCalls.
+const errTooManyCalls = "This call was not made: one answer makes at most %d calls. Make it again in your next."
+
+// retryWait is how long a run waits to ask a model that was busy or
+// failing again, when it did not say; maxRetryWait is the longest it
+// waits, past which it does not ask again. Tests shorten them.
+var retryWait, maxRetryWait = 2 * time.Second, 30 * time.Second
+
+// retryable reports whether a model's failure is worth asking again for,
+// once, and after how long: the model was busy (429) or failing (5xx),
+// and asked for no longer a wait than maxRetryWait.
+func retryable(err error) (time.Duration, bool) {
+	var api *APIError
+	if !errors.As(err, &api) || api.Status != http.StatusTooManyRequests && api.Status < http.StatusInternalServerError {
+		return 0, false
+	}
+	wait := cmp.Or(api.RetryAfter, retryWait)
+	return wait, wait <= maxRetryWait
+}
+
+// errCallCutOff is what the model is told of a call its length limit cut
+// off, for it to make it again in parts rather than the same way.
+const errCallCutOff = "Your answer reached your output length limit, which cut this call off: it was not made. Make it again in smaller calls, a few blocks each."
 
 // Streamer is the server's client as RunCloud uses it: *remote.Client.
 type Streamer interface {
@@ -208,8 +335,13 @@ type Streamer interface {
 	SelectOne(ctx context.Context, table string, q remote.Query) (map[string]any, error)
 }
 
-// errCutOff is a run whose stream ended before the server said how.
-var errCutOff = errors.New("The connection to the agent ended before it finished.") //nolint:staticcheck // shown to people as a sentence.
+// errCutOff is a run whose stream ended before the server said how, said
+// in the app's language.
+var errCutOff error = errStreamCutOff{}
+
+type errStreamCutOff struct{}
+
+func (errStreamCutOff) Error() string { return locales.AgentConnectionEnded() }
 
 // RunCloud runs the loop on the server, whose Vault keeps the model's key.
 // The job row must exist (docs/protocol.md §4); ops come as the server
@@ -233,12 +365,13 @@ func RunCloud(ctx context.Context, be Streamer, jobID string, ev Events) (Result
 			if json.Unmarshal(raw, &op) != nil {
 				return
 			}
-			summary, _ := e["summary"].(string)
-			if summary == "" {
-				summary = "Edited the page"
-			}
+			// Said from the op, in the app's language, as a local run's
+			// edit, not as the server words it.
+			tool, _ := e["tool"].(string)
+			edit := opEdit(op, tool)
+			summary := edit.Summary
 			res.Ops = append(res.Ops, op)
-			res.Edits = append(res.Edits, Edit{Summary: summary, BlockIDs: OpBlockIDs(op)})
+			res.Edits = append(res.Edits, edit)
 			if ev.Op != nil {
 				ev.Op(op, summary)
 			}
@@ -295,17 +428,28 @@ type cloudJob struct {
 	Result struct {
 		Reply string   `json:"reply"`
 		Ops   []doc.Op `json:"ops"`
-		Edits []Edit   `json:"edits"`
+		// An edit for each op, naming the call that made it.
+		Edits []struct {
+			Tool string `json:"tool"`
+		} `json:"edits"`
 	} `json:"result"`
 }
 
 // result is how a run whose stream was cut off ended, by its job: the
-// server's ops and edits are all of the run's, those streamed before the
-// cut among them.
+// server's ops are all of the run's, those streamed before the cut among
+// them, its edits said from them as streamed ones are.
 func (j cloudJob) result(streamed Result) (Result, error) {
 	res := streamed
 	if len(j.Result.Ops) >= len(res.Ops) {
-		res.Ops, res.Edits = j.Result.Ops, j.Result.Edits
+		res.Ops, res.Edits = j.Result.Ops, nil
+		for i, op := range j.Result.Ops {
+			tool := ""
+			// One edit an op, as servers that name the tool make them.
+			if len(j.Result.Edits) == len(j.Result.Ops) {
+				tool = j.Result.Edits[i].Tool
+			}
+			res.Edits = append(res.Edits, opEdit(op, tool))
+		}
 	}
 	if j.Status == "failed" {
 		msg := j.Error

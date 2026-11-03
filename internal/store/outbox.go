@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"time"
 )
@@ -16,7 +17,7 @@ type OutboxEntry struct {
 	// a deleted file's stored copy.
 	Entity   string
 	EntityID string
-	Op       string // upsert | delete
+	Op       string // always "upsert": a row deleted goes up with deleted_at set
 	Payload  string
 	// Revision counts the times the payload was replaced while queued, so
 	// sending an older payload does not take a newer one off the queue.
@@ -76,6 +77,21 @@ func queue(q querier, entity, id string, payload map[string]any, label, pageID s
 // row queued without it, new here or sent again whole, goes up whole.
 const ChangedKey = "_changed"
 
+// AdoptKey marks, in a queued row, one sent again whole as this device's
+// pages join an account (sync's requeueAll), with when it last changed
+// here. The server may have the row already, from a device this one synced
+// with through iCloud Drive, and changed there since: the row goes over
+// the server's only when it changed here later, and takes the server's
+// otherwise. A row with a change of some columns queued has none: that
+// change goes as any other.
+const AdoptKey = "_adopt"
+
+// adopting is row marked with AdoptKey, changed here at at.
+func adopting(row map[string]any, at time.Time) map[string]any {
+	row[AdoptKey] = at.UTC().Format(time.RFC3339Nano)
+	return row
+}
+
 // queueChange queues row, changed here from old, the row as stored before
 // the change (nil for a new one), naming the columns that changed, with
 // those of any change to it still queued. One still queued whole stays
@@ -84,42 +100,58 @@ func queueChange(q querier, entity, id string, old, row map[string]any, label, p
 	if old == nil {
 		return queue(q, entity, id, row, label, pageID)
 	}
-	var cols []string
-	var queued string
-	switch err := q.QueryRow(`SELECT payload FROM outbox WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, entity, id).Scan(&queued); {
-	case errors.Is(err, sql.ErrNoRows):
-	case err != nil:
+	cols, queued, err := queuedCols(q, entity, id)
+	if err != nil {
 		return err
-	default:
-		var prev map[string]any
-		if err := json.Unmarshal([]byte(queued), &prev); err != nil {
-			return err
-		}
-		prevCols, ok := prev[ChangedKey].([]any)
-		if !ok {
-			return queue(q, entity, id, row, label, pageID)
-		}
-		for _, c := range prevCols {
-			if s, ok := c.(string); ok {
-				cols = append(cols, s)
-			}
+	}
+	if queued && cols == nil {
+		return queue(q, entity, id, row, label, pageID)
+	}
+	if cols = withChanged(cols, old, row); len(cols) == 0 {
+		return nil
+	}
+	changed := maps.Clone(row)
+	changed[ChangedKey] = cols
+	return queue(q, entity, id, changed, label, pageID)
+}
+
+// queuedCols reads the change of a row still queued: whether there is one,
+// and the columns it changes (ChangedKey), nil for one queued whole.
+func queuedCols(q querier, entity, id string) (cols []string, queued bool, err error) {
+	var payload string
+	switch err := q.QueryRow(`SELECT payload FROM outbox WHERE entity = ? AND entity_id = ? AND op = 'upsert'`, entity, id).Scan(&payload); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil, false, nil
+	case err != nil:
+		return nil, false, err
+	}
+	var prev map[string]any
+	if err := json.Unmarshal([]byte(payload), &prev); err != nil {
+		return nil, false, err
+	}
+	list, ok := prev[ChangedKey].([]any)
+	if !ok {
+		return nil, true, nil
+	}
+	cols = make([]string, 0, len(list))
+	for _, c := range list {
+		if s, ok := c.(string); ok {
+			cols = append(cols, s)
 		}
 	}
+	return cols, true, nil
+}
+
+// withChanged is cols with the columns of row whose values differ from
+// old's, in order.
+func withChanged(cols []string, old, row map[string]any) []string {
 	for k, v := range row {
 		if !slices.Contains(cols, k) && !sameJSON(v, old[k]) {
 			cols = append(cols, k)
 		}
 	}
-	if len(cols) == 0 {
-		return nil
-	}
 	slices.Sort(cols)
-	changed := make(map[string]any, len(row)+1)
-	for k, v := range row {
-		changed[k] = v
-	}
-	changed[ChangedKey] = cols
-	return queue(q, entity, id, changed, label, pageID)
+	return cols
 }
 
 // sameJSON reports whether two column values go up as the same JSON.
@@ -132,38 +164,38 @@ func sameJSON(a, b any) bool {
 // Pending returns the queue, oldest first.
 func (s *Store) Pending() ([]OutboxEntry, error) {
 	rows, err := s.db.Query(`SELECT id, entity, entity_id, op, payload, revision, label, page_id, attempts, last_error, created_at FROM outbox ORDER BY id`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []OutboxEntry
-	for rows.Next() {
+	return collect(rows, err, func(sc scanner) (OutboxEntry, error) {
 		var e OutboxEntry
 		var page, lastErr sql.NullString
 		var created int64
-		if err := rows.Scan(&e.ID, &e.Entity, &e.EntityID, &e.Op, &e.Payload, &e.Revision, &e.Label, &page, &e.Attempts, &lastErr, &created); err != nil {
-			return nil, err
-		}
+		err := sc.Scan(&e.ID, &e.Entity, &e.EntityID, &e.Op, &e.Payload, &e.Revision, &e.Label, &page, &e.Attempts, &lastErr, &created)
 		e.PageID, e.LastError, e.CreatedAt = page.String, lastErr.String, time.UnixMilli(created)
-		out = append(out, e)
-	}
-	return out, rows.Err()
+		return e, err
+	})
 }
 
-// PendingCount is how many changes wait for the server.
+// PendingCount is how many changes wait for the server, to show: 0 when
+// the queue cannot be read. What it would decide, as forgetting an
+// account's pages, counts again in its own transaction
+// (ForgetSyncedAccount).
 func (s *Store) PendingCount() int {
 	var n int
 	_ = s.db.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n)
 	return n
 }
 
-// HasPending reports whether a row has a change waiting.
-func (s *Store) HasPending(entity, id string) bool { return pending(s.db, entity, id) }
+// HasPending reports whether a row has a change waiting, or may have: one
+// the queue could not be read to tell of counts as waiting, so nothing
+// from elsewhere is stored over it.
+func (s *Store) HasPending(entity, id string) bool {
+	waits, err := pending(s.db, entity, id)
+	return waits || err != nil
+}
 
-func pending(q querier, entity, id string) bool {
+func pending(q querier, entity, id string) (bool, error) {
 	var n int
-	_ = q.QueryRow(`SELECT COUNT(*) FROM outbox WHERE entity = ? AND entity_id = ?`, entity, id).Scan(&n)
-	return n > 0
+	err := q.QueryRow(`SELECT COUNT(*) FROM outbox WHERE entity = ? AND entity_id = ?`, entity, id).Scan(&n)
+	return n > 0, err
 }
 
 // Dequeue removes an entry once the server has it, unless it was replaced

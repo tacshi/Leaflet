@@ -900,6 +900,176 @@
   },
   {
     "spec": {
+      "type": "image",
+      "image": {
+        "url": "https://example.com:99999/a.png"
+      }
+    },
+    "node": {
+      "type": "image",
+      "data": {
+        "url": "https://example.com:99999/a.png",
+        "align": "center",
+        "alt": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "https://256.0.0.1/a.png"
+      }
+    },
+    "node": {
+      "type": "image",
+      "data": {
+        "url": "https://256.0.0.1/a.png",
+        "align": "center",
+        "alt": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "https://example.com/%zz.png"
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "https://exa\\mple.com/a.png"
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "https://%41.com/a.png"
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "https://[::1]:8080/a.png"
+      }
+    },
+    "node": {
+      "type": "image",
+      "data": {
+        "url": "https://[::1]:8080/a.png",
+        "align": "center",
+        "alt": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "image",
+      "image": {
+        "url": "https://[1.2.3.4]/a.png"
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "link_preview",
+      "link": {
+        "url": "https://u:p@go.dev/"
+      }
+    },
+    "node": {
+      "type": "link_preview",
+      "data": {
+        "url": "https://u:p@go.dev/"
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "link_preview",
+      "link": {
+        "url": "https://go.dev/ab"
+      }
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "video",
+      "video": {
+        "url": "https://youtu.be/a/b.mp4"
+      }
+    },
+    "node": {
+      "type": "video",
+      "data": {
+        "url": "https://youtu.be/a/b.mp4",
+        "title": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "video",
+      "video": {
+        "url": "https://vİmeo.com/76979871"
+      }
+    },
+    "node": {
+      "type": "video",
+      "data": {
+        "url": "https://vİmeo.com/76979871",
+        "title": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "video",
+      "video": {
+        "url": "https://youtu.be/%64Qw4w9WgXcQ"
+      }
+    },
+    "node": {
+      "type": "video",
+      "data": {
+        "url": "https://youtu.be/%64Qw4w9WgXcQ",
+        "title": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "code",
+      "text": "x",
+      "language": "İNI"
+    },
+    "node": {
+      "type": "code",
+      "data": {
+        "delta": [
+          {
+            "insert": "x"
+          }
+        ],
+        "language": "ini"
+      }
+    }
+  },
+  {
+    "spec": {
       "type": "table",
       "rows": [
         [
@@ -1020,6 +1190,103 @@
         ],
         "caption": "",
         "author": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "video",
+      "url": "https://youtube.com/foo.mp4"
+    },
+    "node": {
+      "type": "video",
+      "data": {
+        "url": "https://youtube.com/foo.mp4",
+        "title": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "video",
+      "url": "https://youtu.be/short.mp4"
+    },
+    "node": {
+      "type": "video",
+      "data": {
+        "url": "https://youtu.be/short.mp4",
+        "title": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "video",
+      "url": "https://x.com/a%2Emp4"
+    },
+    "node": {
+      "type": "video",
+      "data": {
+        "url": "https://x.com/a%2Emp4",
+        "title": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "image",
+      "url": "https://example.com:99999/a.png"
+    },
+    "node": {
+      "type": "image",
+      "data": {
+        "url": "https://example.com:99999/a.png",
+        "align": "center",
+        "alt": ""
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "image",
+      "url": "https://%65xample.com/a.png"
+    },
+    "error": true
+  },
+  {
+    "spec": {
+      "type": "todo_list",
+      "text": "x",
+      "due": "2026-03-08T02:30"
+    },
+    "node": {
+      "type": "todo_list",
+      "data": {
+        "checked": false,
+        "due": "2026-03-08T02:30",
+        "delta": [
+          {
+            "insert": "x"
+          }
+        ]
+      }
+    }
+  },
+  {
+    "spec": {
+      "type": "todo_list",
+      "text": "x",
+      "due": "2026-10-30T5:04"
+    },
+    "node": {
+      "type": "todo_list",
+      "data": {
+        "checked": false,
+        "delta": [
+          {
+            "insert": "x"
+          }
+        ]
       }
     }
   }

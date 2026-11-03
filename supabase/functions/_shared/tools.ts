@@ -3,6 +3,7 @@
 
 import {
   type BlockSpec,
+  type BlockView,
   clone,
   collectIds,
   deltaOf,
@@ -13,9 +14,11 @@ import {
   pageViews,
   type Position,
   randomId,
+  type RecordingInfo,
   SPACES,
   SPEC_TYPES,
   SpecError,
+  type SpecOptions,
   specToNode,
   TEXT_TYPES,
   trimSpace,
@@ -49,12 +52,36 @@ export interface ToolHooks {
   readOtherPage(pageId: string): Promise<unknown>;
 }
 
+/** An edit as the person sees it: what it did, and the blocks it touched. */
+export interface Edit {
+  summary: string;
+  blockIds: string[];
+}
+
 export interface ToolOutcome {
   result: unknown;
   ops: Op[];
+  /** An edit for each op, as the app makes one for each of its own. */
+  edits: Edit[];
+  /** The edits' summaries in one. */
   summary?: string;
+  /** The blocks all its edits touched. */
   blockIds: string[];
 }
+
+/** A call's outcome of these ops, each with its edit. */
+function outcome(result: unknown, ops: Op[], edits: Edit[]): ToolOutcome {
+  return {
+    result,
+    ops,
+    edits,
+    summary: edits.map((e) => e.summary).join(". ") || undefined,
+    blockIds: edits.flatMap((e) => e.blockIds),
+  };
+}
+
+/** A call that changed nothing. */
+const unchanged = (result: unknown): ToolOutcome => outcome(result, [], []);
 
 export class ToolError extends Error {}
 
@@ -189,11 +216,48 @@ function tool(
   };
 }
 
+/**
+ * The longest embed source agents read, in characters (Go's maxViewHTML):
+ * a few longer would be more than a model reads at once, and the page
+ * could not be read at all.
+ */
+export const MAX_VIEW_HTML = 30_000;
+
+/**
+ * The blocks as agents read them, as the app's agents do (Go's
+ * ToolContext.Views): pageViews, without an embed's source longer than
+ * MAX_VIEW_HTML, whose length is given instead.
+ */
+export function agentViews(content: PageContent, recordings?: Map<string, RecordingInfo>): BlockView[] {
+  const views = pageViews(content, recordings);
+  for (const v of views) {
+    const html = v.embed?.html;
+    if (typeof html === "string") {
+      const length = [...html].length;
+      if (length > MAX_VIEW_HTML) {
+        delete v.embed!.html;
+        v.embed!.html_length = length;
+      }
+    }
+  }
+  return views;
+}
+
+/** The most blocks one run writes (Go's maxRunBlocks): a model that goes on and on, as one repeating itself, stops there. */
+export const MAX_RUN_BLOCKS = 5000;
+
+/** The most tool calls of one answer that run (Go's maxRoundCalls): those past it are refused, for the next answer. */
+export const MAX_ROUND_CALLS = 50;
+
+/** What the model is told of a call past MAX_ROUND_CALLS. */
+export const TOO_MANY_CALLS =
+  `This call was not made: one answer makes at most ${MAX_ROUND_CALLS} calls. Make it again in your next.`;
+
 export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean }): ToolDef[] {
   const defs: ToolDef[] = [
     tool(
       "read_page",
-      "Read the whole current page: every block with its id, its comments, and its subpages.",
+      `Read the whole current page: every block with its id, its comments, and its subpages. An embed's html longer than ${MAX_VIEW_HTML} characters is left out, its html_length given instead: to change such an embed, write its html whole.`,
     ),
   ];
   if (opts.canEdit) {
@@ -279,6 +343,63 @@ export function indexBlocks(root: NodeJSON): Map<string, Located> {
   return map;
 }
 
+/**
+ * A page's addressable blocks, as indexBlocks has them, kept up as the
+ * page changes rather than found again for every edit: each block is
+ * looked up by id, with the block it is in, and its place among its
+ * siblings found as it is asked for.
+ */
+class BlockIndex {
+  private readonly parents = new Map<string, { node: NodeJSON; parent: NodeJSON }>();
+
+  constructor(private readonly root: NodeJSON) {
+    this.add(root.children ?? [], root);
+  }
+
+  /**
+   * Whether the blocks in parent are addressable: in the page, or in an
+   * addressable block but a table. Those put in a table's cell, or in a
+   * block in one, are no more than the ones there already.
+   */
+  private holds(parent: NodeJSON): boolean {
+    return parent === this.root || (parent.type !== "table" && this.parents.get(parent.id)?.node === parent);
+  }
+
+  /** Puts nodes, and the blocks in them, in the index, as children of parent, where it holds them. */
+  add(nodes: NodeJSON[], parent: NodeJSON): void {
+    if (!this.holds(parent)) return;
+    // In reading order, so the last of blocks with one id wins, as in
+    // indexBlocks.
+    const stack = nodes.map((node) => ({ node, parent })).reverse();
+    while (stack.length) {
+      const at = stack.pop()!;
+      this.parents.set(at.node.id, at);
+      if (at.node.type === "table") continue;
+      const kids = at.node.children ?? [];
+      for (let i = kids.length - 1; i >= 0; i--) stack.push({ node: kids[i], parent: at.node });
+    }
+  }
+
+  /** Takes node and the blocks in it out of the index. */
+  remove(node: NodeJSON): void {
+    walk(node, (n) => {
+      if (this.parents.get(n.id)?.node === n) this.parents.delete(n.id);
+    });
+  }
+
+  /** Has node in parent now, where it holds it. */
+  moved(node: NodeJSON, parent: NodeJSON): void {
+    if (this.holds(parent)) this.parents.set(node.id, { node, parent });
+  }
+
+  get(id: string): Located | undefined {
+    const at = this.parents.get(id);
+    if (!at) return undefined;
+    const index = at.parent.children?.indexOf(at.node) ?? -1;
+    return index < 0 ? undefined : { ...at, index };
+  }
+}
+
 function anchorOf(position: Position): string | null {
   if ("after" in position) return position.after;
   if ("before" in position) return position.before;
@@ -286,21 +407,81 @@ function anchorOf(position: Position): string | null {
   return null;
 }
 
-/** Like the session's resolve, but returns null instead of throwing. */
-function resolveLenient(
-  root: NodeJSON,
-  position: Position,
-  idx: Map<string, Located>,
-): { parent: NodeJSON; index: number } | null {
+/**
+ * Where a block is, as doc.Content.Locate finds it: a table's cell, or a
+ * block in one, too, which the index leaves out.
+ */
+function locate(root: NodeJSON, idx: BlockIndex, id: string): Located | undefined {
+  const at = idx.get(id);
+  if (at) return at;
+  let found: Located | undefined;
+  walk(root, (node) => {
+    const index = found ? -1 : (node.children ?? []).findIndex((k) => k.id === id);
+    if (index >= 0) found = { node: node.children![index], parent: node, index };
+  });
+  return found;
+}
+
+/** Whether a block is a table or one of its cells (doc's inTable). */
+function inTable(node: NodeJSON): boolean {
+  return node.type === "table" || node.type === "table/cell";
+}
+
+/** Where a position puts blocks, or null for an anchor that is gone (doc.Content.Insert). */
+function place(root: NodeJSON, position: Position, idx: BlockIndex): { parent: NodeJSON; index: number } | null {
   root.children ??= [];
-  if ("at" in position) return { parent: root, index: position.at === "start" ? 0 : root.children.length };
-  const at = idx.get(anchorOf(position)!);
+  const anchor = anchorOf(position);
+  if (!anchor) return { parent: root, index: "at" in position && position.at === "start" ? 0 : root.children.length };
+  const at = locate(root, idx, anchor);
   if (!at) return null;
   if ("after" in position) return { parent: at.parent, index: at.index + 1 };
   if ("before" in position) return { parent: at.parent, index: at.index };
-  if (!LIST_TYPES.has(at.node.type)) return null;
   at.node.children ??= [];
   return { parent: at.node, index: at.node.children.length };
+}
+
+/**
+ * Where an insert puts its blocks on a page that may have changed since
+ * (doc.Content.Apply): an anchor gone since, as a neighbour deleted after
+ * the op, leaves them at the end of the page rather than not at all, and
+ * a parent that is no longer a list has them after it. A table holds only
+ * its cells: other blocks put in it or next to one of its cells go after
+ * the table.
+ */
+function insertPosition(root: NodeJSON, position: Position, nodes: NodeJSON[], idx: BlockIndex): Position {
+  const anchor = anchorOf(position);
+  if (!anchor) return position;
+  const at = locate(root, idx, anchor);
+  const cells = nodes.every((n) => n.type === "table/cell");
+  if (!at) return { at: "end" };
+  if ("parent" in position && at.node.type === "table" && !cells) return { after: anchor };
+  if ("parent" in position && !LIST_TYPES.has(at.node.type) && !inTable(at.node)) return { after: anchor };
+  if (!("parent" in position) && at.parent.type === "table" && !cells) return { after: at.parent.id };
+  return position;
+}
+
+/**
+ * Whether a move may go where it says (doc.Content.Move): next to or into
+ * a block that is not itself or in it, only into a list, and neither into
+ * a table nor out of one, whose cells keep their blocks.
+ */
+function canMove(root: NodeJSON, from: Located, position: Position, idx: BlockIndex): boolean {
+  const anchor = anchorOf(position);
+  if (!anchor) return !inTable(from.parent);
+  const at = locate(root, idx, anchor);
+  if (!at || collectIds(from.node).includes(anchor)) return false;
+  const to = "parent" in position ? at.node : at.parent;
+  if ("parent" in position && !LIST_TYPES.has(to.type) && !inTable(to)) return false;
+  return !((inTable(to) || inTable(from.parent)) && to !== from.parent);
+}
+
+/** node without the blocks in it the page has already (have), or null when node is one (doc's withoutPresent). */
+function withoutPresent(node: NodeJSON, have: Set<string>): NodeJSON | null {
+  if (node.id && have.has(node.id)) return null;
+  if (node.children) {
+    node.children = node.children.map((k) => withoutPresent(k, have)).filter((k): k is NodeJSON => k !== null);
+  }
+  return node;
 }
 
 /**
@@ -313,7 +494,18 @@ function keptChildren(op: Extract<Op, { op: "replace" }>): boolean {
   return op.previous.type !== "table" && ids(op.node) === ids(op.previous);
 }
 
-/** Whether node may take the children current has (replace's own check). */
+/** node without the cells only a table holds, when it is none (doc.DropCells). */
+function dropCells(node: NodeJSON): void {
+  if (node.type === "table" || !node.children) return;
+  node.children = node.children.filter((k) => k.type !== "table/cell");
+  if (!node.children.length) delete node.children;
+}
+
+/**
+ * Whether node may take the children current has (doc's canHoldChildren):
+ * a list takes any, another block those of a block of its own type, as
+ * one from another editor may hold.
+ */
 function canHoldChildren(node: NodeJSON, current: NodeJSON): boolean {
   return current.type !== "table" && (LIST_TYPES.has(node.type) || node.type === current.type);
 }
@@ -356,34 +548,89 @@ export function overwrites(content: PageContent, ops: Op[]): boolean {
 }
 
 /**
+ * The ops of a run still to replay on latest, a version of the page saved
+ * since the run read it as before. An op on a block latest changed since,
+ * by its edit time in meta, is left out: the app that had the page open
+ * already applied it, as the ops streamed, and saved it, and what a person
+ * then wrote over it, or a device wrote meanwhile, is newer than the
+ * agent's edit; replayed, the edit would undo it. The ops on blocks latest
+ * has as the run read them go, as on a page no one had open.
+ */
+export function unseenOps(before: PageContent, latest: PageContent, ops: Op[]): Op[] {
+  const at = (c: PageContent, id: string) => c.meta.blocks[id] ?? c.meta.deleted[id];
+  const touched = (id: string) => at(latest, id) !== at(before, id);
+  const out: Op[] = [];
+  for (const op of ops) {
+    switch (op.op) {
+      case "insert":
+        if (!op.nodes.some((n) => touched(n.id))) out.push(op);
+        break;
+      case "replace":
+      case "move":
+        if (!touched(op.id)) out.push(op);
+        break;
+      case "delete": {
+        const ids = op.ids.filter((id) => !touched(id));
+        if (ids.length > 0) {
+          out.push({ ...op, ids, previous: op.previous.filter((p) => ids.includes(p.node.id)) });
+        }
+        break;
+      }
+      default:
+        out.push(op);
+    }
+  }
+  return out;
+}
+
+/**
  * Replays ops on a (possibly newer) version of a page. Ops whose blocks are
- * gone are skipped; inserts whose anchor is gone land at the end.
+ * gone are skipped; inserts whose anchor is gone land at the end. The page
+ * is copied once, and its blocks indexed once, for all the ops.
  */
 export function applyOps(content: PageContent, ops: Op[], now = Date.now()): PageContent {
   const out = clone(content);
   const root = out.document;
   root.children ??= [];
+  const idx = new BlockIndex(root);
+  // Every block's id, table cells' too: an insert skips a block the page
+  // has already.
+  const ids = new Set(collectIds(root));
   const touch = (node: NodeJSON) =>
     walk(node, (n) => {
       out.meta.blocks[n.id] = now;
       delete out.meta.deleted[n.id];
     });
+  const forget = (node: NodeJSON) => {
+    idx.remove(node);
+    walk(node, (n) => ids.delete(n.id));
+  };
+  const learn = (node: NodeJSON, parent: NodeJSON) => {
+    idx.add([node], parent);
+    walk(node, (n) => ids.add(n.id));
+  };
   for (const op of ops) {
-    const idx = indexBlocks(root);
     switch (op.op) {
       case "insert": {
-        const existing = new Set(collectIds(root));
-        const nodes = op.nodes.filter((n) => !existing.has(n.id)).map((n) => clone(n));
-        const target = resolveLenient(root, op.position, idx) ?? { parent: root, index: root.children.length };
+        // Blocks the page has already, as when an undo run puts back what
+        // an undo or a merge brought back first, stay as they are.
+        const nodes = op.nodes.map((n) => withoutPresent(clone(n), ids)).filter((n): n is NodeJSON => n !== null);
+        if (nodes.length === 0) break;
+        const target = place(root, insertPosition(root, op.position, nodes, idx), idx)!;
         target.parent.children ??= [];
         target.parent.children.splice(target.index, 0, ...nodes);
-        nodes.forEach(touch);
+        for (const n of nodes) {
+          learn(n, target.parent);
+          touch(n);
+        }
         break;
       }
       case "replace": {
         const at = idx.get(op.id);
         if (!at) break;
         const node = clone(op.node);
+        dropCells(node);
+        forget(at.node);
         // A replace that kept the block's children carries them as the
         // agent read them: keep the ones the block has here instead, so
         // a child edited or added since is not undone.
@@ -391,34 +638,33 @@ export function applyOps(content: PageContent, ops: Op[], now = Date.now()): Pag
           if (at.node.children?.length) node.children = at.node.children;
           else delete node.children;
           at.parent.children![at.index] = node;
+          learn(node, at.parent);
           out.meta.blocks[node.id] = now;
           delete out.meta.deleted[node.id];
           break;
         }
         at.parent.children![at.index] = node;
+        learn(node, at.parent);
         touch(node);
         break;
       }
       case "move": {
-        const at = idx.get(op.id);
-        const anchor = anchorOf(op.position);
-        if (!at || (anchor && collectIds(at.node).includes(anchor))) break;
+        const at = locate(root, idx, op.id);
+        if (!at || !canMove(root, at, op.position, idx)) break;
         at.parent.children!.splice(at.index, 1);
-        const target = resolveLenient(root, op.position, indexBlocks(root));
-        if (!target) {
-          at.parent.children!.splice(at.index, 0, at.node);
-          break;
-        }
+        const target = place(root, op.position, idx)!;
         target.parent.children ??= [];
         target.parent.children.splice(target.index, 0, at.node);
+        idx.moved(at.node, target.parent);
         out.meta.blocks[op.id] = now;
         break;
       }
       case "delete": {
         for (const id of op.ids) {
-          const at = indexBlocks(root).get(id);
+          const at = idx.get(id);
           if (!at) continue;
           at.parent.children!.splice(at.index, 1);
+          forget(at.node);
           walk(at.node, (n) => {
             delete out.meta.blocks[n.id];
             out.meta.deleted[n.id] = now;
@@ -481,11 +727,14 @@ function givenKeys(raw: Record<string, unknown>, keys: string[]): string[] {
 export function normalizePosition(raw: unknown): Position {
   if (raw === "start" || raw === "end") return { at: raw };
   if (!isObject(raw)) throw new ToolError('position must be an object such as {"after": "<block id>"}');
-  const keys = givenKeys(raw, ["after", "before", "parent", "at"]);
+  // replace, which only write_markdown takes, counts as a key here too, as
+  // the app counts it: with another, the position has two.
+  const keys = givenKeys(raw, ["after", "before", "parent", "at", "replace"]);
   if (keys.length !== 1) {
     throw new ToolError("position needs exactly one of: after, before, parent, at");
   }
   const key = keys[0];
+  if (key === "replace") throw new ToolError('Unknown position key "replace"');
   const value = raw[key];
   if (key === "at") {
     if (value !== "start" && value !== "end") throw new ToolError('position.at must be "start" or "end"');
@@ -495,79 +744,83 @@ export function normalizePosition(raw: unknown): Position {
   return { [key]: value } as Position;
 }
 
-function plural(n: number, word: string): string {
-  return `${n} ${word}${n === 1 ? "" : "s"}`;
+/**
+ * A call's argument of text, as the app's agents take one (agents.str):
+ * refused when it is of another kind, or only spaces.
+ */
+function textArg(args: Record<string, unknown>, key: string): string {
+  const value = typeof args[key] === "string" ? args[key] as string : "";
+  if (!trimSpace(value)) throw new ToolError(`${key} is required`);
+  return value;
 }
 
-function quoteOf(node: NodeJSON): string {
-  const title = node.data?.title;
-  if (typeof title === "string" && title) return ` “${title}”`;
-  const delta = node.data?.delta;
-  if (Array.isArray(delta)) {
-    const text = delta.map((d) => (d as { insert?: string }).insert ?? "").join("").trim();
-    if (text) return ` “${text.length > 40 ? text.slice(0, 39) + "…" : text}”`;
-  }
-  return "";
-}
+/** What a kind of block is called in an edit's summary. */
+const KINDS: Record<string, string> = {
+  chart: "chart",
+  table: "table",
+  embed: "interactive embed",
+  heading: "heading",
+  image: "image",
+  video: "video",
+  code: "code block",
+  callout: "callout",
+  toggle_list: "toggle",
+  link_preview: "link card",
+  math_equation: "formula",
+  diagram: "diagram",
+};
 
-function insertSummary(nodes: NodeJSON[]): string {
-  if (nodes.length === 1) {
-    const n = nodes[0];
-    switch (n.type) {
-      case "chart":
-        return `Inserted chart${quoteOf(n)}`;
-      case "table":
-        return "Inserted table";
-      case "embed":
-        return `Inserted interactive embed${quoteOf(n)}`;
-      case "heading":
-        return `Added section${quoteOf(n)}`;
-      case "image":
-        return "Inserted image";
-      case "code":
-        return "Inserted code block";
-      case "callout":
-        return `Added callout${quoteOf(n)}`;
-      case "toggle_list":
-        return `Added toggle${quoteOf(n)}`;
-      case "video":
-        return "Inserted video";
-      case "link_preview":
-        return "Inserted link card";
-      case "math_equation":
-        return "Inserted formula";
-      case "diagram":
-        return "Inserted diagram";
-      default:
-        return `Added ${n.type.replace("_", " ")}${quoteOf(n)}`;
-    }
-  }
-  const heading = nodes.find((n) => n.type === "heading");
-  return heading ? `Added section${quoteOf(heading)}` : `Added ${plural(nodes.length, "block")}`;
+/**
+ * An edit's summary, which the person sees in the agent's edits, as the
+ * app words it (agents.summaryFor): "Inserted 3 blocks", "Wrote a
+ * heading", "Inserted a chart · Sales".
+ */
+function summaryFor(verb: string, nodes: NodeJSON[]): string {
+  if (nodes.length > 1) return `${verb} ${nodes.length} blocks`;
+  const n = nodes[0];
+  const kind = KINDS[n.type] ?? "";
+  const title = ["chart", "embed", "video"].includes(n.type) && typeof n.data?.title === "string" ? n.data.title : "";
+  let what = kind.startsWith("i") ? `an ${kind}` : kind ? `a ${kind}` : "a block";
+  if (title) what += ` · ${title}`;
+  return `${verb} ${what}`;
 }
 
 export interface SessionOptions {
   canEdit: boolean;
   crossPage: boolean;
-  /** What the person asked, whose URLs a block may load (FETCHED_URL_TYPES). */
+  /** What the person asked, whose URLs a block may load (checkUrls). */
   request?: string;
   /** Agent name shown on charts it inserts. */
   author?: string;
   now?: () => number;
 }
 
-/**
- * The blocks the app loads by itself, as it shows them: an image, a video,
- * a link card. An agent that has read another of the user's pages could
- * write what it read into one, such as https://example.com/x.png?notes=…,
- * and the app would send it to that server without anyone clicking. So
- * once a run reads another page, or lists them, a block it writes may load
- * only a URL that was on this page as the run began, or in what the person
- * asked. A URL only another page has does not count: someone who can edit
- * that page could put many there, and which ones the agent picked would
- * spell out what it read. Links in text are not loaded, so they stay free.
- */
-const FETCHED_URL_TYPES = new Set(["image", "video", "link_preview"]);
+// The URL guard (checkUrls): the app loads an image, a video or a link
+// card by itself, as it shows them. An agent that has read another of the
+// user's pages could write what it read into one, such as
+// https://example.com/x.png?notes=…, and the app would send it to that
+// server without anyone clicking. So once a run reads another page, or
+// lists them, what it writes may hold only a URL that was on this page as
+// the run began, or in what the person asked. A URL only another page has
+// does not count: someone who can edit that page could put many there, and
+// which ones the agent picked would spell out what it read. Not in text
+// either: a link a run writes in text would be on the page for the next
+// run, which takes the page's URLs as the person's, to load in a block
+// (internal/agents checkURLs). A page it read it names with a link to that
+// page, which loads nothing.
+
+/** The URLs in v, as allow takes them: whole strings that are one, and those in text. */
+function urlsIn(v: unknown, out = new Set<string>()): Set<string> {
+  if (typeof v === "string") {
+    if (v.startsWith("http://") || v.startsWith("https://")) out.add(v);
+    for (const u of v.match(URL_RE) ?? []) out.add(u);
+  } else if (Array.isArray(v)) {
+    for (const e of v) urlsIn(e, out);
+  } else if (isObject(v)) {
+    for (const e of Object.values(v)) urlsIn(e, out);
+  }
+  return out;
+}
 
 /** Finds the URLs in text, each to the first space as the client has one (SPACES), as its urlRe. */
 export const URL_RE = new RegExp(`https?://[^${SPACES}<>"'()\\[\\]]+`, "gu");
@@ -598,13 +851,22 @@ export class PageEditSession {
   readonly before: PageContent;
   readonly ops: Op[] = [];
   private readonly now: () => number;
-  /** The URLs a block may load once the agent has read beyond this page, null before (FETCHED_URL_TYPES). */
+  /** The URLs a block may load once the agent has read beyond this page, null before (checkUrls). */
   private allowed: Set<string> | null = null;
+  /** The page's blocks, kept up as the calls change them. */
+  private readonly idx: BlockIndex;
+  /** Every id the page has or had, which a new block may not take. */
+  private readonly taken: Set<string>;
+  /** The blocks the run's calls have written, toward MAX_RUN_BLOCKS. */
+  private written = 0;
 
   constructor(content: PageContent, private hooks: ToolHooks, private opts: SessionOptions) {
     this.content = clone(content);
     this.before = clone(content);
     this.now = opts.now ?? Date.now;
+    this.content.document.children ??= [];
+    this.idx = new BlockIndex(this.root);
+    this.taken = new Set([...collectIds(this.root), ...Object.keys(this.content.meta.deleted)]);
   }
 
   get changed(): boolean {
@@ -621,27 +883,19 @@ export class PageEditSession {
       args = typeof rawArgs === "string" ? (rawArgs.trim() ? JSON.parse(rawArgs) : {}) : rawArgs;
       if (!isObject(args)) throw new Error();
     } catch {
-      return { result: { error: "Arguments must be a JSON object" }, ops: [], blockIds: [] };
+      return unchanged({ error: "Arguments must be a JSON object" });
     }
-    // A call that fails part way, such as write_markdown whose first block
-    // went in before a later one was refused, leaves the page as it was:
-    // the model is told it failed, so nothing it did may stay.
-    const editing = EDITING_TOOLS.has(name);
-    const content = editing ? clone(this.content) : this.content;
-    const recorded = this.ops.length;
+    // A call that fails part way, such as write_markdown whose last block
+    // is refused, leaves the page as it was: the model is told it failed,
+    // so nothing it did may stay. Each tool makes all its blocks and finds
+    // where they go before it changes the page, which nothing after can
+    // fail, so the page is not copied for each call to go back to.
     try {
       return await this.dispatch(name, args);
     } catch (e) {
-      // A call that throws anything else fails the run, whose edits so
-      // far may still be saved: those are the ones streamed, without this
-      // call's.
-      if (editing) {
-        this.content = content;
-        this.ops.length = recorded;
-      }
-      if (e instanceof ToolError || e instanceof SpecError) {
-        return { result: { error: e.message }, ops: [], blockIds: [] };
-      }
+      if (e instanceof ToolError || e instanceof SpecError) return unchanged({ error: e.message });
+      // Anything else fails the run, whose edits so far may still be
+      // saved: those are the ones streamed, without this call's.
       throw e;
     }
   }
@@ -655,15 +909,15 @@ export class PageEditSession {
     }
     switch (name) {
       case "read_page":
-        return { result: await this.hooks.readPage(this.content), ops: [], blockIds: [] };
+        return unchanged(await this.hooks.readPage(this.content));
       case "write_markdown":
         return this.write(args.position, args.markdown);
       case "insert_blocks":
         return this.insert(normalizePosition(args.position), args.blocks);
       case "replace_block":
-        return this.replace(String(args.id ?? ""), args.block);
+        return this.replace(textArg(args, "id"), args.block);
       case "move_block":
-        return this.move(String(args.id ?? ""), normalizePosition(args.position));
+        return this.move(textArg(args, "id"), normalizePosition(args.position));
       case "delete_blocks":
         return this.remove(args.ids);
       case "create_subpage":
@@ -671,13 +925,12 @@ export class PageEditSession {
       case "list_pages":
         // The titles it lists are read too.
         this.arm();
-        return { result: { pages: await this.hooks.listPages() }, ops: [], blockIds: [] };
+        return unchanged({ pages: await this.hooks.listPages() });
       case "read_other_page": {
-        const pageId = String(args.page_id ?? "");
-        if (!pageId) throw new ToolError("page_id is required");
+        const pageId = textArg(args, "page_id");
         const page = await this.hooks.readOtherPage(pageId);
         this.arm();
-        return { result: page, ops: [], blockIds: [] };
+        return unchanged(page);
       }
       default:
         throw new ToolError(`Unknown tool "${name}"`);
@@ -697,32 +950,34 @@ export class PageEditSession {
 
   /** Adds the URLs in v to allowed. */
   private allow(v: unknown): void {
-    if (typeof v === "string") {
-      if (v.startsWith("http://") || v.startsWith("https://")) this.allowed!.add(v);
-      for (const u of v.match(URL_RE) ?? []) this.allowed!.add(u);
-    } else if (Array.isArray(v)) {
-      for (const e of v) this.allow(e);
-    } else if (isObject(v)) {
-      for (const e of Object.values(v)) this.allow(e);
-    }
+    urlsIn(v, this.allowed!);
   }
 
-  /** Refuses blocks that would load a URL not allowed, once the agent has read beyond this page. */
-  private checkUrls(nodes: NodeJSON[]): void {
+  /**
+   * Keeps what the agent writes to the URLs the person gave from the start,
+   * as after reading another page: the conversation's earlier turns may
+   * hold what a run read on one.
+   */
+  keepToGivenUrls(): void {
+    this.arm();
+  }
+
+  /**
+   * Refuses blocks that hold a URL not allowed, in a block the app loads or
+   * in text, once the agent has read beyond this page (checkUrls).
+   */
+  private checkUrls(nodes: NodeJSON[], ...more: unknown[]): void {
     const allowed = this.allowed;
     if (!allowed) return;
-    const bad: string[] = [];
-    for (const n of nodes) {
-      walk(n, (k) => {
-        const u = String(k.data?.url ?? "");
-        if (FETCHED_URL_TYPES.has(k.type) && !allowed.has(u)) bad.push(u);
-      });
-    }
+    const urls = urlsIn(more);
+    for (const n of nodes) walk(n, (k) => urlsIn(k.data, urls));
+    const bad = [...urls].filter((u) => !allowed.has(u));
     if (bad.length) {
+      bad.sort();
       throw new ToolError(
-        `After reading another page, an image, video or link card may only use a URL that was on this page before you began or is in the user's request, which ${
+        `After reading another page, what you write may only hold a URL that was on this page before you began or is in the user's request, which ${
           bad[0]
-        } is not: the app loads it by itself. Link to it in text instead.`,
+        } is not: a link written here could carry what you read, and a later edit could have the app load it. Name the page you read it on with a link to that page instead.`,
       );
     }
   }
@@ -734,43 +989,42 @@ export class PageEditSession {
     return this.content.document;
   }
 
-  private index(): Map<string, Located> {
-    return indexBlocks(this.root);
-  }
-
-  private locate(id: string, idx = this.index()): Located {
-    const found = idx.get(id);
+  private locate(id: string): Located {
+    const found = this.idx.get(id);
     if (!found) throw new ToolError(`No block with id "${id}" on this page. Call read_page for current ids.`);
     return found;
   }
 
-  private idFactory(): () => string {
-    const taken = new Set<string>(collectIds(this.root));
-    for (const id of Object.keys(this.content.meta.deleted)) taken.add(id);
-    return () => {
+  /**
+   * Options for a call's blocks: ids no block has had, one count for all
+   * toward MAX_SPEC_NODES, and whether they were written in Markdown.
+   */
+  private specOptions(markdown = false): SpecOptions {
+    const newId = () => {
       let id = randomId();
-      while (taken.has(id)) id = randomId();
-      taken.add(id);
+      while (this.taken.has(id)) id = randomId();
+      this.taken.add(id);
       return id;
     };
+    return { newId, author: this.opts.author, markdown };
   }
 
-  private resolve(position: Position, idx = this.index()): { parent: NodeJSON; index: number } {
+  /** Where a position puts a block, refused when it names no block here or one that takes none. */
+  private resolve(position: Position): { parent: NodeJSON; index: number } {
     if ("after" in position) {
-      const at = this.locate(position.after, idx);
+      const at = this.locate(position.after);
       return { parent: at.parent, index: at.index + 1 };
     }
     if ("before" in position) {
-      const at = this.locate(position.before, idx);
+      const at = this.locate(position.before);
       return { parent: at.parent, index: at.index };
     }
     if ("parent" in position) {
-      const at = this.locate(position.parent, idx);
+      const at = this.locate(position.parent);
       if (!LIST_TYPES.has(at.node.type)) {
         throw new ToolError(`Block "${position.parent}" is a ${at.node.type}; only list blocks take children`);
       }
-      at.node.children ??= [];
-      return { parent: at.node, index: at.node.children.length };
+      return { parent: at.node, index: at.node.children?.length ?? 0 };
     }
     return { parent: this.root, index: position.at === "start" ? 0 : this.root.children!.length };
   }
@@ -806,9 +1060,76 @@ export class PageEditSession {
     return raw as BlockSpec[];
   }
 
+  /** Refuses blocks that would take the run past MAX_RUN_BLOCKS. */
+  private room(nodes: NodeJSON[]): number {
+    let n = 0;
+    for (const node of nodes) walk(node, () => n++);
+    if (this.written + n > MAX_RUN_BLOCKS) {
+      throw new ToolError(
+        `This run has written ${this.written} blocks, and one run writes at most ${MAX_RUN_BLOCKS}. Stop here, and say in your reply what is left to do.`,
+      );
+    }
+    return n;
+  }
+
   private record(op: Op): Op {
     this.ops.push(op);
     return op;
+  }
+
+  // --- changing the page ---------------------------------------------------
+  //
+  // Each tool makes its blocks and checks them, then puts them in with
+  // these, which cannot fail.
+
+  /** Puts nodes at a place resolve found, and records the insert. */
+  private put(target: { parent: NodeJSON; index: number }, position: Position, nodes: NodeJSON[]): Op {
+    target.parent.children ??= [];
+    target.parent.children.splice(target.index, 0, ...nodes);
+    for (const n of nodes) {
+      this.idx.add([n], target.parent);
+      this.touch(n);
+    }
+    return this.record({ op: "insert", position, nodes: clone(nodes) });
+  }
+
+  /** Puts node in the place of the block at, its children kept or not, and records the replace. */
+  private swap(at: Located, node: NodeJSON, keepsChildren: boolean): Op {
+    const previous = clone(at.node);
+    if (keepsChildren) node.children = at.node.children;
+    this.idx.remove(at.node);
+    at.parent.children![at.index] = node;
+    this.idx.add([node], at.parent);
+    const kept = new Set(collectIds(node));
+    for (const oldId of collectIds(previous)) {
+      if (!kept.has(oldId)) {
+        delete this.content.meta.blocks[oldId];
+        this.content.meta.deleted[oldId] = this.now();
+      }
+    }
+    if (keepsChildren) {
+      this.content.meta.blocks[node.id] = this.now();
+    } else {
+      this.touch(node);
+    }
+    return this.record({ op: "replace", id: node.id, node: clone(node), previous });
+  }
+
+  /**
+   * Whether a replace keeps the block's children: children left out, or
+   * none given, keep the ones it had, which only a list block may hold
+   * (protocol §2), as the app has it: rewriting a block of another type
+   * that holds some, as one from another editor may, is refused even in
+   * its own type.
+   */
+  private keepsChildren(at: Located, spec: BlockSpec, node: NodeJSON): boolean {
+    const keeps = !spec.children?.length && (at.node.children?.length ?? 0) > 0 && at.node.type !== "table";
+    if (keeps && !LIST_TYPES.has(node.type)) {
+      throw new ToolError(
+        `Block "${at.node.id}" has nested blocks; a ${node.type} cannot hold them. Move or delete them first, or keep a list type.`,
+      );
+    }
+    return keeps;
   }
 
   // --- tools ---------------------------------------------------------------
@@ -821,8 +1142,7 @@ export class PageEditSession {
     const specs = markdownSpecs(typeof markdown === "string" ? markdown : "");
     if (!specs.length) throw new ToolError("markdown is empty");
     if (!isObject(rawPosition) || !givenKeys(rawPosition, ["replace"]).length) {
-      const out = this.insert(normalizePosition(rawPosition), specs);
-      return { ...out, summary: `Wrote ${plural(specs.length, "block")}` };
+      return this.insert(normalizePosition(rawPosition), specs, true);
     }
     // An empty block to write in place of says where, whatever else the
     // position has.
@@ -833,30 +1153,36 @@ export class PageEditSession {
     const empty = TEXT_TYPES.has(at.node.type) && !at.node.children?.length &&
       deltaOf(at.node).every((op) => op.insert === "");
     if (!empty) throw new ToolError("position.replace takes an empty block only; use replace_block to rewrite one");
-    const first = this.replace(id, specs[0]);
-    const ids = [id];
-    const ops = [...first.ops];
-    if (specs.length > 1) {
-      const rest = this.insert({ after: id }, specs.slice(1));
-      ids.push(...rest.blockIds);
-      ops.push(...rest.ops);
+    // Every block first, counted together, as the app counts a call's.
+    const opts = this.specOptions(true);
+    const first = specToNode(specs[0], opts, id);
+    const rest = specs.slice(1).map((spec) => specToNode(spec, opts));
+    this.checkUrls([first, ...rest]);
+    const count = this.room([first, ...rest]);
+    const ops = [this.swap(at, first, false)];
+    const edits = [{ summary: summaryFor("Wrote", [first]), blockIds: [id] }];
+    if (rest.length) {
+      const position = { after: id };
+      ops.push(this.put(this.resolve(position), position, rest));
+      edits.push({ summary: summaryFor("Wrote", rest), blockIds: rest.map((n) => n.id) });
     }
-    return { result: { inserted_ids: ids }, ops, summary: `Wrote ${plural(specs.length, "block")}`, blockIds: ids };
+    this.written += count;
+    return outcome({ inserted_ids: [id, ...rest.map((n) => n.id)] }, ops, edits);
   }
 
-  insert(position: Position, rawBlocks: unknown): ToolOutcome {
+  /** Inserts blocks, given as specs or, for write_markdown, read from Markdown. */
+  insert(position: Position, rawBlocks: unknown, markdown = false): ToolOutcome {
     const specs = this.specs(rawBlocks, "blocks");
+    const verb = markdown ? "Wrote" : "Inserted";
     // One set of options for all, so the limit on blocks counts them all.
-    const opts = { newId: this.idFactory(), author: this.opts.author };
+    const opts = this.specOptions(markdown);
     const nodes = specs.map((spec) => specToNode(spec, opts));
     this.checkUrls(nodes);
-    const target = this.resolve(position);
-    target.parent.children ??= [];
-    target.parent.children.splice(target.index, 0, ...nodes);
-    nodes.forEach((n) => this.touch(n));
-    const op = this.record({ op: "insert", position, nodes: clone(nodes) });
+    const count = this.room(nodes);
+    const op = this.put(this.resolve(position), position, nodes);
+    this.written += count;
     const ids = nodes.map((n) => n.id);
-    return { result: { inserted_ids: ids }, ops: [op], summary: insertSummary(nodes), blockIds: ids };
+    return outcome({ inserted_ids: ids }, [op], [{ summary: summaryFor(verb, nodes), blockIds: ids }]);
   }
 
   replace(id: string, rawSpec: unknown): ToolOutcome {
@@ -864,101 +1190,65 @@ export class PageEditSession {
     if (!isObject(rawSpec)) throw new ToolError("block must be a BlockSpec object");
     const spec = rawSpec as unknown as BlockSpec;
     const at = this.locate(id);
-    const previous = clone(at.node);
-    const node = specToNode(spec, { newId: this.idFactory(), author: this.opts.author }, id);
+    const node = specToNode(spec, this.specOptions(), id);
     this.checkUrls([node]);
-    // Children left out, or none given, keep the ones the block had.
-    const keepsChildren = !spec.children?.length && (previous.children?.length ?? 0) > 0 &&
-      previous.type !== "table";
-    if (keepsChildren) {
-      if (!LIST_TYPES.has(node.type) && node.type !== previous.type) {
-        throw new ToolError(
-          `Block "${id}" has nested blocks; a ${node.type} cannot hold them. Move or delete them first, or keep a list type.`,
-        );
-      }
-      node.children = at.node.children;
-    }
-    at.parent.children![at.index] = node;
-    const kept = new Set(collectIds(node));
-    for (const oldId of collectIds(previous)) {
-      if (!kept.has(oldId)) {
-        delete this.content.meta.blocks[oldId];
-        this.content.meta.deleted[oldId] = this.now();
-      }
-    }
-    if (keepsChildren) {
-      this.content.meta.blocks[id] = this.now();
-    } else {
-      this.touch(node);
-    }
-    const op = this.record({ op: "replace", id, node: clone(node), previous });
-    const summary = node.type === previous.type
-      ? `Rewrote ${node.type.replace("_", " ")}${quoteOf(node)}`
-      : `Changed ${previous.type.replace("_", " ")} to ${node.type.replace("_", " ")}`;
-    return { result: { id }, ops: [op], summary, blockIds: [id] };
+    const op = this.swap(at, node, this.keepsChildren(at, spec, node));
+    return outcome({ id }, [op], [{ summary: summaryFor("Rewrote", [node]), blockIds: [id] }]);
   }
 
   move(id: string, position: Position): ToolOutcome {
     if (!id) throw new ToolError("id is required");
-    const idx = this.index();
-    const at = this.locate(id, idx);
-    const anchor = "after" in position
-      ? position.after
-      : "before" in position
-      ? position.before
-      : "parent" in position
-      ? position.parent
-      : null;
+    const at = this.locate(id);
+    const anchor = anchorOf(position);
     if (anchor) {
       if (anchor === id) throw new ToolError("A block cannot be moved relative to itself");
       if (collectIds(at.node).includes(anchor)) {
         throw new ToolError("A block cannot be moved inside itself");
       }
-      this.locate(anchor, idx);
     }
+    // Where it goes, found before it leaves where it is: a position the
+    // page cannot take leaves it there.
+    this.resolve(position);
     const from = this.positionOf(at);
     at.parent.children!.splice(at.index, 1);
     const target = this.resolve(position);
     target.parent.children ??= [];
     target.parent.children.splice(target.index, 0, at.node);
+    this.idx.moved(at.node, target.parent);
     this.content.meta.blocks[id] = this.now();
     delete this.content.meta.deleted[id];
     const op = this.record({ op: "move", id, position, from });
-    return {
-      result: { id },
-      ops: [op],
-      summary: `Moved ${at.node.type.replace("_", " ")}${quoteOf(at.node)}`,
-      blockIds: [id],
-    };
+    return outcome({ id }, [op], [{ summary: "Moved a block", blockIds: [id] }]);
   }
 
   remove(rawIds: unknown): ToolOutcome {
     if (!Array.isArray(rawIds) || rawIds.length === 0) throw new ToolError("ids must be a non-empty array");
-    const ids = [...new Set(rawIds.map(String))];
-    const idx = this.index();
-    for (const id of ids) this.locate(id, idx);
+    // An ID is text: another value names no block.
+    const ids = [...new Set(rawIds.map((id) => typeof id === "string" ? id : ""))];
+    const found = ids.map((id) => this.locate(id));
     // Skip ids nested inside another id being deleted.
     const covered = new Set<string>();
-    for (const id of ids) {
-      for (const inner of collectIds(idx.get(id)!.node).slice(1)) covered.add(inner);
+    for (const at of found) {
+      for (const inner of collectIds(at.node).slice(1)) covered.add(inner);
     }
     const targets = ids.filter((id) => !covered.has(id));
     const previous = deletedPositions(this.root, new Set(targets));
     for (const id of targets) {
       const at = this.locate(id);
       at.parent.children!.splice(at.index, 1);
+      this.idx.remove(at.node);
       this.tombstone(at.node);
     }
     const op = this.record({ op: "delete", ids: targets, previous });
-    return {
-      result: { deleted_ids: targets },
-      ops: [op],
-      summary: `Deleted ${plural(targets.length, "block")}`,
-      blockIds: targets,
-    };
+    const summary = targets.length > 1 ? `Deleted ${targets.length} blocks` : "Deleted a block";
+    return outcome({ deleted_ids: targets }, [op], [{ summary, blockIds: targets }]);
   }
 
   async createSubpage(rawTitle: unknown, rawBlocks: unknown): Promise<ToolOutcome> {
+    // A title that is no text is refused, as the app refuses it.
+    if (rawTitle !== undefined && rawTitle !== null && typeof rawTitle !== "string") {
+      throw new ToolError("title must be a string");
+    }
     const title = trimSpace(String(rawTitle ?? ""));
     if (!title) throw new ToolError("title is required");
     const content = emptyContent();
@@ -974,13 +1264,16 @@ export class PageEditSession {
       const t = this.now();
       const opts = { newId, author: this.opts.author };
       content.document.children = specs.map((spec) => specToNode(spec, opts));
-      this.checkUrls(content.document.children);
       walk(content.document, (n) => {
         if (n !== content.document) content.meta.blocks[n.id] = t;
       });
     }
+    // Its title shows on this page, in its card, as the next run reads it.
+    this.checkUrls(content.document.children ?? [], title);
+    const count = this.room(content.document.children ?? []);
     const page = await this.hooks.createSubpage(title, content);
+    this.written += count;
     const op = this.record({ op: "create_page", page, content: clone(content) });
-    return { result: { page_id: page.id }, ops: [op], summary: `Created subpage “${title}”`, blockIds: [] };
+    return outcome({ page_id: page.id }, [op], [{ summary: `Created subpage “${title}”`, blockIds: [] }]);
   }
 }

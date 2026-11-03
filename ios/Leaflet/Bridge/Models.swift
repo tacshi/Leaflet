@@ -69,7 +69,6 @@ struct TemplateRow: Codable, Hashable, Identifiable, Sendable {
     var pageID: String?
 
     var id: String { key }
-    var starter: Bool { pageID == nil }
 
     enum CodingKeys: String, CodingKey {
         case key, title, hint, icon
@@ -105,18 +104,24 @@ struct Conflict: Codable, Hashable, Sendable, Identifiable {
     var kept: String
     var other: String
     var deleted: String?
+    /// keptHere says the version kept is this device's: the other device's
+    /// is the one to put back.
+    var keptHere: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, kept, other, deleted
         case pageID = "page_id"
         case pageTitle = "page_title"
+        case keptHere = "kept_here"
     }
 
     /// Resolution is how a conflict is settled: as merged, with this
-    /// device's version put back, or with the block deleted again.
+    /// device's version or the other device's put back, or with the block
+    /// deleted again.
     enum Resolution: String, Sendable {
         case keep
         case thisDevice = "this_device"
+        case otherDevice = "other_device"
         case delete
     }
 }
@@ -136,23 +141,60 @@ struct Member: Codable, Hashable, Sendable {
     }
 }
 
-/// TagRow is a tag and how many pages have it.
+/// TagRow is a tag, how many pages have it, and their IDs, by title.
 struct TagRow: Codable, Hashable, Sendable {
     var tag: String
     var count: Int
+    var pages: [String] = []
 }
 
 /// LibrarySnapshot is what the sidebar shows: pages, templates among them,
-/// folders and tags. Pages of another space are shared with the user.
-struct LibrarySnapshot: Codable, Sendable {
-    var spaceID: String
-    var pages: [PageRow]
-    var folders: [FolderRow]
-    var tags: [TagRow]
+/// the folders of the user's space in order, and tags, as the core
+/// arranges them for the desktop's sidebar too. Pages of another space are
+/// shared with the user.
+struct LibrarySnapshot: Decodable, Sendable {
+    let spaceID: String
+    let pages: [PageRow]
+    let folders: [FolderRow]
+    let tags: [TagRow]
+    /// tree is the library as the sidebar arranges it, its pages looked up
+    /// once as it is read.
+    let tree: LibraryTree
 
     enum CodingKeys: String, CodingKey {
-        case pages, folders, tags
+        case pages, folders, tags, top, children, shared
         case spaceID = "space_id"
+        case inFolder = "in_folder"
+    }
+
+    /// The tree comes as the IDs of the pages: the user's at the top level
+    /// in no folder, those of each folder, those under each page, and those
+    /// shared with the user whose parent the user has not, each in order.
+    init(
+        spaceID: String, pages: [PageRow], folders: [FolderRow], tags: [TagRow],
+        top: [String] = [], inFolder: [String: [String]] = [:],
+        children: [String: [String]] = [:], shared: [String] = []
+    ) {
+        self.spaceID = spaceID
+        self.pages = pages
+        self.folders = folders
+        self.tags = tags
+        tree = LibraryTree(
+            pages: pages, tags: tags, top: top, inFolder: inFolder, children: children,
+            shared: shared)
+    }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            spaceID: try c.decode(String.self, forKey: .spaceID),
+            pages: try c.decode([PageRow].self, forKey: .pages),
+            folders: try c.decode([FolderRow].self, forKey: .folders),
+            tags: try c.decode([TagRow].self, forKey: .tags),
+            top: try c.decode([String].self, forKey: .top),
+            inFolder: try c.decode([String: [String]].self, forKey: .inFolder),
+            children: try c.decode([String: [String]].self, forKey: .children),
+            shared: try c.decode([String].self, forKey: .shared))
     }
 
     static let empty = LibrarySnapshot(spaceID: "", pages: [], folders: [], tags: [])
@@ -215,6 +257,18 @@ struct Todo: Codable, Hashable, Sendable {
     var dueDate: Date? {
         due == 0 ? nil : Date(timeIntervalSince1970: TimeInterval(due) / 1000)
     }
+}
+
+/// TodoGroup is a section of the To-dos tab, as the core sorts them, as
+/// the desktop's: its to-dos, each by date.
+struct TodoGroup: Codable, Hashable, Sendable {
+    /// section is "overdue", "today", "upcoming" or "no_date"; title its
+    /// name.
+    var section: String
+    var title: String
+    var todos: [Todo]
+
+    var overdue: Bool { section == "overdue" }
 }
 
 /// CoreStatus is who uses the app and how sync stands.

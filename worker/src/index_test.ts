@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import worker, { type Env } from "./index.ts";
+import worker, { type Env, type RateLimit } from "./index.ts";
 
 const ORIGIN = "https://leaflet-auth.example.workers.dev";
 
@@ -108,5 +108,48 @@ Deno.test("anything else is refused before Supabase", async () => {
     assertEquals(sent.form, undefined);
     const res = await worker.fetch(new Request(`${ORIGIN}/token`), env);
     assertEquals(res.status, 404);
+  });
+});
+
+// Supabase out of reach is a 502 in OAuth's JSON, which the app reads, not
+// the platform's page of an exception, nor a 400 the app would take for
+// its refresh token refused.
+Deno.test("Supabase out of reach fails as OAuth does", async () => {
+  const env: Env = {
+    CLIENT_ID: "leaflet-app",
+    CLIENT_SECRET: "s3cret",
+    SUPABASE_TOKEN_URL: "http://127.0.0.1:1/token",
+  };
+  const res = await worker.fetch(
+    post({ grant_type: "refresh_token", client_id: "leaflet-app", refresh_token: "r" }),
+    env,
+  );
+  assertEquals(res.status, 502);
+  assertEquals((await res.json()).error, "server_error");
+});
+
+// One address exchanges tokens only so often: past the limit it is told
+// to slow down (429), before Supabase is asked.
+Deno.test("token exchanges are rate limited by address", async () => {
+  await withSupabase(async (env, sent) => {
+    const keys: string[] = [];
+    let left = 1;
+    const limit: RateLimit = {
+      limit: ({ key }) => {
+        keys.push(key);
+        return Promise.resolve({ success: left-- > 0 });
+      },
+    };
+    const req = () => {
+      const r = post({ grant_type: "refresh_token", client_id: "leaflet-app", refresh_token: "r" });
+      r.headers.set("CF-Connecting-IP", "203.0.113.7");
+      return r;
+    };
+    assertEquals((await worker.fetch(req(), { ...env, TOKEN_LIMIT: limit })).status, 200);
+    sent.form = undefined;
+    const res = await worker.fetch(req(), { ...env, TOKEN_LIMIT: limit });
+    assertEquals([res.status, (await res.json()).error], [429, "slow_down"]);
+    assertEquals(sent.form, undefined);
+    assertEquals(keys, ["203.0.113.7", "203.0.113.7"]);
   });
 });

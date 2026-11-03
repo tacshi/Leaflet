@@ -8,7 +8,6 @@ struct AgentPanel: View {
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
-    @State private var draft = ""
     @FocusState private var composing: Bool
     /// line is the composer's height with one line: its buttons take it, so
     /// they sit level with a line's text, and at the foot of a longer draft.
@@ -20,8 +19,23 @@ struct AgentPanel: View {
 
     private var state: AgentState { model.agents }
 
+    /// loneRun is the latest run with edits that no message of the chat
+    /// holds, as one Ask or an @agent comment started: its Undo is here,
+    /// as the desktop's run bar has it, until a version restored settles
+    /// it.
+    private var loneRun: AgentState.Run? {
+        let held = Set(state.messages.compactMap(\.runID))
+        let run = state.runs.last {
+            !held.contains($0.id) && !$0.edits.isEmpty && ($0.error ?? "").isEmpty
+        }
+        return run?.settled == true ? nil : run
+    }
+
     var body: some View {
-        if !state.available && state.options.isEmpty {
+        if !model.agentsLoaded {
+            // Not read yet: no agent to ask is not known yet.
+            ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if !state.available && state.options.isEmpty {
             ContentUnavailableView {
                 Label(L.panelNoProviderTitle, systemImage: "sparkles")
             } description: {
@@ -60,6 +74,19 @@ struct AgentPanel: View {
                             model: model
                         )
                         .id(i)
+                    }
+                    if let run = loneRun {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Label(
+                                run.undone
+                                    ? L.pageRunUndone(agent: run.agentName)
+                                    : L.pageRunEdited(
+                                        agent: run.agentName, count: Set(run.blockIDs ?? []).count),
+                                systemImage: "sparkles"
+                            )
+                            .font(.footnote.weight(.medium))
+                            RunCard(run: run, pageID: model.id)
+                        }
                     }
                 }
                 .padding(14)
@@ -117,7 +144,7 @@ struct AgentPanel: View {
                     .frame(minWidth: 28, minHeight: line)
             }
             .accessibilityLabel(LI.agentOptions)
-            TextField(L.panelAskPlaceholder, text: $draft, axis: .vertical)
+            TextField(L.panelAskPlaceholder, text: Bindable(model).chatDraft, axis: .vertical)
                 .lineLimit(1...6)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 10)
@@ -125,7 +152,7 @@ struct AgentPanel: View {
                 .frame(minHeight: line)
                 .background(palette.panel, in: .rect(cornerRadius: 10))
                 .focused($composing)
-                .onSubmit { send(draft) }
+                .onSubmit { send(model.chatDraft) }
             if state.running, let run = state.runs.last(where: { $0.running && $0.stoppable }) {
                 Button(L.pageStopRun, systemImage: "stop.circle.fill") {
                     Task { await app.client?.stopAgent(model.id, runID: run.id) }
@@ -134,11 +161,13 @@ struct AgentPanel: View {
                 .imageScale(.large)
                 .frame(minWidth: 28, minHeight: line)
             } else {
-                Button(L.panelSend, systemImage: "arrow.up.circle.fill") { send(draft) }
+                Button(L.panelSend, systemImage: "arrow.up.circle.fill") { send(model.chatDraft) }
                     .labelStyle(.iconOnly)
                     .imageScale(.large)
                     .frame(minWidth: 28, minHeight: line)
-                    .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(
+                        model.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    )
                     .keyboardShortcut(.return, modifiers: .command)
             }
         }
@@ -154,7 +183,7 @@ struct AgentPanel: View {
     private func send(_ text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { return }
-        draft = ""
+        model.chatDraft = ""
         let focus = scene.editor?.focusBlockIDs() ?? []
         Task { await app.client?.chat(model.id, text: t, focus: focus) }
     }
@@ -182,7 +211,7 @@ struct MessageView: View {
                     StatusLine(text: message.text)
                 }
             } else {
-                MarkdownText(text: message.text)
+                MarkdownPreview(markdown: message.text)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(
@@ -230,57 +259,6 @@ struct StatusLine: View {
                         endPoint: UnitPoint(x: at + Self.band, y: 0.5)))
             }
         }
-    }
-}
-
-/// MarkdownText shows an agent's answer: its ## headings, - and 1. lists
-/// and paragraphs, each with inline markdown.
-struct MarkdownText: View {
-    let text: String
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                row(line)
-            }
-        }
-    }
-
-    private var lines: [Substring] {
-        text.split(separator: "\n", omittingEmptySubsequences: true)
-    }
-
-    @ViewBuilder private func row(_ line: Substring) -> some View {
-        let t = line.trimmingCharacters(in: .whitespaces)
-        if let heading = t.firstMatch(of: /^#{1,6}\s+(.*)/) {
-            inline(String(heading.1)).font(.headline)
-        } else if let item = t.firstMatch(of: /^[-*•]\s+(.*)/) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("•")
-                inline(String(item.1))
-            }
-            .padding(.leading, indent(line))
-        } else if let item = t.firstMatch(of: /^(\d+[.)])\s+(.*)/) {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(item.1).monospacedDigit()
-                inline(String(item.2))
-            }
-            .padding(.leading, indent(line))
-        } else {
-            inline(t)
-        }
-    }
-
-    /// indent is a nested item's, from its leading spaces.
-    private func indent(_ line: Substring) -> CGFloat {
-        CGFloat(line.prefix { $0 == " " }.count / 2) * 14
-    }
-
-    private func inline(_ s: String) -> Text {
-        Text(
-            (try? AttributedString(
-                markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                ?? AttributedString(s))
     }
 }
 

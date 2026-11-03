@@ -109,7 +109,79 @@ func TestShortcuts(t *testing.T) {
 	if got := InlineShortcut("*a* b*", "[[0,3]]"); got != "" {
 		t.Errorf("a pair in a mention made %s", got)
 	}
-	if !OpensMenu("字") || OpensMenu("a") {
-		t.Error("OpensMenu disagrees with the desktop")
+	// The menus open as the desktop's: after a space or Chinese, in full
+	// width too, "、" only at a block's start or after a space, and not
+	// inside a word.
+	for _, c := range []struct{ typed, before, want string }{
+		{"/", "", "/"}, {"/", " ", "/"}, {"/", "字", "/"}, {"/", "a", ""},
+		{"＠", "字", "@"}, {"／", "", "/"}, {"、", "", "/"}, {"、", " ", "/"}, {"、", "字", ""},
+		{"-", "", ""}, {"//", "", ""},
+	} {
+		if got := Menu(c.typed, c.before); got != c.want {
+			t.Errorf("Menu(%q, %q) = %q, want %q", c.typed, c.before, got, c.want)
+		}
+	}
+	if MenuKind("＠") != "@" || MenuKind("、") != "/" || MenuKind("a") != "" {
+		t.Error("MenuKind disagrees with the desktop")
+	}
+}
+
+// Text pasted reads as the desktop's editor reads it: lines as Markdown
+// blocks, a link on an empty line as its video or picture, one line that
+// is a link as that link, and other text as it is.
+func TestPasteText(t *testing.T) {
+	read := func(text string, empty bool) pasted {
+		t.Helper()
+		raw, err := PasteText(text, empty)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var p pasted
+		if err := json.Unmarshal([]byte(raw), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if p := read("- one\r\n- two", false); len(p.Blocks) != 2 || p.Blocks[0].Type != "bulleted_list" || p.Blocks[1].Delta().Plain() != "two" {
+		t.Errorf("lines: %+v", p.Blocks)
+	}
+	if p := read("https://youtu.be/dQw4w9WgXcQ", true); p.Media == nil || p.Media.Type != "video" {
+		t.Errorf("a video's link on an empty line: %+v", p)
+	}
+	if p := read("https://example.com/a.png", true); p.Media == nil || p.Media.Type != "image" {
+		t.Errorf("a picture's link on an empty line: %+v", p)
+	}
+	if p := read("https://example.com/a.png", false); p.Media != nil || p.Link != "https://example.com/a.png" {
+		t.Errorf("a picture's link in a line: %+v", p)
+	}
+	if p := read("just words", true); p.Blocks != nil || p.Media != nil || p.Link != "" {
+		t.Errorf("words: %+v", p)
+	}
+}
+
+// Enter after a fence makes a code block in its language, or a diagram,
+// or math; after other text, nothing.
+func TestFenceEnter(t *testing.T) {
+	read := func(line string) fence {
+		t.Helper()
+		raw, err := FenceEnter(line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var f fence
+		_ = json.Unmarshal([]byte(raw), &f)
+		return f
+	}
+	if f := read("```go"); !f.Code || f.Language != "go" {
+		t.Errorf("```go: %+v", f)
+	}
+	if f := read("```mermaid"); f.Block == nil || f.Block.Type != "diagram" {
+		t.Errorf("```mermaid: %+v", f)
+	}
+	if f := read("$$"); f.Block == nil || f.Block.Type != "math_equation" {
+		t.Errorf("$$: %+v", f)
+	}
+	if f := read("words"); f.Code || f.Block != nil {
+		t.Errorf("words: %+v", f)
 	}
 }

@@ -263,15 +263,6 @@ func (d Delta) Insert(at int, text string, attrs Attrs) Delta {
 	return out.Compact()
 }
 
-// InsertDelta inserts rich text at a rune offset; inside a mention,
-// after it.
-func (d Delta) InsertDelta(at int, e Delta) Delta {
-	if _, end, ok := d.MentionAround(at); ok {
-		at = end
-	}
-	return d.Slice(0, at).Concat(e).Concat(d.Slice(at, d.Len()))
-}
-
 // Delete removes the runes from start to end, and the whole of a mention
 // they are part of.
 func (d Delta) Delete(start, end int) Delta {

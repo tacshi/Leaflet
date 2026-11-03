@@ -111,10 +111,8 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		if typ == "todo_list" {
 			checked, _ := spec["checked"].(bool)
 			n.Set("checked", checked)
-			if due, _ := spec["due"].(string); due != "" {
-				if t, timed, ok := ParseDue(due); ok {
-					n.SetDue(t, timed)
-				}
+			if due, _ := spec["due"].(string); validDue(due) {
+				n.Set("due", due)
 			}
 		}
 		if typ == "toggle_list" {
@@ -196,7 +194,7 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 		}
 		title, _ := e["title"].(string)
 		if title == "" {
-			title = "Interactive embed"
+			title = DefaultEmbedTitle
 		}
 		n.Data = map[string]any{
 			"title":  title,
@@ -281,7 +279,7 @@ func ChartData(chart map[string]any) (map[string]any, error) {
 	var labels []any
 	if raw, ok := chart["labels"].([]any); ok {
 		for _, l := range raw {
-			labels = append(labels, specText(l))
+			labels = append(labels, JSONText(l))
 		}
 	}
 	var series []any
@@ -298,7 +296,7 @@ func ChartData(chart map[string]any) (map[string]any, error) {
 			// server names it.
 			name := fmt.Sprintf("Series %d", i+1)
 			if v, ok := s["name"]; ok && v != nil {
-				name = specText(v)
+				name = JSONText(v)
 			}
 			series = append(series, map[string]any{"name": name, "values": values})
 		}
@@ -339,17 +337,18 @@ func rowsOf(v any) ([][]string, bool) {
 		}
 		row := []string{}
 		for _, c := range cells {
-			row = append(row, specText(c))
+			row = append(row, JSONText(c))
 		}
 		rows = append(rows, row)
 	}
 	return rows, true
 }
 
-// specText is a spec's value as text, as the server writes it: a string
-// as it is, null as nothing, and a number or a boolean as it reads, a
-// number as JavaScript writes one.
-func specText(v any) string {
+// JSONText is a JSON value as text, as the server writes it: a string as
+// it is, null as nothing, and a number or a boolean as it reads, a number
+// as JavaScript writes one. A spec's cells and labels are read so, and a
+// transcript's speakers.
+func JSONText(v any) string {
 	switch x := v.(type) {
 	case nil:
 		return ""
@@ -473,22 +472,23 @@ func TableNode(rows [][]string, id string) (*Node, error) {
 			if c < len(rows[r]) {
 				text = rows[r][c]
 			}
-			p := &Node{ID: NewBlockID(), Type: "paragraph"}
-			p.SetDelta(FromMarkdown(text))
-			n.Children = append(n.Children, &Node{
-				ID:       NewBlockID(),
-				Type:     "table/cell",
-				Data:     map[string]any{"colPosition": c, "rowPosition": r},
-				Children: []*Node{p},
-			})
+			n.Children = append(n.Children, TableCellNode(r, c, FromMarkdown(text)))
 		}
 	}
 	return n, nil
 }
 
+// TableCellNode is a new table cell at a row and column, holding a
+// paragraph of text.
+func TableCellNode(row, col int, text Delta) *Node {
+	p := &Node{ID: NewBlockID(), Type: "paragraph"}
+	p.SetDelta(text)
+	return &Node{ID: NewBlockID(), Type: "table/cell", Data: map[string]any{"colPosition": col, "rowPosition": row}, Children: []*Node{p}}
+}
+
 // SetTableRows makes table n's cells rows, as TableRows reads them: a
-// cell keeps its ID, and its text as it was when its Markdown is the
-// same, so only what changed is new; cells past the new size go, and
+// cell TableCells finds keeps its ID, and its text as it was when its
+// Markdown is the same, so only what changed is new; other cells go, and
 // those it grows to are made.
 func SetTableRows(n *Node, rows [][]string) error {
 	cols := 0
@@ -498,14 +498,7 @@ func SetTableRows(n *Node, rows [][]string) error {
 	if len(rows) == 0 || cols == 0 {
 		return toolErr("A table needs rows: a list of rows, each a list of cells.")
 	}
-	// The cells by where they are, found once rather than for each cell.
-	at := map[[2]int]*Node{}
-	for _, cell := range n.Children {
-		pos := [2]int{cell.Int("rowPosition", -1), cell.Int("colPosition", -1)}
-		if _, ok := at[pos]; !ok {
-			at[pos] = cell
-		}
-	}
+	grid := TableCells(n)
 	var kept []*Node
 	for c := 0; c < cols; c++ {
 		for r := range rows {
@@ -513,9 +506,12 @@ func SetTableRows(n *Node, rows [][]string) error {
 			if c < len(rows[r]) {
 				text = rows[r][c]
 			}
-			cell := at[[2]int{r, c}]
+			var cell *Node
+			if r < len(grid) && c < len(grid[r]) {
+				cell = grid[r][c]
+			}
 			if cell == nil {
-				cell = &Node{ID: NewBlockID(), Type: "table/cell", Data: map[string]any{"colPosition": c, "rowPosition": r}}
+				cell = TableCellNode(r, c, nil)
 			}
 			if len(cell.Children) == 0 {
 				cell.Children = []*Node{{ID: NewBlockID(), Type: "paragraph"}}
@@ -549,19 +545,9 @@ func DropCells(n *Node) {
 	}
 }
 
-// TableCell returns the cell of a table at a row and column, or nil.
-func TableCell(table *Node, row, col int) *Node {
-	for _, cell := range table.Children {
-		if cell.Int("colPosition", -1) == col && cell.Int("rowPosition", -1) == row {
-			return cell
-		}
-	}
-	return nil
-}
-
 // TableCells is a table's cells by row and column, as many as TableSize
-// makes room for, nil where one is missing: for every cell, it is
-// TableCell without looking through the table for each.
+// makes room for, nil where one is missing; of two cells at one place, the
+// first.
 func TableCells(table *Node) [][]*Node {
 	rows, cols := TableSize(table)
 	grid := make([][]*Node, rows)
@@ -617,23 +603,27 @@ func TableRows(n *Node) [][]string { return tableRows(n, Delta.ToMarkdown) }
 // ReadableMarkdown writes text.
 func ReadableTableRows(n *Node) [][]string { return tableRows(n, Delta.ReadableMarkdown) }
 
+// PlainTableRows is TableRows as the cells show, their text without its
+// formats.
+func PlainTableRows(n *Node) [][]string { return tableRows(n, Delta.Plain) }
+
+// tableRows writes the cells TableCells finds: of two at one place, the
+// first, as every reader of the table shows it.
 func tableRows(n *Node, markdown func(Delta) string) [][]string {
-	rows, cols := TableSize(n)
-	grid := make([][]string, rows)
-	for i := range grid {
-		grid[i] = make([]string, cols)
-	}
-	for _, cell := range n.Children {
-		c := cell.Int("colPosition", -1)
-		r := cell.Int("rowPosition", -1)
-		if c < 0 || r < 0 || r >= rows || c >= cols {
-			continue
+	cells := TableCells(n)
+	grid := make([][]string, len(cells))
+	for r, row := range cells {
+		grid[r] = make([]string, len(row))
+		for c, cell := range row {
+			if cell == nil {
+				continue
+			}
+			var parts []string
+			for _, k := range cell.Children {
+				parts = append(parts, markdown(k.Delta()))
+			}
+			grid[r][c] = strings.Join(parts, " ")
 		}
-		var parts []string
-		for _, k := range cell.Children {
-			parts = append(parts, markdown(k.Delta()))
-		}
-		grid[r][c] = strings.Join(parts, " ")
 	}
 	return grid
 }

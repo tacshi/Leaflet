@@ -89,8 +89,16 @@ extension CoreClient {
         try await call { try $0.nameVersion(pageID, name: name) }
     }
 
-    nonisolated(nonsending) func restoreVersion(_ pageID: String, id: String) async throws {
-        try await call { try $0.restoreVersion(pageID, id_: id) }
+    /// restoreVersion puts a version back as the page's content, and
+    /// returns the version it kept of the page as it was, for Undo to
+    /// restore, or "" when there was nothing to keep.
+    @discardableResult
+    nonisolated(nonsending) func restoreVersion(_ pageID: String, id: String) async throws
+        -> String
+    {
+        try await call { core in
+            try Self.answer { e in core.restoreVersion(pageID, id_: id, error: e) }
+        }
     }
 
     nonisolated(nonsending) func exportMarkdown(_ pageID: String) async throws -> ExportedPage {
@@ -108,19 +116,76 @@ extension CoreClient {
         }
     }
 
+    /// copyText writes blocks as Copy puts them on the clipboard: their
+    /// Markdown, as the desktop's Copy writes it.
+    nonisolated(nonsending) func copyText(_ nodes: [DocNode]) async throws -> String {
+        let json = String(decoding: try JSONEncoder().encode(nodes), as: UTF8.self)
+        return try await call { core in
+            try Self.answer { e in core.copyText(json, error: e) }
+        }
+    }
+
     /// addFile keeps a file with a page, and returns the block that shows
     /// it.
+    /// It waits beside the other calls, as copying a video takes a while.
     nonisolated(nonsending) func addFile(_ pageID: String, path: String) async throws -> DocNode {
-        try await call(DocNode.self) { core in
+        try await call(DocNode.self, waiting: true) { core in
             try Self.answer { e in core.addFile(pageID, path: path, error: e) }
+        }
+    }
+
+    /// picture reads a picture an image block links to on the web, as the
+    /// desktop's image blocks read one: through the core, from a public
+    /// address only, http too, which the app's own loading refuses. A few
+    /// come at a time, as files do.
+    nonisolated(nonsending) func picture(_ link: String) async throws -> Data {
+        try await Downloads.shared.run {
+            try await self.call(waiting: true) { try $0.picture(link) }
         }
     }
 
     /// localFile returns the path on this device of a file kept with a
     /// page, by its ID, downloaded first when it is not here.
+    /// A few come at a time, and the rest wait their turn without a
+    /// thread, as a page of many pictures asks for each.
     nonisolated(nonsending) func localFile(_ id: String) async throws -> String {
-        try await call(waiting: true) { core in
-            try Self.answer { e in core.localFile(id, error: e) }
+        try await Downloads.shared.run {
+            try await self.cancellable { core, token in
+                try Self.answer { e in core.localFile(id, token: token, error: e) }
+            }
         }
+    }
+}
+
+/// Downloads lets a few files come from where they went up at a time:
+/// each holds a thread while it waits on the network, and a page of many
+/// pictures, each asking for its own, would hold many.
+actor Downloads {
+    static let shared = Downloads(most: 4)
+
+    private let most: Int
+    private var running = 0
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    init(most: Int) { self.most = most }
+
+    /// run runs body once fewer than most others run, unless the task that
+    /// asked is cancelled meanwhile.
+    func run<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+        if running < most {
+            running += 1
+        } else {
+            // The one that ends hands this its turn.
+            await withCheckedContinuation { waiting.append($0) }
+        }
+        defer {
+            if waiting.isEmpty {
+                running -= 1
+            } else {
+                waiting.removeFirst().resume()
+            }
+        }
+        try Task.checkCancellation()
+        return try await body()
     }
 }

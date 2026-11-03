@@ -5,7 +5,6 @@ import (
 	gosync "sync"
 
 	"leaflet/internal/core"
-	"leaflet/locales"
 )
 
 // SetICloud turns iCloud sync on or off, through the Leaflet folder at
@@ -29,28 +28,10 @@ func (c *Core) SetICloud(root string, on bool) (err error) {
 		// the other.
 		sync.Hold(func() { sync.SetICloudRoot(root) })
 	}
-	if on && c.core.Store.Session().SignedIn {
-		return errors.New(locales.SettingsICloudSupabaseOn())
+	if err = c.core.SwitchICloud(on); err != nil {
+		err = iCloudError(err)
 	}
-	if on {
-		if err = sync.EnableICloud(); err != nil {
-			err = iCloudError(err)
-			on = false
-		}
-	}
-	if !on {
-		sync.SetICloud(false)
-	}
-	c.q.do(func() {
-		s := c.core.Store.Settings()
-		if s.ICloudSync != on {
-			s.ICloudSync = on
-			if serr := c.core.Store.SaveSettings(s); serr != nil && err == nil {
-				err = serr
-			}
-		}
-		c.plat.WatchICloud(on)
-	})
+	c.q.do(func() { c.core.KeepICloud(on && err == nil) })
 	return err
 }
 

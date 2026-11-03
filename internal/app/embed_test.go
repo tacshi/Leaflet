@@ -5,10 +5,13 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
 	"leaflet/internal/rendered"
+	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // An embed's ID goes into the wrapper's script as a string it cannot end.
@@ -81,15 +84,66 @@ func TestDropEmbedsForgetsDeletedBlocks(t *testing.T) {
 		embedSrc:    map[string]string{"kept": "a", "gone": "b", "full:gone": "c"},
 		embedSizes:  map[string]embedSize{"kept": {h: 1}, "gone": {h: 2}},
 		embedZoomed: map[string]bool{"full:kept": true, "full:gone": true},
-		embedToPage: map[string]bool{"kept": true, "gone": true}}
+		embedToPage: map[string]bool{"kept": true, "gone": true},
+		embedFailed: map[string]string{"kept": "no view", "gone": "no view"}}
 	a.dropEmbeds()
 	if len(a.embedSrc) != 1 || a.embedSrc["kept"] != "a" || len(a.embedSizes) != 1 || a.embedSizes["kept"].h != 1 ||
-		len(a.embedZoomed) != 1 || !a.embedZoomed["full:kept"] || len(a.embedToPage) != 1 || !a.embedToPage["kept"] {
-		t.Errorf("after dropping: %v %v %v %v", a.embedSrc, a.embedSizes, a.embedZoomed, a.embedToPage)
+		len(a.embedZoomed) != 1 || !a.embedZoomed["full:kept"] || len(a.embedToPage) != 1 || !a.embedToPage["kept"] ||
+		len(a.embedFailed) != 1 || a.embedFailed["kept"] == "" {
+		t.Errorf("after dropping: %v %v %v %v %v", a.embedSrc, a.embedSizes, a.embedZoomed, a.embedToPage, a.embedFailed)
 	}
 	a.page = nil
 	a.dropEmbeds()
-	if len(a.embedSrc)+len(a.embedSizes)+len(a.embedZoomed)+len(a.embedToPage) != 0 {
-		t.Errorf("with no page: %v %v %v", a.embedSrc, a.embedSizes, a.embedZoomed)
+	if len(a.embedSrc)+len(a.embedSizes)+len(a.embedZoomed)+len(a.embedToPage)+len(a.embedFailed) != 0 {
+		t.Errorf("with no page: %v %v %v %v", a.embedSrc, a.embedSizes, a.embedZoomed, a.embedFailed)
+	}
+}
+
+// A block whose web view could not be made says why, from what was kept
+// of the failure, rather than trying to make one at every frame.
+func TestEmbedViewNotMadeSaysWhy(t *testing.T) {
+	a := &App{embeds: map[string]*mygo.WebView{}, embedFailed: map[string]string{"e1": "no WebView2"}}
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Fill().Children(func() { a.sandbox(c, "e1", "<p>hi</p>", 400, nil, 200, 10, false) })
+	}, 500, 300)
+	tt.Frame()
+	if !tt.HasText(locales.HostEmbedError("no WebView2")) {
+		t.Errorf("shows %q", tt.Texts())
+	}
+}
+
+// The embed dialog inserts only with HTML to embed, and says in the app's
+// words what else keeps it from inserting it, as HTML too long.
+func TestEmbedDialogSaysWhatIsWrong(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	blocks := len(a.page.editor.Content.Children)
+	a.dialogs.openEmbed()
+	a.dialogs.embedHTML = "  "
+	tt := ui.NewTester(a.embedDialog, 800, 600)
+	tt.Frame()
+	_ = tt.Click(locales.DialogInsert())
+	tt.Frame()
+	if !a.dialogs.embedOpen || len(a.page.editor.Content.Children) != blocks {
+		t.Fatal("an embed with no HTML was inserted")
+	}
+	a.dialogs.embedHTML = strings.Repeat("<p>long</p>", 20_000)
+	tt.Frame()
+	if err := tt.Click(locales.DialogInsert()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	want := strings.TrimSuffix(locales.DialogEmbedFailed(""), " ")
+	if !a.dialogs.embedOpen || !strings.HasPrefix(a.dialogs.embedError, want) || !tt.HasText(a.dialogs.embedError) || len(a.toasts) != 0 {
+		t.Errorf("open %v, error %q, toasts %+v", a.dialogs.embedOpen, a.dialogs.embedError, a.toasts)
+	}
+	a.dialogs.openEmbed()
+	if a.dialogs.embedError != "" {
+		t.Errorf("the dialog opens again with %q", a.dialogs.embedError)
 	}
 }

@@ -1,5 +1,7 @@
 package doc
 
+import "slices"
+
 // Conflict is a block both sides changed since they last agreed. Last write
 // wins, and the losing version is kept so the user can bring it back. A
 // block one side deleted and the other changed is kept, with a nil node for
@@ -37,10 +39,8 @@ func (c Conflict) Kept() string {
 }
 
 type flat struct {
-	node   *Node
-	parent string
-	// prevs are the preceding siblings, nearest first.
-	prevs     []string
+	node      *Node
+	parent    string
 	prev      string
 	next      string
 	own       string
@@ -53,11 +53,8 @@ func flatten(c *Content) map[string]*flat {
 	visit = func(nodes []*Node, parent string) {
 		for i, n := range nodes {
 			f := &flat{node: n, parent: parent}
-			for j := i - 1; j >= 0; j-- {
-				f.prevs = append(f.prevs, nodes[j].ID)
-			}
-			if len(f.prevs) > 0 {
-				f.prev = f.prevs[0]
+			if i > 0 {
+				f.prev = nodes[i-1].ID
 			}
 			if i+1 < len(nodes) {
 				f.next = nodes[i+1].ID
@@ -111,6 +108,9 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 	if !primaryIsLocal {
 		primary, other, primaryFlat, otherFlat = remote, local, remoteFlat, localFlat
 	}
+	// What each side moved since base; a block base lacks counts as moved.
+	movedOn := map[*Content]map[string]bool{local: movedSince(local, base), remote: movedSince(remote, base)}
+	moved := func(c *Content, id string) bool { return baseFlat[id] == nil || movedOn[c][id] }
 
 	result := primary.Copy()
 	times := map[string]int64{}
@@ -147,7 +147,7 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		// whose clock is behind, still counts. Times only decide what
 		// both sides changed.
 		primaryEdited, otherEdited := b == nil || p.own != b.own, b == nil || o.own != b.own
-		if primaryEdited && otherEdited && p.own != o.own {
+		if primaryEdited && otherEdited && p.own != o.own && !onlyPlaced(p.node, o.node) {
 			conflicts = append(conflicts, Conflict{
 				BlockID:        id,
 				Local:          localFlat[id].node.Clone(),
@@ -169,8 +169,10 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 			taken = true
 		}
 		if p.parent != o.parent || p.prev != o.prev {
-			if otherWins(movedSinceBase(p, primaryFlat, b, baseFlat), movedSinceBase(o, otherFlat, b, baseFlat), o.signature > p.signature) {
-				if o.parent != "" && result.Find(o.parent) == nil {
+			if otherWins(moved(primary, id), moved(other, id), o.signature > p.signature) {
+				// Next to a block only the other side has, which goes in
+				// below, it goes once that is in; as into one.
+				if o.parent != "" && result.Find(o.parent) == nil || o.prev != "" && primaryFlat[o.prev] == nil {
 					waiting[id] = true
 				} else if pos, ok := positionIn(result, o); ok && !result.IsSelfOrAncestor(id, pos.Anchor()) {
 					_ = result.Move(id, pos)
@@ -195,7 +197,7 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		var visit func(n *Node)
 		visit = func(n *Node) {
 			f, b := sideFlat[n.ID], baseFlat[n.ID]
-			if b == nil || f.own != b.own || movedSinceBase(f, sideFlat, b, baseFlat) {
+			if b == nil || f.own != b.own || moved(c, n.ID) {
 				changedHere = true
 			}
 			for _, k := range n.Children {
@@ -319,7 +321,9 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 
 	// Blocks only on the other side: add those that stay. Walk the other
 	// side in order, so inserted runs keep their order; a block that stays
-	// comes with the blocks under it.
+	// comes with the blocks under it. added are the cells it adds to the
+	// tables both sides have, by table.
+	added := map[string][]string{}
 	for _, n := range other.All() {
 		id := n.ID
 		if _, ok := primaryFlat[id]; ok {
@@ -358,6 +362,9 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		}
 		shared(node)
 		_ = result.Insert(pos, node)
+		if node.Type == "table/cell" && o.parent != "" {
+			added[o.parent] = append(added[o.parent], id)
+		}
 		times[id] = timeOf(other, id)
 		delete(tombstones, id)
 		var kids func(*Node)
@@ -384,6 +391,15 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		}
 	}
 
+	// Rows or columns both sides added to a table take the same places,
+	// as each numbers its own from the end of the table as it was: the
+	// other side's go after the primary's. They change now, after every
+	// time either side has, so a merge with either side's version as it
+	// was keeps them there.
+	for table, cells := range added {
+		placeAdded(result, baseFlat[table], table, cells, times, max(localLatest, remoteLatest)+1)
+	}
+
 	// A block one side gave children while the other made it one that
 	// holds none, such as a list item turned into a paragraph, keeps its
 	// type, and its children come out to right after it, as the editor
@@ -404,6 +420,117 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		}
 	}
 	return result, conflicts
+}
+
+// placeAdded moves the cells the other side added to a table, cells, off
+// the places the primary's cells have, as when both sides added a row:
+// the other side's new rows go after the primary's, and its new columns
+// after the primary's, and the table grows to hold them. base is the
+// table as both sides last agreed on it; at is when they move.
+func placeAdded(result *Content, base *flat, tableID string, cells []string, times map[string]int64, at int64) {
+	table := result.Find(tableID)
+	if table == nil || base == nil || table.Type != "table" {
+		return
+	}
+	baseRows, baseCols := TableSize(base.node)
+	isAdded := map[string]bool{}
+	for _, id := range cells {
+		isAdded[id] = true
+	}
+	type place struct{ r, c int }
+	taken := map[place]bool{}
+	rows, cols := 0, 0
+	for _, cell := range table.Children {
+		r, c := cell.Int("rowPosition", -1), cell.Int("colPosition", -1)
+		if !isAdded[cell.ID] && r >= 0 && c >= 0 {
+			taken[place{r, c}] = true
+			rows, cols = max(rows, r+1), max(cols, c+1)
+		}
+	}
+	newRows, newCols := false, false
+	for _, cell := range table.Children {
+		r, c := cell.Int("rowPosition", -1), cell.Int("colPosition", -1)
+		if isAdded[cell.ID] && taken[place{r, c}] {
+			newRows = newRows || r >= baseRows
+			newCols = newCols || c >= baseCols
+		}
+	}
+	// The table holds every cell, as one side's rows and the other's
+	// columns: each side's size alone leaves out the other's.
+	lastRow, lastCol := rows, cols
+	for _, cell := range table.Children {
+		if !isAdded[cell.ID] {
+			continue
+		}
+		r, c := cell.Int("rowPosition", -1), cell.Int("colPosition", -1)
+		if newRows && r >= baseRows {
+			r += rows - baseRows
+			cell.Set("rowPosition", r)
+			times[cell.ID] = at
+		}
+		if newCols && c >= baseCols {
+			c += cols - baseCols
+			cell.Set("colPosition", c)
+			times[cell.ID] = at
+		}
+		lastRow, lastCol = max(lastRow, r+1), max(lastCol, c+1)
+	}
+	if table.Int("rowsLen", 0) < lastRow || table.Int("colsLen", 0) < lastCol {
+		table.Set("rowsLen", max(table.Int("rowsLen", 0), lastRow))
+		table.Set("colsLen", max(table.Int("colsLen", 0), lastCol))
+		times[tableID] = at
+	}
+	SortTableCells(table)
+}
+
+// onlyPlaced reports whether two versions of a block differ only in where
+// a table's cells are: a cell at two places, or a table of two sizes, as
+// rows and columns came and went. No one wrote that, and the cells hold
+// what they did: no conflict to review.
+func onlyPlaced(a, b *Node) bool {
+	var grid []string
+	switch {
+	case a.Type != b.Type:
+		return false
+	case a.Type == "table/cell":
+		grid = []string{"rowPosition", "colPosition"}
+	case a.Type == "table":
+		grid = []string{"rowsLen", "colsLen"}
+	default:
+		return false
+	}
+	ungridded := func(n *Node) string {
+		data := map[string]any{}
+		for k, v := range n.Data {
+			if !slices.Contains(grid, k) {
+				data[k] = v
+			}
+		}
+		return canonical(data)
+	}
+	return ungridded(a) == ungridded(b)
+}
+
+// Lifted is c with the children of each block that can't hold them out
+// right after it, as a merge leaves them: c itself when no block has
+// any, else a copy. An editor that keeps the page as its blocks in order,
+// nested only in the blocks that hold blocks, shows it so.
+func (c *Content) Lifted() *Content {
+	var stranded func(nodes []*Node) bool
+	stranded = func(nodes []*Node) bool {
+		for _, n := range nodes {
+			if !inTable(n) && (!NestableTypes[n.Type] && len(n.Children) > 0 || stranded(n.Children)) {
+				return true
+			}
+		}
+		return false
+	}
+	if !stranded(c.Children) {
+		return c
+	}
+	out := c.Copy()
+	out.Children = liftStranded(out.Children)
+	return out
 }
 
 // liftStranded moves the children of each block that can't hold them out
@@ -441,22 +568,101 @@ func Rebase(old, after, current *Content) *Content {
 	return merged
 }
 
-// movedSinceBase reports whether a side really moved the block since base,
-// as opposed to blocks being deleted or added around it: it compares the
-// nearest preceding sibling that both base and the side have.
-func movedSinceBase(side *flat, sideFlat map[string]*flat, base *flat, baseFlat map[string]*flat) bool {
-	if base == nil || side.parent != base.parent {
-		return true
+// movedSince reports which blocks side moved since base: put under another
+// parent, or out of the order of the siblings both have, as the longest run
+// of them that keeps base's order keeps it. A block whose neighbours moved,
+// or came or went around it, did not move: of a, b, c with a moved to the
+// end, only a did. Of runs as long, as when two blocks swap, the one with
+// the most blocks the side did not change since base stays: the block it
+// changed is the one it moved. Every device finds the same for the same two
+// versions.
+func movedSince(side, base *Content) map[string]bool {
+	moved := map[string]bool{}
+	if base == nil {
+		return moved
 	}
-	nearest := func(prevs []string, in map[string]*flat) string {
-		for _, id := range prevs {
-			if _, ok := in[id]; ok {
-				return id
+	type place struct {
+		parent string
+		index  int
+	}
+	inBase := map[string]place{}
+	var index func([]*Node, string)
+	index = func(nodes []*Node, parent string) {
+		for i, n := range nodes {
+			inBase[n.ID] = place{parent, i}
+			index(n.Children, n.ID)
+		}
+	}
+	index(base.Children, "")
+	var visit func([]*Node, string)
+	visit = func(nodes []*Node, parent string) {
+		var ids []string
+		var at []int
+		var stayed []bool
+		for _, n := range nodes {
+			if b, ok := inBase[n.ID]; ok {
+				if b.parent != parent {
+					moved[n.ID] = true
+				} else {
+					ids, at = append(ids, n.ID), append(at, b.index)
+					stayed = append(stayed, side.Blocks[n.ID] == base.Blocks[n.ID])
+				}
+			}
+			visit(n.Children, n.ID)
+		}
+		kept := inOrder(at, stayed)
+		for i, id := range ids {
+			if !kept[i] {
+				moved[id] = true
 			}
 		}
-		return ""
 	}
-	return nearest(side.prevs, baseFlat) != nearest(base.prevs, sideFlat)
+	visit(side.Children, "")
+	return moved
+}
+
+// inOrder marks the longest run of xs, distinct places from 0, that keeps
+// their order, and of runs as long, the one with the most stayed: in
+// n log n, with a tree of the best run ending below each place.
+func inOrder(xs []int, stayed []bool) []bool {
+	type run struct{ length, stayed, end int }
+	better := func(a, b run) bool { return a.length > b.length || a.length == b.length && a.stayed > b.stayed }
+	size := 0
+	for _, x := range xs {
+		size = max(size, x+1)
+	}
+	tree := make([]run, size+1)
+	for i := range tree {
+		tree[i].end = -1
+	}
+	prev := make([]int, len(xs))
+	best := run{end: -1}
+	for i, x := range xs {
+		below := run{end: -1}
+		for j := x; j > 0; j -= j & -j {
+			if better(tree[j], below) {
+				below = tree[j]
+			}
+		}
+		r := run{below.length + 1, below.stayed, i}
+		if stayed[i] {
+			r.stayed++
+		}
+		prev[i] = below.end
+		for j := x + 1; j <= size; j += j & -j {
+			if better(r, tree[j]) {
+				tree[j] = r
+			}
+		}
+		if better(r, best) {
+			best = r
+		}
+	}
+	kept := make([]bool, len(xs))
+	for i := best.end; i >= 0; i = prev[i] {
+		kept[i] = true
+	}
+	return kept
 }
 
 // positionIn is where the block goes in c, next to its neighbours where
@@ -485,7 +691,15 @@ func positionIn(c *Content, f *flat) (Position, bool) {
 		}
 		return Position{}, false
 	}
-	if c.Find(f.parent) != nil {
+	if parent := c.Find(f.parent); parent != nil {
+		// The first under its parent goes first; another, whose
+		// neighbours are not there, last.
+		if f.prev == "" && len(parent.Children) > 0 {
+			if first := parent.Children[0].ID; first != f.node.ID {
+				return Position{Before: first}, true
+			}
+			return Position{}, false
+		}
 		return Position{Parent: f.parent}, true
 	}
 	return Position{}, false

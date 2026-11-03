@@ -23,6 +23,20 @@ image="${SUPABASE_POSTGRES_IMAGE:-public.ecr.aws/supabase/postgres:17.11.0.006}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 name="leaflet-migrations-$$"
 
+# The registry turns pulls away for a while when too many come from one
+# address (toomanyrequests), as from CI's shared runners: the image is
+# pulled first, asked for again over a minute and more before giving up.
+for wait in 0 10 20 40; do
+	sleep "$wait"
+	if docker image inspect "$image" >/dev/null 2>&1 || docker pull --quiet "$image" >/dev/null; then
+		break
+	fi
+	if [[ $wait -eq 40 ]]; then
+		echo "could not pull $image" >&2
+		exit 1
+	fi
+done
+
 docker run --detach --rm --name "$name" --env POSTGRES_PASSWORD=postgres "$image" >/dev/null
 trap 'docker rm --force "$name" >/dev/null 2>&1 || true' EXIT
 

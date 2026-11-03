@@ -85,9 +85,10 @@ type Mentions struct {
 	// PageID is the page the menu is in, which it doesn't offer.
 	PageID string
 	Agents []Agent
-	// Pages are the user's pages, and Place says where one is.
-	Pages []store.Page
-	Place func(store.Page) string
+	// Pages are the user's pages, and Folders their folders, which say
+	// where a page is.
+	Pages   []store.Page
+	Folders []store.Folder
 	// Members are who the page is shared with, and UserID the user, whom
 	// the menu leaves out.
 	Members []store.Member
@@ -107,15 +108,12 @@ func Mention(m Mentions) []Item {
 	}
 	pages := slices.Clone(m.Pages)
 	slices.SortStableFunc(pages, func(x, y store.Page) int { return y.UpdatedAt.Compare(x.UpdatedAt) })
+	place := m.places()
 	for _, p := range pages {
 		if p.ID == m.PageID || p.Template {
 			continue
 		}
-		place := ""
-		if m.Place != nil {
-			place = m.Place(p)
-		}
-		out = append(out, Item{Key: "page:" + p.ID, Label: p.DisplayTitle(), Hint: place, Icon: "file-text", Group: locales.HostGroupPages()})
+		out = append(out, Item{Key: "page:" + p.ID, Label: p.DisplayTitle(), Hint: place(p), Icon: "file-text", Group: locales.HostGroupPages()})
 	}
 	for _, mb := range m.Members {
 		// Someone invited who has not accepted is no account yet: their
@@ -126,6 +124,25 @@ func Mention(m Mentions) []Item {
 		out = append(out, Item{Key: "user:" + mb.UserID, Label: mb.Name(), Hint: mb.Role, Icon: "user", Group: locales.HostGroupPeople()})
 	}
 	return out
+}
+
+// places says where a page is: in its parent page, else its folder, else
+// nothing at the top of the space.
+func (m Mentions) places() func(store.Page) string {
+	titles := map[string]string{}
+	for _, p := range m.Pages {
+		titles[p.ID] = p.DisplayTitle()
+	}
+	folders := map[string]string{}
+	for _, f := range m.Folders {
+		folders[f.ID] = f.Name
+	}
+	return func(p store.Page) string {
+		if t, ok := titles[p.ParentID]; ok {
+			return t
+		}
+		return folders[p.FolderID]
+	}
 }
 
 // Filter keeps the items what is typed after the "/" or "@" finds: those

@@ -109,12 +109,7 @@ func (a *App) keepLinkInfo(pageID, link string, info web.LinkInfo) {
 		}
 		return
 	}
-	err := a.saveStored(pageID, func(c *doc.Content) *doc.Content {
-		if c == nil || !info.Fill(c, link) {
-			return nil
-		}
-		return c
-	})
+	err := a.pageCore().EditPage(pageID, func(c *doc.Content) bool { return info.Fill(c, link) })
 	if err != nil {
 		log.Printf("link %s: %v", link, err)
 	}

@@ -287,15 +287,12 @@ extension DocContent {
     /// blocks are the page's top-level blocks.
     var blocks: [DocNode] { document.children ?? [] }
 
-    /// headings are the page's headings, in order, with their levels, for
-    /// the outline.
-    var headings: [(node: DocNode, level: Int)] {
-        var out: [(DocNode, Int)] = []
+    /// headings are the page's headings, in order, for the outline.
+    var headings: [DocNode] {
+        var out: [DocNode] = []
         func walk(_ nodes: [DocNode]) {
             for n in nodes {
-                if n.type == "heading" {
-                    out.append((n, Int(n.data?["level"]?.int ?? 1)))
-                }
+                if n.type == "heading" { out.append(n) }
                 walk(n.children ?? [])
             }
         }

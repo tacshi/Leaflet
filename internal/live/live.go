@@ -149,6 +149,20 @@ func (p *Page) setDirty(dirty bool) {
 	}
 }
 
+// Change shows c, the content changed from outside the editor, as when a
+// subpage's card comes or goes, a version is restored or a conflict
+// resolved, and saves it at once. It is no undo step: undoing in the page
+// would take back what was not done there. A page the user can't change
+// takes nothing.
+func (p *Page) Change(c *doc.Content) {
+	if p.readOnly {
+		return
+	}
+	p.ed.Replace(c)
+	p.setDirty(true)
+	p.Save()
+}
+
 // Edited marks the content as edited, and saves it shortly after the
 // typing stops. A page the user can't change saves nothing.
 func (p *Page) Edited() {

@@ -1,7 +1,6 @@
 package app
 
 import (
-	"errors"
 	"slices"
 	"strconv"
 	"strings"
@@ -14,6 +13,7 @@ import (
 	"github.com/egoist/mygo/ui/markdown"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
 	"leaflet/internal/menu"
@@ -412,7 +412,7 @@ func (a *App) moveDialog(c *ui.Context) {
 						ui.Text(c, title).FontSize(13.5).TextColor(pal.Text).SingleLine()
 					})
 					if row.Clicked() {
-						if err := a.movePage(d.movePage, parent, func() error {
+						if err := a.pageCore().MovePage(d.movePage, parent, func() error {
 							return a.st.MovePage(d.movePage, parent, folder, "")
 						}); err != nil {
 							a.toast(locales.SidebarCouldNotMove(err.Error()))
@@ -428,7 +428,7 @@ func (a *App) moveDialog(c *ui.Context) {
 				q := strings.ToLower(d.moveQuery)
 				if q == "" && a.canMoveInside(d.movePage, "") {
 					target("top", "file-text", locales.DialogMoveTopLevel(), "", "")
-					for _, f := range a.folders {
+					for _, f := range a.library().Folders {
 						target("folder:"+f.ID, "folder", f.Name, "", f.ID)
 					}
 				}
@@ -457,35 +457,14 @@ func (a *App) openHistory(id string) {
 	d.history, _ = a.st.History(id)
 }
 
-// historyLabel says what a version is: its name, or why it was kept.
-func historyLabel(h store.HistoryEntry) string {
-	if h.Label != "" {
-		return h.Label
-	}
-	switch h.Reason {
-	case "agent_run":
-		return locales.DialogHistoryAgentRun()
-	case "autosave":
-		return locales.DialogHistoryAutosave()
-	case "restore":
-		return locales.DialogHistoryBeforeRestore()
-	case "conflict":
-		return locales.DialogHistoryConflict()
-	}
-	return ""
-}
-
-// nameVersion keeps the page as it is now as a version with a name.
+// nameVersion keeps the page as it is now as a version with a name. A name
+// of spaces leaves the field open, to type one.
 func (a *App) nameVersion(name string) {
 	d := &a.dialogs
-	if a.page != nil && a.page.id == d.historyPage {
-		a.savePage()
-	}
-	c := a.st.Content(d.historyPage)
-	if c == nil || strings.TrimSpace(name) == "" {
+	if strings.TrimSpace(name) == "" {
 		return
 	}
-	if err := a.st.AddHistory(d.historyPage, c, "manual", "", strings.TrimSpace(name)); err != nil {
+	if err := a.pageCore().NameVersion(d.historyPage, name); err != nil {
 		a.toast(locales.DialogHistoryKeepFailed(err.Error()))
 		return
 	}
@@ -531,7 +510,7 @@ func (a *App) historyDialog(c *ui.Context) {
 						row.Children(func() {
 							ui.Column(c).Gap(2).Grow(1).Children(func() {
 								ui.Text(c, locales.DialogHistoryWhen(h.CreatedAt)).FontSize(13.5).FontWeight(550).TextColor(pal.Text)
-								l := ui.Text(c, historyLabel(h)).FontSize(12).TextColor(pal.TextMuted).MaxLines(2)
+								l := ui.Text(c, core.HistoryLabel(h)).FontSize(12).TextColor(pal.TextMuted).MaxLines(2)
 								if named {
 									l.TextColor(pal.AccentText).FontWeight(600)
 								}
@@ -585,7 +564,7 @@ func (a *App) historyDialog(c *ui.Context) {
 						d.historyOpen = false
 					}
 					if primary(c, "restore", "history", locales.DialogHistoryRestore()).Disabled(!a.canEdit(d.historyPage)).Clicked() {
-						a.restoreVersion(d.historyPage, content)
+						a.restoreVersion(d.historyPage, h.ID)
 						d.historyOpen = false
 					}
 				})
@@ -663,42 +642,41 @@ func (a *App) historyChanges(c *ui.Context, h store.HistoryEntry, content *doc.C
 	})
 }
 
-// restoreVersion puts an earlier version back, keeping the current one in
-// the history first.
-func (a *App) restoreVersion(pageID string, c *doc.Content) {
-	if a.page != nil && a.page.id == pageID {
-		a.savePage()
-	}
-	if cur := a.st.Content(pageID); cur != nil {
-		if err := a.st.AddHistory(pageID, cur, "restore", "", locales.DialogHistoryBeforeRestoring(time.Now())); err != nil {
-			a.toast(locales.DialogHistoryRestoreFailed(err.Error()))
-			return
-		}
-	}
-	// A version saved with no blocks leaves one to type in, the page open
-	// or not.
-	v := c.Copy()
-	if len(v.Children) == 0 {
-		v.Children = doc.Empty().Children
-	}
-	if ed := a.openEditor(pageID); ed != nil {
-		ed.Edit(func(content *doc.Content) { content.Children = v.Children })
-		a.savePage()
-		// The last run's edits are gone or back with the version: undoing
-		// it now would do nothing, or something else.
-		if run := a.hub.Session(pageID).Latest(); run != nil {
-			a.dialogs.hideRun = run.ID
-		}
-		if a.page != nil && a.page.id == pageID {
-			clear(a.page.tinted)
-			// A selection made on the other version means nothing here.
-			ed.Select(ed.Caret(), ed.Caret())
-		}
-	} else if _, _, err := a.st.SaveContent(pageID, v); err != nil {
-		a.toast(locales.DialogHistoryRestoreFailed(err.Error()))
+// restoreVersion puts version id back as the page's content, keeping the
+// page as it was in its history first, with Undo in the toast, which puts
+// that back: the change is no undo step in the page, whose Undo has the
+// typing and agents' runs.
+func (a *App) restoreVersion(pageID, id string) {
+	kept, ok := a.putBackVersion(pageID, id)
+	if !ok {
 		return
 	}
-	a.toast(locales.DialogHistoryRestored())
+	if kept == "" {
+		a.toast(locales.DialogHistoryRestored())
+		return
+	}
+	a.toastAction(locales.DialogHistoryRestored(), locales.CommonUndo(), func() { a.putBackVersion(pageID, kept) })
+}
+
+// putBackVersion puts version id back as the page's content
+// (core.Pages.RestoreVersion), saying why when it can't, and returns the
+// version the page was kept as before, "" for none.
+func (a *App) putBackVersion(pageID, id string) (kept string, ok bool) {
+	kept, run, err := a.pageCore().RestoreVersion(pageID, id)
+	if err != nil {
+		a.toast(locales.DialogHistoryRestoreFailed(err.Error()))
+		return "", false
+	}
+	if ed := a.openEditor(pageID); ed != nil {
+		// The last run's Undo no longer shows.
+		if run != "" {
+			a.dialogs.hideRun = run
+		}
+		clear(a.page.tinted)
+		// A selection made on the other version means nothing here.
+		ed.Select(ed.Caret(), ed.Caret())
+	}
+	return kept, true
 }
 
 // Share -----------------------------------------------------------------
@@ -925,22 +903,6 @@ func (d *dialogs) openChart(id string, ed *editor.Editor) {
 	d.chartCSV = doc.ChartCSV(n, locales.DialogChartLabelColumn())
 }
 
-// parseChartCSV reads the dialog's data, saying what is wrong with it in
-// the language shown.
-func parseChartCSV(csv string) (labels []any, series []any, err error) {
-	labels, series, err = doc.ParseChartCSV(csv)
-	var number *doc.ChartNumberError
-	switch {
-	case errors.Is(err, doc.ErrChartRows):
-		err = errors.New(locales.DialogChartNeedRows())
-	case errors.Is(err, doc.ErrChartSeries):
-		err = errors.New(locales.DialogChartNeedSeries())
-	case errors.As(err, &number):
-		err = errors.New(locales.DialogChartNotNumber(number.Line, number.Cell))
-	}
-	return labels, series, err
-}
-
 func (a *App) chartDialog(c *ui.Context) {
 	pal := theme.Of(c)
 	d := &a.dialogs
@@ -959,25 +921,19 @@ func (a *App) chartDialog(c *ui.Context) {
 					d.chartOpen = false
 				}
 				if primary(c, "save", "", locales.DialogChartSave()).Clicked() {
-					labels, series, err := parseChartCSV(d.chartCSV)
-					if err == nil {
-						var data map[string]any
-						data, err = doc.ChartData(map[string]any{"chart_type": chartKinds[d.chartKind], "title": d.chartTitle,
-							"labels": labels, "series": series, "caption": d.chartCap})
-						if err == nil {
-							id := d.chartID
-							d.chartEditor.Edit(func(content *doc.Content) {
-								if n := content.Find(id); n != nil {
-									data["author"] = n.Data["author"]
-									n.Data = data
-								}
-							})
-							d.chartOpen = false
-						}
-					}
+					data, err := menu.ChartData(chartKinds[d.chartKind], d.chartTitle, d.chartCap, d.chartCSV)
 					if err != nil {
 						d.chartError = err.Error()
+						return
 					}
+					id := d.chartID
+					d.chartEditor.Edit(func(content *doc.Content) {
+						if n := content.Find(id); n != nil {
+							data["author"] = n.Data["author"]
+							n.Data = data
+						}
+					})
+					d.chartOpen = false
 				}
 			})
 		})

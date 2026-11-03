@@ -1,3 +1,4 @@
+import LeafletCore
 import SwiftUI
 
 /// SourceSheet edits a formula's TeX or a diagram's Mermaid, as the
@@ -13,8 +14,9 @@ struct SourceSheet: View {
     @State private var original: String?
 
     private var diagram: Bool { node.type == "diagram" }
-    /// key is the data the source is kept under.
-    private var key: String { diagram ? "source" : "formula" }
+    /// key is the data the source is kept under, as the core has it
+    /// (mobile.SourceKey).
+    private var key: String { MobileSourceKey(node.type) }
 
     var body: some View {
         NavigationStack {

@@ -43,8 +43,8 @@ func TestInsertTranscript(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &got); err != nil {
 		t.Fatal(err)
 	}
-	if got.After != "rec" || texts(&doc.Content{Children: got.Blocks}) != "0:00  Hello|1:01  Again" {
-		t.Fatalf("after %q, blocks %q", got.After, texts(&doc.Content{Children: got.Blocks}))
+	if texts(&doc.Content{Children: got.Blocks}) != "0:00  Hello|1:01  Again" {
+		t.Fatalf("blocks %q", texts(&doc.Content{Children: got.Blocks}))
 	}
 	if d := got.Blocks[0].Delta(); len(d) != 2 || !d[0].Attrs.Bold || d[1].Attrs.Bold {
 		t.Errorf("a line's time is not bold alone: %+v", d)

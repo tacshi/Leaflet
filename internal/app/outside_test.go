@@ -8,6 +8,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
@@ -109,7 +110,7 @@ func TestDeletedAndEditedConflict(t *testing.T) {
 	be := remote.New(remote.Config(), st)
 	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
 	a.reloadAll()
-	a.resolveConflict(cf, nil)
+	a.resolveConflict(cf.ID, core.DeleteBlock)
 	if text := st.Content(p.ID).PlainText(); text != "two" {
 		t.Errorf("after Delete it the page holds %q", text)
 	}
@@ -119,8 +120,8 @@ func TestDeletedAndEditedConflict(t *testing.T) {
 }
 
 // A save that fails keeps the edits waiting, for the page closing to try
-// again; and an edit of a page not open goes only over what it read.
-func TestSaveFailsAndRaces(t *testing.T) {
+// again.
+func TestFailedSaveKeepsTheEdits(t *testing.T) {
 	st, err := store.OpenMemory(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -137,34 +138,9 @@ func TestSaveFailsAndRaces(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := st.CreatePage(store.NewPageOptions{Title: "Other", Content: doc.FromBlocks([]*doc.Node{para("q1", "one")})})
-	if err != nil {
-		t.Fatal(err)
-	}
 	be := remote.New(remote.Config(), st)
 	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
 	a.reloadAll()
-
-	// Sync writes the other page while it is being changed: the change
-	// is made again over that, keeping both.
-	tries := 0
-	err = a.saveStored(other.ID, func(c *doc.Content) *doc.Content {
-		if tries++; tries == 1 {
-			synced := st.Content(other.ID)
-			synced.Find("q1").SetDelta(doc.FromMarkdown("one, synced"))
-			if _, _, err := st.SaveContent(other.ID, synced); err != nil {
-				t.Fatal(err)
-			}
-		}
-		_ = c.Insert(doc.Position{At: "end"}, para("q2", "two, added"))
-		return c
-	})
-	if err != nil || tries != 2 {
-		t.Fatalf("saved with %v after %d tries", err, tries)
-	}
-	if text := st.Content(other.ID).PlainText(); !strings.Contains(text, "one, synced") || !strings.Contains(text, "two, added") {
-		t.Errorf("stored %q, want both", text)
-	}
 
 	a.openPage(p.ID)
 	a.page.editor.Content.Find("p1").SetDelta(doc.FromMarkdown("one, typed"))

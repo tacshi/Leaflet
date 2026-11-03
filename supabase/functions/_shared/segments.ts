@@ -1,6 +1,6 @@
 // Transcript segments: [{start_ms, end_ms, text, speaker?}] (recordings.transcript).
 
-import { isSpace, trimSpace } from "./blocks.ts";
+import { isSpace, jsonText, trimSpace } from "./blocks.ts";
 
 export interface Segment {
   start_ms: number;
@@ -48,7 +48,7 @@ export function tokensToSegments(tokens: SonioxToken[]): Segment[] {
     const tokenText = typeof token.text === "string" ? token.text : "";
     const s = token.start_ms ?? 0;
     const e = Math.max(token.end_ms ?? 0, s);
-    const who = token.speaker === undefined || token.speaker === null ? "" : String(token.speaker);
+    const who = jsonText(token.speaker);
     if (isPunct(tokenText)) {
       if (text) text += tokenText;
       else if (segments.length) segments[segments.length - 1].text += trimSpace(tokenText);

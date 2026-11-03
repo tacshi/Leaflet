@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { type Surface, systemPrompt, userMessage } from "./prompt.ts";
+import { pageFits, type Surface, systemPrompt, userMessage } from "./prompt.ts";
 
 const prompt = (surface: Surface) =>
   systemPrompt({
@@ -60,4 +60,17 @@ Deno.test("a cloud run has the device's rules", () => {
   assert(p.includes("If a tool returns an error, fix the call and try again."));
   assert(p.includes("but you only edit this page"));
   assert(p.includes("in the page's own style and language"));
+});
+
+// A page fits in the request by its blocks as the request writes them,
+// line separators escaped, as the app measures it (agents.userMessage):
+// one that fits only as JSON.stringify writes it is read with read_page.
+Deno.test("a page fits in the request as the request writes it", () => {
+  const view = (text: string) => [{ id: "a", type: "paragraph", depth: 0, text }];
+  const plain = JSON.stringify(view("")).length;
+  assert(pageFits(view("x".repeat(40_000 - plain))));
+  assert(!pageFits(view("x".repeat(40_001 - plain))));
+  const separators = view("\u2028".repeat(39_000 - plain) + "x".repeat(1_000));
+  assertEquals(JSON.stringify(separators).length, 40_000);
+  assert(!pageFits(separators));
 });

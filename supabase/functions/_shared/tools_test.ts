@@ -2,6 +2,7 @@ import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   type BlockSpec,
   codeLanguage,
+  deltaOf,
   deltaToMarkdown,
   isPageContent,
   markdownToDelta,
@@ -936,7 +937,10 @@ Deno.test("a run's ops undo as the client undoes them (testdata/run_ops.json)", 
 // table, they go after it; next to a table's cell, after the table; in a
 // cell, in it; next to a block gone, at the end. A block the page has
 // already stays as it is. A move goes into a list only, and neither into
-// a table nor out of one.
+// a table nor out of one. A replace that keeps a block's children keeps
+// those it has now, in a block of another editor's that holds some too.
+// A replace or a delete of a table's cell, or of a block in one, is
+// passed over: a table changes whole.
 Deno.test("ops land where the client puts them (testdata/edge_ops.json)", async () => {
   const table = specToNode({ type: "table", rows: [["a", "b"]] }, { newId: () => "x" });
   table.id = "t";
@@ -945,7 +949,12 @@ Deno.test("ops land where the client puts them (testdata/edge_ops.json)", async 
     cell.children![0].id = `c${i}p`;
   });
   const list = (id: string, children?: NodeJSON[]): NodeJSON => ({ ...para(id, id, children), type: "bulleted_list" });
-  const before = pageOf(list("l", [list("l1")]), para("p", "p"), table);
+  const before = pageOf(
+    list("l", [list("l1")]),
+    para("p", "p"),
+    table,
+    para("q", "q", [para("q1", "q1"), para("q2", "q2")]),
+  );
   const insert = (position: Position, ...nodes: NodeJSON[]): Op => ({ op: "insert", position, nodes });
   const move = (id: string, position: Position): Op => ({ op: "move", id, position, from: { at: "end" } });
   const ops: Op[] = [
@@ -964,11 +973,22 @@ Deno.test("ops land where the client puts them (testdata/edge_ops.json)", async 
     move("x1", { parent: "p" }),
     move("l", { parent: "x8" }),
     move("x7", { at: "start" }),
+    { op: "delete", ids: ["q2"], previous: [] },
+    {
+      op: "replace",
+      id: "q",
+      node: para("q", "Q", [para("q1", "q1"), para("q2", "q2")]),
+      previous: before.document.children![3],
+    },
+    { op: "delete", ids: ["c1", "x5"], previous: [] },
+    { op: "replace", id: "c0p", node: para("c0p", "replaced"), previous: para("c0p", "a") },
   ];
   const after = applyOps(before, ops, 1000);
   const cells = after.document.children!.find((n) => n.id === "t")!.children!;
   assertEquals(cells.map((c) => c.id), ["c1", "c0"]);
   assertEquals(cells[1].children!.map((n) => n.id), ["c0p", "x6", "x5"]);
+  assertEquals(deltaOf(cells[1].children![0]), [{ insert: "a" }]);
+  assertEquals(after.document.children!.find((n) => n.id === "q")!.children!.map((n) => n.id), ["q1"]);
   await fixture("edge_ops.json", { before, ops, after }, edgeOps);
 });
 

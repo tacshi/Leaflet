@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/guard"
 	"leaflet/internal/menu"
-	"leaflet/internal/store"
+	"leaflet/internal/templates"
 	"leaflet/internal/web"
 )
 
@@ -38,26 +39,13 @@ func (c *Core) MenuItems(pageID, trigger string) (_ string, err error) {
 }
 
 // slashItems are the / menu's blocks, and the templates but the page's
-// own. Run on the core's queue.
+// own (templates.Items). Run on the core's queue.
 func (c *Core) slashItems(pageID string) ([]menu.Item, error) {
-	all, err := c.choices()
+	all, hint, err := c.choices()
 	if err != nil {
 		return nil, err
 	}
-	var templates []menu.Item
-	for _, t := range all {
-		if t.page != nil && t.page.ID == pageID {
-			continue
-		}
-		it := menu.Item{Key: t.key(), Label: store.TitleOr(t.name())}
-		if t.page != nil {
-			it.Icon, it.Hint = "layout-template", c.hint(*t.page)
-		} else {
-			it.Icon, it.Hint = t.starter.Icon, t.starter.Hint()
-		}
-		templates = append(templates, it)
-	}
-	return menu.Slash(templates), nil
+	return menu.Slash(templates.Items(all, pageID, hint)), nil
 }
 
 // mentionItems are the @ menu's agents, pages and people. Run on the
@@ -76,23 +64,7 @@ func (c *Core) mentionItems(pageID string) ([]menu.Item, error) {
 	if err != nil {
 		return nil, err
 	}
-	titles := map[string]string{}
-	for _, p := range pages {
-		titles[p.ID] = p.DisplayTitle()
-	}
-	m := menu.Mentions{PageID: pageID, Pages: pages, Members: members, UserID: st.Session().UserID}
-	// Where a page is: in its parent page, else its folder.
-	m.Place = func(p store.Page) string {
-		if t, ok := titles[p.ParentID]; ok {
-			return t
-		}
-		for _, f := range folders {
-			if f.ID == p.FolderID {
-				return f.Name
-			}
-		}
-		return ""
-	}
+	m := menu.Mentions{PageID: pageID, Pages: pages, Folders: folders, Members: members, UserID: st.Session().UserID}
 	for _, o := range c.core.Hub.Options() {
 		m.Agents = append(m.Agents, menu.Agent{ProviderID: o.Provider.ID, Name: o.Name(), Model: o.Model})
 	}
@@ -162,10 +134,16 @@ func EmbedBlock(title, html string, height int, author string) (_ string, err er
 	return encode(n)
 }
 
+// linkRetry is how long a link whose page could not be read, as offline,
+// waits before it is asked again, as the desktop's cards wait. Tests
+// shorten it.
+var linkRetry = time.Minute
+
 // fillLinks asks the pages of page id's link cards without their info
 // for it, once a run, and puts what they say in the cards, as the desktop
-// does as a card shows: for search, exports and other devices. Run on the
-// core's queue.
+// does as a card shows: for search, exports and other devices. A page
+// that could not be read is asked again once linkRetry has passed, as
+// the page next opens or changes. Run on the core's queue.
 func (c *Core) fillLinks(id string, content *doc.Content) {
 	for _, link := range web.Unfilled(content) {
 		if c.linkAsked[link] {
@@ -174,7 +152,11 @@ func (c *Core) fillLinks(id string, content *doc.Content) {
 		c.linkAsked[link] = true
 		guard.Go(func() {
 			info, err := web.LookUp(link)
-			if err != nil || info.Title == "" {
+			if err != nil {
+				time.AfterFunc(linkRetry, func() { c.q.post(func() { delete(c.linkAsked, link) }) })
+				return
+			}
+			if info.Title == "" {
 				return
 			}
 			c.q.post(func() {

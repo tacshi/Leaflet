@@ -83,17 +83,8 @@ type TagCount struct {
 	Count int
 }
 
-// Tags returns the tags of the pages, without templates, by name: a tag
-// spelled differently on two pages is one, as the first page spells it.
-func (s *Store) Tags() ([]TagCount, error) {
-	pages, err := s.Pages()
-	if err != nil {
-		return nil, err
-	}
-	return TagsOf(pages), nil
-}
-
-// TagsOf counts the tags of pages, by name.
+// TagsOf counts the tags of pages, by name: a tag spelled differently on
+// two pages is one, as the first page spells it.
 func TagsOf(pages []Page) []TagCount {
 	at := map[string]int{}
 	var out []TagCount

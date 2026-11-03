@@ -1,26 +1,16 @@
 package app
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
-	"io/fs"
 	"log"
-	"maps"
-	"os"
-	"slices"
-	"sort"
 	"strings"
-	"time"
 
 	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
-	"leaflet/internal/icloud"
-	"leaflet/internal/remote"
-	"leaflet/internal/starters"
 	"leaflet/internal/store"
+	"leaflet/internal/templates"
 	"leaflet/internal/theme"
 	"leaflet/locales"
 )
@@ -33,7 +23,7 @@ func (a *App) duplicatePage(p store.Page) {
 	if !a.flush() {
 		return
 	}
-	if a.recordingIn(p.ID) {
+	if templates.RecordingIn(a.st, a.rec, p.ID, a.isUnder) {
 		a.toast(locales.TemplateWaitForRecording())
 		return
 	}
@@ -43,10 +33,7 @@ func (a *App) duplicatePage(p store.Page) {
 	if !a.copyable(p.ID, failed, func() { a.again(p.ID, a.duplicatePage) }) {
 		return
 	}
-	o := store.CopyOptions{ParentID: p.ParentID, FolderID: p.FolderID, AfterID: p.ID, Title: copyTitle(p.Title)}
-	if a.isShared(p) && (p.ParentID == "" || !a.canEdit(p.ParentID)) {
-		o = store.CopyOptions{Title: o.Title}
-	}
+	o := templates.Duplicate(a.st, p)
 	var cp store.Page
 	a.copyPage(failed, func() (err error) { cp, err = a.st.CopyPage(p.ID, o); return }, func() {
 		a.pages, _ = a.st.Pages()
@@ -69,10 +56,10 @@ func (a *App) again(id string, fn func(store.Page)) {
 // their files and recordings' audio, which a long recording takes seconds
 // for. done runs once it has, on the main thread, or failed with why it
 // did not. One copy is made at a time, as one downloads at a time: another
-// is not begun, and copyPage reports whether this was.
+// is not begun, and copyPage reports whether this was. The audio fetched
+// for the copy being made stays until it has its own.
 func (a *App) copyPage(failed func(error), work func() error, done func()) bool {
 	if a.fetchingCopy {
-		a.dropFetchedAudio()
 		a.toast(locales.TemplateFetchingOther())
 		return false
 	}
@@ -92,56 +79,25 @@ func (a *App) copyPage(failed func(error), work func() error, done func()) bool 
 }
 
 // dropFetchedAudio removes the audio copyable downloaded for a copy, once
-// the copy has its own or will not be made: it stays on this device only
-// as Keep the audio says.
+// the copy has its own or will not be made, as Keep the audio says.
 func (a *App) dropFetchedAudio() {
-	if a.settings.KeepAudioOnDevice == "until_uploaded" {
-		for _, id := range a.fetchedAudio {
-			if r, err := a.st.Recording(id); err == nil && r.AudioPath != "" && r.LocalPath != "" {
-				_ = os.Remove(r.LocalPath)
-				_ = a.st.ClearLocalPath(id)
-			}
-		}
-	}
+	templates.DropAudio(a.st, a.settings, a.fetchedAudio)
 	a.fetchedAudio = nil
 }
 
-// recordingIn reports whether a recording on a page or its subpages is
-// still being made or transcribed here: a copy of it now would stay as it
-// is, without what the recording gets once it finishes.
-func (a *App) recordingIn(id string) bool {
-	if a.rec.Active() && a.isUnder(a.rec.State.PageID, id) {
-		return true
-	}
-	for rid := range a.rec.Transcribing {
-		if r, err := a.st.Recording(rid); err == nil && a.isUnder(r.PageID, id) {
-			return true
-		}
-	}
-	return false
-}
-
-// copyable reports whether page id, with its subpages, can be copied now:
-// a copy goes up with its own files and recordings' audio, copied from
-// this device as it is made, never later from the originals', which
-// another device may delete meanwhile (store.CopyNeeds). Those only
-// stored download first, and again runs once they have, on the main
-// thread; one still uploading from where it was added, or that can't
-// download now, says so, and nothing is copied.
+// copyable reports whether page id, with its subpages, can be copied now,
+// with what it needs on this device (templates.Needs). Those only stored
+// download first, and again runs once they have, on the main thread; one
+// still uploading from where it was added, or that can't download now,
+// says so, and nothing is copied.
 func (a *App) copyable(id string, failed func(error), again func()) bool {
-	needs, err := a.st.CopyNeeds(id)
+	needs, err := templates.Needs(a.st, a.sync, id)
 	if err != nil {
-		failed(err)
+		a.copyFailed(err, failed)
 		return false
 	}
 	if len(needs) == 0 {
 		return true
-	}
-	for _, n := range needs {
-		if n.Path == "" || !a.sync.CanFetch() {
-			a.toast(locales.TemplateFilesUploading())
-			return false
-		}
 	}
 	// One copy's downloads at a time: the toast says they are coming.
 	if a.fetchingCopy {
@@ -151,24 +107,7 @@ func (a *App) copyable(id string, failed func(error), again func()) bool {
 	a.fetchingCopy = true
 	a.toast(locales.TemplateFetchingFiles())
 	go func() {
-		var audio []string
-		var err error
-		for _, n := range needs {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			var data []byte
-			data, err = a.sync.Fetch(ctx, n.Bucket, n.Path)
-			cancel()
-			if err == nil && n.FileID != "" {
-				_, err = a.st.DownloadedFile(n.FileID, data)
-			} else if err == nil {
-				if _, err = a.st.DownloadedAudio(n.RecordingID, data); err == nil {
-					audio = append(audio, n.RecordingID)
-				}
-			}
-			if err != nil {
-				break
-			}
-		}
+		audio, err := templates.Fetch(a.st, a.sync, needs)
 		a.update(func() {
 			a.fetchingCopy = false
 			// What came goes once the copy has its own, or at once when it
@@ -189,23 +128,14 @@ func (a *App) copyable(id string, failed func(error), again func()) bool {
 	return false
 }
 
-// copyFailed says why a copy was not made: a file or a recording's audio
-// not on this device, as one still uploading or gone from where it was
-// stored, or what else failed.
+// copyFailed says why a copy was not made (templates.CopyError): a file or
+// a recording's audio not on this device, or what else failed.
 func (a *App) copyFailed(err error, failed func(error)) {
-	if errors.Is(err, store.ErrCopyNotHere) || remote.IsNotFound(err) || errors.Is(err, icloud.ErrNotReady) || errors.Is(err, fs.ErrNotExist) {
-		a.toast(locales.TemplateFilesUploading())
+	if err = templates.CopyError(err); errors.Is(err, templates.ErrFilesUploading) {
+		a.toast(err.Error())
 		return
 	}
 	failed(err)
-}
-
-// copyTitle is the title of a copy, as Finder names one.
-func copyTitle(title string) string {
-	if strings.TrimSpace(title) == "" {
-		return ""
-	}
-	return locales.TemplateCopyTitle(title)
 }
 
 // saveAsTemplate keeps a copy of a page, with its subpages, as a template
@@ -215,7 +145,7 @@ func (a *App) saveAsTemplate(p store.Page) {
 	if !a.flush() {
 		return
 	}
-	if a.recordingIn(p.ID) {
+	if templates.RecordingIn(a.st, a.rec, p.ID, a.isUnder) {
 		a.toast(locales.TemplateWaitForRecording())
 		return
 	}
@@ -233,180 +163,60 @@ func (a *App) saveAsTemplate(p store.Page) {
 	})
 }
 
-// templateRoots are the templates themselves, without their subpages, by
-// title.
-func (a *App) templateRoots() []store.Page {
-	var out []store.Page
-	for _, t := range a.templates {
-		if t.ParentID == "" {
-			out = append(out, t)
-		}
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		return strings.ToLower(out[i].DisplayTitle()) < strings.ToLower(out[j].DisplayTitle())
-	})
-	return out
+// templateChoices are the templates to start a page from: the user's, by
+// title, then the starters (templates.Choices).
+func (a *App) templateChoices() []templates.Choice {
+	return templates.Choices(a.templates, a.deletedStarters())
 }
-
-// templateKids are the subpages of a template.
-func (a *App) templateKids(id string) []store.Page {
-	var out []store.Page
-	for _, t := range a.templates {
-		if t.ParentID == id {
-			out = append(out, t)
-		}
-	}
-	return out
-}
-
-// A starter is a template that comes with Leaflet (internal/starters).
-type starter = starters.Starter
-
-func starterList() []starter { return starters.All() }
-
-// A templateChoice is a template to start a page from: one of the user's,
-// or a starter.
-type templateChoice struct {
-	page    *store.Page
-	starter *starter
-}
-
-// key tells choices apart in menus and lists.
-func (t templateChoice) key() string {
-	if t.page != nil {
-		return "template:" + t.page.ID
-	}
-	return "starter:" + t.starter.Key
-}
-
-// name is the title a page takes from the template, "" for none.
-func (t templateChoice) name() string {
-	if t.page != nil {
-		return t.page.Title
-	}
-	return t.starter.Title()
-}
-
-func (t templateChoice) title() string { return store.TitleOr(t.name()) }
-
-func (t templateChoice) icon() string {
-	if t.page != nil {
-		return "layout-template"
-	}
-	return t.starter.Icon
-}
-
-// choiceHint tells a template apart under its name.
-func (a *App) choiceHint(t templateChoice) string {
-	if t.page != nil {
-		return a.templateHint(*t.page)
-	}
-	return t.starter.Hint()
-}
-
-// templateChoices are the user's templates, by title, then the starters
-// not deleted that they have no template of the same title for.
-func (a *App) templateChoices() []templateChoice {
-	roots := a.templateRoots()
-	titles := map[string]bool{}
-	var out []templateChoice
-	for i := range roots {
-		titles[strings.ToLower(strings.TrimSpace(roots[i].Title))] = true
-		out = append(out, templateChoice{page: &roots[i]})
-	}
-	gone := a.deletedStarters()
-	ss := starterList()
-	for i := range ss {
-		if !gone[ss[i].Key] && !titles[strings.ToLower(ss[i].Title())] {
-			out = append(out, templateChoice{starter: &ss[i]})
-		}
-	}
-	return out
-}
-
-// deletedStartersKey keeps the keys of the starters deleted on this
-// device, a JSON array.
-const deletedStartersKey = "templates.deleted_starters"
 
 // deletedStarters are the starters deleted on this device, by key, read
-// once and kept as they change.
+// once and again as they change.
 func (a *App) deletedStarters() map[string]bool {
 	if a.goneStarters == nil {
-		a.goneStarters = map[string]bool{}
-		var keys []string
-		if v, ok := a.st.Value(deletedStartersKey); ok {
-			_ = json.Unmarshal([]byte(v), &keys)
-		}
-		for _, k := range keys {
-			a.goneStarters[k] = true
-		}
+		a.goneStarters = templates.DeletedStarters(a.st)
 	}
 	return a.goneStarters
 }
 
-// setStarterDeleted deletes a starter on this device, or brings it back.
-func (a *App) setStarterDeleted(key string, deleted bool) error {
-	gone := maps.Clone(a.deletedStarters())
-	if deleted {
-		gone[key] = true
-	} else {
-		delete(gone, key)
-	}
-	b, _ := json.Marshal(slices.Sorted(maps.Keys(gone)))
-	if err := a.st.SetValue(deletedStartersKey, string(b)); err != nil {
-		return err
-	}
-	a.goneStarters = gone
-	return nil
+// reloadTemplates reads the templates and the starters deleted again, as
+// a starter made the user's own changes both.
+func (a *App) reloadTemplates() {
+	a.templates, _ = a.st.Templates()
+	a.goneStarters = nil
 }
 
 // deleteTemplate deletes a template, with Undo: a starter it hides here.
-func (a *App) deleteTemplate(t templateChoice) {
-	if t.page != nil {
-		a.deletePage(t.page.ID)
+func (a *App) deleteTemplate(t templates.Choice) {
+	if t.Page != nil {
+		a.deletePage(t.Page.ID)
 		return
 	}
-	key := t.starter.Key
-	if err := a.setStarterDeleted(key, true); err != nil {
+	key := t.Starter.Key
+	err := templates.SetStarterDeleted(a.st, key, true)
+	a.reloadTemplates()
+	if err != nil {
 		a.toast(locales.AppErrorDelete(err.Error()))
 		return
 	}
-	a.toastAction(locales.AppDeleted(t.title()), locales.CommonUndo(), func() {
-		if err := a.setStarterDeleted(key, false); err != nil {
+	a.toastAction(locales.AppDeleted(t.Title()), locales.CommonUndo(), func() {
+		err := templates.SetStarterDeleted(a.st, key, false)
+		a.reloadTemplates()
+		if err != nil {
 			a.toast(locales.AppErrorRestore(err.Error()))
 		}
 	})
 }
 
 // templateByKey finds a template by its key.
-func (a *App) templateByKey(key string) (templateChoice, bool) {
-	for _, t := range a.templateChoices() {
-		if t.key() == key {
-			return t, true
-		}
-	}
-	return templateChoice{}, false
-}
-
-// ownTemplate is the user's template for t: t itself, or for a starter a
-// template made from it, which then takes the starter's place: deleting
-// the template later doesn't bring the starter back.
-func (a *App) ownTemplate(t templateChoice) (store.Page, error) {
-	if t.page != nil {
-		return *t.page, nil
-	}
-	p, err := a.st.CreatePage(store.NewPageOptions{Title: t.starter.Title(), Template: true, Content: doc.FromBlocks(t.starter.Nodes())})
-	if err != nil {
-		return store.Page{}, err
-	}
-	a.templates, _ = a.st.Templates()
-	return p, a.setStarterDeleted(t.starter.Key, true)
+func (a *App) templateByKey(key string) (templates.Choice, bool) {
+	return templates.Find(a.templateChoices(), key)
 }
 
 // editTemplate opens a template to change it; a starter becomes the
 // user's own first.
-func (a *App) editTemplate(t templateChoice) {
-	p, err := a.ownTemplate(t)
+func (a *App) editTemplate(t templates.Choice) {
+	p, err := templates.Own(a.st, t)
+	a.reloadTemplates()
 	if err != nil {
 		a.toast(locales.TemplateSaveFailed(err.Error()))
 		return
@@ -419,14 +229,14 @@ func (a *App) editTemplate(t templateChoice) {
 // subpages it copies under the page, once the copy is made off the main
 // thread, if the page is still open. When it has none to give it says why,
 // and reports false.
-func (a *App) templateBlocks(t templateChoice, id string, again func(), use func([]*doc.Node)) bool {
-	if t.starter != nil {
-		use(t.starter.Nodes())
+func (a *App) templateBlocks(t templates.Choice, id string, again func(), use func([]*doc.Node)) bool {
+	if t.Starter != nil {
+		use(t.Starter.Nodes())
 		return true
 	}
 	// A copy would keep a recording still being made in the template
 	// unfinished, as duplicatePage's would.
-	if a.recordingIn(t.page.ID) {
+	if templates.RecordingIn(a.st, a.rec, t.Page.ID, a.isUnder) {
 		a.toast(locales.TemplateWaitForRecording())
 		return false
 	}
@@ -434,21 +244,21 @@ func (a *App) templateBlocks(t templateChoice, id string, again func(), use func
 	failed := func(err error) { a.toast(locales.TemplateUseFailed(err.Error())) }
 	// What the template's files and recordings need first comes, and the
 	// page takes the template once it has, if it is still open.
-	if !a.copyable(t.page.ID, failed, func() {
+	if !a.copyable(t.Page.ID, failed, func() {
 		if open() {
 			again()
 		}
 	}) {
 		return false
 	}
-	var c *doc.Content
-	return a.copyPage(failed, func() (err error) { c, err = a.st.CopyInto(t.page.ID, id); return }, func() {
+	var blocks []*doc.Node
+	return a.copyPage(failed, func() (err error) { blocks, err = templates.Blocks(a.st, t, id); return }, func() {
 		a.pages, _ = a.st.Pages()
-		if len(a.children(id, "", false)) > 0 {
+		if len(a.children(id)) > 0 {
 			a.treeOpen("page", id)
 		}
 		if open() {
-			use(c.Children)
+			use(blocks)
 		}
 	})
 }
@@ -459,9 +269,9 @@ func (a *App) templateBlocks(t templateChoice, id string, again func(), use func
 // or once its copies are made, and then puts the caret in the title:
 // selected to type over when it took the template's. A page with
 // something in it already, or that can't be changed, is left as it is.
-func (a *App) applyTemplate(t templateChoice) bool {
+func (a *App) applyTemplate(t templates.Choice) bool {
 	ps := a.page
-	if ps == nil || ps.editor.ReadOnly || !a.isEmpty() {
+	if ps == nil || ps.editor.ReadOnly || !ps.editor.Content.IsEmpty() {
 		return false
 	}
 	return a.templateBlocks(t, ps.id, func() { a.applyTemplate(t) }, func(blocks []*doc.Node) {
@@ -469,7 +279,7 @@ func (a *App) applyTemplate(t templateChoice) bool {
 		switch {
 		case len(blocks) == 0:
 			// A template of no blocks leaves the page its empty paragraph.
-		case a.isEmpty():
+		case ps.editor.Content.IsEmpty():
 			ps.editor.Edit(func(cur *doc.Content) { cur.Children = blocks })
 		default:
 			// What was typed while the copy was made stays.
@@ -478,9 +288,9 @@ func (a *App) applyTemplate(t templateChoice) bool {
 		if len(blocks) > 0 {
 			a.savePage()
 		}
-		took := strings.TrimSpace(ps.title) == "" && t.name() != ""
+		took := t.Retitles(ps.title)
 		if took {
-			ps.title = t.name()
+			ps.title = t.Name()
 			a.saveTitle()
 		}
 		a.focusTitle(took)
@@ -490,12 +300,12 @@ func (a *App) applyTemplate(t templateChoice) bool {
 // insertTemplate puts a template's blocks at the caret, as / does, with
 // copies of its subpages under the page. An empty page it fills as a blank
 // page's row does.
-func (a *App) insertTemplate(t templateChoice) {
+func (a *App) insertTemplate(t templates.Choice) {
 	ps := a.page
 	if ps == nil {
 		return
 	}
-	if a.isEmpty() {
+	if ps.editor.Content.IsEmpty() {
 		a.applyTemplate(t)
 		return
 	}
@@ -507,7 +317,7 @@ func (a *App) insertTemplate(t templateChoice) {
 
 // startFrom fills the page just made and opened from a template, if there
 // is one, and puts the caret in its title.
-func (a *App) startFrom(t *templateChoice) {
+func (a *App) startFrom(t *templates.Choice) {
 	if t != nil && a.applyTemplate(*t) {
 		return
 	}
@@ -515,26 +325,9 @@ func (a *App) startFrom(t *templateChoice) {
 }
 
 // defaultTemplate is the template new pages under parent, or at the top of
-// folder, start from: the one the page or folder names, if the user has
-// it; else nil.
-func (a *App) defaultTemplate(parent, folder string) *templateChoice {
-	id := ""
-	switch {
-	case parent != "":
-		if p := a.pageByID(parent); p != nil {
-			id = p.DefaultTemplateID
-		}
-	case folder != "":
-		for _, f := range a.folders {
-			if f.ID == folder {
-				id = f.DefaultTemplateID
-			}
-		}
-	}
-	if id == "" {
-		return nil
-	}
-	if t, ok := a.templateByKey("template:" + id); ok {
+// folder, start from (templates.Default); else nil.
+func (a *App) defaultTemplate(parent, folder string) *templates.Choice {
+	if t, ok := templates.Default(a.st, a.templateChoices(), parent, folder); ok {
 		return &t
 	}
 	return nil
@@ -548,17 +341,10 @@ func (a *App) defaultTemplateMenu(m *ui.Menu, label, place, current string, disa
 	if _, ok := a.templateByKey("template:" + current); !ok {
 		current = ""
 	}
-	choose := func(t *templateChoice) {
-		id, done := "", locales.TemplateDefaultCleared(place)
-		if t != nil {
-			p, err := a.ownTemplate(*t)
-			if err != nil {
-				a.toast(locales.TemplateDefaultFailed(err.Error()))
-				return
-			}
-			id, done = p.ID, locales.TemplateDefaultSet(place, t.title())
-		}
-		if err := set(id); err != nil {
+	choose := func(t *templates.Choice) {
+		done, err := templates.SetDefault(a.st, t, place, set)
+		a.reloadTemplates()
+		if err != nil {
 			a.toast(locales.TemplateDefaultFailed(err.Error()))
 			return
 		}
@@ -572,7 +358,7 @@ func (a *App) defaultTemplateMenu(m *ui.Menu, label, place, current string, disa
 		}
 		m.Separator()
 		for _, t := range a.templateChoices() {
-			if m.Item(t.title()).Radio(t.page != nil && t.page.ID == current).Chosen() {
+			if m.Item(t.Title()).Radio(t.Page != nil && t.Page.ID == current).Chosen() {
 				choose(&t)
 			}
 		}
@@ -593,7 +379,7 @@ func (a *App) templateActions(c *ui.Context, row func(key, icon, label, hint str
 	}
 	ui.Text(c, locales.TemplateSectionTitle()).FontSize(12).FontWeight(600).TextColor(pal.TextMuted).Margin(10, 0, 4, 2)
 	for _, t := range choices {
-		row(t.key(), t.icon(), t.title(), a.choiceHint(t), func() { a.applyTemplate(t) }, func(m *ui.Menu) {
+		row(t.Key(), t.Icon(), t.Title(), t.Hint(a.templateHint), func() { a.applyTemplate(t) }, func(m *ui.Menu) {
 			if m.Item(locales.TemplateEdit()).Chosen() {
 				a.editTemplate(t)
 			}
@@ -604,26 +390,14 @@ func (a *App) templateActions(c *ui.Context, row func(key, icon, label, hint str
 	}
 }
 
-// templateHint is the first line of a template's text, to tell templates
-// apart, or how many subpages it has when it has no text; kept until the
+// templateHint tells a template apart (templates.Hint), kept until the
 // template next changes or the app's language does.
 func (a *App) templateHint(t store.Page) string {
 	key := t.ID + "@" + t.UpdatedAt.String() + "@" + i18n.Locale()
 	if h, ok := a.templateHints[key]; ok {
 		return h
 	}
-	hint := locales.TemplateHintEmpty()
-	if n := len(a.templateKids(t.ID)); n > 0 {
-		hint = locales.TemplateHintSubpages(n)
-	}
-	if row, err := a.st.ContentRow(t.ID); err == nil {
-		for _, l := range strings.Split(row.PlainText, "\n") {
-			if l = strings.TrimSpace(l); l != "" {
-				hint = l
-				break
-			}
-		}
-	}
+	hint := templates.Hint(a.st, t, templates.Subpages(a.templates))
 	if a.templateHints == nil {
 		a.templateHints = map[string]string{}
 	}
@@ -663,8 +437,8 @@ func (a *App) withStarters(query string, hits []store.SearchHit) []store.SearchH
 		return hits
 	}
 	for _, t := range a.templateChoices() {
-		if t.starter != nil && strings.Contains(strings.ToLower(t.title()), q) {
-			hits = append(hits, store.SearchHit{Kind: "template", Title: t.title(), PageID: t.key(), Snippet: t.starter.Hint()})
+		if t.Starter != nil && strings.Contains(strings.ToLower(t.Title()), q) {
+			hits = append(hits, store.SearchHit{Kind: "template", Title: t.Title(), PageID: t.Key(), Snippet: t.Starter.Hint()})
 		}
 	}
 	return hits
@@ -672,9 +446,9 @@ func (a *App) withStarters(query string, hits []store.SearchHit) []store.SearchH
 
 // hitTemplate is the template a search hit starts a page from: a starter,
 // or a template itself rather than one of its subpages.
-func (a *App) hitTemplate(h store.SearchHit) (templateChoice, bool) {
+func (a *App) hitTemplate(h store.SearchHit) (templates.Choice, bool) {
 	if h.Kind != "template" {
-		return templateChoice{}, false
+		return templates.Choice{}, false
 	}
 	if t, ok := a.templateByKey(h.PageID); ok {
 		return t, true

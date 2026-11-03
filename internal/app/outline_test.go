@@ -152,18 +152,6 @@ func TestOutlineScrollsHeadingToTop(t *testing.T) {
 	}
 }
 
-func TestHeadingTree(t *testing.T) {
-	h := func(id string, level int) *doc.Node {
-		n := &doc.Node{ID: id, Type: "heading"}
-		n.Set("level", level)
-		return n
-	}
-	roots, kids := headingTree([]*doc.Node{h("a", 2), h("b", 3), h("c", 3), h("d", 1), h("e", 3), h("f", 2)})
-	if fmt.Sprint(roots) != "[a d]" || fmt.Sprint(kids["a"]) != "[b c]" || fmt.Sprint(kids["d"]) != "[e f]" || kids["b"] != nil {
-		t.Errorf("roots %v kids %v", roots, kids)
-	}
-}
-
 // The sidebar's edge is MyGo's split: the arrows move it, within the
 // sidebar's range.
 func TestSidebarSplit(t *testing.T) {

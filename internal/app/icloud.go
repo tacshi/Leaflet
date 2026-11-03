@@ -76,7 +76,8 @@ func (a *App) iCloudFailed(err error) string {
 }
 
 // setICloud turns iCloud sync on or off from Settings, one turn at a
-// time: turning it off while it still turns on could leave it on.
+// time: turning it off while it still turns on could leave it on. The
+// switch shows the turn asked for while it goes.
 func (a *App) setICloud(on bool) {
 	if a.icloudBusy {
 		return
@@ -85,28 +86,15 @@ func (a *App) setICloud(on bool) {
 	a.settings.ICloudSync = on
 	a.saveSettings()
 	a.syncErr, a.syncError = nil, ""
+	c := a.core()
 	go func() {
-		var err error
-		if on {
-			err = a.sync.EnableICloud()
-		} else {
-			a.sync.SetICloud(false)
-		}
+		err := c.SwitchICloud(on)
 		a.update(func() {
 			a.icloudBusy = false
-			if a.settings.ICloudSync != on {
-				// Signing in turned it off meanwhile: it stays off.
-				a.sync.SetICloud(a.settings.ICloudSync)
-				a.watchICloud(a.settings.ICloudSync)
-				return
-			}
+			c.KeepICloud(on && err == nil)
 			if err != nil {
-				a.settings.ICloudSync = false
-				a.saveSettings()
 				a.toast(a.iCloudFailed(err))
-				return
 			}
-			a.watchICloud(on)
 		})
 	}()
 }

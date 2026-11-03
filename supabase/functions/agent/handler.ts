@@ -40,14 +40,13 @@ import {
   type ToolOutcome,
   unseenOps,
 } from "../_shared/tools.ts";
-import { type Surface, systemPrompt, userMessage } from "../_shared/prompt.ts";
+import { pageFits, type Surface, systemPrompt, userMessage } from "../_shared/prompt.ts";
 import { isTimeout } from "../_shared/net.ts";
 import { SAVE_MS } from "../_shared/deadline.ts";
 import { lastKey, newKeyAfter } from "../_shared/sortkey.ts";
 
 const MAX_ROUNDS = 12;
 const UNREADABLE = "The page's content cannot be read, so the agent left it as it is.";
-const INLINE_PAGE_LIMIT = 40_000;
 const TOOL_RESULT_LIMIT = 60_000;
 const HEARTBEAT_MS = 15_000;
 // A call with less time than this left is not started.
@@ -576,7 +575,7 @@ async function runJob(
     // A long page is read with read_page, by a model that has tools; one
     // that has none gets it here whatever its length, as the app's runs
     // give it (userMessage in internal/agents).
-    const fits = JSON.stringify(views).length <= INLINE_PAGE_LIMIT;
+    const fits = pageFits(views);
     const request = (): ChatMessage => ({
       role: "user",
       content: userMessage({

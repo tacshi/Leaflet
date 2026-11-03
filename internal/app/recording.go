@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"log"
 	"slices"
 	"strings"
 	"time"
@@ -29,11 +28,8 @@ func (a *App) startRecording(pageID string) {
 			a.savePage()
 			return
 		}
-		err := a.saveStored(pageID, func(c *doc.Content) *doc.Content {
-			if c != nil {
-				_ = c.Insert(doc.Position{At: "end"}, n.Clone())
-			}
-			return c
+		err := a.pageCore().EditPage(pageID, func(c *doc.Content) bool {
+			return c.Insert(doc.Position{At: "end"}, n.Clone()) == nil
 		})
 		if err != nil {
 			a.toast(locales.RecCouldNotSave(err.Error()))
@@ -43,8 +39,6 @@ func (a *App) startRecording(pageID string) {
 		a.toast(err.Error())
 	}
 }
-
-func fmtDuration(d time.Duration) string { return recording.FormatDuration(d) }
 
 // recordingPill shows the recording in progress in the page's header.
 func (a *App) recordingPill(c *ui.Context) {
@@ -56,7 +50,7 @@ func (a *App) recordingPill(c *ui.Context) {
 		if !st.Paused {
 			dot.Opacity(0.4 + 0.6*dot.Loop("pulse", 1200*time.Millisecond, ui.Bounce(ui.EaseInOut)))
 		}
-		label := fmtDuration(a.rec.Elapsed())
+		label := recording.FormatDuration(a.rec.Elapsed())
 		if st.Starting {
 			label = locales.RecStarting()
 		}
@@ -263,7 +257,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 				ro := a.page == nil || a.page.editor.ReadOnly || !a.canEdit(a.page.id)
 				more.Menu(func(m *ui.Menu) {
 					if m.Item(locales.RecCopyTranscript()).Disabled(len(rec.Transcript) == 0).Chosen() {
-						c.WriteClipboard(transcriptPlain(rec))
+						c.WriteClipboard(recording.TranscriptText(rec))
 						c.Toast(locales.CommonCopied())
 					}
 					if m.Item(locales.RecInsertTranscript()).Disabled(len(rec.Transcript) == 0 || ro).Chosen() {
@@ -312,7 +306,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					ui.Row(c.Key(i)).Gap(12).AlignItems(ui.Baseline).Children(func() {
 						ts := ui.ButtonBase(c.Key("ts")).Width(46)
 						ts.Children(func() {
-							ui.Text(c, fmtDuration(time.Duration(s.StartMs)*time.Millisecond)).FontSize(12).TextColor(pal.Accent).FontFeatures("tnum")
+							ui.Text(c, recording.FormatDuration(time.Duration(s.StartMs)*time.Millisecond)).FontSize(12).TextColor(pal.Accent).FontFeatures("tnum")
 						})
 						if ts.Clicked() {
 							a.seek(rec, time.Duration(s.StartMs)*time.Millisecond)
@@ -355,20 +349,6 @@ func recordingName(n *doc.Node, rec store.Recording, found bool, page string) st
 	return recording.BlockTitle(n.Str("title"), rec.CreatedAt, found, page)
 }
 
-// transcriptPlain is a recording's transcript as text to copy: a line
-// each, after its speaker's name when it has one.
-func transcriptPlain(rec store.Recording) string {
-	var lines []string
-	for _, s := range recording.Tidy(rec.Transcript) {
-		if s.Speaker != "" {
-			lines = append(lines, locales.RecSpeakerLine(s.Speaker, s.Text))
-		} else {
-			lines = append(lines, s.Text)
-		}
-	}
-	return strings.Join(lines, "\n")
-}
-
 // seek plays a recording from t, once its audio loads if it has not.
 func (a *App) seek(rec store.Recording, t time.Duration) {
 	pl := a.players[rec.ID]
@@ -391,7 +371,7 @@ func (a *App) scrubber(c *ui.Context, pl *player) {
 		frac = float64(pos) / float64(dur)
 	}
 	ui.Row(c.Key("scrub")).Gap(10).AlignItems(ui.Center).Children(func() {
-		ui.Text(c, fmtDuration(pos)).FontSize(12).TextColor(pal.TextMuted).FontFeatures("tnum")
+		ui.Text(c, recording.FormatDuration(pos)).FontSize(12).TextColor(pal.TextMuted).FontFeatures("tnum")
 		v := frac
 		if ui.SliderBase(c.Key("bar"), &v, 0, 1).Grow(1).Height(14).Draw(func(p *ui.Painter, r ui.Rect) {
 			y := r.Y + r.H/2 - 2
@@ -401,7 +381,7 @@ func (a *App) scrubber(c *ui.Context, pl *player) {
 		}).Changed() {
 			pl.p.Seek(time.Duration(v * float64(dur)))
 		}
-		ui.Text(c, fmtDuration(dur)).FontSize(12).TextColor(pal.TextMuted).FontFeatures("tnum")
+		ui.Text(c, recording.FormatDuration(dur)).FontSize(12).TextColor(pal.TextMuted).FontFeatures("tnum")
 	})
 }
 
@@ -459,8 +439,7 @@ func (a *App) findSpeech() {
 	}
 	a.update(func() {
 		a.rec.SetEngine(h)
-		if a.settings.Stt.Provider == "openai-compatible" && strings.TrimSpace(a.settings.Stt.BaseURL) == "" {
-			a.settings.Stt.Provider = recording.OnDevice
+		if recording.PreferOnDevice(&a.settings.Stt) {
 			a.saveSettings()
 		}
 	})
@@ -519,7 +498,7 @@ func (a *App) speechSettings(c *ui.Context) {
 	// One card for the engine and its settings, their controls one width
 	// so their left edges line up.
 	card(c, "engine", func() {
-		settingRow(c, "provider", locales.RecSttTranscription(), engineStatus(*stt, s.sonioxSaved || a.session.SignedIn, a.rec.Engine != nil), true, func() {
+		settingRow(c, "provider", locales.RecSttTranscription(), recording.EngineStatus(*stt, s.sonioxSaved || a.session.SignedIn, a.rec.Engine != nil), true, func() {
 			if ui.Segmented(c.Key("provider"), &prov, labels...); true {
 				want := providers[prov]
 				if want != stt.Provider {
@@ -648,7 +627,7 @@ func (a *App) speechSettings(c *ui.Context) {
 			case a.rec.Active() && a.rec.State.LiveText != "":
 				desc = a.rec.State.LiveText
 			case a.rec.Active():
-				desc = locales.RecSttListening(4)
+				desc = locales.RecSttListening(int(recording.MicTest / time.Second))
 			default:
 				desc = locales.RecTranscribing()
 			}
@@ -664,11 +643,8 @@ func (a *App) speechSettings(c *ui.Context) {
 			}
 			if button(c, "test", "record", label).Disabled(a.rec.Active() || s.micTesting).Clicked() {
 				s.micTesting, s.micText = true, ""
-				err := a.rec.Test(a.settings.Stt, a.online && !a.settings.WorkOffline, 4*time.Second, func(text string, err error) {
-					s.micTesting, s.micText = false, locales.RecSttHeard(text)
-					if err != nil {
-						s.micText = err.Error()
-					}
+				err := a.rec.TestMicrophone(a.settings.Stt, a.online && !a.settings.WorkOffline, func(heard string) {
+					s.micTesting, s.micText = false, heard
 				})
 				if err != nil {
 					s.micTesting, s.micText = false, err.Error()
@@ -678,18 +654,8 @@ func (a *App) speechSettings(c *ui.Context) {
 	})
 	if changed {
 		a.saveSettings()
-		a.syncSttSettings()
+		a.rec.MirrorSettings(a.settings.Stt)
 	}
-}
-
-// engineStatus says where transcription runs, or that it is not set up.
-func engineStatus(stt store.SttSettings, hasSonioxKey, onDevice bool) string {
-	if stt.Provider == recording.OnDevice && !onDevice ||
-		stt.Provider == "soniox" && !hasSonioxKey ||
-		stt.Provider == "openai-compatible" && strings.TrimSpace(stt.BaseURL) == "" {
-		return locales.RecSttNotSetUp()
-	}
-	return recording.EngineLabel(stt)
 }
 
 // sttTestButton is a Test button that runs test and shows how it went.
@@ -743,75 +709,30 @@ func (a *App) keepEndpointKey(key string) {
 	})
 }
 
-// saveSonioxKey keeps the Soniox key on the server, or in this device's
-// keychain when there is no server to keep it.
+// saveSonioxKey keeps the Soniox key typed on the server, or in this
+// device's keychain when signed out, off the main thread.
 func (a *App) saveSonioxKey() {
 	s := &a.speech
 	key := strings.TrimSpace(s.soniox)
-	if a.session.SignedIn {
-		a.saveSttKey("soniox", key)
+	if key == "" {
 		return
 	}
-	if err := recording.SetLocalSonioxKey(key); err != nil {
-		a.toast(locales.RecSttKeyNotSaved(err.Error()))
-		return
-	}
-	s.soniox, s.sonioxSaved, s.testResult = "", true, ""
-	a.toast(locales.RecSttSavedOnDevice())
-}
-
-func (a *App) saveSttKey(provider, key string) {
-	if strings.TrimSpace(key) == "" {
-		return
-	}
-	a.speech.saving = true
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		_, err := a.backend.Invoke(ctx, "stt", map[string]any{"action": "save_key", "provider": provider, "api_key": key})
-		a.update(func() {
-			a.speech.saving = false
-			if err != nil {
-				a.toast(locales.RecSttKeyNotSaved(err.Error()))
-				return
-			}
-			a.speech.soniox = ""
-			a.toast(locales.RecSttSavedOnServer())
-		})
-	}()
-}
-
-// syncSttSettings mirrors the speech settings to the server.
-func (a *App) syncSttSettings() {
-	// The Mac's own engine is this Mac's alone: the server's settings stay
-	// those the other devices chose.
-	if !a.backend.SignedIn() || a.settings.Stt.Provider == recording.OnDevice {
-		return
-	}
-	stt := a.settings.Stt
-	// Each key typed into a field sends them: the sends go one at a time,
-	// and only the last, or one ending in the server's old settings.
-	n := a.sttLatest.Add(1)
-	go func() {
-		a.sttSent.Lock()
-		defer a.sttSent.Unlock()
-		if a.sttLatest.Load() != n {
+	s.saving = true
+	rec := a.rec
+	var onServer bool
+	var err error
+	a.offMain(func() { onServer, err = rec.SaveSonioxKey(key) }, func() {
+		s.saving = false
+		if err != nil {
+			a.toast(err.Error())
 			return
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		row := map[string]any{"user_id": a.backend.UserID(), "provider": stt.Provider, "language": stt.Language,
-			"live_transcript": stt.LiveTranscript, "speaker_labels": stt.SpeakerLabels,
-			"base_url": stt.BaseURL, "model": stt.Model, "provider_id": nilIfEmpty(stt.ProviderID)}
-		if _, err := a.backend.Upsert(ctx, "stt_settings", row, "user_id"); err != nil {
-			log.Printf("stt settings: %v", err)
+		s.soniox = ""
+		if onServer {
+			a.toast(locales.RecSttSavedOnServer())
+			return
 		}
-	}()
-}
-
-func nilIfEmpty(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
+		s.sonioxSaved, s.testResult = true, ""
+		a.toast(locales.RecSttSavedOnDevice())
+	})
 }

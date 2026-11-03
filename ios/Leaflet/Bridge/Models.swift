@@ -141,34 +141,47 @@ struct Member: Codable, Hashable, Sendable {
     }
 }
 
-/// TagRow is a tag and how many pages have it.
+/// TagRow is a tag, how many pages have it, and their IDs, by title.
 struct TagRow: Codable, Hashable, Sendable {
     var tag: String
     var count: Int
+    var pages: [String] = []
 }
 
 /// LibrarySnapshot is what the sidebar shows: pages, templates among them,
-/// folders and tags. Pages of another space are shared with the user.
-struct LibrarySnapshot: Codable, Sendable {
+/// the folders of the user's space in order, and tags, as the core
+/// arranges them for the desktop's sidebar too. Pages of another space are
+/// shared with the user.
+struct LibrarySnapshot: Decodable, Sendable {
     let spaceID: String
     let pages: [PageRow]
     let folders: [FolderRow]
     let tags: [TagRow]
-    /// tree is the library as the sidebar arranges it, worked out once as
-    /// it is read.
+    /// tree is the library as the sidebar arranges it, its pages looked up
+    /// once as it is read.
     let tree: LibraryTree
 
     enum CodingKeys: String, CodingKey {
-        case pages, folders, tags
+        case pages, folders, tags, top, children, shared
         case spaceID = "space_id"
+        case inFolder = "in_folder"
     }
 
-    init(spaceID: String, pages: [PageRow], folders: [FolderRow], tags: [TagRow]) {
+    /// The tree comes as the IDs of the pages: the user's at the top level
+    /// in no folder, those of each folder, those under each page, and those
+    /// shared with the user whose parent the user has not, each in order.
+    init(
+        spaceID: String, pages: [PageRow], folders: [FolderRow], tags: [TagRow],
+        top: [String] = [], inFolder: [String: [String]] = [:],
+        children: [String: [String]] = [:], shared: [String] = []
+    ) {
         self.spaceID = spaceID
         self.pages = pages
         self.folders = folders
         self.tags = tags
-        tree = LibraryTree(spaceID: spaceID, pages: pages, folders: folders)
+        tree = LibraryTree(
+            pages: pages, tags: tags, top: top, inFolder: inFolder, children: children,
+            shared: shared)
     }
 
     init(from decoder: any Decoder) throws {
@@ -177,7 +190,11 @@ struct LibrarySnapshot: Codable, Sendable {
             spaceID: try c.decode(String.self, forKey: .spaceID),
             pages: try c.decode([PageRow].self, forKey: .pages),
             folders: try c.decode([FolderRow].self, forKey: .folders),
-            tags: try c.decode([TagRow].self, forKey: .tags))
+            tags: try c.decode([TagRow].self, forKey: .tags),
+            top: try c.decode([String].self, forKey: .top),
+            inFolder: try c.decode([String: [String]].self, forKey: .inFolder),
+            children: try c.decode([String: [String]].self, forKey: .children),
+            shared: try c.decode([String].self, forKey: .shared))
     }
 
     static let empty = LibrarySnapshot(spaceID: "", pages: [], folders: [], tags: [])

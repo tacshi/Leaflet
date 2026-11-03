@@ -1,3 +1,4 @@
+import LeafletCore
 import SwiftUI
 
 /// Byline is the line under a page's title, as the desktop's: who created
@@ -72,26 +73,14 @@ struct Byline: View {
         return L.pageBylineSomeone
     }
 
-    private var shared: Bool {
-        !app.library.spaceID.isEmpty && page.spaceID != app.library.spaceID
-    }
+    private var shared: Bool { !app.library.own(page) }
 
-    /// humanTime says when, as the desktop's byline does: just now, minutes
-    /// ago, today or yesterday at a time, or the date.
-    static func humanTime(_ t: Date, now: Date = .now, calendar: Calendar = .current) -> String {
-        let d = now.timeIntervalSince(t)
-        if d < 60 { return L.pageTimeJustNow }
-        if d < 3600 { return L.pageTimeMinutesAgo(count: Int(d / 60)) }
-        if calendar.isDate(t, inSameDayAs: now) { return L.pageTimeTodayAt(at: t) }
-        if let y = calendar.date(byAdding: .day, value: -1, to: now),
-            calendar.isDate(t, inSameDayAs: y)
-        {
-            return L.pageTimeYesterdayAt(at: t)
-        }
-        if calendar.component(.year, from: t) == calendar.component(.year, from: now) {
-            return L.pageTimeDate(date: t)
-        }
-        return L.pageTimeDateYear(date: t)
+    /// humanTime says when, as the core says it for the desktop too
+    /// (MobileWhen): just now, minutes ago, today or yesterday at a time,
+    /// or the date; nothing for no time.
+    static func humanTime(_ t: Date, now: Date = .now) -> String {
+        func ms(_ d: Date) -> Int64 { Int64((d.timeIntervalSince1970 * 1000).rounded()) }
+        return MobileWhen(L.language, ms(t), ms(now))
     }
 }
 

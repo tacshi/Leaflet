@@ -61,8 +61,8 @@ func absPath(dir, path string) string {
 // does), on this device now.
 func (s *Store) Path(path string) string { return absPath(s.Dir, path) }
 
-// onDevice reports whether a file is on this device.
-func onDevice(path string) bool {
+// OnDevice reports whether a file is on this device.
+func OnDevice(path string) bool {
 	if path == "" {
 		return false
 	}

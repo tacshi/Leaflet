@@ -25,6 +25,11 @@ packages:
   DeviceKit:
     url: https://github.com/devicekit/DeviceKit
     exactVersion: 5.9.0
+  # Transcription with the device's own speech recognition, which the
+  # Mac's speech helper is built with too: the repository's own, so not
+  # pinned.
+  LeafletSpeech:
+    path: ../speech
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -66,6 +71,7 @@ targets:
       - package: Highlightr
       - package: SwiftDraw
       - package: DeviceKit
+      - package: LeafletSpeech
     settings:
       base:
         TARGETED_DEVICE_FAMILY: "1,2"

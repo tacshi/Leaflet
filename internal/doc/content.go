@@ -28,6 +28,13 @@ func Empty() *Content {
 	}
 }
 
+// IsEmpty reports whether c is a blank page, as Empty makes one: one
+// empty paragraph, or nothing. A template fills only such a page.
+func (c *Content) IsEmpty() bool {
+	ch := c.Children
+	return len(ch) == 0 || len(ch) == 1 && ch[0].Type == "paragraph" && ch[0].Delta().Len() == 0 && len(ch[0].Children) == 0
+}
+
 // FromBlocks returns a page of the given blocks, all stamped now.
 func FromBlocks(children []*Node) *Content {
 	c := &Content{Children: children, Blocks: map[string]int64{}, Deleted: map[string]int64{}}

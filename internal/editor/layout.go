@@ -5,7 +5,6 @@ import (
 	"maps"
 	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf16"
 	"unicode/utf8"
 
@@ -13,6 +12,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/rules"
 	"leaflet/internal/theme"
 )
 
@@ -152,21 +152,10 @@ func (e *Editor) style(n *doc.Node) (font ui.Font, top, bottom float32) {
 }
 
 // leading is the height of a line of prose, as a multiple of its size:
-// more for text mostly in Chinese, Japanese or Korean, whose characters
-// fill the em square, than for Latin text. One of those characters counts
-// as much as a word of four letters, so a few English terms or a link in
-// a Chinese paragraph leave it Chinese.
+// more for text mostly in Chinese, Japanese or Korean (rules.MostlyCJK)
+// than for Latin text.
 func leading(text string) float32 {
-	cjk, other := 0, 0
-	for _, r := range text {
-		switch {
-		case unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul):
-			cjk++
-		case unicode.IsLetter(r):
-			other++
-		}
-	}
-	if cjk > 0 && cjk*4 >= other {
+	if rules.MostlyCJK(text) {
 		return 1.8
 	}
 	return 1.5

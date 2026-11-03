@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"log"
-	"os"
 	"path"
 	"runtime"
 	"slices"
@@ -42,6 +41,7 @@ import (
 //	icloud.held.<table>.<id> other devices' entries of a row with a
 //	                       change waiting here (icloud_rows.go)
 
+// cloudTarget syncs through the Leaflet folder in iCloud Drive.
 type cloudTarget struct{ s *Service }
 
 func (t cloudTarget) ready() bool                    { return t.s.folder().Root != "" }
@@ -53,9 +53,6 @@ func (t cloudTarget) refresh(ctx context.Context, pageID string) (*doc.Content, 
 
 // flush has nothing to do: no cloud agent runs on what is in iCloud Drive.
 func (t cloudTarget) flush(context.Context, string) error { return nil }
-func (t cloudTarget) fetch(ctx context.Context, bucket, path string) ([]byte, error) {
-	return t.s.cloudFetch(ctx, bucket, path)
-}
 
 // cloudNow is the time iCloud sync stamps versions with; tests move it.
 var cloudNow = time.Now
@@ -187,25 +184,8 @@ func (s *Service) joinSpace(ctx context.Context, joined string) error {
 	if joined != "" && !lost {
 		return icloud.ErrOtherLibrary
 	}
-	// A library another device made has starter pages of its own: this
-	// device's stay out of it, unless the user took them up.
-	if err := s.st.SettleStarterPages(!made && space.CreatedByDevice != me); err != nil {
+	if err := s.moveInto(space.SpaceID, "My space", store.LocalUserID, !made && space.CreatedByDevice != me); err != nil {
 		return err
-	}
-	local := s.st.Session().SpaceID
-	if local != space.SpaceID {
-		if err := s.st.PutSpace(space.SpaceID, "My space", store.LocalUserID); err != nil {
-			return err
-		}
-		if err := s.st.MoveSpace(local, space.SpaceID); err != nil {
-			return err
-		}
-		if err := s.st.SetValue("space.local", space.SpaceID); err != nil {
-			return err
-		}
-		sess := s.st.Session()
-		sess.SpaceID = space.SpaceID
-		s.st.SetSession(sess)
 	}
 	if err := s.st.ForgetICloud(); err != nil {
 		return err
@@ -218,14 +198,8 @@ func (s *Service) joinSpace(ctx context.Context, joined string) error {
 			return err
 		}
 	}
-	// The folder counts as joined only once everything is queued for it:
-	// a device that stops before then, or could not queue it all, joins
-	// it again on the next pass.
-	failed := s.requeueAll(ctx, space.SpaceID)
-	if errors.Is(failed, errNotRequeued) {
-		return failed
-	}
-	return errors.Join(failed, s.st.SetValue("icloud.space", space.SpaceID))
+	// The folder counts as joined only once everything is queued for it.
+	return s.adopted(ctx, space.SpaceID, "icloud.space")
 }
 
 // loserKept is how long a space.json that lost stays in the folder: a
@@ -365,10 +339,6 @@ func (s *Service) writeDevice(me string, now bool) error {
 	return s.setInt("icloud.device_at", at.UnixMilli())
 }
 
-// syncedRows are the tables whose rows go through iCloud Drive; history,
-// agent runs and model connections stay on each device.
-var syncedRows = map[string]bool{"pages": true, "folders": true, "files": true, "comments": true, "recordings": true}
-
 // cloudPush writes the outbox to one new batch of this device's log:
 // files and audio first, then page content, then the batch that names
 // them, so a device that reads the batch finds what it names.
@@ -388,26 +358,20 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := s.cloudUpload(ctx, e); err != nil {
+		done, err := s.cloudUpload(ctx, e)
+		if err != nil {
 			log.Printf("icloud: upload %s: %v", e.EntityID, err)
 			s.failed(e, err)
 			continue
 		}
-		_ = s.st.Dequeue(e)
-		uploaded = true
+		if done {
+			_ = s.st.Dequeue(e)
+			uploaded = true
+		}
 	}
 	if uploaded {
 		if entries, err = s.st.Pending(); err != nil {
 			return err
-		}
-	}
-	// A file's row waits for its contents: a device that reads the batch
-	// finds what it names, and one whose upload waits, as for what a copy
-	// was made from, is not yet in the folder.
-	uploading := map[string]bool{}
-	for _, e := range entries {
-		if e.Entity == "storage" {
-			uploading[e.EntityID] = true
 		}
 	}
 	batch := icloud.Batch{Format: icloud.Format, Device: me, Seq: s.intValue("icloud.seq") + 1, WrittenAt: cloudNow().UTC()}
@@ -428,14 +392,14 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 		}
 		switch {
 		case e.Entity == "storage":
-			continue // failed above; tried again next pass
+			continue // waits or failed above; tried again next pass
 		case e.Entity == "storage_delete":
 			continue // once the batch with the deletion is written
-		case e.Entity == "files" && uploading["files/"+e.EntityID]:
+		case s.contentsWait(e):
 			continue // once its contents are in the folder
 		case !s.due(e):
 			continue // failed lately; it waits a while
-		case syncedRows[e.Entity]:
+		case synced(e.Entity):
 			entry, err := s.rowEntry(me, e)
 			if err != nil {
 				log.Printf("icloud: %s %s: %v", e.Entity, e.EntityID, err)
@@ -493,23 +457,23 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 	return nil
 }
 
-// cloudRemove removes a deleted file's copy from the folder once a batch
-// has the file's deletion: a device that reads the batch no longer needs
-// it, and one that reads none of it yet finds the file gone a little
-// sooner. It stays while a copy of the file waits to go up from it. A
-// device that sends everything again sends deleted files too, so a
-// deletion in a batch that was lost still reaches the others.
+// cloudRemove removes a deleted file's copy from the folder once it may go
+// (removal), as a batch has the file's deletion: a device that reads the
+// batch no longer needs it, and one that reads none of it yet finds the
+// file gone a little sooner. A device that sends everything again sends
+// deleted files too, so a deletion in a batch that was lost still reaches
+// the others.
 func (s *Service) cloudRemove(e store.OutboxEntry) {
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
 		s.failed(e, err)
 		return
 	}
-	if s.st.HasPending("files", store.S(payload, "file_id")) {
-		return // the deletion is not in a batch yet
-	}
-	if s.copyWaits(store.S(payload, "bucket"), store.S(payload, "path")) {
-		return // a copy still goes up from it
+	if waits, stays := s.removal(payload); waits {
+		return // till the deletion is in a batch, and no copy goes up from it
+	} else if stays {
+		_ = s.st.Dequeue(e)
+		return
 	}
 	rel, err := blobPath(store.S(payload, "bucket"), store.S(payload, "path"))
 	if err != nil {
@@ -635,61 +599,35 @@ func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerCo
 		&store.PeerContent{Peer: me, Version: version, Content: row.Content}, nil
 }
 
-// uploadFetchWait is how long cloudUpload waits for iCloud to download
-// what a copy was made from; tests shorten it.
-var uploadFetchWait = 15 * time.Second
-
-// cloudUpload copies a file or a recording's audio into the folder.
-func (s *Service) cloudUpload(ctx context.Context, e store.OutboxEntry) error {
+// cloudUpload copies a file or a recording's audio into the folder, and
+// reports whether its entry can leave the queue: one whose copy waits for
+// iCloud to download what it was made from stays (uploadFrom).
+func (s *Service) cloudUpload(ctx context.Context, e store.OutboxEntry) (bool, error) {
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
-		return err
+		return false, err
 	}
-	local := s.st.Path(store.S(payload, "local_path"))
-	if !onDevice(local) {
-		// What a copy was made from may not be downloaded yet: it is
-		// waited for a little, then on a later pass, so the rest of this
-		// one goes meanwhile.
-		fctx, cancel := context.WithTimeout(ctx, uploadFetchWait)
-		var err error
-		local, err = s.fetchCopied(fctx, payload)
-		cancel()
-		if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
-			return icloud.ErrNotReady
-		}
-		if err != nil || local == "" {
-			return err // gone: nothing to upload
-		}
+	local, waits, err := s.uploadFrom(ctx, payload)
+	if err != nil || waits || local == "" {
+		return err == nil && !waits, err // gone: nothing to upload
 	}
 	if recID := store.S(payload, "recording_id"); recID != "" {
 		rel, err := icloud.RecordingBlobPath(recID)
 		if err != nil {
-			return err
+			return false, err
 		}
 		if err := s.folder().CopyIn(rel, local); err != nil {
-			return err
+			return false, err
 		}
-		// The upload waits until the recording has its path, as in Storage.
-		if _, err := s.st.UpdateRecording(recID, func(r *store.Recording) {
-			r.AudioPath, r.UploadedAt = recID+".wav", cloudNow()
-		}); store.IsNotFound(err) {
-			return nil // the recording went meanwhile
-		} else if err != nil {
-			return err
-		}
-		if s.KeepAudio != nil && s.KeepAudio() == "until_uploaded" {
-			// The page plays it from iCloud Drive now.
-			_ = os.Remove(local)
-			_ = s.st.ClearLocalPath(recID)
-		}
-		return nil
+		_, _, err = s.uploadedAudio(recID, recID+".wav", local, cloudNow())
+		return err == nil, err
 	}
 	fileID := strings.TrimPrefix(e.EntityID, "files/")
 	rel, err := icloud.FileBlobPath(fileID, path.Base(store.S(payload, "path")))
-	if err != nil {
-		return err
+	if err == nil {
+		err = s.folder().CopyIn(rel, local)
 	}
-	return s.folder().CopyIn(rel, local)
+	return err == nil, err
 }
 
 // blobPath is where the folder keeps a file or a recording's audio, by its
@@ -759,12 +697,8 @@ func (s *Service) keptInICloud(bucket, storagePath string) bool {
 // cloudFetch reads what a device copied into the folder, waiting while
 // iCloud downloads it.
 func (s *Service) cloudFetch(ctx context.Context, bucket, storagePath string) ([]byte, error) {
-	rel, err := blobPath(bucket, storagePath)
-	if err != nil {
-		return nil, err
-	}
 	for {
-		data, err := s.folder().Read(rel)
+		data, err := s.cloudRead(ctx, bucket, storagePath)
 		if !errors.Is(err, icloud.ErrNotReady) {
 			return data, err
 		}
@@ -774,6 +708,17 @@ func (s *Service) cloudFetch(ctx context.Context, bucket, storagePath string) ([
 		case <-time.After(time.Second):
 		}
 	}
+}
+
+// cloudRead reads what a device copied into the folder, once iCloud has
+// downloaded it: until then it asks iCloud for it, and is
+// icloud.ErrNotReady.
+func (s *Service) cloudRead(_ context.Context, bucket, storagePath string) ([]byte, error) {
+	rel, err := blobPath(bucket, storagePath)
+	if err != nil {
+		return nil, err
+	}
+	return s.folder().Read(rel)
 }
 
 // devices are the other devices that write to the folder.

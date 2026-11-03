@@ -111,7 +111,7 @@ func (a *App) pageView(c *ui.Context) {
 					a.dropVideos()
 					a.dropEmbeds()
 					a.dropGonePlayers()
-					if a.isEmpty() && !ps.editor.ReadOnly && a.dialogs.inline == nil {
+					if ps.editor.Content.IsEmpty() && !ps.editor.ReadOnly && a.dialogs.inline == nil {
 						a.emptyActions(c)
 					}
 					a.inlinePrompt(c)
@@ -387,32 +387,8 @@ func contains(list []string, s string) bool {
 	return false
 }
 
-func humanTime(t time.Time) string { return humanTimeAt(t, time.Now()) }
-
-// humanTimeAt is humanTime at now: today and yesterday are days of the
-// calendar, here.
-func humanTimeAt(t, now time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	d := now.Sub(t)
-	t, now = t.Local(), now.Local()
-	y, m, day := now.Date()
-	today := time.Date(y, m, day, 0, 0, 0, 0, time.Local)
-	switch {
-	case d < time.Minute:
-		return locales.PageTimeJustNow()
-	case d < time.Hour:
-		return locales.PageTimeMinutesAgo(int(d.Minutes()))
-	case !t.Before(today):
-		return locales.PageTimeTodayAt(t)
-	case !t.Before(today.AddDate(0, 0, -1)):
-		return locales.PageTimeYesterdayAt(t)
-	case t.Year() == now.Year():
-		return locales.PageTimeDate(t)
-	}
-	return locales.PageTimeDateYear(t)
-}
+// humanTime says when t was, as of now (locales.When).
+func humanTime(t time.Time) string { return locales.When(t, time.Now()) }
 
 // caretAtEnd puts the caret at the end of the page, after a new paragraph
 // when the last block has no text or there is no block.
@@ -433,11 +409,6 @@ func (a *App) caretAtEnd() {
 	}
 	ed.PlaceCaret(last.ID, -1)
 	ed.Focus()
-}
-
-func (a *App) isEmpty() bool {
-	ch := a.page.editor.Content.Children
-	return len(ch) == 0 || len(ch) == 1 && ch[0].Type == "paragraph" && ch[0].Delta().Len() == 0 && len(ch[0].Children) == 0
 }
 
 // emptyActions are the ways to start an empty page.

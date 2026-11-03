@@ -177,18 +177,25 @@ final class Recorder {
         }
     }
 
-    /// insertTranscript has editor, its page's, put a recording's
-    /// transcript after its block, as one step to undo.
-    func insertTranscript(_ id: String, into editor: EditorController?) {
+    /// insertTranscript has editor, its page's, put recording id's
+    /// transcript after block, the recording's block it was asked from, as
+    /// one step to undo.
+    func insertTranscript(_ id: String, after block: String, into editor: EditorController?) {
         guard let client else { return }
         Task {
             do {
-                let transcript = try await client.transcriptBlocks(id)
-                editor?.insertBlocks(transcript.blocks, after: transcript.after)
+                Self.put(try await client.transcriptBlocks(id), after: block, in: editor)
             } catch {
                 toast?(error.localizedDescription)
             }
         }
+    }
+
+    /// put puts a transcript in editor's page after block, the recording's
+    /// block it was asked from, as the desktop does: the block a recording
+    /// was made in may be another, as a copied page's has an ID of its own.
+    static func put(_ transcript: Transcript, after block: String, in editor: EditorController?) {
+        editor?.insertBlocks(transcript.blocks, after: block)
     }
 
     // MARK: Playing

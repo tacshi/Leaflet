@@ -1451,6 +1451,88 @@ struct EditorTests {
         #expect(sent?.blocks.first?.children == nil)
     }
 
+    /// Enter, Backspace and Tab go by the core's rules, the desktop's: an
+    /// empty heading writes on after it; an empty paragraph in a toggle
+    /// with more after it stays in it, and Backspace at its start joins it
+    /// to the block before; Tab nests text in a toggle, not in a list item.
+    @Test func enterBackspaceAndTabFollowTheCoresRules() {
+        let h = editor([block("h", "heading", "", data: ["level": .int(2)])])
+        h.textView.selectedRange = NSRange(location: 0, length: 0)
+        h.type("\n")
+        #expect(blocks(h).map(\.type) == ["heading", "paragraph"])
+
+        let toggle = {
+            self.editor([
+                self.block(
+                    "t", "toggle_list", "T",
+                    children: [self.block("a", "paragraph", ""), self.block("b", "paragraph", "B")])
+            ])
+        }
+        let e = toggle()
+        e.textView.selectedRange = NSRange(location: 2, length: 0)
+        e.type("\n")
+        var sent: DocContent?
+        e.onEdit = { sent = $0 }
+        e.send()
+        #expect(sent?.blocks.map(\.id) == ["t"])
+        #expect(sent?.blocks.first?.children?.count == 3)
+
+        let j = toggle()
+        j.textView.selectedRange = NSRange(location: 2, length: 0)
+        j.type("x")
+        j.textView.selectedRange = NSRange(location: 2, length: 0)
+        j.backspace()
+        j.onEdit = { sent = $0 }
+        j.send()
+        #expect(sent?.blocks.map(\.text) == ["Tx"])
+        #expect(sent?.blocks.first?.children?.map(\.id) == ["b"])
+
+        let l = editor([block("l", "bulleted_list", "Item"), block("p", "paragraph", "Text")])
+        l.textView.selectedRange = NSRange(location: 5, length: 0)
+        l.type("\t")
+        #expect(l.paragraph(at: 5).info.depth == 0)
+        let g = editor([block("g", "toggle_list", "Toggle"), block("p", "paragraph", "Text")])
+        g.textView.selectedRange = NSRange(location: 7, length: 0)
+        g.type("\t")
+        #expect(g.paragraph(at: 7).info.depth == 1)
+    }
+
+    /// Enter on the second blank line at the end of a code block leaves it
+    /// for the empty paragraph after it, as on the desktop, without making
+    /// another.
+    @Test func leavingCodeGoesToTheEmptyLineAfterIt() {
+        let c = editor([block("k", "code", "x\n\n"), block("p", "paragraph", "")])
+        c.textView.selectedRange = NSRange(location: 3, length: 0)
+        c.type("\n")
+        #expect(blocks(c).map(\.id) == ["k", "p"])
+        #expect(blocks(c).first?.text == "x")
+        #expect(c.paragraph(at: c.textView.selectedRange.location).info.id == "p")
+    }
+
+    /// What the core decides for the page shows: halfwidth katakana are
+    /// Japanese, set higher; a link to a file, or a page link with no page,
+    /// opens nothing.
+    @Test func textAndLinksAsTheCoreReadsThem() {
+        #expect(EditorStyle.mostlyCJK("ﾊﾝｶｸｶﾀｶﾅ"))
+        #expect(!EditorStyle.mostlyCJK("Plain English"))
+        #expect(EditorStyle.linkTarget([.leafletHref: "file:///etc/hosts"]) == nil)
+        #expect(EditorStyle.linkTarget([.leafletHref: "leaflet://page/"]) == nil)
+        #expect(
+            EditorStyle.linkTarget([.leafletHref: " https://example.com "])
+                == URL(string: "https://example.com"))
+    }
+
+    /// A transcript goes after the recording's block it was asked from, as
+    /// on the desktop: a copied page's block has an ID of its own, which
+    /// the recording doesn't know.
+    @Test func aTranscriptGoesAfterTheBlockItWasAskedFrom() {
+        let copy = DocNode(
+            id: "copy", type: "recording", data: ["recording_id": .string("r")], children: nil)
+        let c = editor([block("a", "paragraph", "Before"), copy, block("b", "paragraph", "After")])
+        Recorder.put(Transcript(blocks: [block("t", "paragraph", "Said")]), after: "copy", in: c)
+        #expect(blocks(c).map(\.id) == ["a", "copy", "t", "b"])
+    }
+
     /// content is a page of blocks, as the core sends it.
     private func content(_ blocks: [DocNode]) -> DocContent {
         DocContent(

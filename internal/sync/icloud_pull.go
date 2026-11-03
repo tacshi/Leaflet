@@ -235,7 +235,7 @@ func (s *Service) applyEntry(peer string, e icloud.Entry, waiting, changed map[s
 	default:
 		return nil // a kind a newer Leaflet writes
 	}
-	if !syncedRows[e.Table] || !icloud.ValidID(e.ID) || e.Row == nil {
+	if !synced(e.Table) || !icloud.ValidID(e.ID) || e.Row == nil {
 		return nil
 	}
 	return s.applyRow(e, changed)
@@ -277,15 +277,12 @@ func (s *Service) refreshWaiting(ctx context.Context) error {
 		if err != nil {
 			continue // its row comes in a later batch
 		}
-		s.mu.Lock()
-		open := s.open[id]
-		s.mu.Unlock()
-		if !open && !allOffline && !p.KeepOffline {
+		if !s.keepsContent(p, allOffline) {
 			continue
 		}
 		if _, err := s.cloudRefresh(ctx, id); err != nil {
 			switch {
-			case errors.Is(err, errPeerUnreadable) || errors.Is(err, errUnreadable):
+			case unreadable(err):
 				// The page keeps its content here, and waits until every
 				// version can be read; the other pages still come.
 				log.Printf("icloud: merge %s: %v", id, err)
@@ -321,7 +318,7 @@ func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content
 	if err != nil {
 		return nil, err
 	}
-	var notReady, unreadable error
+	var notReady, unread error
 	for _, peer := range peers {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -350,8 +347,8 @@ func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content
 			continue
 		}
 		if err := s.mergePeer(me, peer, pageID, file); err != nil {
-			if errors.Is(err, errPeerUnreadable) || errors.Is(err, errUnreadable) {
-				unreadable = err
+			if unreadable(err) {
+				unread = err
 				continue
 			}
 			return nil, err
@@ -362,8 +359,8 @@ func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content
 			}
 		}
 	}
-	if unreadable != nil {
-		return s.st.Content(pageID), unreadable
+	if unread != nil {
+		return s.st.Content(pageID), unread
 	}
 	if notReady != nil {
 		return s.st.Content(pageID), notReady
@@ -407,44 +404,34 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 		}
 		return ""
 	}
-	// The user or an agent may save while this merges: store the merge
-	// only over the content it merged, and merge again otherwise. It is
-	// stored and queued together, so it cannot be left here only.
-	var next *doc.Content
+	// The merge is stored and queued together, so it cannot be left here
+	// only.
+	var merged *doc.Content
 	var conflicts []doc.Conflict
-	var before string
-	stored, queued := false, false
-	for range 3 {
-		local, localErr := s.st.ContentRow(pageID)
-		next, conflicts, before = theirs, nil, ""
-		if localErr == nil {
-			before = local.Content
-			mine, err := doc.Decode(local.Content)
-			if err != nil {
-				// Merging into an empty page would drop this device's
-				// version: it is left for when it can be read.
-				return errUnreadable
-			}
-			next, conflicts = doc.Merge(base, mine, theirs)
-			if next.Encode() == local.Content {
-				stored = true
-				break
-			}
+	queued := false
+	_, _, err = s.storeMerge(pageID, func(local store.ContentRow, kept bool) (*doc.Content, error) {
+		merged, conflicts, queued = theirs, nil, false
+		if !kept {
+			return theirs, nil
 		}
-		beforeStore(pageID)
-		l := label(next.Encode())
-		err := s.st.PutMergedContentOver(pageID, before, next, l)
-		if errors.Is(err, store.ErrContentChanged) {
-			continue
-		}
+		mine, err := doc.Decode(local.Content)
 		if err != nil {
-			return err
+			// Merging into an empty page would drop this device's
+			// version: it is left for when it can be read.
+			return nil, errUnreadable
 		}
-		stored, queued = true, l != ""
-		break
-	}
-	if !stored {
-		return errors.New("the page kept changing here while it synced")
+		merged, conflicts = doc.Merge(base, mine, theirs)
+		if merged.Encode() == local.Content {
+			return nil, nil
+		}
+		return merged, nil
+	}, func(over string, c *doc.Content) error {
+		l := label(c.Encode())
+		queued = l != ""
+		return s.st.PutMergedContentOver(pageID, over, c, l)
+	})
+	if err != nil {
+		return err
 	}
 	if err := s.st.PutPeerContent(peer, pageID, file.Version, string(file.Content)); err != nil {
 		return err
@@ -454,13 +441,9 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 			return err
 		}
 	}
-	merged := next.Encode()
-	if merged != before && s.OnPageContent != nil {
-		s.OnPageContent(pageID)
-	}
 	// Content this device had as merged, so stored nothing, is queued
 	// here.
-	if l := label(merged); !queued && l != "" {
+	if l := label(merged.Encode()); !queued && l != "" {
 		if err := s.st.Queue("page_content", pageID, map[string]any{"page_id": pageID}, l, pageID); err != nil {
 			return err
 		}

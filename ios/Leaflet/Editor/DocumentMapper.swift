@@ -32,14 +32,12 @@ enum DocumentMapper {
                         .leafletTinted, value: true,
                         range: NSRange(location: start, length: out.length - start))
                 }
-                if BlockInfo.nestable.contains(node.type) {
+                // A block of text has its children after it, one deeper:
+                // the core gives the page with those of text that holds no
+                // blocks lifted after it (doc.Content.Lifted). A block
+                // without text keeps its own, a table's cells.
+                if BlockInfo.textTypes.contains(node.type) {
                     add(node.children ?? [], depth: depth + 1)
-                } else if BlockInfo.textTypes.contains(node.type) {
-                    // Text that holds no blocks has its children after it,
-                    // as the core's merge lifts them (doc.liftStranded):
-                    // left out, they would be deleted as the page is sent.
-                    // A block without text keeps its own, a table's cells.
-                    add(node.children ?? [], depth: depth)
                 }
             }
         }

@@ -95,7 +95,7 @@ func (s *Store) RequeueFile(id, spaceID string) error {
 		if err := requeueRow(tx, "files", f.ID, old, adopting(FileToRemote(f), f.UpdatedAt), "file", f.PageID); err != nil {
 			return err
 		}
-		if !f.DeletedAt.IsZero() || !onDevice(f.LocalPath) {
+		if !f.DeletedAt.IsZero() || !OnDevice(f.LocalPath) {
 			return nil
 		}
 		return queue(tx, "storage", "files/"+f.ID, fileUpload(s.Dir, f), "file waiting to upload", f.PageID)
@@ -126,7 +126,7 @@ func (s *Store) RequeueRecording(id string) error {
 		if err := queue(tx, "recordings", r.ID, RecordingToRemote(r), "", r.PageID); err != nil {
 			return err
 		}
-		if !onDevice(r.LocalPath) {
+		if !OnDevice(r.LocalPath) {
 			return nil
 		}
 		return queue(tx, "storage", "recordings/"+r.ID, audioUpload(s.Dir, r), "audio waiting to upload", r.PageID)

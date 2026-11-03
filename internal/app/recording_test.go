@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -200,56 +199,6 @@ func TestSummarizeRecording(t *testing.T) {
 	}
 }
 
-// The speech settings sent as each key is typed reach the server one at a
-// time, the last last: sent at once, an earlier one could land after it.
-func TestSpeechSettingsLastSentLast(t *testing.T) {
-	first := make(chan struct{})
-	release := make(chan struct{})
-	var mu sync.Mutex
-	var saved []string
-	var once sync.Once
-	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var row struct {
-			BaseURL string `json:"base_url"`
-		}
-		_ = json.NewDecoder(r.Body).Decode(&row)
-		if row.BaseURL == "https://a" {
-			once.Do(func() { close(first) })
-			<-release
-		}
-		mu.Lock()
-		saved = append(saved, row.BaseURL)
-		mu.Unlock()
-		_, _ = w.Write([]byte("[]"))
-	}))
-	t.Cleanup(hs.Close)
-	a := templatesApp(t)
-	a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
-	a.settings.Stt.BaseURL = "https://a"
-	a.syncSttSettings()
-	<-first
-	a.settings.Stt.BaseURL = "https://ab"
-	a.syncSttSettings()
-	time.Sleep(100 * time.Millisecond)
-	close(release)
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		mu.Lock()
-		got := append([]string(nil), saved...)
-		mu.Unlock()
-		if len(got) == 2 {
-			if got[1] != "https://ab" {
-				t.Errorf("the server ended with %q", got[1])
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("saved %v", got)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 // Saving the Soniox key on the server empties its field alone: an
 // endpoint's key typed beside it stays.
 func TestSavingSonioxKeyKeepsEndpointKey(t *testing.T) {
@@ -259,10 +208,11 @@ func TestSavingSonioxKeyKeepsEndpointKey(t *testing.T) {
 	t.Cleanup(hs.Close)
 	a := templatesApp(t)
 	a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
+	a.rec = recording.NewController(a.st, a.backend)
 	posted := make(chan func(), 1)
 	a.post = func(fn func()) { posted <- fn }
 	a.speech.key, a.speech.soniox = "endpoint-key", "soniox-key"
-	a.saveSttKey("soniox", a.speech.soniox)
+	a.saveSonioxKey()
 	(<-posted)()
 	if a.speech.soniox != "" || a.speech.key != "endpoint-key" {
 		t.Errorf("soniox %q, endpoint key %q", a.speech.soniox, a.speech.key)

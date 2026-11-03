@@ -11,6 +11,7 @@ import (
 
 	"github.com/egoist/mygo/i18n"
 
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/export"
 	"leaflet/internal/store"
@@ -29,24 +30,6 @@ type version struct {
 	Label string `json:"label"`
 	// Markdown is the version's text, to look at before restoring it.
 	Markdown string `json:"markdown"`
-}
-
-// historyLabel says what a version is: its name, or why it was kept.
-func historyLabel(h store.HistoryEntry) string {
-	if h.Label != "" {
-		return h.Label
-	}
-	switch h.Reason {
-	case "agent_run":
-		return locales.DialogHistoryAgentRun()
-	case "autosave":
-		return locales.DialogHistoryAutosave()
-	case "restore":
-		return locales.DialogHistoryBeforeRestore()
-	case "conflict":
-		return locales.DialogHistoryConflict()
-	}
-	return ""
 }
 
 // History returns the versions kept of a page, newest first, as a JSON
@@ -69,7 +52,7 @@ func (c *Core) History(pageID string) (_ string, err error) {
 				continue
 			}
 			out = append(out, version{
-				ID: h.ID, When: locales.DialogHistoryWhen(h.CreatedAt), Label: historyLabel(h),
+				ID: h.ID, When: locales.DialogHistoryWhen(h.CreatedAt), Label: core.HistoryLabel(h),
 				Markdown: doc.PageMarkdown("", content, c.markdownOptions()),
 			})
 		}
@@ -83,94 +66,28 @@ func (c *Core) History(pageID string) (_ string, err error) {
 // NameVersion keeps a page as it is now as a version named name.
 func (c *Core) NameVersion(pageID, name string) (err error) {
 	defer catch(&err)
-	name = strings.TrimSpace(name)
-	c.q.do(func() {
-		if p := c.pages[pageID]; p != nil {
-			p.live.Save()
-		}
-		content := c.core.Store.Content(pageID)
-		if content == nil || name == "" {
-			return
-		}
-		err = c.core.Store.AddHistory(pageID, content, "manual", "", name)
-	})
+	c.q.do(func() { err = c.pageCore().NameVersion(pageID, name) })
 	return err
 }
 
 // RestoreVersion puts version id back as page pageID's content, keeping
 // the page as it was as a version first, as the desktop does, and returns
 // that version's ID, for Undo to restore it, or "" when the page had no
-// content to keep. A version saved with no blocks leaves one to type in.
-// The page's last agent run no longer offers Undo: its edits are gone or
-// back with the version, and undoing it would do nothing, or something
-// else.
+// content to keep (core.Pages.RestoreVersion). The page's last agent run
+// no longer offers Undo: its edits are gone or back with the version, and
+// undoing it would do nothing, or something else.
 func (c *Core) RestoreVersion(pageID, id string) (_ string, err error) {
 	defer catch(&err)
 	kept := ""
 	c.q.do(func() {
-		st := c.core.Store
-		if !c.canEdit(pageID) {
-			err = errors.New(locales.AppErrorReadOnly())
+		var run string
+		if kept, run, err = c.pageCore().RestoreVersion(pageID, id); err != nil || run == "" {
 			return
 		}
-		var entries []store.HistoryEntry
-		if entries, err = st.History(pageID); err != nil {
-			return
-		}
-		var old *doc.Content
-		for _, h := range entries {
-			if h.ID == id {
-				old, err = doc.Decode(h.Content)
-			}
-		}
-		if err != nil {
-			return
-		}
-		if old == nil {
-			err = errors.New(locales.DialogHistoryVersionGone())
-			return
-		}
-		if p := c.pages[pageID]; p != nil {
-			p.live.Save()
-		}
-		if cur := st.Content(pageID); cur != nil {
-			label := locales.DialogHistoryBeforeRestoring(time.Now())
-			if err = st.AddHistory(pageID, cur, "restore", "", label); err != nil {
-				return
-			}
-			kept = c.newestRestore(pageID, label)
-		}
-		children := old.Copy().Children
-		if len(children) == 0 {
-			children = doc.Empty().Children
-		}
-		if err = c.editContent(pageID, func(content *doc.Content) bool {
-			content.Children = children
-			return true
-		}); err != nil {
-			return
-		}
-		if run := c.core.Hub.Session(pageID).Latest(); run != nil {
-			c.settled[pageID] = run.ID
-			c.ev.agentsChanged(pageID)
-		}
+		c.settled[pageID] = run
+		c.ev.agentsChanged(pageID)
 	})
 	return kept, err
-}
-
-// newestRestore is the ID of the version RestoreVersion just kept of a
-// page, by label, the newest kept so. Run on the core's queue.
-func (c *Core) newestRestore(pageID, label string) string {
-	entries, err := c.core.Store.History(pageID)
-	if err != nil {
-		return ""
-	}
-	for _, h := range entries {
-		if h.Reason == "restore" && h.Label == label {
-			return h.ID
-		}
-	}
-	return ""
 }
 
 func (c *Core) titleOf(id string) string {

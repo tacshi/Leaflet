@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -17,8 +16,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
-	"leaflet/internal/agents/endpoint"
-	"leaflet/internal/doc"
+	"leaflet/internal/core"
 	"leaflet/internal/icloud"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
@@ -136,7 +134,7 @@ type accountState struct {
 	// devices are the devices of the account devicesOf names, once
 	// loaded (devicesLoaded); loadingFor is the account whose devices are
 	// loading, and devicesErr why they could not be, to try again.
-	devices       []map[string]any
+	devices       []core.Device
 	devicesOf     string
 	devicesLoaded bool
 	loadingFor    string
@@ -354,19 +352,17 @@ func (a *App) accountSettings(c *ui.Context) {
 			case len(s.devices) == 0:
 				settingRow(c, "none", locales.SettingsDevicesNone(), "", true, nil)
 			}
-			me := a.st.DeviceID()
 			for i, d := range s.devices {
-				id := store.S(d, "id")
-				desc := locales.SettingsDeviceLastActive(humanTime(store.Time(d["last_active_at"])))
-				if id == me {
+				desc := locales.SettingsDeviceLastActive(humanTime(d.LastActive))
+				if d.This {
 					desc = locales.SettingsDeviceThis()
 				}
-				if d["revoked_at"] != nil {
+				if d.Revoked {
 					desc = locales.SettingsDeviceSignedOut()
 				}
-				settingRow(c, "dev:"+id, store.S(d, "name"), desc, i == 0, func() {
-					if id != me && d["revoked_at"] == nil && button(c, "revoke", "", locales.CommonSignOut()).Clicked() {
-						a.revokeDevice(id)
+				settingRow(c, "dev:"+d.ID, d.Name, desc, i == 0, func() {
+					if !d.This && !d.Revoked && button(c, "revoke", "", locales.CommonSignOut()).Clicked() {
+						a.revokeDevice(d.ID)
 					}
 				})
 			}
@@ -428,15 +424,12 @@ func (a *App) deleteAccountDialog(c *ui.Context) {
 func (a *App) deleteAccount() {
 	s := &a.account
 	s.busy = true
+	c := a.core()
 	var err error
-	a.offMain(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		defer cancel()
-		_, err = a.backend.Invoke(ctx, "account", map[string]any{"action": "delete"})
-	}, func() {
+	a.offMain(func() { err = c.DeleteAccount() }, func() {
 		s.busy = false
 		if err != nil {
-			a.toast(locales.SettingsDeleteAccountFailed(err.Error()))
+			a.toast(err.Error())
 			return
 		}
 		s.deleteOpen = false
@@ -477,31 +470,24 @@ func (a *App) keepName() {
 	s.shownBefore, s.nameShown = s.nameShown, false
 }
 
+// saveName keeps the name typed, here and then on the server.
 func (a *App) saveName(name string) {
-	name = strings.TrimSpace(name)
-	if name == "" || name == a.session.DisplayName {
+	c := a.core()
+	changed, err := c.SetDisplayName(name)
+	if err != nil {
+		a.account.name = a.session.DisplayName
+		a.toast(err.Error())
 		return
 	}
-	if err := a.st.SetDisplayName(name); err != nil {
-		a.account.name = a.session.DisplayName
-		a.toast(locales.SettingsSaveFailed(err.Error()))
+	if !changed {
 		return
 	}
 	a.session = a.st.Session()
-	if a.backend.SignedIn() {
-		go func() {
-			err := a.backend.UpdateUser(map[string]any{"display_name": name})
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
-			_, uerr := a.backend.Upsert(ctx, "profiles", map[string]any{"id": a.backend.UserID(), "display_name": name}, "")
-			if err == nil {
-				err = uerr
-			}
-			if err != nil {
-				a.update(func() { a.toast(locales.SettingsNameServerFailed(err.Error())) })
-			}
-		}()
-	}
+	go func() {
+		if err := c.SendDisplayName(); err != nil {
+			a.update(func() { a.toast(err.Error()) })
+		}
+	}()
 }
 
 // loadDevices loads the devices of the account signed in, off the main
@@ -516,13 +502,10 @@ func (a *App) loadDevices() {
 		return
 	}
 	s.loadingFor = user
-	var rows []map[string]any
+	c := a.core()
+	var devices []core.Device
 	var err error
-	a.offMain(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		rows, err = a.backend.Select(ctx, "devices", remoteQuery("last_active_at.desc"))
-	}, func() {
+	a.offMain(func() { devices, err = c.Devices() }, func() {
 		if s.loadingFor == user {
 			s.loadingFor = ""
 		}
@@ -534,21 +517,17 @@ func (a *App) loadDevices() {
 			s.devicesErr = err.Error()
 			return
 		}
-		s.devices, s.devicesLoaded, s.devicesErr = rows, true, ""
+		s.devices, s.devicesLoaded, s.devicesErr = devices, true, ""
 	})
 }
 
 // revokeDevice signs out another device of the account.
 func (a *App) revokeDevice(id string) {
-	user := a.backend.UserID()
+	c := a.core()
 	var err error
-	a.offMain(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		_, err = a.backend.Upsert(ctx, "devices", map[string]any{"id": id, "user_id": user, "revoked_at": time.Now().UTC().Format(time.RFC3339)}, "")
-	}, func() {
+	a.offMain(func() { err = c.SignOutDevice(id) }, func() {
 		if err != nil {
-			a.toast(locales.SettingsDeviceSignOutFailed(err.Error()))
+			a.toast(err.Error())
 			return
 		}
 		a.loadDevices()
@@ -879,7 +858,7 @@ func (a *App) providerDialog(c *ui.Context) {
 	preset := agents.PresetByID(a.form.preset)
 	account := preset.Auth == "account"
 	local := preset.Local
-	here := a.keptHere(preset)
+	here := a.hub.KeptHere(a.providerForm())
 	title := locales.SettingsConnectProvider(preset.Name)
 	if a.form.id != "" {
 		title = locales.SettingsProviderEdit(a.form.name)
@@ -1018,20 +997,13 @@ func (a *App) chatgptRow(c *ui.Context) {
 
 func (a *App) chatgptSignIn() {
 	a.form.signingIn, a.form.result = true, ""
-	host := a.hub.HostID()
-	clientID := ""
-	if a.form.chatgpt != nil {
-		clientID = a.form.chatgpt.Account().ClientID
-	} else if id, ok := a.st.Value("chatgpt.client"); ok {
-		clientID = id
-	}
-	gen := a.form.gen
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	hub, had, gen := a.hub, a.form.chatgpt, a.form.gen
+	ctx, cancel := context.WithCancel(context.Background())
 	a.form.cancelSignIn()
 	a.form.stopSignIn = cancel
 	go func() {
 		defer cancel()
-		g, err := agents.SignInChatGPT(ctx, host, clientID, func(u string) { _ = mygo.Shell.OpenExternal(u) })
+		g, err := hub.SignInWithChatGPT(ctx, had, func(u string) { _ = mygo.Shell.OpenExternal(u) })
 		a.update(func() {
 			if !a.formIs(gen) {
 				return
@@ -1042,7 +1014,6 @@ func (a *App) chatgptSignIn() {
 				a.form.result, a.form.resultOK = err.Error(), false
 				return
 			}
-			_ = a.st.SetValue("chatgpt.client", g.Account().ClientID)
 			a.form.chatgpt, a.form.email = g, g.Account().Email
 			a.form.name = "ChatGPT"
 			a.fetchModels()
@@ -1168,38 +1139,21 @@ func listAny(v any) []any {
 	return l
 }
 
+// providerForm is the provider of the dialog, to test or save.
+func (a *App) providerForm() agents.Form {
+	f := &a.form
+	return agents.Form{
+		ID: f.id, Preset: f.preset, Name: f.name, BaseURL: f.baseURL, APIKey: f.apiKey, Model: f.model,
+		Models: f.models, SupportsTools: f.tools, ChatGPT: f.chatgpt,
+	}
+}
+
 func (a *App) testProvider() {
-	preset := agents.PresetByID(a.form.preset)
-	base, key, id, model, g := a.form.baseURL, strings.TrimSpace(a.form.apiKey), a.form.id, a.form.model, a.form.chatgpt
+	f := a.providerForm()
 	a.form.testing, a.form.result = true, ""
-	gen := a.form.gen
+	hub, gen := a.hub, a.form.gen
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-		defer cancel()
-		var res agents.TestResult
-		switch {
-		case g != nil:
-			if model == "" {
-				res = agents.TestResult{Message: locales.SettingsChooseModelToTest()}
-			} else {
-				res = agents.TestModel(ctx, g, model, nil)
-			}
-		case preset.Local || key != "":
-			// A key typed here is tried from this device, before it goes
-			// to the server.
-			res = agents.NewClient(base, key).Test(ctx, model)
-		case id != "":
-			r, err := a.backend.Invoke(ctx, "providers", map[string]any{"action": "test", "provider_id": id, "model": model})
-			if err != nil {
-				res = agents.TestResult{Message: err.Error()}
-			} else {
-				res.OK, _ = r["ok"].(bool)
-				res.SupportsTools, _ = r["supports_tools"].(bool)
-				res.Message, _ = r["message"].(string)
-			}
-		default:
-			res = agents.TestResult{Message: locales.SettingsPasteKeyToTest()}
-		}
+		res := hub.TestProvider(f)
 		a.update(func() {
 			if !a.formIs(gen) {
 				return
@@ -1209,135 +1163,39 @@ func (a *App) testProvider() {
 			if res.OK {
 				t := res.SupportsTools
 				a.form.tools = &t
-				if ms := agents.ChatModels(res.Models, preset.Suggested); len(ms) > 0 {
-					a.form.models = ms
+				if len(res.Models) > 0 {
+					a.form.models = res.Models
 				}
 			}
 		})
 	}()
 }
 
-// keptHere reports whether the dialog's cloud provider is kept on this
-// device, its key with it, and runs from here: one signed out or without
-// a server, or one already kept here. Signed in, a new one is kept on the
-// server, for every device.
-func (a *App) keptHere(preset agents.Preset) bool {
-	if preset.Local || preset.Auth == "account" {
-		return false
-	}
-	if a.form.id != "" {
-		p, err := a.st.Provider(a.form.id)
-		return err == nil && p.IsLocal
-	}
-	return !a.hasServer() || !a.session.SignedIn
-}
-
+// saveProvider saves the dialog's provider, off the main thread: to the
+// keychain, or the server. The first is the default agent.
 func (a *App) saveProvider() {
-	preset := agents.PresetByID(a.form.preset)
-	if preset.Auth != "account" && strings.TrimSpace(a.form.baseURL) == "" || strings.TrimSpace(a.form.model) == "" {
-		a.form.errorText = locales.SettingsNeedURLAndModel()
-		return
-	}
-	here := a.keptHere(preset)
-	if here && strings.TrimSpace(a.form.apiKey) == "" {
-		a.form.errorText = locales.SettingsNeedKey()
-		return
-	}
-	if preset.Local || here {
-		p := store.Provider{ID: a.form.id, Preset: a.form.preset, Name: strings.TrimSpace(a.form.name), BaseURL: endpoint.NormalizeBaseURL(a.form.baseURL),
-			AuthKind: "none", DefaultModel: a.form.model, IsLocal: true, SupportsTools: a.form.tools, Models: a.form.models}
-		if p.ID == "" {
-			p.ID = doc.NewRowID()
-		}
-		if p.Name == "" {
-			p.Name = preset.Name
-		}
-		if a.form.apiKey != "" {
-			p.AuthKind = "api_key"
-		}
-		if preset.Auth == "account" {
-			p.AuthKind, p.BaseURL = "account", preset.BaseURL
-			if err := agents.UseChatGPT(p.ID, a.form.chatgpt); err != nil {
-				a.form.errorText = locales.SettingsKeepSignInFailed(err.Error())
-				return
+	f := a.providerForm()
+	a.form.saving, a.form.errorText = true, ""
+	hub, gen := a.hub, a.form.gen
+	var p store.Provider
+	var err error
+	a.offMain(func() { p, err = hub.SaveProvider(f) }, func() {
+		// Only the dialog it was saved from shows how it went, or closes:
+		// one opened since is another provider's.
+		if err != nil {
+			if a.formIs(gen) {
+				a.form.saving, a.form.errorText = false, err.Error()
 			}
-		}
-		if old, err := a.st.Provider(p.ID); err == nil {
-			p.CreatedAt = old.CreatedAt
-		}
-		if err := a.st.PutProvider(p); err != nil {
-			a.form.errorText = err.Error()
 			return
-		}
-		if preset.Auth != "account" {
-			if err := agents.SetLocalKey(p.ID, a.form.apiKey); err != nil {
-				a.form.errorText = locales.SettingsSaveKeyFailed(err.Error())
-				return
-			}
 		}
 		if a.settings.DefaultModel == "" {
 			a.settings.DefaultModel = store.ModelChoice{ProviderID: p.ID}.Encode()
 			a.saveSettings()
 		}
-		a.form.open = false
-		return
-	}
-	body := map[string]any{"preset": a.form.preset, "name": strings.TrimSpace(a.form.name), "base_url": endpoint.NormalizeBaseURL(a.form.baseURL),
-		"auth_kind": "api_key", "default_model": a.form.model}
-	if a.form.id != "" {
-		body["id"] = a.form.id
-	}
-	if a.form.apiKey != "" {
-		body["api_key"] = a.form.apiKey
-	}
-	a.form.saving = true
-	tools := a.form.tools
-	models := a.form.models
-	gen := a.form.gen
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		res, err := a.backend.Invoke(ctx, "providers", map[string]any{"action": "save", "provider": body})
-		a.update(func() {
-			// The server has the provider either way; only the dialog it
-			// was saved from shows how it went, or closes.
-			fail := func(msg string) {
-				if a.formIs(gen) {
-					a.form.saving, a.form.errorText = false, msg
-				}
-			}
-			if err != nil {
-				fail(err.Error())
-				return
-			}
-			raw, _ := json.Marshal(res["provider"])
-			var row map[string]any
-			if err := json.Unmarshal(raw, &row); err != nil {
-				fail(err.Error())
-				return
-			}
-			p := store.ProviderFromRemote(row)
-			if tools != nil {
-				// What the dialog knows, from the stored value or a test
-				// run in it, over what the server last heard.
-				p.SupportsTools = tools
-			}
-			if len(p.Models) == 0 {
-				p.Models = models
-			}
-			if err := a.st.PutProvider(p); err != nil {
-				fail(err.Error())
-				return
-			}
-			if a.settings.DefaultModel == "" {
-				a.settings.DefaultModel = store.ModelChoice{ProviderID: p.ID}.Encode()
-				a.saveSettings()
-			}
-			if a.formIs(gen) {
-				a.form.saving, a.form.open = false, false
-			}
-		})
-	}()
+		if a.formIs(gen) {
+			a.form.saving, a.form.open = false, false
+		}
+	})
 }
 
 // removeAlert asks before the provider of the dialog goes, with its key.
@@ -1363,66 +1221,33 @@ func (a *App) removeAlert(c *ui.Context) {
 	}
 }
 
-// removeProvider removes a provider and its key. One kept on the server
-// goes there first: removed only here, sync would bring it back, so
-// until the server has deleted it, it stays, and the dialog says why.
+// removeProvider removes a provider and its key, off the main thread.
+// One kept on the server goes there first, and until the server has
+// deleted it, it stays, and the dialog says why.
 func (a *App) removeProvider(id string) {
-	p, err := a.st.Provider(id)
-	if err != nil {
-		return
-	}
-	if p.IsLocal {
-		a.forgetProvider(p)
-		return
-	}
 	a.form.removing, a.form.errorText = true, ""
-	gen := a.form.gen
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		_, err := a.backend.Invoke(ctx, "providers", map[string]any{"action": "delete", "id": id})
-		a.update(func() {
+	hub, gen := a.hub, a.form.gen
+	var err error
+	a.offMain(func() { err = hub.RemoveProvider(id) }, func() {
+		if a.formIs(gen) {
+			a.form.removing = false
+		}
+		if err != nil {
 			if a.formIs(gen) {
-				a.form.removing = false
+				a.form.errorText = err.Error()
+			} else {
+				a.toast(err.Error())
 			}
-			if err != nil {
-				if a.formIs(gen) {
-					a.form.errorText = locales.SettingsDeleteFailed(err.Error())
-				} else {
-					a.toast(locales.SettingsDeleteFailed(err.Error()))
-				}
-				return
-			}
-			a.forgetProvider(p)
-		})
-	}()
-}
-
-// forgetProvider removes a provider from this device, with its key or
-// sign-in, and closes its dialog.
-func (a *App) forgetProvider(p store.Provider) {
-	id := p.ID
-	if p.AuthKind == "account" {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
-			agents.ForgetChatGPT(ctx, id)
-		}()
-	}
-	if err := agents.SetLocalKey(id, ""); err != nil {
-		a.toast(locales.SettingsDeleteKeyFailed(err.Error()))
-	}
-	if err := a.st.DeleteProvider(id); err != nil {
-		a.toast(locales.SettingsDeleteFailed(err.Error()))
-		return
-	}
-	if ch, ok := a.settings.Default(); ok && ch.ProviderID == id {
-		a.settings.DefaultModel = ""
-		a.saveSettings()
-	}
-	if a.form.id == id {
-		a.form.open = false
-	}
+			return
+		}
+		if ch, ok := a.settings.Default(); ok && ch.ProviderID == id {
+			a.settings.DefaultModel = ""
+			a.saveSettings()
+		}
+		if a.form.id == id {
+			a.form.open = false
+		}
+	})
 }
 
 // Sync and storage ---------------------------------------------------
@@ -1440,46 +1265,39 @@ func (a *App) offlineSettings(c *ui.Context) {
 		label(c, locales.SettingsConflicts())
 		card(c, "conflicts", func() {
 			for i, cf := range a.conflicts {
-				kept, other := cf.LocalNode, cf.RemoteNode
-				if cf.Kept == "remote" {
-					kept, other = cf.RemoteNode, cf.LocalNode
-				}
+				s := core.SidesOf(cf)
 				// A block one side deleted and the other edited was kept,
 				// and can be deleted again.
-				deleted := other == nil
+				deleted := s.Deleted != ""
 				var desc string
-				switch {
-				case cf.LocalNode == nil:
-					desc = locales.SettingsConflictDeletedHere(short(kept.Delta().Plain(), 40))
-				case cf.RemoteNode == nil:
-					desc = locales.SettingsConflictDeletedThere(short(kept.Delta().Plain(), 40))
+				switch s.Deleted {
+				case "here":
+					desc = locales.SettingsConflictDeletedHere(s.Kept)
+				case "there":
+					desc = locales.SettingsConflictDeletedThere(s.Kept)
 				default:
-					desc = locales.SettingsConflictKeptOver(short(kept.Delta().Plain(), 40), short(other.Delta().Plain(), 40))
+					desc = locales.SettingsConflictKeptOver(s.Kept, s.Other)
 				}
 				settingRow(c, cf.ID, a.pageTitleOf(cf.PageID), desc, i == 0, func() {
 					ui.MenuButton(c.Key("act"), locales.SettingsResolve(), func(m *ui.Menu) {
 						if deleted {
 							if m.Item(locales.SettingsDeleteIt()).Chosen() {
-								a.resolveConflict(cf, nil)
+								a.resolveConflict(cf.ID, core.DeleteBlock)
 							}
 							if m.Item(locales.SettingsKeepIt()).Chosen() {
-								if err := a.st.ResolveConflict(cf.ID); err != nil {
-									a.toast(locales.SettingsResolveFailed(err.Error()))
-								}
+								a.resolveConflict(cf.ID, core.KeepMerged)
 							}
 						}
 						// The version the merge did not keep can come back,
 						// whichever device's it is.
-						if !deleted && cf.Kept == "remote" && m.Item(locales.SettingsUseThisDevice()).Chosen() {
-							a.resolveConflict(cf, cf.LocalNode)
+						if !deleted && !s.KeptHere && m.Item(locales.SettingsUseThisDevice()).Chosen() {
+							a.resolveConflict(cf.ID, core.UseThisDevice)
 						}
-						if !deleted && cf.Kept != "remote" && m.Item(locales.SettingsUseOtherDevice()).Chosen() {
-							a.resolveConflict(cf, cf.RemoteNode)
+						if !deleted && s.KeptHere && m.Item(locales.SettingsUseOtherDevice()).Chosen() {
+							a.resolveConflict(cf.ID, core.UseOtherDevice)
 						}
 						if !deleted && m.Item(locales.SettingsKeepNewer()).Chosen() {
-							if err := a.st.ResolveConflict(cf.ID); err != nil {
-								a.toast(locales.SettingsResolveFailed(err.Error()))
-							}
+							a.resolveConflict(cf.ID, core.KeepMerged)
 						}
 						if m.Item(locales.SettingsOpenPage()).Chosen() {
 							a.openPage(cf.PageID)
@@ -1579,8 +1397,7 @@ func (a *App) syncSettings(c *ui.Context) {
 		all := a.settings.AllPagesOffline
 		settingRow(c, "all", locales.SettingsAllPagesOffline(), locales.SettingsAllPagesOfflineDesc(), false, func() {
 			if ui.Switch(c.Key("all"), &all).Changed() {
-				a.settings.AllPagesOffline = all
-				a.saveSettings()
+				a.core().SetAllPagesOffline(all)
 			}
 		})
 		keep := a.settings.KeepAudioOnDevice
@@ -1595,43 +1412,10 @@ func (a *App) syncSettings(c *ui.Context) {
 	})
 }
 
-// resolveConflict puts a version of a block back, or deletes the block
-// for a nil node.
-func (a *App) resolveConflict(cf store.ConflictRow, node *doc.Node) {
-	apply := func(content *doc.Content) {
-		if node == nil {
-			content.Remove(cf.BlockID)
-			if len(content.Children) == 0 {
-				content.Children = doc.Empty().Children
-			}
-			return
-		}
-		if content.Find(cf.BlockID) != nil {
-			_ = content.Replace(cf.BlockID, node.Clone())
-		} else {
-			_ = content.Insert(doc.Position{At: "end"}, node.Clone())
-		}
-	}
-	if ed := a.openEditor(cf.PageID); ed != nil {
-		ed.Edit(apply)
-		a.savePage()
-	} else if c := a.st.Content(cf.PageID); c != nil {
-		if err := a.st.AddHistory(cf.PageID, c, "conflict", "", locales.SettingsHistoryBeforeResolving()); err != nil {
-			a.toast(locales.SettingsResolveFailed(err.Error()))
-			return
-		}
-		err := a.saveStored(cf.PageID, func(c *doc.Content) *doc.Content {
-			if c != nil {
-				apply(c)
-			}
-			return c
-		})
-		if err != nil {
-			a.toast(locales.SettingsResolveFailed(err.Error()))
-			return
-		}
-	}
-	if err := a.st.ResolveConflict(cf.ID); err != nil {
+// resolveConflict settles conflict id as how says
+// (core.Pages.ResolveConflict), saying why when it can't.
+func (a *App) resolveConflict(id string, how core.Resolution) {
+	if err := a.pageCore().ResolveConflict(id, how); err != nil {
 		a.toast(locales.SettingsResolveFailed(err.Error()))
 	}
 }

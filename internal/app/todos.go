@@ -148,16 +148,13 @@ func (a *App) finishTodo(t store.PageTodo) {
 			}
 			return
 		}
-		err := a.saveStored(t.PageID, func(c *doc.Content) *doc.Content {
-			if c == nil {
-				return nil
-			}
+		err := a.pageCore().EditPage(t.PageID, func(c *doc.Content) bool {
 			n := c.Find(t.BlockID)
 			if n == nil {
-				return nil
+				return false
 			}
 			n.Set("checked", checked)
-			return c
+			return true
 		})
 		if err != nil {
 			a.toast(locales.SidebarCouldNotSave(err.Error()))

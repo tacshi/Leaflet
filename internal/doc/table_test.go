@@ -18,6 +18,16 @@ func bigRows(rows, cols int) [][]string {
 	return out
 }
 
+// A table's cells show as their text, without its formats, in the rows
+// and columns TableCells finds: an empty row stays, as the table has it.
+func TestPlainTableRows(t *testing.T) {
+	table, _ := TableNode([][]string{{"**A**", "B"}, {"", ""}, {"1", "[two](https://example.com)"}}, "")
+	want := [][]string{{"A", "B"}, {"", ""}, {"1", "two"}}
+	if got := PlainTableRows(table); !reflect.DeepEqual(got, want) {
+		t.Errorf("PlainTableRows = %q, want %q", got, want)
+	}
+}
+
 // TableCells finds each cell where TableCell does, and nil for a missing
 // one.
 func TestTableCellsMatchTableCell(t *testing.T) {
@@ -26,7 +36,7 @@ func TestTableCellsMatchTableCell(t *testing.T) {
 	grid := TableCells(table)
 	for r := range 3 {
 		for c := range 2 {
-			if grid[r][c] != TableCell(table, r, c) {
+			if grid[r][c] != tableCell(table, r, c) {
 				t.Errorf("cell %d,%d", r, c)
 			}
 		}
@@ -40,13 +50,13 @@ func TestTableCellsMatchTableCell(t *testing.T) {
 // others.
 func TestSetTableRowsKeepsCells(t *testing.T) {
 	table, _ := TableNode(bigRows(3, 2), "")
-	kept := TableCell(table, 2, 1)
+	kept := tableCell(table, 2, 1)
 	rows := bigRows(4, 2)
 	rows[0][0] = "changed"
 	if err := SetTableRows(table, rows); err != nil {
 		t.Fatal(err)
 	}
-	if TableCell(table, 2, 1) != kept || !reflect.DeepEqual(TableRows(table), rows) {
+	if tableCell(table, 2, 1) != kept || !reflect.DeepEqual(TableRows(table), rows) {
 		t.Errorf("rows %q", TableRows(table))
 	}
 }
@@ -109,4 +119,14 @@ func TestAsIntKeepsExactIntegers(t *testing.T) {
 			t.Errorf("AsInt(%v) = %d, want %d", tc.v, got, tc.want)
 		}
 	}
+}
+
+// tableCell is the cell of a table at a row and column, or nil.
+func tableCell(table *Node, row, col int) *Node {
+	for _, cell := range table.Children {
+		if cell.Int("colPosition", -1) == col && cell.Int("rowPosition", -1) == row {
+			return cell
+		}
+	}
+	return nil
 }

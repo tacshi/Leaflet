@@ -14,7 +14,7 @@ import (
 	"leaflet/locales"
 )
 
-func templates(t *testing.T, c *Core) []templateRow {
+func templateRows(t *testing.T, c *Core) []templateRow {
 	t.Helper()
 	raw, err := c.Templates()
 	if err != nil {
@@ -55,7 +55,7 @@ func closeEditors(c *Core, id string) {
 func TestTemplatesStartPages(t *testing.T) {
 	c, _ := open(t)
 	var meeting templateRow
-	for _, r := range templates(t, c) {
+	for _, r := range templateRows(t, c) {
 		if r.Key == "starter:meeting" {
 			meeting = r
 		}
@@ -83,7 +83,7 @@ func TestTemplatesStartPages(t *testing.T) {
 	if err != nil || id == "" {
 		t.Fatal(err)
 	}
-	for _, r := range templates(t, c) {
+	for _, r := range templateRows(t, c) {
 		if r.Key == meeting.Key {
 			t.Fatal("the starter still shows beside its template")
 		}
@@ -221,6 +221,44 @@ func TestNoCopyWhileRecording(t *testing.T) {
 	recording(false, "")
 	if _, err := c.ApplyTemplate(page.ID, "template:"+tpl.ID); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// One copy is made at a time, as on the desktop: another asked for while
+// one is made says so, and makes nothing. A starter, which copies nothing,
+// still fills a page meanwhile.
+func TestOneCopyAtATime(t *testing.T) {
+	c, _ := open(t)
+	p := create(t, c, `{"title":"Notes"}`)
+	raw, err := c.SaveAsTemplate(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tpl pageRow
+	_ = json.Unmarshal([]byte(raw), &tpl)
+	page := create(t, c, `{}`)
+
+	c.copying.Store(true)
+	other := locales.TemplateFetchingOther()
+	if _, err := c.DuplicatePage(p.ID); err == nil || err.Error() != other {
+		t.Errorf("duplicated while another copy is made: %v", err)
+	}
+	if _, err := c.SaveAsTemplate(p.ID); err == nil || err.Error() != other {
+		t.Errorf("saved as a template while another copy is made: %v", err)
+	}
+	if _, err := c.ApplyTemplate(page.ID, "template:"+tpl.ID); err == nil || err.Error() != other {
+		t.Errorf("used a template while another copy is made: %v", err)
+	}
+	if !content(t, c, page.ID).IsEmpty() {
+		t.Fatal("the page took the template while another copy was made")
+	}
+	if title, err := c.ApplyTemplate(page.ID, "starter:meeting"); err != nil || title == "" {
+		t.Errorf("a starter while a copy is made: %q, %v", title, err)
+	}
+
+	c.copying.Store(false)
+	if _, err := c.DuplicatePage(p.ID); err != nil {
+		t.Errorf("not duplicated once the other copy is made: %v", err)
 	}
 }
 

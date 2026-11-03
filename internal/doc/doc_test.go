@@ -110,6 +110,29 @@ func TestChildrenOnlyOnLists(t *testing.T) {
 	}
 }
 
+// A blank page is one empty paragraph, or nothing: a paragraph with text
+// in it, or one with blocks under it, or another kind of block, is not.
+func TestIsEmpty(t *testing.T) {
+	nested := para("a", "")
+	nested.Children = []*Node{para("b", "")}
+	for _, c := range []struct {
+		page  *Content
+		empty bool
+	}{
+		{Empty(), true},
+		{&Content{}, true},
+		{FromBlocks([]*Node{para("a", "")}), true},
+		{FromBlocks([]*Node{para("a", "Hi")}), false},
+		{FromBlocks([]*Node{nested}), false},
+		{FromBlocks([]*Node{para("a", ""), para("b", "")}), false},
+		{FromBlocks([]*Node{{ID: "d", Type: "divider"}}), false},
+	} {
+		if got := c.page.IsEmpty(); got != c.empty {
+			t.Errorf("%s: empty %v, want %v", c.page.Encode(), got, c.empty)
+		}
+	}
+}
+
 func TestStamping(t *testing.T) {
 	before := page(map[string]int64{"a": 1, "b": 1}, para("a", "one"), para("b", "two"))
 	after := page(map[string]int64{}, para("a", "one!"))
@@ -958,7 +981,7 @@ func TestMergeTableCellDeletedAndEdited(t *testing.T) {
 		base.Blocks[id] = 1000
 	}
 	cellText := func(c *Content, row, col int) string {
-		cell := TableCell(c.Find("T"), row, col)
+		cell := tableCell(c.Find("T"), row, col)
 		if cell == nil || len(cell.Children) == 0 {
 			return ""
 		}
@@ -966,7 +989,7 @@ func TestMergeTableCellDeletedAndEdited(t *testing.T) {
 	}
 	edit := func(at int64) *Content {
 		c := base.Copy()
-		TableCell(c.Find("T"), 1, 1).Children[0].SetDelta(Delta{{Text: "edited"}})
+		tableCell(c.Find("T"), 1, 1).Children[0].SetDelta(Delta{{Text: "edited"}})
 		return c.Stamped(base, at)
 	}
 	rewritten := base.Copy()

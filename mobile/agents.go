@@ -1,17 +1,13 @@
 package mobile
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"leaflet/internal/agents"
-	"leaflet/internal/agents/endpoint"
 	"leaflet/internal/core"
 	"leaflet/internal/doc"
-	"leaflet/internal/guard"
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
@@ -423,25 +419,18 @@ type providerJSON struct {
 	Email string `json:"email,omitempty"`
 }
 
-// keptHere reports whether a cloud provider is kept on this device, its
-// key in the keychain, and runs from here: one signed out or without a
-// server, or one already kept here. Signed in, a new one is kept on the
-// server, for every device, as on the desktop.
-func (c *Core) keptHere(in providerJSON) bool {
-	preset := agents.PresetByID(in.Preset)
-	if preset.Local || preset.Auth == "account" {
-		return false
+// providerForm is a provider as SaveProvider takes it, as the core tests
+// and saves one: with the key kept here of one edited, which the app's
+// form never shows.
+func providerForm(in providerJSON) agents.Form {
+	key := strings.TrimSpace(in.APIKey)
+	if key == "" && in.ID != "" {
+		key = agents.LocalKey(in.ID)
 	}
-	var here bool
-	c.q.do(func() {
-		if in.ID != "" {
-			p, err := c.core.Store.Provider(in.ID)
-			here = err == nil && p.IsLocal
-			return
-		}
-		here = !c.core.Store.Session().SignedIn
-	})
-	return here
+	return agents.Form{
+		ID: in.ID, Preset: in.Preset, Name: in.Name, BaseURL: in.BaseURL, APIKey: key, Model: in.DefaultModel,
+		Models: in.Models, SupportsTools: in.SupportsTools,
+	}
 }
 
 // providerTest is what TestProvider found.
@@ -464,55 +453,14 @@ func (c *Core) TestProvider(provider string) (_ string, err error) {
 	if err := json.Unmarshal([]byte(provider), &in); err != nil {
 		return "", err
 	}
-	preset := agents.PresetByID(in.Preset)
-	key := strings.TrimSpace(in.APIKey)
-	if key == "" && in.ID != "" {
-		key = agents.LocalKey(in.ID)
+	f := providerForm(in)
+	if agents.PresetByID(in.Preset).Auth == "account" {
+		if f.ChatGPT, err = c.chatgptFor(in.ID); err != nil {
+			return encode(providerTest{Message: err.Error(), Models: []string{}})
+		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-	var res agents.TestResult
-	switch {
-	case preset.Auth == "account":
-		g, err := c.chatgptFor(in.ID)
-		switch {
-		case err != nil:
-			res.Message = err.Error()
-		case in.DefaultModel == "":
-			res.Message = locales.SettingsChooseModelToTest()
-		default:
-			res = agents.TestModel(ctx, g, in.DefaultModel, nil)
-			if models, err := g.ListModels(ctx); err == nil {
-				res.Models = models
-			}
-		}
-	case preset.Local || key != "":
-		res = agents.NewClient(endpoint.NormalizeBaseURL(in.BaseURL), key).Test(ctx, in.DefaultModel)
-	case in.ID != "" && c.core.Store.Session().SignedIn:
-		r, err := c.core.Remote.Invoke(ctx, "providers", map[string]any{
-			"action": "test", "provider_id": in.ID, "model": in.DefaultModel,
-		})
-		if err != nil {
-			res.Message = err.Error()
-			break
-		}
-		res.OK, _ = r["ok"].(bool)
-		res.SupportsTools, _ = r["supports_tools"].(bool)
-		res.Message, _ = r["message"].(string)
-		if l, ok := r["models"].([]any); ok {
-			for _, m := range l {
-				if id, ok := m.(string); ok {
-					res.Models = append(res.Models, id)
-				}
-			}
-		}
-	default:
-		res.Message = locales.SettingsPasteKeyToTest()
-	}
-	return encode(providerTest{
-		OK: res.OK, SupportsTools: res.SupportsTools, Message: res.Message,
-		Models: agents.ChatModels(res.Models, preset.Suggested),
-	})
+	res := c.core.Hub.TestProvider(f)
+	return encode(providerTest{OK: res.OK, SupportsTools: res.SupportsTools, Message: res.Message, Models: res.Models})
 }
 
 // Presets returns the providers to add, as JSON, as the desktop offers
@@ -565,83 +513,21 @@ func (c *Core) SaveProvider(provider string) (err error) {
 	if err := json.Unmarshal([]byte(provider), &in); err != nil {
 		return err
 	}
-	preset := agents.PresetByID(in.Preset)
-	name := strings.TrimSpace(in.Name)
-	if name == "" {
-		name = preset.Name
+	f := providerForm(in)
+	account := agents.PresetByID(in.Preset).Auth == "account"
+	if account {
+		// One edited without signing in again keeps the sign-in it has.
+		f.ChatGPT = c.madeChatGPT()
 	}
-	// An account's provider goes to its preset's address, as on the
-	// desktop, whatever the form says.
-	if preset.Auth != "account" && strings.TrimSpace(in.BaseURL) == "" || strings.TrimSpace(in.DefaultModel) == "" {
-		return errors.New(locales.SettingsNeedURLAndModel())
-	}
-	if preset.Auth == "account" {
-		return c.saveChatGPT(in, name)
-	}
-	here := c.keptHere(in)
-	if here && strings.TrimSpace(in.APIKey) == "" && (in.ID == "" || agents.LocalKey(in.ID) == "") {
-		return errors.New(locales.SettingsNeedKey())
-	}
-	if preset.Local || here {
-		var err error
-		c.q.do(func() {
-			p := store.Provider{
-				ID: in.ID, Preset: in.Preset, Name: name, BaseURL: endpoint.NormalizeBaseURL(in.BaseURL),
-				AuthKind: "none", DefaultModel: in.DefaultModel, IsLocal: true, Models: in.Models,
-				SupportsTools: in.SupportsTools,
-			}
-			if p.ID == "" {
-				p.ID = doc.NewRowID()
-			}
-			if in.APIKey != "" || (in.ID != "" && agents.LocalKey(in.ID) != "") {
-				p.AuthKind = "api_key"
-			}
-			if old, e := c.core.Store.Provider(p.ID); e == nil {
-				p.CreatedAt = old.CreatedAt
-			}
-			if err = c.core.Store.PutProvider(p); err != nil {
-				return
-			}
-			if in.APIKey != "" {
-				if err = agents.SetLocalKey(p.ID, in.APIKey); err != nil {
-					return
-				}
-			}
-			c.defaultAgent(p.ID)
-		})
-		return err
-	}
-	body := map[string]any{
-		"preset": in.Preset, "name": name, "base_url": endpoint.NormalizeBaseURL(in.BaseURL),
-		"auth_kind": "api_key", "default_model": in.DefaultModel,
-	}
-	if in.ID != "" {
-		body["id"] = in.ID
-	}
-	if in.APIKey != "" {
-		body["api_key"] = in.APIKey
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	res, err := c.core.Remote.Invoke(ctx, "providers", map[string]any{"action": "save", "provider": body})
+	p, err := c.core.Hub.SaveProvider(f)
 	if err != nil {
 		return err
 	}
-	raw, _ := json.Marshal(res["provider"])
-	var row map[string]any
-	if err := json.Unmarshal(raw, &row); err != nil {
-		return err
+	c.q.do(func() { c.defaultAgent(p.ID) })
+	if account {
+		c.ForgetChatGPTSignIn()
 	}
-	c.q.do(func() {
-		p := store.ProviderFromRemote(row)
-		if len(p.Models) == 0 {
-			p.Models = in.Models
-		}
-		if err = c.core.Store.PutProvider(p); err == nil {
-			c.defaultAgent(p.ID)
-		}
-	})
-	return err
+	return nil
 }
 
 // defaultAgent makes a provider the default agent while there is none.
@@ -653,73 +539,11 @@ func (c *Core) defaultAgent(providerID string) {
 	}
 }
 
-// saveChatGPT keeps a ChatGPT provider on this device, with the sign-in
-// made in its form, or the one it has.
-func (c *Core) saveChatGPT(in providerJSON, name string) error {
-	g := c.madeChatGPT()
-	if g == nil && in.ID == "" {
-		return errors.New(locales.SettingsChatGPTSignInFirst())
-	}
-	var err error
-	c.q.do(func() {
-		p := store.Provider{
-			ID: in.ID, Preset: in.Preset, Name: name, BaseURL: agents.PresetByID(in.Preset).BaseURL,
-			AuthKind: "account", DefaultModel: in.DefaultModel, IsLocal: true, Models: in.Models,
-			SupportsTools: in.SupportsTools,
-		}
-		if p.ID == "" {
-			p.ID = doc.NewRowID()
-		}
-		if g != nil {
-			if err = agents.UseChatGPT(p.ID, g); err != nil {
-				err = errors.New(locales.SettingsKeepSignInFailed(err.Error()))
-				return
-			}
-		}
-		if old, e := c.core.Store.Provider(p.ID); e == nil {
-			p.CreatedAt = old.CreatedAt
-		}
-		if err = c.core.Store.PutProvider(p); err != nil {
-			return
-		}
-		c.defaultAgent(p.ID)
-	})
-	if err == nil {
-		c.ForgetChatGPTSignIn()
-	}
-	return err
-}
-
 // RemoveProvider removes a provider, with its key or sign-in, as the
 // desktop does: one kept on the server goes there first, since removed
 // only here, sync would bring it back. The default agent it was stops
 // being one.
 func (c *Core) RemoveProvider(id string) (err error) {
 	defer catch(&err)
-	var p store.Provider
-	c.q.do(func() { p, err = c.core.Store.Provider(id) })
-	if err != nil {
-		return err
-	}
-	if !p.IsLocal {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		if _, err := c.core.Remote.Invoke(ctx, "providers", map[string]any{"action": "delete", "id": id}); err != nil {
-			return errors.New(locales.SettingsDeleteFailed(err.Error()))
-		}
-	}
-	if p.AuthKind == "account" {
-		guard.Go(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
-			agents.ForgetChatGPT(ctx, id)
-		})
-	}
-	// A default it was is none from now on, as Store.Settings reads one
-	// whose provider is gone.
-	c.q.do(func() {
-		_ = agents.SetLocalKey(id, "")
-		err = c.core.Store.DeleteProvider(id)
-	})
-	return err
+	return c.core.Hub.RemoveProvider(id)
 }

@@ -253,5 +253,8 @@ func (s *Store) PushedContent(pageID, over, content, plain, base string, remoteA
 	} else if n == 0 {
 		return ErrContentChanged
 	}
+	if content != over {
+		s.Notify("page_contents", pageID)
+	}
 	return nil
 }

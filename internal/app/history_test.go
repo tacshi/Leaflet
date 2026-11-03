@@ -7,6 +7,7 @@ import (
 	codeeditor "github.com/egoist/mygo/ui/editor"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -26,7 +27,7 @@ func TestNamedVersionAndChanges(t *testing.T) {
 	a.openHistory(p.ID)
 	a.nameVersion("Sent to legal")
 	h := a.dialogs.history
-	if len(h) != 1 || h[0].Reason != "manual" || historyLabel(h[0]) != "Sent to legal" {
+	if len(h) != 1 || h[0].Reason != "manual" || core.HistoryLabel(h[0]) != "Sent to legal" {
 		t.Fatalf("history %+v", h)
 	}
 	// Edit the page after it.
@@ -81,9 +82,9 @@ func TestUnreadableVersionIsNotRestored(t *testing.T) {
 	}
 }
 
-// A version of no blocks restores as one to type in, whether its page is
-// open or not.
-func TestEmptyVersionRestoresAParagraph(t *testing.T) {
+// A version restored, its page open or not, offers Undo in the toast,
+// which puts the page back as it was.
+func TestRestoredVersionUndoes(t *testing.T) {
 	a := templatesApp(t)
 	a.hub = agents.NewHub(a.st, a.backend, a)
 	for _, open := range []bool{true, false} {
@@ -91,16 +92,26 @@ func TestEmptyVersionRestoresAParagraph(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if err := a.st.AddHistory(p.ID, doc.FromBlocks([]*doc.Node{textNode("Plans")}), "manual", "", "v1"); err != nil {
+			t.Fatal(err)
+		}
+		h, _ := a.st.History(p.ID)
 		a.reloadAll()
 		if open {
 			a.openPage(p.ID)
 		} else {
 			a.page = nil
 		}
-		a.restoreVersion(p.ID, &doc.Content{})
-		c := a.st.Content(p.ID)
-		if c == nil || len(c.Children) != 1 || c.Children[0].Type != "paragraph" || c.PlainText() != "" {
-			t.Errorf("open %v: restored to %+v", open, c)
+		a.restoreVersion(p.ID, h[0].ID)
+		if got := a.st.Content(p.ID).PlainText(); got != "Plans" {
+			t.Fatalf("open %v: restored to %q", open, got)
+		}
+		if open && a.page.editor.Content.PlainText() != "Plans" {
+			t.Errorf("the open page shows %q", a.page.editor.Content.PlainText())
+		}
+		a.toasts[len(a.toasts)-1].fn()
+		if got := a.st.Content(p.ID).PlainText(); got != "Goals" {
+			t.Errorf("open %v: undone to %q", open, got)
 		}
 	}
 }

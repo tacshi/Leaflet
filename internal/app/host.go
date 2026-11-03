@@ -27,6 +27,7 @@ import (
 	"leaflet/internal/menu"
 	"leaflet/internal/rendered"
 	"leaflet/internal/store"
+	"leaflet/internal/templates"
 	"leaflet/internal/theme"
 	"leaflet/internal/web"
 	"leaflet/locales"
@@ -173,19 +174,15 @@ func (h *host) CommentPreview(c *ui.Context, blockID string) {
 }
 
 func (h *host) SlashItems(query string) []editor.MenuItem {
-	// A template doesn't go into itself.
-	var templates []menu.Item
-	for _, t := range h.a.templateChoices() {
-		if h.a.page != nil && t.page != nil && t.page.ID == h.a.page.id {
-			continue
-		}
-		templates = append(templates, menu.Item{Key: t.key(), Label: t.title(), Hint: h.a.choiceHint(t), Icon: t.icon()})
+	id := ""
+	if h.a.page != nil {
+		id = h.a.page.id
 	}
-	return menu.Filter(menu.Slash(templates), query)
+	return menu.Filter(menu.Slash(templates.Items(h.a.templateChoices(), id, h.a.templateHint)), query)
 }
 
 func (h *host) MentionItems(query string) []editor.MenuItem {
-	m := menu.Mentions{Pages: h.a.pages, Place: h.a.pagePlace, UserID: h.a.session.UserID}
+	m := menu.Mentions{Pages: h.a.pages, Folders: h.a.folders, UserID: h.a.session.UserID}
 	for _, o := range h.a.hub.Options() {
 		m.Agents = append(m.Agents, menu.Agent{ProviderID: o.Provider.ID, Name: o.Name(), Model: o.Model})
 	}
@@ -193,20 +190,6 @@ func (h *host) MentionItems(query string) []editor.MenuItem {
 		m.PageID, m.Members = h.a.page.id, h.a.page.members
 	}
 	return menu.Filter(menu.Mention(m), query)
-}
-
-// pagePlace says where a page is, for a list of pages: in its parent
-// page, else its folder, else nothing at the top of the space.
-func (a *App) pagePlace(p store.Page) string {
-	if parent := a.pageByID(p.ParentID); parent != nil {
-		return parent.DisplayTitle()
-	}
-	for _, f := range a.folders {
-		if f.ID == p.FolderID {
-			return f.Name
-		}
-	}
-	return ""
 }
 
 func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {

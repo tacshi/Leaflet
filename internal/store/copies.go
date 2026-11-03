@@ -245,12 +245,12 @@ func (s *Store) CopyNeeds(id string) ([]CopyNeed, error) {
 	}
 	var out []CopyNeed
 	for _, c := range plan.recs {
-		if !onDevice(c.LocalPath) {
+		if !OnDevice(c.LocalPath) {
 			out = append(out, CopyNeed{Bucket: "recordings", Path: c.AudioPath, RecordingID: c.from})
 		}
 	}
 	for _, c := range plan.files {
-		if !onDevice(c.LocalPath) {
+		if !OnDevice(c.LocalPath) {
 			out = append(out, CopyNeed{Bucket: "files", Path: c.StoragePath, FileID: c.ID})
 		}
 	}
@@ -268,7 +268,7 @@ func (s *Store) copyLocal(plan pageCopies) ([]Recording, []File, []string, error
 	var made []string
 	var recs []Recording
 	for _, c := range plan.recs {
-		if !onDevice(c.LocalPath) {
+		if !OnDevice(c.LocalPath) {
 			return nil, nil, made, ErrCopyNotHere
 		}
 		r := c.Recording
@@ -283,7 +283,7 @@ func (s *Store) copyLocal(plan pageCopies) ([]Recording, []File, []string, error
 	}
 	var files []File
 	for _, c := range plan.files {
-		if !onDevice(c.LocalPath) {
+		if !OnDevice(c.LocalPath) {
 			return nil, nil, made, ErrCopyNotHere
 		}
 		now := time.Now()

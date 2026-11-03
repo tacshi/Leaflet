@@ -478,25 +478,31 @@ func TestSignedOutSavesAProviderKeptHere(t *testing.T) {
 	if a.session.SignedIn {
 		t.Fatal("the test app is signed in")
 	}
+	a.hub = agents.NewHub(a.st, a.backend, a)
 	// The models listed as it is edited come from no server out there,
 	// and are not waited for.
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"data":[]}`))
 	}))
 	t.Cleanup(hs.Close)
-	// What the keychain has comes on the main thread, between frames.
+	// What the keychain has, and how a save went, come on the main
+	// thread, between frames.
 	posted := make(chan func(), 8)
 	a.post = func(fn func()) { posted <- fn }
-	read := func() {
+	until := func(busy *bool, what string) {
 		t.Helper()
-		for a.form.reading {
+		for *busy {
 			select {
 			case fn := <-posted:
 				fn()
 			case <-time.After(5 * time.Second):
-				t.Fatal("the key kept here was never read")
+				t.Fatalf("%s never came", what)
 			}
 		}
+	}
+	read := func() {
+		t.Helper()
+		until(&a.form.reading, "the key kept here")
 	}
 	tt := ui.NewTester(a.providerDialog, 900, 800)
 	a.newProvider(agents.PresetByID("deepseek"))
@@ -508,6 +514,7 @@ func TestSignedOutSavesAProviderKeptHere(t *testing.T) {
 	if err := tt.Click(locales.CommonSave()); err != nil {
 		t.Fatal(err)
 	}
+	until(&a.form.saving, "the save")
 	tt.Frame()
 	ps, err := a.st.Providers()
 	if err != nil {
@@ -542,6 +549,7 @@ func TestSignedOutSavesAProviderKeptHere(t *testing.T) {
 	if err := tt.Click(locales.CommonSave()); err != nil {
 		t.Fatal(err)
 	}
+	until(&a.form.saving, "the save")
 	tt.Frame()
 	if p, err := a.st.Provider(ps[0].ID); err != nil || p.DefaultModel != "deepseek-v4-flash" {
 		t.Errorf("edited to %+v, %v", p, err)

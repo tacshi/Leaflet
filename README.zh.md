@@ -95,7 +95,7 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 
 - macOS 12 或更高版本（Apple 芯片或 Intel）；或 x64、arm64 上的 Windows。
 - 从源码构建：Go 1.27.3 或更高版本；Go 代码不需要 cgo 或 C 编译器。Mac
-  应用的设备端语音识别助手（[`macos/speech`](macos/speech)）用 Swift 编写，
+  应用的设备端语音识别助手（[`speech`](speech)）用 Swift 编写，
   由 `scripts/build-speech.sh` 使用 Xcode 26 或更高版本（macOS 26 SDK）
   构建：在 Xcode 无法构建它的环境中，调试构建会跳过它继续进行，发布构建则
   必须有它（签名和公证也需要 Xcode）。Windows 安装程序需要 NSIS。
@@ -280,7 +280,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `internal/agents` | 兼容 OpenAI 的客户端、预设、提示词、页面工具、循环和中枢 |
 | `internal/mcp` | `leaflet mcp`：供应用外智能体使用的页面工具 |
 | `internal/recording` | 采集、WAV、Soniox 流式传输和端点转写 |
-| `internal/macspeech`、`macos/speech` | 用 Mac 自带的语音识别转写，通过 Mac 应用附带的 Swift 助手 `leaflet-speech` |
+| `internal/macspeech`、`speech` | 用设备自带的语音识别转写：`speech` 是一个 Swift 包，iOS 应用和 Mac 应用附带的助手 `leaflet-speech` 都由它构建 |
 | `internal/theme` | 颜色、字体和图标 |
 | `locales` | 各语言的应用文本，以及由其生成的 Go 代码 |
 | `scripts` | 调试与发布构建、发布到 GitHub Releases，以及迁移的检查 |

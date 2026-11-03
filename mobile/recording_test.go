@@ -253,13 +253,13 @@ func (f *fakeTranscriber) Send(id string, pcm []byte) {
 func (f *fakeTranscriber) Finish(id string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return fmt.Sprintf(`[{"start_ms":0,"end_ms":1000,"text":"heard %d"}]`, f.heard[id]), nil
+	return fmt.Sprintf(`{"done":true,"segments":[{"start_ms":0,"end_ms":1000,"text":"heard %d"}]}`, f.heard[id]), nil
 }
 
 func (f *fakeTranscriber) Close(id string) {}
 
 func (f *fakeTranscriber) File(path, language string) (string, error) {
-	return `[{"start_ms":0,"end_ms":1000,"text":"from the file"}]`, nil
+	return `{"done":true,"segments":[{"start_ms":0,"end_ms":1000,"text":"from the file"}]}`, nil
 }
 
 func TestRecordingTranscribedOnTheDevice(t *testing.T) {
@@ -423,12 +423,12 @@ func (s *stuckTranscriber) Close(id string)                                     
 
 func (s *stuckTranscriber) Finish(id string) (string, error) {
 	<-s.release
-	return "[]", nil
+	return `{"done":true,"segments":[]}`, nil
 }
 
 func (s *stuckTranscriber) File(path, language string) (string, error) {
 	<-s.release
-	return "[]", nil
+	return `{"done":true,"segments":[]}`, nil
 }
 
 // The device's engine stuck is given up on once the audio's length and

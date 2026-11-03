@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"leaflet/internal/doc"
@@ -97,6 +98,11 @@ type Controller struct {
 	// among them whose words came live, now getting their timestamps.
 	Transcribing map[string]bool
 	Finishing    map[string]bool
+
+	// sttLatest numbers the changes of the speech settings, and sttSent
+	// orders their sends to the server (MirrorSettings).
+	sttLatest atomic.Int64
+	sttSent   sync.Mutex
 }
 
 // ending is where the last audio of a recording stopped goes.

@@ -215,6 +215,8 @@ func storeOps(st *store.Store, pageID string, ops []doc.Op, orEmpty, strict bool
 // than the agent read it, as the agent function's overwrites has it. The
 // first op on a block has it as read; a replace that keeps the block's
 // children looks at the block alone, as Apply keeps the children found.
+// A table's cell, and a block in one, which Apply passes over, take
+// nothing away.
 func overwrites(c *doc.Content, ops []doc.Op) bool {
 	seen := map[string]bool{}
 	changed := func(read *doc.Node, own bool) bool {
@@ -222,7 +224,7 @@ func overwrites(c *doc.Content, ops []doc.Op) bool {
 			return false
 		}
 		seen[read.ID] = true
-		at := c.Find(read.ID)
+		at := c.Addressable(read.ID)
 		if at == nil {
 			return false
 		}

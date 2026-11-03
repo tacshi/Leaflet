@@ -9,31 +9,36 @@ import Testing
 /// from the core.
 @MainActor
 struct LibraryTests {
-    private func page(
-        _ id: String, parent: String? = nil, folder: String? = nil, space: String = "me",
-        key: String = "a", template: Bool = false, tags: [String] = [], updated: Int64 = 0
-    ) -> PageRow {
+    private func page(_ id: String, parent: String? = nil) -> PageRow {
         PageRow(
-            id: id, spaceID: space, parentID: parent, folderID: folder, title: id, icon: nil,
-            sortKey: key, updatedAt: updated, keepOffline: false, template: template, tags: tags,
+            id: id, spaceID: "me", parentID: parent, folderID: nil, title: id, icon: nil,
+            sortKey: "a", updatedAt: 0, keepOffline: false, template: false, tags: [],
             canEdit: true, createdBy: nil, defaultTemplateID: nil)
     }
 
-    @Test func pagesNestAndSortAsTheDesktopsTree() {
-        let lib = LibrarySnapshot(
-            spaceID: "me",
-            pages: [
-                page("b", key: "b"), page("a", key: "a"), page("a2", parent: "a", key: "b"),
-                page("a1", parent: "a", key: "a"), page("f1", folder: "f"),
-                page("t", template: true), page("s", space: "them"),
-                page("s1", parent: "s", space: "them"), page("lone", parent: "gone", space: "them"),
-            ],
-            folders: [FolderRow(id: "f", name: "Work", sortKey: "a")], tags: [])
+    /// The library reads as the core arranges it: each list of the tree
+    /// its pages, in the core's order, and an ID it has no page of left
+    /// out.
+    @Test func theCoresTreeReadsAsItsPages() throws {
+        func row(_ id: String, parent: String? = nil) -> String {
+            let p = parent.map { #","parent_id":"\#($0)""# } ?? ""
+            return #"""
+                {"id":"\#(id)","space_id":"me","title":"\#(id)","sort_key":"a","updated_at":0,"keep_offline":false,"template":false,"tags":[],"can_edit":true\#(p)}
+                """#
+        }
+        let json = """
+            {"space_id":"me","pages":[\(row("b")),\(row("a")),\(row("a1", parent: "a")),\(row("f1")),\(row("s"))],
+            "folders":[{"id":"f","name":"Work","sort_key":"a"}],
+            "tags":[{"tag":"home","count":2,"pages":["b","a"]}],
+            "top":["a","b","gone"],"in_folder":{"f":["f1"]},"children":{"a":["a1"]},"shared":["s"]}
+            """
+        let lib = try JSONDecoder().decode(LibrarySnapshot.self, from: Data(json.utf8))
         #expect(lib.topPages.map(\.id) == ["a", "b"])
-        #expect(lib.children(of: page("a")).map(\.id) == ["a1", "a2"])
-        #expect(lib.pages(in: lib.sortedFolders[0]).map(\.id) == ["f1"])
-        // A shared page whose parent the user has not is a top one.
-        #expect(lib.sharedPages.map(\.id) == ["lone", "s"])
+        #expect(lib.children(of: page("a")).map(\.id) == ["a1"])
+        #expect(lib.pages(in: lib.folders[0]).map(\.id) == ["f1"])
+        #expect(lib.sharedPages.map(\.id) == ["s"])
+        #expect(lib.pages(tagged: "home").map(\.id) == ["b", "a"])
+        #expect(lib.pages(tagged: "work").isEmpty)
         #expect(lib.page("a1")?.parentID == "a")
         #expect(lib.page("nope") == nil)
     }
@@ -45,18 +50,6 @@ struct LibraryTests {
             spaceID: "me", pages: [page("x", parent: "y"), page("y", parent: "x")], folders: [],
             tags: [])
         #expect(lib.path(to: page("x", parent: "y")).map(\.id) == ["y"])
-        #expect(lib.topPages.isEmpty)
-    }
-
-    @Test func taggedPagesAreTheLastChangedFirst() {
-        let lib = LibrarySnapshot(
-            spaceID: "me",
-            pages: [
-                page("old", tags: ["home"], updated: 1), page("new", tags: ["home"], updated: 2),
-                page("t", template: true, tags: ["home"], updated: 3),
-            ], folders: [], tags: [TagRow(tag: "home", count: 2)])
-        #expect(lib.pages(tagged: "home").map(\.id) == ["new", "old"])
-        #expect(lib.pages(tagged: "work").isEmpty)
     }
 
     /// Back and Forward leave out the pages deleted, and a window whose

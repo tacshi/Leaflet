@@ -279,7 +279,7 @@ func ChartData(chart map[string]any) (map[string]any, error) {
 	var labels []any
 	if raw, ok := chart["labels"].([]any); ok {
 		for _, l := range raw {
-			labels = append(labels, specText(l))
+			labels = append(labels, JSONText(l))
 		}
 	}
 	var series []any
@@ -296,7 +296,7 @@ func ChartData(chart map[string]any) (map[string]any, error) {
 			// server names it.
 			name := fmt.Sprintf("Series %d", i+1)
 			if v, ok := s["name"]; ok && v != nil {
-				name = specText(v)
+				name = JSONText(v)
 			}
 			series = append(series, map[string]any{"name": name, "values": values})
 		}
@@ -337,17 +337,18 @@ func rowsOf(v any) ([][]string, bool) {
 		}
 		row := []string{}
 		for _, c := range cells {
-			row = append(row, specText(c))
+			row = append(row, JSONText(c))
 		}
 		rows = append(rows, row)
 	}
 	return rows, true
 }
 
-// specText is a spec's value as text, as the server writes it: a string
-// as it is, null as nothing, and a number or a boolean as it reads, a
-// number as JavaScript writes one.
-func specText(v any) string {
+// JSONText is a JSON value as text, as the server writes it: a string as
+// it is, null as nothing, and a number or a boolean as it reads, a number
+// as JavaScript writes one. A spec's cells and labels are read so, and a
+// transcript's speakers.
+func JSONText(v any) string {
 	switch x := v.(type) {
 	case nil:
 		return ""
@@ -544,19 +545,9 @@ func DropCells(n *Node) {
 	}
 }
 
-// TableCell returns the cell of a table at a row and column, or nil.
-func TableCell(table *Node, row, col int) *Node {
-	for _, cell := range table.Children {
-		if cell.Int("colPosition", -1) == col && cell.Int("rowPosition", -1) == row {
-			return cell
-		}
-	}
-	return nil
-}
-
 // TableCells is a table's cells by row and column, as many as TableSize
-// makes room for, nil where one is missing: for every cell, it is
-// TableCell without looking through the table for each.
+// makes room for, nil where one is missing; of two cells at one place, the
+// first.
 func TableCells(table *Node) [][]*Node {
 	rows, cols := TableSize(table)
 	grid := make([][]*Node, rows)
@@ -611,6 +602,10 @@ func TableRows(n *Node) [][]string { return tableRows(n, Delta.ToMarkdown) }
 // ReadableTableRows is TableRows for people to read, its cells written as
 // ReadableMarkdown writes text.
 func ReadableTableRows(n *Node) [][]string { return tableRows(n, Delta.ReadableMarkdown) }
+
+// PlainTableRows is TableRows as the cells show, their text without its
+// formats.
+func PlainTableRows(n *Node) [][]string { return tableRows(n, Delta.Plain) }
 
 // tableRows writes the cells TableCells finds: of two at one place, the
 // first, as every reader of the table shows it.

@@ -1240,8 +1240,12 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
 }
 
-/** A spec's value as text (doc.specText): a string as it is, null as nothing, a number or a boolean as it reads. */
-function specText(value: unknown): string {
+/**
+ * A JSON value as text (doc.JSONText): a string as it is, null as nothing,
+ * a number or a boolean as it reads. A spec's cells and labels are read
+ * so, and a transcript's speakers.
+ */
+export function jsonText(value: unknown): string {
   // A list or an object is no text, as on the client.
   return value == null || typeof value === "object" ? "" : String(value);
 }
@@ -1289,7 +1293,7 @@ function validateChart(chart: unknown): ChartSpec {
   if (!Array.isArray(c.series) || c.series.length === 0) {
     throw new SpecError("chart.series must be a non-empty array");
   }
-  const labels = c.labels.map(specText);
+  const labels = c.labels.map(jsonText);
   const series = c.series.map((s, i) => {
     const values = Array.isArray(s?.values) ? s.values.map(specNumber) : [];
     if (values.length !== labels.length) {
@@ -1297,7 +1301,7 @@ function validateChart(chart: unknown): ChartSpec {
         `chart.series[${i}].values must hold ${labels.length} numbers, one per label`,
       );
     }
-    return { name: s?.name == null ? `Series ${i + 1}` : specText(s.name), values };
+    return { name: s?.name == null ? `Series ${i + 1}` : jsonText(s.name), values };
   });
   if (chartType === "pie" && series.length > 1) {
     throw new SpecError("A pie chart takes exactly one series");
@@ -1514,7 +1518,7 @@ export function tableNode(id: string, rows: unknown, newId: IdFactory): NodeJSON
         id: newId(),
         type: "table/cell",
         data: { colPosition: col, rowPosition: row },
-        children: [textNode(newId(), "paragraph", specText((rows[row] as unknown[])[col]))],
+        children: [textNode(newId(), "paragraph", jsonText((rows[row] as unknown[])[col]))],
       });
     }
   }

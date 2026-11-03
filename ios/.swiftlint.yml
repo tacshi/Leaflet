@@ -4,9 +4,12 @@
 included:
   - Leaflet
   - LeafletTests
+  # The speech package the app shares with the Mac's speech helper.
+  - ../speech
 excluded:
   # What ios/gen writes.
   - Leaflet/Generated
+  - ../speech/.build
 disabled_rules:
   # swift-format's: it wraps lines at 100, putting a brace or a closure's
   # parameters on a line of their own after a wrapped list, and ends a

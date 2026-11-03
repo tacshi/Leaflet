@@ -76,3 +76,17 @@ func TranscriptBlocks(rec store.Recording) []*doc.Node {
 	}
 	return nodes
 }
+
+// TranscriptText is rec's transcript as text to copy: a line each, tidied,
+// after its speaker's name when it has one.
+func TranscriptText(rec store.Recording) string {
+	var lines []string
+	for _, s := range Tidy(rec.Transcript) {
+		if s.Speaker != "" {
+			lines = append(lines, locales.RecSpeakerLine(s.Speaker, s.Text))
+		} else {
+			lines = append(lines, s.Text)
+		}
+	}
+	return strings.Join(lines, "\n")
+}

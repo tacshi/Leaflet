@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/url"
-	"strings"
 	"time"
 
 	"leaflet/internal/guard"
 	"leaflet/internal/provision"
-	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/internal/supabaseapi"
 	"leaflet/locales"
@@ -317,33 +315,13 @@ func (c *Core) closePages() {
 // Saved here but not on the server, it fails saying so.
 func (c *Core) SetDisplayName(name string) (err error) {
 	defer catch(&err)
-	name = strings.TrimSpace(name)
-	var signedIn bool
-	c.q.do(func() {
-		if name == "" || name == c.core.Store.Session().DisplayName {
-			return
-		}
-		if err = c.core.Store.SetDisplayName(name); err != nil {
-			err = errors.New(locales.SettingsSaveFailed(err.Error()))
-			return
-		}
-		signedIn = c.core.Remote.SignedIn()
-	})
-	if err != nil || !signedIn {
+	var changed bool
+	c.q.do(func() { changed, err = c.core.SetDisplayName(name) })
+	if err != nil || !changed {
 		return err
 	}
 	// The network's part runs off the core's queue.
-	be := c.core.Remote
-	err = be.UpdateUser(map[string]any{"display_name": name})
-	ctx, cancel := context.WithTimeout(context.Background(), remoteTimeout)
-	defer cancel()
-	if _, uerr := be.Upsert(ctx, "profiles", map[string]any{"id": be.UserID(), "display_name": name}, ""); err == nil {
-		err = uerr
-	}
-	if err != nil {
-		return errors.New(locales.SettingsNameServerFailed(err.Error()))
-	}
-	return nil
+	return c.core.SendDisplayName()
 }
 
 // remoteTimeout bounds a call to the server from Settings, as the
@@ -366,20 +344,13 @@ type device struct {
 // last first, as a JSON array of device: Account › Devices.
 func (c *Core) Devices() (_ string, err error) {
 	defer catch(&err)
-	ctx, cancel := context.WithTimeout(context.Background(), remoteTimeout)
-	defer cancel()
-	rows, err := c.core.Remote.Select(ctx, "devices", remote.Query{Order: "last_active_at.desc"})
+	ds, err := c.core.Devices()
 	if err != nil {
 		return "", err
 	}
-	me := c.core.Store.DeviceID()
-	out := make([]device, 0, len(rows))
-	for _, d := range rows {
-		id := store.S(d, "id")
-		out = append(out, device{
-			ID: id, Name: store.S(d, "name"), LastActive: millis(store.Time(d["last_active_at"])),
-			This: id == me, Revoked: d["revoked_at"] != nil,
-		})
+	out := make([]device, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, device{ID: d.ID, Name: d.Name, LastActive: millis(d.LastActive), This: d.This, Revoked: d.Revoked})
 	}
 	return encode(out)
 }
@@ -388,18 +359,8 @@ func (c *Core) Devices() (_ string, err error) {
 // out the next time it syncs.
 func (c *Core) SignOutDevice(id string) (err error) {
 	defer catch(&err)
-	ctx, cancel := context.WithTimeout(context.Background(), remoteTimeout)
-	defer cancel()
-	be := c.core.Remote
-	_, err = be.Upsert(ctx, "devices", map[string]any{"id": id, "user_id": be.UserID(), "revoked_at": time.Now().UTC().Format(time.RFC3339)}, "")
-	if err != nil {
-		return errors.New(locales.SettingsDeviceSignOutFailed(err.Error()))
-	}
-	return nil
+	return c.core.SignOutDevice(id)
 }
-
-// deleteTimeout bounds deleting the account on the server.
-const deleteTimeout = 60 * time.Second
 
 // DeleteAccount deletes the account on the server, its space, pages,
 // recordings and keys, then signs out and wipes this device, as the
@@ -411,10 +372,8 @@ func (c *Core) DeleteAccount() (err error) {
 	if !signedIn {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), deleteTimeout)
-	defer cancel()
-	if _, err := c.core.Remote.Invoke(ctx, "account", map[string]any{"action": "delete"}); err != nil {
-		return errors.New(locales.SettingsDeleteAccountFailed(err.Error()))
+	if err := c.core.DeleteAccount(); err != nil {
+		return err
 	}
 	// Nothing of the account is left to keep: the open pages go unsaved.
 	_, err = c.leave(c.core.Store.Wipe, false)

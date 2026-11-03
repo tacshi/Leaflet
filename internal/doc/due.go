@@ -3,6 +3,8 @@ package doc
 import (
 	"slices"
 	"time"
+
+	"leaflet/locales"
 )
 
 // Overdue reports whether a due date has passed: its time when timed, or
@@ -12,6 +14,34 @@ func Overdue(due time.Time, timed bool, now time.Time) bool {
 		return due.Before(now)
 	}
 	return due.Before(time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.Local))
+}
+
+// DueLabel says when a due date is, from now, in the language of m:
+// Today, Tomorrow, Yesterday, or the day, with its year when not this
+// one's, and its time when timed.
+func DueLabel(m locales.Messages, due time.Time, timed bool, now time.Time) string {
+	// The days between are counted on the calendar, in UTC, where each is
+	// 24 hours long: a day that changes the clocks is 23 or 25.
+	day := func(t time.Time) time.Time { return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC) }
+	var label string
+	switch int(day(due).Sub(day(now)).Hours() / 24) {
+	case 0:
+		label = m.CommonToday()
+	case 1:
+		label = m.EditorTomorrow()
+	case -1:
+		label = m.EditorYesterday()
+	default:
+		if due.Year() == now.Year() {
+			label = m.EditorDueDay(due)
+		} else {
+			label = m.EditorDueDate(due)
+		}
+	}
+	if timed {
+		return m.EditorDueAt(label, due)
+	}
+	return label
 }
 
 // DueToday reports whether a due date is on now's day.

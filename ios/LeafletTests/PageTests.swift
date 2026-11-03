@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import LeafletCore
+import LeafletSpeech
 import Testing
 
 @testable import Leaflet
@@ -124,16 +125,18 @@ struct PageTests {
         await model.close()
     }
 
-    /// The byline and the comments say when as the desktop does: just
-    /// now, minutes ago, today or yesterday at a time, or the date, with
-    /// its year when not this one's.
+    /// The byline and the comments say when as the desktop does, as the
+    /// core says it: just now, minutes ago, today or yesterday at a time,
+    /// or the date, with its year when not this one's; no time says
+    /// nothing.
     @Test func timesSayWhenAsTheDesktopDoes() throws {
         var cal = Calendar(identifier: .gregorian)
         cal.timeZone = .current
         let now = try #require(
             cal.date(from: DateComponents(year: 2026, month: 11, day: 3, hour: 15)))
         let ago = { (seconds: TimeInterval) in now.addingTimeInterval(-seconds) }
-        let say = { (t: Date) in Byline.humanTime(t, now: now, calendar: cal) }
+        let say = { (t: Date) in Byline.humanTime(t, now: now) }
+        #expect(say(Date(timeIntervalSince1970: 0)).isEmpty)
         #expect(say(ago(30)) == L.pageTimeJustNow)
         #expect(say(ago(5 * 60)) == L.pageTimeMinutesAgo(count: 5))
         #expect(say(ago(3 * 3600)) == L.pageTimeTodayAt(at: ago(3 * 3600)))
@@ -224,9 +227,9 @@ struct PageTests {
         #expect(!Microphone.hands(rec, from: engine))
     }
 
-    /// A transcription on the device that stops going on is given up, with
-    /// a message, rather than holding the core's thread for good; one that
-    /// goes on, however long, is waited for.
+    /// A transcription on the device that stops going on is given up, as
+    /// stuck, for the core to say so, rather than holding the core's
+    /// thread for good; one that goes on, however long, is waited for.
     @Test func aStuckTranscriptionIsGivenUp() async throws {
         let stuck = await Task.detached {
             do {
@@ -236,21 +239,21 @@ struct PageTests {
                 }
                 return nil as String?
             } catch {
-                return error.localizedDescription
+                return (error as? SpeechFailure)?.code
             }
         }.value
-        #expect(stuck == L.recErrOnDeviceStuck)
+        #expect(stuck == "stuck")
 
-        let json = try await Task.detached {
+        let segments = try await Task.detached {
             let pulse = Pulse()
             return try DeviceTranscriber.wait(pulse, stall: .milliseconds(1500)) {
                 for _ in 0..<5 {
                     try await Task.sleep(for: .milliseconds(600))
                     pulse.beat()
                 }
-                return [Segment(startMs: 0, endMs: 1000, text: "Hello")]
+                return [SpeechSegment(startMs: 0, endMs: 1000, text: "Hello")]
             }
         }.value
-        #expect(json.contains("Hello"))
+        #expect(segments.map(\.text) == ["Hello"])
     }
 }

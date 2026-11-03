@@ -511,6 +511,28 @@ func onlyPlaced(a, b *Node) bool {
 	return ungridded(a) == ungridded(b)
 }
 
+// Lifted is c with the children of each block that can't hold them out
+// right after it, as a merge leaves them: c itself when no block has
+// any, else a copy. An editor that keeps the page as its blocks in order,
+// nested only in the blocks that hold blocks, shows it so.
+func (c *Content) Lifted() *Content {
+	var stranded func(nodes []*Node) bool
+	stranded = func(nodes []*Node) bool {
+		for _, n := range nodes {
+			if !inTable(n) && (!NestableTypes[n.Type] && len(n.Children) > 0 || stranded(n.Children)) {
+				return true
+			}
+		}
+		return false
+	}
+	if !stranded(c.Children) {
+		return c
+	}
+	out := c.Copy()
+	out.Children = liftStranded(out.Children)
+	return out
+}
+
 // liftStranded moves the children of each block that can't hold them out
 // to right after it, in order, and returns the blocks as they are then.
 // A table and its cells keep theirs.

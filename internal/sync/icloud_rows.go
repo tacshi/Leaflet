@@ -7,7 +7,6 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"time"
 
 	"leaflet/internal/icloud"
 	"leaflet/internal/store"
@@ -142,7 +141,7 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 	if _, ok := r["space_id"]; ok {
 		r["space_id"] = s.st.Session().SpaceID
 	}
-	if err := s.putRow(e.Table, r); err != nil {
+	if err := s.putRow(e.Table, r, s.putCloudPage); err != nil {
 		return err
 	}
 	// A change made here meanwhile kept the row from being stored.
@@ -154,75 +153,6 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 		return s.st.SetRowVersion(e.Table, e.ID, v)
 	}
 	return s.setVersion(e.Table, e.ID, newer, v)
-}
-
-// putRow stores a row of another device's.
-func (s *Service) putRow(table string, r map[string]any) error {
-	switch table {
-	case "pages":
-		return s.putCloudPage(r)
-	case "folders":
-		return s.st.PutRemoteFolder(r)
-	case "files":
-		return s.st.PutRemoteFile(r)
-	case "comments":
-		return s.st.PutRemoteComment(r, store.S(r, "author_name"))
-	case "recordings":
-		return s.st.PutRemoteRecording(r)
-	}
-	return nil
-}
-
-// localRow is this device's row as a batch has it, decoded from JSON; ok
-// is false when it has none.
-func (s *Service) localRow(table, id string) (row map[string]any, ok bool, err error) {
-	var at time.Time
-	switch table {
-	case "pages":
-		var p store.Page
-		if p, err = s.st.Page(id); err == nil {
-			row, at = store.PageToRemote(p), p.UpdatedAt
-		}
-	case "folders":
-		var f store.Folder
-		if f, err = s.st.Folder(id); err == nil {
-			row, at = store.FolderToRemote(f), f.UpdatedAt
-		}
-	case "files":
-		var f store.File
-		if f, err = s.st.File(id); err == nil {
-			row, at = store.FileToRemote(f), f.UpdatedAt
-		}
-	case "comments":
-		var c store.Comment
-		if c, err = s.st.Comment(id); err == nil {
-			row, at = store.CommentToRemote(c), c.UpdatedAt
-			row["author_name"] = c.AuthorName
-		}
-	case "recordings":
-		var r store.Recording
-		if r, err = s.st.Recording(id); err == nil {
-			row, at = store.RecordingToRemote(r), r.UpdatedAt
-		}
-	default:
-		return nil, false, nil
-	}
-	if store.IsNotFound(err) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	row["updated_at"] = at.UTC().Format(time.RFC3339Nano)
-	raw, err := json.Marshal(row)
-	if err != nil {
-		return nil, false, err
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, false, err
-	}
-	return out, true, nil
 }
 
 func heldKey(table, id string) string { return heldPrefix + table + "." + id }
@@ -271,7 +201,7 @@ func (s *Service) applyHeld(changed map[string]bool) error {
 		_ = json.Unmarshal([]byte(raw), &held)
 		var err error
 		for _, e := range held {
-			if e.Kind != "row" || e.Table != table || e.ID != id || !syncedRows[table] || e.Row == nil {
+			if e.Kind != "row" || e.Table != table || e.ID != id || !synced(table) || e.Row == nil {
 				continue
 			}
 			applyingHeld(e)

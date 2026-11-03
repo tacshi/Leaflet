@@ -258,6 +258,60 @@ func TestICloudChangesGoColumnByColumn(t *testing.T) {
 	check("Plan B2", "")
 }
 
+// Through iCloud Drive too, a page marked to keep on this device, and
+// every page once all are kept, brings what another device wrote in it
+// while it was not kept; a page still not kept does not come.
+func TestICloudKeptPagesBringWhatChangedMeanwhile(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	settings := a.st.Settings()
+	settings.AllPagesOffline = false
+	if err := a.st.SaveSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for range 3 {
+		p := a.page("Notes", para("x", "x0"))
+		if err := a.st.SetKeepOffline(p.ID, false); err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, p.ID)
+	}
+	syncAll(a, b)
+	for _, id := range ids {
+		b.edit(id, "x", "from B")
+	}
+	syncAll(a, b)
+	texts := func() []string {
+		var out []string
+		for _, id := range ids {
+			out = append(out, a.text(id, "x"))
+		}
+		return out
+	}
+	if got := texts(); !slices.Equal(got, []string{"x0", "x0", "x0"}) {
+		t.Fatalf("pages not kept have %v", got)
+	}
+
+	if err := a.st.SetKeepOffline(ids[0], true); err != nil {
+		t.Fatal(err)
+	}
+	keepContent(t, a.svc, ids[0])
+	a.sync()
+	if got := texts(); !slices.Equal(got, []string{"from B", "x0", "x0"}) {
+		t.Errorf("with the first kept, %v", got)
+	}
+	settings.AllPagesOffline = true
+	if err := a.st.SaveSettings(settings); err != nil {
+		t.Fatal(err)
+	}
+	keepContent(t, a.svc)
+	a.sync()
+	if got := texts(); !slices.Equal(got, []string{"from B", "from B", "from B"}) {
+		t.Errorf("with all kept, %v", got)
+	}
+}
+
 func TestICloudMergesContent(t *testing.T) {
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1033,7 +1087,7 @@ func TestRequeueWaitsForAFileNotDownloaded(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := file()
-	if got.StoragePath != space+"/"+f.ID+"/"+f.Name || !onDevice(got.LocalPath) {
+	if got.StoragePath != space+"/"+f.ID+"/"+f.Name || !store.OnDevice(got.LocalPath) {
 		t.Errorf("file %+v", got)
 	}
 	if !a.st.HasPending("files", f.ID) || !a.st.HasPending("storage", "files/"+f.ID) {
@@ -1086,7 +1140,7 @@ func TestICloudSendingAgainLeavesFilesInTheFolder(t *testing.T) {
 	if len(a.svc.ids(movesKey)) != 0 {
 		t.Errorf("waits for %v", a.svc.ids(movesKey))
 	}
-	if got, _ := a.st.File(f.ID); onDevice(got.LocalPath) {
+	if got, _ := a.st.File(f.ID); store.OnDevice(got.LocalPath) {
 		t.Error("the file came from iCloud Drive to go back there")
 	}
 	b.sync()
@@ -1247,6 +1301,50 @@ func TestICloudDeletedFileLeavesTheFolder(t *testing.T) {
 	}
 	if _, err := os.Stat(copyOnB); !errors.Is(err, os.ErrNotExist) {
 		t.Errorf("B kept its copy: %v", err)
+	}
+}
+
+// A file whose deletion is queued but that lives here again, as when the
+// deletion gave way to another's row, keeps its copy in the folder, as it
+// keeps its object on the server.
+func TestICloudFileThatLivesKeepsItsCopy(t *testing.T) {
+	root := cloudRoot(t)
+	a := newCloudDevice(t, root)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := a.st.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.sync()
+	rel, err := icloud.FileBlobPath(f.ID, f.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := filepath.Join(root, filepath.FromSlash(rel))
+	if _, err := os.Stat(blob); err != nil {
+		t.Fatalf("no copy in the folder: %v", err)
+	}
+	if err := a.st.DeleteFile(f); err != nil {
+		t.Fatal(err)
+	}
+	lives, err := a.st.File(f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lives.DeletedAt = time.Time{}
+	if err := a.st.PutFile(lives); err != nil {
+		t.Fatal(err)
+	}
+
+	a.sync()
+	if _, err := os.Stat(blob); err != nil {
+		t.Errorf("the copy left the folder: %v", err)
+	}
+	if n := a.st.PendingCount(); n != 0 {
+		t.Errorf("%d still waiting", n)
 	}
 }
 
@@ -1476,9 +1574,6 @@ func TestICloudCopiesGoUpAsTheirOwn(t *testing.T) {
 // A copy an earlier version queued, whose file iCloud has not downloaded
 // yet, goes up on a later pass; the rest of the pass goes meanwhile.
 func TestICloudCopyOfAFileNotDownloadedWaits(t *testing.T) {
-	old := uploadFetchWait
-	uploadFetchWait = 50 * time.Millisecond
-	t.Cleanup(func() { uploadFetchWait = old })
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
 	src := filepath.Join(t.TempDir(), "notes.txt")
@@ -1533,9 +1628,6 @@ func TestICloudCopyOfAFileNotDownloadedWaits(t *testing.T) {
 // A file deleted while a copy of it an earlier version queued waits to go
 // up from it stays in the folder until the copy has gone up.
 func TestICloudDeletedFileStaysForACopyThatWaits(t *testing.T) {
-	old := uploadFetchWait
-	uploadFetchWait = 50 * time.Millisecond
-	t.Cleanup(func() { uploadFetchWait = old })
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
 	src := filepath.Join(t.TempDir(), "notes.txt")
@@ -1596,9 +1688,6 @@ func TestICloudDeletedFileStaysForACopyThatWaits(t *testing.T) {
 // it while the file lives, rather than go without it; the copy's row
 // waits with it, as a batch names only what is in the folder.
 func TestICloudCopyWaitsForAnOriginalNotListedYet(t *testing.T) {
-	old := uploadFetchWait
-	uploadFetchWait = 50 * time.Millisecond
-	t.Cleanup(func() { uploadFetchWait = old })
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
 	src := filepath.Join(t.TempDir(), "notes.txt")
@@ -1765,6 +1854,57 @@ func TestICloudHeldEntriesOutlastAStop(t *testing.T) {
 	}
 	if a.svc.held("pages", p.ID) != nil {
 		t.Error("still held once applied")
+	}
+}
+
+// A recording's audio that went through iCloud Drive but is not listed
+// there yet waits to go up to the server until it is, as a file does:
+// queued now, the recording would go up naming audio stored nowhere.
+func TestICloudAudioNotListedYetWaitsToGoUp(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Meeting")
+	wav := filepath.Join(t.TempDir(), "rec.wav")
+	if err := os.WriteFile(wav, []byte("RIFF"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := a.st.CreateRecording(p.ID, "blk", "", "", wav, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec, err = a.st.UpdateRecording(rec.ID, func(r *store.Recording) { r.Status = "ready" }); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.QueueUpload(rec); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	br, err := b.st.Recording(rec.ID)
+	if err != nil || br.AudioPath == "" || store.OnDevice(br.LocalPath) {
+		t.Fatalf("recording on B %+v, %v", br, err)
+	}
+	rel, _ := blobPath("recordings", br.AudioPath)
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	away := filepath.Join(t.TempDir(), "away")
+	if err := os.Rename(path, away); err != nil {
+		t.Fatal(err)
+	}
+	b.svc.SetICloud(false)
+	ctx := context.Background()
+	if err := b.svc.requeueRecording(ctx, br); !errors.Is(err, errNotInICloud) {
+		t.Errorf("queued audio it does not have: %v", err)
+	}
+	if b.st.HasPending("recordings", rec.ID) {
+		t.Error("the recording is queued without its audio")
+	}
+	if err := os.Rename(away, path); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.svc.requeueRecording(ctx, br); err != nil {
+		t.Fatal(err)
+	}
+	if !b.st.HasPending("recordings", rec.ID) || !b.st.HasPending("storage", "recordings/"+rec.ID) {
+		t.Error("the recording is not queued with its audio")
 	}
 }
 

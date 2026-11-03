@@ -20,7 +20,7 @@ struct MoveSheet: View {
                     target(L.dialogMoveTopLevel, systemImage: "doc.text") {
                         await app.move(page, parentID: "", folderID: "")
                     }
-                    ForEach(app.library.sortedFolders) { folder in
+                    ForEach(app.library.folders) { folder in
                         target(folder.name, systemImage: "folder") {
                             await app.move(page, parentID: "", folderID: folder.id)
                         }

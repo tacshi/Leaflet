@@ -4,14 +4,12 @@ package app
 
 import (
 	"context"
-	"errors"
 	"log"
 	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,11 +26,13 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
 	"leaflet/internal/guard"
+	"leaflet/internal/library"
 	"leaflet/internal/live"
 	"leaflet/internal/recording"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
+	"leaflet/internal/templates"
 	"leaflet/internal/theme"
 	"leaflet/internal/web"
 	"leaflet/locales"
@@ -65,13 +65,9 @@ type App struct {
 	early    []func()
 
 	settings store.Settings
-	// sttSent orders the speech settings sent to the server, one at a
-	// time, and sttLatest numbers the last change: a send overtaken by a
-	// later one is left out, so the server ends with the last.
-	sttSent   sync.Mutex
-	sttLatest atomic.Int64
 	// endpointKeyMu orders the endpoint keys kept in the keychain, and
-	// endpointKeys numbers the last typed, as sttSent and sttLatest do.
+	// endpointKeys numbers the last typed: a write overtaken by a later
+	// one is left out, so the keychain ends with the last.
 	endpointKeyMu sync.Mutex
 	endpointKeys  atomic.Int64
 	session       store.Session
@@ -93,6 +89,10 @@ type App struct {
 	folders    []store.Folder
 	files      []store.File
 	providers  []store.Provider
+	// lib is the library as the sidebar arranges it, and libFrom what it
+	// was arranged from (library).
+	lib     *library.Tree
+	libFrom arrangedFrom
 	// editable is canEdit as it was read, by page, until the pages, their
 	// members or the session change: the sidebar asks it of every row as
 	// it draws, and each ask walks the page's parents in the database.
@@ -722,57 +722,41 @@ func (a *App) pageByID(id string) *store.Page {
 	return nil
 }
 
-// children returns the pages under a parent, or the top-level pages of a
-// folder ("" for none) when parent is "": pages of a folder that is gone
-// are at the top level, and those shared with the user among
-// sharedRoots instead.
-func (a *App) children(parent, folder string, top bool) []store.Page {
-	var out []store.Page
-	for _, p := range a.pages {
-		if p.ParentID != parent {
-			continue
-		}
-		if top && a.liveFolder(p.FolderID) != folder {
-			continue
-		}
-		if parent == "" && a.isShared(p) {
-			continue
-		}
-		out = append(out, p)
-	}
-	// Equal keys, from another client or before keys were made apart, go
-	// by ID, as every device sorts them alike.
-	sort.SliceStable(out, func(i, j int) bool {
-		return out[i].SortKey < out[j].SortKey || out[i].SortKey == out[j].SortKey && out[i].ID < out[j].ID
-	})
-	return out
+// arrangedFrom is what the library was arranged from: the pages, the
+// templates and the folders, each as read by its first, which a new read
+// makes another, and the user's space.
+type arrangedFrom struct {
+	pages, templates   *store.Page
+	nPages, nTemplates int
+	folders            *store.Folder
+	nFolders           int
+	space              string
 }
 
-// liveFolder is folder, or "" when no folder of that ID is there, as when
-// another device deleted it.
-func (a *App) liveFolder(folder string) string {
-	if folder == "" || slices.ContainsFunc(a.folders, func(f store.Folder) bool { return f.ID == folder }) {
-		return folder
+// library is the library as the sidebar arranges it (library.Arrange),
+// arranged again once the pages, the templates, the folders or the
+// user's space are others than it was arranged from.
+func (a *App) library() *library.Tree {
+	from := arrangedFrom{firstOf(a.pages), firstOf(a.templates), len(a.pages), len(a.templates), firstOf(a.folders), len(a.folders), a.session.SpaceID}
+	if a.lib == nil || from != a.libFrom {
+		a.lib, a.libFrom = library.Arrange(a.session.SpaceID, slices.Concat(a.pages, a.templates), a.folders), from
 	}
-	return ""
+	return a.lib
+}
+
+// children are the pages under a page, in order.
+func (a *App) children(id string) []store.Page { return a.library().Children[id] }
+
+// firstOf is the first of a list, or nil for none.
+func firstOf[T any](list []T) *T {
+	if len(list) == 0 {
+		return nil
+	}
+	return &list[0]
 }
 
 // isShared reports whether a page belongs to someone else's space.
 func (a *App) isShared(p store.Page) bool { return p.SpaceID != a.session.SpaceID }
-
-// sharedRoots are pages shared with the user whose parent is not.
-func (a *App) sharedRoots() []store.Page {
-	var out []store.Page
-	for _, p := range a.pages {
-		if !a.isShared(p) {
-			continue
-		}
-		if p.ParentID == "" || a.pageByID(p.ParentID) == nil {
-			out = append(out, p)
-		}
-	}
-	return out
-}
 
 // ancestors returns a page's parents, the root first.
 func (a *App) ancestors(id string) []store.Page {
@@ -1157,7 +1141,7 @@ func (a *App) newPage(parent, folder string) {
 
 // newPageFrom creates a page from a template, or blank for nil, and opens
 // it.
-func (a *App) newPageFrom(parent, folder string, t *templateChoice) {
+func (a *App) newPageFrom(parent, folder string, t *templates.Choice) {
 	// A subpage changes its parent, which a page shared to view cannot be.
 	if parent != "" && !a.canEdit(parent) {
 		return
@@ -1197,152 +1181,24 @@ func (a *App) newPageFrom(parent, folder string, t *templateChoice) {
 // shows in the page it is inside. A copy goes after the link to the page
 // it copies, after, when parent has one.
 func (a *App) linkSubpage(parent, id, after string) {
-	a.linkSubpageAt(parent, id, func(c *doc.Content) doc.Position {
-		at := doc.Position{At: "end"}
-		c.Walk(func(n, _ *doc.Node) {
-			if after != "" && n.Type == "subpage" && n.Str("page_id") == after {
-				at = doc.Position{After: n.ID}
-			}
-		})
-		return at
-	})
-}
-
-// linkSubpageAt puts a link to subpage id in page parent where at says,
-// or at its end when that place is gone.
-func (a *App) linkSubpageAt(parent, id string, at func(c *doc.Content) doc.Position) {
-	link := doc.SubpageNode(id)
-	insert := func(c *doc.Content) {
-		if c.Insert(at(c), link) != nil {
-			_ = c.Insert(doc.Position{At: "end"}, link)
-		}
-	}
-	if ed := a.openEditor(parent); ed != nil {
-		a.changeOpen(ed, insert)
-		return
-	}
-	err := a.saveStored(parent, func(c *doc.Content) *doc.Content {
-		if c == nil {
-			c = doc.Empty()
-		}
-		insert(c)
-		return c
-	})
-	if err != nil {
+	if err := a.pageCore().LinkSubpage(parent, id, after); err != nil {
 		a.toast(locales.AppErrorLinkSubpage(err.Error()))
 	}
 }
 
-// saveStored changes the stored content of a page the editor does not
-// have open: edit is given it (nil when this device has none) and returns
-// it changed, or nil to leave it. The save goes only over what edit was
-// given, so content synced in between is not written over: edit runs
-// again on that.
-func (a *App) saveStored(pageID string, edit func(c *doc.Content) *doc.Content) error {
-	err := store.ErrContentChanged
-	for range 5 {
-		var over string
-		var c *doc.Content
-		row, rowErr := a.st.ContentRow(pageID)
-		switch {
-		case rowErr == nil:
-			// Content that can't be read is left alone, not saved over.
-			if c, err = doc.Decode(row.Content); err != nil {
-				return err
-			}
-			over = row.Content
-		case !store.IsNotFound(rowErr):
-			return rowErr
-		}
-		if c = edit(c); c == nil {
-			return nil
-		}
-		_, _, err = a.st.SaveContentOver(pageID, over, c)
-		if !errors.Is(err, store.ErrContentChanged) {
-			return err
-		}
-	}
-	return err
-}
-
-// unlinkSubpage takes the links to subpage id out of page parent, as when
-// the subpage moves out of it.
-func (a *App) unlinkSubpage(parent, id string) {
-	remove := func(c *doc.Content) {
-		var links []string
-		c.Walk(func(n, _ *doc.Node) {
-			if n.Type == "subpage" && n.Str("page_id") == id {
-				links = append(links, n.ID)
-			}
-		})
-		for _, l := range links {
-			c.Remove(l)
-		}
-		// A page whose only block was the link keeps one to type in.
-		if len(c.Children) == 0 {
-			c.Children = doc.Empty().Children
-		}
-	}
-	if ed := a.openEditor(parent); ed != nil {
-		a.changeOpen(ed, remove)
-		return
-	}
-	err := a.saveStored(parent, func(c *doc.Content) *doc.Content {
-		if c != nil {
-			remove(c)
-		}
-		return c
-	})
-	if err != nil {
-		a.toast(locales.AppErrorUnlinkSubpage(err.Error()))
-	}
-}
-
-// changeOpen makes a change to the open page's content, ed's, as one from
-// outside the editor, not as an undo step, and saves it. A subpage's link
+// pageCore is the core as it changes pages: the open page through its
+// editor, as a change from outside it, not an undo step. A subpage's link
 // comes and goes as the subpage moves, is deleted or comes back: undoing
 // in the page would take a link from a page still inside, or bring back
 // one to a page gone or elsewhere, apart from the toast's Undo.
-func (a *App) changeOpen(ed *editor.Editor, change func(c *doc.Content)) {
-	c := ed.Content.Copy()
-	change(c)
-	ed.Replace(c)
-	a.page.live.Changed()
-	a.savePage()
+func (a *App) pageCore() core.Pages {
+	return core.Pages{Core: a.core(), Open: a.openLive, Notify: a.toast}
 }
 
-// hasSubpageLink reports whether page parent links to subpage id.
-func (a *App) hasSubpageLink(parent, id string) bool {
-	c := a.st.Content(parent)
-	if ed := a.openEditor(parent); ed != nil {
-		c = ed.Content
-	}
-	found := false
-	if c != nil {
-		c.Walk(func(n, _ *doc.Node) { found = found || n.Type == "subpage" && n.Str("page_id") == id })
-	}
-	return found
-}
-
-// movePage moves page id under page parent, or to the top level, by
-// move, and keeps the links to it in step: a page it leaves loses its
-// link, and a page it goes into links to it at its end.
-func (a *App) movePage(id, parent string, move func() error) error {
-	old := ""
-	if p := a.pageByID(id); p != nil {
-		old = p.ParentID
-	}
-	if err := move(); err != nil {
-		return err
-	}
-	if old == parent {
-		return nil
-	}
-	if old != "" && a.canEdit(old) {
-		a.unlinkSubpage(old, id)
-	}
-	if parent != "" && a.canEdit(parent) && !a.hasSubpageLink(parent, id) {
-		a.linkSubpage(parent, id, "")
+// openLive returns page id's live page while it is open.
+func (a *App) openLive(id string) *live.Page {
+	if a.page != nil && a.page.id == id {
+		return a.page.live
 	}
 	return nil
 }
@@ -1367,28 +1223,10 @@ func (a *App) deletePage(id string) {
 	if a.page != nil && a.isUnder(a.page.id, id) && !a.flush() {
 		return
 	}
-	// Its link leaves the page it is in, rather than staying to say the
-	// page is gone; Undo puts it back where it was.
-	parent, at := "", doc.Position{At: "end"}
-	if p := a.pageByID(id); p != nil && p.ParentID != "" && a.canEdit(p.ParentID) {
-		parent = p.ParentID
-		c := a.st.Content(parent)
-		if ed := a.openEditor(parent); ed != nil {
-			c = ed.Content
-		}
-		if c != nil {
-			if place, ok := c.SubpagePlace(id); ok {
-				at = place
-			}
-		}
-	}
-	ids, err := a.st.DeletePage(id)
+	ids, card, err := a.pageCore().DeletePage(id)
 	if err != nil {
 		a.toast(locales.AppErrorDelete(err.Error()))
 		return
-	}
-	if parent != "" {
-		a.unlinkSubpage(parent, id)
 	}
 	a.pages, _ = a.st.Pages()
 	if a.route.Kind == "page" {
@@ -1400,14 +1238,11 @@ func (a *App) deletePage(id string) {
 		}
 	}
 	a.toastAction(locales.AppDeleted(title), locales.CommonUndo(), func() {
-		if err := a.st.RestorePages(ids); err != nil {
+		if err := a.pageCore().RestorePages(ids, card); err != nil {
 			a.toast(locales.AppErrorRestore(err.Error()))
 			return
 		}
 		a.pages, _ = a.st.Pages()
-		if parent != "" && a.pageByID(parent) != nil && !a.hasSubpageLink(parent, id) {
-			a.linkSubpageAt(parent, id, func(*doc.Content) doc.Position { return at })
-		}
 	})
 }
 

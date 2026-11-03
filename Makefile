@@ -38,19 +38,21 @@ check:
 # The Swift counterparts of check's tools: swift-format for gofmt, SwiftLint
 # for golangci-lint, osv-scanner on the Swift packages ios/Package.resolved
 # pins for govulncheck, and mobsfscan, which runs its rules with semgrep,
-# for gosec. ios/ holds their settings; what ios/gen writes is left out.
+# for gosec. ios/ holds their settings, for speech/ too, the package the
+# app shares with the Mac's speech helper; what ios/gen writes is left out.
 # The packages resolve only to the versions pinned, failing otherwise.
 ios-check: ios-project
 	@for tool in swiftlint osv-scanner mobsfscan semgrep; do \
 		command -v $$tool >/dev/null || { echo "ios-check needs $$tool on PATH" >&2; exit 1; }; \
 	done
-	cd ios && find Leaflet LeafletTests -name '*.swift' -not -path '*/Generated/*' -print0 | \
-		xargs -0 xcrun swift-format lint --strict
+	cd ios && find Leaflet LeafletTests ../speech -name '*.swift' -not -path '*/Generated/*' \
+		-not -path '../speech/.build/*' -print0 | \
+		xargs -0 xcrun swift-format lint --strict --configuration .swift-format
 	cd ios && swiftlint lint --strict --quiet
 	xcodebuild -resolvePackageDependencies -quiet -onlyUsePackageVersionsFromResolvedFile \
 		-project ios/Leaflet.xcodeproj -scheme Leaflet
 	osv-scanner scan source -L ios/Package.resolved
-	cd ios && mobsfscan -w -c .mobsf Leaflet LeafletTests
+	cd ios && mobsfscan -w -c .mobsf Leaflet LeafletTests ../speech
 
 clean:
 	@case "$(strip $(BUILD_DIR))" in \

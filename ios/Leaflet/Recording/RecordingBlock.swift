@@ -118,10 +118,12 @@ struct RecordingBlock: View {
         let run: @MainActor () -> Void
     }
 
-    /// actions are what the block of recording id offers now, for VoiceOver
+    /// actions are what block, of recording id, offers now, for VoiceOver
     /// at the caret, which can't reach the block in the text: Play or
     /// Pause, and its menu's items.
-    static func actions(_ id: String, canEdit: Bool, editor: EditorController?) -> [Action] {
+    static func actions(_ id: String, block: String, canEdit: Bool, editor: EditorController?)
+        -> [Action]
+    {
         let recorder = Recorder.shared
         let state = recorder.state
         guard let row = recorder.rows[id], !(state.recording && state.id == id),
@@ -132,13 +134,14 @@ struct RecordingBlock: View {
             let playing = recorder.playing == id && recorder.player?.isPlaying == true
             out.append(Action(title: playing ? L.commonPause : L.recPlay) { recorder.play(id) })
         }
-        return out + menuItems(id, row, canEdit: canEdit, editor: editor).filter(\.enabled)
+        return out
+            + menuItems(id, block: block, row, canEdit: canEdit, editor: editor).filter(\.enabled)
     }
 
-    /// menuItems are the items of the block's menu, for recording id, in
+    /// menuItems are the items of the menu of block, of recording id, in
     /// editor's page.
     private static func menuItems(
-        _ id: String, _ row: RecordingRow, canEdit: Bool, editor: EditorController?
+        _ id: String, block: String, _ row: RecordingRow, canEdit: Bool, editor: EditorController?
     ) -> [Action] {
         let recorder = Recorder.shared
         let empty = row.transcript.isEmpty
@@ -148,7 +151,7 @@ struct RecordingBlock: View {
             },
             Action(title: L.recInsertTranscript, symbol: "text.insert", enabled: !empty && canEdit)
             {
-                recorder.insertTranscript(id, into: editor)
+                recorder.insertTranscript(id, after: block, into: editor)
             },
             // Not while a transcription runs, which the new one would race.
             Action(
@@ -185,7 +188,10 @@ struct RecordingBlock: View {
     private func menu(_ recorder: Recorder, _ row: RecordingRow) -> some View {
         let palette = BlockLook.palette
         return Menu {
-            ForEach(Self.menuItems(id, row, canEdit: canEdit, editor: editor), id: \.title) {
+            ForEach(
+                Self.menuItems(id, block: node.id, row, canEdit: canEdit, editor: editor),
+                id: \.title
+            ) {
                 item in
                 Button(item.title, systemImage: item.symbol, action: item.run)
                     .disabled(!item.enabled)

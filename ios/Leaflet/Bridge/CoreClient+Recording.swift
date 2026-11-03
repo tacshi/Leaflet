@@ -89,9 +89,8 @@ struct RecordingRow: Codable, Equatable, Sendable {
 }
 
 /// Transcript is a recording's transcript as blocks, a paragraph a line,
-/// and the block they go after, the recording's.
+/// to put after the recording's block it was asked from.
 struct Transcript: Decodable, Sendable {
-    var after: String
     var blocks: [DocNode]
 }
 

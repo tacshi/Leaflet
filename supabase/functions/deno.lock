@@ -3,6 +3,7 @@
   "specifiers": {
     "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/internal@^1.0.12": "1.0.14",
+    "jsr:@std/random@0.1.5": "0.1.5",
     "jsr:@supabase/supabase-js@2.118.0": "2.118.0",
     "npm:@supabase/auth-js@2.118.0": "2.118.0",
     "npm:@supabase/functions-js@2.118.0": "2.118.0",
@@ -19,6 +20,9 @@
     },
     "@std/internal@1.0.14": {
       "integrity": "291516b3d4c35024d6ffbc0a9df5bf4c64116e05b50012cf846710152d2ffdf7"
+    },
+    "@std/random@0.1.5": {
+      "integrity": "d26614c4f6c441afc22397a1c5b8f27d02ab8f5572f1d29e7b0cd57f3d548235"
     },
     "@supabase/supabase-js@2.118.0": {
       "integrity": "42009f9d5b35997f35bba560d509f42608057cae647bd5a25b9b4a06ec3ffad0",

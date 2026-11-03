@@ -110,7 +110,7 @@ itself.
 
 - macOS 12 or later, on Apple silicon or Intel; or Windows on x64 or arm64.
 - To build from source: Go 1.27.3 or later; the Go code needs no cgo or C
-  compiler. The Mac app's on-device speech helper ([`macos/speech`](macos/speech))
+  compiler. The Mac app's on-device speech helper ([`speech`](speech))
   is Swift, which `scripts/build-speech.sh` builds with Xcode 26 or later
   (the macOS 26 SDK): debug builds go on without it where Xcode can't build
   it, and release builds need it, as they need Xcode to sign and notarize.
@@ -309,7 +309,7 @@ rules.
 | `internal/agents` | The OpenAI-compatible client, presets, prompt, page tools, loop and hub |
 | `internal/mcp` | `leaflet mcp`: the page tools for agents outside the app |
 | `internal/recording` | Capture, WAV, Soniox streaming and endpoint transcription |
-| `internal/macspeech`, `macos/speech` | Transcription with the Mac's own speech recognition, through `leaflet-speech`, a Swift helper the Mac app ships |
+| `internal/macspeech`, `speech` | Transcription with the device's own speech recognition: `speech`, a Swift package the iOS app and `leaflet-speech`, the helper the Mac app ships, are built with |
 | `internal/theme` | Colors, fonts and icons |
 | `locales` | The app's texts in each language, and the Go code generated from them |
 | `scripts` | Debug and release builds, publishing to GitHub Releases, and the migrations' check |

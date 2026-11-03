@@ -19,6 +19,7 @@ import (
 	"github.com/coder/websocket"
 
 	"leaflet/internal/agents/endpoint"
+	"leaflet/internal/doc"
 	"leaflet/internal/guard"
 	"leaflet/internal/keychain"
 	"leaflet/internal/store"
@@ -108,9 +109,7 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reade
 	var segs []store.Segment
 	for _, s := range out.Segments {
 		seg := store.Segment{StartMs: int(s.Start * 1000), EndMs: int(s.End * 1000), Text: strings.TrimSpace(s.Text)}
-		if s.Speaker != nil {
-			seg.Speaker = fmt.Sprint(s.Speaker)
-		}
+		seg.Speaker = doc.JSONText(s.Speaker)
 		segs = append(segs, seg)
 	}
 	if len(segs) == 0 && strings.TrimSpace(out.Text) != "" {
@@ -550,10 +549,8 @@ func TokensToSegments(tokens []Token) []store.Segment {
 		if e < s {
 			e = s
 		}
-		who := ""
-		if t.Speaker != nil {
-			who = fmt.Sprint(t.Speaker)
-		}
+		// As the server writes it, a number too.
+		who := doc.JSONText(t.Speaker)
 		// Punctuation that comes late ends the words before it rather
 		// than starting a line of its own.
 		if isPunct(t.Text) {

@@ -1230,6 +1230,33 @@ func TestSaveContentOverNone(t *testing.T) {
 	}
 }
 
+// Recording what the server stored tells the app of the page's content
+// only when it changed it, as the other stores of synced content do.
+func TestPushedContentTellsOfAChange(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var told []string
+	s.Subscribe(func(c Change) { told = append(told, c.Table+" "+c.PageID) })
+	row, _ := s.ContentRow(p.ID)
+	if err := s.PushedContent(p.ID, row.Content, row.Content, row.PlainText, row.Content, time.Now(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if len(told) != 0 {
+		t.Errorf("told of %v for the same content", told)
+	}
+	merged := doc.MustDecode(row.Content)
+	merged.Children[0].SetDelta(doc.Delta{{Text: "Merged"}})
+	if err := s.PushedContent(p.ID, row.Content, merged.Encode(), merged.PlainText(), merged.Encode(), time.Now(), 2); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(told, []string{"page_contents " + p.ID}) {
+		t.Errorf("told of %v", told)
+	}
+}
+
 // writeDB makes a database at path with the statements, as an earlier
 // version of Leaflet would have.
 func writeDB(t *testing.T, path string, stmts ...string) {
@@ -2274,9 +2301,12 @@ func TestRenameAndDeleteTags(t *testing.T) {
 	a, _ := s.CreatePage(NewPageOptions{Title: "A", Tags: []string{"work", "draft"}})
 	b, _ := s.CreatePage(NewPageOptions{Title: "B", Tags: []string{"Work", "done"}})
 	_, _ = s.CreatePage(NewPageOptions{Title: "T", Template: true, Tags: []string{"template-only"}})
-	tags, _ := s.Tags()
-	if want := []TagCount{{"done", 1}, {"draft", 1}, {"work", 2}}; !slices.Equal(tags, want) {
-		t.Errorf("tags %+v, want %+v", tags, want)
+	tags := func() []TagCount {
+		pages, _ := s.Pages()
+		return TagsOf(pages)
+	}
+	if want := []TagCount{{"done", 1}, {"draft", 1}, {"work", 2}}; !slices.Equal(tags(), want) {
+		t.Errorf("tags %+v, want %+v", tags(), want)
 	}
 	if before, err := s.RenameTag("draft", "done"); err != nil || len(before) != 1 || !slices.Equal(before[a.ID], []string{"work", "draft"}) {
 		t.Fatalf("renamed %v, %v", before, err)
@@ -2293,8 +2323,8 @@ func TestRenameAndDeleteTags(t *testing.T) {
 	if before, err := s.DeleteTag("WORK"); err != nil || len(before) != 2 {
 		t.Fatalf("deleted %v, %v", before, err)
 	}
-	if tags, _ := s.Tags(); len(tags) != 0 {
-		t.Errorf("left %+v", tags)
+	if left := tags(); len(left) != 0 {
+		t.Errorf("left %+v", left)
 	}
 }
 

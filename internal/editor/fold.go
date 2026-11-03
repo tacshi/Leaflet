@@ -6,6 +6,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/rules"
 	"leaflet/internal/theme"
 	"leaflet/locales"
 )
@@ -22,30 +23,30 @@ func headingLevel(n *doc.Node) int { return n.Int("level", 1) }
 // ends reports whether block n ends the section of heading h.
 func ends(n, h *doc.Node) bool { return n.Type == "heading" && headingLevel(n) <= headingLevel(h) }
 
-// hidden returns the blocks folded headings hide; the blocks under them
-// are hidden with them, and not listed.
+// hidden returns the blocks folds hide (rules.Hidden): those in a closed
+// toggle, and in the section of a folded heading, with the blocks under
+// them.
 func (e *Editor) hidden() map[string]bool {
-	out := map[string]bool{}
-	var visit func(nodes []*doc.Node)
-	visit = func(nodes []*doc.Node) {
-		var by *doc.Node
-		for _, n := range nodes {
-			if by != nil && ends(n, by) {
-				by = nil
-			}
-			if by != nil {
-				out[n.ID] = true
-				continue
-			}
-			if foldedHeading(n) {
-				by = n
-			}
-			if n.Type != "table" && !collapsed(n) {
-				visit(n.Children)
+	var nodes []*doc.Node
+	var folds []rules.Fold
+	var visit func(nodes []*doc.Node, depth int)
+	visit = func(ns []*doc.Node, depth int) {
+		for _, n := range ns {
+			nodes = append(nodes, n)
+			folds = append(folds, rules.Fold{Type: n.Type, Depth: depth, Level: headingLevel(n), Collapsed: n.Bool("collapsed")})
+			// A table's cells are the table's.
+			if n.Type != "table" {
+				visit(n.Children, depth+1)
 			}
 		}
 	}
-	visit(e.Content.Children)
+	visit(e.Content.Children, 0)
+	out := map[string]bool{}
+	for i, h := range rules.Hidden(folds) {
+		if h {
+			out[nodes[i].ID] = true
+		}
+	}
 	return out
 }
 

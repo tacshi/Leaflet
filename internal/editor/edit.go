@@ -9,6 +9,7 @@ import (
 	"github.com/go-text/typesetting/segmenter"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/rules"
 	"leaflet/internal/shortcut"
 )
 
@@ -289,13 +290,27 @@ func (e *Editor) inlineShortcut(n *doc.Node) {
 	e.typing.Bold, e.typing.Italic, e.typing.Code, e.typing.Strike = false, false, false, false
 }
 
-// continues is the type a new block after n takes on Enter.
-func continues(n *doc.Node) string {
-	switch n.Type {
-	case "bulleted_list", "numbered_list", "todo_list", "toggle_list":
-		return n.Type
+// ruleBlock is block n as the editing rules know it.
+func (e *Editor) ruleBlock(n *doc.Node) rules.Block {
+	b := rules.Block{
+		Type:      n.Type,
+		Collapsed: (n.Type == "toggle_list" || n.Type == "heading") && n.Bool("collapsed"),
+		Empty:     n.IsText() && n.Delta().Len() == 0,
+		Holds:     len(n.Children) > 0,
 	}
-	return "paragraph"
+	if loc := e.Content.Locate(n.ID); loc != nil && loc.Parent != nil && loc.Parent.Type != "table/cell" {
+		b.Nested, b.Last = true, loc.Index == len(loc.Siblings)-1
+	}
+	return b
+}
+
+// newLine is the new block Enter makes, as line says, with text d.
+func newLine(line rules.Line, d doc.Delta) *doc.Node {
+	p := newText(line.Type, d)
+	for k, v := range line.Data {
+		p.Set(k, v)
+	}
+	return p
 }
 
 // Enter splits the block at the caret.
@@ -310,38 +325,31 @@ func (e *Editor) Enter() {
 	if n == nil {
 		return
 	}
-	if !n.IsText() {
-		p := newText("paragraph", nil)
-		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
-		e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
-		e.changed()
-		return
-	}
-	if n.Type == "code" {
-		e.codeEnter(n)
-		return
-	}
+	// A paragraph of a Markdown fence becomes its block first.
 	if e.fenceEnter(n) {
 		return
 	}
 	d := n.Delta()
-	// Enter in an empty list item, quote or callout ends it: a nested
-	// item goes up a level, anything else becomes a paragraph where it is.
-	// An empty paragraph last in a toggle leaves it, for the line after.
-	if d.Len() == 0 && (n.Type != "paragraph" && n.Type != "heading" || e.lastNested(n)) {
-		e.unstyle(n)
+	off := e.focus.Off
+	line := rules.Enter(e.ruleBlock(n), off == 0)
+	switch line.Action {
+	case rules.LineAfter:
+		p := newLine(line, nil)
+		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
+		e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
+		e.changed()
+		return
+	case rules.CodeLine:
+		e.codeEnter(n)
+		return
+	case rules.Outdent, rules.Plain:
+		e.unstyle(n, line.Action)
 		e.invalidate(n.ID)
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
 		e.changed()
 		return
-	}
-	off := e.focus.Off
-	if off == 0 && d.Len() > 0 {
-		// At the start, a new empty block goes before.
-		p := newText(continues(n), nil)
-		if p.Type == "todo_list" {
-			p.Set("checked", false)
-		}
+	case rules.LineBefore:
+		p := newLine(line, nil)
 		_ = e.Content.Insert(doc.Position{Before: n.ID}, p)
 		// Before a heading that ends a folded section, the new line
 		// would join it, out of sight.
@@ -350,29 +358,12 @@ func (e *Editor) Enter() {
 		e.changed()
 		return
 	}
-	head, tail := d.Slice(0, off), d.Slice(off, d.Len())
-	if n.Type == "toggle_list" && !collapsed(n) {
-		// In an open toggle, the new line is its first child.
-		n.SetDelta(head)
-		p := newText("paragraph", tail)
-		n.Children = append([]*doc.Node{p}, n.Children...)
-		e.invalidate(n.ID)
-		e.Select(Pos{p.ID, 0}, Pos{p.ID, 0})
-		e.changed()
-		return
-	}
-	n.SetDelta(head)
-	p := newText(continues(n), tail)
-	if p.Type == "todo_list" {
-		p.Set("checked", false)
-	}
-	if nestable(n) && len(n.Children) > 0 && !collapsed(n) {
-		// The new item comes first among the children.
+	n.SetDelta(d.Slice(0, off))
+	p := newLine(line, d.Slice(off, d.Len()))
+	if line.Action == rules.SplitInside {
 		n.Children = append([]*doc.Node{p}, n.Children...)
 	} else {
-		// A new line after a folded heading starts its section, which
-		// shows.
-		if foldedHeading(n) {
+		if line.Unfold {
 			n.Set("collapsed", false)
 		}
 		_ = e.Content.Insert(doc.Position{After: n.ID}, p)
@@ -384,17 +375,6 @@ func (e *Editor) Enter() {
 
 // nestable reports whether a block takes children.
 func nestable(n *doc.Node) bool { return doc.NestableTypes[n.Type] }
-
-// lastNested reports whether block n is a paragraph in another, as in a
-// toggle, after all else in it: going out of it, after it, it leaves the
-// order of the page as it reads.
-func (e *Editor) lastNested(n *doc.Node) bool {
-	if n.Type != "paragraph" {
-		return false
-	}
-	loc := e.Content.Locate(n.ID)
-	return loc != nil && loc.Parent != nil && loc.Parent.Type != "table/cell" && loc.Index == len(loc.Siblings)-1
-}
 
 // SoftBreak inserts a line break within the block; on a block selected
 // whole, which has no line to break, it does nothing.
@@ -455,26 +435,29 @@ func (e *Editor) Backspace(word bool) {
 	// nothing, is no step of undo. A paragraph last in a toggle goes out
 	// of it, as a nested list item goes up a level.
 	e.coalescing = false
-	if n.Type != "paragraph" || e.lastNested(n) {
+	us := e.units()
+	i := e.index(n.ID)
+	var prev *doc.Node
+	var before rules.Block
+	if i > 0 {
+		prev = us[i-1]
+		before = rules.Block{Type: prev.Type}
+	}
+	switch action := rules.Backspace(e.ruleBlock(n), before, prev != nil); action {
+	case rules.Outdent, rules.Plain:
 		e.pushUndo(false)
-		e.unstyle(n)
+		e.unstyle(n, action)
 		e.invalidate(n.ID)
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
 		e.changed()
 		return
-	}
-	us := e.units()
-	i := e.index(n.ID)
-	if i <= 0 {
+	case rules.Nothing:
 		return
-	}
-	prev := us[i-1]
-	if !prev.IsText() {
-		if n.Delta().Len() > 0 {
-			e.Select(Pos{prev.ID, 0}, Pos{prev.ID, 0})
-			e.services.Invalidate()
-			return
-		}
+	case rules.SelectBefore:
+		e.Select(Pos{prev.ID, 0}, Pos{prev.ID, 0})
+		e.services.Invalidate()
+		return
+	case rules.Remove:
 		e.pushUndo(false)
 		e.liftChildren(n)
 		e.Content.Remove(n.ID)
@@ -530,7 +513,7 @@ func (e *Editor) Delete(word bool) {
 		return
 	}
 	next := us[i+1]
-	if !next.IsText() {
+	if rules.Delete(rules.Block{Type: n.Type}, rules.Block{Type: next.Type}) == rules.SelectAfter {
 		// Onto a block selected whole: no step of undo.
 		e.BreakUndo()
 		e.Select(Pos{next.ID, 0}, Pos{next.ID, 0})
@@ -565,12 +548,11 @@ func (e *Editor) keepShown(id string) {
 	}
 }
 
-// unstyle is Backspace at the start of a block other than a paragraph,
-// and Enter in an empty one: a nested list item goes up a level, as does
-// a paragraph last in what it is in, and any other block becomes a
-// paragraph where it is.
-func (e *Editor) unstyle(n *doc.Node) {
-	if loc := e.Content.Locate(n.ID); loc != nil && loc.Parent != nil && (nestable(n) || e.lastNested(n)) {
+// unstyle ends block n as action, rules.Unstyle's, says, as Backspace at
+// its start and Enter in it empty do: it goes up a level (Outdent), or
+// becomes a paragraph where it is (Plain).
+func (e *Editor) unstyle(n *doc.Node, action rules.Action) {
+	if action == rules.Outdent {
 		e.outdent(n)
 	} else {
 		e.toParagraph(n)
@@ -659,7 +641,7 @@ func (e *Editor) Indent() {
 // can't: list items nest in list items, and any text in a toggle, but not
 // in a block a folded heading hides (hid), where it would be hidden too.
 func (e *Editor) indentUnder(n *doc.Node, hid map[string]bool) *doc.Node {
-	if n == nil || !n.IsText() {
+	if n == nil {
 		return nil
 	}
 	loc := e.Content.Locate(n.ID)
@@ -667,7 +649,7 @@ func (e *Editor) indentUnder(n *doc.Node, hid map[string]bool) *doc.Node {
 		return nil
 	}
 	prev := loc.Siblings[loc.Index-1]
-	if hid[prev.ID] || !nestable(prev) || !nestable(n) && prev.Type != "toggle_list" {
+	if hid[prev.ID] || !rules.Nests(n.Type, prev.Type) {
 		return nil
 	}
 	return prev

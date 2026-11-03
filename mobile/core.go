@@ -54,12 +54,16 @@ type Core struct {
 	cancels   map[int64]context.CancelFunc
 	cancelled map[int64]bool
 	// linkAsked are the links whose pages were asked for their link
-	// cards' info this run; touched only on q.
+	// cards' info this run, but for those that could not be read a while
+	// ago (fillLinks); touched only on q.
 	linkAsked map[string]bool
 	// settled are the runs whose Undo no longer shows, by page, as a
 	// version restored since put the page back to before or after them,
 	// until the page's runs change again; touched only on q.
 	settled map[string]string
+	// copying is set while a copy of pages is made (copyOf), one at a
+	// time.
+	copying atomic.Bool
 }
 
 // config is how the app opens the core, as JSON.

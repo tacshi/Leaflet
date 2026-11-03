@@ -6,13 +6,10 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
-	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
 )
-
-func remoteQuery(order string) remote.Query { return remote.Query{Order: order} }
 
 type signInState struct {
 	// email, code and sent are the email-code form of a server the build

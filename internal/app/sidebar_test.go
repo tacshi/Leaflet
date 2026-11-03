@@ -18,6 +18,20 @@ import (
 	"leaflet/locales"
 )
 
+// hasSubpageLink reports whether page parent links to subpage id, as the
+// open page shows it or as stored.
+func (a *App) hasSubpageLink(parent, id string) bool {
+	c := a.st.Content(parent)
+	if ed := a.openEditor(parent); ed != nil {
+		c = ed.Content
+	}
+	if c == nil {
+		return false
+	}
+	_, ok := c.SubpagePlace(id)
+	return ok
+}
+
 // The sidebar's tree is MyGo's Outline: choosing a page opens it and is
 // its row chosen, choosing a folder opens it to its pages, and a page
 // opened shows the pages above it opened.
@@ -84,7 +98,7 @@ func TestSidebarDragPages(t *testing.T) {
 	}, 260, 600)
 	tt.Frame()
 	order := func() (out []string) {
-		for _, p := range a.children("", "", true) {
+		for _, p := range a.library().Top {
 			out = append(out, p.Title)
 		}
 		return out
@@ -134,7 +148,7 @@ func TestSidebarDragPages(t *testing.T) {
 		t.Fatalf("Beta moved under %q", p.ParentID)
 	}
 	// Alpha back to the top level, by Move to…: Beta's link goes.
-	if err := a.movePage(ids[0], "", func() error { return a.st.MovePage(ids[0], "", "", "") }); err != nil {
+	if err := a.pageCore().MovePage(ids[0], "", func() error { return a.st.MovePage(ids[0], "", "", "") }); err != nil {
 		t.Fatal(err)
 	}
 	if a.hasSubpageLink(ids[1], ids[0]) {
@@ -188,7 +202,7 @@ func TestSidebarDragOut(t *testing.T) {
 		t.Fatalf("Reversi is under %q", p.ParentID)
 	}
 	var top []string
-	for _, p := range a.children("", "", true) {
+	for _, p := range a.library().Top {
 		top = append(top, p.Title)
 	}
 	if fmt.Sprint(top) != "[Welcome Reversi]" {
@@ -646,7 +660,7 @@ func TestSharedPageListedOnce(t *testing.T) {
 	a := templatesApp(t)
 	a.settings.SidebarOpen = true
 	theirs, _ := sharedTree(t, a)
-	for _, p := range a.children("", "", true) {
+	for _, p := range a.library().Top {
 		if p.ID == theirs {
 			t.Errorf("a shared page is among the user's own")
 		}
@@ -700,7 +714,7 @@ func TestPagesOfAGoneFolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.reloadAll()
-	if top := a.children("", "", true); len(top) == 0 || !slices.ContainsFunc(top, func(x store.Page) bool { return x.ID == p.ID }) {
+	if top := a.library().Top; len(top) == 0 || !slices.ContainsFunc(top, func(x store.Page) bool { return x.ID == p.ID }) {
 		t.Fatalf("top level %+v", top)
 	}
 	if !a.lastSibling(a.pageByID(p.ID), "") {
@@ -859,7 +873,7 @@ func TestSubpageLinkIsNoUndoStep(t *testing.T) {
 	ed := a.page.editor
 	// An edit of the user's before, for undoing to go back past.
 	ed.Edit(func(c *doc.Content) { c.Children[0].SetDelta(doc.FromMarkdown("Plans for May")) })
-	if err := a.movePage(packing.ID, trip.ID, func() error { return a.st.MovePage(packing.ID, trip.ID, "", "") }); err != nil {
+	if err := a.pageCore().MovePage(packing.ID, trip.ID, func() error { return a.st.MovePage(packing.ID, trip.ID, "", "") }); err != nil {
 		t.Fatal(err)
 	}
 	if !a.hasSubpageLink(trip.ID, packing.ID) {
@@ -875,33 +889,6 @@ func TestSubpageLinkIsNoUndoStep(t *testing.T) {
 	a.savePage()
 	if !slices.ContainsFunc(a.st.Content(trip.ID).Children, func(n *doc.Node) bool { return n.Str("page_id") == packing.ID }) {
 		t.Error("the link isn't stored")
-	}
-}
-
-// A link put back where it was goes at the end of the page when that
-// place has gone meanwhile, open or not.
-func TestSubpageLinkAtAPlaceGone(t *testing.T) {
-	a := templatesApp(t)
-	trip, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip", Content: doc.FromBlocks([]*doc.Node{textNode("Plans")})})
-	packing, _ := a.st.CreatePage(store.NewPageOptions{Title: "Packing", ParentID: trip.ID})
-	tickets, _ := a.st.CreatePage(store.NewPageOptions{Title: "Tickets", ParentID: trip.ID})
-	a.reloadAll()
-	gone := func(*doc.Content) doc.Position { return doc.Position{After: "gone"} }
-	last := func() string {
-		c := a.st.Content(trip.ID)
-		if ed := a.openEditor(trip.ID); ed != nil {
-			c = ed.Content
-		}
-		return c.Children[len(c.Children)-1].Str("page_id")
-	}
-	a.linkSubpageAt(trip.ID, packing.ID, gone)
-	if got := last(); got != packing.ID {
-		t.Errorf("stored: the last block links to %q", got)
-	}
-	a.openPage(trip.ID)
-	a.linkSubpageAt(trip.ID, tickets.ID, gone)
-	if got := last(); got != tickets.ID {
-		t.Errorf("open: the last block links to %q", got)
 	}
 }
 

@@ -153,8 +153,11 @@ func (c *Core) OpenPage(id string) (_ string, err error) {
 		p.editors[c.editors] = &pageEditor{seen: map[int64]*doc.Content{p.rev: p.cur.Copy()}, last: p.rev}
 		c.fillLinks(id, p.cur)
 		// Encoded here, on the queue: a save changes the content in
-		// place, stamping its blocks.
-		raw, err = encode(openedPage{ID: id, Editor: c.editors, Content: p.cur, Rev: p.rev, ReadOnly: p.live.ReadOnly(), Unreadable: p.live.Unreadable()})
+		// place, stamping its blocks. The app's editor nests blocks only
+		// in the blocks that hold blocks: the children of others come
+		// after them, as a merge leaves them, and as the edits it sends
+		// have them.
+		raw, err = encode(openedPage{ID: id, Editor: c.editors, Content: p.cur.Lifted(), Rev: p.rev, ReadOnly: p.live.ReadOnly(), Unreadable: p.live.Unreadable()})
 	})
 	return raw, err
 }
@@ -329,7 +332,7 @@ func (p *openPage) Doc() *doc.Content { return p.cur }
 func (p *openPage) Replace(c *doc.Content) {
 	p.show()
 	p.bump(c)
-	p.c.ev.pageUpdated(p.id, c.Encode(), p.rev, "external", false)
+	p.c.ev.pageUpdated(p.id, c.Lifted().Encode(), p.rev, "external", false)
 }
 
 func (p *openPage) SetReadOnly(readOnly bool) { p.c.ev.pageReadOnly(p.id, readOnly) }
@@ -383,7 +386,7 @@ func (p *openPage) show() {
 		return
 	}
 	p.bump(p.cur)
-	p.c.ev.pageUpdated(p.id, p.cur.Encode(), p.rev, "agent", newStep)
+	p.c.ev.pageUpdated(p.id, p.cur.Lifted().Encode(), p.rev, "agent", newStep)
 }
 
 // member is someone a page is shared with, as Members lists them.

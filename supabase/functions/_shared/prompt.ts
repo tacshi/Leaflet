@@ -104,6 +104,18 @@ function asData(v: unknown): string {
 }
 
 /**
+ * The longest page, in UTF-16 units of its blocks as JSON, the request
+ * carries (agents' inlinePageLimit); a longer one the model reads with
+ * read_page.
+ */
+const INLINE_PAGE_LIMIT = 40_000;
+
+/** Whether a page's blocks go in the request whole, as the request writes them (asData). */
+export function pageFits(views: BlockView[]): boolean {
+  return asData(views).length <= INLINE_PAGE_LIMIT;
+}
+
+/**
  * The person's turn: the page, the focus, a selection and a comment
  * thread as JSON data, which others may have written, and last the
  * request itself, the person's own words.

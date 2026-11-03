@@ -19,6 +19,59 @@ func TestCalloutTones(t *testing.T) {
 	}
 }
 
+// A callout's icon gives it the next tone, the first after the last; a
+// tone not known reads as the first.
+func TestNextTone(t *testing.T) {
+	for tone, want := range map[string]string{"info": "tip", "tip": "warning", "warning": "danger", "danger": "info", " Warning ": "danger", "loud": "tip", "": "tip"} {
+		if got := NextTone(tone); got != want {
+			t.Errorf("NextTone(%q) = %q, want %q", tone, got, want)
+		}
+	}
+}
+
+// Math keeps its formula, and a diagram its Mermaid, under keys of their
+// own, which their editors write.
+func TestSourceKey(t *testing.T) {
+	for _, n := range []*Node{MathNode("x^2"), DiagramNode("graph TD")} {
+		key, source := BlockSource(n)
+		if key != SourceKey(n.Type) || source == "" || n.Str(key) != source {
+			t.Errorf("%s: %q %q", n.Type, key, source)
+		}
+	}
+	if SourceKey("math_equation") != "formula" || SourceKey("diagram") != "source" {
+		t.Error("keys")
+	}
+}
+
+// The children of a block that can't hold them come out after it, in
+// order, as a merge lifts them, in a copy; a list item and a table keep
+// theirs, and a page with none stranded is itself.
+func TestLifted(t *testing.T) {
+	kid := func(id string) *Node { return &Node{ID: id, Type: "paragraph"} }
+	c := &Content{Children: []*Node{
+		{ID: "p", Type: "paragraph", Children: []*Node{kid("a"), {ID: "q", Type: "quote", Children: []*Node{kid("b")}}}},
+		{ID: "l", Type: "bulleted_list", Children: []*Node{kid("c")}},
+		{ID: "t", Type: "table", Children: []*Node{{ID: "cell", Type: "table/cell", Children: []*Node{kid("d")}}}},
+	}}
+	lifted := c.Lifted()
+	var ids []string
+	for _, n := range lifted.Children {
+		ids = append(ids, n.ID)
+	}
+	if strings.Join(ids, " ") != "p a q b l t" {
+		t.Errorf("top level %v", ids)
+	}
+	if len(lifted.Find("l").Children) != 1 || len(lifted.Find("t").Children) != 1 {
+		t.Error("a list item and a table keep their children")
+	}
+	if len(c.Children) != 3 || len(c.Children[0].Children) != 2 {
+		t.Error("the page lifted is a copy")
+	}
+	if again := lifted.Lifted(); again != lifted {
+		t.Error("a page with none stranded is itself")
+	}
+}
+
 func TestNewBlockSpecs(t *testing.T) {
 	spec := func(m map[string]any) *Node {
 		t.Helper()

@@ -146,29 +146,17 @@ func (a *App) outlinePanel(c *ui.Context) {
 	}
 }
 
-// headingTree nests each heading under the nearest heading before it of a
-// higher level: the headings at the top, and those under each, nil for a
-// heading with none.
+// headingTree is the outline's tree, as doc.Outline nests the headings:
+// those at the top, and those in each, nil for a heading with none.
 func headingTree(heads []*doc.Node) ([]string, map[string][]string) {
 	var roots []string
 	kids := map[string][]string{}
-	type open struct {
-		level int
-		id    string
-	}
-	var stack []open
-	for _, h := range heads {
-		level := h.Int("level", 1)
-		for len(stack) > 0 && stack[len(stack)-1].level >= level {
-			stack = stack[:len(stack)-1]
-		}
-		if len(stack) == 0 {
+	for _, h := range doc.Outline(heads) {
+		if h.Parent == "" {
 			roots = append(roots, h.ID)
 		} else {
-			parent := stack[len(stack)-1].id
-			kids[parent] = append(kids[parent], h.ID)
+			kids[h.Parent] = append(kids[h.Parent], h.ID)
 		}
-		stack = append(stack, open{level, h.ID})
 	}
 	return roots, kids
 }

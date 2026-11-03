@@ -402,8 +402,8 @@ struct MarkdownPreview: View {
     /// source is a code block's, a formula's or a diagram's text.
     static func source(_ node: DocNode) -> String {
         switch node.type {
-        case "math_equation": node.data?["formula"]?.string ?? node.text
-        case "diagram": node.data?["source"]?.string ?? node.text
+        case "math_equation", "diagram":
+            node.data?[MobileSourceKey(node.type)]?.string ?? node.text
         default: node.text
         }
     }

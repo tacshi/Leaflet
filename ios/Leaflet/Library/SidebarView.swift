@@ -194,7 +194,7 @@ struct SidebarView: View {
     @ViewBuilder private var pagesTab: some View {
         let lib = app.library
         Section {
-            ForEach(lib.sortedFolders) { folder in
+            ForEach(lib.folders) { folder in
                 FolderRowView(folder: folder, actions: actions)
             }
             ForEach(lib.topPages) { page in

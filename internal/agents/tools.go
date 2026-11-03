@@ -538,26 +538,10 @@ func (x *Executor) readPage() map[string]any {
 	return out
 }
 
-// block is the block of ID id a call may name, nil when there is none: not
-// a table's cell, nor a block in one, which the server's tools cannot find
-// either (indexBlocks). A table changes whole, with replace_block.
-func (x *Executor) block(id string) *doc.Node {
-	var find func([]*doc.Node) *doc.Node
-	find = func(nodes []*doc.Node) *doc.Node {
-		for _, n := range nodes {
-			if n.ID == id {
-				return n
-			}
-			if n.Type != "table" {
-				if hit := find(n.Children); hit != nil {
-					return hit
-				}
-			}
-		}
-		return nil
-	}
-	return find(x.Ctx.Content.Children)
-}
+// block is the block of ID id a call may name, nil when there is none:
+// not a table's cell, nor a block in one, which the server's tools cannot
+// find either. A table changes whole, with replace_block.
+func (x *Executor) block(id string) *doc.Node { return x.Ctx.Content.Addressable(id) }
 
 func (x *Executor) has(id string) bool { return x.block(id) != nil }
 

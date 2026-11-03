@@ -4,18 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"slices"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/guard"
-	"leaflet/internal/keychain"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -122,7 +119,9 @@ type Transcriber interface {
 	// recording.SampleRate, in order. It does not wait.
 	Send(id string, pcm []byte)
 	// Finish waits for the words of the audio sent to stream id, ends it,
-	// and returns its transcript, a JSON array of store.Segment.
+	// and returns its answer, as recording.OnDeviceAnswer reads it: its
+	// transcript, or why it failed, with a code for the core to say it in
+	// the user's language.
 	Finish(id string) (string, error)
 	// Close ends stream id at once.
 	Close(id string)
@@ -147,7 +146,7 @@ func (e engine) Stream(language string, text func(string)) (recording.Stream, er
 	if err := e.t.Start(id, language, &TranscriptSink{text: text}); err != nil {
 		return nil, err
 	}
-	return &stream{t: e.t, id: id}, nil
+	return &stream{t: e.t, id: id, language: language}, nil
 }
 
 func (e engine) File(path, language string) ([]store.Segment, error) {
@@ -159,7 +158,7 @@ func (e engine) File(path, language string) ([]store.Segment, error) {
 	if err != nil {
 		return nil, err
 	}
-	return segments(raw)
+	return recording.OnDeviceTranscript(raw, language)
 }
 
 // onDeviceSlack is how much longer than its audio lasts the device's
@@ -205,18 +204,11 @@ type stuck struct{}
 
 func (stuck) Error() string { return locales.RecErrOnDeviceStuck() }
 
-func segments(raw string) ([]store.Segment, error) {
-	var segs []store.Segment
-	if err := json.Unmarshal([]byte(raw), &segs); err != nil {
-		return nil, err
-	}
-	return recording.Tidy(segs), nil
-}
-
 // stream is one recording's transcription by the app's Transcriber.
 type stream struct {
-	t  Transcriber
-	id string
+	t        Transcriber
+	id       string
+	language string
 	// sent counts the bytes of audio it was sent.
 	sent atomic.Int64
 }
@@ -236,7 +228,7 @@ func (s *stream) Finish() ([]store.Segment, error) {
 		}
 		return nil, err
 	}
-	return segments(raw)
+	return recording.OnDeviceTranscript(raw, s.language)
 }
 
 func (s *stream) Close() { s.t.Close(s.id) }
@@ -253,10 +245,9 @@ func (c *Core) UseTranscriber(t Transcriber) {
 		// Through its lock: transcriptions running read it.
 		c.core.Rec.SetEngine(engine{t})
 		s := c.core.Store.Settings()
-		if s.Stt.Provider != "openai-compatible" || strings.TrimSpace(s.Stt.BaseURL) != "" {
+		if !recording.PreferOnDevice(&s.Stt) {
 			return
 		}
-		s.Stt.Provider = recording.OnDevice
 		if err := c.core.Store.SaveSettings(s); err != nil {
 			log.Printf("settings: %v", err)
 		}
@@ -454,15 +445,7 @@ func (c *Core) Recording(id string) (_ string, err error) {
 	if row.Transcript == nil {
 		row.Transcript = []store.Segment{}
 	}
-	var lines []string
-	for _, s := range row.Transcript {
-		if s.Speaker != "" {
-			lines = append(lines, locales.RecSpeakerLine(s.Speaker, s.Text))
-		} else {
-			lines = append(lines, s.Text)
-		}
-	}
-	row.Plain = strings.Join(lines, "\n")
+	row.Plain = recording.TranscriptText(rec)
 	return encode(row)
 }
 
@@ -513,9 +496,8 @@ func (c *Core) Retranscribe(id string) (err error) {
 }
 
 // transcript is a recording's transcript as the blocks its page's editor
-// puts after its block, as TranscriptBlocks returns it.
+// puts after the recording's block, as TranscriptBlocks returns it.
 type transcript struct {
-	After  string      `json:"after"`
 	Blocks []*doc.Node `json:"blocks"`
 }
 
@@ -529,7 +511,7 @@ func (c *Core) TranscriptBlocks(id string) (_ string, err error) {
 	if err != nil {
 		return "", err
 	}
-	return encode(transcript{After: rec.BlockID, Blocks: recording.TranscriptBlocks(rec)})
+	return encode(transcript{Blocks: recording.TranscriptBlocks(rec)})
 }
 
 // Speech to text -----------------------------------------------------------
@@ -569,20 +551,10 @@ func (c *Core) SpeechSettings() (_ string, err error) {
 		out.SignedIn = c.core.Remote.SignedIn()
 		out.OnDevice = c.core.Rec.Engine != nil
 	})
-	if k, err := keychain.Get("stt.endpoint.key"); err == nil {
-		out.EndpointKey = string(k)
-	}
+	out.EndpointKey = recording.EndpointKey()
 	out.SonioxSaved = recording.LocalSonioxKey() != ""
 	out.LocalEndpoint = recording.IsLocalEndpoint(out.Stt.BaseURL)
-	stt := out.Stt
-	switch {
-	case stt.Provider == recording.OnDevice && !out.OnDevice,
-		stt.Provider == "soniox" && !out.SonioxSaved && !out.SignedIn,
-		stt.Provider == "openai-compatible" && strings.TrimSpace(stt.BaseURL) == "":
-		out.Status = locales.RecSttNotSetUp()
-	default:
-		out.Status = recording.EngineLabel(stt)
-	}
+	out.Status = recording.EngineStatus(out.Stt, out.SonioxSaved || out.SignedIn, out.OnDevice)
 	for _, code := range recording.LanguageCodes() {
 		out.Languages = append(out.Languages, speechLanguage{Code: code, Name: recording.LanguageName(code)})
 	}
@@ -605,64 +577,16 @@ func (c *Core) SaveSpeechSettings(stt string) (err error) {
 		err = c.core.Store.SaveSettings(s)
 	})
 	if err == nil {
-		c.mirrorStt(next)
+		c.core.Rec.MirrorSettings(next)
 	}
 	return err
-}
-
-// sttLatest numbers the changes of the speech settings, and sttSent
-// orders their mirrors: each change sends them, one at a time, and only
-// the last goes, so the server never ends with older ones. A change only
-// counts, never waiting for a send on the network.
-var (
-	sttLatest atomic.Int64
-	sttSent   sync.Mutex
-)
-
-// mirrorStt sends the speech settings to the server, signed in, as the
-// desktop does: it transcribes with them.
-func (c *Core) mirrorStt(stt store.SttSettings) {
-	be := c.core.Remote
-	// The device's own engine is this device's alone: the server's
-	// settings stay those the other devices chose.
-	if !be.SignedIn() || stt.Provider == recording.OnDevice {
-		return
-	}
-	n := sttLatest.Add(1)
-	guard.Go(func() {
-		// Only the last change waits for its turn.
-		time.Sleep(500 * time.Millisecond)
-		if sttLatest.Load() != n {
-			return
-		}
-		sttSent.Lock()
-		defer sttSent.Unlock()
-		if sttLatest.Load() != n {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), remoteTimeout)
-		defer cancel()
-		var provider any
-		if stt.ProviderID != "" {
-			provider = stt.ProviderID
-		}
-		row := map[string]any{"user_id": be.UserID(), "provider": stt.Provider, "language": stt.Language,
-			"live_transcript": stt.LiveTranscript, "speaker_labels": stt.SpeakerLabels,
-			"base_url": stt.BaseURL, "model": stt.Model, "provider_id": provider}
-		if _, err := be.Upsert(ctx, "stt_settings", row, "user_id"); err != nil {
-			log.Printf("stt settings: %v", err)
-		}
-	})
 }
 
 // SetEndpointKey keeps the key of an endpoint on this device's network
 // in its keychain; "" removes it.
 func (c *Core) SetEndpointKey(key string) (err error) {
 	defer catch(&err)
-	if key == "" {
-		return keychain.Delete("stt.endpoint.key")
-	}
-	return keychain.Set("stt.endpoint.key", []byte(key))
+	return recording.SetEndpointKey(key)
 }
 
 // SaveSonioxKey keeps a Soniox key on the server, signed in, or else in
@@ -673,19 +597,14 @@ func (c *Core) SaveSonioxKey(key string) (_ string, err error) {
 	if key == "" {
 		return "", nil
 	}
-	be := c.core.Remote
-	if !be.SignedIn() {
-		if err := recording.SetLocalSonioxKey(key); err != nil {
-			return "", fmt.Errorf("%s", locales.RecSttKeyNotSaved(err.Error()))
-		}
-		return locales.RecSttSavedOnDevice(), nil
+	onServer, err := c.core.Rec.SaveSonioxKey(key)
+	switch {
+	case err != nil:
+		return "", err
+	case onServer:
+		return locales.RecSttSavedOnServer(), nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), remoteTimeout)
-	defer cancel()
-	if _, err := be.Invoke(ctx, "stt", map[string]any{"action": "save_key", "provider": "soniox", "api_key": key}); err != nil {
-		return "", fmt.Errorf("%s", locales.RecSttKeyNotSaved(err.Error()))
-	}
-	return locales.RecSttSavedOnServer(), nil
+	return locales.RecSttSavedOnDevice(), nil
 }
 
 // TestEndpoint tries an OpenAI-compatible endpoint with a second of
@@ -723,11 +642,8 @@ func (c *Core) TestMicrophone() (err error) {
 	c.q.do(func() {
 		s := c.core.Store.Settings()
 		c.micTesting, c.micHeard = true, ""
-		err = c.core.Rec.Test(s.Stt, c.online(s), 4*time.Second, func(text string, err error) {
-			c.micTesting, c.micHeard = false, locales.RecSttHeard(text)
-			if err != nil {
-				c.micHeard = err.Error()
-			}
+		err = c.core.Rec.TestMicrophone(s.Stt, c.online(s), func(heard string) {
+			c.micTesting, c.micHeard = false, heard
 		})
 		if err != nil {
 			c.micTesting = false

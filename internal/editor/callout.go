@@ -42,12 +42,7 @@ func (e *Editor) CycleTone(id string) {
 		return
 	}
 	e.pushUndo(false)
-	tone := doc.CalloutTone(n.Str("tone"))
-	for i, t := range doc.CalloutTones {
-		if t == tone {
-			n.Set("tone", doc.CalloutTones[(i+1)%len(doc.CalloutTones)])
-		}
-	}
+	n.Set("tone", doc.NextTone(n.Str("tone")))
 	e.invalidate(id)
 	e.changed()
 }

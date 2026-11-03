@@ -352,12 +352,22 @@ export function indexBlocks(root: NodeJSON): Map<string, Located> {
 class BlockIndex {
   private readonly parents = new Map<string, { node: NodeJSON; parent: NodeJSON }>();
 
-  constructor(root: NodeJSON) {
+  constructor(private readonly root: NodeJSON) {
     this.add(root.children ?? [], root);
   }
 
-  /** Puts nodes, and the blocks in them, in the index, as children of parent. */
+  /**
+   * Whether the blocks in parent are addressable: in the page, or in an
+   * addressable block but a table. Those put in a table's cell, or in a
+   * block in one, are no more than the ones there already.
+   */
+  private holds(parent: NodeJSON): boolean {
+    return parent === this.root || (parent.type !== "table" && this.parents.get(parent.id)?.node === parent);
+  }
+
+  /** Puts nodes, and the blocks in them, in the index, as children of parent, where it holds them. */
   add(nodes: NodeJSON[], parent: NodeJSON): void {
+    if (!this.holds(parent)) return;
     // In reading order, so the last of blocks with one id wins, as in
     // indexBlocks.
     const stack = nodes.map((node) => ({ node, parent })).reverse();
@@ -377,9 +387,9 @@ class BlockIndex {
     });
   }
 
-  /** Has node in parent now. */
+  /** Has node in parent now, where it holds it. */
   moved(node: NodeJSON, parent: NodeJSON): void {
-    this.parents.set(node.id, { node, parent });
+    if (this.holds(parent)) this.parents.set(node.id, { node, parent });
   }
 
   get(id: string): Located | undefined {
@@ -484,9 +494,20 @@ function keptChildren(op: Extract<Op, { op: "replace" }>): boolean {
   return op.previous.type !== "table" && ids(op.node) === ids(op.previous);
 }
 
-/** Whether node may take the children current has (replace's own check). */
+/** node without the cells only a table holds, when it is none (doc.DropCells). */
+function dropCells(node: NodeJSON): void {
+  if (node.type === "table" || !node.children) return;
+  node.children = node.children.filter((k) => k.type !== "table/cell");
+  if (!node.children.length) delete node.children;
+}
+
+/**
+ * Whether node may take the children current has (doc's canHoldChildren):
+ * a list takes any, another block those of a block of its own type, as
+ * one from another editor may hold.
+ */
 function canHoldChildren(node: NodeJSON, current: NodeJSON): boolean {
-  return current.type !== "table" && LIST_TYPES.has(node.type);
+  return current.type !== "table" && (LIST_TYPES.has(node.type) || node.type === current.type);
 }
 
 /** JSON with each object's keys in order, as jsonb does not keep them. */
@@ -608,6 +629,7 @@ export function applyOps(content: PageContent, ops: Op[], now = Date.now()): Pag
         const at = idx.get(op.id);
         if (!at) break;
         const node = clone(op.node);
+        dropCells(node);
         forget(at.node);
         // A replace that kept the block's children carries them as the
         // agent read them: keep the ones the block has here instead, so
@@ -720,6 +742,16 @@ export function normalizePosition(raw: unknown): Position {
   }
   if (typeof value !== "string" || !value) throw new ToolError(`position.${key} must be a block id`);
   return { [key]: value } as Position;
+}
+
+/**
+ * A call's argument of text, as the app's agents take one (agents.str):
+ * refused when it is of another kind, or only spaces.
+ */
+function textArg(args: Record<string, unknown>, key: string): string {
+  const value = typeof args[key] === "string" ? args[key] as string : "";
+  if (!trimSpace(value)) throw new ToolError(`${key} is required`);
+  return value;
 }
 
 /** What a kind of block is called in an edit's summary. */
@@ -883,9 +915,9 @@ export class PageEditSession {
       case "insert_blocks":
         return this.insert(normalizePosition(args.position), args.blocks);
       case "replace_block":
-        return this.replace(String(args.id ?? ""), args.block);
+        return this.replace(textArg(args, "id"), args.block);
       case "move_block":
-        return this.move(String(args.id ?? ""), normalizePosition(args.position));
+        return this.move(textArg(args, "id"), normalizePosition(args.position));
       case "delete_blocks":
         return this.remove(args.ids);
       case "create_subpage":
@@ -895,8 +927,7 @@ export class PageEditSession {
         this.arm();
         return unchanged({ pages: await this.hooks.listPages() });
       case "read_other_page": {
-        const pageId = String(args.page_id ?? "");
-        if (!pageId) throw new ToolError("page_id is required");
+        const pageId = textArg(args, "page_id");
         const page = await this.hooks.readOtherPage(pageId);
         this.arm();
         return unchanged(page);
@@ -1192,7 +1223,8 @@ export class PageEditSession {
 
   remove(rawIds: unknown): ToolOutcome {
     if (!Array.isArray(rawIds) || rawIds.length === 0) throw new ToolError("ids must be a non-empty array");
-    const ids = [...new Set(rawIds.map(String))];
+    // An ID is text: another value names no block.
+    const ids = [...new Set(rawIds.map((id) => typeof id === "string" ? id : ""))];
     const found = ids.map((id) => this.locate(id));
     // Skip ids nested inside another id being deleted.
     const covered = new Set<string>();

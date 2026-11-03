@@ -542,6 +542,18 @@ func wait(t *testing.T, ev *fakeEvents, reason string) update {
 	}
 }
 
+// When says a time as the desktop does, in the language asked for, and
+// nothing for none.
+func TestWhen(t *testing.T) {
+	now := time.Now()
+	if got := When("ja", now.Add(-5*time.Minute).UnixMilli(), now.UnixMilli()); got != locales.In("ja").PageTimeMinutesAgo(5) {
+		t.Errorf("five minutes ago: %q", got)
+	}
+	if got := When("en", 0, now.UnixMilli()); got != "" {
+		t.Errorf("no time: %q", got)
+	}
+}
+
 func TestText(t *testing.T) {
 	for _, c := range []struct{ locale, key, args, want string }{
 		{"en", "commonCancel", "", "Cancel"},
@@ -782,13 +794,22 @@ func TestPlainCopy(t *testing.T) {
 	}
 }
 
-// A page whose folder is gone, as another device deleted the folder while
-// this one moved the page into it, is listed at the top level, as the
-// desktop shows it: the sidebar shows no page with no place.
-func TestPageOfAFolderGoneIsAtTheTop(t *testing.T) {
+// The library comes arranged as the desktop's sidebar arranges it: pages
+// in their folders and under their parents, in order, and each tag's
+// pages by title. A page whose folder is gone, as another device deleted
+// the folder while this one moved the page into it, is at the top level:
+// the sidebar shows no page with no place.
+func TestLibraryTree(t *testing.T) {
 	c, _ := open(t)
-	p := create(t, c, `{"title":"Notes"}`)
-	if _, err := c.core.Store.DB().Exec(`UPDATE pages SET folder_id = 'gone' WHERE id = ?`, p.ID); err != nil {
+	var f folderRow
+	raw, _ := c.CreateFolder("Work")
+	_ = json.Unmarshal([]byte(raw), &f)
+	plan := create(t, c, `{"title":"Plan","tags":["work"]}`)
+	notes := create(t, c, `{"title":"notes","tags":["Work"],"folder_id":"`+f.ID+`"}`)
+	second := create(t, c, `{"title":"Second","parent_id":"`+plan.ID+`"}`)
+	first := create(t, c, `{"title":"First","parent_id":"`+plan.ID+`"}`)
+	left := create(t, c, `{"title":"Left"}`)
+	if _, err := c.core.Store.DB().Exec(`UPDATE pages SET folder_id = 'gone' WHERE id = ?`, left.ID); err != nil {
 		t.Fatal(err)
 	}
 	raw, err := c.Library()
@@ -797,10 +818,21 @@ func TestPageOfAFolderGoneIsAtTheTop(t *testing.T) {
 	}
 	var lib library
 	_ = json.Unmarshal([]byte(raw), &lib)
-	for _, row := range lib.Pages {
-		if row.ID == p.ID && row.FolderID != "" {
-			t.Errorf("listed in folder %q, which is gone", row.FolderID)
-		}
+	if !slices.Contains(lib.Top, plan.ID) || !slices.Contains(lib.Top, left.ID) || slices.Contains(lib.Top, notes.ID) {
+		t.Errorf("top %v", lib.Top)
+	}
+	if !slices.Equal(lib.InFolder[f.ID], []string{notes.ID}) || len(lib.Folders) != 1 || lib.Folders[0].ID != f.ID {
+		t.Errorf("in folder %v, folders %+v", lib.InFolder, lib.Folders)
+	}
+	if !slices.Equal(lib.Children[plan.ID], []string{second.ID, first.ID}) {
+		t.Errorf("under Plan %v, want Second, First", lib.Children[plan.ID])
+	}
+	i := slices.IndexFunc(lib.Tags, func(tg tagRow) bool { return strings.EqualFold(tg.Tag, "work") })
+	if i < 0 || lib.Tags[i].Count != 2 || !slices.Equal(lib.Tags[i].Pages, []string{notes.ID, plan.ID}) {
+		t.Errorf("tags %+v", lib.Tags)
+	}
+	if lib.Shared == nil {
+		t.Error("no pages shared is null, not an empty list")
 	}
 }
 

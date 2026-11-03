@@ -1,7 +1,6 @@
 package app
 
 import (
-	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -18,7 +17,7 @@ import (
 // and the tag it is under, for a page is under each of its tags.
 
 // tagCounts are the tags of the pages, by name.
-func (a *App) tagCounts() []store.TagCount { return store.TagsOf(a.pages) }
+func (a *App) tagCounts() []store.TagCount { return a.library().Tags }
 
 // tagNames are the tags of the pages, by name, as suggestions.
 func (a *App) tagNames() []string {
@@ -26,20 +25,6 @@ func (a *App) tagNames() []string {
 	for _, t := range a.tagCounts() {
 		out = append(out, t.Name)
 	}
-	return out
-}
-
-// tagged are the pages with a tag, by title.
-func (a *App) tagged(tag string) []store.Page {
-	var out []store.Page
-	for _, p := range a.pages {
-		if p.HasTag(tag) {
-			out = append(out, p)
-		}
-	}
-	slices.SortStableFunc(out, func(x, y store.Page) int {
-		return strings.Compare(strings.ToLower(x.DisplayTitle()), strings.ToLower(y.DisplayTitle()))
-	})
 	return out
 }
 
@@ -74,7 +59,7 @@ func (a *App) tagsTree(c *ui.Context) {
 			return nil
 		}
 		var out []string
-		for _, p := range a.tagged(tag) {
+		for _, p := range a.library().Tagged(tag) {
 			out = append(out, "tagged:"+p.ID+"|"+tag)
 		}
 		return out

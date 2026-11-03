@@ -134,23 +134,22 @@ func (a *App) showInTree(kind, id string) {
 // opens it, a file opens the file, and a folder opens or closes.
 func (a *App) tree(c *ui.Context) {
 	var roots []string
-	for _, f := range a.folders {
-		if f.SpaceID == a.session.SpaceID {
-			roots = append(roots, "folder:"+f.ID)
-		}
+	lib := a.library()
+	for _, f := range lib.Folders {
+		roots = append(roots, "folder:"+f.ID)
 	}
-	for _, p := range a.children("", "", true) {
+	for _, p := range lib.Top {
 		roots = append(roots, "page:"+p.ID)
 	}
 	// Files of a folder that was deleted are at the top level.
 	for _, f := range a.files {
-		if a.liveFolder(f.FolderID) == "" && f.PageID == "" {
+		if !lib.HasFolder(f.FolderID) && f.PageID == "" {
 			roots = append(roots, "file:"+f.ID)
 		}
 	}
-	if shared := a.sharedRoots(); len(shared) > 0 {
+	if len(lib.Shared) > 0 {
 		roots = append(roots, "section:shared")
-		for _, p := range shared {
+		for _, p := range lib.Shared {
 			roots = append(roots, "page:"+p.ID)
 		}
 	}
@@ -159,7 +158,7 @@ func (a *App) tree(c *ui.Context) {
 		switch kind {
 		case "folder":
 			out := []string{} // a folder opens, empty or not
-			for _, p := range a.children("", id, true) {
+			for _, p := range lib.InFolder[id] {
 				out = append(out, "page:"+p.ID)
 			}
 			for _, f := range a.files {
@@ -170,7 +169,7 @@ func (a *App) tree(c *ui.Context) {
 			return out
 		case "page":
 			var out []string
-			for _, p := range a.children(id, "", false) {
+			for _, p := range lib.Children[id] {
 				out = append(out, "page:"+p.ID)
 			}
 			return out
@@ -478,7 +477,7 @@ func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (
 		}
 		// After a page showing its subpages is before the first of them.
 		key = "page:" + t.ID
-		first := out == 0 && a.treeState.Open.Has(key) && len(a.children(t.ID, "", false)) > 0
+		first := out == 0 && a.treeState.Open.Has(key) && len(a.children(t.ID)) > 0
 		return dropAfter, key, out, t.ID != d.id && (t.ParentID != "" || top || first && a.canMoveInside(d.id, key))
 	case id != d.id:
 		return dropInside, key, 0, a.canMoveInside(d.id, key)
@@ -588,7 +587,7 @@ func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 	if d, ok := ui.Drop[pageDrag](list); ok {
 		if at, target, out, _, ok := spot(d); ok {
 			if target == "" {
-				if err := a.movePage(d.id, "", func() error { return a.st.MovePage(d.id, "", "", "") }); err != nil {
+				if err := a.pageCore().MovePage(d.id, "", func() error { return a.st.MovePage(d.id, "", "", "") }); err != nil {
 					a.toast(locales.SidebarCouldNotMove(err.Error()))
 				}
 				return
@@ -618,7 +617,7 @@ func dropLine(p *ui.Painter, x, y, right float32, pal *theme.Palette) {
 // lastSibling reports whether page p is the last of its siblings, but
 // page skip, unless that is p.
 func (a *App) lastSibling(p *store.Page, skip string) bool {
-	siblings := a.children(p.ParentID, a.liveFolder(p.FolderID), p.ParentID == "")
+	siblings := a.library().Siblings(*p)
 	for k := len(siblings) - 1; k >= 0; k-- {
 		if siblings[k].ID != skip || skip == p.ID {
 			return siblings[k].ID == p.ID
@@ -651,13 +650,13 @@ func (a *App) dropPage(id, key string, at int, out bool) {
 		switch {
 		case at == dropBefore:
 			move = func() error { return a.st.MovePageBefore(id, t.ParentID, t.FolderID, t.ID) }
-		case !out && a.treeState.Open.Has(key) && len(a.children(t.ID, "", false)) > 0:
+		case !out && a.treeState.Open.Has(key) && len(a.children(t.ID)) > 0:
 			parent, move = t.ID, func() error { return a.st.MovePageBefore(id, t.ID, "", "") }
 		default:
 			move = func() error { return a.st.MovePage(id, t.ParentID, t.FolderID, t.ID) }
 		}
 	}
-	if err := a.movePage(id, parent, move); err != nil {
+	if err := a.pageCore().MovePage(id, parent, move); err != nil {
 		a.toast(locales.SidebarCouldNotMove(err.Error()))
 	}
 }
@@ -709,7 +708,7 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 		a.exportPage(p.ID)
 	}
 	if (server || a.sync.ICloudOn()) && !p.Template && m.Item(locales.SidebarKeepOnDevice()).Checked(p.KeepOffline || a.settings.AllPagesOffline).Disabled(a.settings.AllPagesOffline).Chosen() {
-		if err := a.st.SetKeepOffline(p.ID, !p.KeepOffline); err != nil {
+		if err := a.core().SetKeepOffline(p.ID, !p.KeepOffline); err != nil {
 			a.toast(locales.SidebarCouldNotSave(err.Error()))
 		}
 	}

@@ -65,3 +65,17 @@ func TestStatus(t *testing.T) {
 		}
 	}
 }
+
+// A transcript copies as a line each, tidied, after its speaker's name
+// when it has one.
+func TestTranscriptText(t *testing.T) {
+	rec := store.Recording{Transcript: []store.Segment{
+		{Text: "Hello", Speaker: "1"},
+		{Text: "."},
+		{Text: "Shall we start?"},
+	}}
+	want := locales.RecSpeakerLine("1", "Hello.") + "\nShall we start?"
+	if got := TranscriptText(rec); got != want {
+		t.Errorf("copied %q, want %q", got, want)
+	}
+}

@@ -47,9 +47,10 @@ struct BlockCard: View {
         let palette = BlockLook.palette
         switch node.type {
         case "math_equation":
-            return MobileMathPage(d["formula"]?.string ?? "")
+            return MobileMathPage(d[MobileSourceKey(node.type)]?.string ?? "")
         case "diagram":
-            return MobileDiagramPage(d["source"]?.string ?? "", palette.surface.hex)
+            return MobileDiagramPage(
+                d[MobileSourceKey(node.type)]?.string ?? "", palette.surface.hex)
         case "embed":
             return MobileEmbedPage(d["html"]?.string ?? "", palette.surface.hex, palette.isDark)
         default:
@@ -480,19 +481,20 @@ struct TableGrid: View {
     /// the desktop; nil on a page that can't be changed.
     var edit: (@MainActor (DocNode) -> Void)?
 
-    /// rows are the table's cells' text, by row, from its column-major
-    /// cells (table/cell blocks with data.rowPosition and colPosition).
+    /// rows are the table's cells' text, by row, as the core reads its
+    /// cells (mobile.TableText): the rows and columns it says it has, as
+    /// far as it has cells for them. The table's last are kept, as it is
+    /// laid out and drawn again and again.
     static func rows(_ node: DocNode) -> [[String]] {
-        var cells: [Int: [Int: String]] = [:]
-        var cols = 0
-        for cell in node.children ?? [] {
-            let r = Int(cell.data?["rowPosition"]?.int ?? 0)
-            let c = Int(cell.data?["colPosition"]?.int ?? 0)
-            cells[r, default: [:]][c] = (cell.children ?? []).map(\.text).joined(separator: " ")
-            cols = max(cols, c + 1)
-        }
-        return cells.keys.sorted().map { r in (0..<cols).map { cells[r]?[$0] ?? "" } }
+        if let (table, rows) = read[node.id], table == node { return rows }
+        let raw = (try? JSONEncoder().encode(node)).map { String(decoding: $0, as: UTF8.self) }
+        var error: NSError?
+        let json = MobileTableText(raw ?? "{}", &error)
+        let rows = (try? JSONDecoder().decode([[String]].self, from: Data(json.utf8))) ?? []
+        read[node.id] = (node, rows)
+        return rows
     }
+    @MainActor private static var read: [String: (DocNode, [[String]])] = [:]
 
     var body: some View {
         if let edit {

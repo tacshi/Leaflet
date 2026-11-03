@@ -611,7 +611,7 @@ func (p *pubLink) render(job pubJob) {
 			if err != nil {
 				return v
 			}
-			v.Length = fmtDuration(time.Duration(rec.DurationMs) * time.Millisecond)
+			v.Length = recording.FormatDuration(time.Duration(rec.DurationMs) * time.Millisecond)
 			// Audio still being recorded, or not on this device, has no player.
 			if path := rec.LocalPath; rec.Status != "recording" && inFolder(job.st.Dir, path) {
 				if _, err := os.Stat(path); err == nil {
@@ -621,7 +621,7 @@ func (p *pubLink) render(job pubJob) {
 				}
 			}
 			for _, s := range recording.Tidy(rec.Transcript) {
-				l := doc.TranscriptLine{Start: float64(s.StartMs) / 1000, Time: fmtDuration(time.Duration(s.StartMs) * time.Millisecond), Text: s.Text}
+				l := doc.TranscriptLine{Start: float64(s.StartMs) / 1000, Time: recording.FormatDuration(time.Duration(s.StartMs) * time.Millisecond), Text: s.Text}
 				if s.Speaker != "" {
 					l.Speaker = locales.RecSpeaker(s.Speaker)
 				}

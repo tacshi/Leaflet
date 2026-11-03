@@ -825,22 +825,6 @@ func TestTableCellKeepsMarkdownAsTyped(t *testing.T) {
 	}
 }
 
-func TestLeadingFollowsScript(t *testing.T) {
-	for text, want := range map[string]float32{
-		"":                    1.5,
-		"Plain English prose": 1.5,
-		"An English paragraph that quotes 模型 once":            1.5,
-		"模型可以通过两种方式访问到这些 MCP 服务":                              1.8,
-		"更完整的介绍可以参考官方文档 https://modelcontextprotocol.io/docs": 1.8,
-		"ひらがなとカタカナ":                                           1.8,
-		"한국어 문장":                                              1.8,
-	} {
-		if got := leading(text); got != want {
-			t.Errorf("leading(%q) = %v, want %v", text, got, want)
-		}
-	}
-}
-
 // Right-clicking an image or a video from the web offers to change its
 // link, an uploaded image to replace it; a block of text offers neither.
 func TestEditMedia(t *testing.T) {

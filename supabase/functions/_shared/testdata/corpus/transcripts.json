@@ -1,0 +1,202 @@
+[
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"Plan"},{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":999,"end_ms":0,"text":""}],"text":"[60:00] Plan"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":-61000,"end_ms":0,"text":"-Plan","speaker":"A"},{"start_ms":59999,"end_ms":0,"text":"字"},{"start_ms":3599999,"end_ms":0,"text":"字Plan"},{"start_ms":3600000,"end_ms":0,"text":"...«»"}],"text":"[-1:-1] Speaker A: -Plan\n[0:59] 字\n[59:59] 字Plan...«»"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":-61000,"end_ms":0,"text":"-a b"},{"start_ms":1000,"end_ms":0,"text":"","speaker":"2"},{"start_ms":59999,"end_ms":0,"text":""}],"text":"[-1:-1] -a b"},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":"字"}],"text":"[205:45] 字"},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"!?Hello there.","speaker":"A"},{"start_ms":0,"end_ms":0,"text":""}],"text":"[0:59] Speaker A: !?Hello there."},
+{"segments":[{"start_ms":-61000,"end_ms":0,"text":"x.","speaker":"A"},{"start_ms":-1500,"end_ms":0,"text":"a b","speaker":"1"},{"start_ms":-1500,"end_ms":0,"text":"a ba b","speaker":"A"},{"start_ms":999,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":" "}],"text":"[-1:-1] Speaker A: x.\n[0:-1] Speaker 1: a b\n[0:-1] Speaker A: a ba b"},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"«»Hello there.","speaker":"1"},{"start_ms":1000,"end_ms":0,"text":""},{"start_ms":3599999,"end_ms":0,"text":"。 ","speaker":"1"},{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":1000,"end_ms":0,"text":"","speaker":"1"}],"text":"[60:00] Speaker 1: «»Hello there.。"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":"Hello there.。"},{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":61000,"end_ms":0,"text":"«»x."},{"start_ms":61000,"end_ms":0,"text":"-字"}],"text":"[1:01] Hello there.。\n[1:01] «»x.\n[1:01] -字"},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":"..."},{"start_ms":3599999,"end_ms":0,"text":"!?-"},{"start_ms":3599999,"end_ms":0,"text":"...","speaker":"A"}],"text":"[0:00] ...!?-..."},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":"","speaker":"2"},{"start_ms":61000,"end_ms":0,"text":""}],"text":""},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":999,"end_ms":0,"text":"Plan","speaker":"A"},{"start_ms":999,"end_ms":0,"text":"-a b"},{"start_ms":-1500,"end_ms":0,"text":"!?"},{"start_ms":999,"end_ms":0,"text":"x...."}],"text":"[0:00] Speaker A: Plan\n[0:00] -a b!?\n[0:00] x...."},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"Plan","speaker":"A"}],"text":"[0:01] Speaker A: Plan"},
+{"segments":[{"start_ms":0,"end_ms":0,"text":""}],"text":""},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":"。-"},{"start_ms":-1500,"end_ms":0,"text":"...","speaker":"A"},{"start_ms":999,"end_ms":0,"text":"Hello there."},{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":999,"end_ms":0,"text":""}],"text":"[1:01] 。-...\n[0:00] Hello there."},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":"","speaker":"A"},{"start_ms":999,"end_ms":0,"text":""},{"start_ms":1000,"end_ms":0,"text":"。"},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":-1500,"end_ms":0,"text":"。","speaker":"1"}],"text":"[0:01] 。。"},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":""}],"text":""},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"«»Plan"},{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"。Plan"},{"start_ms":0,"end_ms":0,"text":"..."},{"start_ms":3599999,"end_ms":0,"text":"!? "}],"text":"[60:00] «»Plan\n[60:00] 。Plan...!?"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":1000,"end_ms":0,"text":""},{"start_ms":-61000,"end_ms":0,"text":"","speaker":"1"},{"start_ms":1000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":-1500,"end_ms":0,"text":"字a b"},{"start_ms":1000,"end_ms":0,"text":"Plan。"}],"text":"[0:-1] 字a b\n[0:01] Plan。"},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"«»"}],"text":"[0:59] «»"},
+{"segments":[],"text":""},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"«»"},{"start_ms":-61000,"end_ms":0,"text":"a b","speaker":"2"},{"start_ms":61000,"end_ms":0,"text":"-!?"},{"start_ms":3599999,"end_ms":0,"text":"x.«»"}],"text":"[60:00] «»\n[-1:-1] Speaker 2: a b-!?\n[59:59] x.«»"},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"x.-","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":"Plan","speaker":"1"},{"start_ms":-1500,"end_ms":0,"text":"字"},{"start_ms":3599999,"end_ms":0,"text":"a b«»","speaker":"1"}],"text":"[0:59] Speaker A: x.-\n[59:59] Speaker 1: Plan\n[0:-1] 字\n[59:59] Speaker 1: a b«»"},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":1000,"end_ms":0,"text":" "}],"text":""},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":""},{"start_ms":-61000,"end_ms":0,"text":"x.«»"},{"start_ms":3600000,"end_ms":0,"text":"x.字"},{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":"...!?"}],"text":"[-1:-1] x.«»\n[60:00] x.字...!?"},
+{"segments":[{"start_ms":0,"end_ms":0,"text":"Hello there."},{"start_ms":999,"end_ms":0,"text":"x.","speaker":"A"},{"start_ms":999,"end_ms":0,"text":"Plan","speaker":"2"},{"start_ms":12345678,"end_ms":0,"text":"字","speaker":"A"}],"text":"[0:00] Hello there.\n[0:00] Speaker A: x.\n[0:00] Speaker 2: Plan\n[205:45] Speaker A: 字"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":"Hello there.!?","speaker":"A"},{"start_ms":-61000,"end_ms":0,"text":"a b"},{"start_ms":3600000,"end_ms":0,"text":"..."}],"text":"[59:59] Speaker A: Hello there.!?\n[-1:-1] a b..."},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":"。","speaker":"1"},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":3599999,"end_ms":0,"text":"..."},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"Hello there."}],"text":"[205:45] Speaker 1: 。...\n[60:00] Hello there."},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":""}],"text":""},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"Plan"},{"start_ms":-61000,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"。«»"},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":59999,"end_ms":0,"text":""}],"text":"[60:00] Plan。«»"},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"PlanHello there.","speaker":"1"},{"start_ms":999,"end_ms":0,"text":"a b"},{"start_ms":999,"end_ms":0,"text":"","speaker":"A"}],"text":"[0:59] Speaker 1: PlanHello there.\n[0:00] a b"},
+{"segments":[{"start_ms":999,"end_ms":0,"text":"!?"},{"start_ms":12345678,"end_ms":0,"text":"。","speaker":"2"},{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":59999,"end_ms":0,"text":"","speaker":"2"}],"text":"[0:00] !?。"},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"Hello there.","speaker":"A"},{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":1000,"end_ms":0,"text":"x.","speaker":"1"},{"start_ms":3599999,"end_ms":0,"text":"字"}],"text":"[0:-1] Speaker A: Hello there.\n[0:01] Speaker 1: x.\n[59:59] 字"},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"Plan","speaker":"A"},{"start_ms":61000,"end_ms":0,"text":" "},{"start_ms":12345678,"end_ms":0,"text":"字"},{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":"","speaker":"1"},{"start_ms":3599999,"end_ms":0,"text":"Hello there.-","speaker":"2"}],"text":"[0:01] Speaker A: Plan\n[205:45] 字\n[59:59] Speaker 2: Hello there.-"},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":"","speaker":"1"},{"start_ms":-61000,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"1"},{"start_ms":12345678,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":"Hello there.","speaker":"2"}],"text":"[0:00] Speaker 2: Hello there."},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":"x."},{"start_ms":-61000,"end_ms":0,"text":"","speaker":"1"}],"text":"[205:45] x."},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":"","speaker":"1"}],"text":""},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"!?","speaker":"1"},{"start_ms":1000,"end_ms":0,"text":"!?"},{"start_ms":12345678,"end_ms":0,"text":"«»"},{"start_ms":3600000,"end_ms":0,"text":"!?a b","speaker":"A"},{"start_ms":999,"end_ms":0,"text":""}],"text":"[0:59] Speaker 1: !?!?«»\n[60:00] Speaker A: !?a b"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":"a b","speaker":"2"},{"start_ms":0,"end_ms":0,"text":"!?","speaker":"2"},{"start_ms":12345678,"end_ms":0,"text":""},{"start_ms":1000,"end_ms":0,"text":"","speaker":"2"},{"start_ms":3599999,"end_ms":0,"text":"..."},{"start_ms":59999,"end_ms":0,"text":"","speaker":"A"}],"text":"[59:59] Speaker 2: a b!?..."},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":999,"end_ms":0,"text":"x."},{"start_ms":1000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":61000,"end_ms":0,"text":"!?-"}],"text":"[0:00] x.!?-"},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":"«»","speaker":"2"},{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":"字"},{"start_ms":999,"end_ms":0,"text":""},{"start_ms":-1500,"end_ms":0,"text":" ","speaker":"1"}],"text":"[1:01] Speaker 2: «»\n[59:59] 字"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":-1500,"end_ms":0,"text":"a b ","speaker":"2"},{"start_ms":-61000,"end_ms":0,"text":"a b!?"},{"start_ms":999,"end_ms":0,"text":"。"},{"start_ms":1000,"end_ms":0,"text":"","speaker":"A"}],"text":"[0:-1] Speaker 2: a b\n[-1:-1] a b!?。"},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"。","speaker":"1"},{"start_ms":1000,"end_ms":0,"text":"-"}],"text":"[0:-1] Speaker 1: 。-"},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"a b...","speaker":"1"},{"start_ms":3600000,"end_ms":0,"text":""}],"text":"[60:00] Speaker 1: a b..."},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"。","speaker":"1"},{"start_ms":-1500,"end_ms":0,"text":"..."}],"text":"[0:-1] Speaker 1: 。..."},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":"","speaker":"1"}],"text":""},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"......"},{"start_ms":1000,"end_ms":0,"text":"Plan","speaker":"2"}],"text":"[0:01] ......\n[0:01] Speaker 2: Plan"},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"","speaker":"1"},{"start_ms":61000,"end_ms":0,"text":"字。"},{"start_ms":1000,"end_ms":0,"text":"。 "},{"start_ms":12345678,"end_ms":0,"text":""}],"text":"[1:01] 字。。"},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"。...","speaker":"2"},{"start_ms":1000,"end_ms":0,"text":"","speaker":"A"}],"text":"[0:01] Speaker 2: 。..."},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"!?","speaker":"A"},{"start_ms":999,"end_ms":0,"text":"x.","speaker":"1"}],"text":"[60:00] Speaker A: !?\n[0:00] Speaker 1: x."},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":"Hello there."},{"start_ms":-1500,"end_ms":0,"text":"..."},{"start_ms":1000,"end_ms":0,"text":"。"}],"text":"[205:45] Hello there....。"},
+{"segments":[{"start_ms":999,"end_ms":0,"text":"","speaker":"1"},{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"«»","speaker":"2"},{"start_ms":-61000,"end_ms":0,"text":"«»"},{"start_ms":3599999,"end_ms":0,"text":" 。","speaker":"2"}],"text":"[60:00] Speaker 2: «»«»。"},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"","speaker":"A"}],"text":""},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":""}],"text":""},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"PlanHello there.","speaker":"1"},{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":"。","speaker":"A"},{"start_ms":-1500,"end_ms":0,"text":""}],"text":"[0:01] Speaker 1: PlanHello there.。"},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":59999,"end_ms":0,"text":"字"}],"text":"[0:59] 字"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"","speaker":"1"},{"start_ms":12345678,"end_ms":0,"text":"«»"}],"text":"[205:45] «»"},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"...","speaker":"1"},{"start_ms":61000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"1"}],"text":"[0:-1] Speaker 1: ..."},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"x."},{"start_ms":12345678,"end_ms":0,"text":"......"},{"start_ms":-1500,"end_ms":0,"text":"!?Hello there.","speaker":"2"},{"start_ms":0,"end_ms":0,"text":"«»a b"},{"start_ms":999,"end_ms":0,"text":"Plan"},{"start_ms":999,"end_ms":0,"text":"a b","speaker":"2"}],"text":"[0:01] x.......\n[0:-1] Speaker 2: !?Hello there.\n[0:00] «»a b\n[0:00] Plan\n[0:00] Speaker 2: a b"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":"。"},{"start_ms":12345678,"end_ms":0,"text":"","speaker":"2"},{"start_ms":3599999,"end_ms":0,"text":"","speaker":"A"},{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":999,"end_ms":0,"text":"Plan ","speaker":"2"}],"text":"[59:59] 。\n[0:00] Speaker 2: Plan"},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"-"}],"text":"[0:01] -"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"","speaker":"1"},{"start_ms":59999,"end_ms":0,"text":"-Hello there.","speaker":"A"},{"start_ms":0,"end_ms":0,"text":""}],"text":"[0:59] Speaker A: -Hello there."},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":"x."},{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":3599999,"end_ms":0,"text":" "},{"start_ms":59999,"end_ms":0,"text":""}],"text":"[205:45] x."},
+{"segments":[{"start_ms":-61000,"end_ms":0,"text":" ..."},{"start_ms":3599999,"end_ms":0,"text":"Plan "}],"text":"[-1:-1] ...\n[59:59] Plan"},
+{"segments":[{"start_ms":-61000,"end_ms":0,"text":"字Plan","speaker":"2"},{"start_ms":59999,"end_ms":0,"text":"«»"},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"1"},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"2"},{"start_ms":61000,"end_ms":0,"text":""}],"text":"[-1:-1] Speaker 2: 字Plan«»"},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"Plan。"}],"text":"[0:-1] Plan。"},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"x.x.","speaker":"1"},{"start_ms":3599999,"end_ms":0,"text":"","speaker":"1"}],"text":"[0:01] Speaker 1: x.x."},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"字","speaker":"A"},{"start_ms":61000,"end_ms":0,"text":"","speaker":"1"},{"start_ms":-1500,"end_ms":0,"text":""}],"text":"[60:00] Speaker A: 字"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":"","speaker":"A"},{"start_ms":59999,"end_ms":0,"text":"。a b"},{"start_ms":3600000,"end_ms":0,"text":"a b字","speaker":"1"},{"start_ms":1000,"end_ms":0,"text":"..."},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"A"}],"text":"[0:59] 。a b\n[60:00] Speaker 1: a b字..."},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":"-"},{"start_ms":61000,"end_ms":0,"text":"a ba b"},{"start_ms":61000,"end_ms":0,"text":"","speaker":"1"}],"text":"[1:01] -\n[1:01] a ba b"},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":-1500,"end_ms":0,"text":"!?!?","speaker":"2"},{"start_ms":0,"end_ms":0,"text":"字-","speaker":"1"},{"start_ms":12345678,"end_ms":0,"text":"!?"}],"text":"[0:-1] Speaker 2: !?!?\n[0:00] Speaker 1: 字-!?"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":999,"end_ms":0,"text":"a b-","speaker":"2"},{"start_ms":999,"end_ms":0,"text":"-x."},{"start_ms":999,"end_ms":0,"text":"。"},{"start_ms":3600000,"end_ms":0,"text":"Hello there.a b"}],"text":"[0:00] Speaker 2: a b-\n[0:00] -x.。\n[60:00] Hello there.a b"},
+{"segments":[{"start_ms":0,"end_ms":0,"text":"a b"}],"text":"[0:00] a b"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"«»","speaker":"1"},{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":"--","speaker":"2"}],"text":"[60:00] Speaker 1: «»--"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"a b"},{"start_ms":-1500,"end_ms":0,"text":"a b","speaker":"1"},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":59999,"end_ms":0,"text":"字"},{"start_ms":3599999,"end_ms":0,"text":"字Hello there."}],"text":"[0:-1] a b\n[0:-1] Speaker 1: a b\n[0:59] 字\n[59:59] 字Hello there."},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"Plan","speaker":"1"},{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"2"}],"text":"[60:00] Speaker 1: Plan"},
+{"segments":[{"start_ms":0,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":-61000,"end_ms":0,"text":""}],"text":""},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":"a b字"},{"start_ms":-1500,"end_ms":0,"text":"«»字"},{"start_ms":61000,"end_ms":0,"text":""}],"text":"[205:45] a b字\n[0:-1] «»字"},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":"!?","speaker":"A"}],"text":"[1:01] Speaker A: !?"},
+{"segments":[{"start_ms":999,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"Hello there.x."},{"start_ms":3599999,"end_ms":0,"text":" 字"},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"A"}],"text":"[60:00] Hello there.x.\n[59:59] 字"},
+{"segments":[{"start_ms":0,"end_ms":0,"text":"","speaker":"1"},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"2"}],"text":""},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"。"},{"start_ms":0,"end_ms":0,"text":"","speaker":"A"}],"text":"[0:-1] 。"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":-61000,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":"...","speaker":"2"},{"start_ms":59999,"end_ms":0,"text":""}],"text":"[0:00] Speaker 2: ..."},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"","speaker":"1"},{"start_ms":61000,"end_ms":0,"text":"!?","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":""}],"text":"[1:01] Speaker A: !?"},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":""}],"text":""},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":""},{"start_ms":-61000,"end_ms":0,"text":"","speaker":"2"},{"start_ms":-1500,"end_ms":0,"text":"字","speaker":"2"}],"text":"[0:-1] Speaker 2: 字"},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":" "},{"start_ms":1000,"end_ms":0,"text":"...","speaker":"2"}],"text":"[0:01] Speaker 2: ..."},
+{"segments":[{"start_ms":999,"end_ms":0,"text":"","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":""}],"text":""},
+{"segments":[{"start_ms":0,"end_ms":0,"text":"......","speaker":"2"},{"start_ms":999,"end_ms":0,"text":"Plan。"}],"text":"[0:00] Speaker 2: ......\n[0:00] Plan。"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":" ","speaker":"A"},{"start_ms":59999,"end_ms":0,"text":"..."},{"start_ms":-61000,"end_ms":0,"text":"Plan"},{"start_ms":-1500,"end_ms":0,"text":"a b","speaker":"2"}],"text":"[0:59] ...\n[-1:-1] Plan\n[0:-1] Speaker 2: a b"},
+{"segments":[{"start_ms":-61000,"end_ms":0,"text":"x.«»","speaker":"A"},{"start_ms":-61000,"end_ms":0,"text":"字","speaker":"2"},{"start_ms":12345678,"end_ms":0,"text":"字-"}],"text":"[-1:-1] Speaker A: x.«»\n[-1:-1] Speaker 2: 字\n[205:45] 字-"},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":""},{"start_ms":1000,"end_ms":0,"text":"a bPlan","speaker":"1"},{"start_ms":-1500,"end_ms":0,"text":"Hello there.«»","speaker":"1"},{"start_ms":3600000,"end_ms":0,"text":"!?","speaker":"2"}],"text":"[0:01] Speaker 1: a bPlan\n[0:-1] Speaker 1: Hello there.«»!?"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":59999,"end_ms":0,"text":"。","speaker":"2"}],"text":"[0:59] Speaker 2: 。"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":"«»Hello there."},{"start_ms":3599999,"end_ms":0,"text":" ","speaker":"2"},{"start_ms":12345678,"end_ms":0,"text":"Hello there.a b"},{"start_ms":999,"end_ms":0,"text":"-!?","speaker":"2"},{"start_ms":-61000,"end_ms":0,"text":"!?","speaker":"1"}],"text":"[59:59] «»Hello there.\n[205:45] Hello there.a b-!?!?"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":1000,"end_ms":0,"text":"","speaker":"2"},{"start_ms":-1500,"end_ms":0,"text":"x.","speaker":"2"},{"start_ms":12345678,"end_ms":0,"text":"Hello there.","speaker":"1"},{"start_ms":-1500,"end_ms":0,"text":"x."}],"text":"[0:-1] Speaker 2: x.\n[205:45] Speaker 1: Hello there.\n[0:-1] x."},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":59999,"end_ms":0,"text":"..."}],"text":"[0:59] ..."},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":" ","speaker":"2"},{"start_ms":-61000,"end_ms":0,"text":"«»"},{"start_ms":3599999,"end_ms":0,"text":"Plan","speaker":"2"},{"start_ms":3600000,"end_ms":0,"text":"!?","speaker":"1"}],"text":"[-1:-1] «»\n[59:59] Speaker 2: Plan!?"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":"«»","speaker":"2"},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":12345678,"end_ms":0,"text":"","speaker":"A"},{"start_ms":0,"end_ms":0,"text":"Hello there.","speaker":"1"}],"text":"[59:59] Speaker 2: «»\n[0:00] Speaker 1: Hello there."},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"Hello there."},{"start_ms":61000,"end_ms":0,"text":"x."},{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":59999,"end_ms":0,"text":"","speaker":"1"}],"text":"[0:59] Hello there.\n[1:01] x."},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":"字","speaker":"1"},{"start_ms":1000,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"Hello there."},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":-61000,"end_ms":0,"text":"Plan","speaker":"A"}],"text":"[0:00] Speaker 1: 字\n[60:00] Hello there.\n[-1:-1] Speaker A: Plan"},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":"Hello there.a b"},{"start_ms":12345678,"end_ms":0,"text":""}],"text":"[205:45] Hello there.a b"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":" ","speaker":"A"},{"start_ms":-61000,"end_ms":0,"text":"x.«»"},{"start_ms":12345678,"end_ms":0,"text":"«»Plan"}],"text":"[-1:-1] x.«»\n[205:45] «»Plan"},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"x.x.","speaker":"A"},{"start_ms":-61000,"end_ms":0,"text":"。"}],"text":"[60:00] Speaker A: x.x.。"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":-61000,"end_ms":0,"text":"a b"},{"start_ms":59999,"end_ms":0,"text":"-","speaker":"A"},{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":-61000,"end_ms":0,"text":"","speaker":"2"},{"start_ms":59999,"end_ms":0,"text":"","speaker":"A"}],"text":"[-1:-1] a b-"},
+{"segments":[{"start_ms":999,"end_ms":0,"text":"Plan"},{"start_ms":3599999,"end_ms":0,"text":"Plan"},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"A"}],"text":"[0:00] Plan\n[59:59] Plan"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":"Plan"},{"start_ms":-1500,"end_ms":0,"text":"-","speaker":"A"},{"start_ms":1000,"end_ms":0,"text":"字a b"}],"text":"[0:00] Plan-\n[0:01] 字a b"},
+{"segments":[{"start_ms":999,"end_ms":0,"text":""},{"start_ms":1000,"end_ms":0,"text":"x."}],"text":"[0:01] x."},
+{"segments":[{"start_ms":0,"end_ms":0,"text":" ","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":"...!?"}],"text":"[59:59] ...!?"},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":-61000,"end_ms":0,"text":" 。","speaker":"2"},{"start_ms":0,"end_ms":0,"text":"a b","speaker":"2"}],"text":"[-1:-1] Speaker 2: 。\n[0:00] Speaker 2: a b"},
+{"segments":[{"start_ms":0,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":"a b","speaker":"A"},{"start_ms":-1500,"end_ms":0,"text":"Plan-","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":" 。","speaker":"2"}],"text":"[205:45] Speaker A: a b\n[0:-1] Speaker A: Plan-。"},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":"!?Plan","speaker":"2"},{"start_ms":-61000,"end_ms":0,"text":"字!?","speaker":"1"},{"start_ms":12345678,"end_ms":0,"text":"x.","speaker":"2"}],"text":"[1:01] Speaker 2: !?Plan\n[-1:-1] Speaker 1: 字!?\n[205:45] Speaker 2: x."},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"..."},{"start_ms":3600000,"end_ms":0,"text":"字","speaker":"1"},{"start_ms":12345678,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":""},{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":-1500,"end_ms":0,"text":"x.","speaker":"1"}],"text":"[0:-1] ...\n[60:00] Speaker 1: 字\n[0:-1] Speaker 1: x."},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":1000,"end_ms":0,"text":" 。"},{"start_ms":3600000,"end_ms":0,"text":"a b","speaker":"1"},{"start_ms":12345678,"end_ms":0,"text":""}],"text":"[0:01] 。\n[60:00] Speaker 1: a b"},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":""},{"start_ms":61000,"end_ms":0,"text":"","speaker":"2"},{"start_ms":61000,"end_ms":0,"text":""}],"text":""},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":"字"},{"start_ms":12345678,"end_ms":0,"text":"  "}],"text":"[59:59] 字"},
+{"segments":[{"start_ms":-61000,"end_ms":0,"text":"-"},{"start_ms":0,"end_ms":0,"text":"...","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":"","speaker":"A"},{"start_ms":-1500,"end_ms":0,"text":""}],"text":"[-1:-1] -..."},
+{"segments":[{"start_ms":999,"end_ms":0,"text":" ","speaker":"A"},{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":999,"end_ms":0,"text":"x.","speaker":"A"},{"start_ms":-61000,"end_ms":0,"text":"Hello there.a b"}],"text":"[0:00] Speaker A: x.\n[-1:-1] Hello there.a b"},
+{"segments":[],"text":""},
+{"segments":[],"text":""},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"Plan","speaker":"A"},{"start_ms":0,"end_ms":0,"text":"Hello there.","speaker":"A"},{"start_ms":0,"end_ms":0,"text":" "},{"start_ms":59999,"end_ms":0,"text":"","speaker":"1"}],"text":"[0:01] Speaker A: Plan\n[0:00] Speaker A: Hello there."},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":" ","speaker":"2"},{"start_ms":61000,"end_ms":0,"text":" ","speaker":"1"},{"start_ms":999,"end_ms":0,"text":"...","speaker":"2"},{"start_ms":-61000,"end_ms":0,"text":""},{"start_ms":3599999,"end_ms":0,"text":"字"}],"text":"[0:00] Speaker 2: ...\n[59:59] 字"},
+{"segments":[{"start_ms":0,"end_ms":0,"text":"«»"},{"start_ms":59999,"end_ms":0,"text":"-"}],"text":"[0:00] «»-"},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":"","speaker":"A"},{"start_ms":12345678,"end_ms":0,"text":"","speaker":"2"},{"start_ms":0,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":""}],"text":""},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":"","speaker":"1"},{"start_ms":3599999,"end_ms":0,"text":"","speaker":"1"}],"text":""},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"x.","speaker":"2"},{"start_ms":3600000,"end_ms":0,"text":"。","speaker":"2"},{"start_ms":12345678,"end_ms":0,"text":"","speaker":"A"},{"start_ms":12345678,"end_ms":0,"text":"«»字","speaker":"A"},{"start_ms":12345678,"end_ms":0,"text":"-字"}],"text":"[0:-1] Speaker 2: x.。\n[205:45] Speaker A: «»字\n[205:45] -字"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":-61000,"end_ms":0,"text":"!?"}],"text":"[-1:-1] !?"},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":" "},{"start_ms":3599999,"end_ms":0,"text":"..."},{"start_ms":3599999,"end_ms":0,"text":"Plan"},{"start_ms":59999,"end_ms":0,"text":" ","speaker":"2"},{"start_ms":61000,"end_ms":0,"text":"。","speaker":"1"}],"text":"[59:59] ...\n[59:59] Plan。"},
+{"segments":[{"start_ms":-61000,"end_ms":0,"text":"a b。"},{"start_ms":0,"end_ms":0,"text":"..."},{"start_ms":-61000,"end_ms":0,"text":"Plan"}],"text":"[-1:-1] a b。...\n[-1:-1] Plan"},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":"!?","speaker":"1"},{"start_ms":0,"end_ms":0,"text":"..."},{"start_ms":999,"end_ms":0,"text":"«»","speaker":"1"},{"start_ms":-61000,"end_ms":0,"text":"","speaker":"2"},{"start_ms":0,"end_ms":0,"text":"«»"}],"text":"[205:45] Speaker 1: !?...«»«»"},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"","speaker":"2"}],"text":""},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"a b","speaker":"A"},{"start_ms":999,"end_ms":0,"text":"a b"},{"start_ms":1000,"end_ms":0,"text":"","speaker":"1"}],"text":"[0:-1] Speaker A: a b\n[0:00] a b"},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"","speaker":"1"},{"start_ms":0,"end_ms":0,"text":"","speaker":"2"},{"start_ms":1000,"end_ms":0,"text":"-","speaker":"2"}],"text":"[0:01] Speaker 2: -"},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"-Hello there."},{"start_ms":-61000,"end_ms":0,"text":"字"},{"start_ms":61000,"end_ms":0,"text":"-Hello there.","speaker":"A"},{"start_ms":0,"end_ms":0,"text":"","speaker":"A"},{"start_ms":61000,"end_ms":0,"text":""}],"text":"[0:01] -Hello there.\n[-1:-1] 字\n[1:01] Speaker A: -Hello there."},
+{"segments":[{"start_ms":0,"end_ms":0,"text":" "},{"start_ms":59999,"end_ms":0,"text":"x.字"},{"start_ms":-61000,"end_ms":0,"text":"«»"},{"start_ms":0,"end_ms":0,"text":"!?"}],"text":"[0:59] x.字«»!?"},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"字","speaker":"A"}],"text":"[0:01] Speaker A: 字"},
+{"segments":[{"start_ms":0,"end_ms":0,"text":"Hello there."},{"start_ms":61000,"end_ms":0,"text":"..."},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":1000,"end_ms":0,"text":" x."},{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":59999,"end_ms":0,"text":"«»"}],"text":"[0:00] Hello there....\n[0:01] x.«»"},
+{"segments":[{"start_ms":0,"end_ms":0,"text":"x."},{"start_ms":0,"end_ms":0,"text":"字"},{"start_ms":1000,"end_ms":0,"text":"Hello there....","speaker":"A"},{"start_ms":1000,"end_ms":0,"text":"。-","speaker":"2"},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"1"},{"start_ms":-1500,"end_ms":0,"text":" "}],"text":"[0:00] x.\n[0:00] 字\n[0:01] Speaker A: Hello there....。-"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"-"},{"start_ms":61000,"end_ms":0,"text":""}],"text":"[60:00] -"},
+{"segments":[{"start_ms":999,"end_ms":0,"text":"","speaker":"2"},{"start_ms":3599999,"end_ms":0,"text":"-..."}],"text":"[59:59] -..."},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":"Hello there.x."},{"start_ms":3599999,"end_ms":0,"text":"。«»"},{"start_ms":59999,"end_ms":0,"text":"«»字"},{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":-61000,"end_ms":0,"text":"字"}],"text":"[60:00] Hello there.x.。«»\n[0:59] «»字\n[-1:-1] 字"},
+{"segments":[{"start_ms":61000,"end_ms":0,"text":"Hello there.x."},{"start_ms":-61000,"end_ms":0,"text":"..."},{"start_ms":3599999,"end_ms":0,"text":"a b"},{"start_ms":-1500,"end_ms":0,"text":" "},{"start_ms":999,"end_ms":0,"text":"a b "},{"start_ms":-1500,"end_ms":0,"text":"","speaker":"A"}],"text":"[1:01] Hello there.x....\n[59:59] a b\n[0:00] a b"},
+{"segments":[{"start_ms":0,"end_ms":0,"text":"字x."},{"start_ms":3599999,"end_ms":0,"text":"Plan!?","speaker":"2"},{"start_ms":-1500,"end_ms":0,"text":"a b-","speaker":"A"},{"start_ms":1000,"end_ms":0,"text":""},{"start_ms":61000,"end_ms":0,"text":"Hello there."}],"text":"[0:00] 字x.\n[59:59] Speaker 2: Plan!?\n[0:-1] Speaker A: a b-\n[1:01] Hello there."},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":""}],"text":""},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":" "},{"start_ms":999,"end_ms":0,"text":"","speaker":"1"},{"start_ms":1000,"end_ms":0,"text":"Plan","speaker":"1"},{"start_ms":12345678,"end_ms":0,"text":""}],"text":"[0:01] Speaker 1: Plan"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":61000,"end_ms":0,"text":""},{"start_ms":61000,"end_ms":0,"text":"!?","speaker":"2"},{"start_ms":59999,"end_ms":0,"text":""}],"text":"[1:01] Speaker 2: !?"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":-61000,"end_ms":0,"text":"字","speaker":"A"},{"start_ms":61000,"end_ms":0,"text":"«»"},{"start_ms":-1500,"end_ms":0,"text":"","speaker":"1"},{"start_ms":0,"end_ms":0,"text":"Plan","speaker":"2"},{"start_ms":3600000,"end_ms":0,"text":""}],"text":"[-1:-1] Speaker A: 字«»\n[0:00] Speaker 2: Plan"},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":3600000,"end_ms":0,"text":"!?","speaker":"1"},{"start_ms":3599999,"end_ms":0,"text":"...","speaker":"2"},{"start_ms":-61000,"end_ms":0,"text":"-"},{"start_ms":-1500,"end_ms":0,"text":""}],"text":"[60:00] Speaker 1: !?...-"},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":""}],"text":""},
+{"segments":[{"start_ms":999,"end_ms":0,"text":"","speaker":"A"},{"start_ms":-1500,"end_ms":0,"text":"-","speaker":"A"},{"start_ms":999,"end_ms":0,"text":"x.。"},{"start_ms":3599999,"end_ms":0,"text":"","speaker":"1"},{"start_ms":-1500,"end_ms":0,"text":"。"}],"text":"[0:-1] Speaker A: -\n[0:00] x.。。"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":"","speaker":"2"},{"start_ms":61000,"end_ms":0,"text":"«»"},{"start_ms":3599999,"end_ms":0,"text":"x."},{"start_ms":1000,"end_ms":0,"text":"-"}],"text":"[1:01] «»\n[59:59] x.-"},
+{"segments":[{"start_ms":999,"end_ms":0,"text":""},{"start_ms":0,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":"","speaker":"2"},{"start_ms":1000,"end_ms":0,"text":"!?"},{"start_ms":1000,"end_ms":0,"text":"--","speaker":"1"}],"text":"[0:01] !?--"},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":"«»!?"}],"text":"[205:45] «»!?"},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":""},{"start_ms":3599999,"end_ms":0,"text":""},{"start_ms":-61000,"end_ms":0,"text":""},{"start_ms":3599999,"end_ms":0,"text":"字"},{"start_ms":-1500,"end_ms":0,"text":"","speaker":"1"}],"text":"[59:59] 字"},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":""},{"start_ms":61000,"end_ms":0,"text":"Planx."},{"start_ms":999,"end_ms":0,"text":"Plan"},{"start_ms":3600000,"end_ms":0,"text":"Hello there."},{"start_ms":-61000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":"x."}],"text":"[1:01] Planx.\n[0:00] Plan\n[60:00] Hello there.\n[59:59] x."},
+{"segments":[{"start_ms":999,"end_ms":0,"text":"Plan。","speaker":"2"},{"start_ms":-61000,"end_ms":0,"text":"a b"},{"start_ms":-61000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":-1500,"end_ms":0,"text":"","speaker":"2"}],"text":"[0:00] Speaker 2: Plan。\n[-1:-1] a b"},
+{"segments":[{"start_ms":3600000,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":"。","speaker":"A"}],"text":"[205:45] Speaker A: 。"},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"字字"},{"start_ms":3599999,"end_ms":0,"text":"-«»","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":"x."},{"start_ms":59999,"end_ms":0,"text":"x."}],"text":"[0:-1] 字字-«»\n[59:59] x.\n[0:59] x."},
+{"segments":[{"start_ms":999,"end_ms":0,"text":"","speaker":"A"},{"start_ms":1000,"end_ms":0,"text":"a b "},{"start_ms":-61000,"end_ms":0,"text":"«»","speaker":"1"}],"text":"[0:01] a b«»"},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":"  "},{"start_ms":-61000,"end_ms":0,"text":"!?"},{"start_ms":3600000,"end_ms":0,"text":"。"}],"text":"[-1:-1] !?。"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":999,"end_ms":0,"text":""},{"start_ms":61000,"end_ms":0,"text":" ..."},{"start_ms":59999,"end_ms":0,"text":""},{"start_ms":12345678,"end_ms":0,"text":" a b"},{"start_ms":12345678,"end_ms":0,"text":" "}],"text":"[1:01] ...\n[205:45] a b"},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":"","speaker":"A"}],"text":""},
+{"segments":[{"start_ms":1000,"end_ms":0,"text":"a b..."},{"start_ms":0,"end_ms":0,"text":""},{"start_ms":59999,"end_ms":0,"text":"","speaker":"2"}],"text":"[0:01] a b..."},
+{"segments":[{"start_ms":-61000,"end_ms":0,"text":"Plan","speaker":"1"}],"text":"[-1:-1] Speaker 1: Plan"},
+{"segments":[],"text":""},
+{"segments":[{"start_ms":59999,"end_ms":0,"text":"!?"}],"text":"[0:59] !?"},
+{"segments":[{"start_ms":-1500,"end_ms":0,"text":"","speaker":"2"},{"start_ms":-61000,"end_ms":0,"text":"Plan","speaker":"1"},{"start_ms":61000,"end_ms":0,"text":"a b«»","speaker":"A"}],"text":"[-1:-1] Speaker 1: Plan\n[1:01] Speaker A: a b«»"},
+{"segments":[{"start_ms":3599999,"end_ms":0,"text":"。 "},{"start_ms":3599999,"end_ms":0,"text":"-","speaker":"2"},{"start_ms":3600000,"end_ms":0,"text":"Hello there."},{"start_ms":3600000,"end_ms":0,"text":"","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":"Hello there.Hello there.","speaker":"A"},{"start_ms":3599999,"end_ms":0,"text":"-"}],"text":"[59:59] 。-\n[60:00] Hello there.\n[59:59] Speaker A: Hello there.Hello there.-"},
+{"segments":[{"start_ms":999,"end_ms":0,"text":""},{"start_ms":59999,"end_ms":0,"text":"!?"}],"text":"[0:59] !?"},
+{"segments":[{"start_ms":0,"end_ms":0,"text":"Hello there.","speaker":"A"},{"start_ms":0,"end_ms":0,"text":""}],"text":"[0:00] Speaker A: Hello there."},
+{"segments":[{"start_ms":12345678,"end_ms":0,"text":"Hello there."}],"text":"[205:45] Hello there."},
+{"segments":[{"start_ms":0,"end_ms":0,"text":"","speaker":"2"},{"start_ms":3599999,"end_ms":0,"text":"«»","speaker":"1"}],"text":"[59:59] Speaker 1: «»"}
+]

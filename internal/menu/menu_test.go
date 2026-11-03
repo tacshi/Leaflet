@@ -65,6 +65,26 @@ func TestMention(t *testing.T) {
 	}
 }
 
+// A page the @ menu offers says where it is: in its parent page, else its
+// folder, else nothing at the top of the space.
+func TestMentionPlace(t *testing.T) {
+	m := Mentions{
+		Pages: []store.Page{
+			{ID: "trip", Title: "Trip", FolderID: "f"},
+			{ID: "packing", Title: "Packing", ParentID: "trip", FolderID: "f"},
+			{ID: "inbox", Title: "Inbox"},
+		},
+		Folders: []store.Folder{{ID: "f", Name: "Travel"}},
+	}
+	places := map[string]string{}
+	for _, it := range Mention(m) {
+		places[it.Key] = it.Hint
+	}
+	if places["page:packing"] != "Trip" || places["page:trip"] != "Travel" || places["page:inbox"] != "" {
+		t.Errorf("places %v", places)
+	}
+}
+
 func TestTurnAndBlock(t *testing.T) {
 	if typ, level, ok := Turn("h2"); typ != "heading" || level != 2 || !ok {
 		t.Errorf("h2 turns into %q level %d (%v)", typ, level, ok)

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Builds leaflet-speech, the helper the Mac app transcribes recordings with
-# on the Mac itself (macos/speech), into resources/darwin-<arch>, which
+# on the Mac itself (speech/, the Swift package the iOS app transcribes
+# with too), into resources/darwin-<arch>, which
 # mygo build and mygo dev ship in that architecture's app, in
 # Contents/Resources. The build scripts run it; run it before mygo dev to
 # record with On device there.
@@ -31,7 +32,16 @@ for arch in "${ARCHES[@]}"; do
 	mkdir -p "$(dirname "$out")"
 	info "building leaflet-speech for darwin/$goarch"
 	# It runs on the app's oldest macOS, and says there that it can't
-	# transcribe: SpeechTranscriber is macOS 26's.
+	# transcribe: SpeechTranscriber is macOS 26's. The package's library
+	# first, then the helper on it, with swiftc: swift build and xcodebuild
+	# mark a package's product as built with the SDK of its oldest macOS,
+	# which macOS's frameworks may hold it to.
+	lib="$ROOT_DIR/build/speech/$goarch"
+	mkdir -p "$lib"
 	xcrun swiftc -O -swift-version 6 -parse-as-library -target "$target-apple-macos12" \
-		"$ROOT_DIR/macos/speech/main.swift" -o "$out"
+		-module-name LeafletSpeech -emit-library -static -emit-module \
+		-emit-module-path "$lib/LeafletSpeech.swiftmodule" -o "$lib/libLeafletSpeech.a" \
+		"$ROOT_DIR"/speech/Sources/LeafletSpeech/*.swift
+	xcrun swiftc -O -swift-version 6 -parse-as-library -target "$target-apple-macos12" \
+		-I "$lib" -L "$lib" -lLeafletSpeech "$ROOT_DIR"/speech/Sources/leaflet-speech/*.swift -o "$out"
 done

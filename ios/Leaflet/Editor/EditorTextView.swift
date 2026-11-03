@@ -187,6 +187,7 @@ final class EditorTextView: UITextView {
             header.frame = CGRect(x: side, y: 12, width: width, height: height)
             top = header.frame.maxY + 8
         }
+        top += leadingCardSpace
         let footerHeight =
             footer.flatMap {
                 height(of: $0, width: bounds.width - side * 2, measure: measureFooter, &footerSize)
@@ -263,6 +264,21 @@ final class EditorTextView: UITextView {
         let height = measure(width)
         kept = Measured(width: width, ideal: ideal, height: height)
         return height
+    }
+
+    /// leadingCardSpace is the spacing before the text's first block when it
+    /// is a card, a callout or code, which draws above its text: TextKit
+    /// gives a text's first paragraph none, and the card would run into the
+    /// header.
+    private var leadingCardSpace: CGFloat {
+        guard textStorage.length > 0,
+            let info = textStorage.attribute(.leafletBlock, at: 0, effectiveRange: nil)
+                as? BlockInfo,
+            info.type == "callout" || info.type == "code",
+            let style = textStorage.attribute(.paragraphStyle, at: 0, effectiveRange: nil)
+                as? NSParagraphStyle
+        else { return 0 }
+        return style.paragraphSpacingBefore
     }
 
     /// remeasure has the header and the footer measured again as they lay

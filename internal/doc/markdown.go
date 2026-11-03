@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // ToMarkdown writes rich text in the small inline markdown dialect agents
@@ -255,56 +256,78 @@ func boldTouchesItalic(toks []mdToken, i int) bool {
 // markers must touch text to read as markers, and a line can't start with
 // one that closes, where it can read as a list item's.
 func trimSpans(d Delta) Delta {
-	type char struct {
-		r   rune
-		a   Attrs
-		run int
+	const bold, italic, strike = 1, 2, 4
+	marksOf := func(a Attrs) (m uint8) {
+		if a.Bold {
+			m |= bold
+		}
+		if a.Italic {
+			m |= italic
+		}
+		if a.Strike {
+			m |= strike
+		}
+		return m
 	}
-	var cs []char
+	// Most text has none of the three, and nothing to trim.
+	if !slices.ContainsFunc(d, func(r Run) bool { return marksOf(r.Attrs) != 0 }) {
+		return d.Compact()
+	}
+	// A character as trimming sees it: its run and where in the run's text
+	// it starts, whether a mark comes off it at a span's end, and the
+	// marks it keeps; its other formats are its run's.
+	type char struct {
+		run, at int32
+		space   bool
+		marks   uint8
+	}
+	n := 0
+	for _, r := range d {
+		n += utf8.RuneCountInString(r.Text)
+	}
+	cs := make([]char, 0, n)
 	for i, r := range d {
-		for _, c := range r.Text {
-			cs = append(cs, char{c, r.Attrs, i})
+		m := marksOf(r.Attrs)
+		for at, c := range r.Text {
+			cs = append(cs, char{int32(i), int32(at), (!r.Attrs.Code || c == '\n') && unicode.IsSpace(c), m})
 		}
 	}
-	marks := []func(*Attrs) *bool{
-		func(a *Attrs) *bool { return &a.Bold },
-		func(a *Attrs) *bool { return &a.Italic },
-		func(a *Attrs) *bool { return &a.Strike },
-	}
-	space := func(i int) bool { return (!cs[i].a.Code || cs[i].r == '\n') && unicode.IsSpace(cs[i].r) }
-	for _, mark := range marks {
+	for _, mark := range []uint8{bold, italic, strike} {
 		for i := 0; i < len(cs); {
-			if !*mark(&cs[i].a) {
+			if cs[i].marks&mark == 0 {
 				i++
 				continue
 			}
 			j := i
-			for j < len(cs) && *mark(&cs[j].a) {
+			for j < len(cs) && cs[j].marks&mark != 0 {
 				j++
 			}
 			lo, hi := i, j
-			for lo < hi && space(lo) {
-				*mark(&cs[lo].a) = false
+			for lo < hi && cs[lo].space {
+				cs[lo].marks &^= mark
 				lo++
 			}
-			for hi > lo && space(hi-1) {
-				*mark(&cs[hi-1].a) = false
+			for hi > lo && cs[hi-1].space {
+				cs[hi-1].marks &^= mark
 				hi--
 			}
 			i = j
 		}
 	}
-	var out Delta
+	out := make(Delta, 0, len(d))
 	for i := 0; i < len(cs); {
 		j := i + 1
-		for j < len(cs) && cs[j].run == cs[i].run && cs[j].a.Equal(cs[i].a) {
+		for j < len(cs) && cs[j].run == cs[i].run && cs[j].marks == cs[i].marks {
 			j++
 		}
-		text := make([]rune, 0, j-i)
-		for _, c := range cs[i:j] {
-			text = append(text, c.r)
+		r := d[cs[i].run]
+		end := len(r.Text)
+		if j < len(cs) && cs[j].run == cs[i].run {
+			end = int(cs[j].at)
 		}
-		out = append(out, Run{Text: string(text), Attrs: cs[i].a})
+		a := r.Attrs
+		a.Bold, a.Italic, a.Strike = cs[i].marks&bold != 0, cs[i].marks&italic != 0, cs[i].marks&strike != 0
+		out = append(out, Run{Text: r.Text[cs[i].at:end], Attrs: a})
 		i = j
 	}
 	return out.Compact()

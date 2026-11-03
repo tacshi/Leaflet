@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -117,5 +118,41 @@ func TestNewBlockSpecs(t *testing.T) {
 	views := BlockViews(c)
 	if views[0]["tone"] != "warning" || views[1]["collapsed"] != true || views[5]["formula"] != "e^{i\\pi}+1=0" || views[6]["source"] == nil {
 		t.Errorf("views %v", views)
+	}
+}
+
+// longPage is a page of n lines of the kinds people write: headings,
+// paragraphs some of them bold, nested bullets, to-dos, quotes and
+// numbered steps.
+func longPage(n int) *Content {
+	var lines []string
+	for i := 0; len(lines) < n; i++ {
+		switch i % 8 {
+		case 0:
+			lines = append(lines, fmt.Sprintf("## Section %d", i))
+		case 1:
+			lines = append(lines, fmt.Sprintf("Some **bold** text and a [link](https://example.com/%d) in paragraph %d, with `code`.", i, i))
+		case 2:
+			lines = append(lines, fmt.Sprintf("- A bullet %d", i), "  - nested under it")
+		case 3:
+			lines = append(lines, fmt.Sprintf("- [ ] To do %d", i))
+		case 4:
+			lines = append(lines, fmt.Sprintf("> A quote %d", i))
+		case 5:
+			lines = append(lines, fmt.Sprintf("1. First %d", i), fmt.Sprintf("2. Second %d", i))
+		default:
+			lines = append(lines, fmt.Sprintf("Plain paragraph %d with enough words to look like writing someone did today.", i))
+		}
+	}
+	return FromBlocks(ParseLines(strings.Join(lines, "\n")))
+}
+
+// BenchmarkBlockViews reads a page of 3000 blocks as an agent's read_page
+// does.
+func BenchmarkBlockViews(b *testing.B) {
+	c := longPage(3000)
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = BlockViews(c)
 	}
 }

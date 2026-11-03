@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 )
 
 func para(id, text string) *Node {
@@ -840,6 +841,100 @@ func TestInlineMarkdownFormatIntoLink(t *testing.T) {
 			t.Fatalf("%+v wrote %q, which reads back as %+v", want, md, got)
 		}
 	}
+}
+
+// trimSpans trims marks as it did one character at a time, each with its
+// formats, which allocated for every character of every text: random
+// texts, in every format, trim the same, and one with no mark to trim
+// allocates no more than its runs.
+func TestTrimSpansAsCharByChar(t *testing.T) {
+	texts := []string{"a", " ", "  ", "\n", " b ", "中文", "\t", "x\n", "é ", "👍", ""}
+	rng := rand.New(rand.NewPCG(5, 6)) // #nosec G404 -- seeded, for runs a test can repeat.
+	for range 20000 {
+		var d Delta
+		for range 1 + rng.IntN(6) {
+			a := Attrs{Bold: rng.IntN(3) == 0, Italic: rng.IntN(3) == 0, Strike: rng.IntN(4) == 0,
+				Code: rng.IntN(4) == 0, Under: rng.IntN(5) == 0}
+			switch rng.IntN(6) {
+			case 0:
+				a.Href = "https://a.b"
+			case 1:
+				a.Mention = &Mention{Kind: "user", ID: "u"}
+			case 2:
+				a.Color = "#ff0000"
+			}
+			text := ""
+			for range 1 + rng.IntN(3) {
+				text += texts[rng.IntN(len(texts))]
+			}
+			d = append(d, Run{Text: text, Attrs: a})
+		}
+		d = d.Compact()
+		if got, want := trimSpans(d), trimSpansByChar(d); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%+v trims to %+v, want %+v", d, got, want)
+		}
+	}
+	plain := Delta{{Text: strings.Repeat("words and spaces ", 200)}, {Text: "a link", Attrs: Attrs{Href: "https://a.b"}}}
+	if n := testing.AllocsPerRun(10, func() { _ = trimSpans(plain) }); n > 1 {
+		t.Errorf("a text with no mark to trim allocates %v times", n)
+	}
+}
+
+// trimSpansByChar is trimSpans as it was, one character at a time.
+func trimSpansByChar(d Delta) Delta {
+	type char struct {
+		r   rune
+		a   Attrs
+		run int
+	}
+	var cs []char
+	for i, r := range d {
+		for _, c := range r.Text {
+			cs = append(cs, char{c, r.Attrs, i})
+		}
+	}
+	marks := []func(*Attrs) *bool{
+		func(a *Attrs) *bool { return &a.Bold },
+		func(a *Attrs) *bool { return &a.Italic },
+		func(a *Attrs) *bool { return &a.Strike },
+	}
+	space := func(i int) bool { return (!cs[i].a.Code || cs[i].r == '\n') && unicode.IsSpace(cs[i].r) }
+	for _, mark := range marks {
+		for i := 0; i < len(cs); {
+			if !*mark(&cs[i].a) {
+				i++
+				continue
+			}
+			j := i
+			for j < len(cs) && *mark(&cs[j].a) {
+				j++
+			}
+			lo, hi := i, j
+			for lo < hi && space(lo) {
+				*mark(&cs[lo].a) = false
+				lo++
+			}
+			for hi > lo && space(hi-1) {
+				*mark(&cs[hi-1].a) = false
+				hi--
+			}
+			i = j
+		}
+	}
+	var out Delta
+	for i := 0; i < len(cs); {
+		j := i + 1
+		for j < len(cs) && cs[j].run == cs[i].run && cs[j].a.Equal(cs[i].a) {
+			j++
+		}
+		text := make([]rune, 0, j-i)
+		for _, c := range cs[i:j] {
+			text = append(text, c.r)
+		}
+		out = append(out, Run{Text: string(text), Attrs: cs[i].a})
+		i = j
+	}
+	return out.Compact()
 }
 
 // sameShown reports whether two texts read the same: the same characters

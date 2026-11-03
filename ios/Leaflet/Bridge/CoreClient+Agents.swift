@@ -37,9 +37,14 @@ struct AgentState: Codable, Sendable {
         /// answer is the model's answer as far as it has come, while the
         /// run works and has not edited the page.
         var answer: String?
+        /// settled is a run whose Undo shows only in its chat message, as
+        /// the desktop's run bar hides it: a version restored since put
+        /// the page back to before or after it.
+        var settled = false
 
         enum CodingKeys: String, CodingKey {
-            case id, surface, instruction, status, undone, error, edits, summary, stoppable, answer
+            case id, surface, instruction, status, undone, error, edits, summary, stoppable, answer,
+                settled
             case agentName = "agent_name"
             case blockIDs = "block_ids"
         }
@@ -104,13 +109,19 @@ struct CommentThread: Codable, Hashable, Identifiable, Sendable {
         var quote: String?
         var resolved: Bool
         var createdAt: Int64
+        /// deleted is a first comment deleted, kept for its replies,
+        /// without its words.
+        var deleted: Bool?
+        /// mayDelete says the user may delete it, as the server lets them.
+        var mayDelete: Bool
 
         enum CodingKeys: String, CodingKey {
-            case id, body, quote, resolved
+            case id, body, quote, resolved, deleted
             case blockID = "block_id"
             case authorKind = "author_kind"
             case authorName = "author_name"
             case createdAt = "created_at"
+            case mayDelete = "may_delete"
         }
 
         var created: Date { Date(timeIntervalSince1970: TimeInterval(createdAt) / 1000) }
@@ -118,7 +129,15 @@ struct CommentThread: Codable, Hashable, Identifiable, Sendable {
 
     var root: Comment
     var replies: [Comment]
+    /// mayResolve says the user may resolve or reopen the thread, as the
+    /// server lets them: another's change would never go up.
+    var mayResolve: Bool
     var id: String { root.id }
+
+    enum CodingKeys: String, CodingKey {
+        case root, replies
+        case mayResolve = "may_resolve"
+    }
 }
 
 /// ProviderPreset is a kind of agent provider to add.
@@ -226,6 +245,17 @@ extension CoreClient {
     /// later ones changed leave the run as it was, and it throws why.
     nonisolated(nonsending) func undoRun(_ pageID: String, runID: String) async throws {
         try await call { try $0.undoRun(pageID, runID: runID) }
+    }
+
+    /// replyBlocks are a run's answer in words as the blocks of its
+    /// Markdown, for the editor to put after the block it was asked about,
+    /// as the desktop's Insert does; none for a run that edited the page.
+    nonisolated(nonsending) func replyBlocks(_ pageID: String, runID: String) async throws
+        -> [DocNode]
+    {
+        try await call([DocNode].self) { core in
+            try Self.answer { e in core.replyBlocks(pageID, runID: runID, error: e) }
+        }
     }
 
     /// redoRun puts an undone run's edits back, or leaves it undone and

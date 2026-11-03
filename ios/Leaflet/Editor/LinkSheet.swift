@@ -70,15 +70,20 @@ struct LinkSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L.commonCancel) { dismiss() }
+                    CancelButton(dirty: dirty)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L.dialogInsert, action: apply)
                 }
             }
         }
+        .interactiveDismissDisabled(dirty)
         .onAppear { focused = true }
     }
+
+    /// dirty says a link was typed or pasted, which Cancel asks before
+    /// throwing away.
+    private var dirty: Bool { !link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
     /// apply makes the block as the core does, or says what is wrong with
     /// the link.
@@ -111,6 +116,11 @@ struct EmbedSheet: View {
     @State private var html = MobileEmbedStart()
     @State private var height = "320"
     @State private var failure: String?
+    /// original is the embed as the sheet opened with it.
+    @State private var original: [String]?
+
+    private var fields: [String] { [title, html, height] }
+    private var dirty: Bool { original.map { $0 != fields } ?? false }
 
     var body: some View {
         NavigationStack {
@@ -144,14 +154,16 @@ struct EmbedSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L.commonCancel) { dismiss() }
+                    CancelButton(dirty: dirty)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(editing == nil ? L.dialogInsert : L.commonSave, action: apply)
                 }
             }
         }
+        .interactiveDismissDisabled(dirty)
         .onAppear {
+            defer { original = fields }
             guard let d = editing?.data else { return }
             title = d["title"]?.string ?? ""
             html = d["html"]?.string ?? ""

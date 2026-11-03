@@ -38,24 +38,72 @@ func (a *App) duplicatePage(p store.Page) {
 		return
 	}
 	failed := func(err error) { a.toast(locales.TemplateDuplicateFailed(err.Error())) }
-	if !a.copyable(p.ID, failed, func() { a.duplicatePage(p) }) {
+	// Again once what it needs has come: as the page is then, which may
+	// have moved or gone meanwhile.
+	if !a.copyable(p.ID, failed, func() { a.again(p.ID, a.duplicatePage) }) {
 		return
 	}
 	o := store.CopyOptions{ParentID: p.ParentID, FolderID: p.FolderID, AfterID: p.ID, Title: copyTitle(p.Title)}
 	if a.isShared(p) && (p.ParentID == "" || !a.canEdit(p.ParentID)) {
 		o = store.CopyOptions{Title: o.Title}
 	}
-	cp, err := a.st.CopyPage(p.ID, o)
-	if err != nil {
-		a.copyFailed(err, failed)
-		return
+	var cp store.Page
+	a.copyPage(failed, func() (err error) { cp, err = a.st.CopyPage(p.ID, o); return }, func() {
+		a.pages, _ = a.st.Pages()
+		if cp.ParentID != "" {
+			a.linkSubpage(cp.ParentID, cp.ID, p.ID)
+		}
+		a.openPage(cp.ID)
+		a.focusTitle(true)
+	})
+}
+
+// again runs fn on page id as it is now, unless it is gone.
+func (a *App) again(id string, fn func(store.Page)) {
+	if p, err := a.st.Page(id); err == nil {
+		fn(p)
 	}
-	a.pages, _ = a.st.Pages()
-	if cp.ParentID != "" {
-		a.linkSubpage(cp.ParentID, cp.ID, p.ID)
+}
+
+// copyPage makes a copy of pages off the main thread, as work, which copies
+// their files and recordings' audio, which a long recording takes seconds
+// for. done runs once it has, on the main thread, or failed with why it
+// did not. One copy is made at a time, as one downloads at a time: another
+// is not begun, and copyPage reports whether this was.
+func (a *App) copyPage(failed func(error), work func() error, done func()) bool {
+	if a.fetchingCopy {
+		a.dropFetchedAudio()
+		a.toast(locales.TemplateFetchingOther())
+		return false
 	}
-	a.openPage(cp.ID)
-	a.focusTitle(true)
+	a.fetchingCopy = true
+	var err error
+	a.offMain(func() { err = work() }, func() {
+		a.fetchingCopy = false
+		// The audio that came for the copy is in it now, or not needed.
+		a.dropFetchedAudio()
+		if err != nil {
+			a.copyFailed(err, failed)
+			return
+		}
+		done()
+	})
+	return true
+}
+
+// dropFetchedAudio removes the audio copyable downloaded for a copy, once
+// the copy has its own or will not be made: it stays on this device only
+// as Keep the audio says.
+func (a *App) dropFetchedAudio() {
+	if a.settings.KeepAudioOnDevice == "until_uploaded" {
+		for _, id := range a.fetchedAudio {
+			if r, err := a.st.Recording(id); err == nil && r.AudioPath != "" && r.LocalPath != "" {
+				_ = os.Remove(r.LocalPath)
+				_ = a.st.ClearLocalPath(id)
+			}
+		}
+	}
+	a.fetchedAudio = nil
 }
 
 // recordingIn reports whether a recording on a page or its subpages is
@@ -123,21 +171,18 @@ func (a *App) copyable(id string, failed func(error), again func()) bool {
 		}
 		a.update(func() {
 			a.fetchingCopy = false
+			// What came goes once the copy has its own, or at once when it
+			// will not be made.
+			a.fetchedAudio = audio
 			if err != nil {
 				log.Printf("copy: %v", err)
+				a.dropFetchedAudio()
 				a.copyFailed(err, failed)
 				return
 			}
 			again()
-			// The audio came for the copy, which has its own now: it stays
-			// on this device only as Keep the audio says.
-			if a.settings.KeepAudioOnDevice == "until_uploaded" {
-				for _, id := range audio {
-					if r, err := a.st.Recording(id); err == nil && r.AudioPath != "" && r.LocalPath != "" {
-						_ = os.Remove(r.LocalPath)
-						_ = a.st.ClearLocalPath(id)
-					}
-				}
+			if !a.fetchingCopy {
+				a.dropFetchedAudio() // no copy began
 			}
 		})
 	}()
@@ -175,16 +220,17 @@ func (a *App) saveAsTemplate(p store.Page) {
 		return
 	}
 	failed := func(err error) { a.toast(locales.TemplateSaveFailed(err.Error())) }
-	if !a.copyable(p.ID, failed, func() { a.saveAsTemplate(p) }) {
+	if !a.copyable(p.ID, failed, func() { a.again(p.ID, a.saveAsTemplate) }) {
 		return
 	}
-	t, err := a.st.CopyPage(p.ID, store.CopyOptions{Title: p.Title, Template: true})
-	if err != nil {
-		a.copyFailed(err, failed)
+	var t store.Page
+	a.copyPage(failed, func() (err error) {
+		t, err = a.st.CopyPage(p.ID, store.CopyOptions{Title: p.Title, Template: true})
 		return
-	}
-	a.templates, _ = a.st.Templates()
-	a.toastAction(locales.TemplateSaved(t.DisplayTitle()), locales.CommonEdit(), func() { a.openPage(t.ID) })
+	}, func() {
+		a.templates, _ = a.st.Templates()
+		a.toastAction(locales.TemplateSaved(t.DisplayTitle()), locales.CommonEdit(), func() { a.openPage(t.ID) })
+	})
 }
 
 // templateRoots are the templates themselves, without their subpages, by
@@ -368,67 +414,77 @@ func (a *App) editTemplate(t templateChoice) {
 	a.openPage(p.ID)
 }
 
-// templateBlocks are the blocks page id takes from a template: a
-// starter's, or a copy of a template's, whose subpages it copies under the
-// page. When it has none to give it says why, and reports false.
-func (a *App) templateBlocks(t templateChoice, id string, again func()) ([]*doc.Node, bool) {
+// templateBlocks gives use the blocks page id takes from a template, on
+// the main thread: a starter's at once, or a copy's of a template, whose
+// subpages it copies under the page, once the copy is made off the main
+// thread, if the page is still open. When it has none to give it says why,
+// and reports false.
+func (a *App) templateBlocks(t templateChoice, id string, again func(), use func([]*doc.Node)) bool {
 	if t.starter != nil {
-		return t.starter.Nodes(), true
+		use(t.starter.Nodes())
+		return true
 	}
 	// A copy would keep a recording still being made in the template
 	// unfinished, as duplicatePage's would.
 	if a.recordingIn(t.page.ID) {
 		a.toast(locales.TemplateWaitForRecording())
-		return nil, false
+		return false
 	}
+	open := func() bool { return a.page != nil && a.page.id == id }
 	failed := func(err error) { a.toast(locales.TemplateUseFailed(err.Error())) }
 	// What the template's files and recordings need first comes, and the
 	// page takes the template once it has, if it is still open.
 	if !a.copyable(t.page.ID, failed, func() {
-		if a.page != nil && a.page.id == id {
+		if open() {
 			again()
 		}
 	}) {
-		return nil, false
+		return false
 	}
-	c, err := a.st.CopyInto(t.page.ID, id)
-	if err != nil {
-		a.copyFailed(err, failed)
-		return nil, false
-	}
-	a.pages, _ = a.st.Pages()
-	if len(a.children(id, "", false)) > 0 {
-		a.treeOpen("page", id)
-	}
-	return c.Children, true
+	var c *doc.Content
+	return a.copyPage(failed, func() (err error) { c, err = a.st.CopyInto(t.page.ID, id); return }, func() {
+		a.pages, _ = a.st.Pages()
+		if len(a.children(id, "", false)) > 0 {
+			a.treeOpen("page", id)
+		}
+		if open() {
+			use(c.Children)
+		}
+	})
 }
 
 // applyTemplate fills the open, empty page from a template: its content,
 // as one undo step, and copies of its subpages. An untitled page takes the
-// template's title, selected to type over, and applyTemplate reports
-// whether it did. A page with something in it already, or that can't be
-// changed, is left as it is.
+// template's title. applyTemplate reports whether it fills the page, now
+// or once its copies are made, and then puts the caret in the title:
+// selected to type over when it took the template's. A page with
+// something in it already, or that can't be changed, is left as it is.
 func (a *App) applyTemplate(t templateChoice) bool {
 	ps := a.page
 	if ps == nil || ps.editor.ReadOnly || !a.isEmpty() {
 		return false
 	}
-	blocks, ok := a.templateBlocks(t, ps.id, func() { a.applyTemplate(t) })
-	if !ok {
-		return false
-	}
-	// A template of no blocks leaves the page its empty paragraph.
-	if len(blocks) > 0 {
-		ps.editor.Edit(func(cur *doc.Content) { cur.Children = blocks })
-		a.savePage()
-	}
-	if strings.TrimSpace(ps.title) != "" || t.name() == "" {
-		return false
-	}
-	ps.title = t.name()
-	a.saveTitle()
-	a.focusTitle(true)
-	return true
+	return a.templateBlocks(t, ps.id, func() { a.applyTemplate(t) }, func(blocks []*doc.Node) {
+		ps := a.page
+		switch {
+		case len(blocks) == 0:
+			// A template of no blocks leaves the page its empty paragraph.
+		case a.isEmpty():
+			ps.editor.Edit(func(cur *doc.Content) { cur.Children = blocks })
+		default:
+			// What was typed while the copy was made stays.
+			ps.editor.InsertBlocks(blocks...)
+		}
+		if len(blocks) > 0 {
+			a.savePage()
+		}
+		took := strings.TrimSpace(ps.title) == "" && t.name() != ""
+		if took {
+			ps.title = t.name()
+			a.saveTitle()
+		}
+		a.focusTitle(took)
+	})
 }
 
 // insertTemplate puts a template's blocks at the caret, as / does, with
@@ -443,12 +499,10 @@ func (a *App) insertTemplate(t templateChoice) {
 		a.applyTemplate(t)
 		return
 	}
-	blocks, ok := a.templateBlocks(t, ps.id, func() { a.insertTemplate(t) })
-	if !ok {
-		return
-	}
-	ps.editor.InsertBlocks(blocks...)
-	a.savePage()
+	a.templateBlocks(t, ps.id, func() { a.insertTemplate(t) }, func(blocks []*doc.Node) {
+		a.page.editor.InsertBlocks(blocks...)
+		a.savePage()
+	})
 }
 
 // startFrom fills the page just made and opened from a template, if there
@@ -581,6 +635,28 @@ func (a *App) templateHint(t store.Page) string {
 // starters whose titles match it, whose PageID is their key.
 func (a *App) searchHits(query string) []store.SearchHit {
 	hits, _ := a.st.Search(query, 30)
+	return a.withStarters(query, hits)
+}
+
+// search has the search dialog show what query finds, read off the main
+// thread: it reads every page's text, which a large library takes a while
+// for, at each key. The answer to a search asked for before the last is
+// dropped.
+func (a *App) search(query string) {
+	d := &a.dialogs
+	d.searches++
+	n := d.searches
+	var hits []store.SearchHit
+	a.offMain(func() { hits, _ = a.st.Search(query, 30) }, func() {
+		if n == d.searches {
+			d.hits, d.hitIndex = a.withStarters(query, hits), 0
+		}
+	})
+}
+
+// withStarters is hits with the starter templates query finds, on the main
+// thread, where the templates are.
+func (a *App) withStarters(query string, hits []store.SearchHit) []store.SearchHit {
 	filters, rest := store.SplitTagQuery(query)
 	q := strings.ToLower(strings.TrimSpace(rest))
 	if q == "" || len(filters) > 0 {

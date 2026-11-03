@@ -1,31 +1,28 @@
 package agents
 
 import (
+	"cmp"
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
 	"log"
 	"slices"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
-	"unicode"
 
-	"leaflet/internal/agents/endpoint"
 	"leaflet/internal/doc"
 	"leaflet/internal/guard"
-	"leaflet/internal/keychain"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
 
 // Host is what the hub needs from the app. Its methods run on the main
-// thread, except Update, which may be called from anywhere.
+// thread, except Update, which may be called from anywhere, and
+// FlushPage, which a cloud run calls from its own goroutine.
 type Host interface {
-	// Update runs fn on the main thread.
-	Update(fn func())
+	// Update runs fn on the main thread, which changes the agent state of
+	// page pageID, or of every page for "".
+	Update(pageID string, fn func())
 	// Live returns the page open with its edits, or nil while it is not
 	// open.
 	Live(pageID string) LiveDoc
@@ -51,65 +48,23 @@ type LiveDoc interface {
 	ApplyOps(ops []doc.Op) error
 }
 
-// Option is an agent people can pick: a provider and a model.
-type Option struct {
-	Provider store.Provider
-	Model    string
-}
-
-// Name is the agent's name, its provider's.
-func (o Option) Name() string { return o.Provider.Name }
-
-// Local reports whether the agent runs from this device: against a model
-// server on it or the network, or a cloud provider whose key is kept here.
-func (o Option) Local() bool { return o.Provider.IsLocal }
-
-// Offline reports whether the agent works without a connection: a model
-// server on this machine or the network, a preset's or a custom one, not
-// a signed-in plan or a cloud provider kept on this device.
-func (o Option) Offline() bool {
-	p := o.Provider
-	return p.IsLocal && p.AuthKind != "account" && (PresetByID(p.Preset).Local || endpoint.IsLocal(p.BaseURL))
-}
-
-// Choice is the option as a setting.
-func (o Option) Choice() store.ModelChoice {
-	return store.ModelChoice{ProviderID: o.Provider.ID, Model: o.Model}
-}
-
-// Label names the agent and its model.
-func (o Option) Label() string { return o.Provider.Name + " · " + o.Model }
-
-// Message is a turn of the sidebar chat.
-type Message struct {
-	Mine      bool
-	Text      string
-	RunID     string
-	Pending   bool
-	Error     bool
-	AgentName string
-	// Streamed is a pending reply whose Text is the answer as far as it
-	// has come, not what the run is doing.
-	Streamed bool `json:"-"`
-}
-
 // Run is one agent run: one undo step, kept with its ops so it can be
 // undone as a whole later.
 type Run struct {
-	ID          string
-	Surface     string
-	AgentName   string
-	Instruction string
-	Ops         []doc.Op
-	Edits       []Edit
-	Reply       string
-	Status      string // running | done | failed
-	Undone      bool
-	Error       string
-	At          time.Time
+	ID          string    `json:"ID"`
+	Surface     string    `json:"Surface"`
+	AgentName   string    `json:"AgentName"`
+	Instruction string    `json:"Instruction"`
+	Ops         []doc.Op  `json:"Ops"`
+	Edits       []Edit    `json:"Edits"`
+	Reply       string    `json:"Reply"`
+	Status      string    `json:"Status"` // running | done | failed
+	Undone      bool      `json:"Undone"`
+	Error       string    `json:"Error"`
+	At          time.Time `json:"At"`
 	// Stopped is a run the user stopped: it keeps the edits it made
 	// before, which undo as one step as a finished run's do.
-	Stopped bool
+	Stopped bool `json:"Stopped"`
 	// Restored is a run of an earlier launch, kept with its chat reply.
 	Restored bool `json:"-"`
 	// Answer is the model's answer as far as it has come, while the run
@@ -120,6 +75,10 @@ type Run struct {
 	// stop cancels a run on this device while it works; a cloud run goes
 	// on on the server whatever the app does, so it has none.
 	stop context.CancelFunc
+	// cancel ends the run's work here, a cloud run's wait for the server
+	// too, as its account leaves (Forget); epoch is the hub's then.
+	cancel context.CancelFunc
+	epoch  int64
 }
 
 // Stoppable reports whether the run is working and Stop can end it.
@@ -134,213 +93,6 @@ func (r *Run) BlockIDs() []string {
 	return out
 }
 
-// Session is the agent state of one page: the sidebar conversation and
-// the runs made from any surface.
-type Session struct {
-	PageID         string
-	Messages       []*Message
-	Runs           []*Run
-	ConversationID string
-	Running        bool
-	Selected       *store.ModelChoice
-	// Past are the page's earlier conversations, the latest first.
-	Past []*Conversation
-}
-
-// Run returns a run by ID.
-func (s *Session) Run(id string) *Run {
-	for _, r := range s.Runs {
-		if r.ID == id {
-			return r
-		}
-	}
-	return nil
-}
-
-// Latest is the newest run of this launch that changed the page.
-func (s *Session) Latest() *Run {
-	for i := len(s.Runs) - 1; i >= 0; i-- {
-		if r := s.Runs[i]; len(r.Ops) > 0 && !r.Restored {
-			return r
-		}
-	}
-	return nil
-}
-
-// Conversation is a page's sidebar chat as the device keeps it between
-// launches, with the runs its replies show, so they can still be undone.
-type Conversation struct {
-	ID       string     `json:"conversation_id"`
-	Messages []*Message `json:"messages"`
-	Runs     []*Run     `json:"runs,omitempty"`
-	// At is when an earlier conversation was left for a new one.
-	At time.Time `json:"at,omitzero"`
-}
-
-// Title is the conversation's first request, on one line.
-func (c *Conversation) Title() string {
-	for _, m := range c.Messages {
-		if m.Mine {
-			line, _, _ := strings.Cut(m.Text, "\n")
-			return short(strings.TrimSpace(line))
-		}
-	}
-	return ""
-}
-
-// restore marks what an earlier launch left unfinished: a reply still
-// pending never got its answer.
-func (c *Conversation) restore() {
-	for _, m := range c.Messages {
-		if m.Pending {
-			m.Pending, m.Error, m.Text = false, true, "The app closed before the agent finished."
-		}
-	}
-	for _, r := range c.Runs {
-		r.Restored = true
-		if r.Status != "done" && r.Status != "failed" {
-			r.Status = "failed"
-		}
-	}
-}
-
-// maxSavedMessages bounds the chat kept for a page.
-const maxSavedMessages = 200
-
-// maxPastConversations bounds the earlier conversations kept for a page.
-const maxPastConversations = 50
-
-func chatKey(pageID string) string { return "chat." + pageID }
-
-func pastChatsKey(pageID string) string { return "chat.past." + pageID }
-
-// loadChat reads a page's chat and its earlier ones from an earlier launch
-// into s.
-func (h *Hub) loadChat(s *Session) {
-	if raw, ok := h.st.Value(pastChatsKey(s.PageID)); ok {
-		if err := json.Unmarshal([]byte(raw), &s.Past); err != nil {
-			log.Printf("agent chat: %v", err)
-		}
-		for _, c := range s.Past {
-			c.restore()
-		}
-	}
-	raw, ok := h.st.Value(chatKey(s.PageID))
-	if !ok {
-		return
-	}
-	var saved Conversation
-	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
-		log.Printf("agent chat: %v", err)
-		return
-	}
-	saved.restore()
-	if saved.ID != "" {
-		s.ConversationID = saved.ID
-	}
-	s.Messages, s.Runs = saved.Messages, saved.Runs
-}
-
-// current is the page's chat as it is kept, its runs with it.
-func (s *Session) current() *Conversation {
-	msgs := s.Messages
-	if len(msgs) > maxSavedMessages {
-		msgs = msgs[len(msgs)-maxSavedMessages:]
-	}
-	c := &Conversation{ID: s.ConversationID, Messages: msgs}
-	for _, m := range msgs {
-		if r := s.Run(m.RunID); r != nil {
-			c.Runs = append(c.Runs, r)
-		}
-	}
-	return c
-}
-
-// saveChat keeps a page's chat for the next launch.
-func (h *Hub) saveChat(s *Session) {
-	if len(s.Messages) == 0 {
-		if err := h.st.DeleteValue(chatKey(s.PageID)); err != nil {
-			log.Printf("agent chat: %v", err)
-		}
-		return
-	}
-	raw, err := json.Marshal(s.current())
-	if err == nil {
-		err = h.st.SetValue(chatKey(s.PageID), string(raw))
-	}
-	if err != nil {
-		log.Printf("agent chat: %v", err)
-	}
-}
-
-// savePast keeps a page's earlier conversations for the next launch.
-func (h *Hub) savePast(s *Session) {
-	var err error
-	if len(s.Past) == 0 {
-		err = h.st.DeleteValue(pastChatsKey(s.PageID))
-	} else {
-		var raw []byte
-		if raw, err = json.Marshal(s.Past); err == nil {
-			err = h.st.SetValue(pastChatsKey(s.PageID), string(raw))
-		}
-	}
-	if err != nil {
-		log.Printf("agent chat: %v", err)
-	}
-}
-
-// leave puts the page's chat first among its earlier ones, when it has
-// messages.
-func (h *Hub) leave(s *Session) {
-	if len(s.Messages) == 0 {
-		return
-	}
-	c := s.current()
-	c.At = time.Now()
-	s.Past = append([]*Conversation{c}, s.Past...)
-	if len(s.Past) > maxPastConversations {
-		s.Past = s.Past[:maxPastConversations]
-	}
-	h.savePast(s)
-}
-
-// NewConversation starts a page's sidebar chat afresh, keeping the one it
-// had among the earlier ones.
-func (h *Hub) NewConversation(pageID string) {
-	s := h.Session(pageID)
-	if s.Running {
-		return
-	}
-	h.leave(s)
-	s.Messages = nil
-	s.ConversationID = doc.NewRowID()
-	h.saveChat(s)
-}
-
-// OpenConversation goes back to an earlier conversation of a page,
-// keeping the one it had among the earlier ones.
-func (h *Hub) OpenConversation(pageID, id string) {
-	s := h.Session(pageID)
-	if s.Running {
-		return
-	}
-	i := slices.IndexFunc(s.Past, func(c *Conversation) bool { return c.ID == id })
-	if i < 0 {
-		return
-	}
-	c := s.Past[i]
-	s.Past = slices.Delete(s.Past, i, i+1)
-	h.leave(s)
-	s.Messages, s.ConversationID = c.Messages, c.ID
-	for _, r := range c.Runs {
-		if s.Run(r.ID) == nil {
-			s.Runs = append(s.Runs, r)
-		}
-	}
-	h.savePast(s)
-	h.saveChat(s)
-}
-
 // Hub runs agents for every page.
 type Hub struct {
 	st       *store.Store
@@ -350,11 +102,50 @@ type Hub struct {
 	// PublicLink reports whether a page has a public link open now, which
 	// the app serves; nil is none.
 	PublicLink func(pageID string) bool
+	// epoch counts the accounts the hub has worked for: Forget moves it
+	// on, and a run started for an earlier one writes nothing more.
+	epoch atomic.Int64
+	// options is Options as the providers last read made it, until the
+	// store says they changed: the app asks for it as it draws, for every
+	// comment and every agent menu. Guarded by optionsMu.
+	optionsMu sync.Mutex
+	options   []Option
 }
+
+// Forget stops every run and forgets every page's agent state, as the
+// account whose pages they are leaves this device: a run that ends once
+// its pages are removed would store them again, with its snapshot, its
+// job and its chat, for the next account to upload. Call it before the
+// pages go; any goroutine may. A run ending meanwhile writes nothing.
+func (h *Hub) Forget() {
+	h.epoch.Add(1)
+	h.host.Update("", func() {
+		for _, s := range h.sessions {
+			for _, run := range s.Runs {
+				if run.cancel != nil {
+					run.cancel()
+				}
+			}
+		}
+		h.sessions = map[string]*Session{}
+	})
+}
+
+// gone reports whether a run's account has left this device since it
+// started (Forget).
+func (h *Hub) gone(run *Run) bool { return run.epoch != h.epoch.Load() }
 
 // NewHub returns the hub.
 func NewHub(st *store.Store, be *remote.Client, host Host) *Hub {
-	return &Hub{st: st, be: be, host: host, sessions: map[string]*Session{}}
+	h := &Hub{st: st, be: be, host: host, sessions: map[string]*Session{}}
+	st.Subscribe(func(c store.Change) {
+		if c.Table == "model_providers" || c.Table == "*" {
+			h.optionsMu.Lock()
+			h.options = nil
+			h.optionsMu.Unlock()
+		}
+	})
+	return h
 }
 
 // Session returns a page's agent state.
@@ -366,278 +157,6 @@ func (h *Hub) Session(pageID string) *Session {
 		h.sessions[pageID] = s
 	}
 	return s
-}
-
-// Models returns a provider's models, or its preset's suggestions.
-func Models(p store.Provider) []string {
-	if len(p.Models) > 0 {
-		return p.Models
-	}
-	var out []string
-	if p.DefaultModel != "" {
-		out = append(out, p.DefaultModel)
-	}
-	for _, m := range PresetByID(p.Preset).Suggested {
-		if m != p.DefaultModel {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-// Options lists every connected agent with its default model.
-func (h *Hub) Options() []Option {
-	ps, _ := h.st.Providers()
-	var out []Option
-	for _, p := range ps {
-		m := p.DefaultModel
-		if m == "" {
-			if ms := Models(p); len(ms) > 0 {
-				m = ms[0]
-			}
-		}
-		if m != "" {
-			out = append(out, Option{Provider: p, Model: m})
-		}
-	}
-	return out
-}
-
-// ErrNoAgent is returned when no model can run, saying why in the app's
-// language.
-type ErrNoAgent struct{ Message string }
-
-func (e *ErrNoAgent) Error() string { return e.Message }
-
-// Resolve picks the agent to use: the one asked for, else the default,
-// switching to a model on this machine while offline.
-func (h *Hub) Resolve(wanted *store.ModelChoice) (Option, error) {
-	all := h.Options()
-	if len(all) == 0 {
-		return Option{}, &ErrNoAgent{locales.AgentNoProvider()}
-	}
-	settings := h.host.Settings()
-	pick := func(c *store.ModelChoice) (Option, bool) {
-		if c == nil {
-			return Option{}, false
-		}
-		for _, o := range all {
-			if o.Provider.ID == c.ProviderID {
-				if c.Model != "" {
-					o.Model = c.Model
-				}
-				return o, true
-			}
-		}
-		return Option{}, false
-	}
-	option, ok := pick(wanted)
-	if !ok {
-		if def, has := settings.Default(); has {
-			// The default names a provider, which runs its own model; an
-			// older default may name a model too.
-			def.Model = ""
-			option, ok = pick(&def)
-		}
-	}
-	if !ok {
-		option = all[0]
-	}
-	signedIn := h.be.SignedIn()
-	online := h.host.Online() && !settings.WorkOffline
-	// Cloud providers need the server; a ChatGPT plan needs the network.
-	needsServer := !option.Local()
-	usable := option.Offline() || (online && (!needsServer || signedIn))
-	if !usable {
-		var offline *Option
-		for i := range all {
-			if all[i].Offline() {
-				offline = &all[i]
-				break
-			}
-		}
-		switch {
-		case offline != nil:
-			option = *offline
-		case needsServer && !signedIn:
-			return Option{}, &ErrNoAgent{locales.AgentSignInToUse(option.Name())}
-		default:
-			return Option{}, &ErrNoAgent{locales.AgentNeedsConnection()}
-		}
-	}
-	return option, nil
-}
-
-// Available reports whether any agent can run now.
-func (h *Hub) Available() bool {
-	_, err := h.Resolve(nil)
-	return err == nil
-}
-
-// LocalKey is the API key of a local provider, kept in the keychain.
-func LocalKey(providerID string) string {
-	raw, err := keychain.Get("provider." + providerID + ".key")
-	if err != nil {
-		return ""
-	}
-	return string(raw)
-}
-
-// SetLocalKey keeps a local provider's API key in the keychain.
-func SetLocalKey(providerID, key string) error {
-	if key == "" {
-		err := keychain.Delete("provider." + providerID + ".key")
-		if errors.Is(err, keychain.ErrNotFound) {
-			return nil
-		}
-		return err
-	}
-	return keychain.Set("provider."+providerID+".key", []byte(key))
-}
-
-// ModelFor is the model a provider on this device runs on: its server, or
-// the ChatGPT plan it signed in to.
-func (h *Hub) ModelFor(p store.Provider) (Model, error) {
-	if p.AuthKind == "account" {
-		return h.ChatGPT(p.ID)
-	}
-	return NewClient(p.BaseURL, LocalKey(p.ID)), nil
-}
-
-var (
-	chatgptMu      sync.Mutex
-	chatgptClients = map[string]*ChatGPT{}
-)
-
-// ChatGPT returns the ChatGPT sign-in of a provider, kept in the keychain.
-func (h *Hub) ChatGPT(providerID string) (*ChatGPT, error) {
-	chatgptMu.Lock()
-	defer chatgptMu.Unlock()
-	if g := chatgptClients[providerID]; g != nil {
-		return g, nil
-	}
-	raw, err := keychain.Get("chatgpt." + providerID)
-	if err != nil {
-		return nil, errors.New("Sign in with ChatGPT again in Settings › Agent providers.") //nolint:staticcheck // shown to people as a sentence.
-	}
-	var acct ChatGPTAccount
-	if err := json.Unmarshal(raw, &acct); err != nil {
-		return nil, err
-	}
-	g := NewChatGPT(acct)
-	keepRefreshed(providerID, g)
-	chatgptClients[providerID] = g
-	return g, nil
-}
-
-// keepRefreshed keeps g's account as its refresh token rotates, while g
-// is still the provider's sign-in: a run may hold one that another
-// sign-in replaced, or that was signed out, and its renewal must not
-// put it back. Under chatgptMu, the saves go in the order the sign-ins
-// change, and g renews one at a time, so its saves go in order too.
-func keepRefreshed(providerID string, g *ChatGPT) {
-	g.OnRefresh = func(a ChatGPTAccount) {
-		chatgptMu.Lock()
-		defer chatgptMu.Unlock()
-		if chatgptClients[providerID] != g {
-			return
-		}
-		if err := SaveChatGPT(providerID, a); err != nil {
-			log.Printf("keep ChatGPT sign-in: %v", err)
-		}
-	}
-}
-
-// UseChatGPT keeps a new ChatGPT sign-in for a provider.
-func UseChatGPT(providerID string, g *ChatGPT) error {
-	keepRefreshed(providerID, g)
-	chatgptMu.Lock()
-	defer chatgptMu.Unlock()
-	chatgptClients[providerID] = g
-	return SaveChatGPT(providerID, g.Account())
-}
-
-// keepSecret and forgetSecret write the keychain; tests keep the
-// sign-ins elsewhere.
-var (
-	keepSecret   = keychain.Set
-	forgetSecret = keychain.Delete
-)
-
-// SaveChatGPT keeps a ChatGPT sign-in in the keychain.
-func SaveChatGPT(providerID string, a ChatGPTAccount) error {
-	raw, _ := json.Marshal(a) // #nosec G117 -- the sign-in goes to the keychain.
-	return keepSecret("chatgpt."+providerID, raw)
-}
-
-// ForgetChatGPT signs a provider out of ChatGPT on this device.
-func ForgetChatGPT(ctx context.Context, providerID string) {
-	chatgptMu.Lock()
-	g := chatgptClients[providerID]
-	delete(chatgptClients, providerID)
-	_ = forgetSecret("chatgpt." + providerID)
-	chatgptMu.Unlock()
-	if g != nil {
-		g.SignOut(ctx)
-	}
-}
-
-// HostID names this device to OpenAI's sign-in, the same every time.
-func (h *Hub) HostID() string {
-	if id, ok := h.st.Value("chatgpt.host"); ok {
-		return id
-	}
-	id := "urn:uuid:" + doc.NewRowID()
-	_ = h.st.SetValue("chatgpt.host", id)
-	return id
-}
-
-// Chat sends a sidebar chat message.
-func (h *Hub) Chat(pageID, text string, focus []string) {
-	s := h.Session(pageID)
-	t := strings.TrimSpace(text)
-	if t == "" || s.Running {
-		return
-	}
-	// The history is the turns before this one, the request itself aside.
-	history := chatHistory(s)
-	s.Messages = append(s.Messages, &Message{Mine: true, Text: t})
-	reply := &Message{Text: "Reading the page…", Pending: true}
-	s.Messages = append(s.Messages, reply)
-	h.Start(pageID, RunOptions{Surface: "sidebar", Instruction: t, Focus: focus, History: history, Reply: reply})
-	h.saveChat(s)
-}
-
-// chatHistory is the sidebar chat as the model reads it: each request
-// with its reply, as the agent function builds it from the runs that are
-// done. A request whose reply failed, or whose run failed or was undone,
-// goes with it, neither said: the model would take the request for done,
-// and the page for having what its reply says.
-func chatHistory(s *Session) []map[string]string {
-	msgs := s.Messages
-	kept := func(m *Message) bool {
-		if m.Pending || m.Error {
-			return false
-		}
-		r := s.Run(m.RunID)
-		return r == nil || (!r.Undone && r.Status != "failed")
-	}
-	var turns []map[string]string
-	for i, m := range msgs {
-		if m.Mine {
-			if i+1 < len(msgs) && !msgs[i+1].Mine && kept(msgs[i+1]) {
-				turns = append(turns, map[string]string{"role": "user", "content": m.Text})
-			}
-			continue
-		}
-		if kept(m) {
-			turns = append(turns, map[string]string{"role": "assistant", "content": m.Text})
-		}
-	}
-	if len(turns) > 20 {
-		turns = turns[len(turns)-20:]
-	}
-	return turns
 }
 
 // RunOptions describe a run.
@@ -663,12 +182,20 @@ type errRunning struct{}
 
 func (errRunning) Error() string { return locales.AgentRunning() }
 
+// ErrAccountLeft ends a run whose account signed out of this device before
+// it finished (Forget), said in the app's language.
+var ErrAccountLeft error = errAccountLeft{}
+
+type errAccountLeft struct{}
+
+func (errAccountLeft) Error() string { return locales.AgentAccountLeft() }
+
 // Start runs an agent from any surface, in the background. Problems end
 // up in Run.Error; a page runs one agent at a time, so a run asked for
 // while another works on it fails with ErrRunning.
 func (h *Hub) Start(pageID string, o RunOptions) *Run {
 	s := h.Session(pageID)
-	run := &Run{ID: doc.NewRowID(), Surface: o.Surface, Instruction: o.Instruction, Status: "running", At: time.Now()}
+	run := &Run{ID: doc.NewRowID(), Surface: o.Surface, Instruction: o.Instruction, Status: "running", At: time.Now(), epoch: h.epoch.Load()}
 	fail := func(err error) *Run {
 		// An agent that never resolved is named for what it is.
 		run.AgentName, run.Status, run.Error = locales.CommonAgent(), "failed", err.Error()
@@ -692,12 +219,8 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 	var before *doc.Content
 	if ed != nil {
 		before = ed.Doc().Copy()
-	} else if c, err := stored(h.st, pageID); err != nil {
+	} else if before, err = stored(h.st, pageID); err != nil {
 		return fail(err)
-	} else if c != nil {
-		before = c
-	} else {
-		before = doc.Empty()
 	}
 	run.AgentName = option.Name()
 	s.Runs = append(s.Runs, run)
@@ -712,27 +235,28 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		ProviderID: option.Provider.ID, Model: option.Model, AgentName: option.Name(),
 		// ChatGPT's models all call tools, whatever an earlier test found.
 		SupportsTools: option.Provider.SupportsTools == nil || *option.Provider.SupportsTools || option.Provider.AuthKind == "account",
-		FocusBlockIDs: o.Focus, SelectionText: o.Selection, CommentID: o.CommentID,
+		FocusBlockIDs: o.Focus, SelectionText: o.Selection, CommentID: o.CommentID, Thread: h.thread(pageID, o.CommentID),
 		History: o.History, AllowCrossPage: h.crossPage(page, settings),
 	}
 	if o.Surface == "sidebar" {
 		req.ConversationID = s.ConversationID
 	}
 	d := h.newDelivery(pageID, run, option)
-	stream := &replyStream{h: h, run: run, reply: o.Reply}
+	stream := &replyStream{h: h, pageID: pageID, run: run, reply: o.Reply}
 	events := Events{
-		Status: func(st string) { h.host.Update(func() { run.Status = st }) },
+		Status: func(st string) { h.host.Update(pageID, func() { run.Status = st }) },
 		Op: func(op doc.Op, summary string) {
 			stream.clear()
-			h.host.Update(func() { h.arrived(s, run, option, before, d, o, op, summary) })
+			h.host.Update(pageID, func() { h.arrived(s, run, option, before, d, o, op, summary) })
 		},
 		Text: stream.set,
 		Revise: func(at int, op *doc.Op, summary string, delta []doc.Op) {
-			h.host.Update(func() { h.revised(s, run, d, o, at, op, summary, delta) })
+			h.host.Update(pageID, func() { h.revised(s, run, d, o, at, op, summary, delta) })
 		},
 	}
 	work := before.Copy()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	run.cancel = cancel
 	if option.Local() {
 		run.stop = cancel
 	}
@@ -757,7 +281,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 			}
 			return res, err
 		}()
-		h.host.Update(func() { h.finish(s, run, req, option, before, d, res, err, o) })
+		h.host.Update(pageID, func() { h.finish(s, run, req, option, before, d, res, err, o) })
 	}()
 	return run
 }
@@ -782,6 +306,9 @@ const chatSaveEvery = time.Second
 // as they come (a save a second at most), so a run the app quit during
 // can still be undone, and the page still goes back to how it was.
 func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, d *delivery, o RunOptions, op doc.Op, summary string) {
+	if h.gone(run) {
+		return
+	}
 	run.Ops = append(run.Ops, op)
 	run.Edits = append(run.Edits, Edit{Summary: summary, BlockIDs: OpBlockIDs(op)})
 	run.Answer = ""
@@ -810,7 +337,7 @@ func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, 
 // the op gets the change, open or stored; one that does not yet gets the
 // op as it is when it does.
 func (h *Hub) revised(s *Session, run *Run, d *delivery, o RunOptions, at int, op *doc.Op, summary string, delta []doc.Op) {
-	if at < 0 || at >= len(run.Ops) {
+	if at < 0 || at >= len(run.Ops) || h.gone(run) {
 		return
 	}
 	had := d.sent > at
@@ -831,7 +358,7 @@ func (h *Hub) revised(s *Session, run *Run, d *delivery, o RunOptions, at int, o
 		for _, c := range delta {
 			d.apply(live, c)
 		}
-	} else if err := storeOps(h.st, s.PageID, delta, true, run.ID, "agent op on a closed page"); err != nil {
+	} else if err := storeOps(h.st, s.PageID, delta, true, false, run.ID, "agent op on a closed page"); err != nil {
 		log.Printf("agent op on a closed page: %v", err)
 	}
 }
@@ -886,286 +413,63 @@ func (h *Hub) insertJob(ctx context.Context, req Request) error {
 	return err
 }
 
-// streamEvery spaces the showings of a reply as it streams: each is a
-// redraw, and on iOS a fetch of the page's agent state.
-const streamEvery = 50 * time.Millisecond
-
-// replyStream shows a run's answer as it streams in, in its chat reply
-// when it has one, set from the run and shown on the main thread.
-type replyStream struct {
-	h     *Hub
-	run   *Run
-	reply *Message
-	mu    sync.Mutex
-	text  string
-	shown time.Time
-	timer *time.Timer
-}
-
-// set takes the answer so far, to show it streamEvery after the last
-// showing at the soonest.
-func (st *replyStream) set(text string) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	st.text = text
-	if st.timer != nil {
-		return
+// thread is the comment thread comment id is in, for a run answering it,
+// as the server's runs read it: its first comment, then the replies not
+// deleted; nil for no comment.
+func (h *Hub) thread(pageID, id string) []ThreadComment {
+	if id == "" {
+		return nil
 	}
-	st.timer = time.AfterFunc(max(0, streamEvery-time.Since(st.shown)), func() {
-		st.mu.Lock()
-		st.timer, st.shown = nil, time.Now()
-		st.mu.Unlock()
-		st.h.host.Update(st.show)
-	})
-}
-
-// clear drops an answer an edit of the page goes on from: the reply says
-// what the run did instead.
-func (st *replyStream) clear() {
-	st.mu.Lock()
-	st.text = ""
-	st.mu.Unlock()
-}
-
-// show puts the answer in the reply while the run works, its thinking
-// left out; an answer still thinking leaves the reply as it was.
-func (st *replyStream) show() {
-	st.mu.Lock()
-	text := shownText(st.text)
-	st.mu.Unlock()
-	if text == "" || st.run.Status == "done" || st.run.Status == "failed" {
-		return
+	ts, err := h.st.Threads(pageID)
+	if err != nil {
+		return nil
 	}
-	st.run.Answer = text
-	if st.reply != nil && st.reply.Pending {
-		st.reply.Text, st.reply.Streamed = text, true
+	comment := func(c store.Comment) ThreadComment {
+		who := c.AuthorName
+		switch {
+		case c.AuthorKind == "agent":
+			who = cmp.Or(who, "Agent") + " (agent)"
+		case c.AuthorKind == "guest":
+			who = cmp.Or(who, "Guest") + " (guest, through the page's public link)"
+		case who == "":
+			who = "Someone"
+		}
+		body := c.Body
+		if !c.DeletedAt.IsZero() {
+			body = "(deleted)"
+		}
+		return ThreadComment{Author: who, Body: body}
 	}
-}
-
-// delivery is how far a run's ops have reached the page: those before
-// sent are in an open editor, or were saved with it when it closed.
-type delivery struct {
-	sent int
-	ed   LiveDoc
-	// conflict keeps an open page's content in history before an op takes
-	// a change of it away; nil keeps none.
-	conflict func(*doc.Content) error
-	// chatSaved is when the page's chat last kept the run's ops.
-	chatSaved time.Time
-}
-
-// newDelivery is a run's delivery to its page, which keeps in the page's
-// history what the run's ops take away of the open page, under its job.
-func (h *Hub) newDelivery(pageID string, run *Run, option Option) *delivery {
-	return &delivery{conflict: func(c *doc.Content) error {
-		return h.st.AddHistory(pageID, c, "conflict", runJobID(run, option), "")
-	}}
-}
-
-// to applies the ops ed does not have yet, in order, so an op never comes
-// before the blocks it needs.
-func (d *delivery) to(ed LiveDoc, ops []doc.Op) {
-	for _, op := range ops[d.sent:] {
-		if op.Op == "create_page" || op.Op == "delete_page" {
+	for _, t := range ts {
+		if t.Root.ID != id && !slices.ContainsFunc(t.Replies, func(c store.Comment) bool { return c.ID == id }) {
 			continue
 		}
-		d.apply(ed, op)
-	}
-	d.sent = len(ops)
-}
-
-// apply applies one op, or one change of an op as its call streams, to
-// ed. The first op an editor gets starts an undo step that the rest join.
-// An op that replaces or deletes a block the user changed since the agent
-// read it keeps the page as it is in history first (conflict), as
-// storeOps does on a closed page. Each op is checked against the page
-// just before it, which has the run's earlier ops by then, so the agent's
-// own edits are no change.
-func (d *delivery) apply(ed LiveDoc, op doc.Op) {
-	if d.conflict != nil && overwrites(ed.Doc(), []doc.Op{op}) {
-		if err := d.conflict(ed.Doc()); err != nil {
-			log.Printf("agent op on the open page: %v", err)
+		out := []ThreadComment{comment(t.Root)}
+		for _, r := range t.Replies {
+			if r.DeletedAt.IsZero() {
+				out = append(out, comment(r))
+			}
 		}
+		return out
 	}
-	if err := ed.ApplyOp(op, ed != d.ed); err != nil {
-		log.Printf("agent op on the open page: %v", err)
-	}
-	d.ed = ed
-}
-
-// missed are the block ops the page does not have yet.
-func (d *delivery) missed(ops []doc.Op) []doc.Op {
-	var out []doc.Op
-	for _, op := range ops[d.sent:] {
-		if op.Op != "create_page" && op.Op != "delete_page" {
-			out = append(out, op)
-		}
-	}
-	return out
-}
-
-// save applies the ops the page does not have yet to its stored content,
-// which keeps whatever else changed there during the run, and in history
-// what they would take away of it (storeOps), under the run jobID. They
-// count as delivered once stored, so a save that fails can be tried again.
-func (d *delivery) save(st *store.Store, pageID string, ops []doc.Op, jobID string) error {
-	if missed := d.missed(ops); len(missed) > 0 {
-		if err := storeOps(st, pageID, missed, true, jobID, "agent op on a closed page"); err != nil {
-			return err
-		}
-	}
-	d.sent = len(ops)
 	return nil
-}
-
-// errKeptChanging is a closed page stored over each time the ops were
-// applied to it.
-var errKeptChanging = errors.New("The page kept changing while saving the agent's edits.") //nolint:staticcheck // shown to people as a sentence.
-
-// storeOps applies ops to a page's stored content, an empty page when
-// there is none and orEmpty, and saves it only over the content it read:
-// what MCP or a sync stores in between is read again and gets the ops,
-// rather than being saved over. Ops that replace or delete a block
-// changed since they were made take that change away, so the content
-// they find is kept in history first (reason conflict, under jobID), as
-// the agent function does; one that could not be kept is not saved over.
-func storeOps(st *store.Store, pageID string, ops []doc.Op, orEmpty bool, jobID, what string) error {
-	kept := "" // the stored content history has already
-	for range 3 {
-		c, over, err := storedRow(st, pageID)
-		if err != nil {
-			return err
-		}
-		if c == nil {
-			if !orEmpty {
-				return nil
-			}
-			c = doc.Empty()
-		}
-		if over != "" && over != kept && overwrites(c, ops) {
-			if err := st.AddHistory(pageID, c, "conflict", jobID, ""); err != nil {
-				return err
-			}
-			kept = over
-		}
-		for _, op := range ops {
-			if err := c.Apply(op); err != nil {
-				log.Printf("%s: %v", what, err)
-			}
-		}
-		beforeStore(pageID)
-		if _, _, err := st.SaveContentOver(pageID, over, c); !errors.Is(err, store.ErrContentChanged) {
-			return err
-		}
-	}
-	return errKeptChanging
-}
-
-// overwrites reports whether applying ops to c takes away a change made
-// since they were made: a block that a replace or a delete finds other
-// than the agent read it, as the agent function's overwrites has it. The
-// first op on a block has it as read; a replace that keeps the block's
-// children looks at the block alone, as Apply keeps the children found.
-func overwrites(c *doc.Content, ops []doc.Op) bool {
-	seen := map[string]bool{}
-	changed := func(read *doc.Node, own bool) bool {
-		if read == nil || seen[read.ID] {
-			return false
-		}
-		seen[read.ID] = true
-		at := c.Find(read.ID)
-		if at == nil {
-			return false
-		}
-		if own {
-			return encodeNode(&doc.Node{ID: at.ID, Type: at.Type, Data: at.Data}) != encodeNode(&doc.Node{ID: read.ID, Type: read.Type, Data: read.Data})
-		}
-		return encodeNode(at) != encodeNode(read)
-	}
-	found := false
-	for _, op := range ops {
-		switch op.Op {
-		case "insert":
-			for _, n := range op.Nodes {
-				walk(n, func(k *doc.Node) { seen[k.ID] = true })
-			}
-		case "replace":
-			if changed(op.PrevNode, keepsChildren(op)) {
-				found = true
-			}
-		case "delete":
-			for _, r := range op.Removed {
-				if changed(r.Node, false) {
-					found = true
-				}
-			}
-		}
-	}
-	return found
-}
-
-// keepsChildren reports whether a replace left the block's children as
-// they were, as doc's keptChildren: its node has the children its
-// previous had, as replace_block without children writes it.
-func keepsChildren(op doc.Op) bool {
-	if op.PrevNode == nil || op.Node == nil || op.PrevNode.Type == "table" || len(op.Node.Children) != len(op.PrevNode.Children) {
-		return false
-	}
-	for i, k := range op.Node.Children {
-		if k.ID != op.PrevNode.Children[i].ID {
-			return false
-		}
-	}
-	return true
-}
-
-// encodeNode is a block as JSON, alike for equal blocks: Data holds only
-// JSON values, and maps encode with their keys in order.
-func encodeNode(n *doc.Node) string {
-	raw, _ := json.Marshal(n)
-	return string(raw)
-}
-
-// walk calls fn on n and every block inside it.
-func walk(n *doc.Node, fn func(*doc.Node)) {
-	fn(n)
-	for _, k := range n.Children {
-		walk(k, fn)
-	}
-}
-
-// errUnreadable is a page whose stored content cannot be read.
-var errUnreadable = errors.New("The page's content could not be read, so agents leave it as it is.") //nolint:staticcheck // shown to people as a sentence.
-
-// stored is a page's stored content, nil when it is not kept here. What
-// cannot be read is an error rather than an empty page, which saving
-// would put in its place.
-func stored(st *store.Store, pageID string) (*doc.Content, error) {
-	c, _, err := storedRow(st, pageID)
-	return c, err
-}
-
-// beforeStore runs between applying ops to a page's stored content and
-// saving it; tests save there, standing in for MCP or a sync.
-var beforeStore = func(pageID string) {}
-
-// storedRow is stored, with the stored text it was read from ("" when
-// there is none) to save over.
-func storedRow(st *store.Store, pageID string) (*doc.Content, string, error) {
-	row, err := st.ContentRow(pageID)
-	if err != nil {
-		return nil, "", nil //nolint:nilerr // not kept on this device.
-	}
-	c, err := doc.Decode(row.Content)
-	if err != nil {
-		return nil, "", errUnreadable
-	}
-	return c, row.Content, nil
 }
 
 func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *doc.Content, d *delivery, res Result, err error, o RunOptions) {
 	s.Running = false
-	run.stop = nil
+	run.stop, run.cancel = nil, nil
+	if h.gone(run) {
+		// Its account left this device, its pages with it: it stores
+		// nothing, and ends for whoever waits on it.
+		run.Status, run.Error = "failed", ErrAccountLeft.Error()
+		if o.Reply != nil {
+			o.Reply.Pending, o.Reply.Streamed, o.Reply.Error, o.Reply.Text = false, false, true, run.Error
+		}
+		if o.Done != nil {
+			o.Done(run)
+		}
+		return
+	}
 	run.Reply, run.Answer = res.Reply, ""
 	// A cloud run whose stream was cut off has its ops from the server's
 	// job, those after the cut too: all of them are the run's, to undo.
@@ -1253,62 +557,6 @@ func short(s string) string {
 	return s
 }
 
-func (h *Hub) toolContext(pageID, title, agent string, content *doc.Content, settings store.Settings) ToolContext {
-	p, err := h.st.Page(pageID)
-	tc := PageTools(h.st, pageID, title, agent, content, err == nil && h.crossPage(p, settings))
-	// An agent edits only what the user may.
-	tc.ReadOnly = err != nil || !h.st.CanEdit(p)
-	return tc
-}
-
-// crossPage reports whether an agent on p may read the user's other
-// pages. Not on a page other people write in too: what they wrote could
-// tell the agent to copy the user's other pages into it. Nor on one with
-// a public link, or a guest's comment from one: its visitors read what
-// the agent copies into it, and a guest's comment is someone else's
-// writing, though stored as the user's.
-func (h *Hub) crossPage(p store.Page, settings store.Settings) bool {
-	return settings.AgentsReadOtherPages && p.ID != "" && !sharedWithOthers(h.st, p) &&
-		!h.st.HasGuestComments(p.ID) && (h.PublicLink == nil || !h.PublicLink(p.ID))
-}
-
-// ownMembersKey is internal/sync's OwnMembersKey: when sync last read who
-// the user's own pages are shared with.
-const ownMembersKey = "sync.own_members_at"
-
-// sharedWithOthers reports whether anyone but the user has a page: it is
-// in someone else's space, or it or a page it is inside has members other
-// than the user. Signed in, the user's own pages count as shared until
-// sync has read who they are shared with: members are kept of a page only
-// once something loaded them, so none kept says nothing before then.
-func sharedWithOthers(st *store.Store, p store.Page) bool {
-	sess := st.Session()
-	if known, _ := st.Value(ownMembersKey); sess.SignedIn && known == "" {
-		return true
-	}
-	seen := map[string]bool{}
-	for p.ID != "" && !seen[p.ID] {
-		seen[p.ID] = true
-		if p.SpaceID != sess.SpaceID {
-			return true
-		}
-		for _, m := range st.MembersOrNil(p.ID) {
-			if m.UserID != sess.UserID {
-				return true
-			}
-		}
-		if p.ParentID == "" {
-			break
-		}
-		parent, err := st.Page(p.ParentID)
-		if err != nil {
-			break
-		}
-		p = parent
-	}
-	return false
-}
-
 func (h *Hub) logLocalJob(run *Run, req Request) {
 	var edits []any
 	for _, e := range run.Edits {
@@ -1328,197 +576,19 @@ func (h *Hub) logLocalJob(run *Run, req Request) {
 	}
 }
 
-// saveRun keeps a run's change with the conversation that shows it: the
-// page's chat or an earlier one, whose run the page's bar can still undo.
-func (h *Hub) saveRun(s *Session, runID string) {
-	for _, c := range s.Past {
-		if slices.ContainsFunc(c.Runs, func(r *Run) bool { return r.ID == runID }) {
-			h.savePast(s)
-			return
-		}
-	}
-	h.saveChat(s)
-}
-
-// UndoRun reverts a whole run, even after later edits elsewhere on the
-// page. One whose edits could not be reverted stays as it was, and says
-// why.
-func (h *Hub) UndoRun(pageID, runID string) error {
-	s := h.Session(pageID)
-	run := s.Run(runID)
-	if run == nil || run.Undone {
-		return nil
-	}
-	if err := h.apply(pageID, run, doc.InvertRun(run.Ops)); err != nil {
-		log.Printf("undo run: %v", err)
-		return err
-	}
-	run.Undone = true
-	h.saveRun(s, runID)
-	h.host.Tint(pageID, nil)
-	h.markJob(runID, "reverted")
-	return nil
-}
-
-// RedoRun applies an undone run again. One whose edits could not be
-// applied stays undone, and says why.
-func (h *Hub) RedoRun(pageID, runID string) error {
-	s := h.Session(pageID)
-	run := s.Run(runID)
-	if run == nil || !run.Undone {
-		return nil
-	}
-	if err := h.apply(pageID, run, run.Ops); err != nil {
-		log.Printf("redo run: %v", err)
-		return err
-	}
-	run.Undone = false
-	h.saveRun(s, runID)
-	h.host.Tint(pageID, run.BlockIDs())
-	h.markJob(runID, "done")
-	return nil
-}
-
-// apply makes a run's ops, or their inverse, on its page and on the pages
-// it made or deleted. A page it made that this device does not have yet,
-// as a cloud run's before it syncs, stops it before anything changes:
-// deleting it would miss it, and it would come back with the sync. One
-// that is not coming, as sync has pulled the pages made since the run
-// began, is gone for good, and passed over. The page's blocks go next,
-// all at once or not at all: when they cannot, nothing changed. Only the
-// database failing leaves the pages after them as they were.
-func (h *Hub) apply(pageID string, run *Run, ops []doc.Op) error {
-	var blockOps, pageOps []doc.Op
-	for _, o := range ops {
-		id := o.PageID
-		if o.Page != nil {
-			id = o.Page.ID
-		}
-		switch _, err := h.st.Page(id); {
-		case o.Op != "delete_page" && o.Op != "create_page":
-			blockOps = append(blockOps, o)
-		case err == nil:
-			pageOps = append(pageOps, o)
-		case id != "" && h.awaited(run):
-			return errors.New(locales.PageRunSubpageNotHere())
-		}
-	}
-	if len(blockOps) > 0 {
-		var err error
-		if ed := h.host.Live(pageID); ed != nil {
-			err = ed.ApplyOps(blockOps)
-		} else {
-			err = storeOps(h.st, pageID, blockOps, false, run.ID, "undo run")
-		}
-		if err != nil {
-			return err
-		}
-	}
-	var failed error
-	for _, o := range pageOps {
-		switch {
-		case o.Op == "delete_page":
-			if _, err := h.st.DeletePage(o.PageID); err != nil {
-				failed = errors.Join(failed, err)
-			}
-		case o.Page != nil:
-			failed = errors.Join(failed, h.st.RestorePages([]string{o.Page.ID}))
-		}
-	}
-	return failed
-}
-
-// pagesCursorKey is internal/sync's cursor of the pages pulled: the
-// time, then the key, of the last.
-const pagesCursorKey = "sync.cursor.pages"
-
-// awaited reports whether a page run made, which this device does not
-// have, may still come with a sync: signed in, sync has not pulled pages
-// made since the run began.
-func (h *Hub) awaited(run *Run) bool {
-	if run.At.IsZero() || !h.st.Session().SignedIn {
-		return false
-	}
-	v, ok := h.st.Value(pagesCursorKey)
-	if !ok {
-		return true
-	}
-	at, _, _ := strings.Cut(v, "|")
-	pulled, err := time.Parse(time.RFC3339Nano, at)
-	return err != nil || pulled.Before(run.At)
-}
-
-// markJob changes a run's status: in the job this device keeps of a local
-// run, or else in the cloud run's row on the server, whose status the
-// agent function reads to leave an undone run out of the chat's history.
-func (h *Hub) markJob(id, status string) {
-	local, err := h.st.SetJobStatus(id, status)
-	if err != nil {
-		log.Printf("job status: %v", err)
-	}
-	if !local && h.be.SignedIn() && h.host.Online() {
-		guard.Go(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
-			if err := h.sendJobStatus(ctx, id, status); err != nil {
-				log.Printf("job status: %v", err)
-			}
-		})
-	}
-}
-
-// sendJobStatus changes a cloud run's status on the server. Not as an
-// upsert: the server checks its insert first, and a row of only an ID and
-// a status, without its page or surface, is refused before it finds the
-// row there.
-func (h *Hub) sendJobStatus(ctx context.Context, id, status string) error {
-	_, err := h.be.Update(ctx, "ai_jobs", []string{remote.Eq("id", id)}, map[string]any{"status": status})
-	return err
-}
-
-// maxTranscript bounds the transcript an agent reads of one recording.
-const maxTranscript = 40000
-
-// TranscriptText is a transcript as lines of "[m:ss] text", with a line of
-// only punctuation joined to the one before.
-func TranscriptText(segs []store.Segment) string {
-	var lines []string
-	for _, s := range segs {
-		text := strings.TrimSpace(s.Text)
-		if text == "" {
-			continue
-		}
-		if strings.TrimFunc(text, func(r rune) bool { return unicode.IsPunct(r) }) == "" && len(lines) > 0 {
-			lines[len(lines)-1] += text
-			continue
-		}
-		at := s.StartMs / 1000
-		line := fmt.Sprintf("[%d:%02d] ", at/60, at%60)
-		if s.Speaker != "" {
-			line += "Speaker " + s.Speaker + ": "
-		}
-		lines = append(lines, line+text)
-	}
-	out := strings.Join(lines, "\n")
-	if r := []rune(out); len(r) > maxTranscript {
-		out = string(r[:maxTranscript]) + "\n[The rest of the transcript is cut off.]"
-	}
-	return out
-}
-
 // Describe is how a run ended, for its reply.
 func Describe(r *Run) string {
 	switch {
 	case r.Error != "":
 		return r.Error
 	case r.Stopped && len(r.Edits) > 0:
-		return fmt.Sprintf("Stopped after: %s.", r.Edits[len(r.Edits)-1].Summary)
+		return locales.AgentStoppedAfter(r.Edits[len(r.Edits)-1].Summary)
 	case r.Stopped:
-		return "Stopped before making any changes."
+		return locales.AgentStoppedBefore()
 	case r.Reply != "":
 		return r.Reply
 	case len(r.Edits) > 0:
-		return fmt.Sprintf("%s.", r.Edits[len(r.Edits)-1].Summary)
+		return locales.AgentEditMade(r.Edits[len(r.Edits)-1].Summary)
 	}
-	return "The agent made no changes."
+	return locales.AgentNoChanges()
 }

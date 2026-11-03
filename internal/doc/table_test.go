@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"testing"
@@ -67,5 +68,45 @@ func BenchmarkTableCells(b *testing.B) {
 	table, _ := TableNode(bigRows(2000, 5), "")
 	for b.Loop() {
 		_ = TableCells(table)
+	}
+}
+
+// A cell at a position no JSON number holds exactly, as a hostile editor
+// of a shared page can write, sizes no table from it: read as the largest
+// int, as arm64 converts it, the table's size overflowed and every reader
+// of it panicked.
+func TestHugeCellPositionsReadAsNone(t *testing.T) {
+	for _, pos := range []string{"1e19", "-1e19", "1e16", "1e308"} {
+		c, err := Decode(`{"document":{"type":"page","id":"root","children":[{"id":"t","type":"table","data":{"rowsLen":2,"colsLen":1},"children":[
+			{"id":"c1","type":"table/cell","data":{"rowPosition":0,"colPosition":0},"children":[{"id":"p1","type":"paragraph","data":{"delta":[{"insert":"kept"}]}}]},
+			{"id":"c2","type":"table/cell","data":{"rowPosition":` + pos + `,"colPosition":0},"children":[{"id":"p2","type":"paragraph","data":{"delta":[{"insert":"far"}]}}]}]}]}}`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		table := c.Find("t")
+		if rows, cols := TableSize(table); rows != 1 || cols != 1 {
+			t.Errorf("position %s: size %d×%d, want 1×1", pos, rows, cols)
+		}
+		if got := TableRows(table); !reflect.DeepEqual(got, [][]string{{"kept"}}) {
+			t.Errorf("position %s: rows %q", pos, got)
+		}
+		_ = TableCells(table)
+		_ = BlockViews(c)
+		_ = PageHTML("T", c, HTMLOptions{})
+		_ = PageMarkdown("T", c, MarkdownOptions{})
+	}
+}
+
+func TestAsIntKeepsExactIntegers(t *testing.T) {
+	for _, tc := range []struct {
+		v    any
+		want int
+	}{
+		{float64(3), 3}, {2.7, 2}, {float64(1 << 53), 1 << 53}, {1e19, -1}, {-1e19, -1},
+		{int64(1 << 62), -1}, {json.Number("12"), 12}, {json.Number("9223372036854775807"), -1}, {"3", -1}, {nil, -1},
+	} {
+		if got := AsInt(tc.v, -1); got != tc.want {
+			t.Errorf("AsInt(%v) = %d, want %d", tc.v, got, tc.want)
+		}
 	}
 }

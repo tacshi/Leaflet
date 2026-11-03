@@ -19,6 +19,7 @@ import (
 
 	"leaflet/internal/guard"
 	"leaflet/internal/supabaseapi"
+	"leaflet/locales"
 	"leaflet/supabase"
 )
 
@@ -51,7 +52,7 @@ var Functions = []string{"agent", "providers", "stt", "account"}
 // FunctionsVersion orders the functions builds deploy: it goes up by one
 // with each change to them, as TestFunctionsVersion holds it to, so a build
 // deploys over older functions only, never over newer ones.
-const FunctionsVersion = 1
+const FunctionsVersion = 2
 
 // hashSecret begins the name of the project secret that says which
 // functions are deployed: the rest of the name is their FunctionsVersion
@@ -117,7 +118,8 @@ func Migrations() ([]Migration, error) {
 }
 
 // functionFiles are each function's sources, at their paths from the
-// project's root: its index.ts and the shared modules, without tests.
+// project's root: its index.ts first, the rest of its folder, and the
+// shared modules, without tests.
 func functionFiles(slug string) ([]supabaseapi.File, error) {
 	var out []supabaseapi.File
 	add := func(name string) error {
@@ -128,15 +130,20 @@ func functionFiles(slug string) ([]supabaseapi.File, error) {
 		out = append(out, supabaseapi.File{Path: "supabase/" + name, Data: data})
 		return nil
 	}
-	if err := add(path.Join("functions", slug, "index.ts")); err != nil {
+	entry := path.Join("functions", slug, "index.ts")
+	if err := add(entry); err != nil {
+		return nil, err
+	}
+	own, err := fs.Glob(supabase.Backend, path.Join("functions", slug, "*.ts"))
+	if err != nil {
 		return nil, err
 	}
 	shared, err := fs.Glob(supabase.Backend, "functions/_shared/*.ts")
 	if err != nil {
 		return nil, err
 	}
-	for _, name := range shared {
-		if strings.HasSuffix(name, "_test.ts") {
+	for _, name := range append(own, shared...) {
+		if name == entry || strings.HasSuffix(name, "_test.ts") {
 			continue
 		}
 		if err := add(name); err != nil {
@@ -302,7 +309,7 @@ func Ready(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project) 
 	for !p.Healthy() {
 		switch p.Status {
 		case "INIT_FAILED", "REMOVED", "RESTORE_FAILED":
-			return p, errors.New("Supabase couldn't start the project. Try again, or check it in the Supabase dashboard.") //nolint:staticcheck // shown to people as a sentence.
+			return p, errors.New(locales.ProvisionProjectFailed())
 		case "INACTIVE":
 			if !restored {
 				if err := api.Restore(ctx, p.Ref); err != nil {
@@ -324,11 +331,13 @@ func Ready(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project) 
 }
 
 // Setup brings a project up to this version of Leaflet: it applies the
-// migrations it lacks and deploys the functions when the project's are
-// older, by FunctionsVersion. Ones of the same version stay, whatever
-// their hash, so two builds never take turns deploying; only a
-// development build deploys its own over them, as they change while it is
-// worked on. progress reports steps done of the steps there are.
+// migrations it lacks, closes its sign-ups, and deploys the functions
+// when the project's are older, by FunctionsVersion. Ones of the same
+// version stay, whatever their hash, so two builds never take turns
+// deploying; only a development build deploys its own over them, as they
+// change while it is worked on. A migration another device applied
+// meanwhile, setting the project up at the same time, counts as done.
+// progress reports steps done of the steps there are.
 func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress func(done, total int)) error {
 	all, err := Migrations()
 	if err != nil {
@@ -371,11 +380,12 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 		}
 	}
 	for _, m := range missing {
-		if err := api.Query(ctx, ref, migrationSQL(m)); err != nil {
-			return fmt.Errorf("Leaflet couldn't set up the database (%s): %w", m.Name, err) //nolint:staticcheck // shown to people as a sentence.
+		if err := api.Query(ctx, ref, migrationSQL(m)); err != nil && !appliedMeanwhile(err) {
+			return &failed{locales.ProvisionMigrationFailed(m.Name, err.Error()), err}
 		}
 		step()
 	}
+	closeSignUps(ctx, api, ref)
 	if !deploy {
 		return nil
 	}
@@ -385,7 +395,7 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 			return err
 		}
 		if err := api.DeployFunction(ctx, ref, slug, "supabase/functions/"+slug+"/index.ts", true, files); err != nil {
-			return fmt.Errorf("Leaflet couldn't deploy its %s function: %w", slug, err) //nolint:staticcheck // shown to people as a sentence.
+			return &failed{locales.ProvisionDeployFailed(slug, err.Error()), err}
 		}
 		step()
 	}
@@ -407,17 +417,59 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 	return nil
 }
 
+// closeSignUps keeps a project's Auth to the owner's account, which
+// Leaflet makes with the secret key (remote.SignInAsOwner): no one else
+// may make an account, and an address counts only once confirmed, as
+// shares and invites go to whoever confirms it. The settings are read
+// first and changed only when they differ. It is best effort, as the
+// upload limit is: Auth settings need the OAuth app's Auth scope, which a
+// Supabase sign-in from before the app had it lacks, and the project then
+// keeps what Supabase made it with, sign-ups open and addresses confirmed.
+func closeSignUps(ctx context.Context, api *supabaseapi.Client, ref string) {
+	closed := supabaseapi.SignUps{Disabled: true}
+	if s, err := api.SignUps(ctx, ref); err == nil && s != closed {
+		_ = api.SetSignUps(ctx, ref, closed)
+	}
+}
+
+// appliedMark is what migrationSQL raises when the migration was applied
+// while it waited for the lock.
+const appliedMark = "leaflet_migration_applied"
+
 // migrationSQL applies m and records it in the migration history the
 // Supabase CLI keeps, so `supabase db push` agrees. The statements run as
-// one transaction.
+// one transaction. Two devices may set a project up at once, as a Mac
+// and an iPhone signing in together: each migration first takes a lock
+// the other's waits for, and one recorded meanwhile raises appliedMark,
+// changing nothing, rather than being applied twice.
 func migrationSQL(m Migration) string {
 	// Version and name are digits and [a-z0-9_] (migrationRe): safe to
 	// quote as is.
-	return m.SQL + "\n;\n" +
+	return "select pg_advisory_xact_lock(hashtext('supabase_migrations'));\n" +
 		"create schema if not exists supabase_migrations;\n" +
 		"create table if not exists supabase_migrations.schema_migrations (version text not null primary key, statements text[], name text);\n" +
+		fmt.Sprintf("do $leaflet$ begin if exists (select 1 from supabase_migrations.schema_migrations where version = '%s') then raise exception '%s'; end if; end $leaflet$;\n", m.Version, appliedMark) +
+		m.SQL + "\n;\n" +
 		fmt.Sprintf("insert into supabase_migrations.schema_migrations (version, name) values ('%s', '%s');\n", m.Version, m.Name)
 }
+
+// appliedMeanwhile reports whether a migration failed because another
+// device applied it while this one waited (appliedMark).
+func appliedMeanwhile(err error) bool {
+	var e *supabaseapi.Error
+	return errors.As(err, &e) && strings.Contains(e.Message, appliedMark)
+}
+
+// failed is an error said as a sentence that holds err, in the app's
+// language, and still err to errors.Is and errors.As.
+type failed struct {
+	msg string
+	err error
+}
+
+func (f *failed) Error() string { return f.msg }
+
+func (f *failed) Unwrap() error { return f.err }
 
 // Owner returns the email and name of the person signed in, by the
 // members of the project's organization: the API tells no account its own
@@ -429,7 +481,7 @@ func Owner(ctx context.Context, api *supabaseapi.Client, org string) (email, nam
 	}
 	members = slices.DeleteFunc(members, func(m supabaseapi.Member) bool { return m.Email == "" })
 	if len(members) != 1 {
-		return "", "", errors.New("Leaflet couldn't tell which member of the organization you are. Use a project in an organization of your own.") //nolint:staticcheck // shown to people as a sentence.
+		return "", "", errors.New(locales.ProvisionWhichMember())
 	}
 	return members[0].Email, members[0].Name, nil
 }
@@ -458,7 +510,7 @@ func Keys(ctx context.Context, api *supabaseapi.Client, ref string) (publishable
 		publishable, secret = anon, service
 	}
 	if publishable == "" || secret == "" {
-		return "", "", errors.New("Supabase didn't give Leaflet the project's API keys.") //nolint:staticcheck // shown to people as a sentence.
+		return "", "", errors.New(locales.ProvisionNoKeys())
 	}
 	return publishable, secret, nil
 }

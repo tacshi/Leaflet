@@ -55,6 +55,10 @@ type Service struct {
 	// DeviceName names this device in Account › Devices and to the other
 	// devices in iCloud Drive; nil is the package's DeviceName.
 	DeviceName func() string
+	// Updating reports whether the Supabase project is being brought up to
+	// this version of Leaflet, while which the changes wait to go up: sent
+	// before, they may name columns its schema lacks yet. nil is never.
+	Updating func() bool
 
 	cloudOn atomic.Bool
 	kick    chan struct{}
@@ -78,6 +82,24 @@ type Service struct {
 	// ID and revision: a replaced entry goes at once. Guarded by mu; it
 	// starts empty with each run, which tries every entry once more.
 	retryAt map[outboxKey]time.Time
+	// busyUntil is when the server asked the loop's passes to wait for,
+	// as it answered busy with a Retry-After (backOff); guarded by mu.
+	busyUntil time.Time
+}
+
+// busyWaitMax is the most a Retry-After holds the loop back.
+const busyWaitMax = 10 * time.Minute
+
+// backOff keeps the loop's passes from the server for as long as an
+// answer that it is busy asks, no longer than busyWaitMax.
+func (s *Service) backOff(err error) {
+	re, ok := errors.AsType[*remote.Error](err)
+	if !ok || re.RetryAfter <= 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.busyUntil = time.Now().Add(min(re.RetryAfter, busyWaitMax))
 }
 
 // outboxKey names an outbox entry as queued: a new payload is a new key.
@@ -132,12 +154,19 @@ func (s *Service) due(e store.OutboxEntry) bool {
 	return !ok || !time.Now().Before(at)
 }
 
-// failed records an outbox entry's failure, and when it may go again.
+// failed records an outbox entry's failure, and when it may go again. One
+// the server refuses for good (remote.IsInvalid), as a file larger than
+// it takes, waits the longest at once: sent again soon, it fails again,
+// and an upload goes whole each time.
 func (s *Service) failed(e store.OutboxEntry, err error) {
 	_ = s.st.MarkFailed(e, err.Error())
+	wait := backoff(e.Attempts + 1)
+	if remote.IsInvalid(err) {
+		wait = retryMax
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.retryAt[outboxKey{e.ID, e.Revision}] = time.Now().Add(backoff(e.Attempts + 1))
+	s.retryAt[outboxKey{e.ID, e.Revision}] = time.Now().Add(wait)
 }
 
 // forgetRetries drops the waits of entries no longer queued as they were.
@@ -177,16 +206,16 @@ func (s *Service) Start() {
 				}
 			case <-tick.C:
 			}
-			s.loopPass()
+			s.loopPass(ctx)
 		}
 	})
 }
 
-// loopPass is a pass of the loop's: one that panics is logged, and the
-// loop goes on to the next.
-func (s *Service) loopPass() {
+// loopPass is a pass of the loop's, which loop ends: one that panics is
+// logged, and the loop goes on to the next.
+func (s *Service) loopPass(loop context.Context) {
 	defer guard.Recover()
-	_ = s.SyncNow()
+	_ = s.syncNow(loop, true)
 }
 
 // Stop ends the loop Start started, and the pass running, the loop's or
@@ -340,10 +369,11 @@ func (s *Service) SetOpen(pageID string, open bool) {
 		if !s.CanSync() {
 			return
 		}
-		// The time it has starts once the pass in progress is done.
+		// The time it has starts once the pass in progress is done, and
+		// Stop ends it, as it ends a pass.
 		s.running.Lock()
 		defer s.running.Unlock()
-		ctx, cancel := context.WithTimeout(context.Background(), openWait)
+		ctx, cancel := context.WithTimeout(s.passContext(), openWait)
 		defer cancel()
 		// Who else has one of the user's pages is known before what they
 		// wrote in it comes, for the agents that run on it.
@@ -383,12 +413,28 @@ func (s *Service) Hold(fn func()) {
 
 // SyncNow runs one pass, after the one in progress. A pass that panics
 // is logged and fails, so it is never taken for one still running.
-func (s *Service) SyncNow() (err error) {
+func (s *Service) SyncNow() error { return s.syncNow(context.Background(), false) }
+
+// syncNow is SyncNow; ofLoop says it is a pass of the loop whose context is
+// loop: one that waited for another, or for SetOpen, FlushPage or Hold, to
+// be done runs only if the loop still does, as Stop ended it.
+func (s *Service) syncNow(loop context.Context, ofLoop bool) (err error) {
 	if !s.CanSync() {
 		return nil
 	}
 	s.running.Lock()
 	defer s.running.Unlock()
+	if loop.Err() != nil {
+		return nil
+	}
+	// The loop leaves a server that asked for a wait alone till then; a
+	// pass asked for, as the user's, still goes.
+	s.mu.Lock()
+	busy := time.Now().Before(s.busyUntil)
+	s.mu.Unlock()
+	if ofLoop && busy {
+		return nil
+	}
 	if s.OnState != nil {
 		s.OnState(true, nil)
 		defer func() { s.OnState(false, err) }()
@@ -422,8 +468,10 @@ func (s *Service) pass(ctx context.Context) error {
 	if err := s.heartbeat(ctx); err != nil {
 		return err
 	}
-	if err := s.push(ctx); err != nil {
-		return err
+	if s.Updating == nil || !s.Updating() {
+		if err := s.push(ctx); err != nil {
+			return err
+		}
 	}
 	return s.pull(ctx)
 }
@@ -440,26 +488,36 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 	if _, ok := s.st.Value("space." + uid); ok {
 		return nil
 	}
-	space, err := s.be.SelectOne(ctx, "spaces", remote.Query{Filters: []string{remote.Eq("owner_id", uid)}})
+	own := remote.Query{Filters: []string{remote.Eq("owner_id", uid)}}
+	space, err := s.be.SelectOne(ctx, "spaces", own)
 	if err != nil {
-		return err
-	}
-	// A library other devices made has starter pages of its own: this
-	// device's stay out of it, unless the user took them up.
-	if err := s.st.SettleStarterPages(space != nil); err != nil {
 		return err
 	}
 	if space == nil {
 		rows, err := s.be.Insert(ctx, "spaces", map[string]any{"name": "My space", "owner_id": uid})
+		switch {
+		case remote.IsConflict(err):
+			// Another device of the user's made it meanwhile.
+			if space, err = s.be.SelectOne(ctx, "spaces", own); err == nil && space == nil {
+				err = errors.New("the server has no space")
+			}
+		case err == nil && len(rows) == 0:
+			err = errors.New("the server made no space")
+		case err == nil:
+			space = rows[0]
+		}
 		if err != nil {
 			return err
 		}
-		if len(rows) == 0 {
-			return errors.New("the server made no space")
-		}
-		space = rows[0]
 	}
 	remoteID := store.S(space, "id")
+	joined, err := s.joinsLibrary(ctx, remoteID)
+	if err != nil {
+		return err
+	}
+	if err := s.st.SettleStarterPages(joined); err != nil {
+		return err
+	}
 	name := store.S(space, "name")
 	if name == "" {
 		name = "My space"
@@ -492,6 +550,25 @@ func (s *Service) resolveSpace(ctx context.Context) error {
 		return failed
 	}
 	return errors.Join(failed, s.st.SetValue("space."+uid, remoteID))
+}
+
+// joinsLibrary reports whether the space's library is another device's,
+// which has starter pages of its own, so this device's stay out of it,
+// unless the user took them up. The server makes an account's space as it
+// signs up, so having one says nothing: a library is another device's once
+// it has pages, or once another device claimed it for its starter pages,
+// as one signing in at the same time does before either has uploaded
+// them. A device with no starter pages left claims nothing.
+func (s *Service) joinsLibrary(ctx context.Context, spaceID string) (bool, error) {
+	started, err := s.be.SelectOne(ctx, "pages", remote.Query{Select: "id", Filters: []string{remote.Eq("space_id", spaceID)}})
+	if err != nil || started != nil || !s.st.StarterPagesUnsettled() {
+		return started != nil, err
+	}
+	won, err := s.be.RPC(ctx, "claim_starter_pages", map[string]any{"p_space_id": spaceID, "p_device": s.st.DeviceID()})
+	if err != nil {
+		return false, err
+	}
+	return won != true, nil
 }
 
 // requeueAll queues everything on this device to go up, now in the space
@@ -747,8 +824,9 @@ func (s *Service) push(ctx context.Context) error {
 	}
 	s.forgetRetries(entries)
 	uid := s.be.UserID()
-	// A file's row waits for its contents (pushOne), which come later in
-	// the queue: it goes once they have, in the same pass.
+	// A file's row waits for its contents (pushOne), and a row for the page
+	// or folder it is in (waitsForParent), which come later in the queue:
+	// it goes once they have, in the same pass.
 	var held []store.OutboxEntry
 	for round := 0; round < 2; round++ {
 		for _, e := range entries {
@@ -763,10 +841,13 @@ func (s *Service) push(ctx context.Context) error {
 			}
 			done, err := s.pushOne(ctx, uid, e)
 			if err != nil {
-				// Offline, signed out or stopped, the rest would fail
-				// alike; anything else is this entry's own, which waits
-				// while the others go.
-				if remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut) || ctx.Err() != nil {
+				// Offline, signed out, stopped, or the server failing or
+				// asking for a wait: the rest would fail alike, and none of
+				// it is the entry's to count against it, which would leave
+				// it waiting long after the server is back. Anything else
+				// is this entry's own, which waits while the others go.
+				if remote.IsNetwork(err) || remote.IsBusy(err) || errors.Is(err, remote.ErrSignedOut) || ctx.Err() != nil {
+					s.backOff(err)
 					return err
 				}
 				log.Printf("outbox %s/%s: %v", e.Entity, e.EntityID, err)
@@ -775,7 +856,7 @@ func (s *Service) push(ctx context.Context) error {
 			}
 			if done {
 				_ = s.st.Dequeue(e)
-			} else if e.Entity == "files" {
+			} else if e.Entity == "files" || e.Entity == "pages" || e.Entity == "folders" {
 				held = append(held, e)
 			}
 		}
@@ -824,7 +905,13 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 	case "comments":
 		return s.pushComment(ctx, uid, e, payload)
 	case "page_history":
+		// A snapshot never changes: one the server has, as an upload whose
+		// answer was lost, is done. As an upsert, sent again it would ask
+		// to change it, which no one may, and to read it back, which
+		// another's may not yet, and fail for good.
 		payload["created_by"] = uid
+		err := s.be.InsertNew(ctx, e.Entity, payload)
+		return err == nil, err
 	}
 	_, err := s.be.Upsert(ctx, e.Entity, payload, "")
 	return err == nil, err
@@ -857,17 +944,87 @@ func (s *Service) pushChanged(ctx context.Context, table string, payload map[str
 
 // pushRow is pushChanged for a row the server may refuse to change: one
 // the user can see there but no longer change, as a page shared with them
-// to view since they changed it. Its change would never go, and the pulls
+// to view since they changed it, or one whose change breaks a rule of the
+// server's for good, as a move under a page another device moved under it
+// meanwhile (remote.IsInvalid). Its change would never go, and the pulls
 // pass over the row while it waits, so every change made to it elsewhere
 // would be missed: the change gives way to the server's row instead. A
 // row the server does not show stays queued, as one under a page not up
 // yet.
 func (s *Service) pushRow(ctx context.Context, e store.OutboxEntry, payload map[string]any) (bool, error) {
-	done, err := s.pushChanged(ctx, e.Entity, payload)
-	if !remote.IsForbidden(err) {
-		return done, err
+	if row, newer, err := s.newerThere(ctx, e, payload); err != nil || newer {
+		if err != nil {
+			return false, err
+		}
+		return s.takeServer(ctx, e, row)
 	}
-	return s.giveWay(ctx, e, err)
+	done, err := s.pushChanged(ctx, e.Entity, payload)
+	switch {
+	case err == nil || remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut) || ctx.Err() != nil:
+		return done, err
+	case s.waitsForParent(payload):
+		return false, nil
+	case remote.IsForbidden(err) || remote.IsInvalid(err):
+		return s.giveWay(ctx, e, err)
+	}
+	return false, err
+}
+
+// waitsForParent reports whether a row names, as the page or folder it is
+// in, one still waiting to go up: the server refuses a move under a page
+// it does not have yet, but this one goes once its parent has, later in the
+// same push, and counts no failure meanwhile. An entry changed again keeps
+// its place in the queue, so a page renamed, then moved under a page made
+// after, comes before that page.
+func (s *Service) waitsForParent(payload map[string]any) bool {
+	for col, table := range map[string]string{"parent_id": "pages", "folder_id": "folders", "parent_folder_id": "folders"} {
+		if id, _ := payload[col].(string); id != "" && s.st.HasPending(table, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// newerThere reports whether the server's row of a row sent again whole as
+// this device's pages joined the account (store.AdoptKey) changed there
+// after it last did here, as another device that synced with this one
+// through iCloud Drive renamed, moved or deleted it since: sent whole, this
+// device's older copy would undo that. It returns that row then. The row
+// goes up when the server has none, or it changed here later.
+func (s *Service) newerThere(ctx context.Context, e store.OutboxEntry, payload map[string]any) (row map[string]any, newer bool, err error) {
+	at, ok := payload[store.AdoptKey].(string)
+	delete(payload, store.AdoptKey)
+	here, err := time.Parse(time.RFC3339Nano, at)
+	if !ok || err != nil {
+		return nil, false, nil
+	}
+	row, err = s.be.SelectOne(ctx, e.Entity, remote.Query{Select: "*", Filters: []string{remote.Eq("id", e.EntityID)}})
+	if err != nil || row == nil || store.Time(row["updated_at"]).Before(here) {
+		return nil, false, err
+	}
+	log.Printf("outbox %s/%s: changed on the server since; taking its row", e.Entity, e.EntityID)
+	return row, true, nil
+}
+
+// putServerPage stores a page from the server. A move of this device's
+// still waiting to go up can make it close a loop of parents, as when
+// another device moved a page under one this device moved under it: the
+// server turns the second move away, so it has no loop, but this device,
+// which stores the first while its own waits, would leave both pages out
+// of the tree. The page of the loop whose move waits goes to the top level
+// here meanwhile, unqueued; its move gives way to the server's row once
+// refused (pushRow).
+func (s *Service) putServerPage(r map[string]any) error {
+	loop := s.st.ParentLoop(store.S(r, "id"), store.S(r, "parent_id"))
+	if err := s.st.PutRemotePage(r); err != nil || len(loop) == 0 {
+		return err
+	}
+	for _, id := range loop {
+		if s.st.HasPending("pages", id) {
+			return s.st.DetachPage(id)
+		}
+	}
+	return s.st.DetachPage(slices.Min(loop))
 }
 
 // giveWay has a change the server refused give way to the server's row,
@@ -892,7 +1049,7 @@ func (s *Service) takeServer(ctx context.Context, e store.OutboxEntry, row map[s
 	var err error
 	switch e.Entity {
 	case "pages":
-		err = s.st.PutRemotePage(row)
+		err = s.putServerPage(row)
 	case "folders":
 		err = s.st.PutRemoteFolder(row)
 	case "files":
@@ -952,6 +1109,12 @@ func (s *Service) pushRecording(ctx context.Context, e store.OutboxEntry, payloa
 // pushRow's does to its row: the pulls pass over a comment while it
 // waits, so its author's edits and deletion would never come.
 func (s *Service) pushComment(ctx context.Context, uid string, e store.OutboxEntry, payload map[string]any) (bool, error) {
+	if row, newer, err := s.newerThere(ctx, e, payload); err != nil || newer {
+		if err != nil {
+			return false, err
+		}
+		return s.takeServer(ctx, e, row)
+	}
 	cols, partial := payload[store.ChangedKey].([]any)
 	delete(payload, store.ChangedKey)
 	changes := map[string]any{"resolved": payload["resolved"]}
@@ -1164,7 +1327,7 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 	// this merges: store the merge only over the content it merged.
 	// What that merge's conflicts lose is kept, as the first merge's is.
 	var now store.ContentRow
-	next := merged
+	var next *doc.Content
 	var meanwhile []doc.Conflict
 	for tries := 1; ; tries++ {
 		// The server has the merge now: unless it is stored here, with its
@@ -1364,17 +1527,40 @@ func (s *Service) copyWaits(bucket, path string) bool {
 // its time and key.
 type cursor struct{ at, key string }
 
-func (s *Service) cursor(table string) cursor {
-	v, ok := s.st.Value("sync.cursor." + table)
-	if !ok {
-		return cursor{at: "1970-01-01T00:00:00Z"}
-	}
+// cursorKey keeps a table's cursor, as its time, "|", and its key.
+func cursorKey(table string) string { return "sync.cursor." + table }
+
+// keptCursor is a table's cursor as kept, if there is one.
+func keptCursor(st *store.Store, table string) (cursor, bool) {
+	v, ok := st.Value(cursorKey(table))
 	at, key, _ := strings.Cut(v, "|")
-	return cursor{at, key}
+	return cursor{at, key}, ok
+}
+
+func (s *Service) cursor(table string) cursor {
+	if c, ok := keptCursor(s.st, table); ok {
+		return c
+	}
+	return cursor{at: "1970-01-01T00:00:00Z"}
 }
 
 func (s *Service) setCursor(table string, c cursor) {
-	_ = s.st.SetValue("sync.cursor."+table, c.at+"|"+c.key)
+	_ = s.st.SetValue(cursorKey(table), c.at+"|"+c.key)
+}
+
+// time is the time of the row the cursor is at.
+func (c cursor) time() (time.Time, error) { return time.Parse(time.RFC3339Nano, c.at) }
+
+// PulledAt reports the time of the newest row of table that sync has
+// pulled: its cursor's. ok is false when there is no cursor yet, or
+// one that cannot be read.
+func PulledAt(st *store.Store, table string) (at time.Time, ok bool) {
+	c, ok := keptCursor(st, table)
+	if !ok {
+		return time.Time{}, false
+	}
+	at, err := c.time()
+	return at, err == nil
 }
 
 // overlap is how far behind its cursor a pull looks again. The server
@@ -1393,7 +1579,7 @@ func (c cursor) passed(r map[string]any, key string) bool {
 	if err != nil {
 		return false
 	}
-	cur, err := time.Parse(time.RFC3339Nano, c.at)
+	cur, err := c.time()
 	if err != nil {
 		return false
 	}
@@ -1509,7 +1695,7 @@ func (s *Service) pull(ctx context.Context) error {
 		table, cols string
 		apply       func(map[string]any) error
 	}{
-		{"pages", "*", s.st.PutRemotePage},
+		{"pages", "*", s.putServerPage},
 		{"folders", "*", s.st.PutRemoteFolder},
 		{"recordings", "*", s.st.PutRemoteRecording},
 		{"files", "*", s.st.PutRemoteFile},
@@ -1874,7 +2060,7 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 		for _, r := range rows {
 			id := store.S(r, "id")
 			if !s.st.HasPending("pages", id) {
-				if err := s.st.PutRemotePage(r); err != nil {
+				if err := s.putServerPage(r); err != nil {
 					return err
 				}
 			}
@@ -2021,7 +2207,10 @@ func (s *Service) pullContentsPage(ctx context.Context, first bool) (bool, error
 		p, err := s.st.Page(id)
 		if err != nil {
 			waiting[id] = true
-			return nil
+			if store.IsNotFound(err) {
+				return nil
+			}
+			return err
 		}
 		delete(waiting, id)
 		s.mu.Lock()
@@ -2218,9 +2407,10 @@ func (s *Service) flushRemote(ctx context.Context, pageID string) error {
 		return err
 	}
 	// What the job's row refers to must be on the server before it: the
-	// page, under the pages it is inside, its content, and its comments, as
-	// the thread a comment's run answers in. The pages go from the top.
-	var chain []string
+	// page, under the pages it is inside, in the folders they are in, its
+	// content, and its comments, as the thread a comment's run answers in.
+	// The folders and pages go from the top.
+	var chain, folders []string
 	seen := map[string]bool{}
 	for id := pageID; id != "" && !seen[id]; {
 		seen[id] = true
@@ -2229,17 +2419,31 @@ func (s *Service) flushRemote(ctx context.Context, pageID string) error {
 		if err != nil {
 			break
 		}
+		for f := p.FolderID; f != "" && !seen[f]; {
+			seen[f] = true
+			folders = append(folders, f)
+			folder, err := s.st.Folder(f)
+			if err != nil {
+				break
+			}
+			f = folder.ParentFolderID
+		}
 		id = p.ParentID
 	}
 	slices.Reverse(chain)
+	slices.Reverse(folders)
 	var order []store.OutboxEntry
-	for _, id := range chain {
-		for _, e := range entries {
-			if e.Entity == "pages" && e.EntityID == id {
-				order = append(order, e)
+	queue := func(entity string, ids []string) {
+		for _, id := range ids {
+			for _, e := range entries {
+				if e.Entity == entity && e.EntityID == id {
+					order = append(order, e)
+				}
 			}
 		}
 	}
+	queue("folders", folders)
+	queue("pages", chain)
 	for _, e := range entries {
 		if e.Entity == "page_content" && e.EntityID == pageID || e.Entity == "comments" && e.PageID == pageID {
 			order = append(order, e)

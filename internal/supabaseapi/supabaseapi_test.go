@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egoist/mygo/i18n"
 )
 
 // fakeAPI answers the OAuth endpoints: the code goes for tokens when its
@@ -131,7 +133,7 @@ func TestRefreshRotatesAndEnds(t *testing.T) {
 		t.Errorf("kept %v", kept)
 	}
 	ended := Resume("revoked")
-	if _, err := ended.Organizations(ctx); err != ErrSignedOut {
+	if _, err := ended.Organizations(ctx); !errors.Is(err, ErrSignedOut) {
 		t.Errorf("a revoked sign-in: %v", err)
 	}
 }
@@ -247,5 +249,19 @@ func TestBeginAndFinishSignIn(t *testing.T) {
 	}
 	if c.RefreshToken() != "refresh-1" {
 		t.Errorf("kept %q", c.RefreshToken())
+	}
+}
+
+// A sign-in that failed says so in the app's language, and an ended one is
+// still ErrSignedOut to errors.Is.
+func TestSignInFailsInTheAppsLanguage(t *testing.T) {
+	i18n.SetLocaleFunc(func() string { return "zh-Hans" })
+	t.Cleanup(func() { i18n.SetLocaleFunc(nil) })
+	_, err := FinishSignIn(context.Background(), url.Values{"state": {"s"}, "error": {"access_denied"}}, "s", "v")
+	if err == nil || err.Error() != "登录已取消。" {
+		t.Errorf("cancelled: %v", err)
+	}
+	if !errors.Is(fmt.Errorf("account: %w", ErrSignedOut), ErrSignedOut) || ErrSignedOut.Error() != "你的 Supabase 登录已失效。请重新使用 Supabase 登录。" {
+		t.Errorf("signed out: %v", ErrSignedOut)
 	}
 }

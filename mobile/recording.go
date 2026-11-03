@@ -3,9 +3,11 @@ package mobile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -71,6 +73,15 @@ func (a *AudioSink) Failed(message string) {
 func (a *AudioSink) Stalled(message string) {
 	defer catch(nil)
 	a.s.Stalled(message)
+}
+
+// Recovered says the microphone a stall took is back, as a call ended
+// and gave it back: the recording the stall paused goes on.
+func (a *AudioSink) Recovered() {
+	defer catch(nil)
+	if a.s.Recovered != nil {
+		a.s.Recovered()
+	}
 }
 
 // capture is the app's microphone as the recorder's Capture.
@@ -140,12 +151,59 @@ func (e engine) Stream(language string, text func(string)) (recording.Stream, er
 }
 
 func (e engine) File(path, language string) ([]store.Segment, error) {
-	raw, err := e.t.File(path, language)
+	var lasts time.Duration
+	if fi, err := os.Stat(path); err == nil {
+		lasts = audioLasts(fi.Size() - 44)
+	}
+	raw, err := giveUpAfter(lasts, func() (string, error) { return e.t.File(path, language) })
 	if err != nil {
 		return nil, err
 	}
 	return segments(raw)
 }
+
+// onDeviceSlack is how much longer than its audio lasts the device's
+// engine gets to transcribe it, as the Mac's speech helper gets: one
+// stuck, as a speech model that stops answering, is given up on, rather
+// than leave the recording transcribing until the app quits. Tests
+// shorten it.
+var onDeviceSlack = time.Minute
+
+// audioLasts is how long size bytes of the recorder's audio last.
+func audioLasts(size int64) time.Duration {
+	return time.Duration(max(size, 0)/2) * time.Second / recording.SampleRate
+}
+
+// giveUpAfter waits for the Transcriber's call fn, of audio that lasts d,
+// for d and onDeviceSlack more at the most: the call then goes on in
+// Swift, its answer unheard, and the transcription fails saying so.
+func giveUpAfter(d time.Duration, fn func() (string, error)) (string, error) {
+	type answer struct {
+		raw string
+		err error
+	}
+	done := make(chan answer, 1)
+	guard.Go(func() {
+		raw, err := fn()
+		done <- answer{raw, err}
+	})
+	timer := time.NewTimer(d + onDeviceSlack)
+	defer timer.Stop()
+	select {
+	case a := <-done:
+		return a.raw, a.err
+	case <-timer.C:
+		return "", errStuck
+	}
+}
+
+// errStuck is giveUpAfter's for a call it gave up on, in the language the
+// app is in then.
+var errStuck error = stuck{}
+
+type stuck struct{}
+
+func (stuck) Error() string { return locales.RecErrOnDeviceStuck() }
 
 func segments(raw string) ([]store.Segment, error) {
 	var segs []store.Segment
@@ -159,13 +217,23 @@ func segments(raw string) ([]store.Segment, error) {
 type stream struct {
 	t  Transcriber
 	id string
+	// sent counts the bytes of audio it was sent.
+	sent atomic.Int64
 }
 
-func (s *stream) Send(pcm []byte) { s.t.Send(s.id, pcm) }
+func (s *stream) Send(pcm []byte) {
+	s.sent.Add(int64(len(pcm)))
+	s.t.Send(s.id, pcm)
+}
 
+// Finish waits for the words of the audio sent, about as long as the
+// recording at worst, as the engine catches up: one stuck is ended.
 func (s *stream) Finish() ([]store.Segment, error) {
-	raw, err := s.t.Finish(s.id)
+	raw, err := giveUpAfter(audioLasts(s.sent.Load()), func() (string, error) { return s.t.Finish(s.id) })
 	if err != nil {
+		if errors.Is(err, errStuck) {
+			s.t.Close(s.id)
+		}
 		return nil, err
 	}
 	return segments(raw)
@@ -267,10 +335,28 @@ func (c *Core) recState() recordingState {
 	return out
 }
 
-// tellRecording tells the app the recording's state; on the queue.
+// tellRecording tells the app what changed of the recording; on the
+// queue. Its levels, which change each 50 ms, go alone; the rest, with
+// the words heard so far, which grow through a long meeting, only as it
+// changes, but for the time recorded, which the app counts on.
 func (c *Core) tellRecording() {
-	raw, _ := encode(c.recState())
-	c.ev.recordingChanged(raw)
+	st := c.recState()
+	levels := st.Levels
+	st.Levels = []float64{}
+	elapsed := st.ElapsedMs
+	st.ElapsedMs = 0
+	same, _ := encode(st)
+	if same != c.recSent {
+		c.recSent = same
+		st.ElapsedMs = elapsed
+		raw, _ := encode(st)
+		c.ev.recordingChanged(raw)
+	}
+	if !slices.Equal(levels, c.levelsSent) {
+		c.levelsSent = slices.Clone(levels)
+		raw, _ := encode(levels)
+		c.ev.recordingLevels(raw)
+	}
 }
 
 // RecordingState returns the recording in progress, as RecordingChanged
@@ -334,6 +420,13 @@ type recordingRow struct {
 	Transcript  []store.Segment `json:"transcript"`
 	// Plain is the transcript to copy: a line each, after its speaker.
 	Plain string `json:"plain"`
+	// Label is the line under the block's title while nothing runs for
+	// the recording here (recording.Status).
+	Label string `json:"label"`
+	// CreatedMs is when it was made, and PageTitle the title of the page
+	// it was made in, for RecordingTitle.
+	CreatedMs int64  `json:"created_ms"`
+	PageTitle string `json:"page_title"`
 }
 
 // Recording returns a recording block's recording as recordingRow, its
@@ -341,13 +434,22 @@ type recordingRow struct {
 func (c *Core) Recording(id string) (_ string, err error) {
 	defer catch(&err)
 	var rec store.Recording
-	c.q.do(func() { rec, err = c.core.Store.Recording(id) })
+	var page store.Page
+	c.q.do(func() {
+		if rec, err = c.core.Store.Recording(id); err == nil {
+			page, _ = c.core.Store.Page(rec.PageID)
+		}
+	})
 	if err != nil {
 		return "", err
 	}
 	row := recordingRow{
 		ID: rec.ID, Status: rec.Status, DurationMs: rec.DurationMs, SttProvider: rec.SttProvider,
-		Error: rec.Error, Transcript: recording.Tidy(rec.Transcript),
+		Error: rec.Error, Transcript: recording.Tidy(rec.Transcript), Label: recording.Status(rec),
+		PageTitle: page.Title,
+	}
+	if !rec.CreatedAt.IsZero() {
+		row.CreatedMs = rec.CreatedAt.UnixMilli()
 	}
 	if row.Transcript == nil {
 		row.Transcript = []store.Segment{}
@@ -364,9 +466,19 @@ func (c *Core) Recording(id string) (_ string, err error) {
 	return encode(row)
 }
 
+// RecordingTitle returns the name a recording block of title shows, as
+// the desktop's does (recording.BlockTitle): for the recording made at
+// createdMs, as Recording gives it, in the page titled pageTitle, or 0
+// for one not on this device.
+func RecordingTitle(title string, createdMs int64, pageTitle string) string {
+	defer catch(nil)
+	return recording.BlockTitle(title, time.UnixMilli(createdMs), createdMs != 0, pageTitle)
+}
+
 // RecordingAudio returns the path of a recording's WAV audio on this
-// device, downloading it first from where it went up when it is not.
-func (c *Core) RecordingAudio(id string) (_ string, err error) {
+// device, downloading it first from where it went up when it is not. The
+// app may give up on it by token, as LocalFile says.
+func (c *Core) RecordingAudio(id string, token int64) (_ string, err error) {
 	defer catch(&err)
 	var rec store.Recording
 	c.q.do(func() { rec, err = c.core.Store.Recording(id) })
@@ -378,15 +490,14 @@ func (c *Core) RecordingAudio(id string) (_ string, err error) {
 			return rec.LocalPath, nil
 		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+	ctx, done := c.cancellable(token, 5*time.Minute)
+	defer done()
 	data, err := c.core.Rec.Audio(ctx, rec)
 	if err != nil {
 		return "", err
 	}
-	var path string
-	c.q.do(func() { path, err = c.core.Store.DownloadedAudio(id, data) })
-	return path, err
+	// Off the core's queue too, as LocalFile's file.
+	return c.core.Store.DownloadedAudio(id, data)
 }
 
 // Retranscribe transcribes a recording again, or for the first time,
@@ -401,49 +512,24 @@ func (c *Core) Retranscribe(id string) (err error) {
 	return err
 }
 
-// InsertTranscript puts a recording's transcript in its page, open,
-// after its block: a paragraph a line, each after its time in bold.
-func (c *Core) InsertTranscript(id string) (err error) {
-	defer catch(&err)
-	c.q.do(func() {
-		var rec store.Recording
-		if rec, err = c.core.Store.Recording(id); err != nil {
-			return
-		}
-		p := c.pages[rec.PageID]
-		if p == nil {
-			err = errNotOpen
-			return
-		}
-		if p.live.ReadOnly() {
-			return
-		}
-		var nodes []*doc.Node
-		for _, s := range recording.Tidy(rec.Transcript) {
-			n := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
-			n.SetDelta(doc.Delta{
-				{Text: fmtDuration(time.Duration(s.StartMs)*time.Millisecond) + "  ", Attrs: doc.Attrs{Bold: true}},
-				{Text: s.Text},
-			})
-			nodes = append(nodes, n)
-		}
-		content := p.cur.Copy()
-		if err = content.Insert(doc.Position{After: rec.BlockID}, nodes...); err != nil {
-			return
-		}
-		p.bump(content)
-		c.ev.pageUpdated(p.id, content.Encode(), p.rev, "agent", true)
-		p.live.Edited()
-	})
-	return err
+// transcript is a recording's transcript as the blocks its page's editor
+// puts after its block, as TranscriptBlocks returns it.
+type transcript struct {
+	After  string      `json:"after"`
+	Blocks []*doc.Node `json:"blocks"`
 }
 
-func fmtDuration(d time.Duration) string {
-	s := int(d.Seconds())
-	if s >= 3600 {
-		return fmt.Sprintf("%d:%02d:%02d", s/3600, s/60%60, s%60)
+// TranscriptBlocks returns recording id's transcript as transcript: a
+// paragraph a line, each after its time in bold, for its page's editor to
+// put after its block, as the desktop's does, as one step to undo.
+func (c *Core) TranscriptBlocks(id string) (_ string, err error) {
+	defer catch(&err)
+	var rec store.Recording
+	c.q.do(func() { rec, err = c.core.Store.Recording(id) })
+	if err != nil {
+		return "", err
 	}
-	return fmt.Sprintf("%d:%02d", s/60, s%60)
+	return encode(transcript{After: rec.BlockID, Blocks: recording.TranscriptBlocks(rec)})
 }
 
 // Speech to text -----------------------------------------------------------

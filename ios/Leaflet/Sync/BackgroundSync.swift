@@ -52,9 +52,13 @@ enum BackgroundSync {
                 done.complete(success: false)
                 return
             }
-            // Out of time now, sync stops, and the pass ends as it does.
+            // Out of time now, sync stops, and the pass ends as it does;
+            // the task is complete at once all the same, as a pass may be
+            // waiting on what no stop cuts short, as a file iCloud Drive
+            // has yet to download: left running, iOS refreshes less.
             task.expirationHandler = { @Sendable in
                 Task { await client.stop() }
+                done.complete(success: false)
             }
             do {
                 try await client.syncNow()

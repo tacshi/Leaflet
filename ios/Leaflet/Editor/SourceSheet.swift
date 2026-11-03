@@ -9,6 +9,8 @@ struct SourceSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.palette) private var palette
     @State private var text = ""
+    /// original is the source as the sheet opened with it.
+    @State private var original: String?
 
     private var diagram: Bool { node.type == "diagram" }
     /// key is the data the source is kept under.
@@ -30,7 +32,7 @@ struct SourceSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L.commonCancel) { dismiss() }
+                    CancelButton(dirty: dirty)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L.commonSave) {
@@ -42,7 +44,32 @@ struct SourceSheet: View {
                 }
             }
         }
-        .onAppear { text = node.data?[key]?.string ?? "" }
+        .interactiveDismissDisabled(dirty)
+        .onAppear {
+            text = node.data?[key]?.string ?? ""
+            original = text
+        }
+    }
+
+    private var dirty: Bool { original.map { $0 != text } ?? false }
+}
+
+/// CancelButton is a sheet's Cancel, which asks before throwing away what
+/// was changed in it, while dirty: the sheet then keeps it from a swipe
+/// down too (interactiveDismissDisabled).
+struct CancelButton: View {
+    let dirty: Bool
+    @Environment(\.dismiss) private var dismiss
+    @State private var asking = false
+
+    var body: some View {
+        Button(L.commonCancel) {
+            if dirty { asking = true } else { dismiss() }
+        }
+        .confirmationDialog(L.dialogDiscardChanges, isPresented: $asking) {
+            Button(L.dialogDiscardChanges, role: .destructive) { dismiss() }
+            Button(L.dialogKeepEditing, role: .cancel) {}
+        }
     }
 }
 

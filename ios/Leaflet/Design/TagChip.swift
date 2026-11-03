@@ -1,3 +1,4 @@
+import LeafletCore
 import SwiftUI
 import UIKit
 
@@ -27,19 +28,10 @@ extension TagChip where Trailing == EmptyView {
 }
 
 extension TagChip {
-    /// color is a tag's color, as the desktop's tagColor chooses it: one of
-    /// the text colors but gray and brown, by the FNV-1a hash of its name
-    /// in any case, so a tag has the same one on every device.
+    /// color is a tag's color, as the core chooses it for the desktop too
+    /// (MobileTagColor), so a tag has the same one on every device.
     static func color(_ name: String) -> UIColor {
-        let bright = EditorController.swatches.map(\.1).filter {
-            $0 != "#92400e" && $0 != "#71717a"
-        }
-        var hash: UInt32 = 2_166_136_261
-        for byte in name.lowercased().utf8 {
-            hash ^= UInt32(byte)
-            hash = hash &* 16_777_619
-        }
-        return UIColor(hex: bright[Int(hash % UInt32(bright.count))]) ?? .systemTeal
+        UIColor(hex: MobileTagColor(name)) ?? .systemTeal
     }
 
     /// ink is the color of a tag's name: its color, darker or, on a dark

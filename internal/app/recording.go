@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"slices"
 	"strings"
@@ -13,7 +12,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
-	"leaflet/internal/keychain"
+	"leaflet/internal/guard"
 	"leaflet/internal/macspeech"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
@@ -45,13 +44,7 @@ func (a *App) startRecording(pageID string) {
 	}
 }
 
-func fmtDuration(d time.Duration) string {
-	s := int(d.Seconds())
-	if s >= 3600 {
-		return fmt.Sprintf("%d:%02d:%02d", s/3600, s/60%60, s%60)
-	}
-	return fmt.Sprintf("%d:%02d", s/60, s%60)
-}
+func fmtDuration(d time.Duration) string { return recording.FormatDuration(d) }
 
 // recordingPill shows the recording in progress in the page's header.
 func (a *App) recordingPill(c *ui.Context) {
@@ -107,12 +100,10 @@ type player struct {
 	from    time.Duration
 }
 
-var players = map[string]*player{}
-
 // dropGonePlayers stops the recordings playing whose block is no longer
 // in the open page, as one deleted, and lets their audio go.
 func (a *App) dropGonePlayers() {
-	if len(players) == 0 {
+	if len(a.players) == 0 {
 		return
 	}
 	shown := map[string]bool{}
@@ -123,32 +114,35 @@ func (a *App) dropGonePlayers() {
 			}
 		})
 	}
-	for id, pl := range players {
+	for id, pl := range a.players {
 		if !shown[id] {
 			if pl.p != nil {
 				pl.p.Close()
 			}
-			delete(players, id)
+			delete(a.players, id)
 		}
 	}
 }
 
 // dropPlayers stops the recordings playing and lets their audio go, as
 // the page that shows them closes.
-func dropPlayers() {
-	for id, pl := range players {
+func (a *App) dropPlayers() {
+	for id, pl := range a.players {
 		if pl.p != nil {
 			pl.p.Close()
 		}
-		delete(players, id)
+		delete(a.players, id)
 	}
 }
 
 func (a *App) play(rec store.Recording) {
-	pl := players[rec.ID]
+	pl := a.players[rec.ID]
 	if pl == nil {
+		if a.players == nil {
+			a.players = map[string]*player{}
+		}
 		pl = &player{}
-		players[rec.ID] = pl
+		a.players[rec.ID] = pl
 	}
 	if pl.p != nil {
 		if pl.p.Playing() {
@@ -175,7 +169,7 @@ func (a *App) play(rec store.Recording) {
 		}
 		a.update(func() {
 			pl.loading = false
-			if players[rec.ID] != pl {
+			if a.players[rec.ID] != pl {
 				return // the page closed meanwhile
 			}
 			if err != nil {
@@ -192,10 +186,38 @@ func (a *App) play(rec store.Recording) {
 	}()
 }
 
+// recView is a recording as its block shows it: its row, or why there is
+// none, and its transcript tidied into lines.
+type recView struct {
+	rec   store.Recording
+	err   error
+	lines []store.Segment
+}
+
+// recordingView is recording id as its block shows it, read once until
+// the recordings change: a block is drawn each frame, and each quarter
+// second while it plays.
+func (a *App) recordingView(id string) recView {
+	if v, ok := a.recs[id]; ok {
+		return v
+	}
+	rec, err := a.st.Recording(id)
+	v := recView{rec: rec, err: err}
+	if err == nil {
+		v.lines = recording.Tidy(rec.Transcript)
+	}
+	if a.recs == nil {
+		a.recs = map[string]recView{}
+	}
+	a.recs[id] = v
+	return v
+}
+
 func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 	pal := theme.Of(c)
 	id := n.Str("recording_id")
-	rec, err := a.st.Recording(id)
+	v := a.recordingView(id)
+	rec, err := v.rec, v.err
 	live := a.rec.Active() && a.rec.State.ID == id
 	ui.Column(c.Key("rec:"+n.ID)).Padding(14, 16).Gap(12).Radius(10).Border(1, pal.Divider).Background(pal.Surface).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
@@ -204,7 +226,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 			})
 			ui.Column(c).Grow(1).Children(func() {
 				ui.Text(c, a.recordingTitle(n, rec, err == nil)).FontSize(14).FontWeight(600).TextColor(pal.Text)
-				status := ""
+				var status string
 				switch {
 				case err != nil:
 					status = locales.RecNotFound()
@@ -212,26 +234,15 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					status = a.rec.State.Engine
 				case a.rec.Finishing[id]:
 					status = locales.RecAddingTimestamps()
-				case rec.Status == "transcribing" || a.rec.Transcribing[id]:
+				case a.rec.Transcribing[id]:
 					status = locales.RecTranscribing()
-				case rec.Status == "failed":
-					status = locales.RecTranscriptionFailed()
-				case rec.SttProvider == "":
-					status = locales.RecStatus(fmtDuration(time.Duration(rec.DurationMs)*time.Millisecond), locales.RecAudioOnly())
 				default:
-					engine := locales.CommonEndpoint()
-					switch rec.SttProvider {
-					case "soniox":
-						engine = "Soniox"
-					case recording.OnDevice:
-						engine = locales.RecEngineOnDevice()
-					}
-					status = locales.RecStatus(fmtDuration(time.Duration(rec.DurationMs)*time.Millisecond), engine)
+					status = recording.Status(rec)
 				}
 				ui.Text(c, status).FontSize(12).TextColor(pal.TextMuted)
 			})
 			if err == nil && !live && rec.Status != "recording" {
-				pl := players[id]
+				pl := a.players[id]
 				icon, label := "play", locales.RecPlay()
 				if pl != nil && pl.p != nil && pl.p.Playing() {
 					icon, label = "pause", locales.CommonPause()
@@ -286,7 +297,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 		if err != nil {
 			return
 		}
-		if pl := players[id]; pl != nil && pl.p != nil {
+		if pl := a.players[id]; pl != nil && pl.p != nil {
 			a.scrubber(c, pl)
 		}
 		if rec.Status == "failed" && rec.Error != "" {
@@ -296,7 +307,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 			// A click on a line plays from it, so its text is not selectable;
 			// the menu's Copy transcript copies it.
 			ui.Column(c).Gap(8).Children(func() {
-				for i, s := range recording.Tidy(rec.Transcript) {
+				for i, s := range v.lines {
 					// The time sits on the line's baseline, though its type is smaller.
 					ui.Row(c.Key(i)).Gap(12).AlignItems(ui.Baseline).Children(func() {
 						ts := ui.ButtonBase(c.Key("ts")).Width(46)
@@ -341,14 +352,7 @@ func (a *App) recordingTitle(n *doc.Node, rec store.Recording, found bool) strin
 // recordingName is recordingTitle for a block on the page titled page;
 // a block with no title is a Recording too.
 func recordingName(n *doc.Node, rec store.Recording, found bool, page string) string {
-	title := n.Str("title")
-	if day := rec.CreatedAt.Local(); found && !rec.CreatedAt.IsZero() && title == "Recording · "+day.Format("Jan 2") {
-		title = locales.RecBlockTitle(day)
-	}
-	if title == "" || strings.TrimSpace(page) == title {
-		return locales.CommonRecording()
-	}
-	return title
+	return recording.BlockTitle(n.Str("title"), rec.CreatedAt, found, page)
 }
 
 // transcriptPlain is a recording's transcript as text to copy: a line
@@ -367,10 +371,10 @@ func transcriptPlain(rec store.Recording) string {
 
 // seek plays a recording from t, once its audio loads if it has not.
 func (a *App) seek(rec store.Recording, t time.Duration) {
-	pl := players[rec.ID]
+	pl := a.players[rec.ID]
 	if pl == nil || pl.p == nil {
 		a.play(rec)
-		players[rec.ID].from = t
+		a.players[rec.ID].from = t
 		return
 	}
 	pl.p.Seek(t)
@@ -429,12 +433,7 @@ func (a *App) insertTranscript(blockID string, rec store.Recording) {
 	if ed.ReadOnly {
 		return
 	}
-	var nodes []*doc.Node
-	for _, s := range recording.Tidy(rec.Transcript) {
-		n := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
-		n.SetDelta(doc.Delta{{Text: fmtDuration(time.Duration(s.StartMs)*time.Millisecond) + "  ", Attrs: doc.Attrs{Bold: true}}, {Text: s.Text}})
-		nodes = append(nodes, n)
-	}
+	nodes := recording.TranscriptBlocks(rec)
 	ed.Edit(func(c *doc.Content) { _ = c.Insert(doc.Position{After: blockID}, nodes...) })
 }
 
@@ -468,9 +467,14 @@ func (a *App) findSpeech() {
 }
 
 type speechState struct {
-	key       string
-	keyLoaded bool
-	soniox    string
+	key string
+	// keyLoaded is set once the keys kept here are being read, off the
+	// main thread; keyTyped once the endpoint key is typed, which keeps
+	// what the keychain had from replacing it; keyTimer keeps it once
+	// typing pauses (keepEndpointKey).
+	keyLoaded, keyTyped bool
+	keyTimer            *time.Timer
+	soniox              string
 	// sonioxSaved is whether this device's keychain has a Soniox key.
 	sonioxSaved bool
 	saving      bool
@@ -483,21 +487,24 @@ type speechState struct {
 	micText    string
 }
 
-var speech speechState
-
 // sttControlW is the width of Speech to text's fields and lists; a
 // field's input is that less its box's padding.
 const sttControlW = 280
 
 func (a *App) speechSettings(c *ui.Context) {
-	s := &speech
+	s := &a.speech
 	stt := &a.settings.Stt
 	if !s.keyLoaded {
 		s.keyLoaded = true
-		if k, err := keychain.Get("stt.endpoint.key"); err == nil {
-			s.key = string(k)
-		}
-		s.sonioxSaved = recording.LocalSonioxKey() != ""
+		// The keychain can take a while, or ask first.
+		var key string
+		var soniox bool
+		a.offMain(func() { key, soniox = recording.EndpointKey(), recording.LocalSonioxKey() != "" }, func() {
+			if !s.keyTyped {
+				s.key = key
+			}
+			s.sonioxSaved = soniox
+		})
 	}
 	changed := false
 	heading(c, locales.RecSttTitle(), locales.RecSttSubtitle())
@@ -543,9 +550,7 @@ func (a *App) speechSettings(c *ui.Context) {
 				settingRow(c, "key", locales.RecSttApiKey(), locales.RecSttKeyInKeychain(), false, func() {
 					ui.Row(c).Width(sttControlW).Gap(8).AlignItems(ui.Center).Children(func() {
 						if growPassword(c, "key", &s.key, locales.RecSttOptional()).Changed() {
-							if err := keychain.Set("stt.endpoint.key", []byte(s.key)); err != nil {
-								a.toast(locales.RecSttKeyNotSaved(err.Error()))
-							}
+							a.keepEndpointKey(s.key)
 						}
 						// The test goes on while the fields change: it has
 						// them as they are now.
@@ -592,11 +597,15 @@ func (a *App) speechSettings(c *ui.Context) {
 				if growPassword(c, "key", &s.soniox, ph).Changed() {
 					s.testResult = ""
 				}
-				key := strings.TrimSpace(s.soniox)
-				if key == "" && s.sonioxSaved {
-					key = recording.LocalSonioxKey()
-				}
-				a.sttTestButton(c, func(ctx context.Context) error { return recording.TestSonioxKey(ctx, key) })
+				// With none typed, the test reads the one kept here, as it
+				// runs: not the keychain each frame.
+				key, saved := strings.TrimSpace(s.soniox), s.sonioxSaved
+				a.sttTestButton(c, func(ctx context.Context) error {
+					if key == "" && saved {
+						key = recording.LocalSonioxKey()
+					}
+					return recording.TestSonioxKey(ctx, key)
+				})
 				if button(c, "save-key", "", locales.CommonSave()).Disabled(s.saving || strings.TrimSpace(s.soniox) == "").Clicked() {
 					a.saveSonioxKey()
 				}
@@ -685,7 +694,7 @@ func engineStatus(stt store.SttSettings, hasSonioxKey, onDevice bool) string {
 
 // sttTestButton is a Test button that runs test and shows how it went.
 func (a *App) sttTestButton(c *ui.Context, test func(ctx context.Context) error) {
-	s := &speech
+	s := &a.speech
 	label := locales.RecSttTest()
 	if s.testing {
 		label = locales.RecSttTesting()
@@ -710,10 +719,34 @@ func (a *App) sttTestButton(c *ui.Context, test func(ctx context.Context) error)
 	}()
 }
 
+// keepEndpointKey keeps the endpoint key typed in the keychain once typing
+// pauses, off the main thread, as the keychain can take a while, or ask
+// first; an empty one it removes. The writes go one at a time, and only
+// the last.
+func (a *App) keepEndpointKey(key string) {
+	s := &a.speech
+	s.keyTyped = true
+	if s.keyTimer != nil {
+		s.keyTimer.Stop()
+	}
+	n := a.endpointKeys.Add(1)
+	s.keyTimer = time.AfterFunc(500*time.Millisecond, func() {
+		defer guard.Recover()
+		a.endpointKeyMu.Lock()
+		defer a.endpointKeyMu.Unlock()
+		if a.endpointKeys.Load() != n {
+			return
+		}
+		if err := recording.SetEndpointKey(key); err != nil {
+			a.update(func() { a.toast(locales.RecSttKeyNotSaved(err.Error())) })
+		}
+	})
+}
+
 // saveSonioxKey keeps the Soniox key on the server, or in this device's
 // keychain when there is no server to keep it.
 func (a *App) saveSonioxKey() {
-	s := &speech
+	s := &a.speech
 	key := strings.TrimSpace(s.soniox)
 	if a.session.SignedIn {
 		a.saveSttKey("soniox", key)
@@ -731,18 +764,18 @@ func (a *App) saveSttKey(provider, key string) {
 	if strings.TrimSpace(key) == "" {
 		return
 	}
-	speech.saving = true
+	a.speech.saving = true
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		_, err := a.backend.Invoke(ctx, "stt", map[string]any{"action": "save_key", "provider": provider, "api_key": key})
 		a.update(func() {
-			speech.saving = false
+			a.speech.saving = false
 			if err != nil {
 				a.toast(locales.RecSttKeyNotSaved(err.Error()))
 				return
 			}
-			speech.soniox = ""
+			a.speech.soniox = ""
 			a.toast(locales.RecSttSavedOnServer())
 		})
 	}()

@@ -1,7 +1,6 @@
 package mobile
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"mime"
@@ -10,9 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egoist/mygo/i18n"
+
 	"leaflet/internal/doc"
 	"leaflet/internal/export"
 	"leaflet/internal/store"
+	"leaflet/internal/web"
 	"leaflet/locales"
 )
 
@@ -68,7 +70,7 @@ func (c *Core) History(pageID string) (_ string, err error) {
 			}
 			out = append(out, version{
 				ID: h.ID, When: locales.DialogHistoryWhen(h.CreatedAt), Label: historyLabel(h),
-				Markdown: doc.PageMarkdown("", content, c.titleOf),
+				Markdown: doc.PageMarkdown("", content, c.markdownOptions()),
 			})
 		}
 	})
@@ -96,9 +98,15 @@ func (c *Core) NameVersion(pageID, name string) (err error) {
 }
 
 // RestoreVersion puts version id back as page pageID's content, keeping
-// the page as it was as a version first, as the desktop does.
-func (c *Core) RestoreVersion(pageID, id string) (err error) {
+// the page as it was as a version first, as the desktop does, and returns
+// that version's ID, for Undo to restore it, or "" when the page had no
+// content to keep. A version saved with no blocks leaves one to type in.
+// The page's last agent run no longer offers Undo: its edits are gone or
+// back with the version, and undoing it would do nothing, or something
+// else.
+func (c *Core) RestoreVersion(pageID, id string) (_ string, err error) {
 	defer catch(&err)
+	kept := ""
 	c.q.do(func() {
 		st := c.core.Store
 		if !c.canEdit(pageID) {
@@ -119,23 +127,50 @@ func (c *Core) RestoreVersion(pageID, id string) (err error) {
 			return
 		}
 		if old == nil {
-			err = errors.New("no such version")
+			err = errors.New(locales.DialogHistoryVersionGone())
 			return
 		}
 		if p := c.pages[pageID]; p != nil {
 			p.live.Save()
 		}
 		if cur := st.Content(pageID); cur != nil {
-			if err = st.AddHistory(pageID, cur, "restore", "", locales.DialogHistoryBeforeRestoring(time.Now())); err != nil {
+			label := locales.DialogHistoryBeforeRestoring(time.Now())
+			if err = st.AddHistory(pageID, cur, "restore", "", label); err != nil {
 				return
 			}
+			kept = c.newestRestore(pageID, label)
 		}
-		err = c.editContent(pageID, func(content *doc.Content) bool {
-			content.Children = old.Copy().Children
+		children := old.Copy().Children
+		if len(children) == 0 {
+			children = doc.Empty().Children
+		}
+		if err = c.editContent(pageID, func(content *doc.Content) bool {
+			content.Children = children
 			return true
-		})
+		}); err != nil {
+			return
+		}
+		if run := c.core.Hub.Session(pageID).Latest(); run != nil {
+			c.settled[pageID] = run.ID
+			c.ev.agentsChanged(pageID)
+		}
 	})
-	return err
+	return kept, err
+}
+
+// newestRestore is the ID of the version RestoreVersion just kept of a
+// page, by label, the newest kept so. Run on the core's queue.
+func (c *Core) newestRestore(pageID, label string) string {
+	entries, err := c.core.Store.History(pageID)
+	if err != nil {
+		return ""
+	}
+	for _, h := range entries {
+		if h.Reason == "restore" && h.Label == label {
+			return h.ID
+		}
+	}
+	return ""
 }
 
 func (c *Core) titleOf(id string) string {
@@ -143,6 +178,12 @@ func (c *Core) titleOf(id string) string {
 		return p.DisplayTitle()
 	}
 	return ""
+}
+
+// markdownOptions are how the app writes a page as Markdown: in its
+// language, its subpages by their titles.
+func (c *Core) markdownOptions() doc.MarkdownOptions {
+	return doc.MarkdownOptions{Lang: i18n.Locale(), PageTitle: c.titleOf}
 }
 
 // exported is a page as Markdown, as ExportMarkdown returns it.
@@ -168,7 +209,7 @@ func (c *Core) ExportMarkdown(pageID string) (_ string, err error) {
 		content := c.content(pageID)
 		out = exported{
 			Name:     export.SafeName(p.DisplayTitle()) + ".md",
-			Markdown: doc.PageMarkdown(p.DisplayTitle(), export.WithTranscripts(c.core.Store, content), c.titleOf),
+			Markdown: doc.PageMarkdown(p.DisplayTitle(), export.WithTranscripts(c.core.Store, content), c.markdownOptions()),
 		}
 	})
 	if err != nil {
@@ -191,40 +232,64 @@ func (c *Core) PlainCopy(nodes string) (_ string, err error) {
 	return out, nil
 }
 
+// CopyText returns blocks, a JSON array of nodes, as Copy puts them on the
+// clipboard: their Markdown, as the desktop's Copy writes it, which pastes
+// back as the blocks, in Leaflet or another app that reads Markdown.
+func (c *Core) CopyText(nodes string) (_ string, err error) {
+	defer catch(&err)
+	var ns []*doc.Node
+	if err := json.Unmarshal([]byte(nodes), &ns); err != nil {
+		return "", err
+	}
+	var out string
+	c.q.do(func() {
+		out = strings.TrimRight(doc.PageMarkdown("", &doc.Content{Children: ns}, c.markdownOptions()), "\n")
+	})
+	return out, nil
+}
+
 // AddFile keeps the file at path with page pageID, as the desktop's
 // Upload does, and returns the block that shows it, as JSON: a picture as
 // an image, another file as a file card.
 func (c *Core) AddFile(pageID, path string) (_ string, err error) {
 	defer catch(&err)
-	var n *doc.Node
-	c.q.do(func() {
-		var f store.File
-		f, err = c.core.Store.AddFile(path, "", pageID, mime.TypeByExtension(strings.ToLower(filepath.Ext(path))))
-		if err != nil {
-			return
-		}
-		if doc.ImageExts[strings.ToLower(filepath.Ext(f.Name))] {
-			n = &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
-				"url": "file://" + f.LocalPath, "align": "center", "alt": f.Name, "file_id": f.ID,
-			}}
-		} else {
-			n = &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
-				"url": "file://" + f.LocalPath, "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
-			}}
-		}
-		c.core.Sync.Kick()
-	})
+	// Off the core's queue, as the desktop adds one off its main thread:
+	// a video takes a while to copy, and every call of the app's would
+	// wait on it. The store keeps itself safe.
+	f, err := c.core.Store.AddFile(path, "", pageID, mime.TypeByExtension(strings.ToLower(filepath.Ext(path))))
 	if err != nil {
 		return "", err
 	}
+	var n *doc.Node
+	if doc.ImageExts[strings.ToLower(filepath.Ext(f.Name))] {
+		n = &doc.Node{ID: doc.NewBlockID(), Type: "image", Data: map[string]any{
+			"url": "file://" + f.LocalPath, "align": "center", "alt": f.Name, "file_id": f.ID,
+		}}
+	} else {
+		n = &doc.Node{ID: doc.NewBlockID(), Type: "file", Data: map[string]any{
+			"url": "file://" + f.LocalPath, "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
+		}}
+	}
+	c.core.Sync.Kick()
 	return encode(n)
+}
+
+// Picture reads the picture at link, on the web, for an image block, as
+// the desktop's image blocks read one (web.Fetch): from a public address
+// only, never this device's network, and http too, which the app's own
+// loading refuses. It waits on the network.
+func (c *Core) Picture(link string) (_ []byte, err error) {
+	defer catch(&err)
+	return web.Fetch(link)
 }
 
 // LocalFile returns the path on this device of a file kept with a page,
 // by the file_id of the block that shows it, downloading it first when
 // another device uploaded it, as the desktop's image blocks do: the
 // block's url is a path on the device that added it.
-func (c *Core) LocalFile(id string) (_ string, err error) {
+//
+// The app may give up on it by token, as Cancel says, 0 for never.
+func (c *Core) LocalFile(id string, token int64) (_ string, err error) {
 	defer catch(&err)
 	var f store.File
 	c.q.do(func() { f, err = c.core.Store.File(id) })
@@ -237,16 +302,15 @@ func (c *Core) LocalFile(id string) (_ string, err error) {
 		}
 	}
 	if f.StoragePath == "" {
-		return "", errors.New("file not uploaded yet")
+		return "", errors.New(locales.CardNotOnDevice())
 	}
-	// The network's part runs off the core's queue.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
+	// The network's part runs off the core's queue, and so does the
+	// writing of what came, as AddFile's copy does.
+	ctx, done := c.cancellable(token, 5*time.Minute)
+	defer done()
 	data, err := c.core.Sync.Fetch(ctx, "files", f.StoragePath)
 	if err != nil {
 		return "", err
 	}
-	var path string
-	c.q.do(func() { path, err = c.core.Store.DownloadedFile(id, data) })
-	return path, err
+	return c.core.Store.DownloadedFile(id, data)
 }

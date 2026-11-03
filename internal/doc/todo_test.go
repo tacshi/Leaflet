@@ -21,7 +21,7 @@ func TestTodos(t *testing.T) {
 	plain := todo("d", "No date", false)
 	c := FromBlocks([]*Node{dated, owned, done, plain})
 	got := c.Todos()
-	if len(got) != 2 || got[0].BlockID != "a" || got[1].Owner != "Sam" {
+	if len(got) != 2 || got[0].BlockID != "a" || got[1].Owner != "Sam" || got[1].OwnerID != "u1" {
 		t.Fatalf("todos %+v", got)
 	}
 	if d := got[0].Due; d.Year() != 2026 || d.Month() != 10 || d.Day() != 30 || d.Hour() != 0 || got[0].Timed {
@@ -51,5 +51,33 @@ func TestTodos(t *testing.T) {
 	n, err = SpecToNode(map[string]any{"type": "todo_list", "text": "Call", "due": "2026-11-02T09:15"}, "", "Agent")
 	if err != nil || n.Str("due") != "2026-11-02T09:15" {
 		t.Fatalf("timed spec %+v %v", n, err)
+	}
+}
+
+// An agent's due date is kept as it is written, as the server keeps it:
+// a time the clocks skip here stays the time it was given, rather than
+// one an hour off, and a time not written in full is no due date.
+func TestSpecDueKeptAsWritten(t *testing.T) {
+	ny, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip(err)
+	}
+	was := time.Local
+	time.Local = ny
+	t.Cleanup(func() { time.Local = was })
+	for due, want := range map[string]string{
+		"2026-03-08T02:30": "2026-03-08T02:30",
+		"2026-11-01T01:30": "2026-11-01T01:30",
+		"2026-10-30":       "2026-10-30",
+		"2026-10-30T5:04":  "",
+		"2026-02-29":       "",
+	} {
+		n, err := SpecToNode(map[string]any{"type": "todo_list", "text": "x", "due": due}, "", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := n.Str("due"); got != want {
+			t.Errorf("due %q kept as %q, want %q", due, got, want)
+		}
 	}
 }

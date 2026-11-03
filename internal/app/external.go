@@ -26,9 +26,9 @@ var externalClients = []struct{ id, label string }{
 	{"codex", "Codex"}, {"claude", "Claude Code"}, {"opencode", "OpenCode"}, {"cursor", "Cursor"}, {"vscode", "VS Code"}, {"other", "Other"},
 }
 
-// external is the section's state: the apps found on this computer,
+// externalState is the section's state: the apps found on this computer,
 // what is being done to one, and the client the setup by hand shows.
-var external struct {
+type externalState struct {
 	agents   []agentStatus
 	checked  time.Time
 	checking bool
@@ -49,7 +49,7 @@ func (a *App) externalSettings(c *ui.Context) {
 	heading(c, locales.SettingsSectionExternal(), locales.ExternalDesc())
 	// Looked for again as the section shows, and as agents write, which
 	// wakes the app, so a connection shows once an app makes it.
-	if !external.checking && time.Since(external.checked) > 3*time.Second {
+	if !a.external.checking && time.Since(a.external.checked) > 3*time.Second {
 		a.checkAgents()
 	}
 	exe, dir := executable(), a.st.Dir
@@ -58,13 +58,13 @@ func (a *App) externalSettings(c *ui.Context) {
 		notice(c, "warn", "triangle-alert", locales.ExternalMoveFirst(), nil)
 	}
 	var found []agentStatus
-	for _, s := range external.agents {
+	for _, s := range a.external.agents {
 		if s.installed {
 			found = append(found, s)
 		}
 	}
 	switch {
-	case external.checked.IsZero():
+	case a.external.checked.IsZero():
 		ui.Text(c, locales.ExternalLooking()).FontSize(13).TextColor(pal.TextMuted)
 	case len(found) == 0:
 		ui.Text(c, locales.ExternalNoneFound()).FontSize(13).TextColor(pal.TextMuted)
@@ -75,7 +75,7 @@ func (a *App) externalSettings(c *ui.Context) {
 			}
 		})
 	}
-	ui.Collapsible(c.Key("by-hand"), locales.ExternalByHand(), &external.byHand, func() {
+	ui.Collapsible(c.Key("by-hand"), locales.ExternalByHand(), &a.external.byHand, func() {
 		a.setupByHand(c, exe, dir)
 	})
 }
@@ -88,7 +88,7 @@ func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, fir
 	// The line is always there, so the row keeps its height as it changes.
 	icon, text, color := "", locales.ExternalNotConnected(), pal.TextMuted
 	switch {
-	case s.entry == nil && external.waiting == id:
+	case s.entry == nil && a.external.waiting == id:
 		icon, text = "clock", locales.ExternalFinishIn(s.app.label)
 	case s.entry == nil:
 	case !s.current(exe, dir):
@@ -116,9 +116,9 @@ func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, fir
 			})
 		})
 		switch {
-		case external.busy == id:
+		case a.external.busy == id:
 			label := locales.ExternalConnecting()
-			if external.disconnecting {
+			if a.external.disconnecting {
 				label = locales.ExternalDisconnecting()
 			}
 			ui.Button(c.Key("busy"), "").Label(label).Disabled(true).Children(func() {
@@ -128,7 +128,7 @@ func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, fir
 				})
 			})
 		case s.entry != nil && s.current(exe, dir):
-			if button(c, "disconnect", "", locales.ExternalDisconnect()).Disabled(external.busy != "").Clicked() {
+			if button(c, "disconnect", "", locales.ExternalDisconnect()).Disabled(a.external.busy != "").Clicked() {
 				a.disconnectAgent(s)
 			}
 		default:
@@ -136,7 +136,7 @@ func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, fir
 			if s.entry != nil {
 				label = locales.ExternalUpdate()
 			}
-			if primary(c, "connect", "", label).Disabled(moved || external.busy != "").Clicked() {
+			if primary(c, "connect", "", label).Disabled(moved || a.external.busy != "").Clicked() {
 				a.connectAgent(s, exe, dir)
 			}
 		}
@@ -147,7 +147,7 @@ func (a *App) agentRow(c *ui.Context, s agentStatus, exe, dir string, moved, fir
 // not listed.
 func (a *App) setupByHand(c *ui.Context, exe, dir string) {
 	pal := theme.Of(c)
-	where, snippet := agentSetup(externalClients[external.client].id, exe, dir)
+	where, snippet := agentSetup(externalClients[a.external.client].id, exe, dir)
 	card(c, "connect", func() {
 		ui.Row(c).Padding(12, 16).FillWidth().Children(func() {
 			labels := make([]string, len(externalClients))
@@ -157,7 +157,7 @@ func (a *App) setupByHand(c *ui.Context, exe, dir string) {
 					labels[i] = locales.ExternalClientOther()
 				}
 			}
-			ui.Segmented(c.Key("client"), &external.client, labels...)
+			ui.Segmented(c.Key("client"), &a.external.client, labels...)
 		})
 		ui.Column(c).Padding(0, 16, 14).Gap(8).FillWidth().Children(func() {
 			ui.Text(c, where).FontSize(12).TextColor(pal.TextMuted)
@@ -176,7 +176,7 @@ func (a *App) setupByHand(c *ui.Context, exe, dir string) {
 
 // checkAgents looks for the apps again, away from the window's thread.
 func (a *App) checkAgents() {
-	external.checking = true
+	a.external.checking = true
 	go func() {
 		found := a.findAgents()
 		a.update(func() { a.foundAgents(found) })
@@ -188,10 +188,10 @@ func (a *App) findAgents() []agentStatus {
 }
 
 func (a *App) foundAgents(found []agentStatus) {
-	external.agents, external.checked, external.checking = found, time.Now(), false
+	a.external.agents, a.external.checked, a.external.checking = found, time.Now(), false
 	for _, s := range found {
-		if s.app.id == external.waiting && s.entry != nil {
-			external.waiting = ""
+		if s.app.id == a.external.waiting && s.entry != nil {
+			a.external.waiting = ""
 		}
 	}
 }
@@ -202,11 +202,11 @@ func (a *App) connectAgent(s agentStatus, exe, dir string) {
 	if link := installLink(s.app.id, exe, dir); link != "" {
 		// The link opened again, as when its question in the app was
 		// closed, waits longer with the watch already on the settings.
-		again := external.waiting == s.app.id
-		external.waiting = s.app.id
-		external.waitUntil.Store(time.Now().Add(agentWait).UnixNano())
+		again := a.external.waiting == s.app.id
+		a.external.waiting = s.app.id
+		a.external.waitUntil.Store(time.Now().Add(agentWait).UnixNano())
 		if err := openInstallLink(link); err != nil {
-			external.waiting = ""
+			a.external.waiting = ""
 			a.toast(locales.ExternalConnectFailed(s.app.label, err.Error()))
 			return
 		}
@@ -215,12 +215,12 @@ func (a *App) connectAgent(s agentStatus, exe, dir string) {
 		}
 		return
 	}
-	external.disconnecting = false
+	a.external.disconnecting = false
 	a.changeAgent(s, func() error { return connectAgent(s.app.settingsID(), s.cli, currentAgentEnv(), exe, dir) }, locales.ExternalConnectFailed)
 }
 
 func (a *App) disconnectAgent(s agentStatus) {
-	external.disconnecting = true
+	a.external.disconnecting = true
 	a.changeAgent(s, func() error { return disconnectAgent(s.app.settingsID(), s.cli, currentAgentEnv()) }, locales.ExternalDisconnectFailed)
 }
 
@@ -228,12 +228,12 @@ func (a *App) disconnectAgent(s agentStatus) {
 // before the row stops being busy, so it goes straight to how the app
 // now stands.
 func (a *App) changeAgent(s agentStatus, fn func() error, failed func(app, err string) string) {
-	external.busy = s.app.id
+	a.external.busy = s.app.id
 	go func() {
 		err := fn()
 		found := a.findAgents()
 		a.update(func() {
-			external.busy = ""
+			a.external.busy = ""
 			a.foundAgents(found)
 			if err != nil {
 				a.toast(failed(s.app.label, err.Error()))
@@ -253,7 +253,7 @@ const agentWait = 3 * time.Minute
 // install link opened, as the window may not redraw meanwhile.
 func (a *App) awaitAgent(id string) {
 	env := currentAgentEnv()
-	for time.Now().UnixNano() < external.waitUntil.Load() {
+	for time.Now().UnixNano() < a.external.waitUntil.Load() {
 		time.Sleep(2 * time.Second)
 		if e, _ := readEntry(id, env); e != nil {
 			a.update(a.checkAgents)
@@ -262,12 +262,12 @@ func (a *App) awaitAgent(id string) {
 	}
 	a.update(func() {
 		switch {
-		case external.waiting != id:
-		case time.Now().UnixNano() < external.waitUntil.Load():
+		case a.external.waiting != id:
+		case time.Now().UnixNano() < a.external.waitUntil.Load():
 			// The link opened again as the watch ended.
 			go a.awaitAgent(id)
 		default:
-			external.waiting = ""
+			a.external.waiting = ""
 		}
 	})
 }

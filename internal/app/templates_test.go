@@ -681,13 +681,19 @@ func TestDuplicateBringsFilesFirst(t *testing.T) {
 	if pages() != before || a.toasts[len(a.toasts)-1].text != locales.TemplateFetchingOther() {
 		t.Fatalf("a second copy while the first downloads: %d pages; toasts %+v", pages(), a.toasts)
 	}
-	close(release)
-	select {
-	case fn := <-posted:
-		fn()
-	case <-time.After(5 * time.Second):
-		t.Fatal("the file never came")
+	next := func(what string) {
+		t.Helper()
+		select {
+		case fn := <-posted:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal(what)
+		}
 	}
+	close(release)
+	next("the file never came")
+	// The copy is made off the main thread, and opens once it is.
+	next("the copy was never made")
 	if pages() != before+1 || a.page == nil || a.page.id == p.ID {
 		t.Fatalf("not copied once the file came: %d pages", pages())
 	}
@@ -714,5 +720,79 @@ func TestDuplicateBringsFilesFirst(t *testing.T) {
 	a.duplicatePage(*a.pageByID(q.ID))
 	if pages() != before || a.toasts[len(a.toasts)-1].text != locales.TemplateFilesUploading() {
 		t.Errorf("a recording still uploading: %d pages, want %d; toasts %+v", pages(), before, a.toasts)
+	}
+}
+
+// Audio that comes for a copy stays until the copy has its own, then goes
+// as Keep the audio says; and the copy is of the page as it is once the
+// audio has come, here moved into a folder meanwhile.
+func TestCopyKeepsFetchedAudioUntilMade(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/storage/v1/object/authenticated/recordings/") {
+			_, _ = w.Write([]byte("RIFF"))
+			return
+		}
+		_, _ = w.Write([]byte("[]"))
+	}))
+	t.Cleanup(hs.Close)
+	a := templatesApp(t)
+	a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
+	a.sync = syncsvc.New(a.st, a.backend)
+	a.settings.KeepAudioOnDevice = "until_uploaded"
+	posted := make(chan func(), 4)
+	a.post = func(fn func()) { posted <- fn }
+	next := func(what string) {
+		t.Helper()
+		select {
+		case fn := <-posted:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal(what)
+		}
+	}
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Call"})
+	r, err := a.st.CreateRecording(p.ID, "r1", "soniox", "m", "", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.AudioPath, r.Status, r.UploadedAt = a.st.Session().SpaceID+"/"+r.ID+".wav", "done", time.Now()
+	if err := a.st.PutRecording(r); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := a.st.SaveContent(p.ID, doc.FromBlocks([]*doc.Node{
+		{ID: "r1", Type: "recording", Data: map[string]any{"recording_id": r.ID}},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := a.st.CreateFolder("Work")
+	a.reloadAll()
+
+	a.duplicatePage(*a.pageByID(p.ID))
+	if err := a.st.MovePage(p.ID, "", f.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	next("the audio never came")
+	if got, _ := a.st.Recording(r.ID); got.LocalPath == "" {
+		t.Fatal("the audio went before the copy was made")
+	}
+	next("the copy was never made")
+	if a.page == nil || a.page.id == p.ID {
+		t.Fatal("no copy opened")
+	}
+	cp, _ := a.st.Page(a.page.id)
+	if cp.FolderID != f.ID {
+		t.Errorf("the copy is in folder %q, not where the page is now", cp.FolderID)
+	}
+	if got, _ := a.st.Recording(r.ID); got.LocalPath != "" {
+		t.Errorf("the original's audio stayed at %q", got.LocalPath)
+	}
+	recs, _ := a.st.Recordings()
+	for _, c := range recs {
+		if c.ID == r.ID {
+			continue
+		}
+		if data, err := os.ReadFile(c.LocalPath); err != nil || string(data) != "RIFF" {
+			t.Errorf("the copy's audio: %q, %v", data, err)
+		}
 	}
 }

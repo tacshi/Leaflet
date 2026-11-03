@@ -35,7 +35,7 @@ import (
 // The app as the agents' host.
 
 // Update runs fn on the main thread.
-func (a *App) Update(fn func()) { a.update(fn) }
+func (a *App) Update(_ string, fn func()) { a.update(fn) }
 
 // Live returns a page as it is open, for agent runs to change.
 func (a *App) Live(pageID string) agents.LiveDoc {
@@ -128,19 +128,10 @@ func (h *host) CommentCount(blockID string) int {
 	if h.a.page == nil {
 		return 0
 	}
-	n := 0
-	for _, t := range h.a.page.threads {
-		if t.Root.BlockID == blockID && !t.Root.Resolved {
-			n++
-		}
-	}
-	return n
+	return h.a.page.open[blockID]
 }
 
-func (h *host) OpenComments(blockID string) {
-	h.a.panelOpen, h.a.panelTab = true, 1
-	h.a.dialogs.commentFocus = blockID
-}
+func (h *host) OpenComments(blockID string) { h.a.showComments(blockID) }
 
 // CommentPreview shows a block's open threads as its badge's hover does:
 // each one's quote and comments, to read; a click on the badge opens them
@@ -527,30 +518,31 @@ func (a *App) localFile(f store.File, done func()) string {
 		a.downloads = map[string]bool{}
 	}
 	a.downloads[f.ID] = true
-	go func() {
+	var err error
+	a.offMain(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		data, err := a.sync.Fetch(ctx, "files", f.StoragePath)
+		var data []byte
+		data, err = a.sync.Fetch(ctx, "files", f.StoragePath)
 		if err == nil {
 			_, err = a.st.DownloadedFile(f.ID, data)
 		}
-		a.update(func() {
-			delete(a.downloads, f.ID)
-			if err != nil {
-				log.Printf("download %s: %v", f.Name, err)
-				if a.downloadFails == nil {
-					a.downloadFails = map[string]time.Time{}
-				}
-				a.downloadFails[f.ID] = time.Now()
-				// The next frame after the wait tries again.
-				time.AfterFunc(imageRetry, func() { a.update(func() {}) })
-				return
+	}, func() {
+		delete(a.downloads, f.ID)
+		if err != nil {
+			log.Printf("download %s: %v", f.Name, err)
+			if a.downloadFails == nil {
+				a.downloadFails = map[string]time.Time{}
 			}
-			delete(a.downloadFails, f.ID)
-			a.reload(store.Change{Table: "files"})
-			done()
-		})
-	}()
+			a.downloadFails[f.ID] = time.Now()
+			// The next frame after the wait tries again.
+			a.later(imageRetry, func() {})
+			return
+		}
+		delete(a.downloadFails, f.ID)
+		a.reload(store.Change{Table: "files"})
+		done()
+	})
 	return ""
 }
 
@@ -572,7 +564,7 @@ func (a *App) exportPage(id string) {
 	if p == nil || c == nil {
 		return
 	}
-	md := doc.PageMarkdown(p.DisplayTitle(), a.withTranscripts(c), a.pageTitleOf)
+	md := doc.PageMarkdown(p.DisplayTitle(), a.withTranscripts(c), a.markdownOptions())
 	name := safeName(p.DisplayTitle()) + ".md"
 	go func() {
 		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportTitle(), DefaultPath: name})
@@ -604,8 +596,12 @@ func (a *App) loadMembers(pageID string) {
 type imageCache struct {
 	root string
 	mu   sync.Mutex
-	// pictures are bitmaps, or SVGs, which MyGo draws itself.
+	// pictures are bitmaps, or SVGs, which MyGo draws itself; used is
+	// when each was last asked for, and swept when releasePictures last
+	// looked at them.
 	pictures map[string]ui.ImageSource
+	used     map[string]time.Time
+	swept    time.Time
 	loading  map[string]bool
 	// failed holds when a picture last failed to load.
 	failed map[string]time.Time
@@ -637,7 +633,7 @@ const playerIdle = 30 * time.Second
 const imageRetry = time.Minute
 
 func newImageCache(root string) *imageCache {
-	return &imageCache{root: root, pictures: map[string]ui.ImageSource{}, loading: map[string]bool{}, failed: map[string]time.Time{},
+	return &imageCache{root: root, pictures: map[string]ui.ImageSource{}, used: map[string]time.Time{}, loading: map[string]bool{}, failed: map[string]time.Time{},
 		gifs: map[string][]byte{}, players: map[string]*gifPlayer{}, making: map[string]bool{}}
 }
 
@@ -647,6 +643,7 @@ func (ic *imageCache) get(url string, done func()) ui.ImageSource {
 	ic.mu.Lock()
 	defer ic.mu.Unlock()
 	if b, ok := ic.pictures[url]; ok {
+		ic.used[url] = time.Now()
 		return b
 	}
 	if ic.loading[url] || url == "" {
@@ -671,7 +668,7 @@ func (ic *imageCache) get(url string, done func()) ui.ImageSource {
 		ic.mu.Lock()
 		delete(ic.loading, url)
 		if b != nil {
-			ic.pictures[url] = b
+			ic.pictures[url], ic.used[url] = b, time.Now()
 			delete(ic.failed, url)
 			if animatedGIF(data) {
 				ic.gifs[url] = data
@@ -745,6 +742,65 @@ func (ic *imageCache) releasePlayers(now time.Time) {
 		}
 		delete(ic.players, key)
 	}
+}
+
+// pictureIdle is how long a picture stays decoded after the last frame
+// that asked for it, and pictureBudget about how many bytes of pixels the
+// pictures may hold: each of a page of large photos scrolled through
+// would stay otherwise, up to 200 MB each. The budget is a variable for
+// tests.
+const pictureIdle = 2 * time.Minute
+
+var pictureBudget int64 = 512 << 20
+
+// releasePictures forgets, once a second at most, the pictures no frame
+// has asked for within pictureIdle of now, and the least recently asked
+// for while the rest hold more than pictureBudget, but for those asked for
+// within the last second, which are on screen; a picture forgotten loads
+// again as a block asks for it. Call it as releasePlayers.
+func (ic *imageCache) releasePictures(now time.Time) {
+	ic.mu.Lock()
+	defer ic.mu.Unlock()
+	if now.Sub(ic.swept) < time.Second {
+		return
+	}
+	ic.swept = now
+	type held struct {
+		url   string
+		at    time.Time
+		bytes int64
+	}
+	var kept []held
+	var total int64
+	for url, b := range ic.pictures {
+		at := ic.used[url]
+		if now.Sub(at) >= pictureIdle {
+			ic.forget(url)
+			continue
+		}
+		w, h := ui.ImageSize(b)
+		n := int64(w) * int64(h) * 4
+		kept = append(kept, held{url, at, n})
+		total += n
+	}
+	if total <= pictureBudget {
+		return
+	}
+	slices.SortFunc(kept, func(x, y held) int { return x.at.Compare(y.at) })
+	for _, p := range kept {
+		if total <= pictureBudget || now.Sub(p.at) < time.Second {
+			break
+		}
+		ic.forget(p.url)
+		total -= p.bytes
+	}
+}
+
+// forget lets a picture go; under mu.
+func (ic *imageCache) forget(url string) {
+	delete(ic.pictures, url)
+	delete(ic.gifs, url)
+	delete(ic.used, url)
 }
 
 // maxPixels is the most pixels a picture may have to be shown, and
@@ -1016,10 +1072,18 @@ func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float
 		delete(a.embedSrc, key)
 		v = nil
 	}
+	// A view that could not be made is not tried again at every frame,
+	// while the block stays in the page: what failed would fail again.
+	if why, failed := a.embedFailed[key]; v == nil && failed {
+		ui.Text(c, locales.HostEmbedError(why)).TextColor(pal.TextMuted)
+		return
+	}
 	if v == nil && a.win != nil {
 		wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: hexOf(pal.Surface), ScrollToContainer: toPage,
 			Page: mygo.PageOptions{TrustedOrigins: []string{strings.TrimSuffix(embedURL, "/")}}})
 		if err != nil {
+			log.Printf("embed %s: %v", key, err)
+			a.embedFailed[key] = err.Error()
 			ui.Text(c, locales.HostEmbedError(err.Error())).TextColor(pal.TextMuted)
 			return
 		}
@@ -1080,6 +1144,7 @@ func (a *App) dropEmbeds() {
 	maps.DeleteFunc(a.embedSizes, func(key string, _ embedSize) bool { return gone(key) })
 	maps.DeleteFunc(a.embedZoomed, func(key string, _ bool) bool { return gone(key) })
 	maps.DeleteFunc(a.embedToPage, func(key string, _ bool) bool { return gone(key) })
+	maps.DeleteFunc(a.embedFailed, func(key, _ string) bool { return gone(key) })
 }
 
 func abs32(f float32) float32 {

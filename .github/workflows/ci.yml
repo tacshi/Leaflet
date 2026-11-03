@@ -20,13 +20,15 @@ concurrency:
 env:
   CGO_ENABLED: "0"
 
+# Actions are pinned to the commit of a release, which a tag moved later
+# cannot change; Deno is pinned too, as Go is by go.mod.
 jobs:
   test:
     name: Test
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
       - name: Build
@@ -34,7 +36,7 @@ jobs:
       - name: Build for Windows
         run: GOOS=windows go build ./...
       - name: Test
-        run: go test ./...
+        run: go test -race ./...
       - name: Vet the app
         run: go tool mygo vet .
       # The Windows-only files are compiled above, and vetted here.
@@ -53,11 +55,11 @@ jobs:
     name: Check
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v9
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.14.0
           install-only: true
@@ -77,18 +79,21 @@ jobs:
       run:
         working-directory: supabase/functions
     steps:
-      - uses: actions/checkout@v7
-      - uses: denoland/setup-deno@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: v2.x
+          deno-version: v2.9.8
       - name: Format
         run: deno fmt --check
       - name: Lint
         run: deno lint
+      # --frozen: a lock out of step with the imports fails, rather than
+      # being written anew.
       - name: Type-check
-        run: deno check */index.ts
+        run: deno check --frozen */index.ts
+      # Every test: the shared modules', and each function's beside it.
       - name: Test
-        run: deno test _shared/
+        run: deno test --frozen
 
   # The app applies these to each person's own Supabase project, so each
   # is applied here, oldest first, on the Postgres image those projects run.
@@ -96,7 +101,7 @@ jobs:
     name: Migrations
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Apply and check the migrations
         run: scripts/check-migrations.sh
 
@@ -107,13 +112,17 @@ jobs:
       run:
         working-directory: worker
     steps:
-      - uses: actions/checkout@v7
-      - uses: denoland/setup-deno@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: v2.x
+          deno-version: v2.9.8
       - name: Format
         run: deno fmt --check
       - name: Lint
         run: deno lint
+      # --frozen: a lock out of step with the imports fails, rather than
+      # being written anew.
+      - name: Type-check
+        run: deno check --frozen src/index.ts
       - name: Test
-        run: deno test --allow-net src/
+        run: deno test --frozen --allow-net src/

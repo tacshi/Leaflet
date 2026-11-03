@@ -15,6 +15,10 @@ struct TableSheet: View {
     /// failure is why the cells could not be put in the table, which the
     /// sheet stays open to say, keeping them.
     @State private var failure: String?
+    /// original are the cells as the sheet opened with them.
+    @State private var original: [[String]]?
+
+    private var dirty: Bool { original.map { $0 != rows } ?? false }
 
     struct Cell: Hashable {
         let row: Int
@@ -45,13 +49,14 @@ struct TableSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(L.commonCancel) { dismiss() }
+                    CancelButton(dirty: dirty)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(L.commonSave, action: apply)
                 }
             }
         }
+        .interactiveDismissDisabled(dirty)
         .onAppear(perform: load)
         .alert(
             failure ?? "",
@@ -127,6 +132,7 @@ struct TableSheet: View {
         let json = MobileTableRows(raw ?? "{}", &error)
         rows = (try? JSONDecoder().decode([[String]].self, from: Data(json.utf8))) ?? [[""]]
         if rows.isEmpty || cols == 0 { rows = [[""]] }
+        original = rows
     }
 
     /// apply puts the cells in the table as the core does, and saves it.

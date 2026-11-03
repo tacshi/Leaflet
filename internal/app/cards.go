@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -17,32 +18,72 @@ import (
 
 // Link cards and file cards.
 
+// webAnswers are what pages on the web said, by what was asked of them:
+// asked once each, an answer is kept while the app runs, and a question
+// that failed, as offline, is asked again once imageRetry has passed, as
+// a picture is. On the main thread only.
+type webAnswers[T any] struct {
+	answers map[string]T
+	asking  map[string]bool
+	failed  map[string]time.Time
+}
+
+// get returns the answer for key, or the zero value without one. Then it
+// asks ask, off the main thread, unless it is asking already or asked in
+// vain a moment ago; got has the answer, on the main thread.
+func (w *webAnswers[T]) get(a *App, key string, ask func() (T, error), got func(T)) T {
+	var zero T
+	if v, ok := w.answers[key]; ok {
+		return v
+	}
+	if w.asking[key] || time.Since(w.failed[key]) < imageRetry {
+		return zero
+	}
+	if w.answers == nil {
+		w.answers, w.asking, w.failed = map[string]T{}, map[string]bool{}, map[string]time.Time{}
+	}
+	w.asking[key] = true
+	var v T
+	var err error
+	a.offMain(func() { v, err = ask() }, func() {
+		delete(w.asking, key)
+		if err != nil {
+			w.failed[key] = time.Now()
+			// What shows it asks again once the wait is over.
+			a.later(imageRetry, func() {})
+			return
+		}
+		delete(w.failed, key)
+		w.answers[key] = v
+		got(v)
+	})
+	return zero
+}
+
+// settled reports whether the question for key has had its answer, or
+// failed the last it was asked.
+func (w *webAnswers[T]) settled(key string) bool {
+	_, answered := w.answers[key]
+	_, failed := w.failed[key]
+	return answered || failed
+}
+
 // linkInfoOf asks a page for its info the first time a card shows it, and
 // keeps it in the page's link cards that lack it, for search, exports and
 // other devices, though the page has closed by then. Until the page
 // answers, the info is empty.
 func (a *App) linkInfoOf(link string) web.LinkInfo {
-	if info, ok := a.linkInfo[link]; ok {
-		return info
+	pageID := ""
+	if a.page != nil {
+		pageID = a.page.id
 	}
-	if !a.linkAsked[link] {
-		a.linkAsked[link] = true
-		pageID := ""
-		if a.page != nil {
-			pageID = a.page.id
+	return a.linkInfo.get(a, link, func() (web.LinkInfo, error) {
+		info, err := web.LookUp(link)
+		if err != nil {
+			log.Printf("link %s: %v", link, err)
 		}
-		go func() {
-			info, err := web.LookUp(link)
-			if err != nil {
-				log.Printf("link %s: %v", link, err)
-			}
-			a.update(func() {
-				a.linkInfo[link] = info
-				a.keepLinkInfo(pageID, link, info)
-			})
-		}()
-	}
-	return web.LinkInfo{}
+		return info, err
+	}, func(info web.LinkInfo) { a.keepLinkInfo(pageID, link, info) })
 }
 
 // keepLinkInfo puts a link's info in page pageID's cards of it that lack

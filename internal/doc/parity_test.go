@@ -66,13 +66,38 @@ func TestCloudRunOpsApplyAndUndo(t *testing.T) {
 	}
 }
 
-// Agents read a page's blocks here as they do on the server.
+// Ops on a page changed since, or naming blocks agents don't read, land
+// here where they land on the server: the page the app has open as they
+// stream in is the one the server saves.
+func TestEdgeOpsLandAsOnTheServer(t *testing.T) {
+	var f struct {
+		Before *Content `json:"before"`
+		Ops    []Op     `json:"ops"`
+		After  *Content `json:"after"`
+	}
+	readFixture(t, "edge_ops.json", &f)
+	c := f.Before.Copy()
+	for _, o := range f.Ops {
+		// A move the server passes over is refused here.
+		_ = c.Apply(o)
+	}
+	if got, want := asJSON(t, c.Children), asJSON(t, f.After.Children); !reflect.DeepEqual(got, want) {
+		t.Errorf("applied\n%v\nwant\n%v", got, want)
+	}
+}
+
+// Agents read a page's blocks here as they do on the server, and search
+// finds the same plain text in it, whichever side saved it last.
 func TestBlockViewsAsTheServerHasThem(t *testing.T) {
 	var f struct {
 		Content *Content `json:"content"`
 		Views   any      `json:"views"`
+		Plain   string   `json:"plain"`
 	}
 	readFixture(t, "views.json", &f)
+	if got := f.Content.PlainText(); got != f.Plain {
+		t.Errorf("plain text\n%q\nwant\n%q", got, f.Plain)
+	}
 	got := asJSON(t, BlockViews(f.Content))
 	for i, want := range f.Views.([]any) {
 		if i >= len(got.([]any)) || !reflect.DeepEqual(got.([]any)[i], want) {

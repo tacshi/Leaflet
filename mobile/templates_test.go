@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/icloud"
@@ -146,7 +147,7 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.RestoreVersion(child.ID, versions[0].ID); err != nil {
+	if _, err := c.RestoreVersion(child.ID, versions[0].ID); err != nil {
 		t.Fatal(err)
 	}
 	if got := texts(content(t, c, child.ID)); strings.Contains(got, "Socks") {
@@ -177,12 +178,12 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 
 	// The file is found by its ID, where it is kept here; gone from here
 	// and never uploaded, it can't be had.
-	local, err := c.LocalFile(n.Str("file_id"))
+	local, err := c.LocalFile(n.Str("file_id"), 0)
 	if data, _ := os.ReadFile(local); err != nil || string(data) != "hi" { // #nosec G304 -- the file the core just kept.
 		t.Fatalf("local file %q, %v", local, err)
 	}
 	_ = os.Remove(local)
-	if _, err := c.LocalFile(n.Str("file_id")); err == nil {
+	if _, err := c.LocalFile(n.Str("file_id"), 0); err == nil {
 		t.Fatal("a file neither here nor uploaded was found")
 	}
 }
@@ -277,5 +278,63 @@ func TestFailedCopyDropsTheAudioItFetched(t *testing.T) {
 	c.q.do(func() { rec, err = c.core.Store.Recording(ids[0]) })
 	if err != nil || rec.LocalPath != "" {
 		t.Errorf("the first recording's audio stays at %q, %v", rec.LocalPath, err)
+	}
+}
+
+// A call the app gives up on ends at once, whether it runs already or has
+// yet to begin.
+func TestCancel(t *testing.T) {
+	c, _ := open(t)
+	ctx, done := c.cancellable(1, time.Minute)
+	defer done()
+	c.Cancel(1)
+	if ctx.Err() == nil {
+		t.Error("a call running was not given up on")
+	}
+	c.Cancel(2)
+	ctx, done2 := c.cancellable(2, time.Minute)
+	defer done2()
+	if ctx.Err() == nil {
+		t.Error("a call given up on before it began runs")
+	}
+	ctx, done3 := c.cancellable(3, time.Minute)
+	defer done3()
+	if ctx.Err() != nil {
+		t.Error("a call no one gave up on was cancelled")
+	}
+}
+
+// A copy whose card can't be put in its parent, unreadable, is still made
+// and given back once, and says the card is missing.
+func TestDuplicateKeepsTheCopyWithoutItsCard(t *testing.T) {
+	c, ev := open(t)
+	parent := create(t, c, `{"title":"Trip"}`)
+	child := create(t, c, `{"title":"Packing","link":true,"parent_id":"`+parent.ID+`"}`)
+	if _, err := c.core.Store.DB().Exec(`UPDATE page_contents SET content = '{"children": [' WHERE page_id = ?`, parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	// The notices told so far, which go to the app on a queue of their
+	// own, are passed over.
+	c.ev.q.do(func() {})
+	for len(ev.notices) > 0 {
+		<-ev.notices
+	}
+	raw, err := c.DuplicatePage(child.ID)
+	if err != nil {
+		t.Fatalf("the copy was made and said it wasn't: %v", err)
+	}
+	c.ev.q.do(func() {})
+	var cp pageRow
+	_ = json.Unmarshal([]byte(raw), &cp)
+	if cp.ID == "" || cp.ParentID != parent.ID {
+		t.Fatalf("copy %+v", cp)
+	}
+	select {
+	case n := <-ev.notices:
+		if n == "" {
+			t.Error("an empty notice")
+		}
+	default:
+		t.Error("no notice of the card missing")
 	}
 }

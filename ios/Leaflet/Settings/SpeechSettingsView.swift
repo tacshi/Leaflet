@@ -16,8 +16,18 @@ struct SpeechSection: View {
         }
         .task {
             if let s = try? await app.client?.speechSettings() { status = s.status }
+            // Where transcription runs follows signing in or out, and the
+            // keys and settings, here or from another device.
+            for await _ in app.changes(of: Self.tables) {
+                if let s = try? await app.client?.speechSettings() { status = s.status }
+            }
         }
     }
+
+    /// tables are those whose changes change the speech settings: the
+    /// session, the settings and the agent providers, whose keys a cloud
+    /// endpoint uses.
+    static let tables: Set<String> = ["session", "key_values", "model_providers", "*"]
 }
 
 /// SpeechSettingsView is Settings › Speech to text, as on the desktop: the
@@ -41,6 +51,9 @@ struct SpeechSettingsView: View {
     @State private var saving = false
     /// result is how the last Test, or saving a key, went.
     @State private var result: (ok: Bool, text: String)?
+    /// onDevice are the languages the device's own engine transcribes, by
+    /// code, once it has said.
+    @State private var onDevice: Set<String>?
 
     var body: some View {
         Form {
@@ -52,7 +65,16 @@ struct SpeechSettingsView: View {
         .themedForm(palette)
         .navigationTitle(L.recSttTitle)
         .navigationBarTitleDisplayMode(.inline)
-        .task { await load() }
+        .task {
+            if DeviceTranscriber.isAvailable { onDevice = await DeviceTranscriber.languages() }
+        }
+        .task {
+            await load()
+            for await _ in app.changes(of: SpeechSection.tables) {
+                await refresh()
+                providers = ((try? await app.client?.providers()) ?? []).filter { !$0.isLocal }
+            }
+        }
         .onDisappear {
             saveKey()
             // What changed in the moment before Back, which the wait below
@@ -217,21 +239,31 @@ struct SpeechSettingsView: View {
         Toggle(L.recSttSpeakers, isOn: stt.speakerLabels)
     }
 
+    /// languages are those the language picker offers: on the device, only
+    /// those its engine transcribes, and the one chosen, to change.
+    private func languages(_ s: SpeechSettings, _ stt: SttSettings) -> [SpeechSettings.Language] {
+        guard stt.provider == "on-device", let onDevice else { return s.languages }
+        return s.languages.filter {
+            $0.code == "auto" || $0.code == stt.language || onDevice.contains($0.code)
+        }
+    }
+
     @ViewBuilder
     private func recording(_ s: SpeechSettings, _ stt: Binding<SttSettings>) -> some View {
         let recorder = Recorder.shared
         let state = recorder.state
+        let languages = languages(s, stt.wrappedValue)
         Section(L.commonRecording) {
             Picker(
                 L.recSttLanguage,
                 selection: Binding(
                     get: {
-                        s.languages.contains { $0.code == stt.wrappedValue.language }
+                        languages.contains { $0.code == stt.wrappedValue.language }
                             ? stt.wrappedValue.language : "auto"
                     },
                     set: { stt.wrappedValue.language = $0 })
             ) {
-                ForEach(s.languages, id: \.code) { Text($0.name).tag($0.code) }
+                ForEach(languages, id: \.code) { Text($0.name).tag($0.code) }
             }
             .pickerStyle(.navigationLink)
             VStack(alignment: .leading, spacing: 4) {
@@ -242,19 +274,20 @@ struct SpeechSettingsView: View {
                     recorder.testMicrophone()
                 }
                 .disabled(state.recording || state.testing)
-                if let heard = heard(state) {
+                if let heard = heard(state, live: recorder.liveText) {
                     Text(heard).font(.footnote).foregroundStyle(.secondary)
                 }
             }
         }
     }
 
-    /// heard says how the test of the microphone goes, or what it heard.
-    private func heard(_ state: RecordingState) -> String? {
+    /// heard says how the test of the microphone goes, or what it heard:
+    /// live, as it hears it.
+    private func heard(_ state: RecordingState, live: String) -> String? {
         if !state.testing { return state.heard.isEmpty ? nil : state.heard }
         if state.starting { return L.recSttMicStarting }
         if state.active {
-            return state.liveText.isEmpty ? L.recSttListening(seconds: 4) : state.liveText
+            return live.isEmpty ? L.recSttListening(seconds: 4) : live
         }
         return L.recTranscribing
     }

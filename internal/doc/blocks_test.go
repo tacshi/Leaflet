@@ -49,7 +49,7 @@ func TestNewBlockSpecs(t *testing.T) {
 		}
 	}
 	c := FromBlocks([]*Node{callout, toggle, link, math, diagram})
-	md := PageMarkdown("", c, nil)
+	md := PageMarkdown("", c, MarkdownOptions{})
 	for _, want := range []string{
 		"> [!WARNING]\n> Back up **first**",
 		"<details>\n<summary>Details</summary>\n\nInside\n\n```\nx := 1\n```\n\n</details>",

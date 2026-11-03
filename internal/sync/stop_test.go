@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -98,5 +99,38 @@ func TestAPassThatPanicsEnds(t *testing.T) {
 	}
 	if len(states) != 2 || states[1] || last == nil {
 		t.Errorf("states %v, last error %v", states, last)
+	}
+}
+
+// A pass of the loop's that waits for the one before, or for Hold, to be
+// done doesn't run once Stop has ended the loop, as an iOS app's scene
+// went to the background meanwhile.
+func TestStopEndsAPassWaitingToRun(t *testing.T) {
+	d := newCloudDevice(t, cloudRoot(t))
+	var runs atomic.Int32
+	d.svc.OnState = func(running bool, _ error) {
+		if running {
+			runs.Add(1)
+		}
+	}
+	held, release := make(chan struct{}), make(chan struct{})
+	go d.svc.Hold(func() {
+		close(held)
+		<-release
+	})
+	<-held
+	d.svc.Start()
+	loop := d.svc.passContext()
+	done := make(chan struct{})
+	go func() {
+		d.svc.loopPass(loop)
+		close(done)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	d.svc.Stop()
+	close(release)
+	<-done
+	if n := runs.Load(); n != 0 {
+		t.Errorf("%d passes ran after Stop", n)
 	}
 }

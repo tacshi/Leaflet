@@ -3,9 +3,11 @@ package app
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
@@ -367,6 +369,46 @@ func TestReloadKeepsATitleNotYetSaved(t *testing.T) {
 	}
 }
 
+// A page renamed elsewhere shows its new title while the user is in the
+// title with nothing typed, and the next save keeps it, not the old one.
+func TestRenameElsewhereShowsInAFocusedTitle(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.TextSize = 16
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	var ctx *ui.Context
+	tt := ui.NewTester(func(c *ui.Context) {
+		ctx = c
+		a.view(c)
+	}, 1300, 800)
+	a.focusTitle(false)
+	for range 3 {
+		tt.Frame()
+	}
+	if !a.page.titleIn.Focused(ctx) {
+		t.Fatal("the title didn't take the focus")
+	}
+	if err := a.st.RenamePage(p.ID, "Renamed elsewhere"); err != nil {
+		t.Fatal(err)
+	}
+	a.reload(store.Change{Table: "pages"})
+	tt.Frame()
+	if a.page.title != "Renamed elsewhere" || !tt.HasText("Renamed elsewhere") {
+		t.Errorf("the title shows %q", a.page.title)
+	}
+	if !a.saveTitle() {
+		t.Fatal("the title did not save")
+	}
+	if q, err := a.st.Page(p.ID); err != nil || q.Title != "Renamed elsewhere" {
+		t.Errorf("stored %q, %v", q.Title, err)
+	}
+}
+
 // The open page deleted on another device closes, with what was typed and
 // not yet saved stored first, for restoring it to bring back.
 func TestPageDeletedElsewhereKeepsWhatWasTyped(t *testing.T) {
@@ -511,5 +553,67 @@ func TestRemovedSharedPageCloses(t *testing.T) {
 	}
 	if _, err := a.st.ContentRow("shared"); err == nil || a.st.HasPending("page_content", "shared") {
 		t.Error("the removed page was saved back")
+	}
+}
+
+// A title typed is saved shortly after the typing stops: with no window,
+// as in tests, at once, on the goroutine typing it, so no timer's runs it
+// later beside the test's.
+func TestTitleSavesWithoutATimer(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.TextSize = 16
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Before"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
+	a.focusTitle(true)
+	for range 3 {
+		tt.Frame()
+	}
+	tt.Type("After")
+	tt.Frame()
+	stored := func() string {
+		q, err := a.st.Page(p.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return q.Title
+	}
+	if got := stored(); got != "After" || a.page.titleTimer != nil {
+		t.Errorf("stored %q, a timer to come %v", got, a.page.titleTimer != nil)
+	}
+	// Longer than the wait a timer would take, the test goes on.
+	time.Sleep(700 * time.Millisecond)
+	tt.Type(" all")
+	tt.Frame()
+	if got := stored(); got != "After all" || a.page.savedTitle != "After all" {
+		t.Errorf("stored %q, saved %q", got, a.page.savedTitle)
+	}
+}
+
+// With a window, or a post standing in for one, later runs its function
+// on the main thread once the wait is over, and not once stopped.
+func TestLaterWaitsWithAWindow(t *testing.T) {
+	a := templatesApp(t)
+	posted := make(chan func(), 2)
+	a.post = func(fn func()) { posted <- fn }
+	ran := 0
+	stopped := a.later(time.Millisecond, func() { ran += 10 })
+	stopped.Stop()
+	if a.later(20*time.Millisecond, func() { ran++ }) == nil || ran != 0 {
+		t.Fatalf("ran %d before the wait", ran)
+	}
+	select {
+	case fn := <-posted:
+		fn()
+	case <-time.After(5 * time.Second):
+		t.Fatal("never posted")
+	}
+	if ran != 1 {
+		t.Errorf("ran %d", ran)
 	}
 }

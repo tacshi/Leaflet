@@ -63,11 +63,22 @@ enum DocumentMapper {
         let s = NSMutableAttributedString()
         for op in delta?.array ?? [] {
             guard let text = op["insert"]?.string else { continue }
-            let shown = text.replacingOccurrences(of: "\n", with: String(lineBreak))
+            let shown = lines(text).replacingOccurrences(of: "\n", with: String(lineBreak))
             s.append(NSAttributedString(string: shown, attributes: inline(op["attributes"])))
         }
         s.addAttribute(.leafletBlock, value: info, range: NSRange(location: 0, length: s.length))
         return (s, info)
+    }
+
+    /// lines is text with each of the breaks TextKit ends a paragraph at,
+    /// "\r\n", "\r", U+2029 and U+0085, made "\n": a block's text from
+    /// another app or device may hold them, and shown as they are, they
+    /// would split the block in two, one more each time the page is saved.
+    static func lines(_ text: String) -> String {
+        text.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .replacingOccurrences(of: "\u{2029}", with: "\n")
+            .replacingOccurrences(of: "\u{85}", with: "\n")
     }
 
     static func inline(_ attributes: JSONValue?) -> [NSAttributedString.Key: Any] {
@@ -103,8 +114,19 @@ enum DocumentMapper {
     /// when empty, is trailing's block; a paragraph without a block gets
     /// one.
     static func paragraphs(_ s: NSAttributedString, trailing: BlockInfo? = nil) -> [Paragraph] {
+        blocks(s, trailing: trailing).map {
+            Paragraph(info: $0.info, text: s.attributedSubstring(from: $0.range), range: $0.range)
+        }
+    }
+
+    /// blocks are the paragraphs' blocks and ranges alone, as paragraphs
+    /// has them, without copying their text: for what goes through the
+    /// whole page as each key is typed.
+    static func blocks(_ s: NSAttributedString, trailing: BlockInfo? = nil) -> [(
+        info: BlockInfo, range: NSRange
+    )] {
         let ns = s.string as NSString
-        var out: [Paragraph] = []
+        var out: [(info: BlockInfo, range: NSRange)] = []
         var at = 0
         repeat {
             let range = ns.paragraphRange(for: NSRange(location: at, length: 0))
@@ -116,16 +138,12 @@ enum DocumentMapper {
                 (range.length > 0
                 ? s.attribute(.leafletBlock, at: range.location, effectiveRange: nil) : nil)
                 as? BlockInfo ?? trailing ?? BlockInfo.paragraph()
-            out.append(
-                Paragraph(info: info, text: s.attributedSubstring(from: content), range: content))
+            out.append((info, content))
             at = NSMaxRange(range)
         } while at < ns.length
         if ns.length > 0, ns.character(at: ns.length - 1) == 0x0A {
             // Text ending in a separator has an empty paragraph after it.
-            out.append(
-                Paragraph(
-                    info: trailing ?? BlockInfo.paragraph(), text: NSAttributedString(),
-                    range: NSRange(location: ns.length, length: 0)))
+            out.append((trailing ?? BlockInfo.paragraph(), NSRange(location: ns.length, length: 0)))
         }
         return out
     }

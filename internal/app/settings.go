@@ -128,13 +128,21 @@ type accountState struct {
 	name string
 	// nameEdited is set once the user changes the name field: until then
 	// it shows the account's name as it is now, and nothing saves from it.
-	// nameShown is set in a frame that showed the field.
-	nameEdited bool
-	nameShown  bool
-	devices    []map[string]any
-	loaded     bool
-	// devicesErr is why the devices could not be loaded, to try again.
-	devicesErr string
+	// nameShown is set in a frame that showed the field, the section, and
+	// shownBefore in the frame before.
+	nameEdited  bool
+	nameShown   bool
+	shownBefore bool
+	// devices are the devices of the account devicesOf names, once
+	// loaded (devicesLoaded); loadingFor is the account whose devices are
+	// loading, and devicesErr why they could not be, to try again.
+	devices       []map[string]any
+	devicesOf     string
+	devicesLoaded bool
+	loadingFor    string
+	devicesErr    string
+	// deleteOpen shows the dialog deleting the account, confirm is what
+	// is typed in it, and busy is set while the server deletes it.
 	deleteOpen bool
 	confirm    string
 	busy       bool
@@ -143,8 +151,6 @@ type accountState struct {
 	signingOut bool
 	unsynced   int
 }
-
-var account accountState
 
 // Appearance ------------------------------------------------------------
 
@@ -279,8 +285,7 @@ func (a *App) accentDots(c *ui.Context) {
 }
 
 func (a *App) accountSettings(c *ui.Context) {
-	pal := theme.Of(c)
-	s := &account
+	s := &a.account
 	if !s.nameEdited {
 		s.name = a.session.DisplayName
 	}
@@ -329,9 +334,10 @@ func (a *App) accountSettings(c *ui.Context) {
 	})
 	if a.session.SignedIn {
 		label(c, locales.SettingsDevices())
-		if !s.loaded {
-			s.loaded = true
-			go a.loadDevices()
+		// They load as the section opens, and for another account, as one
+		// signed out elsewhere and then another signed in.
+		if !s.shownBefore || s.devicesOf != a.session.UserID {
+			a.loadDevices()
 		}
 		card(c, "devices", func() {
 			switch {
@@ -339,12 +345,14 @@ func (a *App) accountSettings(c *ui.Context) {
 				settingRow(c, "failed", locales.SettingsDevicesFailed(s.devicesErr), "", true, func() {
 					if button(c, "retry", "refresh-cw", locales.CommonRetry()).Clicked() {
 						s.devicesErr = ""
-						go a.loadDevices()
+						a.loadDevices()
 					}
 				})
 				return
+			case !s.devicesLoaded:
+				settingRow(c, "loading", locales.SettingsDevicesLoading(), "", true, nil)
 			case len(s.devices) == 0:
-				settingRow(c, "none", locales.SettingsDevicesLoading(), "", true, nil)
+				settingRow(c, "none", locales.SettingsDevicesNone(), "", true, nil)
 			}
 			me := a.st.DeviceID()
 			for i, d := range s.devices {
@@ -358,15 +366,7 @@ func (a *App) accountSettings(c *ui.Context) {
 				}
 				settingRow(c, "dev:"+id, store.S(d, "name"), desc, i == 0, func() {
 					if id != me && d["revoked_at"] == nil && button(c, "revoke", "", locales.CommonSignOut()).Clicked() {
-						go func() {
-							ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-							defer cancel()
-							if _, err := a.backend.Upsert(ctx, "devices", map[string]any{"id": id, "user_id": a.backend.UserID(), "revoked_at": time.Now().UTC().Format(time.RFC3339)}, ""); err != nil {
-								a.update(func() { a.toast(locales.SettingsDeviceSignOutFailed(err.Error())) })
-								return
-							}
-							a.loadDevices()
-						}()
+						a.revokeDevice(id)
 					}
 				})
 			}
@@ -388,44 +388,68 @@ func (a *App) accountSettings(c *ui.Context) {
 		}
 	})
 	if s.deleteOpen {
-		dialog(c, &s.deleteOpen, 420, func() {
-			dialogHeader(c, locales.SettingsDeleteAccountTitle(), locales.SettingsCannotUndo(), &s.deleteOpen)
-			ui.Column(c).Padding(0, 20, 20).Gap(12).Children(func() {
-				ui.Text(c, locales.SettingsTypeDelete()).FontSize(13).TextColor(pal.TextMuted)
-				field(c, "confirm", &s.confirm, "DELETE").AutoFocus()
-				ui.Row(c).Justify(ui.End).Gap(8).Children(func() {
-					if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
-						s.deleteOpen = false
-					}
-					if danger(c, "go", locales.SettingsDeleteAccount()).Clicked() && s.confirm == "DELETE" && !s.busy {
-						s.busy = true
-						go func() {
-							ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-							defer cancel()
-							_, err := a.backend.Invoke(ctx, "account", map[string]any{"action": "delete"})
-							a.update(func() {
-								s.busy = false
-								if err != nil {
-									a.toast(locales.SettingsDeleteAccountFailed(err.Error()))
-									return
-								}
-								s.deleteOpen = false
-								a.leave(a.st.Wipe, false)
-								a.toast(locales.SettingsAccountDeleted())
-							})
-						}()
-					}
-				})
+		a.deleteAccountDialog(c)
+	}
+}
+
+// deleteAccountDialog asks before deleting the account: the button works
+// once DELETE is typed, and Return too then, and the dialog waits while
+// the server deletes it.
+func (a *App) deleteAccountDialog(c *ui.Context) {
+	pal := theme.Of(c)
+	s := &a.account
+	dialog(c, &s.deleteOpen, 420, func() {
+		dialogHeader(c, locales.SettingsDeleteAccountTitle(), locales.SettingsCannotUndo(), &s.deleteOpen)
+		ui.Column(c).Padding(0, 20, 20).Gap(12).Children(func() {
+			ui.Text(c, locales.SettingsTypeDelete()).FontSize(13).TextColor(pal.TextMuted)
+			submitted := field(c, "confirm", &s.confirm, "DELETE").Disabled(s.busy).AutoFocus().Submitted()
+			ready := strings.TrimSpace(s.confirm) == "DELETE" && !s.busy
+			ui.Row(c).Justify(ui.End).AlignItems(ui.Center).Gap(8).Children(func() {
+				if s.busy {
+					ui.Spinner(c).Size(14, 14)
+				}
+				if button(c, "cancel", "", locales.CommonCancel()).Disabled(s.busy).Clicked() {
+					s.deleteOpen = false
+				}
+				label := locales.SettingsDeleteAccount()
+				if s.busy {
+					label = locales.SettingsDeletingAccount()
+				}
+				if danger(c, "go", label).Disabled(!ready).Clicked() || submitted && ready {
+					a.deleteAccount()
+				}
 			})
 		})
-	}
+	})
+}
+
+// deleteAccount deletes the account on the server, then everything of it
+// on this device.
+func (a *App) deleteAccount() {
+	s := &a.account
+	s.busy = true
+	var err error
+	a.offMain(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		_, err = a.backend.Invoke(ctx, "account", map[string]any{"action": "delete"})
+	}, func() {
+		s.busy = false
+		if err != nil {
+			a.toast(locales.SettingsDeleteAccountFailed(err.Error()))
+			return
+		}
+		s.deleteOpen = false
+		a.leave(a.st.Wipe, false)
+		a.toast(locales.SettingsAccountDeleted())
+	})
 }
 
 // signOutAlert asks before signing out removes changes not uploaded yet.
 // The window shows it over whatever it shows, as the upload before it may
 // finish after Settings has closed.
 func (a *App) signOutAlert(c *ui.Context) {
-	s := &account
+	s := &a.account
 	if s.unsynced == 0 {
 		return
 	}
@@ -441,13 +465,16 @@ func (a *App) signOutAlert(c *ui.Context) {
 
 // keepName saves the name typed in Account once a frame no longer shows
 // its field, as Settings closed or went to another section, which the
-// field leaving its focus never says then. Call it after Settings builds.
+// field leaving its focus never says then; and notes whether the frame
+// showed it, for the section to know it opens. Call it after Settings
+// builds.
 func (a *App) keepName() {
-	if account.nameEdited && !account.nameShown {
-		a.saveName(account.name)
-		account.nameEdited = false
+	s := &a.account
+	if s.nameEdited && !s.nameShown {
+		a.saveName(s.name)
+		s.nameEdited = false
 	}
-	account.nameShown = false
+	s.shownBefore, s.nameShown = s.nameShown, false
 }
 
 func (a *App) saveName(name string) {
@@ -456,7 +483,7 @@ func (a *App) saveName(name string) {
 		return
 	}
 	if err := a.st.SetDisplayName(name); err != nil {
-		account.name = a.session.DisplayName
+		a.account.name = a.session.DisplayName
 		a.toast(locales.SettingsSaveFailed(err.Error()))
 		return
 	}
@@ -477,16 +504,54 @@ func (a *App) saveName(name string) {
 	}
 }
 
+// loadDevices loads the devices of the account signed in, off the main
+// thread, unless they are loading; those of another account go first.
 func (a *App) loadDevices() {
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	rows, err := a.backend.Select(ctx, "devices", remoteQuery("last_active_at.desc"))
-	a.update(func() {
-		if err != nil {
-			account.devicesErr = err.Error()
+	s := &a.account
+	user := a.session.UserID
+	if s.devicesOf != user {
+		s.devices, s.devicesOf, s.devicesLoaded, s.devicesErr = nil, user, false, ""
+	}
+	if s.loadingFor == user {
+		return
+	}
+	s.loadingFor = user
+	var rows []map[string]any
+	var err error
+	a.offMain(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		rows, err = a.backend.Select(ctx, "devices", remoteQuery("last_active_at.desc"))
+	}, func() {
+		if s.loadingFor == user {
+			s.loadingFor = ""
+		}
+		// Another account's, signed in meanwhile, load on their own.
+		if s.devicesOf != user {
 			return
 		}
-		account.devices, account.devicesErr = rows, ""
+		if err != nil {
+			s.devicesErr = err.Error()
+			return
+		}
+		s.devices, s.devicesLoaded, s.devicesErr = rows, true, ""
+	})
+}
+
+// revokeDevice signs out another device of the account.
+func (a *App) revokeDevice(id string) {
+	user := a.backend.UserID()
+	var err error
+	a.offMain(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		_, err = a.backend.Upsert(ctx, "devices", map[string]any{"id": id, "user_id": user, "revoked_at": time.Now().UTC().Format(time.RFC3339)}, "")
+	}, func() {
+		if err != nil {
+			a.toast(locales.SettingsDeviceSignOutFailed(err.Error()))
+			return
+		}
+		a.loadDevices()
 	})
 }
 
@@ -523,11 +588,11 @@ func (a *App) signOut() {
 	if !a.flush() {
 		return
 	}
-	account.signingOut = true
+	a.account.signingOut = true
 	go func() {
 		_ = a.sync.SyncNow()
 		a.update(func() {
-			account.signingOut = false
+			a.account.signingOut = false
 			a.leave(a.st.ForgetSyncedAccount, true)
 		})
 	}()
@@ -546,7 +611,7 @@ func (a *App) leave(clear func() error, synced bool) {
 		unsynced, err := c.Leave(clear, synced)
 		a.update(func() {
 			if unsynced > 0 {
-				account.unsynced = unsynced
+				a.account.unsynced = unsynced
 				return
 			}
 			if err != nil {
@@ -570,7 +635,8 @@ func (a *App) leave(clear func() error, synced bool) {
 				}
 			}
 			a.session = a.st.Session()
-			account.loaded, account.devices, account.devicesErr, account.nameEdited = false, nil, "", false
+			s := &a.account
+			s.devices, s.devicesOf, s.devicesLoaded, s.devicesErr, s.nameEdited = nil, "", false, "", false
 		})
 	}()
 }
@@ -598,31 +664,41 @@ type providerForm struct {
 	// confirmRemove asks before removing the provider; removing is set
 	// while the server deletes it.
 	confirmRemove, removing bool
-	// A ChatGPT sign-in, before it is saved.
-	signingIn bool
-	chatgpt   *agents.ChatGPT
-	email     string
-	keyTimer  *time.Timer
+	// A ChatGPT sign-in, before it is saved; stopSignIn stops the one
+	// under way, as the dialog closes or another opens in its place.
+	signingIn  bool
+	stopSignIn context.CancelFunc
+	chatgpt    *agents.ChatGPT
+	email      string
+	keyTimer   *time.Timer
+	// reading is set while the key or sign-in kept here of the provider
+	// edited is read (editProvider): saving waits, not to drop it.
+	reading bool
 	// gen tells this dialog from the ones opened before it: what a test,
 	// sign-in or save started in one of those finds goes nowhere.
 	gen int
 }
 
-var (
-	form    providerForm
-	formGen int
-)
-
-// openForm opens the provider dialog on f.
-func openForm(f providerForm) {
-	formGen++
-	f.gen = formGen
-	form = f
+// openForm opens the provider dialog on f, in place of the one open.
+func (a *App) openForm(f providerForm) {
+	a.form.cancelSignIn()
+	a.formGen++
+	f.gen = a.formGen
+	a.form = f
 }
 
 // formIs reports whether the provider dialog is still the one opened as
 // gen, for work started in it that finishes later.
-func formIs(gen int) bool { return form.open && form.gen == gen }
+func (a *App) formIs(gen int) bool { return a.form.open && a.form.gen == gen }
+
+// cancelSignIn stops the dialog's ChatGPT sign-in under way, if one is:
+// its page in the browser signs in to nothing then, and its port is free.
+func (f *providerForm) cancelSignIn() {
+	if f.stopSignIn != nil {
+		f.stopSignIn()
+		f.stopSignIn = nil
+	}
+}
 
 func (a *App) modelsSettings(c *ui.Context) {
 	pal := theme.Of(c)
@@ -636,7 +712,7 @@ func (a *App) modelsSettings(c *ui.Context) {
 			switch {
 			case p.AuthKind == "account":
 				where = locales.SettingsProviderPlan()
-				if g, err := a.hub.ChatGPT(p.ID); err == nil && g.Account().Email != "" {
+				if g := a.chatgptOf(p.ID); g != nil && g.Account().Email != "" {
 					where = locales.SettingsProviderPlanEmail(g.Account().Email)
 				}
 			case p.IsLocal:
@@ -647,7 +723,6 @@ func (a *App) modelsSettings(c *ui.Context) {
 			if p.SupportsTools != nil && !*p.SupportsTools && p.AuthKind != "account" {
 				where = locales.SettingsProviderChatOnly(where)
 			}
-			pp := p
 			row := ui.ButtonBase(c.Key("p:" + p.ID)).Justify(ui.Start).Label(locales.SettingsProviderEdit(p.Name))
 			if i > 0 {
 				row.BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider)
@@ -661,7 +736,7 @@ func (a *App) modelsSettings(c *ui.Context) {
 				})
 			})
 			if row.Clicked() {
-				a.editProvider(&pp)
+				a.editProvider(&p)
 			}
 		}
 	})
@@ -731,16 +806,19 @@ func (a *App) modelsSettings(c *ui.Context) {
 			})
 		})
 	}
-	if form.open {
+	if a.form.open {
 		a.providerDialog(c)
 		a.removeAlert(c)
+	}
+	if !a.form.open {
+		a.form.cancelSignIn()
 	}
 }
 
 func (a *App) newProvider(p agents.Preset) {
-	openForm(providerForm{open: true, preset: p.ID, name: p.Name, baseURL: p.BaseURL, models: p.Suggested})
+	a.openForm(providerForm{open: true, preset: p.ID, name: p.Name, baseURL: p.BaseURL, models: p.Suggested})
 	if len(p.Suggested) > 0 {
-		form.model = p.Suggested[0]
+		a.form.model = p.Suggested[0]
 	}
 	if p.Auth == "none" {
 		// A server on this machine lists its models without a key.
@@ -749,27 +827,62 @@ func (a *App) newProvider(p agents.Preset) {
 }
 
 func (a *App) editProvider(p *store.Provider) {
-	openForm(providerForm{open: true, id: p.ID, preset: p.Preset, name: p.Name, baseURL: p.BaseURL, model: p.DefaultModel,
-		models: agents.Models(*p), tools: p.SupportsTools})
-	if p.IsLocal && p.AuthKind != "account" {
-		form.apiKey = agents.LocalKey(p.ID)
-	}
-	if p.AuthKind == "account" {
-		if g, err := a.hub.ChatGPT(p.ID); err == nil {
-			form.chatgpt, form.email = g, g.Account().Email
+	a.openForm(providerForm{open: true, id: p.ID, preset: p.Preset, name: p.Name, baseURL: p.BaseURL, model: p.DefaultModel,
+		models: agents.Models(*p), tools: p.SupportsTools, reading: true})
+	// Its key or sign-in kept here is read off the main thread, as the
+	// keychain can take a while, or ask first; its models are listed
+	// with it, and it saves only once it has come.
+	id, gen := p.ID, a.form.gen
+	local, account := p.IsLocal && p.AuthKind != "account", p.AuthKind == "account"
+	var key string
+	var g *agents.ChatGPT
+	a.offMain(func() {
+		if local {
+			key = agents.LocalKey(id)
 		}
+		if account {
+			g, _ = a.hub.ChatGPT(id)
+		}
+	}, func() {
+		if !a.formIs(gen) {
+			return
+		}
+		a.form.reading = false
+		if a.form.apiKey == "" {
+			a.form.apiKey = key
+		}
+		if g != nil && a.form.chatgpt == nil {
+			a.form.chatgpt, a.form.email = g, g.Account().Email
+		}
+		a.fetchModels()
+	})
+}
+
+// chatgptOf is the provider's ChatGPT sign-in, for what is drawn: nil
+// until it has been read, once, off the main thread, as the keychain can
+// take a while, or ask first.
+func (a *App) chatgptOf(id string) *agents.ChatGPT {
+	if g := a.hub.KnownChatGPT(id); g != nil {
+		return g
 	}
-	a.fetchModels()
+	if !a.chatgptRead[id] {
+		if a.chatgptRead == nil {
+			a.chatgptRead = map[string]bool{}
+		}
+		a.chatgptRead[id] = true
+		a.offMain(func() { _, _ = a.hub.ChatGPT(id) }, func() {})
+	}
+	return nil
 }
 
 func (a *App) providerDialog(c *ui.Context) {
-	preset := agents.PresetByID(form.preset)
+	preset := agents.PresetByID(a.form.preset)
 	account := preset.Auth == "account"
 	local := preset.Local
 	here := a.keptHere(preset)
 	title := locales.SettingsConnectProvider(preset.Name)
-	if form.id != "" {
-		title = locales.SettingsProviderEdit(form.name)
+	if a.form.id != "" {
+		title = locales.SettingsProviderEdit(a.form.name)
 	}
 	desc := locales.SettingsProviderDescCloud()
 	switch {
@@ -783,37 +896,37 @@ func (a *App) providerDialog(c *ui.Context) {
 	if preset.ID == "claude" {
 		desc = locales.SettingsProviderClaudeNote(desc)
 	}
-	dialog(c, &form.open, 500, func() {
-		dialogHeader(c, title, desc, &form.open)
+	dialog(c, &a.form.open, 500, func() {
+		dialogHeader(c, title, desc, &a.form.open)
 		ui.Column(c).Padding(0, 20, 20).Gap(12).Children(func() {
 			if account {
 				a.chatgptRow(c)
 			} else {
-				ui.Field(c, locales.SettingsName(), func() { field(c, "name", &form.name, preset.Name) })
+				ui.Field(c, locales.SettingsName(), func() { field(c, "name", &a.form.name, preset.Name) })
 				ui.Field(c, locales.SettingsBaseURL(), func() {
 					ph := preset.Placeholder
 					if ph == "" {
 						ph = preset.BaseURL
 					}
 					// Another address has other models.
-					if field(c, "url", &form.baseURL, ph).Changed() {
+					if field(c, "url", &a.form.baseURL, ph).Changed() {
 						a.fetchModelsSoon()
 					}
 				})
 			}
 			testButton := func() {
 				label := locales.SettingsTest()
-				if form.testing {
+				if a.form.testing {
 					label = locales.SettingsTesting()
 				}
-				if button(c, "test", "", label).MinWidth(82).Justify(ui.Center).Disabled(form.testing || (account && form.chatgpt == nil)).Clicked() {
+				if button(c, "test", "", label).MinWidth(82).Justify(ui.Center).Disabled(a.form.testing || (account && a.form.chatgpt == nil)).Clicked() {
 					a.testProvider()
 				}
 			}
 			if !account {
 				ui.Field(c, locales.SettingsAPIKey(), func() {
 					ph := locales.SettingsPasteKey()
-					if form.id != "" && !local {
+					if a.form.id != "" && !local {
 						ph = locales.SettingsKeySaved()
 					}
 					if local {
@@ -821,7 +934,7 @@ func (a *App) providerDialog(c *ui.Context) {
 					}
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						var in ui.Element
-						ui.Box(c).Grow(1).Children(func() { in = password(c, "key", &form.apiKey, ph) })
+						ui.Box(c).Grow(1).Children(func() { in = password(c, "key", &a.form.apiKey, ph) })
 						if in.Changed() {
 							a.fetchModelsSoon()
 						}
@@ -829,16 +942,16 @@ func (a *App) providerDialog(c *ui.Context) {
 					})
 				})
 			}
-			if form.result != "" {
+			if a.form.result != "" {
 				kind := "danger"
-				if form.resultOK {
+				if a.form.resultOK {
 					kind = "ok"
 				}
-				notice(c, kind, map[bool]string{true: "check", false: "circle-alert"}[form.resultOK], form.result, nil)
+				notice(c, kind, map[bool]string{true: "check", false: "circle-alert"}[a.form.resultOK], a.form.result, nil)
 			}
 			// What saving or removing found wrong shows below the model,
 			// the last field.
-			if !account || form.chatgpt != nil {
+			if !account || a.form.chatgpt != nil {
 				ui.Field(c, locales.CommonModel(), func() {
 					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 						a.modelPicker(c)
@@ -846,17 +959,17 @@ func (a *App) providerDialog(c *ui.Context) {
 							testButton()
 						}
 					})
-				}).Error(form.errorText)
+				}).Error(a.form.errorText)
 			}
 			// Nothing to save before signing in: an existing sign-in can
 			// only be removed.
-			signedOut := account && form.chatgpt == nil
-			if signedOut && form.id == "" {
+			signedOut := account && a.form.chatgpt == nil
+			if signedOut && a.form.id == "" {
 				return
 			}
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-				if form.id != "" && danger(c, "remove", locales.CommonRemove()).Disabled(form.removing).Clicked() {
-					form.confirmRemove = true
+				if a.form.id != "" && danger(c, "remove", locales.CommonRemove()).Disabled(a.form.removing).Clicked() {
+					a.form.confirmRemove = true
 				}
 				ui.Spacer(c)
 				if signedOut {
@@ -864,7 +977,7 @@ func (a *App) providerDialog(c *ui.Context) {
 				}
 				// Only a provider kept on the server needs the account to
 				// save it; one kept here saves signed out too.
-				cannot := form.saving || (!local && !here && !a.session.SignedIn) || (account && form.chatgpt == nil) || strings.TrimSpace(form.model) == ""
+				cannot := a.form.saving || a.form.reading || (!local && !here && !a.session.SignedIn) || (account && a.form.chatgpt == nil) || strings.TrimSpace(a.form.model) == ""
 				if primary(c, "save", "", locales.CommonSave()).Disabled(cannot).Clicked() {
 					a.saveProvider()
 				}
@@ -876,26 +989,26 @@ func (a *App) providerDialog(c *ui.Context) {
 // chatgptRow signs in with ChatGPT, or shows who is signed in.
 func (a *App) chatgptRow(c *ui.Context) {
 	pal := theme.Of(c)
-	if form.chatgpt != nil {
+	if a.form.chatgpt != nil {
 		ui.Row(c).Padding(10, 12).Gap(10).Radius(8).Background(pal.OkBg).Border(1, pal.OkBorder).AlignItems(ui.Center).Children(func() {
 			ui.Icon(c, theme.Icon("check")).FontSize(15).TextColor(pal.OkText)
 			who := locales.SettingsSignedInAccount()
-			if form.email != "" {
-				who = locales.SettingsSignedInAs(form.email)
+			if a.form.email != "" {
+				who = locales.SettingsSignedInAs(a.form.email)
 			}
 			ui.Text(c, who).FontSize(13.5).TextColor(pal.OkText).Grow(1)
-			if ghost(c, "again", "", locales.SettingsSwitchAccount()).Disabled(form.signingIn).Clicked() {
+			if ghost(c, "again", "", locales.SettingsSwitchAccount()).Disabled(a.form.signingIn).Clicked() {
 				a.chatgptSignIn()
 			}
 		})
 		return
 	}
 	label := locales.SettingsChatGPTSignIn()
-	if form.signingIn {
+	if a.form.signingIn {
 		label = locales.SettingsWaitingBrowser()
 	}
 	ui.Column(c).Gap(8).Children(func() {
-		if primary(c, "signin", "user", label).Height(36).Disabled(form.signingIn).Clicked() {
+		if primary(c, "signin", "user", label).Height(36).Disabled(a.form.signingIn).Clicked() {
 			a.chatgptSignIn()
 		}
 		ui.Text(c, locales.SettingsChatGPTNote()).
@@ -904,31 +1017,34 @@ func (a *App) chatgptRow(c *ui.Context) {
 }
 
 func (a *App) chatgptSignIn() {
-	form.signingIn, form.result = true, ""
+	a.form.signingIn, a.form.result = true, ""
 	host := a.hub.HostID()
 	clientID := ""
-	if form.chatgpt != nil {
-		clientID = form.chatgpt.Account().ClientID
+	if a.form.chatgpt != nil {
+		clientID = a.form.chatgpt.Account().ClientID
 	} else if id, ok := a.st.Value("chatgpt.client"); ok {
 		clientID = id
 	}
-	gen := form.gen
+	gen := a.form.gen
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	a.form.cancelSignIn()
+	a.form.stopSignIn = cancel
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		g, err := agents.SignInChatGPT(ctx, host, clientID, func(u string) { _ = mygo.Shell.OpenExternal(u) })
 		a.update(func() {
-			if !formIs(gen) {
+			if !a.formIs(gen) {
 				return
 			}
-			form.signingIn = false
+			a.form.stopSignIn = nil
+			a.form.signingIn = false
 			if err != nil {
-				form.result, form.resultOK = err.Error(), false
+				a.form.result, a.form.resultOK = err.Error(), false
 				return
 			}
 			_ = a.st.SetValue("chatgpt.client", g.Account().ClientID)
-			form.chatgpt, form.email = g, g.Account().Email
-			form.name = "ChatGPT"
+			a.form.chatgpt, a.form.email = g, g.Account().Email
+			a.form.name = "ChatGPT"
 			a.fetchModels()
 		})
 	}()
@@ -938,20 +1054,20 @@ func (a *App) chatgptSignIn() {
 func (a *App) modelPicker(c *ui.Context) {
 	const other = "\x00other"
 	ui.Box(c).Grow(1).Children(func() {
-		if form.custom || len(form.models) == 0 {
+		if a.form.custom || len(a.form.models) == 0 {
 			ph := locales.SettingsModelID()
-			if form.fetching {
+			if a.form.fetching {
 				ph = locales.SettingsFetchingModels()
 			}
-			field(c, "model-id", &form.model, ph)
+			field(c, "model-id", &a.form.model, ph)
 			return
 		}
-		options := append([]string{}, form.models...)
-		if form.model != "" && !contains(options, form.model) {
-			options = append([]string{form.model}, options...)
+		options := append([]string{}, a.form.models...)
+		if a.form.model != "" && !contains(options, a.form.model) {
+			options = append([]string{a.form.model}, options...)
 		}
 		options = append(options, other)
-		choice := form.model
+		choice := a.form.model
 		selectBox(c, "model", &choice, options, func(s string) string {
 			if s == other {
 				return locales.SettingsOtherModel()
@@ -962,18 +1078,18 @@ func (a *App) modelPicker(c *ui.Context) {
 			return s
 		}, 0).FillWidth()
 		if choice == other {
-			form.custom, form.model = true, ""
+			a.form.custom, a.form.model = true, ""
 		} else {
-			form.model = choice
+			a.form.model = choice
 		}
 	})
-	if !form.custom && len(form.models) == 0 && !form.fetching {
+	if !a.form.custom && len(a.form.models) == 0 && !a.form.fetching {
 		return
 	}
-	if form.custom && len(form.models) > 0 && ghost(c, "list", "", locales.SettingsFromList()).Clicked() {
-		form.custom = false
-		if len(form.models) > 0 {
-			form.model = form.models[0]
+	if a.form.custom && len(a.form.models) > 0 && ghost(c, "list", "", locales.SettingsFromList()).Clicked() {
+		a.form.custom = false
+		if len(a.form.models) > 0 {
+			a.form.model = a.form.models[0]
 		}
 	}
 }
@@ -981,26 +1097,26 @@ func (a *App) modelPicker(c *ui.Context) {
 // fetchModelsSoon lists the models once a pasted key or the address
 // settles.
 func (a *App) fetchModelsSoon() {
-	if form.keyTimer != nil {
-		form.keyTimer.Stop()
+	if a.form.keyTimer != nil {
+		a.form.keyTimer.Stop()
 	}
-	form.keyTimer = time.AfterFunc(700*time.Millisecond, func() { a.update(a.fetchModels) })
+	a.form.keyTimer = a.later(700*time.Millisecond, a.fetchModels)
 }
 
 // fetchModels lists the provider's models for the dropdown: from its
 // server with the key typed here, from Leaflet's server for a saved cloud
 // provider, or from the ChatGPT plan.
 func (a *App) fetchModels() {
-	preset := agents.PresetByID(form.preset)
-	base, key, id, g := form.baseURL, strings.TrimSpace(form.apiKey), form.id, form.chatgpt
+	preset := agents.PresetByID(a.form.preset)
+	base, key, id, g := a.form.baseURL, strings.TrimSpace(a.form.apiKey), a.form.id, a.form.chatgpt
 	switch {
 	case preset.Auth == "account" && g == nil:
 		return
 	case preset.Auth == "key" && key == "" && (id == "" || !a.backend.SignedIn()):
 		return
 	}
-	at, gen := base+"|"+key, form.gen
-	form.fetching, form.fetchedAt = true, at
+	at, gen := base+"|"+key, a.form.gen
+	a.form.fetching, a.form.fetchedAt = true, at
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
@@ -1019,16 +1135,16 @@ func (a *App) fetchModels() {
 			}
 		}
 		a.update(func() {
-			if !formIs(gen) || form.fetchedAt != at {
+			if !a.formIs(gen) || a.form.fetchedAt != at {
 				return // another dialog, or another fetch since
 			}
-			form.fetching = false
-			if form.baseURL+"|"+strings.TrimSpace(form.apiKey) != at {
+			a.form.fetching = false
+			if a.form.baseURL+"|"+strings.TrimSpace(a.form.apiKey) != at {
 				return // the key or address changed since, not yet fetched for
 			}
 			if err != nil {
-				if !preset.Local || form.id != "" {
-					form.result, form.resultOK = locales.SettingsListModelsFailed(err.Error()), false
+				if !preset.Local || a.form.id != "" {
+					a.form.result, a.form.resultOK = locales.SettingsListModelsFailed(err.Error()), false
 				}
 				return
 			}
@@ -1036,12 +1152,12 @@ func (a *App) fetchModels() {
 			if len(models) == 0 {
 				return
 			}
-			form.models = models
-			if form.model == "" || !contains(models, form.model) && !form.custom {
-				form.model = models[0]
+			a.form.models = models
+			if a.form.model == "" || !contains(models, a.form.model) && !a.form.custom {
+				a.form.model = models[0]
 			}
-			if form.result != "" && !form.resultOK {
-				form.result = ""
+			if a.form.result != "" && !a.form.resultOK {
+				a.form.result = ""
 			}
 		})
 	}()
@@ -1053,10 +1169,10 @@ func listAny(v any) []any {
 }
 
 func (a *App) testProvider() {
-	preset := agents.PresetByID(form.preset)
-	base, key, id, model, g := form.baseURL, strings.TrimSpace(form.apiKey), form.id, form.model, form.chatgpt
-	form.testing, form.result = true, ""
-	gen := form.gen
+	preset := agents.PresetByID(a.form.preset)
+	base, key, id, model, g := a.form.baseURL, strings.TrimSpace(a.form.apiKey), a.form.id, a.form.model, a.form.chatgpt
+	a.form.testing, a.form.result = true, ""
+	gen := a.form.gen
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
@@ -1085,16 +1201,16 @@ func (a *App) testProvider() {
 			res = agents.TestResult{Message: locales.SettingsPasteKeyToTest()}
 		}
 		a.update(func() {
-			if !formIs(gen) {
+			if !a.formIs(gen) {
 				return
 			}
-			form.testing = false
-			form.result, form.resultOK = res.Message, res.OK
+			a.form.testing = false
+			a.form.result, a.form.resultOK = res.Message, res.OK
 			if res.OK {
 				t := res.SupportsTools
-				form.tools = &t
+				a.form.tools = &t
 				if ms := agents.ChatModels(res.Models, preset.Suggested); len(ms) > 0 {
-					form.models = ms
+					a.form.models = ms
 				}
 			}
 		})
@@ -1109,40 +1225,40 @@ func (a *App) keptHere(preset agents.Preset) bool {
 	if preset.Local || preset.Auth == "account" {
 		return false
 	}
-	if form.id != "" {
-		p, err := a.st.Provider(form.id)
+	if a.form.id != "" {
+		p, err := a.st.Provider(a.form.id)
 		return err == nil && p.IsLocal
 	}
 	return !a.hasServer() || !a.session.SignedIn
 }
 
 func (a *App) saveProvider() {
-	preset := agents.PresetByID(form.preset)
-	if preset.Auth != "account" && strings.TrimSpace(form.baseURL) == "" || strings.TrimSpace(form.model) == "" {
-		form.errorText = locales.SettingsNeedURLAndModel()
+	preset := agents.PresetByID(a.form.preset)
+	if preset.Auth != "account" && strings.TrimSpace(a.form.baseURL) == "" || strings.TrimSpace(a.form.model) == "" {
+		a.form.errorText = locales.SettingsNeedURLAndModel()
 		return
 	}
 	here := a.keptHere(preset)
-	if here && strings.TrimSpace(form.apiKey) == "" {
-		form.errorText = locales.SettingsNeedKey()
+	if here && strings.TrimSpace(a.form.apiKey) == "" {
+		a.form.errorText = locales.SettingsNeedKey()
 		return
 	}
 	if preset.Local || here {
-		p := store.Provider{ID: form.id, Preset: form.preset, Name: strings.TrimSpace(form.name), BaseURL: endpoint.NormalizeBaseURL(form.baseURL),
-			AuthKind: "none", DefaultModel: form.model, IsLocal: true, SupportsTools: form.tools, Models: form.models}
+		p := store.Provider{ID: a.form.id, Preset: a.form.preset, Name: strings.TrimSpace(a.form.name), BaseURL: endpoint.NormalizeBaseURL(a.form.baseURL),
+			AuthKind: "none", DefaultModel: a.form.model, IsLocal: true, SupportsTools: a.form.tools, Models: a.form.models}
 		if p.ID == "" {
 			p.ID = doc.NewRowID()
 		}
 		if p.Name == "" {
 			p.Name = preset.Name
 		}
-		if form.apiKey != "" {
+		if a.form.apiKey != "" {
 			p.AuthKind = "api_key"
 		}
 		if preset.Auth == "account" {
 			p.AuthKind, p.BaseURL = "account", preset.BaseURL
-			if err := agents.UseChatGPT(p.ID, form.chatgpt); err != nil {
-				form.errorText = locales.SettingsKeepSignInFailed(err.Error())
+			if err := agents.UseChatGPT(p.ID, a.form.chatgpt); err != nil {
+				a.form.errorText = locales.SettingsKeepSignInFailed(err.Error())
 				return
 			}
 		}
@@ -1150,12 +1266,12 @@ func (a *App) saveProvider() {
 			p.CreatedAt = old.CreatedAt
 		}
 		if err := a.st.PutProvider(p); err != nil {
-			form.errorText = err.Error()
+			a.form.errorText = err.Error()
 			return
 		}
 		if preset.Auth != "account" {
-			if err := agents.SetLocalKey(p.ID, form.apiKey); err != nil {
-				form.errorText = locales.SettingsSaveKeyFailed(err.Error())
+			if err := agents.SetLocalKey(p.ID, a.form.apiKey); err != nil {
+				a.form.errorText = locales.SettingsSaveKeyFailed(err.Error())
 				return
 			}
 		}
@@ -1163,21 +1279,21 @@ func (a *App) saveProvider() {
 			a.settings.DefaultModel = store.ModelChoice{ProviderID: p.ID}.Encode()
 			a.saveSettings()
 		}
-		form.open = false
+		a.form.open = false
 		return
 	}
-	body := map[string]any{"preset": form.preset, "name": strings.TrimSpace(form.name), "base_url": endpoint.NormalizeBaseURL(form.baseURL),
-		"auth_kind": "api_key", "default_model": form.model}
-	if form.id != "" {
-		body["id"] = form.id
+	body := map[string]any{"preset": a.form.preset, "name": strings.TrimSpace(a.form.name), "base_url": endpoint.NormalizeBaseURL(a.form.baseURL),
+		"auth_kind": "api_key", "default_model": a.form.model}
+	if a.form.id != "" {
+		body["id"] = a.form.id
 	}
-	if form.apiKey != "" {
-		body["api_key"] = form.apiKey
+	if a.form.apiKey != "" {
+		body["api_key"] = a.form.apiKey
 	}
-	form.saving = true
-	tools := form.tools
-	models := form.models
-	gen := form.gen
+	a.form.saving = true
+	tools := a.form.tools
+	models := a.form.models
+	gen := a.form.gen
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -1186,8 +1302,8 @@ func (a *App) saveProvider() {
 			// The server has the provider either way; only the dialog it
 			// was saved from shows how it went, or closes.
 			fail := func(msg string) {
-				if formIs(gen) {
-					form.saving, form.errorText = false, msg
+				if a.formIs(gen) {
+					a.form.saving, a.form.errorText = false, msg
 				}
 			}
 			if err != nil {
@@ -1217,8 +1333,8 @@ func (a *App) saveProvider() {
 				a.settings.DefaultModel = store.ModelChoice{ProviderID: p.ID}.Encode()
 				a.saveSettings()
 			}
-			if formIs(gen) {
-				form.saving, form.open = false, false
+			if a.formIs(gen) {
+				a.form.saving, a.form.open = false, false
 			}
 		})
 	}()
@@ -1226,12 +1342,12 @@ func (a *App) saveProvider() {
 
 // removeAlert asks before the provider of the dialog goes, with its key.
 func (a *App) removeAlert(c *ui.Context) {
-	if !form.confirmRemove {
+	if !a.form.confirmRemove {
 		return
 	}
-	p, err := a.st.Provider(form.id)
+	p, err := a.st.Provider(a.form.id)
 	if err != nil {
-		form.confirmRemove = false
+		a.form.confirmRemove = false
 		return
 	}
 	msg := locales.SettingsRemoveProviderCloud()
@@ -1241,7 +1357,7 @@ func (a *App) removeAlert(c *ui.Context) {
 	case p.IsLocal:
 		msg = locales.SettingsRemoveProviderLocal()
 	}
-	if ui.AlertDialog(c, &form.confirmRemove, locales.SettingsRemoveProviderTitle(p.Name), msg,
+	if ui.AlertDialog(c, &a.form.confirmRemove, locales.SettingsRemoveProviderTitle(p.Name), msg,
 		locales.CommonCancel(), locales.CommonRemove()) == 1 {
 		a.removeProvider(p.ID)
 	}
@@ -1259,19 +1375,19 @@ func (a *App) removeProvider(id string) {
 		a.forgetProvider(p)
 		return
 	}
-	form.removing, form.errorText = true, ""
-	gen := form.gen
+	a.form.removing, a.form.errorText = true, ""
+	gen := a.form.gen
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		_, err := a.backend.Invoke(ctx, "providers", map[string]any{"action": "delete", "id": id})
 		a.update(func() {
-			if formIs(gen) {
-				form.removing = false
+			if a.formIs(gen) {
+				a.form.removing = false
 			}
 			if err != nil {
-				if formIs(gen) {
-					form.errorText = locales.SettingsDeleteFailed(err.Error())
+				if a.formIs(gen) {
+					a.form.errorText = locales.SettingsDeleteFailed(err.Error())
 				} else {
 					a.toast(locales.SettingsDeleteFailed(err.Error()))
 				}
@@ -1304,19 +1420,12 @@ func (a *App) forgetProvider(p store.Provider) {
 		a.settings.DefaultModel = ""
 		a.saveSettings()
 	}
-	if form.id == id {
-		form.open = false
+	if a.form.id == id {
+		a.form.open = false
 	}
 }
 
 // Sync and storage ---------------------------------------------------
-
-type offlineState struct {
-	queue  []store.OutboxEntry
-	loaded time.Time
-}
-
-var offline offlineState
 
 func (a *App) offlineSettings(c *ui.Context) {
 	heading(c, locales.SettingsSectionOffline(), locales.SettingsOfflineDesc())
@@ -1331,7 +1440,6 @@ func (a *App) offlineSettings(c *ui.Context) {
 		label(c, locales.SettingsConflicts())
 		card(c, "conflicts", func() {
 			for i, cf := range a.conflicts {
-				cf := cf
 				kept, other := cf.LocalNode, cf.RemoteNode
 				if cf.Kept == "remote" {
 					kept, other = cf.RemoteNode, cf.LocalNode
@@ -1339,7 +1447,7 @@ func (a *App) offlineSettings(c *ui.Context) {
 				// A block one side deleted and the other edited was kept,
 				// and can be deleted again.
 				deleted := other == nil
-				desc := ""
+				var desc string
 				switch {
 				case cf.LocalNode == nil:
 					desc = locales.SettingsConflictDeletedHere(short(kept.Delta().Plain(), 40))
@@ -1360,8 +1468,13 @@ func (a *App) offlineSettings(c *ui.Context) {
 								}
 							}
 						}
-						if !deleted && m.Item(locales.SettingsUseThisDevice()).Chosen() {
+						// The version the merge did not keep can come back,
+						// whichever device's it is.
+						if !deleted && cf.Kept == "remote" && m.Item(locales.SettingsUseThisDevice()).Chosen() {
 							a.resolveConflict(cf, cf.LocalNode)
+						}
+						if !deleted && cf.Kept != "remote" && m.Item(locales.SettingsUseOtherDevice()).Chosen() {
+							a.resolveConflict(cf, cf.RemoteNode)
 						}
 						if !deleted && m.Item(locales.SettingsKeepNewer()).Chosen() {
 							if err := a.st.ResolveConflict(cf.ID); err != nil {
@@ -1396,11 +1509,6 @@ func (a *App) offlineSettings(c *ui.Context) {
 // syncSettings are the parts of Sync and storage about syncing: through
 // the server, or through iCloud Drive.
 func (a *App) syncSettings(c *ui.Context) {
-	if time.Since(offline.loaded) > 2*time.Second {
-		offline.queue, _ = a.st.Pending()
-		offline.loaded = time.Now()
-		c.After(2 * time.Second)
-	}
 	card(c, "status", func() {
 		first := true
 		if icloud.Available() || a.settings.ICloudSync {
@@ -1443,7 +1551,9 @@ func (a *App) syncSettings(c *ui.Context) {
 			status = locales.SettingsSyncFailed(a.syncError)
 		}
 		title := locales.SettingsSynced()
-		if n := len(offline.queue); n > 0 {
+		// As counted as the outbox changes: reading it here, at every
+		// frame, read every change's whole payload.
+		if n := a.pending; n > 0 {
 			title = locales.SettingsChangesWaiting(n)
 		}
 		settingRow(c, "sync", title, status, first, func() {

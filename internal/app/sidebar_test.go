@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
@@ -321,13 +322,12 @@ func TestSettingsModal(t *testing.T) {
 	if err := tt.Click("Account"); err != nil {
 		t.Fatal(err)
 	}
-	account.deleteOpen = true
-	t.Cleanup(func() { account.deleteOpen = false })
+	a.account.deleteOpen = true
 	tt.Frame()
 	tt.Key(0, ui.KeyEscape)
 	tt.Frame()
-	if account.deleteOpen || !a.settingsOpen {
-		t.Fatalf("Escape left delete %v, settings %v", account.deleteOpen, a.settingsOpen)
+	if a.account.deleteOpen || !a.settingsOpen {
+		t.Fatalf("Escape left delete %v, settings %v", a.account.deleteOpen, a.settingsOpen)
 	}
 	tt.Key(0, ui.KeyEscape)
 	tt.Frame()
@@ -802,4 +802,222 @@ func TestCaretAtEndOfAPageWithNoBlocks(t *testing.T) {
 	if n := len(a.page.editor.Content.Children); n != 1 {
 		t.Errorf("%d blocks", n)
 	}
+}
+
+// The arrows go by a folder in the tree without opening it, the row
+// chosen staying where they put it; Enter opens it, as a click does.
+func TestTreeArrowsGoByFolders(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.SidebarOpen = true
+	f, err := a.st.CreateFolder("Product")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.CreatePage(store.NewPageOptions{Title: "PRD", FolderID: f.ID}); err != nil {
+		t.Fatal(err)
+	}
+	notes, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	a.reloadAll()
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 260, 600)
+	tt.Frame()
+	if err := tt.Click("Notes"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.route.ID != notes.ID {
+		t.Fatalf("route %+v", a.route)
+	}
+	folder := "folder:" + f.ID
+	tt.Key(0, ui.KeyUp)
+	for range 3 {
+		tt.Frame()
+	}
+	if a.treeState.Open.Has(folder) || a.treeRow < 0 || a.treeState.Item(a.treeRow) != folder {
+		t.Fatalf("after Up: open %v, row %d", a.treeState.Open.Has(folder), a.treeRow)
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if !a.treeState.Open.Has(folder) || !tt.HasText("PRD") {
+		t.Errorf("Enter left the folder closed: %v", tt.Texts())
+	}
+}
+
+// A page moved into the open page links to it there as a change from
+// outside the editor, not an undo step: undoing in the page leaves the
+// link to the page still inside it.
+func TestSubpageLinkIsNoUndoStep(t *testing.T) {
+	a := templatesApp(t)
+	trip, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip", Content: doc.FromBlocks([]*doc.Node{textNode("Plans")})})
+	packing, _ := a.st.CreatePage(store.NewPageOptions{Title: "Packing"})
+	a.reloadAll()
+	a.openPage(trip.ID)
+	if a.page == nil {
+		t.Fatal("Trip did not open")
+	}
+	ed := a.page.editor
+	// An edit of the user's before, for undoing to go back past.
+	ed.Edit(func(c *doc.Content) { c.Children[0].SetDelta(doc.FromMarkdown("Plans for May")) })
+	if err := a.movePage(packing.ID, trip.ID, func() error { return a.st.MovePage(packing.ID, trip.ID, "", "") }); err != nil {
+		t.Fatal(err)
+	}
+	if !a.hasSubpageLink(trip.ID, packing.ID) {
+		t.Fatal("Trip doesn't link to Packing, moved into it")
+	}
+	ed.Undo()
+	if !a.hasSubpageLink(trip.ID, packing.ID) {
+		t.Error("undoing in the page took out the link to Packing, still inside it")
+	}
+	if got := ed.Content.Children[0].Delta().Plain(); got != "Plans" {
+		t.Errorf("undo left %q", got)
+	}
+	a.savePage()
+	if !slices.ContainsFunc(a.st.Content(trip.ID).Children, func(n *doc.Node) bool { return n.Str("page_id") == packing.ID }) {
+		t.Error("the link isn't stored")
+	}
+}
+
+// A link put back where it was goes at the end of the page when that
+// place has gone meanwhile, open or not.
+func TestSubpageLinkAtAPlaceGone(t *testing.T) {
+	a := templatesApp(t)
+	trip, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip", Content: doc.FromBlocks([]*doc.Node{textNode("Plans")})})
+	packing, _ := a.st.CreatePage(store.NewPageOptions{Title: "Packing", ParentID: trip.ID})
+	tickets, _ := a.st.CreatePage(store.NewPageOptions{Title: "Tickets", ParentID: trip.ID})
+	a.reloadAll()
+	gone := func(*doc.Content) doc.Position { return doc.Position{After: "gone"} }
+	last := func() string {
+		c := a.st.Content(trip.ID)
+		if ed := a.openEditor(trip.ID); ed != nil {
+			c = ed.Content
+		}
+		return c.Children[len(c.Children)-1].Str("page_id")
+	}
+	a.linkSubpageAt(trip.ID, packing.ID, gone)
+	if got := last(); got != packing.ID {
+		t.Errorf("stored: the last block links to %q", got)
+	}
+	a.openPage(trip.ID)
+	a.linkSubpageAt(trip.ID, tickets.ID, gone)
+	if got := last(); got != tickets.ID {
+		t.Errorf("open: the last block links to %q", got)
+	}
+}
+
+// What a page may go inside: the top level or a folder for a page of the
+// user's own; a page they may edit, in the same space, but not the page
+// itself nor one under it.
+func TestCanMoveInside(t *testing.T) {
+	a := templatesApp(t)
+	f, _ := a.st.CreateFolder("Work")
+	trip, _ := a.st.CreatePage(store.NewPageOptions{Title: "Trip"})
+	packing, _ := a.st.CreatePage(store.NewPageOptions{Title: "Packing", ParentID: trip.ID})
+	notes, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	const theirs, view, space = "00000000-0000-0000-0000-0000000000bb", "00000000-0000-0000-0000-0000000000bd", "00000000-0000-0000-0000-0000000000cc"
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	for id, role := range map[string]string{theirs: "editor", view: "viewer"} {
+		if err := a.st.PutRemotePage(map[string]any{"id": id, "space_id": space, "title": role, "sort_key": "V", "created_at": at, "updated_at": at}); err != nil {
+			t.Fatal(err)
+		}
+		if err := a.st.SetMembers(id, []store.Member{{PageID: id, UserID: a.session.UserID, Role: role, Accepted: true}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.reloadAll()
+	for _, tc := range []struct {
+		id, key string
+		ok      bool
+	}{
+		{trip.ID, "", true},
+		{trip.ID, "folder:" + f.ID, true},
+		{notes.ID, "page:" + trip.ID, true},
+		{trip.ID, "page:" + trip.ID, false},
+		{trip.ID, "page:" + packing.ID, false},
+		{notes.ID, "page:" + theirs, false},
+		{theirs, "", false},
+		{theirs, "folder:" + f.ID, false},
+		{theirs, "page:" + notes.ID, false},
+		{theirs, "page:" + view, false},
+		{"gone", "", false},
+	} {
+		if got := a.canMoveInside(tc.id, tc.key); got != tc.ok {
+			t.Errorf("%s inside %q: %v, want %v", a.pageTitleOf(tc.id), tc.key, got, tc.ok)
+		}
+	}
+}
+
+// A folder made shows in the sidebar, which the menu's New Folder (⌘⇧N)
+// makes from the sidebar hidden or at the Tags tab; so does a click on
+// the folder in a page's path.
+func TestFolderShowsInTheSidebar(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.SidebarOpen, a.settings.SidebarTab = false, tabTags
+	a.dialogs.openRenameFolder(nil)
+	a.dialogs.folderName = "Work"
+	tt := ui.NewTester(a.folderDialog, 600, 400)
+	tt.Frame()
+	if err := tt.Click(locales.DialogFolderCreate()); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	if len(a.folders) != 1 {
+		t.Fatalf("folders %+v", a.folders)
+	}
+	work := a.folders[0]
+	if !a.settings.SidebarOpen || a.settings.SidebarTab != tabPages || !a.treeState.Open.Has("folder:"+work.ID) {
+		t.Errorf("sidebar open %v at tab %d, folder open %v", a.settings.SidebarOpen, a.settings.SidebarTab, a.treeState.Open.Has("folder:"+work.ID))
+	}
+
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan", FolderID: work.ID})
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.treeState.Open.Remove("folder:" + work.ID)
+	a.settings.SidebarOpen, a.settings.SidebarTab = false, tabTodos
+	crumbs := ui.NewTester(func(c *ui.Context) { a.breadcrumbs(c, *a.pageByID(p.ID)) }, 600, 60)
+	crumbs.Frame()
+	if err := crumbs.Click("Work"); err != nil {
+		t.Fatal(err)
+	}
+	if !a.settings.SidebarOpen || a.settings.SidebarTab != tabPages || !a.treeState.Open.Has("folder:"+work.ID) {
+		t.Errorf("after the path's folder: sidebar open %v at tab %d, folder open %v", a.settings.SidebarOpen, a.settings.SidebarTab, a.treeState.Open.Has("folder:"+work.ID))
+	}
+}
+
+// Settings… is in the app menu at ⌘,, as on the Mac, opening Settings and
+// closing it again; each of the menu's shortcuts is its own.
+func TestSettingsInTheAppMenu(t *testing.T) {
+	a := templatesApp(t)
+	items := a.menu(&mygo.MenuItem{Label: "Check for Updates…"})
+	var settings *mygo.MenuItem
+	for _, it := range items[0].Submenu {
+		if it.Accelerator == "CmdOrCtrl+," {
+			settings = it
+		}
+	}
+	if settings == nil || settings.Label != locales.AppMenuSettings() {
+		t.Fatalf("the app menu has %+v at ⌘,", settings)
+	}
+	settings.Click(settings, nil)
+	if !a.settingsOpen || a.settingsSection != "account" {
+		t.Errorf("Settings… opened %v at %q", a.settingsOpen, a.settingsSection)
+	}
+	settings.Click(settings, nil)
+	if a.settingsOpen {
+		t.Error("Settings… again left Settings open")
+	}
+	seen := map[string]bool{}
+	var walk func([]*mygo.MenuItem)
+	walk = func(items []*mygo.MenuItem) {
+		for _, it := range items {
+			if k := strings.ToLower(it.Accelerator); k != "" {
+				if seen[k] {
+					t.Errorf("two items at %s", it.Accelerator)
+				}
+				seen[k] = true
+			}
+			walk(it.Submenu)
+		}
+	}
+	walk(items)
 }

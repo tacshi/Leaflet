@@ -1,4 +1,3 @@
--- Four rules a second review found loose:
 -- * A file row may sit in its writer's own space and name any page, since
 --   the page_id foreign key looks past row-level security: anyone, even a
 --   viewer, or someone a page is no longer shared with, could put a file on

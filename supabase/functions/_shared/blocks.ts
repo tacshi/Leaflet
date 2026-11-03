@@ -2,6 +2,8 @@
 // markdown ⇄ delta, BlockSpec → node JSON, and BlockView for read_page.
 // Mirrors internal/agents/ and internal/doc/ on the client.
 
+import { agentURL, goLower, hostname, parseURL, pathExt, queryValue } from "./url.ts";
+
 export type Attrs = Record<string, unknown>;
 
 export interface DeltaOp {
@@ -93,7 +95,7 @@ export interface BlockView {
   rows?: string[][];
   chart?: Record<string, unknown>;
   /** The source too, so an agent can change an embed with replace_block rather than write a new one blind. */
-  embed?: { title: unknown; height: unknown; html: unknown };
+  embed?: { title: unknown; height: unknown; html?: unknown; html_length?: number };
   image?: { url: unknown; alt: unknown };
   video?: { url: unknown; title: unknown };
   link?: { url: unknown; title: unknown; description: unknown };
@@ -152,20 +154,61 @@ export function emptyContent(): PageContent {
   };
 }
 
-/**
- * Whether stored content is a page's: an object with its document, of a
- * version this code knows. What is not would read as an empty page, which
- * saving would put in place of the real one.
- */
-export function isPageContent(raw: unknown): boolean {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
-  const r = raw as { document?: unknown; meta?: { v?: unknown } };
-  if (!r.document || typeof r.document !== "object" || Array.isArray(r.document)) return false;
-  const v = r.meta && typeof r.meta === "object" ? r.meta.v : undefined;
-  return v === undefined || (typeof v === "number" && v <= 1);
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Accepts whatever is stored and returns a well-formed content object. */
+/**
+ * Whether a list of blocks reads as the client's doc.Node reads one: each
+ * an object, or null, which the client drops; its id and type text, its
+ * data an object and its children such a list, each of them null or not
+ * there too. The client cannot read a page with anything else in it.
+ */
+function blocksDecode(raw: unknown): boolean {
+  const lists = [raw];
+  while (lists.length) {
+    const list = lists.pop();
+    if (list == null) continue;
+    if (!Array.isArray(list)) return false;
+    for (const node of list) {
+      if (node === null) continue;
+      if (!isRecord(node)) return false;
+      const { id, type, data, children } = node;
+      if (id != null && typeof id !== "string") return false;
+      if (type != null && typeof type !== "string") return false;
+      if (data != null && !isRecord(data)) return false;
+      lists.push(children);
+    }
+  }
+  return true;
+}
+
+/**
+ * Whether stored content is a page's, as the client reads one: an object
+ * with its document, of a version this code knows, with blocks it can read
+ * (blocksDecode) and edit times that are numbers. What is not would read
+ * as an empty page, or part of one, which saving would put in place of the
+ * real one.
+ */
+export function isPageContent(raw: unknown): boolean {
+  if (!isRecord(raw) || !isRecord(raw.document)) return false;
+  const meta = raw.meta;
+  if (meta != null) {
+    if (!isRecord(meta)) return false;
+    if (meta.v != null && !(Number.isInteger(meta.v) && (meta.v as number) <= 1)) return false;
+    for (const times of [meta.blocks, meta.deleted]) {
+      if (times == null) continue;
+      if (!isRecord(times) || Object.values(times).some((t) => t !== null && typeof t !== "number")) return false;
+    }
+  }
+  return blocksDecode(raw.document.children);
+}
+
+/**
+ * Accepts whatever is stored and returns a well-formed content object:
+ * nulls among blocks dropped, as the client drops them, and each block
+ * with an id of its own.
+ */
 export function normalizeContent(raw: unknown): PageContent {
   const content = emptyContent();
   if (!raw || typeof raw !== "object") return content;
@@ -175,7 +218,6 @@ export function normalizeContent(raw: unknown): PageContent {
   }
   content.document.id ||= "root";
   content.document.type ||= "page";
-  content.document.children ??= [];
   if (r.meta && typeof r.meta === "object") {
     content.meta = {
       v: r.meta.v ?? 1,
@@ -183,12 +225,55 @@ export function normalizeContent(raw: unknown): PageContent {
       deleted: { ...(r.meta.deleted ?? {}) },
     };
   }
-  const seen = new Set<string>();
-  walk(content.document, (node) => {
-    if (!node.id || seen.has(node.id)) node.id = randomId();
-    seen.add(node.id);
-  });
+  // A block at a time, not by recursion: a stored page may nest deeper
+  // than the stack goes. blocks are the page's blocks in document order.
+  const blocks: NodeJSON[] = [];
+  const nodes = [content.document];
+  while (nodes.length) {
+    const node = nodes.pop()!;
+    if (node !== content.document) blocks.push(node);
+    if (typeof node.type !== "string") node.type = "";
+    if (Array.isArray(node.children)) node.children = node.children.filter(isRecord) as unknown as NodeJSON[];
+    else if (node === content.document) node.children = [];
+    else delete node.children;
+    const kids = node.children ?? [];
+    for (let i = kids.length - 1; i >= 0; i--) nodes.push(kids[i]);
+  }
+  repairIds(blocks);
   return content;
+}
+
+/**
+ * Gives stored content's blocks without an ID, or with one an earlier
+ * block or the page has, IDs every reader gives them (doc's repairIDs):
+ * its ID and how many blocks had it so far, "a-2" for the second "a" and
+ * "block-1" for the first without one. Every read of the page makes the
+ * same, here and on each device, so a merge matches the blocks up. Only
+ * what is read goes through it: a block an edit makes takes a new random
+ * ID (randomId). blocks are in document order.
+ */
+function repairIds(blocks: NodeJSON[]): void {
+  const idOf = (node: NodeJSON) => typeof node.id === "string" ? node.id : "";
+  const taken = new Set(["root", ...blocks.map(idOf)]);
+  const seen = new Set(["root"]);
+  const count = new Map<string, number>();
+  for (const node of blocks) {
+    const was = idOf(node);
+    count.set(was, (count.get(was) ?? 0) + 1);
+    if (was && !seen.has(was)) {
+      seen.add(was);
+      continue;
+    }
+    for (;;) {
+      const id = `${was || "block"}-${count.get(was)}`;
+      if (!taken.has(id) && !seen.has(id)) {
+        node.id = id;
+        break;
+      }
+      count.set(was, count.get(was)! + 1);
+    }
+    seen.add(node.id);
+  }
 }
 
 export function walk(
@@ -210,9 +295,13 @@ export function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+/**
+ * A block's runs of text, as the client reads its delta (doc.DeltaFromJSON):
+ * an op that is no object, or that inserts no text, is none of them.
+ */
 export function deltaOf(node: NodeJSON): DeltaOp[] {
   const delta = node.data?.delta;
-  return Array.isArray(delta) ? (delta as DeltaOp[]) : [];
+  return Array.isArray(delta) ? delta.filter((op) => isRecord(op) && typeof op.insert === "string") : [];
 }
 
 // ---------------------------------------------------------------------------
@@ -613,134 +702,303 @@ export function deltaToMarkdown(delta: DeltaOp[]): string {
   return out;
 }
 
-/**
- * Reads [text](url) at the start of s: the text, the url and how many
- * characters they take. As in CommonMark, the url may be in angle
- * brackets or hold balanced parentheses, and backslashes escape in both.
- */
-export function link(s: string[]): { text: string[]; href: string; n: number } | null {
-  let i = 1, depth = 0;
-  for (; i < s.length; i++) {
-    if (s[i] === "\\") i++;
-    else if (s[i] === "`") {
-      // A ] in code is the code's.
-      const span = codeSpanAt(s.slice(i));
-      if (span) i += span.n - 1;
-    } else if (s[i] === "[") depth++;
-    else if (s[i] === "]") {
-      if (depth === 0) break;
-      depth--;
-    }
-  }
-  if (i === 1 || i + 1 >= s.length || s[i + 1] !== "(") return null;
-  const text = s.slice(1, i);
-  let href = "";
-  let j = i + 2;
-  let n: number;
-  if (j < s.length && s[j] === "<") {
-    for (j++; j < s.length && s[j] !== ">"; j++) {
-      if (s[j] === "<" || s[j] === "\n") return null;
-      if (s[j] === "\\" && j + 1 < s.length && isPunct(s[j + 1])) j++;
-      href += s[j];
-    }
-    if (j + 1 >= s.length || s[j + 1] !== ")") return null;
-    n = j + 2;
-  } else {
-    depth = 0;
-    for (; j < s.length; j++) {
-      let c = s[j];
-      if (isSpace(c)) return null;
-      if (c === "\\" && j + 1 < s.length && isPunct(s[j + 1])) c = s[++j];
-      else if (c === "(") depth++;
-      else if (c === ")") {
-        if (depth === 0) break;
-        depth--;
-      }
-      href += c;
-    }
-    if (j >= s.length) return null;
-    n = j + 1;
-  }
-  return href ? { text, href, n } : null;
+// ---------------------------------------------------------------------------
+// Reading inline markdown
+// ---------------------------------------------------------------------------
+//
+// The reader looks ahead from a marker for where it ends: a code span's
+// closing backticks, a link's ] and its url's ), a * or ** that closes.
+// Looked for again from each marker, as doc.FromMarkdown looks, a text of
+// markers that close nowhere takes time in the square of its length: 60 KB
+// of "_a " takes seconds, past what an Edge Function may spend. Here each
+// is found once for each place in a span of text: what a scan finds from a
+// place it passes on to every place it went through, and the runs of
+// backticks are found once for the whole text. A span is what one reading
+// of it covers, the text or the inside of a link or a format, as it ends
+// where it does: the scans of what is inside one stop at its end.
+
+/** A code span read: its code, and how many characters it takes from its first backtick. */
+interface CodeSpan {
+  code: string;
+  n: number;
+}
+
+/** A link read, [text](url): its text is s[from + 1, close), its url in s[urlFrom, urlTo), and it takes n characters. */
+interface LinkSpan {
+  close: number;
+  urlFrom: number;
+  urlTo: number;
+  n: number;
 }
 
 /**
- * Reads a code span at the start of s, between runs of as many backticks,
- * and how many characters it takes; null when there is none. A space
- * inside each end comes off, as CommonMark has it.
+ * Formats and links nest at most this deep: past it, text is read as it
+ * is written. Each level reads its span again, and the stack runs out a
+ * few thousand deep.
  */
-export function codeSpanAt(s: string[]): { code: string; n: number } | null {
-  let open = 0;
-  while (open < s.length && s[open] === "`") open++;
-  for (let j = open; j < s.length;) {
-    if (s[j] !== "`") {
-      j++;
-      continue;
-    }
-    let end = j;
-    while (end < s.length && s[end] === "`") end++;
-    if (end - j === open) {
-      let code = s.slice(open, j).join("");
-      if (code.length >= 2 && code[0] === " " && code[code.length - 1] === " " && trimSpace(code) !== "") {
-        code = code.slice(1, -1);
+const MAX_INLINE_DEPTH = 32;
+
+/** The characters of a text read as inline markdown, and its runs of backticks. */
+export class InlineText {
+  /** For a backtick, where the run of them it is in starts and ends. */
+  private readonly runStart: Int32Array;
+  private readonly runEnd: Int32Array;
+  /** The runs of backticks of each length, by where they start, in order. */
+  private readonly runs = new Map<number, number[]>();
+
+  constructor(readonly s: string[]) {
+    this.runStart = new Int32Array(s.length);
+    this.runEnd = new Int32Array(s.length);
+    for (let i = 0; i < s.length;) {
+      if (s[i] !== "`") {
+        i++;
+        continue;
       }
-      return code ? { code, n: end } : null;
+      let end = i;
+      while (end < s.length && s[end] === "`") end++;
+      this.runStart.fill(i, i, end);
+      this.runEnd.fill(end, i, end);
+      const list = this.runs.get(end - i) ?? [];
+      list.push(i);
+      this.runs.set(end - i, list);
+      i = end;
     }
-    j = end;
   }
-  return null;
+
+  /** The whole text, as one span. */
+  span(): Span {
+    return new Span(this, 0, this.s.length);
+  }
+
+  /**
+   * The code span at j, in a span ending at hi: between runs of as many
+   * backticks, the first such run after j's (codeSpanAt). A run the span
+   * cuts at hi counts as long as it is inside it.
+   */
+  codeSpan(j: number, hi: number): CodeSpan | null {
+    const open = Math.min(this.runEnd[j], hi) - j;
+    if (open >= hi - j) return null;
+    let close = -1;
+    // The first whole run of as many after j's.
+    const list = this.runs.get(open) ?? [];
+    let a = 0, b = list.length;
+    while (a < b) {
+      const m = (a + b) >> 1;
+      if (list[m] <= j) a = m + 1;
+      else b = m;
+    }
+    if (a < list.length && list[a] + open <= hi) close = list[a];
+    else if (this.s[hi - 1] === "`" && this.runEnd[hi - 1] > hi) {
+      // Else the run the span cuts, if it is as long inside it.
+      const start = this.runStart[hi - 1];
+      if (start > j && hi - start === open) close = start;
+    }
+    if (close < 0) return null;
+    let code = this.s.slice(j + open, close).join("");
+    if (code.length >= 2 && code[0] === " " && code[code.length - 1] === " " && trimSpace(code) !== "") {
+      code = code.slice(1, -1);
+    }
+    return code ? { code, n: close + open - j } : null;
+  }
 }
 
-/** Where a code span or a link at s[j] ends, or j when none starts there. */
-function skipSpan(s: string[], j: number): number {
-  if (s[j] === "`") {
-    const span = codeSpanAt(s.slice(j));
-    if (span) return j + span.n;
-  } else if (s[j] === "[") {
-    const l = link(s.slice(j));
-    if (l) return j + l.n;
-  }
-  return j;
-}
+/** Part of an InlineText, s[lo, hi), read on its own, with what its scans found. */
+export class Span {
+  private readonly s: string[];
+  private codes = new Map<number, CodeSpan | null>();
+  private links = new Map<number, LinkSpan | null>();
+  /** For each place, where the first ] at its depth is from there (link), or -1. */
+  private closes: Int32Array | null = null;
+  /** For each place, where the first ) at its depth is from there, in a url (link), or -1. */
+  private urlCloses: Int32Array | null = null;
+  /** Of each marker, where it is first found from each place passed (findSingle, indexOfMarker). */
+  private found = new Map<string, Map<number, number>>();
 
-function findSingle(s: string[], marker: string, from: number): number {
-  for (let j = from; j < s.length; j++) {
-    if (s[j] === "\\") {
-      j++;
-      continue;
+  constructor(readonly text: InlineText, readonly lo: number, readonly hi: number) {
+    this.s = text.s;
+  }
+
+  /** The code span at j, or null. */
+  codeSpan(j: number): CodeSpan | null {
+    if (!this.codes.has(j)) this.codes.set(j, this.text.codeSpan(j, this.hi));
+    return this.codes.get(j)!;
+  }
+
+  /** Where a code span or a link at j ends, or j when none starts there. */
+  skip(j: number): number {
+    if (this.s[j] === "`") {
+      const span = this.codeSpan(j);
+      if (span) return j + span.n;
+    } else if (this.s[j] === "[") {
+      const l = this.link(j);
+      if (l) return j + l.n;
     }
-    const k = skipSpan(s, j);
-    if (k > j) {
-      j = k - 1;
-      continue;
-    }
-    if (s[j] !== marker) continue;
-    if (j + 1 < s.length && s[j + 1] === marker) {
-      j++;
-      continue;
-    }
-    if (marker === "_" && j + 1 < s.length && isWordChar(s[j + 1])) continue;
-    if (j > from && s[j - 1] === " ") continue;
     return j;
   }
-  return -1;
-}
 
-function indexOfMarker(s: string[], marker: string, from: number): number {
-  const m = [...marker];
-  for (let j = from; j + m.length <= s.length; j++) {
-    if (s[j] === "\\") {
-      j++;
-      continue;
+  /**
+   * Where the first ] is from each place at the depth of that place, a [
+   * and its ] in between, a code span's or an escaped one not counting:
+   * filled from the end, each from the places after it.
+   */
+  private closeAt(p: number): number {
+    if (!this.closes) {
+      const { s, lo, hi } = this;
+      const m = new Int32Array(hi - lo + 2).fill(-1);
+      const at = (q: number) => (q < hi ? m[q - lo] : -1);
+      for (let q = hi - 1; q >= lo; q--) {
+        const c = s[q];
+        if (c === "\\") m[q - lo] = at(q + 2);
+        else if (c === "`") {
+          const span = this.codeSpan(q);
+          m[q - lo] = at(span ? q + span.n : q + 1);
+        } else if (c === "[") {
+          const inner = at(q + 1);
+          m[q - lo] = inner < 0 ? -1 : at(inner + 1);
+        } else if (c === "]") m[q - lo] = q;
+        else m[q - lo] = at(q + 1);
+      }
+      this.closes = m;
     }
-    const k = skipSpan(s, j);
-    if (k > j) {
-      j = k - 1;
-      continue;
-    }
-    if (s.slice(j, j + m.length).join("") === marker) return j;
+    return p < this.hi ? this.closes[p - this.lo] : -1;
   }
-  return -1;
+
+  /**
+   * Where a url's ) is from each place at the depth of that place, a (
+   * and its ) in between, an escaped one not counting; -1 past a space.
+   */
+  private urlCloseAt(p: number): number {
+    if (!this.urlCloses) {
+      const { s, lo, hi } = this;
+      const m = new Int32Array(hi - lo + 2).fill(-1);
+      const at = (q: number) => (q < hi ? m[q - lo] : -1);
+      for (let q = hi - 1; q >= lo; q--) {
+        const c = s[q];
+        if (isSpace(c)) m[q - lo] = -1;
+        else if (c === "\\" && q + 1 < hi && isPunct(s[q + 1])) m[q - lo] = at(q + 2);
+        else if (c === "(") {
+          const inner = at(q + 1);
+          m[q - lo] = inner < 0 ? -1 : at(inner + 1);
+        } else if (c === ")") m[q - lo] = q;
+        else m[q - lo] = at(q + 1);
+      }
+      this.urlCloses = m;
+    }
+    return p < this.hi ? this.urlCloses[p - this.lo] : -1;
+  }
+
+  /**
+   * Reads [text](url) at j: as in CommonMark, the url may be in angle
+   * brackets or hold balanced parentheses, and backslashes escape in
+   * both (doc.link).
+   */
+  link(j: number): LinkSpan | null {
+    if (this.links.has(j)) return this.links.get(j)!;
+    const { s, hi } = this;
+    let found: LinkSpan | null = null;
+    const close = this.closeAt(j + 1);
+    if (close > j + 1 && close + 1 < hi && s[close + 1] === "(") {
+      const from = close + 2;
+      if (from < hi && s[from] === "<") {
+        let k = from + 1;
+        for (; k < hi && s[k] !== ">"; k++) {
+          if (s[k] === "<" || s[k] === "\n") {
+            k = -1;
+            break;
+          }
+          if (s[k] === "\\" && k + 1 < hi && isPunct(s[k + 1])) k++;
+        }
+        if (k > from + 1 && k + 1 < hi && s[k + 1] === ")") {
+          found = { close, urlFrom: from + 1, urlTo: k, n: k + 2 - j };
+        }
+      } else {
+        const end = this.urlCloseAt(from);
+        if (end > from) found = { close, urlFrom: from, urlTo: end, n: end + 1 - j };
+      }
+    }
+    this.links.set(j, found);
+    return found;
+  }
+
+  /** A link's url, its escapes undone. */
+  href(l: LinkSpan): string {
+    const { s, hi } = this;
+    let href = "";
+    for (let k = l.urlFrom; k < l.urlTo; k++) {
+      if (s[k] === "\\" && k + 1 < hi && isPunct(s[k + 1])) k++;
+      href += s[k];
+    }
+    return href;
+  }
+
+  /**
+   * Where scanning from p for a marker first finds one, a place at a time
+   * as next has it, or -1: each place passed is told what was found, so
+   * no place is scanned from twice.
+   */
+  private first(
+    key: string,
+    p: number,
+    end: number,
+    next: (q: number) => number,
+    takes: (q: number) => boolean,
+  ): number {
+    let memo = this.found.get(key);
+    if (!memo) this.found.set(key, memo = new Map());
+    const passed: number[] = [];
+    let result = -1;
+    while (p < end) {
+      const known = memo.get(p);
+      if (known !== undefined) {
+        result = known;
+        break;
+      }
+      if (takes(p)) {
+        result = p;
+        break;
+      }
+      passed.push(p);
+      p = next(p);
+    }
+    for (const q of passed) memo.set(q, result);
+    return result;
+  }
+
+  /**
+   * Where a single * or _ closes from `from`: one not doubled, not before
+   * a word for _, nor after a space but right at from, outside code spans
+   * and links (doc.findSingle).
+   */
+  findSingle(marker: string, from: number): number {
+    const { s, hi } = this;
+    const next = (j: number) => {
+      if (s[j] === "\\") return j + 2;
+      const k = this.skip(j);
+      if (k > j) return k;
+      return s[j] === marker && j + 1 < hi && s[j + 1] === marker ? j + 2 : j + 1;
+    };
+    const closes = (j: number) =>
+      s[j] === marker && !(j + 1 < hi && s[j + 1] === marker) &&
+      !(marker === "_" && j + 1 < hi && isWordChar(s[j + 1]));
+    if (from >= hi) return -1;
+    // Right at from, a space before it does not count.
+    if (closes(from)) return from;
+    return this.first(`1${marker}`, next(from), hi, next, (j) => closes(j) && s[j - 1] !== " ");
+  }
+
+  /** Where marker is first from `from`, outside code spans and links (doc.indexString). */
+  indexOf(marker: string, from: number): number {
+    const { s } = this;
+    const m = [...marker];
+    const next = (j: number) => {
+      if (s[j] === "\\") return j + 2;
+      const k = this.skip(j);
+      return k > j ? k : j + 1;
+    };
+    // A marker's characters are never a backslash nor what opens a span.
+    const at = (j: number) => m.every((c, k) => s[j + k] === c);
+    return this.first(marker, from, this.hi - m.length + 1, next, at);
+  }
 }
 
 /** The formats a run keeps of its own (doc.Attrs), which sharedAttrs looks at. */
@@ -764,81 +1022,94 @@ function sharedAttrs(d: DeltaOp[], attrs: Attrs): Attrs {
   return out;
 }
 
-function parseInline(s: string[], attrs: Attrs, out: DeltaOp[]): void {
+function parseInline(span: Span, attrs: Attrs, out: DeltaOp[], depth = 0): void {
+  const { s } = span.text;
+  const { lo, hi } = span;
+  if (depth > MAX_INLINE_DEPTH) {
+    pushText(out, s.slice(lo, hi).join(""), attrs);
+    return;
+  }
+  const inner = (from: number, to: number) => new Span(span.text, from, to);
   let plain = "";
   const flush = () => {
     pushText(out, plain, attrs);
     plain = "";
   };
-  for (let i = 0; i < s.length;) {
+  for (let i = lo; i < hi;) {
     const c = s[i];
-    if (c === "\\" && i + 1 < s.length && isPunct(s[i + 1])) {
+    if (c === "\\" && i + 1 < hi && isPunct(s[i + 1])) {
       plain += s[i + 1];
       i += 2;
       continue;
     }
     if (c === "`") {
-      const span = codeSpanAt(s.slice(i));
-      if (span) {
+      const code = span.codeSpan(i);
+      if (code) {
         flush();
-        pushText(out, span.code, { ...attrs, code: true });
-        i += span.n;
+        pushText(out, code.code, { ...attrs, code: true });
+        i += code.n;
         continue;
       }
     }
     if (c === "[") {
-      const l = link(s.slice(i));
+      const l = span.link(i);
       if (l) {
         flush();
-        const page = pageLink(l.href);
-        const mention = mentionLink(l.href);
+        const href = span.href(l);
+        const page = pageLink(href);
+        const mention = mentionLink(href);
+        const text = inner(i + 1, l.close);
         if (page && !page.block) {
           // A link to a page is a mention of it, in the formats around the
           // link and those all its text has, as deltaToMarkdown writes a
           // mention's own; one to a block of a page stays a link, with its
           // own text.
-          const inner: DeltaOp[] = [];
-          parseInline(l.text, attrs, inner);
-          const name = deltaToPlain(inner);
+          const kids: DeltaOp[] = [];
+          parseInline(text, attrs, kids, depth + 1);
+          const name = deltaToPlain(kids);
           pushText(out, name, {
-            ...sharedAttrs(inner, attrs),
+            ...sharedAttrs(kids, attrs),
             href: PAGE_LINK_PREFIX + page.id,
             mention: { kind: "page", id: page.id, name },
           });
         } else if (mention) {
-          const name = deltaToPlain(markdownToDelta(l.text.join(""))).replace(/^@/, "");
+          // By the name it shows, its text read on its own.
+          const kids: DeltaOp[] = [];
+          parseInline(text, {}, kids, depth + 1);
+          const name = deltaToPlain(kids).replace(/^@/, "");
           pushText(out, `@${name}`, { ...attrs, mention: { ...mention, name } });
         } else {
-          parseInline(l.text, { ...attrs, href: l.href }, out);
+          parseInline(text, { ...attrs, href }, out, depth + 1);
         }
         i += l.n;
         continue;
       }
     }
     // ***both*** is bold and italic, as agents write it.
-    if (i + 2 < s.length && (c === "*" || c === "_") && s[i + 1] === c && s[i + 2] === c) {
-      const end = indexOfMarker(s, c.repeat(3), i + 3);
+    if (i + 2 < hi && (c === "*" || c === "_") && s[i + 1] === c && s[i + 2] === c) {
+      const end = span.indexOf(c.repeat(3), i + 3);
       if (end > i + 3) {
         flush();
-        parseInline(s.slice(i + 3, end), { ...attrs, bold: true, italic: true }, out);
+        parseInline(inner(i + 3, end), { ...attrs, bold: true, italic: true }, out, depth + 1);
         i = end + 3;
         continue;
       }
     }
-    if (i + 1 < s.length && (c === "*" || c === "~" || c === "_") && s[i + 1] === c) {
-      const end = indexOfMarker(s, c.repeat(2), i + 2);
+    if (i + 1 < hi && (c === "*" || c === "~" || c === "_") && s[i + 1] === c) {
+      const end = span.indexOf(c.repeat(2), i + 2);
       if (end > i + 2) {
         flush();
-        parseInline(s.slice(i + 2, end), { ...attrs, ...(c === "~" ? { strikethrough: true } : { bold: true }) }, out);
+        const format = c === "~" ? { strikethrough: true } : { bold: true };
+        parseInline(inner(i + 2, end), { ...attrs, ...format }, out, depth + 1);
         i = end + 2;
         continue;
       }
     }
-    if ((c === "*" || c === "_") && (c !== "_" || !(i > 0 && isWordChar(s[i - 1])))) {
-      const end = findSingle(s, c, i + 1);
+    if ((c === "*" || c === "_") && (c !== "_" || !(i > lo && isWordChar(s[i - 1])))) {
+      const end = span.findSingle(c, i + 1);
       if (end > i + 1) {
         flush();
-        parseInline(s.slice(i + 1, end), { ...attrs, italic: true }, out);
+        parseInline(inner(i + 1, end), { ...attrs, italic: true }, out, depth + 1);
         i = end + 1;
         continue;
       }
@@ -857,7 +1128,7 @@ function parseInline(s: string[], attrs: Attrs, out: DeltaOp[]): void {
  */
 export function markdownToDelta(src: string, attrs: Attrs = {}): DeltaOp[] {
   const out: DeltaOp[] = [];
-  parseInline([...src], attrs, out);
+  parseInline(new InlineText([...src]).span(), attrs, out);
   return out;
 }
 
@@ -909,40 +1180,45 @@ const CALLOUT_TONES = new Set(["info", "tip", "warning", "danger"]);
 
 /** A callout's tone, or info (doc.CalloutTone). */
 export function calloutTone(tone: unknown): string {
-  const t = trimSpace(String(tone ?? "")).toLowerCase();
+  const t = goLower(trimSpace(String(tone ?? "")));
   return CALLOUT_TONES.has(t) ? t : "info";
 }
 
 /** Video files a video block plays, by extension (doc.VideoExts). */
 const VIDEO_EXTS = new Set([".mp4", ".m4v", ".mov", ".webm", ".ogv"]);
 
-/** Whether a link is to a YouTube or Vimeo video, or a video file (doc.ParseVideoURL). */
+/**
+ * Whether a link is to a YouTube or Vimeo video, or a video file
+ * (doc.ParseVideoURL): a link to one of those sites that names no video
+ * may still be to a file.
+ */
 export function isVideoURL(link: string): boolean {
-  let u: URL;
-  try {
-    u = new URL(trimSpace(link));
-  } catch {
-    return false;
-  }
-  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-  const host = u.hostname.toLowerCase().replace(/^www\./, "");
-  const parts = u.pathname.split("/").filter(Boolean);
+  const u = parseURL(trimSpace(link));
+  if (!u || (u.scheme !== "http" && u.scheme !== "https")) return false;
+  const host = goLower(hostname(u.host)).replace(/^www\./, "");
+  const parts = u.path.split("/").filter(Boolean);
   const youtubeId = /^[A-Za-z0-9_-]{11}$/;
   switch (host) {
     case "youtu.be":
-      return parts.length === 1 && youtubeId.test(parts[0]);
+      if (parts.length === 1 && youtubeId.test(parts[0])) return true;
+      break;
     case "youtube.com":
     case "m.youtube.com":
     case "music.youtube.com":
-    case "youtube-nocookie.com":
-      if (parts.length === 1 && parts[0] === "watch") return youtubeId.test(u.searchParams.get("v") ?? "");
-      return parts.length === 2 && ["embed", "shorts", "live", "v"].includes(parts[0]) && youtubeId.test(parts[1]);
+    case "youtube-nocookie.com": {
+      const id = parts.length === 1 && parts[0] === "watch"
+        ? queryValue(u.rawQuery, "v")
+        : parts.length === 2 && ["embed", "shorts", "live", "v"].includes(parts[0])
+        ? parts[1]
+        : "";
+      if (youtubeId.test(id)) return true;
+      break;
+    }
     case "vimeo.com":
     case "player.vimeo.com":
       if (parts.some((p) => /^[0-9]+$/.test(p))) return true;
   }
-  const ext = u.pathname.match(/\.[^./]*$/)?.[0].toLowerCase() ?? "";
-  return VIDEO_EXTS.has(ext);
+  return VIDEO_EXTS.has(goLower(pathExt(u.path))) && u.host !== "";
 }
 
 /**
@@ -950,7 +1226,7 @@ export function isVideoURL(link: string): boolean {
  * spaces dashes, as a fence, which ends a language at a space, can write it.
  */
 export function codeLanguage(name: unknown): string {
-  const id = fields(String(name ?? "")).join("-").toLowerCase();
+  const id = goLower(fields(String(name ?? "")).join("-"));
   return Object.hasOwn(LANGUAGE_ALIASES, id) ? LANGUAGE_ALIASES[id] : id;
 }
 
@@ -987,20 +1263,6 @@ function specNumber(value: unknown): number {
     ? Number(s)
     : Number.NaN;
   return Number.isFinite(n) ? n : 0;
-}
-
-/**
- * Whether an agent's link for a block the app loads by itself is a web link
- * with a host's name and no space of any kind (doc.agentURL).
- */
-function webURL(link: string): boolean {
-  if (isSpace(link) || !/^https?:\/\/[^/?#]+/i.test(link)) return false;
-  try {
-    new URL(link);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** A spec's own object for a block, or the spec itself when it has none, as doc.SpecToNode reads image, video and link. */
@@ -1058,6 +1320,11 @@ export interface SpecOptions {
    * options share it, so a call's blocks stay under MAX_SPEC_NODES in all.
    */
   made?: { count: number };
+  /**
+   * Specs read from Markdown (markdownSpecs): a code block's text is its
+   * fence's lines, a blank one at the end too, as the app keeps them.
+   */
+  markdown?: boolean;
 }
 
 /** How deep a spec's blocks may nest, and how many one call may make. */
@@ -1143,7 +1410,7 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
     }
     case "link_preview": {
       const url = trimSpace(str(specPart(spec, "link").url));
-      if (!webURL(url)) {
+      if (!agentURL(url)) {
         throw new SpecError("A link_preview block needs `link.url`, an http(s) link");
       }
       node = { id, type, data: { url } };
@@ -1162,8 +1429,9 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
       break;
     }
     case "code": {
-      // The code as it is, not markdown; data.delta is its plain text.
-      const code = text.replace(/\n$/, "");
+      // The code as it is, not markdown; data.delta is its plain text. An
+      // agent's code may end in a line break, which is no line of it.
+      const code = opts.markdown ? text : text.replace(/\n$/, "");
       node = {
         id,
         type,
@@ -1178,7 +1446,7 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
       const image = specPart(spec, "image");
       // The app loads it by itself.
       const url = typeof image.url === "string" ? trimSpace(image.url) : "";
-      if (!webURL(url)) throw new SpecError("image.url must be an http(s) URL");
+      if (!agentURL(url)) throw new SpecError("image.url must be an http(s) URL");
       const alt = typeof image.alt === "string" ? image.alt : "";
       node = { id, type, data: { url, align: "center", alt } };
       break;
@@ -1204,7 +1472,9 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
       if (typeof html !== "string" || !trimSpace(html)) {
         throw new SpecError("An embed block needs `embed.html`");
       }
-      if (html.length > 200_000) throw new SpecError("embed.html must be under 200 KB");
+      // In bytes, as the client counts them: UTF-16 units would let CJK
+      // through at three times the size.
+      if (new TextEncoder().encode(html).length > 200_000) throw new SpecError("embed.html must be under 200 KB");
       // As internal/doc/spec.go builds it.
       const title = typeof spec.embed?.title === "string" && spec.embed.title ? spec.embed.title : "Interactive embed";
       node = {
@@ -1265,9 +1535,12 @@ export function tableNode(id: string, rows: unknown, newId: IdFactory): NodeJSON
 /** The most cells tableSize makes room for (doc.maxTableCells). */
 const MAX_TABLE_CELLS = 1 << 16;
 
-/** A JSON number as an integer, as doc.AsInt reads one; def for anything else. */
+/**
+ * A JSON number as an integer, as doc.AsInt reads one; def for anything
+ * else, and for one beyond the integers a number holds exactly (±2^53).
+ */
 function asInt(v: unknown, def: number): number {
-  return typeof v === "number" && Number.isFinite(v) ? Math.trunc(v) : def;
+  return typeof v === "number" && Number.isFinite(v) && Math.abs(v) <= 2 ** 53 ? Math.trunc(v) : def;
 }
 
 /**
@@ -1291,13 +1564,16 @@ export function tableSize(node: NodeJSON): { rows: number; cols: number } {
   return { rows: Math.min(rows, Math.floor(MAX_TABLE_CELLS / cols)), cols };
 }
 
+/** A table's cells as Markdown; of two at one place, the first (doc.TableCells). */
 export function tableRows(node: NodeJSON): string[][] {
   const { rows: rowsLen, cols: colsLen } = tableSize(node);
   const rows: string[][] = Array.from({ length: rowsLen }, () => Array(colsLen).fill(""));
+  const taken = new Set<number>();
   for (const cell of node.children ?? []) {
     const col = asInt(cell.data?.colPosition, -1);
     const row = asInt(cell.data?.rowPosition, -1);
-    if (row >= 0 && row < rowsLen && col >= 0 && col < colsLen) {
+    if (row >= 0 && row < rowsLen && col >= 0 && col < colsLen && !taken.has(row * colsLen + col)) {
+      taken.add(row * colsLen + col);
       rows[row][col] = (cell.children ?? []).map((p) => deltaToMarkdown(deltaOf(p))).join(" ");
     }
   }
@@ -1316,9 +1592,32 @@ export interface RecordingInfo {
   transcript?: { start_ms?: number; text?: string; speaker?: string }[];
 }
 
-function clock(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+/** How much of a recording's transcript an agent reads. */
+const MAX_TRANSCRIPT = 40_000;
+
+/**
+ * A transcript as an agent reads it (agents.TranscriptText): a line of
+ * "[m:ss] text" each, a line of only punctuation joined to the one before.
+ */
+export function transcriptText(segments: RecordingInfo["transcript"]): string {
+  const lines: string[] = [];
+  for (const s of segments ?? []) {
+    const text = trimSpace(String(s?.text ?? ""));
+    if (!text) continue;
+    if (/^\p{P}+$/u.test(text) && lines.length) {
+      lines[lines.length - 1] += text;
+      continue;
+    }
+    const at = Math.trunc((s.start_ms ?? 0) / 1000);
+    let line = `[${Math.trunc(at / 60)}:${String(at % 60).padStart(2, "0")}] `;
+    const speaker = s.speaker == null ? "" : String(s.speaker);
+    if (speaker) line += `Speaker ${speaker}: `;
+    lines.push(line + text);
+  }
+  const out = [...lines.join("\n")];
+  return out.length > MAX_TRANSCRIPT
+    ? out.slice(0, MAX_TRANSCRIPT).join("") + "\n[The rest of the transcript is cut off.]"
+    : out.join("");
 }
 
 export function nodeView(
@@ -1344,7 +1643,7 @@ export function nodeView(
       break;
     case "heading":
       // Within 1 and 6, however far past them it is stored, as on the client.
-      view.level = Math.min(Math.max(asInt(data.level, 1), 1), 6);
+      view.level = clampInt(data.level, 1, 6, 1);
       break;
     case "todo_list":
       view.checked = data.checked === true;
@@ -1389,24 +1688,15 @@ export function nodeView(
       // transcript is done, and the transcript, which the client adds too.
       const rid = String(data.recording_id ?? "");
       const info = recordings.get(rid);
+      const transcript = info ? transcriptText(info.transcript) : "";
       view.recording = {
         recording_id: data.recording_id,
         title: data.title,
         // The block's own, null too, as on the client; else the server's.
         duration_ms: "duration_ms" in data ? data.duration_ms : info?.duration_ms,
-        ...(info
-          ? {
-            status: info.status,
-            transcript: (info.transcript ?? [])
-              .map((s) =>
-                `${clock(s.start_ms ?? 0)}${s.speaker ? ` ${s.speaker}:` : ""} ${s.text ?? ""}`.replace(
-                  edgeSpacesRe,
-                  "",
-                )
-              )
-              .join("\n"),
-          }
-          : {}),
+        ...(info ? { status: info.status } : {}),
+        // As the client adds it: only when there is one.
+        ...(transcript ? { transcript } : {}),
       };
       break;
     }
@@ -1435,21 +1725,34 @@ export function pageViews(
   return views;
 }
 
+/** A block's own text without formats: for a block with none, the title or source it shows (doc.blockText). */
+function blockText(node: NodeJSON): string {
+  const data = node.data ?? {};
+  const str = (key: string) => typeof data[key] === "string" ? data[key] as string : "";
+  switch (node.type) {
+    case "chart":
+    case "embed":
+    case "video":
+      return str("title");
+    case "link_preview":
+    case "file":
+      // Its title or name, else its link (doc.cardTitle).
+      return ["title", "name", "url"].map((k) => trimSpace(str(k))).find(Boolean) ?? "";
+    case "math_equation":
+      return str("formula");
+    case "diagram":
+      return str("source");
+  }
+  return deltaToPlain(deltaOf(node));
+}
+
+/** The page's text, a line per block that has some, for search (doc.Content.PlainText). */
 export function plainText(content: PageContent): string {
   const lines: string[] = [];
   walk(content.document, (node) => {
-    if (TEXT_TYPES.has(node.type)) {
-      const text = deltaToPlain(deltaOf(node));
-      if (text) lines.push(text);
-    } else if (["chart", "embed", "video", "link_preview"].includes(node.type)) {
-      const title = String(node.data?.title ?? "");
-      if (title) lines.push(title);
-    } else if (node.type === "file" && node.data?.name) {
-      lines.push(String(node.data.name));
-    } else if (node.type === "math_equation" || node.type === "diagram") {
-      const source = String(node.data?.formula ?? node.data?.source ?? "");
-      if (source) lines.push(source);
-    }
+    if (node === content.document) return;
+    const text = blockText(node);
+    if (trimSpace(text) !== "") lines.push(text);
   });
   return lines.join("\n");
 }

@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/i18n"
+
 	"leaflet/internal/store"
 )
 
@@ -91,7 +93,8 @@ func TestTokenRefreshesOnceForAll(t *testing.T) {
 // on.
 func TestRefreshThatPanicsFails(t *testing.T) {
 	c := expiredClient(t, &refreshServer{status: 400, body: `{"error":"invalid_grant"}`})
-	c.OnAuth = func(*store.User) { panic("boom") }
+	c.st = signedInStore(t)
+	c.st.Subscribe(func(store.Change) { panic("boom") })
 	if _, err := c.token(context.Background()); err == nil || !strings.Contains(err.Error(), "boom") {
 		t.Errorf("token after a panic: %v", err)
 	}
@@ -135,6 +138,8 @@ func TestSignInDuringRefreshStays(t *testing.T) {
 	}
 }
 
+// A refresh token the server refuses ends the sign-in, and the app's
+// session with it; any other failure keeps both.
 func TestRefreshSignsOutOnlyWhenRevoked(t *testing.T) {
 	cases := []struct {
 		status  int
@@ -149,17 +154,27 @@ func TestRefreshSignsOutOnlyWhenRevoked(t *testing.T) {
 	}
 	for _, cs := range cases {
 		c := expiredClient(t, &refreshServer{status: cs.status, body: cs.body})
-		var told atomic.Bool
-		c.OnAuth = func(u *store.User) {
-			if u == nil {
-				told.Store(true)
-			}
-		}
+		c.st = signedInStore(t)
 		_, err := c.token(context.Background())
-		if signedOut := errors.Is(err, ErrSignedOut); signedOut != cs.signOut || c.SignedIn() == cs.signOut || told.Load() != cs.signOut {
-			t.Errorf("%d: err %v, signed in %v, told %v; want signed out %v", cs.status, err, c.SignedIn(), told.Load(), cs.signOut)
+		told := !c.st.Session().SignedIn
+		if signedOut := errors.Is(err, ErrSignedOut); signedOut != cs.signOut || c.SignedIn() == cs.signOut || told != cs.signOut {
+			t.Errorf("%d: err %v, signed in %v, store signed out %v; want signed out %v", cs.status, err, c.SignedIn(), told, cs.signOut)
 		}
 	}
+}
+
+// signedInStore is a store whose session is signed in as u1.
+func signedInStore(t *testing.T) *store.Store {
+	t.Helper()
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	return st
 }
 
 // Storage transfers take as long as they need, past the timeout of the
@@ -510,5 +525,53 @@ func TestUpdateUserRenewsARefusedToken(t *testing.T) {
 	defer mu.Unlock()
 	if want := `PUT /auth/v1/user {"data":{"display_name":"Ana"}}`; len(sent) != 2 || sent[1] != want {
 		t.Errorf("sent %q", sent)
+	}
+}
+
+// A refusal that sending again cannot change is told apart by its code:
+// a check the change fails, or Storage's object too large, which it may
+// answer as a 400.
+func TestIsInvalidReadsTheCode(t *testing.T) {
+	answers := map[string]struct {
+		status int
+		body   string
+	}{
+		"/rest/v1/pages":           {http.StatusBadRequest, `{"code":"23514","message":"page_cycle"}`},
+		"/rest/v1/folders":         {http.StatusInternalServerError, `{"code":"P0002","message":"parent_not_found"}`},
+		"/storage/v1/object/big/x": {http.StatusBadRequest, `{"statusCode":"413","error":"Payload too large"}`},
+		"/storage/v1/object/ok/x":  {http.StatusRequestEntityTooLarge, `<html>too large</html>`},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a := answers[r.URL.Path]
+		w.WriteHeader(a.status)
+		_, _ = io.WriteString(w, a.body)
+	}))
+	defer srv.Close()
+	c := SignedInForTest(srv.URL, nil, "u")
+	ctx := context.Background()
+	_, cycle := c.Update(ctx, "pages", []string{"id=eq.p"}, map[string]any{"parent_id": "q"})
+	_, waits := c.Update(ctx, "folders", []string{"id=eq.f"}, map[string]any{"name": "x"})
+	big := c.Upload(ctx, "big", "x", strings.NewReader("data"), "text/plain")
+	huge := c.Upload(ctx, "ok", "x", strings.NewReader("data"), "text/plain")
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{{cycle, true}, {waits, false}, {big, true}, {huge, true}, {&Error{Status: http.StatusForbidden}, false}, {nil, false}} {
+		if got := IsInvalid(tc.err); got != tc.want {
+			t.Errorf("IsInvalid(%v) = %v", tc.err, got)
+		}
+	}
+}
+
+// What the server's client says to people is in the app's language, and
+// still the error it is to errors.Is.
+func TestErrorsInTheAppsLanguage(t *testing.T) {
+	i18n.SetLocaleFunc(func() string { return "ja" })
+	t.Cleanup(func() { i18n.SetLocaleFunc(nil) })
+	if got := ErrSignedOut.Error(); got != "これを使うにはサインインしてください。" {
+		t.Errorf("signed out: %q", got)
+	}
+	if !errors.Is(fmt.Errorf("sync: %w", ErrSignedOut), ErrSignedOut) || errors.Is(ErrSignedOut, ErrNotConfigured) {
+		t.Error("ErrSignedOut is not itself alone")
 	}
 }

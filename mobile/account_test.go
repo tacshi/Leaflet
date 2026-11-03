@@ -6,13 +6,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"leaflet/internal/doc"
 	"leaflet/internal/keychain"
+	"leaflet/internal/live"
 	"leaflet/internal/provision"
 	"leaflet/internal/remote"
+	"leaflet/internal/store"
 	"leaflet/internal/supabaseapi"
 )
 
@@ -186,20 +190,34 @@ func TestFailedSignInKeepsTheManagementSignIn(t *testing.T) {
 // counts the changes still to go up and leaves all as it is; once they
 // have gone, it signs out and removes the account's pages, and the
 // device's own pages, made signed out, stay through signing out again.
-func TestSignOutOfAnAccount(t *testing.T) {
-	c, _ := open(t)
+// signInRocky signs c in to a server that answers only sign-in and
+// sign-out, as rocky@example.com.
+func signInRocky(t *testing.T, c *Core) { signInRockyTo(t, c, nil) }
+
+// signInRockyTo signs c in as signInRocky does, to a server that answers
+// the rest with other, or not at all without it.
+func signInRockyTo(t *testing.T, c *Core, other http.HandlerFunc) {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/auth/v1/verify":
 			_, _ = io.WriteString(w, `{"access_token":"a","refresh_token":"r","expires_in":3600,
 				"user":{"id":"00000000-0000-0000-0000-0000000000a1","email":"rocky@example.com"}}`)
 		case "/auth/v1/logout":
+			if other != nil {
+				other(w, r)
+				return
+			}
 			w.WriteHeader(http.StatusNoContent)
 		default:
+			if other != nil {
+				other(w, r)
+				return
+			}
 			http.Error(w, "down", http.StatusServiceUnavailable)
 		}
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 	if err := c.core.Remote.Use(remote.Settings{URL: srv.URL, AnonKey: "anon"}); err != nil {
 		t.Fatal(err)
 	}
@@ -219,6 +237,25 @@ func TestSignOutOfAnAccount(t *testing.T) {
 	if acct := account0(t, c); !acct.SignedIn || acct.Email != "rocky@example.com" {
 		t.Fatalf("account %+v: want signed in", acct)
 	}
+}
+
+// uploadAll takes every change waiting off the outbox, as a pass would.
+func uploadAll(t *testing.T, c *Core) {
+	t.Helper()
+	entries, err := c.core.Store.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if err := c.core.Store.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestSignOutOfAnAccount(t *testing.T) {
+	c, _ := open(t)
+	signInRocky(t, c)
 	plan := create(t, c, `{"title":"Plan"}`)
 
 	// Not up yet: nothing goes.
@@ -231,15 +268,7 @@ func TestSignOutOfAnAccount(t *testing.T) {
 	}
 
 	// Gone up, as a pass would take them.
-	entries, err := c.core.Store.Pending()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if err := c.core.Store.Dequeue(e); err != nil {
-			t.Fatal(err)
-		}
-	}
+	uploadAll(t, c)
 	if n, err := c.SignOut(false); err != nil || n != 0 {
 		t.Fatalf("SignOut: %d, %v", n, err)
 	}
@@ -254,6 +283,91 @@ func TestSignOutOfAnAccount(t *testing.T) {
 	own := create(t, c, `{"title":"Mine"}`)
 	if n, err := c.SignOut(false); err != nil || n != 0 || !hasPage(t, c, own.ID) {
 		t.Fatalf("SignOut signed out: %d, %v; the page stayed %v", n, err, hasPage(t, c, own.ID))
+	}
+}
+
+// A recording in progress is a change not up yet, though the outbox gets
+// it only once it is saved: signing out keeps it, and its audio, until its
+// upload is queued and gone.
+func TestSignOutWaitsForARecording(t *testing.T) {
+	c, _ := open(t)
+	signInRocky(t, c)
+	page := create(t, c, `{"title":"Lecture"}`)
+	if _, err := c.OpenPage(page.ID); err != nil {
+		t.Fatal(err)
+	}
+	mic := &fakeMic{closed: make(chan struct{}, 1)}
+	c.UseMicrophone(mic)
+	raw, err := c.StartRecording(page.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var block doc.Node
+	_ = json.Unmarshal([]byte(raw), &block)
+	id := block.Str("recording_id")
+	uploadAll(t, c)
+
+	if n, err := c.SignOut(false); err != nil || n == 0 {
+		t.Fatalf("SignOut while recording: %d, %v; want it counted", n, err)
+	}
+	path, err := c.RecordingAudio(id, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil || !account0(t, c).SignedIn {
+		t.Fatalf("signed out while recording: the audio %v", err)
+	}
+
+	c.StopRecording()
+	<-mic.closed
+	for deadline := time.Now().Add(5 * time.Second); c.core.Rec.Saving() > 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the recording was never saved")
+		}
+	}
+	uploadAll(t, c)
+	if n, err := c.SignOut(false); err != nil || n != 0 {
+		t.Fatalf("SignOut once saved: %d, %v", n, err)
+	}
+}
+
+// Deleting the account closes the open pages as it removes them: a save
+// waiting for the typing to stop, which comes due while the sign-out
+// goes to the server, writes nothing of the account back to the device.
+func TestDeleteAccountLeavesNoSaveOfAnOpenPage(t *testing.T) {
+	c, _ := open(t)
+	signInRockyTo(t, c, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/functions/v1/account":
+			_, _ = io.WriteString(w, `{}`)
+		case "/auth/v1/logout":
+			// Past the page's save, which would come due meanwhile.
+			time.Sleep(live.SaveDelay + 500*time.Millisecond)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "down", http.StatusServiceUnavailable)
+		}
+	})
+	// A page whose content has not come to this device yet: its first
+	// save is over no content.
+	page := create(t, c, `{"title":"Plan"}`)
+	if _, err := c.core.Store.DB().Exec(`DELETE FROM page_contents WHERE page_id = ?`, page.ID); err != nil {
+		t.Fatal(err)
+	}
+	pg := openEditor(t, c, page.ID)
+	edit := doc.FromBlocks([]*doc.Node{paragraph("a", "Typed just now")})
+	if _, err := c.EditPage(page.ID, pg.Editor, edit.Encode(), pg.Rev); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.DeleteAccount(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(live.SaveDelay)
+	if _, err := c.core.Store.ContentRow(page.ID); !store.IsNotFound(err) {
+		t.Errorf("the deleted account's page has content again: %v", err)
+	}
+	if n := c.core.Store.PendingCount(); n != 0 {
+		t.Errorf("%d changes wait to go up for the deleted account", n)
 	}
 }
 
@@ -296,15 +410,7 @@ func TestFailedUseAccountSignsOut(t *testing.T) {
 	// The pages of another account, all gone up, which can't be removed.
 	create(t, c, `{"title":"Uploaded"}`)
 	st := c.core.Store
-	entries, err := st.Pending()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if err := st.Dequeue(e); err != nil {
-			t.Fatal(err)
-		}
-	}
+	uploadAll(t, c)
 	if err := st.SetValue("account", "00000000-0000-0000-0000-0000000000a1"); err != nil {
 		t.Fatal(err)
 	}

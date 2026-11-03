@@ -41,6 +41,8 @@ struct SidebarView: View {
     @SceneStorage("sidebar.collapsed") private var collapsed = ""
     @State private var query = ""
     @State private var hits: [SearchHit] = []
+    /// searching says the hits shown are not yet the query's.
+    @State private var searching = false
     @State private var renaming: Renaming?
     @State private var newName = ""
     /// renamingTag is the tag being renamed, from its menu in the Tags tab.
@@ -54,6 +56,21 @@ struct SidebarView: View {
             switch self {
             case .page(let p): "page-" + p.id
             case .folder(let f): "folder-" + f.id
+            }
+        }
+
+        /// title and placeholder word the alert, as the desktop's Rename
+        /// folder dialog does a folder's.
+        var title: String {
+            switch self {
+            case .page: L.commonRename
+            case .folder: L.dialogFolderRename
+            }
+        }
+        var placeholder: String {
+            switch self {
+            case .page: L.pageTitleLabel
+            case .folder: L.dialogFolderName
             }
         }
     }
@@ -144,17 +161,18 @@ struct SidebarView: View {
             Text(L.dialogTagRenameSubtitle)
         }
         .alert(
-            L.commonRename,
+            renaming?.title ?? L.commonRename,
             isPresented: Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } }),
             presenting: renaming
         ) { item in
-            TextField(L.pageTitleLabel, text: $newName)
+            TextField(item.placeholder, text: $newName)
             Button(L.commonCancel, role: .cancel) {}
             Button(L.commonSave) {
+                let name = newName
                 Task {
                     switch item {
-                    case .page(let p): await app.rename(p, to: newName)
-                    case .folder(let f): await app.renameFolder(f, to: newName)
+                    case .page(let p): await app.rename(p, to: name)
+                    case .folder(let f): await app.renameFolder(f, to: name)
                     }
                 }
             }
@@ -266,6 +284,7 @@ struct SidebarView: View {
             .foregroundStyle(.secondary)
             .accessibilityLabel(L.tagActions)
             Text("\(tag.count)").font(.caption).foregroundStyle(.secondary)
+                .accessibilityLabel(L.sidebarTagPages(count: tag.count))
             Button(action: fold) {
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
@@ -326,19 +345,18 @@ struct SidebarView: View {
     // MARK: To-dos
 
     @ViewBuilder private var todosTab: some View {
-        if app.todos.isEmpty {
+        // The core's sections, in its order, each by date, as the desktop's.
+        let groups = app.todos
+        if groups.isEmpty {
             ContentUnavailableView(
                 L.todosEmptyTitle, systemImage: "checklist", description: Text(L.todosEmptyBody))
         }
-        let now = Date.now
-        let groups = TodoSection.allCases.map { section in
-            (section: section, todos: app.todos.filter { TodoSection.of($0, now: now) == section })
-        }.filter { !$0.todos.isEmpty }
         // A group alone has no header, which would only say what the
-        // to-dos' dates do, nor a fold to hide them all.
-        if groups.count == 1 {
+        // to-dos' dates do, nor a fold to hide them all; but Overdue, which
+        // their dates say only in red.
+        if groups.count == 1, !groups[0].overdue {
             Section {
-                todoRows(groups[0].todos, in: groups[0].section)
+                todoRows(groups[0])
             }
             .withoutTopLine()
         } else {
@@ -346,19 +364,19 @@ struct SidebarView: View {
                 let open = expanded("todo:\(group.section)")
                 Section {
                     if open.wrappedValue {
-                        todoRows(group.todos, in: group.section)
+                        todoRows(group)
                     }
                 } header: {
-                    foldHeader(group.section.title, open: open)
+                    foldHeader(group.title, open: open)
                 }
                 .withoutTopLine()
             }
         }
     }
 
-    private func todoRows(_ todos: [Todo], in section: TodoSection) -> some View {
-        ForEach(todos, id: \.self) { todo in
-            TodoRowView(todo: todo, section: section) {
+    private func todoRows(_ group: TodoGroup) -> some View {
+        ForEach(group.todos, id: \.self) { todo in
+            TodoRowView(todo: todo, overdue: group.overdue) {
                 scene.open(todo.pageID, at: todo.blockID)
             }
         }
@@ -368,7 +386,9 @@ struct SidebarView: View {
 
     private var searchResults: some View {
         Section {
-            if hits.isEmpty {
+            if searching && hits.isEmpty {
+                ProgressView().frame(maxWidth: .infinity)
+            } else if hits.isEmpty {
                 ContentUnavailableView.search(text: query)
             }
             searchHits
@@ -405,16 +425,24 @@ struct SidebarView: View {
         }
     }
 
+    /// search finds the query's hits as it is typed. Each change of the
+    /// query cancels the search before: one that answers after it would
+    /// show the hits of what was typed before.
     private func search() async {
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else {
             hits = []
+            searching = false
             return
         }
+        searching = true
         // Typing on waits a moment before searching.
         try? await Task.sleep(for: .milliseconds(150))
         guard !Task.isCancelled else { return }
-        hits = (try? await app.client?.search(q)) ?? []
+        let found = (try? await app.client?.search(q)) ?? []
+        guard !Task.isCancelled else { return }
+        hits = found
+        searching = false
     }
 }
 
@@ -579,10 +607,11 @@ struct FolderRowView: View {
     }
 }
 
-/// TodoRowView is an open to-do: its text, its page, and when it is due.
+/// TodoRowView is an open to-do: its text, its page, and when it is due,
+/// in red when that has passed.
 struct TodoRowView: View {
     let todo: Todo
-    let section: TodoSection
+    let overdue: Bool
     let open: () -> Void
 
     var body: some View {
@@ -597,7 +626,7 @@ struct TodoRowView: View {
                             format: todo.timed
                                 ? .dateTime.month().day().hour().minute() : .dateTime.month().day()
                         )
-                        .foregroundStyle(section == .overdue ? Color.red : Color.secondary)
+                        .foregroundStyle(overdue ? Color.red : Color.secondary)
                     }
                 }
                 .font(.footnote)

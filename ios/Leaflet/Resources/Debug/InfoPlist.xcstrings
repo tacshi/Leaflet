@@ -25,6 +25,30 @@
         }
       }
     },
+    "NSLocalNetworkUsageDescription": {
+      "comment": "Why Leaflet asks to reach the local network, as iOS asks the first time an agent or a speech-to-text server on it is used.",
+      "extractionState": "manual",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet connects to the AI models and speech-to-text servers you set up on your local network."
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet は、ローカルネットワーク上に設定した AI モデルや音声認識サーバーに接続します。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Leaflet 会连接你在本地网络上设置的 AI 模型和语音转文字服务器。"
+          }
+        }
+      }
+    },
     "NSMicrophoneUsageDescription": {
       "comment": "Why Leaflet asks for the microphone, as iOS asks the first time a recording starts.",
       "extractionState": "manual",

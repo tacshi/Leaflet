@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -555,5 +556,31 @@ func TestConnectClaudeCodeKeepsTheOldEntry(t *testing.T) {
 	if len(lines) != 3 || !strings.HasPrefix(lines[0], "mcp remove") || !strings.HasPrefix(lines[1], "mcp add ") ||
 		lines[2] != "mcp add-json -s user leaflet "+old {
 		t.Errorf("calls:\n%s", raw)
+	}
+}
+
+// The login shell's PATH comes though its startup files leave a job in
+// the background holding its output, and a shell that never answers is
+// given up on.
+func TestShellPathDoesNotWaitForever(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake shells are shell scripts")
+	}
+	dir := t.TempDir()
+	shell := func(name, script string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o700); err != nil { // #nosec G306 -- the test's own fake shell, which must run.
+			t.Fatal(err)
+		}
+		return path
+	}
+	start := time.Now()
+	p, ok := shellPath(shell("busy", "sleep 30 &\nprintf '\\nhello\\n__LEAFLET_PATH__/opt/tools/bin\\n'\n"), 5*time.Second)
+	if !ok || p != "/opt/tools/bin" || time.Since(start) > 4*time.Second {
+		t.Errorf("PATH %q, %v, after %v", p, ok, time.Since(start))
+	}
+	start = time.Now()
+	if p, ok := shellPath(shell("stuck", "exec sleep 30\n"), 200*time.Millisecond); ok || time.Since(start) > 4*time.Second {
+		t.Errorf("PATH %q, %v, after %v", p, ok, time.Since(start))
 	}
 }

@@ -109,6 +109,7 @@ struct FormatCommands: View {
             Button(LI.moveBlockDown) { editor?.moveBlock(by: 1) }
                 .keyboardShortcut(.downArrow, modifiers: [.option, .shift])
         }
-        .disabled(editor == nil)
+        // A page the user may only view takes no format.
+        .disabled(editor?.textView.isEditable != true)
     }
 }

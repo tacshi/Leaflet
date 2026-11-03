@@ -316,22 +316,3 @@ func keptChildren(o Op) bool {
 func canHoldChildren(n, cur *Node) bool {
 	return cur.Type != "table" && (NestableTypes[n.Type] || n.Type == cur.Type)
 }
-
-// Touched returns the IDs of the blocks ops change.
-func Touched(ops []Op) []string {
-	seen := map[string]bool{}
-	var out []string
-	add := func(id string) {
-		if id != "" && !seen[id] {
-			seen[id] = true
-			out = append(out, id)
-		}
-	}
-	for _, o := range ops {
-		for _, n := range o.Nodes {
-			add(n.ID)
-		}
-		add(o.ID)
-	}
-	return out
-}

@@ -239,3 +239,33 @@ func TestAskFailsToStart(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// An answer in words is the blocks of its Markdown, for the editor to put
+// after the block it was asked about, as the desktop's Insert puts it; a
+// run that edited the page gives none.
+func TestReplyBlocksAreTheAnswersMarkdown(t *testing.T) {
+	c, _ := open(t)
+	row := create(t, c, `{"title":"Plan"}`)
+	c.q.do(func() {
+		s := c.core.Hub.Session(row.ID)
+		s.Runs = append(s.Runs,
+			&agents.Run{ID: "r1", Status: "done", Reply: "It means **twice**.\n\n- once\n- again"},
+			&agents.Run{ID: "r2", Status: "done", Reply: "Done.", Ops: []doc.Op{doc.InsertOp(doc.Position{At: "end"}, paragraph("x1", "one"))}})
+	})
+	if got, err := c.ReplyBlocks(row.ID, "r2"); err != nil || got != "[]" {
+		t.Errorf("a run's edits give %s, %v", got, err)
+	}
+	raw, err := c.ReplyBlocks(row.ID, "r1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var nodes []*doc.Node
+	if err := json.Unmarshal([]byte(raw), &nodes); err != nil {
+		t.Fatal(err)
+	}
+	got := &doc.Content{Children: nodes}
+	if len(nodes) != 3 || nodes[0].Delta().Plain() != "It means twice." || nodes[1].Type != "bulleted_list" ||
+		nodes[2].Delta().Plain() != "again" {
+		t.Errorf("blocks %s", texts(got))
+	}
+}

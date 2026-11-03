@@ -64,21 +64,16 @@ type supabaseState struct {
 	link string
 }
 
-var (
-	supa     supabaseState
-	supaRuns int
-)
-
 // nextRun starts a sign-in's run, on the main thread.
-func nextRun() int {
-	supaRuns++
-	return supaRuns
+func (a *App) nextRun() int {
+	a.supaRuns++
+	return a.supaRuns
 }
 
 // supaStep runs fn on the main thread while run is the sign-in under way.
 func (a *App) supaStep(run int, fn func()) {
 	a.update(func() {
-		if supa.run == run {
+		if a.supa.run == run {
 			fn()
 		}
 	})
@@ -89,20 +84,20 @@ func (a *App) supaStep(run int, fn func()) {
 // chooses on the page.
 func (a *App) signInWithSupabase() {
 	ctx, cancel := context.WithCancel(context.Background())
-	run := nextRun()
-	supa = supabaseState{run: run, step: stepBrowser, cancel: cancel}
-	signIn.err, signIn.info = "", ""
+	run := a.nextRun()
+	a.supa = supabaseState{run: run, step: stepBrowser, cancel: cancel}
+	a.signIn.err, a.signIn.info = "", ""
 	go func() {
 		wait, stop := context.WithTimeout(ctx, 5*time.Minute)
 		api, err := a.core().SignInWithSupabase(wait, func(u string) {
-			a.supaStep(run, func() { supa.link = u })
+			a.supaStep(run, func() { a.supa.link = u })
 		})
 		stop()
 		if err != nil {
 			a.supabaseFailed(run, err)
 			return
 		}
-		a.supaStep(run, func() { supa.api, supa.step = api, stepFinding })
+		a.supaStep(run, func() { a.supa.api, a.supa.step = api, stepFinding })
 		found, err := provision.Find(ctx, api)
 		if err != nil {
 			a.supabaseFailed(run, err)
@@ -115,9 +110,9 @@ func (a *App) signInWithSupabase() {
 			return
 		}
 		a.supaStep(run, func() {
-			supa.found, supa.step = found, stepChoose
+			a.supa.found, a.supa.step = found, stepChoose
 			if len(found.Orgs) > 0 {
-				supa.org = found.Orgs[0].Slug
+				a.supa.org = found.Orgs[0].Slug
 			}
 		})
 	}()
@@ -128,24 +123,24 @@ func (a *App) signInWithSupabase() {
 func (a *App) chooseProject(p *supabaseapi.Project) {
 	// One setup at a time: a second click before the projects' list goes
 	// does nothing.
-	if supa.step != stepChoose {
+	if a.supa.step != stepChoose {
 		return
 	}
-	if supa.cancel != nil {
-		supa.cancel()
+	if a.supa.cancel != nil {
+		a.supa.cancel()
 	}
-	api, org := supa.api, supa.org
+	api, org := a.supa.api, a.supa.org
 	ctx, cancel := context.WithCancel(context.Background())
-	run := nextRun()
-	supa.run, supa.cancel = run, cancel
-	signIn.err = ""
+	run := a.nextRun()
+	a.supa.run, a.supa.cancel = run, cancel
+	a.signIn.err = ""
 	if p != nil {
 		// The list goes at once; the setup says its steps as they come.
-		supa.step = stepSetup
+		a.supa.step = stepSetup
 		go a.connectProject(ctx, run, api, *p)
 		return
 	}
-	supa.step = stepCreating
+	a.supa.step = stepCreating
 	go func() {
 		created, err := provision.Create(ctx, api, org)
 		if err != nil {
@@ -161,9 +156,9 @@ func (a *App) chooseProject(p *supabaseapi.Project) {
 func (a *App) connectProject(ctx context.Context, run int, api *supabaseapi.Client, p supabaseapi.Project) {
 	pending, err := a.core().ConnectProject(ctx, api, p, func(step string, done, all int) {
 		a.supaStep(run, func() {
-			supa.step = step
+			a.supa.step = step
 			if step == stepSetup {
-				supa.done, supa.all = done, all
+				a.supa.done, a.supa.all = done, all
 			}
 		})
 	})
@@ -175,17 +170,17 @@ func (a *App) connectProject(ctx context.Context, run int, api *supabaseapi.Clie
 	// under way: one cancelled, or started again since, leaves them as
 	// they are.
 	a.update(func() {
-		if supa.run != run {
+		if a.supa.run != run {
 			go a.backend.Discard(pending)
 			return
 		}
 		user, err := a.core().AdoptProject(pending, api)
 		if err != nil {
-			supa = supabaseState{}
-			signIn.err = err.Error()
+			a.supa = supabaseState{}
+			a.signIn.err = err.Error()
 			return
 		}
-		supa = supabaseState{}
+		a.supa = supabaseState{}
 		a.signedIn(user)
 	})
 }
@@ -194,22 +189,22 @@ func (a *App) connectProject(ctx context.Context, run int, api *supabaseapi.Clie
 // cancelled.
 func (a *App) supabaseFailed(run int, err error) {
 	a.supaStep(run, func() {
-		step := supa.step
-		supa = supabaseState{}
+		step := a.supa.step
+		a.supa = supabaseState{}
 		if step == stepCreating || step == stepStarting || step == stepSetup {
-			signIn.err = locales.SigninSetupFailed(err.Error())
+			a.signIn.err = locales.SigninSetupFailed(err.Error())
 			return
 		}
-		signIn.err = err.Error()
+		a.signIn.err = err.Error()
 	})
 }
 
 // cancelSupabase stops the sign-in under way.
 func (a *App) cancelSupabase() {
-	if supa.cancel != nil {
-		supa.cancel()
+	if a.supa.cancel != nil {
+		a.supa.cancel()
 	}
-	supa = supabaseState{}
+	a.supa = supabaseState{}
 }
 
 // dashboardURL is the project's page in the Supabase dashboard.

@@ -38,6 +38,25 @@ struct EditorTests {
         #expect(sent?.document.children == content.document.children)
     }
 
+    /// A block whose text holds a break TextKit ends a paragraph at, as
+    /// from another app or device, stays one block: shown as it is, it
+    /// split the block in two, one more each time the page was saved.
+    @Test func paragraphBreaksInTextStayInTheBlock() {
+        for brk in ["\r", "\r\n", "\u{2029}", "\u{85}"] {
+            let c = editor([
+                block("a", "paragraph", "one\(brk)two"), block("b", "paragraph", "after"),
+            ])
+            var sent: DocContent?
+            c.onEdit = { sent = $0 }
+            c.send()
+            let blocks = sent?.document.children ?? []
+            #expect(blocks.map(\.id) == ["a", "b"], "\(brk.unicodeScalars.map(\.value))")
+            #expect(
+                blocks.first?.data?["delta"]?.array?.first?["insert"]?.string == "one\ntwo",
+                "\(brk.unicodeScalars.map(\.value))")
+        }
+    }
+
     /// A closed toggle folds what is in it out of the page's layout, and
     /// opening it brings it back.
     @Test func aClosedToggleFoldsAwayWhatIsInIt() {
@@ -230,6 +249,33 @@ struct EditorTests {
         let k = editor([block("a", "paragraph", "")])
         k.type("한/")
         #expect(k.menu == nil)
+    }
+
+    /// The menus open for full-width "／" and "＠", as Chinese and Japanese
+    /// input methods type them, and the / menu for "、" at a block's start
+    /// or after a space, as on the desktop; "－－－" makes a divider.
+    @Test func fullWidthMenusAndDividersFollowTheDesktop() {
+        for (typed, trigger) in [("／", "/"), ("＠", "@"), ("、", "/")] {
+            let c = editor([block("a", "paragraph", "")])
+            offer(c, [("h1", "Heading 1")])
+            c.type(typed)
+            #expect(c.menu?.trigger == Character(trigger), "\(typed)")
+            c.type("\n")
+            #expect(c.menu == nil, "\(typed)")
+        }
+        // "、" is a comma in Chinese text.
+        let comma = editor([block("a", "paragraph", "")])
+        offer(comma, [("h1", "Heading 1")])
+        comma.type("字、")
+        #expect(comma.menu == nil)
+        let slash = editor([block("a", "paragraph", "")])
+        offer(slash, [("h1", "Heading 1")])
+        slash.type("字／")
+        #expect(slash.menu?.trigger == "/")
+
+        let d = editor([block("a", "paragraph", "")])
+        d.type("－－－")
+        #expect(blocks(d).map(\.type) == ["divider", "paragraph"])
     }
 
     @Test func aBulletTurnsIntoAToDo() {
@@ -440,17 +486,37 @@ struct EditorTests {
         #expect(color("x") == nil)
     }
 
+    /// A version reads as the page's blocks, as the core reads Markdown:
+    /// a heading, a to-do, a numbered item and a table.
     @Test func versionsReadAsBlocks() {
         let md = "## Plan\n\n- [ ] Pack\n1. Go\n\n| | A |\n| --- | --- |\n| x | 1 |"
-        let lines = MarkdownPreview.lines(md)
-        #expect(lines.count == 4)
-        if case .heading(2, "Plan") = lines[0] {} else { Issue.record("heading \(lines[0])") }
-        if case .item("☐", "Pack", 0) = lines[1] {} else { Issue.record("to-do \(lines[1])") }
-        if case .table(let rows) = lines[3] {
-            #expect(rows == [["", "A"], ["x", "1"]])
-        } else {
-            Issue.record("table \(lines[3])")
-        }
+        let rows = MarkdownPreview.rows(MarkdownPreview.blocks(md))
+        #expect(rows.map(\.node.type) == ["heading", "todo_list", "numbered_list", "table"])
+        #expect(rows[0].node.data?["level"]?.int == 2)
+        #expect(MarkdownPreview.marker(rows[1]) == "☐")
+        #expect(MarkdownPreview.marker(rows[2]) == "1.")
+        #expect(TableGrid.rows(rows[3].node) == [["", "A"], ["x", "1"]])
+    }
+
+    /// An agent's answer reads as blocks too: a fence's lines are code,
+    /// though one starts with "#", a fence still open as it streams in
+    /// runs to the end, and inline formats and links stay.
+    @Test func answersReadAsBlocks() {
+        let md =
+            "Run **this**:\n\n```sh\n# not a heading\nls\n```\n\n1. [Go](https://go.dev)\n2. On\n\n```go\nfunc f() {"
+        let rows = MarkdownPreview.rows(MarkdownPreview.blocks(md))
+        #expect(
+            rows.map(\.node.type) == [
+                "paragraph", "code", "numbered_list", "numbered_list", "code",
+            ])
+        #expect(MarkdownPreview.source(rows[1].node) == "# not a heading\nls")
+        #expect(MarkdownPreview.marker(rows[3]) == "2.")
+        #expect(MarkdownPreview.source(rows[4].node) == "func f() {")
+        let text = MarkdownPreview.text(rows[0].node)
+        let bold = text.runs.first { String(text[$0.range].characters) == "this" }
+        #expect(bold?.inlinePresentationIntent == .stronglyEmphasized)
+        let link = MarkdownPreview.text(rows[2].node).runs.first { $0.link != nil }?.link
+        #expect(link == URL(string: "https://go.dev"))
     }
 
     @Test func tagsTakeTheDesktopsColors() {
@@ -597,15 +663,17 @@ struct EditorTests {
         #expect(sent?.blocks.first?.children?.map(\.text) == ["Two!"])
     }
 
-    /// Lines pasted are a block each, which keep their IDs as the page is
-    /// sent again; in code they are the block's lines.
+    /// Lines pasted are a block each, read as Markdown as on the desktop:
+    /// the first joins the line it goes in, plain lines are paragraphs and
+    /// "- " ones list items. They keep their IDs as the page is sent again;
+    /// in code they are the block's lines.
     @Test func pastedLinesAreABlockEach() {
         let c = editor([block("a", "bulleted_list", "x")])
         c.textView.selectedRange = NSRange(location: 1, length: 0)
-        c.paste("a\nb\nc\nd")
+        c.paste("a\nb\nc\n- d")
         let first = blocks(c)
         #expect(first.map(\.text) == ["xa", "b", "c", "d"])
-        #expect(first.map(\.type) == Array(repeating: "bulleted_list", count: 4))
+        #expect(first.map(\.type) == ["bulleted_list", "paragraph", "paragraph", "bulleted_list"])
         #expect(Set(first.map(\.id)).count == 4)
         #expect(blocks(c).map(\.id) == first.map(\.id))
 
@@ -879,6 +947,307 @@ struct EditorTests {
         #expect(!texts.contains { $0.contains("Groceries") && $0.contains("@") })
     }
 
+    /// Undo, again and again, goes back through a mention taken whole, as
+    /// through the typing around it, to the page as it was.
+    @Test func undoAllAfterAMentionTakenWhole() async throws {
+        let c = editor([block("a", "paragraph", "Hi")])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        let undo = try #require(c.textView.undoManager)
+        offer(c, [("page:p1", "Groceries")])
+        c.textView.selectedRange = NSRange(location: 2, length: 0)
+        try await slowly(c, " @gro\n")
+        #expect(c.textView.text == "Hi Groceries ")
+        // Typing inside the mention goes after it; Backspace in it takes
+        // all of it.
+        c.textView.selectedRange = NSRange(location: 6, length: 0)
+        try await slowly(c, "x")
+        #expect(c.textView.text == "Hi Groceriesx ")
+        c.textView.selectedRange = NSRange(location: 6, length: 0)
+        c.backspace()
+        #expect(c.textView.text == "Hi x ")
+        try await slowly(c, "yz")
+        undoAll(undo)
+        #expect(c.textView.text == "Hi")
+    }
+
+    /// Undo, again and again, goes back through lines pasted as blocks, a
+    /// fence's code block, and the lines and indents typed in it.
+    @Test func undoAllAfterPastedLinesAndCode() async throws {
+        let c = editor([block("a", "paragraph", "Hi")])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        let undo = try #require(c.textView.undoManager)
+        c.textView.selectedRange = NSRange(location: 2, length: 0)
+        try await slowly(c, "\n")
+        c.paste("- one\n- two")
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(blocks(c).map(\.type) == ["paragraph", "bulleted_list", "bulleted_list"])
+        try await slowly(c, "\n\n```go\n")
+        #expect(blocks(c).contains { $0.type == "code" })
+        try await slowly(c, "if x {\n")
+        c.indent(by: 1)
+        try await slowly(c, "y\n\n\nend")
+        undoAll(undo)
+        #expect(c.textView.text == "Hi")
+    }
+
+    /// Enter, lines pasted, Enter again: undo, again and again, takes back
+    /// each, the line breaks too, to the page as it was. Undoing a list
+    /// item's line break went through Backspace's rule, which refused it,
+    /// and the steps before it, undone where the text no longer was,
+    /// crashed the app.
+    @Test func undoAllAfterEnterAndAPaste() async throws {
+        let c = editor([block("a", "paragraph", "Hi")])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        let undo = try #require(c.textView.undoManager)
+        c.textView.selectedRange = NSRange(location: 2, length: 0)
+        try await slowly(c, "\n")
+        c.paste("- one\n- two")
+        try await Task.sleep(for: .milliseconds(20))
+        try await slowly(c, "\n")
+        var texts: [String] = []
+        for _ in 0..<100 where undo.canUndo {
+            undo.undo()
+            texts.append(c.textView.text)
+        }
+        #expect(texts.last == "Hi")
+        #expect(texts.contains("Hi\n"))
+        #expect(blocks(c).map(\.id) == ["a"])
+    }
+
+    /// Undo takes back a list item's line break, as a paragraph's, though
+    /// Backspace at a list item's start makes it a paragraph instead.
+    @Test func undoTakesBackAListItemsLineBreak() async throws {
+        for type in ["bulleted_list", "todo_list", "paragraph"] {
+            let c = editor([block("a", type, "x")])
+            let (_, done) = try show(c)
+            try await settle(c)
+            let undo = try #require(c.textView.undoManager)
+            c.textView.selectedRange = NSRange(location: 1, length: 0)
+            try await slowly(c, "\ny")
+            undoAll(undo)
+            #expect(c.textView.text == "x", "\(type)")
+            #expect(blocks(c).map(\.id) == ["a"], "\(type)")
+            done()
+        }
+    }
+
+    /// Undo, again and again, goes back through a format typed in full.
+    @Test func undoAllAfterAnInlineFormat() async throws {
+        let c = editor([block("a", "paragraph", "")])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        let undo = try #require(c.textView.undoManager)
+        try await slowly(c, "a **b** c")
+        undoAll(undo)
+        #expect(c.textView.text == "")
+    }
+
+    /// Blocks copied paste back as the blocks they were, as on the desktop,
+    /// with IDs of their own: the clipboard has their Markdown, for other
+    /// apps; text within a block pastes back with its formats.
+    @Test func copiedBlocksPasteBack() async throws {
+        var bold = block("c", "paragraph", "")
+        bold.data?["delta"] = .array([
+            .object(["insert": .string("Bold"), "attributes": .object(["bold": .bool(true)])])
+        ])
+        let c = editor([
+            block("a", "bulleted_list", "abcd"), block("b", "bulleted_list", "efgh"), bold,
+            block("p", "paragraph", ""),
+        ])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        c.copyText = { _ in "- abcd\n- efgh" }
+        c.textView.selectedRange = NSRange(location: 0, length: 9)
+        c.textView.copy(nil)
+        for _ in 0..<50 where UIPasteboard.general.string != "- abcd\n- efgh" {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(UIPasteboard.general.string == "- abcd\n- efgh")
+        c.textView.selectedRange = NSRange(location: 15, length: 0)
+        c.paste(UIPasteboard.general.string ?? "")
+        var b = blocks(c)
+        #expect(
+            b.map(\.type) == [
+                "bulleted_list", "bulleted_list", "paragraph", "bulleted_list", "bulleted_list",
+            ])
+        #expect(b.map(\.text) == ["abcd", "efgh", "Bold", "abcd", "efgh"])
+        #expect(Set(b.map(\.id)).count == 5)
+
+        // "Bold", within its block, pastes bold.
+        c.textView.selectedRange = NSRange(location: 10, length: 4)
+        c.textView.copy(nil)
+        try await Task.sleep(for: .milliseconds(20))
+        c.textView.selectedRange = NSRange(location: 5, length: 0)
+        c.paste(UIPasteboard.general.string ?? "")
+        b = blocks(c)
+        #expect(b[1].text == "Boldefgh")
+        let run = b[1].data?["delta"]?.array?.first?.object
+        #expect(run?["attributes"]?.object?["bold"] == .bool(true))
+    }
+
+    /// An agent's answer or a transcript put in the page goes after the
+    /// block and those in it, at its depth, and is one step to undo, the
+    /// typing before it a step still.
+    @Test func blocksPutInAreOneStepToUndo() async throws {
+        let c = editor([
+            block("a", "bulleted_list", "One", children: [block("n", "paragraph", "Nested")]),
+            block("b", "paragraph", "Two"),
+        ])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        let undo = try #require(c.textView.undoManager)
+        c.textView.selectedRange = NSRange(location: 14, length: 0)
+        try await slowly(c, "!")
+        c.insertBlocks(
+            [block("x", "paragraph", "Answer"), block("y", "bulleted_list", "Point")], after: "a")
+        var b = blocks(c)
+        #expect(b.map(\.id) == ["a", "n", "x", "y", "b"])
+        #expect(
+            b.map(\.type) == [
+                "bulleted_list", "paragraph", "paragraph", "bulleted_list", "paragraph",
+            ])
+        #expect(b.map(\.text) == ["One", "Nested", "Answer", "Point", "Two!"])
+        #expect(c.textView.selectedRange == NSRange(location: 28, length: 0))
+        // After the nested block, they are in the item too: a step of its
+        // own, as a tap later is.
+        try await Task.sleep(for: .milliseconds(20))
+        c.insertBlocks([block("z", "paragraph", "Inside")], after: "n")
+        try await Task.sleep(for: .milliseconds(20))
+        var sent: DocContent?
+        c.onEdit = { sent = $0 }
+        c.send()
+        #expect(sent?.blocks.first?.children?.map(\.id) == ["n", "z"])
+        undo.undo()
+        b = blocks(c)
+        #expect(b.map(\.id) == ["a", "n", "x", "y", "b"])
+        undo.undo()
+        #expect(c.textView.text == "One\nNested\nTwo!")
+        // The typing before them is a step still, and they come back.
+        #expect(undo.canUndo)
+        undo.redo()
+        b = blocks(c)
+        #expect(b.map(\.text) == ["One", "Nested", "Answer", "Point", "Two!"])
+        #expect(
+            b.map(\.type) == [
+                "bulleted_list", "paragraph", "paragraph", "bulleted_list", "paragraph",
+            ])
+    }
+
+    /// undoesAndRedoes types, then has command change the page, and checks
+    /// that the change is a step of its own that keeps those before it:
+    /// undo, again and again, goes back to the page as it was, its text and
+    /// its blocks' IDs, and redo, again and again, to the page after it.
+    private func undoesAndRedoes(
+        _ c: EditorController, typing: String, _ command: @MainActor () -> Void
+    ) async throws {
+        let undo = try #require(c.textView.undoManager)
+        let start = (c.textView.text ?? "", blocks(c).map(\.id))
+        try await slowly(c, typing)
+        command()
+        try await Task.sleep(for: .milliseconds(20))
+        let after = (c.textView.text ?? "", blocks(c).map(\.id))
+        undoAll(undo)
+        #expect(c.textView.text == start.0)
+        #expect(blocks(c).map(\.id) == start.1)
+        for _ in 0..<100 where undo.canRedo { undo.redo() }
+        #expect(c.textView.text == after.0)
+        #expect(blocks(c).map(\.id) == after.1)
+    }
+
+    /// A block put in from a sheet or an upload is a step to undo after the
+    /// typing before it, which stays.
+    @Test func aBlockPutInKeepsTheStepsBefore() async throws {
+        let c = editor([block("a", "paragraph", "Hi")])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        c.textView.selectedRange = NSRange(location: 2, length: 0)
+        let image = DocNode(
+            id: "i", type: "image", data: ["url": .string("https://example.com/a.png")],
+            children: nil)
+        try await undoesAndRedoes(c, typing: " there") { c.insertBlock(image) }
+        #expect(blocks(c).map(\.type) == ["paragraph", "image", "paragraph"])
+    }
+
+    /// A block's sheet saved, as a table's cells, is a step to undo after
+    /// the typing before it.
+    @Test func aSheetSavedKeepsTheStepsBefore() async throws {
+        func table(_ rows: [[String]]) -> DocNode {
+            var error: NSError?
+            let raw = MobileSetTableRows(
+                #"{"id":"t","type":"table","data":{"colsLen":1,"rowsLen":1}}"#,
+                String(decoding: (try? JSONEncoder().encode(rows)) ?? Data(), as: UTF8.self),
+                &error)
+            return (try? JSONDecoder().decode(DocNode.self, from: Data(raw.utf8)))
+                ?? DocNode(id: "t", type: "table", data: nil, children: nil)
+        }
+        let c = editor([block("a", "paragraph", "Plan"), table([["A"]])])
+        let (_, done) = try show(c)
+        try await settle(c)
+        defer { done() }
+        c.textView.selectedRange = NSRange(location: 4, length: 0)
+        try await undoesAndRedoes(c, typing: "s") { c.replaceBlock(table([["A", "B"]])) }
+        let t = blocks(c).first { $0.id == "t" }
+        #expect(t.map(TableGrid.rows) == [["A", "B"]])
+    }
+
+    /// A "/" or "@" item picked with a tap, not Return, is a step to undo
+    /// after the typing before it.
+    @Test func aMenuItemTappedKeepsTheStepsBefore() async throws {
+        for (typing, key, label) in [
+            ("x /h", "h1", "Heading 1"), ("x @gro", "page:p1", "Groceries"),
+        ] {
+            let c = editor([block("a", "paragraph", "")])
+            let (_, done) = try show(c)
+            try await settle(c)
+            offer(c, [(key, label)])
+            try await undoesAndRedoes(c, typing: typing) {
+                guard let menu = c.menu, let item = menu.current else {
+                    Issue.record("no menu for \(typing)")
+                    return
+                }
+                menu.onPick?(item)
+            }
+            done()
+        }
+    }
+
+    /// A block moved, or nested, is a step to undo after the typing before
+    /// it.
+    @Test func aBlockMovedOrNestedKeepsTheStepsBefore() async throws {
+        for command in ["move", "nest"] {
+            let c = editor([
+                block("a", "bulleted_list", "One"), block("b", "bulleted_list", "Two"),
+            ])
+            let (_, done) = try show(c)
+            try await settle(c)
+            c.textView.selectedRange = NSRange(location: 7, length: 0)
+            try await undoesAndRedoes(c, typing: "!") {
+                if command == "move" { c.moveBlock(by: -1) } else { c.indent(by: 1) }
+            }
+            #expect(c.textView.text == (command == "move" ? "Two!\nOne" : "One\nTwo!"))
+            done()
+        }
+    }
+
+    /// slowly types text a key at a time, as a person does, the editor's
+    /// changes after each made before the next.
+    private func slowly(_ c: EditorController, _ text: String) async throws {
+        for ch in text {
+            c.type(String(ch))
+            try await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
     /// A to-do checked between typing is a step of its own.
     @Test func aToDoCheckedBetweenTypingIsAStepOfItsOwn() async throws {
         let c = editor([block("t", "todo_list", "", data: ["checked": .bool(false)])])
@@ -1080,6 +1449,306 @@ struct EditorTests {
         c.send()
         #expect(sent?.blocks.map(\.id) == ["q", "in", "after"])
         #expect(sent?.blocks.first?.children == nil)
+    }
+
+    /// content is a page of blocks, as the core sends it.
+    private func content(_ blocks: [DocNode]) -> DocContent {
+        DocContent(
+            document: DocNode(id: "root", type: "page", data: nil, children: blocks), meta: nil)
+    }
+
+    /// The keyboard bar's Insert offers what "/" does and puts it in as "/"
+    /// does: after the block with text the caret is in, which it leaves as
+    /// it was.
+    @Test func insertPutsABlockAfterTheText() async {
+        let c = editor([block("a", "paragraph", "Plan")])
+        offer(c, [("h1", "Heading 1"), ("table", "Table")])
+        c.textView.selectedRange = NSRange(location: 4, length: 0)
+        let offered = await withCheckedContinuation { done in
+            c.insertMenu { done.resume(returning: $0) }
+        }
+        let titles = offered.flatMap { ($0 as? UIMenu)?.children ?? [$0] }.compactMap {
+            ($0 as? UIAction)?.title
+        }
+        #expect(titles == ["Heading 1", "Table"])
+        c.insertItem(MenuItem(key: "h1", label: "Heading 1", hint: "", icon: "", group: ""))
+        let b = blocks(c)
+        #expect(b.map(\.type) == ["paragraph", "heading"])
+        #expect(b.map(\.text) == ["Plan", ""])
+        #expect(b.first?.id == "a")
+    }
+
+    /// A change from outside that takes away the block the caret is in
+    /// leaves the caret at the end of the block before it.
+    @Test func theCaretOfABlockTakenAwayGoesToTheOneBefore() {
+        let c = editor([
+            block("a", "paragraph", "One"), block("b", "paragraph", "Two"),
+            block("c", "paragraph", "Three"),
+        ])
+        c.textView.selectedRange = NSRange(location: 6, length: 0)
+        c.update(
+            content([block("a", "paragraph", "One more"), block("c", "paragraph", "Three")]),
+            tinted: [])
+        #expect(c.textView.text == "One more\nThree")
+        #expect(c.textView.selectedRange == NSRange(location: 8, length: 0))
+        // The first block taken away, the caret goes to the start of the
+        // one after it.
+        c.textView.selectedRange = NSRange(location: 2, length: 0)
+        c.update(content([block("c", "paragraph", "Three")]), tinted: [])
+        #expect(c.textView.selectedRange == NSRange(location: 0, length: 0))
+    }
+
+    /// VoiceOver copies a code block and offers its language from the
+    /// actions at the caret, as its bar does, which VoiceOver can't reach
+    /// in the text view, one element.
+    @Test func voiceOverCopiesCode() throws {
+        let c = editor([block("k", "code", "let a = 1", data: ["language": .string("swift")])])
+        c.textView.selectedRange = NSRange(location: 2, length: 0)
+        let actions = c.textView.accessibilityCustomActions ?? []
+        let copy = try #require(actions.first { $0.name == L.editorCopyCode })
+        #expect(
+            actions.contains { $0.name == L.editorCodeLanguage(name: CodeLanguage.name("swift")) })
+        _ = copy.actionHandler?(copy)
+        #expect(UIPasteboard.general.string == "let a = 1")
+        // A page that can't be changed copies, and keeps its language.
+        c.textView.isEditable = false
+        #expect(
+            !(c.textView.accessibilityCustomActions ?? []).contains {
+                $0.name.hasPrefix(L.editorCodeLanguage(name: ""))
+            })
+    }
+
+    /// A to-do's due date is drawn again as the day changes: its chip says
+    /// Today, Tomorrow or overdue as of when it was drawn.
+    @Test func dueDatesAreDrawnAgainAsTheDayChanges() throws {
+        let c = editor([
+            block(
+                "t", "todo_list", "Call",
+                data: ["checked": .bool(false), "due": .string("2026-01-02")])
+        ])
+        c.textView.frame = CGRect(x: 0, y: 0, width: 600, height: 400)
+        c.textView.layoutIfNeeded()
+        let tlm = try #require(c.textView.textLayoutManager)
+        tlm.ensureLayout(for: tlm.documentRange)
+        let before = try #require(tlm.textLayoutFragment(for: tlm.documentRange.location))
+        NotificationCenter.default.post(
+            name: UIApplication.significantTimeChangeNotification, object: nil)
+        tlm.ensureLayout(for: tlm.documentRange)
+        let after = try #require(tlm.textLayoutFragment(for: tlm.documentRange.location))
+        #expect(after !== before)
+    }
+
+    /// Typing that never pauses is still sent, every two seconds or so: a
+    /// crash in it loses no more.
+    @Test func typingOnIsSentEveryTwoSeconds() async throws {
+        let c = editor([block("a", "paragraph", "")])
+        var sent = 0
+        c.onEdit = { _ in sent += 1 }
+        let start = ContinuousClock.now
+        while ContinuousClock.now - start < .milliseconds(2600) {
+            c.type("a")
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(sent >= 1)
+    }
+
+    /// Text being composed, as Japanese is typed, is not sent, and holds a
+    /// change from outside, which would commit it; once composed, it goes
+    /// to the core at once, for the core to merge with the change.
+    @Test func aCompositionHoldsChangesAndSendsOnceComposed() async throws {
+        let c = editor([block("a", "paragraph", ""), block("b", "paragraph", "Other")])
+        let (_, done) = try show(c)
+        defer { done() }
+        try await settle(c)
+        var sent: DocContent?
+        c.onEdit = { sent = $0 }
+        c.textView.selectedRange = NSRange(location: 0, length: 0)
+        c.textView.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0))
+        #expect(c.textView.markedTextRange != nil)
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(sent == nil)
+        c.update(
+            content([block("a", "paragraph", ""), block("b", "paragraph", "Other, changed")]),
+            tinted: [])
+        #expect(c.textView.text == "か\nOther")
+        c.textView.unmarkText()
+        for _ in 0..<20 where sent == nil { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(sent?.blocks.first?.text == "か")
+    }
+
+    /// A table copied pastes back with IDs of its own, its cells' too, and
+    /// one dropped beside itself takes them as it is lifted into a block.
+    @Test func blocksCopiedTakeIDsOfTheirOwn() {
+        let cell = { (id: String, r: Int, col: Int, text: String) in
+            DocNode(
+                id: id, type: "table_cell",
+                data: ["rowPosition": .int(Int64(r)), "colPosition": .int(Int64(col))],
+                children: [self.block(id + "p", "paragraph", text)])
+        }
+        let table = DocNode(
+            id: "t", type: "table", data: [:],
+            children: [cell("c1", 0, 0, "A"), cell("c2", 1, 0, "1")])
+        let c = editor([table, block("p", "paragraph", "After")])
+        // As UIKit drops a card: in the text, with the block it went in.
+        let (para, info) = c.paragraph(at: 2)
+        let card = NSMutableAttributedString(attachment: BlockAttachment(node: table))
+        card.addAttribute(.leafletBlock, value: info, range: NSRange(location: 0, length: 1))
+        c.textView.textStorage.insert(card, at: NSMaxRange(para))
+        c.textViewDidChange(c.textView)
+        let b = blocks(c)
+        #expect(b.filter { $0.type == "table" }.count == 2)
+        #expect(Set(b.map(\.id)).count == b.count)
+        #expect(b.first?.id == "t")
+    }
+
+    /// A page that can't be changed takes no command: Tab, a format, a
+    /// kind, a move or a block put in would never be saved.
+    @Test func aPageThatCantBeChangedTakesNoCommand() {
+        let c = editor([block("a", "bulleted_list", "One"), block("b", "bulleted_list", "Two")])
+        let before = blocks(c)
+        c.textView.isEditable = false
+        c.textView.selectedRange = NSRange(location: 4, length: 3)
+        c.indent(by: 1)
+        c.setType("heading", ["level": .int(1)])
+        c.toggleInline(.leafletBold)
+        c.moveBlock(by: -1)
+        c.insertBlock(DocNode(id: "d", type: "divider", data: nil, children: nil))
+        c.softBreak()
+        #expect(blocks(c) == before)
+    }
+
+    /// The blocks an agent lit follow its tint as it changes, apart from
+    /// the content, and none are lit once it ends.
+    @Test func theBlocksLitFollowTheTint() {
+        let c = editor([block("a", "paragraph", "One"), block("b", "paragraph", "Two")])
+        let lit = { (at: Int) in
+            c.textView.textStorage.attribute(.leafletTinted, at: at, effectiveRange: nil) != nil
+        }
+        c.tint(["b"])
+        #expect(!lit(0))
+        #expect(lit(4))
+        c.tint([])
+        #expect(!lit(4))
+    }
+
+    /// In code, Tab indents the line, Enter keeps its indent and leaves the
+    /// block on a second blank line, as on the desktop; Shift-Return breaks
+    /// a line within a block of text.
+    @Test func codeAndLineBreaksFollowTheDesktop() {
+        let c = editor([block("k", "code", "if x {")])
+        c.textView.selectedRange = NSRange(location: 6, length: 0)
+        c.type("\n")
+        c.press("\t")
+        c.type("y\n")
+        #expect(blocks(c).first?.text == "if x {\n  y\n  ")
+        c.type("\n")
+        c.type("\n")
+        #expect(blocks(c).map(\.type) == ["code", "paragraph"])
+
+        let p = editor([block("a", "paragraph", "One")])
+        p.textView.selectedRange = NSRange(location: 3, length: 0)
+        p.softBreak()
+        p.type("Two")
+        #expect(blocks(p).map(\.text) == ["One\nTwo"])
+    }
+
+    /// Emoji, two code units or more, go through the rules as one
+    /// character: a Markdown shortcut, an inline format, and "/" after one
+    /// and a space.
+    @Test func emojiGoThroughTheRules() {
+        let c = editor([block("a", "paragraph", "")])
+        c.type("## 👍🏽 Done")
+        #expect(blocks(c).first?.type == "heading")
+        #expect(blocks(c).first?.text == "👍🏽 Done")
+
+        let d = editor([block("a", "paragraph", "")])
+        d.type("a **👩‍💻** b")
+        let runs = blocks(d).first?.data?["delta"]?.array ?? []
+        #expect(
+            runs.first { $0["insert"]?.string == "👩‍💻" }?["attributes"]?["bold"]?.bool == true)
+
+        let e = editor([block("a", "paragraph", "")])
+        offer(e, [("h1", "Heading 1")])
+        e.type("😀 /")
+        #expect(e.menu != nil)
+        e.type("\n")
+        #expect(blocks(e).map(\.type) == ["paragraph", "heading"])
+        #expect(blocks(e).map(\.text) == ["😀 ", ""])
+    }
+
+    /// The item chosen in the menu stays chosen through a change from
+    /// outside, which filters the menu again.
+    @Test func theMenusChoiceSurvivesAChangeFromOutside() {
+        let c = editor([block("a", "paragraph", "Intro"), block("b", "paragraph", "")])
+        offer(c, [("h1", "Heading 1"), ("h2", "Heading 2")])
+        c.textView.selectedRange = NSRange(location: 6, length: 0)
+        c.type("/")
+        c.moveInMenu(1)
+        #expect(c.menu?.current?.key == "h2")
+        c.update(
+            content([block("a", "paragraph", "A longer intro"), block("b", "paragraph", "/")]),
+            tinted: [])
+        #expect(c.menu?.current?.key == "h2")
+    }
+
+    /// Text pasted for real, as the edit menu's Paste does, goes through
+    /// the editor's rules: lines pasted are blocks.
+    @Test func aRealPasteGoesThroughTheRules() async throws {
+        let c = editor([block("a", "paragraph", "")])
+        let (_, done) = try show(c)
+        defer { done() }
+        try await settle(c)
+        UIPasteboard.general.string = "- one\n- two"
+        c.textView.selectedRange = NSRange(location: 0, length: 0)
+        c.textView.paste(nil)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(blocks(c).map(\.type) == ["bulleted_list", "bulleted_list"])
+        #expect(blocks(c).map(\.text) == ["one", "two"])
+    }
+
+    /// Tables, cards and charts are taller at the largest text sizes, as
+    /// their text is.
+    @Test func blocksGrowWithTheTextSize() {
+        let table = DocNode(
+            id: "t", type: "table", data: [:],
+            children: [
+                DocNode(
+                    id: "c", type: "table_cell",
+                    data: ["rowPosition": .int(0), "colPosition": .int(0)],
+                    children: nil)
+            ])
+        let height = { (size: UIContentSizeCategory) in
+            var h: [CGFloat] = []
+            UITraitCollection(preferredContentSizeCategory: size).performAsCurrent {
+                h = ["table", "chart", "link_preview"].map {
+                    BlockCard.height(
+                        $0 == "table"
+                            ? table : DocNode(id: "x", type: $0, data: [:], children: nil),
+                        width: 600)
+                }
+            }
+            return h
+        }
+        let large = height(.large)
+        let largest = height(.accessibilityExtraExtraExtraLarge)
+        for (l, xl) in zip(large, largest) { #expect(xl > l) }
+    }
+
+    /// Heights blocks measured are kept by width: the same page in two
+    /// windows of different widths keeps each; an embed grows to its
+    /// content, and back.
+    @Test func measuredHeightsAreKeptByWidth() {
+        let id = "h-" + UUID().uuidString
+        #expect(BlockHeights.set(id, CGSize(width: 300, height: 400)))
+        #expect(BlockHeights.set(id, CGSize(width: 600, height: 200)))
+        #expect(!BlockHeights.set(id, CGSize(width: 600.5, height: 200.4)))
+        #expect(BlockHeights.of(id, width: 300) == 400)
+        #expect(BlockHeights.of(id, width: 600) == 200)
+        #expect(BlockHeights.of(id, width: 450) == nil)
+        let embed = DocNode(id: id, type: "embed", data: ["height": .int(320)], children: nil)
+        #expect(BlockCard.height(embed, width: 300) == 400)
+        _ = BlockHeights.set(id, CGSize(width: 300, height: 100))
+        #expect(BlockCard.height(embed, width: 300) == 320)
     }
 
     /// settle waits for the keyboard to come up, as an iPhone's software

@@ -19,9 +19,12 @@ import (
 	"leaflet/internal/doc"
 )
 
+// open is a store in a folder of the test's, as the app's is: a file, with
+// the write-ahead log, the busy timeout and the transactions that take the
+// write lock as they begin, which one in memory has none of.
 func open(t *testing.T) *Store {
 	t.Helper()
-	s, err := OpenMemory(t.TempDir())
+	s, err := Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,6 +77,50 @@ func TestKeyBetweenAKeyAndItsZeros(t *testing.T) {
 
 // Keys from the server may hold any characters: a key between them never
 // panics, and sorts strictly between whenever a key of digits can.
+// A key made for a page is its own, between its neighbours: two made from
+// the same keys differ, and so does a page made where a deleted one was,
+// which Undo then brings back.
+func TestNewKeysStayApart(t *testing.T) {
+	for _, pair := range [][2]string{{"", ""}, {"V", ""}, {"", "V"}, {"V", "W"}, {"V", "V1"}, {"a", "a2"}, {"Z", "a"}, {"b", "a"}} {
+		seen := map[string]bool{}
+		for range 30 {
+			k := NewKey(pair[0], pair[1])
+			b := pair[1]
+			if b != "" && pair[0] >= b {
+				b = ""
+			}
+			if k <= pair[0] || b != "" && k >= b || strings.HasSuffix(k, "0") {
+				t.Errorf("between %q and %q: %q", pair[0], pair[1], k)
+			}
+			seen[k] = true
+		}
+		if len(seen) < 2 && pair != [2]string{"V", "V1"} {
+			t.Errorf("between %q and %q: always %v", pair[0], pair[1], seen)
+		}
+	}
+	st := open(t)
+	a, _ := st.CreatePage(NewPageOptions{Title: "A"})
+	b, _ := st.CreatePage(NewPageOptions{Title: "B"})
+	if _, err := st.DeletePage(b.ID); err != nil {
+		t.Fatal(err)
+	}
+	c, _ := st.CreatePage(NewPageOptions{Title: "C"})
+	if err := st.RestorePages([]string{b.ID}); err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]string{}
+	pages, _ := st.Pages()
+	for _, p := range pages {
+		if other, ok := keys[p.SortKey]; ok {
+			t.Errorf("%s and %s share the key %q", other, p.Title, p.SortKey)
+		}
+		keys[p.SortKey] = p.Title
+	}
+	if len(pages) != 3 || a.SortKey >= c.SortKey {
+		t.Errorf("pages %v", pages)
+	}
+}
+
 func TestKeyBetweenAnyKeys(t *testing.T) {
 	for _, pair := range [][2]string{{"~", ""}, {"", "~"}, {" ", ""}, {" ", "!"}, {"a~", "b"}, {"~", "~~"},
 		{"Z", "a"}, {"", "1"}, {"!", "1"}, {"", "05"}, {"z", ""}, {"zz", ""}, {"中", ""}, {"a", "中"}, {"V", "V0X"}} {
@@ -169,7 +216,7 @@ func TestPagesAndContent(t *testing.T) {
 	if n != 1 {
 		t.Errorf("%d page_content entries", n)
 	}
-	if err := s.MovePage(p.ID, kid.ID, "", ""); err != ErrMoveIntoSelf {
+	if err := s.MovePage(p.ID, kid.ID, "", ""); !errors.Is(err, ErrMoveIntoSelf) {
 		t.Errorf("move into own child: %v", err)
 	}
 	ids, _ := s.DeletePage(p.ID)
@@ -1062,6 +1109,54 @@ func TestTodos(t *testing.T) {
 	}
 }
 
+// To-dos read again follow every change of a page's content, from this
+// process or another, as leaflet mcp's, and of its title, though only the
+// pages whose content changed are read again.
+func TestTodosFollowChanges(t *testing.T) {
+	s := open(t)
+	todo := func(text string) *doc.Node {
+		n := &doc.Node{Type: "todo_list"}
+		n.SetDelta(doc.Delta{{Text: text}})
+		n.SetDue(time.Now(), false)
+		return n
+	}
+	a, _ := s.CreatePage(NewPageOptions{Title: "A", Content: doc.FromBlocks([]*doc.Node{todo("one")})})
+	b, _ := s.CreatePage(NewPageOptions{Title: "B", Content: doc.FromBlocks([]*doc.Node{todo("two")})})
+	texts := func() []string {
+		got, err := s.Todos()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, td := range got {
+			out = append(out, td.PageTitle+":"+td.Text)
+		}
+		slices.Sort(out)
+		return out
+	}
+	if got := texts(); !slices.Equal(got, []string{"A:one", "B:two"}) {
+		t.Fatalf("todos %v", got)
+	}
+	c := s.Content(a.ID)
+	c.Children = append(c.Children, todo("three"))
+	if _, _, err := s.SaveContent(a.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenamePage(b.ID, "Bee"); err != nil {
+		t.Fatal(err)
+	}
+	if got := texts(); !slices.Equal(got, []string{"A:one", "A:three", "Bee:two"}) {
+		t.Errorf("after a save and a rename %v", got)
+	}
+	// Another process writes the content, in the same millisecond as is.
+	if _, err := s.DB().Exec(`UPDATE page_contents SET content = ? WHERE page_id = ?`, doc.FromBlocks([]*doc.Node{todo("four, from elsewhere")}).Encode(), b.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := texts(); !slices.Equal(got, []string{"A:one", "A:three", "Bee:four, from elsewhere"}) {
+		t.Errorf("after a write from elsewhere %v", got)
+	}
+}
+
 // A local agent run's snapshot keeps its job here, and goes up without
 // it, as the job has no server row.
 func TestAgentRunHistoryGoesUpWithoutItsJob(t *testing.T) {
@@ -1324,20 +1419,20 @@ func TestADatabaseGainsTheICloudTables(t *testing.T) {
 	if err := s.PutPeerContent("d1", "p1", 5, "{}"); err != nil {
 		t.Fatal(err)
 	}
-	if p, ok := s.PeerContent("d1", "p1"); !ok || p.Version != 5 {
-		t.Errorf("peer content %+v %v", p, ok)
+	if p, ok, err := s.PeerContent("d1", "p1"); !ok || err != nil || p.Version != 5 {
+		t.Errorf("peer content %+v %v %v", p, ok, err)
 	}
 	if err := s.SetRowVersion("pages", "p1", RowVersion{At: 9, Device: "d1"}); err != nil {
 		t.Fatal(err)
 	}
-	if v := s.RowVersion("pages", "p1"); v != (RowVersion{9, "d1"}) {
-		t.Errorf("row version %+v", v)
+	if v, err := s.RowVersion("pages", "p1"); err != nil || v != (RowVersion{9, "d1"}) {
+		t.Errorf("row version %+v, %v", v, err)
 	}
 	if err := s.ForgetICloud(); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := s.PeerContent("d1", "p1"); ok {
-		t.Error("peer content kept after ForgetICloud")
+	if _, ok, err := s.PeerContent("d1", "p1"); ok || err != nil {
+		t.Errorf("peer content kept after ForgetICloud: %v", err)
 	}
 }
 
@@ -1466,16 +1561,15 @@ func TestADatabaseGainsTheIndexes(t *testing.T) {
 	} {
 		var plan strings.Builder
 		rows, err := s.db.Query(`EXPLAIN QUERY PLAN ` + q)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for rows.Next() {
+		if err := each(rows, err, func(sc scanner) (bool, error) {
 			var id, parent, unused int
 			var detail string
-			_ = rows.Scan(&id, &parent, &unused, &detail)
+			err := sc.Scan(&id, &parent, &unused, &detail)
 			plan.WriteString(detail + "\n")
+			return true, err
+		}); err != nil {
+			t.Fatal(err)
 		}
-		_ = rows.Close()
 		if !strings.Contains(plan.String(), index) {
 			t.Errorf("%s\nplan:\n%s", q, plan.String())
 		}
@@ -2776,4 +2870,388 @@ func TestCopyPageIsAllOrNothing(t *testing.T) {
 	if len(madeAfter) != len(made) {
 		t.Errorf("audio left here: %d files, was %d", len(madeAfter), len(made))
 	}
+}
+
+// A conflict resolved goes, and those an earlier version kept resolved go
+// as the database is opened.
+func TestResolvedConflictsGo(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	writeDB(t, path,
+		`CREATE TABLE pages (
+		  id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_id TEXT, folder_id TEXT,
+		  title TEXT NOT NULL DEFAULT '', icon TEXT, sort_key TEXT NOT NULL, created_by TEXT,
+		  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
+		  keep_offline INTEGER NOT NULL DEFAULT 1, is_template INTEGER NOT NULL DEFAULT 0,
+		  tags TEXT NOT NULL DEFAULT '[]', default_template_id TEXT)`,
+		`CREATE TABLE conflicts (
+		  id TEXT PRIMARY KEY, page_id TEXT NOT NULL, block_id TEXT NOT NULL, local_node TEXT, remote_node TEXT,
+		  kept TEXT NOT NULL, local_edited_at INTEGER NOT NULL, remote_edited_at INTEGER NOT NULL,
+		  created_at INTEGER NOT NULL, resolved_at INTEGER)`,
+		`INSERT INTO conflicts VALUES ('c1', 'p1', 'b1', 'null', 'null', 'local', 1, 1, 1, 2)`,
+		`INSERT INTO conflicts VALUES ('c2', 'p1', 'b2', 'null', 'null', 'local', 1, 1, 1, NULL)`,
+		`PRAGMA user_version = 5`,
+	)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	count := func() int {
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM conflicts`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if n := count(); n != 1 {
+		t.Fatalf("%d conflicts kept, want the one unresolved", n)
+	}
+	if err := s.ResolveConflict("c2"); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n != 0 {
+		t.Errorf("%d conflicts kept once resolved", n)
+	}
+}
+
+// A deleted page's conflicts are not listed, and come back with it.
+func TestConflictsOfDeletedPagesWait(t *testing.T) {
+	s := open(t)
+	p, err := s.CreatePage(NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AddConflict(p.ID, doc.Conflict{BlockID: "b1"}); err != nil {
+		t.Fatal(err)
+	}
+	ids, err := s.DeletePage(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cs, err := s.Conflicts(); err != nil || len(cs) != 0 {
+		t.Errorf("a deleted page's conflicts listed: %+v, %v", cs, err)
+	}
+	if err := s.RestorePages(ids); err != nil {
+		t.Fatal(err)
+	}
+	if cs, err := s.Conflicts(); err != nil || len(cs) != 1 {
+		t.Errorf("restored, its conflicts %+v, %v", cs, err)
+	}
+}
+
+// Keys of pages put last, one after another, stay short however long the
+// list grows, from an empty list and from keys an earlier version made.
+func TestKeysPutLastStayShort(t *testing.T) {
+	for _, start := range []string{"", "V", "lXY", "zzV", "a0", "~"} {
+		k := start
+		for i := range 5000 {
+			next := NewKey(k, "")
+			if next <= k || strings.HasSuffix(next, "0") {
+				t.Fatalf("from %q, key %d: %q after %q", start, i, next, k)
+			}
+			k = next
+		}
+		if len(k) > len(start)+6 {
+			t.Errorf("from %q, 5000 keys later: %q", start, k)
+		}
+	}
+}
+
+// The server's agent puts a subpage last with the key the app would make
+// (supabase/functions/_shared/sortkey.ts writes the fixture).
+func TestKeysPutLastAsTheServerMakesThem(t *testing.T) {
+	data, err := os.ReadFile("../../supabase/functions/_shared/testdata/sort_keys.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cases []struct{ After, Key string }
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	if len(cases) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range cases {
+		if got := KeyBetween(c.After, ""); got != c.Key {
+			t.Errorf("after %q: the app makes %q, the server %q", c.After, got, c.Key)
+		}
+	}
+}
+
+// The tables the store removes from, all at once or a page's, are every
+// table it has.
+func TestEveryTableIsListed(t *testing.T) {
+	s := open(t)
+	rows, err := s.db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	have, err := collect(rows, err, scanString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed []string
+	for _, tb := range tables {
+		listed = append(listed, tb.name)
+	}
+	slices.Sort(listed)
+	if !slices.Equal(have, listed) {
+		t.Errorf("tables %v, listed %v", have, listed)
+	}
+}
+
+// The app and leaflet mcp opening a new database at once make one space
+// and one device ID between them, not one each.
+func TestOneSpaceForTwoProcesses(t *testing.T) {
+	for range 5 {
+		dir := t.TempDir()
+		var stores [2]*Store
+		for i := range stores {
+			s, err := Open(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = s.Close() })
+			stores[i] = s
+		}
+		var sessions [2]Session
+		var devices [2]string
+		var wg gosync.WaitGroup
+		for i, s := range stores {
+			wg.Go(func() {
+				sess, err := s.LoadSession(nil)
+				if err != nil {
+					t.Error(err)
+				}
+				sessions[i], devices[i] = sess, s.DeviceID()
+			})
+		}
+		wg.Wait()
+		var n int
+		if err := stores[0].db.QueryRow(`SELECT COUNT(*) FROM spaces`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if sessions[0].SpaceID != sessions[1].SpaceID || n != 1 || devices[0] != devices[1] || devices[0] == "" {
+			t.Fatalf("spaces %q %q (%d stored), devices %q %q", sessions[0].SpaceID, sessions[1].SpaceID, n, devices[0], devices[1])
+		}
+	}
+}
+
+// A setting, a queue or a version that cannot be read is never taken for
+// none: no new device ID or space is made over it, a row from elsewhere
+// is not stored over a change that may wait, and no merge goes without
+// its base.
+func TestUnreadRowsCountForSomething(t *testing.T) {
+	s := open(t)
+	device := s.DeviceID()
+	space := s.Session().SpaceID
+	hide := func(table string) func() {
+		if _, err := s.db.Exec(`ALTER TABLE ` + table + ` RENAME TO hidden`); err != nil {
+			t.Fatal(err)
+		}
+		return func() {
+			if _, err := s.db.Exec(`ALTER TABLE hidden RENAME TO ` + table); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	back := hide("key_values")
+	if id := s.DeviceID(); id != "" {
+		t.Errorf("device ID %q while it cannot be read", id)
+	}
+	if _, err := s.LoadSession(nil); err == nil {
+		t.Error("a session loaded while its space cannot be read")
+	}
+	back()
+	if id := s.DeviceID(); id != device {
+		t.Errorf("device ID %q, was %q", id, device)
+	}
+	if sess, err := s.LoadSession(nil); err != nil || sess.SpaceID != space {
+		t.Errorf("space %q, was %q: %v", sess.SpaceID, space, err)
+	}
+
+	p, err := s.CreatePage(NewPageOptions{Title: "Mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	back = hide("outbox")
+	if !s.HasPending("pages", p.ID) {
+		t.Error("a change that may wait reads as none")
+	}
+	err = s.PutRemotePage(map[string]any{"id": p.ID, "space_id": p.SpaceID, "title": "Theirs", "sort_key": "V"})
+	back()
+	if got, _ := s.Page(p.ID); err == nil || got.Title != "Mine" {
+		t.Errorf("stored %q over a change that may wait: %v", got.Title, err)
+	}
+
+	if err := s.PutPeerContent("d1", p.ID, 5, "{}"); err != nil {
+		t.Fatal(err)
+	}
+	back = hide("peer_contents")
+	if _, ok, err := s.PeerContent("d1", p.ID); ok || err == nil {
+		t.Errorf("a base that cannot be read: %v, %v", ok, err)
+	}
+	back()
+	back = hide("row_versions")
+	if _, err := s.RowVersion("pages", p.ID); err == nil {
+		t.Error("a version that cannot be read reads as none")
+	}
+	back()
+}
+
+// A deleted comment keeps no text, here or in what goes up, whether it
+// was deleted here, came deleted from elsewhere, or was deleted before;
+// only the deletion goes up, which the page's owner may make of a
+// comment of someone else's.
+func TestDeletedCommentsKeepNoText(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Plan"})
+	c, err := s.AddComment(p.ID, "b1", "Secret plan", "", "the quote", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	reply, _ := s.AddComment(p.ID, "b1", "Agreed", c.ID, "", "", "")
+	for _, e := range mustPending(t, s) {
+		if err := s.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.DeleteComment(c.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Comment(c.ID); got.Body != "" || got.Quote != "" || got.DeletedAt.IsZero() {
+		t.Errorf("deleted comment %+v", got)
+	}
+	queued := mustPending(t, s)
+	var row map[string]any
+	if len(queued) != 1 || json.Unmarshal([]byte(queued[0].Payload), &row) != nil {
+		t.Fatalf("queued %+v", queued)
+	}
+	if row["body"] != "" || row["quote"] != nil || fmt.Sprint(row[ChangedKey]) != "[deleted_at]" {
+		t.Errorf("queued %v", row)
+	}
+	// From another device that kept the text.
+	remote := CommentToRemote(reply)
+	remote["deleted_at"], remote["updated_at"] = time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano)
+	if err := s.PutRemoteComment(remote, "Ann"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Comment(reply.ID); got.Body != "" || got.DeletedAt.IsZero() {
+		t.Errorf("deleted elsewhere: %+v", got)
+	}
+	if hits, _ := s.Search("secret", 10); len(hits) != 0 {
+		t.Errorf("found %+v", hits)
+	}
+}
+
+// A database whose deleted comments kept their text loses it as it opens.
+func TestDeletedCommentsLoseTheirText(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	before := strings.Split(schema, "CREATE TABLE IF NOT EXISTS recordings")[0]
+	writeDB(t, path, before,
+		`INSERT INTO comments (id, page_id, block_id, body, quote, created_at, updated_at, deleted_at) VALUES ('c1', 'p1', 'b1', 'gone', 'q', 1, 1, 2)`,
+		`INSERT INTO comments (id, page_id, block_id, body, created_at, updated_at) VALUES ('c2', 'p1', 'b1', 'kept', 1, 1)`,
+		`PRAGMA user_version = 6`)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	gone, _ := s.Comment("c1")
+	kept, _ := s.Comment("c2")
+	if gone.Body != "" || gone.Quote != "" || kept.Body != "kept" {
+		t.Errorf("deleted %+v, kept %+v", gone, kept)
+	}
+}
+
+// A file sent again in another space moves there, its row as its path.
+func TestRequeuedFileMovesToItsSpace(t *testing.T) {
+	s := open(t)
+	src := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(src, []byte("hi"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := s.AddFile(src, "", "", "text/plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RequeueFile(f.ID, "other"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.File(f.ID); got.SpaceID != "other" || got.StoragePath != "other/"+f.ID+"/notes.txt" {
+		t.Errorf("space %q, path %q", got.SpaceID, got.StoragePath)
+	}
+}
+
+// A recording finished goes up with its audio, both queued at once or
+// neither; without upload, or once its audio is up, only the recording.
+func TestFinishedRecordingQueuesItsAudio(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Call"})
+	wav := filepath.Join(s.Dir, "recordings", "a.wav")
+	if err := writeFile(wav, []byte("RIFF")); err != nil {
+		t.Fatal(err)
+	}
+	entities := func() []string {
+		var out []string
+		for _, e := range mustPending(t, s) {
+			if e.Entity == "recordings" || e.Entity == "storage" {
+				out = append(out, e.Entity)
+			}
+		}
+		return out
+	}
+	for _, tc := range []struct {
+		upload bool
+		audio  string
+		want   string
+	}{{true, "", "[recordings storage]"}, {false, "", "[recordings]"}, {true, "a.wav", "[recordings]"}} {
+		r, err := s.CreateRecording(p.ID, "b1", "", "", wav, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.FinishRecording(r.ID, tc.upload, func(x *Recording) { x.Status, x.AudioPath = "ready", tc.audio }); err != nil {
+			t.Fatal(err)
+		}
+		if got := fmt.Sprint(entities()); got != tc.want {
+			t.Errorf("upload %v, audio %q: queued %s", tc.upload, tc.audio, got)
+		}
+		for _, e := range mustPending(t, s) {
+			_ = s.Dequeue(e)
+		}
+	}
+	// The upload refused, the recording is not finished either.
+	r, _ := s.CreateRecording(p.ID, "b1", "", "", wav, "")
+	if _, err := s.db.Exec(`CREATE TRIGGER fail_storage BEFORE INSERT ON outbox WHEN NEW.entity = 'storage' BEGIN SELECT RAISE(ABORT, 'refused'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FinishRecording(r.ID, true, func(x *Recording) { x.Status = "ready" }); err == nil {
+		t.Fatal("finished without its upload")
+	}
+	if got, _ := s.Recording(r.ID); got.Status != "recording" || len(entities()) != 0 {
+		t.Errorf("status %q, queued %v", got.Status, entities())
+	}
+}
+
+// Every system the app runs on can hold the name a file is kept by, as
+// iCloud Drive syncs it to Windows too.
+func TestFileNamesEverySystemHolds(t *testing.T) {
+	for in, want := range map[string]string{
+		"Q3: report.pdf": "Q3_ report.pdf", `What?<*>|".txt`: "What______.txt", "notes. ": "notes",
+		"CON": "_CON", "nul.tar.gz": "_nul.tar.gz", "COM1.txt": "_COM1.txt", "console.txt": "console.txt",
+		"a\x01b": "a_b", "...": "_",
+	} {
+		if got := fileName(in); got != want {
+			t.Errorf("fileName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// mustPending is the queue, or the test fails.
+func mustPending(t *testing.T, s *Store) []OutboxEntry {
+	t.Helper()
+	entries, err := s.Pending()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return entries
 }

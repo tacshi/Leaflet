@@ -4,14 +4,17 @@
 package web
 
 import (
+	"bufio"
 	"context"
+	"crypto/tls"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/netip"
 	"net/url"
-	"sync"
 	"syscall"
 	"time"
 
@@ -60,39 +63,54 @@ const fetchAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/
 
 // publicClient is Fetch's: through the system's proxy, as the app's other
 // clients go, and to public addresses only.
-var publicClient = &http.Client{Transport: &http.Transport{
-	Proxy:                 publicProxy,
-	DialContext:           publicDial,
+var publicClient = &http.Client{Transport: publicTransport{}}
+
+// direct goes to a site itself, its address checked as it is dialed.
+var direct = &http.Transport{
+	DialContext:           publicDialer.DialContext,
 	ForceAttemptHTTP2:     true,
 	MaxIdleConns:          10,
 	IdleConnTimeout:       90 * time.Second,
 	TLSHandshakeTimeout:   10 * time.Second,
 	ExpectContinueTimeout: time.Second,
-}}
+}
 
-// proxies are the proxies' addresses publicProxy has chosen: dialing them
-// is fine, whatever their address, as the system's settings name them.
-var proxies sync.Map
-
-// publicProxy is the proxy the app's other clients would use for r. A
-// proxy dials the site itself, so the site's address is checked here,
-// before; going direct, it is checked as it is dialed.
-func publicProxy(r *http.Request) (*url.URL, error) {
-	var p *url.URL
+// systemProxy is the proxy the app's other clients would use for r, or
+// nil to go direct.
+var systemProxy = func(r *http.Request) (*url.URL, error) {
 	if t, ok := http.DefaultTransport.(*http.Transport); ok && t.Proxy != nil {
-		var err error
-		if p, err = t.Proxy(r); err != nil {
-			return nil, err
-		}
+		return t.Proxy(r)
 	}
+	return nil, nil
+}
+
+// lookupIP finds the addresses of a host's name.
+var lookupIP = net.DefaultResolver.LookupNetIP
+
+// publicTransport takes each request, redirects too, direct or through
+// the system's proxy.
+type publicTransport struct{}
+
+func (publicTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	proxy, err := systemProxy(r)
+	if err != nil {
+		return nil, err
+	}
+	if proxy == nil {
+		return direct.RoundTrip(r)
+	}
+	return viaProxy(r, proxy)
+}
+
+// viaProxy takes a request through a proxy. A proxy would look the site's
+// name up itself, and a name can resolve elsewhere the second time, to
+// this machine, whose proxy it may be, or its network: the address is
+// found and checked here, and the proxy asked for it, the name going only
+// in the Host header and to TLS. Each request has a connection of its
+// own, which goes with its response.
+func viaProxy(r *http.Request, proxy *url.URL) (*http.Response, error) {
 	host := r.URL.Hostname()
-	if p == nil {
-		if _, ok := proxies.Load(hostPort(r.URL)); ok {
-			return nil, ErrNotPublic
-		}
-		return nil, nil
-	}
-	ips, err := net.DefaultResolver.LookupNetIP(r.Context(), "ip", host)
+	ips, err := lookupIP(r.Context(), "ip", host)
 	if err != nil {
 		return nil, err
 	}
@@ -101,8 +119,83 @@ func publicProxy(r *http.Request) (*url.URL, error) {
 			return nil, ErrNotPublic
 		}
 	}
-	proxies.Store(hostPort(p), true)
-	return p, nil
+	if len(ips) == 0 {
+		return nil, ErrNotPublic
+	}
+	_, port, _ := net.SplitHostPort(hostPort(r.URL))
+	addr := net.JoinHostPort(ips[0].Unmap().String(), port)
+	t := &http.Transport{DisableKeepAlives: true, TLSHandshakeTimeout: 10 * time.Second, ExpectContinueTimeout: time.Second}
+	switch proxy.Scheme {
+	case "http", "https":
+		// A tunnel to the address, as CONNECT asks for, the site's TLS
+		// in it by the site's name.
+		t.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) { return tunnel(ctx, proxy, addr) }
+		t.DialTLSContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			conn, err := tunnel(ctx, proxy, addr)
+			if err != nil {
+				return nil, err
+			}
+			tc := tls.Client(conn, &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12})
+			if err := tc.HandshakeContext(ctx); err != nil {
+				_ = conn.Close()
+				return nil, err
+			}
+			return tc, nil
+		}
+	case "socks5", "socks5h":
+		t.Proxy = http.ProxyURL(proxy)
+		t.DialContext = plainDialer.DialContext
+		t.TLSClientConfig = &tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}
+	default:
+		return nil, fmt.Errorf("web: proxy scheme %q", proxy.Scheme)
+	}
+	r = r.Clone(r.Context())
+	if r.Host == "" {
+		r.Host = r.URL.Host
+	}
+	r.URL.Host = addr
+	return t.RoundTrip(r)
+}
+
+// tunnel opens a connection to addr through an HTTP proxy, which CONNECT
+// asks to go there.
+func tunnel(ctx context.Context, proxy *url.URL, addr string) (net.Conn, error) {
+	conn, err := plainDialer.DialContext(ctx, "tcp", hostPort(proxy))
+	if err != nil {
+		return nil, err
+	}
+	fail := func(err error) (net.Conn, error) {
+		_ = conn.Close()
+		return nil, err
+	}
+	if proxy.Scheme == "https" {
+		tc := tls.Client(conn, &tls.Config{ServerName: proxy.Hostname(), MinVersion: tls.VersionTLS12})
+		if err := tc.HandshakeContext(ctx); err != nil {
+			return fail(err)
+		}
+		conn = tc
+	}
+	if d, ok := ctx.Deadline(); ok {
+		_ = conn.SetDeadline(d)
+	}
+	req := &http.Request{Method: http.MethodConnect, URL: &url.URL{Opaque: addr}, Host: addr, Header: http.Header{}}
+	if u := proxy.User; u != nil {
+		pass, _ := u.Password()
+		req.Header.Set("Proxy-Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte(u.Username()+":"+pass)))
+	}
+	if err := req.Write(conn); err != nil {
+		return fail(err)
+	}
+	res, err := http.ReadResponse(bufio.NewReader(conn), req)
+	if err != nil {
+		return fail(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return fail(fmt.Errorf("web: the proxy answered %s", res.Status))
+	}
+	_ = conn.SetDeadline(time.Time{})
+	return conn, nil
 }
 
 // hostPort is where a URL connects, its port given by its scheme when it
@@ -119,13 +212,6 @@ var (
 	plainDialer  = &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second}
 	publicDialer = &net.Dialer{Timeout: 10 * time.Second, KeepAlive: 30 * time.Second, Control: publicControl}
 )
-
-func publicDial(ctx context.Context, network, addr string) (net.Conn, error) {
-	if _, ok := proxies.Load(addr); ok {
-		return plainDialer.DialContext(ctx, network, addr)
-	}
-	return publicDialer.DialContext(ctx, network, addr)
-}
 
 // publicControl refuses an address, as resolved, that is not public.
 func publicControl(_, address string, _ syscall.RawConn) error {

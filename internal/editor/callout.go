@@ -75,13 +75,14 @@ func (e *Editor) ToggleCollapsed(id string) {
 		}
 	}
 	// Folding is how the page shows, not an edit to undo, but it is kept.
+	e.keepFold(n)
 	e.changed()
 }
 
 // marker reports whether a point in the window is on the control before
 // a block's text: a to-do's box, a callout's icon or a toggle's chevron.
 func (e *Editor) marker(n *doc.Node, wx, wy float32) bool {
-	box, ok := e.geom[n.ID]
+	box, ok := e.box(n.ID)
 	if !ok || wy < box.Y || wy >= box.Y+box.H {
 		return false
 	}

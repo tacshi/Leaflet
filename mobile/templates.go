@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"log"
 	"maps"
 	"os"
 	"slices"
@@ -129,13 +130,8 @@ func (c *Core) choice(key string) (choice, error) {
 			return t, nil
 		}
 	}
-	return choice{}, errNoTemplate
+	return choice{}, errors.New(locales.TemplateGone())
 }
-
-var (
-	errNoTemplate = errors.New("no such template")
-	errNoFolder   = errors.New("no such folder")
-)
 
 // hint is the first line of a template's text, or how many subpages it
 // has when it has no text.
@@ -263,7 +259,7 @@ func (c *Core) SetDefaultTemplate(pageID, folderID, key string) (_ string, err e
 			if folders, err = st.Folders(); err != nil {
 				return
 			}
-			err = errNoFolder
+			err = errors.New(locales.DialogFolderGone())
 			for _, f := range folders {
 				if f.ID == folderID {
 					place = f.Name
@@ -481,8 +477,12 @@ func (c *Core) copyPage(id string, options func(store.Page) store.CopyOptions) (
 		}
 		row = c.rowOf(cp)
 		if cp.ParentID != "" && !cp.Template {
+			// The copy is made: a card in the parent that can't be saved
+			// says so, as on the desktop, and the copy stands, rather than
+			// asked for again as if none were made.
 			if lerr := c.linkSubpageAfter(cp.ParentID, cp.ID, p.ID); lerr != nil {
-				err = lerr
+				log.Printf("page %s: link in %s: %v", cp.ID, cp.ParentID, lerr)
+				c.ev.notice(locales.AppErrorLinkSubpage(lerr.Error()))
 			}
 		}
 		c.core.Sync.Kick()
@@ -584,13 +584,12 @@ func (c *Core) fetchNeeds(id string) (audio []string, err error) {
 		if ferr != nil {
 			return audio, copyError(ferr)
 		}
-		c.q.do(func() {
-			if n.FileID != "" {
-				_, err = c.core.Store.DownloadedFile(n.FileID, data)
-			} else if _, err = c.core.Store.DownloadedAudio(n.RecordingID, data); err == nil {
-				audio = append(audio, n.RecordingID)
-			}
-		})
+		// Kept off the core's queue, as LocalFile keeps a file.
+		if n.FileID != "" {
+			_, err = c.core.Store.DownloadedFile(n.FileID, data)
+		} else if _, err = c.core.Store.DownloadedAudio(n.RecordingID, data); err == nil {
+			audio = append(audio, n.RecordingID)
+		}
 		if err != nil {
 			return audio, err
 		}

@@ -74,6 +74,12 @@ func freshClipboard(t *testing.T) {
 	t.Cleanup(empty)
 }
 
+// boxOf is a block's box in the window, as last drawn.
+func boxOf(e *Editor, id string) ui.Rect {
+	r, _ := e.box(id)
+	return r
+}
+
 func texts(e *Editor) []string {
 	var out []string
 	for _, n := range e.units() {
@@ -172,6 +178,25 @@ func TestSlashMenu(t *testing.T) {
 	}
 }
 
+// A space right after "/" or "@" is writing, not a search: the menu goes,
+// and Enter breaks the line, keeping what was typed.
+func TestSpaceAfterTriggerClosesTheMenu(t *testing.T) {
+	for _, typed := range []string{"ratio 1 / 2", "yes / no", "meet @ home"} {
+		e, tt, host := setup(t)
+		tt.Type(typed)
+		if e.Trigger() != nil {
+			t.Errorf("%q: trigger %+v", typed, e.Trigger())
+		}
+		tt.Key(0, ui.KeyEnter)
+		if len(host.picked) != 0 {
+			t.Errorf("%q: picked %+v", typed, host.picked)
+		}
+		if got := texts(e); len(got) != 2 || got[0] != "paragraph:"+typed {
+			t.Errorf("%q: blocks %v", typed, got)
+		}
+	}
+}
+
 func TestSelectionAcrossBlocksDeletes(t *testing.T) {
 	e, tt, _ := setup(t)
 	tt.Type("alpha")
@@ -246,7 +271,7 @@ func TestClickImageThenDelete(t *testing.T) {
 	var box ui.Rect
 	for _, n := range e.units() {
 		if n.Type == "divider" {
-			box = e.geom[n.ID]
+			box = boxOf(e, n.ID)
 		}
 	}
 	tt.ClickAt(box.X+box.W/2, box.Y+box.H/2)
@@ -350,7 +375,7 @@ func TestPasteLinesInTableCell(t *testing.T) {
 	if len(e.Content.Children) != 1 {
 		t.Errorf("blocks %v", texts(e))
 	}
-	md := doc.PageMarkdown("", e.Content, nil)
+	md := doc.PageMarkdown("", e.Content, doc.MarkdownOptions{})
 	if !strings.Contains(md, "| one<br>two \\| three |") {
 		t.Errorf("markdown %q", md)
 	}
@@ -447,6 +472,40 @@ func TestEmacsKeys(t *testing.T) {
 	}
 }
 
+// Off macOS, Ctrl is the word and page key: Ctrl+Backspace takes a word,
+// not the block up to the caret, Ctrl+Left steps a word, and Ctrl+Home
+// goes to the page's start. On a Mac, the keys go as Windows sends them.
+func TestCtrlKeysOffTheMac(t *testing.T) {
+	e, tt, _ := setup(t)
+	press := func(mods ui.Modifiers, key ui.Key) {
+		if runtime.GOOS == "darwin" {
+			e.key(ctrlKeys(ui.InputEvent{Kind: ui.InputKeyDown, Key: key, Mods: mods}))
+			tt.Frame()
+			return
+		}
+		tt.Key(mods, key)
+	}
+	tt.Type("first")
+	tt.Key(0, ui.KeyEnter)
+	tt.Type("one two three")
+	press(ui.Ctrl, ui.KeyBackspace)
+	if got := texts(e); len(got) != 2 || got[1] != "paragraph:one two " {
+		t.Fatalf("after Ctrl+Backspace %v", got)
+	}
+	press(ui.Ctrl, ui.KeyLeft)
+	if p := e.Caret(); p.Off != len("one ") {
+		t.Errorf("after Ctrl+Left the caret is at %d", p.Off)
+	}
+	press(ui.Ctrl, ui.KeyHome)
+	if p := e.Caret(); p.ID != e.Content.Children[0].ID || p.Off != 0 {
+		t.Errorf("after Ctrl+Home the caret is at %v", p)
+	}
+	press(ui.Ctrl|ui.Shift, ui.KeyEnd)
+	if p := e.Caret(); p.ID != e.Content.Children[1].ID || p.Off != len("one two ") || e.Collapsed() {
+		t.Errorf("after Ctrl+Shift+End the caret is at %v, collapsed %v", p, e.Collapsed())
+	}
+}
+
 func TestEmacsKeysInSlashMenu(t *testing.T) {
 	if runtime.GOOS != "darwin" {
 		t.Skip("Control keys act as Emacs only on macOS")
@@ -530,7 +589,7 @@ func TestFencedCode(t *testing.T) {
 		t.Fatalf("got %v", texts(e))
 	}
 	e.Select(Pos{top[0].ID, 0}, Pos{top[2].ID, 5})
-	if got := e.copyText(); got != "Intro\n```go\nfunc a() {\n\treturn\n}\n```\nAfter" {
+	if got := e.copyText(); got != "Intro\n\n```go\nfunc a() {\n\treturn\n}\n```\n\nAfter" {
 		t.Errorf("copied %q", got)
 	}
 	// A fence typed in a paragraph and Enter start a code block.
@@ -683,7 +742,7 @@ func TestTableCellsTabAndEnter(t *testing.T) {
 	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table, after} })
 	tt.Frame()
 	// Click the first body cell: it opens to its Markdown.
-	box := e.geom[table.ID]
+	box := boxOf(e, table.ID)
 	tt.ClickAt(box.X+20, box.Y+box.H*0.75)
 	tt.Frame()
 	if e.cellEdit != cellKey(table.ID, 1, 0) {
@@ -722,7 +781,7 @@ func TestTableWithAHugeSize(t *testing.T) {
 	table.Set("colsLen", 1_000_000_000)
 	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table} })
 	tt.Frame()
-	box := e.geom[table.ID]
+	box := boxOf(e, table.ID)
 	tt.ClickAt(box.X+20, box.Y+box.H*0.75)
 	tt.Frame()
 	tt.Key(0, ui.KeyTab)
@@ -732,7 +791,7 @@ func TestTableWithAHugeSize(t *testing.T) {
 	if e.cellEdit != cellKey(table.ID, 2, 0) || len(table.Children) != 6 {
 		t.Fatalf("editing %q, %d cells", e.cellEdit, len(table.Children))
 	}
-	e.Edit(func(*doc.Content) { addTableColumn(table) })
+	e.Edit(func(*doc.Content) { insertTableColumn(table, 2) })
 	if rows, cols := doc.TableSize(table); rows != 3 || cols != 3 || len(table.Children) != 9 {
 		t.Errorf("after a column, %d by %d, %d cells", rows, cols, len(table.Children))
 	}
@@ -745,7 +804,7 @@ func TestTableCellKeepsMarkdownAsTyped(t *testing.T) {
 	table, _ := doc.TableNode([][]string{{"ID"}, {""}}, "")
 	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table} })
 	tt.Frame()
-	box := e.geom[table.ID]
+	box := boxOf(e, table.ID)
 	tt.ClickAt(box.X+20, box.Y+box.H*0.75)
 	tt.Frame()
 	for _, r := range "[Go](https://go.dev) and **this**" {
@@ -795,7 +854,7 @@ func TestEditMedia(t *testing.T) {
 		t.Error("the image does not say it is loading")
 	}
 	for id, item := range map[string]string{"img": "Edit link", "vid": "Edit link", "up": "Replace image…"} {
-		r := e.geom[id]
+		r := boxOf(e, id)
 		tt.RightClickAt(r.X+20, r.Y+r.H/2)
 		tt.Frame()
 		if tt.HasText("Edit link") && tt.HasText("Replace image…") {
@@ -809,7 +868,7 @@ func TestEditMedia(t *testing.T) {
 	if !reflect.DeepEqual(host.edited, []string{"img", "up", "vid"}) {
 		t.Errorf("edited %v", host.edited)
 	}
-	r := e.geom["p"]
+	r := boxOf(e, "p")
 	tt.RightClickAt(r.X+5, r.Y+r.H/2)
 	tt.Frame()
 	if !tt.HasText("Copy link to block") || tt.HasText("Edit link") || tt.HasText("Replace image…") {
@@ -944,7 +1003,7 @@ func TestBlocksInAToggleBecomeParagraphs(t *testing.T) {
 		t.Errorf("after Shift-Tab %v", texts(e))
 	}
 	e.Content.Walk(func(n, _ *doc.Node) {
-		if len(n.Children) > 0 && !NestableTypes(n) {
+		if len(n.Children) > 0 && !nestable(n) {
 			t.Errorf("%s %q has children", n.Type, n.Delta().Plain())
 		}
 	})
@@ -1123,7 +1182,7 @@ func TestCopyPlainText(t *testing.T) {
 func TestCaretIsAsTallAsItsText(t *testing.T) {
 	font := ui.Font{Size: 16, LineHeight: 1.8}
 	l := ui.ShapeRichText([]ui.Span{{Text: "也就是「波形」：", Size: font.Size}}, font, 400)
-	line, cr := l.Lines()[0], textCaret(l, 3)
+	line, cr := l.Lines()[0], textCaret(l, ui.TextCaretPosition{Index: 3})
 	if cr.H >= line.Rect.H || cr.Y <= line.Rect.Y || cr.Y+cr.H >= line.Rect.Y+line.Rect.H {
 		t.Errorf("caret %+v fills its line %+v", cr, line.Rect)
 	}
@@ -1142,7 +1201,7 @@ func TestClickEndsComposition(t *testing.T) {
 	tt.Compose("ni", 2)
 	tt.Frame()
 	first := e.Content.Children[0]
-	r := e.geom[first.ID]
+	r := boxOf(e, first.ID)
 	tt.ClickAt(r.X+1, r.Y+r.H/2)
 	if e.marked {
 		t.Fatal("the click kept the composition")
@@ -1184,8 +1243,8 @@ func TestCompositionIsOneUndoStep(t *testing.T) {
 	steps := len(e.undo)
 	tt.Compose("ha", 2)
 	tt.Compose("", 0)
-	if got := texts(e); !slices.Equal(got, []string{"paragraph:a"}) || len(e.undo) != steps || !e.CanRedo() {
-		t.Errorf("given up: %v, %d steps, want %d; redo %v", got, len(e.undo), steps, e.CanRedo())
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a"}) || len(e.undo) != steps || len(e.redo) == 0 {
+		t.Errorf("given up: %v, %d steps, want %d; redo %d", got, len(e.undo), steps, len(e.redo))
 	}
 	// Over a selection, it is one step with what it replaced.
 	e.Select(Pos{e.Content.Children[0].ID, 0}, Pos{e.Content.Children[0].ID, 1})
@@ -1216,7 +1275,7 @@ func TestCmdClickOpensOnlyWebLinks(t *testing.T) {
 	e.Edit(func(c *doc.Content) { c.Children = blocks })
 	tt.Frame()
 	for _, n := range blocks {
-		r := e.geom[n.ID]
+		r := boxOf(e, n.ID)
 		tt.ClickAtWith(ui.Cmd, r.X+10, r.Y+r.H/2)
 		tt.Frame()
 	}
@@ -1235,8 +1294,8 @@ func TestNoUndoStepsThatChangeNothing(t *testing.T) {
 	e.Undo()
 	check := func(what string, caret Pos) {
 		t.Helper()
-		if e.CanUndo() || !e.CanRedo() {
-			t.Errorf("%s: undo %v, redo %v", what, e.CanUndo(), e.CanRedo())
+		if len(e.undo) > 0 || len(e.redo) == 0 {
+			t.Errorf("%s: undo %d, redo %d", what, len(e.undo), len(e.redo))
 		}
 		if e.Caret() != caret {
 			t.Errorf("%s: caret %v, want %v", what, e.Caret(), caret)
@@ -1266,8 +1325,8 @@ func TestPasteOnABlockIsOneUndoStep(t *testing.T) {
 		t.Fatalf("pasted %v", got)
 	}
 	e.Undo()
-	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "divider:", "paragraph:b"}) || e.CanUndo() {
-		t.Errorf("after undo %v, undo %v", got, e.CanUndo())
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:a", "divider:", "paragraph:b"}) || len(e.undo) > 0 {
+		t.Errorf("after undo %v, %d steps", got, len(e.undo))
 	}
 }
 
@@ -1327,7 +1386,7 @@ func TestCopyAndCutABlockSelectedWhole(t *testing.T) {
 	e.InsertBlocks(&doc.Node{ID: doc.NewBlockID(), Type: "divider"})
 	tt.Frame()
 	div := e.units()[1]
-	r := e.geom[div.ID]
+	r := boxOf(e, div.ID)
 	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
 	if e.Caret() != (Pos{div.ID, 0}) {
 		t.Fatalf("caret %v", e.Caret())
@@ -1456,8 +1515,8 @@ func TestOutdentUnindentedCodeMakesNoStep(t *testing.T) {
 	e.Undo()
 	e.PlaceCaret("C", 0)
 	e.indentCode(e.node("C"), true)
-	if e.CanUndo() || !e.CanRedo() {
-		t.Errorf("undo %v, redo %v", e.CanUndo(), e.CanRedo())
+	if len(e.undo) > 0 || len(e.redo) == 0 {
+		t.Errorf("undo %d, redo %d", len(e.undo), len(e.redo))
 	}
 }
 
@@ -1498,5 +1557,37 @@ func TestOpsFromOutsideKeepTheView(t *testing.T) {
 	e.Replace(e.Content.Copy())
 	if e.reveal != "" || e.FocusBlock() != "p1" {
 		t.Errorf("reveal %q, caret in %q", e.reveal, e.FocusBlock())
+	}
+}
+
+// Typing at the end of a block taller than the window keeps the caret in
+// sight: it is the caret's line that comes into view, not the block, whose
+// top alone would show.
+func TestTypingKeepsTheCaretOfATallBlockInView(t *testing.T) {
+	freshClipboard(t)
+	e := New(doc.Empty(), &fakeHost{})
+	e.SetWidth(500)
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Scroll(c).Fill().Children(func() {
+			ui.Column(c).FillWidth().Padding(20).Children(func() { e.View(c) })
+		})
+	}, 600, 400)
+	var lines []string
+	for i := range 80 {
+		lines = append(lines, fmt.Sprintf("line %d", i))
+	}
+	code := doc.CodeNode(strings.Join(lines, "\n"), "")
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{newText("paragraph", doc.Delta{{Text: "intro"}}), code} })
+	tt.Frame()
+	if err := tt.Click("Page"); err != nil {
+		t.Fatal(err)
+	}
+	e.PlaceCaret(code.ID, -1)
+	tt.Frame()
+	tt.Type("x")
+	tt.Frame()
+	tt.Frame()
+	if cr, _ := e.caretRect(e.focus); cr.Y < 0 || cr.Y+cr.H > 400 {
+		t.Errorf("the caret at y %.0f, out of the 400 high window", cr.Y)
 	}
 }

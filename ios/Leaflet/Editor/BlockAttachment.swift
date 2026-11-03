@@ -181,9 +181,9 @@ final class BlockViews {
         if let page = BlockCard.page(for: node) {
             let web = WebBlockView(html: page, interactive: node.type == "embed")
             web.clipsToBounds = true
-            web.onHeight = { [weak textView] h in
+            web.onHeight = { [weak textView] size in
                 // The block's room follows its page, laid out again once.
-                guard BlockHeights.set(node.id, h), let tv = textView as? EditorTextView
+                guard BlockHeights.set(node.id, size), let tv = textView as? EditorTextView
                 else { return }
                 tv.relayout(block: node.id)
             }
@@ -212,9 +212,10 @@ final class BlockViews {
     private func card(_ node: DocNode, in textView: UIView) -> BlockCard {
         BlockCard(
             node: node, links: links, edit: editable ? edit : nil,
-            onHeight: { [weak textView] h in
+            editor: (textView as? EditorTextView)?.controller,
+            onHeight: { [weak textView] size in
                 // The block's room follows its view, laid out again once.
-                guard BlockHeights.set(node.id, h), let tv = textView as? EditorTextView
+                guard BlockHeights.set(node.id, size), let tv = textView as? EditorTextView
                 else { return }
                 tv.relayout(block: node.id)
             })

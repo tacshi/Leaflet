@@ -1,5 +1,18 @@
 import Foundation
 
+/// PageHost is what a page's model needs of the app: the core, its events,
+/// and a toast. AppModel is the app's; a test gives one of its own.
+@MainActor
+protocol PageHost: AnyObject {
+    var client: CoreClient? { get }
+    func opened() async -> CoreClient?
+    func listen(_ fn: @escaping (CoreEvent) -> Void) -> UUID
+    func stopListening(_ id: UUID)
+    func show(_ toast: Toast)
+}
+
+extension AppModel: PageHost {}
+
 /// PageModel is a page open in a window: its content at the core's rev,
 /// kept current as the core sends changes from sync and agents, and the
 /// edits the editor makes, sent back over the rev they were made on.
@@ -7,7 +20,7 @@ import Foundation
 @Observable
 final class PageModel {
     let id: String
-    private let app: AppModel
+    private let app: any PageHost
     private(set) var content: DocContent?
     private(set) var rev: Int64 = 0
     /// shown is the rev of the content the editor shows, which its edits
@@ -21,8 +34,17 @@ final class PageModel {
     /// external counts the changes from outside the editor, for the editor
     /// to show them.
     private(set) var external = 0
-    /// agents is the page's agent state: its chat and runs.
+    /// agents is the page's agent state: its chat and runs; agentsLoaded
+    /// says it has been read, before which the panel can't say there is
+    /// no agent to ask.
     private(set) var agents = AgentState.empty
+    private(set) var agentsLoaded = false
+    /// chatDraft, commentDraft and replies are what was typed and not sent
+    /// in the panel: in the chat, a new comment, and the threads' replies,
+    /// by thread. The page keeps them as the panel's tabs change.
+    var chatDraft = ""
+    var commentDraft = ""
+    var replies: [String: String] = [:]
     /// threads are the page's comment threads.
     private(set) var threads: [CommentThread] = []
     /// saving says the edits wait to be saved, as the byline says.
@@ -42,7 +64,10 @@ final class PageModel {
     @ObservationIgnored private var sending = 0
     /// held is the newest change from outside that came while edits were
     /// on their way, which the editor shows once they are there.
-    @ObservationIgnored private var held: (content: DocContent, rev: Int64)?
+    @ObservationIgnored private var held: (content: DocContent, rev: Int64, agent: Bool)?
+    /// byAgent says the change from outside the editor shows is an agent
+    /// run's, as the core said it.
+    @ObservationIgnored private(set) var byAgent = false
     /// edited is the newest rev an edit left the page at, which has it: a
     /// change from outside at an older one, though it comes after the
     /// edit was taken, is from before it, and would take it away.
@@ -52,12 +77,18 @@ final class PageModel {
     /// blank says the page is one empty paragraph, which offers ways to
     /// start it.
     var blank = false
-    /// asked numbers the reads of the agents, the threads and the members,
-    /// as each is asked again on every change: an answer older than the
-    /// one shown is dropped.
+    /// asked numbers the reads of the threads and the members, as each is
+    /// asked again on every change: an answer older than the one shown is
+    /// dropped.
     @ObservationIgnored private var asked = Newest()
+    /// agentsReading is the read of the agent state under way, and
+    /// agentsQueued the one after it, which every change meanwhile shares:
+    /// a streaming answer changes it 20 times a second, and each read
+    /// waits on the core's queue that edits go through.
+    @ObservationIgnored private var agentsReading: Task<Void, Never>?
+    @ObservationIgnored private var agentsQueued: Task<Void, Never>?
 
-    init(id: String, app: AppModel) {
+    init(id: String, app: any PageHost) {
         self.id = id
         self.app = app
     }
@@ -145,22 +176,40 @@ final class PageModel {
         if let left { edited = max(edited, left) }
         guard sending == 0, let held else { return }
         self.held = nil
-        if held.rev >= edited { show(held.content, at: held.rev) }
+        if held.rev >= edited { show(held.content, at: held.rev, agent: held.agent) }
     }
 
-    /// show has the editor show content, the page at rev.
-    private func show(_ content: DocContent, at rev: Int64) {
+    /// show has the editor show content, the page at rev; agent says an
+    /// agent's run changed it, which the editor's Undo then undoes.
+    private func show(_ content: DocContent, at rev: Int64, agent: Bool = false) {
         self.content = content
         self.rev = rev
+        byAgent = agent
         external += 1
     }
 
     /// flush waits for the core to have the edits given it.
     func flush() async { await editing?.value }
 
+    /// refreshAgents reads the agent state again, and returns once a read
+    /// begun after it was asked has answered.
     func refreshAgents() async {
-        let n = asked.ask("agents")
-        if let s = try? await app.client?.agentState(id), asked.answered(n, "agents") { agents = s }
+        if let queued = agentsQueued {
+            await queued.value
+            return
+        }
+        let before = agentsReading
+        let read = Task { [weak self] in
+            await before?.value
+            guard let self else { return }
+            // Under way now: a change from here on asks for another.
+            self.agentsQueued = nil
+            if let s = try? await self.app.client?.agentState(self.id) { self.agents = s }
+            if !self.agentsLoaded { self.agentsLoaded = true }
+        }
+        agentsQueued = read
+        agentsReading = read
+        await read.value
     }
 
     func refreshThreads() async {
@@ -173,16 +222,16 @@ final class PageModel {
         if let m = try? await app.client?.members(id), asked.answered(n, "members") { members = m }
     }
 
-    private func handle(_ event: CoreEvent) {
+    /// handle follows the core's events for the page, as the app hears
+    /// them.
+    func handle(_ event: CoreEvent) {
         switch event {
-        case .pageUpdated(let pageID, let json, let newRev, _, _) where pageID == id:
-            guard newRev > (held?.rev ?? rev), newRev >= edited,
-                let c = try? JSONDecoder().decode(DocContent.self, from: Data(json.utf8))
-            else { return }
+        case .pageUpdated(let pageID, let c, let newRev, let reason, _) where pageID == id:
+            guard newRev > (held?.rev ?? rev), newRev >= edited else { return }
             if sending > 0 {
-                held = (c, newRev)
+                held = (c, newRev, reason == "agent")
             } else {
-                show(c, at: newRev)
+                show(c, at: newRev, agent: reason == "agent")
             }
         case .pageReadOnly(let pageID, let ro) where pageID == id:
             readOnly = ro
@@ -190,7 +239,7 @@ final class PageModel {
             saving = on
         case .tint(let pageID, let ids) where pageID == id:
             tinted = Set(ids)
-        case .agentsChanged:
+        case .agentsChanged(let pageID) where pageID.isEmpty || pageID == id:
             Task { await refreshAgents() }
         // The agents to pick from: a provider saved or removed, the
         // default agent, signing in or out, or all of them at once.

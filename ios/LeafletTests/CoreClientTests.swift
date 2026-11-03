@@ -55,6 +55,60 @@ struct CoreClientTests {
         #expect(settings["text_size"]?.double == 40)
     }
 
+    /// Every answer the app reads decodes from a core just opened, as the
+    /// app's types have them: a key the core leaves out, or a list it
+    /// sends as null, fails here rather than show an empty sidebar.
+    @Test func everyAnswerDecodesFromAFreshCore() async throws {
+        let page = try await client.createPage(NewPage(title: "Plan"))
+        _ = try await client.library()
+        _ = try await client.todos()
+        _ = try await client.templates()
+        _ = try await client.conflicts()
+        _ = try await client.status()
+        _ = try await client.account()
+        _ = try await client.agentState(page.id)
+        _ = try await client.threads(page.id)
+        _ = try await client.members(page.id)
+        _ = try await client.history(page.id)
+        _ = try await client.moveTargets(page.id)
+        _ = try await client.exportMarkdown(page.id)
+        _ = try await client.speechSettings()
+        _ = try await client.recordingState()
+        _ = try await client.presets()
+        _ = try await client.providers()
+        let opened = try await client.openPage(page.id)
+        await client.closePage(page.id, editor: opened.editor)
+    }
+
+    /// The To-dos tab's sections come from the core in order, overdue
+    /// first, each by date.
+    @Test func toDosComeInTheirSections() async throws {
+        let page = try await client.createPage(NewPage(title: "Chores"))
+        var opened = try await client.openPage(page.id)
+        func todo(_ id: String, _ text: String, _ due: String) -> DocNode {
+            DocNode(
+                id: id, type: "todo_list",
+                data: [
+                    "checked": .bool(false), "due": .string(due),
+                    "delta": .array([.object(["insert": .string(text)])]),
+                ], children: nil)
+        }
+        opened.content.document.children = [
+            todo("a", "Later", "2999-01-02"), todo("b", "Late", "2001-01-01"),
+            todo("c", "Sooner", "2999-01-01"),
+        ]
+        try await client.editPage(
+            page.id, editor: opened.editor, content: opened.content, rev: opened.rev)
+        await client.closePage(page.id, editor: opened.editor)
+        // Those of this page: the welcome page may have its own.
+        let mine = try await client.todos().map { group in
+            (group, group.todos.filter { $0.pageID == page.id }.map(\.text))
+        }.filter { !$0.1.isEmpty }
+        #expect(mine.map(\.0.section) == ["overdue", "upcoming"])
+        #expect(mine.first?.0.overdue == true)
+        #expect(mine.last?.1 == ["Sooner", "Later"])
+    }
+
     @Test func applyingATemplateGivesTheTitleItTook() async throws {
         let page = try await client.createPage(NewPage())
         let template = try #require(try await client.templates().first { !$0.title.isEmpty })

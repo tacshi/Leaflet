@@ -2,6 +2,8 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"time"
 )
 
@@ -154,22 +156,6 @@ func tagsFromRemote(v any) []string {
 	return NormalizeTags(tags)
 }
 
-// PutRemotePage stores a page that came from the server, unless it has a
-// change waiting here: that change wins and goes up on the next push. The
-// check and the write are one transaction, so a change made in between,
-// here or by leaflet mcp, is never overwritten.
-func (s *Store) PutRemotePage(r map[string]any) error {
-	id := S(r, "id")
-	return s.inTx(func(tx *sql.Tx) error {
-		if pending(tx, "pages", id) {
-			return nil
-		}
-		keep := true
-		_ = tx.QueryRow(`SELECT keep_offline FROM pages WHERE id = ?`, id).Scan(&keep)
-		return writePage(tx, PageFromRemote(r, keep))
-	})
-}
-
 // FolderFromRemote reads a folders row.
 func FolderFromRemote(r map[string]any) Folder {
 	sk := S(r, "sort_key")
@@ -226,4 +212,129 @@ func ProviderFromRemote(r map[string]any) Provider {
 		}
 	}
 	return p
+}
+
+// pulled are the tables a pull from the server stores rows of, by id,
+// with the time each last changed there.
+var pulled = map[string]bool{"pages": true, "folders": true, "files": true, "comments": true, "recordings": true, "model_providers": true}
+
+// HasRowAt reports whether this device has a row pulled from the server as
+// it was at a time, to the millisecond kept here. One that cannot be read
+// is not had: the row is stored again, as any other is (putRemote).
+func (s *Store) HasRowAt(table, id string, at time.Time) bool {
+	if !pulled[table] {
+		return false
+	}
+	var n int
+	_ = s.db.QueryRow(`SELECT COUNT(*) FROM `+table+` WHERE id = ? AND updated_at = ?`, id, at.UnixMilli()).Scan(&n) // #nosec G202 -- table is one of pulled.
+	return n > 0
+}
+
+// putRemote stores a row that came from the server, or another device,
+// with write, unless it has a change waiting here: that change wins and
+// goes up on the next push. The check and the write are one transaction,
+// so a change made in between, here or by leaflet mcp, is never stored
+// over, and nor is one the check could not tell of. It reports whether it
+// stored the row.
+func (s *Store) putRemote(entity, id string, write func(tx *sql.Tx) error) (bool, error) {
+	stored := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		waits, err := pending(tx, entity, id)
+		if err != nil || waits {
+			return err
+		}
+		stored = true
+		return write(tx)
+	})
+	return stored && err == nil, err
+}
+
+// PutRemotePage stores a page that came from the server, unless it has a
+// change waiting here (putRemote), keeping whether it is kept offline.
+func (s *Store) PutRemotePage(r map[string]any) error {
+	id := S(r, "id")
+	_, err := s.putRemote("pages", id, func(tx *sql.Tx) error {
+		keep := true
+		if err := tx.QueryRow(`SELECT keep_offline FROM pages WHERE id = ?`, id).Scan(&keep); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		return writePage(tx, PageFromRemote(r, keep))
+	})
+	return err
+}
+
+// PutRemoteFolder stores a folder from the server, unless it has a change
+// waiting here (putRemote).
+func (s *Store) PutRemoteFolder(r map[string]any) error {
+	f := FolderFromRemote(r)
+	_, err := s.putRemote("folders", f.ID, func(tx *sql.Tx) error { return writeFolder(tx, f) })
+	return err
+}
+
+// PutRemoteComment stores a comment from the server, unless it has a
+// change waiting here (putRemote).
+func (s *Store) PutRemoteComment(r map[string]any, authorName string) error {
+	c := CommentFromRemote(r, authorName)
+	_, err := s.putRemote("comments", c.ID, func(tx *sql.Tx) error { return putComment(tx, c) })
+	return err
+}
+
+// PutRemoteFile stores a file from the server, unless it has a change
+// waiting here (putRemote), keeping its copy here until the file is
+// deleted.
+func (s *Store) PutRemoteFile(r map[string]any) error {
+	f := FileFromRemote(r)
+	stored, err := s.putRemote("files", f.ID, func(tx *sql.Tx) error {
+		if err := putFile(tx, s.Dir, f); err != nil || !f.DeletedAt.IsZero() {
+			return err
+		}
+		// A file that lives keeps its stored copy: its deletion here gave
+		// way to the server's row, as one the user may no longer delete
+		// (sync's pushRow), and the removal queued with it would take
+		// the copy the row still names.
+		_, err := tx.Exec(`DELETE FROM outbox WHERE entity = 'storage_delete' AND entity_id = ?`, "files/"+f.ID)
+		return err
+	})
+	if stored && !f.DeletedAt.IsZero() {
+		s.removeCopy(f.ID)
+	}
+	return err
+}
+
+// RecordingFromRemote reads a recordings row.
+func RecordingFromRemote(r map[string]any) Recording {
+	rec := Recording{ID: S(r, "id"), PageID: S(r, "page_id"), BlockID: S(r, "block_id"), AudioPath: S(r, "audio_path"),
+		SttProvider: S(r, "stt_provider"), SttModel: S(r, "stt_model"), Status: S(r, "status"), Language: S(r, "language"),
+		Error: S(r, "error"), CreatedAt: Time(r["created_at"]), UpdatedAt: Time(r["updated_at"])}
+	if d, ok := r["duration_ms"].(float64); ok {
+		rec.DurationMs = int(d)
+	}
+	if rec.Status == "" {
+		rec.Status = "ready"
+	}
+	if raw, err := json.Marshal(r["transcript"]); err == nil {
+		_ = json.Unmarshal(raw, &rec.Transcript)
+	}
+	return rec
+}
+
+// PutRemoteRecording stores a recording from the server, unless it has a
+// change waiting here (putRemote), keeping its audio on this device.
+func (s *Store) PutRemoteRecording(r map[string]any) error {
+	rec := RecordingFromRemote(r)
+	_, err := s.putRemote("recordings", rec.ID, func(tx *sql.Tx) error {
+		switch old, err := recordingIn(tx, s.Dir, rec.ID); {
+		case err == nil:
+			rec.LocalPath, rec.UploadedAt = old.LocalPath, old.UploadedAt
+		case !errors.Is(err, sql.ErrNoRows):
+			return err
+		}
+		return putRecording(tx, s.Dir, rec)
+	})
+	return err
+}
+
+// PutRemoteProvider stores a cloud model connection from the server.
+func (s *Store) PutRemoteProvider(r map[string]any) error {
+	return s.PutProvider(ProviderFromRemote(r))
 }

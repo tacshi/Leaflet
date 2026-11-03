@@ -3,16 +3,22 @@ package provision
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/i18n"
+
 	"leaflet/internal/supabaseapi"
+	"leaflet/supabase"
 )
 
 // fakeProject is a Management API with projects whose migrations and
@@ -29,6 +35,17 @@ type fakeProject struct {
 	members  string
 	// broken is a project whose migrations can't be listed.
 	broken string
+	// refused refuses every query.
+	refused bool
+	// meanwhile are the versions another device applies while this one
+	// waits for its lock.
+	meanwhile []string
+	// signUps are the project's Auth settings, and signUpPatches how
+	// often they were changed; authRefused refuses both, as a sign-in
+	// without the Auth scope is.
+	signUps       supabaseapi.SignUps
+	signUpPatches int
+	authRefused   bool
 }
 
 func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
@@ -55,7 +72,9 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 				{"ref":"gone","name":"Leaflet 5","status":"REMOVED","created_at":"2026-08-04","organization_slug":"me"},
 				{"ref":"dev","name":"Leaflet-dev","status":"ACTIVE_HEALTHY","created_at":"2026-07-01","organization_slug":"me"}]`)
 		case path == "/v1/projects" && r.Method == "POST":
-			var body struct{ Name string }
+			var body struct {
+				Name string `json:"name"`
+			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			f.created = body.Name
 			_, _ = io.WriteString(w, `{"ref":"made","name":"Leaflet","status":"COMING_UP"}`)
@@ -76,11 +95,38 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 				return
 			}
 			_ = json.NewEncoder(w).Encode(f.applied[ref])
+		case strings.HasSuffix(path, "/database/query") && f.refused:
+			http.Error(w, `{"message":"permission denied"}`, http.StatusBadRequest)
 		case strings.HasSuffix(path, "/database/query"):
-			var body struct{ Query string }
+			var body struct {
+				Query string `json:"query"`
+			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			f.queries = append(f.queries, body.Query)
+			for _, v := range f.meanwhile {
+				if strings.Contains(body.Query, "where version = '"+v+"') then raise exception") {
+					// As Postgres answers the check that raises.
+					http.Error(w, `{"message":"Failed to run sql query: ERROR:  P0001: leaflet_migration_applied\n"}`, http.StatusBadRequest)
+					return
+				}
+			}
 			w.WriteHeader(http.StatusCreated)
+		case strings.HasSuffix(path, "/config/auth") && f.authRefused:
+			http.Error(w, `{"message":"Forbidden resource"}`, http.StatusForbidden)
+		case strings.HasSuffix(path, "/config/auth") && r.Method == "GET":
+			_ = json.NewEncoder(w).Encode(f.signUps)
+		case strings.HasSuffix(path, "/config/auth") && r.Method == "PATCH":
+			// Only the fields sent change, as the API's PATCH does.
+			var set map[string]bool
+			_ = json.NewDecoder(r.Body).Decode(&set)
+			if v, ok := set["disable_signup"]; ok {
+				f.signUps.Disabled = v
+			}
+			if v, ok := set["mailer_autoconfirm"]; ok {
+				f.signUps.AutoConfirm = v
+			}
+			f.signUpPatches++
+			_ = json.NewEncoder(w).Encode(f.signUps)
 		case strings.HasSuffix(path, "/secrets") && r.Method == "GET":
 			_ = json.NewEncoder(w).Encode(f.secrets)
 		case strings.HasSuffix(path, "/secrets") && r.Method == "DELETE":
@@ -208,7 +254,7 @@ func TestSetupAppliesWhatIsMissing(t *testing.T) {
 		t.Fatalf("applied %d migrations, want %d", len(f.queries), len(all)-1)
 	}
 	last := all[len(all)-1]
-	if q := f.queries[len(f.queries)-1]; !strings.HasPrefix(q, last.SQL) ||
+	if q := f.queries[len(f.queries)-1]; !strings.Contains(q, last.SQL) ||
 		!strings.Contains(q, "values ('"+last.Version+"', '"+last.Name+"')") {
 		t.Errorf("the last migration is not recorded as the CLI does:\n%s", q[max(0, len(q)-300):])
 	}
@@ -296,6 +342,34 @@ func TestSetupNeverDowngrades(t *testing.T) {
 // here; a released version's hash never changes.
 var functionsHashes = map[int]string{
 	1: "6c7a63f55f1a88ba9ced2e8085b35cf1e781c73438e276ef73709cefef78836b",
+	2: "ba484424da07bf59753dc8d53e3c9415f30e62cf3f8833f3029fbe0edec2e35b",
+}
+
+// The functions a project gets import their packages at exact versions:
+// their lock does not go with them, and "@2" would be whatever 2.x is the
+// newest as each project deploys, untested, and differ between projects of
+// one FunctionsVersion.
+func TestFunctionsImportExactVersions(t *testing.T) {
+	spec := regexp.MustCompile(`"((?:jsr|npm):@?[^"@]+@[^"]*)"`)
+	exact := regexp.MustCompile(`@\d+\.\d+\.\d+$`)
+	err := fs.WalkDir(supabase.Backend, "functions", func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || strings.HasSuffix(path, "_test.ts") {
+			return err
+		}
+		src, err := fs.ReadFile(supabase.Backend, path)
+		if err != nil {
+			return err
+		}
+		for _, m := range spec.FindAllStringSubmatch(string(src), -1) {
+			if !exact.MatchString(m[1]) {
+				t.Errorf("%s imports %s, not at an exact version", path, m[1])
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 // FunctionsVersion goes up with every change to the functions: a build
@@ -344,6 +418,8 @@ func TestReadyRestoresOncePaused(t *testing.T) {
 	}
 }
 
+// A function goes up with its entrypoint first, the rest of its folder and
+// the shared modules, and none of their tests.
 func TestFunctionsLeaveTestsOut(t *testing.T) {
 	files, err := functionFiles("agent")
 	if err != nil {
@@ -351,6 +427,10 @@ func TestFunctionsLeaveTestsOut(t *testing.T) {
 	}
 	if files[0].Path != "supabase/functions/agent/index.ts" {
 		t.Errorf("entrypoint %s", files[0].Path)
+	}
+	// What index.ts imports from its own folder goes with it.
+	if !slices.ContainsFunc(files, func(f supabaseapi.File) bool { return f.Path == "supabase/functions/agent/handler.ts" }) {
+		t.Error("the agent's handler stays behind")
 	}
 	for _, f := range files {
 		if strings.HasSuffix(f.Path, "_test.ts") || !strings.HasPrefix(f.Path, "supabase/functions/") {
@@ -419,5 +499,79 @@ func TestOwnerFromMembers(t *testing.T) {
 		if email != want || (want == "") != (err != nil) {
 			t.Errorf("%s: %q, %v", members, email, err)
 		}
+	}
+}
+
+// A setup that fails says so in the app's language, the API's error still
+// in it, to errors.As too.
+func TestSetupFailsInTheAppsLanguage(t *testing.T) {
+	i18n.SetLocaleFunc(func() string { return "ja" })
+	t.Cleanup(func() { i18n.SetLocaleFunc(nil) })
+	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, refused: true}
+	err := Setup(context.Background(), f.serve(t), "p", nil)
+	var api *supabaseapi.Error
+	if err == nil || !strings.HasPrefix(err.Error(), "Leaflet でデータベースを設定できませんでした（") || !strings.Contains(err.Error(), "permission denied") || !errors.As(err, &api) {
+		t.Errorf("setup: %v", err)
+	}
+}
+
+// Two devices setting a project up at once take turns, migration by
+// migration: each takes the lock first, then checks the version is not
+// recorded, before any of the migration. One the other device applied
+// while this one waited is done, and the rest go on.
+func TestSetupSkipsWhatAnotherDeviceApplied(t *testing.T) {
+	all, err := Migrations()
+	if err != nil || len(all) < 3 {
+		t.Fatalf("migrations %d, %v", len(all), err)
+	}
+	q := migrationSQL(all[1])
+	check := strings.Index(q, "where version = '"+all[1].Version+"'")
+	body := strings.Index(q, all[1].SQL)
+	record := strings.LastIndex(q, "insert into supabase_migrations.schema_migrations")
+	if !strings.HasPrefix(q, "select pg_advisory_xact_lock(") || check < 0 || body < check || record < body {
+		t.Errorf("check at %d, migration at %d, record at %d:\n%s", check, body, record, q[:min(len(q), 400)])
+	}
+
+	f := &fakeProject{
+		applied:   map[string][]supabaseapi.Migration{"p": {{Version: all[0].Version}}},
+		meanwhile: []string{all[1].Version},
+	}
+	var steps [][2]int
+	if err := Setup(context.Background(), f.serve(t), "p", func(done, total int) { steps = append(steps, [2]int{done, total}) }); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.queries) != len(all)-1 {
+		t.Errorf("sent %d migrations, want %d", len(f.queries), len(all)-1)
+	}
+	if want := len(all) - 1 + len(Functions); len(steps) != want {
+		t.Errorf("progress %v", steps)
+	}
+
+	// Any other failure still stops it.
+	f = &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, refused: true}
+	if err := Setup(context.Background(), f.serve(t), "p", nil); err == nil {
+		t.Error("a refused migration counted as applied")
+	}
+}
+
+// Setup keeps the project's Auth to the owner's account: sign-ups off and
+// addresses confirmed, changed only when they differ. A sign-in that may
+// not touch Auth leaves them, and the setup goes on.
+func TestSetupClosesSignUps(t *testing.T) {
+	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, signUps: supabaseapi.SignUps{AutoConfirm: true}}
+	api := f.serve(t)
+	if err := Setup(context.Background(), api, "p", nil); err != nil {
+		t.Fatal(err)
+	}
+	if f.signUps != (supabaseapi.SignUps{Disabled: true}) || f.signUpPatches != 1 {
+		t.Errorf("sign-ups %+v after %d changes", f.signUps, f.signUpPatches)
+	}
+	if err := Setup(context.Background(), api, "p", nil); err != nil || f.signUpPatches != 1 {
+		t.Errorf("set up again: %v, %d changes", err, f.signUpPatches)
+	}
+
+	f = &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, authRefused: true}
+	if err := Setup(context.Background(), f.serve(t), "p", nil); err != nil || len(f.deployed) != len(Functions) {
+		t.Errorf("with Auth refused: %v, deployed %v", err, f.deployed)
 	}
 }

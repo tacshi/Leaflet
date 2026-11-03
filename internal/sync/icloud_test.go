@@ -1745,7 +1745,7 @@ func TestICloudHeldEntriesOutlastAStop(t *testing.T) {
 	if err := a.svc.cloudPush(ctx, a.st.DeviceID()); err != nil {
 		t.Fatal(err)
 	}
-	stopped := errors.New("stopped")
+	const stopped = "stopped"
 	applyingHeld = func(icloud.Entry) { panic(stopped) }
 	func() {
 		defer func() {
@@ -1832,7 +1832,7 @@ func TestICloudSettledRecordingGivesWayToAFinishedOne(t *testing.T) {
 	}
 	a.sync()
 	time.Sleep(5 * time.Millisecond)
-	if _, err := b.st.SettleRecording(rec.ID, "transcribing", func(r *store.Recording) { r.Status = "failed" }); err != nil {
+	if _, err := b.st.SettleRecording(rec.ID, "transcribing", false, func(r *store.Recording) { r.Status = "failed" }); err != nil {
 		t.Fatal(err)
 	}
 	syncAll(b, a)

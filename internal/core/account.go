@@ -41,7 +41,27 @@ func (c *Core) LostBySigningIn(user *store.User) int {
 	if !c.ReplacesAccount(user) {
 		return 0
 	}
-	return c.Store.PendingCount()
+	return c.unsynced()
+}
+
+// stopRuns stops the agents' runs before the account's pages go: one that
+// ended after would store them again.
+func (c *Core) stopRuns() {
+	if c.Hub != nil {
+		c.Hub.Forget()
+	}
+}
+
+// unsynced counts the changes here not uploaded yet: the outbox's, and the
+// recordings whose audio is still being recorded, saved or transcribed,
+// which the outbox gets only once they finish. Removing the account's
+// pages would remove that audio too.
+func (c *Core) unsynced() int {
+	n := c.Store.PendingCount()
+	if c.Rec != nil {
+		n += c.Rec.Saving()
+	}
+	return n
 }
 
 // UseAccount makes user the session, once signed in: the previous
@@ -53,6 +73,7 @@ func (c *Core) LostBySigningIn(user *store.User) int {
 // mcp, to ask again.
 func (c *Core) UseAccount(user *store.User, drop bool) error {
 	if drop && c.ReplacesAccount(user) {
+		c.stopRuns()
 		if err := c.Store.ForgetAccount(); err != nil {
 			return err
 		}
@@ -76,12 +97,13 @@ func (c *Core) UseAccount(user *store.User, drop bool) error {
 func (c *Core) Leave(clear func() error, synced bool) (unsynced int, err error) {
 	c.Sync.Hold(func() {
 		if synced {
-			if unsynced = c.Store.PendingCount(); unsynced > 0 {
+			if unsynced = c.unsynced(); unsynced > 0 {
 				return
 			}
 		}
+		c.stopRuns()
 		if err = clear(); errors.Is(err, store.ErrUnsynced) {
-			unsynced, err = max(c.Store.PendingCount(), 1), nil
+			unsynced, err = max(c.unsynced(), 1), nil
 			return
 		}
 		c.Remote.SignOut()
@@ -204,24 +226,28 @@ func (c *Core) signInAsOwner(ctx context.Context, api *supabaseapi.Client, p sup
 // account's sign-in kept from signing in. One already running does it
 // for this one too: two at once would renew the same sign-in, and the
 // one that loses forgets it.
-func (c *Core) UpdateProject() {
+func (c *Core) UpdateProject() { _ = c.updateProject() }
+
+// updateProject is UpdateProject, and reports whether it is worth trying
+// again: it failed, but for the Supabase sign-in gone.
+func (c *Core) updateProject() (again bool) {
 	if !updating.TryLock() {
-		return
+		return false
 	}
 	defer updating.Unlock()
 	ref := c.Remote.Project().Ref
 	if ref == "" || !c.Remote.SignedIn() {
-		return
+		return false
 	}
 	raw, err := keychain.Get(managementKey)
 	if errors.Is(err, keychain.ErrNotFound) || err == nil && len(raw) == 0 {
 		// Signed in without the Supabase account, as to a server of one's
 		// own: there is nothing to bring up to date with.
-		return
+		return false
 	}
 	if err != nil {
 		log.Printf("update project %s: the Supabase sign-in: %v", ref, err)
-		return
+		return false
 	}
 	api := supabaseapi.Resume(string(raw))
 	api.OnRefresh = keepManagement
@@ -233,6 +259,38 @@ func (c *Core) UpdateProject() {
 			if err := keychain.Delete(managementKey); err != nil {
 				log.Printf("update project %s: forget the Supabase sign-in: %v", ref, err)
 			}
+			return false
 		}
+		return true
+	}
+	return false
+}
+
+// projectRetries are the waits before trying again to bring the project up
+// to date, after the first try failed, as offline as the app started;
+// tests shorten them.
+var projectRetries = []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute}
+
+// keepProjectUpdated brings the project up to date as the app starts, and
+// tries again a few times later if that failed. The changes wait to go up
+// for the first try alone: a project that can't be reached then is most
+// likely up to date already, and holding them back longer would leave
+// them on this device.
+func (c *Core) keepProjectUpdated() {
+	again := c.updateProject()
+	c.updatingProject.Store(false)
+	c.Sync.Kick()
+	// One run of tries at a time, as iOS starts the core again each time
+	// the app comes back to the screen.
+	if !again || !c.retryingUpdate.CompareAndSwap(false, true) {
+		return
+	}
+	defer c.retryingUpdate.Store(false)
+	for _, wait := range projectRetries {
+		if !again {
+			return
+		}
+		time.Sleep(wait)
+		again = c.updateProject()
 	}
 }

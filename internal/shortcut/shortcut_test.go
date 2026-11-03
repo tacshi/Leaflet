@@ -12,6 +12,11 @@ func TestBlock(t *testing.T) {
 	}{
 		{"paragraph", "# ", "heading", true},
 		{"paragraph", "###　", "heading", true},
+		{"paragraph", "＃　", "heading", true},
+		{"paragraph", "１．　", "numbered_list", true},
+		{"paragraph", "－ ", "bulleted_list", true},
+		{"paragraph", "＞　", "quote", true},
+		{"paragraph", "［］　", "todo_list", true},
 		{"paragraph", "``` ", "code", true},
 		{"paragraph", "[X] ", "todo_list", true},
 		{"bulleted_list", "[] ", "todo_list", true},
@@ -68,5 +73,24 @@ func TestOpensMenu(t *testing.T) {
 		if OpensMenu(r) != want {
 			t.Errorf("OpensMenu(%q) = %v", r, !want)
 		}
+	}
+}
+
+// The full-width "／" and "＠" open their menus as "/" and "@" do, and
+// "、" the / menu, but only where it is no comma: at a block's start or
+// after a space.
+func TestMenu(t *testing.T) {
+	for _, tc := range []struct {
+		r, before, want rune
+	}{
+		{'/', 0, '/'}, {'／', 0, '/'}, {'／', '字', '/'}, {'＠', ' ', '@'}, {'@', 'a', 0}, {'／', 'a', 0},
+		{'、', 0, '/'}, {'、', ' ', '/'}, {'、', '　', '/'}, {'、', '果', 0}, {'x', 0, 0},
+	} {
+		if got := Menu(tc.r, tc.before); got != tc.want {
+			t.Errorf("Menu(%q, %q) = %q, want %q", tc.r, tc.before, got, tc.want)
+		}
+	}
+	if !Divider("paragraph", "－－－") || Divider("heading", "---") {
+		t.Error("a full-width divider")
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"leaflet/internal/doc"
+	"leaflet/locales"
 )
 
 // draft is a call that writes blocks going into the page while its
@@ -15,7 +16,7 @@ import (
 // blocks, after a replace of the empty block the first took the place of.
 type draft struct {
 	// verb says what the call did, in its edits.
-	verb string
+	verb func(what string) string
 	pos  doc.Position
 	// into is the empty block the first block takes the place of, and
 	// prev that block as it was.
@@ -28,8 +29,9 @@ type draft struct {
 	// replaceAt and insertAt are the call's ops among the run's, -1
 	// before it has them.
 	replaceAt, insertAt int
-	// frozen is a draft a block of which could not go in: the rest wait
-	// for the whole call, which then fails.
+	// frozen is a draft a block of which could not go in, or of more
+	// blocks than may go in (fits): the rest wait for the whole call,
+	// which then fails.
 	frozen bool
 }
 
@@ -68,15 +70,18 @@ func (x *Executor) Draft(name, raw string) {
 		if err != nil {
 			return
 		}
-		d.verb = "Inserted"
+		d.verb = locales.AgentEditInserted
 		if name == "write_markdown" {
-			d.verb = "Wrote"
+			d.verb = locales.AgentEditWrote
 		}
 		x.draft = d
 	}
 	if name == "write_markdown" {
 		md, _ := args["markdown"].(string)
 		nodes := doc.MarkdownBlocks(md)
+		if !x.fits(nodes) {
+			return
+		}
 		_ = x.syncDraft(nodes, len(nodes)-1)
 		return
 	}
@@ -98,7 +103,22 @@ func (x *Executor) Draft(name, raw string) {
 		}
 		nodes = append(nodes, n)
 	}
+	if !x.fits(nodes) {
+		return
+	}
 	_ = x.syncDraft(nodes, len(list)-1)
+}
+
+// fits reports whether a draft's blocks are within the most a call writes
+// and a run does. One past them freezes the draft: the page gets no more
+// of it, and the whole call, refused once it has come, takes out what it
+// put in.
+func (x *Executor) fits(nodes []*doc.Node) bool {
+	if doc.CallNodes(nodes) != nil || x.room(nodes) != nil {
+		x.draft.frozen = true
+		return false
+	}
+	return true
 }
 
 // newDraft is a draft of blocks going where raw says: insert_blocks'
@@ -110,10 +130,10 @@ func (x *Executor) newDraft(raw any, replace bool) (*draft, error) {
 	// position has.
 	if m := given(raw); replace && m["replace"] != nil {
 		id, _ := m["replace"].(string)
-		n := x.Ctx.Content.Find(id)
+		n := x.block(id)
 		switch {
 		case n == nil:
-			return nil, terr("No block with ID %q.", id)
+			return nil, noBlock(id)
 		case !n.IsText() || n.Delta().Len() > 0 || len(n.Children) > 0:
 			return nil, terr("position.replace takes an empty block only; use replace_block to rewrite one.")
 		}
@@ -158,12 +178,16 @@ func (x *Executor) FinishDraft(name, raw string) (map[string]any, bool) {
 			return fail(err)
 		}
 	}
+	if err := x.room(nodes); err != nil {
+		return fail(err)
+	}
 	x.draft.frozen = false
 	if err := x.syncDraft(nodes, len(nodes)); err != nil {
 		return fail(err)
 	}
 	ids := x.draft.ids
 	x.draft = nil
+	x.written += countNodes(nodes)
 	return map[string]any{"inserted_ids": ids}, true
 }
 

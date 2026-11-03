@@ -1,15 +1,17 @@
 // Package rendered makes the pages that draw math and diagram blocks:
 // TeX drawn by KaTeX as MathML, and Mermaid drawn by Pele as SVG. The
 // desktop shows them in sandboxed frames, the iOS app in web views; either
-// way they have no network. The scripts are in third_party.
+// way their policy keeps them off the network. The scripts are in
+// third_party.
 package rendered
 
 import (
+	"crypto/sha256"
 	_ "embed"
+	"encoding/base64"
 	"encoding/json"
 	"html"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"leaflet/internal/doc"
@@ -53,14 +55,41 @@ body{padding:6px 0;overflow:hidden;text-align:center}
 .err{font:12.5px -apple-system,system-ui,sans-serif;color:#a61b1b;white-space:pre-wrap;text-align:left;padding:2px 4px}
 :root[data-theme="dark"] .err{color:#ffa3a3}`
 
+// scriptsCSP is the policy of a page that runs only scripts, by their
+// hashes: nothing a formula or a diagram's source makes of the page, as an
+// element with an event handler in the SVG, runs, and nothing comes from
+// the network but pictures in data URLs.
+func scriptsCSP(scripts ...string) string {
+	policy := "default-src 'none'; script-src"
+	for _, s := range scripts {
+		sum := sha256.Sum256([]byte(s))
+		policy += " 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
+	}
+	return policy + "; style-src 'unsafe-inline'; img-src data:"
+}
+
+// dataScript is v as JSON in a script element that runs nothing, for a
+// page's own script to read by its id.
+func dataScript(id string, v any) string {
+	b, _ := json.Marshal(v)
+	return `<script type="application/json" id="` + id + `">` + strings.ReplaceAll(string(b), "</", `<\/`) + `</script>`
+}
+
+// mathScript draws the formula in the page's data.
+const mathScript = `var m = document.getElementById("m");
+try { katex.render(JSON.parse(document.getElementById("formula").textContent), m, {displayMode: true, output: "mathml", throwOnError: true}); }
+catch (e) { m.className = "err"; m.textContent = e.message; }`
+
+// MathCSP is the math page's policy: KaTeX and the script that calls it.
+var MathCSP = scriptsCSP(KatexJS, mathScript)
+
 // MathPage draws a TeX formula in display style.
 func MathPage(formula string) string {
-	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>` + renderedStyle + `
-math{font-size:1.35em}</style></head><body><div id="m"></div>
+	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
+		`<meta http-equiv="Content-Security-Policy" content="` + MathCSP + `"><style>` + renderedStyle + `
+math{font-size:1.35em}</style></head><body><div id="m"></div>` + dataScript("formula", formula) + `
 <script>` + KatexJS + `</script>
-<script>var m = document.getElementById("m");
-try { katex.render(` + ScriptString(formula) + `, m, {displayMode: true, output: "mathml", throwOnError: true}); }
-catch (e) { m.className = "err"; m.textContent = e.message; }</script></body></html>`
+<script>` + mathScript + `</script></body></html>`
 }
 
 // ZoomScript defines leafletZoom(view, box, on, full, zoomed), which lets
@@ -208,21 +237,28 @@ body{padding:0}
 #d{height:100%;box-sizing:border-box;padding:24px;display:flex;align-items:center;justify-content:center}
 #d svg{width:100%;height:100%}`
 	}
-	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>` + renderedStyle + `
+	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
+		`<meta http-equiv="Content-Security-Policy" content="` + DiagramCSP + `"><style>` + renderedStyle + `
 .pele{--pele-bg:` + bg + `;--pele-fg:#16181d;--pele-muted:#565c67;--pele-line:#3d424c;--pele-surface:#f5f6f8;--pele-surface-alt:#eceef2;--pele-border:#c9ced8;--pele-accent:#3446c9;--pele-fg-on-light:#16181d;--pele-fg-on-dark:#e9ebef;--pele-font:-apple-system,system-ui,sans-serif}
 :root[data-theme="dark"] .pele{--pele-fg:#e9ebef;--pele-muted:#9ea4af;--pele-line:#c0c5ce;--pele-surface:#23272e;--pele-surface-alt:#2b3038;--pele-border:#3a404a;--pele-accent:#8a97ff}
 svg{max-width:100%;height:auto}
 #v{overflow:hidden}
 #d{transform-origin:0 0}
 #v.zoomed{cursor:grab;-webkit-user-select:none;user-select:none}
-#v.dragging{cursor:grabbing}` + fill + `</style></head><body><div id="v"><div id="d"></div></div>
-<script type="module">` + PeleModule + "\n" + ZoomScript + `
+#v.dragging{cursor:grabbing}` + fill + `</style></head><body><div id="v"><div id="d"></div></div>` +
+		dataScript("diagram", map[string]any{"source": source, "full": full}) + `
+<script type="module">` + diagramScript + `</script></body></html>`
+}
+
+// diagramScript draws the diagram in the page's data with Pele, and lets
+// it zoom.
+var diagramScript = PeleModule + "\n" + ZoomScript + `
 // In a block of its own, clear of the names Pele's module takes.
 {
   const view = document.getElementById("v"), box = document.getElementById("d");
-  try { box.innerHTML = peleRender(` + ScriptString(source) + `, {fontFamily: "-apple-system, system-ui, sans-serif"}).svg; }
+  const {source, full} = JSON.parse(document.getElementById("diagram").textContent);
+  try { box.innerHTML = peleRender(source, {fontFamily: "-apple-system, system-ui, sans-serif"}).svg; }
   catch (e) { box.className = "err"; box.textContent = e.message; }
-  const full = ` + strconv.FormatBool(full) + `;
   const zoom = leafletZoom(view, box, window, full, (z) => parent.postMessage({leafletZoomed: z}, "*"));
   if (full) addEventListener("keydown", e => {
     if (e.key === "Escape") parent.postMessage({leafletExit: true}, "*");
@@ -230,8 +266,10 @@ svg{max-width:100%;height:auto}
   addEventListener("message", e => {
     if (e.source === parent && e.data && e.data.leafletZoom) zoom(e.data.leafletZoom);
   });
-}</script></body></html>`
-}
+}`
+
+// DiagramCSP is the diagram page's policy: its one script, with Pele.
+var DiagramCSP = scriptsCSP(diagramScript)
 
 // Video blocks play their site's player, or the file, in a page of their
 // own, once play is pressed.

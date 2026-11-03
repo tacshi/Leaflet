@@ -229,7 +229,7 @@ func (c *Core) SignOut(anyway bool) (unsynced int, err error) {
 		}
 	}
 	// Between sync passes, which Leave waits for, off the queue.
-	unsynced, err = c.core.Leave(forget, !anyway)
+	unsynced, err = c.leave(forget, !anyway)
 	if unsynced > 0 {
 		return unsynced, nil
 	}
@@ -237,12 +237,27 @@ func (c *Core) SignOut(anyway bool) (unsynced int, err error) {
 		err = errors.New(locales.SettingsRemovePagesFailed(err.Error()))
 	}
 	c.q.do(func() {
-		c.closePages()
 		if _, e := c.core.Store.LoadSession(nil); e != nil && err == nil {
 			err = e
 		}
 	})
 	return 0, err
+}
+
+// leave signs out and clears this device with clear, as core.Leave does,
+// closing the open pages as it clears, in one turn of the queue: no save
+// or retry of theirs comes between, to write a page of the account that
+// left back to the device. A clear that keeps the pages, for a change
+// not up yet, leaves them open, as the user may stay.
+func (c *Core) leave(clear func() error, synced bool) (int, error) {
+	return c.core.Leave(func() (err error) {
+		c.q.do(func() {
+			if err = clear(); !errors.Is(err, store.ErrUnsynced) {
+				c.closePages()
+			}
+		})
+		return err
+	}, synced)
 }
 
 // account is who is signed in, and to which project, as Account returns
@@ -402,12 +417,11 @@ func (c *Core) DeleteAccount() (err error) {
 		return errors.New(locales.SettingsDeleteAccountFailed(err.Error()))
 	}
 	// Nothing of the account is left to keep: the open pages go unsaved.
-	_, err = c.core.Leave(c.core.Store.Wipe, false)
+	_, err = c.leave(c.core.Store.Wipe, false)
 	if err != nil {
 		err = errors.New(locales.SettingsRemovePagesFailed(err.Error()))
 	}
 	c.q.do(func() {
-		c.closePages()
 		if _, e := c.core.Store.LoadSession(nil); e != nil && err == nil {
 			err = e
 		}

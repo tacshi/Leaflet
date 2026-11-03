@@ -35,12 +35,18 @@ func TestTextColorAndHighlight(t *testing.T) {
 		t.Fatalf("delta %+v", d)
 	}
 	e.SetHighlight("#eab30840")
-	spans := e.spans(n, nil, ui.Font{})
+	spans := e.spans(n, theme.For(false), ui.Font{})
 	if spans[1].Color != ui.Hex("#ef4444") || spans[1].Background != ui.Hex("#eab30840") {
 		t.Errorf("span %+v", spans[1])
 	}
+	// In dark, the text shows in the color's lighter shade, which reads
+	// on dark paper; the highlight is as it was.
+	spans = e.spans(n, theme.For(true), ui.Font{})
+	if spans[1].Color != ui.Hex("#f87171") || spans[1].Background != ui.Hex("#eab30840") {
+		t.Errorf("dark span %+v", spans[1])
+	}
 	// Remove color, from the context menu, takes both away.
-	r := e.geom[n.ID]
+	r := boxOf(e, n.ID)
 	tt.RightClickAt(r.X+20, r.Y+r.H/2)
 	if err := chooseDrawn(tt, "Remove color"); err != nil {
 		t.Fatalf("%v; shown %v", err, tt.Texts())

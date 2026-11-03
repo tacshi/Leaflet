@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 
 	"leaflet/internal/doc"
@@ -48,6 +49,91 @@ func TestAgentsAsTheServerHasThem(t *testing.T) {
 		x.Call("create_subpage", map[string]any{"title": tc.Title})
 		if (made == nil) != (tc.Made == nil) || made != nil && *made != *tc.Made {
 			t.Errorf("%q made %v, want %v", tc.Title, made, tc.Made)
+		}
+	}
+}
+
+// contract is a schema as both sides check it: its words left out, its
+// lists of names sorted, as the server's test writes it.
+func contract(v any) any {
+	switch x := v.(type) {
+	case []any:
+		out := make([]any, len(x))
+		names := true
+		for i, e := range x {
+			out[i] = contract(e)
+			_, ok := out[i].(string)
+			names = names && ok
+		}
+		if names {
+			slices.SortFunc(out, func(a, b any) int { return strings.Compare(a.(string), b.(string)) })
+		}
+		return out
+	case map[string]any:
+		out := map[string]any{}
+		for k, e := range x {
+			if k != "description" {
+				out[k] = contract(e)
+			}
+		}
+		return out
+	}
+	return v
+}
+
+// The tools offer the model what the server's offer it, and take and
+// refuse the same calls (supabase/functions/_shared/testdata/tools.json,
+// which its tests write): a call that works on a cloud run works here.
+func TestToolsAsTheServerHasThem(t *testing.T) {
+	raw, err := os.ReadFile("../../supabase/functions/_shared/testdata/tools.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Schemas map[string]any `json:"schemas"`
+		Calls   []struct {
+			Tool string `json:"tool"`
+			Args string `json:"args"`
+			OK   bool   `json:"ok"`
+		} `json:"calls"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Schemas) == 0 || len(f.Calls) == 0 {
+		t.Fatal("the fixture has no cases")
+	}
+	defs, _ := json.Marshal(ToolDefinitions(true, false))
+	var ours []struct {
+		Function struct {
+			Name       string `json:"name"`
+			Parameters any    `json:"parameters"`
+		} `json:"function"`
+	}
+	if err := json.Unmarshal(defs, &ours); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range ours {
+		want, ok := f.Schemas[d.Function.Name]
+		if !ok {
+			t.Errorf("%s: the server has no such tool", d.Function.Name)
+			continue
+		}
+		got, _ := json.Marshal(contract(d.Function.Parameters))
+		w, _ := json.Marshal(want)
+		if string(got) != string(w) {
+			t.Errorf("%s takes\n%s\nthe server's\n%s", d.Function.Name, got, w)
+		}
+	}
+	if len(ours) != len(f.Schemas) {
+		t.Errorf("%d tools here, %d on the server", len(ours), len(f.Schemas))
+	}
+	for _, c := range f.Calls {
+		x := executor(page())
+		x.Ctx.CreateSubpage = func(string, []*doc.Node) (string, error) { return "page-2", nil }
+		out := x.CallRaw(c.Tool, c.Args)
+		if _, refused := out["error"]; refused == c.OK {
+			t.Errorf("%s %s: refused %v (%v), the server's ok %v", c.Tool, c.Args, refused, out["error"], c.OK)
 		}
 	}
 }

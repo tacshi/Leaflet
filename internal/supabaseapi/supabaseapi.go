@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"leaflet/internal/oauth"
+	"leaflet/locales"
 )
 
 // ClientID is the OAuth app Leaflet signs in as, registered in a Supabase
@@ -58,8 +59,23 @@ type Error struct {
 func (e *Error) Error() string { return e.Message }
 
 // ErrSignedOut is a sign-in that ended: revoked, or its refresh token
-// expired.
-var ErrSignedOut = errors.New("Your Supabase sign-in ended. Sign in with Supabase again.") //nolint:staticcheck // shown to people as a sentence.
+// expired. It says so in the app's language, as it is shown.
+var ErrSignedOut error = errSignedOut{}
+
+type errSignedOut struct{}
+
+func (errSignedOut) Error() string { return locales.SupabaseSignedOut() }
+
+// failed is an error said as a sentence that holds err, in the app's
+// language, and still err to errors.Is and errors.As.
+type failed struct {
+	msg string
+	err error
+}
+
+func (f *failed) Error() string { return f.msg }
+
+func (f *failed) Unwrap() error { return f.err }
 
 // Client is a signed-in connection to the Management API.
 type Client struct {
@@ -136,13 +152,13 @@ func BeginSignIn() (authURL, state, verifier string) {
 // is exchanged for the sign-in.
 func FinishSignIn(ctx context.Context, answer url.Values, state, verifier string) (*Client, error) {
 	if subtle.ConstantTimeCompare([]byte(answer.Get("state")), []byte(state)) != 1 {
-		return nil, errors.New("Leaflet couldn't finish this sign-in, which is stale. Sign in with Supabase again.") //nolint:staticcheck // shown to people as a sentence.
+		return nil, errors.New(locales.SupabaseSignInStale())
 	}
 	if e := answer.Get("error"); e != "" {
 		if e == "access_denied" {
-			return nil, errors.New("Sign-in was cancelled.") //nolint:staticcheck // shown to people as a sentence.
+			return nil, errors.New(locales.SupabaseSignInCancelled())
 		}
-		return nil, errors.New("Supabase sign-in failed: " + e) //nolint:staticcheck // shown to people as a sentence.
+		return nil, errors.New(locales.SupabaseSignInFailed(e))
 	}
 	c := &Client{}
 	err := c.exchange(ctx, url.Values{
@@ -175,10 +191,10 @@ func (c *Client) exchange(ctx context.Context, form url.Values) error {
 		if errors.As(err, &e) && form.Get("grant_type") == "refresh_token" && e.Status == http.StatusBadRequest {
 			return ErrSignedOut
 		}
-		return fmt.Errorf("Supabase sign-in failed: %w", err) //nolint:staticcheck // shown to people as a sentence.
+		return &failed{locales.SupabaseSignInFailed(err.Error()), err}
 	}
 	if t.AccessToken == "" {
-		return errors.New("Supabase did not sign you in.") //nolint:staticcheck // shown to people as a sentence.
+		return errors.New(locales.SupabaseNoSignIn())
 	}
 	c.mu.Lock()
 	c.access, c.expires = t.AccessToken, time.Now().Add(time.Duration(t.ExpiresIn)*time.Second)
@@ -435,4 +451,24 @@ func (c *Client) DeployFunction(ctx context.Context, ref, slug, entrypoint strin
 // SetUploadLimit sets a project's largest upload, in bytes.
 func (c *Client) SetUploadLimit(ctx context.Context, ref string, limit int64) error {
 	return c.call(ctx, "PATCH", "/v1/projects/"+url.PathEscape(ref)+"/config/storage", map[string]any{"fileSizeLimit": limit}, "", nil)
+}
+
+// SignUps is what a project's Auth lets anyone with its address and
+// publishable key do: make an account (unless Disabled), and use its
+// address before confirming it (AutoConfirm). Accounts made with the
+// secret key, through Auth's admin API, need neither.
+type SignUps struct {
+	Disabled    bool `json:"disable_signup"`
+	AutoConfirm bool `json:"mailer_autoconfirm"`
+}
+
+// SignUps returns a project's sign-up settings.
+func (c *Client) SignUps(ctx context.Context, ref string) (SignUps, error) {
+	var s SignUps
+	return s, c.call(ctx, "GET", "/v1/projects/"+url.PathEscape(ref)+"/config/auth", nil, "", &s)
+}
+
+// SetSignUps sets a project's sign-up settings.
+func (c *Client) SetSignUps(ctx context.Context, ref string, s SignUps) error {
+	return c.call(ctx, "PATCH", "/v1/projects/"+url.PathEscape(ref)+"/config/auth", s, "", nil)
 }

@@ -45,15 +45,12 @@ func (a *App) tagged(tag string) []store.Page {
 
 // showTag shows a tag's pages in the Tags tab.
 func (a *App) showTag(tag string) {
-	a.sidebarTab(tabTags)
 	for _, t := range a.tagCounts() {
 		if strings.EqualFold(t.Name, tag) {
 			a.tagTree.Open.Add("tag:" + t.Name)
 		}
 	}
-	if !a.settings.SidebarOpen {
-		a.toggleSidebar()
-	}
+	a.showSidebar(tabTags)
 }
 
 // tagsTree builds the Tags tab: the tags, each with how many pages have
@@ -83,11 +80,13 @@ func (a *App) tagsTree(c *ui.Context) {
 		return out
 	}
 	s := &a.tagTree
-	a.tagRow = -1
-	for i := 0; i < s.Rows(); i++ {
-		if id, _ := taggedPage(s.Item(i)); a.route.Kind == "page" && id == a.route.ID {
-			a.tagRow = i
-			break
+	if a.tagIn.follows(a.route.Kind + ":" + a.route.ID) {
+		a.tagRow = -1
+		for i := 0; i < s.Rows(); i++ {
+			if id, _ := taggedPage(s.Item(i)); a.route.Kind == "page" && id == a.route.ID {
+				a.tagRow = i
+				break
+			}
 		}
 	}
 	s.List.Selected = &a.tagRow
@@ -101,10 +100,13 @@ func (a *App) tagsTree(c *ui.Context) {
 	}
 	opened := s.Open.Len()
 	list := ui.Outline(c, s, roots, children, func(key string) { a.tagItem(c, key, counts) }).Grow(1).Padding(0, 8, 12)
-	if list.Changed() && s.Open.Len() == opened && a.tagRow >= 0 && a.tagRow < s.Rows() {
+	pressed, submitted := a.tagIn.after(list), list.Submitted()
+	if (list.Changed() || submitted) && s.Open.Len() == opened && a.tagRow >= 0 && a.tagRow < s.Rows() {
 		key := s.Item(a.tagRow)
 		if id, ok := taggedPage(key); ok {
 			a.openPage(id)
+		} else if !pressed && !submitted {
+			// A click or Enter opens or closes a tag; the arrows only go by.
 		} else if s.Open.Has(key) {
 			s.Open.Remove(key)
 		} else {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -31,7 +32,6 @@ func (a *App) sidebar(c *ui.Context) {
 				a.newPage("", "")
 			}
 			if iconButton(c, "new-folder", "folder-plus", locales.SidebarNewFolder()).Clicked() {
-				a.sidebarTab(tabPages)
 				a.dialogs.openRenameFolder(nil)
 			}
 			if iconButton(c, "hide-sidebar", "panel-left", locales.SidebarHide()).Clicked() {
@@ -67,6 +67,15 @@ func (a *App) sidebarTab(tab int) {
 	if a.settings.SidebarTab != tab {
 		a.settings.SidebarTab = tab
 		a.saveSettings()
+	}
+}
+
+// showSidebar shows a tab of the sidebar, and the sidebar when it is
+// hidden, for what an action opens in it to be seen.
+func (a *App) showSidebar(tab int) {
+	a.sidebarTab(tab)
+	if !a.settings.SidebarOpen {
+		a.toggleSidebar()
 	}
 }
 
@@ -111,6 +120,13 @@ func (a *App) folderMenu(m *ui.Menu, f store.Folder) {
 
 // treeOpen opens an item of the tree, as a page's ancestors to show it.
 func (a *App) treeOpen(kind, id string) { a.treeState.Open.Add(kind + ":" + id) }
+
+// showInTree opens an item of the tree and shows it there: in the Pages
+// tab, the sidebar shown.
+func (a *App) showInTree(kind, id string) {
+	a.treeOpen(kind, id)
+	a.showSidebar(tabPages)
+}
 
 // tree builds the sidebar's tree: the folders of the user's space, with
 // their pages and files, and its pages, then the pages shared with the
@@ -162,10 +178,12 @@ func (a *App) tree(c *ui.Context) {
 		return nil
 	}
 	s := &a.treeState
-	a.treeRow = -1
-	for i := 0; i < s.Rows(); i++ {
-		if a.route.Kind == "page" && s.Item(i) == "page:"+a.route.ID {
-			a.treeRow = i
+	if a.treeIn.follows(a.route.Kind + ":" + a.route.ID) {
+		a.treeRow = -1
+		for i := 0; i < s.Rows(); i++ {
+			if a.route.Kind == "page" && s.Item(i) == "page:"+a.route.ID {
+				a.treeRow = i
+			}
 		}
 	}
 	s.List.Selected = &a.treeRow
@@ -175,15 +193,20 @@ func (a *App) tree(c *ui.Context) {
 	opened := s.Open.Len()
 	list := ui.Outline(c, s, roots, children, func(key string) { a.treeItem(c, key) }).Grow(1).Padding(0, 8, 12)
 	a.treeDrop(c, list)
+	pressed, submitted := a.treeIn.after(list), list.Submitted()
 	// An arrow closing an item over the open page chooses the item,
 	// which it has closed already: that is no click on it.
-	if list.Changed() && s.Open.Len() == opened && a.treeRow >= 0 && a.treeRow < s.Rows() {
+	if (list.Changed() || submitted) && s.Open.Len() == opened && a.treeRow >= 0 && a.treeRow < s.Rows() {
 		key := s.Item(a.treeRow)
 		kind, id, _ := strings.Cut(key, ":")
 		switch kind {
 		case "page":
 			a.openPage(id)
 		case "folder":
+			// A click or Enter opens or closes it; the arrows only go by.
+			if !pressed && !submitted {
+				break
+			}
 			if s.Open.Has(key) {
 				s.Open.Remove(key)
 			} else {
@@ -197,6 +220,56 @@ func (a *App) tree(c *ui.Context) {
 			}
 		}
 	}
+}
+
+// treeInput follows a sidebar tree's input: whether it had the keyboard
+// as it last built, which keeps its row chosen where the arrows put it
+// rather than on the page open, and when the pointer was last pressed on
+// it, which tells a click from an arrow. open is the page the row chosen
+// went to last, and wait the frames it may still take for its row to
+// show, as the pages above it open.
+type treeInput struct {
+	focused   bool
+	pressedAt time.Time
+	open      string
+	wait      int
+}
+
+// clickChooses is how long after a press on a tree a row it chooses is
+// taken as clicked: the list chooses as the press is let go, and a press
+// a row took itself, as a page's to open it, chooses nothing.
+const clickChooses = time.Second
+
+// follows reports whether the row chosen goes to the page open, id: while
+// the tree has the keyboard, it stays where the arrows put it, unless
+// another page is opened meanwhile.
+func (in *treeInput) follows(id string) bool {
+	if id != in.open {
+		in.open, in.wait = id, 3
+	}
+	if in.wait > 0 {
+		in.wait--
+		return true
+	}
+	return !in.focused
+}
+
+// after takes the input of list, as it is built, and reports whether its
+// row chosen now, if it was, was chosen with the pointer: a click chooses
+// as it is let go, a frame or more after the press.
+func (in *treeInput) after(list ui.Element) bool {
+	in.focused = list.Focused()
+	list.HandleInput(func(ev ui.InputEvent) bool {
+		if ev.Kind == ui.InputPointerDown {
+			in.pressedAt = time.Now()
+		}
+		return false
+	})
+	pressed := !in.pressedAt.IsZero() && time.Since(in.pressedAt) < clickChooses
+	if list.Changed() || list.Submitted() {
+		in.pressedAt = time.Time{}
+	}
+	return pressed
 }
 
 // treeLabel is the text of an item of the tree.
@@ -308,6 +381,8 @@ func (a *App) treeItem(c *ui.Context, key string) {
 			}
 			if row.Clicked() {
 				a.openPage(id)
+				// The press is the row's, which chose no row of the list.
+				a.treeIn.pressedAt = time.Time{}
 			}
 		}
 		a.pageDrop(c, row, key)
@@ -387,7 +462,7 @@ func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (
 		return dropInside, key, 0, a.canMoveInside(d.id, key)
 	}
 	t := a.pageByID(id)
-	if t == nil || t.SpaceID != p.SpaceID || id != d.id && a.st.IsDescendant(id, d.id) {
+	if t == nil || t.SpaceID != p.SpaceID || id != d.id && a.isUnder(id, d.id) {
 		return 0, "", 0, false
 	}
 	top := a.canMoveInside(d.id, "")
@@ -425,7 +500,7 @@ func (a *App) canMoveInside(id, key string) bool {
 		return !a.isShared(*p)
 	}
 	t := a.pageByID(target)
-	return t != nil && target != id && t.SpaceID == p.SpaceID && !a.st.IsDescendant(target, id) && a.canEdit(target)
+	return t != nil && target != id && t.SpaceID == p.SpaceID && !a.isUnder(target, id) && a.canEdit(target)
 }
 
 // treeIndent is how far in each level of the tree is.

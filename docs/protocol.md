@@ -30,6 +30,13 @@ metadata:
 
 - Node JSON is appflowy_editor's (`type`, `data`, `children`) **plus `id`**, the
   stable block ID. Comments, focus lists, and agent ops address blocks by ID.
+- A block's ID is its own in the page. A writer gives every block it
+  makes a new random ID, a pasted or copied one too. A reader of stored
+  content gives a block without one, or with one an earlier block or the
+  page (`root`) has, its ID and how many blocks had it so far: the second
+  `a` is `a-2`, the first block without one `block-1`, skipping IDs the
+  page has. Every reader makes the same (`doc.Decode`, `normalizeContent`),
+  so a merge matches the blocks up rather than keeping each reader's copy.
 - `meta.blocks[id]` is the last time (ms since epoch) that block's own content,
   type, or position changed. `meta.deleted[id]` is a tombstone.
 - Until CRDTs land, two versions of a page merge **last-write-wins per block**
@@ -40,6 +47,11 @@ metadata:
   was; if the other side changed any of it, it comes back whole, and the
   conflict is kept with the deleted side's node null, so the user can delete
   it again.
+- A table's cells are a grid. Rows or columns both sides added at the same
+  places are both kept: those of the side whose latest edit is older go
+  after the other's, stamped as changed after either side's edits, and the
+  table grows to hold every cell. A cell that differs only in its place, or
+  a table only in its size, is no conflict.
 - Saves are compare-and-set on `page_content.revision`, which the server
   moves on with every update. A writer reads `content, revision`, merges,
   then updates `where page_id = … and revision = <what it read>`. Zero rows
@@ -59,10 +71,10 @@ metadata:
 | `callout` | `delta`, `tone` (`info`\|`tip`\|`warning`\|`danger`) | a tinted box; Markdown writes it as a GitHub alert |
 | `toggle_list` | `delta`, `collapsed` | any blocks nest in `children`, hidden while collapsed |
 | `divider` | — | |
-| `image` | `url`, `align`, `width`, `height` | |
+| `image` | `url`, `align`, `alt`, `width`, `height` | |
 | `table` | `colsLen`, `rowsLen`, … | children are `table/cell` nodes with `colPosition`, `rowPosition`, each holding one `paragraph` |
 | `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client |
-| `embed` | `title`, `html`, `height` | sandboxed HTML, no access to app storage or tokens |
+| `embed` | `title`, `html`, `height`, `author` | sandboxed HTML, no access to app storage or tokens |
 | `video` | `url`, `title` | a YouTube or Vimeo link, or a link to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page |
 | `link_preview` | `url`, `title`, `description`, `image`, `site` | a card for a web page; the client fills in what the page says about itself |
 | `file` | `file_id`, `url`, `name`, `size`, `mime` | a file kept with the page, as a card |
@@ -123,11 +135,13 @@ loop with the same tools. Tool definitions live in
 
 One of: `{ "after": "<block id>" }`, `{ "before": "<block id>" }`,
 `{ "parent": "<block id>" }` (append as last child), `{ "at": "start" }`,
-`{ "at": "end" }`. Only keys given a value count: models that write every
-key of a schema give the others `null` or `""`, and those are left out. `at`,
-which such a model fills with one of its two values, counts only alone, so
-`{ "after": "a1", "at": "end" }` is after `a1`. Any other two keys are an
-error.
+`{ "at": "end" }`; `"start"` or `"end"` alone is that end of the page. Only
+keys given a value count: models that write every key of a schema give the
+others `null` or `""`, and those are left out, as are keys a position does
+not have. `at`, which such a model fills with one of its two values, counts
+only alone, so `{ "after": "a1", "at": "end" }` is after `a1`. Any other two
+keys are an error, `replace` (below) among them where only `write_markdown`
+takes it.
 
 `write_markdown` also takes `{ "replace": "<block id>" }`: an empty text
 block (no text at all, not even a space, and no children) to write in place
@@ -139,7 +153,7 @@ says where whatever other keys the position has.
 | name | arguments | returns |
 | --- | --- | --- |
 | `read_page` | — | `{ page: {id, title}, blocks: [BlockView], subpages: [{id, title}], comments: [{block_id, resolved, thread: [{author, body}]}] }` |
-| `write_markdown` | `position` (or `{ replace }`), `markdown` | `{ inserted_ids: [...] }` (a block a line: paragraphs, `#` to `###` headings, `-`/`1.` lists, `- [ ]` to-dos, `>` quotes, fenced code, `$$` formulas, ` ```mermaid ` diagrams, `\|` tables, `---` dividers) |
+| `write_markdown` | `position` (or `{ replace }`), `markdown` | `{ inserted_ids: [...] }` (a block a line: paragraphs, `#` to `######` headings, `-`/`1.` lists, `- [ ]` to-dos, `>` quotes, fenced code, `$$` formulas, ` ```mermaid ` diagrams, `\|` tables, `---` dividers) |
 | `insert_blocks` | `position`, `blocks: [BlockSpec]` | `{ inserted_ids: [...] }` |
 | `replace_block` | `id`, `block: BlockSpec` | `{ id }` (the ID is kept) |
 | `move_block` | `id`, `position` | `{ id }` |
@@ -170,11 +184,15 @@ the model and changes nothing: a call that fails part way, as a
 the page as it was.
 
 `list_pages` and `read_other_page` reach only the pages of the current page's
-space. Once a run has called either, an `image`, `video` or `link_preview`
-block it writes may load only a URL that was on the current page as the run
-began or is in the instruction: the app loads those by itself, and a URL
-seen only on another page, which someone else may have put there, could
-carry what the run read.
+space. Once a run has called either, what it writes may hold only a URL that
+was on the current page as the run began or is in the instruction, in any
+block, in text and in a subpage's title: the app loads an `image`, `video` or
+`link_preview` by itself, a URL seen only on another page, which someone else
+may have put there, could carry what the run read, and one written in text
+would be on the page for a later run to load. A link to a page
+(`leaflet://page/…`) goes. A run whose conversation has earlier turns, where
+cross-page reading is on, keeps to the same URLs from its start: an earlier
+turn may hold what a run read.
 
 ## 3. Ops
 
@@ -198,7 +216,8 @@ streams to the client, what the client applies to the open editor, and what
    user's JWT. The response is NDJSON, one event per line:
    - `{ "type": "status", "status": "running" }`, and again every 15 s
      while the run goes on, so that nothing between closes a quiet stream
-   - `{ "type": "op", "op": Op, "summary": "Inserted chart" }`
+   - `{ "type": "op", "op": Op, "summary": "Inserted a chart" }`, an event
+     for each op, its summary the op's own edit
    - `{ "type": "text", "delta": "…", "round": 0 }`: the model's answer as it
      streams, a piece at a time; a new `round` (after tool calls) starts it
      again.
@@ -206,8 +225,12 @@ streams to the client, what the client applies to the open editor, and what
    - `{ "type": "error", "message": "…" }`
 3. The worker loads the page, focus blocks, the last 10 turns of the
    conversation, and (if allowed) titles of other pages; calls the model with
-   the tools above, up to 12 rounds; validates and applies each call; streams
-   the op; finally writes a `page_history` row (`reason: "agent_run"`, the
+   the tools above, up to 12 rounds, as the app's own runs do: at most 50
+   calls of one answer run (the rest are refused, for the next), one run
+   writes at most 5,000 blocks, and a model that answers 429 or 5xx is asked
+   once more, after its `Retry-After` (30 s at most) or 2 s, when nothing of
+   that answer came yet; validates and applies each call; streams the op;
+   finally writes a `page_history` row (`reason: "agent_run"`, the
    content from before the run) and then saves `page_content`, updates the
    job (`status: done`, `result: { reply, ops, edits }`), and for the
    `comment` surface inserts the reply as a comment by the agent. A
@@ -216,7 +239,11 @@ streams to the client, what the client applies to the open editor, and what
    the page saves what it changed, as above, and its job is `status: failed`
    with the `error`; only when that save went through does the job have
    `result: { reply: "", ops, edits }` too, so the client can undo it. One
-   whose save failed as well says so in its `error`.
+   whose save failed as well says so in its `error`. When the page was saved
+   since the run read it, the worker applies its ops to that version, but
+   only those on blocks it has as the run read them (by `meta.blocks` and
+   `meta.deleted`): a client with the page open saved the ops as they
+   streamed, and a block changed since keeps what a person wrote over it.
 4. The client applies streamed ops to the open editor as one undo step.
 
 Local models (`is_local`) run the identical loop on the client against the
@@ -230,17 +257,35 @@ All take the user's JWT (`Authorization: Bearer`). Bodies are JSON.
 | --- | --- | --- |
 | `agent` | `{ job_id }` | NDJSON stream (above) |
 | `providers` | `{ action: "save", provider: { id?, preset, name, base_url, auth_kind, api_key?, default_model } }` | `{ provider }` (no secret) |
-| | `{ action: "models", provider_id? , base_url?, api_key? }` | `{ models: [id], supports_tools?: bool }` |
-| | `{ action: "test", provider_id? , base_url?, api_key?, model }` | `{ ok, models: [id], supports_tools, message }` |
+| | `{ action: "models", provider_id? , base_url?, api_key?, preset? }` | `{ models: [id], supports_tools?: bool }` |
+| | `{ action: "test", provider_id? , base_url?, api_key?, preset?, model }` | `{ ok, models: [id], supports_tools, message }` |
 | | `{ action: "delete", id }` | `{ ok }` |
 | `stt` | `{ action: "soniox_key" }` | `{ api_key, expires_at }` (short-lived Soniox key) |
 | | `{ action: "transcribe", recording_id, language? }` | `{ segments: [{start_ms, end_ms, text, speaker?}] }` |
 | | `{ action: "save_key", provider: "soniox", api_key }` | `{ ok }` |
 | `account` | `{ action: "delete" }` | `{ ok }` |
 
+`models` and `test` reach a saved provider by `provider_id`, or an unsaved one
+by its `base_url`, or the address of its `preset` without one. A provider's
+`supports_tools` is what `test` found of its `default_model`, null until then
+and again once the default changes: a test of another model answers for that
+model and leaves it as it is, and a run of another model is offered tools,
+going without them if the model refuses them.
+
 `transcribe` saves the transcript, and the recording's status as it goes, as
 the caller: someone who can only view the recording's page is refused (403)
-before any of their key is spent.
+before any of their key is spent. A call takes the recording first
+(`recordings.transcribing_at`), so a second call while one has it is refused
+(409) rather than spending the key again; one left by a call the platform
+stopped is taken again once it is older than a call can run. A transcription
+that fails says so in the function's own words, in the recording's `error`
+and to the caller: what the transcriber answered, and the address it went
+to, go to the function's log only.
+
+A provider's saved key goes only to the address it was saved for: a `save`
+that changes a provider's `preset`, or the origin of its `base_url`, without
+an `api_key` is refused (400) while it has a key, so a session can never send
+the saved key to a server of its choosing.
 
 ## 6. Sync
 
@@ -251,6 +296,13 @@ before any of their key is spent.
   there (an update), so a change another device made to another column
   meanwhile stays: an offline rename does not undo a move or a deletion. A
   row the server does not have yet, or one sent again whole, goes up whole.
+  The rows a device sends again whole as its pages join an account, which
+  the server may have already from a device it synced with through iCloud
+  Drive, go over the server's only when they changed on the device after
+  the server's `updated_at`; otherwise the device takes the server's row.
+  A row the server refuses (403) while the page or folder it is in still
+  waits to go up from the device waits for it, and goes after it in the
+  same push; any other refusal gives way to the server's row.
 - Each table is pulled in `(updated_at, key)` order from a cursor of the
   last row stored here (`key` is `id`, or `page_id` for `page_content`). A
   row that cannot be stored stops that table's pull, and the next pull starts
@@ -412,9 +464,10 @@ of pages not deleted), `accept_page_invite(p_page_id)`,
 iCloud sync needs no server: the devices of one person sync through the
 folder `Leaflet` in their iCloud Drive (`~/Library/Mobile Documents/
 com~apple~CloudDocs/Leaflet` on macOS, `%USERPROFILE%\iCloudDrive\Leaflet`
-with iCloud for Windows). Every file has one writer, so iCloud never keeps
-two versions of one; versions are in the files, never in their times; and
-nothing depends on being told of changes, which a reader finds by listing.
+with iCloud for Windows). Every file but space.json and a blob has one
+writer, so iCloud never keeps two versions of one; versions are in the
+files, never in their times; and nothing depends on being told of
+changes, which a reader finds by listing.
 
 ```
 Leaflet/
@@ -435,7 +488,8 @@ Leaflet/
   ("0000000000000007 2.json"). The copies of space.json are read, as below.
 - **space.json** names the space the devices sync: every device files its
   pages, folders and files under that `space_id`, whatever a row says. The
-  first device makes it from its own space. When two made it at once, the
+  first device makes it from its own space, only where none is yet, as
+  the file moves into place. When two made it at once, apart, the
   lowest `space_id` among `space*.json` wins; a device that made a losing
   one moves its pages into the winner, sends them all again, and removes it
   30 days later, so a device that joined the losing one finds it beside
@@ -491,10 +545,17 @@ Leaflet/
   (other than the one it notes it is writing), or a copy iCloud made, shares its ID with another device (a restored
   backup): it takes a new ID, reads the old ID's folder as another device's,
   and sends everything again.
-- **Blobs** are written by a device that has the file or audio. A device
-  that deletes a file removes its blob, whoever wrote it, once a batch of
-  its own has the deletion; one that sends everything again sends deleted
-  files' rows too, so a deletion in a batch that was lost goes again.
+- **Blobs** are written by any device that has the file or audio, the same
+  whoever writes it, under a name every system with iCloud Drive can hold:
+  the characters Windows takes in no name (`<>:"/\|?*` and control
+  characters) become `_`, the dots and spaces at its end go, and a name
+  Windows keeps for a device (`CON`, `NUL`, `COM1`…) gets `_` before it.
+  A reader finds one an earlier version kept by the name it had. A device
+  that deletes a file removes its blob, whoever wrote it, with the copies
+  iCloud made of it beside it when two wrote it at once ("notes 2.pdf"),
+  once a batch of its own has the deletion; one that sends everything
+  again sends deleted files' rows too, so a deletion in a batch that was
+  lost goes again.
 - **Not downloaded.** A file iCloud has not downloaded (on macOS before 14,
   `.<name>.icloud` beside where it goes; after, a file flagged dataless) is
   asked for, and read on a later pass. A reader that stops at a batch not

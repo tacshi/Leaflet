@@ -39,14 +39,16 @@ type inlinePrompt struct {
 	// shown is set once it has.
 	from, to editor.Pos
 	shown    bool
-	// height is the panel's, as last drawn.
-	height float32
+	// panel is the prompt's panel, whose box in the window its Bounds
+	// gives.
+	panel ui.Handle
 }
 
 type newComment struct {
 	blockID string
 	quote   string
 	text    string
+	postNow bool // Enter was pressed in its box
 	agents  agentPicker
 }
 
@@ -57,6 +59,9 @@ type dialogs struct {
 	hits       []store.SearchHit
 	hitIndex   int
 	hitList    ui.ListState
+	// searches counts the searches asked for: an answer to an earlier one
+	// than the last, come late, is dropped.
+	searches int
 
 	folderOpen   bool
 	folder       *store.Folder
@@ -83,6 +88,13 @@ type dialogs struct {
 	historyView   int
 	historyDiff   codeeditor.DiffState
 	historyDiffOf string
+	// version is the version versionOf, decoded, and versionMD it as
+	// Markdown, made once for the version chosen rather than at every
+	// frame; versionErr says it could not be read.
+	versionOf  string
+	version    *doc.Content
+	versionMD  string
+	versionErr error
 	// sideBySide shows the changes as two columns, kept while the app runs.
 	sideBySide  bool
 	naming      bool
@@ -109,6 +121,7 @@ type dialogs struct {
 	embedTitle  string
 	embedHTML   string
 	embedHeight string
+	embedError  string
 
 	// The dialog asking for a video's or a link card's link, or changing
 	// an image's or video's.
@@ -124,9 +137,14 @@ type dialogs struct {
 	sourceKind string
 	sourceText string
 
-	inline       *inlinePrompt
-	newComment   *newComment
+	inline     *inlinePrompt
+	newComment *newComment
+	// commentFocus is the block whose threads the comments panel shows lit
+	// (showComments), since commentAt, and commentShown whether the first
+	// of them has been brought into view.
 	commentFocus string
+	commentAt    time.Time
+	commentShown bool
 	showResolved bool
 	focusChat    bool
 	hideRun      string
@@ -185,8 +203,7 @@ func (a *App) searchDialog(c *ui.Context) {
 			// The header is its frame.
 			in := ui.SearchField(c.Key("q"), &d.query).Placeholder(locales.DialogSearchPlaceholder()).FontSize(16).Grow(1).Padding(0).BorderWidth(0).Background(ui.Transparent).AutoFocus()
 			if in.Changed() {
-				d.hits = a.searchHits(d.query)
-				d.hitIndex = 0
+				a.search(d.query)
 			}
 			// The keys stay in the field; Up and Down move the list's
 			// choice.
@@ -300,8 +317,7 @@ func (a *App) openHit(h store.SearchHit) {
 		a.page.editor.PlaceCaret(h.BlockID, 0)
 	}
 	if h.Kind == "comment" {
-		a.panelOpen, a.panelTab = true, 1
-		a.dialogs.commentFocus = h.BlockID
+		a.showComments(h.BlockID)
 		// The comment found may be in a resolved thread.
 		if a.page != nil && slices.ContainsFunc(a.page.threads, func(t store.Thread) bool { return t.Root.BlockID == h.BlockID && t.Root.Resolved }) {
 			a.dialogs.showResolved = true
@@ -339,10 +355,12 @@ func (a *App) folderDialog(c *ui.Context) {
 					return
 				}
 				if d.folder == nil {
+					// The folder made shows, from ⌘⇧N with the sidebar
+					// hidden or at another tab too.
 					if f, err := a.st.CreateFolder(name); err != nil {
 						a.toast(locales.DialogFolderCreateFailed(err.Error()))
 					} else {
-						a.treeOpen("folder", f.ID)
+						a.showInTree("folder", f.ID)
 					}
 				} else {
 					if err := a.st.RenameFolder(*d.folder, name); err != nil {
@@ -397,7 +415,7 @@ func (a *App) moveDialog(c *ui.Context) {
 						if err := a.movePage(d.movePage, parent, func() error {
 							return a.st.MovePage(d.movePage, parent, folder, "")
 						}); err != nil {
-							a.toast(err.Error())
+							a.toast(locales.SidebarCouldNotMove(err.Error()))
 						} else {
 							d.moveOpen = false
 							if parent != "" {
@@ -435,7 +453,7 @@ func (a *App) openHistory(id string) {
 		a.savePage()
 	}
 	d := &a.dialogs
-	d.historyOpen, d.historyPage, d.historyPick, d.historyDiffOf, d.naming = true, id, 0, "", false
+	d.historyOpen, d.historyPage, d.historyPick, d.historyDiffOf, d.versionOf, d.naming = true, id, 0, "", "", false
 	d.history, _ = a.st.History(id)
 }
 
@@ -472,7 +490,7 @@ func (a *App) nameVersion(name string) {
 		return
 	}
 	d.history, _ = a.st.History(d.historyPage)
-	d.historyPick, d.historyDiffOf, d.naming, d.versionName = 0, "", false, ""
+	d.historyPick, d.historyDiffOf, d.versionOf, d.naming, d.versionName = 0, "", "", false, ""
 }
 
 func (a *App) historyDialog(c *ui.Context) {
@@ -533,7 +551,17 @@ func (a *App) historyDialog(c *ui.Context) {
 			}
 			ui.Column(c).Grow(1).Children(func() {
 				h := d.history[min(d.historyPick, len(d.history)-1)]
-				content := doc.MustDecode(h.Content)
+				content, md, err := a.historyVersion(h)
+				if err != nil {
+					// Shown as an empty page, Restore would empty the page.
+					ui.Text(c, locales.DialogHistoryUnreadable()).FontSize(13).TextColor(pal.TextMuted).Padding(18, 24).Grow(1)
+					ui.Row(c).Padding(12, 16).Justify(ui.End).BorderWidth(1, 0, 0, 0).BorderColor(pal.Divider).Children(func() {
+						if button(c, "close", "", locales.CommonClose()).Clicked() {
+							d.historyOpen = false
+						}
+					})
+					return
+				}
 				ui.Row(c).Padding(10, 16).Gap(10).AlignItems(ui.Center).BorderWidth(0, 0, 1, 0).BorderColor(pal.Divider).Children(func() {
 					ui.Segmented(c.Key("history-view"), &d.historyView, locales.DialogHistoryThisVersion(), locales.DialogHistoryChangesSince())
 					ui.Spacer(c)
@@ -549,7 +577,6 @@ func (a *App) historyDialog(c *ui.Context) {
 					a.historyChanges(c, h, content)
 				} else {
 					ui.Scroll(c).Grow(1).Padding(18, 24).Children(func() {
-						md := doc.PageMarkdown("", content, a.pageTitleOf)
 						markdown.View(c, md, &a.md).Font(theme.PageFamily(md)).FontSize(15)
 					})
 				}
@@ -567,6 +594,19 @@ func (a *App) historyDialog(c *ui.Context) {
 	})
 }
 
+// historyVersion is version h decoded and as Markdown, made once for the
+// version chosen, or why it could not be read.
+func (a *App) historyVersion(h store.HistoryEntry) (*doc.Content, string, error) {
+	d := &a.dialogs
+	if d.versionOf != h.ID {
+		d.versionOf, d.versionMD = h.ID, ""
+		if d.version, d.versionErr = doc.Decode(h.Content); d.versionErr == nil {
+			d.versionMD = doc.PageMarkdown("", d.version, a.markdownOptions())
+		}
+	}
+	return d.version, d.versionMD, d.versionErr
+}
+
 // historyDiff compares a version's Markdown with the page's now, in the
 // diff viewer, made again when another version is chosen.
 func (a *App) historyDiff(h store.HistoryEntry, content *doc.Content) *codeeditor.DiffState {
@@ -576,7 +616,7 @@ func (a *App) historyDiff(h store.HistoryEntry, content *doc.Content) *codeedito
 		if now == nil {
 			now = doc.Empty()
 		}
-		old, cur := doc.PageMarkdown("", content, a.pageTitleOf), doc.PageMarkdown("", now, a.pageTitleOf)
+		old, cur := doc.PageMarkdown("", content, a.markdownOptions()), doc.PageMarkdown("", now, a.markdownOptions())
 		d.historyDiff = codeeditor.DiffState{
 			Old:  codeeditor.NewBuffer(old),
 			New:  codeeditor.NewBuffer(cur),
@@ -635,14 +675,14 @@ func (a *App) restoreVersion(pageID string, c *doc.Content) {
 			return
 		}
 	}
+	// A version saved with no blocks leaves one to type in, the page open
+	// or not.
+	v := c.Copy()
+	if len(v.Children) == 0 {
+		v.Children = doc.Empty().Children
+	}
 	if ed := a.openEditor(pageID); ed != nil {
-		ed.Edit(func(content *doc.Content) {
-			content.Children = c.Copy().Children
-			// A version saved with no blocks leaves one to type in.
-			if len(content.Children) == 0 {
-				content.Children = doc.Empty().Children
-			}
-		})
+		ed.Edit(func(content *doc.Content) { content.Children = v.Children })
 		a.savePage()
 		// The last run's edits are gone or back with the version: undoing
 		// it now would do nothing, or something else.
@@ -654,7 +694,7 @@ func (a *App) restoreVersion(pageID string, c *doc.Content) {
 			// A selection made on the other version means nothing here.
 			ed.Select(ed.Caret(), ed.Caret())
 		}
-	} else if _, _, err := a.st.SaveContent(pageID, c); err != nil {
+	} else if _, _, err := a.st.SaveContent(pageID, v); err != nil {
 		a.toast(locales.DialogHistoryRestoreFailed(err.Error()))
 		return
 	}
@@ -948,23 +988,27 @@ func (a *App) chartDialog(c *ui.Context) {
 
 func (d *dialogs) openEmbed() {
 	d.embedOpen, d.embedID, d.embedTitle, d.embedHeight = true, "", locales.DialogEmbedTitle(), "320"
-	d.embedHTML = menu.EmbedStart
+	d.embedHTML, d.embedError = menu.EmbedStart, ""
 }
 
 // editEmbed opens the dialog on an embed in the page, to change it.
 func (d *dialogs) editEmbed(n *doc.Node) {
-	d.embedOpen, d.embedID = true, n.ID
+	d.embedOpen, d.embedID, d.embedError = true, n.ID, ""
 	d.embedTitle, d.embedHTML = n.Str("title"), n.Str("html")
 	d.embedHeight = strconv.Itoa(n.Int("height", 320))
 }
 
 func (a *App) embedDialog(c *ui.Context) {
+	pal := theme.Of(c)
 	d := &a.dialogs
 	dialog(c, &d.embedOpen, 600, func() {
 		dialogHeader(c, locales.DialogEmbedTitle(), locales.DialogEmbedSubtitle(), &d.embedOpen)
 		ui.Column(c).Padding(0, 20, 20).Gap(12).Children(func() {
 			field(c, "title", &d.embedTitle, locales.DialogFieldTitle())
 			ui.TextArea(c.Key("html"), &d.embedHTML).Height(240).Font("monospace").FontSize(12.5)
+			if d.embedError != "" {
+				ui.Text(c, d.embedError).FontSize(12.5).TextColor(pal.DangerText)
+			}
 			ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, locales.DialogEmbedHeight()).FontSize(13)
 				field(c, "height", &d.embedHeight, "320").Width(80)
@@ -976,11 +1020,14 @@ func (a *App) embedDialog(c *ui.Context) {
 				if d.embedID != "" {
 					label = locales.CommonSave()
 				}
-				if primary(c, "insert", "", label).Clicked() && a.page != nil {
+				// An embed needs its HTML; what else is wrong with it, as
+				// being too long, the dialog says.
+				insert := primary(c, "insert", "", label).Disabled(strings.TrimSpace(d.embedHTML) == "")
+				if insert.Clicked() && a.page != nil {
 					h, _ := strconv.Atoi(d.embedHeight)
 					n, err := menu.EmbedBlock(d.embedTitle, d.embedHTML, h, a.session.DisplayName)
 					if err != nil {
-						a.toast(err.Error())
+						d.embedError = locales.DialogEmbedFailed(err.Error())
 						return
 					}
 					if id := d.embedID; id != "" {
@@ -1121,12 +1168,12 @@ func (a *App) inlinePrompt(c *ui.Context) {
 			}
 		}
 	}
-	if ip.working && ps.viewH > 0 {
+	if view := ps.view.Bounds(c); ip.working && view.H > 0 {
 		const gap = 8 + 24 // over the panel, and under it
-		end := ps.viewTop + ps.viewH
+		end := view.Y + view.H
 		// What it writes past the window, the panel keeps in the window
 		// over the last lines, not below them.
-		if room := end - ip.height - gap - at.Y; room > 0 && at.H > room {
+		if room := end - ip.panel.Bounds(c).H - gap - at.Y; room > 0 && at.H > room {
 			at.H = room
 		}
 	}
@@ -1134,7 +1181,7 @@ func (a *App) inlinePrompt(c *ui.Context) {
 		anchor := ui.Box(c.Key("inline-anchor")).Absolute().Left(at.X).Top(at.Y).Size(at.W, at.H).PassThrough()
 		panel := ui.Column(c.Key("inline-prompt")).AttachTo(anchor, ui.AnchorBottomLeft, ui.AnchorTopLeft).Width(at.W).Margin(8, 0, 0).
 			Padding(12).Gap(10).Radius(10).Background(pal.AgentSection).Border(1, pal.AccentSoftBorder).Shadow(0, 10, 30, 0, pal.Shadow).
-			Draw(func(_ *ui.Painter, r ui.Rect) { ip.height = r.H })
+			Bind(&ip.panel)
 		// A press elsewhere puts away a prompt with nothing in it yet, but
 		// not the press on Ask agent that opened it.
 		if panel.PressedOutside() && ip.shown && strings.TrimSpace(ip.text) == "" && !ip.working && ip.reply == "" {

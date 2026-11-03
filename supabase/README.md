@@ -15,7 +15,13 @@ supabase/
     providers/      save / models / test / delete model providers
     stt/            Soniox temporary keys, Soniox key storage, file transcription
     account/        account deletion
+    _testing/       the tests' own: a project in memory, the fixtures' writer
   embed.go          carries migrations/ and functions/ into the app
+
+Each function's `index.ts` serves its `handler.ts` on the project it runs in;
+the tests beside it run the handler on a project in memory
+(`_testing/project.ts`), with the model, Soniox and the checks of typed
+addresses stood in for.
 ```
 
 Each schema change is a new migration: `supabase db push` never runs one a
@@ -29,7 +35,11 @@ Supabase** signs in to the Management API, uses the account's Leaflet project
 Leaflet, then sets it up from this folder, built into the app:
 
 - the migrations it lacks, each recorded in `supabase_migrations` as
-  `supabase db push` records them;
+  `supabase db push` records them, each behind a lock, so two devices
+  setting the project up at once apply each one once;
+- sign-ups closed and addresses confirmed (Auth's `disable_signup`, and
+  `mailer_autoconfirm` off), so the owner's account is the project's only
+  one, where the sign-in may change Auth settings;
 - the four functions, when the project's are older: a project secret
   named `LEAFLET_FUNCTIONS_V`, their version (`FunctionsVersion` in
   `internal/provision`, raised by one with every change to them), `_` and
@@ -52,7 +62,9 @@ This needs one OAuth app, registered once in a Supabase organization
   Worker's page (below).
 - Scopes: Organizations read; Projects read and write; Database read and
   write; Edge Functions write; Secrets read and write (the project's API
-  keys are read under Secrets); Storage write.
+  keys are read under Secrets); Storage write; Auth read and write (sign-ups;
+  a sign-in from before the app had it leaves them as they are, until the
+  person signs in with Supabase again).
 
 Its client ID is built in (`ClientID` in
 [`internal/supabaseapi`](../internal/supabaseapi/supabaseapi.go)). Its client
@@ -69,7 +81,10 @@ A Cloudflare Worker with three routes:
   code and state.
 - `POST /token`, Supabase's token endpoint with the client secret added. It
   takes only Leaflet's client ID, codes with their PKCE verifier and its own
-  redirect URL, and refresh tokens.
+  redirect URL, and refresh tokens; at most 30 a minute from one address
+  (`TOKEN_LIMIT`, a Workers rate limit in `wrangler.toml`), answering 429
+  past them, and 502 in OAuth's JSON when Supabase can't be reached. Its
+  logs are on (`observability`).
 - `GET /.well-known/apple-app-site-association`, which ties the domain to the
   iOS app: its sign-in takes `/auth/supabase` as its https callback, so it
   never loads the page. It names the team in `APPLE_TEAM_ID` (in
@@ -116,15 +131,23 @@ models work; sync, cloud models and cloud speech to text are off.
 
 ```bash
 cd supabase/functions
-deno test _shared/             # blocks, inline markdown, tools, op replay/undo
-deno check */index.ts
+deno test --frozen             # the shared modules, and each function's handler
+deno test --frozen --allow-write=_shared/testdata   # writes the fixtures the Go tests read
+deno check --frozen */index.ts
 deno lint
 ```
 
 `scripts/check-migrations.sh` applies every migration, oldest first, to a
 throwaway container of the `supabase/postgres` image, as the app applies them
-to a project, then runs the checks in `scripts/migrations/test.sql`; it needs
-only Docker, and CI runs it.
+to a project; it needs only Docker, and CI runs it. Along the way,
+`scripts/migrations/seed/<version>.sql` puts rows in right after the migration
+of that version, as a project in use has, so the migrations that move data
+move some. Then it runs the checks in `scripts/migrations`: `seeded.sql`, what
+the later migrations made of those rows; `test.sql`, what single migrations
+promise; and `access.sql`, the privileges each role has, and who of a page's
+owner, editor, viewer, invitee and a stranger may read and change it, its
+content, history, comments, files, recordings and images, and their Storage
+objects.
 
 ## Deploying by hand
 
@@ -164,11 +187,39 @@ Confirm email; `enable_confirmations = true` in `config.toml`, which local
 development uses too, with the emails in Mailpit on :54324). Shares and
 invites waiting for an address go to the account that confirmed it; without
 confirmation, signing up confirms any address at once, so whoever signs up
-with someone else's address gets the pages shared with them.
+with someone else's address gets the pages shared with them. A project the
+app sets up also takes no sign-ups (Allow new users to sign up, off): the
+app makes the owner's account with the secret key, which needs none, and
+anyone else who learned the project's address and publishable key could
+otherwise make one and use its functions and storage. A project deployed
+by hand keeps sign-ups on: its people make their accounts with an emailed
+code.
 
-Supabase Vault (`supabase_vault`) is enabled on every Supabase project; the
-migration relies on `vault.create_secret`, `vault.update_secret` and
-`vault.decrypted_secrets`.
+Supabase Vault (`supabase_vault`) is enabled on every Supabase project. Keys
+go in it through `vault.create_secret` and `vault.update_secret`, and the
+Functions read them from `vault.decrypted_secrets`; clearing a key
+(`set_provider_secret`, `set_stt_secret`) and deleting a provider or a
+speech-to-text key (the `model_providers_cleanup` and `stt_secrets_cleanup`
+triggers) delete its row from `vault.secrets` directly, as `postgres`, who
+owns those functions. The `supabase/postgres` image grants `postgres` that,
+and `access.sql` checks it.
+
+The migrations state every privilege the roles have (`20261103020000`): they
+count on no default grant of a project's. Three things they assume of a
+hosted project can't be checked here, and are worth checking once on one
+(in its SQL editor, as `postgres`):
+
+- that `postgres` may delete from `vault.secrets`, as above:
+  `select has_table_privilege('vault.secrets', 'delete')`;
+- that `postgres` may make policies on `storage.objects`, and update its
+  `owner` (and `owner_id`), as `release_kept_recordings` does: the image
+  has `scripts/migrations/services.sql` make `postgres` own the Storage
+  tables, which Supabase's Storage service owns in a project:
+  `select has_table_privilege('storage.objects', 'update')`;
+- that the Management API's query endpoint runs what it is sent as one
+  transaction, so a migration that fails part way leaves nothing behind
+  (`migrationSQL` in `internal/provision` sends a migration with the row
+  that records it).
 
 ## Notes for the client
 
@@ -232,4 +283,7 @@ migration relies on `vault.create_secret`, `vault.update_secret` and
   `recordings/{user_id}/{recording_id}.wav` is written only by the user who
   made that `recordings` row, while they can edit its page, so upsert the
   row before uploading its audio. The row's `created_by` stays theirs: an
-  update cannot change it, and only deleting their account clears it.
+  update cannot change it, and only deleting their account clears it. Its
+  `audio_path` is that path or null: any other a client sends is dropped.
+  A deleted file (`deleted_at`) is read only by its space's owner and its
+  page's owner, who may remove its object.

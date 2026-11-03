@@ -385,3 +385,232 @@ func TestStatusLineShimmers(t *testing.T) {
 		t.Error("with less motion, the status line still moves")
 	}
 }
+
+// A chat asks about the block the caret was left in, sent from the
+// composer, where the focus then is; a page whose caret was never placed
+// gives none.
+func TestChatTakesTheCaretsBlock(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.TextSize = 16
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{textNode("Hello there")})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
+	tt.Frame()
+	if got := a.focusBlocks(); got != nil {
+		t.Fatalf("before the caret was placed: %v", got)
+	}
+	block := a.page.editor.Content.Children[0].ID
+	a.page.editor.PlaceCaret(block, 3)
+	a.page.editor.Focus()
+	tt.Frame()
+	tt.Frame()
+	if !a.page.editor.Focused() {
+		t.Fatal("the page didn't take the focus")
+	}
+	// The title takes the focus, as the composer would.
+	a.focusTitle(false)
+	tt.Frame()
+	if a.page.editor.Focused() {
+		t.Fatal("the page kept the focus")
+	}
+	if got := a.focusBlocks(); len(got) != 1 || got[0] != block {
+		t.Errorf("from the composer: %v, want %s", got, block)
+	}
+}
+
+// commentsApp is an app with a page open, Plan, of blocks b1 and b2, and
+// the comments panel beside it.
+func commentsApp(t *testing.T) (*App, store.Page) {
+	t.Helper()
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.TextSize = 16
+	b1, b2 := textNode("Goals"), textNode("Risks")
+	b1.ID, b2.ID = "b1", "b2"
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan", Content: doc.FromBlocks([]*doc.Node{b1, b2})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	if a.page == nil {
+		t.Fatal("the page did not open")
+	}
+	a.panelOpen, a.panelTab = true, 1
+	return a, p
+}
+
+// Enter posts a new comment and sends a reply, as it sends a chat, and
+// Cmd+Enter too; Shift+Enter breaks the line.
+func TestEnterPostsComments(t *testing.T) {
+	a, p := commentsApp(t)
+	a.dialogs.newComment = &newComment{blockID: "b1"}
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
+	tt.Frame()
+	tt.Type("Why May?")
+	tt.Key(ui.Shift, ui.KeyEnter)
+	tt.Type("Not June")
+	tt.Frame()
+	if nc := a.dialogs.newComment; nc == nil || nc.text != "Why May?\nNot June" {
+		t.Fatalf("new comment %+v", nc)
+	}
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	threads, _ := a.st.Threads(p.ID)
+	if a.dialogs.newComment != nil || len(threads) != 1 || threads[0].Root.Body != "Why May?\nNot June" {
+		t.Fatalf("after Enter: box %v, threads %+v", a.dialogs.newComment != nil, threads)
+	}
+	a.page.setThreads(a.st.Threads(p.ID))
+	tt.Frame()
+	// The reply box is under the thread's comment.
+	body, ok := tt.Find("Why May? Not June")
+	if !ok {
+		t.Fatalf("no comment in %q", tt.Texts())
+	}
+	tt.ClickAt(body.X+20, body.Y+body.H+10+17)
+	tt.Type("The venue")
+	tt.Key(ui.Cmd, ui.KeyEnter)
+	tt.Frame()
+	if threads, _ = a.st.Threads(p.ID); len(threads) != 1 || len(threads[0].Replies) != 1 || threads[0].Replies[0].Body != "The venue" {
+		t.Errorf("after Cmd+Enter in the reply box: %+v", threads)
+	}
+}
+
+// The threads of a block asked for, from its badge or a search, are lit
+// for a moment, every one of them, and then are not.
+func TestCommentsAskedForStayLit(t *testing.T) {
+	a, p := commentsApp(t)
+	for _, c := range []struct{ block, body string }{{"b1", "First question"}, {"b1", "Second question"}, {"b2", "Other question"}} {
+		if _, err := a.st.AddComment(p.ID, c.block, c.body, "", "", "", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	a.page.setThreads(a.st.Threads(p.ID))
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
+	tt.Frame()
+	// A card's border, left of its comment's text, by the card's padding
+	// and the comment's indent past its avatar.
+	border := func(body string) [4]uint8 {
+		t.Helper()
+		r, ok := tt.Find(body)
+		if !ok {
+			t.Fatalf("no %q in %q", body, tt.Texts())
+		}
+		img := tt.Image()
+		scale := float32(img.Bounds().Dx()) / 1300
+		px := img.RGBAAt(int((r.X-28-12-0.75)*scale), int((r.Y+r.H/2)*scale))
+		return [4]uint8{px.R, px.G, px.B, px.A}
+	}
+	bodies := []string{"First question", "Second question", "Other question"}
+	var before [3][4]uint8
+	for i, b := range bodies {
+		before[i] = border(b)
+	}
+	(&host{a: a}).OpenComments("b1")
+	tt.Frame()
+	tt.Frame()
+	for i, b := range bodies {
+		if lit := border(b) != before[i]; lit != (i < 2) {
+			t.Errorf("%q lit %v after two frames", b, lit)
+		}
+	}
+	tt.Advance(commentLit)
+	tt.Frame()
+	for i, b := range bodies {
+		if border(b) != before[i] {
+			t.Errorf("%q still lit after %v", b, commentLit)
+		}
+	}
+	if a.dialogs.commentFocus != "" {
+		t.Errorf("focus %q", a.dialogs.commentFocus)
+	}
+}
+
+// A comment that could not be posted, and an agent asked in one that
+// could not answer, say so in the app's words around why.
+func TestCommentErrorsSaySo(t *testing.T) {
+	a, _ := commentsApp(t)
+	if _, err := a.st.DB().Exec(`CREATE TRIGGER full BEFORE INSERT ON comments BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatal(err)
+	}
+	a.dialogs.newComment = &newComment{blockID: "b1", text: "Why May?"}
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
+	tt.Frame()
+	if err := tt.Click(locales.CommonComment()); err != nil {
+		t.Fatal(err)
+	}
+	prefix := func(msg string) string { return strings.TrimSuffix(msg, " ") }
+	if !tt.HasText(prefix(locales.PanelCouldNotPost(""))) {
+		t.Fatalf("no toast in %q", tt.Texts())
+	}
+	if a.dialogs.newComment == nil {
+		t.Error("the comment not posted was dropped")
+	}
+
+	// A model that cannot be reached.
+	hs := httptest.NewServer(http.NotFoundHandler())
+	hs.Close()
+	var mu sync.Mutex
+	var posted []func()
+	a.post = func(fn func()) {
+		mu.Lock()
+		posted = append(posted, fn)
+		mu.Unlock()
+	}
+	a.online, a.toasts = true, nil
+	if err := a.st.PutProvider(store.Provider{ID: "test-gone-" + t.Name(), Preset: "ollama", Name: "Ollama", BaseURL: hs.URL,
+		AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.agentInComment(store.Comment{ID: "c1", BlockID: "b1"}, "@Ollama why May?")
+	for deadline := time.Now().Add(10 * time.Second); len(a.toasts) == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("no toast")
+		}
+		time.Sleep(10 * time.Millisecond)
+		mu.Lock()
+		fns := posted
+		posted = nil
+		mu.Unlock()
+		for _, fn := range fns {
+			fn()
+		}
+	}
+	if !strings.HasPrefix(a.toasts[0].text, prefix(locales.PanelAgentFailed("Ollama", ""))) {
+		t.Errorf("toast %q", a.toasts[0].text)
+	}
+}
+
+// What was typed in a page's chat and reply boxes and not sent stays with
+// the page as it closes and opens again, and goes once the page is gone.
+func TestDraftsStayWithTheirPage(t *testing.T) {
+	a := templatesApp(t)
+	plan, _ := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	other, _ := a.st.CreatePage(store.NewPageOptions{Title: "Other"})
+	a.reloadAll()
+	a.openPage(plan.ID)
+	a.draftsOf(plan.ID).chat.draft = "Summarize"
+	a.draftsOf(plan.ID).replies["c1"] = &threadDraft{text: "Agreed"}
+	a.openPage(other.ID)
+	a.openPage(plan.ID)
+	if d := a.draftsOf(plan.ID); d.chat.draft != "Summarize" || d.replies["c1"] == nil || d.replies["c1"].text != "Agreed" {
+		t.Fatalf("drafts back on the page: %+v", d)
+	}
+	if b := templatesApp(t); len(b.drafts) != 0 {
+		t.Errorf("another app has drafts %v", b.drafts)
+	}
+	a.openPage(other.ID)
+	if _, err := a.st.DeletePage(plan.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reload(store.Change{Table: "pages"})
+	if _, ok := a.drafts[plan.ID]; ok {
+		t.Error("the drafts of a page deleted stay")
+	}
+}

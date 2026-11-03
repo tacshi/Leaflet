@@ -74,12 +74,29 @@ struct PageScreen: View {
                         }
                         c.onAddAgent = { [weak scene] in scene?.openSettings() }
                         c.onEditBlock = { [weak scene] in scene?.editingBlock = $0 }
+                        c.onUndoRun = { [weak model, app] in
+                            guard let model,
+                                let run = model.agents.runs.last(where: {
+                                    !$0.edits.isEmpty && !$0.undone && !$0.running
+                                })
+                            else { return }
+                            Task {
+                                do {
+                                    try await app.client?.undoRun(model.id, runID: run.id)
+                                } catch {
+                                    app.show(Toast(message: error.localizedDescription))
+                                }
+                                await model.refreshAgents()
+                            }
+                        }
                         c.onEditing = { [weak scene] in scene?.writing = $0 }
                         c.onHeading = { [weak scene] in scene?.heading = $0 }
                         c.pageLinks = PageLinks(
                             title: { [app] id in app.library.page(id)?.title },
-                            open: { [weak scene] id in scene?.open(id) })
+                            open: { [weak scene] id in scene?.open(id) },
+                            openAt: { [weak scene] id, block in scene?.open(id, at: block) })
                         c.plainCopy = { [app] nodes in try? await app.client?.plainCopy(nodes) }
+                        c.copyText = { [app] nodes in try? await app.client?.copyText(nodes) }
                         c.menuItems = { [app, pageID] trigger, give in
                             Task {
                                 if let items = try? await app.client?.menuItems(

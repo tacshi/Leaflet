@@ -3,11 +3,15 @@ package doc
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math"
 	"math/rand/v2"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 func para(id, text string) *Node {
@@ -375,7 +379,7 @@ func TestMarkdownNestsByMarkerWidth(t *testing.T) {
 		item("numbered_list", "Run the tests"),
 		item("bulleted_list", "Notes", item("bulleted_list", "One")),
 	})
-	got := PageMarkdown("", c, nil)
+	got := PageMarkdown("", c, MarkdownOptions{})
 	want := "1. Clone the repo\n   - Use SSH\n2. Run the tests\n- Notes\n  - One\n"
 	if got != want {
 		t.Errorf("got\n%q\nwant\n%q", got, want)
@@ -1060,7 +1064,7 @@ func TestPageMarkdownKeepsBlocksApart(t *testing.T) {
 		{ID: "i", Type: "image", Data: map[string]any{"url": "https://e.com/a b.png", "alt": "*a*"}},
 		{ID: "s", Type: "subpage", Data: map[string]any{"page_id": "P1"}},
 	})
-	got := PageMarkdown("", c, func(string) string { return "Sub [page]" })
+	got := PageMarkdown("", c, MarkdownOptions{PageTitle: func(string) string { return "Sub [page]" }})
 	want := "## Plan for \\*now\\*\n\n" +
 		"> said\\\n> \\- not a list\n\n" +
 		"- item\\\n  1\\. not a list\n  - sub\n\n  after sub\n\n  > q\n\n" +
@@ -1097,5 +1101,238 @@ func TestPlainCopy(t *testing.T) {
 	want := "Trip plan with map\nDay 1\n\tKiyomizu-dera\n\nItem\tCost\nHotel\t800\na()\n\nb()\nhttps://x.dev\nKyoto (P1)"
 	if got != want {
 		t.Errorf("got\n%q\nwant\n%q", got, want)
+	}
+}
+
+// Rows both sides added to a table, at the same places, are both kept, the
+// other side's after the primary's, as every reader shows them; so are
+// columns. Each merge places them alike, whichever side is local, with no
+// conflict, and merging the result with either side's version again keeps
+// it.
+func TestMergeTableRowsAddedOnBothSides(t *testing.T) {
+	table, _ := TableNode([][]string{{"a", "b"}, {"c", "d"}}, "T")
+	base := FromBlocks([]*Node{table})
+	for id := range base.Blocks {
+		base.Blocks[id] = 1000
+	}
+	cell := func(row, col int, text string) *Node {
+		return &Node{ID: NewBlockID(), Type: "table/cell", Data: map[string]any{"rowPosition": row, "colPosition": col},
+			Children: []*Node{{ID: NewBlockID(), Type: "paragraph", Data: map[string]any{"delta": Delta{{Text: text}}.JSON()}}}}
+	}
+	addRow := func(text string, at int64) *Content {
+		c := base.Copy()
+		tt := c.Find("T")
+		tt.Children = append(tt.Children, cell(2, 0, text), cell(2, 1, text+"!"))
+		tt.Set("rowsLen", 3)
+		return c.Stamped(base, at)
+	}
+	addCol := func(text string, at int64) *Content {
+		c := base.Copy()
+		tt := c.Find("T")
+		tt.Children = append(tt.Children, cell(0, 2, text), cell(1, 2, text+"!"))
+		tt.Set("colsLen", 3)
+		return c.Stamped(base, at)
+	}
+	for _, tc := range []struct {
+		name         string
+		mine, theirs *Content
+		want         [][]string
+	}{
+		{"rows", addRow("mine", 2000), addRow("theirs", 1500),
+			[][]string{{"a", "b"}, {"c", "d"}, {"mine", "mine!"}, {"theirs", "theirs!"}}},
+		{"columns", addCol("mine", 2000), addCol("theirs", 1500),
+			[][]string{{"a", "b", "mine", "theirs"}, {"c", "d", "mine!", "theirs!"}}},
+		{"a row and a column", addRow("mine", 2000), addCol("theirs", 1500),
+			[][]string{{"a", "b", "theirs"}, {"c", "d", "theirs!"}, {"mine", "mine!", ""}}},
+	} {
+		var first *Content
+		for _, sides := range [][2]*Content{{tc.mine, tc.theirs}, {tc.theirs, tc.mine}} {
+			got, conflicts := Merge(base, sides[0], sides[1])
+			if rows := TableRows(got.Find("T")); !reflect.DeepEqual(rows, tc.want) {
+				t.Errorf("%s: rows %q, want %q", tc.name, rows, tc.want)
+			}
+			if len(conflicts) != 0 {
+				t.Errorf("%s: conflicts %+v", tc.name, conflicts)
+			}
+			if first == nil {
+				first = got
+			} else if got.Encode() != first.Encode() {
+				t.Errorf("%s: the merge differs as the sides swap", tc.name)
+			}
+		}
+		for _, side := range []*Content{tc.mine, tc.theirs} {
+			again, conflicts := Merge(base, side, first)
+			if rows := TableRows(again.Find("T")); !reflect.DeepEqual(rows, tc.want) || len(conflicts) != 0 {
+				t.Errorf("%s: merged again, rows %q, conflicts %+v", tc.name, rows, conflicts)
+			}
+		}
+	}
+}
+
+// Moves on each side keep to what each side did: a block whose neighbour
+// moved did not move itself, and a move next to a block the other side
+// made lands next to it once it is in. Each comes out the same whichever
+// side is local.
+func TestMergeKeepsMovesApart(t *testing.T) {
+	order := func(c *Content) string {
+		var ids []string
+		c.Walk(func(n, _ *Node) { ids = append(ids, n.ID) })
+		return strings.Join(ids, ",")
+	}
+	list := func(id string, kids ...*Node) *Node {
+		n := &Node{ID: id, Type: "bulleted_list", Children: kids}
+		n.SetDelta(Delta{{Text: id}})
+		return n
+	}
+	at := func(t0 int64, c *Content, base *Content) *Content { return c.Stamped(base, t0) }
+	base := page(map[string]int64{"a": 1, "b": 1, "c": 1}, para("a", "a"), para("b", "b"), para("c", "c"))
+	four := page(map[string]int64{"a": 1, "b": 1, "c": 1, "d": 1}, para("a", "a"), para("b", "b"), para("c", "c"), para("d", "d"))
+	nested := page(map[string]int64{"l": 1, "x": 1, "y": 1, "p": 1}, list("l", para("x", "x"), para("y", "y")), para("p", "p"))
+	for _, tc := range []struct {
+		name          string
+		base          *Content
+		local, remote *Content
+		want          []string // any one of these
+	}{
+		{"a deleted block stays deleted as its neighbour moves",
+			base, at(5, page(nil, para("a", "a"), para("c", "c")), base), at(4, page(nil, para("b", "b"), para("c", "c"), para("a", "a")), base),
+			[]string{"c,a"}},
+		{"two blocks moved to the end on each side",
+			four, at(5, page(nil, para("b", "b"), para("c", "c"), para("d", "d"), para("a", "a")), four),
+			at(4, page(nil, para("a", "a"), para("c", "c"), para("d", "d"), para("b", "b")), four),
+			[]string{"c,d,a,b", "c,d,b,a"}},
+		{"a move after a block the other side made",
+			base, at(5, page(nil, para("a", "a"), para("b", "b"), para("c", "c!")), base),
+			at(4, page(nil, para("b", "b"), para("c", "c"), para("n", "n"), para("a", "a")), base),
+			[]string{"b,c,n,a"}},
+		{"a move in a list after a block the other side made",
+			nested, at(5, page(nil, list("l", para("x", "x"), para("y", "y")), para("p", "p!")), nested),
+			at(4, page(nil, list("l", para("y", "y"), para("n", "n"), para("x", "x")), para("p", "p")), nested),
+			[]string{"l,y,n,x,p"}},
+	} {
+		var first string
+		for _, sides := range [][2]*Content{{tc.local, tc.remote}, {tc.remote, tc.local}} {
+			got, conflicts := Merge(tc.base, sides[0], sides[1])
+			if !slices.Contains(tc.want, order(got)) {
+				t.Errorf("%s: %s, want one of %v", tc.name, order(got), tc.want)
+			}
+			if len(conflicts) != 0 {
+				t.Errorf("%s: conflicts %+v", tc.name, conflicts)
+			}
+			if first == "" {
+				first = order(got)
+			} else if order(got) != first {
+				t.Errorf("%s: %s as the sides swap, %s before", tc.name, order(got), first)
+			}
+		}
+	}
+}
+
+// A save drops the tombstones older than TombstoneLife, and keeps the
+// newer.
+func TestOldTombstonesGo(t *testing.T) {
+	now := int64(400 * 24 * 60 * 60 * 1000)
+	prev := &Content{Children: []*Node{{ID: "a", Type: "paragraph"}}, Blocks: map[string]int64{"a": 1},
+		Deleted: map[string]int64{"old": now - TombstoneLife - 1, "new": now - 1000}}
+	got := prev.Copy().Stamped(prev, now)
+	if _, ok := got.Deleted["old"]; ok {
+		t.Error("an old tombstone stayed")
+	}
+	if _, ok := got.Deleted["new"]; !ok {
+		t.Error("a new tombstone went")
+	}
+}
+
+// Blocks of one ID, as a paste can make, and blocks without one, read
+// with the same IDs on every device and every read of the page, so that a
+// merge of three reads, as each device reads base, local and remote,
+// keeps one of each rather than every read's own copy.
+func TestRepairedIDsAreTheSameEachRead(t *testing.T) {
+	stored := `{"document":{"type":"page","id":"root","children":[` +
+		`{"id":"a","type":"paragraph","data":{"delta":[{"insert":"one"}]}},` +
+		`{"id":"a","type":"paragraph","data":{"delta":[{"insert":"two"}]}},` +
+		`{"id":"a-2","type":"paragraph","data":{"delta":[{"insert":"three"}]}},` +
+		`{"id":"","type":"paragraph","data":{"delta":[{"insert":"four"}]},"children":[` +
+		`{"id":"root","type":"paragraph","data":{"delta":[{"insert":"five"}]}}]}]},"meta":{"v":1}}`
+	read := func() *Content {
+		c, err := Decode(stored)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c
+	}
+	var ids []string
+	read().Walk(func(n, _ *Node) { ids = append(ids, n.ID) })
+	if want := []string{"a", "a-3", "a-2", "block-1", "root-1"}; !slices.Equal(ids, want) {
+		t.Errorf("IDs %q, want %q", ids, want)
+	}
+	base, local, remote := read(), read(), read()
+	local.Find("a-3").SetDelta(Delta{{Text: "two, edited"}})
+	got, _ := Merge(base, local, remote)
+	if want := []string{"one", "two, edited", "three", "four", "five"}; !slices.Equal(texts(got), want) {
+		t.Errorf("merged %q, want %q", texts(got), want)
+	}
+}
+
+// Blocks two devices make without IDs, each on its own, get IDs of their
+// own, whether an editor sends them (DecodeEdit), a page is made of them
+// (FromBlocks) or a page is copied (CopyFor): merged, both devices' blocks
+// are kept, not taken for one, as the IDs every reader gives stored
+// content would have them.
+func TestNewBlocksOnTwoDevicesKeepApart(t *testing.T) {
+	base := FromBlocks([]*Node{para("a", "first")})
+	edit := func(text string) *Content {
+		c := base.Copy()
+		c.Children = append(c.Children, para("", text), para("a", text+", pasted"))
+		got, err := DecodeEdit(c.Encode())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got.Stamped(base, NowMs())
+	}
+	got, _ := Merge(base, edit("from A"), edit("from B"))
+	if want := []string{"first", "from A", "from A, pasted", "from B", "from B, pasted"}; !slices.Equal(slices.Sorted(slices.Values(texts(got))), want) {
+		t.Errorf("merged %q, want %q", texts(got), want)
+	}
+	made := func() string { return FromBlocks([]*Node{{Type: "paragraph"}}).Children[0].ID }
+	copied := func() string { return base.CopyFor(nil).Children[0].ID }
+	if a, b := made(), made(); a == b {
+		t.Errorf("two pages made of a block without an ID both have %s", a)
+	}
+	if a, b := copied(), copied(); a == b || a == "a" {
+		t.Errorf("two copies of a page have %s and %s", a, b)
+	}
+}
+
+// A merge takes time in proportion to the page: a one-line edit on each
+// side of a page of 8,000 blocks, as a long transcript or a big table
+// makes, merges in about eight times what one of 1,000 takes, not the
+// sixty-four times of a merge that goes over the page for each block.
+func TestMergeIsLinear(t *testing.T) {
+	if testing.Short() {
+		t.Skip("times merges")
+	}
+	merge := func(n int) time.Duration {
+		blocks := make([]*Node, n)
+		for i := range blocks {
+			blocks[i] = para(fmt.Sprintf("b%d", i), fmt.Sprintf("line %d with some words", i))
+		}
+		base := FromBlocks(blocks)
+		local, remote := base.Copy(), base.Copy()
+		local.Find("b1").SetDelta(Delta{{Text: "local"}})
+		remote.Find(fmt.Sprintf("b%d", n-2)).SetDelta(Delta{{Text: "remote"}})
+		local, remote = local.Stamped(base, NowMs()+1), remote.Stamped(base, NowMs()+2)
+		best := time.Duration(math.MaxInt64)
+		for range 3 {
+			runtime.GC()
+			start := time.Now()
+			Merge(base, local, remote)
+			best = min(best, time.Since(start))
+		}
+		return best
+	}
+	small, large := merge(1000), merge(8000)
+	if large > 24*small {
+		t.Errorf("a merge of 1000 blocks takes %v, of 8000 %v", small, large)
 	}
 }

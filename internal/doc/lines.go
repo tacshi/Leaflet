@@ -612,8 +612,9 @@ func imageLine(line string) *Node {
 		return nil
 	}
 	// An address with a space in it, a title after a no-break space
-	// among them, is no picture's: the server reads the line as text.
-	if strings.IndexFunc(in[0].Dest, unicode.IsSpace) >= 0 {
+	// among them, is no picture's: the server reads the line as text. Nor
+	// is one an image block refuses, as one without a host's name.
+	if strings.IndexFunc(in[0].Dest, unicode.IsSpace) >= 0 || !agentURL(in[0].Dest) {
 		return nil
 	}
 	n, err := ImageNode(in[0].Dest)

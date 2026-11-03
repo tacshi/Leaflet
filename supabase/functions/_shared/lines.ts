@@ -11,15 +11,14 @@
 import {
   type BlockSpec,
   codeLanguage,
-  codeSpanAt,
   deltaToPlain,
   fields,
+  InlineText,
   isRule,
-  isSpace,
-  link,
   markdownToDelta,
   trimSpace,
 } from "./blocks.ts";
+import { agentURL } from "./url.ts";
 
 const ALERT_TONES: Record<string, string> = {
   "[!NOTE]": "info",
@@ -58,6 +57,7 @@ function codeFence(line: string): string | null {
  */
 export function tableRow(line: string): { cells: string[]; rule: boolean } {
   const s = [...trimSpace(line).replace(/^\|/, "")];
+  const text = new InlineText(s).span();
   const cells: string[] = [];
   let cell = "";
   // Where the code span the line is read in ends.
@@ -73,7 +73,7 @@ export function tableRow(line: string): { cells: string[]; rule: boolean } {
       cells.push(cell);
       cell = "";
     } else if (s[i] === "`" && i >= code) {
-      const span = codeSpanAt(s.slice(i));
+      const span = text.codeSpan(i);
       if (span) code = i + span.n;
       cell += s[i];
     } else {
@@ -99,6 +99,7 @@ const BR_TAGS = ["<br>", "<br/>", "<br />"];
 function cellBreaks(md: string): string {
   if (!md.toLowerCase().includes("<br")) return md;
   const s = [...md];
+  const text = new InlineText(s).span();
   let out = "";
   for (let i = 0; i < s.length;) {
     if (s[i] === "\\") {
@@ -107,15 +108,15 @@ function cellBreaks(md: string): string {
       continue;
     }
     if (s[i] === "[") {
-      const l = link(s.slice(i));
+      const l = text.link(i);
       if (l) {
-        out += "[" + cellBreaks(l.text.join("")) + s.slice(i + 1 + l.text.length, i + l.n).join("");
+        out += "[" + cellBreaks(s.slice(i + 1, l.close).join("")) + s.slice(l.close, i + l.n).join("");
         i += l.n;
         continue;
       }
     }
     if (s[i] === "`") {
-      const span = codeSpanAt(s.slice(i));
+      const span = text.codeSpan(i);
       let j = i + (span?.n ?? 0);
       if (!span) { while (j < s.length && s[j] === "`") j++; }
       out += s.slice(i, j).join("");
@@ -123,7 +124,7 @@ function cellBreaks(md: string): string {
       continue;
     }
     if (s[i] === "<") {
-      const rest = s.slice(i).join("").toLowerCase();
+      const rest = s.slice(i, i + 6).join("").toLowerCase();
       const tag = BR_TAGS.find((t) => rest.startsWith(t));
       if (tag) {
         out += "\n";
@@ -134,17 +135,6 @@ function cellBreaks(md: string): string {
     out += s[i++];
   }
   return out;
-}
-
-/** Whether a link is to a picture on the web, as doc.WebURL has it. */
-function webURL(link: string): boolean {
-  if (isSpace(link)) return false;
-  try {
-    const u = new URL(link);
-    return (u.protocol === "http:" || u.protocol === "https:") && u.host !== "";
-  } catch {
-    return false;
-  }
 }
 
 const unescape = (s: string) => s.replace(/\\([!-/:-@[-`{-~])/g, "$1");
@@ -193,8 +183,10 @@ function imageLine(line: string): { url: string; alt: string } | null {
   }
   // An optional title, and the ) that ends the line.
   if (!titleEnd.test(rest)) return null;
-  url = trimSpace(unescape(url));
-  if (!webURL(url)) return null;
+  // A link the image block takes, as a spec's image.url: one it would
+  // refuse would fail the whole call (agentURL).
+  url = unescape(url);
+  if (!agentURL(url)) return null;
   return { url, alt: deltaToPlain(markdownToDelta(alt)) };
 }
 
@@ -235,10 +227,11 @@ const isDetailsClose = (s: string) => trimSpace(s).toLowerCase() === "</details>
 /** Where the </summary> that ends a toggle's summary is in s, one not escaped nor in a code span, or -1. */
 function summaryEnd(s: string): number {
   const r = [...s];
+  const text = new InlineText(r).span();
   for (let i = 0; i < r.length; i++) {
     if (r[i] === "\\") i++;
     else if (r[i] === "`") {
-      const span = codeSpanAt(r.slice(i));
+      const span = text.codeSpan(i);
       if (span) i += span.n - 1;
     } else if (r[i] === "<" && r.slice(i, i + 10).join("").toLowerCase() === "</summary>") {
       return r.slice(0, i).join("").length;

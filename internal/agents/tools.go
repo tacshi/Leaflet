@@ -2,14 +2,16 @@ package agents
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // The page tools every agent surface uses (docs/protocol.md §2), mirroring
@@ -52,8 +54,8 @@ var blockSchema = map[string]any{
 		"formula":   map[string]any{"type": "string", "description": "A math_equation's formula in TeX, without $ delimiters, shown in display style."},
 		"source":    map[string]any{"type": "string", "description": "A diagram's Mermaid source: flowchart, sequenceDiagram, classDiagram, stateDiagram, gantt, pie, mindmap and the rest."},
 		"link": map[string]any{"type": "object", "description": "A link_preview: a card for a web page, with its title and picture.",
-			"properties": map[string]any{"url": map[string]any{"type": "string"}}},
-		"level":   map[string]any{"type": "integer", "description": "Heading level 1-3."},
+			"properties": map[string]any{"url": map[string]any{"type": "string"}}, "required": []string{"url"}},
+		"level":   map[string]any{"type": "integer", "minimum": 1, "maximum": 6, "description": "Heading level, 1 to 6."},
 		"checked": map[string]any{"type": "boolean"},
 		"due":     map[string]any{"type": "string", "description": "For todo_list: the day it is due, YYYY-MM-DD, or with a time of day, YYYY-MM-DDTHH:MM, in the user's own time"},
 		"children": map[string]any{"type": "array", "description": "Nested blocks: list items under a list item, or any blocks inside a toggle_list.",
@@ -67,14 +69,16 @@ var blockSchema = map[string]any{
 			"series": map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": map[string]any{
 				"name":   map[string]any{"type": "string"},
 				"values": map[string]any{"type": "array", "items": map[string]any{"type": "number"}},
-			}}},
+			}, "required": []string{"name", "values"}}},
 			"caption": map[string]any{"type": "string"},
-		}},
+		}, "required": []string{"chart_type", "labels", "series"}},
 		"embed": map[string]any{"type": "object", "description": "A self-contained interactive HTML widget. It runs sandboxed with no network or storage access.",
-			"properties": map[string]any{"title": map[string]any{"type": "string"}, "html": map[string]any{"type": "string"}, "height": map[string]any{"type": "integer"}}},
-		"image": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}, "alt": map[string]any{"type": "string"}}},
+			"properties": map[string]any{"title": map[string]any{"type": "string"}, "html": map[string]any{"type": "string"}, "height": map[string]any{"type": "integer", "minimum": 120, "maximum": 1200}},
+			"required":   []string{"html"}},
+		"image": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}, "alt": map[string]any{"type": "string"}}, "required": []string{"url"}},
 		"video": map[string]any{"type": "object", "description": "A YouTube or Vimeo video, or a video file, that plays in the page.",
-			"properties": map[string]any{"url": map[string]any{"type": "string", "description": "The video's YouTube or Vimeo link, or a link to the video file (.mp4, .webm, .mov)."}, "title": map[string]any{"type": "string"}}},
+			"properties": map[string]any{"url": map[string]any{"type": "string", "description": "The video's YouTube or Vimeo link, or a link to the video file (.mp4, .webm, .mov)."}, "title": map[string]any{"type": "string"}},
+			"required":   []string{"url"}},
 	},
 	"required": []string{"type"},
 }
@@ -131,7 +135,7 @@ func tool(name, desc string, props any, required ...string) map[string]any {
 // on a page the user may not edit.
 func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 	out := []map[string]any{
-		tool("read_page", "Read the whole page: every block with its ID, subpage titles, and comment threads.", map[string]any{}),
+		tool("read_page", "Read the whole page: every block with its ID, subpage titles, and comment threads. An embed's html longer than 30,000 characters is left out, its html_length given instead: to change such an embed, write its html whole.", map[string]any{}),
 	}
 	if !readOnly {
 		out = append(out, editTools()...)
@@ -150,10 +154,10 @@ func editTools() []map[string]any {
 		tool("write_markdown", "Write into the page in Markdown: the way to write prose, as a story, a draft, notes or a summary. Each line is a block: a paragraph, # to ### headings, - or 1. list items (indent two spaces to nest), - [ ] to-dos, > quotes, ``` fenced code, | tables, --- dividers; blank lines only separate them. It goes into the page as you write it.",
 			ordered{{"position", writeSchema}, {"markdown", map[string]any{"type": "string"}}}, "position", "markdown"),
 		// The position first, so the blocks can go in as they stream.
-		tool("insert_blocks", "Insert new blocks at a position.", ordered{{"position", positionSchema}, {"blocks", map[string]any{"type": "array", "items": blockSchema}}}, "position", "blocks"),
+		tool("insert_blocks", "Insert new blocks at a position.", ordered{{"position", positionSchema}, {"blocks", map[string]any{"type": "array", "minItems": 1, "items": blockSchema}}}, "position", "blocks"),
 		tool("replace_block", "Replace one block with a new one, keeping its ID (and its nested items when it stays a list).", ordered{{"id", map[string]any{"type": "string"}}, {"block", blockSchema}}, "id", "block"),
 		tool("move_block", "Move a block (with its nested items) to a new position.", map[string]any{"id": map[string]any{"type": "string"}, "position": positionSchema}, "id", "position"),
-		tool("delete_blocks", "Delete blocks by ID, with their nested items.", map[string]any{"ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}}, "ids"),
+		tool("delete_blocks", "Delete blocks by ID, with their nested items.", map[string]any{"ids": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}}, "ids"),
 		tool("create_subpage", "Create a subpage of this page, optionally with content.", map[string]any{"title": map[string]any{"type": "string"}, "blocks": map[string]any{"type": "array", "items": blockSchema}}, "title"),
 	}
 }
@@ -177,7 +181,7 @@ type ToolContext struct {
 	// Transcript is a recording's transcript as text, "" when there is none.
 	Transcript func(recordingID string) string
 	// Request is what the user asked the run, whose URLs a block may load
-	// as this page's may (fetchedURLs).
+	// as this page's may (checkURLs).
 	Request string
 }
 
@@ -247,27 +251,46 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 			}
 			return out
 		}
+		// Shaped as read_page's, as protocol §2 has it: its subpages, and
+		// no comments, which are of this page's alone.
 		tc.ReadOtherPage = func(id string) map[string]any {
 			p, err := st.Page(id)
 			c := st.Content(id)
 			if err != nil || c == nil || !p.DeletedAt.IsZero() || p.SpaceID != here.SpaceID {
 				return nil
 			}
-			return map[string]any{"page": map[string]any{"id": id, "title": p.DisplayTitle()}, "blocks": tc.Views(c)}
+			subpages := []map[string]any{}
+			if kids, err := st.Children(id, ""); err == nil {
+				for _, k := range kids {
+					subpages = append(subpages, map[string]any{"id": k.ID, "title": k.DisplayTitle()})
+				}
+			}
+			return map[string]any{"page": map[string]any{"id": id, "title": p.DisplayTitle()}, "blocks": tc.Views(c),
+				"subpages": subpages, "comments": []map[string]any{}}
 		}
 	}
 	return tc
 }
 
+// maxViewHTML is the longest embed source agents read, in characters. A
+// longer one is left out, its length given instead: a few would be more
+// than a model reads at once, or an MCP client takes from a tool, and
+// the page could not be read at all.
+const maxViewHTML = 30_000
+
 // Views are the blocks as agents read them, with the transcripts of
-// recordings, which are not in the page itself.
+// recordings, which are not in the page itself, and without an embed's
+// source longer than maxViewHTML.
 func (tc ToolContext) Views(c *doc.Content) []map[string]any {
 	views := doc.BlockViews(c)
-	if tc.Transcript == nil {
-		return views
-	}
 	for _, v := range views {
-		if rec, ok := v["recording"].(map[string]any); ok {
+		if e, ok := v["embed"].(map[string]any); ok {
+			if html, _ := e["html"].(string); utf8.RuneCountInString(html) > maxViewHTML {
+				delete(e, "html")
+				e["html_length"] = utf8.RuneCountInString(html)
+			}
+		}
+		if rec, ok := v["recording"].(map[string]any); ok && tc.Transcript != nil {
 			id, _ := rec["recording_id"].(string)
 			if t := tc.Transcript(id); t != "" {
 				rec["transcript"] = t
@@ -295,70 +318,99 @@ type Executor struct {
 	// draft is an insert_blocks call going in as it streams.
 	draft *draft
 	// allowed are the URLs a block may load once the run reads beyond
-	// this page (fetchedURLs): those on it when the run began, and in the
+	// this page (checkURLs): those on it when the run began, and in the
 	// user's request; nil before the run's first call.
 	allowed map[string]bool
 	// armed is a run that has read beyond this page.
 	armed bool
+	// written counts the blocks the run's calls have written, toward
+	// maxRunBlocks.
+	written int
 }
 
-// fetchedURLs are the URLs of the blocks the app loads by itself, as it
-// shows them: an image, a video, a link card. An agent that has read
-// another of the user's pages could write what it read into one, such as
-// https://example.com/x.png?notes=…, and the app would send it to that
-// server without anyone clicking. So once a run reads another page, or
-// lists them, a block it writes may load only a URL the user gave it: one
-// on this page as the run began, or in their request. Not one on a page
-// it read, which someone else may have written there for it to use, nor
-// one the run wrote, which could carry what it read. Links in text are
-// not loaded, so they stay free.
-var fetchedURLs = map[string]bool{"image": true, "video": true, "link_preview": true}
+// maxRunBlocks bounds the blocks one run writes: a model that goes on and
+// on, as one repeating itself, stops there.
+const maxRunBlocks = 5000
+
+// room refuses blocks that would take the run past maxRunBlocks.
+func (x *Executor) room(nodes []*doc.Node) error {
+	if x.written+countNodes(nodes) > maxRunBlocks {
+		return terr("This run has written %d blocks, and one run writes at most %d. Stop here, and say in your reply what is left to do.", x.written, maxRunBlocks)
+	}
+	return nil
+}
+
+// countNodes counts blocks and the blocks inside them.
+func countNodes(nodes []*doc.Node) int {
+	n := 0
+	for _, k := range nodes {
+		walk(k, func(*doc.Node) { n++ })
+	}
+	return n
+}
 
 // urlRe finds the URLs in text the agent read, each to the first space
 // of unicode.IsSpace's, as the server's URL_RE.
 var urlRe = regexp.MustCompile(`https?://[^\t\n\v\f\r \x{85}\x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}<>"'()\[\]]+`)
 
-// see adds the URLs in v to set.
+// see adds the URLs in v to set: strings that are one, and those in text,
+// in v and in every list and map in it, a table's rows of cells among
+// them, as the server's urlsIn.
 func see(set map[string]bool, v any) {
-	switch v := v.(type) {
-	case string:
-		if strings.HasPrefix(v, "http://") || strings.HasPrefix(v, "https://") {
-			set[v] = true
+	if s, ok := v.(string); ok {
+		if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+			set[s] = true
 		}
-		for _, u := range urlRe.FindAllString(v, -1) {
+		for _, u := range urlRe.FindAllString(s, -1) {
 			set[u] = true
 		}
-	case map[string]any:
-		for _, e := range v {
-			see(set, e)
+		return
+	}
+	switch rv := reflect.ValueOf(v); rv.Kind() {
+	case reflect.Slice, reflect.Array:
+		for i := range rv.Len() {
+			see(set, rv.Index(i).Interface())
 		}
-	case []map[string]any:
-		for _, e := range v {
-			see(set, e)
-		}
-	case []any:
-		for _, e := range v {
-			see(set, e)
+	case reflect.Map:
+		for it := rv.MapRange(); it.Next(); {
+			see(set, it.Value().Interface())
 		}
 	}
 }
 
-// checkURLs refuses blocks that would load a URL the user did not give
-// the run, once it has read beyond this page.
-func (x *Executor) checkURLs(nodes []*doc.Node) error {
+// The URL guard: the app loads an image, a video or a link card by itself,
+// as it shows them. An agent that has read another of the user's pages
+// could write what it read into one, such as https://example.com/x.png?notes=…,
+// and the app would send it to that server without anyone clicking. So once a run reads another page, or
+// lists them, what it writes may hold only a URL the user gave it: one on
+// this page as the run began, or in their request. Not one on a page it
+// read, which someone else may have written there for it to use, nor one
+// the run made up, which could carry what it read. Not in text either: a
+// link a run writes in text would be on the page for the next run, which
+// takes the page's URLs as the user's, to load in a block. A page it read
+// it names with a link to that page, which loads nothing.
+//
+// checkURLs refuses blocks that hold a URL the user did not give the run,
+// in a block the app loads or in text, and more text that does, as a
+// subpage's title, once it has read beyond this page.
+func (x *Executor) checkURLs(nodes []*doc.Node, more ...any) error {
 	if !x.armed {
 		return nil
 	}
-	var bad string
+	x.begin()
+	urls := map[string]bool{}
+	see(urls, more)
 	for _, n := range nodes {
-		walk(n, func(k *doc.Node) {
-			if u := k.Str("url"); fetchedURLs[k.Type] && bad == "" && !x.allowed[u] {
-				bad = u
-			}
-		})
+		walk(n, func(k *doc.Node) { see(urls, k.Data) })
+	}
+	var bad string
+	for u := range urls {
+		if !x.allowed[u] && (bad == "" || u < bad) {
+			bad = u
+		}
 	}
 	if bad != "" {
-		return terr("After reading another page, an image, video or link card may only use a URL that was on this page before you began or is in the user's request, which %s is not: the app loads it by itself. Link to it in text instead.", bad)
+		return terr("After reading another page, what you write may only hold a URL that was on this page before you began or is in the user's request, which %s is not: a link written here could carry what you read, and a later edit could have the app load it. Name the page you read it on with a link to that page instead.", bad)
 	}
 	return nil
 }
@@ -372,22 +424,27 @@ func (x *Executor) CallRaw(name, raw string) map[string]any {
 		if err := json.Unmarshal([]byte(raw), &v); err != nil {
 			return map[string]any{"error": "Arguments were not valid JSON."}
 		}
-		if m, ok := v.(map[string]any); ok {
-			args = m
+		// Arguments that are no object are refused, as the server
+		// refuses them, rather than taken as none.
+		m, ok := v.(map[string]any)
+		if !ok {
+			return map[string]any{"error": "Arguments must be a JSON object."}
 		}
+		args = m
 	}
 	return x.Call(name, args)
 }
 
 // Call runs a tool.
 func (x *Executor) Call(name string, args map[string]any) map[string]any {
-	out, err := x.dispatch(name, args)
+	return ToolAnswer(x.dispatch(name, args))
+}
+
+// ToolAnswer is a tool's result as the model reads it: out, or else what
+// err says was wrong, as {error}.
+func ToolAnswer(out map[string]any, err error) map[string]any {
 	if err != nil {
-		var te *doc.ToolError
-		if errors.As(err, &te) {
-			return map[string]any{"error": te.Message}
-		}
-		return map[string]any{"error": err.Error()}
+		return map[string]any{"error": toolMessage(err)}
 	}
 	return out
 }
@@ -398,7 +455,8 @@ func terr(format string, args ...any) error {
 
 // begin keeps the URLs a block may load once the run reads beyond this
 // page, before its first call changes the page: those on it, and in the
-// user's request.
+// user's request. RunLocal calls it before any call, as one streaming in
+// changes the page before it is made.
 func (x *Executor) begin() {
 	if x.allowed == nil && (x.Ctx.ListPages != nil || x.Ctx.ReadOtherPage != nil) {
 		x.allowed = map[string]bool{}
@@ -480,15 +538,48 @@ func (x *Executor) readPage() map[string]any {
 	return out
 }
 
-func (x *Executor) has(id string) bool { return x.Ctx.Content.Find(id) != nil }
+// block is the block of ID id a call may name, nil when there is none: not
+// a table's cell, nor a block in one, which the server's tools cannot find
+// either (indexBlocks). A table changes whole, with replace_block.
+func (x *Executor) block(id string) *doc.Node {
+	var find func([]*doc.Node) *doc.Node
+	find = func(nodes []*doc.Node) *doc.Node {
+		for _, n := range nodes {
+			if n.ID == id {
+				return n
+			}
+			if n.Type != "table" {
+				if hit := find(n.Children); hit != nil {
+					return hit
+				}
+			}
+		}
+		return nil
+	}
+	return find(x.Ctx.Content.Children)
+}
+
+func (x *Executor) has(id string) bool { return x.block(id) != nil }
+
+// noBlock is a call naming a block that is not there, or not one it may
+// name (block), as the server says it.
+func noBlock(id any) error {
+	return terr("No block with id \"%v\" on this page. Call read_page for current ids.", id)
+}
 
 // given are the keys of a position a model gave a value. Models that
 // write every key of a schema give the others null or "", and at, which
-// takes only start or end, one of those: at counts only alone.
+// takes only start or end, one of those: at counts only alone. Keys a
+// position has not are left out, as the server leaves them.
 func given(raw any) map[string]any {
 	m, _ := raw.(map[string]any)
 	set := map[string]any{}
 	for k, v := range m {
+		switch k {
+		case "after", "before", "parent", "at", "replace":
+		default:
+			continue
+		}
 		if v != nil && v != "" {
 			set[k] = v
 		}
@@ -500,6 +591,11 @@ func given(raw any) map[string]any {
 }
 
 func (x *Executor) position(raw any) (doc.Position, error) {
+	// "start" or "end" alone is that end of the page, as the server takes
+	// it.
+	if s, ok := raw.(string); ok && (s == "start" || s == "end") {
+		return doc.Position{At: s}, nil
+	}
 	if _, ok := raw.(map[string]any); !ok {
 		return doc.Position{}, terr("position must be an object.")
 	}
@@ -512,16 +608,16 @@ func (x *Executor) position(raw any) (doc.Position, error) {
 		switch k {
 		case "after", "before":
 			if !x.has(s) {
-				return doc.Position{}, terr("No block with ID %q.", fmt.Sprint(v))
+				return doc.Position{}, noBlock(v)
 			}
 			if k == "after" {
 				return doc.Position{After: s}, nil
 			}
 			return doc.Position{Before: s}, nil
 		case "parent":
-			n := x.Ctx.Content.Find(s)
+			n := x.block(s)
 			if n == nil {
-				return doc.Position{}, terr("No block with ID %q.", fmt.Sprint(v))
+				return doc.Position{}, noBlock(v)
 			}
 			if !doc.NestableTypes[n.Type] {
 				return doc.Position{}, terr("Only list blocks can have nested items.")
@@ -574,14 +670,18 @@ func (x *Executor) insert(args map[string]any) (map[string]any, error) {
 	if err := x.checkURLs(nodes); err != nil {
 		return nil, err
 	}
+	if err := x.room(nodes); err != nil {
+		return nil, err
+	}
 	var ids []string
 	for _, n := range nodes {
 		ids = append(ids, n.ID)
 	}
 	op := doc.InsertOp(p, cloneAll(nodes)...)
-	if err := x.emit(op, summaryFor("Inserted", nodes), ids); err != nil {
+	if err := x.emit(op, summaryFor(locales.AgentEditInserted, nodes), ids); err != nil {
 		return nil, err
 	}
+	x.written += countNodes(nodes)
 	return map[string]any{"inserted_ids": ids}, nil
 }
 
@@ -600,12 +700,16 @@ func (x *Executor) write(args map[string]any) (map[string]any, error) {
 	if err := doc.CallNodes(nodes); err != nil {
 		return nil, err
 	}
-	d.verb, x.draft = "Wrote", d
+	if err := x.room(nodes); err != nil {
+		return nil, err
+	}
+	d.verb, x.draft = locales.AgentEditWrote, d
 	if err := x.syncDraft(nodes, len(nodes)); err != nil {
 		x.DropDraft()
 		return nil, err
 	}
 	x.draft = nil
+	x.written += countNodes(nodes)
 	return map[string]any{"inserted_ids": d.ids}, nil
 }
 
@@ -622,9 +726,9 @@ func (x *Executor) replace(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	prev := x.Ctx.Content.Find(id)
+	prev := x.block(id)
 	if prev == nil {
-		return nil, terr("No block with ID %q.", id)
+		return nil, noBlock(id)
 	}
 	spec, ok := args["block"].(map[string]any)
 	if !ok {
@@ -635,7 +739,7 @@ func (x *Executor) replace(args map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	op := doc.Op{Op: "replace", ID: id, Node: n, PrevNode: prev.Clone()}
-	if err := x.emit(op, summaryFor("Rewrote", []*doc.Node{n}), []string{id}); err != nil {
+	if err := x.emit(op, summaryFor(locales.AgentEditRewrote, []*doc.Node{n}), []string{id}); err != nil {
 		return nil, err
 	}
 	return map[string]any{"id": id}, nil
@@ -674,7 +778,7 @@ func (x *Executor) move(args map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	if !x.has(id) {
-		return nil, terr("No block with ID %q.", id)
+		return nil, noBlock(id)
 	}
 	p, err := x.position(args["position"])
 	if err != nil {
@@ -683,7 +787,7 @@ func (x *Executor) move(args map[string]any) (map[string]any, error) {
 	if a := p.Anchor(); a != "" && x.Ctx.Content.IsSelfOrAncestor(id, a) {
 		return nil, terr("A block cannot move next to or inside itself.")
 	}
-	if err := x.emit(x.Ctx.Content.MoveOp(id, p), "Moved a block", []string{id}); err != nil {
+	if err := x.emit(x.Ctx.Content.MoveOp(id, p), locales.AgentEditMoved(), []string{id}); err != nil {
 		return nil, err
 	}
 	return map[string]any{"id": id}, nil
@@ -698,7 +802,7 @@ func (x *Executor) delete(args map[string]any) (map[string]any, error) {
 	for _, v := range raw {
 		s, _ := v.(string)
 		if s == "" || !x.has(s) {
-			return nil, terr("No block with ID %q.", fmt.Sprint(v))
+			return nil, noBlock(v)
 		}
 		dup := false
 		for _, e := range ids {
@@ -721,11 +825,7 @@ func (x *Executor) delete(args map[string]any) (map[string]any, error) {
 			roots = append(roots, id)
 		}
 	}
-	summary := "Deleted a block"
-	if len(roots) > 1 {
-		summary = fmt.Sprintf("Deleted %d blocks", len(roots))
-	}
-	if err := x.emit(x.Ctx.Content.DeleteOp(roots), summary, roots); err != nil {
+	if err := x.emit(x.Ctx.Content.DeleteOp(roots), locales.AgentEditDeleted(len(roots)), roots); err != nil {
 		return nil, err
 	}
 	return map[string]any{"deleted_ids": roots}, nil
@@ -739,13 +839,18 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 	// Without the spaces around it, as the server keeps it.
 	title = strings.TrimSpace(title)
 	var nodes []*doc.Node
-	if args["blocks"] != nil {
+	// No blocks, or none listed, is an empty subpage, as the server makes.
+	if list, ok := args["blocks"].([]any); args["blocks"] != nil && (!ok || len(list) > 0) {
 		if nodes, err = x.specs(args["blocks"]); err != nil {
 			return nil, err
 		}
-		if err := x.checkURLs(nodes); err != nil {
-			return nil, err
-		}
+	}
+	// Its title shows on this page, in its card, as the next run reads it.
+	if err := x.checkURLs(nodes, title); err != nil {
+		return nil, err
+	}
+	if err := x.room(nodes); err != nil {
+		return nil, err
 	}
 	if x.Ctx.CreateSubpage == nil {
 		return nil, terr("Subpages cannot be made here.")
@@ -754,8 +859,9 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	x.written += countNodes(nodes)
 	op := doc.Op{Op: "create_page", Page: &doc.NewPage{ID: id, ParentID: x.Ctx.PageID, Title: title}}
-	summary := "Created subpage “" + title + "”"
+	summary := locales.AgentEditCreatedSubpage(title)
 	x.Ops = append(x.Ops, op)
 	x.Edits = append(x.Edits, Edit{Summary: summary, BlockIDs: []string{}})
 	if x.OnOp != nil {
@@ -772,29 +878,59 @@ func str(args map[string]any, key string) (string, error) {
 	return s, nil
 }
 
-func summaryFor(verb string, nodes []*doc.Node) string {
+// kinds name the blocks an edit summary names by their kind, in the
+// app's language.
+var kinds = map[string]func() string{
+	"chart": locales.AgentEditChart, "table": locales.AgentEditTable, "embed": locales.AgentEditEmbed, "heading": locales.AgentEditHeading,
+	"image": locales.AgentEditImage, "video": locales.AgentEditVideo, "code": locales.AgentEditCode, "callout": locales.AgentEditCallout,
+	"toggle_list": locales.AgentEditToggle, "link_preview": locales.AgentEditLinkCard, "math_equation": locales.AgentEditFormula, "diagram": locales.AgentEditDiagram,
+}
+
+// summaryFor is what an edit that wrote nodes did, as verb says it of
+// what it wrote: their number, or the one block's kind and title.
+func summaryFor(verb func(what string) string, nodes []*doc.Node) string {
 	if len(nodes) > 1 {
-		return fmt.Sprintf("%s %d blocks", verb, len(nodes))
+		return verb(locales.AgentEditBlocks(len(nodes)))
 	}
 	n := nodes[0]
-	kind := map[string]string{"chart": "chart", "table": "table", "embed": "interactive embed", "heading": "heading", "image": "image", "video": "video", "code": "code block",
-		"callout": "callout", "toggle_list": "toggle", "link_preview": "link card", "math_equation": "formula", "diagram": "diagram"}[n.Type]
-	title := ""
+	what := locales.AgentEditBlocks(1)
+	if kind, ok := kinds[n.Type]; ok {
+		what = kind()
+	}
 	if n.Type == "chart" || n.Type == "embed" || n.Type == "video" {
-		title = n.Str("title")
+		if title := n.Str("title"); title != "" {
+			what += " · " + title
+		}
 	}
-	what := "a block"
+	return verb(what)
+}
+
+// opEdit is a cloud run's op as an edit, said as a local run's would be
+// in the app's language: the server words its summaries in English. tool
+// is the call that made it, as the server names it: write_markdown's
+// blocks, inserted or in place of an empty one, are said as written, as
+// a local run says them. An older server names none, and its inserts are
+// said as insert_blocks' are.
+func opEdit(op doc.Op, tool string) Edit {
+	wrote := tool == "write_markdown"
+	summary := locales.AgentEditedPage()
 	switch {
-	case strings.HasPrefix(kind, "i"):
-		// "interactive embed" and "image" take "an".
-		what = "an " + kind
-	case kind != "":
-		what = "a " + kind
+	case op.Op == "insert" && len(op.Nodes) > 0 && wrote:
+		summary = summaryFor(locales.AgentEditWrote, op.Nodes)
+	case op.Op == "insert" && len(op.Nodes) > 0:
+		summary = summaryFor(locales.AgentEditInserted, op.Nodes)
+	case op.Op == "replace" && op.Node != nil && wrote:
+		summary = summaryFor(locales.AgentEditWrote, []*doc.Node{op.Node})
+	case op.Op == "replace" && op.Node != nil:
+		summary = summaryFor(locales.AgentEditRewrote, []*doc.Node{op.Node})
+	case op.Op == "move":
+		summary = locales.AgentEditMoved()
+	case op.Op == "delete" && len(op.IDs) > 0:
+		summary = locales.AgentEditDeleted(len(op.IDs))
+	case op.Op == "create_page" && op.Page != nil:
+		summary = locales.AgentEditCreatedSubpage(op.Page.Title)
 	}
-	if title != "" {
-		what += " · " + title
-	}
-	return verb + " " + what
+	return Edit{Summary: summary, BlockIDs: OpBlockIDs(op)}
 }
 
 // OpBlockIDs are the blocks an op touches, for tinting them.

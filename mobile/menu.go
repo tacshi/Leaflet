@@ -3,6 +3,7 @@ package mobile
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/guard"
@@ -181,4 +182,65 @@ func (c *Core) fillLinks(id string, content *doc.Content) {
 			})
 		})
 	}
+}
+
+// pasted is what text pasted makes, as PasteText gives it: the blocks of
+// lines, a video or a picture for a link pasted on an empty line, or the
+// web link the text is.
+type pasted struct {
+	Blocks []*doc.Node `json:"blocks,omitempty"`
+	Media  *doc.Node   `json:"media,omitempty"`
+	Link   string      `json:"link,omitempty"`
+}
+
+// PasteText reads text pasted, as the desktop's editor pastes text: lines
+// as blocks, read as Markdown (doc.ParseLines), and one line that is a web
+// link as that link; on an empty line, a YouTube, Vimeo or video file's
+// link as a video, and a picture's as an image. empty says the caret is on
+// an empty line. A line of other text makes nothing: it goes in as typed.
+func PasteText(text string, empty bool) (_ string, err error) {
+	defer catch(&err)
+	var out pasted
+	text = strings.NewReplacer("\r\n", "\n", "\r", "\n", " ", "\n", "\u0085", "\n").Replace(text)
+	line := strings.TrimSpace(text)
+	switch {
+	case strings.Contains(strings.TrimRight(text, "\n"), "\n"):
+		out.Blocks = doc.ParseLines(strings.TrimRight(text, "\n"))
+	case empty && line != "":
+		if v, err := doc.VideoNode(line, ""); err == nil {
+			out.Media = v
+		} else if doc.ImageLink(line) {
+			out.Media, _ = doc.ImageNode(line)
+		}
+	}
+	if out.Blocks == nil && out.Media == nil && doc.WebURL(text) {
+		out.Link = line
+	}
+	return encode(out)
+}
+
+// fence is what Enter after a line makes, as FenceEnter gives it.
+type fence struct {
+	Code     bool      `json:"code,omitempty"`
+	Language string    `json:"language,omitempty"`
+	Block    *doc.Node `json:"block,omitempty"`
+}
+
+// FenceEnter says what Enter at the end of a paragraph of line makes, as
+// the desktop's editor has it (fenceEnter): a Markdown fence, as "```go",
+// a code block in its language; "```mermaid" a diagram, and "$$" math, to
+// be written; nothing for another line.
+func FenceEnter(line string) (_ string, err error) {
+	defer catch(&err)
+	var out fence
+	language, ok := doc.CodeFence(line)
+	switch {
+	case ok && language == "mermaid":
+		out.Block = doc.DiagramNode("")
+	case ok:
+		out.Code, out.Language = true, language
+	case strings.TrimSpace(line) == "$$":
+		out.Block = doc.MathNode("")
+	}
+	return encode(out)
 }

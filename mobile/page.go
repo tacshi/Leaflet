@@ -171,7 +171,7 @@ func (c *Core) OpenPage(id string) (_ string, err error) {
 // instead.
 func (c *Core) EditPage(id string, editor int64, content string, rev int64) (left int64, err error) {
 	defer catch(&err)
-	edit, err := doc.Decode(content)
+	edit, err := doc.DecodeEdit(content)
 	if err != nil {
 		return 0, err
 	}

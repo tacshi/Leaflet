@@ -12,7 +12,22 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
     /// isAvailable says the device can transcribe by itself.
     static var isAvailable: Bool { SpeechTranscriber.isAvailable }
 
+    /// languages are the languages the device can transcribe, by their
+    /// ISO 639 codes, as the core names them.
+    static func languages() async -> Set<String> {
+        Set(
+            await SpeechTranscriber.supportedLocales.compactMap {
+                $0.language.languageCode?.identifier
+            })
+    }
+
     private let streams = Mutex<[String: LiveTranscription]>([:])
+
+    /// stall is how long a transcription may go without going on, its
+    /// model downloading or its words coming, before it is given up: the
+    /// core's thread waiting for it would wait for good, and the block say
+    /// "Adding timestamps…" until the app quits.
+    static let stall = Duration.seconds(180)
 
     func start(_ id: String?, language: String?, sink: MobileTranscriptSink?) throws {
         let live = LiveTranscription(language: language ?? "auto", sink: SinkRef(sink: sink))
@@ -28,7 +43,10 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
         guard let live = streams.withLock({ $0.removeValue(forKey: id ?? "") }) else {
             return "[]"
         }
-        return Self.answer(error) { try await live.finish() }
+        let json = Self.answer(error, live.pulse) { try await live.finish() }
+        // Given up as stuck, it goes on no more.
+        if json.isEmpty { live.close() }
+        return json
     }
 
     func close(_ id: String?) {
@@ -38,11 +56,12 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
     func file(_ path: String?, language: String?, error: NSErrorPointer) -> String {
         let url = URL(fileURLWithPath: path ?? "")
         let language = language ?? "auto"
-        return Self.answer(error) {
-            let transcriber = try await Self.transcriber(for: language)
+        let pulse = Pulse()
+        return Self.answer(error, pulse) {
+            let transcriber = try await Self.transcriber(for: language, pulse: pulse)
             let audio = try AVAudioFile(forReading: url)
             let analyzer = SpeechAnalyzer(modules: [transcriber])
-            let collect = Task { try await Self.collect(transcriber, sink: nil) }
+            let collect = Task { try await Self.collect(transcriber, sink: nil, pulse: pulse) }
             try await analyzer.start(inputAudioFile: audio, finishAfterFile: true)
             return try await collect.value
         }
@@ -52,22 +71,29 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
     /// may, returning its transcript as JSON, or "" with why it failed in
     /// error, as gomobile's methods do.
     private static func answer(
-        _ error: NSErrorPointer, _ body: @escaping @Sendable () async throws -> [Segment]
+        _ error: NSErrorPointer, _ pulse: Pulse,
+        _ body: @escaping @Sendable () async throws -> [Segment]
     ) -> String {
         do {
-            return try wait(body)
+            return try wait(pulse, body)
         } catch let e {
             error?.pointee = e as NSError
             return ""
         }
     }
 
-    private static func wait(_ body: @escaping @Sendable () async throws -> [Segment]) throws
-        -> String
-    {
+    /// wait waits for body, which beats pulse as it goes on, and gives it
+    /// up once it has not for stall, saying so.
+    static func wait(
+        _ pulse: Pulse, stall: Duration = stall,
+        _ body: @escaping @Sendable () async throws -> [Segment]
+    ) throws -> String {
         let result = Mutex<Result<[Segment], any Error>?>(nil)
         let done = DispatchSemaphore(value: 0)
-        Task.detached {
+        // From now: a live transcription heard nothing while the recording
+        // was silent.
+        pulse.beat()
+        let task = Task.detached {
             do {
                 let segments = try await body()
                 result.withLock { $0 = .success(segments) }
@@ -76,14 +102,22 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
             }
             done.signal()
         }
-        done.wait()
+        while done.wait(timeout: .now() + 1) == .timedOut {
+            guard pulse.still < stall else {
+                task.cancel()
+                throw TranscriptionError(message: L.recErrOnDeviceStuck)
+            }
+        }
         let segments = try result.withLock { $0! }.get()
         return String(decoding: try JSONEncoder().encode(segments), as: UTF8.self)
     }
 
     /// transcriber is a transcriber of language ("auto" for the device's),
-    /// its model downloaded first if this is its first time.
-    fileprivate static func transcriber(for language: String) async throws -> SpeechTranscriber {
+    /// its model downloaded first if this is its first time, which beats
+    /// pulse as it goes.
+    fileprivate static func transcriber(for language: String, pulse: Pulse) async throws
+        -> SpeechTranscriber
+    {
         let locale = try await locale(for: language)
         let transcriber = SpeechTranscriber(
             locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults],
@@ -94,6 +128,8 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
         if let request = try await AssetInventory.assetInstallationRequest(
             supporting: [transcriber])
         {
+            let watching = request.progress.observe(\.completedUnitCount) { _, _ in pulse.beat() }
+            defer { watching.invalidate() }
             try await request.downloadAndInstall()
         }
         return transcriber
@@ -119,13 +155,15 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
     }
 
     /// collect gathers a transcriber's final results as the transcript, a
-    /// segment each, telling sink the words so far as they come.
-    fileprivate static func collect(_ transcriber: SpeechTranscriber, sink: SinkRef?) async throws
-        -> [Segment]
-    {
+    /// segment each, telling sink the words so far as they come, and
+    /// beating pulse.
+    fileprivate static func collect(
+        _ transcriber: SpeechTranscriber, sink: SinkRef?, pulse: Pulse
+    ) async throws -> [Segment] {
         var segments: [Segment] = []
         var final = ""
         for try await result in transcriber.results {
+            pulse.beat()
             let text = String(result.text.characters)
             if result.isFinal {
                 let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -152,13 +190,17 @@ final class DeviceTranscriber: NSObject, MobileTranscriberProtocol, Sendable {
 private final class LiveTranscription: Sendable {
     private let audio: AsyncStream<Data>.Continuation
     private let task: Task<[Segment], any Error>
+    /// pulse beats as the transcription goes on, which finish waits by.
+    let pulse = Pulse()
 
     init(language: String, sink: SinkRef) {
         let (audio, input) = AsyncStream.makeStream(of: Data.self)
         self.audio = input
+        let pulse = pulse
         task = Task.detached {
             do {
-                return try await Self.transcribe(audio, language: language, sink: sink)
+                return try await Self.transcribe(
+                    audio, language: language, sink: sink, pulse: pulse)
             } catch {
                 // The audio waiting goes, and what comes after isn't kept.
                 input.finish()
@@ -169,9 +211,9 @@ private final class LiveTranscription: Sendable {
 
     /// transcribe transcribes audio as it comes, until it ends.
     private static func transcribe(
-        _ audio: AsyncStream<Data>, language: String, sink: SinkRef
+        _ audio: AsyncStream<Data>, language: String, sink: SinkRef, pulse: Pulse
     ) async throws -> [Segment] {
-        let transcriber = try await DeviceTranscriber.transcriber(for: language)
+        let transcriber = try await DeviceTranscriber.transcriber(for: language, pulse: pulse)
         guard
             let format = await SpeechAnalyzer.bestAvailableAudioFormat(
                 compatibleWith: [transcriber]),
@@ -184,7 +226,9 @@ private final class LiveTranscription: Sendable {
         }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let (buffers, analyze) = AsyncStream.makeStream(of: AnalyzerInput.self)
-        let collect = Task { try await DeviceTranscriber.collect(transcriber, sink: sink) }
+        let collect = Task {
+            try await DeviceTranscriber.collect(transcriber, sink: sink, pulse: pulse)
+        }
         try await analyzer.start(inputSequence: buffers)
         for await pcm in audio {
             if let buffer = Self.buffer(pcm, from: from, with: converter, to: format) {
@@ -243,6 +287,17 @@ private final class LiveTranscription: Sendable {
         }
         return error == nil && output.frameLength > 0 ? output : nil
     }
+}
+
+/// Pulse is when a transcription last went on, as its model downloads or
+/// its words come, from any thread.
+final class Pulse: Sendable {
+    private let last = Mutex(ContinuousClock.now)
+
+    func beat() { last.withLock { $0 = .now } }
+
+    /// still is how long since it last went on.
+    var still: Duration { ContinuousClock.now - last.withLock { $0 } }
 }
 
 /// SinkRef passes the words so far to the core, from any thread.

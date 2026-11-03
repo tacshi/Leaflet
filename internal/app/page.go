@@ -92,9 +92,8 @@ func (a *App) pageView(c *ui.Context) {
 			// The block went: by undo, an agent or another device.
 			a.leaveFullDiagram()
 		}
-		a.scrollToBlock()
-		scroll := ui.Scroll(c.Key("page-scroll:" + ps.id)).TrackScroll(&ps.scroll).Fill().
-			Draw(func(_ *ui.Painter, r ui.Rect) { ps.viewTop, ps.viewH = r.Y, r.H })
+		a.scrollToBlock(c)
+		scroll := ui.Scroll(c.Key("page-scroll:" + ps.id)).TrackScroll(&ps.scroll).Fill().Bind(&ps.view)
 		scroll.Children(func() {
 			ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(40, pagePadX, 160).Children(func() {
 				col := ui.Column(c).Width(a.contentWidth(c)).Gap(0)
@@ -104,7 +103,11 @@ func (a *App) pageView(c *ui.Context) {
 					if notices := a.pageNotices(c, ps.id); notices {
 						ui.Box(c).Height(8)
 					}
+					a.dimLit(c)
 					ps.editor.View(c)
+					if ps.editor.Focused() {
+						ps.caretSet = true
+					}
 					a.dropVideos()
 					a.dropEmbeds()
 					a.dropGonePlayers()
@@ -130,8 +133,8 @@ func (a *App) pageView(c *ui.Context) {
 }
 
 // breadcrumbs is MyGo's path of the page: its folder, the pages above it,
-// and it, where a click on the folder shows it in the sidebar and one on
-// a page above opens that page. Its marks follow it.
+// and it, where a click on the folder shows it open in the sidebar's
+// Pages tab and one on a page above opens that page. Its marks follow it.
 func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 	pal := theme.Of(c)
 	var path []string
@@ -146,7 +149,7 @@ func (a *App) breadcrumbs(c *ui.Context, p store.Page) {
 		for _, f := range a.folders {
 			if f.ID == top.FolderID {
 				path = append(path, f.Name)
-				open = append(open, func() { a.treeOpen("folder", f.ID) })
+				open = append(open, func() { a.showInTree("folder", f.ID) })
 			}
 		}
 	}
@@ -265,13 +268,19 @@ func (a *App) pageTitle(c *ui.Context, p store.Page) {
 	}
 }
 
-var titleTimer *time.Timer
-
+// saveTitleSoon renames the open page shortly after its title's typing
+// stops, as its content saves; a page closed meanwhile saved its title
+// as it closed.
 func (a *App) saveTitleSoon() {
-	if titleTimer != nil {
-		titleTimer.Stop()
+	ps := a.page
+	if ps.titleTimer != nil {
+		ps.titleTimer.Stop()
 	}
-	titleTimer = time.AfterFunc(600*time.Millisecond, func() { a.update(func() { a.saveTitle() }) })
+	ps.titleTimer = a.later(600*time.Millisecond, func() {
+		if a.page == ps {
+			a.saveTitle()
+		}
+	})
 }
 
 func (a *App) byline(c *ui.Context, p store.Page) {

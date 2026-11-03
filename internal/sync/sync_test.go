@@ -444,6 +444,32 @@ func TestPullFindsARowThatCommittedLate(t *testing.T) {
 	}
 }
 
+// PulledAt has no time before a table's first pull, the time of the newest
+// row after, as the server writes it, and none for a cursor it cannot read.
+func TestPulledAt(t *testing.T) {
+	st := openStore(t)
+	if at, ok := PulledAt(st, "pages"); ok {
+		t.Errorf("pulled at %v before any pull", at)
+	}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "p1", "updated_at": "2026-10-26T09:00:05.123456+00:00"}})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.pullTable(context.Background(), "pages", "*", func(map[string]any) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if at, ok := PulledAt(st, "pages"); !ok || !at.Equal(time.Date(2026, 10, 26, 9, 0, 5, 123456000, time.UTC)) {
+		t.Errorf("pulled at %v, %v", at, ok)
+	}
+	if err := st.SetValue(cursorKey("pages"), "soon|p1"); err != nil {
+		t.Fatal(err)
+	}
+	if at, ok := PulledAt(st, "pages"); ok {
+		t.Errorf("pulled at %v by a cursor that does not read", at)
+	}
+}
+
 // An overlap fuller than a page of rows reads on past it.
 func TestPullReadsPastAFullOverlap(t *testing.T) {
 	st := openStore(t)
@@ -545,13 +571,17 @@ func TestOpeningAPageWaitsForThePassFirst(t *testing.T) {
 	}
 }
 
-// A device revoked in Account › Devices signs out and forgets its ID:
-// signing in again, it registers as a new device, not as the one revoked,
-// which would sign it out again on every pass. What iCloud sync kept of
-// the old ID goes too, so iCloud sync under the new one starts afresh,
-// but for the folder's space, which what went up to it is fetched from.
+// A device revoked in Account › Devices signs out, the app's session too,
+// and forgets its ID: signing in again, it registers as a new device, not
+// as the one revoked, which would sign it out again on every pass. What
+// iCloud sync kept of the old ID goes too, so iCloud sync under the new
+// one starts afresh, but for the folder's space, which what went up to it
+// is fetched from.
 func TestRevokedDeviceRegistersAnew(t *testing.T) {
 	st := openStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
 	for k, v := range map[string]string{"icloud.seq": "5", "icloud.space": "s", "icloud.log_from": "3", "icloud.device_at": "1"} {
 		if err := st.SetValue(k, v); err != nil {
 			t.Fatal(err)
@@ -569,6 +599,9 @@ func TestRevokedDeviceRegistersAnew(t *testing.T) {
 	}
 	if now := st.DeviceID(); now == was {
 		t.Errorf("the device kept its revoked ID %s", was)
+	}
+	if st.Session().SignedIn {
+		t.Error("the app still shows the account signed in")
 	}
 	if kept := st.ValuesWithPrefix("icloud."); len(kept) != 1 || kept["fetch_space"] != "s" {
 		t.Errorf("iCloud sync kept %v of the old ID", kept)
@@ -1101,15 +1134,28 @@ func TestSignInUploadsEarlierRecordings(t *testing.T) {
 	}
 }
 
-// Signing in adopts the device's space only once everything in it is
-// queued: a pass that could not queue it all leaves the space to adopt
-// again, and what was not queued is queued before the next pass. What
-// is made meanwhile goes into the account's space.
 // Signing in to an account whose library other devices made leaves this
-// device's starter pages out of it; signing in to a new one keeps them as
-// its own. The device's other pages go up either way.
+// device's starter pages out of it; signing in to one with no pages yet
+// keeps them as its own, though the server made its space at sign-up,
+// unless another device signing in at the same time claimed it first. A
+// space another device made meanwhile is joined. The device's other pages
+// go up either way.
 func TestSignInSettlesStarterPages(t *testing.T) {
-	for _, existing := range []bool{true, false} {
+	const remoteID = "00000000-0000-0000-0000-0000000000aa"
+	for _, c := range []struct {
+		name string
+		// made says the server has the space from the start, else it has
+		// none until the insert, which another device's beats; claim is
+		// what the server answers this device's claim, "" when it must
+		// not be asked.
+		made, pages, kept bool
+		claim             string
+	}{
+		{"library with pages", true, true, false, ""},
+		{"new account", true, false, true, "true"},
+		{"new account another device claimed", true, false, false, "false"},
+		{"space made meanwhile", false, true, false, ""},
+	} {
 		st := openStore(t)
 		guide, err := st.CreatePage(store.NewPageOptions{Title: "Welcome"})
 		if err != nil {
@@ -1122,27 +1168,73 @@ func TestSignInSettlesStarterPages(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		made := c.made
+		var claimed map[string]any
 		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == http.MethodGet && !existing {
+			switch {
+			case r.URL.Path == "/rest/v1/rpc/claim_starter_pages":
+				_ = json.NewDecoder(r.Body).Decode(&claimed)
+				_, _ = io.WriteString(w, c.claim)
+			case r.URL.Path == "/rest/v1/spaces" && r.Method == http.MethodPost:
+				made = true
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"code":"23505","message":"duplicate key value violates unique constraint \"spaces_one_per_owner\""}`))
+			case r.URL.Path == "/rest/v1/spaces" && made:
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"id": remoteID, "name": "My space"}})
+			case r.URL.Path == "/rest/v1/pages" && c.pages && r.URL.Query().Get("space_id") == "eq."+remoteID:
+				_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "00000000-0000-0000-0000-0000000000bb"}})
+			default:
 				_ = json.NewEncoder(w).Encode([]map[string]any{})
-				return
 			}
-			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "00000000-0000-0000-0000-0000000000aa", "name": "My space"}})
 		}))
 		svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 		if err := svc.resolveSpace(context.Background()); err != nil {
-			t.Fatal(err)
+			t.Fatalf("%s: %v", c.name, err)
 		}
 		hs.Close()
-		if _, err := st.Page(guide.ID); store.IsNotFound(err) != existing {
-			t.Errorf("account with a library %v: the starter page went %v", existing, store.IsNotFound(err))
+		if _, err := st.Page(guide.ID); store.IsNotFound(err) == c.kept {
+			t.Errorf("%s: the starter page went %v", c.name, store.IsNotFound(err))
 		}
-		if !st.HasPending("pages", mine.ID) {
-			t.Errorf("account with a library %v: the device's own page does not go up", existing)
+		if !st.HasPending("pages", mine.ID) || st.Session().SpaceID != remoteID {
+			t.Errorf("%s: the device's own page does not go up", c.name)
+		}
+		if want := c.claim != ""; (claimed != nil) != want ||
+			want && (claimed["p_space_id"] != remoteID || claimed["p_device"] != st.DeviceID()) {
+			t.Errorf("%s: claimed %v", c.name, claimed)
 		}
 	}
 }
 
+// A device whose starter pages are settled, as when it joined a library
+// before, claims no new library for them: the device that has some does.
+func TestSignInWithoutStarterPagesClaimsNothing(t *testing.T) {
+	st := openStore(t)
+	claimed := false
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/v1/rpc/claim_starter_pages":
+			claimed = true
+			_, _ = io.WriteString(w, "true")
+		case "/rest/v1/spaces":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "00000000-0000-0000-0000-0000000000aa", "name": "My space"}})
+		default:
+			_ = json.NewEncoder(w).Encode([]map[string]any{})
+		}
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.resolveSpace(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if claimed {
+		t.Error("a device with no starter pages claimed the library")
+	}
+}
+
+// Signing in adopts the device's space only once everything in it is
+// queued: a pass that could not queue it all leaves the space to adopt
+// again, and what was not queued is queued before the next pass. What
+// is made meanwhile goes into the account's space.
 func TestSignInAdoptsOnceAllIsQueued(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -1419,6 +1511,32 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 	}
 	if !svc.waiting()[p.ID] {
 		t.Errorf("waiting for %v", svc.waiting())
+	}
+}
+
+// Content listed for a page whose row this device fails to read, as with
+// the database failing, stops the pull before it, for the next to go on
+// from: only a page not here yet waits for its row.
+func TestPullStopsAtAPageItCannotRead(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"page_id": p.ID, "updated_at": at}})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if _, err := st.DB().Exec(`ALTER TABLE pages RENAME TO pages_away`); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.pullContents(context.Background()); err == nil {
+		t.Error("the pull went on past the page")
+	}
+	if v, ok := st.Value("sync.cursor.page_content"); ok {
+		t.Errorf("the cursor passed the page: %s", v)
 	}
 }
 
@@ -1888,8 +2006,9 @@ func TestDeletedFileStaysForACopyThatWaits(t *testing.T) {
 	defer hs.Close()
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 
-	if err := svc.push(context.Background()); err != nil {
-		t.Fatal(err)
+	// The server failing stops the push, the copy waiting.
+	if err := svc.push(context.Background()); !remote.IsBusy(err) {
+		t.Fatalf("push: %v", err)
 	}
 	if len(removed) != 0 || !st.HasPending("storage", "files/"+fileID) {
 		t.Fatalf("removed %v before the copy went up", removed)
@@ -2077,7 +2196,7 @@ func TestSettledRecordingTakesAFinishedTranscript(t *testing.T) {
 	dequeueAll(t, st)
 	settle := func() {
 		t.Helper()
-		if _, err := st.SettleRecording(r.ID, "transcribing", func(x *store.Recording) { x.Status, x.Error = "failed", "quit" }); err != nil {
+		if _, err := st.SettleRecording(r.ID, "transcribing", false, func(x *store.Recording) { x.Status, x.Error = "failed", "quit" }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -2304,6 +2423,54 @@ func TestFileRowGoesAfterItsContents(t *testing.T) {
 	}
 }
 
+// A file larger than the server takes is refused for good: its upload
+// waits the longest at once rather than going whole again on the next
+// passes, its row waits with it, and the page's other changes still go.
+func TestUploadTooLargeWaitsTheLongest(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Trip"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := filepath.Join(t.TempDir(), "film.mov")
+	if err := os.WriteFile(src, []byte("mov"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := st.AddFile(src, "", p.ID, "video/quicktime")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	uploads := 0
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if strings.HasPrefix(req.URL.Path, "/storage/v1/object/files/") {
+			uploads++
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"statusCode":"413","error":"Payload too large"}`)
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	for range 2 {
+		if err := svc.push(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if uploads != 1 {
+		t.Errorf("the file went up %d times", uploads)
+	}
+	if !st.HasPending("storage", "files/"+f.ID) || !st.HasPending("files", f.ID) {
+		t.Error("the file stopped waiting")
+	}
+	if st.HasPending("pages", p.ID) {
+		t.Error("the page waits with the file")
+	}
+}
+
 // A cloud agent's job refers to the page, the pages it is inside, and the
 // comment its thread starts with: flushing the page sends them all first,
 // and leaves another page's changes queued.
@@ -2341,6 +2508,47 @@ func TestFlushSendsWhatTheJobRefersTo(t *testing.T) {
 	}
 	if !st.HasPending("pages", other.ID) || !st.HasPending("comments", aside.ID) {
 		t.Error("another page's changes went")
+	}
+}
+
+// A page in a folder not up yet goes after the folder: the server refuses
+// a page in a folder it does not have, so the job would refer to a page
+// that is not there. Another folder stays queued.
+func TestFlushSendsThePagesFolderFirst(t *testing.T) {
+	st := openStore(t)
+	folder, err := st.CreateFolder("Work")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := st.CreateFolder("Home")
+	if err != nil {
+		t.Fatal(err)
+	}
+	top, err := st.CreatePage(store.NewPageOptions{Title: "Projects", FolderID: folder.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", ParentID: top.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, requests := fullPass(t, st, nil)
+
+	if err := svc.FlushPage(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range [][2]string{{"folders", folder.ID}, {"pages", top.ID}, {"pages", p.ID}} {
+		if st.HasPending(e[0], e[1]) {
+			t.Errorf("%s %s still waits", e[0], e[1])
+		}
+	}
+	if !st.HasPending("folders", other.ID) {
+		t.Error("another folder went")
+	}
+	folders := slices.IndexFunc(*requests, func(r string) bool { return strings.HasSuffix(r, "/rest/v1/folders") })
+	pages := slices.IndexFunc(*requests, func(r string) bool { return strings.HasSuffix(r, "/rest/v1/pages") })
+	if folders < 0 || pages < 0 || folders > pages {
+		t.Errorf("sent %v", *requests)
 	}
 }
 
@@ -2653,5 +2861,379 @@ func TestPullKeepsOwnPagesMembers(t *testing.T) {
 	}
 	if got := others(); len(got) != 0 {
 		t.Errorf("the share went, members %v stayed", got)
+	}
+}
+
+// Rows sent again whole as a device's pages join an account go over the
+// server's only when they changed here later: one another device renamed
+// since, which this device has from iCloud Drive as it was, takes the
+// server's, and one the server does not have goes up.
+func TestAdoptedRowsKeepNewerServerRows(t *testing.T) {
+	for _, serverNewer := range []bool{true, false} {
+		st := openStore(t)
+		shared, err := st.CreatePage(store.NewPageOptions{Title: "Old title"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		own, err := st.CreatePage(store.NewPageOptions{Title: "Mine"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries, _ := st.Pending()
+		for _, e := range entries {
+			if err := st.Dequeue(e); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, p := range []store.Page{shared, own} {
+			if err := st.Requeue("pages", p.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		at := shared.UpdatedAt.Add(-time.Hour)
+		if serverNewer {
+			at = shared.UpdatedAt.Add(time.Hour)
+		}
+		there := store.PageToRemote(shared)
+		there["title"], there["created_at"], there["updated_at"] = "New title", at.UTC().Format(time.RFC3339Nano), at.UTC().Format(time.RFC3339Nano)
+		var mu gosync.Mutex
+		sent := map[string]map[string]any{}
+		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			out := []map[string]any{}
+			if r.URL.Path == "/rest/v1/pages" {
+				switch r.Method {
+				case http.MethodGet:
+					if r.URL.Query().Get("id") == "eq."+shared.ID {
+						out = append(out, there)
+					}
+				case http.MethodPost:
+					var row map[string]any
+					_ = json.NewDecoder(r.Body).Decode(&row)
+					mu.Lock()
+					sent[store.S(row, "id")] = row
+					mu.Unlock()
+					out = append(out, row)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(out)
+		}))
+		svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+		if err := svc.push(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		hs.Close()
+
+		got, err := st.Page(shared.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if row, ok := sent[shared.ID]; ok == serverNewer {
+			t.Errorf("server's newer %v: the page was sent %v (%v)", serverNewer, ok, row)
+		}
+		if want := map[bool]string{true: "New title", false: "Old title"}[serverNewer]; got.Title != want {
+			t.Errorf("server's newer %v: title %q, want %q", serverNewer, got.Title, want)
+		}
+		if row, ok := sent[own.ID]; !ok || row[store.AdoptKey] != nil || row["title"] != "Mine" {
+			t.Errorf("the device's own page went as %v (sent %v)", row, ok)
+		}
+		if st.HasPending("pages", shared.ID) || st.HasPending("pages", own.ID) {
+			t.Errorf("server's newer %v: pages still queued", serverNewer)
+		}
+	}
+}
+
+// A page renamed, then moved under a page made after, keeps its place in
+// the queue, before that page: the server refuses the move under a page it
+// does not have yet, and the page goes once that one has, in the same
+// push, with its rename, counting no failure.
+func TestMoveUnderANewPageWaitsForIt(t *testing.T) {
+	st := openStore(t)
+	a, err := st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		if err := st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.RenamePage(a.ID, "Meeting notes"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.CreatePage(store.NewPageOptions{Title: "Project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.MovePage(a.ID, b.ID, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	known := map[string]bool{a.ID: true}
+	var patched map[string]any
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		out := []map[string]any{}
+		if r.URL.Path == "/rest/v1/pages" {
+			var row map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&row)
+			switch r.Method {
+			case http.MethodPost:
+				known[store.S(row, "id")] = true
+				out = append(out, row)
+			case http.MethodPatch:
+				// As pages_guard raises it, which PostgREST answers 500.
+				if parent := store.S(row, "parent_id"); parent != "" && !known[parent] {
+					w.WriteHeader(http.StatusInternalServerError)
+					_, _ = io.WriteString(w, `{"code":"P0002","message":"parent_not_found"}`)
+					return
+				}
+				patched = row
+				row["id"] = a.ID
+				out = append(out, row)
+			case http.MethodGet:
+				if r.URL.Query().Get("id") == "eq."+a.ID {
+					out = append(out, map[string]any{"id": a.ID, "space_id": a.SpaceID, "title": "Notes", "sort_key": a.SortKey,
+						"created_at": time.Now().UTC().Format(time.RFC3339Nano), "updated_at": time.Now().UTC().Format(time.RFC3339Nano)})
+				}
+			}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if patched["parent_id"] != b.ID || patched["title"] != "Meeting notes" {
+		t.Errorf("the page went as %v", patched)
+	}
+	got, err := st.Page(a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ParentID != b.ID || got.Title != "Meeting notes" {
+		t.Errorf("the page is %q under %q here: the move and rename were undone", got.Title, got.ParentID)
+	}
+	if st.HasPending("pages", a.ID) || st.HasPending("pages", b.ID) {
+		t.Error("pages still queued")
+	}
+}
+
+// Two devices moving pages under each other at once: the server takes the
+// first move and refuses the second (page_cycle) for good. This device's
+// pull stores the first while its own waits, which would leave both pages
+// out of the tree in a loop: its own page goes to the top level meanwhile,
+// and its refused move gives way to the server's row, with no retries.
+func TestMovesUnderEachOtherSettleOnTheServers(t *testing.T) {
+	st := openStore(t)
+	a, err := st.CreatePage(store.NewPageOptions{Title: "A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := st.CreatePage(store.NewPageOptions{Title: "B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		if err := st.Dequeue(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.MovePage(a.ID, b.ID, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	row := func(p store.Page, parent any) map[string]any {
+		r := store.PageToRemote(p)
+		r["parent_id"], r["created_at"], r["updated_at"] = parent, now, now
+		return r
+	}
+	var patches int
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out := []map[string]any{}
+		if r.URL.Path == "/rest/v1/pages" {
+			switch r.Method {
+			case http.MethodPatch:
+				patches++
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `{"code":"23514","message":"page_cycle"}`)
+				return
+			case http.MethodGet:
+				if r.URL.Query().Get("id") == "eq."+a.ID {
+					out = append(out, row(a, nil))
+				}
+			}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+
+	// The pull brings B under A, as the other device moved it.
+	if err := svc.putServerPage(row(b, a.ID)); err != nil {
+		t.Fatal(err)
+	}
+	gotA, _ := st.Page(a.ID)
+	gotB, _ := st.Page(b.ID)
+	if gotA.ParentID != "" || gotB.ParentID != a.ID {
+		t.Fatalf("A under %q, B under %q: want A at the top, B under it", gotA.ParentID, gotB.ParentID)
+	}
+
+	for range 2 {
+		if err := svc.push(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if st.HasPending("pages", a.ID) {
+		t.Error("the refused move stays queued")
+	}
+	if patches != 1 {
+		t.Errorf("the move went %d times", patches)
+	}
+	if gotA, _ = st.Page(a.ID); gotA.ParentID != "" {
+		t.Errorf("A under %q: want the server's top level", gotA.ParentID)
+	}
+}
+
+// A snapshot goes up as an insert the server keeps if it has it, without
+// reading it back: sent again, as when the answer to its upload was lost,
+// it is done, though no one may change a snapshot, and the server refuses
+// an upsert of one it has.
+func TestHistorySentAgainIsDone(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		_ = st.Dequeue(e)
+	}
+	if err := st.AddHistory(p.ID, doc.Empty(), "manual", "", "v1"); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	have := map[string]bool{}
+	var prefers []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path != "/rest/v1/page_history" || r.Method != http.MethodPost {
+			_, _ = w.Write([]byte("[]"))
+			return
+		}
+		prefers = append(prefers, r.Header.Get("Prefer"))
+		var row map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&row)
+		id := store.S(row, "id")
+		ignore := strings.Contains(r.Header.Get("Prefer"), "ignore-duplicates")
+		if have[id] && !ignore {
+			// As page_history's policies have it: no one may update one.
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = io.WriteString(w, `{"code":"42501","message":"new row violates row-level security policy"}`)
+			return
+		}
+		have[id] = true
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	// Its first upload went, but its answer was lost: it is still queued.
+	h, _ := st.History(p.ID)
+	have[h[0].ID] = true
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if st.HasPending("page_history", h[0].ID) {
+		t.Errorf("the snapshot stays queued (%v)", prefers)
+	}
+}
+
+// A server failing, or asking for a wait, stops the push without counting
+// against the entries, which go as soon as it is back; the loop leaves it
+// alone for the wait it asks.
+func TestBusyServerCountsNoFailure(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.CreatePage(store.NewPageOptions{Title: "Plan"}); err != nil {
+		t.Fatal(err)
+	}
+	status := http.StatusInternalServerError
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if status == http.StatusTooManyRequests {
+			w.Header().Set("Retry-After", "120")
+		}
+		w.WriteHeader(status)
+		_ = json.NewEncoder(w).Encode(map[string]any{"message": "busy"})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	for _, s := range []int{http.StatusInternalServerError, http.StatusTooManyRequests} {
+		status = s
+		if err := svc.push(context.Background()); !remote.IsBusy(err) {
+			t.Fatalf("%d: push %v", s, err)
+		}
+		entries, _ := st.Pending()
+		for _, e := range entries {
+			if e.Attempts != 0 {
+				t.Errorf("%d: %s/%s counted %d failures", s, e.Entity, e.EntityID, e.Attempts)
+			}
+		}
+	}
+	svc.mu.Lock()
+	wait := time.Until(svc.busyUntil)
+	svc.mu.Unlock()
+	if wait < time.Minute || wait > 2*time.Minute {
+		t.Errorf("waits %v for a Retry-After of 2 minutes", wait)
+	}
+	ran := false
+	svc.OnState = func(running bool, _ error) { ran = ran || running }
+	loop, stop := context.WithCancel(context.Background())
+	defer stop()
+	_ = svc.syncNow(loop, true)
+	if ran {
+		t.Error("the loop's pass ran in the wait the server asked for")
+	}
+}
+
+// While the project is brought up to date, the changes wait to go up, and
+// go once it is.
+func TestChangesWaitForTheProjectUpdate(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.CreatePage(store.NewPageOptions{Title: "Plan"}); err != nil {
+		t.Fatal(err)
+	}
+	// The space is adopted, as after the first pass.
+	if err := st.SetValue("space.u1", st.Session().SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	sent := 0
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		if r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/rest/v1/pages") {
+			sent++
+		}
+		mu.Unlock()
+		_ = json.NewEncoder(w).Encode([]map[string]any{})
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	updating := true
+	svc.Updating = func() bool { return updating }
+	_ = svc.SyncNow()
+	mu.Lock()
+	if sent != 0 {
+		t.Errorf("%d pages went up while the project was updated", sent)
+	}
+	mu.Unlock()
+	updating = false
+	_ = svc.SyncNow()
+	mu.Lock()
+	defer mu.Unlock()
+	if sent == 0 {
+		t.Error("the page never went up")
 	}
 }

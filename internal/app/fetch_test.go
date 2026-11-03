@@ -8,6 +8,7 @@ import (
 	"image"
 	"image/color"
 	"image/gif"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -237,4 +238,71 @@ func TestClosedImageCacheClosesPlayers(t *testing.T) {
 	if p.Playing() || len(ic.players) != 0 {
 		t.Errorf("after closing: playing %v, %d players kept", p.Playing(), len(ic.players))
 	}
+}
+
+// Pictures no frame asked for a while go, and the least recently asked
+// for while they hold more than the budget, but not those on screen; one
+// gone loads again as it is asked for.
+func TestPicturesLetGo(t *testing.T) {
+	root := t.TempDir()
+	ic := newImageCache(root)
+	write := func(name string) string {
+		var b bytes.Buffer
+		if err := png.Encode(&b, image.NewGray(image.Rect(0, 0, 10, 10))); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(root, name)
+		if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return "file://" + path
+	}
+	load := func(url string) {
+		t.Helper()
+		done := make(chan struct{})
+		if ic.get(url, func() { close(done) }) != nil {
+			return
+		}
+		<-done
+		if ic.get(url, nil) == nil {
+			t.Fatalf("%s did not load", url)
+		}
+	}
+	held := func() int {
+		ic.mu.Lock()
+		defer ic.mu.Unlock()
+		return len(ic.pictures)
+	}
+	a, b := write("a.png"), write("b.png")
+	load(a)
+	load(b)
+	now := time.Now()
+	ic.releasePictures(now.Add(pictureIdle / 2))
+	if held() != 2 {
+		t.Fatal("pictures asked for lately were let go")
+	}
+	ic.releasePictures(now.Add(2 * pictureIdle))
+	if held() != 0 {
+		t.Fatalf("%d pictures kept long after they were shown", held())
+	}
+
+	// Over the budget, the one asked for longer ago goes first.
+	was := pictureBudget
+	t.Cleanup(func() { pictureBudget = was })
+	pictureBudget = 10 * 10 * 4
+	load(a)
+	load(b)
+	ic.mu.Lock()
+	ic.used[a] = time.Now().Add(-time.Minute)
+	ic.swept = time.Time{}
+	ic.mu.Unlock()
+	ic.releasePictures(time.Now())
+	ic.mu.Lock()
+	_, hasA := ic.pictures[a]
+	_, hasB := ic.pictures[b]
+	ic.mu.Unlock()
+	if hasA || !hasB {
+		t.Errorf("over the budget: kept a %v, b %v", hasA, hasB)
+	}
+	load(a)
 }

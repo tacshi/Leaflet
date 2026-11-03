@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"strings"
 
+	"github.com/egoist/mygo/i18n"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui/richtext"
 
@@ -38,11 +39,11 @@ func (e *Editor) CopyPlainText() {
 
 // copySelection puts the selection on the clipboard.
 func (e *Editor) copySelection() {
-	text := e.copyText()
+	nodes := e.copyBlocks()
+	text := e.markdownOf(nodes)
 	if text == "" {
 		return
 	}
-	nodes := e.copyBlocks()
 	clip.text, clip.blocks, clip.delta, clip.token = text, nodes, nil, rand.Text()
 	if nodes == nil {
 		// Text within one block keeps its formats too.
@@ -80,7 +81,7 @@ func (e *Editor) pasteClipboard(plain bool) {
 			return
 		}
 	}
-	e.paste(text)
+	e.pasteAs(text, plain)
 }
 
 // richOfData reads the richest format of data it has: MyGo's rich text,
@@ -118,6 +119,12 @@ func formatted(t richtext.Text) bool {
 	return false
 }
 
+// markdownOptions are how a copy writes blocks as Markdown: in the app's
+// language, subpages by their titles, as title gives them.
+func markdownOptions(title func(string) string) doc.MarkdownOptions {
+	return doc.MarkdownOptions{Lang: i18n.Locale(), PageTitle: title}
+}
+
 // richOf writes blocks as rich text: a paragraph of its kind for each text
 // block, its list items indented as they nest, and the Markdown of the
 // others.
@@ -127,7 +134,7 @@ func richOf(nodes []*doc.Node, title func(string) string) richtext.Text {
 	walk = func(nodes []*doc.Node, depth int) {
 		for _, n := range nodes {
 			if !n.IsText() {
-				md := doc.PageMarkdown("", &doc.Content{Children: []*doc.Node{n}}, title)
+				md := doc.PageMarkdown("", &doc.Content{Children: []*doc.Node{n}}, markdownOptions(title))
 				paras = append(paras, richtext.Paragraph{Runs: []richtext.Run{{Text: strings.TrimRight(md, "\n")}}})
 				continue
 			}

@@ -120,15 +120,17 @@ func TestPubServesOnlyThePage(t *testing.T) {
 	if w := get(h, "/tok/f/1.png"); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" {
 		t.Errorf("picture: %d %v", w.Code, w.Header())
 	}
+	// What is refused has no words, which would be the app's language,
+	// not the visitor's.
 	for _, path := range []string{"/", "/tak/", "/tokx/", "/tok/f/2.png", "/tok/f/../../etc/hosts", "/tok/other"} {
-		if w := get(h, path); w.Code != http.StatusNotFound {
-			t.Errorf("%s: %d, want 404", path, w.Code)
+		if w := get(h, path); w.Code != http.StatusNotFound || w.Body.Len() != 0 {
+			t.Errorf("%s: %d %q, want 404", path, w.Code, w.Body)
 		}
 	}
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/tok/", nil))
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("POST: %d", w.Code)
+	if w.Code != http.StatusMethodNotAllowed || w.Body.Len() != 0 {
+		t.Errorf("POST: %d %q", w.Code, w.Body)
 	}
 	if w := get(h, "/tok/comments.js"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "leaflet-name") {
 		t.Errorf("comments script: %d", w.Code)
@@ -278,15 +280,16 @@ func TestPubComments(t *testing.T) {
 		t.Errorf("reply to a resolved thread: %d", w.Code)
 	}
 
-	// Only a link kept to emails is behind Access: on any other, the
-	// header a visitor sends names no one.
+	// cloudflared tells the page no visitor's email, on a link kept to
+	// emails too: a header that names one is the visitor's own, and names
+	// no one.
 	byEmail := func() string {
 		r := httptest.NewRequest(http.MethodPost, "/tok/comments", strings.NewReader(`{"block":"p1","name":"Dee","body":"Signed?"}`))
 		r.Host = "quiet-river.trycloudflare.com"
 		r.Header.Set("Origin", origin)
 		r.Header.Set("Content-Type", "application/json")
 		r.Header.Set("Cf-Connecting-Ip", "203.0.113.9")
-		r.Header.Set(accessEmailHeader, "boss@example.com")
+		r.Header.Set("Cf-Access-Authenticated-User-Email", "boss@example.com")
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
 		if w.Code != http.StatusNoContent {
@@ -299,8 +302,15 @@ func TestPubComments(t *testing.T) {
 		t.Errorf("an open link took the visitor's header: %q", name)
 	}
 	p.emails = []string{"boss@example.com"}
-	if name := byEmail(); name != "boss@example.com" {
-		t.Errorf("a link kept to emails named %q", name)
+	if name := byEmail(); name != "Dee" {
+		t.Errorf("a link kept to emails took the visitor's header: %q", name)
+	}
+	r = httptest.NewRequest(http.MethodGet, "/tok/", nil)
+	r.Header.Set("Cf-Access-Authenticated-User-Email", "boss@example.com")
+	w = httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if strings.Contains(w.Body.String(), "boss@example.com") {
+		t.Error("the page names the visitor by their header")
 	}
 	p.emails = nil
 	for name, tc := range map[string]struct {
@@ -314,8 +324,8 @@ func TestPubComments(t *testing.T) {
 		"no name":        {origin, `{"block":"p1","name":" ","body":"x"}`, http.StatusBadRequest},
 		"too long":       {origin, `{"block":"p1","name":"E","body":"` + strings.Repeat("x", pubMaxComment+1) + `"}`, http.StatusBadRequest},
 	} {
-		if w := postComment(h, tc.origin, tc.body); w.Code != tc.want {
-			t.Errorf("%s: %d, want %d", name, w.Code, tc.want)
+		if w := postComment(h, tc.origin, tc.body); w.Code != tc.want || w.Body.Len() != 0 {
+			t.Errorf("%s: %d %q, want %d", name, w.Code, w.Body, tc.want)
 		}
 	}
 
@@ -617,5 +627,71 @@ func TestPubCommentTimedOut(t *testing.T) {
 	}
 	if p.total != 0 || len(p.posts["203.0.113.7"]) != 0 {
 		t.Errorf("counted: %d, %v", p.total, p.posts)
+	}
+}
+
+// A link whose cloudflared stops renders the page no more as it changes,
+// and says so in a toast unless the Share dialog shows it.
+func TestPubFailedLinkStops(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake cloudflared is a shell script")
+	}
+	a, _, _, pg := pubTest(t)
+	a.stopPub()
+	tool := filepath.Join(t.TempDir(), "cloudflared")
+	script := "#!/bin/sh\necho 'INF |  https://quiet-river.trycloudflare.com  |' >&2\nsleep 0.3\necho 'ERR lost the connection' >&2\nexit 1\n"
+	if err := os.WriteFile(tool, []byte(script), 0o700); err != nil { // #nosec G306 -- a test's script, run by the test.
+		t.Fatal(err)
+	}
+	posts := make(chan func(), 16)
+	a.post = func(fn func()) { posts <- fn }
+	a.cloudflared = cloudflaredInfo{checked: true, path: tool, version: "2026.10.0"}
+	a.startPub(pg.ID, nil, true)
+	p := a.pub
+	live := false
+	deadline := time.After(10 * time.Second)
+	for p.state != "failed" {
+		select {
+		case fn := <-posts:
+			fn()
+			live = live || p.state == "live"
+		case <-deadline:
+			t.Fatalf("still %s", p.state)
+		}
+	}
+	if !live || !strings.HasSuffix(p.err, "ERR lost the connection") || a.pub != p {
+		t.Errorf("live %v, error %q", live, p.err)
+	}
+	if len(a.toasts) != 1 || a.toasts[0].text != locales.PubLinkStopped("Trip") {
+		t.Errorf("toasts %+v", a.toasts)
+	}
+	seq := p.seq
+	a.pubChanged(store.Change{Table: "page_contents", PageID: pg.ID})
+	a.setPubComments(false)
+	if p.timer != nil || p.seq != seq {
+		t.Error("a failed link renders again")
+	}
+
+	// The Share dialog says so itself.
+	a.toasts = nil
+	a.dialogs.shareOpen, a.dialogs.sharePage = true, pg.ID
+	a.pubFailed(p, "again")
+	if len(a.toasts) != 0 {
+		t.Errorf("toasts %+v", a.toasts)
+	}
+}
+
+// A picture is read as a visitor asks for it, never kept with the page.
+func TestPubReadsPicturesAsAsked(t *testing.T) {
+	a, p, h, _ := pubTest(t)
+	pic := filepath.Join(a.st.Dir, "files", "dawn.png")
+	if f := p.snap.files["1.png"]; f.path != pic || f.typ != "image/png" {
+		t.Fatalf("picture %+v", f)
+	}
+	if err := os.WriteFile(pic, []byte("\x89PNG\r\n\x1a\nnewer"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if w := get(h, "/tok/f/1.png"); w.Code != http.StatusOK || !strings.HasSuffix(w.Body.String(), "newer") {
+		t.Errorf("picture: %d %q", w.Code, w.Body)
 	}
 }

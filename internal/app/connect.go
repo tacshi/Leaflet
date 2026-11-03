@@ -192,7 +192,7 @@ func connectAgent(id, cli string, env agentEnv, exe, dir string) error {
 		err := runCLI(cli, env, "mcp", "add", "-s", "user", "leaflet", "-e", "LEAFLET_DATA_DIR="+dir, "--", exe, "mcp")
 		if err != nil && old != nil {
 			if rerr := runCLI(cli, env, "mcp", "add-json", "-s", "user", "leaflet", string(old)); rerr != nil {
-				return fmt.Errorf("%w; putting the old entry back: %w", err, rerr)
+				return errors.New(locales.ExternalOldEntryNotBack(err.Error(), rerr.Error()))
 			}
 		}
 		return err
@@ -833,26 +833,30 @@ var loginPath = sync.OnceValue(func() string {
 	if sh == "" {
 		sh = "/bin/zsh"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	// Interactive too, as version managers set PATH in .zshrc; the
-	// marker keeps what the shell prints as it starts out of it.
-	out, err := exec.CommandContext(ctx, sh, "-lic", `printf '\n__LEAFLET_PATH__%s\n' "$PATH"`).Output() // #nosec G204 -- the user's own login shell, from $SHELL.
-	if err == nil {
-		for _, line := range strings.Split(string(out), "\n") {
-			if p, ok := strings.CutPrefix(line, "__LEAFLET_PATH__"); ok {
-				return p
-			}
-		}
+	if p, ok := shellPath(sh, 5*time.Second); ok {
+		return p
 	}
 	return os.Getenv("PATH")
 })
 
-// translocated says whether macOS runs this copy from where it cannot
-// stay: a disk image, or a random folder it moved a download to. An
-// app's settings would lose it.
-func translocated(exe string) bool {
-	return strings.Contains(exe, "/AppTranslocation/") || strings.HasPrefix(exe, "/Volumes/")
+// shellPath asks the login shell sh for its PATH, for at most wait. A
+// process its startup files leave running, as a job started in the
+// background, can keep its output open once it has exited: what it
+// printed by then is enough.
+func shellPath(sh string, wait time.Duration) (string, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), wait)
+	defer cancel()
+	// Interactive too, as version managers set PATH in .zshrc; the
+	// marker keeps what the shell prints as it starts out of it.
+	cmd := exec.CommandContext(ctx, sh, "-lic", `printf '\n__LEAFLET_PATH__%s\n' "$PATH"`) // #nosec G204 -- the user's own login shell, from $SHELL.
+	cmd.WaitDelay = time.Second
+	out, _ := cmd.Output()
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if p, ok := strings.CutPrefix(line, "__LEAFLET_PATH__"); ok {
+			return p, true
+		}
+	}
+	return "", false
 }
 
 func exists(p string) bool {

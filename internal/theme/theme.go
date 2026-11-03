@@ -244,14 +244,22 @@ func Apply(c *ui.Context) {
 }
 
 // pageFonts is what SetFonts chose, which pages are set in.
-var pageFonts struct{ latin, chinese, japanese, code string }
+var pageFonts struct {
+	latin, chinese, japanese, code string
+	chosen                         int
+}
 
 // SetFonts chooses the families of pages: latin for their text, chinese
 // and japanese for the characters of those languages, and code for code,
 // each "" for Leaflet's own.
 func SetFonts(latin, chinese, japanese, code string) {
 	pageFonts.latin, pageFonts.chinese, pageFonts.japanese, pageFonts.code = latin, chinese, japanese, code
+	pageFonts.chosen++
 }
+
+// FontsChosen counts the times the page fonts were chosen: what is kept of
+// PageFamily's and CodeFamily's is out of date once it changes.
+func FontsChosen() int { return pageFonts.chosen }
 
 // PageFamily returns the family list of page text: the Latin font, then
 // the font of the language text's Han characters are in, Japanese where it

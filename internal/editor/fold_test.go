@@ -99,6 +99,52 @@ func TestFoldedSectionGoesWithItsHeading(t *testing.T) {
 	}
 }
 
+// A selection ending at the end of a folded heading takes its section too,
+// as one past it does: deleting it leaves nothing of the section, copying
+// it copies it, and Select All, which ends at the last block shown, does
+// both.
+func TestSelectionToAFoldedHeadingsEndTakesItsSection(t *testing.T) {
+	e, tt, _, b := foldPage(t)
+	e.ToggleFold(b["C"].ID) // nothing under it
+	e.ToggleFold(b["B"].ID)
+	e.Select(Pos{b["a1"].ID, 0}, Pos{b["B"].ID, 1})
+	if blocks := e.copyBlocks(); len(blocks) != 4 || blocks[3].Delta().Plain() != "b1" {
+		var copied []string
+		for _, n := range blocks {
+			copied = append(copied, n.Delta().Plain())
+		}
+		t.Errorf("copied %v", copied)
+	}
+	if text := e.copyText(); !strings.Contains(text, "b1") {
+		t.Errorf("copied as text %q", text)
+	}
+	tt.Key(0, ui.KeyBackspace)
+	var top []string
+	for _, n := range e.Content.Children {
+		top = append(top, n.Delta().Plain())
+	}
+	if !slices.Equal(top, []string{"A", "", "C"}) {
+		t.Errorf("after deleting to B's end %v", top)
+	}
+
+	// Select All, twice, ends at the end of the last heading shown.
+	e, tt, _, b = foldPage(t)
+	e.ToggleFold(b["B"].ID)
+	e.Edit(func(c *doc.Content) { c.Remove(b["C"].ID) })
+	tt.Frame()
+	e.PlaceCaret(b["a1"].ID, 0)
+	e.SelectAll()
+	e.SelectAll()
+	tt.Key(0, ui.KeyBackspace)
+	if got := e.Content.Children; len(got) != 1 || got[0].Delta().Plain() != "" {
+		var left []string
+		for _, n := range got {
+			left = append(left, n.Delta().Plain())
+		}
+		t.Errorf("after Select All and Backspace %v", left)
+	}
+}
+
 // A selection from inside a folded heading leaves the heading, and so its
 // section: Backspace over it does as Delete at the heading's end does.
 func TestSelectionFromInsideAFoldedHeadingKeepsItsSection(t *testing.T) {
@@ -231,13 +277,13 @@ func TestBlockLinks(t *testing.T) {
 	b["a1"].SetDelta(doc.Delta{{Text: "see B", Attrs: doc.Attrs{Href: doc.BlockLink("prd", "b9")}}})
 	e.invalidate(b["a1"].ID)
 	tt.Frame()
-	r := e.geom[b["a1"].ID]
+	r := boxOf(e, b["a1"].ID)
 	tt.ClickAt(r.X+5, r.Y+r.H/2)
 	if len(host.opened) != 1 || host.opened[0] != "prd#b9" {
 		t.Errorf("opened %v", host.opened)
 	}
 	// Right-click a block for a link to it.
-	r = e.geom[b["b1"].ID]
+	r = boxOf(e, b["b1"].ID)
 	tt.RightClickAt(r.X+5, r.Y+r.H/2)
 	if err := chooseDrawn(tt, "Copy link to block"); err != nil {
 		t.Fatalf("%v; shown %v", err, tt.Texts())
@@ -323,7 +369,7 @@ func TestReplaceKeepsUndo(t *testing.T) {
 		c.Find("B").SetDelta(doc.Delta{{Text: "B from outside"}})
 		c.Children = append(c.Children, para("Q", "from outside"))
 	})
-	if !e.CanUndo() {
+	if len(e.undo) == 0 {
 		t.Fatal("undo steps went")
 	}
 	got := func() string { return strings.Join(texts(e), " | ") }
@@ -339,7 +385,7 @@ func TestReplaceKeepsUndo(t *testing.T) {
 	if want := "paragraph:a | paragraph:B from outside | paragraph:again | paragraph:x"; got() != want {
 		t.Errorf("after undoing all %q, want %q", got(), want)
 	}
-	if e.CanUndo() {
+	if len(e.undo) > 0 {
 		t.Error("steps left")
 	}
 	e.Redo()
@@ -491,5 +537,83 @@ func TestPasteEndingInFoldedToggleShowsTheRest(t *testing.T) {
 	}
 	if k := count(e.Content, "hidden"); k != 1 {
 		t.Errorf("%d hidden children, want 1", k)
+	}
+}
+
+// Tab and Shift-Tab move every block selected, with what is in them, and
+// none when the first can't go in.
+func TestIndentSelection(t *testing.T) {
+	item := func(id, text string, kids ...*doc.Node) *doc.Node {
+		n := &doc.Node{ID: id, Type: "bulleted_list", Children: kids}
+		n.SetDelta(doc.Delta{{Text: text}})
+		return n
+	}
+	shape := func(e *Editor) string {
+		var b strings.Builder
+		var visit func([]*doc.Node, string)
+		visit = func(nodes []*doc.Node, in string) {
+			for _, n := range nodes {
+				b.WriteString(in + n.ID + " ")
+				visit(n.Children, in+">")
+			}
+		}
+		visit(e.Content.Children, "")
+		return strings.TrimSpace(b.String())
+	}
+	e := New(doc.FromBlocks([]*doc.Node{item("A", "a"), item("B", "b", item("B1", "b1")), item("C", "c")}), &fakeHost{})
+	e.Select(Pos{"B", 0}, Pos{"C", 1})
+	e.Indent()
+	if got := shape(e); got != "A >B >>B1 >C" {
+		t.Errorf("after Tab %q", got)
+	}
+	e.Outdent()
+	if got := shape(e); got != "A B >B1 C" {
+		t.Errorf("after Shift-Tab %q", got)
+	}
+	// The first selected can't go in: nothing moves.
+	e.Select(Pos{"A", 0}, Pos{"B", 1})
+	e.Indent()
+	if got := shape(e); got != "A B >B1 C" {
+		t.Errorf("Tab with the first at the top %q", got)
+	}
+}
+
+// Tab doesn't put a block in a toggle a folded heading hides: the block
+// would be hidden with it, the caret jumping away.
+func TestIndentNotIntoAHiddenToggle(t *testing.T) {
+	heading := func(id, text string) *doc.Node {
+		n := &doc.Node{ID: id, Type: "heading", Data: map[string]any{"level": 2}}
+		n.SetDelta(doc.Delta{{Text: text}})
+		return n
+	}
+	one := heading("H1", "One")
+	one.Set("collapsed", true)
+	e := New(doc.FromBlocks([]*doc.Node{one, foldedToggle("T", "Toggle", "kid"), heading("H2", "Two")}), &fakeHost{})
+	if hid := e.hidden(); !hid["T"] || hid["H2"] {
+		t.Fatalf("hidden %v", hid)
+	}
+	e.PlaceCaret("H2", 0)
+	e.Indent()
+	if loc := e.Content.Locate("H2"); loc == nil || loc.Parent != nil {
+		t.Error("Tab put a heading in a toggle its fold hides")
+	}
+}
+
+// A page that can't be changed still unfolds a section its owner folded,
+// as it opens its toggles.
+func TestReadOnlyUnfoldsAHeading(t *testing.T) {
+	e, tt, _, b := foldPage(t)
+	b["B"].Set("collapsed", true)
+	e.ReadOnly = true
+	tt.Frame()
+	if !e.hidden()[b["b1"].ID] {
+		t.Fatal("the section isn't folded")
+	}
+	if err := tt.Click("Unfold section"); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if e.hidden()[b["b1"].ID] {
+		t.Error("the section stayed folded")
 	}
 }

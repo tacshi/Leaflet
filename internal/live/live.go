@@ -79,8 +79,11 @@ type Page struct {
 	// page opens empty, or keeps what it showed when such content comes
 	// in, read-only, and is never saved over.
 	unreadable bool
-	readOnly   bool
-	closed     bool
+	// removed is set once the page's content is no longer on this device,
+	// as when its share was withdrawn: it has nothing to save over.
+	removed  bool
+	readOnly bool
+	closed   bool
 }
 
 // Open opens a page, returning it and the content for the editor to start
@@ -153,6 +156,11 @@ func (p *Page) Edited() {
 		return
 	}
 	p.setDirty(true)
+	p.schedule()
+}
+
+// schedule saves the edits shortly after the typing stops.
+func (p *Page) schedule() {
 	if p.timer != nil {
 		p.timer.Stop()
 	}
@@ -181,7 +189,8 @@ func (p *Page) notify(message string) {
 
 // Save stores the edits. It reports whether nothing is left to save.
 func (p *Page) Save() bool {
-	if !p.dirty || p.unreadable {
+	if !p.dirty || p.unreadable || p.removed {
+		p.setDirty(false)
 		return true
 	}
 	// What was stored since, by another process, merges in first, so the
@@ -189,8 +198,9 @@ func (p *Page) Save() bool {
 	// in between merges on the next try instead of being written over.
 	for range 5 {
 		p.External()
-		if p.unreadable {
-			// What was stored since can't be read: it is not saved over.
+		if p.unreadable || p.removed {
+			// What was stored since can't be read, or is gone: it is not
+			// saved over.
 			return true
 		}
 		if p.timer != nil {
@@ -220,8 +230,9 @@ func (p *Page) Save() bool {
 		}
 		return true
 	}
-	// Stored over each time, the edits wait for the save that merging
-	// them scheduled.
+	// Stored over each time, the edits wait for a save shortly after, as
+	// the merge before each try stopped the one it scheduled.
+	p.schedule()
 	return false
 }
 
@@ -230,16 +241,23 @@ func (p *Page) Save() bool {
 // typed.
 func (p *Page) External() {
 	row, err := p.st.ContentRow(p.ID)
+	if store.IsNotFound(err) && p.row != "" {
+		p.remove()
+		return
+	}
 	if err != nil || row.Content == p.row {
 		return
 	}
-	if p.unreadable {
-		// Content that can be read again, as a sync brought it, opens.
+	if p.unreadable || p.removed {
+		// Content that can be read again, as a sync brought it, opens, as
+		// does content back on this device, as a page shared again.
 		c, err := doc.Decode(row.Content)
 		if err != nil {
+			p.removed = false
+			p.unreadable = true
 			return
 		}
-		p.unreadable = false
+		p.unreadable, p.removed = false, false
 		p.SetReadOnly(p.opt.CanEdit != nil && !p.opt.CanEdit())
 		p.ed.Replace(c.Copy())
 		p.loaded, p.stored, p.row = c.Copy(), c.Encode(), row.Content
@@ -287,6 +305,23 @@ func (p *Page) External() {
 	}
 	p.ed.Replace(stored.Copy())
 	p.loaded, p.stored, p.row = stored.Copy(), stored.Encode(), row.Content
+}
+
+// remove leaves the page once its content is no longer on this device, as
+// when its share was withdrawn, the device left the account, or starter
+// pages went as it joined a library: read-only, with nothing to save, as
+// nothing is there to save over. Edits not saved are lost with the page,
+// which the user is told.
+func (p *Page) remove() {
+	if p.timer != nil {
+		p.timer.Stop()
+	}
+	if p.dirty {
+		p.notify(locales.AppPageRemoved())
+	}
+	p.removed = true
+	p.setDirty(false)
+	p.SetReadOnly(true)
 }
 
 // Doc is the content as it is open, with what is being typed.

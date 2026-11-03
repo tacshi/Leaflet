@@ -25,6 +25,10 @@ type conflictRow struct {
 	Kept    string `json:"kept"`
 	Other   string `json:"other"`
 	Deleted string `json:"deleted,omitempty"`
+	// KeptHere is whether the version kept is this device's, so the other
+	// device's is the one to put back (resolveOtherDevice), or the other
+	// way (resolveThisDevice).
+	KeptHere bool `json:"kept_here"`
 }
 
 // Conflicts returns the conflicts not resolved yet, newest first, as a
@@ -43,7 +47,8 @@ func (c *Core) Conflicts() (_ string, err error) {
 			if cf.Kept == "remote" {
 				kept, other = cf.RemoteNode, cf.LocalNode
 			}
-			r := conflictRow{ID: cf.ID, PageID: cf.PageID, PageTitle: c.titleOf(cf.PageID), Kept: textOf(kept), Other: textOf(other)}
+			r := conflictRow{ID: cf.ID, PageID: cf.PageID, PageTitle: c.titleOf(cf.PageID), Kept: textOf(kept), Other: textOf(other),
+				KeptHere: cf.Kept != "remote"}
 			switch {
 			case cf.LocalNode == nil:
 				r.Deleted = "here"
@@ -74,22 +79,25 @@ func textOf(n *doc.Node) string {
 
 // How ResolveConflict settles a conflict: as merged ("keep": the newer
 // version, or the block one device deleted kept), with this device's
-// version put back, or with the block deleted again, for one the other
-// device deleted.
+// version put back, or the other device's, or with the block deleted
+// again, for one the other device deleted.
 const (
-	resolveKeep       = "keep"
-	resolveThisDevice = "this_device"
-	resolveDelete     = "delete"
+	resolveKeep        = "keep"
+	resolveThisDevice  = "this_device"
+	resolveOtherDevice = "other_device"
+	resolveDelete      = "delete"
 )
 
 // ResolveConflict settles a conflict, as the desktop's Resolve menu does,
-// how says: resolveKeep, resolveThisDevice or resolveDelete. A page not
-// open keeps a version from before in its history first.
+// how says: resolveKeep, resolveThisDevice, resolveOtherDevice or
+// resolveDelete. A page not open keeps a version from before in its
+// history first. One the user can no longer edit is put back nothing, and
+// stays to resolve.
 func (c *Core) ResolveConflict(id, how string) (err error) {
 	defer catch(&err)
 	// Any other how would delete the block.
 	switch how {
-	case resolveKeep, resolveThisDevice, resolveDelete:
+	case resolveKeep, resolveThisDevice, resolveOtherDevice, resolveDelete:
 	default:
 		return fmt.Errorf("no way to resolve a conflict named %q", how)
 	}
@@ -109,7 +117,12 @@ func (c *Core) ResolveConflict(id, how string) (err error) {
 			return
 		}
 		if how != resolveKeep {
-			err = c.putBack(*cf, how == resolveThisDevice)
+			if !c.canEdit(cf.PageID) {
+				err = errors.New(locales.AppErrorReadOnly())
+				return
+			}
+			node := map[string]*doc.Node{resolveThisDevice: cf.LocalNode, resolveOtherDevice: cf.RemoteNode}[how]
+			err = c.putBack(*cf, node)
 		}
 		if err == nil {
 			err = c.core.Store.ResolveConflict(cf.ID)
@@ -121,13 +134,9 @@ func (c *Core) ResolveConflict(id, how string) (err error) {
 	return nil
 }
 
-// putBack puts this device's version of a conflict's block back, or with
-// local false deletes the block, on the queue.
-func (c *Core) putBack(cf store.ConflictRow, local bool) error {
-	node := cf.LocalNode
-	if !local {
-		node = nil
-	}
+// putBack puts node, a version of a conflict's block, back, or with node
+// nil deletes the block, on the queue.
+func (c *Core) putBack(cf store.ConflictRow, node *doc.Node) error {
 	if c.pages[cf.PageID] == nil {
 		if content := c.core.Store.Content(cf.PageID); content != nil {
 			if err := c.core.Store.AddHistory(cf.PageID, content, "conflict", "", locales.SettingsHistoryBeforeResolving()); err != nil {

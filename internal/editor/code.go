@@ -132,7 +132,7 @@ func (e *Editor) codeBarView(c *ui.Context, n *doc.Node, left float32, hovered b
 // inCodeBar reports whether a point in the window is on a code block's
 // bar, whose controls take the press.
 func (e *Editor) inCodeBar(n *doc.Node, wy float32) bool {
-	box, ok := e.geom[n.ID]
+	box, ok := e.box(n.ID)
 	return ok && n.Type == "code" && wy >= box.Y && wy < box.Y+codeMargin+codeBar
 }
 

@@ -89,26 +89,52 @@ func (e *Editor) ToggleFold(id string) {
 		}
 	}
 	// Folding is how the page shows, not an edit to undo, but it is kept.
+	e.keepFold(n)
 	e.changed()
 }
 
-// Reveal unfolds the headings that hide a block, so it can be shown.
+// keepFold carries how block n is folded, as the user just folded or
+// unfolded it, into the steps of undo and redo: going back to one of
+// them, the page is as it was then, but folded as it is now. The folds
+// an edit made, as indenting under a folded toggle unfolds it, are its
+// own, and go back with it.
+func (e *Editor) keepFold(n *doc.Node) {
+	folded := n.Bool("collapsed")
+	for _, steps := range [][]snapshot{e.undo, e.redo, e.markRedo} {
+		for _, s := range steps {
+			for _, c := range []*doc.Content{s.content, s.after} {
+				if c == nil {
+					continue
+				}
+				if m := c.Find(n.ID); m != nil && m.Type == n.Type && m.Bool("collapsed") != folded {
+					m.Set("collapsed", folded)
+				}
+			}
+		}
+	}
+}
+
+// Reveal unfolds the headings that hide a block, so it can be shown: as
+// the user's own unfolding, it is kept in the steps of undo too.
 func (e *Editor) Reveal(id string) {
-	if e.unfold(id) {
+	opened := e.unfold(id)
+	for _, h := range opened {
+		e.keepFold(h)
+	}
+	if len(opened) > 0 {
 		e.changed()
 	}
 }
 
-// unfold unfolds the headings that hide a block, and reports whether any
-// did.
-func (e *Editor) unfold(id string) bool {
-	changed := false
+// unfold unfolds the headings that hide a block, and returns them.
+func (e *Editor) unfold(id string) []*doc.Node {
+	var opened []*doc.Node
 	for h := e.folder(id); h != nil; h = e.folder(id) {
 		h.Set("collapsed", false)
 		e.invalidate(h.ID)
-		changed = true
+		opened = append(opened, h)
 	}
-	return changed
+	return opened
 }
 
 // section returns the blocks heading h's section holds, and the blocks
@@ -154,6 +180,22 @@ func (e *Editor) selectedUnits(a Pos) []*doc.Node {
 	return out
 }
 
+// selectedEnd is the index in us, the units selectedUnits gives, of the
+// last unit a selection ending at b takes: b's, or, for a folded heading
+// taken to its end, the last of its section, which goes with it as it
+// does when the heading is taken whole.
+func (e *Editor) selectedEnd(us []*doc.Node, b Pos) int {
+	ib := indexIn(us, b.ID)
+	if ib < 0 || !foldedHeading(us[ib]) || b.Off < textLen(us[ib]) {
+		return ib
+	}
+	sec := e.section(us[ib])
+	for ib+1 < len(us) && sec[us[ib+1].ID] {
+		ib++
+	}
+	return ib
+}
+
 // Headings are the page's headings in order, with their levels and text,
 // shown or folded away.
 func (e *Editor) Headings() []*doc.Node {
@@ -169,7 +211,7 @@ func (e *Editor) Headings() []*doc.Node {
 // BlockTop is where a block shows, in window coordinates, as last drawn;
 // false for one a folded heading hides.
 func (e *Editor) BlockTop(id string) (float32, bool) {
-	r, ok := e.geom[id]
+	r, ok := e.box(id)
 	return r.Y, ok && !e.hid[id] && e.folder(id) == nil
 }
 
@@ -177,7 +219,7 @@ func (e *Editor) BlockTop(id string) (float32, bool) {
 // as laid out for one out of view and never drawn; false for one not in
 // the page, or that a folded heading hides.
 func (e *Editor) BlockRect(id string) (ui.Rect, bool) {
-	r, ok := e.geom[id]
+	r, ok := e.box(id)
 	if !ok {
 		r = e.laid[id]
 		ok = r.H > 0
@@ -192,7 +234,7 @@ const gutterWidth = 52
 // inGutter reports whether a point in the window is left of a heading's
 // text, where its buttons take the press.
 func (e *Editor) inGutter(n *doc.Node, wx, wy float32) bool {
-	box, ok := e.geom[n.ID]
+	box, ok := e.box(n.ID)
 	return ok && n.Type == "heading" && wx < box.X && wx >= box.X-gutterWidth && wy >= box.Y && wy < box.Y+box.H
 }
 
@@ -231,9 +273,8 @@ func (e *Editor) headingGutter(c *ui.Context, n *doc.Node, top float32, hovered 
 		wait := 1500*time.Millisecond - time.Since(e.copiedAt)
 		ui.Box(c.Key("link-wait:" + n.ID)).Absolute().Draw(func(p *ui.Painter, _ ui.Rect) { p.After(wait) })
 	}
-	if e.ReadOnly {
-		return
-	}
+	// A page that can't be changed folds too, as its toggles do: here
+	// alone, as it saves nothing, for a section its owner folded to show.
 	folded := foldedHeading(n)
 	icon, label = "chevron-down", locales.EditorFoldSection()
 	if folded {

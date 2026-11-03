@@ -5,105 +5,15 @@
 package store
 
 import (
-	"context"
 	"database/sql"
-	"database/sql/driver"
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-
-	"modernc.org/sqlite"
 )
-
-// lowerFunc is SQL's name for strings.ToLower, which search matches text
-// with as it does titles: SQLite's lower() lowers ASCII alone.
-const lowerFunc = "leaflet_lower"
-
-func init() {
-	sqlite.MustRegisterDeterministicScalarFunction(lowerFunc, 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
-		switch v := args[0].(type) {
-		case string:
-			return strings.ToLower(v), nil
-		case []byte:
-			return strings.ToLower(string(v)), nil
-		}
-		return args[0], nil
-	})
-}
-
-const schema = `
-CREATE TABLE IF NOT EXISTS spaces (
-  id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS folders (
-  id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_folder_id TEXT, name TEXT NOT NULL,
-  sort_key TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
-  default_template_id TEXT);
-CREATE TABLE IF NOT EXISTS pages (
-  id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_id TEXT, folder_id TEXT,
-  title TEXT NOT NULL DEFAULT '', icon TEXT, sort_key TEXT NOT NULL, created_by TEXT,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
-  keep_offline INTEGER NOT NULL DEFAULT 1, is_template INTEGER NOT NULL DEFAULT 0,
-  tags TEXT NOT NULL DEFAULT '[]', default_template_id TEXT);
-CREATE INDEX IF NOT EXISTS pages_space ON pages (space_id, parent_id);
-CREATE INDEX IF NOT EXISTS pages_parent ON pages (parent_id, sort_key);
-CREATE TABLE IF NOT EXISTS page_contents (
-  page_id TEXT PRIMARY KEY, content TEXT NOT NULL, plain_text TEXT NOT NULL DEFAULT '',
-  updated_at INTEGER NOT NULL, base_content TEXT, remote_updated_at INTEGER,
-  remote_revision INTEGER NOT NULL DEFAULT 0);
-CREATE TABLE IF NOT EXISTS comments (
-  id TEXT PRIMARY KEY, page_id TEXT NOT NULL, block_id TEXT NOT NULL, parent_comment_id TEXT,
-  author_id TEXT, author_kind TEXT NOT NULL DEFAULT 'user', author_name TEXT NOT NULL DEFAULT '',
-  body TEXT NOT NULL, quote TEXT, resolved INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER);
-CREATE INDEX IF NOT EXISTS comments_page ON comments (page_id, block_id);
-CREATE TABLE IF NOT EXISTS recordings (
-  id TEXT PRIMARY KEY, page_id TEXT NOT NULL, block_id TEXT NOT NULL, audio_path TEXT, local_path TEXT,
-  duration_ms INTEGER NOT NULL DEFAULT 0, stt_provider TEXT NOT NULL DEFAULT '', stt_model TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT 'recording', transcript TEXT NOT NULL DEFAULT '[]', language TEXT, error TEXT,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, uploaded_at INTEGER);
-CREATE TABLE IF NOT EXISTS files (
-  id TEXT PRIMARY KEY, space_id TEXT NOT NULL, folder_id TEXT, page_id TEXT, name TEXT NOT NULL,
-  storage_path TEXT, local_path TEXT, mime_type TEXT NOT NULL DEFAULT '', size_bytes INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER);
-CREATE TABLE IF NOT EXISTS ai_jobs (
-  id TEXT PRIMARY KEY, page_id TEXT NOT NULL, surface TEXT NOT NULL, focus_block_ids TEXT NOT NULL DEFAULT '[]',
-  comment_id TEXT, conversation_id TEXT, provider_id TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL,
-  request TEXT NOT NULL, result TEXT, error TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS model_providers (
-  id TEXT PRIMARY KEY, preset TEXT NOT NULL, name TEXT NOT NULL, base_url TEXT NOT NULL, auth_kind TEXT NOT NULL,
-  default_model TEXT NOT NULL DEFAULT '', is_local INTEGER NOT NULL DEFAULT 0, supports_tools INTEGER,
-  models TEXT NOT NULL DEFAULT '[]', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS page_history (
-  id TEXT PRIMARY KEY, page_id TEXT NOT NULL, content TEXT NOT NULL, reason TEXT NOT NULL, ai_job_id TEXT,
-  label TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS page_history_page ON page_history (page_id, created_at);
-CREATE TABLE IF NOT EXISTS outbox (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, entity TEXT NOT NULL, entity_id TEXT NOT NULL, op TEXT NOT NULL,
-  payload TEXT NOT NULL, label TEXT NOT NULL DEFAULT '', page_id TEXT, attempts INTEGER NOT NULL DEFAULT 0,
-  last_error TEXT, created_at INTEGER NOT NULL, revision INTEGER NOT NULL DEFAULT 0);
-CREATE INDEX IF NOT EXISTS outbox_entity ON outbox (entity, entity_id);
-CREATE TABLE IF NOT EXISTS conflicts (
-  id TEXT PRIMARY KEY, page_id TEXT NOT NULL, block_id TEXT NOT NULL, local_node TEXT NOT NULL,
-  remote_node TEXT NOT NULL, kept TEXT NOT NULL, local_edited_at INTEGER NOT NULL, remote_edited_at INTEGER NOT NULL,
-  created_at INTEGER NOT NULL, resolved_at INTEGER);
-CREATE TABLE IF NOT EXISTS page_members (
-  page_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL, display_name TEXT NOT NULL DEFAULT '',
-  email TEXT NOT NULL DEFAULT '', accepted INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (page_id, user_id));
-CREATE TABLE IF NOT EXISTS key_values (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS peer_contents (
-  peer_id TEXT NOT NULL, page_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL,
-  PRIMARY KEY (peer_id, page_id));
-CREATE INDEX IF NOT EXISTS peer_contents_page ON peer_contents (page_id, peer_id);
-CREATE TABLE IF NOT EXISTS row_versions (
-  tbl TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, device TEXT NOT NULL,
-  PRIMARY KEY (tbl, id));
-`
 
 // Change says what changed: a table, and the page when one is concerned.
 type Change struct {
@@ -119,6 +29,12 @@ type Store struct {
 	mu        sync.Mutex
 	session   Session
 	listeners []func(Change)
+
+	// todos are each page's to-dos as its content last read gave them,
+	// with what that content was (todoKey): Todos decodes only the pages
+	// whose content changed since. Guarded by todosMu.
+	todosMu sync.Mutex
+	todos   map[string]pageTodos
 }
 
 // Open opens (creating) the database in dir.
@@ -186,143 +102,51 @@ func fileURI(path, query string) (string, error) {
 	return u.String(), nil
 }
 
-// migrations bring a database an earlier version made up to this one's:
-// migrations[i] takes it from schema version i to i+1, kept in PRAGMA
-// user_version. A change to a table that exists adds one here as well as
-// changing schema; a new table needs only schema.
-var migrations = []func(context.Context, *sql.Conn) error{
-	// 1: columns added before the first release, which kept no version:
-	// databases from the releases have them, earlier ones lack them.
-	func(ctx context.Context, c *sql.Conn) error {
-		return addColumns(ctx, c, [][3]string{
-			{"pages", "is_template", "INTEGER NOT NULL DEFAULT 0"},
-			{"page_contents", "remote_revision", "INTEGER NOT NULL DEFAULT 0"},
-			{"outbox", "revision", "INTEGER NOT NULL DEFAULT 0"},
-		})
-	},
-	// 2: indexes for the pages under a parent, a page's history, and what
-	// the other devices published of a page.
-	func(ctx context.Context, c *sql.Conn) error {
-		return addIndexes(ctx, c, [][3]string{
-			{"pages_parent", "pages", "parent_id, sort_key"},
-			{"page_history_page", "page_history", "page_id, created_at"},
-			{"peer_contents_page", "peer_contents", "page_id, peer_id"},
-		})
-	},
-	// 3: whether each member of a page has accepted its invite.
-	func(ctx context.Context, c *sql.Conn) error {
-		return addColumns(ctx, c, [][3]string{
-			{"page_members", "accepted", "INTEGER NOT NULL DEFAULT 1"},
-		})
-	},
-	// 4: the pages' tags, a JSON array.
-	func(ctx context.Context, c *sql.Conn) error {
-		return addColumns(ctx, c, [][3]string{
-			{"pages", "tags", "TEXT NOT NULL DEFAULT '[]'"},
-		})
-	},
-	// 5: the template a folder's new pages, or a page's new subpages,
-	// start from.
-	func(ctx context.Context, c *sql.Conn) error {
-		return addColumns(ctx, c, [][3]string{
-			{"folders", "default_template_id", "TEXT"},
-			{"pages", "default_template_id", "TEXT"},
-		})
-	},
-}
-
-// migrate creates the tables, or brings those an earlier version made up
-// to date, in one transaction that another process opening the database
-// waits for.
-func migrate(db *sql.DB) error {
-	ctx := context.Background()
-	c, err := db.Conn(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = c.Close() }()
-	if _, err := c.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
-		return fmt.Errorf("migrate: %w", err)
-	}
-	if err := upgrade(ctx, c); err != nil {
-		_, _ = c.ExecContext(ctx, `ROLLBACK`)
-		return err
-	}
-	_, err = c.ExecContext(ctx, `COMMIT`)
-	return err
-}
-
-func upgrade(ctx context.Context, c *sql.Conn) error {
-	var version, tables int
-	if err := c.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
-		return err
-	}
-	if version > len(migrations) {
-		return fmt.Errorf("the database is from a newer Leaflet (schema %d; this one knows %d)", version, len(migrations))
-	}
-	// A new database gets the schema as it is; only one an earlier
-	// version made runs the migrations.
-	if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'pages'`).Scan(&tables); err != nil {
-		return err
-	}
-	if tables > 0 {
-		for i := version; i < len(migrations); i++ {
-			if err := migrations[i](ctx, c); err != nil {
-				return fmt.Errorf("migrate to schema %d: %w", i+1, err)
-			}
-		}
-	}
-	if _, err := c.ExecContext(ctx, schema); err != nil {
-		return fmt.Errorf("create schema: %w", err)
-	}
-	_, err := c.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, len(migrations)))
-	return err
-}
-
-// addColumns adds the columns, as {table, column, definition}, that their
-// tables lack; a table still to come gets them from schema.
-func addColumns(ctx context.Context, c *sql.Conn, cols [][3]string) error {
-	for _, col := range cols {
-		var tables, n int
-		if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, col[0]).Scan(&tables); err != nil {
-			return err
-		}
-		if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, col[0], col[1]).Scan(&n); err != nil {
-			return err
-		}
-		if tables == 0 || n > 0 {
-			continue
-		}
-		if _, err := c.ExecContext(ctx, "ALTER TABLE "+col[0]+" ADD COLUMN "+col[1]+" "+col[2]); err != nil { // #nosec G202 -- the migrations' own names and definitions.
-			return err
-		}
-	}
-	return nil
-}
-
-// addIndexes makes the indexes, as {name, table, columns}, of the tables
-// there are; a table still to come gets its own from schema.
-func addIndexes(ctx context.Context, c *sql.Conn, indexes [][3]string) error {
-	for _, ix := range indexes {
-		var n int
-		if err := c.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, ix[1]).Scan(&n); err != nil {
-			return err
-		}
-		if n == 0 {
-			continue
-		}
-		if _, err := c.ExecContext(ctx, "CREATE INDEX IF NOT EXISTS "+ix[0]+" ON "+ix[1]+" ("+ix[2]+")"); err != nil { // #nosec G202 -- the migrations' own names and columns.
-			return err
-		}
-	}
-	return nil
-}
-
 // querier is the database, or a transaction on it.
 type querier interface {
 	Exec(query string, args ...any) (sql.Result, error)
 	Query(query string, args ...any) (*sql.Rows, error)
 	QueryRow(query string, args ...any) *sql.Row
+}
+
+// scanner is a row to read: one QueryRow returned, or the rows Query did.
+type scanner interface{ Scan(dest ...any) error }
+
+// each calls fn with each of the rows a query returned, until it reports
+// it needs no more, and closes them.
+func each(rows *sql.Rows, err error, fn func(scanner) (more bool, err error)) error {
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		if more, err := fn(rows); err != nil || !more {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+// collect reads, with scan, each of the rows a query returned, and closes
+// them.
+func collect[T any](rows *sql.Rows, err error, scan func(scanner) (T, error)) ([]T, error) {
+	var out []T
+	err = each(rows, err, func(sc scanner) (bool, error) {
+		v, err := scan(sc)
+		out = append(out, v)
+		return true, err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// scanString reads a row of one text column.
+func scanString(sc scanner) (string, error) {
+	var v string
+	err := sc.Scan(&v)
+	return v, err
 }
 
 // inTx runs fn in one transaction, which holds the write lock from its
@@ -344,7 +168,8 @@ func (s *Store) inTx(fn func(tx *sql.Tx) error) error {
 // Close closes the database.
 func (s *Store) Close() error { return s.db.Close() }
 
-// DB returns the database, for sync.
+// DB returns the database, for tests to set up rows as no method of the
+// store would.
 func (s *Store) DB() *sql.DB { return s.db }
 
 // Subscribe calls fn after each change, on the goroutine that made it.
@@ -394,131 +219,6 @@ func (s *Store) WatchOthers(every time.Duration, stop <-chan struct{}, fn func()
 		}
 	}
 }
-
-// Value reads a key-value setting.
-func (s *Store) Value(key string) (string, bool) {
-	var v string
-	err := s.db.QueryRow(`SELECT value FROM key_values WHERE key = ?`, key).Scan(&v)
-	if err != nil {
-		return "", false
-	}
-	return v, true
-}
-
-// SetValue writes a key-value setting.
-func (s *Store) SetValue(key, value string) error {
-	_, err := s.db.Exec(`INSERT INTO key_values (key, value) VALUES (?, ?)
-		ON CONFLICT(key) DO UPDATE SET value = excluded.value`, key, value)
-	if err == nil {
-		s.Notify("key_values", "")
-	}
-	return err
-}
-
-// ValuesWithPrefix is the key-value settings whose keys start with
-// prefix, by their keys less it.
-func (s *Store) ValuesWithPrefix(prefix string) map[string]string {
-	out := map[string]string{}
-	rows, err := s.db.Query(`SELECT key, value FROM key_values WHERE substr(key, 1, ?) = ?`, len(prefix), prefix)
-	if err != nil {
-		return out
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var k, v string
-		if rows.Scan(&k, &v) == nil {
-			out[strings.TrimPrefix(k, prefix)] = v
-		}
-	}
-	return out
-}
-
-// DeleteValue removes a key-value setting.
-func (s *Store) DeleteValue(key string) error {
-	_, err := s.db.Exec(`DELETE FROM key_values WHERE key = ?`, key)
-	return err
-}
-
-// Wipe removes everything stored on this device.
-// It is one transaction: a table left behind by a failure part way, as
-// the outbox with the pages gone, would go up as the next account's.
-func (s *Store) Wipe() error {
-	err := s.inTx(func(tx *sql.Tx) error {
-		for _, t := range []string{"spaces", "folders", "pages", "page_contents", "comments", "recordings",
-			"files", "ai_jobs", "model_providers", "page_history", "outbox", "conflicts", "page_members", "key_values",
-			"peer_contents", "row_versions"} {
-			if _, err := tx.Exec("DELETE FROM " + t); err != nil { // #nosec G202 -- one of the tables listed here.
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	s.Notify("*", "")
-	return s.removeCopies()
-}
-
-// removeCopies removes the copies of files and the recordings' audio the
-// app keeps in its data folder, once no row names them: left there, an
-// account's attachments and voice would stay on the device after it signs
-// out or is deleted.
-func (s *Store) removeCopies() error {
-	return errors.Join(os.RemoveAll(filepath.Join(s.Dir, "files")), os.RemoveAll(filepath.Join(s.Dir, "recordings")))
-}
-
-// The copies of files and the recordings' audio the app keeps in its data
-// folder are named in their rows by where they are in it, not by their
-// whole paths: the folder can move, as an iOS app's does when it is
-// updated, and a whole path would name a file that is gone. Paths go in
-// through relPath and come out through absPath.
-
-// relPath is how a row names the file at path: by where it is in dir, when
-// it is in it, or by its whole path.
-func relPath(dir, path string) string {
-	if path == "" || !filepath.IsAbs(path) {
-		return path
-	}
-	if rel, err := filepath.Rel(dir, path); err == nil && filepath.IsLocal(rel) {
-		return filepath.ToSlash(rel)
-	}
-	return path
-}
-
-// absPath is the file a row names, with relPath, as it is in dir now. A
-// whole path an earlier version kept, of a file that is no longer there,
-// names one in a data folder that has moved since: the part after the
-// folder ("Leaflet") is looked for in dir.
-func absPath(dir, path string) string {
-	if path == "" {
-		return ""
-	}
-	if !filepath.IsAbs(path) {
-		return filepath.Join(dir, filepath.FromSlash(path))
-	}
-	if _, err := os.Stat(path); err == nil {
-		return path
-	}
-	slashed := filepath.ToSlash(path)
-	i := strings.LastIndex(slashed, "/Leaflet/")
-	if i < 0 {
-		return path
-	}
-	rel := filepath.FromSlash(slashed[i+len("/Leaflet/"):])
-	if !filepath.IsLocal(rel) {
-		return path
-	}
-	moved := filepath.Join(dir, rel)
-	if _, err := os.Stat(moved); err != nil {
-		return path
-	}
-	return moved
-}
-
-// Path is the file at path as an entry in the outbox names it (as a row
-// does), on this device now.
-func (s *Store) Path(path string) string { return absPath(s.Dir, path) }
 
 // Helpers for nullable columns: "" and zero times are NULL.
 

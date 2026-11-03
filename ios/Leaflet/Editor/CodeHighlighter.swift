@@ -52,8 +52,28 @@ enum CodeHighlighter {
     /// know, stays plain, as on the desktop.
     static func spans(_ code: String, language: String, dark: Bool) -> [(NSRange, UIColor)] {
         let lang = language.lowercased()
-        guard !code.isEmpty, !lang.isEmpty, let h = highlighter,
-            h.supportedLanguages().contains(lang),
+        guard !code.isEmpty, !lang.isEmpty, languages.contains(lang) else { return [] }
+        let key = "\(dark ? 1 : 0)\(lang)\u{0}\(code)"
+        if let kept = made[key] { return kept }
+        let out = highlight(code, as: lang, dark: dark)
+        // A few blocks' worth: those styled again as the page changes
+        // around them, each of which highlight.js reads whole.
+        if made.count >= 64 { made.removeAll() }
+        made[key] = out
+        return out
+    }
+
+    /// languages are those highlight.js knows, asked of it once, as each
+    /// asking goes through JavaScriptCore.
+    private static let languages = Set(highlighter?.supportedLanguages() ?? [])
+    /// made are the spans of the code highlighted lately, by its look,
+    /// language and text.
+    private static var made: [String: [(NSRange, UIColor)]] = [:]
+
+    private static func highlight(_ code: String, as lang: String, dark: Bool) -> [(
+        NSRange, UIColor
+    )] {
+        guard let h = highlighter,
             let colored = h.highlight(code, as: lang, fastRender: true),
             colored.length == (code as NSString).length
         else { return [] }

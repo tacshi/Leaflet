@@ -74,7 +74,8 @@ export interface ChatResult {
 }
 
 export class ProviderError extends Error {
-  constructor(public status: number, message: string, public body = "") {
+  /** retryAfterMs: the wait the provider's Retry-After asked for, 0 for none. */
+  constructor(public status: number, message: string, public body = "", public retryAfterMs = 0) {
     super(message);
   }
 
@@ -100,6 +101,26 @@ export function normalizeBaseUrl(raw: string, preset?: string): string {
     url = `${parsed.origin}/v1`;
   }
   return url;
+}
+
+/**
+ * Whether a provider's saved key may go where it now points: only to the
+ * address, and the preset's headers, it was saved for. A base URL or preset
+ * changed without a new key would send the old one to whatever server the
+ * change names, so one stolen session could take the key Vault keeps.
+ */
+export function keyStaysWith(
+  saved: { base_url: string; preset: string },
+  next: { base_url: string; preset: string },
+): boolean {
+  const origin = (p: { base_url: string; preset: string }) => {
+    try {
+      return new URL(normalizeBaseUrl(p.base_url, p.preset)).origin;
+    } catch {
+      return "";
+    }
+  };
+  return saved.preset === next.preset && origin(saved) !== "" && origin(saved) === origin(next);
 }
 
 function headers(conn: Connection): Record<string, string> {
@@ -141,17 +162,100 @@ const STATUS_MESSAGES: Record<number, string> = {
   429: "The provider is rate limiting requests; try again shortly",
 };
 
+/** The most of an answer read from a provider: a whole one, its stream, a list of models. */
+export const MAX_ANSWER_BYTES = 8 << 20;
+/** The most of an error's body read, for its message. */
+const MAX_ERROR_BYTES = 64 << 10;
+
+/**
+ * A response's body as text, read only up to limit bytes: an address that
+ * answers without end is cut off, rather than filling the function's
+ * memory. Past the limit it fails, unless cut is set, which keeps the
+ * start.
+ */
+export async function readText(res: Response, limit: number, cut = false): Promise<string> {
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      if (size + value.length > limit) {
+        if (!cut) throw new ProviderError(502, "The provider's answer was too large");
+        chunks.push(value.subarray(0, limit - size));
+        size = limit;
+        break;
+      }
+      chunks.push(value);
+      size += value.length;
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const c of chunks) {
+    all.set(c, at);
+    at += c.length;
+  }
+  return new TextDecoder().decode(all);
+}
+
+/** A response's body as JSON, read only up to MAX_ANSWER_BYTES. */
+async function readJsonCapped(res: Response): Promise<unknown> {
+  const text = await readText(res, MAX_ANSWER_BYTES);
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new ProviderError(502, "The provider's answer was not JSON");
+  }
+}
+
+/**
+ * The wait a busy provider's Retry-After asks for, in seconds or until a
+ * time, in ms; 0 when it asks none.
+ */
+export function retryAfterMs(value: string | null, now = Date.now()): number {
+  const v = (value ?? "").trim();
+  if (/^\d+$/.test(v)) return Number(v) * 1000;
+  const at = Date.parse(v);
+  return Number.isFinite(at) ? Math.max(0, at - now) : 0;
+}
+
 /**
  * A provider's error as a short message: its status, and the provider's
  * own JSON error message when it sent one. The raw body is never shown, as
  * it could be anything the address answered with.
  */
-async function failure(res: Response): Promise<ProviderError> {
-  const body = (await res.text().catch(() => "")).slice(0, 2000);
+export async function failure(res: Response): Promise<ProviderError> {
+  const body = (await readText(res, MAX_ERROR_BYTES, true).catch(() => "")).slice(0, 2000);
   const known = STATUS_MESSAGES[res.status] ??
     (res.status >= 500 ? "The provider had an error" : "The provider refused the request");
   const detail = providerMessage(body);
-  return new ProviderError(res.status, `${known} (${res.status})${detail ? `: ${detail}` : ""}`, body);
+  return new ProviderError(
+    res.status,
+    `${known} (${res.status})${detail ? `: ${detail}` : ""}`,
+    body,
+    retryAfterMs(res.headers.get("retry-after")),
+  );
+}
+
+/** The wait before asking a busy or failing model once more (Go's retryWait), when it says none. */
+export const RETRY_WAIT_MS = 2_000;
+/** The longest wait to ask again after (Go's maxRetryWait): a model asking for longer is not asked again. */
+export const MAX_RETRY_WAIT_MS = 30_000;
+
+/**
+ * Whether a model's failure is worth asking again for, once, and after how
+ * long (Go's retryable): it was busy (429) or failing (5xx), and asked for
+ * no longer a wait than MAX_RETRY_WAIT_MS. null when it is not.
+ */
+export function retryWait(e: unknown): number | null {
+  if (!(e instanceof ProviderError) || (e.status !== 429 && e.status < 500)) return null;
+  const wait = e.retryAfterMs || RETRY_WAIT_MS;
+  return wait <= MAX_RETRY_WAIT_MS ? wait : null;
 }
 
 /**
@@ -184,7 +288,8 @@ export async function chatCompletion(
   if (onText && res.headers.get("content-type")?.startsWith("text/event-stream")) {
     return await readStream(res, onText);
   }
-  const data = await res.json();
+  // deno-lint-ignore no-explicit-any
+  const data = await readJsonCapped(res) as any;
   const choice = data?.choices?.[0];
   if (!choice?.message) {
     throw new ProviderError(502, "The provider returned no message", JSON.stringify(data).slice(0, 2000));
@@ -230,6 +335,7 @@ export async function readStream(res: Response, onText: (delta: string) => void)
   let finishReason: string | null = null;
   let done = false;
   let buffer = "";
+  let read = 0;
   const take = (line: string) => {
     if (!line.startsWith("data:")) return;
     const data = line.slice(5).trim();
@@ -281,6 +387,10 @@ export async function readStream(res: Response, onText: (delta: string) => void)
     while (!done) {
       const { value, done: ended } = await reader.read();
       if (ended) break;
+      // The answer and the line it is on come to no more than a whole
+      // answer may: a stream without end is cut off.
+      read += value.length;
+      if (read > MAX_ANSWER_BYTES) throw new ProviderError(502, "The provider's answer was too large");
       buffer += value;
       let nl;
       while (!done && (nl = buffer.indexOf("\n")) >= 0) {
@@ -316,7 +426,8 @@ export async function listModels(
     signal,
   });
   if (!res.ok) throw await failure(res);
-  const data = await res.json();
+  // deno-lint-ignore no-explicit-any
+  const data = await readJsonCapped(res) as any;
   const items: unknown[] = Array.isArray(data?.data)
     ? data.data
     : Array.isArray(data?.models)

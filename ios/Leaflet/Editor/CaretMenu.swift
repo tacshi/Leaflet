@@ -53,13 +53,17 @@ final class CaretMenu {
         filter(query)
     }
 
+    /// filter keeps what query finds. The item chosen stays chosen while
+    /// what is typed does, as a change from outside filters again: the
+    /// first is chosen again only as the query changes, or the item goes.
     func filter(_ query: String) {
+        let kept = query == self.query ? current?.key : nil
         self.query = query
         guard let all else { return }
         var error: NSError?
         let raw = MobileFilterMenu(all, query, &error)
         items = (try? JSONDecoder().decode([MenuItem].self, from: Data(raw.utf8))) ?? []
-        selected = 0
+        selected = kept.flatMap { key in items.firstIndex { $0.key == key } } ?? 0
         render()
     }
 

@@ -379,7 +379,10 @@ var errPeerUnreadable = errors.New("the page's content from another device could
 
 // mergePeer merges one device's version of a page into this device's.
 func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error {
-	known, hasBase := s.st.PeerContent(peer, pageID)
+	known, hasBase, err := s.st.PeerContent(peer, pageID)
+	if err != nil {
+		return err
+	}
 	if hasBase && file.Version <= known.Version {
 		return nil
 	}
@@ -394,7 +397,10 @@ func (s *Service) mergePeer(me, peer, pageID string, file icloud.PageFile) error
 	// The merge is queued to go to the other devices when it differs
 	// from the version merged and from what this device published, unless
 	// a change of this device's waits already.
-	own, _ := s.st.PeerContent(me, pageID)
+	own, _, err := s.st.PeerContent(me, pageID)
+	if err != nil {
+		return err
+	}
 	label := func(merged string) string {
 		if merged != string(file.Content) && merged != own.Content && !s.st.HasPending("page_content", pageID) {
 			return "merged from another device"

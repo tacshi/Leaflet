@@ -885,6 +885,106 @@
           }
         }
       ]
+    },
+    {
+      "markdown": "![a](http:/example.com/c.png)",
+      "nodes": [
+        {
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "!"
+              },
+              {
+                "insert": "a",
+                "attributes": {
+                  "href": "http:/example.com/c.png"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "markdown": "![a](https://example.com:99999/a.png)",
+      "nodes": [
+        {
+          "type": "image",
+          "data": {
+            "url": "https://example.com:99999/a.png",
+            "align": "center",
+            "alt": "a"
+          }
+        }
+      ]
+    },
+    {
+      "markdown": "![a](https://256.0.0.1/a.png)",
+      "nodes": [
+        {
+          "type": "image",
+          "data": {
+            "url": "https://256.0.0.1/a.png",
+            "align": "center",
+            "alt": "a"
+          }
+        }
+      ]
+    },
+    {
+      "markdown": "![a](https://example.com/%zz.png)",
+      "nodes": [
+        {
+          "type": "paragraph",
+          "data": {
+            "delta": [
+              {
+                "insert": "!"
+              },
+              {
+                "insert": "a",
+                "attributes": {
+                  "href": "https://example.com/%zz.png"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "markdown": "```\ncode\n\n```",
+      "nodes": [
+        {
+          "type": "code",
+          "data": {
+            "delta": [
+              {
+                "insert": "code\n"
+              }
+            ],
+            "language": ""
+          }
+        }
+      ]
+    },
+    {
+      "markdown": "```go\na\n\n\n```",
+      "nodes": [
+        {
+          "type": "code",
+          "data": {
+            "delta": [
+              {
+                "insert": "a\n\n"
+              }
+            ],
+            "language": "go"
+          }
+        }
+      ]
     }
   ],
   "inline": [
@@ -1106,6 +1206,8 @@
     "  Objective   C ": "objective-c",
     "JS": "javascript",
     "c++": "cpp",
-    "Golang": "go"
+    "Golang": "go",
+    "İNI": "ini",
+    "ΑΣ": "ασ"
   }
 }

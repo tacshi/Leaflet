@@ -18,6 +18,7 @@ import (
 	"time"
 	"unicode"
 
+	"leaflet/internal/doc"
 	"leaflet/internal/store"
 )
 
@@ -79,7 +80,7 @@ func (s *Server) markSeen() {
 // NewServer serves the pages in st.
 func NewServer(st *store.Store, version string) *Server {
 	s := &Server{st: st, version: version, agent: "Agent"}
-	s.pages = pageTools{s: s, edited: map[string]int64{}}
+	s.pages = pageTools{s: s, edited: map[string]int64{}, read: map[string]*doc.Content{}}
 	return s
 }
 
@@ -102,57 +103,91 @@ type response struct {
 	Error   *rpcError       `json:"error,omitempty"`
 }
 
-// Serve reads one JSON-RPC message a line until in ends.
+// Serve reads one JSON-RPC message a line until in ends: a request or a
+// notification, or a batch of them.
 func (s *Server) Serve(in io.Reader, out io.Writer) error {
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
 	enc := json.NewEncoder(out)
 	enc.SetEscapeHTML(false)
 	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" {
+		line := bytes.TrimSpace(sc.Bytes())
+		if len(line) == 0 {
 			continue
 		}
-		var req request
-		if err := json.Unmarshal([]byte(line), &req); err != nil {
-			// JSON that is no request object, a batch among them (which
-			// MCP no longer has), is an invalid request, not a parse error.
-			e := &rpcError{-32700, "Parse error"}
-			if json.Valid([]byte(line)) {
-				e = &rpcError{-32600, "Invalid Request"}
-			}
-			if err := enc.Encode(response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: e}); err != nil {
-				return err
-			}
+		var answer any
+		if line[0] == '[' {
+			answer = s.batch(line)
+		} else if r := s.answer(line); r != nil {
+			answer = r
+		}
+		if answer == nil {
 			continue
 		}
-		// An object that is no JSON-RPC 2.0 request, without its method,
-		// is an invalid request too, answered under its ID if it has one.
-		if req.JSONRPC != "2.0" || req.Method == "" {
-			id := req.ID
-			if len(id) == 0 {
-				id = json.RawMessage("null")
-			}
-			if err := enc.Encode(response{JSONRPC: "2.0", ID: id, Error: &rpcError{-32600, "Invalid Request"}}); err != nil {
-				return err
-			}
-			continue
-		}
-		result, rerr := s.handle(req)
-		// Notifications get no answer.
-		if len(req.ID) == 0 {
-			continue
-		}
-		// A request answers with a result or an error, even one named as
-		// a notification.
-		if result == nil && rerr == nil {
-			result = map[string]any{}
-		}
-		if err := enc.Encode(response{JSONRPC: "2.0", ID: req.ID, Result: result, Error: rerr}); err != nil {
+		if err := enc.Encode(answer); err != nil {
 			return err
 		}
 	}
 	return sc.Err()
+}
+
+// batch answers a batch, as protocol 2025-03-26 has them, which the
+// server still speaks: an array of messages, answered by an array of the
+// answers to its requests, none when it holds only notifications. An
+// empty one is an invalid request.
+func (s *Server) batch(line []byte) any {
+	var msgs []json.RawMessage
+	if err := json.Unmarshal(line, &msgs); err != nil {
+		return s.answer(line)
+	}
+	if len(msgs) == 0 {
+		return response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: &rpcError{-32600, "Invalid Request"}}
+	}
+	var out []*response
+	for _, m := range msgs {
+		if r := s.answer(m); r != nil {
+			out = append(out, r)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// answer handles one message, and returns its answer: nil for a
+// notification.
+func (s *Server) answer(msg []byte) *response {
+	var req request
+	if err := json.Unmarshal(msg, &req); err != nil {
+		// JSON that is no request object is an invalid request, not a
+		// parse error.
+		e := &rpcError{-32700, "Parse error"}
+		if json.Valid(msg) {
+			e = &rpcError{-32600, "Invalid Request"}
+		}
+		return &response{JSONRPC: "2.0", ID: json.RawMessage("null"), Error: e}
+	}
+	// An object that is no JSON-RPC 2.0 request, without its method, is an
+	// invalid request too, answered under its ID if it has one.
+	if req.JSONRPC != "2.0" || req.Method == "" {
+		id := req.ID
+		if len(id) == 0 {
+			id = json.RawMessage("null")
+		}
+		return &response{JSONRPC: "2.0", ID: id, Error: &rpcError{-32600, "Invalid Request"}}
+	}
+	result, rerr := s.handle(req)
+	// Notifications get no answer.
+	if len(req.ID) == 0 {
+		return nil
+	}
+	// A request answers with a result or an error, even one named as a
+	// notification.
+	if result == nil && rerr == nil {
+		result = map[string]any{}
+	}
+	return &response{JSONRPC: "2.0", ID: req.ID, Result: result, Error: rerr}
 }
 
 func (s *Server) handle(req request) (any, *rpcError) {

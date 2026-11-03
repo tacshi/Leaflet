@@ -29,11 +29,9 @@ type signInState struct {
 	lost   int
 }
 
-var signIn signInState
-
 func (a *App) signInView(c *ui.Context) {
 	pal := theme.Of(c)
-	s := &signIn
+	s := &a.signIn
 	a.titleBar(c, func() { ui.Spacer(c) })
 	ui.Scroll(c).Grow(1).Children(func() {
 		ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(64, 24).Children(func() {
@@ -72,7 +70,7 @@ func (a *App) signInView(c *ui.Context) {
 }
 
 func (a *App) runAuth(fn func() (*store.User, error)) {
-	s := &signIn
+	s := &a.signIn
 	s.busy, s.err, s.info = true, "", ""
 	go func() {
 		user, err := fn()
@@ -104,7 +102,7 @@ func (a *App) supabaseSignIn(c *ui.Context) {
 			}
 		})
 	}
-	switch supa.step {
+	switch a.supa.step {
 	case "":
 		// One way of syncing at a time: iCloud's, while it is on.
 		if tip := a.supabaseTip(); tip != "" {
@@ -120,10 +118,10 @@ func (a *App) supabaseSignIn(c *ui.Context) {
 		})
 	case stepBrowser:
 		busy(locales.SigninWaitingBrowser())
-		if supa.link != "" {
+		if a.supa.link != "" {
 			ui.Row(c).Gap(6).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, locales.SigninNewOrg()).FontSize(13).TextColor(pal.TextMuted)
-				ui.Link(c, locales.SigninReopenBrowser(), supa.link).FontSize(13)
+				ui.Link(c, locales.SigninReopenBrowser(), a.supa.link).FontSize(13)
 			})
 		}
 	case stepFinding:
@@ -135,8 +133,8 @@ func (a *App) supabaseSignIn(c *ui.Context) {
 	case stepStarting:
 		busy(locales.SigninStartingProject())
 	case stepSetup:
-		if supa.all > 0 {
-			busy(locales.SigninSettingUpSteps(supa.done, supa.all))
+		if a.supa.all > 0 {
+			busy(locales.SigninSettingUpSteps(a.supa.done, a.supa.all))
 		} else {
 			busy(locales.SigninSettingUp())
 		}
@@ -151,7 +149,7 @@ const supabaseSignUp = "https://supabase.com/dashboard/sign-up"
 // projectChoice lists the account's Leaflet projects to use, those
 // Leaflet made and did not finish, and a new project to create.
 func (a *App) projectChoice(c *ui.Context) {
-	f := &supa.found
+	f := &a.supa.found
 	label(c, locales.SigninChooseProject())
 	card(c, "projects", func() {
 		row := 0
@@ -182,7 +180,7 @@ func (a *App) projectChoice(c *ui.Context) {
 				for i, o := range f.Orgs {
 					slugs[i] = o.Slug
 				}
-				selectBox(c, "org", &supa.org, slugs, func(slug string) string {
+				selectBox(c, "org", &a.supa.org, slugs, func(slug string) string {
 					for _, o := range f.Orgs {
 						if o.Slug == slug {
 							return o.Name
@@ -191,7 +189,7 @@ func (a *App) projectChoice(c *ui.Context) {
 					return slug
 				}, 160)
 			}
-			if primary(c, "create", "", locales.SigninCreateProject()).Disabled(supa.org == "").Clicked() {
+			if primary(c, "create", "", locales.SigninCreateProject()).Disabled(a.supa.org == "").Clicked() {
 				a.chooseProject(nil)
 			}
 		})
@@ -201,39 +199,56 @@ func (a *App) projectChoice(c *ui.Context) {
 // emailCodeForm signs in to a server the build or environment fixes,
 // such as the local stack, with a code sent by email.
 func (a *App) emailCodeForm(c *ui.Context) {
-	s := &signIn
-	field(c, "email", &s.email, locales.CommonEmail()).AutoFocus()
-	if s.sent {
-		if field(c, "code", &s.code, locales.SigninCode()).Submitted() {
-			a.doVerify()
+	pal := theme.Of(c)
+	s := &a.signIn
+	// The email a code went to stays as it was, for the code to sign in
+	// with: another email is changed to, and sent a code of its own.
+	email := field(c, "email", &s.email, locales.CommonEmail()).Disabled(s.sent)
+	if !s.sent {
+		email.AutoFocus()
+		if primary(c, "send", "", locales.SigninSendCode()).Disabled(s.busy).Clicked() {
+			a.doSendCode()
 		}
-		if primary(c, "verify", "", locales.CommonSignIn()).Disabled(s.busy).Clicked() {
-			a.doVerify()
-		}
-	} else if primary(c, "send", "", locales.SigninSendCode()).Disabled(s.busy).Clicked() {
-		a.doSendCode()
+		return
 	}
+	if field(c, "code", &s.code, locales.SigninCode()).AutoFocus().Submitted() && !s.busy {
+		a.doVerify()
+	}
+	if primary(c, "verify", "", locales.CommonSignIn()).Disabled(s.busy).Clicked() {
+		a.doVerify()
+	}
+	// A code mistyped or too old for the server comes again.
+	ui.Row(c).Gap(6).Justify(ui.Center).AlignItems(ui.Center).Children(func() {
+		if ghost(c, "resend", "", locales.SigninResendCode()).Disabled(s.busy).Clicked() {
+			a.doSendCode()
+		}
+		ui.Text(c, "·").FontSize(13).TextColor(pal.TextMuted)
+		if ghost(c, "change", "", locales.SigninChangeEmail()).Disabled(s.busy).Clicked() {
+			s.sent, s.code, s.err, s.info = false, "", "", ""
+		}
+	})
 }
 
+// doSendCode emails a code to sign in with, again for one sent before;
+// what the last send said goes as this one starts.
 func (a *App) doSendCode() {
-	email := strings.TrimSpace(signIn.email)
-	signIn.busy, signIn.err = true, ""
-	go func() {
-		err := a.backend.SendCode(email)
-		a.update(func() {
-			signIn.busy = false
-			if err != nil {
-				signIn.err = err.Error()
-				return
-			}
-			signIn.sent = true
-			signIn.info = locales.SigninCodeSent()
-		})
-	}()
+	s := &a.signIn
+	email := strings.TrimSpace(s.email)
+	s.busy, s.err, s.info = true, "", ""
+	var err error
+	a.offMain(func() { err = a.backend.SendCode(email) }, func() {
+		s.busy = false
+		if err != nil {
+			s.err = err.Error()
+			return
+		}
+		s.sent, s.code = true, ""
+		s.info = locales.SigninCodeSent()
+	})
 }
 
 func (a *App) doVerify() {
-	email, code := strings.TrimSpace(signIn.email), signIn.code
+	email, code := strings.TrimSpace(a.signIn.email), a.signIn.code
 	a.runAuth(func() (*store.User, error) { return a.backend.VerifyCode(email, code) })
 }
 
@@ -248,7 +263,7 @@ func (a *App) signedIn(user *store.User) {
 		return
 	}
 	if n := a.lostBySigningIn(user); n > 0 {
-		signIn.asking, signIn.lost = user, n
+		a.signIn.asking, a.signIn.lost = user, n
 		return
 	}
 	a.useAccount(user, false)
@@ -273,7 +288,7 @@ func (a *App) useAccount(user *store.User, drop bool) {
 	if err := a.core().UseAccount(user, drop); err != nil {
 		// A change made since it counted, by leaflet mcp: it asks again.
 		if errors.Is(err, store.ErrUnsynced) {
-			signIn.asking, signIn.lost = user, a.st.PendingCount()
+			a.signIn.asking, a.signIn.lost = user, a.st.PendingCount()
 			return
 		}
 		// The new account signs out again, as when the person says no.
@@ -282,9 +297,9 @@ func (a *App) useAccount(user *store.User, drop bool) {
 		return
 	}
 	a.session = a.st.Session()
-	signIn = signInState{}
+	a.signIn = signInState{}
 	// The name field shows the account's name now, not one typed before.
-	account.nameEdited = false
+	a.account.nameEdited = false
 	a.toast(locales.SettingsSignedInAs(user.Email))
 	// A sign-in that finished after the person went to a page leaves them
 	// there.
@@ -302,7 +317,7 @@ func (a *App) useAccount(user *store.User, drop bool) {
 // account out again. The window shows it over whatever it shows, as a
 // sign-in may finish after the person has left its page.
 func (a *App) signInAlert(c *ui.Context) {
-	s := &signIn
+	s := &a.signIn
 	user := s.asking
 	if user == nil {
 		return

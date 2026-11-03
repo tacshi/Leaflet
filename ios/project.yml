@@ -81,6 +81,11 @@ targets:
         # In English; Resources/Debug and Resources/Release have it, and
         # the Debug build's name, in each language.
         INFOPLIST_KEY_NSMicrophoneUsageDescription: Leaflet records audio into recording blocks when you press Record.
+        # Agents and speech to text can run on a computer on the same
+        # network (Ollama, LM Studio, a speech server), which iOS asks
+        # about the first time one is reached; so do Resources/Debug and
+        # Resources/Release, in each language.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: Leaflet connects to the AI models and speech-to-text servers you set up on your local network.
         # No NSSpeechRecognitionUsageDescription: SpeechAnalyzer and
         # SpeechTranscriber, which transcribe on the device, ask for no
         # permission, as SFSpeechRecognizer does; the desktop's speech

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"os"
@@ -144,6 +145,9 @@ func (s *Service) cloudPass(ctx context.Context) error {
 // does.
 func (s *Service) joinSpace(ctx context.Context, joined string) error {
 	me := s.st.DeviceID()
+	if !icloud.ValidID(me) {
+		return errors.New("icloud: this device's ID could not be read")
+	}
 	space, losers, err := s.folder().ReadSpace()
 	made := false
 	if errors.Is(err, fs.ErrNotExist) {
@@ -152,7 +156,11 @@ func (s *Service) joinSpace(ctx context.Context, joined string) error {
 		}
 		made = true
 		space = icloud.Space{Format: icloud.Format, SpaceID: s.st.Session().SpaceID, CreatedAt: cloudNow().UTC(), CreatedByDevice: me}
-		if err := s.folder().WriteJSON(icloud.SpacePath, space); err != nil {
+		if err := s.folder().CreateJSON(icloud.SpacePath, space); errors.Is(err, fs.ErrExist) {
+			// Another device made it meanwhile: this one joins that one,
+			// on the next pass.
+			return fmt.Errorf("%w: %w", icloud.ErrNotReady, err)
+		} else if err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -238,7 +246,13 @@ func (s *Service) checkDeviceID(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	last := s.intValue("icloud.seq")
+	// A seq that cannot be read is not 0: this device would take a batch
+	// of its own for another's.
+	seq, _, err := s.st.Lookup("icloud.seq")
+	if err != nil {
+		return "", err
+	}
+	last, _ := strconv.ParseInt(seq, 10, 64)
 	if !copies && len(seqs) > 0 && seqs[len(seqs)-1] == last+1 {
 		// This device may have stopped between writing a batch and
 		// keeping its seq.
@@ -502,12 +516,11 @@ func (s *Service) cloudRemove(e store.OutboxEntry) {
 		_ = s.st.Dequeue(e) // no copy was ever kept by such a name
 		return
 	}
-	if err := s.folder().Remove(rel); err != nil {
+	if err := s.folder().RemoveBlob(rel); err != nil {
 		log.Printf("icloud: remove %s: %v", e.EntityID, err)
 		s.failed(e, err)
 		return
 	}
-	_ = s.folder().Remove(path.Dir(rel)) // its folder, once empty
 	_ = s.st.Dequeue(e)
 }
 
@@ -546,10 +559,18 @@ func (s *Service) rowEntry(me string, e store.OutboxEntry) (icloud.Entry, error)
 	if changed.IsZero() {
 		at = cloudNow().UnixMilli()
 	}
-	if had := s.newestHad(e.Entity, e.EntityID, row); settled && had.At > 0 {
+	had, err := s.newestHad(e.Entity, e.EntityID, row)
+	if err != nil {
+		return icloud.Entry{}, err
+	}
+	if settled && had.At > 0 {
 		at = had.At + 1
 	} else {
-		at = max(at, s.newestSeen(e.Entity, e.EntityID, row).At+1)
+		seen, err := s.newestSeen(e.Entity, e.EntityID, row)
+		if err != nil {
+			return icloud.Entry{}, err
+		}
+		at = max(at, seen.At+1)
 	}
 	row["updated_at"] = time.UnixMilli(at).UTC().Format(time.RFC3339Nano)
 	if e.Entity == "comments" {
@@ -578,7 +599,10 @@ func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerCo
 	} else if err != nil {
 		return icloud.Entry{}, nil, err
 	}
-	own, _ := s.st.PeerContent(me, pageID)
+	own, _, err := s.st.PeerContent(me, pageID)
+	if err != nil {
+		return icloud.Entry{}, nil, err
+	}
 	if own.Content == row.Content && own.Version > 0 {
 		return icloud.Entry{}, nil, nil // published as it is
 	}

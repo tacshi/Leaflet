@@ -2,15 +2,40 @@ package doc
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
 	"leaflet/locales"
 )
 
+// MarkdownOptions are what a page written as Markdown gets from the app
+// around it.
+type MarkdownOptions struct {
+	// Lang is the language of what stands for a block Markdown can't
+	// show, as an embed, which can't run there: "" for the catalogs' own.
+	Lang string
+	// PageTitle names a page a subpage block links to; it may be nil.
+	PageTitle func(id string) string
+	// Link is where a link of the page goes, in its text and of its
+	// blocks alike: an export's go to its own files and pages. nil keeps
+	// each as the page has it.
+	Link func(href string) string
+}
+
+// DefaultEmbedTitle is the title an agent's embed takes when it gives
+// none; the app gives a new one the same, in its own language.
+const DefaultEmbedTitle = "Interactive embed"
+
 // PageMarkdown writes a whole page as CommonMark with GitHub's tables and
-// task lists. pageTitle resolves subpage links; it may be nil.
-func PageMarkdown(title string, c *Content, pageTitle func(id string) string) string {
+// task lists.
+func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
+	msgs := locales.In(o.Lang)
+	href := func(s string) string { return s }
+	if o.Link != nil {
+		href = o.Link
+		c = withLinks(c, o.Link)
+	}
 	var b strings.Builder
 	if title != "" {
 		b.WriteString("# " + escapeText(title) + "\n\n")
@@ -31,7 +56,7 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 		}
 		b.WriteString("\n")
 	}
-	link := func(text, href string) string { return "[" + escapeText(text) + "](" + LinkDestination(href) + ")" }
+	link := func(text, to string) string { return "[" + escapeText(text) + "](" + LinkDestination(href(to)) + ")" }
 	// indent is the room before a block, nested under list items: as much
 	// as each item's marker takes, as CommonMark nests by ("1. " three).
 	var visit func(nodes []*Node, indent string)
@@ -125,18 +150,16 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 				}
 			case "embed":
 				// An embed with no title, or the one a new embed takes, in
-				// English or the app's language, is named only for what it
-				// is.
-				title := n.Str("title")
-				if title == "" || strings.EqualFold(title, "interactive embed") || strings.EqualFold(title, locales.DialogEmbedTitle()) {
-					block(indent, "*"+escapeText(locales.ExportEmbed())+"*")
+				// any language, is named only for what it is.
+				if title := n.Str("title"); title == "" || defaultEmbedTitle(title) {
+					block(indent, "*"+escapeText(msgs.ExportEmbed())+"*")
 				} else {
-					block(indent, "*"+escapeText(locales.ExportEmbedTitled(title))+"*")
+					block(indent, "*"+escapeText(msgs.ExportEmbedTitled(title))+"*")
 				}
 			case "video":
 				title := n.Str("title")
 				if title == "" {
-					title = locales.ExportVideo()
+					title = msgs.ExportVideo()
 				}
 				block(indent, link(title, n.Str("url")))
 			case "math_equation":
@@ -146,15 +169,15 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 			case "link_preview", "file":
 				block(indent, link(cardTitle(n), n.Str("url")))
 			case "recording":
-				name := locales.CommonRecording()
+				name := msgs.CommonRecording()
 				if title := n.Str("title"); title != "" {
-					name = locales.ExportRecordingTitled(title)
+					name = msgs.ExportRecordingTitled(title)
 				}
 				block(indent, "*"+escapeText(name)+"*")
 			case "subpage":
 				name := n.Str("page_id")
-				if pageTitle != nil {
-					name = pageTitle(name)
+				if o.PageTitle != nil {
+					name = o.PageTitle(name)
 				}
 				block(indent, link(name, PageLink(n.Str("page_id"))))
 			}
@@ -165,6 +188,39 @@ func PageMarkdown(title string, c *Content, pageTitle func(id string) string) st
 	}
 	visit(c.Children, "")
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// withLinks is a copy of c whose text links go where link says.
+func withLinks(c *Content, link func(string) string) *Content {
+	c = c.Copy()
+	c.Walk(func(n, _ *Node) {
+		d := n.Delta()
+		if !slices.ContainsFunc(d, func(r Run) bool { return r.Attrs.Href != "" }) {
+			return
+		}
+		for i := range d {
+			if d[i].Attrs.Href != "" {
+				d[i].Attrs.Href = link(d[i].Attrs.Href)
+			}
+		}
+		n.SetDelta(d)
+	})
+	return c
+}
+
+// defaultEmbedTitle reports whether title is the one a new embed takes,
+// as an agent gives it or the app in any of its languages: an embed made
+// in one language keeps it when the page is read in another.
+func defaultEmbedTitle(title string) bool {
+	if strings.EqualFold(title, DefaultEmbedTitle) {
+		return true
+	}
+	for _, lang := range locales.Catalog.Languages() {
+		if strings.EqualFold(title, locales.In(lang).DialogEmbedTitle()) {
+			return true
+		}
+	}
+	return false
 }
 
 // OneLine is text on one line, as a heading's Markdown is: a line break

@@ -3,6 +3,7 @@ package doc
 import (
 	"encoding/json"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -78,5 +79,21 @@ func TestSetTableRows(t *testing.T) {
 	}
 	if err := SetTableRows(n, nil); err == nil {
 		t.Error("a table of no rows was kept")
+	}
+}
+
+// An embed's HTML is held to 200 KB as stored, in UTF-8's bytes, as on
+// the server: HTML of Chinese text a third as long as the limit in
+// characters is over it.
+func TestEmbedSizeInBytes(t *testing.T) {
+	embed := func(html string) error {
+		_, err := SpecToNode(map[string]any{"type": "embed", "embed": map[string]any{"html": html}}, "", "")
+		return err
+	}
+	if err := embed(strings.Repeat("x", maxEmbedHTML)); err != nil {
+		t.Errorf("HTML of %d bytes refused: %v", maxEmbedHTML, err)
+	}
+	if err := embed(strings.Repeat("字", maxEmbedHTML/3+1)); err == nil {
+		t.Errorf("HTML of %d characters, %d bytes, taken", maxEmbedHTML/3+1, 3*(maxEmbedHTML/3+1))
 	}
 }

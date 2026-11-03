@@ -1,5 +1,16 @@
-import { assert, assertEquals } from "jsr:@std/assert@1";
-import { deltaToMarkdown, markdownToDelta, type NodeJSON, pageViews, specToNode, tableRows } from "./blocks.ts";
+import { assert, assertEquals, assertThrows } from "jsr:@std/assert@1";
+import {
+  collectIds,
+  deltaToMarkdown,
+  deltaToPlain,
+  markdownToDelta,
+  type NodeJSON,
+  normalizeContent,
+  pageViews,
+  plainText,
+  specToNode,
+  tableRows,
+} from "./blocks.ts";
 
 // Inline markdown here writes and reads as internal/doc/markdown.go does,
 // so text an agent reads and writes back through either keeps its formats.
@@ -78,4 +89,111 @@ Deno.test("a to-do is due on a day, or at a time of it", () => {
   for (const due of ["2026-10-30T25:00", "2026-13-01", "2025-02-29", "2026-10-30 15:04", "Friday"]) {
     assert(specToNode({ type: "todo_list", text: "x", due }, opts).data?.due === undefined, due);
   }
+});
+
+// Blocks of one ID, as a paste can make, and blocks without one, read with
+// the IDs the client reads them with (TestRepairedIDsAreTheSameEachRead),
+// so the page the server saves matches the blocks up with each device's.
+Deno.test("repaired IDs are the client's, the same each read", () => {
+  const para = (id: string, text: string, children?: NodeJSON[]): NodeJSON => ({
+    id,
+    type: "paragraph",
+    data: { delta: [{ insert: text }] },
+    ...(children ? { children } : {}),
+  });
+  const stored = {
+    document: {
+      id: "root",
+      type: "page",
+      children: [para("a", "one"), para("a", "two"), para("a-2", "three"), para("", "four", [para("root", "five")])],
+    },
+    meta: { v: 1 },
+  };
+  const ids = collectIds(normalizeContent(structuredClone(stored)).document).slice(1);
+  assertEquals(ids, ["a", "a-3", "a-2", "block-1", "root-1"]);
+  assertEquals(collectIds(normalizeContent(structuredClone(stored)).document).slice(1), ids);
+});
+
+// An embed's HTML is held to 200 KB in UTF-8's bytes, as the client holds
+// it (TestEmbedSizeInBytes): Chinese text a third as long as the limit in
+// characters is over it.
+Deno.test("an embed's size is in bytes, as the client's", () => {
+  const embed = (html: string) => () => specToNode({ type: "embed", embed: { html } }, { newId: () => "x" });
+  embed("x".repeat(200_000))();
+  assertThrows(embed("字".repeat(Math.floor(200_000 / 3) + 1)));
+});
+
+const pageOf = (...children: NodeJSON[]) => ({
+  document: { id: "root", type: "page", children },
+  meta: { v: 1, blocks: {}, deleted: {} },
+});
+
+// A page's text for search is the app's (doc.Content.PlainText): a line
+// for each block with more than spaces, and a link card's title, else its
+// link.
+Deno.test("a page's text is the app's", () => {
+  const content = pageOf(
+    { id: "a", type: "paragraph", data: { delta: [{ insert: "  " }] } },
+    { id: "b", type: "link_preview", data: { url: "https://go.dev/", title: " " } },
+    { id: "c", type: "file", data: { name: "notes.pdf" } },
+    { id: "d", type: "diagram", data: { source: "graph TD", formula: "x" } },
+    { id: "e", type: "math_equation", data: { formula: "e=mc^2" } },
+    { id: "f", type: "image", data: { url: "https://e.com/a.png", alt: "A" } },
+  );
+  assertEquals(plainText(content), "https://go.dev/\nnotes.pdf\ngraph TD\ne=mc^2");
+});
+
+// A recording's transcript reads as the app's agents read it
+// (agents.TranscriptText): "[m:ss] text", a speaker named, a line of only
+// punctuation joined to the one before, and none when there is none.
+Deno.test("a recording's transcript reads as the app's agents read it", () => {
+  const content = pageOf({ id: "r", type: "recording", data: { recording_id: "rec" } }, {
+    id: "s",
+    type: "recording",
+    data: { recording_id: "none" },
+  });
+  const recordings = new Map([
+    ["rec", {
+      id: "rec",
+      status: "ready",
+      transcript: [
+        { start_ms: 5_000, text: " Hello " },
+        { start_ms: 6_000, text: "?" },
+        { start_ms: 754_000, text: "Next", speaker: "2" },
+        { start_ms: 755_000, text: "  " },
+      ],
+    }],
+    ["none", { id: "none", status: "recording", transcript: [] }],
+  ]);
+  const [rec, none] = pageViews(content, recordings);
+  assertEquals(rec.recording?.transcript, "[0:05] Hello?\n[12:34] Speaker 2: Next");
+  assertEquals(none.recording, { recording_id: "none", title: undefined, duration_ms: undefined, status: "recording" });
+});
+
+// Text whose markers close nowhere, or nest without end, reads in time
+// about its length: each scan's end is found once, and formats nest at
+// most so deep. Read again from each marker, 60 KB of "_a " takes
+// seconds, past what an Edge Function may spend, and links nested 20,000
+// deep run out of stack.
+Deno.test("inline markdown reads in time about its length", () => {
+  const texts = [
+    "_a ".repeat(20_000),
+    "*a ".repeat(20_000),
+    "[a](b".repeat(12_000),
+    "[".repeat(60_000),
+    "``a`".repeat(15_000),
+    "*_[`a".repeat(12_000),
+    "[".repeat(20_000) + "x" + "](u)".repeat(20_000),
+  ];
+  const start = performance.now();
+  for (const text of texts) {
+    const delta = markdownToDelta(text);
+    assert(delta.map((op) => op.insert).join("").length > 0);
+  }
+  // Seconds a text when read in the square of its length; tens of
+  // milliseconds all of them here.
+  assert(performance.now() - start < 3_000, `took ${Math.round(performance.now() - start)} ms`);
+  // Within that, nesting reads as the app reads it; past it, as written.
+  assertEquals(markdownToDelta("[".repeat(10) + "x" + "](u)".repeat(10)), [{ insert: "x", attributes: { href: "u" } }]);
+  assert(deltaToPlain(markdownToDelta("[".repeat(40) + "x" + "](u)".repeat(40))).includes("x](u)"));
 });

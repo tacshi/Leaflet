@@ -1,4 +1,3 @@
--- Four rules a fourth review found loose:
 -- * A comment's author could delete it outright (comments_delete), and its
 --   replies, everyone's, went with it (parent_comment_id cascades), past
 --   comments_guard, which keeps others' comments from all but the page's

@@ -40,7 +40,7 @@ func TestCodeBlocks(t *testing.T) {
 		t.Errorf("view %v", v)
 	}
 	// A fence longer than the backticks in the code.
-	if md := PageMarkdown("", c, nil); md != "````go\n"+code+"\n````\n" {
+	if md := PageMarkdown("", c, MarkdownOptions{}); md != "````go\n"+code+"\n````\n" {
 		t.Errorf("markdown %q", md)
 	}
 	if !strings.Contains(c.PlainText(), "Println") {

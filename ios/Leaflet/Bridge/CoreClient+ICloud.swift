@@ -18,7 +18,7 @@ extension CoreClient {
     }
 
     /// stopWatchingICloud stops watching the folder as the app goes to
-    /// the background, where a file presenter must not stay; Start
-    /// watches it again.
-    func stopWatchingICloud() { platform.watchICloud(false) }
+    /// the background, where a file presenter must not stay, until start
+    /// watches it again: a watch the core asks for meanwhile waits.
+    func stopWatchingICloud() { platform.setInFront(false) }
 }

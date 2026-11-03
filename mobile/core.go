@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"leaflet/internal/agents"
 	"leaflet/internal/core"
@@ -41,9 +43,23 @@ type Core struct {
 	// only on q.
 	micTesting bool
 	micHeard   string
+	// recSent is the recording's state last told the app, but its time,
+	// and levelsSent its levels; touched only on q (tellRecording).
+	recSent    string
+	levelsSent []float64
+	// cancels are the calls running that the app may give up on, by the
+	// token it gave each, and cancelled the tokens it gave up on before
+	// their calls began (Cancel).
+	cancelMu  sync.Mutex
+	cancels   map[int64]context.CancelFunc
+	cancelled map[int64]bool
 	// linkAsked are the links whose pages were asked for their link
 	// cards' info this run; touched only on q.
 	linkAsked map[string]bool
+	// settled are the runs whose Undo no longer shows, by page, as a
+	// version restored since put the page back to before or after them,
+	// until the page's runs change again; touched only on q.
+	settled map[string]string
 }
 
 // config is how the app opens the core, as JSON.
@@ -85,6 +101,7 @@ func Open(settings string, platform Platform, ev Events) (_ *Core, err error) {
 		pages:     map[string]*openPage{},
 		cards:     map[string]doc.Position{},
 		linkAsked: map[string]bool{},
+		settled:   map[string]string{},
 	}
 	var locale func() string
 	if cfg.Locale != "" {
@@ -153,6 +170,50 @@ func (c *Core) Start() {
 	c.q.do(c.core.Start)
 }
 
+// cancellable is the context of a call the app may give up on, by token
+// (Cancel; 0 for one it won't), which ends after d at the latest; done
+// ends it.
+func (c *Core) cancellable(token int64, d time.Duration) (ctx context.Context, done func()) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	if token == 0 {
+		return ctx, cancel
+	}
+	c.cancelMu.Lock()
+	defer c.cancelMu.Unlock()
+	if c.cancelled[token] {
+		delete(c.cancelled, token)
+		cancel()
+		return ctx, cancel
+	}
+	if c.cancels == nil {
+		c.cancels = map[int64]context.CancelFunc{}
+	}
+	c.cancels[token] = cancel
+	return ctx, func() {
+		c.cancelMu.Lock()
+		delete(c.cancels, token)
+		c.cancelMu.Unlock()
+		cancel()
+	}
+}
+
+// Cancel gives up on the call the app gave token, as a picture's download
+// whose page closed: it returns at once, with an error.
+func (c *Core) Cancel(token int64) {
+	defer catch(nil)
+	c.cancelMu.Lock()
+	defer c.cancelMu.Unlock()
+	if cancel := c.cancels[token]; cancel != nil {
+		cancel()
+		return
+	}
+	// Given up on before it began.
+	if c.cancelled == nil {
+		c.cancelled = map[int64]bool{}
+	}
+	c.cancelled[token] = true
+}
+
 // Stop stops the sync loop. A pass running, the loop's or SyncNow's, is
 // cut short; the changes it didn't send go on the next.
 func (c *Core) Stop() {
@@ -208,11 +269,11 @@ func (c *Core) Status() (_ string, err error) {
 type host struct{ c *Core }
 
 // Update runs fn on the core's queue, where the hub changes its state,
-// and tells the app it changed.
-func (h host) Update(fn func()) {
+// and tells the app the page's changed.
+func (h host) Update(pageID string, fn func()) {
 	h.c.q.post(func() {
 		fn()
-		h.c.ev.agentsChanged()
+		h.c.ev.agentsChanged(pageID)
 	})
 }
 
@@ -239,4 +300,8 @@ func (h host) FlushPage(ctx context.Context, pageID string) error {
 
 func (h host) SyncNow() { h.c.core.Sync.Kick() }
 
-func (h host) Tint(pageID string, ids []string) { h.c.ev.tint(pageID, ids) }
+func (h host) Tint(pageID string, ids []string) {
+	// A run that edits, or is undone or redone, is the one to undo next.
+	h.c.q.post(func() { delete(h.c.settled, pageID) })
+	h.c.ev.tint(pageID, ids)
+}

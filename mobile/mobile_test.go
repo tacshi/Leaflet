@@ -88,8 +88,9 @@ type fakeEvents struct {
 func (e *fakeEvents) Changed(table, pageID string)           {}
 func (e *fakeEvents) SyncState(running bool, failure string) {}
 func (e *fakeEvents) Tint(string, string)                    {}
-func (e *fakeEvents) AgentsChanged()                         {}
+func (e *fakeEvents) AgentsChanged(string)                   {}
 func (e *fakeEvents) RecordingChanged(string)                {}
+func (e *fakeEvents) RecordingLevels(string)                 {}
 
 // PageSaving drops what a test without a channel for it, or not waiting
 // on it, says.
@@ -595,6 +596,21 @@ func TestCommentsAndAgents(t *testing.T) {
 	if len(threads[0].Replies) != 1 || !threads[0].Root.Resolved {
 		t.Fatalf("after a reply and resolving %+v", threads[0])
 	}
+	if !threads[0].MayResolve || !threads[0].Root.MayDelete || !threads[0].Replies[0].MayDelete {
+		t.Fatalf("the user's own thread %+v", threads[0])
+	}
+	// The first comment deleted stays for its reply, without its words.
+	if err := c.DeleteComment(threads[0].Root.ID); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = c.Threads(row.ID)
+	if strings.Contains(raw, "Is this right?") || strings.Contains(raw, "the plan") {
+		t.Fatalf("a deleted comment's words are listed: %s", raw)
+	}
+	_ = json.Unmarshal([]byte(raw), &threads)
+	if len(threads) != 1 || !threads[0].Root.Deleted || threads[0].Root.MayDelete || len(threads[0].Replies) != 1 {
+		t.Fatalf("after deleting the first comment %+v", threads)
+	}
 
 	// No agent until a provider is added; a local one is kept here.
 	raw, _ = c.AgentState(row.ID)
@@ -763,5 +779,49 @@ func TestPlainCopy(t *testing.T) {
 	}
 	if _, err := c.PlainCopy("not json"); err == nil {
 		t.Error("copied blocks that are not JSON")
+	}
+}
+
+// A page whose folder is gone, as another device deleted the folder while
+// this one moved the page into it, is listed at the top level, as the
+// desktop shows it: the sidebar shows no page with no place.
+func TestPageOfAFolderGoneIsAtTheTop(t *testing.T) {
+	c, _ := open(t)
+	p := create(t, c, `{"title":"Notes"}`)
+	if _, err := c.core.Store.DB().Exec(`UPDATE pages SET folder_id = 'gone' WHERE id = ?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.Library()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lib library
+	_ = json.Unmarshal([]byte(raw), &lib)
+	for _, row := range lib.Pages {
+		if row.ID == p.ID && row.FolderID != "" {
+			t.Errorf("listed in folder %q, which is gone", row.FolderID)
+		}
+	}
+}
+
+// Copy puts blocks on the clipboard as their Markdown, which reads back
+// as the blocks.
+func TestCopyText(t *testing.T) {
+	c, _ := open(t)
+	item := func(text string) *doc.Node {
+		n := &doc.Node{ID: doc.NewBlockID(), Type: "bulleted_list"}
+		n.SetDelta(doc.FromMarkdown(text))
+		return n
+	}
+	raw, _ := json.Marshal([]*doc.Node{item("abcd"), item("**efgh**")})
+	got, err := c.CopyText(string(raw))
+	if err != nil || got != "- abcd\n- **efgh**" {
+		t.Fatalf("copied %q, %v", got, err)
+	}
+	if back := doc.ParseLines(got); len(back) != 2 || back[1].Type != "bulleted_list" || !back[1].Delta()[0].Attrs.Bold {
+		t.Errorf("read back %+v", back)
+	}
+	if _, err := c.CopyText("not json"); err == nil {
+		t.Error("copied what isn't blocks")
 	}
 }

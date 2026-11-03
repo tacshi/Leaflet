@@ -25,7 +25,8 @@
 # keep MyGo's names, leaflet-<version>-<arch>.dmg (leaflet-<version>.dmg
 # for universal) and leaflet-setup-<version>-<arch>.exe, by which
 # SHA256SUMS lists them and install.ps1 finds its installer. Installed
-# copies see the update once the draft is published.
+# copies see the update once the draft is published. A release that is
+# published already is refused: its files are what installed copies took.
 #
 # Signs updates with MYGO_UPDATER_PRIVATE_KEY, else the key in the file
 # LEAFLET_UPDATE_KEY, by default
@@ -161,7 +162,7 @@ if $MAC; then
 		command -v "$tool" >/dev/null 2>&1 || die "needs $tool"
 	done
 	# Before the long builds: the Mac apps ship leaflet-speech.
-	why="$(speech_toolchain)" || die "the Mac apps ship leaflet-speech, which can't be built here: $why"
+	check_speech
 	DEVELOPER_ID_APPLICATION="$(signing_identity)"
 	BUILD_ARGS+=(-sign "$DEVELOPER_ID_APPLICATION")
 	if $NOTARIZE; then
@@ -187,8 +188,12 @@ if $WIN; then
 fi
 load_update_key
 # Uploaded here after the checks below, not by mygo build -upload, which
-# uploads as it finishes.
-if $UPLOAD; then check_gh; fi
+# uploads as it finishes. A published release is refused before the long
+# builds, and again as they are uploaded.
+if $UPLOAD; then
+	check_gh
+	check_draft "$VERSION"
+fi
 
 # The version, the changelog, notarization and the Windows certificate go
 # into mygo.json for this build only: notarizing would fail the ad hoc

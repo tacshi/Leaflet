@@ -32,15 +32,22 @@ func IsLocalEndpoint(baseURL string) bool { return endpoint.IsLocal(baseURL) }
 // TestEndpoint tries an OpenAI-compatible endpoint with a second of
 // silence, as Settings does on the desktop and the phone.
 func TestEndpoint(ctx context.Context, baseURL, model, apiKey string) error {
-	_, err := TranscribeEndpoint(ctx, baseURL, model, WavFromPCM(make([]byte, 2*SampleRate)), apiKey, "auto")
+	wav := WavFromPCM(make([]byte, 2*SampleRate))
+	_, err := TranscribeEndpoint(ctx, baseURL, model, bytes.NewReader(wav), int64(len(wav)), apiKey, "auto")
 	return err
 }
 
-// TranscribeEndpoint transcribes audio with an OpenAI-style
-// /audio/transcriptions endpoint (OpenAI, DashScope, a self-hosted server).
-func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, apiKey, language string) ([]store.Segment, error) {
-	var body bytes.Buffer
-	w := multipart.NewWriter(&body)
+// TranscribeEndpoint transcribes size bytes of WAV audio from wav with an
+// OpenAI-style /audio/transcriptions endpoint (OpenAI, DashScope, a
+// self-hosted server). The audio goes into the request as it is read: a
+// long recording is never all in memory, as it would be twice over in a
+// form built first.
+func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav io.Reader, size int64, apiKey, language string) ([]store.Segment, error) {
+	// The form's fields and the file's header, then the audio, then the
+	// form's end: its length is known before the audio is read, for the
+	// servers that take no body of unknown length.
+	var form bytes.Buffer
+	w := multipart.NewWriter(&form)
 	if err := w.WriteField("model", model); err != nil {
 		return nil, err
 	}
@@ -52,22 +59,22 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, 
 			return nil, err
 		}
 	}
-	part, err := w.CreateFormFile("file", "recording.wav")
-	if err != nil {
+	if _, err := w.CreateFormFile("file", "recording.wav"); err != nil {
 		return nil, err
 	}
-	if _, err := part.Write(wav); err != nil {
-		return nil, err
-	}
+	head := form.Len()
 	if err := w.Close(); err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(ctx, transcribeWait(len(wav)))
+	tail := form.Bytes()[head:]
+	body := io.MultiReader(bytes.NewReader(form.Bytes()[:head]), io.LimitReader(wav, size), bytes.NewReader(tail))
+	ctx, cancel := context.WithTimeout(ctx, transcribeWait(size))
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", endpoint.NormalizeBaseURL(baseURL)+"/audio/transcriptions", &body)
+	req, err := http.NewRequestWithContext(ctx, "POST", endpoint.NormalizeBaseURL(baseURL)+"/audio/transcriptions", body)
 	if err != nil {
 		return nil, err
 	}
+	req.ContentLength = int64(head) + size + int64(len(tail))
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	if apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+apiKey)
@@ -115,7 +122,7 @@ func TranscribeEndpoint(ctx context.Context, baseURL, model string, wav []byte, 
 // transcribeWait is how long an endpoint gets to transcribe size bytes of
 // the app's WAV (2 bytes a sample): five minutes, and twice the audio's
 // length more, as a server on a CPU can take longer than the audio lasts.
-func transcribeWait(size int) time.Duration {
+func transcribeWait(size int64) time.Duration {
 	return 5*time.Minute + 2*time.Duration(size/(2*SampleRate))*time.Second
 }
 
@@ -153,6 +160,27 @@ func LocalSonioxKey() string {
 	return string(k)
 }
 
+// EndpointKey is the key kept in this device's keychain for a speech
+// endpoint on this machine or network; "" when there is none.
+func EndpointKey() string {
+	k, err := keychain.Get("stt.endpoint.key")
+	if err != nil {
+		return ""
+	}
+	return string(k)
+}
+
+// SetEndpointKey keeps the endpoint's key in the keychain, or removes it.
+func SetEndpointKey(key string) error {
+	if key == "" {
+		if err := keychain.Delete("stt.endpoint.key"); !errors.Is(err, keychain.ErrNotFound) {
+			return err
+		}
+		return nil
+	}
+	return keychain.Set("stt.endpoint.key", []byte(key))
+}
+
 // SetLocalSonioxKey keeps a Soniox key in the keychain, or removes it.
 func SetLocalSonioxKey(key string) error {
 	if key == "" {
@@ -173,8 +201,9 @@ type Token struct {
 	Speaker any    `json:"speaker"`
 }
 
-// Soniox streams audio to Soniox's real-time API with a short-lived key
-// the server mints, so the user's key never reaches this device.
+// Soniox streams audio to Soniox's real-time API, with the key kept on
+// this device or else a short-lived one the server mints from the user's
+// key, which then never reaches the device.
 type Soniox struct {
 	conn    *websocket.Conn
 	mu      sync.Mutex
@@ -244,6 +273,13 @@ const maxQueued = 600
 
 // errBehind is a stream that could not keep up with the audio.
 var errBehind = errors.New("the connection could not keep up")
+
+// errNoEnd is a stream whose last words never came once it was finished.
+var errNoEnd = errors.New("the last words never came")
+
+// finishWait is how long Finish waits for the audio queued to go, and then
+// for the last words. Tests shorten it.
+var finishWait = 15 * time.Second
 
 // newSoniox reads, writes and keeps alive a stream that has its
 // configuration.
@@ -418,10 +454,14 @@ func (s *Soniox) Close() {
 // Finish ends the stream and waits for the last final words.
 func (s *Soniox) Finish() ([]store.Segment, error) {
 	// The audio queued goes first, as long as the connection takes it.
+	// What it could not take is in the recording's audio, not the
+	// transcript: the stream counts as lost, and the recording, its words
+	// kept, is to transcribe again.
 	s.endQueue()
 	select {
 	case <-s.written:
-	case <-time.After(15 * time.Second):
+	case <-time.After(finishWait):
+		s.lose(errBehind)
 	}
 	s.wmu.Lock()
 	s.ending.Store(true)
@@ -431,7 +471,13 @@ func (s *Soniox) Finish() ([]store.Segment, error) {
 	s.wmu.Unlock()
 	select {
 	case <-s.done:
-	case <-time.After(15 * time.Second):
+	case <-time.After(finishWait):
+		// Ending, it takes no loss by lose: this one is its own.
+		s.mu.Lock()
+		if s.lost == nil {
+			s.lost = errNoEnd
+		}
+		s.mu.Unlock()
 	}
 	_ = s.conn.Close(websocket.StatusNormalClosure, "")
 	s.mu.Lock()

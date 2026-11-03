@@ -11,6 +11,7 @@ import (
 	"leaflet/internal/editor"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // As an agent asked inline writes on past the window, the page stays
@@ -63,5 +64,63 @@ func TestInlineRunLeavesTheScrollToTheUser(t *testing.T) {
 	tt.Frame()
 	if a.page.scroll.Y != 400 {
 		t.Errorf("the page went to %v from where the user scrolled it", a.page.scroll.Y)
+	}
+}
+
+// An agent's reply in words goes into the page after the block it was
+// asked about, its Markdown read as blocks, or at the end once that block
+// has gone.
+func TestInsertReply(t *testing.T) {
+	a := templatesApp(t)
+	first, second := textNode("First"), textNode("Second")
+	first.ID, second.ID = "b1", "b2"
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{first, second})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.insertReply("b1", "**Note**\n\n- one\n- two")
+	var got []string
+	for _, n := range a.page.editor.Content.Children {
+		got = append(got, n.Type+":"+n.Delta().Plain())
+	}
+	if want := "[paragraph:First paragraph:Note bulleted_list:one bulleted_list:two paragraph:Second]"; fmt.Sprint(got) != want {
+		t.Errorf("blocks %v, want %s", got, want)
+	}
+	a.insertReply("gone", "Last")
+	ch := a.page.editor.Content.Children
+	if last := ch[len(ch)-1]; last.Delta().Plain() != "Last" {
+		t.Errorf("the reply after a block gone went before %q", last.Delta().Plain())
+	}
+}
+
+// Asking inline sends nothing empty. Asked with no agent to run it, the
+// prompt stops working and says why, staying open for that to be read.
+func TestSendInline(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	ip := &inlinePrompt{blockID: "b1", blocks: []string{"b1", "b2"}, quote: "Hello", selection: true, text: "  "}
+	a.dialogs.inline = ip
+	a.sendInline(ip)
+	if ip.working || ip.runID != "" || ip.reply != "" {
+		t.Fatalf("an empty prompt was sent: %+v", ip)
+	}
+	if got := ip.focus(); fmt.Sprint(got) != "[b1 b2]" {
+		t.Errorf("focus %v", got)
+	}
+	ip.text = "Make it shorter"
+	a.sendInline(ip)
+	if ip.working || ip.runID == "" || ip.reply != locales.AgentNoProvider() {
+		t.Errorf("with no agent: working %v, run %q, reply %q", ip.working, ip.runID, ip.reply)
+	}
+	if a.dialogs.inline != ip {
+		t.Error("the prompt closed without its reply read")
 	}
 }

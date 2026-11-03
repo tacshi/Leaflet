@@ -88,18 +88,14 @@ func TestShellQuote(t *testing.T) {
 // longer with the watch already on the app's settings.
 func TestConnectOpensTheInstallLinkAgain(t *testing.T) {
 	was := openInstallLink
-	t.Cleanup(func() {
-		openInstallLink = was
-		external.waiting = ""
-		external.waitUntil.Store(0)
-	})
+	t.Cleanup(func() { openInstallLink = was })
 	var opened []string
 	openInstallLink = func(link string) error { opened = append(opened, link); return nil }
 	a := templatesApp(t)
 	s := agentStatus{app: agentApp{id: "cursor", label: "Cursor"}, installed: true}
-	external.waiting = "cursor"
+	a.external.waiting = "cursor"
 	soon := time.Now().Add(time.Second).UnixNano()
-	external.waitUntil.Store(soon)
+	a.external.waitUntil.Store(soon)
 	dir := t.TempDir()
 	tt := ui.NewTester(func(c *ui.Context) {
 		a.agentRow(c, s, "/Applications/Leaflet.app/Contents/MacOS/Leaflet", dir, false, true)
@@ -112,7 +108,7 @@ func TestConnectOpensTheInstallLinkAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	tt.Frame()
-	if len(opened) != 1 || !strings.HasPrefix(opened[0], "cursor://") || external.waiting != "cursor" || external.waitUntil.Load() <= soon {
-		t.Errorf("opened %q, waiting for %q until %v", opened, external.waiting, time.Unix(0, external.waitUntil.Load()))
+	if len(opened) != 1 || !strings.HasPrefix(opened[0], "cursor://") || a.external.waiting != "cursor" || a.external.waitUntil.Load() <= soon {
+		t.Errorf("opened %q, waiting for %q until %v", opened, a.external.waiting, time.Unix(0, a.external.waitUntil.Load()))
 	}
 }

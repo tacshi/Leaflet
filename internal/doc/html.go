@@ -13,7 +13,9 @@ import (
 
 // HTMLOptions are what a page written as HTML gets from the app around it.
 type HTMLOptions struct {
-	// Lang is the page's language, for the html element; "" leaves it out.
+	// Lang is the page's language, for the html element, and that of what
+	// stands for a block the page can't show, as an embed not served; ""
+	// leaves the element's out, and says those in the catalogs' own.
 	Lang string
 	// Head is HTML of the app's own for the head: styles and meta tags.
 	Head string
@@ -347,7 +349,7 @@ func (w htmlWriter) block(n *Node) {
 	case "embed":
 		title := n.Str("title")
 		if title == "" {
-			title = locales.ExportEmbed()
+			title = locales.In(w.opts.Lang).ExportEmbed()
 		}
 		src := ""
 		if w.opts.Embed != nil {
@@ -506,23 +508,23 @@ func (w htmlWriter) recording(n *Node) {
 // short labels that stay on one line.
 const shortCell = 20
 
-// tableCells are a stored table's cells, row by row, as rich text.
+// tableCells are a stored table's cells, row by row, as rich text: those
+// TableCells finds, as every reader of the table shows it.
 func tableCells(n *Node) [][]Delta {
-	rows, cols := TableSize(n)
-	grid := make([][]Delta, rows)
-	for i := range grid {
-		grid[i] = make([]Delta, cols)
-	}
-	for _, cell := range n.Children {
-		c, r := cell.Int("colPosition", -1), cell.Int("rowPosition", -1)
-		if c < 0 || r < 0 || r >= rows || c >= cols {
-			continue
-		}
-		for i, k := range cell.Children {
-			if i > 0 {
-				grid[r][c] = append(grid[r][c], Run{Text: " "})
+	cells := TableCells(n)
+	grid := make([][]Delta, len(cells))
+	for r, row := range cells {
+		grid[r] = make([]Delta, len(row))
+		for c, cell := range row {
+			if cell == nil {
+				continue
 			}
-			grid[r][c] = append(grid[r][c], k.Delta()...)
+			for i, k := range cell.Children {
+				if i > 0 {
+					grid[r][c] = append(grid[r][c], Run{Text: " "})
+				}
+				grid[r][c] = append(grid[r][c], k.Delta()...)
+			}
 		}
 	}
 	return grid

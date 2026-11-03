@@ -2,11 +2,13 @@ package mobile
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // fakeMic is the app's microphone, one for all recordings: on at once,
@@ -128,7 +131,7 @@ func TestRecordingKeepsAudioWithoutAnEngine(t *testing.T) {
 	if rec.SttProvider != "" {
 		t.Fatalf("recording %+v", rec)
 	}
-	path, err := c.RecordingAudio(id)
+	path, err := c.RecordingAudio(id, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,5 +365,103 @@ func TestTestEndpointSendsASecond(t *testing.T) {
 	}
 	if n := <-sent; n != 44+2*recording.SampleRate {
 		t.Errorf("sent %d bytes", n)
+	}
+}
+
+// recordingEvents keeps what the core tells the app of the recording.
+type recordingEvents struct {
+	fakeEvents
+	states, levels chan string
+}
+
+func (e *recordingEvents) RecordingChanged(s string) { e.states <- s }
+func (e *recordingEvents) RecordingLevels(l string)  { e.levels <- l }
+
+// The recording's state goes to the app as it changes, its levels alone:
+// told again with nothing new, it goes nowhere.
+func TestRecordingToldAsItChanges(t *testing.T) {
+	c, ev := open(t)
+	re := &recordingEvents{fakeEvents: *ev, states: make(chan string, 8), levels: make(chan string, 8)}
+	c.ev.q.do(func() { c.ev.to = re })
+	c.q.do(func() {
+		st := &c.core.Rec.State
+		st.Active, st.ID, st.Levels = true, "r1", []float64{0.1}
+		c.tellRecording()
+		c.tellRecording()
+		st.Levels = []float64{0.1, 0.2}
+		c.tellRecording()
+		st.LiveText = "Hello"
+		c.tellRecording()
+	})
+	c.ev.q.do(func() {})
+	if n := len(re.states); n != 2 {
+		t.Errorf("%d states told, want the first and the words'", n)
+	}
+	if n := len(re.levels); n != 2 {
+		t.Errorf("%d levels told, want 2", n)
+	}
+	<-re.states
+	var last recordingState
+	if err := json.Unmarshal([]byte(<-re.states), &last); err != nil || last.LiveText != "Hello" || len(last.Levels) != 0 {
+		t.Errorf("then %+v, %v", last, err)
+	}
+	if l := <-re.levels; l != "[0.1]" {
+		t.Errorf("levels %s", l)
+	}
+}
+
+// stuckTranscriber is the device's engine stuck, as a speech model that
+// stops answering: Finish and File return only once released.
+type stuckTranscriber struct {
+	release chan struct{}
+	closed  chan string
+}
+
+func (s *stuckTranscriber) Start(id, language string, sink *TranscriptSink) error { return nil }
+func (s *stuckTranscriber) Send(id string, pcm []byte)                            {}
+func (s *stuckTranscriber) Close(id string)                                       { s.closed <- id }
+
+func (s *stuckTranscriber) Finish(id string) (string, error) {
+	<-s.release
+	return "[]", nil
+}
+
+func (s *stuckTranscriber) File(path, language string) (string, error) {
+	<-s.release
+	return "[]", nil
+}
+
+// The device's engine stuck is given up on once the audio's length and
+// onDeviceSlack have gone by, as the Mac's speech helper is: the
+// transcription fails saying so, rather than run until the app quits,
+// and a stream is ended.
+func TestStuckEngineIsGivenUpOn(t *testing.T) {
+	slack := onDeviceSlack
+	onDeviceSlack = 50 * time.Millisecond
+	t.Cleanup(func() { onDeviceSlack = slack })
+	tr := &stuckTranscriber{release: make(chan struct{}), closed: make(chan string, 1)}
+	t.Cleanup(func() { close(tr.release) })
+	e := engine{tr}
+
+	s, err := e.Stream("en", func(string) {})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Send(make([]byte, 3200))
+	if _, err := s.Finish(); !errors.Is(err, errStuck) {
+		t.Fatalf("Finish: %v", err)
+	}
+	select {
+	case <-tr.closed:
+	default:
+		t.Error("the stream given up on was not ended")
+	}
+
+	path := filepath.Join(t.TempDir(), "a.wav")
+	if err := os.WriteFile(path, recording.WavFromPCM(make([]byte, 3200)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.File(path, "en"); !errors.Is(err, errStuck) || err.Error() != locales.RecErrOnDeviceStuck() {
+		t.Fatalf("File: %v", err)
 	}
 }

@@ -3,9 +3,11 @@ package recording
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -394,6 +396,60 @@ func TestLastAudioGoesToItsRecording(t *testing.T) {
 	}
 }
 
+// Audio a microphone hands on from a thread of its own while its
+// recording stops, as the desktop's web microphone does, goes in before
+// the file closes, or not at all: the header counts every byte of it.
+func TestLateAudioWhileStoppingGoesInWhole(t *testing.T) {
+	r, st, c := newTestController(t)
+	// The audio and the stop meet at a different moment each time.
+	for range 20 {
+		lateAudioWhileStopping(t, r, st, c)
+	}
+}
+
+func lateAudioWhileStopping(t *testing.T, r *Controller, st *store.Store, c *fakeCapture) {
+	t.Helper()
+	if err := r.Start("p1", store.SttSettings{}, false, func(*doc.Node) {}); err != nil {
+		t.Fatal(err)
+	}
+	id := r.State.ID
+	mic := c.mics[len(c.mics)-1]
+	mic.sink.Started()
+	close(mic.letGo)
+	sent := make(chan struct{})
+	go func() {
+		defer close(sent)
+		for {
+			select {
+			case <-mic.stopped:
+				return
+			default:
+				mic.sink.Chunk([]byte{1, 1})
+			}
+		}
+	}()
+	r.Stop()
+	<-sent
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		rec, _ := st.Recording(id)
+		if rec.Status == "ready" {
+			raw, err := os.ReadFile(rec.LocalPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if size := int(binary.LittleEndian.Uint32(raw[40:])); size != len(raw)-44 {
+				t.Fatalf("the header counts %d bytes of %d", size, len(raw)-44)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("never ready: %+v", rec)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // A recording stopped is transcribing from then on: a Retranscribe
 // before its transcription starts refuses, rather than run beside it.
 func TestStoppedRecordingIsTranscribingAtOnce(t *testing.T) {
@@ -612,6 +668,35 @@ func TestStalledPauses(t *testing.T) {
 	<-mic.stopped
 }
 
+// A recording a stall paused goes on once its microphone is back, as a
+// call ends; one the user paused meanwhile stays paused.
+func TestRecoveredResumesWhatTheStallPaused(t *testing.T) {
+	r, _, c := newTestController(t)
+	if err := r.Start("p1", store.SttSettings{}, false, func(*doc.Node) {}); err != nil {
+		t.Fatal(err)
+	}
+	mic := c.mics[0]
+	mic.sink.Started()
+	mic.sink.Stalled("taken")
+	if !r.State.Paused {
+		t.Fatalf("not paused: %+v", r.State)
+	}
+	mic.sink.Recovered()
+	if r.State.Paused || r.State.Error != "" {
+		t.Errorf("not resumed: %+v", r.State)
+	}
+	mic.sink.Stalled("taken")
+	r.TogglePause() // the user resumes it
+	r.TogglePause() // and pauses it again
+	mic.sink.Recovered()
+	if !r.State.Paused {
+		t.Errorf("the user's pause went: %+v", r.State)
+	}
+	close(mic.letGo)
+	r.Stop()
+	<-mic.stopped
+}
+
 // lostStream is a live stream that ended before Finish, having heard part
 // of the recording.
 type lostStream struct{}
@@ -635,5 +720,51 @@ func TestLostBeforeFinish(t *testing.T) {
 	got, _ := st.Recording(rec.ID)
 	if got.Status != "failed" || !strings.Contains(got.Error, "dropped") || len(got.Transcript) != 1 || r.Transcribing[rec.ID] {
 		t.Errorf("recording %+v, transcribing %v", got, r.Transcribing[rec.ID])
+	}
+}
+
+// Audio still queued when Finish stops waiting for a slow connection, or
+// last words that never come, leave the stream lost: the recording keeps
+// its words and fails, to transcribe again from its audio, rather than
+// counting as whole.
+func TestSonioxFinishTellsWhatItDropped(t *testing.T) {
+	was := finishWait
+	finishWait = 100 * time.Millisecond
+	t.Cleanup(func() { finishWait = was })
+	for _, answers := range []bool{true, false} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			c, err := websocket.Accept(w, req, nil)
+			if err != nil {
+				return
+			}
+			for {
+				_, data, err := c.Read(context.Background())
+				if err != nil {
+					return
+				}
+				if len(data) == 0 && answers {
+					_ = c.Write(context.Background(), websocket.MessageText, []byte(`{"tokens":[],"finished":true}`))
+				}
+			}
+		}))
+		conn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := newSoniox(conn)
+		if answers {
+			// A slow connection: the write under way holds the queue up.
+			s.wmu.Lock()
+			for range 5 {
+				s.Send([]byte{1, 2})
+			}
+			time.AfterFunc(3*finishWait/2, s.wmu.Unlock)
+		}
+		_, _ = s.Finish()
+		want := map[bool]error{true: errBehind, false: errNoEnd}[answers]
+		if got := s.Lost(); got != want {
+			t.Errorf("server answers %v: lost %v, want %v", answers, got, want)
+		}
+		srv.Close()
 	}
 }

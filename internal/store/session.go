@@ -1,7 +1,9 @@
 package store
 
 import (
+	"database/sql"
 	"errors"
+	"log"
 	"strings"
 	"time"
 
@@ -52,7 +54,11 @@ type User struct {
 // in as another account forgets them itself once the user agrees to.
 func (s *Store) LoadSession(user *User) (Session, error) {
 	if user != nil {
-		if prev := s.CachedAccount(); prev != "" && prev != user.ID {
+		prev, _, err := s.Lookup("account")
+		if err != nil {
+			return Session{}, err
+		}
+		if prev != "" && prev != user.ID {
 			if err := s.ForgetSyncedAccount(); err != nil {
 				return Session{}, err
 			}
@@ -60,9 +66,11 @@ func (s *Store) LoadSession(user *User) (Session, error) {
 	}
 	name, hasName := s.Value("profile.name")
 	if user != nil {
-		spaceID, ok := s.Value("space." + user.ID)
+		spaceID, ok, err := s.Lookup("space." + user.ID)
+		if err != nil {
+			return Session{}, err
+		}
 		if !ok {
-			var err error
 			if spaceID, err = s.ensureLocalSpace(user.ID); err != nil {
 				return Session{}, err
 			}
@@ -101,13 +109,20 @@ var ErrNoSpace = errors.New("the space is no longer on this device: Leaflet chan
 // account it started with. It makes nothing, and fails while the app is
 // between accounts and has no space yet.
 func (s *Store) ReloadSession() (Session, error) {
-	acct := s.CachedAccount()
+	acct, _, err := s.Lookup("account")
+	if err != nil {
+		return Session{}, err
+	}
 	spaceID, ok := "", false
 	if acct != "" {
-		spaceID, ok = s.Value("space." + acct)
+		if spaceID, ok, err = s.Lookup("space." + acct); err != nil {
+			return Session{}, err
+		}
 	}
 	if !ok {
-		if spaceID, ok = s.Value("space.local"); !ok {
+		if spaceID, ok, err = s.Lookup("space.local"); err != nil {
+			return Session{}, err
+		} else if !ok {
 			return Session{}, ErrNoSpace
 		}
 	}
@@ -132,56 +147,6 @@ func (s *Store) CachedAccount() string {
 	return id
 }
 
-// ForgetAccount removes the account's pages, and everything synced or
-// waiting to sync with them, from this device, its files and recordings'
-// audio included. Settings and the device's
-// own model connections stay. The next session starts with an empty space,
-// and the device registers anew, as the server's row is the account's.
-func (s *Store) ForgetAccount() error { return s.forgetAccount(false) }
-
-// ErrUnsynced is ForgetSyncedAccount finding changes still to go up.
-var ErrUnsynced = errors.New("changes made on this device have not gone up yet")
-
-// ForgetSyncedAccount is ForgetAccount once every change here has gone up:
-// it removes nothing, and returns ErrUnsynced, while one waits. It checks
-// in the transaction that removes, so a change stored meanwhile, by leaflet
-// mcp too, is never removed with the rest.
-func (s *Store) ForgetSyncedAccount() error { return s.forgetAccount(true) }
-
-func (s *Store) forgetAccount(synced bool) error {
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if synced {
-		var n int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM outbox`).Scan(&n); err != nil {
-			return err
-		}
-		if n > 0 {
-			return ErrUnsynced
-		}
-	}
-	for _, q := range []string{
-		`DELETE FROM spaces`, `DELETE FROM folders`, `DELETE FROM pages`, `DELETE FROM page_contents`,
-		`DELETE FROM comments`, `DELETE FROM recordings`, `DELETE FROM files`, `DELETE FROM ai_jobs`,
-		`DELETE FROM model_providers WHERE is_local = 0`, `DELETE FROM page_history`, `DELETE FROM outbox`,
-		`DELETE FROM conflicts`, `DELETE FROM page_members`, `DELETE FROM peer_contents`, `DELETE FROM row_versions`,
-		`DELETE FROM key_values WHERE key IN ('account', 'profile.name', 'last.page', 'device.id', 'sync.content_waiting', 'sync.own_members_at', 'sync.requeue_waiting', 'sync.moves_waiting')
-			OR key LIKE 'space.%' OR key LIKE 'sync.cursor.%' OR key LIKE 'chat.%' OR key LIKE 'icloud.%' OR key LIKE 'invite.%'`,
-	} {
-		if _, err := tx.Exec(q); err != nil {
-			return err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	s.Notify("*", "")
-	return s.removeCopies()
-}
-
 // hasSpace reports whether a space is on this device.
 func hasSpace(q querier, id string) bool {
 	var n int
@@ -189,17 +154,49 @@ func hasSpace(q querier, id string) bool {
 	return n > 0
 }
 
+// ensureLocalSpace is the space of this device's pages, made the first
+// time (valueOnce): one made by the app and another by leaflet mcp at
+// once would leave the pages of one out of the other's.
 func (s *Store) ensureLocalSpace(owner string) (string, error) {
-	if id, ok := s.Value("space.local"); ok {
-		return id, nil
-	}
-	id := doc.NewRowID()
+	return s.valueOnce("space.local", func(tx *sql.Tx) (string, error) {
+		id := doc.NewRowID()
+		now := time.Now().UnixMilli()
+		_, err := tx.Exec(`INSERT INTO spaces (id, name, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+			id, "My space", owner, now, now)
+		return id, err
+	})
+}
+
+// PutSpace stores a space row.
+func (s *Store) PutSpace(id, name, owner string) error {
 	now := time.Now().UnixMilli()
-	if _, err := s.db.Exec(`INSERT INTO spaces (id, name, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
-		id, "My space", owner, now, now); err != nil {
-		return "", err
+	_, err := s.db.Exec(`INSERT INTO spaces (id, name, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET name = excluded.name, owner_id = excluded.owner_id, updated_at = excluded.updated_at`,
+		id, name, owner, now, now)
+	return err
+}
+
+// MoveSpace moves everything of one space into another, in one
+// transaction, so nothing made meanwhile is left in the space it deletes.
+func (s *Store) MoveSpace(from, to string) error {
+	err := s.inTx(func(tx *sql.Tx) error {
+		for _, q := range []string{
+			`UPDATE pages SET space_id = ? WHERE space_id = ?`,
+			`UPDATE folders SET space_id = ? WHERE space_id = ?`,
+			`UPDATE files SET space_id = ? WHERE space_id = ?`,
+		} {
+			if _, err := tx.Exec(q, to, from); err != nil {
+				return err
+			}
+		}
+		_, err := tx.Exec(`DELETE FROM spaces WHERE id = ?`, from)
+		return err
+	})
+	if err != nil {
+		return err
 	}
-	return id, s.SetValue("space.local", id)
+	s.Notify("*", "")
+	return nil
 }
 
 // SetDisplayName changes the name shown on comments and bylines.
@@ -213,12 +210,14 @@ func (s *Store) SetDisplayName(name string) error {
 	return nil
 }
 
-// DeviceID is a stable ID for this device.
+// DeviceID is a stable ID for this device, made the first time
+// (valueOnce). It is "" while the database cannot be read, never an ID
+// made anew, under which this device would sync as another: a folder of
+// the Leaflet folder in iCloud Drive refuses "" (icloud.DevicePath).
 func (s *Store) DeviceID() string {
-	if id, ok := s.Value("device.id"); ok {
-		return id
+	id, err := s.valueOnce("device.id", func(*sql.Tx) (string, error) { return doc.NewRowID(), nil })
+	if err != nil {
+		log.Printf("store: device ID: %v", err)
 	}
-	id := doc.NewRowID()
-	_ = s.SetValue("device.id", id)
 	return id
 }

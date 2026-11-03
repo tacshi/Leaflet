@@ -44,30 +44,36 @@ func (e *Editor) colored() bool {
 }
 
 // colors are the colors a run takes, MyGo's color picker's swatches, by
-// key, with the names people read; a highlight is one at a quarter of its strength, which text
-// reads through.
+// key, with the names people read; a highlight is one at a quarter of its
+// strength, which text reads through. Text in one shows in dark its dark
+// shade, lighter, which reads on dark paper at 4.5:1 or more, as WCAG's
+// AA asks; the run keeps the color itself.
 var colors = []struct {
-	key, hex string
-	name     func() string
+	key, hex, dark string
+	name           func() string
 }{
-	{"red", "#ef4444", locales.EditorColorRed}, {"orange", "#f97316", locales.EditorColorOrange},
-	{"yellow", "#eab308", locales.EditorColorYellow}, {"green", "#22c55e", locales.EditorColorGreen},
-	{"teal", "#14b8a6", locales.EditorColorTeal}, {"blue", "#3b82f6", locales.EditorColorBlue},
-	{"indigo", "#6366f1", locales.EditorColorIndigo}, {"purple", "#a855f7", locales.EditorColorPurple},
-	{"pink", "#ec4899", locales.EditorColorPink}, {"brown", "#92400e", locales.EditorColorBrown},
-	{"gray", "#71717a", locales.EditorColorGray},
+	{"red", "#ef4444", "#f87171", locales.EditorColorRed}, {"orange", "#f97316", "#fb923c", locales.EditorColorOrange},
+	{"yellow", "#eab308", "#facc15", locales.EditorColorYellow}, {"green", "#22c55e", "#4ade80", locales.EditorColorGreen},
+	{"teal", "#14b8a6", "#2dd4bf", locales.EditorColorTeal}, {"blue", "#3b82f6", "#60a5fa", locales.EditorColorBlue},
+	{"indigo", "#6366f1", "#818cf8", locales.EditorColorIndigo}, {"purple", "#a855f7", "#c084fc", locales.EditorColorPurple},
+	{"pink", "#ec4899", "#f472b6", locales.EditorColorPink}, {"brown", "#92400e", "#b98a5e", locales.EditorColorBrown},
+	{"gray", "#71717a", "#a1a1aa", locales.EditorColorGray},
 }
 
-// BrightColors are the colors text takes but gray and brown, which the
-// app colors other things by, as tags.
-func BrightColors() []ui.Color {
-	var out []ui.Color
+// textColor is how text in a run's color shows in pal: in a dark palette,
+// one of colors in its dark shade, as strong as the run has it; any other
+// color as it is.
+func textColor(hex string, pal *theme.Palette) ui.Color {
+	c := hexColor(hex)
+	if !pal.Dark || c.A == 0 {
+		return c
+	}
 	for _, col := range colors {
-		if col.key != "gray" && col.key != "brown" {
-			out = append(out, ui.Hex(col.hex))
+		if light := ui.Hex(col.hex); light.R == c.R && light.G == c.G && light.B == c.B {
+			return ui.Hex(col.dark).Alpha(float32(c.A) / 255)
 		}
 	}
-	return out
+	return c
 }
 
 // highlightAlpha is the strength of a highlight, in hex.
@@ -79,12 +85,12 @@ const highlightAlpha = "40"
 // takes it away.
 func (e *Editor) colorButton(c *ui.Context, pal *theme.Palette) {
 	attrs := e.selectionAttrs()
-	b := ui.Button(c, "").Label(locales.EditorColor()).Tooltip(locales.EditorColor()).KeepFocus()
+	b := ui.Button(c.Key("color"), "").Label(locales.EditorColor()).Tooltip(locales.EditorColor()).KeepFocus()
 	b.Children(func() {
 		// The text's color: the theme's while it has none of its own.
 		dot := ui.Box(c).Size(12, 12).Radius(999).Background(pal.Text)
 		if attrs.Color != "" {
-			dot.Background(hexColor(attrs.Color))
+			dot.Background(textColor(attrs.Color, pal))
 		}
 		if attrs.Background != "" {
 			dot.Border(2, hexColor(attrs.Background).Alpha(1))
@@ -95,15 +101,17 @@ func (e *Editor) colorButton(c *ui.Context, pal *theme.Palette) {
 	}
 	ui.Popover(c, b, &e.colorOpen, func() {
 		ui.Column(c).Gap(6).Children(func() {
-			e.colorDots(c, pal, "text", locales.EditorColorText(), locales.EditorNoTextColor(), attrs.Color, "", e.SetColor)
-			e.colorDots(c, pal, "highlight", locales.EditorColorHighlight(), locales.EditorNoHighlight(), attrs.Background, highlightAlpha, e.SetHighlight)
+			e.colorDots(c, pal, "text", locales.EditorColorText(), locales.EditorNoTextColor(), attrs.Color, "", textColor, e.SetColor)
+			e.colorDots(c, pal, "highlight", locales.EditorColorHighlight(), locales.EditorNoHighlight(), attrs.Background, highlightAlpha,
+				func(hex string, _ *theme.Palette) ui.Color { return hexColor(hex) }, e.SetHighlight)
 		})
 	})
 }
 
 // colorDots is a row of dots choosing a color, alpha its strength, after
-// one, named none, that takes the color away.
-func (e *Editor) colorDots(c *ui.Context, pal *theme.Palette, key, label, none, value, alpha string, set func(string)) {
+// one, named none, that takes the color away; show is how a color shows.
+func (e *Editor) colorDots(c *ui.Context, pal *theme.Palette, key, label, none, value, alpha string,
+	show func(string, *theme.Palette) ui.Color, set func(string)) {
 	ui.Text(c, label).FontSize(12).FontWeight(600).TextColor(pal.TextMuted)
 	ui.Row(c.Key("dots:" + key)).Gap(6).Children(func() {
 		dot := func(key, name, hex string) {
@@ -111,7 +119,7 @@ func (e *Editor) colorDots(c *ui.Context, pal *theme.Palette, key, label, none, 
 			if hex == "" {
 				d.Border(1.5, pal.Border)
 			} else {
-				d.Background(hexColor(hex))
+				d.Background(show(hex, pal))
 			}
 			if value == hex || hexColor(value) == hexColor(hex) && hex != "" {
 				d.Border(2, pal.Text)

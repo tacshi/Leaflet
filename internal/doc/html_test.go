@@ -181,7 +181,7 @@ func TestTableWithBadSize(t *testing.T) {
 		table.Data["rowsLen"], table.Data["colsLen"] = size[0], size[1]
 		c := &Content{Children: []*Node{table}}
 		_ = PageHTML("T", c, HTMLOptions{})
-		_ = PageMarkdown("T", c, func(string) string { return "" })
+		_ = PageMarkdown("T", c, MarkdownOptions{PageTitle: func(string) string { return "" }})
 		_ = BlockViews(c)
 		rows, cols := TableSize(table)
 		if rows < 0 || rows > 2 || cols < 0 || cols > 2 {

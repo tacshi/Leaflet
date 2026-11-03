@@ -146,6 +146,22 @@ enum LI {
                 "Why a recording could not start: a phone or FaceTime call holds the microphone. Follows 'The microphone did not start: '."
         )
     }
+    static var microphoneTaken: String {
+        String(
+            localized: "another app or a call is using it.", bundle: L.bundle,
+            comment:
+                "Why a recording paused: a call, Siri or another app's audio took the microphone. Follows 'The microphone stopped: '; the recording goes on by itself when it is given back."
+        )
+    }
+    static var microphoneInBackground: String {
+        String(
+            localized:
+                "iOS lets it start again only while Leaflet is open. Open Leaflet, then resume.",
+            bundle: L.bundle,
+            comment:
+                "Why a recording could not go on: iOS refuses to start the microphone again from the background. Follows 'The microphone stopped: '."
+        )
+    }
     static var markDone: String {
         String(
             localized: "Mark as Done", bundle: L.bundle,

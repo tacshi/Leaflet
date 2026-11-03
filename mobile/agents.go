@@ -70,6 +70,10 @@ type agentRun struct {
 	// Answer is the model's answer as far as it has come, while the run
 	// works and has not edited the page.
 	Answer string `json:"answer,omitempty"`
+	// Settled is a run whose Undo no longer shows outside the chat, as
+	// the desktop's run bar hides it: a version restored since put the
+	// page back to before or after it.
+	Settled bool `json:"settled"`
 }
 
 type agentOption struct {
@@ -89,39 +93,35 @@ func (c *Core) AgentState(pageID string) (_ string, err error) {
 		s := c.core.Hub.Session(pageID)
 		out.Messages = []agentMessage{}
 		out.Runs = []agentRun{}
-		if s != nil {
-			out.Running = s.Running
-			for _, m := range s.Messages {
-				out.Messages = append(out.Messages, agentMessage{
-					Mine: m.Mine, Text: m.Text, RunID: m.RunID, Pending: m.Pending, Error: m.Error, AgentName: m.AgentName,
-					Streamed: m.Streamed,
-				})
+		out.Running = s.Running
+		for _, m := range s.Messages {
+			out.Messages = append(out.Messages, agentMessage{
+				Mine: m.Mine, Text: m.Text, RunID: m.RunID, Pending: m.Pending, Error: m.Error, AgentName: m.AgentName,
+				Streamed: m.Streamed,
+			})
+		}
+		for _, r := range s.Runs {
+			edits := make([]string, 0, len(r.Edits))
+			for _, e := range r.Edits {
+				edits = append(edits, e.Summary)
 			}
-			for _, r := range s.Runs {
-				edits := make([]string, 0, len(r.Edits))
-				for _, e := range r.Edits {
-					edits = append(edits, e.Summary)
-				}
-				out.Runs = append(out.Runs, agentRun{
-					ID: r.ID, Surface: r.Surface, AgentName: r.AgentName, Instruction: r.Instruction, Status: r.Status,
-					Undone: r.Undone, Error: r.Error, Edits: edits, BlockIDs: r.BlockIDs(), Summary: agents.Describe(r),
-					Stoppable: r.Stoppable(), Answer: r.Answer,
-				})
-			}
+			out.Runs = append(out.Runs, agentRun{
+				ID: r.ID, Surface: r.Surface, AgentName: r.AgentName, Instruction: r.Instruction, Status: r.Status,
+				Undone: r.Undone, Error: r.Error, Edits: edits, BlockIDs: r.BlockIDs(), Summary: agents.Describe(r),
+				Stoppable: r.Stoppable(), Answer: r.Answer, Settled: c.settled[pageID] == r.ID,
+			})
 		}
 		out.Options = c.options()
 		out.Available = c.core.Hub.Available()
 		if o, err := c.core.Hub.Resolve(nil); err == nil {
 			out.DefaultAgent = &agentChoice{ProviderID: o.Provider.ID, Model: o.Model}
 		}
-		if s != nil {
-			// The one picked shows as picked even while it can't run, as
-			// offline.
-			if o, err := c.core.Hub.Resolve(s.Selected); err == nil {
-				out.Current = &agentChoice{ProviderID: o.Provider.ID, Model: o.Model}
-			} else if s.Selected != nil {
-				out.Current = &agentChoice{ProviderID: s.Selected.ProviderID, Model: s.Selected.Model}
-			}
+		// The one picked shows as picked even while it can't run, as
+		// offline.
+		if o, err := c.core.Hub.Resolve(s.Selected); err == nil {
+			out.Current = &agentChoice{ProviderID: o.Provider.ID, Model: o.Model}
+		} else if s.Selected != nil {
+			out.Current = &agentChoice{ProviderID: s.Selected.ProviderID, Model: s.Selected.Model}
 		}
 	})
 	return encode(out)
@@ -144,7 +144,7 @@ func (c *Core) SelectAgent(pageID, providerID, model string) {
 	c.q.do(func() {
 		c.core.Hub.Session(pageID).Selected = &store.ModelChoice{ProviderID: providerID, Model: model}
 	})
-	c.ev.agentsChanged()
+	c.ev.agentsChanged(pageID)
 }
 
 // Chat sends a message to the page's agent chat, about the blocks in
@@ -210,6 +210,23 @@ func (c *Core) UndoRun(pageID, runID string) (err error) {
 	return nil
 }
 
+// ReplyBlocks returns a run's answer in words as the blocks of its
+// Markdown, a JSON array of nodes, for the page's editor to put after the
+// block it was asked about, as the desktop's Insert does, as one step to
+// undo. A run that edited the page, or has no answer, gives none.
+func (c *Core) ReplyBlocks(pageID, runID string) (_ string, err error) {
+	defer catch(&err)
+	nodes := []*doc.Node{}
+	c.q.do(func() {
+		run := c.core.Hub.Session(pageID).Run(runID)
+		if run == nil || run.Error != "" || run.Reply == "" || len(run.Ops) > 0 {
+			return
+		}
+		nodes = doc.MarkdownBlocks(run.Reply)
+	})
+	return encode(nodes)
+}
+
 // RedoRun puts an undone run's edits back. Edits it can't put back leave
 // the run undone, and it fails saying why.
 func (c *Core) RedoRun(pageID, runID string) (err error) {
@@ -247,25 +264,58 @@ type commentJSON struct {
 	Resolved   bool   `json:"resolved"`
 	// CreatedAt is in milliseconds since 1970.
 	CreatedAt int64 `json:"created_at"`
+	// Deleted is a first comment deleted, kept for the replies under it:
+	// its words are gone, as the desktop says "Comment deleted".
+	Deleted bool `json:"deleted,omitempty"`
+	// MayDelete is whether the user may delete it, as the server lets
+	// them: their own, or a guest's on a page of theirs.
+	MayDelete bool `json:"may_delete"`
 }
 
 type threadJSON struct {
 	Root    commentJSON   `json:"root"`
 	Replies []commentJSON `json:"replies"`
+	// MayResolve is whether the user may resolve or reopen the thread, as
+	// the server lets them: its author, or someone who may edit the page.
+	// Another's change would never go up.
+	MayResolve bool `json:"may_resolve"`
 }
 
-func commentOf(m store.Comment) commentJSON {
-	return commentJSON{
+// commentOf is m as Threads lists it to uid, on a page of theirs or not.
+func commentOf(m store.Comment, uid string, owns bool) commentJSON {
+	j := commentJSON{
 		ID: m.ID, BlockID: m.BlockID, AuthorKind: m.AuthorKind, AuthorName: m.AuthorName, Body: m.Body,
 		Quote: m.Quote, Resolved: m.Resolved, CreatedAt: millis(m.CreatedAt),
 	}
+	if !m.DeletedAt.IsZero() {
+		j.Deleted, j.Body, j.Quote = true, "", ""
+		return j
+	}
+	j.MayDelete = mine(m, uid) || m.AuthorKind == "guest" && owns
+	return j
+}
+
+// mine reports whether a comment is uid's own.
+func mine(m store.Comment, uid string) bool {
+	return m.AuthorKind == "user" && (m.AuthorID == "" || m.AuthorID == uid)
 }
 
 // Threads returns a page's comment threads, as JSON.
 func (c *Core) Threads(pageID string) (_ string, err error) {
 	defer catch(&err)
 	var ts []store.Thread
-	c.q.do(func() { ts, err = c.core.Store.Threads(pageID) })
+	var uid string
+	var owns, canEdit bool
+	c.q.do(func() {
+		if ts, err = c.core.Store.Threads(pageID); err != nil {
+			return
+		}
+		sess := c.core.Store.Session()
+		uid = sess.UserID
+		p, perr := c.core.Store.Page(pageID)
+		owns = perr == nil && p.SpaceID == sess.SpaceID
+		canEdit = c.canEdit(pageID)
+	})
 	if err != nil {
 		return "", err
 	}
@@ -273,9 +323,9 @@ func (c *Core) Threads(pageID string) (_ string, err error) {
 	for _, t := range ts {
 		replies := make([]commentJSON, 0, len(t.Replies))
 		for _, r := range t.Replies {
-			replies = append(replies, commentOf(r))
+			replies = append(replies, commentOf(r, uid, owns))
 		}
-		out = append(out, threadJSON{Root: commentOf(t.Root), Replies: replies})
+		out = append(out, threadJSON{Root: commentOf(t.Root, uid, owns), Replies: replies, MayResolve: canEdit || mine(t.Root, uid)})
 	}
 	return encode(out)
 }
@@ -308,17 +358,17 @@ func (c *Core) AddComment(pageID, blockID, body, parentID, quote string) (err er
 // the default for @agent. A run that fails says why in a notice, as the
 // desktop's toast.
 func (c *Core) agentInComment(pageID string, root store.Comment, body string) {
-	agent, err := core.CommentAgent(c.core.Hub, body)
+	agent, mentioned, err := core.CommentAgent(c.core.Hub, body)
 	if err != nil {
 		c.ev.notice(err.Error())
 		return
 	}
-	if agent == nil {
+	if !mentioned {
 		return
 	}
 	c.core.Hub.Start(pageID, agents.RunOptions{
 		Surface: "comment", Instruction: body, Focus: []string{root.BlockID}, Selection: root.Quote,
-		CommentID: root.ID, Agent: agent,
+		CommentID: root.ID, Agent: &agent,
 		Done: func(r *agents.Run) {
 			if r.Error != "" {
 				c.ev.notice(r.AgentName + ": " + r.Error)

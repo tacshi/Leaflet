@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"leaflet/internal/store"
 )
@@ -154,7 +155,7 @@ func TestDiscardLeavesTheSession(t *testing.T) {
 	var loggedOut []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/auth/v1/logout" {
-			loggedOut = append(loggedOut, r.Header.Get("Authorization"))
+			loggedOut = append(loggedOut, r.Header.Get("Authorization")+" "+r.URL.Query().Get("scope"))
 		}
 	}))
 	defer srv.Close()
@@ -168,7 +169,29 @@ func TestDiscardLeavesTheSession(t *testing.T) {
 	if !c.SignedIn() || c.sess.AccessToken != "new" {
 		t.Error("the session in use went")
 	}
-	if len(loggedOut) != 1 || loggedOut[0] != "Bearer old" {
+	if len(loggedOut) != 1 || loggedOut[0] != "Bearer old local" {
 		t.Errorf("signed out %v", loggedOut)
+	}
+}
+
+// Signing out ends this device's session only: Auth's logout would end
+// the others too, as a revoked device's sign-out would every device's.
+func TestSignOutEndsOnlyThisSession(t *testing.T) {
+	var scopes []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auth/v1/logout" {
+			scopes = append(scopes, r.URL.Query().Get("scope"))
+		}
+	}))
+	defer srv.Close()
+	c := New(Settings{URL: srv.URL, AnonKey: "k"}, nil)
+	c.noKeychain = true
+	c.keep(&session{AccessToken: "t", RefreshToken: "r", ExpiresAt: time.Now().Add(time.Hour).Unix(), User: &authUser{ID: "u"}})
+	c.SignOut()
+	if c.SignedIn() {
+		t.Error("still signed in")
+	}
+	if len(scopes) != 1 || scopes[0] != "local" {
+		t.Errorf("logout scopes %q, want [local]", scopes)
 	}
 }

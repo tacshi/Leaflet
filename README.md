@@ -247,7 +247,8 @@ makensis`), and every release needs the update signing key;
 `scripts/build-release.sh --help` explains each one. Uploads refuse
 unsigned Windows installers, and macOS ones built `--skip-notarize`, unless
 `--allow-unsigned` (`-AllowUnsigned`) or `LEAFLET_ALLOW_UNSIGNED=1` says
-to publish them anyway.
+to publish them anyway, and never go to a release that is published
+already.
 
 To build one server in, as `SUPABASE_URL` and `SUPABASE_ANON_KEY` set one
 for a run, give its URL and Publishable key to the linker through

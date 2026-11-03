@@ -8,12 +8,14 @@ package editor
 import (
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/menu"
+	"leaflet/internal/shortcut"
 )
 
 // Pos is a place in the page: a block and a rune offset in its text. On a
@@ -29,7 +31,9 @@ type MenuItem = menu.Item
 // Trigger is an open / or @ menu: where its character was typed and what
 // was typed after it.
 type Trigger struct {
-	Kind  rune // '/' or '@'
+	// Kind is '/' or '@', the menu its character opens, as typed or one
+	// shortcut.MenuKind takes for it, as "／".
+	Kind  rune
 	ID    string
 	Off   int
 	Query string
@@ -104,6 +108,10 @@ type Editor struct {
 	OnChange func()
 
 	anchor, focus Pos
+	// affinity is the caret's side where its place shows twice, as at the
+	// end of a line that wraps, which is the start of the next: upstream,
+	// it shows after the text before it.
+	affinity ui.TextAffinity
 	// typing holds formats toggled at a collapsed caret.
 	typing    doc.Attrs
 	hasTyping bool
@@ -122,18 +130,23 @@ type Editor struct {
 	runStep  *doc.Content
 	lastEdit time.Time
 	// coalescing is set while typing joins the undo step open, which
-	// began in block coalesceIn.
+	// began in block coalesceIn, and typed is how many characters typing
+	// has put in it.
 	coalescing bool
 	coalesceIn string
+	typed      int
 
 	layouts map[string]*blockLayout
-	// geom is each block's box in the window, for hit-testing; rel is the
-	// same box relative to root, which keeps blocks scrolled out of view
-	// (and so not drawn) where the page has moved them.
-	geom map[string]ui.Rect
-	rel  map[string]ui.Rect
-	// laid is each block's box in the window as the last frame laid it
-	// out, drawn or not: a block never drawn has no geom.
+	// looks are what the text blocks' texts give their layouts (lookOf).
+	looks map[string]*look
+	// rel is each block's box as last drawn, relative to root, the page's
+	// box as last drawn: box puts it in the window, for hit-testing, where
+	// the page has moved it since, as a block scrolled out of view is not
+	// drawn. laid is each block's box in the window as the last frame
+	// laid it out, drawn or not: a block never drawn has no rel. Each
+	// build keeps them, and the layouts and looks, for the blocks it
+	// builds alone.
+	rel     map[string]ui.Rect
 	laid    map[string]ui.Rect
 	root    ui.Rect
 	width   float32
@@ -147,7 +160,10 @@ type Editor struct {
 
 	trigger   *Trigger
 	menuIndex int
+	// menuItems are the choices of the menu open, as the host gave them
+	// for menuFor.
 	menuItems []MenuItem
+	menuFor   Trigger
 	linkOpen  bool
 	linkDraft string
 	// copied is the code block whose code was copied last, at copiedAt.
@@ -180,8 +196,12 @@ type Editor struct {
 	// depth, kept while the blocks build unless a change comes first:
 	// each block asks where it is against the selection and how deep it
 	// is, which walking the page for would make a frame quadratic.
-	order     map[string]int
-	depths    map[string]int
+	order  map[string]int
+	depths map[string]int
+	// building is set while the blocks build: a change made then, as
+	// typing in a table's cell, finds order and depths again for the
+	// blocks after it.
+	building  bool
 	menuBlock string
 	menuAt    Pos
 	// bar is the selection toolbar, kept while the focus is in it or its
@@ -211,7 +231,7 @@ type Editor struct {
 // New returns an editor of content.
 func New(content *doc.Content, host Host) *Editor {
 	e := &Editor{Content: content, Host: host, Size: 17,
-		layouts: map[string]*blockLayout{}, geom: map[string]ui.Rect{}, rel: map[string]ui.Rect{}, laid: map[string]ui.Rect{}, chips: map[string]ui.Rect{}, width: 680}
+		layouts: map[string]*blockLayout{}, looks: map[string]*look{}, rel: map[string]ui.Rect{}, laid: map[string]ui.Rect{}, chips: map[string]ui.Rect{}, width: 680}
 	refill(content)
 	first := e.units()[0]
 	e.anchor, e.focus = Pos{first.ID, 0}, Pos{first.ID, 0}
@@ -357,8 +377,14 @@ func (e *Editor) Caret() Pos { return e.focus }
 
 // place records a block's box as drawn.
 func (e *Editor) place(id string, r ui.Rect) {
-	e.geom[id] = r
 	e.rel[id] = ui.Rect{X: r.X - e.root.X, Y: r.Y - e.root.Y, W: r.W, H: r.H}
+}
+
+// box is a block's box in the window, as last drawn, moved with the page
+// since; false for one not drawn.
+func (e *Editor) box(id string) (ui.Rect, bool) {
+	r, ok := e.rel[id]
+	return ui.Rect{X: e.root.X + r.X, Y: e.root.Y + r.Y, W: r.W, H: r.H}, ok
 }
 
 // FocusBlock is the block the caret is in.
@@ -384,6 +410,7 @@ func (e *Editor) setSelection(anchor, focus Pos) {
 		e.changed()
 	}
 	e.anchor, e.focus = e.clamp(anchor), e.clamp(focus)
+	e.affinity = ui.TextDownstream
 	e.hasTyping = false
 	e.hasDesired = false
 	e.blink = time.Now()
@@ -509,13 +536,17 @@ func (e *Editor) selectedNodes() []*doc.Node {
 	return out
 }
 
+// maxTyped is the most characters typing puts in one step of undo.
+const maxTyped = 40
+
 // pushUndo keeps the page as it is before an edit. Typing in one block
 // within a second and a half joins the step before it, unless the caret
-// was moved in between.
+// was moved in between, up to the end of a word (InsertText) or maxTyped
+// characters: a step takes back a word or so, not all typed in one go.
 func (e *Editor) pushUndo(typing bool) {
 	e.markStep = false
 	now := time.Now()
-	if typing && e.coalescing && e.coalesceIn == e.focus.ID && now.Sub(e.lastEdit) < 1500*time.Millisecond {
+	if typing && e.coalescing && e.coalesceIn == e.focus.ID && now.Sub(e.lastEdit) < 1500*time.Millisecond && e.typed < maxTyped {
 		e.lastEdit = now
 		return
 	}
@@ -527,7 +558,7 @@ func (e *Editor) pushUndo(typing bool) {
 		}
 	}
 	e.redo = nil
-	e.coalescing, e.coalesceIn = typing, e.focus.ID
+	e.coalescing, e.coalesceIn, e.typed = typing, e.focus.ID, 0
 	e.lastEdit = now
 }
 
@@ -543,11 +574,6 @@ func (e *Editor) dropStep() {
 
 // BreakUndo makes the next edit a step of its own.
 func (e *Editor) BreakUndo() { e.coalescing = false }
-
-// CanUndo and CanRedo report whether there are steps to go back or
-// forward, as there are none on a page that has become read-only.
-func (e *Editor) CanUndo() bool { return len(e.undo) > 0 && !e.ReadOnly }
-func (e *Editor) CanRedo() bool { return len(e.redo) > 0 && !e.ReadOnly }
 
 // Undo goes back a step. On a page that has become read-only it changes
 // nothing, as every other edit: the steps kept from before would put back
@@ -622,7 +648,12 @@ func (e *Editor) restore(s snapshot) {
 }
 
 func (e *Editor) changed() {
-	e.order = nil
+	if e.building {
+		e.hid = e.hidden()
+		e.order, e.depths = unitOrder(e.walkUnits(e.hid)), e.blockDepths()
+	} else {
+		e.order = nil
+	}
 	e.blink = time.Now()
 	if e.OnChange != nil {
 		e.OnChange()
@@ -770,12 +801,16 @@ func (e *Editor) updateTrigger() {
 		return
 	}
 	runes := []rune(n.Delta().Plain())
-	if t.Off >= len(runes) || runes[t.Off] != t.Kind {
+	if t.Off >= len(runes) || shortcut.MenuKind(runes[t.Off]) != t.Kind {
 		e.trigger = nil
 		return
 	}
 	q := string(runes[t.Off+1 : min(e.focus.Off, len(runes))])
-	if utf8.RuneCountInString(q) > 40 || (t.Kind == '@' && len(q) > 0 && q[len(q)-1] == ' ' && utf8.RuneCountInString(q) > 24) {
+	// A space right after the "/" or "@" is writing, as "1 / 2" or "a @ b",
+	// not a search: the menu goes, as the iOS editor's does, and Enter
+	// breaks the line.
+	first, _ := utf8.DecodeRuneInString(q)
+	if q != "" && unicode.IsSpace(first) || utf8.RuneCountInString(q) > 40 || (t.Kind == '@' && len(q) > 0 && q[len(q)-1] == ' ' && utf8.RuneCountInString(q) > 24) {
 		e.trigger = nil
 		return
 	}

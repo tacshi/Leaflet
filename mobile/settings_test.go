@@ -203,6 +203,59 @@ func TestResolveConflicts(t *testing.T) {
 	}
 }
 
+// A conflict whose version kept is this device's, the newer, can bring
+// back the other device's: keeping the newer would keep this one's again.
+func TestResolveConflictWithTheOtherDevicesVersion(t *testing.T) {
+	c, _ := open(t)
+	p := create(t, c, `{"title":"Plans"}`)
+	if err := c.editContent(p.ID, func(content *doc.Content) bool {
+		content.Children = []*doc.Node{paragraph("b1", "Mine")}
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UnixMilli()
+	if err := c.core.Store.AddConflict(p.ID, doc.Conflict{BlockID: "b1", Local: paragraph("b1", "Mine"), Remote: paragraph("b1", "Theirs"),
+		LocalEditedAt: now, RemoteEditedAt: now - 1000}); err != nil {
+		t.Fatal(err)
+	}
+	list := conflicts(t, c)
+	if len(list) != 1 || list[0].Kept != "Mine" || !list[0].KeptHere {
+		t.Fatalf("conflicts %+v", list)
+	}
+	if err := c.ResolveConflict(list[0].ID, resolveOtherDevice); err != nil {
+		t.Fatal(err)
+	}
+	if got := texts(content(t, c, p.ID)); !strings.Contains(got, "Theirs") || strings.Contains(got, "Mine") {
+		t.Fatalf("put back %q", got)
+	}
+}
+
+// A conflict on a page the user can no longer edit puts nothing back, and
+// stays to resolve, saying why.
+func TestResolveConflictOnAPageOnlyViewed(t *testing.T) {
+	c, _ := open(t)
+	p := create(t, c, `{"title":"Plans"}`)
+	st := c.core.Store
+	if err := st.AddConflict(p.ID, doc.Conflict{BlockID: "b1", Local: paragraph("b1", "Mine"), Remote: paragraph("b1", "Theirs"),
+		LocalEditedAt: 1, RemoteEditedAt: 2}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`UPDATE pages SET space_id = 'someone-elses' WHERE id = ?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if c.canEdit(p.ID) {
+		t.Skip("the page is still the user's to edit")
+	}
+	list := conflicts(t, c)
+	if err := c.ResolveConflict(list[0].ID, resolveThisDevice); err == nil {
+		t.Error("resolved a conflict it could not put back")
+	}
+	if len(conflicts(t, c)) != 1 {
+		t.Error("the conflict went")
+	}
+}
+
 // An edit says the page is saving, and the save shortly after says it no
 // longer is; a page no one shares has no members.
 func TestPageSavingAndMembers(t *testing.T) {

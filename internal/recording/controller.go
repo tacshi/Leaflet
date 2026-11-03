@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -18,7 +19,6 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/guard"
-	"leaflet/internal/keychain"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -48,6 +48,9 @@ type Controller struct {
 
 	// The recording in progress, read and written on the main thread.
 	State State
+	// stallPaused is the recording in progress paused by its microphone
+	// stalling, which Recovered resumes; on the main thread.
+	stallPaused bool
 
 	mu sync.Mutex
 	// toggling orders the microphone's Pause and Resume, which run off the
@@ -74,6 +77,14 @@ type Controller struct {
 	// the audio it held, by session: it goes to their own file and
 	// stream, though the next recording has started meanwhile.
 	ending map[string]ending
+	// late is held while that audio goes in, taken under mu as its
+	// recording is found ending: Stop takes it to close the file, once the
+	// recording is no longer ending.
+	late sync.Mutex
+	// saving counts, by recording, the work its audio is in: being
+	// recorded, then saved and transcribed until its upload is queued.
+	// Until then no change of the outbox holds it (Saving).
+	saving map[string]int
 	// withText is whether the recording in progress gets a transcript;
 	// without an engine that can run, it keeps only its audio.
 	withText bool
@@ -167,6 +178,10 @@ type Sink struct {
 	// to resume or stop. A microphone that never stalls, as the desktop's,
 	// never calls it.
 	Stalled func(message string)
+	// Recovered says the microphone a stall took is back, as a call ended:
+	// the recording the stall paused goes on, unless the user paused or
+	// resumed it meanwhile.
+	Recovered func()
 }
 
 // OnDevice is the speech-to-text provider that is the device's own
@@ -244,6 +259,37 @@ func NewController(st *store.Store, be *remote.Client) *Controller {
 	return &Controller{st: st, be: be, Transcribing: map[string]bool{}, Finishing: map[string]bool{}}
 }
 
+// Saving counts the recordings whose audio is not safe yet: one being
+// recorded, or stopped and still being saved or transcribed, whose upload
+// the outbox gets only once that ends. Signing out counts them among the
+// changes not uploaded, as removing the account's files would remove
+// their audio. Any goroutine may call it.
+func (r *Controller) Saving() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.saving)
+}
+
+// hold and release mark a recording's audio as in work, for Saving.
+func (r *Controller) hold(id string) {
+	r.mu.Lock()
+	if r.saving == nil {
+		r.saving = map[string]int{}
+	}
+	r.saving[id]++
+	r.mu.Unlock()
+}
+
+func (r *Controller) release(id string) {
+	r.mu.Lock()
+	if r.saving[id] > 1 {
+		r.saving[id]--
+	} else {
+		delete(r.saving, id)
+	}
+	r.mu.Unlock()
+}
+
 // RecoverInterrupted settles recordings that an earlier run left at
 // "recording" or "transcribing", as when the app quit before they were
 // done: nothing finishes them after a restart, and their blocks would say
@@ -278,7 +324,7 @@ func (r *Controller) RecoverInterrupted() {
 		if cutOff {
 			over = ""
 		}
-		updated, err := r.st.SettleRecording(rec.ID, over, func(x *store.Recording) {
+		if _, err := r.st.SettleRecording(rec.ID, over, r.uploads(), func(x *store.Recording) {
 			if duration > 0 {
 				x.DurationMs = duration
 			}
@@ -287,15 +333,8 @@ func (r *Controller) RecoverInterrupted() {
 				return
 			}
 			x.Status, x.Error = "failed", locales.RecErrQuit()
-		})
-		if err != nil {
+		}); err != nil {
 			log.Printf("recording: %v", err)
-			continue
-		}
-		if updated.AudioPath == "" && updated.LocalPath != "" && r.uploads() {
-			if err := r.st.QueueUpload(updated); err != nil {
-				log.Printf("recording: %v", err)
-			}
 		}
 	}
 }
@@ -419,6 +458,8 @@ func (r *Controller) Start(pageID string, stt store.SttSettings, online bool, in
 	insert(&doc.Node{ID: blockID, Type: "recording", Data: map[string]any{
 		"recording_id": rec.ID, "title": locales.RecBlockTitle(time.Now()), "duration_ms": 0,
 	}})
+	// Released by abort, or once Stop has saved it.
+	r.hold(rec.ID)
 	return r.capture(wav, stt, transcribe, State{PageID: pageID, BlockID: blockID, ID: rec.ID})
 }
 
@@ -511,10 +552,11 @@ func (r *Controller) capture(wav *WavWriter, stt store.SttSettings, transcribe b
 		}
 	}
 	m, err := r.input.Start(SampleRate, Sink{
-		Chunk:   func(pcm []byte) { r.chunk(session, pcm) },
-		Started: func() { r.started(session, testFor) },
-		Failed:  func(msg string) { r.failed(session, msg) },
-		Stalled: func(msg string) { r.stalled(session, msg) },
+		Chunk:     func(pcm []byte) { r.chunk(session, pcm) },
+		Started:   func() { r.started(session, testFor) },
+		Failed:    func(msg string) { r.failed(session, msg) },
+		Stalled:   func(msg string) { r.stalled(session, msg) },
+		Recovered: func() { r.recovered(session) },
 	})
 	if err != nil {
 		r.abort()
@@ -651,7 +693,9 @@ const maxEarly = 30 * SampleRate * 2
 func (r *Controller) chunk(session string, pcm []byte) {
 	r.mu.Lock()
 	if e, ok := r.ending[session]; ok {
+		r.late.Lock()
 		r.mu.Unlock()
+		defer r.late.Unlock()
 		r.lateChunk(e, pcm)
 		return
 	}
@@ -707,6 +751,7 @@ const MaxLevels = 400
 // TogglePause pauses or resumes the recording; one still starting has no
 // time running to pause yet.
 func (r *Controller) TogglePause() {
+	r.stallPaused = false
 	r.mu.Lock()
 	if r.resumed.IsZero() {
 		r.mu.Unlock()
@@ -761,7 +806,23 @@ func (r *Controller) stalled(session, msg string) {
 		r.mu.Unlock()
 		if !paused {
 			r.TogglePause()
+			r.stallPaused = true
 		}
+	})
+}
+
+// recovered resumes the recording session a stall paused, its microphone
+// back; one the user paused or resumed since stays as they left it.
+func (r *Controller) recovered(session string) {
+	r.update(func() {
+		r.mu.Lock()
+		same := r.session == session && r.State.Active && r.mic != nil && r.paused
+		r.mu.Unlock()
+		if !same || !r.stallPaused {
+			return
+		}
+		r.State.Error = ""
+		r.TogglePause()
 	})
 }
 
@@ -796,6 +857,7 @@ func (r *Controller) abort() {
 		if _, err := r.st.UpdateRecording(r.State.ID, func(rec *store.Recording) { rec.Status, rec.Error = "failed", msg }); err != nil {
 			log.Printf("recording: %v", err)
 		}
+		r.release(r.State.ID)
 	}
 	r.State.Active, r.State.Starting = false, false
 }
@@ -838,6 +900,11 @@ func (r *Controller) Stop() {
 		}
 	}
 	guard.Go(func() {
+		// Its audio is safe once saved, and transcribed with its upload
+		// queued: Start held it.
+		if st.ID != "" {
+			defer r.release(st.ID)
+		}
 		if m != nil {
 			m.Stop()
 		}
@@ -854,11 +921,14 @@ func (r *Controller) Stop() {
 		var path string
 		var duration time.Duration
 		if wav != nil {
+			// After the audio that found it ending a moment before.
+			r.late.Lock()
 			path = wav.Path
 			duration = time.Duration(wav.DurationMs()) * time.Millisecond
 			if err := wav.Close(); err != nil {
 				log.Printf("recording: %v", err)
 			}
+			r.late.Unlock()
 		}
 		if test != nil {
 			text, err := r.transcribeTest(path, stream, stt, why, st.Error)
@@ -868,13 +938,10 @@ func (r *Controller) Stop() {
 		if !withText {
 			// Audio only: it stays, whatever Keep the audio says, for a
 			// transcript later.
-			rec, err := r.st.UpdateRecording(st.ID, func(rec *store.Recording) {
+			if _, err := r.st.FinishRecording(st.ID, r.uploads(), func(rec *store.Recording) {
 				rec.Status, rec.DurationMs, rec.SttProvider, rec.SttModel = "ready", int(duration.Milliseconds()), "", ""
-			})
-			if err == nil && rec.AudioPath == "" && r.uploads() {
-				if err := r.st.QueueUpload(rec); err != nil {
-					log.Printf("recording: %v", err)
-				}
+			}); err != nil {
+				log.Printf("recording: %v", err)
 			}
 			return
 		}
@@ -919,12 +986,13 @@ func (r *Controller) transcribeTest(path string, stream Stream, stt store.SttSet
 		}
 		err = errors.New(liveErr)
 	default:
-		var audio []byte
-		if audio, err = os.ReadFile(path); err == nil { // #nosec G304 -- the recording's own audio file.
-			key, _ := keychain.Get("stt.endpoint.key")
+		var f *os.File
+		var size int64
+		if f, size, err = openAudio(path); err == nil {
+			defer func() { _ = f.Close() }()
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			segs, err = TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, audio, string(key), stt.Language)
+			segs, err = TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, f, size, EndpointKey(), stt.Language)
 		}
 	}
 	if err != nil {
@@ -971,7 +1039,11 @@ func (r *Controller) Retranscribe(id string, stt store.SttSettings, online bool)
 	}
 	// Set now, not once finish starts, so a second call refuses at once.
 	r.Transcribing[id] = true
-	guard.Go(func() { r.finish(rec, rec.LocalPath, nil, stt) })
+	r.hold(id)
+	guard.Go(func() {
+		defer r.release(id)
+		r.finish(rec, rec.LocalPath, nil, stt)
+	})
 	return nil
 }
 
@@ -991,7 +1063,8 @@ func (r *Controller) finish(rec store.Recording, path string, stream Stream, stt
 	if stream != nil {
 		lost = stream.Lost()
 	}
-	updated, _ := r.st.UpdateRecording(rec.ID, func(x *store.Recording) {
+	// A recording keeps its audio, whatever transcribed it.
+	if _, err := r.st.FinishRecording(rec.ID, r.uploads(), func(x *store.Recording) {
 		if err != nil {
 			x.Status, x.Error = "failed", err.Error()
 			return
@@ -1003,12 +1076,8 @@ func (r *Controller) finish(rec store.Recording, path string, stream Stream, stt
 			return
 		}
 		x.Status, x.Error, x.Transcript = "ready", "", segs
-	})
-	// A recording keeps its audio, whatever transcribed it.
-	if updated.AudioPath == "" && r.uploads() {
-		if err := r.st.QueueUpload(updated); err != nil {
-			log.Printf("recording: %v", err)
-		}
+	}); err != nil && !store.IsNotFound(err) {
+		log.Printf("recording: %v", err)
 	}
 }
 
@@ -1021,14 +1090,34 @@ func (r *Controller) storedAudio(ctx context.Context, rec store.Recording) ([]by
 	return r.Audio(ctx, rec)
 }
 
-// uploadAudio uploads a recording's audio, given as long as it takes over
-// a slow connection (256 kbit/s) and two minutes more: storage transfers
-// have no whole-request timeout of their own, so a stalled one ends here.
-func (r *Controller) uploadAudio(path string, audio []byte) error {
-	wait := 2*time.Minute + time.Duration(len(audio)/(32<<10))*time.Second
+// uploadAudio uploads size bytes of a recording's audio from audio, given
+// as long as it takes over a slow connection (256 kbit/s) and two minutes
+// more: storage transfers have no whole-request timeout of their own, so
+// a stalled one ends here.
+func (r *Controller) uploadAudio(path string, audio io.Reader, size int64) error {
+	wait := 2*time.Minute + time.Duration(size/(32<<10))*time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), wait)
 	defer cancel()
-	return r.be.Upload(ctx, "recordings", path, bytes.NewReader(audio), "audio/wav")
+	return r.be.Upload(ctx, "recordings", path, audio, "audio/wav")
+}
+
+// openAudio opens a recording's audio file at path to read, with its
+// size: it goes up or to an endpoint as it is read, never all in memory,
+// which a recording of hours would take hundreds of megabytes of.
+func openAudio(path string) (*os.File, int64, error) {
+	if path == "" {
+		return nil, 0, errors.New(locales.RecErrAudioMissing())
+	}
+	f, err := os.Open(path) // #nosec G304 -- the recording's own audio file.
+	if err != nil {
+		return nil, 0, err
+	}
+	fi, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, 0, err
+	}
+	return f, fi.Size(), nil
 }
 
 func (r *Controller) transcribe(rec store.Recording, path string, stream Stream, stt store.SttSettings) ([]store.Segment, error) {
@@ -1036,35 +1125,34 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 		return stream.Finish()
 	}
 	ctx := context.Background()
-	readAudio := func() ([]byte, error) {
-		if path == "" {
-			return nil, errors.New(locales.RecErrAudioMissing())
-		}
-		return os.ReadFile(path) // #nosec G304 -- the recording's own audio file.
-	}
 	if stt.Provider == OnDevice {
 		return r.transcribeOnDevice(ctx, rec, path, stt.Language)
 	}
 	if stt.Provider == "openai-compatible" && IsLocalEndpoint(stt.BaseURL) {
-		audio, err := readAudio()
+		f, size, err := openAudio(path)
 		if err != nil && rec.AudioPath != "" {
-			audio, err = r.storedAudio(ctx, rec)
+			audio, err := r.storedAudio(ctx, rec)
+			if err != nil {
+				return nil, err
+			}
+			return TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, bytes.NewReader(audio), int64(len(audio)), EndpointKey(), stt.Language)
 		}
 		if err != nil {
 			return nil, err
 		}
-		key, _ := keychain.Get("stt.endpoint.key")
-		return TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, audio, string(key), stt.Language)
+		defer func() { _ = f.Close() }()
+		return TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, f, size, EndpointKey(), stt.Language)
 	}
 	if !r.be.SignedIn() {
 		return nil, errors.New(locales.RecErrSignIn())
 	}
 	// The server reads the audio from Storage, so it goes up first.
 	if rec.AudioPath == "" {
-		audio, err := readAudio()
+		f, size, err := openAudio(path)
 		if err != nil {
 			return nil, err
 		}
+		defer func() { _ = f.Close() }()
 		up := r.be.UserID() + "/" + rec.ID + ".wav"
 		if _, err := r.be.Upsert(ctx, "recordings", map[string]any{
 			"id": rec.ID, "page_id": rec.PageID, "block_id": rec.BlockID, "status": "transcribing",
@@ -1072,7 +1160,7 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 		}, ""); err != nil {
 			return nil, err
 		}
-		if err := r.uploadAudio(up, audio); err != nil {
+		if err := r.uploadAudio(up, f, size); err != nil {
 			return nil, err
 		}
 		if _, err := r.be.Upsert(ctx, "recordings", map[string]any{"id": rec.ID, "page_id": rec.PageID, "block_id": rec.BlockID, "audio_path": up}, ""); err != nil {

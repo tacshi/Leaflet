@@ -3,6 +3,8 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"slices"
 	"strings"
 	"time"
 )
@@ -31,6 +33,13 @@ func (s *Store) MarkStarterPages(ids []string) error {
 		return err
 	}
 	return s.SetValue(starterKey, string(v))
+}
+
+// StarterPagesUnsettled reports whether this device still has starter
+// pages for SettleStarterPages to settle: it has joined no library yet.
+func (s *Store) StarterPagesUnsettled() bool {
+	_, ok := s.Value(starterKey)
+	return ok
 }
 
 // SettleStarterPages decides what becomes of the starter pages as this
@@ -85,7 +94,7 @@ func starterTaken(tx *sql.Tx, set starterSet) (bool, error) {
 	for i, id := range set.Pages {
 		ids[i] = id
 	}
-	after := func(args ...any) []any { return append(append([]any{}, args...), set.At) }
+	after := func(args ...any) []any { return append(slices.Clone(args), set.At) }
 	checks := []struct {
 		query string
 		args  []any
@@ -96,9 +105,9 @@ func starterTaken(tx *sql.Tx, set starterSet) (bool, error) {
 		{`SELECT 1 FROM comments WHERE page_id IN (` + in + `) AND updated_at > ?`, after(ids...)},
 		{`SELECT 1 FROM files WHERE page_id IN (` + in + `) AND updated_at > ?`, after(ids...)},
 		{`SELECT 1 FROM recordings WHERE page_id IN (` + in + `)`, ids},
-		{`SELECT 1 FROM pages WHERE parent_id IN (` + in + `) AND id NOT IN (` + in + `)`, append(ids, ids...)},
+		{`SELECT 1 FROM pages WHERE parent_id IN (` + in + `) AND id NOT IN (` + in + `)`, slices.Concat(ids, ids)},
 		{`SELECT 1 FROM pages WHERE default_template_id IN (` + in + `)
-			UNION ALL SELECT 1 FROM folders WHERE default_template_id IN (` + in + `)`, append(ids, ids...)},
+			UNION ALL SELECT 1 FROM folders WHERE default_template_id IN (` + in + `)`, slices.Concat(ids, ids)},
 	}
 	for _, c := range checks {
 		var one int
@@ -106,7 +115,7 @@ func starterTaken(tx *sql.Tx, set starterSet) (bool, error) {
 		if err == nil {
 			return true, nil
 		}
-		if err != sql.ErrNoRows {
+		if !errors.Is(err, sql.ErrNoRows) {
 			return false, err
 		}
 	}

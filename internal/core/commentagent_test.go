@@ -12,7 +12,7 @@ import (
 // host is the app as the hub sees it, with the default agent set.
 type host struct{ settings store.Settings }
 
-func (h host) Update(fn func())                        { fn() }
+func (h host) Update(_ string, fn func())              { fn() }
 func (h host) Live(string) agents.LiveDoc              { return nil }
 func (h host) SaveNow(string)                          {}
 func (h host) Online() bool                            { return true }
@@ -35,7 +35,7 @@ func TestCommentAgent(t *testing.T) {
 	}
 	h := host{settings: store.DefaultSettings()}
 	hub := agents.NewHub(st, remote.New(remote.Settings{}, st), h)
-	if _, err := CommentAgent(hub, "@agent sum it up"); err == nil {
+	if _, _, err := CommentAgent(hub, "@agent sum it up"); err == nil {
 		t.Error("@agent with no agent to run")
 	}
 	for _, p := range []store.Provider{
@@ -54,13 +54,13 @@ func TestCommentAgent(t *testing.T) {
 		"@agent ask @Ollama":      "a",
 		"@Studio and @Ollama":     "a",
 	} {
-		got, err := CommentAgent(hub, body)
+		got, mentioned, err := CommentAgent(hub, body)
 		switch {
 		case err != nil:
 			t.Errorf("%q: %v", body, err)
-		case want == "" && got != nil:
+		case want == "" && mentioned:
 			t.Errorf("%q: %+v, want none", body, got)
-		case want != "" && (got == nil || got.ProviderID != want):
+		case want != "" && (!mentioned || got.ProviderID != want):
 			t.Errorf("%q: %+v, want %s", body, got, want)
 		}
 	}

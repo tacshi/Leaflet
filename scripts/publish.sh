@@ -21,6 +21,10 @@
 # not just the first, then shows the notes and the commands it would run. It
 # builds, tags, pushes and uploads nothing, and leaves build/release alone.
 #
+# A release tags the commit it was built from, which must still be checked
+# out, unchanged, once the build is done, and is marked the latest: its
+# version must come after every v* tag's, here and on origin.
+#
 # Signing, notarization, NSIS and the update signing key are as in
 # scripts/build-release.sh. Without LEAFLET_WINDOWS_CERTIFICATE the Windows
 # builds would be unsigned, which a release refuses unless --allow-unsigned,
@@ -48,7 +52,7 @@ for arg in "$@"; do
 	--allow-branch) ALLOW_BRANCH=true ;;
 	--allow-unsigned) ALLOW_UNSIGNED=true ;;
 	-h | --help)
-		sed -n '2,29p' "$0" | sed 's/^# \{0,1\}//'
+		sed -n '/^set -euo pipefail/q;2,$p' "$0" | sed 's/^# \{0,1\}//'
 		exit 0
 		;;
 	-*) die "unknown option: $arg" ;;
@@ -121,10 +125,14 @@ run() {
 # ------------------------------------------------------------------- checks
 
 BRANCH="$(git branch --show-current)"
-info "Leaflet $VERSION for ${PLATFORM_ARGS[*]#--} from ${BRANCH:-a detached HEAD} at $(git rev-parse --short HEAD), as $TAG of $REPO"
+# The commit the release is built from, and tagged.
+COMMIT="$(git rev-parse HEAD)"
+SHORT="$(git rev-parse --short HEAD)"
+info "Leaflet $VERSION for ${PLATFORM_ARGS[*]#--} from ${BRANCH:-a detached HEAD} at $SHORT, as $TAG of $REPO"
 
 # What the build needs, checked before the notes are reviewed.
 if $MAC; then
+	check check_speech
 	check signing_identity
 	check notary_profile
 fi
@@ -159,19 +167,30 @@ if ! $NO_UPLOAD; then
 		esac
 		if [[ -z "$BRANCH" ]]; then
 			problem "HEAD is detached, so no branch of origin has the commit $TAG would name"
-		elif ! REMOTE_REFS="$(git ls-remote origin "refs/heads/$BRANCH" "refs/tags/$TAG")"; then
+		elif ! REMOTE_REFS="$(git ls-remote origin "refs/heads/$BRANCH" "refs/tags/v*")"; then
 			problem "could not reach origin, $ORIGIN"
 		else
-			[[ "$(awk -v ref="refs/heads/$BRANCH" '$2 == ref { print $1 }' <<<"$REMOTE_REFS")" == "$(git rev-parse HEAD)" ]] ||
+			[[ "$(awk -v ref="refs/heads/$BRANCH" '$2 == ref { print $1 }' <<<"$REMOTE_REFS")" == "$COMMIT" ]] ||
 				problem "HEAD is not what origin/$BRANCH is; push or pull first, so the tag names a published commit"
 			if awk -v ref="refs/tags/$TAG" '$2 == ref { found = 1 } END { exit !found }' <<<"$REMOTE_REFS"; then
 				problem "the tag $TAG already exists on origin"
 			fi
 		fi
 	fi
-	if [[ "$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq .isDraft 2>/dev/null)" == "false" ]]; then
-		problem "the release $TAG of $REPO is already published"
+	# The release is marked the latest, which an older version must not be.
+	LATEST=""
+	while read -r tag; do
+		if [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] && { [[ -z "$LATEST" ]] || version_after "${tag#v}" "${LATEST#v}"; }; then
+			LATEST="$tag"
+		fi
+	done < <(
+		git tag --list 'v*'
+		awk '{ sub("^refs/tags/", "", $2); print $2 }' <<<"${REMOTE_REFS:-}"
+	)
+	if [[ -n "$LATEST" ]] && ! version_after "$VERSION" "${LATEST#v}"; then
+		problem "$VERSION does not come after $LATEST, the latest release, and a release is marked the latest"
 	fi
+	check check_draft "$VERSION"
 fi
 
 # ------------------------------------------------------------------- notes
@@ -242,7 +261,7 @@ BUILD_ARGS=("$VERSION" "${PLATFORM_ARGS[@]}" -o "$STAGE_DIR/out" --changelog "$S
 $NO_UPLOAD || BUILD_ARGS+=(--upload)
 if $ALLOW_UNSIGNED; then BUILD_ARGS+=(--allow-unsigned); fi
 
-$DRY_RUN || info "building Leaflet $VERSION at $(git rev-parse --short HEAD)"
+$DRY_RUN || info "building Leaflet $VERSION at $SHORT"
 run "$ROOT_DIR/scripts/build-release.sh" "${BUILD_ARGS[@]}"
 
 # ------------------------------------------------------------------- publish
@@ -250,7 +269,12 @@ run "$ROOT_DIR/scripts/build-release.sh" "${BUILD_ARGS[@]}"
 # The assets are on the draft before the release is published, so installed
 # copies never read a manifest whose archive is missing.
 if ! $NO_UPLOAD; then
-	run git tag -a "$TAG" -F "$STAGE_DIR/notes.md"
+	# The build took minutes: what it built must still be what is checked
+	# out, or the tag would name another commit than the one built.
+	if ! $DRY_RUN && { [[ "$(git rev-parse HEAD)" != "$COMMIT" ]] || [[ -n "$(git status --porcelain --untracked-files=no)" ]]; }; then
+		die "the checkout changed while Leaflet $VERSION was built from $SHORT, so which commit the draft release $TAG holds a build of is not known; delete the draft and run again"
+	fi
+	run git tag -a "$TAG" -F "$STAGE_DIR/notes.md" "$COMMIT"
 	run git push origin "$TAG"
 	run gh release edit "$TAG" --repo "$REPO" --draft=false --latest --title "Leaflet $VERSION" --notes-file "$STAGE_DIR/notes.md"
 fi

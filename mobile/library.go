@@ -3,9 +3,13 @@ package mobile
 import (
 	"encoding/json"
 	"log"
+	"slices"
+	"strings"
 	"time"
 
+	"leaflet/internal/doc"
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 // pageRow is a page as the library lists it.
@@ -39,6 +43,13 @@ type folderRow struct {
 	DefaultTemplateID string `json:"default_template_id,omitempty"`
 }
 
+// TagColor returns a tag's color, as hex, as the desktop colors it: the
+// same on every device, whatever the name's case.
+func TagColor(name string) string {
+	defer catch(nil)
+	return doc.TagColor(name)
+}
+
 // tagRow is a tag and how many pages have it.
 type tagRow struct {
 	Tag   string `json:"tag"`
@@ -69,13 +80,24 @@ func (c *Core) Library() (_ string, err error) {
 		if templates, err = st.Templates(); err != nil {
 			return
 		}
-		lib.Pages = make([]pageRow, 0, len(pages)+len(templates))
-		for _, p := range append(pages, templates...) {
-			lib.Pages = append(lib.Pages, c.rowOf(p))
-		}
 		var folders []store.Folder
 		if folders, err = st.Folders(); err != nil {
 			return
+		}
+		live := map[string]bool{}
+		for _, f := range folders {
+			live[f.ID] = true
+		}
+		lib.Pages = make([]pageRow, 0, len(pages)+len(templates))
+		for _, p := range append(pages, templates...) {
+			row := c.rowOf(p)
+			// A page of a folder that is gone, as another device deleted
+			// it while this one put the page in it, is at the top level,
+			// as the desktop shows it, not in no place at all.
+			if !live[row.FolderID] {
+				row.FolderID = ""
+			}
+			lib.Pages = append(lib.Pages, row)
 		}
 		lib.Folders = make([]folderRow, 0, len(folders))
 		for _, f := range folders {
@@ -185,7 +207,7 @@ func (c *Core) RenamePage(id, title string) (err error) {
 }
 
 // MovePage moves a page under parentID or into folderID (or to the top
-// level, with neither), after afterID among its siblings, or first with
+// level, with neither), after afterID among its siblings, or last with
 // "". As on the desktop, a parent it leaves loses its card, and one it
 // goes into gets one at its end.
 func (c *Core) MovePage(id, parentID, folderID, afterID string) (err error) {
@@ -210,6 +232,36 @@ func (c *Core) MovePage(id, parentID, folderID, afterID string) (err error) {
 		}
 	})
 	return err
+}
+
+// MoveTargets returns the pages page id can move under, as the desktop's
+// Move to dialog offers them, the one changed last first, as a JSON array
+// of their IDs: those of its space the user may change, but templates,
+// the page itself and the pages inside it.
+func (c *Core) MoveTargets(id string) (_ string, err error) {
+	defer catch(&err)
+	var out []string
+	c.q.do(func() {
+		var p store.Page
+		if p, err = c.core.Store.Page(id); err != nil {
+			return
+		}
+		var pages []store.Page
+		if pages, err = c.core.Store.Pages(); err != nil {
+			return
+		}
+		slices.SortStableFunc(pages, func(a, b store.Page) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
+		out = []string{}
+		for _, t := range pages {
+			if t.SpaceID == p.SpaceID && !t.Template && c.core.Store.CanEdit(t) && !c.within(t.ID, id) {
+				out = append(out, t.ID)
+			}
+		}
+	})
+	if err != nil {
+		return "", err
+	}
+	return encode(out)
 }
 
 // DeletePage deletes a page and its subpages, and the page's card in its
@@ -349,9 +401,11 @@ func (c *Core) SetKeepOffline(id string, keep bool) (err error) {
 	return err
 }
 
-// CreateFolder creates a folder, returning it as a folderRow.
+// CreateFolder creates a folder, returning it as a folderRow. Its name
+// is kept without the spaces around it.
 func (c *Core) CreateFolder(name string) (_ string, err error) {
 	defer catch(&err)
+	name = strings.TrimSpace(name)
 	var f store.Folder
 	c.q.do(func() { f, err = c.core.Store.CreateFolder(name) })
 	if err != nil {
@@ -360,9 +414,14 @@ func (c *Core) CreateFolder(name string) (_ string, err error) {
 	return encode(folderRow{ID: f.ID, ParentID: f.ParentFolderID, Name: f.Name, SortKey: f.SortKey})
 }
 
-// RenameFolder renames a folder.
+// RenameFolder renames a folder, as the desktop's Rename folder does:
+// without the spaces around the name, and a name left empty changes
+// nothing.
 func (c *Core) RenameFolder(id, name string) (err error) {
 	defer catch(&err)
+	if name = strings.TrimSpace(name); name == "" {
+		return nil
+	}
 	c.q.do(func() {
 		var f store.Folder
 		if f, err = c.core.Store.Folder(id); err == nil {
@@ -422,8 +481,31 @@ type todo struct {
 	Owner string `json:"owner,omitempty"`
 }
 
-// Todos returns the open to-dos with a due date or an owner, as a JSON
-// array of todo.
+// todoGroup is a section of the To-dos tab, as the desktop's: its name,
+// its key ("overdue", "today", "upcoming" or "no_date") and its to-dos,
+// by date.
+type todoGroup struct {
+	Section string `json:"section"`
+	Title   string `json:"title"`
+	Todos   []todo `json:"todos"`
+}
+
+// todoSections are the To-dos tab's sections, by doc.TodoSection: their
+// keys and names.
+var todoSections = [...]struct {
+	key   string
+	title func() string
+}{
+	doc.TodoOverdue:  {"overdue", locales.TodosSectionOverdue},
+	doc.TodoToday:    {"today", locales.CommonToday},
+	doc.TodoUpcoming: {"upcoming", locales.TodosSectionUpcoming},
+	doc.TodoNoDate:   {"no_date", locales.TodosSectionNoDate},
+}
+
+// Todos returns the open to-dos with a due date or an owner, in the
+// To-dos tab's sections as the desktop has them now, as a JSON array of
+// todoGroup: overdue, today's, the coming ones, each by date, and those
+// with no date. A section with none is left out.
 func (c *Core) Todos() (_ string, err error) {
 	defer catch(&err)
 	var todos []store.PageTodo
@@ -431,9 +513,16 @@ func (c *Core) Todos() (_ string, err error) {
 	if err != nil {
 		return "", err
 	}
-	out := make([]todo, 0, len(todos))
-	for _, t := range todos {
-		out = append(out, todo{PageID: t.PageID, PageTitle: t.PageTitle, BlockID: t.BlockID, Text: t.Text, Due: millis(t.Due), Timed: t.Timed, Owner: t.Owner})
+	out := []todoGroup{}
+	for _, g := range doc.TodoGroups(todos, func(t store.PageTodo) doc.Todo { return t.Todo }, time.Now()) {
+		section := todoSections[g.Section]
+		group := todoGroup{Section: section.key, Title: section.title(), Todos: make([]todo, 0, len(g.Todos))}
+		for _, t := range g.Todos {
+			group.Todos = append(group.Todos, todo{
+				PageID: t.PageID, PageTitle: t.PageTitle, BlockID: t.BlockID, Text: t.Text, Due: millis(t.Due), Timed: t.Timed, Owner: t.Owner,
+			})
+		}
+		out = append(out, group)
 	}
 	return encode(out)
 }

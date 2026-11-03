@@ -5,21 +5,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egoist/mygo/i18n"
-
 	"leaflet/locales"
 )
 
 // readBack is blocks written as a page's Markdown and read back.
 func readBack(blocks ...*Node) []*Node {
-	return MarkdownBlocks(PageMarkdown("", FromBlocks(blocks), nil))
+	return MarkdownBlocks(PageMarkdown("", FromBlocks(blocks), MarkdownOptions{}))
 }
 
 // sameShape fails t when blocks read back from their Markdown are not as
 // they were.
 func sameShape(t *testing.T, blocks ...*Node) {
 	t.Helper()
-	md := PageMarkdown("", FromBlocks(blocks), nil)
+	md := PageMarkdown("", FromBlocks(blocks), MarkdownOptions{})
 	if got, want := shape(MarkdownBlocks(md)), shape(blocks); !slices.Equal(got, want) {
 		t.Errorf("read back from\n%s\nas\n%q\nwant\n%q", md, got, want)
 	}
@@ -154,7 +152,7 @@ func TestChartWithoutSeriesName(t *testing.T) {
 	n := &Node{ID: "c", Type: "chart", Data: map[string]any{
 		"labels": []any{"a", nil, 1250000.0, []any{"x"}}, "series": []any{map[string]any{"values": []any{1.0}}},
 	}}
-	md := PageMarkdown("", FromBlocks([]*Node{n}), nil)
+	md := PageMarkdown("", FromBlocks([]*Node{n}), MarkdownOptions{})
 	page := PageHTML("", FromBlocks([]*Node{n}), HTMLOptions{})
 	for _, out := range []string{md, page, ChartCSV(n, "Label")} {
 		if strings.Contains(out, "nil") || !strings.Contains(out, "1250000") {
@@ -196,30 +194,28 @@ func TestCodeLanguageWithSpacesReadsBack(t *testing.T) {
 }
 
 // What an embed, a video and a recording stand for in an export is in the
-// app's language.
-func TestExportSaysBlocksInTheAppsLanguage(t *testing.T) {
-	// The tests set no language, which shows the catalogs' own, and are
-	// left so after this one; one set before it is set again.
-	was := i18n.Locale()
-	i18n.SetLocaleFunc(func() string { return "ja" })
-	t.Cleanup(func() {
-		if was == "" {
-			i18n.SetLocaleFunc(nil)
-		} else {
-			i18n.SetLocaleFunc(func() string { return was })
-		}
-	})
+// language it is written for, whatever the app shows; an embed with the
+// title a new one takes, in any language, is named only for what it is.
+func TestExportSaysBlocksInItsLanguage(t *testing.T) {
 	embed := &Node{ID: "e", Type: "embed", Data: map[string]any{"title": ""}}
 	video := &Node{ID: "v", Type: "video", Data: map[string]any{"url": "https://x.dev/a.mp4"}}
 	rec := &Node{ID: "r", Type: "recording", Data: map[string]any{"title": "Sync"}}
-	md := PageMarkdown("", FromBlocks([]*Node{embed, video, rec}), nil)
-	for _, want := range []string{locales.ExportEmbed(), locales.ExportVideo(), locales.ExportRecordingTitled("Sync")} {
+	made := &Node{ID: "m", Type: "embed", Data: map[string]any{"title": locales.In("zh-Hans").DialogEmbedTitle()}}
+	ja := locales.In("ja")
+	md := PageMarkdown("", FromBlocks([]*Node{embed, video, rec, made}), MarkdownOptions{Lang: "ja"})
+	for _, want := range []string{ja.ExportEmbed(), ja.ExportVideo(), ja.ExportRecordingTitled("Sync")} {
 		if want == "" || !strings.Contains(md, want) {
 			t.Errorf("%q does not say %q", md, want)
 		}
 	}
-	if strings.Contains(md, "Recording") || strings.Contains(md, "Video") {
-		t.Errorf("%q is in English", md)
+	if strings.Contains(md, "Recording") || strings.Contains(md, "Video") || strings.Contains(md, made.Str("title")) {
+		t.Errorf("%q is not all in Japanese", md)
+	}
+	if strings.Count(md, "*"+ja.ExportEmbed()+"*") != 2 {
+		t.Errorf("%q names an embed by a title a new one takes", md)
+	}
+	if got := PageMarkdown("", FromBlocks([]*Node{video}), MarkdownOptions{}); !strings.Contains(got, "[Video]") {
+		t.Errorf("%q is not in the catalogs' own language", got)
 	}
 }
 
@@ -249,8 +245,8 @@ func TestRulesAsCommonMarkReadsThem(t *testing.T) {
 		block("paragraph", Delta{{Text: "-\t-\t-"}}),
 	} {
 		sameShape(t, b)
-		md := PageMarkdown("", FromBlocks([]*Node{b}), nil)
-		if again := PageMarkdown("", FromBlocks(MarkdownBlocks(md)), nil); again != md {
+		md := PageMarkdown("", FromBlocks([]*Node{b}), MarkdownOptions{})
+		if again := PageMarkdown("", FromBlocks(MarkdownBlocks(md)), MarkdownOptions{}); again != md {
 			t.Errorf("%q wrote %q, then %q", b.Delta().Plain(), md, again)
 		}
 	}
@@ -264,8 +260,8 @@ func TestRulesAsCommonMarkReadsThem(t *testing.T) {
 // italics, and an italic over a space between two bold words.
 func TestFormatsWriteTheSameEachTime(t *testing.T) {
 	for _, md := range []string{"*[ 0](leaflet://page/0)*", "**0**_**0** **0**_", "<details>\n<summary>a\n  `x\n 000`</summary>\n</details>"} {
-		written := PageMarkdown("", FromBlocks(MarkdownBlocks(md)), nil)
-		if again := PageMarkdown("", FromBlocks(MarkdownBlocks(written)), nil); again != written {
+		written := PageMarkdown("", FromBlocks(MarkdownBlocks(md)), MarkdownOptions{})
+		if again := PageMarkdown("", FromBlocks(MarkdownBlocks(written)), MarkdownOptions{}); again != written {
 			t.Errorf("%q wrote %q, then %q", md, written, again)
 		}
 	}

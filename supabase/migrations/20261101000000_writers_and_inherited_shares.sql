@@ -1,4 +1,3 @@
--- Four rules a fifth review found loose:
 -- * unshare_page deletes the rows on the page it is given, but page_members
 --   lists the grants on the pages above it and the invites waiting on them
 --   too, which a client would offer to remove: removing one of those from a

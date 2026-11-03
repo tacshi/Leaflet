@@ -40,9 +40,30 @@ speech_toolchain() {
 	fi
 }
 
+# check_speech fails unless this Mac can build leaflet-speech, which the
+# Mac apps ship, saying why.
+check_speech() {
+	local why
+	why="$(speech_toolchain)" || die "the Mac apps ship leaflet-speech, which can't be built here: $why"
+}
+
 # check_version fails unless $1 looks like 1.2.3.
 check_version() {
 	[[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "the version must look like 1.2.3, not $1"
+}
+
+# version_after succeeds when the version $1 comes after $2, both 1.2.3.
+version_after() {
+	local a b i
+	IFS=. read -r -a a <<<"$1"
+	IFS=. read -r -a b <<<"$2"
+	for i in 0 1 2; do
+		if ((10#${a[i]} != 10#${b[i]})); then
+			((10#${a[i]} > 10#${b[i]}))
+			return
+		fi
+	done
+	return 1
 }
 
 # config_value prints the value in mygo.json at the dotted keys $1, as in
@@ -158,6 +179,17 @@ check_gh() {
 	gh auth status >/dev/null 2>&1 || [[ -n "${GH_TOKEN:-}${GITHUB_TOKEN:-}" ]] || die "uploads need gh auth login, or GH_TOKEN"
 }
 
+# check_draft fails when the GitHub release v$1 of updates.github is
+# published: an upload to it would replace, under the same version, the
+# files installed copies have taken. A draft, or no release yet, passes.
+check_draft() {
+	local repo draft
+	repo="$(config_value updates.github)"
+	if draft="$(gh release view "v$1" --repo "$repo" --json isDraft --jq .isDraft 2>/dev/null)" && [[ "$draft" != true ]]; then
+		die "the release v$1 of $repo is already published; a new build needs a new version"
+	fi
+}
+
 # changelog_notes prints the section of the changelog $1 under
 # "## <version>" (or "## [<version>]") for the version $2, as MyGo reads
 # it, or nothing.
@@ -206,40 +238,47 @@ EOF
 
 # upload_release puts what go tool mygo build wrote in the output directory
 # $2, for the platform folders $4…, on the GitHub release v$1 of
-# updates.github, with gh, as mygo build -upload does: the installers,
-# update archives, deltas, install scripts and SHA256SUMS first, then the
-# update manifests, so that none ever names a file not there yet. They
-# keep MyGo's names, by which SHA256SUMS lists them and install.ps1 finds
-# its installer. A release there already keeps the checksums of the files
-# other builds put on it; else it is made, as a draft, with the notes in
-# the file $3.
+# updates.github, with gh, as mygo build -upload does: the files the
+# build's SHA256SUMS lists, which MyGo writes for the files it would
+# upload (the installers, update archives, deltas and install scripts),
+# and SHA256SUMS, first, then the update manifests, so that none ever
+# names a file not there yet. They keep MyGo's names, by which SHA256SUMS
+# lists them and install.ps1 finds its installer. A release there already
+# must be a draft, and keeps the checksums of the files other builds put
+# on it; else it is made, as a draft, with the notes in the file $3.
 upload_release() {
-	local version="$1" out="$2" notes="$3" repo tag dir f name assets earlier
+	local version="$1" out="$2" notes="$3" repo tag dir f sum name found assets earlier
 	shift 3
-	local files=() manifests=() scripts=" "
+	local files=() manifests=()
 	repo="$(config_value updates.github)"
 	tag="v$version"
+	[[ -f "$out/SHA256SUMS" ]] || die "no SHA256SUMS in $out, which lists what the build made to upload"
+	# By MyGo's own list, a kind of file it starts to make goes up too,
+	# rather than being left out. One install script serves every
+	# architecture of a system, so the first folder's goes.
+	while read -r sum name; do
+		[[ -n "$sum" ]] || continue
+		name="${name#\*}"
+		found=""
+		for dir in "$@"; do
+			if [[ -f "$out/$dir/$name" ]]; then
+				found="$out/$dir/$name"
+				break
+			fi
+		done
+		[[ -n "$found" ]] || die "SHA256SUMS lists $name, which is in none of the build's folders ($*)"
+		files+=("$found")
+	done <"$out/SHA256SUMS"
 	for dir in "$@"; do
-		for f in "$out/$dir"/*; do
-			[[ -f "$f" ]] || continue
-			name="${f##*/}"
-			case "$name" in
-			update-*.json) manifests+=("$f") ;;
-			install.sh | install.ps1)
-				# One script serves every architecture of a system.
-				if [[ "$scripts" != *" $name "* ]]; then
-					scripts+="$name "
-					files+=("$f")
-				fi
-				;;
-			*.dmg | *-setup-*.exe | *.deb | *.tar.gz | *.delta) files+=("$f") ;;
-			esac
+		for f in "$out/$dir"/update-*.json; do
+			if [[ -f "$f" ]]; then manifests+=("$f"); fi
 		done
 	done
 	((${#files[@]} + ${#manifests[@]} > 0)) || die "nothing to upload in $out"
+	check_draft "$version"
 	if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
 		assets="$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name')"
-		if [[ -f "$out/SHA256SUMS" ]] && grep -qx SHA256SUMS <<<"$assets"; then
+		if grep -qx SHA256SUMS <<<"$assets"; then
 			earlier="$(mktemp -d)"
 			gh release download "$tag" --repo "$repo" --pattern SHA256SUMS --dir "$earlier"
 			merge_checksums "$out/SHA256SUMS" "$earlier/SHA256SUMS"
@@ -249,7 +288,7 @@ upload_release() {
 		info "creating the draft release $tag of $repo"
 		gh release create "$tag" --repo "$repo" --draft --title "$tag" --notes-file "$notes" >/dev/null
 	fi
-	if [[ -f "$out/SHA256SUMS" ]]; then files+=("$out/SHA256SUMS"); fi
+	files+=("$out/SHA256SUMS")
 	info "uploading ${#files[@]} files, then ${#manifests[@]} manifests, to $tag of $repo"
 	if ((${#files[@]} > 0)); then gh release upload "$tag" --repo "$repo" --clobber "${files[@]}"; fi
 	if ((${#manifests[@]} > 0)); then gh release upload "$tag" --repo "$repo" --clobber "${manifests[@]}"; fi

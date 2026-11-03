@@ -702,6 +702,42 @@
           }
         }
       }
+    },
+    "another app or a call is using it.": {
+      "comment": "Why a recording paused: a call, Siri or another app's audio took the microphone. Follows 'The microphone stopped: '; the recording goes on by itself when it is given back.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "別のアプリまたは通話が使用中です。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "另一个应用或通话正在使用它。"
+          }
+        }
+      }
+    },
+    "iOS lets it start again only while Leaflet is open. Open Leaflet, then resume.": {
+      "comment": "Why a recording could not go on: iOS refuses to start the microphone again from the background. Follows 'The microphone stopped: '.",
+      "extractionState": "manual",
+      "localizations": {
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iOS では Leaflet を開いている間しか再開できません。Leaflet を開いてから再開してください。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "iOS 仅允许在 Leaflet 打开时重新启动它。请打开 Leaflet，然后继续。"
+          }
+        }
+      }
     }
   },
   "version": "1.0"

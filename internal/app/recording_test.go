@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
+	"leaflet/internal/keychain"
 	"leaflet/internal/recording"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
@@ -32,7 +34,6 @@ func TestTranscriptLinePlays(t *testing.T) {
 	if err := a.st.PutRecording(rec); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { delete(players, rec.ID) })
 	n := &doc.Node{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": rec.ID, "title": "Recording"}}
 	// The audio loads on its own goroutine; what it hands back runs in a
 	// frame, as Window.Update runs it on the main thread.
@@ -57,7 +58,7 @@ func TestTranscriptLinePlays(t *testing.T) {
 	if err := tt.Click("She could neither sleep nor concentrate."); err != nil {
 		t.Fatal(err)
 	}
-	pl := players[rec.ID]
+	pl := a.players[rec.ID]
 	if pl == nil || pl.from != 5*time.Second {
 		t.Fatalf("player %+v", pl)
 	}
@@ -82,12 +83,10 @@ func TestClosingPageDropsPlayers(t *testing.T) {
 	}
 	a.reloadAll()
 	a.openPage(p.ID)
-	pl := &player{loading: true}
-	players["r1"] = pl
-	t.Cleanup(func() { delete(players, "r1") })
+	a.players = map[string]*player{"r1": {loading: true}}
 	a.closePage()
-	if len(players) != 0 {
-		t.Errorf("players kept: %v", players)
+	if len(a.players) != 0 {
+		t.Errorf("players kept: %v", a.players)
 	}
 }
 
@@ -101,16 +100,15 @@ func TestDeletedRecordingStopsPlaying(t *testing.T) {
 	}
 	a.reloadAll()
 	a.openPage(p.ID)
-	players["r1"], players["r2"] = &player{}, &player{}
-	t.Cleanup(func() { delete(players, "r1"); delete(players, "r2") })
+	a.players = map[string]*player{"r1": {}, "r2": {}}
 	a.dropGonePlayers()
-	if players["r1"] == nil || players["r2"] != nil {
-		t.Fatalf("players %v", players)
+	if a.players["r1"] == nil || a.players["r2"] != nil {
+		t.Fatalf("players %v", a.players)
 	}
 	a.page.editor.Edit(func(c *doc.Content) { c.Children = c.Children[:0] })
 	a.dropGonePlayers()
-	if len(players) != 0 {
-		t.Errorf("players kept: %v", players)
+	if len(a.players) != 0 {
+		t.Errorf("players kept: %v", a.players)
 	}
 }
 
@@ -121,7 +119,6 @@ func TestPlaybackFailureShows(t *testing.T) {
 	if err := a.st.PutRecording(rec); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { delete(players, rec.ID) })
 	posted := make(chan func(), 1)
 	a.post = func(fn func()) { posted <- fn }
 	a.play(rec)
@@ -256,7 +253,6 @@ func TestSpeechSettingsLastSentLast(t *testing.T) {
 // Saving the Soniox key on the server empties its field alone: an
 // endpoint's key typed beside it stays.
 func TestSavingSonioxKeyKeepsEndpointKey(t *testing.T) {
-	t.Cleanup(func() { speech = speechState{} })
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("{}"))
 	}))
@@ -265,10 +261,62 @@ func TestSavingSonioxKeyKeepsEndpointKey(t *testing.T) {
 	a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
 	posted := make(chan func(), 1)
 	a.post = func(fn func()) { posted <- fn }
-	speech.key, speech.soniox = "endpoint-key", "soniox-key"
-	a.saveSttKey("soniox", speech.soniox)
+	a.speech.key, a.speech.soniox = "endpoint-key", "soniox-key"
+	a.saveSttKey("soniox", a.speech.soniox)
 	(<-posted)()
-	if speech.soniox != "" || speech.key != "endpoint-key" {
-		t.Errorf("soniox %q, endpoint key %q", speech.soniox, speech.key)
+	if a.speech.soniox != "" || a.speech.key != "endpoint-key" {
+		t.Errorf("soniox %q, endpoint key %q", a.speech.soniox, a.speech.key)
+	}
+}
+
+// The endpoint key typed is kept in the keychain once typing pauses, the
+// last typed alone, and an emptied one is removed.
+func TestEndpointKeyKeptOncePaused(t *testing.T) {
+	keychain.Use(keys{})
+	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
+	a := templatesApp(t)
+	kept := func(want string) {
+		t.Helper()
+		for end := time.Now().Add(3 * time.Second); recording.EndpointKey() != want; {
+			if time.Now().After(end) {
+				t.Fatalf("kept %q, want %q", recording.EndpointKey(), want)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	for _, k := range []string{"s", "sk", "sk-1"} {
+		a.keepEndpointKey(k)
+	}
+	if got := recording.EndpointKey(); got != "" {
+		t.Errorf("kept %q as it was typed", got)
+	}
+	kept("sk-1")
+	a.keepEndpointKey("")
+	kept("")
+	if _, err := keychain.Get("stt.endpoint.key"); !errors.Is(err, keychain.ErrNotFound) {
+		t.Errorf("an emptied key stays: %v", err)
+	}
+}
+
+// A recording block shows its transcript as it is once the recordings
+// change, though it reads it once for the frames between.
+func TestRecordingBlockFollowsChanges(t *testing.T) {
+	a := templatesApp(t)
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Call"})
+	r, err := a.st.CreateRecording(p.ID, "r1", "soniox", "m", "", "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v := a.recordingView(r.ID); v.err != nil || len(v.lines) != 0 {
+		t.Fatalf("a new recording shows %+v", v)
+	}
+	if _, err := a.st.UpdateRecording(r.ID, func(r *store.Recording) {
+		r.Transcript = []store.Segment{{StartMs: 0, EndMs: 900, Text: "Hello."}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	a.reload(store.Change{Table: "recordings", PageID: p.ID})
+	if v := a.recordingView(r.ID); len(v.lines) != 1 || v.lines[0].Text != "Hello." {
+		t.Errorf("once transcribed it shows %+v", v.lines)
 	}
 }

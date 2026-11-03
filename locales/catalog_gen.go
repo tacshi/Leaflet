@@ -9383,6 +9383,38 @@ func (msgs Messages) RecErrMic() string {
 	return Catalog.Format(msgs.locale, "recErrMic", nil)
 }
 
+// RecErrMicDeniedMac says "Leaflet isn't allowed to use it. Turn it on in System Settings › Privacy & Security › Microphone."
+// in the language the app shows.
+//
+// Why a recording could not start on the Mac: macOS has not let the app use
+// the microphone. Follows 'The microphone did not start: '.
+func RecErrMicDeniedMac() string { return In(i18n.Locale()).RecErrMicDeniedMac() }
+
+// RecErrMicDeniedMac says "Leaflet isn't allowed to use it. Turn it on in System Settings › Privacy & Security › Microphone."
+// in the language of msgs.
+//
+// Why a recording could not start on the Mac: macOS has not let the app use
+// the microphone. Follows 'The microphone did not start: '.
+func (msgs Messages) RecErrMicDeniedMac() string {
+	return Catalog.Format(msgs.locale, "recErrMicDeniedMac", nil)
+}
+
+// RecErrMicDeniedWindows says "Leaflet isn't allowed to use it. Turn it on in Settings › Privacy & security › Microphone."
+// in the language the app shows.
+//
+// Why a recording could not start on Windows: Windows has not let the app
+// use the microphone. Follows 'The microphone did not start: '.
+func RecErrMicDeniedWindows() string { return In(i18n.Locale()).RecErrMicDeniedWindows() }
+
+// RecErrMicDeniedWindows says "Leaflet isn't allowed to use it. Turn it on in Settings › Privacy & security › Microphone."
+// in the language of msgs.
+//
+// Why a recording could not start on Windows: Windows has not let the app
+// use the microphone. Follows 'The microphone did not start: '.
+func (msgs Messages) RecErrMicDeniedWindows() string {
+	return Catalog.Format(msgs.locale, "recErrMicDeniedWindows", nil)
+}
+
 // RecErrMicStalled says "The microphone stopped: {error} Resume to try again."
 // in the language the app shows.
 //

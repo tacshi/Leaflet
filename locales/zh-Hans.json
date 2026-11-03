@@ -633,6 +633,8 @@
   "recErrQuit": "转写完成前 Leaflet 已退出。",
   "recErrMicDetail": "麦克风未能启动：{error}",
   "recErrMic": "麦克风未能启动。",
+  "recErrMicDeniedMac": "Leaflet 没有使用麦克风的权限。请在“系统设置 › 隐私与安全性 › 麦克风”中打开。",
+  "recErrMicDeniedWindows": "Leaflet 没有使用麦克风的权限。请在“设置 › 隐私和安全性 › 麦克风”中打开。",
   "recErrMicStalled": "麦克风已停止：{error} 请点按“继续”重试。",
   "recErrLive": "实时转写不可用：{error}",
   "recErrLiveStopped": "实时转写中途停止，转写可能缺少后面的内容；音频已保留：{error}",

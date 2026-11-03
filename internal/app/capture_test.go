@@ -3,6 +3,8 @@ package app
 import (
 	"bytes"
 	"testing"
+
+	"leaflet/locales"
 )
 
 // Chunks that come in out of order are written in order, each once; one
@@ -23,6 +25,23 @@ func TestChunksGoInOrder(t *testing.T) {
 	}
 	if len(got) != maxHeld+1 || got[0] != 5 {
 		t.Fatalf("wrote %v", got)
+	}
+}
+
+// A microphone the system refused says where to allow it, on the systems
+// that have a place for it; other failures keep the page's message.
+func TestRefusedMicSaysWhereToAllowIt(t *testing.T) {
+	const webKit = "The request is not allowed by the user agent or the platform in the current context, possibly because the user denied permission."
+	for _, tc := range []struct{ name, goos, want string }{
+		{"NotAllowedError", "darwin", locales.RecErrMicDeniedMac()},
+		{"NotAllowedError", "windows", locales.RecErrMicDeniedWindows()},
+		{"NotAllowedError", "linux", webKit},
+		{"NotReadableError", "darwin", webKit},
+		{"", "darwin", webKit},
+	} {
+		if got := micFailure(tc.name, webKit, tc.goos); got != tc.want {
+			t.Errorf("%s on %s: %q, want %q", tc.name, tc.goos, got, tc.want)
+		}
 	}
 }
 

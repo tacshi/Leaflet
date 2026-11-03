@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"maps"
 	"net/http"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/recording"
+	"leaflet/locales"
 )
 
 // Recordings hear through a small page of the app's own scheme: such pages
@@ -87,7 +89,7 @@ async function start() {
     setInterval(send, 50);
     call("Started", ctx.sampleRate);
   } catch (e) {
-    call("Failed", String(e && e.message || e));
+    call("Failed", String(e && e.name || ""), String(e && e.message || e));
   }
 }
 window.pauseCapture = (p) => { paused = p; };
@@ -198,14 +200,33 @@ func (r *Recorder) Started(session string, sampleRate float64) {
 	}
 }
 
-// Failed tells the session the microphone could not start.
-func (r *Recorder) Failed(session, message string) {
+// Failed tells the session the microphone could not start, with the name
+// and the message of the page's error.
+func (r *Recorder) Failed(session, name, message string) {
 	r.mu.Lock()
 	s := r.sessions[session]
 	r.mu.Unlock()
 	if s != nil && s.failed != nil {
-		s.failed(message)
+		s.failed(micFailure(name, message, runtime.GOOS))
 	}
+}
+
+// micFailure is why the microphone did not start, as the user reads it:
+// where to allow it, when the system refused it (the page's own message
+// then is the web view's, in English), else the page's message. The
+// capture page is the app's own, which the window lets capture, so a
+// NotAllowedError is the system's.
+func micFailure(name, message, goos string) string {
+	if name != "NotAllowedError" {
+		return message
+	}
+	switch goos {
+	case "darwin":
+		return locales.RecErrMicDeniedMac()
+	case "windows":
+		return locales.RecErrMicDeniedWindows()
+	}
+	return message
 }
 
 func (r *Recorder) add(session string, s *captureSink) {

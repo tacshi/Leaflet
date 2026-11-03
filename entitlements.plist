@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The Mac app's entitlements, which mygo.json signs it with. Under the
+     hardened runtime a release build runs with, macOS hands the microphone
+     only to an app entitled to it: without audio-input it refuses the
+     recordings' capture page without asking. -->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

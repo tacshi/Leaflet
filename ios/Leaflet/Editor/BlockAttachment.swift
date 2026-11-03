@@ -95,7 +95,12 @@ final class BlockViews {
 
     private var shown: [String: Shown] = [:]
     /// links let subpages' cards show their pages' titles and open them.
-    var links: PageLinks?
+    /// The page gives them once the window hears of its editor, which can
+    /// be after the first cards showed: those take them then, or they
+    /// would say their pages are not found for as long as the page is open.
+    var links: PageLinks? {
+        didSet { refresh() }
+    }
     /// edit opens a block's editor, from its long press's menu, while the
     /// page can be changed.
     var edit: (@MainActor (DocNode) -> Void)? {

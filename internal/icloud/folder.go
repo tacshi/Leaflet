@@ -569,16 +569,6 @@ func (f Folder) RemoveBlob(rel string) error {
 	return access(err, err)
 }
 
-// linkNew is renameNew by a link to the file, which fails where a file is,
-// and then the file's removal.
-func linkNew(from, to string) error {
-	if err := os.Link(from, to); err != nil {
-		return err
-	}
-	_ = os.Remove(from)
-	return nil
-}
-
 // Remove removes a file of this device's.
 func (f Folder) Remove(rel string) error {
 	path := f.abs(rel)

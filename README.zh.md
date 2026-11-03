@@ -63,6 +63,10 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
   `insert_blocks`、`replace_block`、`move_block`、`delete_blocks`、
   `create_subpage`，开启读取其他页面时还有 `list_pages` 和
   `read_other_page`），在保存历史快照后以流式写入页面，并合为一步撤销。
+- 在你允许时，智能体可以使用网络：`read_web_page` 把网页读成带链接的文本，
+  `web_search` 通过智能体自己的服务商搜索（OpenAI、Claude、xAI、OpenRouter、
+  GLM 或 ChatGPT 套餐）。一次运行读过网络后，只写入和读取它找到的或你给的
+  链接；一旦读取你的其他页面，这次运行就不再使用网络。
 - 支持任何兼容 OpenAI 的服务商：内置 OpenAI、Claude、xAI、OpenRouter、
   DeepSeek 和 GLM 预设，支持 ChatGPT Plus 或 Pro 登录、自定义端点，以及
   Ollama、LM Studio、llama.cpp、vLLM 等本地服务，可离线运行智能体。
@@ -268,7 +272,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `internal/rendered` | 绘制数学公式（KaTeX）和示意图（Pele）的页面，运行在不能联网的框架中 |
 | `internal/starters` | Leaflet 自带的模板 |
 | `internal/export` | 把所有页面连同图片、文件和录音导出为 Markdown 压缩包 |
-| `internal/web` | 链接卡片、图片和视频信息，只从公网地址读取 |
+| `internal/web` | 链接卡片、图片、视频信息和供智能体阅读的网页，只从公网地址读取 |
 | `internal/store` | SQLite（纯 Go）表、发件箱和设置 |
 | `internal/remote` | 基于 HTTP 的 Supabase：Auth、PostgREST、Storage 和 Edge Functions |
 | `internal/sync` | 推送发件箱、拉取、账户接管和设备心跳，经由 Supabase 或 iCloud 云盘 |

@@ -71,6 +71,11 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
   `create_subpage`、ほかのページの読み取りがオンなら `list_pages` と
   `read_other_page` も）で、履歴のスナップショットを取ってからページに
   ストリーミングされ、1 回の取り消し単位になります。
+- 許可すれば、エージェントはウェブを使えます：`read_web_page` はページを
+  リンク付きのテキストとして読み、`web_search` はエージェント自身のプロバイダ
+  （OpenAI、Claude、xAI、OpenRouter、GLM、ChatGPT プラン）で検索します。
+  ウェブを読んだ実行は、見つけたリンクかあなたが渡したリンクだけを書き込み、
+  読みます。ほかのページを読んだ実行は、それ以降ウェブを使いません。
 - OpenAI 互換のプロバイダならどれでも使えます：OpenAI、Claude、xAI、
   OpenRouter、DeepSeek、GLM のプリセット、ChatGPT Plus / Pro でのサインイン、
   カスタムエンドポイント、そしてオフラインでエージェントを動かせる Ollama、
@@ -295,7 +300,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/rendered` | 数式（KaTeX）とダイアグラム（Pele）を描画するページ。ネットワークのないフレームで動きます |
 | `internal/starters` | Leaflet に付属するテンプレート |
 | `internal/export` | すべてのページを、画像、ファイル、録音とともに Markdown の zip に書き出す |
-| `internal/web` | リンクカード、画像、動画の情報を、公開アドレスからだけ読み込む |
+| `internal/web` | リンクカード、画像、動画の情報、エージェントが読むページを、公開アドレスからだけ読み込む |
 | `internal/store` | SQLite（純 Go）のテーブル、送信トレイ、設定 |
 | `internal/remote` | HTTP 経由の Supabase：Auth、PostgREST、Storage、Edge Functions |
 | `internal/sync` | 送信トレイのプッシュ、プル、アカウントの引き継ぎ、デバイスのハートビート（Supabase または iCloud Drive 経由） |

@@ -39,9 +39,12 @@ import {
   ToolError,
   type ToolOutcome,
   unseenOps,
+  webToolDefinitions,
 } from "../_shared/tools.ts";
 import { pageFits, type Surface, systemPrompt, userMessage } from "../_shared/prompt.ts";
 import { isTimeout } from "../_shared/net.ts";
+import { readPage } from "../_shared/page.ts";
+import { canSearch, searchWeb } from "../_shared/search.ts";
 import { SAVE_MS } from "../_shared/deadline.ts";
 import { lastKey, newKeyAfter } from "../_shared/sortkey.ts";
 
@@ -68,6 +71,9 @@ export interface AgentDeps {
   waitUntil?(work: Promise<unknown>): void;
   /** Waits ms before asking a busy model again; tests wait less. */
   sleep?(ms: number): Promise<void>;
+  /** Searches the web through the provider, and reads a page of it: searchWeb and readPage, or a test's. */
+  searchWeb?: typeof searchWeb;
+  readPage?: typeof readPage;
 }
 
 interface Job {
@@ -86,6 +92,7 @@ interface Job {
     instruction?: string;
     selection_text?: string;
     allow_cross_page?: boolean;
+    allow_web?: boolean;
   } | null;
 }
 
@@ -392,6 +399,30 @@ async function runJob(
     // other model is offered them, and answers without them if it refuses
     // them (rejectedTools, below).
     let toolsEnabled = !(provider.supports_tools === false && model === provider.default_model);
+    // The person lets agents use the web (the app's setting, allow_web);
+    // the provider may search it too (canSearch).
+    const allowWeb = job.request?.allow_web === true;
+    const today = new Date().toISOString().slice(0, 10);
+    const webSignal = () => AbortSignal.timeout(Math.max(0, Math.min(deps.callTimeoutMs, deadline - Date.now())));
+
+    // --- history --------------------------------------------------------
+    const history = job.conversation_id
+      ? await rows<{ request: Job["request"]; result: { reply?: string; kept_to_page?: boolean } | null }>(
+        uc.from("ai_jobs")
+          .select("request, result")
+          .eq("conversation_id", job.conversation_id)
+          .eq("status", "done")
+          .neq("id", job.id)
+          .order("created_at", { ascending: false })
+          .limit(10),
+      )
+      : [];
+    // An earlier turn may hold what a run read on another page: this one
+    // has no web, and where it may read other pages itself, keeps to the
+    // URLs the person gave, as after reading one (keepToGivenUrls, below).
+    // A turn that read nothing beyond its page says so.
+    const pagesBefore = history.some((turn) => turn.result?.kept_to_page !== true);
+    const web = allowWeb && !pagesBefore;
 
     // --- tools ----------------------------------------------------------
     session = new PageEditSession(content, {
@@ -468,6 +499,14 @@ async function runJob(
           comments: [],
         };
       },
+      ...(web
+        ? {
+          readWebPage: (url: string) => (deps.readPage ?? readPage)(url, webSignal()),
+          ...(canSearch(conn)
+            ? { searchWeb: (query: string) => (deps.searchWeb ?? searchWeb)(conn, model, query, today, webSignal()) }
+            : {}),
+        }
+        : {}),
     }, { canEdit, crossPage, request: instruction, author: agentName });
 
     // Saves the run's edits, once: on its end, or on its failure after it
@@ -538,6 +577,7 @@ async function runJob(
     };
 
     // --- messages -------------------------------------------------------
+    if (pagesBefore && crossPage) session.keepToGivenUrls();
     const promptContext = {
       agentName,
       surface: job.surface,
@@ -545,27 +585,14 @@ async function runJob(
       crossPage,
       toolsEnabled,
       userName,
-      today: new Date().toISOString().slice(0, 10),
+      today,
+      web,
+      search: web && canSearch(conn),
     };
     const messages: ChatMessage[] = [{ role: "system", content: systemPrompt(promptContext) }];
-
-    if (job.conversation_id) {
-      const history = await rows<{ request: Job["request"]; result: { reply?: string } | null }>(
-        uc.from("ai_jobs")
-          .select("request, result")
-          .eq("conversation_id", job.conversation_id)
-          .eq("status", "done")
-          .neq("id", job.id)
-          .order("created_at", { ascending: false })
-          .limit(10),
-      );
-      for (const turn of history.reverse()) {
-        if (turn.request?.instruction) messages.push({ role: "user", content: turn.request.instruction });
-        if (turn.result?.reply) messages.push({ role: "assistant", content: turn.result.reply });
-      }
-      // An earlier turn may hold what a run read on another page: this one
-      // keeps to the URLs the person gave, as after reading one.
-      if (history.length > 0 && crossPage) session.keepToGivenUrls();
+    for (const turn of history.reverse()) {
+      if (turn.request?.instruction) messages.push({ role: "user", content: turn.request.instruction });
+      if (turn.result?.reply) messages.push({ role: "assistant", content: turn.result.reply });
     }
 
     const views = agentViews(content, recordings);
@@ -591,7 +618,9 @@ async function runJob(
 
     // --- loop -----------------------------------------------------------
     const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-    let tools: ToolDef[] = toolsEnabled ? toolDefinitions({ canEdit, crossPage }) : [];
+    let tools: ToolDef[] = toolsEnabled
+      ? [...toolDefinitions({ canEdit, crossPage }), ...(web ? webToolDefinitions(promptContext.search) : [])]
+      : [];
     let reply = "";
     let finished = false;
     let outOfTime = false;
@@ -655,12 +684,17 @@ async function runJob(
             outOfTime = true;
             break rounds;
           }
+          const tool = call.function.name;
+          // A call that takes a while, the app says it does, as searching
+          // the web (activity in internal/agents).
+          if (i < MAX_ROUND_CALLS && (tool === "web_search" || tool === "read_web_page")) {
+            emit({ type: "call", tool, args: webArgs(call.function.arguments) });
+          }
           // Calls past the most one answer makes are refused, for the
           // model to make in its next (Go's maxRoundCalls).
           const outcome: ToolOutcome = i < MAX_ROUND_CALLS
-            ? await session.call(call.function.name, call.function.arguments)
+            ? await session.call(tool, call.function.arguments)
             : { result: { error: TOO_MANY_CALLS }, ops: [], edits: [], blockIds: [] };
-          const tool = call.function.name;
           outcome.ops.forEach((op, k) => emit({ type: "op", op, summary: outcome.edits[k]?.summary ?? "", tool }));
           for (const e of outcome.edits) edits.push({ summary: e.summary, block_ids: e.blockIds, tool });
           messages.push({
@@ -691,7 +725,11 @@ async function runJob(
 
     const { error: jobError } = await uc
       .from("ai_jobs")
-      .update({ status: "done", result: { reply, ops: session.ops, edits }, error: null })
+      .update({
+        status: "done",
+        result: { reply, ops: session.ops, edits, kept_to_page: session.keptToPage },
+        error: null,
+      })
       .eq("id", job.id);
     if (jobError) console.error("ai_jobs:", jobError.message);
 
@@ -710,7 +748,7 @@ async function runJob(
       if (replyError) console.error("comment reply:", replyError.message);
     }
 
-    emit({ type: "done", reply, edits });
+    emit({ type: "done", reply, edits, kept_to_page: session.keptToPage });
   } catch (e) {
     let message = e instanceof Error ? e.message : String(e);
     console.error("agent job failed:", message);
@@ -733,5 +771,18 @@ async function runJob(
       job.id,
     );
     emit({ type: "error", message });
+  }
+}
+
+/** A web call's query or URL, as the app shows what it does: nothing else the model sent. */
+function webArgs(raw: string): { query?: string; url?: string } {
+  try {
+    const args = JSON.parse(raw);
+    return {
+      ...(typeof args?.query === "string" ? { query: args.query } : {}),
+      ...(typeof args?.url === "string" ? { url: args.url } : {}),
+    };
+  } catch {
+    return {};
   }
 }

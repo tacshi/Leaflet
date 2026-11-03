@@ -102,6 +102,13 @@ struct ProvidersSection: View {
                 .onChange(of: app.agentsReadOtherPages) { _, on in
                     app.save(["agents_read_other_pages": on])
                 }
+                Toggle(isOn: $app.agentsUseWeb) {
+                    Text(L.settingsUseWeb)
+                    Text(L.settingsUseWebDesc)
+                }
+                .onChange(of: app.agentsUseWeb) { _, on in
+                    app.save(["agents_use_web": on])
+                }
             }
         }
     }

@@ -161,6 +161,8 @@ says where whatever other keys the position has.
 | `create_subpage` | `title`, `blocks?: [BlockSpec]` | `{ page_id }` |
 | `list_pages` | — | `{ pages: [{id, title, parent_id}] }` (only when cross-page reading is on) |
 | `read_other_page` | `page_id` | same shape as `read_page` |
+| `web_search` | `query` | `{ query, answer, results: [{url, title?, snippet?}] }` (only when the web is on and the provider searches) |
+| `read_web_page` | `url` | `{ url, title, text, truncated? }` (only when the web is on) |
 
 `BlockView` = `{ id, type, depth, text?, parent_id?, level?, checked?, due?, language?, tone?, collapsed?, formula?, source?, rows?, chart?, embed?, image?, video?, link?, file?, recording?, page_id? }`,
 the same on the client and the server: `text` only for text blocks and
@@ -194,6 +196,21 @@ would be on the page for a later run to load. A link to a page
 cross-page reading is on, keeps to the same URLs from its start: an earlier
 turn may hold what a run read.
 
+`web_search` and `read_web_page` are offered when the user lets agents use
+the web (`allow_web`, the setting "Let agents use the web") and no earlier
+turn of the conversation read beyond its page. `web_search` searches through
+the run's provider, as a request of its own: the Responses API's
+`web_search` (OpenAI, xAI, a ChatGPT plan), Claude's `web_search_20250305`,
+OpenRouter's `openrouter:web_search` or GLM's `web_search`; other providers
+have none. `read_web_page` reads a public page, its redirects followed,
+as text with Markdown's headings, list items and links (MAX_PAGE_TEXT,
+30,000 characters). Once a run has read the web, what it writes, and the
+pages it reads, may hold only a URL in the instruction, on the page as the
+run began, among a search's results (not one its query names) or linked
+from a page it read, and a query may name no address: a page could have the
+run send what is on this page to an address of its making. Once a run reads
+another page, the web is closed to it.
+
 ## 3. Ops
 
 Each applied tool call produces one or more ops. Ops are what the server
@@ -211,7 +228,7 @@ streams to the client, what the client applies to the open editor, and what
 ## 4. Agent run (cloud model)
 
 1. Client flushes unsynced edits of the page, then inserts an `ai_jobs` row:
-   `{ id, page_id, user_id, surface, focus_block_ids, comment_id?, conversation_id?, provider_id, model, status: "queued", request: { instruction, selection_text?, allow_cross_page } }`.
+   `{ id, page_id, user_id, surface, focus_block_ids, comment_id?, conversation_id?, provider_id, model, status: "queued", request: { instruction, selection_text?, allow_cross_page, allow_web } }`.
 2. Client calls `POST /functions/v1/agent` with `{ "job_id": "…" }` and the
    user's JWT. The response is NDJSON, one event per line:
    - `{ "type": "status", "status": "running" }`, and again every 15 s
@@ -221,7 +238,11 @@ streams to the client, what the client applies to the open editor, and what
    - `{ "type": "text", "delta": "…", "round": 0 }`: the model's answer as it
      streams, a piece at a time; a new `round` (after tool calls) starts it
      again.
-   - `{ "type": "done", "reply": "…", "edits": [{ "summary": "…", "block_ids": [...] }] }`
+   - `{ "type": "call", "tool": "web_search", "args": { "query": "…" } }`, as a
+     call that reads the web starts (`read_web_page`'s with its `url`), for
+     the app to say what the run is doing
+   - `{ "type": "done", "reply": "…", "edits": [{ "summary": "…", "block_ids": [...] }], "kept_to_page": true }`,
+     `kept_to_page` saying the run read nothing beyond its page
    - `{ "type": "error", "message": "…" }`
 3. The worker loads the page, focus blocks, the last 10 turns of the
    conversation, and (if allowed) titles of other pages; calls the model with
@@ -232,7 +253,7 @@ streams to the client, what the client applies to the open editor, and what
    that answer came yet; validates and applies each call; streams the op;
    finally writes a `page_history` row (`reason: "agent_run"`, the
    content from before the run) and then saves `page_content`, updates the
-   job (`status: done`, `result: { reply, ops, edits }`), and for the
+   job (`status: done`, `result: { reply, ops, edits, kept_to_page }`), and for the
    `comment` surface inserts the reply as a comment by the agent. A
    `page_history` row that can't be written stops the save: no edits are
    saved that the page can't go back from. A run that fails after it changed

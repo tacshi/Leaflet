@@ -736,6 +736,30 @@
       "type": "object"
     }
   },
+  "web": {
+    "web_search": {
+      "properties": {
+        "query": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "type": "object"
+    },
+    "read_web_page": {
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    }
+  },
   "calls": [
     {
       "tool": "insert_blocks",

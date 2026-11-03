@@ -126,7 +126,7 @@ export function publicHttpsUrl(raw: string): URL {
   return url;
 }
 
-type Resolver = (host: string, type: "A" | "AAAA") => Promise<string[]>;
+export type Resolver = (host: string, type: "A" | "AAAA") => Promise<string[]>;
 
 const denoResolver: Resolver = (host, type) => Deno.resolveDns(host, type);
 
@@ -164,20 +164,28 @@ export async function checkPublicUrl(raw: string, resolve?: Resolver): Promise<U
  * connection attempt and a failed handshake.
  */
 export async function safeFetch(raw: string, init: RequestInit = {}, resolve?: Resolver): Promise<Response> {
+  const res = await publicFetch(raw, init, resolve);
+  if (res.status >= 300 && res.status < 400 || res.type === "opaqueredirect") {
+    await res.body?.cancel().catch(() => {});
+    throw new UnsafeUrlError(`${new URL(raw).hostname} answered with a redirect; enter the address it redirects to`);
+  }
+  return res;
+}
+
+/**
+ * safeFetch with a redirect answered as it came, for the caller to check
+ * where it leads before it follows it, as a web page an agent reads
+ * (page.ts readPage).
+ */
+export async function publicFetch(raw: string, init: RequestInit = {}, resolve?: Resolver): Promise<Response> {
   const url = await checkPublicUrl(raw, resolve);
-  let res: Response;
   try {
-    res = await fetch(url, { ...init, redirect: "manual" });
+    return await fetch(url, { ...init, redirect: "manual" });
   } catch (e) {
     if (e instanceof DOMException && (e.name === "AbortError" || e.name === "TimeoutError")) throw e;
     if (init.signal?.aborted) throw e;
     throw new UnsafeUrlError(`Could not reach ${url.hostname}`);
   }
-  if (res.status >= 300 && res.status < 400 || res.type === "opaqueredirect") {
-    await res.body?.cancel().catch(() => {});
-    throw new UnsafeUrlError(`${url.hostname} answered with a redirect; enter the address it redirects to`);
-  }
-  return res;
 }
 
 /** True when an error is an abort or timeout of a fetch. */

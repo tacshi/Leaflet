@@ -66,7 +66,7 @@ func (st *replyStream) show() {
 	if text == "" || st.run.Status == "done" || st.run.Status == "failed" {
 		return
 	}
-	st.run.Answer = text
+	st.run.Answer, st.run.Activity = text, ""
 	if st.reply != nil && st.reply.Pending {
 		st.reply.Text, st.reply.Streamed = text, true
 	}

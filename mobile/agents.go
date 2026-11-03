@@ -66,6 +66,9 @@ type agentRun struct {
 	// Answer is the model's answer as far as it has come, while the run
 	// works and has not edited the page.
 	Answer string `json:"answer,omitempty"`
+	// Activity is what the run is doing while a call takes a while, as
+	// searching the web.
+	Activity string `json:"activity,omitempty"`
 	// Settled is a run whose Undo no longer shows outside the chat, as
 	// the desktop's run bar hides it: a version restored since put the
 	// page back to before or after it.
@@ -104,7 +107,7 @@ func (c *Core) AgentState(pageID string) (_ string, err error) {
 			out.Runs = append(out.Runs, agentRun{
 				ID: r.ID, Surface: r.Surface, AgentName: r.AgentName, Instruction: r.Instruction, Status: r.Status,
 				Undone: r.Undone, Error: r.Error, Edits: edits, BlockIDs: r.BlockIDs(), Summary: agents.Describe(r),
-				Stoppable: r.Stoppable(), Answer: r.Answer, Settled: c.settled[pageID] == r.ID,
+				Stoppable: r.Stoppable(), Answer: r.Answer, Activity: r.Activity, Settled: c.settled[pageID] == r.ID,
 			})
 		}
 		out.Options = c.options()

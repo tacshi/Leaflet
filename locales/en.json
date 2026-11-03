@@ -2024,6 +2024,34 @@
   "@agentReadingPage": {
     "description": "The agent chat's reply while an agent starts on a request, before it has said or done anything."
   },
+  "agentSearchingWeb": "Searching the web for “{query}”…",
+  "@agentSearchingWeb": {
+    "description": "The agent chat's reply while an agent searches the web.",
+    "placeholders": {
+      "query": {
+        "type": "String",
+        "example": "AI videos on Hacker News this week"
+      }
+    }
+  },
+  "agentReadingWebPage": "Reading {site}…",
+  "@agentReadingWebPage": {
+    "description": "The agent chat's reply while an agent reads a web page.",
+    "placeholders": {
+      "site": {
+        "type": "String",
+        "example": "news.ycombinator.com"
+      }
+    }
+  },
+  "agentReadingWeb": "Reading a web page…",
+  "@agentReadingWeb": {
+    "description": "The agent chat's reply while an agent reads a web page whose site is not known."
+  },
+  "agentSearchUnavailable": "This agent's provider does not search the web.",
+  "@agentSearchUnavailable": {
+    "description": "Told to an agent whose provider cannot search the web, when it tries."
+  },
   "agentAppClosed": "The app closed before the agent finished.",
   "@agentAppClosed": {
     "description": "An agent chat reply kept from an earlier launch: the app quit while the agent was still working on it."
@@ -4205,6 +4233,14 @@
   },
   "settingsReadOtherPagesDesc": "They can use them for context, but only change the page you ask on",
   "@settingsReadOtherPagesDesc": {
+    "description": "Settings › Agent providers › Defaults: a switch."
+  },
+  "settingsUseWeb": "Let agents use the web",
+  "@settingsUseWeb": {
+    "description": "Settings › Agent providers › Defaults: a switch."
+  },
+  "settingsUseWebDesc": "They can search it through your agent's provider, and read web pages",
+  "@settingsUseWebDesc": {
     "description": "Settings › Agent providers › Defaults: a switch."
   },
   "settingsConnectProvider": "Connect {name}",

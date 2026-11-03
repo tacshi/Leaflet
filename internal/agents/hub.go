@@ -70,6 +70,12 @@ type Run struct {
 	// Answer is the model's answer as far as it has come, while the run
 	// works and has not edited the page.
 	Answer string `json:"-"`
+	// Activity is what the run is doing while a call takes a while, as
+	// searching the web, until it answers or edits again.
+	Activity string `json:"-"`
+	// KeptToPage is a run that read nothing beyond its page: a turn of
+	// its conversation that the next run may take for the user's.
+	KeptToPage bool `json:"KeptToPage,omitempty"`
 	// kept is a run whose "Before" snapshot is in the page's history.
 	kept bool
 	// stop cancels a run on this device while it works; a cloud run goes
@@ -168,6 +174,8 @@ type RunOptions struct {
 	CommentID   string
 	Agent       *store.ModelChoice
 	History     []map[string]string
+	// KeptToPage is a History whose runs read nothing beyond the page.
+	KeptToPage bool
 	// Reply is the chat message that shows the run.
 	Reply *Message
 	// Done runs on the main thread when the run ends.
@@ -236,7 +244,8 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		// ChatGPT's models all call tools, whatever an earlier test found.
 		SupportsTools: option.Provider.SupportsTools == nil || *option.Provider.SupportsTools || option.Provider.AuthKind == "account",
 		FocusBlockIDs: o.Focus, SelectionText: o.Selection, CommentID: o.CommentID, Thread: h.thread(pageID, o.CommentID),
-		History: o.History, AllowCrossPage: h.crossPage(page, settings),
+		History: o.History, KeptToPage: o.KeptToPage, AllowCrossPage: h.crossPage(page, settings),
+		Web: h.web(settings),
 	}
 	if o.Surface == "sidebar" {
 		req.ConversationID = s.ConversationID
@@ -252,6 +261,15 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		Text: stream.set,
 		Revise: func(at int, op *doc.Op, summary string, delta []doc.Op) {
 			h.host.Update(pageID, func() { h.revised(s, run, d, o, at, op, summary, delta) })
+		},
+		Activity: func(text string) {
+			stream.clear()
+			h.host.Update(pageID, func() {
+				run.Activity, run.Answer = text, ""
+				if o.Reply != nil && o.Reply.Pending {
+					o.Reply.Text, o.Reply.Streamed = text, false
+				}
+			})
 		},
 	}
 	work := before.Copy()
@@ -311,7 +329,7 @@ func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, 
 	}
 	run.Ops = append(run.Ops, op)
 	run.Edits = append(run.Edits, Edit{Summary: summary, BlockIDs: OpBlockIDs(op)})
-	run.Answer = ""
+	run.Answer, run.Activity = "", ""
 	if o.Reply != nil {
 		o.Reply.Text, o.Reply.Streamed = summary+"…", false
 	}
@@ -470,7 +488,8 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		}
 		return
 	}
-	run.Reply, run.Answer = res.Reply, ""
+	run.Reply, run.Answer, run.Activity = res.Reply, "", ""
+	run.KeptToPage = res.KeptToPage
 	// A cloud run whose stream was cut off has its ops from the server's
 	// job, those after the cut too: all of them are the run's, to undo.
 	if len(res.Ops) > len(run.Ops) {

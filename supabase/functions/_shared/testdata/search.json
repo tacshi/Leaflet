@@ -1,0 +1,168 @@
+{
+  "responses": {
+    "output": [
+      {
+        "type": "web_search_call",
+        "id": "ws_1",
+        "status": "completed",
+        "action": {
+          "type": "search",
+          "queries": [
+            "AI videos Hacker News"
+          ],
+          "sources": [
+            {
+              "type": "url",
+              "url": "https://news.ycombinator.com/item?id=2"
+            },
+            {
+              "type": "url",
+              "url": "https://www.youtube.com/watch?v=abc"
+            }
+          ]
+        }
+      },
+      {
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "output_text",
+            "text": "An AI video was on the front page ([youtube.com](https://www.youtube.com/watch?v=abc)).",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url": "https://www.youtube.com/watch?v=abc",
+                "title": "An  AI video",
+                "start_index": 0,
+                "end_index": 10
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "search": {
+      "answer": "An AI video was on the front page ([youtube.com](https://www.youtube.com/watch?v=abc)).",
+      "sources": [
+        {
+          "url": "https://www.youtube.com/watch?v=abc",
+          "title": "An AI video"
+        },
+        {
+          "url": "https://news.ycombinator.com/item?id=2"
+        }
+      ]
+    }
+  },
+  "anthropic": {
+    "content": [
+      {
+        "type": "server_tool_use",
+        "id": "srvtoolu_1",
+        "name": "web_search",
+        "input": {
+          "query": "AI videos"
+        }
+      },
+      {
+        "type": "web_search_tool_result",
+        "tool_use_id": "srvtoolu_1",
+        "content": [
+          {
+            "type": "web_search_result",
+            "url": "https://example.com/a",
+            "title": "A",
+            "encrypted_content": "x",
+            "page_age": "1 day"
+          },
+          {
+            "type": "web_search_result",
+            "url": "https://example.com/b",
+            "title": "B",
+            "encrypted_content": "y"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "B says so.",
+        "citations": [
+          {
+            "type": "web_search_result_location",
+            "url": "https://example.com/b",
+            "title": "B",
+            "cited_text": "So it is,\nsaid B.",
+            "encrypted_index": "z"
+          }
+        ]
+      }
+    ],
+    "search": {
+      "answer": "B says so.",
+      "sources": [
+        {
+          "url": "https://example.com/b",
+          "title": "B",
+          "snippet": "So it is, said B."
+        },
+        {
+          "url": "https://example.com/a",
+          "title": "A"
+        }
+      ]
+    }
+  },
+  "chat": {
+    "data": {
+      "choices": [
+        {
+          "message": {
+            "role": "assistant",
+            "content": "Two results.",
+            "annotations": [
+              {
+                "type": "url_citation",
+                "url_citation": {
+                  "url": "https://example.org/one",
+                  "title": "One",
+                  "content": "What one says",
+                  "start_index": 0,
+                  "end_index": 3
+                }
+              }
+            ]
+          }
+        }
+      ],
+      "web_search": [
+        {
+          "title": "Two",
+          "link": "https://example.org/two",
+          "content": "What two says",
+          "media": "Example",
+          "refer": "ref_1"
+        },
+        {
+          "title": "Not a link",
+          "link": "javascript:alert(1)"
+        }
+      ]
+    },
+    "search": {
+      "answer": "Two results.",
+      "sources": [
+        {
+          "url": "https://example.org/two",
+          "title": "Two",
+          "snippet": "What two says"
+        },
+        {
+          "url": "https://example.org/one",
+          "title": "One",
+          "snippet": "What one says"
+        }
+      ]
+    }
+  }
+}

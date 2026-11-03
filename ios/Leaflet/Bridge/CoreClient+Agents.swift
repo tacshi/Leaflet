@@ -37,6 +37,9 @@ struct AgentState: Codable, Sendable {
         /// answer is the model's answer as far as it has come, while the
         /// run works and has not edited the page.
         var answer: String?
+        /// activity is what the run is doing while a call takes a while,
+        /// as searching the web.
+        var activity: String?
         /// settled is a run whose Undo shows only in its chat message, as
         /// the desktop's run bar hides it: a version restored since put
         /// the page back to before or after it.
@@ -44,7 +47,7 @@ struct AgentState: Codable, Sendable {
 
         enum CodingKeys: String, CodingKey {
             case id, surface, instruction, status, undone, error, edits, summary, stoppable, answer,
-                settled
+                activity, settled
             case agentName = "agent_name"
             case blockIDs = "block_ids"
         }

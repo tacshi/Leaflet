@@ -323,7 +323,7 @@ func TestRequestCarriesOthersWritingAsData(t *testing.T) {
 // The prompt has the server's rules: block IDs stay stable, and a run
 // finishes its job, its edits being one undo step.
 func TestPromptHasTheServersRules(t *testing.T) {
-	p := SystemPrompt("Claude", "sidebar", false, true, false)
+	p := SystemPrompt("Claude", "sidebar", false, true, false, false, false)
 	for _, rule := range []string{"Keep block IDs stable", "finish the job", "If the page's blocks are not in the request, call read_page", "come before the request as JSON"} {
 		if !strings.Contains(p, rule) {
 			t.Errorf("no %q in the prompt", rule)

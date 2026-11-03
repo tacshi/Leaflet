@@ -82,6 +82,9 @@ final class EditorController: NSObject, UITextViewDelegate {
     var onEditBlock: (@MainActor (DocNode) -> Void)? {
         didSet { textView.blocks.edit = onEditBlock }
     }
+    /// onRenameBlock asks for a new name for a block, named title now: a
+    /// recording's, from its menu.
+    var onRenameBlock: (@MainActor (DocNode, String) -> Void)?
     /// pageLinks open the pages subpages' cards show.
     var pageLinks: PageLinks? {
         didSet { textView.blocks.links = pageLinks }
@@ -433,6 +436,8 @@ final class EditorController: NSObject, UITextViewDelegate {
     }
 
     func replaceBlock(_ node: DocNode) { commands.replaceBlock(node) }
+
+    func removeBlock(_ id: String) { commands.removeBlock(id) }
 
     func insertBlock(_ node: DocNode, at location: Int? = nil) {
         commands.insertBlock(node, at: location)

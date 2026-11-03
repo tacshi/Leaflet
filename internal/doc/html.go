@@ -487,7 +487,13 @@ func (w htmlWriter) recording(n *Node) {
 	}
 	if len(v.Lines) > 0 {
 		w.write(`<div class="transcript">`)
-		for _, l := range v.Lines {
+		// A long transcript shows its first lines until it is opened, as
+		// the app's block does.
+		folds := FoldsTranscript(len(v.Lines))
+		for i, l := range v.Lines {
+			if folds && i == FoldedLines {
+				w.write("<details><summary>", html.EscapeString(locales.In(w.opts.Lang).RecShowAll(len(v.Lines))), w.icon("chevron-down"), "</summary>")
+			}
 			if v.Audio != "" {
 				w.write(`<p data-start="`, strconv.FormatFloat(l.Start, 'f', -1, 64), `">`)
 			} else {
@@ -499,10 +505,21 @@ func (w htmlWriter) recording(n *Node) {
 			}
 			w.write(html.EscapeString(l.Text), "</span></p>")
 		}
+		if folds {
+			w.write("</details>")
+		}
 		w.write("</div>")
 	}
 	w.write("</figure>\n")
 }
+
+// FoldedLines are the lines a long transcript shows until it is opened,
+// in a recording block and on a web page.
+const FoldedLines = 6
+
+// FoldsTranscript says a transcript of n lines shows only its first
+// FoldedLines until it is opened: one of up to two more shows whole.
+func FoldsTranscript(n int) bool { return n > FoldedLines+2 }
 
 // shortCell is the most characters a cell holds for its column to count as
 // short labels that stay on one line.
@@ -691,6 +708,13 @@ figure.recording{border:1px solid var(--line);border-radius:10px;padding:14px 16
 .transcript .line{flex:1;min-width:0;padding:0 6px;margin:0 -6px;border-radius:6px}
 .transcript p[data-start]:hover .line{background:var(--hover)}
 .transcript .speaker{display:block;font-size:11.5px;font-weight:600;color:var(--muted)}
+.transcript details>p{margin-top:8px}
+.transcript summary{display:block;width:fit-content;list-style:none;cursor:pointer;margin-left:52px;padding:2px 6px;border-radius:6px;font-size:12.5px;font-weight:500;color:var(--link)}
+.transcript summary svg{width:13px;height:13px;margin-left:4px;vertical-align:-2px}
+.transcript summary::-webkit-details-marker{display:none}
+.transcript summary:hover{background:var(--hover)}
+.transcript details[open]>summary{display:none}
+.transcript details[open]>summary+p{margin-top:0}
 figure.embed{border:1px solid var(--line);border-radius:10px;padding:12px 14px 14px}
 figure.embed figcaption{margin:0 0 10px;color:var(--fg);font-weight:650;font-size:15px}
 figure.embed iframe{display:block;width:100%;border:0}

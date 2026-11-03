@@ -72,7 +72,7 @@ enum EditorAccessibility {
             }
             if node.type == "recording", let id = node.data?["recording_id"]?.string {
                 for action in RecordingBlock.actions(
-                    id, block: node.id, canEdit: editable, editor: editor)
+                    id, block: node, canEdit: editable, editor: editor)
                 {
                     offer(action.title) { _ in action.run() }
                 }

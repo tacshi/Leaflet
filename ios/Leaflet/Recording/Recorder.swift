@@ -177,6 +177,19 @@ final class Recorder {
         }
     }
 
+    /// dismissError closes the notice of what went wrong with recording id.
+    func dismissError(_ id: String) {
+        guard let client else { return }
+        Task {
+            do {
+                try await client.dismissRecordingError(id)
+                await load(id)
+            } catch {
+                toast?(error.localizedDescription)
+            }
+        }
+    }
+
     /// insertTranscript has editor, its page's, put recording id's
     /// transcript after block, the recording's block it was asked from, as
     /// one step to undo.

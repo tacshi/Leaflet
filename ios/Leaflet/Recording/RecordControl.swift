@@ -49,14 +49,17 @@ struct RecordControl: View {
             }
             .accessibilityLabel(state.paused ? LI.resumeRecording : L.commonPause)
             .disabled(state.starting)
+            // A square in a circle, which needs no room for a word.
             Button {
                 recorder.stop()
             } label: {
-                Text(L.recStop).font(.footnote.weight(.semibold))
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(palette.danger, in: .capsule)
-                    .foregroundStyle(palette.onAccent)
+                RoundedRectangle(cornerRadius: 2).fill(palette.onAccent)
+                    .frame(width: pause * 0.32, height: pause * 0.32)
+                    .frame(width: pause, height: pause)
+                    .background(palette.danger, in: .circle)
+                    .contentShape(.circle)
             }
+            .accessibilityLabel(L.recStop)
         }
         .buttonStyle(.plain)
         .foregroundStyle(palette.danger)

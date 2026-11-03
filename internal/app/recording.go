@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/audio"
@@ -69,8 +70,9 @@ func (a *App) recordingPill(c *ui.Context) {
 		if pause.Clicked() {
 			a.rec.TogglePause()
 		}
-		stop := ui.ButtonBase(c.Key("stop")).Height(22).Padding(0, 8).Radius(999).Background(pal.Danger).TextColor(pal.OnAccent).Label(locales.RecStop())
-		stop.Children(func() { ui.Text(c, locales.RecStop()).FontSize(12).FontWeight(600) })
+		// A square in a circle, as on the iPad.
+		stop := ui.ButtonBase(c.Key("stop")).Size(22, 22).Center().Radius(999).Background(pal.Danger).Label(locales.RecStop()).Tooltip(locales.RecStop())
+		stop.Children(func() { ui.Box(c).Size(8, 8).Radius(2).Background(pal.OnAccent) })
 		if stop.Clicked() {
 			a.rec.Stop()
 		}
@@ -213,6 +215,8 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 	v := a.recordingView(id)
 	rec, err := v.rec, v.err
 	live := a.rec.Active() && a.rec.State.ID == id
+	// On a page that can't be changed, the transcript only copies.
+	ro := a.page == nil || a.page.editor.ReadOnly || !a.canEdit(a.page.id)
 	ui.Column(c.Key("rec:"+n.ID)).Padding(14, 16).Gap(12).Radius(10).Border(1, pal.Divider).Background(pal.Surface).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Box(c).Size(30, 30).Radius(999).Center().Background(map[bool]ui.Color{true: pal.DangerBg, false: pal.AccentSoft}[live]).Children(func() {
@@ -253,9 +257,10 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					}
 					more = iconButton(c, "more", "ellipsis", locales.RecActions())
 				})
-				// On a page that can't be changed, the transcript only copies.
-				ro := a.page == nil || a.page.editor.ReadOnly || !a.canEdit(a.page.id)
 				more.Menu(func(m *ui.Menu) {
+					if m.Item(locales.RecRename()).Disabled(ro).Chosen() {
+						a.dialogs.openRenameRecording(n.ID, a.recordingTitle(n, rec, true))
+					}
 					if m.Item(locales.RecCopyTranscript()).Disabled(len(rec.Transcript) == 0).Chosen() {
 						c.WriteClipboard(recording.TranscriptText(rec))
 						c.Toast(locales.CommonCopied())
@@ -278,13 +283,24 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 							a.toast(err.Error())
 						}
 					}
+					m.Separator()
+					// The block goes as one step to undo; its recording stays,
+					// for the undo to bring back.
+					if m.Item(locales.CommonDelete()).Disabled(ro).Chosen() {
+						a.page.editor.Edit(func(content *doc.Content) { content.Remove(n.ID) })
+					}
 				})
 			}
 		})
 		if live {
 			a.levelMeter(c, a.rec.State.Levels)
 			if t := a.rec.State.LiveText; t != "" {
-				ui.Text(c, t).FontSize(13.5).TextColor(pal.TextSecondary).Font(theme.PageFamily(t))
+				// Its last two lines, from the bottom up, so the block keeps
+				// its height as the words come: the whole transcript shows
+				// once it stops.
+				ui.Column(c.Key("live")).MaxHeight(2 * liveLine).Reverse().Clip().Children(func() {
+					ui.Text(c, t).FontSize(13.5).FixedLineHeight(liveLine).Shrink(0).TextColor(pal.TextSecondary).Font(theme.PageFamily(t))
+				})
 			}
 			return
 		}
@@ -294,14 +310,35 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 		if pl := a.players[id]; pl != nil && pl.p != nil {
 			a.scrubber(c, pl)
 		}
-		if rec.Status == "failed" && rec.Error != "" {
-			notice(c, "danger", "circle-alert", rec.Error, nil)
+		// What went wrong, until it is read and closed: a failure, or a
+		// warning over a transcript that may be short.
+		if rec.Error != "" {
+			kind := "warn"
+			if rec.Status == "failed" {
+				kind = "danger"
+			}
+			var dismiss func()
+			if !ro {
+				dismiss = func() {
+					if err := a.rec.DismissError(id); err != nil {
+						a.toast(err.Error())
+					}
+				}
+			}
+			closableNotice(c, kind, "circle-alert", rec.Error, nil, dismiss)
 		}
 		if len(rec.Transcript) > 0 {
+			// A long transcript shows its first lines until it is opened.
+			lines := v.lines
+			long := doc.FoldsTranscript(len(lines))
+			open := a.recOpen[n.ID]
+			if long && !open {
+				lines = lines[:doc.FoldedLines]
+			}
 			// A click on a line plays from it, so its text is not selectable;
 			// the menu's Copy transcript copies it.
 			ui.Column(c).Gap(8).Children(func() {
-				for i, s := range v.lines {
+				for i, s := range lines {
 					// The time sits on the line's baseline, though its type is smaller.
 					ui.Row(c.Key(i)).Gap(12).AlignItems(ui.Baseline).Children(func() {
 						ts := ui.ButtonBase(c.Key("ts")).Width(46)
@@ -326,8 +363,83 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 						}
 					})
 				}
+				if long {
+					label, turn := locales.RecShowAll(len(v.lines)), float32(0)
+					if open {
+						label, turn = locales.RecShowLess(), 180
+					}
+					// Under the lines' text, past their times.
+					fold := ui.ButtonBase(c.Key("fold")).Margin(0, 0, 0, 52).Padding(2, 6).Radius(6).AlignSelf(ui.Start)
+					if fold.Hovered() {
+						fold.Background(pal.Hover)
+					}
+					fold.Children(func() {
+						ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+							ui.Text(c, label).FontSize(12.5).FontWeight(500).TextColor(pal.Accent)
+							ui.Icon(c, theme.Icon("chevron-down")).FontSize(13).TextColor(pal.Accent).Rotate(turn)
+						})
+					})
+					if fold.Clicked() {
+						if a.recOpen == nil {
+							a.recOpen = map[string]bool{}
+						}
+						a.recOpen[n.ID] = !open
+					}
+				}
 			})
 		}
+	})
+}
+
+// liveLine is the height of a line of the words heard while recording,
+// two of which show.
+const liveLine = 20
+
+// openRenameRecording opens the dialog renaming the recording block of
+// id, named title.
+func (d *dialogs) openRenameRecording(id, title string) {
+	d.recOpen, d.recBlock, d.recName, d.recSelect = true, id, title, true
+}
+
+// recordingDialog renames a recording block of the open page; a name
+// left empty keeps the one it has.
+func (a *App) recordingDialog(c *ui.Context) {
+	d := &a.dialogs
+	dialog(c, &d.recOpen, 380, func() {
+		dialogHeader(c, locales.RecRenameTitle(), "", &d.recOpen)
+		ui.Column(c).Padding(0, 20, 20).Gap(14).Children(func() {
+			in := field(c, "name", &d.recName, locales.RecName()).AutoFocus()
+			if d.recSelect && in.Focused() {
+				d.recSelect = false
+				in.SetTextSelection(0, utf8.RuneCountInString(d.recName))
+			}
+			save := func() {
+				d.recOpen = false
+				if a.page == nil || a.page.editor.ReadOnly {
+					return
+				}
+				n := a.page.editor.Content.Find(d.recBlock)
+				if n == nil || n.Type != "recording" {
+					return
+				}
+				name := strings.TrimSpace(d.recName)
+				if name != "" && name != n.Str("title") {
+					id := n.ID
+					a.page.editor.Edit(func(content *doc.Content) { content.Find(id).Set("title", name) })
+				}
+			}
+			if in.Submitted() {
+				save()
+			}
+			ui.Row(c).Gap(8).Justify(ui.End).Children(func() {
+				if button(c, "cancel", "", locales.CommonCancel()).Clicked() {
+					d.recOpen = false
+				}
+				if primary(c, "save", "", locales.CommonRename()).Clicked() {
+					save()
+				}
+			})
+		})
 	})
 }
 

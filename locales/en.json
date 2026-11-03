@@ -2981,7 +2981,7 @@
   },
   "recStop": "Stop",
   "@recStop": {
-    "description": "The recording pill's button that stops recording."
+    "description": "Accessibility name and tooltip of the recording pill's ■ button that stops recording."
   },
   "recNotFound": "Recording not found on this device",
   "@recNotFound": {
@@ -3054,6 +3054,32 @@
   "recTranscribe": "Transcribe",
   "@recTranscribe": {
     "description": "Recording block menu item, for a recording without a transcript."
+  },
+  "recRename": "Rename…",
+  "@recRename": {
+    "description": "Recording block menu item: opens the dialog that renames the recording."
+  },
+  "recRenameTitle": "Rename recording",
+  "@recRenameTitle": {
+    "description": "Title of the dialog that renames a recording block."
+  },
+  "recName": "Name",
+  "@recName": {
+    "description": "Rename recording dialog: the name field's placeholder. Left empty, the block is named Recording with when it was made."
+  },
+  "recShowAll": "{count, plural, one {Show # line} other {Show all # lines}}",
+  "@recShowAll": {
+    "description": "Under the first lines of a long transcript in a recording block, and on a shared page: shows all its lines.",
+    "placeholders": {
+      "count": {
+        "type": "int",
+        "example": "42"
+      }
+    }
+  },
+  "recShowLess": "Show less",
+  "@recShowLess": {
+    "description": "Under a long transcript shown whole in a recording block: shows only its first lines again."
   },
   "recSpeaker": "Speaker {name}",
   "@recSpeaker": {
@@ -3357,6 +3383,14 @@
         "type": "String"
       }
     }
+  },
+  "recLostBehind": "the connection could not keep up",
+  "@recLostBehind": {
+    "description": "Why live transcription stopped early, after the colon of recErrLiveStopped: the connection was too slow for the audio. Lowercase, as part of a sentence."
+  },
+  "recLostNoEnd": "the last words did not arrive in time",
+  "@recLostNoEnd": {
+    "description": "Why live transcription stopped early, after the colon of recErrLiveStopped: once the recording stopped, the engine did not send its last words in time. Lowercase, as part of a sentence."
   },
   "recErrAudioNotSaved": "The audio could not be saved: {error}",
   "@recErrAudioNotSaved": {

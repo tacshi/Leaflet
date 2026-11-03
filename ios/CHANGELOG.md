@@ -44,7 +44,10 @@ Go core as the desktop app.
 
 - Recording blocks, from the device's microphone, going on with the screen
   locked, transcribed on the device or through Soniox or an
-  OpenAI-compatible endpoint.
+  OpenAI-compatible endpoint, showing the last two lines of the words as
+  they come. A long transcript folds to its first lines, and a block can
+  be renamed or deleted from its menu, and its notice of what went wrong
+  closed.
 
 ### Sync and settings
 

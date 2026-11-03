@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -147,7 +148,7 @@ func TestRecordingMenuOnAViewOnlyPage(t *testing.T) {
 	a.page.editor.ReadOnly = true
 	tt := ui.NewTester(func(c *ui.Context) { a.recordingBlock(c, n) }, 700, 400)
 	tt.Frame()
-	for _, item := range []string{locales.RecInsertTranscript(), locales.RecSummarize(), locales.RecTranscribeAgain()} {
+	for _, item := range []string{locales.RecRename(), locales.RecInsertTranscript(), locales.RecSummarize(), locales.RecTranscribeAgain(), locales.CommonDelete()} {
 		if err := tt.Click(locales.RecActions()); err != nil {
 			t.Fatal(err)
 		}
@@ -268,5 +269,167 @@ func TestRecordingBlockFollowsChanges(t *testing.T) {
 	a.reload(store.Change{Table: "recordings", PageID: p.ID})
 	if v := a.recordingView(r.ID); len(v.lines) != 1 || v.lines[0].Text != "Hello." {
 		t.Errorf("once transcribed it shows %+v", v.lines)
+	}
+}
+
+// A long transcript shows its first lines until it is opened, and closes
+// again; a short one shows whole.
+func TestLongTranscriptFolds(t *testing.T) {
+	a := templatesApp(t)
+	var segs []store.Segment
+	for i := range doc.FoldedLines + 4 {
+		segs = append(segs, store.Segment{StartMs: i * 2000, EndMs: i*2000 + 1500, Text: fmt.Sprintf("Line %d.", i+1)})
+	}
+	rec := store.Recording{ID: "r1", PageID: "p", DurationMs: 30000, SttProvider: "soniox", Status: "ready", Transcript: segs}
+	if err := a.st.PutRecording(rec); err != nil {
+		t.Fatal(err)
+	}
+	n := &doc.Node{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": rec.ID, "title": "Call"}}
+	tt := ui.NewTester(func(c *ui.Context) { a.recordingBlock(c, n) }, 700, 900)
+	tt.Frame()
+	last := fmt.Sprintf("Line %d.", len(segs))
+	if !tt.HasText(fmt.Sprintf("Line %d.", doc.FoldedLines)) || tt.HasText(fmt.Sprintf("Line %d.", doc.FoldedLines+1)) {
+		t.Fatalf("folded, it shows %q", tt.Texts())
+	}
+	if err := tt.Click(locales.RecShowAll(len(segs))); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText(last) {
+		t.Fatalf("opened, it shows %q", tt.Texts())
+	}
+	if err := tt.Click(locales.RecShowLess()); err != nil {
+		t.Fatal(err)
+	}
+	if tt.HasText(last) {
+		t.Errorf("closed again, it shows %q", tt.Texts())
+	}
+	if doc.FoldsTranscript(doc.FoldedLines + 2) {
+		t.Error("a transcript of two lines more than it folds to folds")
+	}
+}
+
+// The menu renames a recording block, as one step to undo, and deletes it,
+// which Undo brings back with its recording.
+func TestRenameAndDeleteRecording(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	rec := store.Recording{ID: "r1", PageID: "p", DurationMs: 2000, SttProvider: "soniox", Status: "ready",
+		Transcript: []store.Segment{{StartMs: 0, EndMs: 1000, Text: "Hello."}}}
+	if err := a.st.PutRecording(rec); err != nil {
+		t.Fatal(err)
+	}
+	n := &doc.Node{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": rec.ID, "title": "Weekly sync"}}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{n, {ID: "p1", Type: "paragraph"}})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	ed := a.page.editor
+	tt := ui.NewTester(func(c *ui.Context) {
+		if n := ed.Content.Find("b1"); n != nil {
+			a.recordingBlock(c, n)
+		}
+		a.dialogs.view(c, a)
+	}, 700, 500)
+	tt.Frame()
+	if err := tt.Click(locales.RecActions()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem(locales.RecRename()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	tt.Frame() // the name is selected as the field takes the focus
+	tt.Type("Standup")
+	tt.Key(0, ui.KeyEnter)
+	tt.Frame()
+	if got := ed.Content.Find("b1").Str("title"); got != "Standup" || a.dialogs.recOpen {
+		t.Fatalf("renamed %q, dialog open %v", got, a.dialogs.recOpen)
+	}
+	if !tt.HasText("Standup") {
+		t.Errorf("the block shows %q", tt.Texts())
+	}
+	ed.Undo()
+	if got := ed.Content.Find("b1").Str("title"); got != "Weekly sync" {
+		t.Fatalf("after undo %q", got)
+	}
+
+	if err := tt.Click(locales.RecActions()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem(locales.CommonDelete()); err != nil {
+		t.Fatal(err)
+	}
+	if ed.Content.Find("b1") != nil {
+		t.Fatal("the block is still there")
+	}
+	ed.Undo()
+	if ed.Content.Find("b1") == nil {
+		t.Fatal("undo did not bring the block back")
+	}
+	if _, err := a.st.Recording(rec.ID); err != nil {
+		t.Errorf("its recording went: %v", err)
+	}
+}
+
+// A recording's notice closes with its ×, for good, on a page that can be
+// changed: a warning over its transcript, as a live stream ending early
+// leaves, and its status says it is ready.
+func TestRecordingNoticeCloses(t *testing.T) {
+	a := templatesApp(t)
+	a.rec = recording.NewController(a.st, a.backend)
+	rec := store.Recording{ID: "r1", PageID: "p", DurationMs: 273000, SttProvider: "soniox", Status: "ready",
+		Error: locales.RecErrLiveStopped(locales.RecLostNoEnd()), Transcript: []store.Segment{{StartMs: 0, EndMs: 1000, Text: "Hello."}}}
+	if err := a.st.PutRecording(rec); err != nil {
+		t.Fatal(err)
+	}
+	n := &doc.Node{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": rec.ID, "title": "Call"}}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{n})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	tt := ui.NewTester(func(c *ui.Context) { a.recordingBlock(c, n) }, 700, 400)
+	tt.Frame()
+	if !tt.HasText(rec.Error) || tt.HasText(locales.RecTranscriptionFailed()) || !tt.HasText(locales.RecStatus("4:33", "Soniox")) {
+		t.Fatalf("it shows %q", tt.Texts())
+	}
+	if err := tt.Click(locales.PageDismiss()); err != nil {
+		t.Fatal(err)
+	}
+	a.reload(store.Change{Table: "recordings", PageID: p.ID})
+	tt.Frame()
+	if got, _ := a.st.Recording(rec.ID); got.Error != "" || tt.HasText(rec.Error) {
+		t.Errorf("closed, the recording has %q and the block shows %q", got.Error, tt.Texts())
+	}
+}
+
+// While it records, a block shows the last two lines of the words heard:
+// as more come, it keeps its height.
+func TestLiveTextKeepsTwoLines(t *testing.T) {
+	a := templatesApp(t)
+	a.rec = recording.NewController(a.st, a.backend)
+	n := &doc.Node{ID: "b1", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": "Call"}}
+	a.rec.State = recording.State{Active: true, ID: "r1", BlockID: "b1"}
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Children(func() {
+			a.recordingBlock(c, n)
+			ui.Text(c, "Below")
+		})
+	}, 500, 900)
+	below := func(words int) float32 {
+		a.rec.State.LiveText = strings.TrimSpace(strings.Repeat("words heard live ", words))
+		tt.Frame()
+		r, ok := tt.Find("Below")
+		if !ok {
+			t.Fatalf("no text below the block: %q", tt.Texts())
+		}
+		return r.Y
+	}
+	one, two, many := below(1), below(12), below(200)
+	if two <= one || many != two {
+		t.Errorf("the text below is at %v with a line heard, %v with two and %v with many", one, two, many)
 	}
 }

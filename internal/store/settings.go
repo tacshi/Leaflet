@@ -61,7 +61,9 @@ type Settings struct {
 	Language             string `json:"language,omitempty"`
 	DefaultModel         string `json:"default_model,omitempty"`
 	AgentsReadOtherPages bool   `json:"agents_read_other_pages"`
-	AllPagesOffline      bool   `json:"all_pages_offline"`
+	// AgentsUseWeb lets agents search the web and read pages of it.
+	AgentsUseWeb    bool `json:"agents_use_web"`
+	AllPagesOffline bool `json:"all_pages_offline"`
 	// WorkOffline treats the app as offline even with a connection.
 	WorkOffline bool `json:"work_offline"`
 	// ICloudSync syncs pages through the Leaflet folder in iCloud Drive.
@@ -79,7 +81,7 @@ type Settings struct {
 // DefaultSettings are the settings of a new install.
 func DefaultSettings() Settings {
 	return Settings{
-		Theme: "system", TextSize: 17, AgentsReadOtherPages: true,
+		Theme: "system", TextSize: 17, AgentsReadOtherPages: true, AgentsUseWeb: true,
 		AllPagesOffline: true, KeepAudioOnDevice: "until_uploaded", SidebarOpen: true,
 		SidebarWidth: 264, PanelWidth: 360,
 		Stt: SttSettings{

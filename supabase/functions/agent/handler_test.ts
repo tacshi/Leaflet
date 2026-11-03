@@ -372,3 +372,66 @@ Deno.test("an agent's comment is named as the app names it", async () => {
   const thread = JSON.parse(user.split("Comment thread (JSON):\n")[1].split("\n")[0]);
   assertEquals(thread.map((c: { author: string }) => c.author), ["Bob", "Claude (agent)", "Ann"]);
 });
+
+// A run the person lets use the web is offered its tools, says what it
+// does as it reads the web, and keeps the page's URLs to those it found;
+// its job says it kept to its page. A run after turns that read other
+// pages is offered no web; one after turns that kept to theirs is.
+Deno.test("a run may use the web", async () => {
+  const p = project();
+  p.tables.ai_jobs = [job("job", { request: { instruction: "Find AI videos", allow_web: true } })];
+  const m = model(
+    calls(["web_search", { query: "AI videos" }]),
+    calls(["insert_blocks", {
+      position: "end",
+      blocks: [{ type: "link_preview", link: { url: "https://www.youtube.com/watch?v=abc" } }],
+    }], ["insert_blocks", { position: "end", blocks: [{ type: "link_preview", link: { url: "https://made.up/x" } }] }]),
+    says("Added a video."),
+  );
+  const searched: string[] = [];
+  const { events } = await run(
+    p,
+    deps(p, m.chat, {
+      searchWeb: (_conn, _model, query) => {
+        searched.push(query);
+        return Promise.resolve({ answer: "One video.", sources: [{ url: "https://www.youtube.com/watch?v=abc" }] });
+      },
+    }),
+  );
+  const names = (m.asked[0].tools ?? []).map((t) => t.function.name);
+  assert(names.includes("web_search") && names.includes("read_web_page"), names.join());
+  assert(m.asked[0].messages[0].content!.includes("web_search"));
+  assertEquals(searched, ["AI videos"]);
+  assertEquals(events.find((e) => e.type === "call"), {
+    type: "call",
+    tool: "web_search",
+    args: { query: "AI videos" },
+  });
+  assertEquals(events.filter((e) => e.type === "op").length, 1);
+  const refused = m.asked[2].messages.filter((x) => x.role === "tool").at(-1)!.content!;
+  assert(refused.includes("After reading the web"), refused);
+  assertEquals(events.at(-1)!.kept_to_page, true);
+  assertEquals((jobOf(p).result as { kept_to_page: boolean }).kept_to_page, true);
+
+  for (const [kept, offered] of [[false, false], [true, true]]) {
+    const q = project();
+    q.tables.ai_jobs = [
+      job("before", {
+        status: "done",
+        conversation_id: "talk",
+        request: { instruction: "What do my other pages say?" },
+        result: { reply: "They say things.", ...(kept ? { kept_to_page: true } : {}) },
+      }),
+      job("job", { conversation_id: "talk", request: { instruction: "Find AI videos", allow_web: true } }),
+    ];
+    const n = model(says("Hello."));
+    await run(q, deps(q, n.chat));
+    const offeredNow = (n.asked[0].tools ?? []).some((t) => t.function.name === "read_web_page");
+    assertEquals(offeredNow, offered, `kept ${kept}`);
+  }
+
+  const r = project();
+  const o = model(says("Hello."));
+  await run(r, deps(r, o.chat));
+  assert(!(o.asked[0].tools ?? []).some((t) => t.function.name === "read_web_page"));
+});

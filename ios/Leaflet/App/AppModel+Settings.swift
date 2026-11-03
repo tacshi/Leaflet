@@ -16,6 +16,7 @@ extension AppModel {
         allPagesOffline = s.allPagesOffline ?? true
         workOffline = s.workOffline ?? false
         agentsReadOtherPages = s.agentsReadOtherPages ?? true
+        agentsUseWeb = s.agentsUseWeb ?? true
         if (s.language ?? "") != language || L.language != shown {
             language = s.language ?? ""
             await showLanguage()
@@ -78,6 +79,7 @@ private struct LookSettings: Decodable {
     var allPagesOffline: Bool?
     var workOffline: Bool?
     var agentsReadOtherPages: Bool?
+    var agentsUseWeb: Bool?
 
     enum CodingKeys: String, CodingKey {
         case theme, accent, language
@@ -85,5 +87,6 @@ private struct LookSettings: Decodable {
         case allPagesOffline = "all_pages_offline"
         case workOffline = "work_offline"
         case agentsReadOtherPages = "agents_read_other_pages"
+        case agentsUseWeb = "agents_use_web"
     }
 }

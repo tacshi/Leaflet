@@ -248,7 +248,7 @@ func (h *Hub) Chat(pageID, text string, focus []string) {
 	s.Messages = append(s.Messages, &Message{Mine: true, Text: t})
 	reply := &Message{Text: locales.AgentReadingPage(), Pending: true}
 	s.Messages = append(s.Messages, reply)
-	h.Start(pageID, RunOptions{Surface: "sidebar", Instruction: t, Focus: focus, History: history, Reply: reply})
+	h.Start(pageID, RunOptions{Surface: "sidebar", Instruction: t, Focus: focus, History: history, KeptToPage: keptToPage(s), Reply: reply})
 	h.saveChat(s)
 }
 
@@ -282,6 +282,22 @@ func chatHistory(s *Session) []map[string]string {
 		turns = turns[len(turns)-20:]
 	}
 	return turns
+}
+
+// keptToPage reports whether the replies chatHistory gives the model came
+// from runs that read nothing beyond the page: the next run may then take
+// what the conversation holds for the user's own, and use the web.
+func keptToPage(s *Session) bool {
+	for _, m := range s.Messages {
+		if m.Mine || m.Pending || m.Error {
+			continue
+		}
+		r := s.Run(m.RunID)
+		if r == nil || !r.KeptToPage && !r.Undone && r.Status != "failed" {
+			return false
+		}
+	}
+	return true
 }
 
 // saveRun keeps a run's change with the conversation that shows it: the

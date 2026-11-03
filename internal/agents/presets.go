@@ -86,8 +86,9 @@ func Today() string { return time.Now().Format("2006-01-02") }
 // agent function's own (supabase/functions/_shared/prompt.ts), worded
 // apart from this one: a rule added to one belongs in the other too.
 // The page's title is not in it: it goes with the user's request, as data
-// (RunLocal).
-func SystemPrompt(agentName, surface string, canReadOtherPages, supportsTools, readOnly bool) string {
+// (RunLocal). web is a run that reads the web, and search one that
+// searches it too.
+func SystemPrompt(agentName, surface string, canReadOtherPages, supportsTools, readOnly, web, search bool) string {
 	// As in a selection, a question gets an answer, not an edit.
 	focus := "The user is chatting with you beside the page. The whole page is your focus. If they ask about the page (summarize it, explain it, find gaps or open questions, suggest a structure or other ideas), answer in your reply and leave the page as it is: they can insert your answer into the page themselves. Edit the page only when they ask you to write, add or change something in it, such as filling in a section, turning numbers into a chart, or applying a structure."
 	answer := "When you are done, reply with your answer, as long as it needs to be and no longer, in paragraphs, - lists and ## headings with inline markdown; or, if you edited the page, say what you changed in one or two sentences without repeating it."
@@ -117,6 +118,9 @@ func SystemPrompt(agentName, surface string, canReadOtherPages, supportsTools, r
 		if supportsTools && canReadOtherPages {
 			b.WriteString("- You may read the user's other pages with list_pages and read_other_page.\n")
 		}
+		if supportsTools && web {
+			b.WriteString(webPrompt(search))
+		}
 	case supportsTools:
 		b.WriteString(`How to work:
 - If the page's blocks are not in the request, call read_page before you edit it.
@@ -137,9 +141,20 @@ func SystemPrompt(agentName, surface string, canReadOtherPages, supportsTools, r
 		if canReadOtherPages {
 			b.WriteString("- You may read the user's other pages with list_pages and read_other_page, but you only edit this page.\n")
 		}
+		if web {
+			b.WriteString(webPrompt(search))
+		}
 	default:
 		b.WriteString("This model cannot call tools, so you cannot edit the page. Answer in the reply, and say what you would change.\n")
 	}
 	b.WriteString("\n" + done)
 	return b.String()
+}
+
+// webPrompt is the system prompt's line on the web, as prompt.ts words it.
+func webPrompt(search bool) string {
+	if search {
+		return "- You can use the web: search it with web_search and read a page with read_web_page, when the request needs what is recent or what you do not know. Say where what you found comes from, with its links. Once you have read the user's other pages in a run, the web is closed to it.\n"
+	}
+	return "- You can read a web page with read_web_page, one the user gave or that is on this page; you cannot search the web. Once you have read the user's other pages in a run, the web is closed to it.\n"
 }

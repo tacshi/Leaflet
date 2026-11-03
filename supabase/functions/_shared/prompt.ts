@@ -10,6 +10,9 @@ export interface PromptContext {
   toolsEnabled: boolean;
   userName: string;
   today: string;
+  /** A run that reads the web, and search one that searches it too. */
+  web?: boolean;
+  search?: boolean;
 }
 
 const SURFACE_NOTES: Record<Surface, string> = {
@@ -70,6 +73,14 @@ export function systemPrompt(ctx: PromptContext): string {
       ctx.canEdit
         ? "- You may read the person's other pages with list_pages and read_other_page when they are relevant, but you only edit this page."
         : "- You may read the person's other pages with list_pages and read_other_page when they are relevant.",
+    );
+  }
+  if (ctx.web && ctx.toolsEnabled) {
+    // As the app's runs word it (presets.go webPrompt).
+    lines.push(
+      ctx.search
+        ? "- You can use the web: search it with web_search and read a page with read_web_page, when the request needs what is recent or what you do not know. Say where what you found comes from, with its links. Once you have read the person's other pages in a run, the web is closed to it."
+        : "- You can read a web page with read_web_page, one the person gave or that is on this page; you cannot search the web. Once you have read the person's other pages in a run, the web is closed to it.",
     );
   }
   lines.push(

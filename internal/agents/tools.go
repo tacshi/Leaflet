@@ -11,6 +11,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
+	"leaflet/internal/web"
 	"leaflet/locales"
 )
 
@@ -148,6 +149,18 @@ func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 	return out
 }
 
+// WebToolDefinitions are the web's tools offered to a model: a search,
+// when its provider searches, and reading a page.
+func WebToolDefinitions(search bool) []map[string]any {
+	var out []map[string]any
+	if search {
+		out = append(out, tool("web_search", "Search the web, for what is recent or what you do not know: this week's news, a price, a page's address. Returns the results' links and what they say; read one whole with read_web_page.",
+			map[string]any{"query": map[string]any{"type": "string", "description": "What to search for, as you would type it into a search engine."}}, "query"))
+	}
+	return append(out, tool("read_web_page", "Read a web page: its title, its text, and the links in it. Once you have read the web in this run, read only a page the user gave, one on this page, or one a search found or a page you read links to.",
+		map[string]any{"url": map[string]any{"type": "string"}}, "url"))
+}
+
 func editTools() []map[string]any {
 	return []map[string]any{
 		// Writing streams into the page as the model writes it.
@@ -183,6 +196,11 @@ type ToolContext struct {
 	// Request is what the user asked the run, whose URLs a block may load
 	// as this page's may (checkURLs).
 	Request string
+	// SearchWeb searches the web through the run's provider, and ReadWeb
+	// reads a page of it; nil when the run has no web, or its provider no
+	// search.
+	SearchWeb func(query string) (Search, error)
+	ReadWeb   func(link string) (web.Page, error)
 }
 
 // PageTools is the ToolContext of a page in the store: its subpages,
@@ -317,12 +335,19 @@ type Executor struct {
 	Edits    []Edit
 	// draft is an insert_blocks call going in as it streams.
 	draft *draft
-	// allowed are the URLs a block may load once the run reads beyond
-	// this page (checkURLs): those on it when the run began, and in the
-	// user's request; nil before the run's first call.
+	// allowed are the URLs the user gave the run, which a block may load
+	// once the run reads beyond this page or the web (checkURLs): those on
+	// it when the run began, and in the user's request; nil before the
+	// run's first call.
 	allowed map[string]bool
-	// armed is a run that has read beyond this page.
-	armed bool
+	// armed is a run that has read beyond this page, or follows turns
+	// that may have; readPages, one that has itself.
+	armed, readPages bool
+	// found are the URLs the run came on in the web: those its searches
+	// found, and those on the pages it read. Nil before it reads the web,
+	// after which what it writes, and the pages it reads, keep to them
+	// and those the user gave it (checkURLs, readWeb).
+	found map[string]bool
 	// written counts the blocks the run's calls have written, toward
 	// maxRunBlocks.
 	written int
@@ -390,11 +415,20 @@ func see(set map[string]bool, v any) {
 // takes the page's URLs as the user's, to load in a block. A page it read
 // it names with a link to that page, which loads nothing.
 //
-// checkURLs refuses blocks that hold a URL the user did not give the run,
-// in a block the app loads or in text, and more text that does, as a
-// subpage's title, once it has read beyond this page.
+// The web is written by anyone, to steer the agents that read it: a page
+// could have one write what is on this page into such a URL, or read the
+// page at one. So once a run reads the web, what it writes, and the pages
+// it reads, may hold only a URL the user gave it, or one it found there:
+// a search's result, or a link on a page it read. Not one it made up. And
+// once it reads the user's other pages, it does not use the web at all
+// (errWebClosed), as what it asked for there could carry what it read,
+// and what it writes keeps to the URLs the user gave it, as above.
+//
+// checkURLs refuses blocks that hold a URL the run may not write, in a
+// block the app loads or in text, and more text that does, as a subpage's
+// title, once it has read beyond this page.
 func (x *Executor) checkURLs(nodes []*doc.Node, more ...any) error {
-	if !x.armed {
+	if !x.armed && x.found == nil {
 		return nil
 	}
 	x.begin()
@@ -405,14 +439,116 @@ func (x *Executor) checkURLs(nodes []*doc.Node, more ...any) error {
 	}
 	var bad string
 	for u := range urls {
-		if !x.allowed[u] && (bad == "" || u < bad) {
+		if !x.given(u) && (bad == "" || u < bad) {
 			bad = u
 		}
 	}
-	if bad != "" {
+	switch {
+	case bad == "":
+		return nil
+	case x.armed:
 		return terr("After reading another page, what you write may only hold a URL that was on this page before you began or is in the user's request, which %s is not: a link written here could carry what you read, and a later edit could have the app load it. Name the page you read it on with a link to that page instead.", bad)
 	}
-	return nil
+	return terr("After reading the web, what you write may only hold a URL you found there, that was on this page before you began, or that is in the user's request, which %s is not: one made up could carry what is on this page to whoever runs its site, as the app loads it.", bad)
+}
+
+// given reports whether the run may write or read the URL u: one the user
+// gave it, or one it found on the web while it has not read beyond this
+// page.
+func (x *Executor) given(u string) bool {
+	return x.allowed[u] || !x.armed && x.found[u]
+}
+
+// errWebClosed is a web tool's answer once the run has read the user's
+// other pages, or follows turns that did.
+const errWebClosed = "This run has read the user's other pages, or follows turns of this conversation that did, so it cannot use the web: what it asked for there could carry what it read. Work from what you have."
+
+// addressRe finds a web address in a search's query, with its scheme, its
+// www. or a path after its host.
+var addressRe = regexp.MustCompile(`(?i)://|\bwww\.|\b[a-z0-9-]+(\.[a-z0-9-]+)+/`)
+
+// searchWeb searches the web through the run's provider. The results'
+// links are found (given), but not those its answer names, which the
+// model that searched wrote and the query could have asked it for, nor
+// those the query names itself. Once the run has read the web, a query
+// may name no address: a search may read the page at one.
+func (x *Executor) searchWeb(args map[string]any) (map[string]any, error) {
+	if x.Ctx.SearchWeb == nil {
+		return nil, terr("Searching the web is off.")
+	}
+	if x.armed {
+		return nil, terr(errWebClosed)
+	}
+	q, err := str(args, "query")
+	if err != nil {
+		return nil, err
+	}
+	q = strings.TrimSpace(q)
+	if x.found != nil && addressRe.MatchString(q) {
+		return nil, terr("Search for words, not a web address: read a page you found with read_web_page.")
+	}
+	s, err := x.Ctx.SearchWeb(q)
+	if err != nil {
+		return nil, terr("The search failed: %v", err)
+	}
+	x.saw()
+	results := []map[string]any{}
+	for _, src := range s.Sources {
+		if bare := strings.SplitN(src.URL, "://", 2); len(bare) < 2 || !strings.Contains(q, bare[1]) {
+			x.found[src.URL] = true
+		}
+		r := map[string]any{"url": src.URL}
+		if src.Title != "" {
+			r["title"] = src.Title
+		}
+		if src.Snippet != "" {
+			r["snippet"] = src.Snippet
+		}
+		results = append(results, r)
+	}
+	return map[string]any{"query": q, "answer": s.Answer, "results": results}, nil
+}
+
+// readWeb reads a web page for the run: any the run names until it has
+// read the web, then only one it may (given).
+func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
+	if x.Ctx.ReadWeb == nil {
+		return nil, terr("Reading the web is off.")
+	}
+	if x.armed {
+		return nil, terr(errWebClosed)
+	}
+	link, err := str(args, "url")
+	if err != nil {
+		return nil, err
+	}
+	link = strings.TrimSpace(link)
+	if bare, _, _ := strings.Cut(link, "#"); x.found != nil && !x.given(link) && !x.given(bare) {
+		return nil, terr("After reading the web, read only a page the user gave, one on this page, or one a search found or a page you read links to, which %s is not.", link)
+	}
+	p, err := x.Ctx.ReadWeb(link)
+	if err != nil {
+		return nil, terr("Could not read %s: %v", link, err)
+	}
+	x.saw()
+	x.found[p.URL] = true
+	for _, u := range p.Links {
+		x.found[u] = true
+	}
+	out := map[string]any{"url": p.URL, "title": p.Title, "text": p.Text}
+	if p.Truncated {
+		out["truncated"] = true
+	}
+	return out, nil
+}
+
+// saw starts keeping the URLs the run finds on the web, as it first reads
+// it.
+func (x *Executor) saw() {
+	x.begin()
+	if x.found == nil {
+		x.found = map[string]bool{}
+	}
 }
 
 // CallRaw runs a tool with JSON arguments. Invalid calls return {error}
@@ -458,7 +594,7 @@ func terr(format string, args ...any) error {
 // user's request. RunLocal calls it before any call, as one streaming in
 // changes the page before it is made.
 func (x *Executor) begin() {
-	if x.allowed == nil && (x.Ctx.ListPages != nil || x.Ctx.ReadOtherPage != nil) {
+	if x.allowed == nil && (x.Ctx.ListPages != nil || x.Ctx.ReadOtherPage != nil || x.Ctx.ReadWeb != nil || x.Ctx.SearchWeb != nil) {
 		x.allowed = map[string]bool{}
 		see(x.allowed, doc.BlockViews(x.Ctx.Content))
 		see(x.allowed, x.Ctx.Request)
@@ -502,7 +638,7 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 			return nil, terr("Reading other pages is off.")
 		}
 		// The titles it lists are read too.
-		x.armed = true
+		x.armed, x.readPages = true, true
 		return map[string]any{"pages": x.Ctx.ListPages()}, nil
 	case "read_other_page":
 		if x.Ctx.ReadOtherPage == nil {
@@ -516,8 +652,12 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		if p == nil {
 			return nil, terr("No page %s.", id)
 		}
-		x.armed = true
+		x.armed, x.readPages = true, true
 		return p, nil
+	case "web_search":
+		return x.searchWeb(args)
+	case "read_web_page":
+		return x.readWeb(args)
 	}
 	return nil, terr("Unknown tool %q.", name)
 }

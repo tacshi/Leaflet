@@ -174,7 +174,12 @@ const MAX_ERROR_BYTES = 64 << 10;
  * start.
  */
 export async function readText(res: Response, limit: number, cut = false): Promise<string> {
-  if (!res.body) return "";
+  return new TextDecoder().decode(await readBytes(res, limit, cut));
+}
+
+/** A response's body, read only up to limit bytes, as readText reads it. */
+export async function readBytes(res: Response, limit: number, cut = false): Promise<Uint8Array> {
+  if (!res.body) return new Uint8Array();
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -200,7 +205,7 @@ export async function readText(res: Response, limit: number, cut = false): Promi
     all.set(c, at);
     at += c.length;
   }
-  return new TextDecoder().decode(all);
+  return all;
 }
 
 /** A response's body as JSON, read only up to MAX_ANSWER_BYTES. */

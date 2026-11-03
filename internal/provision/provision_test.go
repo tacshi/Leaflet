@@ -343,6 +343,7 @@ func TestSetupNeverDowngrades(t *testing.T) {
 var functionsHashes = map[int]string{
 	1: "6c7a63f55f1a88ba9ced2e8085b35cf1e781c73438e276ef73709cefef78836b",
 	2: "2b34649fda4f2565e5de75e6772d25454ba74c8435a6a898f925ddd792acabf1",
+	3: "dfb182b6786ef1ea387d13f63c7a613ef98ed019b9e0527a337bf395c7a72cd9",
 }
 
 // The functions a project gets import their packages at exact versions:

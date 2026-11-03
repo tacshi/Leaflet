@@ -84,6 +84,8 @@ struct AskSheet: View {
                             // some.
                             if let answer = run.answer, !answer.isEmpty {
                                 MarkdownPreview(markdown: answer)
+                            } else if let activity = run.activity, !activity.isEmpty {
+                                Label(activity, systemImage: "globe")
                             } else {
                                 Label(L.dialogInlineWorking, systemImage: "sparkles")
                             }

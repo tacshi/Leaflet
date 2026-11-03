@@ -783,6 +783,13 @@ func (a *App) modelsSettings(c *ui.Context) {
 					a.saveSettings()
 				}
 			})
+			w := a.settings.AgentsUseWeb
+			settingRow(c, "web", locales.SettingsUseWeb(), locales.SettingsUseWebDesc(), false, func() {
+				if ui.Switch(c.Key("web"), &w).Changed() {
+					a.settings.AgentsUseWeb = w
+					a.saveSettings()
+				}
+			})
 		})
 	}
 	if a.form.open {

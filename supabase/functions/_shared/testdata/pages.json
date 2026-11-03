@@ -1,0 +1,60 @@
+[
+  {
+    "page": "https://news.example.com/item?id=1#top",
+    "html": "<!doctype html><html><head><title> Hello\n world </title><base href=\"/sub/\"></head><body>\n<nav><a href=\"/\">Home</a> | <a href=\"#c\">Comments</a></nav>\n<h1>Big <em>news</em></h1>\n<p>Read <a href=\"story.html\">the story</a>, then <a href=\"https://ex.com/wiki/Foo_(bar)#x\">Foo</a>.</p>\n<ul><li>One<ul><li>Two <a href=\"mailto:a@b.c\">mail</a></li></ul></li><li><p>Three</p></li></ul>\n<table><tr><td>1.</td><td><a href=\"https://a.com/x\">A</a></td></tr><tr><td>2.</td><td>B&nbsp;&nbsp;c</td></tr></table>\n<a href=\"/card\"><div>Card title</div><div>Card text</div></a>\n<a href=\"/img\"><img src=\"x.png\" alt=\"x\"></a>\n<pre>line 1\n  line 2\n\nline 4</pre>\n<script>alert(1)</script><style>p{}</style><svg><text>no</text></svg><math><mi>x</mi></math>\n</body></html>",
+    "read": {
+      "url": "https://news.example.com/item?id=1#top",
+      "title": "Hello world",
+      "text": "[Home](https://news.example.com/) | [Comments](https://news.example.com/sub/)\n# Big news\nRead [the story](https://news.example.com/sub/story.html), then [Foo](https://ex.com/wiki/Foo_%28bar%29).\n- One\n- Two mail\n- Three\n1. | [A](https://a.com/x)\n2. | B c\nCard title\nCard text\n<https://news.example.com/card>\nline 1\n  line 2\n\nline 4",
+      "links": [
+        "https://news.example.com/",
+        "https://news.example.com/sub/",
+        "https://news.example.com/sub/story.html",
+        "https://ex.com/wiki/Foo_%28bar%29",
+        "https://a.com/x",
+        "https://news.example.com/card"
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "page": "https://news.ycombinator.com/",
+    "html": "<html><head><title>Hacker News</title></head><body><center><table>\n<tr class=\"athing\"><td class=\"title\"><span class=\"rank\">1.</span></td><td><a href=\"vote?id=2\"><div class=\"votearrow\"></div></a></td>\n<td class=\"title\"><span class=\"titleline\"><a href=\"https://www.youtube.com/watch?v=abc\">An AI video</a>\n<span class=\"sitebit comhead\"> (<a href=\"from?site=youtube.com\"><span class=\"sitestr\">youtube.com</span></a>)</span></span></td></tr>\n<tr><td colspan=\"2\"></td><td class=\"subtext\"><span class=\"score\">120 points</span> by <a href=\"user?id=pg\">pg</a>\n<span class=\"age\"><a href=\"item?id=2\">3 hours ago</a></span> | <a href=\"item?id=2\">45&nbsp;comments</a></td></tr>\n</table></center></body></html>",
+    "read": {
+      "url": "https://news.ycombinator.com/",
+      "title": "Hacker News",
+      "text": "1. | [An AI video](https://www.youtube.com/watch?v=abc) ([youtube.com](https://news.ycombinator.com/from?site=youtube.com))\n120 points by [pg](https://news.ycombinator.com/user?id=pg) [3 hours ago](https://news.ycombinator.com/item?id=2) | [45 comments](https://news.ycombinator.com/item?id=2)",
+      "links": [
+        "https://www.youtube.com/watch?v=abc",
+        "https://news.ycombinator.com/from?site=youtube.com",
+        "https://news.ycombinator.com/user?id=pg",
+        "https://news.ycombinator.com/item?id=2"
+      ],
+      "truncated": false
+    }
+  },
+  {
+    "page": "https://example.com/zh/文章",
+    "html": "<meta charset=\"utf-8\"><title>标题</title><h2>第一节</h2><p>正文，<b>加粗</b>的字。<br>下一行</p><hr><dl><dt>词</dt><dd>义</dd></dl>",
+    "read": {
+      "url": "https://example.com/zh/文章",
+      "title": "标题",
+      "text": "## 第一节\n正文，加粗的字。\n下一行\n---\n词\n义",
+      "links": [],
+      "truncated": false
+    }
+  },
+  {
+    "page": "https://example.com",
+    "html": "<p>No head at all, <a href=\"HTTPS://Example.COM\">itself</a>, <a href=\"//cdn.example.org/a b\">a space</a>, <a href=\"javascript:void(0)\">js</a> and <a>none</a>.</p>\n<template><p>hidden</p></template><noscript>Enable JS</noscript><select><option>pick</option></select><button>Go</button>",
+    "read": {
+      "url": "https://example.com",
+      "title": "",
+      "text": "No head at all, itself, [a space](https://cdn.example.org/a%20b), js and none.",
+      "links": [
+        "https://cdn.example.org/a%20b"
+      ],
+      "truncated": false
+    }
+  }
+]

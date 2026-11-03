@@ -5757,6 +5757,64 @@ func (msgs Messages) AgentReadingPage() string {
 	return Catalog.Format(msgs.locale, "agentReadingPage", nil)
 }
 
+// AgentSearchingWeb says "Searching the web for “{query}”…"
+// in the language the app shows.
+//
+// The agent chat's reply while an agent searches the web.
+func AgentSearchingWeb(query string) string { return In(i18n.Locale()).AgentSearchingWeb(query) }
+
+// AgentSearchingWeb says "Searching the web for “{query}”…"
+// in the language of msgs.
+//
+// The agent chat's reply while an agent searches the web.
+func (msgs Messages) AgentSearchingWeb(query string) string {
+	return Catalog.Format(msgs.locale, "agentSearchingWeb", map[string]any{"query": query})
+}
+
+// AgentReadingWebPage says "Reading {site}…"
+// in the language the app shows.
+//
+// The agent chat's reply while an agent reads a web page.
+func AgentReadingWebPage(site string) string { return In(i18n.Locale()).AgentReadingWebPage(site) }
+
+// AgentReadingWebPage says "Reading {site}…"
+// in the language of msgs.
+//
+// The agent chat's reply while an agent reads a web page.
+func (msgs Messages) AgentReadingWebPage(site string) string {
+	return Catalog.Format(msgs.locale, "agentReadingWebPage", map[string]any{"site": site})
+}
+
+// AgentReadingWeb says "Reading a web page…"
+// in the language the app shows.
+//
+// The agent chat's reply while an agent reads a web page whose site is not
+// known.
+func AgentReadingWeb() string { return In(i18n.Locale()).AgentReadingWeb() }
+
+// AgentReadingWeb says "Reading a web page…"
+// in the language of msgs.
+//
+// The agent chat's reply while an agent reads a web page whose site is not
+// known.
+func (msgs Messages) AgentReadingWeb() string {
+	return Catalog.Format(msgs.locale, "agentReadingWeb", nil)
+}
+
+// AgentSearchUnavailable says "This agent's provider does not search the web."
+// in the language the app shows.
+//
+// Told to an agent whose provider cannot search the web, when it tries.
+func AgentSearchUnavailable() string { return In(i18n.Locale()).AgentSearchUnavailable() }
+
+// AgentSearchUnavailable says "This agent's provider does not search the web."
+// in the language of msgs.
+//
+// Told to an agent whose provider cannot search the web, when it tries.
+func (msgs Messages) AgentSearchUnavailable() string {
+	return Catalog.Format(msgs.locale, "agentSearchUnavailable", nil)
+}
+
 // AgentAppClosed says "The app closed before the agent finished."
 // in the language the app shows.
 //
@@ -11883,6 +11941,34 @@ func SettingsReadOtherPagesDesc() string { return In(i18n.Locale()).SettingsRead
 // Settings › Agent providers › Defaults: a switch.
 func (msgs Messages) SettingsReadOtherPagesDesc() string {
 	return Catalog.Format(msgs.locale, "settingsReadOtherPagesDesc", nil)
+}
+
+// SettingsUseWeb says "Let agents use the web"
+// in the language the app shows.
+//
+// Settings › Agent providers › Defaults: a switch.
+func SettingsUseWeb() string { return In(i18n.Locale()).SettingsUseWeb() }
+
+// SettingsUseWeb says "Let agents use the web"
+// in the language of msgs.
+//
+// Settings › Agent providers › Defaults: a switch.
+func (msgs Messages) SettingsUseWeb() string {
+	return Catalog.Format(msgs.locale, "settingsUseWeb", nil)
+}
+
+// SettingsUseWebDesc says "They can search it through your agent's provider, and read web pages"
+// in the language the app shows.
+//
+// Settings › Agent providers › Defaults: a switch.
+func SettingsUseWebDesc() string { return In(i18n.Locale()).SettingsUseWebDesc() }
+
+// SettingsUseWebDesc says "They can search it through your agent's provider, and read web pages"
+// in the language of msgs.
+//
+// Settings › Agent providers › Defaults: a switch.
+func (msgs Messages) SettingsUseWebDesc() string {
+	return Catalog.Format(msgs.locale, "settingsUseWebDesc", nil)
 }
 
 // SettingsConnectProvider says "Connect {name}"

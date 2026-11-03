@@ -550,9 +550,13 @@ func (a *App) runningBar(c *ui.Context, s *agents.Session) {
 	})
 }
 
-// runProgress is what a running agent is doing: its latest edit, or
-// working while it has made none.
+// runProgress is what a running agent is doing: what it does while a call
+// takes a while, as searching the web, else its latest edit, or working
+// while it has made none.
 func runProgress(run *agents.Run, working string) string {
+	if run.Activity != "" {
+		return run.Activity
+	}
 	if n := len(run.Edits); n > 0 {
 		return run.Edits[n-1].Summary + "…"
 	}

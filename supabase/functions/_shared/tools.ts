@@ -26,6 +26,8 @@ import {
 } from "./blocks.ts";
 import { markdownSpecs } from "./lines.ts";
 import type { ToolDef } from "./openai.ts";
+import type { WebPage } from "./page.ts";
+import type { Search } from "./search.ts";
 
 export type Op =
   | { op: "insert"; position: Position; nodes: NodeJSON[] }
@@ -50,6 +52,10 @@ export interface ToolHooks {
   createSubpage(title: string, content: PageContent): Promise<Extract<Op, { op: "create_page" }>["page"]>;
   listPages(): Promise<PageSummary[]>;
   readOtherPage(pageId: string): Promise<unknown>;
+  /** Searches the web through the run's provider; none when the run has no web, or its provider no search. */
+  searchWeb?(query: string): Promise<Search>;
+  /** Reads a page of the web; none when the run has no web. */
+  readWebPage?(url: string): Promise<WebPage>;
 }
 
 /** An edit as the person sees it: what it did, and the blocks it touched. */
@@ -317,6 +323,29 @@ export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean }):
       ),
     );
   }
+  return defs;
+}
+
+/**
+ * The web's tools offered to a model (Go's WebToolDefinitions): a search,
+ * when its provider searches, and reading a page.
+ */
+export function webToolDefinitions(search: boolean): ToolDef[] {
+  const defs: ToolDef[] = [];
+  if (search) {
+    defs.push(tool(
+      "web_search",
+      "Search the web, for what is recent or what you do not know: this week's news, a price, a page's address. Returns the results' links and what they say; read one whole with read_web_page.",
+      { query: { type: "string", description: "What to search for, as you would type it into a search engine." } },
+      ["query"],
+    ));
+  }
+  defs.push(tool(
+    "read_web_page",
+    "Read a web page: its title, its text, and the links in it. Once you have read the web in this run, read only a page the person gave, one on this page, or one a search found or a page you read links to.",
+    { url: { type: "string" } },
+    ["url"],
+  ));
   return defs;
 }
 
@@ -808,6 +837,15 @@ export interface SessionOptions {
 // run, which takes the page's URLs as the person's, to load in a block
 // (internal/agents checkURLs). A page it read it names with a link to that
 // page, which loads nothing.
+//
+// The web is written by anyone, to steer the agents that read it: a page
+// could have one write what is on this page into such a URL, or read the
+// page at one. So once a run reads the web, what it writes, and the pages
+// it reads, may hold only a URL the person gave it, or one it found there:
+// a search's result, or a link on a page it read. Not one it made up. And
+// once it reads the person's other pages, it does not use the web at all
+// (WEB_CLOSED), as what it asked for there could carry what it read, and
+// what it writes keeps to the URLs the person gave it, as above.
 
 /** The URLs in v, as allow takes them: whole strings that are one, and those in text. */
 function urlsIn(v: unknown, out = new Set<string>()): Set<string> {
@@ -846,13 +884,30 @@ const EDITING_TOOLS = new Set([
   "create_subpage",
 ]);
 
+/** A web tool's answer once the run has read the person's other pages, or follows turns that did (Go's errWebClosed). */
+const WEB_CLOSED =
+  "This run has read the user's other pages, or follows turns of this conversation that did, so it cannot use the web: what it asked for there could carry what it read. Work from what you have.";
+
+/** A web address in a search's query: its scheme, its www. or a path after its host (Go's addressRe). */
+const ADDRESS_RE = /:\/\/|\bwww\.|\b[a-z0-9-]+(\.[a-z0-9-]+)+\//i;
+
 export class PageEditSession {
   content: PageContent;
   readonly before: PageContent;
   readonly ops: Op[] = [];
   private readonly now: () => number;
-  /** The URLs a block may load once the agent has read beyond this page, null before (checkUrls). */
+  /** The URLs the person gave the run: on this page as it began, and in their request (checkUrls). */
   private allowed: Set<string> | null = null;
+  /** A run that has read beyond this page, or follows turns that may have; readPages, one that has itself. */
+  private armed = false;
+  private readPages = false;
+  /**
+   * The URLs the run came on in the web: those its searches found, and
+   * those on the pages it read. Null before it reads the web, after which
+   * what it writes, and the pages it reads, keep to them and those the
+   * person gave it (checkUrls, readWeb).
+   */
+  private found: Set<string> | null = null;
   /** The page's blocks, kept up as the calls change them. */
   private readonly idx: BlockIndex;
   /** Every id the page has or had, which a new block may not take. */
@@ -871,6 +926,11 @@ export class PageEditSession {
 
   get changed(): boolean {
     return this.ops.some((op) => op.op !== "create_page");
+  }
+
+  /** A run that read nothing beyond its page. */
+  get keptToPage(): boolean {
+    return !this.readPages;
   }
 
   /**
@@ -925,13 +985,19 @@ export class PageEditSession {
       case "list_pages":
         // The titles it lists are read too.
         this.arm();
+        this.readPages = true;
         return unchanged({ pages: await this.hooks.listPages() });
       case "read_other_page": {
         const pageId = textArg(args, "page_id");
         const page = await this.hooks.readOtherPage(pageId);
         this.arm();
+        this.readPages = true;
         return unchanged(page);
       }
+      case "web_search":
+        return unchanged(await this.searchWeb(args));
+      case "read_web_page":
+        return unchanged(await this.readWeb(args));
       default:
         throw new ToolError(`Unknown tool "${name}"`);
     }
@@ -942,15 +1008,71 @@ export class PageEditSession {
    * use those on this page as the run found it, and those in the request.
    */
   private arm(): void {
-    if (this.allowed) return;
-    this.allowed = new Set();
-    this.allow(pageViews(this.before));
-    this.allow(this.opts.request ?? "");
+    this.armed = true;
   }
 
-  /** Adds the URLs in v to allowed. */
-  private allow(v: unknown): void {
-    urlsIn(v, this.allowed!);
+  /** The URLs the person gave the run: on this page as the run found it, and in the request. */
+  private given(): Set<string> {
+    if (!this.allowed) {
+      this.allowed = urlsIn(pageViews(this.before));
+      urlsIn(this.opts.request ?? "", this.allowed);
+    }
+    return this.allowed;
+  }
+
+  /** Whether the run may write or read u: one the person gave it, or one it found on the web while it has not read beyond this page (Go's given). */
+  private may(u: string): boolean {
+    return this.given().has(u) || (!this.armed && !!this.found?.has(u));
+  }
+
+  /**
+   * Searches the web through the run's provider (Go's searchWeb). The
+   * results' links are found, but not those its answer names, which the
+   * model that searched wrote and the query could have asked it for, nor
+   * those the query names itself. Once the run has read the web, a query
+   * may name no address: a search may read the page at one.
+   */
+  private async searchWeb(args: Record<string, unknown>): Promise<unknown> {
+    if (!this.hooks.searchWeb) throw new ToolError("Searching the web is off.");
+    if (this.armed) throw new ToolError(WEB_CLOSED);
+    const query = trimSpace(textArg(args, "query"));
+    if (this.found && ADDRESS_RE.test(query)) {
+      throw new ToolError("Search for words, not a web address: read a page you found with read_web_page.");
+    }
+    let search: Search;
+    try {
+      search = await this.hooks.searchWeb(query);
+    } catch (e) {
+      throw new ToolError(`The search failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const found = this.found ??= new Set();
+    for (const s of search.sources) {
+      const bare = s.url.split("://")[1];
+      if (bare === undefined || !query.includes(bare)) found.add(s.url);
+    }
+    return { query, answer: search.answer, results: search.sources };
+  }
+
+  /** Reads a web page for the run: any the run names until it has read the web, then only one it may (Go's readWeb). */
+  private async readWeb(args: Record<string, unknown>): Promise<unknown> {
+    if (!this.hooks.readWebPage) throw new ToolError("Reading the web is off.");
+    if (this.armed) throw new ToolError(WEB_CLOSED);
+    const url = trimSpace(textArg(args, "url"));
+    if (this.found && !this.may(url) && !this.may(url.split("#")[0])) {
+      throw new ToolError(
+        `After reading the web, read only a page the user gave, one on this page, or one a search found or a page you read links to, which ${url} is not.`,
+      );
+    }
+    let page: WebPage;
+    try {
+      page = await this.hooks.readWebPage(url);
+    } catch (e) {
+      throw new ToolError(`Could not read ${url}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const found = this.found ??= new Set();
+    found.add(page.url);
+    for (const u of page.links) found.add(u);
+    return { url: page.url, title: page.title, text: page.text, ...(page.truncated ? { truncated: true } : {}) };
   }
 
   /**
@@ -963,23 +1085,29 @@ export class PageEditSession {
   }
 
   /**
-   * Refuses blocks that hold a URL not allowed, in a block the app loads or
-   * in text, once the agent has read beyond this page (checkUrls).
+   * Refuses blocks that hold a URL the run may not write, in a block the
+   * app loads or in text, once the agent has read beyond this page or the
+   * web (checkUrls).
    */
   private checkUrls(nodes: NodeJSON[], ...more: unknown[]): void {
-    const allowed = this.allowed;
-    if (!allowed) return;
+    if (!this.armed && !this.found) return;
     const urls = urlsIn(more);
     for (const n of nodes) walk(n, (k) => urlsIn(k.data, urls));
-    const bad = [...urls].filter((u) => !allowed.has(u));
-    if (bad.length) {
-      bad.sort();
+    const bad = [...urls].filter((u) => !this.may(u));
+    if (!bad.length) return;
+    bad.sort();
+    if (this.armed) {
       throw new ToolError(
         `After reading another page, what you write may only hold a URL that was on this page before you began or is in the user's request, which ${
           bad[0]
         } is not: a link written here could carry what you read, and a later edit could have the app load it. Name the page you read it on with a link to that page instead.`,
       );
     }
+    throw new ToolError(
+      `After reading the web, what you write may only hold a URL you found there, that was on this page before you began, or that is in the user's request, which ${
+        bad[0]
+      } is not: one made up could carry what is on this page to whoever runs its site, as the app loads it.`,
+    );
   }
 
   // --- indexing ------------------------------------------------------------

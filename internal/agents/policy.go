@@ -63,3 +63,9 @@ func sharedWithOthers(st *store.Store, p store.Page) bool {
 	}
 	return false
 }
+
+// web reports whether a run may use the web: the user lets agents, and
+// the app is online.
+func (h *Hub) web(settings store.Settings) bool {
+	return settings.AgentsUseWeb && !settings.WorkOffline && h.host.Online()
+}

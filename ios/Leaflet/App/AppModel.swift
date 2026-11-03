@@ -57,6 +57,7 @@ final class AppModel {
     var allPagesOffline = true
     var workOffline = false
     var agentsReadOtherPages = true
+    var agentsUseWeb = true
 
     /// activeScene is the window that last came to the front, which the
     /// menu bar's commands act on while no view in a window has focus.

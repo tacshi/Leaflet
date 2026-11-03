@@ -633,6 +633,8 @@
   "recErrQuit": "文字起こしが終わる前に Leaflet が終了しました。",
   "recErrMicDetail": "マイクを起動できませんでした：{error}",
   "recErrMic": "マイクを起動できませんでした。",
+  "recErrMicDeniedMac": "Leaflet にマイクの使用が許可されていません。「システム設定 › プライバシーとセキュリティ › マイク」でオンにしてください。",
+  "recErrMicDeniedWindows": "Leaflet にマイクの使用が許可されていません。「設定 › プライバシーとセキュリティ › マイク」でオンにしてください。",
   "recErrMicStalled": "マイクが停止しました：{error}「再開」でもう一度お試しください。",
   "recErrLive": "リアルタイム文字起こしを利用できません：{error}",
   "recErrLiveStopped": "リアルタイム文字起こしが途中で止まったため、以降の文字起こしが欠けている可能性があります。音声は保存されています：{error}",

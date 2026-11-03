@@ -3323,6 +3323,14 @@
   "@recErrMic": {
     "description": "Error when the microphone fails."
   },
+  "recErrMicDeniedMac": "Leaflet isn't allowed to use it. Turn it on in System Settings › Privacy & Security › Microphone.",
+  "@recErrMicDeniedMac": {
+    "description": "Why a recording could not start on the Mac: macOS has not let the app use the microphone. Follows 'The microphone did not start: '."
+  },
+  "recErrMicDeniedWindows": "Leaflet isn't allowed to use it. Turn it on in Settings › Privacy & security › Microphone.",
+  "@recErrMicDeniedWindows": {
+    "description": "Why a recording could not start on Windows: Windows has not let the app use the microphone. Follows 'The microphone did not start: '."
+  },
   "recErrMicStalled": "The microphone stopped: {error} Resume to try again.",
   "@recErrMicStalled": {
     "description": "Error when the microphone stops mid-recording and cannot go on, as after a phone call, with the system's reason; the recording is paused.",
@@ -4610,11 +4618,11 @@
   "settingsICloudNoAccess": "Leaflet can't open iCloud Drive. Allow it in System Settings › Privacy & Security › Files and Folders.",
   "@settingsICloudNoAccess": {
     "description": "iCloud sync cannot run: macOS keeps Leaflet out of iCloud Drive."
-  },  "settingsICloudFolderLost": "Leaflet can't open the folder it synced through. Choose it again in Settings.",
+  },
+  "settingsICloudFolderLost": "Leaflet can't open the folder it synced through. Choose it again in Settings.",
   "@settingsICloudFolderLost": {
     "description": "iOS: iCloud sync cannot run because the app can no longer open the folder in iCloud Drive the user picked; they pick it again in Settings › Sync and storage."
   },
-
   "settingsICloudOpenPrivacy": "Open Settings",
   "@settingsICloudOpenPrivacy": {
     "description": "Settings › Sync and storage: a button that opens macOS's privacy settings."

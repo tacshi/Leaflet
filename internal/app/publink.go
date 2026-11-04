@@ -41,6 +41,7 @@ import (
 	"leaflet/internal/rendered"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/internal/web"
 	"leaflet/internal/webpage"
 	"leaflet/locales"
 )
@@ -518,6 +519,12 @@ func (p *pubLink) render(job pubJob) {
 		Lang:   i18n.Locale(),
 		Head:   job.head,
 		Tail:   commentsPanel(c, threads, job.comments),
+		// A Bilibili video's player in a phone's browser asks Bilibili for
+		// nothing but what it plays given its part, which is asked here.
+		Video: func(v doc.Video) doc.Video {
+			v, _ = web.VideoPart(v)
+			return v
+		},
 		Script: func(name string) string {
 			// Visitors see the link's threads even once commenting stops.
 			if name == "comments" && !job.comments && len(threads) == 0 {
@@ -1067,8 +1074,12 @@ const recordingScript = `document.addEventListener("click", function (e) {
 // as in the app: one started so, or a file or a recording started from
 // its own controls, pauses the others, as far as their sites let them.
 const videoScript = rendered.VideoSeekJS + `(function () {
+  // A player is ready once its site's page has loaded in its frame. One
+  // that came before this script did, which runs once the page is read,
+  // has a document of another site's, which the page can't see.
   var ready = new WeakSet();
   document.querySelectorAll("figure.video iframe").forEach(function (f) {
+    if (!f.contentDocument) ready.add(f);
     f.addEventListener("load", function () { ready.add(f); });
   });
   function pauseOthers(el) {
@@ -1089,7 +1100,11 @@ const videoScript = rendered.VideoSeekJS + `(function () {
     var el = fig && fig.querySelector("iframe, video");
     if (!el) return;
     e.preventDefault();
-    if (a.dataset.video) fig.scrollIntoView({behavior: "smooth", block: "center"});
+    if (a.dataset.video) {
+      // A video in a closed toggle or a folded heading shows first.
+      for (var d = fig.parentElement; d; d = d.parentElement) if (d.tagName === "DETAILS") d.open = true;
+      fig.scrollIntoView({behavior: "smooth", block: "center"});
+    }
     pauseOthers(el);
     var t = +a.dataset.t;
     if ((el.tagName === "VIDEO" || ready.has(el)) && leafletSeek(el, fig.dataset.provider, t)) return;

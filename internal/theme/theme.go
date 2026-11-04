@@ -345,6 +345,3 @@ func Icon(name string) *ui.SVG {
 // IconSVG returns a Lucide icon's SVG source by name, for a web page;
 // its strokes are currentColor.
 func IconSVG(name string) string { return icons.SVG(name) }
-
-// IconNames lists the bundled icons.
-func IconNames() []string { return icons.Names() }

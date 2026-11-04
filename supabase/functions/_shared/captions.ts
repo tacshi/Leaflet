@@ -5,7 +5,7 @@
 
 import { fields, type VideoRef } from "./blocks.ts";
 import { readBytes } from "./openai.ts";
-import { publicFetch } from "./net.ts";
+import { publicFetch, type Resolver } from "./net.ts";
 
 /** A video's captions in one language (web.Captions). */
 export interface Captions {
@@ -55,26 +55,51 @@ const MAX_CAPTION_BYTES = 8 << 20;
 
 const AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Leaflet";
 
-/** What a site answers a request, from the public web only (web.ask). */
-async function ask(url: string, init: { body?: string; cookie?: string; signal?: AbortSignal } = {}): Promise<string> {
-  const headers: Record<string, string> = { "User-Agent": AGENT, "Accept-Language": "en-US,en;q=0.8" };
-  if (init.body !== undefined) headers["Content-Type"] = "application/json";
-  if (init.cookie) headers.Cookie = init.cookie;
-  const res = await publicFetch(url, {
-    method: init.body === undefined ? "GET" : "POST",
-    headers,
-    body: init.body,
-    signal: init.signal,
-  });
-  if (res.status === 429) {
-    await res.body?.cancel().catch(() => {});
-    throw refused();
+/** The most redirects a request follows, as Go's http.Client does. */
+const MAX_CAPTION_REDIRECTS = 10;
+
+/**
+ * What a site answers a request, from the public web only (web.ask). Its
+ * redirects are followed as Go's http.Client follows them, each checked
+ * again: a 307 or 308 asks again as it asked, any other with GET, and the
+ * cookie goes on only to the host it was for or one under it. An http://
+ * address is asked for over https (net.ts safeFetch).
+ */
+export async function ask(
+  url: string,
+  init: { body?: string; cookie?: string; signal?: AbortSignal; resolve?: Resolver } = {},
+): Promise<string> {
+  const host = new URL(url).hostname;
+  let { body, cookie } = init;
+  for (let hop = 0;; hop++) {
+    const headers: Record<string, string> = { "User-Agent": AGENT, "Accept-Language": "en-US,en;q=0.8" };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (cookie) headers.Cookie = cookie;
+    const res = await publicFetch(url, {
+      method: body === undefined ? "GET" : "POST",
+      headers,
+      body,
+      signal: init.signal,
+    }, init.resolve);
+    const next = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+    if (next && hop < MAX_CAPTION_REDIRECTS) {
+      await res.body?.cancel().catch(() => {});
+      url = new URL(next, url).href.replace(/^http:\/\//i, "https://");
+      if (res.status !== 307 && res.status !== 308) body = undefined;
+      const to = new URL(url).hostname;
+      if (to !== host && !to.endsWith("." + host)) cookie = undefined;
+      continue;
+    }
+    if (res.status === 429) {
+      await res.body?.cancel().catch(() => {});
+      throw refused();
+    }
+    if (res.status >= 300) {
+      await res.body?.cancel().catch(() => {});
+      throw Object.assign(new Error(`${new URL(url).hostname} answered ${res.status}`), { status: res.status });
+    }
+    return new TextDecoder().decode(await readBytes(res, MAX_CAPTION_BYTES, true));
   }
-  if (res.status >= 300) {
-    await res.body?.cancel().catch(() => {});
-    throw Object.assign(new Error(`${new URL(url).hostname} answered ${res.status}`), { status: res.status });
-  }
-  return new TextDecoder().decode(await readBytes(res, MAX_CAPTION_BYTES, true));
 }
 
 /** Reads a video's captions from its site (web.ReadCaptions). */

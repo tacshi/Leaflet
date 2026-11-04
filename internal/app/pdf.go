@@ -22,6 +22,11 @@ import (
 // the web: past it, it prints with those that came.
 const pdfLoadWait = 20 * time.Second
 
+// pdfDownloadWait is how long a page to print waits for its own pictures
+// that another device uploaded to download, as the mobile core's
+// ExportPDFPage waits.
+const pdfDownloadWait = 2 * time.Minute
+
 // pdfMargin is the room around a printed page's text, in inches.
 const pdfMargin = 0.6
 
@@ -38,8 +43,10 @@ func (a *App) exportPDF(id string) {
 		return
 	}
 	o := webpage.Options{Store: a.st, Page: id, Title: p.DisplayTitle(), Titles: a.pageTitles(), Files: slices.Clone(a.files),
-		Lang: i18n.Locale(), Head: "<style>" + printLook() + "</style>", Serve: webpage.Inline, Code: codeHTML, Chart: chartHTML, Print: true}
+		Lang: i18n.Locale(), Head: "<style>" + printLook() + "</style>", Serve: webpage.Inline, Code: codeHTML, Chart: chartHTML, Print: true,
+		Region: webpage.RegionOf(mygo.App.Region().Locale)}
 	name := safeName(p.DisplayTitle()) + ".pdf"
+	cr := a.core()
 	go func() {
 		defer guard.Recover()
 		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportPDFTitle(), DefaultPath: name})
@@ -47,6 +54,15 @@ func (a *App) exportPDF(id string) {
 			return
 		}
 		a.update(func() { a.toast(locales.HostExportingPDF(filepath.Base(path))) })
+		// Pictures another device added, which this one has not shown yet,
+		// come first: paper has no other way to them.
+		ctx, cancel := context.WithTimeout(context.Background(), pdfDownloadWait)
+		if cr.DownloadPictures(ctx, c, id) {
+			if files, err := a.st.Files(); err == nil {
+				o.Files = files
+			}
+		}
+		cancel()
 		pdf, err := printPDF(webpage.HTML(c, o))
 		if err == nil {
 			err = os.WriteFile(path, pdf, 0o644) // #nosec G306 -- a file the user saves, readable like any other they save.

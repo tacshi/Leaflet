@@ -174,12 +174,25 @@ final class BlockViews {
         }
     }
 
-    /// view returns the block's view, made again when the block changed.
-    /// Its hosting controller joins the page's view controller: without
-    /// it, SwiftUI never tells the block it appeared, and a picture or a
-    /// video's thumbnail never starts loading.
+    /// view returns the block's view, made again when the block changed,
+    /// but a video's while its link is the same. Its hosting controller
+    /// joins the page's view controller: without it, SwiftUI never tells
+    /// the block it appeared, and a picture or a video's thumbnail never
+    /// starts loading.
     private func view(for node: DocNode, id: String, in textView: UIView) -> UIView {
-        if let s = shown[id], s.node == node { return s.view }
+        if let s = shown[id] {
+            if s.node == node { return s.view }
+            // A video of the same link keeps its view, given the block as
+            // it is now: made again, its player would load again from where
+            // it first started, as its notes are written, by hand or by an
+            // agent, or undone. Its height follows as it measures itself
+            // again.
+            if let host = s.host, Self.samePlayer(s.node, node) {
+                host.rootView = card(node, in: textView)
+                shown[id] = Shown(node: node, view: s.view, host: host)
+                return s.view
+            }
+        }
         drop(id)
         // A web block is its web view alone: inside a SwiftUI host in the
         // text view, WebKit paints the page but it never shows.
@@ -211,6 +224,13 @@ final class BlockViews {
         }
         shown[id] = Shown(node: node, view: host.view, host: host)
         return host.view
+    }
+
+    /// samePlayer says two states of a block are a video of the same link,
+    /// which its player is made from.
+    private static func samePlayer(_ old: DocNode, _ new: DocNode) -> Bool {
+        old.type == "video" && new.type == "video" && old.id == new.id
+            && old.data?["url"] == new.data?["url"]
     }
 
     /// card is a block's view, as the page can be changed or not.

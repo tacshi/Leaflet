@@ -112,31 +112,22 @@ struct RecordingBlock: View {
         return row.label
     }
 
-    /// Action is something the block offers: Play or Pause, or an item of
-    /// its menu.
-    struct Action {
-        let title: String
-        var symbol = ""
-        var enabled = true
-        var destructive = false
-        let run: @MainActor () -> Void
-    }
-
     /// actions are what block, of recording id, offers now, for VoiceOver
     /// at the caret, which can't reach the block in the text: Play or
     /// Pause, and its menu's items.
     static func actions(_ id: String, block: DocNode, canEdit: Bool, editor: EditorController?)
-        -> [Action]
+        -> [BlockAction]
     {
         let recorder = Recorder.shared
         let state = recorder.state
         guard let row = recorder.rows[id], !(state.recording && state.id == id),
             row.status != "recording"
         else { return [] }
-        var out: [Action] = []
+        var out: [BlockAction] = []
         if recorder.loading == nil, !state.recording {
             let playing = recorder.playing == id && recorder.player?.isPlaying == true
-            out.append(Action(title: playing ? L.commonPause : L.recPlay) { recorder.play(id) })
+            out.append(
+                BlockAction(title: playing ? L.commonPause : L.recPlay) { recorder.play(id) })
         }
         return out
             + menuItems(id, block: block, row, canEdit: canEdit, editor: editor).filter(\.enabled)
@@ -146,22 +137,23 @@ struct RecordingBlock: View {
     /// editor's page.
     private static func menuItems(
         _ id: String, block: DocNode, _ row: RecordingRow, canEdit: Bool, editor: EditorController?
-    ) -> [Action] {
+    ) -> [BlockAction] {
         let recorder = Recorder.shared
         let empty = row.transcript.isEmpty
         return [
-            Action(title: L.recRename, symbol: "pencil", enabled: canEdit) {
+            BlockAction(title: L.recRename, symbol: "pencil", enabled: canEdit) {
                 editor?.onRenameBlock?(block, title(block, row))
             },
-            Action(title: L.recCopyTranscript, symbol: "doc.on.doc", enabled: !empty) {
+            BlockAction(title: L.recCopyTranscript, symbol: "doc.on.doc", enabled: !empty) {
                 UIPasteboard.general.string = row.plain
             },
-            Action(title: L.recInsertTranscript, symbol: "text.insert", enabled: !empty && canEdit)
-            {
+            BlockAction(
+                title: L.recInsertTranscript, symbol: "text.insert", enabled: !empty && canEdit
+            ) {
                 recorder.insertTranscript(id, after: block.id, into: editor)
             },
             // Not while a transcription runs, which the new one would race.
-            Action(
+            BlockAction(
                 title: empty ? L.recTranscribe : L.recTranscribeAgain, symbol: "captions.bubble",
                 enabled: canEdit && !recorder.state.transcribing.contains(id)
             ) {
@@ -169,7 +161,9 @@ struct RecordingBlock: View {
             },
             // The block goes as one step to undo; its recording stays, for
             // the undo to bring back.
-            Action(title: L.commonDelete, symbol: "trash", enabled: canEdit, destructive: true) {
+            BlockAction(
+                title: L.commonDelete, symbol: "trash", enabled: canEdit, destructive: true
+            ) {
                 editor?.removeBlock(block.id)
             },
         ]

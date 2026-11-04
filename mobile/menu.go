@@ -3,6 +3,7 @@ package mobile
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -107,14 +108,25 @@ func MenuBlock(key, author string) (_ string, err error) {
 
 // LinkBlock returns the block of kind "image", "video" or "link_preview"
 // for link, as JSON, or what is wrong with the link, in the app's
-// language.
+// language. A video's share link, as Bilibili's app shares, is followed
+// to the video first, which asks its site: call it off the main thread.
 func LinkBlock(kind, link string) (_ string, err error) {
 	defer catch(&err)
+	if kind == "video" {
+		link = web.VideoLink(link)
+	}
 	n, err := menu.LinkBlock(kind, link)
 	if err != nil {
 		return "", err
 	}
 	return encode(n)
+}
+
+// ShortVideoLink reports whether link is a video's share link, as
+// Bilibili's app shares, which LinkBlock follows to its video.
+func ShortVideoLink(link string) bool {
+	defer catch(nil)
+	return doc.ShortVideoLink(link)
 }
 
 // EmbedStart returns the page a new embed starts from, to change.
@@ -140,30 +152,98 @@ func EmbedBlock(title, html string, height int, author string) (_ string, err er
 var linkRetry = time.Minute
 
 // fillLinks asks the pages of page id's link cards without their info
-// for it, once a run, and puts what they say in the cards, as the desktop
-// does as a card shows: for search, exports and other devices. A page
+// for it, and the sites of its videos without a title for theirs, once a
+// run, and puts what they say in the blocks, as the desktop does as a
+// card or a video shows: for search, exports and other devices. A page
 // that could not be read is asked again once linkRetry has passed, as
 // the page next opens or changes. Run on the core's queue.
 func (c *Core) fillLinks(id string, content *doc.Content) {
 	for _, link := range web.Unfilled(content) {
-		if c.linkAsked[link] {
-			continue
-		}
-		c.linkAsked[link] = true
-		guard.Go(func() {
+		c.askOnce(link, func() bool {
 			info, err := web.LookUp(link)
 			if err != nil {
-				time.AfterFunc(linkRetry, func() { c.q.post(func() { delete(c.linkAsked, link) }) })
-				return
+				return false
 			}
-			if info.Title == "" {
-				return
+			if info.Title != "" {
+				c.q.post(func() {
+					_ = c.editContent(id, func(content *doc.Content) bool { return info.Fill(content, link) })
+				})
 			}
-			c.q.post(func() {
-				_ = c.editContent(id, func(content *doc.Content) bool { return info.Fill(content, link) })
-			})
+			return true
 		})
 	}
+	for _, v := range untitledVideos(content) {
+		c.askOnce("video "+v.Provider+":"+v.ID, func() bool {
+			title, err := videoTitle(v)
+			if err != nil {
+				return false
+			}
+			if title != "" {
+				c.q.post(func() {
+					_ = c.editContent(id, func(content *doc.Content) bool { return nameVideo(content, v, title) })
+				})
+			}
+			return true
+		})
+	}
+}
+
+// askOnce runs ask off the queue unless key was asked this run, and lets
+// key be asked again once linkRetry has passed when ask reports it could
+// not be read. Run on the core's queue.
+func (c *Core) askOnce(key string, ask func() bool) {
+	if c.linkAsked[key] {
+		return
+	}
+	c.linkAsked[key] = true
+	guard.Go(func() {
+		if !ask() {
+			time.AfterFunc(linkRetry, func() { c.q.post(func() { delete(c.linkAsked, key) }) })
+		}
+	})
+}
+
+// videoTitle asks a video's site for its title, as the desktop's video
+// blocks do. Tests replace it.
+var videoTitle = func(v doc.Video) (string, error) {
+	data, err := web.Fetch(v.InfoURL())
+	if err != nil {
+		return "", err
+	}
+	title, _, err := v.ReadInfo(data)
+	return title, err
+}
+
+// untitledVideos are the videos of content's video blocks without a title,
+// each once: a file goes by its name, with no site to ask.
+func untitledVideos(content *doc.Content) []doc.Video {
+	var out []doc.Video
+	content.Walk(func(n, _ *doc.Node) {
+		if n.Type != "video" || n.Str("title") != "" {
+			return
+		}
+		if v, ok := doc.ParseVideoURL(n.Str("url")); ok && v.Provider != "file" &&
+			!slices.ContainsFunc(out, func(o doc.Video) bool { return o.Provider == v.Provider && o.ID == v.ID }) {
+			out = append(out, v)
+		}
+	})
+	return out
+}
+
+// nameVideo gives content's blocks of video v without a title the one
+// its site said, and reports whether there were any.
+func nameVideo(content *doc.Content, v doc.Video, title string) bool {
+	found := false
+	content.Walk(func(n, _ *doc.Node) {
+		if n.Type != "video" || n.Str("title") != "" {
+			return
+		}
+		if o, ok := doc.ParseVideoURL(n.Str("url")); ok && o.Provider == v.Provider && o.ID == v.ID {
+			n.Set("title", title)
+			found = true
+		}
+	})
+	return found
 }
 
 // pasted is what text pasted makes, as PasteText gives it: the blocks of

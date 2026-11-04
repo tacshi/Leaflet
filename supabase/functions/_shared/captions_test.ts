@@ -2,7 +2,16 @@
 // as well (testdata/captions.json).
 
 import { assertEquals, assertThrows } from "jsr:@std/assert@1";
-import { type Caption, CaptionsError, passages, vimeoTrack, vttLines, youtubeLines, youtubeTrack } from "./captions.ts";
+import {
+  ask,
+  type Caption,
+  CaptionsError,
+  passages,
+  vimeoTrack,
+  vttLines,
+  youtubeLines,
+  youtubeTrack,
+} from "./captions.ts";
 import { emptyContent, type VideoRef } from "./blocks.ts";
 import { PageEditSession, type ToolHooks } from "./tools.ts";
 import { fixture } from "../_testing/fixture.ts";
@@ -176,4 +185,36 @@ Deno.test("read_video_transcript reads a video block's captions in passages", as
   }
   fail = new CaptionsError("refused", "refused");
   assertEquals(String((await read("yt")).error).includes("YouTube refused"), true);
+});
+
+// A site's redirects are followed as the app's client follows them: a 302
+// asks again with GET, a 307 as it asked, and the cookie goes on only to
+// the host it was for or one under it.
+Deno.test("a site's captions are read through its redirects", async () => {
+  const asked: { url: string; method: string; cookie: string | null; body: unknown }[] = [];
+  const answers = [
+    new Response(null, { status: 307, headers: { location: "/again" } }),
+    new Response(null, { status: 302, headers: { location: "http://m.example.com/b" } }),
+    new Response(null, { status: 301, headers: { location: "https://cdn.example.net/c" } }),
+    new Response("lines"),
+  ];
+  const real = globalThis.fetch;
+  globalThis.fetch = (input: string | URL | Request, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    asked.push({ url: String(input), method: init?.method ?? "GET", cookie: headers.get("cookie"), body: init?.body });
+    const next = answers.shift();
+    return next ? Promise.resolve(next) : Promise.reject(new TypeError("no answer"));
+  };
+  try {
+    const resolve = () => Promise.resolve(["93.184.216.34"]);
+    assertEquals(await ask("https://example.com/a", { body: "{}", cookie: "CONSENT=YES+1", resolve }), "lines");
+    assertEquals(asked, [
+      { url: "https://example.com/a", method: "POST", cookie: "CONSENT=YES+1", body: "{}" },
+      { url: "https://example.com/again", method: "POST", cookie: "CONSENT=YES+1", body: "{}" },
+      { url: "https://m.example.com/b", method: "GET", cookie: "CONSENT=YES+1", body: undefined },
+      { url: "https://cdn.example.net/c", method: "GET", cookie: null, body: undefined },
+    ]);
+  } finally {
+    globalThis.fetch = real;
+  }
 });

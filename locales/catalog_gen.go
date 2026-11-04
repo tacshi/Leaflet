@@ -3919,6 +3919,22 @@ func (msgs Messages) DialogLinkNotVideo() string {
 	return Catalog.Format(msgs.locale, "dialogLinkNotVideo", nil)
 }
 
+// DialogLinkNotFollowed says "Couldn't find the video this share link leads to. Check that you're online, or paste the video's own link."
+// in the language the app shows.
+//
+// Link dialog: an error when a video's share link, as Bilibili's b23.tv
+// links, could not be followed to a video.
+func DialogLinkNotFollowed() string { return In(i18n.Locale()).DialogLinkNotFollowed() }
+
+// DialogLinkNotFollowed says "Couldn't find the video this share link leads to. Check that you're online, or paste the video's own link."
+// in the language of msgs.
+//
+// Link dialog: an error when a video's share link, as Bilibili's b23.tv
+// links, could not be followed to a video.
+func (msgs Messages) DialogLinkNotFollowed() string {
+	return Catalog.Format(msgs.locale, "dialogLinkNotFollowed", nil)
+}
+
 // DialogLinkNotWeb says "That isn't a web link."
 // in the language the app shows.
 //

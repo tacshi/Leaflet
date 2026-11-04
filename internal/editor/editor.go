@@ -85,6 +85,10 @@ type Host interface {
 	OpenBlock(pageID, blockID string, at int)
 	// BlockLink is the link to a block of this page.
 	BlockLink(blockID string) string
+	// FollowVideoLink follows a video's share link to the video, off the
+	// main thread (web.VideoLink), and then runs done on it with the
+	// video's link, or the share link when it leads to no video.
+	FollowVideoLink(link string, done func(video string))
 }
 
 // snapshot is a step of undo or redo: the page as it was, to go back to.

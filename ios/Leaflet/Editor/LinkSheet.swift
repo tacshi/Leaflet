@@ -18,6 +18,9 @@ struct LinkSheet: View {
     @Environment(\.palette) private var palette
     @State private var link = ""
     @State private var failure: String?
+    /// making says the core is making the block, as it follows a video's
+    /// share link, which asks its site.
+    @State private var making = false
     @FocusState private var focused: Bool
 
     private var title: String {
@@ -76,7 +79,11 @@ struct LinkSheet: View {
                     CancelButton(dirty: dirty)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(current == nil ? L.dialogInsert : L.commonSave, action: apply)
+                    if making {
+                        ProgressView()
+                    } else {
+                        Button(current == nil ? L.dialogInsert : L.commonSave, action: apply)
+                    }
                 }
             }
         }
@@ -94,18 +101,30 @@ struct LinkSheet: View {
         return current.map { typed != $0 } ?? !typed.isEmpty
     }
 
-    /// apply makes the block as the core does, or says what is wrong with
-    /// the link.
+    /// apply makes the block as the core does, off the main thread, as a
+    /// video's share link is followed to its video, or says what is wrong
+    /// with the link.
     private func apply() {
-        var error: NSError?
-        let raw = MobileLinkBlock(kind, link, &error)
-        guard error == nil, let node = try? JSONDecoder().decode(DocNode.self, from: Data(raw.utf8))
-        else {
-            failure = error?.localizedDescription
-            return
+        guard !making else { return }
+        making = true
+        let kind = kind
+        let link = link
+        Task {
+            let made = await Task.detached { () -> (raw: String, failure: String?) in
+                var error: NSError?
+                let raw = MobileLinkBlock(kind, link, &error)
+                return (raw, error?.localizedDescription)
+            }.value
+            making = false
+            guard made.failure == nil,
+                let node = try? JSONDecoder().decode(DocNode.self, from: Data(made.raw.utf8))
+            else {
+                failure = made.failure
+                return
+            }
+            insert(node)
+            dismiss()
         }
-        insert(node)
-        dismiss()
     }
 }
 

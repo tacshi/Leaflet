@@ -2,6 +2,7 @@ package editor
 
 import (
 	"net/url"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -861,6 +862,41 @@ func (e *Editor) insertBlocks(nodes ...*doc.Node) {
 	}
 	e.layouts = map[string]*blockLayout{}
 	e.Select(Pos{last.ID, textLen(last)}, Pos{last.ID, textLen(last)})
+	e.changed()
+}
+
+// shareToVideo shows block id, a video's share link pasted on a line of
+// its own, as the video the share led to, as that video's link pasted
+// there shows: unless the line has changed since, or the share led to no
+// video. It is a step of its own to undo, which takes it back to the link.
+func (e *Editor) shareToVideo(id, link, video string) {
+	n := e.node(id)
+	if n == nil || e.ReadOnly || n.Type != "paragraph" || len(n.Children) > 0 ||
+		strings.TrimSpace(n.Delta().Plain()) != link ||
+		slices.ContainsFunc(n.Delta(), func(r doc.Run) bool { return r.Attrs.Href != link && strings.TrimSpace(r.Text) != "" }) {
+		return
+	}
+	v, err := doc.VideoNode(video, "")
+	if err != nil {
+		return
+	}
+	held := e.anchor.ID == id || e.focus.ID == id
+	e.pushUndo(false)
+	e.coalescing = false
+	_ = e.Content.Insert(doc.Position{After: id}, v)
+	e.Content.Remove(id)
+	e.keepShown(v.ID)
+	// As insertBlocks leaves it: somewhere to type after it at the end of
+	// the page, where the caret goes.
+	last := v
+	if us := e.units(); e.index(v.ID)+1 >= len(us) {
+		last = newText("paragraph", nil)
+		_ = e.Content.Insert(doc.Position{After: v.ID}, last)
+	}
+	e.layouts = map[string]*blockLayout{}
+	if held {
+		e.Select(Pos{last.ID, textLen(last)}, Pos{last.ID, textLen(last)})
+	}
 	e.changed()
 }
 

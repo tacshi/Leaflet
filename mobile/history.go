@@ -1,6 +1,7 @@
 package mobile
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"mime"
@@ -148,6 +149,10 @@ type exportedPDF struct {
 	Height float64 `json:"height"`
 }
 
+// pdfDownloadWait is how long a page to print waits for its own pictures
+// that another device uploaded to download, as the desktop's waits.
+const pdfDownloadWait = 2 * time.Minute
+
 // ExportPDFPage returns a page as a web page to print as a PDF, as the
 // desktop's Export › PDF prints it, on the paper of region, a code such as
 // "US": an exportedPDF in JSON. The page's edits are saved first.
@@ -177,10 +182,21 @@ func (c *Core) ExportPDFPage(pageID, region string) (_ string, err error) {
 		}
 		content = c.content(pageID).Copy()
 		o = webpage.Options{Store: c.core.Store, Page: pageID, Title: p.DisplayTitle(), Titles: titles, Files: files,
-			Lang: i18n.Locale(), Serve: webpage.Inline, Print: true}
+			Lang: i18n.Locale(), Serve: webpage.Inline, Print: true, Region: region}
 	})
 	if err != nil {
 		return "", err
+	}
+	// Pictures another device added, which this one has not shown yet,
+	// come first, off the queue: paper has no other way to them.
+	ctx, cancel := context.WithTimeout(context.Background(), pdfDownloadWait)
+	defer cancel()
+	if c.core.DownloadPictures(ctx, content, pageID) {
+		c.q.do(func() {
+			if files, err := c.core.Store.Files(); err == nil {
+				o.Files = files
+			}
+		})
 	}
 	// Off the queue: its pictures are read into it.
 	out := exportedPDF{Name: export.SafeName(o.Title) + ".pdf", HTML: webpage.HTML(content, o)}

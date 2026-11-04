@@ -16,9 +16,11 @@ import (
 	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/guard"
 	"leaflet/internal/menu"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/internal/web"
 	"leaflet/locales"
 )
 
@@ -141,6 +143,8 @@ type dialogs struct {
 	linkID    string // the block being changed, or "" for a new one
 	linkURL   string
 	linkError string
+	// linkFollowing is a video's share link being followed to its video.
+	linkFollowing bool
 
 	// The dialog editing a math or diagram block's source.
 	sourceOpen bool
@@ -1053,19 +1057,26 @@ func (a *App) linkDialog(c *ui.Context) {
 			}
 			insert := func() {
 				link := strings.TrimSpace(d.linkURL)
-				n, err := menu.LinkBlock(d.linkKind, link)
-				if err != nil {
-					d.linkError = err.Error()
+				if d.linkFollowing {
 					return
 				}
-				switch {
-				case a.page == nil:
-				case d.linkID != "":
-					a.setMediaLink(d.linkID, link)
-				default:
-					a.page.editor.InsertBlocks(n)
+				if d.linkKind != "video" || !doc.ShortVideoLink(link) {
+					a.insertLink(link)
+					return
 				}
-				d.linkOpen = false
+				// A share link is followed to its video first, off the
+				// main thread: it asks its site.
+				d.linkFollowing, d.linkError = true, ""
+				go func() {
+					defer guard.Recover()
+					to := web.VideoLink(link)
+					a.update(func() {
+						d.linkFollowing = false
+						if d.linkOpen && strings.TrimSpace(d.linkURL) == link {
+							a.insertLink(to)
+						}
+					})
+				}()
 			}
 			if in.Submitted() {
 				insert()
@@ -1085,12 +1096,31 @@ func (a *App) linkDialog(c *ui.Context) {
 				if d.linkID != "" {
 					label = locales.CommonSave()
 				}
-				if primary(c, "insert", "", label).Clicked() {
+				if primary(c, "insert", "", label).Disabled(d.linkFollowing).Clicked() {
 					insert()
 				}
 			})
 		})
 	})
+}
+
+// insertLink puts the block the link dialog's link makes at the caret, or
+// points the block it changes at it, or says what is wrong with it.
+func (a *App) insertLink(link string) {
+	d := &a.dialogs
+	n, err := menu.LinkBlock(d.linkKind, link)
+	if err != nil {
+		d.linkError = err.Error()
+		return
+	}
+	switch {
+	case a.page == nil:
+	case d.linkID != "":
+		a.setMediaLink(d.linkID, n.Str("url"))
+	default:
+		a.page.editor.InsertBlocks(n)
+	}
+	d.linkOpen = false
 }
 
 // setMediaLink points an image or video block of the open page at a new

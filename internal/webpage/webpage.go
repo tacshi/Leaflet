@@ -60,8 +60,12 @@ type Options struct {
 	Code  func(code, language string) string
 	Chart func(n *doc.Node) string
 	// Print writes the page to be printed, as doc.HTMLOptions.Print does,
-	// with its scripts in it.
-	Print bool
+	// with its scripts in it, and Region is where, as
+	// doc.HTMLOptions.Region has it.
+	Print  bool
+	Region string
+	// Video is as doc.HTMLOptions.Video.
+	Video func(v doc.Video) doc.Video
 }
 
 // PrintCSP is a printed page's policy: it runs only its own two scripts,
@@ -90,6 +94,8 @@ func HTML(c *doc.Content, o Options) string {
 		Script: o.Script,
 		Embed:  o.Embed,
 		Print:  o.Print,
+		Region: o.Region,
+		Video:  o.Video,
 		Image: func(n *doc.Node) string {
 			local, ok := strings.CutPrefix(n.Str("url"), "file://")
 			if !ok {

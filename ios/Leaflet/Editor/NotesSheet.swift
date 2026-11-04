@@ -15,7 +15,9 @@ struct NotesSheet: View {
     @FocusState private var focused: Bool
 
     private var kept: String { MobileNormalizeNotes(text) }
-    private var tooLong: Bool { kept.count > Int(MobileMaxNotes) }
+    /// tooLong counts code points, as the core and the server do: an emoji
+    /// or a Devanagari syllable is one character here but several there.
+    private var tooLong: Bool { kept.unicodeScalars.count > Int(MobileMaxNotes) }
     private var dirty: Bool { kept != MobileNormalizeNotes(notes) }
 
     var body: some View {

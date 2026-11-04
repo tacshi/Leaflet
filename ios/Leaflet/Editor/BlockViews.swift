@@ -30,6 +30,17 @@ struct PageLinks {
     var openAt: (@MainActor (String, String, Int) -> Void)?
 }
 
+/// BlockAction is something a block offers: Play or Pause, or an item of
+/// its menu. A block's menu and VoiceOver's actions at the caret, which
+/// can't reach the block in the text, offer the same.
+struct BlockAction {
+    let title: String
+    var symbol = ""
+    var enabled = true
+    var destructive = false
+    let run: @MainActor () -> Void
+}
+
 /// BlockCard shows a block without text.
 struct BlockCard: View {
     let node: DocNode
@@ -85,6 +96,9 @@ struct BlockCard: View {
         // and title until then.
         case "video": BlockHeights.of(node.id, width: width) ?? min(width * 9 / 16, 420) + 44
         case "chart": scaled(300)
+        // Short without a description or picture to make room for, as on
+        // the desktop.
+        case "link_preview": scaled(LinkCardBlock.tall(node) ? 96 : 64)
         // As tall as it measured itself, or its header alone until then.
         case "recording": BlockHeights.of(node.id, width: width) ?? scaled(64)
         // As tall as it was made, or as its content, when that is taller,
@@ -114,8 +128,87 @@ struct BlockCard: View {
             SubpageBlock(node: node, links: links)
         case "recording":
             RecordingBlock(node: node, canEdit: edit != nil, editor: editor, onHeight: onHeight)
+        case "link_preview":
+            LinkCardBlock(node: node)
         default:
             CardBlock(node: node)
+        }
+    }
+}
+
+/// LinkCardBlock is a link card as the desktop draws it: the page's title,
+/// its description, its site, and its picture beside them.
+struct LinkCardBlock: View {
+    let node: DocNode
+    @State private var picture: UIImage?
+
+    /// pictures are the cards' pictures as they came, by link, for a card
+    /// made again not to ask for its picture again.
+    @MainActor private static let pictures = NSCache<NSString, UIImage>()
+
+    /// tall says the card has a description or a picture to make room for.
+    static func tall(_ node: DocNode) -> Bool {
+        !(node.data?["description"]?.string ?? "").isEmpty
+            || !(node.data?["image"]?.string ?? "").isEmpty
+    }
+
+    private var link: String { node.data?["url"]?.string ?? "" }
+    private var image: String { node.data?["image"]?.string ?? "" }
+
+    private var title: String {
+        let title = node.data?["title"]?.string ?? ""
+        return title.isEmpty ? link : title
+    }
+
+    private var site: String {
+        if let site = node.data?["site"]?.string, !site.isEmpty { return site }
+        let host = URL(string: link)?.host() ?? ""
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                if let detail = node.data?["description"]?.string, !detail.isEmpty {
+                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+                HStack(spacing: 6) {
+                    Image(systemName: "globe").font(.caption2)
+                    Text(site).font(.caption).lineLimit(1)
+                }
+                .foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 12)
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let picture {
+                Image(uiImage: picture).resizable().scaledToFill()
+                    .frame(width: 150)
+                    .frame(maxHeight: .infinity)
+                    .clipped()
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.quaternary.opacity(0.5))
+        .clipShape(.rect(cornerRadius: 10))
+        .task(id: image) {
+            guard !image.isEmpty else {
+                picture = nil
+                return
+            }
+            if let kept = Self.pictures.object(forKey: image as NSString) {
+                picture = kept
+                return
+            }
+            // From the web through the core, as the desktop reads one: http
+            // too, and never this device's network.
+            guard let data = try? await ImageBlock.client?.picture(image), !data.isEmpty,
+                let made = await Task.detached(operation: { UIImage(data: data) }).value
+            else { return }
+            Self.pictures.setObject(made, forKey: image as NSString)
+            picture = made
         }
     }
 }
@@ -288,7 +381,10 @@ final class VideoPlayback {
         }
         playAlone(id)
         let script = MobileVideoSeek(link, at)
-        if script.isEmpty {
+        // A player whose web view left the page, as many blocks showed
+        // since, loads there as it shows again: a script has no page to run
+        // in, and the view made next runs none it was made with.
+        if script.isEmpty || views[id]?.view?.window == nil {
             start[id] = at
             loads[id, default: 0] += 1
         } else {
@@ -326,8 +422,9 @@ final class VideoPlayback {
     }
 
     /// register keeps the web view of block id's player, for another
-    /// starting to pause it. While two show, one started from its own
-    /// controls, which the app isn't told of, is found within a second.
+    /// starting to pause it. While two show, or one as a recording plays,
+    /// one started from its own controls, which the app isn't told of, is
+    /// found within a second.
     func register(_ view: WKWebView, for id: String) {
         views[id] = Weak(view)
         views = views.filter { $0.value.view != nil }
@@ -341,7 +438,11 @@ final class VideoPlayback {
                     self.watching = nil
                     return
                 }
-                guard self.views.count > 1 else { continue }
+                // One player alone, with no recording playing, has none to
+                // pause. A recording that starts pauses the players and
+                // leaves none current: each is looked at then.
+                guard self.views.count > 1 || Recorder.shared.player?.isPlaying == true
+                else { continue }
                 for (id, weak) in self.views where id != self.current {
                     if await weak.view?.requestMediaPlaybackState() == .playing {
                         self.playAlone(id)
@@ -369,6 +470,10 @@ struct VideoBlock: View {
     @State private var width: CGFloat = 0
     /// open shows long notes whole.
     @State private var open = false
+    /// made is the block's player, as the core makes it off the main
+    /// thread, a Bilibili video's asking its site for its part the first
+    /// time, with the time it was loaded again for.
+    @State private var made: Made?
     @ScaledMetric(relativeTo: .subheadline) private var control: CGFloat = 28
 
     private var playback: VideoPlayback { VideoPlayback.shared }
@@ -379,10 +484,15 @@ struct VideoBlock: View {
         return title.isEmpty ? link : title
     }
 
-    private struct Player: Decodable {
+    private struct Player: Decodable, Sendable {
         let page: String
         let origin: String
         let thumbnail: String
+    }
+
+    private struct Made {
+        let player: Player
+        let loads: Int
     }
 
     /// Line is a line of the notes, as the core reads them.
@@ -399,12 +509,9 @@ struct VideoBlock: View {
 
     var body: some View {
         let start = playback.start[node.id] ?? -1
-        let player = try? JSONDecoder().decode(
-            Player.self, from: Data(MobileVideoPlayerAt(link, start).utf8))
-        let lines =
-            (try? JSONDecoder().decode(
-                [Line].self, from: Data(MobileVideoNotes(node.data?["notes"]?.string ?? "").utf8)))
-            ?? []
+        let loads = playback.loads[node.id] ?? 0
+        let player = made?.player
+        let lines = Self.lines(node)
         VStack(alignment: .leading, spacing: 0) {
             // The black area takes the player's room; the picture fills it
             // without setting its size, so it never spills past the block.
@@ -412,11 +519,11 @@ struct VideoBlock: View {
                 .frame(maxWidth: .infinity)
                 .frame(height: min(max(width, 1) * 9 / 16, 420))
                 .overlay {
-                    if playing, let player {
+                    if playing, let made {
                         // Loaded again for the same time asked again.
                         WebPage(
-                            html: player.page + "<!-- \(playback.loads[node.id] ?? 0) -->",
-                            base: URL(string: player.origin), interactive: true,
+                            html: made.player.page + "<!-- \(made.loads) -->",
+                            base: URL(string: made.player.origin), interactive: true,
                             script: playback.seeks[node.id], player: node.id)
                     } else if let thumb = player?.thumbnail, let url = URL(string: thumb) {
                         AsyncImage(url: url) {
@@ -467,6 +574,14 @@ struct VideoBlock: View {
             onHeight?(CGSize(width: $0.width, height: $0.height + 2))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .task(id: "\(start) \(loads) \(link)") {
+            let link = link
+            let player = await Task.detached {
+                try? JSONDecoder().decode(
+                    Player.self, from: Data(MobileVideoPlayerAt(link, start).utf8))
+            }.value
+            made = player.map { Made(player: $0, loads: loads) }
+        }
     }
 
     /// play plays the video from at seconds in.
@@ -557,49 +672,108 @@ struct VideoBlock: View {
         }
     }
 
-    /// menu is the block's, as the desktop's context menu of it has it: Cut
-    /// and Copy, a link to the block, its link, its notes and an agent's
-    /// summary of them from what is said in the video, where its site gives
-    /// its captions, and Delete, as a recording's menu has. A page that
-    /// can't be changed offers only what copies.
+    /// lines are the notes of block, a line each, as the core reads them.
+    static func lines(_ block: DocNode) -> [Line] {
+        let notes = MobileVideoNotes(block.data?["notes"]?.string ?? "")
+        return (try? JSONDecoder().decode([Line].self, from: Data(notes.utf8))) ?? []
+    }
+
+    /// actions are what block offers now, for VoiceOver at the caret,
+    /// which can't reach the block in the text: Play, each time in its
+    /// notes, as a tap on its line plays from it, and its menu's items.
+    static func actions(_ block: DocNode, canEdit: Bool, editor: EditorController?)
+        -> [BlockAction]
+    {
+        let playback = VideoPlayback.shared
+        let link = block.data?["url"]?.string ?? ""
+        let lines = Self.lines(block)
+        var out: [BlockAction] = []
+        if !playback.playing.contains(block.id) {
+            out.append(BlockAction(title: L.recPlay) { playback.play(block.id) })
+        }
+        func offer(_ title: String, at: Int) {
+            out.append(
+                BlockAction(title: L.videoPlay(title: title)) {
+                    playback.seek(block.id, link: link, at: at)
+                })
+        }
+        for line in lines {
+            let text = line.parts.map(\.text).joined()
+            if let time = line.time, line.at >= 0 {
+                offer(text.isEmpty ? time : time + " " + text, at: line.at)
+            } else {
+                // A line with one time is named by the whole of it, one
+                // with more by each time.
+                let times = line.parts.filter { $0.at >= 0 }
+                for p in times { offer(times.count == 1 ? text : p.text, at: p.at) }
+            }
+        }
+        return out + menuItems(block, lines, canEdit: canEdit, editor: editor).joined()
+    }
+
+    /// menuItems are the sections of the menu of block, in editor's page,
+    /// as the desktop's context menu of it has them: Cut and Copy; a link
+    /// to the block, its link, its notes and an agent's summary of them
+    /// from what is said in the video, where its site gives its captions;
+    /// and Delete, as a recording's menu has. A page that can't be changed
+    /// offers only what copies.
+    private static func menuItems(
+        _ block: DocNode, _ lines: [Line], canEdit: Bool, editor: EditorController?
+    ) -> [[BlockAction]] {
+        let link = block.data?["url"]?.string ?? ""
+        let title = block.data?["title"]?.string ?? ""
+        var copies: [BlockAction] = []
+        if canEdit {
+            copies.append(
+                BlockAction(title: L.editorCut, symbol: "scissors") { editor?.cutBlock(block.id) })
+        }
+        copies.append(
+            BlockAction(title: L.commonCopy, symbol: "doc.on.doc") { editor?.copyBlock(block.id) })
+        var links: [BlockAction] = []
+        if let page = editor?.pageID, !page.isEmpty {
+            links.append(
+                BlockAction(title: L.editorCopyBlockLink, symbol: "link") {
+                    UIPasteboard.general.string = MobileBlockLink(page, block.id)
+                })
+        }
+        guard canEdit else { return [copies, links] }
+        links.append(
+            BlockAction(title: L.editorEditMediaLink, symbol: "pencil") {
+                editor?.onEditLink?(block)
+            })
+        links.append(
+            BlockAction(
+                title: lines.isEmpty ? L.videoAddNotes : L.videoEditNotes,
+                symbol: "text.alignleft"
+            ) {
+                editor?.onEditNotes?(block)
+            })
+        if MobileVideoHasCaptions(link) {
+            links.append(
+                BlockAction(title: L.videoSummarize, symbol: "sparkles") {
+                    editor?.onSummarize?(
+                        block, L.videoSummarizePrompt(title: title.isEmpty ? link : title))
+                })
+        }
+        // The block goes as one step to undo.
+        let delete = BlockAction(title: L.commonDelete, symbol: "trash", destructive: true) {
+            editor?.removeBlock(block.id)
+        }
+        return [copies, links, [delete]]
+    }
+
+    /// menu is the block's, of its menuItems.
     private func menu(_ lines: [Line]) -> some View {
         let palette = BlockLook.palette
+        let sections = Self.menuItems(node, lines, canEdit: canEdit, editor: editor)
         return Menu {
-            Section {
-                if canEdit {
-                    Button(L.editorCut, systemImage: "scissors") { editor?.cutBlock(node.id) }
-                }
-                Button(L.commonCopy, systemImage: "doc.on.doc") { editor?.copyBlock(node.id) }
-            }
-            Section {
-                if let page = editor?.pageID, !page.isEmpty {
-                    Button(L.editorCopyBlockLink, systemImage: "link") {
-                        UIPasteboard.general.string = MobileBlockLink(page, node.id)
+            ForEach(sections.indices, id: \.self) { i in
+                Section {
+                    ForEach(sections[i], id: \.title) { item in
+                        Button(
+                            item.title, systemImage: item.symbol,
+                            role: item.destructive ? .destructive : nil, action: item.run)
                     }
-                }
-                if canEdit {
-                    Button(L.editorEditMediaLink, systemImage: "pencil") {
-                        editor?.onEditLink?(node)
-                    }
-                    Button(
-                        lines.isEmpty ? L.videoAddNotes : L.videoEditNotes,
-                        systemImage: "text.alignleft"
-                    ) {
-                        editor?.onEditNotes?(node)
-                    }
-                    if MobileVideoHasCaptions(link) {
-                        Button(L.videoSummarize, systemImage: "sparkles") {
-                            let title = node.data?["title"]?.string ?? ""
-                            editor?.onSummarize?(
-                                node, L.videoSummarizePrompt(title: title.isEmpty ? link : title))
-                        }
-                    }
-                }
-            }
-            if canEdit {
-                // The block goes as one step to undo.
-                Button(L.commonDelete, systemImage: "trash", role: .destructive) {
-                    editor?.removeBlock(node.id)
                 }
             }
         } label: {
@@ -693,7 +867,6 @@ struct CardBlock: View {
     private var symbol: String {
         switch node.type {
         case "embed": "curlybraces.square"
-        case "link_preview": "link"
         case "file": "doc"
         case "recording": "waveform"
         case "subpage": "doc.text"

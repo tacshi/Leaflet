@@ -197,21 +197,31 @@ struct PageScreen: View {
         .sheet(item: Binding(get: { scene.editingLink }, set: { scene.editingLink = $0 })) {
             node in
             LinkSheet(kind: "video", current: node.data?["url"]?.string ?? "") { [scene] made in
+                // The block as it is now, with what synced in while the
+                // sheet was open; the same link saved changes nothing.
+                guard let editor = scene.editor, let now = editor.node(ofBlock: node.id),
+                    now.type == "video", made.data?["url"] != now.data?["url"]
+                else { return }
                 // Another video: its title is learned again, and its player
                 // starts again from its picture; its notes stay.
-                var data = node.data ?? [:]
+                var data = now.data ?? [:]
                 data["url"] = made.data?["url"]
                 data["title"] = made.data?["title"] ?? .string("")
                 VideoPlayback.shared.stop([node.id])
-                scene.editor?.setData(data, ofBlock: node.id)
+                editor.setData(data, ofBlock: node.id)
             }
         }
         .sheet(item: Binding(get: { scene.editingNotes }, set: { scene.editingNotes = $0 })) {
             node in
             NotesSheet(notes: node.data?["notes"]?.string ?? "") { [scene] notes in
-                var data = node.data ?? [:]
+                // Into the block as it is now, with what synced in while the
+                // sheet was open.
+                guard let editor = scene.editor, let now = editor.node(ofBlock: node.id),
+                    now.type == "video"
+                else { return }
+                var data = now.data ?? [:]
                 data["notes"] = notes.isEmpty ? nil : .string(notes)
-                scene.editor?.setData(data, ofBlock: node.id)
+                if data != (now.data ?? [:]) { editor.setData(data, ofBlock: node.id) }
             }
         }
         .alert(

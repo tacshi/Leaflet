@@ -394,7 +394,7 @@
   "@hostSlashVideo": {
     "description": "The / menu."
   },
-  "hostSlashVideoHint": "A YouTube, Vimeo or video file link",
+  "hostSlashVideoHint": "A YouTube, Bilibili, Vimeo or video file link",
   "@hostSlashVideoHint": {
     "description": "The / menu: hint of Video."
   },
@@ -1329,11 +1329,11 @@
   "@dialogLinkVideoTitle": {
     "description": "Link dialog: the title when adding a video."
   },
-  "dialogLinkVideoSubtitle": "Paste a YouTube or Vimeo link, or a link to a video file.",
+  "dialogLinkVideoSubtitle": "Paste a link to a video on YouTube, Bilibili, Vimeo, Dailymotion or Niconico, or to a video file.",
   "@dialogLinkVideoSubtitle": {
     "description": "Link dialog: the subtitle when adding a video."
   },
-  "dialogLinkNotVideo": "That isn't a YouTube, Vimeo or video file link.",
+  "dialogLinkNotVideo": "That isn't a link to a video on YouTube, Bilibili, Vimeo, Dailymotion or Niconico, or to a video file.",
   "@dialogLinkNotVideo": {
     "description": "Link dialog: an error when the link is not a video."
   },
@@ -5336,7 +5336,7 @@
   "@welcomeMediaHeading": {
     "description": "The welcome guide page, made once on first run: a section heading."
   },
-  "welcomeMediaImages": "Images are saved with the page, so they show offline. Paste a YouTube or Vimeo link on an empty line for a video that plays in place.",
+  "welcomeMediaImages": "Images are saved with the page, so they show offline. Paste a YouTube or Bilibili link on an empty line for a video that plays in place.",
   "@welcomeMediaImages": {
     "description": "The welcome guide page, made once on first run: a paragraph."
   },

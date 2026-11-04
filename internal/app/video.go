@@ -1,7 +1,6 @@
 package app
 
 import (
-	"encoding/json"
 	"log"
 	"strings"
 	"sync"
@@ -39,14 +38,9 @@ func (a *App) videoInfoOf(v doc.Video) videoInfo {
 	key := videoKey(v)
 	return a.videoInfo.get(a, key, func() (videoInfo, error) {
 		var info videoInfo
-		data, err := web.Fetch(v.OEmbedURL())
+		data, err := web.Fetch(v.InfoURL())
 		if err == nil {
-			var o struct {
-				Title     string `json:"title"`
-				Thumbnail string `json:"thumbnail_url"`
-			}
-			err = json.Unmarshal(data, &o)
-			info = videoInfo{strings.TrimSpace(o.Title), o.Thumbnail}
+			info.title, info.thumbnail, err = v.ReadInfo(data)
 		}
 		if err != nil {
 			log.Printf("video %s: %v", v.WatchURL(), err)

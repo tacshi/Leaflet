@@ -1249,13 +1249,13 @@ func (msgs Messages) HostSlashVideo() string {
 	return Catalog.Format(msgs.locale, "hostSlashVideo", nil)
 }
 
-// HostSlashVideoHint says "A YouTube, Vimeo or video file link"
+// HostSlashVideoHint says "A YouTube, Bilibili, Vimeo or video file link"
 // in the language the app shows.
 //
 // The / menu: hint of Video.
 func HostSlashVideoHint() string { return In(i18n.Locale()).HostSlashVideoHint() }
 
-// HostSlashVideoHint says "A YouTube, Vimeo or video file link"
+// HostSlashVideoHint says "A YouTube, Bilibili, Vimeo or video file link"
 // in the language of msgs.
 //
 // The / menu: hint of Video.
@@ -3891,13 +3891,13 @@ func (msgs Messages) DialogLinkVideoTitle() string {
 	return Catalog.Format(msgs.locale, "dialogLinkVideoTitle", nil)
 }
 
-// DialogLinkVideoSubtitle says "Paste a YouTube or Vimeo link, or a link to a video file."
+// DialogLinkVideoSubtitle says "Paste a link to a video on YouTube, Bilibili, Vimeo, Dailymotion or Niconico, or to a video file."
 // in the language the app shows.
 //
 // Link dialog: the subtitle when adding a video.
 func DialogLinkVideoSubtitle() string { return In(i18n.Locale()).DialogLinkVideoSubtitle() }
 
-// DialogLinkVideoSubtitle says "Paste a YouTube or Vimeo link, or a link to a video file."
+// DialogLinkVideoSubtitle says "Paste a link to a video on YouTube, Bilibili, Vimeo, Dailymotion or Niconico, or to a video file."
 // in the language of msgs.
 //
 // Link dialog: the subtitle when adding a video.
@@ -3905,13 +3905,13 @@ func (msgs Messages) DialogLinkVideoSubtitle() string {
 	return Catalog.Format(msgs.locale, "dialogLinkVideoSubtitle", nil)
 }
 
-// DialogLinkNotVideo says "That isn't a YouTube, Vimeo or video file link."
+// DialogLinkNotVideo says "That isn't a link to a video on YouTube, Bilibili, Vimeo, Dailymotion or Niconico, or to a video file."
 // in the language the app shows.
 //
 // Link dialog: an error when the link is not a video.
 func DialogLinkNotVideo() string { return In(i18n.Locale()).DialogLinkNotVideo() }
 
-// DialogLinkNotVideo says "That isn't a YouTube, Vimeo or video file link."
+// DialogLinkNotVideo says "That isn't a link to a video on YouTube, Bilibili, Vimeo, Dailymotion or Niconico, or to a video file."
 // in the language of msgs.
 //
 // Link dialog: an error when the link is not a video.
@@ -15387,13 +15387,13 @@ func (msgs Messages) WelcomeMediaHeading() string {
 	return Catalog.Format(msgs.locale, "welcomeMediaHeading", nil)
 }
 
-// WelcomeMediaImages says "Images are saved with the page, so they show offline. Paste a YouTube or Vimeo link on an empty line for a video that…"
+// WelcomeMediaImages says "Images are saved with the page, so they show offline. Paste a YouTube or Bilibili link on an empty line for a video t…"
 // in the language the app shows.
 //
 // The welcome guide page, made once on first run: a paragraph.
 func WelcomeMediaImages() string { return In(i18n.Locale()).WelcomeMediaImages() }
 
-// WelcomeMediaImages says "Images are saved with the page, so they show offline. Paste a YouTube or Vimeo link on an empty line for a video that…"
+// WelcomeMediaImages says "Images are saved with the page, so they show offline. Paste a YouTube or Bilibili link on an empty line for a video t…"
 // in the language of msgs.
 //
 // The welcome guide page, made once on first run: a paragraph.

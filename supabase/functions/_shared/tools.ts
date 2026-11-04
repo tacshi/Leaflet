@@ -137,7 +137,8 @@ const blockSpecSchema = {
     },
     video: {
       type: "object",
-      description: "For video: a YouTube or Vimeo video, or a video file, that plays in the page",
+      description:
+        "For video: a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or a video file, that plays in the page",
       properties: { url: { type: "string" }, title: { type: "string" } },
       required: ["url"],
     },

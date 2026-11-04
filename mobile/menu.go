@@ -177,9 +177,10 @@ type pasted struct {
 
 // PasteText reads text pasted, as the desktop's editor pastes text: lines
 // as blocks, read as Markdown (doc.ParseLines), and one line that is a web
-// link as that link; on an empty line, a YouTube, Vimeo or video file's
-// link as a video, and a picture's as an image. empty says the caret is on
-// an empty line. A line of other text makes nothing: it goes in as typed.
+// link as that link; on an empty line, a link to a video on a site
+// Leaflet plays or to a video file as a video, and a picture's as an
+// image. empty says the caret is on an empty line. A line of other text
+// makes nothing: it goes in as typed.
 func PasteText(text string, empty bool) (_ string, err error) {
 	defer catch(&err)
 	var out pasted

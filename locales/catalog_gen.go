@@ -2954,13 +2954,15 @@ func (msgs Messages) DialogSearchNoMatch(query string) string {
 // DialogSearchAskAgent says "Ask an agent instead"
 // in the language the app shows.
 //
-// Search dialog: a button, when nothing matches, asking an agent the query.
+// Search, the desktop's dialog and the iPhone and iPad sidebar's: a button,
+// when nothing matches, asking the agent of all the user's pages the query.
 func DialogSearchAskAgent() string { return In(i18n.Locale()).DialogSearchAskAgent() }
 
 // DialogSearchAskAgent says "Ask an agent instead"
 // in the language of msgs.
 //
-// Search dialog: a button, when nothing matches, asking an agent the query.
+// Search, the desktop's dialog and the iPhone and iPad sidebar's: a button,
+// when nothing matches, asking the agent of all the user's pages the query.
 func (msgs Messages) DialogSearchAskAgent() string {
 	return Catalog.Format(msgs.locale, "dialogSearchAskAgent", nil)
 }
@@ -17298,15 +17300,15 @@ func (msgs Messages) WorkspaceSuggestNew() string {
 // ShellAskAgent says "Ask the agent"
 // in the language the app shows.
 //
-// A button on the screen shown when no page is open: it opens the agent
-// chat of all the user's pages.
+// A button on the screen shown when no page is open, and on iPhone above
+// the list of pages: it opens the agent chat of all the user's pages.
 func ShellAskAgent() string { return In(i18n.Locale()).ShellAskAgent() }
 
 // ShellAskAgent says "Ask the agent"
 // in the language of msgs.
 //
-// A button on the screen shown when no page is open: it opens the agent
-// chat of all the user's pages.
+// A button on the screen shown when no page is open, and on iPhone above
+// the list of pages: it opens the agent chat of all the user's pages.
 func (msgs Messages) ShellAskAgent() string {
 	return Catalog.Format(msgs.locale, "shellAskAgent", nil)
 }

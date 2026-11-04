@@ -1,3 +1,4 @@
+import LeafletCore
 import SwiftUI
 
 /// AgentPanel is an agent chat, as the desktop's Agent tab: the page's,
@@ -10,6 +11,10 @@ struct AgentPanel<Chat: AgentChat>: View {
     /// about, the page or all the user's pages, as a menu by the composer,
     /// as on the desktop.
     var allPages: Binding<Bool>?
+    /// isSheet says the panel is a sheet over the page, as on iPhone,
+    /// rather than a column beside it: a page opened from it shows once it
+    /// goes. (A column's own size class is compact on iPad too.)
+    var isSheet = false
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
@@ -49,6 +54,8 @@ struct AgentPanel<Chat: AgentChat>: View {
                 Button(L.panelOpenProviders) { openProviders() }
                     .buttonStyle(.borderedProminent)
             }
+            // No composer to give the keyboard to: no later one takes it.
+            .onAppear { scene.focusChat = false }
         } else {
             VStack(spacing: 0) {
                 conversation
@@ -76,7 +83,7 @@ struct AgentPanel<Chat: AgentChat>: View {
                         MessageView(
                             message: m,
                             run: m.runID.flatMap { id in state.runs.first { $0.id == id } },
-                            pageID: model.id
+                            pageID: model.id, isSheet: isSheet
                         )
                         .id(i)
                     }
@@ -84,12 +91,14 @@ struct AgentPanel<Chat: AgentChat>: View {
                         VStack(alignment: .leading, spacing: 6) {
                             Label(runText(run), systemImage: "sparkles")
                                 .font(.footnote.weight(.medium))
-                            RunCard(run: run, pageID: model.id)
+                            RunCard(run: run, pageID: model.id, isSheet: isSheet)
                         }
                     }
                 }
                 .padding(14)
             }
+            // At its latest as it shows, as a chat opens.
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
             .onChange(of: state.messages.count) {
                 withAnimation { proxy.scrollTo(state.messages.count - 1, anchor: .bottom) }
             }
@@ -157,6 +166,9 @@ struct AgentPanel<Chat: AgentChat>: View {
                 .background(palette.panel, in: .rect(cornerRadius: 10))
                 .focused($composing)
                 .onSubmit { send(model.chatDraft) }
+                // As Ask the agent opens the chat.
+                .onAppear { takeFocus() }
+                .onChange(of: scene.focusChat) { takeFocus() }
             if state.running, let run = state.runs.last(where: { $0.running && $0.stoppable }) {
                 Button(L.pageStopRun, systemImage: "stop.circle.fill") {
                     Task { await app.client?.stopAgent(model.id, runID: run.id) }
@@ -165,12 +177,16 @@ struct AgentPanel<Chat: AgentChat>: View {
                 .imageScale(.large)
                 .frame(minWidth: 28, minHeight: line)
             } else {
+                // A run the server works on can't be stopped here: what is
+                // typed waits for it to end, as the core asks one at a time.
                 Button(L.panelSend, systemImage: "arrow.up.circle.fill") { send(model.chatDraft) }
                     .labelStyle(.iconOnly)
                     .imageScale(.large)
                     .frame(minWidth: 28, minHeight: line)
                     .disabled(
-                        model.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        state.running
+                            || model.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .isEmpty
                     )
                     .keyboardShortcut(.return, modifiers: .command)
             }
@@ -204,9 +220,19 @@ struct AgentPanel<Chat: AgentChat>: View {
         scene.openSettings()
     }
 
+    /// takeFocus gives the composer the keyboard, once, as Ask the agent
+    /// asked.
+    private func takeFocus() {
+        guard scene.focusChat else { return }
+        scene.focusChat = false
+        composing = true
+    }
+
+    /// send asks the chat's agent text. While a run works, which the core
+    /// asks one at a time, it waits in the composer.
     private func send(_ text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty, let client = app.client else { return }
+        guard !t.isEmpty, !state.running, let client = app.client else { return }
         model.chatDraft = ""
         Task { [model, scene] in await model.send(t, client: client, scene: scene) }
     }
@@ -219,6 +245,8 @@ struct MessageView: View {
     let run: AgentState.Run?
     /// pageID is the chat's: its page's, or "workspace".
     let pageID: String
+    /// isSheet says the chat is a sheet, which goes as a page opens.
+    var isSheet = false
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
@@ -246,25 +274,24 @@ struct MessageView: View {
                     .foregroundStyle(message.error ? palette.dangerText : palette.text)
                     .textSelection(.enabled)
                     // A link to a page, a block of one or a moment of a video
-                    // opens it here, as one in the page does.
+                    // opens it here, as one in the page does, with no page
+                    // open too, as the workspace agent's chat may be. One
+                    // to a page not here, as one not synced yet, goes nowhere.
                     .environment(
                         \.openURL,
-                        OpenURLAction { [scene] url in
+                        OpenURLAction { [scene, app, pageID, isSheet] url in
                             guard url.scheme == "leaflet" else { return .systemAction }
-                            if let editor = scene.editor {
-                                editor.open(url)
-                            } else if url.host() == "page", url.pathComponents.count > 1 {
-                                // With no page open, as the workspace agent's
-                                // chat may be, the page it links to opens.
-                                scene.open(url.pathComponents[1])
-                            } else {
-                                return .systemAction
-                            }
+                            let id = url.pathComponents.dropFirst().first ?? ""
+                            guard url.host() == "page", app.opens(id) else { return .handled }
+                            let href = url.absoluteString
+                            scene.openFromChat(
+                                id, at: MobileLinkedBlock(href), moment: MobileLinkedMoment(href),
+                                workspace: pageID == WorkspaceAgentModel.chatID, sheet: isSheet)
                             return .handled
                         })
             }
             if let run, !run.edits.isEmpty {
-                RunCard(run: run, pageID: pageID)
+                RunCard(run: run, pageID: pageID, isSheet: isSheet)
             }
         }
         .frame(maxWidth: .infinity, alignment: message.mine ? .trailing : .leading)
@@ -308,9 +335,10 @@ struct StatusLine: View {
 struct RunCard: View {
     let run: AgentState.Run
     let pageID: String
+    /// isSheet says the card is in a sheet, which goes as a page opens.
+    var isSheet = false
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
-    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -318,11 +346,11 @@ struct RunCard: View {
             // By place: two edits can say the same.
             ForEach(Array(run.edits.enumerated()), id: \.offset) { i, e in
                 // A page the run made opens, unless undone: then it is gone.
-                if let page = run.page(i), !run.undone {
+                // One that has not come yet goes nowhere.
+                if let page = run.page(i), !run.undone, app.opens(page) {
                     Button {
-                        // The panel as a sheet would cover it.
-                        if sizeClass == .compact { scene.inspectorShown = false }
-                        scene.open(page)
+                        scene.openFromChat(
+                            page, workspace: pageID == WorkspaceAgentModel.chatID, sheet: isSheet)
                     } label: {
                         Label(e, systemImage: "doc.text")
                     }

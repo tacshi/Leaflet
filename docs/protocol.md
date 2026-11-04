@@ -167,8 +167,8 @@ says where whatever other keys the position has.
 | `move_block` | `id`, `position` | `{ id }` |
 | `delete_blocks` | `ids: [...]` | `{ deleted_ids: [...] }` |
 | `create_subpage` | `title`, `markdown?` or `blocks?: [BlockSpec]` | `{ page_id }` (inside this page, its subpage block inserted at the end of this page: an `insert` op, then `create_page`) |
-| `create_page` | `title`, `folder_id?`, `markdown?` or `blocks?: [BlockSpec]` | `{ page_id }` (a page of its own in the user's own space, at the top level or in their folder, last there; this page is left as it is) |
-| `list_pages` | — | `{ pages: [{id, title, parent_id}] }` (only when cross-page reading is on) |
+| `create_page` | `title`, `folder_id?`, `markdown?` or `blocks?: [BlockSpec]` | `{ page_id }` (a page of its own in the user's own space, at the top level or in their folder, last there; this page is left as it is). Only on a page no one else writes or reads, as for reading other pages: a page of the user's own made from one someone else shares, comments on as a guest or reads by a public link could take what they wrote into the user's pages, where the workspace agent reads it as theirs. On one, the agent makes a subpage instead |
+| `list_pages` | — | `{ pages: [{id, title, parent_id}] }` (only when cross-page reading is on): at most 500, fewer where they would take more of the result than a model reads at once (60,000 UTF-16 units, each page's JSON counted at the most either side writes it) |
 | `read_other_page` | `page_id` | same shape as `read_page` |
 | `list_folders` | — | `{ folders: [{id, name}] }` (the user's own, only when cross-page reading is on; not reading beyond the page: the URL guard and the web stay as they were) |
 | `web_search` | `query` | `{ query, answer, results: [{url, title?, snippet?}] }` (only when the web is on and the provider searches) |
@@ -261,20 +261,21 @@ The workspace agent is a chat of the user's own, not of a page (surface
 `workspace`): its agent finds, reads, makes and files the user's pages, and
 changes no page's blocks, which the agent on the page does. It sees the
 pages of the user's own space, templates left out, and changes nothing of a
-page someone else reads or writes (`shared`: shared with others, commented
-on by a guest, or with a public link open), nor puts a page in one. A page
-shared with other people, who write in it too (`shared_with_people`), it
-does not read either: what they wrote could steer what it does to the
-user's other pages.
+page someone else reads or writes (`shared`: shared with others, an invite
+to it still waiting too, commented on by a guest, or with a public link
+open; or whose title they read, as its card is on such a page), nor puts a
+page in one. A page shared with other people, who write in it too
+(`shared_with_people`), it does not read either: what they wrote could
+steer what it does to the user's other pages.
 
 | name | arguments | returns |
 | --- | --- | --- |
-| `list_pages` | — | `{ pages: [{id, title, tags?, parent_id?, folder_id?, shared?, shared_with_people?}], folders: [{id, name}], more_pages? }`: at most 500 pages, `more_pages` how many more there are (only when reading is on) |
-| `search_pages` | `query` | `{ results: [{page_id, title, snippet?}] }`: words starting with `#` keep to the pages with those tags; no `snippet` of a page shared with people (only when reading is on) |
+| `list_pages` | — | `{ folders: [{id, name}], more_pages?, pages: [{id, title, tags?, parent_id?, folder_id?, shared?, shared_with_people?}] }`: at most 500 pages, fewer where they would take more of the result than a model reads at once, as on a page; `more_pages` how many more there are (only when reading is on) |
+| `search_pages` | `query` | `{ results: [{page_id, title, snippet?}] }`, 20 at most: titles and tags that hold the words first, then text, each the most recently changed page first, a match in text with the 40 characters either side; words starting with `#` keep to the pages with each of those tags, in any case. No `snippet` of a page shared with people, or of one the run does not know, as one made since it began (only when reading is on) |
 | `read_page` | `page_id` | `{ page: {id, title, tags?}, blocks: [BlockView], subpages: [{id, title}] }`, refused for a page shared with people (only when reading is on) |
 | `list_folders` | — | `{ folders: [{id, name}] }` |
 | `create_page` | `title`, `parent_id?` or `folder_id?`, `markdown?` or `blocks?` | `{ page_id }`, a page inside `parent_id` linked at its end |
-| `move_page` | `page_id`, `parent_id?` or `folder_id?` | `{ page_id }`: inside a page, linked at its end, into a folder, or with neither to the top level |
+| `move_page` | `page_id`, `parent_id?` or `folder_id?` | `{ page_id }`: inside a page, linked at its end, into a folder, or with neither to the top level; where it is already, it stays as it is, and the call makes no op |
 | `rename_page` | `page_id`, `title` | `{ page_id }` |
 | `set_page_tags` | `page_id`, `tags: [string]` | `{ page_id, tags }`, the tags tidied as the app tidies them |
 | `create_folder` | `name` | `{ folder_id }` |
@@ -284,7 +285,8 @@ pages (`list_pages`, `search_pages`, `read_page`) counts as reading beyond
 the page, as `list_pages` does on a page: the web closes to the run, and
 what it writes keeps to the URLs in the user's request. The page open as
 they asked comes before the request as `Open page (JSON): {id, title,
-shared?}`.
+shared?}`. A call that fails for the database, as one slow to answer, is
+an error the model is told, as a refusal is: the run goes on.
 
 ## 3. Ops
 
@@ -297,15 +299,20 @@ streams to the client, what the client applies to the open editor, and what
 { "op": "replace", "id": "a1b2c3", "node": NodeJSON, "previous": NodeJSON }
 { "op": "move",    "id": "a1b2c3", "position": { "before": "d4e5f6" }, "from": Position }
 { "op": "delete",  "ids": ["a1b2c3"], "previous": [{ "node": NodeJSON, "position": Position }] }
-{ "op": "create_page", "page": { "id", "space_id", "parent_id", "folder_id"?, "title", "sort_key" }, "content": PageContent }
+{ "op": "create_page", "page": { "id", "space_id"?, "parent_id", "folder_id"?, "title", "sort_key"? }, "content": PageContent }
 { "op": "move_page", "page_id": "…", "title": "…", "place": PagePlace, "previous": PagePlace }
 { "op": "rename_page", "page_id": "…", "title": "…", "previous": "old title" }
 { "op": "set_page_tags", "page_id": "…", "title": "…", "tags": ["…"], "previous": ["…"] }
 { "op": "create_folder", "folder": { "id", "space_id", "name", "sort_key" } }
 ```
 
-`PagePlace` = `{ parent_id?, folder_id?, sort_key? }`: inside a page, or at
-the top level, in a folder or none. The page ops (those above from
+`PagePlace` = `{ parent_id?, folder_id?, sort_key?, card?: Position }`:
+inside a page, or at the top level, in a folder or none; `card` is where
+the page's card was in the page it left, for Undo to put it back there,
+none for the end. A page op's `title` is the page's, after the op, `""` for
+an untitled one, which the app names in the user's language. The server's
+`create_page` has the page's `space_id` and `sort_key`, the app's of a run
+on a page none. The page ops (those above from
 `create_page`, and `delete_page` and `delete_folder`, which only Undo makes)
 change the pages around a page rather than its blocks. Undo makes each
 through the app's own page changes, so an open page shows a subpage's card
@@ -316,12 +323,18 @@ so a page made and then tagged comes back tagged, and one moved twice
 goes back where it was. A folder the run made stays where the user has
 filed a page, a file or a folder in it since; a page `rename_page` gave
 a title to had none when `previous` is `""`, though shown as "Untitled".
+A page or a folder the run made that the user deleted since stays
+deleted: Undo leaves it so, and Redo after that Undo too. A run of the
+app's own made its changes on the device, none of them to come with a
+sync: what the user changed since is passed over as soon as Undo finds it.
 
 A `create_page` op's `parent_id` is null for a page of its own, made at the
 top level, in `folder_id` when it has one. A run that only makes pages has
 done something though it changed nothing on its page: it ends with them,
 out of time too, and its failed job keeps its ops, for Undo to take the
-pages away by.
+pages away by. A job keeps a `create_page` op without its `content`, which
+is the page's own, and would outlast it once it is deleted for good: Undo
+takes a page away by its ID.
 
 ## 4. Agent run (cloud model)
 
@@ -373,7 +386,11 @@ A workspace run's job is of no page: `page_id` is null, `surface` is
 user asked, and `public_page_ids?`, those the app has a public link open to.
 The client first sends all of its unsynced changes, not one page's. The
 worker reads the pages of the user's own space, a page whose
-`public_link_until` is to come having a public link open too, makes its
+`public_link_until` is to come having a public link open too, and finds
+those someone else has, or is asked to have, with `agent_shared_pages()`,
+which reads the invites still waiting the owner's reads do not, and those
+whose cards are on the pages others read with `agent_card_pages(p_pages)`,
+the pages' content staying in the database; makes its
 changes as the caller, puts a subpage's card in and takes it out of the
 page it moves in or out of over that page's revision, keeps no page's
 history, and updates the job with

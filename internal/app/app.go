@@ -442,7 +442,14 @@ func (a *App) start() error {
 			if !moment {
 				at = -1
 			}
-			a.update(func() { a.openLink(id, doc.LinkBlock(url), at) })
+			a.update(func() {
+				// With no page open, a link is in the workspace agent's
+				// chat, the panel's alone, which the page opens beside.
+				if !a.pageOpen() && a.panelShown() {
+					a.fromWorkspace()
+				}
+				a.openLink(id, doc.LinkBlock(url), at)
+			})
 		} else if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "mailto:") {
 			_ = mygo.Shell.OpenExternal(url)
 		}
@@ -1424,6 +1431,15 @@ func (a *App) toggleSidebar() {
 }
 
 func (a *App) togglePanel(tab int) {
+	// With no page open the panel is the workspace agent's chat alone,
+	// whatever tab was last shown: the agent's shortcut shows or hides it,
+	// and a page's other tabs have nothing to show.
+	if !a.pageOpen() {
+		if tab == 0 {
+			a.panelOpen = !a.panelOpen
+		}
+		return
+	}
 	if a.panelOpen && a.panelTab == tab {
 		a.panelOpen = false
 		return

@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf16"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
@@ -28,6 +30,10 @@ type linkHost struct {
 	linked *[]string
 	main   *sync.Mutex
 }
+
+// Online is a host online, whose runs ask the server what it says of the
+// pages' public links.
+func (linkHost) Online() bool { return true }
 
 func (h linkHost) Update(_ string, fn func()) {
 	h.main.Lock()
@@ -90,7 +96,7 @@ func newWorkspaceWorld(t *testing.T) *workspaceWorld {
 }
 
 func (w *workspaceWorld) executor(reading bool) *Executor {
-	return &Executor{Ctx: w.h.workspaceTools(context.Background(), "Test", store.Settings{AgentsReadOtherPages: reading})}
+	return &Executor{Ctx: w.h.workspaceTools(context.Background(), "Test", store.Settings{AgentsReadOtherPages: reading}, true)}
 }
 
 // The workspace agent sees the user's own pages, templates and others'
@@ -252,22 +258,41 @@ func TestWorkspaceLeavesPagesPublicElsewhere(t *testing.T) {
 }
 
 // The workspace agent lists at most maxListedPages of the user's pages,
-// saying how many more there are, for search_pages to find.
+// fewer where their titles would take more than a model reads at once,
+// saying how many more there are, for search_pages to find: what it
+// lists is never cut off with the result.
 func TestWorkspaceListsAtMostSoManyPages(t *testing.T) {
-	var pages []WorkspacePage
-	for i := range maxListedPages + 3 {
-		pages = append(pages, WorkspacePage{ID: fmt.Sprint("p-", i), Title: "Page", Tags: []string{}})
+	list := func(title string, n int) map[string]any {
+		var pages []WorkspacePage
+		for i := range n {
+			p := WorkspacePage{ID: fmt.Sprint("p-", i), Title: title, Tags: []string{}}
+			if len(title) > 10 {
+				p.ID, p.ParentID, p.Tags = fmt.Sprintf("%08d-0000-0000-0000-000000000000", i), "00000000-0000-0000-0000-000000000000", []string{"work", "plans"}
+			}
+			pages = append(pages, p)
+		}
+		x := &Executor{Ctx: ToolContext{Content: doc.Empty(), PageID: WorkspaceID, Workspace: &Workspace{Reading: true,
+			Pages:   func() ([]WorkspacePage, error) { return pages, nil },
+			Folders: func() []map[string]any { return []map[string]any{{"id": "f-1", "name": "Clippings"}} }}}}
+		return x.Call("list_pages", map[string]any{})
 	}
-	x := &Executor{Ctx: ToolContext{Content: doc.Empty(), PageID: WorkspaceID, Workspace: &Workspace{Reading: true,
-		Pages: func() []WorkspacePage { return pages }, Folders: func() []map[string]any { return []map[string]any{} }}}}
-	out := x.Call("list_pages", map[string]any{})
-	if listed, _ := out["pages"].([]map[string]any); len(listed) != maxListedPages || out["more_pages"] != 3 {
-		t.Errorf("listed %d, more %v", len(listed), out["more_pages"])
+	if out := list("Page", maxListedPages+3); len(out["pages"].([]map[string]any)) != maxListedPages || out["more_pages"] != 3 {
+		t.Errorf("listed %d, more %v", len(out["pages"].([]map[string]any)), out["more_pages"])
+	}
+	out := list(strings.Repeat("Quarterly planning <notes> & ", 3), maxListedPages)
+	listed := len(out["pages"].([]map[string]any))
+	if listed == 0 || listed == maxListedPages || out["more_pages"] != maxListedPages-listed {
+		t.Errorf("long titles: listed %d, more %v", listed, out["more_pages"])
+	}
+	raw, _ := json.Marshal(out)
+	if units := len(utf16.Encode([]rune(string(raw)))); units > toolResultLimit {
+		t.Errorf("the list takes %d units, past %d", units, toolResultLimit)
 	}
 }
 
 // What other people wrote in a page shared with them is not read: a
-// search finds the page, but shows none of its text.
+// search finds the page, but shows none of its text, nor of a page the
+// run does not know, as one made since it began.
 func TestWorkspaceSearchShowsNoTextOfPeoplesPages(t *testing.T) {
 	world := map[string]WorkspacePage{"p-1": {ID: "p-1", Title: "Plan"}, "p-3": {ID: "p-3", Title: "Shared", Shared: true, People: true}}
 	x := &Executor{Ctx: ToolContext{Content: doc.Empty(), PageID: WorkspaceID, Workspace: &Workspace{Reading: true,
@@ -275,12 +300,13 @@ func TestWorkspaceSearchShowsNoTextOfPeoplesPages(t *testing.T) {
 			p, ok := world[id]
 			return p, ok
 		},
-		Search: func(string) []map[string]any {
-			return []map[string]any{{"page_id": "p-1", "title": "Plan", "snippet": "mine"}, {"page_id": "p-3", "title": "Shared", "snippet": "theirs"}}
+		Search: func(string) ([]map[string]any, error) {
+			return []map[string]any{{"page_id": "p-1", "title": "Plan", "snippet": "mine"}, {"page_id": "p-3", "title": "Shared", "snippet": "theirs"},
+				{"page_id": "p-new", "title": "Made since", "snippet": "unknown"}}, nil
 		},
 	}}}
 	results, _ := x.Call("search_pages", map[string]any{"query": "x"})["results"].([]map[string]any)
-	if len(results) != 2 || results[0]["snippet"] != "mine" || results[1]["snippet"] != nil {
+	if len(results) != 3 || results[0]["snippet"] != "mine" || results[1]["snippet"] != nil || results[2]["snippet"] != nil {
 		t.Errorf("results %v", results)
 	}
 }
@@ -616,5 +642,259 @@ func TestPrivacyOfAllPagesIsEachPagesOwn(t *testing.T) {
 	}
 	if !people(under) || people(guested) || !people(w.shared) || people(w.mine) {
 		t.Errorf("had by others: under %v, guested %v, shared %v, mine %v", people(under), people(guested), people(w.shared), people(w.mine))
+	}
+}
+
+// A streamed call of the page's tools in a workspace run, which has none
+// of them, puts nothing in a page as it comes: it runs whole, and is
+// refused, as the workspace's tools refuse it.
+func TestWorkspaceDraftsNoBlocks(t *testing.T) {
+	w := newWorkspaceWorld(t)
+	x := w.executor(true)
+	var ops []doc.Op
+	x.OnOp = func(op doc.Op, _ string) { ops = append(ops, op) }
+	raw := `{"position":{"at":"end"},"markdown":"# Hi\n\nBody"}`
+	x.Draft("write_markdown", raw)
+	if _, drafted := x.FinishDraft("write_markdown", raw); drafted || len(ops) != 0 {
+		t.Fatalf("drafted %v, ops %+v", drafted, ops)
+	}
+	if out := x.CallRaw("write_markdown", raw); out["error"] == nil || len(x.Ops) != 0 {
+		t.Errorf("write_markdown %v, ops %+v", out, x.Ops)
+	}
+}
+
+// A local workspace run keeps each op with its chat as it comes, as its
+// tools have changed the user's pages already: the app quitting during
+// the run leaves them to undo.
+func TestWorkspaceRunKeepsItsOpsAsTheyCome(t *testing.T) {
+	w := newWorkspaceWorld(t)
+	s := w.h.Session(WorkspaceID)
+	reply := &Message{Text: "Working…", Pending: true, RunID: "r1"}
+	run := &Run{ID: "r1", Status: "running", Local: true, At: time.Now()}
+	s.Runs, s.Messages = []*Run{run}, []*Message{{Mine: true, Text: "File them"}, reply}
+	option := Option{Provider: store.Provider{Name: "Local", IsLocal: true}}
+	d := w.h.newDelivery(WorkspaceID, run, option)
+	o := RunOptions{Surface: "workspace", Reply: reply}
+	for i, op := range []doc.Op{
+		{Op: "rename_page", PageID: w.mine.ID, Title: "Mine 2", PrevTitle: "Mine"},
+		{Op: "set_page_tags", PageID: w.mine.ID, Title: "Mine 2", Tags: []string{"a"}, PrevTags: []string{"plan"}},
+	} {
+		w.h.arrived(s, run, option, doc.Empty(), d, o, op, "edit")
+		kept := ""
+		if i == 0 {
+			kept, _ = w.st.Value(chatKey(WorkspaceID))
+		} else {
+			kept, _ = w.st.Value(runningKey(WorkspaceID))
+		}
+		if !strings.Contains(kept, op.Op) {
+			t.Errorf("after op %d the chat keeps %q", i, kept)
+		}
+	}
+}
+
+// Undo of a run of this device's passes over what the user changed since,
+// keeping their change, signed in before a sync too: none of the run's
+// changes is still to come with one.
+func TestUndoOfALocalRunPassesOverTheUsersChange(t *testing.T) {
+	st := openStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1", Email: "u@example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "New", SpaceID: st.Session().SpaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, readingHost{})
+	run := &Run{ID: "r1", Status: "done", Local: true, At: time.Now(),
+		Ops: []doc.Op{{Op: "rename_page", PageID: p.ID, Title: "New", PrevTitle: "Old"}}}
+	h.Session(WorkspaceID).Runs = []*Run{run}
+	if err := st.RenamePage(p.ID, "Mine"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.UndoRun(WorkspaceID, run.ID); err != nil {
+		t.Fatalf("undo: %v", err)
+	}
+	if got, _ := st.Page(p.ID); got.Title != "Mine" || !run.Undone {
+		t.Errorf("title %q, undone %v", got.Title, run.Undone)
+	}
+	// A cloud run's change may still be to come: it waits for the sync.
+	cloud := &Run{ID: "r2", Status: "done", At: time.Now(),
+		Ops: []doc.Op{{Op: "rename_page", PageID: p.ID, Title: "New", PrevTitle: "Old"}}}
+	h.Session(WorkspaceID).Runs = append(h.Session(WorkspaceID).Runs, cloud)
+	if err := h.UndoRun(WorkspaceID, cloud.ID); err == nil {
+		t.Error("a cloud run's Undo did not wait for its change")
+	}
+}
+
+// A page and a folder the run made that the user deleted since stay
+// deleted: Undo leaves them so, and Redo after it too.
+func TestRedoLeavesWhatTheUserDeleted(t *testing.T) {
+	w := newWorkspaceWorld(t)
+	x := w.executor(true)
+	folder := x.Call("create_folder", map[string]any{"name": "Trips"})["folder_id"].(string)
+	page := x.Call("create_page", map[string]any{"title": "Lisbon"})["page_id"].(string)
+	kept := x.Call("create_page", map[string]any{"title": "Porto"})["page_id"].(string)
+	run := &Run{ID: "r1", Status: "done", Local: true, At: time.Now(), Ops: x.Ops, Edits: x.Edits}
+	w.h.Session(WorkspaceID).Runs = []*Run{run}
+	if _, err := w.st.DeletePage(page); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := w.st.Folder(folder)
+	if err := w.st.DeleteFolder(f); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.h.UndoRun(WorkspaceID, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.h.RedoRun(WorkspaceID, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := w.st.Page(page); p.DeletedAt.IsZero() {
+		t.Error("the page the user deleted is back")
+	}
+	if f, _ := w.st.Folder(folder); f.DeletedAt.IsZero() {
+		t.Error("the folder the user deleted is back")
+	}
+	if p, _ := w.st.Page(kept); !p.DeletedAt.IsZero() {
+		t.Error("Redo did not bring back the page the user kept")
+	}
+}
+
+// movingPages are a host's pages that keep where each card goes, and say
+// where the one a page leaves was, as the app's do.
+type movingPages struct {
+	storePages
+	moved *[]*doc.Position
+}
+
+func (p movingPages) MovePageAt(_, _ string, at *doc.Position, move func() error) (*doc.Position, error) {
+	*p.moved = append(*p.moved, at)
+	return &doc.Position{After: "b0"}, move()
+}
+
+type movingHost struct {
+	readingHost
+	pages movingPages
+}
+
+func (h movingHost) Pages() Pages { return h.pages }
+
+// A page moved where it is already stays as it is, its place among the
+// pages there too, and the call makes no op. One moved out of a page keeps
+// where its card was there, for Undo to put it back there.
+func TestWorkspaceMovesKeepTheirCards(t *testing.T) {
+	w := newWorkspaceWorld(t)
+	var moved []*doc.Position
+	w.h = NewHub(w.st, nil, movingHost{pages: movingPages{storePages{w.st}, &moved}})
+	inside, err := w.st.CreatePage(store.NewPageOptions{Title: "Inside", ParentID: w.mine.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := w.executor(true)
+	before, _ := w.st.Page(w.inside.ID)
+	if out := x.Call("move_page", map[string]any{"page_id": w.inside.ID, "folder_id": w.folder.ID}); out["error"] != nil || len(x.Ops) != 0 {
+		t.Fatalf("a move where it is: %v, ops %+v", out, x.Ops)
+	}
+	if after, _ := w.st.Page(w.inside.ID); after.SortKey != before.SortKey || len(moved) != 0 {
+		t.Errorf("moved where it is: key %q, was %q; moves %d", after.SortKey, before.SortKey, len(moved))
+	}
+	if out := x.Call("move_page", map[string]any{"page_id": inside.ID}); out["error"] != nil || len(x.Ops) != 1 {
+		t.Fatalf("a move out: %v, ops %+v", out, x.Ops)
+	}
+	if card := x.Ops[0].PrevPlace.Card; card == nil || card.After != "b0" {
+		t.Fatalf("the card was at %+v", card)
+	}
+	w.h.Session(WorkspaceID).Runs = []*Run{{ID: "r1", Status: "done", Local: true, Ops: x.Ops, Edits: x.Edits}}
+	if err := w.h.UndoRun(WorkspaceID, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := w.st.Page(inside.ID); p.ParentID != w.mine.ID || len(moved) != 2 || moved[1] == nil || moved[1].After != "b0" {
+		t.Errorf("after Undo inside %q, moves %+v", p.ParentID, moved)
+	}
+}
+
+// A page whose title someone else reads, as its card is on a page they
+// read, is left as it is, as one shared: renaming it would write there.
+// Its card on a public page shows it, inside a page or pasted elsewhere.
+func TestWorkspaceLeavesPagesWhoseCardsOthersRead(t *testing.T) {
+	w := newWorkspaceWorld(t)
+	guested, err := w.st.CreatePage(store.NewPageOptions{Title: "Guested"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.st.AddComment(guested.ID, "b1", "Nice", "", "", "guest", "Visitor"); err != nil {
+		t.Fatal(err)
+	}
+	child, err := w.st.CreatePage(store.NewPageOptions{Title: "Child", ParentID: guested.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pasted, err := w.st.CreatePage(store.NewPageOptions{Title: "Pasted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := w.st.Content(guested.ID)
+	c.Children = append(c.Children, doc.SubpageNode(pasted.ID))
+	if _, _, err := w.st.SaveContent(guested.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	x := w.executor(true)
+	for _, id := range []string{child.ID, pasted.ID} {
+		if out := x.Call("rename_page", map[string]any{"page_id": id, "title": "Secret"}); out["error"] == nil {
+			t.Errorf("renamed %s: %v", id, out)
+		}
+		if out := x.Call("move_page", map[string]any{"page_id": id, "folder_id": w.folder.ID}); out["error"] == nil {
+			t.Errorf("moved %s: %v", id, out)
+		}
+	}
+	listed, _ := x.Call("list_pages", map[string]any{})["pages"].([]map[string]any)
+	for _, p := range listed {
+		if (p["id"] == child.ID || p["id"] == pasted.ID) && p["shared"] != true {
+			t.Errorf("listed %v", p)
+		}
+	}
+	if len(x.Ops) != 0 {
+		t.Errorf("ops %+v", x.Ops)
+	}
+}
+
+// A page this device cannot read, as a newer app's, is not read as an
+// empty one: the agent is told it could not be.
+func TestWorkspaceReadsNoUnreadablePage(t *testing.T) {
+	w := newWorkspaceWorld(t)
+	if _, err := w.st.DB().Exec(`UPDATE page_contents SET content = '{"version": 99' WHERE page_id = ?`, w.mine.ID); err != nil {
+		t.Fatal(err)
+	}
+	if out := w.executor(true).Call("read_page", map[string]any{"page_id": w.mine.ID}); out["error"] == nil {
+		t.Errorf("read %v", out)
+	}
+}
+
+// A cloud run's ops name an untitled page "", which its edits say in the
+// app's language, as a local run's do; and keep no page's content, which
+// the page keeps itself.
+func TestCloudEditsNameUntitledPages(t *testing.T) {
+	ops := []map[string]any{
+		{"op": "rename_page", "page_id": "p1", "title": "Trip", "previous": ""},
+		{"op": "move_page", "page_id": "p1", "title": "", "place": map[string]any{"folder_id": "f1"}, "previous": map[string]any{}},
+		{"op": "set_page_tags", "page_id": "p1", "title": "", "tags": []any{"a"}, "previous": []any{}},
+		{"op": "create_page", "page": map[string]any{"id": "p2", "title": "Notes"}, "content": map[string]any{"document": map[string]any{"type": "doc"}}},
+	}
+	var events []map[string]any
+	for _, op := range ops {
+		events = append(events, map[string]any{"type": "op", "op": op})
+	}
+	res, err := RunCloud(context.Background(), fakeStream{events: append(events, map[string]any{"type": "done", "reply": "Done."})}, "j1", Events{})
+	if err != nil || len(res.Edits) != 4 {
+		t.Fatalf("run %+v, %v", res, err)
+	}
+	untitled := store.TitleOr("")
+	for i, want := range []string{"Renamed “" + untitled + "” to “Trip”", "Moved “" + untitled + "”", "Tagged “" + untitled + "”"} {
+		if got := res.Edits[i].Summary; got != want {
+			t.Errorf("edit %d says %q, want %q", i, got, want)
+		}
+	}
+	if res.Ops[3].Content != nil {
+		t.Error("the page made keeps its content in the run")
 	}
 }

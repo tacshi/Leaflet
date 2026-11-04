@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/keychain"
 	"leaflet/internal/live"
@@ -429,5 +430,48 @@ func TestFailedUseAccountSignsOut(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatal("the new account is still signed in")
 		}
+	}
+}
+
+// Signing in as another account, the pages of the one before all gone up,
+// forgets its agents' chats with its pages, as signing out does: none
+// shows to the next account, nor goes in its runs as history.
+func TestAnotherAccountForgetsTheAgentsChats(t *testing.T) {
+	c, _ := open(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/auth/v1/verify":
+			_, _ = io.WriteString(w, `{"access_token":"a","refresh_token":"r","expires_in":3600,
+				"user":{"id":"00000000-0000-0000-0000-0000000000a2","email":"sam@example.com"}}`)
+		case "/auth/v1/logout":
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.Error(w, "down", http.StatusServiceUnavailable)
+		}
+	}))
+	defer srv.Close()
+	if err := c.core.Remote.Use(remote.Settings{URL: srv.URL, PublishableKey: "anon"}); err != nil {
+		t.Fatal(err)
+	}
+	create(t, c, `{"title":"Uploaded"}`)
+	uploadAll(t, c)
+	if err := c.core.Store.SetValue("account", "00000000-0000-0000-0000-0000000000a1"); err != nil {
+		t.Fatal(err)
+	}
+	c.q.do(func() {
+		c.core.Hub.Session(agents.WorkspaceID).Messages = []*agents.Message{{Mine: true, Text: "File my secret plans"}}
+	})
+	user, err := c.core.Remote.VerifyCode("sam@example.com", "123456")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.q.do(func() { _, err = c.signedIn(user) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var left []*agents.Message
+	c.q.do(func() { left = c.core.Hub.Session(agents.WorkspaceID).Messages })
+	if len(left) != 0 {
+		t.Errorf("the next account sees %+v", left)
 	}
 }

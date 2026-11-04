@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { type AgentDeps, handle, withoutThinking } from "./handler.ts";
 import { type ChatMessage, type ChatRequest, type ChatResult, ProviderError } from "../_shared/openai.ts";
-import type { NodeJSON, PageContent } from "../_shared/blocks.ts";
+import { type NodeJSON, type PageContent, walk } from "../_shared/blocks.ts";
 import { TOO_MANY_CALLS } from "../_shared/tools.ts";
 import { Project, type Row } from "../_testing/project.ts";
 
@@ -698,6 +698,29 @@ function workspaceProject(request: Record<string, unknown> = {}): Project {
     },
   ];
   p.tables.page_permissions = [{ page_id: "ours", user_id: "bo", role: "editor" }];
+  p.tables.page_email_invites = [];
+  // The pages of the caller's own space someone else has, or is asked to
+  // have, the invite waiting or not, as the function finds them.
+  p.rpcs.agent_shared_pages = (_args, caller) => {
+    const own = new Set(p.rows("spaces").filter((s) => s.owner_id === caller).map((s) => s.id));
+    const mine = new Set(p.rows("pages").filter((r) => own.has(r.space_id)).map((r) => r.id));
+    const shared = new Set([
+      ...p.rows("page_permissions").filter((r) => r.user_id !== caller).map((r) => r.page_id),
+      ...p.rows("page_email_invites").map((r) => r.page_id),
+    ]);
+    return [...shared].filter((id) => mine.has(id)).map((page_id) => ({ page_id }));
+  };
+  // The pages the cards of these pages name, as the function finds them.
+  p.rpcs.agent_card_pages = (args) => {
+    const of = new Set(args.p_pages as string[]);
+    const cards = new Set<string>();
+    for (const c of p.rows("page_content").filter((r) => of.has(String(r.page_id)))) {
+      walk((c.content as PageContent).document, (n) => {
+        if (n.type === "subpage" && typeof n.data?.page_id === "string") cards.add(n.data.page_id);
+      });
+    }
+    return [...cards].map((page_id) => ({ page_id }));
+  };
   p.tables.comments = [];
   p.tables.ai_jobs = [job("job", {
     page_id: null,
@@ -808,10 +831,11 @@ Deno.test("a workspace job reads no page other people write in", async () => {
   }]);
   assert(String(answers[1].error).includes("shared with other people"), String(answers[1].error));
   assertEquals(answers[2].page.id, "plan");
-  const who = p.requests.map(decodeURIComponent).filter((r) =>
-    r.startsWith("GET /rest/v1/page_permissions?") || r.startsWith("GET /rest/v1/comments?")
-  );
-  assert(who.length >= 2 && who.every((r) => r.includes("pages.space_id=eq.space")), who.join("\n"));
+  const who = p.requests.map(decodeURIComponent).filter((r) => r.startsWith("GET /rest/v1/comments?"));
+  assert(who.length >= 1 && who.every((r) => r.includes("pages.space_id=eq.space")), who.join("\n"));
+  // Who else has a page, an invite waiting too, the function finds, of the
+  // caller's own space alone.
+  assert(p.requests.some((r) => r.includes("/rest/v1/rpc/agent_shared_pages")), p.requests.join("\n"));
 });
 
 // The API answers a read with max_rows at most: the workspace job reads
@@ -871,4 +895,148 @@ Deno.test("a workspace job keeps a page whose card could not go in", async () =>
   const notes = p.rows("pages").find((row) => row.title === "Notes")!;
   assertEquals(answer, { page_id: notes.id });
   assertEquals((jobOf(p).result as { ops: { op: string }[] }).ops.map((o) => o.op), ["create_page"]);
+});
+
+// A page whose invite is still waiting, by person or by address, is
+// someone else's to have: the workspace job leaves it as it is, as the
+// app does, though the owner's reads list no such share.
+Deno.test("a workspace job leaves a page with an invite waiting as it is", async () => {
+  const p = workspaceProject();
+  p.tables.page_email_invites = [{ page_id: "plan", email: "bo@example.com", role: "viewer" }];
+  const m = model(calls(["rename_page", { page_id: "plan", title: "Mine" }]), says("I can't."));
+  await run(p, deps(p, m.chat));
+  const answer = JSON.parse(String(m.asked[1].messages.find((x) => x.role === "tool")!.content));
+  assert(String(answer.error).includes("shared with others"), String(answer.error));
+  assertEquals(p.rows("pages").find((row) => row.id === "plan")!.title, "Plan");
+});
+
+// A page inside one a guest commented on has its card read there: the
+// job leaves it as it is, neither moved out, which would change the page
+// guests read, nor renamed, which would write there.
+Deno.test("a workspace job leaves a page whose card others read as it is", async () => {
+  const p = workspaceProject();
+  p.rows("pages").push({
+    id: "child",
+    space_id: "space",
+    parent_id: "plan",
+    folder_id: null,
+    title: "Child",
+    tags: [],
+    sort_key: "a1",
+    is_template: false,
+    deleted_at: null,
+  });
+  p.rows("comments").push({ id: "c1", page_id: "plan", author_kind: "guest", body: "Nice", block_id: "b1" });
+  const m = model(
+    calls(["move_page", { page_id: "child", folder_id: "clip" }], ["rename_page", {
+      page_id: "child",
+      title: "Secret",
+    }]),
+    says("I can't."),
+  );
+  await run(p, deps(p, m.chat));
+  const answers = m.asked[1].messages.filter((x) => x.role === "tool").map((x) => JSON.parse(String(x.content)).error);
+  assert(answers.every((e) => typeof e === "string" && e.includes("shared with others")), String(answers));
+  const child = p.rows("pages").find((row) => row.id === "child")!;
+  assertEquals([child.parent_id, child.title], ["plan", "Child"]);
+});
+
+// A page moved out of another keeps where its card was there, for Undo to
+// put it back; the job keeps a page made without its content, the page's
+// own; a page moved where it is already stays, and makes no op.
+Deno.test("a workspace job keeps where a moved page's card was", async () => {
+  const p = workspaceProject();
+  p.rows("pages").push({
+    id: "child",
+    space_id: "space",
+    parent_id: "plan",
+    folder_id: null,
+    title: "Child",
+    tags: [],
+    sort_key: "a1",
+    is_template: false,
+    deleted_at: null,
+  });
+  contentOf(p).content = page(
+    para("b1", "Ship the beta"),
+    { id: "card", type: "subpage", data: { page_id: "child" } },
+    para("b2", "More"),
+  );
+  const m = model(
+    calls(["move_page", { page_id: "child", folder_id: "clip" }], ["move_page", { page_id: "plan" }], [
+      "create_page",
+      { title: "Notes", markdown: "- one" },
+    ]),
+    says("Done."),
+  );
+  await run(p, deps(p, m.chat));
+  const answers = m.asked[1].messages.filter((x) => x.role === "tool").map((x) => JSON.parse(String(x.content)));
+  assertEquals(answers[1], { page_id: "plan" });
+  const ops = (jobOf(p).result as { ops: Record<string, unknown>[] }).ops;
+  assertEquals(ops.map((o) => o.op), ["move_page", "create_page"]);
+  assertEquals((ops[0].previous as Record<string, unknown>).card, { after: "b1" });
+  assertEquals("content" in ops[1], false);
+  const made = ops[1].page as Record<string, unknown>;
+  assertEquals([made.space_id, typeof made.sort_key], ["space", "string"]);
+  assert(String(made.sort_key).length > 0);
+  const kids = (contentOf(p).content as PageContent).document.children!.map((n) => n.id);
+  assertEquals(kids, ["b1", "b2"]);
+});
+
+// What the database fails at is a failed call the model is told of, as a
+// refusal is: the run goes on.
+Deno.test("a workspace job goes on past the database failing", async () => {
+  const p = workspaceProject();
+  p.rpcs.agent_search_pages = () => {
+    throw new Error("canceling statement due to statement timeout");
+  };
+  const m = model(calls(["search_pages", { query: "launch" }]), says("The search failed."));
+  const { events } = await run(p, deps(p, m.chat));
+  assertEquals(events.at(-1)?.type, "done");
+  const answer = JSON.parse(String(m.asked[1].messages.at(-1)!.content));
+  assert(String(answer.error).includes("failed"), String(answer.error));
+});
+
+// On a page someone else writes in, or a guest commented on past the
+// API's most rows, the agent makes no page of the person's own, which
+// would take what they wrote into the person's pages: it makes a subpage.
+Deno.test("an agent on a shared page makes no page of the person's own", async () => {
+  for (const shared of ["members", "guest"] as const) {
+    const p = project();
+    p.rules.maxRows = 2;
+    p.tables.comments = [1, 2, 3].map((i) => ({
+      id: `c${i}`,
+      page_id: "plan",
+      block_id: "b1",
+      parent_comment_id: null,
+      author_id: "ann",
+      author_kind: shared === "guest" && i === 3 ? "guest" : "user",
+      agent_name: null,
+      body: `Comment ${i}`,
+      resolved: false,
+      created_at: new Date(Date.now() + i).toISOString(),
+      deleted_at: null,
+    }));
+    if (shared === "members") p.rpcs.page_members = () => [{ user_id: "ann" }, { user_id: "bo" }];
+    p.tables.ai_jobs = [job("job", { request: { instruction: "Make a new page", allow_cross_page: true } })];
+    const m = model(calls(["create_page", { title: "Copy" }]), says("Made a subpage instead."));
+    await run(p, deps(p, m.chat));
+    const names = (m.asked[0].tools ?? []).map((t) => t.function.name);
+    assert(!names.includes("create_page") && !names.includes("list_pages"), `${shared}: ${names.join()}`);
+    assert(!m.asked[0].messages[0].content!.includes("create_page"), shared);
+    const answer = JSON.parse(String(m.asked[1].messages.at(-1)!.content));
+    assert(String(answer.error).includes("create_subpage"), `${shared}: ${answer.error}`);
+    assertEquals(p.rows("pages").length, 1, shared);
+  }
+});
+
+// A page the asking app has a public link open to, whose lease may not
+// have reached the server yet, is left as it is too.
+Deno.test("a workspace job leaves a page the app serves a link to as it is", async () => {
+  const p = workspaceProject({ public_page_ids: ["plan"] });
+  const m = model(calls(["rename_page", { page_id: "plan", title: "Mine" }]), says("I can't."));
+  await run(p, deps(p, m.chat));
+  const answer = JSON.parse(String(m.asked[1].messages.find((x) => x.role === "tool")!.content));
+  assert(String(answer.error).includes("shared with others"), String(answer.error));
+  assertEquals(p.rows("pages").find((row) => row.id === "plan")!.title, "Plan");
 });

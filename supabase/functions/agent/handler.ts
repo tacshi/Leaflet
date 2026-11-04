@@ -25,6 +25,7 @@ import {
   normalizeContent,
   type PageContent,
   plainText,
+  type Position,
   randomId,
   type RecordingInfo,
   trimSpace,
@@ -40,8 +41,10 @@ import {
   overwrites,
   PAGE_OPS,
   PageEditSession,
+  type PagePlace,
   type PageSummary,
   TOO_MANY_CALLS,
+  TOOL_RESULT_LIMIT,
   toolDefinitions,
   ToolError,
   type ToolHooks,
@@ -73,7 +76,6 @@ import { lastKey, newKeyAfter } from "../_shared/sortkey.ts";
 
 const MAX_ROUNDS = 12;
 const UNREADABLE = "The page's content cannot be read, so the agent left it as it is.";
-const TOOL_RESULT_LIMIT = 60_000;
 const HEARTBEAT_MS = 15_000;
 // A call with less time than this left is not started.
 const MIN_CALL_MS = 5_000;
@@ -266,24 +268,42 @@ async function rows<T>(query: PromiseLike<{ data: T[] | null; error: { message: 
 /** The rows allRows asks for at a time: max_rows (supabase/config.toml), the most the API answers a read with. */
 const PAGE_ROWS = 1000;
 
+/** A read allRows makes a page at a time, by key. */
+interface Keyed<T> extends PromiseLike<{ data: T[] | null; error: { message: string } | null }> {
+  gt(column: string, value: unknown): Keyed<T>;
+  order(column: string): Keyed<T>;
+  limit(count: number): Keyed<T>;
+}
+
 /**
  * Every row a query finds. The API answers a read with max_rows at most,
  * however many it asks for, and says nothing of the rest: they are asked
  * for a page at a time, until one comes empty, so a project that answers
- * with fewer still gives them all. query makes the read again each time,
- * in an order that tells every row apart.
+ * with fewer still gives them all. query makes the read again each time;
+ * each page starts past the last row's key, a column that tells every row
+ * apart, so a row taken out meanwhile moves none of the rest past a page.
  */
-async function allRows<T>(
-  query: () => {
-    range(from: number, to: number): PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
-  },
-): Promise<T[]> {
+async function allRows<T>(query: () => Keyed<T>, key: keyof T & string): Promise<T[]> {
   const out: T[] = [];
   for (;;) {
-    const page = await rows<T>(query().range(out.length, out.length + PAGE_ROWS - 1));
+    const read = out.length ? query().gt(key, out[out.length - 1][key]) : query();
+    const page = await rows<T>(read.order(key).limit(PAGE_ROWS));
     if (!page.length) return out;
     out.push(...page);
   }
+}
+
+/**
+ * A run's ops as its job keeps them: a page made without its content,
+ * which is the page's own to keep, and here would outlast the page once it
+ * is deleted for good. Undo takes a page away by its id.
+ */
+function keptOps(ops: Op[]): unknown[] {
+  return ops.map((o) => {
+    if (o.op !== "create_page") return o;
+    const { content: _, ...kept } = o;
+    return kept;
+  });
 }
 
 /** By sort key, then id, as the app's store orders them in its SQLite. */
@@ -293,8 +313,9 @@ function bySortKey(a: { id: string; sort_key: string }, b: { id: string; sort_ke
 
 /** The folders of a space, not deleted, in their order, as list_folders lists them (Go's spaceFolders). */
 async function foldersOf(uc: SupabaseClient, space: string): Promise<{ id: string; name: string }[]> {
-  return (await allRows<{ id: string; name: string; sort_key: string }>(() =>
-    uc.from("folders").select("id, name, sort_key").eq("space_id", space).is("deleted_at", null).order("id")
+  return (await allRows<{ id: string; name: string; sort_key: string }>(
+    () => uc.from("folders").select("id, name, sort_key").eq("space_id", space).is("deleted_at", null),
+    "id",
   )).sort(bySortKey).map(({ id, name }) => ({ id, name }));
 }
 
@@ -457,9 +478,38 @@ function linkSubpage(uc: SupabaseClient, user: User, parent: string, id: string)
   });
 }
 
-/** Takes the cards for subpage id out of page parent, which keeps one block to type in (core.Pages.UnlinkSubpage). */
-function unlinkSubpage(uc: SupabaseClient, user: User, parent: string, id: string): Promise<void> {
-  return editContent(uc, user, parent, (c) => {
+/**
+ * Where page id's card is in content, the first one's (Go's
+ * Content.SubpagePlace): after the block before it, before the one after
+ * it, first in the block it is in, or first in the page.
+ */
+function subpagePlace(content: PageContent, id: string): Position | undefined {
+  let at: Position | undefined;
+  walk(content.document, (n, parent) => {
+    if (at || !parent || n.type !== "subpage" || n.data?.page_id !== id) return;
+    const siblings = parent.children ?? [];
+    const i = siblings.indexOf(n);
+    if (i > 0) at = { after: siblings[i - 1].id };
+    else if (i + 1 < siblings.length) at = { before: siblings[i + 1].id };
+    else if (parent !== content.document) at = { parent: parent.id };
+    else at = { at: "start" };
+  });
+  return at;
+}
+
+/**
+ * Takes the cards for subpage id out of page parent, which keeps one block
+ * to type in (core.Pages.UnlinkSubpage), and returns where the first was.
+ */
+async function unlinkSubpage(
+  uc: SupabaseClient,
+  user: User,
+  parent: string,
+  id: string,
+): Promise<Position | undefined> {
+  let was: Position | undefined;
+  await editContent(uc, user, parent, (c) => {
+    was = subpagePlace(c, id);
     let gone = false;
     const drop = (nodes: NodeJSON[] | undefined): NodeJSON[] | undefined =>
       nodes?.filter((n) => {
@@ -476,6 +526,7 @@ function unlinkSubpage(uc: SupabaseClient, user: User, parent: string, id: strin
     if (gone && !c.document.children?.length) c.document.children = emptyContent().document.children;
     return gone;
   });
+  return was;
 }
 
 /** The page tools of no page, which a workspace run's session is given (it has its own). */
@@ -524,9 +575,10 @@ async function runWorkspaceJob(
 
     // --- the person's pages ---------------------------------------------
     // Read once a run, all of them, and kept as the run changes them: who
-    // else has a page comes from its shares, those of the pages it is
-    // inside too, its guests' comments and its public link, which no change
-    // of a run's changes, as it changes no page someone else has.
+    // else has a page comes from its shares and invites, those of the
+    // pages it is inside too, its guests' comments and its public link,
+    // which no change of a run's changes, as it changes no page someone
+    // else has.
     type Row = {
       id: string;
       title: string;
@@ -536,47 +588,72 @@ async function runWorkspaceJob(
       sort_key: string;
       public_link_until: string | null;
     };
-    let world: Promise<{ rows: Map<string, Row>; shares: Set<string>; guested: Set<string> }> | undefined;
+    type World = { rows: Map<string, Row>; people: (r: Row) => boolean; read: (r: Row) => boolean; shown: Set<string> };
+    let world: Promise<World> | undefined;
+    const readWorld = async (): Promise<World> => {
+      const [list, shares, guested] = await Promise.all([
+        allRows<Row>(
+          () =>
+            uc.from("pages").select("id, title, parent_id, folder_id, tags, sort_key, public_link_until")
+              .eq("space_id", own).is("deleted_at", null).eq("is_template", false),
+          "id",
+        ),
+        // Those of the person's own space someone else has, or is asked to:
+        // the pages an invite waits on too, as the app counts them.
+        allRows<{ page_id: string }>(() => uc.rpc("agent_shared_pages"), "page_id"),
+        allRows<{ id: string; page_id: string }>(
+          () =>
+            uc.from("comments").select("id, page_id, pages!inner(space_id)").eq("pages.space_id", own).eq(
+              "author_kind",
+              "guest",
+            ),
+          "id",
+        ),
+      ]);
+      const byId = new Map(list.map((r) => [r.id, r]));
+      const shared = new Set(shares.map((r) => r.page_id));
+      const guests = new Set(guested.map((r) => r.page_id));
+      // Shared with other people, it or a page it is inside.
+      const people = (r: Row) => {
+        const seen = new Set<string>();
+        for (let p: Row | undefined = r; p && !seen.has(p.id); p = byId.get(p.parent_id ?? "")) {
+          if (shared.has(p.id)) return true;
+          seen.add(p.id);
+        }
+        return false;
+      };
+      const read = (r: Row) =>
+        people(r) || guests.has(r.id) || publicIds.has(r.id) || publiclyLinked(r.public_link_until);
+      // Those whose titles someone else reads, as their cards are on a page
+      // they read: its subpages, whose cards it may have, and the cards it
+      // has (Go's workspaceTools).
+      const others = [...byId.values()].filter(read).map((r) => r.id);
+      const readSet = new Set(others);
+      const shown = new Set([...byId.values()].filter((r) => r.parent_id && readSet.has(r.parent_id)).map((r) => r.id));
+      // The cards, found in the database: the pages' content, which can be
+      // long, stays there.
+      if (others.length) {
+        const cards = await allRows<{ page_id: string }>(
+          () => uc.rpc("agent_card_pages", { p_pages: others }),
+          "page_id",
+        );
+        for (const c of cards) shown.add(c.page_id);
+      }
+      return { rows: byId, people, read, shown };
+    };
     const rowsNow = () =>
-      world ??= Promise.all([
-        allRows<Row>(() =>
-          uc.from("pages").select("id, title, parent_id, folder_id, tags, sort_key, public_link_until").eq(
-            "space_id",
-            own,
-          )
-            .is("deleted_at", null).eq("is_template", false).order("id")
-        ),
-        // Of the pages of the person's own space alone.
-        allRows<{ page_id: string }>(() =>
-          uc.from("page_permissions").select("page_id, pages!inner(space_id)").eq("pages.space_id", own)
-            .neq("user_id", user.id).order("page_id").order("user_id")
-        ),
-        allRows<{ page_id: string }>(() =>
-          uc.from("comments").select("page_id, pages!inner(space_id)").eq("pages.space_id", own)
-            .eq("author_kind", "guest").order("id")
-        ),
-      ]).then(([list, shares, guested]) => ({
-        rows: new Map(list.map((r) => [r.id, r])),
-        shares: new Set(shares.map((r) => r.page_id)),
-        guested: new Set(guested.map((r) => r.page_id)),
-      })).catch((e) => {
+      world ??= readWorld().catch((e) => {
         // Read again by the next call.
         world = undefined;
         throw e;
       });
     // A page as the agent sees it, from its row.
     const pageOf = async (id: string): Promise<WorkspacePage | null> => {
-      const { rows: byId, shares, guested } = await rowsNow();
+      const { rows: byId, people: peopleHave, read, shown } = await rowsNow();
       const r = byId.get(id);
       if (!r) return null;
-      // Shared with other people, it or a page it is inside.
-      const seen = new Set<string>();
-      let people = false;
-      for (let p: Row | undefined = r; p && !people && !seen.has(p.id); p = byId.get(p.parent_id ?? "")) {
-        seen.add(p.id);
-        people = shares.has(p.id);
-      }
-      const shared = people || guested.has(r.id) || publicIds.has(r.id) || publiclyLinked(r.public_link_until);
+      const people = peopleHave(r);
+      const shared = read(r) || shown.has(r.id);
       return {
         id: r.id,
         title: displayTitle(r.title),
@@ -600,8 +677,11 @@ async function runWorkspaceJob(
     // A card that could not be put in a page, or taken out of it, leaves
     // the page made or moved all the same, as the app's moves do
     // (core.Pages.MovePage): the run keeps what it did, to undo.
-    const card = (what: Promise<void>) =>
-      what.catch((e) => console.error("subpage card:", e instanceof Error ? e.message : String(e)));
+    const card = <T>(what: Promise<T>): Promise<T | undefined> =>
+      what.catch((e) => {
+        console.error("subpage card:", e instanceof Error ? e.message : String(e));
+        return undefined;
+      });
     const hooks: WorkspaceHooks = {
       reading,
       listPages: async () =>
@@ -646,7 +726,7 @@ async function runWorkspaceJob(
         // As a page made from the sidebar, it shows in the page it is
         // inside.
         if (parent) await card(linkSubpage(uc, user, parent, made.id));
-        return made.id;
+        return { id: made.id, space_id: own, sort_key: row.sort_key };
       },
       movePage: async (id, parent, folder) => {
         if (folder && !(await folderIn(uc, own, folder))) throw noFolder(folder);
@@ -655,7 +735,7 @@ async function runWorkspaceJob(
         for (let p = parent; p; p = byId.get(p)?.parent_id ?? "") {
           if (p === id) throw new ToolError("A page cannot move inside itself or one of its subpages");
         }
-        const from = {
+        const from: PagePlace = {
           ...(was.parent_id ? { parent_id: was.parent_id } : {}),
           ...(was.folder_id ? { folder_id: was.folder_id } : {}),
           sort_key: was.sort_key,
@@ -670,9 +750,10 @@ async function runWorkspaceJob(
         if (error) throw new ToolError(`Could not move the page: ${error.message}`);
         const left = was.parent_id;
         Object.assign(was, place);
-        // Its card leaves the page it was in, and goes in the one it is in
-        // now, as the sidebar's moves keep them.
-        if (left) await card(unlinkSubpage(uc, user, left, id));
+        // Its card leaves the page it was in, from where Undo puts it back,
+        // and goes in the one it is in now, as the sidebar's moves keep them.
+        const at = left ? await card(unlinkSubpage(uc, user, left, id)) : undefined;
+        if (at) from.card = at;
         if (parent) await card(linkSubpage(uc, user, parent, id));
         return {
           from,
@@ -692,8 +773,9 @@ async function runWorkspaceJob(
         return kept;
       },
       createFolder: async (name) => {
-        const all = await allRows<{ sort_key: string }>(() =>
-          uc.from("folders").select("sort_key").eq("space_id", own).is("deleted_at", null).order("id")
+        const all = await allRows<{ id: string; sort_key: string }>(
+          () => uc.from("folders").select("id, sort_key").eq("space_id", own).is("deleted_at", null),
+          "id",
         );
         const folder = {
           id: crypto.randomUUID(),
@@ -782,7 +864,7 @@ async function runWorkspaceJob(
     }
     const { error: jobError } = await uc.from("ai_jobs").update({
       status: "done",
-      result: { reply, ops: session.ops, edits, kept_to_page: session.keptToPage, guarded: session.guarded },
+      result: { reply, ops: keptOps(session.ops), edits, kept_to_page: session.keptToPage, guarded: session.guarded },
       error: null,
     }).eq("id", job.id);
     if (jobError) console.error("ai_jobs:", jobError.message);
@@ -791,7 +873,7 @@ async function runWorkspaceJob(
     const message = e instanceof Error ? e.message : String(e);
     console.error("agent job failed:", message);
     // What it changed stays, its ops with it, for Undo to take it back by.
-    const result = session?.ops.length ? { reply: "", ops: session.ops, edits } : undefined;
+    const result = session?.ops.length ? { reply: "", ops: keptOps(session.ops), edits } : undefined;
     await uc.from("ai_jobs").update({ status: "failed", error: message, ...(result ? { result } : {}) }).eq(
       "id",
       job.id,
@@ -857,14 +939,16 @@ async function runJob(
       uc.from("pages").select("id, title").eq("parent_id", page.id).is("deleted_at", null).order("sort_key"),
     )).map((p) => ({ id: p.id, title: displayTitle(p.title) }));
 
-    const comments = await rows<CommentRow>(
-      uc.from("comments")
-        .select(
-          "id, block_id, parent_comment_id, author_id, author_kind, agent_name, body, resolved, created_at, deleted_at",
-        )
-        .eq("page_id", page.id)
-        .order("created_at"),
-    );
+    // All of them, past max_rows, in the order they were made.
+    const comments = (await allRows<CommentRow>(
+      () =>
+        uc.from("comments")
+          .select(
+            "id, block_id, parent_comment_id, author_id, author_kind, agent_name, body, resolved, created_at, deleted_at",
+          )
+          .eq("page_id", page.id),
+      "id",
+    )).sort((a, b) => a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : 1);
     // A thread whose first comment was deleted stays while it has replies,
     // that comment shown as deleted: the app shows it so too.
     const repliesTo = (root: CommentRow) => comments.filter((c) => c.parent_comment_id === root.id && !c.deleted_at);
@@ -915,19 +999,20 @@ async function runJob(
 
     // Other pages are offered only on a page that is the caller's alone: on
     // a shared page, someone else's writing could have the agent read the
-    // caller's other pages into it. A guest's comment is someone else's too,
-    // though stored as the owner's (a deleted one still shows its name), and
-    // it is on a page with a public link: what the agent reads into it, its
-    // visitors read. So is a public link no one commented through yet,
-    // which the app that serves it keeps on the page while it does
-    // (public_link_until).
-    let crossPage = job.request?.allow_cross_page === true && !publiclyLinked(page.public_link_until) &&
-      !comments.some((c) => c.author_kind === "guest");
-    if (crossPage) {
+    // caller's other pages into it, or, in a page of the caller's own made
+    // from it, take what they wrote into the caller's pages. A guest's
+    // comment is someone else's too, though stored as the owner's (a
+    // deleted one still shows its name), and it is on a page with a public
+    // link: what the agent reads into it, its visitors read. So is a public
+    // link no one commented through yet, which the app that serves it keeps
+    // on the page while it does (public_link_until).
+    let alone = !publiclyLinked(page.public_link_until) && !comments.some((c) => c.author_kind === "guest");
+    if (alone) {
       const { data: members, error: membersError } = await uc.rpc("page_members", { p_page_id: page.id });
-      crossPage = !membersError && Array.isArray(members) && members.length > 0 &&
+      alone = !membersError && Array.isArray(members) && members.length > 0 &&
         members.every((m: { user_id: string }) => m.user_id === user.id);
     }
+    const crossPage = job.request?.allow_cross_page === true && alone;
     // The provider's test found whether its default model calls tools; any
     // other model is offered them, and answers without them if it refuses
     // them (rejectedTools, below).
@@ -975,8 +1060,9 @@ async function runJob(
       createSubpage: async (title: string, subContent: PageContent) => {
         // Last among its siblings, by the keys' bytes as the app orders
         // them, not the database's collation: all of them, past max_rows.
-        const siblings = await allRows<{ sort_key: string }>(() =>
-          uc.from("pages").select("sort_key").eq("parent_id", page.id).order("id")
+        const siblings = await allRows<{ id: string; sort_key: string }>(
+          () => uc.from("pages").select("id, sort_key").eq("parent_id", page.id),
+          "id",
         );
         const made = await insertPage({
           space_id: page.space_id,
@@ -996,10 +1082,10 @@ async function runJob(
         if (folderId && !(await folderIn(uc, space, folderId))) throw noFolder(folderId);
         // Last among the folder's pages, or the top level's outside folders:
         // all of them, past max_rows.
-        const siblings = await allRows<{ sort_key: string }>(() => {
-          const top = uc.from("pages").select("sort_key").eq("space_id", space).is("parent_id", null);
-          return (folderId ? top.eq("folder_id", folderId) : top.is("folder_id", null)).order("id");
-        });
+        const siblings = await allRows<{ id: string; sort_key: string }>(() => {
+          const top = uc.from("pages").select("id, sort_key").eq("space_id", space).is("parent_id", null);
+          return folderId ? top.eq("folder_id", folderId) : top.is("folder_id", null);
+        }, "id");
         return await insertPage({
           space_id: space,
           parent_id: null,
@@ -1052,7 +1138,7 @@ async function runJob(
             : {}),
         }
         : {}),
-    }, { canEdit, crossPage, request: instruction, author: agentName });
+    }, { canEdit, crossPage, ownPages: alone, request: instruction, author: agentName });
 
     // Saves the run's edits, once: on its end, or on its failure after it
     // made some.
@@ -1129,6 +1215,7 @@ async function runJob(
       surface: job.surface,
       canEdit,
       crossPage,
+      ownPages: alone,
       toolsEnabled,
       userName,
       today,
@@ -1165,7 +1252,10 @@ async function runJob(
 
     // --- loop -----------------------------------------------------------
     const tools: ToolDef[] = toolsEnabled
-      ? [...toolDefinitions({ canEdit, crossPage }), ...(web ? webToolDefinitions(promptContext.search) : [])]
+      ? [
+        ...toolDefinitions({ canEdit, crossPage, ownPages: alone }),
+        ...(web ? webToolDefinitions(promptContext.search) : []),
+      ]
       : [];
     const { reply: answered, finished, outOfTime } = await converse(
       {
@@ -1205,7 +1295,7 @@ async function runJob(
       .from("ai_jobs")
       .update({
         status: "done",
-        result: { reply, ops: session.ops, edits, kept_to_page: session.keptToPage, guarded: session.guarded },
+        result: { reply, ops: keptOps(session.ops), edits, kept_to_page: session.keptToPage, guarded: session.guarded },
         error: null,
       })
       .eq("id", job.id);
@@ -1246,7 +1336,7 @@ async function runJob(
     // The pages it made are kept, its ops with them, for Undo to take
     // them away by.
     const result = savedEdits || (session?.ops.length && !session.changed)
-      ? { reply: "", ops: session!.ops, edits }
+      ? { reply: "", ops: keptOps(session!.ops), edits }
       : undefined;
     await uc.from("ai_jobs").update({ status: "failed", error: message, ...(result ? { result } : {}) }).eq(
       "id",

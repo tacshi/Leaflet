@@ -168,3 +168,28 @@ func TestToolsAsTheServerHasThem(t *testing.T) {
 		}
 	}
 }
+
+// A value is counted as the server counts it (json_costs.json): the pages
+// list_pages lists are cut where they would pass the most a model reads at
+// once, on either side at the same page.
+func TestJSONCostAsTheServer(t *testing.T) {
+	var cases []struct {
+		Value any `json:"value"`
+		Cost  int `json:"cost"`
+	}
+	data, err := os.ReadFile("../../supabase/functions/_shared/testdata/json_costs.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	if len(cases) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range cases {
+		if got := jsonCost(c.Value); got != c.Cost {
+			t.Errorf("%#v costs %d here, %d on the server", c.Value, got, c.Cost)
+		}
+	}
+}

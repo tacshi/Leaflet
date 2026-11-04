@@ -11,7 +11,10 @@ import (
 type Pages interface {
 	LinkSubpage(parent, id, after string) error
 	UnlinkSubpage(parent, id string) error
-	MovePage(id, parent string, move func() error) error
+	// MovePageAt moves page id under page parent, or to the top level, by
+	// move, its card going in parent at at, or at its end for nil, and
+	// returns where its card was in the parent it left, nil for none.
+	MovePageAt(id, parent string, at *doc.Position, move func() error) (left *doc.Position, err error)
 	DeletePage(id string) (ids []string, card doc.Position, err error)
 	RestorePages(ids []string, card doc.Position) error
 }
@@ -37,7 +40,9 @@ func (storePages) LinkSubpage(string, string, string) error { return nil }
 
 func (storePages) UnlinkSubpage(string, string) error { return nil }
 
-func (storePages) MovePage(_, _ string, move func() error) error { return move() }
+func (storePages) MovePageAt(_, _ string, _ *doc.Position, move func() error) (*doc.Position, error) {
+	return nil, move()
+}
 
 func (p storePages) DeletePage(id string) ([]string, doc.Position, error) {
 	ids, err := p.st.DeletePage(id)

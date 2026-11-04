@@ -222,7 +222,7 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 			}
 		}
 	}
-	system, user := SystemPrompt(req.AgentName, req.Surface, tc.ListPages != nil, req.SupportsTools, tc.ReadOnly, tc.ReadWeb != nil, tc.SearchWeb != nil), userMessage(req, views, focus)
+	system, user := SystemPrompt(req.AgentName, req.Surface, tc.ListPages != nil, req.SupportsTools, tc.ReadOnly, tc.ReadWeb != nil, tc.SearchWeb != nil, tc.CreatePage != nil), userMessage(req, views, focus)
 	if tc.Workspace != nil {
 		system, user = WorkspacePrompt(req.AgentName, tc.Workspace.Reading, req.SupportsTools, tc.ReadWeb != nil, tc.SearchWeb != nil), workspaceMessage(req)
 	}
@@ -237,6 +237,11 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 	var tools []map[string]any
 	if req.SupportsTools {
 		tools = ToolDefinitions(tc.ListPages != nil, tc.ReadOnly)
+		// No page of the user's own from a page someone else writes or
+		// reads (ToolContext.CreatePage).
+		if tc.CreatePage == nil {
+			tools = slices.DeleteFunc(tools, func(d map[string]any) bool { return d["function"].(map[string]any)["name"] == "create_page" })
+		}
 		if tc.Workspace != nil {
 			tools = WorkspaceToolDefinitions(tc.Workspace.Reading)
 		}
@@ -511,6 +516,9 @@ func RunCloud(ctx context.Context, be Streamer, jobID string, ev Events) (Result
 			if json.Unmarshal(raw, &op) != nil {
 				return
 			}
+			// A page made keeps its content itself: the run's chat, kept
+			// here, keeps none of it, for Undo takes the page away by its ID.
+			op.Content = nil
 			// Said from the op, in the app's language, as a local run's
 			// edit, not as the server words it.
 			tool, _ := e["tool"].(string)
@@ -605,6 +613,8 @@ func (j cloudJob) result(streamed Result) (Result, error) {
 	if len(j.Result.Ops) >= len(res.Ops) {
 		res.Ops, res.Edits = j.Result.Ops, nil
 		for i, op := range j.Result.Ops {
+			// As a streamed op, without the content of a page it made.
+			res.Ops[i].Content = nil
 			tool := ""
 			// One edit an op, as servers that name the tool make them.
 			if len(j.Result.Edits) == len(j.Result.Ops) {

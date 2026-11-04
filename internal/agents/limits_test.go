@@ -325,7 +325,7 @@ func TestRequestCarriesOthersWritingAsData(t *testing.T) {
 // finishes its job, its edits being one undo step, a new page is one of
 // its own, and text it is asked to save goes in whole.
 func TestPromptHasTheServersRules(t *testing.T) {
-	p := SystemPrompt("Claude", "sidebar", false, true, false, false, false)
+	p := SystemPrompt("Claude", "sidebar", false, true, false, false, false, true)
 	for _, rule := range []string{"Keep block IDs stable", "finish the job", "If the page's blocks are not in the request, call read_page", "come before the request as JSON",
 		"Asked for a new page, make one with create_page", "not a summary, unless"} {
 		if !strings.Contains(p, rule) {

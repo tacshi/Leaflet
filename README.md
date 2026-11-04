@@ -78,7 +78,10 @@ itself.
   page as one undo step, after a history snapshot.
 - Asked for a new page, an agent makes one of its own, at the top level or
   in a folder (`create_page`), and a subpage inside the page when asked for
-  one there, its link at the end of the page (`create_subpage`).
+  one there, its link at the end of the page (`create_subpage`). On a page
+  someone else writes in, comments on as a guest or reads by a public link,
+  it makes a subpage: a page of your own would take their writing into
+  your pages.
 - The workspace agent works on all your pages rather than one: the panel's
   Agent tab at All pages, and the panel itself with no page open. It finds
   and reads your pages, makes them, moves, renames and tags them, and makes

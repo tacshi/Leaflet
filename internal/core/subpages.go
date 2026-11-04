@@ -74,12 +74,27 @@ func (p Pages) UnlinkSubpage(parent, id string) error {
 // could not be changed the user is told of, as the page moved all the
 // same.
 func (p Pages) MovePage(id, parent string, move func() error) error {
+	_, err := p.MovePageAt(id, parent, nil, move)
+	return err
+}
+
+// MovePageAt is MovePage, the card going in parent at at, or at its end
+// for nil, as Undo puts one back where it was. It returns where the card
+// was in the parent the page left, nil for none.
+func (p Pages) MovePageAt(id, parent string, at *doc.Position, move func() error) (left *doc.Position, err error) {
 	old := ""
 	if pg, err := p.Store.Page(id); err == nil {
 		old = pg.ParentID
 	}
+	if old != "" && old != parent {
+		if c := p.content(old); c != nil {
+			if was, ok := c.SubpagePlace(id); ok {
+				left = &was
+			}
+		}
+	}
 	if err := move(); err != nil || old == parent {
-		return err
+		return nil, err
 	}
 	if old != "" {
 		if err := p.UnlinkSubpage(old, id); err != nil {
@@ -87,11 +102,17 @@ func (p Pages) MovePage(id, parent string, move func() error) error {
 		}
 	}
 	if parent != "" {
-		if err := p.LinkSubpage(parent, id, ""); err != nil {
-			p.notify(locales.AppErrorLinkSubpage(err.Error()))
+		var link error
+		if at != nil {
+			link = p.LinkSubpageAt(parent, id, *at)
+		} else {
+			link = p.LinkSubpage(parent, id, "")
+		}
+		if link != nil {
+			p.notify(locales.AppErrorLinkSubpage(link.Error()))
 		}
 	}
-	return nil
+	return left, nil
 }
 
 // DeletePage deletes page id and its subpages, returning their IDs, the

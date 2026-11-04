@@ -118,6 +118,8 @@ struct SidebarView: View {
         .searchFocused($searchFocused)
         .onChange(of: scene.searchRequested) { searchFocused = true }
         .task(id: query) { await search() }
+        // Its agents, for search to offer one where nothing matches.
+        .task { scene.workspace.start(app) }
         .onAppear { app.showsTodos(id, showsTodos) }
         .onDisappear { app.showsTodos(id, false) }
         .onChange(of: showsTodos) { app.showsTodos(id, showsTodos) }
@@ -137,6 +139,14 @@ struct SidebarView: View {
             // the desktop's sidebar has them; plain, as the sidebar's own
             // button.
             ToolbarItemGroup(placement: .primaryAction) {
+                // Stacked, as on iPhone, no screen of no page open has Ask
+                // the agent beside it: the list of pages does.
+                if stacked {
+                    Button(L.shellAskAgent, systemImage: "sparkles") {
+                        scene.askWorkspace(sheet: true)
+                    }
+                    .tint(Color.primary)
+                }
                 Button(L.shellNewPage, systemImage: "square.and.pencil") { newPage() }
                     .tint(Color.primary)
                 Button(L.sidebarNewFolder, systemImage: "folder.badge.plus") {
@@ -399,6 +409,12 @@ struct SidebarView: View {
                 ProgressView().frame(maxWidth: .infinity)
             } else if hits.isEmpty {
                 ContentUnavailableView.search(text: query)
+                // As the desktop's search: what nothing matches, an agent
+                // may find in the pages, or make of them.
+                if scene.workspace.agents.available {
+                    Button(L.dialogSearchAskAgent, systemImage: "sparkles") { askAgent() }
+                        .frame(maxWidth: .infinity)
+                }
             }
             searchHits
         }
@@ -431,6 +447,35 @@ struct SidebarView: View {
         case "recording": "waveform"
         case "comment": "text.bubble"
         default: "doc.text"
+        }
+    }
+
+    /// askAgent asks an agent what was searched for, as the desktop's search
+    /// does: the page's beside it, or with none beside the list, the
+    /// workspace agent, as a sheet, stacked. While the agent works, which
+    /// takes one request at a time, the question waits in its composer.
+    private func askAgent() {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty, let client = app.client else { return }
+        query = ""
+        searchFocused = false
+        if let page = scene.page, scene.selection == page.id, !stacked {
+            scene.inspectorTab = .agent
+            scene.allPages = false
+            scene.focusChat = true
+            scene.inspectorShown = true
+            if page.agents.running {
+                page.chatDraft = q
+            } else {
+                Task { await client.chat(page.id, text: q, focus: []) }
+            }
+            return
+        }
+        scene.askWorkspace(sheet: stacked)
+        if scene.workspace.agents.running {
+            scene.workspace.chatDraft = q
+        } else {
+            Task { [scene] in await client.workspaceChat(q, openPageID: scene.selection ?? "") }
         }
     }
 

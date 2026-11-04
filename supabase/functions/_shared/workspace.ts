@@ -18,9 +18,10 @@ export interface WorkspacePage {
   tags: string[];
   /**
    * A page someone else reads or writes: shared with others, with a
-   * guest's comment or a public link. The agent changes nothing of it, nor
-   * puts a page in it: what someone else wrote there could have it copy
-   * the person's other pages in.
+   * guest's comment or a public link, or whose title they read, as its
+   * card is on such a page. The agent changes nothing of it, nor puts a
+   * page in it: what someone else wrote there could have it copy the
+   * person's other pages in, or write them where others read it.
    */
   shared?: boolean;
   /**
@@ -54,9 +55,14 @@ export interface WorkspaceHooks {
   readPage(id: string): Promise<unknown>;
   searchPages(query: string): Promise<unknown[]>;
   listFolders(): Promise<{ id: string; name: string }[]>;
-  /** Makes a page, in folderId at the top level or inside parentId, linked at its end, and returns its id. */
-  createPage(title: string, content: PageContent, parentId: string, folderId: string): Promise<string>;
-  /** Moves a page, returning where it was and where it went. */
+  /** Makes a page, in folderId at the top level or inside parentId, linked at its end, and returns it as made. */
+  createPage(
+    title: string,
+    content: PageContent,
+    parentId: string,
+    folderId: string,
+  ): Promise<{ id: string; space_id: string; sort_key: string }>;
+  /** Moves a page, returning where it was and where it went: the same place, where it is already. */
   movePage(id: string, parentId: string, folderId: string): Promise<{ from: PagePlace; to: PagePlace }>;
   renamePage(id: string, title: string): Promise<void>;
   /** Sets a page's tags, returning them as the page keeps them (normalizeTags). */
@@ -72,7 +78,7 @@ export function workspaceToolDefinitions(reading: boolean): ToolDef[] {
     out.push(
       tool(
         "list_pages",
-        `List the person's pages, at most ${MAX_LISTED_PAGES} (search_pages finds the others): their ids, titles and tags, the page or folder each is in, and whether others share it; and their folders.`,
+        `List the person's pages, at most ${MAX_LISTED_PAGES}, fewer where their titles are long (more_pages says how many more; search_pages finds them): their ids, titles and tags, the page or folder each is in, and whether others share it; and their folders.`,
       ),
       tool(
         "search_pages",

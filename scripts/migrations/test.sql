@@ -289,11 +289,52 @@ begin
   end if;
 end;
 $$;
+-- The workspace agent finds the owner's pages someone else has, or is
+-- asked to have, an invite still waiting, by person or by address, as the
+-- app counts their members; and none of anyone else's.
+insert into public.pages (id, space_id, title)
+select v.id, s.id, v.title from public.spaces s,
+  (values ('f0000000-0000-0000-0000-0000000000c1'::uuid, 'Invited'), ('f0000000-0000-0000-0000-0000000000c2'::uuid, 'By address'),
+    ('f0000000-0000-0000-0000-0000000000c3'::uuid, 'Alone')) v (id, title)
+where s.owner_id = auth.uid();
+select public.share_page('f0000000-0000-0000-0000-0000000000c1', 'editor@example.com', 'viewer');
+select public.share_page('f0000000-0000-0000-0000-0000000000c2', 'nobody@example.com', 'viewer');
+do $$
+begin
+  if array(select page_id from public.agent_shared_pages() order by page_id) is distinct from
+     array['f0000000-0000-0000-0000-00000000000a', 'f0000000-0000-0000-0000-0000000000c1',
+       'f0000000-0000-0000-0000-0000000000c2']::uuid[] then
+    raise exception 'the owner''s shared pages are %', array(select page_id from public.agent_shared_pages() order by page_id);
+  end if;
+end;
+$$;
+-- The pages the cards of the owner's pages name, nested in lists too,
+-- found without the pages' content; none of a page the caller has not.
+update public.page_content set content = '{"document": {"type": "page", "id": "root", "children": [
+    {"id": "s1", "type": "subpage", "data": {"page_id": "f0000000-0000-0000-0000-0000000000c3"}},
+    {"id": "l1", "type": "bulleted_list", "children": [
+      {"id": "s2", "type": "subpage", "data": {"page_id": "f0000000-0000-0000-0000-0000000000c1"}}]},
+    {"id": "p1", "type": "paragraph", "data": {"page_id": "not a card"}}]}}'
+where page_id = 'f0000000-0000-0000-0000-00000000000a';
+do $$
+begin
+  if array(select page_id from public.agent_card_pages(array['f0000000-0000-0000-0000-00000000000a']::uuid[]) order by page_id)
+     is distinct from array['f0000000-0000-0000-0000-0000000000c1', 'f0000000-0000-0000-0000-0000000000c3'] then
+    raise exception 'the cards found are %', array(select page_id from public.agent_card_pages(array['f0000000-0000-0000-0000-00000000000a']::uuid[]));
+  end if;
+end;
+$$;
 select pg_temp.act_as('b0000000-0000-0000-0000-000000000002');
 do $$
 begin
   if exists (select 1 from public.agent_search_pages('', '{}', 20)) then
     raise exception 'the editor found the owner''s pages';
+  end if;
+  if exists (select 1 from public.agent_shared_pages()) then
+    raise exception 'the editor found the owner''s shared pages';
+  end if;
+  if exists (select 1 from public.agent_card_pages(array['f0000000-0000-0000-0000-00000000000a']::uuid[])) then
+    raise exception 'the editor found the cards of the owner''s pages';
   end if;
 end;
 $$;

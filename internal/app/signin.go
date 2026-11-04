@@ -6,6 +6,7 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
 	"leaflet/locales"
@@ -278,7 +279,8 @@ func (a *App) lostBySigningIn(user *store.User) int { return a.core().LostBySign
 // it was another's, once the open page's edits are saved; with their
 // changes not uploaded yet only when drop says the user agreed.
 func (a *App) useAccount(user *store.User, drop bool) {
-	if a.replacesAccount(user) && !a.flush() {
+	replaces := a.replacesAccount(user)
+	if replaces && !a.flush() {
 		go a.backend.SignOut()
 		return
 	}
@@ -294,6 +296,11 @@ func (a *App) useAccount(user *store.User, drop bool) {
 		return
 	}
 	a.session = a.st.Session()
+	// What was typed to the workspace agent, of no page, goes with the
+	// account whose pages went.
+	if replaces {
+		delete(a.drafts, agents.WorkspaceID)
+	}
 	a.signIn = signInState{}
 	// The name field shows the account's name now, not one typed before.
 	a.account.nameEdited = false

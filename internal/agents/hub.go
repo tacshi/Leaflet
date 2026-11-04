@@ -86,6 +86,13 @@ type Run struct {
 	// subpages that went with it and where its card was, for Redo to put
 	// them all back.
 	Removed map[string]RemovedPages `json:"Removed,omitempty"`
+	// Left are the pages and folders the run made that the user deleted
+	// since, which the latest Undo left as they were: Redo leaves them so
+	// too, rather than bring back what the user deleted.
+	Left []string `json:"Left,omitempty"`
+	// Local is a run of this device's, all of whose changes were made
+	// here: none of them is still to come with a sync (awaited).
+	Local bool `json:"Local,omitempty"`
 	// kept is a run whose "Before" snapshot is in the page's history.
 	kept bool
 	// stop cancels a run on this device while it works; a cloud run goes
@@ -271,7 +278,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 			return fail(err)
 		}
 	}
-	run.AgentName = option.Name()
+	run.AgentName, run.Local = option.Name(), option.Local()
 	s.Runs = append(s.Runs, run)
 	s.Running = true
 	if o.Reply != nil {
@@ -323,6 +330,8 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		},
 	}
 	work := before.Copy()
+	// Asked here, on the main thread, as the host's methods are.
+	online := h.host.Online()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	run.cancel = cancel
 	if option.Local() {
@@ -340,7 +349,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 				if client, err = h.ModelFor(option.Provider); err == nil {
 					var tc ToolContext
 					if workspace {
-						tc = h.workspaceTools(ctx, option.Name(), settings)
+						tc = h.workspaceTools(ctx, option.Name(), settings, online)
 						// The open page is told of as the tools see it, a public
 						// link another device serves of it among what they know.
 						if req.OpenPage != nil {
@@ -352,8 +361,8 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 						}
 					} else {
 						tc = h.toolContext(pageID, page.DisplayTitle(), option.Name(), work, settings)
-						if tc.ListPages != nil && h.publicElsewhere(ctx, pageID) {
-							tc.ListPages, tc.ReadOtherPage, tc.ListFolders = nil, nil, nil
+						if (tc.ListPages != nil || tc.CreatePage != nil) && h.publicElsewhere(ctx, pageID, online) {
+							tc.ListPages, tc.ReadOtherPage, tc.ListFolders, tc.CreatePage = nil, nil, nil, nil
 						}
 					}
 					res, err = RunLocal(ctx, client, req, tc, events)
@@ -414,21 +423,31 @@ func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, 
 			log.Printf("agent run history: %v", err)
 		}
 		d.to(live, run.Ops)
-		if o.Reply != nil && time.Since(d.chatSaved) >= chatSaveEvery {
-			// The chat whole the first time, which has the run then, and
-			// after that the run alone.
-			if d.chatSaved.IsZero() {
-				h.saveChat(s)
-			} else {
-				h.saveRunning(s, run)
-			}
-			d.chatSaved = time.Now()
-		}
+		h.keepRunning(s, run, d, o, chatSaveEvery)
 	case !option.Local():
 		// The server keeps a cloud run's ops: a page opened
 		// later gets them by syncing.
 		d.sent = len(run.Ops)
+	case s.PageID == WorkspaceID:
+		// Its tools have changed the user's pages already: each op is kept
+		// as it comes, for Undo after a launch the app quit during.
+		h.keepRunning(s, run, d, o, 0)
 	}
+}
+
+// keepRunning keeps a run's ops with its chat as they come, a save each
+// every at most: the chat whole the first time, which has the run then,
+// and after that the run alone (saveRunning).
+func (h *Hub) keepRunning(s *Session, run *Run, d *delivery, o RunOptions, every time.Duration) {
+	if o.Reply == nil || !d.chatSaved.IsZero() && time.Since(d.chatSaved) < every {
+		return
+	}
+	if d.chatSaved.IsZero() {
+		h.saveChat(s)
+	} else {
+		h.saveRunning(s, run)
+	}
+	d.chatSaved = time.Now()
 }
 
 // revised takes a change of a run's op at at as the blocks of the call

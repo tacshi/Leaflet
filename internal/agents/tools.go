@@ -7,6 +7,7 @@ import (
 	"maps"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -190,7 +191,7 @@ func editTools() []map[string]any {
 		tool("delete_blocks", "Delete blocks by ID, with their nested items.", map[string]any{"ids": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}}, "ids"),
 		tool("create_subpage", "Create a subpage inside this page, for content that is part of it, optionally with content: a link to it goes at the end of this page.", pageSchema(), "title"),
 		tool("create_page", "Create a page of its own, outside this one, optionally with content: at the top level of the user's pages, or in one of their folders. Make \"a new page\" with this, unless the user asks for one inside or under this page.",
-			pageSchema(prop{"folder_id", map[string]any{"type": "string", "description": "The folder to put it in, from list_folders; none for the top level."}}), "title"),
+			pageSchema(prop{"folder_id", map[string]any{"type": "string", "description": "The folder to put it in, its ID from list_folders where that is offered; none for the top level."}}), "title"),
 	}
 }
 
@@ -208,7 +209,9 @@ type ToolContext struct {
 	// CreateSubpage makes the subpage and returns its ID.
 	CreateSubpage func(title string, nodes []*doc.Node) (string, error)
 	// CreatePage makes a page of the user's own at the top level, in the
-	// folder of ID folderID when it is not "", and returns its ID.
+	// folder of ID folderID when it is not "", and returns its ID; nil on a
+	// page someone else writes or reads, whose writing it would take into
+	// the user's own pages.
 	CreatePage func(title string, nodes []*doc.Node, folderID string) (string, error)
 	// ListPages, ReadOtherPage and ListFolders are nil when cross-page
 	// reading is off.
@@ -292,8 +295,9 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 			p, err := st.CreatePage(store.NewPageOptions{ParentID: pageID, Title: title, Content: c})
 			return p.ID, err
 		},
-		// A page of its own is the user's, in their space, wherever the page
-		// the run is on is: one someone else shared is theirs.
+		// A page of its own is the user's, in their space, whatever space
+		// the page the run is on is in; the hub offers it only on a page no
+		// one else writes or reads (toolContext).
 		CreatePage: func(title string, nodes []*doc.Node, folderID string) (string, error) {
 			if folderID != "" && !spaceFolder(st, folderID) {
 				return "", noFolder(folderID)
@@ -313,16 +317,24 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 		here, _ := st.Page(pageID)
 		tc.ListPages = func() []map[string]any {
 			pages, _ := st.Pages()
-			out := []map[string]any{}
+			var others []store.Page
 			for _, p := range pages {
-				if len(out) == maxListedPages {
-					break
-				}
 				if p.ID != pageID && p.SpaceID == here.SpaceID {
-					out = append(out, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "parent_id": p.ParentID})
+					others = append(others, p)
 				}
 			}
-			return out
+			out := []map[string]any{}
+			for _, p := range others {
+				out = append(out, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "parent_id": p.ParentID})
+			}
+			// A page at the top level counted as the server writes it, of
+			// parent null: the more of the two.
+			return out[:listed(len(out), 0, func(i int) int {
+				if out[i]["parent_id"] == "" {
+					return jsonCost(out[i]) + jsonCost(nil) - jsonCost("")
+				}
+				return jsonCost(out[i])
+			})]
 		}
 		// Shaped as read_page's, as protocol §2 has it: its subpages, and
 		// no comments, which are of this page's alone.
@@ -349,6 +361,78 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 // maxListedPages is the most pages list_pages lists, as the agent
 // function lists at most so many.
 const maxListedPages = 500
+
+// listBudget is how much of a tool's result, in UTF-16 units by
+// jsonCost, the pages list_pages lists take at most, with what is listed
+// with them: within toolResultLimit, with room for the keys around them.
+// Past it, as past maxListedPages, the rest are left for a search to
+// find, rather than cut off with the result.
+const listBudget = toolResultLimit - 2_000
+
+// jsonCost is at least how many UTF-16 units v takes as JSON, as either
+// side writes it, the server counting it so too: six for a character one
+// of them escapes (\u003c, as Go writes <), one or two for the rest.
+func jsonCost(v any) int {
+	switch x := v.(type) {
+	case string:
+		n := 2
+		for _, r := range x {
+			switch {
+			case r < 0x20 || strings.ContainsRune(`"\<>&`, r) || r == 0x2028 || r == 0x2029 || r == utf8.RuneError:
+				n += 6
+			case r > 0xFFFF:
+				n += 2
+			default:
+				n++
+			}
+		}
+		return n
+	case bool:
+		if x {
+			return 4
+		}
+		return 5
+	case int:
+		return len(strconv.Itoa(x))
+	case []string:
+		n := 2 + max(len(x)-1, 0)
+		for _, e := range x {
+			n += jsonCost(e)
+		}
+		return n
+	case []map[string]any:
+		n := 2 + max(len(x)-1, 0)
+		for _, e := range x {
+			n += jsonCost(e)
+		}
+		return n
+	case []any:
+		n := 2 + max(len(x)-1, 0)
+		for _, e := range x {
+			n += jsonCost(e)
+		}
+		return n
+	case map[string]any:
+		n := 2 + max(len(x)-1, 0)
+		for k, e := range x {
+			n += jsonCost(k) + 1 + jsonCost(e)
+		}
+		return n
+	}
+	return 4
+}
+
+// listed is how many of n pages list_pages lists: at most maxListedPages,
+// and as many as listBudget takes past spent, what is listed with them,
+// cost being each page's jsonCost.
+func listed(n, spent int, cost func(i int) int) int {
+	for i := range min(n, maxListedPages) {
+		if spent += cost(i) + 1; spent > listBudget {
+			return i
+		}
+	}
+	return min(n, maxListedPages)
+}
 
 // spaceFolders are the folders of the user's own space, as list_folders
 // lists them.
@@ -1332,6 +1416,10 @@ func PageNodes(args map[string]any, author string) (string, []*doc.Node, error) 
 	return strings.TrimSpace(title), nodes, nil
 }
 
+// errNoOwnPages refuses a page of the user's own on a page someone else
+// writes or reads, as the server words it.
+const errNoOwnPages = "Someone else writes or reads this page: a page of the user's own made from it could take what they wrote into the user's own pages. Make a subpage of this page with create_subpage instead."
+
 // optionalString is the text args has at key: "" when it has none, and an
 // error when it has something else.
 func optionalString(args map[string]any, key string) (string, error) {
@@ -1384,6 +1472,9 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 }
 
 func (x *Executor) createPage(args map[string]any) (map[string]any, error) {
+	if x.Ctx.CreatePage == nil {
+		return nil, terr(errNoOwnPages)
+	}
 	title, nodes, err := PageNodes(args, x.Ctx.AgentName)
 	if err != nil {
 		return nil, err
@@ -1399,9 +1490,6 @@ func (x *Executor) createPage(args map[string]any) (map[string]any, error) {
 	}
 	if err := x.room(nodes); err != nil {
 		return nil, err
-	}
-	if x.Ctx.CreatePage == nil {
-		return nil, terr("Pages cannot be made here.")
 	}
 	id, err := x.Ctx.CreatePage(title, nodes, folder)
 	if err != nil {
@@ -1471,15 +1559,16 @@ func opEdit(op doc.Op, tool string) Edit {
 	case op.Op == "delete" && len(op.IDs) > 0:
 		summary = locales.AgentEditDeleted(len(op.IDs))
 	case op.Op == "create_page" && op.Page != nil && op.Page.ParentID == "":
-		summary = locales.AgentEditCreatedPage(op.Page.Title)
+		summary = locales.AgentEditCreatedPage(store.TitleOr(op.Page.Title))
 	case op.Op == "create_page" && op.Page != nil:
-		summary = locales.AgentEditCreatedSubpage(op.Page.Title)
+		summary = locales.AgentEditCreatedSubpage(store.TitleOr(op.Page.Title))
+	// A page op names an untitled page "", said in the app's language.
 	case op.Op == "move_page":
-		summary = locales.AgentEditMovedPage(op.Title)
+		summary = locales.AgentEditMovedPage(store.TitleOr(op.Title))
 	case op.Op == "rename_page":
-		summary = locales.AgentEditRenamedPage(op.PrevTitle, op.Title)
+		summary = locales.AgentEditRenamedPage(store.TitleOr(op.PrevTitle), store.TitleOr(op.Title))
 	case op.Op == "set_page_tags":
-		summary = locales.AgentEditTaggedPage(op.Title)
+		summary = locales.AgentEditTaggedPage(store.TitleOr(op.Title))
 	case op.Op == "create_folder" && op.Folder != nil:
 		summary = locales.AgentEditCreatedFolder(op.Folder.Name)
 	}

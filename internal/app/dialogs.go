@@ -303,14 +303,24 @@ func (a *App) searchDialog(c *ui.Context) {
 				ui.Column(c).Padding(24).Gap(10).AlignItems(ui.Center).Children(func() {
 					ui.Text(c, locales.DialogSearchNoMatch(d.query)).TextColor(pal.TextMuted)
 					// The page's agent, or with none open the workspace's.
+					// While it works, which it takes one request at a time
+					// for, the query waits in its composer.
 					if a.hub.Available() && button(c, "ask", "sparkles", locales.DialogSearchAskAgent()).Clicked() {
 						q := d.query
 						d.searchOpen = false
+						sess := agents.WorkspaceID
 						if a.page != nil {
+							sess = a.page.id
 							a.openPageAgent()
-							a.hub.Chat(a.page.id, q, nil)
 						} else {
 							a.openWorkspace()
+						}
+						switch {
+						case a.hub.Session(sess).Running:
+							a.draftsOf(sess).chat.draft = q
+						case a.page != nil:
+							a.hub.Chat(a.page.id, q, nil)
+						default:
 							a.askWorkspace(q)
 						}
 					}

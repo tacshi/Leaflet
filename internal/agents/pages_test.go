@@ -3,6 +3,7 @@ package agents
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"leaflet/internal/doc"
@@ -238,5 +239,52 @@ func TestUndoKeepsWhatTheUserChangedSince(t *testing.T) {
 	}
 	if got, _ := st.Page(article.ID); got.Title != "Mine" || len(got.Tags) != 0 {
 		t.Errorf("page %q tagged %q", got.Title, got.Tags)
+	}
+}
+
+// A page of the user's own is made only from a page no one else writes or
+// reads: from one shared, or one a guest commented on, the run has no
+// create_page, and its prompt has it make a subpage instead; listing the
+// folders it may not, its prompt names none.
+func TestNoPagesOfTheirOwnFromSharedPages(t *testing.T) {
+	st := openStore(t)
+	h := NewHub(st, nil, readingHost{})
+	own, err := st.CreatePage(store.NewPageOptions{Title: "Mine", SpaceID: st.Session().SpaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guested, err := st.CreatePage(store.NewPageOptions{Title: "Guested", SpaceID: st.Session().SpaceID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddComment(guested.ID, "b1", "Nice", "", "", "guest", "Visitor"); err != nil {
+		t.Fatal(err)
+	}
+	theirs, err := st.CreatePage(store.NewPageOptions{Title: "Theirs", SpaceID: "space-other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tc := h.toolContext(own.ID, "Mine", "Test", doc.Empty(), store.Settings{}); tc.CreatePage == nil {
+		t.Error("no page of the user's own from their own page")
+	}
+	for _, p := range []store.Page{guested, theirs} {
+		tc := h.toolContext(p.ID, p.Title, "Test", doc.Empty(), store.Settings{AgentsReadOtherPages: true})
+		if tc.CreatePage != nil {
+			t.Errorf("a page of the user's own from %q", p.Title)
+		}
+		x := &Executor{Ctx: tc}
+		if out := x.Call("create_page", map[string]any{"title": "Copy"}); out["error"] == nil {
+			t.Errorf("made %v from %q", out, p.Title)
+		}
+	}
+	shared := SystemPrompt("Test", "sidebar", false, true, false, false, false, false)
+	if strings.Contains(shared, "create_page") || !strings.Contains(shared, "make it a subpage of this one with create_subpage") {
+		t.Errorf("the prompt on a shared page: %s", shared)
+	}
+	if p := SystemPrompt("Test", "sidebar", false, true, false, false, false, true); strings.Contains(p, "list_folders") || !strings.Contains(p, "create_page") {
+		t.Errorf("the prompt with no other pages to read: %s", p)
+	}
+	if p := SystemPrompt("Test", "sidebar", true, true, false, false, false, true); !strings.Contains(p, "folder_id from list_folders") {
+		t.Errorf("the prompt with other pages to read: %s", p)
 	}
 }

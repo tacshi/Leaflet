@@ -42,12 +42,23 @@ extension PageModel: AgentChat {
 @MainActor
 @Observable
 final class WorkspaceAgentModel: AgentChat {
-    let id = "workspace"
+    /// chatID is the workspace agent's chat in the core (agents.WorkspaceID).
+    static let chatID = "workspace"
+    let id = chatID
     private(set) var agents = AgentState.empty
     private(set) var agentsLoaded = false
     var chatDraft = ""
     @ObservationIgnored private weak var host: (any PageHost)?
     @ObservationIgnored private var token: UUID?
+    /// reading is the read of the state under way, and queued the one
+    /// after it, which every change meanwhile shares, as a page's chat
+    /// has them: a streaming answer changes it many times a second, and
+    /// each read waits on the core's queue that edits go through.
+    @ObservationIgnored private var reading: Task<Void, Never>?
+    @ObservationIgnored private var queued: Task<Void, Never>?
+    /// account is the user the chat is of: what was typed and not sent
+    /// goes once another signs in, or they sign out, as their chat does.
+    @ObservationIgnored private var account: String?
 
     var emptyText: String { L.workspaceEmpty }
     var placeholder: String { L.workspacePlaceholder }
@@ -63,20 +74,50 @@ final class WorkspaceAgentModel: AgentChat {
         guard token == nil else { return }
         self.host = host
         token = host.listen { [weak self] in self?.handle($0) }
-        Task { await refreshAgents() }
+        Task {
+            await refreshAgents()
+            await keepAccount()
+        }
     }
 
+    /// stop has the chat stop following the core's events, as its window
+    /// closes.
     func stop() {
         if let token { host?.stopListening(token) }
         token = nil
     }
 
     /// refreshAgents reads the state once the core is open, as a page's
-    /// chat does: read before, it would say there is no agent to ask.
+    /// chat does: read before, it would say there is no agent to ask. It
+    /// returns once a read begun after it was asked has answered.
     func refreshAgents() async {
-        let client = await host?.opened()
-        if let s = try? await client?.agentState(id) { agents = s }
-        if !agentsLoaded { agentsLoaded = true }
+        if let queued {
+            await queued.value
+            return
+        }
+        let before = reading
+        let read = Task { [weak self] in
+            await before?.value
+            guard let self else { return }
+            // Under way now: a change from here on asks for another.
+            self.queued = nil
+            let client = await self.host?.opened()
+            if let s = try? await client?.agentState(self.id) { self.agents = s }
+            if !self.agentsLoaded { self.agentsLoaded = true }
+        }
+        queued = read
+        reading = read
+        await read.value
+    }
+
+    /// keepAccount notes the user the chat is of, and lets go of what was
+    /// typed for another.
+    private func keepAccount() async {
+        guard let client = await host?.opened(), let user = try? await client.status().userID else {
+            return
+        }
+        if let account, account != user { chatDraft = "" }
+        account = user
     }
 
     /// send asks the workspace agent, telling it of the page open.
@@ -88,10 +129,14 @@ final class WorkspaceAgentModel: AgentChat {
         switch event {
         case .agentsChanged(let pageID) where pageID.isEmpty || pageID == id:
             Task { await refreshAgents() }
-        // The agents to pick from, as a page's chat hears them.
+        // The agents to pick from, as a page's chat hears them; and the
+        // account, which signing in or out changes.
         case .changed(let table, _)
         where ["model_providers", "key_values", "session", "*"].contains(table):
-            Task { await refreshAgents() }
+            Task {
+                await refreshAgents()
+                if table == "session" || table == "*" { await keepAccount() }
+            }
         default:
             break
         }

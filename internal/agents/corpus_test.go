@@ -221,15 +221,17 @@ func TestCorpusOverwrites(t *testing.T) {
 	}
 }
 
-// workspaceWorld is the user's pages as both sides' corpora have them
+// corpusWorld is the user's pages as both sides' corpora have them
 // (workspace_test.ts WORLD): a page with a subpage, one shared with a
-// friend, one in their folder, one untitled; p-9 is someone else's.
+// friend, one in their folder, one untitled, one others read by its public
+// link; p-9 is someone else's.
 var corpusWorld = []WorkspacePage{
 	{ID: "p-1", Title: "Plan", Tags: []string{"plan"}},
 	{ID: "p-2", Title: "Notes", ParentID: "p-1", Tags: []string{}},
 	{ID: "p-3", Title: "Shared", Tags: []string{}, Shared: true, People: true},
 	{ID: "p-4", Title: "Filed", FolderID: "f-1", Tags: []string{}},
 	{ID: "p-5", Title: "Untitled", Tags: []string{}, Untitled: true},
+	{ID: "p-6", Title: "Linked", Tags: []string{}, Shared: true},
 }
 
 // corpusWorkspace is the workspace's hooks over corpusWorld, which they
@@ -247,22 +249,22 @@ func corpusWorkspace(reading bool, made *[][]*doc.Node) *Workspace {
 	folders := func() []map[string]any { return []map[string]any{{"id": "f-1", "name": "Clippings"}} }
 	return &Workspace{
 		Reading: reading,
-		Pages:   func() []WorkspacePage { return corpusWorld },
+		Pages:   func() ([]WorkspacePage, error) { return corpusWorld, nil },
 		Page:    page,
-		ReadPage: func(id string) map[string]any {
+		ReadPage: func(id string) (map[string]any, error) {
 			p, _ := page(id)
-			return map[string]any{"page": map[string]any{"id": id, "title": p.Title}, "blocks": []any{}, "subpages": []any{}}
+			return map[string]any{"page": map[string]any{"id": id, "title": p.Title}, "blocks": []any{}, "subpages": []any{}}, nil
 		},
-		Search: func(string) []map[string]any {
-			return []map[string]any{{"page_id": "p-1", "title": "Plan"}, {"page_id": "p-3", "title": "Shared", "snippet": "What they wrote"}}
+		Search: func(string) ([]map[string]any, error) {
+			return []map[string]any{{"page_id": "p-1", "title": "Plan"}, {"page_id": "p-3", "title": "Shared", "snippet": "What they wrote"}}, nil
 		},
 		Folders: folders,
-		CreatePage: func(_ string, nodes []*doc.Node, _, folder string) (string, error) {
+		CreatePage: func(_ string, nodes []*doc.Node, _, folder string) (doc.NewPage, error) {
 			if folder != "" && folder != "f-1" {
-				return "", noFolder(folder)
+				return doc.NewPage{}, noFolder(folder)
 			}
 			*made = append(*made, nodes)
-			return "page-new", nil
+			return doc.NewPage{ID: "page-new"}, nil
 		},
 		MovePage: func(id, parent, folder string) (from, to doc.PagePlace, err error) {
 			if folder != "" && folder != "f-1" {

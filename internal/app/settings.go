@@ -614,6 +614,9 @@ func (a *App) leave(clear func() error, synced bool) {
 				}
 			}
 			a.session = a.st.Session()
+			// What was typed to the workspace agent, of no page, goes with
+			// the account, as what was typed on its pages goes with them.
+			delete(a.drafts, agents.WorkspaceID)
 			s := &a.account
 			s.devices, s.devicesOf, s.devicesLoaded, s.devicesErr, s.nameEdited = nil, "", false, "", false
 		})

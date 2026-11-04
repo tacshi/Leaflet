@@ -1359,13 +1359,18 @@ func TestPublicLinkAsTheServerSays(t *testing.T) {
 		l.mu.Lock()
 		l.live = live
 		l.mu.Unlock()
-		if got := h.publicElsewhere(ctx, "p1"); got != live {
+		if got := h.publicElsewhere(ctx, "p1", true); got != live {
 			t.Errorf("live %v: public %v", live, got)
 		}
 	}
-	hs.Close()
-	if !h.publicElsewhere(ctx, "p1") || h.publicElsewhere(ctx, "p2") {
+	// Offline the server is not asked, its last answer standing; gone, it
+	// stands too.
+	if !h.publicElsewhere(ctx, "p1", false) || h.publicElsewhere(ctx, "p2", false) {
 		t.Error("offline, the server's last answer was not kept")
+	}
+	hs.Close()
+	if !h.publicElsewhere(ctx, "p1", true) || h.publicElsewhere(ctx, "p2", true) {
+		t.Error("with the server gone, its last answer was not kept")
 	}
 }
 
@@ -1417,6 +1422,9 @@ func (h serialHost) Update(_ string, fn func()) {
 	defer h.mu.Unlock()
 	fn()
 }
+
+// Online is a host online, whose runs ask the server of public links.
+func (serialHost) Online() bool { return true }
 
 // A run on this device of a page whose public link another device serves,
 // as the server says as the run starts, is offered none of the user's

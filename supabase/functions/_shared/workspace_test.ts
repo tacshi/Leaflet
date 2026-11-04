@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { emptyContent, type PageContent } from "./blocks.ts";
-import { MAX_LISTED_PAGES, PageEditSession, type PagePlace, ToolError } from "./tools.ts";
+import { MAX_LISTED_PAGES, PageEditSession, type PagePlace, TOOL_RESULT_LIMIT, ToolError } from "./tools.ts";
 import { normalizeTags, type WorkspaceHooks, type WorkspacePage, workspaceToolDefinitions } from "./workspace.ts";
 import { workspaceMessage, workspacePrompt } from "./prompt.ts";
 import { corpus } from "../_testing/fixture.ts";
@@ -13,7 +13,8 @@ import messagesCorpus from "./testdata/corpus/workspace_messages.json" with { ty
 /**
  * The person's pages as both sides' corpora have them (Go's
  * TestCorpusWorkspaceCalls): a page with a subpage, one shared with a
- * friend, one in their folder; p-9 is someone else's.
+ * friend, one in their folder, one untitled, one others read by its public
+ * link; p-9 is someone else's.
  */
 const WORLD: WorkspacePage[] = [
   { id: "p-1", title: "Plan", tags: ["plan"] },
@@ -21,6 +22,7 @@ const WORLD: WorkspacePage[] = [
   { id: "p-3", title: "Shared", tags: [], shared: true, people: true },
   { id: "p-4", title: "Filed", folder_id: "f-1", tags: [] },
   { id: "p-5", title: "Untitled", tags: [], untitled: true },
+  { id: "p-6", title: "Linked", tags: [], shared: true },
 ];
 
 function placeOf(p: WorkspacePage): PagePlace {
@@ -46,7 +48,7 @@ function worldHooks(reading: boolean, made: PageContent[] = []): WorkspaceHooks 
     createPage: (_title, content, _parent, folder) => {
       if (folder && folder !== "f-1") return Promise.reject(noFolder(folder));
       made.push(content);
-      return Promise.resolve("page-new");
+      return Promise.resolve({ id: "page-new", space_id: "space-0", sort_key: "a0" });
     },
     movePage: (id, parent, folder) => {
       if (folder && folder !== "f-1") return Promise.reject(noFolder(folder));
@@ -118,14 +120,49 @@ Deno.test("the workspace agent leaves shared pages as they are", async () => {
   assertEquals(tagged.result, { page_id: "p-1", tags: ["plan", "work"] });
 });
 
-// The agent lists at most MAX_LISTED_PAGES of the person's pages, saying
-// how many more there are, for search_pages to find (Go's
-// TestWorkspaceListsAtMostSoManyPages).
+// The agent lists at most MAX_LISTED_PAGES of the person's pages, fewer
+// where their titles would take more than a model reads at once, saying
+// how many more there are, for search_pages to find: what it lists is
+// never cut off with the result, its folders and its count before the
+// pages (Go's TestWorkspaceListsAtMostSoManyPages).
 Deno.test("the workspace agent lists at most so many pages", async () => {
-  const many = Array.from({ length: MAX_LISTED_PAGES + 3 }, (_, i) => ({ id: `p-${i}`, title: "Page", tags: [] }));
-  const s = session(true, "", { ...worldHooks(true), listPages: () => Promise.resolve(many) });
-  const out = (await s.call("list_pages", {})).result as { pages: unknown[]; more_pages?: number };
-  assertEquals([out.pages.length, out.more_pages], [MAX_LISTED_PAGES, 3]);
+  const list = async (title: string, n: number) => {
+    const many: WorkspacePage[] = Array.from({ length: n }, (_, i) =>
+      title.length > 10
+        ? {
+          id: `${String(i).padStart(8, "0")}-0000-0000-0000-000000000000`,
+          title,
+          parent_id: "00000000-0000-0000-0000-000000000000",
+          tags: ["work", "plans"],
+        }
+        : { id: `p-${i}`, title, tags: [] });
+    const s = session(true, "", { ...worldHooks(true), listPages: () => Promise.resolve(many) });
+    return (await s.call("list_pages", {})).result as { pages: unknown[]; folders: unknown[]; more_pages?: number };
+  };
+  const short = await list("Page", MAX_LISTED_PAGES + 3);
+  assertEquals([short.pages.length, short.more_pages], [MAX_LISTED_PAGES, 3]);
+  const long = await list("Quarterly planning <notes> & ".repeat(3), MAX_LISTED_PAGES);
+  assert(long.pages.length > 0 && long.pages.length < MAX_LISTED_PAGES, String(long.pages.length));
+  assertEquals(long.more_pages, MAX_LISTED_PAGES - long.pages.length);
+  assert(JSON.stringify(long).length <= TOOL_RESULT_LIMIT);
+  assertEquals(Object.keys(long), ["folders", "more_pages", "pages"]);
+});
+
+// A search shows none of the text of a page the run does not know, as one
+// made since it began, as of one other people write in.
+Deno.test("the workspace agent's search shows no text of a page it does not know", async () => {
+  const s = session(true, "", {
+    ...worldHooks(true),
+    searchPages: () =>
+      Promise.resolve([{ page_id: "p-1", title: "Plan", snippet: "mine" }, {
+        page_id: "p-new",
+        title: "New",
+        snippet: "who knows",
+      }]),
+  });
+  assertEquals((await s.call("search_pages", { query: "x" })).result, {
+    results: [{ page_id: "p-1", title: "Plan", snippet: "mine" }, { page_id: "p-new", title: "New" }],
+  });
 });
 
 // With reading off, the agent reads none of the person's pages, and is not
@@ -150,7 +187,7 @@ Deno.test("the workspace agent with reading off reads no page", async () => {
 // them, and take and refuse the same calls (Go's TestCorpusWorkspaceCalls).
 Deno.test("workspace calls are the app's (testdata/corpus/workspace_calls.json)", async () => {
   const r = new Random(13);
-  const ids = ["p-1", "p-2", "p-3", "p-4", "p-5", "p-9", "nope", ""];
+  const ids = ["p-1", "p-2", "p-3", "p-4", "p-5", "p-6", "p-9", "nope", ""];
   const urls = ["https://example.com/given.png", "https://elsewhere.com/x.png"];
   const id = () => r.chance(0.9) ? r.pick(ids) : r.pick([5, null]);
   const folder = () => r.pick(["f-1", "nope", "", null, 5]);

@@ -534,7 +534,7 @@ struct Inspector: View {
         @Bindable var scene = scene
         VStack(spacing: 0) {
             if noPage {
-                AgentPanel(model: scene.workspace)
+                AgentPanel(model: scene.workspace, isSheet: isSheet)
             } else {
                 Picker(selection: $tab) {
                     ForEach(InspectorTab.allCases) { Text($0.title).tag($0) }
@@ -549,9 +549,10 @@ struct Inspector: View {
                     // The page's agent, or the workspace agent's, of all the
                     // user's pages, as the composer's menu chooses.
                     if scene.allPages {
-                        AgentPanel(model: scene.workspace, allPages: $scene.allPages)
+                        AgentPanel(
+                            model: scene.workspace, allPages: $scene.allPages, isSheet: isSheet)
                     } else if let model {
-                        AgentPanel(model: model, allPages: $scene.allPages)
+                        AgentPanel(model: model, allPages: $scene.allPages, isSheet: isSheet)
                     }
                 case .comments: if let model { CommentsPanel(model: model) }
                 }
@@ -571,7 +572,10 @@ struct Inspector: View {
             counted = isSheet
             scene.panelShown(asSheet: counted)
         }
-        .onDisappear { scene.panelGone(asSheet: counted) }
+        .onDisappear {
+            scene.focusChat = false
+            scene.panelGone(asSheet: counted)
+        }
     }
 }
 

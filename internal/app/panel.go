@@ -107,8 +107,6 @@ type chatOptions struct {
 	send func(text string)
 	// focus, set, has the composer take the keyboard once.
 	focus *bool
-	// escape, if set, is what Escape in the composer does.
-	escape func()
 	// scope shows the choice of what the chat asks about beside a page:
 	// the page, or all the user's pages (scopePicker).
 	scope bool
@@ -167,10 +165,6 @@ func (a *App) chatBody(c *ui.Context, sess *agents.Session, cs *chatState, o cha
 			// still breaks the line.
 			ui.TextArea(c.Key("draft"), &cs.draft).Bind(&cs.input).Placeholder(o.placeholder).MinHeight(64).MaxHeight(180).
 				OnTextKey(func(k ui.TextKey) bool {
-					if k.Key == ui.KeyEscape && k.Mods == 0 && o.escape != nil {
-						o.escape()
-						return true
-					}
 					if !sends(k) {
 						return false
 					}
@@ -389,6 +383,9 @@ func (a *App) runEdits(c *ui.Context, sessID string, run *agents.Run) {
 				})
 				switch {
 				case opens && row.Clicked():
+					if sessID == agents.WorkspaceID {
+						a.fromWorkspace()
+					}
 					a.openPage(e.PageID)
 				case goes && row.Clicked():
 					a.page.editor.PlaceCaret(e.BlockIDs[0], 0)

@@ -80,6 +80,20 @@ struct RootView: View {
         }
         .onChange(of: scene.newFolderShown) { if scene.newFolderShown { folderName = "" } }
         .sheet(item: $scene.moving) { MoveSheet(page: $0) }
+        // The workspace agent's chat with no panel beside a page for it, as
+        // on iPhone's list of pages.
+        .sheet(isPresented: $scene.workspaceShown) {
+            AgentPanel(model: scene.workspace, isSheet: true)
+                .task { scene.workspace.start(app) }
+                // A panel as a sheet, which Settings waits for to go.
+                .onAppear { scene.panelShown(asSheet: true) }
+                .onDisappear {
+                    scene.focusChat = false
+                    scene.panelGone(asSheet: true)
+                }
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .sheet(item: $scene.history) { HistorySheet(page: $0).presentationSizing(.page) }
         .fileExporter(
             isPresented: Binding(
@@ -131,6 +145,7 @@ struct RootView: View {
             #endif
         }
         .onChange(of: scene.selection) { savedPage = scene.selection }
+        .onChange(of: sizeClass, initial: true) { scene.stacked = sizeClass == .compact }
         .onChange(of: scene.inspectorShown) { savedInspector = scene.inspectorShown }
         .onChange(of: app.library.pages.map(\.id)) { _, ids in
             // Pages deleted, here or on another device, or gone as the
@@ -138,8 +153,12 @@ struct RootView: View {
             // read: the last page too.
             if app.libraryLoaded { scene.keep(Set(ids)) }
         }
-        // The page the window still holds closes with it.
-        .onDisappear { scene.closeHeld() }
+        // The page the window still holds closes with it, and its
+        // workspace agent's chat stops following the core.
+        .onDisappear {
+            scene.closeHeld()
+            scene.workspace.stop()
+        }
         .onChange(of: phase) { _, phase in
             switch phase {
             case .active:
@@ -299,7 +318,7 @@ private struct NoPageScreen: View {
                 // shows, as the desktop's New Recording.
                 Button(L.trayNewRecording, systemImage: "record.circle") {
                     Task {
-                        guard let id = await app.createPage() else { return }
+                        guard let id = await app.createRecordingPage() else { return }
                         scene.recordOnOpen = id
                         scene.open(id)
                     }

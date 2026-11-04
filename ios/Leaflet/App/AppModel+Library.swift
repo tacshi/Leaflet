@@ -4,6 +4,26 @@ import SwiftUI
 /// moved and deleted, and pages from templates and copies of them, each
 /// failure said in a toast.
 extension AppModel {
+    /// opens reports whether page id is here to open: one of the library's,
+    /// or a template's, not one deleted or not synced yet.
+    func opens(_ id: String) -> Bool {
+        library.page(id) != nil || templates.contains { $0.pageID == id }
+    }
+
+    /// createRecordingPage makes a page of its own to record in, named for
+    /// its recording, as the desktop's New Recording does, and returns its
+    /// ID.
+    func createRecordingPage() async -> String? {
+        do {
+            let page = try await client?.createPage(NewPage(title: L.recBlockTitle(when: Date())))
+            await reload()
+            return page?.id
+        } catch {
+            show(Toast(message: L.appErrorCreatePage(error: error.localizedDescription)))
+            return nil
+        }
+    }
+
     /// createPage makes a page, under parentID or in folderID, and returns
     /// its ID, for the window to open it; link puts a card for a subpage
     /// at the end of its parent. It starts from the template its parent or

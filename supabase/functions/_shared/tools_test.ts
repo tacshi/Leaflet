@@ -21,6 +21,7 @@ import {
 import {
   agentViews,
   applyOps,
+  jsonCost,
   MAX_VIEW_HTML,
   type Op,
   overwrites,
@@ -42,6 +43,7 @@ import markdown from "./testdata/markdown.json" with { type: "json" };
 import agent from "./testdata/agent.json" with { type: "json" };
 import toolsFixture from "./testdata/tools.json" with { type: "json" };
 import webCalls from "./testdata/web_calls.json" with { type: "json" };
+import jsonCosts from "./testdata/json_costs.json" with { type: "json" };
 import { markdownSpecs } from "./lines.ts";
 import { fixture } from "../_testing/fixture.ts";
 
@@ -1721,4 +1723,31 @@ Deno.test("the web's tools keep to the URLs the run may use (testdata/web_calls.
   assertEquals(made[3].calls.map((c) => c.ok), [true, false, true, true, false, false, false, false, true, true]);
   assertEquals(made.map((m) => m.kept_to_page), [true, false, true, true]);
   await fixture("web_calls.json", { request, search, sequences: made }, webCalls);
+});
+
+// How much of a tool's result a value takes is counted as Go counts it
+// (testdata/json_costs.json, Go's TestJSONCostAsTheServer): the pages
+// list_pages lists are cut where it would pass the most a model reads at
+// once, on either side at the same page.
+Deno.test("values are counted as Go counts them", async () => {
+  const values: unknown[] = [
+    "",
+    "Plan",
+    'a "quoted" \\ path',
+    "<b>&amp;</b>",
+    "tab\tnew\nline\u0001",
+    "\u2028\u2029",
+    "日本語のページ",
+    "😀 emoji",
+    "\ufffd",
+    true,
+    false,
+    ["work", "plans"],
+    [],
+    { id: "p-1", title: "Plan", tags: ["a", "b"], shared: true },
+    [{ id: "f-1", name: "Clippings" }, { id: "f-2", name: "<Trips>" }],
+  ];
+  const made = values.map((value) => ({ value, cost: jsonCost(value) }));
+  for (const { value, cost } of made) assert(JSON.stringify(value).length <= cost, JSON.stringify(value));
+  await fixture("json_costs.json", made, jsonCosts);
 });

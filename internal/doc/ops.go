@@ -25,11 +25,13 @@ type NewPage struct {
 
 // PagePlace is where a page is among the user's pages: inside ParentID, or
 // at the top level, in FolderID when it has one, at SortKey among the
-// pages there.
+// pages there. Card is where its card is in ParentID, for Undo to put it
+// back there: none for the end.
 type PagePlace struct {
-	ParentID string `json:"parent_id,omitempty"`
-	FolderID string `json:"folder_id,omitempty"`
-	SortKey  string `json:"sort_key,omitempty"`
+	ParentID string    `json:"parent_id,omitempty"`
+	FolderID string    `json:"folder_id,omitempty"`
+	SortKey  string    `json:"sort_key,omitempty"`
+	Card     *Position `json:"card,omitempty"`
 }
 
 // Same reports whether p and q are the same place, wherever among the
@@ -110,18 +112,24 @@ type opJSON struct {
 	Page     *NewPage        `json:"page,omitempty"`
 	Content  *Content        `json:"content,omitempty"`
 	PageID   string          `json:"page_id,omitempty"`
-	Title    string          `json:"title,omitempty"`
-	Place    *PagePlace      `json:"place,omitempty"`
-	Tags     []string        `json:"tags,omitempty"`
-	Folder   *NewFolder      `json:"folder,omitempty"`
-	FolderID string          `json:"folder_id,omitempty"`
+	// Title is written for move_page, rename_page and set_page_tags,
+	// "" for an untitled page's, as the server writes it.
+	Title    *string    `json:"title,omitempty"`
+	Place    *PagePlace `json:"place,omitempty"`
+	Tags     []string   `json:"tags,omitempty"`
+	Folder   *NewFolder `json:"folder,omitempty"`
+	FolderID string     `json:"folder_id,omitempty"`
 }
 
 // MarshalJSON writes the op as the protocol has it.
 func (o Op) MarshalJSON() ([]byte, error) {
 	j := opJSON{Op: o.Op, Position: o.Position, Nodes: o.Nodes, ID: o.ID, Node: o.Node,
 		From: o.From, IDs: o.IDs, Page: o.Page, Content: o.Content, PageID: o.PageID,
-		Title: o.Title, Place: o.Place, Tags: o.Tags, Folder: o.Folder, FolderID: o.FolderID}
+		Place: o.Place, Tags: o.Tags, Folder: o.Folder, FolderID: o.FolderID}
+	switch o.Op {
+	case "move_page", "rename_page", "set_page_tags":
+		j.Title = &o.Title
+	}
 	var err error
 	switch o.Op {
 	case "replace":
@@ -162,7 +170,10 @@ func (o *Op) UnmarshalJSON(raw []byte) error {
 	}
 	*o = Op{Op: j.Op, Position: j.Position, Nodes: j.Nodes, ID: j.ID, Node: j.Node,
 		From: j.From, IDs: j.IDs, Page: j.Page, Content: j.Content, PageID: j.PageID,
-		Title: j.Title, Place: j.Place, Tags: j.Tags, Folder: j.Folder, FolderID: j.FolderID}
+		Place: j.Place, Tags: j.Tags, Folder: j.Folder, FolderID: j.FolderID}
+	if j.Title != nil {
+		o.Title = *j.Title
+	}
 	if len(j.Previous) > 0 && string(j.Previous) != "null" {
 		var err error
 		switch j.Op {

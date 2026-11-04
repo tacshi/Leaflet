@@ -1016,7 +1016,7 @@
   },
   "dialogSearchAskAgent": "Ask an agent instead",
   "@dialogSearchAskAgent": {
-    "description": "Search dialog: a button, when nothing matches, asking an agent the query."
+    "description": "Search, the desktop's dialog and the iPhone and iPad sidebar's: a button, when nothing matches, asking the agent of all the user's pages the query."
   },
   "dialogSearchTemplateEnter": "Enter starts a new page from this template",
   "@dialogSearchTemplateEnter": {
@@ -5946,7 +5946,7 @@
   },
   "shellAskAgent": "Ask the agent",
   "@shellAskAgent": {
-    "description": "A button on the screen shown when no page is open: it opens the agent chat of all the user's pages."
+    "description": "A button on the screen shown when no page is open, and on iPhone above the list of pages: it opens the agent chat of all the user's pages."
   },
   "panelScopePage": "This page",
   "@panelScopePage": {

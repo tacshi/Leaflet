@@ -86,7 +86,18 @@ func TestAgentTabSwitchesToAllPages(t *testing.T) {
 	if a.agentScope != 1 || !tt.HasText(locales.WorkspaceEmpty()) {
 		t.Fatalf("All pages shows %q", tt.Texts())
 	}
+	if err := tt.Click(locales.PanelScopeAll()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tt.ChooseMenuItem(locales.PanelScopePage()); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.agentScope != 0 || !tt.HasText(locales.PanelChatEmpty()) {
+		t.Fatalf("This page shows %q", tt.Texts())
+	}
 	// A chat sent from the page shows in the page's.
+	a.agentScope = 1
 	a.openPageAgent()
 	tt.Frame()
 	if !tt.HasText(locales.PanelChatEmpty()) {
@@ -111,6 +122,20 @@ func TestSearchWithNoPageAsksTheWorkspaceAgent(t *testing.T) {
 	msgs := a.hub.Session(agents.WorkspaceID).Messages
 	if !a.panelOpen || len(msgs) == 0 || msgs[0].Text != "nothing like it" {
 		t.Errorf("panel open %v, messages %+v", a.panelOpen, msgs)
+	}
+
+	// While the agent works, which takes one request at a time, the query
+	// waits in its composer rather than go nowhere.
+	a.hub.Session(agents.WorkspaceID).Running = true
+	a.openSearch()
+	tt.Frame()
+	tt.Type("still nothing")
+	tt.Frame()
+	if err := tt.Click(locales.DialogSearchAskAgent()); err != nil {
+		t.Fatal(err)
+	}
+	if got := a.draftsOf(agents.WorkspaceID).chat.draft; got != "still nothing" || len(a.hub.Session(agents.WorkspaceID).Messages) != len(msgs) {
+		t.Errorf("draft %q, messages %+v", got, a.hub.Session(agents.WorkspaceID).Messages)
 	}
 }
 
@@ -175,5 +200,131 @@ func TestRunBarSaysWhatAPageMakingRunDid(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText(locales.PageRunDid("Fake", summary)) || tt.HasText(locales.PageRunEdited("Fake", 0)) {
 		t.Errorf("the bar says %q", tt.Texts())
+	}
+}
+
+// With no page open, the panel's shortcut shows and hides the workspace
+// agent's chat at a press, whatever tab a page left it at, and a page's
+// other tabs have none to show; a page opened from the chat, however the
+// panel was opened, opens beside it still.
+func TestPanelShortcutWithNoPage(t *testing.T) {
+	a := workspaceApp(t)
+	made, err := a.st.CreatePage(store.NewPageOptions{Title: "Article"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.panelOpen, a.panelTab = true, 1
+	a.togglePanel(0)
+	if a.panelOpen {
+		t.Fatal("the shortcut left the panel open")
+	}
+	a.togglePanel(1)
+	if a.panelOpen {
+		t.Fatal("Comments opened the panel with no page")
+	}
+	a.togglePanel(0)
+	if !a.panelOpen {
+		t.Fatal("the shortcut did not open the panel")
+	}
+	summary := locales.AgentEditCreatedPage("Article")
+	sess := a.hub.Session(agents.WorkspaceID)
+	sess.Runs = []*agents.Run{{ID: "r1", Status: "done", AgentName: "Ollama",
+		Ops:   []doc.Op{{Op: "create_page", Page: &doc.NewPage{ID: made.ID, Title: "Article"}}},
+		Edits: []agents.Edit{{Summary: summary, PageID: made.ID}}}}
+	sess.Messages = []*agents.Message{{Mine: true, Text: "Save the article"}, {Text: "Saved it.", RunID: "r1"}}
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1100, 760)
+	tt.Frame()
+	if err := tt.Click(summary); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.route.ID != made.ID || a.agentScope != 1 || !tt.HasText(summary) {
+		t.Errorf("route %+v of %s, scope %d: the page opened beside another chat: %q", a.route, made.ID, a.agentScope, tt.Texts())
+	}
+}
+
+// The panel a page left, as its Comments tab, is the one it shows again
+// after the screen of no page open: only a page opened from the workspace
+// agent's chat opens beside that chat.
+func TestPanelKeepsItsTabPastNoPage(t *testing.T) {
+	a := workspaceApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.panelOpen, a.panelTab, a.agentScope = true, 1, 0
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1100, 760)
+	tt.Frame()
+	a.show(Route{Kind: "home"})
+	tt.Frame()
+	if !tt.HasText(locales.WorkspaceEmpty()) {
+		t.Fatalf("no workspace chat with no page: %q", tt.Texts())
+	}
+	a.openPage(p.ID)
+	tt.Frame()
+	if a.panelTab != 1 || a.agentScope != 0 {
+		t.Errorf("tab %d, scope %d after the screen of no page", a.panelTab, a.agentScope)
+	}
+}
+
+// What was typed to the workspace agent, unsent, goes with the account as
+// it leaves this device, as what was typed on its pages does.
+func TestWorkspaceDraftGoesWithTheAccount(t *testing.T) {
+	a := workspaceApp(t)
+	// The settings stay with the device.
+	a.saveSettings()
+	a.draftsOf(agents.WorkspaceID).chat.draft = "My secret plans"
+	posted := make(chan func(), 8)
+	a.post = func(fn func()) { posted <- fn }
+	a.leave(a.st.ForgetAccount, false)
+	// The agents forget their chats on the main thread too, before the
+	// account's leaving ends there.
+	for a.drafts[agents.WorkspaceID] != nil {
+		select {
+		case fn := <-posted:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the draft %q stayed", a.drafts[agents.WorkspaceID].chat.draft)
+		}
+	}
+}
+
+// A chat the app reads back from the store as the account leaves, as it
+// draws the workspace agent's after the agents first forgot theirs and
+// before the store is cleared, does not stay for the next account.
+func TestWorkspaceChatReadAsTheAccountLeavesGoes(t *testing.T) {
+	a := workspaceApp(t)
+	a.saveSettings()
+	if err := a.st.SetValue("chat.workspace", `{"conversation_id":"c1","messages":[{"Mine":true,"Text":"File my secret plans"}]}`); err != nil {
+		t.Fatal(err)
+	}
+	posted := make(chan func(), 8)
+	a.post = func(fn func()) { posted <- fn }
+	cleared := make(chan struct{})
+	a.leave(func() error {
+		defer close(cleared)
+		// The agents forget their chats on the main thread, which then
+		// draws the panel before the store is cleared.
+		(<-posted)()
+		if msgs := a.hub.Session(agents.WorkspaceID).Messages; len(msgs) != 1 {
+			t.Errorf("the chat read back %+v", msgs)
+		}
+		return a.st.ForgetAccount()
+	}, false)
+	<-cleared
+	for {
+		select {
+		case fn := <-posted:
+			fn()
+			continue
+		case <-time.After(time.Second):
+		}
+		break
+	}
+	if msgs := a.hub.Session(agents.WorkspaceID).Messages; len(msgs) != 0 {
+		t.Errorf("the next account sees %+v", msgs)
 	}
 }

@@ -34,6 +34,13 @@ func (a *App) openWorkspace() {
 	a.dialogs.focusChat = true
 }
 
+// fromWorkspace has a page opened from the workspace agent's chat, as a
+// page a run made or a link in a reply, open beside that chat still: the
+// panel's Agent tab at All pages.
+func (a *App) fromWorkspace() {
+	a.panelTab, a.agentScope = 0, 1
+}
+
 // openPageAgent opens the panel at its Agent tab, at This page: the open
 // page's agent, which a chat sent from the page shows in.
 func (a *App) openPageAgent() {

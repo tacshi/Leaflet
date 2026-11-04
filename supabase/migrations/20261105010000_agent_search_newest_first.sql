@@ -1,12 +1,15 @@
--- agent_search_pages finds what it did, in the same order, reading less:
--- titles and tags first, then the pages' text the most recently changed
--- page first, and only until it has found enough, rather than every
--- page's whole text for every search. Text is matched under the caller's
--- row-level security, whose rules no index of it could be read past, so
--- reading less is what makes a search quick. A match's words around it
--- are cut from where it is in the text itself: lowering text can change
--- its length, as 'İ' becomes two letters, so where it is in the text
--- lowered is not where it is in the text.
+-- The workspace agent finds the caller's pages as the app's agents search
+-- them (store.SearchPages): those of their own space, neither deleted nor
+-- templates, with every one of p_tags, in any case, whose title, a tag or
+-- text holds p_text, in any case; with no p_text, the most recently
+-- changed. Titles and tags first, then the pages' text the most recently
+-- changed page first, and only until it has found enough, rather than
+-- every page's whole text for every search. Text is matched under the
+-- caller's row-level security, whose rules no index of it could be read
+-- past, so reading less is what makes a search quick. A match's words
+-- around it are cut from where it is in the text itself: lowering text can
+-- change its length, as 'İ' becomes two letters, so where it is in the
+-- text lowered is not where it is in the text.
 create or replace function public.agent_search_pages(p_text text, p_tags text[], p_limit integer)
 returns table (page_id uuid, title text, snippet text)
 language sql stable security invoker set search_path = ''
@@ -63,3 +66,6 @@ as $$
   ) h
   order by h.rank, h.updated_at desc, h.id
 $$;
+
+revoke execute on function public.agent_search_pages(text, text[], integer) from public, anon, service_role;
+grant execute on function public.agent_search_pages(text, text[], integer) to authenticated;

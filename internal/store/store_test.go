@@ -3391,3 +3391,41 @@ func TestPagesSharedAndGuestCommented(t *testing.T) {
 		t.Errorf("guest-commented %v, %v", got, err)
 	}
 }
+
+// SearchPages finds as the agent function's search does: titles and tags
+// first, then text, each the most recently changed page first; tags in any
+// case but whole, as the server keeps them; a match in text with the 40
+// characters either side of it.
+func TestSearchPagesAsTheServer(t *testing.T) {
+	s := open(t)
+	all := func(Page) bool { return true }
+	older, _ := s.CreatePage(NewPageOptions{Title: "Plan older", Tags: []string{"Work"}})
+	newer, _ := s.CreatePage(NewPageOptions{Title: "Plan newer", Tags: []string{"workshop"}})
+	text, _ := s.CreatePage(NewPageOptions{Title: "Notes"})
+	c := doc.Empty()
+	c.Children[0].SetDelta(doc.FromMarkdown(strings.Repeat("x", 60) + " the plan is set " + strings.Repeat("y", 100)))
+	if _, _, err := s.SaveContent(text.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	// Changed a second apart, the newer last: within a millisecond the
+	// order would be the IDs'.
+	for i, id := range []string{older.ID, text.ID, newer.ID} {
+		if _, err := s.DB().Exec(`UPDATE pages SET updated_at = ? WHERE id = ?`, time.Now().Add(time.Duration(i)*time.Second).UnixMilli(), id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hits, err := s.SearchPages(context.Background(), "plan", 20, all)
+	if err != nil || len(hits) != 3 || hits[0].PageID != newer.ID || hits[1].PageID != older.ID || hits[2].PageID != text.ID {
+		t.Fatalf("hits %+v, %v", hits, err)
+	}
+	// From 40 before "plan", as long as it and 80 more.
+	if want := strings.Repeat("x", 35) + " the plan is set " + strings.Repeat("y", 32); hits[2].Snippet != want {
+		t.Errorf("snippet %q, want %q", hits[2].Snippet, want)
+	}
+	if hits, _ := s.SearchPages(context.Background(), "#work", 20, all); len(hits) != 1 || hits[0].PageID != older.ID {
+		t.Errorf("#work found %+v", hits)
+	}
+	if hits, _ := s.SearchPages(context.Background(), "#wor", 20, all); len(hits) != 0 {
+		t.Errorf("#wor found %+v", hits)
+	}
+}

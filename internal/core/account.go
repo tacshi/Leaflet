@@ -72,8 +72,14 @@ func (c *Core) unsynced() int {
 // store.ErrUnsynced when a change was stored since the count, by leaflet
 // mcp, to ask again.
 func (c *Core) UseAccount(user *store.User, drop bool) error {
-	if drop && c.ReplacesAccount(user) {
+	// The previous account's agents stop, and their chats go, as its pages
+	// do: with drop here, else as the session loads (store.LoadSession),
+	// which leaves them while a change of theirs waits to go up.
+	replaces := c.ReplacesAccount(user)
+	if replaces && (drop || c.Store.PendingCount() == 0) {
 		c.stopRuns()
+	}
+	if drop && replaces {
 		if err := c.Store.ForgetAccount(); err != nil {
 			return err
 		}
@@ -85,6 +91,10 @@ func (c *Core) UseAccount(user *store.User, drop bool) error {
 		c.saveSettings(s)
 	}
 	_, err := c.Store.LoadSession(user)
+	// Again once the chats are gone from the store, as Leave does.
+	if replaces && err == nil {
+		c.stopRuns()
+	}
 	return err
 }
 
@@ -106,6 +116,10 @@ func (c *Core) Leave(clear func() error, synced bool) (unsynced int, err error) 
 			unsynced, err = max(c.unsynced(), 1), nil
 			return
 		}
+		// Again once the chats are gone from the store: one the app read
+		// back from it in between, as the workspace agent's it draws,
+		// would stay with the next account.
+		c.stopRuns()
 		c.Remote.SignOut()
 		c.ForgetProject()
 	})

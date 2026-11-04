@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"log"
 	"slices"
 	"sync"
@@ -25,6 +26,12 @@ func (h *Hub) toolContext(pageID, title, agent string, content *doc.Content, set
 	tc := PageTools(h.st, pageID, title, agent, content, err == nil && h.crossPage(p, settings))
 	// An agent edits only what the user may.
 	tc.ReadOnly = err != nil || !h.st.CanEdit(p)
+	// A page of the user's own made from one someone else writes or reads
+	// would take what they wrote into the user's pages, where the user's
+	// workspace agent reads it as theirs: only from a page of no one else.
+	if err != nil || !h.private(p) {
+		tc.CreatePage = nil
+	}
 	return tc
 }
 
@@ -126,9 +133,15 @@ func (h *Hub) ServePublicLink(pageID string) (stop func()) {
 // asked, as offline, the lease it last gave stands, by this device's
 // clock, none before it gave one: what the run writes reaches the link
 // only once this device syncs the page.
-func (h *Hub) publicElsewhere(ctx context.Context, pageID string) bool {
+func (h *Hub) publicElsewhere(ctx context.Context, pageID string, online bool) bool {
 	if h.be == nil || !h.be.SignedIn() {
 		return false
+	}
+	// Offline, the server is not asked: the lease it last gave stands.
+	if !online {
+		h.linksMu.Lock()
+		defer h.linksMu.Unlock()
+		return h.links[pageID].After(time.Now())
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
@@ -148,19 +161,27 @@ func (h *Hub) publicElsewhere(ctx context.Context, pageID string) bool {
 	return row != nil
 }
 
+// errOffline is the server not asked, this device being offline.
+var errOffline = errors.New("offline")
+
 // publicElsewhereIn are the pages of space with a public link another
 // device serves, as publicElsewhere has one page's: a workspace run asks
 // it as it starts, of all the pages it may change. Where the server cannot
 // be asked, the leases it last gave stand.
-func (h *Hub) publicElsewhereIn(ctx context.Context, space string) map[string]bool {
+func (h *Hub) publicElsewhereIn(ctx context.Context, space string, online bool) map[string]bool {
 	out := map[string]bool{}
 	if h.be == nil || !h.be.SignedIn() {
 		return out
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	rows, err := h.be.Select(ctx, "pages", remote.Query{Select: "id,public_link_until",
-		Filters: []string{remote.Eq("space_id", space), remote.Gt("public_link_until", "now")}})
+	var rows []map[string]any
+	err := errOffline
+	// Offline, the server is not asked: the leases it last gave stand.
+	if online {
+		rows, err = h.be.Select(ctx, "pages", remote.Query{Select: "id,public_link_until",
+			Filters: []string{remote.Eq("space_id", space), remote.Gt("public_link_until", "now")}})
+	}
 	h.linksMu.Lock()
 	defer h.linksMu.Unlock()
 	if err != nil {

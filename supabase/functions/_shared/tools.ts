@@ -57,11 +57,17 @@ export type Op =
   | { op: "set_page_tags"; page_id: string; title: string; tags: string[]; previous: string[] }
   | { op: "create_folder"; folder: { id: string; space_id: string; name: string; sort_key: string } };
 
-/** Where a page is among the person's pages: inside parent_id, or at the top level, in folder_id when it has one. */
+/**
+ * Where a page is among the person's pages: inside parent_id, or at the top
+ * level, in folder_id when it has one, at sort_key among the pages there;
+ * card is where its card is in parent_id, for Undo to put it back there,
+ * none for the end (Go's PagePlace).
+ */
 export interface PagePlace {
   parent_id?: string;
   folder_id?: string;
   sort_key?: string;
+  card?: Position;
 }
 
 /** The ops that change the pages around a page's blocks rather than its blocks (Go's IsPageOp). */
@@ -331,6 +337,62 @@ function withoutSiteInfo(v: BlockView): void {
 /** The most pages list_pages lists (Go's maxListedPages): more would be more than a model reads at once. */
 export const MAX_LISTED_PAGES = 500;
 
+/** The longest tool result a model reads, in UTF-16 units (Go's toolResultLimit): longer ones are cut. */
+export const TOOL_RESULT_LIMIT = 60_000;
+
+/**
+ * How much of a tool's result, by jsonCost, the pages list_pages lists take
+ * at most, with what is listed with them, with room for the keys around
+ * them (Go's listBudget): past it, the rest are left for a search to find,
+ * rather than cut off with the result.
+ */
+export const LIST_BUDGET = TOOL_RESULT_LIMIT - 2_000;
+
+/**
+ * At least how many UTF-16 units v takes as JSON, as either side writes it
+ * (Go's jsonCost): six for a character one of them escapes (\u003c, as Go
+ * writes <), one or two for the rest.
+ */
+export function jsonCost(v: unknown): number {
+  if (typeof v === "string") {
+    let n = 2;
+    for (const ch of v) {
+      const c = ch.codePointAt(0)!;
+      if (
+        c < 0x20 || '"\\<>&'.includes(ch) || c === 0x2028 || c === 0x2029 || c === 0xfffd || (c >= 0xd800 && c < 0xe000)
+      ) {
+        n += 6;
+      } else n += c > 0xffff ? 2 : 1;
+    }
+    return n;
+  }
+  if (typeof v === "boolean") return v ? 4 : 5;
+  if (typeof v === "number") return String(v).length;
+  if (Array.isArray(v)) return 2 + Math.max(v.length - 1, 0) + v.reduce((n: number, e) => n + jsonCost(e), 0);
+  if (v && typeof v === "object") {
+    const entries = Object.entries(v);
+    return 2 + Math.max(entries.length - 1, 0) + entries.reduce((n, [k, e]) => n + jsonCost(k) + 1 + jsonCost(e), 0);
+  }
+  return 4;
+}
+
+/**
+ * How many of items list_pages lists (Go's listed): at most MAX_LISTED_PAGES,
+ * and as many as LIST_BUDGET takes past spent, what is listed with them.
+ */
+export function listed(items: unknown[], spent: number): number {
+  const n = Math.min(items.length, MAX_LISTED_PAGES);
+  for (let i = 0; i < n; i++) {
+    spent += jsonCost(items[i]) + 1;
+    if (spent > LIST_BUDGET) return i;
+  }
+  return n;
+}
+
+/** Refuses a page of the person's own on a page someone else writes or reads (Go's errNoOwnPages). */
+export const NO_OWN_PAGES =
+  "Someone else writes or reads this page: a page of the person's own made from it could take what they wrote into the person's own pages. Make a subpage of this page with create_subpage instead";
+
 /** The most blocks one run writes (Go's maxRunBlocks): a model that goes on and on, as one repeating itself, stops there. */
 export const MAX_RUN_BLOCKS = 5000;
 
@@ -341,7 +403,13 @@ export const MAX_ROUND_CALLS = 50;
 export const TOO_MANY_CALLS =
   `This call was not made: one answer makes at most ${MAX_ROUND_CALLS} calls. Make it again in your next.`;
 
-export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean }): ToolDef[] {
+/**
+ * The page's tools. ownPages, unless false, offers create_page: none on a page
+ * someone else writes or reads, whose writing a page of the person's own
+ * would take into their pages, where their workspace agent reads it as
+ * theirs.
+ */
+export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean; ownPages?: boolean }): ToolDef[] {
   const defs: ToolDef[] = [
     tool(
       "read_page",
@@ -401,7 +469,8 @@ export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean }):
         pageSchema({
           folder_id: {
             type: "string",
-            description: "The folder to put it in, from list_folders; none for the top level.",
+            description:
+              "The folder to put it in, its id from list_folders where that is offered; none for the top level.",
           },
         }),
         ["title"],
@@ -420,7 +489,7 @@ export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean }):
       tool("list_folders", "List the person's folders (names and ids), to make a page in one with create_page."),
     );
   }
-  return defs;
+  return opts.ownPages === false ? defs.filter((d) => d.function.name !== "create_page") : defs;
 }
 
 /** A new page's schema: its title, where it goes, and its content in Markdown or as blocks, or neither for an empty page. */
@@ -931,6 +1000,11 @@ function pageView(p: WorkspacePage): Record<string, unknown> {
   };
 }
 
+/** A page's title as it keeps it: "" for one untitled (Go's WorkspacePage.title). */
+function keptTitle(p: WorkspacePage): string {
+  return p.untitled ? "" : p.title;
+}
+
 /** Refuses a page someone else reads or writes (Go's changeable). */
 function changeable(p: WorkspacePage): void {
   if (p.shared) {
@@ -983,6 +1057,8 @@ function summaryFor(verb: string, nodes: NodeJSON[]): string {
 export interface SessionOptions {
   canEdit: boolean;
   crossPage: boolean;
+  /** False on a page someone else writes or reads, where create_page is refused (toolDefinitions). */
+  ownPages?: boolean;
   /** What the person asked, whose URLs a block may load (checkUrls). */
   request?: string;
   /** Agent name shown on charts it inserts. */
@@ -1177,7 +1253,17 @@ export class PageEditSession {
   }
 
   private async dispatch(name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
-    if (this.opts.workspace) return await this.workspace(this.opts.workspace, name, args);
+    if (this.opts.workspace) {
+      // What the person's pages could not be read or changed for, as the
+      // database failing or slow, the model is told, as Go tells it: the
+      // run goes on, its changes so far kept.
+      try {
+        return await this.workspace(this.opts.workspace, name, args);
+      } catch (e) {
+        if (e instanceof ToolError || e instanceof SpecError) throw e;
+        throw new ToolError(`The call failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     if (EDITING_TOOLS.has(name) && !this.opts.canEdit) {
       throw new ToolError("You can read this page but not edit it: the person asking has view access only");
     }
@@ -1207,11 +1293,15 @@ export class PageEditSession {
         // the URLs it may write stay those it may (checkUrls), and the web
         // stays open.
         return unchanged({ folders: await this.hooks.listFolders() });
-      case "list_pages":
+      case "list_pages": {
         // The titles it lists are read too.
         this.arm();
         this.readPages = true;
-        return unchanged({ pages: await this.hooks.listPages() });
+        // As many as a model reads at once, each counted as Go counts it:
+        // with no parent as null, the more of null and Go's "".
+        const pages = await this.hooks.listPages();
+        return unchanged({ pages: pages.slice(0, listed(pages, 0)) });
+      }
       case "read_other_page": {
         const pageId = textArg(args, "page_id");
         const page = await this.hooks.readOtherPage(pageId);
@@ -1770,6 +1860,7 @@ export class PageEditSession {
   }
 
   async createPage(args: Record<string, unknown>): Promise<ToolOutcome> {
+    if (this.opts.ownPages === false) throw new ToolError(NO_OWN_PAGES);
     const { title, content } = this.pageContent(args);
     const folderId = optionalText(args, "folder_id");
     // Its title shows in the sidebar, where the next run that lists the
@@ -1795,10 +1886,13 @@ export class PageEditSession {
         this.arm();
         this.readPages = true;
         const all = await w.listPages();
-        const listed = { pages: all.slice(0, MAX_LISTED_PAGES).map(pageView), folders: await w.listFolders() };
+        const folders = await w.listFolders();
+        const views = all.slice(0, MAX_LISTED_PAGES).map(pageView);
         // More would be more than a model reads at once: it finds the rest.
-        const more = all.length - listed.pages.length;
-        return unchanged(more > 0 ? { ...listed, more_pages: more } : listed);
+        // The folders and the count go first, so a result cut off keeps them.
+        const pages = views.slice(0, listed(views, jsonCost(folders)));
+        const more = all.length - pages.length;
+        return unchanged({ folders, ...(more > 0 ? { more_pages: more } : {}), pages });
       }
       case "search_pages": {
         const query = trimSpace(textArg(args, "query"));
@@ -1806,9 +1900,11 @@ export class PageEditSession {
         this.readPages = true;
         const results = await w.searchPages(query);
         // What people wrote in a page shared with them is not read: it is
-        // found, but none of its text shown.
+        // found, but none of its text shown; nor of one the run does not
+        // know, as one made since it began.
         for (const r of results as Record<string, unknown>[]) {
-          if (typeof r.page_id === "string" && r.page_id && (await w.page(r.page_id))?.people) delete r.snippet;
+          const page = typeof r.page_id === "string" && r.page_id ? await w.page(r.page_id) : null;
+          if (!page || page.people) delete r.snippet;
         }
         return unchanged({ results });
       }
@@ -1875,15 +1971,15 @@ export class PageEditSession {
     const { parent, folder } = await this.place(w, args);
     this.checkUrls(content.document.children ?? [], title);
     const count = this.room(content.document.children ?? []);
-    const id = await w.createPage(title, content, parent?.id ?? "", folder);
+    const made = await w.createPage(title, content, parent?.id ?? "", folder);
     this.written += count;
     const op = this.record({
       op: "create_page",
-      page: { id, space_id: "", parent_id: parent?.id ?? null, folder_id: folder || null, title, sort_key: "" },
+      page: { ...made, parent_id: parent?.id ?? null, folder_id: folder || null, title },
       content: clone(content),
     });
     const summary = parent ? `Created subpage “${title}”` : `Created page “${title}”`;
-    return outcome({ page_id: id }, [op], [{ summary, blockIds: [] }]);
+    return outcome({ page_id: made.id }, [op], [{ summary, blockIds: [] }]);
   }
 
   private async workspaceMove(w: WorkspaceHooks, args: Record<string, unknown>): Promise<ToolOutcome> {
@@ -1895,7 +1991,8 @@ export class PageEditSession {
     if ((from.parent_id ?? "") === (to.parent_id ?? "") && (from.folder_id ?? "") === (to.folder_id ?? "")) {
       return unchanged({ page_id: page.id });
     }
-    const op = this.record({ op: "move_page", page_id: page.id, title: page.title, place: to, previous: from });
+    // An untitled page is named "", as the app says it in the person's language.
+    const op = this.record({ op: "move_page", page_id: page.id, title: keptTitle(page), place: to, previous: from });
     return outcome({ page_id: page.id }, [op], [{ summary: `Moved “${page.title}”`, blockIds: [] }]);
   }
 
@@ -1905,7 +2002,7 @@ export class PageEditSession {
     // Without the spaces around it, as a new page's.
     const title = trimSpace(textArg(args, "title"));
     this.checkUrls([], title);
-    const had = page.untitled ? "" : page.title;
+    const had = keptTitle(page);
     if (title === had) return unchanged({ page_id: page.id });
     await w.renamePage(page.id, title);
     const op = this.record({ op: "rename_page", page_id: page.id, title, previous: had });
@@ -1928,7 +2025,7 @@ export class PageEditSession {
     const op = this.record({
       op: "set_page_tags",
       page_id: page.id,
-      title: page.title,
+      title: keptTitle(page),
       tags: kept,
       previous: page.tags,
     });

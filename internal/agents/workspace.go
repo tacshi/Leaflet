@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"leaflet/internal/doc"
@@ -26,9 +27,10 @@ type WorkspacePage struct {
 	ID, Title, ParentID, FolderID string
 	Tags                          []string
 	// Shared is a page someone else reads or writes: shared with others,
-	// with a guest's comment or a public link. The agent changes nothing
-	// of it, nor puts a page in it: what someone else wrote there could
-	// have it copy the user's other pages in.
+	// with a guest's comment or a public link, or whose title they read,
+	// as its card is on such a page. The agent changes nothing of it, nor
+	// puts a page in it: what someone else wrote there could have it copy
+	// the user's other pages in, or write them where others read it.
 	Shared bool
 	// People is a page shared with other people, who write in it too: the
 	// agent reads none of it either, as what they wrote could steer what
@@ -39,6 +41,15 @@ type WorkspacePage struct {
 	Untitled bool
 }
 
+// title is the page's title as it keeps it: "" for one untitled, which
+// its ops name so, as the app says it in the user's language.
+func (p WorkspacePage) title() string {
+	if p.Untitled {
+		return ""
+	}
+	return p.Title
+}
+
 // Workspace is what the workspace agent's tools need: the user's pages,
 // those of their own space but templates, and the changes to them. A page
 // of another space, a template or one deleted is none of them.
@@ -46,15 +57,16 @@ type Workspace struct {
 	// Reading lets the agent read the pages, as AgentsReadOtherPages
 	// does: without it, it reads none, but makes and files them.
 	Reading  bool
-	Pages    func() []WorkspacePage
+	Pages    func() ([]WorkspacePage, error)
 	Page     func(id string) (WorkspacePage, bool)
-	ReadPage func(id string) map[string]any
-	Search   func(query string) []map[string]any
+	ReadPage func(id string) (map[string]any, error)
+	Search   func(query string) ([]map[string]any, error)
 	Folders  func() []map[string]any
 	// CreatePage makes a page, in folderID at the top level or inside
-	// parentID, linked at its end, and returns its ID.
-	CreatePage func(title string, nodes []*doc.Node, parentID, folderID string) (string, error)
-	// MovePage moves a page, returning where it was and where it went.
+	// parentID, linked at its end, and returns it as made.
+	CreatePage func(title string, nodes []*doc.Node, parentID, folderID string) (doc.NewPage, error)
+	// MovePage moves a page, returning where it was and where it went:
+	// the same place, and the page as it was, where it is already.
 	MovePage   func(id, parentID, folderID string) (from, to doc.PagePlace, err error)
 	RenamePage func(id, title string) error
 	// SetTags sets a page's tags, returning them as the page keeps them.
@@ -69,7 +81,7 @@ func WorkspaceToolDefinitions(reading bool) []map[string]any {
 	var out []map[string]any
 	if reading {
 		out = append(out,
-			tool("list_pages", "List the user's pages, at most 500 (search_pages finds the others): their IDs, titles and tags, the page or folder each is in, and whether others share it; and their folders.", map[string]any{}),
+			tool("list_pages", "List the user's pages, at most 500, fewer where their titles are long (more_pages says how many more; search_pages finds them): their IDs, titles and tags, the page or folder each is in, and whether others share it; and their folders.", map[string]any{}),
 			tool("search_pages", "Find the user's pages by title, tag or text. Words starting with # (as #work) keep to the pages with those tags.",
 				map[string]any{"query": map[string]any{"type": "string"}}, "query"),
 			tool("read_page", "Read one of the user's pages: every block with its ID, its tags and its subpages. Read-only.", map[string]any{"page_id": pageID}, "page_id"))
@@ -101,12 +113,17 @@ func (x *Executor) workspace(name string, args map[string]any) (map[string]any, 
 	case "list_pages":
 		// The titles it lists are read too.
 		x.armed, x.readPages = true, true
-		all := w.Pages()
+		all, err := w.Pages()
+		if err != nil {
+			return nil, terr("Could not read the user's pages: %v", err)
+		}
+		folders := w.Folders()
 		pages := []map[string]any{}
 		for _, p := range all[:min(len(all), maxListedPages)] {
 			pages = append(pages, pageView(p))
 		}
-		out := map[string]any{"pages": pages, "folders": w.Folders()}
+		pages = pages[:listed(len(pages), jsonCost(folders), func(i int) int { return jsonCost(pages[i]) })]
+		out := map[string]any{"pages": pages, "folders": folders}
 		// More would be more than a model reads at once: it finds the rest.
 		if more := len(all) - len(pages); more > 0 {
 			out["more_pages"] = more
@@ -118,14 +135,17 @@ func (x *Executor) workspace(name string, args map[string]any) (map[string]any, 
 			return nil, err
 		}
 		x.armed, x.readPages = true, true
-		results := w.Search(strings.TrimSpace(q))
+		results, err := w.Search(strings.TrimSpace(q))
+		if err != nil {
+			return nil, terr("The search failed: %v", err)
+		}
 		// What people wrote in a page shared with them is not read: it
-		// is found, but none of its text shown.
+		// is found, but none of its text shown; nor of one the run does
+		// not know, as one made since it began.
 		for _, r := range results {
-			if id, _ := r["page_id"].(string); id != "" {
-				if p, ok := w.Page(id); ok && p.People {
-					delete(r, "snippet")
-				}
+			id, _ := r["page_id"].(string)
+			if p, ok := w.Page(id); !ok || p.People {
+				delete(r, "snippet")
 			}
 		}
 		return map[string]any{"results": results}, nil
@@ -138,7 +158,11 @@ func (x *Executor) workspace(name string, args map[string]any) (map[string]any, 
 			return nil, terr("“%s” is shared with other people, who write in it too: the agent here reads none of it. To work with it, ask the agent on that page.", p.Title)
 		}
 		x.armed, x.readPages = true, true
-		return w.ReadPage(p.ID), nil
+		out, err := w.ReadPage(p.ID)
+		if err != nil {
+			return nil, terr("Could not read “%s”: %v", p.Title, err)
+		}
+		return out, nil
 	case "list_folders":
 		// Only the user names their folders: as on a page, listing them
 		// reads nothing someone else wrote.
@@ -240,7 +264,7 @@ func (x *Executor) workspaceCreate(args map[string]any) (map[string]any, error) 
 	if err := x.room(nodes); err != nil {
 		return nil, err
 	}
-	id, err := x.Ctx.Workspace.CreatePage(title, nodes, parent.ID, folder)
+	made, err := x.Ctx.Workspace.CreatePage(title, nodes, parent.ID, folder)
 	if err != nil {
 		return nil, err
 	}
@@ -249,8 +273,9 @@ func (x *Executor) workspaceCreate(args map[string]any) (map[string]any, error) 
 	if parent.ID != "" {
 		summary = locales.AgentEditCreatedSubpage(title)
 	}
-	x.record(doc.Op{Op: "create_page", Page: &doc.NewPage{ID: id, ParentID: parent.ID, FolderID: folder, Title: title}}, summary)
-	return map[string]any{"page_id": id}, nil
+	made.ParentID, made.FolderID, made.Title = parent.ID, folder, title
+	x.record(doc.Op{Op: "create_page", Page: &made}, summary)
+	return map[string]any{"page_id": made.ID}, nil
 }
 
 func (x *Executor) workspaceMove(args map[string]any) (map[string]any, error) {
@@ -276,7 +301,7 @@ func (x *Executor) workspaceMove(args map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	if !from.Same(to) {
-		x.record(doc.Op{Op: "move_page", PageID: p.ID, Title: p.Title, Place: &to, PrevPlace: &from}, locales.AgentEditMovedPage(p.Title))
+		x.record(doc.Op{Op: "move_page", PageID: p.ID, Title: p.title(), Place: &to, PrevPlace: &from}, locales.AgentEditMovedPage(p.Title))
 	}
 	return map[string]any{"page_id": p.ID}, nil
 }
@@ -298,11 +323,7 @@ func (x *Executor) workspaceRename(args map[string]any) (map[string]any, error) 
 	if err := x.checkURLs(nil, title); err != nil {
 		return nil, err
 	}
-	had := p.Title
-	if p.Untitled {
-		had = ""
-	}
-	if title != had {
+	if had := p.title(); title != had {
 		if err := x.Ctx.Workspace.RenamePage(p.ID, title); err != nil {
 			return nil, err
 		}
@@ -339,7 +360,7 @@ func (x *Executor) workspaceTags(args map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	if !sameTags(kept, p.Tags) {
-		x.record(doc.Op{Op: "set_page_tags", PageID: p.ID, Title: p.Title, Tags: kept, PrevTags: p.Tags}, locales.AgentEditTaggedPage(p.Title))
+		x.record(doc.Op{Op: "set_page_tags", PageID: p.ID, Title: p.title(), Tags: kept, PrevTags: p.Tags}, locales.AgentEditTaggedPage(p.Title))
 	}
 	return map[string]any{"page_id": p.ID, "tags": kept}, nil
 }
@@ -377,16 +398,50 @@ func (x *Executor) workspaceFolder(args map[string]any) (map[string]any, error) 
 // the store: the user's own space, its templates left out. What changes a
 // page as the app has it, as a subpage's card in its parent, runs on the
 // main thread through the host's Pages.
-func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.Settings) ToolContext {
+func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.Settings, online bool) ToolContext {
 	st := h.st
 	space := st.Session().SpaceID
 	mine := func(p store.Page) bool { return p.SpaceID == space && !p.Template && p.DeletedAt.IsZero() }
 	// A page with a public link another device serves, as the server says
 	// as the run starts, is read by others too.
-	elsewhere := h.publicElsewhereIn(ctx, space)
+	elsewhere := h.publicElsewhereIn(ctx, space, online)
+	read := func(p store.Page, private func(store.Page) bool) bool { return !private(p) || elsewhere[p.ID] }
+	// Those whose titles someone else reads, as their cards are on a page
+	// they read: read once a run, of all the pages they read, and only for
+	// a page no one reads itself. Unread, every page is taken for one.
+	shown := sync.OnceValue(func() func(id string) bool {
+		pages, err := st.Pages()
+		if err != nil {
+			return func(string) bool { return true }
+		}
+		private, _ := h.privacy(pages)
+		others := map[string]bool{}
+		for _, p := range pages {
+			if mine(p) && read(p, private) {
+				others[p.ID] = true
+			}
+		}
+		// Their subpages, whose cards they may have, and the cards they have.
+		on := map[string]bool{}
+		for _, p := range pages {
+			if others[p.ParentID] {
+				on[p.ID] = true
+			}
+		}
+		for id := range others {
+			if c := st.Content(id); c != nil {
+				c.Walk(func(n, _ *doc.Node) {
+					if n.Type == "subpage" {
+						on[n.Str("page_id")] = true
+					}
+				})
+			}
+		}
+		return func(id string) bool { return on[id] }
+	})
 	view := func(p store.Page, private, people func(store.Page) bool) WorkspacePage {
 		return WorkspacePage{ID: p.ID, Title: p.DisplayTitle(), ParentID: p.ParentID, FolderID: p.FolderID, Tags: p.Tags,
-			Shared: !private(p) || elsewhere[p.ID], People: people(p), Untitled: strings.TrimSpace(p.Title) == ""}
+			Shared: read(p, private) || shown()(p.ID), People: people(p), Untitled: strings.TrimSpace(p.Title) == ""}
 	}
 	page := func(id string) (WorkspacePage, bool) {
 		p, err := st.Page(id)
@@ -406,8 +461,11 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 	}}
 	w := &Workspace{
 		Reading: settings.AgentsReadOtherPages,
-		Pages: func() []WorkspacePage {
-			pages, _ := st.Pages()
+		Pages: func() ([]WorkspacePage, error) {
+			pages, err := st.Pages()
+			if err != nil {
+				return nil, err
+			}
 			private, people := h.privacy(pages)
 			out := []WorkspacePage{}
 			for _, p := range pages {
@@ -415,14 +473,19 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 					out = append(out, view(p, private, people))
 				}
 			}
-			return out
+			return out, nil
 		},
 		Page: page,
-		ReadPage: func(id string) map[string]any {
-			p, _ := st.Page(id)
-			c := st.Content(id)
-			if c == nil {
-				c = doc.Empty()
+		ReadPage: func(id string) (map[string]any, error) {
+			p, err := st.Page(id)
+			if err != nil {
+				return nil, err
+			}
+			// Content this device cannot read, as a newer app's, is not
+			// read as an empty page.
+			c, err := stored(st, id)
+			if err != nil {
+				return nil, err
 			}
 			subpages := []map[string]any{}
 			if kids, err := st.Children(id, ""); err == nil {
@@ -434,12 +497,15 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 			if len(p.Tags) > 0 {
 				info["tags"] = p.Tags
 			}
-			return map[string]any{"page": info, "blocks": reader.viewsOf(id, c), "subpages": subpages}
+			return map[string]any{"page": info, "blocks": reader.viewsOf(id, c), "subpages": subpages}, nil
 		},
-		Search: func(query string) []map[string]any {
+		Search: func(query string) ([]map[string]any, error) {
 			// Among the user's own pages alone, so only theirs count toward
 			// the most it finds, as the server's search keeps to them.
-			hits, _ := st.SearchPages(ctx, query, 20, mine)
+			hits, err := st.SearchPages(ctx, query, 20, mine)
+			if err != nil {
+				return nil, err
+			}
 			out := []map[string]any{}
 			for _, hit := range hits {
 				r := map[string]any{"page_id": hit.PageID, "title": hit.Title}
@@ -448,20 +514,24 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 				}
 				out = append(out, r)
 			}
-			return out
+			return out, nil
 		},
 		Folders: func() []map[string]any { return spaceFolders(st) },
-		CreatePage: func(title string, nodes []*doc.Node, parentID, folderID string) (string, error) {
+		CreatePage: func(title string, nodes []*doc.Node, parentID, folderID string) (doc.NewPage, error) {
 			if folderID != "" && !spaceFolder(st, folderID) {
-				return "", noFolder(folderID)
+				return doc.NewPage{}, noFolder(folderID)
 			}
 			var c *doc.Content
 			if len(nodes) > 0 {
 				c = doc.FromBlocks(nodes)
 			}
 			p, err := st.CreatePage(store.NewPageOptions{SpaceID: space, ParentID: parentID, FolderID: folderID, Title: title, Content: c})
-			if err != nil || parentID == "" {
-				return p.ID, err
+			if err != nil {
+				return doc.NewPage{}, err
+			}
+			made := doc.NewPage{ID: p.ID, SpaceID: p.SpaceID, ParentID: p.ParentID, FolderID: p.FolderID, Title: p.Title, SortKey: p.SortKey}
+			if parentID == "" {
+				return made, nil
 			}
 			// As a page made from the sidebar, it shows in the page it is
 			// inside. A card that could not go in leaves the page made, as
@@ -470,7 +540,7 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 			if err := h.onMain(ctx, func() error { return h.pages().LinkSubpage(parentID, p.ID, "") }); err != nil {
 				log.Printf("agent subpage card: %v", err)
 			}
-			return p.ID, nil
+			return made, nil
 		},
 		MovePage: func(id, parentID, folderID string) (from, to doc.PagePlace, err error) {
 			if folderID != "" && !spaceFolder(st, folderID) {
@@ -481,8 +551,17 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 				return from, to, err
 			}
 			from = doc.PagePlace{ParentID: p.ParentID, FolderID: p.FolderID, SortKey: p.SortKey}
+			// Where it is already it stays, as it is among the pages there,
+			// as the server leaves it: inside the page, or at the top level
+			// in the folder.
+			if parentID == p.ParentID && (parentID != "" || folderID == p.FolderID) {
+				return from, from, nil
+			}
 			err = h.onMain(ctx, func() error {
-				return h.pages().MovePage(id, parentID, func() error { return st.MovePage(id, parentID, folderID, "") })
+				left, err := h.pages().MovePageAt(id, parentID, nil, func() error { return st.MovePage(id, parentID, folderID, "") })
+				// Where its card was, for Undo to put it back there.
+				from.Card = left
+				return err
 			})
 			if p, perr := st.Page(id); err == nil && perr == nil {
 				to = doc.PagePlace{ParentID: p.ParentID, FolderID: p.FolderID, SortKey: p.SortKey}

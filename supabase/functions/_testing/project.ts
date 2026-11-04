@@ -87,7 +87,15 @@ export class Project {
       if (rpc) {
         const fn = this.rpcs[rpc[1]];
         if (!fn) return reply({ code: "PGRST202", message: `no function ${rpc[1]}` }, 404);
-        return reply(await fn(await req.json().catch(() => ({})), caller) ?? null);
+        const result = await fn(await req.json().catch(() => ({})), caller);
+        // A function's rows are read as a table's are: its filters, order
+        // and limit, and no more than max_rows.
+        if (!Array.isArray(result)) return reply(result ?? null);
+        let rows = (result as Row[]).filter(filters(url.searchParams, (name) => this.rows(name)));
+        const order = url.searchParams.get("order");
+        if (order) rows = sorted(rows, order);
+        const limit = url.searchParams.get("limit");
+        return reply(rows.slice(0, limit === null ? undefined : Number(limit)).slice(0, this.rules.maxRows));
       }
       const table = url.pathname.match(/^\/rest\/v1\/(\w+)$/);
       if (table) return await this.rest(table[1], req, url, caller);

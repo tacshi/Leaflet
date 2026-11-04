@@ -91,8 +91,9 @@ func (p Pages) EditPage(id string, edit func(c *doc.Content) bool) error {
 		changed = edit(c)
 		return changed, nil
 	})
+	// A save goes up soon; what changed elsewhere comes with the passes.
 	if err == nil && changed && p.Sync != nil {
-		p.Sync.Kick()
+		p.Sync.KickPush()
 	}
 	return err
 }

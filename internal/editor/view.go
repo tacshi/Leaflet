@@ -66,8 +66,7 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 			}
 		}
 	})
-	e.hid = e.hidden()
-	e.order, e.depths = unitOrder(e.walkUnits(e.hid)), e.blockDepths()
+	e.reshape()
 	// The chips shown fill this in again as they draw, and the blocks
 	// built laid as they build.
 	clear(e.chips)
@@ -81,6 +80,85 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 	e.reveal = ""
 	e.overlays(c, pal)
 	return root
+}
+
+// shapeEntry is a block as what folds hide, the units and the blocks'
+// depths are worked out from it: which it is and where in the tree, its
+// kind, and for a heading or a toggle, its level and whether it is folded.
+type shapeEntry struct {
+	n       *doc.Node
+	id, typ string
+	depth   int
+	level   int
+	folded  bool
+}
+
+// shaped is what the page's blocks were worked out to be as it last
+// built: the blocks as shapeEntry has them, in order, and from them what
+// folds hide, each unit's place and each block's depth. at is the page's
+// gen then.
+type shaped struct {
+	entries []shapeEntry
+	hid     map[string]bool
+	order   map[string]int
+	depths  map[string]int
+	at      uint64
+}
+
+// entryOf is block n, depth deep, as shapeEntry has it.
+func entryOf(n *doc.Node, depth int) shapeEntry {
+	en := shapeEntry{n: n, id: n.ID, typ: n.Type, depth: depth}
+	if n.Type == "heading" || n.Type == "toggle_list" {
+		en.level, en.folded = headingLevel(n), n.Bool("collapsed")
+	}
+	return en
+}
+
+// reshape finds what folds hide, each unit's place and each block's
+// depth, for the blocks to build: as the page last built while its blocks
+// are as they were then, which each frame tells by walking them, without
+// working them out again.
+func (e *Editor) reshape() {
+	s := &e.shaped
+	i := 0
+	var same func([]*doc.Node, int) bool
+	same = func(nodes []*doc.Node, depth int) bool {
+		for _, n := range nodes {
+			if i >= len(s.entries) || s.entries[i] != entryOf(n, depth) {
+				return false
+			}
+			i++
+			if !same(n.Children, depth+1) {
+				return false
+			}
+		}
+		return true
+	}
+	if s.hid == nil || !same(e.Content.Children, 0) || i != len(s.entries) {
+		s.entries = s.entries[:0]
+		var walk func([]*doc.Node, int)
+		walk = func(nodes []*doc.Node, depth int) {
+			for _, n := range nodes {
+				s.entries = append(s.entries, entryOf(n, depth))
+				walk(n.Children, depth+1)
+			}
+		}
+		walk(e.Content.Children, 0)
+		s.hid = e.hidden()
+		s.order, s.depths = unitOrder(e.walkUnits(s.hid)), e.blockDepths()
+	}
+	s.at = e.gen
+	e.hid, e.order, e.depths, e.hidAt = s.hid, s.order, s.depths, e.gen
+}
+
+// HasBlock reports whether block id is in the page: from what the page
+// last built, while nothing changed since, without looking for it.
+func (e *Editor) HasBlock(id string) bool {
+	if s := &e.shaped; s.depths != nil && s.at == e.gen {
+		_, ok := s.depths[id]
+		return ok
+	}
+	return e.node(id) != nil
 }
 
 // forgetUnbuilt drops what the editor keeps of blocks the page did not

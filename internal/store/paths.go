@@ -87,11 +87,11 @@ func copyFile(from, to string) (int64, error) {
 	return n, err
 }
 
-// writeFile writes data to a file in the app's data folder, as copyFile
-// copies one.
-func writeFile(path string, data []byte) error {
+// writeFrom writes what r reads to a file in the app's data folder, as
+// copyFile copies one, as it comes: a download is never all in memory.
+func writeFrom(path string, r io.Reader) error {
 	return writeTo(path, func(w io.Writer) error {
-		_, err := w.Write(data)
+		_, err := io.Copy(w, r)
 		return err
 	})
 }

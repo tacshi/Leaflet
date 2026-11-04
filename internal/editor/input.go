@@ -315,7 +315,7 @@ func (e *Editor) BoundsForRange(r ui.TextInputRange) (ui.Rect, ui.TextInputRange
 	if n == nil {
 		return ui.Rect{}, r, false
 	}
-	l := e.layouts[n.ID]
+	l := e.layoutOf(n)
 	box, ok := e.box(n.ID)
 	if l == nil || !ok {
 		return ui.Rect{}, r, false
@@ -337,7 +337,7 @@ func (e *Editor) IndexForPoint(p ui.Point) (int, bool) {
 	if n == nil {
 		return 0, false
 	}
-	l := e.layouts[n.ID]
+	l := e.layoutOf(n)
 	box, ok := e.box(n.ID)
 	if l == nil || !ok {
 		return 0, false
@@ -376,7 +376,7 @@ func (e *Editor) hit(wx, wy float32) (Pos, ui.TextAffinity, bool) {
 	if !best.IsText() {
 		return Pos{best.ID, 0}, ui.TextDownstream, true
 	}
-	l := e.layouts[best.ID]
+	l := e.layoutOf(best)
 	r, _ := e.box(best.ID)
 	if l == nil {
 		return Pos{best.ID, 0}, ui.TextDownstream, true
@@ -398,7 +398,7 @@ func (e *Editor) caretRect(p Pos) (ui.Rect, bool) {
 	if !n.IsText() {
 		return ui.Rect{X: box.X, Y: box.Y, W: 1, H: box.H}, true
 	}
-	l := e.layouts[n.ID]
+	l := e.layoutOf(n)
 	if l == nil {
 		return ui.Rect{}, false
 	}
@@ -641,7 +641,7 @@ func (e *Editor) vertical(dir int, extend bool) {
 	n := e.node(e.focus.ID)
 	// Within the block, to the line above or below.
 	if n.IsText() {
-		if l := e.layouts[n.ID]; l != nil {
+		if l := e.layoutOf(n); l != nil {
 			box, _ := e.box(n.ID)
 			_, h := l.layout.Size()
 			y := caret.Y - box.Y - l.y + caret.H/2 + float32(dir)*caret.H
@@ -667,7 +667,7 @@ func (e *Editor) vertical(dir int, extend bool) {
 		e.moveTo(Pos{next.ID, 0}, extend)
 		return
 	}
-	l := e.layouts[next.ID]
+	l := e.layoutOf(next)
 	box, ok := e.box(next.ID)
 	if l == nil || !ok {
 		off := 0
@@ -843,7 +843,8 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 // caret place nearest the pointer, which is as much beside a link's last
 // letter, outside it, as on it.
 func (e *Editor) linkUnder(id string, wx, wy float32) string {
-	n, l := e.node(id), e.layouts[id]
+	n := e.node(id)
+	l := e.layoutOf(n)
 	r, ok := e.box(id)
 	if n == nil || !n.IsText() || l == nil || !ok {
 		return ""

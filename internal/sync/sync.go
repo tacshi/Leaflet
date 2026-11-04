@@ -13,6 +13,7 @@ package sync
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"runtime"
 	gosync "sync"
@@ -81,12 +82,34 @@ type Service struct {
 	// busyUntil is when the server asked the loop's passes to wait for,
 	// as it answered busy with a Retry-After (backOff); guarded by mu.
 	busyUntil time.Time
+	// wantPull is set by Kick for the loop's next pass to pull too, which
+	// one KickPush asked for alone would not.
+	wantPull atomic.Bool
+	// beat is when the device last said it is in use (heartbeat), and
+	// providersSwept when the cloud model connections removed elsewhere
+	// were last looked for (pullProviderRemovals); guarded by mu.
+	beat, providersSwept every
+	// waitingAfter is the last of the pages that wait, in ID order, that
+	// a pass brought, for the next to go on after (pullWaiting); guarded
+	// by mu.
+	waitingAfter string
+	// pageFiles are the other devices' page files in iCloud Drive as this
+	// device last merged them, by root and path, so one that has not
+	// changed since is not read again (cloudRefresh); guarded by mu. It
+	// starts empty with each run.
+	pageFiles map[string]mergedFile
+}
+
+// mergedFile is a page file's stamp as it was merged, and its version.
+type mergedFile struct {
+	stamp   icloud.Stamp
+	version int64
 }
 
 // New returns the sync service.
 func New(st *store.Store, be *remote.Client) *Service {
 	return &Service{st: st, be: be, kick: make(chan struct{}, 1), open: map[string]bool{},
-		membersAt: map[string]time.Time{}, retryAt: map[outboxKey]time.Time{}}
+		membersAt: map[string]time.Time{}, retryAt: map[outboxKey]time.Time{}, pageFiles: map[string]mergedFile{}}
 }
 
 // folder is the Leaflet folder in iCloud Drive as it is now.
@@ -116,7 +139,9 @@ type target interface {
 	// iCloud sync on.
 	ready() bool
 	needsNetwork() bool
-	pass(ctx context.Context) error
+	// pass runs a pass; one without pull may leave what changed
+	// elsewhere for the next, as one that sends a save does.
+	pass(ctx context.Context, pull bool) error
 	refresh(ctx context.Context, pageID string) (*doc.Content, error)
 	flush(ctx context.Context, pageID string) error
 }
@@ -153,17 +178,30 @@ func (s *Service) CanFetch() bool {
 }
 
 // Fetch reads a file (bucket "files") or a recording's audio
-// ("recordings") that another device uploaded, by its storage path. What
-// went up to iCloud Drive stays there after switching to the server,
-// until it has gone up again.
+// ("recordings") that another device uploaded, by its storage path, whole.
+// What went up to iCloud Drive stays there after switching to the server,
+// until it has gone up again. FetchReader reads one as it comes.
 func (s *Service) Fetch(ctx context.Context, bucket, path string) ([]byte, error) {
+	r, err := s.FetchReader(ctx, bucket, path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = r.Close() }()
+	return io.ReadAll(r)
+}
+
+// FetchReader opens what Fetch reads, to read as it comes: a file or a
+// recording's audio may be hundreds of megabytes, which are then never
+// all in memory, as the store keeps them (store.DownloadedFileFrom). The
+// caller closes it.
+func (s *Service) FetchReader(ctx context.Context, bucket, path string) (io.ReadCloser, error) {
 	return s.fetch(ctx, bucket, path, true)
 }
 
-// fetch is Fetch, which waits while iCloud downloads what is in iCloud
-// Drive; with wait false it asks iCloud for it, and is icloud.ErrNotReady
-// until it has come.
-func (s *Service) fetch(ctx context.Context, bucket, path string, wait bool) ([]byte, error) {
+// fetch is FetchReader, which waits while iCloud downloads what is in
+// iCloud Drive; with wait false it asks iCloud for it, and is
+// icloud.ErrNotReady until it has come.
+func (s *Service) fetch(ctx context.Context, bucket, path string, wait bool) (io.ReadCloser, error) {
 	fromCloud := s.cloudRead
 	if wait {
 		fromCloud = s.cloudFetch
@@ -172,9 +210,9 @@ func (s *Service) fetch(ctx context.Context, bucket, path string, wait bool) ([]
 		return fromCloud(ctx, bucket, path)
 	}
 	if s.be.SignedIn() {
-		data, err := s.be.Download(ctx, bucket, path)
+		r, err := s.be.Download(ctx, bucket, path)
 		if err == nil || !s.keptInICloud(bucket, path) {
-			return data, err
+			return r, err
 		}
 	}
 	if s.keptInICloud(bucket, path) {

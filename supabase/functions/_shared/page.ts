@@ -2,7 +2,7 @@
 // items and links, the links made whole. Mirrors internal/web/read.go; both
 // read the pages of testdata/pages.json alike.
 
-import { parse } from "npm:parse5@8.0.1";
+import { type DefaultTreeAdapterMap, Parser } from "npm:parse5@8.0.1";
 import { readBytes } from "./openai.ts";
 import { publicFetch, type Resolver, UnsafeUrlError } from "./net.ts";
 
@@ -20,8 +20,14 @@ export interface WebPage {
 /** The most of a page's text an agent reads, in characters (Go's MaxPageText). */
 export const MAX_PAGE_TEXT = 30_000;
 
-/** The most of a page read from the web. */
-const MAX_PAGE_BYTES = 5 << 20;
+/** The most of a page read from the web, as on the device (Go's maxPageBytes). */
+export const MAX_PAGE_BYTES = 2 << 20;
+
+/**
+ * The most elements open at once in a page that is read, as Go's parser
+ * has it: a page nested deeper reads as nothing, as it does there.
+ */
+const MAX_OPEN_ELEMENTS = 512;
 
 /** The most redirects followed to a page. */
 const MAX_REDIRECTS = 5;
@@ -93,7 +99,7 @@ const BLOCKS = new Set([
 ]);
 
 /** HTML's spaces and the no-break space, which run together into one. */
-const SPACES = /[\t\n\f\r  ]+/g;
+const SPACES = /[\t\n\f\r \u00a0]+/g;
 
 interface Node {
   nodeName: string;
@@ -120,9 +126,71 @@ function attr(n: Node, name: string): string | undefined {
   return n.attrs?.find((a) => !a.namespace && a.name === name)?.value;
 }
 
+/** Whether a UTF-16 code is a space as Go's unicode.IsSpace has it. */
+function isSpace(c: number): boolean {
+  return c === 0x20 || (c >= 0x09 && c <= 0x0d) || c === 0x85 || c === 0xa0 || c === 0x1680 ||
+    (c >= 0x2000 && c <= 0x200a) || c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f ||
+    c === 0x3000;
+}
+
+/** s without the spaces it starts with (Go's strings.TrimLeftFunc with unicode.IsSpace). */
+function trimLeft(s: string): string {
+  let i = 0;
+  while (i < s.length && isSpace(s.charCodeAt(i))) i++;
+  return s.slice(i);
+}
+
+/** s without the spaces it ends with (Go's strings.TrimRightFunc with unicode.IsSpace). */
+function trimRight(s: string): string {
+  let i = s.length;
+  while (i > 0 && isSpace(s.charCodeAt(i - 1))) i--;
+  return s.slice(0, i);
+}
+
 /** Trims Go's unicode.IsSpace, as strings.TrimSpace does. */
 function trimSpace(s: string): string {
-  return s.replace(/^[\s\u0085]+|[\s\u0085]+$/gu, "");
+  return trimRight(trimLeft(s));
+}
+
+/** s without the characters of cut it ends with (Go's strings.TrimRight). */
+function trimRightOf(s: string, cut: string): string {
+  let i = s.length;
+  while (i > 0 && cut.includes(s[i - 1])) i--;
+  return s.slice(0, i);
+}
+
+/** The characters in s, as Go counts a string's runes. */
+function runes(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++, n++) {
+    const c = s.charCodeAt(i);
+    if (c >= 0xd800 && c < 0xdc00 && i + 1 < s.length) {
+      const d = s.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d < 0xe000) i++;
+    }
+  }
+  return n;
+}
+
+/** The characters in s that are not spaces. */
+function marksIn(s: string): number {
+  let n = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (isSpace(c)) continue;
+    n++;
+    if (c >= 0xd800 && c < 0xdc00 && i + 1 < s.length) {
+      const d = s.charCodeAt(i + 1);
+      if (d >= 0xdc00 && d < 0xe000) i++;
+    }
+  }
+  return n;
+}
+
+/** Whether s has a character that is not a space. */
+function hasMark(s: string): boolean {
+  for (let i = 0; i < s.length; i++) if (!isSpace(s.charCodeAt(i))) return true;
+  return false;
 }
 
 /**
@@ -135,22 +203,41 @@ function linkString(u: URL): string {
   return c.href.replace(/\(/g, "%28").replace(/\)/g, "%29");
 }
 
-/** Whether n has text to read: a text node of more than spaces, or an element read with one in it (Go's hasText). */
-function hasText(n: Node): boolean {
-  if (n.nodeName === "#text") return trimSpace((n.value ?? "").replace(SPACES, " ")) !== "";
-  if (isElement(n) && (n.namespaceURI !== HTML_NS || SKIPPED.has(n.nodeName))) return false;
-  return (n.childNodes ?? []).some(hasText);
+/** A link being read: its piece in the line, and the line's marks before it (Go's openLink). */
+interface OpenLink {
+  at: number;
+  marks: number;
 }
 
+/**
+ * Writes a page's text, as Go's pageReader: each piece of the page read
+ * once, so a page takes as long as it is long, and no more once its text
+ * has gone on past MAX_PAGE_TEXT for good.
+ */
 class PageReader {
-  out = "";
-  line = "";
+  out: string[] = [];
+  /** The characters in out, and those up to its last that is not a line break. */
+  outRunes = 0;
+  outText = 0;
+  /** The line, piece by piece: a link holds a piece of its own before its text, for its [ once it ends in the line. */
+  parts: string[] = [];
+  /** The links being read, outermost first; the first decided of them ended a line on the way. */
+  links: OpenLink[] = [];
+  decided = 0;
+  /** The line's characters that are not spaces; whether it ends in a space, or has nothing in it. */
+  marks = 0;
+  space = false;
+  empty = true;
   prefix = "";
   pre = 0;
+  /** hasText's answers, each element asked once. */
+  read = new WeakMap<Node, boolean>();
+  done = false;
 
   constructor(public base: URL, readonly self: string) {}
 
   walk(n: Node): void {
+    if (this.done) return;
     if (n.nodeName === "#document") return this.children(n);
     if (n.nodeName === "#text") return this.write(n.value ?? "");
     if (!isElement(n)) return;
@@ -162,15 +249,15 @@ class PageReader {
         return this.flush();
       case "hr":
         this.flush();
-        this.out += "---\n";
+        this.writeOut("---\n");
         return;
       case "img":
         return;
     }
     // An element with no text, as a link around a picture or an empty
     // box, breaks no line and says nothing.
-    if (!hasText(n)) return;
-    if ((name === "td" || name === "th") && trimSpace(this.line) !== "") this.write(" | ");
+    if (!this.hasText(n)) return;
+    if ((name === "td" || name === "th") && this.marks > 0) this.write(" | ");
     const block = BLOCKS.has(name);
     if (block) {
       this.flush();
@@ -188,25 +275,68 @@ class PageReader {
     }
   }
 
+  /** Whether n has text to read: a text node of more than spaces, or an element read with one in it (Go's hasText). */
+  hasText(n: Node): boolean {
+    if (n.nodeName === "#text") return hasMark(n.value ?? "");
+    if (isElement(n) && (n.namespaceURI !== HTML_NS || SKIPPED.has(n.nodeName))) return false;
+    const children = n.childNodes;
+    if (!children?.length) return false;
+    let has = this.read.get(n);
+    if (has === undefined) {
+      has = children.some((c) => this.hasText(c));
+      this.read.set(n, has);
+    }
+    return has;
+  }
+
   children(n: Node): void {
-    for (const c of n.childNodes ?? []) this.walk(c);
+    for (const c of n.childNodes ?? []) {
+      if (this.done) return;
+      this.walk(c);
+    }
   }
 
   /** A link's text as [text](link) (Go's anchor). */
   anchor(n: Node, link: string): void {
-    const lines = this.out.length;
-    const at = this.line.length;
+    const lines = this.outRunes;
+    this.links.push({ at: this.parts.length, marks: this.marks });
+    this.parts.push("");
     this.children(n);
-    if (this.out.length !== lines) {
+    const l = this.links.pop()!;
+    this.decided = Math.min(this.decided, this.links.length);
+    if (this.outRunes !== lines) {
       this.flush();
-      this.out += `<${link}>\n`;
+      this.writeOut(`<${link}>\n`);
       return;
     }
-    const text = this.line.slice(at);
-    const inner = trimSpace(text);
-    const lead = text.startsWith(" ") ? " " : "";
-    const trail = text.endsWith(" ") ? " " : "";
-    this.line = `${this.line.slice(0, at)}${lead}[${inner}](${link})${trail}`;
+    // The text goes in the brackets without the spaces it starts and ends
+    // with, a space of which stays outside them.
+    const parts = this.parts;
+    let lead = "", trail = "";
+    for (let i = l.at + 1; i < parts.length; i++) {
+      if (parts[i] !== "") {
+        if (parts[i][0] === " ") lead = " ";
+        break;
+      }
+    }
+    for (let i = parts.length - 1; i > l.at; i--) {
+      if (parts[i] !== "") {
+        if (parts[i].endsWith(" ")) trail = " ";
+        break;
+      }
+    }
+    for (let i = l.at + 1; i < parts.length; i++) {
+      if ((parts[i] = trimLeft(parts[i])) !== "") break;
+    }
+    for (let i = parts.length - 1; i > l.at; i--) {
+      if ((parts[i] = trimRight(parts[i])) !== "") break;
+    }
+    parts[l.at] = `${lead}[`;
+    parts.push(`](${link})${trail}`);
+    this.marks += 4 + runes(link);
+    this.empty = false;
+    this.space = trail !== "";
+    this.check();
   }
 
   /** Where an <a> goes, or "" when nowhere to show (Go's link). */
@@ -225,31 +355,122 @@ class PageReader {
     return s !== this.self ? s : "";
   }
 
+  /** Adds text to the line, its spaces run together, but in a <pre> (Go's write). */
   write(s: string): void {
     if (this.pre > 0) {
-      s.split("\n").forEach((l, i) => {
-        if (i > 0) {
-          this.out += `${this.prefix}${this.line.replace(/[ \t]+$/, "")}\n`;
-          this.line = "";
-          this.prefix = "";
-        }
-        this.line += l;
-      });
+      for (let from = 0; !this.done;) {
+        const nl = s.indexOf("\n", from);
+        this.add(nl < 0 ? s.slice(from) : s.slice(from, nl));
+        if (nl < 0) return;
+        const line = `${this.prefix}${trimRightOf(this.parts.join(""), " \t")}\n`;
+        this.prefix = "";
+        this.newLine(true);
+        this.writeOut(line);
+        from = nl + 1;
+      }
       return;
     }
     s = s.replace(SPACES, " ");
-    if (this.line === "" || this.line.endsWith(" ")) s = s.replace(/^ +/, "");
-    this.line += s;
+    if (this.empty || this.space) s = s.replace(/^ +/, "");
+    this.add(s);
   }
 
+  /** Puts s at the end of the line (Go's add). */
+  add(s: string): void {
+    if (s === "") return;
+    this.parts.push(s);
+    this.empty = false;
+    this.space = s.endsWith(" ");
+    this.marks += marksIn(s);
+    this.check();
+  }
+
+  /** Ends the line, when it has text, after its prefix (Go's flush). */
   flush(): void {
-    const line = this.pre > 0 ? this.line.replace(/[ \t]+$/, "") : trimSpace(this.line);
-    this.line = "";
-    if (trimSpace(line) !== "") {
-      this.out += `${this.prefix}${line}\n`;
-      this.prefix = "";
+    if (this.marks === 0) return this.newLine(false);
+    const joined = this.parts.join("");
+    const line = `${this.prefix}${this.pre > 0 ? trimRightOf(joined, " \t") : trimSpace(joined)}\n`;
+    this.prefix = "";
+    this.newLine(true);
+    this.writeOut(line);
+  }
+
+  /** Starts the next line, after one written or one with no text (Go's newLine). */
+  newLine(wrote: boolean): void {
+    this.parts = [];
+    if (wrote) this.decided = this.links.length;
+    for (let i = this.decided; i < this.links.length; i++) {
+      this.links[i] = { at: this.parts.length, marks: 0 };
+      this.parts.push("");
+    }
+    this.marks = 0;
+    this.space = false;
+    this.empty = true;
+  }
+
+  /** Adds s to the finished lines, the line it ends begun anew (Go's writeOut). */
+  writeOut(s: string): void {
+    this.out.push(s);
+    const t = trimRightOf(s, "\n");
+    if (t !== "") this.outText = this.outRunes + runes(t);
+    this.outRunes += runes(s);
+    this.check();
+  }
+
+  /** Stops the reading once the text has gone on past MAX_PAGE_TEXT whatever comes next (Go's check). */
+  check(): void {
+    const kept = this.decided < this.links.length ? this.links[this.decided].marks : this.marks;
+    if (this.outText > MAX_PAGE_TEXT || kept > 0 && this.outRunes + runes(this.prefix) + kept > MAX_PAGE_TEXT) {
+      this.done = true;
     }
   }
+}
+
+/** A page nested deeper than MAX_OPEN_ELEMENTS. */
+class TooDeep extends Error {}
+
+/**
+ * How long a page may take to parse, in ms. Each tag of a page whose
+ * elements are nested deep takes a while, as the parser looks through
+ * them: a long page takes a fraction of this, and one made to take longer
+ * is not read, as the function has its seconds of CPU for all its run.
+ */
+const MAX_PARSE_MS = 1000;
+
+/** How much of a page is parsed at a time, between looks at the time. */
+const PARSE_CHUNK = 1 << 16;
+
+/**
+ * Parses a page, or undefined for one nested deeper than
+ * MAX_OPEN_ELEMENTS, which Go's parser refuses at the same element.
+ */
+function parseHtml(src: string): Node | undefined {
+  const parser = new Parser<DefaultTreeAdapterMap>();
+  const stack = parser.openElements;
+  const push = stack.push.bind(stack);
+  stack.push = (element, tagID) => {
+    push(element, tagID);
+    if (stack.stackTop >= MAX_OPEN_ELEMENTS) throw new TooDeep();
+  };
+  const start = performance.now();
+  try {
+    let at = 0;
+    do {
+      let end = Math.min(at + PARSE_CHUNK, src.length);
+      // A piece ends between characters, not between a character's halves.
+      const c = src.charCodeAt(end - 1);
+      if (end < src.length && c >= 0xd800 && c < 0xdc00) end++;
+      parser.tokenizer.write(src.slice(at, end), end === src.length);
+      if (end < src.length && performance.now() - start > MAX_PARSE_MS) {
+        throw new Error("The page takes too long to read");
+      }
+      at = end;
+    } while (at < src.length);
+  } catch (e) {
+    if (e instanceof TooDeep) return undefined;
+    throw e;
+  }
+  return parser.document as unknown as Node;
 }
 
 /** Reads a page's HTML, page being where it was read (Go's ReadHTML). */
@@ -261,7 +482,8 @@ export function readHtml(page: string, src: string): WebPage {
   } catch {
     return result;
   }
-  const root = parse(src) as unknown as Node;
+  const root = parseHtml(src);
+  if (!root) return result;
   const reader = new PageReader(base, linkString(base));
   const head = find(root, "head");
   if (head) {
@@ -282,19 +504,27 @@ export function readHtml(page: string, src: string): WebPage {
   }
   reader.walk(root);
   reader.flush();
-  [result.text, result.truncated] = truncate(reader.out.replace(/\n+$/, ""));
+  [result.text, result.truncated] = truncate(trimRightOf(reader.out.join(""), "\n"));
   result.links = urlsOf(result.text);
   return result;
 }
 
 /** Cuts text to MAX_PAGE_TEXT characters, at a line's end in the last quarter (Go's truncate). */
 export function truncate(text: string): [string, boolean] {
-  const chars = [...text];
-  if (chars.length <= MAX_PAGE_TEXT) return [text, false];
-  let cut = chars.slice(0, MAX_PAGE_TEXT).join("");
+  // Where the characters past MAX_PAGE_TEXT start, if there are any.
+  let end = 0;
+  for (let n = 0; n < MAX_PAGE_TEXT && end < text.length; n++) {
+    const c = text.charCodeAt(end++);
+    if (c >= 0xd800 && c < 0xdc00 && end < text.length) {
+      const d = text.charCodeAt(end);
+      if (d >= 0xdc00 && d < 0xe000) end++;
+    }
+  }
+  if (end >= text.length) return [text, false];
+  let cut = text.slice(0, end);
   const at = cut.lastIndexOf("\n");
-  if (at >= 0 && [...cut.slice(0, at)].length >= MAX_PAGE_TEXT * 3 / 4) cut = cut.slice(0, at);
-  return [cut.replace(/[ \t\n]+$/, ""), true];
+  if (at >= 0 && runes(cut.slice(0, at)) >= MAX_PAGE_TEXT * 3 / 4) cut = cut.slice(0, at);
+  return [trimRightOf(cut, " \t\n"), true];
 }
 
 const MARKDOWN_URL = /\]\((https?:\/\/[^()\t\n\f\r ]+)\)|<(https?:\/\/[^<>\t\n\f\r ]+)>/g;

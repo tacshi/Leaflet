@@ -115,10 +115,31 @@ type pageTools struct {
 	s *Server
 	// edited is when this client last edited each page.
 	edited map[string]int64
-	// read is each page as this client last read or edited it: a block it
+	// read is each page as this client last read or edited it, of the
+	// keptReads it read or edited last, those first in order: a block it
 	// replaces or deletes that changed since, as the user typed in the
 	// app, is kept in a snapshot first (conflictSince).
-	read map[string]*doc.Content
+	read  map[string]*doc.Content
+	order []string
+}
+
+// keptReads is how many pages the server keeps as the client last read or
+// edited them: a client that reads page after page, as to search them,
+// would have the server keep every one. An edit of one read longer ago
+// keeps no snapshot of a change the client never saw, as an edit of a
+// page never read does (conflictSince), but the one before its edits
+// (snapshot).
+const keptReads = 16
+
+// keep keeps c as the client last read or edited page id, and forgets the
+// page read longest ago past keptReads.
+func (t *pageTools) keep(id string, c *doc.Content) {
+	t.read[id] = c
+	t.order = append(slices.DeleteFunc(t.order, func(k string) bool { return k == id }), id)
+	if len(t.order) > keptReads {
+		delete(t.read, t.order[0])
+		t.order = t.order[1:]
+	}
 }
 
 func (t *pageTools) call(name string, args map[string]any) map[string]any {
@@ -339,7 +360,7 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		return nil, err
 	}
 	args = maps.Clone(args)
-	offset, limit, err := readPart(args)
+	offset, limit, err := partOf(args)
 	if err != nil {
 		return nil, err
 	}
@@ -356,17 +377,21 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 		if !kept {
 			return false, toolErr("The page's content is not kept on this device.")
 		}
-		before := content.Copy()
 		// Not with the user's other pages, which MCP's own tools read.
-		x := &agents.Executor{Ctx: agents.PageTools(st, p.ID, p.DisplayTitle(), t.s.agent, content, false)}
-		out = x.Call(name, args)
-		if page, ok := out["page"].(map[string]any); ok && name == "read_page" {
-			page["tags"] = p.Tags
-			if out["error"] == nil {
-				t.read[p.ID] = before
-				keepPart(out, offset, limit)
-			}
+		// What sites wrote of the blocks, a link card's title and a
+		// video's, which the in-app agents read only with the web (agents'
+		// Finish), the client reads as the page has it: it keeps to no URL
+		// guard of the app's.
+		tc := agents.PageTools(st, p.ID, p.DisplayTitle(), t.s.agent, content, false)
+		tc.SiteInfo = true
+		if name == "read_page" {
+			out = readPart(tc, p, content, offset, limit)
+			t.keep(p.ID, content)
+			return false, nil
 		}
+		before := content.Copy()
+		x := &agents.Executor{Ctx: tc}
+		out = x.Call(name, args)
 		if len(x.Ops) == 0 {
 			return false, nil
 		}
@@ -399,7 +424,7 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	}
 	if saved != nil {
 		t.edited[p.ID] = doc.NowMs()
-		t.read[p.ID] = saved.Copy()
+		t.keep(p.ID, saved.Copy())
 	}
 	return out, nil
 }
@@ -410,9 +435,9 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 // in parts instead, each saying where the next starts.
 const maxRead = 60_000
 
-// readPart is the part of a page read_page's args ask for: from the block
+// partOf is the part of a page read_page's args ask for: from the block
 // at offset, at most limit blocks (0, as many as fit in maxRead).
-func readPart(args map[string]any) (offset, limit int, err error) {
+func partOf(args map[string]any) (offset, limit int, err error) {
 	count := func(key string, least int) (int, error) {
 		v, ok := args[key]
 		if !ok || v == nil {
@@ -431,26 +456,28 @@ func readPart(args map[string]any) (offset, limit int, err error) {
 	return offset, limit, err
 }
 
-// keepPart keeps to the part of a read_page answer out asks for, from the
-// block at offset, at most limit of them, or as many as fit in maxRead,
-// though always one: it says how many blocks the page has, and where the
-// next part starts, when there is more. The page's subpages and comments
-// come with the first part.
-func keepPart(out map[string]any, offset, limit int) {
-	blocks, _ := out["blocks"].([]map[string]any)
+// readPart is read_page's answer of the part of page p, of content c,
+// from the block at offset, at most limit of them, or as many as fit in
+// maxRead, though always one: it says how many blocks the page has, and
+// where the next part starts, when there is more. The page's subpages and
+// comments come with the first part. Only the part's blocks are read as
+// agents read them (agents' Finish), with their transcripts: a long page
+// read in parts would have each read every one.
+func readPart(tc agents.ToolContext, p store.Page, c *doc.Content, offset, limit int) map[string]any {
+	out := map[string]any{"page": map[string]any{"id": p.ID, "title": p.DisplayTitle(), "tags": p.Tags}}
 	size := 0
-	if offset > 0 {
-		delete(out, "subpages")
-		delete(out, "comments")
-	} else {
+	if offset == 0 {
+		out["subpages"], out["comments"] = tc.Subpages(), tc.Comments()
 		for _, k := range []string{"page", "subpages", "comments"} {
 			raw, _ := json.Marshal(out[k])
 			size += len(raw)
 		}
 	}
+	blocks := doc.BlockViews(c)
 	start := min(offset, len(blocks))
 	end := start
 	for end < len(blocks) && (limit == 0 || end-start < limit) {
+		tc.Finish(p.ID, blocks[end])
 		raw, _ := json.Marshal(blocks[end])
 		if end > start && size+len(raw) > maxRead {
 			break
@@ -463,6 +490,7 @@ func keepPart(out map[string]any, offset, limit int) {
 	if end < len(blocks) {
 		out["next_offset"] = end
 	}
+	return out
 }
 
 // conflictSince reports whether ops replace or delete a block that changed

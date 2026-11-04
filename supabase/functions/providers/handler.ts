@@ -91,6 +91,11 @@ async function save(
   deps: ProviderDeps,
 ): Promise<ProviderRow> {
   if (!input || !PRESETS.has(input.preset)) throw new HttpError(400, "Unknown provider preset");
+  // A key that is no string (null, say) is no key: refused before anything
+  // is written, rather than once the row has moved.
+  if (input.api_key !== undefined && typeof input.api_key !== "string") {
+    throw new HttpError(400, "api_key must be a string");
+  }
   const local = LOCAL_PRESETS.has(input.preset);
   if (local && input.api_key) {
     throw new HttpError(400, "Keys for local providers stay on your device");
@@ -103,6 +108,13 @@ async function save(
   try {
     baseUrl = normalizeBaseUrl(input.base_url ?? "", input.preset);
   } catch {
+    throw new HttpError(400, "Enter the provider's base URL");
+  }
+  // A URL parser takes a backslash for a slash, drops tabs and line
+  // breaks, and maps a host past ASCII its own way, none of which the URL
+  // as saved shows: a base URL is printable ASCII, so the address its key
+  // is kept for (model_providers_key_stays) is the one it is sent to.
+  if (!/^[!-~]+$/.test(baseUrl) || baseUrl.includes("\\")) {
     throw new HttpError(400, "Enter the provider's base URL");
   }
   // Local providers are only listed; the server never calls them.
@@ -124,10 +136,18 @@ async function save(
   };
 
   let id = input.id;
+  // A saved key goes only to the address, and the preset, it was saved
+  // for, whatever the preset is now: a provider moved without a new key is
+  // refused, and one made local, which takes no key, loses its key. The
+  // database drops it too (model_providers_key_stays), whoever moves the row.
+  let dropKey = false;
   if (id) {
     const saved = await loadProvider(uc, id);
-    if (input.api_key === undefined && !local && saved.has_secret && !keyStaysWith(saved, row)) {
-      throw new HttpError(400, "Enter the API key again: a saved key goes only to the address it was saved for.");
+    if (saved.has_secret && !keyStaysWith(saved, row)) {
+      if (local) dropKey = true;
+      else if (input.api_key === undefined) {
+        throw new HttpError(400, "Enter the API key again: a saved key goes only to the address it was saved for.");
+      }
     }
     // Whether the provider calls tools is known of its default model
     // (test, below): another default is not tested yet.
@@ -143,11 +163,10 @@ async function save(
     id = (data as { id: string }).id;
   }
 
-  if (input.api_key !== undefined && !local) {
-    const { error } = await uc.rpc("set_provider_secret", {
-      p_provider_id: id,
-      p_secret: input.api_key.trim(),
-    });
+  // After the row: a key saved with a move is the new address's.
+  const secret = local ? (dropKey ? "" : undefined) : input.api_key?.trim();
+  if (secret !== undefined) {
+    const { error } = await uc.rpc("set_provider_secret", { p_provider_id: id, p_secret: secret });
     if (error) throw new Error(error.message);
   }
   return await loadProvider(uc, id!);

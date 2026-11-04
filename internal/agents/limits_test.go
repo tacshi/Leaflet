@@ -15,6 +15,7 @@ import (
 	"github.com/egoist/mygo/i18n"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/store"
 	"leaflet/locales"
 )
 
@@ -422,5 +423,77 @@ func TestCloudEditsSaidInTheAppsLanguage(t *testing.T) {
 	}}, "j1", Events{})
 	if err != nil || len(res.Edits) != 2 || res.Edits[0].Summary != want[0] || res.Edits[1].Summary != want[1] {
 		t.Errorf("cut off: %v, edits %+v", err, res.Edits)
+	}
+}
+
+// A tool's result reaches the model cut to as many UTF-16 units of its
+// JSON as the server's, saying it was cut, as the server cuts one.
+func TestToolResultsCutAsOnTheServer(t *testing.T) {
+	short := strings.Repeat("a", toolResultLimit)
+	if got := cutResult(short); got != short {
+		t.Error("a result that fits was cut")
+	}
+	long := strings.Repeat("😀", toolResultLimit)
+	got := cutResult(long)
+	if !strings.HasSuffix(got, "…(truncated)") || !strings.HasPrefix(got, strings.Repeat("😀", toolResultLimit/2)) || len([]rune(got)) != toolResultLimit/2+len([]rune("…(truncated)")) {
+		t.Errorf("cut to %d runes", len([]rune(got)))
+	}
+	// Through a run: a page of many long blocks, read whole.
+	c := page()
+	for i := range 40 {
+		n := &doc.Node{ID: fmt.Sprint("long", i), Type: "paragraph"}
+		n.SetDelta(doc.FromMarkdown(strings.Repeat("word ", 400)))
+		c.Children = append(c.Children, n)
+	}
+	f := &fakeModel{replies: []map[string]any{{"content": "", "tool_calls": []any{call("read_page", map[string]any{})}}, {"content": "Read it."}}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	if _, err := RunLocal(context.Background(), NewClient(srv.URL, ""), Request{Model: "m", SupportsTools: true}, executor(c).Ctx, Events{}); err != nil {
+		t.Fatal(err)
+	}
+	msgs := f.requests[1]["messages"].([]any)
+	if out := msgs[len(msgs)-1].(map[string]any)["content"].(string); !strings.HasSuffix(out, "…(truncated)") || len(out) > toolResultLimit+len("…(truncated)") {
+		t.Errorf("read_page's result reached the model %d bytes long", len(out))
+	}
+}
+
+// list_pages lists at most as many pages as the agent function's.
+func TestListPagesListsAtMostAsManyAsTheServer(t *testing.T) {
+	st := openStore(t)
+	here, err := st.CreatePage(store.NewPageOptions{Title: "Here"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range maxListedPages + 1 {
+		if _, err := st.CreatePage(store.NewPageOptions{Title: fmt.Sprint("Page ", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tc := PageTools(st, here.ID, "Here", "Test", page(), true)
+	if n := len(tc.ListPages()); n != maxListedPages {
+		t.Errorf("listed %d pages", n)
+	}
+}
+
+// Blocks that come together in a tick of the stream go in as one insert,
+// which walks the page once, not one each: the page gets one change for
+// them, and the run its op as ever.
+func TestDraftsNewBlocksTogether(t *testing.T) {
+	x := executor(page())
+	var deltas [][]doc.Op
+	x.OnRevise = func(_ int, _ *doc.Op, _ string, delta []doc.Op) { deltas = append(deltas, delta) }
+	one := `{"position":{"after":"p1"},"markdown":"First line\n`
+	x.Draft("write_markdown", one)
+	four := one + `Second\nThird\nFourth\nFifth`
+	x.Draft("write_markdown", four)
+	if len(deltas) != 1 || len(deltas[0]) != 1 || deltas[0][0].Op != "insert" || len(deltas[0][0].Nodes) != 4 {
+		t.Fatalf("changes %+v", deltas)
+	}
+	out, ok := x.FinishDraft("write_markdown", four+`"}`)
+	if !ok || out["error"] != nil || len(x.Ops) != 1 || len(x.Ops[0].Nodes) != 5 {
+		t.Fatalf("finished %v, ops %+v", out, x.Ops)
+	}
+	if got := texts(x.Ctx.Content); strings.Join(got, "|") != "Plan|Ship the editor first.|First line|Second|Third|Fourth|Fifth|item" {
+		t.Errorf("page %q", got)
 	}
 }

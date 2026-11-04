@@ -83,6 +83,11 @@ final class AppModel {
     @ObservationIgnored private var reloading: Task<Void, Never>?
     @ObservationIgnored private var reloadAgain = false
     @ObservationIgnored private var toReload: Reload = []
+    /// todosShown are the windows' sidebars that show the To-dos tab, by
+    /// their own IDs: the to-dos are read again as pages change only while
+    /// one does, each autosave of a page being typed in a change, and once
+    /// as one comes to show them.
+    @ObservationIgnored private var todosShown = Set<UUID>()
     /// saving is the last of the settings on their way to the core, which
     /// go one after another, as they were changed.
     @ObservationIgnored var saving: Task<Void, Never>?
@@ -262,7 +267,9 @@ final class AppModel {
                     libraryLoaded = true
                     library = lib
                 }
-                if parts.contains(.todos), let list = await read("to-dos", client.todos) {
+                if parts.contains(.todos), !todosShown.isEmpty,
+                    let list = await read("to-dos", client.todos)
+                {
                     todos = list
                 }
                 if parts.contains(.templates), let list = await read("templates", client.templates)
@@ -278,6 +285,17 @@ final class AppModel {
         }
         reloading = task
         await task.value
+    }
+
+    /// showsTodos says the sidebar of id shows the To-dos tab, or no longer
+    /// does: one coming to show it reads them, as they may have changed
+    /// while none did.
+    func showsTodos(_ id: UUID, _ shown: Bool) {
+        guard shown else {
+            todosShown.remove(id)
+            return
+        }
+        if todosShown.insert(id).inserted { Task { await reload(.todos) } }
     }
 
     /// read returns what body reads of the core, or nil, saying why in

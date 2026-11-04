@@ -54,11 +54,22 @@ func TestUseKeepsTheProject(t *testing.T) {
 func TestSignInAsOwner(t *testing.T) {
 	users := map[string]bool{}
 	marked := map[string]bool{}
+	passwords, others := 0, 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		admin := r.Header.Get("apikey") == "sb_secret_s" && r.Header.Get("Authorization") == ""
 		switch {
+		case r.URL.Path == "/auth/v1/admin/users/u1" && r.Method == "GET":
+			if !admin {
+				http.Error(w, `{"msg":"forbidden"}`, http.StatusForbidden)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "u1", "app_metadata": map[string]any{"leaflet_owner": marked["me@example.com"]}})
+		case r.URL.Path == "/auth/v1/logout" && r.URL.Query().Get("scope") == "others":
+			if r.Header.Get("Authorization") == "Bearer a" {
+				others++
+			}
 		case r.URL.Path == "/auth/v1/admin/users" && r.Method == "GET":
 			if !admin {
 				http.Error(w, `{"msg":"forbidden"}`, http.StatusForbidden)
@@ -71,8 +82,12 @@ func TestSignInAsOwner(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"users": list})
 		case r.URL.Path == "/auth/v1/admin/users/u1" && r.Method == "PUT":
-			meta, _ := body["app_metadata"].(map[string]any)
-			marked["me@example.com"] = admin && meta["leaflet_owner"] == true
+			if p, _ := body["password"].(string); admin && len(p) >= 32 {
+				passwords++
+			}
+			if meta, ok := body["app_metadata"].(map[string]any); ok {
+				marked["me@example.com"] = admin && meta["leaflet_owner"] == true
+			}
 		case r.URL.Path == "/auth/v1/admin/users":
 			email, _ := body["email"].(string)
 			if !strings.Contains(email, "@") {
@@ -142,10 +157,68 @@ func TestSignInAsOwner(t *testing.T) {
 		t.Errorf("an invalid email: %v", err)
 	}
 
-	// An account there before, unmarked, becomes the owner's.
+	// The owner's own account, marked, keeps its password and its other
+	// sessions, as on each device that signs in.
+	if passwords != 0 || others != 0 {
+		t.Errorf("the owner's account had %d passwords set and %d sign-outs of other sessions", passwords, others)
+	}
+
+	// An account there before, unmarked, becomes the owner's, with a new
+	// password and its other sessions ended, as someone else may have made
+	// it with the owner's email.
 	marked["me@example.com"] = false
 	if _, err := c.SignInAsOwner(ctx, project, "sb_secret_s", "me@example.com", "Me"); err != nil || !marked["me@example.com"] {
 		t.Errorf("not marked: %v", err)
+	}
+	if passwords != 1 || others != 1 {
+		t.Errorf("an account there before had %d passwords set and %d sign-outs of other sessions, want 1 and 1", passwords, others)
+	}
+}
+
+// An account there before stays unmarked when its other sessions cannot
+// be ended, so the next sign-in tries again, and the session made for it
+// is signed out.
+func TestSignInAsOwnerEndsOthersBeforeMarking(t *testing.T) {
+	var marked bool
+	var loggedOut []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		switch {
+		case r.URL.Path == "/auth/v1/admin/users" && r.Method == "POST":
+			http.Error(w, `{"code":422,"error_code":"email_exists","msg":"exists"}`, http.StatusUnprocessableEntity)
+		case r.URL.Path == "/auth/v1/admin/generate_link":
+			_, _ = io.WriteString(w, `{"id":"u1","hashed_token":"h1","verification_type":"magiclink"}`)
+		case r.URL.Path == "/auth/v1/admin/users/u1" && r.Method == "GET":
+			_, _ = io.WriteString(w, `{"id":"u1","app_metadata":{}}`)
+		case r.URL.Path == "/auth/v1/admin/users/u1" && r.Method == "PUT":
+			if _, ok := body["app_metadata"]; ok {
+				marked = true
+			}
+		case r.URL.Path == "/auth/v1/verify":
+			_, _ = io.WriteString(w, `{"access_token":"a","refresh_token":"r","expires_in":3600,"user":{"id":"u1","email":"me@example.com"}}`)
+		case r.URL.Path == "/auth/v1/logout":
+			scope := r.URL.Query().Get("scope")
+			loggedOut = append(loggedOut, scope)
+			if scope == "others" {
+				http.Error(w, `{"msg":"unavailable"}`, http.StatusServiceUnavailable)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	c := New(Settings{}, nil)
+	c.noKeychain = true
+	project := Settings{URL: srv.URL, PublishableKey: "k", Ref: "p"}
+	if _, err := c.SignInAsOwner(context.Background(), project, "sb_secret_s", "me@example.com", "Me"); err == nil {
+		t.Fatal("signed in although the other sessions went on")
+	}
+	if marked {
+		t.Error("marked as the owner's with its other sessions going on")
+	}
+	if strings.Join(loggedOut, " ") != "others local" {
+		t.Errorf("logouts %v, want [others local]", loggedOut)
 	}
 }
 

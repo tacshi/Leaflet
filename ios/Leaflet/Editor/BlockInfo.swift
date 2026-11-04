@@ -37,6 +37,8 @@ final class BlockInfo: NSObject, @unchecked Sendable {
 
     var level: Int { Int(data["level"]?.int ?? 1) }
     var checked: Bool { data["checked"]?.bool ?? false }
+    /// isCollapsed says a toggle or a heading is folded.
+    var isCollapsed: Bool { data["collapsed"]?.bool == true }
 
     /// isText reports whether the block holds text, as the core's
     /// doc.TextTypes.

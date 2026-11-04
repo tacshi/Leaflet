@@ -2,7 +2,13 @@ package mobile
 
 import (
 	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
@@ -103,5 +109,39 @@ func TestRestoringAVersionSettlesTheLastRun(t *testing.T) {
 	host{c}.Tint(page.ID, nil)
 	if settled() {
 		t.Error("a run that changed the page again stays settled")
+	}
+}
+
+// A file another device uploaded downloads as a block asks for it, to the
+// disk as it comes, and is found there from then on.
+func TestLocalFileDownloadsAFileFromElsewhere(t *testing.T) {
+	c, _ := open(t)
+	data := strings.Repeat("a long video's bytes ", 50000)
+	var asked atomic.Int32
+	signInRockyTo(t, c, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/storage/v1/object/authenticated/files/space/clip.mp4" {
+			asked.Add(1)
+			_, _ = io.WriteString(w, data)
+			return
+		}
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	})
+	at := time.Now().UTC().Format(time.RFC3339Nano)
+	if err := c.core.Store.PutRemoteFile(map[string]any{"id": "f1", "space_id": c.core.Store.Session().SpaceID, "name": "clip.mp4",
+		"storage_path": "space/clip.mp4", "mime_type": "video/mp4", "size_bytes": float64(len(data)), "created_at": at, "updated_at": at}); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		path, err := c.LocalFile("f1", 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.ReadFile(path) // #nosec G304 -- the file the core just kept.
+		if err != nil || string(got) != data {
+			t.Fatalf("downloaded %d bytes, %v", len(got), err)
+		}
+	}
+	if n := asked.Load(); n != 1 {
+		t.Fatalf("downloaded %d times", n)
 	}
 }

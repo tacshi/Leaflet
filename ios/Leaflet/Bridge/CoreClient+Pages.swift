@@ -108,12 +108,17 @@ extension CoreClient {
     }
 
     /// exportPDF returns a page to print as a PDF, on the paper of region,
-    /// a code such as "US".
+    /// a code such as "US", its web page in a file of the app's own for
+    /// PagePDF to print and remove. It waits beside the other calls: the
+    /// page's pictures may download first.
     nonisolated(nonsending) func exportPDF(_ pageID: String, region: String) async throws
         -> ExportedPDF
     {
-        try await call(ExportedPDF.self) { core in
-            try Self.answer { e in core.exportPDFPage(pageID, region: region, error: e) }
+        let dir = FileManager.default.temporaryDirectory.appending(
+            path: "Print", directoryHint: .isDirectory
+        ).path(percentEncoded: false)
+        return try await call(ExportedPDF.self, waiting: true) { core in
+            try Self.answer { e in core.exportPDFPage(pageID, region: region, dir: dir, error: e) }
         }
     }
 

@@ -481,12 +481,14 @@ func (c *Core) RecordingAudio(id string, token int64) (_ string, err error) {
 	}
 	ctx, done := c.cancellable(token, 5*time.Minute)
 	defer done()
-	data, err := c.core.Rec.Audio(ctx, rec)
+	audio, err := c.core.Rec.OpenAudio(ctx, rec)
 	if err != nil {
 		return "", err
 	}
-	// Off the core's queue too, as LocalFile's file.
-	return c.core.Store.DownloadedAudio(id, data)
+	defer func() { _ = audio.Close() }()
+	// Off the core's queue too, as LocalFile's file, and written as it
+	// comes, never all in memory.
+	return c.core.Store.DownloadedAudioFrom(id, audio)
 }
 
 // Retranscribe transcribes a recording again, or for the first time,

@@ -2,7 +2,6 @@ package sync
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io/fs"
 	"log"
@@ -15,7 +14,7 @@ import (
 )
 
 func (s *Service) push(ctx context.Context) error {
-	entries, err := s.st.Pending()
+	entries, err := s.st.Queued()
 	if err != nil {
 		return err
 	}
@@ -36,7 +35,7 @@ func (s *Service) push(ctx context.Context) error {
 			if !s.due(e) {
 				continue
 			}
-			done, err := s.pushOne(ctx, uid, e)
+			done, err := s.pushOne(ctx, uid, &e)
 			if err != nil {
 				// Offline, signed out, stopped, or the server failing or
 				// asking for a wait: the rest would fail alike, and none of
@@ -65,12 +64,15 @@ func (s *Service) push(ctx context.Context) error {
 	return nil
 }
 
-// pushOne sends one entry and reports whether it can leave the queue.
-func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) (bool, error) {
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
-		return false, err
+// pushOne sends one entry, as Queued listed it, and reports whether it can
+// leave the queue: its payload is read as it goes. One no longer queued is
+// done.
+func (s *Service) pushOne(ctx context.Context, uid string, entry *store.OutboxEntry) (bool, error) {
+	payload, err := s.payload(entry)
+	if err != nil || payload == nil {
+		return err == nil, err
 	}
+	e := *entry
 	switch e.Entity {
 	case "page_content":
 		done, err := s.pushContent(ctx, e.EntityID)
@@ -102,12 +104,23 @@ func (s *Service) pushOne(ctx context.Context, uid string, e store.OutboxEntry) 
 		// A snapshot never changes: one the server has, as an upload whose
 		// answer was lost, is done. As an upsert, sent again it would ask
 		// to change it, which no one may, and to read it back, which
-		// another's may not yet, and fail for good.
+		// another's may not yet, and fail for good. Its entry names it
+		// alone, its content read as it goes; one an earlier version
+		// queued has it all.
+		if _, whole := payload["content"]; !whole {
+			h, err := s.st.HistoryEntry(e.EntityID)
+			if store.IsNotFound(err) {
+				return true, nil // pruned meanwhile, as History no longer shows it
+			} else if err != nil {
+				return false, err
+			}
+			payload = store.HistoryToRemote(h, uid)
+		}
 		payload["created_by"] = uid
 		err := s.be.InsertNew(ctx, e.Entity, payload)
 		return err == nil, err
 	}
-	_, err := s.be.Upsert(ctx, e.Entity, payload, "")
+	_, err = s.be.Upsert(ctx, e.Entity, payload, "")
 	return err == nil, err
 }
 
@@ -367,7 +380,7 @@ func (s *Service) flushRemote(ctx context.Context, pageID string) error {
 	if err := s.resolveSpace(ctx); err != nil {
 		return err
 	}
-	entries, err := s.st.Pending()
+	entries, err := s.st.Queued()
 	if err != nil {
 		return err
 	}
@@ -416,7 +429,7 @@ func (s *Service) flushRemote(ctx context.Context, pageID string) error {
 	}
 	uid := s.be.UserID()
 	for _, e := range order {
-		done, err := s.pushOne(ctx, uid, e)
+		done, err := s.pushOne(ctx, uid, &e)
 		if err != nil {
 			return err
 		}

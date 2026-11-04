@@ -209,7 +209,7 @@ func TestStorageTransfersOutlastTheCallTimeout(t *testing.T) {
 	if err := c.Upload(ctx, "recordings", "u1/r.wav", strings.NewReader("RIFF"), "audio/wav"); err != nil {
 		t.Errorf("upload: %v", err)
 	}
-	if data, err := c.Download(ctx, "recordings", "u1/r.wav"); err != nil || string(data) != "RIFF" {
+	if data, err := readAll(c.Download(ctx, "recordings", "u1/r.wav")); err != nil || string(data) != "RIFF" {
 		t.Errorf("download %q, %v", data, err)
 	}
 	hang.Store(true)
@@ -573,5 +573,103 @@ func TestErrorsInTheAppsLanguage(t *testing.T) {
 	}
 	if !errors.Is(fmt.Errorf("sync: %w", ErrSignedOut), ErrSignedOut) || errors.Is(ErrSignedOut, ErrNotConfigured) {
 		t.Error("ErrSignedOut is not itself alone")
+	}
+}
+
+// readAll reads what Download opened, and closes it.
+func readAll(body io.ReadCloser, err error) ([]byte, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = body.Close() }()
+	return io.ReadAll(body)
+}
+
+// A change asks for only the columns it names back, as a page's content
+// saved whole need not come back whole.
+func TestWritesAnswerWithTheColumnsAskedFor(t *testing.T) {
+	var mu sync.Mutex
+	var queries []string
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		queries = append(queries, r.Method+" "+r.URL.RawQuery)
+		mu.Unlock()
+		_, _ = io.WriteString(w, `[{"revision":2}]`)
+	}))
+	t.Cleanup(hs.Close)
+	c := SignedInForTest(hs.URL, nil, "u1")
+	ctx := context.Background()
+	if _, err := c.UpdateReturning(ctx, "page_content", []string{Eq("page_id", "p")}, map[string]any{"plain_text": "x"}, "revision, updated_at"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.InsertReturning(ctx, "page_content", map[string]any{"page_id": "p"}, "revision"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.UpsertReturning(ctx, "devices", map[string]any{"id": "d"}, "id", "revoked_at"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Update(ctx, "pages", []string{Eq("id", "p")}, map[string]any{"title": "x"}); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"PATCH page_id=eq.p&select=revision%2C+updated_at",
+		"POST select=revision",
+		"POST on_conflict=id&select=revoked_at",
+		"PATCH id=eq.p",
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if strings.Join(queries, "\n") != strings.Join(want, "\n") {
+		t.Errorf("queries\n%s\nwant\n%s", strings.Join(queries, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// A download comes as it is read, and one cut short before the length the
+// server gave fails as it is read rather than read as a whole file.
+func TestDownloadComesAsItIsRead(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		_, _ = io.WriteString(w, "RIFF")
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		// The connection goes with only 4 of the 100 bytes sent.
+		if hj, ok := w.(http.Hijacker); ok {
+			conn, _, err := hj.Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+		}
+	}))
+	t.Cleanup(hs.Close)
+	c := SignedInForTest(hs.URL, nil, "u1")
+	data, err := readAll(c.Download(context.Background(), "recordings", "u1/r.wav"))
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Errorf("read %q, %v", data, err)
+	}
+}
+
+// Each session the client has counts, a token renewed not: a sign-in, a
+// sign-out, and a refresh token refused, which ends the session.
+func TestSessionsCount(t *testing.T) {
+	c := expiredClient(t, &refreshServer{status: 200, body: newSession})
+	n := c.Sessions()
+	if _, err := c.token(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if c.Sessions() != n {
+		t.Errorf("a token renewed began a session: %d, was %d", c.Sessions(), n)
+	}
+	c.SignInForTest("u1")
+	if c.Sessions() != n+1 {
+		t.Errorf("a sign-in: %d, was %d", c.Sessions(), n)
+	}
+	refused := expiredClient(t, &refreshServer{status: 400, body: `{"error":"invalid_grant"}`})
+	m := refused.Sessions()
+	if _, err := refused.token(context.Background()); !errors.Is(err, ErrSignedOut) {
+		t.Fatalf("token: %v", err)
+	}
+	if refused.Sessions() != m+1 {
+		t.Errorf("a session ended: %d, was %d", refused.Sessions(), m)
 	}
 }

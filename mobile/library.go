@@ -94,10 +94,16 @@ func (c *Core) Library() (_ string, err error) {
 		if folders, err = st.Folders(); err != nil {
 			return
 		}
+		// Who may change each page is worked out from one read of the
+		// pages and their members, not a read of each page's parents.
+		var access *store.Tree
+		if access, err = st.Tree(); err != nil {
+			return
+		}
 		all := slices.Concat(pages, templates)
 		lib.Pages = make([]pageRow, 0, len(all))
 		for _, p := range all {
-			lib.Pages = append(lib.Pages, c.rowOf(p))
+			lib.Pages = append(lib.Pages, rowWith(p, access.CanEdit(p)))
 		}
 		tree := libtree.Arrange(lib.SpaceID, all, folders)
 		lib.Folders = make([]folderRow, 0, len(tree.Folders))
@@ -137,7 +143,11 @@ func idsBy(pages map[string][]store.Page) map[string][]string {
 	return out
 }
 
-func (c *Core) rowOf(p store.Page) pageRow {
+func (c *Core) rowOf(p store.Page) pageRow { return rowWith(p, c.core.Store.CanEdit(p)) }
+
+// rowWith is a page as the library lists it, which the user may change or
+// not as canEdit says.
+func rowWith(p store.Page, canEdit bool) pageRow {
 	tags := p.Tags
 	if tags == nil {
 		tags = []string{}
@@ -145,7 +155,7 @@ func (c *Core) rowOf(p store.Page) pageRow {
 	return pageRow{
 		ID: p.ID, SpaceID: p.SpaceID, ParentID: p.ParentID, FolderID: p.FolderID,
 		Title: p.Title, Icon: p.Icon, SortKey: p.SortKey, UpdatedAt: millis(p.UpdatedAt),
-		KeepOffline: p.KeepOffline, Template: p.Template, Tags: tags, CanEdit: c.core.Store.CanEdit(p),
+		KeepOffline: p.KeepOffline, Template: p.Template, Tags: tags, CanEdit: canEdit,
 		CreatedBy: p.CreatedBy, DefaultTemplateID: p.DefaultTemplateID,
 	}
 }
@@ -255,10 +265,14 @@ func (c *Core) MoveTargets(id string) (_ string, err error) {
 		if pages, err = c.core.Store.Pages(); err != nil {
 			return
 		}
+		var access *store.Tree
+		if access, err = c.core.Store.Tree(); err != nil {
+			return
+		}
 		slices.SortStableFunc(pages, func(a, b store.Page) int { return b.UpdatedAt.Compare(a.UpdatedAt) })
 		out = []string{}
 		for _, t := range pages {
-			if t.SpaceID == p.SpaceID && !t.Template && c.core.Store.CanEdit(t) && !c.core.Store.IsDescendant(t.ID, id) {
+			if t.SpaceID == p.SpaceID && !t.Template && access.CanEdit(t) && !access.IsDescendant(t.ID, id) {
 				out = append(out, t.ID)
 			}
 		}
@@ -445,8 +459,23 @@ type searchHit struct {
 // limit hits as a JSON array of searchHit. #tag words keep to those tags.
 func (c *Core) Search(query string, limit int) (_ string, err error) {
 	defer catch(&err)
+	return c.SearchCancellable(query, limit, 0)
+}
+
+// SearchCancellable is Search, which the app may give up on by token, as
+// Cancel says, 0 for never: a search typed past, given up on as the next
+// begins, stops before it runs, or as it runs, and returns an error, so
+// the core's queue is the newer one's at once.
+func (c *Core) SearchCancellable(query string, limit int, token int64) (_ string, err error) {
+	defer catch(&err)
+	ctx, done := c.cancellable(token, time.Minute)
+	defer done()
 	var hits []store.SearchHit
-	c.q.do(func() { hits, err = c.core.Store.Search(query, limit) })
+	c.q.do(func() {
+		if err = ctx.Err(); err == nil {
+			hits, err = c.core.Store.SearchContext(ctx, query, limit)
+		}
+	})
 	if err != nil {
 		return "", err
 	}

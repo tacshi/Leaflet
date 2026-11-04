@@ -1,9 +1,7 @@
 package editor
 
 import (
-	"encoding/json"
 	"maps"
-	"strconv"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -19,10 +17,17 @@ import (
 // blockLayout is a text block laid out: its text's layout and where the
 // text sits in the block's box.
 type blockLayout struct {
-	// key is the block's look as it was laid out, text the text it held
-	// then, and pal the palette its colors are of, as the links' accent.
-	key    string
+	// kind, rest, width and code are what the block was laid out as: its
+	// type, its data but its text, the width it wraps at and its inline
+	// code's font. text is the text it held then, as stored, and runs
+	// that text, to tell it the same in another slice, as undo and sync
+	// make. pal is the palette its colors are of, as the links' accent.
+	kind   string
+	rest   map[string]any
+	width  float32
+	code   string
 	text   textID
+	runs   doc.Delta
 	pal    *theme.Palette
 	layout *ui.TextLayout
 	// x and y are the text's origin in the block's box; h the box's height.
@@ -104,11 +109,17 @@ type look struct {
 // lookOf is n's look, as it is now.
 func (e *Editor) lookOf(n *doc.Node) *look {
 	id, fonts := textIDOf(n), theme.FontsChosen()
-	if l := e.looks[n.ID]; l != nil && l.text == id && l.fonts == fonts {
+	l := e.looks[n.ID]
+	if l != nil && l.text == id && l.fonts == fonts {
 		return l
 	}
 	plain := n.Delta().Plain()
-	l := &look{text: id, fonts: fonts, plain: plain, family: theme.PageFamily(plain), code: theme.CodeFamily(plain), leading: leading(plain)}
+	if l != nil && l.plain == plain && l.fonts == fonts {
+		// The same text in another slice, as undo and sync make.
+		l.text = id
+		return l
+	}
+	l = &look{text: id, fonts: fonts, plain: plain, family: theme.PageFamily(plain), code: theme.CodeFamily(plain), leading: leading(plain)}
 	if e.looks == nil {
 		e.looks = map[string]*look{}
 	}
@@ -237,17 +248,24 @@ func (e *Editor) spans(n *doc.Node, pal *theme.Palette, font ui.Font) []ui.Span 
 	return out
 }
 
+// layoutOf is text block n's layout as the page last built it, while it
+// is of n's text as it is now: one changed since lays out again as the
+// page next builds, and has none till then.
 func (e *Editor) layoutOf(n *doc.Node) *blockLayout {
 	if n == nil || !n.IsText() {
 		return nil
 	}
-	return e.layouts[n.ID]
+	if l := e.layouts[n.ID]; l != nil && l.text == textIDOf(n) {
+		return l
+	}
+	return nil
 }
 
 // layout lays a text block out at the editor's width, in pal's colors,
 // reusing the last layout while the block, its look and the palette stay
 // the same: theme.Of keeps one palette for each look, appearance, paper
-// and accent.
+// and accent. Each is told apart as it is, as every block's is each
+// frame, not written out to compare.
 func (e *Editor) layout(n *doc.Node, pal *theme.Palette) *blockLayout {
 	font, top, bottom := e.style(n)
 	depth := e.depth(n.ID)
@@ -259,12 +277,21 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette) *blockLayout {
 	case "callout":
 		width = max(width-calloutPad, 40)
 	}
-	// The text is told by its slice, not read (look); the rest of the
-	// data is small.
-	text := textIDOf(n)
-	key := n.Type + dataKey(n) + ftoa(width) + ftoa(font.Size) + ftoa(font.LineHeight) + font.Family + e.lookOf(n).code
-	if l := e.layouts[n.ID]; l != nil && l.key == key && l.text == text && l.pal == pal {
-		return l
+	// The text is told by its slice, not read (look), and read only when
+	// the slice is another; the rest of the data is small.
+	text, code := textIDOf(n), e.lookOf(n).code
+	var runs doc.Delta
+	if l := e.layouts[n.ID]; l != nil && l.pal == pal && l.kind == n.Type && l.width == width && l.font == font &&
+		l.code == code && l.x == x && l.y == top && sameRest(l.rest, n.Data) {
+		if l.text == text {
+			return l
+		}
+		if runs = n.Delta(); sameRuns(l.runs, runs) {
+			l.text = text
+			return l
+		}
+	} else {
+		runs = n.Delta()
 	}
 	spans := e.spans(n, pal, font)
 	tl := ui.ShapeRichText(spans, font, width)
@@ -272,28 +299,56 @@ func (e *Editor) layout(n *doc.Node, pal *theme.Palette) *blockLayout {
 	if h == 0 {
 		h = font.Size * max(font.LineHeight, 1.3)
 	}
-	l := &blockLayout{key: key, text: text, pal: pal, layout: tl, x: x, y: top, h: top + h + bottom, font: font}
+	l := &blockLayout{kind: n.Type, rest: restOf(n.Data), width: width, code: code, text: text, runs: runs, pal: pal,
+		layout: tl, x: x, y: top, h: top + h + bottom, font: font}
 	e.layouts[n.ID] = l
 	return l
 }
 
-// dataKey is a block's data but its text, for its layout's key: its
-// level, check, color and the like.
-func dataKey(n *doc.Node) string {
-	if _, ok := n.Data["delta"]; len(n.Data) == 0 || ok && len(n.Data) == 1 {
-		return ""
-	}
-	rest := make(map[string]any, len(n.Data))
-	for k, v := range n.Data {
+// restOf is a copy of a block's data but its text: its level, check,
+// color and the like, which its layout is of.
+func restOf(data map[string]any) map[string]any {
+	var rest map[string]any
+	for k, v := range data {
 		if k != "delta" {
+			if rest == nil {
+				rest = make(map[string]any, len(data))
+			}
 			rest[k] = v
 		}
 	}
-	raw, _ := json.Marshal(rest)
-	return string(raw)
+	return cloneData(rest)
 }
 
-func ftoa(f float32) string { return strconv.FormatFloat(float64(f), 'g', -1, 32) }
+// sameRest reports whether a block's data but its text is as rest, which
+// restOf made, has it.
+func sameRest(rest, data map[string]any) bool {
+	n := 0
+	for k, v := range data {
+		if k == "delta" {
+			continue
+		}
+		if w, ok := rest[k]; !ok || !sameValue(v, w) {
+			return false
+		}
+		n++
+	}
+	return n == len(rest)
+}
+
+// sameRuns reports whether two texts are the same runs, in the same
+// formats.
+func sameRuns(a, b doc.Delta) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Text != b[i].Text || !a[i].Attrs.Equal(b[i].Attrs) {
+			return false
+		}
+	}
+	return true
+}
 
 // utf16Off converts a rune offset in a block's text to UTF-16 units.
 func utf16Off(n *doc.Node, off int) int {
@@ -603,7 +658,6 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 		// Before a heading that ends a folded section, they would join
 		// it, out of sight.
 		e.keepShown(first.ID)
-		e.layouts = map[string]*blockLayout{}
 		e.Select(Pos{n.ID, 0}, Pos{n.ID, 0})
 		e.changed()
 		return
@@ -706,7 +760,6 @@ func (e *Editor) pasteBlocks(blocks []*doc.Node) {
 	for _, id := range []string{n.ID, first.ID, last.ID} {
 		e.keepShown(id)
 	}
-	e.layouts = map[string]*blockLayout{}
 	e.Select(Pos{last.ID, off}, Pos{last.ID, off})
 	e.changed()
 }

@@ -303,6 +303,23 @@ func (f Folder) Batches(device string) (seqs []int64, copies bool, err error) {
 // Exists reports whether a file is in the folder, downloaded or not.
 func (f Folder) Exists(rel string) bool { return f.exists(f.blob(rel)) }
 
+// Stamp is what a file's metadata says of it: its time and size, which
+// change as another device writes it again, read without reading the file.
+type Stamp struct {
+	ModTime time.Time
+	Size    int64
+}
+
+// Stamp returns a file's Stamp, as it is downloaded: ok is false for one
+// not there, or not downloaded yet.
+func (f Folder) Stamp(rel string) (stamp Stamp, ok bool) {
+	info, err := os.Lstat(f.abs(rel))
+	if err != nil || notReady(info) {
+		return Stamp{}, false
+	}
+	return Stamp{info.ModTime(), info.Size()}, true
+}
+
 func (f Folder) exists(rel string) bool {
 	path := f.abs(rel)
 	if _, err := os.Lstat(path); err == nil {
@@ -336,6 +353,23 @@ func (f Folder) blob(rel string) string {
 // Read reads a file, or returns fs.ErrNotExist, or ErrNotReady after
 // asking iCloud to download it.
 func (f Folder) Read(rel string) ([]byte, error) {
+	r, err := f.Open(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = r.Close() }()
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, access(err, err)
+	}
+	return data, nil
+}
+
+// Open opens a file to read as Read reads it, a little at a time, as a
+// recording's audio is too large to read whole: fs.ErrNotExist, or
+// ErrNotReady after asking iCloud to download it. Read to its end, it is
+// as long as it was when it opened, or fails with io.ErrUnexpectedEOF.
+func (f Folder) Open(rel string) (io.ReadCloser, error) {
 	path := f.abs(f.blob(rel))
 	info, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -350,12 +384,37 @@ func (f Folder) Read(rel string) ([]byte, error) {
 	if notReady(info) {
 		return nil, f.download(path)
 	}
-	data, err := os.ReadFile(path) // #nosec G304 -- a file of the Leaflet folder, by a path checked above.
+	file, err := os.Open(path) // #nosec G304 -- a file of the Leaflet folder, by a path checked above.
 	if err != nil {
 		return nil, access(err, err)
 	}
-	return data, nil
+	return &sized{file: file, left: info.Size()}, nil
 }
+
+// sized is a file read to the size it had as it opened: one iCloud cuts
+// short meanwhile ends in io.ErrUnexpectedEOF, and what it gains after is
+// not read. It reads only through Read, so io.Copy goes through the check.
+type sized struct {
+	file *os.File
+	left int64
+}
+
+func (s *sized) Read(p []byte) (int, error) {
+	if s.left <= 0 {
+		return 0, io.EOF
+	}
+	if int64(len(p)) > s.left {
+		p = p[:s.left]
+	}
+	n, err := s.file.Read(p)
+	s.left -= int64(n)
+	if errors.Is(err, io.EOF) && s.left > 0 {
+		err = io.ErrUnexpectedEOF
+	}
+	return n, err
+}
+
+func (s *sized) Close() error { return s.file.Close() }
 
 func (f Folder) download(path string) error {
 	if StartDownload == nil {

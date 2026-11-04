@@ -2022,3 +2022,159 @@ func TestICloudJoinedTheLosingSpace(t *testing.T) {
 		t.Errorf("Z is in %s, not %s", z.st.Session().SpaceID, won.st.Session().SpaceID)
 	}
 }
+
+// Another device's page file, as it was when this device merged it, by its
+// time and size, is not read again as a third device's change to the page
+// comes: it has nothing new.
+func TestICloudPageFilesMergedAreNotReadAgain(t *testing.T) {
+	root := cloudRoot(t)
+	a, b, c := newCloudDevice(t, root), newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plan", para("a1", "one"), para("b1", "two"))
+	syncAll(a, b, c)
+	b.edit(p.ID, "b1", "two, from B")
+	syncAll(a, b, c)
+	if c.text(p.ID, "b1") != "two, from B" {
+		t.Fatalf("C has %q", c.text(p.ID, "b1"))
+	}
+	// B's file stays as it is to its time and size, but reads as nothing:
+	// read again, it would hold the page up.
+	rel, err := icloud.PagePath(b.st.DeviceID(), p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, make([]byte, info.Size()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	a.edit(p.ID, "a1", "one, from A")
+	a.sync()
+	c.sync()
+	if c.text(p.ID, "a1") != "one, from A" || c.text(p.ID, "b1") != "two, from B" {
+		t.Errorf("C has %q, %q", c.text(p.ID, "a1"), c.text(p.ID, "b1"))
+	}
+	if w := c.svc.waiting(); w[p.ID] {
+		t.Errorf("the page waits on B's file: %v", w)
+	}
+}
+
+// A device's own page file is not read to learn the version it wrote: the
+// highest it wrote is kept, and the next is after it.
+func TestICloudPublishGoesOnFromTheVersionKept(t *testing.T) {
+	root := cloudRoot(t)
+	a := newCloudDevice(t, root)
+	p := a.page("Plan", para("a1", "one"))
+	a.sync()
+	ahead := time.Now().Add(time.Hour).UnixMilli()
+	if err := a.svc.setInt(pageVersionKey, ahead); err != nil {
+		t.Fatal(err)
+	}
+	a.edit(p.ID, "a1", "one, edited")
+	a.sync()
+	rel, _ := icloud.PagePath(a.st.DeviceID(), p.ID)
+	var file icloud.PageFile
+	if err := a.svc.folder().ReadJSON(rel, &file); err != nil {
+		t.Fatal(err)
+	}
+	if file.Version != ahead+1 || a.svc.intValue(pageVersionKey) != ahead+1 {
+		t.Errorf("version %d, kept %d, want %d", file.Version, a.svc.intValue(pageVersionKey), ahead+1)
+	}
+}
+
+// What this device knew of another's page files goes with what it merged
+// from them: wiped and joining the folder again in the same run, it reads
+// them again and has the page's content back, and with its iCloud sync
+// forgotten alone, it merges and keeps their versions again. What it
+// writes on the page after goes to the others with what it had.
+func TestICloudPageFilesAreReadAgainOnceTheirBasesGo(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plan", para("a1", "one"))
+	syncAll(a, b)
+	if b.text(p.ID, "a1") != "one" {
+		t.Fatalf("B has %q", b.text(p.ID, "a1"))
+	}
+	b.svc.SetICloud(false)
+	if err := b.st.Wipe(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.svc.EnableICloud(); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(b)
+	if got := b.text(p.ID, "a1"); got != "one" {
+		t.Fatalf("after joining again B has %q, waiting for %v", got, b.svc.waiting())
+	}
+	c := b.st.Content(p.ID)
+	c.Children = append(c.Children, para("b1", "from B"))
+	if _, _, err := b.st.SaveContent(p.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	syncAll(a, b)
+	if a.text(p.ID, "a1") != "one" || a.text(p.ID, "b1") != "from B" {
+		t.Errorf("A has %q, %q", a.text(p.ID, "a1"), a.text(p.ID, "b1"))
+	}
+
+	if err := b.st.ForgetICloud(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.svc.cloudRefresh(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok, err := b.st.PeerVersion(a.st.DeviceID(), p.ID); err != nil || !ok || v == 0 {
+		t.Errorf("A's version kept again: %d, %v, %v", v, ok, err)
+	}
+}
+
+// A page file older than the version a batch named is read again though
+// its time and size are as they were when it was merged: it may have been
+// written again so.
+func TestICloudPageFileBehindItsBatchIsReadAgain(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Plan", para("a1", "one"))
+	syncAll(a, b)
+	rel, _ := icloud.PagePath(a.st.DeviceID(), p.ID)
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file icloud.PageFile
+	if err := a.svc.folder().ReadJSON(rel, &file); err != nil {
+		t.Fatal(err)
+	}
+	// A's next version, as long as the last, at the same time.
+	theirs := doc.MustDecode(string(file.Content))
+	theirs.Find("a1").SetDelta(doc.Delta{{Text: "two"}})
+	theirs.Blocks["a1"]++
+	file.Version++
+	file.Content = []byte(theirs.Encode())
+	if err := a.svc.folder().WriteJSON(rel, file); err != nil {
+		t.Fatal(err)
+	}
+	if now, _ := os.Stat(path); now.Size() != info.Size() {
+		t.Fatalf("size %d, was %d", now.Size(), info.Size())
+	}
+	if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.svc.setInt(wantKey(a.st.DeviceID(), p.ID), file.Version); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.svc.cloudRefresh(context.Background(), p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.text(p.ID, "a1"); got != "two" {
+		t.Errorf("B has %q", got)
+	}
+}

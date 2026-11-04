@@ -238,6 +238,13 @@ type Blobs interface {
 	Fetch(ctx context.Context, bucket, path string) ([]byte, error)
 }
 
+// blobReader is Blobs that opens what it fetches to read as it comes, as
+// sync does: a recording of hours is hundreds of megabytes, which are then
+// never all in memory.
+type blobReader interface {
+	FetchReader(ctx context.Context, bucket, path string) (io.ReadCloser, error)
+}
+
 func (r *Controller) uploads() bool {
 	if r.Blobs != nil {
 		return r.Blobs.Uploads()
@@ -1113,11 +1120,18 @@ func (r *Controller) DismissError(id string) error {
 
 // storedAudio fetches the audio of a recording that is not on this device,
 // recorded on another or removed here once it went up, for an engine on
-// this device to transcribe.
-func (r *Controller) storedAudio(ctx context.Context, rec store.Recording) ([]byte, error) {
+// this device to transcribe: into a file of its own in the system's
+// temporary folder as it comes, never all in memory, whose path it
+// returns. The caller removes it.
+func (r *Controller) storedAudio(ctx context.Context, rec store.Recording) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
-	return r.Audio(ctx, rec)
+	audio, err := r.openAudioOf(ctx, rec)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = audio.Close() }()
+	return tempAudio(audio)
 }
 
 // uploadAudio uploads size bytes of a recording's audio from audio, given
@@ -1161,11 +1175,12 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 	if stt.Provider == "openai-compatible" && IsLocalEndpoint(stt.BaseURL) {
 		f, size, err := openAudio(path)
 		if err != nil && rec.AudioPath != "" {
-			audio, err := r.storedAudio(ctx, rec)
-			if err != nil {
-				return nil, err
+			fetched, ferr := r.storedAudio(ctx, rec)
+			if ferr != nil {
+				return nil, ferr
 			}
-			return TranscribeEndpoint(ctx, stt.BaseURL, stt.Model, bytes.NewReader(audio), int64(len(audio)), EndpointKey(), stt.Language)
+			defer func() { _ = os.Remove(fetched) }()
+			f, size, err = openAudio(fetched)
 		}
 		if err != nil {
 			return nil, err
@@ -1235,11 +1250,7 @@ func (r *Controller) transcribeOnDevice(ctx context.Context, rec store.Recording
 		return nil, errors.New(locales.RecErrOnDevice())
 	}
 	if _, err := os.Stat(path); path == "" || err != nil {
-		audio, err := r.storedAudio(ctx, rec)
-		if err != nil {
-			return nil, err
-		}
-		if path, err = tempAudio(audio); err != nil {
+		if path, err = r.storedAudio(ctx, rec); err != nil {
 			return nil, err
 		}
 		defer func() { _ = os.Remove(path) }()
@@ -1247,14 +1258,15 @@ func (r *Controller) transcribeOnDevice(ctx context.Context, rec store.Recording
 	return e.File(path, language)
 }
 
-// tempAudio writes audio to a file of its own in the system's temporary
-// folder, readable only by the user, and returns its path.
-func tempAudio(audio []byte) (string, error) {
+// tempAudio writes what audio reads to a file of its own in the system's
+// temporary folder, readable only by the user, as it comes, and returns
+// its path.
+func tempAudio(audio io.Reader) (string, error) {
 	f, err := os.CreateTemp("", "leaflet-*.wav")
 	if err != nil {
 		return "", err
 	}
-	_, err = f.Write(audio)
+	_, err = io.Copy(f, audio)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -1265,16 +1277,41 @@ func tempAudio(audio []byte) (string, error) {
 	return f.Name(), nil
 }
 
-// Audio returns a recording's WAV audio: on this device, or from where it
-// went up to.
+// Audio returns a recording's WAV audio, whole: on this device, or from
+// where it went up to.
 func (r *Controller) Audio(ctx context.Context, rec store.Recording) ([]byte, error) {
+	audio, err := r.openAudioOf(ctx, rec)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = audio.Close() }()
+	return io.ReadAll(audio)
+}
+
+// OpenAudio opens a recording's WAV audio to read as it comes, on this
+// device or from where it went up to, so a long one is never all in
+// memory, as it is written to a file. The caller closes it.
+func (r *Controller) OpenAudio(ctx context.Context, rec store.Recording) (io.ReadCloser, error) {
+	return r.openAudioOf(ctx, rec)
+}
+
+// openAudioOf opens a recording's WAV audio to read as it comes: on this
+// device, or from where it went up to. The caller closes it.
+func (r *Controller) openAudioOf(ctx context.Context, rec store.Recording) (io.ReadCloser, error) {
 	if rec.LocalPath != "" {
-		if data, err := os.ReadFile(rec.LocalPath); err == nil {
-			return data, nil
+		if f, err := os.Open(rec.LocalPath); err == nil { // #nosec G304 -- the recording's own audio file.
+			return f, nil
 		}
 	}
 	if rec.AudioPath != "" && r.Blobs != nil && r.Blobs.CanFetch() {
-		return r.Blobs.Fetch(ctx, "recordings", rec.AudioPath)
+		if br, ok := r.Blobs.(blobReader); ok {
+			return br.FetchReader(ctx, "recordings", rec.AudioPath)
+		}
+		data, err := r.Blobs.Fetch(ctx, "recordings", rec.AudioPath)
+		if err != nil {
+			return nil, err
+		}
+		return io.NopCloser(bytes.NewReader(data)), nil
 	}
 	if rec.AudioPath != "" && r.Blobs == nil && r.be.SignedIn() {
 		return r.be.Download(ctx, "recordings", rec.AudioPath)

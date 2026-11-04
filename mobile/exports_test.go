@@ -85,12 +85,12 @@ func TestDevicesAndSigningOneOut(t *testing.T) {
 		case r.URL.Path == "/rest/v1/devices" && r.Method == http.MethodGet:
 			_, _ = io.WriteString(w, `[{"id":"`+me+`","name":"iPad","last_active_at":"2026-11-03T10:00:00Z"},
 				{"id":"d2","name":"MacBook","last_active_at":"2026-11-02T10:00:00Z","revoked_at":null}]`)
-		case r.URL.Path == "/rest/v1/devices":
+		case r.URL.Path == "/rest/v1/rpc/sign_out_device" && r.Method == http.MethodPost:
 			body, _ := io.ReadAll(r.Body)
 			mu.Lock()
 			revoked = string(body)
 			mu.Unlock()
-			_, _ = io.WriteString(w, `[]`)
+			_, _ = io.WriteString(w, `null`)
 		default:
 			http.Error(w, "down", http.StatusServiceUnavailable)
 		}
@@ -109,7 +109,7 @@ func TestDevicesAndSigningOneOut(t *testing.T) {
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	if !strings.Contains(revoked, `"id":"d2"`) || !strings.Contains(revoked, `"revoked_at"`) {
+	if revoked != `{"p_device_id":"d2"}` {
 		t.Errorf("revoked with %s", revoked)
 	}
 }

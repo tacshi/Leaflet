@@ -7,6 +7,34 @@ import UIKit
 enum DocumentMapper {
     // MARK: Content to text
 
+    /// Block is a block as a paragraph of the editor's text has it, and how
+    /// deep it is: a block of text without the blocks nested in it, which
+    /// are paragraphs of their own after it.
+    typealias Block = (node: DocNode, depth: Int)
+
+    /// flatten is the content's blocks in the order of the editor's
+    /// paragraphs. A block of text has its children after it, one deeper:
+    /// the core gives the page with those of text that holds no blocks
+    /// lifted after it (doc.Content.Lifted). A block without text keeps its
+    /// own, a table's cells.
+    static func flatten(_ content: DocContent) -> [Block] {
+        var out: [Block] = []
+        func add(_ nodes: [DocNode], depth: Int) {
+            for var node in nodes {
+                guard BlockInfo.textTypes.contains(node.type) else {
+                    out.append((node, depth))
+                    continue
+                }
+                let children = node.children ?? []
+                node.children = nil
+                out.append((node, depth))
+                add(children, depth: depth + 1)
+            }
+        }
+        add(content.blocks, depth: 0)
+        return out
+    }
+
     /// attributedString is the content as the editor's text. Each
     /// paragraph's separator carries its block too, which keeps an empty
     /// block's; the last block, when empty, is returned apart, for the
@@ -14,35 +42,38 @@ enum DocumentMapper {
     static func attributedString(_ content: DocContent, tinted: Set<String> = [])
         -> (text: NSAttributedString, trailing: BlockInfo?)
     {
+        let (text, _, trailing) = attributedString(flatten(content), tinted: tinted)
+        return (text, trailing)
+    }
+
+    /// attributedString is blocks, as flatten has them, as the editor's
+    /// paragraphs, apart by their separators, and each block's BlockInfo,
+    /// in order: a part of the page, as a change from outside puts in the
+    /// blocks it changed alone. The last block, when empty, is returned
+    /// apart too.
+    static func attributedString(_ blocks: some Collection<Block>, tinted: Set<String> = [])
+        -> (text: NSAttributedString, infos: [BlockInfo], trailing: BlockInfo?)
+    {
         let out = NSMutableAttributedString()
-        var last: BlockInfo?
+        var infos: [BlockInfo] = []
+        infos.reserveCapacity(blocks.count)
         var lastEmpty = false
-        func add(_ nodes: [DocNode], depth: Int) {
-            for node in nodes {
-                if let last {
-                    out.append(NSAttributedString(string: "\n", attributes: [.leafletBlock: last]))
-                }
-                let start = out.length
-                let (para, info) = paragraph(node, depth: depth)
-                out.append(para)
-                last = info
-                lastEmpty = para.length == 0
-                if tinted.contains(node.id), out.length > start {
-                    out.addAttribute(
-                        .leafletTinted, value: true,
-                        range: NSRange(location: start, length: out.length - start))
-                }
-                // A block of text has its children after it, one deeper:
-                // the core gives the page with those of text that holds no
-                // blocks lifted after it (doc.Content.Lifted). A block
-                // without text keeps its own, a table's cells.
-                if BlockInfo.textTypes.contains(node.type) {
-                    add(node.children ?? [], depth: depth + 1)
-                }
+        for (node, depth) in blocks {
+            if let last = infos.last {
+                out.append(NSAttributedString(string: "\n", attributes: [.leafletBlock: last]))
+            }
+            let start = out.length
+            let (para, info) = paragraph(node, depth: depth)
+            out.append(para)
+            infos.append(info)
+            lastEmpty = para.length == 0
+            if tinted.contains(node.id), out.length > start {
+                out.addAttribute(
+                    .leafletTinted, value: true,
+                    range: NSRange(location: start, length: out.length - start))
             }
         }
-        add(content.blocks, depth: 0)
-        return (out, lastEmpty ? last : nil)
+        return (out, infos, lastEmpty ? infos.last : nil)
     }
 
     /// paragraph is a block as its paragraph, without the separator, and
@@ -152,54 +183,68 @@ enum DocumentMapper {
     static func content(_ s: NSAttributedString, trailing: BlockInfo? = nil, meta: JSONValue?)
         -> DocContent
     {
-        var roots: [DocNode] = []
-        // chain is the path to the last block that holds blocks at each
-        // depth so far, and the depth it is at.
-        var chain: [(depth: Int, path: [Int])] = []
+        content(s, blocks: blocks(s, trailing: trailing), meta: meta) { info, range in
+            node(for: info, text: s.attributedSubstring(from: range))
+        }
+    }
+
+    /// content returns the page's content as the editor's text s has it,
+    /// its paragraphs as blocks has them, each block as made gives it from
+    /// its paragraph's block and text, as node(for:text:) does.
+    static func content(
+        _ s: NSAttributedString, blocks: [(info: BlockInfo, range: NSRange)], meta: JSONValue?,
+        made: (BlockInfo, NSRange) -> DocNode
+    ) -> DocContent {
+        var roots: [Built] = []
+        // chain is the last block that holds blocks at each depth so far,
+        // and the depth it is at.
+        var chain: [(depth: Int, built: Built)] = []
         var seen = Set<String>()
-        for p in paragraphs(s, trailing: trailing) {
+        for p in blocks {
             var info = p.info
-            if seen.contains(info.id) { info = info.with(id: BlockInfo.newID()) }
+            let node: DocNode
+            if seen.contains(info.id) {
+                info = info.with(id: BlockInfo.newID())
+                node = Self.node(for: info, text: s.attributedSubstring(from: p.range))
+            } else {
+                node = made(info, p.range)
+            }
             seen.insert(info.id)
-            let node = node(for: info, text: p.text)
+            let built = Built(node)
             while let top = chain.last, top.depth >= info.depth { chain.removeLast() }
             // A nested block goes in the block before it that holds blocks;
             // one deeper than that can be goes as deep as it can.
-            let path: [Int]
             let depth: Int
             if let parent = chain.last {
-                insert(node, into: &roots, at: parent.path)
-                path = parent.path + [(nodeAt(roots, parent.path).children?.count ?? 1) - 1]
+                parent.built.children.append(built)
                 depth = parent.depth + 1
             } else {
-                roots.append(node)
-                path = [roots.count - 1]
+                roots.append(built)
                 depth = 0
             }
-            if BlockInfo.nestable.contains(node.type) { chain.append((depth, path)) }
+            if BlockInfo.nestable.contains(node.type) { chain.append((depth, built)) }
         }
         return DocContent(
-            document: DocNode(id: "root", type: "page", data: nil, children: roots), meta: meta)
+            document: DocNode(id: "root", type: "page", data: nil, children: roots.map(\.node)),
+            meta: meta)
     }
 
-    private static func nodeAt(_ roots: [DocNode], _ path: [Int]) -> DocNode {
-        var n = roots[path[0]]
-        for i in path.dropFirst() { n = n.children![i] }
-        return n
-    }
+    /// Built is a block of the content being made, the blocks in it added
+    /// as they come and put in it once all are (node): kept as values, each
+    /// block added to one would copy those before it, and the blocks it is
+    /// in, a page of many blocks in one list as many times over.
+    private final class Built {
+        private let made: DocNode
+        var children: [Built] = []
 
-    private static func insert(_ child: DocNode, into roots: inout [DocNode], at path: [Int]) {
-        func go(_ nodes: inout [DocNode], _ rest: ArraySlice<Int>) {
-            let i = rest.first!
-            if rest.count == 1 {
-                nodes[i].children = (nodes[i].children ?? []) + [child]
-            } else {
-                var kids = nodes[i].children ?? []
-                go(&kids, rest.dropFirst())
-                nodes[i].children = kids
-            }
+        init(_ node: DocNode) { made = node }
+
+        var node: DocNode {
+            guard !children.isEmpty else { return made }
+            var n = made
+            n.children = children.map(\.node)
+            return n
         }
-        go(&roots, path[...])
     }
 
     static func node(for info: BlockInfo, text: NSAttributedString) -> DocNode {

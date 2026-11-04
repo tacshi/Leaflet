@@ -460,7 +460,7 @@ func videoAgent() string {
 // dropVideos stops the players of videos no longer in the open page.
 func (a *App) dropVideos() {
 	for id, v := range a.videos {
-		if a.page == nil || a.page.editor.Content.Find(id) == nil {
+		if a.page == nil || !a.page.editor.HasBlock(id) {
 			v.Destroy()
 			delete(a.videos, id)
 		}

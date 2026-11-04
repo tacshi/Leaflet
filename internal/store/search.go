@@ -1,31 +1,19 @@
 package store
 
 import (
-	"database/sql/driver"
+	"context"
+	"database/sql"
+	"errors"
+	"log"
 	"slices"
 	"sort"
 	"strings"
+	"time"
+	"unicode/utf8"
 
-	"modernc.org/sqlite"
-
+	"leaflet/internal/guard"
 	"leaflet/locales"
 )
-
-// lowerFunc is SQL's name for strings.ToLower, which search matches text
-// with as it does titles: SQLite's lower() lowers ASCII alone.
-const lowerFunc = "leaflet_lower"
-
-func init() {
-	sqlite.MustRegisterDeterministicScalarFunction(lowerFunc, 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
-		switch v := args[0].(type) {
-		case string:
-			return strings.ToLower(v), nil
-		case []byte:
-			return strings.ToLower(string(v)), nil
-		}
-		return args[0], nil
-	})
-}
 
 // SearchHit is one search result.
 type SearchHit struct {
@@ -41,6 +29,19 @@ type SearchHit struct {
 // those tags, which alone lists them, newest first. A blank query returns
 // the most recently edited pages.
 func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
+	return s.SearchContext(context.Background(), query, limit)
+}
+
+// SearchContext is Search, which stops, with ctx's error, once ctx is
+// done, as when the user typed on and a newer search replaces it.
+//
+// Text matches as titles do: lowered as Go lowers it, and with % and _ the
+// characters they are. The texts are found by the trigrams of what is
+// searched for (search_index), then read and matched: only the hits listed
+// count toward the limits, so pages deleted, found by their titles
+// already, or left out by the tags do not crowd the others out; the most
+// recently changed come first.
+func (s *Store) SearchContext(ctx context.Context, query string, limit int) ([]SearchHit, error) {
 	filters, rest := SplitTagQuery(query)
 	q := strings.ToLower(rest)
 	pages, err := s.Pages()
@@ -94,76 +95,296 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 			seen[t.ID] = true
 		}
 	}
-	// Text matches as the titles do, lowered as Go lowers it, and with %
-	// and _ the characters they are: SQLite's lower() and LIKE fold ASCII
-	// alone, and LIKE reads those two as wildcards. Only the hits listed
-	// count toward the limits, so pages deleted, found by their titles
-	// already, or left out by the tags do not crowd the others out; the
-	// most recently changed come first.
-	rows, err := s.db.Query(`SELECT c.page_id, c.plain_text FROM page_contents c JOIN pages p ON p.id = c.page_id
-		WHERE p.deleted_at IS NULL AND instr(`+lowerFunc+`(c.plain_text), ?) > 0 ORDER BY p.updated_at DESC, p.id`, q)
-	n := 0
-	err = each(rows, err, func(sc scanner) (bool, error) {
-		var id, text string
-		if err := sc.Scan(&id, &text); err != nil {
-			return false, err
-		}
-		if seen[id] {
-			return true, nil
-		}
-		if title, ok := templateTitles[id]; ok {
-			hits = append(hits, SearchHit{Kind: "template", Title: TitleOr(title), PageID: id, Snippet: snippet(text, q)})
-			n++
-		} else if title, ok := titles[id]; ok {
-			hits = append(hits, SearchHit{Kind: "page", Title: TitleOr(title), PageID: id, Snippet: snippet(text, q)})
-			n++
-		}
-		return n != textLimit, nil
-	})
+	// What the index lacks is read as it is: a search does not fail for
+	// it.
+	if err := s.indexSearch(ctx, indexBudget); ctx.Err() != nil {
+		return nil, ctx.Err()
+	} else if err != nil {
+		log.Printf("search index: %v", err)
+	}
+	// The pages' text, the most recently changed first.
+	found, err := s.searchCandidates(ctx, "page", q)
 	if err != nil {
 		return nil, err
+	}
+	listed := slices.Concat(pages, templates)
+	slices.SortFunc(listed, func(a, b Page) int {
+		if c := b.UpdatedAt.Compare(a.UpdatedAt); c != 0 {
+			return c
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	n := 0
+	for _, p := range listed {
+		if n == textLimit {
+			break
+		}
+		if seen[p.ID] || !found.has(p.ID) {
+			continue
+		}
+		text, ok, err := s.matchText(ctx, `SELECT plain_text FROM page_contents WHERE page_id = ?`, p.ID, q)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			continue
+		}
+		kind := "page"
+		if p.Template {
+			kind = "template"
+		}
+		hits = append(hits, SearchHit{Kind: kind, Title: TitleOr(p.Title), PageID: p.ID, Snippet: snippet(text, q)})
+		n++
 	}
 	// Recordings and comments, as the text, of the pages listed alone.
-	rows, err = s.db.Query(`SELECT r.page_id, r.block_id FROM recordings r JOIN pages p ON p.id = r.page_id
-		WHERE p.deleted_at IS NULL AND p.is_template = 0 AND instr(`+lowerFunc+`(r.transcript), ?) > 0
-		ORDER BY r.created_at DESC, r.id`, q)
-	n = 0
-	err = each(rows, err, func(sc scanner) (bool, error) {
-		var id, block string
-		if err := sc.Scan(&id, &block); err != nil {
-			return false, err
-		}
-		if title, ok := titles[id]; ok {
+	if err := s.searchRows(ctx, "recording", q, otherLimit, `SELECT r.id, r.page_id, r.block_id FROM recordings r JOIN pages p ON p.id = r.page_id
+		WHERE p.deleted_at IS NULL AND p.is_template = 0 ORDER BY r.created_at DESC, r.id`, `SELECT transcript FROM recordings WHERE id = ?`,
+		titles, func(id, block, _, title string) {
 			hits = append(hits, SearchHit{Kind: "recording", Title: locales.StoreSearchRecording(TitleOr(title)), PageID: id, BlockID: block})
-			n++
-		}
-		return n != otherLimit, nil
-	})
-	if err != nil {
+		}); err != nil {
 		return nil, err
 	}
-	rows, err = s.db.Query(`SELECT c.page_id, c.block_id, c.body FROM comments c JOIN pages p ON p.id = c.page_id
-		WHERE p.deleted_at IS NULL AND p.is_template = 0 AND instr(`+lowerFunc+`(c.body), ?) > 0 AND c.deleted_at IS NULL
-		ORDER BY c.created_at DESC, c.id`, q)
-	n = 0
-	err = each(rows, err, func(sc scanner) (bool, error) {
-		var id, block, body string
-		if err := sc.Scan(&id, &block, &body); err != nil {
-			return false, err
-		}
-		if title, ok := titles[id]; ok {
+	if err := s.searchRows(ctx, "comment", q, otherLimit, `SELECT c.id, c.page_id, c.block_id FROM comments c JOIN pages p ON p.id = c.page_id
+		WHERE p.deleted_at IS NULL AND p.is_template = 0 AND c.deleted_at IS NULL ORDER BY c.created_at DESC, c.id`, `SELECT body FROM comments WHERE id = ?`,
+		titles, func(id, block, body, title string) {
 			hits = append(hits, SearchHit{Kind: "comment", Title: body, PageID: id, BlockID: block, Snippet: locales.StoreSearchCommentOn(TitleOr(title))})
-			n++
-		}
-		return n != otherLimit, nil
-	})
-	if err != nil {
+		}); err != nil {
 		return nil, err
 	}
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
 	return hits, nil
+}
+
+// searchRows lists the recordings or comments (kind) whose text, read by
+// id with text, contains q, lowered, up to limit, in the order list lists
+// them as their id, page and block: those of the pages in titles alone.
+func (s *Store) searchRows(ctx context.Context, kind, q string, limit int, list, text string, titles map[string]string, hit func(pageID, block, text, title string)) error {
+	found, err := s.searchCandidates(ctx, kind, q)
+	if err != nil {
+		return err
+	}
+	type row struct{ id, page, block string }
+	rows, err := s.db.QueryContext(ctx, list)
+	listed, err := collect(rows, err, func(sc scanner) (row, error) {
+		var r row
+		err := sc.Scan(&r.id, &r.page, &r.block)
+		return r, err
+	})
+	if err != nil {
+		return err
+	}
+	n := 0
+	for _, r := range listed {
+		if n == limit {
+			break
+		}
+		title, ok := titles[r.page]
+		if !ok || !found.has(r.id) {
+			continue
+		}
+		body, ok, err := s.matchText(ctx, text, r.id, q)
+		if err != nil {
+			return err
+		}
+		if ok {
+			hit(r.page, r.block, body, title)
+			n++
+		}
+	}
+	return nil
+}
+
+// matchText reads a text by id with query, and reports whether it holds q,
+// lowered as Go lowers it. One gone meanwhile holds nothing.
+func (s *Store) matchText(ctx context.Context, query, id, q string) (string, bool, error) {
+	var text string
+	err := s.db.QueryRowContext(ctx, query, id).Scan(&text)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return text, strings.Contains(strings.ToLower(text), q), nil
+}
+
+// candidates are the texts of a kind that may hold what is searched for,
+// by ID: those whose trigrams search_index has, and those it does not
+// have as they are now. all is set when every one may, as for a search of
+// fewer than three characters, which has no trigram.
+type candidates struct {
+	ids map[string]bool
+	all bool
+}
+
+func (c candidates) has(id string) bool { return c.all || c.ids[id] }
+
+// searchCandidates finds the texts of a kind that may hold q, lowered, in
+// search_index: those with each of its trigrams. Search reads and matches
+// each, so what the index cannot tell apart, as the trigrams in another
+// order, is never a hit.
+func (s *Store) searchCandidates(ctx context.Context, kind, q string) (candidates, error) {
+	grams := trigrams(q)
+	if len(grams) == 0 {
+		return candidates{all: true}, nil
+	}
+	quoted := make([]string, len(grams))
+	for i, g := range grams {
+		quoted[i] = `"` + strings.ReplaceAll(g, `"`, `""`) + `"`
+	}
+	out := candidates{ids: map[string]bool{}}
+	// Those written since they were indexed, or never, as while the
+	// index is made, are read as they are. It is one statement, which
+	// sees the index and the writes as they were at one moment: indexing
+	// in the background between two would take a text out of what is
+	// left to index after the index was asked, and it would be in neither.
+	rows, err := s.db.QueryContext(ctx, `SELECT w.id FROM text_writes w
+		WHERE w.kind = ? AND (w.indexed IS NOT w.write_id
+			OR w.n IN (SELECT rowid FROM search_index WHERE search_index MATCH ?))`, kind, strings.Join(quoted, " AND "))
+	if err := each(rows, err, func(sc scanner) (bool, error) {
+		var id string
+		err := sc.Scan(&id)
+		out.ids[id] = true
+		return true, err
+	}); err != nil {
+		return candidates{}, err
+	}
+	return out, nil
+}
+
+// maxTrigrams is how many of a search's trigrams the index is asked for:
+// a long search has more than it takes to tell texts apart, and each is
+// one more list for the index to read.
+const maxTrigrams = 24
+
+// trigrams are the distinct runs of three characters in q, as
+// search_index's tokenizer makes them, at most maxTrigrams of them spread
+// over q: none for fewer than three characters.
+func trigrams(q string) []string {
+	runes := []rune(q)
+	if len(runes) < 3 {
+		return nil
+	}
+	var all []string
+	for i := 0; i+3 <= len(runes); i++ {
+		if g := string(runes[i : i+3]); !slices.Contains(all, g) {
+			all = append(all, g)
+		}
+	}
+	if len(all) <= maxTrigrams {
+		return all
+	}
+	out := make([]string, 0, maxTrigrams)
+	for i := range maxTrigrams {
+		out = append(out, all[i*(len(all)-1)/(maxTrigrams-1)])
+	}
+	return out
+}
+
+// indexBudget is how long a search indexes the texts written since the
+// last, before it searches: those it leaves are read as they are, and
+// indexed in the background.
+const indexBudget = 50 * time.Millisecond
+
+// indexSearch brings search_index up to date with the texts written since
+// it last was, for up to budget, a few at a time in a transaction, which
+// reads each text with its write: the write it records is the text it
+// indexed. With texts still to index, as a database from before the index
+// has, it goes on in the background.
+func (s *Store) indexSearch(ctx context.Context, budget time.Duration) error {
+	done, err := s.indexFor(ctx, budget)
+	if err == nil && !done && s.indexing.CompareAndSwap(false, true) {
+		guard.Go(func() {
+			defer s.indexing.Store(false)
+			for {
+				// A little at a time, so the app's own reads and writes
+				// wait on it no longer than a search does.
+				if done, err := s.indexFor(context.Background(), indexBudget); err != nil || done {
+					return
+				}
+				time.Sleep(indexBudget)
+			}
+		})
+	}
+	return err
+}
+
+// indexFor indexes the texts written since they were, for up to budget,
+// and reports whether it indexed all of them.
+func (s *Store) indexFor(ctx context.Context, budget time.Duration) (bool, error) {
+	until := time.Now().Add(budget)
+	for time.Now().Before(until) {
+		rows, err := s.db.QueryContext(ctx, `SELECT n FROM text_writes WHERE indexed IS NOT write_id LIMIT 25`)
+		stale, err := collect(rows, err, func(sc scanner) (int64, error) {
+			var n int64
+			err := sc.Scan(&n)
+			return n, err
+		})
+		if err != nil || len(stale) == 0 {
+			return err == nil, err
+		}
+		if err := s.inTx(func(tx *sql.Tx) error {
+			for _, n := range stale {
+				if err := indexText(tx, n); err != nil {
+					return err
+				}
+				if time.Now().After(until) {
+					break
+				}
+			}
+			return nil
+		}); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
+}
+
+// searchTexts are where each kind of text search_index holds is: its
+// table, key and column.
+var searchTexts = map[string][3]string{
+	"page":      {"page_contents", "page_id", "plain_text"},
+	"recording": {"recordings", "id", "transcript"},
+	"comment":   {"comments", "id", "body"},
+}
+
+// indexText puts text_writes' row n's text in search_index, lowered, in
+// place of what it had of it.
+func indexText(tx *sql.Tx, n int64) error {
+	var kind, id string
+	var written int64
+	var indexed sql.NullInt64
+	switch err := tx.QueryRow(`SELECT kind, id, write_id, indexed FROM text_writes WHERE n = ?`, n).Scan(&kind, &id, &written, &indexed); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil // its text went meanwhile
+	case err != nil:
+		return err
+	}
+	// Indexed meanwhile, as by the search running beside the indexing in
+	// the background.
+	src, ok := searchTexts[kind]
+	if !ok || indexed.Valid && indexed.Int64 == written {
+		return nil
+	}
+	var text string
+	switch err := tx.QueryRow(`SELECT `+src[2]+` FROM `+src[0]+` WHERE `+src[1]+` = ?`, id).Scan(&text); { // #nosec G202 -- searchTexts' own names.
+	case errors.Is(err, sql.ErrNoRows):
+		return nil // gone, and its row with it
+	case err != nil:
+		return err
+	}
+	if indexed.Valid {
+		if _, err := tx.Exec(`DELETE FROM search_index WHERE rowid = ?`, n); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT INTO search_index (rowid, text) VALUES (?, ?)`, n, strings.ToLower(text)); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`UPDATE text_writes SET indexed = ? WHERE n = ?`, written, n)
+	return err
 }
 
 // SplitTagQuery splits a search into its tag filters, the words starting
@@ -242,10 +463,10 @@ func snippet(text, q string) string {
 			end = i + n + j
 		}
 	}
-	for start > 0 && !utf8Start(text[start]) {
+	for start > 0 && !utf8.RuneStart(text[start]) {
 		start--
 	}
-	for end < len(text) && !utf8Start(text[end]) {
+	for end < len(text) && !utf8.RuneStart(text[end]) {
 		end++
 	}
 	out := strings.Trim(text[start:end], " ·")
@@ -257,5 +478,3 @@ func snippet(text, q string) string {
 	}
 	return out
 }
-
-func utf8Start(b byte) bool { return b&0xC0 != 0x80 }

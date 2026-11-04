@@ -1,9 +1,10 @@
 -- Checks what the migrations made of the rows seed/*.sql put in before
 -- them, each right after the migration it is named for: shares kept,
 -- invites moved, deleted comments emptied, history pruned and dated back,
--- pages placed. scripts/check-migrations.sh runs it, as postgres, after
--- every migration. It changes nothing: it rolls back at the end. A check
--- that fails raises, and psql stops there.
+-- pages placed, deleted pages read by who had them.
+-- scripts/check-migrations.sh runs it, as postgres, after every
+-- migration. It changes nothing: it rolls back at the end. A check that
+-- fails raises, and psql stops there.
 
 \set ON_ERROR_STOP on
 \set VERBOSITY terse
@@ -103,6 +104,10 @@ $$;
 
 -- The editor reads the page's history from when they accepted the share,
 -- and none of the subpage's from before it was placed under the page.
+-- What is on a subpage deleted after they accepted it, before
+-- 20261031000000 filled placed_at in, is theirs still, and they may
+-- restore the page; what is on one deleted before, is not, nor may they.
+-- Both pages they see.
 create function pg_temp.act_as(p_user uuid) returns void
 language sql as $$ select set_config('request.jwt.claim.sub', p_user::text, true) $$;
 set local role authenticated;
@@ -118,6 +123,33 @@ begin
   if exists (select 1 from public.page_history where page_id = '5eed0000-0000-0000-0000-0000000000a2') then
     raise exception 'the editor reads the subpage''s history from before it was placed';
   end if;
+
+  if (select count(*) from public.pages
+      where id in ('5eed0000-0000-0000-0000-0000000000a4', '5eed0000-0000-0000-0000-0000000000a5')) <> 2 then
+    raise exception 'the editor does not see the deleted subpages';
+  end if;
+  select (select count(*) from public.page_content where page_id = '5eed0000-0000-0000-0000-0000000000a4')
+       + (select count(*) from public.comments where page_id = '5eed0000-0000-0000-0000-0000000000a4')
+  into n;
+  if n <> 2 then
+    raise exception 'the editor reads % of what is on the subpage deleted after they had it', n;
+  end if;
+  if exists (select 1 from public.page_content where page_id = '5eed0000-0000-0000-0000-0000000000a5')
+     or exists (select 1 from public.comments where page_id = '5eed0000-0000-0000-0000-0000000000a5') then
+    raise exception 'the editor reads what is on the subpage deleted before they had it';
+  end if;
+  update public.pages set deleted_at = null where id = '5eed0000-0000-0000-0000-0000000000a4';
+  if not found then
+    raise exception 'the editor could not restore the subpage deleted after they had it';
+  end if;
+  begin
+    update public.pages set deleted_at = null where id = '5eed0000-0000-0000-0000-0000000000a5';
+    raise exception 'the editor restored the subpage deleted before they had it';
+  exception when insufficient_privilege then
+    if sqlerrm <> 'forbidden_restore' then
+      raise;
+    end if;
+  end;
 end;
 $$;
 reset role;

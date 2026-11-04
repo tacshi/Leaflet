@@ -91,15 +91,17 @@ type Host interface {
 	FollowVideoLink(link string, done func(video string))
 }
 
-// snapshot is a step of undo or redo: the page as it was, to go back to.
-// One with after marks a change from outside, as sync brings: after is
-// the page as the steps under it left it, before that change, which
-// going back to one of them keeps.
+// snapshot is a step of undo or redo: the page as it was, to go back to,
+// frozen (freeze). One with after marks a change from outside, as sync
+// brings: after is the page as the steps under it left it, before that
+// change, which going back to one of them keeps. size is about how many
+// bytes it keeps of its own, which no step before it keeps.
 type snapshot struct {
 	content *doc.Content
 	anchor  Pos
 	focus   Pos
 	after   *doc.Content
+	size    int
 }
 
 // Editor is the state of a page's editor, kept from frame to frame.
@@ -136,7 +138,12 @@ type Editor struct {
 	undo, redo []snapshot
 	// runStep is the page the step of undo an agent run's ops began with
 	// keeps, to tell that step from those made since.
-	runStep  *doc.Content
+	runStep *doc.Content
+	// kept are the blocks as the steps last kept them (freeze), by ID, and
+	// frozen the page the last step kept, which the next shares what it
+	// can of.
+	kept     map[string]*doc.Node
+	frozen   *doc.Content
 	lastEdit time.Time
 	// coalescing is set while typing joins the undo step open, which
 	// began in block coalesceIn, and typed is how many characters typing
@@ -197,10 +204,11 @@ type Editor struct {
 	// another device), which the input then shows.
 	cellText, cellFor, cellSaved string
 
-	// hid are the blocks folded headings hide, as the page last built;
-	// menuBlock is the block a context menu was opened on, and menuAt
-	// where in it.
-	hid map[string]bool
+	// hid are the blocks folded headings hide, as the page last built,
+	// when the page's gen was hidAt; menuBlock is the block a context menu
+	// was opened on, and menuAt where in it.
+	hid   map[string]bool
+	hidAt uint64
 	// order is each unit's place in the page and depths each block's
 	// depth, kept while the blocks build unless a change comes first:
 	// each block asks where it is against the selection and how deep it
@@ -210,7 +218,12 @@ type Editor struct {
 	// building is set while the blocks build: a change made then, as
 	// typing in a table's cell, finds order and depths again for the
 	// blocks after it.
-	building  bool
+	building bool
+	// gen counts the changes to the page, for what is worked out of it to
+	// tell it is out of date; shaped is what its blocks were worked out
+	// to be as it last built (reshape).
+	gen       uint64
+	shaped    shaped
 	menuBlock string
 	menuAt    Pos
 	// bar is the selection toolbar, kept while the focus is in it or its
@@ -263,11 +276,11 @@ func (e *Editor) Focus() { e.handle.Focus() }
 // Focused reports whether the editor had the focus as it last built.
 func (e *Editor) Focused() bool { return e.focused }
 
-// SetWidth sets the width the text wraps at.
+// SetWidth sets the width the text wraps at. The blocks lay out again at
+// it as they next build, their layouts being of the width they had.
 func (e *Editor) SetWidth(w float32) {
-	if w != e.width && w > 0 {
+	if w > 0 {
 		e.width = w
-		e.layouts = map[string]*blockLayout{}
 	}
 }
 
@@ -559,14 +572,10 @@ func (e *Editor) pushUndo(typing bool) {
 		e.lastEdit = now
 		return
 	}
-	e.undo = append(e.undo, snapshot{content: e.Content.Copy(), anchor: e.anchor, focus: e.focus})
-	if len(e.undo) > 200 {
-		e.undo = e.undo[len(e.undo)-200:]
-		if e.undo[0].after != nil {
-			e.undo = e.undo[1:]
-		}
-	}
+	c, size := e.freeze()
+	e.undo = append(e.undo, snapshot{content: c, anchor: e.anchor, focus: e.focus, size: size})
 	e.redo = nil
+	e.trimHistory()
 	e.coalescing, e.coalesceIn, e.typed = typing, e.focus.ID, 0
 	e.lastEdit = now
 }
@@ -620,23 +629,42 @@ func (e *Editor) step(from, to *[]snapshot) {
 	if !ok {
 		return
 	}
-	*to = append(*to, snapshot{content: e.Content.Copy(), anchor: e.anchor, focus: e.focus})
+	c, size := e.freeze()
+	*to = append(*to, snapshot{content: c, anchor: e.anchor, focus: e.focus, size: size})
 	if after != nil {
 		old := s.content
 		s.content = doc.Rebase(old, after, e.Content)
 		// The steps under it are now under the page as it was, with
 		// what came from outside.
-		mark(from, old)
+		mark(from, old, 0)
 	}
 	e.restore(s)
+	e.trimHistory()
 }
 
 // mark marks a change from outside on top of steps, made to the page
-// after, as the steps left it. Under a mark already there, the steps are
-// under that one's page, which a change since only adds to.
-func mark(steps *[]snapshot, after *doc.Content) {
+// after, as the steps left it, size bytes of which no step kept before.
+// Under a mark already there, the steps are under that one's page, which
+// a change since only adds to.
+func mark(steps *[]snapshot, after *doc.Content, size int) {
 	if markable(*steps) {
-		*steps = append(*steps, snapshot{after: after})
+		*steps = append(*steps, snapshot{after: after, size: size})
+	}
+}
+
+// markOutside marks the change from outside about to be made on top of
+// the steps of undo and redo, keeping the page as it is before it: only
+// for steps that take a mark.
+func (e *Editor) markOutside() {
+	if markable(e.undo) || markable(e.redo) {
+		// The page kept counts once, against the steps that take it first.
+		before, size := e.freeze()
+		if markable(e.undo) {
+			mark(&e.undo, before, size)
+			size = 0
+		}
+		mark(&e.redo, before, size)
+		e.trimHistory()
 	}
 }
 
@@ -647,18 +675,21 @@ func markable(steps []snapshot) bool {
 	return n > 0 && steps[n-1].after == nil
 }
 
+// restore makes the page as step s keeps it: its blocks that are as they
+// were then stay, and the others are copied from the step, which keeps
+// them still.
 func (e *Editor) restore(s snapshot) {
-	e.Content.Children = s.content.Copy().Children
+	e.Content.Children = e.adopt(s.content.Children, false)
 	e.coalescing = false
 	e.marked = false
-	e.layouts = map[string]*blockLayout{}
 	e.Select(s.anchor, s.focus)
 	e.changed()
 }
 
 func (e *Editor) changed() {
+	e.gen++
 	if e.building {
-		e.hid = e.hidden()
+		e.hid, e.hidAt = e.hidden(), e.gen
 		e.order, e.depths = unitOrder(e.walkUnits(e.hid)), e.blockDepths()
 	} else {
 		e.order = nil
@@ -679,13 +710,13 @@ func (e *Editor) Doc() *doc.Content { return e.Content }
 // takes back what it changed on the page as it is, keeping the change.
 func (e *Editor) Replace(c *doc.Content) {
 	l := e.liftComposition()
-	before := e.Content.Copy()
-	mark(&e.undo, before)
-	mark(&e.redo, before)
-	e.Content.Children = c.Children
+	e.markOutside()
+	// The blocks the change left as they were stay the page's, with their
+	// layouts and looks.
+	e.Content.Children = e.adopt(c.Children, true)
 	e.Content.Blocks, e.Content.Deleted = c.Blocks, c.Deleted
 	e.order = nil
-	e.layouts = map[string]*blockLayout{}
+	e.gen++
 	e.coalescing = false
 	refill(e.Content)
 	e.keepSelection()
@@ -704,7 +735,6 @@ func (e *Editor) ApplyOps(ops []doc.Op) error {
 			first = err
 		}
 	}
-	e.layouts = map[string]*blockLayout{}
 	refill(e.Content)
 	e.keepSelection()
 	e.putBack(l)
@@ -733,16 +763,11 @@ func (e *Editor) ApplyOp(o doc.Op, newStep bool) error {
 		e.runStep = e.undo[len(e.undo)-1].content
 	} else if n := len(e.undo); n == 0 || e.undo[n-1].content != e.runStep {
 		// Past the first op since that edit, the steps have their mark
-		// already: the page is copied only for one to take.
-		if markable(e.undo) || markable(e.redo) {
-			before := e.Content.Copy()
-			mark(&e.undo, before)
-			mark(&e.redo, before)
-		}
+		// already: the page is kept only for one to take.
+		e.markOutside()
 		e.coalescing = false
 	}
 	err := e.Content.Apply(o)
-	e.layouts = map[string]*blockLayout{}
 	refill(e.Content)
 	e.keepSelection()
 	e.putBack(l)
@@ -755,7 +780,6 @@ func (e *Editor) Edit(fn func(c *doc.Content)) {
 	e.pushUndo(false)
 	e.coalescing = false
 	fn(e.Content)
-	e.layouts = map[string]*blockLayout{}
 	// Taking out the page's only block, as its one subpage's card, leaves
 	// it none.
 	refill(e.Content)

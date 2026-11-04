@@ -111,7 +111,7 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
         // Read here, for SwiftUI to update the view as they change; shown
         // once this update is done, as what the editor does then tells
         // the page and the window, whose views this update reads.
-        if model.content != nil, c.loaded != model.external || c.tinted != model.tinted {
+        if model.hasContent, c.loaded != model.external || c.tinted != model.tinted {
             Task { @MainActor [model] in c.show(model) }
         }
     }

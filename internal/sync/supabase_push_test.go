@@ -1284,7 +1284,7 @@ func TestBusyServerCountsNoFailure(t *testing.T) {
 	svc.OnState = func(running bool, _ error) { ran = ran || running }
 	loop, stop := context.WithCancel(context.Background())
 	defer stop()
-	_ = svc.syncNow(loop, true)
+	_ = svc.syncNow(loop, true, true)
 	if ran {
 		t.Error("the loop's pass ran in the wait the server asked for")
 	}

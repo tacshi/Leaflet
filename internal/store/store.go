@@ -12,7 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	_ "modernc.org/sqlite" // the driver, "sqlite"
 )
 
 // Change says what changed: a table, and the page when one is concerned.
@@ -31,10 +34,14 @@ type Store struct {
 	listeners []func(Change)
 
 	// todos are each page's to-dos as its content last read gave them,
-	// with what that content was (todoKey): Todos decodes only the pages
-	// whose content changed since. Guarded by todosMu.
+	// with the write it was (WriteID): Todos decodes only the pages whose
+	// content changed since. Guarded by todosMu.
 	todosMu sync.Mutex
 	todos   map[string]pageTodos
+
+	// indexing is set while search_index is brought up to date in the
+	// background (indexSearch).
+	indexing atomic.Bool
 }
 
 // Open opens (creating) the database in dir.

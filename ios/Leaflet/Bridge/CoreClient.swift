@@ -122,18 +122,28 @@ final class CoreClient: Sendable {
         }
     }
 
-    /// cancellable runs body as a waiting call, with a token by which the
-    /// core gives up on it as the task that called it is cancelled: a
-    /// download for a page that closed holds a thread no longer.
+    /// cancellable runs body as a waiting call, or in order with inOrder,
+    /// with a token by which the core gives up on it as the task that
+    /// called it is cancelled: a download for a page that closed holds a
+    /// thread no longer, and a search typed over stops. One given up on
+    /// before its turn comes never reaches the core, and throws
+    /// CancellationError: a search typed over would otherwise wait its
+    /// turn for an answer no one reads, and hold up the saves after it.
     nonisolated(nonsending) func cancellable<T: Sendable>(
-        _ body: @escaping @Sendable (MobileCore, Int64) throws -> T
+        inOrder: Bool = false, _ body: @escaping @Sendable (MobileCore, Int64) throws -> T
     ) async throws -> T {
+        try Task.checkCancellation()
         let token = Self.tokens.add(1, ordering: .relaxed).newValue
         let ref = core
+        let turn = Turn()
         return try await withTaskCancellationHandler {
-            try await call(waiting: true) { core in try body(core, token) }
+            try await call(waiting: !inOrder) { core in
+                guard turn.begin() else { throw CancellationError() }
+                defer { turn.end() }
+                return try body(core, token)
+            }
         } onCancel: {
-            ref.core.cancel(token)
+            if turn.giveUp() { ref.core.cancel(token) }
         }
     }
 
@@ -278,11 +288,19 @@ final class CoreClient: Sendable {
         try await call { try $0.deleteFolder(id) }
     }
 
+    /// search finds query's hits. A search whose task is cancelled, as one
+    /// typed over is, stops, or never reaches the core if its turn has
+    /// not come (cancellable).
     nonisolated(nonsending) func search(_ query: String, limit: Int = 50) async throws
         -> [SearchHit]
     {
-        try await call([SearchHit].self) { core in
-            try Self.answer { e in core.search(query, limit: limit, error: e) }
+        try await cancellable(inOrder: true) { core, token in
+            try JSONDecoder().decode(
+                [SearchHit].self,
+                from: Data(
+                    try Self.answer { e in
+                        core.searchCancellable(query, limit: limit, token: token, error: e)
+                    }.utf8))
         }
     }
 
@@ -352,6 +370,37 @@ final class CoreClient: Sendable {
 
     nonisolated(nonsending) func closePage(_ id: String, editor: Int64) async {
         try? await call { $0.closePage(id, editor: editor) }
+    }
+}
+
+/// Turn is where a call that may be given up on is, from any thread:
+/// waiting for its turn, under way in the core, given up on first, or
+/// done.
+private final class Turn: Sendable {
+    private let state = Atomic<Int>(0)
+    private static let waiting = 0
+    private static let running = 1
+    private static let givenUp = 2
+    private static let done = 3
+
+    /// begin starts the call as its turn comes, and reports whether it
+    /// may, not having been given up on.
+    func begin() -> Bool {
+        state.compareExchange(
+            expected: Self.waiting, desired: Self.running, ordering: .acquiringAndReleasing
+        ).exchanged
+    }
+
+    /// end says the call is done: given up on after, there is nothing to
+    /// tell the core.
+    func end() { state.store(Self.done, ordering: .releasing) }
+
+    /// giveUp gives the call up, and reports whether it is under way in
+    /// the core, which is then to be told: one still waiting never goes.
+    func giveUp() -> Bool {
+        !state.compareExchange(
+            expected: Self.waiting, desired: Self.givenUp, ordering: .acquiringAndReleasing
+        ).exchanged && state.load(ordering: .acquiring) == Self.running
     }
 }
 

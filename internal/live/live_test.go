@@ -363,3 +363,47 @@ func TestSaveLosingEveryTryComesBack(t *testing.T) {
 		t.Errorf("stored %q, dirty %v", text, p.Dirty())
 	}
 }
+
+// The page tells an edit stored since it last saved by the write stored,
+// even one another process wrote straight to the database, and merges it
+// as it saves; saves in a row, with nothing stored between, go on over
+// what the page saved.
+func TestEditsStoredBetweenSavesAreMerged(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	pg, err := st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{para("p1", "one"), para("p2", "two")})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, content := Open(st, pg.ID, Options{})
+	ed := &textEditor{c: content}
+	p.Attach(ed)
+	for _, text := range []string{"one, typed", "one, typed on"} {
+		ed.typeIn(text)
+		p.Changed()
+		if !p.Save() {
+			t.Fatal("not saved")
+		}
+	}
+	outside := st.Content(pg.ID)
+	outside.Find("p2").SetDelta(doc.FromMarkdown("two, from elsewhere"))
+	stamped := outside.Stamped(st.Content(pg.ID), doc.NowMs())
+	if _, err := st.DB().Exec(`UPDATE page_contents SET content = ?, plain_text = ? WHERE page_id = ?`, stamped.Encode(), stamped.PlainText(), pg.ID); err != nil {
+		t.Fatal(err)
+	}
+	ed.typeIn("one, typed again")
+	p.Changed()
+	if !p.Save() {
+		t.Fatal("not saved")
+	}
+	text := st.Content(pg.ID).PlainText()
+	if !strings.Contains(text, "one, typed again") || !strings.Contains(text, "two, from elsewhere") {
+		t.Errorf("stored %q", text)
+	}
+}

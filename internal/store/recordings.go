@@ -1,8 +1,10 @@
 package store
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -185,11 +187,19 @@ func audioUpload(dir string, r Recording) map[string]any {
 // file's, for a copy of its page to copy
 // (CopyNeeds). A recording removed before or while it came keeps none.
 func (s *Store) DownloadedAudio(id string, data []byte) (string, error) {
+	return s.DownloadedAudioFrom(id, bytes.NewReader(data))
+}
+
+// DownloadedAudioFrom is DownloadedAudio for audio read from r as it
+// comes, written to the disk as it is read, never all in memory, as a
+// recording of hours is hundreds of megabytes. One that fails part way
+// keeps nothing.
+func (s *Store) DownloadedAudioFrom(id string, r io.Reader) (string, error) {
 	if _, err := s.Recording(id); err != nil {
 		return "", err
 	}
 	local := filepath.Join(s.Dir, "recordings", id+".wav")
-	if err := writeFile(local, data); err != nil {
+	if err := writeFrom(local, r); err != nil {
 		return "", err
 	}
 	res, err := s.db.Exec(`UPDATE recordings SET local_path = ? WHERE id = ?`, relPath(s.Dir, local), id)

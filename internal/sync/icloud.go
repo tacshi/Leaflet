@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"path"
@@ -37,16 +38,25 @@ import (
 //	icloud.cursor.<device> the last batch of another device applied here
 //	icloud.want.<device>.<page> the version of a device's page file a
 //	                       batch named, until it has merged here
+//	icloud.page_version    the highest version of a page file this device
+//	                       wrote, kept before it writes one
 //	icloud.device_at       when device.json was last written (ms)
 //	icloud.held.<table>.<id> other devices' entries of a row with a
 //	                       change waiting here (icloud_rows.go)
 
+// pageVersionKey keeps the highest version of a page file this device
+// wrote (publishContent).
+const pageVersionKey = "icloud.page_version"
+
 // cloudTarget syncs through the Leaflet folder in iCloud Drive.
 type cloudTarget struct{ s *Service }
 
-func (t cloudTarget) ready() bool                    { return t.s.folder().Root != "" }
-func (t cloudTarget) needsNetwork() bool             { return false }
-func (t cloudTarget) pass(ctx context.Context) error { return t.s.cloudPass(ctx) }
+func (t cloudTarget) ready() bool        { return t.s.folder().Root != "" }
+func (t cloudTarget) needsNetwork() bool { return false }
+
+// pass always reads what the other devices wrote: the folder is on this
+// device, and reading it costs no requests.
+func (t cloudTarget) pass(ctx context.Context, _ bool) error { return t.s.cloudPass(ctx) }
 func (t cloudTarget) refresh(ctx context.Context, pageID string) (*doc.Content, error) {
 	return t.s.cloudRefresh(ctx, pageID)
 }
@@ -343,7 +353,7 @@ func (s *Service) writeDevice(me string, now bool) error {
 // files and audio first, then page content, then the batch that names
 // them, so a device that reads the batch finds what it names.
 func (s *Service) cloudPush(ctx context.Context, me string) error {
-	entries, err := s.st.Pending()
+	entries, err := s.st.Queued()
 	if err != nil || len(entries) == 0 {
 		return err
 	}
@@ -358,7 +368,7 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		done, err := s.cloudUpload(ctx, e)
+		done, err := s.cloudUpload(ctx, &e)
 		if err != nil {
 			log.Printf("icloud: upload %s: %v", e.EntityID, err)
 			s.failed(e, err)
@@ -370,7 +380,7 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 		}
 	}
 	if uploaded {
-		if entries, err = s.st.Pending(); err != nil {
+		if entries, err = s.st.Queued(); err != nil {
 			return err
 		}
 	}
@@ -400,7 +410,7 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 		case !s.due(e):
 			continue // failed lately; it waits a while
 		case synced(e.Entity):
-			entry, err := s.rowEntry(me, e)
+			entry, err := s.rowEntry(me, &e)
 			if err != nil {
 				log.Printf("icloud: %s %s: %v", e.Entity, e.EntityID, err)
 				s.failed(e, err)
@@ -451,7 +461,7 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 	}
 	for _, e := range entries {
 		if e.Entity == "storage_delete" && s.due(e) {
-			s.cloudRemove(e)
+			s.cloudRemove(&e)
 		}
 	}
 	return nil
@@ -463,11 +473,15 @@ func (s *Service) cloudPush(ctx context.Context, me string) error {
 // file gone a little sooner. A device that sends everything again sends
 // deleted files too, so a deletion in a batch that was lost still reaches
 // the others.
-func (s *Service) cloudRemove(e store.OutboxEntry) {
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
+func (s *Service) cloudRemove(entry *store.OutboxEntry) {
+	payload, err := s.payload(entry)
+	e := *entry
+	if err != nil {
 		s.failed(e, err)
 		return
+	}
+	if payload == nil {
+		return // no longer queued
 	}
 	if waits, stays := s.removal(payload); waits {
 		return // till the deletion is in a batch, and no copy goes up from it
@@ -493,11 +507,15 @@ func (s *Service) cloudRemove(e store.OutboxEntry) {
 // for a comment its author's name, which no server here looks up. Its
 // version is newer than any this device has seen of the row, so a change
 // made here while another device's waited still wins over it.
-func (s *Service) rowEntry(me string, e store.OutboxEntry) (icloud.Entry, error) {
-	var row map[string]any
-	if err := json.Unmarshal([]byte(e.Payload), &row); err != nil {
+func (s *Service) rowEntry(me string, entry *store.OutboxEntry) (icloud.Entry, error) {
+	row, err := s.payload(entry)
+	if err != nil {
 		return icloud.Entry{}, err
 	}
+	if row == nil {
+		return icloud.Entry{}, errors.New("no longer queued")
+	}
+	e := *entry
 	// A recording settled after a quit (store.IfStatusKey) goes as just
 	// after the version this device had of it, not after every one it has
 	// seen: a transcription another device finished since is newer, and
@@ -580,17 +598,28 @@ func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerCo
 			merged[p.Peer] = p.Version
 		}
 	}
-	// After the version last written, whether or not its batch was.
+	// After the version last written, whether or not its batch was: the
+	// highest this device wrote is kept before each page file is written
+	// (pageVersionKey), so the file need not be read for it. A device from
+	// before it was kept reads its file once.
 	written := own.Version
 	rel, err := icloud.PagePath(me, pageID)
 	if err != nil {
 		return icloud.Entry{}, nil, err
 	}
-	var last icloud.PageFile
-	if s.folder().ReadJSON(rel, &last) == nil {
-		written = max(written, last.Version)
+	if v, ok := s.st.Value(pageVersionKey); ok {
+		n, _ := strconv.ParseInt(v, 10, 64)
+		written = max(written, n)
+	} else {
+		var last icloud.PageFile
+		if s.folder().ReadJSON(rel, &last) == nil {
+			written = max(written, last.Version)
+		}
 	}
 	version := max(cloudNow().UnixMilli(), written+1)
+	if err := s.setInt(pageVersionKey, version); err != nil {
+		return icloud.Entry{}, nil, err
+	}
 	file := icloud.PageFile{Format: icloud.Format, PageID: pageID, Version: version, Merged: merged, Content: json.RawMessage(row.Content)}
 	if err := s.folder().WriteJSON(rel, file); err != nil {
 		return icloud.Entry{}, nil, err
@@ -602,11 +631,12 @@ func (s *Service) publishContent(me, pageID string) (icloud.Entry, *store.PeerCo
 // cloudUpload copies a file or a recording's audio into the folder, and
 // reports whether its entry can leave the queue: one whose copy waits for
 // iCloud to download what it was made from stays (uploadFrom).
-func (s *Service) cloudUpload(ctx context.Context, e store.OutboxEntry) (bool, error) {
-	var payload map[string]any
-	if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
+func (s *Service) cloudUpload(ctx context.Context, entry *store.OutboxEntry) (bool, error) {
+	payload, err := s.payload(entry)
+	if err != nil || payload == nil {
 		return false, err
 	}
+	e := *entry
 	local, waits, err := s.uploadFrom(ctx, payload)
 	if err != nil || waits || local == "" {
 		return err == nil && !waits, err // gone: nothing to upload
@@ -694,13 +724,13 @@ func (s *Service) keptInICloud(bucket, storagePath string) bool {
 	return err == nil && s.folder().Exists(rel)
 }
 
-// cloudFetch reads what a device copied into the folder, waiting while
+// cloudFetch opens what a device copied into the folder, waiting while
 // iCloud downloads it.
-func (s *Service) cloudFetch(ctx context.Context, bucket, storagePath string) ([]byte, error) {
+func (s *Service) cloudFetch(ctx context.Context, bucket, storagePath string) (io.ReadCloser, error) {
 	for {
-		data, err := s.cloudRead(ctx, bucket, storagePath)
+		r, err := s.cloudRead(ctx, bucket, storagePath)
 		if !errors.Is(err, icloud.ErrNotReady) {
-			return data, err
+			return r, err
 		}
 		select {
 		case <-ctx.Done():
@@ -710,15 +740,15 @@ func (s *Service) cloudFetch(ctx context.Context, bucket, storagePath string) ([
 	}
 }
 
-// cloudRead reads what a device copied into the folder, once iCloud has
-// downloaded it: until then it asks iCloud for it, and is
-// icloud.ErrNotReady.
-func (s *Service) cloudRead(_ context.Context, bucket, storagePath string) ([]byte, error) {
+// cloudRead opens what a device copied into the folder, to read as it
+// comes, once iCloud has downloaded it: until then it asks iCloud for it,
+// and is icloud.ErrNotReady.
+func (s *Service) cloudRead(_ context.Context, bucket, storagePath string) (io.ReadCloser, error) {
 	rel, err := blobPath(bucket, storagePath)
 	if err != nil {
 		return nil, err
 	}
-	return s.folder().Read(rel)
+	return s.folder().Open(rel)
 }
 
 // devices are the other devices that write to the folder.

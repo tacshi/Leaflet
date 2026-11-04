@@ -4,9 +4,11 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -70,6 +72,10 @@ type pubLink struct {
 	qr  *ui.Bitmap
 	cmd *exec.Cmd
 	srv *http.Server
+	// lease, set while signed in, stops saying on the server that this
+	// device serves the link (agents' ServePublicLink), so agents on other
+	// devices and in the cloud read no other pages into the page.
+	lease func()
 	// timer waits for saves to settle before the page renders again; seq
 	// numbers the renders asked for.
 	timer *time.Timer
@@ -112,7 +118,9 @@ type pubFile struct {
 	name string
 }
 
-// pubJob is what a render needs from the main thread.
+// pubJob is what a render needs from the main thread. known renders the
+// videos as this run of the app knows them, asking no site: for a render
+// a visitor waits for.
 type pubJob struct {
 	st                 *store.Store
 	seq                int
@@ -122,6 +130,7 @@ type pubJob struct {
 	comments           bool
 	threads            map[string]bool
 	head               string
+	known              bool
 }
 
 // cloudflaredInfo is what the app found of cloudflared.
@@ -311,6 +320,7 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 	p := &pubLink{page: page, token: randomToken(), emails: emails, state: "starting",
 		comments: comments, threads: threads, posts: map[string][]time.Time{}}
 	a.setPub(p)
+	a.leasePub()
 	fail := func(err error) { a.pubFailed(p, err.Error()) }
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -405,7 +415,29 @@ func (a *App) pubFailed(p *pubLink, why string) {
 // serving says whether the link still serves the page, or will once live.
 func (p *pubLink) serving() bool { return p.state != "failed" }
 
+// leasePub says on the server that this device serves the public link,
+// while it does and the person is signed in: from when the link starts,
+// or they sign in with one serving, which no server heard of before,
+// until they sign out, after which what other devices write to the page
+// no longer reaches the page the link serves.
+func (a *App) leasePub() {
+	p := a.pub
+	if p == nil || a.hub == nil {
+		return
+	}
+	switch {
+	case !a.session.SignedIn && p.lease != nil:
+		p.lease()
+		p.lease = nil
+	case a.session.SignedIn && p.serving() && p.lease == nil:
+		p.lease = a.hub.ServePublicLink(p.page)
+	}
+}
+
 func (p *pubLink) close() {
+	if p.lease != nil {
+		p.lease()
+	}
 	if p.timer != nil {
 		p.timer.Stop()
 	}
@@ -522,6 +554,9 @@ func (p *pubLink) render(job pubJob) {
 		// A Bilibili video's player in a phone's browser asks Bilibili for
 		// nothing but what it plays given its part, which is asked here.
 		Video: func(v doc.Video) doc.Video {
+			if job.known {
+				return web.KnownVideoPart(v)
+			}
 			v, _ = web.VideoPart(v)
 			return v
 		},
@@ -530,7 +565,7 @@ func (p *pubLink) render(job pubJob) {
 			if name == "comments" && !job.comments && len(threads) == 0 {
 				return ""
 			}
-			return prefix + name + ".js"
+			return prefix + pubStatic().names[name+".js"]
 		},
 		Embed: func(n *doc.Node) string {
 			src := n.Str("html")
@@ -602,7 +637,7 @@ func servedExt(name string) string {
 // while comments says they may.
 func pubHead(prefix string, comments bool) string {
 	var b strings.Builder
-	b.WriteString(`<link rel="icon" type="image/png" href="` + html.EscapeString(prefix) + `favicon.png">`)
+	b.WriteString(`<link rel="icon" type="image/png" href="` + html.EscapeString(prefix+pubStatic().names["favicon.png"]) + `">`)
 	if comments {
 		b.WriteString(`<meta name="leaflet-open" content="1"><meta name="leaflet-icon" content="` + html.EscapeString(theme.IconSVG("message-square")) + `">`)
 	}
@@ -806,6 +841,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			h.Set("Content-Type", typ)
 			_, _ = w.Write([]byte(body))
 		}
+		asset, static := pubStatic().assets[rest]
 		switch {
 		case rest == "":
 			if snap.html == "" {
@@ -813,21 +849,13 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 				return
 			}
 			serve("text/html; charset=utf-8", snap.html)
-		case rest == "math.js":
-			serve("text/javascript; charset=utf-8", rendered.PageMathJS)
-		case rest == "diagram.js":
-			serve("text/javascript; charset=utf-8", rendered.PeleModule+"\n"+rendered.ZoomScript+"\n"+diagramScript)
-		case rest == "comments.js":
-			serve("text/javascript; charset=utf-8", commentsScript)
-		case rest == "embed.js":
-			serve("text/javascript; charset=utf-8", embedScript)
-		case rest == "recording.js":
-			serve("text/javascript; charset=utf-8", recordingScript)
-		case rest == "video.js":
-			serve("text/javascript; charset=utf-8", videoScript)
-		case rest == "favicon.png":
-			h.Set("Content-Type", "image/png")
-			_, _ = w.Write(pubFavicon)
+		case static:
+			// Named by what it is, it is the same as long as its name is:
+			// a visitor's browser keeps it, and loads the page again, as
+			// after a comment, without it.
+			h.Set("Cache-Control", "public, max-age=31536000, immutable")
+			h.Set("Content-Type", asset.typ)
+			_, _ = w.Write(asset.body)
 		case strings.HasPrefix(rest, "e/"):
 			src, ok := snap.embeds[strings.TrimPrefix(rest, "e/")]
 			if !ok {
@@ -1036,9 +1064,51 @@ func (a *App) pubComment(p *pubLink, w http.ResponseWriter, r *http.Request) {
 		refuse(status, res.err.Error())
 		return
 	}
-	p.render(res.job)
+	// The page renders again with the comment before the answer, for the
+	// visitor's page to show it as it loads again: with its videos as
+	// known, asking no site, which the render the comment's change asks
+	// for shortly after does.
+	job := res.job
+	job.known = true
+	p.render(job)
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// pubAsset is a file the shared page serves that never changes while the
+// app runs: a script or its icon, of type typ.
+type pubAsset struct {
+	typ  string
+	body []byte
+}
+
+// pubAssets are the shared page's pubAsset files, by the names they are
+// served at, and those names by the names the page knows them by, as
+// "math.js": each served name has a hash of the file in it, so that one
+// changed in another version of the app is never one a browser kept.
+type pubAssets struct {
+	names  map[string]string
+	assets map[string]pubAsset
+}
+
+// pubStatic are the shared page's pubAsset files, made the first time a
+// page is shared.
+var pubStatic = sync.OnceValue(func() pubAssets {
+	a := pubAssets{names: map[string]string{}, assets: map[string]pubAsset{}}
+	add := func(name, ext, typ, body string) {
+		sum := sha256.Sum256([]byte(body))
+		served := name + "." + hex.EncodeToString(sum[:6]) + ext
+		a.names[name+ext], a.assets[served] = served, pubAsset{typ: typ, body: []byte(body)}
+	}
+	const js = "text/javascript; charset=utf-8"
+	add("math", ".js", js, rendered.PageMathJS)
+	add("diagram", ".js", js, rendered.PeleModule+"\n"+rendered.ZoomScript+"\n"+diagramScript)
+	add("comments", ".js", js, commentsScript)
+	add("embed", ".js", js, embedScript)
+	add("recording", ".js", js, recordingScript)
+	add("video", ".js", js, videoScript)
+	add("favicon", ".png", "image/png", string(pubFavicon))
+	return a
+})
 
 // pubAnswerWait is how long a visitor's comment waits for the main
 // thread to take it.

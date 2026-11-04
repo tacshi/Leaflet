@@ -132,11 +132,12 @@ func TestPubServesOnlyThePage(t *testing.T) {
 	if w.Code != http.StatusMethodNotAllowed || w.Body.Len() != 0 {
 		t.Errorf("POST: %d %q", w.Code, w.Body)
 	}
-	if w := get(h, "/tok/comments.js"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "leaflet-name") {
+	if w := get(h, "/tok/"+pubStatic().names["comments.js"]); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "leaflet-name") {
 		t.Errorf("comments script: %d", w.Code)
 	}
-	if w := get(h, "/tok/favicon.png"); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" ||
-		!strings.Contains(get(h, "/tok/").Body.String(), `<link rel="icon" type="image/png" href="/tok/favicon.png">`) {
+	icon := "/tok/" + pubStatic().names["favicon.png"]
+	if w := get(h, icon); w.Code != http.StatusOK || w.Header().Get("Content-Type") != "image/png" ||
+		!strings.Contains(get(h, "/tok/").Body.String(), `<link rel="icon" type="image/png" href="`+icon+`">`) {
 		t.Errorf("favicon: %d %v", w.Code, w.Header())
 	}
 
@@ -154,6 +155,34 @@ func TestPubServesOnlyThePage(t *testing.T) {
 	}
 	if w := get(h, "/tok/e/nope"); w.Code != http.StatusNotFound {
 		t.Errorf("unknown embed: %d", w.Code)
+	}
+}
+
+// The shared page's scripts and icon, which never change while the app
+// runs, are served under names of what they are, for visitors' browsers
+// to keep; the page and its files are never kept, and the names the page
+// had before are no more.
+func TestPubKeepsWhatNeverChanges(t *testing.T) {
+	_, _, h, _ := pubTest(t)
+	page := get(h, "/tok/")
+	if page.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("the page is kept: %v", page.Header())
+	}
+	for _, name := range []string{"math.js", "diagram.js", "comments.js", "embed.js", "recording.js", "video.js", "favicon.png"} {
+		served := pubStatic().names[name]
+		if served == name || !strings.HasPrefix(served, strings.TrimSuffix(strings.TrimSuffix(name, ".js"), ".png")+".") {
+			t.Errorf("%s is served as %q", name, served)
+		}
+		w := get(h, "/tok/"+served)
+		if w.Code != http.StatusOK || w.Body.Len() == 0 || !strings.Contains(w.Header().Get("Cache-Control"), "immutable") {
+			t.Errorf("%s: %d %v", served, w.Code, w.Header())
+		}
+		if w := get(h, "/tok/"+name); w.Code != http.StatusNotFound {
+			t.Errorf("%s: %d, want 404", name, w.Code)
+		}
+	}
+	if w := get(h, "/tok/f/1.png"); w.Header().Get("Cache-Control") != "no-store" {
+		t.Errorf("a file is kept: %v", w.Header())
 	}
 }
 
@@ -491,8 +520,8 @@ func TestPubBlocksAsInTheEditor(t *testing.T) {
 		`<div id="b-gone" data-block="gone" class="card file">`, locales.CardNotOnDevice(),
 		`<strong>` + locales.CommonRecording() + `</strong>`, `<span class="muted">1:05</span>`, `<audio controls preload="metadata" src="/tok/f/`,
 		`<p data-start="1.5"><span class="ts">0:01</span><span class="line"><span class="speaker">` + locales.RecSpeaker("1") + `</span>Hello there.</span></p>`,
-		`<script src="/tok/recording.js" defer></script>`,
-		`<script src="/tok/video.js" defer></script>`,
+		`<script src="/tok/` + pubStatic().names["recording.js"] + `" defer></script>`,
+		`<script src="/tok/` + pubStatic().names["video.js"] + `" defer></script>`,
 		`<a class="ts" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ&amp;t=83s" rel="noopener noreferrer" data-t="83"`,
 		"<details class=\"fold\"><summary><h2 id=\"b-h1\" data-block=\"h1\">Later</h2>\n</summary>\n<p id=\"b-p2\" data-block=\"p2\">Hidden</p>\n</details>\n<h2 id=\"b-h2\"",
 	} {
@@ -520,10 +549,10 @@ func TestPubBlocksAsInTheEditor(t *testing.T) {
 	if w.Code != http.StatusPartialContent || w.Body.String() != "234" || w.Header().Get("Content-Type") != "audio/wav" || w.Header().Get("Content-Disposition") != "" {
 		t.Errorf("audio: %d %v %q", w.Code, w.Header(), w.Body)
 	}
-	if w := get(h, "/tok/recording.js"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "currentTime") {
+	if w := get(h, "/tok/"+pubStatic().names["recording.js"]); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "currentTime") {
 		t.Errorf("recording script: %d", w.Code)
 	}
-	if w := get(h, "/tok/video.js"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "leafletSeek(el, fig.dataset.provider, t)") {
+	if w := get(h, "/tok/"+pubStatic().names["video.js"]); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "leafletSeek(el, fig.dataset.provider, t)") {
 		t.Errorf("video script: %d", w.Code)
 	}
 }

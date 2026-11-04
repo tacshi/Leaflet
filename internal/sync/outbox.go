@@ -95,7 +95,7 @@ func (s *Service) removal(payload map[string]any) (waits, stays bool) {
 // file's stored contents (fetchCopied): until it has, they stay, as the
 // copy would go up with nothing in it. One it cannot tell of waits too.
 func (s *Service) copyWaits(bucket, path string) bool {
-	entries, err := s.st.Pending()
+	entries, err := s.st.Queued()
 	if err != nil {
 		return true
 	}
@@ -103,13 +103,30 @@ func (s *Service) copyWaits(bucket, path string) bool {
 		if e.Entity != "storage" {
 			continue
 		}
-		var payload map[string]any
-		if json.Unmarshal([]byte(e.Payload), &payload) == nil &&
-			store.S(payload, "bucket") == bucket && store.S(payload, "from_path") == path {
+		payload, err := s.payload(&e)
+		if err != nil {
+			return true
+		}
+		if store.S(payload, "bucket") == bucket && store.S(payload, "from_path") == path {
 			return true
 		}
 	}
 	return false
+}
+
+// payload reads an outbox entry's payload, loading it first for one Queued
+// listed without it: nil for one no longer queued.
+func (s *Service) payload(e *store.OutboxEntry) (map[string]any, error) {
+	if e.Payload == "" {
+		if queued, err := s.st.LoadPayload(e); err != nil || !queued {
+			return nil, err
+		}
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(e.Payload), &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
 }
 
 // uploadFrom is where on this device the file or audio a storage entry
@@ -145,6 +162,9 @@ func (s *Service) fetchCopied(ctx context.Context, payload map[string]any) (stri
 		return "", nil
 	}
 	data, err := s.fetch(ctx, store.S(payload, "bucket"), from, false)
+	if err == nil {
+		defer func() { _ = data.Close() }()
+	}
 	if remote.IsNotFound(err) || errors.Is(err, fs.ErrNotExist) {
 		// iCloud Drive may not list it yet, as while the device that has
 		// it still uploads it: it is waited for while the original lives.
@@ -158,9 +178,9 @@ func (s *Service) fetchCopied(ctx context.Context, payload map[string]any) (stri
 	}
 	var local string
 	if recID := store.S(payload, "recording_id"); recID != "" {
-		local, err = s.st.DownloadedAudio(recID, data)
+		local, err = s.st.DownloadedAudioFrom(recID, data)
 	} else {
-		local, err = s.st.DownloadedFile(store.S(payload, "file_id"), data)
+		local, err = s.st.DownloadedFileFrom(store.S(payload, "file_id"), data)
 	}
 	if store.IsNotFound(err) {
 		return "", nil

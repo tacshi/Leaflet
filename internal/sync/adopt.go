@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
 	"leaflet/internal/store"
@@ -171,12 +172,14 @@ func (s *Service) retryMoves(ctx context.Context) error {
 // a change made while it waited for it is not undone.
 func (s *Service) requeueFile(ctx context.Context, f store.File, spaceID string) error {
 	if f.DeletedAt.IsZero() {
-		data, only, err := s.fromICloud(ctx, "files", f.StoragePath, f.LocalPath)
+		data, err := s.fromICloud(ctx, "files", f.StoragePath, f.LocalPath)
 		if err != nil {
 			return fmt.Errorf("file %s: %w", f.Name, err)
 		}
-		if only {
-			if _, err := s.st.DownloadedFile(f.ID, data); err != nil && !store.IsNotFound(err) {
+		if data != nil {
+			_, err := s.st.DownloadedFileFrom(f.ID, data)
+			_ = data.Close()
+			if err != nil && !store.IsNotFound(err) {
 				return err
 			}
 		}
@@ -192,36 +195,40 @@ func (s *Service) requeueRecording(ctx context.Context, r store.Recording) error
 	if r.Status != "ready" && r.Status != "failed" {
 		return nil
 	}
-	data, only, err := s.fromICloud(ctx, "recordings", r.AudioPath, r.LocalPath)
+	data, err := s.fromICloud(ctx, "recordings", r.AudioPath, r.LocalPath)
 	if err != nil {
 		return fmt.Errorf("recording %s: %w", r.ID, err)
 	}
-	if only {
-		if _, err := s.st.DownloadedAudio(r.ID, data); err != nil && !store.IsNotFound(err) {
+	if data != nil {
+		_, err := s.st.DownloadedAudioFrom(r.ID, data)
+		_ = data.Close()
+		if err != nil && !store.IsNotFound(err) {
 			return err
 		}
 	}
 	return s.st.RequeueRecording(r.ID)
 }
 
-// fromICloud reads a file or audio, by its storage path, that this device
+// fromICloud opens a file or audio, by its storage path, that this device
 // has only in the Leaflet folder of iCloud Drive it synced through, so it
-// comes here to go up elsewhere; only is false when nothing has to come.
-// One that went up there but is not listed yet, as while the device that
-// has it still copies it there, is errNotInICloud, and waits: queued now,
-// it would go up with a path of its own and nothing stored there. While
-// sync goes through iCloud Drive, as when a device sends everything again
-// there, it stays where the other devices read it: waiting for it would
-// hold up the pass for nothing.
-func (s *Service) fromICloud(ctx context.Context, bucket, storagePath, local string) (data []byte, only bool, err error) {
+// comes here to go up elsewhere, read as it comes; it is nil when nothing
+// has to come, and the caller closes it otherwise. One that went up there
+// but is not listed yet, as while the device that has it still copies it
+// there, is errNotInICloud, and waits: queued now, it would go up with a
+// path of its own and nothing stored there. While sync goes through
+// iCloud Drive, as when a device sends everything again there, it stays
+// where the other devices read it: waiting for it would hold up the pass
+// for nothing.
+func (s *Service) fromICloud(ctx context.Context, bucket, storagePath, local string) (io.ReadCloser, error) {
 	if s.cloudOn.Load() || store.OnDevice(local) || storagePath == "" || !s.joinedICloud() {
-		return nil, false, nil
+		return nil, nil
 	}
 	if !s.keptInICloud(bucket, storagePath) {
-		return nil, false, errNotInICloud
+		return nil, errNotInICloud
 	}
-	if data, err = s.cloudFetch(ctx, bucket, storagePath); err != nil {
-		return nil, false, fmt.Errorf("from iCloud Drive: %w", err)
+	data, err := s.cloudFetch(ctx, bucket, storagePath)
+	if err != nil {
+		return nil, fmt.Errorf("from iCloud Drive: %w", err)
 	}
-	return data, true, nil
+	return data, nil
 }

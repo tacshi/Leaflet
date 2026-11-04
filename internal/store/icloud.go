@@ -82,6 +82,17 @@ func (s *Store) PeerContent(peer, pageID string) (PeerContent, bool, error) {
 	return p, err == nil, err
 }
 
+// PeerVersion is PeerContent without the content: the version of a page
+// this device last merged from another, and whether it has merged one.
+func (s *Store) PeerVersion(peer, pageID string) (int64, bool, error) {
+	var v int64
+	err := s.db.QueryRow(`SELECT version FROM peer_contents WHERE peer_id = ? AND page_id = ?`, peer, pageID).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	return v, err == nil, err
+}
+
 // PeerContents returns what every device last published of a page, as far
 // as this one has merged it.
 func (s *Store) PeerContents(pageID string) ([]PeerContent, error) {

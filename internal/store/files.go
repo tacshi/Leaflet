@@ -1,7 +1,9 @@
 package store
 
 import (
+	"bytes"
 	"database/sql"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -152,13 +154,20 @@ func fileName(name string) string {
 // file deleted or removed, before or while it came, keeps no copy:
 // nothing would remove it again.
 func (s *Store) DownloadedFile(id string, data []byte) (string, error) {
+	return s.DownloadedFileFrom(id, bytes.NewReader(data))
+}
+
+// DownloadedFileFrom is DownloadedFile for a file read from r as it comes,
+// such as a download still under way, which is written to the disk as it
+// is read, never all in memory. One that fails part way keeps nothing.
+func (s *Store) DownloadedFileFrom(id string, r io.Reader) (string, error) {
 	var name string
 	if err := s.db.QueryRow(`SELECT name FROM files WHERE id = ? AND deleted_at IS NULL`, id).Scan(&name); err != nil {
 		return "", err
 	}
 	dir := filepath.Join(s.Dir, "files", id)
 	local := filepath.Join(dir, fileName(name))
-	if err := writeFile(local, data); err != nil {
+	if err := writeFrom(local, r); err != nil {
 		_ = os.Remove(dir) // only once it is empty
 		return "", err
 	}

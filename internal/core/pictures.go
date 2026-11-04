@@ -35,9 +35,11 @@ func (c *Core) DownloadPictures(ctx context.Context, content *doc.Content, page 
 				continue
 			}
 		}
-		data, err := c.Sync.Fetch(ctx, "files", f.StoragePath)
+		// As it comes: a picture may be large, and is not kept in memory.
+		data, err := c.Sync.FetchReader(ctx, "files", f.StoragePath)
 		if err == nil {
-			_, err = c.Store.DownloadedFile(id, data)
+			_, err = c.Store.DownloadedFileFrom(id, data)
+			_ = data.Close()
 		}
 		if err != nil {
 			log.Printf("download %s: %v", f.Name, err)

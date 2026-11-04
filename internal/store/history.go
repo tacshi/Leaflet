@@ -22,14 +22,20 @@ type HistoryEntry struct {
 
 // AddHistory keeps a snapshot of a page.
 func (s *Store) AddHistory(pageID string, c *doc.Content, reason, aiJobID, label string) error {
-	h := HistoryEntry{ID: doc.NewRowID(), PageID: pageID, Content: c.Encode(), Reason: reason, AIJobID: aiJobID, Label: label, CreatedAt: time.Now()}
-	remote := HistoryToRemote(h, s.Session().UserID)
+	return s.AddHistoryEncoded(pageID, c.Encode(), reason, aiJobID, label)
+}
+
+// AddHistoryEncoded is AddHistory for content encoded already, as a save
+// has it. Its entry in the outbox names the snapshot alone, which the push
+// reads (HistoryToRemote): the content is kept once, in page_history.
+func (s *Store) AddHistoryEncoded(pageID, content, reason, aiJobID, label string) error {
+	h := HistoryEntry{ID: doc.NewRowID(), PageID: pageID, Content: content, Reason: reason, AIJobID: aiJobID, Label: label, CreatedAt: time.Now()}
 	err := s.inTx(func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`INSERT INTO page_history (id, page_id, content, reason, ai_job_id, label, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 			h.ID, h.PageID, h.Content, h.Reason, ns(h.AIJobID), h.Label, ms(h.CreatedAt)); err != nil {
 			return err
 		}
-		if err := queue(tx, "page_history", h.ID, remote, "page history", pageID); err != nil {
+		if err := queue(tx, "page_history", h.ID, map[string]any{"id": h.ID, "page_id": pageID}, "page history", pageID); err != nil {
 			return err
 		}
 		return pruneHistory(tx, pageID)
@@ -59,6 +65,17 @@ func pruneHistory(tx *sql.Tx, pageID string) error {
 	return err
 }
 
+// HistoryEntry returns one snapshot.
+func (s *Store) HistoryEntry(id string) (HistoryEntry, error) {
+	var h HistoryEntry
+	var job sql.NullString
+	var created int64
+	err := s.db.QueryRow(`SELECT id, page_id, content, reason, ai_job_id, label, created_at FROM page_history WHERE id = ?`, id).
+		Scan(&h.ID, &h.PageID, &h.Content, &h.Reason, &job, &h.Label, &created)
+	h.AIJobID, h.CreatedAt = job.String, time.UnixMilli(created)
+	return h, err
+}
+
 // History returns a page's newest 50 snapshots, and the versions named
 // before them.
 func (s *Store) History(pageID string) ([]HistoryEntry, error) {
@@ -78,10 +95,17 @@ func (s *Store) History(pageID string) ([]HistoryEntry, error) {
 // MaybeAutosave keeps an autosave snapshot at most every ten minutes of
 // editing.
 func (s *Store) MaybeAutosave(pageID string, c *doc.Content) error {
+	return s.MaybeAutosaveEncoded(pageID, func() string { return c.Encode() })
+}
+
+// MaybeAutosaveEncoded is MaybeAutosave for content encode encodes, which
+// it calls only when it keeps a snapshot, as a save that has the content
+// encoded already passes it.
+func (s *Store) MaybeAutosaveEncoded(pageID string, encode func() string) error {
 	var last int64
 	err := s.db.QueryRow(`SELECT created_at FROM page_history WHERE page_id = ? ORDER BY created_at DESC LIMIT 1`, pageID).Scan(&last)
 	if err == nil && time.Since(time.UnixMilli(last)) < 10*time.Minute {
 		return nil
 	}
-	return s.AddHistory(pageID, c, "autosave", "", "Autosave")
+	return s.AddHistoryEncoded(pageID, encode(), "autosave", "", "Autosave")
 }

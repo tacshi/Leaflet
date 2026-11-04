@@ -443,11 +443,14 @@ func (s *Soniox) Send(pcm []byte) {
 	}
 }
 
-// Close drops the stream, for a recording that needs it no more.
+// Close drops the stream, for a recording that needs it no more, at once:
+// it runs on the main thread, and the close handshake would wait seconds
+// on a slow network. The stream's reading, writing and keepalives end as
+// its connection does.
 func (s *Soniox) Close() {
 	s.ending.Store(true)
 	s.endQueue()
-	_ = s.conn.Close(websocket.StatusNormalClosure, "")
+	_ = s.conn.CloseNow()
 }
 
 // Finish ends the stream and waits for the last final words.

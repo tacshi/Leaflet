@@ -1,8 +1,10 @@
 package agents
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 
 	"leaflet/internal/doc"
@@ -22,10 +24,11 @@ type draft struct {
 	// prev that block as it was.
 	into string
 	prev *doc.Node
-	// keys are the blocks as last put in, without their IDs, and ids
-	// theirs.
-	keys []string
-	ids  []string
+	// nodes are the blocks as last put in, as the call's arguments made
+	// them, which the page has as they are, and ids their IDs: kept here,
+	// so a tick of the stream finds none of them in the page again.
+	nodes []*doc.Node
+	ids   []string
 	// replaceAt and insertAt are the call's ops among the run's, -1
 	// before it has them.
 	replaceAt, insertAt int
@@ -157,7 +160,7 @@ func (x *Executor) FinishDraft(name, raw string) (map[string]any, bool) {
 	}
 	fail := func(err error) (map[string]any, bool) {
 		x.DropDraft()
-		return map[string]any{"error": toolMessage(err)}, true
+		return x.refuse(err), true
 	}
 	var args map[string]any
 	if json.Unmarshal([]byte(raw), &args) != nil {
@@ -188,6 +191,7 @@ func (x *Executor) FinishDraft(name, raw string) (map[string]any, bool) {
 	ids := x.draft.ids
 	x.draft = nil
 	x.written += countNodes(nodes)
+	x.Refused = ""
 	return map[string]any{"inserted_ids": ids}, true
 }
 
@@ -226,25 +230,25 @@ func (x *Executor) dropOp(at int, delta []doc.Op) {
 	}
 }
 
-// keyOf is a block as a draft compares it: without its IDs, which each
-// reading of the arguments makes anew.
-func keyOf(n *doc.Node) string {
-	c := n.Clone()
-	var strip func(*doc.Node)
-	strip = func(k *doc.Node) {
-		k.ID = ""
-		for _, ch := range k.Children {
-			strip(ch)
+// sameBlock reports whether a and b are one block but for their IDs,
+// which each reading of a call's arguments makes anew.
+func sameBlock(a, b *doc.Node) bool {
+	if a.Type != b.Type || len(a.Children) != len(b.Children) || !reflect.DeepEqual(a.Data, b.Data) {
+		return false
+	}
+	for i, k := range a.Children {
+		if !sameBlock(k, b.Children[i]) {
+			return false
 		}
 	}
-	strip(c)
-	raw, _ := json.Marshal(c)
-	return string(raw)
+	return true
 }
 
 // syncDraft puts nodes in the page, those before whole having all come:
-// a block that changed is rewritten, a new one goes after the one before
-// it, and one no longer there once all has come is taken out.
+// a block that changed is rewritten, the new ones go in together after
+// the one before them, and one no longer there once all has come is
+// taken out. Each change walks the page, so a tick of the stream makes
+// as few as it can.
 func (x *Executor) syncDraft(nodes []*doc.Node, whole int) error {
 	d := x.draft
 	// The changes in the page, of the replaced block and of the rest.
@@ -261,9 +265,10 @@ func (x *Executor) syncDraft(nodes []*doc.Node, whole int) error {
 		return nil
 	}
 	var err error
+	// fresh are the blocks after those the page has, which go in at once.
+	var fresh []*doc.Node
 	for i, n := range nodes {
-		key := keyOf(n)
-		if i < len(d.keys) && d.keys[i] == key {
+		if i < len(d.nodes) && sameBlock(d.nodes[i], n) {
 			continue
 		}
 		if e := x.checkURLs([]*doc.Node{n}); e != nil {
@@ -275,44 +280,58 @@ func (x *Executor) syncDraft(nodes []*doc.Node, whole int) error {
 		var op doc.Op
 		switch {
 		case i < len(d.ids):
-			op = x.Ctx.Content.ReplaceOp(d.ids[i], n)
+			n.ID = d.ids[i]
+			op = doc.Op{Op: "replace", ID: n.ID, Node: n, PrevNode: d.nodes[i].Clone()}
 		case i == 0 && d.into != "":
-			op = x.Ctx.Content.ReplaceOp(d.into, n)
-		case i == 0:
-			op = doc.InsertOp(d.pos, n)
+			n.ID = d.into
+			op = doc.Op{Op: "replace", ID: n.ID, Node: n, PrevNode: d.prev.Clone()}
 		default:
-			op = doc.InsertOp(doc.Position{After: d.ids[i-1]}, n)
+			fresh = append(fresh, n)
+			continue
 		}
 		if e := apply(i, op); e != nil {
 			d.frozen, err = true, e
 			break
 		}
 		if i < len(d.ids) {
-			d.keys[i] = key
+			d.nodes[i] = n
 		} else {
-			d.keys, d.ids = append(d.keys, key), append(d.ids, n.ID)
+			d.nodes, d.ids = append(d.nodes, n), append(d.ids, n.ID)
+		}
+	}
+	if len(fresh) > 0 {
+		pos := d.pos
+		if len(d.ids) > 0 {
+			pos = doc.Position{After: d.ids[len(d.ids)-1]}
+		}
+		if e := apply(len(d.ids), doc.InsertOp(pos, fresh...)); e != nil {
+			d.frozen, err = true, cmp.Or(err, e)
+		} else {
+			for _, n := range fresh {
+				d.nodes, d.ids = append(d.nodes, n), append(d.ids, n.ID)
+			}
 		}
 	}
 	if err == nil && whole >= len(nodes) && len(d.ids) > len(nodes) {
 		if apply(len(nodes), x.Ctx.Content.DeleteOp(d.ids[len(nodes):])) == nil {
-			d.keys, d.ids = d.keys[:len(nodes)], d.ids[:len(nodes)]
+			d.nodes, d.ids = d.nodes[:len(nodes)], d.ids[:len(nodes)]
 		}
 	}
-	ids := d.ids
+	ids, kept := d.ids, d.nodes
 	if d.into != "" && len(ids) > 0 {
 		if len(first) > 0 {
-			n := x.Ctx.Content.Find(d.into).Clone()
+			n := kept[0].Clone()
 			op := doc.Op{Op: "replace", ID: d.into, Node: n, PrevNode: d.prev.Clone()}
 			x.putOp(&d.replaceAt, op, summaryFor(d.verb, []*doc.Node{n}), []string{d.into}, first)
 		}
-		ids = ids[1:]
+		ids, kept = ids[1:], kept[1:]
 	}
 	switch {
 	case len(rest) == 0:
 	case len(ids) > 0:
-		var blocks []*doc.Node
-		for _, id := range ids {
-			blocks = append(blocks, x.Ctx.Content.Find(id).Clone())
+		blocks := make([]*doc.Node, len(kept))
+		for i, n := range kept {
+			blocks[i] = n.Clone()
 		}
 		pos := d.pos
 		if d.into != "" {

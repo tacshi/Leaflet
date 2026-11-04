@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-const schema = `
+var schema = `
 CREATE TABLE IF NOT EXISTS spaces (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, owner_id TEXT NOT NULL,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS page_contents (
   page_id TEXT PRIMARY KEY, content TEXT NOT NULL, plain_text TEXT NOT NULL DEFAULT '',
   updated_at INTEGER NOT NULL, base_content TEXT, remote_updated_at INTEGER,
   remote_revision INTEGER NOT NULL DEFAULT 0);
+CREATE INDEX IF NOT EXISTS page_contents_remote ON page_contents (page_id, remote_updated_at, remote_revision);
 CREATE TABLE IF NOT EXISTS comments (
   id TEXT PRIMARY KEY, page_id TEXT NOT NULL, block_id TEXT NOT NULL, parent_comment_id TEXT,
   author_id TEXT, author_kind TEXT NOT NULL DEFAULT 'user', author_name TEXT NOT NULL DEFAULT '',
@@ -73,7 +74,47 @@ CREATE INDEX IF NOT EXISTS peer_contents_page ON peer_contents (page_id, peer_id
 CREATE TABLE IF NOT EXISTS row_versions (
   tbl TEXT NOT NULL, id TEXT NOT NULL, at INTEGER NOT NULL, device TEXT NOT NULL,
   PRIMARY KEY (tbl, id));
-`
+` + textWritesTable + `
+CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(text,
+  tokenize = 'trigram case_sensitive 1', detail = 'none', content = '', contentless_delete = 1);
+` + textTriggers("page", "page_contents", "page_id", "content") +
+	textTriggers("recording", "recordings", "id", "transcript") +
+	textTriggers("comment", "comments", "id", "body")
+
+// textWritesTable keeps a number for each write of the text that the
+// to-dos and search read, by its kind (page, recording or comment) and ID:
+// a page's content, a recording's transcript, a comment's body. Triggers
+// keep it (textTriggers), so every write counts, another process's too, at
+// no cost to the row written, as large as it may be. write_id is drawn
+// anew with each write; indexed is the write search_index has, by n, or
+// NULL while it has none. Rows go with their text. It and search_index are
+// made from the other tables, which removing goes by (tables): they follow
+// them.
+const textWritesTable = `
+CREATE TABLE IF NOT EXISTS text_writes (
+  n INTEGER PRIMARY KEY, kind TEXT NOT NULL, id TEXT NOT NULL, write_id INTEGER NOT NULL, indexed INTEGER,
+  UNIQUE (kind, id));`
+
+// textTriggers keep text_writes of a kind of text, col of table by its key:
+// a row stored, or its text changed, draws a new write_id; a row removed
+// goes from text_writes and search_index.
+func textTriggers(kind, table, key, col string) string {
+	write := `INSERT INTO text_writes (kind, id, write_id) VALUES ('` + kind + `', new.` + key + `, random())
+    ON CONFLICT (kind, id) DO UPDATE SET write_id = excluded.write_id;`
+	return `
+CREATE TRIGGER IF NOT EXISTS ` + table + `_text_insert AFTER INSERT ON ` + table + ` BEGIN
+  ` + write + `
+END;
+CREATE TRIGGER IF NOT EXISTS ` + table + `_text_update AFTER UPDATE OF ` + col + ` ON ` + table + `
+  WHEN new.` + col + ` IS NOT old.` + col + ` BEGIN
+  ` + write + `
+END;
+CREATE TRIGGER IF NOT EXISTS ` + table + `_text_delete AFTER DELETE ON ` + table + ` BEGIN
+  DELETE FROM search_index WHERE rowid IN
+    (SELECT n FROM text_writes WHERE kind = '` + kind + `' AND id = old.` + key + ` AND indexed IS NOT NULL);
+  DELETE FROM text_writes WHERE kind = '` + kind + `' AND id = old.` + key + `;
+END;`
+}
 
 // migrations bring a database an earlier version made up to this one's:
 // migrations[i] takes it from schema version i to i+1, kept in PRAGMA
@@ -128,6 +169,26 @@ var migrations = []func(context.Context, *sql.Conn) error{
 	func(ctx context.Context, c *sql.Conn) error {
 		return execIfTable(ctx, c, "comments", `UPDATE comments SET body = '', quote = NULL
 			WHERE deleted_at IS NOT NULL AND (body <> '' OR quote IS NOT NULL)`)
+	},
+	// 8: a write of each text there is, which the triggers keep from now
+	// on (textTriggers), and search indexes as it next runs; and an index
+	// of the server's version of each page's content this device merged,
+	// read as the pulls go without the content.
+	func(ctx context.Context, c *sql.Conn) error {
+		if _, err := c.ExecContext(ctx, textWritesTable); err != nil {
+			return err
+		}
+		if err := addIndexes(ctx, c, [][3]string{
+			{"page_contents_remote", "page_contents", "page_id, remote_updated_at, remote_revision"},
+		}); err != nil {
+			return err
+		}
+		for _, t := range [][3]string{{"page", "page_contents", "page_id"}, {"recording", "recordings", "id"}, {"comment", "comments", "id"}} {
+			if err := execIfTable(ctx, c, t[1], `INSERT OR IGNORE INTO text_writes (kind, id, write_id) SELECT '`+t[0]+`', `+t[2]+`, random() FROM `+t[1]); err != nil { // #nosec G202 -- the migration's own names.
+				return err
+			}
+		}
+		return nil
 	},
 }
 

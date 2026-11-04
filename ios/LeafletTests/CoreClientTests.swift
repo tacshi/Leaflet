@@ -42,6 +42,16 @@ struct CoreClientTests {
         #expect(texts == ["Milk"])
     }
 
+    /// A search whose task is cancelled before its turn, as one typed over
+    /// is, never reaches the core.
+    @Test func aCancelledSearchNeverReachesTheCore() async throws {
+        let search = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await client.search("anything")
+        }
+        await #expect(throws: CancellationError.self) { try await search.value }
+    }
+
     /// Calls made one after another without waiting, each from a task of
     /// its own, as a slider's changes are, reach the core in that order:
     /// the last one made is the one kept.

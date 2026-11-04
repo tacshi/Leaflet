@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"image"
+	"io"
 	"log"
 	"maps"
 	"mime"
@@ -102,9 +103,9 @@ func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	url := n.Str("url")
 	// An uploaded picture is found by its file: its url is a path on the
 	// device that uploaded it.
+	path := ""
 	if f, ok := h.a.fileByID(n.Str("file_id")); ok {
-		path := h.a.localFile(f, redraw)
-		if path == "" {
+		if path = h.a.localFile(f, redraw); path == "" {
 			return nil, nil, h.a.downloadFailed(f.ID)
 		}
 		url = "file://" + path
@@ -112,7 +113,12 @@ func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 	if b := h.a.images.get(url, redraw); b != nil {
 		return b, h.a.images.player(url, n.ID, redraw), false
 	}
-	return nil, nil, url == "" || h.a.images.hasFailed(url)
+	failed := url == "" || h.a.images.hasFailed(url)
+	if failed && path != "" {
+		// The file may have gone since it was found.
+		h.a.lost(path)
+	}
+	return nil, nil, failed
 }
 func (h *host) Embed(c *ui.Context, n *doc.Node, width float32) { h.a.embedBlock(c, n, width) }
 func (h *host) Video(c *ui.Context, n *doc.Node, width float32) { h.a.videoBlock(c, n, width) }
@@ -182,15 +188,49 @@ func (h *host) SlashItems(query string) []editor.MenuItem {
 	return menu.Filter(menu.Slash(templates.Items(h.a.templateChoices(), id, h.a.templateHint)), query)
 }
 
+// mentionMenu is the @ menu as last made (menu.Mention), to filter by one
+// query after another, and what it was made from: the pages, the folders
+// and the open page's members as read, each by its first, which a new read
+// makes another; the user, the open page and the agents. The menu asks for
+// its items at every frame it shows: they are made again only as one of
+// those changes, and filtered again only as the query does.
+type mentionMenu struct {
+	from     mentionsFrom
+	agents   []menu.Agent
+	items    *menu.Folded
+	query    string
+	out      []menu.Item
+	filtered bool
+}
+
+type mentionsFrom struct {
+	pages            *store.Page
+	folders          *store.Folder
+	members          *store.Member
+	nPages, nFolders int
+	nMembers         int
+	user, page       string
+}
+
 func (h *host) MentionItems(query string) []editor.MenuItem {
-	m := menu.Mentions{Pages: h.a.pages, Folders: h.a.folders, UserID: h.a.session.UserID}
-	for _, o := range h.a.hub.Options() {
+	a := h.a
+	m := menu.Mentions{Pages: a.pages, Folders: a.folders, UserID: a.session.UserID}
+	for _, o := range a.hub.Options() {
 		m.Agents = append(m.Agents, menu.Agent{ProviderID: o.Provider.ID, Name: o.Name(), Model: o.Model})
 	}
-	if h.a.page != nil {
-		m.PageID, m.Members = h.a.page.id, h.a.page.members
+	if a.page != nil {
+		m.PageID, m.Members = a.page.id, a.page.members
 	}
-	return menu.Filter(menu.Mention(m), query)
+	from := mentionsFrom{pages: firstOf(m.Pages), folders: firstOf(m.Folders), members: firstOf(m.Members),
+		nPages: len(m.Pages), nFolders: len(m.Folders), nMembers: len(m.Members), user: m.UserID, page: m.PageID}
+	mm := &a.mentions
+	if mm.items == nil || from != mm.from || !slices.Equal(m.Agents, mm.agents) {
+		*mm = mentionMenu{from: from, agents: m.Agents, items: menu.Fold(menu.Mention(m))}
+	}
+	if !mm.filtered || query != mm.query {
+		mm.out, mm.query, mm.filtered = mm.items.Filter(query), query, true
+	}
+	return mm.out
 }
 
 func (h *host) Pick(t editor.Trigger, item editor.MenuItem) {
@@ -417,8 +457,10 @@ func (a *App) uploadFile(folderID string) {
 }
 
 func (a *App) openFile(f store.File) {
-	// A click tries a download that failed again.
+	// A click tries a download that failed again, and looks for the file
+	// on the device again.
 	delete(a.downloadFails, f.ID)
+	a.lost(f.LocalPath)
 	path := a.localFile(f, func() {
 		if f, ok := a.fileByID(f.ID); ok && f.LocalPath != "" {
 			openSafely(f.LocalPath)
@@ -473,27 +515,61 @@ func runsAsProgram(path string) bool {
 	return err == nil && runtime.GOOS != "windows" && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0
 }
 
+// fileByID finds a file: in an index of the files, made again once they
+// are others than it was made from, as every uploaded picture asks as it
+// draws.
 func (a *App) fileByID(id string) (store.File, bool) {
 	if id == "" {
 		return store.File{}, false
 	}
-	for _, f := range a.files {
-		if f.ID == id {
-			return f, true
+	from := listsFrom{files: firstOf(a.files), nFiles: len(a.files)}
+	if a.fileIndex == nil || from != a.fileIndexFrom {
+		a.fileIndex, a.fileIndexFrom = make(map[string]int, len(a.files)), from
+		for i, f := range a.files {
+			if _, ok := a.fileIndex[f.ID]; !ok {
+				a.fileIndex[f.ID] = i
+			}
 		}
 	}
-	return store.File{}, false
+	i, ok := a.fileIndex[id]
+	if !ok {
+		return store.File{}, false
+	}
+	return a.files[i], true
 }
+
+// presence is whether a file was on this device, and when that was found.
+type presence struct {
+	there bool
+	at    time.Time
+}
+
+// onDevice reports whether the file at path is there: as last looked, not
+// at every frame that shows it, until the files are read again, as after
+// a download, or showing it failed (lost); one that was not there is
+// looked for again once imageRetry has passed.
+func (a *App) onDevice(path string) bool {
+	if p, ok := a.present[path]; ok && (p.there || time.Since(p.at) < imageRetry) {
+		return p.there
+	}
+	_, err := os.Stat(path)
+	if a.present == nil {
+		a.present = map[string]presence{}
+	}
+	a.present[path] = presence{there: err == nil, at: time.Now()}
+	return err == nil
+}
+
+// lost has the file at path looked for again, as showing it failed.
+func (a *App) lost(path string) { delete(a.present, path) }
 
 // localFile returns where a file is on this device, or "" while one
 // uploaded from another device downloads; done runs once it has. A
 // download that failed is tried again once imageRetry has passed, or
 // when the file is opened.
 func (a *App) localFile(f store.File, done func()) string {
-	if f.LocalPath != "" {
-		if _, err := os.Stat(f.LocalPath); err == nil {
-			return f.LocalPath
-		}
+	if f.LocalPath != "" && a.onDevice(f.LocalPath) {
+		return f.LocalPath
 	}
 	if f.StoragePath == "" || !a.sync.CanFetch() || a.downloads[f.ID] || a.downloadFailed(f.ID) {
 		return ""
@@ -506,10 +582,12 @@ func (a *App) localFile(f store.File, done func()) string {
 	a.offMain(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
-		var data []byte
-		data, err = a.sync.Fetch(ctx, "files", f.StoragePath)
+		// Written to the disk as it comes, never all in memory.
+		var r io.ReadCloser
+		r, err = a.sync.FetchReader(ctx, "files", f.StoragePath)
 		if err == nil {
-			_, err = a.st.DownloadedFile(f.ID, data)
+			_, err = a.st.DownloadedFileFrom(f.ID, r)
+			_ = r.Close()
 		}
 	}, func() {
 		delete(a.downloads, f.ID)
@@ -568,8 +646,14 @@ func (a *App) exportMarkdown(id string) {
 
 func safeName(s string) string { return export.SafeName(s) }
 
-// loadMembers reads who a page is shared with.
+// loadMembers reads who a page is shared with, as it opens. Sync reads
+// them itself for the user's own pages as they open (sync.Service.SetOpen),
+// on the server: here they are read for the pages others share, and for
+// all of them while sync goes through iCloud Drive instead.
 func (a *App) loadMembers(pageID string) {
+	if p, err := a.st.Page(pageID); err == nil && p.SpaceID == a.st.Session().SpaceID && !a.sync.ICloudOn() {
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	_ = a.sync.LoadMembers(ctx, pageID)
@@ -929,13 +1013,18 @@ func hexOf(c ui.Color) string {
 type embedScroll struct{ a *App }
 
 // embedSize is how tall an embed's content is at a width of its frame.
-type embedSize struct{ h, w float32 }
+// kept is set while it is what a view let go said: the block keeps that
+// height, its view made again hidden till it says its own.
+type embedSize struct {
+	h, w float32
+	kept bool
+}
 
 // Size keeps the height of embed id's content at its frame's width w. The
 // first call also tells that the embed has drawn, so it shows.
 func (s *embedScroll) Size(id string, h, w float64) {
 	s.a.update(func() {
-		s.a.embedSizes[id] = embedSize{float32(min(max(h, 0), 4000)), float32(w)}
+		s.a.embedSizes[id] = embedSize{h: float32(min(max(h, 0), 4000)), w: float32(w)}
 	})
 }
 
@@ -973,15 +1062,30 @@ func (a *App) zoomEmbed(key, how string) {
 	go func() { _, _ = page.Eval(script) }()
 }
 
-// Scroll scrolls the open page by dy DIPs, for wheel movement over an
-// embed that the embed did not use.
-func (s *embedScroll) Scroll(dy float64) {
-	dy = max(min(dy, 2000), -2000)
+// maxEmbedWheel is the most DIPs an embed's leftover wheel scrolls the
+// page in a frame.
+const maxEmbedWheel = 2000
+
+// Scroll scrolls the open page by dy DIPs, for wheel movement over embed
+// id that the embed did not use: only while the pointer is over its view,
+// as an embed could otherwise scroll the page at will, and once a frame
+// (embedWheel), however often it asks.
+func (s *embedScroll) Scroll(id string, dy float64) {
+	dy = max(min(dy, maxEmbedWheel), -maxEmbedWheel)
 	s.a.update(func() {
-		if ps := s.a.page; ps != nil {
-			ps.scroll.Y = max(min(ps.scroll.Y+float32(dy), ps.scroll.MaxY), 0)
+		if a := s.a; a.embedOver == id && a.embeds[id] != nil {
+			a.embedWheel += float32(dy)
 		}
 	})
+}
+
+// scrollByEmbeds scrolls the open page by the wheel the embed under the
+// pointer passed on since the frame before, up to maxEmbedWheel.
+func (a *App) scrollByEmbeds(ps *pageState) {
+	if dy := a.embedWheel; dy != 0 {
+		a.embedWheel = 0
+		ps.scroll.Y = max(min(ps.scroll.Y+max(min(dy, maxEmbedWheel), -maxEmbedWheel), ps.scroll.MaxY), 0)
+	}
 }
 
 func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
@@ -1021,39 +1125,63 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 		})
 		// The block grows when the content is taller at this width, as a
 		// narrow page stacks its layout.
-		a.sandbox(c, n.ID, n.Str("html"), width-2-2*pad, func(content float32) float32 {
+		html := n.Str("html")
+		a.sandbox(c, n.ID, embedInput{src: html, kind: n.Type}, func() string { return html }, width-2-2*pad, func(content float32) float32 {
 			return max(height, min(content, 1200))
-		}, height, 10, false)
+		}, height)
 	})
 }
 
-// sandbox shows HTML in a block's sandboxed web view, key naming it, at
-// width w inside the page. fit gives the frame's height from its
+// embedInput is what an embed's web view loads its page from: the embed's
+// HTML, or a formula's or a diagram's source, of block kind kind ("full"
+// for a diagram's full screen view), on the background bg, dark or not.
+// toPage gives the page all of the wheel (sandbox). The page, as large as
+// the scripts that draw math and diagrams, is made again only as one of
+// them changes, not at every frame.
+type embedInput struct {
+	src, kind string
+	bg        ui.Color
+	dark      bool
+	toPage    bool
+}
+
+// sandbox shows a block's HTML in its sandboxed web view, key naming it,
+// at width w inside the page: page makes the HTML of in, which sandbox
+// fills in with the theme's colors. fit gives the frame's height from its
 // content's, once that has drawn; until then it is height, and the box
-// shows, gap above it, rather than a blank page in the frame's color. A
-// nil fit has the frame fill the rest of its parent instead.
-// The view loads again when the HTML or the theme changes: by hand, by an
-// agent, by undo or a restored version.
+// shows rather than a blank page in the frame's color. A nil fit has the
+// frame fill the rest of its parent instead. The view loads again when in
+// changes: by hand, by an agent, by undo or a restored version, or as the
+// theme does.
 //
-// toPage gives all of the wheel over the view to the page around it, as
+// A block's view is made only once its frame comes within a window's
+// height of the window, and let go once it is three away: a page of many
+// formulas runs those near the part of it shown, each with its own copy
+// of KaTeX, not all of them. One let go keeps its height for its block.
+//
+// in.toPage gives all of the wheel over the view to the page around it, as
 // MyGo does natively, for HTML that neither scrolls nor takes the wheel
 // itself, as math; otherwise the frame keeps the wheel and passes the
 // page what it leaves.
-func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float32) float32, height, gap float32, toPage bool) {
+func (a *App) sandbox(c *ui.Context, key string, in embedInput, page func() string, w float32, fit func(float32) float32, height float32) {
 	pal := theme.Of(c)
-	src := rendered.EmbedPage(key, html, hexOf(pal.Surface), pal.Dark, !toPage)
-	size, ready := a.embedSizes[key]
-	if ready && fit != nil && abs32(size.w-w) < 4 {
+	in.bg, in.dark = pal.Surface, pal.Dark
+	if a.embedBuilt == nil {
+		a.embedBuilt = map[string]bool{}
+	}
+	a.embedBuilt[key] = true
+	size, sized := a.embedSizes[key]
+	if sized && fit != nil && abs32(size.w-w) < 4 {
 		height = fit(size.h)
 	}
+	ready := sized && !size.kept
 	v := a.embeds[key]
-	if v != nil && a.embedToPage[key] != toPage {
+	if v != nil && a.embedToPage[key] != in.toPage {
 		// The block was replaced by another kind, keeping its ID, as an
 		// agent's replace_block does: a view takes the wheel as it was
 		// made, so a new one takes it as the new kind needs.
-		v.Destroy()
-		delete(a.embeds, key)
-		delete(a.embedSrc, key)
+		a.letGoEmbed(key)
+		delete(a.embedIn, key)
 		v = nil
 	}
 	// A view that could not be made is not tried again at every frame,
@@ -1062,69 +1190,150 @@ func (a *App) sandbox(c *ui.Context, key, html string, w float32, fit func(float
 		ui.Text(c, locales.HostEmbedError(why)).TextColor(pal.TextMuted)
 		return
 	}
-	if v == nil && a.win != nil {
-		wv, err := a.win.NewWebView(mygo.WebViewOptions{BackgroundColor: hexOf(pal.Surface), ScrollToContainer: toPage,
-			Page: mygo.PageOptions{TrustedOrigins: []string{strings.TrimSuffix(embedURL, "/")}}})
+	var holder ui.Element
+	near := true
+	if fit != nil {
+		holder = ui.Column(c.Key("frame:" + key)).FillWidth()
+		var far bool
+		near, far = embedNear(c, holder.Bounds())
+		if v != nil && far {
+			a.letGoEmbed(key)
+			v = nil
+		}
+	}
+	made := false
+	if v == nil && near && a.win != nil {
+		wv, err := a.win.NewWebView(embedViewOptions(pal.Surface, in.toPage))
 		if err != nil {
 			log.Printf("embed %s: %v", key, err)
 			a.embedFailed[key] = err.Error()
 			ui.Text(c, locales.HostEmbedError(err.Error())).TextColor(pal.TextMuted)
 			return
 		}
-		page := wv.Page()
-		page.OnWillNavigate(func(e *mygo.NavigateEvent) {
+		p := wv.Page()
+		p.OnWillNavigate(func(e *mygo.NavigateEvent) {
 			if !strings.HasPrefix(e.URL, "about:") && !strings.HasPrefix(e.URL, "data:") {
 				e.PreventDefault()
 			}
 		})
-		page.SetWindowOpenHandler(func(mygo.WindowOpenRequest) *mygo.WindowOptions { return nil })
+		p.SetWindowOpenHandler(func(mygo.WindowOpenRequest) *mygo.WindowOptions { return nil })
 		a.embeds[key] = wv
-		if toPage {
+		if in.toPage {
 			a.embedToPage[key] = true
 		} else {
 			delete(a.embedToPage, key)
 		}
-		v = wv
+		v, made = wv, true
 	}
-	if v == nil {
-		return
-	}
-	if a.embedSrc[key] != src {
-		v.Page().LoadHTML(src, embedURL)
-		a.embedSrc[key] = src
-		delete(a.embedSizes, key)
+	if v != nil && (made || a.embedIn[key] != in) {
+		if was, ok := a.embedIn[key]; ok && was == in && sized {
+			// Made again for the same page: it keeps its height, hidden
+			// till it has drawn.
+			size.kept = true
+			a.embedSizes[key] = size
+		} else {
+			delete(a.embedSizes, key)
+		}
+		v.Page().LoadHTML(rendered.EmbedPage(key, page(), hexOf(in.bg), in.dark, !in.toPage), embedURL)
+		a.embedIn[key] = in
 		delete(a.embedZoomed, key)
 		ready = false
 	}
-	wv := ui.WebView(c, v).FillWidth().Radius(6)
-	if fit == nil {
-		wv.Grow(1)
+	show := func() {
+		if v == nil {
+			// Away from what the window shows: the block keeps its room.
+			ui.Box(c).Height(height).FillWidth().Radius(6).Background(pal.Ground)
+			return
+		}
+		wv := ui.WebView(c, v).FillWidth().Radius(6)
+		if wv.Hovered() {
+			a.embedOver = key
+		} else if a.embedOver == key {
+			a.embedOver = ""
+		}
+		if fit == nil {
+			wv.Grow(1)
+			if !ready {
+				wv.Opacity(0)
+			}
+			return
+		}
+		wv.Height(height)
 		if !ready {
 			wv.Opacity(0)
+			ui.Box(c).Height(height).FillWidth().Margin(-height, 0, 0, 0).Radius(6).Background(pal.Ground)
 		}
+	}
+	if fit == nil {
+		show()
 		return
 	}
-	wv.Height(height)
-	if !ready {
-		wv.Opacity(0)
-		ui.Box(c).Height(height).FillWidth().Margin(-height-gap, 0, 0, 0).Radius(6).Background(pal.Ground)
+	holder.Children(show)
+}
+
+// embedViewOptions are those of an embed's web view, on a background of
+// bg: every frame of its page starts without WebRTC (rendered.NoRTC), the
+// frames the embed makes itself too, before their own scripts run.
+func embedViewOptions(bg ui.Color, toPage bool) mygo.WebViewOptions {
+	return mygo.WebViewOptions{BackgroundColor: hexOf(bg), ScrollToContainer: toPage,
+		Page: mygo.PageOptions{TrustedOrigins: []string{strings.TrimSuffix(embedURL, "/")},
+			PreloadScript: rendered.NoRTC, PreloadAllFrames: true}}
+}
+
+// embedNear tells where a block's frame, r as last laid out, is from the
+// window: near within a window's height of it, where its web view is
+// made, or far past three, where it is let go; in between, neither, and a
+// view keeps as it is. A frame not laid out yet is neither, and the next
+// frame tells; in a window of no size, all are near.
+func embedNear(c *ui.Context, r ui.Rect) (near, far bool) {
+	_, wh := c.Size()
+	if wh <= 0 {
+		return true, false
+	}
+	if r.W <= 0 && r.H <= 0 {
+		c.Invalidate()
+		return false, false
+	}
+	var away float32
+	switch {
+	case r.Y+r.H < 0:
+		away = -(r.Y + r.H)
+	case r.Y > wh:
+		away = r.Y - wh
+	}
+	return away <= wh, away > 3*wh
+}
+
+// letGoEmbed destroys embed key's web view, keeping what its block shows
+// at: its height, and the page it had, to tell its next view, made for
+// the same page, to keep that height.
+func (a *App) letGoEmbed(key string) {
+	if v := a.embeds[key]; v != nil {
+		v.Destroy()
+	}
+	delete(a.embeds, key)
+	delete(a.embedZoomed, key)
+	if a.embedOver == key {
+		a.embedOver = ""
 	}
 }
 
 // dropEmbeds lets go of the web views of embeds, math and diagrams no
 // longer in the open page, and what they said about themselves, as
-// deleting one or undoing its insert leaves it running otherwise.
+// deleting one or undoing its insert leaves it running otherwise; and,
+// called as the page has built, of the views of blocks it did not build,
+// as those folded away, which keep what they said, to show again.
 func (a *App) dropEmbeds() {
 	gone := func(key string) bool {
-		return a.page == nil || a.page.editor.Content.Find(strings.TrimPrefix(key, "full:")) == nil
+		return a.page == nil || !a.page.editor.HasBlock(strings.TrimPrefix(key, "full:"))
 	}
-	for key, v := range a.embeds {
-		if gone(key) {
-			v.Destroy()
-			delete(a.embeds, key)
+	for key := range a.embeds {
+		if gone(key) || !a.embedBuilt[key] && !strings.HasPrefix(key, "full:") {
+			a.letGoEmbed(key)
 		}
 	}
-	maps.DeleteFunc(a.embedSrc, func(key, _ string) bool { return gone(key) })
+	clear(a.embedBuilt)
+	maps.DeleteFunc(a.embedIn, func(key string, _ embedInput) bool { return gone(key) })
 	maps.DeleteFunc(a.embedSizes, func(key string, _ embedSize) bool { return gone(key) })
 	maps.DeleteFunc(a.embedZoomed, func(key string, _ bool) bool { return gone(key) })
 	maps.DeleteFunc(a.embedToPage, func(key string, _ bool) bool { return gone(key) })

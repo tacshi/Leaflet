@@ -109,8 +109,11 @@ func chatKey(pageID string) string { return "chat." + pageID }
 
 func pastChatsKey(pageID string) string { return "chat.past." + pageID }
 
+func runningKey(pageID string) string { return "chat.running." + pageID }
+
 // loadChat reads a page's chat and its earlier ones from an earlier launch
-// into s.
+// into s, with the ops its run had made when that launch ended, should it
+// have ended during one (saveRunning).
 func (h *Hub) loadChat(s *Session) {
 	if raw, ok := h.st.Value(pastChatsKey(s.PageID)); ok {
 		if err := json.Unmarshal([]byte(raw), &s.Past); err != nil {
@@ -120,20 +123,32 @@ func (h *Hub) loadChat(s *Session) {
 			c.restore()
 		}
 	}
-	raw, ok := h.st.Value(chatKey(s.PageID))
+	if raw, ok := h.st.Value(chatKey(s.PageID)); ok {
+		var saved Conversation
+		if err := json.Unmarshal([]byte(raw), &saved); err != nil {
+			log.Printf("agent chat: %v", err)
+		} else {
+			saved.restore()
+			if saved.ID != "" {
+				s.ConversationID = saved.ID
+			}
+			s.Messages, s.Runs = saved.Messages, saved.Runs
+		}
+	}
+	raw, ok := h.st.Value(runningKey(s.PageID))
 	if !ok {
 		return
 	}
-	var saved Conversation
-	if err := json.Unmarshal([]byte(raw), &saved); err != nil {
+	var run Run
+	if err := json.Unmarshal([]byte(raw), &run); err != nil {
 		log.Printf("agent chat: %v", err)
-		return
+	} else if r := s.Run(run.ID); r != nil && len(run.Ops) > len(r.Ops) {
+		r.Ops, r.Edits = run.Ops, run.Edits
+		h.saveChat(s)
 	}
-	saved.restore()
-	if saved.ID != "" {
-		s.ConversationID = saved.ID
+	if err := h.st.DeleteValue(runningKey(s.PageID)); err != nil {
+		log.Printf("agent chat: %v", err)
 	}
-	s.Messages, s.Runs = saved.Messages, saved.Runs
 }
 
 // current is the page's chat as it is kept, its runs with it.
@@ -162,6 +177,20 @@ func (h *Hub) saveChat(s *Session) {
 	raw, err := json.Marshal(s.current())
 	if err == nil {
 		err = h.st.SetValue(chatKey(s.PageID), string(raw))
+	}
+	if err != nil {
+		log.Printf("agent chat: %v", err)
+	}
+}
+
+// saveRunning keeps the run working in a page's chat, with the ops it
+// made so far, for the next launch to undo should the app quit before it
+// ends (loadChat): the run alone, as the rest of the chat, kept as the run
+// began, stays as it was while it works. Its end keeps the chat whole.
+func (h *Hub) saveRunning(s *Session, run *Run) {
+	raw, err := json.Marshal(run)
+	if err == nil {
+		err = h.st.SetValue(runningKey(s.PageID), string(raw))
 	}
 	if err != nil {
 		log.Printf("agent chat: %v", err)
@@ -256,8 +285,10 @@ func (h *Hub) Chat(pageID, text string, focus []string) {
 // with its reply, as the agent function builds it from the runs that are
 // done. A request whose reply failed, or whose run failed or was undone,
 // goes with it, neither said: the model would take the request for done,
-// and the page for having what its reply says.
-func chatHistory(s *Session) []map[string]string {
+// and the page for having what its reply says. Each turn says whether its
+// run kept to the page, as keptToPage counts it, and whether its URL guard
+// was on, as a reply whose run is not known is taken to have been.
+func chatHistory(s *Session) []Turn {
 	msgs := s.Messages
 	kept := func(m *Message) bool {
 		if m.Pending || m.Error {
@@ -266,16 +297,24 @@ func chatHistory(s *Session) []map[string]string {
 		r := s.Run(m.RunID)
 		return r == nil || (!r.Undone && r.Status != "failed")
 	}
-	var turns []map[string]string
+	onPage := func(m *Message) bool {
+		r := s.Run(m.RunID)
+		return r != nil && r.KeptToPage
+	}
+	guarded := func(m *Message) bool {
+		r := s.Run(m.RunID)
+		return r == nil || r.Guarded
+	}
+	var turns []Turn
 	for i, m := range msgs {
 		if m.Mine {
 			if i+1 < len(msgs) && !msgs[i+1].Mine && kept(msgs[i+1]) {
-				turns = append(turns, map[string]string{"role": "user", "content": m.Text})
+				turns = append(turns, Turn{Role: "user", Content: m.Text, KeptToPage: onPage(msgs[i+1]), Guarded: guarded(msgs[i+1])})
 			}
 			continue
 		}
 		if kept(m) {
-			turns = append(turns, map[string]string{"role": "assistant", "content": m.Text})
+			turns = append(turns, Turn{Role: "assistant", Content: m.Text, KeptToPage: onPage(m), Guarded: guarded(m)})
 		}
 	}
 	if len(turns) > 20 {

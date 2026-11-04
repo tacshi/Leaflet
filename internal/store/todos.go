@@ -13,20 +13,21 @@ type PageTodo struct {
 
 // Todos returns the open to-dos of the pages on this device, but
 // templates', that have a due date or an owner, page by page. It decodes
-// only the pages whose content changed since it last did: the app asks
-// again after every save, while the To-dos tab shows.
+// only the pages whose content changed since it last did, by their writes
+// (WriteID), which it reads without their content: the app asks again
+// after every save, while the To-dos tab shows.
 func (s *Store) Todos() ([]PageTodo, error) {
 	pages, err := s.Pages()
 	if err != nil {
 		return nil, err
 	}
-	keys := map[string]todoKey{}
-	rows, err := s.db.Query(`SELECT page_id, updated_at, remote_revision, length(content) FROM page_contents`)
+	keys := map[string]int64{}
+	rows, err := s.db.Query(`SELECT id, write_id FROM text_writes WHERE kind = 'page'`)
 	if err := each(rows, err, func(sc scanner) (bool, error) {
 		var id string
-		var k todoKey
-		err := sc.Scan(&id, &k.at, &k.revision, &k.size)
-		keys[id] = k
+		var written int64
+		err := sc.Scan(&id, &written)
+		keys[id] = written
 		return true, err
 	}); err != nil {
 		return nil, err
@@ -56,15 +57,9 @@ func (s *Store) Todos() ([]PageTodo, error) {
 	return out, nil
 }
 
-// todoKey tells a page's content apart from what it was: every write of
-// it moves its time, or the server's revision, or both, and its length
-// tells two writes in one millisecond apart but for ones as long.
-type todoKey struct {
-	at, revision, size int64
-}
-
-// pageTodos are a page's to-dos as its content, by key, gave them.
+// pageTodos are a page's to-dos as its content, by the write it was
+// (WriteID), gave them.
 type pageTodos struct {
-	key   todoKey
+	key   int64
 	todos []doc.Todo
 }

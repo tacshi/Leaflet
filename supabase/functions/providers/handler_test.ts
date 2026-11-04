@@ -23,6 +23,8 @@ function project(): { p: Project; secrets: string[] } {
   const secrets: string[] = [];
   p.rpcs.set_provider_secret = (args) => {
     secrets.push(String(args.p_secret));
+    const saved = p.tables.model_providers.find((r) => r.id === args.p_provider_id);
+    if (saved) saved.has_secret = args.p_secret !== "";
     return null;
   };
   p.rpcs.get_provider_secret = () => "sk-saved";
@@ -80,6 +82,68 @@ Deno.test("a saved key stays with its address", async () => {
   assertEquals(rekeyed.status, 200);
   assertEquals(row(p).base_url, "https://attacker.example/v1");
   assertEquals(secrets, ["sk-new"]);
+});
+
+// A key that is no string is no key: the save is refused before the row
+// is read or written, so the saved key never sits at the new address.
+Deno.test("a key that is no string is refused before anything is written", async () => {
+  const { p, secrets } = project();
+  for (const api_key of [null, 42, { key: "sk-new" }]) {
+    const refused = await call(p, deps(p), {
+      action: "save",
+      provider: { id: "openai", preset: "openai", base_url: "https://attacker.example/v1", api_key },
+    });
+    assertEquals(refused.status, 400);
+  }
+  assertEquals(row(p).base_url, "https://api.openai.com/v1");
+  assertEquals(secrets, []);
+  assertEquals(p.requests.filter((r) => !r.startsWith("GET /auth/")), []);
+});
+
+// A base URL a URL parser reads otherwise than it looks (a backslash,
+// read as a slash, so the host is evil.example; a tab, dropped; a letter
+// past ASCII, mapped) is refused, with a new key or without, before
+// anything is written.
+Deno.test("a base URL is what a parser reads it as", async () => {
+  const { p, secrets } = project();
+  for (
+    const base_url of [
+      "https://evil.example\\@api.openai.com/v1",
+      "https://api.openai.com\t.evil.example/v1",
+      "https://аpi.openai.com/v1",
+    ]
+  ) {
+    for (const provider of [{ id: "openai", api_key: "sk-new" }, {}]) {
+      const refused = await call(p, deps(p), { action: "save", provider: { preset: "openai", base_url, ...provider } });
+      assertEquals(refused.status, 400);
+    }
+  }
+  assertEquals([p.tables.model_providers.length, row(p).base_url, secrets], [1, "https://api.openai.com/v1", []]);
+  assertEquals(p.requests.filter((r) => !r.startsWith("GET")), []);
+});
+
+// A provider made local, at any address, takes no key, and loses the one
+// it had rather than keeping it there; the server never calls it.
+Deno.test("a provider made local loses its key", async () => {
+  const { p, secrets } = project();
+  const listed: string[] = [];
+  const d = { ...deps(p), listModels: (conn: { baseUrl: string }) => (listed.push(conn.baseUrl), Promise.resolve([])) };
+  const keyed = await call(p, d, {
+    action: "save",
+    provider: { id: "openai", preset: "ollama", base_url: "https://attacker.example/v1", api_key: "sk-new" },
+  });
+  assertEquals(keyed.status, 400);
+  assertEquals(row(p).preset, "openai");
+
+  const saved = await call(p, d, {
+    action: "save",
+    provider: { id: "openai", preset: "ollama", base_url: "https://attacker.example/v1" },
+  });
+  assertEquals(saved.status, 200);
+  assertEquals(secrets, [""]);
+  assertEquals([row(p).base_url, row(p).is_local, row(p).has_secret], ["https://attacker.example/v1", true, false]);
+  assertEquals((await call(p, d, { action: "models", provider_id: "openai" })).status, 400);
+  assertEquals(listed, []);
 });
 
 // A test of a model other than the provider's default says nothing of the

@@ -6,7 +6,7 @@
 import type { SupabaseClient, User } from "jsr:@supabase/supabase-js@2.118.0";
 import { errorResponse, HttpError, json, preflight, readJson } from "../_shared/cors.ts";
 import { type Clients, loadProvider, providerSecret, requireTokenUntil, requireUser } from "../_shared/supabase.ts";
-import { MAX_ANSWER_BYTES, normalizeBaseUrl, readText } from "../_shared/openai.ts";
+import { LOCAL_PRESETS, MAX_ANSWER_BYTES, normalizeBaseUrl, readText } from "../_shared/openai.ts";
 import { isTimeout, type safeFetch, UnsafeUrlError } from "../_shared/net.ts";
 import { SAVE_MS } from "../_shared/deadline.ts";
 import { type Segment, tokensToSegments } from "../_shared/segments.ts";
@@ -38,7 +38,10 @@ export interface SttDeps {
    * Soniox.
    */
   deadlineMs: number;
-  /** The longest audio transcribed here: it is read into memory to send on. */
+  /**
+   * The longest audio transcribed here. It is streamed from Storage to the
+   * transcriber, never held whole, so the deadline bounds it, not memory.
+   */
   maxAudioBytes: number;
   /** Waits between asking Soniox whether it is done; tests wait less. */
   pollMs?: number;
@@ -161,7 +164,9 @@ function until(deadline: number): AbortSignal {
  * Where an OpenAI-compatible transcription goes, and with which key. A
  * provider's key goes only to the provider's own address, which
  * providers.save checked: the endpoint in the settings, which the client
- * writes, may name it but not send the key anywhere else.
+ * writes, may name it but not send the key anywhere else. A local
+ * provider's address is the device's, which providers.save never checks
+ * and the server never calls.
  */
 export async function endpointFor(
   uc: SupabaseClient,
@@ -170,6 +175,9 @@ export async function endpointFor(
 ): Promise<{ baseUrl: string; apiKey: string | null }> {
   if (!settings.provider_id) return { baseUrl: normalizeBaseUrl(settings.base_url!), apiKey: null };
   const provider = await loadProvider(uc, settings.provider_id);
+  if (provider.is_local || LOCAL_PRESETS.has(provider.preset)) {
+    throw new HttpError(400, "Local providers are reached from your device, not from the server");
+  }
   const baseUrl = normalizeBaseUrl(provider.base_url, provider.preset);
   if (settings.base_url && new URL(normalizeBaseUrl(settings.base_url)).href !== new URL(baseUrl).href) {
     throw new HttpError(
@@ -268,19 +276,15 @@ async function transcribe(
     if (editable === true) throw new HttpError(409, "This recording is being transcribed already");
     throw new HttpError(403, "You can view this recording but not edit its page");
   }
+  const audio: Audio = {
+    name: fileName,
+    type: mediaType(object.metadata?.mimetype),
+    open: (signal) => openAudio(uc, rec.audio_path, deps.maxAudioBytes, signal),
+  };
   try {
-    const { data: audio, error: downloadError } = await uc.storage.from("recordings").download(rec.audio_path);
-    if (downloadError || !audio) {
-      console.error("recording audio:", downloadError?.message ?? "missing");
-      throw new HttpError(502, "Could not read the recording's audio");
-    }
-    if (audio.size > deps.maxAudioBytes) {
-      throw new HttpError(413, "This recording is too long to transcribe on the server");
-    }
-
     const { segments, model } = sonioxApiKey
-      ? await sonioxFile(sonioxApiKey, audio, fileName, settings, language, deadline, deps)
-      : await openAiCompatible(endpoint!, audio, fileName, settings, language, rec.duration_ms ?? 0, deadline, deps);
+      ? await sonioxFile(sonioxApiKey, audio, settings, language, deadline, deps)
+      : await openAiCompatible(endpoint!, audio, settings, language, rec.duration_ms ?? 0, deadline, deps);
 
     const { data: saved, error: saveError } = await uc.from("recordings").update({
       transcript: segments,
@@ -316,10 +320,95 @@ async function transcribe(
   }
 }
 
+/**
+ * A recording's audio as it is sent: its file name and media type, and its
+ * bytes, streamed from Storage anew each time it is sent.
+ */
+interface Audio {
+  name: string;
+  type: string;
+  open(signal: AbortSignal): Promise<ReadableStream<Uint8Array>>;
+}
+
+/** A media type as a part's header may carry it, or the one for any bytes. */
+function mediaType(raw: unknown): string {
+  const type = String(raw ?? "");
+  return /^[\w.+-]+\/[\w.+-]+$/.test(type) ? type : "application/octet-stream";
+}
+
+/**
+ * The recording's audio from Storage, as a stream that fails past maxBytes:
+ * Storage told its size before the recording was claimed, but its recorder
+ * may upload it again meanwhile.
+ */
+async function openAudio(
+  uc: SupabaseClient,
+  path: string,
+  maxBytes: number,
+  signal: AbortSignal,
+): Promise<ReadableStream<Uint8Array>> {
+  const { data, error } = await uc.storage.from("recordings").download(path, {}, { signal }).asStream();
+  if (error || !data) {
+    console.error("recording audio:", error?.message ?? "missing");
+    throw new HttpError(502, "Could not read the recording's audio");
+  }
+  let read = 0;
+  return (data as ReadableStream<Uint8Array>).pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, out) {
+        read += chunk.byteLength;
+        if (read > maxBytes) out.error(new HttpError(413, "This recording is too long to transcribe on the server"));
+        else out.enqueue(chunk);
+      },
+    }),
+  );
+}
+
+/**
+ * Posts the audio, after fields, as multipart/form-data through post. The
+ * audio's bytes go on as Storage sends them, so a recording is never in
+ * memory whole; the body has no length, and goes chunked, or in HTTP/2's
+ * frames. The download stops once post has answered, read whole or not.
+ */
+async function postAudio(
+  audio: Audio,
+  fields: [string, string][],
+  signal: AbortSignal,
+  post: (body: ReadableStream<Uint8Array>, contentType: string) => Promise<Response>,
+): Promise<Response> {
+  const answered = new AbortController();
+  try {
+    const bytes = await audio.open(AbortSignal.any([signal, answered.signal]));
+    const boundary = `leaflet-${crypto.randomUUID()}`;
+    // The file's name goes in quotes: none of its own, nor a line break.
+    const name = audio.name.replace(/["\r\n]/g, (c) => encodeURIComponent(c));
+    const head = fields
+      .map(([field, value]) => `--${boundary}\r\nContent-Disposition: form-data; name="${field}"\r\n\r\n${value}\r\n`)
+      .join("") +
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name}"\r\n` +
+      `Content-Type: ${audio.type}\r\n\r\n`;
+    const text = new TextEncoder();
+    const body = ReadableStream.from(between(text.encode(head), bytes, text.encode(`\r\n--${boundary}--\r\n`)));
+    return await post(body, `multipart/form-data; boundary=${boundary}`);
+  } finally {
+    answered.abort();
+  }
+}
+
+/** head, then the bytes as they come, then tail. */
+async function* between(
+  head: Uint8Array,
+  bytes: ReadableStream<Uint8Array>,
+  tail: Uint8Array,
+): AsyncGenerator<Uint8Array> {
+  yield head;
+  yield* bytes;
+  yield tail;
+}
+
 async function openAiCompatible(
   { baseUrl, apiKey }: { baseUrl: string; apiKey: string | null },
-  audio: Blob,
-  fileName: string,
+  audio: Audio,
   settings: SttSettings,
   language: string | null,
   durationMs: number,
@@ -328,20 +417,19 @@ async function openAiCompatible(
 ): Promise<{ segments: Segment[]; model: string }> {
   const model = settings.model || "whisper-1";
 
-  const send = async (format: "verbose_json" | "json") => {
-    const form = new FormData();
-    form.append("file", audio, fileName);
-    form.append("model", model);
-    form.append("response_format", format);
-    if (format === "verbose_json") form.append("timestamp_granularities[]", "segment");
-    if (language) form.append("language", language);
+  const send = (format: "verbose_json" | "json") => {
+    const fields: [string, string][] = [["model", model], ["response_format", format]];
+    if (format === "verbose_json") fields.push(["timestamp_granularities[]", "segment"]);
+    if (language) fields.push(["language", language]);
+    const signal = until(deadline);
     // The base URL is the user's: safeFetch keeps it off private addresses.
-    return await deps.send(`${baseUrl}/audio/transcriptions`, {
-      method: "POST",
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-      body: form,
-      signal: until(deadline),
-    });
+    return postAudio(audio, fields, signal, (body, contentType) =>
+      deps.send(`${baseUrl}/audio/transcriptions`, {
+        method: "POST",
+        headers: { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}), "Content-Type": contentType },
+        body,
+        signal,
+      }));
   };
 
   // Some models (gpt-4o-transcribe) only return plain json: ask them for it
@@ -381,8 +469,7 @@ async function openAiCompatible(
 
 async function sonioxFile(
   key: string,
-  audio: Blob,
-  fileName: string,
+  audio: Audio,
   settings: SttSettings,
   language: string | null,
   deadline: number,
@@ -393,14 +480,14 @@ async function sonioxFile(
   const auth = { Authorization: `Bearer ${key}` };
   const model = settings.model?.startsWith("stt-async") ? settings.model : SONIOX_ASYNC_MODEL;
 
-  const form = new FormData();
-  form.append("file", audio, fileName);
-  const upload = await fetch(`${SONIOX_API}/files`, {
-    method: "POST",
-    headers: auth,
-    body: form,
-    signal: until(deadline),
-  });
+  const signal = until(deadline);
+  const upload = await postAudio(audio, [], signal, (body, contentType) =>
+    fetch(`${SONIOX_API}/files`, {
+      method: "POST",
+      headers: { ...auth, "Content-Type": contentType },
+      body,
+      signal,
+    }));
   if (!upload.ok) throw await sonioxFailure(upload, "upload");
   const fileId: string = (await upload.json()).id;
 

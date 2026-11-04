@@ -137,3 +137,36 @@ func TestLinkBlockOfAShareLink(t *testing.T) {
 		t.Errorf("the video's own link: %+v, %v", n, err)
 	}
 }
+
+// Items folded once filter as Filter does, query after query, full-width
+// letters too, their labels folded only once a query needs them.
+func TestFoldedFiltersAsFilterDoes(t *testing.T) {
+	var pages []store.Page
+	now := time.Now()
+	for i := range 40 {
+		pages = append(pages, store.Page{ID: fmt.Sprint("p", i), Title: fmt.Sprint("Meeting ", i, " ＡＢＣ"), UpdatedAt: now.Add(time.Duration(i) * time.Minute)})
+	}
+	items := Mention(Mentions{Pages: pages, Agents: []Agent{{ProviderID: "a", Name: "Claude"}}})
+	f := Fold(items)
+	if got := keys(f.Filter("")); !slices.Equal(got, keys(Filter(items, ""))) || f.labels != nil {
+		t.Errorf("nothing typed: %v, labels folded %v", got, f.labels != nil)
+	}
+	for _, q := range []string{"mee", "abc", "ＭＥＥ", "cla", "3", "zzz", " ting "} {
+		if got, want := keys(f.Filter(q)), keys(Filter(items, q)); !slices.Equal(got, want) {
+			t.Errorf("%q: %v, want %v", q, got, want)
+		}
+	}
+}
+
+// Filtering a long @ menu again folds no label again.
+func BenchmarkFoldedMention(b *testing.B) {
+	var pages []store.Page
+	now := time.Now()
+	for i := range 5000 {
+		pages = append(pages, store.Page{ID: fmt.Sprintf("p%05d", i), Title: fmt.Sprintf("Meeting notes %d about planning", i), UpdatedAt: now.Add(-time.Duration(i*7919%5000) * time.Minute)})
+	}
+	f := Fold(Mention(Mentions{Pages: pages, PageID: "p00001"}))
+	for b.Loop() {
+		_ = f.Filter("pla")
+	}
+}

@@ -127,8 +127,8 @@ func TestChatGPTWaitsOutReasoning(t *testing.T) {
 
 func TestRecordingViewsCarryTranscript(t *testing.T) {
 	c := doc.FromBlocks([]*doc.Node{{ID: "r1", Type: "recording", Data: map[string]any{"recording_id": "rec", "title": "Standup"}}})
-	tc := ToolContext{Content: c, Transcript: func(id string) string {
-		if id != "rec" {
+	tc := ToolContext{Content: c, PageID: "page", Transcript: func(pageID, id string) string {
+		if pageID != "page" || id != "rec" {
 			return ""
 		}
 		return TranscriptText([]store.Segment{{StartMs: 1000, Text: "Ship on Friday"}, {StartMs: 26000, Text: "."}})
@@ -428,5 +428,45 @@ func TestChatGPTInsertStreams(t *testing.T) {
 	}
 	if revisions == 0 || len(res.Ops) != 1 || c.Children[2].Delta().ToMarkdown() != "Once upon a time." {
 		t.Errorf("%d revisions, %d ops, page %s", revisions, len(res.Ops), c.Encode())
+	}
+}
+
+// A recording block carries the transcript only of a recording of its
+// page: a block can name any recording's ID, another page's among them,
+// whose transcript the run, or an MCP client, would read through it. The
+// other page's own read gives its own.
+func TestRecordingTranscriptsOfThePageAlone(t *testing.T) {
+	st := openStore(t)
+	here, err := st.CreatePage(store.NewPageOptions{Title: "Here"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, page := range map[string]string{"mine": here.ID, "theirs": other.ID} {
+		if err := st.PutRecording(store.Recording{ID: id, PageID: page, Status: "ready", Transcript: []store.Segment{{Text: "Words of " + id + "."}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	block := func(id string) *doc.Node {
+		return &doc.Node{ID: "b-" + id, Type: "recording", Data: map[string]any{"recording_id": id}}
+	}
+	c := doc.FromBlocks([]*doc.Node{block("mine"), block("theirs")})
+	tc := PageTools(st, here.ID, "Here", "Test", c, true)
+	views := tc.Views(c)
+	if rec := views[0]["recording"].(map[string]any); rec["transcript"] != "[0:00] Words of mine." {
+		t.Errorf("the page's recording reads %v", rec)
+	}
+	if rec := views[1]["recording"].(map[string]any); rec["transcript"] != nil {
+		t.Errorf("another page's recording reads %v", rec)
+	}
+	if _, _, err := st.SaveContent(other.ID, doc.FromBlocks([]*doc.Node{block("theirs")})); err != nil {
+		t.Fatal(err)
+	}
+	read := tc.ReadOtherPage(other.ID)["blocks"].([]map[string]any)
+	if rec := read[0]["recording"].(map[string]any); rec["transcript"] != "[0:00] Words of theirs." {
+		t.Errorf("the other page read as %v", rec)
 	}
 }

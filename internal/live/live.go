@@ -67,14 +67,17 @@ type Page struct {
 
 	// loaded is the stored content the editor started from or last saved,
 	// and stored that content as the store has it, encoded, before any
-	// change that is no edit (page mentions' new titles). row is the
-	// stored content exactly as the store has it ("" when it has none),
-	// for a save to go only over it.
-	loaded *doc.Content
-	stored string
-	row    string
-	dirty  bool
-	timer  *time.Timer
+	// change that is no edit (page mentions' new titles); loaded is nil
+	// while it is stored decoded, as after a save (loadedContent). row is
+	// the stored content exactly as the store has it ("" when it has none),
+	// for a save to go only over it, and written the write it was
+	// (store.WriteID), which tells whether it changed without reading it.
+	loaded  *doc.Content
+	stored  string
+	row     string
+	written int64
+	dirty   bool
+	timer   *time.Timer
 	// unreadable is set while the stored content could not be read: the
 	// page opens empty, or keeps what it showed when such content comes
 	// in, read-only, and is never saved over.
@@ -90,8 +93,8 @@ type Page struct {
 // from, which Attach then gives it. Content that can't be read opens as an
 // empty page, kept from being saved in its place.
 func Open(st *store.Store, id string, opt Options) (*Page, *doc.Content) {
-	row, _ := st.ContentRow(id)
-	content, err := doc.Decode(row.Content)
+	row, written, _ := st.StoredContent(id)
+	content, err := doc.Decode(row)
 	unreadable := err != nil
 	if unreadable {
 		log.Printf("page %s: %v", id, err)
@@ -105,8 +108,17 @@ func Open(st *store.Store, id string, opt Options) (*Page, *doc.Content) {
 		p, err := st.Page(id)
 		return p.DisplayTitle(), err == nil
 	})
-	p := &Page{ID: id, st: st, opt: opt, loaded: content.Copy(), stored: stored, row: row.Content, unreadable: unreadable}
+	p := &Page{ID: id, st: st, opt: opt, loaded: content.Copy(), stored: stored, row: row, written: written, unreadable: unreadable}
 	return p, content
+}
+
+// loadedContent is the content the editor started from or last saved
+// (loaded), decoded from stored the first time it is needed after a save.
+func (p *Page) loadedContent() *doc.Content {
+	if p.loaded == nil {
+		p.loaded = doc.MustDecode(p.stored)
+	}
+	return p.loaded
 }
 
 // Attach gives the page the editor that shows it, made from the content
@@ -222,7 +234,7 @@ func (p *Page) Save() bool {
 		}
 		// An empty row saves only while the page still has none.
 		content := p.ed.Doc()
-		stamped, changed, err := p.st.SaveContentOver(p.ID, p.row, content)
+		saved, err := p.st.SaveOver(p.ID, p.row, content)
 		if errors.Is(err, store.ErrContentChanged) {
 			continue
 		}
@@ -232,12 +244,15 @@ func (p *Page) Save() bool {
 			p.notify(locales.AppErrorSave(err.Error()))
 			return false
 		}
-		content.Blocks, content.Deleted = stamped.Blocks, stamped.Deleted
-		p.loaded, p.stored = stamped.Copy(), stamped.Encode()
+		// The store encoded what it stored, which is all this keeps: the
+		// content saved is decoded again only if it is needed, which
+		// typing on does not need.
+		content.Blocks, content.Deleted = saved.Content.Blocks, saved.Content.Deleted
+		p.loaded, p.stored = nil, saved.Encoded
+		p.row, p.written = saved.Encoded, saved.WriteID
 		p.setDirty(false)
-		if changed {
-			p.row = p.stored
-			_ = p.st.MaybeAutosave(p.ID, stamped)
+		if saved.Changed {
+			_ = p.st.MaybeAutosaveEncoded(p.ID, func() string { return saved.Encoded })
 			if p.opt.Saved != nil {
 				p.opt.Saved()
 			}
@@ -254,18 +269,27 @@ func (p *Page) Save() bool {
 // runs on the server, restores) into the page, merging what is being
 // typed.
 func (p *Page) External() {
-	row, err := p.st.ContentRow(p.ID)
+	// The write stored tells, without reading the content, that it is
+	// still the one the page has, as each save finds before it saves.
+	if written, err := p.st.WriteID(p.ID); err == nil && written != 0 && written == p.written && p.row != "" {
+		return
+	}
+	row, written, err := p.st.StoredContent(p.ID)
 	if store.IsNotFound(err) && p.row != "" {
 		p.remove()
 		return
 	}
-	if err != nil || row.Content == p.row {
+	if err != nil {
+		return
+	}
+	if row == p.row {
+		p.written = written
 		return
 	}
 	if p.unreadable || p.removed {
 		// Content that can be read again, as a sync brought it, opens, as
 		// does content back on this device, as a page shared again.
-		c, err := doc.Decode(row.Content)
+		c, err := doc.Decode(row)
 		if err != nil {
 			p.removed = false
 			p.unreadable = true
@@ -274,10 +298,14 @@ func (p *Page) External() {
 		p.unreadable, p.removed = false, false
 		p.SetReadOnly(p.opt.CanEdit != nil && !p.opt.CanEdit())
 		p.ed.Replace(c.Copy())
-		p.loaded, p.stored, p.row = c.Copy(), c.Encode(), row.Content
+		p.loaded, p.stored, p.row, p.written = c, c.Encode(), row, written
 		return
 	}
-	stored, err := doc.Decode(row.Content)
+	if row == p.stored {
+		p.row, p.written = row, written
+		return
+	}
+	stored, err := doc.Decode(row)
 	if err != nil {
 		// Content this version can't read (damaged, or from a newer
 		// Leaflet) is not shown as an empty page to be saved over: the
@@ -293,17 +321,18 @@ func (p *Page) External() {
 		if p.timer != nil {
 			p.timer.Stop()
 		}
-		p.unreadable, p.row = true, row.Content
+		p.unreadable, p.row, p.written = true, row, written
 		p.setDirty(false)
 		p.SetReadOnly(true)
 		return
 	}
-	if stored.Encode() == p.stored {
-		p.row = row.Content
+	encoded := stored.Encode()
+	if encoded == p.stored {
+		p.row, p.written = row, written
 		return
 	}
 	if p.dirty {
-		local := p.ed.Doc().Stamped(p.loaded, doc.NowMs())
+		local := p.ed.Doc().Stamped(p.loadedContent(), doc.NowMs())
 		merged, conflicts := doc.Merge(doc.MustDecode(p.stored), local, stored)
 		// The side a conflict loses is kept for recovery before the
 		// editor shows the merge.
@@ -313,12 +342,12 @@ func (p *Page) External() {
 			}
 		}
 		p.ed.Replace(merged)
-		p.loaded, p.stored, p.row = stored.Copy(), stored.Encode(), row.Content
+		p.loaded, p.stored, p.row, p.written = nil, encoded, row, written
 		p.Edited()
 		return
 	}
 	p.ed.Replace(stored.Copy())
-	p.loaded, p.stored, p.row = stored.Copy(), stored.Encode(), row.Content
+	p.loaded, p.stored, p.row, p.written = stored, encoded, row, written
 }
 
 // remove leaves the page once its content is no longer on this device, as

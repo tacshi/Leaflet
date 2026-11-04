@@ -108,17 +108,20 @@ func Needs(st *store.Store, sync *syncsvc.Service, id string) ([]store.CopyNeed,
 func Fetch(st *store.Store, sync *syncsvc.Service, needs []store.CopyNeed) ([]string, error) {
 	var audio []string
 	for _, n := range needs {
+		// Each is written to the disk as it comes, never all in memory.
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		data, err := sync.Fetch(ctx, n.Bucket, n.Path)
-		cancel()
+		r, err := sync.FetchReader(ctx, n.Bucket, n.Path)
 		if err != nil {
+			cancel()
 			return audio, err
 		}
 		if n.FileID != "" {
-			_, err = st.DownloadedFile(n.FileID, data)
-		} else if _, err = st.DownloadedAudio(n.RecordingID, data); err == nil {
+			_, err = st.DownloadedFileFrom(n.FileID, r)
+		} else if _, err = st.DownloadedAudioFrom(n.RecordingID, r); err == nil {
 			audio = append(audio, n.RecordingID)
 		}
+		_ = r.Close()
+		cancel()
 		if err != nil {
 			return audio, err
 		}

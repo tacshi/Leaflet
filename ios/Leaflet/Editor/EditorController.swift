@@ -240,16 +240,21 @@ final class EditorController: NSObject, UITextViewDelegate {
 
     /// edited follows each change of the text: it keeps each paragraph
     /// one block, shows the paragraphs changed, and sends the page soon.
+    /// What it does is of the paragraphs changed, and those right after
+    /// them their change reaches: a key typed in a long page does not go
+    /// through all of it.
     func edited(_ range: NSRange) {
-        text.normalize(around: range)
+        var changed = NSUnionRange(range, text.normalize(around: range))
         if text.keepTrailing() { layout.redrawEnd() }
-        let fitted = text.fitDepths()
-        for r in fitted.changed { style.apply(to: storage, in: r) }
+        // The blocks after those changed that go less deep with them follow
+        // right after them, styled with them.
+        let fitted = text.fitDepths(from: changed)
+        for r in fitted.changed { changed = NSUnionRange(changed, r) }
         if fitted.trailing { layout.redrawEnd() }
         // The last block, as deep as it now is.
         if text.keepTrailing() { layout.redrawEnd() }
-        style.apply(to: storage, in: range)
-        restyleNumbersAfter(range)
+        style.apply(to: storage, in: changed)
+        restyleNumbersAfter(changed)
         format.updateTypingAttributes()
         layout.updateFolds()
         reportBlank()
@@ -268,26 +273,71 @@ final class EditorController: NSObject, UITextViewDelegate {
         style.apply(to: storage, in: NSRange(location: 0, length: storage.length))
     }
 
+    /// restyleNumbersAfter numbers again the items after range, styled as
+    /// their blocks now are, whose numbers follow those before them: those
+    /// whose number changed, and no further than an item that shows the
+    /// rest are as they were. The blocks after range are as they were, and
+    /// so is how an item at a depth is numbered after one at that depth or
+    /// above it whose number stayed: the items after one that stayed at
+    /// the top are numbered as they were, and those deeper than one that
+    /// stayed below it too. Only an item's number changes, nothing else of
+    /// its style: typing in a long list goes no further than the next
+    /// item.
     func restyleNumbersAfter(_ range: NSRange) {
-        // A numbered item's number follows those before it.
-        let end = min(NSMaxRange(range), storage.length)
-        let rest = NSRange(location: end, length: storage.length - end)
-        guard rest.length > 0 else { return }
-        var at = rest.location
         let ns = storage.string as NSString
-        while at < storage.length {
+        guard ns.length > 0 else { return }
+        let start = min(range.location, ns.length)
+        let last = range.length > 0 ? min(NSMaxRange(range), ns.length) - 1 : start
+        var at = NSMaxRange(ns.paragraphRange(for: NSRange(location: last, length: 0)))
+        guard at < ns.length else { return renumberEnd(open: true) }
+        // The numbers of range's items, as they were just given, for the
+        // count to go on from: walked back to the list's start, a long
+        // list's numbering would take as many steps.
+        var known: [Int: Int] = [:]
+        storage.enumerateAttribute(
+            .leafletOrdinal, in: NSRange(location: start, length: at - start)
+        ) { v, r, _ in
+            if let n = v as? Int {
+                known[ns.paragraphRange(for: NSRange(location: r.location, length: 0)).location] = n
+            }
+        }
+        // open is how deep the items whose numbers may have changed go: no
+        // deeper than it, which a number that stayed takes up to.
+        var open = Int.max
+        storage.beginEditing()
+        while at < ns.length, open > 0 {
             let para = ns.paragraphRange(for: NSRange(location: at, length: 0))
-            guard let info = text.blockAt(para.location),
-                info.type == "numbered_list" || info.depth > 0
-            else {
-                break
+            guard let info = text.blockAt(para.location) else { break }
+            let was =
+                storage.attribute(.leafletOrdinal, at: para.location, effectiveRange: nil) as? Int
+            if info.depth < open {
+                open = info.depth
+                if info.type == "numbered_list" {
+                    let n = EditorStyle.ordinal(storage, at: para.location, info, known: known)
+                    known[para.location] = n
+                    if n != was {
+                        storage.addAttribute(.leafletOrdinal, value: n, range: para)
+                        open = .max
+                    }
+                }
+            } else if info.type == "numbered_list", let was {
+                known[para.location] = was
             }
             at = NSMaxRange(para)
         }
-        // At once, for each item's number to go on from the one before.
-        if at > rest.location {
-            style.apply(
-                to: storage, in: NSRange(location: rest.location, length: at - rest.location))
+        storage.endEditing()
+        if at >= ns.length { renumberEnd(open: open > 0) }
+    }
+
+    /// renumberEnd draws the empty numbered item at the page's end again,
+    /// whose number follows the items before it, when theirs may have
+    /// changed.
+    private func renumberEnd(open: Bool) {
+        let ns = storage.string as NSString
+        if open, text.trailing?.type == "numbered_list", ns.length > 0,
+            ns.character(at: ns.length - 1) == 0x0A
+        {
+            layout.redrawEnd()
         }
     }
 

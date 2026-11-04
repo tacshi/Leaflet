@@ -247,7 +247,8 @@ export const MAX_VIEW_HTML = 30_000;
 /**
  * The blocks as agents read them, as the app's agents do (Go's
  * ToolContext.Views): pageViews, without an embed's source longer than
- * MAX_VIEW_HTML, whose length is given instead.
+ * MAX_VIEW_HTML, whose length is given instead, and without what sites
+ * wrote of the blocks (withoutSiteInfo).
  */
 export function agentViews(content: PageContent, recordings?: Map<string, RecordingInfo>): BlockView[] {
   const views = pageViews(content, recordings);
@@ -260,8 +261,30 @@ export function agentViews(content: PageContent, recordings?: Map<string, Record
         v.embed!.html_length = length;
       }
     }
+    withoutSiteInfo(v);
   }
   return views;
+}
+
+/**
+ * A block's view without what a site wrote of it, which the apps read from
+ * the site to show the block (Go's withoutSiteInfo): a link card's title
+ * and description, its page's of itself, and a video's title, its
+ * uploader's, which the apps give a video that has none. That is the web's
+ * writing, read with none of the web's guard (checkUrls). A video's title
+ * is the site's but for one an agent wrote, and the block keeps no word of
+ * which, nor did pages kept before, so none is read. A run that would know
+ * what a page says reads it with the web, and a video's title comes with
+ * its transcript, read as the web is (readTranscript), each keeping the
+ * run to the URLs it may write after. Nor are the URLs in that text the
+ * person's, to write as the page's (given).
+ */
+function withoutSiteInfo(v: BlockView): void {
+  if (v.type === "link_preview" && v.link) {
+    delete v.link.title;
+    delete v.link.description;
+  }
+  if (v.type === "video" && v.video) delete v.video.title;
 }
 
 /** The most blocks one run writes (Go's maxRunBlocks): a model that goes on and on, as one repeating itself, stops there. */
@@ -884,18 +907,26 @@ export interface SessionOptions {
 //
 // The web is written by anyone, to steer the agents that read it: a page
 // could have one write what is on this page into such a URL, or read the
-// page at one. So once a run reads the web, what it writes, and the pages
-// it reads, may hold only a URL the person gave it, or one it found there:
-// a search's result, or a link on a page it read. Not one it made up. And
-// once it reads the person's other pages, it does not use the web at all
+// page at one. So once a run reads the web, a video's captions among it,
+// what it writes, and the pages it reads, may hold only a URL the person
+// gave it, or one it found there: a search's result, or a link on a page
+// it read. Not one it made up. A block the app loads by itself keeps to
+// fewer: a search's result, or a page the run read but did not pick from
+// another it read, not a link on one, read or not, which its writer could
+// have put there by the hundred for the run to pick from. And once it
+// reads the person's other pages, it does not use the web at all
 // (WEB_CLOSED), as what it asked for there could carry what it read, and
 // what it writes keeps to the URLs the person gave it, as above.
 
-/** The URLs in v, as allow takes them: whole strings that are one, and those in text. */
+/**
+ * The URLs in v, as allow takes them, their schemes in lower case
+ * (canonUrl): whole strings that are one, and those in text.
+ */
 function urlsIn(v: unknown, out = new Set<string>()): Set<string> {
   if (typeof v === "string") {
-    if (v.startsWith("http://") || v.startsWith("https://")) out.add(v);
-    for (const u of v.match(URL_RE) ?? []) out.add(u);
+    const whole = canonUrl(v);
+    if (whole.startsWith("http://") || whole.startsWith("https://")) out.add(whole);
+    for (const u of v.match(URL_RE) ?? []) out.add(canonUrl(u));
   } else if (Array.isArray(v)) {
     for (const e of v) urlsIn(e, out);
   } else if (isObject(v)) {
@@ -904,8 +935,34 @@ function urlsIn(v: unknown, out = new Set<string>()): Set<string> {
   return out;
 }
 
-/** Finds the URLs in text, each to the first space as the client has one (SPACES), as its urlRe. */
-export const URL_RE = new RegExp(`https?://[^${SPACES}<>"'()\\[\\]]+`, "gu");
+/**
+ * Finds the URLs in text, each to the first space as the client has one
+ * (SPACES), as its urlRe: their scheme in any case, as the app takes a
+ * link's (webURL), and in ASCII's letters alone, as a scheme is.
+ */
+export const URL_RE = new RegExp(`[hH][tT][tT][pP][sS]?://[^${SPACES}<>"'()\\[\\]]+`, "gu");
+
+/**
+ * u with a web link's scheme in lower case, as a URL parser reads it (Go's
+ * canonURL): the guard keeps and compares URLs so, as two that only their
+ * scheme's case sets apart are one link to the app.
+ */
+function canonUrl(u: string): string {
+  for (const scheme of ["https://", "http://"]) {
+    if (u.length >= scheme.length && asciiFold(u.slice(0, scheme.length)) === scheme) {
+      return scheme + u.slice(scheme.length);
+    }
+  }
+  return u;
+}
+
+/** s with its ASCII letters in lower case, and nothing else changed. */
+function asciiFold(s: string): string {
+  return s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+/** The blocks whose url the app loads by itself, as it shows them (Go's loads). */
+const LOADS = new Set(["image", "link_preview", "video"]);
 
 /**
  * The tools that change the page, which a viewer may not call. Text on the
@@ -949,9 +1006,13 @@ export class PageEditSession {
    * The URLs the run came on in the web: those its searches found, and
    * those on the pages it read. Null before it reads the web, after which
    * what it writes, and the pages it reads, keep to them and those the
-   * person gave it (checkUrls, readWeb).
+   * person gave it (checkUrls, readWeb). sources are those of them the run
+   * came on itself, its searches' results and the pages it read that it
+   * picked from none it read, not the links on those: the only ones a block
+   * the app loads by itself may hold (LOADS).
    */
   private found: Set<string> | null = null;
+  private sources = new Set<string>();
   /** The page's blocks, kept up as the calls change them. */
   private readonly idx: BlockIndex;
   /** Every id the page has or had, which a new block may not take. */
@@ -975,6 +1036,15 @@ export class PageEditSession {
   /** A run that read nothing beyond its page. */
   get keptToPage(): boolean {
     return !this.readPages;
+  }
+
+  /**
+   * Whether the run's URL guard is on: it has read beyond its page or the
+   * web, or follows turns that did (Go's Guarded). What it says may then
+   * carry what it read, its reply too.
+   */
+  get guarded(): boolean {
+    return this.armed || this.found !== null;
   }
 
   /**
@@ -1057,10 +1127,16 @@ export class PageEditSession {
     this.armed = true;
   }
 
-  /** The URLs the person gave the run: on this page as the run found it, and in the request. */
+  /**
+   * The URLs the person gave the run: on this page as the run found it,
+   * but what sites wrote of its blocks (withoutSiteInfo), and in the
+   * request.
+   */
   private given(): Set<string> {
     if (!this.allowed) {
-      this.allowed = urlsIn(pageViews(this.before));
+      const views = pageViews(this.before);
+      views.forEach(withoutSiteInfo);
+      this.allowed = urlsIn(views);
       urlsIn(this.opts.request ?? "", this.allowed);
     }
     return this.allowed;
@@ -1068,7 +1144,30 @@ export class PageEditSession {
 
   /** Whether the run may write or read u: one the person gave it, or one it found on the web while it has not read beyond this page (Go's given). */
   private may(u: string): boolean {
+    u = canonUrl(u);
     return this.given().has(u) || (!this.armed && !!this.found?.has(u));
+  }
+
+  /**
+   * Whether a block the app loads by itself may hold u: one the person gave
+   * the run, or one of the web's it came on itself (sources) while it has
+   * not read beyond this page (Go's mayLoad).
+   */
+  private mayLoad(u: string): boolean {
+    u = canonUrl(u);
+    return this.given().has(u) || (!this.armed && this.sources.has(u));
+  }
+
+  /** Starts keeping the URLs the run finds on the web, as it first reads it (Go's saw). */
+  private saw(): Set<string> {
+    return this.found ??= new Set();
+  }
+
+  /** Keeps a URL the run came on in the web, a source of its own or only a link on one (Go's find). */
+  private find(u: string, source: boolean): void {
+    u = canonUrl(u);
+    this.saw().add(u);
+    if (source) this.sources.add(u);
   }
 
   /**
@@ -1091,10 +1190,10 @@ export class PageEditSession {
     } catch (e) {
       throw new ToolError(`The search failed: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const found = this.found ??= new Set();
+    this.saw();
     for (const s of search.sources) {
       const bare = s.url.split("://")[1];
-      if (bare === undefined || !query.includes(bare)) found.add(s.url);
+      if (bare === undefined || !query.includes(bare)) this.find(s.url, true);
     }
     return { query, answer: search.answer, results: search.sources };
   }
@@ -1109,15 +1208,20 @@ export class PageEditSession {
         `After reading the web, read only a page the user gave, one on this page, or one a search found or a page you read links to, which ${url} is not.`,
       );
     }
+    // The page is a source of the run's own (LOADS) only when its link was
+    // not one picked from a page the run read: the run's first page of the
+    // web, one the person gave, or a search's result (Go's readWeb). A link
+    // a page had, read, stays a link: reading it does not make it one a
+    // block may load.
+    const source = !this.found || this.mayLoad(url) || this.mayLoad(url.split("#")[0]);
     let page: WebPage;
     try {
       page = await this.hooks.readWebPage(url);
     } catch (e) {
       throw new ToolError(`Could not read ${url}: ${e instanceof Error ? e.message : String(e)}`);
     }
-    const found = this.found ??= new Set();
-    found.add(page.url);
-    for (const u of page.links) found.add(u);
+    this.find(page.url, source);
+    for (const u of page.links) this.find(u, false);
     return { url: page.url, title: page.title, text: page.text, ...(page.truncated ? { truncated: true } : {}) };
   }
 
@@ -1125,7 +1229,10 @@ export class PageEditSession {
    * Reads what is said in a video block of the page, from its site's
    * captions, as lines of the times they start and their words (Go's
    * readTranscript). Once the run has read the person's other pages, only a
-   * video the page had as it began, or the request names, may be read.
+   * video the page had as it began, or the request names, may be read. The
+   * captions, whoever put the video up wrote, are the web's: the run that
+   * reads them keeps to the URLs it may write after reading the web
+   * (checkUrls).
    */
   private async readTranscript(args: Record<string, unknown>): Promise<unknown> {
     const id = textArg(args, "id");
@@ -1144,7 +1251,7 @@ export class PageEditSession {
       );
     }
     if (!this.hooks.readCaptions) throw new ToolError("Reading videos' transcripts is off.");
-    if (this.armed && !this.given().has(trimSpace(link))) throw new ToolError(WEB_CLOSED);
+    if (this.armed && !this.may(trimSpace(link))) throw new ToolError(WEB_CLOSED);
     const site = video.provider === "vimeo" ? "Vimeo" : "YouTube";
     let captions: Captions;
     try {
@@ -1165,6 +1272,8 @@ export class PageEditSession {
       }
       throw new ToolError(`Could not read the video's captions: ${e instanceof Error ? e.message : String(e)}`);
     }
+    // Read with the web or without it.
+    this.saw();
     const segments = passages(captions.lines).map((l) => ({ start_ms: l.start_ms, text: l.text }));
     const title = typeof node.data?.title === "string" ? node.data.title : "";
     return {
@@ -1186,28 +1295,48 @@ export class PageEditSession {
   }
 
   /**
+   * Keeps what the agent writes to the URLs it may write after reading the
+   * web from the start, with none found yet, as a run that read it does:
+   * the conversation's earlier turns may hold what a run read there.
+   */
+  keepToFoundUrls(): void {
+    this.saw();
+  }
+
+  /**
    * Refuses blocks that hold a URL the run may not write, in a block the
    * app loads or in text, once the agent has read beyond this page or the
    * web (checkUrls).
    */
   private checkUrls(nodes: NodeJSON[], ...more: unknown[]): void {
     if (!this.armed && !this.found) return;
+    // Every URL, as text holds them, and those the app loads by itself.
     const urls = urlsIn(more);
-    for (const n of nodes) walk(n, (k) => urlsIn(k.data, urls));
-    const bad = [...urls].filter((u) => !this.may(u));
-    if (!bad.length) return;
-    bad.sort();
+    const loaded = new Set<string>();
+    for (const n of nodes) {
+      walk(n, (k) => {
+        urlsIn(k.data, urls);
+        if (LOADS.has(k.type)) urlsIn(k.data?.url, loaded);
+      });
+    }
+    // The first of those refused, in order.
+    const first = (set: Set<string>, may: (u: string) => boolean) =>
+      [...set].filter((u) => !may(u)).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))[0];
+    const bad = first(urls, (u) => this.may(u));
+    if (bad === undefined) {
+      const load = first(loaded, (u) => this.mayLoad(u));
+      if (load === undefined) return;
+      throw new ToolError(
+        `After reading the web, a picture, a video or a link card may only hold a URL a search found, of a page you read, that was on this page before you began, or that is in the user's request, which ${load} is not: a page's links are its writer's choice, and the one picked could carry what is on this page, as the app loads it by itself. Link to it in text instead.`,
+      );
+    }
     if (this.armed) {
       throw new ToolError(
-        `After reading another page, what you write may only hold a URL that was on this page before you began or is in the user's request, which ${
-          bad[0]
-        } is not: a link written here could carry what you read, and a later edit could have the app load it. Name the page you read it on with a link to that page instead.`,
+        `After reading another page, what you write may only hold a URL that was on this page before you began or is in the user's request, which ${bad} is not: a link written here could carry what you read, and a later edit could have the app load it. Name the page you read it on with a link to that page instead.`,
       );
     }
     throw new ToolError(
-      `After reading the web, what you write may only hold a URL you found there, that was on this page before you began, or that is in the user's request, which ${
-        bad[0]
-      } is not: one made up could carry what is on this page to whoever runs its site, as the app loads it.`,
+      `After reading the web, what you write may only hold a URL you found there, that was on this page before you began, or that is in the user's request, which ${bad} is not: one made up could carry what is on this page to whoever runs its site, as the app loads it.`,
     );
   }
 

@@ -1,5 +1,6 @@
-import { assert, assertEquals, assertRejects } from "jsr:@std/assert@1";
-import { MAX_PAGE_TEXT, readHtml, readPage, truncate } from "./page.ts";
+import { assert, assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
+import { parse } from "npm:parse5@8.0.1";
+import { MAX_PAGE_BYTES, MAX_PAGE_TEXT, readHtml, readPage, truncate } from "./page.ts";
 import pages from "./testdata/pages.json" with { type: "json" };
 import { fixture } from "../_testing/fixture.ts";
 
@@ -41,6 +42,20 @@ line 4</pre>
     `<p>No head at all, <a href="HTTPS://Example.COM">itself</a>, <a href="//cdn.example.org/a b">a space</a>, <a href="javascript:void(0)">js</a> and <a>none</a>.</p>
 <template><p>hidden</p></template><noscript>Enable JS</noscript><select><option>pick</option></select><button>Go</button>`,
   ],
+  [
+    "https://example.com/spaces",
+    // Spaces other than HTML's: a line of them before a link with a break
+    // in it, a byte order mark, which is none, and some at a link's ends.
+    `<p>\u3000<a href="/x"><br>after a break</a></p><p>\ufeffmarked</p>
+<p>a<a href="/y">\u3000 linked \u2003</a>b <a href="/w"> <a href="/v">in</a></a></p>
+<pre>  <a href="/z">z  </a> kept\u3000 </pre>`,
+  ],
+  ["https://example.com/deep", `<title>Deep</title>${"<div>".repeat(600)}nested too deep to read`],
+  [
+    "https://example.com/long",
+    // Text that goes on past the most an agent reads in a line with a link.
+    `<h2>Long</h2><p>${"w ".repeat(14_990)}<a href="/x"> <b>a b</b> </a>${"z ".repeat(50)}</p><p>after</p>`,
+  ],
 ];
 
 // A page reads as the app's agents read it (Go's ReadHTML), which reads
@@ -66,6 +81,58 @@ Deno.test("a long page is cut at a line's end", () => {
   assert([...cut].length <= MAX_PAGE_TEXT);
   assert(cut.endsWith(line));
   assertEquals(truncate("short"), ["short", false]);
+});
+
+/**
+ * Pages made to be slow to read (Go's hostilePages), each as long as a
+ * page read from the web may be: a line of many pieces, many links, many
+ * small elements, a long link, links in links, and elements nested about
+ * as deep as a page may be.
+ */
+function hostilePages(): Record<string, string> {
+  const fill = (head: string, piece: string, tail = "") =>
+    head + piece.repeat(Math.floor((MAX_PAGE_BYTES - head.length - tail.length) / piece.length)) + tail;
+  return {
+    pieces: fill("", "x<!---->"),
+    "spaced pieces": fill("", "x\u3000<!---->"),
+    links: fill("", "<a href=/x>y</a>"),
+    elements: fill("", "<i>x</i>\n"),
+    pre: fill("<pre>", "x <!---->"),
+    "pre lines": fill("<pre>", "\n", "x"),
+    cells: fill("<table><tr>", "<td>x</td>"),
+    "long link": fill("<a href=/x>", "x<!---->", "</a>"),
+    "links in links": fill('<a href="/x"><marquee>'.repeat(250), "y<!---->"),
+    deep: fill("<div>".repeat(500), "x<!---->"),
+  };
+}
+
+// A page made to be slow reads in about the time it takes to parse it:
+// each piece of it once, and none past the most of it an agent reads.
+Deno.test("a page made to be slow to read reads quickly", () => {
+  for (const [name, html] of Object.entries(hostilePages())) {
+    let start = performance.now();
+    parse(html);
+    const parsing = performance.now() - start;
+    start = performance.now();
+    const page = readHtml("https://example.com/", html);
+    const reading = performance.now() - start;
+    assert(reading < 4 * parsing + 500, `${name}: read in ${reading} ms, parsed in ${parsing} ms`);
+    assert([...page.text].length <= MAX_PAGE_TEXT, name);
+  }
+});
+
+// A page nested deeper than a page may be reads as nothing, at once, as
+// in the app; one that would take long to parse, each of its tags among
+// many open elements, is not read.
+Deno.test("a page too deep or too slow to parse is not read", () => {
+  let start = performance.now();
+  assertEquals(readHtml("https://example.com/", `${"<div>".repeat(Math.floor(MAX_PAGE_BYTES / 5))}x`).text, "");
+  assert(performance.now() - start < 1000, "a page too deep was parsed whole");
+  const deep = "<div>".repeat(500);
+  const slow = deep + "</p>".repeat((MAX_PAGE_BYTES - deep.length) / 4);
+  start = performance.now();
+  assertThrows(() => readHtml("https://example.com/", slow), Error, "too long");
+  assert(performance.now() - start < 5000, "a slow page was parsed whole");
 });
 
 /** Answers fetch with these, in turn, keeping what it was asked. */

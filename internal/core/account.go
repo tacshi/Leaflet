@@ -119,6 +119,9 @@ func (c *Core) ForgetProject() {
 		return
 	}
 	_ = keychain.Delete(managementKey)
+	c.mgmtMu.Lock()
+	c.mgmt = nil
+	c.mgmtMu.Unlock()
 	_ = c.Remote.Use(remote.Settings{})
 }
 
@@ -177,7 +180,14 @@ func (c *Core) ConnectProject(ctx context.Context, api *supabaseapi.Client, p su
 		}
 	}
 	progress(StepSetup, 0, 0)
-	if err := provision.Setup(ctx, api, p.Ref, func(done, all int) { progress(StepSetup, done, all) }); err != nil {
+	// Sign-ups it could not close yet leave the project set up but for
+	// them: the sign-in goes on, and the next start closes them.
+	switch err := provision.Setup(ctx, api, p.Ref, func(done, all int) { progress(StepSetup, done, all) }); {
+	case err == nil:
+		c.projectUpdated(p.Ref)
+	case errors.Is(err, provision.ErrSignUpsOpen):
+		log.Printf("set up project %s: %v", p.Ref, err)
+	default:
 		return nil, err
 	}
 	publishable, secret, err := provision.Keys(ctx, api, p.Ref)
@@ -199,6 +209,9 @@ func (c *Core) AdoptProject(pending *remote.Pending, api *supabaseapi.Client) (*
 		return nil, err
 	}
 	keepManagementOf(api)
+	c.mgmtMu.Lock()
+	c.mgmt = api
+	c.mgmtMu.Unlock()
 	return user, nil
 }
 
@@ -219,6 +232,40 @@ func (c *Core) signInAsOwner(ctx context.Context, api *supabaseapi.Client, p sup
 		return nil, errors.New(locales.SigninNotYourProject(p.Name, owner))
 	}
 	return c.Remote.SignInAsOwner(ctx, project, secret, email, name)
+}
+
+// projectUpdatedKey keeps, by a project's ref, the Signature of the build
+// that last brought it up to date from this device.
+func projectUpdatedKey(ref string) string { return "project.updated." + ref }
+
+// projectUpdated keeps that this build brought the project of ref up to
+// date.
+func (c *Core) projectUpdated(ref string) {
+	sig, err := provision.Signature()
+	if err == nil {
+		err = c.Store.SetValue(projectUpdatedKey(ref), sig)
+	}
+	if err != nil {
+		log.Printf("update project %s: %v", ref, err)
+	}
+}
+
+// projectOutOfDate reports whether the project in use may lack what this
+// version of Leaflet brings it: signed in to it, with the Supabase
+// account's sign-in kept, and not brought up to date by this build yet.
+// Each Setup renews that sign-in, whose refresh token rotates, and makes
+// a few calls more: they wait for a build that has something new.
+func (c *Core) projectOutOfDate() bool {
+	ref := c.Remote.Project().Ref
+	if ref == "" || !c.Remote.SignedIn() {
+		return false
+	}
+	sig, err := provision.Signature()
+	if err != nil {
+		return true
+	}
+	done, _ := c.Store.Value(projectUpdatedKey(ref))
+	return done != sig
 }
 
 // UpdateProject brings the project up to this version of Leaflet, when a
@@ -249,13 +296,27 @@ func (c *Core) updateProject() (again bool) {
 		log.Printf("update project %s: the Supabase sign-in: %v", ref, err)
 		return false
 	}
-	api := supabaseapi.Resume(string(raw))
-	api.OnRefresh = keepManagement
+	// The sign-in this run used last, with its access token, while it is
+	// still the one kept: a refresh token renewed for it is kept as it
+	// rotates (keepManagement), so the next try does not renew it again.
+	c.mgmtMu.Lock()
+	api := c.mgmt
+	if api == nil || api.RefreshToken() != string(raw) {
+		api = supabaseapi.Resume(string(raw))
+		api.OnRefresh = keepManagement
+		c.mgmt = api
+	}
+	c.mgmtMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	if err := provision.Setup(ctx, api, ref, nil); err != nil {
 		log.Printf("update project %s: %v", ref, err)
 		if errors.Is(err, supabaseapi.ErrSignedOut) {
+			c.mgmtMu.Lock()
+			if c.mgmt == api {
+				c.mgmt = nil
+			}
+			c.mgmtMu.Unlock()
 			if err := keychain.Delete(managementKey); err != nil {
 				log.Printf("update project %s: forget the Supabase sign-in: %v", ref, err)
 			}
@@ -263,6 +324,7 @@ func (c *Core) updateProject() (again bool) {
 		}
 		return true
 	}
+	c.projectUpdated(ref)
 	return false
 }
 
@@ -272,20 +334,18 @@ func (c *Core) updateProject() (again bool) {
 var projectRetries = []time.Duration{time.Minute, 2 * time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute}
 
 // keepProjectUpdated brings the project up to date as the app starts, and
-// tries again a few times later if that failed. The changes wait to go up
-// for the first try alone: a project that can't be reached then is most
-// likely up to date already, and holding them back longer would leave
-// them on this device.
-func (c *Core) keepProjectUpdated() {
+// tries again a few times later if that failed. With hold, the changes
+// wait to go up for the first try alone: a project that can't be reached
+// then is most likely up to date already, and holding them back longer
+// would leave them on this device. Start runs it as a run of the app first
+// starts, and again as it starts later while the project is still not up
+// to date and no run of tries is under way.
+func (c *Core) keepProjectUpdated(hold bool) {
 	again := c.updateProject()
-	c.updatingProject.Store(false)
-	c.Sync.Kick()
-	// One run of tries at a time, as iOS starts the core again each time
-	// the app comes back to the screen.
-	if !again || !c.retryingUpdate.CompareAndSwap(false, true) {
-		return
+	if hold {
+		c.updatingProject.Store(false)
+		c.Sync.Kick()
 	}
-	defer c.retryingUpdate.Store(false)
 	for _, wait := range projectRetries {
 		if !again {
 			return

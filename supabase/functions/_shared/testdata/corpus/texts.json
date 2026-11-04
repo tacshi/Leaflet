@@ -22,7 +22,7 @@
 {"text":"","urls":[]},
 {"text":"https://player.bilibili.com/player.html?bvid=Bv1KofNYjEuK&page=2https://www.dailymotion.com/video/x7tgad0_a-titlehttps://dai.ly/x8j5v1k","urls":["https://player.bilibili.com/player.html?bvid=Bv1KofNYjEuK&page=2https://www.dailymotion.com/video/x7tgad0_a-titlehttps://dai.ly/x8j5v1k"]},
 {"text":"","urls":[]},
-{"text":"HTTP://1.2.3.4.pngsm9watch?video=x8j5v1k#a b","urls":[]},
+{"text":"HTTP://1.2.3.4.pngsm9watch?video=x8j5v1k#a b","urls":["HTTP://1.2.3.4.pngsm9watch?video=x8j5v1k#a"]},
 {"text":"/( https://例え.jp/a.png！😀。/**","urls":["https://例え.jp/a.png！😀。/**"]},
 {"text":"@~~https://player.vimeo.com/video/76979871","urls":["https://player.vimeo.com/video/76979871"]},
 {"text":"https://[::1]:8080/a.png @","urls":[]},
@@ -32,7 +32,7 @@
 {"text":" 　https://www.bilibili.com/video/BV0KofNYjEuK","urls":["https://www.bilibili.com/video/BV0KofNYjEuK"]},
 {"text":"","urls":[]},
 {"text":"https://player.bilibili.com/player.html?bvid=Bv1KofNYjEuK&page=2https:nico.mssm9%20x8j5v1k/","urls":["https://player.bilibili.com/player.html?bvid=Bv1KofNYjEuK&page=2https:nico.mssm9%20x8j5v1k/"]},
-{"text":"HTTP://u@dai.ly:99999.png%20#%zzhttp://1.2.3.4:99999a/watch%2Fahttps://go.dev/ab","urls":["http://1.2.3.4:99999a/watch%2Fahttps://go.dev/ab"]},
+{"text":"HTTP://u@dai.ly:99999.png%20#%zzhttp://1.2.3.4:99999a/watch%2Fahttps://go.dev/ab","urls":["HTTP://u@dai.ly:99999.png%20#%zzhttp://1.2.3.4:99999a/watch%2Fahttps://go.dev/ab"]},
 {"text":"","urls":[]},
 {"text":"https://example.com:99999/a.png éPlan https://www.bilibili.coma　　.pngvideo?x=%zz#top","urls":["https://example.com:99999/a.png","https://www.bilibili.coma"]},
 {"text":"https://example.com/clip.MP4https:/u:p@www.bilibili.com:0.png","urls":["https://example.com/clip.MP4https:/u:p@www.bilibili.com:0.png"]},
@@ -45,14 +45,14 @@
 {"text":" https://b23.tv/AbCdEfGhttps:/a_b.com:x%zz?v=dQw4w9WgXcQ#%zz","urls":["https://b23.tv/AbCdEfGhttps:/a_b.com:x%zz?v=dQw4w9WgXcQ#%zz"]},
 {"text":"\n","urls":[]},
 {"text":"https://www.bilibili.com/zh-Hans/video/BV1e5nv6GEZJhttps://m.bilibili.com/video/av573719854<\ré","urls":["https://www.bilibili.com/zh-Hans/video/BV1e5nv6GEZJhttps://m.bilibili.com/video/av573719854"]},
-{"text":"HTTP://x yaplayer.html %20%20?v=dQw4w9WgXcQHTTP://u@1.2.3.4video%2F?a=1&v=x#top","urls":[]},
+{"text":"HTTP://x yaplayer.html %20%20?v=dQw4w9WgXcQHTTP://u@1.2.3.4video%2F?a=1&v=x#top","urls":["HTTP://x","HTTP://u@1.2.3.4video%2F?a=1&v=x#top"]},
 {"text":"#","urls":[]},
 {"text":" `İ\u000b","urls":[]},
 {"text":"https://example.com/%2e.pngé","urls":["https://example.com/%2e.pngé"]},
 {"text":"https://player.bilibili.com/player.html?bvid=%42V1KofNYjEuKhttps:/u@example.com:8080?video=x8j5v1k","urls":["https://player.bilibili.com/player.html?bvid=%42V1KofNYjEuKhttps:/u@example.com:8080?video=x8j5v1k"]},
 {"text":"https://example.com/a.png#%zzhttps://example.com/clip.MP4https://youtube-nocookie.com/embed/dQw4w9WgXcQ","urls":["https://example.com/a.png#%zzhttps://example.com/clip.MP4https://youtube-nocookie.com/embed/dQw4w9WgXcQ"]},
 {"text":"https://example.com/a b.png**  ","urls":["https://example.com/a"]},
-{"text":"\\字HTTP://u@:xéBV1KofNYjEuK?bvid=BV1KofNYjEuK#a b","urls":[]},
+{"text":"\\字HTTP://u@:xéBV1KofNYjEuK?bvid=BV1KofNYjEuK#a b","urls":["HTTP://u@:xéBV1KofNYjEuK?bvid=BV1KofNYjEuK#a"]},
 {"text":"~https:/x y:xa sm9?a=1&v=x#a bhttps://example.com/a%2Emp4\\+é","urls":["https://example.com/a%2Emp4\\+é"]},
 {"text":" *\\Plan«b","urls":[]},
 {"text":"mailto:@b23.tv?video=x8j5v1k#%zz","urls":[]},
@@ -73,7 +73,7 @@
 {"text":"https://www.dailymotion.com/embed/video//http://1.2.3.4:x/?bvid=BV1KofNYjEuK#a bé","urls":["https://www.dailymotion.com/embed/video//http://1.2.3.4:x/?bvid=BV1KofNYjEuK#a"]},
 {"text":"https://[::1%25en0]/a.png","urls":[]},
 {"text":"😀 \t","urls":[]},
-{"text":"HTTPS://Example.com/D.PNG","urls":[]},
+{"text":"HTTPS://Example.com/D.PNG","urls":["HTTPS://Example.com/D.PNG"]},
 {"text":"https://dai.ly/x8j5v1k","urls":["https://dai.ly/x8j5v1k"]},
 {"text":"　#bhttps://example.com/.movhttps://exa mple.com/a.png","urls":["https://example.com/.movhttps://exa"]},
 {"text":"https://256.0.0.1/a.pnghttps://example.com/a b.png","urls":["https://256.0.0.1/a.pnghttps://example.com/a"]},
@@ -160,7 +160,7 @@
 {"text":"dai.ly:99999dQw4w9WgXcQ.pngBV1KofNYjEuK#tophttps://%c3%a9.com/a.png@x y:x?x=%zz","urls":["https://%c3%a9.com/a.png@x"]},
 {"text":"","urls":[]},
 {"text":"","urls":[]},
-{"text":"  \n HTTP://u@example.com/player.htmlav2dQw4w9WgXcQ.png?a=1&v=x#a b","urls":[]},
+{"text":"  \n HTTP://u@example.com/player.htmlav2dQw4w9WgXcQ.png?a=1&v=x#a b","urls":["HTTP://u@example.com/player.htmlav2dQw4w9WgXcQ.png?a=1&v=x#a"]},
 {"text":"","urls":[]},
 {"text":"https://256.0.0.1/a.png&！{﻿https://example.com:99999/a.png«\r\u0001","urls":["https://256.0.0.1/a.png&！{﻿https://example.com:99999/a.png«"]},
 {"text":"","urls":[]},
@@ -183,7 +183,7 @@
 {"text":"https://www.bilibili.com/video/bv1KofNYjEuK/","urls":["https://www.bilibili.com/video/bv1KofNYjEuK/"]},
 {"text":"","urls":[]},
 {"text":"#$Σhttps://vimeo.com/76979871","urls":["https://vimeo.com/76979871"]},
-{"text":"HTTP://u:p@1.2.3.4:0player.html#%zz","urls":[]},
+{"text":"HTTP://u:p@1.2.3.4:0player.html#%zz","urls":["HTTP://u:p@1.2.3.4:0player.html#%zz"]},
 {"text":"https://example.com/a b.png*<Σ。","urls":["https://example.com/a"]},
 {"text":"http://Example.COM?a=1&v=xé**https:/u@Example.COM:xsm9?x=%zz#%zz","urls":["http://Example.COM?a=1&v=xé**https:/u@Example.COM:xsm9?x=%zz#%zz"]},
 {"text":"https:b23.tv:99999éav2.mp4?x=%zz#a b","urls":[]},
@@ -209,7 +209,7 @@
 {"text":"(42 https:www.bilibili.com:a?video=x8j5v1k#%zzhttp://www.bilibili.comwatchav2watch?x=%zzhttps://vİmeo.com/76979871","urls":["http://www.bilibili.comwatchav2watch?x=%zzhttps://vİmeo.com/76979871"]},
 {"text":"","urls":[]},
 {"text":"https://exa mple.com/a.png|=x+​{Plan！","urls":["https://exa"]},
-{"text":"HTTP://:99999.mp4?aid=2#a b　 ","urls":[]},
+{"text":"HTTP://:99999.mp4?aid=2#a b　 ","urls":["HTTP://:99999.mp4?aid=2#a"]},
 {"text":"https:1.2.3.4:99999.mp4x8j5v1ka　#a b","urls":[]},
 {"text":"https://www.dailymotion.com/video/x7tgad0_a-title__K{__​​","urls":["https://www.dailymotion.com/video/x7tgad0_a-title__K{__​​"]},
 {"text":"","urls":[]},
@@ -221,10 +221,10 @@
 {"text":"","urls":[]},
 {"text":"","urls":[]},
 {"text":"Σ日本語","urls":[]},
-{"text":"HTTP://x y ?v=dQw4w9WgXcQ#a b","urls":[]},
+{"text":"HTTP://x y ?v=dQw4w9WgXcQ#a b","urls":["HTTP://x"]},
 {"text":"u:p@vimeo.com:99999.pngéé.mp4?aid=2#a bhttps://www.bilibili.com/zh-Hans/video/BV1e5nv6GEZJ+ ","urls":["https://www.bilibili.com/zh-Hans/video/BV1e5nv6GEZJ+"]},
 {"text":"https://m.bilibili.com/video/av573719854","urls":["https://m.bilibili.com/video/av573719854"]},
-{"text":"HTTP://@youtu.be.png?video=x8j5v1kmailto:youtu.be:8080.pngé?v=dQw4w9WgXcQ#%zzhttps://","urls":[]},
+{"text":"HTTP://@youtu.be.png?video=x8j5v1kmailto:youtu.be:8080.pngé?v=dQw4w9WgXcQ#%zzhttps://","urls":["HTTP://@youtu.be.png?video=x8j5v1kmailto:youtu.be:8080.pngé?v=dQw4w9WgXcQ#%zzhttps://"]},
 {"text":"https://www.nicovideo.jp/watch/sm9~&﻿`https:@b23.tv%2Fwatch é?v=dQw4w9WgXcQ#top","urls":["https://www.nicovideo.jp/watch/sm9~&﻿`https:@b23.tv%2Fwatch"]},
 {"text":"https://[1.2.3.4]/a.pnghttps://youtube.com/watch?x=1;v=dQw4w9WgXcQ","urls":["https://youtube.com/watch?x=1;v=dQw4w9WgXcQ"]},
 {"text":"http://@[::1]:x8j5v1kvideoéplayer.htmlsm9?x=%zz#a b","urls":["http://@"]},
@@ -263,14 +263,14 @@
 {"text":"http://@1.2.3.4:8080videodQw4w9WgXcQ?a=1&v=x#%zzhttps:/u@nico.ms:8080#a b\u000b x。","urls":["http://@1.2.3.4:8080videodQw4w9WgXcQ?a=1&v=x#%zzhttps:/u@nico.ms:8080#a"]},
 {"text":"\u0001~","urls":[]},
 {"text":"+İ！0","urls":[]},
-{"text":"HTTP://u:p@player.bilibili.com.png%20https://example.com:/a.png\"","urls":["https://example.com:/a.png"]},
+{"text":"HTTP://u:p@player.bilibili.com.png%20https://example.com:/a.png\"","urls":["HTTP://u:p@player.bilibili.com.png%20https://example.com:/a.png"]},
 {"text":"K","urls":[]},
-{"text":"HTTP://b23.tv?aid=2","urls":[]},
+{"text":"HTTP://b23.tv?aid=2","urls":["HTTP://b23.tv?aid=2"]},
 {"text":"https://vimeo.com/76979871?h=Nopehttps://example.com/clip.MP4http://@player.bilibili.com:0player.html.mp4dQw4w9WgXcQwatchBV1KofNYjEuK?a=1&v=x","urls":["https://vimeo.com/76979871?h=Nopehttps://example.com/clip.MP4http://@player.bilibili.com:0player.html.mp4dQw4w9WgXcQwatchBV1KofNYjEuK?a=1&v=x"]},
 {"text":"~(x","urls":[]},
 {"text":"  [ ","urls":[]},
 {"text":"https:u@example.com?video=x8j5v1k#top","urls":[]},
-{"text":"HTTP://b23.tvBV1KofNYjEuKsm9x8j5v1k%zz?x=%zz#%zzhttps://www.bilibili.com/zh-Hans/video/BV1e5nv6GEZJ","urls":["https://www.bilibili.com/zh-Hans/video/BV1e5nv6GEZJ"]},
+{"text":"HTTP://b23.tvBV1KofNYjEuKsm9x8j5v1k%zz?x=%zz#%zzhttps://www.bilibili.com/zh-Hans/video/BV1e5nv6GEZJ","urls":["HTTP://b23.tvBV1KofNYjEuKsm9x8j5v1k%zz?x=%zz#%zzhttps://www.bilibili.com/zh-Hans/video/BV1e5nv6GEZJ"]},
 {"text":"https://www.nicovideo.jp/watch/lv1","urls":["https://www.nicovideo.jp/watch/lv1"]},
 {"text":"","urls":[]},
 {"text":"https://:xvideoBV1KofNYjEuKplayer.html?aid=2https://example.com/a b.png~~'#","urls":["https://:xvideoBV1KofNYjEuKplayer.html?aid=2https://example.com/a"]},
@@ -292,7 +292,7 @@
 {"text":"","urls":[]},
 {"text":"]​","urls":[]},
 {"text":"","urls":[]},
-{"text":"HTTP://www.youtube.com:8080%zz.mp4u@nico.msx8j5v1k　BV1KofNYjEuKplayer.html?x=%zz！  \nx。","urls":[]},
+{"text":"HTTP://www.youtube.com:8080%zz.mp4u@nico.msx8j5v1k　BV1KofNYjEuKplayer.html?x=%zz！  \nx。","urls":["HTTP://www.youtube.com:8080%zz.mp4u@nico.msx8j5v1k"]},
 {"text":"","urls":[]},
 {"text":"","urls":[]},
 {"text":" _\u0001","urls":[]},

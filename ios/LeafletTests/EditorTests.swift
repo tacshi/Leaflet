@@ -1791,8 +1791,9 @@ struct EditorTests {
     /// Tables, cards and charts are taller at the largest text sizes, as
     /// their text is.
     @Test func blocksGrowWithTheTextSize() {
+        // A table of its own, which no other test has measured.
         let table = DocNode(
-            id: "t", type: "table", data: [:],
+            id: "t-" + UUID().uuidString, type: "table", data: [:],
             children: [
                 DocNode(
                     id: "c", type: "table_cell",
@@ -1814,6 +1815,18 @@ struct EditorTests {
         let large = height(.large)
         let largest = height(.accessibilityExtraExtraExtraLarge)
         for (l, xl) in zip(large, largest) { #expect(xl > l) }
+    }
+
+    /// A table's columns are as wide as their text and fill the page; too
+    /// wide for it, the widest wrap down to one width, unless that leaves
+    /// them too narrow, as many columns would be, and the table scrolls
+    /// instead. No column is wider than the page.
+    @Test func tableColumnsFitThePageOrScroll() {
+        #expect(TableLayout.fit([100, 300], in: 800, wrapTo: 160) == [200, 600])
+        #expect(TableLayout.fit([300, 1000], in: 720, wrapTo: 160) == [300, 420])
+        let many = Array(repeating: CGFloat(150), count: 8)
+        #expect(TableLayout.fit(many, in: 720, wrapTo: 160) == many)
+        #expect(TableLayout.fit([2000], in: 720, wrapTo: 160) == [720])
     }
 
     /// Heights blocks measured are kept by width: the same page in two

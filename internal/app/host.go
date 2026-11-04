@@ -536,8 +536,8 @@ func (a *App) downloadFailed(id string) bool {
 	return ok && time.Since(at) < imageRetry
 }
 
-// exportPage saves a page as Markdown.
-func (a *App) exportPage(id string) {
+// exportMarkdown saves a page as Markdown.
+func (a *App) exportMarkdown(id string) {
 	// As exportAll, not without the edits waiting.
 	if a.page != nil && a.page.id == id && !a.savePage() {
 		return

@@ -2,7 +2,6 @@ package app
 
 import (
 	"log"
-	"math"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/theme"
 	"leaflet/internal/web"
+	"leaflet/internal/webpage"
 	"leaflet/locales"
 )
 
@@ -171,17 +171,7 @@ func (a *App) linkPreviewBlock(c *ui.Context, n *doc.Node) {
 }
 
 // humanSize is a file's size as people read it.
-func humanSize(n int64) string {
-	switch {
-	case n >= 1<<30:
-		return locales.CardSizeGB(math.Round(float64(n)/(1<<30)*10) / 10)
-	case n >= 1<<20:
-		return locales.CardSizeMB(math.Round(float64(n)/(1<<20)*10) / 10)
-	case n >= 1<<10:
-		return locales.CardSizeKB(int(math.Round(float64(n) / (1 << 10))))
-	}
-	return locales.CardSizeBytes(int(n)) // #nosec G115 -- under a kilobyte here.
-}
+func humanSize(n int64) string { return webpage.FileSize(n) }
 
 func (a *App) fileBlock(c *ui.Context, n *doc.Node) {
 	pal := theme.Of(c)

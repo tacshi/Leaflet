@@ -57,8 +57,8 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 - Markdown のショートカット、`/` メニュー、メンバー・エージェント・ページへの
   `@` メンション、文字色を変えられる選択ツールバー、折りたためる見出し、
   アウトライン、ページや個々のブロックへのリンク。
-- 入れ子のページとフォルダ、テンプレート、ページの複製、検索、Markdown への
-  書き出し。
+- 入れ子のページとフォルダ、テンプレート、ページの複製、検索、Markdown と PDF
+  への書き出し。
 - 名前付きバージョンを持つページ履歴と、任意のバージョンからの変更点の表示
   （インラインまたは左右に並べて）。
 
@@ -298,6 +298,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/doc` | ページのドキュメントモデル：ブロック、差分、インライン Markdown、操作、ブロック単位のマージ、Markdown 書き出し |
 | `internal/menu`、`internal/shortcut` | `/` と `@` のメニューの項目と、ページで入力した Markdown の変換（両アプリのエディタで共通） |
 | `internal/rendered` | 数式（KaTeX）とダイアグラム（Pele）を描画するページ。ネットワークのないフレームで動きます |
+| `internal/webpage` | 単独で開けるウェブページとしてのページ。公開リンクで共有し、書き出し › PDF で印刷するもので、両方のアプリで使います |
 | `internal/starters` | Leaflet に付属するテンプレート |
 | `internal/export` | すべてのページを、画像、ファイル、録音とともに Markdown の zip に書き出す |
 | `internal/web` | リンクカード、画像、動画の情報、エージェントが読むページを、公開アドレスからだけ読み込む |

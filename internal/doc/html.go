@@ -53,6 +53,15 @@ type HTMLOptions struct {
 	// Recording returns what a recording block shows; nil shows only its
 	// title.
 	Recording func(n *Node) RecordingView
+	// Print writes the page to be printed, as Export › PDF does: in light
+	// colors alone, every fold open, each video as a link to it, and its
+	// pictures loaded with the page, which paper can't scroll to.
+	Print bool
+	// ScriptSource returns a script's own source, written in the page in
+	// place of Script's link, for a page loaded from a string, which has
+	// nowhere to load scripts from; "" leaves it to Script. The sources
+	// are the app's own, with no "</script" in them.
+	ScriptSource func(name string) string
 }
 
 // RecordingView is what a recording block shows on a web page: its title,
@@ -88,10 +97,17 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 		}
 		return opts.Script(name)
 	}
-	if !math || script("math") == "" {
+	source := func(name string) string {
+		if opts.ScriptSource == nil {
+			return ""
+		}
+		return opts.ScriptSource(name)
+	}
+	served := func(name string) bool { return source(name) != "" || script(name) != "" }
+	if !math || !served("math") {
 		math = false
 	}
-	if !diagram || script("diagram") == "" {
+	if !diagram || !served("diagram") {
 		diagram = false
 	}
 	w := htmlWriter{b: &body, opts: opts, math: math, diagram: diagram}
@@ -103,23 +119,32 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 		b.WriteString(` lang="` + html.EscapeString(opts.Lang) + `"`)
 	}
 	b.WriteString(`><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`)
-	b.WriteString(`<meta name="robots" content="noindex"><title>` + html.EscapeString(title) + `</title><style>` + pageCSS + `</style>` + opts.Head)
+	css := pageCSS
+	if opts.Print {
+		css = printCSS + printFontCSS(opts.Lang)
+	}
+	b.WriteString(`<meta name="robots" content="noindex"><title>` + html.EscapeString(title) + `</title><style>` + css + `</style>` + opts.Head)
+	// A script written in the page goes after it, where the blocks it
+	// draws are already read.
+	var inline strings.Builder
 	for _, name := range []string{"math", "diagram", "embed", "recording", "comments"} {
 		if name == "math" && !math || name == "diagram" && !diagram || name == "embed" && !embed || name == "recording" && !recording {
 			continue
 		}
-		if src := script(name); src != "" {
-			// Diagrams are drawn by a module: Pele is one.
-			kind := " defer"
-			if name == "diagram" {
-				kind = ` type="module"`
-			}
+		// Diagrams are drawn by a module: Pele is one.
+		kind := " defer"
+		if name == "diagram" {
+			kind = ` type="module"`
+		}
+		if src := source(name); src != "" {
+			inline.WriteString(`<script` + strings.TrimPrefix(kind, " defer") + `>` + src + "</script>\n")
+		} else if src := script(name); src != "" {
 			b.WriteString(`<script src="` + html.EscapeString(src) + `"` + kind + `></script>`)
 		}
 	}
 	b.WriteString("</head><body><main>\n<h1 class=\"title\">" + html.EscapeString(title) + "</h1>\n")
 	b.WriteString(body.String())
-	b.WriteString("</main>" + opts.Tail + "</body></html>\n")
+	b.WriteString("</main>" + opts.Tail + inline.String() + "</body></html>\n")
 	return b.String()
 }
 
@@ -169,10 +194,10 @@ func listTag(typ string) string {
 
 func (w htmlWriter) blocks(nodes []*Node) {
 	for i := 0; i < len(nodes); {
-		if h := nodes[i]; h.Type == "heading" && h.Bool("collapsed") {
+		if h := nodes[i]; h.Type == "heading" && h.Bool("collapsed") && !w.opts.Print {
 			// A folded heading folds its section away, as in the app: the
 			// blocks after it up to the next heading of its level or
-			// higher. The visitor opens it.
+			// higher. The visitor opens it; on paper it is open.
 			end := i + 1
 			for end < len(nodes) && (nodes[end].Type != "heading" || nodes[end].Int("level", 1) > h.Int("level", 1)) {
 				end++
@@ -183,6 +208,16 @@ func (w htmlWriter) blocks(nodes []*Node) {
 			w.blocks(nodes[i+1 : end])
 			w.write("</details>\n")
 			i = end
+			continue
+		}
+		if w.opts.Print && nodes[i].Type == "heading" && i+1 < len(nodes) && whole[nodes[i+1].Type] {
+			// On paper a heading goes to the next page with a block that
+			// does, which doesn't break across two.
+			w.write(`<div class="keep">`)
+			w.block(nodes[i])
+			w.block(nodes[i+1])
+			w.write("</div>\n")
+			i += 2
 			continue
 		}
 		typ := nodes[i].Type
@@ -200,6 +235,10 @@ func (w htmlWriter) blocks(nodes []*Node) {
 		w.write("</" + strings.Fields(tag)[0] + ">\n")
 	}
 }
+
+// whole are the blocks a printed page keeps on one page, by type.
+var whole = map[string]bool{"code": true, "quote": true, "callout": true, "image": true, "chart": true, "video": true, "link_preview": true,
+	"file": true, "subpage": true, "embed": true, "math_equation": true, "diagram": true}
 
 func (w htmlWriter) item(n *Node) {
 	w.write("<li", w.attrs(n, ""), ">")
@@ -252,7 +291,7 @@ func (w htmlWriter) block(n *Node) {
 		w.write("<pre", w.attrs(n, ""), "><code", class, ">", code, "</code></pre>\n")
 	case "toggle_list":
 		open := " open"
-		if n.Bool("collapsed") {
+		if n.Bool("collapsed") && !w.opts.Print {
 			open = ""
 		}
 		w.write("<details", w.attrs(n, ""), open, "><summary>", n.Delta().HTML(), "</summary>\n")
@@ -279,7 +318,7 @@ func (w htmlWriter) block(n *Node) {
 		if n.Str("align") == "left" {
 			class += " left"
 		}
-		w.write("<figure", w.attrs(n, class), `><img src="`, html.EscapeString(src), `" alt="`, html.EscapeString(n.Str("alt")), `"`, style, ` loading="lazy"></figure>`+"\n")
+		w.write("<figure", w.attrs(n, class), `><img src="`, html.EscapeString(src), `" alt="`, html.EscapeString(n.Str("alt")), `"`, style, w.lazy(), `></figure>`+"\n")
 	case "table":
 		w.write("<div", w.attrs(n, "table"), "><table>\n")
 		grid := tableCells(n)
@@ -371,6 +410,11 @@ func (w htmlWriter) block(n *Node) {
 			w.card(n)
 			break
 		}
+		if w.opts.Print {
+			// Paper plays nothing: the video is a card linking to it.
+			w.videoCard(n, v)
+			break
+		}
 		// It plays in place, as in the app, but only once the visitor
 		// asks: the page's player does not start as it loads.
 		src := strings.Replace(strings.Replace(v.PlayerURL(), "autoplay=1&", "", 1), "?autoplay=1", "", 1)
@@ -439,9 +483,38 @@ func (w htmlWriter) card(n *Node) {
 	}
 	w.write(`<span class="site">`, w.icon("globe"), html.EscapeString(site), "</span></span>")
 	if img := n.Str("image"); WebURL(img) {
-		w.write(`<img src="`, html.EscapeString(img), `" alt="" loading="lazy">`)
+		w.write(`<img src="`, html.EscapeString(img), `" alt=""`, w.lazy(), `>`)
 	}
 	w.write("</a>\n")
+}
+
+// videoCard writes a video as a link card to its page, with its picture
+// where it has one, for a page that is printed.
+func (w htmlWriter) videoCard(n *Node, v Video) {
+	link := v.WatchURL()
+	site := ""
+	if u, err := url.Parse(link); err == nil {
+		site = strings.TrimPrefix(u.Hostname(), "www.")
+	}
+	w.write("<a", w.attrs(n, "card link"), ` href="`, html.EscapeString(link), `" rel="noopener noreferrer"><span class="text"><strong>`, html.EscapeString(cardTitle(n)), "</strong>")
+	w.write(`<span class="site">`, w.icon("play"), html.EscapeString(site), "</span></span>")
+	img := n.Str("image")
+	if !WebURL(img) {
+		img = v.Thumbnail()
+	}
+	if img != "" {
+		w.write(`<img src="`, html.EscapeString(img), `" alt="">`)
+	}
+	w.write("</a>\n")
+}
+
+// lazy is a picture's loading attribute: lazy, but on paper, which can't
+// scroll to it.
+func (w htmlWriter) lazy() string {
+	if w.opts.Print {
+		return ""
+	}
+	return ` loading="lazy"`
 }
 
 // file writes a file's card: its name and what it is, a link that
@@ -488,8 +561,8 @@ func (w htmlWriter) recording(n *Node) {
 	if len(v.Lines) > 0 {
 		w.write(`<div class="transcript">`)
 		// A long transcript shows its first lines until it is opened, as
-		// the app's block does.
-		folds := FoldsTranscript(len(v.Lines))
+		// the app's block does; on paper it is whole.
+		folds := FoldsTranscript(len(v.Lines)) && !w.opts.Print
 		for i, l := range v.Lines {
 			if folds && i == FoldedLines {
 				w.write("<details><summary>", html.EscapeString(locales.In(w.opts.Lang).RecShowAll(len(v.Lines))), w.icon("chevron-down"), "</summary>")
@@ -612,15 +685,66 @@ func SafeHref(s string) string {
 	return ""
 }
 
-const pageCSS = `:root{color-scheme:light dark;--fg:#16181d;--muted:#565c67;--bg:#fff;--line:#e3e6eb;--code:#f3f4f6;--link:#3446c9;
+// pageCSS is a page's look, light and dark.
+const pageCSS = pageVarsCSS + pageDarkCSS + pageRulesCSS + peleDarkCSS
+
+// printCSS is a printed page's look: light alone, filling the paper's
+// width, with nothing cut off at its edge or broken across two pages that
+// fits on one. A heading keeps room below it, which takes it to the next
+// page with what it heads, as WebKit keeps no heading with what follows;
+// a recording is in blocks, which WebKit breaks across pages, as it does
+// no flex box.
+const printCSS = pageVarsCSS + pageRulesCSS + `:root{color-scheme:light}
+body{font-size:15px}
+main{max-width:none;padding:0}
+pre{white-space:pre-wrap}
+.table,.math,.diagram{overflow:visible}
+h1,h2,h3,h4,h5,h6,summary{break-inside:avoid}
+h1::after,h2::after,h3::after,h4::after,h5::after,h6::after,summary::after{content:"";display:block;height:5em;margin-bottom:-5em}
+pre,blockquote,.callout,.card,tr,figure:not(.recording),.math,.diagram,.keep,.recording .head,.transcript p{break-inside:avoid}
+figure.recording,.transcript{display:block}
+.recording .head{margin-bottom:12px}
+.transcript p+p{margin-top:8px}
+`
+
+// cjkRange is where Chinese and Japanese are in Unicode: radicals,
+// punctuation, kana, ideographs and full-width forms.
+const cjkRange = "U+2E80-2FDF,U+3000-30FF,U+3190-31FF,U+3200-33FF,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+FE30-FE4F,U+FF00-FFEF,U+20000-2FA1F"
+
+// printFontCSS sets a printed page's Chinese and Japanese in fonts the
+// system finds by name: PingFang SC, or Hiragino Sans for a page in
+// Japanese. For -apple-system, WebKit takes a hidden font, and the PDFs of
+// Apple's systems name radicals for many of its ideographs, as ⼈ for 人,
+// which only a font found by name tells back, so the page copies and
+// searches as it reads. Elsewhere, without those fonts, it changes
+// nothing.
+func printFontCSS(lang string) string {
+	regular, bold := "PingFangSC-Regular", "PingFangSC-Semibold"
+	if strings.HasPrefix(lang, "ja") {
+		regular, bold = "HiraginoSans-W3", "HiraginoSans-W6"
+	}
+	face := func(name, weight string) string {
+		return `@font-face{font-family:"Leaflet CJK";src:local("` + name + `");font-weight:` + weight + `;unicode-range:` + cjkRange + "}\n"
+	}
+	return face(regular, "100 500") + face(bold, "600 900") +
+		`body{font-family:"Leaflet CJK",-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif}
+code{font-family:"Leaflet CJK",ui-monospace,SFMono-Regular,Menlo,monospace}
+`
+}
+
+const pageVarsCSS = `:root{color-scheme:light dark;--fg:#16181d;--muted:#565c67;--bg:#fff;--line:#e3e6eb;--code:#f3f4f6;--link:#3446c9;
 --info:#eef1ff;--tip:#e9f7ef;--warning:#fff6e0;--danger:#fdecec;--th:#f5f6f8;
 --info-line:transparent;--tip-line:transparent;--warning-line:transparent;--danger-line:transparent;
 --info-icon:currentColor;--tip-icon:currentColor;--warning-icon:currentColor;--danger-icon:currentColor;
 --fg2:#3d424c;--accent:#3446c9;--chart-muted:#9aa1ad;--hover:rgba(22,24,29,.05);--due:#f0f1f4}
-@media (prefers-color-scheme:dark){:root{--fg:#e9ebef;--muted:#9ea4af;--bg:#16181d;--line:#2f343c;--code:#23272e;--link:#8a97ff;
+`
+
+const pageDarkCSS = `@media (prefers-color-scheme:dark){:root{--fg:#e9ebef;--muted:#9ea4af;--bg:#16181d;--line:#2f343c;--code:#23272e;--link:#8a97ff;
 --info:#22264a;--tip:#1c3326;--warning:#3a2f14;--danger:#3d1d1d;--th:#101216;
 --fg2:#c0c5ce;--accent:#4f5fd9;--chart-muted:#6b7280;--hover:rgba(233,235,239,.06);--due:#23272e}}
-html{background:var(--bg);color:var(--fg)}
+`
+
+const pageRulesCSS = `html{background:var(--bg);color:var(--fg)}
 body{margin:0;font:17px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;-webkit-text-size-adjust:100%}
 main{max-width:720px;margin:0 auto;padding:48px 16px 120px;overflow-wrap:anywhere}
 h1.title{font-size:2.2em;line-height:1.2;margin:0 0 .8em}
@@ -726,4 +850,6 @@ figure.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
 @media (max-width:600px){main{padding:28px 16px 96px}h1.title{font-size:1.8em}pre{font-size:.92em}
 th:not(.nowrap),td:not(.nowrap){min-width:9em}.card.link img{width:96px}}
 .pele{--pele-bg:var(--bg);--pele-fg:#16181d;--pele-muted:#565c67;--pele-line:#3d424c;--pele-surface:#f5f6f8;--pele-surface-alt:#eceef2;--pele-border:#c9ced8;--pele-accent:#3446c9;--pele-fg-on-light:#16181d;--pele-fg-on-dark:#e9ebef;--pele-font:-apple-system,system-ui,sans-serif}
-@media (prefers-color-scheme:dark){.pele{--pele-fg:#e9ebef;--pele-muted:#9ea4af;--pele-line:#c0c5ce;--pele-surface:#23272e;--pele-surface-alt:#2b3038;--pele-border:#3a404a;--pele-accent:#8a97ff}}`
+`
+
+const peleDarkCSS = `@media (prefers-color-scheme:dark){.pele{--pele-fg:#e9ebef;--pele-muted:#9ea4af;--pele-line:#c0c5ce;--pele-surface:#23272e;--pele-surface-alt:#2b3038;--pele-border:#3a404a;--pele-accent:#8a97ff}}`

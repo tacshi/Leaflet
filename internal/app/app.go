@@ -1282,12 +1282,21 @@ func (a *App) menu(update *mygo.MenuItem) []*mygo.MenuItem {
 			{Label: locales.AppMenuSearch(), Accelerator: "CmdOrCtrl+P", Click: func(*mygo.MenuItem, *mygo.Window) {
 				a.update(func() { a.openSearch() })
 			}},
-			{Label: locales.AppMenuExportMarkdown(), Click: func(*mygo.MenuItem, *mygo.Window) {
-				a.update(func() {
-					if a.page != nil {
-						a.exportPage(a.page.id)
-					}
-				})
+			{Label: locales.AppMenuExport(), Submenu: []*mygo.MenuItem{
+				{Label: locales.AppMenuExportMarkdown(), Click: func(*mygo.MenuItem, *mygo.Window) {
+					a.update(func() {
+						if a.page != nil {
+							a.exportMarkdown(a.page.id)
+						}
+					})
+				}},
+				{Label: locales.AppMenuExportPDF(), Click: func(*mygo.MenuItem, *mygo.Window) {
+					a.update(func() {
+						if a.page != nil {
+							a.exportPDF(a.page.id)
+						}
+					})
+				}},
 			}},
 			{Type: mygo.MenuItemSeparator},
 			{Role: mygo.RoleClose},

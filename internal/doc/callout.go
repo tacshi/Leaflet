@@ -23,6 +23,12 @@ func CalloutTone(tone string) string {
 	return "info"
 }
 
+var calloutIcons = map[string]string{"info": "info", "tip": "lightbulb", "warning": "triangle-alert", "danger": "octagon-alert"}
+
+// CalloutIcon is the name of a tone's Lucide icon, as the editor and web
+// pages show it.
+func CalloutIcon(tone string) string { return calloutIcons[CalloutTone(tone)] }
+
 // NextTone is the tone a callout takes after tone, as a click on its icon
 // cycles them: the first after the last, and the second after one not
 // known, which reads as the first.

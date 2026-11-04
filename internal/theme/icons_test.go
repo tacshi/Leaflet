@@ -1,7 +1,7 @@
 package theme
 
 import (
-	"strings"
+	"leaflet/internal/theme/icons"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -10,20 +10,13 @@ import (
 // TestIconsParse checks that every bundled icon draws, as a hand-made one
 // such as record.svg may not.
 func TestIconsParse(t *testing.T) {
-	entries, err := icons.ReadDir("icons")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".svg") {
-			continue
-		}
-		data, err := icons.ReadFile("icons/" + e.Name())
-		if err != nil {
-			t.Fatal(err)
+	for _, name := range icons.Names() {
+		data, ok := icons.Read(name)
+		if !ok {
+			t.Fatalf("%s: not read", name)
 		}
 		if _, err := ui.ParseSVG(data); err != nil {
-			t.Errorf("%s: %v", e.Name(), err)
+			t.Errorf("%s.svg: %v", name, err)
 		}
 	}
 }

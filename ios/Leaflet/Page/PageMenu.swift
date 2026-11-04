@@ -61,13 +61,36 @@ struct PageMenu: View {
                 scene.history = page
             }
         }
-        Button(L.sidebarExportMarkdown, systemImage: "square.and.arrow.up") {
-            Task {
-                await scene.flush()
-                do {
-                    scene.exported = try await app.client?.exportMarkdown(page.id)
-                } catch {
-                    app.show(Toast(message: L.hostErrorExport(error: error.localizedDescription)))
+        Menu(L.sidebarExport, systemImage: "square.and.arrow.up") {
+            Button(L.sidebarExportMarkdown, systemImage: "doc.plaintext") {
+                Task {
+                    await scene.flush()
+                    do {
+                        if let md = try await app.client?.exportMarkdown(page.id) {
+                            scene.exported = ExportFile(
+                                name: md.name, data: Data(md.markdown.utf8),
+                                type: ExportFile.markdown)
+                        }
+                    } catch {
+                        app.show(
+                            Toast(message: L.hostErrorExport(error: error.localizedDescription)))
+                    }
+                }
+            }
+            Button(L.sidebarExportPDF, systemImage: "doc.richtext") {
+                Task {
+                    await scene.flush()
+                    do {
+                        let region = Locale.current.region?.identifier ?? ""
+                        guard let printed = try await app.client?.exportPDF(page.id, region: region)
+                        else { return }
+                        app.show(Toast(message: L.hostExportingPDF(name: printed.name)))
+                        scene.exported = ExportFile(
+                            name: printed.name, data: try await PagePDF.make(printed), type: .pdf)
+                    } catch {
+                        app.show(
+                            Toast(message: L.hostErrorExport(error: error.localizedDescription)))
+                    }
                 }
             }
         }
@@ -124,19 +147,29 @@ struct DefaultTemplateMenu: View {
     }
 }
 
-/// MarkdownFile is a page's Markdown, saved where the user picks.
-struct MarkdownFile: FileDocument {
-    static let readableContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
-    var text: String
+/// ExportFile is a page exported as a file, Markdown or PDF, saved where
+/// the user picks under name.
+struct ExportFile: FileDocument {
+    static let markdown = UTType(filenameExtension: "md") ?? .plainText
+    static let readableContentTypes = [markdown, .pdf]
+    var name: String
+    var data: Data
+    var type: UTType
 
-    init(_ text: String) { self.text = text }
+    init(name: String, data: Data, type: UTType) {
+        self.name = name
+        self.data = data
+        self.type = type
+    }
 
     init(configuration: ReadConfiguration) throws {
-        text = String(decoding: configuration.file.regularFileContents ?? Data(), as: UTF8.self)
+        name = configuration.file.filename ?? ""
+        data = configuration.file.regularFileContents ?? Data()
+        type = configuration.contentType
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        FileWrapper(regularFileWithContents: Data(text.utf8))
+        FileWrapper(regularFileWithContents: data)
     }
 }
 

@@ -30,8 +30,9 @@ final class SceneModel {
     var moving: PageRow?
     /// history is the page whose versions show.
     var history: PageRow?
-    /// exported is a page's Markdown being saved to a file.
-    var exported: ExportedPage?
+    /// exported is a page exported as a file, Markdown or PDF, being saved
+    /// where the user picks.
+    var exported: ExportFile?
     /// page is the open page's model, for its edits to reach the core.
     @ObservationIgnored weak var page: PageModel?
     /// saveTitle keeps the open page's title as typed, which the page sets:

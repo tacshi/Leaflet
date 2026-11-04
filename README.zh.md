@@ -53,7 +53,7 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
   视频、链接卡片，以及在沙盒中运行的交互式嵌入。
 - Markdown 快捷输入、`/` 菜单、用 `@` 提及成员、智能体和页面、带文字颜色
   的选区工具栏、可折叠的标题、大纲，以及指向页面和单个块的链接。
-- 嵌套页面与文件夹、模板、复制页面、搜索，以及导出为 Markdown。
+- 嵌套页面与文件夹、模板、复制页面、搜索，以及导出为 Markdown 和 PDF。
 - 页面历史，支持命名版本，可以行内或并排查看与任一版本相比的改动。
 
 ### 与智能体协作
@@ -270,6 +270,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `internal/doc` | 页面文档模型：块、增量、行内 Markdown、操作、按块合并和 Markdown 导出 |
 | `internal/menu`、`internal/shortcut` | `/` 和 `@` 菜单提供的内容，以及在页面中输入的 Markdown 会变成什么（两个应用的编辑器通用） |
 | `internal/rendered` | 绘制数学公式（KaTeX）和示意图（Pele）的页面，运行在不能联网的框架中 |
+| `internal/webpage` | 可独立打开的网页形式的页面：公开链接分享的、导出 › PDF 打印的都是它，两个应用共用 |
 | `internal/starters` | Leaflet 自带的模板 |
 | `internal/export` | 把所有页面连同图片、文件和录音导出为 Markdown 压缩包 |
 | `internal/web` | 链接卡片、图片、视频信息和供智能体阅读的网页，只从公网地址读取 |

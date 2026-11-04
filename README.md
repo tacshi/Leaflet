@@ -58,7 +58,7 @@ itself.
   pages, a selection toolbar with text colors, folding headings, an
   outline, and links to pages and to single blocks.
 - Nested pages and folders, templates, duplicate pages, search, and export
-  to Markdown.
+  to Markdown and PDF.
 - Page history with named versions, and what changed since any of them,
   inline or side by side.
 
@@ -300,6 +300,7 @@ rules.
 | `internal/doc` | The page document model: blocks, deltas, inline Markdown, ops, per-block merge and Markdown export |
 | `internal/menu`, `internal/shortcut` | What the `/` and `@` menus offer, and what Markdown typed in a page becomes, for both apps' editors |
 | `internal/rendered` | The pages that draw math (KaTeX) and diagrams (Pele), in frames with no network |
+| `internal/webpage` | A page as a web page that stands alone, as a public link shares it and Export › PDF prints it, on both apps |
 | `internal/starters` | The templates that come with Leaflet |
 | `internal/export` | Exporting every page as Markdown in a zip, with its pictures, files and recordings |
 | `internal/web` | Link cards, pictures, video info and pages for agents, read from public addresses only |

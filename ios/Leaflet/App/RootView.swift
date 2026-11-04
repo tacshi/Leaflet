@@ -97,8 +97,8 @@ struct RootView: View {
         .fileExporter(
             isPresented: Binding(
                 get: { scene.exported != nil }, set: { if !$0 { scene.exported = nil } }),
-            document: scene.exported.map { MarkdownFile($0.markdown) },
-            contentType: MarkdownFile.readableContentTypes[0],
+            document: scene.exported,
+            contentType: scene.exported?.type ?? ExportFile.markdown,
             defaultFilename: scene.exported?.name
         ) { result in
             switch result {

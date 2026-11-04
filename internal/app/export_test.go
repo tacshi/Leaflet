@@ -218,3 +218,44 @@ func TestEditMenuCopiesPlainText(t *testing.T) {
 		t.Errorf("copied %q", got)
 	}
 }
+
+// File › Export saves the open page as Markdown or as a PDF, as the
+// page's menu does, in the sidebar and in the page's header.
+func TestExportMenus(t *testing.T) {
+	a := templatesApp(t)
+	var export *mygo.MenuItem
+	for _, it := range a.menu(&mygo.MenuItem{Label: "Check for Updates…"})[1].Submenu {
+		if it.Label == locales.AppMenuExport() {
+			export = it
+		}
+	}
+	if export == nil {
+		t.Fatal("no Export in the File menu")
+	}
+	var labels []string
+	for _, it := range export.Submenu {
+		labels = append(labels, it.Label)
+	}
+	if !slices.Equal(labels, []string{locales.AppMenuExportMarkdown(), locales.AppMenuExportPDF()}) {
+		t.Errorf("File › Export has %v", labels)
+	}
+
+	p, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes"})
+	a.reloadAll()
+	for _, header := range []bool{false, true} {
+		tt := ui.NewTester(func(c *ui.Context) {
+			ui.Button(c.Key("menu"), "Menu").Menu(func(m *ui.Menu) { a.pageMenu(m, *a.pageByID(p.ID), header) })
+		}, 300, 200)
+		tt.Frame()
+		if err := tt.Click("Menu"); err != nil {
+			t.Fatal(err)
+		}
+		menu := tt.Menu()
+		if !slices.Contains(menu, locales.SidebarExport()) || slices.Contains(menu, locales.SidebarExportMarkdown()) {
+			t.Errorf("header %v: menu %v", header, menu)
+		}
+		if err := tt.ChooseMenuItem(locales.SidebarExport()); err == nil || !strings.Contains(err.Error(), "opens a submenu") {
+			t.Errorf("header %v: Export is no submenu: %v", header, err)
+		}
+	}
+}

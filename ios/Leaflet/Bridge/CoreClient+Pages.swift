@@ -107,6 +107,16 @@ extension CoreClient {
         }
     }
 
+    /// exportPDF returns a page to print as a PDF, on the paper of region,
+    /// a code such as "US".
+    nonisolated(nonsending) func exportPDF(_ pageID: String, region: String) async throws
+        -> ExportedPDF
+    {
+        try await call(ExportedPDF.self) { core in
+            try Self.answer { e in core.exportPDFPage(pageID, region: region, error: e) }
+        }
+    }
+
     /// plainCopy returns blocks as Copy as Plain Text puts them on the
     /// clipboard, as the desktop's: text alone, a line per block.
     nonisolated(nonsending) func plainCopy(_ nodes: [DocNode]) async throws -> String {

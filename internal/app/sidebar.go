@@ -704,9 +704,14 @@ func (a *App) pageMenu(m *ui.Menu, p store.Page, header bool) {
 	if !header && server && !p.Template && m.Item(locales.SidebarShareEllipsis()).Chosen() {
 		a.openShare(p.ID)
 	}
-	if m.Item(locales.SidebarExportMarkdown()).Chosen() {
-		a.exportPage(p.ID)
-	}
+	m.Submenu(locales.SidebarExport(), func(m *ui.Menu) {
+		if m.Item(locales.SidebarExportMarkdown()).Chosen() {
+			a.exportMarkdown(p.ID)
+		}
+		if m.Item(locales.SidebarExportPDF()).Chosen() {
+			a.exportPDF(p.ID)
+		}
+	})
 	if (server || a.sync.ICloudOn()) && !p.Template && m.Item(locales.SidebarKeepOnDevice()).Checked(p.KeepOffline || a.settings.AllPagesOffline).Disabled(a.settings.AllPagesOffline).Chosen() {
 		if err := a.core().SetKeepOffline(p.ID, !p.KeepOffline); err != nil {
 			a.toast(locales.SidebarCouldNotSave(err.Error()))

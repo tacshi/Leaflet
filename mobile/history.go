@@ -16,6 +16,7 @@ import (
 	"leaflet/internal/export"
 	"leaflet/internal/store"
 	"leaflet/internal/web"
+	"leaflet/internal/webpage"
 	"leaflet/locales"
 )
 
@@ -132,6 +133,58 @@ func (c *Core) ExportMarkdown(pageID string) (_ string, err error) {
 	if err != nil {
 		return "", err
 	}
+	return encode(out)
+}
+
+// exportedPDF is a page to print as a PDF, as ExportPDFPage returns it.
+type exportedPDF struct {
+	// Name is the file's name: the title, safe in a path, and ".pdf".
+	Name string `json:"name"`
+	// HTML is the page as its public link shows it, laid out for paper,
+	// with its pictures and scripts in it.
+	HTML string `json:"html"`
+	// Width and Height are the paper's, in inches.
+	Width  float64 `json:"width"`
+	Height float64 `json:"height"`
+}
+
+// ExportPDFPage returns a page as a web page to print as a PDF, as the
+// desktop's Export › PDF prints it, on the paper of region, a code such as
+// "US": an exportedPDF in JSON. The page's edits are saved first.
+func (c *Core) ExportPDFPage(pageID, region string) (_ string, err error) {
+	defer catch(&err)
+	var o webpage.Options
+	var content *doc.Content
+	c.q.do(func() {
+		if p := c.pages[pageID]; p != nil {
+			p.live.Save()
+		}
+		var p store.Page
+		if p, err = c.core.Store.Page(pageID); err != nil {
+			return
+		}
+		var pages []store.Page
+		if pages, err = c.core.Store.Pages(); err != nil {
+			return
+		}
+		titles := map[string]string{}
+		for _, pg := range pages {
+			titles[pg.ID] = pg.DisplayTitle()
+		}
+		var files []store.File
+		if files, err = c.core.Store.Files(); err != nil {
+			return
+		}
+		content = c.content(pageID).Copy()
+		o = webpage.Options{Store: c.core.Store, Page: pageID, Title: p.DisplayTitle(), Titles: titles, Files: files,
+			Lang: i18n.Locale(), Serve: webpage.Inline, Print: true}
+	})
+	if err != nil {
+		return "", err
+	}
+	// Off the queue: its pictures are read into it.
+	out := exportedPDF{Name: export.SafeName(o.Title) + ".pdf", HTML: webpage.HTML(content, o)}
+	out.Width, out.Height = webpage.Paper(region)
 	return encode(out)
 }
 

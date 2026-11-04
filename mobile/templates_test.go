@@ -163,6 +163,20 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 	if md.Name != "Trip.md" || !strings.HasPrefix(md.Markdown, "# Trip") {
 		t.Fatalf("export %+v", md)
 	}
+	// A PDF is the page as its link shares it, laid out for the region's
+	// paper: its subpages by their titles.
+	for region, width := range map[string]float64{"US": 8.5, "DE": 8.27, "": 8.27} {
+		raw, err = c.ExportPDFPage(parent.ID, region)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var pdf exportedPDF
+		_ = json.Unmarshal([]byte(raw), &pdf)
+		if pdf.Name != "Trip.pdf" || pdf.Width != width || !strings.Contains(pdf.HTML, `<h1 class="title">Trip</h1>`) ||
+			!strings.Contains(pdf.HTML, ">Packing</p>") || strings.Contains(pdf.HTML, "prefers-color-scheme") {
+			t.Fatalf("PDF for %q: %+v", region, pdf)
+		}
+	}
 
 	path := filepath.Join(t.TempDir(), "notes.txt")
 	_ = os.WriteFile(path, []byte("hi"), 0o600)

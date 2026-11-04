@@ -189,3 +189,13 @@ func EmbedPage(src, bg string, dark bool) string {
 	defer catch(nil)
 	return rendered.EmbedPage("", src, bg, dark, true)
 }
+
+// NoRTCScript returns the script that takes WebRTC away from the window it
+// runs in, as an embed's frame runs it before the embed (rendered.NoRTC):
+// the app's web views of embeds, formulas and diagrams run it first in
+// each of their frames, those a page makes itself among them, which would
+// otherwise have WebRTC to reach the network around the page's policy.
+func NoRTCScript() string {
+	defer catch(nil)
+	return rendered.NoRTC
+}

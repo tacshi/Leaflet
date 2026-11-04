@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -42,8 +43,8 @@ type Request struct {
 	SelectionText  string
 	ConversationID string
 	CommentID      string
-	// History holds earlier turns of the conversation: {role, content}.
-	History []map[string]string
+	// History holds earlier turns of the conversation.
+	History []Turn
 	// KeptToPage is a History whose runs read nothing beyond their page:
 	// this run may then use the web (RunLocal).
 	KeptToPage     bool
@@ -53,6 +54,17 @@ type Request struct {
 	// Thread is the comment thread a comment run answers in, its first
 	// comment first.
 	Thread []ThreadComment
+}
+
+// Turn is a message of an earlier turn of a conversation, the user's
+// request or the agent's reply, as the model reads it.
+type Turn struct {
+	Role    string
+	Content string
+	// KeptToPage is a turn of a run that read nothing beyond its page,
+	// and Guarded one whose URL guard was on: it read beyond its page or
+	// the web, or followed turns that did.
+	KeptToPage, Guarded bool
 }
 
 // ThreadComment is a comment of the thread a run answers in, as the model
@@ -94,6 +106,10 @@ type Result struct {
 	Ops   []doc.Op
 	// KeptToPage is a run that read nothing beyond its page.
 	KeptToPage bool
+	// Guarded is a run whose URL guard was on as it ended (Executor.
+	// Guarded): its reply may carry what it read beyond its page or on
+	// the web.
+	Guarded bool
 }
 
 // Models that think aloud write their thinking in <think> tags, in any
@@ -139,11 +155,17 @@ func shownText(s string) string {
 func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev Events) (Result, error) {
 	tc.Request = req.Instruction
 	// Earlier turns of the conversation may hold what a run read on
-	// another page: this one has no web, and where it may read other pages
-	// itself, what it writes keeps to the URLs the user gave, as after
-	// reading one (checkURLs).
+	// another page: this one has no web, and what it writes keeps to the
+	// URLs the user gave, as after reading one (checkURLs). Where it may no
+	// longer read other pages, as the page is shared now, the turns of
+	// those runs are left out: what they read would be written where
+	// others read it.
 	pagesBefore := len(req.History) > 0 && !req.KeptToPage
-	armed := pagesBefore && (tc.ListPages != nil || tc.ReadOtherPage != nil)
+	crossPage := tc.ListPages != nil || tc.ReadOtherPage != nil
+	// Earlier turns that read the web may hold what they read there: the
+	// run keeps to the URLs it may write after reading the web from its
+	// start, as one that read it itself does, and has found none yet.
+	webBefore := slices.ContainsFunc(req.History, func(t Turn) bool { return t.Guarded })
 	if req.Web && req.SupportsTools && !pagesBefore {
 		if tc.ReadWeb == nil {
 			tc.ReadWeb = func(link string) (web.Page, error) { return web.Read(ctx, link) }
@@ -159,11 +181,13 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 	if tc.Captions == nil {
 		tc.Captions = func(v doc.Video) (web.Captions, error) { return web.ReadCaptions(ctx, v) }
 	}
-	exec := &Executor{Ctx: tc, OnOp: ev.Op, OnRevise: ev.Revise}
+	exec := &Executor{Ctx: tc, OnOp: ev.Op, OnRevise: ev.Revise, armed: pagesBefore}
+	if webBefore {
+		exec.saw()
+	}
 	exec.begin()
-	exec.armed = armed
 	result := func(reply string) Result {
-		return Result{Reply: reply, Edits: exec.Edits, Ops: exec.Ops, KeptToPage: !exec.readPages}
+		return Result{Reply: reply, Edits: exec.Edits, Ops: exec.Ops, KeptToPage: !exec.readPages, Guarded: exec.Guarded()}
 	}
 	if ev.Status != nil {
 		ev.Status("running")
@@ -179,7 +203,10 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 	}
 	messages := []map[string]any{{"role": "system", "content": SystemPrompt(req.AgentName, req.Surface, tc.ListPages != nil, req.SupportsTools, tc.ReadOnly, tc.ReadWeb != nil, tc.SearchWeb != nil)}}
 	for _, t := range req.History {
-		messages = append(messages, map[string]any{"role": t["role"], "content": t["content"]})
+		if pagesBefore && !crossPage && !t.KeptToPage {
+			continue
+		}
+		messages = append(messages, map[string]any{"role": t.Role, "content": t.Content})
 	}
 	messages = append(messages, map[string]any{"role": "user", "content": userMessage(req, views, focus)})
 	var tools []map[string]any
@@ -193,10 +220,9 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 	streams = streams && (ev.Text != nil || ev.Revise != nil)
 	// answer asks the model for the round's answer. The round's calls that
 	// write blocks go in the page as they stream, while the calls before
-	// them did too, so they still run in turn: drafted are the results of
-	// those that did.
-	answer := func() (res ChatResult, drafted map[int]map[string]any, err error) {
-		drafted = map[int]map[string]any{}
+	// them did too, so they still run in turn: drafted are those that did.
+	answer := func() (res ChatResult, drafted map[int]madeCall, err error) {
+		drafted = map[int]madeCall{}
 		if !streams {
 			res, err = client.Chat(ctx, req.Model, messages, tools, 0)
 			return res, drafted, err
@@ -209,7 +235,7 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 				if current >= 0 {
 					out, ok := exec.FinishDraft(name, args)
 					if ok {
-						drafted[current] = out
+						drafted[current] = madeCall{out, exec.Refused}
 					}
 					drafting = drafting && ok
 				}
@@ -233,7 +259,7 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 			exec.DropDraft()
 		case err == nil && current >= 0 && current < len(res.ToolCalls):
 			if out, ok := exec.FinishDraft(name, res.ToolCalls[current].Arguments); ok {
-				drafted[current] = out
+				drafted[current] = madeCall{out, exec.Refused}
 			}
 		}
 		return res, drafted, err
@@ -267,33 +293,53 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 		}
 		messages = append(messages, res.AssistantMessage())
 		for i, call := range res.ToolCalls {
-			out, ok := drafted[i]
+			made, ok := drafted[i]
 			switch {
 			case ok:
 			case cut && i == len(res.ToolCalls)-1:
-				out = map[string]any{"error": errCallCutOff}
+				made = madeCall{map[string]any{"error": errCallCutOff}, errCallCutOff}
 			case i >= maxRoundCalls:
-				out = map[string]any{"error": fmt.Sprintf(errTooManyCalls, maxRoundCalls)}
+				tooMany := fmt.Sprintf(errTooManyCalls, maxRoundCalls)
+				made = madeCall{map[string]any{"error": tooMany}, tooMany}
 			default:
 				if a := activity(call.Name, call.Arguments); a != "" && ev.Activity != nil {
 					ev.Activity(a)
 				}
-				out = exec.CallRaw(call.Name, call.Arguments)
+				made = madeCall{exec.CallRaw(call.Name, call.Arguments), exec.Refused}
 			}
-			if e, ok := out["error"].(string); ok {
-				// Where it was asked to write, not what: the page's text
-				// stays out of the log.
-				var args struct {
-					Position json.RawMessage `json:"position"`
-				}
-				_ = json.Unmarshal([]byte(call.Arguments), &args)
-				log.Printf("agent tool %s refused: %s (position %s)", call.Name, e, args.Position)
+			if made.refused != "" {
+				// Why, in the code's own words: the call's arguments, and
+				// what a refusal says of them, a URL the run may not write
+				// say, stay out of the log.
+				log.Printf("agent tool %s refused: %s", call.Name, made.refused)
 			}
-			raw, _ := json.Marshal(out)
-			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": call.ID, "content": string(raw)})
+			raw, _ := json.Marshal(made.out)
+			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": call.ID, "content": cutResult(string(raw))})
 		}
 	}
 	return result(locales.AgentStoppedAfterRounds(MaxRounds)), nil
+}
+
+// madeCall is a tool call made: its result, and why it was refused, ""
+// when it was not (Executor.Refused).
+type madeCall struct {
+	out     map[string]any
+	refused string
+}
+
+// toolResultLimit is the longest tool result a model reads, in UTF-16
+// units of its JSON, as on the server: a page of embeds, or many pages
+// listed, would be more than a model reads at once.
+const toolResultLimit = 60_000
+
+// cutResult is a tool's result as the model reads it, cut off past
+// toolResultLimit as the server cuts it.
+func cutResult(s string) string {
+	units := utf16.Encode([]rune(s))
+	if len(units) <= toolResultLimit {
+		return s
+	}
+	return string(utf16.Decode(units[:toolResultLimit])) + "…(truncated)"
 }
 
 // activity says what a call that takes a while does, for the reply to
@@ -453,9 +499,14 @@ func RunCloud(ctx context.Context, be Streamer, jobID string, ev Events) (Result
 			if a := activity(tool, string(raw)); a != "" && ev.Activity != nil {
 				ev.Activity(a)
 			}
+			// The server names the calls that read the web: a run that
+			// made one may have read it.
+			res.Guarded = true
 		case "done":
 			res.Reply, _ = e["reply"].(string)
 			res.KeptToPage, _ = e["kept_to_page"].(bool)
+			guarded, _ := e["guarded"].(bool)
+			res.Guarded = res.Guarded || guarded || !res.KeptToPage
 			done = true
 		case "error":
 			failure = fmt.Errorf("%v", e["message"])
@@ -496,8 +547,10 @@ type cloudJob struct {
 	Result struct {
 		Reply string   `json:"reply"`
 		Ops   []doc.Op `json:"ops"`
-		// KeptToPage is a run that read nothing beyond its page.
+		// KeptToPage is a run that read nothing beyond its page, and
+		// Guarded one whose URL guard was on.
 		KeptToPage bool `json:"kept_to_page"`
+		Guarded    bool `json:"guarded"`
 		// An edit for each op, naming the call that made it.
 		Edits []struct {
 			Tool string `json:"tool"`
@@ -529,6 +582,8 @@ func (j cloudJob) result(streamed Result) (Result, error) {
 		return res, errors.New(msg)
 	}
 	res.Reply, res.KeptToPage = j.Result.Reply, j.Result.KeptToPage
+	// The calls streamed before the cut say the run's guard was on too.
+	res.Guarded = streamed.Guarded || j.Result.Guarded || !res.KeptToPage
 	return res, nil
 }
 

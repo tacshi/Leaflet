@@ -94,11 +94,12 @@ struct ExportedPage: Codable, Sendable {
     var markdown: String
 }
 
-/// ExportedPDF is a page to print as a PDF: its web page, as the desktop
-/// prints it, the file name to save it as, and the paper's size in inches.
+/// ExportedPDF is a page to print as a PDF: the file of its web page, as
+/// the desktop prints it, the file name to save it as, and the paper's
+/// size in inches.
 struct ExportedPDF: Codable, Sendable {
     var name: String
-    var html: String
+    var path: String
     var width: Double
     var height: Double
 }

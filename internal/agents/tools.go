@@ -195,8 +195,15 @@ type ToolContext struct {
 	// ListPages and ReadOtherPage are nil when cross-page reading is off.
 	ListPages     func() []map[string]any
 	ReadOtherPage func(id string) map[string]any
-	// Transcript is a recording's transcript as text, "" when there is none.
-	Transcript func(recordingID string) string
+	// Transcript is the transcript of a recording on page pageID as text,
+	// "" when there is none, or the recording is another page's.
+	Transcript func(pageID, recordingID string) string
+	// SiteInfo keeps in the blocks the tools read what sites wrote of
+	// them, which the app read from them: a link card's title and
+	// description, and a video's title. An MCP client's, whose writing
+	// keeps to no URL guard of the app's, keeps it; a run reads a card's
+	// link and a video's alone (withoutSiteInfo).
+	SiteInfo bool
 	// Captions reads a video's captions from its site; nil reads none.
 	Captions func(v doc.Video) (web.Captions, error)
 	// Request is what the user asked the run, whose URLs a block may load
@@ -215,9 +222,12 @@ type ToolContext struct {
 func PageTools(st *store.Store, pageID, title, agent string, content *doc.Content, crossPage bool) ToolContext {
 	tc := ToolContext{
 		Content: content, PageID: pageID, PageTitle: title, AgentName: agent,
-		Transcript: func(id string) string {
+		// Only a recording of the page whose block names it, as the agent
+		// function reads a page's: a block can name any recording's ID,
+		// another page's among them.
+		Transcript: func(pageID, id string) string {
 			rec, err := st.Recording(id)
-			if err != nil {
+			if err != nil || rec.PageID != pageID {
 				return ""
 			}
 			return TranscriptText(rec.Transcript)
@@ -269,6 +279,9 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 			pages, _ := st.Pages()
 			out := []map[string]any{}
 			for _, p := range pages {
+				if len(out) == maxListedPages {
+					break
+				}
 				if p.ID != pageID && p.SpaceID == here.SpaceID {
 					out = append(out, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "parent_id": p.ParentID})
 				}
@@ -289,12 +302,16 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 					subpages = append(subpages, map[string]any{"id": k.ID, "title": k.DisplayTitle()})
 				}
 			}
-			return map[string]any{"page": map[string]any{"id": id, "title": p.DisplayTitle()}, "blocks": tc.Views(c),
+			return map[string]any{"page": map[string]any{"id": id, "title": p.DisplayTitle()}, "blocks": tc.viewsOf(id, c),
 				"subpages": subpages, "comments": []map[string]any{}}
 		}
 	}
 	return tc
 }
+
+// maxListedPages is the most pages list_pages lists, as the agent
+// function lists at most so many.
+const maxListedPages = 500
 
 // maxViewHTML is the longest embed source agents read, in characters. A
 // longer one is left out, its length given instead: a few would be more
@@ -302,26 +319,65 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 // the page could not be read at all.
 const maxViewHTML = 30_000
 
-// Views are the blocks as agents read them, with the transcripts of
-// recordings, which are not in the page itself, and without an embed's
-// source longer than maxViewHTML.
-func (tc ToolContext) Views(c *doc.Content) []map[string]any {
+// Views are the blocks of the page as agents read them (Finish).
+func (tc ToolContext) Views(c *doc.Content) []map[string]any { return tc.viewsOf(tc.PageID, c) }
+
+// viewsOf are the blocks of page pageID, whose content c is, as agents
+// read them (Finish).
+func (tc ToolContext) viewsOf(pageID string, c *doc.Content) []map[string]any {
 	views := doc.BlockViews(c)
 	for _, v := range views {
-		if e, ok := v["embed"].(map[string]any); ok {
-			if html, _ := e["html"].(string); utf8.RuneCountInString(html) > maxViewHTML {
-				delete(e, "html")
-				e["html_length"] = utf8.RuneCountInString(html)
-			}
-		}
-		if rec, ok := v["recording"].(map[string]any); ok && tc.Transcript != nil {
-			id, _ := rec["recording_id"].(string)
-			if t := tc.Transcript(id); t != "" {
-				rec["transcript"] = t
-			}
-		}
+		tc.Finish(pageID, v)
 	}
 	return views
+}
+
+// Finish makes a block's view, as doc.BlockViews has it, one as agents
+// read it: with the transcript of a recording of page pageID, which is
+// not in the page itself; without an embed's source longer than
+// maxViewHTML; and, but for SiteInfo, without what sites wrote of the
+// block (withoutSiteInfo).
+func (tc ToolContext) Finish(pageID string, v map[string]any) {
+	if e, ok := v["embed"].(map[string]any); ok {
+		if html, _ := e["html"].(string); utf8.RuneCountInString(html) > maxViewHTML {
+			delete(e, "html")
+			e["html_length"] = utf8.RuneCountInString(html)
+		}
+	}
+	if rec, ok := v["recording"].(map[string]any); ok && tc.Transcript != nil {
+		id, _ := rec["recording_id"].(string)
+		if t := tc.Transcript(pageID, id); t != "" {
+			rec["transcript"] = t
+		}
+	}
+	if !tc.SiteInfo {
+		withoutSiteInfo(v)
+	}
+}
+
+// withoutSiteInfo takes out of a block's view what a site wrote of it,
+// which the apps read from the site to show the block: a link card's
+// title and description, its page's of itself, and a video's title, its
+// uploader's, which the apps give a video that has none. That is the
+// web's writing, read with none of the web's guard (checkURLs). A video's
+// title is the site's but for one an agent wrote, and the block keeps no
+// word of which, nor did pages kept before, so none is read. A run that
+// would know what a page says reads it with the web, and a video's title
+// comes with its transcript, read as the web is (readTranscript), each
+// keeping the run to the URLs it may write after. Nor are the URLs in that
+// text the user's, to write as the page's (begin).
+func withoutSiteInfo(v map[string]any) {
+	switch v["type"] {
+	case "link_preview":
+		if l, ok := v["link"].(map[string]any); ok {
+			delete(l, "title")
+			delete(l, "description")
+		}
+	case "video":
+		if vid, ok := v["video"].(map[string]any); ok {
+			delete(vid, "title")
+		}
+	}
 }
 
 // Edit is a short description of a change, with the blocks it touched.
@@ -352,12 +408,24 @@ type Executor struct {
 	// found are the URLs the run came on in the web: those its searches
 	// found, and those on the pages it read. Nil before it reads the web,
 	// after which what it writes, and the pages it reads, keep to them
-	// and those the user gave it (checkURLs, readWeb).
-	found map[string]bool
+	// and those the user gave it (checkURLs, readWeb). sources are those
+	// of them the run came on itself, its searches' results and the pages
+	// it read that it picked from none it read, not the links on those:
+	// the only ones a block the app loads by itself may hold (loads).
+	found, sources map[string]bool
 	// written counts the blocks the run's calls have written, toward
 	// maxRunBlocks.
 	written int
+	// Refused is why the latest call was refused, said in words of the
+	// code's own, with nothing the run read or wrote in them, for a log:
+	// "" when it was not.
+	Refused string
 }
+
+// Guarded reports whether the run's URL guard is on: it has read beyond
+// its page or the web, or follows turns that did (checkURLs). What it
+// says may then carry what it read, its reply too (ReplyBlocks).
+func (x *Executor) Guarded() bool { return x.armed || x.found != nil }
 
 // maxRunBlocks bounds the blocks one run writes: a model that goes on and
 // on, as one repeating itself, stops there.
@@ -381,19 +449,45 @@ func countNodes(nodes []*doc.Node) int {
 }
 
 // urlRe finds the URLs in text the agent read, each to the first space
-// of unicode.IsSpace's, as the server's URL_RE.
-var urlRe = regexp.MustCompile(`https?://[^\t\n\v\f\r \x{85}\x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}<>"'()\[\]]+`)
+// of unicode.IsSpace's, as the server's URL_RE: their scheme in any case,
+// as the app takes a link's (doc.WebURL), and in ASCII's letters alone,
+// as url.Parse has a scheme.
+var urlRe = regexp.MustCompile(`[hH][tT][tT][pP][sS]?://[^\t\n\v\f\r \x{85}\x{A0}\x{1680}\x{2000}-\x{200A}\x{2028}\x{2029}\x{202F}\x{205F}\x{3000}<>"'()\[\]]+`)
 
-// see adds the URLs in v to set: strings that are one, and those in text,
-// in v and in every list and map in it, a table's rows of cells among
-// them, as the server's urlsIn.
+// canonURL is u with a web link's scheme in lower case, as url.Parse
+// reads it: the guard keeps and compares URLs so, as two that only their
+// scheme's case sets apart are one link to the app.
+func canonURL(u string) string {
+	for _, scheme := range []string{"https://", "http://"} {
+		if len(u) >= len(scheme) && asciiFold(u[:len(scheme)]) == scheme {
+			return scheme + u[len(scheme):]
+		}
+	}
+	return u
+}
+
+// asciiFold is s with its ASCII letters in lower case, and nothing else
+// changed.
+func asciiFold(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if 'A' <= c && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
+}
+
+// see adds the URLs in v to set, their schemes in lower case (canonURL):
+// strings that are one, and those in text, in v and in every list and map
+// in it, a table's rows of cells among them, as the server's urlsIn.
 func see(set map[string]bool, v any) {
 	if s, ok := v.(string); ok {
-		if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
-			set[s] = true
+		if c := canonURL(s); strings.HasPrefix(c, "http://") || strings.HasPrefix(c, "https://") {
+			set[c] = true
 		}
 		for _, u := range urlRe.FindAllString(s, -1) {
-			set[u] = true
+			set[canonURL(u)] = true
 		}
 		return
 	}
@@ -423,10 +517,15 @@ func see(set map[string]bool, v any) {
 //
 // The web is written by anyone, to steer the agents that read it: a page
 // could have one write what is on this page into such a URL, or read the
-// page at one. So once a run reads the web, what it writes, and the pages
-// it reads, may hold only a URL the user gave it, or one it found there:
-// a search's result, or a link on a page it read. Not one it made up. And
-// once it reads the user's other pages, it does not use the web at all
+// page at one. So once a run reads the web, a video's captions among it,
+// what it writes, and the pages it reads, may hold only a URL the user
+// gave it, or one it found there: a search's result, or a link on a page
+// it read. Not one it made up. A block the app loads by itself keeps to
+// fewer: a search's result, or a page the run read but did not pick from
+// another it read, not a link on one, read or not, which its writer could
+// have put there by the hundred for the run to pick from, the one it
+// picked spelling out what it read. And once it
+// reads the user's other pages, it does not use the web at all
 // (errWebClosed), as what it asked for there could carry what it read,
 // and what it writes keeps to the URLs the user gave it, as above.
 //
@@ -438,31 +537,68 @@ func (x *Executor) checkURLs(nodes []*doc.Node, more ...any) error {
 		return nil
 	}
 	x.begin()
-	urls := map[string]bool{}
+	// Every URL, as text holds them, and those the app loads by itself.
+	urls, loaded := map[string]bool{}, map[string]bool{}
 	see(urls, more)
 	for _, n := range nodes {
-		walk(n, func(k *doc.Node) { see(urls, k.Data) })
+		walk(n, func(k *doc.Node) {
+			see(urls, k.Data)
+			if loads[k.Type] {
+				see(loaded, k.Data["url"])
+			}
+		})
 	}
-	var bad string
-	for u := range urls {
-		if !x.given(u) && (bad == "" || u < bad) {
-			bad = u
+	first := func(set map[string]bool, may func(string) bool) string {
+		bad := ""
+		for u := range set {
+			if !may(u) && (bad == "" || u < bad) {
+				bad = u
+			}
 		}
+		return bad
 	}
+	bad := first(urls, x.given)
 	switch {
 	case bad == "":
-		return nil
 	case x.armed:
 		return terr("After reading another page, what you write may only hold a URL that was on this page before you began or is in the user's request, which %s is not: a link written here could carry what you read, and a later edit could have the app load it. Name the page you read it on with a link to that page instead.", bad)
+	default:
+		return terr("After reading the web, what you write may only hold a URL you found there, that was on this page before you began, or that is in the user's request, which %s is not: one made up could carry what is on this page to whoever runs its site, as the app loads it.", bad)
 	}
-	return terr("After reading the web, what you write may only hold a URL you found there, that was on this page before you began, or that is in the user's request, which %s is not: one made up could carry what is on this page to whoever runs its site, as the app loads it.", bad)
+	if bad = first(loaded, x.mayLoad); bad != "" {
+		return terr("After reading the web, a picture, a video or a link card may only hold a URL a search found, of a page you read, that was on this page before you began, or that is in the user's request, which %s is not: a page's links are its writer's choice, and the one picked could carry what is on this page, as the app loads it by itself. Link to it in text instead.", bad)
+	}
+	return nil
 }
+
+// loads are the blocks whose url the app loads by itself, as it shows
+// them, as the server's LOADS.
+var loads = map[string]bool{"image": true, "link_preview": true, "video": true}
 
 // given reports whether the run may write or read the URL u: one the user
 // gave it, or one it found on the web while it has not read beyond this
 // page.
 func (x *Executor) given(u string) bool {
+	u = canonURL(u)
 	return x.allowed[u] || !x.armed && x.found[u]
+}
+
+// mayLoad reports whether a block the app loads by itself may hold the
+// URL u: one the user gave the run, or one of the web's it came on itself
+// (sources) while it has not read beyond this page.
+func (x *Executor) mayLoad(u string) bool {
+	u = canonURL(u)
+	return x.allowed[u] || !x.armed && x.sources[u]
+}
+
+// find keeps a URL the run came on in the web, a source of its own or
+// only a link on one.
+func (x *Executor) find(u string, source bool) {
+	u = canonURL(u)
+	x.found[u] = true
+	if source {
+		x.sources[u] = true
+	}
 }
 
 // errWebClosed is a web tool's answer once the run has read the user's
@@ -501,7 +637,7 @@ func (x *Executor) searchWeb(args map[string]any) (map[string]any, error) {
 	results := []map[string]any{}
 	for _, src := range s.Sources {
 		if bare := strings.SplitN(src.URL, "://", 2); len(bare) < 2 || !strings.Contains(q, bare[1]) {
-			x.found[src.URL] = true
+			x.find(src.URL, true)
 		}
 		r := map[string]any{"url": src.URL}
 		if src.Title != "" {
@@ -529,17 +665,23 @@ func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	link = strings.TrimSpace(link)
-	if bare, _, _ := strings.Cut(link, "#"); x.found != nil && !x.given(link) && !x.given(bare) {
+	bare, _, _ := strings.Cut(link, "#")
+	if x.found != nil && !x.given(link) && !x.given(bare) {
 		return nil, terr("After reading the web, read only a page the user gave, one on this page, or one a search found or a page you read links to, which %s is not.", link)
 	}
+	// The page is a source of the run's own (loads) only when its link was
+	// not one picked from a page the run read: the run's first page of the
+	// web, one the user gave, or a search's result. A link a page had, read,
+	// stays a link: reading it does not make it one a block may load.
+	source := x.found == nil || x.mayLoad(link) || x.mayLoad(bare)
 	p, err := x.Ctx.ReadWeb(link)
 	if err != nil {
 		return nil, terr("Could not read %s: %v", link, err)
 	}
 	x.saw()
-	x.found[p.URL] = true
+	x.find(p.URL, source)
 	for _, u := range p.Links {
-		x.found[u] = true
+		x.find(u, false)
 	}
 	out := map[string]any{"url": p.URL, "title": p.Title, "text": p.Text}
 	if p.Truncated {
@@ -552,7 +694,9 @@ func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
 // its site's captions, as lines of the times they start and their words.
 // Once the run has read the user's other pages, only a video the page had
 // as it began, or the request names, may be read: a video the run put
-// there itself could be named for what it read.
+// there itself could be named for what it read. The captions, whoever put
+// the video up wrote, are the web's: the run that reads them keeps to the
+// URLs it may write after reading the web (checkURLs).
 func (x *Executor) readTranscript(args map[string]any) (map[string]any, error) {
 	id, err := str(args, "id")
 	if err != nil {
@@ -591,6 +735,8 @@ func (x *Executor) readTranscript(args map[string]any) (map[string]any, error) {
 	case err != nil:
 		return nil, terr("Could not read the video's captions: %v", err)
 	}
+	// Read with the web or without it.
+	x.saw()
 	segs := make([]store.Segment, 0, len(c.Lines))
 	for _, l := range web.Passages(c.Lines) {
 		segs = append(segs, store.Segment{StartMs: l.StartMs, Text: l.Text})
@@ -614,12 +760,12 @@ func siteName(v doc.Video) string {
 }
 
 // saw starts keeping the URLs the run finds on the web, as it first reads
-// it.
+// it, or as it starts after turns that did (RunLocal).
 func (x *Executor) saw() {
-	x.begin()
 	if x.found == nil {
-		x.found = map[string]bool{}
+		x.found, x.sources = map[string]bool{}, map[string]bool{}
 	}
+	x.begin()
 }
 
 // CallRaw runs a tool with JSON arguments. Invalid calls return {error}
@@ -629,13 +775,13 @@ func (x *Executor) CallRaw(name, raw string) map[string]any {
 	if strings.TrimSpace(raw) != "" {
 		var v any
 		if err := json.Unmarshal([]byte(raw), &v); err != nil {
-			return map[string]any{"error": "Arguments were not valid JSON."}
+			return x.refuse(terr("Arguments were not valid JSON."))
 		}
 		// Arguments that are no object are refused, as the server
 		// refuses them, rather than taken as none.
 		m, ok := v.(map[string]any)
 		if !ok {
-			return map[string]any{"error": "Arguments must be a JSON object."}
+			return x.refuse(terr("Arguments must be a JSON object."))
 		}
 		args = m
 	}
@@ -644,7 +790,15 @@ func (x *Executor) CallRaw(name, raw string) map[string]any {
 
 // Call runs a tool.
 func (x *Executor) Call(name string, args map[string]any) map[string]any {
-	return ToolAnswer(x.dispatch(name, args))
+	out, err := x.dispatch(name, args)
+	x.Refused = reason(err)
+	return ToolAnswer(out, err)
+}
+
+// refuse is a call's answer that err refused it.
+func (x *Executor) refuse(err error) map[string]any {
+	x.Refused = reason(err)
+	return ToolAnswer(nil, err)
 }
 
 // ToolAnswer is a tool's result as the model reads it: out, or else what
@@ -656,19 +810,53 @@ func ToolAnswer(out map[string]any, err error) map[string]any {
 	return out
 }
 
+// terr is a tool's refusal, as the model is told it: format with args.
+// The format is why too, for a log (reason), as it holds nothing the run
+// read or wrote.
 func terr(format string, args ...any) error {
-	return &doc.ToolError{Message: fmt.Sprintf(format, args...)}
+	return &refusal{ToolError: doc.ToolError{Message: fmt.Sprintf(format, args...)}, why: format}
+}
+
+// refusal is a tool's refusal, with why in the code's own words.
+type refusal struct {
+	doc.ToolError
+	why string
+}
+
+func (r *refusal) Unwrap() error { return &r.ToolError }
+
+// reason is why err refused a call, for a log, with nothing the run read
+// or wrote in it: a refusal's format, or the kind of error another is; ""
+// for none.
+func reason(err error) string {
+	var r *refusal
+	var te *doc.ToolError
+	switch {
+	case err == nil:
+		return ""
+	case errors.As(err, &r):
+		return r.why
+	case errors.As(err, &te):
+		return "The call's blocks were refused."
+	}
+	return "The call failed."
 }
 
 // begin keeps the URLs a block may load once the run reads beyond this
 // page, before its first call changes the page: those on it, and in the
 // user's request. RunLocal calls it before any call, as one streaming in
-// changes the page before it is made.
+// changes the page before it is made. A run that may read nothing beyond
+// it keeps none, as it needs none.
 func (x *Executor) begin() {
-	if x.allowed == nil && (x.Ctx.ListPages != nil || x.Ctx.ReadOtherPage != nil || x.Ctx.ReadWeb != nil || x.Ctx.SearchWeb != nil) {
+	c := x.Ctx
+	if x.allowed == nil && (x.armed || x.found != nil || c.ListPages != nil || c.ReadOtherPage != nil || c.ReadWeb != nil || c.SearchWeb != nil || c.Captions != nil) {
 		x.allowed = map[string]bool{}
-		see(x.allowed, doc.BlockViews(x.Ctx.Content))
-		see(x.allowed, x.Ctx.Request)
+		views := doc.BlockViews(c.Content)
+		for _, v := range views {
+			withoutSiteInfo(v)
+		}
+		see(x.allowed, views)
+		see(x.allowed, c.Request)
 	}
 }
 

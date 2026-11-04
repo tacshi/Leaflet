@@ -1,7 +1,12 @@
 package webpage
 
 import (
+	"bytes"
 	"encoding/base64"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -98,5 +103,104 @@ func TestPaper(t *testing.T) {
 	}
 	if w, _ := Paper("us"); w != 8.5 {
 		t.Error("a region in lower case prints on A4")
+	}
+}
+
+// photo is a w×h picture of noise, as a photo is to compress, its top
+// left corner red, and alpha, if not 255, its pixels' opacity.
+func photo(w, h int, alpha uint8) *image.NRGBA {
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	seed := uint32(1)
+	for y := range h {
+		for x := range w {
+			seed = seed*1664525 + 1013904223
+			c := color.NRGBA{uint8(seed >> 24), uint8(seed >> 16), uint8(x * 255 / w), alpha}
+			if x < w/10 && y < h/10 {
+				c = color.NRGBA{255, 0, 0, alpha}
+			}
+			img.SetNRGBA(x, y, c)
+		}
+	}
+	return img
+}
+
+func encodeJPEG(t testing.TB, img image.Image, turn uint16) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	if turn == 0 {
+		return buf.Bytes()
+	}
+	// An EXIF orientation in an APP1 segment after the start of the image.
+	exif := []byte("Exif\x00\x00MM\x00\x2a\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01")
+	exif = append(exif, byte(turn>>8), byte(turn), 0, 0, 0, 0, 0, 0)
+	app1 := append([]byte{0xff, 0xe1, byte((len(exif) + 2) >> 8), byte(len(exif) + 2)}, exif...)
+	data := buf.Bytes()
+	return append(append([]byte{0xff, 0xd8}, app1...), data[2:]...)
+}
+
+func decoded(t *testing.T, data []byte) image.Image {
+	t.Helper()
+	img, _, err := image.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return img
+}
+
+// A printed page's pictures are as wide as paper prints them sharp, and
+// no wider: a photo as a JPEG, one that is not opaque as a PNG, each
+// turned as its EXIF says to see it; a picture already that small, or
+// one that can't be read, is as it was.
+func TestPicturesPrintSmall(t *testing.T) {
+	big := encodeJPEG(t, photo(3000, 2000, 255), 0)
+	small, typ, ok := forPrint(big)
+	if img := decoded(t, small); !ok || typ != "image/jpeg" || img.Bounds().Dx() != printPixels || img.Bounds().Dy() != 933 || len(small) >= len(big) {
+		t.Errorf("a photo printed as %s %v, %d bytes of %d", typ, img.Bounds(), len(small), len(big))
+	}
+	var see bytes.Buffer
+	if err := png.Encode(&see, photo(2000, 600, 128)); err != nil {
+		t.Fatal(err)
+	}
+	small, typ, ok = forPrint(see.Bytes())
+	if img := decoded(t, small); !ok || typ != "image/png" || img.Bounds().Dx() != printPixels {
+		t.Errorf("a picture to see through printed as %s %v", typ, img.Bounds())
+	} else if _, _, _, a := img.At(700, 300).RGBA(); a == 0xffff {
+		t.Error("a picture to see through printed opaque")
+	}
+	// Turned a quarter to see, a picture 3000 by 2000 is 2000 wide, and
+	// its top left corner is at the top right.
+	small, _, ok = forPrint(encodeJPEG(t, photo(3000, 2000, 255), 6))
+	img := decoded(t, small)
+	if !ok || img.Bounds().Dx() != printPixels || img.Bounds().Dy() != 2100 {
+		t.Fatalf("a turned photo printed %v", img.Bounds())
+	}
+	if r, g, _, _ := img.At(printPixels-20, 20).RGBA(); r < 0xc000 || g > 0x4000 {
+		t.Errorf("a turned photo's corner is %v", img.At(printPixels-20, 20))
+	}
+	// One turned to be 1000 wide is narrow enough, and keeps its EXIF.
+	for _, kept := range [][]byte{encodeJPEG(t, photo(3000, 1000, 255), 6), encodeJPEG(t, photo(800, 600, 255), 0), []byte("\x89PNG\r\n\x1a\nnot a picture")} {
+		if _, _, ok := forPrint(kept); ok {
+			t.Errorf("a picture of %d bytes was made anew", len(kept))
+		}
+	}
+	path := filepath.Join(t.TempDir(), "big.jpg")
+	if err := os.WriteFile(path, big, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if src := Inline.Image(path, "image/jpeg"); !strings.HasPrefix(src, "data:image/jpeg;base64,") || len(src) > base64.StdEncoding.EncodedLen(len(big))/2 {
+		t.Errorf("a photo is inlined in %d bytes, of %d", len(src), len(big))
+	}
+}
+
+func BenchmarkPrintAPhoto(b *testing.B) {
+	data := encodeJPEG(b, photo(4032, 3024, 255), 6)
+	b.SetBytes(int64(len(data)))
+	for b.Loop() {
+		if _, _, ok := forPrint(data); !ok {
+			b.Fatal("not made smaller")
+		}
 	}
 }

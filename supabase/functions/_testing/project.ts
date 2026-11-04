@@ -190,12 +190,25 @@ function reply(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-/** A row with only the columns select names: "*" or a list, embeds left out. */
+/**
+ * A row with only the columns select names: "*" or a list, embeds left out.
+ * A column may be a JSON path, alias:col->key->>key, as PostgREST reads it:
+ * ->> gives text, and a key that is not there null.
+ */
 function project(row: Row, select: string | null): Row {
   if (!select || select === "*") return { ...row };
   const out: Row = {};
   for (const col of select.replace(/\w+!?\w*\([^)]*\)/g, "").split(",")) {
-    if (col) out[col] = row[col];
+    const path = col.match(/^(?:(\w+):)?(\w+)((?:->>?\w+)+)$/);
+    if (path) {
+      let v: unknown = row[path[2]];
+      const steps = [...path[3].matchAll(/(->>?)(\w+)/g)];
+      for (const [, arrow, key] of steps) {
+        v = v && typeof v === "object" ? (v as Row)[key] ?? null : null;
+        if (arrow === "->>" && v !== null && typeof v !== "string") v = JSON.stringify(v);
+      }
+      out[path[1] ?? steps[steps.length - 1][2]] = v;
+    } else if (col) out[col] = row[col];
   }
   return out;
 }

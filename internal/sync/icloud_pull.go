@@ -334,24 +334,51 @@ func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content
 			}
 			continue
 		}
-		var file icloud.PageFile
-		if err := s.folder().ReadJSON(rel, &file); err != nil {
-			if errors.Is(err, icloud.ErrNotReady) {
-				notReady = err
+		// A page file as it was when this device last merged it, by its
+		// time and size, is not read again while what it merged is still
+		// here, as mergePeer would pass over it: its version is known. One
+		// whose base went since, as with the device wiped or its iCloud
+		// sync forgotten, is read and merged again, as is one older than
+		// a batch named, which may have been written again as it was.
+		stamp, stamped := s.folder().Stamp(rel)
+		version, merged := s.mergedFile(rel, stamp)
+		if merged && version >= want {
+			known, has, err := s.st.PeerVersion(peer, pageID)
+			if err != nil {
+				return nil, err
+			}
+			merged = has && version <= known
+		} else {
+			merged = false
+		}
+		if !stamped || !merged {
+			var file icloud.PageFile
+			if err := s.folder().ReadJSON(rel, &file); err != nil {
+				if errors.Is(err, icloud.ErrNotReady) {
+					notReady = err
+					continue
+				}
+				return nil, err
+			}
+			if file.Version < want {
+				notReady = icloud.ErrNotReady
 				continue
 			}
-			return nil, err
+			if err := s.mergePeer(me, peer, pageID, file); err != nil {
+				if unreadable(err) {
+					unread = err
+					continue
+				}
+				return nil, err
+			}
+			version = file.Version
+			if stamped {
+				s.keepMerged(rel, stamp, version)
+			}
 		}
-		if file.Version < want {
+		if version < want {
 			notReady = icloud.ErrNotReady
 			continue
-		}
-		if err := s.mergePeer(me, peer, pageID, file); err != nil {
-			if unreadable(err) {
-				unread = err
-				continue
-			}
-			return nil, err
 		}
 		if want > 0 {
 			if err := s.st.DeleteValue(wantKey(peer, pageID)); err != nil {
@@ -366,6 +393,26 @@ func (s *Service) cloudRefresh(ctx context.Context, pageID string) (*doc.Content
 		return s.st.Content(pageID), notReady
 	}
 	return s.st.Content(pageID), nil
+}
+
+// mergedFile reports whether the page file at rel is as it was when this
+// device last merged it, by its stamp, and the version it had.
+func (s *Service) mergedFile(rel string, stamp icloud.Stamp) (int64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen, ok := s.pageFiles[s.folder().Root+"\x00"+rel]
+	if !ok || !seen.stamp.ModTime.Equal(stamp.ModTime) || seen.stamp.Size != stamp.Size {
+		return 0, false
+	}
+	return seen.version, true
+}
+
+// keepMerged keeps that the page file at rel, of stamp, was merged at
+// version.
+func (s *Service) keepMerged(rel string, stamp icloud.Stamp, version int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pageFiles[s.folder().Root+"\x00"+rel] = mergedFile{stamp, version}
 }
 
 // errPeerUnreadable is a page whose version from another device cannot be

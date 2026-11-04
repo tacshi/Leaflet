@@ -53,10 +53,13 @@ metadata:
   table grows to hold every cell. A cell that differs only in its place, or
   a table only in its size, is no conflict.
 - Saves are compare-and-set on `page_content.revision`, which the server
-  moves on with every update. A writer reads `content, revision`, merges,
-  then updates `where page_id = … and revision = <what it read>`. Zero rows
-  updated means someone saved in between: read again, merge again, retry. A
-  page with no row yet is inserted; a conflict on insert means the same.
+  moves on with every update that changes `content` or `plain_text`, and
+  only then: an update that changes neither, as a move's touch of
+  `updated_at`, leaves it, so no one merges for nothing. A writer reads
+  `content, revision`, merges, then updates `where page_id = … and
+  revision = <what it read>`. Zero rows updated means someone saved in
+  between: read again, merge again, retry. A page with no row yet is
+  inserted; a conflict on insert means the same.
 
 ### Block types
 
@@ -176,9 +179,16 @@ code (a code block's is its code, not markdown); `chart` is
 `image` `{url, alt}`; `video` `{url, title, notes?}`; `link` (a `link_preview`)
 `{url, title, description}`; `file` `{name, mime, size}`; `recording`
 `{recording_id, title, duration_ms}`, as far as the block has them, with
-its `transcript` when it has one; the server adds the recording's `status`,
-and its `duration_ms` when the block has none; and a subpage block's
-`page_id`.
+its `transcript` when it has one, and the recording is the page's; the
+server adds the recording's `status`, and its `duration_ms` when the block
+has none; and a subpage block's `page_id`. The tools' views of a page give a
+`link` its `url` alone, and a `video` no `title`: a card's title and
+description are what the linked page says of itself, and a video's title is
+its uploader's, which the apps fill in from its site, the web's writing,
+which a run reads with `read_web_page` and `read_video_transcript` (which
+gives the title), under the web's rules below; nor do URLs in them count as
+the page's. `leaflet mcp`'s `read_page` gives them, to a client the app's
+URL guard does not hold.
 
 A call writes at most 2000 blocks in all, nested ones counted.
 
@@ -191,15 +201,23 @@ the model and changes nothing: a call that fails part way, as a
 the page as it was.
 
 `list_pages` and `read_other_page` reach only the pages of the current page's
-space. Once a run has called either, what it writes may hold only a URL that
+space; `list_pages` lists at most 500. Once a run has called either, what it
+writes may hold only a URL that
 was on the current page as the run began or is in the instruction, in any
 block, in text and in a subpage's title: the app loads an `image`, `video` or
 `link_preview` by itself, a URL seen only on another page, which someone else
 may have put there, could carry what the run read, and one written in text
 would be on the page for a later run to load. A link to a page
-(`leaflet://page/…`) goes. A run whose conversation has earlier turns, where
-cross-page reading is on, keeps to the same URLs from its start: an earlier
-turn may hold what a run read.
+(`leaflet://page/…`) goes. URLs compare with their scheme in lower case, as
+a link's is read in any case (`HTTPS://` is `https://`). A run whose
+conversation has earlier turns that read beyond their page keeps to the
+same URLs from its start: an earlier turn may hold what a run read. Where
+cross-page reading is off for it, as the page is shared now, those turns
+are left out of what the model reads. A run whose conversation has earlier
+turns whose URL guard was on (`guarded`: they read the web) keeps to the
+URLs it may write after reading the web, below, from its start, with none
+found yet. A tool's result reaches the model cut to 60,000 characters of
+its JSON.
 
 `web_search` and `read_web_page` are offered when the user lets agents use
 the web (`allow_web`, the setting "Let agents use the web") and no earlier
@@ -209,12 +227,17 @@ the run's provider, as a request of its own: the Responses API's
 OpenRouter's `openrouter:web_search` or GLM's `web_search`; other providers
 have none. `read_web_page` reads a public page, its redirects followed,
 as text with Markdown's headings, list items and links (MAX_PAGE_TEXT,
-30,000 characters). Once a run has read the web, what it writes, and the
-pages it reads, may hold only a URL in the instruction, on the page as the
-run began, among a search's results (not one its query names) or linked
-from a page it read, and a query may name no address: a page could have the
-run send what is on this page to an address of its making. Once a run reads
-another page, the web is closed to it.
+30,000 characters). Once a run has read the web, `read_video_transcript`'s
+captions among it, what it writes, and the pages it reads, may hold only a
+URL in the instruction, on the page as the run began, among a search's
+results (not one its query names) or linked from a page it read, and a
+query may name no address: a page could have the run send what is on this
+page to an address of its making. An `image`, `video` or `link_preview`,
+which the app loads by itself, holds only a search's result, or a page the
+run read that it did not pick from one it read (its first page of the web,
+one in the instruction or on the page, or a search's result): a page could
+list many addresses for the run to choose from, and reading the one chosen
+makes it no better. Once a run reads another page, the web is closed to it.
 
 `read_video_transcript` is offered with `read_page`, with the web or
 without it: it reads only the site of a video block of the page, which the
@@ -260,8 +283,11 @@ streams to the client, what the client applies to the open editor, and what
    - `{ "type": "call", "tool": "web_search", "args": { "query": "…" } }`, as a
      call that reads the web starts (`read_web_page`'s with its `url`), for
      the app to say what the run is doing
-   - `{ "type": "done", "reply": "…", "edits": [{ "summary": "…", "block_ids": [...] }], "kept_to_page": true }`,
-     `kept_to_page` saying the run read nothing beyond its page
+   - `{ "type": "done", "reply": "…", "edits": [{ "summary": "…", "block_ids": [...] }], "kept_to_page": true, "guarded": false }`,
+     `kept_to_page` saying the run read nothing beyond its page, and
+     `guarded` that its URL guard was on (it read beyond its page or the
+     web, or followed turns that did), so its reply may carry what it read:
+     the app puts the pictures of such a reply in a page as links
    - `{ "type": "error", "message": "…" }`
 3. The worker loads the page, focus blocks, the last 10 turns of the
    conversation, and (if allowed) titles of other pages; calls the model with
@@ -272,7 +298,7 @@ streams to the client, what the client applies to the open editor, and what
    that answer came yet; validates and applies each call; streams the op;
    finally writes a `page_history` row (`reason: "agent_run"`, the
    content from before the run) and then saves `page_content`, updates the
-   job (`status: done`, `result: { reply, ops, edits, kept_to_page }`), and for the
+   job (`status: done`, `result: { reply, ops, edits, kept_to_page, guarded }`), and for the
    `comment` surface inserts the reply as a comment by the agent. A
    `page_history` row that can't be written stops the save: no edits are
    saved that the page can't go back from. A run that fails after it changed
@@ -322,10 +348,23 @@ that fails says so in the function's own words, in the recording's `error`
 and to the caller: what the transcriber answered, and the address it went
 to, go to the function's log only.
 
+`transcribe` streams the audio from Storage to the transcriber as it reads
+it, never holding a recording whole, in a multipart body with no length
+(chunked, or in HTTP/2 frames), and reads it again for a second request.
+
 A provider's saved key goes only to the address it was saved for: a `save`
 that changes a provider's `preset`, or the origin of its `base_url`, without
 an `api_key` is refused (400) while it has a key, so a session can never send
-the saved key to a server of its choosing.
+the saved key to a server of its choosing; one that makes it a local preset,
+which takes no key, drops it. An `api_key` that is not a string is refused
+(400) before anything is written. The database drops a provider's keys, and
+their Vault secrets, whenever the origin of its `base_url`, its `preset` or
+`is_local` changes, whoever writes the row (`model_providers_key_stays`),
+the origin as a URL parser reads it: a URL it reads its own way keeps a key
+only while it stays the very same. A `save` refuses (400) a `base_url` that
+is not printable ASCII, or has a backslash, which a URL parser takes for a
+slash. A local provider is never called from the server: `models`, `test`
+and a `transcribe` whose settings name one are refused (400).
 
 ## 6. Sync
 
@@ -407,11 +446,27 @@ the saved key to a server of its choosing.
 - A device whose `devices` row is revoked signs out and forgets its ID:
   signing in again, it registers as a new device. What iCloud sync kept
   under the old ID goes too, so a later turn-on joins the folder afresh;
-  only the folder's space stays, to fetch what went up to it.
+  only the folder's space stays, to fetch what went up to it. Account ›
+  Devices signs one out with `sign_out_device(p_device_id)`, which revokes
+  its row and ends the auth session it last wrote the row with
+  (`devices.session_id`), its refresh tokens with it, so it can no longer
+  renew its token. Every client write of a `devices` row sets `session_id`
+  from the caller's token; no client sets or clears `revoked_at`
+  (`forbidden_revoke`) or deletes a row. A revocation is for the session
+  it ended, which the row keeps naming: the revoked session's own writes
+  find the row revoked, but the first write from another session, as a
+  device's first heartbeat after its owner signs in on it again (one its
+  token ran out on before it learned it was revoked keeps its ID), finds
+  the revocation stale, and clears it. A row revoked with no session named
+  stays revoked. A device says it is in use every
+  10 minutes, and on the first pass after its sync loop starts, with an
+  upsert of its own row answered with `revoked_at`, which is how it learns
+  it was revoked.
 - Model connections are deleted on the server, not marked deleted, so the
-  pull by time never brings their removal: each pull lists the ids of the
-  cloud ones there and removes the others here (of those stored before
-  the list was read).
+  pull by time never brings their removal: every 10 minutes, and on the
+  first pull after the sync loop starts, a pull lists the ids of the cloud
+  ones there and removes the others here (of those stored before the list
+  was read).
 - A page stays in the space it was made in (`space_immutable`): a device
   refuses to move one under a page, or into a folder, of another space.
 
@@ -441,6 +496,20 @@ value for either is ignored on update. A snapshot's `created_at` is never
 later than when it reached the server; each writer keeps their newest 50
 unnamed snapshots of a page, and each writer but the page's owner their
 newest 50 named (`manual`) ones.
+Pages are only soft-deleted. What is on a deleted page (its
+`page_content`, comments, recordings, files and their objects, and its
+images) is the owner's to read, and anyone else's only if their view of
+it began, as their history of it does, no later than the page, or a page
+between it and the shared one, was deleted: what was taken off before it
+was shared with them is not theirs. The page's own row stays readable, so
+its deletion syncs, and the client simply finds nothing on it. Only
+someone who may read what is on a deleted page restores it, or changes
+its `deleted_at` (`forbidden_restore`). A page, comment and recording keep
+their `id`, and a `page_content` row its `page_id`, on update
+(`page_id_immutable`, `comment_immutable`, `recording_id_immutable`,
+`content_page_immutable`). A tree is at most 1,000 pages deep, a page and
+those above it: making a page, or moving one, deeper is refused
+(`page_too_deep`).
 Moving a page under a new parent requires edit access to both, and anyone
 but the space owner moves a page only between parents that the same shares
 reach (`forbidden_move` otherwise), so a move never shows a page to people
@@ -467,9 +536,26 @@ owner's device, is inserted only by the page's owner
 (`guest_comment_not_owner` otherwise). A comment is deleted only by setting
 `deleted_at`, never as a row, so its replies stay and the deletion reaches
 every device; once it is set, `body` is empty, `quote` null and `mentions`
-empty. A profile is read by its owner and by those who share a page with
-them: the space's owner and someone shared one of its pages, or two people
-shared the same page or a page and one inside it.
+empty. A comment's `body` and `quote` are at most 100,000 characters,
+its `mentions` a list of at most 64 KB, and its `block_id` at most 256
+characters; anyone but the page's owner adds at most 2,000 comments to a
+page, of 10 MB in all, mentions with the text (`too_many_comments`,
+`comments_too_long`). A profile is read by its owner and by those who
+share a page with them: the space's owner and someone shared one of its
+pages, or two people shared the same page or a page and one inside it.
+`pages.public_link_until` is when the public link a desktop app serves of
+the page stops counting. The app sets it through
+`lease_public_link(p_page_id)`, which only someone who may edit the page
+calls, and which sets it an hour on by the server's clock and returns it:
+as the link starts, and every 15 minutes while it serves. As the link stops
+the app calls `lease_public_link(p_page_id, p_ending)` with the lease it
+last got, which clears it only while the page still has that lease, so a
+newer one, of the link started again, stays. While it is to come (the apps
+ask with `public_link_until=gt.now`, by the server's clock), agent runs, the
+agent function's and the apps' on other devices, which ask the server as
+they start, read none of the user's other pages into the page. A change of
+it alone leaves the page's `updated_at` as it was, and pages sync without
+it.
 `pages.is_template` marks a template and every subpage of one (a subpage
 made under a template is one too); templates stay out of the page list,
 search and `list_pages`. `pages.tags` is a page's tags (`text[]`, at most 50,
@@ -497,7 +583,9 @@ invite's id, not the account's, `email` the address as shared, and
 caller's pending invites: `page_id, title, role, inviter_name, created_at`,
 of pages not deleted), `accept_page_invite(p_page_id)`,
 `decline_page_invite(p_page_id)`, `set_provider_secret(p_provider_id, p_secret)`
-(authenticated), `get_provider_secret(p_provider_id)` (service role only).
+(authenticated), `get_provider_secret(p_provider_id)` (service role only),
+`sign_out_device(p_device_id)` (one of the caller's devices: revoked, and
+its session ended; `device_not_found` otherwise).
 
 ## 8. iCloud Drive folder
 

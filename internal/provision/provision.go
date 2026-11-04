@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"path"
 	"regexp"
 	"slices"
@@ -52,7 +53,7 @@ var Functions = []string{"agent", "providers", "stt", "account"}
 // FunctionsVersion orders the functions builds deploy: it goes up by one
 // with each change to them, as TestFunctionsVersion holds it to, so a build
 // deploys over older functions only, never over newer ones.
-const FunctionsVersion = 7
+const FunctionsVersion = 8
 
 // hashSecret begins the name of the project secret that says which
 // functions are deployed: the rest of the name is their FunctionsVersion
@@ -169,6 +170,27 @@ func FunctionsHash() (string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
+
+// Signature names what Setup brings a project to, this build's: its
+// migrations, and its functions' FunctionsVersion and FunctionsHash. A
+// project set up by a build of the same signature has nothing to gain
+// from another Setup by this one.
+var Signature = sync.OnceValues(func() (string, error) {
+	all, err := Migrations()
+	if err != nil {
+		return "", err
+	}
+	hash, err := FunctionsHash()
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	for _, m := range all {
+		_, _ = fmt.Fprintf(h, "%s\x00", m.Version)
+	}
+	_, _ = fmt.Fprintf(h, "%d\x00%s", FunctionsVersion, hash)
+	return hex.EncodeToString(h.Sum(nil)), nil
+})
 
 // IsLeaflet reports whether a project's applied migrations are Leaflet's.
 func IsLeaflet(applied []supabaseapi.Migration) bool {
@@ -337,7 +359,8 @@ func Ready(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project) 
 // deploying; only a development build deploys its own over them, as they
 // change while it is worked on. A migration another device applied
 // meanwhile, setting the project up at the same time, counts as done.
-// progress reports steps done of the steps there are.
+// Sign-ups it could not close for now leave it ErrSignUpsOpen, once the
+// rest is done. progress reports steps done of the steps there are.
 func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress func(done, total int)) error {
 	all, err := Migrations()
 	if err != nil {
@@ -385,9 +408,11 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 		}
 		step()
 	}
-	closeSignUps(ctx, api, ref)
+	// Sign-ups that could not be closed for now leave the rest to do, and
+	// Setup says so at the end, to be run again.
+	open := closeSignUps(ctx, api, ref)
 	if !deploy {
-		return nil
+		return open
 	}
 	for _, slug := range Functions {
 		files, err := functionFiles(slug)
@@ -414,22 +439,41 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 	// Best effort: a plan with a lower cap refuses it, and long
 	// recordings then transcribe on the device.
 	_ = api.SetUploadLimit(ctx, ref, uploadLimit)
-	return nil
+	return open
 }
+
+// ErrSignUpsOpen is Setup's when it did all else, but the project's
+// sign-ups could not be closed for now, as with the network failing as
+// it asked: the project works, and Setup is to run again to close them.
+var ErrSignUpsOpen = errors.New("provision: the project's sign-ups could not be closed yet")
 
 // closeSignUps keeps a project's Auth to the owner's account, which
 // Leaflet makes with the secret key (remote.SignInAsOwner): no one else
 // may make an account, and an address counts only once confirmed, as
 // shares and invites go to whoever confirms it. The settings are read
-// first and changed only when they differ. It is best effort, as the
-// upload limit is: Auth settings need the OAuth app's Auth scope, which a
-// Supabase sign-in from before the app had it lacks, and the project then
-// keeps what Supabase made it with, sign-ups open and addresses confirmed.
-func closeSignUps(ctx context.Context, api *supabaseapi.Client, ref string) {
+// first and changed only when they differ. A refusal that asking again
+// would not change leaves them, and is no error: Auth settings need the
+// OAuth app's Auth scope, which a Supabase sign-in from before the app
+// had it lacks, and the project then keeps what Supabase made it with,
+// sign-ups open and addresses confirmed. Any other failure, as the
+// network's, is ErrSignUpsOpen.
+func closeSignUps(ctx context.Context, api *supabaseapi.Client, ref string) error {
 	closed := supabaseapi.SignUps{Disabled: true}
-	if s, err := api.SignUps(ctx, ref); err == nil && s != closed {
-		_ = api.SetSignUps(ctx, ref, closed)
+	s, err := api.SignUps(ctx, ref)
+	if err == nil && s != closed {
+		err = api.SetSignUps(ctx, ref, closed)
 	}
+	if err == nil || refusedForGood(err) {
+		return nil
+	}
+	return fmt.Errorf("%w: %w", ErrSignUpsOpen, err)
+}
+
+// refusedForGood reports whether the API refused a request as it would
+// again, whenever it is asked: a 4xx but a timeout or a wait asked for.
+func refusedForGood(err error) bool {
+	e, ok := errors.AsType[*supabaseapi.Error](err)
+	return ok && e.Status >= 400 && e.Status < 500 && e.Status != http.StatusRequestTimeout && e.Status != http.StatusTooManyRequests
 }
 
 // appliedMark is what migrationSQL raises when the migration was applied

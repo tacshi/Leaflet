@@ -7,6 +7,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -123,6 +125,9 @@ type Client struct {
 	refused string
 	// refreshing is the refresh under way, which other callers wait for.
 	refreshing *refresh
+	// sessions counts the sessions the client has had (Sessions); guarded
+	// by mu.
+	sessions uint64
 	// keepMu has the keychain written in the order sess changes.
 	keepMu sync.Mutex
 	// noKeychain keeps the session in memory only, for tests.
@@ -240,6 +245,17 @@ func (c *Client) User() *store.User {
 	return toUser(c.sess.User)
 }
 
+// Sessions counts the sessions the client has had: each sign-in,
+// sign-out, session kept from before, or one that ended, as its refresh
+// token was refused, begins another; renewing its token does not. A
+// change tells sync to learn at once whether the device was signed out
+// from another.
+func (c *Client) Sessions() uint64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.sessions
+}
+
 // UserID is the signed-in account's ID, or "".
 func (c *Client) UserID() string {
 	if u := c.User(); u != nil {
@@ -267,6 +283,7 @@ func (c *Client) RestoreSession() *store.User {
 	}
 	c.mu.Lock()
 	c.sess = &s
+	c.sessions++
 	c.mu.Unlock()
 	if s.User == nil {
 		return nil
@@ -286,6 +303,11 @@ func (c *Client) replace(old, s *session, force bool) bool {
 	if !force && c.sess != old {
 		c.mu.Unlock()
 		return false
+	}
+	// A refresh renews the session; anything else, a sign-in, a sign-out
+	// or a session that ended, is another.
+	if force || s == nil {
+		c.sessions++
 	}
 	c.sess, c.refused = s, ""
 	c.mu.Unlock()
@@ -447,6 +469,13 @@ type Pending struct {
 // leaving the client as it is. secret is the project's secret key: it
 // makes their account when there is none, marked as the owner's, then a
 // sign-in link used at once, and is not kept.
+//
+// An account there before, not marked, was made some other way, as by
+// signing up, and perhaps by someone else, who used the person's email
+// before them: its password and its sessions are then that someone's. So
+// it gets a new password no one knows, and its other sessions end, before
+// it is marked as the owner's; until it is, the next sign-in does all of
+// this again.
 func (c *Client) SignInAsOwner(ctx context.Context, project Settings, secret, email, name string) (*Pending, error) {
 	project.URL = strings.TrimRight(project.URL, "/")
 	owner := map[string]any{ownerFlag: true}
@@ -457,14 +486,31 @@ func (c *Client) SignInAsOwner(ctx context.Context, project Settings, secret, em
 	if err != nil && !accountExists(out) {
 		return nil, err
 	}
-	link, err := c.adminRequest(ctx, project, secret, "POST", "admin/generate_link", map[string]any{"type": "magiclink", "email": email})
+	magicLink := map[string]any{"type": "magiclink", "email": email}
+	link, err := c.adminRequest(ctx, project, secret, "POST", "admin/generate_link", magicLink)
 	if err != nil {
 		return nil, err
 	}
-	if id, _ := link["id"].(string); !made && id != "" {
-		// An account made before it was marked, as by signing up.
-		if _, err := c.adminRequest(ctx, project, secret, "PUT", "admin/users/"+url.PathEscape(id), map[string]any{"app_metadata": owner}); err != nil {
+	id, _ := link["id"].(string)
+	takeOver := false
+	if !made && id != "" {
+		user, err := c.adminRequest(ctx, project, secret, "GET", "admin/users/"+url.PathEscape(id), nil)
+		if err != nil {
 			return nil, err
+		}
+		if meta, _ := user["app_metadata"].(map[string]any); meta[ownerFlag] != true {
+			password, err := newPassword()
+			if err != nil {
+				return nil, err
+			}
+			if _, err := c.adminRequest(ctx, project, secret, "PUT", "admin/users/"+url.PathEscape(id), map[string]any{"password": password}); err != nil {
+				return nil, err
+			}
+			// A link made before the password changed may not outlive it.
+			if link, err = c.adminRequest(ctx, project, secret, "POST", "admin/generate_link", magicLink); err != nil {
+				return nil, err
+			}
+			takeOver = true
 		}
 	}
 	if props, ok := link["properties"].(map[string]any); ok {
@@ -489,7 +535,28 @@ func (c *Client) SignInAsOwner(ctx context.Context, project Settings, secret, em
 	if s.User == nil {
 		return nil, errNoSession
 	}
-	return &Pending{project: project, s: s}, nil
+	p := &Pending{project: project, s: s}
+	if takeOver {
+		if _, err := c.authRequestTo(ctx, project, logoutOthers, map[string]any{}, s.AccessToken); err != nil {
+			c.Discard(p)
+			return nil, err
+		}
+		if _, err := c.adminRequest(ctx, project, secret, "PUT", "admin/users/"+url.PathEscape(id), map[string]any{"app_metadata": owner}); err != nil {
+			c.Discard(p)
+			return nil, err
+		}
+	}
+	return p, nil
+}
+
+// newPassword is a password for an account that signs in only by links:
+// random, and never kept or shown.
+func newPassword() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // Adopt makes p's project the client's and its sign-in the session.
@@ -504,6 +571,9 @@ func (c *Client) Adopt(p *Pending) (*store.User, error) {
 // logoutHere ends only the session the token is of: Auth's logout ends
 // every session of the user, on every device, unless told otherwise.
 const logoutHere = "logout?scope=local"
+
+// logoutOthers ends every session of the user but the one the token is of.
+const logoutOthers = "logout?scope=others"
 
 // Discard signs p out on the server, leaving the client's session alone.
 func (c *Client) Discard(p *Pending) {
@@ -887,36 +957,52 @@ func (c *Client) SelectOne(ctx context.Context, table string, q Query) (map[stri
 
 // Upsert inserts or updates rows and returns them as stored.
 func (c *Client) Upsert(ctx context.Context, table string, rows any, onConflict string) ([]map[string]any, error) {
-	raw, err := json.Marshal(rows)
-	if err != nil {
-		return nil, err
-	}
-	path := "/rest/v1/" + table
+	return c.UpsertReturning(ctx, table, rows, onConflict, "")
+}
+
+// UpsertReturning is Upsert answered with only the columns sel names, as
+// a select does, or every column for "".
+func (c *Client) UpsertReturning(ctx context.Context, table string, rows any, onConflict, sel string) ([]map[string]any, error) {
+	var q []string
 	if onConflict != "" {
-		path += "?on_conflict=" + url.QueryEscape(onConflict)
+		q = append(q, "on_conflict="+url.QueryEscape(onConflict))
 	}
-	res, err := c.request(ctx, "POST", path, bytes.NewReader(raw), map[string]string{
-		"Prefer": "resolution=merge-duplicates,return=representation",
-	})
-	if err != nil {
-		return nil, err
-	}
-	return decodeRows(res)
+	return c.write(ctx, "POST", table, q, rows, "resolution=merge-duplicates,return=representation", sel)
 }
 
 // Update changes the rows that match the filters and returns them as
 // stored; none when nothing matched.
 func (c *Client) Update(ctx context.Context, table string, filters []string, values map[string]any) ([]map[string]any, error) {
-	raw, err := json.Marshal(values)
-	if err != nil {
-		return nil, err
-	}
+	return c.UpdateReturning(ctx, table, filters, values, "")
+}
+
+// UpdateReturning is Update answered with only the columns sel names, as a
+// select does, or every column for "": a page's content, saved whole, need
+// not come back whole to say which revision it is now.
+func (c *Client) UpdateReturning(ctx context.Context, table string, filters []string, values map[string]any, sel string) ([]map[string]any, error) {
 	q := make([]string, len(filters))
 	for i, f := range filters {
 		k, v, _ := strings.Cut(f, "=")
 		q[i] = url.QueryEscape(k) + "=" + url.QueryEscape(v)
 	}
-	res, err := c.request(ctx, "PATCH", "/rest/v1/"+table+"?"+strings.Join(q, "&"), bytes.NewReader(raw), map[string]string{"Prefer": "return=representation"})
+	return c.write(ctx, "PATCH", table, q, values, "return=representation", sel)
+}
+
+// write sends body to a table with method and the query q, and returns the
+// rows the server answers with, of the columns sel names when it is set.
+func (c *Client) write(ctx context.Context, method, table string, q []string, body any, prefer, sel string) ([]map[string]any, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	if sel != "" {
+		q = append(q, "select="+url.QueryEscape(sel))
+	}
+	path := "/rest/v1/" + table
+	if len(q) > 0 {
+		path += "?" + strings.Join(q, "&")
+	}
+	res, err := c.request(ctx, method, path, bytes.NewReader(raw), map[string]string{"Prefer": prefer})
 	if err != nil {
 		return nil, err
 	}
@@ -955,15 +1041,13 @@ func IsNotFound(err error) bool {
 
 // Insert inserts rows and returns them as stored.
 func (c *Client) Insert(ctx context.Context, table string, rows any) ([]map[string]any, error) {
-	raw, err := json.Marshal(rows)
-	if err != nil {
-		return nil, err
-	}
-	res, err := c.request(ctx, "POST", "/rest/v1/"+table, bytes.NewReader(raw), map[string]string{"Prefer": "return=representation"})
-	if err != nil {
-		return nil, err
-	}
-	return decodeRows(res)
+	return c.InsertReturning(ctx, table, rows, "")
+}
+
+// InsertReturning is Insert answered with only the columns sel names, as
+// a select does, or every column for "".
+func (c *Client) InsertReturning(ctx context.Context, table string, rows any, sel string) ([]map[string]any, error) {
+	return c.write(ctx, "POST", table, nil, rows, "return=representation", sel)
 }
 
 // InsertNew inserts rows the server may have already, as an upload whose
@@ -1102,15 +1186,16 @@ func (c *Client) Remove(ctx context.Context, bucket string, paths ...string) err
 	return nil
 }
 
-// Download reads a file of a Storage bucket, taking as long as ctx lets
-// it.
-func (c *Client) Download(ctx context.Context, bucket, path string) ([]byte, error) {
+// Download opens a file of a Storage bucket to read as it comes, taking as
+// long as ctx lets it: a file may be hundreds of megabytes, which are never
+// all in memory. The caller closes it. One that ends before the length the
+// server gave is io.ErrUnexpectedEOF as it is read, never a file cut short.
+func (c *Client) Download(ctx context.Context, bucket, path string) (io.ReadCloser, error) {
 	res, err := c.requestWith(c.long, ctx, tokenLasts, "GET", "/storage/v1/object/authenticated/"+bucket+"/"+escapePath(path), nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = res.Body.Close() }()
-	return io.ReadAll(res.Body)
+	return res.Body, nil
 }
 
 func escapePath(p string) string {

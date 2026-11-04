@@ -139,6 +139,13 @@ func (s *Service) ids(key string) map[string]bool {
 	return out
 }
 
+// setIDs keeps a set of IDs under key. A set as it is kept already is not
+// written again: each write is a commit to the disk, and tells the app
+// that key_values changed, which a pass would otherwise do every time.
 func (s *Service) setIDs(key string, ids map[string]bool) error {
-	return s.st.SetValue(key, strings.Join(slices.Sorted(maps.Keys(ids)), ","))
+	v := strings.Join(slices.Sorted(maps.Keys(ids)), ",")
+	if kept, ok := s.st.Value(key); ok && kept == v || !ok && v == "" {
+		return nil
+	}
+	return s.st.SetValue(key, v)
 }

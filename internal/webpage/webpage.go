@@ -209,8 +209,8 @@ func HTML(c *doc.Content, o Options) string {
 }
 
 // Inline serves a printed page's pictures in the page itself, as data
-// URLs, and its files and audio nowhere: paper neither downloads nor
-// plays.
+// URLs, each made as small as printing it needs, and its files and audio
+// nowhere: paper neither downloads nor plays.
 var Inline Server = inline{}
 
 type inline struct{}
@@ -219,6 +219,9 @@ func (inline) Image(path, typ string) string {
 	data, err := os.ReadFile(path) // #nosec G304 -- a picture of the page's own, which HTML checked.
 	if err != nil {
 		return ""
+	}
+	if small, smallTyp, ok := forPrint(data); ok {
+		data, typ = small, smallTyp
 	}
 	return "data:" + typ + ";base64," + base64.StdEncoding.EncodeToString(data)
 }

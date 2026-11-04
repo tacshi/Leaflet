@@ -287,7 +287,7 @@ func TestRunOffersTheWeb(t *testing.T) {
 
 	for name, req := range map[string]Request{
 		"no web":          {Model: "m", SupportsTools: true},
-		"pages before it": {Model: "m", SupportsTools: true, Web: true, History: []map[string]string{{"role": "user", "content": "hi"}}},
+		"pages before it": {Model: "m", SupportsTools: true, Web: true, History: []Turn{{Role: "user", Content: "hi"}}},
 	} {
 		f := &fakeModel{replies: []map[string]any{{"content": "Hi."}}}
 		srv := httptest.NewServer(f)
@@ -302,7 +302,7 @@ func TestRunOffersTheWeb(t *testing.T) {
 	f = &fakeModel{replies: []map[string]any{{"content": "Hi."}}}
 	srv2 := httptest.NewServer(f)
 	defer srv2.Close()
-	req := Request{Model: "m", SupportsTools: true, Web: true, History: []map[string]string{{"role": "user", "content": "hi"}}, KeptToPage: true}
+	req := Request{Model: "m", SupportsTools: true, Web: true, History: []Turn{{Role: "user", Content: "hi"}}, KeptToPage: true}
 	if _, err := RunLocal(context.Background(), NewClient(srv2.URL, ""), req, webExecutor("", Search{}).Ctx, Events{}); err != nil {
 		t.Fatal(err)
 	}
@@ -344,5 +344,56 @@ func TestCloudRunSaysWhatItDoes(t *testing.T) {
 	}}, "j1", Events{Activity: func(s string) { did = append(did, s) }})
 	if err != nil || !res.KeptToPage || len(did) != 2 || !strings.Contains(did[0], "AI videos") || !strings.Contains(did[1], "news.ycombinator.com") {
 		t.Errorf("run %+v %v, said %q", res, err, did)
+	}
+}
+
+// A cloud run whose URL guard was on says so, as its server does, or as
+// what it did tells: it called the web, or read beyond its page. One that
+// did none of those did not.
+func TestCloudRunSaysItsGuardWasOn(t *testing.T) {
+	for name, c := range map[string]struct {
+		events  []map[string]any
+		guarded bool
+	}{
+		"kept":   {[]map[string]any{{"type": "done", "reply": "Hi.", "kept_to_page": true}}, false},
+		"said":   {[]map[string]any{{"type": "done", "reply": "Hi.", "kept_to_page": true, "guarded": true}}, true},
+		"beyond": {[]map[string]any{{"type": "done", "reply": "Hi."}}, true},
+		"called": {[]map[string]any{{"type": "call", "tool": "read_video_transcript", "args": map[string]any{}}, {"type": "done", "reply": "Hi.", "kept_to_page": true}}, true},
+	} {
+		res, err := RunCloud(context.Background(), fakeStream{events: c.events}, "j1", Events{})
+		if err != nil || res.Guarded != c.guarded {
+			t.Errorf("%s: guarded %v, %v", name, res.Guarded, err)
+		}
+	}
+}
+
+// A page the run read is a source of its own, which a picture, a video or
+// a link card may hold, only when it did not pick it from a page it read:
+// its first page of the web, one the user gave, or a search's result. One
+// a page linked to, read, stays a link: its writer could have listed many
+// for the run to choose from, and reading one makes it no better.
+func TestPagesPickedFromPagesAreNoSources(t *testing.T) {
+	x := webExecutor("Read https://given.example/r", Search{Sources: []Source{{URL: "https://found.example/a"}}})
+	card := func(u string) map[string]any {
+		return map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "link_preview", "link": map[string]any{"url": u}}}}
+	}
+	for _, c := range []struct {
+		tool string
+		args map[string]any
+		ok   bool
+	}{
+		{"read_web_page", map[string]any{"url": "https://first.example/"}, true},
+		{"read_web_page", map[string]any{"url": "https://found.example/b"}, true},
+		{"insert_blocks", card("https://found.example/b"), false},
+		{"insert_blocks", card("https://first.example/"), true},
+		{"read_web_page", map[string]any{"url": "https://given.example/r"}, true},
+		{"insert_blocks", card("https://given.example/r"), true},
+		{"web_search", map[string]any{"query": "AI videos"}, true},
+		{"read_web_page", map[string]any{"url": "https://found.example/a"}, true},
+		{"insert_blocks", card("https://found.example/a"), true},
+	} {
+		if out := x.Call(c.tool, c.args); (out["error"] == nil) != c.ok {
+			t.Errorf("%s %v: %v", c.tool, c.args, out)
+		}
 	}
 }

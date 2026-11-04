@@ -406,21 +406,48 @@ func VideoPause(v doc.Video) string {
 
 // EmbedCSP is the policy of an embed's frame: inline scripts and styles,
 // images, fonts and media from data and blob URLs, and nothing from the
-// network. default-src does not cover WebRTC; the webrtc directive does
-// where the web view knows it, and EmbedNoRTC where it does not.
+// network. default-src does not cover WebRTC, and neither WebKit nor
+// Chromium keeps to the webrtc directive: NoRTC is what takes it away.
 const EmbedCSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; webrtc 'block'"
 
-// EmbedNoRTC runs first in an embed's frame: it takes away WebRTC, which
-// would reach the network around the policy, before the embed's own
-// script runs. It is best effort: a frame the embed makes itself has them
-// back, which the webrtc directive, where known, still blocks.
-const EmbedNoRTC = `<script>(function () {
-  ["RTCPeerConnection", "webkitRTCPeerConnection", "mozRTCPeerConnection", "RTCDataChannel",
-   "RTCSessionDescription", "RTCIceCandidate", "RTCRtpSender", "RTCRtpReceiver", "RTCRtpTransceiver",
-   "RTCDtlsTransport", "RTCIceTransport", "RTCSctpTransport", "RTCCertificate"].forEach(function (k) {
-    try { Object.defineProperty(window, k, {value: undefined, writable: false, configurable: false}); } catch (e) {}
-  });
-})();</script>`
+// NoRTC takes WebRTC away from the window it runs in, which would reach
+// the network around the policy: what the desktop's web views of embeds,
+// math and diagrams run first in every frame, those an embed makes itself
+// among them (mygo.PageOptions.PreloadAllFrames), and EmbedNoRTC's script.
+// A frame the window makes and reaches through its element, as
+// contentWindow or contentDocument, loses WebRTC too before it is handed
+// out, for where no web view runs this in it, as in a visitor's browser:
+// there one reached otherwise, as frames[0], or loaded from srcdoc, keeps
+// it.
+const NoRTC = `(function () {
+  function guard(w) {
+    ["RTCPeerConnection", "webkitRTCPeerConnection", "mozRTCPeerConnection", "RTCDataChannel",
+     "RTCSessionDescription", "RTCIceCandidate", "RTCRtpSender", "RTCRtpReceiver", "RTCRtpTransceiver",
+     "RTCDtlsTransport", "RTCIceTransport", "RTCSctpTransport", "RTCCertificate"].forEach(function (k) {
+      try { Object.defineProperty(w, k, {value: undefined, writable: false, configurable: false}); } catch (e) {}
+    });
+    ["HTMLIFrameElement", "HTMLFrameElement", "HTMLObjectElement"].forEach(function (t) {
+      var proto;
+      try { proto = w[t] && w[t].prototype; } catch (e) { return; }
+      if (!proto) return;
+      ["contentWindow", "contentDocument"].forEach(function (p) {
+        var d = Object.getOwnPropertyDescriptor(proto, p);
+        if (!d || !d.get || !d.configurable) return;
+        var get = d.get;
+        Object.defineProperty(proto, p, {configurable: false, enumerable: d.enumerable, get: function () {
+          var v = get.call(this);
+          try { var f = p === "contentWindow" ? v : v && v.defaultView; if (f) guard(f); } catch (e) {}
+          return v;
+        }});
+      });
+    });
+  }
+  guard(window);
+})();`
+
+// EmbedNoRTC runs NoRTC first in an embed's frame, before the embed's own
+// script, for a web view that does not run it in every frame itself.
+const EmbedNoRTC = "<script>" + NoRTC + "</script>"
 
 // EmbedWheel runs in an embed's frame: wheel movement the embed cannot
 // use itself, as most embeds do not scroll, goes to the page around it.
@@ -500,7 +527,7 @@ func EmbedPage(id, src, bg string, dark, wheel bool) string {
 		`var id = ` + ScriptString(id) + `;` +
 		`addEventListener("message", function (e) {` +
 		`if (e.source !== document.getElementById("f").contentWindow || !e.data || !window.mygo) return;` +
-		`if (typeof e.data.leafletWheel === "number") window.mygo.call("Embeds.Scroll", e.data.leafletWheel);` +
+		`if (typeof e.data.leafletWheel === "number") window.mygo.call("Embeds.Scroll", id, e.data.leafletWheel);` +
 		`var z = e.data.leafletSize;` +
 		`if (z && typeof z[0] === "number" && typeof z[1] === "number") window.mygo.call("Embeds.Size", id, z[0], z[1]);` +
 		`if (typeof e.data.leafletZoomed === "boolean") window.mygo.call("Embeds.Zoomed", id, e.data.leafletZoomed);` +

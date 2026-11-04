@@ -155,12 +155,35 @@ func (m Mentions) places() func(store.Page) string {
 // input method for Chinese or Japanese types them, find what their ASCII
 // does. Pages are kept to the best Pages that match, and the way to add
 // an agent shows only before anything is typed.
-func Filter(items []Item, query string) []Item {
-	q := strings.ToLower(width.Fold.String(strings.TrimSpace(query)))
-	type hit struct {
-		it               Item
-		rank, group, top int
+func Filter(items []Item, query string) []Item { return (&Folded{items: items}).Filter(query) }
+
+// Folded is items to filter by one query after another, as the @ menu's
+// pages are while it is open: their labels, as Filter compares them, are
+// folded once, the first time a query needs them, not for each query.
+type Folded struct {
+	items  []Item
+	labels []string
+}
+
+// Fold is items, to filter as Filter does.
+func Fold(items []Item) *Folded { return &Folded{items: items} }
+
+// fold is s as Filter compares it: full-width letters and digits as
+// their ASCII, in lower case.
+func fold(s string) string { return strings.ToLower(width.Fold.String(s)) }
+
+// Filter is Filter of the items, by query.
+func (f *Folded) Filter(query string) []Item {
+	items := f.items
+	q := fold(strings.TrimSpace(query))
+	if q != "" && f.labels == nil {
+		f.labels = make([]string, len(items))
+		for i, it := range items {
+			f.labels[i] = fold(it.Label)
+		}
 	}
+	// A hit is an item by its place in items.
+	type hit struct{ i, rank, group, top int }
 	var hits []hit
 	groups := map[string]int{} // a group's first place
 	best := map[string]int{}   // its best rank
@@ -168,7 +191,11 @@ func Filter(items []Item, query string) []Item {
 		if it.Key == "connect" && q != "" {
 			continue
 		}
-		r := rank(it, q)
+		label := ""
+		if q != "" {
+			label = f.labels[i]
+		}
+		r := rank(it, label, q)
 		if r < 0 {
 			continue
 		}
@@ -176,10 +203,11 @@ func Filter(items []Item, query string) []Item {
 			groups[it.Group], best[it.Group] = i, r
 		}
 		best[it.Group] = min(best[it.Group], r)
-		hits = append(hits, hit{it: it, rank: r})
+		hits = append(hits, hit{i: i, rank: r})
 	}
 	for i := range hits {
-		hits[i].group, hits[i].top = groups[hits[i].it.Group], best[hits[i].it.Group]
+		g := items[hits[i].i].Group
+		hits[i].group, hits[i].top = groups[g], best[g]
 	}
 	slices.SortStableFunc(hits, func(x, y hit) int {
 		if c := cmp.Compare(x.top, y.top); c != 0 {
@@ -193,30 +221,41 @@ func Filter(items []Item, query string) []Item {
 	out := []Item{}
 	pages := 0
 	for _, h := range hits {
-		if strings.HasPrefix(h.it.Key, "page:") {
+		it := items[h.i]
+		if strings.HasPrefix(it.Key, "page:") {
 			if pages == Pages {
 				continue
 			}
 			pages++
 		}
-		out = append(out, h.it)
+		out = append(out, it)
 	}
 	return out
 }
 
-// rank is how well an item matches q, lowered: 0 best, -1 not at all.
-func rank(it Item, q string) int {
+// rank is how well an item matches q, folded, its label folded as label:
+// 0 best, -1 not at all.
+func rank(it Item, label, q string) int {
 	if q == "" {
 		return 0
 	}
-	label := strings.ToLower(width.Fold.String(it.Label))
+	// words reports whether a word of s, a run of letters and digits,
+	// starts with q.
 	words := func(s string) bool {
-		for _, w := range strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) }) {
-			if strings.HasPrefix(w, q) {
+		start := -1
+		for i, r := range s {
+			if unicode.IsLetter(r) || unicode.IsDigit(r) {
+				if start < 0 {
+					start = i
+				}
+				continue
+			}
+			if start >= 0 && strings.HasPrefix(s[start:i], q) {
 				return true
 			}
+			start = -1
 		}
-		return false
+		return start >= 0 && strings.HasPrefix(s[start:], q)
 	}
 	switch {
 	case strings.HasPrefix(label, q):

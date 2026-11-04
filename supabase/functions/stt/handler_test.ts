@@ -46,15 +46,32 @@ function project(settings: Row = {}): Project {
   return p;
 }
 
-/** Soniox, answering as status says, and the calls it had. */
+/** The file a multipart/form-data request carries, and its other fields. */
+async function upload(url: string, init?: RequestInit) {
+  const form = await new Request(url, init).formData();
+  const file = form.get("file") as File;
+  form.delete("file");
+  return {
+    streamed: init?.body instanceof ReadableStream,
+    name: file.name,
+    bytes: new Uint8Array(await file.arrayBuffer()),
+    fields: Object.fromEntries(form),
+  };
+}
+
+/** Soniox, answering as status says, the calls it had, and the files sent it. */
 function soniox(status: Row = { status: "completed" }) {
   const calls: string[] = [];
-  const fetch: typeof globalThis.fetch = (input, init) => {
+  const files: Awaited<ReturnType<typeof upload>>[] = [];
+  const fetch: typeof globalThis.fetch = async (input, init) => {
     const url = new URL(input instanceof Request ? input.url : input);
     const call = `${init?.method ?? "GET"} ${url.pathname}`;
     calls.push(call);
     const reply = (body: unknown) => Promise.resolve(Response.json(body));
-    if (call === "POST /v1/files") return reply({ id: "file" });
+    if (call === "POST /v1/files") {
+      files.push(await upload(url.href, init));
+      return reply({ id: "file" });
+    }
     if (call === "POST /v1/transcriptions") return reply({ id: "job" });
     if (call === "GET /v1/transcriptions/job") return reply(status);
     if (call === "GET /v1/transcriptions/job/transcript") {
@@ -62,7 +79,7 @@ function soniox(status: Row = { status: "completed" }) {
     }
     return Promise.resolve(new Response(null, { status: 204 }));
   };
-  return { fetch, calls };
+  return { fetch, calls, files };
 }
 
 function deps(
@@ -162,4 +179,60 @@ Deno.test("a provider's key goes only to its address", async () => {
   const done = await transcribe(p, deps(p, soniox().fetch, send));
   assertEquals(done.status, 200);
   assertEquals(sent, ["https://api.openai.com/v1/audio/transcriptions"]);
+});
+
+// A local provider is the device's to call: a transcription that names
+// one is refused before its key is read or anything is sent or claimed,
+// whatever address the provider names.
+Deno.test("a local provider's key goes nowhere", async () => {
+  for (const local of [{ preset: "ollama", is_local: true }, { preset: "lmstudio", is_local: false }]) {
+    const p = project({ provider: "openai-compatible", provider_id: "local" });
+    p.tables.model_providers.push({
+      id: "local",
+      user_id: "ann",
+      name: "Local",
+      base_url: "https://attacker.example/v1",
+      auth_kind: "api_key",
+      has_secret: true,
+      ...local,
+    });
+    let read = false;
+    p.rpcs.get_provider_secret = () => (read = true, "sk-local");
+    const sent: string[] = [];
+    const send: SttDeps["send"] = (raw) => (sent.push(String(raw)), Promise.resolve(Response.json({ text: "Hi" })));
+    const refused = await transcribe(p, deps(p, soniox().fetch, send));
+    assertEquals(refused.status, 400);
+    assertEquals([sent, read, rec(p).status], [[], false, "uploading"]);
+  }
+});
+
+// The audio goes to the transcriber as it is stored, streamed from Storage
+// rather than read whole first: to Soniox once, and to an OpenAI-compatible
+// endpoint each time it is asked, again when it turns verbose_json down.
+Deno.test("the audio is streamed to the transcriber as it is stored", async () => {
+  const audio = Uint8Array.from({ length: 300_000 }, (_, i) => i % 251);
+
+  const p = project();
+  p.objects.recordings.set("ann/rec.wav", audio);
+  const s = soniox();
+  assertEquals((await transcribe(p, deps(p, s.fetch))).status, 200);
+  assertEquals(s.files.map((f) => [f.streamed, f.name, f.bytes]), [[true, "rec.wav", audio]]);
+
+  const q = project({ provider: "openai-compatible", base_url: "https://stt.example/v1", model: "whisper-1" });
+  q.objects.recordings.set("ann/rec.wav", audio);
+  const sent: Awaited<ReturnType<typeof upload>>[] = [];
+  const send: SttDeps["send"] = async (raw, init) => {
+    const got = await upload(String(raw), init);
+    sent.push(got);
+    return got.fields.response_format === "verbose_json"
+      ? new Response("response_format verbose_json is not supported", { status: 400 })
+      : Response.json({ text: "Hello." });
+  };
+  const done = await transcribe(q, deps(q, soniox().fetch, send));
+  assertEquals(done.status, 200);
+  assertEquals(sent.map((f) => [f.streamed, f.name, f.fields.model, f.fields.response_format, f.bytes]), [
+    [true, "rec.wav", "whisper-1", "verbose_json", audio],
+    [true, "rec.wav", "whisper-1", "json", audio],
+  ]);
+  assertEquals((rec(q).transcript as { text: string }[]).map((t) => t.text), ["Hello."]);
 });

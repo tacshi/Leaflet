@@ -3,6 +3,7 @@ package sync
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"time"
 
@@ -14,9 +15,11 @@ import (
 // supabaseTarget syncs through the Supabase server the user signed in to.
 type supabaseTarget struct{ s *Service }
 
-func (t supabaseTarget) ready() bool                    { return t.s.be.SignedIn() }
-func (t supabaseTarget) needsNetwork() bool             { return true }
-func (t supabaseTarget) pass(ctx context.Context) error { return t.s.pass(ctx) }
+func (t supabaseTarget) ready() bool        { return t.s.be.SignedIn() }
+func (t supabaseTarget) needsNetwork() bool { return true }
+func (t supabaseTarget) pass(ctx context.Context, pull bool) error {
+	return t.s.pass(ctx, pull)
+}
 func (t supabaseTarget) refresh(ctx context.Context, pageID string) (*doc.Content, error) {
 	return t.s.refreshRemote(ctx, pageID)
 }
@@ -25,10 +28,10 @@ func (t supabaseTarget) flush(ctx context.Context, pageID string) error {
 }
 
 // pass is a pass through the server: this device's pages join the
-// account's space, once, and the device says it is still in use; then the
-// outbox goes up, unless the project is being updated, and what changed
-// comes down.
-func (s *Service) pass(ctx context.Context) error {
+// account's space, once, and the device says it is still in use, every
+// heartbeatEvery; then the outbox goes up, unless the project is being
+// updated, and, with pull, what changed comes down.
+func (s *Service) pass(ctx context.Context, pull bool) error {
 	if err := s.resolveSpace(ctx); err != nil {
 		return err
 	}
@@ -39,6 +42,9 @@ func (s *Service) pass(ctx context.Context) error {
 		if err := s.push(ctx); err != nil {
 			return err
 		}
+	}
+	if !pull {
+		return nil
 	}
 	return s.pull(ctx)
 }
@@ -119,13 +125,50 @@ func (s *Service) joinsLibrary(ctx context.Context, spaceID string) (bool, error
 	return won != true, nil
 }
 
+// heartbeatEvery is how often the passes say the device is in use, in
+// Account › Devices, and learn whether it was signed out from another: a
+// revoked device signs itself out within it. The first pass after Start,
+// or after a session begins (remote.Client.Sessions), as signing in again
+// does, or under a new ID, says so at once: a device revoked whose session
+// ended before it heard, and that the user signs in again, learns it is
+// revoked as it starts, before anything is done under its old ID.
+const heartbeatEvery = 10 * time.Minute
+
+// every is when something a pass does every so often was last done, and
+// for whom, as the user, or the user, the device's ID and the session;
+// guarded by the service's mu. Start forgets it, so the first pass after
+// does it.
+type every struct {
+	at   time.Time
+	whom string
+}
+
+// due reports whether it is to be done again for whom, d after it was
+// last: once that long has gone, for someone else, or never.
+func (r *every) due(whom string, d time.Duration) bool {
+	return r.at.IsZero() || r.whom != whom || time.Since(r.at) >= d
+}
+
+// heartbeat says, every heartbeatEvery, that the device is in use, with
+// one upsert of its own row, which answers with whether it was revoked:
+// a revoked one signs out, and forgets its ID.
 func (s *Service) heartbeat(ctx context.Context) error {
-	id := s.st.DeviceID()
-	row, err := s.be.SelectOne(ctx, "devices", remote.Query{Select: "revoked_at", Filters: []string{remote.Eq("id", id)}})
+	uid, id := s.be.UserID(), s.st.DeviceID()
+	whom := fmt.Sprintf("%s %s %d", uid, id, s.be.Sessions())
+	s.mu.Lock()
+	due := s.beat.due(whom, heartbeatEvery)
+	s.mu.Unlock()
+	if !due {
+		return nil
+	}
+	rows, err := s.be.UpsertReturning(ctx, "devices", map[string]any{
+		"id": id, "user_id": uid, "name": s.deviceName(), "platform": runtime.GOOS,
+		"last_active_at": time.Now().UTC().Format(time.RFC3339Nano),
+	}, "", "revoked_at")
 	if err != nil {
 		return err
 	}
-	if row != nil && row["revoked_at"] != nil {
+	if len(rows) > 0 && rows[0]["revoked_at"] != nil {
 		// The row stays revoked: signing in again, this device registers
 		// as a new one. What iCloud sync kept goes with the old ID, as its
 		// log is that ID's: under the new one, a later turn-on joins the
@@ -144,9 +187,8 @@ func (s *Service) heartbeat(ctx context.Context) error {
 		s.be.SignOut()
 		return remote.ErrSignedOut
 	}
-	_, err = s.be.Upsert(ctx, "devices", map[string]any{
-		"id": id, "user_id": s.be.UserID(), "name": s.deviceName(), "platform": runtime.GOOS,
-		"last_active_at": time.Now().UTC().Format(time.RFC3339Nano),
-	}, "")
-	return err
+	s.mu.Lock()
+	s.beat = every{time.Now(), whom}
+	s.mu.Unlock()
+	return nil
 }

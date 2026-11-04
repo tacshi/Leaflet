@@ -123,7 +123,7 @@ func TestStopEndsAPassWaitingToRun(t *testing.T) {
 	loop := d.svc.passContext()
 	done := make(chan struct{})
 	go func() {
-		d.svc.loopPass(loop)
+		d.svc.loopPass(loop, true)
 		close(done)
 	}()
 	time.Sleep(50 * time.Millisecond)

@@ -18,12 +18,11 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 	pal := theme.Of(c)
 	_, source := doc.BlockSource(n)
 	name, empty, edit := locales.RenderedMath(), locales.RenderedWriteFormula(), locales.RenderedEditMath()
-	var page string
+	// The page, with KaTeX or Pele in it, is made only as the view loads.
+	page := func() string { return rendered.MathPage(source) }
 	if n.Type == "diagram" {
 		name, empty, edit = locales.RenderedDiagram(), locales.RenderedWriteDiagram(), locales.RenderedEditDiagram()
-		page = rendered.DiagramPage(source, hexOf(pal.Surface), false)
-	} else {
-		page = rendered.MathPage(source)
+		page = func() string { return rendered.DiagramPage(source, hexOf(pal.Surface), false) }
 	}
 	editable := a.page != nil && !a.page.editor.ReadOnly
 	const pad = 12
@@ -79,9 +78,10 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 		}
 		// The frame takes its content's height. Math gives the page the
 		// wheel; a diagram keeps Ctrl and the wheel to zoom.
-		a.sandbox(c, n.ID, page, width-2-2*pad, func(content float32) float32 {
+		in := embedInput{src: source, kind: n.Type, toPage: n.Type == "math_equation"}
+		a.sandbox(c, n.ID, in, page, width-2-2*pad, func(content float32) float32 {
 			return min(max(content, 32), 1600)
-		}, height, 4, n.Type == "math_equation")
+		}, height)
 	})
 }
 
@@ -126,7 +126,9 @@ func (a *App) fullDiagram(c *ui.Context, n *doc.Node) {
 				a.leaveFullDiagram()
 			}
 		})
-		a.sandbox(c, key, rendered.DiagramPage(source, hexOf(pal.Surface), true), 0, nil, 0, 0, false)
+		a.sandbox(c, key, embedInput{src: source, kind: "full"}, func() string {
+			return rendered.DiagramPage(source, hexOf(pal.Surface), true)
+		}, 0, nil, 0)
 	})
 	c.OnShortcut(0, ui.KeyEscape, a.leaveFullDiagram)
 }
@@ -140,13 +142,9 @@ func (a *App) leaveFullDiagram() {
 	}
 	key := "full:" + ps.fullDiagram
 	ps.fullDiagram = ""
-	if v := a.embeds[key]; v != nil {
-		v.Destroy()
-	}
-	delete(a.embeds, key)
-	delete(a.embedSrc, key)
+	a.letGoEmbed(key)
+	delete(a.embedIn, key)
 	delete(a.embedSizes, key)
-	delete(a.embedZoomed, key)
 }
 
 // Math and diagram source --------------------------------------------------

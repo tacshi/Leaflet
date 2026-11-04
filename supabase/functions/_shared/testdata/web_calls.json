@@ -39,7 +39,7 @@
         {
           "tool": "insert_blocks",
           "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"link_preview\",\"link\":{\"url\":\"https://found.example/b\"}}]}",
-          "ok": true
+          "ok": false
         },
         {
           "tool": "insert_blocks",
@@ -127,6 +127,62 @@
           "tool": "web_search",
           "args": "{\"query\":\"q\"}",
           "ok": false
+        }
+      ],
+      "kept_to_page": true
+    },
+    {
+      "armed": false,
+      "calls": [
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://any.example/\"}",
+          "ok": true
+        },
+        {
+          "tool": "insert_blocks",
+          "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"link_preview\",\"link\":{\"url\":\"https://found.example/b\"}}]}",
+          "ok": false
+        },
+        {
+          "tool": "insert_blocks",
+          "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"paragraph\",\"text\":\"[next](https://found.example/b)\"}]}",
+          "ok": true
+        },
+        {
+          "tool": "insert_blocks",
+          "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"link_preview\",\"link\":{\"url\":\"HTTPS://any.example/\"}}]}",
+          "ok": true
+        },
+        {
+          "tool": "insert_blocks",
+          "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"image\",\"image\":{\"url\":\"https://found.example/b\"}}]}",
+          "ok": false
+        },
+        {
+          "tool": "write_markdown",
+          "args": "{\"position\":\"end\",\"markdown\":\"![b](https://found.example/b)\"}",
+          "ok": false
+        },
+        {
+          "tool": "insert_blocks",
+          "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"link_preview\",\"link\":{\"url\":\"HTTPS://made.up/x\"}}]}",
+          "ok": false
+        },
+        {
+          "tool": "write_markdown",
+          "args": "{\"position\":\"end\",\"markdown\":\"[x](Https://made.up/y)\"}",
+          "ok": false
+        },
+        {
+          "tool": "web_search",
+          "args": "{\"query\":\"AI videos\"}",
+          "ok": true
+        },
+        {
+          "tool": "insert_blocks",
+          "args": "{\"position\":\"end\",\"blocks\":[{\"type\":\"image\",\"image\":{\"url\":\"HTTPS://found.example/a\"}}]}",
+          "ok": true
         }
       ],
       "kept_to_page": true

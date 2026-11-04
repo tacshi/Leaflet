@@ -12,11 +12,20 @@ enum PagePDF {
     /// desktop.
     static let margin: CGFloat = 0.6 * 72
 
-    /// make prints page, on its paper, as PDF data.
+    /// make prints page, on its paper, as PDF data, and removes the file
+    /// the core wrote it in.
     static func make(_ page: ExportedPDF) async throws -> Data {
+        let file = URL(filePath: page.path)
+        defer { try? FileManager.default.removeItem(at: file) }
         let paper = CGRect(x: 0, y: 0, width: page.width * 72, height: page.height * 72)
         let config = WKWebViewConfiguration()
         config.websiteDataStore = WebPage.store
+        // Its formulas and diagrams are drawn by scripts, as in the blocks'
+        // web views, which take WebRTC from each frame first too.
+        config.userContentController.addUserScript(
+            WKUserScript(
+                source: WebBlockView.noRTC, injectionTime: .atDocumentStart, forMainFrameOnly: false
+            ))
         let view = WKWebView(frame: paper, configuration: config)
         // In a window, out of sight, for as long as it prints: one in no
         // window may never lay its page out.
@@ -29,7 +38,10 @@ enum PagePDF {
         defer { view.removeFromSuperview() }
         let loading = Loading()
         view.navigationDelegate = loading
-        view.loadHTMLString(page.html, baseURL: nil)
+        // From its file, which the page may read alone: a page of many
+        // pictures held in a string would be in memory as many times as it
+        // is passed on.
+        view.loadFileURL(file, allowingReadAccessTo: file)
         if await !loading.wait(upTo: loadWait) {
             view.stopLoading()
         }

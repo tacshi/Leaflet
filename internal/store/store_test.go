@@ -2579,6 +2579,12 @@ func TestRemoveSharedPages(t *testing.T) {
 	if _, err := s.CreateRecording("root", "rec", "local", "model", audio, ""); err != nil {
 		t.Fatal(err)
 	}
+	chats := []string{"chat.kid", "chat.past.kid", "chat.running.kid"}
+	for _, k := range chats {
+		if err := s.SetValue(k, "[]"); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	if ids, err := s.RemoveSharedPages(mine.ID); err != nil || len(ids) != 0 {
 		t.Fatalf("own page removed: %v, %v", ids, err)
@@ -2604,6 +2610,11 @@ func TestRemoveSharedPages(t *testing.T) {
 	}
 	if _, err := os.Stat(audio); !errors.Is(err, fs.ErrNotExist) {
 		t.Errorf("recording's audio stayed: %v", err)
+	}
+	for _, k := range chats {
+		if _, ok := s.Value(k); ok {
+			t.Errorf("%s stayed", k)
+		}
 	}
 	if !s.HasPending("pages", mine.ID) {
 		t.Error("own page's change waiting removed")
@@ -3010,10 +3021,12 @@ func TestKeysPutLastAsTheServerMakesThem(t *testing.T) {
 }
 
 // The tables the store removes from, all at once or a page's, are every
-// table it has.
+// table it has, but those its triggers keep after them: text_writes and
+// search_index.
 func TestEveryTableIsListed(t *testing.T) {
 	s := open(t)
-	rows, err := s.db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	rows, err := s.db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'
+		AND name <> 'text_writes' AND name NOT LIKE 'search_index%' ORDER BY name`)
 	have, err := collect(rows, err, scanString)
 	if err != nil {
 		t.Fatal(err)
@@ -3218,7 +3231,7 @@ func TestFinishedRecordingQueuesItsAudio(t *testing.T) {
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Call"})
 	wav := filepath.Join(s.Dir, "recordings", "a.wav")
-	if err := writeFile(wav, []byte("RIFF")); err != nil {
+	if err := writeFrom(wav, strings.NewReader("RIFF")); err != nil {
 		t.Fatal(err)
 	}
 	entities := func() []string {

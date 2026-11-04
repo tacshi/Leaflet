@@ -100,7 +100,7 @@ func TestDisplayName(t *testing.T) {
 }
 
 // The devices list this one and those signed out from another; signing
-// one out marks it so on the server.
+// one out asks the server to, which revokes it and ends its session.
 func TestDevices(t *testing.T) {
 	s := &accountServer{}
 	c := signedInCore(t, s)
@@ -119,11 +119,12 @@ func TestDevices(t *testing.T) {
 		t.Errorf("asked %+v", calls)
 	}
 
-	s.answer = "[]"
+	s.answer = ""
 	if err := c.SignOutDevice("d3"); err != nil {
 		t.Fatal(err)
 	}
-	if calls := s.calls(); len(calls) != 1 || calls[0].body["id"] != "d3" || calls[0].body["user_id"] != "u1" || calls[0].body["revoked_at"] == nil {
+	if calls := s.calls(); len(calls) != 1 || calls[0].method != "POST" || calls[0].path != "/rest/v1/rpc/sign_out_device" ||
+		len(calls[0].body) != 1 || calls[0].body["p_device_id"] != "d3" {
 		t.Errorf("sent %+v", calls)
 	}
 	s.down = true

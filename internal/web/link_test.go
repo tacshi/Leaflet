@@ -1,9 +1,12 @@
 package web
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"leaflet/internal/doc"
 )
@@ -53,5 +56,59 @@ func TestFillLinkCards(t *testing.T) {
 	}
 	if len(Unfilled(c)) != 0 || (LinkInfo{Title: "Go"}).Fill(c, "https://go.dev/") {
 		t.Error("filled cards were filled again")
+	}
+}
+
+// A card's page is read only as far as its head, and what is no page, as
+// its Content-Type says, not at all: its card has no info.
+func TestLookUpReadsOnlyAPagesHead(t *testing.T) {
+	useServer(t)
+	release := make(chan struct{})
+	sent := make(chan int, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/video.mp4":
+			w.Header().Set("Content-Type", "video/mp4")
+			w.WriteHeader(http.StatusOK)
+			_ = http.NewResponseController(w).Flush()
+			<-release
+		case "/endless":
+			// A page that goes on and on after its head.
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			n, _ := w.Write([]byte(`<head><meta property="og:title" content="Endless"></head>`))
+			chunk := []byte(strings.Repeat("<p>more</p>", 1000))
+			for n < 4*maxFetchBytes {
+				m, err := w.Write(chunk)
+				if n += m; err != nil {
+					break
+				}
+			}
+			sent <- n
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+	done := make(chan error, 1)
+	go func() {
+		info, err := LookUp(srv.URL + "/video.mp4")
+		if err == nil && info != (LinkInfo{}) {
+			t.Errorf("a video's info %+v", info)
+		}
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Errorf("looked up a video: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("LookUp waited for a video's body")
+	}
+	info, err := LookUp(srv.URL + "/endless")
+	if err != nil || info.Title != "Endless" {
+		t.Errorf("looked up %+v, %v", info, err)
+	}
+	if n := <-sent; n >= maxFetchBytes {
+		t.Errorf("the page sent %d bytes before LookUp let it go", n)
 	}
 }

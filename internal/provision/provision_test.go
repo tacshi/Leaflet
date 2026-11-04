@@ -42,10 +42,12 @@ type fakeProject struct {
 	meanwhile []string
 	// signUps are the project's Auth settings, and signUpPatches how
 	// often they were changed; authRefused refuses both, as a sign-in
-	// without the Auth scope is.
+	// without the Auth scope is, and authDown fails them, as the API
+	// failing for now does.
 	signUps       supabaseapi.SignUps
 	signUpPatches int
 	authRefused   bool
+	authDown      bool
 }
 
 func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
@@ -113,6 +115,8 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 			w.WriteHeader(http.StatusCreated)
 		case strings.HasSuffix(path, "/config/auth") && f.authRefused:
 			http.Error(w, `{"message":"Forbidden resource"}`, http.StatusForbidden)
+		case strings.HasSuffix(path, "/config/auth") && f.authDown:
+			http.Error(w, `{"message":"try again"}`, http.StatusServiceUnavailable)
 		case strings.HasSuffix(path, "/config/auth") && r.Method == "GET":
 			_ = json.NewEncoder(w).Encode(f.signUps)
 		case strings.HasSuffix(path, "/config/auth") && r.Method == "PATCH":
@@ -348,6 +352,7 @@ var functionsHashes = map[int]string{
 	5: "6e3994b6bd5f678c7dc07c19a459a932a066db4ef4c173c8d63eb59916a7b508",
 	6: "4c98a96cf1986b0c7ca862f4334410990186337f4fb56cad4c0c45585b3bd173",
 	7: "bf4593b9e4801d510595dbc68c3592010b81a98151c3819b2b4bb61e22c4fc48",
+	8: "dadff27ccd1171b4f5ee5b70318bc02118c36b3a2d0ce717a3fa6ce7878a47d4",
 }
 
 // The functions a project gets import their packages at exact versions:
@@ -578,5 +583,21 @@ func TestSetupClosesSignUps(t *testing.T) {
 	f = &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, authRefused: true}
 	if err := Setup(context.Background(), f.serve(t), "p", nil); err != nil || len(f.deployed) != len(Functions) {
 		t.Errorf("with Auth refused: %v, deployed %v", err, f.deployed)
+	}
+}
+
+// Sign-ups that could not be closed for now, as with the API failing, do
+// the rest of the setup, and say so, for it to run again.
+func TestSetupSaysSignUpsLeftOpen(t *testing.T) {
+	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, authDown: true}
+	api := f.serve(t)
+	if err := Setup(context.Background(), api, "p", nil); !errors.Is(err, ErrSignUpsOpen) || len(f.deployed) != len(Functions) || len(f.queries) == 0 {
+		t.Errorf("with Auth down: %v, deployed %v, %d queries", err, f.deployed, len(f.queries))
+	}
+	f.mu.Lock()
+	f.authDown = false
+	f.mu.Unlock()
+	if err := Setup(context.Background(), api, "p", nil); err != nil || f.signUps != (supabaseapi.SignUps{Disabled: true}) {
+		t.Errorf("again: %v, sign-ups %+v", err, f.signUps)
 	}
 }

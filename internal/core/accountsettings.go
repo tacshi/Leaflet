@@ -88,14 +88,14 @@ func (c *Core) Devices() ([]Device, error) {
 	return out, nil
 }
 
-// SignOutDevice signs another device out of the account: it signs itself
-// out the next time it syncs.
+// SignOutDevice signs another device out of the account, through the
+// server's sign_out_device: its row is revoked, which no device can undo,
+// and the session it syncs with ends, so it can no longer renew its
+// token. It signs itself out the next time it syncs.
 func (c *Core) SignOutDevice(id string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), remoteTimeout)
 	defer cancel()
-	be := c.Remote
-	_, err := be.Upsert(ctx, "devices", map[string]any{"id": id, "user_id": be.UserID(), "revoked_at": time.Now().UTC().Format(time.RFC3339)}, "")
-	if err != nil {
+	if _, err := c.Remote.RPC(ctx, "sign_out_device", map[string]any{"p_device_id": id}); err != nil {
 		return errors.New(locales.SettingsDeviceSignOutFailed(err.Error()))
 	}
 	return nil

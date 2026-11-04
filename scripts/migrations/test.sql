@@ -161,4 +161,71 @@ exception when insufficient_privilege then
 end;
 $$;
 
+-- A public link's lease, renewed, leaves the page's time as it was, so no
+-- device pulls the page again for it; any other change moves it on.
+do $$
+declare
+  v_before timestamptz;
+  v_after timestamptz;
+begin
+  insert into public.pages (id, space_id, title)
+  select 'f0000000-0000-0000-0000-0000000000e1', id, 'Leased' from public.spaces where owner_id = auth.uid();
+  select updated_at into v_before from public.pages where id = 'f0000000-0000-0000-0000-0000000000e1';
+  update public.pages set public_link_until = now() + interval '1 hour' where id = 'f0000000-0000-0000-0000-0000000000e1';
+  select updated_at into v_after from public.pages where id = 'f0000000-0000-0000-0000-0000000000e1';
+  if v_after is distinct from v_before then
+    raise exception 'renewing a public link''s lease moved the page''s time on';
+  end if;
+  update public.pages set title = 'Leased, renamed' where id = 'f0000000-0000-0000-0000-0000000000e1';
+  select updated_at into v_after from public.pages where id = 'f0000000-0000-0000-0000-0000000000e1';
+  if v_after <= v_before then
+    raise exception 'renaming the page left its time as it was';
+  end if;
+end;
+$$;
+
+-- The lease is set through lease_public_link, an hour on by the server's
+-- clock, by someone who may edit the page alone, and leaves the page's
+-- time as it was too. Ended with the lease its holder got, it goes; with
+-- an older one, which a newer lease has replaced, it stays.
+do $$
+declare
+  v_page constant uuid := 'f0000000-0000-0000-0000-0000000000e1';
+  v_before timestamptz;
+  v_until timestamptz;
+begin
+  -- Without the lease above, of this transaction's now() too.
+  update public.pages set public_link_until = null where id = v_page;
+  select updated_at into v_before from public.pages where id = v_page;
+  v_until := public.lease_public_link(v_page);
+  if v_until is distinct from now() + interval '1 hour'
+     or (select public_link_until from public.pages where id = v_page) is distinct from v_until
+     or (select updated_at from public.pages where id = v_page) is distinct from v_before then
+    raise exception 'the lease is not an hour on by the server''s clock, or moved the page''s time on';
+  end if;
+  perform public.lease_public_link(v_page, v_until - interval '1 minute');
+  if (select public_link_until from public.pages where id = v_page) is distinct from v_until then
+    raise exception 'an older lease''s end ended the newer one';
+  end if;
+  perform public.lease_public_link(v_page, v_until);
+  if (select public_link_until from public.pages where id = v_page) is not null then
+    raise exception 'the lease did not end';
+  end if;
+
+  perform pg_temp.act_as('b0000000-0000-0000-0000-000000000002');
+  begin
+    perform public.lease_public_link(v_page);
+    raise exception 'someone who may not edit the page leased it';
+  exception when insufficient_privilege then
+    if sqlerrm <> 'forbidden_public_link' then
+      raise;
+    end if;
+  end;
+  if public.lease_public_link('f0000000-0000-0000-0000-00000000000a') is null then
+    raise exception 'an editor could not lease a page shared with them';
+  end if;
+  perform pg_temp.act_as('a0000000-0000-0000-0000-000000000001');
+end;
+$$;
+
 rollback;

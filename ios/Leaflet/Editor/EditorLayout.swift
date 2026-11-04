@@ -17,6 +17,11 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
     /// section of a folded heading, which the page leaves out of its
     /// layout: they stay in its text and its content.
     private(set) var folded: Set<String> = []
+    /// foldsFound is the change of the blocks folds go by that folded was
+    /// found at (BlockText.foldChanges), and asked the blocks the core was
+    /// last asked to fold and its answer.
+    private var foldsFound = -1
+    private var asked: (blocks: String, marks: String)?
 
     init(_ editor: EditorController) {
         self.editor = editor
@@ -41,18 +46,32 @@ final class EditorLayout: NSObject, @preconcurrency NSTextLayoutManagerDelegate,
     /// did. What a fold hides is as the core's rules have it, the
     /// desktop's (mobile.Folded): the blocks in a closed toggle, and a
     /// folded heading's section, the blocks after it at its depth, and
-    /// those in them, up to the next heading of its level or higher. A
-    /// page with nothing folded, as most are, asks nothing.
+    /// those in them, up to the next heading of its level or higher. It
+    /// looks again only once paragraphs came or went, or a block's type,
+    /// depth, level or fold changed, as a key typed in a block changes
+    /// none of them; a page with nothing folded, as most are, asks
+    /// nothing, and the core is asked again only of blocks that fold
+    /// otherwise than those it was last asked of.
     func updateFolds() {
-        var hidden = Set<String>()
         let all = text.blocks()
-        if all.contains(where: { $0.info.data["collapsed"]?.bool == true }) {
+        guard text.foldChanges != foldsFound else { return }
+        foldsFound = text.foldChanges
+        var hidden = Set<String>()
+        if text.collapsed > 0 {
             var blocks = ""
+            blocks.reserveCapacity(all.count * 20)
             for p in all {
-                let collapsed = p.info.data["collapsed"]?.bool == true
-                blocks += "\(p.info.type),\(p.info.depth),\(p.info.level),\(collapsed ? 1 : 0)\n"
+                blocks +=
+                    "\(p.info.type),\(p.info.depth),\(p.info.level),\(p.info.isCollapsed ? 1 : 0)\n"
             }
-            for (p, mark) in zip(all, MobileFolded(blocks).utf8) where mark == UInt8(ascii: "1") {
+            let marks: String
+            if let asked, asked.blocks == blocks {
+                marks = asked.marks
+            } else {
+                marks = MobileFolded(blocks)
+                asked = (blocks, marks)
+            }
+            for (p, mark) in zip(all, marks.utf8) where mark == UInt8(ascii: "1") {
                 hidden.insert(p.info.id)
             }
         }

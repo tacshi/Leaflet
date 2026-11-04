@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"leaflet/internal/doc"
 )
@@ -51,11 +52,20 @@ func TestVideoLink(t *testing.T) {
 }
 
 // A Bilibili video gets its part's cid, asked once a run; one Bilibili
-// can't tell of now is asked again next time, and another site's video is
-// as it is.
+// can't tell of now is asked again once a while has passed, not each time
+// it shows, and another site's video is as it is.
 func TestVideoPart(t *testing.T) {
-	was := partsFetch
-	t.Cleanup(func() { partsFetch = was })
+	was, wasRetry := partsFetch, partsRetry
+	bilibiliParts.Lock()
+	wasParts, wasFailed := bilibiliParts.m, bilibiliParts.failed
+	bilibiliParts.m, bilibiliParts.failed = map[string]doc.BilibiliPart{}, map[string]time.Time{}
+	bilibiliParts.Unlock()
+	t.Cleanup(func() {
+		partsFetch, partsRetry = was, wasRetry
+		bilibiliParts.Lock()
+		bilibiliParts.m, bilibiliParts.failed = wasParts, wasFailed
+		bilibiliParts.Unlock()
+	})
 	var asked []string
 	fails := true
 	partsFetch = func(link string) ([]byte, error) {
@@ -66,10 +76,16 @@ func TestVideoPart(t *testing.T) {
 		return []byte(`{"code":0,"data":[{"cid":43310384091,"page":1,"part":"Zelda","first_frame":"http://i2.hdslb.com/f.jpg"}]}`), nil
 	}
 	v := doc.Video{Provider: "bilibili", ID: "BV1uVxD6oE1y", Start: 30}
-	if got, _ := VideoPart(v); got != v {
-		t.Errorf("a part not told of: %+v", got)
+	partsRetry = time.Hour
+	for range 2 {
+		if got, _ := VideoPart(v); got != v {
+			t.Errorf("a part not told of: %+v", got)
+		}
 	}
-	fails = false
+	if len(asked) != 1 {
+		t.Errorf("asked %v while waiting to ask again", asked)
+	}
+	fails, partsRetry = false, 0
 	for range 2 {
 		got, part := VideoPart(v)
 		if got.CID != 43310384091 || got.Start != 30 || part.Picture != "https://i2.hdslb.com/f.jpg" {

@@ -253,7 +253,9 @@ func TestKeptPagesBringWhatChangedMeanwhile(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		out := []map[string]any{}
 		if strings.Contains(r.URL.Query().Get("select"), "content") {
-			out = append(out, map[string]any{"content": json.RawMessage(theirs.Encode()), "revision": 2, "updated_at": at})
+			out = contentRows(r, func(string) map[string]any {
+				return map[string]any{"content": json.RawMessage(theirs.Encode()), "revision": 2, "updated_at": at}
+			})
 		} else if lists++; lists == 1 {
 			for _, id := range ids {
 				out = append(out, map[string]any{"page_id": id, "updated_at": at})
@@ -315,7 +317,9 @@ func TestContentWaitsForItsPage(t *testing.T) {
 	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		out := []map[string]any{}
 		if strings.Contains(r.URL.Query().Get("select"), "content") {
-			out = append(out, map[string]any{"content": json.RawMessage(theirs.Encode()), "revision": 1, "updated_at": at})
+			out = contentRows(r, func(string) map[string]any {
+				return map[string]any{"content": json.RawMessage(theirs.Encode()), "revision": 1, "updated_at": at}
+			})
 		} else if lists++; lists == 1 {
 			out = append(out, map[string]any{"page_id": id, "updated_at": at})
 		}
@@ -370,7 +374,7 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 	svc, requests := fullPass(t, st, onlyContent(srv))
 
 	// A whole pass: the page waits, and the rest of it goes on.
-	if err := svc.pass(context.Background()); err != nil {
+	if err := svc.pass(context.Background(), true); err != nil {
 		t.Fatalf("pass: %v", err)
 	}
 	if srv.updates != 0 || srv.content != base.Encode() {
@@ -405,7 +409,9 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 	hs2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		out := []map[string]any{}
 		if strings.Contains(r.URL.Query().Get("select"), "content") {
-			out = append(out, map[string]any{"content": json.RawMessage(theirs.Encode()), "revision": 2, "updated_at": at})
+			out = contentRows(r, func(string) map[string]any {
+				return map[string]any{"content": json.RawMessage(theirs.Encode()), "revision": 2, "updated_at": at}
+			})
 		} else {
 			out = append(out, map[string]any{"page_id": p.ID, "updated_at": at}, map[string]any{"page_id": other.ID, "updated_at": at})
 		}
@@ -413,7 +419,7 @@ func TestUnreadableContentIsNotSynced(t *testing.T) {
 	}))
 	defer hs2.Close()
 	svc, _ = fullPass(t, st, hs2.Config.Handler)
-	if err := svc.pass(context.Background()); err != nil {
+	if err := svc.pass(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 	if row, _ := st.ContentRow(p.ID); row.Content != broken {
@@ -476,7 +482,7 @@ func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 	svc, requests := fullPass(t, st, onlyContent(srv))
 	ctx := context.Background()
 
-	if err := svc.pass(ctx); err != nil {
+	if err := svc.pass(ctx, true); err != nil {
 		t.Fatalf("pass: %v", err)
 	}
 	if srv.updates != 0 || srv.content != unreadable {
@@ -504,19 +510,21 @@ func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 	theirs := &doc.Content{Children: []*doc.Node{para("c", "from another device")}, Blocks: map[string]int64{"c": 1000}, Deleted: map[string]int64{}}
 	hs2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		out := []map[string]any{}
-		switch {
-		case !strings.Contains(r.URL.Query().Get("select"), "content"):
+		if !strings.Contains(r.URL.Query().Get("select"), "content") {
 			out = append(out, map[string]any{"page_id": p.ID, "updated_at": at}, map[string]any{"page_id": other.ID, "updated_at": at})
-		case r.URL.Query().Get("page_id") == "eq."+p.ID:
-			out = append(out, map[string]any{"content": json.RawMessage(unreadable), "revision": 2, "updated_at": at})
-		default:
-			out = append(out, map[string]any{"content": json.RawMessage(theirs.Encode()), "revision": 1, "updated_at": at})
+		} else {
+			out = contentRows(r, func(id string) map[string]any {
+				if id == p.ID {
+					return map[string]any{"content": json.RawMessage(unreadable), "revision": 2, "updated_at": at}
+				}
+				return map[string]any{"content": json.RawMessage(theirs.Encode()), "revision": 1, "updated_at": at}
+			})
 		}
 		_ = json.NewEncoder(w).Encode(out)
 	}))
 	defer hs2.Close()
 	svc, _ = fullPass(t, st, hs2.Config.Handler)
-	if err := svc.pass(ctx); err != nil {
+	if err := svc.pass(ctx, true); err != nil {
 		t.Fatal(err)
 	}
 	if c := st.Content(p.ID); c == nil || textOf(c, "a") != "one, edited here" {

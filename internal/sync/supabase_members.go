@@ -75,8 +75,12 @@ func (s *Service) forgetMembers(pageID string) error {
 	if err != nil {
 		return err
 	}
+	tree, err := s.st.TreeOf(pages)
+	if err != nil {
+		return err
+	}
 	for _, p := range pages {
-		if s.st.MembersOrNil(p.ID) != nil && s.st.IsDescendant(p.ID, pageID) {
+		if tree.Members(p.ID) != nil && tree.IsDescendant(p.ID, pageID) {
 			if err := s.st.SetMembers(p.ID, nil); err != nil {
 				return err
 			}
@@ -187,6 +191,13 @@ func (s *Service) pullOwnMembers(ctx context.Context) error {
 	if err := s.dropOwnMembers(ctx, shared); err != nil {
 		return err
 	}
+	// Kept again every membersEvery, not each pass: each write is a commit
+	// to the disk, and tells the app that key_values changed.
+	if at, ok := s.st.Value(OwnMembersKey); ok {
+		if t, err := time.Parse(time.RFC3339Nano, at); err == nil && time.Since(t) < membersEvery {
+			return nil
+		}
+	}
 	return s.st.SetValue(OwnMembersKey, time.Now().UTC().Format(time.RFC3339Nano))
 }
 
@@ -223,17 +234,20 @@ func (s *Service) dropOwnMembers(ctx context.Context, shared map[string]map[stri
 	if err != nil {
 		return err
 	}
+	tree, err := s.st.TreeOf(pages)
+	if err != nil {
+		return err
+	}
 	uid, own := s.be.UserID(), s.st.Session().SpaceID
 	for _, p := range pages {
-		if p.SpaceID != own || !slices.ContainsFunc(s.st.MembersOrNil(p.ID), func(m store.Member) bool { return m.UserID != uid }) {
+		if p.SpaceID != own || !slices.ContainsFunc(tree.Members(p.ID), func(m store.Member) bool { return m.UserID != uid }) {
 			continue
 		}
-		under := false
-		for top := range shared {
-			if s.st.IsDescendant(p.ID, top) {
-				under = true
-				break
-			}
+		// A share of the page or of one it is inside, by its parents.
+		under, seen := false, map[string]bool{}
+		for id := p.ID; id != "" && !seen[id] && !under; {
+			seen[id], under = true, shared[id] != nil
+			id = tree.Parent(id)
 		}
 		if !under {
 			if err := s.LoadMembers(ctx, p.ID); err != nil {
@@ -253,8 +267,13 @@ func (s *Service) dropOwnMembers(ctx context.Context, shared map[string]map[stri
 // changed to view only must not stay editable below the top. Members that
 // do not load are dropped, leaving it to the pages above.
 func (s *Service) reloadMembersUnder(ctx context.Context, topID string, pages []store.Page) {
+	tree, err := s.st.TreeOf(pages)
+	if err != nil {
+		log.Printf("members under %s: %v", topID, err)
+		return
+	}
 	for _, p := range pages {
-		if p.ID == topID || s.st.MembersOrNil(p.ID) == nil || !s.st.IsDescendant(p.ID, topID) {
+		if p.ID == topID || tree.Members(p.ID) == nil || !tree.IsDescendant(p.ID, topID) {
 			continue
 		}
 		if err := s.LoadMembers(ctx, p.ID); err != nil {

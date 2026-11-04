@@ -27,6 +27,8 @@ func (s *Service) backOff(err error) {
 }
 
 // Start runs the loop: soon after changes, when asked, and every 30 seconds.
+// The first pass after says the device is in use, and looks for what is
+// looked for every so often, at once.
 func (s *Service) Start() {
 	s.mu.Lock()
 	if s.stop != nil {
@@ -35,12 +37,14 @@ func (s *Service) Start() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.loop, s.stop = ctx, cancel
+	s.beat, s.providersSwept = every{}, every{}
 	s.mu.Unlock()
 	guard.Go(func() {
 		tick := time.NewTicker(30 * time.Second)
 		defer tick.Stop()
 		s.Kick()
 		for {
+			pull := true
 			select {
 			case <-ctx.Done():
 				return
@@ -50,18 +54,20 @@ func (s *Service) Start() {
 					return
 				case <-time.After(1200 * time.Millisecond):
 				}
+				pull = s.wantPull.Swap(false)
 			case <-tick.C:
+				s.wantPull.Store(false)
 			}
-			s.loopPass(ctx)
+			s.loopPass(ctx, pull)
 		}
 	})
 }
 
-// loopPass is a pass of the loop's, which loop ends: one that panics is
-// logged, and the loop goes on to the next.
-func (s *Service) loopPass(loop context.Context) {
+// loopPass is a pass of the loop's, which loop ends, pulling with pull: one
+// that panics is logged, and the loop goes on to the next.
+func (s *Service) loopPass(loop context.Context, pull bool) {
 	defer guard.Recover()
-	_ = s.syncNow(loop, true)
+	_ = s.syncNow(loop, true, pull)
 }
 
 // Stop ends the loop Start started, and the pass running, the loop's or
@@ -108,8 +114,20 @@ func (s *Service) startPass() (ctx context.Context, done func()) {
 	}
 }
 
-// Kick asks for a pass soon.
+// Kick asks for a pass soon, which sends what changed here and brings what
+// changed elsewhere.
 func (s *Service) Kick() {
+	s.wantPull.Store(true)
+	s.signal()
+}
+
+// KickPush asks for a pass soon that sends what changed here, as after a
+// save: what changed elsewhere comes with the passes every 30 seconds, so
+// typing does not make the device ask the server for every table after
+// each pause. A Kick before the pass runs has it bring that too.
+func (s *Service) KickPush() { s.signal() }
+
+func (s *Service) signal() {
 	select {
 	case s.kick <- struct{}{}:
 	default:
@@ -135,9 +153,17 @@ func (s *Service) SetOpen(pageID string, open bool) {
 			return
 		}
 		// The time it has starts once the pass in progress is done, and
-		// Stop ends it, as it ends a pass.
+		// Stop ends it, as it ends a pass. A page closed meanwhile, as one
+		// passed over on the way to another, needs nothing: it holds up
+		// the passes for nothing.
 		s.running.Lock()
 		defer s.running.Unlock()
+		s.mu.Lock()
+		stillOpen := s.open[pageID]
+		s.mu.Unlock()
+		if !stillOpen {
+			return
+		}
 		ctx, cancel := context.WithTimeout(s.passContext(), openWait)
 		defer cancel()
 		// Who else has one of the user's pages is known before what they
@@ -178,12 +204,13 @@ func (s *Service) Hold(fn func()) {
 
 // SyncNow runs one pass, after the one in progress. A pass that panics
 // is logged and fails, so it is never taken for one still running.
-func (s *Service) SyncNow() error { return s.syncNow(context.Background(), false) }
+func (s *Service) SyncNow() error { return s.syncNow(context.Background(), false, true) }
 
-// syncNow is SyncNow; ofLoop says it is a pass of the loop whose context is
-// loop: one that waited for another, or for SetOpen, FlushPage or Hold, to
-// be done runs only if the loop still does, as Stop ended it.
-func (s *Service) syncNow(loop context.Context, ofLoop bool) (err error) {
+// syncNow is SyncNow, which brings what changed elsewhere only with pull;
+// ofLoop says it is a pass of the loop whose context is loop: one that
+// waited for another, or for SetOpen, FlushPage or Hold, to be done runs
+// only if the loop still does, as Stop ended it.
+func (s *Service) syncNow(loop context.Context, ofLoop, pull bool) (err error) {
 	if !s.CanSync() {
 		return nil
 	}
@@ -213,7 +240,7 @@ func (s *Service) syncNow(loop context.Context, ofLoop bool) (err error) {
 		log.Printf("sync: %v", err)
 	}
 	t := s.target()
-	err = t.pass(ctx)
+	err = t.pass(ctx, pull)
 	if t.needsNetwork() && remote.IsNetwork(err) {
 		err = nil // offline: try again later
 	}

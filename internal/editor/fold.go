@@ -27,8 +27,9 @@ func ends(n, h *doc.Node) bool { return n.Type == "heading" && headingLevel(n) <
 // toggle, and in the section of a folded heading, with the blocks under
 // them.
 func (e *Editor) hidden() map[string]bool {
-	var nodes []*doc.Node
-	var folds []rules.Fold
+	size := len(e.shaped.entries)
+	nodes := make([]*doc.Node, 0, size)
+	folds := make([]rules.Fold, 0, size)
 	var visit func(nodes []*doc.Node, depth int)
 	visit = func(ns []*doc.Node, depth int) {
 		for _, n := range ns {
@@ -41,8 +42,15 @@ func (e *Editor) hidden() map[string]bool {
 		}
 	}
 	visit(e.Content.Children, 0)
-	out := map[string]bool{}
-	for i, h := range rules.Hidden(folds) {
+	hidden := rules.Hidden(folds)
+	count := 0
+	for _, h := range hidden {
+		if h {
+			count++
+		}
+	}
+	out := make(map[string]bool, count)
+	for i, h := range hidden {
 		if h {
 			out[nodes[i].ID] = true
 		}
@@ -213,7 +221,17 @@ func (e *Editor) Headings() []*doc.Node {
 // false for one a folded heading hides.
 func (e *Editor) BlockTop(id string) (float32, bool) {
 	r, ok := e.box(id)
-	return r.Y, ok && !e.hid[id] && e.folder(id) == nil
+	return r.Y, ok && !e.foldedAway(id)
+}
+
+// foldedAway reports whether folds hide block id: as the page last built
+// worked it out, while nothing changed since, and from the page as it is
+// otherwise. The outline asks it of every heading at every frame.
+func (e *Editor) foldedAway(id string) bool {
+	if e.hid[id] {
+		return true
+	}
+	return (e.hidAt != e.gen || e.hid == nil) && e.folder(id) != nil
 }
 
 // BlockRect is a block's box in window coordinates, as last drawn, or
@@ -225,7 +243,7 @@ func (e *Editor) BlockRect(id string) (ui.Rect, bool) {
 		r = e.laid[id]
 		ok = r.H > 0
 	}
-	return r, ok && e.node(id) != nil && !e.hid[id] && e.folder(id) == nil
+	return r, ok && e.HasBlock(id) && !e.foldedAway(id)
 }
 
 // gutterWidth is the room left of a heading for its fold and link

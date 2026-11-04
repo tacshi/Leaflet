@@ -1246,10 +1246,19 @@ final class WebBlockView: WKWebView, WKNavigationDelegate {
         });
         """
 
+    /// noRTC takes WebRTC away from each frame of the page as it starts,
+    /// before any script of its own runs (mobile.NoRTCScript): those an
+    /// embed makes itself too, whose WebRTC would reach the network around
+    /// the embed's policy, which WebKit's webrtc directive does not block.
+    static let noRTC = MobileNoRTCScript()
+
     init(html: String, interactive: Bool) {
         let config = WKWebViewConfiguration()
         config.websiteDataStore = WebPage.store
         config.allowsInlineMediaPlayback = true
+        config.userContentController.addUserScript(
+            WKUserScript(
+                source: Self.noRTC, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         let relay = SizeRelay()
         config.userContentController.add(relay, name: "size")
         config.userContentController.addUserScript(
@@ -1300,18 +1309,34 @@ final class WebBlockView: WKWebView, WKNavigationDelegate {
     }
 
     /// SizeRelay passes the page's height on, holding its view weakly: the
-    /// web view's content controller keeps it.
+    /// web view's content controller keeps it. Only the page's own frame
+    /// says it, which the app made: an embed's frame, or one it makes, can
+    /// post to the app's handlers too, and each height lays the page out
+    /// again. The heights that come in one turn of the main run loop go on
+    /// as one, the last.
+    @MainActor
     private final class SizeRelay: NSObject, WKScriptMessageHandler {
         weak var view: WebBlockView?
+        /// height is the last height posted, waiting for the turn to end.
+        private var height: CGFloat?
 
         func userContentController(
             _ c: WKUserContentController, didReceive message: WKScriptMessage
         ) {
-            guard let h = message.body as? Double, h > 0 else { return }
-            MainActor.assumeIsolated {
-                guard let view else { return }
-                view.onHeight?(CGSize(width: view.bounds.width, height: CGFloat(h)))
-            }
+            guard message.frameInfo.isMainFrame, let h = message.body as? Double, h > 0,
+                h.isFinite
+            else { return }
+            let waiting = height != nil
+            height = CGFloat(h)
+            guard !waiting else { return }
+            DispatchQueue.main.async { [weak self] in self?.relay() }
+        }
+
+        private func relay() {
+            guard let h = height else { return }
+            height = nil
+            guard let view else { return }
+            view.onHeight?(CGSize(width: view.bounds.width, height: h))
         }
     }
 }

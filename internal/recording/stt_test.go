@@ -6,7 +6,11 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/coder/websocket"
 )
 
 // An endpoint gets the audio as it is read, in a form whose length is
@@ -39,5 +43,49 @@ func TestTranscribeEndpointStreamsTheAudio(t *testing.T) {
 	}
 	if len(segs) != 1 || segs[0].Text != "hello" || segs[0].EndMs != 1000 {
 		t.Fatalf("segments %+v", segs)
+	}
+}
+
+// Closing a stream returns at once, though its server never answers the
+// close, as over a slow network, and the stream's goroutines end with it.
+func TestSonioxCloseDoesNotWait(t *testing.T) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		c, err := websocket.Accept(w, req, nil)
+		if err != nil {
+			return
+		}
+		defer func() { _ = c.CloseNow() }()
+		<-release
+	}))
+	defer srv.Close()
+	defer close(release)
+	conn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newSoniox(conn)
+	s.Send([]byte{1, 2})
+	start := time.Now()
+	s.Close()
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("Close took %v", took)
+	}
+	for name, ended := range map[string]chan struct{}{"reading": s.done, "writing": s.written} {
+		select {
+		case <-ended:
+		case <-time.After(2 * time.Second):
+			t.Errorf("the stream's %s goes on after Close", name)
+		}
+	}
+	if err := s.Lost(); err != nil {
+		t.Errorf("a stream closed here was lost: %v", err)
+	}
+	// Finish after Close, as a recording that failed as it stopped may
+	// call both, returns at once too.
+	start = time.Now()
+	_, _ = s.Finish()
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("Finish after Close took %v", took)
 	}
 }

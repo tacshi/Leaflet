@@ -141,9 +141,12 @@ func (c *Core) ExportMarkdown(pageID string) (_ string, err error) {
 type exportedPDF struct {
 	// Name is the file's name: the title, safe in a path, and ".pdf".
 	Name string `json:"name"`
-	// HTML is the page as its public link shows it, laid out for paper,
-	// with its pictures and scripts in it.
-	HTML string `json:"html"`
+	// Path is the file that holds the page as its public link shows it,
+	// laid out for paper, with its pictures and scripts in it, for the
+	// app to load and remove once it is printed: a page of many pictures
+	// is many megabytes, which would go through the app's memory several
+	// times as JSON and strings.
+	Path string `json:"path"`
 	// Width and Height are the paper's, in inches.
 	Width  float64 `json:"width"`
 	Height float64 `json:"height"`
@@ -153,10 +156,11 @@ type exportedPDF struct {
 // that another device uploaded to download, as the desktop's waits.
 const pdfDownloadWait = 2 * time.Minute
 
-// ExportPDFPage returns a page as a web page to print as a PDF, as the
+// ExportPDFPage writes a page as a web page to print as a PDF, as the
 // desktop's Export › PDF prints it, on the paper of region, a code such as
-// "US": an exportedPDF in JSON. The page's edits are saved first.
-func (c *Core) ExportPDFPage(pageID, region string) (_ string, err error) {
+// "US", in a file of its own in the folder dir, and returns an exportedPDF
+// in JSON. The page's edits are saved first.
+func (c *Core) ExportPDFPage(pageID, region, dir string) (_ string, err error) {
 	defer catch(&err)
 	var o webpage.Options
 	var content *doc.Content
@@ -199,9 +203,34 @@ func (c *Core) ExportPDFPage(pageID, region string) (_ string, err error) {
 		})
 	}
 	// Off the queue: its pictures are read into it.
-	out := exportedPDF{Name: export.SafeName(o.Title) + ".pdf", HTML: webpage.HTML(content, o)}
+	out := exportedPDF{Name: export.SafeName(o.Title) + ".pdf"}
+	if out.Path, err = writePage(dir, webpage.HTML(content, o)); err != nil {
+		return "", err
+	}
 	out.Width, out.Height = webpage.Paper(region)
 	return encode(out)
+}
+
+// writePage writes html in a file of its own in the folder dir, and
+// returns the file's path.
+func writePage(dir, html string) (string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	f, err := os.CreateTemp(dir, "page-*.html")
+	if err != nil {
+		return "", err
+	}
+	// Written from the string itself, which a file takes without a copy.
+	_, err = f.WriteString(html)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(f.Name())
+		return "", err
+	}
+	return f.Name(), nil
 }
 
 // PlainCopy returns blocks as Copy as Plain Text puts them on the
@@ -256,7 +285,8 @@ func (c *Core) AddFile(pageID, path string) (_ string, err error) {
 			"url": "file://" + f.LocalPath, "name": f.Name, "file_id": f.ID, "size": f.SizeBytes, "mime": f.MimeType,
 		}}
 	}
-	c.core.Sync.Kick()
+	// The file goes up soon; it brings nothing from elsewhere.
+	c.core.Sync.KickPush()
 	return encode(n)
 }
 
@@ -291,12 +321,14 @@ func (c *Core) LocalFile(id string, token int64) (_ string, err error) {
 		return "", errors.New(locales.CardNotOnDevice())
 	}
 	// The network's part runs off the core's queue, and so does the
-	// writing of what came, as AddFile's copy does.
+	// writing of what came, as AddFile's copy does: to the disk as it
+	// comes, as a video of hundreds of megabytes is never all in memory.
 	ctx, done := c.cancellable(token, 5*time.Minute)
 	defer done()
-	data, err := c.core.Sync.Fetch(ctx, "files", f.StoragePath)
+	data, err := c.core.Sync.FetchReader(ctx, "files", f.StoragePath)
 	if err != nil {
 		return "", err
 	}
-	return c.core.Store.DownloadedFile(id, data)
+	defer func() { _ = data.Close() }()
+	return c.core.Store.DownloadedFileFrom(id, data)
 }

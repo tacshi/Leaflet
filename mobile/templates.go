@@ -309,7 +309,7 @@ func (c *Core) copyPage(id string, options func(store.Page) store.CopyOptions) (
 				c.ev.notice(locales.AppErrorLinkSubpage(lerr.Error()))
 			}
 		}
-		c.core.Sync.Kick()
+		c.core.Sync.KickPush()
 		return nil
 	})
 	if err != nil {

@@ -50,11 +50,17 @@ func VideoLink(link string) string {
 }
 
 // bilibiliParts are the parts of Bilibili videos asked of Bilibili this
-// run, by video and part.
+// run, by video and part, and when Bilibili last could not tell of one.
 var bilibiliParts = struct {
 	sync.Mutex
-	m map[string]doc.BilibiliPart
-}{m: map[string]doc.BilibiliPart{}}
+	m      map[string]doc.BilibiliPart
+	failed map[string]time.Time
+}{m: map[string]doc.BilibiliPart{}, failed: map[string]time.Time{}}
+
+// partsRetry is how long a part Bilibili could not tell of waits to be
+// asked again: a public link shows its videos each time it is opened.
+// Tests change it.
+var partsRetry = 5 * time.Minute
 
 // partsFetch reads a video's parts' list. Tests replace it.
 var partsFetch = Fetch
@@ -74,8 +80,9 @@ func KnownVideoPart(v doc.Video) doc.Video {
 // VideoPart is v with its part's cid, where it is a Bilibili video's, as
 // its players need it to play it in another site's page (doc.Video.CID),
 // and the part as Bilibili lists it, asked of Bilibili once a run. Any
-// other video, or one Bilibili can't tell of now, is as it is. It asks the
-// site, so it runs off the main thread.
+// other video, or one Bilibili can't tell of now, is as it is; that one is
+// asked again once partsRetry has passed. It asks the site, so it runs off
+// the main thread.
 func VideoPart(v doc.Video) (doc.Video, doc.BilibiliPart) {
 	if v.Provider != "bilibili" {
 		return v, doc.BilibiliPart{}
@@ -83,18 +90,24 @@ func VideoPart(v doc.Video) (doc.Video, doc.BilibiliPart) {
 	key := v.ID + "/" + strconv.Itoa(v.Part)
 	bilibiliParts.Lock()
 	p, ok := bilibiliParts.m[key]
+	at, failed := bilibiliParts.failed[key]
 	bilibiliParts.Unlock()
 	if !ok {
+		if failed && time.Since(at) < partsRetry {
+			return v, doc.BilibiliPart{}
+		}
 		data, err := partsFetch(v.InfoURL())
 		if err == nil {
 			p, err = v.ReadPart(data)
 		}
+		bilibiliParts.Lock()
+		defer bilibiliParts.Unlock()
 		if err != nil {
+			bilibiliParts.failed[key] = time.Now()
 			return v, doc.BilibiliPart{}
 		}
-		bilibiliParts.Lock()
+		delete(bilibiliParts.failed, key)
 		bilibiliParts.m[key] = p
-		bilibiliParts.Unlock()
 	}
 	if v.CID == 0 {
 		v.CID = p.CID

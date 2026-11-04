@@ -21,7 +21,13 @@ extension AppModel: PageHost {}
 final class PageModel {
     let id: String
     private let app: any PageHost
-    private(set) var content: DocContent?
+    /// content is the page as the editor last had it, or as it last came
+    /// from outside. The views go by hasContent and external instead,
+    /// which change only as it comes: it changes with every edit sent.
+    @ObservationIgnored private(set) var content: DocContent? {
+        didSet { if content != nil, !hasContent { hasContent = true } }
+    }
+    private(set) var hasContent = false
     private(set) var rev: Int64 = 0
     /// shown is the rev of the content the editor shows, which its edits
     /// are made over: rev, once the editor shows what came at it.
@@ -87,6 +93,17 @@ final class PageModel {
     /// waits on the core's queue that edits go through.
     @ObservationIgnored private var agentsReading: Task<Void, Never>?
     @ObservationIgnored private var agentsQueued: Task<Void, Never>?
+    /// outline is the page's headings as the outline lists them, worked out
+    /// off the main thread from the headings the content has, as they
+    /// change: an agent writing or typing in a long page changes the
+    /// content many times a second, and its headings seldom.
+    private(set) var outline: [OutlineRow] = []
+    /// outlined are the headings outline was made from; outlining is the
+    /// one being made, and outlineAgain says the content changed since it
+    /// began, for another to follow it.
+    @ObservationIgnored private var outlined: [DocNode] = []
+    @ObservationIgnored private var outlining: Task<Void, Never>?
+    @ObservationIgnored private var outlineAgain = false
 
     init(id: String, app: any PageHost) {
         self.id = id
@@ -111,6 +128,7 @@ final class PageModel {
             if content == nil || page.rev >= rev {
                 content = page.content
                 rev = page.rev
+                refreshOutline()
             }
             shown = rev
             editor = page.editor
@@ -152,6 +170,7 @@ final class PageModel {
     func edit(_ content: DocContent) {
         guard !readOnly, let client = app.client, let editor else { return }
         self.content = content
+        refreshOutline()
         let rev = shown
         let id = self.id
         sending += 1
@@ -186,6 +205,37 @@ final class PageModel {
         self.rev = rev
         byAgent = agent
         external += 1
+        refreshOutline()
+    }
+
+    /// refreshOutline works out the outline again from the content as it
+    /// now is, off the main thread, once the one being worked out is done:
+    /// only when its headings changed, which the core then nests
+    /// (OutlineRow.rows).
+    private func refreshOutline() {
+        guard outlining == nil else {
+            outlineAgain = true
+            return
+        }
+        guard let content else { return }
+        let before = outlined
+        outlining = Task { [weak self] in
+            let made = await Task.detached(priority: .userInitiated) {
+                () -> (headings: [DocNode], rows: [OutlineRow])? in
+                let headings = content.headings
+                return headings == before ? nil : (headings, OutlineRow.rows(headings))
+            }.value
+            guard let self else { return }
+            if let made {
+                outlined = made.headings
+                outline = made.rows
+            }
+            outlining = nil
+            if outlineAgain {
+                outlineAgain = false
+                refreshOutline()
+            }
+        }
     }
 
     /// flush waits for the core to have the edits given it.

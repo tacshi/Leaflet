@@ -179,9 +179,12 @@ func (a *App) tree(c *ui.Context) {
 	s := &a.treeState
 	if a.treeIn.follows(a.route.Kind + ":" + a.route.ID) {
 		a.treeRow = -1
-		for i := 0; i < s.Rows(); i++ {
-			if a.route.Kind == "page" && s.Item(i) == "page:"+a.route.ID {
-				a.treeRow = i
+		if a.route.Kind == "page" {
+			open := "page:" + a.route.ID
+			for i := 0; i < s.Rows(); i++ {
+				if s.Item(i) == open {
+					a.treeRow = i
+				}
 			}
 		}
 	}

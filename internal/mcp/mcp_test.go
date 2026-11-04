@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
 )
@@ -770,5 +771,65 @@ func TestTemplatesOutOfReach(t *testing.T) {
 	}
 	if kids, _ := st.Children(template.ID, ""); len(kids) != 0 {
 		t.Errorf("a page made inside the template: %v", kids)
+	}
+}
+
+// read_page makes whole, as agents read them, only the blocks of the part
+// it gives, their transcripts read for them alone: a long page read in
+// parts reads each once, not every part all. A link card reads as the
+// page has it, its title too.
+func TestReadPartReadsItsOwnBlocks(t *testing.T) {
+	var blocks []*doc.Node
+	for i := range 30 {
+		blocks = append(blocks, &doc.Node{ID: fmt.Sprint("r", i), Type: "recording", Data: map[string]any{"recording_id": fmt.Sprint("rec", i)}})
+	}
+	blocks = append(blocks, &doc.Node{ID: "k", Type: "link_preview", Data: map[string]any{"url": "https://go.dev/", "title": "Go"}})
+	c := doc.FromBlocks(blocks)
+	var asked []string
+	tc := agents.ToolContext{SiteInfo: true,
+		Subpages: func() []map[string]any { return nil }, Comments: func() []map[string]any { return nil },
+		Transcript: func(_, id string) string {
+			asked = append(asked, id)
+			return strings.Repeat("words ", 2000)
+		}}
+	p := store.Page{ID: "p", Title: "Talks"}
+	out := readPart(tc, p, c, 0, 0)
+	part := out["blocks"].([]map[string]any)
+	if len(part) == 0 || len(part) > 10 || len(asked) > len(part)+1 || out["next_offset"] != len(part) {
+		t.Fatalf("a part of %d blocks read %d transcripts, next %v", len(part), len(asked), out["next_offset"])
+	}
+	asked = nil
+	last := readPart(tc, p, c, len(blocks)-1, 0)
+	if len(asked) != 0 || last["comments"] != nil {
+		t.Errorf("the last part read %d transcripts, comments %v", len(asked), last["comments"])
+	}
+	if link := last["blocks"].([]map[string]any)[0]["link"].(map[string]any); link["title"] != "Go" {
+		t.Errorf("the link card reads %v", link)
+	}
+}
+
+// The server keeps as the client read them only the pages it read last,
+// so a client that reads page after page does not have it keep them all.
+func TestReadsKeptAreTheLatest(t *testing.T) {
+	st := newStore(t)
+	s := NewServer(st, "test")
+	var ids []string
+	for i := range keptReads + 4 {
+		p, err := st.CreatePage(store.NewPageOptions{Title: fmt.Sprint("Page ", i), Content: doc.FromBlocks(nil)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, p.ID)
+		if out := s.pages.call("read_page", map[string]any{"page_id": p.ID}); out["error"] != nil {
+			t.Fatal(out)
+		}
+	}
+	if len(s.pages.read) != keptReads || len(s.pages.order) != keptReads || s.pages.read[ids[0]] != nil || s.pages.read[ids[len(ids)-1]] == nil {
+		t.Errorf("kept %d reads, %d in order", len(s.pages.read), len(s.pages.order))
+	}
+	// Reading one again makes it the latest.
+	s.pages.call("read_page", map[string]any{"page_id": ids[4]})
+	if s.pages.order[len(s.pages.order)-1] != ids[4] || len(s.pages.order) != keptReads {
+		t.Errorf("order %v", s.pages.order)
 	}
 }

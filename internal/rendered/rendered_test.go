@@ -66,3 +66,25 @@ func TestRenderedPagesRunOnlyTheirScripts(t *testing.T) {
 		}
 	}
 }
+
+// The wrapper says whose wheel it passes on, for the app to scroll the
+// page by it only while the pointer is over that embed.
+func TestEmbedPagePassesTheWheelWithItsID(t *testing.T) {
+	page := EmbedPage("b1", "<p>x</p>", "#fff", false, true)
+	if !strings.Contains(page, `window.mygo.call("Embeds.Scroll", id, e.data.leafletWheel)`) {
+		t.Errorf("the wrapper passes the wheel without its embed: %s", page)
+	}
+}
+
+// NoRTC runs in the embed's own frame, and takes WebRTC from the frames
+// it reaches through their elements too.
+func TestNoRTCGuardsFramesReached(t *testing.T) {
+	if EmbedNoRTC != "<script>"+NoRTC+"</script>" || !strings.HasPrefix(EmbedFrame("<p>x</p>", "light", false), `<meta http-equiv="Content-Security-Policy" content="`+EmbedCSP+`">`+EmbedNoRTC) {
+		t.Error("the embed's frame does not start without WebRTC")
+	}
+	for _, want := range []string{"RTCPeerConnection", "contentWindow", "contentDocument", "HTMLIFrameElement", "configurable: false"} {
+		if !strings.Contains(NoRTC, want) {
+			t.Errorf("NoRTC lacks %s", want)
+		}
+	}
+}

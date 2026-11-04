@@ -279,7 +279,7 @@ async function runJob(
     // --- page and permissions -------------------------------------------
     const { data: page, error: pageError } = await uc
       .from("pages")
-      .select("id, space_id, parent_id, title, is_template")
+      .select("id, space_id, parent_id, title, is_template, public_link_until")
       .eq("id", job.page_id)
       .is("deleted_at", null)
       .maybeSingle();
@@ -391,8 +391,11 @@ async function runJob(
     // caller's other pages into it. A guest's comment is someone else's too,
     // though stored as the owner's (a deleted one still shows its name), and
     // it is on a page with a public link: what the agent reads into it, its
-    // visitors read.
-    let crossPage = job.request?.allow_cross_page === true &&
+    // visitors read. So is a public link no one commented through yet,
+    // which the app that serves it keeps on the page while it does
+    // (public_link_until).
+    const publicLink = typeof page.public_link_until === "string" && Date.parse(page.public_link_until) > Date.now();
+    let crossPage = job.request?.allow_cross_page === true && !publicLink &&
       !comments.some((c) => c.author_kind === "guest");
     if (crossPage) {
       const { data: members, error: membersError } = await uc.rpc("page_members", { p_page_id: page.id });
@@ -410,10 +413,14 @@ async function runJob(
     const webSignal = () => AbortSignal.timeout(Math.max(0, Math.min(deps.callTimeoutMs, deadline - Date.now())));
 
     // --- history --------------------------------------------------------
+    // Each turn's request and reply, whether it kept to its page and
+    // whether its URL guard was on: not its ops, which may be many.
     const history = job.conversation_id
-      ? await rows<{ request: Job["request"]; result: { reply?: string; kept_to_page?: boolean } | null }>(
+      ? await rows<{ instruction: string | null; reply: string | null; kept_to_page: unknown; guarded: unknown }>(
         uc.from("ai_jobs")
-          .select("request, result")
+          .select(
+            "instruction:request->>instruction, reply:result->>reply, kept_to_page:result->kept_to_page, guarded:result->guarded",
+          )
           .eq("conversation_id", job.conversation_id)
           .eq("status", "done")
           .neq("id", job.id)
@@ -422,11 +429,17 @@ async function runJob(
       )
       : [];
     // An earlier turn may hold what a run read on another page: this one
-    // has no web, and where it may read other pages itself, keeps to the
-    // URLs the person gave, as after reading one (keepToGivenUrls, below).
-    // A turn that read nothing beyond its page says so.
-    const pagesBefore = history.some((turn) => turn.result?.kept_to_page !== true);
+    // has no web, and keeps to the URLs the person gave, as after reading
+    // one (keepToGivenUrls, below). A turn that read nothing beyond its
+    // page says so. Where this run may no longer read other pages, as the
+    // page is shared now, the turns that read beyond it are left out: what
+    // they read would be written where others read it.
+    const pagesBefore = history.some((turn) => turn.kept_to_page !== true);
     const web = allowWeb && !pagesBefore;
+    // An earlier turn that read the web may hold what it read there: this
+    // run keeps to the URLs it may write after reading the web from its
+    // start, with none found yet (keepToFoundUrls, below).
+    const webBefore = history.some((turn) => turn.guarded === true);
 
     // --- tools ----------------------------------------------------------
     session = new PageEditSession(content, {
@@ -584,7 +597,8 @@ async function runJob(
     };
 
     // --- messages -------------------------------------------------------
-    if (pagesBefore && crossPage) session.keepToGivenUrls();
+    if (pagesBefore) session.keepToGivenUrls();
+    if (webBefore) session.keepToFoundUrls();
     const promptContext = {
       agentName,
       surface: job.surface,
@@ -598,8 +612,9 @@ async function runJob(
     };
     const messages: ChatMessage[] = [{ role: "system", content: systemPrompt(promptContext) }];
     for (const turn of history.reverse()) {
-      if (turn.request?.instruction) messages.push({ role: "user", content: turn.request.instruction });
-      if (turn.result?.reply) messages.push({ role: "assistant", content: turn.result.reply });
+      if (pagesBefore && !crossPage && turn.kept_to_page !== true) continue;
+      if (turn.instruction) messages.push({ role: "user", content: turn.instruction });
+      if (turn.reply) messages.push({ role: "assistant", content: turn.reply });
     }
 
     const views = agentViews(content, recordings);
@@ -737,7 +752,7 @@ async function runJob(
       .from("ai_jobs")
       .update({
         status: "done",
-        result: { reply, ops: session.ops, edits, kept_to_page: session.keptToPage },
+        result: { reply, ops: session.ops, edits, kept_to_page: session.keptToPage, guarded: session.guarded },
         error: null,
       })
       .eq("id", job.id);
@@ -758,7 +773,7 @@ async function runJob(
       if (replyError) console.error("comment reply:", replyError.message);
     }
 
-    emit({ type: "done", reply, edits, kept_to_page: session.keptToPage });
+    emit({ type: "done", reply, edits, kept_to_page: session.keptToPage, guarded: session.guarded });
   } catch (e) {
     let message = e instanceof Error ? e.message : String(e);
     console.error("agent job failed:", message);

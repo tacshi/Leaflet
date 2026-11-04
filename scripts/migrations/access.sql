@@ -49,7 +49,7 @@ begin
     values
       ('ai_jobs', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
       ('comments', 'authenticated', 'INSERT,SELECT,UPDATE'),
-      ('devices', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
+      ('devices', 'authenticated', 'INSERT,SELECT,UPDATE'),
       ('files', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
       ('folders', 'authenticated', 'DELETE,INSERT,SELECT,UPDATE'),
       ('model_providers', 'authenticated', 'DELETE'),
@@ -102,11 +102,12 @@ begin
   with expected (fn, who) as (
     select f, 'authenticated'
     from unnest(array[
-      'accept_page_invite', 'can_edit_page', 'can_view_image_path', 'can_view_page', 'can_write_file_path',
-      'claim_starter_pages',
-      'decline_page_invite', 'has_space_access', 'has_stt_secret', 'is_space_owner', 'owns_recording_path',
+      'accept_page_invite', 'can_edit_page', 'can_read_page', 'can_view_image_path', 'can_view_page',
+      'can_write_file_path', 'claim_starter_pages',
+      'decline_page_invite', 'has_space_access', 'has_stt_secret', 'is_space_owner', 'lease_public_link', 'owns_recording_path',
       'owns_space_path', 'page_history_since', 'page_invites', 'page_members', 'page_role',
-      'set_provider_secret', 'set_stt_secret', 'share_page', 'shares_page_with', 'tags_in_bounds', 'unshare_page'
+      'set_provider_secret', 'set_stt_secret', 'share_page', 'shares_page_with', 'sign_out_device', 'tags_in_bounds',
+      'unshare_page'
     ]) f
     union all
     select f, 'service_role'
@@ -377,6 +378,59 @@ begin
 end;
 $$;
 
+-- A tree goes 1,000 pages deep and no deeper: the shared page and 999
+-- under it. The share reaches the deepest; no page is made under it; and
+-- a page with a subpage goes under the 997th, but not the 998th, where
+-- its subpage would be the 1,001st.
+do $$
+declare
+  v_deepest uuid := 'e0000000-0000-0000-0000-0000000000e1';
+  v_997 uuid;
+  v_998 uuid;
+  v_moved constant uuid := 'e0000000-0000-0000-0000-0000000000c0';
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  for i in 1 .. 999 loop
+    insert into public.pages (space_id, parent_id, title)
+    select p.space_id, p.id, 'Down ' || i from public.pages p where p.id = v_deepest
+    returning id into v_deepest;
+    if i = 997 then
+      v_997 := v_deepest;
+    elsif i = 998 then
+      v_998 := v_deepest;
+    end if;
+  end loop;
+  begin
+    insert into public.pages (space_id, parent_id, title)
+    select p.space_id, p.id, 'Down 1000' from public.pages p where p.id = v_deepest;
+    raise exception 'a page was made 1,001 pages deep';
+  exception when check_violation then
+    if sqlerrm <> 'page_too_deep' then
+      raise;
+    end if;
+  end;
+
+  insert into public.pages (id, space_id, title)
+  select v_moved, id, 'Moved' from public.spaces where owner_id = auth.uid();
+  insert into public.pages (space_id, parent_id, title)
+  select p.space_id, p.id, 'Under moved' from public.pages p where p.id = v_moved;
+  begin
+    update public.pages set parent_id = v_998 where id = v_moved;
+    raise exception 'a move took a tree 1,001 pages deep';
+  exception when check_violation then
+    if sqlerrm <> 'page_too_deep' then
+      raise;
+    end if;
+  end;
+  update public.pages set parent_id = v_997 where id = v_moved;
+
+  perform pg_temp.act_as('a3000000-0000-0000-0000-000000000003');
+  if not exists (select 1 from public.pages where id = v_deepest) then
+    raise exception 'the share does not reach 1,000 pages down';
+  end if;
+end;
+$$;
+
 -- A new page is placed when it reaches the server, whatever created_at
 -- its client sends, and its content starts at revision 0, whatever
 -- revision it is sent with.
@@ -395,6 +449,49 @@ begin
   update public.page_content set plain_text = 'Saved' where page_id = v_page;
   if (select revision from public.page_content where page_id = v_page) <> 1 then
     raise exception 'new content kept the revision its writer sent';
+  end if;
+end;
+$$;
+
+-- An editor's new subpage of the page is read back as it is made, from
+-- its parent, as the app's upsert reads it; a stranger makes none.
+do $$
+declare
+  v_page uuid;
+begin
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  insert into public.pages (space_id, parent_id, title)
+  select space_id, id, 'Read back' from public.pages where id = 'e0000000-0000-0000-0000-0000000000e1'
+  returning id into v_page;
+  if v_page is null then
+    raise exception 'the editor''s new subpage was not read back';
+  end if;
+  perform pg_temp.act_as('a5000000-0000-0000-0000-000000000005');
+  perform pg_temp.refused(format(
+    'insert into public.pages (space_id, parent_id, title) values (%L, %L, ''Mine'') returning id',
+    (select p.space_id from public.pages p where p.id = v_page), v_page));
+end;
+$$;
+
+-- A page moved under the share brings its content to the people it now
+-- reaches (updated_at moves on), but leaves its revision, which moves on
+-- only with the content: a device with an edit waiting saves it over the
+-- revision it read.
+do $$
+declare
+  v_page constant uuid := 'e0000000-0000-0000-0000-0000000000f2';
+  v_before timestamptz;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  insert into public.pages (id, space_id, title)
+  select v_page, id, 'Private' from public.spaces where owner_id = auth.uid();
+  insert into public.page_content (page_id) values (v_page);
+  update public.page_content set plain_text = 'Draft' where page_id = v_page;
+  v_before := clock_timestamp();
+  update public.pages set parent_id = 'e0000000-0000-0000-0000-0000000000e1' where id = v_page;
+  if (select revision from public.page_content where page_id = v_page) <> 1
+     or (select updated_at from public.page_content where page_id = v_page) <= v_before then
+    raise exception 'a move under the share moved the content''s revision, or not its updated_at';
   end if;
 end;
 $$;
@@ -557,6 +654,104 @@ begin
 end;
 $$;
 
+-- What a row was made with stays: a page's, comment's and recording's id,
+-- and the page a page's content is of.
+do $$
+begin
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  perform pg_temp.refused(
+    'update public.recordings set id = ''e0000000-0000-0000-0000-0000000000a7'' where id = ''e0000000-0000-0000-0000-0000000000a9''',
+    'recording_id_immutable');
+  perform pg_temp.refused(
+    'update public.comments set id = gen_random_uuid() where page_id = ''e0000000-0000-0000-0000-0000000000e1'' and author_id = auth.uid()',
+    'comment_immutable');
+  perform pg_temp.refused(
+    'update public.page_content set page_id = ''e0000000-0000-0000-0000-0000000000a2'' where page_id = ''e0000000-0000-0000-0000-0000000000e1''',
+    'content_page_immutable');
+  begin
+    update public.pages set id = gen_random_uuid() where id = 'e0000000-0000-0000-0000-0000000000a2';
+    raise exception 'a page took another id';
+  exception when check_violation then
+    if sqlerrm <> 'page_id_immutable' then
+      raise;
+    end if;
+  end;
+end;
+$$;
+
+-- Two subpages of the shared page the owner deleted: one before those it
+-- is shared with had it (its deleted_at before their view of it began),
+-- one after. Everyone sees both pages, which brings the deletions. What is
+-- on the first (content, comments, a recording and its audio, a file and
+-- its object, an image) only the owner reads; what is on the second,
+-- everyone who had it. Only someone who may read the first restores it.
+do $$
+declare
+  v_owner constant uuid := 'a1000000-0000-0000-0000-000000000001';
+  v_gone constant uuid := 'e0000000-0000-0000-0000-0000000000d7';
+  v_late constant uuid := 'e0000000-0000-0000-0000-0000000000d8';
+  v_rec constant uuid := 'e0000000-0000-0000-0000-0000000000d9';
+  v_file constant uuid := 'e0000000-0000-0000-0000-0000000000da';
+  v_space uuid;
+  v_objects text[];
+  v_who uuid;
+  v_on_gone bigint;
+  v_on_late bigint;
+begin
+  perform pg_temp.act_as(v_owner);
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, parent_id, title) values
+    (v_gone, v_space, 'e0000000-0000-0000-0000-0000000000e1', 'Gone before'),
+    (v_late, v_space, 'e0000000-0000-0000-0000-0000000000e1', 'Gone after');
+  insert into public.page_content (page_id) values (v_gone), (v_late);
+  insert into public.comments (page_id, block_id, body) values (v_gone, 'b1', 'Before'), (v_late, 'b1', 'After');
+  v_objects := array[
+    v_owner || '/' || v_rec || '.wav',
+    v_space || '/' || v_file || '/a.txt',
+    v_space || '/' || v_gone || '/e0000000-0000-0000-0000-0000000000db.png'
+  ];
+  insert into public.recordings (id, page_id, audio_path) values (v_rec, v_gone, v_objects[1]);
+  insert into public.files (id, space_id, page_id, name, storage_path)
+  values (v_file, v_space, v_gone, 'a.txt', v_objects[2]);
+  insert into storage.objects (bucket_id, name, owner) values
+    ('recordings', v_objects[1], auth.uid()), ('files', v_objects[2], auth.uid()), ('images', v_objects[3], auth.uid());
+  update public.pages set deleted_at = now() - interval '1 day' where id = v_gone;
+  update public.pages set deleted_at = now() + interval '1 hour' where id = v_late;
+
+  foreach v_who in array array[v_owner, 'a2000000-0000-0000-0000-000000000002', 'a3000000-0000-0000-0000-000000000003']::uuid[] loop
+    perform pg_temp.act_as(v_who);
+    if pg_temp.seen(format('select 1 from public.pages where id in (%L, %L)', v_gone, v_late)) <> 2 then
+      raise exception '% does not see the deleted pages', v_who;
+    end if;
+    v_on_gone := pg_temp.seen(format('select 1 from public.page_content where page_id = %L', v_gone))
+      + pg_temp.seen(format('select 1 from public.comments where page_id = %L', v_gone))
+      + pg_temp.seen(format('select 1 from public.recordings where id = %L', v_rec))
+      + pg_temp.seen(format('select 1 from public.files where id = %L', v_file))
+      + pg_temp.seen(format('select 1 from storage.objects where name = any (%L::text[])', v_objects));
+    if v_on_gone <> (case when v_who = v_owner then 7 else 0 end) then
+      raise exception '% reads % of what was on the page deleted before they had it', v_who, v_on_gone;
+    end if;
+    v_on_late := pg_temp.seen(format('select 1 from public.page_content where page_id = %L', v_late))
+      + pg_temp.seen(format('select 1 from public.comments where page_id = %L', v_late));
+    if v_on_late <> 2 then
+      raise exception '% reads % of what is on the page deleted after they had it', v_who, v_on_late;
+    end if;
+  end loop;
+
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  perform pg_temp.refused(format('update public.pages set deleted_at = null where id = %L', v_gone), 'forbidden_restore');
+  update public.pages set deleted_at = null where id = v_late;
+  if not found then
+    raise exception 'the editor could not restore a page they had';
+  end if;
+  perform pg_temp.act_as(v_owner);
+  update public.pages set deleted_at = null where id = v_gone;
+  if not found then
+    raise exception 'the owner could not restore their page';
+  end if;
+end;
+$$;
+
 -- Keys in Vault: a provider's key saved again changes it there, and
 -- cleared, or its provider deleted, it goes from there; a speech-to-text
 -- key the same. postgres does it, who owns the functions that do.
@@ -626,6 +821,87 @@ begin
   end if;
 end;
 $$;
+
+-- A provider's key stays with the address it was saved for, whoever
+-- writes the row (the providers function writes it as the service role):
+-- a path changed at the same origin keeps it; another origin, another
+-- preset, or turning local, and it goes, from Vault too; a key saved after
+-- such a move, as the function saves one, stays.
+insert into public.model_providers (id, user_id, preset, base_url)
+values ('e0000000-0000-0000-0000-0000000000ef', 'a1000000-0000-0000-0000-000000000001', 'openai', 'https://api.openai.com/v1');
+create function pg_temp.moved_key(p_change text, p_key text) returns text
+language plpgsql as $$
+declare
+  v_secret uuid;
+  v_key text;
+begin
+  set local role authenticated;
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  perform public.set_provider_secret('e0000000-0000-0000-0000-0000000000ef', p_key);
+  reset role;
+  select encrypted_secret into v_secret from public.model_providers where id = 'e0000000-0000-0000-0000-0000000000ef';
+  set local role service_role;
+  execute format('update public.model_providers set %s where id = ''e0000000-0000-0000-0000-0000000000ef''', p_change);
+  reset role;
+  select s.decrypted_secret into v_key from public.model_providers mp
+  join vault.decrypted_secrets s on s.id = mp.encrypted_secret
+  where mp.id = 'e0000000-0000-0000-0000-0000000000ef';
+  if v_key is null and exists (select 1 from vault.secrets where id = v_secret) then
+    raise exception 'a key dropped by "%" is still in Vault', p_change;
+  end if;
+  return v_key;
+end;
+$$;
+do $$
+begin
+  if pg_temp.moved_key('base_url = ''https://API.openai.com:443/v2''', 'key-a') is distinct from 'key-a' then
+    raise exception 'a new path at the same origin lost the key';
+  end if;
+  if pg_temp.moved_key('base_url = ''https://elsewhere.example/v1''', 'key-b') is not null then
+    raise exception 'the key went to another origin';
+  end if;
+  -- A URL parser reads its host as evil.example: a backslash is a slash.
+  if pg_temp.moved_key('base_url = ''https://evil.example\@api.openai.com/v1''', 'key-g') is not null then
+    raise exception 'the key went to a host behind a backslash';
+  end if;
+  if pg_temp.moved_key('base_url = ''https://api.openai.com/v1''', 'key-h') is not null then
+    raise exception 'the key went back from a URL read its own way';
+  end if;
+  if pg_temp.moved_key('preset = ''custom''', 'key-c') is not null then
+    raise exception 'the key went to another preset';
+  end if;
+  if pg_temp.moved_key('is_local = true, preset = ''ollama''', 'key-d') is not null then
+    raise exception 'the key went with a provider turned local';
+  end if;
+  if pg_temp.moved_key('is_local = false, preset = ''openai'', base_url = ''https://api.openai.com/v1''', 'key-e') is not null then
+    raise exception 'the key went with a provider turned cloud again';
+  end if;
+  -- The origins compared, as a URL parser reads them; one it reads its
+  -- own way, or with no host, is the whole URL.
+  if (select string_agg(coalesce(public.base_url_origin(u), 'null'), ' ' order by n)
+      from unnest(array[
+        'https://API.openai.com:443/v2', 'api.openai.com/v1', 'https://user:pw@api.openai.com/v1',
+        E'https://api.openai.com\t.evil.example/v1', 'https:///a.example/v1', 'http://example.com:80/v1',
+        'https://evil.example\@api.openai.com/v1', E'https://\u0430pi.openai.com/v1', '', 'https:///'
+      ]) with ordinality v (u, n))
+     is distinct from
+     'https://api.openai.com https://api.openai.com https://api.openai.com https://api.openai.com.evil.example '
+     || 'https://a.example http://example.com https://evil.example\@api.openai.com/v1 '
+     || E'https://\u0430pi.openai.com/v1 https:// https:///' then
+    raise exception 'base URLs'' origins are not as a URL parser reads them';
+  end if;
+  set local role authenticated;
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  perform public.set_provider_secret('e0000000-0000-0000-0000-0000000000ef', 'key-f');
+  reset role;
+  if (select s.decrypted_secret from public.model_providers mp
+      join vault.decrypted_secrets s on s.id = mp.encrypted_secret
+      where mp.id = 'e0000000-0000-0000-0000-0000000000ef') is distinct from 'key-f' then
+    raise exception 'a key saved after a move did not stay';
+  end if;
+end;
+$$;
+delete from public.model_providers where id = 'e0000000-0000-0000-0000-0000000000ef';
 set local role authenticated;
 
 -- Unshared, the editor sees the page no more, nor its content.
@@ -672,9 +948,243 @@ begin
 end;
 $$;
 
+-- Comments keep to their bounds: none says more than 100,000 characters,
+-- or quotes more, nor names a block of more than 256; and on a page of
+-- someone else's, one person writes at most 2,000 comments, of 10 MB in
+-- all, mentions with the text. The page's owner is not counted.
+do $$
+declare
+  v_page constant uuid := 'e0000000-0000-0000-0000-0000000000e1';
+  v_viewer constant uuid := 'a3000000-0000-0000-0000-000000000003';
+begin
+  perform pg_temp.act_as(v_viewer);
+  begin
+    insert into public.comments (page_id, block_id, body) values (v_page, 'b1', repeat('x', 100001));
+    raise exception 'a comment of 100,001 characters went in';
+  exception when check_violation then
+    if sqlerrm not like '%comments_body_length%' then
+      raise;
+    end if;
+  end;
+  begin
+    insert into public.comments (page_id, block_id, body, quote) values (v_page, 'b1', 'Hi', repeat('x', 100001));
+    raise exception 'a quote of 100,001 characters went in';
+  exception when check_violation then
+    if sqlerrm not like '%comments_quote_length%' then
+      raise;
+    end if;
+  end;
+  begin
+    insert into public.comments (page_id, block_id, body, mentions) values (v_page, 'b1', 'Hi', '{}');
+    raise exception 'mentions that are no list went in';
+  exception when check_violation then
+    if sqlerrm not like '%comments_mentions_size%' then
+      raise;
+    end if;
+  end;
+  begin
+    insert into public.comments (page_id, block_id, body) values (v_page, repeat('b', 257), 'Hi');
+    raise exception 'a block ID of 257 characters went in';
+  exception when check_violation then
+    if sqlerrm not like '%comments_block_id_length%' then
+      raise;
+    end if;
+  end;
+  insert into public.comments (page_id, block_id, body) values (v_page, 'b1', repeat('x', 100000));
+
+  -- 10 MB of mentions, which count as the text does: one more is refused.
+  reset role;
+  perform set_config('request.jwt.claim.sub', '', true);
+  insert into public.comments (page_id, block_id, body, mentions, author_id)
+  select v_page, 'b1', 'm', jsonb_build_array(repeat('m', 64990)), v_viewer from generate_series(1, 162);
+  set local role authenticated;
+  perform pg_temp.act_as(v_viewer);
+  begin
+    insert into public.comments (page_id, block_id, body) values (v_page, 'b1', 'One more');
+    raise exception 'a comment went past 10 MB of one person''s mentions on a page';
+  exception when check_violation then
+    if sqlerrm <> 'comments_too_long' then
+      raise;
+    end if;
+  end;
+  reset role;
+  perform set_config('request.jwt.claim.sub', '', true);
+  delete from public.comments where page_id = v_page and author_id = v_viewer and body = 'm';
+  set local role authenticated;
+  perform pg_temp.act_as(v_viewer);
+
+  -- 10 MB of the viewer's comments on the page, put in with no caller,
+  -- as the service role would: one more is refused, and so is a comment
+  -- made longer.
+  reset role;
+  perform set_config('request.jwt.claim.sub', '', true);
+  insert into public.comments (page_id, block_id, body, author_id)
+  select v_page, 'b1', repeat('y', 100000), v_viewer from generate_series(1, 104);
+  set local role authenticated;
+  perform pg_temp.act_as(v_viewer);
+  begin
+    insert into public.comments (page_id, block_id, body) values (v_page, 'b1', 'One more');
+    raise exception 'a comment went past 10 MB of one person''s on a page';
+  exception when check_violation then
+    if sqlerrm <> 'comments_too_long' then
+      raise;
+    end if;
+  end;
+  begin
+    update public.comments set body = 'Hi, and more' where page_id = v_page and author_id = auth.uid() and body = 'Hi';
+    raise exception 'a comment grew past 10 MB of one person''s on a page';
+  exception when check_violation then
+    if sqlerrm <> 'comments_too_long' then
+      raise;
+    end if;
+  end;
+
+  -- 2,000 of them: one more is refused. The owner's own are not counted.
+  reset role;
+  perform set_config('request.jwt.claim.sub', '', true);
+  delete from public.comments where page_id = v_page and author_id = v_viewer and body like 'yyy%';
+  insert into public.comments (page_id, block_id, body, author_id)
+  select v_page, 'b1', 'y', v_viewer
+  from generate_series(1, 2000 - (select count(*) from public.comments where page_id = v_page and author_id = v_viewer));
+  insert into public.comments (page_id, block_id, body, author_id)
+  select v_page, 'b1', 'y', 'a1000000-0000-0000-0000-000000000001' from generate_series(1, 2000);
+  set local role authenticated;
+  perform pg_temp.act_as(v_viewer);
+  begin
+    insert into public.comments (page_id, block_id, body) values (v_page, 'b1', 'One more');
+    raise exception 'a comment went past 2,000 of one person''s on a page';
+  exception when check_violation then
+    if sqlerrm <> 'too_many_comments' then
+      raise;
+    end if;
+  end;
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  insert into public.comments (page_id, block_id, body) values (v_page, 'b1', 'The owner''s 2,001st');
+  reset role;
+  delete from public.comments where page_id = v_page and body in ('y', 'The owner''s 2,001st');
+  set local role authenticated;
+end;
+$$;
+
+-- Devices. Each write of a device's row names the session it was made
+-- with, whatever was sent, and no client sets or clears revoked_at, or
+-- deletes a row. Signing one out revokes it and ends its session, with
+-- its refresh tokens, and leaves the others; the row keeps naming that
+-- session. Its own upsert from that session, as its heartbeat sends it,
+-- still goes, and finds it revoked; one from a new session, as after its
+-- owner signs in on it again, finds the revocation stale, and clears it.
+-- A row revoked with no session named stays revoked. Another person's
+-- device is not theirs to sign out.
+reset role;
+insert into auth.sessions (id, user_id) values
+  ('5e550000-0000-0000-0000-000000000001', 'a1000000-0000-0000-0000-000000000001'),
+  ('5e550000-0000-0000-0000-000000000002', 'a1000000-0000-0000-0000-000000000001'),
+  ('5e550000-0000-0000-0000-000000000003', 'a1000000-0000-0000-0000-000000000001');
+insert into public.devices (id, user_id, name, revoked_at)
+values ('de000000-0000-0000-0000-000000000004', 'a1000000-0000-0000-0000-000000000001', 'Old', now());
+insert into auth.refresh_tokens (token, user_id, session_id)
+values ('refresh-2', 'a1000000-0000-0000-0000-000000000001', '5e550000-0000-0000-0000-000000000002');
+create function pg_temp.act_in(p_user uuid, p_session uuid) returns void
+language sql as $$
+  select pg_temp.act_as(p_user);
+  select set_config('request.jwt.claims', json_build_object('sub', p_user, 'session_id', p_session)::text, true);
+$$;
+-- A device's heartbeat, as the app upserts it.
+create function pg_temp.beat(p_device uuid) returns timestamptz
+language sql as $$
+  insert into public.devices (id, user_id, name, platform, last_active_at)
+  values (p_device, auth.uid(), 'Device', 'darwin', now())
+  on conflict (id) do update set
+    id = excluded.id, user_id = excluded.user_id, name = excluded.name,
+    platform = excluded.platform, last_active_at = excluded.last_active_at
+  returning revoked_at;
+$$;
+set local role authenticated;
+do $$
+declare
+  v_mac constant uuid := 'de000000-0000-0000-0000-000000000001';
+  v_ipad constant uuid := 'de000000-0000-0000-0000-000000000002';
+begin
+  perform pg_temp.act_in('a1000000-0000-0000-0000-000000000001', '5e550000-0000-0000-0000-000000000001');
+  insert into public.devices (id, user_id, name, session_id)
+  values (v_mac, auth.uid(), 'Mac', '5e550000-0000-0000-0000-000000000002');
+  perform pg_temp.act_in('a1000000-0000-0000-0000-000000000001', '5e550000-0000-0000-0000-000000000002');
+  perform pg_temp.beat(v_ipad);
+  if (select session_id from public.devices where id = v_mac) is distinct from '5e550000-0000-0000-0000-000000000001'
+     or (select session_id from public.devices where id = v_ipad) is distinct from '5e550000-0000-0000-0000-000000000002' then
+    raise exception 'a device''s row does not name the session it was written with';
+  end if;
+  perform pg_temp.refused(
+    'insert into public.devices (id, user_id, revoked_at) values (''de000000-0000-0000-0000-000000000003'', auth.uid(), now())',
+    'forbidden_revoke');
+  perform pg_temp.refused(format('update public.devices set revoked_at = now() where id = %L', v_mac), 'forbidden_revoke');
+
+  perform pg_temp.act_in('a5000000-0000-0000-0000-000000000005', null);
+  begin
+    perform public.sign_out_device(v_ipad);
+    raise exception 'someone signed out another person''s device';
+  exception when no_data_found then
+    if sqlerrm <> 'device_not_found' then
+      raise;
+    end if;
+  end;
+
+  perform pg_temp.act_in('a1000000-0000-0000-0000-000000000001', '5e550000-0000-0000-0000-000000000001');
+  perform public.sign_out_device(v_ipad);
+  if (select session_id from public.devices where id = v_ipad) is distinct from '5e550000-0000-0000-0000-000000000002' then
+    raise exception 'a signed-out device''s row no longer names the session that was ended';
+  end if;
+
+  perform pg_temp.act_in('a1000000-0000-0000-0000-000000000001', '5e550000-0000-0000-0000-000000000002');
+  perform pg_temp.refused(format('update public.devices set revoked_at = null where id = %L', v_ipad), 'forbidden_revoke');
+  perform pg_temp.refused(format('delete from public.devices where id = %L', v_ipad));
+  if pg_temp.beat(v_ipad) is null then
+    raise exception 'a signed-out device''s heartbeat found it signed in';
+  end if;
+  perform pg_temp.act_in('a1000000-0000-0000-0000-000000000001', '5e550000-0000-0000-0000-000000000001');
+  if pg_temp.beat(v_mac) is not null then
+    raise exception 'signing one device out signed out another';
+  end if;
+  if pg_temp.beat('de000000-0000-0000-0000-000000000004') is null then
+    raise exception 'a device revoked with no session named came back signed in';
+  end if;
+  perform pg_temp.act_in('a1000000-0000-0000-0000-000000000001', '5e550000-0000-0000-0000-000000000003');
+  if pg_temp.beat('de000000-0000-0000-0000-000000000004') is null then
+    raise exception 'a device revoked with no session named came back signed in from a second session';
+  end if;
+
+  -- Signed in again on the iPad: a new session.
+  perform pg_temp.act_in('a1000000-0000-0000-0000-000000000001', '5e550000-0000-0000-0000-000000000003');
+  perform pg_temp.refused(format('update public.devices set revoked_at = null where id = %L', v_ipad), 'forbidden_revoke');
+  if pg_temp.beat(v_ipad) is not null then
+    raise exception 'a new session''s heartbeat found its device signed out by an old one';
+  end if;
+  if (select session_id from public.devices where id = v_ipad) is distinct from '5e550000-0000-0000-0000-000000000003' then
+    raise exception 'a device''s row does not name the new session it was written with';
+  end if;
+  perform pg_temp.refused(format('update public.devices set revoked_at = now() where id = %L', v_ipad), 'forbidden_revoke');
+  perform pg_temp.act_in('a1000000-0000-0000-0000-000000000001', '5e550000-0000-0000-0000-000000000001');
+  perform public.sign_out_device(v_ipad);
+  perform set_config('request.jwt.claims', '', true);
+end;
+$$;
+reset role;
+do $$
+begin
+  if exists (select 1 from auth.sessions where id in ('5e550000-0000-0000-0000-000000000002', '5e550000-0000-0000-0000-000000000003'))
+     or exists (select 1 from auth.refresh_tokens where token = 'refresh-2') then
+    raise exception 'the signed-out device''s session, or its refresh token, is still there';
+  end if;
+  if not exists (select 1 from auth.sessions where id = '5e550000-0000-0000-0000-000000000001') then
+    raise exception 'signing a device out ended another''s session';
+  end if;
+end;
+$$;
+
 -- A walk of the tree ends on a cycle, should one ever get past
--- pages_guard: the page moved under Ideas made its parent. One that went
--- round for good would time out.
+-- pages_guard: the page moved under Ideas made its parent. It stops 1,000
+-- pages up, as deep as a tree may go; one that went round for good would
+-- time out.
 reset role;
 set local statement_timeout = '10s';
 alter table public.pages disable trigger pages_guard;

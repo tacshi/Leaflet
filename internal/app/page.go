@@ -93,6 +93,7 @@ func (a *App) pageView(c *ui.Context) {
 			a.leaveFullDiagram()
 		}
 		a.scrollToBlock(c)
+		a.scrollByEmbeds(ps)
 		scroll := ui.Scroll(c.Key("page-scroll:" + ps.id)).TrackScroll(&ps.scroll).Fill().Bind(&ps.view)
 		scroll.Children(func() {
 			ui.Column(c).FillWidth().AlignItems(ui.Center).Padding(40, pagePadX, 160).Children(func() {

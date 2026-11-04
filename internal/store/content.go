@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -21,6 +22,9 @@ type ContentRow struct {
 	BaseContent     string
 	RemoteUpdatedAt time.Time
 	RemoteRevision  int64
+	// WriteID tells this write of the content apart from every other
+	// (WriteID).
+	WriteID int64
 }
 
 // ContentRow returns a page's stored content.
@@ -30,40 +34,81 @@ func contentRow(q querier, pageID string) (ContentRow, error) {
 	var r ContentRow
 	var updated int64
 	var base sql.NullString
-	var remote sql.NullInt64
-	err := q.QueryRow(`SELECT page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision FROM page_contents WHERE page_id = ?`, pageID).
-		Scan(&r.PageID, &r.Content, &r.PlainText, &updated, &base, &remote, &r.RemoteRevision)
-	r.UpdatedAt, r.BaseContent, r.RemoteUpdatedAt = time.UnixMilli(updated), base.String, fromMs(remote)
+	var remote, written sql.NullInt64
+	err := q.QueryRow(`SELECT c.page_id, c.content, c.plain_text, c.updated_at, c.base_content, c.remote_updated_at, c.remote_revision, w.write_id
+		FROM page_contents c LEFT JOIN text_writes w ON w.kind = 'page' AND w.id = c.page_id WHERE c.page_id = ?`, pageID).
+		Scan(&r.PageID, &r.Content, &r.PlainText, &updated, &base, &remote, &r.RemoteRevision, &written)
+	r.UpdatedAt, r.BaseContent, r.RemoteUpdatedAt, r.WriteID = time.UnixMilli(updated), base.String, fromMs(remote), written.Int64
 	return r, err
+}
+
+// StoredContent returns a page's content as stored, and its write
+// (WriteID), without the rest of its row, as a page open in the app reads
+// it after each save, and its base, as large, is of no use to it.
+func (s *Store) StoredContent(pageID string) (content string, writeID int64, err error) {
+	var written sql.NullInt64
+	err = s.db.QueryRow(`SELECT c.content, w.write_id FROM page_contents c
+		LEFT JOIN text_writes w ON w.kind = 'page' AND w.id = c.page_id WHERE c.page_id = ?`, pageID).Scan(&content, &written)
+	return content, written.Int64, err
+}
+
+// RemoteAt is the time of the server's version of a page's content this
+// device last merged, read from its index, not its row: zero before the
+// first, and for a page whose content this device does not keep.
+func (s *Store) RemoteAt(pageID string) (time.Time, error) {
+	var at sql.NullInt64
+	err := s.db.QueryRow(`SELECT remote_updated_at FROM page_contents INDEXED BY page_contents_remote WHERE page_id = ?`, pageID).Scan(&at)
+	if errors.Is(err, sql.ErrNoRows) {
+		return time.Time{}, nil
+	}
+	return fromMs(at), err
+}
+
+// WriteID tells the write of a page's content stored now apart from every
+// other, its content unread: every write of it, this process's or
+// another's, draws a new one (textTriggers). It is sql.ErrNoRows for a
+// page whose content this device does not keep.
+func (s *Store) WriteID(pageID string) (int64, error) { return writeID(s.db, pageID) }
+
+func writeID(q querier, pageID string) (int64, error) {
+	var id int64
+	err := q.QueryRow(`SELECT write_id FROM text_writes WHERE kind = 'page' AND id = ?`, pageID).Scan(&id)
+	return id, err
+}
+
+// savedWrite is the write a save stored, or 0, which tells nothing, where
+// text_writes has no row of the page, as one removed by hand: the save
+// stands all the same.
+func savedWrite(q querier, pageID string) (int64, error) {
+	id, err := writeID(q, pageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	return id, err
 }
 
 // Content returns a page's content on this device, or nil when it is not
 // kept here or cannot be read, as content of a newer app: read as an empty
 // page, it would be copied or saved as one.
 func (s *Store) Content(pageID string) *doc.Content {
-	r, err := s.ContentRow(pageID)
+	stored, _, err := s.StoredContent(pageID)
 	if err != nil {
 		return nil
 	}
-	c, err := doc.Decode(r.Content)
+	c, err := doc.Decode(stored)
 	if err != nil {
 		return nil
 	}
 	return c
 }
 
-func writeContent(q querier, pageID string, c *doc.Content, at time.Time, keep *ContentRow) error {
-	var base any
-	var remote any
-	var revision int64
-	if keep != nil {
-		base, remote, revision = ns(keep.BaseContent), nt(keep.RemoteUpdatedAt), keep.RemoteRevision
-	}
+// writeContent stores a new page's content, as never synced.
+func writeContent(q querier, pageID string, c *doc.Content, at time.Time) error {
 	_, err := q.Exec(`INSERT INTO page_contents (page_id, content, plain_text, updated_at, base_content, remote_updated_at, remote_revision)
-		VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(page_id) DO UPDATE SET content = excluded.content,
-		plain_text = excluded.plain_text, updated_at = excluded.updated_at, base_content = excluded.base_content,
-		remote_updated_at = excluded.remote_updated_at, remote_revision = excluded.remote_revision`,
-		pageID, c.Encode(), c.PlainText(), ms(at), base, remote, revision)
+		VALUES (?, ?, ?, ?, NULL, NULL, 0) ON CONFLICT(page_id) DO UPDATE SET content = excluded.content,
+		plain_text = excluded.plain_text, updated_at = excluded.updated_at, base_content = NULL,
+		remote_updated_at = NULL, remote_revision = 0`,
+		pageID, c.Encode(), c.PlainText(), ms(at))
 	return err
 }
 
@@ -75,13 +120,34 @@ var ErrContentChanged = errors.New("store: page content changed")
 // stores it, and queues it for the server. It returns the stamped content
 // and whether anything changed.
 func (s *Store) SaveContent(pageID string, c *doc.Content) (*doc.Content, bool, error) {
-	return s.saveContent(pageID, c, nil)
+	saved, err := s.saveContent(pageID, c, nil)
+	return saved.Content, saved.Changed, err
 }
 
 // SaveContentOver is SaveContent for content made from the stored content
 // over ("" when there was none): it saves only while that is still what is
 // stored, and returns ErrContentChanged otherwise.
 func (s *Store) SaveContentOver(pageID, over string, c *doc.Content) (*doc.Content, bool, error) {
+	saved, err := s.saveContent(pageID, c, &over)
+	return saved.Content, saved.Changed, err
+}
+
+// Saved is what a save stored.
+type Saved struct {
+	// Content is the content stamped, and Encoded it as stored: what is
+	// stored now, whether or not the save changed it.
+	Content *doc.Content
+	Encoded string
+	// WriteID is the write stored now (Store.WriteID).
+	WriteID int64
+	// Changed reports whether the save changed what was stored.
+	Changed bool
+}
+
+// SaveOver is SaveContentOver for a caller that keeps the content as
+// stored, as a page open in the app does: what it stored comes encoded,
+// with its write, so the caller need not encode it again.
+func (s *Store) SaveOver(pageID, over string, c *doc.Content) (Saved, error) {
 	return s.saveContent(pageID, c, &over)
 }
 
@@ -98,13 +164,13 @@ var ErrUnreadable = errors.New("store: page content cannot be read")
 func (s *Store) UpdateContent(pageID string, edit func(c *doc.Content, kept bool) (bool, error)) error {
 	for range 5 {
 		over, c := "", doc.Empty()
-		row, err := s.ContentRow(pageID)
+		stored, _, err := s.StoredContent(pageID)
 		switch {
 		case err == nil:
-			if c, err = doc.Decode(row.Content); err != nil {
+			if c, err = doc.Decode(stored); err != nil {
 				return fmt.Errorf("%w: %w", ErrUnreadable, err)
 			}
-			over = row.Content
+			over = stored
 		case !IsNotFound(err):
 			return err
 		}
@@ -121,41 +187,53 @@ func (s *Store) UpdateContent(pageID string, edit func(c *doc.Content, kept bool
 // saveContent reads the stored content, stores the new content and queues
 // it in one transaction, which holds the write lock throughout: a pull
 // cannot store the server's content in between, finding nothing queued,
-// and a save that fails leaves nothing half done.
-func (s *Store) saveContent(pageID string, c *doc.Content, over *string) (*doc.Content, bool, error) {
-	var stamped *doc.Content
-	changed := false
+// and a save that fails leaves nothing half done. The content is encoded
+// once, and only what a save changes is written: the merge base stays as
+// it is, unread but for its blocks' times, which the label counts.
+func (s *Store) saveContent(pageID string, c *doc.Content, over *string) (Saved, error) {
+	var saved Saved
 	err := s.inTx(func(tx *sql.Tx) error {
-		row, err := contentRow(tx, pageID)
-		if over != nil {
-			// No content is stored as "", so "" can only mean none.
-			none := errors.Is(err, sql.ErrNoRows)
-			if *over == "" && !none || *over != "" && (err != nil || row.Content != *over) {
-				return ErrContentChanged
-			}
+		var stored string
+		var base sql.NullString
+		err := tx.QueryRow(`SELECT content, base_content FROM page_contents WHERE page_id = ?`, pageID).Scan(&stored, &base)
+		// No content is stored as "", so "" can only mean none.
+		none := errors.Is(err, sql.ErrNoRows)
+		if err != nil && !none {
+			return err
+		}
+		if over != nil && (*over == "" && !none || *over != "" && (none || stored != *over)) {
+			return ErrContentChanged
 		}
 		var previous *doc.Content
-		switch {
-		case err == nil:
+		if !none {
 			// Content that cannot be read, as a newer app's, is not saved
 			// over as if it were an empty page.
-			if previous, err = doc.Decode(row.Content); err != nil {
+			if previous, err = doc.Decode(stored); err != nil {
 				return fmt.Errorf("stored content: %w", err)
 			}
-		case !errors.Is(err, sql.ErrNoRows):
-			return err
 		}
 		now := time.Now()
-		stamped = c.Stamped(previous, now.UnixMilli())
-		if previous != nil && previous.Encode() == stamped.Encode() {
-			return nil
-		}
-		if err := writeContent(tx, pageID, stamped, now, &row); err != nil {
+		saved.Content = c.Stamped(previous, now.UnixMilli())
+		saved.Encoded = saved.Content.Encode()
+		if !none && stored == saved.Encoded {
+			saved.WriteID, err = savedWrite(tx, pageID)
 			return err
 		}
-		blocks := len(stamped.Blocks)
-		if base, err := doc.Decode(row.BaseContent); row.BaseContent != "" && err == nil {
-			blocks = len(doc.ChangedBlocks(base, stamped))
+		if none {
+			_, err = tx.Exec(`INSERT INTO page_contents (page_id, content, plain_text, updated_at) VALUES (?, ?, ?, ?)`,
+				pageID, saved.Encoded, saved.Content.PlainText(), ms(now))
+		} else {
+			_, err = tx.Exec(`UPDATE page_contents SET content = ?, plain_text = ?, updated_at = ? WHERE page_id = ?`,
+				saved.Encoded, saved.Content.PlainText(), ms(now), pageID)
+		}
+		if err != nil {
+			return err
+		}
+		blocks := len(saved.Content.Blocks)
+		if base.String != "" {
+			if n, ok := changedSince(base.String, saved.Content); ok {
+				blocks = n
+			}
 		}
 		label := fmt.Sprintf("%d blocks edited", blocks)
 		if blocks == 1 {
@@ -167,17 +245,45 @@ func (s *Store) saveContent(pageID string, c *doc.Content, over *string) (*doc.C
 		if _, err := tx.Exec(`UPDATE pages SET updated_at = ? WHERE id = ?`, ms(now), pageID); err != nil {
 			return err
 		}
-		changed = true
-		return nil
+		saved.Changed = true
+		saved.WriteID, err = savedWrite(tx, pageID)
+		return err
 	})
 	if err != nil {
-		return nil, false, err
+		return Saved{}, err
 	}
-	if changed {
+	if saved.Changed {
 		s.Notify("outbox", pageID)
 		s.Notify("page_contents", pageID)
 	}
-	return stamped, changed, nil
+	return saved, nil
+}
+
+// changedSince counts the blocks of c edited since base, encoded, the
+// version last synced: those whose time differs, added or deleted since.
+// A block's time moves on exactly as it changes (doc.Content.Stamped), so
+// only base's times are read, not its blocks. ok is false for a base that
+// cannot be read.
+func changedSince(base string, c *doc.Content) (n int, ok bool) {
+	var b struct {
+		Meta struct {
+			Blocks map[string]float64 `json:"blocks"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal([]byte(base), &b); err != nil {
+		return 0, false
+	}
+	for id, at := range c.Blocks {
+		if was, ok := b.Meta.Blocks[id]; !ok || int64(was) != at {
+			n++
+		}
+	}
+	for id := range b.Meta.Blocks {
+		if _, ok := c.Blocks[id]; !ok {
+			n++
+		}
+	}
+	return n, true
 }
 
 // PutSyncedContentOver stores content that came from the server, merged

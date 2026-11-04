@@ -1,7 +1,10 @@
 package web
 
 import (
+	"context"
 	"html"
+	"io"
+	"mime"
 	"net/url"
 	"regexp"
 	"slices"
@@ -74,13 +77,28 @@ func ReadLinkInfo(page, src string) LinkInfo {
 	return info
 }
 
-// LookUp asks link's page for its info.
+// maxHeadBytes is the most of a page LookUp reads: its head, which comes
+// first.
+const maxHeadBytes = 1 << 20
+
+// LookUp asks link's page for its info. What its Content-Type says is no
+// page, as a picture or a PDF, has none, and is not read.
 func LookUp(link string) (LinkInfo, error) {
-	data, err := Fetch(link)
+	ctx, cancel := context.WithTimeout(context.Background(), fetchWait)
+	defer cancel()
+	res, err := get(ctx, link, "")
 	if err != nil {
 		return LinkInfo{}, err
 	}
-	return ReadLinkInfo(link, string(data[:min(len(data), 1<<20)])), nil
+	defer func() { _ = res.Body.Close() }()
+	if mt, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type")); mt != "" && mt != "text/html" && mt != "application/xhtml+xml" {
+		return LinkInfo{}, nil
+	}
+	data, err := io.ReadAll(io.LimitReader(res.Body, maxHeadBytes))
+	if err != nil {
+		return LinkInfo{}, err
+	}
+	return ReadLinkInfo(link, string(data)), nil
 }
 
 // Lacking reports whether n is a link card of link without its info yet.

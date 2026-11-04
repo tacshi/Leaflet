@@ -41,7 +41,7 @@ struct PageScreen: View {
     var body: some View {
         let row = app.library.page(pageID)
         Group {
-            if let model, model.content != nil {
+            if let model, model.hasContent {
                 PageEditorView(
                     model: model,
                     style: EditorStyle(textSize: app.textSize, palette: palette),
@@ -532,7 +532,7 @@ struct Inspector: View {
             .pickerStyle(.segmented)
             .padding()
             switch tab {
-            case .outline: OutlineList(content: model?.content, isSheet: isSheet)
+            case .outline: OutlineList(rows: model?.outline ?? [], isSheet: isSheet)
             case .agent: if let model { AgentPanel(model: model) }
             case .comments: if let model { CommentsPanel(model: model) }
             }
@@ -557,8 +557,8 @@ struct Inspector: View {
 /// OutlineRow is a heading in the outline, as the core nests it for the
 /// desktop's outline too (MobileOutline): its text and level, how deep it
 /// nests, the heading it is in, and whether others are in it. Apart from
-/// the view, it is worked out on any thread.
-struct OutlineRow: Identifiable, Decodable {
+/// the view, it is worked out on any thread (PageModel.outline).
+struct OutlineRow: Identifiable, Decodable, Hashable, Sendable {
     let id: String
     let text: String
     let level: Int
@@ -581,42 +581,23 @@ struct OutlineRow: Identifiable, Decodable {
 }
 
 /// OutlineList is the page's headings, to go to one: those under a heading
-/// nested in it and folded with it, as the desktop's outline.
+/// nested in it and folded with it, as the desktop's outline. rows are the
+/// page's model's, worked out as its headings change; the heading the page
+/// is at, which changes as it scrolls, is read by the list of rows alone
+/// (OutlineRows).
 struct OutlineList: View {
-    let content: DocContent?
+    let rows: [OutlineRow]
     var isSheet = false
-    @Environment(SceneModel.self) private var scene
-    @Environment(\.palette) private var palette
     /// closed are the headings folded, their own headings hidden.
     @State private var closed: Set<String> = []
 
     var body: some View {
-        let all = OutlineRow.rows(content?.headings ?? [])
-        if all.isEmpty {
+        if rows.isEmpty {
             ContentUnavailableView(
                 L.panelTabOutline, systemImage: "list.bullet.indent",
                 description: Text(L.outlineEmpty))
         } else {
-            let byID = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
-            let shown = visible(all)
-            let marked = mark(scene.heading, byID: byID, shown: Set(shown.map(\.id)))
-            // The heading the page is at shows chosen, kept in view; folded
-            // away, the heading it is in does.
-            ScrollViewReader { proxy in
-                // Room for the chevrons only where a heading has some.
-                let folds = all.contains(where: \.hasChildren)
-                List(shown) { row in
-                    line(row, current: row.id == marked, folds: folds)
-                }
-                .listStyle(.plain)
-                .onChange(of: marked) {
-                    guard let marked else { return }
-                    withAnimation { proxy.scrollTo(marked) }
-                }
-                .onAppear {
-                    if let marked { proxy.scrollTo(marked, anchor: .center) }
-                }
-            }
+            OutlineRows(all: rows, shown: visible(rows), isSheet: isSheet, closed: $closed)
         }
     }
 
@@ -631,12 +612,47 @@ struct OutlineList: View {
             return false
         }
     }
+}
 
-    /// mark is the row that shows the heading the page is at: it, or the
-    /// heading it is folded in.
-    private func mark(_ id: String?, byID: [String: OutlineRow], shown: Set<String>) -> String? {
+/// OutlineRows lists the outline's rows shown, the one of the heading the
+/// page is at chosen, kept in view.
+private struct OutlineRows: View {
+    let all: [OutlineRow]
+    let shown: [OutlineRow]
+    let isSheet: Bool
+    @Binding var closed: Set<String>
+    @Environment(SceneModel.self) private var scene
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let marked = mark(scene.heading)
+        // The heading the page is at shows chosen, kept in view; folded
+        // away, the heading it is in does.
+        ScrollViewReader { proxy in
+            // Room for the chevrons only where a heading has some.
+            let folds = all.contains(where: \.hasChildren)
+            List(shown) { row in
+                line(row, current: row.id == marked, folds: folds)
+            }
+            .listStyle(.plain)
+            .onChange(of: marked) {
+                guard let marked else { return }
+                withAnimation { proxy.scrollTo(marked) }
+            }
+            .onAppear {
+                if let marked { proxy.scrollTo(marked, anchor: .center) }
+            }
+        }
+    }
+
+    /// mark is the row that shows the heading the page is at, id: it, or
+    /// the heading it is folded in.
+    private func mark(_ id: String?) -> String? {
+        guard id != nil else { return nil }
+        let visible = Set(shown.map(\.id))
+        let parents = Dictionary(all.map { ($0.id, $0.parent) }, uniquingKeysWith: { a, _ in a })
         var at = id
-        while let a = at, !shown.contains(a) { at = byID[a]?.parent }
+        while let a = at, !visible.contains(a) { at = parents[a] ?? nil }
         return at
     }
 

@@ -238,11 +238,23 @@ func (s *Service) putServerPage(r map[string]any) error {
 	return s.st.DetachPage(slices.Min(loop))
 }
 
+// providerRemovalsEvery is how often pullProviderRemovals asks the server
+// for every connection it has.
+const providerRemovalsEvery = 10 * time.Minute
+
 // pullProviderRemovals removes the cloud model connections the server no
-// longer has: one removed on another device is deleted there, and leaves
-// no row for the pull by time to bring. Only those stored here before the
-// server listed its own go, so one added meanwhile stays.
+// longer has, every providerRemovalsEvery: one removed on another device
+// is deleted there, and leaves no row for the pull by time to bring. Only
+// those stored here before the server listed its own go, so one added
+// meanwhile stays.
 func (s *Service) pullProviderRemovals(ctx context.Context) error {
+	uid := s.be.UserID()
+	s.mu.Lock()
+	due := s.providersSwept.due(uid, providerRemovalsEvery)
+	s.mu.Unlock()
+	if !due {
+		return nil
+	}
 	here, err := s.st.Providers()
 	if err != nil {
 		return err
@@ -262,6 +274,9 @@ func (s *Service) pullProviderRemovals(ctx context.Context) error {
 			}
 		}
 	}
+	s.mu.Lock()
+	s.providersSwept = every{time.Now(), uid}
+	s.mu.Unlock()
 	return nil
 }
 

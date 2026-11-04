@@ -181,7 +181,9 @@ Buckets cap uploads at 500 MiB for `recordings` (audio only), 200 MiB for
 `files` and 50 MiB for `images` (images only); a hosted project's global upload
 limit (Storage settings) must be at least as high for long recordings. The
 `stt` function transcribes recordings up to `STT_MAX_AUDIO_MB` (default 100,
-about 54 minutes of the app's WAV); longer ones transcribe on the device.
+about 54 minutes of the app's WAV); longer ones transcribe on the device. It
+streams a recording from Storage to the transcriber rather than holding it,
+so the deadline bounds that size, not the function's memory.
 
 Keep email confirmation on (Authentication › Sign In / Providers › Email ›
 Confirm email; `enable_confirmations = true` in `config.toml`, which local
@@ -206,12 +208,17 @@ owns those functions. The `supabase/postgres` image grants `postgres` that,
 and `access.sql` checks it.
 
 The migrations state every privilege the roles have (`20261103020000`): they
-count on no default grant of a project's. Three things they assume of a
+count on no default grant of a project's. Four things they assume of a
 hosted project can't be checked here, and are worth checking once on one
 (in its SQL editor, as `postgres`):
 
 - that `postgres` may delete from `vault.secrets`, as above:
   `select has_table_privilege('vault.secrets', 'delete')`;
+- that `postgres` may delete from `auth.sessions`, as `sign_out_device`
+  does to end a signed-out device's session (its refresh tokens cascade):
+  Auth owns the table, and the image's default privileges grant `postgres`
+  what Auth makes, as `scripts/migrations/services.sql` has it, and as
+  `supabase start` does: `select has_table_privilege('auth.sessions', 'delete')`;
 - that `postgres` may make policies on `storage.objects`, and update its
   `owner` (and `owner_id`), as `release_kept_recordings` does: the image
   has `scripts/migrations/services.sql` make `postgres` own the Storage
@@ -229,16 +236,22 @@ hosted project can't be checked here, and are worth checking once on one
   `functions/_shared/supabase.ts`), never `*`. `has_secret` says whether a key
   is saved. Clients read and delete their rows but cannot insert or update
   them: rows go through the `providers` function (`save`), which checks the
-  base URL. Keys go through `save` with `api_key` or the
-  `set_provider_secret` RPC; an empty key clears it.
+  base URL. Keys go through `save` with `api_key` (a string) or the
+  `set_provider_secret` RPC; an empty key clears it. A key stays with the
+  address it was saved for: when a row's `base_url` origin, `preset` or
+  `is_local` changes, the database drops its keys, whoever writes it, so a
+  provider moved keeps a key only when one is saved with the move. A base
+  URL is printable ASCII with no backslash, which a URL parser would read
+  as a slash.
 - **Base URLs** the server calls (cloud providers, OpenAI-compatible speech to
   text) must be `https://` to a public host: names that resolve to private,
   loopback, link-local or CGNAT addresses are refused, redirects are errors,
   and errors show the status and the provider's JSON message, never the raw
   body (`functions/_shared/net.ts`).
 - **Local providers** (`ollama`, `lmstudio`, `local`) may be saved without a
-  key for listing, but the server never calls them and rejects their keys.
-  Clients call local endpoints directly.
+  key for listing, but the server never calls them, for models, tests or
+  transcriptions, and rejects their keys; one saved local loses the key it
+  had. Clients call local endpoints directly.
 - **Account sign-in** (`auth_kind: "account"`) is rejected by `providers.save`
   until provider terms for third-party apps are confirmed (open question in the
   design); use API keys.
@@ -247,7 +260,18 @@ hosted project can't be checked here, and are worth checking once on one
   saved.
 - **updated_at** is always set by the server (`clock_timestamp()`), on insert
   and update. Pull with `updated_at > cursor`; soft-deleted rows
-  (`deleted_at`) come through the same pull.
+  (`deleted_at`) come through the same pull. What is on a page deleted
+  before someone was shared it (its content, comments, recordings, files,
+  images) is not theirs: they pull the page's row, and nothing on it.
+- **Devices**: a device upserts its own `devices` row (its heartbeat), which
+  the server stamps with the session it was written with; Account › Devices
+  signs another out with `sign_out_device`, which revokes the row and ends
+  that session. Clients neither set nor clear `revoked_at`, nor delete a row;
+  a write from a new session, as after signing in on the device again,
+  clears a revocation that was for another.
+- **Comments** keep `body` and `quote` to 100,000 characters, `mentions`
+  to 64 KB and `block_id` to 256 characters; on someone else's page, one
+  person writes at most 2,000 comments, of 10 MB in all.
 - **ai_jobs**: viewers may create jobs; the worker then runs without edit
   tools. The worker claims a job by moving it from `queued` to `running`; a
   second call returns 409.

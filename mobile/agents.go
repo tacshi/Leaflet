@@ -212,7 +212,9 @@ func (c *Core) UndoRun(pageID, runID string) (err error) {
 // ReplyBlocks returns a run's answer in words as the blocks of its
 // Markdown, a JSON array of nodes, for the page's editor to put after the
 // block it was asked about, as the desktop's Insert does, as one step to
-// undo. A run that edited the page, or has no answer, gives none.
+// undo: of a run that read beyond the page or the web, its pictures as
+// links to them (agents.ReplyBlocks). A run that edited the page, or has
+// no answer, gives none.
 func (c *Core) ReplyBlocks(pageID, runID string) (_ string, err error) {
 	defer catch(&err)
 	nodes := []*doc.Node{}
@@ -221,7 +223,7 @@ func (c *Core) ReplyBlocks(pageID, runID string) (_ string, err error) {
 		if run == nil || run.Error != "" || run.Reply == "" || len(run.Ops) > 0 {
 			return
 		}
-		nodes = doc.MarkdownBlocks(run.Reply)
+		nodes = agents.ReplyBlocks(run.Reply, run)
 	})
 	return encode(nodes)
 }
@@ -347,7 +349,7 @@ func (c *Core) AddComment(pageID, blockID, body, parentID, quote string) (err er
 			}
 		}
 		c.agentInComment(pageID, root, body)
-		c.core.Sync.Kick()
+		c.core.Sync.KickPush()
 	})
 	return err
 }

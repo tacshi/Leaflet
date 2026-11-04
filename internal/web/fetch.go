@@ -31,6 +31,27 @@ var ErrNotPublic = errors.New("not a public address")
 // checked as it is dialed, after the name resolves, so a name that
 // resolves elsewhere the second time cannot get round it.
 func Fetch(link string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), fetchWait)
+	defer cancel()
+	res, err := get(ctx, link, "")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = res.Body.Close() }()
+	return io.ReadAll(io.LimitReader(res.Body, maxFetchBytes))
+}
+
+// maxFetchBytes is the most Fetch reads: a large picture whole.
+const maxFetchBytes = 20 << 20
+
+// fetchWait is how long Fetch, and a page's reading, wait for what they
+// read, whole. Tests shorten it.
+var fetchWait = 30 * time.Second
+
+// get asks for link as Fetch does, with accept, if any, as its Accept
+// header. An answer that is an error is its error; another's body is the
+// caller's to read and close.
+func get(ctx context.Context, link, accept string) (*http.Response, error) {
 	u, err := url.Parse(link)
 	if err != nil {
 		return nil, err
@@ -38,23 +59,28 @@ func Fetch(link string) ([]byte, error) {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return nil, errors.New("not a web link")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", link, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", fetchAgent)
-	res, err := publicClient.Do(req)
+	if accept != "" {
+		req.Header.Set("Accept", accept)
+	}
+	res, err := do(req)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = res.Body.Close() }()
 	if res.StatusCode >= 400 {
+		_ = res.Body.Close()
 		return nil, &remote.Error{Status: res.StatusCode, Message: res.Status}
 	}
-	return io.ReadAll(io.LimitReader(res.Body, 20<<20))
+	return res, nil
 }
+
+// do sends get's requests, to public addresses only. Tests answer from
+// servers of their own, which it refuses.
+var do = publicClient.Do
 
 // fetchAgent is the User-Agent Fetch names, as a browser's: some sites
 // refuse Go's own, as segmentfault.com's picture links answer it 410 Gone
@@ -72,8 +98,13 @@ var direct = &http.Transport{
 	MaxIdleConns:          10,
 	IdleConnTimeout:       90 * time.Second,
 	TLSHandshakeTimeout:   10 * time.Second,
+	ResponseHeaderTimeout: answerWait,
 	ExpectContinueTimeout: time.Second,
 }
+
+// answerWait is how long a site that took a request has to start its
+// answer: one that never does holds nothing up for longer.
+const answerWait = 20 * time.Second
 
 // systemProxy is the proxy the app's other clients would use for r, or
 // nil to go direct.
@@ -124,7 +155,8 @@ func viaProxy(r *http.Request, proxy *url.URL) (*http.Response, error) {
 	}
 	_, port, _ := net.SplitHostPort(hostPort(r.URL))
 	addr := net.JoinHostPort(ips[0].Unmap().String(), port)
-	t := &http.Transport{DisableKeepAlives: true, TLSHandshakeTimeout: 10 * time.Second, ExpectContinueTimeout: time.Second}
+	t := &http.Transport{DisableKeepAlives: true, TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: answerWait,
+		ExpectContinueTimeout: time.Second}
 	switch proxy.Scheme {
 	case "http", "https":
 		// A tunnel to the address, as CONNECT asks for, the site's TLS
@@ -226,18 +258,22 @@ func publicControl(_, address string, _ syscall.RawConn) error {
 	return nil
 }
 
-// sharedSpace is 100.64.0.0/10, carriers' and Tailscale's, and
-// thisNetwork 0.0.0.0/8. IPv6 addresses of nat64, sixToFour and v4Compat
-// stand for IPv4 ones, in their last 4 bytes, or 6to4's 2 bytes in;
-// nat64Local's and siteLocal's are a network's own.
+// sharedSpace is 100.64.0.0/10, carriers' and Tailscale's, thisNetwork
+// 0.0.0.0/8, protocolSpace 192.0.0.0/24, kept for protocols' own
+// addresses, and futureSpace 240.0.0.0/4, kept for later, as is
+// 255.255.255.255, a network's broadcast. IPv6 addresses of nat64,
+// sixToFour and v4Compat stand for IPv4 ones, in their last 4 bytes, or
+// 6to4's 2 bytes in; nat64Local's and siteLocal's are a network's own.
 var (
-	sharedSpace = netip.MustParsePrefix("100.64.0.0/10")
-	thisNetwork = netip.MustParsePrefix("0.0.0.0/8")
-	nat64       = netip.MustParsePrefix("64:ff9b::/96")
-	nat64Local  = netip.MustParsePrefix("64:ff9b:1::/48")
-	sixToFour   = netip.MustParsePrefix("2002::/16")
-	v4Compat    = netip.MustParsePrefix("::/96")
-	siteLocal   = netip.MustParsePrefix("fec0::/10")
+	sharedSpace   = netip.MustParsePrefix("100.64.0.0/10")
+	thisNetwork   = netip.MustParsePrefix("0.0.0.0/8")
+	protocolSpace = netip.MustParsePrefix("192.0.0.0/24")
+	futureSpace   = netip.MustParsePrefix("240.0.0.0/4")
+	nat64         = netip.MustParsePrefix("64:ff9b::/96")
+	nat64Local    = netip.MustParsePrefix("64:ff9b:1::/48")
+	sixToFour     = netip.MustParsePrefix("2002::/16")
+	v4Compat      = netip.MustParsePrefix("::/96")
+	siteLocal     = netip.MustParsePrefix("fec0::/10")
 )
 
 // publicAddr reports whether ip is on the internet: not this machine, nor
@@ -255,5 +291,9 @@ func publicAddr(ip netip.Addr) bool {
 	case nat64Local.Contains(ip), siteLocal.Contains(ip):
 		return false
 	}
-	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !sharedSpace.Contains(ip) && !thisNetwork.Contains(ip)
+	// 198.18.0.0/15, kept for benchmarks, is public here: fake-IP proxies,
+	// as Clash, answer every name with one of its addresses, and refusing
+	// it would stop link cards and reading the web behind them.
+	return ip.IsGlobalUnicast() && !ip.IsPrivate() && !sharedSpace.Contains(ip) && !thisNetwork.Contains(ip) &&
+		!protocolSpace.Contains(ip) && !futureSpace.Contains(ip)
 }

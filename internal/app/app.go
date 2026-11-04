@@ -93,6 +93,17 @@ type App struct {
 	// was arranged from (library).
 	lib     *library.Tree
 	libFrom arrangedFrom
+	// pageIndex and fileIndex are the pages and templates, and the files,
+	// by ID, as made from what pageIndexFrom and fileIndexFrom say
+	// (pageByID, fileByID). present is whether each file of the app's is
+	// on this device, as last looked (localFile).
+	pageIndex     map[string]*store.Page
+	pageIndexFrom listsFrom
+	fileIndex     map[string]int
+	fileIndexFrom listsFrom
+	present       map[string]presence
+	// mentions is the @ menu as last made, and filtered (MentionItems).
+	mentions mentionMenu
 	// editable is canEdit as it was read, by page, until the pages, their
 	// members or the session change: the sidebar asks it of every row as
 	// it draws, and each ask walks the page's parents in the database.
@@ -184,16 +195,23 @@ type App struct {
 	fetchingCopy bool
 	fetchedAudio []string
 	embeds       map[string]*mygo.WebView
-	// embedSrc is the page each embed's web view last loaded, and
-	// embedSizes how tall its content said it is, once it has drawn;
+	// embedIn is what each embed's web view last loaded its page from,
+	// and embedSizes how tall its content said it is, once it has drawn;
 	// embedZoomed the diagrams zoomed in; embedToPage the views that give
 	// the page the wheel (sandbox's toPage); embedFailed why a view could
 	// not be made, which is not tried again while the block stays.
-	embedSrc    map[string]string
+	// embedOver is the embed whose view the pointer was over as the last
+	// frame built, and embedWheel the wheel it passed the page since,
+	// for the next frame to scroll it by; embedBuilt the embeds the page
+	// built since it last let go of views (dropEmbeds).
+	embedIn     map[string]embedInput
 	embedSizes  map[string]embedSize
 	embedZoomed map[string]bool
 	embedToPage map[string]bool
 	embedFailed map[string]string
+	embedOver   string
+	embedWheel  float32
+	embedBuilt  map[string]bool
 	// videos are the players of the open page's videos that were played;
 	// videoInfo what each video's site said about it, by provider and ID.
 	videos    map[string]*mygo.WebView
@@ -332,7 +350,7 @@ type pageState struct {
 
 // Run starts the app.
 func Run() {
-	a := &App{embeds: map[string]*mygo.WebView{}, embedSrc: map[string]string{}, embedSizes: map[string]embedSize{},
+	a := &App{embeds: map[string]*mygo.WebView{}, embedIn: map[string]embedInput{}, embedSizes: map[string]embedSize{},
 		embedZoomed: map[string]bool{}, embedToPage: map[string]bool{}, embedFailed: map[string]string{}, videos: map[string]*mygo.WebView{}}
 	theme.RegisterFonts()
 	registerCapture()
@@ -681,6 +699,8 @@ func (a *App) reload(ch store.Change) {
 	}
 	if all || ch.Table == "files" {
 		a.files, _ = a.st.Files()
+		// A file downloaded, added or gone is looked for again.
+		clear(a.present)
 	}
 	if all || ch.Table == "model_providers" {
 		// A default whose provider is gone, removed on another device, is
@@ -701,6 +721,7 @@ func (a *App) reload(ch store.Change) {
 	}
 	if all || ch.Table == "session" {
 		a.session = a.st.Session()
+		a.leasePub()
 	}
 	if a.page != nil && (all || ch.Table == "comments" && (ch.PageID == "" || ch.PageID == a.page.id)) {
 		a.page.setThreads(a.st.Threads(a.page.id))
@@ -719,19 +740,32 @@ func (a *App) reload(ch store.Change) {
 	}
 }
 
-// pageByID finds a page, or a template, which opens as one.
+// listsFrom is what an index of the pages and the templates, or of the
+// files, was made from: each list as read, by its first, which a new read
+// makes another.
+type listsFrom struct {
+	pages, templates   *store.Page
+	files              *store.File
+	nPages, nTemplates int
+	nFiles             int
+}
+
+// pageByID finds a page, or a template, which opens as one: in an index of
+// them, made again once the pages or the templates are others than it was
+// made from, as every subpage card and tree row asks as it draws.
 func (a *App) pageByID(id string) *store.Page {
-	for i := range a.pages {
-		if a.pages[i].ID == id {
-			return &a.pages[i]
+	from := listsFrom{pages: firstOf(a.pages), templates: firstOf(a.templates), nPages: len(a.pages), nTemplates: len(a.templates)}
+	if a.pageIndex == nil || from != a.pageIndexFrom {
+		a.pageIndex, a.pageIndexFrom = make(map[string]*store.Page, len(a.pages)+len(a.templates)), from
+		for _, list := range [][]store.Page{a.pages, a.templates} {
+			for i := range list {
+				if _, ok := a.pageIndex[list[i].ID]; !ok {
+					a.pageIndex[list[i].ID] = &list[i]
+				}
+			}
 		}
 	}
-	for i := range a.templates {
-		if a.templates[i].ID == id {
-			return &a.templates[i]
-		}
-	}
-	return nil
+	return a.pageIndex[id]
 }
 
 // arrangedFrom is what the library was arranged from: the pages, the
@@ -957,7 +991,7 @@ func (a *App) loadPage(id string) {
 		Post:    a.update,
 		CanEdit: func() bool { return a.canEdit(id) },
 		Notify:  a.toast,
-		Saved:   func() { a.sync.Kick() },
+		Saved:   func() { a.sync.KickPush() },
 	})
 	ps := &pageState{id: id, title: p.Title, savedTitle: p.Title, live: lp, tinted: map[string]bool{}}
 	ed := editor.New(content, &host{a: a})

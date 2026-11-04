@@ -47,6 +47,12 @@ struct SidebarView: View {
     @State private var newName = ""
     /// renamingTag is the tag being renamed, from its menu in the Tags tab.
     @State private var renamingTag: String?
+    /// id is this sidebar's, by which it tells the app it shows the to-dos.
+    @State private var id = UUID()
+
+    /// showsTodos says the sidebar shows the To-dos tab, which the app then
+    /// keeps current (AppModel.showsTodos).
+    private var showsTodos: Bool { tab == .todos && query.isEmpty }
 
     /// Renaming is the page or folder being renamed.
     enum Renaming: Identifiable {
@@ -112,6 +118,9 @@ struct SidebarView: View {
         .searchFocused($searchFocused)
         .onChange(of: scene.searchRequested) { searchFocused = true }
         .task(id: query) { await search() }
+        .onAppear { app.showsTodos(id, showsTodos) }
+        .onDisappear { app.showsTodos(id, false) }
+        .onChange(of: showsTodos) { app.showsTodos(id, showsTodos) }
         .refreshable { await app.syncNow() }
         .safeAreaInset(edge: .top, spacing: 0) {
             Picker(L.sidebarTabsLabel, selection: $tab) {

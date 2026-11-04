@@ -32,6 +32,9 @@ var accountRows = map[string]string{
 // the outbox with the pages gone, would go up as the next account's.
 func (s *Store) Wipe() error {
 	err := s.inTx(func(tx *sql.Tx) error {
+		if err := forgetSearch(tx); err != nil {
+			return err
+		}
 		for _, t := range tables {
 			if _, err := tx.Exec("DELETE FROM " + t.name); err != nil { // #nosec G202 -- one of the tables listed here.
 				return err
@@ -73,6 +76,10 @@ func (s *Store) forgetAccount(synced bool) error {
 				return ErrUnsynced
 			}
 		}
+		// Every page goes, and what search kept of them with it.
+		if err := forgetSearch(tx); err != nil {
+			return err
+		}
 		for _, t := range tables {
 			q := "DELETE FROM " + t.name
 			if where, ok := accountRows[t.name]; ok {
@@ -89,6 +96,16 @@ func (s *Store) forgetAccount(synced bool) error {
 	}
 	s.Notify("*", "")
 	return s.removeCopies()
+}
+
+// forgetSearch empties search_index and text_writes at once, as all the
+// texts they follow go: the triggers would take them out one by one.
+func forgetSearch(tx *sql.Tx) error {
+	if _, err := tx.Exec(`INSERT INTO search_index (search_index) VALUES ('delete-all')`); err != nil {
+		return err
+	}
+	_, err := tx.Exec(`DELETE FROM text_writes`)
+	return err
 }
 
 // RemoveSharedPages removes from this device a page shared with the user
@@ -189,7 +206,7 @@ func (s *Store) removePages(tx *sql.Tx, ids []string) ([]string, error) {
 		return nil, err
 	}
 	for _, id := range ids {
-		if _, err := tx.Exec(`DELETE FROM key_values WHERE key IN (?, ?)`, "chat."+id, "chat.past."+id); err != nil {
+		if _, err := tx.Exec(`DELETE FROM key_values WHERE key IN (?, ?, ?)`, "chat."+id, "chat.past."+id, "chat.running."+id); err != nil {
 			return nil, err
 		}
 	}

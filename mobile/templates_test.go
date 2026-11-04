@@ -164,18 +164,26 @@ func TestCopiesHistoryAndExport(t *testing.T) {
 		t.Fatalf("export %+v", md)
 	}
 	// A PDF is the page as its link shares it, laid out for the region's
-	// paper: its subpages by their titles.
+	// paper: its subpages by their titles, in a file of its own in the
+	// folder given.
+	dir := t.TempDir()
 	for region, width := range map[string]float64{"US": 8.5, "DE": 8.27, "": 8.27} {
-		raw, err = c.ExportPDFPage(parent.ID, region)
+		raw, err = c.ExportPDFPage(parent.ID, region, dir)
 		if err != nil {
 			t.Fatal(err)
 		}
 		var pdf exportedPDF
 		_ = json.Unmarshal([]byte(raw), &pdf)
-		if pdf.Name != "Trip.pdf" || pdf.Width != width || !strings.Contains(pdf.HTML, `<h1 class="title">Trip</h1>`) ||
-			!strings.Contains(pdf.HTML, ">Packing</p>") || strings.Contains(pdf.HTML, "prefers-color-scheme") {
-			t.Fatalf("PDF for %q: %+v", region, pdf)
+		data, err := os.ReadFile(pdf.Path) // #nosec G304 -- the file the core just wrote.
+		html := string(data)
+		if err != nil || filepath.Dir(pdf.Path) != dir || pdf.Name != "Trip.pdf" || pdf.Width != width ||
+			!strings.Contains(html, `<h1 class="title">Trip</h1>`) || !strings.Contains(html, ">Packing</p>") ||
+			strings.Contains(html, "prefers-color-scheme") {
+			t.Fatalf("PDF for %q: %+v, %v", region, pdf, err)
 		}
+	}
+	if pages, _ := filepath.Glob(filepath.Join(dir, "*.html")); len(pages) != 3 {
+		t.Fatalf("%d pages written for 3 PDFs", len(pages))
 	}
 
 	path := filepath.Join(t.TempDir(), "notes.txt")

@@ -33,6 +33,12 @@ func TestFetchOnlyThePublicWeb(t *testing.T) {
 		"64:ff9b::7f00:1": false, "64:ff9b::a9fe:a9fe": false, "64:ff9b::5db8:d822": true, "64:ff9b:1::a00:1": false,
 		"2002:7f00:1::1": false, "2002:c0a8:101::1": false, "2002:5db8:d822::1": true,
 		"::127.0.0.1": false, "::10.0.0.1": false, "fec0::1": false,
+		// Ranges kept for protocols, for later, and for a network's
+		// broadcast; but the benchmarks' range, which fake-IP proxies
+		// answer every name with.
+		"192.0.0.1": false, "192.0.0.170": false, "240.0.0.1": false, "250.1.2.3": false, "255.255.255.255": false,
+		"::ffff:240.0.0.1": false, "64:ff9b::c000:aa": false, "2002:f000:1::1": false, "192.0.1.1": true,
+		"198.18.0.1": true, "198.19.255.254": true, "239.255.255.255": false,
 	} {
 		if got := publicAddr(netip.MustParseAddr(addr)); got != public {
 			t.Errorf("publicAddr(%s) = %v", addr, got)

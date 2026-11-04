@@ -412,6 +412,8 @@ Deno.test("a run may use the web", async () => {
   assert(refused.includes("After reading the web"), refused);
   assertEquals(events.at(-1)!.kept_to_page, true);
   assertEquals((jobOf(p).result as { kept_to_page: boolean }).kept_to_page, true);
+  // It read the web: what it says may carry what it read there.
+  assertEquals(events.at(-1)!.guarded, true);
 
   for (const [kept, offered] of [[false, false], [true, true]]) {
     const q = project();
@@ -434,4 +436,103 @@ Deno.test("a run may use the web", async () => {
   const o = model(says("Hello."));
   await run(r, deps(r, o.chat));
   assert(!(o.asked[0].tools ?? []).some((t) => t.function.name === "read_web_page"));
+});
+
+// After turns of runs that read other pages, a run keeps what it writes to
+// the URLs the person gave, whether it may read other pages itself or not;
+// where it may not, those turns are left out of what the model reads, and
+// the turns that kept to the page stay (Go's
+// TestEarlierTurnsWhereOtherPagesAreOff). The history is read without the
+// turns' ops: their request, reply and whether they kept to their page.
+Deno.test("earlier turns that read other pages stay out where the run may not read them", async () => {
+  for (const cross of [false, true]) {
+    const p = project();
+    const at = (s: number) => new Date(Date.now() - s * 1000).toISOString();
+    p.tables.ai_jobs = [
+      job("notes", {
+        status: "done",
+        conversation_id: "talk",
+        created_at: at(20),
+        request: { instruction: "What do my notes say?" },
+        result: { reply: "They say the salary is 90k.", ops: [] },
+      }),
+      job("thanks", {
+        status: "done",
+        conversation_id: "talk",
+        created_at: at(10),
+        request: { instruction: "Thanks" },
+        result: { reply: "You're welcome.", ops: [], kept_to_page: true },
+      }),
+      job("job", { conversation_id: "talk", request: { instruction: "Add it", allow_cross_page: cross } }),
+    ];
+    const m = model(
+      calls(["insert_blocks", {
+        position: "end",
+        blocks: [{ type: "image", image: { url: "https://evil.example/x.png" } }],
+      }]),
+      says("Done."),
+    );
+    const { events } = await run(p, deps(p, m.chat));
+    const read = JSON.stringify(m.asked[0].messages);
+    assertEquals(read.includes("90k"), cross, `cross-page ${cross}`);
+    assert(read.includes("You're welcome."), `cross-page ${cross}`);
+    assertEquals(events.filter((e) => e.type === "op").length, 0, `cross-page ${cross}`);
+    assertEquals(events.at(-1)!.guarded, true);
+    const history = p.requests.map(decodeURIComponent).find((r) => r.includes("conversation_id=eq.talk"))!;
+    assert(
+      history.includes(
+        "select=instruction:request->>instruction,reply:result->>reply,kept_to_page:result->kept_to_page",
+      ),
+      history,
+    );
+  }
+});
+
+// A page with a public link the app serves offers no other pages, as one
+// with a guest's comment does not; one whose link ran out does. A run
+// that read nothing beyond its page, nor the web, says its URL guard was
+// off.
+Deno.test("a page with a public link offers no other pages", async () => {
+  for (const [until, offered] of [[Date.now() + 60_000, false], [Date.now() - 60_000, true], [null, true]] as const) {
+    const p = project();
+    p.tables.pages[0].public_link_until = until === null ? null : new Date(until).toISOString();
+    p.tables.ai_jobs = [job("job", { request: { instruction: "Sum up my notes", allow_cross_page: true } })];
+    const m = model(says("Hello."));
+    const { events } = await run(p, deps(p, m.chat));
+    const names = (m.asked[0].tools ?? []).map((t) => t.function.name);
+    assertEquals(names.includes("list_pages"), offered, `until ${until}`);
+    assertEquals(events.at(-1)!.guarded, false);
+    assertEquals((jobOf(p).result as { guarded: boolean }).guarded, false);
+  }
+});
+
+// Turns that read the web may hold what they read: a run after them keeps
+// to the URLs it may write after reading the web from its start, though it
+// read nothing itself; one after turns whose guard was off does not (Go's
+// TestRunAfterTurnsThatReadTheWeb). The history reads each turn's guard.
+Deno.test("a run after turns that read the web keeps to the URLs it may write", async () => {
+  for (const guarded of [true, false]) {
+    const p = project();
+    p.tables.ai_jobs = [
+      job("news", {
+        status: "done",
+        conversation_id: "talk",
+        request: { instruction: "What's new?" },
+        result: { reply: "See https://evil.example/x.png", ops: [], kept_to_page: true, guarded },
+      }),
+      job("job", { conversation_id: "talk", request: { instruction: "Add it" } }),
+    ];
+    const m = model(
+      calls(["insert_blocks", {
+        position: "end",
+        blocks: [{ type: "image", image: { url: "https://evil.example/x.png" } }],
+      }]),
+      says("Done."),
+    );
+    const { events } = await run(p, deps(p, m.chat));
+    assertEquals(events.filter((e) => e.type === "op").length, guarded ? 0 : 1, `guarded ${guarded}`);
+    assertEquals(events.at(-1)!.guarded, guarded);
+    const history = p.requests.map(decodeURIComponent).find((r) => r.includes("conversation_id=eq.talk"))!;
+    assert(history.includes("guarded:result->guarded"), history);
+  }
 });

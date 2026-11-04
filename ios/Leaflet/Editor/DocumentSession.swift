@@ -32,18 +32,74 @@ final class DocumentSession {
     /// composition ends, what was typed goes to the core, which merges it
     /// with the change and sends the merge (sendComposed).
     private var held: (content: DocContent, tinted: Set<String>)?
+    /// shown are the page's blocks, by ID, as they were last loaded, put
+    /// in or sent, each with the BlockInfo its paragraph had: one whose
+    /// paragraph changed since is not among them (BlockText.takeTouched).
+    /// A change from outside is compared with them, and a send takes them,
+    /// rather than reading each block from the text again: on a long page,
+    /// that is most of the work.
+    private var shown: [String: Shown] = [:]
+
+    private struct Shown {
+        let info: BlockInfo
+        /// came is the block as it came from outside, which its paragraph
+        /// was made from, or nil; node is the block as the text has it,
+        /// once read from it, as a send gives it. The text may have it
+        /// otherwise than it came: a line break of another kind, a format
+        /// it doesn't show.
+        var came: DocNode?
+        var node: DocNode?
+    }
 
     init(_ editor: EditorController) { self.editor = editor }
+
+    /// kept is what shown keeps of the block of info, while its paragraph
+    /// has that block.
+    private func kept(_ info: BlockInfo) -> Shown? {
+        guard let s = shown[info.id], s.info === info else { return nil }
+        return s
+    }
+
+    /// node is the block of the paragraph at range, of block info, as the
+    /// text has it: as shown keeps it while it is as it was.
+    private func node(_ info: BlockInfo, _ range: NSRange) -> DocNode {
+        let s = kept(info)
+        if let n = s?.node { return n }
+        let n = DocumentMapper.node(for: info, text: storage.attributedSubstring(from: range))
+        shown[info.id] = Shown(info: info, came: s?.came, node: n)
+        return n
+    }
+
+    /// same says the paragraph at range, of block info, is the block n: as
+    /// it came from outside, if it did, else as the text has it.
+    private func same(_ info: BlockInfo, _ range: NSRange, _ n: DocNode) -> Bool {
+        if let came = kept(info)?.came { return came == n }
+        return node(info, range) == n
+    }
+
+    /// forgetTouched drops from shown the blocks whose paragraphs changed
+    /// since they were kept.
+    private func forgetTouched() {
+        for id in text.takeTouched() { shown[id] = nil }
+    }
 
     var hasPendingEdit: Bool { sendTask != nil }
 
     /// load shows content, as the page opens.
     func load(_ content: DocContent, tinted: Set<String>) {
         meta = content.meta
-        let (shown, trailing) = DocumentMapper.attributedString(content, tinted: tinted)
+        let blocks = DocumentMapper.flatten(content)
+        let (page, infos, trailing) = DocumentMapper.attributedString(blocks, tinted: tinted)
         text.trailing = trailing
-        storage.setAttributedString(shown)
+        storage.setAttributedString(page)
+        // Each block as deep as it can be, as each change keeps them after.
+        _ = text.fitDepths(from: NSRange(location: 0, length: storage.length))
         editor.restyleAll()
+        shown = [:]
+        for (info, block) in zip(infos, blocks) {
+            shown[info.id] = Shown(info: info, came: block.node)
+        }
+        _ = text.takeTouched()
         // The page as it opens is no step to undo.
         textView.undoManager?.removeAllActions()
         if storage.length == 0 { text.trailing = text.trailing ?? BlockInfo.paragraph() }
@@ -59,7 +115,10 @@ final class DocumentSession {
     /// merge) into the text: only the blocks that changed, where the
     /// blocks are the same; all of it otherwise. The caret stays in its
     /// block, and the page where it is: an agent writing does not scroll
-    /// it, the user does.
+    /// it, the user does. Each block is compared as a node with the one
+    /// the text has (shown), and only those that changed are made into
+    /// text: an agent writing in a long page changes a block or two of it
+    /// each time.
     func update(_ content: DocContent, tinted: Set<String>, byAgent: Bool) {
         if textView.markedTextRange != nil {
             held = (content, tinted)
@@ -83,21 +142,25 @@ final class DocumentSession {
         let menu = editor.caretMenu.menu
         let anchor = menu.map { text.position(at: $0.anchor) }
         let offset = textView.contentOffset
-        let (shown, newTrailing) = DocumentMapper.attributedString(content, tinted: tinted)
-        let old = text.paragraphs()
-        let new = DocumentMapper.paragraphs(shown, trailing: newTrailing)
+        var new = DocumentMapper.flatten(content)
+        // A page of no blocks shows one empty paragraph, as its text does.
+        if new.isEmpty {
+            new = [(DocNode(id: BlockInfo.newID(), type: "paragraph", data: [:], children: nil), 0)]
+        }
+        forgetTouched()
+        let old = text.blocks()
         // The blocks the same at either end, by ID, are compared one by
         // one; those between, which came, went or moved, are replaced at
         // once, and only what is replaced is styled again: the whole page
         // laid out again for each edit an agent makes would hold up
         // typing on a long one.
         var head = 0
-        while head < old.count, head < new.count, old[head].info.id == new[head].info.id {
+        while head < old.count, head < new.count, old[head].info.id == new[head].node.id {
             head += 1
         }
         var tail = 0
         while tail < old.count - head, tail < new.count - head,
-            old[old.count - 1 - tail].info.id == new[new.count - 1 - tail].info.id
+            old[old.count - 1 - tail].info.id == new[new.count - 1 - tail].node.id
         {
             tail += 1
         }
@@ -111,60 +174,79 @@ final class DocumentSession {
         // styled are where the text replaced now is, as each replacement
         // before it moves it.
         var styled: [NSRange] = []
-        func put(_ range: NSRange, _ t: NSAttributedString, last info: BlockInfo) {
+        // next is shown as the text will have it: the blocks kept with the
+        // BlockInfo they have in it, those put in with their new ones.
+        var next: [String: Shown] = [:]
+        // trailing is the last block, when its paragraph is put in empty.
+        var trailing: BlockInfo??
+        func put(_ range: NSRange, _ blocks: ArraySlice<DocumentMapper.Block>) {
             changed = true
+            let (t, infos, last) = DocumentMapper.attributedString(blocks, tinted: tinted)
+            for (info, block) in zip(infos, blocks) {
+                next[info.id] = Shown(info: info, came: block.node)
+            }
+            if blocks.endIndex == new.endIndex { trailing = .some(last) }
             storage.replaceCharacters(in: range, with: t)
             let moved = t.length - range.length
             for i in styled.indices { styled[i].location += moved }
             styled.append(NSRange(location: range.location, length: t.length))
             // The separator after the paragraph is its block's too.
             let sep = range.location + t.length
-            if sep < storage.length {
+            if sep < storage.length, let info = infos.last {
                 storage.addAttribute(
                     .leafletBlock, value: info, range: NSRange(location: sep, length: 1))
             }
         }
-        func keep(_ o: DocumentMapper.Paragraph, _ n: DocumentMapper.Paragraph) {
+        func keep(_ i: Int, _ j: Int) {
+            let o = old[i]
+            let n = new[j]
             // A block nested or taken out keeps its node: its depth is
             // where it is in the tree.
             let same =
-                o.info.depth == n.info.depth
-                && DocumentMapper.node(for: o.info, text: o.text)
-                    == DocumentMapper.node(for: n.info, text: n.text)
-                && (o.text.length == 0 || n.text.length == 0
-                    || (o.text.attribute(.leafletTinted, at: 0, effectiveRange: nil) != nil)
-                        == (n.text.attribute(.leafletTinted, at: 0, effectiveRange: nil) != nil))
-            if !same { put(o.range, n.text, last: n.info) }
+                o.info.depth == n.depth && self.same(o.info, o.range, n.node)
+                && (o.range.length == 0
+                    || (storage.attribute(.leafletTinted, at: o.range.location, effectiveRange: nil)
+                        != nil) == tinted.contains(n.node.id))
+            if same {
+                next[o.info.id] = Shown(info: o.info, came: n.node, node: kept(o.info)?.node)
+            } else {
+                put(o.range, new[j...j])
+            }
         }
         do {
             storage.beginEditing()
             // From the end, for the ranges before each change to stay.
             for j in (0..<tail).reversed() {
-                keep(old[old.count - tail + j], new[new.count - tail + j])
+                keep(old.count - tail + j, new.count - tail + j)
             }
             if !sameBlocks {
                 let from = old[head].range.location
                 let to = NSMaxRange(old[old.count - tail - 1].range)
-                let newFrom = new[head].range.location
-                let newTo = NSMaxRange(new[new.count - tail - 1].range)
-                put(
-                    NSRange(location: from, length: to - from),
-                    shown.attributedSubstring(
-                        from: NSRange(location: newFrom, length: newTo - newFrom)),
-                    last: new[new.count - tail - 1].info)
+                put(NSRange(location: from, length: to - from), new[head..<(new.count - tail)])
             }
-            for j in (0..<head).reversed() { keep(old[j], new[j]) }
-            if changed { text.trailing = newTrailing }
+            for j in (0..<head).reversed() { keep(j, j) }
+            if case .some(let last) = trailing { text.trailing = last }
             storage.endEditing()
         }
         // Changes made to the storage itself are no undo steps: the text
         // view records only typing and its own edits. Those steps were
         // made over text that has moved since, which they no longer fit.
-        guard changed else { return }
-        for r in styled {
-            editor.style.apply(to: storage, in: r)
-            editor.restyleNumbersAfter(r)
+        guard changed else {
+            shown = next
+            _ = text.takeTouched()
+            return
         }
+        // In the page's order, for each item's number to go on from those
+        // before it as they now are.
+        for r in styled.sorted(by: { $0.location < $1.location }) {
+            var span = r
+            let fitted = text.fitDepths(from: r)
+            for c in fitted.changed { span = NSUnionRange(span, c) }
+            editor.style.apply(to: storage, in: span)
+            editor.restyleNumbersAfter(span)
+        }
+        shown = next
+        _ = text.takeTouched()
         _ = text.keepTrailing()
         editor.layout.redrawEnd()
         textView.undoManager?.removeAllActions()
@@ -265,12 +347,25 @@ final class DocumentSession {
         return true
     }
 
-    /// send passes the page's content now, as the page closes.
+    /// send passes the page's content now, as the page closes: each block
+    /// as shown keeps it, unless its paragraph changed since. The text's
+    /// paragraphs are found again, all of them: what the page saves is not
+    /// left to an index kept as it changed.
     func send() {
         sendTask?.cancel()
         sendTask = nil
         unsentSince = nil
         if text.uniqueIDs() { editor.layout.redrawEnd() }
-        editor.onEdit?(DocumentMapper.content(storage, trailing: text.trailing, meta: meta))
+        forgetTouched()
+        var next: [String: Shown] = [:]
+        let content = DocumentMapper.content(
+            storage, blocks: DocumentMapper.blocks(storage, trailing: text.trailing), meta: meta
+        ) { info, range in
+            let n = node(info, range)
+            next[info.id] = Shown(info: info, came: kept(info)?.came, node: n)
+            return n
+        }
+        shown = next
+        editor.onEdit?(content)
     }
 }

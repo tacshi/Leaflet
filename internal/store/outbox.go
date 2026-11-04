@@ -161,9 +161,22 @@ func sameJSON(a, b any) bool {
 	return errA == nil && errB == nil && string(ja) == string(jb)
 }
 
-// Pending returns the queue, oldest first.
+// Pending returns the queue, oldest first, with each entry's payload.
 func (s *Store) Pending() ([]OutboxEntry, error) {
-	rows, err := s.db.Query(`SELECT id, entity, entity_id, op, payload, revision, label, page_id, attempts, last_error, created_at FROM outbox ORDER BY id`)
+	return s.pending(`payload`)
+}
+
+// Queued returns the queue, oldest first, without the payloads, which
+// LoadPayload reads an entry at a time as it goes: a queue of many changes
+// is never all in memory at once.
+func (s *Store) Queued() ([]OutboxEntry, error) {
+	return s.pending(`''`)
+}
+
+// pending lists the queue with payload, the column, or an empty text
+// in its place.
+func (s *Store) pending(payload string) ([]OutboxEntry, error) {
+	rows, err := s.db.Query(`SELECT id, entity, entity_id, op, ` + payload + `, revision, label, page_id, attempts, last_error, created_at FROM outbox ORDER BY id`) // #nosec G202 -- payload is one of the literals above.
 	return collect(rows, err, func(sc scanner) (OutboxEntry, error) {
 		var e OutboxEntry
 		var page, lastErr sql.NullString
@@ -172,6 +185,18 @@ func (s *Store) Pending() ([]OutboxEntry, error) {
 		e.PageID, e.LastError, e.CreatedAt = page.String, lastErr.String, time.UnixMilli(created)
 		return e, err
 	})
+}
+
+// LoadPayload reads the payload of an entry Queued listed, as it is queued
+// now: one replaced since comes with its revision, so it leaves the queue
+// only as sent. It reports false for an entry no longer queued, as one
+// sent or dropped meanwhile.
+func (s *Store) LoadPayload(e *OutboxEntry) (bool, error) {
+	err := s.db.QueryRow(`SELECT payload, revision FROM outbox WHERE id = ?`, e.ID).Scan(&e.Payload, &e.Revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // PendingCount is how many changes wait for the server, to show: 0 when

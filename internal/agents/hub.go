@@ -5,6 +5,7 @@ import (
 	"context"
 	"log"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,6 +77,9 @@ type Run struct {
 	// KeptToPage is a run that read nothing beyond its page: a turn of
 	// its conversation that the next run may take for the user's.
 	KeptToPage bool `json:"KeptToPage,omitempty"`
+	// Guarded is a run whose URL guard was on as it ended: its reply may
+	// carry what it read beyond its page or on the web (ReplyBlocks).
+	Guarded bool `json:"Guarded,omitempty"`
 	// kept is a run whose "Before" snapshot is in the page's history.
 	kept bool
 	// stop cancels a run on this device while it works; a cloud run goes
@@ -108,6 +112,13 @@ type Hub struct {
 	// PublicLink reports whether a page has a public link open now, which
 	// the app serves; nil is none.
 	PublicLink func(pageID string) bool
+	// links are when each page's public link, which another device
+	// serves, stops counting, as the server last said (publicElsewhere),
+	// and leases how many leases this device took of each page's link, the
+	// latest of which stands (ServePublicLink). Guarded by linksMu.
+	linksMu sync.Mutex
+	links   map[string]time.Time
+	leases  map[string]int
 	// epoch counts the accounts the hub has worked for: Forget moves it
 	// on, and a run started for an earlier one writes nothing more.
 	epoch atomic.Int64
@@ -173,7 +184,7 @@ type RunOptions struct {
 	Selection   string
 	CommentID   string
 	Agent       *store.ModelChoice
-	History     []map[string]string
+	History     []Turn
 	// KeptToPage is a History whose runs read nothing beyond the page.
 	KeptToPage bool
 	// Reply is the chat message that shows the run.
@@ -288,7 +299,11 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 			if option.Local() {
 				var client Model
 				if client, err = h.ModelFor(option.Provider); err == nil {
-					res, err = RunLocal(ctx, client, req, h.toolContext(pageID, page.DisplayTitle(), option.Name(), work, settings), events)
+					tc := h.toolContext(pageID, page.DisplayTitle(), option.Name(), work, settings)
+					if tc.ListPages != nil && h.publicElsewhere(ctx, pageID) {
+						tc.ListPages, tc.ReadOtherPage = nil, nil
+					}
+					res, err = RunLocal(ctx, client, req, tc, events)
 				}
 			} else {
 				if err = h.host.FlushPage(ctx, pageID); err == nil {
@@ -315,14 +330,15 @@ func (h *Hub) Stop(pageID, runID string) {
 	run.stop()
 }
 
-// chatSaveEvery spaces the saves of a page's chat as a run's ops come.
+// chatSaveEvery spaces the saves of a chat's run as its ops come.
 const chatSaveEvery = time.Second
 
 // arrived takes a run's op as it comes, on the main thread. An open page
 // gets it at once, and so its editor saves it before the run ends: the
 // page's "Before" snapshot goes first, and the chat keeps the run's ops
-// as they come (a save a second at most), so a run the app quit during
-// can still be undone, and the page still goes back to how it was.
+// as they come (a save a second at most, after the first of the run
+// alone: saveRunning), so a run the app quit during can still be undone,
+// and the page still goes back to how it was.
 func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, d *delivery, o RunOptions, op doc.Op, summary string) {
 	if h.gone(run) {
 		return
@@ -340,7 +356,13 @@ func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, 
 		}
 		d.to(live, run.Ops)
 		if o.Reply != nil && time.Since(d.chatSaved) >= chatSaveEvery {
-			h.saveChat(s)
+			// The chat whole the first time, which has the run then, and
+			// after that the run alone.
+			if d.chatSaved.IsZero() {
+				h.saveChat(s)
+			} else {
+				h.saveRunning(s, run)
+			}
 			d.chatSaved = time.Now()
 		}
 	case !option.Local():
@@ -489,7 +511,7 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		return
 	}
 	run.Reply, run.Answer, run.Activity = res.Reply, "", ""
-	run.KeptToPage = res.KeptToPage
+	run.KeptToPage, run.Guarded = res.KeptToPage, res.Guarded
 	// A cloud run whose stream was cut off has its ops from the server's
 	// job, those after the cut too: all of them are the run's, to undo.
 	if len(res.Ops) > len(run.Ops) {
@@ -562,6 +584,12 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		o.Reply.Error = run.Error != ""
 		o.Reply.Text = Describe(run)
 		h.saveChat(s)
+		// The chat has the run whole now.
+		if !d.chatSaved.IsZero() {
+			if err := h.st.DeleteValue(runningKey(pageID)); err != nil {
+				log.Printf("agent chat: %v", err)
+			}
+		}
 	}
 	if o.Done != nil {
 		o.Done(run)
@@ -593,6 +621,33 @@ func (h *Hub) logLocalJob(run *Run, req Request) {
 	}); err != nil {
 		log.Printf("agent job: %v", err)
 	}
+}
+
+// ReplyBlocks are a run's answer in words, reply, as blocks to put in its
+// page, as Insert puts them: its Markdown read as blocks. The reply keeps
+// to no URL guard (checkURLs): of a run whose guard was on, or that read
+// beyond its page, each picture is a link to it instead, as the app loads
+// a picture by itself, and its URL, which the run picked, could carry
+// what it read. A run not known, nil, is taken for one of those.
+func ReplyBlocks(reply string, run *Run) []*doc.Node {
+	nodes := doc.MarkdownBlocks(reply)
+	if run != nil && run.KeptToPage && !run.Guarded {
+		return nodes
+	}
+	var unload func([]*doc.Node)
+	unload = func(nodes []*doc.Node) {
+		for i, n := range nodes {
+			if n.Type == "image" {
+				link := n.Str("url")
+				p := &doc.Node{ID: n.ID, Type: "paragraph", Children: n.Children}
+				p.SetDelta(doc.Delta{{Text: cmp.Or(strings.TrimSpace(n.Str("alt")), link), Attrs: doc.Attrs{Href: link}}})
+				nodes[i] = p
+			}
+			unload(nodes[i].Children)
+		}
+	}
+	unload(nodes)
+	return nodes
 }
 
 // Describe is how a run ended, for its reply.

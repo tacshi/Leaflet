@@ -99,6 +99,37 @@ func (s *contentServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func jsonNumber(n int64) string { raw, _ := json.Marshal(n); return string(raw) }
 
+// askedPages are the pages a request names by page_id, as page_id=eq.x
+// or page_id=in.("x","y").
+func askedPages(r *http.Request) []string {
+	v := r.URL.Query().Get("page_id")
+	if id, ok := strings.CutPrefix(v, "eq."); ok {
+		return []string{id}
+	}
+	list, ok := strings.CutPrefix(v, "in.(")
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, id := range strings.Split(strings.TrimSuffix(list, ")"), ",") {
+		out = append(out, strings.Trim(id, `"`))
+	}
+	return out
+}
+
+// contentRows answers a request for pages' content with row for each page
+// it names, as the server does, with the page's ID.
+func contentRows(r *http.Request, row func(id string) map[string]any) []map[string]any {
+	out := []map[string]any{}
+	for _, id := range askedPages(r) {
+		if m := row(id); m != nil {
+			m["page_id"] = id
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // fullPass is a service on a server a whole pass runs against: content
 // answers for page_content, and every other table has no rows and takes
 // what is sent. requests are those it had, as "GET /rest/v1/comments".

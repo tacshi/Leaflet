@@ -1286,12 +1286,20 @@ func (a *App) inlinePanel(c *ui.Context, panel ui.Element, ip *inlinePrompt, pal
 }
 
 // insertReply puts an agent's reply in the page after a block, its
-// Markdown read as blocks, as pasting it does.
+// Markdown read as blocks, as pasting it does: of a run that read beyond
+// the page or the web, its pictures as links to them, as the inline
+// prompt's run, whose reply it is, says (agents.ReplyBlocks).
 func (a *App) insertReply(after, reply string) {
 	if a.page == nil {
 		return
 	}
-	nodes := doc.MarkdownBlocks(reply)
+	var run *agents.Run
+	if ip := a.dialogs.inline; ip != nil && ip.runID != "" {
+		if r := a.hub.Session(a.page.id).Run(ip.runID); r != nil && r.Reply == reply {
+			run = r
+		}
+	}
+	nodes := agents.ReplyBlocks(reply, run)
 	if len(nodes) == 0 {
 		return
 	}

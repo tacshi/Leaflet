@@ -252,7 +252,6 @@ func (e *Editor) dividerShortcut(n *doc.Node) {
 	e.pushUndo(false)
 	_ = e.Content.Insert(doc.Position{Before: n.ID}, &doc.Node{ID: doc.NewBlockID(), Type: "divider"})
 	n.SetDelta(nil)
-	e.layouts = map[string]*blockLayout{}
 	e.anchor, e.focus = Pos{n.ID, 0}, Pos{n.ID, 0}
 }
 
@@ -860,7 +859,6 @@ func (e *Editor) insertBlocks(nodes ...*doc.Node) {
 			last = p
 		}
 	}
-	e.layouts = map[string]*blockLayout{}
 	e.Select(Pos{last.ID, textLen(last)}, Pos{last.ID, textLen(last)})
 	e.changed()
 }
@@ -893,7 +891,6 @@ func (e *Editor) shareToVideo(id, link, video string) {
 		last = newText("paragraph", nil)
 		_ = e.Content.Insert(doc.Position{After: v.ID}, last)
 	}
-	e.layouts = map[string]*blockLayout{}
 	if held {
 		e.Select(Pos{last.ID, textLen(last)}, Pos{last.ID, textLen(last)})
 	}
@@ -947,7 +944,6 @@ func (e *Editor) LinkToMedia(p Pos) {
 		// Leave somewhere to type after it at the end of the page.
 		_ = e.Content.Insert(doc.Position{After: m.ID}, newText("paragraph", nil))
 	}
-	e.layouts = map[string]*blockLayout{}
 	e.Select(Pos{m.ID, 0}, Pos{m.ID, 0})
 	e.changed()
 }

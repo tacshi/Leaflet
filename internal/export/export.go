@@ -203,12 +203,22 @@ func putAudio(src Source, rec store.Recording, path string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	data, err := src.Rec.Audio(ctx, rec)
+	audio, err := src.Rec.OpenAudio(ctx, rec)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = audio.Close() }()
+	// Written as it comes, as a long recording is hundreds of megabytes.
 	// Audio cut short goes, or another block would take it as it is.
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	out, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600) // #nosec G304 -- a file in the export's own folder.
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, audio)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
 		_ = os.Remove(path)
 		return err
 	}

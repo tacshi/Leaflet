@@ -6,6 +6,35 @@
 
 alter table auth.users add column if not exists email_confirmed_at timestamptz;
 
+-- Auth's sessions, which its refresh tokens belong to, and auth.jwt(),
+-- the caller's claims. Made as supabase_auth_admin, as Auth makes them,
+-- so the image's default privileges give postgres what a project gives
+-- it: sign_out_device deletes a session, as postgres.
+set role supabase_auth_admin;
+create table if not exists auth.sessions (
+  id uuid primary key,
+  user_id uuid not null references auth.users (id) on delete cascade,
+  created_at timestamptz default now(),
+  updated_at timestamptz default now()
+);
+alter table auth.refresh_tokens
+  add column if not exists session_id uuid references auth.sessions (id) on delete cascade;
+do $$
+begin
+  if to_regprocedure('auth.jwt()') is null then
+    create function auth.jwt() returns jsonb
+    language sql stable
+    as $f$
+      select coalesce(
+        nullif(current_setting('request.jwt.claim', true), ''),
+        nullif(current_setting('request.jwt.claims', true), '')
+      )::jsonb
+    $f$;
+  end if;
+end;
+$$;
+reset role;
+
 create table if not exists storage.buckets (
   id text primary key,
   name text not null unique,

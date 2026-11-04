@@ -247,7 +247,7 @@ func createPage(tx *sql.Tx, sess Session, o NewPageOptions) (Page, error) {
 	if err := writePage(tx, p); err != nil {
 		return Page{}, err
 	}
-	if err := writeContent(tx, p.ID, body, now, nil); err != nil {
+	if err := writeContent(tx, p.ID, body, now); err != nil {
 		return Page{}, err
 	}
 	if err := queue(tx, "pages", p.ID, PageToRemote(p), "new page", p.ID); err != nil {

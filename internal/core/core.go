@@ -10,6 +10,7 @@ import (
 	"errors"
 	"log"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 
 	"github.com/egoist/mygo/i18n"
@@ -21,6 +22,7 @@ import (
 	"leaflet/internal/recording"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
+	"leaflet/internal/supabaseapi"
 	syncsvc "leaflet/internal/sync"
 )
 
@@ -82,8 +84,18 @@ type Core struct {
 	// updatingProject is set while the project is first brought up to
 	// date as the app starts (Start), as sync reads through Updating.
 	updatingProject atomic.Bool
-	// retryingUpdate is set while keepProjectUpdated tries again.
-	retryingUpdate atomic.Bool
+	// startedUpdate is set once Start has first looked at whether the
+	// project needs bringing up to date, as a run of the app starts: only
+	// then do the changes wait for it. updatingRun is set while a run of
+	// tries to bring it up to date is under way (keepProjectUpdated), which
+	// a later Start, as the iOS app comes back to the screen, leaves be.
+	startedUpdate atomic.Bool
+	updatingRun   atomic.Bool
+	// mgmt is the Supabase account's sign-in as updateProject or signing
+	// in last had it, with its access token, for the next update to use
+	// rather than renew the sign-in again; guarded by mgmtMu.
+	mgmtMu sync.Mutex
+	mgmt   *supabaseapi.Client
 
 	// OpenURL and WatchICloud are the Platform's.
 	OpenURL     func(url string)
@@ -157,15 +169,26 @@ func Open(cfg Config) (*Core, error) {
 
 // Start starts what runs in the background, once the app is ready for
 // what it reports: watching the Leaflet folder in iCloud Drive while
-// iCloud sync is on, the sync loop, and bringing the Supabase project up
-// to this version of Leaflet.
+// iCloud sync is on, the sync loop, and bringing the Supabase project up to
+// this version of Leaflet, while it has not been yet (projectOutOfDate)
+// and no run of tries at it is under way. A project up to date is not
+// asked again, and its sign-in not renewed, each time the iOS app comes
+// back to the screen.
 func (c *Core) Start() {
 	c.watch(c.Sync.ICloudOn())
-	// The changes wait to go up while the project is brought up to date,
-	// a try that failed tried again later.
-	c.updatingProject.Store(true)
+	first := c.startedUpdate.CompareAndSwap(false, true)
+	if c.projectOutOfDate() && c.updatingRun.CompareAndSwap(false, true) {
+		// The changes wait to go up while the project is first brought up
+		// to date as the app starts, a try that failed tried again later.
+		if first {
+			c.updatingProject.Store(true)
+		}
+		guard.Go(func() {
+			defer c.updatingRun.Store(false)
+			c.keepProjectUpdated(first)
+		})
+	}
 	c.Sync.Start()
-	guard.Go(c.keepProjectUpdated)
 }
 
 // startICloud sets iCloud sync up as the settings have it. Signed in, the

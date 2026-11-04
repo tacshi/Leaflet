@@ -147,7 +147,11 @@ struct PageScreen: View {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .background(palette.surface)
+        // Under the keyboard too, as the editor: the page is given the
+        // keyboard's safe area at its foot, which a background style keeps
+        // out of, and the hosting view's own background, black in the dark,
+        // would show behind the text there.
+        .background { palette.surface.ignoresSafeArea() }
         .navigationTitle(row?.displayTitle ?? "")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

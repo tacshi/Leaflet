@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -91,6 +92,8 @@ func TestMeterWindowsAcrossChunks(t *testing.T) {
 }
 
 // A WAV file is the user's alone, and never one that was there already.
+// Windows keeps no Unix modes: Go reports any file it can write as 0666,
+// and who else may read it is up to the access list of its folder.
 func TestCreateWavIsPrivate(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "a.wav")
 	w, err := CreateWav(path)
@@ -98,8 +101,12 @@ func TestCreateWavIsPrivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = w.Close()
-	if fi, err := os.Stat(path); err != nil || fi.Mode().Perm() != 0o600 {
-		t.Errorf("mode %v, %v", fi.Mode(), err)
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Errorf("mode %v", fi.Mode())
 	}
 	if _, err := CreateWav(path); err == nil {
 		t.Error("an existing file was written over")

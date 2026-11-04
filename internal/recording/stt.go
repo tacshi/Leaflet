@@ -465,7 +465,9 @@ func (s *Soniox) Finish() ([]store.Segment, error) {
 	s.wmu.Lock()
 	s.ending.Store(true)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	_ = s.conn.Write(ctx, websocket.MessageBinary, []byte{})
+	// An empty text frame ends the stream. An empty binary one is only an
+	// empty piece of audio, after which Soniox goes on waiting for more.
+	_ = s.conn.Write(ctx, websocket.MessageText, []byte{})
 	cancel()
 	s.wmu.Unlock()
 	select {

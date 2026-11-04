@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -42,6 +43,51 @@ func searchFor(t *testing.T, s *Store, q string) []string {
 		t.Fatal(err)
 	}
 	return titlesOf(hits)
+}
+
+// The texts that may hold what is searched for are all found while the
+// index catches up beside the search, as it does in the background: one
+// indexed meanwhile is found as indexed or as still to index, never as
+// neither.
+func TestSearchCandidatesWhileIndexing(t *testing.T) {
+	s := open(t)
+	const pages = 60
+	for i := range pages {
+		textPage(t, s, fmt.Sprintf("Page %d", i), "the quarterly budget")
+	}
+	ctx := context.Background()
+	for range 5 {
+		// Every text waits to be indexed again.
+		if _, err := s.db.Exec(`UPDATE text_writes SET indexed = NULL`); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan error, 1)
+		go func() {
+			for {
+				if all, err := s.indexFor(ctx, time.Millisecond); err != nil || all {
+					done <- err
+					return
+				}
+			}
+		}()
+		for indexing := true; indexing; {
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatal(err)
+				}
+				indexing = false
+			default:
+			}
+			found, err := s.searchCandidates(ctx, "page", "quarterly")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(found.ids) != pages {
+				t.Fatalf("found %d of the %d pages while indexing", len(found.ids), pages)
+			}
+		}
+	}
 }
 
 // Search finds text as it is now through the index: text written since it
@@ -240,7 +286,7 @@ func TestDownloadedFileFromKeepsNothingCutShort(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if data, _ := os.ReadFile(local); string(data) != "the whole file" {
+	if data, _ := os.ReadFile(local); string(data) != "the whole file" { // #nosec G304 -- the file the store just wrote.
 		t.Errorf("kept %q", data)
 	}
 }

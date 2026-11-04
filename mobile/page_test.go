@@ -16,7 +16,7 @@ import (
 // copy of the whole page, and leaves the content it came from, and each
 // before that, as they were: the revs share the blocks they have alike.
 func TestThawedOpsLeaveEarlierRevsAsTheyWere(t *testing.T) {
-	r := rand.New(rand.NewPCG(1, 2))
+	r := rand.New(rand.NewPCG(1, 2)) // #nosec G404 -- seeded, for runs a test can repeat.
 	ids := 0
 	newID := func() string {
 		ids++

@@ -235,21 +235,20 @@ func (s *Store) searchCandidates(ctx context.Context, kind, q string) (candidate
 		quoted[i] = `"` + strings.ReplaceAll(g, `"`, `""`) + `"`
 	}
 	out := candidates{ids: map[string]bool{}}
-	add := func(sc scanner) (bool, error) {
+	// Those written since they were indexed, or never, as while the
+	// index is made, are read as they are. It is one statement, which
+	// sees the index and the writes as they were at one moment: indexing
+	// in the background between two would take a text out of what is
+	// left to index after the index was asked, and it would be in neither.
+	rows, err := s.db.QueryContext(ctx, `SELECT w.id FROM text_writes w
+		WHERE w.kind = ? AND (w.indexed IS NOT w.write_id
+			OR w.n IN (SELECT rowid FROM search_index WHERE search_index MATCH ?))`, kind, strings.Join(quoted, " AND "))
+	if err := each(rows, err, func(sc scanner) (bool, error) {
 		var id string
 		err := sc.Scan(&id)
 		out.ids[id] = true
 		return true, err
-	}
-	rows, err := s.db.QueryContext(ctx, `SELECT w.id FROM search_index f JOIN text_writes w ON w.n = f.rowid
-		WHERE search_index MATCH ? AND w.kind = ? AND w.indexed = w.write_id`, strings.Join(quoted, " AND "), kind)
-	if err := each(rows, err, add); err != nil {
-		return candidates{}, err
-	}
-	// Those written since they were indexed, or never, as while the
-	// index is made, are read as they are.
-	rows, err = s.db.QueryContext(ctx, `SELECT id FROM text_writes WHERE kind = ? AND indexed IS NOT write_id`, kind)
-	if err := each(rows, err, add); err != nil {
+	}); err != nil {
 		return candidates{}, err
 	}
 	return out, nil

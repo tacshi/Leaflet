@@ -159,6 +159,22 @@ const URLS = [
   "https://player.vimeo.com/video/76979871",
   "https://vİmeo.com/76979871",
   "https://vimeo.com/channels/staff",
+  "https://www.bilibili.com/video/BV1KofNYjEuK/?p=2",
+  "https://www.bilibili.com/zh-Hans/video/BV1e5nv6GEZJ",
+  "https://m.bilibili.com/video/av573719854",
+  "https://www.bilibili.com/video/BV0KofNYjEuK",
+  "https://b23.tv/BV1KofNYjEuK",
+  "https://b23.tv/AbCdEfG",
+  "https://player.bilibili.com/player.html?aid=573719854",
+  "https://player.bilibili.com/player.html?bvid=%42V1KofNYjEuK",
+  "https://player.bilibili.com/player.html?aid=0",
+  "https://www.dailymotion.com/video/x7tgad0_a-title",
+  "https://dai.ly/x8j5v1k",
+  "https://geo.dailymotion.com/player.html?video=x8j5v1k",
+  "https://www.dailymotion.com/embed/video/",
+  "https://www.nicovideo.jp/watch/sm9",
+  "https://nico.ms/so38016254",
+  "https://www.nicovideo.jp/watch/lv1",
   "https://example.com/clip.MP4",
   "https://example.com/clip.webm?x=1",
   "https://example.com/a%2Emp4",
@@ -179,6 +195,11 @@ export function url(r: Random): string {
     "www.youtube.com",
     "youtu.be",
     "vimeo.com",
+    "www.bilibili.com",
+    "player.bilibili.com",
+    "b23.tv",
+    "dai.ly",
+    "nico.ms",
     "1.2.3.4",
     "[::1]",
     "",
@@ -188,8 +209,36 @@ export function url(r: Random): string {
     "x y",
   ]);
   const port = r.pick(["", "", "", ":8080", ":0", ":99999", ":", ":x"]);
-  const path = r.text(["/", "a", ".png", ".mp4", "%20", "%zz", "%2F", " ", "　", "watch", "dQw4w9WgXcQ", "é"], 5);
-  const query = r.pick(["", "", "?v=dQw4w9WgXcQ", "?x=%zz", "?a=1&v=x"]);
+  const path = r.text([
+    "/",
+    "a",
+    ".png",
+    ".mp4",
+    "%20",
+    "%zz",
+    "%2F",
+    " ",
+    "　",
+    "watch",
+    "dQw4w9WgXcQ",
+    "é",
+    "video",
+    "BV1KofNYjEuK",
+    "av2",
+    "player.html",
+    "x8j5v1k",
+    "sm9",
+  ], 5);
+  const query = r.pick([
+    "",
+    "",
+    "?v=dQw4w9WgXcQ",
+    "?x=%zz",
+    "?a=1&v=x",
+    "?aid=2",
+    "?bvid=BV1KofNYjEuK",
+    "?video=x8j5v1k",
+  ]);
   const fragment = r.pick(["", "", "#top", "#%zz", "#a b"]);
   return scheme + user + host + port + path + query + fragment;
 }

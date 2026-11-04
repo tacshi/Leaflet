@@ -60,7 +60,7 @@ func Slash(templates []Item) []Item {
 		{"embed", locales.HostSlashEmbed(), locales.HostSlashEmbedHint(), "layout-grid", blocks, "embed html widget"},
 		{"subpage", locales.HostSlashSubpage(), locales.HostSlashSubpageHint(), "file-plus", blocks, "page subpage child"},
 		{"image", locales.HostSlashImage(), locales.HostSlashImageHint(), "image", blocks, "image picture photo"},
-		{"video", locales.HostSlashVideo(), locales.HostSlashVideoHint(), "play", blocks, "video youtube vimeo movie film mp4"},
+		{"video", locales.HostSlashVideo(), locales.HostSlashVideoHint(), "play", blocks, "video youtube vimeo bilibili dailymotion niconico movie film mp4"},
 		{"link_preview", locales.HostSlashLinkCard(), locales.HostSlashLinkCardHint(), "globe", blocks, "link card bookmark preview url web"},
 		{"file", locales.HostSlashFile(), locales.HostSlashFileHint(), "paperclip", blocks, "file attach attachment upload document pdf"},
 		{"recording", locales.CommonRecording(), locales.HostSlashRecordingHint(), "audio-lines", blocks, "record audio voice transcript"},

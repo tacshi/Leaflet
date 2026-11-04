@@ -417,7 +417,7 @@ func (w htmlWriter) block(n *Node) {
 		}
 		// It plays in place, as in the app, but only once the visitor
 		// asks: the page's player does not start as it loads.
-		src := strings.Replace(strings.Replace(v.PlayerURL(), "autoplay=1&", "", 1), "?autoplay=1", "", 1)
+		src := v.PlayerURL(false)
 		w.write("<figure", w.attrs(n, "video"), ">")
 		if v.Provider == "file" {
 			w.write(`<video controls preload="metadata" src="`, html.EscapeString(src), `"></video>`)

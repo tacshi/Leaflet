@@ -1188,9 +1188,9 @@ export function calloutTone(tone: unknown): string {
 const VIDEO_EXTS = new Set([".mp4", ".m4v", ".mov", ".webm", ".ogv"]);
 
 /**
- * Whether a link is to a YouTube or Vimeo video, or a video file
- * (doc.ParseVideoURL): a link to one of those sites that names no video
- * may still be to a file.
+ * Whether a link is to a video on YouTube, Vimeo, Bilibili, Dailymotion or
+ * Niconico, or a video file (doc.ParseVideoURL): a link to one of those
+ * sites that names no video may still be to a file.
  */
 export function isVideoURL(link: string): boolean {
   const u = parseURL(trimSpace(link));
@@ -1198,9 +1198,10 @@ export function isVideoURL(link: string): boolean {
   const host = goLower(hostname(u.host)).replace(/^www\./, "");
   const parts = u.path.split("/").filter(Boolean);
   const youtubeId = /^[A-Za-z0-9_-]{11}$/;
+  const one = parts.length === 1 ? parts[0] : "";
   switch (host) {
     case "youtu.be":
-      if (parts.length === 1 && youtubeId.test(parts[0])) return true;
+      if (youtubeId.test(one)) return true;
       break;
     case "youtube.com":
     case "m.youtube.com":
@@ -1217,6 +1218,44 @@ export function isVideoURL(link: string): boolean {
     case "vimeo.com":
     case "player.vimeo.com":
       if (parts.some((p) => /^[0-9]+$/.test(p))) return true;
+      break;
+    case "bilibili.com":
+    case "m.bilibili.com":
+    case "player.bilibili.com":
+    case "b23.tv": {
+      const i = parts.indexOf("video");
+      let id = "";
+      if (host === "b23.tv") id = one;
+      else if (one === "player.html") {
+        id = queryValue(u.rawQuery, "bvid");
+        const aid = queryValue(u.rawQuery, "aid");
+        if (id === "" && aid !== "") id = "av" + aid;
+      } else if (i >= 0 && i + 1 < parts.length) id = parts[i + 1];
+      if (/^(?:BV[1-9A-HJ-NP-Za-km-z]{10}|av[1-9][0-9]*)$/.test(id)) return true;
+      break;
+    }
+    case "dailymotion.com":
+    case "geo.dailymotion.com":
+    case "dai.ly": {
+      const id = host === "dai.ly"
+        ? one
+        : one === "player.html"
+        ? queryValue(u.rawQuery, "video")
+        : parts.length === 2 && parts[0] === "video"
+        ? parts[1]
+        : parts.length === 3 && parts[0] === "embed" && parts[1] === "video"
+        ? parts[2]
+        : "";
+      if (/^[xk][0-9A-Za-z]+$/.test(id.split("_")[0])) return true;
+      break;
+    }
+    case "nicovideo.jp":
+    case "sp.nicovideo.jp":
+    case "embed.nicovideo.jp":
+    case "nico.ms": {
+      const id = host === "nico.ms" ? one : parts.length === 2 && parts[0] === "watch" ? parts[1] : "";
+      if (/^(?:sm|so|nm)[1-9][0-9]*$/.test(id)) return true;
+    }
   }
   return VIDEO_EXTS.has(goLower(pathExt(u.path))) && u.host !== "";
 }
@@ -1407,7 +1446,9 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
       const video = specPart(spec, "video");
       const url = trimSpace(str(video.url));
       if (!isVideoURL(url)) {
-        throw new SpecError("A video block needs `video.url`, a YouTube or Vimeo link or a link to a video file");
+        throw new SpecError(
+          "A video block needs `video.url`, a link to a YouTube, Vimeo, Bilibili, Dailymotion or Niconico video, or to a video file",
+        );
       }
       node = { id, type, data: { url, title: trimSpace(str(video.title)) } };
       break;

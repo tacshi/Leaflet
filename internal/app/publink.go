@@ -177,7 +177,7 @@ const (
 // video players the app plays videos in, and its embeds, each of which is
 // served at its own path, sandboxed off the network.
 const pubCSP = "default-src 'none'; img-src 'self' https: data:; style-src 'unsafe-inline'; script-src 'self'; " +
-	"frame-src 'self' https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https: http:; " +
+	"frame-src 'self' " + doc.VideoPlayers + "; media-src 'self' https: http:; " +
 	"connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 
 // findCloudflared looks for cloudflared on the login shell's PATH, which

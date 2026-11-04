@@ -304,16 +304,16 @@ var DiagramCSP = scriptsCSP(diagramScript)
 // gets none, and refuses to play.
 const VideoOrigin = "https://app.capyvibe.leaflet/"
 
-// VideoCSP lets a video's page frame only the two players, or play only
-// web video files, and run nothing of its own.
-const VideoCSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; media-src https: http:"
+// VideoCSP lets a video's page frame only the sites' players, or play
+// only web video files, and run nothing of its own.
+const VideoCSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src " + doc.VideoPlayers + "; media-src https: http:"
 
 // VideoPage frames a video's player, or plays the file, to fill the web
 // view.
 func VideoPage(v doc.Video) string {
-	player := `<iframe src="` + html.EscapeString(v.PlayerURL()) + `" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`
+	player := `<iframe src="` + html.EscapeString(v.PlayerURL(true)) + `" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`
 	if v.Provider == "file" {
-		player = `<video src="` + html.EscapeString(v.PlayerURL()) + `" controls autoplay playsinline></video>`
+		player = `<video src="` + html.EscapeString(v.PlayerURL(true)) + `" controls autoplay playsinline></video>`
 	}
 	return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width">` +
 		`<meta http-equiv="Content-Security-Policy" content="` + VideoCSP + `">` +

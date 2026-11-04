@@ -91,6 +91,10 @@ struct RootView: View {
                     scene.focusChat = false
                     scene.panelGone(asSheet: true)
                 }
+                // Clear of the sheet's grabber and its round corners: no
+                // tabs stand above the chat here, as they do in a page's.
+                .padding(.top, 14)
+                .padding(.horizontal, 8)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }

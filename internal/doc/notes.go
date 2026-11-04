@@ -140,7 +140,7 @@ func leadingTime(line string) (int, string) {
 		}
 	}
 	// The time stands alone: 1:23pm is not one.
-	if r, _ := utf8.DecodeRuneInString(rest); rest != "" && (unicode.IsLetter(r) || unicode.IsDigit(r)) {
+	if runsOn(rest) {
 		return -1, line
 	}
 	rest = strings.TrimLeftFunc(rest, unicode.IsSpace)
@@ -181,17 +181,27 @@ func noteParts(text string) []NotePart {
 
 // standsAlone tells whether the time at text[i:j] is not part of
 // something longer: no letter or digit next to it, nor a colon or a point
-// before it, nor a colon after it that more digits follow.
+// before it, nor one after it that more digits follow.
 func standsAlone(text string, i, j int) bool {
 	word := func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }
 	if r, _ := utf8.DecodeLastRuneInString(text[:i]); i > 0 && (word(r) || r == ':' || r == '.') {
 		return false
 	}
-	r, size := utf8.DecodeRuneInString(text[j:])
-	if j < len(text) && word(r) {
+	return !runsOn(text[j:])
+}
+
+// runsOn reports whether what follows a time makes it part of something
+// longer: a letter or a digit, as 1:23pm, or a colon or a point before a
+// digit, as 12:34:56:78 or 1:23.5.
+func runsOn(rest string) bool {
+	r, size := utf8.DecodeRuneInString(rest)
+	switch {
+	case rest == "":
 		return false
+	case unicode.IsLetter(r) || unicode.IsDigit(r):
+		return true
 	}
-	return r != ':' || j+size >= len(text) || text[j+size] < '0' || text[j+size] > '9'
+	return (r == ':' || r == '.') && size < len(rest) && rest[size] >= '0' && rest[size] <= '9'
 }
 
 // Text is the line's text without its time.

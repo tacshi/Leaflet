@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"leaflet/locales"
@@ -57,6 +58,12 @@ type HTMLOptions struct {
 	// colors alone, every fold open, each video as a link to it, and its
 	// pictures loaded with the page, which paper can't scroll to.
 	Print bool
+	// Region is where the page is printed, a code such as TW, whose way
+	// of writing Chinese a printed page's fonts take.
+	Region string
+	// Video gives a video what its link lacks and its player needs, as a
+	// Bilibili part's cid (web.VideoPart); nil plays the link as it is.
+	Video func(v Video) Video
 	// ScriptSource returns a script's own source, written in the page in
 	// place of Script's link, for a page loaded from a string, which has
 	// nowhere to load scripts from; "" leaves it to Script. The sources
@@ -94,6 +101,9 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 		embed = embed || n.Type == "embed" && opts.Embed != nil
 		recording = recording || n.Type == "recording"
 		if v, ok := ParseVideoURL(n.Str("url")); ok && n.Type == "video" {
+			if opts.Video != nil && !opts.Print {
+				v = opts.Video(v)
+			}
 			videos[n.ID] = v
 		}
 	})
@@ -128,7 +138,7 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	b.WriteString(`><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`)
 	css := pageCSS
 	if opts.Print {
-		css = printCSS + printFontCSS(opts.Lang)
+		css = printCSS + printFontCSS(opts.Lang, opts.Region, c.PlainText())
 	}
 	b.WriteString(`<meta name="robots" content="noindex"><title>` + html.EscapeString(title) + `</title><style>` + css + `</style>` + opts.Head)
 	// A script written in the page goes after it, where the blocks it
@@ -437,7 +447,7 @@ func (w htmlWriter) block(n *Node) {
 			html.EscapeString(src), `" title="`, html.EscapeString(title), `" data-height="`, strconv.Itoa(height), `" style="height:`, strconv.Itoa(height),
 			`px" loading="lazy"></iframe></figure>`+"\n")
 	case "video":
-		v, ok := ParseVideoURL(n.Str("url"))
+		v, ok := w.videos[n.ID]
 		if !ok {
 			w.card(n)
 			break
@@ -807,16 +817,22 @@ figure.recording,.transcript{display:block}
 const cjkRange = "U+2E80-2FDF,U+3000-30FF,U+3190-31FF,U+3200-33FF,U+3400-4DBF,U+4E00-9FFF,U+F900-FAFF,U+FE30-FE4F,U+FF00-FFEF,U+20000-2FA1F"
 
 // printFontCSS sets a printed page's Chinese and Japanese in fonts the
-// system finds by name: PingFang SC, or Hiragino Sans for a page in
-// Japanese. For -apple-system, WebKit takes a hidden font, and the PDFs of
-// Apple's systems name radicals for many of its ideographs, as ⼈ for 人,
-// which only a font found by name tells back, so the page copies and
-// searches as it reads. Elsewhere, without those fonts, it changes
-// nothing.
-func printFontCSS(lang string) string {
+// system finds by name: Hiragino Sans for a page in Japanese, as its kana
+// or else the app's language lang says; PingFang TC or HK where region
+// writes Chinese as Taiwan or Hong Kong does; else PingFang SC. For
+// -apple-system, WebKit takes a hidden font, and the PDFs of Apple's
+// systems name radicals for many of its ideographs, as ⼈ for 人, which
+// only a font found by name tells back, so the page copies and searches
+// as it reads. Elsewhere, without those fonts, it changes nothing.
+func printFontCSS(lang, region, text string) string {
 	regular, bold := "PingFangSC-Regular", "PingFangSC-Semibold"
-	if strings.HasPrefix(lang, "ja") {
+	switch {
+	case strings.HasPrefix(lang, "ja") || strings.ContainsFunc(text, func(r rune) bool { return unicode.In(r, unicode.Hiragana, unicode.Katakana) }):
 		regular, bold = "HiraginoSans-W3", "HiraginoSans-W6"
+	case region == "TW":
+		regular, bold = "PingFangTC-Regular", "PingFangTC-Semibold"
+	case region == "HK" || region == "MO":
+		regular, bold = "PingFangHK-Regular", "PingFangHK-Semibold"
 	}
 	face := func(name, weight string) string {
 		return `@font-face{font-family:"Leaflet CJK";src:local("` + name + `");font-weight:` + weight + `;unicode-range:` + cjkRange + "}\n"

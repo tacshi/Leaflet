@@ -57,10 +57,10 @@ func LinkMoment(href string) (int, bool) {
 	if at, ok := ParseClock(t); ok {
 		return at, true
 	}
-	if t == "" || !linkTime.MatchString(strings.ToLower(t)) {
+	if t == "" {
 		return 0, false
 	}
-	return startOf(t), true
+	return linkSeconds(t)
 }
 
 // PageMention is the text and formats of a mention of page id titled

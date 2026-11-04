@@ -469,13 +469,21 @@ final class EditorController: NSObject, UITextViewDelegate {
 
     func removeBlock(_ id: String) { commands.removeBlock(id) }
 
+    /// node returns the block of id as the page has it now, or nil once it
+    /// is gone: a sheet saves into the block as it is then, with what
+    /// synced in while it was open.
+    func node(ofBlock id: String) -> DocNode? {
+        guard let (info, range) = text.blocks().first(where: { $0.info.id == id }) else {
+            return nil
+        }
+        return DocumentMapper.node(for: info, text: storage.attributedSubstring(from: range))
+    }
+
     /// copyBlock copies the block of id, as Copy does a selection of it:
     /// from a block's menu, which a block without text has.
     func copyBlock(_ id: String) {
-        guard let (info, range) = text.blocks().first(where: { $0.info.id == id }) else { return }
-        clipboard.copy(blocks: [
-            DocumentMapper.node(for: info, text: storage.attributedSubstring(from: range))
-        ])
+        guard let node = node(ofBlock: id) else { return }
+        clipboard.copy(blocks: [node])
     }
 
     /// cutBlock copies the block of id and takes it out of the page, as

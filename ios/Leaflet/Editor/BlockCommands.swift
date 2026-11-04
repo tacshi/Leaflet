@@ -260,6 +260,41 @@ final class BlockCommands {
         if let caret { restoreCaret(caret) }
     }
 
+    /// shareToVideo puts video in place of the paragraph of id while it
+    /// holds only link, a video's share link pasted on a line of its own,
+    /// once the share is followed to the video, as insertBlock puts the
+    /// video's link pasted there: with an empty block after it to write
+    /// on, where the caret goes when it was on the line. It is a step of
+    /// its own to undo, which takes it back to the link. A line changed
+    /// since stays as it is.
+    func shareToVideo(_ id: String, link: String, video: DocNode) {
+        guard textView.isEditable,
+            let p = text.paragraphs().first(where: { $0.info.id == id }),
+            p.info.type == "paragraph",
+            p.text.string.trimmingCharacters(in: .whitespaces) == link
+        else { return }
+        let all = NSRange(location: 0, length: p.text.length)
+        var linked = true
+        p.text.enumerateAttribute(.leafletHref, in: all) { value, range, _ in
+            let words = (p.text.string as NSString).substring(with: range)
+            if value as? String != link, !words.trimmingCharacters(in: .whitespaces).isEmpty {
+                linked = false
+            }
+        }
+        guard linked else { return }
+        let caret = text.position(at: textView.selectedRange.location)
+        let (attachment, info) = DocumentMapper.paragraph(video, depth: p.info.depth)
+        edits.keepingScroll {
+            edits.replace(p.range, with: attachment)
+            edits.setBlock(info, at: p.range.location, undoable: false)
+            edits.insertParagraph(
+                after: NSRange(location: p.range.location, length: attachment.length),
+                info: BlockInfo(id: BlockInfo.newID(), type: "paragraph", depth: p.info.depth),
+                text: "")
+        }
+        if caret.id != id { restoreCaret(caret) }
+    }
+
     /// insertBlocks puts blocks in the page after the block of id, and those
     /// in it, at its depth, or at the page's end once it is gone, as one
     /// step to undo, the caret and the page staying where they are: an

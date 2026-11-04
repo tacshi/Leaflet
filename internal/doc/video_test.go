@@ -30,8 +30,11 @@ func TestParseVideoURL(t *testing.T) {
 		{"https://m.bilibili.com/video/av573719854?p=1", Video{Provider: "bilibili", ID: "av573719854"}},
 		{"https://www.bilibili.com/s/video/BV1KofNYjEuK", Video{Provider: "bilibili", ID: "BV1KofNYjEuK"}},
 		{"https://b23.tv/BV1KofNYjEuK", Video{Provider: "bilibili", ID: "BV1KofNYjEuK"}},
-		{"https://player.bilibili.com/player.html?isOutside=true&aid=573719854&cid=1&p=3", Video{Provider: "bilibili", ID: "av573719854", Part: 3}},
+		{"https://player.bilibili.com/player.html?isOutside=true&aid=573719854&cid=1&p=3", Video{Provider: "bilibili", ID: "av573719854", Part: 3, CID: 1}},
 		{"https://player.bilibili.com/player.html?bvid=BV1KofNYjEuK&t=1m", Video{Provider: "bilibili", ID: "BV1KofNYjEuK", Start: 60}},
+		{"https://player.bilibili.com/player.html?aid=573719854&bvid=BV1KofNYjEuK&cid=1&page=2", Video{Provider: "bilibili", ID: "BV1KofNYjEuK", Part: 2, CID: 1}},
+		{"https://www.bilibili.com/video/bv1KofNYjEuK/", Video{Provider: "bilibili", ID: "BV1KofNYjEuK"}},
+		{"https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=99999999999", Video{Provider: "youtube", ID: "dQw4w9WgXcQ"}},
 		{"https://www.dailymotion.com/video/x8j5v1k?start=12", Video{Provider: "dailymotion", ID: "x8j5v1k", Start: 12}},
 		{"https://www.dailymotion.com/video/x7tgad0_a-title", Video{Provider: "dailymotion", ID: "x7tgad0"}},
 		{"https://dai.ly/x8j5v1k", Video{Provider: "dailymotion", ID: "x8j5v1k"}},
@@ -104,11 +107,17 @@ func TestVideoURLs(t *testing.T) {
 		{Video{Provider: "bilibili", ID: "BV1KofNYjEuK", Part: 2, Start: 30},
 			"https://www.bilibili.com/video/BV1KofNYjEuK?p=2&t=30",
 			"https://player.bilibili.com/player.html?autoplay=0&bvid=BV1KofNYjEuK&high_quality=1&p=2&t=30",
-			"https://api.bilibili.com/x/web-interface/view?bvid=BV1KofNYjEuK"},
+			"https://api.bilibili.com/x/player/pagelist?bvid=BV1KofNYjEuK"},
+		// Given its part, as its parts list it, its player is told the
+		// video's av number and the part's, as Bilibili's embed code says.
+		{Video{Provider: "bilibili", ID: "BV1uVxD6oE1y", CID: 43310384091},
+			"https://www.bilibili.com/video/BV1uVxD6oE1y",
+			"https://player.bilibili.com/player.html?aid=117555888986356&autoplay=0&bvid=BV1uVxD6oE1y&cid=43310384091&high_quality=1",
+			"https://api.bilibili.com/x/player/pagelist?bvid=BV1uVxD6oE1y"},
 		{Video{Provider: "bilibili", ID: "av573719854"},
 			"https://www.bilibili.com/video/av573719854",
 			"https://player.bilibili.com/player.html?aid=573719854&autoplay=0&high_quality=1",
-			"https://api.bilibili.com/x/web-interface/view?aid=573719854"},
+			"https://api.bilibili.com/x/player/pagelist?aid=573719854"},
 		{Video{Provider: "dailymotion", ID: "x8j5v1k", Start: 12},
 			"https://www.dailymotion.com/video/x8j5v1k?start=12",
 			"https://geo.dailymotion.com/player.html?video=x8j5v1k&startTime=12",
@@ -154,8 +163,11 @@ func TestVideoInfo(t *testing.T) {
 	}{
 		{Video{Provider: "youtube", ID: "dQw4w9WgXcQ"}, `{"title":" Never Gonna Give You Up ","thumbnail_url":"https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg"}`,
 			"Never Gonna Give You Up", "https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg", false},
-		{Video{Provider: "bilibili", ID: "BV1884g6mE8K"}, `{"code":0,"message":"0","data":{"bvid":"BV1884g6mE8K","title":"师父！","pic":"http://i2.hdslb.com/bfs/archive/97c9.jpg"}}`,
-			"师父！", "https://i2.hdslb.com/bfs/archive/97c9.jpg", false},
+		{Video{Provider: "bilibili", ID: "BV1884g6mE8K"}, `{"code":0,"message":"0","data":[{"cid":7,"page":1,"part":" 师父！","first_frame":"http://i2.hdslb.com/bfs/storyff/97c9.jpg"}]}`,
+			"师父！", "https://i2.hdslb.com/bfs/storyff/97c9.jpg", false},
+		{Video{Provider: "bilibili", ID: "BV1884g6mE8K", Part: 2}, `{"code":0,"data":[{"cid":7,"page":1,"part":"P1"},{"cid":8,"page":2,"part":"P2"}]}`,
+			"P2", "", false},
+		{Video{Provider: "bilibili", ID: "BV1884g6mE8K", Part: 3}, `{"code":0,"data":[{"cid":7,"page":1,"part":"P1"}]}`, "", "", true},
 		{Video{Provider: "bilibili", ID: "BV1GJ411x7h7"}, `{"code":-404,"message":"啥都木有","ttl":1}`, "", "", true},
 		{Video{Provider: "bilibili", ID: "BV1GJ411x7h7"}, `<!DOCTYPE html><html>`, "", "", true},
 		{Video{Provider: "niconico", ID: "sm9"}, `<?xml version="1.0" encoding="UTF-8"?>
@@ -168,6 +180,23 @@ func TestVideoInfo(t *testing.T) {
 		title, thumb, err := tc.v.ReadInfo([]byte(tc.data))
 		if title != tc.title || thumb != tc.thumbnail || (err != nil) != tc.fails {
 			t.Errorf("%s: %q %q %v", tc.v.Provider, title, thumb, err)
+		}
+	}
+	if p, err := (Video{Provider: "bilibili", ID: "BV1884g6mE8K", Part: 2}).ReadPart([]byte(`{"code":0,"data":[{"cid":7,"page":1},{"cid":8,"page":2}]}`)); err != nil || p.CID != 8 {
+		t.Errorf("part 2: %+v, %v", p, err)
+	}
+}
+
+// A BV ID is its video's av number, encoded, as Bilibili's pages read it.
+func TestBilibiliAID(t *testing.T) {
+	for id, want := range map[string]int64{"BV17x411w7KC": 170001, "BV1uVxD6oE1y": 117555888986356, "av573719854": 573719854} {
+		if got, ok := bilibiliAID(id); !ok || got != want {
+			t.Errorf("bilibiliAID(%q) = %d, %v, want %d", id, got, ok, want)
+		}
+	}
+	for _, id := range []string{"BV0uVxD6oE1y", "BV1uVxD6oE1", "BV1uVxD6oE1l", "av0", "avx"} {
+		if got, ok := bilibiliAID(id); ok {
+			t.Errorf("bilibiliAID(%q) = %d, but it is no video's", id, got)
 		}
 	}
 }

@@ -1261,6 +1261,8 @@ export function videoOf(link: string): VideoRef | null {
         const aid = queryValue(u.rawQuery, "aid");
         if (id === "" && aid !== "") id = "av" + aid;
       } else if (i >= 0 && i + 1 < parts.length) id = parts[i + 1];
+      // Bilibili takes a BV ID's prefix in any case, sending on to BV.
+      if (id.length > 2 && goLower(id.slice(0, 2)) === "bv") id = "BV" + id.slice(2);
       if (/^(?:BV[1-9A-HJ-NP-Za-km-z]{10}|av[1-9][0-9]*)$/.test(id)) return ref("bilibili");
       break;
     }

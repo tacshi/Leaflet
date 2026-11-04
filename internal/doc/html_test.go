@@ -298,11 +298,25 @@ func TestPageHTMLPrint(t *testing.T) {
 		t.Error("the printed page links a script")
 	}
 	// Chinese and Japanese are in fonts found by name: Japanese pages'
-	// in Hiragino Sans.
+	// in Hiragino Sans, Taiwan's and Hong Kong's Chinese in theirs.
 	for lang, font := range map[string]string{"": "PingFangSC-Regular", "zh-Hans": "PingFangSC-Regular", "ja": "HiraginoSans-W3"} {
 		opts.Lang = lang
 		if page := PageHTML("Trip", c, opts); !strings.Contains(page, `@font-face{font-family:"Leaflet CJK";src:local("`+font+`")`) {
 			t.Errorf("a page in %q is not in %s", lang, font)
+		}
+	}
+	opts.Lang = "en"
+	for _, s := range []struct{ region, text, font string }{
+		{"US", "旅の計画", "HiraginoSans-W3"},
+		{"TW", "旅の計画", "HiraginoSans-W3"},
+		{"TW", "旅行計畫", "PingFangTC-Regular"},
+		{"HK", "旅行計劃", "PingFangHK-Regular"},
+		{"US", "旅行计划", "PingFangSC-Regular"},
+	} {
+		opts.Region = s.region
+		trip := FromBlocks([]*Node{para("p", s.text)})
+		if page := PageHTML("Trip", trip, opts); !strings.Contains(page, `@font-face{font-family:"Leaflet CJK";src:local("`+s.font+`")`) {
+			t.Errorf("%q printed in %s is not in %s", s.text, s.region, s.font)
 		}
 	}
 	if strings.Contains(screen, "Leaflet CJK") {

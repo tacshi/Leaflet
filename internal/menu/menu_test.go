@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"leaflet/internal/store"
+	"leaflet/locales"
 )
 
 func keys(items []Item) []string {
@@ -122,5 +123,17 @@ func TestFilterRanks(t *testing.T) {
 			t.Fatalf("group %s split: %v", it.Group, keys(got))
 		}
 		seen[it.Group] = true
+	}
+}
+
+// A video's share link not followed to its video, as when offline, says
+// so, not that it is no video's link; its video's own link makes one.
+func TestLinkBlockOfAShareLink(t *testing.T) {
+	_, err := LinkBlock("video", "https://b23.tv/xuajGqj")
+	if err == nil || err.Error() != locales.DialogLinkNotFollowed() {
+		t.Errorf("a share link not followed: %v", err)
+	}
+	if n, err := LinkBlock("video", " https://www.bilibili.com/video/BV1bY4G6pEEg "); err != nil || n.Str("url") != "https://www.bilibili.com/video/BV1bY4G6pEEg" {
+		t.Errorf("the video's own link: %+v, %v", n, err)
 	}
 }

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"log"
 	"runtime"
 	"strings"
@@ -40,6 +41,14 @@ func (a *App) videoInfoOf(v doc.Video) videoInfo {
 	key := videoKey(v)
 	return a.videoInfo.get(a, key, func() (videoInfo, error) {
 		var info videoInfo
+		if v.Provider == "bilibili" {
+			// Its part, which its player then plays given, says them.
+			_, p := web.VideoPart(v)
+			if p.CID == 0 {
+				return info, errors.New("bilibili did not list it")
+			}
+			return videoInfo{title: p.Title, thumbnail: p.Picture}, nil
+		}
 		data, err := web.Fetch(v.InfoURL())
 		if err == nil {
 			info.title, info.thumbnail, err = v.ReadInfo(data)
@@ -161,7 +170,7 @@ func (a *App) playVideo(id string, v doc.Video) {
 		}
 		return nil
 	})
-	page.LoadHTML(rendered.VideoPage(v), rendered.VideoOrigin)
+	page.LoadHTML(rendered.VideoPage(web.KnownVideoPart(v)), rendered.VideoOrigin)
 	a.videos[id] = wv
 	a.playAlone(id, "")
 	// Started from its own controls, as after a pause, it plays alone too.
@@ -242,7 +251,7 @@ func (a *App) seekVideo(id string, sec int) {
 		go func() { _, _ = page.Eval(script) }()
 		return
 	}
-	page.LoadHTML(rendered.VideoPage(v.At(sec)), rendered.VideoOrigin)
+	page.LoadHTML(rendered.VideoPage(web.KnownVideoPart(v.At(sec))), rendered.VideoOrigin)
 }
 
 // noteLines are a video's notes in lines, read once for each text of them

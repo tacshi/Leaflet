@@ -455,7 +455,9 @@ var lineBreaks = strings.NewReplacer("\r\n", "\n", "\r", "\n", "\u2029", "\n", "
 // paste inserts text at the caret: a line inline, several as blocks. The
 // text Leaflet itself last copied pastes as the blocks it came from, a
 // link to a video on a site Leaflet plays or to a video file pasted on an
-// empty line as a video, and a link to a picture there as an image.
+// empty line as a video, and a link to a picture there as an image. A
+// video's share link pasted there goes in as a link, which becomes its
+// video once the share is followed.
 func (e *Editor) paste(text string) { e.pasteAs(text, false) }
 
 // pasteAs is paste, and plain is Paste and Match Style: what Leaflet
@@ -490,6 +492,12 @@ func (e *Editor) pasteAs(text string, plain bool) {
 		if doc.ImageLink(text) {
 			img, _ := doc.ImageNode(text)
 			e.InsertBlocks(img)
+			return
+		}
+		if link := strings.TrimSpace(text); doc.ShortVideoLink(link) {
+			id := n.ID
+			e.insertInline(text, link)
+			e.Host.FollowVideoLink(link, func(video string) { e.shareToVideo(id, link, video) })
 			return
 		}
 	}

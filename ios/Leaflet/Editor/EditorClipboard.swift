@@ -172,7 +172,25 @@ final class EditorClipboard {
         let r = NSRange(location: range.location, length: (s as NSString).length)
         textView.selectedRange = NSRange(location: NSMaxRange(r), length: 0)
         editor.edited(editor.paragraphs(around: r))
+        if empty, MobileShortVideoLink(link) { follow(link, in: info.id) }
         return true
+    }
+
+    /// follow follows a video's share link pasted on a line of its own to
+    /// the video, off the main thread, as the core asks its site, and then
+    /// shows the line as the video, as the video's link pasted there does.
+    private func follow(_ link: String, in id: String) {
+        Task { [weak editor] in
+            let raw = await Task.detached { () -> String? in
+                var error: NSError?
+                let raw = MobileLinkBlock("video", link, &error)
+                return error == nil ? raw : nil
+            }.value
+            guard let editor, let raw,
+                let video = try? JSONDecoder().decode(DocNode.self, from: Data(raw.utf8))
+            else { return }
+            editor.commands.shareToVideo(id, link: link, video: video)
+        }
     }
 
     /// liftCards gives each block card pasted or dropped into the page a

@@ -6,7 +6,9 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/guard"
 	"leaflet/internal/theme"
+	"leaflet/internal/web"
 	"leaflet/locales"
 )
 
@@ -16,6 +18,26 @@ func (h *host) BlockLink(blockID string) string {
 		return ""
 	}
 	return doc.BlockLink(h.a.page.id, blockID)
+}
+
+// FollowVideoLink follows a video's share link pasted in the open page to
+// the video off the main thread, as the link dialog does, and runs done
+// once it has, while that page is still open.
+func (h *host) FollowVideoLink(link string, done func(video string)) {
+	a := h.a
+	if a.page == nil {
+		return
+	}
+	ed := a.page.editor
+	go func() {
+		defer guard.Recover()
+		video := web.VideoLink(link)
+		a.update(func() {
+			if a.page != nil && a.page.editor == ed {
+				done(video)
+			}
+		})
+	}()
 }
 
 // openBlock opens a page at one of its blocks, for a link to it.

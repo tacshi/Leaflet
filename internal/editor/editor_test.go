@@ -24,6 +24,8 @@ type fakeHost struct {
 	edited []string
 	// imageFailed is whether images fail to load, rather than load forever.
 	imageFailed bool
+	// follows are the share links the editor asked to follow.
+	follows []follow
 }
 
 func (h *fakeHost) PageTitle(id string) string { return "Sub" }
@@ -54,6 +56,16 @@ func (h *fakeHost) OpenBlock(page, id string, at int) {
 	h.opened = append(h.opened, page+"#"+id)
 }
 func (h *fakeHost) BlockLink(id string) string { return doc.BlockLink("this", id) }
+
+// FollowVideoLink keeps what it was asked, for the test to answer.
+func (h *fakeHost) FollowVideoLink(link string, done func(string)) {
+	h.follows = append(h.follows, follow{link, done})
+}
+
+type follow struct {
+	link string
+	done func(string)
+}
 
 func setup(t *testing.T) (*Editor, *ui.Tester, *fakeHost) {
 	t.Helper()
@@ -426,6 +438,43 @@ func TestPasteVideoLink(t *testing.T) {
 	e.paste("https://youtu.be/dQw4w9WgXcQ")
 	if got := texts(e); got[len(got)-1] != "paragraph:see https://youtu.be/dQw4w9WgXcQ" {
 		t.Errorf("got %v", got)
+	}
+}
+
+// A video's share link pasted on an empty line goes in as a link, which
+// becomes the video the share leads to, a step to undo of its own; a line
+// changed since, or a share of no video, stays as it is.
+func TestPasteShareLink(t *testing.T) {
+	e, _, h := setup(t)
+	const share, video = "https://b23.tv/xuajGqj", "https://www.bilibili.com/video/BV1bY4G6pEEg"
+	e.paste(share)
+	if got := texts(e); len(h.follows) != 1 || h.follows[0].link != share || got[len(got)-1] != "paragraph:"+share {
+		t.Fatalf("pasted %v, following %v", got, h.follows)
+	}
+	h.follows[0].done(video)
+	top := e.Content.Children
+	if len(top) != 2 || top[0].Type != "video" || top[0].Str("url") != video || top[1].Type != "paragraph" || e.focus.ID != top[1].ID {
+		t.Fatalf("got %v, caret in %s", texts(e), e.focus.ID)
+	}
+	e.Undo()
+	if got := texts(e); got[len(got)-1] != "paragraph:"+share {
+		t.Errorf("undone to %v", got)
+	}
+
+	// Typed on since, the line is the user's.
+	e.Enter()
+	e.paste(share)
+	e.InsertText(" later")
+	h.follows[1].done(video)
+	if got := texts(e); got[len(got)-1] != "paragraph:"+share+" later" {
+		t.Errorf("a changed line became %v", got)
+	}
+	// A share of no video stays a link.
+	e.Enter()
+	e.paste(share)
+	h.follows[2].done(share)
+	if got := texts(e); got[len(got)-1] != "paragraph:"+share {
+		t.Errorf("a share of no video became %v", got)
 	}
 }
 

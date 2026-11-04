@@ -67,8 +67,10 @@ enum EditorAccessibility {
             if node.type == "subpage", let id = node.data?["page_id"]?.string {
                 offer(L.commonOpen) { $0.pageLinks?.open(id) }
             }
-            if node.type == "video", !VideoPlayback.shared.playing.contains(node.id) {
-                offer(L.recPlay) { _ in VideoPlayback.shared.play(node.id) }
+            if node.type == "video" {
+                for action in VideoBlock.actions(node, canEdit: editable, editor: editor) {
+                    offer(action.title) { _ in action.run() }
+                }
             }
             if node.type == "recording", let id = node.data?["recording_id"]?.string {
                 for action in RecordingBlock.actions(

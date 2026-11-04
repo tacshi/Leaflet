@@ -194,18 +194,13 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 }
 
 // notesMarkdown writes a video's notes as a list, a line an item, its
-// times links to the video's site at each, which plays it from there.
+// times links to the video's site at each, which plays it from there. A
+// line's text that would start another kind of block in its item, or
+// make the item a rule, is escaped, as TextMarkdown escapes a list item's.
 func notesMarkdown(notes string, v Video) string {
 	var lines []string
 	for _, l := range NoteLines(notes) {
 		var b strings.Builder
-		b.WriteString("- ")
-		if l.At >= 0 {
-			b.WriteString("[" + Clock(l.At) + "](" + LinkDestination(v.At(l.At).WatchURL()) + ")")
-			if len(l.Parts) > 0 {
-				b.WriteString(" ")
-			}
-		}
 		for _, p := range l.Parts {
 			if p.At >= 0 {
 				b.WriteString("[" + escapeText(p.Text) + "](" + LinkDestination(v.At(p.At).WatchURL()) + ")")
@@ -213,7 +208,16 @@ func notesMarkdown(notes string, v Video) string {
 				b.WriteString(escapeText(p.Text))
 			}
 		}
-		lines = append(lines, b.String())
+		text := b.String()
+		switch {
+		case l.At >= 0:
+			text = strings.TrimRight("["+Clock(l.At)+"]("+LinkDestination(v.At(l.At).WatchURL())+") "+text, " ")
+		default:
+			if text = EscapeBlockStart(text); IsRule("- " + text) {
+				text = `\` + text
+			}
+		}
+		lines = append(lines, "- "+text)
 	}
 	return strings.Join(lines, "\n")
 }

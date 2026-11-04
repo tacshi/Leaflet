@@ -268,6 +268,7 @@
   "dialogLinkVideoTitle": "動画",
   "dialogLinkVideoSubtitle": "YouTube・ニコニコ動画・Bilibili・Vimeo・Dailymotion の動画のリンク、または動画ファイルのリンクを貼り付けてください。",
   "dialogLinkNotVideo": "YouTube・ニコニコ動画・Bilibili・Vimeo・Dailymotion の動画や動画ファイルのリンクではありません。",
+  "dialogLinkNotFollowed": "この共有リンクの動画が見つかりませんでした。オンラインか確認するか、動画そのもののリンクを貼り付けてください。",
   "dialogLinkNotWeb": "Web リンクではありません。",
   "dialogInlineAsk": "{name} に聞く",
   "dialogInlineAskAbout": "「{quote}」について {name} に聞く",

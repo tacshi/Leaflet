@@ -274,10 +274,15 @@ func Block(key, author string) (n *doc.Node, ok bool) {
 // LinkBlock is the block of kind "image", "video" or "link_preview" the /
 // menu puts at the caret for link, the link checked as the kind needs: a
 // web link, a video's of a site Leaflet plays. What is wrong with it, the
-// error says in the app's language.
+// error says in the app's language. A video's share link the caller has
+// followed first (web.VideoLink): one still a share link leads nowhere
+// that could be told.
 func LinkBlock(kind, link string) (*doc.Node, error) {
 	link = strings.TrimSpace(link)
 	if kind == "video" {
+		if doc.ShortVideoLink(link) {
+			return nil, errors.New(locales.DialogLinkNotFollowed())
+		}
 		if _, ok := doc.ParseVideoURL(link); !ok {
 			return nil, errors.New(locales.DialogLinkNotVideo())
 		}

@@ -28,7 +28,7 @@ func TestNoteLines(t *testing.T) {
 	text := func(s string) NotePart { return NotePart{Text: s, At: -1} }
 	at := func(s string, sec int) NotePart { return NotePart{Text: s, At: sec} }
 	got := NoteLines("A talk on caching.\r\n\n0:00 Intro\n[1:23] - Why caches miss\n1:02:03: Wrap-up, as 4:56 showed\n  12:30\n" +
-		"10:30am stand-up\nat 1:23:45:01 or 1.2:30, not 3:2 or v2:30, but (5:00)\n12:00 | Lunch")
+		"10:30am stand-up\nat 1:23:45:01 or 1.2:30, not 3:2 or v2:30, but (5:00)\n12:00 | Lunch\n12:34:56:78 frames\n1:23.5 in, as 4:56.7 and 8:09.")
 	want := []NoteLine{
 		{At: -1, Parts: []NotePart{text("A talk on caching.")}},
 		{At: 0, Parts: []NotePart{text("Intro")}},
@@ -38,6 +38,8 @@ func TestNoteLines(t *testing.T) {
 		{At: -1, Parts: []NotePart{text("10:30am stand-up")}},
 		{At: -1, Parts: []NotePart{text("at 1:23:45:01 or 1.2:30, not 3:2 or v2:30, but ("), at("5:00", 300), text(")")}},
 		{At: 720, Parts: []NotePart{text("Lunch")}},
+		{At: -1, Parts: []NotePart{text("12:34:56:78 frames")}},
+		{At: -1, Parts: []NotePart{text("1:23.5 in, as 4:56.7 and "), at("8:09", 489), text(".")}},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got\n%+v\nwant\n%+v", got, want)
@@ -63,7 +65,8 @@ func TestMomentLink(t *testing.T) {
 			t.Errorf("LinkMoment(%q) = %d, %v, want %d", href, got, ok, want)
 		}
 	}
-	for _, href := range []string{BlockLink("p1", "b1"), PageLink("p1"), "leaflet://page/p1#b1?t=", "leaflet://page/p1#b1?t=soon", "https://x.dev/#b1?t=3", "leaflet://page/p1?t=3"} {
+	for _, href := range []string{BlockLink("p1", "b1"), PageLink("p1"), "leaflet://page/p1#b1?t=", "leaflet://page/p1#b1?t=soon", "https://x.dev/#b1?t=3", "leaflet://page/p1?t=3",
+		"leaflet://page/p1#b1?t=99999999999999999999", "leaflet://page/p1#b1?t=999999999h", "leaflet://page/p1#b1?t=596524h"} {
 		if got, ok := LinkMoment(href); ok {
 			t.Errorf("LinkMoment(%q) = %d, but it names no moment", href, got)
 		}
@@ -99,6 +102,19 @@ func TestVideoNotes(t *testing.T) {
 	if !strings.Contains(md, "[Talk](https://youtu.be/dQw4w9WgXcQ)\n\n- [0:00](https://www.youtube.com/watch?v=dQw4w9WgXcQ) Intro\n"+
 		"- [1:23](https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=83s) Caches\n") {
 		t.Errorf("markdown %q", md)
+	}
+	// A line that reads as another kind of block is a note in its item all
+	// the same, read back as the list's item it was written as.
+	lines := []string{"---", "# Chapter one", "1. numbered", "> quoted", "<details>", "- dashed", "** *"}
+	md = notesMarkdown(strings.Join(lines, "\n"), Video{Provider: "youtube", ID: "dQw4w9WgXcQ"})
+	back := ParseLines(md)
+	if len(back) != len(lines) {
+		t.Fatalf("read back %d blocks of %q", len(back), md)
+	}
+	for i, n := range back {
+		if n.Type != "bulleted_list" || n.Delta().Plain() != lines[i] {
+			t.Errorf("line %q read back as %s %q from %q", lines[i], n.Type, n.Delta().Plain(), md)
+		}
 	}
 }
 

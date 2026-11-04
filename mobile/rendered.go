@@ -34,7 +34,8 @@ type videoPlayer struct {
 }
 
 // VideoPlayer returns the player of a video block's link, as JSON, or ""
-// for a link that is no video Leaflet plays.
+// for a link that is no video Leaflet plays, as VideoPlayerAt does, off
+// the main thread.
 func VideoPlayer(link string) string {
 	defer catch(nil)
 	return VideoPlayerAt(link, -1)
@@ -42,7 +43,9 @@ func VideoPlayer(link string) string {
 
 // VideoPlayerAt is VideoPlayer playing from at seconds in, as a time in
 // the block's notes or a link to a moment of it asks; at -1 plays from
-// where the link says.
+// where the link says. A Bilibili video's part, which its player needs,
+// and its picture are asked of Bilibili the first time, so the app calls
+// it off the main thread.
 func VideoPlayerAt(link string, at int) string {
 	defer catch(nil)
 	v, ok := doc.ParseVideoURL(link)
@@ -52,9 +55,14 @@ func VideoPlayerAt(link string, at int) string {
 	if at >= 0 {
 		v = v.At(at)
 	}
+	thumbnail := v.Thumbnail()
+	v, part := web.VideoPart(v)
+	if thumbnail == "" {
+		thumbnail = part.Picture
+	}
 	out, _ := encode(videoPlayer{
 		Page: rendered.VideoPage(v), Origin: rendered.VideoOrigin,
-		Thumbnail: v.Thumbnail(), WatchURL: v.WatchURL(),
+		Thumbnail: thumbnail, WatchURL: v.WatchURL(),
 	})
 	return out
 }

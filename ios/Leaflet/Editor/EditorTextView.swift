@@ -205,6 +205,16 @@ final class EditorTextView: UITextView {
             tlm.invalidateLayout(for: tlm.documentRange)
             viewportStale = true
         }
+        // TextKit lays out the text in view as the text view's canvas, a
+        // view inside it, lays out, which UIKit does only after this. Text
+        // laid out there for the first time, as it comes into view, moves
+        // what follows from where its estimate had it: laid out now, the
+        // blocks go where the text is, not where it was, and stay there
+        // once the page is still.
+        for view in subviews
+        where view !== header && view !== footer && view !== emptyMark && !blocks.owns(view) {
+            view.layoutIfNeeded()
+        }
         if viewportStale, let tlm = textLayoutManager {
             viewportStale = false
             tlm.textViewportLayoutController.layoutViewport()

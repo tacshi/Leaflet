@@ -270,6 +270,11 @@ final class BlockViews {
         return nil
     }
 
+    /// owns says view is a block's.
+    func owns(_ view: UIView) -> Bool {
+        shown.values.contains { $0.view === view }
+    }
+
     /// shownView returns the view of the block of id, while it shows.
     func shownView(_ id: String) -> UIView? {
         guard let view = shown[id]?.view, !view.isHidden, view.superview != nil else { return nil }

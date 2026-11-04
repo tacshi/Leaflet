@@ -194,13 +194,11 @@ private struct SyncSection: View {
         Section(L.settingsSectionOffline) {
             ICloudRows()
             if app.syncs {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                    Text(status).font(.footnote).foregroundStyle(.secondary)
+                // How sync stands, with Sync Now beside it, as the desktop's.
+                ActionRow(label: title, desc: status) {
+                    Button(L.settingsSyncNow) { Task { await app.syncNow() } }
+                        .disabled(app.syncing || app.workOffline)
                 }
-                .accessibilityElement(children: .combine)
-                Button(L.settingsSyncNow) { Task { await app.syncNow() } }
-                    .disabled(app.syncing || app.workOffline)
                 Toggle(isOn: $app.workOffline) {
                     Text(L.settingsWorkOffline)
                     Text(L.settingsWorkOfflineDesc)

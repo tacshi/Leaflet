@@ -59,9 +59,11 @@ struct RootView: View {
                             .buttonStyle(.borderedProminent)
                         }
                         // On the page's ground, as a page open is: the
-                        // sidebar's glass takes its color from it.
+                        // sidebar's glass takes its color from it. Under
+                        // the keyboard too, while the sidebar's search has
+                        // it.
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(palette.surface)
+                        .background { palette.surface.ignoresSafeArea() }
                     }
                 }
                 // Drawn again in a language chosen in the settings.

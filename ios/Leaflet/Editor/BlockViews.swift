@@ -85,7 +85,11 @@ struct BlockCard: View {
         switch node.type {
         case "divider": 24
         case "image": min(width * 0.6, 420)
-        case "table": CGFloat(max(TableGrid.rows(node).count, 1)) * scaled(40) + 2
+        // As tall as it measured itself, its rows as tall as their text,
+        // or a line a row until then.
+        case "table":
+            BlockHeights.of(node.id, width: width)
+                ?? CGFloat(max(TableGrid.rows(node).count, 1)) * scaled(40) + 2
         // Math and diagrams take the height their page measures, once it
         // has; until then, a guess.
         // At least the room of their Edit, an empty formula too.
@@ -123,7 +127,7 @@ struct BlockCard: View {
         case "chart":
             ChartBlock(node: node)
         case "table":
-            TableGrid(node: node, edit: edit)
+            TableGrid(node: node, edit: edit, onHeight: onHeight)
         case "subpage":
             SubpageBlock(node: node, links: links)
         case "recording":
@@ -977,12 +981,18 @@ struct WebPage: UIViewRepresentable {
     }
 }
 
-/// TableGrid shows a table's cells, its first row as the header.
+/// TableGrid shows a table's cells, its first row as the header, their
+/// text whole: its columns as TableLayout has them, scrolling sideways
+/// when they are wider than the page. It tells onHeight how tall it is,
+/// its rows as tall as their text.
 struct TableGrid: View {
     let node: DocNode
     /// edit opens the table's sheet from a tap, as a click edits a cell on
     /// the desktop; nil on a page that can't be changed.
     var edit: (@MainActor (DocNode) -> Void)?
+    var onHeight: (@MainActor (CGSize) -> Void)?
+    /// height is the table's, as it last measured.
+    @State private var height: CGFloat = 0
 
     /// rows are the table's cells' text, by row, as the core reads its
     /// cells (mobile.TableText): the rows and columns it says it has, as
@@ -1000,45 +1010,148 @@ struct TableGrid: View {
     @MainActor private static var read: [String: (DocNode, [[String]])] = [:]
 
     var body: some View {
-        if let edit {
-            Button {
-                edit(node)
-            } label: {
-                grid
+        GeometryReader { page in
+            ScrollView(.horizontal) {
+                Group {
+                    if let edit {
+                        Button {
+                            edit(node)
+                        } label: {
+                            grid(room: page.size.width - 2)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        grid(room: page.size.width - 2)
+                    }
+                }
+                // Room for the border's outer half, at either end too.
+                .padding(1)
+                .onGeometryChange(for: CGFloat.self) {
+                    $0.size.height
+                } action: {
+                    height = $0
+                }
             }
-            .buttonStyle(.plain)
-        } else {
-            grid
+            .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+            .defaultScrollAnchor(.topLeading, for: .alignment)
+            // The table's room in the text is kept by the page's width,
+            // which the table can be wider than.
+            .onChange(of: CGSize(width: page.size.width, height: height)) { _, size in
+                if size.height > 0 { onHeight?(size) }
+            }
         }
     }
 
-    private var grid: some View {
+    private func grid(room: CGFloat) -> some View {
         let rows = Self.rows(node)
+        let columns = rows.map(\.count).max() ?? 0
         let palette = BlockLook.palette
-        return Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
-            ForEach(rows.indices, id: \.self) { r in
-                GridRow {
-                    ForEach(rows[r].indices, id: \.self) { c in
-                        // In the page's font, a little smaller, as the
-                        // desktop's cells.
-                        Text(rows[r][c])
-                            .font(Fonts.pageText(size: BlockLook.textSize * 0.88))
-                            .fontWeight(r == 0 ? .semibold : .regular)
-                            .foregroundStyle(palette.text)
-                            .lineLimit(1)
-                            .padding(.horizontal, 10)
-                            .frame(
-                                maxWidth: .infinity, minHeight: BlockCard.scaled(40),
-                                alignment: .leading
-                            )
-                            .background(r == 0 ? palette.panel : .clear)
-                            .border(palette.divider, width: 0.5)
-                    }
-                }
+        let rowHeight = BlockCard.scaled(40)
+        return TableLayout(
+            columns: columns, room: room, rowHeight: rowHeight, wrapTo: BlockCard.scaled(160)
+        ) {
+            // Each row as many cells as the widest, as on the desktop.
+            ForEach(0..<rows.count * columns, id: \.self) { i in
+                let (r, c) = (i / columns, i % columns)
+                // In the page's font, a little smaller, as the desktop's
+                // cells; one line stands in the middle of a row's height,
+                // more from its top.
+                Text(c < rows[r].count ? rows[r][c] : "")
+                    .font(Fonts.pageText(size: BlockLook.textSize * 0.88))
+                    .fontWeight(r == 0 ? .semibold : .regular)
+                    .foregroundStyle(palette.text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
+                    .frame(minHeight: rowHeight, alignment: .leading)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .background(r == 0 ? palette.panel : .clear)
+                    .border(palette.divider, width: 0.5)
             }
         }
         .clipShape(.rect(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).stroke(palette.border, lineWidth: 1))
+    }
+}
+
+/// TableLayout lays a table's cells out row by row, in columns as wide as
+/// their widest cell's text on one line, and as the desktop's narrowest
+/// at least, which share room as they fill it. Too wide for room, the
+/// widest wrap their text down to one width, as long as that leaves them
+/// wrapTo wide: past that, as with many columns, they keep their widths
+/// and the table is wider than room. No column is wider than room. Each
+/// row is as tall as its tallest cell, rowHeight at least.
+struct TableLayout: Layout {
+    let columns: Int
+    let room: CGFloat
+    let rowHeight: CGFloat
+    let wrapTo: CGFloat
+
+    /// least is a column's narrowest width, as on the desktop.
+    static let least: CGFloat = 80
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void)
+        -> CGSize
+    {
+        let (widths, heights) = plan(subviews)
+        return CGSize(width: widths.reduce(0, +), height: heights.reduce(0, +))
+    }
+
+    func placeSubviews(
+        in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void
+    ) {
+        let (widths, heights) = plan(subviews)
+        var y = bounds.minY
+        for (r, height) in heights.enumerated() {
+            var x = bounds.minX
+            for (c, width) in widths.enumerated() where r * columns + c < subviews.count {
+                subviews[r * columns + c].place(
+                    at: CGPoint(x: x, y: y), anchor: .topLeading,
+                    proposal: ProposedViewSize(width: width, height: height))
+                x += width
+            }
+            y += height
+        }
+    }
+
+    /// plan is the columns' widths and the rows' heights.
+    private func plan(_ subviews: Subviews) -> (widths: [CGFloat], heights: [CGFloat]) {
+        guard columns > 0 else { return ([], []) }
+        var ideal = Array(repeating: Self.least, count: columns)
+        for (i, cell) in subviews.enumerated() {
+            ideal[i % columns] = max(ideal[i % columns], cell.sizeThatFits(.unspecified).width)
+        }
+        let widths = Self.fit(ideal, in: room, wrapTo: wrapTo)
+        var heights = Array(repeating: rowHeight, count: (subviews.count + columns - 1) / columns)
+        for (i, cell) in subviews.enumerated() {
+            let width = widths[i % columns]
+            let fitted = cell.sizeThatFits(ProposedViewSize(width: width, height: nil))
+            heights[i / columns] = max(heights[i / columns], fitted.height)
+        }
+        return (widths, heights)
+    }
+
+    /// fit is the columns' widths, from their text's on one line, as
+    /// TableLayout has them.
+    static func fit(_ ideal: [CGFloat], in room: CGFloat, wrapTo: CGFloat) -> [CGFloat] {
+        let widths = ideal.map { min($0, max(room, least)) }
+        let total = widths.reduce(0, +)
+        guard room > 0, total > 0 else { return widths }
+        if total <= room {
+            return widths.map { $0 + (room - total) * $0 / total }
+        }
+        // The level the widest come down to for the columns to fill room:
+        // the narrower, under it, keep their widths.
+        let sorted = widths.sorted()
+        var narrower: CGFloat = 0
+        for (k, width) in sorted.enumerated() {
+            let level = (room - narrower) / CGFloat(sorted.count - k)
+            if level <= width {
+                return level < wrapTo ? widths : widths.map { min($0, level) }
+            }
+            narrower += width
+        }
+        return widths
     }
 }
 

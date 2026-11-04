@@ -562,10 +562,11 @@ export function overwrites(content: PageContent, ops: Op[]): boolean {
   const changed = (read: NodeJSON, own: boolean) => {
     if (seen.has(read.id)) return false;
     seen.add(read.id);
-    const at = idx.get(read.id);
-    if (!at) return false;
+    const entry = idx.get(read.id);
+    if (!entry) return false;
+    const at = asRead(entry.node, read);
     const strip = (n: NodeJSON) => ({ ...n, children: undefined });
-    return own ? canonical(strip(at.node)) !== canonical(strip(read)) : canonical(at.node) !== canonical(read);
+    return own ? canonical(strip(at)) !== canonical(strip(read)) : canonical(at) !== canonical(read);
   };
   let found = false;
   for (const op of ops) {
@@ -574,6 +575,28 @@ export function overwrites(content: PageContent, ops: Op[]): boolean {
     if (op.op === "delete" && op.previous.some((p) => changed(p.node, false))) found = true;
   }
   return found;
+}
+
+/** What the app looks up for a link card that lacks its title (web.LinkInfo). */
+const LINK_INFO = ["title", "description", "image", "site"];
+
+/**
+ * A block as found, with the info the app looks up for a link card that
+ * lacked it as read put back as read: filling a card in is no change of
+ * the page's.
+ */
+function asRead(at: NodeJSON, read: NodeJSON): NodeJSON {
+  const str = (n: NodeJSON, k: string) => (typeof n.data?.[k] === "string" ? n.data[k] as string : "");
+  const link = str(read, "url");
+  if (!link || read.type !== "link_preview" || str(read, "title") || at.type !== read.type || str(at, "url") !== link) {
+    return at;
+  }
+  const data = { ...at.data };
+  for (const k of LINK_INFO) {
+    if (read.data && k in read.data) data[k] = read.data[k];
+    else delete data[k];
+  }
+  return { ...at, data };
 }
 
 /**

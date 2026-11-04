@@ -269,28 +269,60 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 			if run == nil || m.Pending || len(run.Edits) == 0 {
 				return
 			}
-			ui.Column(c).Gap(4).Padding(8, 10).Radius(8).Background(pal.AgentSection).Children(func() {
-				for j, e := range run.Edits {
-					row := ui.ButtonBase(c.Key(fmt.Sprintf("edit:%d", j))).Gap(6).AlignItems(ui.Center).TextColor(pal.AccentText)
-					row.Children(func() {
-						ui.Icon(c, theme.Icon("check")).FontSize(12)
-						ui.Text(c, e.Summary).FontSize(12.5)
-					})
-					if row.Clicked() && len(e.BlockIDs) > 0 {
-						a.page.editor.PlaceCaret(e.BlockIDs[0], 0)
-					}
+			a.runEdits(c, run)
+		})
+	})
+}
+
+// runEdits is the card of what a run changed, under its reply: an edit a
+// line, which a click goes to, and beside the first Undo, or Redo once
+// undone, as one step for them all. Undone edits show struck through.
+func (a *App) runEdits(c *ui.Context, run *agents.Run) {
+	pal := theme.Of(c)
+	ui.Row(c).FillWidth().Gap(4).Padding(4).Radius(8).Background(pal.AgentSection).AlignItems(ui.Start).Children(func() {
+		ui.Column(c).Grow(1).Shrink(1).Children(func() {
+			for j, e := range run.Edits {
+				row := ui.ButtonBase(c.Key(fmt.Sprintf("edit:%d", j))).FillWidth().Height(26).Padding(0, 8).Gap(6).Radius(6).
+					Justify(ui.Start).AlignItems(ui.Center).TextColor(pal.AccentText).Label(e.Summary)
+				// The blocks of an undone edit are gone, or as they were.
+				goes := !run.Undone && len(e.BlockIDs) > 0
+				switch {
+				case run.Undone:
+					row.TextColor(pal.TextMuted)
+				case goes && row.Hovered():
+					row.Background(pal.Accent.Alpha(0.08)).Cursor(ui.CursorPointer)
 				}
-				ui.Row(c).Gap(6).Margin(4, 0, 0).Children(func() {
+				row.Children(func() {
+					ui.Icon(c, theme.Icon("check")).FontSize(12)
+					t := ui.Text(c, e.Summary).FontSize(12.5).SingleLine().Ellipsis("…").Shrink(1)
 					if run.Undone {
-						if ghost(c, "redo", "redo-2", locales.PageRedo()).Clicked() {
-							a.redoRun(run)
-						}
-					} else if ghost(c, "undo", "undo-2", locales.CommonUndo()).Clicked() {
-						a.undoRun(run)
+						t.Strikethrough()
 					}
 				})
-			})
+				if goes && row.Clicked() {
+					a.page.editor.PlaceCaret(e.BlockIDs[0], 0)
+				}
+			}
 		})
+		label, icon := locales.CommonUndo(), "undo-2"
+		if run.Undone {
+			label, icon = locales.PageRedo(), "redo-2"
+		}
+		b := ui.ButtonBase(c.Key("undo")).Height(26).Padding(0, 8).Gap(5).Radius(6).TextColor(pal.TextSecondary).Label(label)
+		if b.Hovered() {
+			b.Background(pal.Accent.Alpha(0.08)).TextColor(pal.Text)
+		}
+		b.Children(func() {
+			ui.Icon(c, theme.Icon(icon)).FontSize(13)
+			ui.Text(c, label).FontSize(12.5).FontWeight(500)
+		})
+		if b.Clicked() {
+			if run.Undone {
+				a.redoRun(run)
+			} else {
+				a.undoRun(run)
+			}
+		}
 	})
 }
 

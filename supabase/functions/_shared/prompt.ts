@@ -79,8 +79,8 @@ export function systemPrompt(ctx: PromptContext): string {
     // As the app's runs word it (presets.go webPrompt).
     lines.push(
       ctx.search
-        ? "- You can use the web: search it with web_search and read a page with read_web_page, when the request needs what is recent or what you do not know. Say where what you found comes from, with its links. Once you have read the person's other pages in a run, the web is closed to it."
-        : "- You can read a web page with read_web_page, one the person gave or that is on this page; you cannot search the web. Once you have read the person's other pages in a run, the web is closed to it.",
+        ? "- You can use the web: search it with web_search and read a page with read_web_page, when the request needs what is recent or what you do not know. Say where what you found comes from, with its links, each one a search's results or a page you read link to, not one their text only names: a call that writes any other address is refused whole. Once you have read the person's other pages in a run, the web is closed to it."
+        : "- You can read a web page with read_web_page, one the person gave or that is on this page; you cannot search the web. Once you have read a page, link only to an address the person gave, one on this page, or one a page you read links to: a call that writes any other is refused whole. Once you have read the person's other pages in a run, the web is closed to it.",
     );
   }
   lines.push(

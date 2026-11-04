@@ -16,6 +16,7 @@ import (
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
+	"leaflet/internal/web"
 )
 
 func insertAfter(after, id, text string) doc.Op {
@@ -385,6 +386,44 @@ func TestAgentOpOverAnOpenPagesChangeKeepsIt(t *testing.T) {
 	}
 	if ed.Content.Find("h1") != nil {
 		t.Error("h1 is still on the open page")
+	}
+}
+
+// A link card the agent put in, which the open page then filled in with
+// what its link says, is the agent's own still: taking it out, as a call
+// refused once it has all come does, keeps nothing in history. A card the
+// user gave another link is theirs.
+func TestTakingOutAFilledInLinkCardKeepsNothing(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	h := NewHub(st, nil, openHost{ed: ed})
+	d := h.newDelivery(p.ID, &Run{ID: "r1"}, Option{Provider: store.Provider{ID: "ollama", Name: "Ollama", IsLocal: true}})
+	work := ed.Content.Copy()
+	var ops []doc.Op
+	agent := func(op doc.Op) {
+		t.Helper()
+		if err := work.Apply(op); err != nil {
+			t.Fatal(err)
+		}
+		ops = append(ops, op)
+		d.to(ed, ops)
+	}
+	card := func(id string) *doc.Node {
+		return &doc.Node{ID: id, Type: "link_preview", Data: map[string]any{"url": "https://a.example"}}
+	}
+	agent(doc.InsertOp(doc.Position{At: "end"}, card("c1"), card("c2")))
+	info := web.LinkInfo{Title: "A", Description: "About A", Image: "https://a.example/a.png", Site: "A"}
+	if !info.Fill(ed.Content, "https://a.example") {
+		t.Fatal("no card to fill in")
+	}
+	agent(work.DeleteOp([]string{"c1"}))
+	if history, _ := st.History(p.ID); len(history) != 0 {
+		t.Fatalf("history of the agent's own card: %+v", history)
+	}
+	ed.Content.Find("c2").Set("url", "https://b.example")
+	agent(work.DeleteOp([]string{"c2"}))
+	if history, _ := st.History(p.ID); len(history) != 1 || history[0].Reason != "conflict" {
+		t.Fatalf("history %+v", history)
 	}
 }
 

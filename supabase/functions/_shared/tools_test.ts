@@ -506,6 +506,16 @@ Deno.test("a replay that replaces or deletes a block changed since is told apart
   // Only the agent's first op on a block has it as read.
   const again: Op = { op: "replace", id: "p", previous: para("p", "agent edit"), node: para("p", "agent edit 2") };
   assert(!overwrites(page(para("p", "original")), [replace, again]));
+  // A link card the app filled in is as read; one given another link is not.
+  const card = (url: string, info = {}): NodeJSON => ({ id: "c", type: "link_preview", data: { url, ...info } });
+  const dropCard: Op = {
+    op: "delete",
+    ids: ["c"],
+    previous: [{ node: card("https://a.example"), position: { at: "end" } }],
+  };
+  const info = { title: "A", description: "About A", image: "https://a.example/a.png", site: "A" };
+  assert(!overwrites(page(card("https://a.example", info)), [dropCard]));
+  assert(overwrites(page(card("https://b.example", info)), [dropCard]));
 });
 
 Deno.test("a replay leaves the blocks changed since the run read them as they were saved", () => {

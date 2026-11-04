@@ -9,6 +9,7 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
+	"leaflet/internal/web"
 	"leaflet/locales"
 )
 
@@ -228,6 +229,7 @@ func overwrites(c *doc.Content, ops []doc.Op) bool {
 		if at == nil {
 			return false
 		}
+		at = asRead(at, read)
 		if own {
 			return encodeNode(&doc.Node{ID: at.ID, Type: at.Type, Data: at.Data}) != encodeNode(&doc.Node{ID: read.ID, Type: read.Type, Data: read.Data})
 		}
@@ -253,6 +255,25 @@ func overwrites(c *doc.Content, ops []doc.Op) bool {
 		}
 	}
 	return found
+}
+
+// asRead is a block as found, with the info the app looks up for a link
+// card that lacked it as read put back as read: filling a card in
+// (web.LinkInfo.Fill) is no change of the page's.
+func asRead(at, read *doc.Node) *doc.Node {
+	link := read.Str("url")
+	if link == "" || !web.Lacking(read, link) || at.Type != read.Type || at.Str("url") != link {
+		return at
+	}
+	out := at.Clone()
+	for k := range (web.LinkInfo{}).Data() {
+		if v, ok := read.Data[k]; ok {
+			out.Data[k] = v
+		} else {
+			delete(out.Data, k)
+		}
+	}
+	return out
 }
 
 // keepsChildren reports whether a replace left the block's children as

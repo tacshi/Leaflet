@@ -188,14 +188,15 @@ func TestSonioxSendsNothingAfterFinish(t *testing.T) {
 				wait = 300 * time.Millisecond
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), wait)
-			_, data, err := c.Read(ctx)
+			kind, data, err := c.Read(ctx)
 			cancel()
 			if err != nil {
 				_ = c.Close(websocket.StatusNormalClosure, "")
 				return
 			}
 			heard <- data
-			if len(data) == 0 && !ended {
+			// As Soniox does, only an empty text frame ends the stream.
+			if kind == websocket.MessageText && len(data) == 0 && !ended {
 				ended = true
 				<-release
 			}
@@ -376,12 +377,20 @@ func TestLastAudioGoesToItsRecording(t *testing.T) {
 	if err := r.capture(second, store.SttSettings{}, false, State{}); err != nil {
 		t.Fatal(err)
 	}
+	// Windows removes no file still open, so neither is when the folder
+	// goes. The second recording, its microphone never started, ends with
+	// its file closed at once.
+	t.Cleanup(r.Stop)
 	close(mic.letGo)
 	<-mic.stopped
 	c.mics[1].sink.Chunk([]byte{3, 3})
 	deadline := time.Now().Add(5 * time.Second)
 	for {
+		// The header counts the audio once Close writes it, under late,
+		// just before it closes the file: read under late, it is closed.
+		r.late.Lock()
 		got, _ := ReadWav(first.Path)
+		r.late.Unlock()
 		if bytes.Equal(got, []byte{1, 1, 2, 2}) {
 			break
 		}
@@ -757,6 +766,58 @@ type silentLost struct{ lostStream }
 func (silentLost) Finish() ([]store.Segment, error) { return nil, nil }
 func (silentLost) Lost() error                      { return errNoEnd }
 
+// A short recording, its words final before it stops, ends whole: Finish
+// ends the stream as Soniox asks, with an empty text frame, and does not
+// wait out its time for words that are not coming. An empty binary frame
+// is only an empty piece of audio to Soniox, which then answers nothing.
+func TestSonioxFinishEndsTheStreamAsSonioxAsks(t *testing.T) {
+	was := finishWait
+	finishWait = 2 * time.Second
+	t.Cleanup(func() { finishWait = was })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		c, err := websocket.Accept(w, req, nil)
+		if err != nil {
+			return
+		}
+		ctx := context.Background()
+		for {
+			kind, data, err := c.Read(ctx)
+			if err != nil {
+				return
+			}
+			if kind == websocket.MessageBinary && len(data) > 0 {
+				_ = c.Write(ctx, websocket.MessageText, []byte(`{"tokens":[{"text":"现在开始录音。","start_ms":0,"end_ms":1500,"is_final":true}]}`))
+			}
+			if kind == websocket.MessageText && len(data) == 0 {
+				_ = c.Write(ctx, websocket.MessageText, []byte(`{"tokens":[],"finished":true}`))
+				_ = c.Close(websocket.StatusNormalClosure, "")
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+	conn, _, err := websocket.Dial(context.Background(), "ws"+strings.TrimPrefix(srv.URL, "http"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newSoniox(conn)
+	s.Send([]byte{1, 2})
+	start := time.Now()
+	segs, err := s.Finish()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took >= finishWait {
+		t.Errorf("Finish waited %v for the end", took)
+	}
+	if lost := s.Lost(); lost != nil {
+		t.Errorf("a stream that ended whole was lost: %v", lost)
+	}
+	if len(segs) != 1 || segs[0].Text != "现在开始录音。" {
+		t.Errorf("segments %+v", segs)
+	}
+}
+
 // Audio still queued when Finish stops waiting for a slow connection, or
 // last words that never come, leave the stream lost: the recording keeps
 // its words and fails, to transcribe again from its audio, rather than
@@ -772,11 +833,11 @@ func TestSonioxFinishTellsWhatItDropped(t *testing.T) {
 				return
 			}
 			for {
-				_, data, err := c.Read(context.Background())
+				kind, data, err := c.Read(context.Background())
 				if err != nil {
 					return
 				}
-				if len(data) == 0 && answers {
+				if kind == websocket.MessageText && len(data) == 0 && answers {
 					_ = c.Write(context.Background(), websocket.MessageText, []byte(`{"tokens":[],"finished":true}`))
 				}
 			}

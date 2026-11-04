@@ -162,6 +162,9 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 					title = msgs.ExportVideo()
 				}
 				block(indent, link(title, n.Str("url")))
+				if v, ok := ParseVideoURL(n.Str("url")); ok {
+					block(indent, notesMarkdown(n.Str("notes"), v))
+				}
 			case "math_equation":
 				block(indent, "$$\n"+n.Str("formula")+"\n$$")
 			case "diagram":
@@ -188,6 +191,31 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 	}
 	visit(c.Children, "")
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// notesMarkdown writes a video's notes as a list, a line an item, its
+// times links to the video's site at each, which plays it from there.
+func notesMarkdown(notes string, v Video) string {
+	var lines []string
+	for _, l := range NoteLines(notes) {
+		var b strings.Builder
+		b.WriteString("- ")
+		if l.At >= 0 {
+			b.WriteString("[" + Clock(l.At) + "](" + LinkDestination(v.At(l.At).WatchURL()) + ")")
+			if len(l.Parts) > 0 {
+				b.WriteString(" ")
+			}
+		}
+		for _, p := range l.Parts {
+			if p.At >= 0 {
+				b.WriteString("[" + escapeText(p.Text) + "](" + LinkDestination(v.At(p.At).WatchURL()) + ")")
+			} else {
+				b.WriteString(escapeText(p.Text))
+			}
+		}
+		lines = append(lines, b.String())
+	}
+	return strings.Join(lines, "\n")
 }
 
 // withLinks is a copy of c whose text links go where link says.

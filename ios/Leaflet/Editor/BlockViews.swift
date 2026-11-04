@@ -21,11 +21,13 @@ enum BlockLook {
 
 /// PageLinks are what a subpage's card needs of the app: its page's
 /// title, read where the app's pages are observed, and opening it; openAt
-/// opens a page at one of its blocks, for a link to it.
+/// opens a page at one of its blocks, for a link to it, and plays a video
+/// or a recording from a time, in seconds, for a link to a moment of one,
+/// -1 for none.
 struct PageLinks {
     let title: @MainActor (String) -> String?
     let open: @MainActor (String) -> Void
-    var openAt: (@MainActor (String, String) -> Void)?
+    var openAt: (@MainActor (String, String, Int) -> Void)?
 }
 
 /// BlockCard shows a block without text.
@@ -79,7 +81,9 @@ struct BlockCard: View {
         case "math_equation": max(BlockHeights.of(node.id, width: width) ?? 96, 44)
         case "diagram":
             max(BlockHeights.of(node.id, width: width) ?? min(max(width * 0.3, 160), 320), 44)
-        case "video": min(width * 9 / 16, 420) + 44
+        // As tall as it measured itself, with its notes, or its player
+        // and title until then.
+        case "video": BlockHeights.of(node.id, width: width) ?? min(width * 9 / 16, 420) + 44
         case "chart": scaled(300)
         // As tall as it measured itself, or its header alone until then.
         case "recording": BlockHeights.of(node.id, width: width) ?? scaled(64)
@@ -101,7 +105,7 @@ struct BlockCard: View {
         case "image":
             ImageBlock(node: node)
         case "video":
-            VideoBlock(node: node)
+            VideoBlock(node: node, canEdit: edit != nil, editor: editor, onHeight: onHeight)
         case "chart":
             ChartBlock(node: node)
         case "table":
@@ -232,19 +236,148 @@ struct ImageBlock: View {
 
 /// VideoPlayback is which videos play in place of their pictures, by
 /// block: play is pressed on the block, or chosen from VoiceOver's actions
-/// at the caret, which can't reach the block's button.
+/// at the caret, which can't reach the block's button; and where each
+/// plays from, as a time in its notes or a link to a moment of it asks.
+/// One plays at a time, as one person listens to one: the one that starts
+/// pauses the others, and a recording playing.
 @MainActor
 @Observable
 final class VideoPlayback {
     static let shared = VideoPlayback()
-    var playing: Set<String> = []
+    /// playing are the blocks whose players show, playing or paused.
+    private(set) var playing: Set<String> = []
+    /// views are the players' web views, by block, which another starting
+    /// pauses, and current the block of the one that started last.
+    @ObservationIgnored private var views: [String: Weak] = [:]
+    @ObservationIgnored private var current: String?
+    @ObservationIgnored private var watching: Task<Void, Never>?
+
+    private final class Weak {
+        weak var view: WKWebView?
+        init(_ view: WKWebView) { self.view = view }
+    }
+    /// start is the time a block's player loads at, in seconds, and loads
+    /// how many times it loaded there, for the same time asked again to
+    /// load it again.
+    var start: [String: Int] = [:]
+    var loads: [String: Int] = [:]
+    /// seeks are the scripts a block's player runs to go to a time without
+    /// loading again, where its site's player takes them.
+    var seeks: [String: Seek] = [:]
+
+    /// Seek is a script for a player to run once.
+    struct Seek: Equatable {
+        let id = UUID()
+        let script: String
+    }
+
+    /// play shows the player of video block id, which plays alone.
+    func play(_ id: String) {
+        playing.insert(id)
+        playAlone(id)
+    }
+
+    /// seek plays video block id, of link, from at seconds in: its player
+    /// goes there, or loads again there where its site's can't be told
+    /// to, or starts there if it has not.
+    func seek(_ id: String, link: String, at: Int) {
+        guard playing.contains(id) else {
+            start[id] = at
+            play(id)
+            return
+        }
+        playAlone(id)
+        let script = MobileVideoSeek(link, at)
+        if script.isEmpty {
+            start[id] = at
+            loads[id, default: 0] += 1
+        } else {
+            seeks[id] = Seek(script: script)
+        }
+    }
+
+    /// stop takes the blocks of ids out of play, as their page closes.
+    func stop(_ ids: Set<String>) {
+        playing.subtract(ids)
+        for id in ids {
+            start[id] = nil
+            loads[id] = nil
+            seeks[id] = nil
+            views[id] = nil
+        }
+    }
+
+    /// playAlone pauses every player but that of block id, which starts
+    /// now, and a recording playing.
+    func playAlone(_ id: String) {
+        current = id
+        for (other, weak) in views where other != id {
+            weak.view?.pauseAllMediaPlayback(completionHandler: nil)
+        }
+        Recorder.shared.pausePlaying()
+    }
+
+    /// pauseAll pauses every player, as a recording starts.
+    func pauseAll() {
+        current = nil
+        for weak in views.values {
+            weak.view?.pauseAllMediaPlayback(completionHandler: nil)
+        }
+    }
+
+    /// register keeps the web view of block id's player, for another
+    /// starting to pause it. While two show, one started from its own
+    /// controls, which the app isn't told of, is found within a second.
+    func register(_ view: WKWebView, for id: String) {
+        views[id] = Weak(view)
+        views = views.filter { $0.value.view != nil }
+        guard watching == nil else { return }
+        watching = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self else { return }
+                self.views = self.views.filter { $0.value.view != nil }
+                if self.views.isEmpty {
+                    self.watching = nil
+                    return
+                }
+                guard self.views.count > 1 else { continue }
+                for (id, weak) in self.views where id != self.current {
+                    if await weak.view?.requestMediaPlaybackState() == .playing {
+                        self.playAlone(id)
+                        break
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// VideoBlock shows a video's picture and title, and its player in place
-/// once play is pressed.
+/// once play is pressed; under them its notes, a line's time beside it, as
+/// a recording's transcript shows them, which plays the video from there,
+/// a long one folded to its first lines. It is as tall as it needs, which
+/// it tells onHeight.
 struct VideoBlock: View {
     let node: DocNode
-    private var playing: Bool { VideoPlayback.shared.playing.contains(node.id) }
+    /// canEdit says the page can be changed: the notes only show otherwise.
+    var canEdit = false
+    /// editor is the page's, which writes the notes and asks an agent.
+    weak var editor: EditorController?
+    var onHeight: (@MainActor (CGSize) -> Void)?
+    /// width is the block's, which the player's height follows.
+    @State private var width: CGFloat = 0
+    /// open shows long notes whole.
+    @State private var open = false
+    @ScaledMetric(relativeTo: .subheadline) private var control: CGFloat = 28
+
+    private var playback: VideoPlayback { VideoPlayback.shared }
+    private var playing: Bool { playback.playing.contains(node.id) }
+    private var link: String { node.data?["url"]?.string ?? "" }
+    private var title: String {
+        let title = node.data?["title"]?.string ?? ""
+        return title.isEmpty ? link : title
+    }
 
     private struct Player: Decodable {
         let page: String
@@ -252,19 +385,39 @@ struct VideoBlock: View {
         let thumbnail: String
     }
 
+    /// Line is a line of the notes, as the core reads them.
+    struct Line: Decodable {
+        let at: Int
+        var time: String?
+        let parts: [Part]
+
+        struct Part: Decodable {
+            let text: String
+            let at: Int
+        }
+    }
+
     var body: some View {
-        let link = node.data?["url"]?.string ?? ""
+        let start = playback.start[node.id] ?? -1
         let player = try? JSONDecoder().decode(
-            Player.self, from: Data(MobileVideoPlayer(link).utf8))
-        VStack(alignment: .leading, spacing: 8) {
-            // The black area takes the block's room; the picture fills it
+            Player.self, from: Data(MobileVideoPlayerAt(link, start).utf8))
+        let lines =
+            (try? JSONDecoder().decode(
+                [Line].self, from: Data(MobileVideoNotes(node.data?["notes"]?.string ?? "").utf8)))
+            ?? []
+        VStack(alignment: .leading, spacing: 0) {
+            // The black area takes the player's room; the picture fills it
             // without setting its size, so it never spills past the block.
             Color.black
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .frame(maxWidth: .infinity)
+                .frame(height: min(max(width, 1) * 9 / 16, 420))
                 .overlay {
                     if playing, let player {
+                        // Loaded again for the same time asked again.
                         WebPage(
-                            html: player.page, base: URL(string: player.origin), interactive: true)
+                            html: player.page + "<!-- \(playback.loads[node.id] ?? 0) -->",
+                            base: URL(string: player.origin), interactive: true,
+                            script: playback.seeks[node.id], player: node.id)
                     } else if let thumb = player?.thumbnail, let url = URL(string: thumb) {
                         AsyncImage(url: url) {
                             $0.resizable().scaledToFill()
@@ -276,7 +429,7 @@ struct VideoBlock: View {
                 .overlay {
                     if !playing {
                         Button {
-                            VideoPlayback.shared.playing.insert(node.id)
+                            playback.play(node.id)
                         } label: {
                             Image(systemName: "play.fill")
                                 .font(.title)
@@ -290,10 +443,171 @@ struct VideoBlock: View {
                 }
                 .clipped()
                 .clipShape(.rect(cornerRadius: 10))
-            Text(node.data?["title"]?.string ?? link)
-                .font(.subheadline.weight(.medium))
-                .lineLimit(1)
+            // Its title, as its site's page has it under the player, or its
+            // link for a block that has none.
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(BlockLook.palette.text)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+                menu(lines)
+            }
+            .frame(minHeight: control)
+            .padding(.top, 4)
+            if !lines.isEmpty {
+                notes(lines).padding(.top, 4)
+            }
         }
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGSize.self) {
+            $0.size
+        } action: {
+            width = $0.width
+            onHeight?(CGSize(width: $0.width, height: $0.height + 2))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    /// play plays the video from at seconds in.
+    private func play(_ at: Int) {
+        playback.seek(node.id, link: link, at: at)
+    }
+
+    /// notes are the video's notes, each line after its time, if it has
+    /// one, which a tap on the line plays from; a time in a line without
+    /// one plays from there. They are in the page's font and size, in a
+    /// panel of their own, as a video's description is on its site, tinted
+    /// as a code block is.
+    private func notes(_ lines: [Line]) -> some View {
+        let palette = BlockLook.palette
+        // The times' column is as wide as the longest of them, its digits
+        // all as wide.
+        let widest =
+            lines.compactMap(\.time).max { $0.count < $1.count }
+            .map { String($0.map { $0.isNumber ? "0" : $0 }) } ?? "0:00"
+        let folds = MobileFoldsTranscript(lines.count)
+        let shown = folds && !open ? Array(lines.prefix(Int(MobileFoldedLines))) : lines
+        return VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(shown.enumerated()), id: \.offset) { _, line in
+                Group {
+                    if let time = line.time, line.at >= 0 {
+                        TimedRow(time: time, widest: widest, style: .notes) {
+                            play(line.at)
+                        } content: {
+                            Text(text(line.parts, links: false))
+                                .multilineTextAlignment(.leading)
+                        }
+                    } else {
+                        // Its times are links, which play from there.
+                        Text(text(line.parts, links: true))
+                            .multilineTextAlignment(.leading)
+                            .environment(
+                                \.openURL,
+                                OpenURLAction { url in
+                                    guard url.scheme == Self.seekScheme,
+                                        let at = Int(url.host() ?? "")
+                                    else { return .systemAction }
+                                    play(at)
+                                    return .handled
+                                })
+                    }
+                }
+                .font(Fonts.pageText(size: BlockLook.textSize))
+                .foregroundStyle(palette.text)
+                .contextMenu { lineMenu(line) }
+            }
+            if folds {
+                FoldButton(open: $open, count: lines.count, indent: TimeStyle.notes.indent(widest))
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(palette.code, in: .rect(cornerRadius: 10))
+    }
+
+    /// seekScheme is the scheme of the links a time in a line is, to play
+    /// from: leaflet-seek://83.
+    private static let seekScheme = "leaflet-seek"
+
+    /// text is a line's text, its times in the accent, and, with links,
+    /// links that play from each.
+    private func text(_ parts: [Line.Part], links: Bool) -> AttributedString {
+        var out = AttributedString()
+        for p in parts {
+            var run = AttributedString(p.text)
+            if p.at >= 0 {
+                run.foregroundColor = BlockLook.palette.accent
+                if links { run.link = URL(string: "\(Self.seekScheme)://\(p.at)") }
+            }
+            out += run
+        }
+        return out
+    }
+
+    /// lineMenu is a line's menu, from a long press: a link to the moment
+    /// it is about, to put in another page or a chat.
+    @ViewBuilder private func lineMenu(_ line: Line) -> some View {
+        let at = line.at >= 0 ? line.at : line.parts.first { $0.at >= 0 }?.at
+        if let at, let page = editor?.pageID, !page.isEmpty {
+            Button(L.videoCopyMoment(time: MobileClock(at)), systemImage: "link") {
+                UIPasteboard.general.string = MobileMomentLink(page, node.id, at)
+            }
+        }
+    }
+
+    /// menu is the block's, as the desktop's context menu of it has it: Cut
+    /// and Copy, a link to the block, its link, its notes and an agent's
+    /// summary of them from what is said in the video, where its site gives
+    /// its captions, and Delete, as a recording's menu has. A page that
+    /// can't be changed offers only what copies.
+    private func menu(_ lines: [Line]) -> some View {
+        let palette = BlockLook.palette
+        return Menu {
+            Section {
+                if canEdit {
+                    Button(L.editorCut, systemImage: "scissors") { editor?.cutBlock(node.id) }
+                }
+                Button(L.commonCopy, systemImage: "doc.on.doc") { editor?.copyBlock(node.id) }
+            }
+            Section {
+                if let page = editor?.pageID, !page.isEmpty {
+                    Button(L.editorCopyBlockLink, systemImage: "link") {
+                        UIPasteboard.general.string = MobileBlockLink(page, node.id)
+                    }
+                }
+                if canEdit {
+                    Button(L.editorEditMediaLink, systemImage: "pencil") {
+                        editor?.onEditLink?(node)
+                    }
+                    Button(
+                        lines.isEmpty ? L.videoAddNotes : L.videoEditNotes,
+                        systemImage: "text.alignleft"
+                    ) {
+                        editor?.onEditNotes?(node)
+                    }
+                    if MobileVideoHasCaptions(link) {
+                        Button(L.videoSummarize, systemImage: "sparkles") {
+                            let title = node.data?["title"]?.string ?? ""
+                            editor?.onSummarize?(
+                                node, L.videoSummarizePrompt(title: title.isEmpty ? link : title))
+                        }
+                    }
+                }
+            }
+            if canEdit {
+                // The block goes as one step to undo.
+                Button(L.commonDelete, systemImage: "trash", role: .destructive) {
+                    editor?.removeBlock(node.id)
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: control, height: control)
+                .contentShape(.rect)
+        }
+        .foregroundStyle(palette.icon)
     }
 }
 
@@ -417,6 +731,12 @@ struct WebPage: UIViewRepresentable {
     let html: String
     let base: URL?
     let interactive: Bool
+    /// script runs in the page once, as a video's player is told to go to
+    /// a time.
+    var script: VideoPlayback.Seek?
+    /// player is the video block the page plays, which VideoPlayback keeps
+    /// to one playing at a time.
+    var player: String?
 
     /// store keeps nothing past the app's run, shared by the blocks' pages.
     @MainActor static let store = WKWebsiteDataStore.nonPersistent()
@@ -430,6 +750,9 @@ struct WebPage: UIViewRepresentable {
         config.websiteDataStore = Self.store
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
+        // Safari's own end of the user agent, which WebKit's lacks: the
+        // sites' players, as Vimeo's, play only in a browser they know.
+        config.applicationNameForUserAgent = "Version/26.0 Mobile/15E148 Safari/604.1"
         let view = WKWebView(frame: .zero, configuration: config)
         view.isOpaque = false
         view.backgroundColor = .clear
@@ -437,6 +760,8 @@ struct WebPage: UIViewRepresentable {
         view.scrollView.isScrollEnabled = interactive
         view.navigationDelegate = context.coordinator
         context.coordinator.loaded = html
+        context.coordinator.ran = script?.id
+        if let player { VideoPlayback.shared.register(view, for: player) }
         view.loadHTMLString(
             themed(html, dark: context.environment.colorScheme == .dark), baseURL: base)
         return view
@@ -448,6 +773,10 @@ struct WebPage: UIViewRepresentable {
             context.coordinator.loaded = html
             context.coordinator.dark = dark
             view.loadHTMLString(themed(html, dark: dark), baseURL: base)
+        }
+        if let script, context.coordinator.ran != script.id {
+            context.coordinator.ran = script.id
+            view.evaluateJavaScript(script.script)
         }
     }
 
@@ -461,6 +790,7 @@ struct WebPage: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate {
         var loaded = ""
         var dark = false
+        var ran: UUID?
 
         func webView(
             _ webView: WKWebView, decidePolicyFor action: WKNavigationAction,

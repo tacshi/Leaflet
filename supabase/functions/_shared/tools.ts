@@ -21,9 +21,13 @@ import {
   type SpecOptions,
   specToNode,
   TEXT_TYPES,
+  transcriptText,
   trimSpace,
+  videoOf,
+  type VideoRef,
   walk,
 } from "./blocks.ts";
+import { type Captions, CaptionsError, hasCaptions, passages } from "./captions.ts";
 import { markdownSpecs } from "./lines.ts";
 import type { ToolDef } from "./openai.ts";
 import type { WebPage } from "./page.ts";
@@ -56,6 +60,8 @@ export interface ToolHooks {
   searchWeb?(query: string): Promise<Search>;
   /** Reads a page of the web; none when the run has no web. */
   readWebPage?(url: string): Promise<WebPage>;
+  /** Reads a video's captions from its site; none reads none. */
+  readCaptions?(video: VideoRef): Promise<Captions>;
 }
 
 /** An edit as the person sees it: what it did, and the blocks it touched. */
@@ -139,7 +145,15 @@ const blockSpecSchema = {
       type: "object",
       description:
         "For video: a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or a video file, that plays in the page",
-      properties: { url: { type: "string" }, title: { type: "string" } },
+      properties: {
+        url: { type: "string" },
+        title: { type: "string" },
+        notes: {
+          type: "string",
+          description:
+            "Plain-text notes shown under the video, a line each, no Markdown: a line that starts with a time, as 0:00 or 1:02:03, plays the video from there when clicked. For its summary, chapters or key moments",
+        },
+      },
       required: ["url"],
     },
     link: {
@@ -265,6 +279,12 @@ export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean }):
     tool(
       "read_page",
       `Read the whole current page: every block with its id, its comments, and its subpages. An embed's html longer than ${MAX_VIEW_HTML} characters is left out, its html_length given instead: to change such an embed, write its html whole.`,
+    ),
+    tool(
+      "read_video_transcript",
+      "Read what is said in a video block of this page, from its site's captions: lines of [m:ss] text, each the time it starts. Only YouTube's and Vimeo's videos have them, and not every one. Read it to summarize a video, write its notes, or cite a moment of it.",
+      { id: { type: "string", description: "The video block's id." } },
+      ["id"],
     ),
   ];
   if (opts.canEdit) {
@@ -1022,6 +1042,8 @@ export class PageEditSession {
         return unchanged(await this.searchWeb(args));
       case "read_web_page":
         return unchanged(await this.readWeb(args));
+      case "read_video_transcript":
+        return unchanged(await this.readTranscript(args));
       default:
         throw new ToolError(`Unknown tool "${name}"`);
     }
@@ -1097,6 +1119,61 @@ export class PageEditSession {
     found.add(page.url);
     for (const u of page.links) found.add(u);
     return { url: page.url, title: page.title, text: page.text, ...(page.truncated ? { truncated: true } : {}) };
+  }
+
+  /**
+   * Reads what is said in a video block of the page, from its site's
+   * captions, as lines of the times they start and their words (Go's
+   * readTranscript). Once the run has read the person's other pages, only a
+   * video the page had as it began, or the request names, may be read.
+   */
+  private async readTranscript(args: Record<string, unknown>): Promise<unknown> {
+    const id = textArg(args, "id");
+    const node = this.idx.get(id)?.node;
+    if (!node) throw new ToolError(`No block with id "${id}" on this page. Call read_page for current ids.`);
+    if (node.type === "recording") {
+      throw new ToolError(`Block ${id} is a recording: its transcript is in its view, from read_page.`);
+    }
+    if (node.type !== "video") throw new ToolError(`Block ${id} is a ${node.type}, not a video.`);
+    const link = typeof node.data?.url === "string" ? node.data.url : "";
+    const video = videoOf(link);
+    if (!video) throw new ToolError(`Block ${id} has no video Leaflet plays.`);
+    if (!hasCaptions(video)) {
+      throw new ToolError(
+        `Leaflet can read what is said only in YouTube's and Vimeo's videos, whose sites give their captions; this one is a ${video.provider} video. Work from what the user tells you of it.`,
+      );
+    }
+    if (!this.hooks.readCaptions) throw new ToolError("Reading videos' transcripts is off.");
+    if (this.armed && !this.given().has(trimSpace(link))) throw new ToolError(WEB_CLOSED);
+    const site = video.provider === "vimeo" ? "Vimeo" : "YouTube";
+    let captions: Captions;
+    try {
+      captions = await this.hooks.readCaptions(video);
+    } catch (e) {
+      if (e instanceof CaptionsError && e.kind === "none") {
+        throw new ToolError(
+          "The video has no captions to read: its creator gave none, and its site made none. Work from what the user tells you of it.",
+        );
+      }
+      if (e instanceof CaptionsError && e.kind === "refused") {
+        throw new ToolError(
+          `${site} refused to give the video's captions to Leaflet just now. Tell the user; trying again later may work.`,
+        );
+      }
+      if (e instanceof CaptionsError) {
+        throw new ToolError(`${site} won't show this video here (${e.message}), so its captions can't be read.`);
+      }
+      throw new ToolError(`Could not read the video's captions: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const segments = passages(captions.lines).map((l) => ({ start_ms: l.start_ms, text: l.text }));
+    const title = typeof node.data?.title === "string" ? node.data.title : "";
+    return {
+      id,
+      language: captions.language,
+      auto_generated: captions.auto,
+      transcript: transcriptText(segments),
+      ...(title ? { title } : {}),
+    };
   }
 
   /**

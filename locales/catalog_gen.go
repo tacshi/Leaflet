@@ -5843,6 +5843,22 @@ func (msgs Messages) AgentReadingWebPage(site string) string {
 	return Catalog.Format(msgs.locale, "agentReadingWebPage", map[string]any{"site": site})
 }
 
+// AgentReadingVideo says "Reading what is said in the video…"
+// in the language the app shows.
+//
+// The agent's reply while it reads a video's captions, for what is said in
+// it.
+func AgentReadingVideo() string { return In(i18n.Locale()).AgentReadingVideo() }
+
+// AgentReadingVideo says "Reading what is said in the video…"
+// in the language of msgs.
+//
+// The agent's reply while it reads a video's captions, for what is said in
+// it.
+func (msgs Messages) AgentReadingVideo() string {
+	return Catalog.Format(msgs.locale, "agentReadingVideo", nil)
+}
+
 // AgentReadingWeb says "Reading a web page…"
 // in the language the app shows.
 //
@@ -8365,6 +8381,146 @@ func VideoCannotPlay(error string) string { return In(i18n.Locale()).VideoCannot
 // Toast when a video player could not be made.
 func (msgs Messages) VideoCannotPlay(error string) string {
 	return Catalog.Format(msgs.locale, "videoCannotPlay", map[string]any{"error": error})
+}
+
+// VideoAddNotes says "Add notes…"
+// in the language the app shows.
+//
+// Video block menu item: opens the dialog that writes notes under the
+// video, its lines starting with times that play the video from there.
+func VideoAddNotes() string { return In(i18n.Locale()).VideoAddNotes() }
+
+// VideoAddNotes says "Add notes…"
+// in the language of msgs.
+//
+// Video block menu item: opens the dialog that writes notes under the
+// video, its lines starting with times that play the video from there.
+func (msgs Messages) VideoAddNotes() string {
+	return Catalog.Format(msgs.locale, "videoAddNotes", nil)
+}
+
+// VideoEditNotes says "Edit notes"
+// in the language the app shows.
+//
+// Video block menu item, and the button over its notes while the block is
+// hovered: opens the dialog that writes them.
+func VideoEditNotes() string { return In(i18n.Locale()).VideoEditNotes() }
+
+// VideoEditNotes says "Edit notes"
+// in the language of msgs.
+//
+// Video block menu item, and the button over its notes while the block is
+// hovered: opens the dialog that writes them.
+func (msgs Messages) VideoEditNotes() string {
+	return Catalog.Format(msgs.locale, "videoEditNotes", nil)
+}
+
+// VideoNotesTitle says "Video notes"
+// in the language the app shows.
+//
+// Title of the dialog that writes a video block's notes.
+func VideoNotesTitle() string { return In(i18n.Locale()).VideoNotesTitle() }
+
+// VideoNotesTitle says "Video notes"
+// in the language of msgs.
+//
+// Title of the dialog that writes a video block's notes.
+func (msgs Messages) VideoNotesTitle() string {
+	return Catalog.Format(msgs.locale, "videoNotesTitle", nil)
+}
+
+// VideoNotesHint says "Start a line with a time, as 1:23 or 1:02:03: a click on it plays the video from there."
+// in the language the app shows.
+//
+// Video notes dialog: under its title, how a time in the notes works.
+func VideoNotesHint() string { return In(i18n.Locale()).VideoNotesHint() }
+
+// VideoNotesHint says "Start a line with a time, as 1:23 or 1:02:03: a click on it plays the video from there."
+// in the language of msgs.
+//
+// Video notes dialog: under its title, how a time in the notes works.
+func (msgs Messages) VideoNotesHint() string {
+	return Catalog.Format(msgs.locale, "videoNotesHint", nil)
+}
+
+// VideoNotesPlaceholder says "0:00 Introduction\n1:23 The first idea\n4:56 A demo"
+// in the language the app shows.
+//
+// Video notes dialog: the text area's placeholder, a line per moment of the
+// video after its time.
+func VideoNotesPlaceholder() string { return In(i18n.Locale()).VideoNotesPlaceholder() }
+
+// VideoNotesPlaceholder says "0:00 Introduction\n1:23 The first idea\n4:56 A demo"
+// in the language of msgs.
+//
+// Video notes dialog: the text area's placeholder, a line per moment of the
+// video after its time.
+func (msgs Messages) VideoNotesPlaceholder() string {
+	return Catalog.Format(msgs.locale, "videoNotesPlaceholder", nil)
+}
+
+// VideoNotesTooLong says "Notes take at most {max} characters."
+// in the language the app shows.
+//
+// Video notes dialog: notes past the most a video block keeps.
+func VideoNotesTooLong(max int) string { return In(i18n.Locale()).VideoNotesTooLong(max) }
+
+// VideoNotesTooLong says "Notes take at most {max} characters."
+// in the language of msgs.
+//
+// Video notes dialog: notes past the most a video block keeps.
+func (msgs Messages) VideoNotesTooLong(max int) string {
+	return Catalog.Format(msgs.locale, "videoNotesTooLong", map[string]any{"max": max})
+}
+
+// VideoCopyMoment says "Copy link to {time}"
+// in the language the app shows.
+//
+// Menu of a line of a video's notes: copies a link to that moment of the
+// video, which plays it from there when clicked in a page or a chat.
+func VideoCopyMoment(time_ string) string { return In(i18n.Locale()).VideoCopyMoment(time_) }
+
+// VideoCopyMoment says "Copy link to {time}"
+// in the language of msgs.
+//
+// Menu of a line of a video's notes: copies a link to that moment of the
+// video, which plays it from there when clicked in a page or a chat.
+func (msgs Messages) VideoCopyMoment(time_ string) string {
+	return Catalog.Format(msgs.locale, "videoCopyMoment", map[string]any{"time": time_})
+}
+
+// VideoSummarize says "Summarize with agent"
+// in the language the app shows.
+//
+// Video block menu item, for a video whose site gives its captions: asks
+// the agent to write the video's notes from what is said in it.
+func VideoSummarize() string { return In(i18n.Locale()).VideoSummarize() }
+
+// VideoSummarize says "Summarize with agent"
+// in the language of msgs.
+//
+// Video block menu item, for a video whose site gives its captions: asks
+// the agent to write the video's notes from what is said in it.
+func (msgs Messages) VideoSummarize() string {
+	return Catalog.Format(msgs.locale, "videoSummarize", nil)
+}
+
+// VideoSummarizePrompt says "Summarize the video “{title}” in its notes: a line for each key moment, starting with its time."
+// in the language the app shows.
+//
+// Chat message sent to the agent, and shown as the user's, by a video
+// block's Summarize with agent; the agent reads the video's transcript
+// itself.
+func VideoSummarizePrompt(title string) string { return In(i18n.Locale()).VideoSummarizePrompt(title) }
+
+// VideoSummarizePrompt says "Summarize the video “{title}” in its notes: a line for each key moment, starting with its time."
+// in the language of msgs.
+//
+// Chat message sent to the agent, and shown as the user's, by a video
+// block's Summarize with agent; the agent reads the video's transcript
+// itself.
+func (msgs Messages) VideoSummarizePrompt(title string) string {
+	return Catalog.Format(msgs.locale, "videoSummarizePrompt", map[string]any{"title": title})
 }
 
 // RecBlockTitle says "Recording · {when, date, ::MMMdHm}"

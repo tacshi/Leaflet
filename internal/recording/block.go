@@ -1,7 +1,6 @@
 package recording
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
@@ -15,13 +14,7 @@ import (
 
 // FormatDuration is a recording's length as its block shows it: 3:05, or
 // 1:02:05.
-func FormatDuration(d time.Duration) string {
-	s := int(d.Seconds())
-	if s >= 3600 {
-		return fmt.Sprintf("%d:%02d:%02d", s/3600, s/60%60, s%60)
-	}
-	return fmt.Sprintf("%d:%02d", s/60, s%60)
-}
+func FormatDuration(d time.Duration) string { return doc.Clock(int(d.Seconds())) }
 
 // BlockTitle is the name a recording block shows: its title, with the time
 // it was made where the title, as older blocks', gives only the day, or

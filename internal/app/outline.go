@@ -10,7 +10,7 @@ import (
 	"leaflet/locales"
 )
 
-func (h *host) OpenBlock(pageID, blockID string) { h.a.openBlock(pageID, blockID) }
+func (h *host) OpenBlock(pageID, blockID string, at int) { h.a.openLink(pageID, blockID, at) }
 func (h *host) BlockLink(blockID string) string {
 	if h.a.page == nil {
 		return ""
@@ -29,6 +29,25 @@ func (a *App) openBlock(pageID, blockID string) {
 		return
 	}
 	a.goToBlock(blockID, true)
+}
+
+// openLink opens a page at one of its blocks, for a link to it, and
+// plays a video or a recording from at seconds in, for a link to a moment
+// of one; at is -1 for none.
+func (a *App) openLink(pageID, blockID string, at int) {
+	a.openBlock(pageID, blockID)
+	if at < 0 || a.page == nil || a.page.id != pageID {
+		return
+	}
+	switch n := a.page.editor.Content.Find(blockID); {
+	case n == nil:
+	case n.Type == "video":
+		a.seekVideo(blockID, at)
+	case n.Type == "recording":
+		if rec, err := a.st.Recording(n.Str("recording_id")); err == nil {
+			a.seek(rec, time.Duration(at)*time.Second)
+		}
+	}
 }
 
 // goToBlock shows a block of the open page at the top, opening the

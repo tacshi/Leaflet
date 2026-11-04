@@ -541,8 +541,13 @@ func TestAgentOnAPageToView(t *testing.T) {
 	if kids, _ := st.Children(p.ID, ""); len(kids) != 0 || ids(c) != "h1,p1,l1" {
 		t.Errorf("subpages %d, blocks %s", len(kids), ids(c))
 	}
-	if defs := ToolDefinitions(false, true); len(defs) != 1 {
-		t.Errorf("%d tools offered", len(defs))
+	// Only the reading ones: the page, and what is said in its videos.
+	var names []string
+	for _, d := range ToolDefinitions(false, true) {
+		names = append(names, d["function"].(map[string]any)["name"].(string))
+	}
+	if !slices.Equal(names, []string{"read_page", "read_video_transcript"}) {
+		t.Errorf("tools offered: %v", names)
 	}
 }
 

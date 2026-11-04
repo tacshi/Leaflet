@@ -85,6 +85,16 @@ final class EditorController: NSObject, UITextViewDelegate {
     /// onRenameBlock asks for a new name for a block, named title now: a
     /// recording's, from its menu.
     var onRenameBlock: (@MainActor (DocNode, String) -> Void)?
+    /// onEditNotes opens the sheet that writes a video's notes, and
+    /// onEditLink the one that changes its link, from its menu.
+    var onEditNotes: (@MainActor (DocNode) -> Void)?
+    var onEditLink: (@MainActor (DocNode) -> Void)?
+    /// onSummarize asks an agent about a block with a prompt, for the user
+    /// to send: a video's summary in its notes, from its menu.
+    var onSummarize: (@MainActor (DocNode, String) -> Void)?
+    /// pageID is the page's, which a link to a moment of one of its blocks
+    /// names.
+    var pageID = ""
     /// pageLinks open the pages subpages' cards show.
     var pageLinks: PageLinks? {
         didSet { textView.blocks.links = pageLinks }
@@ -198,8 +208,8 @@ final class EditorController: NSObject, UITextViewDelegate {
         due.stop()
         // The page's videos stop with it: opened again, they show their
         // pictures.
-        VideoPlayback.shared.playing.subtract(
-            text.blocks().filter { $0.info.type == "video" }.map { $0.info.id })
+        VideoPlayback.shared.stop(
+            Set(text.blocks().filter { $0.info.type == "video" }.map { $0.info.id }))
         textView.blocks.reset()
     }
 
@@ -418,15 +428,35 @@ final class EditorController: NSObject, UITextViewDelegate {
         if url.scheme == "leaflet" {
             let id = url.pathComponents.dropFirst().first ?? ""
             guard !id.isEmpty else { return }
-            // A link to a block of the page opens the page there.
-            if let block = url.fragment, !block.isEmpty, let openAt = pageLinks?.openAt {
-                openAt(id, block)
+            // A link to a block of the page opens the page there, and one to
+            // a moment of a video or a recording plays it from that time.
+            let href = url.absoluteString
+            let block = MobileLinkedBlock(href)
+            if !block.isEmpty, let openAt = pageLinks?.openAt {
+                openAt(id, block, MobileLinkedMoment(href))
             } else {
                 pageLinks?.open(id)
             }
             return
         }
         UIApplication.shared.open(url)
+    }
+
+    /// play plays the video or the recording of block blockID from at
+    /// seconds in, for a link to a moment of it; at -1 plays nothing.
+    func play(blockID: String, at: Int) {
+        guard at >= 0, let info = text.blocks().first(where: { $0.info.id == blockID })?.info
+        else { return }
+        switch info.type {
+        case "video":
+            VideoPlayback.shared.seek(blockID, link: info.data["url"]?.string ?? "", at: at)
+        case "recording":
+            if let id = info.data["recording_id"]?.string {
+                Recorder.shared.play(id, from: TimeInterval(at))
+            }
+        default:
+            break
+        }
     }
 
     /// setData gives a block without text new data, as its editor saved
@@ -438,6 +468,22 @@ final class EditorController: NSObject, UITextViewDelegate {
     func replaceBlock(_ node: DocNode) { commands.replaceBlock(node) }
 
     func removeBlock(_ id: String) { commands.removeBlock(id) }
+
+    /// copyBlock copies the block of id, as Copy does a selection of it:
+    /// from a block's menu, which a block without text has.
+    func copyBlock(_ id: String) {
+        guard let (info, range) = text.blocks().first(where: { $0.info.id == id }) else { return }
+        clipboard.copy(blocks: [
+            DocumentMapper.node(for: info, text: storage.attributedSubstring(from: range))
+        ])
+    }
+
+    /// cutBlock copies the block of id and takes it out of the page, as
+    /// one step to undo.
+    func cutBlock(_ id: String) {
+        copyBlock(id)
+        removeBlock(id)
+    }
 
     func insertBlock(_ node: DocNode, at location: Int? = nil) {
         commands.insertBlock(node, at: location)

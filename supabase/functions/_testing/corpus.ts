@@ -97,6 +97,7 @@ const INLINE = [
   "[@Bot](mention:agent:a1)",
   "[Plan](leaflet://page/p1)",
   "[x](leaflet://page/p2#b1)",
+  "[1:23](leaflet://page/p2#b1?t=83)",
   "[](leaflet://page/p3)",
   "https://example.com/x?y=1",
   "\\*",
@@ -157,6 +158,10 @@ const URLS = [
   "https://youtube.com/watch?x=1;v=dQw4w9WgXcQ",
   "https://vimeo.com/76979871",
   "https://player.vimeo.com/video/76979871",
+  "https://vimeo.com/76979871/8272103f6e",
+  "https://player.vimeo.com/video/76979871?h=8272103f6e",
+  "https://vimeo.com/76979871?h=Nope",
+  "https://vimeo.com/channels/staffpicks/76979871/abcdef",
   "https://vİmeo.com/76979871",
   "https://vimeo.com/channels/staff",
   "https://www.bilibili.com/video/BV1KofNYjEuK/?p=2",
@@ -294,7 +299,9 @@ export function delta(r: Random, max = 5): DeltaOp[] {
     if (r.chance(0.15)) a.strikethrough = true;
     if (r.chance(0.2)) a.code = true;
     if (r.chance(0.15)) {
-      a.href = r.chance(0.5) ? url(r) : r.pick(["leaflet://page/p1", "leaflet://page/p2#b", "#x", ""]);
+      a.href = r.chance(0.5)
+        ? url(r)
+        : r.pick(["leaflet://page/p1", "leaflet://page/p2#b", "leaflet://page/p2#b?t=83", "#x", ""]);
     }
     if (r.chance(0.08)) a.mention = mention(r);
     if (r.chance(0.05)) a.underline = true;
@@ -407,6 +414,16 @@ const LANGUAGES = [
   "",
 ];
 
+/** A video's notes, as an agent writes them: lines after their times, with spaces and line breaks of each kind. */
+const NOTES = [
+  "0:00 Intro\n1:23 Caches",
+  " \r\n[1:02:03] - Wrap-up\r\n",
+  "A talk.\rsee 4:56",
+  "\u0085 2:05 字 \u3000",
+  " ",
+  "",
+];
+
 /** A block spec, as an agent writes one: of each type, with fields of the wrong kind now and then. */
 export function spec(r: Random, depth = 0): Record<string, unknown> {
   const s: Record<string, unknown> = {};
@@ -465,7 +482,11 @@ export function spec(r: Random, depth = 0): Record<string, unknown> {
   }
   if (r.chance(0.2)) {
     s.video = r.chance(0.9)
-      ? { url: url(r), ...(r.chance(0.5) ? { title: field(r, [" Song ", ""]) } : {}) }
+      ? {
+        url: url(r),
+        ...(r.chance(0.5) ? { title: field(r, [" Song ", ""]) } : {}),
+        ...(r.chance(0.4) ? { notes: field(r, NOTES) } : {}),
+      }
       : anyValue(r);
   }
   if (r.chance(0.2)) s.link = r.chance(0.9) ? { url: url(r) } : anyValue(r);
@@ -634,6 +655,7 @@ export function block(r: Random, ids: Ids, odd: boolean, depth = 0): NodeJSON {
     case "video":
       data.url = v(["https://youtu.be/dQw4w9WgXcQ", "https://example.com/a.mp4"]);
       if (r.chance(0.7)) data.title = v(["Song", ""]);
+      if (r.chance(0.4)) data.notes = v(NOTES);
       break;
     case "link_preview":
       data.url = v(["https://go.dev/", "https://example.com/untitled"]);

@@ -39,8 +39,11 @@ final class SceneModel {
     /// the title is otherwise kept only as its field lets the keyboard go.
     @ObservationIgnored var saveTitle: (() async -> Void)?
     /// target is a block the page opening goes to once it shows, as a
-    /// to-do's or a search hit's.
+    /// to-do's or a search hit's, and targetAt the time it plays it from,
+    /// in seconds, for a link to a moment of a video or a recording; -1 for
+    /// none.
     @ObservationIgnored var target: String?
+    @ObservationIgnored var targetAt = -1
     /// toasts shows the app's toasts over the window and its sheets.
     @ObservationIgnored let toasts = ToastWindow()
 
@@ -107,6 +110,10 @@ final class SceneModel {
     /// blockName the name being typed for it.
     var renamingBlock: DocNode?
     var blockName = ""
+    /// editingNotes is a video block whose notes are being written, and
+    /// editingLink one whose link is being changed.
+    var editingNotes: DocNode?
+    var editingLink: DocNode?
     /// heading is the heading the open page is at, which the outline shows.
     var heading: String?
     /// writing says the page's text or title has the keyboard, which the
@@ -123,15 +130,17 @@ final class SceneModel {
     }
 
     /// open opens a page at a block, as a to-do or a search hit does: the
-    /// page open goes to it at once, another once it shows.
-    func open(_ id: String, at blockID: String?) {
+    /// page open goes to it at once, another once it shows. A link to a
+    /// moment of a video or a recording plays it from moment seconds in.
+    func open(_ id: String, at blockID: String?, moment: Int = -1) {
         guard let blockID, !blockID.isEmpty else { return open(id) }
         if id == selection, let editor {
             editor.reveal(blockID: blockID, atTop: true)
+            editor.play(blockID: blockID, at: moment)
             return
         }
         open(id)
-        target = blockID
+        (target, targetAt) = (blockID, moment)
     }
 
     var canGoBack: Bool { !back.isEmpty }
@@ -158,11 +167,13 @@ final class SceneModel {
             self.held = nil
         }
         selection = id
-        target = nil
+        (target, targetAt) = (nil, -1)
         newComment = nil
         asking = nil
         editingBlock = nil
         renamingBlock = nil
+        editingNotes = nil
+        editingLink = nil
     }
 
     /// keep drops the pages not among ids from the history, as they are

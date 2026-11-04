@@ -116,6 +116,7 @@ func (h *host) Image(n *doc.Node) (ui.ImageSource, *ui.VideoPlayer, bool) {
 }
 func (h *host) Embed(c *ui.Context, n *doc.Node, width float32) { h.a.embedBlock(c, n, width) }
 func (h *host) Video(c *ui.Context, n *doc.Node, width float32) { h.a.videoBlock(c, n, width) }
+func (h *host) VideoMenu(m *ui.Menu, n *doc.Node)               { h.a.videoMenu(m, n) }
 func (h *host) Card(c *ui.Context, n *doc.Node) {
 	if n.Type == "file" {
 		h.a.fileBlock(c, n)

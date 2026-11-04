@@ -1,0 +1,285 @@
+{
+  "youtube_tracks": [
+    {
+      "player": "{\"playabilityStatus\":{\"status\":\"OK\",\"reason\":\"\"},\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&lang=ja\",\"languageCode\":\"ja\"},{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&kind=asr&lang=en\",\"languageCode\":\"en\",\"kind\":\"asr\"},{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&lang=en\",\"languageCode\":\"en-US\"}],\"audioTracks\":[{\"defaultCaptionTrackIndex\":0}]}}}",
+      "value": {
+        "url": "https://www.youtube.com/api/timedtext?v=x&lang=en",
+        "language": "en-US",
+        "auto": false
+      }
+    },
+    {
+      "player": "{\"playabilityStatus\":{\"status\":\"OK\",\"reason\":\"\"},\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&lang=ja\",\"languageCode\":\"ja\"},{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&kind=asr&lang=en\",\"languageCode\":\"en\",\"kind\":\"asr\"}],\"audioTracks\":[{\"defaultCaptionTrackIndex\":0}]}}}",
+      "value": {
+        "url": "https://www.youtube.com/api/timedtext?v=x&kind=asr&lang=en",
+        "language": "en",
+        "auto": true
+      }
+    },
+    {
+      "player": "{\"playabilityStatus\":{\"status\":\"OK\",\"reason\":\"\"},\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&lang=ja\",\"languageCode\":\"ja\"},{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&lang=en\",\"languageCode\":\"en-US\"}],\"audioTracks\":[{\"defaultCaptionTrackIndex\":0}]}}}",
+      "value": {
+        "url": "https://www.youtube.com/api/timedtext?v=x&lang=ja",
+        "language": "ja",
+        "auto": false
+      }
+    },
+    {
+      "player": "{\"playabilityStatus\":{\"status\":\"OK\",\"reason\":\"\"},\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&lang=ja\",\"languageCode\":\"ja\"},{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&lang=en\",\"languageCode\":\"en-US\"}],\"audioTracks\":[]}}}",
+      "value": {
+        "url": "https://www.youtube.com/api/timedtext?v=x&lang=en",
+        "language": "en-US",
+        "auto": false
+      }
+    },
+    {
+      "player": "{\"playabilityStatus\":{\"status\":\"OK\",\"reason\":\"\"},\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&lang=ja\",\"languageCode\":\"ja\"},{\"languageCode\":\"de\"}],\"audioTracks\":[{\"defaultCaptionTrackIndex\":7}]}}}",
+      "value": {
+        "url": "https://www.youtube.com/api/timedtext?v=x&lang=ja",
+        "language": "ja",
+        "auto": false
+      }
+    },
+    {
+      "player": "{\"playabilityStatus\":{\"status\":\"OK\",\"reason\":\"\"},\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[],\"audioTracks\":[{\"defaultCaptionTrackIndex\":0}]}}}",
+      "error": "none"
+    },
+    {
+      "player": "{\"playabilityStatus\":{\"status\":\"LOGIN_REQUIRED\",\"reason\":\"Sign in to confirm you’re not a bot\"},\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&lang=en\",\"languageCode\":\"en-US\"}],\"audioTracks\":[{\"defaultCaptionTrackIndex\":0}]}}}",
+      "error": "refused"
+    },
+    {
+      "player": "{\"playabilityStatus\":{\"status\":\"LOGIN_REQUIRED\",\"reason\":\"This video is private\"},\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&lang=en\",\"languageCode\":\"en-US\"}],\"audioTracks\":[{\"defaultCaptionTrackIndex\":0}]}}}",
+      "error": "restricted"
+    },
+    {
+      "player": "{\"playabilityStatus\":{\"status\":\"ERROR\",\"reason\":\"\"},\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&lang=en\",\"languageCode\":\"en-US\"}],\"audioTracks\":[{\"defaultCaptionTrackIndex\":0}]}}}",
+      "error": "restricted"
+    },
+    {
+      "player": "{\"playabilityStatus\":{\"status\":\"OK\"}}",
+      "error": "none"
+    },
+    {
+      "player": "{\"playabilityStatus\":{\"status\":\"OK\",\"reason\":\"\"},\"captions\":{\"playerCaptionsTracklistRenderer\":{\"captionTracks\":[{\"baseUrl\":\"https://www.youtube.com/api/timedtext?v=x&exp=xpe&lang=en\",\"languageCode\":\"en\"}],\"audioTracks\":[{\"defaultCaptionTrackIndex\":0}]}}}",
+      "error": "refused"
+    },
+    {
+      "player": "<html>",
+      "error": "unreadable"
+    }
+  ],
+  "youtube_lines": [
+    {
+      "xml": "<?xml version=\"1.0\" encoding=\"utf-8\" ?><timedtext format=\"3\"><head><ws id=\"0\"/></head><body>\n<w t=\"0\" id=\"1\" wp=\"1\" ws=\"1\"/>\n<p t=\"320\" d=\"14260\" w=\"1\">[Music]</p>\n<p t=\"18790\" w=\"1\" a=\"1\">\n</p>\n<p t=\"18800\" d=\"7160\" w=\"1\"><s ac=\"0\">We&#39;re</s><s t=\"239\" ac=\"0\"> no</s><s t=\"559\" ac=\"0\"> strangers</s></p>\n<p t=\"22640\" d=\"4320\">♪ You know the rules\nand so do I ♪</p>\n<p t=\"27040\">Tom &amp; Jerry &lt;i&gt;shout&lt;/i&gt; &#x1F600; &nbsp;&nbsp; &copy; &#0; &#xD800;</p>\n<p d=\"5\" t=\"31000\">a&amp;amp;b</p>\n<p t=\"1.5\">half</p>\n</body></timedtext>",
+      "lines": [
+        {
+          "start_ms": 320,
+          "text": "[Music]"
+        },
+        {
+          "start_ms": 18800,
+          "text": "We're no strangers"
+        },
+        {
+          "start_ms": 22640,
+          "text": "♪ You know the rules and so do I ♪"
+        },
+        {
+          "start_ms": 27040,
+          "text": "Tom & Jerry shout 😀 &copy; &#0; &#xD800;"
+        },
+        {
+          "start_ms": 31000,
+          "text": "a&b"
+        },
+        {
+          "start_ms": 0,
+          "text": "half"
+        }
+      ]
+    },
+    {
+      "xml": "<?xml version=\"1.0\" encoding=\"utf-8\" ?><transcript><text start=\"1.36\" dur=\"1.68\">Hello &amp;amp; welcome</text><text start=\"3.0405\" dur=\"2\">back</text><text start=\"x\">no time</text><text dur=\"1\">  </text></transcript>",
+      "lines": [
+        {
+          "start_ms": 1360,
+          "text": "Hello & welcome"
+        },
+        {
+          "start_ms": 3041,
+          "text": "back"
+        },
+        {
+          "start_ms": 0,
+          "text": "no time"
+        }
+      ]
+    },
+    {
+      "xml": "",
+      "lines": []
+    }
+  ],
+  "vimeo_tracks": [
+    {
+      "config": "{\"request\":{\"text_tracks\":[{\"lang\":\"de\",\"url\":\"https://captions.vimeo.com/captions/170.vtt?sig=1\",\"kind\":\"subtitles\",\"default\":true},{\"lang\":\"en\",\"url\":\"https://captions.vimeo.com/captions/140662.vtt?sig=2\",\"kind\":\"subtitles\"}]}}",
+      "value": {
+        "url": "https://captions.vimeo.com/captions/140662.vtt?sig=2",
+        "language": "en",
+        "auto": false
+      }
+    },
+    {
+      "config": "{\"request\":{\"text_tracks\":[{\"lang\":\"de\",\"url\":\"https://captions.vimeo.com/captions/170.vtt?sig=1\",\"kind\":\"subtitles\",\"default\":true}]}}",
+      "value": {
+        "url": "https://captions.vimeo.com/captions/170.vtt?sig=1",
+        "language": "de",
+        "auto": false
+      }
+    },
+    {
+      "config": "{\"request\":{\"text_tracks\":[{\"lang\":\"de\",\"url\":\"https://captions.vimeo.com/c/1.vtt\",\"kind\":\"subtitles\"},{\"lang\":\"fr\",\"url\":\"/texttrack/9.vtt?token=3\",\"kind\":\"captions\"}]}}",
+      "value": {
+        "url": "https://player.vimeo.com/texttrack/9.vtt?token=3",
+        "language": "fr",
+        "auto": false
+      }
+    },
+    {
+      "config": "{\"request\":{\"text_tracks\":[{\"lang\":\"en\",\"url\":\"https://captions.vimeo.com/c/2.vtt\",\"kind\":\"subtitles\"},{\"lang\":\"fr-x-autogen\",\"url\":\"https://captions.vimeo.com/c/7.vtt\",\"kind\":\"captions\"},{\"lang\":\"fr-CA\",\"url\":\"https://captions.vimeo.com/c/8.vtt\"}]}}",
+      "value": {
+        "url": "https://captions.vimeo.com/c/8.vtt",
+        "language": "fr-CA",
+        "auto": false
+      }
+    },
+    {
+      "config": "{\"request\":{\"text_tracks\":[{\"lang\":\"en\",\"url\":\"https://captions.vimeo.com/c/2.vtt\"},{\"lang\":\"es-x-autogen\",\"url\":\"https://captions.vimeo.com/c/7.vtt\"}]}}",
+      "value": {
+        "url": "https://captions.vimeo.com/c/7.vtt",
+        "language": "es",
+        "auto": true
+      }
+    },
+    {
+      "config": "{\"request\":{\"text_tracks\":[]}}",
+      "error": "none"
+    },
+    {
+      "config": "{\"request\":{\"text_tracks\":[{\"lang\":\"en\",\"url\":\"javascript:alert(1)\"},{\"lang\":\"en\",\"url\":7}]}}",
+      "error": "none"
+    },
+    {
+      "config": "{\"request\":{}}",
+      "error": "none"
+    },
+    {
+      "config": "nope",
+      "error": "unreadable"
+    }
+  ],
+  "vtt_lines": [
+    {
+      "vtt": "WEBVTT\r\nKind: captions\r\n\r\nNOTE made by hand\r\n\r\nSTYLE\r\n::cue { color: red }\r\n\r\n1\r\n00:00:05.237 --> 00:00:08.043 align:start\r\n<i>Here at Vimeo, there's always</i>\r\n<i>one thing on our minds:</i>\r\n\r\n01:02.5 --> 01:04.000\n<v Roger>Fish &amp; chips</v>\n\n2\n1:00:00.000 --> 1:00:02.000\n\n\nbad --> 00:00:01.000\nnot a cue\n\n00:01:00 --> 00:01:02\nno fraction\n\n00:+1:00.000 --> x\nsigned\n\n00:01:00.12a --> x\nletters\n",
+      "lines": [
+        {
+          "start_ms": 5237,
+          "text": "Here at Vimeo, there's always one thing on our minds:"
+        },
+        {
+          "start_ms": 62500,
+          "text": "Fish & chips"
+        },
+        {
+          "start_ms": 60000,
+          "text": "no fraction"
+        }
+      ]
+    },
+    {
+      "vtt": "WEBVTT\n\n\n\n00:00:00.000 --> 00:00:01.000\n\n",
+      "lines": []
+    }
+  ],
+  "passages": [
+    {
+      "lines": [
+        {
+          "start_ms": 0,
+          "text": "Hello."
+        },
+        {
+          "start_ms": 2000,
+          "text": "Today we look"
+        },
+        {
+          "start_ms": 6500,
+          "text": "at caches."
+        },
+        {
+          "start_ms": 9000,
+          "text": "They hit"
+        },
+        {
+          "start_ms": 12000,
+          "text": "and they miss"
+        },
+        {
+          "start_ms": 30000,
+          "text": "until"
+        },
+        {
+          "start_ms": 31000,
+          "text": "they don't.”"
+        },
+        {
+          "start_ms": 38000,
+          "text": "「終わり」。"
+        },
+        {
+          "start_ms": 45000,
+          "text": "Next"
+        },
+        {
+          "start_ms": 52000,
+          "text": "Really?)"
+        },
+        {
+          "start_ms": 59000,
+          "text": "Yes"
+        }
+      ],
+      "passages": [
+        {
+          "start_ms": 0,
+          "text": "Hello. Today we look at caches."
+        },
+        {
+          "start_ms": 9000,
+          "text": "They hit and they miss"
+        },
+        {
+          "start_ms": 30000,
+          "text": "until they don't.”"
+        },
+        {
+          "start_ms": 38000,
+          "text": "「終わり」。"
+        },
+        {
+          "start_ms": 45000,
+          "text": "Next Really?)"
+        },
+        {
+          "start_ms": 59000,
+          "text": "Yes"
+        }
+      ]
+    },
+    {
+      "lines": [],
+      "passages": []
+    }
+  ]
+}

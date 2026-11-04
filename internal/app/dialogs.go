@@ -80,6 +80,11 @@ type dialogs struct {
 	recName   string
 	recSelect bool
 
+	// The dialog writing the notes of a video block of the open page.
+	notesOpen  bool
+	notesBlock string
+	notesText  string
+
 	moveOpen  bool
 	movePage  string
 	moveQuery string
@@ -168,6 +173,9 @@ func (d *dialogs) view(c *ui.Context, a *App) {
 	}
 	if d.recOpen {
 		a.recordingDialog(c)
+	}
+	if d.notesOpen {
+		a.videoNotesDialog(c)
 	}
 	if d.moveOpen {
 		a.moveDialog(c)

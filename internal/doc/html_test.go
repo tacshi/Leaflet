@@ -122,7 +122,8 @@ func TestPageHTMLVideoCodeCallout(t *testing.T) {
 		CalloutIcon: func(tone string) string { return "<svg>" + tone + "</svg>" },
 	})
 	for _, want := range []string{
-		`<iframe src="https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ?playsinline=1&amp;rel=0"`,
+		`<iframe src="https://www.youtube-nocookie.com/embed/aqz-KE-bpKQ?playsinline=1&amp;rel=0&amp;enablejsapi=1"`,
+		`<script src="/tok/video.js" defer></script>`,
 		`>Big Buck Bunny</a></figcaption>`,
 		`<video controls preload="metadata" src="https://x.dev/clip.mp4">`,
 		`<code class="language-go"><b>go</b></code>`,
@@ -137,8 +138,9 @@ func TestPageHTMLVideoCodeCallout(t *testing.T) {
 	if strings.Contains(out, "x()") {
 		t.Errorf("an embed's HTML is in the page:\n%s", out)
 	}
-	if strings.Contains(out, "autoplay") {
-		t.Errorf("a video plays as the page loads:\n%s", out)
+	// The frame may play, once the visitor asks.
+	if strings.Contains(out, "autoplay=1") || !strings.Contains(out, `allow="autoplay;`) {
+		t.Errorf("a video plays as the page loads, or can't when asked:\n%s", out)
 	}
 }
 

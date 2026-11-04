@@ -53,6 +53,10 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
   视频、链接卡片，以及在沙盒中运行的交互式嵌入。
 - Markdown 快捷输入、`/` 菜单、用 `@` 提及成员、智能体和页面、带文字颜色
   的选区工具栏、可折叠的标题、大纲，以及指向页面和单个块的链接。
+- 在页面中播放 YouTube、Vimeo、哔哩哔哩、Dailymotion 和 niconico 的视频或
+  视频文件，每个视频下方可以写笔记，就像视频的简介栏：点击笔记中的时间，
+  就从那里播放这个视频。指向视频或录音某一刻的链接，在任何页面或聊天中点击，
+  都从那一刻开始播放。
 - 嵌套页面与文件夹、模板、复制页面、搜索，以及导出为 Markdown 和 PDF。
 - 页面历史，支持命名版本，可以行内或并排查看与任一版本相比的改动。
 
@@ -63,6 +67,9 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
   `insert_blocks`、`replace_block`、`move_block`、`delete_blocks`、
   `create_subpage`，开启读取其他页面时还有 `list_pages` 和
   `read_other_page`），在保存历史快照后以流式写入页面，并合为一步撤销。
+- 智能体可以从字幕读取 YouTube 和 Vimeo 视频中说的内容
+  （`read_video_transcript`），写出带每个要点时间的视频笔记，并用链接指出
+  视频或录音的某一刻。
 - 在你允许时，智能体可以使用网络：`read_web_page` 把网页读成带链接的文本，
   `web_search` 通过智能体自己的服务商搜索（OpenAI、Claude、xAI、OpenRouter、
   GLM 或 ChatGPT 套餐）。一次运行读过网络后，只写入和读取它找到的或你给的
@@ -273,7 +280,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `internal/webpage` | 可独立打开的网页形式的页面：公开链接分享的、导出 › PDF 打印的都是它，两个应用共用 |
 | `internal/starters` | Leaflet 自带的模板 |
 | `internal/export` | 把所有页面连同图片、文件和录音导出为 Markdown 压缩包 |
-| `internal/web` | 链接卡片、图片、视频信息和供智能体阅读的网页，只从公网地址读取 |
+| `internal/web` | 链接卡片、图片、视频信息与字幕，以及供智能体阅读的网页，只从公网地址读取 |
 | `internal/store` | SQLite（纯 Go）表、发件箱和设置 |
 | `internal/remote` | 基于 HTTP 的 Supabase：Auth、PostgREST、Storage 和 Edge Functions |
 | `internal/sync` | 推送发件箱、拉取、账户接管和设备心跳，经由 Supabase 或 iCloud 云盘 |

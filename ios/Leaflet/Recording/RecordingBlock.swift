@@ -219,8 +219,7 @@ struct RecordingBlock: View {
     }
 
     /// transcript is the recording's lines, each after its time: a tap on
-    /// either plays from it. The times are as wide as the longest they
-    /// can be, as the text size has them, for the lines to start together.
+    /// either plays from it.
     private func transcript(_ row: RecordingRow) -> some View {
         let palette = BlockLook.palette
         let widest = row.durationMs >= 3_600_000 ? "0:00:00" : "00:00"
@@ -228,61 +227,29 @@ struct RecordingBlock: View {
         let lines = folds && !open ? Array(row.transcript.prefix(row.folded)) : row.transcript
         return VStack(alignment: .leading, spacing: 8) {
             ForEach(Array(lines.enumerated()), id: \.offset) { _, s in
-                Button {
+                TimedRow(time: RecordControl.time(TimeInterval(s.startMs) / 1000), widest: widest) {
                     Recorder.shared.play(id, from: TimeInterval(s.startMs) / 1000)
-                } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        ZStack(alignment: .leading) {
-                            Text(verbatim: widest).hidden()
-                            Text(RecordControl.time(TimeInterval(s.startMs) / 1000))
-                                .foregroundStyle(palette.accent)
+                } content: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if let speaker = s.speaker, !speaker.isEmpty {
+                            Text(L.recSpeaker(name: speaker))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(palette.textMuted)
                         }
-                        .font(.caption.monospacedDigit())
-                        .fixedSize()
-                        VStack(alignment: .leading, spacing: 2) {
-                            if let speaker = s.speaker, !speaker.isEmpty {
-                                Text(L.recSpeaker(name: speaker))
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(palette.textMuted)
-                            }
-                            Text(s.text)
-                                .font(.system(size: BlockLook.textSize - 2))
-                                .foregroundStyle(palette.text)
-                                .multilineTextAlignment(.leading)
-                        }
-                        Spacer(minLength: 0)
+                        Text(s.text)
+                            .font(.system(size: BlockLook.textSize - 2))
+                            .foregroundStyle(palette.text)
+                            .multilineTextAlignment(.leading)
                     }
-                    .contentShape(.rect)
                 }
-                .buttonStyle(.plain)
                 .disabled(Recorder.shared.state.recording)
             }
             if folds {
-                Button {
-                    open.toggle()
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(open ? L.recShowLess : L.recShowAll(count: row.transcript.count))
-                        Image(systemName: "chevron.down").imageScale(.small)
-                            .rotationEffect(.degrees(open ? 180 : 0))
-                    }
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(palette.accent)
-                    .contentShape(.rect)
-                }
-                .buttonStyle(.plain)
-                // Under the lines' text, past their times.
-                .padding(.leading, timesWidth(widest))
+                FoldButton(
+                    open: $open, count: row.transcript.count,
+                    indent: TimeStyle.caption.indent(widest))
             }
         }
-    }
-
-    /// timesWidth is how far the lines' text starts: past the widest time
-    /// and the space after it.
-    private func timesWidth(_ widest: String) -> CGFloat {
-        let font = UIFont.monospacedDigitSystemFont(
-            ofSize: UIFont.preferredFont(forTextStyle: .caption1).pointSize, weight: .regular)
-        return (widest as NSString).size(withAttributes: [.font: font]).width.rounded(.up) + 12
     }
 
     /// notice is what went wrong with the recording, in red when it failed:

@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"html"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"leaflet/internal/doc"
@@ -304,6 +305,11 @@ var DiagramCSP = scriptsCSP(diagramScript)
 // gets none, and refuses to play.
 const VideoOrigin = "https://app.capyvibe.leaflet/"
 
+// SafariAgent is what Safari adds to WebKit's user agent, which a web view
+// of WebKit's sends without it: the sites' players, as Vimeo's, play only
+// in a browser they know.
+const SafariAgent = "Version/26.0 Safari/605.1.15"
+
 // VideoCSP lets a video's page frame only the sites' players, or play
 // only web video files, and run nothing of its own.
 const VideoCSP = "default-src 'none'; style-src 'unsafe-inline'; frame-src " + doc.VideoPlayers + "; media-src https: http:"
@@ -319,6 +325,80 @@ func VideoPage(v doc.Video) string {
 		`<meta http-equiv="Content-Security-Policy" content="` + VideoCSP + `">` +
 		`<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}iframe,video{border:0;width:100%;height:100%;display:block}</style></head><body>` +
 		player + `</body></html>`
+}
+
+// VideoSeekJS defines leafletSeek(el, provider, t), which plays the player
+// in el, a site's frame or a video, from t seconds in, and leafletPause(el,
+// provider), which pauses it, as far as the site lets a page around its
+// player say so: YouTube's and Vimeo's take a message, a video file is the
+// page's own. Each reports whether it could.
+const VideoSeekJS = `function leafletSeek(el, provider, t) {
+  if (el.tagName === "VIDEO") {
+    el.currentTime = t;
+    el.play();
+    return true;
+  }
+  var w = el.contentWindow;
+  if (!w) return false;
+  if (provider === "youtube") {
+    [["seekTo", [t, true]], ["playVideo", []]].forEach(function (c) {
+      w.postMessage(JSON.stringify({event: "command", func: c[0], args: c[1]}), "https://www.youtube-nocookie.com");
+    });
+    return true;
+  }
+  if (provider === "vimeo") {
+    [{method: "setCurrentTime", value: t}, {method: "play"}].forEach(function (m) {
+      w.postMessage(JSON.stringify(m), "https://player.vimeo.com");
+    });
+    return true;
+  }
+  return false;
+}
+function leafletPause(el, provider) {
+  if (el.tagName === "VIDEO") {
+    el.pause();
+    return true;
+  }
+  var w = el.contentWindow;
+  if (!w) return false;
+  if (provider === "youtube") {
+    w.postMessage(JSON.stringify({event: "command", func: "pauseVideo", args: []}), "https://www.youtube-nocookie.com");
+    return true;
+  }
+  if (provider === "vimeo") {
+    w.postMessage(JSON.stringify({method: "pause"}), "https://player.vimeo.com");
+    return true;
+  }
+  return false;
+}
+`
+
+// SeeksInPlace tells whether a video's player, as VideoPage frames it,
+// goes to another time without loading again: the others' sites take no
+// word from the page around them.
+func SeeksInPlace(v doc.Video) bool {
+	return v.Provider == "youtube" || v.Provider == "vimeo" || v.Provider == "file"
+}
+
+// VideoSeek is the expression that plays a video's page, as VideoPage
+// made it, from sec seconds in, or "" for one whose player must load
+// again there: VideoPage of the video at that time.
+func VideoSeek(v doc.Video, sec int) string {
+	if !SeeksInPlace(v) {
+		return ""
+	}
+	return "(function () {\n" + VideoSeekJS + "return leafletSeek(document.querySelector(\"iframe, video\"), " +
+		strconv.Quote(v.Provider) + ", " + strconv.Itoa(max(sec, 0)) + ");\n})()"
+}
+
+// VideoPause is the expression that pauses a video's page, as VideoPage
+// made it, or "" for one whose site's player can't be told to.
+func VideoPause(v doc.Video) string {
+	if !SeeksInPlace(v) {
+		return ""
+	}
+	return "(function () {\n" + VideoSeekJS + "return leafletPause(document.querySelector(\"iframe, video\"), " +
+		strconv.Quote(v.Provider) + ");\n})()"
 }
 
 // Interactive embeds run their HTML in a sandboxed frame of a page of

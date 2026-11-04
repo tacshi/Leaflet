@@ -8,6 +8,9 @@ struct AskRequest: Identifiable, Equatable {
     var selection: String
     /// agent is the one chosen in "@", or nil for the default.
     var agent: AgentState.Option?
+    /// prompt is what the ask starts with, for the user to send or change:
+    /// a video's summary, from its menu.
+    var prompt = ""
 }
 
 /// AskSheet asks an agent to write, rewrite or explain, as the desktop's
@@ -141,7 +144,10 @@ struct AskSheet: View {
         .onChange(of: fit) { _, height in
             if detent != .large { detent = .height(height) }
         }
-        .onAppear { focused = true }
+        .onAppear {
+            if text.isEmpty { text = request.prompt }
+            focused = true
+        }
         .onChange(of: run?.status) { if let run, Self.closes(run) { dismiss() } }
         .onChange(of: run?.edits.count) { if let run, Self.closes(run) { dismiss() } }
     }

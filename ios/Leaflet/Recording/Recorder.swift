@@ -223,10 +223,12 @@ final class Recorder {
             }
             if let at {
                 player.currentTime = at
+                VideoPlayback.shared.pauseAll()
                 player.play()
             } else if player.isPlaying {
                 player.pause()
             } else {
+                VideoPlayback.shared.pauseAll()
                 player.play()
             }
             changes += 1
@@ -246,6 +248,7 @@ final class Recorder {
                 p.delegate = ended
                 p.prepareToPlay()
                 if let at { p.currentTime = at }
+                VideoPlayback.shared.pauseAll()
                 p.play()
                 player = p
                 playing = id
@@ -253,6 +256,13 @@ final class Recorder {
                 toast?(L.recCouldNotPlay(error: error.localizedDescription))
             }
         }
+    }
+
+    /// pausePlaying pauses the recording playing, as a video starts.
+    func pausePlaying() {
+        guard let player, player.isPlaying else { return }
+        player.pause()
+        changes += 1
     }
 
     func seek(_ id: String, to at: TimeInterval) {

@@ -67,10 +67,10 @@ func TestParseVideoURL(t *testing.T) {
 
 func TestVideoURLs(t *testing.T) {
 	yt := Video{Provider: "youtube", ID: "dQw4w9WgXcQ", Start: 90}
-	if got := yt.PlayerURL(true); got != "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&playsinline=1&rel=0&start=90" {
+	if got := yt.PlayerURL(true); got != "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?autoplay=1&playsinline=1&rel=0&enablejsapi=1&start=90" {
 		t.Errorf("player %s", got)
 	}
-	if got := yt.PlayerURL(false); got != "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?playsinline=1&rel=0&start=90" {
+	if got := yt.PlayerURL(false); got != "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?playsinline=1&rel=0&enablejsapi=1&start=90" {
 		t.Errorf("still player %s", got)
 	}
 	if got := yt.WatchURL(); got != "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=90s" {
@@ -110,7 +110,7 @@ func TestVideoURLs(t *testing.T) {
 			"https://player.bilibili.com/player.html?aid=573719854&autoplay=0&high_quality=1",
 			"https://api.bilibili.com/x/web-interface/view?aid=573719854"},
 		{Video{Provider: "dailymotion", ID: "x8j5v1k", Start: 12},
-			"https://www.dailymotion.com/video/x8j5v1k",
+			"https://www.dailymotion.com/video/x8j5v1k?start=12",
 			"https://geo.dailymotion.com/player.html?video=x8j5v1k&startTime=12",
 			"https://www.dailymotion.com/services/oembed?url=https%3A%2F%2Fwww.dailymotion.com%2Fvideo%2Fx8j5v1k"},
 		{Video{Provider: "niconico", ID: "sm9", Start: 30},

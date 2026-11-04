@@ -5,6 +5,17 @@
       "required": [],
       "type": "object"
     },
+    "read_video_transcript": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "type": "object"
+    },
     "write_markdown": {
       "properties": {
         "markdown": {
@@ -216,6 +227,9 @@
               },
               "video": {
                 "properties": {
+                  "notes": {
+                    "type": "string"
+                  },
                   "title": {
                     "type": "string"
                   },
@@ -439,6 +453,9 @@
             },
             "video": {
               "properties": {
+                "notes": {
+                  "type": "string"
+                },
                 "title": {
                   "type": "string"
                 },
@@ -690,6 +707,9 @@
               },
               "video": {
                 "properties": {
+                  "notes": {
+                    "type": "string"
+                  },
                   "title": {
                     "type": "string"
                   },

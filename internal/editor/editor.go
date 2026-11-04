@@ -76,8 +76,13 @@ type Host interface {
 	// or diagram block's source, an image's or video's link, or a picker
 	// for another file in place of an uploaded image.
 	EditBlock(blockID string)
-	// OpenBlock opens a page at one of its blocks, for a link to a block.
-	OpenBlock(pageID, blockID string)
+	// VideoMenu adds a video block's own items to its context menu: its
+	// notes and an agent's summary.
+	VideoMenu(m *ui.Menu, n *doc.Node)
+	// OpenBlock opens a page at one of its blocks, for a link to a block,
+	// and plays a video or a recording from at seconds in, for a link to a
+	// moment of one; at is -1 for none.
+	OpenBlock(pageID, blockID string, at int)
 	// BlockLink is the link to a block of this page.
 	BlockLink(blockID string) string
 }

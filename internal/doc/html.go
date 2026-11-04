@@ -85,12 +85,19 @@ type TranscriptLine struct {
 func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	var body strings.Builder
 	math, diagram, embed, recording := false, false, false, false
+	// The page's videos, by block, which its notes and the links to their
+	// moments play.
+	videos := map[string]Video{}
 	c.Walk(func(n, _ *Node) {
 		math = math || n.Type == "math_equation"
 		diagram = diagram || n.Type == "diagram"
 		embed = embed || n.Type == "embed" && opts.Embed != nil
 		recording = recording || n.Type == "recording"
+		if v, ok := ParseVideoURL(n.Str("url")); ok && n.Type == "video" {
+			videos[n.ID] = v
+		}
 	})
+	video := len(videos) > 0 && !opts.Print
 	script := func(name string) string {
 		if opts.Script == nil {
 			return ""
@@ -110,7 +117,7 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	if !diagram || !served("diagram") {
 		diagram = false
 	}
-	w := htmlWriter{b: &body, opts: opts, math: math, diagram: diagram}
+	w := htmlWriter{b: &body, opts: opts, math: math, diagram: diagram, videos: videos}
 	w.blocks(c.Children)
 
 	var b strings.Builder
@@ -127,8 +134,8 @@ func PageHTML(title string, c *Content, opts HTMLOptions) string {
 	// A script written in the page goes after it, where the blocks it
 	// draws are already read.
 	var inline strings.Builder
-	for _, name := range []string{"math", "diagram", "embed", "recording", "comments"} {
-		if name == "math" && !math || name == "diagram" && !diagram || name == "embed" && !embed || name == "recording" && !recording {
+	for _, name := range []string{"math", "diagram", "embed", "recording", "video", "comments"} {
+		if name == "math" && !math || name == "diagram" && !diagram || name == "embed" && !embed || name == "recording" && !recording || name == "video" && !video {
 			continue
 		}
 		// Diagrams are drawn by a module: Pele is one.
@@ -152,6 +159,31 @@ type htmlWriter struct {
 	b             *strings.Builder
 	opts          HTMLOptions
 	math, diagram bool
+	videos        map[string]Video
+}
+
+// text writes rich text as the page shows it: a link to a moment of one of
+// its videos goes to the video's site at that time, which the page's video
+// script plays in place instead.
+func (w htmlWriter) text(d Delta) string {
+	return d.html(func(href string) (string, string) {
+		at, ok := LinkMoment(href)
+		v, found := w.videos[LinkBlock(href)]
+		if !ok || !found || w.opts.Print {
+			if ok && found {
+				return v.At(at).WatchURL(), ""
+			}
+			return "", ""
+		}
+		return v.At(at).WatchURL(), ` data-video="` + html.EscapeString(LinkBlock(href)) + `"` + momentData(v, at)
+	})
+}
+
+// momentData are the attributes of a link to a moment of video v, at
+// seconds in, for the page's video script: the time, and the player
+// there, for a player that must load again to go to it.
+func momentData(v Video, at int) string {
+	return ` data-t="` + strconv.Itoa(at) + `" data-src="` + html.EscapeString(v.At(at).PlayerURL(true)) + `"`
 }
 
 // icon is the app's icon of a name, as HTML, or "".
@@ -249,7 +281,7 @@ func (w htmlWriter) item(n *Node) {
 		}
 		w.write(`<input type="checkbox" disabled` + checked + `> `)
 	}
-	w.write(n.Delta().HTML())
+	w.write(w.text(n.Delta()))
 	if n.Type == "todo_list" && w.opts.Due != nil {
 		if due := w.opts.Due(n); due != "" {
 			w.write(` <span class="due">`, w.icon("calendar"), html.EscapeString(due), "</span>")
@@ -265,19 +297,19 @@ func (w htmlWriter) item(n *Node) {
 func (w htmlWriter) block(n *Node) {
 	switch n.Type {
 	case "paragraph":
-		w.write("<p", w.attrs(n, ""), ">", n.Delta().HTML(), "</p>\n")
+		w.write("<p", w.attrs(n, ""), ">", w.text(n.Delta()), "</p>\n")
 	case "heading":
 		h := "h" + strconv.Itoa(min(max(n.Int("level", 1), 1), 6))
-		w.write("<", h, w.attrs(n, ""), ">", n.Delta().HTML(), "</", h, ">\n")
+		w.write("<", h, w.attrs(n, ""), ">", w.text(n.Delta()), "</", h, ">\n")
 	case "quote":
-		w.write("<blockquote", w.attrs(n, ""), ">", n.Delta().HTML(), "</blockquote>\n")
+		w.write("<blockquote", w.attrs(n, ""), ">", w.text(n.Delta()), "</blockquote>\n")
 	case "callout":
 		tone := CalloutTone(n.Str("tone"))
 		icon := ""
 		if w.opts.CalloutIcon != nil {
 			icon = `<span class="icon">` + w.opts.CalloutIcon(tone) + `</span>`
 		}
-		w.write("<div", w.attrs(n, "callout "+tone), ">", icon, "<div>", n.Delta().HTML(), "</div></div>\n")
+		w.write("<div", w.attrs(n, "callout "+tone), ">", icon, "<div>", w.text(n.Delta()), "</div></div>\n")
 	case "code":
 		lang := n.Str("language")
 		class := ""
@@ -294,7 +326,7 @@ func (w htmlWriter) block(n *Node) {
 		if n.Bool("collapsed") && !w.opts.Print {
 			open = ""
 		}
-		w.write("<details", w.attrs(n, ""), open, "><summary>", n.Delta().HTML(), "</summary>\n")
+		w.write("<details", w.attrs(n, ""), open, "><summary>", w.text(n.Delta()), "</summary>\n")
 		w.blocks(n.Children)
 		w.write("</details>\n")
 	case "divider":
@@ -347,7 +379,7 @@ func (w htmlWriter) block(n *Node) {
 				if short[c] {
 					open = "<" + cell + ` class="nowrap">`
 				}
-				w.write(open, d.HTML(), "</", cell, ">")
+				w.write(open, w.text(d), "</", cell, ">")
 			}
 			w.write("</tr>\n")
 		}
@@ -411,24 +443,28 @@ func (w htmlWriter) block(n *Node) {
 			break
 		}
 		if w.opts.Print {
-			// Paper plays nothing: the video is a card linking to it.
+			// Paper plays nothing: the video is a card linking to it, its
+			// notes' times to its site at each.
 			w.videoCard(n, v)
+			w.notes(n, v)
 			break
 		}
 		// It plays in place, as in the app, but only once the visitor
 		// asks: the page's player does not start as it loads.
 		src := v.PlayerURL(false)
-		w.write("<figure", w.attrs(n, "video"), ">")
+		w.write("<figure", w.attrs(n, "video"), ` data-provider="`, html.EscapeString(v.Provider), `">`)
 		if v.Provider == "file" {
 			w.write(`<video controls preload="metadata" src="`, html.EscapeString(src), `"></video>`)
 		} else {
-			// The sites' players need to know the page they are on.
+			// The sites' players need to know the page they are on, and may
+			// start playing at a time the visitor clicks in the notes.
 			w.write(`<div class="frame"><iframe src="`, html.EscapeString(src), `" title="`, html.EscapeString(cardTitle(n)),
-				`" allow="fullscreen; picture-in-picture; encrypted-media" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`)
+				`" allow="autoplay; fullscreen; picture-in-picture; encrypted-media" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin"></iframe></div>`)
 		}
 		if t := n.Str("title"); t != "" {
 			w.write(`<figcaption><a href="`, html.EscapeString(v.WatchURL()), `" rel="noopener noreferrer">`, html.EscapeString(t), "</a></figcaption>")
 		}
+		w.notes(n, v)
 		w.write("</figure>\n")
 	case "link_preview":
 		w.card(n)
@@ -459,7 +495,7 @@ func (w htmlWriter) block(n *Node) {
 		}
 	default:
 		if n.IsText() {
-			w.write("<p", w.attrs(n, ""), ">", n.Delta().HTML(), "</p>\n")
+			w.write("<p", w.attrs(n, ""), ">", w.text(n.Delta()), "</p>\n")
 		}
 	}
 }
@@ -506,6 +542,55 @@ func (w htmlWriter) videoCard(n *Node, v Video) {
 		w.write(`<img src="`, html.EscapeString(img), `" alt="">`)
 	}
 	w.write("</a>\n")
+}
+
+// notes writes a video's notes as its block shows them, a line's time
+// beside it, and folded when long, but on paper. A time links to the
+// video's site there, which the page's video script plays in place
+// instead.
+func (w htmlWriter) notes(n *Node, v Video) {
+	lines := NoteLines(n.Str("notes"))
+	if len(lines) == 0 {
+		return
+	}
+	moment := func(class, text string, at int) string {
+		data := ""
+		if !w.opts.Print {
+			data = momentData(v, at)
+		}
+		return `<a class="` + class + `" href="` + html.EscapeString(v.At(at).WatchURL()) + `" rel="noopener noreferrer"` + data + `>` + html.EscapeString(text) + "</a>"
+	}
+	// The times' column is as wide as the longest of them, in figures.
+	widest := 0
+	for _, l := range lines {
+		if l.At >= 0 {
+			widest = max(widest, len(Clock(l.At)))
+		}
+	}
+	w.write(`<div class="transcript notes" style="--ts:`, strconv.Itoa(widest), `ch">`)
+	folds := FoldsTranscript(len(lines)) && !w.opts.Print
+	for i, l := range lines {
+		if folds && i == FoldedLines {
+			w.write("<details><summary>", html.EscapeString(locales.In(w.opts.Lang).RecShowAll(len(lines))), w.icon("chevron-down"), "</summary>")
+		}
+		w.write("<p>")
+		if l.At >= 0 {
+			w.write(moment("ts", Clock(l.At), l.At))
+		}
+		w.write(`<span class="line">`)
+		for _, p := range l.Parts {
+			if p.At >= 0 {
+				w.write(moment("at", p.Text, p.At))
+			} else {
+				w.write(html.EscapeString(p.Text))
+			}
+		}
+		w.write("</span></p>")
+	}
+	if folds {
+		w.write("</details>")
+	}
+	w.write("</div>")
 }
 
 // lazy is a picture's loading attribute: lazy, but on paper, which can't
@@ -622,7 +707,11 @@ func tableCells(n *Node) [][]Delta {
 
 // HTML writes rich text as inline HTML. A link keeps only a web or mail
 // address, and a mention is its name.
-func (d Delta) HTML() string {
+func (d Delta) HTML() string { return d.html(nil) }
+
+// html is HTML with links as link has them, when it gives one: where each
+// goes and attributes of the page's own for it.
+func (d Delta) html(link func(href string) (to, attrs string)) string {
 	var b strings.Builder
 	for _, r := range d {
 		text := strings.ReplaceAll(html.EscapeString(r.Text), "\n", "<br>")
@@ -637,8 +726,14 @@ func (d Delta) HTML() string {
 			open = append(open, o)
 			close = append([]string{c}, close...)
 		}
-		if href := SafeHref(a.Href); href != "" {
-			wrap(`<a href="`+html.EscapeString(href)+`" rel="noopener noreferrer">`, "</a>")
+		href, attrs := SafeHref(a.Href), ""
+		if link != nil {
+			if to, more := link(a.Href); to != "" {
+				href, attrs = SafeHref(to), more
+			}
+		}
+		if href != "" {
+			wrap(`<a href="`+html.EscapeString(href)+`" rel="noopener noreferrer"`+attrs+`>`, "</a>")
 		}
 		if a.Bold {
 			wrap("<strong>", "</strong>")
@@ -845,6 +940,14 @@ figure.embed iframe{display:block;width:100%;border:0}
 figure.video video{width:100%;border-radius:8px;background:#000}
 figure.video .frame{position:relative;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:#000}
 figure.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.notes{margin-top:12px;padding:10px 12px;border-radius:10px;background:var(--code);gap:4px}
+.notes p{font-size:1em}
+.notes p{gap:10px}
+.notes .ts{font-size:13px;width:var(--ts)}
+.notes summary{margin-left:calc(var(--ts) + 4px)}
+.notes .ts,.notes .at{text-decoration:none}
+.notes .ts:hover,.notes .at:hover{text-decoration:underline}
+.notes .at{color:var(--link);font-variant-numeric:tabular-nums}
 .math,.diagram{text-align:center;overflow-x:auto}
 .diagram svg{max-width:100%;height:auto}
 @media (max-width:600px){main{padding:28px 16px 96px}h1.title{font-size:1.8em}pre{font-size:.92em}

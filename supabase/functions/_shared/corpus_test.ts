@@ -17,6 +17,7 @@ import {
   plainText,
   specToNode,
   transcriptText,
+  videoOf,
 } from "./blocks.ts";
 import { markdownSpecs } from "./lines.ts";
 import { agentURL, webURL } from "./url.ts";
@@ -136,7 +137,7 @@ Deno.test("links read as the app reads them (testdata/corpus/urls.json)", async 
   const r = new Random(5);
   const made = Array.from({ length: 400 }, () => {
     const u = url(r);
-    return { url: u, web: webURL(u), agent: agentURL(u), video: isVideoURL(u) };
+    return { url: u, web: webURL(u), agent: agentURL(u), video: isVideoURL(u), video_of: videoOf(u) };
   });
   await corpus("corpus/urls.json", made, urlsCorpus);
 });

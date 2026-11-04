@@ -147,6 +147,7 @@ func (a *App) play(rec store.Recording) {
 			if pl.p.Position() >= pl.p.Duration() {
 				pl.p.Seek(0)
 			}
+			a.playAlone("", rec.ID)
 			pl.p.Play()
 		}
 		return
@@ -177,6 +178,7 @@ func (a *App) play(rec store.Recording) {
 			if pl.from > 0 {
 				pl.p.Seek(pl.from)
 			}
+			a.playAlone("", rec.ID)
 			pl.p.Play()
 		})
 	}()
@@ -337,54 +339,23 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 			}
 			// A click on a line plays from it, so its text is not selectable;
 			// the menu's Copy transcript copies it.
+			col := timeColumn(c, []string{recording.FormatDuration(time.Duration(rec.DurationMs) * time.Millisecond)}, 12)
 			ui.Column(c).Gap(8).Children(func() {
 				for i, s := range lines {
-					// The time sits on the line's baseline, though its type is smaller.
-					ui.Row(c.Key(i)).Gap(12).AlignItems(ui.Baseline).Children(func() {
-						ts := ui.ButtonBase(c.Key("ts")).Width(46)
-						ts.Children(func() {
-							ui.Text(c, recording.FormatDuration(time.Duration(s.StartMs)*time.Millisecond)).FontSize(12).TextColor(pal.Accent).FontFeatures("tnum")
-						})
-						if ts.Clicked() {
-							a.seek(rec, time.Duration(s.StartMs)*time.Millisecond)
+					at := time.Duration(s.StartMs) * time.Millisecond
+					timedRow(c, i, recording.FormatDuration(at), col, 12, func() bool {
+						if s.Speaker != "" {
+							ui.Text(c, locales.RecSpeaker(s.Speaker)).FontSize(11.5).FontWeight(600).TextColor(pal.TextMuted)
 						}
-						line := ui.Column(c.Key("line")).Grow(1).Padding(0, 6).Margin(0, -6).Radius(6)
-						if line.Hovered() {
-							line.Background(pal.Hover)
-						}
-						line.Children(func() {
-							if s.Speaker != "" {
-								ui.Text(c, locales.RecSpeaker(s.Speaker)).FontSize(11.5).FontWeight(600).TextColor(pal.TextMuted)
-							}
-							ui.Text(c, s.Text).FontSize(14).Font(theme.PageFamily(s.Text)).TextColor(pal.Text)
-						})
-						if line.Clicked() {
-							a.seek(rec, time.Duration(s.StartMs)*time.Millisecond)
-						}
-					})
+						ui.Text(c, s.Text).FontSize(14).Font(theme.PageFamily(s.Text)).TextColor(pal.Text)
+						return false
+					}, func() { a.seek(rec, at) })
 				}
-				if long {
-					label, turn := locales.RecShowAll(len(v.lines)), float32(0)
-					if open {
-						label, turn = locales.RecShowLess(), 180
+				if long && foldButton(c, len(v.lines), open, col) {
+					if a.recOpen == nil {
+						a.recOpen = map[string]bool{}
 					}
-					// Under the lines' text, past their times.
-					fold := ui.ButtonBase(c.Key("fold")).Margin(0, 0, 0, 52).Padding(2, 6).Radius(6).AlignSelf(ui.Start)
-					if fold.Hovered() {
-						fold.Background(pal.Hover)
-					}
-					fold.Children(func() {
-						ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
-							ui.Text(c, label).FontSize(12.5).FontWeight(500).TextColor(pal.Accent)
-							ui.Icon(c, theme.Icon("chevron-down")).FontSize(13).TextColor(pal.Accent).Rotate(turn)
-						})
-					})
-					if fold.Clicked() {
-						if a.recOpen == nil {
-							a.recOpen = map[string]bool{}
-						}
-						a.recOpen[n.ID] = !open
-					}
+					a.recOpen[n.ID] = !open
 				}
 			})
 		}
@@ -471,6 +442,7 @@ func (a *App) seek(rec store.Recording, t time.Duration) {
 	}
 	pl.p.Seek(t)
 	if !pl.p.Playing() {
+		a.playAlone("", rec.ID)
 		pl.p.Play()
 	}
 }

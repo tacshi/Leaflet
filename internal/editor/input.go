@@ -775,7 +775,11 @@ func (e *Editor) HandleInput(ev ui.InputEvent) bool {
 			link := e.linkUnder(p.ID, wx, wy)
 			if id, ok := doc.PageLinkID(link); ok {
 				if block := doc.LinkBlock(link); block != "" {
-					e.Host.OpenBlock(id, block)
+					at, moment := doc.LinkMoment(link)
+					if !moment {
+						at = -1
+					}
+					e.Host.OpenBlock(id, block, at)
 				} else {
 					e.Host.OpenPage(id)
 				}

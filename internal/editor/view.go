@@ -58,6 +58,9 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 			if label := mediaEdit(e.node(e.menuBlock)); label != "" && !e.ReadOnly && m.Item(label).Chosen() {
 				e.Host.EditBlock(e.menuBlock)
 			}
+			if n := e.node(e.menuBlock); n.Type == "video" {
+				e.Host.VideoMenu(m, n)
+			}
 			if label := mediaLink(e.linkAtPos(e.menuAt)); label != "" && !e.ReadOnly && m.Item(label).Chosen() {
 				e.LinkToMedia(e.menuAt)
 			}

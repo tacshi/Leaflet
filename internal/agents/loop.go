@@ -154,6 +154,11 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 	} else {
 		tc.ReadWeb, tc.SearchWeb = nil, nil
 	}
+	// A video's captions are read from its site, whose link is on the
+	// page, with or without the web.
+	if tc.Captions == nil {
+		tc.Captions = func(v doc.Video) (web.Captions, error) { return web.ReadCaptions(ctx, v) }
+	}
 	exec := &Executor{Ctx: tc, OnOp: ev.Op, OnRevise: ev.Revise}
 	exec.begin()
 	exec.armed = armed
@@ -307,6 +312,8 @@ func activity(name, raw string) string {
 			return locales.AgentReadingWebPage(strings.TrimPrefix(u.Hostname(), "www."))
 		}
 		return locales.AgentReadingWeb()
+	case "read_video_transcript":
+		return locales.AgentReadingVideo()
 	}
 	return ""
 }

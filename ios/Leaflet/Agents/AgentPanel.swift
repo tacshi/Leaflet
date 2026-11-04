@@ -196,6 +196,7 @@ struct MessageView: View {
     let run: AgentState.Run?
     let model: PageModel
     @Environment(AppModel.self) private var app
+    @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -220,6 +221,17 @@ struct MessageView: View {
                     )
                     .foregroundStyle(message.error ? palette.dangerText : palette.text)
                     .textSelection(.enabled)
+                    // A link to a page, a block of one or a moment of a video
+                    // opens it here, as one in the page does.
+                    .environment(
+                        \.openURL,
+                        OpenURLAction { [scene] url in
+                            guard url.scheme == "leaflet", let editor = scene.editor else {
+                                return .systemAction
+                            }
+                            editor.open(url)
+                            return .handled
+                        })
             }
             if let run, !run.edits.isEmpty {
                 RunCard(run: run, pageID: model.id)

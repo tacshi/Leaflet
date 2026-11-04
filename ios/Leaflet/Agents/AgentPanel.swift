@@ -1,10 +1,15 @@
 import SwiftUI
 
-/// AgentPanel is the page's agent chat, as the desktop's Agent tab: the
+/// AgentPanel is an agent chat, as the desktop's Agent tab: the page's,
+/// or the workspace agent's, of all the user's pages. It shows the
 /// conversation, each run's edits with Undo, Stop while one works, the
 /// agent to ask, and suggestions for an empty chat.
-struct AgentPanel: View {
-    let model: PageModel
+struct AgentPanel<Chat: AgentChat>: View {
+    let model: Chat
+    /// allPages, given, is the choice beside a page of what the chat asks
+    /// about, the page or all the user's pages, as a menu by the composer,
+    /// as on the desktop.
+    var allPages: Binding<Bool>?
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
@@ -58,10 +63,10 @@ struct AgentPanel: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if state.messages.isEmpty {
-                        Text(L.panelChatEmpty)
+                        Text(model.emptyText)
                             .foregroundStyle(palette.textMuted)
                             .padding(.vertical, 8)
-                        ForEach(suggestions, id: \.self) { s in
+                        ForEach(model.suggestions, id: \.self) { s in
                             Button(s) { send(s) }
                                 .buttonStyle(.bordered)
                                 .hoverEffect()
@@ -71,20 +76,14 @@ struct AgentPanel: View {
                         MessageView(
                             message: m,
                             run: m.runID.flatMap { id in state.runs.first { $0.id == id } },
-                            model: model
+                            pageID: model.id
                         )
                         .id(i)
                     }
                     if let run = loneRun {
                         VStack(alignment: .leading, spacing: 6) {
-                            Label(
-                                run.undone
-                                    ? L.pageRunUndone(agent: run.agentName)
-                                    : L.pageRunEdited(
-                                        agent: run.agentName, count: Set(run.blockIDs ?? []).count),
-                                systemImage: "sparkles"
-                            )
-                            .font(.footnote.weight(.medium))
+                            Label(runText(run), systemImage: "sparkles")
+                                .font(.footnote.weight(.medium))
                             RunCard(run: run, pageID: model.id)
                         }
                     }
@@ -108,12 +107,20 @@ struct AgentPanel: View {
         }
     }
 
-    private var suggestions: [String] {
-        [L.panelSuggestSummarize, L.panelSuggestStructure, L.panelSuggestGaps, L.panelSuggestChart]
+    /// runText says what a lone run did: undone, the blocks it edited,
+    /// or, one that changed pages rather than blocks, its last edit.
+    private func runText(_ run: AgentState.Run) -> String {
+        if run.undone { return L.pageRunUndone(agent: run.agentName) }
+        let blocks = Set(run.blockIDs ?? []).count
+        if blocks == 0, let last = run.edits.last {
+            return L.pageRunDid(agent: run.agentName, edit: last)
+        }
+        return L.pageRunEdited(agent: run.agentName, count: blocks)
     }
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
+            if let allPages { scopeMenu(allPages) }
             Menu {
                 // Each agent, at the model Settings chose for it, the one
                 // the chat asks checked.
@@ -121,15 +128,12 @@ struct AgentPanel: View {
                     Toggle(
                         o.label,
                         isOn: Binding(
-                            get: {
-                                state.current
-                                    == AgentState.Choice(providerID: o.providerID, model: o.model)
-                            },
+                            get: { state.current?.providerID == o.providerID },
                             set: { on in
                                 guard on else { return }
                                 Task {
                                     await app.client?.selectAgent(
-                                        model.id, providerID: o.providerID, model: o.model)
+                                        model.id, providerID: o.providerID, model: "")
                                     await model.refreshAgents()
                                 }
                             }))
@@ -144,7 +148,7 @@ struct AgentPanel: View {
                     .frame(minWidth: 28, minHeight: line)
             }
             .accessibilityLabel(LI.agentOptions)
-            TextField(L.panelAskPlaceholder, text: Bindable(model).chatDraft, axis: .vertical)
+            TextField(model.placeholder, text: Bindable(model).chatDraft, axis: .vertical)
                 .lineLimit(1...6)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 10)
@@ -174,6 +178,26 @@ struct AgentPanel: View {
         .padding(10)
     }
 
+    /// scopeMenu chooses what the chat asks about: this page, of its agent,
+    /// or all the user's pages, of the workspace agent's.
+    private func scopeMenu(_ allPages: Binding<Bool>) -> some View {
+        Menu {
+            Picker(selection: allPages) {
+                Label(L.panelScopePage, systemImage: "doc.text").tag(false)
+                Label(L.panelScopeAll, systemImage: "square.grid.2x2").tag(true)
+            } label: {
+                EmptyView()
+            }
+        } label: {
+            Image(systemName: allPages.wrappedValue ? "square.grid.2x2" : "doc.text").imageScale(
+                .large
+            )
+            .frame(minWidth: 28, minHeight: line)
+        }
+        .accessibilityLabel(L.panelScope)
+        .accessibilityValue(allPages.wrappedValue ? L.panelScopeAll : L.panelScopePage)
+    }
+
     /// openProviders opens Settings, for its agent providers: over the
     /// panel beside the page, or once the panel as a sheet has gone.
     private func openProviders() {
@@ -182,10 +206,9 @@ struct AgentPanel: View {
 
     private func send(_ text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
+        guard !t.isEmpty, let client = app.client else { return }
         model.chatDraft = ""
-        let focus = scene.editor?.focusBlockIDs() ?? []
-        Task { await app.client?.chat(model.id, text: t, focus: focus) }
+        Task { [model, scene] in await model.send(t, client: client, scene: scene) }
     }
 }
 
@@ -194,7 +217,8 @@ struct AgentPanel: View {
 struct MessageView: View {
     let message: AgentState.Message
     let run: AgentState.Run?
-    let model: PageModel
+    /// pageID is the chat's: its page's, or "workspace".
+    let pageID: String
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
@@ -226,15 +250,21 @@ struct MessageView: View {
                     .environment(
                         \.openURL,
                         OpenURLAction { [scene] url in
-                            guard url.scheme == "leaflet", let editor = scene.editor else {
+                            guard url.scheme == "leaflet" else { return .systemAction }
+                            if let editor = scene.editor {
+                                editor.open(url)
+                            } else if url.host() == "page", url.pathComponents.count > 1 {
+                                // With no page open, as the workspace agent's
+                                // chat may be, the page it links to opens.
+                                scene.open(url.pathComponents[1])
+                            } else {
                                 return .systemAction
                             }
-                            editor.open(url)
                             return .handled
                         })
             }
             if let run, !run.edits.isEmpty {
-                RunCard(run: run, pageID: model.id)
+                RunCard(run: run, pageID: pageID)
             }
         }
         .frame(maxWidth: .infinity, alignment: message.mine ? .trailing : .leading)
@@ -279,13 +309,27 @@ struct RunCard: View {
     let run: AgentState.Run
     let pageID: String
     @Environment(AppModel.self) private var app
+    @Environment(SceneModel.self) private var scene
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             // By place: two edits can say the same.
-            ForEach(Array(run.edits.enumerated()), id: \.offset) { _, e in
-                Label(e, systemImage: "pencil.line").font(.footnote)
+            ForEach(Array(run.edits.enumerated()), id: \.offset) { i, e in
+                // A page the run made opens, unless undone: then it is gone.
+                if let page = run.page(i), !run.undone {
+                    Button {
+                        // The panel as a sheet would cover it.
+                        if sizeClass == .compact { scene.inspectorShown = false }
+                        scene.open(page)
+                    } label: {
+                        Label(e, systemImage: "doc.text")
+                    }
+                    .font(.footnote)
+                } else {
+                    Label(e, systemImage: "pencil.line").font(.footnote)
+                }
             }
             // What the agent said is in its message above.
             HStack {

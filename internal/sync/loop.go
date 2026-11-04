@@ -263,7 +263,8 @@ func (s *Service) RefreshContent(ctx context.Context, pageID string) (*doc.Conte
 }
 
 // FlushPage pushes a page's pending changes right away, so a cloud agent
-// starts from what the user sees.
+// starts from what the user sees; for "", all of them, as a workspace
+// agent's run reads all the user's pages.
 func (s *Service) FlushPage(ctx context.Context, pageID string) error {
 	if !s.CanSync() {
 		return nil

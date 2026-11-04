@@ -536,3 +536,339 @@ Deno.test("a run after turns that read the web keeps to the URLs it may write", 
     assert(history.includes("guarded:result->guarded"), history);
   }
 });
+
+// A page of its own is the person's, in their space wherever the page the
+// run is on is, last among its folder's pages, and changes nothing on the
+// page the run is on.
+Deno.test("a page of its own goes in the person's space and folder", async () => {
+  const p = project();
+  // Folders are listed where the person lets the agent read their pages.
+  p.tables.ai_jobs = [job("job", { request: { instruction: "Save the article", allow_cross_page: true } })];
+  p.tables.spaces = [{ id: "ann-space", owner_id: "ann" }, { id: "space", owner_id: "bo" }];
+  p.tables.folders = [
+    { id: "clip", space_id: "ann-space", name: "Clippings", sort_key: "a0", deleted_at: null },
+    { id: "bos", space_id: "space", name: "Bo's", sort_key: "a1", deleted_at: null },
+  ];
+  p.tables.pages.push(
+    {
+      id: "old",
+      space_id: "ann-space",
+      parent_id: null,
+      folder_id: "clip",
+      title: "Old",
+      sort_key: "a5",
+      is_template: false,
+      deleted_at: null,
+    },
+    {
+      id: "top",
+      space_id: "ann-space",
+      parent_id: null,
+      folder_id: null,
+      title: "Top",
+      sort_key: "z9",
+      is_template: false,
+      deleted_at: null,
+    },
+  );
+  const m = model(
+    calls(["list_folders", {}]),
+    calls(
+      ["create_page", { title: "Elsewhere", folder_id: "bos" }],
+      ["create_page", { title: "Article", folder_id: "clip", markdown: "# Title\n\nBody" }],
+    ),
+    says("Saved it in Clippings."),
+  );
+  const { events } = await run(p, deps(p, m.chat, { deadlineMs: 60_000 }));
+  assertEquals(events.at(-1)?.type, "done");
+  const listed = m.asked[1].messages.find((msg) => msg.role === "tool")?.content;
+  assertEquals(JSON.parse(String(listed)), { folders: [{ id: "clip", name: "Clippings" }] });
+  const made = p.rows("pages").filter((row) => row.title === "Article");
+  assertEquals(made.length, 1);
+  assertEquals([made[0].space_id, made[0].parent_id, made[0].folder_id, made[0].is_template], [
+    "ann-space",
+    null,
+    "clip",
+    false,
+  ]);
+  assert(String(made[0].sort_key) > "a5" && String(made[0].sort_key) < "z9");
+  assertEquals(p.rows("pages").filter((row) => row.title === "Elsewhere"), []);
+  const content = p.rows("page_content").find((c) => c.page_id === made[0].id)!;
+  assertEquals(texts(content.content), ["Title", "Body"]);
+  assertEquals(texts(contentOf(p).content), ["Ship the beta"]);
+  const result = jobOf(p).result as { ops: { op: string }[]; edits: { summary: string }[] };
+  assertEquals(result.ops.map((o) => o.op), ["create_page"]);
+  assertEquals(result.edits.map((e) => e.summary), ["Created page “Article”"]);
+});
+
+// A run out of time after it made a page did something: it ends with what
+// it made, which Undo takes away by its ops.
+Deno.test("a run out of time after making a page keeps it", async () => {
+  const p = project();
+  p.tables.spaces = [{ id: "ann-space", owner_id: "ann" }];
+  const m = model(
+    calls(["create_page", { title: "Article", markdown: "Body" }]),
+    () => new DOMException("timed out", "TimeoutError"),
+  );
+  const { events } = await run(p, deps(p, m.chat));
+  assertEquals(events.at(-1)?.type, "done");
+  assert(String(events.at(-1)?.reply).startsWith("I ran out of time and stopped."));
+  const job = jobOf(p);
+  assertEquals(job.status, "done");
+  assertEquals((job.result as { ops: { op: string }[] }).ops.map((o) => o.op), ["create_page"]);
+});
+
+// A run that fails after it made a page keeps its ops, to undo it by.
+Deno.test("a run that fails after making a page keeps its ops", async () => {
+  const p = project();
+  p.tables.spaces = [{ id: "ann-space", owner_id: "ann" }];
+  const m = model(
+    calls(["create_page", { title: "Article" }]),
+    new ProviderError(400, "The provider rejected the request (400)"),
+  );
+  await run(p, deps(p, m.chat));
+  const failed = jobOf(p);
+  assertEquals(failed.status, "failed");
+  assertEquals((failed.result as { ops: { op: string }[] }).ops.map((o) => o.op), ["create_page"]);
+});
+
+// A subpage's card goes at the end of the page the run is on, saved with
+// it.
+Deno.test("a subpage is linked at the end of its page", async () => {
+  const p = project();
+  const m = model(calls(["create_subpage", { title: "Notes" }]), says("Made it."));
+  await run(p, deps(p, m.chat));
+  const sub = p.rows("pages").find((row) => row.title === "Notes")!;
+  assertEquals(sub.parent_id, "plan");
+  const last = (contentOf(p).content as PageContent).document.children!.at(-1)!;
+  assertEquals([last.type, last.data], ["subpage", { page_id: sub.id }]);
+});
+
+// A page made at the top level goes last among the person's pages there,
+// all of them, past the API's most rows.
+Deno.test("a page of its own goes last past the API's most rows", async () => {
+  const p = project();
+  p.rules.maxRows = 2;
+  p.tables.spaces = [{ id: "ann-space", owner_id: "ann" }];
+  for (const [id, key] of [["t1", "a1"], ["t2", "a2"], ["t3", "z9"]]) {
+    p.tables.pages.push({
+      id,
+      space_id: "ann-space",
+      parent_id: null,
+      folder_id: null,
+      title: id,
+      sort_key: key,
+      is_template: false,
+      deleted_at: null,
+    });
+  }
+  const m = model(calls(["create_page", { title: "Article" }]), says("Made it."));
+  await run(p, deps(p, m.chat));
+  const made = p.rows("pages").find((row) => row.title === "Article")!;
+  assert(String(made.sort_key) > "z9", String(made.sort_key));
+});
+
+/** Ann's workspace: her page "Plan", one she shares with Bo, her folder, and a workspace job of hers. */
+function workspaceProject(request: Record<string, unknown> = {}): Project {
+  const p = project();
+  p.tables.spaces = [{ id: "space", owner_id: "ann" }];
+  p.tables.folders = [{ id: "clip", space_id: "space", name: "Clippings", sort_key: "a0", deleted_at: null }];
+  p.tables.pages = [
+    {
+      id: "plan",
+      space_id: "space",
+      parent_id: null,
+      folder_id: null,
+      title: "Plan",
+      tags: [],
+      sort_key: "a1",
+      is_template: false,
+      deleted_at: null,
+    },
+    {
+      id: "ours",
+      space_id: "space",
+      parent_id: null,
+      folder_id: null,
+      title: "Ours",
+      tags: [],
+      sort_key: "a2",
+      is_template: false,
+      deleted_at: null,
+    },
+  ];
+  p.tables.page_permissions = [{ page_id: "ours", user_id: "bo", role: "editor" }];
+  p.tables.comments = [];
+  p.tables.ai_jobs = [job("job", {
+    page_id: null,
+    surface: "workspace",
+    conversation_id: "convo",
+    request: { instruction: "File my pages", allow_cross_page: true, open_page_id: "plan", ...request },
+  })];
+  return p;
+}
+
+// A workspace job makes a page inside one of the person's, linked at its
+// end, and moves a page into their folder; the open page goes in the
+// request as data, and the job keeps its ops.
+Deno.test("a workspace job makes and files the person's pages", async () => {
+  const p = workspaceProject();
+  const m = model(
+    calls(["list_pages", {}]),
+    calls(["create_page", { title: "Notes", parent_id: "plan", markdown: "- one" }], ["move_page", {
+      page_id: "plan",
+      folder_id: "clip",
+    }]),
+    says("Done."),
+  );
+  const { events } = await run(p, deps(p, m.chat));
+  assertEquals(events.at(-1)?.type, "done");
+  const user = m.asked[0].messages.at(-1)!.content as string;
+  assertEquals(user, 'Open page (JSON): {"id":"plan","title":"Plan"}\n\nRequest:\nFile my pages');
+  const listed = JSON.parse(String(m.asked[1].messages.at(-1)!.content));
+  assertEquals(listed.pages.find((x: { id: string }) => x.id === "ours").shared, true);
+  const notes = p.rows("pages").find((row) => row.title === "Notes")!;
+  assertEquals([notes.parent_id, notes.space_id], ["plan", "space"]);
+  const plan = p.rows("pages").find((row) => row.id === "plan")!;
+  assertEquals(plan.folder_id, "clip");
+  const card = (contentOf(p).content as PageContent).document.children!.at(-1)!;
+  assertEquals([card.type, card.data], ["subpage", { page_id: notes.id }]);
+  const result = jobOf(p).result as { ops: { op: string }[] };
+  assertEquals(result.ops.map((o) => o.op), ["create_page", "move_page"]);
+});
+
+// A page someone else shares is read, and left as it is: no page goes in
+// it, nor is it moved, renamed or tagged.
+Deno.test("a workspace job leaves a shared page as it is", async () => {
+  const p = workspaceProject();
+  const m = model(
+    calls(["create_page", { title: "Notes", parent_id: "ours" }], ["rename_page", { page_id: "ours", title: "Mine" }]),
+    says("I can't."),
+  );
+  await run(p, deps(p, m.chat));
+  const answers = m.asked[1].messages.filter((x) => x.role === "tool").map((x) => JSON.parse(String(x.content)).error);
+  assert(answers.every((e) => typeof e === "string" && e.includes("shared with others")), String(answers));
+  assertEquals(p.rows("pages").find((row) => row.id === "ours")!.title, "Ours");
+  assertEquals(p.rows("pages").length, 2);
+});
+
+// A page with a public link open, which the app that serves it keeps on
+// the page, is left as it is too; one whose link ran out is not.
+Deno.test("a workspace job leaves a publicly linked page as it is", async () => {
+  for (const [until, left] of [[Date.now() + 60_000, true], [Date.now() - 60_000, false]] as const) {
+    const p = workspaceProject();
+    p.tables.pages[0].public_link_until = new Date(until).toISOString();
+    const m = model(calls(["rename_page", { page_id: "plan", title: "Mine" }]), says("Done."));
+    await run(p, deps(p, m.chat));
+    const answer = JSON.parse(String(m.asked[1].messages.find((x) => x.role === "tool")!.content));
+    assertEquals(String(answer.error ?? "").includes("shared with others"), left, `until ${until}`);
+    assertEquals(p.rows("pages").find((row) => row.id === "plan")!.title, left ? "Plan" : "Mine", `until ${until}`);
+  }
+});
+
+// The search splits its tags from its words, as the app's does, and asks
+// the database for the person's pages.
+Deno.test("a workspace job searches the person's pages", async () => {
+  const p = workspaceProject();
+  let asked: Record<string, unknown> | undefined;
+  p.rpcs.agent_search_pages = (args) => {
+    asked = args;
+    return [{ page_id: "plan", title: "Plan", snippet: "the launch" }];
+  };
+  const m = model(calls(["search_pages", { query: "#work launch  date" }]), says("Found it."));
+  await run(p, deps(p, m.chat));
+  assertEquals(asked, { p_text: "launch date", p_tags: ["work"], p_limit: 20 });
+  const found = JSON.parse(String(m.asked[1].messages.at(-1)!.content));
+  assertEquals(found, { results: [{ page_id: "plan", title: "Plan", snippet: "the launch" }] });
+  assertEquals((jobOf(p).result as { kept_to_page: boolean }).kept_to_page, false);
+});
+
+// A page other people share is not read, nor its text shown by a search;
+// one only the person writes in, with a public link, is read. Who else has
+// a page is read of the person's own space's pages alone.
+Deno.test("a workspace job reads no page other people write in", async () => {
+  const p = workspaceProject();
+  p.tables.pages[0].public_link_until = new Date(Date.now() + 60_000).toISOString();
+  p.rpcs.agent_search_pages = () => [
+    { page_id: "plan", title: "Plan", snippet: "the launch" },
+    { page_id: "ours", title: "Ours", snippet: "what Bo wrote" },
+  ];
+  const m = model(
+    calls(["search_pages", { query: "launch" }], ["read_page", { page_id: "ours" }], [
+      "read_page",
+      { page_id: "plan" },
+    ]),
+    says("Read it."),
+  );
+  await run(p, deps(p, m.chat));
+  const answers = m.asked[1].messages.filter((x) => x.role === "tool").map((x) => JSON.parse(String(x.content)));
+  assertEquals(answers[0].results, [{ page_id: "plan", title: "Plan", snippet: "the launch" }, {
+    page_id: "ours",
+    title: "Ours",
+  }]);
+  assert(String(answers[1].error).includes("shared with other people"), String(answers[1].error));
+  assertEquals(answers[2].page.id, "plan");
+  const who = p.requests.map(decodeURIComponent).filter((r) =>
+    r.startsWith("GET /rest/v1/page_permissions?") || r.startsWith("GET /rest/v1/comments?")
+  );
+  assert(who.length >= 2 && who.every((r) => r.includes("pages.space_id=eq.space")), who.join("\n"));
+});
+
+// The API answers a read with max_rows at most: the workspace job reads
+// every page past them, and every guest's comment, so a page one is on is
+// shared however many come before it. It reads them once a run, keeping
+// what it changes.
+Deno.test("a workspace job reads every page past the API's most rows", async () => {
+  const p = workspaceProject();
+  p.rules.maxRows = 2;
+  for (let i = 0; i < 5; i++) {
+    p.rows("pages").push({
+      id: `more-${i}`,
+      space_id: "space",
+      parent_id: null,
+      folder_id: null,
+      title: `More ${i}`,
+      tags: [],
+      sort_key: `b${i}`,
+      is_template: false,
+      deleted_at: null,
+    });
+  }
+  p.tables.comments = ["plan", "ours", "more-4"].map((page, i) => ({
+    id: `c${i}`,
+    page_id: page,
+    author_kind: "guest",
+  }));
+  const m = model(
+    calls(["list_pages", {}], ["rename_page", { page_id: "more-3", title: "Renamed" }], [
+      "set_page_tags",
+      { page_id: "more-3", tags: ["late"] },
+    ]),
+    calls(["list_pages", {}]),
+    says("Done."),
+  );
+  await run(p, deps(p, m.chat));
+  const answers = m.asked[1].messages.filter((x) => x.role === "tool").map((x) => JSON.parse(String(x.content)));
+  const listed = answers[0].pages as { id: string; shared?: boolean }[];
+  assertEquals(listed.length, 7);
+  assertEquals(listed.find((x) => x.id === "more-4")!.shared, true);
+  assertEquals(answers.slice(1).map((a) => a.error), [undefined, undefined]);
+  const again = JSON.parse(String(m.asked[2].messages.at(-1)!.content)).pages as Record<string, unknown>[];
+  assertEquals(again.find((x) => x.id === "more-3"), { id: "more-3", title: "Renamed", tags: ["late"] });
+  // Four pages of rows, the last of them empty, once.
+  assertEquals(p.requests.filter((r) => r.startsWith("GET /rest/v1/pages?")).length, 5);
+});
+
+// A card that cannot be put in the page a new page goes inside leaves the
+// page made, and kept among the run's ops for Undo: the agent is not told
+// to make it again.
+Deno.test("a workspace job keeps a page whose card could not go in", async () => {
+  const p = workspaceProject();
+  p.rules.writes = (table) => table !== "page_content";
+  const m = model(calls(["create_page", { title: "Notes", parent_id: "plan" }]), says("Done."));
+  await run(p, deps(p, m.chat));
+  const answer = JSON.parse(String(m.asked[1].messages.at(-1)!.content));
+  const notes = p.rows("pages").find((row) => row.title === "Notes")!;
+  assertEquals(answer, { page_id: notes.id });
+  assertEquals((jobOf(p).result as { ops: { op: string }[] }).ops.map((o) => o.op), ["create_page"]);
+});

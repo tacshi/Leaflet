@@ -78,6 +78,10 @@ func (a *App) FlushPage(ctx context.Context, pageID string) error {
 // SyncNow asks for a sync pass.
 func (a *App) SyncNow() { a.sync.Kick() }
 
+// Pages changes pages as the app has them, for agents: the open page
+// through its editor, its subpages' cards kept in step.
+func (a *App) Pages() agents.Pages { return a.pageCore() }
+
 // Tint marks the blocks an agent run changed.
 func (a *App) Tint(pageID string, ids []string) {
 	if a.page == nil || a.page.id != pageID {

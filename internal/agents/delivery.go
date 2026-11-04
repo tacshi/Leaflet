@@ -97,7 +97,7 @@ func (h *Hub) newDelivery(pageID string, run *Run, option Option) *delivery {
 // before the blocks it needs.
 func (d *delivery) to(ed LiveDoc, ops []doc.Op) {
 	for _, op := range ops[d.sent:] {
-		if op.Op == "create_page" || op.Op == "delete_page" {
+		if op.IsPageOp() {
 			continue
 		}
 		d.apply(ed, op)
@@ -128,7 +128,7 @@ func (d *delivery) apply(ed LiveDoc, op doc.Op) {
 func (d *delivery) missed(ops []doc.Op) []doc.Op {
 	var out []doc.Op
 	for _, op := range ops[d.sent:] {
-		if op.Op != "create_page" && op.Op != "delete_page" {
+		if !op.IsPageOp() {
 			out = append(out, op)
 		}
 	}

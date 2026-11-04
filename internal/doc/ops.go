@@ -12,17 +12,42 @@ type Removed struct {
 	Position Position `json:"position"`
 }
 
-// NewPage is the page a create_page op makes.
+// NewPage is the page a create_page op makes: inside ParentID, or at the
+// top level, in FolderID when it has one.
 type NewPage struct {
 	ID       string `json:"id"`
 	SpaceID  string `json:"space_id,omitempty"`
 	ParentID string `json:"parent_id,omitempty"`
+	FolderID string `json:"folder_id,omitempty"`
 	Title    string `json:"title"`
 	SortKey  string `json:"sort_key,omitempty"`
 }
 
-// Op is one block change by ID, as agents make and Undo run inverts
-// (docs/protocol.md §3):
+// PagePlace is where a page is among the user's pages: inside ParentID, or
+// at the top level, in FolderID when it has one, at SortKey among the
+// pages there.
+type PagePlace struct {
+	ParentID string `json:"parent_id,omitempty"`
+	FolderID string `json:"folder_id,omitempty"`
+	SortKey  string `json:"sort_key,omitempty"`
+}
+
+// Same reports whether p and q are the same place, wherever among the
+// pages there.
+func (p PagePlace) Same(q PagePlace) bool {
+	return p.ParentID == q.ParentID && p.FolderID == q.FolderID
+}
+
+// NewFolder is the folder a create_folder op makes.
+type NewFolder struct {
+	ID      string `json:"id"`
+	SpaceID string `json:"space_id,omitempty"`
+	Name    string `json:"name"`
+	SortKey string `json:"sort_key,omitempty"`
+}
+
+// Op is one block change by ID, as agents make and Undo run inverts, or
+// one of the pages around them (docs/protocol.md §3):
 //
 //	insert   position, nodes
 //	replace  id, node, previous (node)
@@ -30,6 +55,11 @@ type NewPage struct {
 //	delete   ids, previous ([{node, position}])
 //	create_page  page, content
 //	delete_page  page_id
+//	move_page    page_id, title, place, previous (place)
+//	rename_page  page_id, title, previous (title)
+//	set_page_tags  page_id, title, tags, previous (tags)
+//	create_folder  folder
+//	delete_folder  folder_id
 type Op struct {
 	Op       string
 	Position *Position
@@ -44,6 +74,28 @@ type Op struct {
 	Page     *NewPage
 	Content  *Content
 	PageID   string
+	// Title is the title of the page a page op changes, after it.
+	Title string
+	// Place is where a move_page puts its page, PrevPlace where it was;
+	// PrevTitle is a rename's title before, Tags and PrevTags a page's
+	// tags after and before.
+	Place     *PagePlace
+	PrevPlace *PagePlace
+	PrevTitle string
+	Tags      []string
+	PrevTags  []string
+	Folder    *NewFolder
+	FolderID  string
+}
+
+// IsPageOp reports whether o changes the pages around a page's blocks,
+// rather than its blocks: the caller's to make, as Apply leaves them.
+func (o Op) IsPageOp() bool {
+	switch o.Op {
+	case "create_page", "delete_page", "move_page", "rename_page", "set_page_tags", "create_folder", "delete_folder":
+		return true
+	}
+	return false
 }
 
 type opJSON struct {
@@ -58,12 +110,18 @@ type opJSON struct {
 	Page     *NewPage        `json:"page,omitempty"`
 	Content  *Content        `json:"content,omitempty"`
 	PageID   string          `json:"page_id,omitempty"`
+	Title    string          `json:"title,omitempty"`
+	Place    *PagePlace      `json:"place,omitempty"`
+	Tags     []string        `json:"tags,omitempty"`
+	Folder   *NewFolder      `json:"folder,omitempty"`
+	FolderID string          `json:"folder_id,omitempty"`
 }
 
 // MarshalJSON writes the op as the protocol has it.
 func (o Op) MarshalJSON() ([]byte, error) {
 	j := opJSON{Op: o.Op, Position: o.Position, Nodes: o.Nodes, ID: o.ID, Node: o.Node,
-		From: o.From, IDs: o.IDs, Page: o.Page, Content: o.Content, PageID: o.PageID}
+		From: o.From, IDs: o.IDs, Page: o.Page, Content: o.Content, PageID: o.PageID,
+		Title: o.Title, Place: o.Place, Tags: o.Tags, Folder: o.Folder, FolderID: o.FolderID}
 	var err error
 	switch o.Op {
 	case "replace":
@@ -76,6 +134,19 @@ func (o Op) MarshalJSON() ([]byte, error) {
 			removed = []Removed{}
 		}
 		j.Previous, err = json.Marshal(removed)
+	case "move_page":
+		if o.PrevPlace != nil {
+			j.Previous, err = json.Marshal(o.PrevPlace)
+		}
+	case "rename_page":
+		j.Previous, err = json.Marshal(o.PrevTitle)
+	case "set_page_tags":
+		// None are tags too: a page that had none gets none back.
+		prev := o.PrevTags
+		if prev == nil {
+			prev = []string{}
+		}
+		j.Previous, err = json.Marshal(prev)
 	}
 	if err != nil {
 		return nil, err
@@ -90,25 +161,33 @@ func (o *Op) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	*o = Op{Op: j.Op, Position: j.Position, Nodes: j.Nodes, ID: j.ID, Node: j.Node,
-		From: j.From, IDs: j.IDs, Page: j.Page, Content: j.Content, PageID: j.PageID}
+		From: j.From, IDs: j.IDs, Page: j.Page, Content: j.Content, PageID: j.PageID,
+		Title: j.Title, Place: j.Place, Tags: j.Tags, Folder: j.Folder, FolderID: j.FolderID}
 	if len(j.Previous) > 0 && string(j.Previous) != "null" {
+		var err error
 		switch j.Op {
 		case "replace":
 			o.PrevNode = &Node{}
-			if err := json.Unmarshal(j.Previous, o.PrevNode); err != nil {
-				return err
-			}
+			err = json.Unmarshal(j.Previous, o.PrevNode)
 		case "delete":
-			if err := json.Unmarshal(j.Previous, &o.Removed); err != nil {
-				return err
-			}
+			err = json.Unmarshal(j.Previous, &o.Removed)
+		case "move_page":
+			o.PrevPlace = &PagePlace{}
+			err = json.Unmarshal(j.Previous, o.PrevPlace)
+		case "rename_page":
+			err = json.Unmarshal(j.Previous, &o.PrevTitle)
+		case "set_page_tags":
+			err = json.Unmarshal(j.Previous, &o.PrevTags)
+		}
+		if err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-// Apply applies a block op to the content. create_page and delete_page are
-// the caller's: they touch the page tree rather than this page.
+// Apply applies a block op to the content. Page ops are the caller's
+// (IsPageOp): they touch the page tree rather than this page.
 func (c *Content) Apply(o Op) error {
 	switch o.Op {
 	case "insert":
@@ -257,6 +336,16 @@ func (o Op) Invert() []Op {
 	case "create_page":
 		if o.Page != nil {
 			return []Op{{Op: "delete_page", PageID: o.Page.ID}}
+		}
+	case "move_page":
+		return []Op{{Op: "move_page", PageID: o.PageID, Title: o.Title, Place: o.PrevPlace, PrevPlace: o.Place}}
+	case "rename_page":
+		return []Op{{Op: "rename_page", PageID: o.PageID, Title: o.PrevTitle, PrevTitle: o.Title}}
+	case "set_page_tags":
+		return []Op{{Op: "set_page_tags", PageID: o.PageID, Title: o.Title, Tags: o.PrevTags, PrevTags: o.Tags}}
+	case "create_folder":
+		if o.Folder != nil {
+			return []Op{{Op: "delete_folder", FolderID: o.Folder.ID}}
 		}
 	}
 	return nil

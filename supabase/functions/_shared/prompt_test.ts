@@ -1,7 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { pageFits, type Surface, systemPrompt, userMessage } from "./prompt.ts";
+import { pageFits, type PageSurface, systemPrompt, userMessage } from "./prompt.ts";
 
-const prompt = (surface: Surface) =>
+const prompt = (surface: PageSurface) =>
   systemPrompt({
     agentName: "Claude",
     surface,
@@ -44,7 +44,8 @@ Deno.test("others' writing goes in the request as data", () => {
 
 // The rules a run on the device has are a cloud run's too
 // (internal/agents/presets.go): read the page first, read a recording's
-// transcript, try a failed call again, and edit only this page.
+// transcript, try a failed call again, edit only this page and the pages
+// it makes, make a new page of its own, and save text whole.
 Deno.test("a cloud run has the device's rules", () => {
   const p = systemPrompt({
     agentName: "Claude",
@@ -58,8 +59,10 @@ Deno.test("a cloud run has the device's rules", () => {
   assert(p.includes("call read_page before you edit it"));
   assert(p.includes("Recording blocks carry their transcript"));
   assert(p.includes("If a tool returns an error, fix the call and try again."));
-  assert(p.includes("but you only edit this page"));
+  assert(p.includes("but you only edit this page and the pages you make"));
   assert(p.includes("in the page's own style and language"));
+  assert(p.includes("Asked for a new page, make one with create_page"));
+  assert(p.includes("not a summary, unless"));
 });
 
 // A page fits in the request by its blocks as the request writes them,

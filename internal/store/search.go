@@ -42,14 +42,28 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 // already, or left out by the tags do not crowd the others out; the most
 // recently changed come first.
 func (s *Store) SearchContext(ctx context.Context, query string, limit int) ([]SearchHit, error) {
+	return s.search(ctx, query, limit, nil)
+}
+
+// SearchPages finds pages as SearchContext does, the pages keep keeps
+// alone: no templates, recordings or comments, so that only those pages
+// count toward the limit, and a blank query lists the most recently
+// edited of them, up to limit.
+func (s *Store) SearchPages(ctx context.Context, query string, limit int, keep func(Page) bool) ([]SearchHit, error) {
+	return s.search(ctx, query, limit, keep)
+}
+
+func (s *Store) search(ctx context.Context, query string, limit int, keep func(Page) bool) ([]SearchHit, error) {
 	filters, rest := SplitTagQuery(query)
 	q := strings.ToLower(rest)
 	pages, err := s.Pages()
 	if err != nil {
 		return nil, err
 	}
-	templates, err := s.Templates()
-	if err != nil {
+	var templates []Page
+	if keep != nil {
+		pages = slices.DeleteFunc(pages, func(p Page) bool { return !keep(p) })
+	} else if templates, err = s.Templates(); err != nil {
 		return nil, err
 	}
 	// Text, transcripts and comments are read for every page there is,
@@ -75,7 +89,7 @@ func (s *Store) SearchContext(ctx context.Context, query string, limit int) ([]S
 		recent := append([]Page{}, pages...)
 		sort.Slice(recent, func(i, j int) bool { return recent[i].UpdatedAt.After(recent[j].UpdatedAt) })
 		for i, p := range recent {
-			if i == 8 && len(filters) == 0 || i == limit {
+			if i == 8 && len(filters) == 0 && keep == nil || i == limit {
 				break
 			}
 			hits = append(hits, SearchHit{Kind: "page", Title: p.DisplayTitle(), PageID: p.ID})
@@ -135,6 +149,10 @@ func (s *Store) SearchContext(ctx context.Context, query string, limit int) ([]S
 		}
 		hits = append(hits, SearchHit{Kind: kind, Title: TitleOr(p.Title), PageID: p.ID, Snippet: snippet(text, q)})
 		n++
+	}
+	// SearchPages finds pages alone.
+	if keep != nil {
+		return hits[:min(len(hits), limit)], nil
 	}
 	// Recordings and comments, as the text, of the pages listed alone.
 	if err := s.searchRows(ctx, "recording", q, otherLimit, `SELECT r.id, r.page_id, r.block_id FROM recordings r JOIN pages p ON p.id = r.page_id

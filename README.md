@@ -73,9 +73,17 @@ itself.
   in a comment thread.
 - Every edit is a validated tool call (`read_page`, `write_markdown`,
   `insert_blocks`, `replace_block`, `move_block`, `delete_blocks`,
-  `create_subpage`, and `list_pages` and `read_other_page` where reading
-  other pages is on) that streams into the page as one undo step, after a
-  history snapshot.
+  `create_subpage`, `create_page`, and `list_pages`, `read_other_page` and
+  `list_folders` where reading other pages is on) that streams into the
+  page as one undo step, after a history snapshot.
+- Asked for a new page, an agent makes one of its own, at the top level or
+  in a folder (`create_page`), and a subpage inside the page when asked for
+  one there, its link at the end of the page (`create_subpage`).
+- The workspace agent works on all your pages rather than one: the panel's
+  Agent tab at All pages, and the panel itself with no page open. It finds
+  and reads your pages, makes them, moves, renames and tags them, and makes
+  folders, each change undoable. It changes no page someone else shares,
+  and reads none that other people write in too.
 - Agents read what is said in a YouTube or Vimeo video, from its captions
   (`read_video_transcript`), to write a video's notes with the time of each
   moment, and cite a moment of a video or a recording with a link to it.

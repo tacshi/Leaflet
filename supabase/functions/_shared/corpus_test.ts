@@ -21,7 +21,16 @@ import {
 } from "./blocks.ts";
 import { markdownSpecs } from "./lines.ts";
 import { agentURL, webURL } from "./url.ts";
-import { agentViews, applyOps, type Op, overwrites, PageEditSession, type ToolHooks, URL_RE } from "./tools.ts";
+import {
+  agentViews,
+  applyOps,
+  type Op,
+  overwrites,
+  PageEditSession,
+  ToolError,
+  type ToolHooks,
+  URL_RE,
+} from "./tools.ts";
 import { keyAfter } from "./sortkey.ts";
 import { tokensToSegments } from "./segments.ts";
 import { userMessage } from "./prompt.ts";
@@ -40,6 +49,7 @@ import {
   position,
   spec,
   url,
+  withSeededIds,
 } from "../_testing/corpus.ts";
 import inlineCorpus from "./testdata/corpus/inline.json" with { type: "json" };
 import deltasCorpus from "./testdata/corpus/deltas.json" with { type: "json" };
@@ -60,23 +70,6 @@ import transcriptsCorpus from "./testdata/corpus/transcripts.json" with { type: 
 function withoutIds(node: NodeJSON): unknown {
   const { id: _, children, ...rest } = node;
   return children ? { ...rest, children: children.map(withoutIds) } : rest;
-}
-
-/** Runs fn with IDs drawn from r, so the blocks it makes are the same each time. */
-async function withSeededIds<T>(r: Random, fn: () => Promise<T>): Promise<T> {
-  const random = crypto.getRandomValues;
-  crypto.getRandomValues = (<A extends ArrayBufferView | null>(array: A): A => {
-    if (array) {
-      const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
-      for (let i = 0; i < bytes.length; i++) bytes[i] = r.int(256);
-    }
-    return array;
-  }) as typeof crypto.getRandomValues;
-  try {
-    return await fn();
-  } finally {
-    crypto.getRandomValues = random;
-  }
 }
 
 // Inline Markdown reads as the same runs of text here and in the app
@@ -333,17 +326,19 @@ function call(r: Random, ids: string[], empty: string, urls: string[]): { tool: 
     tool = "delete_blocks";
     args = { ids: r.chance(0.9) ? r.times(r.chance(0.9) ? 1 : 0, 2, id) : anyValue(r) };
   } else if (pick < 17) {
-    tool = "create_subpage";
+    tool = r.pick(["create_subpage", "create_page"]);
     args = {
       title: r.chance(0.9) ? r.pick(["Notes", "  Plan　", "\u0085Plan\u0085", "﻿BOM", " ", r.pick(urls)]) : anyValue(r),
       ...(r.chance(0.5) ? { blocks: r.chance(0.9) ? r.times(0, 2, () => callSpec(r, urls)) : anyValue(r) } : {}),
+      ...(r.chance(0.3) ? { markdown: r.chance(0.9) ? markdown(r) : anyValue(r) } : {}),
+      ...(tool === "create_page" && r.chance(0.5) ? { folder_id: r.pick(["folder-1", "nope", "", null, 5]) } : {}),
     };
   } else if (pick < 18) {
     tool = "read_page";
     args = {};
   } else if (pick < 19) {
-    tool = r.pick(["list_pages", "read_other_page"]);
-    args = tool === "list_pages" ? {} : { page_id: r.chance(0.9) ? "page-9" : 5 };
+    tool = r.pick(["list_pages", "read_other_page", "list_folders"]);
+    args = tool === "read_other_page" ? { page_id: r.chance(0.9) ? "page-9" : 5 } : {};
   } else {
     tool = r.pick(["nope", "insert_blocks"]);
     return { tool, args: r.pick(["", "{", "[]", "null", '"x"', "{}"]) };
@@ -382,8 +377,21 @@ Deno.test("tool calls edit the page as the app's do (testdata/corpus/calls.json)
       readPage: (content) => Promise.resolve({ blocks: agentViews(content) }),
       createSubpage: (title) =>
         Promise.resolve({ id: "page-2", space_id: "space-1", parent_id: "page-1", title, sort_key: "a1" }),
+      // The person has folder-1 alone.
+      createPage: (title, _content, folderId) =>
+        folderId && folderId !== "folder-1"
+          ? Promise.reject(new ToolError(`No folder "${folderId}"`))
+          : Promise.resolve({
+            id: "page-3",
+            space_id: "space-0",
+            parent_id: null,
+            folder_id: folderId,
+            title,
+            sort_key: "a1",
+          }),
       listPages: () => Promise.resolve([]),
       readOtherPage: (id) => Promise.resolve({ id, title: "Other", blocks: [] }),
+      listFolders: () => Promise.resolve([]),
     };
     const session = new PageEditSession(before, hooks, {
       canEdit: !readOnly,

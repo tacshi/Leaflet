@@ -269,3 +269,26 @@ func TestReplyBlocksAreTheAnswersMarkdown(t *testing.T) {
 		t.Errorf("blocks %s", texts(got))
 	}
 }
+
+// A run's edits say which pages they made, an edit each, for the app to
+// open them from.
+func TestAgentStateNamesThePagesMade(t *testing.T) {
+	c, _ := open(t)
+	c.q.do(func() {
+		c.core.Hub.Session("p").Runs = []*agents.Run{{ID: "r1", Status: "done", Edits: []agents.Edit{
+			{Summary: "Inserted a subpage link", BlockIDs: []string{"b1"}},
+			{Summary: "Created subpage “Notes”", PageID: "page-2"},
+		}}}
+	})
+	raw, err := c.AgentState("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var s agentState
+	if err := json.Unmarshal([]byte(raw), &s); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Runs) != 1 || !slices.Equal(s.Runs[0].EditPages, []string{"", "page-2"}) {
+		t.Errorf("runs %+v", s.Runs)
+	}
+}

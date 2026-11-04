@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"log"
+	"slices"
 	"time"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/guard"
 	"leaflet/internal/remote"
+	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
 	"leaflet/locales"
 )
@@ -55,27 +57,27 @@ func (h *Hub) RedoRun(pageID, runID string) error {
 }
 
 // apply makes a run's ops, or their inverse, on its page and on the pages
-// it made or deleted. A page it made that this device does not have yet,
-// as a cloud run's before it syncs, stops it before anything changes:
-// deleting it would miss it, and it would come back with the sync. One
-// that is not coming, as sync has pulled the pages made since the run
-// began, is gone for good, and passed over. The page's blocks go next,
-// all at once or not at all: when they cannot, nothing changed. Only the
-// database failing leaves the pages after them as they were.
+// around it. A page or a folder an op changes that this device does not
+// have as the run left it, as a cloud run's before it syncs, stops it
+// before anything changes: the change would miss it, and the run's would
+// come with the sync after. One that is not coming, as sync has pulled
+// the pages made since the run began, is gone for good, or the user
+// changed it since, and is passed over, their change kept. The page's
+// blocks go next, all at once or not at all: when they cannot, nothing
+// changed. Only the database failing leaves the pages after them as they
+// were.
 func (h *Hub) apply(pageID string, run *Run, ops []doc.Op) error {
 	var blockOps, pageOps []doc.Op
+	pl := newPlan(h.st)
 	for _, o := range ops {
-		id := o.PageID
-		if o.Page != nil {
-			id = o.Page.ID
-		}
-		switch _, err := h.st.Page(id); {
-		case o.Op != "delete_page" && o.Op != "create_page":
+		switch {
+		case !o.IsPageOp():
 			blockOps = append(blockOps, o)
-		case err == nil:
+		case pl.ready(o):
+			pl.made(run, o)
 			pageOps = append(pageOps, o)
-		case id != "" && h.awaited(run):
-			return errors.New(locales.PageRunSubpageNotHere())
+		case h.awaited(run):
+			return errors.New(locales.PageRunPageNotHere())
 		}
 	}
 	if len(blockOps) > 0 {
@@ -93,17 +95,211 @@ func (h *Hub) apply(pageID string, run *Run, ops []doc.Op) error {
 		}
 	}
 	var failed error
+	pages := h.pages()
 	for _, o := range pageOps {
-		switch {
-		case o.Op == "delete_page":
-			if _, err := h.st.DeletePage(o.PageID); err != nil {
-				failed = errors.Join(failed, err)
-			}
-		case o.Page != nil:
-			failed = errors.Join(failed, h.st.RestorePages([]string{o.Page.ID}))
-		}
+		failed = errors.Join(failed, h.applyPage(pages, run, o))
 	}
 	return failed
+}
+
+// plan is the pages and folders a run's page ops change as the ops before
+// each, in one Undo or Redo, leave them: an op is ready by what those do,
+// not by what was stored before any of them, as for a page made and then
+// tagged, or moved twice.
+type plan struct {
+	st      *store.Store
+	pages   map[string]*store.Page
+	folders map[string]*store.Folder
+	// all is every page, file and folder stored, read once, for the first
+	// folder an Undo would delete (empty).
+	all *snapshot
+}
+
+// snapshot is a store's pages, files and folders, failed when one of them
+// could not be read.
+type snapshot struct {
+	pages   []store.Page
+	files   []store.File
+	folders []store.Folder
+	failed  bool
+}
+
+func newPlan(st *store.Store) *plan {
+	return &plan{st: st, pages: map[string]*store.Page{}, folders: map[string]*store.Folder{}}
+}
+
+// page is page id as the ops planned so far leave it, nil for one this
+// device does not have.
+func (pl *plan) page(id string) *store.Page {
+	p, ok := pl.pages[id]
+	if !ok {
+		if got, err := pl.st.Page(id); err == nil {
+			p = &got
+		}
+		pl.pages[id] = p
+	}
+	return p
+}
+
+// folder is folder id as the ops planned so far leave it, nil for one this
+// device does not have.
+func (pl *plan) folder(id string) *store.Folder {
+	f, ok := pl.folders[id]
+	if !ok {
+		if got, err := pl.st.Folder(id); err == nil {
+			f = &got
+		}
+		pl.folders[id] = f
+	}
+	return f
+}
+
+// ready reports whether page op o finds what it changes as it was before
+// it: the page or the folder, in its place, with its title or its tags.
+// A folder an Undo would delete holds nothing more than the run left in
+// it: what the user filed there since stays, and the folder with it.
+func (pl *plan) ready(o doc.Op) bool {
+	switch o.Op {
+	case "create_folder":
+		return o.Folder != nil && pl.folder(o.Folder.ID) != nil
+	case "delete_folder":
+		f := pl.folder(o.FolderID)
+		return f != nil && f.DeletedAt.IsZero() && pl.empty(o.FolderID)
+	}
+	id := o.PageID
+	if o.Page != nil {
+		id = o.Page.ID
+	}
+	p := pl.page(id)
+	if p == nil {
+		return false
+	}
+	switch o.Op {
+	case "move_page":
+		was := doc.PagePlace{ParentID: p.ParentID, FolderID: p.FolderID}
+		return o.Place != nil && o.PrevPlace != nil && p.DeletedAt.IsZero() && was.Same(*o.PrevPlace)
+	case "rename_page":
+		return p.DeletedAt.IsZero() && p.Title == o.PrevTitle
+	case "set_page_tags":
+		return p.DeletedAt.IsZero() && slices.Equal(p.Tags, o.PrevTags)
+	}
+	return true
+}
+
+// made has the plan take page op o as made: what it changes is as it
+// leaves it, for the ops after it.
+func (pl *plan) made(run *Run, o doc.Op) {
+	switch o.Op {
+	case "delete_page":
+		pl.page(o.PageID).DeletedAt = time.Now()
+	case "create_page":
+		ids := []string{o.Page.ID}
+		if gone, ok := run.Removed[o.Page.ID]; ok {
+			ids = gone.IDs
+		}
+		for _, id := range ids {
+			if p := pl.page(id); p != nil {
+				p.DeletedAt = time.Time{}
+			}
+		}
+	case "move_page":
+		p := pl.page(o.PageID)
+		p.ParentID, p.FolderID = o.Place.ParentID, o.Place.FolderID
+	case "rename_page":
+		pl.page(o.PageID).Title = o.Title
+	case "set_page_tags":
+		pl.page(o.PageID).Tags = store.NormalizeTags(o.Tags)
+	case "delete_folder":
+		pl.folder(o.FolderID).DeletedAt = time.Now()
+	case "create_folder":
+		pl.folder(o.Folder.ID).DeletedAt = time.Time{}
+	}
+}
+
+// empty reports whether folder id holds no page, file or folder once the
+// ops planned so far are made. One that could not be read is taken to
+// hold something, and stays. What is stored is read once a plan, the ops
+// planned making their changes over it.
+func (pl *plan) empty(id string) bool {
+	if pl.all == nil {
+		all := &snapshot{}
+		var err, ferr, gerr error
+		all.pages, err = pl.st.AllPages()
+		all.files, ferr = pl.st.Files()
+		all.folders, gerr = pl.st.Folders()
+		all.failed = err != nil || ferr != nil || gerr != nil
+		pl.all = all
+	}
+	if pl.all.failed {
+		return false
+	}
+	for _, p := range pl.all.pages {
+		if q := pl.pages[p.ID]; q != nil {
+			p = *q
+		}
+		if p.FolderID == id && p.DeletedAt.IsZero() {
+			return false
+		}
+	}
+	if slices.ContainsFunc(pl.all.files, func(f store.File) bool { return f.FolderID == id }) {
+		return false
+	}
+	return !slices.ContainsFunc(pl.all.folders, func(f store.Folder) bool {
+		q := pl.folders[f.ID]
+		return f.ParentFolderID == id && (q == nil || q.DeletedAt.IsZero())
+	})
+}
+
+// applyPage makes page op o, through pages, so a page open in the app
+// shows the cards of its subpages come and go.
+func (h *Hub) applyPage(pages Pages, run *Run, o doc.Op) error {
+	switch o.Op {
+	case "delete_page":
+		ids, card, err := pages.DeletePage(o.PageID)
+		if err != nil {
+			return err
+		}
+		if run.Removed == nil {
+			run.Removed = map[string]RemovedPages{}
+		}
+		run.Removed[o.PageID] = RemovedPages{IDs: ids, Card: card}
+	case "create_page":
+		gone, ok := run.Removed[o.Page.ID]
+		if !ok {
+			gone = RemovedPages{IDs: []string{o.Page.ID}, Card: doc.Position{At: "end"}}
+		}
+		if err := pages.RestorePages(gone.IDs, gone.Card); err != nil {
+			return err
+		}
+		// A page made in a folder that Undo deleted after it left the
+		// folder then, as a deleted folder's pages do: it goes back in,
+		// once the folder is back too.
+		folder := o.Page.FolderID
+		if f, err := h.st.Folder(folder); folder == "" || err != nil || !f.DeletedAt.IsZero() {
+			return nil
+		}
+		if p, err := h.st.Page(o.Page.ID); err == nil && p.ParentID == "" && p.FolderID == "" {
+			return h.st.PlacePage(p.ID, "", folder, p.SortKey)
+		}
+	case "move_page":
+		to := *o.Place
+		return pages.MovePage(o.PageID, to.ParentID, func() error {
+			return h.st.PlacePage(o.PageID, to.ParentID, to.FolderID, to.SortKey)
+		})
+	case "rename_page":
+		return h.st.RenamePage(o.PageID, o.Title)
+	case "set_page_tags":
+		return h.st.SetPageTags(o.PageID, o.Tags)
+	case "delete_folder":
+		f, err := h.st.Folder(o.FolderID)
+		if err != nil {
+			return err
+		}
+		return h.st.DeleteFolder(f)
+	case "create_folder":
+		return h.st.RestoreFolder(o.Folder.ID)
+	}
+	return nil
 }
 
 // awaited reports whether a page run made, which this device does not

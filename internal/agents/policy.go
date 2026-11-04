@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"log"
+	"slices"
 	"sync"
 	"time"
 
@@ -37,8 +38,13 @@ func (h *Hub) toolContext(pageID, title, agent string, content *doc.Content, set
 // on this device asks it before it starts (publicElsewhere), and the agent
 // function reads itself.
 func (h *Hub) crossPage(p store.Page, settings store.Settings) bool {
-	return settings.AgentsReadOtherPages && p.ID != "" && !sharedWithOthers(h.st, p) &&
-		!h.st.HasGuestComments(p.ID) && (h.PublicLink == nil || !h.PublicLink(p.ID))
+	return settings.AgentsReadOtherPages && p.ID != "" && h.private(p)
+}
+
+// private reports whether no one but the user reads or writes p: no one
+// else has it, no guest commented on it, and it has no public link.
+func (h *Hub) private(p store.Page) bool {
+	return !sharedWithOthers(h.st, p) && !h.st.HasGuestComments(p.ID) && (h.PublicLink == nil || !h.PublicLink(p.ID))
 }
 
 // publicLinkLease is how often the device serving a public link says so
@@ -142,37 +148,114 @@ func (h *Hub) publicElsewhere(ctx context.Context, pageID string) bool {
 	return row != nil
 }
 
+// publicElsewhereIn are the pages of space with a public link another
+// device serves, as publicElsewhere has one page's: a workspace run asks
+// it as it starts, of all the pages it may change. Where the server cannot
+// be asked, the leases it last gave stand.
+func (h *Hub) publicElsewhereIn(ctx context.Context, space string) map[string]bool {
+	out := map[string]bool{}
+	if h.be == nil || !h.be.SignedIn() {
+		return out
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	rows, err := h.be.Select(ctx, "pages", remote.Query{Select: "id,public_link_until",
+		Filters: []string{remote.Eq("space_id", space), remote.Gt("public_link_until", "now")}})
+	h.linksMu.Lock()
+	defer h.linksMu.Unlock()
+	if err != nil {
+		for id, until := range h.links {
+			if until.After(time.Now()) {
+				out[id] = true
+			}
+		}
+		return out
+	}
+	if h.links == nil {
+		h.links = map[string]time.Time{}
+	}
+	for _, r := range rows {
+		id, _ := r["id"].(string)
+		s, _ := r["public_link_until"].(string)
+		until, _ := time.Parse(time.RFC3339Nano, s)
+		h.links[id], out[id] = until, true
+	}
+	// Those of the space it no longer lists have ended.
+	for id := range h.links {
+		if p, err := h.st.Page(id); !out[id] && err == nil && p.SpaceID == space {
+			delete(h.links, id)
+		}
+	}
+	return out
+}
+
+// privacy is private for many pages at once, as list_pages asks it of
+// all the user's, and people sharedWithOthers: who else has them and
+// which have a guest's comment are read once for them all, and pages
+// finds those they are inside. Either unread, none is taken for private,
+// and each for had by others.
+func (h *Hub) privacy(pages []store.Page) (private, people func(store.Page) bool) {
+	others, err := h.st.SharedBeyond(h.st.Session().UserID)
+	guested, gerr := h.st.GuestCommented()
+	if err != nil || gerr != nil {
+		return func(store.Page) bool { return false }, func(store.Page) bool { return true }
+	}
+	byID := make(map[string]store.Page, len(pages))
+	for _, p := range pages {
+		byID[p.ID] = p
+	}
+	shared := sharing(h.st, func(id string) bool { return others[id] }, func(id string) (store.Page, error) {
+		if p, ok := byID[id]; ok {
+			return p, nil
+		}
+		return h.st.Page(id)
+	})
+	return func(p store.Page) bool {
+		return !shared(p) && !guested[p.ID] && (h.PublicLink == nil || !h.PublicLink(p.ID))
+	}, shared
+}
+
 // sharedWithOthers reports whether anyone but the user has a page: it is
 // in someone else's space, or it or a page it is inside has members other
 // than the user. Signed in, the user's own pages count as shared until
 // sync has read who they are shared with: members are kept of a page only
 // once something loaded them, so none kept says nothing before then.
 func sharedWithOthers(st *store.Store, p store.Page) bool {
+	me := st.Session().UserID
+	return sharing(st, func(id string) bool {
+		return slices.ContainsFunc(st.MembersOrNil(id), func(m store.Member) bool { return m.UserID != me })
+	}, st.Page)(p)
+}
+
+// sharing is sharedWithOthers over others, which reports whether a page
+// has members other than the user, and page, which finds the page one is
+// inside. What it finds of a page it keeps, for the pages inside it.
+func sharing(st *store.Store, others func(id string) bool, page func(id string) (store.Page, error)) func(store.Page) bool {
 	sess := st.Session()
 	if known, _ := st.Value(syncsvc.OwnMembersKey); sess.SignedIn && known == "" {
-		return true
+		return func(store.Page) bool { return true }
 	}
-	seen := map[string]bool{}
-	for p.ID != "" && !seen[p.ID] {
-		seen[p.ID] = true
-		if p.SpaceID != sess.SpaceID {
-			return true
+	found := map[string]bool{}
+	var shared func(p store.Page) bool
+	shared = func(p store.Page) bool {
+		if p.ID == "" {
+			return false
 		}
-		for _, m := range st.MembersOrNil(p.ID) {
-			if m.UserID != sess.UserID {
-				return true
+		if v, ok := found[p.ID]; ok {
+			return v
+		}
+		// Not shared while it is worked out, so a loop of parents ends.
+		found[p.ID] = false
+		v := p.SpaceID != sess.SpaceID || others(p.ID)
+		if !v && p.ParentID != "" {
+			if parent, err := page(p.ParentID); err == nil {
+				v = shared(parent)
 			}
 		}
-		if p.ParentID == "" {
-			break
-		}
-		parent, err := st.Page(p.ParentID)
-		if err != nil {
-			break
-		}
-		p = parent
+		found[p.ID] = v
+		return v
 	}
-	return false
+	return shared
 }
 
 // web reports whether a run may use the web: the user lets agents, and

@@ -732,3 +732,20 @@ export function position(r: Random, ids: readonly string[]): Position {
       return { at: r.pick(["start", "end"] as const) };
   }
 }
+
+/** Runs fn with IDs drawn from r, so the blocks it makes are the same each time. */
+export async function withSeededIds<T>(r: Random, fn: () => Promise<T>): Promise<T> {
+  const random = crypto.getRandomValues;
+  crypto.getRandomValues = (<A extends ArrayBufferView | null>(array: A): A => {
+    if (array) {
+      const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+      for (let i = 0; i < bytes.length; i++) bytes[i] = r.int(256);
+    }
+    return array;
+  }) as typeof crypto.getRandomValues;
+  try {
+    return await fn();
+  } finally {
+    crypto.getRandomValues = random;
+  }
+}

@@ -304,6 +304,10 @@ func (h host) FlushPage(ctx context.Context, pageID string) error {
 
 func (h host) SyncNow() { h.c.core.Sync.Kick() }
 
+// Pages changes pages as the core has them, for agents: those open in the
+// app through their live pages, their subpages' cards kept in step.
+func (h host) Pages() agents.Pages { return h.c.pageCore() }
+
 func (h host) Tint(pageID string, ids []string) {
 	// A run that edits, or is undone or redone, is the one to undo next.
 	h.c.q.post(func() { delete(h.c.settled, pageID) })

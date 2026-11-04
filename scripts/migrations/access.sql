@@ -102,7 +102,7 @@ begin
   with expected (fn, who) as (
     select f, 'authenticated'
     from unnest(array[
-      'accept_page_invite', 'can_edit_page', 'can_read_page', 'can_view_image_path', 'can_view_page',
+      'accept_page_invite', 'agent_search_pages', 'can_edit_page', 'can_read_page', 'can_view_image_path', 'can_view_page',
       'can_write_file_path', 'claim_starter_pages',
       'decline_page_invite', 'has_space_access', 'has_stt_secret', 'is_space_owner', 'lease_public_link', 'owns_recording_path',
       'owns_space_path', 'page_history_since', 'page_invites', 'page_members', 'page_role',

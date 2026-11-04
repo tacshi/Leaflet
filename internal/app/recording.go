@@ -272,7 +272,7 @@ func (a *App) recordingBlock(c *ui.Context, n *doc.Node) {
 					}
 					// The agent reads the transcript with the block.
 					if m.Item(locales.RecSummarize()).Disabled(len(rec.Transcript) == 0 || !a.hub.Available() || ro).Chosen() {
-						a.panelOpen, a.panelTab = true, 0
+						a.openPageAgent()
 						a.hub.Chat(a.page.id, locales.RecSummarizePrompt(a.recordingTitle(n, rec, true)), []string{n.ID})
 					}
 					label := locales.RecTranscribeAgain()

@@ -152,6 +152,9 @@ type App struct {
 	panelOpen bool
 	panelW    float32
 	panelTab  int
+	// agentScope is the Agent tab's switch beside a page: 0 its agent, 1
+	// the workspace agent's, of all the user's pages.
+	agentScope int
 	// panelTabsW is how wide the panel's tabs were last frame, which the
 	// panel keeps room for.
 	panelTabsW float32
@@ -278,6 +281,16 @@ func (a *App) publiclyLinked(pageID string) bool {
 	a.pubPage.Lock()
 	defer a.pubPage.Unlock()
 	return a.pubPage.id != "" && a.pubPage.id == pageID
+}
+
+// publicPages are the pages with a public link open now: the one, or none.
+func (a *App) publicPages() []string {
+	a.pubPage.Lock()
+	defer a.pubPage.Unlock()
+	if a.pubPage.id == "" {
+		return nil
+	}
+	return []string{a.pubPage.id}
 }
 
 type toast struct {
@@ -435,7 +448,7 @@ func (a *App) start() error {
 		}
 	}
 	a.commentMD.OnLink = a.md.OnLink
-	a.hub.PublicLink = a.publiclyLinked
+	a.hub.PublicLink, a.hub.PublicPages = a.publiclyLinked, a.publicPages
 	a.online = mygo.Network.Status().Online
 	mygo.Network.OnChanged(func(s mygo.NetworkStatus) {
 		a.update(func() {
@@ -667,7 +680,8 @@ func (a *App) reload(ch store.Change) {
 			a.templates = templates
 		}
 		// What was typed on a page gone, and not sent, goes with it.
-		maps.DeleteFunc(a.drafts, func(id string, _ *pageDrafts) bool { return a.pageByID(id) == nil })
+		// The workspace agent's draft is of no page, and stays.
+		maps.DeleteFunc(a.drafts, func(id string, _ *pageDrafts) bool { return id != agents.WorkspaceID && a.pageByID(id) == nil })
 		a.todosStale = true
 		if a.page != nil {
 			if p := a.pageByID(a.page.id); p == nil {

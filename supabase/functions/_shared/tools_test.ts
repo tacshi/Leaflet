@@ -1,6 +1,7 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
   type BlockSpec,
+  clone,
   codeLanguage,
   deltaOf,
   deltaToMarkdown,
@@ -25,12 +26,14 @@ import {
   overwrites,
   PageEditSession,
   toolDefinitions,
+  ToolError,
   type ToolHooks,
   unseenOps,
   URL_RE,
   webToolDefinitions,
 } from "./tools.ts";
 import { tokensToSegments } from "./segments.ts";
+import { workspaceToolDefinitions } from "./workspace.ts";
 import runOps from "./testdata/run_ops.json" with { type: "json" };
 import edgeOps from "./testdata/edge_ops.json" with { type: "json" };
 import views from "./testdata/views.json" with { type: "json" };
@@ -46,8 +49,21 @@ const hooks: ToolHooks = {
   readPage: (content) => Promise.resolve({ blocks: pageViews(content) }),
   createSubpage: (title) =>
     Promise.resolve({ id: "page-2", space_id: "space-1", parent_id: "page-1", title, sort_key: "a0" }),
+  // A page of the person's own, in folder-1 or at the top level.
+  createPage: (title, _content, folderId) =>
+    folderId && folderId !== "folder-1"
+      ? Promise.reject(new ToolError(`No folder "${folderId}". Call list_folders for the folders' ids.`))
+      : Promise.resolve({
+        id: "page-3",
+        space_id: "space-0",
+        parent_id: null,
+        folder_id: folderId,
+        title,
+        sort_key: "a0",
+      }),
   listPages: () => Promise.resolve([]),
   readOtherPage: () => Promise.resolve({}),
+  listFolders: () => Promise.resolve([{ id: "folder-1", name: "Clippings" }]),
 };
 
 function para(id: string, text: string, children?: NodeJSON[]): NodeJSON {
@@ -299,7 +315,11 @@ Deno.test("edits are one for each op, worded as the app's", async () => {
   assertEquals(await edits("move_block", { id: "p2", position: { at: "start" } }), ["Moved a block"]);
   assertEquals(await edits("delete_blocks", { ids: ["h1"] }), ["Deleted a block"]);
   assertEquals(await edits("delete_blocks", { ids: ["p1", "p2"] }), ["Deleted 2 blocks"]);
-  assertEquals(await edits("create_subpage", { title: "Notes" }), ["Created subpage “Notes”"]);
+  assertEquals(await edits("create_subpage", { title: "Notes" }), [
+    "Inserted a subpage link",
+    "Created subpage “Notes”",
+  ]);
+  assertEquals(await edits("create_page", { title: "Notes" }), ["Created page “Notes”"]);
 });
 
 // write_markdown reads a line as a picture only when an image block takes
@@ -317,14 +337,82 @@ Deno.test("write_markdown writes a picture line and a fence as the app does", as
   assertEquals(code.data?.delta, [{ insert: "code\n" }]);
 });
 
-Deno.test("create_subpage records a create_page op", async () => {
+// A subpage's card goes at the end of the page it is in, as the app puts
+// one there, before the op that made it: Undo takes both away.
+Deno.test("create_subpage links its page at the end of this one", async () => {
   const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false, now: () => 5 });
   const outcome = await session.call("create_subpage", { title: "Notes", blocks: [{ type: "paragraph", text: "hi" }] });
   assertEquals(outcome.result, { page_id: "page-2" });
+  const [insert, made] = outcome.ops as [Extract<Op, { op: "insert" }>, Extract<Op, { op: "create_page" }>];
+  assertEquals(insert.position, { at: "end" });
+  assertEquals(insert.nodes.map((n) => [n.type, n.data]), [["subpage", { page_id: "page-2" }]]);
+  assertEquals(session.content.document.children!.at(-1)?.id, insert.nodes[0].id);
+  assertEquals(made.page.title, "Notes");
+  assertEquals(plainText(made.content), "hi");
+  assertEquals(session.changed, true);
+});
+
+// A page of its own changes nothing here: it is made in the person's
+// space, at the top level or in their folder, its content written in
+// Markdown or as blocks.
+Deno.test("create_page makes a page of its own", async () => {
+  const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: true, now: () => 5 });
+  const before = clone(session.content);
+  const outcome = await session.call("create_page", {
+    title: " Article ",
+    folder_id: "folder-1",
+    markdown: "# Title\n\nBody",
+  });
+  assertEquals(outcome.result, { page_id: "page-3" });
   const op = outcome.ops[0] as Extract<Op, { op: "create_page" }>;
-  assertEquals(op.page.title, "Notes");
-  assertEquals(plainText(op.content), "hi");
+  assertEquals([op.page.title, op.page.parent_id, op.page.folder_id], ["Article", null, "folder-1"]);
+  assertEquals(op.content.document.children!.map((n) => n.type), ["heading", "paragraph"]);
+  assertEquals(session.content, before);
   assertEquals(session.changed, false);
+  const refused = async (args: Record<string, unknown>) =>
+    ((await session.call("create_page", args)).result as { error?: string }).error;
+  assertEquals(
+    await refused({ title: "A", folder_id: "nope" }),
+    `No folder "nope". Call list_folders for the folders' ids.`,
+  );
+  assertEquals(await refused({ title: "A", folder_id: 5 }), "folder_id must be a string");
+  assertEquals(
+    await refused({ title: "A", markdown: "x", blocks: [{ type: "paragraph", text: "y" }] }),
+    "Give the page markdown or blocks, not both",
+  );
+  assertEquals(await refused({ title: "A", markdown: 5 }), "markdown must be a string");
+  // No markdown, or none in it, and no blocks, is an empty page.
+  const empty = await session.call("create_page", { title: "Empty", markdown: "", blocks: [] });
+  assertEquals((empty.ops[0] as Extract<Op, { op: "create_page" }>).content.document.children, []);
+});
+
+// Listing the folders reads nothing someone else wrote: the web's links
+// stay the run's to write, as they are before it reads another page.
+Deno.test("list_folders reads nothing beyond the page", async () => {
+  const session = new PageEditSession(sample(), {
+    ...hooks,
+    readWebPage: (url) =>
+      Promise.resolve({
+        url,
+        title: "Article",
+        text: "See https://example.com/found.png",
+        links: ["https://example.com/found.png"],
+        truncated: false,
+      }),
+  }, { canEdit: true, crossPage: true });
+  await session.call("read_web_page", { url: "https://example.com/article" });
+  assertEquals((await session.call("list_folders", {})).result, { folders: [{ id: "folder-1", name: "Clippings" }] });
+  assertEquals(session.keptToPage, true);
+  const out = await session.call("create_page", {
+    title: "Article",
+    blocks: [{ type: "paragraph", text: "See https://example.com/found.png" }],
+  });
+  assertEquals((out.result as { error?: string }).error, undefined);
+  const off = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false });
+  assertEquals(
+    ((await off.call("list_folders", {})).result as { error?: string }).error,
+    "Reading other pages is turned off for this user",
+  );
 });
 
 Deno.test("views flatten nesting and fold tables", () => {
@@ -1472,6 +1560,8 @@ Deno.test("the tools' schemas and the calls they take are the client's (testdata
   }
   const web: Record<string, unknown> = {};
   for (const t of webToolDefinitions(true)) web[t.function.name] = contract(t.function.parameters);
+  const workspace: Record<string, unknown> = {};
+  for (const t of workspaceToolDefinitions(true)) workspace[t.function.name] = contract(t.function.parameters);
   const para = '{"type":"paragraph","text":"a"}';
   const cases = [
     ["insert_blocks", `{"position":"end","blocks":[${para}]}`],
@@ -1484,6 +1574,12 @@ Deno.test("the tools' schemas and the calls they take are the client's (testdata
     ["create_subpage", `{"title":"Notes","blocks":[]}`],
     ["create_subpage", `{"title":3}`],
     ["create_subpage", `{"title":"  "}`],
+    ["create_subpage", `{"title":"Notes","markdown":"- a\\n- b"}`],
+    ["create_subpage", `{"title":"Notes","markdown":"a","blocks":[${para}]}`],
+    ["create_page", `{"title":"Notes"}`],
+    ["create_page", `{"title":"Notes","folder_id":"nope"}`],
+    ["create_page", `{"title":"Notes","folder_id":3}`],
+    ["create_page", `{"title":"Notes","markdown":"# A\\n\\nB","blocks":[]}`],
     ["replace_block", `{"id":"h1","block":{"type":"heading","text":"Aims","level":9}}`],
     ["write_markdown", `{"position":{"at":"end"},"markdown":"![a](http:/example.com/c.png)"}`],
     ["read_page", `[]`],
@@ -1494,7 +1590,7 @@ Deno.test("the tools' schemas and the calls they take are the client's (testdata
     const out = await session.call(tool, args);
     calls.push({ tool, args, ok: !(out.result as { error?: string }).error });
   }
-  await fixture("tools.json", { schemas, web, calls }, toolsFixture);
+  await fixture("tools.json", { schemas, web, workspace, calls }, toolsFixture);
 });
 
 // An embed's source past 30,000 characters is left out of what agents

@@ -380,6 +380,13 @@ func (s *Service) flushRemote(ctx context.Context, pageID string) error {
 	if err := s.resolveSpace(ctx); err != nil {
 		return err
 	}
+	if pageID == "" {
+		// Not while the project is being updated, as a pass does not.
+		if s.Updating != nil && s.Updating() {
+			return nil
+		}
+		return s.push(ctx)
+	}
 	entries, err := s.st.Queued()
 	if err != nil {
 		return err

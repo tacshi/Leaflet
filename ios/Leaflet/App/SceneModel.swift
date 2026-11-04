@@ -15,6 +15,15 @@ final class SceneModel {
     var inspectorShown = false
     /// inspectorTab is the panel's tab shown: Agent first, as on the desktop.
     var inspectorTab = InspectorTab.agent
+    /// allPages is the Agent tab's switch beside a page: the workspace
+    /// agent's chat, of all the user's pages, rather than the page's. With
+    /// no page open, the panel is the workspace agent's alone.
+    var allPages = false
+    /// workspace is the workspace agent's chat, the window's.
+    let workspace = WorkspaceAgentModel()
+    /// recordOnOpen is a page opening to record in, as New Recording makes
+    /// one with no page open: it records once its editor shows.
+    @ObservationIgnored var recordOnOpen: String?
     var settingsShown = false
     /// afterPanel is what shows once the panel as a sheet has gone.
     @ObservationIgnored private var afterPanel: AfterPanel?
@@ -193,6 +202,13 @@ final class SceneModel {
             inspectorTab = tab
             inspectorShown = true
         }
+    }
+
+    /// askWorkspace shows the panel at the workspace agent's chat.
+    func askWorkspace() {
+        inspectorTab = .agent
+        allPages = true
+        inspectorShown = true
     }
 
     /// openSettings shows Settings. With the panel a sheet, as on iPhone,

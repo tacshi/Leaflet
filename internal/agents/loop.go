@@ -33,7 +33,7 @@ type Request struct {
 	JobID          string
 	PageID         string
 	PageTitle      string
-	Surface        string // inline | selection | sidebar | comment
+	Surface        string // inline | selection | sidebar | comment | workspace
 	Instruction    string
 	ProviderID     string
 	Model          string
@@ -54,6 +54,20 @@ type Request struct {
 	// Thread is the comment thread a comment run answers in, its first
 	// comment first.
 	Thread []ThreadComment
+	// OpenPage is the page open as a workspace run was asked for, which
+	// its agent is told of; nil for none, or one not the user's.
+	OpenPage *OpenPage
+	// PublicPages are the pages the app has a public link open to, which a
+	// cloud workspace run changes nothing of, as of a page shared.
+	PublicPages []string
+}
+
+// OpenPage is the page open as a workspace run is asked for, as its agent
+// is told of it.
+type OpenPage struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Shared bool   `json:"shared,omitempty"`
 }
 
 // Turn is a message of an earlier turn of a conversation, the user's
@@ -79,6 +93,13 @@ func (r Request) JobRequest() map[string]any {
 	m := map[string]any{"instruction": r.Instruction, "allow_cross_page": r.AllowCrossPage, "agent_name": r.AgentName, "allow_web": r.Web}
 	if r.SelectionText != "" {
 		m["selection_text"] = r.SelectionText
+	}
+	// The server finds the rest of it, as it finds a page's.
+	if r.OpenPage != nil {
+		m["open_page_id"] = r.OpenPage.ID
+	}
+	if len(r.PublicPages) > 0 {
+		m["public_page_ids"] = r.PublicPages
 	}
 	return m
 }
@@ -161,7 +182,7 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 	// those runs are left out: what they read would be written where
 	// others read it.
 	pagesBefore := len(req.History) > 0 && !req.KeptToPage
-	crossPage := tc.ListPages != nil || tc.ReadOtherPage != nil
+	crossPage := tc.ListPages != nil || tc.ReadOtherPage != nil || tc.Workspace != nil && tc.Workspace.Reading
 	// Earlier turns that read the web may hold what they read there: the
 	// run keeps to the URLs it may write after reading the web from its
 	// start, as one that read it itself does, and has found none yet.
@@ -201,17 +222,24 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 			}
 		}
 	}
-	messages := []map[string]any{{"role": "system", "content": SystemPrompt(req.AgentName, req.Surface, tc.ListPages != nil, req.SupportsTools, tc.ReadOnly, tc.ReadWeb != nil, tc.SearchWeb != nil)}}
+	system, user := SystemPrompt(req.AgentName, req.Surface, tc.ListPages != nil, req.SupportsTools, tc.ReadOnly, tc.ReadWeb != nil, tc.SearchWeb != nil), userMessage(req, views, focus)
+	if tc.Workspace != nil {
+		system, user = WorkspacePrompt(req.AgentName, tc.Workspace.Reading, req.SupportsTools, tc.ReadWeb != nil, tc.SearchWeb != nil), workspaceMessage(req)
+	}
+	messages := []map[string]any{{"role": "system", "content": system}}
 	for _, t := range req.History {
 		if pagesBefore && !crossPage && !t.KeptToPage {
 			continue
 		}
 		messages = append(messages, map[string]any{"role": t.Role, "content": t.Content})
 	}
-	messages = append(messages, map[string]any{"role": "user", "content": userMessage(req, views, focus)})
+	messages = append(messages, map[string]any{"role": "user", "content": user})
 	var tools []map[string]any
 	if req.SupportsTools {
 		tools = ToolDefinitions(tc.ListPages != nil, tc.ReadOnly)
+		if tc.Workspace != nil {
+			tools = WorkspaceToolDefinitions(tc.Workspace.Reading)
+		}
 		if tc.ReadWeb != nil {
 			tools = append(tools, WebToolDefinitions(tc.SearchWeb != nil)...)
 		}
@@ -395,6 +423,17 @@ func userMessage(req Request, views, focus []map[string]any) string {
 	}
 	parts = append(parts, "Request:\n"+req.Instruction)
 	return strings.Join(parts, "\n\n")
+}
+
+// workspaceMessage is the user's turn of a workspace run: the page open as
+// they asked, as data, and the request, as the server's runs have it
+// (prompt.ts userMessage).
+func workspaceMessage(req Request) string {
+	var parts []string
+	if req.OpenPage != nil {
+		parts = append(parts, "Open page (JSON): "+asData(req.OpenPage))
+	}
+	return strings.Join(append(parts, "Request:\n"+req.Instruction), "\n\n")
 }
 
 // asData is v as JSON on one line, as the server's asData has it: the line

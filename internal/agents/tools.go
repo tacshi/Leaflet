@@ -7,6 +7,7 @@ import (
 	"maps"
 	"reflect"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode/utf8"
 
@@ -88,7 +89,10 @@ var blockSchema = map[string]any{
 
 // ordered are a schema's properties in the order a model should write
 // them, as a map's are not.
-type ordered []struct {
+type ordered []prop
+
+// prop is one of a schema's properties.
+type prop struct {
 	key   string
 	value any
 }
@@ -148,9 +152,19 @@ func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 	if crossPage {
 		out = append(out,
 			tool("list_pages", "List the user's other pages (titles and IDs).", map[string]any{}),
-			tool("read_other_page", "Read another of the user's pages. Read-only.", map[string]any{"page_id": map[string]any{"type": "string"}}, "page_id"))
+			tool("read_other_page", "Read another of the user's pages. Read-only.", map[string]any{"page_id": map[string]any{"type": "string"}}, "page_id"),
+			tool("list_folders", "List the user's folders (names and IDs), to make a page in one with create_page.", map[string]any{}))
 	}
 	return out
+}
+
+// pageSchema is a new page's: its title, where it goes, and its content in
+// Markdown or as blocks, or neither for an empty page.
+func pageSchema(place ...prop) ordered {
+	o := append(ordered{{"title", map[string]any{"type": "string"}}}, place...)
+	return append(o,
+		prop{"markdown", map[string]any{"type": "string", "description": "The page's content in Markdown, as write_markdown writes it: the way to write text. Not with blocks."}},
+		prop{"blocks", map[string]any{"type": "array", "items": blockSchema}})
 }
 
 // WebToolDefinitions are the web's tools offered to a model: a search,
@@ -175,7 +189,9 @@ func editTools() []map[string]any {
 		tool("replace_block", "Replace one block with a new one, keeping its ID (and its nested items when it stays a list).", ordered{{"id", map[string]any{"type": "string"}}, {"block", blockSchema}}, "id", "block"),
 		tool("move_block", "Move a block (with its nested items) to a new position.", map[string]any{"id": map[string]any{"type": "string"}, "position": positionSchema}, "id", "position"),
 		tool("delete_blocks", "Delete blocks by ID, with their nested items.", map[string]any{"ids": map[string]any{"type": "array", "minItems": 1, "items": map[string]any{"type": "string"}}}, "ids"),
-		tool("create_subpage", "Create a subpage of this page, optionally with content.", map[string]any{"title": map[string]any{"type": "string"}, "blocks": map[string]any{"type": "array", "items": blockSchema}}, "title"),
+		tool("create_subpage", "Create a subpage inside this page, for content that is part of it, optionally with content: a link to it goes at the end of this page.", pageSchema(), "title"),
+		tool("create_page", "Create a page of its own, outside this one, optionally with content: at the top level of the user's pages, or in one of their folders. Make \"a new page\" with this, unless the user asks for one inside or under this page.",
+			pageSchema(prop{"folder_id", map[string]any{"type": "string", "description": "The folder to put it in, its ID from list_folders where that is offered; none for the top level."}}), "title"),
 	}
 }
 
@@ -192,9 +208,16 @@ type ToolContext struct {
 	Comments func() []map[string]any
 	// CreateSubpage makes the subpage and returns its ID.
 	CreateSubpage func(title string, nodes []*doc.Node) (string, error)
-	// ListPages and ReadOtherPage are nil when cross-page reading is off.
+	// CreatePage makes a page of the user's own at the top level, in the
+	// folder of ID folderID when it is not "", and returns its ID; nil on a
+	// page someone else writes or reads, whose writing it would take into
+	// the user's own pages.
+	CreatePage func(title string, nodes []*doc.Node, folderID string) (string, error)
+	// ListPages, ReadOtherPage and ListFolders are nil when cross-page
+	// reading is off.
 	ListPages     func() []map[string]any
 	ReadOtherPage func(id string) map[string]any
+	ListFolders   func() []map[string]any
 	// Transcript is the transcript of a recording on page pageID as text,
 	// "" when there is none, or the recording is another page's.
 	Transcript func(pageID, recordingID string) string
@@ -214,6 +237,9 @@ type ToolContext struct {
 	// search.
 	SearchWeb func(query string) (Search, error)
 	ReadWeb   func(link string) (web.Page, error)
+	// Workspace is the workspace agent's, whose tools are of the user's
+	// pages rather than of one: nil on a page.
+	Workspace *Workspace
 }
 
 // PageTools is the ToolContext of a page in the store: its subpages,
@@ -269,6 +295,20 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 			p, err := st.CreatePage(store.NewPageOptions{ParentID: pageID, Title: title, Content: c})
 			return p.ID, err
 		},
+		// A page of its own is the user's, in their space, whatever space
+		// the page the run is on is in; the hub offers it only on a page no
+		// one else writes or reads (toolContext).
+		CreatePage: func(title string, nodes []*doc.Node, folderID string) (string, error) {
+			if folderID != "" && !spaceFolder(st, folderID) {
+				return "", noFolder(folderID)
+			}
+			var c *doc.Content
+			if len(nodes) > 0 {
+				c = doc.FromBlocks(nodes)
+			}
+			p, err := st.CreatePage(store.NewPageOptions{SpaceID: st.Session().SpaceID, FolderID: folderID, Title: title, Content: c})
+			return p.ID, err
+		},
 	}
 	if crossPage {
 		// The other pages are those of this page's space, as the agent
@@ -277,16 +317,24 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 		here, _ := st.Page(pageID)
 		tc.ListPages = func() []map[string]any {
 			pages, _ := st.Pages()
-			out := []map[string]any{}
+			var others []store.Page
 			for _, p := range pages {
-				if len(out) == maxListedPages {
-					break
-				}
 				if p.ID != pageID && p.SpaceID == here.SpaceID {
-					out = append(out, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "parent_id": p.ParentID})
+					others = append(others, p)
 				}
 			}
-			return out
+			out := []map[string]any{}
+			for _, p := range others {
+				out = append(out, map[string]any{"id": p.ID, "title": p.DisplayTitle(), "parent_id": p.ParentID})
+			}
+			// A page at the top level counted as the server writes it, of
+			// parent null: the more of the two.
+			return out[:listed(len(out), 0, func(i int) int {
+				if out[i]["parent_id"] == "" {
+					return jsonCost(out[i]) + jsonCost(nil) - jsonCost("")
+				}
+				return jsonCost(out[i])
+			})]
 		}
 		// Shaped as read_page's, as protocol §2 has it: its subpages, and
 		// no comments, which are of this page's alone.
@@ -305,6 +353,7 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 			return map[string]any{"page": map[string]any{"id": id, "title": p.DisplayTitle()}, "blocks": tc.viewsOf(id, c),
 				"subpages": subpages, "comments": []map[string]any{}}
 		}
+		tc.ListFolders = func() []map[string]any { return spaceFolders(st) }
 	}
 	return tc
 }
@@ -312,6 +361,105 @@ func PageTools(st *store.Store, pageID, title, agent string, content *doc.Conten
 // maxListedPages is the most pages list_pages lists, as the agent
 // function lists at most so many.
 const maxListedPages = 500
+
+// listBudget is how much of a tool's result, in UTF-16 units by
+// jsonCost, the pages list_pages lists take at most, with what is listed
+// with them: within toolResultLimit, with room for the keys around them.
+// Past it, as past maxListedPages, the rest are left for a search to
+// find, rather than cut off with the result.
+const listBudget = toolResultLimit - 2_000
+
+// jsonCost is at least how many UTF-16 units v takes as JSON, as either
+// side writes it, the server counting it so too: six for a character one
+// of them escapes (\u003c, as Go writes <), one or two for the rest.
+func jsonCost(v any) int {
+	switch x := v.(type) {
+	case string:
+		n := 2
+		for _, r := range x {
+			switch {
+			case r < 0x20 || strings.ContainsRune(`"\<>&`, r) || r == 0x2028 || r == 0x2029 || r == utf8.RuneError:
+				n += 6
+			case r > 0xFFFF:
+				n += 2
+			default:
+				n++
+			}
+		}
+		return n
+	case bool:
+		if x {
+			return 4
+		}
+		return 5
+	case int:
+		return len(strconv.Itoa(x))
+	case []string:
+		n := 2 + max(len(x)-1, 0)
+		for _, e := range x {
+			n += jsonCost(e)
+		}
+		return n
+	case []map[string]any:
+		n := 2 + max(len(x)-1, 0)
+		for _, e := range x {
+			n += jsonCost(e)
+		}
+		return n
+	case []any:
+		n := 2 + max(len(x)-1, 0)
+		for _, e := range x {
+			n += jsonCost(e)
+		}
+		return n
+	case map[string]any:
+		n := 2 + max(len(x)-1, 0)
+		for k, e := range x {
+			n += jsonCost(k) + 1 + jsonCost(e)
+		}
+		return n
+	}
+	return 4
+}
+
+// listed is how many of n pages list_pages lists: at most maxListedPages,
+// and as many as listBudget takes past spent, what is listed with them,
+// cost being each page's jsonCost.
+func listed(n, spent int, cost func(i int) int) int {
+	for i := range min(n, maxListedPages) {
+		if spent += cost(i) + 1; spent > listBudget {
+			return i
+		}
+	}
+	return min(n, maxListedPages)
+}
+
+// spaceFolders are the folders of the user's own space, as list_folders
+// lists them.
+func spaceFolders(st *store.Store) []map[string]any {
+	space := st.Session().SpaceID
+	folders, _ := st.Folders()
+	out := []map[string]any{}
+	for _, f := range folders {
+		if f.SpaceID == space {
+			out = append(out, map[string]any{"id": f.ID, "name": f.Name})
+		}
+	}
+	return out
+}
+
+// spaceFolder reports whether id is a folder of the user's own space, not
+// deleted: one a page can be made or put in.
+func spaceFolder(st *store.Store, id string) bool {
+	f, err := st.Folder(id)
+	return err == nil && f.SpaceID == st.Session().SpaceID && f.DeletedAt.IsZero()
+}
+
+// noFolder is a call naming a folder the user has not, as the server says
+// it.
+func noFolder(id string) error {
+	return terr("No folder %q. Call list_folders for the folders' IDs.", id)
+}
 
 // maxViewHTML is the longest embed source agents read, in characters. A
 // longer one is left out, its length given instead: a few would be more
@@ -380,10 +528,17 @@ func withoutSiteInfo(v map[string]any) {
 	}
 }
 
-// Edit is a short description of a change, with the blocks it touched.
+// Edit is a short description of a change, with the blocks it touched,
+// or the page it made.
 type Edit struct {
 	Summary  string   `json:"summary"`
 	BlockIDs []string `json:"block_ids"`
+	PageID   string   `json:"page_id,omitempty"`
+}
+
+// editOf is op as an edit summary says it.
+func editOf(op doc.Op, summary string) Edit {
+	return Edit{Summary: summary, BlockIDs: OpBlockIDs(op), PageID: OpPageID(op)}
 }
 
 // Executor validates and applies tool calls, recording each as an op.
@@ -849,7 +1004,7 @@ func reason(err error) string {
 // it keeps none, as it needs none.
 func (x *Executor) begin() {
 	c := x.Ctx
-	if x.allowed == nil && (x.armed || x.found != nil || c.ListPages != nil || c.ReadOtherPage != nil || c.ReadWeb != nil || c.SearchWeb != nil || c.Captions != nil) {
+	if x.allowed == nil && (x.armed || x.found != nil || c.ListPages != nil || c.ReadOtherPage != nil || c.ReadWeb != nil || c.SearchWeb != nil || c.Captions != nil || c.Workspace != nil) {
 		x.allowed = map[string]bool{}
 		views := doc.BlockViews(c.Content)
 		for _, v := range views {
@@ -862,6 +1017,9 @@ func (x *Executor) begin() {
 
 func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, error) {
 	x.begin()
+	if x.Ctx.Workspace != nil {
+		return x.workspace(name, args)
+	}
 	// Text on the page, in its comments or in what a tool returns may be
 	// written to steer the agent, and only the prompt has it take that as
 	// data. The tools that delete or rewrite blocks are not refused for
@@ -872,7 +1030,7 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 	// user's other pages, which could carry them off, is what is refused
 	// where others write (crossPage).
 	switch name {
-	case "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_subpage":
+	case "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks", "create_subpage", "create_page":
 		if x.Ctx.ReadOnly {
 			return nil, terr("You can read this page but not edit it: the user has view access only.")
 		}
@@ -892,6 +1050,17 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		return x.delete(args)
 	case "create_subpage":
 		return x.createSubpage(args)
+	case "create_page":
+		return x.createPage(args)
+	case "list_folders":
+		if x.Ctx.ListFolders == nil {
+			return nil, terr("Reading other pages is off.")
+		}
+		// Only the user names their folders, and no page's words are in
+		// them: a run that lists them has read nothing beyond this page, so
+		// the URLs it may write stay those it may (checkURLs), and the web
+		// stays open.
+		return map[string]any{"folders": x.Ctx.ListFolders()}, nil
 	case "list_pages":
 		if x.Ctx.ListPages == nil {
 			return nil, terr("Reading other pages is off.")
@@ -1216,19 +1385,66 @@ func (x *Executor) delete(args map[string]any) (map[string]any, error) {
 	return map[string]any{"deleted_ids": roots}, nil
 }
 
-func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
+// PageNodes is the title and the blocks a call gives a new page, written
+// by author: as blocks, or in Markdown as write_markdown takes it, or
+// neither for an empty page, as the server takes them.
+func PageNodes(args map[string]any, author string) (string, []*doc.Node, error) {
 	title, err := str(args, "title")
 	if err != nil {
-		return nil, err
+		return "", nil, err
+	}
+	md, err := optionalString(args, "markdown")
+	if err != nil {
+		return "", nil, err
+	}
+	var nodes []*doc.Node
+	// No blocks, or none listed, is no content, as the server takes it.
+	if list, ok := args["blocks"].([]any); args["blocks"] != nil && (!ok || len(list) > 0) {
+		if md != "" {
+			return "", nil, terr("Give the page markdown or blocks, not both.")
+		}
+		if nodes, err = Specs(args["blocks"], author); err != nil {
+			return "", nil, err
+		}
+	} else if nodes = doc.MarkdownBlocks(md); len(nodes) > 0 {
+		// As many blocks as a call of blocks makes, as write_markdown.
+		if err := doc.CallNodes(nodes); err != nil {
+			return "", nil, err
+		}
 	}
 	// Without the spaces around it, as the server keeps it.
-	title = strings.TrimSpace(title)
-	var nodes []*doc.Node
-	// No blocks, or none listed, is an empty subpage, as the server makes.
-	if list, ok := args["blocks"].([]any); args["blocks"] != nil && (!ok || len(list) > 0) {
-		if nodes, err = x.specs(args["blocks"]); err != nil {
-			return nil, err
-		}
+	return strings.TrimSpace(title), nodes, nil
+}
+
+// errNoOwnPages refuses a page of the user's own on a page someone else
+// writes or reads, as the server words it.
+const errNoOwnPages = "Someone else writes or reads this page: a page of the user's own made from it could take what they wrote into the user's own pages. Make a subpage of this page with create_subpage instead."
+
+// optionalString is the text args has at key: "" when it has none, and an
+// error when it has something else.
+func optionalString(args map[string]any, key string) (string, error) {
+	switch v := args[key].(type) {
+	case nil:
+		return "", nil
+	case string:
+		return v, nil
+	}
+	return "", terr("%s must be a string.", key)
+}
+
+// record keeps an op that changes no block of the page, as create_page.
+func (x *Executor) record(op doc.Op, summary string) {
+	x.Ops = append(x.Ops, op)
+	x.Edits = append(x.Edits, editOf(op, summary))
+	if x.OnOp != nil {
+		x.OnOp(op, summary)
+	}
+}
+
+func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
+	title, nodes, err := PageNodes(args, x.Ctx.AgentName)
+	if err != nil {
+		return nil, err
 	}
 	// Its title shows on this page, in its card, as the next run reads it.
 	if err := x.checkURLs(nodes, title); err != nil {
@@ -1245,13 +1461,42 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 		return nil, err
 	}
 	x.written += countNodes(nodes)
-	op := doc.Op{Op: "create_page", Page: &doc.NewPage{ID: id, ParentID: x.Ctx.PageID, Title: title}}
-	summary := locales.AgentEditCreatedSubpage(title)
-	x.Ops = append(x.Ops, op)
-	x.Edits = append(x.Edits, Edit{Summary: summary, BlockIDs: []string{}})
-	if x.OnOp != nil {
-		x.OnOp(op, summary)
+	// Its card goes at the end of this page, as the app puts one there, so
+	// the page shows its subpage and Undo takes both away.
+	card := doc.SubpageNode(id)
+	if err := x.emit(doc.InsertOp(doc.Position{At: "end"}, card.Clone()), summaryFor(locales.AgentEditInserted, []*doc.Node{card}), []string{card.ID}); err != nil {
+		return nil, err
 	}
+	x.record(doc.Op{Op: "create_page", Page: &doc.NewPage{ID: id, ParentID: x.Ctx.PageID, Title: title}}, locales.AgentEditCreatedSubpage(title))
+	return map[string]any{"page_id": id}, nil
+}
+
+func (x *Executor) createPage(args map[string]any) (map[string]any, error) {
+	if x.Ctx.CreatePage == nil {
+		return nil, terr(errNoOwnPages)
+	}
+	title, nodes, err := PageNodes(args, x.Ctx.AgentName)
+	if err != nil {
+		return nil, err
+	}
+	folder, err := optionalString(args, "folder_id")
+	if err != nil {
+		return nil, err
+	}
+	// Its title shows in the sidebar, where the next run that lists the
+	// user's pages reads it.
+	if err := x.checkURLs(nodes, title); err != nil {
+		return nil, err
+	}
+	if err := x.room(nodes); err != nil {
+		return nil, err
+	}
+	id, err := x.Ctx.CreatePage(title, nodes, folder)
+	if err != nil {
+		return nil, err
+	}
+	x.written += countNodes(nodes)
+	x.record(doc.Op{Op: "create_page", Page: &doc.NewPage{ID: id, FolderID: folder, Title: title}}, locales.AgentEditCreatedPage(title))
 	return map[string]any{"page_id": id}, nil
 }
 
@@ -1269,6 +1514,7 @@ var kinds = map[string]func() string{
 	"chart": locales.AgentEditChart, "table": locales.AgentEditTable, "embed": locales.AgentEditEmbed, "heading": locales.AgentEditHeading,
 	"image": locales.AgentEditImage, "video": locales.AgentEditVideo, "code": locales.AgentEditCode, "callout": locales.AgentEditCallout,
 	"toggle_list": locales.AgentEditToggle, "link_preview": locales.AgentEditLinkCard, "math_equation": locales.AgentEditFormula, "diagram": locales.AgentEditDiagram,
+	"subpage": locales.AgentEditSubpageLink,
 }
 
 // summaryFor is what an edit that wrote nodes did, as verb says it of
@@ -1312,10 +1558,33 @@ func opEdit(op doc.Op, tool string) Edit {
 		summary = locales.AgentEditMoved()
 	case op.Op == "delete" && len(op.IDs) > 0:
 		summary = locales.AgentEditDeleted(len(op.IDs))
+	case op.Op == "create_page" && op.Page != nil && op.Page.ParentID == "":
+		summary = locales.AgentEditCreatedPage(store.TitleOr(op.Page.Title))
 	case op.Op == "create_page" && op.Page != nil:
-		summary = locales.AgentEditCreatedSubpage(op.Page.Title)
+		summary = locales.AgentEditCreatedSubpage(store.TitleOr(op.Page.Title))
+	// A page op names an untitled page "", said in the app's language.
+	case op.Op == "move_page":
+		summary = locales.AgentEditMovedPage(store.TitleOr(op.Title))
+	case op.Op == "rename_page":
+		summary = locales.AgentEditRenamedPage(store.TitleOr(op.PrevTitle), store.TitleOr(op.Title))
+	case op.Op == "set_page_tags":
+		summary = locales.AgentEditTaggedPage(store.TitleOr(op.Title))
+	case op.Op == "create_folder" && op.Folder != nil:
+		summary = locales.AgentEditCreatedFolder(op.Folder.Name)
 	}
-	return Edit{Summary: summary, BlockIDs: OpBlockIDs(op)}
+	return editOf(op, summary)
+}
+
+// OpPageID is the page an op made, or moved, renamed or tagged: "" for
+// one that changed no page of its own.
+func OpPageID(op doc.Op) string {
+	switch {
+	case op.Op == "create_page" && op.Page != nil:
+		return op.Page.ID
+	case op.Op == "move_page" || op.Op == "rename_page" || op.Op == "set_page_tags":
+		return op.PageID
+	}
+	return ""
 }
 
 // OpBlockIDs are the blocks an op touches, for tinting them.

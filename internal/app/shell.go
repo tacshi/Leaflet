@@ -159,9 +159,9 @@ func (a *App) saveWidthsSoon() {
 }
 
 // panelShown reports whether the agent and comments panel is beside the
-// page.
+// page, or beside the screen of no page open, as the workspace agent's.
 func (a *App) panelShown() bool {
-	return a.panelOpen && a.route.Kind == "page" && a.page != nil
+	return a.panelOpen && a.route.Kind != "signin"
 }
 
 // pageRoom is the width beside the sidebar: the page's, and the panel's
@@ -228,17 +228,31 @@ func (a *App) titleBar(c *ui.Context, fn func()) {
 	})
 }
 
-// homeView shows when no page is open.
+// homeView shows when no page is open: recording starts in a page of its
+// own, and the panel is the workspace agent's.
 func (a *App) homeView(c *ui.Context) {
 	pal := theme.Of(c)
-	a.titleBar(c, func() { ui.Spacer(c) })
+	a.titleBar(c, func() {
+		ui.Spacer(c)
+		tools(c, func() {
+			if !a.rec.Active() && iconButton(c, "record", "record", locales.TrayNewRecording()).Clicked() {
+				a.newRecordingPage()
+			}
+			a.panelToggle(c)
+		})
+	})
 	ui.Column(c).Grow(1).Center().Gap(14).Children(func() {
 		ui.Icon(c, theme.Icon("file-text")).FontSize(36).TextColor(pal.ChartMuted)
 		ui.Text(c, locales.ShellNoPageOpen()).FontSize(18).FontWeight(650).TextColor(pal.Text)
 		ui.Text(c, locales.ShellNoPageHint()).TextColor(pal.TextMuted)
-		if primary(c, "new", "plus", locales.ShellNewPage()).Clicked() {
-			a.newPage("", "")
-		}
+		ui.Row(c).Gap(8).Children(func() {
+			if primary(c, "new", "plus", locales.ShellNewPage()).Clicked() {
+				a.newPage("", "")
+			}
+			if button(c, "ask-agent", "sparkles", locales.ShellAskAgent()).Clicked() {
+				a.openWorkspace()
+			}
+		})
 	})
 }
 

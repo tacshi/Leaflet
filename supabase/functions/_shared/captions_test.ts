@@ -142,8 +142,10 @@ Deno.test("read_video_transcript reads a video block's captions in passages", as
   const hooks: ToolHooks = {
     readPage: () => Promise.resolve({}),
     createSubpage: () => Promise.reject(new Error("no")),
+    createPage: () => Promise.reject(new Error("no")),
     listPages: () => Promise.resolve([]),
     readOtherPage: () => Promise.resolve({}),
+    listFolders: () => Promise.resolve([]),
     readCaptions: (v) => {
       asked.push(v);
       if (fail) return Promise.reject(fail);

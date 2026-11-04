@@ -387,7 +387,7 @@ func (a *App) videoMenu(m *ui.Menu, n *doc.Node) {
 			if title == "" {
 				title = n.Str("url")
 			}
-			a.panelOpen, a.panelTab = true, 0
+			a.openPageAgent()
 			a.hub.Chat(a.page.id, locales.VideoSummarizePrompt(title), []string{n.ID})
 		}
 	}

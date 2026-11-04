@@ -136,6 +136,18 @@ func (s *Store) changeFolder(id, label string, fn func(*Folder) bool) error {
 	return nil
 }
 
+// RestoreFolder brings back a folder DeleteFolder deleted, as Undo does
+// one an agent made. The pages and files it held stay where they went.
+func (s *Store) RestoreFolder(id string) error {
+	return s.changeFolder(id, "restored folder", func(f *Folder) bool {
+		if f.DeletedAt.IsZero() {
+			return false
+		}
+		f.DeletedAt = time.Time{}
+		return true
+	})
+}
+
 // RenameFolder renames a folder.
 func (s *Store) RenameFolder(f Folder, name string) error {
 	return s.changeFolder(f.ID, "renamed folder", func(f *Folder) bool {

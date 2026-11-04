@@ -31,6 +31,9 @@ struct AgentState: Codable, Sendable {
         var undone: Bool
         var error: String?
         var edits: [String]
+        /// editPages are the pages the edits made, an edit each, "" for
+        /// one that made none: a tap on one opens its page.
+        var editPages: [String]?
         var blockIDs: [String]?
         var summary: String
         var stoppable: Bool
@@ -50,9 +53,18 @@ struct AgentState: Codable, Sendable {
                 activity, settled
             case agentName = "agent_name"
             case blockIDs = "block_ids"
+            case editPages = "edit_pages"
         }
 
         var running: Bool { status == "running" }
+
+        /// page is the page edit i made, nil for one that made none.
+        func page(_ i: Int) -> String? {
+            guard let pages = editPages, pages.indices.contains(i), !pages[i].isEmpty else {
+                return nil
+            }
+            return pages[i]
+        }
     }
 
     struct Option: Codable, Hashable, Identifiable, Sendable {
@@ -221,6 +233,12 @@ extension CoreClient {
     nonisolated(nonsending) func chat(_ pageID: String, text: String, focus: [String]) async {
         let f = json(focus)
         try? await call { $0.chat(pageID, text: text, focus: f) }
+    }
+
+    /// workspaceChat asks the workspace agent, the agent of all the user's
+    /// pages, telling it of the page open, "" for none.
+    nonisolated(nonsending) func workspaceChat(_ text: String, openPageID: String) async {
+        try? await call { $0.workspaceChat(text, openPageID: openPageID) }
     }
 
     /// ask starts a run from the editor, and returns its ID, or throws why

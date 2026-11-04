@@ -40,6 +40,26 @@ func (s *Store) MembersOrNil(pageID string) []Member {
 	return m
 }
 
+// SharedBeyond returns the pages with a member other than userID, all at
+// once, as Members would list them a page at a time.
+func (s *Store) SharedBeyond(userID string) (map[string]bool, error) {
+	return pageSet(s.db.Query(`SELECT DISTINCT page_id FROM page_members WHERE user_id != ?`, userID))
+}
+
+// pageSet is the page IDs rows has, one a row.
+func pageSet(rows *sql.Rows, err error) (map[string]bool, error) {
+	ids, err := collect(rows, err, func(sc scanner) (string, error) {
+		var id string
+		err := sc.Scan(&id)
+		return id, err
+	})
+	set := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		set[id] = true
+	}
+	return set, err
+}
+
 // SetMembers replaces the people a page is shared with.
 func (s *Store) SetMembers(pageID string, members []Member) error {
 	err := s.inTx(func(tx *sql.Tx) error {

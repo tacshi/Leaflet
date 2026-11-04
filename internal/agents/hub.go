@@ -31,6 +31,8 @@ type Host interface {
 	SaveNow(pageID string)
 	Online() bool
 	Settings() store.Settings
+	// FlushPage pushes a page's pending changes to the server, or all of
+	// them for "".
 	FlushPage(ctx context.Context, pageID string) error
 	SyncNow()
 	// Tint marks the blocks the latest run of a page changed.
@@ -80,6 +82,17 @@ type Run struct {
 	// Guarded is a run whose URL guard was on as it ended: its reply may
 	// carry what it read beyond its page or on the web (ReplyBlocks).
 	Guarded bool `json:"Guarded,omitempty"`
+	// Removed are what Undo took away with each page the run made: the
+	// subpages that went with it and where its card was, for Redo to put
+	// them all back.
+	Removed map[string]RemovedPages `json:"Removed,omitempty"`
+	// Left are the pages and folders the run made that the user deleted
+	// since, which the latest Undo left as they were: Redo leaves them so
+	// too, rather than bring back what the user deleted.
+	Left []string `json:"Left,omitempty"`
+	// Local is a run of this device's, all of whose changes were made
+	// here: none of them is still to come with a sync (awaited).
+	Local bool `json:"Local,omitempty"`
 	// kept is a run whose "Before" snapshot is in the page's history.
 	kept bool
 	// stop cancels a run on this device while it works; a cloud run goes
@@ -89,6 +102,13 @@ type Run struct {
 	// too, as its account leaves (Forget); epoch is the hub's then.
 	cancel context.CancelFunc
 	epoch  int64
+}
+
+// RemovedPages are the pages deleting one took away, its subpages with it,
+// the page first, and where its card was in its parent.
+type RemovedPages struct {
+	IDs  []string     `json:"IDs"`
+	Card doc.Position `json:"Card"`
 }
 
 // Stoppable reports whether the run is working and Stop can end it.
@@ -110,8 +130,11 @@ type Hub struct {
 	host     Host
 	sessions map[string]*Session
 	// PublicLink reports whether a page has a public link open now, which
-	// the app serves; nil is none.
-	PublicLink func(pageID string) bool
+	// the app serves; nil is none. PublicPages are those pages, for a cloud
+	// workspace run, whose leases may not have reached its server yet
+	// (ServePublicLink).
+	PublicLink  func(pageID string) bool
+	PublicPages func() []string
 	// links are when each page's public link, which another device
 	// serves, stops counting, as the server last said (publicElsewhere),
 	// and leases how many leases this device took of each page's link, the
@@ -189,6 +212,9 @@ type RunOptions struct {
 	KeptToPage bool
 	// Reply is the chat message that shows the run.
 	Reply *Message
+	// OpenPage is the page open as a workspace run is asked for, which
+	// its agent is told of: "" for none.
+	OpenPage string
 	// Done runs on the main thread when the run ends.
 	Done func(*Run)
 }
@@ -233,15 +259,26 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 	if err != nil {
 		return fail(err)
 	}
+	// A workspace run is of no page: it changes none's blocks, and reads
+	// them as they are stored, the open page's as it is open.
+	workspace := pageID == WorkspaceID
 	h.host.SaveNow(pageID)
+	if o.OpenPage != "" {
+		h.host.SaveNow(o.OpenPage)
+	}
 	ed := h.host.Live(pageID)
 	var before *doc.Content
-	if ed != nil {
+	switch {
+	case workspace:
+		before = doc.Empty()
+	case ed != nil:
 		before = ed.Doc().Copy()
-	} else if before, err = stored(h.st, pageID); err != nil {
-		return fail(err)
+	default:
+		if before, err = stored(h.st, pageID); err != nil {
+			return fail(err)
+		}
 	}
-	run.AgentName = option.Name()
+	run.AgentName, run.Local = option.Name(), option.Local()
 	s.Runs = append(s.Runs, run)
 	s.Running = true
 	if o.Reply != nil {
@@ -258,8 +295,17 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		History: o.History, KeptToPage: o.KeptToPage, AllowCrossPage: h.crossPage(page, settings),
 		Web: h.web(settings),
 	}
-	if o.Surface == "sidebar" {
+	if o.Surface == "sidebar" || o.Surface == "workspace" {
 		req.ConversationID = s.ConversationID
+	}
+	if workspace {
+		// Its job is of no page, and it reads the user's pages as the user
+		// lets agents, the open one among them.
+		req.PageID, req.PageTitle, req.AllowCrossPage = "", "", settings.AgentsReadOtherPages
+		req.OpenPage = h.openPage(o.OpenPage)
+		if h.PublicPages != nil {
+			req.PublicPages = h.PublicPages()
+		}
 	}
 	d := h.newDelivery(pageID, run, option)
 	stream := &replyStream{h: h, pageID: pageID, run: run, reply: o.Reply}
@@ -284,6 +330,8 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		},
 	}
 	work := before.Copy()
+	// Asked here, on the main thread, as the host's methods are.
+	online := h.host.Online()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	run.cancel = cancel
 	if option.Local() {
@@ -299,14 +347,34 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 			if option.Local() {
 				var client Model
 				if client, err = h.ModelFor(option.Provider); err == nil {
-					tc := h.toolContext(pageID, page.DisplayTitle(), option.Name(), work, settings)
-					if tc.ListPages != nil && h.publicElsewhere(ctx, pageID) {
-						tc.ListPages, tc.ReadOtherPage = nil, nil
+					var tc ToolContext
+					if workspace {
+						tc = h.workspaceTools(ctx, option.Name(), settings, online)
+						// The open page is told of as the tools see it, a public
+						// link another device serves of it among what they know.
+						if req.OpenPage != nil {
+							if p, ok := tc.Workspace.Page(req.OpenPage.ID); ok {
+								open := *req.OpenPage
+								open.Shared = p.Shared
+								req.OpenPage = &open
+							}
+						}
+					} else {
+						tc = h.toolContext(pageID, page.DisplayTitle(), option.Name(), work, settings)
+						if (tc.ListPages != nil || tc.CreatePage != nil) && h.publicElsewhere(ctx, pageID, online) {
+							tc.ListPages, tc.ReadOtherPage, tc.ListFolders, tc.CreatePage = nil, nil, nil, nil
+						}
 					}
 					res, err = RunLocal(ctx, client, req, tc, events)
 				}
 			} else {
-				if err = h.host.FlushPage(ctx, pageID); err == nil {
+				// What the server reads of the user's pages it has first: the
+				// page's, or for a workspace run all of them.
+				flush := pageID
+				if workspace {
+					flush = ""
+				}
+				if err = h.host.FlushPage(ctx, flush); err == nil {
 					if err = h.insertJob(ctx, req); err == nil {
 						res, err = RunCloud(ctx, h.be, run.ID, events)
 					}
@@ -344,7 +412,7 @@ func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, 
 		return
 	}
 	run.Ops = append(run.Ops, op)
-	run.Edits = append(run.Edits, Edit{Summary: summary, BlockIDs: OpBlockIDs(op)})
+	run.Edits = append(run.Edits, editOf(op, summary))
 	run.Answer, run.Activity = "", ""
 	if o.Reply != nil {
 		o.Reply.Text, o.Reply.Streamed = summary+"…", false
@@ -355,21 +423,31 @@ func (h *Hub) arrived(s *Session, run *Run, option Option, before *doc.Content, 
 			log.Printf("agent run history: %v", err)
 		}
 		d.to(live, run.Ops)
-		if o.Reply != nil && time.Since(d.chatSaved) >= chatSaveEvery {
-			// The chat whole the first time, which has the run then, and
-			// after that the run alone.
-			if d.chatSaved.IsZero() {
-				h.saveChat(s)
-			} else {
-				h.saveRunning(s, run)
-			}
-			d.chatSaved = time.Now()
-		}
+		h.keepRunning(s, run, d, o, chatSaveEvery)
 	case !option.Local():
 		// The server keeps a cloud run's ops: a page opened
 		// later gets them by syncing.
 		d.sent = len(run.Ops)
+	case s.PageID == WorkspaceID:
+		// Its tools have changed the user's pages already: each op is kept
+		// as it comes, for Undo after a launch the app quit during.
+		h.keepRunning(s, run, d, o, 0)
 	}
+}
+
+// keepRunning keeps a run's ops with its chat as they come, a save each
+// every at most: the chat whole the first time, which has the run then,
+// and after that the run alone (saveRunning).
+func (h *Hub) keepRunning(s *Session, run *Run, d *delivery, o RunOptions, every time.Duration) {
+	if o.Reply == nil || !d.chatSaved.IsZero() && time.Since(d.chatSaved) < every {
+		return
+	}
+	if d.chatSaved.IsZero() {
+		h.saveChat(s)
+	} else {
+		h.saveRunning(s, run)
+	}
+	d.chatSaved = time.Now()
 }
 
 // revised takes a change of a run's op at at as the blocks of the call
@@ -386,7 +464,7 @@ func (h *Hub) revised(s *Session, run *Run, d *delivery, o RunOptions, at int, o
 		d.sent = min(d.sent, len(run.Ops))
 	} else {
 		run.Ops[at] = *op
-		run.Edits[at] = Edit{Summary: summary, BlockIDs: OpBlockIDs(*op)}
+		run.Edits[at] = editOf(*op, summary)
 		if o.Reply != nil {
 			o.Reply.Text, o.Reply.Streamed = summary+"…", false
 		}
@@ -415,7 +493,9 @@ func runJobID(run *Run, option Option) string {
 // keepBefore keeps the page as it was before a run in its history, once
 // a run: when its first op reaches the page, or at its end.
 func (h *Hub) keepBefore(pageID string, run *Run, option Option, before *doc.Content) error {
-	if run.kept {
+	// A workspace run changed no page's blocks: Undo takes back its
+	// changes to the pages around them.
+	if run.kept || pageID == WorkspaceID {
 		return nil
 	}
 	label := "Before " + option.Name() + ": " + short(run.Instruction)
@@ -439,9 +519,13 @@ func (h *Hub) insertJob(ctx context.Context, req Request) error {
 		focus = []string{}
 	}
 	row := map[string]any{
-		"id": req.JobID, "page_id": req.PageID, "user_id": h.be.UserID(), "surface": req.Surface,
+		"id": req.JobID, "user_id": h.be.UserID(), "surface": req.Surface,
 		"focus_block_ids": focus, "provider_id": req.ProviderID, "model": req.Model, "status": "queued",
 		"request": req.JobRequest(),
+	}
+	// A workspace run's job is of no page.
+	if req.PageID != "" {
+		row["page_id"] = req.PageID
 	}
 	if req.CommentID != "" {
 		row["comment_id"] = req.CommentID
@@ -607,7 +691,11 @@ func short(s string) string {
 func (h *Hub) logLocalJob(run *Run, req Request) {
 	var edits []any
 	for _, e := range run.Edits {
-		edits = append(edits, map[string]any{"summary": e.Summary, "block_ids": e.BlockIDs})
+		edit := map[string]any{"summary": e.Summary, "block_ids": e.BlockIDs}
+		if e.PageID != "" {
+			edit["page_id"] = e.PageID
+		}
+		edits = append(edits, edit)
 	}
 	status := "done"
 	if run.Error != "" {

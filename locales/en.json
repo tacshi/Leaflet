@@ -1016,7 +1016,7 @@
   },
   "dialogSearchAskAgent": "Ask an agent instead",
   "@dialogSearchAskAgent": {
-    "description": "Search dialog: a button, when nothing matches, asking an agent the query."
+    "description": "Search, the desktop's dialog and the iPhone and iPad sidebar's: a button, when nothing matches, asking the agent of all the user's pages the query."
   },
   "dialogSearchTemplateEnter": "Enter starts a new page from this template",
   "@dialogSearchTemplateEnter": {
@@ -1844,9 +1844,9 @@
       }
     }
   },
-  "pageRunSubpageNotHere": "the subpage it made has not reached this device yet; try again once it syncs",
-  "@pageRunSubpageNotHere": {
-    "description": "Why undoing or redoing an agent's edits failed, in the toast's error: a subpage the cloud agent made has not synced to this device yet, so nothing changed."
+  "pageRunPageNotHere": "the page it made has not reached this device yet; try again once it syncs",
+  "@pageRunPageNotHere": {
+    "description": "Why undoing or redoing an agent's edits failed, in the toast's error: a page or subpage the cloud agent made has not synced to this device yet, so nothing changed."
   },
   "agentNoProvider": "Add an agent provider in Settings › Agent providers to use agents.",
   "@agentNoProvider": {
@@ -2050,6 +2050,10 @@
   "@agentReadingPage": {
     "description": "The agent chat's reply while an agent starts on a request, before it has said or done anything."
   },
+  "agentWorking": "Working…",
+  "@agentWorking": {
+    "description": "The workspace agent chat's reply while the agent starts on a request, before it has said or done anything: it works on the user's pages, not on one page."
+  },
   "agentSearchingWeb": "Searching the web for “{query}”…",
   "@agentSearchingWeb": {
     "description": "The agent chat's reply while an agent searches the web.",
@@ -2182,6 +2186,60 @@
       }
     }
   },
+  "agentEditMovedPage": "Moved “{title}”",
+  "@agentEditMovedPage": {
+    "description": "An edit the workspace agent made, in its reply and the list of its edits: it moved the page titled title, inside another page, into a folder or to the top level.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Trip notes"
+      }
+    }
+  },
+  "agentEditRenamedPage": "Renamed “{from}” to “{title}”",
+  "@agentEditRenamedPage": {
+    "description": "An edit the workspace agent made, in its reply and the list of its edits: it changed a page's title from from to title.",
+    "placeholders": {
+      "from": {
+        "type": "String",
+        "example": "Untitled"
+      },
+      "title": {
+        "type": "String",
+        "example": "Trip notes"
+      }
+    }
+  },
+  "agentEditTaggedPage": "Tagged “{title}”",
+  "@agentEditTaggedPage": {
+    "description": "An edit the workspace agent made, in its reply and the list of its edits: it set the tags of the page titled title.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Trip notes"
+      }
+    }
+  },
+  "agentEditCreatedFolder": "Created folder “{name}”",
+  "@agentEditCreatedFolder": {
+    "description": "An edit the workspace agent made, in its reply and the list of its edits: it made a folder named name.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Clippings"
+      }
+    }
+  },
+  "agentEditCreatedPage": "Created page “{title}”",
+  "@agentEditCreatedPage": {
+    "description": "An edit an agent made, in its reply and the list of its edits: it made a page of its own, at the top level of the user's pages or in a folder, titled title. Clicking the edit opens the page.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "Critical thinking"
+      }
+    }
+  },
   "agentEditBlocks": "{count, plural, one {a block} other {# blocks}}",
   "@agentEditBlocks": {
     "description": "The blocks an agent's edit wrote, in agentEditInserted, agentEditWrote and agentEditRewrote: how many, or a block of a kind they don't name.",
@@ -2231,6 +2289,10 @@
   "agentEditLinkCard": "a link card",
   "@agentEditLinkCard": {
     "description": "A link card block (a web page's title and picture), in agentEditInserted, agentEditWrote and agentEditRewrote."
+  },
+  "agentEditSubpageLink": "a subpage link",
+  "@agentEditSubpageLink": {
+    "description": "A subpage block, the card in a page that opens one of its subpages, in agentEditInserted: an agent put one in as it made the subpage."
   },
   "agentEditFormula": "a formula",
   "@agentEditFormula": {
@@ -5857,5 +5919,59 @@
   "welcomeSubEmail": "Ask an agent to turn these notes into an email",
   "@welcomeSubEmail": {
     "description": "The guide's example subpage (Weekly team sync): its to-do."
+  },
+  "workspaceEmpty": "Ask about any of your pages, or have the agent make, tag and file them.",
+  "@workspaceEmpty": {
+    "description": "The workspace agent's chat before anything was asked."
+  },
+  "workspacePlaceholder": "Ask about your pages…",
+  "@workspacePlaceholder": {
+    "description": "The workspace agent's chat box, empty."
+  },
+  "workspaceSuggestFile": "Sort my top-level pages into folders",
+  "@workspaceSuggestFile": {
+    "description": "A suggestion in the empty workspace agent's chat, sent as the user's request when clicked."
+  },
+  "workspaceSuggestTag": "Tag the pages that have no tags",
+  "@workspaceSuggestTag": {
+    "description": "A suggestion in the empty workspace agent's chat, sent as the user's request when clicked."
+  },
+  "workspaceSuggestFind": "Which of my pages mention a deadline?",
+  "@workspaceSuggestFind": {
+    "description": "A suggestion in the empty workspace agent's chat, sent as the user's request when clicked."
+  },
+  "workspaceSuggestNew": "Start a page for today's notes",
+  "@workspaceSuggestNew": {
+    "description": "A suggestion in the empty workspace agent's chat, sent as the user's request when clicked."
+  },
+  "shellAskAgent": "Ask the agent",
+  "@shellAskAgent": {
+    "description": "A button on the screen shown when no page is open, and on iPhone above the list of pages: it opens the agent chat of all the user's pages."
+  },
+  "panelScopePage": "This page",
+  "@panelScopePage": {
+    "description": "The panel's Agent tab beside a page, its switch: the agent of the page open."
+  },
+  "panelScopeAll": "All pages",
+  "@panelScopeAll": {
+    "description": "The panel's Agent tab beside a page, its switch: the workspace agent, which finds, makes, tags and files all the user's pages."
+  },
+  "pageRunDid": "{agent}: {edit}",
+  "@pageRunDid": {
+    "description": "Bar at the bottom of a page after an agent's run changed pages rather than this page's blocks: the agent's name and its last edit, as agentEditCreatedPage says it.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "Claude"
+      },
+      "edit": {
+        "type": "String",
+        "example": "Created page “Notes”"
+      }
+    }
+  },
+  "panelScope": "Ask about",
+  "@panelScope": {
+    "description": "The accessible name of the agent chat's menu, beside the agent picker, choosing what the chat asks about: this page, or all the user's pages."
   }
 }

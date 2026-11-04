@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -3297,4 +3298,134 @@ func mustPending(t *testing.T, s *Store) []OutboxEntry {
 		t.Fatal(err)
 	}
 	return entries
+}
+
+// A page put back goes where it was, at its sort key, or last there
+// without one; a folder brought back is there again, empty.
+func TestPlacePageAndRestoreFolder(t *testing.T) {
+	s := open(t)
+	f, _ := s.CreateFolder("Clippings")
+	a, _ := s.CreatePage(NewPageOptions{Title: "A", FolderID: f.ID})
+	b, _ := s.CreatePage(NewPageOptions{Title: "B"})
+	if err := s.PlacePage(b.ID, "", f.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Page(b.ID); got.FolderID != f.ID || got.SortKey <= a.SortKey {
+		t.Errorf("placed last: %+v after %q", got, a.SortKey)
+	}
+	if err := s.PlacePage(b.ID, a.ID, "", b.SortKey); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Page(b.ID); got.ParentID != a.ID || got.FolderID != "" || got.SortKey != b.SortKey {
+		t.Errorf("placed at its key: %+v", got)
+	}
+
+	if err := s.DeleteFolder(f); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RestoreFolder(f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Folder(f.ID); !got.DeletedAt.IsZero() || got.Name != "Clippings" {
+		t.Errorf("folder %+v", got)
+	}
+	if got, _ := s.Page(a.ID); got.FolderID != "" {
+		t.Errorf("its page went back in: %+v", got)
+	}
+}
+
+// SearchPages finds the pages it keeps alone: templates and the pages it
+// leaves out crowd none of them out of the limit, and a blank query lists
+// as many as the limit lets, not Search's few.
+func TestSearchPagesKeepsToItsPages(t *testing.T) {
+	s := open(t)
+	for i := range 5 {
+		if _, err := s.CreatePage(NewPageOptions{Title: fmt.Sprintf("Their plan %d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.CreatePage(NewPageOptions{Title: "Plan template", Template: true}); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 10 {
+		if _, err := s.CreatePage(NewPageOptions{Title: fmt.Sprintf("My plan %d", i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mine := func(p Page) bool { return strings.HasPrefix(p.Title, "My ") }
+	hits, err := s.SearchPages(context.Background(), "plan", 4, mine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 4 || slices.ContainsFunc(hits, func(h SearchHit) bool { return h.Kind != "page" || !strings.HasPrefix(h.Title, "My ") }) {
+		t.Errorf("found %+v", hits)
+	}
+	if hits, _ := s.SearchPages(context.Background(), "", 20, mine); len(hits) != 10 {
+		t.Errorf("a blank query lists %d", len(hits))
+	}
+	if hits, _ := s.Search("", 20); len(hits) != 8 {
+		t.Errorf("Search's blank query lists %d", len(hits))
+	}
+}
+
+// SharedBeyond and GuestCommented find at once the pages Members and
+// HasGuestComments find one at a time.
+func TestPagesSharedAndGuestCommented(t *testing.T) {
+	s := open(t)
+	shared, _ := s.CreatePage(NewPageOptions{Title: "Shared"})
+	alone, _ := s.CreatePage(NewPageOptions{Title: "Alone"})
+	guested, _ := s.CreatePage(NewPageOptions{Title: "Guested"})
+	if err := s.SetMembers(shared.ID, []Member{{PageID: shared.ID, UserID: "me", Role: "owner"}, {PageID: shared.ID, UserID: "friend", Role: "editor"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMembers(alone.ID, []Member{{PageID: alone.ID, UserID: "me", Role: "owner"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddComment(guested.ID, "b1", "Nice", "", "", "guest", "Visitor"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := s.SharedBeyond("me"); err != nil || !got[shared.ID] || got[alone.ID] || len(got) != 1 {
+		t.Errorf("shared %v, %v", got, err)
+	}
+	if got, err := s.GuestCommented(); err != nil || !got[guested.ID] || len(got) != 1 {
+		t.Errorf("guest-commented %v, %v", got, err)
+	}
+}
+
+// SearchPages finds as the agent function's search does: titles and tags
+// first, then text, each the most recently changed page first; tags in any
+// case but whole, as the server keeps them; a match in text with the 40
+// characters either side of it.
+func TestSearchPagesAsTheServer(t *testing.T) {
+	s := open(t)
+	all := func(Page) bool { return true }
+	older, _ := s.CreatePage(NewPageOptions{Title: "Plan older", Tags: []string{"Work"}})
+	newer, _ := s.CreatePage(NewPageOptions{Title: "Plan newer", Tags: []string{"workshop"}})
+	text, _ := s.CreatePage(NewPageOptions{Title: "Notes"})
+	c := doc.Empty()
+	c.Children[0].SetDelta(doc.FromMarkdown(strings.Repeat("x", 60) + " the plan is set " + strings.Repeat("y", 100)))
+	if _, _, err := s.SaveContent(text.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	// Changed a second apart, the newer last: within a millisecond the
+	// order would be the IDs'.
+	for i, id := range []string{older.ID, text.ID, newer.ID} {
+		if _, err := s.DB().Exec(`UPDATE pages SET updated_at = ? WHERE id = ?`, time.Now().Add(time.Duration(i)*time.Second).UnixMilli(), id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hits, err := s.SearchPages(context.Background(), "plan", 20, all)
+	if err != nil || len(hits) != 3 || hits[0].PageID != newer.ID || hits[1].PageID != older.ID || hits[2].PageID != text.ID {
+		t.Fatalf("hits %+v, %v", hits, err)
+	}
+	// From 40 before "plan", as long as it and 80 more.
+	if want := strings.Repeat("x", 35) + " the plan is set " + strings.Repeat("y", 32); hits[2].Snippet != want {
+		t.Errorf("snippet %q, want %q", hits[2].Snippet, want)
+	}
+	if hits, _ := s.SearchPages(context.Background(), "#work", 20, all); len(hits) != 1 || hits[0].PageID != older.ID {
+		t.Errorf("#work found %+v", hits)
+	}
+	if hits, _ := s.SearchPages(context.Background(), "#wor", 20, all); len(hits) != 0 {
+		t.Errorf("#wor found %+v", hits)
+	}
 }

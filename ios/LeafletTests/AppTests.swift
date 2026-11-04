@@ -24,6 +24,54 @@ struct AppTests {
         #expect(scene.newComment == nil)
     }
 
+    @Test func withNoPageThePanelShortcutShowsTheWorkspaceChat() {
+        let scene = SceneModel()
+        scene.inspectorTab = .comments
+        scene.inspectorShown = true
+        scene.showPanel(.agent)
+        #expect(!scene.inspectorShown)
+        scene.showPanel(.comments)
+        #expect(!scene.inspectorShown)
+        scene.showPanel(.agent)
+        #expect(scene.inspectorShown)
+
+        // Stacked, as on iPhone, no panel is beside a page: the chat is the
+        // list's sheet.
+        scene.inspectorShown = false
+        scene.stacked = true
+        scene.showPanel(.agent)
+        #expect(scene.workspaceShown && !scene.inspectorShown)
+    }
+
+    @Test func aPageOpenedFromTheWorkspaceChatOpensBesideIt() {
+        let scene = SceneModel()
+        scene.askWorkspace(sheet: true)
+        #expect(scene.workspaceShown && scene.allPages && scene.focusChat)
+        scene.allPages = false
+        scene.inspectorShown = true
+        scene.inspectorTab = .comments
+        scene.openFromChat("made", workspace: true, sheet: true)
+        #expect(scene.selection == "made")
+        #expect(scene.allPages && scene.inspectorTab == .agent)
+        #expect(!scene.workspaceShown && !scene.inspectorShown)
+
+        // A page's own chat, beside the page, stays as it was.
+        scene.allPages = false
+        scene.inspectorShown = true
+        scene.openFromChat("other", at: "b1", moment: 83, workspace: false, sheet: false)
+        #expect(scene.selection == "other" && scene.inspectorShown && !scene.allPages)
+        #expect(scene.target == "b1" && scene.targetAt == 83)
+    }
+
+    @Test func aRecordingPageRecordsOnlyAsItOpens() {
+        let scene = SceneModel()
+        scene.recordOnOpen = "rec"
+        scene.open("rec")
+        #expect(scene.recordOnOpen == "rec")
+        scene.open("other")
+        #expect(scene.recordOnOpen == nil)
+    }
+
     @Test func anOlderAnswerDoesNotReplaceANewerOne() {
         var asked = Newest()
         let first = asked.ask("agents")

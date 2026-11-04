@@ -1,0 +1,82 @@
+[
+  {
+    "value": "",
+    "cost": 2
+  },
+  {
+    "value": "Plan",
+    "cost": 6
+  },
+  {
+    "value": "a \"quoted\" \\ path",
+    "cost": 34
+  },
+  {
+    "value": "<b>&amp;</b>",
+    "cost": 39
+  },
+  {
+    "value": "tab\tnew\nline\u0001",
+    "cost": 30
+  },
+  {
+    "value": "  ",
+    "cost": 14
+  },
+  {
+    "value": "日本語のページ",
+    "cost": 9
+  },
+  {
+    "value": "😀 emoji",
+    "cost": 10
+  },
+  {
+    "value": "�",
+    "cost": 8
+  },
+  {
+    "value": true,
+    "cost": 4
+  },
+  {
+    "value": false,
+    "cost": 5
+  },
+  {
+    "value": [
+      "work",
+      "plans"
+    ],
+    "cost": 16
+  },
+  {
+    "value": [],
+    "cost": 2
+  },
+  {
+    "value": {
+      "id": "p-1",
+      "title": "Plan",
+      "tags": [
+        "a",
+        "b"
+      ],
+      "shared": true
+    },
+    "cost": 58
+  },
+  {
+    "value": [
+      {
+        "id": "f-1",
+        "name": "Clippings"
+      },
+      {
+        "id": "f-2",
+        "name": "<Trips>"
+      }
+    ],
+    "cost": 73
+  }
+]

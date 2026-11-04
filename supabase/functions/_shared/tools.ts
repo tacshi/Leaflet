@@ -32,6 +32,7 @@ import { markdownSpecs } from "./lines.ts";
 import type { ToolDef } from "./openai.ts";
 import type { WebPage } from "./page.ts";
 import type { Search } from "./search.ts";
+import type { WorkspaceHooks, WorkspacePage } from "./workspace.ts";
 
 export type Op =
   | { op: "insert"; position: Position; nodes: NodeJSON[] }
@@ -40,9 +41,45 @@ export type Op =
   | { op: "delete"; ids: string[]; previous: { node: NodeJSON; position: Position }[] }
   | {
     op: "create_page";
-    page: { id: string; space_id: string; parent_id: string; title: string; sort_key: string };
+    /** Inside parent_id, or at the top level when it is null: in folder_id when it has one. */
+    page: {
+      id: string;
+      space_id: string;
+      parent_id: string | null;
+      folder_id?: string | null;
+      title: string;
+      sort_key: string;
+    };
     content: PageContent;
-  };
+  }
+  | { op: "move_page"; page_id: string; title: string; place: PagePlace; previous: PagePlace }
+  | { op: "rename_page"; page_id: string; title: string; previous: string }
+  | { op: "set_page_tags"; page_id: string; title: string; tags: string[]; previous: string[] }
+  | { op: "create_folder"; folder: { id: string; space_id: string; name: string; sort_key: string } };
+
+/**
+ * Where a page is among the person's pages: inside parent_id, or at the top
+ * level, in folder_id when it has one, at sort_key among the pages there;
+ * card is where its card is in parent_id, for Undo to put it back there,
+ * none for the end (Go's PagePlace).
+ */
+export interface PagePlace {
+  parent_id?: string;
+  folder_id?: string;
+  sort_key?: string;
+  card?: Position;
+}
+
+/** The ops that change the pages around a page's blocks rather than its blocks (Go's IsPageOp). */
+export const PAGE_OPS = new Set([
+  "create_page",
+  "delete_page",
+  "move_page",
+  "rename_page",
+  "set_page_tags",
+  "create_folder",
+  "delete_folder",
+]);
 
 export interface PageSummary {
   id: string;
@@ -54,8 +91,18 @@ export interface ToolHooks {
   /** read_page for the current page, given its current content. */
   readPage(content: PageContent): Promise<unknown>;
   createSubpage(title: string, content: PageContent): Promise<Extract<Op, { op: "create_page" }>["page"]>;
+  /**
+   * Makes a page of the person's own at the top level, in their folder of
+   * id folderId when there is one; refuses one they have not.
+   */
+  createPage(
+    title: string,
+    content: PageContent,
+    folderId: string | null,
+  ): Promise<Extract<Op, { op: "create_page" }>["page"]>;
   listPages(): Promise<PageSummary[]>;
   readOtherPage(pageId: string): Promise<unknown>;
+  listFolders(): Promise<{ id: string; name: string }[]>;
   /** Searches the web through the run's provider; none when the run has no web, or its provider no search. */
   searchWeb?(query: string): Promise<Search>;
   /** Reads a page of the web; none when the run has no web. */
@@ -221,7 +268,7 @@ const blockSpecSchema = {
   required: ["type"],
 };
 
-function tool(
+export function tool(
   name: string,
   description: string,
   properties: Record<string, unknown> = {},
@@ -287,6 +334,65 @@ function withoutSiteInfo(v: BlockView): void {
   if (v.type === "video" && v.video) delete v.video.title;
 }
 
+/** The most pages list_pages lists (Go's maxListedPages): more would be more than a model reads at once. */
+export const MAX_LISTED_PAGES = 500;
+
+/** The longest tool result a model reads, in UTF-16 units (Go's toolResultLimit): longer ones are cut. */
+export const TOOL_RESULT_LIMIT = 60_000;
+
+/**
+ * How much of a tool's result, by jsonCost, the pages list_pages lists take
+ * at most, with what is listed with them, with room for the keys around
+ * them (Go's listBudget): past it, the rest are left for a search to find,
+ * rather than cut off with the result.
+ */
+export const LIST_BUDGET = TOOL_RESULT_LIMIT - 2_000;
+
+/**
+ * At least how many UTF-16 units v takes as JSON, as either side writes it
+ * (Go's jsonCost): six for a character one of them escapes (\u003c, as Go
+ * writes <), one or two for the rest.
+ */
+export function jsonCost(v: unknown): number {
+  if (typeof v === "string") {
+    let n = 2;
+    for (const ch of v) {
+      const c = ch.codePointAt(0)!;
+      if (
+        c < 0x20 || '"\\<>&'.includes(ch) || c === 0x2028 || c === 0x2029 || c === 0xfffd || (c >= 0xd800 && c < 0xe000)
+      ) {
+        n += 6;
+      } else n += c > 0xffff ? 2 : 1;
+    }
+    return n;
+  }
+  if (typeof v === "boolean") return v ? 4 : 5;
+  if (typeof v === "number") return String(v).length;
+  if (Array.isArray(v)) return 2 + Math.max(v.length - 1, 0) + v.reduce((n: number, e) => n + jsonCost(e), 0);
+  if (v && typeof v === "object") {
+    const entries = Object.entries(v);
+    return 2 + Math.max(entries.length - 1, 0) + entries.reduce((n, [k, e]) => n + jsonCost(k) + 1 + jsonCost(e), 0);
+  }
+  return 4;
+}
+
+/**
+ * How many of items list_pages lists (Go's listed): at most MAX_LISTED_PAGES,
+ * and as many as LIST_BUDGET takes past spent, what is listed with them.
+ */
+export function listed(items: unknown[], spent: number): number {
+  const n = Math.min(items.length, MAX_LISTED_PAGES);
+  for (let i = 0; i < n; i++) {
+    spent += jsonCost(items[i]) + 1;
+    if (spent > LIST_BUDGET) return i;
+  }
+  return n;
+}
+
+/** Refuses a page of the person's own on a page someone else writes or reads (Go's errNoOwnPages). */
+export const NO_OWN_PAGES =
+  "Someone else writes or reads this page: a page of the person's own made from it could take what they wrote into the person's own pages. Make a subpage of this page with create_subpage instead";
+
 /** The most blocks one run writes (Go's maxRunBlocks): a model that goes on and on, as one repeating itself, stops there. */
 export const MAX_RUN_BLOCKS = 5000;
 
@@ -297,7 +403,13 @@ export const MAX_ROUND_CALLS = 50;
 export const TOO_MANY_CALLS =
   `This call was not made: one answer makes at most ${MAX_ROUND_CALLS} calls. Make it again in your next.`;
 
-export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean }): ToolDef[] {
+/**
+ * The page's tools. ownPages, unless false, offers create_page: none on a page
+ * someone else writes or reads, whose writing a page of the person's own
+ * would take into their pages, where their workspace agent reads it as
+ * theirs.
+ */
+export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean; ownPages?: boolean }): ToolDef[] {
   const defs: ToolDef[] = [
     tool(
       "read_page",
@@ -347,11 +459,20 @@ export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean }):
       ),
       tool(
         "create_subpage",
-        "Create a new subpage under the current page, optionally with content.",
-        {
-          title: { type: "string" },
-          blocks: { type: "array", items: blockSpecSchema },
-        },
+        "Create a subpage inside this page, for content that is part of it, optionally with content: a link to it goes at the end of this page.",
+        pageSchema(),
+        ["title"],
+      ),
+      tool(
+        "create_page",
+        'Create a page of its own, outside this one, optionally with content: at the top level of the person\'s pages, or in one of their folders. Make "a new page" with this, unless the person asks for one inside or under this page.',
+        pageSchema({
+          folder_id: {
+            type: "string",
+            description:
+              "The folder to put it in, its id from list_folders where that is offered; none for the top level.",
+          },
+        }),
         ["title"],
       ),
     );
@@ -365,9 +486,24 @@ export function toolDefinitions(opts: { canEdit: boolean; crossPage: boolean }):
         { page_id: { type: "string" } },
         ["page_id"],
       ),
+      tool("list_folders", "List the person's folders (names and ids), to make a page in one with create_page."),
     );
   }
-  return defs;
+  return opts.ownPages === false ? defs.filter((d) => d.function.name !== "create_page") : defs;
+}
+
+/** A new page's schema: its title, where it goes, and its content in Markdown or as blocks, or neither for an empty page. */
+export function pageSchema(place: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    title: { type: "string" },
+    ...place,
+    markdown: {
+      type: "string",
+      description:
+        "The page's content in Markdown, as write_markdown writes it: the way to write text. Not with blocks.",
+    },
+    blocks: { type: "array", items: blockSpecSchema },
+  };
 }
 
 /**
@@ -768,7 +904,8 @@ export function applyOps(content: PageContent, ops: Op[], now = Date.now()): Pag
         }
         break;
       }
-      case "create_page":
+      default:
+        // A page op changes the pages around this one (PAGE_OPS).
         break;
     }
   }
@@ -850,6 +987,41 @@ function textArg(args: Record<string, unknown>, key: string): string {
   return value;
 }
 
+/** A page as list_pages lists it (Go's pageView). */
+function pageView(p: WorkspacePage): Record<string, unknown> {
+  return {
+    id: p.id,
+    title: p.title,
+    ...(p.tags.length ? { tags: p.tags } : {}),
+    ...(p.parent_id ? { parent_id: p.parent_id } : {}),
+    ...(p.folder_id ? { folder_id: p.folder_id } : {}),
+    ...(p.shared ? { shared: true } : {}),
+    ...(p.people ? { shared_with_people: true } : {}),
+  };
+}
+
+/** A page's title as it keeps it: "" for one untitled (Go's WorkspacePage.title). */
+function keptTitle(p: WorkspacePage): string {
+  return p.untitled ? "" : p.title;
+}
+
+/** Refuses a page someone else reads or writes (Go's changeable). */
+function changeable(p: WorkspacePage): void {
+  if (p.shared) {
+    throw new ToolError(
+      `“${p.title}” is shared with others: the agent here leaves it as it is, and puts nothing in it. To change it, ask the agent on that page`,
+    );
+  }
+}
+
+/** The text args has at key: "" when it has none, refused when it has something else (Go's optionalString). */
+function optionalText(args: Record<string, unknown>, key: string): string {
+  const value = args[key];
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") throw new ToolError(`${key} must be a string`);
+  return value;
+}
+
 /** What a kind of block is called in an edit's summary. */
 const KINDS: Record<string, string> = {
   chart: "chart",
@@ -864,6 +1036,7 @@ const KINDS: Record<string, string> = {
   link_preview: "link card",
   math_equation: "formula",
   diagram: "diagram",
+  subpage: "subpage link",
 };
 
 /**
@@ -884,11 +1057,15 @@ function summaryFor(verb: string, nodes: NodeJSON[]): string {
 export interface SessionOptions {
   canEdit: boolean;
   crossPage: boolean;
+  /** False on a page someone else writes or reads, where create_page is refused (toolDefinitions). */
+  ownPages?: boolean;
   /** What the person asked, whose URLs a block may load (checkUrls). */
   request?: string;
   /** Agent name shown on charts it inserts. */
   author?: string;
   now?: () => number;
+  /** The workspace agent's, whose tools are of the person's pages rather than of one: none on a page. */
+  workspace?: WorkspaceHooks;
 }
 
 // The URL guard (checkUrls): the app loads an image, a video or a link
@@ -983,6 +1160,7 @@ const EDITING_TOOLS = new Set([
   "move_block",
   "delete_blocks",
   "create_subpage",
+  "create_page",
 ]);
 
 /** A web tool's answer once the run has read the person's other pages, or follows turns that did (Go's errWebClosed). */
@@ -1030,7 +1208,7 @@ export class PageEditSession {
   }
 
   get changed(): boolean {
-    return this.ops.some((op) => op.op !== "create_page");
+    return this.ops.some((op) => !PAGE_OPS.has(op.op));
   }
 
   /** A run that read nothing beyond its page. */
@@ -1075,10 +1253,21 @@ export class PageEditSession {
   }
 
   private async dispatch(name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
+    if (this.opts.workspace) {
+      // What the person's pages could not be read or changed for, as the
+      // database failing or slow, the model is told, as Go tells it: the
+      // run goes on, its changes so far kept.
+      try {
+        return await this.workspace(this.opts.workspace, name, args);
+      } catch (e) {
+        if (e instanceof ToolError || e instanceof SpecError) throw e;
+        throw new ToolError(`The call failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     if (EDITING_TOOLS.has(name) && !this.opts.canEdit) {
       throw new ToolError("You can read this page but not edit it: the person asking has view access only");
     }
-    if ((name === "list_pages" || name === "read_other_page") && !this.opts.crossPage) {
+    if ((name === "list_pages" || name === "read_other_page" || name === "list_folders") && !this.opts.crossPage) {
       throw new ToolError("Reading other pages is turned off for this user");
     }
     switch (name) {
@@ -1095,12 +1284,24 @@ export class PageEditSession {
       case "delete_blocks":
         return this.remove(args.ids);
       case "create_subpage":
-        return await this.createSubpage(args.title, args.blocks);
-      case "list_pages":
+        return await this.createSubpage(args);
+      case "create_page":
+        return await this.createPage(args);
+      case "list_folders":
+        // Only the person names their folders, and no page's words are in
+        // them: a run that lists them has read nothing beyond this page, so
+        // the URLs it may write stay those it may (checkUrls), and the web
+        // stays open.
+        return unchanged({ folders: await this.hooks.listFolders() });
+      case "list_pages": {
         // The titles it lists are read too.
         this.arm();
         this.readPages = true;
-        return unchanged({ pages: await this.hooks.listPages() });
+        // As many as a model reads at once, each counted as Go counts it:
+        // with no parent as null, the more of null and Go's "".
+        const pages = await this.hooks.listPages();
+        return unchanged({ pages: pages.slice(0, listed(pages, 0)) });
+      }
       case "read_other_page": {
         const pageId = textArg(args, "page_id");
         const page = await this.hooks.readOtherPage(pageId);
@@ -1602,36 +1803,240 @@ export class PageEditSession {
     return outcome({ deleted_ids: targets }, [op], [{ summary, blockIds: targets }]);
   }
 
-  async createSubpage(rawTitle: unknown, rawBlocks: unknown): Promise<ToolOutcome> {
+  /**
+   * The title and the content a call gives a new page: as blocks, or in
+   * Markdown as write_markdown takes it, or neither for an empty page (Go's
+   * pageContent).
+   */
+  private pageContent(args: Record<string, unknown>): { title: string; content: PageContent } {
     // A title that is no text is refused, as the app refuses it.
-    if (rawTitle !== undefined && rawTitle !== null && typeof rawTitle !== "string") {
+    if (args.title !== undefined && args.title !== null && typeof args.title !== "string") {
       throw new ToolError("title must be a string");
     }
-    const title = trimSpace(String(rawTitle ?? ""));
+    const title = trimSpace(String(args.title ?? ""));
     if (!title) throw new ToolError("title is required");
+    const markdown = optionalText(args, "markdown");
+    const taken = new Set<string>();
+    const newId = () => {
+      let id = randomId();
+      while (taken.has(id)) id = randomId();
+      taken.add(id);
+      return id;
+    };
+    const opts = { newId, author: this.opts.author };
     const content = emptyContent();
-    if (rawBlocks !== undefined && rawBlocks !== null) {
-      const specs = Array.isArray(rawBlocks) && rawBlocks.length === 0 ? [] : this.specs(rawBlocks, "blocks");
-      const taken = new Set<string>();
-      const newId = () => {
-        let id = randomId();
-        while (taken.has(id)) id = randomId();
-        taken.add(id);
-        return id;
-      };
-      const t = this.now();
-      const opts = { newId, author: this.opts.author };
-      content.document.children = specs.map((spec) => specToNode(spec, opts));
-      walk(content.document, (n) => {
-        if (n !== content.document) content.meta.blocks[n.id] = t;
-      });
+    // No blocks, or none listed, is no content, as the app takes it.
+    const blocks = args.blocks;
+    if (blocks !== undefined && blocks !== null && !(Array.isArray(blocks) && blocks.length === 0)) {
+      if (markdown !== "") throw new ToolError("Give the page markdown or blocks, not both");
+      content.document.children = this.specs(blocks, "blocks").map((spec) => specToNode(spec, opts));
+    } else {
+      content.document.children = markdownSpecs(markdown).map((spec) => specToNode(spec, { ...opts, markdown: true }));
     }
+    const t = this.now();
+    walk(content.document, (n) => {
+      if (n !== content.document) content.meta.blocks[n.id] = t;
+    });
+    return { title, content };
+  }
+
+  async createSubpage(args: Record<string, unknown>): Promise<ToolOutcome> {
+    const { title, content } = this.pageContent(args);
     // Its title shows on this page, in its card, as the next run reads it.
     this.checkUrls(content.document.children ?? [], title);
     const count = this.room(content.document.children ?? []);
     const page = await this.hooks.createSubpage(title, content);
     this.written += count;
+    // Its card goes at the end of this page, as the app puts one there, so
+    // the page shows its subpage and Undo takes both away.
+    const position: Position = { at: "end" };
+    const card: NodeJSON = { id: this.specOptions().newId(), type: "subpage", data: { page_id: page.id } };
+    const insert = this.put(this.resolve(position), position, [card]);
     const op = this.record({ op: "create_page", page, content: clone(content) });
-    return outcome({ page_id: page.id }, [op], [{ summary: `Created subpage “${title}”`, blockIds: [] }]);
+    return outcome({ page_id: page.id }, [insert, op], [
+      { summary: summaryFor("Inserted", [card]), blockIds: [card.id] },
+      { summary: `Created subpage “${title}”`, blockIds: [] },
+    ]);
+  }
+
+  async createPage(args: Record<string, unknown>): Promise<ToolOutcome> {
+    if (this.opts.ownPages === false) throw new ToolError(NO_OWN_PAGES);
+    const { title, content } = this.pageContent(args);
+    const folderId = optionalText(args, "folder_id");
+    // Its title shows in the sidebar, where the next run that lists the
+    // person's pages reads it.
+    this.checkUrls(content.document.children ?? [], title);
+    const count = this.room(content.document.children ?? []);
+    const page = await this.hooks.createPage(title, content, folderId || null);
+    this.written += count;
+    const op = this.record({ op: "create_page", page, content: clone(content) });
+    return outcome({ page_id: page.id }, [op], [{ summary: `Created page “${title}”`, blockIds: [] }]);
+  }
+
+  // --- the workspace agent's tools ------------------------------------------
+
+  /** Runs a workspace agent's tool (Go's Executor.workspace). */
+  private async workspace(w: WorkspaceHooks, name: string, args: Record<string, unknown>): Promise<ToolOutcome> {
+    if ((name === "list_pages" || name === "search_pages" || name === "read_page") && !w.reading) {
+      throw new ToolError("Reading the person's pages is off");
+    }
+    switch (name) {
+      case "list_pages": {
+        // The titles it lists are read too.
+        this.arm();
+        this.readPages = true;
+        const all = await w.listPages();
+        const folders = await w.listFolders();
+        const views = all.slice(0, MAX_LISTED_PAGES).map(pageView);
+        // More would be more than a model reads at once: it finds the rest.
+        // The folders and the count go first, so a result cut off keeps them.
+        const pages = views.slice(0, listed(views, jsonCost(folders)));
+        const more = all.length - pages.length;
+        return unchanged({ folders, ...(more > 0 ? { more_pages: more } : {}), pages });
+      }
+      case "search_pages": {
+        const query = trimSpace(textArg(args, "query"));
+        this.arm();
+        this.readPages = true;
+        const results = await w.searchPages(query);
+        // What people wrote in a page shared with them is not read: it is
+        // found, but none of its text shown; nor of one the run does not
+        // know, as one made since it began.
+        for (const r of results as Record<string, unknown>[]) {
+          const page = typeof r.page_id === "string" && r.page_id ? await w.page(r.page_id) : null;
+          if (!page || page.people) delete r.snippet;
+        }
+        return unchanged({ results });
+      }
+      case "read_page": {
+        const page = await this.workspacePage(w, args, "page_id");
+        if (page.people) {
+          throw new ToolError(
+            `“${page.title}” is shared with other people, who write in it too: the agent here reads none of it. To work with it, ask the agent on that page`,
+          );
+        }
+        this.arm();
+        this.readPages = true;
+        return unchanged(await w.readPage(page.id));
+      }
+      case "list_folders":
+        // Only the person names their folders: as on a page, listing them
+        // reads nothing someone else wrote.
+        return unchanged({ folders: await w.listFolders() });
+      case "create_page":
+        return await this.workspaceCreate(w, args);
+      case "move_page":
+        return await this.workspaceMove(w, args);
+      case "rename_page":
+        return await this.workspaceRename(w, args);
+      case "set_page_tags":
+        return await this.workspaceTags(w, args);
+      case "create_folder":
+        return await this.workspaceFolder(w, args);
+      case "web_search":
+        return unchanged(await this.searchWeb(args));
+      case "read_web_page":
+        return unchanged(await this.readWeb(args));
+      default:
+        throw new ToolError(`Unknown tool "${name}"`);
+    }
+  }
+
+  /** The page args names at key, one of the person's. */
+  private async workspacePage(w: WorkspaceHooks, args: Record<string, unknown>, key: string): Promise<WorkspacePage> {
+    const id = textArg(args, key);
+    const page = await w.page(id);
+    if (!page) {
+      throw new ToolError(`No page "${id}" of the person's. Call list_pages or search_pages for the pages' ids`);
+    }
+    return page;
+  }
+
+  /** Where args puts a page: inside a page of the person's that no one else shares, or at the top level, in a folder or none. */
+  private async place(
+    w: WorkspaceHooks,
+    args: Record<string, unknown>,
+  ): Promise<{ parent: WorkspacePage | null; folder: string }> {
+    const parentId = optionalText(args, "parent_id");
+    const folder = optionalText(args, "folder_id");
+    if (!parentId) return { parent: null, folder };
+    if (folder) throw new ToolError("Give parent_id or folder_id, not both: a page inside another is in no folder");
+    const parent = await this.workspacePage(w, args, "parent_id");
+    changeable(parent);
+    return { parent, folder: "" };
+  }
+
+  private async workspaceCreate(w: WorkspaceHooks, args: Record<string, unknown>): Promise<ToolOutcome> {
+    const { title, content } = this.pageContent(args);
+    const { parent, folder } = await this.place(w, args);
+    this.checkUrls(content.document.children ?? [], title);
+    const count = this.room(content.document.children ?? []);
+    const made = await w.createPage(title, content, parent?.id ?? "", folder);
+    this.written += count;
+    const op = this.record({
+      op: "create_page",
+      page: { ...made, parent_id: parent?.id ?? null, folder_id: folder || null, title },
+      content: clone(content),
+    });
+    const summary = parent ? `Created subpage “${title}”` : `Created page “${title}”`;
+    return outcome({ page_id: made.id }, [op], [{ summary, blockIds: [] }]);
+  }
+
+  private async workspaceMove(w: WorkspaceHooks, args: Record<string, unknown>): Promise<ToolOutcome> {
+    const page = await this.workspacePage(w, args, "page_id");
+    changeable(page);
+    const { parent, folder } = await this.place(w, args);
+    if (parent?.id === page.id) throw new ToolError("A page cannot move inside itself");
+    const { from, to } = await w.movePage(page.id, parent?.id ?? "", folder);
+    if ((from.parent_id ?? "") === (to.parent_id ?? "") && (from.folder_id ?? "") === (to.folder_id ?? "")) {
+      return unchanged({ page_id: page.id });
+    }
+    // An untitled page is named "", as the app says it in the person's language.
+    const op = this.record({ op: "move_page", page_id: page.id, title: keptTitle(page), place: to, previous: from });
+    return outcome({ page_id: page.id }, [op], [{ summary: `Moved “${page.title}”`, blockIds: [] }]);
+  }
+
+  private async workspaceRename(w: WorkspaceHooks, args: Record<string, unknown>): Promise<ToolOutcome> {
+    const page = await this.workspacePage(w, args, "page_id");
+    changeable(page);
+    // Without the spaces around it, as a new page's.
+    const title = trimSpace(textArg(args, "title"));
+    this.checkUrls([], title);
+    const had = keptTitle(page);
+    if (title === had) return unchanged({ page_id: page.id });
+    await w.renamePage(page.id, title);
+    const op = this.record({ op: "rename_page", page_id: page.id, title, previous: had });
+    return outcome({ page_id: page.id }, [op], [{ summary: `Renamed “${page.title}” to “${title}”`, blockIds: [] }]);
+  }
+
+  private async workspaceTags(w: WorkspaceHooks, args: Record<string, unknown>): Promise<ToolOutcome> {
+    const page = await this.workspacePage(w, args, "page_id");
+    changeable(page);
+    const raw = args.tags;
+    if (!Array.isArray(raw) || raw.some((t) => typeof t !== "string")) {
+      throw new ToolError("tags must be a list of words");
+    }
+    const tags = raw as string[];
+    this.checkUrls([], tags);
+    const kept = await w.setTags(page.id, tags);
+    if (kept.length === page.tags.length && kept.every((t, i) => t === page.tags[i])) {
+      return unchanged({ page_id: page.id, tags: kept });
+    }
+    const op = this.record({
+      op: "set_page_tags",
+      page_id: page.id,
+      title: keptTitle(page),
+      tags: kept,
+      previous: page.tags,
+    });
+    return outcome({ page_id: page.id, tags: kept }, [op], [{ summary: `Tagged “${page.title}”`, blockIds: [] }]);
+  }
+
+  private async workspaceFolder(w: WorkspaceHooks, args: Record<string, unknown>): Promise<ToolOutcome> {
+    const name = trimSpace(textArg(args, "name"));
+    this.checkUrls([], name);
+    const folder = await w.createFolder(name);
+    const op = this.record({ op: "create_folder", folder });
+    return outcome({ folder_id: folder.id }, [op], [{ summary: `Created folder “${name}”`, blockIds: [] }]);
   }
 }

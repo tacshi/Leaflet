@@ -160,3 +160,27 @@ func TestCardNotSavedIsTold(t *testing.T) {
 		t.Errorf("deleted %v, %v, told %q", ids, err, f.told)
 	}
 }
+
+// A page moved out of its parent says where its card was there, and moved
+// back to it at that place, as Undo moves it, its card goes back there.
+func TestMovePageAtPutsTheCardBack(t *testing.T) {
+	f := newPagesFixture(t)
+	trip := f.page(t, "Trip", "", block("t1", "Plan"), block("t2", "More"))
+	packing := f.page(t, "Packing", trip.ID)
+	if err := f.LinkSubpageAt(trip.ID, packing.ID, doc.Position{After: "t1"}); err != nil {
+		t.Fatal(err)
+	}
+	left, err := f.MovePageAt(packing.ID, "", nil, func() error { return f.st.MovePage(packing.ID, "", "", "") })
+	if err != nil || left == nil || left.After != "t1" {
+		t.Fatalf("left %+v, %v", left, err)
+	}
+	if got := f.cards(trip.ID); len(got) != 0 {
+		t.Fatalf("the parent still has %v", got)
+	}
+	if _, err := f.MovePageAt(packing.ID, trip.ID, left, func() error { return f.st.MovePage(packing.ID, trip.ID, "", "") }); err != nil {
+		t.Fatal(err)
+	}
+	if c := f.st.Content(trip.ID); len(c.Children) != 3 || c.Children[1].Str("page_id") != packing.ID {
+		t.Errorf("the parent is %s", c.Encode())
+	}
+}

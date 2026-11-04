@@ -61,6 +61,11 @@ func (s *Store) HasGuestComments(pageID string) bool {
 	return n > 0
 }
 
+// GuestCommented returns the pages HasGuestComments reports, all at once.
+func (s *Store) GuestCommented() (map[string]bool, error) {
+	return pageSet(s.db.Query(`SELECT DISTINCT page_id FROM comments WHERE author_kind = 'guest'`))
+}
+
 // AllComments returns every comment, deleted ones too.
 func (s *Store) AllComments() ([]Comment, error) {
 	rows, err := s.db.Query(`SELECT ` + commentCols + ` FROM comments ORDER BY created_at`)

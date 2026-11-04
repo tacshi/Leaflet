@@ -1454,3 +1454,53 @@ func TestMergeIsLinear(t *testing.T) {
 		t.Errorf("a merge of 1000 blocks takes %v, of 8000 %v", small, large)
 	}
 }
+
+// Page ops go as the protocol has them and come back the same, and each
+// undoes to its reverse, as the run that made it is undone.
+func TestPageOpsRoundTripAndInvert(t *testing.T) {
+	ops := []Op{
+		{Op: "move_page", PageID: "p1", Title: "Plan", Place: &PagePlace{ParentID: "p2"}, PrevPlace: &PagePlace{FolderID: "f1", SortKey: "a1"}},
+		{Op: "rename_page", PageID: "p1", Title: "Plan", PrevTitle: "Draft"},
+		{Op: "set_page_tags", PageID: "p1", Title: "Plan", Tags: []string{"work"}, PrevTags: []string{}},
+		{Op: "create_folder", Folder: &NewFolder{ID: "f2", SpaceID: "s1", Name: "Clippings", SortKey: "a2"}},
+		{Op: "delete_folder", FolderID: "f2"},
+	}
+	for _, o := range ops {
+		raw, err := json.Marshal(o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var back Op
+		if err := json.Unmarshal(raw, &back); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(back, o) {
+			t.Errorf("%s came back as %+v", raw, back)
+		}
+		if !o.IsPageOp() {
+			t.Errorf("%s is no page op", o.Op)
+		}
+	}
+	if raw, _ := json.Marshal(ops[0]); !strings.Contains(string(raw), `"previous":{"folder_id":"f1","sort_key":"a1"}`) {
+		t.Errorf("move_page %s", raw)
+	}
+	inv := InvertRun(ops[:4])
+	want := []Op{
+		{Op: "delete_folder", FolderID: "f2"},
+		{Op: "set_page_tags", PageID: "p1", Title: "Plan", Tags: []string{}, PrevTags: []string{"work"}},
+		{Op: "rename_page", PageID: "p1", Title: "Draft", PrevTitle: "Plan"},
+		{Op: "move_page", PageID: "p1", Title: "Plan", Place: &PagePlace{FolderID: "f1", SortKey: "a1"}, PrevPlace: &PagePlace{ParentID: "p2"}},
+	}
+	if !reflect.DeepEqual(inv, want) {
+		t.Errorf("inverse %+v", inv)
+	}
+	if (Op{Op: "insert"}).IsPageOp() {
+		t.Error("an insert is a page op")
+	}
+	// A page op leaves the blocks as they are.
+	c := Empty()
+	before := c.Encode()
+	if err := c.Apply(ops[0]); err != nil || c.Encode() != before {
+		t.Errorf("apply: %v, %s", err, c.Encode())
+	}
+}

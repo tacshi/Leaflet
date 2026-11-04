@@ -56,21 +56,7 @@ func (a *App) pageView(c *ui.Context) {
 			}
 			more := iconButton(c, "page-more", "ellipsis", locales.PageActions())
 			more.Menu(func(m *ui.Menu) { a.pageMenu(m, *p, true) })
-			// The toggle stays here while the panel is open, leaving the
-			// panel's top bar to its tabs: on Windows and Linux the window
-			// controls take the bar's right end.
-			label := locales.PageShowPanel()
-			if a.panelOpen {
-				label = locales.PanelHide()
-			}
-			toggle := iconButton(c, "toggle-panel", "panel-right", label)
-			if a.panelOpen {
-				pal := theme.Of(c)
-				toggle.Background(pal.NavSelected).TextColor(pal.Text)
-			}
-			if toggle.Clicked() {
-				a.panelOpen = !a.panelOpen
-			}
+			a.panelToggle(c)
 		})
 	})
 	// The page menu's choice runs as the title bar draws: Delete closes
@@ -451,7 +437,7 @@ func (a *App) emptyActions(c *ui.Context) {
 			}
 		}
 		row("draft", "sparkles", locales.PageDraftWithAgent(), locales.PageDraftWithAgentHint(), func() {
-			a.panelOpen, a.panelTab = true, 0
+			a.openPageAgent()
 			a.dialogs.focusChat = true
 		}, nil)
 		row("subpage", "file-plus", locales.PageAddSubpage(), locales.PageAddSubpageHint(), func() { a.addSubpageBlock() }, nil)
@@ -463,18 +449,38 @@ func (a *App) emptyActions(c *ui.Context) {
 	})
 }
 
-// undoRun takes back an agent's run on the open page, or says why it
-// could not: the run is then left as it was.
-func (a *App) undoRun(run *agents.Run) {
-	if err := a.hub.UndoRun(a.page.id, run.ID); err != nil {
+// panelToggle shows or hides the panel. The toggle stays in the main
+// area's title bar while the panel is open, leaving the panel's top bar to
+// its tabs: on Windows and Linux the window controls take the bar's right
+// end.
+func (a *App) panelToggle(c *ui.Context) {
+	label := locales.PageShowPanel()
+	if a.panelOpen {
+		label = locales.PanelHide()
+	}
+	toggle := iconButton(c, "toggle-panel", "panel-right", label)
+	if a.panelOpen {
+		pal := theme.Of(c)
+		toggle.Background(pal.NavSelected).TextColor(pal.Text)
+	}
+	if toggle.Clicked() {
+		a.panelOpen = !a.panelOpen
+	}
+}
+
+// undoRun takes back an agent's run of session sessID, the open page's or
+// the workspace's, or says why it could not: the run is then left as it
+// was.
+func (a *App) undoRun(sessID string, run *agents.Run) {
+	if err := a.hub.UndoRun(sessID, run.ID); err != nil {
 		a.toast(locales.PageUndoRunFailed(run.AgentName, err.Error()))
 	}
 }
 
 // redoRun makes an undone run's edits again, or says why it could not:
 // the run then stays undone.
-func (a *App) redoRun(run *agents.Run) {
-	if err := a.hub.RedoRun(a.page.id, run.ID); err != nil {
+func (a *App) redoRun(sessID string, run *agents.Run) {
+	if err := a.hub.RedoRun(sessID, run.ID); err != nil {
 		a.toast(locales.PageRedoRunFailed(run.AgentName, err.Error()))
 	}
 }
@@ -489,6 +495,11 @@ func (a *App) runBar(c *ui.Context, run *agents.Run) {
 		Background(pal.Inverse).TextColor(pal.OnInverse).Shadow(0, 10, 30, 0, pal.Shadow).AlignItems(ui.Center).Children(func() {
 		ui.Icon(c, theme.Icon("sparkles")).FontSize(14)
 		text := locales.PageRunEdited(run.AgentName, len(uniq(run.BlockIDs())))
+		if len(run.BlockIDs()) == 0 && len(run.Edits) > 0 {
+			// A run that changed pages, not this one's blocks, says what it
+			// did last.
+			text = locales.PageRunDid(run.AgentName, run.Edits[len(run.Edits)-1].Summary)
+		}
 		if run.Undone {
 			text = locales.PageRunUndone(run.AgentName)
 		}
@@ -502,10 +513,10 @@ func (a *App) runBar(c *ui.Context, run *agents.Run) {
 			return b.Clicked()
 		}
 		if !run.Undone && btn("undo-run", locales.CommonUndo()) {
-			a.undoRun(run)
+			a.undoRun(a.page.id, run)
 		}
 		if run.Undone && btn("redo-run", locales.PageRedo()) {
-			a.redoRun(run)
+			a.redoRun(a.page.id, run)
 		}
 		x := ui.ButtonBase(c.Key("hide-run")).Size(24, 24).Center().Radius(6).Label(locales.PageDismiss())
 		x.Children(func() { ui.Icon(c, theme.Icon("x")).FontSize(13).TextColor(pal.OnInverse.Alpha(0.7)) })
@@ -532,7 +543,7 @@ func (a *App) runningBar(c *ui.Context, s *agents.Session) {
 	switch {
 	case run == nil, ip != nil && ip.runID == run.ID:
 		return
-	case run.Surface == "sidebar" && a.panelOpen && a.panelTab == 0:
+	case run.Surface == "sidebar" && a.panelOpen && a.panelTab == 0 && a.agentScope == 0:
 		return
 	}
 	bar := ui.Row(c.Key("running-bar")).Attach(ui.AnchorBottom, ui.AnchorBottom).Bottom(18).Padding(8, 14).Gap(10).Radius(10).

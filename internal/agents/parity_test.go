@@ -39,16 +39,23 @@ func TestAgentsAsTheServerHasThem(t *testing.T) {
 			t.Errorf("%q: URLs %q, want %q", tc.Text, got, tc.URLs)
 		}
 	}
-	for _, tc := range f.Titles {
-		var made *string
-		x := executor(page())
-		x.Ctx.CreateSubpage = func(title string, _ []*doc.Node) (string, error) {
-			made = &title
-			return "page-2", nil
-		}
-		x.Call("create_subpage", map[string]any{"title": tc.Title})
-		if (made == nil) != (tc.Made == nil) || made != nil && *made != *tc.Made {
-			t.Errorf("%q made %v, want %v", tc.Title, made, tc.Made)
+	// A page of its own takes its title as a subpage does.
+	for _, tool := range []string{"create_subpage", "create_page"} {
+		for _, tc := range f.Titles {
+			var made *string
+			x := executor(page())
+			x.Ctx.CreateSubpage = func(title string, _ []*doc.Node) (string, error) {
+				made = &title
+				return "page-2", nil
+			}
+			x.Ctx.CreatePage = func(title string, _ []*doc.Node, _ string) (string, error) {
+				made = &title
+				return "page-3", nil
+			}
+			x.Call(tool, map[string]any{"title": tc.Title})
+			if (made == nil) != (tc.Made == nil) || made != nil && *made != *tc.Made {
+				t.Errorf("%s %q made %v, want %v", tool, tc.Title, made, tc.Made)
+			}
 		}
 	}
 }
@@ -90,8 +97,9 @@ func TestToolsAsTheServerHasThem(t *testing.T) {
 		t.Fatal(err)
 	}
 	var f struct {
-		Schemas map[string]any `json:"schemas"`
-		Calls   []struct {
+		Schemas   map[string]any `json:"schemas"`
+		Workspace map[string]any `json:"workspace"`
+		Calls     []struct {
 			Tool string `json:"tool"`
 			Args string `json:"args"`
 			OK   bool   `json:"ok"`
@@ -128,12 +136,60 @@ func TestToolsAsTheServerHasThem(t *testing.T) {
 	if len(ours) != len(f.Schemas) {
 		t.Errorf("%d tools here, %d on the server", len(ours), len(f.Schemas))
 	}
+	// The workspace agent's too.
+	defs, _ = json.Marshal(WorkspaceToolDefinitions(true))
+	ours = nil
+	if err := json.Unmarshal(defs, &ours); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range ours {
+		got, _ := json.Marshal(contract(d.Function.Parameters))
+		w, _ := json.Marshal(f.Workspace[d.Function.Name])
+		if string(got) != string(w) {
+			t.Errorf("workspace %s takes\n%s\nthe server's\n%s", d.Function.Name, got, w)
+		}
+	}
+	if len(ours) != len(f.Workspace) {
+		t.Errorf("%d workspace tools here, %d on the server", len(ours), len(f.Workspace))
+	}
 	for _, c := range f.Calls {
 		x := executor(page())
 		x.Ctx.CreateSubpage = func(string, []*doc.Node) (string, error) { return "page-2", nil }
+		// The user has folder-1 alone, as on the server.
+		x.Ctx.CreatePage = func(_ string, _ []*doc.Node, folder string) (string, error) {
+			if folder != "" && folder != "folder-1" {
+				return "", noFolder(folder)
+			}
+			return "page-3", nil
+		}
 		out := x.CallRaw(c.Tool, c.Args)
 		if _, refused := out["error"]; refused == c.OK {
 			t.Errorf("%s %s: refused %v (%v), the server's ok %v", c.Tool, c.Args, refused, out["error"], c.OK)
+		}
+	}
+}
+
+// A value is counted as the server counts it (json_costs.json): the pages
+// list_pages lists are cut where they would pass the most a model reads at
+// once, on either side at the same page.
+func TestJSONCostAsTheServer(t *testing.T) {
+	var cases []struct {
+		Value any `json:"value"`
+		Cost  int `json:"cost"`
+	}
+	data, err := os.ReadFile("../../supabase/functions/_shared/testdata/json_costs.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &cases); err != nil {
+		t.Fatal(err)
+	}
+	if len(cases) == 0 {
+		t.Fatal("no cases")
+	}
+	for _, c := range cases {
+		if got := jsonCost(c.Value); got != c.Cost {
+			t.Errorf("%#v costs %d here, %d on the server", c.Value, got, c.Cost)
 		}
 	}
 }

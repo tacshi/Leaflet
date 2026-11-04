@@ -59,6 +59,10 @@ struct PageScreen: View {
                             (scene.target, scene.targetAt) = (nil, -1)
                             goTo(block, at: at, in: c)
                         }
+                        if scene.recordOnOpen == pageID {
+                            scene.recordOnOpen = nil
+                            Recorder.shared.start(pageID: pageID, editor: c)
+                        }
                         // The window holds the editor weakly: the editor's
                         // view keeps it, as long as the page shows. So
                         // onMenuItem may hold this view, and through it the
@@ -296,6 +300,7 @@ struct PageScreen: View {
             page: row,
             draft: { [scene] in
                 scene.inspectorTab = .agent
+                scene.allPages = false
                 scene.inspectorShown = true
             },
             addSubpage: { [app, scene, pageID] in
@@ -511,32 +516,49 @@ struct Breadcrumbs: View {
     }
 }
 
-/// Inspector is the panel beside a page.
+/// Inspector is the panel beside a page, or, with none open, the
+/// workspace agent's chat alone (noPage).
 struct Inspector: View {
     @Binding var tab: InspectorTab
     let model: PageModel?
     /// isSheet says it is a sheet over the page, as on iPhone, rather than
     /// a column beside it.
     var isSheet = false
+    var noPage = false
     @Environment(SceneModel.self) private var scene
+    @Environment(AppModel.self) private var app
     /// counted is what the window was told the panel is, as it showed.
     @State private var counted = false
 
     var body: some View {
+        @Bindable var scene = scene
         VStack(spacing: 0) {
-            Picker(selection: $tab) {
-                ForEach(InspectorTab.allCases) { Text($0.title).tag($0) }
-            } label: {
-                EmptyView()
-            }
-            .pickerStyle(.segmented)
-            .padding()
-            switch tab {
-            case .outline: OutlineList(rows: model?.outline ?? [], isSheet: isSheet)
-            case .agent: if let model { AgentPanel(model: model) }
-            case .comments: if let model { CommentsPanel(model: model) }
+            if noPage {
+                AgentPanel(model: scene.workspace, isSheet: isSheet)
+            } else {
+                Picker(selection: $tab) {
+                    ForEach(InspectorTab.allCases) { Text($0.title).tag($0) }
+                } label: {
+                    EmptyView()
+                }
+                .pickerStyle(.segmented)
+                .padding()
+                switch tab {
+                case .outline: OutlineList(rows: model?.outline ?? [], isSheet: isSheet)
+                case .agent:
+                    // The page's agent, or the workspace agent's, of all the
+                    // user's pages, as the composer's menu chooses.
+                    if scene.allPages {
+                        AgentPanel(
+                            model: scene.workspace, allPages: $scene.allPages, isSheet: isSheet)
+                    } else if let model {
+                        AgentPanel(model: model, allPages: $scene.allPages, isSheet: isSheet)
+                    }
+                case .comments: if let model { CommentsPanel(model: model) }
+                }
             }
         }
+        .task { scene.workspace.start(app) }
         // Settings, or a new folder, asked for while the panel is a sheet
         // shows once it goes.
         .onAppear {
@@ -550,7 +572,10 @@ struct Inspector: View {
             counted = isSheet
             scene.panelShown(asSheet: counted)
         }
-        .onDisappear { scene.panelGone(asSheet: counted) }
+        .onDisappear {
+            scene.focusChat = false
+            scene.panelGone(asSheet: counted)
+        }
     }
 }
 

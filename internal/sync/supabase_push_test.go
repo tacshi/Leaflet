@@ -915,6 +915,30 @@ func TestFlushSendsWhatTheJobRefersTo(t *testing.T) {
 	}
 }
 
+// A flush of no page, as a workspace agent's run asks for, sends every
+// change: its agent reads all the user's pages.
+func TestFlushOfNoPageSendsEverything(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, _ := fullPass(t, st, nil)
+
+	if err := svc.FlushPage(context.Background(), ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{p.ID, other.ID} {
+		if st.HasPending("pages", id) || st.HasPending("page_content", id) {
+			t.Errorf("page %s still waits", id)
+		}
+	}
+}
+
 // A page in a folder not up yet goes after the folder: the server refuses
 // a page in a folder it does not have, so the job would refer to a page
 // that is not there. Another folder stays queued.

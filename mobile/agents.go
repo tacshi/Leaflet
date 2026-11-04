@@ -59,7 +59,10 @@ type agentRun struct {
 	Undone      bool     `json:"undone"`
 	Error       string   `json:"error,omitempty"`
 	Edits       []string `json:"edits"`
-	BlockIDs    []string `json:"block_ids"`
+	// EditPages are the pages the edits made, an edit each, "" for one
+	// that made none: a tap on one opens its page.
+	EditPages []string `json:"edit_pages"`
+	BlockIDs  []string `json:"block_ids"`
 	// Summary says what the run did, in words for the user.
 	Summary   string `json:"summary"`
 	Stoppable bool   `json:"stoppable"`
@@ -100,13 +103,13 @@ func (c *Core) AgentState(pageID string) (_ string, err error) {
 			})
 		}
 		for _, r := range s.Runs {
-			edits := make([]string, 0, len(r.Edits))
+			edits, pages := make([]string, 0, len(r.Edits)), make([]string, 0, len(r.Edits))
 			for _, e := range r.Edits {
-				edits = append(edits, e.Summary)
+				edits, pages = append(edits, e.Summary), append(pages, e.PageID)
 			}
 			out.Runs = append(out.Runs, agentRun{
 				ID: r.ID, Surface: r.Surface, AgentName: r.AgentName, Instruction: r.Instruction, Status: r.Status,
-				Undone: r.Undone, Error: r.Error, Edits: edits, BlockIDs: r.BlockIDs(), Summary: agents.Describe(r),
+				Undone: r.Undone, Error: r.Error, Edits: edits, EditPages: pages, BlockIDs: r.BlockIDs(), Summary: agents.Describe(r),
 				Stoppable: r.Stoppable(), Answer: r.Answer, Activity: r.Activity, Settled: c.settled[pageID] == r.ID,
 			})
 		}
@@ -153,6 +156,15 @@ func (c *Core) Chat(pageID, text, focus string) {
 	var ids []string
 	_ = json.Unmarshal([]byte(focus), &ids)
 	c.q.do(func() { c.core.Hub.Chat(pageID, text, ids) })
+}
+
+// WorkspaceChat sends a message to the workspace agent, the agent of all
+// the user's pages, telling it of the page open, "" for none. Its state,
+// its runs' Undo and the rest are those of the page "workspace"
+// (agents.WorkspaceID).
+func (c *Core) WorkspaceChat(text, openPageID string) {
+	defer catch(nil)
+	c.q.do(func() { c.core.Hub.ChatWorkspace(text, openPageID) })
 }
 
 // Ask starts an agent run from the editor: surface is "inline" or

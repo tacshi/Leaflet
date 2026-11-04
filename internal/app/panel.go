@@ -28,13 +28,25 @@ func (a *App) panel(c *ui.Context) {
 		// MyGo's tabs, as high as the bar, so the chosen one's line is on
 		// the bar's bottom edge. They keep their width, which panelMinW
 		// keeps the panel wide enough for.
-		tabs := ui.Tabs(c.Key("panel-tab"), &a.panelTab, locales.CommonAgent(), locales.PanelTabComments(), locales.PanelTabOutline()).FillHeight().AlignItems(ui.Stretch).Shrink(0)
+		// With no page open, its Agent tab alone: the workspace agent's.
+		var tabs ui.Element
+		if a.pageOpen() {
+			tabs = ui.Tabs(c.Key("panel-tab"), &a.panelTab, locales.CommonAgent(), locales.PanelTabComments(), locales.PanelTabOutline())
+		} else {
+			agent := 0
+			tabs = ui.Tabs(c.Key("panel-tab"), &agent, locales.CommonAgent())
+		}
+		tabs.FillHeight().AlignItems(ui.Stretch).Shrink(0)
 		a.panelTabsW = tabs.Bounds().W
 		ui.Spacer(c)
 	})
+	if !a.pageOpen() {
+		a.workspacePanel(c)
+		return
+	}
 	switch a.panelTab {
 	case 0:
-		a.agentPanel(c)
+		a.agentTab(c)
 	case 1:
 		a.commentsPanel(c)
 	default:
@@ -76,10 +88,35 @@ func sends(k ui.TextKey) bool {
 }
 
 func (a *App) agentPanel(c *ui.Context) {
-	pal := theme.Of(c)
 	ps := a.page
-	sess := a.hub.Session(ps.id)
-	cs := &a.draftsOf(ps.id).chat
+	a.chatView(c, a.hub.Session(ps.id), &a.draftsOf(ps.id).chat, chatOptions{
+		empty: locales.PanelChatEmpty(), placeholder: locales.PanelAskPlaceholder(),
+		suggestions: []string{locales.PanelSuggestSummarize(), locales.PanelSuggestStructure(), locales.PanelSuggestGaps(), locales.PanelSuggestChart()},
+		send:        func(text string) { a.hub.Chat(ps.id, text, a.focusBlocks()) },
+		focus:       &a.dialogs.focusChat,
+		scope:       true,
+	})
+}
+
+// chatOptions are what a chat view says and does: the page panel's chat
+// and the workspace agent's.
+type chatOptions struct {
+	empty, placeholder string
+	suggestions        []string
+	// send asks the session's agent text.
+	send func(text string)
+	// focus, set, has the composer take the keyboard once.
+	focus *bool
+	// scope shows the choice of what the chat asks about beside a page:
+	// the page, or all the user's pages (scopePicker).
+	scope bool
+}
+
+// chatView is a session's chat: its messages, or what to ask while it has
+// none, and the composer, with the agent to ask, a new conversation, the
+// earlier ones, and Send or Stop. With no provider, it says to add one.
+func (a *App) chatView(c *ui.Context, sess *agents.Session, cs *chatState, o chatOptions) {
+	pal := theme.Of(c)
 	options := a.hub.Options()
 	if len(options) == 0 {
 		ui.Column(c).Grow(1).Padding(24).Gap(12).Justify(ui.Center).Children(func() {
@@ -96,15 +133,22 @@ func (a *App) agentPanel(c *ui.Context) {
 	if cs.end.Y >= cs.end.MaxY-4 {
 		cs.end.Y = 1e9
 	}
-	ui.Scroll(c.Key("chat:" + ps.id)).Grow(1).TrackScroll(&cs.end).Padding(14).Children(func() {
+	// Each chat's own widgets, its composer's text and undo among them:
+	// the page's and the workspace agent's take turns in one place.
+	ui.Column(c.Key("chat-view:" + sess.PageID)).Grow(1).Children(func() { a.chatBody(c, sess, cs, o, options) })
+}
+
+// chatBody is chatView's messages and composer.
+func (a *App) chatBody(c *ui.Context, sess *agents.Session, cs *chatState, o chatOptions, options []agents.Option) {
+	pal := theme.Of(c)
+	ui.Scroll(c.Key("chat:" + sess.PageID)).Grow(1).TrackScroll(&cs.end).Padding(14).Children(func() {
 		ui.Column(c).Gap(14).Children(func() {
 			if len(sess.Messages) == 0 {
 				ui.Column(c).Gap(10).Padding(12, 2).Children(func() {
-					ui.Text(c, locales.PanelChatEmpty()).FontSize(13.5).TextColor(pal.TextMuted)
-					suggestions := []string{locales.PanelSuggestSummarize(), locales.PanelSuggestStructure(), locales.PanelSuggestGaps(), locales.PanelSuggestChart()}
-					for i, s := range suggestions {
+					ui.Text(c, o.empty).FontSize(13.5).TextColor(pal.TextMuted)
+					for i, s := range o.suggestions {
 						if ghost(c, fmt.Sprintf("suggest:%d", i), "sparkles", s).Border(1, pal.Divider).Justify(ui.Start).Height(32).Clicked() {
-							a.hub.Chat(ps.id, s, a.focusBlocks())
+							o.send(s)
 						}
 					}
 				})
@@ -119,7 +163,7 @@ func (a *App) agentPanel(c *ui.Context) {
 			// MyGo's text area. It takes a plain Enter as a newline before
 			// any Shortcut sees it; OnTextKey sees it first. Shift+Enter
 			// still breaks the line.
-			ui.TextArea(c.Key("draft"), &cs.draft).Bind(&cs.input).Placeholder(locales.PanelAskPlaceholder()).MinHeight(64).MaxHeight(180).
+			ui.TextArea(c.Key("draft"), &cs.draft).Bind(&cs.input).Placeholder(o.placeholder).MinHeight(64).MaxHeight(180).
 				OnTextKey(func(k ui.TextKey) bool {
 					if !sends(k) {
 						return false
@@ -127,15 +171,15 @@ func (a *App) agentPanel(c *ui.Context) {
 					cs.sendNow = true
 					return true
 				})
-			if a.dialogs.focusChat {
-				a.dialogs.focusChat = false
+			if o.focus != nil && *o.focus {
+				*o.focus = false
 				cs.input.Focus()
 			}
 			send := func() {
 				if strings.TrimSpace(cs.draft) == "" || sess.Running {
 					return
 				}
-				a.hub.Chat(ps.id, cs.draft, a.focusBlocks())
+				o.send(cs.draft)
 				cs.draft = ""
 				cs.end.Y = 1e9
 			}
@@ -144,10 +188,13 @@ func (a *App) agentPanel(c *ui.Context) {
 				send()
 			}
 			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				if o.scope {
+					a.scopePicker(c)
+				}
 				a.agentPicker(c, sess, options)
 				tools(c, func() {
 					if iconButton(c, "new-chat", "message-square-plus", locales.PanelNewConversation()).Disabled(sess.Running).Clicked() {
-						a.hub.NewConversation(ps.id)
+						a.hub.NewConversation(sess.PageID)
 					}
 					if len(sess.Past) > 0 {
 						a.pastConversations(c, sess)
@@ -158,7 +205,7 @@ func (a *App) agentPanel(c *ui.Context) {
 				if run := chatRun(sess); run != nil && run.Stoppable() {
 					stop := primary(c, "stop", "square-stop", "").Size(28, 28).Padding(0).Label(locales.PageStopRun()).Tooltip(locales.PageStopRun())
 					if stop.Clicked() {
-						a.hub.Stop(ps.id, run.ID)
+						a.hub.Stop(sess.PageID, run.ID)
 					}
 					return
 				}
@@ -192,29 +239,61 @@ func (a *App) focusBlocks() []string {
 	return []string{a.page.editor.FocusBlock()}
 }
 
-// agentPicker is MyGo's menu button choosing the agent and model the
-// panel's chat asks.
+// agentPicker is the menu choosing the agent the chat asks, named alone:
+// each runs the model Settings › Agent providers chose for it, which its
+// item says.
 func (a *App) agentPicker(c *ui.Context, sess *agents.Session, options []agents.Option) {
 	current, err := a.hub.Resolve(sess.Selected)
 	name := locales.PanelNoAgent()
 	if err == nil {
-		name = current.Label()
+		name = current.Name()
 	}
-	ui.MenuButton(c.Key("agent-picker"), name, func(m *ui.Menu) {
+	menuChip(c, "agent-picker", "", name, locales.CommonAgent(), func(m *ui.Menu) {
 		for _, o := range options {
-			for _, model := range agents.Models(o.Provider) {
-				ch := store.ModelChoice{ProviderID: o.Provider.ID, Model: model}
-				on := err == nil && current.Provider.ID == o.Provider.ID && current.Model == model
-				if m.Item(o.Name() + " · " + model).Radio(on).Chosen() {
-					sess.Selected = &ch
-				}
+			if m.Item(o.Label()).Radio(err == nil && current.Provider.ID == o.Provider.ID).Chosen() {
+				sess.Selected = &store.ModelChoice{ProviderID: o.Provider.ID}
 			}
 		}
 		m.Separator()
 		if m.Item(locales.PanelManageProviders()).Chosen() {
 			a.openSettings("providers")
 		}
-	}).Label(locales.CommonAgent()).FontSize(12)
+	})
+}
+
+// scopePicker is the choice, beside a page, of what the Agent tab's chat
+// asks about: this page, of its agent, or all the user's pages, of the
+// workspace agent. The composer takes the keyboard again once chosen.
+func (a *App) scopePicker(c *ui.Context) {
+	icon, label := "file-text", locales.PanelScopePage()
+	if a.agentScope == 1 {
+		icon, label = "layout-grid", locales.PanelScopeAll()
+	}
+	menuChip(c, "agent-scope", icon, label, locales.PanelScope(), func(m *ui.Menu) {
+		for i, choice := range []string{locales.PanelScopePage(), locales.PanelScopeAll()} {
+			if m.Item(choice).Radio(a.agentScope == i).Chosen() {
+				a.agentScope, a.dialogs.focusChat = i, true
+			}
+		}
+	}).Shrink(0)
+}
+
+// menuChip is a small button of the composer's row opening a menu: an
+// icon, if any, its label and an arrow. Unlike MyGo's MenuButton, it gives
+// way where the row has no room, its label cut short.
+func menuChip(c *ui.Context, key, icon, label, name string, build func(m *ui.Menu)) ui.Element {
+	b := ui.Button(c.Key(key), "").Label(name).Tooltip(label).Padding(4, 7).Shrink(1).MinWidth(0)
+	b.Children(func() {
+		ui.Row(c).Gap(4).AlignItems(ui.Center).Shrink(1).MinWidth(0).Children(func() {
+			if icon != "" {
+				ui.Icon(c, theme.Icon(icon)).FontSize(13).Shrink(0)
+			}
+			ui.Text(c, label).FontSize(12).SingleLine().Ellipsis("…").Shrink(1)
+			ui.Icon(c, theme.Icon("chevron-down")).FontSize(11).Shrink(0)
+		})
+	})
+	b.Menu(build)
+	return b
 }
 
 // pastConversations is MyGo's menu on an icon button, going back to one
@@ -269,7 +348,7 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 			if run == nil || m.Pending || len(run.Edits) == 0 {
 				return
 			}
-			a.runEdits(c, run)
+			a.runEdits(c, sess.PageID, run)
 		})
 	})
 }
@@ -277,15 +356,18 @@ func (a *App) chatMessage(c *ui.Context, i int, m *agents.Message, sess *agents.
 // runEdits is the card of what a run changed, under its reply: an edit a
 // line, which a click goes to, and beside the first Undo, or Redo once
 // undone, as one step for them all. Undone edits show struck through.
-func (a *App) runEdits(c *ui.Context, run *agents.Run) {
+func (a *App) runEdits(c *ui.Context, sessID string, run *agents.Run) {
 	pal := theme.Of(c)
 	ui.Row(c).FillWidth().Gap(4).Padding(4).Radius(8).Background(pal.AgentSection).AlignItems(ui.Start).Children(func() {
 		ui.Column(c).Grow(1).Shrink(1).Children(func() {
 			for j, e := range run.Edits {
 				row := ui.ButtonBase(c.Key(fmt.Sprintf("edit:%d", j))).FillWidth().Height(26).Padding(0, 8).Gap(6).Radius(6).
 					Justify(ui.Start).AlignItems(ui.Center).TextColor(pal.AccentText).Label(e.Summary)
-				// The blocks of an undone edit are gone, or as they were.
-				goes := !run.Undone && len(e.BlockIDs) > 0
+				// The blocks of an undone edit are gone, or as they were, and
+				// the page it made with them. A page made that has not come
+				// yet goes nowhere.
+				opens := !run.Undone && e.PageID != "" && a.pageByID(e.PageID) != nil
+				goes := opens || !run.Undone && len(e.BlockIDs) > 0 && a.page != nil
 				switch {
 				case run.Undone:
 					row.TextColor(pal.TextMuted)
@@ -299,7 +381,13 @@ func (a *App) runEdits(c *ui.Context, run *agents.Run) {
 						t.Strikethrough()
 					}
 				})
-				if goes && row.Clicked() {
+				switch {
+				case opens && row.Clicked():
+					if sessID == agents.WorkspaceID {
+						a.fromWorkspace()
+					}
+					a.openPage(e.PageID)
+				case goes && row.Clicked():
 					a.page.editor.PlaceCaret(e.BlockIDs[0], 0)
 				}
 			}
@@ -318,9 +406,9 @@ func (a *App) runEdits(c *ui.Context, run *agents.Run) {
 		})
 		if b.Clicked() {
 			if run.Undone {
-				a.redoRun(run)
+				a.redoRun(sessID, run)
 			} else {
-				a.undoRun(run)
+				a.undoRun(sessID, run)
 			}
 		}
 	})

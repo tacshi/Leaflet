@@ -48,22 +48,7 @@ struct RootView: View {
                         PageScreen(pageID: selection).id(selection)
                             .ignoresSafeArea(.keyboard, edges: .bottom)
                     } else {
-                        ContentUnavailableView {
-                            Label(L.shellNoPageOpen, systemImage: "doc.text")
-                        } description: {
-                            Text(L.shellNoPageHint)
-                        } actions: {
-                            Button(L.shellNewPage) {
-                                Task { scene.open(await app.createPage()) }
-                            }
-                            .buttonStyle(.borderedProminent)
-                        }
-                        // On the page's ground, as a page open is: the
-                        // sidebar's glass takes its color from it. Under
-                        // the keyboard too, while the sidebar's search has
-                        // it.
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background { palette.surface.ignoresSafeArea() }
+                        NoPageScreen()
                     }
                 }
                 // Drawn again in a language chosen in the settings.
@@ -95,6 +80,24 @@ struct RootView: View {
         }
         .onChange(of: scene.newFolderShown) { if scene.newFolderShown { folderName = "" } }
         .sheet(item: $scene.moving) { MoveSheet(page: $0) }
+        // The workspace agent's chat with no panel beside a page for it, as
+        // on iPhone's list of pages.
+        .sheet(isPresented: $scene.workspaceShown) {
+            AgentPanel(model: scene.workspace, isSheet: true)
+                .task { scene.workspace.start(app) }
+                // A panel as a sheet, which Settings waits for to go.
+                .onAppear { scene.panelShown(asSheet: true) }
+                .onDisappear {
+                    scene.focusChat = false
+                    scene.panelGone(asSheet: true)
+                }
+                // Clear of the sheet's grabber and its round corners: no
+                // tabs stand above the chat here, as they do in a page's.
+                .padding(.top, 14)
+                .padding(.horizontal, 8)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .sheet(item: $scene.history) { HistorySheet(page: $0).presentationSizing(.page) }
         .fileExporter(
             isPresented: Binding(
@@ -146,6 +149,7 @@ struct RootView: View {
             #endif
         }
         .onChange(of: scene.selection) { savedPage = scene.selection }
+        .onChange(of: sizeClass, initial: true) { scene.stacked = sizeClass == .compact }
         .onChange(of: scene.inspectorShown) { savedInspector = scene.inspectorShown }
         .onChange(of: app.library.pages.map(\.id)) { _, ids in
             // Pages deleted, here or on another device, or gone as the
@@ -153,8 +157,12 @@ struct RootView: View {
             // read: the last page too.
             if app.libraryLoaded { scene.keep(Set(ids)) }
         }
-        // The page the window still holds closes with it.
-        .onDisappear { scene.closeHeld() }
+        // The page the window still holds closes with it, and its
+        // workspace agent's chat stops following the core.
+        .onDisappear {
+            scene.closeHeld()
+            scene.workspace.stop()
+        }
         .onChange(of: phase) { _, phase in
             switch phase {
             case .active:
@@ -277,6 +285,67 @@ struct ToastView: View {
             .transition(.move(edge: .bottom).combined(with: .opacity))
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isStaticText)
+        }
+    }
+}
+
+/// NoPageScreen is the window with no page open: a new page to start, or a
+/// recording in one, and the panel beside it, the workspace agent's chat
+/// alone, of all the user's pages.
+private struct NoPageScreen: View {
+    @Environment(AppModel.self) private var app
+    @Environment(SceneModel.self) private var scene
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(L.shellNoPageOpen, systemImage: "doc.text")
+        } description: {
+            Text(L.shellNoPageHint)
+        } actions: {
+            Button(L.shellNewPage) {
+                Task { scene.open(await app.createPage()) }
+            }
+            .buttonStyle(.borderedProminent)
+            Button(L.shellAskAgent, systemImage: "sparkles") { scene.askWorkspace() }
+                .buttonStyle(.bordered)
+        }
+        // On the page's ground, as a page open is: the sidebar's glass
+        // takes its color from it. Under the keyboard too, while the
+        // sidebar's search has it.
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background { palette.surface.ignoresSafeArea() }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                // A recording in a page of its own, which records once it
+                // shows, as the desktop's New Recording.
+                Button(L.trayNewRecording, systemImage: "record.circle") {
+                    Task {
+                        guard let id = await app.createRecordingPage() else { return }
+                        scene.recordOnOpen = id
+                        scene.open(id)
+                    }
+                }
+                .tint(Color.primary)
+                .disabled(Recorder.shared.state.recording)
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button(LI.showInspector, systemImage: "sidebar.trailing") {
+                    scene.inspectorShown.toggle()
+                }
+                .tint(scene.inspectorShown ? nil : Color.primary)
+            }
+        }
+        .inspector(
+            isPresented: Binding(get: { scene.inspectorShown }, set: { scene.inspectorShown = $0 })
+        ) {
+            Inspector(
+                tab: Binding(get: { scene.inspectorTab }, set: { scene.inspectorTab = $0 }),
+                model: nil, isSheet: sizeClass == .compact, noPage: true
+            )
+            .inspectorColumnWidth(min: 280, ideal: 340, max: 640)
+            .presentationDetents([.medium, .large])
         }
     }
 }

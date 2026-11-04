@@ -1,10 +1,20 @@
+import LeafletCore
 import SwiftUI
 
-/// AgentPanel is the page's agent chat, as the desktop's Agent tab: the
+/// AgentPanel is an agent chat, as the desktop's Agent tab: the page's,
+/// or the workspace agent's, of all the user's pages. It shows the
 /// conversation, each run's edits with Undo, Stop while one works, the
 /// agent to ask, and suggestions for an empty chat.
-struct AgentPanel: View {
-    let model: PageModel
+struct AgentPanel<Chat: AgentChat>: View {
+    let model: Chat
+    /// allPages, given, is the choice beside a page of what the chat asks
+    /// about, the page or all the user's pages, as a menu by the composer,
+    /// as on the desktop.
+    var allPages: Binding<Bool>?
+    /// isSheet says the panel is a sheet over the page, as on iPhone,
+    /// rather than a column beside it: a page opened from it shows once it
+    /// goes. (A column's own size class is compact on iPad too.)
+    var isSheet = false
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
@@ -44,6 +54,8 @@ struct AgentPanel: View {
                 Button(L.panelOpenProviders) { openProviders() }
                     .buttonStyle(.borderedProminent)
             }
+            // No composer to give the keyboard to: no later one takes it.
+            .onAppear { scene.focusChat = false }
         } else {
             VStack(spacing: 0) {
                 conversation
@@ -58,10 +70,10 @@ struct AgentPanel: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     if state.messages.isEmpty {
-                        Text(L.panelChatEmpty)
+                        Text(model.emptyText)
                             .foregroundStyle(palette.textMuted)
                             .padding(.vertical, 8)
-                        ForEach(suggestions, id: \.self) { s in
+                        ForEach(model.suggestions, id: \.self) { s in
                             Button(s) { send(s) }
                                 .buttonStyle(.bordered)
                                 .hoverEffect()
@@ -71,26 +83,22 @@ struct AgentPanel: View {
                         MessageView(
                             message: m,
                             run: m.runID.flatMap { id in state.runs.first { $0.id == id } },
-                            model: model
+                            pageID: model.id, isSheet: isSheet
                         )
                         .id(i)
                     }
                     if let run = loneRun {
                         VStack(alignment: .leading, spacing: 6) {
-                            Label(
-                                run.undone
-                                    ? L.pageRunUndone(agent: run.agentName)
-                                    : L.pageRunEdited(
-                                        agent: run.agentName, count: Set(run.blockIDs ?? []).count),
-                                systemImage: "sparkles"
-                            )
-                            .font(.footnote.weight(.medium))
-                            RunCard(run: run, pageID: model.id)
+                            Label(runText(run), systemImage: "sparkles")
+                                .font(.footnote.weight(.medium))
+                            RunCard(run: run, pageID: model.id, isSheet: isSheet)
                         }
                     }
                 }
                 .padding(14)
             }
+            // At its latest as it shows, as a chat opens.
+            .defaultScrollAnchor(.bottom, for: .initialOffset)
             .onChange(of: state.messages.count) {
                 withAnimation { proxy.scrollTo(state.messages.count - 1, anchor: .bottom) }
             }
@@ -108,12 +116,20 @@ struct AgentPanel: View {
         }
     }
 
-    private var suggestions: [String] {
-        [L.panelSuggestSummarize, L.panelSuggestStructure, L.panelSuggestGaps, L.panelSuggestChart]
+    /// runText says what a lone run did: undone, the blocks it edited,
+    /// or, one that changed pages rather than blocks, its last edit.
+    private func runText(_ run: AgentState.Run) -> String {
+        if run.undone { return L.pageRunUndone(agent: run.agentName) }
+        let blocks = Set(run.blockIDs ?? []).count
+        if blocks == 0, let last = run.edits.last {
+            return L.pageRunDid(agent: run.agentName, edit: last)
+        }
+        return L.pageRunEdited(agent: run.agentName, count: blocks)
     }
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 8) {
+            if let allPages { scopeMenu(allPages) }
             Menu {
                 // Each agent, at the model Settings chose for it, the one
                 // the chat asks checked.
@@ -121,15 +137,12 @@ struct AgentPanel: View {
                     Toggle(
                         o.label,
                         isOn: Binding(
-                            get: {
-                                state.current
-                                    == AgentState.Choice(providerID: o.providerID, model: o.model)
-                            },
+                            get: { state.current?.providerID == o.providerID },
                             set: { on in
                                 guard on else { return }
                                 Task {
                                     await app.client?.selectAgent(
-                                        model.id, providerID: o.providerID, model: o.model)
+                                        model.id, providerID: o.providerID, model: "")
                                     await model.refreshAgents()
                                 }
                             }))
@@ -144,7 +157,7 @@ struct AgentPanel: View {
                     .frame(minWidth: 28, minHeight: line)
             }
             .accessibilityLabel(LI.agentOptions)
-            TextField(L.panelAskPlaceholder, text: Bindable(model).chatDraft, axis: .vertical)
+            TextField(model.placeholder, text: Bindable(model).chatDraft, axis: .vertical)
                 .lineLimit(1...6)
                 .textFieldStyle(.plain)
                 .padding(.horizontal, 10)
@@ -153,6 +166,9 @@ struct AgentPanel: View {
                 .background(palette.panel, in: .rect(cornerRadius: 10))
                 .focused($composing)
                 .onSubmit { send(model.chatDraft) }
+                // As Ask the agent opens the chat.
+                .onAppear { takeFocus() }
+                .onChange(of: scene.focusChat) { takeFocus() }
             if state.running, let run = state.runs.last(where: { $0.running && $0.stoppable }) {
                 Button(L.pageStopRun, systemImage: "stop.circle.fill") {
                     Task { await app.client?.stopAgent(model.id, runID: run.id) }
@@ -161,17 +177,41 @@ struct AgentPanel: View {
                 .imageScale(.large)
                 .frame(minWidth: 28, minHeight: line)
             } else {
+                // A run the server works on can't be stopped here: what is
+                // typed waits for it to end, as the core asks one at a time.
                 Button(L.panelSend, systemImage: "arrow.up.circle.fill") { send(model.chatDraft) }
                     .labelStyle(.iconOnly)
                     .imageScale(.large)
                     .frame(minWidth: 28, minHeight: line)
                     .disabled(
-                        model.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        state.running
+                            || model.chatDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                                .isEmpty
                     )
                     .keyboardShortcut(.return, modifiers: .command)
             }
         }
         .padding(10)
+    }
+
+    /// scopeMenu chooses what the chat asks about: this page, of its agent,
+    /// or all the user's pages, of the workspace agent's.
+    private func scopeMenu(_ allPages: Binding<Bool>) -> some View {
+        Menu {
+            Picker(selection: allPages) {
+                Label(L.panelScopePage, systemImage: "doc.text").tag(false)
+                Label(L.panelScopeAll, systemImage: "square.grid.2x2").tag(true)
+            } label: {
+                EmptyView()
+            }
+        } label: {
+            Image(systemName: allPages.wrappedValue ? "square.grid.2x2" : "doc.text").imageScale(
+                .large
+            )
+            .frame(minWidth: 28, minHeight: line)
+        }
+        .accessibilityLabel(L.panelScope)
+        .accessibilityValue(allPages.wrappedValue ? L.panelScopeAll : L.panelScopePage)
     }
 
     /// openProviders opens Settings, for its agent providers: over the
@@ -180,12 +220,21 @@ struct AgentPanel: View {
         scene.openSettings()
     }
 
+    /// takeFocus gives the composer the keyboard, once, as Ask the agent
+    /// asked.
+    private func takeFocus() {
+        guard scene.focusChat else { return }
+        scene.focusChat = false
+        composing = true
+    }
+
+    /// send asks the chat's agent text. While a run works, which the core
+    /// asks one at a time, it waits in the composer.
     private func send(_ text: String) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !t.isEmpty else { return }
+        guard !t.isEmpty, !state.running, let client = app.client else { return }
         model.chatDraft = ""
-        let focus = scene.editor?.focusBlockIDs() ?? []
-        Task { await app.client?.chat(model.id, text: t, focus: focus) }
+        Task { [model, scene] in await model.send(t, client: client, scene: scene) }
     }
 }
 
@@ -194,7 +243,10 @@ struct AgentPanel: View {
 struct MessageView: View {
     let message: AgentState.Message
     let run: AgentState.Run?
-    let model: PageModel
+    /// pageID is the chat's: its page's, or "workspace".
+    let pageID: String
+    /// isSheet says the chat is a sheet, which goes as a page opens.
+    var isSheet = false
     @Environment(AppModel.self) private var app
     @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
@@ -222,19 +274,24 @@ struct MessageView: View {
                     .foregroundStyle(message.error ? palette.dangerText : palette.text)
                     .textSelection(.enabled)
                     // A link to a page, a block of one or a moment of a video
-                    // opens it here, as one in the page does.
+                    // opens it here, as one in the page does, with no page
+                    // open too, as the workspace agent's chat may be. One
+                    // to a page not here, as one not synced yet, goes nowhere.
                     .environment(
                         \.openURL,
-                        OpenURLAction { [scene] url in
-                            guard url.scheme == "leaflet", let editor = scene.editor else {
-                                return .systemAction
-                            }
-                            editor.open(url)
+                        OpenURLAction { [scene, app, pageID, isSheet] url in
+                            guard url.scheme == "leaflet" else { return .systemAction }
+                            let id = url.pathComponents.dropFirst().first ?? ""
+                            guard url.host() == "page", app.opens(id) else { return .handled }
+                            let href = url.absoluteString
+                            scene.openFromChat(
+                                id, at: MobileLinkedBlock(href), moment: MobileLinkedMoment(href),
+                                workspace: pageID == WorkspaceAgentModel.chatID, sheet: isSheet)
                             return .handled
                         })
             }
             if let run, !run.edits.isEmpty {
-                RunCard(run: run, pageID: model.id)
+                RunCard(run: run, pageID: pageID, isSheet: isSheet)
             }
         }
         .frame(maxWidth: .infinity, alignment: message.mine ? .trailing : .leading)
@@ -278,14 +335,29 @@ struct StatusLine: View {
 struct RunCard: View {
     let run: AgentState.Run
     let pageID: String
+    /// isSheet says the card is in a sheet, which goes as a page opens.
+    var isSheet = false
     @Environment(AppModel.self) private var app
+    @Environment(SceneModel.self) private var scene
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             // By place: two edits can say the same.
-            ForEach(Array(run.edits.enumerated()), id: \.offset) { _, e in
-                Label(e, systemImage: "pencil.line").font(.footnote)
+            ForEach(Array(run.edits.enumerated()), id: \.offset) { i, e in
+                // A page the run made opens, unless undone: then it is gone.
+                // One that has not come yet goes nowhere.
+                if let page = run.page(i), !run.undone, app.opens(page) {
+                    Button {
+                        scene.openFromChat(
+                            page, workspace: pageID == WorkspaceAgentModel.chatID, sheet: isSheet)
+                    } label: {
+                        Label(e, systemImage: "doc.text")
+                    }
+                    .font(.footnote)
+                } else {
+                    Label(e, systemImage: "pencil.line").font(.footnote)
+                }
             }
             // What the agent said is in its message above.
             HStack {

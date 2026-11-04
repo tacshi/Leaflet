@@ -89,6 +89,18 @@ func (s *Store) MovePageBefore(id, parentID, folderID, beforeID string) error {
 	})
 }
 
+// PlacePage puts a page back where it was: under parentID, or at the top
+// level, into folderID, at sortKey among its siblings, or last when that
+// is "".
+func (s *Store) PlacePage(id, parentID, folderID, sortKey string) error {
+	return s.movePage(id, parentID, folderID, func(q querier, spaceID string) (string, error) {
+		if sortKey != "" {
+			return sortKey, nil
+		}
+		return keyAfter(q, parentID, spaceID, folderID, "", id)
+	})
+}
+
 // movePage moves a page under parentID or into folderID, at the sort key
 // key gives for its space, reading the page and its new siblings in the
 // transaction that saves it.

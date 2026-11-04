@@ -45,7 +45,9 @@ var drafts = map[string]bool{"write_markdown": true, "insert_blocks": true}
 // being them so far. A block of insert_blocks that is not text waits
 // until it has all come.
 func (x *Executor) Draft(name, raw string) {
-	if !drafts[name] || x.Ctx.ReadOnly || x.draft != nil && x.draft.frozen {
+	// The workspace agent writes no page's blocks: a call of these runs
+	// whole, through its own tools, which refuse it (Executor.workspace).
+	if !drafts[name] || x.Ctx.ReadOnly || x.Ctx.Workspace != nil || x.draft != nil && x.draft.frozen {
 		return
 	}
 	// A drafted call runs no dispatch, which keeps the page's URLs as the

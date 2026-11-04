@@ -84,11 +84,12 @@ func toolList() []map[string]any {
 		}
 		add(name, desc, object(props, required...))
 	}
-	sub := agents.Properties(defs["create_subpage"]["parameters"].(map[string]any))
+	made := agents.Properties(defs["create_page"]["parameters"].(map[string]any))
 	add("create_page", "Create a page, optionally with content. With parent_id it goes inside that page, and a link to it is added at the end of the parent.",
 		object(map[string]any{
-			"title":     sub["title"],
-			"blocks":    sub["blocks"],
+			"title":     made["title"],
+			"markdown":  made["markdown"],
+			"blocks":    made["blocks"],
 			"parent_id": map[string]any{"type": "string", "description": "The page to put it inside; none for the top level."},
 			"folder_id": map[string]any{"type": "string", "description": "The folder to put it in, at the top level; not with parent_id."},
 		}, "title"))
@@ -540,22 +541,17 @@ func (t *pageTools) snapshot(pageID string, before *doc.Content) error {
 
 func (t *pageTools) createPage(args map[string]any) (map[string]any, error) {
 	st := t.s.st
-	title, _ := args["title"].(string)
-	// Without the spaces around it, as create_subpage keeps a title.
-	title = strings.TrimSpace(title)
-	if title == "" {
-		return nil, toolErr("title is required.")
+	// Its content as the app's agents give a page theirs.
+	title, nodes, err := agents.PageNodes(args, t.s.agent)
+	if err != nil {
+		return nil, err
 	}
 	parent, folderID, err := t.place(args)
 	if err != nil {
 		return nil, err
 	}
 	var content *doc.Content
-	if args["blocks"] != nil {
-		nodes, err := agents.Specs(args["blocks"], t.s.agent)
-		if err != nil {
-			return nil, err
-		}
+	if len(nodes) > 0 {
 		content = doc.FromBlocks(nodes)
 	}
 	p, err := st.CreatePage(store.NewPageOptions{ParentID: parent.ID, FolderID: folderID, Title: title, Content: content})

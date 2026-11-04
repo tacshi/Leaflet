@@ -2954,13 +2954,15 @@ func (msgs Messages) DialogSearchNoMatch(query string) string {
 // DialogSearchAskAgent says "Ask an agent instead"
 // in the language the app shows.
 //
-// Search dialog: a button, when nothing matches, asking an agent the query.
+// Search, the desktop's dialog and the iPhone and iPad sidebar's: a button,
+// when nothing matches, asking the agent of all the user's pages the query.
 func DialogSearchAskAgent() string { return In(i18n.Locale()).DialogSearchAskAgent() }
 
 // DialogSearchAskAgent says "Ask an agent instead"
 // in the language of msgs.
 //
-// Search dialog: a button, when nothing matches, asking an agent the query.
+// Search, the desktop's dialog and the iPhone and iPad sidebar's: a button,
+// when nothing matches, asking the agent of all the user's pages the query.
 func (msgs Messages) DialogSearchAskAgent() string {
 	return Catalog.Format(msgs.locale, "dialogSearchAskAgent", nil)
 }
@@ -5235,22 +5237,22 @@ func (msgs Messages) PageRedoRunFailed(agent string, error string) string {
 	return Catalog.Format(msgs.locale, "pageRedoRunFailed", map[string]any{"agent": agent, "error": error})
 }
 
-// PageRunSubpageNotHere says "the subpage it made has not reached this device yet; try again once it syncs"
+// PageRunPageNotHere says "the page it made has not reached this device yet; try again once it syncs"
 // in the language the app shows.
 //
 // Why undoing or redoing an agent's edits failed, in the toast's error: a
-// subpage the cloud agent made has not synced to this device yet, so
-// nothing changed.
-func PageRunSubpageNotHere() string { return In(i18n.Locale()).PageRunSubpageNotHere() }
+// page or subpage the cloud agent made has not synced to this device yet,
+// so nothing changed.
+func PageRunPageNotHere() string { return In(i18n.Locale()).PageRunPageNotHere() }
 
-// PageRunSubpageNotHere says "the subpage it made has not reached this device yet; try again once it syncs"
+// PageRunPageNotHere says "the page it made has not reached this device yet; try again once it syncs"
 // in the language of msgs.
 //
 // Why undoing or redoing an agent's edits failed, in the toast's error: a
-// subpage the cloud agent made has not synced to this device yet, so
-// nothing changed.
-func (msgs Messages) PageRunSubpageNotHere() string {
-	return Catalog.Format(msgs.locale, "pageRunSubpageNotHere", nil)
+// page or subpage the cloud agent made has not synced to this device yet,
+// so nothing changed.
+func (msgs Messages) PageRunPageNotHere() string {
+	return Catalog.Format(msgs.locale, "pageRunPageNotHere", nil)
 }
 
 // AgentNoProvider says "Add an agent provider in Settings › Agent providers to use agents."
@@ -5831,6 +5833,24 @@ func (msgs Messages) AgentReadingPage() string {
 	return Catalog.Format(msgs.locale, "agentReadingPage", nil)
 }
 
+// AgentWorking says "Working…"
+// in the language the app shows.
+//
+// The workspace agent chat's reply while the agent starts on a request,
+// before it has said or done anything: it works on the user's pages, not on
+// one page.
+func AgentWorking() string { return In(i18n.Locale()).AgentWorking() }
+
+// AgentWorking says "Working…"
+// in the language of msgs.
+//
+// The workspace agent chat's reply while the agent starts on a request,
+// before it has said or done anything: it works on the user's pages, not on
+// one page.
+func (msgs Messages) AgentWorking() string {
+	return Catalog.Format(msgs.locale, "agentWorking", nil)
+}
+
 // AgentSearchingWeb says "Searching the web for “{query}”…"
 // in the language the app shows.
 //
@@ -6121,6 +6141,94 @@ func (msgs Messages) AgentEditCreatedSubpage(title string) string {
 	return Catalog.Format(msgs.locale, "agentEditCreatedSubpage", map[string]any{"title": title})
 }
 
+// AgentEditMovedPage says "Moved “{title}”"
+// in the language the app shows.
+//
+// An edit the workspace agent made, in its reply and the list of its edits:
+// it moved the page titled title, inside another page, into a folder or to
+// the top level.
+func AgentEditMovedPage(title string) string { return In(i18n.Locale()).AgentEditMovedPage(title) }
+
+// AgentEditMovedPage says "Moved “{title}”"
+// in the language of msgs.
+//
+// An edit the workspace agent made, in its reply and the list of its edits:
+// it moved the page titled title, inside another page, into a folder or to
+// the top level.
+func (msgs Messages) AgentEditMovedPage(title string) string {
+	return Catalog.Format(msgs.locale, "agentEditMovedPage", map[string]any{"title": title})
+}
+
+// AgentEditRenamedPage says "Renamed “{from}” to “{title}”"
+// in the language the app shows.
+//
+// An edit the workspace agent made, in its reply and the list of its edits:
+// it changed a page's title from from to title.
+func AgentEditRenamedPage(from string, title string) string {
+	return In(i18n.Locale()).AgentEditRenamedPage(from, title)
+}
+
+// AgentEditRenamedPage says "Renamed “{from}” to “{title}”"
+// in the language of msgs.
+//
+// An edit the workspace agent made, in its reply and the list of its edits:
+// it changed a page's title from from to title.
+func (msgs Messages) AgentEditRenamedPage(from string, title string) string {
+	return Catalog.Format(msgs.locale, "agentEditRenamedPage", map[string]any{"from": from, "title": title})
+}
+
+// AgentEditTaggedPage says "Tagged “{title}”"
+// in the language the app shows.
+//
+// An edit the workspace agent made, in its reply and the list of its edits:
+// it set the tags of the page titled title.
+func AgentEditTaggedPage(title string) string { return In(i18n.Locale()).AgentEditTaggedPage(title) }
+
+// AgentEditTaggedPage says "Tagged “{title}”"
+// in the language of msgs.
+//
+// An edit the workspace agent made, in its reply and the list of its edits:
+// it set the tags of the page titled title.
+func (msgs Messages) AgentEditTaggedPage(title string) string {
+	return Catalog.Format(msgs.locale, "agentEditTaggedPage", map[string]any{"title": title})
+}
+
+// AgentEditCreatedFolder says "Created folder “{name}”"
+// in the language the app shows.
+//
+// An edit the workspace agent made, in its reply and the list of its edits:
+// it made a folder named name.
+func AgentEditCreatedFolder(name string) string {
+	return In(i18n.Locale()).AgentEditCreatedFolder(name)
+}
+
+// AgentEditCreatedFolder says "Created folder “{name}”"
+// in the language of msgs.
+//
+// An edit the workspace agent made, in its reply and the list of its edits:
+// it made a folder named name.
+func (msgs Messages) AgentEditCreatedFolder(name string) string {
+	return Catalog.Format(msgs.locale, "agentEditCreatedFolder", map[string]any{"name": name})
+}
+
+// AgentEditCreatedPage says "Created page “{title}”"
+// in the language the app shows.
+//
+// An edit an agent made, in its reply and the list of its edits: it made a
+// page of its own, at the top level of the user's pages or in a folder,
+// titled title. Clicking the edit opens the page.
+func AgentEditCreatedPage(title string) string { return In(i18n.Locale()).AgentEditCreatedPage(title) }
+
+// AgentEditCreatedPage says "Created page “{title}”"
+// in the language of msgs.
+//
+// An edit an agent made, in its reply and the list of its edits: it made a
+// page of its own, at the top level of the user's pages or in a folder,
+// titled title. Clicking the edit opens the page.
+func (msgs Messages) AgentEditCreatedPage(title string) string {
+	return Catalog.Format(msgs.locale, "agentEditCreatedPage", map[string]any{"title": title})
+}
+
 // AgentEditBlocks says "{count, plural, one {a block} other {# blocks}}"
 // in the language the app shows.
 //
@@ -6287,6 +6395,22 @@ func AgentEditLinkCard() string { return In(i18n.Locale()).AgentEditLinkCard() }
 // agentEditWrote and agentEditRewrote.
 func (msgs Messages) AgentEditLinkCard() string {
 	return Catalog.Format(msgs.locale, "agentEditLinkCard", nil)
+}
+
+// AgentEditSubpageLink says "a subpage link"
+// in the language the app shows.
+//
+// A subpage block, the card in a page that opens one of its subpages, in
+// agentEditInserted: an agent put one in as it made the subpage.
+func AgentEditSubpageLink() string { return In(i18n.Locale()).AgentEditSubpageLink() }
+
+// AgentEditSubpageLink says "a subpage link"
+// in the language of msgs.
+//
+// A subpage block, the card in a page that opens one of its subpages, in
+// agentEditInserted: an agent put one in as it made the subpage.
+func (msgs Messages) AgentEditSubpageLink() string {
+	return Catalog.Format(msgs.locale, "agentEditSubpageLink", nil)
 }
 
 // AgentEditFormula says "a formula"
@@ -17079,4 +17203,178 @@ func WelcomeSubEmail() string { return In(i18n.Locale()).WelcomeSubEmail() }
 // The guide's example subpage (Weekly team sync): its to-do.
 func (msgs Messages) WelcomeSubEmail() string {
 	return Catalog.Format(msgs.locale, "welcomeSubEmail", nil)
+}
+
+// WorkspaceEmpty says "Ask about any of your pages, or have the agent make, tag and file them."
+// in the language the app shows.
+//
+// The workspace agent's chat before anything was asked.
+func WorkspaceEmpty() string { return In(i18n.Locale()).WorkspaceEmpty() }
+
+// WorkspaceEmpty says "Ask about any of your pages, or have the agent make, tag and file them."
+// in the language of msgs.
+//
+// The workspace agent's chat before anything was asked.
+func (msgs Messages) WorkspaceEmpty() string {
+	return Catalog.Format(msgs.locale, "workspaceEmpty", nil)
+}
+
+// WorkspacePlaceholder says "Ask about your pages…"
+// in the language the app shows.
+//
+// The workspace agent's chat box, empty.
+func WorkspacePlaceholder() string { return In(i18n.Locale()).WorkspacePlaceholder() }
+
+// WorkspacePlaceholder says "Ask about your pages…"
+// in the language of msgs.
+//
+// The workspace agent's chat box, empty.
+func (msgs Messages) WorkspacePlaceholder() string {
+	return Catalog.Format(msgs.locale, "workspacePlaceholder", nil)
+}
+
+// WorkspaceSuggestFile says "Sort my top-level pages into folders"
+// in the language the app shows.
+//
+// A suggestion in the empty workspace agent's chat, sent as the user's
+// request when clicked.
+func WorkspaceSuggestFile() string { return In(i18n.Locale()).WorkspaceSuggestFile() }
+
+// WorkspaceSuggestFile says "Sort my top-level pages into folders"
+// in the language of msgs.
+//
+// A suggestion in the empty workspace agent's chat, sent as the user's
+// request when clicked.
+func (msgs Messages) WorkspaceSuggestFile() string {
+	return Catalog.Format(msgs.locale, "workspaceSuggestFile", nil)
+}
+
+// WorkspaceSuggestTag says "Tag the pages that have no tags"
+// in the language the app shows.
+//
+// A suggestion in the empty workspace agent's chat, sent as the user's
+// request when clicked.
+func WorkspaceSuggestTag() string { return In(i18n.Locale()).WorkspaceSuggestTag() }
+
+// WorkspaceSuggestTag says "Tag the pages that have no tags"
+// in the language of msgs.
+//
+// A suggestion in the empty workspace agent's chat, sent as the user's
+// request when clicked.
+func (msgs Messages) WorkspaceSuggestTag() string {
+	return Catalog.Format(msgs.locale, "workspaceSuggestTag", nil)
+}
+
+// WorkspaceSuggestFind says "Which of my pages mention a deadline?"
+// in the language the app shows.
+//
+// A suggestion in the empty workspace agent's chat, sent as the user's
+// request when clicked.
+func WorkspaceSuggestFind() string { return In(i18n.Locale()).WorkspaceSuggestFind() }
+
+// WorkspaceSuggestFind says "Which of my pages mention a deadline?"
+// in the language of msgs.
+//
+// A suggestion in the empty workspace agent's chat, sent as the user's
+// request when clicked.
+func (msgs Messages) WorkspaceSuggestFind() string {
+	return Catalog.Format(msgs.locale, "workspaceSuggestFind", nil)
+}
+
+// WorkspaceSuggestNew says "Start a page for today's notes"
+// in the language the app shows.
+//
+// A suggestion in the empty workspace agent's chat, sent as the user's
+// request when clicked.
+func WorkspaceSuggestNew() string { return In(i18n.Locale()).WorkspaceSuggestNew() }
+
+// WorkspaceSuggestNew says "Start a page for today's notes"
+// in the language of msgs.
+//
+// A suggestion in the empty workspace agent's chat, sent as the user's
+// request when clicked.
+func (msgs Messages) WorkspaceSuggestNew() string {
+	return Catalog.Format(msgs.locale, "workspaceSuggestNew", nil)
+}
+
+// ShellAskAgent says "Ask the agent"
+// in the language the app shows.
+//
+// A button on the screen shown when no page is open, and on iPhone above
+// the list of pages: it opens the agent chat of all the user's pages.
+func ShellAskAgent() string { return In(i18n.Locale()).ShellAskAgent() }
+
+// ShellAskAgent says "Ask the agent"
+// in the language of msgs.
+//
+// A button on the screen shown when no page is open, and on iPhone above
+// the list of pages: it opens the agent chat of all the user's pages.
+func (msgs Messages) ShellAskAgent() string {
+	return Catalog.Format(msgs.locale, "shellAskAgent", nil)
+}
+
+// PanelScopePage says "This page"
+// in the language the app shows.
+//
+// The panel's Agent tab beside a page, its switch: the agent of the page
+// open.
+func PanelScopePage() string { return In(i18n.Locale()).PanelScopePage() }
+
+// PanelScopePage says "This page"
+// in the language of msgs.
+//
+// The panel's Agent tab beside a page, its switch: the agent of the page
+// open.
+func (msgs Messages) PanelScopePage() string {
+	return Catalog.Format(msgs.locale, "panelScopePage", nil)
+}
+
+// PanelScopeAll says "All pages"
+// in the language the app shows.
+//
+// The panel's Agent tab beside a page, its switch: the workspace agent,
+// which finds, makes, tags and files all the user's pages.
+func PanelScopeAll() string { return In(i18n.Locale()).PanelScopeAll() }
+
+// PanelScopeAll says "All pages"
+// in the language of msgs.
+//
+// The panel's Agent tab beside a page, its switch: the workspace agent,
+// which finds, makes, tags and files all the user's pages.
+func (msgs Messages) PanelScopeAll() string {
+	return Catalog.Format(msgs.locale, "panelScopeAll", nil)
+}
+
+// PageRunDid says "{agent}: {edit}"
+// in the language the app shows.
+//
+// Bar at the bottom of a page after an agent's run changed pages rather
+// than this page's blocks: the agent's name and its last edit, as
+// agentEditCreatedPage says it.
+func PageRunDid(agent string, edit string) string { return In(i18n.Locale()).PageRunDid(agent, edit) }
+
+// PageRunDid says "{agent}: {edit}"
+// in the language of msgs.
+//
+// Bar at the bottom of a page after an agent's run changed pages rather
+// than this page's blocks: the agent's name and its last edit, as
+// agentEditCreatedPage says it.
+func (msgs Messages) PageRunDid(agent string, edit string) string {
+	return Catalog.Format(msgs.locale, "pageRunDid", map[string]any{"agent": agent, "edit": edit})
+}
+
+// PanelScope says "Ask about"
+// in the language the app shows.
+//
+// The accessible name of the agent chat's menu, beside the agent picker,
+// choosing what the chat asks about: this page, or all the user's pages.
+func PanelScope() string { return In(i18n.Locale()).PanelScope() }
+
+// PanelScope says "Ask about"
+// in the language of msgs.
+//
+// The accessible name of the agent chat's menu, beside the agent picker,
+// choosing what the chat asks about: this page, or all the user's pages.
+func (msgs Messages) PanelScope() string {
+	return Catalog.Format(msgs.locale, "panelScope", nil)
 }

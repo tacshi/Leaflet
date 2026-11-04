@@ -3,9 +3,13 @@ package core
 import (
 	"log"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/live"
 )
+
+// Agents change pages as the app has them, through Pages.
+var _ agents.Pages = Pages{}
 
 // Pages changes pages as the app has them, the same on the desktop and the
 // phone: a page the app has open through its live page, so the editor

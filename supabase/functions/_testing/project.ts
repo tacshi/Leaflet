@@ -17,6 +17,8 @@ export interface Rules {
   writes?(table: string, row: Row, caller: Caller): boolean;
   /** Changes a row as the table's triggers would, before an update is stored. */
   onUpdate?(table: string, row: Row, old: Row): void;
+  /** The most rows a read answers with, as the API's max_rows has it (supabase/config.toml); no most when absent. */
+  maxRows?: number;
 }
 
 const URL_BASE = "http://project.test";
@@ -85,7 +87,15 @@ export class Project {
       if (rpc) {
         const fn = this.rpcs[rpc[1]];
         if (!fn) return reply({ code: "PGRST202", message: `no function ${rpc[1]}` }, 404);
-        return reply(await fn(await req.json().catch(() => ({})), caller) ?? null);
+        const result = await fn(await req.json().catch(() => ({})), caller);
+        // A function's rows are read as a table's are: its filters, order
+        // and limit, and no more than max_rows.
+        if (!Array.isArray(result)) return reply(result ?? null);
+        let rows = (result as Row[]).filter(filters(url.searchParams, (name) => this.rows(name)));
+        const order = url.searchParams.get("order");
+        if (order) rows = sorted(rows, order);
+        const limit = url.searchParams.get("limit");
+        return reply(rows.slice(0, limit === null ? undefined : Number(limit)).slice(0, this.rules.maxRows));
       }
       const table = url.pathname.match(/^\/rest\/v1\/(\w+)$/);
       if (table) return await this.rest(table[1], req, url, caller);
@@ -98,7 +108,7 @@ export class Project {
 
   private async rest(name: string, req: Request, url: URL, caller: Caller): Promise<Response> {
     const table = this.rows(name);
-    const match = filters(url.searchParams);
+    const match = filters(url.searchParams, (name) => this.rows(name));
     const prefer = req.headers.get("Prefer") ?? "";
     const single = (req.headers.get("Accept") ?? "").includes("vnd.pgrst.object");
     const out = (rows: Row[], status = 200) => {
@@ -120,7 +130,7 @@ export class Project {
         const offset = Number(url.searchParams.get("offset") ?? 0);
         const limit = url.searchParams.get("limit");
         rows = rows.slice(offset, limit === null ? undefined : offset + Number(limit));
-        return out(rows);
+        return out(rows.slice(0, this.rules.maxRows));
       }
       case "POST": {
         const body = await req.json();
@@ -259,9 +269,15 @@ function condition(col: string, expr: string): (row: Row) => boolean {
   };
 }
 
-/** The rows a query's filters keep: its conditions, and an or=(…) of them. */
-function filters(params: URLSearchParams): (row: Row) => boolean {
+/**
+ * The rows a query's filters keep: its conditions, an or=(…) of them, and
+ * those of a table embedded with !inner, as pages.space_id=eq.x with
+ * pages!inner(…) in select: the rows whose row there, by its key (page_id
+ * for pages), matches.
+ */
+function filters(params: URLSearchParams, tables: (name: string) => Row[]): (row: Row) => boolean {
   const all: ((row: Row) => boolean)[] = [];
+  const inner = new Set([...(params.get("select") ?? "").matchAll(/(\w+)!inner\(/g)].map((m) => m[1]));
   for (const [key, expr] of params) {
     if (["select", "order", "limit", "offset", "columns", "on_conflict"].includes(key)) continue;
     if (key === "or") {
@@ -272,6 +288,11 @@ function filters(params: URLSearchParams): (row: Row) => boolean {
       all.push((row) => any.some((c) => c(row)));
     } else if (!key.includes(".")) {
       all.push(condition(key, expr));
+    } else if (inner.has(key.split(".")[0])) {
+      const [embed, col] = key.split(".");
+      const match = condition(col, expr);
+      const fk = `${embed.replace(/s$/, "")}_id`;
+      all.push((row) => tables(embed).some((r) => r.id === row[fk] && match(r)));
     }
   }
   return (row) => all.every((c) => c(row));

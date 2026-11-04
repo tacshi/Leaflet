@@ -15,6 +15,25 @@ final class SceneModel {
     var inspectorShown = false
     /// inspectorTab is the panel's tab shown: Agent first, as on the desktop.
     var inspectorTab = InspectorTab.agent
+    /// allPages is the Agent tab's switch beside a page: the workspace
+    /// agent's chat, of all the user's pages, rather than the page's. With
+    /// no page open, the panel is the workspace agent's alone.
+    var allPages = false
+    /// workspace is the workspace agent's chat, the window's.
+    let workspace = WorkspaceAgentModel()
+    /// workspaceShown shows the workspace agent's chat as a sheet of the
+    /// sidebar's, as on iPhone, where no page is beside it for the panel.
+    var workspaceShown = false
+    /// focusChat has an agent chat's composer take the keyboard as it
+    /// shows, once, as Ask the agent opens it.
+    var focusChat = false
+    /// stacked says the window's columns stack, as on iPhone: with no page
+    /// open, no panel is beside one, and the workspace agent's chat is a
+    /// sheet of the sidebar's.
+    var stacked = false
+    /// recordOnOpen is a page opening to record in, as New Recording makes
+    /// one with no page open: it records once its editor shows.
+    @ObservationIgnored var recordOnOpen: String?
     var settingsShown = false
     /// afterPanel is what shows once the panel as a sheet has gone.
     @ObservationIgnored private var afterPanel: AfterPanel?
@@ -166,6 +185,9 @@ final class SceneModel {
             close(held)
             self.held = nil
         }
+        // A page New Recording made records only as it opens: another
+        // shown first, it no longer does.
+        if recordOnOpen != id { recordOnOpen = nil }
         selection = id
         (target, targetAt) = (nil, -1)
         newComment = nil
@@ -187,12 +209,52 @@ final class SceneModel {
     /// showPanel shows the panel at tab, or hides it when it already shows
     /// that tab, as ⌘J and ⇧⌘M do on the desktop.
     func showPanel(_ tab: InspectorTab) {
+        // With no page open the panel is the workspace agent's chat alone,
+        // whatever tab was last shown: the agent's shortcut shows or hides
+        // it, and a page's other tabs have nothing to show.
+        guard selection != nil else {
+            if tab == .agent, stacked {
+                workspaceShown.toggle()
+            } else if tab == .agent {
+                inspectorShown.toggle()
+            }
+            return
+        }
         if inspectorShown, inspectorTab == tab {
             inspectorShown = false
         } else {
             inspectorTab = tab
             inspectorShown = true
         }
+    }
+
+    /// askWorkspace shows the panel at the workspace agent's chat, its
+    /// composer taking the keyboard; as a sheet of the sidebar's, with
+    /// sheet, where no page is beside it for the panel.
+    func askWorkspace(sheet: Bool = false) {
+        inspectorTab = .agent
+        allPages = true
+        focusChat = true
+        if sheet {
+            workspaceShown = true
+        } else {
+            inspectorShown = true
+        }
+    }
+
+    /// openFromChat opens page id, at block and a moment of it when given,
+    /// from a link or an edit in an agent's chat: the workspace agent's,
+    /// with workspace, stays beside it, the panel at its Agent tab at All
+    /// pages, and a chat as a sheet goes first, as it would cover the page.
+    func openFromChat(
+        _ id: String, at block: String? = nil, moment: Int = -1, workspace: Bool, sheet: Bool
+    ) {
+        if workspace { (inspectorTab, allPages) = (.agent, true) }
+        if sheet {
+            inspectorShown = false
+            workspaceShown = false
+        }
+        open(id, at: block, moment: moment)
     }
 
     /// openSettings shows Settings. With the panel a sheet, as on iPhone,
@@ -210,6 +272,7 @@ final class SceneModel {
         // well; one whose going was never heard, not for long.
         afterPanel = what
         inspectorShown = false
+        workspaceShown = false
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1))
             guard let self, self.afterPanel == what else { return }

@@ -322,7 +322,7 @@ func TestUndoRunThatFailsSaysSo(t *testing.T) {
 	n.SetDelta(doc.FromMarkdown("one"))
 	run := &agents.Run{ID: "r1", Status: "done", AgentName: "Ollama", Ops: []doc.Op{{Op: "insert", Position: &doc.Position{At: "end"}, Nodes: []*doc.Node{n}}}}
 	a.hub.Session(p.ID).Runs = []*agents.Run{run}
-	a.undoRun(run)
+	a.undoRun(p.ID, run)
 	if run.Undone {
 		t.Error("the run counts as undone")
 	}
@@ -612,5 +612,88 @@ func TestDraftsStayWithTheirPage(t *testing.T) {
 	a.reload(store.Change{Table: "pages"})
 	if _, ok := a.drafts[plan.ID]; ok {
 		t.Error("the drafts of a page deleted stay")
+	}
+}
+
+// A page an agent made opens from its edit in the chat, and an edit of
+// this page's blocks still goes to them.
+func TestCreatedPageEditOpensIt(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.SidebarOpen, a.settings.TextSize = true, 16
+	if err := a.st.PutProvider(store.Provider{ID: "local", Preset: "ollama", Name: "Ollama", AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	made, err := a.st.CreatePage(store.NewPageOptions{Title: "Article"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	a.panelOpen, a.panelTab = true, 0
+	sess := a.hub.Session(p.ID)
+	summary := locales.AgentEditCreatedPage("Article")
+	sess.Runs = []*agents.Run{{ID: "r1", Status: "done", AgentName: "Ollama",
+		Ops:   []doc.Op{{Op: "create_page", Page: &doc.NewPage{ID: made.ID, Title: "Article"}}},
+		Edits: []agents.Edit{{Summary: summary, PageID: made.ID}}}}
+	sess.Messages = []*agents.Message{{Mine: true, Text: "Save the article"}, {Text: "Saved it.", RunID: "r1"}}
+
+	tt := ui.NewTester(func(c *ui.Context) { a.view(c) }, 1300, 800)
+	tt.Frame()
+	if err := tt.Click(summary); err != nil {
+		t.Fatal(err)
+	}
+	tt.Frame()
+	if a.route.Kind != "page" || a.route.ID != made.ID {
+		t.Errorf("route %+v, want the page made", a.route)
+	}
+}
+
+// Undo of a run that made a subpage takes its card out of the open page
+// and the subpage away, and Redo puts back one card, not two: the run's
+// own and the one a subpage brought back gets.
+func TestUndoOfASubpageRunOnTheOpenPage(t *testing.T) {
+	a := templatesApp(t)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	if a.page == nil {
+		t.Fatal("the page did not open")
+	}
+	sub, err := a.st.CreatePage(store.NewPageOptions{ParentID: p.ID, Title: "Notes"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	card := doc.InsertOp(doc.Position{At: "end"}, doc.SubpageNode(sub.ID))
+	if err := a.Live(p.ID).ApplyOps([]doc.Op{card}); err != nil {
+		t.Fatal(err)
+	}
+	run := &agents.Run{ID: "r1", Status: "done", AgentName: "Ollama", Ops: []doc.Op{card,
+		{Op: "create_page", Page: &doc.NewPage{ID: sub.ID, ParentID: p.ID, Title: "Notes"}}}}
+	a.hub.Session(p.ID).Runs = []*agents.Run{run}
+	cards := func() int {
+		n := 0
+		a.page.live.Doc().Walk(func(b, _ *doc.Node) {
+			if b.Type == "subpage" && b.Str("page_id") == sub.ID {
+				n++
+			}
+		})
+		return n
+	}
+	a.undoRun(p.ID, run)
+	if got, _ := a.st.Page(sub.ID); !run.Undone || cards() != 0 || got.DeletedAt.IsZero() {
+		t.Errorf("after Undo: undone %v, %d cards, subpage deleted %v", run.Undone, cards(), !got.DeletedAt.IsZero())
+	}
+	a.redoRun(p.ID, run)
+	if got, _ := a.st.Page(sub.ID); run.Undone || cards() != 1 || !got.DeletedAt.IsZero() {
+		t.Errorf("after Redo: undone %v, %d cards, subpage deleted %v", run.Undone, cards(), !got.DeletedAt.IsZero())
 	}
 }

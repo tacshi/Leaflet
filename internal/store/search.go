@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -42,14 +42,40 @@ func (s *Store) Search(query string, limit int) ([]SearchHit, error) {
 // already, or left out by the tags do not crowd the others out; the most
 // recently changed come first.
 func (s *Store) SearchContext(ctx context.Context, query string, limit int) ([]SearchHit, error) {
+	return s.search(ctx, query, limit, nil)
+}
+
+// SearchPages finds pages as the agent function's search does
+// (agent_search_pages), the pages keep keeps alone: no templates,
+// recordings or comments, so that only those pages count toward the
+// limit. Titles and tags that match come first, then text, each the most
+// recently changed page first, a match in text with the 40 characters
+// either side of it; tags keep to the pages with each of them, in any
+// case, and a blank query lists the most recently edited, up to limit.
+func (s *Store) SearchPages(ctx context.Context, query string, limit int, keep func(Page) bool) ([]SearchHit, error) {
+	return s.search(ctx, query, limit, keep)
+}
+
+// newestFirst orders pages the most recently changed first, then by ID.
+func newestFirst(a, b Page) int {
+	if c := b.UpdatedAt.Compare(a.UpdatedAt); c != 0 {
+		return c
+	}
+	return strings.Compare(a.ID, b.ID)
+}
+
+func (s *Store) search(ctx context.Context, query string, limit int, keep func(Page) bool) ([]SearchHit, error) {
 	filters, rest := SplitTagQuery(query)
 	q := strings.ToLower(rest)
 	pages, err := s.Pages()
 	if err != nil {
 		return nil, err
 	}
-	templates, err := s.Templates()
-	if err != nil {
+	var templates []Page
+	if keep != nil {
+		pages = slices.DeleteFunc(pages, func(p Page) bool { return !keep(p) })
+		slices.SortStableFunc(pages, newestFirst)
+	} else if templates, err = s.Templates(); err != nil {
 		return nil, err
 	}
 	// Text, transcripts and comments are read for every page there is,
@@ -58,6 +84,9 @@ func (s *Store) SearchContext(ctx context.Context, query string, limit int) ([]S
 	textLimit, otherLimit := limit, 10
 	if len(filters) > 0 {
 		match := tagMatcher(filters, append(append([]Page{}, pages...), templates...))
+		if keep != nil {
+			match = hasTags(filters)
+		}
 		pages, templates = slices.DeleteFunc(pages, func(p Page) bool { return !match(p) }),
 			slices.DeleteFunc(templates, func(p Page) bool { return !match(p) })
 		textLimit, otherLimit = -1, -1
@@ -73,9 +102,9 @@ func (s *Store) SearchContext(ctx context.Context, query string, limit int) ([]S
 	var hits []SearchHit
 	if q == "" {
 		recent := append([]Page{}, pages...)
-		sort.Slice(recent, func(i, j int) bool { return recent[i].UpdatedAt.After(recent[j].UpdatedAt) })
+		slices.SortStableFunc(recent, newestFirst)
 		for i, p := range recent {
-			if i == 8 && len(filters) == 0 || i == limit {
+			if i == 8 && len(filters) == 0 && keep == nil || i == limit {
 				break
 			}
 			hits = append(hits, SearchHit{Kind: "page", Title: p.DisplayTitle(), PageID: p.ID})
@@ -108,12 +137,13 @@ func (s *Store) SearchContext(ctx context.Context, query string, limit int) ([]S
 		return nil, err
 	}
 	listed := slices.Concat(pages, templates)
-	slices.SortFunc(listed, func(a, b Page) int {
-		if c := b.UpdatedAt.Compare(a.UpdatedAt); c != 0 {
-			return c
-		}
-		return strings.Compare(a.ID, b.ID)
-	})
+	slices.SortFunc(listed, newestFirst)
+	// Of a page found by its text alone, the words around the match.
+	cut := func(text string) string { return snippet(text, q) }
+	if keep != nil {
+		at := regexp.MustCompile("(?i)" + regexp.QuoteMeta(rest))
+		cut = func(text string) string { return around(text, at, rest) }
+	}
 	n := 0
 	for _, p := range listed {
 		if n == textLimit {
@@ -133,8 +163,12 @@ func (s *Store) SearchContext(ctx context.Context, query string, limit int) ([]S
 		if p.Template {
 			kind = "template"
 		}
-		hits = append(hits, SearchHit{Kind: kind, Title: TitleOr(p.Title), PageID: p.ID, Snippet: snippet(text, q)})
+		hits = append(hits, SearchHit{Kind: kind, Title: TitleOr(p.Title), PageID: p.ID, Snippet: cut(text)})
 		n++
+	}
+	// SearchPages finds pages alone.
+	if keep != nil {
+		return hits[:min(len(hits), limit)], nil
 	}
 	// Recordings and comments, as the text, of the pages listed alone.
 	if err := s.searchRows(ctx, "recording", q, otherLimit, `SELECT r.id, r.page_id, r.block_id FROM recordings r JOIN pages p ON p.id = r.page_id
@@ -425,6 +459,36 @@ func tagMatcher(filters []string, pages []Page) func(Page) bool {
 		}
 		return true
 	}
+}
+
+// hasTags reports whether a page has every tag of filters, in any case,
+// lowered as the server lowers them (lower(t) = lower(want)) rather than
+// folded.
+func hasTags(filters []string) func(Page) bool {
+	want := make([]string, len(filters))
+	for i, f := range filters {
+		want[i] = strings.ToLower(f)
+	}
+	return func(p Page) bool {
+		for _, f := range want {
+			if !slices.ContainsFunc(p.Tags, func(t string) bool { return strings.ToLower(t) == f }) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// around is the words around the first match of at, of what, in text, as
+// the agent function's search cuts them: from 40 characters before it,
+// as long as what and 80 more.
+func around(text string, at *regexp.Regexp, what string) string {
+	from := 0
+	if loc := at.FindStringIndex(text); loc != nil {
+		from = max(utf8.RuneCountInString(text[:loc[0]])-40, 0)
+	}
+	runes := []rune(text)
+	return string(runes[min(from, len(runes)):min(from+utf8.RuneCountInString(what)+80, len(runes))])
 }
 
 // tagContains reports whether a tag of p contains q, lower case.

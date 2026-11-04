@@ -14137,14 +14137,14 @@ func (msgs Messages) SigninSubtitle() string {
 	return Catalog.Format(msgs.locale, "signinSubtitle", nil)
 }
 
-// SigninNoServer says "SUPABASE_URL is set without SUPABASE_ANON_KEY. Set both to sign in to that server, or neither to sign in with Supabase."
+// SigninNoServer says "SUPABASE_URL is set without SUPABASE_PUBLISHABLE_KEY. Set both to sign in to that server, or neither to sign in with …"
 // in the language the app shows.
 //
 // The sign-in page when the environment sets a server's URL but not its
 // key.
 func SigninNoServer() string { return In(i18n.Locale()).SigninNoServer() }
 
-// SigninNoServer says "SUPABASE_URL is set without SUPABASE_ANON_KEY. Set both to sign in to that server, or neither to sign in with Supabase."
+// SigninNoServer says "SUPABASE_URL is set without SUPABASE_PUBLISHABLE_KEY. Set both to sign in to that server, or neither to sign in with …"
 // in the language of msgs.
 //
 // The sign-in page when the environment sets a server's URL but not its

@@ -29,30 +29,32 @@ import (
 
 // Build-time defaults, set with -ldflags "-X leaflet/internal/remote.DefaultURL=…".
 var (
-	DefaultURL     = ""
-	DefaultAnonKey = ""
+	DefaultURL            = ""
+	DefaultPublishableKey = ""
 )
 
 // Settings say which Supabase project to use.
 type Settings struct {
-	URL     string `json:"url"`
-	AnonKey string `json:"anon_key"`
+	URL string `json:"url"`
+	// PublishableKey is kept under its older name, anon key, as devices
+	// saved it.
+	PublishableKey string `json:"anon_key"`
 	// Ref and Name are the project's, when the person chose it with their
 	// Supabase account; a server the build or environment fixes has none.
 	Ref  string `json:"ref,omitempty"`
 	Name string `json:"name,omitempty"`
 }
 
-// Config reads the project from SUPABASE_URL and SUPABASE_ANON_KEY, or the
-// build's defaults. Without them, New uses the project kept on this
-// device.
+// Config reads the project from SUPABASE_URL and
+// SUPABASE_PUBLISHABLE_KEY, or the build's defaults. Without them, New
+// uses the project kept on this device.
 func Config() Settings {
-	s := Settings{URL: DefaultURL, AnonKey: DefaultAnonKey}
+	s := Settings{URL: DefaultURL, PublishableKey: DefaultPublishableKey}
 	if v := os.Getenv("SUPABASE_URL"); v != "" {
 		s.URL = v
 	}
-	if v := os.Getenv("SUPABASE_ANON_KEY"); v != "" {
-		s.AnonKey = v
+	if v := os.Getenv("SUPABASE_PUBLISHABLE_KEY"); v != "" {
+		s.PublishableKey = v
 	}
 	s.URL = strings.TrimRight(s.URL, "/")
 	return s
@@ -212,7 +214,7 @@ func (c *Client) Configured() bool {
 		return false
 	}
 	cfg := c.settings()
-	return cfg.URL != "" && cfg.AnonKey != ""
+	return cfg.URL != "" && cfg.PublishableKey != ""
 }
 
 // URL is the project's URL.
@@ -326,7 +328,7 @@ func (c *Client) authRequestTo(ctx context.Context, cfg Settings, path string, b
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("apikey", cfg.AnonKey)
+	req.Header.Set("apikey", cfg.PublishableKey)
 	req.Header.Set("Content-Type", "application/json")
 	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
@@ -731,7 +733,7 @@ func (c *Client) requestWith(hc *http.Client, ctx context.Context, lasting time.
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("apikey", cfg.AnonKey)
+	req.Header.Set("apikey", cfg.PublishableKey)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

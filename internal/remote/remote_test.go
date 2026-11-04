@@ -484,12 +484,12 @@ func TestProjectOwnerReadsEveryPage(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"users": users})
 	}))
 	t.Cleanup(hs.Close)
-	got, err := New(Settings{}, nil).ProjectOwner(context.Background(), Settings{URL: hs.URL, AnonKey: "k"}, "sb_secret_s")
+	got, err := New(Settings{}, nil).ProjectOwner(context.Background(), Settings{URL: hs.URL, PublishableKey: "k"}, "sb_secret_s")
 	if err != nil || got != "me@example.com" {
 		t.Errorf("owner %q, %v", got, err)
 	}
 	maxUserPages = 1
-	if got, _ := New(Settings{}, nil).ProjectOwner(context.Background(), Settings{URL: hs.URL, AnonKey: "k"}, "sb_secret_s"); got != "" {
+	if got, _ := New(Settings{}, nil).ProjectOwner(context.Background(), Settings{URL: hs.URL, PublishableKey: "k"}, "sb_secret_s"); got != "" {
 		t.Errorf("read past the last page it may: %q", got)
 	}
 }

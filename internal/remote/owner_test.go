@@ -26,7 +26,7 @@ func TestUseKeepsTheProject(t *testing.T) {
 	if c.Configured() || c.Fixed() {
 		t.Fatal("a new device has a project")
 	}
-	p := Settings{URL: "https://abc.supabase.co/", AnonKey: "sb_publishable_x", Ref: "abc", Name: "Leaflet"}
+	p := Settings{URL: "https://abc.supabase.co/", PublishableKey: "sb_publishable_x", Ref: "abc", Name: "Leaflet"}
 	if err := c.Use(p); err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestUseKeepsTheProject(t *testing.T) {
 	if got := New(Settings{}, st).Project(); got.URL != "https://abc.supabase.co" || got.Ref != "abc" {
 		t.Errorf("kept %+v", got)
 	}
-	if err := c.Use(Settings{URL: "https://def.supabase.co", AnonKey: "k", Ref: "def"}); err != nil {
+	if err := c.Use(Settings{URL: "https://def.supabase.co", PublishableKey: "k", Ref: "def"}); err != nil {
 		t.Fatal(err)
 	}
 	if c.SignedIn() {
@@ -43,7 +43,7 @@ func TestUseKeepsTheProject(t *testing.T) {
 	if err := c.Use(Settings{}); err != nil || New(Settings{}, st).Configured() {
 		t.Errorf("forgot the project: %v", err)
 	}
-	fixed := New(Settings{URL: "http://127.0.0.1:54321", AnonKey: "k"}, st)
+	fixed := New(Settings{URL: "http://127.0.0.1:54321", PublishableKey: "k"}, st)
 	if !fixed.Fixed() || fixed.Use(p) == nil {
 		t.Error("a fixed server changed")
 	}
@@ -109,7 +109,7 @@ func TestSignInAsOwner(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	project := Settings{URL: srv.URL, AnonKey: "sb_publishable_p", Ref: "p"}
+	project := Settings{URL: srv.URL, PublishableKey: "sb_publishable_p", Ref: "p"}
 	c := New(Settings{}, nil)
 	c.noKeychain = true
 	ctx := context.Background()
@@ -159,7 +159,7 @@ func TestDiscardLeavesTheSession(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	project := Settings{URL: srv.URL, AnonKey: "k"}
+	project := Settings{URL: srv.URL, PublishableKey: "k"}
 	c := New(Settings{}, nil)
 	c.noKeychain = true
 	if _, err := c.Adopt(&Pending{project: project, s: &session{AccessToken: "new", RefreshToken: "r", User: &authUser{ID: "u"}}}); err != nil {
@@ -184,7 +184,7 @@ func TestSignOutEndsOnlyThisSession(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c := New(Settings{URL: srv.URL, AnonKey: "k"}, nil)
+	c := New(Settings{URL: srv.URL, PublishableKey: "k"}, nil)
 	c.noKeychain = true
 	c.keep(&session{AccessToken: "t", RefreshToken: "r", ExpiresAt: time.Now().Add(time.Hour).Unix(), User: &authUser{ID: "u"}})
 	c.SignOut()

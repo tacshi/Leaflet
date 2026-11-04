@@ -154,7 +154,7 @@ To work against one server instead, such as the local stack, set it, and
 sign in with a code sent by email:
 
 ```bash
-SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key> go tool mygo dev
+SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_PUBLISHABLE_KEY=<publishable key> go tool mygo dev
 ```
 
 To try agents without an API key, run a local model server (for example
@@ -255,12 +255,12 @@ unsigned Windows installers, and macOS ones built `--skip-notarize`, unless
 to publish them anyway, and never go to a release that is published
 already.
 
-To build one server in, as `SUPABASE_URL` and `SUPABASE_ANON_KEY` set one
-for a run, give its URL and Publishable key to the linker through
+To build one server in, as `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`
+set one for a run, give its URL and Publishable key to the linker through
 `MYGO_LDFLAGS`, which `go tool mygo build` and the scripts pass on:
 
 ```bash
-MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://<ref>.supabase.co -X leaflet/internal/remote.DefaultAnonKey=<publishable key>" scripts/build-release.sh
+MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://<ref>.supabase.co -X leaflet/internal/remote.DefaultPublishableKey=<publishable key>" scripts/build-release.sh
 ```
 
 ## Development

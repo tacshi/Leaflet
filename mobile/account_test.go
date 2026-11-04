@@ -218,7 +218,7 @@ func signInRockyTo(t *testing.T, c *Core, other http.HandlerFunc) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-	if err := c.core.Remote.Use(remote.Settings{URL: srv.URL, AnonKey: "anon"}); err != nil {
+	if err := c.core.Remote.Use(remote.Settings{URL: srv.URL, PublishableKey: "anon"}); err != nil {
 		t.Fatal(err)
 	}
 	user, err := c.core.Remote.VerifyCode("rocky@example.com", "123456")
@@ -404,7 +404,7 @@ func TestFailedUseAccountSignsOut(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	if err := c.core.Remote.Use(remote.Settings{URL: srv.URL, AnonKey: "anon"}); err != nil {
+	if err := c.core.Remote.Use(remote.Settings{URL: srv.URL, PublishableKey: "anon"}); err != nil {
 		t.Fatal(err)
 	}
 	// The pages of another account, all gone up, which can't be removed.

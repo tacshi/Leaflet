@@ -952,7 +952,7 @@
   "externalDisconnectFailed": "无法断开 {app}：{error}",
   "signinTitle": "通过 Supabase 同步",
   "signinSubtitle": "Leaflet 会把页面保存在你自己的 Supabase 项目中，并在你的设备间同步。",
-  "signinNoServer": "已设置 SUPABASE_URL，但没有设置 SUPABASE_ANON_KEY。两者都设置即可登录该服务器，都不设置则使用 Supabase 登录。",
+  "signinNoServer": "已设置 SUPABASE_URL，但没有设置 SUPABASE_PUBLISHABLE_KEY。两者都设置即可登录该服务器，都不设置则使用 Supabase 登录。",
   "signinContinueSupabase": "使用 Supabase 继续",
   "signinNoSupabase": "还没有 Supabase 账户？",
   "signinCreateSupabase": "免费创建一个",

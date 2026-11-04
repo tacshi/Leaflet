@@ -106,17 +106,31 @@ func TestCorpusSpecs(t *testing.T) {
 // the server.
 func TestCorpusLinks(t *testing.T) {
 	var cases []struct {
-		URL   string `json:"url"`
-		Web   bool   `json:"web"`
-		Agent bool   `json:"agent"`
-		Video bool   `json:"video"`
+		URL     string `json:"url"`
+		Web     bool   `json:"web"`
+		Agent   bool   `json:"agent"`
+		Video   bool   `json:"video"`
+		VideoOf *struct {
+			Provider string `json:"provider"`
+			ID       string `json:"id"`
+			Hash     string `json:"hash"`
+		} `json:"video_of"`
 	}
 	parity.Read(t, "urls.json", &cases)
 	fail := parity.Check(t)
 	for _, c := range cases {
-		_, video := ParseVideoURL(c.URL)
+		v, video := ParseVideoURL(c.URL)
 		if web, agent := WebURL(c.URL), agentURL(c.URL); web != c.Web || agent != c.Agent || video != c.Video {
 			fail("%q: web %v, agent %v, video %v; the server's %v, %v, %v", c.URL, web, agent, video, c.Web, c.Agent, c.Video)
+		}
+		// The server knows the ID of a video whose captions agents read.
+		if !video || c.VideoOf == nil {
+			continue
+		}
+		o := *c.VideoOf
+		captioned := v.Provider == "youtube" || v.Provider == "vimeo"
+		if v.Provider != o.Provider || captioned && (v.ID != o.ID || v.Hash != o.Hash) {
+			fail("%q: %+v; the server's %+v", c.URL, v, o)
 		}
 	}
 }

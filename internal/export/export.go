@@ -152,13 +152,7 @@ func recordings(c *doc.Content) []*doc.Node {
 
 // clock says a time into a recording as its transcript does: 1:05, or
 // 1:02:05.
-func clock(d time.Duration) string {
-	s := int(d.Seconds())
-	if s >= 3600 {
-		return fmt.Sprintf("%d:%02d:%02d", s/3600, s/60%60, s%60)
-	}
-	return fmt.Sprintf("%d:%02d", s/60, s%60)
-}
+func clock(d time.Duration) string { return doc.Clock(int(d.Seconds())) }
 
 // withAudio is WithTranscripts for a zip: each recording's audio follows
 // its block as a file, named for the recording, which the zip takes into
@@ -430,6 +424,23 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 	// files are the pictures and files written so far, by their URL on
 	// this device.
 	files := map[string]string{}
+	// videos are the exported pages' videos, by page and block, read when
+	// a link to a moment of one is.
+	videos := map[string]map[string]doc.Video{}
+	videoAt := func(pageID, blockID string) (doc.Video, bool) {
+		if _, read := videos[pageID]; !read {
+			videos[pageID] = map[string]doc.Video{}
+			if c := content(pageID); c != nil {
+				c.Walk(func(n, _ *doc.Node) {
+					if v, ok := doc.ParseVideoURL(n.Str("url")); ok && n.Type == "video" {
+						videos[pageID][n.ID] = v
+					}
+				})
+			}
+		}
+		v, ok := videos[pageID][blockID]
+		return v, ok
+	}
 	for _, p := range pages {
 		c := content(p.ID)
 		if c == nil {
@@ -483,6 +494,12 @@ func Zip(w io.Writer, pages []store.Page, folders []store.Folder, content func(i
 					return rel(name)
 				}
 				if id, ok := doc.PageLinkID(href); ok && paths[id] != "" {
+					// A moment of a video plays on its site, from that time.
+					if at, ok := doc.LinkMoment(href); ok {
+						if v, ok := videoAt(id, doc.LinkBlock(href)); ok {
+							return v.At(at).WatchURL()
+						}
+					}
 					if block := doc.LinkBlock(href); block != "" {
 						return rel(paths[id]+".md") + "#" + block
 					}

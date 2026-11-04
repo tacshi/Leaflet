@@ -483,7 +483,13 @@ func (c *Content) PlainText() string {
 // text, the title or source it shows.
 func blockText(n *Node) string {
 	switch n.Type {
-	case "chart", "embed", "video":
+	case "chart", "embed":
+		return n.Str("title")
+	case "video":
+		// Its notes too, for search to find what is said in it.
+		if notes := n.Str("notes"); notes != "" {
+			return strings.TrimSpace(n.Str("title") + "\n" + notes)
+		}
 		return n.Str("title")
 	case "link_preview", "file":
 		return cardTitle(n)

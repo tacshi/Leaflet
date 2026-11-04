@@ -816,6 +816,8 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			serve("text/javascript; charset=utf-8", embedScript)
 		case rest == "recording.js":
 			serve("text/javascript; charset=utf-8", recordingScript)
+		case rest == "video.js":
+			serve("text/javascript; charset=utf-8", videoScript)
 		case rest == "favicon.png":
 			h.Set("Content-Type", "image/png")
 			_, _ = w.Write(pubFavicon)
@@ -1055,6 +1057,45 @@ const recordingScript = `document.addEventListener("click", function (e) {
   audio.currentTime = +line.dataset.start;
   audio.play();
 });
+`
+
+// videoScript plays a video of the page from a time in its notes, or from
+// a link to a moment of it, as a click on one does in the app, unless the
+// click ends selecting text: its player goes there, where its site's takes
+// word from the page and has loaded, or loads again there. A link to a
+// video elsewhere in the page shows it first. One player plays at a time,
+// as in the app: one started so, or a file or a recording started from
+// its own controls, pauses the others, as far as their sites let them.
+const videoScript = rendered.VideoSeekJS + `(function () {
+  var ready = new WeakSet();
+  document.querySelectorAll("figure.video iframe").forEach(function (f) {
+    f.addEventListener("load", function () { ready.add(f); });
+  });
+  function pauseOthers(el) {
+    document.querySelectorAll("figure.video iframe, figure.video video, audio").forEach(function (p) {
+      if (p === el) return;
+      if (p.tagName === "AUDIO") p.pause();
+      else if (p.tagName === "VIDEO" || ready.has(p)) leafletPause(p, p.closest("figure").dataset.provider);
+    });
+  }
+  document.querySelectorAll("figure.video video, audio").forEach(function (m) {
+    m.addEventListener("play", function () { pauseOthers(m); });
+  });
+  document.addEventListener("click", function (e) {
+    var a = e.target.closest && e.target.closest("a[data-t]");
+    var sel = getSelection();
+    if (!a || sel && !sel.isCollapsed) return;
+    var fig = a.dataset.video ? document.getElementById("b-" + a.dataset.video) : a.closest("figure.video");
+    var el = fig && fig.querySelector("iframe, video");
+    if (!el) return;
+    e.preventDefault();
+    if (a.dataset.video) fig.scrollIntoView({behavior: "smooth", block: "center"});
+    pauseOthers(el);
+    var t = +a.dataset.t;
+    if ((el.tagName === "VIDEO" || ready.has(el)) && leafletSeek(el, fig.dataset.provider, t)) return;
+    if (el.tagName !== "VIDEO") el.src = a.dataset.src;
+  });
+})();
 `
 
 // embedScript grows each embed's frame to the height its content says,

@@ -29,13 +29,19 @@ Go core as the desktop app.
   cards and recordings.
 - The `/` and `@` menus, Markdown shortcuts, folding headings and the
   outline, links to pages and blocks, and a keyboard bar for the blocks.
+- A video's notes under it, as the desktop shows them: a time in them
+  plays that video from there, a long press on a line copies a link to
+  its moment, and its menu writes them. A link to a moment of a video or
+  a recording, in a page or a chat reply, plays it from that moment.
 - A page's title, tags and byline, as the desktop shows them.
 
 ### Agents and comments
 
 - The Agent panel: the chat, each run's edits as they stream into the page,
   with Stop, Undo and Redo, and the agent and model it asks.
-- Asking an agent from the editor, about the text chosen or at the caret.
+- Asking an agent from the editor, about the text chosen or at the caret,
+  and to summarize a YouTube or Vimeo video in its notes, from what is
+  said in it.
 - The Comments panel, with replies, resolving and reopening.
 - The desktop's agent providers, a ChatGPT Plus or Pro sign-in among them,
   and its defaults.

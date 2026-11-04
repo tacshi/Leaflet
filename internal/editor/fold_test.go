@@ -4,6 +4,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 
@@ -280,6 +281,16 @@ func TestBlockLinks(t *testing.T) {
 	r := boxOf(e, b["a1"].ID)
 	tt.ClickAt(r.X+5, r.Y+r.H/2)
 	if len(host.opened) != 1 || host.opened[0] != "prd#b9" {
+		t.Errorf("opened %v", host.opened)
+	}
+	// A link to a moment of a video plays it from there.
+	tt.Advance(time.Second) // not a double click
+	b["a1"].SetDelta(doc.Delta{{Text: "see 1:23", Attrs: doc.Attrs{Href: doc.MomentLink("prd", "v9", 83)}}})
+	e.invalidate(b["a1"].ID)
+	tt.Frame()
+	r = boxOf(e, b["a1"].ID)
+	tt.ClickAt(r.X+5, r.Y+r.H/2)
+	if len(host.opened) != 2 || host.opened[1] != "prd#v9@83" {
 		t.Errorf("opened %v", host.opened)
 	}
 	// Right-click a block for a link to it.

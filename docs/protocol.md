@@ -75,7 +75,7 @@ metadata:
 | `table` | `colsLen`, `rowsLen`, … | children are `table/cell` nodes with `colPosition`, `rowPosition`, each holding one `paragraph` |
 | `chart` | `chart_type` (`bar`\|`line`\|`pie`), `title`, `labels` [string], `series` [{`name`, `values` [number]}], `caption`, `author` | drawn by the client |
 | `embed` | `title`, `html`, `height`, `author` | sandboxed HTML, no access to app storage or tokens |
-| `video` | `url`, `title` | a link to a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page |
+| `video` | `url`, `title`, `notes?` | a link to a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or to a video file (.mp4, .m4v, .mov, .webm, .ogv), played in the page; `notes` is plain text shown under it, a line each, at most 20,000 characters, a time that starts a line (`1:23`, `1:02:03`, `[1:23]`) or stands in one playing the video from there |
 | `link_preview` | `url`, `title`, `description`, `image`, `site` | a card for a web page; the client fills in what the page says about itself |
 | `file` | `file_id`, `url`, `name`, `size`, `mime` | a file kept with the page, as a card |
 | `math_equation` | `formula` | TeX, drawn in display style by KaTeX |
@@ -91,7 +91,11 @@ A page mention is the page's title with `href` `leaflet://page/<id>` and a
 `mention` of kind `page`; in agents' inline Markdown it is
 `[Title](leaflet://page/<id>)`, and such a link read back is a page mention.
 A link to a block of a page is `leaflet://page/<id>#<block id>`, which
-stays a link.
+stays a link. A link to a moment of a video or a recording block is
+`leaflet://page/<id>#<block id>?t=<seconds>` (`t` also takes `1m23s` or
+`1:23`): it opens the page at the block and plays it from there. A
+Markdown export writes one to a video in the exported pages as the
+video's own page at that time.
 A person or an agent mentioned is `@` and their name with a `mention` of
 kind `user` or `agent`; in agents' inline Markdown it is
 `[@Name](mention:user:<id>)` or `[@Name](mention:agent:<id>)`, which both
@@ -126,7 +130,7 @@ loop with the same tools. Tool definitions live in
   "chart": { "chart_type": "bar", "title": "Risks by phase", "labels": ["Editor", "Agents"], "series": [{ "name": "Open risks", "values": [1, 4] }] },
   "embed": { "title": "Phase timeline", "html": "<!doctype html>…", "height": 320 },
   "image": { "url": "https://…", "alt": "…" },
-  "video": { "url": "https://www.youtube.com/watch?v=…", "title": "…" },
+  "video": { "url": "https://www.youtube.com/watch?v=…", "title": "…", "notes": "0:00 Intro\n1:23 The first idea" },
   "link": { "url": "https://…" }
 }
 ```
@@ -153,6 +157,7 @@ says where whatever other keys the position has.
 | name | arguments | returns |
 | --- | --- | --- |
 | `read_page` | — | `{ page: {id, title}, blocks: [BlockView], subpages: [{id, title}], comments: [{block_id, resolved, thread: [{author, body}]}] }` |
+| `read_video_transcript` | `id` (a video block of the page) | `{ id, language, auto_generated, transcript, title? }`: what is said in the video, from its site's captions, as `[m:ss] text` lines of a passage each (YouTube's and Vimeo's videos only) |
 | `write_markdown` | `position` (or `{ replace }`), `markdown` | `{ inserted_ids: [...] }` (a block a line: paragraphs, `#` to `######` headings, `-`/`1.` lists, `- [ ]` to-dos, `>` quotes, fenced code, `$$` formulas, ` ```mermaid ` diagrams, `\|` tables, `---` dividers) |
 | `insert_blocks` | `position`, `blocks: [BlockSpec]` | `{ inserted_ids: [...] }` |
 | `replace_block` | `id`, `block: BlockSpec` | `{ id }` (the ID is kept) |
@@ -168,7 +173,7 @@ says where whatever other keys the position has.
 the same on the client and the server: `text` only for text blocks and
 code (a code block's is its code, not markdown); `chart` is
 `{chart_type, title, labels, series, caption}`; `embed` `{title, height, html}`;
-`image` `{url, alt}`; `video` `{url, title}`; `link` (a `link_preview`)
+`image` `{url, alt}`; `video` `{url, title, notes?}`; `link` (a `link_preview`)
 `{url, title, description}`; `file` `{name, mime, size}`; `recording`
 `{recording_id, title, duration_ms}`, as far as the block has them, with
 its `transcript` when it has one; the server adds the recording's `status`,
@@ -210,6 +215,20 @@ run began, among a search's results (not one its query names) or linked
 from a page it read, and a query may name no address: a page could have the
 run send what is on this page to an address of its making. Once a run reads
 another page, the web is closed to it.
+
+`read_video_transcript` is offered with `read_page`, with the web or
+without it: it reads only the site of a video block of the page, which the
+page links already. It reads YouTube's captions as the youtube-transcript-api
+project does (the watch page's key, then the player API as the Android app,
+then the chosen track) and Vimeo's from the player's `config`, preferring
+the creator's captions in the language spoken, then the site's own speech
+recognition (`internal/web/captions.go`, `_shared/captions.ts`; both read
+`testdata/captions.json` alike). Captions are joined into passages: one
+ends at a sentence's end once it is six seconds long, and at twenty seconds.
+Once a run reads another page, it reads only a video that was on the page as
+the run began or is in the instruction. Bilibili gives subtitles only to
+signed-in accounts, and Dailymotion's, Niconico's and video files have
+none to read.
 
 ## 3. Ops
 

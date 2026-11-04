@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -40,13 +41,19 @@ func (h *fakeHost) CommentPreview(*ui.Context, string)          {}
 func (h *fakeHost) SlashItems(q string) []MenuItem {
 	return []MenuItem{{Key: "h1", Label: "Heading 1"}}
 }
-func (h *fakeHost) MentionItems(q string) []MenuItem { return nil }
-func (h *fakeHost) Pick(t Trigger, item MenuItem)    { h.picked = append(h.picked, item) }
-func (h *fakeHost) Comment(id, quote string)         {}
-func (h *fakeHost) AskAgent(id, quote string)        {}
-func (h *fakeHost) EditBlock(id string)              { h.edited = append(h.edited, id) }
-func (h *fakeHost) OpenBlock(page, id string)        { h.opened = append(h.opened, page+"#"+id) }
-func (h *fakeHost) BlockLink(id string) string       { return doc.BlockLink("this", id) }
+func (h *fakeHost) MentionItems(q string) []MenuItem  { return nil }
+func (h *fakeHost) Pick(t Trigger, item MenuItem)     { h.picked = append(h.picked, item) }
+func (h *fakeHost) Comment(id, quote string)          {}
+func (h *fakeHost) AskAgent(id, quote string)         {}
+func (h *fakeHost) EditBlock(id string)               { h.edited = append(h.edited, id) }
+func (h *fakeHost) VideoMenu(m *ui.Menu, n *doc.Node) { m.Item("Video item for " + n.ID) }
+func (h *fakeHost) OpenBlock(page, id string, at int) {
+	if at >= 0 {
+		id += "@" + strconv.Itoa(at)
+	}
+	h.opened = append(h.opened, page+"#"+id)
+}
+func (h *fakeHost) BlockLink(id string) string { return doc.BlockLink("this", id) }
 
 func setup(t *testing.T) (*Editor, *ui.Tester, *fakeHost) {
 	t.Helper()

@@ -474,6 +474,7 @@ func TestPubBlocksAsInTheEditor(t *testing.T) {
 		{ID: "fl", Type: "file", Data: map[string]any{"file_id": "f1", "name": "Notes.pdf"}},
 		{ID: "gone", Type: "file", Data: map[string]any{"file_id": "nope", "name": "Old.zip"}},
 		{ID: "rec", Type: "recording", Data: map[string]any{"recording_id": "r1", "title": ""}},
+		{ID: "vid", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ", "notes": "1:23 Chorus"}},
 		folded, text("p2", "paragraph", "Hidden"), next,
 	})
 	if _, _, err := a.st.SaveContent(pg.ID, c); err != nil {
@@ -491,6 +492,8 @@ func TestPubBlocksAsInTheEditor(t *testing.T) {
 		`<strong>` + locales.CommonRecording() + `</strong>`, `<span class="muted">1:05</span>`, `<audio controls preload="metadata" src="/tok/f/`,
 		`<p data-start="1.5"><span class="ts">0:01</span><span class="line"><span class="speaker">` + locales.RecSpeaker("1") + `</span>Hello there.</span></p>`,
 		`<script src="/tok/recording.js" defer></script>`,
+		`<script src="/tok/video.js" defer></script>`,
+		`<a class="ts" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ&amp;t=83s" rel="noopener noreferrer" data-t="83"`,
 		"<details class=\"fold\"><summary><h2 id=\"b-h1\" data-block=\"h1\">Later</h2>\n</summary>\n<p id=\"b-p2\" data-block=\"p2\">Hidden</p>\n</details>\n<h2 id=\"b-h2\"",
 	} {
 		if !strings.Contains(page, want) {
@@ -519,6 +522,9 @@ func TestPubBlocksAsInTheEditor(t *testing.T) {
 	}
 	if w := get(h, "/tok/recording.js"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "currentTime") {
 		t.Errorf("recording script: %d", w.Code)
+	}
+	if w := get(h, "/tok/video.js"); w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "leafletSeek(el, fig.dataset.provider, t)") {
+		t.Errorf("video script: %d", w.Code)
 	}
 }
 

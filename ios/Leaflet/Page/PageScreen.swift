@@ -55,8 +55,9 @@ struct PageScreen: View {
                             await Self.keep(title.wrappedValue, of: pageID, app: app)
                         }
                         if let block = scene.target {
-                            scene.target = nil
-                            goTo(block, in: c)
+                            let at = scene.targetAt
+                            (scene.target, scene.targetAt) = (nil, -1)
+                            goTo(block, at: at, in: c)
                         }
                         // The window holds the editor weakly: the editor's
                         // view keeps it, as long as the page shows. So
@@ -79,6 +80,13 @@ struct PageScreen: View {
                             scene?.blockName = name
                             scene?.renamingBlock = node
                         }
+                        c.onEditNotes = { [weak scene] in scene?.editingNotes = $0 }
+                        c.onEditLink = { [weak scene] in scene?.editingLink = $0 }
+                        c.onSummarize = { [weak scene] node, prompt in
+                            scene?.asking = AskRequest(
+                                focus: [node.id], selection: "", agent: nil, prompt: prompt)
+                        }
+                        c.pageID = pageID
                         c.onUndoRun = { [weak model, app] in
                             guard let model,
                                 let run = model.agents.runs.last(where: {
@@ -99,7 +107,9 @@ struct PageScreen: View {
                         c.pageLinks = PageLinks(
                             title: { [app] id in app.library.page(id)?.title },
                             open: { [weak scene] id in scene?.open(id) },
-                            openAt: { [weak scene] id, block in scene?.open(id, at: block) })
+                            openAt: { [weak scene] id, block, at in
+                                scene?.open(id, at: block, moment: at)
+                            })
                         c.plainCopy = { [app] nodes in try? await app.client?.plainCopy(nodes) }
                         c.copyText = { [app] nodes in try? await app.client?.copyText(nodes) }
                         c.menuItems = { [app, pageID] trigger, give in
@@ -183,6 +193,26 @@ struct PageScreen: View {
         }
         .sheet(item: Binding(get: { scene.editingBlock }, set: { scene.editingBlock = $0 })) {
             blockSheet($0)
+        }
+        .sheet(item: Binding(get: { scene.editingLink }, set: { scene.editingLink = $0 })) {
+            node in
+            LinkSheet(kind: "video", current: node.data?["url"]?.string ?? "") { [scene] made in
+                // Another video: its title is learned again, and its player
+                // starts again from its picture; its notes stay.
+                var data = node.data ?? [:]
+                data["url"] = made.data?["url"]
+                data["title"] = made.data?["title"] ?? .string("")
+                VideoPlayback.shared.stop([node.id])
+                scene.editor?.setData(data, ofBlock: node.id)
+            }
+        }
+        .sheet(item: Binding(get: { scene.editingNotes }, set: { scene.editingNotes = $0 })) {
+            node in
+            NotesSheet(notes: node.data?["notes"]?.string ?? "") { [scene] notes in
+                var data = node.data ?? [:]
+                data["notes"] = notes.isEmpty ? nil : .string(notes)
+                scene.editor?.setData(data, ofBlock: node.id)
+            }
         }
         .alert(
             L.recRenameTitle,
@@ -425,8 +455,9 @@ struct PageScreen: View {
     }
 
     /// goTo shows the block the window opened the page at, once the
-    /// editor is in the window and laid out: it scrolls to it then.
-    private func goTo(_ blockID: String, in editor: EditorController) {
+    /// editor is in the window and laid out: it scrolls to it then, and
+    /// plays it from at seconds in, for a link to a moment of it.
+    private func goTo(_ blockID: String, at: Int, in editor: EditorController) {
         Task { @MainActor [weak editor] in
             // Its first layout comes as the window draws it, a moment
             // after the editor is made.
@@ -436,6 +467,7 @@ struct PageScreen: View {
                 if view.window != nil, view.bounds.height > 0 {
                     view.layoutIfNeeded()
                     editor.reveal(blockID: blockID, atTop: true)
+                    editor.play(blockID: blockID, at: at)
                     return
                 }
                 try? await Task.sleep(for: .milliseconds(50))

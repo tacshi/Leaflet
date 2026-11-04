@@ -57,6 +57,11 @@ itself.
 - Markdown shortcuts, the `/` menu, `@` mentions of people, agents and
   pages, a selection toolbar with text colors, folding headings, an
   outline, and links to pages and to single blocks.
+- Videos from YouTube, Vimeo, Bilibili, Dailymotion and Niconico, or video
+  files, that play in the page, with notes under each, as a video's
+  description has them: a time in them plays that video from there. A link
+  to a moment of a video or a recording plays it from that moment, from any
+  page or a chat.
 - Nested pages and folders, templates, duplicate pages, search, and export
   to Markdown and PDF.
 - Page history with named versions, and what changed since any of them,
@@ -71,6 +76,9 @@ itself.
   `create_subpage`, and `list_pages` and `read_other_page` where reading
   other pages is on) that streams into the page as one undo step, after a
   history snapshot.
+- Agents read what is said in a YouTube or Vimeo video, from its captions
+  (`read_video_transcript`), to write a video's notes with the time of each
+  moment, and cite a moment of a video or a recording with a link to it.
 - Agents use the web where you let them: `read_web_page` reads a page as
   text with its links, and `web_search` searches through the agent's own
   provider (OpenAI, Claude, xAI, OpenRouter, GLM or a ChatGPT plan). Once a
@@ -303,7 +311,7 @@ rules.
 | `internal/webpage` | A page as a web page that stands alone, as a public link shares it and Export › PDF prints it, on both apps |
 | `internal/starters` | The templates that come with Leaflet |
 | `internal/export` | Exporting every page as Markdown in a zip, with its pictures, files and recordings |
-| `internal/web` | Link cards, pictures, video info and pages for agents, read from public addresses only |
+| `internal/web` | Link cards, pictures, video info, videos' captions and pages for agents, read from public addresses only |
 | `internal/store` | SQLite (pure Go) tables, the outbox and settings |
 | `internal/remote` | Supabase over HTTP: Auth, PostgREST, Storage and Edge Functions |
 | `internal/sync` | Pushing the outbox, pulls, account adoption and the device heartbeat, through Supabase or iCloud Drive |

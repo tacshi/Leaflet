@@ -68,7 +68,7 @@ enum EditorAccessibility {
                 offer(L.commonOpen) { $0.pageLinks?.open(id) }
             }
             if node.type == "video", !VideoPlayback.shared.playing.contains(node.id) {
-                offer(L.recPlay) { _ in VideoPlayback.shared.playing.insert(node.id) }
+                offer(L.recPlay) { _ in VideoPlayback.shared.play(node.id) }
             }
             if node.type == "recording", let id = node.data?["recording_id"]?.string {
                 for action in RecordingBlock.actions(

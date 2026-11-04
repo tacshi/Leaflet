@@ -1,6 +1,10 @@
 package doc
 
-import "strings"
+import (
+	"net/url"
+	"strconv"
+	"strings"
+)
 
 // PageLinkPrefix starts a link to one of the user's pages: a page mention
 // is text linked to it, kept as the page's title.
@@ -26,7 +30,37 @@ func LinkBlock(href string) string {
 		return ""
 	}
 	_, block, _ := strings.Cut(href, "#")
+	block, _, _ = strings.Cut(block, "?")
 	return block
+}
+
+// MomentLink is the link to a moment of a video or a recording, block id
+// of page pageID, at seconds into it: it opens the page there and plays
+// the block from that time.
+func MomentLink(pageID, id string, at int) string {
+	return BlockLink(pageID, id) + "?t=" + strconv.Itoa(max(at, 0))
+}
+
+// LinkMoment returns the time a link to a block plays it from, in seconds,
+// if it names one: as MomentLink writes it, or as 1m23s or 1:23.
+func LinkMoment(href string) (int, bool) {
+	if LinkBlock(href) == "" {
+		return 0, false
+	}
+	_, frag, _ := strings.Cut(href, "#")
+	_, query, ok := strings.Cut(frag, "?")
+	if !ok {
+		return 0, false
+	}
+	q, _ := url.ParseQuery(query)
+	t := strings.TrimSpace(q.Get("t"))
+	if at, ok := ParseClock(t); ok {
+		return at, true
+	}
+	if t == "" || !linkTime.MatchString(strings.ToLower(t)) {
+		return 0, false
+	}
+	return startOf(t), true
 }
 
 // PageMention is the text and formats of a mention of page id titled

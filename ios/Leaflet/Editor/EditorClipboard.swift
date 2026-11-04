@@ -46,9 +46,13 @@ final class EditorClipboard {
             Self.clip = Clip(text: piece.string, inline: piece)
             return
         }
-        let blocks = DocumentMapper.content(piece, meta: nil).document.children ?? []
-        let clip = Clip(blocks: blocks)
-        Self.clip = clip
+        copy(blocks: DocumentMapper.content(piece, meta: nil).document.children ?? [])
+    }
+
+    /// copy takes blocks as Copy takes them: Leaflet's own copy, and their
+    /// Markdown on the clipboard. A block's menu copies it so.
+    func copy(blocks: [DocNode]) {
+        Self.clip = Clip(blocks: blocks)
         guard let copyText = editor.copyText else { return }
         Task {
             guard let text = await copyText(blocks), !text.isEmpty else { return }

@@ -7,6 +7,9 @@ import SwiftUI
 /// instead.
 struct LinkSheet: View {
     let kind: String
+    /// current is the link of a block whose link the sheet changes, as a
+    /// video's menu's Edit link asks: it starts with it, and saves.
+    var current: String?
     /// insert gives the block made from the link.
     let insert: (DocNode) -> Void
     /// upload picks a picture on the device instead, for "image".
@@ -73,17 +76,23 @@ struct LinkSheet: View {
                     CancelButton(dirty: dirty)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(L.dialogInsert, action: apply)
+                    Button(current == nil ? L.dialogInsert : L.commonSave, action: apply)
                 }
             }
         }
         .interactiveDismissDisabled(dirty)
-        .onAppear { focused = true }
+        .onAppear {
+            link = current ?? ""
+            focused = true
+        }
     }
 
-    /// dirty says a link was typed or pasted, which Cancel asks before
-    /// throwing away.
-    private var dirty: Bool { !link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// dirty says a link was typed or pasted, or the block's changed,
+    /// which Cancel asks before throwing away.
+    private var dirty: Bool {
+        let typed = link.trimmingCharacters(in: .whitespacesAndNewlines)
+        return current.map { typed != $0 } ?? !typed.isEmpty
+    }
 
     /// apply makes the block as the core does, or says what is wrong with
     /// the link.

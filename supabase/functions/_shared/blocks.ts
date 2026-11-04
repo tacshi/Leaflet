@@ -54,7 +54,8 @@ export interface BlockSpec {
   formula?: string;
   /** For diagram: the Mermaid source. */
   source?: string;
-  video?: { url: string; title?: string };
+  /** For video: its link, its title, and its notes, a plain-text line each, a time starting a line playing it from there. */
+  video?: { url: string; title?: string; notes?: string };
   link?: { url: string };
   level?: number;
   checked?: boolean;
@@ -97,7 +98,7 @@ export interface BlockView {
   /** The source too, so an agent can change an embed with replace_block rather than write a new one blind. */
   embed?: { title: unknown; height: unknown; html?: unknown; html_length?: number };
   image?: { url: unknown; alt: unknown };
-  video?: { url: unknown; title: unknown };
+  video?: { url: unknown; title: unknown; notes?: unknown };
   link?: { url: unknown; title: unknown; description: unknown };
   file?: { name: unknown; mime: unknown; size: unknown };
   recording?: Record<string, unknown>;
@@ -384,13 +385,17 @@ function isPunct(ch: string | undefined): boolean {
 // leaflet://page/<id>#<block>, stays a link.
 const PAGE_LINK_PREFIX = "leaflet://page/";
 
-/** The page a page link points to and the block, "" for the page; null for other links. */
+/**
+ * The page a page link points to and the block, "" for the page; null for
+ * other links. A link to a moment of a video or a recording names its time
+ * after the block, as #<block>?t=83 (doc.MomentLink).
+ */
 function pageLink(href: string): { id: string; block: string } | null {
   if (!href.startsWith(PAGE_LINK_PREFIX)) return null;
   const rest = href.slice(PAGE_LINK_PREFIX.length);
   const hash = rest.indexOf("#");
   const id = hash < 0 ? rest : rest.slice(0, hash);
-  return id ? { id, block: hash < 0 ? "" : rest.slice(hash + 1) } : null;
+  return id ? { id, block: hash < 0 ? "" : rest.slice(hash + 1).split("?")[0] } : null;
 }
 
 /** A person or agent mentioned, written [@Name](mention:user|agent:<id>). */
@@ -1187,21 +1192,37 @@ export function calloutTone(tone: unknown): string {
 /** Video files a video block plays, by extension (doc.VideoExts). */
 const VIDEO_EXTS = new Set([".mp4", ".m4v", ".mov", ".webm", ".ogv"]);
 
+/** A video a link points to (doc.Video): its site, and on YouTube and Vimeo, whose captions agents read, its ID and Vimeo's key. */
+export interface VideoRef {
+  provider: string;
+  id: string;
+  hash: string;
+}
+
 /**
  * Whether a link is to a video on YouTube, Vimeo, Bilibili, Dailymotion or
  * Niconico, or a video file (doc.ParseVideoURL): a link to one of those
  * sites that names no video may still be to a file.
  */
 export function isVideoURL(link: string): boolean {
+  return videoOf(link) !== null;
+}
+
+/**
+ * The video a link points to, as doc.ParseVideoURL reads it, or null: the
+ * ID and key of one on YouTube or Vimeo, the site alone of the others'.
+ */
+export function videoOf(link: string): VideoRef | null {
   const u = parseURL(trimSpace(link));
-  if (!u || (u.scheme !== "http" && u.scheme !== "https")) return false;
+  if (!u || (u.scheme !== "http" && u.scheme !== "https")) return null;
+  const ref = (provider: string, id = "", hash = ""): VideoRef => ({ provider, id, hash });
   const host = goLower(hostname(u.host)).replace(/^www\./, "");
   const parts = u.path.split("/").filter(Boolean);
   const youtubeId = /^[A-Za-z0-9_-]{11}$/;
   const one = parts.length === 1 ? parts[0] : "";
   switch (host) {
     case "youtu.be":
-      if (youtubeId.test(one)) return true;
+      if (youtubeId.test(one)) return ref("youtube", one);
       break;
     case "youtube.com":
     case "m.youtube.com":
@@ -1212,13 +1233,22 @@ export function isVideoURL(link: string): boolean {
         : parts.length === 2 && ["embed", "shorts", "live", "v"].includes(parts[0])
         ? parts[1]
         : "";
-      if (youtubeId.test(id)) return true;
+      if (youtubeId.test(id)) return ref("youtube", id);
       break;
     }
     case "vimeo.com":
-    case "player.vimeo.com":
-      if (parts.some((p) => /^[0-9]+$/.test(p))) return true;
+    case "player.vimeo.com": {
+      // The ID is the last number in the path; an unlisted video's key
+      // follows it, or is the query's h.
+      const hex = /^[0-9a-f]{6,}$/;
+      for (let i = parts.length - 1; i >= 0; i--) {
+        if (!/^[0-9]+$/.test(parts[i])) continue;
+        let hash = queryValue(u.rawQuery, "h");
+        if (i + 1 < parts.length && hex.test(parts[i + 1])) hash = parts[i + 1];
+        return ref("vimeo", parts[i], hex.test(hash) ? hash : "");
+      }
       break;
+    }
     case "bilibili.com":
     case "m.bilibili.com":
     case "player.bilibili.com":
@@ -1231,7 +1261,7 @@ export function isVideoURL(link: string): boolean {
         const aid = queryValue(u.rawQuery, "aid");
         if (id === "" && aid !== "") id = "av" + aid;
       } else if (i >= 0 && i + 1 < parts.length) id = parts[i + 1];
-      if (/^(?:BV[1-9A-HJ-NP-Za-km-z]{10}|av[1-9][0-9]*)$/.test(id)) return true;
+      if (/^(?:BV[1-9A-HJ-NP-Za-km-z]{10}|av[1-9][0-9]*)$/.test(id)) return ref("bilibili");
       break;
     }
     case "dailymotion.com":
@@ -1246,7 +1276,7 @@ export function isVideoURL(link: string): boolean {
         : parts.length === 3 && parts[0] === "embed" && parts[1] === "video"
         ? parts[2]
         : "";
-      if (/^[xk][0-9A-Za-z]+$/.test(id.split("_")[0])) return true;
+      if (/^[xk][0-9A-Za-z]+$/.test(id.split("_")[0])) return ref("dailymotion");
       break;
     }
     case "nicovideo.jp":
@@ -1254,10 +1284,18 @@ export function isVideoURL(link: string): boolean {
     case "embed.nicovideo.jp":
     case "nico.ms": {
       const id = host === "nico.ms" ? one : parts.length === 2 && parts[0] === "watch" ? parts[1] : "";
-      if (/^(?:sm|so|nm)[1-9][0-9]*$/.test(id)) return true;
+      if (/^(?:sm|so|nm)[1-9][0-9]*$/.test(id)) return ref("niconico");
     }
   }
-  return VIDEO_EXTS.has(goLower(pathExt(u.path))) && u.host !== "";
+  return VIDEO_EXTS.has(goLower(pathExt(u.path))) && u.host !== "" ? ref("file") : null;
+}
+
+/** The most characters a video's notes hold (doc.MaxNotes). */
+export const MAX_NOTES = 20000;
+
+/** A video's notes as a block keeps them (doc.NormalizeNotes): a line break for each of any kind, and no space around them. */
+export function normalizeNotes(s: string): string {
+  return trimSpace(s.replaceAll("\r\n", "\n").replaceAll("\r", "\n"));
 }
 
 /**
@@ -1450,7 +1488,9 @@ export function specToNode(spec: BlockSpec, opts: SpecOptions, id = opts.newId()
           "A video block needs `video.url`, a link to a YouTube, Vimeo, Bilibili, Dailymotion or Niconico video, or to a video file",
         );
       }
-      node = { id, type, data: { url, title: trimSpace(str(video.title)) } };
+      const notes = normalizeNotes(str(video.notes));
+      if ([...notes].length > MAX_NOTES) throw new SpecError(`A video's notes take at most ${MAX_NOTES} characters`);
+      node = { id, type, data: { url, title: trimSpace(str(video.title)), ...(notes ? { notes } : {}) } };
       break;
     }
     case "link_preview": {
@@ -1713,7 +1753,7 @@ export function nodeView(
       view.image = { url: data.url, alt: data.alt };
       break;
     case "video":
-      view.video = { url: data.url, title: data.title };
+      view.video = { url: data.url, title: data.title, ...("notes" in data ? { notes: data.notes } : {}) };
       break;
     case "math_equation":
       view.formula = typeof data.formula === "string" ? data.formula : "";
@@ -1777,8 +1817,12 @@ function blockText(node: NodeJSON): string {
   switch (node.type) {
     case "chart":
     case "embed":
-    case "video":
       return str("title");
+    case "video": {
+      // Its notes too, for search to find what is said in it.
+      const notes = str("notes");
+      return notes ? trimSpace(str("title") + "\n" + notes) : str("title");
+    }
     case "link_preview":
     case "file":
       // Its title or name, else its link (doc.cardTitle).

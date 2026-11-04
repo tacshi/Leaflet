@@ -190,7 +190,13 @@ func startOf(t string) int {
 	return s
 }
 
-// WatchURL is the video's page on its site, or the file.
+// At is the video from seconds into it.
+func (v Video) At(sec int) Video {
+	v.Start = max(sec, 0)
+	return v
+}
+
+// WatchURL is the video's page on its site, or the file, from its start.
 func (v Video) WatchURL() string {
 	switch v.Provider {
 	case "file":
@@ -199,6 +205,9 @@ func (v Video) WatchURL() string {
 		u := "https://vimeo.com/" + v.ID
 		if v.Hash != "" {
 			u += "/" + v.Hash
+		}
+		if v.Start > 0 {
+			u += "#t=" + strconv.Itoa(v.Start) + "s"
 		}
 		return u
 	case "bilibili":
@@ -215,7 +224,11 @@ func (v Video) WatchURL() string {
 		}
 		return u
 	case "dailymotion":
-		return "https://www.dailymotion.com/video/" + v.ID
+		u := "https://www.dailymotion.com/video/" + v.ID
+		if v.Start > 0 {
+			u += "?start=" + strconv.Itoa(v.Start)
+		}
+		return u
 	case "niconico":
 		u := "https://www.nicovideo.jp/watch/" + v.ID
 		if v.Start > 0 {
@@ -286,7 +299,9 @@ func (v Video) PlayerURL(autoplay bool) string {
 		}
 		return u
 	}
-	u := "https://www.youtube-nocookie.com/embed/" + v.ID + "?" + play + "playsinline=1&rel=0"
+	// The page around the player seeks it by message, which YouTube's
+	// takes only with its API on.
+	u := "https://www.youtube-nocookie.com/embed/" + v.ID + "?" + play + "playsinline=1&rel=0&enablejsapi=1"
 	if v.Start > 0 {
 		u += "&start=" + strconv.Itoa(v.Start)
 	}
@@ -296,6 +311,7 @@ func (v Video) PlayerURL(autoplay bool) string {
 // InfoURL is where the site tells the video's title and picture, as
 // ReadInfo reads them, or "" for a file, which has no site to ask.
 func (v Video) InfoURL() string {
+	v = v.At(0)
 	switch v.Provider {
 	case "file":
 		return ""

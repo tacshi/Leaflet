@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // ToolError is a tool call an agent made that cannot be applied. The
@@ -240,6 +241,12 @@ func specToNode(spec map[string]any, id, author string, depth int, made *int) (*
 			return nil, err
 		}
 		n.Data = vn.Data
+		notes, _ := v["notes"].(string)
+		if notes = NormalizeNotes(notes); utf8.RuneCountInString(notes) > MaxNotes {
+			return nil, toolErr("A video's notes take at most %d characters.", MaxNotes)
+		} else if notes != "" {
+			n.Data["notes"] = notes
+		}
 	}
 	if kids, ok := spec["children"].([]any); ok && len(kids) > 0 && !NestableTypes[typ] {
 		return nil, toolErr("Only list blocks can have children, not %q.", typ)
@@ -669,7 +676,7 @@ func BlockViews(c *Content) []map[string]any {
 			case "image":
 				v["image"] = present(n, "url", "alt")
 			case "video":
-				v["video"] = present(n, "url", "title")
+				v["video"] = present(n, "url", "title", "notes")
 			case "math_equation":
 				v["formula"] = n.Str("formula")
 			case "diagram":

@@ -57,6 +57,10 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 - Markdown のショートカット、`/` メニュー、メンバー・エージェント・ページへの
   `@` メンション、文字色を変えられる選択ツールバー、折りたためる見出し、
   アウトライン、ページや個々のブロックへのリンク。
+- YouTube、Vimeo、Bilibili、Dailymotion、ニコニコの動画や動画ファイルを
+  ページ内で再生し、それぞれの下に動画の概要欄のようなメモを置けます：
+  メモの時刻をクリックすると、その動画をそこから再生します。動画や録音の
+  ある場面へのリンクは、どのページやチャットからでもその場面から再生します。
 - 入れ子のページとフォルダ、テンプレート、ページの複製、検索、Markdown と PDF
   への書き出し。
 - 名前付きバージョンを持つページ履歴と、任意のバージョンからの変更点の表示
@@ -71,6 +75,9 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
   `create_subpage`、ほかのページの読み取りがオンなら `list_pages` と
   `read_other_page` も）で、履歴のスナップショットを取ってからページに
   ストリーミングされ、1 回の取り消し単位になります。
+- エージェントは YouTube と Vimeo の動画で話されている内容を字幕から読み
+  （`read_video_transcript`）、場面ごとの時刻付きで動画のメモを書き、動画や
+  録音のある場面をリンクで示せます。
 - 許可すれば、エージェントはウェブを使えます：`read_web_page` はページを
   リンク付きのテキストとして読み、`web_search` はエージェント自身のプロバイダ
   （OpenAI、Claude、xAI、OpenRouter、GLM、ChatGPT プラン）で検索します。
@@ -301,7 +308,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/webpage` | 単独で開けるウェブページとしてのページ。公開リンクで共有し、書き出し › PDF で印刷するもので、両方のアプリで使います |
 | `internal/starters` | Leaflet に付属するテンプレート |
 | `internal/export` | すべてのページを、画像、ファイル、録音とともに Markdown の zip に書き出す |
-| `internal/web` | リンクカード、画像、動画の情報、エージェントが読むページを、公開アドレスからだけ読み込む |
+| `internal/web` | リンクカード、画像、動画の情報と字幕、エージェントが読むページを、公開アドレスからだけ読み込む |
 | `internal/store` | SQLite（純 Go）のテーブル、送信トレイ、設定 |
 | `internal/remote` | HTTP 経由の Supabase：Auth、PostgREST、Storage、Edge Functions |
 | `internal/sync` | 送信トレイのプッシュ、プル、アカウントの引き継ぎ、デバイスのハートビート（Supabase または iCloud Drive 経由） |

@@ -55,6 +55,8 @@ export function systemPrompt(ctx: PromptContext): string {
       "- For code, insert a code block with the code in text, verbatim, and its language; never a fence in a paragraph.",
       "- For a note, tip or warning to stand out, insert a callout with a tone. To keep long detail out of the way, put it in a toggle_list's children, the summary in its text.",
       "- For a formula, insert a math_equation with its TeX; for a flowchart, sequence or other diagram, a diagram with its Mermaid source. For a video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or a link to a video file, a video block with its url rather than the link as text; to point at a web page, a link_preview with its url.",
+      "- A video block's notes show under it, a plain-text line each, no Markdown: a time that starts a line, as 0:00 or 1:02:03, plays the video from there when clicked. Write a video's summary, chapters or key moments in its notes, with replace_block keeping its url, each line starting with the time it is about. Read what is said in a YouTube or Vimeo video with read_video_transcript. Take every time from a transcript, a recording's or a video's, never guess one.",
+      "- To cite a moment of a video or a recording, in this page or your reply, link its time to it: [1:23](leaflet://page/<page id>#<block id>?t=83), t in seconds. A click plays it from there.",
       "- Recording blocks carry their transcript: read it there. Asked to write a recording up in the page, put the result below it, for example a heading with key points.",
       "- If a tool returns an error, fix the call and try again.",
       "- All your edits in this run are one undo step for the person, so finish the job rather than asking for permission mid-way.",

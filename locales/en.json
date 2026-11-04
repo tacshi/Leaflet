@@ -2066,6 +2066,10 @@
       }
     }
   },
+  "agentReadingVideo": "Reading what is said in the video…",
+  "@agentReadingVideo": {
+    "description": "The agent's reply while it reads a video's captions, for what is said in it."
+  },
   "agentReadingWeb": "Reading a web page…",
   "@agentReadingWeb": {
     "description": "The agent chat's reply while an agent reads a web page whose site is not known."
@@ -2975,6 +2979,60 @@
     "placeholders": {
       "error": {
         "type": "String"
+      }
+    }
+  },
+  "videoAddNotes": "Add notes…",
+  "@videoAddNotes": {
+    "description": "Video block menu item: opens the dialog that writes notes under the video, its lines starting with times that play the video from there."
+  },
+  "videoEditNotes": "Edit notes",
+  "@videoEditNotes": {
+    "description": "Video block menu item, and the button over its notes while the block is hovered: opens the dialog that writes them."
+  },
+  "videoNotesTitle": "Video notes",
+  "@videoNotesTitle": {
+    "description": "Title of the dialog that writes a video block's notes."
+  },
+  "videoNotesHint": "Start a line with a time, as 1:23 or 1:02:03: a click on it plays the video from there.",
+  "@videoNotesHint": {
+    "description": "Video notes dialog: under its title, how a time in the notes works."
+  },
+  "videoNotesPlaceholder": "0:00 Introduction\n1:23 The first idea\n4:56 A demo",
+  "@videoNotesPlaceholder": {
+    "description": "Video notes dialog: the text area's placeholder, a line per moment of the video after its time."
+  },
+  "videoNotesTooLong": "Notes take at most {max} characters.",
+  "@videoNotesTooLong": {
+    "description": "Video notes dialog: notes past the most a video block keeps.",
+    "placeholders": {
+      "max": {
+        "type": "int",
+        "example": "20000"
+      }
+    }
+  },
+  "videoCopyMoment": "Copy link to {time}",
+  "@videoCopyMoment": {
+    "description": "Menu of a line of a video's notes: copies a link to that moment of the video, which plays it from there when clicked in a page or a chat.",
+    "placeholders": {
+      "time": {
+        "type": "String",
+        "example": "1:23"
+      }
+    }
+  },
+  "videoSummarize": "Summarize with agent",
+  "@videoSummarize": {
+    "description": "Video block menu item, for a video whose site gives its captions: asks the agent to write the video's notes from what is said in it."
+  },
+  "videoSummarizePrompt": "Summarize the video “{title}” in its notes: a line for each key moment, starting with its time.",
+  "@videoSummarizePrompt": {
+    "description": "Chat message sent to the agent, and shown as the user's, by a video block's Summarize with agent; the agent reads the video's transcript itself.",
+    "placeholders": {
+      "title": {
+        "type": "String",
+        "example": "How caches work"
       }
     }
   },

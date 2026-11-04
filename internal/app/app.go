@@ -198,6 +198,11 @@ type App struct {
 	// videoInfo what each video's site said about it, by provider and ID.
 	videos    map[string]*mygo.WebView
 	videoInfo webAnswers[videoInfo]
+	// notesRead are videos' notes read in lines, by their text, and
+	// notesOpen the video blocks whose long notes show whole, by block ID;
+	// on the main thread only.
+	notesRead map[string][]doc.NoteLine
+	notesOpen map[string]bool
 	// linkInfo is what each link card's page said about itself, by link.
 	linkInfo webAnswers[web.LinkInfo]
 	// drafts are what was typed on each page and not sent yet, kept as it
@@ -402,7 +407,11 @@ func (a *App) start() error {
 	// here, a web link the browser.
 	a.md.OnLink = func(url string) {
 		if id, ok := doc.PageLinkID(url); ok {
-			a.update(func() { a.openBlock(id, doc.LinkBlock(url)) })
+			at, moment := doc.LinkMoment(url)
+			if !moment {
+				at = -1
+			}
+			a.update(func() { a.openLink(id, doc.LinkBlock(url), at) })
 		} else if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") || strings.HasPrefix(url, "mailto:") {
 			_ = mygo.Shell.OpenExternal(url)
 		}

@@ -25,6 +25,7 @@ import {
   plainText,
   type RecordingInfo,
   trimSpace,
+  type VideoRef,
 } from "../_shared/blocks.ts";
 import {
   agentViews,
@@ -45,6 +46,7 @@ import { pageFits, type Surface, systemPrompt, userMessage } from "../_shared/pr
 import { isTimeout } from "../_shared/net.ts";
 import { readPage } from "../_shared/page.ts";
 import { canSearch, searchWeb } from "../_shared/search.ts";
+import { readCaptions } from "../_shared/captions.ts";
 import { SAVE_MS } from "../_shared/deadline.ts";
 import { lastKey, newKeyAfter } from "../_shared/sortkey.ts";
 
@@ -74,6 +76,8 @@ export interface AgentDeps {
   /** Searches the web through the provider, and reads a page of it: searchWeb and readPage, or a test's. */
   searchWeb?: typeof searchWeb;
   readPage?: typeof readPage;
+  /** Reads a video's captions from its site: readCaptions, or a test's. */
+  readCaptions?: typeof readCaptions;
 }
 
 interface Job {
@@ -499,6 +503,9 @@ async function runJob(
           comments: [],
         };
       },
+      // A video's captions are read from its site, whose link is on the
+      // page, with or without the web.
+      readCaptions: (video: VideoRef) => (deps.readCaptions ?? readCaptions)(video, webSignal()),
       ...(web
         ? {
           readWebPage: (url: string) => (deps.readPage ?? readPage)(url, webSignal()),
@@ -687,7 +694,10 @@ async function runJob(
           const tool = call.function.name;
           // A call that takes a while, the app says it does, as searching
           // the web (activity in internal/agents).
-          if (i < MAX_ROUND_CALLS && (tool === "web_search" || tool === "read_web_page")) {
+          if (
+            i < MAX_ROUND_CALLS &&
+            (tool === "web_search" || tool === "read_web_page" || tool === "read_video_transcript")
+          ) {
             emit({ type: "call", tool, args: webArgs(call.function.arguments) });
           }
           // Calls past the most one answer makes are refused, for the

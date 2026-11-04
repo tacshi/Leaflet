@@ -2,6 +2,7 @@ package agents
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -78,8 +79,9 @@ var blockSchema = map[string]any{
 			"required":   []string{"html"}},
 		"image": map[string]any{"type": "object", "properties": map[string]any{"url": map[string]any{"type": "string"}, "alt": map[string]any{"type": "string"}}, "required": []string{"url"}},
 		"video": map[string]any{"type": "object", "description": "A video on YouTube, Vimeo, Bilibili, Dailymotion or Niconico, or a video file, that plays in the page.",
-			"properties": map[string]any{"url": map[string]any{"type": "string", "description": "The video's link on its site, or a link to the video file (.mp4, .webm, .mov)."}, "title": map[string]any{"type": "string"}},
-			"required":   []string{"url"}},
+			"properties": map[string]any{"url": map[string]any{"type": "string", "description": "The video's link on its site, or a link to the video file (.mp4, .webm, .mov)."}, "title": map[string]any{"type": "string"},
+				"notes": map[string]any{"type": "string", "description": "Plain-text notes shown under the video, a line each, no Markdown: a line that starts with a time, as 0:00 or 1:02:03, plays the video from there when clicked. For its summary, chapters or key moments."}},
+			"required": []string{"url"}},
 	},
 	"required": []string{"type"},
 }
@@ -137,6 +139,8 @@ func tool(name, desc string, props any, required ...string) map[string]any {
 func ToolDefinitions(crossPage, readOnly bool) []map[string]any {
 	out := []map[string]any{
 		tool("read_page", "Read the whole page: every block with its ID, subpage titles, and comment threads. An embed's html longer than 30,000 characters is left out, its html_length given instead: to change such an embed, write its html whole.", map[string]any{}),
+		tool("read_video_transcript", "Read what is said in a video block of this page, from its site's captions: lines of [m:ss] text, each the time it starts. Only YouTube's and Vimeo's videos have them, and not every one. Read it to summarize a video, write its notes, or cite a moment of it.",
+			map[string]any{"id": map[string]any{"type": "string", "description": "The video block's ID."}}, "id"),
 	}
 	if !readOnly {
 		out = append(out, editTools()...)
@@ -193,6 +197,8 @@ type ToolContext struct {
 	ReadOtherPage func(id string) map[string]any
 	// Transcript is a recording's transcript as text, "" when there is none.
 	Transcript func(recordingID string) string
+	// Captions reads a video's captions from its site; nil reads none.
+	Captions func(v doc.Video) (web.Captions, error)
 	// Request is what the user asked the run, whose URLs a block may load
 	// as this page's may (checkURLs).
 	Request string
@@ -542,6 +548,71 @@ func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
 	return out, nil
 }
 
+// readTranscript reads what is said in a video block of the page, from
+// its site's captions, as lines of the times they start and their words.
+// Once the run has read the user's other pages, only a video the page had
+// as it began, or the request names, may be read: a video the run put
+// there itself could be named for what it read.
+func (x *Executor) readTranscript(args map[string]any) (map[string]any, error) {
+	id, err := str(args, "id")
+	if err != nil {
+		return nil, err
+	}
+	n := x.block(id)
+	switch {
+	case n == nil:
+		return nil, noBlock(id)
+	case n.Type == "recording":
+		return nil, terr("Block %s is a recording: its transcript is in its view, from read_page.", id)
+	case n.Type != "video":
+		return nil, terr("Block %s is a %s, not a video.", id, n.Type)
+	}
+	link := n.Str("url")
+	v, ok := doc.ParseVideoURL(link)
+	switch {
+	case !ok:
+		return nil, terr("Block %s has no video Leaflet plays.", id)
+	case !web.HasCaptions(v):
+		return nil, terr("Leaflet can read what is said only in YouTube's and Vimeo's videos, whose sites give their captions; this one is a %s video. Work from what the user tells you of it.", v.Provider)
+	case x.Ctx.Captions == nil:
+		return nil, terr("Reading videos' transcripts is off.")
+	case x.armed && !x.given(strings.TrimSpace(link)):
+		return nil, terr(errWebClosed)
+	}
+	c, err := x.Ctx.Captions(v)
+	var restricted *web.RestrictedError
+	switch {
+	case errors.Is(err, web.ErrNoCaptions):
+		return nil, terr("The video has no captions to read: its creator gave none, and its site made none. Work from what the user tells you of it.")
+	case errors.Is(err, web.ErrRefused):
+		return nil, terr("%s refused to give the video's captions to Leaflet just now. Tell the user; trying again later may work.", siteName(v))
+	case errors.As(err, &restricted):
+		return nil, terr("%s won't show this video here (%v), so its captions can't be read.", siteName(v), restricted)
+	case err != nil:
+		return nil, terr("Could not read the video's captions: %v", err)
+	}
+	segs := make([]store.Segment, 0, len(c.Lines))
+	for _, l := range web.Passages(c.Lines) {
+		segs = append(segs, store.Segment{StartMs: l.StartMs, Text: l.Text})
+	}
+	out := map[string]any{"id": id, "language": c.Language, "auto_generated": c.Auto, "transcript": TranscriptText(segs)}
+	if t := n.Str("title"); t != "" {
+		out["title"] = t
+	}
+	return out, nil
+}
+
+// siteName is the name of a video's site.
+func siteName(v doc.Video) string {
+	switch v.Provider {
+	case "vimeo":
+		return "Vimeo"
+	case "youtube":
+		return "YouTube"
+	}
+	return v.Provider
+}
+
 // saw starts keeping the URLs the run finds on the web, as it first reads
 // it.
 func (x *Executor) saw() {
@@ -658,6 +729,8 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		return x.searchWeb(args)
 	case "read_web_page":
 		return x.readWeb(args)
+	case "read_video_transcript":
+		return x.readTranscript(args)
 	}
 	return nil, terr("Unknown tool %q.", name)
 }

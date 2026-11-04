@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 /// ICloudRows are iCloud sync's rows in Settings › Sync and storage, first
 /// as on the desktop: the switch, and the folder in iCloud Drive pages sync
-/// through.
+/// through, with the button that chooses it beside it.
 struct ICloudRows: View {
     @Environment(AppModel.self) private var app
 
@@ -26,9 +26,10 @@ struct ICloudRows: View {
             Text(desc(on: on, signedIn: signedIn))
         }
         .disabled(signedIn || sync.turning != nil)
-        LabeledContent(LI.iCloudFolder, value: sync.folderName ?? LI.iCloudNoFolder)
-        Button(LI.iCloudChooseFolder) { sync.choose() }
-            .disabled(signedIn || sync.turning != nil)
+        ActionRow(label: LI.iCloudFolder, desc: sync.folderName ?? LI.iCloudNoFolder) {
+            Button(LI.iCloudChooseFolder) { sync.choose() }
+                .disabled(signedIn || sync.turning != nil)
+        }
     }
 
     /// picker picks the folder, as Choose Folder asks; Settings shows it,

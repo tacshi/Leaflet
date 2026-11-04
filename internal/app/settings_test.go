@@ -598,7 +598,7 @@ func TestSyncMessages(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	_, late := be.Insert(ctx, "slow", map[string]any{"id": "p"})
-	_, out := remote.New(remote.Settings{URL: hs.URL, AnonKey: "test"}, a.st).Insert(t.Context(), "pages", map[string]any{"id": "p"})
+	_, out := remote.New(remote.Settings{URL: hs.URL, PublishableKey: "test"}, a.st).Insert(t.Context(), "pages", map[string]any{"id": "p"})
 	for _, c := range []struct {
 		err  error
 		want string

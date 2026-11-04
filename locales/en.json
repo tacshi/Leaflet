@@ -4976,7 +4976,7 @@
   "@signinSubtitle": {
     "description": "The sign-in page, under its title."
   },
-  "signinNoServer": "SUPABASE_URL is set without SUPABASE_ANON_KEY. Set both to sign in to that server, or neither to sign in with Supabase.",
+  "signinNoServer": "SUPABASE_URL is set without SUPABASE_PUBLISHABLE_KEY. Set both to sign in to that server, or neither to sign in with Supabase.",
   "@signinNoServer": {
     "description": "The sign-in page when the environment sets a server's URL but not its key."
   },

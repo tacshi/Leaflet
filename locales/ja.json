@@ -952,7 +952,7 @@
   "externalDisconnectFailed": "{app} の接続を解除できませんでした：{error}",
   "signinTitle": "Supabase で同期",
   "signinSubtitle": "Leaflet はページをあなた自身の Supabase プロジェクトに保存し、デバイス間で同期します。",
-  "signinNoServer": "SUPABASE_URL が設定されていますが、SUPABASE_ANON_KEY がありません。そのサーバーにサインインするには両方を、Supabase でサインインするにはどちらも設定しないでください。",
+  "signinNoServer": "SUPABASE_URL が設定されていますが、SUPABASE_PUBLISHABLE_KEY がありません。そのサーバーにサインインするには両方を、Supabase でサインインするにはどちらも設定しないでください。",
   "signinContinueSupabase": "Supabase で続ける",
   "signinNoSupabase": "Supabase のアカウントがない場合：",
   "signinCreateSupabase": "無料で作成",

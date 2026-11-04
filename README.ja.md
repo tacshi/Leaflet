@@ -150,7 +150,7 @@ go tool mygo dev
 ローカルスタックなど特定のサーバーを使う場合は、それを指定し、メールで届くコードでサインインします：
 
 ```bash
-SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key> go tool mygo dev
+SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_PUBLISHABLE_KEY=<publishable key> go tool mygo dev
 ```
 
 API キーなしでエージェントを試すには、ローカルのモデルサーバー（たとえば
@@ -253,13 +253,13 @@ Windows インストーラや `--skip-notarize` でビルドした macOS のも�
 `--allow-unsigned`（`-AllowUnsigned`）か `LEAFLET_ALLOW_UNSIGNED=1` で
 公開すると明示しない限りアップロードされません。
 
-`SUPABASE_URL` と `SUPABASE_ANON_KEY` が 1 回の実行にサーバーを指定するように、
+`SUPABASE_URL` と `SUPABASE_PUBLISHABLE_KEY` が 1 回の実行にサーバーを指定するように、
 ビルドにサーバーを 1 つ組み込むには、その URL と Publishable キーを
 `MYGO_LDFLAGS` でリンカに渡します。`go tool mygo build` とスクリプトはこれを
 そのまま渡します：
 
 ```bash
-MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://<ref>.supabase.co -X leaflet/internal/remote.DefaultAnonKey=<publishable key>" scripts/build-release.sh
+MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://<ref>.supabase.co -X leaflet/internal/remote.DefaultPublishableKey=<publishable key>" scripts/build-release.sh
 ```
 
 ## 開発

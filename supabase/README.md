@@ -118,7 +118,7 @@ supabase functions serve       # serve every function with hot reload
 the older anon key works too). Run the app against it:
 
 ```bash
-SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key from supabase start> go tool mygo dev
+SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_PUBLISHABLE_KEY=<publishable key from supabase start> go tool mygo dev
 ```
 
 Without these variables the app uses the project it was built with
@@ -161,8 +161,9 @@ supabase functions deploy agent providers stt account
 ```
 
 The app takes the project URL and its Publishable key (Project Settings › API
-Keys) as `SUPABASE_URL` and `SUPABASE_ANON_KEY`; it sends the key only as
-`apikey`. The Secret key bypasses row-level security and never goes in the app.
+Keys) as `SUPABASE_URL` and `SUPABASE_PUBLISHABLE_KEY`; it sends the key only
+as `apikey`. The Secret key bypasses row-level security and never goes in the
+app.
 
 `SUPABASE_URL`, `SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` are
 provided to functions automatically. There is no app-wide Soniox key: each

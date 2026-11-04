@@ -185,7 +185,7 @@ func (c *Core) ConnectProject(ctx context.Context, api *supabaseapi.Client, p su
 		return nil, err
 	}
 	progress(StepSigning, 0, 0)
-	project := remote.Settings{URL: p.URL(), AnonKey: publishable, Ref: p.Ref, Name: p.Name}
+	project := remote.Settings{URL: p.URL(), PublishableKey: publishable, Ref: p.Ref, Name: p.Name}
 	return c.signInAsOwner(ctx, api, p, project, secret)
 }
 

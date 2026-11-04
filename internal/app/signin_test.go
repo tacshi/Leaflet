@@ -308,7 +308,7 @@ func TestEmailCodeSendsAgain(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	t.Cleanup(hs.Close)
-	a.backend = remote.New(remote.Settings{URL: hs.URL, AnonKey: "test"}, a.st)
+	a.backend = remote.New(remote.Settings{URL: hs.URL, PublishableKey: "test"}, a.st)
 	tt := ui.NewTester(func(c *ui.Context) { a.emailCodeForm(c) }, 600, 400)
 	tt.Frame()
 	a.signIn.email = "sam@example.com"

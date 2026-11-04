@@ -132,7 +132,7 @@ Leaflet 的登录 Worker 中（见 [`supabase/README.md`](supabase/README.md)）
 如果要改用某一台服务器（例如本地栈），设置它，并通过邮件中的验证码登录：
 
 ```bash
-SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_ANON_KEY=<publishable key> go tool mygo dev
+SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_PUBLISHABLE_KEY=<publishable key> go tool mygo dev
 ```
 
 想在没有 API 密钥的情况下试用智能体，可以运行一个本地模型服务（例如用
@@ -227,12 +227,12 @@ Windows 安装程序，以及用 `--skip-notarize` 构建的 macOS 安装包，�
 上传，除非用 `--allow-unsigned`（`-AllowUnsigned`）或
 `LEAFLET_ALLOW_UNSIGNED=1` 表明仍要发布它们。
 
-就像 `SUPABASE_URL` 和 `SUPABASE_ANON_KEY` 为一次运行指定服务器一样，要把一个
+就像 `SUPABASE_URL` 和 `SUPABASE_PUBLISHABLE_KEY` 为一次运行指定服务器一样，要把一个
 服务器内置进构建，可以通过 `MYGO_LDFLAGS` 把它的 URL 和 Publishable key 传给
 链接器，`go tool mygo build` 和这些脚本会原样传递它：
 
 ```bash
-MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://<ref>.supabase.co -X leaflet/internal/remote.DefaultAnonKey=<publishable key>" scripts/build-release.sh
+MYGO_LDFLAGS="-X leaflet/internal/remote.DefaultURL=https://<ref>.supabase.co -X leaflet/internal/remote.DefaultPublishableKey=<publishable key>" scripts/build-release.sh
 ```
 
 ## 开发

@@ -31,10 +31,3 @@ func (a *App) markdownOptions() doc.MarkdownOptions {
 // withTranscripts is a page's content to export: a copy, each recording's
 // transcript after its block as lines of text.
 func (a *App) withTranscripts(c *doc.Content) *doc.Content { return export.WithTranscripts(a.st, c) }
-
-// ownFiles returns where each of files is on this device, as
-// export.OwnFiles.
-func ownFiles(files []store.File) (localPath func(fileID string) string) {
-	localPath, _ = export.OwnFiles(files)
-	return localPath
-}

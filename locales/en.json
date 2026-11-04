@@ -24,9 +24,17 @@
   "@appMenuSearch": {
     "description": "The File menu: open search."
   },
-  "appMenuExportMarkdown": "Export Page as Markdown…",
+  "appMenuExport": "Export",
+  "@appMenuExport": {
+    "description": "The File menu: the submenu that saves the open page as a file, Markdown or PDF."
+  },
+  "appMenuExportMarkdown": "Markdown…",
   "@appMenuExportMarkdown": {
-    "description": "The File menu: save the open page as a Markdown file."
+    "description": "The File menu's Export submenu: save the open page as a Markdown file."
+  },
+  "appMenuExportPDF": "PDF…",
+  "@appMenuExportPDF": {
+    "description": "The File menu's Export submenu: save the open page as a PDF."
   },
   "appMenuSpeech": "Speech",
   "@appMenuSpeech": {
@@ -482,7 +490,21 @@
   },
   "hostExportTitle": "Export as Markdown",
   "@hostExportTitle": {
-    "description": "Title of the save dialog exporting a page."
+    "description": "Title of the save dialog exporting a page as Markdown."
+  },
+  "hostExportPDFTitle": "Export as PDF",
+  "@hostExportPDFTitle": {
+    "description": "Title of the save dialog exporting a page as a PDF."
+  },
+  "hostExportingPDF": "Exporting {name}…",
+  "@hostExportingPDF": {
+    "description": "Toast while a page is made into a PDF, with the file's name.",
+    "placeholders": {
+      "name": {
+        "type": "String",
+        "example": "Trip.pdf"
+      }
+    }
   },
   "hostErrorExport": "Could not export: {error}",
   "@hostErrorExport": {
@@ -2707,9 +2729,17 @@
   "@sidebarShareEllipsis": {
     "description": "Page menu item."
   },
-  "sidebarExportMarkdown": "Export as Markdown…",
+  "sidebarExport": "Export",
+  "@sidebarExport": {
+    "description": "Page menu item, on the desktop and iOS: the submenu that saves the page as a file, Markdown or PDF."
+  },
+  "sidebarExportMarkdown": "Markdown…",
   "@sidebarExportMarkdown": {
-    "description": "Page menu item."
+    "description": "The page menu's Export submenu: save the page as a Markdown file."
+  },
+  "sidebarExportPDF": "PDF…",
+  "@sidebarExportPDF": {
+    "description": "The page menu's Export submenu: save the page as a PDF."
   },
   "sidebarKeepOnDevice": "Keep on this device",
   "@sidebarKeepOnDevice": {

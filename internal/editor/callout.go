@@ -20,15 +20,16 @@ const (
 
 // CalloutLook is the tint, border, icon color and icon of a tone.
 func CalloutLook(tone string, pal *theme.Palette) (bg, border, fg ui.Color, icon string) {
+	icon = doc.CalloutIcon(tone)
 	switch doc.CalloutTone(tone) {
 	case "tip":
-		return pal.OkBg, pal.OkBorder, pal.OkText, "lightbulb"
+		return pal.OkBg, pal.OkBorder, pal.OkText, icon
 	case "warning":
-		return pal.WarnBg, pal.WarnBorder, pal.WarnText, "triangle-alert"
+		return pal.WarnBg, pal.WarnBorder, pal.WarnText, icon
 	case "danger":
-		return pal.DangerBg, pal.DangerBorder, pal.DangerText, "octagon-alert"
+		return pal.DangerBg, pal.DangerBorder, pal.DangerText, icon
 	}
-	return pal.AccentSoft, pal.AccentSoftBorder, pal.AccentText, "info"
+	return pal.AccentSoft, pal.AccentSoftBorder, pal.AccentText, icon
 }
 
 // collapsed reports whether a block is a toggle folded shut, its children

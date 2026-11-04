@@ -38,10 +38,10 @@ import (
 
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
-	"leaflet/internal/recording"
 	"leaflet/internal/rendered"
 	"leaflet/internal/store"
 	"leaflet/internal/theme"
+	"leaflet/internal/webpage"
 	"leaflet/locales"
 )
 
@@ -469,15 +469,22 @@ func (a *App) pubChanged(ch store.Change) {
 // pubJob is what the next render of p needs, read on the main thread.
 func (a *App) pubJob(p *pubLink) pubJob {
 	p.seq++
-	titles := map[string]string{}
-	for _, pg := range a.pages {
-		titles[pg.ID] = pg.DisplayTitle()
-	}
+	titles := a.pageTitles()
 	p.mu.Lock()
 	threads, comments := maps.Clone(p.threads), p.comments
 	p.mu.Unlock()
 	return pubJob{st: a.st, seq: p.seq, page: p.page, title: a.pageTitleOf(p.page), token: p.token, titles: titles,
 		files: slices.Clone(a.files), comments: comments, threads: threads, head: pubHead("/"+p.token+"/", comments)}
+}
+
+// pageTitles are the pages' titles for display, by ID, for work off the
+// main thread.
+func (a *App) pageTitles() map[string]string {
+	titles := map[string]string{}
+	for _, pg := range a.pages {
+		titles[pg.ID] = pg.DisplayTitle()
+	}
+	return titles
 }
 
 // render renders the page for visitors, off the main thread, unless a
@@ -487,9 +494,6 @@ func (p *pubLink) render(job pubJob) {
 	if c == nil {
 		c = doc.Empty()
 	}
-	localPath := ownFiles(job.files)
-	files := map[string]pubFile{}
-	names := map[string]string{}
 	blocks := map[string]string{}
 	c.Walk(func(n, _ *doc.Node) { blocks[n.ID] = squash(n.Delta().Plain()) })
 	embeds := map[string]string{}
@@ -503,51 +507,17 @@ func (p *pubLink) render(job pubJob) {
 			}
 		}
 	}
-	// Only the page's own files and recordings go out: a block may name
-	// any, as one an editor of the page wrote could.
-	own, ownPaths := map[string]bool{}, map[string]bool{}
-	for _, f := range job.files {
-		if f.PageID == job.page {
-			own[f.ID] = true
-			if lp := localPath(f.ID); lp != "" {
-				ownPaths[lp] = true
-			}
-		}
-	}
 	prefix := "/" + job.token + "/"
-	page := doc.PageHTML(job.title, c, doc.HTMLOptions{
-		Lang: i18n.Locale(),
-		Head: job.head,
-		Image: func(n *doc.Node) string {
-			local, ok := strings.CutPrefix(n.Str("url"), "file://")
-			if !ok {
-				return ""
-			}
-			// An uploaded file's url is a path on the device that uploaded
-			// it: this device keeps its copy elsewhere, or none.
-			if id := n.Str("file_id"); id != "" {
-				if !own[id] {
-					return ""
-				}
-				local = localPath(id)
-			}
-			if !ownPaths[local] {
-				return ""
-			}
-			ext := strings.ToLower(filepath.Ext(local))
-			if !doc.ImageExts[ext] {
-				return ""
-			}
-			if name, ok := names[local]; ok {
-				return prefix + "f/" + name
-			}
-			if info, err := os.Stat(local); err != nil || !info.Mode().IsRegular() {
-				return ""
-			}
-			name := strconv.Itoa(len(files)+1) + ext
-			files[name], names[local] = pubFile{typ: mime.TypeByExtension(ext), path: local}, name
-			return prefix + "f/" + name
-		},
+	srv := &pubServer{prefix: prefix, files: map[string]pubFile{}, names: map[string]string{}}
+	page := webpage.HTML(c, webpage.Options{
+		Store:  job.st,
+		Page:   job.page,
+		Title:  job.title,
+		Titles: job.titles,
+		Files:  job.files,
+		Lang:   i18n.Locale(),
+		Head:   job.head,
+		Tail:   commentsPanel(c, threads, job.comments),
 		Script: func(name string) string {
 			// Visitors see the link's threads even once commenting stops.
 			if name == "comments" && !job.comments && len(threads) == 0 {
@@ -555,7 +525,6 @@ func (p *pubLink) render(job pubJob) {
 			}
 			return prefix + name + ".js"
 		},
-		Tail: commentsPanel(c, threads, job.comments),
 		Embed: func(n *doc.Node) string {
 			src := n.Str("html")
 			if strings.TrimSpace(src) == "" {
@@ -564,77 +533,9 @@ func (p *pubLink) render(job pubJob) {
 			embeds[n.ID] = src
 			return prefix + "e/" + url.PathEscape(n.ID)
 		},
-		Code:        codeHTML,
-		CalloutIcon: calloutIcon,
-		Icon:        theme.IconSVG,
-		Chart:       chartHTML,
-		Due:         dueText,
-		File: func(n *doc.Node) (href, name, detail string) {
-			name = n.Str("name")
-			for _, f := range job.files {
-				if f.ID != n.Str("file_id") {
-					continue
-				}
-				// Another page's file is named as the block names it, and
-				// is neither served nor said to be missing.
-				if !own[f.ID] {
-					if name == "" {
-						name = locales.CardFile()
-					}
-					return "", name, ""
-				}
-				name = f.Name
-				path := localPath(f.ID)
-				if _, err := os.Stat(path); path == "" || err != nil {
-					break
-				}
-				served := strconv.Itoa(len(files)+1) + servedExt(f.Name)
-				files[served] = pubFile{typ: "application/octet-stream", path: path, name: f.Name}
-				detail = humanSize(f.SizeBytes)
-				if kind := strings.ToUpper(strings.TrimPrefix(filepath.Ext(f.Name), ".")); kind != "" {
-					detail = locales.CardFileDetail(kind, detail)
-				}
-				return prefix + "f/" + served, name, detail
-			}
-			if name == "" {
-				name = locales.CardFile()
-			}
-			return "", name, locales.CardNotOnDevice()
-		},
-		Recording: func(n *doc.Node) doc.RecordingView {
-			rec, err := job.st.Recording(n.Str("recording_id"))
-			// Another page's recording shows its block's title alone.
-			if err == nil && rec.PageID != job.page {
-				return doc.RecordingView{Title: recordingName(n, store.Recording{}, false, job.title)}
-			}
-			v := doc.RecordingView{Title: recordingName(n, rec, err == nil, job.title)}
-			if err != nil {
-				return v
-			}
-			v.Length = recording.FormatDuration(time.Duration(rec.DurationMs) * time.Millisecond)
-			// Audio still being recorded, or not on this device, has no player.
-			if path := rec.LocalPath; rec.Status != "recording" && inFolder(job.st.Dir, path) {
-				if _, err := os.Stat(path); err == nil {
-					served := strconv.Itoa(len(files)+1) + ".wav"
-					files[served] = pubFile{typ: "audio/wav", path: path}
-					v.Audio = prefix + "f/" + served
-				}
-			}
-			for _, s := range recording.Tidy(rec.Transcript) {
-				l := doc.TranscriptLine{Start: float64(s.StartMs) / 1000, Time: recording.FormatDuration(time.Duration(s.StartMs) * time.Millisecond), Text: s.Text}
-				if s.Speaker != "" {
-					l.Speaker = locales.RecSpeaker(s.Speaker)
-				}
-				v.Lines = append(v.Lines, l)
-			}
-			return v
-		},
-		PageTitle: func(id string) string {
-			if t, ok := job.titles[id]; ok {
-				return t
-			}
-			return locales.CommonUntitled()
-		},
+		Serve: srv,
+		Code:  codeHTML,
+		Chart: chartHTML,
 	})
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -642,7 +543,38 @@ func (p *pubLink) render(job pubJob) {
 		return
 	}
 	p.shown = job.seq
-	p.snap = pubSnapshot{html: page, files: files, embeds: embeds, blocks: blocks}
+	p.snap = pubSnapshot{html: page, files: srv.files, embeds: embeds, blocks: blocks}
+}
+
+// pubServer serves the shared page's files under its secret path, by
+// the names it gives them as the page renders.
+type pubServer struct {
+	prefix string
+	files  map[string]pubFile
+	// names are the pictures' names by path: a picture shown twice is
+	// served once.
+	names map[string]string
+}
+
+func (s *pubServer) Image(path, typ string) string {
+	if name, ok := s.names[path]; ok {
+		return s.prefix + "f/" + name
+	}
+	name := strconv.Itoa(len(s.files)+1) + strings.ToLower(filepath.Ext(path))
+	s.files[name], s.names[path] = pubFile{typ: typ, path: path}, name
+	return s.prefix + "f/" + name
+}
+
+func (s *pubServer) File(path, name string) string {
+	served := strconv.Itoa(len(s.files)+1) + servedExt(name)
+	s.files[served] = pubFile{typ: "application/octet-stream", path: path, name: name}
+	return s.prefix + "f/" + served
+}
+
+func (s *pubServer) Audio(path string) string {
+	served := strconv.Itoa(len(s.files)+1) + ".wav"
+	s.files[served] = pubFile{typ: "audio/wav", path: path}
+	return s.prefix + "f/" + served
 }
 
 // servedExt is the extension a file of name is served with, in lower
@@ -683,40 +615,42 @@ func pubHead(prefix string, comments bool) string {
 	return b.String()
 }
 
-// pubLook is the visitor page in Leaflet's colors, light and dark: its
-// palettes, MyGo's colors of code tokens, and the callouts' tints. It is
+// pubLook is the visitor page in Leaflet's colors, light and dark. It is
 // written the first time a page is shared.
 var pubLook = sync.OnceValue(func() string {
-	vars := func(pal *theme.Palette) string {
-		ct := editor.CodeTheme(pal)
-		var b strings.Builder
-		b.WriteString(":root{")
-		for _, v := range [][2]any{
-			{"fg", pal.Text}, {"muted", pal.TextMuted}, {"bg", pal.Surface}, {"line", pal.Border}, {"code", pal.Code},
-			{"link", pal.Accent}, {"th", pal.Ground},
-		} {
-			b.WriteString("--" + v[0].(string) + ":" + cssColor(v[1].(ui.Color)) + ";")
+	return pageLook(theme.For(false)) + "\n@media (prefers-color-scheme:dark){" + pageLook(theme.For(true)) + "}\n"
+})
+
+// pageLook is a web page of a page in a palette's colors: its tokens,
+// MyGo's colors of code tokens, and the callouts' tints.
+func pageLook(pal *theme.Palette) string {
+	ct := editor.CodeTheme(pal)
+	var b strings.Builder
+	b.WriteString(":root{")
+	for _, v := range [][2]any{
+		{"fg", pal.Text}, {"muted", pal.TextMuted}, {"bg", pal.Surface}, {"line", pal.Border}, {"code", pal.Code},
+		{"link", pal.Accent}, {"th", pal.Ground},
+	} {
+		b.WriteString("--" + v[0].(string) + ":" + cssColor(v[1].(ui.Color)) + ";")
+	}
+	for _, tone := range doc.CalloutTones {
+		bg, border, fg, _ := editor.CalloutLook(tone, pal)
+		b.WriteString("--" + tone + ":" + cssColor(bg) + ";--" + tone + "-line:" + cssColor(border) + ";--" + tone + "-icon:" + cssColor(fg) + ";")
+	}
+	b.WriteString("}")
+	for k := codeeditor.TokenKind(1); k <= codeeditor.TokenInvalid; k++ {
+		st := ct.Tokens[k]
+		b.WriteString(".k" + strconv.Itoa(int(k)) + "{color:" + cssColor(ct.TokenColor(k)))
+		if st.Italic {
+			b.WriteString(";font-style:italic")
 		}
-		for _, tone := range doc.CalloutTones {
-			bg, border, fg, _ := editor.CalloutLook(tone, pal)
-			b.WriteString("--" + tone + ":" + cssColor(bg) + ";--" + tone + "-line:" + cssColor(border) + ";--" + tone + "-icon:" + cssColor(fg) + ";")
+		if st.Bold {
+			b.WriteString(";font-weight:700")
 		}
 		b.WriteString("}")
-		for k := codeeditor.TokenKind(1); k <= codeeditor.TokenInvalid; k++ {
-			st := ct.Tokens[k]
-			b.WriteString(".k" + strconv.Itoa(int(k)) + "{color:" + cssColor(ct.TokenColor(k)))
-			if st.Italic {
-				b.WriteString(";font-style:italic")
-			}
-			if st.Bold {
-				b.WriteString(";font-weight:700")
-			}
-			b.WriteString("}")
-		}
-		return b.String()
 	}
-	return vars(theme.For(false)) + "\n@media (prefers-color-scheme:dark){" + vars(theme.For(true)) + "}\n"
-})
+	return b.String()
+}
 
 // cssColor writes a color as CSS.
 func cssColor(c ui.Color) string {
@@ -756,12 +690,6 @@ func codeHTML(code, language string) string {
 		b.WriteString(html.EscapeString(line[at:]))
 	}
 	return b.String()
-}
-
-// calloutIcon is a callout tone's icon, as the app shows it.
-func calloutIcon(tone string) string {
-	_, _, _, icon := editor.CalloutLook(tone, theme.For(false))
-	return theme.IconSVG(icon)
 }
 
 // pubCommentBody is a comment as the panel shows it: its Markdown's
@@ -879,7 +807,7 @@ func (a *App) pubHandler(p *pubLink) http.Handler {
 			}
 			serve("text/html; charset=utf-8", snap.html)
 		case rest == "math.js":
-			serve("text/javascript; charset=utf-8", rendered.KatexJS+"\n"+mathScript)
+			serve("text/javascript; charset=utf-8", rendered.PageMathJS)
 		case rest == "diagram.js":
 			serve("text/javascript; charset=utf-8", rendered.PeleModule+"\n"+rendered.ZoomScript+"\n"+diagramScript)
 		case rest == "comments.js":
@@ -1138,11 +1066,6 @@ const embedScript = `addEventListener("message", function (e) {
   document.querySelectorAll("figure.embed iframe").forEach(function (f) {
     if (f.contentWindow === e.source) f.style.height = Math.max(+f.dataset.height, Math.min(z[0], 1200)) + "px";
   });
-});`
-
-// mathScript draws the page's formulas with KaTeX, which comes before it.
-const mathScript = `document.querySelectorAll(".math[data-tex]").forEach(function (el) {
-  try { katex.render(el.dataset.tex, el, {displayMode: true, output: "mathml", throwOnError: true}); } catch (e) {}
 });`
 
 // diagramScript draws the page's diagrams with Pele and zooms them with

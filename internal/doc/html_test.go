@@ -227,3 +227,83 @@ func TestPageHTMLFoldsLongTranscript(t *testing.T) {
 		t.Errorf("a short transcript:\n%s", short)
 	}
 }
+
+// A printed page is in light colors alone, with every fold open, each
+// video a link to it, its pictures loaded with it and its scripts in it,
+// after the blocks they draw.
+func TestPageHTMLPrint(t *testing.T) {
+	text := func(id, typ, s string) *Node {
+		n := &Node{ID: id, Type: typ}
+		n.SetDelta(Delta{{Text: s}})
+		return n
+	}
+	folded := text("h1", "heading", "Later")
+	folded.Set("level", 2)
+	folded.Set("collapsed", true)
+	toggle := text("tg", "toggle_list", "More")
+	toggle.Set("collapsed", true)
+	toggle.Children = []*Node{text("in", "paragraph", "Inside")}
+	code := text("hc", "heading", "Code")
+	code.Set("level", 2)
+	c := FromBlocks([]*Node{
+		folded, text("p", "paragraph", "Hidden"), code, text("c", "code", "x"), toggle,
+		{ID: "v", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ", "title": "Song"}},
+		{ID: "i", Type: "image", Data: map[string]any{"url": "https://x.dev/c.png"}},
+		{ID: "r", Type: "recording", Data: map[string]any{"recording_id": "r1"}},
+		{ID: "m", Type: "math_equation", Data: map[string]any{"formula": "x^2"}},
+		{ID: "d", Type: "diagram", Data: map[string]any{"source": "graph TD; A-->B"}},
+	})
+	var lines []TranscriptLine
+	for i := range 12 {
+		lines = append(lines, TranscriptLine{Time: fmt.Sprint(i), Text: fmt.Sprint("line ", i)})
+	}
+	opts := HTMLOptions{
+		Recording: func(*Node) RecordingView { return RecordingView{Title: "Talk", Lines: lines} },
+		ScriptSource: func(name string) string {
+			if name != "math" && name != "diagram" {
+				return ""
+			}
+			return "/*" + name + "*/"
+		},
+	}
+	screen := PageHTML("Trip", c, opts)
+	opts.Print = true
+	paper := PageHTML("Trip", c, opts)
+	for _, want := range []string{"prefers-color-scheme:dark", `<details class="fold">`, `<iframe src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ`, `loading="lazy"`, "<details><summary>"} {
+		if !strings.Contains(screen, want) {
+			t.Errorf("the screen's page lacks %q", want)
+		}
+		if strings.Contains(paper, want) {
+			t.Errorf("the printed page has %q", want)
+		}
+	}
+	for _, want := range []string{
+		":root{color-scheme:light}",
+		"<h2 id=\"b-h1\" data-block=\"h1\">Later</h2>\n<p id=\"b-p\" data-block=\"p\">Hidden</p>",
+		"<div class=\"keep\"><h2 id=\"b-hc\" data-block=\"hc\">Code</h2>\n<pre id=\"b-c\" data-block=\"c\"><code>x</code></pre>\n</div>",
+		`<details id="b-tg" data-block="tg" open>`,
+		`<a id="b-v" data-block="v" class="card link" href="https://www.youtube.com/watch?v=dQw4w9WgXcQ"`,
+		`<img src="https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg" alt="">`,
+		`<img src="https://x.dev/c.png" alt="">`,
+		"line 11",
+		"</main><script>/*math*/</script>\n<script type=\"module\">/*diagram*/</script>\n</body>",
+	} {
+		if !strings.Contains(paper, want) {
+			t.Errorf("the printed page lacks %q:\n%s", want, paper)
+		}
+	}
+	if strings.Contains(paper, "<script src=") {
+		t.Error("the printed page links a script")
+	}
+	// Chinese and Japanese are in fonts found by name: Japanese pages'
+	// in Hiragino Sans.
+	for lang, font := range map[string]string{"": "PingFangSC-Regular", "zh-Hans": "PingFangSC-Regular", "ja": "HiraginoSans-W3"} {
+		opts.Lang = lang
+		if page := PageHTML("Trip", c, opts); !strings.Contains(page, `@font-face{font-family:"Leaflet CJK";src:local("`+font+`")`) {
+			t.Errorf("a page in %q is not in %s", lang, font)
+		}
+	}
+	if strings.Contains(screen, "Leaflet CJK") {
+		t.Error("the screen's page names the printed page's fonts")
+	}
+}

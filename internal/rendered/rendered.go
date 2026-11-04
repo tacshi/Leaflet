@@ -59,13 +59,18 @@ body{padding:6px 0;overflow:hidden;text-align:center}
 // hashes: nothing a formula or a diagram's source makes of the page, as an
 // element with an event handler in the SVG, runs, and nothing comes from
 // the network but pictures in data URLs.
-func scriptsCSP(scripts ...string) string {
+func scriptsCSP(scripts ...string) string { return ScriptsCSP(scripts...) + "; img-src data:" }
+
+// ScriptsCSP is the policy of a page whose scripts are written in it: it
+// runs those alone, by their hashes, and inline styles, and loads nothing.
+// What else a page loads, as pictures, follows it.
+func ScriptsCSP(scripts ...string) string {
 	policy := "default-src 'none'; script-src"
 	for _, s := range scripts {
 		sum := sha256.Sum256([]byte(s))
 		policy += " 'sha256-" + base64.StdEncoding.EncodeToString(sum[:]) + "'"
 	}
-	return policy + "; style-src 'unsafe-inline'; img-src data:"
+	return policy + "; style-src 'unsafe-inline'"
 }
 
 // dataScript is v as JSON in a script element that runs nothing, for a
@@ -79,6 +84,12 @@ func dataScript(id string, v any) string {
 const mathScript = `var m = document.getElementById("m");
 try { katex.render(JSON.parse(document.getElementById("formula").textContent), m, {displayMode: true, output: "mathml", throwOnError: true}); }
 catch (e) { m.className = "err"; m.textContent = e.message; }`
+
+// PageMathJS draws a page's formulas, its .math elements with their TeX in
+// data-tex, with KaTeX: a shared page's, and a printed page's.
+var PageMathJS = KatexJS + "\n" + `document.querySelectorAll(".math[data-tex]").forEach(function (el) {
+  try { katex.render(el.dataset.tex, el, {displayMode: true, output: "mathml", throwOnError: true}); } catch (e) {}
+});`
 
 // MathCSP is the math page's policy: KaTeX and the script that calls it.
 var MathCSP = scriptsCSP(KatexJS, mathScript)
@@ -265,6 +276,19 @@ var diagramScript = PeleModule + "\n" + ZoomScript + `
   });
   addEventListener("message", e => {
     if (e.source === parent && e.data && e.data.leafletZoom) zoom(e.data.leafletZoom);
+  });
+}`
+
+// PrintDiagramJS draws a printed page's diagrams, its .diagram elements
+// with their source in data-source, with Pele, as a module: still, as
+// paper shows them.
+var PrintDiagramJS = PeleModule + `
+{
+  document.querySelectorAll(".diagram[data-source]").forEach((el) => {
+    try {
+      el.innerHTML = peleRender(el.dataset.source, {fontFamily: '"Leaflet CJK", -apple-system, system-ui, sans-serif'}).svg;
+      el.classList.add("pele");
+    } catch (e) {}
   });
 }`
 

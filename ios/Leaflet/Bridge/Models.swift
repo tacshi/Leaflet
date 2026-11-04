@@ -94,6 +94,15 @@ struct ExportedPage: Codable, Sendable {
     var markdown: String
 }
 
+/// ExportedPDF is a page to print as a PDF: its web page, as the desktop
+/// prints it, the file name to save it as, and the paper's size in inches.
+struct ExportedPDF: Codable, Sendable {
+    var name: String
+    var html: String
+    var width: Double
+    var height: Double
+}
+
 /// Conflict is a block two devices changed at once, as sync merged it:
 /// kept is the start of its text as kept, other the side's that was not,
 /// or deleted names the side that deleted it, "here" or "there".

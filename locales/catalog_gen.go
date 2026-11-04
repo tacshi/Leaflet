@@ -123,18 +123,48 @@ func (msgs Messages) AppMenuSearch() string {
 	return Catalog.Format(msgs.locale, "appMenuSearch", nil)
 }
 
-// AppMenuExportMarkdown says "Export Page as Markdown…"
+// AppMenuExport says "Export"
 // in the language the app shows.
 //
-// The File menu: save the open page as a Markdown file.
-func AppMenuExportMarkdown() string { return In(i18n.Locale()).AppMenuExportMarkdown() }
+// The File menu: the submenu that saves the open page as a file, Markdown
+// or PDF.
+func AppMenuExport() string { return In(i18n.Locale()).AppMenuExport() }
 
-// AppMenuExportMarkdown says "Export Page as Markdown…"
+// AppMenuExport says "Export"
 // in the language of msgs.
 //
-// The File menu: save the open page as a Markdown file.
+// The File menu: the submenu that saves the open page as a file, Markdown
+// or PDF.
+func (msgs Messages) AppMenuExport() string {
+	return Catalog.Format(msgs.locale, "appMenuExport", nil)
+}
+
+// AppMenuExportMarkdown says "Markdown…"
+// in the language the app shows.
+//
+// The File menu's Export submenu: save the open page as a Markdown file.
+func AppMenuExportMarkdown() string { return In(i18n.Locale()).AppMenuExportMarkdown() }
+
+// AppMenuExportMarkdown says "Markdown…"
+// in the language of msgs.
+//
+// The File menu's Export submenu: save the open page as a Markdown file.
 func (msgs Messages) AppMenuExportMarkdown() string {
 	return Catalog.Format(msgs.locale, "appMenuExportMarkdown", nil)
+}
+
+// AppMenuExportPDF says "PDF…"
+// in the language the app shows.
+//
+// The File menu's Export submenu: save the open page as a PDF.
+func AppMenuExportPDF() string { return In(i18n.Locale()).AppMenuExportPDF() }
+
+// AppMenuExportPDF says "PDF…"
+// in the language of msgs.
+//
+// The File menu's Export submenu: save the open page as a PDF.
+func (msgs Messages) AppMenuExportPDF() string {
+	return Catalog.Format(msgs.locale, "appMenuExportPDF", nil)
 }
 
 // AppMenuSpeech says "Speech"
@@ -1448,15 +1478,43 @@ func (msgs Messages) HostDownloading(name string) string {
 // HostExportTitle says "Export as Markdown"
 // in the language the app shows.
 //
-// Title of the save dialog exporting a page.
+// Title of the save dialog exporting a page as Markdown.
 func HostExportTitle() string { return In(i18n.Locale()).HostExportTitle() }
 
 // HostExportTitle says "Export as Markdown"
 // in the language of msgs.
 //
-// Title of the save dialog exporting a page.
+// Title of the save dialog exporting a page as Markdown.
 func (msgs Messages) HostExportTitle() string {
 	return Catalog.Format(msgs.locale, "hostExportTitle", nil)
+}
+
+// HostExportPDFTitle says "Export as PDF"
+// in the language the app shows.
+//
+// Title of the save dialog exporting a page as a PDF.
+func HostExportPDFTitle() string { return In(i18n.Locale()).HostExportPDFTitle() }
+
+// HostExportPDFTitle says "Export as PDF"
+// in the language of msgs.
+//
+// Title of the save dialog exporting a page as a PDF.
+func (msgs Messages) HostExportPDFTitle() string {
+	return Catalog.Format(msgs.locale, "hostExportPDFTitle", nil)
+}
+
+// HostExportingPDF says "Exporting {name}…"
+// in the language the app shows.
+//
+// Toast while a page is made into a PDF, with the file's name.
+func HostExportingPDF(name string) string { return In(i18n.Locale()).HostExportingPDF(name) }
+
+// HostExportingPDF says "Exporting {name}…"
+// in the language of msgs.
+//
+// Toast while a page is made into a PDF, with the file's name.
+func (msgs Messages) HostExportingPDF(name string) string {
+	return Catalog.Format(msgs.locale, "hostExportingPDF", map[string]any{"name": name})
 }
 
 // HostErrorExport says "Could not export: {error}"
@@ -7661,18 +7719,48 @@ func (msgs Messages) SidebarShareEllipsis() string {
 	return Catalog.Format(msgs.locale, "sidebarShareEllipsis", nil)
 }
 
-// SidebarExportMarkdown says "Export as Markdown…"
+// SidebarExport says "Export"
 // in the language the app shows.
 //
-// Page menu item.
-func SidebarExportMarkdown() string { return In(i18n.Locale()).SidebarExportMarkdown() }
+// Page menu item, on the desktop and iOS: the submenu that saves the page
+// as a file, Markdown or PDF.
+func SidebarExport() string { return In(i18n.Locale()).SidebarExport() }
 
-// SidebarExportMarkdown says "Export as Markdown…"
+// SidebarExport says "Export"
 // in the language of msgs.
 //
-// Page menu item.
+// Page menu item, on the desktop and iOS: the submenu that saves the page
+// as a file, Markdown or PDF.
+func (msgs Messages) SidebarExport() string {
+	return Catalog.Format(msgs.locale, "sidebarExport", nil)
+}
+
+// SidebarExportMarkdown says "Markdown…"
+// in the language the app shows.
+//
+// The page menu's Export submenu: save the page as a Markdown file.
+func SidebarExportMarkdown() string { return In(i18n.Locale()).SidebarExportMarkdown() }
+
+// SidebarExportMarkdown says "Markdown…"
+// in the language of msgs.
+//
+// The page menu's Export submenu: save the page as a Markdown file.
 func (msgs Messages) SidebarExportMarkdown() string {
 	return Catalog.Format(msgs.locale, "sidebarExportMarkdown", nil)
+}
+
+// SidebarExportPDF says "PDF…"
+// in the language the app shows.
+//
+// The page menu's Export submenu: save the page as a PDF.
+func SidebarExportPDF() string { return In(i18n.Locale()).SidebarExportPDF() }
+
+// SidebarExportPDF says "PDF…"
+// in the language of msgs.
+//
+// The page menu's Export submenu: save the page as a PDF.
+func (msgs Messages) SidebarExportPDF() string {
+	return Catalog.Format(msgs.locale, "sidebarExportPDF", nil)
 }
 
 // SidebarKeepOnDevice says "Keep on this device"

@@ -6,18 +6,16 @@ package theme
 import (
 	"embed"
 	"log"
-	"strings"
 	"sync"
 	"unicode"
 
 	"github.com/egoist/mygo/ui"
+
+	"leaflet/internal/theme/icons"
 )
 
 //go:embed fonts/*.ttf
 var fonts embed.FS
-
-//go:embed icons/*.svg
-var icons embed.FS
 
 // UIFont and PageFont are the families of the interface and of pages.
 const (
@@ -334,10 +332,10 @@ func Icon(name string) *ui.SVG {
 	if s, ok := iconCache[name]; ok {
 		return s
 	}
-	data, err := icons.ReadFile("icons/" + name + ".svg")
-	if err != nil {
-		log.Printf("icon %s: %v", name, err)
-		data, _ = icons.ReadFile("icons/circle-alert.svg")
+	data, ok := icons.Read(name)
+	if !ok {
+		log.Printf("icon %s: not bundled", name)
+		data, _ = icons.Read("circle-alert")
 	}
 	s := ui.MustParseSVG(data)
 	iconCache[name] = s
@@ -346,20 +344,7 @@ func Icon(name string) *ui.SVG {
 
 // IconSVG returns a Lucide icon's SVG source by name, for a web page;
 // its strokes are currentColor.
-func IconSVG(name string) string {
-	data, err := icons.ReadFile("icons/" + name + ".svg")
-	if err != nil {
-		data, _ = icons.ReadFile("icons/circle-alert.svg")
-	}
-	return string(data)
-}
+func IconSVG(name string) string { return icons.SVG(name) }
 
 // IconNames lists the bundled icons.
-func IconNames() []string {
-	entries, _ := icons.ReadDir("icons")
-	var out []string
-	for _, e := range entries {
-		out = append(out, strings.TrimSuffix(e.Name(), ".svg"))
-	}
-	return out
-}
+func IconNames() []string { return icons.Names() }

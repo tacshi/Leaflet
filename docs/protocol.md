@@ -499,6 +499,12 @@ and a `transcribe` whose settings name one are refused (400).
   with it. Each pull reads again from 10 seconds behind its cursor, since a
   row is stamped before its transaction commits and one that commits late
   can carry an earlier time; rows already stored here are skipped.
+- Between the pulls, a device checks the pages open on it every 5 seconds
+  while they are on screen, so another device's edits show within
+  seconds: it reads each one's `page_content` revision
+  (`select=revision,updated_at&page_id=eq.<id>`), and its content only
+  when that moved, merging it as a pull does. Through iCloud Drive (§8)
+  there is no check: a change to the folder starts a pass.
 - Page content from the server that a device cannot read (a newer format)
   is neither merged nor stored, so it never stands in for an empty page:
   that page's change here stays queued, and its content is asked for again

@@ -56,6 +56,11 @@ type Service struct {
 	// this version of Leaflet, while which the changes wait to go up: sent
 	// before, they may name columns its schema lacks yet. nil is never.
 	Updating func() bool
+	// Shown reports whether the open pages are on screen, for the loop to
+	// check them for what changed on the server (watchOpen): not while the
+	// window is hidden or minimized. nil is always, as on iOS, where the
+	// loop stops in the background.
+	Shown func() bool
 
 	cloudOn atomic.Bool
 	kick    chan struct{}

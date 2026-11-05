@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log"
+	"maps"
+	"slices"
 	"time"
 
 	"leaflet/internal/doc"
@@ -28,7 +30,8 @@ func (s *Service) backOff(err error) {
 
 // Start runs the loop: soon after changes, when asked, and every 30 seconds.
 // The first pass after says the device is in use, and looks for what is
-// looked for every so often, at once.
+// looked for every so often, at once. In between, the open pages are
+// checked every watchEvery (watchOpen).
 func (s *Service) Start() {
 	s.mu.Lock()
 	if s.stop != nil {
@@ -42,12 +45,17 @@ func (s *Service) Start() {
 	guard.Go(func() {
 		tick := time.NewTicker(30 * time.Second)
 		defer tick.Stop()
+		watch := time.NewTicker(watchEvery)
+		defer watch.Stop()
 		s.Kick()
 		for {
 			pull := true
 			select {
 			case <-ctx.Done():
 				return
+			case <-watch.C:
+				s.watchOpen(ctx)
+				continue
 			case <-s.kick:
 				select {
 				case <-ctx.Done():
@@ -134,9 +142,58 @@ func (s *Service) signal() {
 	}
 }
 
-// openWait is how long SetOpen has to bring an opened page up to date;
-// tests shorten it.
+// openWait is how long SetOpen has to bring an opened page up to date,
+// and watchOpen the open pages; tests shorten it.
 var openWait = time.Minute
+
+// watchEvery is how often the loop checks the open pages for what changed
+// on the server, so another device's edits, as an agent writes them
+// there, show within seconds rather than with the next pass. Tests
+// shorten it.
+var watchEvery = 5 * time.Second
+
+// watchOpen brings the open pages' content up to date with the server's
+// while they are shown (Shown), from the loop, whose context is loop: a
+// page's revision is asked for, and its content only when that moved. A
+// pass or an opened page's refresh under way brings them already, so the
+// check waits for the next. Changes in iCloud Drive start a pass as they
+// come (core.Platform.WatchICloud), so only the server is asked.
+func (s *Service) watchOpen(loop context.Context) {
+	defer guard.Recover()
+	if _, server := s.target().(supabaseTarget); !server || !s.CanSync() || s.Shown != nil && !s.Shown() || s.busy() {
+		return
+	}
+	if !s.running.TryLock() {
+		return
+	}
+	defer s.running.Unlock()
+	if loop.Err() != nil {
+		return
+	}
+	s.mu.Lock()
+	open := slices.Sorted(maps.Keys(s.open))
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(loop, openWait)
+	defer cancel()
+	for _, id := range open {
+		// A page whose content can't be read is passed over, as the
+		// passes pass over it. Any other failure, as the server out of
+		// reach or asking for a wait, leaves the others for the next
+		// check too, and the passes say why.
+		if _, err := s.refreshRemote(ctx, id); err != nil && !unreadable(err) {
+			s.backOff(err)
+			return
+		}
+	}
+}
+
+// busy reports whether the loop still waits as the server asked it to
+// (backOff).
+func (s *Service) busy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return time.Now().Before(s.busyUntil)
+}
 
 // SetOpen marks a page as open, so its content is always pulled, and
 // brings an opened page up to date in the background.
@@ -221,10 +278,7 @@ func (s *Service) syncNow(loop context.Context, ofLoop, pull bool) (err error) {
 	}
 	// The loop leaves a server that asked for a wait alone till then; a
 	// pass asked for, as the user's, still goes.
-	s.mu.Lock()
-	busy := time.Now().Before(s.busyUntil)
-	s.mu.Unlock()
-	if ofLoop && busy {
+	if ofLoop && s.busy() {
 		return nil
 	}
 	if s.OnState != nil {

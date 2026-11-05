@@ -67,6 +67,9 @@ type App struct {
 	winMu    sync.Mutex
 	starting bool
 	early    []func()
+	// hidden and minimized say the window is off screen, for sync to stop
+	// checking the open page for what changed elsewhere (shown).
+	hidden, minimized atomic.Bool
 
 	settings store.Settings
 	// endpointKeyMu orders the endpoint keys kept in the keychain, and
@@ -516,6 +519,11 @@ func (a *App) start() error {
 	a.early = nil
 	a.winMu.Unlock()
 	a.startTray()
+	a.win.OnHide(func() { a.hidden.Store(true) })
+	a.win.OnShow(func() { a.hidden.Store(false) })
+	a.win.OnMinimize(func() { a.minimized.Store(true) })
+	a.win.OnRestore(func() { a.minimized.Store(false) })
+	a.sync.Shown = a.shown
 	a.win.OnClose(func(e *mygo.CloseEvent) {
 		saved := a.flush()
 		// With the menu bar icon, closing the window hides it, and the
@@ -560,6 +568,11 @@ func (a *App) start() error {
 	a.core().Start()
 	return nil
 }
+
+// shown reports whether the window is on screen, as sync asks from its
+// loop, off the main thread: an open page is checked every few seconds for
+// what changed on the server only then.
+func (a *App) shown() bool { return !a.hidden.Load() && !a.minimized.Load() }
 
 // core is the app's parts as the core wires them, with the app's hooks:
 // the one core the app keeps (cr), asked for on the main thread. Tests,

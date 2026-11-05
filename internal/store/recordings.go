@@ -154,6 +154,9 @@ func (s *Store) updateRecording(id, ifStatus string, upload bool, fn func(*Recor
 		if ifStatus != "" {
 			row[IfStatusKey] = ifStatus
 		}
+		if err := unpulled(tx, "recordings", r.ID); err != nil {
+			return err
+		}
 		if err := queue(tx, "recordings", r.ID, row, label, r.PageID); err != nil || !upload || r.AudioPath != "" || r.LocalPath == "" {
 			return err
 		}

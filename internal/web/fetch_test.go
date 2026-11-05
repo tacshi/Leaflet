@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"net/url"
 	"testing"
+	"time"
 )
 
 // Links from shared pages reach only the web: not files on this device,
@@ -111,5 +112,24 @@ func TestFetchThroughAProxyAsksForTheCheckedAddress(t *testing.T) {
 	case got := <-asked:
 		t.Errorf("the proxy was asked %q for a name that resolves inside", got)
 	default:
+	}
+}
+
+// A fetch ends as its context does, as when the app gives up on a
+// picture whose page closed, though the site never answers.
+func TestFetchEndsWithItsContext(t *testing.T) {
+	useServer(t)
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	defer srv.Close()
+	defer close(release)
+	ctx, cancel := context.WithCancel(context.Background())
+	time.AfterFunc(50*time.Millisecond, cancel)
+	start := time.Now()
+	if _, err := FetchContext(ctx, srv.URL); !errors.Is(err, context.Canceled) {
+		t.Errorf("fetched from a site that never answers: %v", err)
+	}
+	if took := time.Since(start); took > 5*time.Second {
+		t.Errorf("the fetch went on %v after it was given up on", took)
 	}
 }

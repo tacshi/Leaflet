@@ -35,7 +35,6 @@ import {
 import {
   agentViews,
   applyOps,
-  MAX_LISTED_PAGES,
   MAX_ROUND_CALLS,
   type Op,
   overwrites,
@@ -392,6 +391,78 @@ async function historyOf(uc: SupabaseClient, job: Job) {
   );
 }
 
+/**
+ * What the earlier turns of a job's conversation that are done read: any
+ * of them, not only the latest that historyOf gives the model, as the app
+ * counts its chat's (keptToPage). A turn after one that did had what it
+ * read before it, and may have said it again, though it read nothing
+ * itself. readBeyond is one that may have read beyond its page; readOthers
+ * one that read a page someone else writes or reads, after which no page
+ * of the person's own is made.
+ */
+async function earlierTurns(uc: SupabaseClient, job: Job): Promise<{ readBeyond: boolean; readOthers: boolean }> {
+  if (!job.conversation_id) return { readBeyond: false, readOthers: false };
+  const turns = await allRows<{ id: string; kept_to_page: unknown; read_others: unknown }>(
+    () =>
+      uc.from("ai_jobs").select("id, kept_to_page:result->kept_to_page, read_others:result->read_others")
+        .eq("conversation_id", job.conversation_id).eq("status", "done").neq("id", job.id),
+    "id",
+  );
+  return {
+    readBeyond: turns.some((turn) => turn.kept_to_page !== true),
+    readOthers: turns.some((turn) => turn.read_others === true),
+  };
+}
+
+/**
+ * Where a page goes last: a key after those of the pages inside parent,
+ * or at the top level of space in folder, but skip, as the app's store
+ * finds them (store.siblings), all of them, past max_rows. Those deleted
+ * are left out; the top level is as the app shows it, with the pages whose
+ * parent is deleted or not there, and a folder that is gone none, its
+ * pages in no folder.
+ */
+async function keyLastIn(
+  uc: SupabaseClient,
+  space: string,
+  parent: string,
+  folder: string,
+  skip = "",
+): Promise<string> {
+  if (parent) {
+    const kids = await allRows<{ id: string; sort_key: string }>(
+      () => uc.from("pages").select("id, sort_key").eq("parent_id", parent).is("deleted_at", null),
+      "id",
+    );
+    return newKeyAfter(lastKey(kids.filter((r) => r.id !== skip).map((r) => r.sort_key)));
+  }
+  const [all, folders] = await Promise.all([
+    allRows<{ id: string; sort_key: string; parent_id: string | null; folder_id: string | null }>(
+      () => uc.from("pages").select("id, sort_key, parent_id, folder_id").eq("space_id", space).is("deleted_at", null),
+      "id",
+    ),
+    foldersOf(uc, space),
+  ]);
+  const pages = new Set(all.map((r) => r.id));
+  const kept = new Set(folders.map((f) => f.id));
+  const shown = (f: string | null) => f && kept.has(f) ? f : "";
+  const top = all.filter((r) =>
+    r.id !== skip && (!r.parent_id || !pages.has(r.parent_id)) && shown(r.folder_id) === shown(folder)
+  );
+  return newKeyAfter(lastKey(top.map((r) => r.sort_key)));
+}
+
+/**
+ * Whether only the caller is a member of page id, those of the pages it is
+ * inside and the invites waiting counted (page_members): no one else has
+ * it.
+ */
+async function onlyTheirs(uc: SupabaseClient, user: User, id: string): Promise<boolean> {
+  const { data: members, error } = await uc.rpc("page_members", { p_page_id: id });
+  return !error && Array.isArray(members) && members.length > 0 &&
+    members.every((m: { user_id: string }) => m.user_id === user.id);
+}
+
 /** The person's name as their profile has it, or their address's start. */
 async function userNameOf(uc: SupabaseClient, user: User): Promise<string> {
   const { data: profile } = await uc.from("profiles").select("display_name").eq("id", user.id).maybeSingle();
@@ -574,11 +645,14 @@ async function runWorkspaceJob(
     const publicIds = new Set(job.request?.public_page_ids ?? []);
 
     // --- the person's pages ---------------------------------------------
-    // Read once a run, all of them, and kept as the run changes them: who
-    // else has a page comes from its shares and invites, those of the
-    // pages it is inside too, its guests' comments and its public link,
-    // which no change of a run's changes, as it changes no page someone
-    // else has.
+    // Who else has a page comes from its shares and invites, those of the
+    // pages it is inside too, its guests' comments and its public link:
+    // read as the run begins, and again before each call that changes a
+    // page, as someone may have been given it meanwhile. A page's own row,
+    // its title, tags, place and lease, is read again each time a call
+    // names it, and the pages each time they are listed, as the app reads
+    // its store for each call: what the run changes from, and what it
+    // keeps for Undo, is the page as it is then.
     type Row = {
       id: string;
       title: string;
@@ -587,19 +661,75 @@ async function runWorkspaceJob(
       tags: string[] | null;
       sort_key: string;
       public_link_until: string | null;
+      deleted_at: string | null;
+      is_template: boolean | null;
     };
-    type World = { rows: Map<string, Row>; people: (r: Row) => boolean; read: (r: Row) => boolean; shown: Set<string> };
+    const COLUMNS = "id, title, parent_id, folder_id, tags, sort_key, public_link_until, deleted_at, is_template";
+    // Every page of the space, deleted ones and templates among them: a
+    // page inside one is shared as that page is, whatever it is now.
+    const readRows = () => allRows<Row>(() => uc.from("pages").select(COLUMNS).eq("space_id", own), "id");
+    // A page of the person's the agent may name: neither deleted nor a template.
+    const listed = (r: Row | null | undefined): r is Row => !!r && !r.deleted_at && !r.is_template;
+    // The row of page id as it is now, null for none of the person's space.
+    const fresh = async (id: string): Promise<Row | null> => {
+      const { data, error } = await uc.from("pages").select(COLUMNS).eq("id", id).eq("space_id", own).maybeSingle();
+      if (error) throw new Error(error.message);
+      return data as Row | null;
+    };
+    type World = {
+      /** The rows of the space's pages, as last read. */
+      rows: Map<string, Row>;
+      /** The pages someone else has, or is asked to have, as last read. */
+      shared: Set<string>;
+      /** Those a guest commented on, as last read. */
+      guests: Set<string>;
+      /** Those someone else reads, as the run began. */
+      read: Set<string>;
+      /** Those whose titles someone else reads, on a page they read. */
+      shown: Set<string>;
+    };
     let world: Promise<World> | undefined;
-    const readWorld = async (): Promise<World> => {
-      const [list, shares, guested] = await Promise.all([
-        allRows<Row>(
-          () =>
-            uc.from("pages").select("id, title, parent_id, folder_id, tags, sort_key, public_link_until")
-              .eq("space_id", own).is("deleted_at", null).eq("is_template", false),
-          "id",
-        ),
-        // Those of the person's own space someone else has, or is asked to:
-        // the pages an invite waits on too, as the app counts them.
+    // The page r is inside, as last read, or read now for one not read
+    // yet, as one made since the run began.
+    const parentOf = async (w: World, r: Row): Promise<Row | undefined> => {
+      if (!r.parent_id) return undefined;
+      if (!w.rows.has(r.parent_id)) {
+        const p = await fresh(r.parent_id);
+        if (p) w.rows.set(p.id, p);
+      }
+      return w.rows.get(r.parent_id);
+    };
+    // Shared with other people, it or a page it is inside, as found is
+    // for the pages found already (Go's sharing): a loop of parents ends.
+    const peopleHave = async (w: World, r: Row, found = new Map<string, boolean>()): Promise<boolean> => {
+      const path: string[] = [];
+      const seen = new Set<string>();
+      let v = false;
+      for (let p: Row | undefined = r; p && !seen.has(p.id); p = await parentOf(w, p)) {
+        const known = found.get(p.id);
+        if (known !== undefined) {
+          v = known;
+          break;
+        }
+        seen.add(p.id);
+        path.push(p.id);
+        if (w.shared.has(p.id)) {
+          v = true;
+          break;
+        }
+      }
+      for (const id of path) found.set(id, v);
+      return v;
+    };
+    // Read by someone else, besides those it is shared with: commented on
+    // by a guest, or with a public link open.
+    const guestsRead = (w: World, r: Row) =>
+      w.guests.has(r.id) || publicIds.has(r.id) || publiclyLinked(r.public_link_until);
+    // Who else has the person's pages: those of their own space someone
+    // else has, or is asked to, the pages an invite waits on too, as the
+    // app counts them; and those a guest commented on.
+    const readSharing = async () => {
+      const [shares, guested] = await Promise.all([
         allRows<{ page_id: string }>(() => uc.rpc("agent_shared_pages"), "page_id"),
         allRows<{ id: string; page_id: string }>(
           () =>
@@ -610,36 +740,28 @@ async function runWorkspaceJob(
           "id",
         ),
       ]);
-      const byId = new Map(list.map((r) => [r.id, r]));
-      const shared = new Set(shares.map((r) => r.page_id));
-      const guests = new Set(guested.map((r) => r.page_id));
-      // Shared with other people, it or a page it is inside.
-      const people = (r: Row) => {
-        const seen = new Set<string>();
-        for (let p: Row | undefined = r; p && !seen.has(p.id); p = byId.get(p.parent_id ?? "")) {
-          if (shared.has(p.id)) return true;
-          seen.add(p.id);
-        }
-        return false;
-      };
-      const read = (r: Row) =>
-        people(r) || guests.has(r.id) || publicIds.has(r.id) || publiclyLinked(r.public_link_until);
-      // Those whose titles someone else reads, as their cards are on a page
-      // they read: its subpages, whose cards it may have, and the cards it
-      // has (Go's workspaceTools).
-      const others = [...byId.values()].filter(read).map((r) => r.id);
-      const readSet = new Set(others);
-      const shown = new Set([...byId.values()].filter((r) => r.parent_id && readSet.has(r.parent_id)).map((r) => r.id));
-      // The cards, found in the database: the pages' content, which can be
-      // long, stays there.
-      if (others.length) {
-        const cards = await allRows<{ page_id: string }>(
-          () => uc.rpc("agent_card_pages", { p_pages: others }),
+      return { shared: new Set(shares.map((r) => r.page_id)), guests: new Set(guested.map((r) => r.page_id)) };
+    };
+    const readWorld = async (): Promise<World> => {
+      const [list, sharing] = await Promise.all([readRows(), readSharing()]);
+      const w: World = { rows: new Map(list.map((r) => [r.id, r])), ...sharing, read: new Set(), shown: new Set() };
+      const found = new Map<string, boolean>();
+      for (const r of list.filter(listed)) if (await peopleHave(w, r, found) || guestsRead(w, r)) w.read.add(r.id);
+      // Those whose titles someone else reads, as they are on a page they
+      // read: its subpages, whose cards it may have, and the pages its
+      // cards and its mentions name, which the app keeps to their titles
+      // (Go's workspaceTools).
+      for (const r of list) if (listed(r) && r.parent_id && w.read.has(r.parent_id)) w.shown.add(r.id);
+      // Found in the database: the pages' content, which can be long,
+      // stays there.
+      if (w.read.size) {
+        const named = await allRows<{ page_id: string }>(
+          () => uc.rpc("agent_card_pages", { p_pages: [...w.read] }),
           "page_id",
         );
-        for (const c of cards) shown.add(c.page_id);
+        for (const c of named) w.shown.add(c.page_id);
       }
-      return { rows: byId, people, read, shown };
+      return w;
     };
     const rowsNow = () =>
       world ??= readWorld().catch((e) => {
@@ -648,12 +770,11 @@ async function runWorkspaceJob(
         throw e;
       });
     // A page as the agent sees it, from its row.
-    const pageOf = async (id: string): Promise<WorkspacePage | null> => {
-      const { rows: byId, people: peopleHave, read, shown } = await rowsNow();
-      const r = byId.get(id);
-      if (!r) return null;
-      const people = peopleHave(r);
-      const shared = read(r) || shown.has(r.id);
+    const viewOf = async (w: World, r: Row, found?: Map<string, boolean>): Promise<WorkspacePage> => {
+      const people = await peopleHave(w, r, found);
+      // Its title is read where it is inside a page others read, as it is
+      // now, as well as where it was as the run began.
+      const shared = people || guestsRead(w, r) || w.shown.has(r.id) || !!r.parent_id && w.read.has(r.parent_id);
       return {
         id: r.id,
         title: displayTitle(r.title),
@@ -665,15 +786,19 @@ async function runWorkspaceJob(
         ...(trimSpace(r.title ?? "") ? {} : { untitled: true }),
       };
     };
-    // The row of a page the run changes, which a call to page() has read.
-    const rowOf = async (id: string) => (await rowsNow()).rows.get(id)!;
-    // Last among the pages inside parent, or the folder's at the top level.
-    const keyLast = async (parent: string, folder: string, skip = "") => {
-      const siblings = [...(await rowsNow()).rows.values()].filter((r) =>
-        r.id !== skip && (parent ? r.parent_id === parent : !r.parent_id && (r.folder_id ?? "") === folder)
-      );
-      return newKeyAfter(lastKey(siblings.map((r) => r.sort_key)));
+    // One of the person's pages, read as it is now.
+    const pageOf = async (id: string): Promise<WorkspacePage | null> => {
+      const w = await rowsNow();
+      const r = await fresh(id);
+      if (r) w.rows.set(id, r);
+      else w.rows.delete(id);
+      return listed(r) ? await viewOf(w, r) : null;
     };
+    // The row of a page the run changes, which a call to page() has just read.
+    const rowOf = async (id: string) => (await rowsNow()).rows.get(id)!;
+    // Last among the pages inside parent, or the folder's at the top level,
+    // as they are now.
+    const keyLast = (parent: string, folder: string, skip = "") => keyLastIn(uc, own, parent, folder, skip);
     // A card that could not be put in a page, or taken out of it, leaves
     // the page made or moved all the same, as the app's moves do
     // (core.Pages.MovePage): the run keeps what it did, to undo.
@@ -684,18 +809,34 @@ async function runWorkspaceJob(
       });
     const hooks: WorkspaceHooks = {
       reading,
-      listPages: async () =>
-        (await Promise.all([...(await rowsNow()).rows.values()].sort(bySortKey).map((r) => pageOf(r.id))))
-          .filter((p): p is WorkspacePage => !!p),
+      // The pages as they are now, as the app's store lists them each time.
+      listPages: async () => {
+        const w = await rowsNow();
+        const list = await readRows();
+        for (const r of list) w.rows.set(r.id, r);
+        const found = new Map<string, boolean>();
+        const out: WorkspacePage[] = [];
+        for (const r of list.filter(listed).sort(bySortKey)) out.push(await viewOf(w, r, found));
+        return out;
+      },
       page: pageOf,
+      changing: async () => {
+        // Read for the first time now, it is as it is now.
+        if (!world) return void await rowsNow();
+        Object.assign(await world, await readSharing());
+      },
       readPage: async (id) => {
-        const page = (await pageOf(id))!;
+        const page = await rowOf(id);
         const { data } = await uc.from("page_content").select("content").eq("page_id", id).maybeSingle();
         if (data && !isPageContent(data.content)) throw new ToolError(UNREADABLE);
-        const subpages = [...(await rowsNow()).rows.values()].filter((r) => r.parent_id === id).sort(bySortKey)
-          .map((r) => ({ id: r.id, title: displayTitle(r.title) }));
+        // Those inside it now, not deleted, as the app's store has them (store.Children).
+        const subpages = (await allRows<{ id: string; title: string; sort_key: string }>(
+          () => uc.from("pages").select("id, title, sort_key").eq("parent_id", id).is("deleted_at", null),
+          "id",
+        )).sort(bySortKey).map((r) => ({ id: r.id, title: displayTitle(r.title) }));
+        const tags = page.tags ?? [];
         return {
-          page: { id, title: page.title, ...(page.tags.length ? { tags: page.tags } : {}) },
+          page: { id, title: displayTitle(page.title), ...(tags.length ? { tags } : {}) },
           blocks: agentViews(normalizeContent(data?.content), await recordingsOf(uc, id)),
           subpages,
         };
@@ -722,7 +863,13 @@ async function runWorkspaceJob(
           is_template: false,
         };
         const made = await insertPageOf(uc, sc, user, row, content);
-        (await rowsNow()).rows.set(made.id, { ...row, id: made.id, tags: [], public_link_until: null });
+        (await rowsNow()).rows.set(made.id, {
+          ...row,
+          id: made.id,
+          tags: [],
+          public_link_until: null,
+          deleted_at: null,
+        });
         // As a page made from the sidebar, it shows in the page it is
         // inside.
         if (parent) await card(linkSubpage(uc, user, parent, made.id));
@@ -732,8 +879,11 @@ async function runWorkspaceJob(
         if (folder && !(await folderIn(uc, own, folder))) throw noFolder(folder);
         const { rows: byId } = await rowsNow();
         const was = byId.get(id)!;
-        for (let p = parent; p; p = byId.get(p)?.parent_id ?? "") {
+        // Rows read at different times may loop: each is passed once.
+        const passed = new Set<string>();
+        for (let p = parent; p && !passed.has(p); p = byId.get(p)?.parent_id ?? "") {
           if (p === id) throw new ToolError("A page cannot move inside itself or one of its subpages");
+          passed.add(p);
         }
         const from: PagePlace = {
           ...(was.parent_id ? { parent_id: was.parent_id } : {}),
@@ -794,7 +944,7 @@ async function runWorkspaceJob(
     // An earlier turn that read the person's pages closes the web to this
     // one, and keeps what it writes to the URLs the person gave. Where it
     // may not read their pages, those turns are left out, as on a page.
-    const pagesBefore = history.some((turn) => turn.kept_to_page !== true);
+    const pagesBefore = (await earlierTurns(uc, job)).readBeyond;
     const web = job.request?.allow_web === true && !pagesBefore;
     // One that read the web keeps this one to the URLs it may write after
     // reading the web from its start, as on a page.
@@ -1006,12 +1156,8 @@ async function runJob(
     // link: what the agent reads into it, its visitors read. So is a public
     // link no one commented through yet, which the app that serves it keeps
     // on the page while it does (public_link_until).
-    let alone = !publiclyLinked(page.public_link_until) && !comments.some((c) => c.author_kind === "guest");
-    if (alone) {
-      const { data: members, error: membersError } = await uc.rpc("page_members", { p_page_id: page.id });
-      alone = !membersError && Array.isArray(members) && members.length > 0 &&
-        members.every((m: { user_id: string }) => m.user_id === user.id);
-    }
+    const alone = !publiclyLinked(page.public_link_until) && !comments.some((c) => c.author_kind === "guest") &&
+      await onlyTheirs(uc, user, page.id);
     const crossPage = job.request?.allow_cross_page === true && alone;
     // The provider's test found whether its default model calls tools; any
     // other model is offered them, and answers without them if it refuses
@@ -1031,7 +1177,8 @@ async function runJob(
     // page says so. Where this run may no longer read other pages, as the
     // page is shared now, the turns that read beyond it are left out: what
     // they read would be written where others read it.
-    const pagesBefore = history.some((turn) => turn.kept_to_page !== true);
+    const before = await earlierTurns(uc, job);
+    const pagesBefore = before.readBeyond;
     const web = allowWeb && !pagesBefore;
     // An earlier turn that read the web may hold what it read there: this
     // run keeps to the URLs it may write after reading the web from its
@@ -1059,16 +1206,12 @@ async function runJob(
         }),
       createSubpage: async (title: string, subContent: PageContent) => {
         // Last among its siblings, by the keys' bytes as the app orders
-        // them, not the database's collation: all of them, past max_rows.
-        const siblings = await allRows<{ id: string; sort_key: string }>(
-          () => uc.from("pages").select("id, sort_key").eq("parent_id", page.id),
-          "id",
-        );
+        // them, not the database's collation.
         const made = await insertPage({
           space_id: page.space_id,
           parent_id: page.id,
           title,
-          sort_key: newKeyAfter(lastKey(siblings.map((s) => s.sort_key))),
+          sort_key: await keyLastIn(uc, page.space_id, page.id, ""),
           // A subpage of a template is part of it.
           is_template: page.is_template,
         }, subContent);
@@ -1080,26 +1223,25 @@ async function runJob(
       createPage: async (title: string, pageContent: PageContent, folderId: string | null) => {
         const space = await ownSpace();
         if (folderId && !(await folderIn(uc, space, folderId))) throw noFolder(folderId);
-        // Last among the folder's pages, or the top level's outside folders:
-        // all of them, past max_rows.
-        const siblings = await allRows<{ id: string; sort_key: string }>(() => {
-          const top = uc.from("pages").select("id, sort_key").eq("space_id", space).is("parent_id", null);
-          return folderId ? top.eq("folder_id", folderId) : top.is("folder_id", null);
-        }, "id");
+        // Last among the folder's pages, or the top level's outside folders.
         return await insertPage({
           space_id: space,
           parent_id: null,
           folder_id: folderId,
           title,
-          sort_key: newKeyAfter(lastKey(siblings.map((s) => s.sort_key))),
+          sort_key: await keyLastIn(uc, space, "", folderId ?? ""),
           is_template: false,
         }, pageContent);
       },
+      // In the app's order, by sort key and then id, as its store has them:
+      // all of them, past max_rows, for the session to list as many as fit.
       listPages: async (): Promise<PageSummary[]> =>
-        (await rows<PageSummary>(
-          uc.from("pages").select("id, title, parent_id").eq("space_id", page.space_id).is("deleted_at", null)
-            .eq("is_template", false).neq("id", page.id).limit(MAX_LISTED_PAGES),
-        )).map((p) => ({ ...p, title: displayTitle(p.title) })),
+        (await allRows<PageSummary & { sort_key: string }>(
+          () =>
+            uc.from("pages").select("id, title, parent_id, sort_key").eq("space_id", page.space_id)
+              .is("deleted_at", null).eq("is_template", false).neq("id", page.id),
+          "id",
+        )).sort(bySortKey).map((p) => ({ id: p.id, title: displayTitle(p.title), parent_id: p.parent_id })),
       listFolders: async () => foldersOf(uc, await ownSpace()),
       // Shaped as read_page's, as the app's (protocol §2): its subpages,
       // and no comments, which are of this page's alone.
@@ -1127,6 +1269,23 @@ async function runJob(
           comments: [],
         };
       },
+      // Its lease, as the run read it as it began (alone, above): one that
+      // cannot be read is taken for one.
+      linkedNow: async () => {
+        const { data, error } = await uc.from("pages").select("public_link_until").eq("id", page.id).maybeSingle();
+        return !!error || !data || publiclyLinked(data.public_link_until);
+      },
+      // As this page is counted (alone, above); one that cannot be told is
+      // taken for someone else's too.
+      pageAlone: async (otherId: string) => {
+        const { data: other, error: otherError } = await uc.from("pages").select("public_link_until").eq("id", otherId)
+          .maybeSingle();
+        if (otherError || !other || publiclyLinked(other.public_link_until)) return false;
+        const { data: guests, error: guestsError } = await uc.from("comments").select("id").eq("page_id", otherId)
+          .eq("author_kind", "guest").limit(1);
+        if (guestsError || guests?.length) return false;
+        return await onlyTheirs(uc, user, otherId);
+      },
       // A video's captions are read from its site, whose link is on the
       // page, with or without the web.
       readCaptions: (video: VideoRef) => (deps.readCaptions ?? readCaptions)(video, webSignal()),
@@ -1138,7 +1297,19 @@ async function runJob(
             : {}),
         }
         : {}),
-    }, { canEdit, crossPage, ownPages: alone, request: instruction, author: agentName });
+    }, {
+      canEdit,
+      crossPage,
+      ownPages: alone,
+      request: instruction,
+      author: agentName,
+      // Those turns are among what the model reads where it may read other
+      // pages itself (below).
+      heldPages: pagesBefore && crossPage,
+    });
+    // A page someone else writes or reads that an earlier turn read keeps
+    // this one from making pages of the person's own too.
+    if (before.readOthers) session.keepFromOwnPages();
 
     // Saves the run's edits, once: on its end, or on its failure after it
     // made some.
@@ -1280,7 +1451,14 @@ async function runJob(
     if (outOfTime && !session.ops.length) {
       throw new Error("The model took too long to answer. Try again, or choose a faster model.");
     }
-    if (!reply) {
+    if (session.stopped) {
+      // It ended as its page's public link started, keeping what it did.
+      const done = edits.map((e) => e.summary).join(". ");
+      reply =
+        `This page got a public link while I worked, so I stopped, as its visitors would read here what I read on your other pages.${
+          done ? ` So far: ${done}.` : ""
+        }`;
+    } else if (!reply) {
       const done = edits.map((e) => e.summary).join(". ");
       reply = finished
         ? (done ? `${done}.` : "Done.")
@@ -1295,7 +1473,15 @@ async function runJob(
       .from("ai_jobs")
       .update({
         status: "done",
-        result: { reply, ops: keptOps(session.ops), edits, kept_to_page: session.keptToPage, guarded: session.guarded },
+        result: {
+          reply,
+          ops: keptOps(session.ops),
+          edits,
+          kept_to_page: session.keptToPage,
+          guarded: session.guarded,
+          // Later turns make no page of the person's own either.
+          ...(session.readOtherPeoples ? { read_others: true } : {}),
+        },
         error: null,
       })
       .eq("id", job.id);
@@ -1333,10 +1519,12 @@ async function runJob(
         message = `${message} Its edits were not saved either: ${why}`;
       }
     }
-    // The pages it made are kept, its ops with them, for Undo to take
-    // them away by.
-    const result = savedEdits || (session?.ops.length && !session.changed)
-      ? { reply: "", ops: keptOps(session!.ops), edits }
+    // The pages it made are kept, their ops with them, for Undo to take
+    // them away by, whether its edits of the page were saved or not; those
+    // edits' ops only once they were. Each op has its edit, in order.
+    const kept = (session?.ops ?? []).flatMap((op, i) => savedEdits || PAGE_OPS.has(op.op) ? [i] : []);
+    const result = kept.length
+      ? { reply: "", ops: keptOps(kept.map((i) => session!.ops[i])), edits: kept.flatMap((i) => edits[i] ?? []) }
       : undefined;
     await uc.from("ai_jobs").update({ status: "failed", error: message, ...(result ? { result } : {}) }).eq(
       "id",
@@ -1361,8 +1549,9 @@ interface Conversation {
 
 /**
  * Asks the model, round after round, making the calls it asks for, until
- * it answers, runs out of rounds, or of time before deadline: a page's run
- * and a workspace run alike.
+ * it answers, runs out of rounds, or of time before deadline, or its page
+ * gains a public link after it read beyond the page (session.stopped): a
+ * page's run and a workspace run alike.
  */
 async function converse(
   c: Conversation,
@@ -1453,6 +1642,9 @@ async function converse(
           tool_call_id: call.id,
           content: truncate(JSON.stringify(outcome.result), TOOL_RESULT_LIMIT),
         });
+        // A run whose page's public link started after it read beyond the
+        // page ends here, as the app's runs on the page do.
+        if (c.session.stopped) break rounds;
       }
       continue;
     }

@@ -53,6 +53,24 @@ func TestLeadingSpacesDontNest(t *testing.T) {
 	}
 }
 
+// A line of a block's text that starts with a space of another kind, as a
+// no-break or an ideographic space, then what would start a block, is
+// text of the block: a $$ there doesn't make the blocks after it math,
+// nor a </details> end the block.
+func TestSpacesOfAnyKindBeforeABlockStart(t *testing.T) {
+	for _, space := range []string{" ", "　", "\v", "\f"} {
+		for _, start := range []string{"$$", "</details>", "| a |"} {
+			for _, typ := range []string{"paragraph", "bulleted_list", "quote"} {
+				text := "a\n" + space + start
+				got := readBack(block("paragraph", Delta{{Text: "before"}}), block(typ, Delta{{Text: text}}), block("paragraph", Delta{{Text: "after"}}))
+				if len(got) != 3 || got[1].Type != typ || got[1].Delta().Plain() != text || got[2].Delta().Plain() != "after" {
+					t.Errorf("%s %q read back as %q", typ, text, shape(got))
+				}
+			}
+		}
+	}
+}
+
 // A ! before a link is text, not the start of a picture, at the start of
 // a block or in it.
 func TestBangBeforeALinkStaysText(t *testing.T) {

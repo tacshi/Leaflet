@@ -310,6 +310,13 @@ func (s *Service) storeRemote(pageID string, remoteRow map[string]any) (*doc.Con
 		return nil, err
 	}
 	if next == nil {
+		// This device has that revision, which the server stamped again
+		// without changing it, as a move of the page does: kept as of then,
+		// it is passed over by the pulls after, rather than fetched again
+		// by each while it is among the rows they read again (overlap).
+		if err := s.st.MergedRemoteAt(pageID, store.Int(remoteRow, "revision"), remoteAt); err != nil {
+			return nil, err
+		}
 		return here, nil
 	}
 	for _, c := range conflicts {

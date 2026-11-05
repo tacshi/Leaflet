@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"io"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,6 +93,114 @@ func TestExportKeepsTranscripts(t *testing.T) {
 	}
 	if len(c.Children) != 1 {
 		t.Error("the page's own content changed")
+	}
+}
+
+// A page whose content is not on this device, and can't come down now,
+// exports as nothing, saying so, rather than nothing at all.
+func TestExportSaysThePageIsNotHere(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Away"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.DB().Exec(`DELETE FROM page_contents WHERE page_id = ?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.st.SetKeepOffline(p.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	for _, export := range []func(string){a.exportMarkdown, a.exportPDF} {
+		a.toasts = nil
+		export(p.ID)
+		if len(a.toasts) != 1 || a.toasts[0].text != locales.HostErrorExport(locales.CardNotOnDevice()) {
+			t.Errorf("toasts %+v", a.toasts)
+		}
+	}
+}
+
+// A page not kept here whose content can't come down, the server failing,
+// exports as this device has it; only with none here does it say why.
+func TestExportFallsBackToTheCopyHere(t *testing.T) {
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "down", http.StatusInternalServerError)
+	}))
+	t.Cleanup(hs.Close)
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	be := remote.SignedInForTest(hs.URL, st, "u1")
+	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
+	para := &doc.Node{ID: "p1", Type: "paragraph"}
+	para.SetDelta(doc.Delta{{Text: "As it was here"}})
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Away", Content: doc.FromBlocks([]*doc.Node{para})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetKeepOffline(p.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.session.SignedIn = true
+	if a.keptHere(*a.pageByID(p.ID)) || !a.sync.CanSync() {
+		t.Fatal("the page is kept here, or nothing syncs")
+	}
+	var got *doc.Content
+	a.exportContent(p.ID, func(c *doc.Content) { got = c })
+	if got == nil || got.Find("p1") == nil {
+		t.Fatalf("exported %v", got)
+	}
+	if len(a.toasts) != 1 || a.toasts[0].text != locales.HostDownloading("Away") {
+		t.Errorf("toasts %+v", a.toasts)
+	}
+
+	if _, err := st.DB().Exec(`DELETE FROM page_contents WHERE page_id = ?`, p.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.toasts, got = nil, nil
+	a.exportContent(p.ID, func(c *doc.Content) { got = c })
+	if got != nil || len(a.toasts) != 2 || !strings.HasPrefix(a.toasts[1].text, strings.TrimSuffix(locales.HostErrorExport(""), " ")) ||
+		a.toasts[1].text == locales.HostErrorExport(locales.CardNotOnDevice()) {
+		t.Errorf("with no copy here: exported %v, toasts %+v", got, a.toasts)
+	}
+}
+
+// A page exports at once where this device keeps its content as the
+// other devices have it: with nothing to sync with, kept on the device,
+// alone or with all pages, open, or served by a public link. Any other
+// comes down first.
+func TestExportBringsAPageNotKeptDown(t *testing.T) {
+	a := templatesApp(t)
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Away"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	if !a.keptHere(*a.pageByID(p.ID)) {
+		t.Error("with nothing to sync with, a page is not kept here")
+	}
+	if err := a.st.SetKeepOffline(p.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.session.SignedIn = true
+	if a.keptHere(*a.pageByID(p.ID)) {
+		t.Error("a page not kept, nor open, nor linked, is kept here")
+	}
+	a.settings.AllPagesOffline = true
+	if !a.keptHere(*a.pageByID(p.ID)) {
+		t.Error("with all pages kept, a page is not kept here")
+	}
+	a.settings.AllPagesOffline = false
+	a.pub = &pubLink{page: p.ID, state: "live"}
+	if !a.keptHere(*a.pageByID(p.ID)) {
+		t.Error("the page a link serves is not kept here")
 	}
 }
 

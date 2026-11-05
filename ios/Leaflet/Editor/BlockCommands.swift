@@ -121,12 +121,49 @@ final class BlockCommands {
             edits.insert(unit, replacing: sel)
             return
         }
-        var attributes = storage.attributes(at: para.location, effectiveRange: nil)
-        attributes[.leafletBlock] = info
-        edits.replace(para, with: NSAttributedString(string: lines, attributes: attributes))
+        edits.replace(
+            para, with: Self.indented(storage.attributedSubstring(from: para), lines, info))
         editor.edited(NSRange(location: para.location, length: (lines as NSString).length))
         let a = para.location + min(made.anchor, made.focus)
         textView.selectedRange = NSRange(location: a, length: abs(made.focus - made.anchor))
+    }
+
+    /// indented is code, a code block's text, with its lines as lines has
+    /// them, as IndentCode left them: an indent put at a line's start, or
+    /// taken off it. The rest of each line keeps its own formats, links
+    /// and mentions; an indent put in has only the block, info.
+    static func indented(_ code: NSAttributedString, _ lines: String, _ info: BlockInfo)
+        -> NSAttributedString
+    {
+        let br = String(lineBreak)
+        let plain = NSAttributedString(string: lines, attributes: [.leafletBlock: info])
+        let was = code.string.components(separatedBy: br)
+        let now = lines.components(separatedBy: br)
+        guard was.count == now.count else { return plain }
+        var starts: [Int] = []
+        var at = 0
+        for line in was {
+            starts.append(at)
+            at += (line as NSString).length + 1
+        }
+        let out = NSMutableAttributedString(attributedString: code)
+        // From the last line back, for the lines before to stay where they
+        // are.
+        for k in was.indices.reversed() {
+            let old = (was[k] as NSString).length
+            let new = now[k] as NSString
+            if new.length > old {
+                out.insert(
+                    NSAttributedString(
+                        string: new.substring(to: new.length - old),
+                        attributes: [.leafletBlock: info]), at: starts[k])
+            } else if new.length < old {
+                out.deleteCharacters(in: NSRange(location: starts[k], length: old - new.length))
+            }
+        }
+        out.addAttribute(
+            .leafletBlock, value: info, range: NSRange(location: 0, length: out.length))
+        return out.string == lines ? out : plain
     }
 
     func setType(_ type: String, _ data: [String: JSONValue] = [:]) {

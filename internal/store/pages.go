@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -46,6 +47,24 @@ func TitleOr(t string) string {
 		return locales.CommonUntitled()
 	}
 	return t
+}
+
+// maxTitleLen is the most characters a page's title has, as the server's
+// pages table checks (pages_title_length): a page with a longer one would
+// be refused every time it went up, and its subpages would wait on it.
+const maxTitleLen = 2000
+
+// ClampTitle is a title as a page keeps it: its first maxTitleLen
+// characters, and nothing else changed.
+func ClampTitle(title string) string {
+	n := 0
+	for i := range title {
+		if n == maxTitleLen {
+			return title[:i]
+		}
+		n++
+	}
+	return title
 }
 
 const pageCols = `id, space_id, parent_id, folder_id, title, icon, sort_key, created_by, created_at, updated_at, deleted_at, keep_offline, is_template, tags, default_template_id`
@@ -180,7 +199,7 @@ type NewPageOptions struct {
 }
 
 // CreatePage creates a page, last among its siblings unless AfterID says
-// where.
+// where, its title cut to the characters one may have (ClampTitle).
 func (s *Store) CreatePage(o NewPageOptions) (Page, error) {
 	var p Page
 	// The page, its content and their entries in the outbox are stored
@@ -225,7 +244,7 @@ func createPage(tx *sql.Tx, sess Session, o NewPageOptions) (Page, error) {
 	}
 	now := time.Now()
 	p := Page{
-		ID: o.ID, SpaceID: spaceID, ParentID: o.ParentID, FolderID: folderID, Title: o.Title, Icon: o.Icon,
+		ID: o.ID, SpaceID: spaceID, ParentID: o.ParentID, FolderID: folderID, Title: ClampTitle(o.Title), Icon: o.Icon,
 		SortKey: key, CreatedAt: now, UpdatedAt: now, KeepOffline: true, Template: template, Tags: NormalizeTags(o.Tags),
 	}
 	if p.ID == "" {
@@ -256,8 +275,10 @@ func createPage(tx *sql.Tx, sess Session, o NewPageOptions) (Page, error) {
 	return p, queue(tx, "page_content", p.ID, map[string]any{"page_id": p.ID}, "new page", p.ID)
 }
 
-// RenamePage changes a page's title.
+// RenamePage changes a page's title, cut to the characters one may have
+// (ClampTitle).
 func (s *Store) RenamePage(id, title string) error {
+	title = ClampTitle(title)
 	return s.changePage(id, "renamed", func(_ *sql.Tx, p *Page) (bool, error) {
 		if p.Title == title {
 			return false, nil
@@ -323,8 +344,14 @@ func (s *Store) DeletePage(id string) ([]string, error) {
 	return ids, nil
 }
 
-// RestorePages undoes a delete.
+// RestorePages undoes a delete. A page of the user's own space whose
+// parent was deleted since, and does not come back with it, comes back at
+// the top level, last: under the parent, it would show nowhere. A page of
+// someone else's space comes back where it was, as only its owner may
+// move one to the top level there: the server would refuse the restore
+// with the move, and it would be undone.
 func (s *Store) RestorePages(ids []string) error {
+	own := s.Session().SpaceID
 	err := s.inTx(func(tx *sql.Tx) error {
 		now := time.Now()
 		for _, pid := range ids {
@@ -333,6 +360,18 @@ func (s *Store) RestorePages(ids []string) error {
 				continue
 			} else if err != nil {
 				return err
+			}
+			if p.SpaceID == own && p.ParentID != "" && !slices.Contains(ids, p.ParentID) {
+				switch parent, err := pageIn(tx, p.ParentID); {
+				case err == nil && !parent.DeletedAt.IsZero():
+					key, err := keyAfter(tx, "", p.SpaceID, "", "", p.ID)
+					if err != nil {
+						return err
+					}
+					p.ParentID, p.FolderID, p.SortKey = "", "", key
+				case err != nil && !errors.Is(err, sql.ErrNoRows):
+					return err
+				}
 			}
 			p.DeletedAt, p.UpdatedAt = time.Time{}, now
 			if err := savePage(tx, p, "restored"); err != nil {

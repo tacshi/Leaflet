@@ -92,9 +92,9 @@ func TestCommentsPushAsUpdates(t *testing.T) {
 	}
 }
 
-// A page changed here sends only what changed, so an offline rename does
-// not undo a move or a deletion made on another device meanwhile; one the
-// server does not have goes up whole.
+// A page changed here sends only what changed, with when it changed, so an
+// offline rename does not undo a move or a deletion made on another device
+// meanwhile; one the server does not have goes up whole.
 func TestPagePushSendsOnlyItsChanges(t *testing.T) {
 	st := openStore(t)
 	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
@@ -132,10 +132,12 @@ func TestPagePushSendsOnlyItsChanges(t *testing.T) {
 	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
 	ctx := context.Background()
 
+	renamed, _ := st.Page(p.ID)
 	if err := svc.push(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(methods, ",") != "PATCH" || len(sent) != 1 || sent["title"] != "Plan for Q4" {
+	if strings.Join(methods, ",") != "PATCH" || len(sent) != 2 || sent["title"] != "Plan for Q4" ||
+		store.Time(sent["changed_at"]).UnixMilli() != renamed.UpdatedAt.UnixMilli() {
 		t.Errorf("requests %v, sent %v", methods, sent)
 	}
 	if st.PendingCount() != 0 {
@@ -257,7 +259,7 @@ func TestFilePushSendsOnlyItsChanges(t *testing.T) {
 	if err := svc.push(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if got, ok := sent["PATCH /rest/v1/files"]; !ok || len(got) != 1 || got["folder_id"] != nil {
+	if got, ok := sent["PATCH /rest/v1/files"]; !ok || len(got) != 2 || got["folder_id"] != nil || got["changed_at"] == nil {
 		t.Errorf("sent %v", sent)
 	}
 	if _, ok := sent["POST /rest/v1/files"]; ok {
@@ -981,13 +983,31 @@ func TestFlushSendsThePagesFolderFirst(t *testing.T) {
 }
 
 // Rows sent again whole as a device's pages join an account go over the
-// server's only when they changed here later: one another device renamed
-// since, which this device has from iCloud Drive as it was, takes the
-// server's, and one the server does not have goes up.
+// server's only when they changed here later than there, by when each
+// change was made, not when it reached the server: one another device
+// renamed since, which this device has from iCloud Drive as it was, takes
+// the server's; one this device renamed after the copy another device
+// uploaded late, as it joined the account first, goes up over that copy;
+// and one the server does not have goes up. A server that keeps no change
+// time has only its own.
 func TestAdoptedRowsKeepNewerServerRows(t *testing.T) {
-	for _, serverNewer := range []bool{true, false} {
+	for _, tc := range []struct {
+		name string
+		// changed and uploaded are when the server's copy changed and when
+		// it reached the server, from the change here; no changed leaves
+		// the server's row without one.
+		changed, uploaded time.Duration
+		noChanged         bool
+		serverNewer       bool
+	}{
+		{name: "renamed there since", changed: time.Hour, uploaded: time.Hour, serverNewer: true},
+		{name: "an older copy uploaded late", changed: -time.Hour, uploaded: time.Hour},
+		{name: "no change time there", uploaded: time.Hour, noChanged: true, serverNewer: true},
+		{name: "no change time, uploaded before", uploaded: -time.Hour, noChanged: true},
+	} {
+		serverNewer := tc.serverNewer
 		st := openStore(t)
-		shared, err := st.CreatePage(store.NewPageOptions{Title: "Old title"})
+		shared, err := st.CreatePage(store.NewPageOptions{Title: "Renamed here"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1006,12 +1026,13 @@ func TestAdoptedRowsKeepNewerServerRows(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		at := shared.UpdatedAt.Add(-time.Hour)
-		if serverNewer {
-			at = shared.UpdatedAt.Add(time.Hour)
-		}
+		stamp := func(d time.Duration) string { return shared.UpdatedAt.Add(d).UTC().Format(time.RFC3339Nano) }
 		there := store.PageToRemote(shared)
-		there["title"], there["created_at"], there["updated_at"] = "New title", at.UTC().Format(time.RFC3339Nano), at.UTC().Format(time.RFC3339Nano)
+		there["title"], there["created_at"], there["updated_at"] = "As it is there", stamp(-2*time.Hour), stamp(tc.uploaded)
+		there["changed_at"] = stamp(tc.changed)
+		if tc.noChanged {
+			delete(there, "changed_at")
+		}
 		var mu gosync.Mutex
 		sent := map[string]map[string]any{}
 		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1043,17 +1064,122 @@ func TestAdoptedRowsKeepNewerServerRows(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if row, ok := sent[shared.ID]; ok == serverNewer {
-			t.Errorf("server's newer %v: the page was sent %v (%v)", serverNewer, ok, row)
+		row, ok := sent[shared.ID]
+		if ok == serverNewer {
+			t.Errorf("%s: the page was sent %v (%v)", tc.name, ok, row)
 		}
-		if want := map[bool]string{true: "New title", false: "Old title"}[serverNewer]; got.Title != want {
-			t.Errorf("server's newer %v: title %q, want %q", serverNewer, got.Title, want)
+		if ok && (row["title"] != "Renamed here" || store.Time(row["changed_at"]).UnixMilli() != shared.UpdatedAt.UnixMilli()) {
+			t.Errorf("%s: sent %v, not as changed here", tc.name, row)
+		}
+		if want := map[bool]string{true: "As it is there", false: "Renamed here"}[serverNewer]; got.Title != want {
+			t.Errorf("%s: title %q, want %q", tc.name, got.Title, want)
 		}
 		if row, ok := sent[own.ID]; !ok || row[store.AdoptKey] != nil || row["title"] != "Mine" {
-			t.Errorf("the device's own page went as %v (sent %v)", row, ok)
+			t.Errorf("%s: the device's own page went as %v (sent %v)", tc.name, row, ok)
 		}
 		if st.HasPending("pages", shared.ID) || st.HasPending("pages", own.ID) {
-			t.Errorf("server's newer %v: pages still queued", serverNewer)
+			t.Errorf("%s: pages still queued", tc.name)
+		}
+	}
+}
+
+// A row this device pulled from the server, and has not changed since,
+// sends nothing as its pages join the account again, as after a while of
+// syncing through iCloud Drive: the server's row stays, also when another
+// device changed it there since, in a change it made offline before this
+// one took the row, which by their times alone would lose to this copy.
+// One changed here since, or by a device through iCloud Drive, goes up,
+// as changed there.
+func TestAdoptedPulledRowsGoOnlyWhenChangedHere(t *testing.T) {
+	const id = "00000000-0000-0000-0000-0000000000f1"
+	for _, tc := range []struct {
+		name string
+		// renamedThere is the title another device gave the row on the
+		// server since, in a change made before this device took it; ""
+		// for none.
+		renamedThere, renamedHere, fromPeer string
+		want                                string
+	}{
+		{name: "unchanged", want: "Plan"},
+		{name: "renamed there since, offline before", renamedThere: "Plan, renamed offline", want: "Plan, renamed offline"},
+		{name: "renamed here", renamedHere: "Plan, renamed here", want: "Plan, renamed here"},
+		{name: "renamed by a device through iCloud Drive", fromPeer: "Plan, renamed on the iPad", want: "Plan, renamed on the iPad"},
+	} {
+		st := openStore(t)
+		written := time.Now().UTC().Add(-time.Hour)
+		server := func(at time.Time) string { return at.Format("2006-01-02T15:04:05.999999-07:00") }
+		there := map[string]any{
+			"id": id, "space_id": st.Session().SpaceID, "parent_id": nil, "folder_id": nil, "title": "Plan", "icon": nil,
+			"sort_key": "a0", "created_by": "u1", "created_at": server(written.Add(-time.Hour)), "deleted_at": nil,
+			"is_template": false, "tags": []any{"work"}, "default_template_id": nil, "placed_at": server(written),
+			"updated_at": server(written), "changed_at": server(written.Add(-time.Minute)),
+		}
+		if err := st.PutRemotePage(there); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case tc.renamedHere != "":
+			if err := st.RenamePage(id, tc.renamedHere); err != nil {
+				t.Fatal(err)
+			}
+			dequeueAll(t, st) // gone through iCloud Drive
+		case tc.fromPeer != "":
+			// As applyRow stores it: the change is the other device's, made
+			// before this one took the row, so the row's time stays.
+			peer := maps.Clone(there)
+			peer["title"], peer[store.PeerKey] = tc.fromPeer, true
+			if err := st.PutRemotePage(peer); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if tc.renamedThere != "" {
+			there = maps.Clone(there)
+			there["title"], there["changed_at"], there["updated_at"] = tc.renamedThere, server(written.Add(-2*time.Hour)), server(time.Now())
+		}
+		if err := st.Requeue("pages", id); err != nil {
+			t.Fatal(err)
+		}
+		local, err := st.Page(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var mu gosync.Mutex
+		var sent []map[string]any
+		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			out := []map[string]any{}
+			if r.URL.Path == "/rest/v1/pages" {
+				if r.Method == http.MethodGet {
+					out = append(out, there)
+				} else {
+					var row map[string]any
+					_ = json.NewDecoder(r.Body).Decode(&row)
+					mu.Lock()
+					sent = append(sent, row)
+					mu.Unlock()
+					out = append(out, row)
+				}
+			}
+			_ = json.NewEncoder(w).Encode(out)
+		}))
+		svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+		if err := svc.push(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		hs.Close()
+
+		goesUp := tc.renamedHere != "" || tc.fromPeer != ""
+		switch {
+		case !goesUp && len(sent) != 0:
+			t.Errorf("%s: sent %v", tc.name, sent)
+		case goesUp && (len(sent) != 1 || sent[0]["title"] != tc.want ||
+			store.Time(sent[0]["changed_at"]).UnixMilli() != local.UpdatedAt.UnixMilli()):
+			t.Errorf("%s: sent %v", tc.name, sent)
+		}
+		if got, _ := st.Page(id); got.Title != tc.want {
+			t.Errorf("%s: title %q, want %q", tc.name, got.Title, tc.want)
+		}
+		if st.HasPending("pages", id) {
+			t.Errorf("%s: still queued", tc.name)
 		}
 	}
 }

@@ -496,6 +496,22 @@ struct EditorTests {
         #expect(MarkdownPreview.marker(rows[1]) == "☐")
         #expect(MarkdownPreview.marker(rows[2]) == "1.")
         #expect(TableGrid.rows(rows[3].node) == [["", "A"], ["x", "1"]])
+        // Read with the rows, off the main thread, as a preview shows them.
+        #expect(rows[3].cells == [["", "A"], ["x", "1"]])
+    }
+
+    /// A comment's links are only those the page opens: a web, mail or
+    /// page link, not a file's or another app's, which whoever comments
+    /// could write; their text stays.
+    @Test func aCommentLinksOnlyWhatThePageOpens() {
+        let text = CommentRow.text(
+            "[a](https://example.com) [b](shortcuts://run-shortcut?name=X) [c](file:///etc/hosts) "
+                + "[d](leaflet://page/p1) [e](mailto:me@example.com)")
+        #expect(String(text.characters) == "a b c d e")
+        #expect(
+            text.runs.compactMap { $0.link?.absoluteString } == [
+                "https://example.com", "leaflet://page/p1", "mailto:me@example.com",
+            ])
     }
 
     /// An agent's answer reads as blocks too: a fence's lines are code,
@@ -583,6 +599,26 @@ struct EditorTests {
         #expect(day.overdue(now: later))
         // A day without a time is due all of it.
         #expect(!day.overdue(now: now.addingTimeInterval(86400)))
+    }
+
+    /// Tab and Shift-Tab over a code block's lines indent them and take
+    /// the indent off again, each line's formats staying where they were.
+    @Test func codeIndentedKeepsItsFormats() {
+        var d = block("c", "code", "")
+        d.data?["delta"] = .array([
+            .object(["insert": .string("let ")]),
+            .object(["insert": .string("a"), "attributes": .object(["bold": .bool(true)])]),
+            .object(["insert": .string("\nb")]),
+        ])
+        let c = editor([d])
+        c.textView.selectedRange = NSRange(location: 0, length: 7)
+        c.indent(by: 1)
+        #expect(runs(blocks(c).first).map(\.0) == ["  let ", "a", "\n  b"])
+        #expect(runs(blocks(c).first)[1].1?["bold"]?.bool == true)
+        c.textView.selectedRange = NSRange(location: 0, length: 11)
+        c.indent(by: -1)
+        #expect(runs(blocks(c).first).map(\.0) == ["let ", "a", "\nb"])
+        #expect(runs(blocks(c).first)[1].1?["bold"]?.bool == true)
     }
 
     /// runs is a block's text as runs of text and their formats.
@@ -801,6 +837,80 @@ struct EditorTests {
         #expect(blocks(c).map(\.type) == ["quote", "paragraph"])
     }
 
+    /// Backspace after a closed toggle joins the block to the toggle's own
+    /// line, the block before it that shows, past what is folded in it,
+    /// which stays folded; Delete at the toggle's end does the same. The
+    /// key's own join would put it in the last of the folded blocks, out
+    /// of sight.
+    @Test func backspaceAndDeleteGoPastWhatIsFolded() {
+        func folded() -> EditorController {
+            editor([
+                block(
+                    "t", "toggle_list", "Details", data: ["collapsed": .bool(true)],
+                    children: [block("in", "paragraph", "Hidden")]),
+                block("b", "paragraph", "After"),
+            ])
+        }
+        var sent: DocContent?
+        // "Details\nHidden\nAfter", the caret at the start of After.
+        let c = folded()
+        c.textView.selectedRange = NSRange(location: 15, length: 0)
+        c.backspace()
+        c.onEdit = { sent = $0 }
+        c.send()
+        #expect(sent?.blocks.map(\.text) == ["DetailsAfter"])
+        #expect(sent?.blocks.first?.children?.map(\.text) == ["Hidden"])
+        #expect(sent?.blocks.first?.data?["collapsed"]?.bool == true)
+        #expect(c.textView.selectedRange == NSRange(location: 7, length: 0))
+
+        let d = folded()
+        d.textView.selectedRange = NSRange(location: 7, length: 0)
+        d.forwardDelete()
+        d.onEdit = { sent = $0 }
+        d.send()
+        #expect(sent?.blocks.map(\.text) == ["DetailsAfter"])
+        #expect(sent?.blocks.first?.children?.map(\.text) == ["Hidden"])
+        #expect(d.textView.selectedRange == NSRange(location: 7, length: 0))
+    }
+
+    /// Delete at the end of a folded heading joins the heading after it,
+    /// which ended its section: what that one's section showed still
+    /// shows, the heading unfolding, as on the desktop, whether its own
+    /// section held blocks or none.
+    @Test func deleteAtAFoldedHeadingKeepsWhatShowedAfter() {
+        for body in [[block("p", "paragraph", "Body")], []] {
+            let c = editor(
+                [block("h", "heading", "Plan", data: ["level": .int(2), "collapsed": .bool(true)])]
+                    + body + [
+                        block("n", "heading", "Next", data: ["level": .int(2)]),
+                        block("q", "paragraph", "Shown"),
+                    ])
+            c.textView.selectedRange = NSRange(location: 4, length: 0)
+            c.forwardDelete()
+            let b = blocks(c)
+            #expect(b.map(\.text) == ["PlanNext"] + body.map(\.text) + ["Shown"])
+            #expect(b.first?.data?["collapsed"]?.bool != true)
+        }
+    }
+
+    /// Delete at the end of a closed toggle with nothing shown after it
+    /// does nothing, as on the desktop: what is folded in it stays there.
+    @Test func deleteAtAClosedToggleLastOnThePageLeavesIt() {
+        let c = editor([
+            block(
+                "t", "toggle_list", "Details", data: ["collapsed": .bool(true)],
+                children: [block("in", "paragraph", "Hidden")])
+        ])
+        c.textView.selectedRange = NSRange(location: 7, length: 0)
+        c.forwardDelete()
+        var sent: DocContent?
+        c.onEdit = { sent = $0 }
+        c.send()
+        #expect(sent?.blocks.map(\.text) == ["Details"])
+        #expect(sent?.blocks.first?.children?.map(\.text) == ["Hidden"])
+        #expect(c.textView.selectedRange == NSRange(location: 7, length: 0))
+    }
+
     /// Delete at a block's end joins the block after it, as Backspace at
     /// that one's start does not.
     @Test func deleteAtTheEndJoinsTheNextBlock() {
@@ -970,6 +1080,46 @@ struct EditorTests {
         try await slowly(c, "yz")
         undoAll(undo)
         #expect(c.textView.text == "Hi")
+    }
+
+    /// A letter typed on a picture chosen whole, as Backspace and Delete
+    /// choose it, starts a block after it, as on the desktop: the picture
+    /// stays.
+    @Test func typingOnAPictureChosenWholeKeepsIt() {
+        let image = DocNode(
+            id: "i", type: "image", data: ["url": .string("https://example.com/a.png")],
+            children: nil)
+        let c = editor([image, block("p", "paragraph", "After")])
+        c.textView.selectedRange = NSRange(location: 0, length: 1)
+        c.type("x")
+        let b = blocks(c)
+        #expect(b.map(\.type) == ["image", "paragraph", "paragraph"])
+        #expect(b.map(\.text) == ["", "x", "After"])
+        #expect(b.first?.id == "i")
+    }
+
+    /// Text typed or pasted over a selection that starts at a picture
+    /// takes its place, the picture with it, as over any other; from the
+    /// picture's end, the picture stays and the text goes after it.
+    @Test func textOverASelectionFromAPictureReplacesIt() async throws {
+        let image = DocNode(
+            id: "i", type: "image", data: ["url": .string("https://example.com/a.png")],
+            children: nil)
+        // All of the page, then from the picture's end to the end of After.
+        for (chosen, types, texts) in [
+            (NSRange(location: 0, length: 7), ["paragraph"], ["New"]),
+            (NSRange(location: 1, length: 6), ["image", "paragraph"], ["", "New"]),
+        ] {
+            let c = editor([image, block("p", "paragraph", "After")])
+            let (_, done) = try show(c)
+            try await settle(c)
+            c.textView.selectedRange = chosen
+            c.paste("New")
+            try await Task.sleep(for: .milliseconds(20))
+            #expect(blocks(c).map(\.type) == types)
+            #expect(blocks(c).map(\.text) == texts)
+            done()
+        }
     }
 
     /// Undo, again and again, goes back through lines pasted as blocks, a
@@ -1558,6 +1708,22 @@ struct EditorTests {
         #expect(b.map(\.type) == ["paragraph", "heading"])
         #expect(b.map(\.text) == ["Plan", ""])
         #expect(b.first?.id == "a")
+    }
+
+    /// Insert with a picture chosen puts the kind picked after it, as the
+    /// caret by it does: the picture stays.
+    @Test func insertByAPictureKeepsIt() {
+        let image = DocNode(
+            id: "i", type: "image", data: ["url": .string("https://example.com/a.png")],
+            children: nil)
+        let c = editor([image, block("p", "paragraph", "After")])
+        offer(c, [("h1", "Heading 1")])
+        c.textView.selectedRange = NSRange(location: 0, length: 1)
+        c.insertItem(MenuItem(key: "h1", label: "Heading 1", hint: "", icon: "", group: ""))
+        let b = blocks(c)
+        #expect(b.map(\.type) == ["image", "heading", "paragraph"])
+        #expect(b.first?.id == "i")
+        #expect(b.map(\.text) == ["", "", "After"])
     }
 
     /// A change from outside that takes away the block the caret is in

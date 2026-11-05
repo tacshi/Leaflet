@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { emptyContent, type PageContent } from "./blocks.ts";
-import { MAX_LISTED_PAGES, PageEditSession, type PagePlace, TOOL_RESULT_LIMIT, ToolError } from "./tools.ts";
+import { MAX_LISTED_PAGES, MAX_TITLE, PageEditSession, type PagePlace, TOOL_RESULT_LIMIT, ToolError } from "./tools.ts";
 import { normalizeTags, type WorkspaceHooks, type WorkspacePage, workspaceToolDefinitions } from "./workspace.ts";
 import { workspaceMessage, workspacePrompt } from "./prompt.ts";
 import { corpus } from "../_testing/fixture.ts";
@@ -351,4 +351,43 @@ Deno.test("renaming an untitled page keeps no title to give back", async () => {
     undefined,
   );
   assertEquals(s.ops.length, 2);
+});
+
+// Listing the folders reads nothing someone else wrote, as on a page, but
+// spends the run's one read of the web that may go to any page, which
+// could carry their names: after it, the run reads only a page the person
+// gave.
+Deno.test("the workspace agent's folders spend its free read of the web", async () => {
+  const read: string[] = [];
+  const s = new PageEditSession(emptyContent(), {
+    readPage: () => Promise.resolve({}),
+    createSubpage: () => Promise.reject(new Error("no")),
+    createPage: () => Promise.reject(new Error("no")),
+    listPages: () => Promise.resolve([]),
+    readOtherPage: () => Promise.resolve({}),
+    listFolders: () => Promise.resolve([]),
+    readWebPage: (url) => {
+      read.push(url);
+      return Promise.resolve({ url, title: "", text: "", links: [], truncated: false });
+    },
+  }, {
+    canEdit: true,
+    crossPage: false,
+    request: "Save https://example.com/given",
+    author: "Claude",
+    workspace: worldHooks(true),
+  });
+  await s.call("list_folders", {});
+  assertEquals([s.keptToPage, s.guarded], [true, true]);
+  assert(errorOf((await s.call("read_web_page", { url: "https://elsewhere.example/?f=Clippings" })).result));
+  assertEquals(errorOf((await s.call("read_web_page", { url: "https://example.com/given" })).result), undefined);
+  assertEquals(read, ["https://example.com/given"]);
+});
+
+// A page renamed to a title longer than the pages table takes keeps its
+// first MAX_TITLE characters, as code points.
+Deno.test("a rename's title is cut to the longest the pages table takes", async () => {
+  const s = session();
+  await s.call("rename_page", { page_id: "p-1", title: "字".repeat(MAX_TITLE + 1) });
+  assertEquals(s.ops, [{ op: "rename_page", page_id: "p-1", title: "字".repeat(MAX_TITLE), previous: "Plan" }]);
 });

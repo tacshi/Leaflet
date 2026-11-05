@@ -52,6 +52,13 @@ export interface WorkspaceHooks {
   listPages(): Promise<WorkspacePage[]>;
   /** One of the person's pages, null for one they have not. */
   page(id: string): Promise<WorkspacePage | null>;
+  /**
+   * Reads again who else has the person's pages, before a call that
+   * changes one: someone may have been given one, or commented on it as a
+   * guest, since the run began (Go's page, which asks the store each
+   * time). None keeps what it read.
+   */
+  changing?(): Promise<void>;
   readPage(id: string): Promise<unknown>;
   searchPages(query: string): Promise<unknown[]>;
   listFolders(): Promise<{ id: string; name: string }[]>;

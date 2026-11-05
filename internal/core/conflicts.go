@@ -107,7 +107,9 @@ func (p Pages) ResolveConflict(id string, how Resolution) error {
 }
 
 // putBack puts node, a version of a conflict's block, back, or with node
-// nil deletes the block.
+// nil deletes the block. The version is of the block itself, its type and
+// data: the blocks under it as the merge found them are not put back
+// over those the page has now.
 func (p Pages) putBack(cf store.ConflictRow, node *doc.Node) error {
 	p.save(cf.PageID)
 	if c := p.Store.Content(cf.PageID); c != nil {
@@ -116,16 +118,28 @@ func (p Pages) putBack(cf store.ConflictRow, node *doc.Node) error {
 		}
 	}
 	return p.EditPage(cf.PageID, func(c *doc.Content) bool {
-		switch {
+		switch cur := c.Find(cf.BlockID); {
 		case node == nil:
 			c.Remove(cf.BlockID)
 			if len(c.Children) == 0 {
 				c.Children = doc.Empty().Children
 			}
-		case c.Find(cf.BlockID) != nil:
-			_ = c.Replace(cf.BlockID, node.Clone())
+		case cur != nil:
+			// The blocks under it stay as they are, edited, added or moved
+			// since, as a replace keeps them; a table's cells are the
+			// table, and come back with it.
+			n := node.Clone()
+			if n.Type != "table" && cur.Type != "table" {
+				n.Children = cur.Children
+			}
+			_ = c.Replace(cf.BlockID, n)
+			// Under a version that holds none, as an item put back as the
+			// paragraph it was, they come out after it.
+			c.Children = c.Lifted().Children
 		default:
-			_ = c.Insert(doc.Position{At: "end"}, node.Clone())
+			// Blocks of it the page has elsewhere now stay there, rather
+			// than being on the page twice.
+			_ = c.Apply(doc.InsertOp(doc.Position{At: "end"}, node.Clone()))
 		}
 		return true
 	})

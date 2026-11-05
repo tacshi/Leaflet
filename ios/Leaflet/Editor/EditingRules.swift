@@ -105,8 +105,11 @@ final class EditingRules {
             break
         }
         if !info.isText {
-            // Text typed by a block without text goes in a new block after
-            // it.
+            // A selection that reaches past the block takes what is typed
+            // in its place.
+            if NSMaxRange(range) > NSMaxRange(para) { return replaceSelection(range, para, s) }
+            // Text typed by a block without text, or on it chosen whole, as
+            // Backspace and Delete choose it, goes in a new block after it.
             edits.insertParagraph(after: para, info: BlockInfo.paragraph(), text: s)
             return false
         }
@@ -155,19 +158,43 @@ final class EditingRules {
         return true
     }
 
+    /// replaceSelection puts s, typed or pasted, in place of range, chosen
+    /// from the block without text of para, as all of a page that starts
+    /// with a picture: what is chosen goes, and s goes in where it was as
+    /// the rules have it there, as text, lines or blocks. Chosen from the
+    /// picture's end, the picture and its line's end stay.
+    private func replaceSelection(_ range: NSRange, _ para: NSRange, _ s: String) -> Bool {
+        var gone = range
+        if gone.location == NSMaxRange(para) {
+            gone = NSRange(location: gone.location + 1, length: gone.length - 1)
+        }
+        if gone.length > 0 { edits.delete(gone) }
+        let caret = NSRange(location: gone.location, length: 0)
+        textView.selectedRange = caret
+        if follow(caret, s) { edits.insert(s, replacing: caret) }
+        return false
+    }
+
     /// deleteAtEnd follows Delete at the end of a block, which joins the
     /// block after it to it, as the core's rules have it (mobile.Delete): a
     /// block without text, after or before, is chosen first, to go with
-    /// another Delete, as Backspace does.
+    /// another Delete, as Backspace does. The block after it is the next
+    /// that shows, past those a closed toggle or a folded heading hides,
+    /// as on the desktop; with none, as after a closed toggle last on the
+    /// page, Delete does nothing.
     private func deleteAtEnd(_ para: NSRange, _ info: BlockInfo) -> Bool {
-        let (next, nextInfo) = text.paragraph(at: NSMaxRange(para) + 1)
+        guard let after = shownAfter(para) else { return false }
+        let (next, nextInfo) = after
         switch MobileDelete(info.type, nextInfo.type) {
         case "selectAfter":
             textView.selectedRange = next
         case "selectThis":
             textView.selectedRange = para
         default:
-            return true
+            // Right after a block that folds nothing away, the key joins
+            // the two itself.
+            guard next.location > NSMaxRange(para) + 1 || info.isCollapsed else { return true }
+            joinPast(next, into: para)
         }
         return false
     }
@@ -412,21 +439,23 @@ final class EditingRules {
     /// para, as the core's rules have it (mobile.Backspace): a list item, a
     /// quote or a heading turns into text, or goes out of the list it is
     /// in, as does a paragraph last in a toggle; else the block joins the
-    /// one before, a block without text before it chosen first.
+    /// one before, a block without text before it chosen first. The block
+    /// before it is the one that shows, past those a closed toggle or a
+    /// folded heading hides, as on the desktop.
     private func backspaceAtStart(_ para: NSRange, _ info: BlockInfo) -> Bool {
         if !info.isText {
             // The caret before a block without text: it goes out of the
             // list it is in, or the caret back into the block before.
             if info.depth > 0 {
                 edits.setBlock(info.with(depth: info.depth - 1), at: para.location)
-            } else if para.location > 0 {
-                let (prev, prevInfo) = text.paragraph(at: para.location - 1)
+            } else if let prev = shownBefore(para) {
                 textView.selectedRange =
-                    prevInfo.isText ? NSRange(location: NSMaxRange(prev), length: 0) : prev
+                    prev.info.isText
+                    ? NSRange(location: NSMaxRange(prev.range), length: 0) : prev.range
             }
             return false
         }
-        let prev = para.location > 0 ? text.paragraph(at: para.location - 1) : nil
+        let prev = shownBefore(para)
         let action = MobileBackspace(
             info.type, para.length == 0, info.depth > 0, isLast(para, info),
             prev?.info.type ?? "")
@@ -447,9 +476,67 @@ final class EditingRules {
         case "nothing":
             break
         default:
-            return true
+            // Right after a block that folds nothing away, the key joins
+            // the two itself.
+            guard let prev,
+                NSMaxRange(prev.range) + 1 < para.location || prev.info.isCollapsed
+            else { return true }
+            joinPast(para, into: prev.range)
         }
         return false
+    }
+
+    /// shownBefore is the paragraph before para that shows, past those
+    /// folded away, or nil at the page's start.
+    private func shownBefore(_ para: NSRange) -> (range: NSRange, info: BlockInfo)? {
+        guard para.location > 0 else { return nil }
+        let prev = text.paragraph(at: para.location - 1)
+        let folded = editor.layout.folded
+        guard folded.contains(prev.info.id) else { return prev }
+        let all = text.blocks()
+        let i = all.lastIndex { $0.range.location <= para.location } ?? 0
+        return all[..<i].last { !folded.contains($0.info.id) }.map { ($0.range, $0.info) }
+    }
+
+    /// shownAfter is the paragraph after para that shows, past those
+    /// folded away, or nil when none does.
+    private func shownAfter(_ para: NSRange) -> (range: NSRange, info: BlockInfo)? {
+        guard NSMaxRange(para) < storage.length else { return nil }
+        let next = text.paragraph(at: NSMaxRange(para) + 1)
+        let folded = editor.layout.folded
+        guard folded.contains(next.info.id) else { return next }
+        let all = text.blocks()
+        let i = all.lastIndex { $0.range.location <= para.location } ?? 0
+        return all[(i + 1)...].first { !folded.contains($0.info.id) }.map { ($0.range, $0.info) }
+    }
+
+    /// joinPast joins the block of para to the block of prev, the one
+    /// before it that shows, past the blocks a fold hides between them, as
+    /// the desktop joins them: its text goes at the end of prev's, the
+    /// blocks nested in it come out a level, after the folded ones, which
+    /// stay folded, and the caret goes where the two texts meet. Joined by
+    /// the key, it would go into the last of the folded blocks, out of
+    /// sight. What showed after the block joined still shows: a heading
+    /// joined to a folded one ended its section, which now goes on past
+    /// what came after it, and unfolds.
+    private func joinPast(_ para: NSRange, into prev: NSRange) {
+        let all = text.paragraphs()
+        let p = BlockText.index(all, at: prev.location)
+        let i = BlockText.index(all, at: para.location)
+        guard p < i else { return }
+        let last = BlockText.subtree(all, i)
+        let folded = editor.layout.folded
+        let shown = all[(i + 1)...].first { !folded.contains($0.info.id) }?.info.id
+        let joined = NSMutableAttributedString(attributedString: all[p].text)
+        joined.append(all[i].text)
+        var blocks: [(info: BlockInfo, text: NSAttributedString)] = [(all[p].info, joined)]
+        blocks += all[(p + 1)..<i].map { ($0.info, $0.text) }
+        blocks += all[(i + 1)..<(last + 1)].map {
+            ($0.info.with(depth: max($0.info.depth - 1, 0)), $0.text)
+        }
+        edits.rewrite(all, p, last, blocks)
+        if let shown { editor.layout.keepShown(shown) }
+        textView.selectedRange = NSRange(location: NSMaxRange(prev), length: 0)
     }
 
     /// markdownShortcut turns "#", "-", "1.", "[]", ">", "```" and the like,

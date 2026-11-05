@@ -119,9 +119,10 @@ final class CaretMenuController {
     }
 
     /// make does what a "/" item says at location, as the "/" menu and the
-    /// keyboard bar's Insert do: an empty block becomes the kind picked
-    /// and one with text gets a block of it after it; a block without text
-    /// goes in after the block there.
+    /// keyboard bar's Insert do: an empty block becomes the kind picked,
+    /// and one with text gets a block of it after it, as does a block
+    /// without text, as a picture chosen, which stays; a block without
+    /// text goes in after the block there.
     private func make(_ item: MenuItem, at location: Int) {
         var error: NSError?
         let raw = MobileMenuBlock(item.key, editor.author?() ?? "", &error)
@@ -129,7 +130,7 @@ final class CaretMenuController {
         if let type = made?.type {
             let (para, info) = text.paragraph(at: location)
             let data = made?.data ?? [:]
-            if para.length == 0 || !info.isText {
+            if para.length == 0 {
                 editor.edits.setBlock(info.with(type: type, data: data), at: para.location)
             } else {
                 editor.edits.insertParagraph(

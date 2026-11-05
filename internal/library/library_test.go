@@ -76,6 +76,30 @@ func TestPagesOfAFolderGone(t *testing.T) {
 	}
 }
 
+// A page of the user's whose parent is gone, as another device deleted it
+// while this one made the page in it, is at the top level, or in its
+// folder, among the pages there, not in no place at all. A shared one is
+// among what is shared, and a template's stays under it.
+func TestPagesOfAParentGone(t *testing.T) {
+	tmpl := page("t1", "gone", "", "me", "c")
+	tmpl.Template = true
+	tree := Arrange("me", []store.Page{
+		page("a", "", "", "me", "a"), page("left", "gone", "", "me", "b"), page("filed", "gone", "f", "me", "a"),
+		page("lone", "gone", "", "them", "a"), tmpl,
+	}, []store.Folder{{ID: "f", SpaceID: "me", Name: "Work"}})
+	for _, c := range []struct{ what, got, want string }{
+		{"top", ids(tree.Top), "[a left]"},
+		{"in Work", ids(tree.InFolder["f"]), "[filed]"},
+		{"shared", ids(tree.Shared), "[lone]"},
+		{"under the parent gone", ids(tree.Children["gone"]), "[lone t1]"},
+		{"siblings of left", ids(tree.Siblings(page("left", "gone", "", "me", "b"))), "[a left]"},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s: %s, want %s", c.what, c.got, c.want)
+		}
+	}
+}
+
 // Pages whose parents go round in a loop, as two devices' moves can leave
 // them, are under each other, and at no top level.
 func TestALoopOfParents(t *testing.T) {

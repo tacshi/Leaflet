@@ -36,7 +36,7 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 		ui.Row(c).Height(26).Gap(2).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, name).FontSize(12).TextColor(pal.TextMuted).Opacity(shown).Grow(1)
 			if n.Type == "diagram" && strings.TrimSpace(source) != "" {
-				a.zoomTools(c, n.ID, shown)
+				a.zoomTools(c, blockView(n.ID), shown)
 				if barButton(c, "full", "maximize-2", locales.RenderedFullScreen(), shown).Clicked() {
 					a.page.fullDiagram = n.ID
 				}
@@ -79,7 +79,7 @@ func (a *App) renderedBlock(c *ui.Context, n *doc.Node, width float32) {
 		// The frame takes its content's height. Math gives the page the
 		// wheel; a diagram keeps Ctrl and the wheel to zoom.
 		in := embedInput{src: source, kind: n.Type, toPage: n.Type == "math_equation"}
-		a.sandbox(c, n.ID, in, page, width-2-2*pad, func(content float32) float32 {
+		a.sandbox(c, blockView(n.ID), in, page, width-2-2*pad, func(content float32) float32 {
 			return min(max(content, 32), 1600)
 		}, height)
 	})
@@ -116,7 +116,7 @@ func (a *App) zoomTools(c *ui.Context, key string, shown float32) {
 // it; Escape or its button brings back the page where it was.
 func (a *App) fullDiagram(c *ui.Context, n *doc.Node) {
 	pal := theme.Of(c)
-	key := "full:" + n.ID
+	key := fullView(n.ID)
 	_, source := doc.BlockSource(n)
 	ui.Column(c.Key(key)).Fill().Padding(0, pagePadX, 16).Children(func() {
 		ui.Row(c).Height(40).Gap(2).AlignItems(ui.Center).Children(func() {
@@ -140,7 +140,7 @@ func (a *App) leaveFullDiagram() {
 	if ps == nil || ps.fullDiagram == "" {
 		return
 	}
-	key := "full:" + ps.fullDiagram
+	key := fullView(ps.fullDiagram)
 	ps.fullDiagram = ""
 	a.letGoEmbed(key)
 	delete(a.embedIn, key)

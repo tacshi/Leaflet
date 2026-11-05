@@ -12,6 +12,7 @@ import (
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/i18n"
 
+	"leaflet/internal/doc"
 	"leaflet/internal/guard"
 	"leaflet/internal/theme"
 	"leaflet/internal/webpage"
@@ -31,50 +32,52 @@ const pdfDownloadWait = 2 * time.Minute
 const pdfMargin = 0.6
 
 // exportPDF saves a page as a PDF: the page as its public link shows it,
-// in light colors, laid out on paper of this region's size.
+// as the other devices have it, in light colors, laid out on paper of
+// this region's size.
 func (a *App) exportPDF(id string) {
 	// As exportMarkdown, not without the edits waiting.
 	if a.page != nil && a.page.id == id && !a.savePage() {
 		return
 	}
-	p := a.pageByID(id)
-	c := a.st.Content(id)
-	if p == nil || c == nil {
-		return
-	}
-	o := webpage.Options{Store: a.st, Page: id, Title: p.DisplayTitle(), Titles: a.pageTitles(), Files: slices.Clone(a.files),
-		Lang: i18n.Locale(), Head: "<style>" + printLook() + "</style>", Serve: webpage.Inline, Code: codeHTML, Chart: chartHTML, Print: true,
-		Region: webpage.RegionOf(mygo.App.Region().Locale)}
-	name := safeName(p.DisplayTitle()) + ".pdf"
-	cr := a.core()
-	go func() {
-		defer guard.Recover()
-		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportPDFTitle(), DefaultPath: name})
-		if path == "" {
+	a.exportContent(id, func(c *doc.Content) {
+		p := a.pageByID(id)
+		if p == nil {
 			return
 		}
-		a.update(func() { a.toast(locales.HostExportingPDF(filepath.Base(path))) })
-		// Pictures another device added, which this one has not shown yet,
-		// come first: paper has no other way to them.
-		ctx, cancel := context.WithTimeout(context.Background(), pdfDownloadWait)
-		if cr.DownloadPictures(ctx, c, id) {
-			if files, err := a.st.Files(); err == nil {
-				o.Files = files
+		o := webpage.Options{Store: a.st, Page: id, Title: p.DisplayTitle(), Titles: a.pageTitles(), Files: slices.Clone(a.files),
+			Lang: i18n.Locale(), Head: "<style>" + printLook() + "</style>", Serve: webpage.Inline, Code: codeHTML, Chart: chartHTML, Print: true,
+			Region: webpage.RegionOf(mygo.App.Region().Locale)}
+		name := safeName(p.DisplayTitle()) + ".pdf"
+		cr := a.core()
+		go func() {
+			defer guard.Recover()
+			path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportPDFTitle(), DefaultPath: name})
+			if path == "" {
+				return
 			}
-		}
-		cancel()
-		pdf, err := printPDF(webpage.HTML(c, o))
-		if err == nil {
-			err = os.WriteFile(path, pdf, 0o644) // #nosec G306 -- a file the user saves, readable like any other they save.
-		}
-		a.update(func() {
-			if err != nil {
-				a.toast(locales.HostErrorExport(err.Error()))
-			} else {
-				a.toast(locales.HostExported(filepath.Base(path)))
+			a.update(func() { a.toast(locales.HostExportingPDF(filepath.Base(path))) })
+			// Pictures another device added, which this one has not shown
+			// yet, come first: paper has no other way to them.
+			ctx, cancel := context.WithTimeout(context.Background(), pdfDownloadWait)
+			if cr.DownloadPictures(ctx, c, id) {
+				if files, err := a.st.Files(); err == nil {
+					o.Files = files
+				}
 			}
-		})
-	}()
+			cancel()
+			pdf, err := printPDF(webpage.HTML(c, o))
+			if err == nil {
+				err = os.WriteFile(path, pdf, 0o644) // #nosec G306 -- a file the user saves, readable like any other they save.
+			}
+			a.update(func() {
+				if err != nil {
+					a.toast(locales.HostErrorExport(err.Error()))
+				} else {
+					a.toast(locales.HostExported(filepath.Base(path)))
+				}
+			})
+		}()
+	})
 }
 
 // printLook is a printed page in Leaflet's light colors, which paper

@@ -73,8 +73,10 @@ type Config struct {
 }
 
 // Core is Leaflet's parts, wired together, and the hooks of the app they
-// run in. It keeps nothing else: a Core made over the same parts and
-// hooks is the same Core.
+// run in. It keeps what it has under way too: the project being brought
+// up to date, which sync waits for as Open wired it to, and the Supabase
+// account's sign-in for that. An app keeps the Core that Open made for
+// as long as it runs: another made over the same parts has none of it.
 type Core struct {
 	Store  *store.Store
 	Remote *remote.Client
@@ -150,6 +152,9 @@ func Open(cfg Config) (*Core, error) {
 	c.Sync.Online, c.Sync.DeviceName = cfg.Online, cfg.DeviceName
 	c.Sync.OnState, c.Sync.OnPageContent = cfg.OnSyncState, cfg.OnPageContent
 	c.Sync.Updating = c.updatingProject.Load
+	// Signed out, the pages go to the other devices through iCloud Drive,
+	// where the devices say which public links they serve.
+	c.Hub.ICloudLease, c.Hub.ICloudLinks = c.Sync.ICloudLease, c.Sync.ICloudLinksElsewhere
 	// Sync asks from its own goroutine: the stored settings, which the
 	// app's own copy is not safe to read from.
 	c.Sync.Offline = func() bool { return st.Settings().WorkOffline }

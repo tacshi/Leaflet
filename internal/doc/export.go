@@ -312,6 +312,7 @@ func markdownLines(md string) []string {
 		return []string{md}
 	}
 	s := []rune(md)
+	links := &linkScan{s: s}
 	var lines []string
 	var b strings.Builder
 	for i := 0; i < len(s); {
@@ -325,7 +326,7 @@ func markdownLines(md string) []string {
 		case '[':
 			// A link's text may go over lines; its address, where a
 			// backtick opens no code span, is on the line its text ends.
-			if text, _, n, ok := link(s[i:]); ok {
+			if text, _, n, ok := links.link(i); ok {
 				parts := markdownLines(string(text))
 				b.WriteString("[" + parts[0])
 				for _, part := range parts[1:] {
@@ -445,6 +446,7 @@ func cellMarkdown(md string) string {
 		return md
 	}
 	s := []rune(md)
+	links := &linkScan{s: s}
 	var b strings.Builder
 	for i := 0; i < len(s); {
 		switch s[i] {
@@ -455,7 +457,7 @@ func cellMarkdown(md string) string {
 		case '[':
 			// A link's text is the cell's Markdown, and its address only
 			// has its |s escaped: a backtick there opens no code span.
-			if text, _, n, ok := link(s[i:]); ok {
+			if text, _, n, ok := links.link(i); ok {
 				b.WriteString("[" + cellMarkdown(string(text)) + strings.ReplaceAll(string(s[i+1+len(text):i+n]), "|", `\|`))
 				i += n
 				continue

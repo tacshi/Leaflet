@@ -249,11 +249,20 @@ end;
 $$;
 
 -- The workspace agent finds the owner's pages by title, tag or text, and
--- none of anyone else's.
+-- none of anyone else's. The words around a match come from the page's
+-- own text, its content's.
+create function pg_temp.paragraph(p_text text) returns jsonb
+language sql as $$
+  select jsonb_build_object(
+    'document', jsonb_build_object('type', 'page', 'id', 'root', 'children', jsonb_build_array(
+      jsonb_build_object('id', 't1', 'type', 'paragraph', 'data', jsonb_build_object(
+        'delta', jsonb_build_array(jsonb_build_object('insert', p_text)))))),
+    'meta', jsonb_build_object('v', 1, 'blocks', '{}'::jsonb, 'deleted', '{}'::jsonb))
+$$;
 update public.pages set tags = '{Plans}' where id = 'f0000000-0000-0000-0000-00000000000a';
 insert into public.page_content (page_id, content, plain_text)
-values ('f0000000-0000-0000-0000-00000000000a', '{}', 'the launch is in May')
-on conflict (page_id) do update set plain_text = excluded.plain_text;
+values ('f0000000-0000-0000-0000-00000000000a', pg_temp.paragraph('the launch is in May'), 'the launch is in May')
+on conflict (page_id) do update set content = excluded.content, plain_text = excluded.plain_text;
 do $$
 begin
   if (select count(*) from public.agent_search_pages('shar', '{}', 20) where page_id = 'f0000000-0000-0000-0000-00000000000a') <> 1 then
@@ -272,7 +281,9 @@ $$;
 -- Titles and tags come before text, the words around a match in text are
 -- cut where it is, however lowering the text changes its length, and no
 -- more pages are found than asked for.
-update public.page_content set plain_text = repeat('İ', 50) || ' the launch was leased in May'
+update public.page_content
+set content = pg_temp.paragraph(repeat('İ', 50) || ' the launch was leased in May'),
+    plain_text = repeat('İ', 50) || ' the launch was leased in May'
 where page_id = 'f0000000-0000-0000-0000-00000000000a';
 do $$
 begin

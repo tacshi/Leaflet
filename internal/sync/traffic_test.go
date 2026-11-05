@@ -160,6 +160,53 @@ func TestPullPassesOverWhatThisDevicePushed(t *testing.T) {
 	}
 }
 
+// Content the server stamped again without a new revision, as a move of its
+// page does, is fetched once: the passes after, which read the row again
+// while it is in the overlap behind the cursor, pass over it.
+func TestPullFetchesContentStampedAgainOnce(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dequeueAll(t, st)
+	merged := time.Now().UTC().Add(-time.Hour)
+	row, _ := st.ContentRow(p.ID)
+	if err := st.PushedContent(p.ID, row.Content, row.Content, "", row.Content, merged, 4); err != nil {
+		t.Fatal(err)
+	}
+	stamped := time.Now().UTC().Format(time.RFC3339Nano)
+	rec := &recorder{answer: func(r *http.Request) any {
+		if r.URL.Path != "/rest/v1/page_content" {
+			return nil
+		}
+		if r.URL.Query().Get("select") == "page_id, updated_at" {
+			return []map[string]any{{"page_id": p.ID, "updated_at": stamped}}
+		}
+		return contentRows(r, func(string) map[string]any {
+			return map[string]any{"content": json.RawMessage(row.Content), "revision": 4, "updated_at": stamped}
+		})
+	}}
+	hs := httptest.NewServer(rec)
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	svc.setCursor("page_content", cursor{merged.Add(-time.Hour).Format(time.RFC3339Nano), ""})
+	for range 3 {
+		if err := svc.pullContents(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := rec.asked("/rest/v1/page_content", "content%2C"); len(got) != 1 {
+		t.Errorf("content fetched %d times over 3 passes, want once: %v", len(got), got)
+	}
+	if c := svc.cursor("page_content"); c.key != p.ID {
+		t.Errorf("cursor at %+v", c)
+	}
+	if got, _ := st.ContentRow(p.ID); got.Content != row.Content || got.RemoteRevision != 4 {
+		t.Errorf("content %q at revision %d", got.Content, got.RemoteRevision)
+	}
+}
+
 // The content of many pages changed elsewhere comes a batch of pages at a
 // time, not a request each; the pages that wait come after the rows the
 // cursor passes, and one of them failing leaves the cursor past those.

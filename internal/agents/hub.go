@@ -3,6 +3,7 @@ package agents
 import (
 	"cmp"
 	"context"
+	"errors"
 	"log"
 	"slices"
 	"strings"
@@ -44,9 +45,26 @@ type Host interface {
 type LiveDoc interface {
 	// Doc is the content as it is open, with what is being typed.
 	Doc() *doc.Content
+	// Peek is the content as Doc gives it, without the read counting as
+	// what the user is composing going out with the page, to be saved:
+	// content from outside after Doc's, with the same text where the
+	// composition is, is taken to hold it, and the text is taken out. A
+	// run reads the page with it, and gives back the composition it read
+	// with its ops (ApplyOpFrom); the page an op is checked against, and
+	// kept in history before it, are read with it too.
+	Peek() *doc.Content
+	// Composition is what the user is composing in the page, by its
+	// number, 0 for none, and whether it has gone out with the page, to be
+	// saved or read.
+	Composition() (id uint64, out bool)
 	// ApplyOp applies an op, starting a new undo step with newStep or
 	// joining the one before.
 	ApplyOp(op doc.Op, newStep bool) error
+	// ApplyOpFrom is ApplyOp of an op written from the page as read while
+	// the composition numbered read was in it: only then is the op's text
+	// where the composition is taken for the composition's, which goes as
+	// the change gives it up. Any other op keeps its text.
+	ApplyOpFrom(op doc.Op, newStep bool, read uint64) error
 	// ApplyOps applies ops as one undo step.
 	ApplyOps(ops []doc.Op) error
 }
@@ -82,6 +100,11 @@ type Run struct {
 	// Guarded is a run whose URL guard was on as it ended: its reply may
 	// carry what it read beyond its page or on the web (ReplyBlocks).
 	Guarded bool `json:"Guarded,omitempty"`
+	// ReadOthers is a run that read a page someone else writes or reads,
+	// or followed turns that did, as the server's jobs say it of theirs:
+	// the turns of its conversation after it make no page of the user's
+	// own (readOthers).
+	ReadOthers bool `json:"read_others,omitempty"`
 	// Removed are what Undo took away with each page the run made: the
 	// subpages that went with it and where its card was, for Redo to put
 	// them all back.
@@ -135,6 +158,15 @@ type Hub struct {
 	// (ServePublicLink).
 	PublicLink  func(pageID string) bool
 	PublicPages func() []string
+	// ICloudLease and ICloudLinks say the public links devices serve in the
+	// Leaflet folder of iCloud Drive, which the pages go to the other
+	// devices through, signed out, while iCloud sync is on: ICloudLease
+	// says so of this device's (ServePublicLink) until stopped, and
+	// ICloudLinks are the pages the other devices say so of, with when
+	// each lease ends, by that device's clock (publicElsewhere). Nil is
+	// none.
+	ICloudLease func(pageID string) (stop func())
+	ICloudLinks func() map[string]time.Time
 	// links are when each page's public link, which another device
 	// serves, stops counting, as the server last said (publicElsewhere),
 	// and leases how many leases this device took of each page's link, the
@@ -208,8 +240,11 @@ type RunOptions struct {
 	CommentID   string
 	Agent       *store.ModelChoice
 	History     []Turn
-	// KeptToPage is a History whose runs read nothing beyond the page.
+	// KeptToPage is a History whose runs read nothing beyond the page,
+	// and ReadOthers one a run of which read a page someone else writes or
+	// reads.
 	KeptToPage bool
+	ReadOthers bool
 	// Reply is the chat message that shows the run.
 	Reply *Message
 	// OpenPage is the page open as a workspace run is asked for, which
@@ -268,11 +303,20 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 	}
 	ed := h.host.Live(pageID)
 	var before *doc.Content
+	// read is what the user was composing in the page as the run read it,
+	// which its ops can hold (ApplyOpFrom): a local run reads the page as
+	// it is open, a cloud run as it is stored, which holds the composition
+	// only once it went out with the page, as the save just before takes
+	// it.
+	var read uint64
 	switch {
 	case workspace:
 		before = doc.Empty()
 	case ed != nil:
-		before = ed.Doc().Copy()
+		before = ed.Peek().Copy()
+		if id, out := ed.Composition(); out || option.Local() {
+			read = id
+		}
 	default:
 		if before, err = stored(h.st, pageID); err != nil {
 			return fail(err)
@@ -292,7 +336,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		// ChatGPT's models all call tools, whatever an earlier test found.
 		SupportsTools: option.Provider.SupportsTools == nil || *option.Provider.SupportsTools || option.Provider.AuthKind == "account",
 		FocusBlockIDs: o.Focus, SelectionText: o.Selection, CommentID: o.CommentID, Thread: h.thread(pageID, o.CommentID),
-		History: o.History, KeptToPage: o.KeptToPage, AllowCrossPage: h.crossPage(page, settings),
+		History: o.History, KeptToPage: o.KeptToPage, ReadOthers: o.ReadOthers, AllowCrossPage: h.crossPage(page, settings),
 		Web: h.web(settings),
 	}
 	if o.Surface == "sidebar" || o.Surface == "workspace" {
@@ -308,6 +352,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 		}
 	}
 	d := h.newDelivery(pageID, run, option)
+	d.read = read
 	stream := &replyStream{h: h, pageID: pageID, run: run, reply: o.Reply}
 	events := Events{
 		Status: func(st string) { h.host.Update(pageID, func() { run.Status = st }) },
@@ -363,6 +408,13 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 						tc = h.toolContext(pageID, page.DisplayTitle(), option.Name(), work, settings)
 						if (tc.ListPages != nil || tc.CreatePage != nil) && h.publicElsewhere(ctx, pageID, online) {
 							tc.ListPages, tc.ReadOtherPage, tc.ListFolders, tc.CreatePage = nil, nil, nil, nil
+						}
+						// The pages it reads are counted as this one is, and a
+						// public link may start on this one while it works, here
+						// or on another device.
+						if tc.ReadOtherPage != nil {
+							tc.Alone = func(id string) bool { return h.alone(ctx, id, online) }
+							tc.LinkedNow = func() bool { return h.linkedNow(ctx, pageID, online) }
 						}
 					}
 					res, err = RunLocal(ctx, client, req, tc, events)
@@ -595,7 +647,12 @@ func (h *Hub) finish(s *Session, run *Run, req Request, option Option, before *d
 		return
 	}
 	run.Reply, run.Answer, run.Activity = res.Reply, "", ""
-	run.KeptToPage, run.Guarded = res.KeptToPage, res.Guarded
+	run.KeptToPage, run.Guarded, run.ReadOthers = res.KeptToPage, res.Guarded, res.ReadOthers
+	// A public link started on its page as it went on, after it read beyond
+	// the page: it ended as a run the user stopped does.
+	if errors.Is(err, errLinkedStop) {
+		run.Stopped = true
+	}
 	// A cloud run whose stream was cut off has its ops from the server's
 	// job, those after the cut too: all of them are the run's, to undo.
 	if len(res.Ops) > len(run.Ops) {
@@ -705,7 +762,7 @@ func (h *Hub) logLocalJob(run *Run, req Request) {
 	if err := h.st.PutJob(store.Job{
 		ID: run.ID, PageID: req.PageID, Surface: run.Surface, FocusBlockIDs: req.FocusBlockIDs, CommentID: req.CommentID,
 		ConversationID: req.ConversationID, ProviderID: req.ProviderID, Model: req.Model, Status: status,
-		Request: req.JobRequest(), Result: map[string]any{"reply": run.Reply, "ops": run.Ops, "edits": edits}, Error: run.Error,
+		Request: req.JobRequest(), Result: map[string]any{"reply": run.Reply, "ops": run.Ops, "edits": edits, "read_others": run.ReadOthers}, Error: run.Error,
 	}); err != nil {
 		log.Printf("agent job: %v", err)
 	}

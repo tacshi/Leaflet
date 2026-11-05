@@ -160,6 +160,7 @@ func (e *Editor) SetMarkedText(r *ui.TextInputRange, text string, selected ui.Te
 		redo := e.redo
 		e.pushUndo(false)
 		e.markStep, e.markRedo = e.Collapsed() && (r == nil || r.Start == r.End), redo
+		e.markID, e.markOut = compositions.Add(1), false
 		if e.focusNode() == nil {
 			// On a block selected whole, or a selection ending on one, it
 			// starts a paragraph, as typing does: in place of what is
@@ -226,26 +227,29 @@ func (e *Editor) UnmarkText() {
 }
 
 // lifted is a composition taken out of the page while a change from
-// outside goes in: the block it was in, with it and without.
+// outside goes in: the block it was in, with it and without, and whether
+// the change can hold it, having been made from the page with it.
 type lifted struct {
 	id               string
 	text, full, rest doc.Delta
 	start            int
 	anchor, focus    Pos
+	holds            bool
 }
 
 // liftComposition takes the composition out of the page before a change
 // from outside, so that neither the change nor the step of undo kept for
 // it holds text the input method is still changing. The composition's own
-// step goes with it while it changes nothing else.
-func (e *Editor) liftComposition() *lifted {
+// step goes with it while it changes nothing else. holds tells whether the
+// change was made from the page with the composition in it.
+func (e *Editor) liftComposition(holds bool) *lifted {
 	n := e.focusNode()
 	if !e.marked || n == nil {
 		e.marked = false
 		return nil
 	}
 	d := n.Delta()
-	l := &lifted{id: n.ID, text: d.Slice(e.markStart, e.markEnd), full: d, start: e.markStart, anchor: e.anchor, focus: e.focus}
+	l := &lifted{id: n.ID, text: d.Slice(e.markStart, e.markEnd), full: d, start: e.markStart, anchor: e.anchor, focus: e.focus, holds: holds}
 	n.SetDelta(d.Delete(e.markStart, e.markEnd))
 	l.rest = n.Delta()
 	e.invalidate(n.ID)
@@ -261,8 +265,9 @@ func (e *Editor) liftComposition() *lifted {
 // in, after the caret has been placed. MyGo never tells the input method
 // that a composition ended, so it composes on regardless: kept, its next
 // update replaces the composition as before. Only when the change was to
-// the composition's block is it given up and its text taken out, so that
-// the input method, composing on afresh at the caret, leaves none behind.
+// the composition's block is it given up, and its text, where the change
+// holds it, taken out, so that the input method, composing on afresh at
+// the caret, leaves none behind.
 func (e *Editor) putBack(l *lifted) {
 	if l == nil {
 		return
@@ -272,11 +277,13 @@ func (e *Editor) putBack(l *lifted) {
 		return
 	}
 	d, end := n.Delta(), l.start+l.text.Len()
-	// Content from outside can hold the composition already, the page
-	// having been saved with it.
+	// Content from outside can hold the composition already, made from the
+	// page with it, as saved. Content made without it cannot: the same text
+	// at its place there, as an agent's rewrite of the line goes on with
+	// it, is the change's own, and stays.
 	held := sameDelta(d, l.full)
 	if e.focus.ID != l.id || !held && !sameDelta(d, l.rest) {
-		if end <= d.Len() && sameDelta(d.Slice(l.start, end), l.text) {
+		if l.holds && end <= d.Len() && sameDelta(d.Slice(l.start, end), l.text) {
 			n.SetDelta(d.Delete(l.start, end))
 			e.invalidate(n.ID)
 			e.Select(e.anchor, e.focus)

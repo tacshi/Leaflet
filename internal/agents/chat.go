@@ -277,7 +277,7 @@ func (h *Hub) Chat(pageID, text string, focus []string) {
 	s.Messages = append(s.Messages, &Message{Mine: true, Text: t})
 	reply := &Message{Text: locales.AgentReadingPage(), Pending: true}
 	s.Messages = append(s.Messages, reply)
-	h.Start(pageID, RunOptions{Surface: "sidebar", Instruction: t, Focus: focus, History: history, KeptToPage: keptToPage(s), Reply: reply})
+	h.Start(pageID, RunOptions{Surface: "sidebar", Instruction: t, Focus: focus, History: history, KeptToPage: keptToPage(s), ReadOthers: readOthers(s), Reply: reply})
 	h.saveChat(s)
 }
 
@@ -337,6 +337,24 @@ func keptToPage(s *Session) bool {
 		}
 	}
 	return true
+}
+
+// readOthers reports whether a run whose reply the chat holds read a page
+// someone else writes or reads, judged over the whole chat, as keptToPage
+// judges it: what that run read may be in the turns the next run reads,
+// and in what it would make a page of the user's own of. A reply whose run
+// is not known is taken for one; one whose run failed or was undone,
+// whose turn the model no longer reads, is not.
+func readOthers(s *Session) bool {
+	for _, m := range s.Messages {
+		if m.Mine || m.Pending || m.Error {
+			continue
+		}
+		if r := s.Run(m.RunID); r == nil || r.ReadOthers && !r.Undone && r.Status != "failed" {
+			return true
+		}
+	}
+	return false
 }
 
 // saveRun keeps a run's change with the conversation that shows it: the

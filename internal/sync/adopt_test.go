@@ -234,6 +234,45 @@ func TestSignInAdoptsOnceAllIsQueued(t *testing.T) {
 	}
 }
 
+// A device whose account's session ended, and that syncs through iCloud
+// Drive since, sends everything again as it signs in to the account again:
+// what went through the folder meanwhile left the queue without reaching
+// the server.
+func TestSignInAgainAfterICloudSendsAllAgain(t *testing.T) {
+	d := newCloudDevice(t, cloudRoot(t))
+	space := d.st.Session().SpaceID
+	// Adopted by the account, as the sign-in before left it.
+	for k, v := range map[string]string{"account": "u1", "space.u1": space} {
+		if err := d.st.SetValue(k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := d.page("Plan", para("a", "one"))
+	d.sync()
+	if d.st.HasPending("pages", p.ID) || d.st.HasPending("page_content", p.ID) {
+		t.Fatal("the page did not go through iCloud Drive")
+	}
+	if _, ok := d.st.Value("space.u1"); ok {
+		t.Error("the account's space still counts as adopted")
+	}
+
+	d.svc.SetICloud(false)
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"id": space, "name": "My space"}})
+	}))
+	defer hs.Close()
+	svc := New(d.st, remote.SignedInForTest(hs.URL, d.st, "u1"))
+	if err := svc.resolveSpace(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !d.st.HasPending("pages", p.ID) || !d.st.HasPending("page_content", p.ID) {
+		t.Error("the page is not sent to the server again")
+	}
+	if v, _ := d.st.Value("space.u1"); v != space {
+		t.Errorf("space.u1 is %q", v)
+	}
+}
+
 // Sending everything again sends a deleted file's row, so its deletion
 // still reaches the other devices, but none of its contents, and a deleted
 // folder's.

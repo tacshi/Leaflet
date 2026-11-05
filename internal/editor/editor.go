@@ -7,6 +7,7 @@ package editor
 
 import (
 	"strings"
+	"sync/atomic"
 	"time"
 	"unicode"
 	"unicode/utf8"
@@ -129,12 +130,17 @@ type Editor struct {
 	// marked is an input method's composition, in the focus block.
 	// markStep is set while the step of undo on top is the one it began
 	// with and changes nothing but it, and markRedo the steps of redo that
-	// step cleared, to keep when it is given up.
+	// step cleared, to keep when it is given up. markID is its number
+	// (Composition), and markOut is set once it has gone out with the page
+	// (Doc), to be saved or read: only then can content from outside
+	// (Replace) hold it.
 	marked     bool
 	markStart  int
 	markEnd    int
 	markStep   bool
 	markRedo   []snapshot
+	markID     uint64
+	markOut    bool
 	undo, redo []snapshot
 	// runStep is the page the step of undo an agent run's ops began with
 	// keeps, to tell that step from those made since.
@@ -680,6 +686,9 @@ func markable(steps []snapshot) bool {
 // them still.
 func (e *Editor) restore(s snapshot) {
 	e.Content.Children = e.adopt(s.content.Children, false)
+	// Going back past a change from outside can leave the page none of its
+	// blocks: the step's own are taken back, and the others went outside.
+	refill(e.Content)
 	e.coalescing = false
 	e.marked = false
 	e.Select(s.anchor, s.focus)
@@ -702,14 +711,45 @@ func (e *Editor) changed() {
 }
 
 // Doc is the content the editor shows, with what is being typed: Content,
-// for what takes the page as an agents.LiveDoc.
-func (e *Editor) Doc() *doc.Content { return e.Content }
+// for what takes the page as an agents.LiveDoc. A composition goes out
+// with it, and may come back in content saved or merged from it (Replace).
+func (e *Editor) Doc() *doc.Content {
+	if e.marked {
+		e.markOut = true
+	}
+	return e.Content
+}
+
+// Peek is the content the editor shows, with what is being typed, as Doc
+// gives it, without its read counting as the composition going out with
+// the page (markOut): content from outside after it, whatever text it has
+// where the composition is, is not taken to hold it. It is for what never
+// comes back as such content: an agent run's read, which gives back the
+// composition it had with its ops (Composition), an agent's check of what
+// its op would take away, and the page kept in history before it.
+func (e *Editor) Peek() *doc.Content { return e.Content }
+
+// compositions numbers the compositions of every editor, each as it
+// begins, so that no two have the same number: an agent run's page can
+// close and open again in another editor as it goes.
+var compositions atomic.Uint64
+
+// Composition is the input method's composition in the page, by its
+// number, or 0 for none, and whether it has gone out with the page (Doc),
+// to be saved or read. Ops written from the page as read then give the
+// number back (ApplyOpFrom): only those can hold its text.
+func (e *Editor) Composition() (id uint64, out bool) {
+	if !e.marked {
+		return 0, false
+	}
+	return e.markID, e.markOut
+}
 
 // Replace swaps in content from outside the editor (sync, restores),
 // keeping the caret where it can, and the undo steps: going back one
 // takes back what it changed on the page as it is, keeping the change.
 func (e *Editor) Replace(c *doc.Content) {
-	l := e.liftComposition()
+	l := e.liftComposition(e.markOut)
 	e.markOutside()
 	// The blocks the change left as they were stay the page's, with their
 	// layouts and looks.
@@ -726,7 +766,7 @@ func (e *Editor) Replace(c *doc.Content) {
 
 // ApplyOps applies an agent run's ops as one undo step.
 func (e *Editor) ApplyOps(ops []doc.Op) error {
-	l := e.liftComposition()
+	l := e.liftComposition(false)
 	e.pushUndo(false)
 	e.coalescing = false
 	var first error
@@ -754,9 +794,17 @@ func (e *Editor) keepSelection() {
 // ApplyOp applies one op of an agent run as it streams in. The first op of
 // a run starts an undo step that the rest join, while it is the step on
 // top: past an edit of the user's since, the op is a change from outside,
-// which undoing that edit keeps.
-func (e *Editor) ApplyOp(o doc.Op, newStep bool) error {
-	l := e.liftComposition()
+// which undoing that edit keeps. The op was written from no read of the
+// composition in the page, if any: its text is its own (ApplyOpFrom).
+func (e *Editor) ApplyOp(o doc.Op, newStep bool) error { return e.ApplyOpFrom(o, newStep, 0) }
+
+// ApplyOpFrom is ApplyOp of an op written from the page as read while the
+// composition numbered read was in it (Composition). Given up as the op
+// changes its block, that composition's text, where the op has it, is the
+// read's, and goes, as the input method composes it on at the caret. Any
+// other op's text there is its own, the same or not, and stays.
+func (e *Editor) ApplyOpFrom(o doc.Op, newStep bool, read uint64) error {
+	l := e.liftComposition(read != 0 && read == e.markID)
 	if newStep {
 		e.pushUndo(false)
 		e.coalescing = false

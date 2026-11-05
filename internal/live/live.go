@@ -370,9 +370,52 @@ func (p *Page) remove() {
 // Doc is the content as it is open, with what is being typed.
 func (p *Page) Doc() *doc.Content { return p.ed.Doc() }
 
+// peeker is an editor whose content can be read without the read counting
+// as what is being composed going out with it (editor.Editor.Peek).
+type peeker interface{ Peek() *doc.Content }
+
+// Peek is the content as it is open, with what is being typed, as Doc
+// gives it, without its read counting as an editor's composition going out
+// with the page (editor.Editor.Peek). An editor that keeps no such count
+// gives its Doc.
+func (p *Page) Peek() *doc.Content {
+	if e, ok := p.ed.(peeker); ok {
+		return e.Peek()
+	}
+	return p.ed.Doc()
+}
+
+// composer is an editor that numbers its input method's compositions, for
+// an agent run's ops to give back the one it read the page with
+// (editor.Editor.Composition).
+type composer interface {
+	Composition() (id uint64, out bool)
+	ApplyOpFrom(op doc.Op, newStep bool, read uint64) error
+}
+
+// Composition is what is being composed in the open page, by its number,
+// and whether it has gone out with the page, as editor.Editor.Composition
+// tells them; none in an editor that numbers no compositions.
+func (p *Page) Composition() (id uint64, out bool) {
+	if e, ok := p.ed.(composer); ok {
+		return e.Composition()
+	}
+	return 0, false
+}
+
 // ApplyOp applies an agent's op to the open page, starting a new undo
 // step with newStep or joining the one before.
 func (p *Page) ApplyOp(op doc.Op, newStep bool) error { return p.ed.ApplyOp(op, newStep) }
+
+// ApplyOpFrom is ApplyOp of an op written from the page as read while the
+// composition numbered read was in it, as editor.Editor.ApplyOpFrom takes
+// it; ApplyOp in an editor that numbers no compositions.
+func (p *Page) ApplyOpFrom(op doc.Op, newStep bool, read uint64) error {
+	if e, ok := p.ed.(composer); ok {
+		return e.ApplyOpFrom(op, newStep, read)
+	}
+	return p.ed.ApplyOp(op, newStep)
+}
 
 // ApplyOps applies an agent run's ops to the open page as one undo step.
 func (p *Page) ApplyOps(ops []doc.Op) error { return p.ed.ApplyOps(ops) }

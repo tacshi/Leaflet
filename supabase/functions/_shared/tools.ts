@@ -102,6 +102,21 @@ export interface ToolHooks {
   ): Promise<Extract<Op, { op: "create_page" }>["page"]>;
   listPages(): Promise<PageSummary[]>;
   readOtherPage(pageId: string): Promise<unknown>;
+  /**
+   * Whether page pageId, one the run read, is the person's alone, as the
+   * page the run is on is counted for ownPages: no one else has it, no
+   * guest commented on it, and it has no public link. None counts every
+   * page so.
+   */
+  pageAlone?(pageId: string): Promise<boolean>;
+  /**
+   * Whether the page the run is on has a public link now, read again
+   * before each call that reads beyond it, and once the run has read
+   * beyond it, before each call that writes to it: one started since the
+   * run began has visitors read what the run writes there. None counts it
+   * as it was.
+   */
+  linkedNow?(): Promise<boolean>;
   listFolders(): Promise<{ id: string; name: string }[]>;
   /** Searches the web through the run's provider; none when the run has no web, or its provider no search. */
   searchWeb?(query: string): Promise<Search>;
@@ -392,6 +407,27 @@ export function listed(items: unknown[], spent: number): number {
 /** Refuses a page of the person's own on a page someone else writes or reads (Go's errNoOwnPages). */
 export const NO_OWN_PAGES =
   "Someone else writes or reads this page: a page of the person's own made from it could take what they wrote into the person's own pages. Make a subpage of this page with create_subpage instead";
+
+/**
+ * Refuses a page of the person's own, a subpage of this page among them,
+ * after the run read another page someone else writes or reads with
+ * read_other_page (Go's errReadOthers).
+ */
+export const READ_OTHERS =
+  "This run read a page someone else writes or reads: a page of the person's own made now could take what they wrote into the person's own pages";
+
+/** Refuses reading beyond a page whose public link started while the run went on (linkedNow). */
+export const NOW_LINKED =
+  "This page has a public link now: its visitors read what you write here, so this run reads no other page. Work from this page";
+
+/** The longest page title the pages table takes, in characters, which it counts as code points (char_length). */
+export const MAX_TITLE = 2000;
+
+/** title cut to MAX_TITLE characters, as the app's store keeps it, so a long one the model gives is saved. */
+export function clampTitle(title: string): string {
+  const chars = [...title];
+  return chars.length > MAX_TITLE ? chars.slice(0, MAX_TITLE).join("") : title;
+}
 
 /** The most blocks one run writes (Go's maxRunBlocks): a model that goes on and on, as one repeating itself, stops there. */
 export const MAX_RUN_BLOCKS = 5000;
@@ -1066,6 +1102,12 @@ export interface SessionOptions {
   now?: () => number;
   /** The workspace agent's, whose tools are of the person's pages rather than of one: none on a page. */
   workspace?: WorkspaceHooks;
+  /**
+   * Earlier turns of the conversation that read beyond the page are among
+   * what the model reads: the run holds what they read, as one that read
+   * it itself (linkedNow).
+   */
+  heldPages?: boolean;
 }
 
 // The URL guard (checkUrls): the app loads an image, a video or a link
@@ -1181,6 +1223,21 @@ export class PageEditSession {
   private armed = false;
   private readPages = false;
   /**
+   * A run that read another page someone else writes or reads (pageAlone):
+   * what they wrote there would go into a page of the person's own made
+   * after it, where their workspace agent reads it as theirs, so it makes
+   * none, as on such a page itself (ownPages).
+   */
+  private readOthers = false;
+  /** A run whose page has had a public link since it began (linkedNow): it reads beyond the page no more. */
+  private linked = false;
+  /**
+   * A run that had read beyond its page as its page gained a public link:
+   * it ends there, keeping what it did, as the app ends its runs on a page
+   * whose link starts, rather than write where the link's visitors read.
+   */
+  private stoppedByLink = false;
+  /**
    * The URLs the run came on in the web: those its searches found, and
    * those on the pages it read. Null before it reads the web, after which
    * what it writes, and the pages it reads, keep to them and those the
@@ -1212,6 +1269,25 @@ export class PageEditSession {
   }
 
   /** A run that read nothing beyond its page. */
+  /** A run whose page gained a public link after it read beyond the page: it ends (stoppedByLink). */
+  get stopped(): boolean {
+    return this.stoppedByLink;
+  }
+
+  /** A run that read a page someone else writes or reads, or follows turns that did (readOthers). */
+  get readOtherPeoples(): boolean {
+    return this.readOthers;
+  }
+
+  /**
+   * Makes no page of the person's own from the start, as after reading a
+   * page someone else writes or reads: an earlier turn of the conversation
+   * did, and what it read is before this one.
+   */
+  keepFromOwnPages(): void {
+    this.readOthers = true;
+  }
+
   get keptToPage(): boolean {
     return !this.readPages;
   }
@@ -1267,8 +1343,20 @@ export class PageEditSession {
     if (EDITING_TOOLS.has(name) && !this.opts.canEdit) {
       throw new ToolError("You can read this page but not edit it: the person asking has view access only");
     }
-    if ((name === "list_pages" || name === "read_other_page" || name === "list_folders") && !this.opts.crossPage) {
-      throw new ToolError("Reading other pages is turned off for this user");
+    const cross = name === "list_pages" || name === "read_other_page" || name === "list_folders";
+    if (cross && !this.opts.crossPage) throw new ToolError("Reading other pages is turned off for this user");
+    // A public link started on the page since the run began has its
+    // visitors read what the run writes there: the run keeps to its page,
+    // and one that read beyond it ends, as the app's runs on a page do as
+    // its link starts. The page's lease is read again for each call that
+    // could take what is beyond the page into it, until it has one.
+    const beyond = this.readPages || !!this.opts.heldPages;
+    if (cross || (beyond && EDITING_TOOLS.has(name))) {
+      if (!this.linked && this.hooks.linkedNow && await this.hooks.linkedNow()) this.linked = true;
+      if (this.linked) {
+        if (beyond) this.stoppedByLink = true;
+        throw new ToolError(NOW_LINKED);
+      }
     }
     switch (name) {
       case "read_page":
@@ -1290,8 +1378,12 @@ export class PageEditSession {
       case "list_folders":
         // Only the person names their folders, and no page's words are in
         // them: a run that lists them has read nothing beyond this page, so
-        // the URLs it may write stay those it may (checkUrls), and the web
-        // stays open.
+        // the web's links stay the run's to write. But the names are the
+        // person's to keep: the run's one read of the web that may go to
+        // any page, whose link could spell them out, is spent, as by a
+        // first read (saw), and it reads and writes only the URLs it may
+        // then.
+        this.saw();
         return unchanged({ folders: await this.hooks.listFolders() });
       case "list_pages": {
         // The titles it lists are read too.
@@ -1307,6 +1399,11 @@ export class PageEditSession {
         const page = await this.hooks.readOtherPage(pageId);
         this.arm();
         this.readPages = true;
+        // One someone else writes or reads keeps the run from making pages
+        // of the person's own.
+        if (!this.readOthers && this.hooks.pageAlone && !(await this.hooks.pageAlone(pageId))) {
+          this.readOthers = true;
+        }
         return unchanged(page);
       }
       case "web_search":
@@ -1813,7 +1910,7 @@ export class PageEditSession {
     if (args.title !== undefined && args.title !== null && typeof args.title !== "string") {
       throw new ToolError("title must be a string");
     }
-    const title = trimSpace(String(args.title ?? ""));
+    const title = clampTitle(trimSpace(String(args.title ?? "")));
     if (!title) throw new ToolError("title is required");
     const markdown = optionalText(args, "markdown");
     const taken = new Set<string>();
@@ -1823,15 +1920,18 @@ export class PageEditSession {
       taken.add(id);
       return id;
     };
-    const opts = { newId, author: this.opts.author };
+    const opts: SpecOptions = { newId, author: this.opts.author };
     const content = emptyContent();
-    // No blocks, or none listed, is no content, as the app takes it.
+    // No blocks, or none listed, is no content, as the app takes it. Either
+    // way the blocks share one set of options, which counts them all toward
+    // MAX_SPEC_NODES, as a call's are counted (doc.CallNodes).
     const blocks = args.blocks;
     if (blocks !== undefined && blocks !== null && !(Array.isArray(blocks) && blocks.length === 0)) {
       if (markdown !== "") throw new ToolError("Give the page markdown or blocks, not both");
       content.document.children = this.specs(blocks, "blocks").map((spec) => specToNode(spec, opts));
     } else {
-      content.document.children = markdownSpecs(markdown).map((spec) => specToNode(spec, { ...opts, markdown: true }));
+      opts.markdown = true;
+      content.document.children = markdownSpecs(markdown).map((spec) => specToNode(spec, opts));
     }
     const t = this.now();
     walk(content.document, (n) => {
@@ -1841,6 +1941,9 @@ export class PageEditSession {
   }
 
   async createSubpage(args: Record<string, unknown>): Promise<ToolOutcome> {
+    // A subpage of a page that is the person's alone is a page of their
+    // own too.
+    if (this.readOthers) throw new ToolError(READ_OTHERS);
     const { title, content } = this.pageContent(args);
     // Its title shows on this page, in its card, as the next run reads it.
     this.checkUrls(content.document.children ?? [], title);
@@ -1861,6 +1964,7 @@ export class PageEditSession {
 
   async createPage(args: Record<string, unknown>): Promise<ToolOutcome> {
     if (this.opts.ownPages === false) throw new ToolError(NO_OWN_PAGES);
+    if (this.readOthers) throw new ToolError(READ_OTHERS);
     const { title, content } = this.pageContent(args);
     const folderId = optionalText(args, "folder_id");
     // Its title shows in the sidebar, where the next run that lists the
@@ -1921,7 +2025,10 @@ export class PageEditSession {
       }
       case "list_folders":
         // Only the person names their folders: as on a page, listing them
-        // reads nothing someone else wrote.
+        // reads nothing someone else wrote, and spends the run's one read
+        // of the web that may go to any page, whose link could spell them
+        // out (saw).
+        this.saw();
         return unchanged({ folders: await w.listFolders() });
       case "create_page":
         return await this.workspaceCreate(w, args);
@@ -1968,6 +2075,8 @@ export class PageEditSession {
 
   private async workspaceCreate(w: WorkspaceHooks, args: Record<string, unknown>): Promise<ToolOutcome> {
     const { title, content } = this.pageContent(args);
+    // A page made inside another changes it, with its card.
+    if (optionalText(args, "parent_id")) await w.changing?.();
     const { parent, folder } = await this.place(w, args);
     this.checkUrls(content.document.children ?? [], title);
     const count = this.room(content.document.children ?? []);
@@ -1983,6 +2092,7 @@ export class PageEditSession {
   }
 
   private async workspaceMove(w: WorkspaceHooks, args: Record<string, unknown>): Promise<ToolOutcome> {
+    await w.changing?.();
     const page = await this.workspacePage(w, args, "page_id");
     changeable(page);
     const { parent, folder } = await this.place(w, args);
@@ -1997,10 +2107,12 @@ export class PageEditSession {
   }
 
   private async workspaceRename(w: WorkspaceHooks, args: Record<string, unknown>): Promise<ToolOutcome> {
+    await w.changing?.();
     const page = await this.workspacePage(w, args, "page_id");
     changeable(page);
-    // Without the spaces around it, as a new page's.
-    const title = trimSpace(textArg(args, "title"));
+    // Without the spaces around it, as a new page's, and no longer than the
+    // pages table takes.
+    const title = clampTitle(trimSpace(textArg(args, "title")));
     this.checkUrls([], title);
     const had = keptTitle(page);
     if (title === had) return unchanged({ page_id: page.id });
@@ -2010,6 +2122,7 @@ export class PageEditSession {
   }
 
   private async workspaceTags(w: WorkspaceHooks, args: Record<string, unknown>): Promise<ToolOutcome> {
+    await w.changing?.();
     const page = await this.workspacePage(w, args, "page_id");
     changeable(page);
     const raw = args.tags;

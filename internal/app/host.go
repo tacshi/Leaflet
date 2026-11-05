@@ -619,33 +619,89 @@ func (a *App) downloadFailed(id string) bool {
 	return ok && time.Since(at) < imageRetry
 }
 
-// exportMarkdown saves a page as Markdown.
+// exportMarkdown saves a page as Markdown, as the other devices have it.
 func (a *App) exportMarkdown(id string) {
 	// As exportAll, not without the edits waiting.
 	if a.page != nil && a.page.id == id && !a.savePage() {
 		return
 	}
-	p := a.pageByID(id)
-	c := a.st.Content(id)
-	if p == nil || c == nil {
-		return
-	}
-	md := doc.PageMarkdown(p.DisplayTitle(), a.withTranscripts(c), a.markdownOptions())
-	name := safeName(p.DisplayTitle()) + ".md"
-	go func() {
-		path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportTitle(), DefaultPath: name})
-		if path == "" {
+	a.exportContent(id, func(c *doc.Content) {
+		p := a.pageByID(id)
+		if p == nil {
 			return
 		}
-		err := os.WriteFile(path, []byte(md), 0o644) // #nosec G306 -- a file the user saves, readable like any other they save.
-		a.update(func() {
-			if err != nil {
-				a.toast(locales.HostErrorExport(err.Error()))
-			} else {
-				a.toast(locales.HostExported(filepath.Base(path)))
+		md := doc.PageMarkdown(p.DisplayTitle(), a.withTranscripts(c), a.markdownOptions())
+		name := safeName(p.DisplayTitle()) + ".md"
+		go func() {
+			path, _ := mygo.Dialog.Save(mygo.SaveDialogOptions{Title: locales.HostExportTitle(), DefaultPath: name})
+			if path == "" {
+				return
 			}
+			err := os.WriteFile(path, []byte(md), 0o644) // #nosec G306 -- a file the user saves, readable like any other they save.
+			a.update(func() {
+				if err != nil {
+					a.toast(locales.HostErrorExport(err.Error()))
+				} else {
+					a.toast(locales.HostExported(filepath.Base(path)))
+				}
+			})
+		}()
+	})
+}
+
+// keptHere reports whether this device has page p's content as the other
+// devices have it, kept up to date as it changes: with nothing to sync
+// it with, open or served by a public link (pulled), or kept on the
+// device, alone or with all the pages.
+func (a *App) keptHere(p store.Page) bool {
+	return !a.syncOn() || a.pulled(p.ID) || p.KeepOffline || a.settings.AllPagesOffline
+}
+
+// exportContent runs use, which exports page id, with its content as the
+// other devices have it, on the main thread: at once where this device
+// keeps it up to date (keptHere), else once it has come down, as when the
+// page opens, or as this device has it when it can't come now. Content
+// that is not on this device at all is said to be missing instead, and
+// nothing is exported.
+func (a *App) exportContent(id string, use func(c *doc.Content)) {
+	p := a.pageByID(id)
+	if p == nil {
+		return
+	}
+	if a.keptHere(*p) {
+		if c := a.st.Content(id); c != nil {
+			use(c)
+			return
+		}
+	}
+	if a.sync.CanSync() {
+		a.toast(locales.HostDownloading(p.DisplayTitle()))
+	}
+	var c *doc.Content
+	var err error
+	a.offMain(func() {
+		// Between passes, as export.All brings a page down.
+		a.sync.Hold(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+			c, err = a.sync.RefreshContent(ctx, id)
 		})
-	}()
+	}, func() {
+		if err != nil {
+			// The server could not be reached, or failed: the copy on this
+			// device is exported as it is, where there is one.
+			log.Printf("export %s: %v", id, err)
+			c = a.st.Content(id)
+		}
+		switch {
+		case c != nil:
+			use(c)
+		case err != nil:
+			a.toast(locales.HostErrorExport(err.Error()))
+		default:
+			a.toast(locales.HostErrorExport(locales.CardNotOnDevice()))
+		}
+	})
 }
 
 func safeName(s string) string { return export.SafeName(s) }
@@ -1047,7 +1103,7 @@ func (s *embedScroll) Zoomed(id string, zoomed bool) {
 // Exit leaves the full screen view of the diagram whose frame is id.
 func (s *embedScroll) Exit(id string) {
 	s.a.update(func() {
-		if ps := s.a.page; ps != nil && "full:"+ps.fullDiagram == id {
+		if ps := s.a.page; ps != nil && ps.fullDiagram != "" && fullView(ps.fullDiagram) == id {
 			s.a.leaveFullDiagram()
 		}
 	})
@@ -1130,7 +1186,7 @@ func (a *App) embedBlock(c *ui.Context, n *doc.Node, width float32) {
 		// The block grows when the content is taller at this width, as a
 		// narrow page stacks its layout.
 		html := n.Str("html")
-		a.sandbox(c, n.ID, embedInput{src: html, kind: n.Type}, func() string { return html }, width-2-2*pad, func(content float32) float32 {
+		a.sandbox(c, blockView(n.ID), embedInput{src: html, kind: n.Type}, func() string { return html }, width-2-2*pad, func(content float32) float32 {
 			return max(height, min(content, 1200))
 		}, height)
 	})
@@ -1308,6 +1364,21 @@ func embedNear(c *ui.Context, r ui.Rect) (near, far bool) {
 	return away <= wh, away > 3*wh
 }
 
+// blockView and fullView are the keys of a block's web view: in its place
+// in the page, and filling the page's body, as a diagram's full screen
+// view. Each is its kind and the block's ID after it, so that no ID a
+// block has, whatever it holds, names another block's view.
+func blockView(id string) string { return "block:" + id }
+
+func fullView(id string) string { return "full:" + id }
+
+// viewBlock is the block a web view's key is of, and whether the view is
+// the one filling the page's body (fullView).
+func viewBlock(key string) (id string, full bool) {
+	kind, id, _ := strings.Cut(key, ":")
+	return id, kind == "full"
+}
+
 // letGoEmbed destroys embed key's web view, keeping what its block shows
 // at: its height, and the page it had, to tell its next view, made for
 // the same page, to keep that height.
@@ -1329,10 +1400,11 @@ func (a *App) letGoEmbed(key string) {
 // as those folded away, which keep what they said, to show again.
 func (a *App) dropEmbeds() {
 	gone := func(key string) bool {
-		return a.page == nil || !a.page.editor.HasBlock(strings.TrimPrefix(key, "full:"))
+		id, _ := viewBlock(key)
+		return a.page == nil || !a.page.editor.HasBlock(id)
 	}
 	for key := range a.embeds {
-		if gone(key) || !a.embedBuilt[key] && !strings.HasPrefix(key, "full:") {
+		if _, full := viewBlock(key); gone(key) || !a.embedBuilt[key] && !full {
 			a.letGoEmbed(key)
 		}
 	}

@@ -41,11 +41,28 @@ func (h *Hub) toolContext(pageID, title, agent string, content *doc.Content, set
 // a public link, or a guest's comment from one: its visitors read what
 // the agent copies into it, and a guest's comment is someone else's
 // writing, though stored as the user's. A public link this device serves
-// it knows here; one another device serves, the server says, which a run
-// on this device asks it before it starts (publicElsewhere), and the agent
-// function reads itself.
+// it knows here; one another device serves, the server says, or iCloud
+// Drive signed out, which a run on this device asks before it starts
+// (publicElsewhere), and the agent function reads itself.
 func (h *Hub) crossPage(p store.Page, settings store.Settings) bool {
 	return settings.AgentsReadOtherPages && p.ID != "" && h.private(p)
+}
+
+// alone reports whether page id is the user's alone, as the page a run
+// makes pages of the user's own from must be, and each page it reads
+// (ToolContext.Alone): private, and with no public link another device
+// serves (publicElsewhere).
+func (h *Hub) alone(ctx context.Context, id string, online bool) bool {
+	p, err := h.st.Page(id)
+	return err == nil && h.private(p) && !h.publicElsewhere(ctx, id, online)
+}
+
+// linkedNow reports whether page id has a public link now: one this
+// device serves (PublicLink), or one another does, as the server or iCloud
+// Drive says (publicElsewhere). A run reads it again as it goes on
+// (ToolContext.LinkedNow).
+func (h *Hub) linkedNow(ctx context.Context, id string, online bool) bool {
+	return h.PublicLink != nil && h.PublicLink(id) || h.publicElsewhere(ctx, id, online)
 }
 
 // private reports whether no one but the user reads or writes p: no one
@@ -68,10 +85,13 @@ const publicLinkLease = 15 * time.Minute
 // clock, which those runs compare it with. Stopping ends the lease this
 // one holds alone: a newer one of the page, as of the link started again
 // for other addresses, stays, whichever reaches the server first. Signed
-// out, the page is on no other device to say it to. Any goroutine may call
-// it, and stop.
+// out, the page goes to other devices through iCloud Drive alone, and it
+// says so there (ICloudLease). Any goroutine may call it, and stop.
 func (h *Hub) ServePublicLink(pageID string) (stop func()) {
 	if h.be == nil || !h.be.SignedIn() {
+		if h.ICloudLease != nil {
+			return h.ICloudLease(pageID)
+		}
 		return func() {}
 	}
 	h.linksMu.Lock()
@@ -132,10 +152,11 @@ func (h *Hub) ServePublicLink(pageID string) (stop func()) {
 // run on this device asks it as it starts. Where the server cannot be
 // asked, as offline, the lease it last gave stands, by this device's
 // clock, none before it gave one: what the run writes reaches the link
-// only once this device syncs the page.
+// only once this device syncs the page. Signed out, the other devices say
+// so in iCloud Drive (iCloudLinked).
 func (h *Hub) publicElsewhere(ctx context.Context, pageID string, online bool) bool {
 	if h.be == nil || !h.be.SignedIn() {
-		return false
+		return h.iCloudLinked()[pageID]
 	}
 	// Offline, the server is not asked: the lease it last gave stands.
 	if !online {
@@ -161,6 +182,27 @@ func (h *Hub) publicElsewhere(ctx context.Context, pageID string, online bool) b
 	return row != nil
 }
 
+// iCloudLinkDrift is how far another device's clock may be off from this
+// one's, as its leases in iCloud Drive are by its own: a lease counts
+// until that long after it ends.
+const iCloudLinkDrift = 15 * time.Minute
+
+// iCloudLinked are the pages with a public link another device says in
+// iCloud Drive that it serves (ICloudLinks), as their leases stand now.
+func (h *Hub) iCloudLinked() map[string]bool {
+	out := map[string]bool{}
+	if h.ICloudLinks == nil {
+		return out
+	}
+	now := time.Now()
+	for id, until := range h.ICloudLinks() {
+		if until.Add(iCloudLinkDrift).After(now) {
+			out[id] = true
+		}
+	}
+	return out
+}
+
 // errOffline is the server not asked, this device being offline.
 var errOffline = errors.New("offline")
 
@@ -169,10 +211,10 @@ var errOffline = errors.New("offline")
 // it as it starts, of all the pages it may change. Where the server cannot
 // be asked, the leases it last gave stand.
 func (h *Hub) publicElsewhereIn(ctx context.Context, space string, online bool) map[string]bool {
-	out := map[string]bool{}
 	if h.be == nil || !h.be.SignedIn() {
-		return out
+		return h.iCloudLinked()
 	}
+	out := map[string]bool{}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var rows []map[string]any

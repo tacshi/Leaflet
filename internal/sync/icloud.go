@@ -40,7 +40,10 @@ import (
 //	                       batch named, until it has merged here
 //	icloud.page_version    the highest version of a page file this device
 //	                       wrote, kept before it writes one
-//	icloud.device_at       when device.json was last written (ms)
+//	icloud.device_at       when device.json was last written (ms), 0 for
+//	                       the next pass to write it
+//	icloud.link.<lease>    a public link this device serves, which its
+//	                       device.json says (icloud_links.go)
 //	icloud.held.<table>.<id> other devices' entries of a row with a
 //	                       change waiting here (icloud_rows.go)
 
@@ -118,6 +121,9 @@ func (s *Service) cloudPass(ctx context.Context) error {
 		if errors.Is(err, icloud.ErrNotReady) {
 			return nil // try again once iCloud has it
 		}
+		return err
+	}
+	if err := s.leaveServerSpace(); err != nil {
 		return err
 	}
 	me, err := s.checkDeviceID(ctx)
@@ -217,6 +223,23 @@ func (s *Service) joinSpace(ctx context.Context, joined string) error {
 // beside the one that won, and would take the folder for another library
 // if it had gone, until the user turned iCloud sync off and on.
 const loserKept = 30 * 24 * time.Hour
+
+// leaveServerSpace has the account this device signed in to before, whose
+// session ended without its pages going, take them up afresh when it signs
+// in again (resolveSpace): what changes here or comes from the other
+// devices goes through iCloud Drive now, and leaves the queue without
+// reaching the server. Kept adopted, the account would send none of it,
+// and the server's versions would later be stored over it.
+func (s *Service) leaveServerSpace() error {
+	acct := s.st.CachedAccount()
+	if acct == "" {
+		return nil
+	}
+	if _, ok := s.st.Value("space." + acct); !ok {
+		return nil
+	}
+	return s.st.DeleteValue("space." + acct)
+}
 
 // checkDeviceID returns the ID this device writes under. Two devices with
 // one ID, as a backup restored to a new Mac has, would write over each
@@ -331,7 +354,8 @@ func (s *Service) checkOwnLog(ctx context.Context, me string) (bool, error) {
 	return true, s.requeueAll(ctx, space)
 }
 
-// writeDevice writes device.json, at most once an hour unless now.
+// writeDevice writes device.json, with the public links this device
+// serves (ownLinks), at most once an hour unless now.
 func (s *Service) writeDevice(me string, now bool) error {
 	at := cloudNow()
 	if !now && at.Sub(time.UnixMilli(s.intValue("icloud.device_at"))) < time.Hour {
@@ -341,8 +365,8 @@ func (s *Service) writeDevice(me string, now bool) error {
 	if err != nil {
 		return err
 	}
-	d := icloud.Device{Format: icloud.Format, ID: me, Name: s.deviceName(), Platform: runtime.GOOS,
-		LastActiveAt: at.UTC(), LogFrom: s.intValue("icloud.log_from")}
+	d := deviceFile{Device: icloud.Device{Format: icloud.Format, ID: me, Name: s.deviceName(), Platform: runtime.GOOS,
+		LastActiveAt: at.UTC(), LogFrom: s.intValue("icloud.log_from")}, PublicLinks: s.ownLinks(at)}
 	if err := s.folder().WriteJSON(rel, d); err != nil {
 		return err
 	}

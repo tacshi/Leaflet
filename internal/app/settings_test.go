@@ -16,6 +16,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/core"
 	"leaflet/internal/doc"
 	"leaflet/internal/icloud"
 	"leaflet/internal/keychain"
@@ -23,6 +24,27 @@ import (
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
+
+// The app keeps the one core it was given, with its hooks: what the core
+// has under way, as the project brought up to date while sync waits for
+// it, is that core's, which another made over the same parts would not
+// know. A part a test changes has a core made over it.
+func TestTheAppKeepsOneCore(t *testing.T) {
+	a := templatesApp(t)
+	made := &core.Core{Store: a.st, Remote: a.backend, Sync: a.sync, Hub: a.hub, Rec: a.rec}
+	a.keepCore(made)
+	if a.core() != made || a.pageCore().Core != made {
+		t.Fatal("another core was made over the same parts")
+	}
+	a.settings.TextSize = 21
+	if made.Settings == nil || made.Settings().TextSize != 21 || made.SaveSettings == nil {
+		t.Error("the core has not the settings the app shows")
+	}
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	if c := a.core(); c == made || c.Hub != a.hub || a.core() != c {
+		t.Error("a changed part has no core of its own kept over it")
+	}
+}
 
 // Work started in a provider dialog, a test or a save, finds nowhere to go
 // once that dialog is closed, or another one opened in its place.

@@ -98,8 +98,10 @@ func (h *Hub) apply(pageID string, run *Run, ops []doc.Op, undo bool) error {
 	if len(blockOps) > 0 {
 		var err error
 		if ed := h.host.Live(pageID); ed != nil {
-			// Tried on a copy first: the editor applies what it can.
-			if err = applyAll(ed.Doc().Copy(), blockOps); err == nil {
+			// Tried on a copy first: the editor applies what it can. The
+			// page is read for it through Peek: the ops were made without
+			// what the user is composing.
+			if err = applyAll(ed.Peek().Copy(), blockOps); err == nil {
 				err = ed.ApplyOps(blockOps)
 			}
 		} else {
@@ -205,7 +207,8 @@ func (pl *plan) folder(id string) *store.Folder {
 
 // ready reports whether page op o finds what it changes as it was before
 // it: the page or the folder, in its place, with its title or its tags,
-// and one to delete not deleted already. A folder an Undo would delete
+// and one to delete not deleted already; and a page to move, a parent to
+// go under that is not deleted. A folder an Undo would delete
 // holds nothing more than the run left in it: what the user filed there
 // since stays, and the folder with it. What the latest Undo left deleted,
 // as the user had, Redo does not bring back.
@@ -229,6 +232,13 @@ func (pl *plan) ready(o doc.Op) bool {
 		return p.DeletedAt.IsZero()
 	case "move_page":
 		was := doc.PagePlace{ParentID: p.ParentID, FolderID: p.FolderID}
+		// A parent deleted since is no place to put the page, which would
+		// show nowhere under it (store.ErrMoveIntoDeleted).
+		if o.Place != nil && o.Place.ParentID != "" {
+			if to := pl.page(o.Place.ParentID); to != nil && !to.DeletedAt.IsZero() {
+				return false
+			}
+		}
 		return o.Place != nil && o.PrevPlace != nil && p.DeletedAt.IsZero() && was.Same(*o.PrevPlace)
 	case "rename_page":
 		return p.DeletedAt.IsZero() && p.Title == o.PrevTitle

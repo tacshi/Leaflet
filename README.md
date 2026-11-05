@@ -42,6 +42,7 @@ itself.
 - [Install](#install)
 - [Run from source](#run-from-source)
 - [Agents outside the app (MCP)](#agents-outside-the-app-mcp)
+- [Command line](#command-line)
 - [Build and release](#build-and-release)
 - [Development](#development)
 - [Project layout](#project-layout)
@@ -104,6 +105,8 @@ itself.
   vLLM, which run agents offline.
 - Agents outside the app, such as Claude Code, Codex and Cursor, work on
   pages through [`leaflet mcp`](#agents-outside-the-app-mcp).
+- A [`leaflet` command](#command-line) finds, reads, makes and files pages
+  from a terminal and in scripts, and adds to them.
 
 ### Record
 
@@ -248,6 +251,50 @@ To try it on a development build, give a binary the dev app's data folder:
 go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HOME/Library/Application Support/Leaflet Dev" -- "$PWD/leaflet" mcp
 ```
 
+## Command line
+
+`leaflet` finds, reads, makes and files your pages from a terminal, and
+adds to them, with the same tools as `leaflet mcp`:
+
+| Command | What it does |
+| --- | --- |
+| `leaflet ls` | List folders and pages, with their IDs and tags |
+| `leaflet search QUERY` | Find pages by title, tag or text, recordings and comments |
+| `leaflet cat PAGE` | Print a page as Markdown |
+| `leaflet new [TITLE]` | Make a page from the Markdown piped in, and print its ID |
+| `leaflet append PAGE [TEXT...]` | Add Markdown to the end of a page: the text given, or what is piped in |
+| `leaflet rename PAGE TITLE` | Change a page's title |
+| `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | Move a page inside another, into a folder, or to the top level |
+| `leaflet tag PAGE [TAG...]` | Set a page's tags, or print them; `--clear` takes them off |
+| `leaflet folder new NAME`, `leaflet folder rename FOLDER NAME` | Make and rename folders |
+
+A page is named by its title, its ID, or the start of its ID as `ls`
+shows it. `--json` prints what the MCP tools return, and `leaflet
+completion zsh` (or bash, fish, powershell) writes a completion script
+that completes page titles.
+
+```bash
+make test 2>&1 | leaflet append "CI log"
+leaflet new "Meeting notes" --folder Work < notes.md
+leaflet cat Roadmap > roadmap.md
+```
+
+Settings › External agents › Command line installs it: on a Mac as a link
+in `/usr/local/bin` to the app, which asks for an administrator's password
+when that folder needs one; on Windows by adding the `bin` folder beside the
+app, which holds the console program `leaflet.exe`, to your Path, which
+terminals opened after read. Like `leaflet mcp`, it writes to the
+database on this device, with the app open or closed: the open app shows
+what it changes within a second, and sync sends that on while the app
+runs. Each page keeps a version from before its changes in its history.
+
+To try it on a development build, give a binary a data folder the app has
+run with:
+
+```bash
+go build -o leaflet . && LEAFLET_DATA_DIR="$HOME/Library/Application Support/Leaflet Dev" ./leaflet ls
+```
+
 ## Build and release
 
 `go tool mygo build` builds the app into `build/`. The release scripts
@@ -315,7 +362,8 @@ rules.
 
 | Path | Contents |
 | --- | --- |
-| `main.go` | Entry point: the app, and `leaflet mcp` |
+| `main.go` | Entry point: the app, and the command line, `leaflet mcp` among its commands |
+| `cmd/leaflet` | The command line on Windows: `bin\leaflet.exe`, a console program, beside the app |
 | `mobile` | The Go core's API for the iOS app, bound to Swift with gomobile |
 | `internal/core` | Opening Leaflet's parts and wiring them together, for the desktop and iOS apps alike, and signing in and out |
 | `internal/live` | A page open in the app: saving what is typed, and merging what arrives meanwhile from sync and agents |
@@ -338,6 +386,7 @@ rules.
 | `internal/keychain` | The app's secrets in the system keychain, read at most once a run |
 | `internal/agents` | The OpenAI-compatible client, presets, prompt, page tools, loop and hub |
 | `internal/mcp` | `leaflet mcp`: the page tools for agents outside the app |
+| `internal/cli` | The `leaflet` command line, on those tools |
 | `internal/recording` | Capture, WAV, Soniox streaming and endpoint transcription |
 | `internal/macspeech`, `speech` | Transcription with the device's own speech recognition: `speech`, a Swift package the iOS app and `leaflet-speech`, the helper the Mac app ships, are built with |
 | `internal/theme` | Colors, fonts and icons |

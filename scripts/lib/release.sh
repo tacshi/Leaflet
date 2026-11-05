@@ -109,6 +109,24 @@ with open(path, "w") as f:
 EOF
 }
 
+# build_cli builds the command line for the Windows app named $1, version
+# $2, on Go's architecture $3 (cmd/leaflet), into what the app ships as
+# bin/<command>.exe: the app is a GUI program there, which a terminal
+# neither waits for nor shows the output of. Its name is the app's, in
+# lower case with dashes, as cli.CommandName has it: leaflet, or
+# leaflet-debug beside it. MyGo signs it with the app.
+build_cli() {
+	local name="$1" version="$2" goarch="$3" bin cmd
+	bin="$ROOT_DIR/resources/windows-$goarch/bin"
+	cmd="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | awk '{$1=$1; gsub(/ /, "-")} 1')"
+	# The other build's command must not ship in this one.
+	rm -rf "$bin"
+	info "building $cmd.exe for windows/$goarch"
+	GOOS=windows GOARCH="$goarch" CGO_ENABLED=0 go build -trimpath \
+		-ldflags "-s -w -X 'main.appName=$name' -X 'main.version=$version' ${MYGO_LDFLAGS:-}" \
+		-o "$bin/$cmd.exe" ./cmd/leaflet
+}
+
 # signing_identity prints DEVELOPER_ID_APPLICATION, or the keychain's one
 # Developer ID Application identity when it is not set, and fails unless the
 # keychain has it.

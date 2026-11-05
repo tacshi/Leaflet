@@ -28,21 +28,31 @@ var versions = []string{"2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"}
 
 // Main serves the pages in the data folder dir on stdin and stdout.
 func Main(dir string, version string, in io.Reader, out io.Writer) error {
-	st, err := store.Open(dir)
+	st, err := Open(dir)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	// The session the app last ran with, without the keychain: the
-	// account this device keeps pages for, or this device's own.
+	return NewServer(st, version).Serve(in, out)
+}
+
+// Open opens the pages in the data folder dir, in the session the app
+// last ran with, without the keychain: the account this device keeps
+// pages for, or this device's own.
+func Open(dir string) (*store.Store, error) {
+	st, err := store.Open(dir)
+	if err != nil {
+		return nil, err
+	}
 	var user *store.User
 	if acct := st.CachedAccount(); acct != "" {
 		user = &store.User{ID: acct}
 	}
 	if _, err := st.LoadSession(user); err != nil {
-		return err
+		_ = st.Close()
+		return nil, err
 	}
-	return NewServer(st, version).Serve(in, out)
+	return st, nil
 }
 
 // Server answers one client's requests.
@@ -82,6 +92,17 @@ func NewServer(st *store.Store, version string) *Server {
 	s := &Server{st: st, version: version, agent: "Agent"}
 	s.pages = pageTools{s: s, edited: map[string]int64{}, read: map[string]*doc.Content{}}
 	return s
+}
+
+// SetAgent names the client on what it writes, as its clientInfo does: for
+// a client that sends none, as the command line, which calls the tools
+// itself (Call).
+func (s *Server) SetAgent(name string) { s.agent = name }
+
+// Call runs the tool name with args, as tools/call does, and returns its
+// result: with an "error" when it failed.
+func (s *Server) Call(name string, args map[string]any) map[string]any {
+	return s.pages.call(name, args)
 }
 
 type request struct {

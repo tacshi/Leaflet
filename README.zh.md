@@ -40,6 +40,7 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 - [安装](#安装)
 - [从源码运行](#从源码运行)
 - [应用外的智能体 (MCP)](#应用外的智能体-mcp)
+- [命令行](#命令行)
 - [构建与发布](#构建与发布)
 - [开发](#开发)
 - [项目结构](#项目结构)
@@ -92,6 +93,8 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
   Ollama、LM Studio、llama.cpp、vLLM 等本地服务，可离线运行智能体。
 - 应用外的智能体，例如 Claude Code、Codex 和 Cursor，可以通过
   [`leaflet mcp`](#应用外的智能体-mcp) 处理页面。
+- [`leaflet` 命令](#命令行)可以在终端和脚本中查找、阅读、新建和整理页面，并向
+  页面添加内容。
 
 ### 录音
 
@@ -221,6 +224,46 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HOME/Library/Application Support/Leaflet Dev" -- "$PWD/leaflet" mcp
 ```
 
+## 命令行
+
+`leaflet` 用与 `leaflet mcp` 相同的工具，在终端中查找、阅读、新建和整理你的页面，
+并向页面添加内容：
+
+| 命令 | 作用 |
+| --- | --- |
+| `leaflet ls` | 列出文件夹和页面，以及它们的 ID 和标签 |
+| `leaflet search QUERY` | 按标题、标签或正文查找页面，以及查找录音和评论 |
+| `leaflet cat PAGE` | 以 Markdown 输出页面 |
+| `leaflet new [TITLE]` | 用管道传入的 Markdown 新建页面，并输出它的 ID |
+| `leaflet append PAGE [TEXT...]` | 把 Markdown 添加到页面末尾：给出的文字，或管道传入的内容 |
+| `leaflet rename PAGE TITLE` | 修改页面标题 |
+| `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | 把页面移入其他页面、文件夹，或移到顶层 |
+| `leaflet tag PAGE [TAG...]` | 设置页面的标签，或输出它们；`--clear` 清除全部标签 |
+| `leaflet folder new NAME`、`leaflet folder rename FOLDER NAME` | 新建和重命名文件夹 |
+
+页面可以用标题、ID，或 `ls` 显示的 ID 开头来指定。`--json` 输出 MCP 工具返回的
+内容；`leaflet completion zsh`（或 bash、fish、powershell）会生成能补全页面标题的
+补全脚本。
+
+```bash
+make test 2>&1 | leaflet append "CI log"
+leaflet new "Meeting notes" --folder Work < notes.md
+leaflet cat Roadmap > roadmap.md
+```
+
+在 设置 › 外部智能体 › 命令行 中安装：在 Mac 上，它是 `/usr/local/bin` 中指向
+应用的链接，该文件夹需要管理员权限时会请求管理员密码；在 Windows 上，会把应用
+旁边存放控制台程序 `leaflet.exe` 的 `bin` 文件夹加入你的 Path，之后打开的终端
+就能找到它。与 `leaflet mcp` 一样，它写入本设备上的数据库，无论应用是否打开：
+打开着的应用会在一秒内显示它的修改，应用运行时会把修改同步出去。每个页面的历史
+记录中都会保留修改前的版本。
+
+要在开发构建上试用，给二进制文件一个应用运行过的数据文件夹：
+
+```bash
+go build -o leaflet . && LEAFLET_DATA_DIR="$HOME/Library/Application Support/Leaflet Dev" ./leaflet ls
+```
+
 ## 构建与发布
 
 `go tool mygo build` 会把应用构建到 `build/`。发布脚本同时为 macOS 和
@@ -283,7 +326,8 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 
 | 路径 | 内容 |
 | --- | --- |
-| `main.go` | 入口：应用本身，以及 `leaflet mcp` |
+| `main.go` | 入口：应用本身，以及命令行（`leaflet mcp` 是其中一个命令） |
+| `cmd/leaflet` | Windows 上的命令行：应用旁边的控制台程序 `bin\leaflet.exe` |
 | `mobile` | 供 iOS 应用使用的 Go 核心 API，由 gomobile 绑定到 Swift |
 | `internal/core` | 打开 Leaflet 的各个部分并把它们连接起来（桌面和 iOS 应用通用），以及登录和退出 |
 | `internal/live` | 应用中打开的页面：保存输入的内容，并合并期间从同步和智能体传来的内容 |
@@ -306,6 +350,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions 的共享代码
 | `internal/keychain` | 保存在系统钥匙串中的应用密钥，每次运行最多读取一次 |
 | `internal/agents` | 兼容 OpenAI 的客户端、预设、提示词、页面工具、循环和中枢 |
 | `internal/mcp` | `leaflet mcp`：供应用外智能体使用的页面工具 |
+| `internal/cli` | 基于这些工具的 `leaflet` 命令行 |
 | `internal/recording` | 采集、WAV、Soniox 流式传输和端点转写 |
 | `internal/macspeech`、`speech` | 用设备自带的语音识别转写：`speech` 是一个 Swift 包，iOS 应用和 Mac 应用附带的助手 `leaflet-speech` 都由它构建 |
 | `internal/theme` | 颜色、字体和图标 |

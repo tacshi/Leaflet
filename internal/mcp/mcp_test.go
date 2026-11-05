@@ -203,6 +203,23 @@ func TestCreateAndEditPage(t *testing.T) {
 	if len(history) != 1 || history[0].Label != "Before Claude Code" || strings.Contains(history[0].Content, "Founded") {
 		t.Errorf("history %+v", history)
 	}
+
+	// So do a client's edits as it starts again, as the command line does
+	// for each, though it remembers none of the last one's; another
+	// client's keep one of their own.
+	edit := func(agent string) {
+		s := NewServer(st, "0.1.0")
+		s.SetAgent(agent)
+		if out := s.Call("write_markdown", map[string]any{"page_id": id, "position": map[string]any{"at": "end"}, "markdown": "More."}); out["error"] != nil {
+			t.Fatal(out["error"])
+		}
+	}
+	edit("Claude Code")
+	edit("Codex")
+	edit("Codex")
+	if history, _ := st.History(id); len(history) != 2 || history[0].Label != "Before Codex" {
+		t.Errorf("history after clients started again %+v", history)
+	}
 }
 
 // links are the pages page id links to as subpages.

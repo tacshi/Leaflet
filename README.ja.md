@@ -42,6 +42,7 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 - [インストール](#インストール)
 - [ソースから実行](#ソースから実行)
 - [アプリ外のエージェント (MCP)](#アプリ外のエージェント-mcp)
+- [コマンドライン](#コマンドライン)
 - [ビルドとリリース](#ビルドとリリース)
 - [開発](#開発)
 - [プロジェクト構成](#プロジェクト構成)
@@ -104,6 +105,8 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
   LM Studio、llama.cpp、vLLM などのローカルサーバー。
 - Claude Code、Codex、Cursor などアプリ外のエージェントも
   [`leaflet mcp`](#アプリ外のエージェント-mcp) を通じてページを扱えます。
+- [`leaflet` コマンド](#コマンドライン)で、ターミナルやスクリプトからページの
+  検索、閲覧、作成、整理、追記ができます。
 
 ### 録音
 
@@ -247,6 +250,48 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<データフォルダ> -- <�
 go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HOME/Library/Application Support/Leaflet Dev" -- "$PWD/leaflet" mcp
 ```
 
+## コマンドライン
+
+`leaflet` は `leaflet mcp` と同じツールで、ターミナルからページの検索、閲覧、
+作成、整理、追記ができます：
+
+| コマンド | 内容 |
+| --- | --- |
+| `leaflet ls` | フォルダとページを ID とタグ付きで一覧する |
+| `leaflet search QUERY` | タイトル、タグ、本文でページを、また録音やコメントを探す |
+| `leaflet cat PAGE` | ページを Markdown で出力する |
+| `leaflet new [TITLE]` | パイプで渡した Markdown からページを作成し、その ID を出力する |
+| `leaflet append PAGE [TEXT...]` | ページの末尾に Markdown を追加する：指定した文字列、またはパイプで渡した内容 |
+| `leaflet rename PAGE TITLE` | ページのタイトルを変更する |
+| `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | ページを別のページの中、フォルダ、またはトップレベルへ移動する |
+| `leaflet tag PAGE [TAG...]` | ページのタグを設定する、または出力する。`--clear` ですべて外す |
+| `leaflet folder new NAME`、`leaflet folder rename FOLDER NAME` | フォルダの作成と名前の変更 |
+
+ページはタイトル、ID、または `ls` が表示する ID の先頭部分で指定できます。
+`--json` は MCP ツールが返す内容を出力し、`leaflet completion zsh`（または bash、
+fish、powershell）はページのタイトルを補完する補完スクリプトを書き出します。
+
+```bash
+make test 2>&1 | leaflet append "CI log"
+leaflet new "Meeting notes" --folder Work < notes.md
+leaflet cat Roadmap > roadmap.md
+```
+
+設定 › 外部エージェント › コマンドライン からインストールできます。Mac では
+`/usr/local/bin` にアプリへのリンクを作り、そのフォルダに管理者権限が必要な
+ときは管理者のパスワードを求めます。Windows では、コンソールプログラム
+`leaflet.exe` が入ったアプリの隣の `bin` フォルダを Path に追加し、その後に
+開いたターミナルから使えます。`leaflet mcp` と同じく、アプリが開いていても
+閉じていてもこのデバイスのデータベースに書き込みます。開いているアプリは 1 秒
+以内に変更を表示し、アプリの実行中に同期します。各ページの履歴には変更前の
+バージョンが残ります。
+
+開発ビルドで試すには、アプリを実行したことのあるデータフォルダをバイナリに渡します：
+
+```bash
+go build -o leaflet . && LEAFLET_DATA_DIR="$HOME/Library/Application Support/Leaflet Dev" ./leaflet ls
+```
+
 ## ビルドとリリース
 
 `go tool mygo build` はアプリを `build/` にビルドします。リリース用スクリプトは、
@@ -314,7 +359,8 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 
 | パス | 内容 |
 | --- | --- |
-| `main.go` | エントリポイント：アプリと `leaflet mcp` |
+| `main.go` | エントリポイント：アプリと、`leaflet mcp` を含むコマンドライン |
+| `cmd/leaflet` | Windows のコマンドライン：アプリの隣のコンソールプログラム `bin\leaflet.exe` |
 | `mobile` | iOS アプリ向けの Go コアの API。gomobile で Swift にバインドされます |
 | `internal/core` | Leaflet の各部分を開いてつなぐ処理（デスクトップと iOS のアプリで共通）、サインインとサインアウト |
 | `internal/live` | アプリで開いているページ：入力内容の保存と、その間に同期やエージェントから届いた内容のマージ |
@@ -337,6 +383,7 @@ cd supabase/functions && deno test _shared/  # Edge Functions の共有コード
 | `internal/keychain` | システムのキーチェーンにあるアプリのシークレット。1 回の起動で読むのは多くても 1 度 |
 | `internal/agents` | OpenAI 互換クライアント、プリセット、プロンプト、ページツール、ループ、ハブ |
 | `internal/mcp` | `leaflet mcp`：アプリ外のエージェント向けページツール |
+| `internal/cli` | それらのツールを使う `leaflet` コマンドライン |
 | `internal/recording` | キャプチャ、WAV、Soniox ストリーミング、エンドポイントでの文字起こし |
 | `internal/macspeech`、`speech` | デバイス自身の音声認識による文字起こし。`speech` は Swift パッケージで、iOS アプリと、Mac アプリに同梱するヘルパー `leaflet-speech` がこれでビルドされます |
 | `internal/theme` | 色、フォント、アイコン |

@@ -20,7 +20,8 @@ import (
 
 // External agents: the AI apps on this computer connected to `leaflet
 // mcp` (internal/mcp), which is this app's own executable, with a click
-// (connect.go), or by hand.
+// (connect.go), or by hand; and the command line, installed with a click
+// (command.go).
 
 var externalClients = []struct{ id, label string }{
 	{"codex", "Codex"}, {"claude", "Claude Code"}, {"opencode", "OpenCode"}, {"cursor", "Cursor"}, {"vscode", "VS Code"}, {"other", "Other"},
@@ -42,6 +43,8 @@ type externalState struct {
 	disconnecting bool
 	byHand        bool
 	client        int
+	// command is the command line's row (command.go).
+	command commandUI
 }
 
 func (a *App) externalSettings(c *ui.Context) {
@@ -78,6 +81,7 @@ func (a *App) externalSettings(c *ui.Context) {
 	ui.Collapsible(c.Key("by-hand"), locales.ExternalByHand(), &a.external.byHand, func() {
 		a.setupByHand(c, exe, dir)
 	})
+	a.commandSettings(c, exe, moved)
 }
 
 // agentRow is an app found: how it stands with Leaflet, said in a line

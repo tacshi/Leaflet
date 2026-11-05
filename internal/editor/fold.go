@@ -217,11 +217,20 @@ func (e *Editor) Headings() []*doc.Node {
 	return out
 }
 
-// BlockTop is where a block shows, in window coordinates, as last drawn;
-// false for one a folded heading hides.
+// BlockTop is where a block shows, in window coordinates: where the page
+// last laid it out in the page, drawn or not, as below the fold of a page
+// just opened or pushed out of view by a picture loaded above it, put
+// where the page was last drawn; false for one a folded heading hides. A
+// block not laid out yet is where it was drawn.
 func (e *Editor) BlockTop(id string) (float32, bool) {
+	if e.foldedAway(id) {
+		return 0, false
+	}
+	if r := e.laid[id]; r.H > 0 {
+		return e.root.Y + r.Y - e.laidTop, true
+	}
 	r, ok := e.box(id)
-	return r.Y, ok && !e.foldedAway(id)
+	return r.Y, ok
 }
 
 // foldedAway reports whether folds hide block id: as the page last built

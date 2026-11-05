@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -149,6 +150,61 @@ func TestOutlineScrollsHeadingToTop(t *testing.T) {
 	tt.Frame()
 	if !ed.Focused() {
 		t.Error("Enter left the keyboard in the outline")
+	}
+}
+
+// A block gone to stays at the top of the page while what is above it
+// grows, as a picture loading does, until the page is scrolled.
+func TestGoToBlockHoldsAsThePageGrows(t *testing.T) {
+	a := templatesApp(t)
+	a.rec = recording.NewController(a.st, a.backend)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.TextSize = 16
+	var blocks []*doc.Node
+	for i := range 60 {
+		n := textNode(fmt.Sprintf("Line %d.", i))
+		n.ID = fmt.Sprintf("p%d", i)
+		blocks = append(blocks, n)
+	}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks(blocks)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	var ctx *ui.Context
+	tt := ui.NewTester(func(c *ui.Context) {
+		ctx = c
+		a.view(c)
+	}, 1300, 700)
+	tt.Frame()
+	a.goToBlock("p40", false)
+	for range 3 {
+		tt.Frame()
+	}
+	below := func() float32 {
+		top, _ := a.page.editor.BlockTop("p40")
+		return top - a.page.view.Bounds(ctx).Y
+	}
+	// As a picture arrives: no edit, and the caret stays.
+	grow := func(id string) {
+		a.page.editor.SetData(id, "delta", doc.Delta{{Text: strings.Repeat("A picture's worth of words. ", 200)}}.JSON())
+		for range 3 {
+			tt.Frame()
+		}
+	}
+	grow("p0")
+	if d := below(); d < 0 || d > 2*scrollMargin {
+		t.Errorf("the block went %v below the top of the page as the page above it grew", d)
+	}
+	view := a.page.view.Bounds(ctx)
+	tt.Move(view.X+view.W/2, view.Y+view.H/2)
+	tt.Scroll(view.X+view.W/2, view.Y+view.H/2, 0, -100)
+	tt.Frame()
+	was := below()
+	grow("p1")
+	if below() <= was {
+		t.Errorf("the page went back to the block after it was scrolled: %v below the top, was %v", below(), was)
 	}
 }
 

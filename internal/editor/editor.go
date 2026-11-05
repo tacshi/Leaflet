@@ -165,11 +165,12 @@ type Editor struct {
 	// box as last drawn: box puts it in the window, for hit-testing, where
 	// the page has moved it since, as a block scrolled out of view is not
 	// drawn. laid is each block's box in the window as the last frame
-	// laid it out, drawn or not: a block never drawn has no rel. Each
-	// build keeps them, and the layouts and looks, for the blocks it
-	// builds alone.
+	// laid it out, drawn or not: a block never drawn has no rel. laidTop
+	// is the page's top in that frame. Each build keeps them, and the
+	// layouts and looks, for the blocks it builds alone.
 	rel     map[string]ui.Rect
 	laid    map[string]ui.Rect
+	laidTop float32
 	root    ui.Rect
 	width   float32
 	focused bool

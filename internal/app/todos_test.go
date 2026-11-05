@@ -8,7 +8,9 @@ import (
 
 	"github.com/egoist/mygo/ui"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
+	"leaflet/internal/recording"
 	"leaflet/internal/store"
 	"leaflet/locales"
 )
@@ -119,6 +121,55 @@ func TestTodosView(t *testing.T) {
 	tt.Frame()
 	if !tt.HasText("Nothing to do") {
 		t.Errorf("still listed: %v", tt.Texts())
+	}
+}
+
+// A click on a to-do of another page opens that page scrolled to it, as
+// one far below its fold, never drawn yet.
+func TestTodoClickScrollsItsPageToIt(t *testing.T) {
+	a := templatesApp(t)
+	a.rec = recording.NewController(a.st, a.backend)
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	a.settings.TextSize = 16
+	var blocks []*doc.Node
+	for i := range 80 {
+		blocks = append(blocks, textNode(fmt.Sprintf("Line %d.", i)))
+	}
+	todo := &doc.Node{ID: "t1", Type: "todo_list"}
+	todo.SetDelta(doc.Delta{{Text: "Join the team call"}})
+	todo.Set("checked", false)
+	todo.SetDue(time.Now(), false)
+	blocks = append(blocks, todo)
+	for i := range 20 {
+		blocks = append(blocks, textNode(fmt.Sprintf("After it %d.", i)))
+	}
+	interview, err := a.st.CreatePage(store.NewPageOptions{Title: "Interview", Content: doc.FromBlocks(blocks)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes, _ := a.st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{textNode("Hello")})})
+	a.reloadAll()
+	a.openPage(notes.ID)
+	a.settings.SidebarOpen, a.settings.SidebarTab = true, tabTodos
+	var ctx *ui.Context
+	tt := ui.NewTester(func(c *ui.Context) {
+		ctx = c
+		a.view(c)
+	}, 1300, 700)
+	tt.Frame()
+	if err := tt.Click("Join the team call"); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		tt.Frame()
+	}
+	if a.page == nil || a.page.id != interview.ID || a.page.editor.Caret().ID != "t1" {
+		t.Fatal("the to-do's page isn't open at it")
+	}
+	top, ok := a.page.editor.BlockTop("t1")
+	view := a.page.view.Bounds(ctx)
+	if !ok || view.H == 0 || top-view.Y < 0 || top-view.Y > 2*scrollMargin {
+		t.Errorf("the to-do is %v below the top of the page (shown %v)", top-view.Y, ok)
 	}
 }
 

@@ -71,6 +71,7 @@ func (e *Editor) View(c *ui.Context) ui.Element {
 	// built laid as they build.
 	clear(e.chips)
 	clear(e.laid)
+	e.laidTop = root.Bounds().Y
 	e.building = true
 	root.Children(func() {
 		e.blocks(c, e.Content.Children, pal)

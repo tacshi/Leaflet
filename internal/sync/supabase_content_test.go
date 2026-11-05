@@ -477,15 +477,14 @@ func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 	if _, _, err := st.SaveContent(p.ID, mine); err != nil {
 		t.Fatal(err)
 	}
-	const unreadable = `{"document": {"type": "page", "id": "root", "children": [{"id": "x", "type": "paragraph", "data": ["of a newer kind"]}]}, "meta": {"v": 1, "blocks": {"x": 5}}}`
-	srv := &contentServer{content: unreadable, revision: 2}
+	srv := &contentServer{content: newerKind, revision: 2}
 	svc, requests := fullPass(t, st, onlyContent(srv))
 	ctx := context.Background()
 
 	if err := svc.pass(ctx, true); err != nil {
 		t.Fatalf("pass: %v", err)
 	}
-	if srv.updates != 0 || srv.content != unreadable {
+	if srv.updates != 0 || srv.content != newerKind {
 		t.Errorf("server saved over: %d updates, %s", srv.updates, srv.content)
 	}
 	if e := pendingOf(t, st, "page_content", p.ID); e == nil || e.Attempts != 1 || !strings.Contains(e.LastError, errServerUnreadable.Error()) {
@@ -515,7 +514,7 @@ func TestServerContentItCannotReadIsNotSynced(t *testing.T) {
 		} else {
 			out = contentRows(r, func(id string) map[string]any {
 				if id == p.ID {
-					return map[string]any{"content": json.RawMessage(unreadable), "revision": 2, "updated_at": at}
+					return map[string]any{"content": json.RawMessage(newerKind), "revision": 2, "updated_at": at}
 				}
 				return map[string]any{"content": json.RawMessage(theirs.Encode()), "revision": 1, "updated_at": at}
 			})

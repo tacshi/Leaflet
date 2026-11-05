@@ -46,6 +46,12 @@ type Platform struct {
 	// Drive while iCloud sync is on, to have sync run soon after another
 	// device writes to it; nil leaves that to the 30-second passes.
 	WatchICloud func(on bool)
+	// Watched reports whether someone sees an open page as it changes
+	// elsewhere, on screen or served to a public link's visitors, for sync
+	// to check it every few seconds for what changed on the server. Sync
+	// asks from its own goroutine; nil is every open page, as on iOS,
+	// where sync stops in the background.
+	Watched func(pageID string) bool
 	// ICloudRoot is the Leaflet folder in iCloud Drive: "" is the one
 	// icloud.Root finds, as on the desktop; the iOS app passes the folder
 	// the user picked.
@@ -149,7 +155,7 @@ func Open(cfg Config) (*Core, error) {
 	c.Rec = recording.NewController(st, c.Remote)
 	c.Hub = agents.NewHub(st, c.Remote, cfg.Agents)
 	c.Sync = syncsvc.New(st, c.Remote)
-	c.Sync.Online, c.Sync.DeviceName = cfg.Online, cfg.DeviceName
+	c.Sync.Online, c.Sync.DeviceName, c.Sync.Watched = cfg.Online, cfg.DeviceName, cfg.Watched
 	c.Sync.OnState, c.Sync.OnPageContent = cfg.OnSyncState, cfg.OnPageContent
 	c.Sync.Updating = c.updatingProject.Load
 	// Signed out, the pages go to the other devices through iCloud Drive,

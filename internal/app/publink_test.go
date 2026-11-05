@@ -96,7 +96,7 @@ func pubTest(t *testing.T) (*App, *pubLink, http.Handler, store.Page) {
 	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
 	a.reloadAll()
 	p := &pubLink{page: pg.ID, token: "tok", state: "live", comments: true, threads: map[string]bool{}, posts: map[string][]time.Time{}}
-	a.pub = p
+	a.setPub(p)
 	p.render(a.pubJob(p))
 	return a, p, a.pubHandler(p), pg
 }
@@ -574,15 +574,22 @@ func TestPublicLinkLeasesTheWayPagesSync(t *testing.T) {
 
 // A page a public link serves has its content come down as it changes
 // elsewhere, as an open page's does, until the link stops; open, it
-// keeps it after.
+// keeps it after. Visitors see it, so it is checked every few seconds
+// whether or not the window shows, which here there is none of.
 func TestPublicLinkKeepsItsPagePulled(t *testing.T) {
 	a, p, _, pg := pubTest(t)
 	if !a.pulled(pg.ID) || a.pulled("other") {
 		t.Error("the page a link serves is not kept as an open page")
 	}
+	if !a.watched(pg.ID) || a.watched("other") {
+		t.Error("the page a link serves is not the one watched")
+	}
 	a.pubFailed(p, "gone")
 	if a.pulled(pg.ID) {
 		t.Error("a failed link keeps its page")
+	}
+	if a.watched(pg.ID) {
+		t.Error("a failed link's page is still watched")
 	}
 	a.openPage(pg.ID)
 	if a.page == nil || !a.pulled(pg.ID) {

@@ -30,8 +30,9 @@ func (s *Service) backOff(err error) {
 
 // Start runs the loop: soon after changes, when asked, and every 30 seconds.
 // The first pass after says the device is in use, and looks for what is
-// looked for every so often, at once. In between, the open pages are
-// checked every watchEvery (watchOpen).
+// looked for every so often, at once. In between, an open page is checked
+// as Realtime tells of a save of it (listen, checkHeard), or, while it
+// cannot, every watchEvery (watchOpen).
 func (s *Service) Start() {
 	s.mu.Lock()
 	if s.stop != nil {
@@ -42,10 +43,12 @@ func (s *Service) Start() {
 	s.loop, s.stop = ctx, cancel
 	s.beat, s.providersSwept = every{}, every{}
 	s.mu.Unlock()
+	interval := watchEvery
+	guard.Go(func() { s.listen(ctx, interval) })
 	guard.Go(func() {
 		tick := time.NewTicker(30 * time.Second)
 		defer tick.Stop()
-		watch := time.NewTicker(watchEvery)
+		watch := time.NewTicker(interval)
 		defer watch.Stop()
 		s.Kick()
 		for {
@@ -53,8 +56,14 @@ func (s *Service) Start() {
 			select {
 			case <-ctx.Done():
 				return
+			case <-s.hear:
+				s.checkHeard(ctx)
+				continue
 			case <-watch.C:
 				s.watchOpen(ctx)
+				// The next check comes watchEvery after this one ended,
+				// however long it took, not at once.
+				watch.Reset(interval)
 				continue
 			case <-s.kick:
 				select {
@@ -142,8 +151,8 @@ func (s *Service) signal() {
 	}
 }
 
-// openWait is how long SetOpen has to bring an opened page up to date,
-// and watchOpen the open pages; tests shorten it.
+// openWait is how long SetOpen has to bring an opened page up to date;
+// tests shorten it.
 var openWait = time.Minute
 
 // watchEvery is how often the loop checks the open pages for what changed
@@ -152,39 +161,125 @@ var openWait = time.Minute
 // shorten it.
 var watchEvery = 5 * time.Second
 
-// watchOpen brings the open pages' content up to date with the server's
-// while they are shown (Shown), from the loop, whose context is loop: a
-// page's revision is asked for, and its content only when that moved. A
-// pass or an opened page's refresh under way brings them already, so the
-// check waits for the next. Changes in iCloud Drive start a pass as they
-// come (core.Platform.WatchICloud), so only the server is asked.
+const (
+	// watchWait is how long a check of the open pages has: one that takes
+	// longer brings nothing sooner than the passes do.
+	watchWait = 10 * time.Second
+	// watchRest is how long the checks leave a server that failed one
+	// alone, as the passes come as often.
+	watchRest = 30 * time.Second
+)
+
+// watchOpen brings the content of the open pages someone sees (Watched)
+// up to date with the server's, those whose saves Realtime does not tell
+// of (listen), from the loop, whose context is loop: a page's revision is
+// asked for, and its content only when that moved. A pass or an opened
+// page's refresh under way brings them already, so the check waits for the
+// next. Changes in iCloud Drive start a pass as they come
+// (core.Platform.WatchICloud), so only the server is asked.
 func (s *Service) watchOpen(loop context.Context) {
 	defer guard.Recover()
-	if _, server := s.target().(supabaseTarget); !server || !s.CanSync() || s.Shown != nil && !s.Shown() || s.busy() {
+	if _, server := s.target().(supabaseTarget); !server || !s.CanSync() || s.resting() {
 		return
 	}
-	if !s.running.TryLock() {
+	open := s.watched()
+	s.mu.Lock()
+	open = slices.DeleteFunc(open, func(id string) bool { return s.live[id] != nil })
+	s.mu.Unlock()
+	if len(open) == 0 || !s.running.TryLock() {
 		return
 	}
 	defer s.running.Unlock()
 	if loop.Err() != nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(loop, watchWait)
+	defer cancel()
+	s.checkPages(loop, ctx, open)
+}
+
+// checkHeard checks the open pages Realtime told of a save of (listen) at
+// once: after the pass or the refresh under way, which may have read them
+// before the save, rather than in its stead. Those it can't check now, as
+// the server asked for a wait, the passes bring.
+func (s *Service) checkHeard(loop context.Context) {
+	defer guard.Recover()
+	if _, server := s.target().(supabaseTarget); !server || !s.CanSync() || s.busy() {
+		s.takeHeard()
+		return
+	}
+	s.running.Lock()
+	defer s.running.Unlock()
+	heard := s.takeHeard()
+	if loop.Err() != nil {
+		return
+	}
+	s.mu.Lock()
+	heard = slices.DeleteFunc(heard, func(id string) bool { return !s.open[id] })
+	s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(loop, watchWait)
+	defer cancel()
+	s.checkPages(loop, ctx, heard)
+}
+
+// checkPages brings pages' content up to date with the server's
+// (checkRemote), in ctx, from the loop, whose context is loop.
+func (s *Service) checkPages(loop, ctx context.Context, ids []string) {
+	for _, id := range ids {
+		err := s.checkRemote(ctx, id)
+		switch {
+		case err == nil, unreadable(err):
+			// A page whose content can't be read is passed over, as the
+			// passes pass over it.
+		case loop.Err() != nil:
+			return // stopped: the loop checks again once it starts
+		case ofServer(err) || ctx.Err() != nil:
+			// The server, or the way to it, would fail the others too:
+			// they are left to the passes, which say why.
+			s.rest(err)
+			return
+		default:
+			// The page's own, as the store's: the others go on.
+			log.Printf("check open page %s: %v", id, err)
+		}
+	}
+}
+
+// watched are the open pages someone sees (Watched), in order.
+func (s *Service) watched() []string {
 	s.mu.Lock()
 	open := slices.Sorted(maps.Keys(s.open))
 	s.mu.Unlock()
-	ctx, cancel := context.WithTimeout(loop, openWait)
-	defer cancel()
-	for _, id := range open {
-		// A page whose content can't be read is passed over, as the
-		// passes pass over it. Any other failure, as the server out of
-		// reach or asking for a wait, leaves the others for the next
-		// check too, and the passes say why.
-		if _, err := s.refreshRemote(ctx, id); err != nil && !unreadable(err) {
-			s.backOff(err)
-			return
-		}
+	if s.Watched != nil {
+		open = slices.DeleteFunc(open, func(id string) bool { return !s.Watched(id) })
 	}
+	return open
+}
+
+// ofServer reports whether err is the server's answer, or the way to it
+// failing, rather than a page's own.
+func ofServer(err error) bool {
+	_, answered := errors.AsType[*remote.Error](err)
+	return answered || remote.IsNetwork(err) || errors.Is(err, remote.ErrSignedOut)
+}
+
+// rest leaves the server a check of the open pages failed on, with err,
+// to the passes for watchRest, and to no one for as long as it asked
+// (backOff).
+func (s *Service) rest(err error) {
+	s.backOff(err)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.watchAfter = time.Now().Add(watchRest)
+}
+
+// resting reports whether the checks of the open pages leave the server
+// alone: as it asked (busy), or after one failed (rest).
+func (s *Service) resting() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	return now.Before(s.busyUntil) || now.Before(s.watchAfter)
 }
 
 // busy reports whether the loop still waits as the server asked it to

@@ -121,8 +121,8 @@ itself.
 - Offline first: everything is saved to SQLite, and changes sync through
   an outbox when online. Edits made apart merge block by block, with a
   conflict notice and a way to bring back the other version. Through a
-  Leaflet server, an open page shows within seconds what changes in it on
-  another device, as an agent's edits there.
+  Leaflet server, an open page shows what changes in it on another device
+  as it is saved there, as an agent's edits, through Supabase Realtime.
 - iCloud sync: your Macs and PCs sync through the Leaflet folder in iCloud
   Drive, with no server and no sign-in. Turn it on in Settings › Sync
   and storage; on Windows it needs iCloud for Windows.

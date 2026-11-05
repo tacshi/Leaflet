@@ -67,9 +67,6 @@ type App struct {
 	winMu    sync.Mutex
 	starting bool
 	early    []func()
-	// hidden and minimized say the window is off screen, for sync to stop
-	// checking the open page for what changed elsewhere (shown).
-	hidden, minimized atomic.Bool
 
 	settings store.Settings
 	// endpointKeyMu orders the endpoint keys kept in the keychain, and
@@ -264,10 +261,13 @@ type App struct {
 	pub         *pubLink
 	cloudflared cloudflaredInfo
 	// pubPage is pub's page, for agent runs to read off the main thread:
-	// a page anyone may read through a link keeps agents to itself.
+	// a page anyone may read through a link keeps agents to itself. served
+	// says the link still serves it (pubLink.serving), for sync to check
+	// it as it changes elsewhere (watched).
 	pubPage struct {
 		sync.Mutex
-		id string
+		id     string
+		served bool
 	}
 }
 
@@ -275,9 +275,9 @@ type App struct {
 func (a *App) setPub(p *pubLink) {
 	a.pub = p
 	a.pubPage.Lock()
-	a.pubPage.id = ""
+	a.pubPage.id, a.pubPage.served = "", false
 	if p != nil {
-		a.pubPage.id = p.page
+		a.pubPage.id, a.pubPage.served = p.page, p.serving()
 	}
 	a.pubPage.Unlock()
 }
@@ -288,6 +288,14 @@ func (a *App) publiclyLinked(pageID string) bool {
 	a.pubPage.Lock()
 	defer a.pubPage.Unlock()
 	return a.pubPage.id != "" && a.pubPage.id == pageID
+}
+
+// publiclyServed reports whether a public link serves a page, or will once
+// live, not one that failed; it may be called from any goroutine.
+func (a *App) publiclyServed(pageID string) bool {
+	a.pubPage.Lock()
+	defer a.pubPage.Unlock()
+	return a.pubPage.served && a.pubPage.id == pageID
 }
 
 // publicPages are the pages with a public link open now: the one, or none.
@@ -416,6 +424,7 @@ func (a *App) start() error {
 			Online:      func() bool { return mygo.Network.Status().Online },
 			OpenURL:     func(u string) { _ = mygo.Shell.OpenExternal(u) },
 			WatchICloud: a.watchICloud,
+			Watched:     a.watched,
 		},
 		Agents: a,
 		OnSyncState: func(running bool, err error) {
@@ -519,11 +528,6 @@ func (a *App) start() error {
 	a.early = nil
 	a.winMu.Unlock()
 	a.startTray()
-	a.win.OnHide(func() { a.hidden.Store(true) })
-	a.win.OnShow(func() { a.hidden.Store(false) })
-	a.win.OnMinimize(func() { a.minimized.Store(true) })
-	a.win.OnRestore(func() { a.minimized.Store(false) })
-	a.sync.Shown = a.shown
 	a.win.OnClose(func(e *mygo.CloseEvent) {
 		saved := a.flush()
 		// With the menu bar icon, closing the window hides it, and the
@@ -569,10 +573,22 @@ func (a *App) start() error {
 	return nil
 }
 
-// shown reports whether the window is on screen, as sync asks from its
-// loop, off the main thread: an open page is checked every few seconds for
-// what changed on the server only then.
-func (a *App) shown() bool { return !a.hidden.Load() && !a.minimized.Load() }
+// watched reports whether someone sees page id as it changes elsewhere,
+// as sync asks from its loop, off the main thread, to check it every few
+// seconds for what changed on the server: a public link serves it, or the
+// window, which shows the one page open, is on screen, neither hidden, as
+// closing it with the menu bar icon does, nor minimized, nor hidden with
+// the app (macOS). The window and the app say how they are, rather than
+// their events, as the app hides on macOS without its window's.
+func (a *App) watched(id string) bool {
+	if a.publiclyServed(id) {
+		return true
+	}
+	a.winMu.Lock()
+	win := a.win
+	a.winMu.Unlock()
+	return win != nil && win.IsVisible() && !win.IsMinimized() && !mygo.App.IsHidden()
+}
 
 // core is the app's parts as the core wires them, with the app's hooks:
 // the one core the app keeps (cr), asked for on the main thread. Tests,

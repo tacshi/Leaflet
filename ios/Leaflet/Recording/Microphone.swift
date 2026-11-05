@@ -77,7 +77,16 @@ final class Microphone: NSObject, MobileMicrophoneProtocol, @unchecked Sendable 
         let engine = AVAudioEngine()
         try tap(engine, session: session, rec)
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            // An engine that won't start, as from the background or in a
+            // call, lets its tap go, which holds the engine: kept, neither
+            // would ever be freed, one for each try.
+            engine.inputNode.removeTap(onBus: 0)
+            rec.resampler = nil
+            throw error
+        }
         rec.engine = engine
         guard rec.observers.isEmpty else { return }
         let center = NotificationCenter.default

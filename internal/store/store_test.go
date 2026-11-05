@@ -16,6 +16,7 @@ import (
 	gosync "sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"leaflet/internal/doc"
 )
@@ -1417,6 +1418,110 @@ func TestOpensADatabaseFromARelease(t *testing.T) {
 	}
 }
 
+// A database from before rows kept the server's time of them gains it as
+// it opens: its rows have none, and count as changed here, until the
+// server's copy of one is stored.
+func TestADatabaseGainsThePulledTimes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "leaflet.db")
+	before := strings.ReplaceAll(schema, ", pulled_at INTEGER", "")
+	if before == schema {
+		t.Fatal("the schema keeps no pulled_at")
+	}
+	writeDB(t, path, before,
+		`INSERT INTO pages (id, space_id, title, sort_key, created_at, updated_at) VALUES ('p1', 's1', 'Plan', 'a', 1, 1)`,
+		`PRAGMA user_version = 8`)
+	s, err := OpenPath(path, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if v := userVersion(t, s); v != len(migrations) {
+		t.Errorf("schema %d, want %d", v, len(migrations))
+	}
+	for _, table := range pulledTables {
+		var n int
+		if err := s.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = 'pulled_at'`, table).Scan(&n); err != nil || n != 1 {
+			t.Errorf("%s has no pulled_at: %v", table, err)
+		}
+	}
+	if _, ok := s.RowPulledAt("pages", "p1"); ok {
+		t.Error("a row from before counts as the server's")
+	}
+	r := PageToRemote(Page{ID: "p1", SpaceID: "s1", Title: "Plan", SortKey: "a"})
+	r["updated_at"] = time.UnixMilli(5000).UTC().Format(time.RFC3339Nano)
+	if err := s.PutRemotePage(r); err != nil {
+		t.Fatal(err)
+	}
+	if at, ok := s.RowPulledAt("pages", "p1"); !ok || at.UnixMilli() != 5000 {
+		t.Errorf("pulled at %v, %v", at, ok)
+	}
+}
+
+// A row stored from the server keeps the server's time of it, until it
+// changes here, or a change of another device's comes for it through
+// iCloud Drive; one that changes nothing here keeps it.
+func TestRowsKeepTheServersTimeUntilTheyChange(t *testing.T) {
+	s := open(t)
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	stamp := now.Format(time.RFC3339Nano)
+	page := PageToRemote(Page{ID: "00000000-0000-0000-0000-0000000000a1", SpaceID: s.Session().SpaceID, Title: "Plan", SortKey: "a0"})
+	folder := FolderToRemote(Folder{ID: "00000000-0000-0000-0000-0000000000a2", SpaceID: s.Session().SpaceID, Name: "Work", SortKey: "a0"})
+	comment := CommentToRemote(Comment{ID: "00000000-0000-0000-0000-0000000000a3", PageID: S(page, "id"), BlockID: "b1", AuthorKind: "user", Body: "Hi"})
+	for _, r := range []map[string]any{page, folder, comment} {
+		r["updated_at"] = stamp
+	}
+	if err := s.PutRemotePage(page); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRemoteFolder(folder); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutRemoteComment(comment, "Ann"); err != nil {
+		t.Fatal(err)
+	}
+	pulled := func(table, id string) bool {
+		t.Helper()
+		at, ok := s.RowPulledAt(table, id)
+		if ok && !at.Equal(now) {
+			t.Errorf("%s pulled at %v, want %v", table, at, now)
+		}
+		return ok
+	}
+	for table, id := range map[string]string{"pages": S(page, "id"), "folders": S(folder, "id"), "comments": S(comment, "id")} {
+		if !pulled(table, id) {
+			t.Errorf("%s stored from the server keeps no time", table)
+		}
+	}
+	// Renamed as it is: nothing changes, nothing is queued.
+	if err := s.RenamePage(S(page, "id"), "Plan"); err != nil {
+		t.Fatal(err)
+	}
+	if !pulled("pages", S(page, "id")) {
+		t.Error("a rename to the same title counts as a change")
+	}
+	if err := s.RenamePage(S(page, "id"), "Plan for Q4"); err != nil {
+		t.Fatal(err)
+	}
+	if pulled("pages", S(page, "id")) {
+		t.Error("a page renamed here is still the server's")
+	}
+	if err := s.SetResolved(S(comment, "id"), true); err != nil {
+		t.Fatal(err)
+	}
+	if pulled("comments", S(comment, "id")) {
+		t.Error("a comment resolved here is still the server's")
+	}
+	folder[PeerKey] = true
+	folder["name"] = "Work, renamed on the iPad"
+	if err := s.PutRemoteFolder(folder); err != nil {
+		t.Fatal(err)
+	}
+	if pulled("folders", S(folder, "id")) {
+		t.Error("a folder another device changed is still the server's")
+	}
+}
+
 func TestNewDatabaseHasTheLatestSchema(t *testing.T) {
 	if v := userVersion(t, open(t)); v != len(migrations) {
 		t.Errorf("schema %d, want %d", v, len(migrations))
@@ -2013,6 +2118,159 @@ func TestMovePageStaysInItsSpace(t *testing.T) {
 	}
 	if got, _ := s.Page(mine.ID); got.ParentID != parent.ID {
 		t.Errorf("page under %q, want %q", got.ParentID, parent.ID)
+	}
+}
+
+// No page goes under a page deleted, as on another device since, where it
+// would show nowhere: a move there is refused, Undo's too, and a page
+// brought back from under one comes back at the top level, last, while
+// pages brought back with their parent stay under it.
+func TestNoPageGoesUnderADeletedOne(t *testing.T) {
+	s := open(t)
+	gone, _ := s.CreatePage(NewPageOptions{Title: "Gone"})
+	mine, _ := s.CreatePage(NewPageOptions{Title: "Mine"})
+	if _, err := s.DeletePage(gone.ID); err != nil {
+		t.Fatal(err)
+	}
+	for what, err := range map[string]error{
+		"move":        s.MovePage(mine.ID, gone.ID, "", ""),
+		"move before": s.MovePageBefore(mine.ID, gone.ID, "", ""),
+		"put back":    s.PlacePage(mine.ID, gone.ID, "", mine.SortKey),
+	} {
+		if !errors.Is(err, ErrMoveIntoDeleted) {
+			t.Errorf("%s under a deleted page: %v", what, err)
+		}
+	}
+	if got, _ := s.Page(mine.ID); got.ParentID != "" {
+		t.Errorf("page under %q", got.ParentID)
+	}
+
+	parent, _ := s.CreatePage(NewPageOptions{Title: "Parent"})
+	sub, _ := s.CreatePage(NewPageOptions{Title: "Sub", ParentID: parent.ID})
+	subIDs, _ := s.DeletePage(sub.ID)
+	ids, _ := s.DeletePage(parent.ID)
+	if err := s.RestorePages(subIDs); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Page(sub.ID)
+	if !got.DeletedAt.IsZero() || got.ParentID != "" || got.SortKey <= mine.SortKey {
+		t.Errorf("brought back as %+v, after %q", got, mine.SortKey)
+	}
+	if err := s.MovePage(sub.ID, parent.ID, "", ""); !errors.Is(err, ErrMoveIntoDeleted) {
+		t.Errorf("move back under its parent, deleted: %v", err)
+	}
+	if err := s.RestorePages(ids); err != nil {
+		t.Fatal(err)
+	}
+	kid, _ := s.CreatePage(NewPageOptions{Title: "Kid", ParentID: parent.ID})
+	ids, _ = s.DeletePage(parent.ID)
+	if err := s.RestorePages(ids); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Page(kid.ID); !got.DeletedAt.IsZero() || got.ParentID != parent.ID {
+		t.Errorf("brought back with its parent as %+v", got)
+	}
+}
+
+// A page of someone else's space, brought back from under a parent deleted
+// since, comes back where it was: only the space's owner may move a page
+// to its top level, and the server would refuse the restore with the move.
+func TestRestoreInASharedTreeKeepsItsParent(t *testing.T) {
+	s := open(t)
+	parent, _ := s.CreatePage(NewPageOptions{Title: "Theirs", SpaceID: "space-other"})
+	sub, _ := s.CreatePage(NewPageOptions{Title: "Sub", ParentID: parent.ID})
+	ids, _ := s.DeletePage(sub.ID)
+	if _, err := s.DeletePage(parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RestorePages(ids); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Page(sub.ID)
+	if !got.DeletedAt.IsZero() || got.ParentID != parent.ID || got.SortKey != sub.SortKey {
+		t.Errorf("brought back as %+v", got)
+	}
+	for _, e := range mustPending(t, s) {
+		var row map[string]any
+		if e.Entity == "pages" && e.EntityID == sub.ID && (json.Unmarshal([]byte(e.Payload), &row) != nil || row["parent_id"] != parent.ID) {
+			t.Errorf("queued %s", e.Payload)
+		}
+	}
+}
+
+// A page's title is at most 2,000 characters, as the server takes it, as
+// it is made, renamed or copied: a longer one would never go up.
+func TestPageTitlesAreCut(t *testing.T) {
+	s := open(t)
+	long := strings.Repeat("é", 2500)
+	p, _ := s.CreatePage(NewPageOptions{Title: long})
+	if got, _ := s.Page(p.ID); got.Title != long[:2*2000] {
+		t.Errorf("made with %d characters", utf8.RuneCountInString(got.Title))
+	}
+	if err := s.RenamePage(p.ID, long+"!"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Page(p.ID); utf8.RuneCountInString(got.Title) != 2000 {
+		t.Errorf("renamed to %d characters", utf8.RuneCountInString(got.Title))
+	}
+	c, err := s.CopyPage(p.ID, CopyOptions{Title: long + " copy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if utf8.RuneCountInString(c.Title) != 2000 {
+		t.Errorf("copied as %d characters", utf8.RuneCountInString(c.Title))
+	}
+	if err := s.RenamePage(p.ID, "Short"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Page(p.ID); got.Title != "Short" {
+		t.Errorf("renamed to %q", got.Title)
+	}
+}
+
+// A page put at the top level goes in order among the pages the library
+// shows there: those whose parent is gone, deleted or not on this device,
+// and those of a folder that is gone, as another device deleted them.
+func TestTopLevelKeysCountPagesWhoseParentIsGone(t *testing.T) {
+	s := open(t)
+	a, _ := s.CreatePage(NewPageOptions{Title: "A"})
+	parent, _ := s.CreatePage(NewPageOptions{Title: "Parent"})
+	orphan, _ := s.CreatePage(NewPageOptions{Title: "Orphan"})
+	stray, _ := s.CreatePage(NewPageOptions{Title: "Stray"})
+	f, _ := s.CreateFolder("Gone")
+	filed, _ := s.CreatePage(NewPageOptions{Title: "Filed", FolderID: f.ID})
+	for _, q := range []struct {
+		sql  string
+		args []any
+	}{
+		{`UPDATE pages SET parent_id = ?, sort_key = 'a3' WHERE id = ?`, []any{parent.ID, orphan.ID}},
+		{`UPDATE pages SET deleted_at = 1 WHERE id = ?`, []any{parent.ID}},
+		{`UPDATE pages SET parent_id = 'not-here', sort_key = 'a5' WHERE id = ?`, []any{stray.ID}},
+		{`UPDATE pages SET sort_key = 'a1' WHERE id = ?`, []any{a.ID}},
+		{`UPDATE pages SET sort_key = 'a7' WHERE id = ?`, []any{filed.ID}},
+		{`UPDATE folders SET deleted_at = 1 WHERE id = ?`, []any{f.ID}},
+	} {
+		if _, err := s.DB().Exec(q.sql, q.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	last, _ := s.CreatePage(NewPageOptions{Title: "Last"})
+	before, _ := s.CreatePage(NewPageOptions{Title: "Before the orphan", FolderID: f.ID})
+	if err := s.MovePageBefore(before.ID, "", "", orphan.ID); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := s.CreatePage(NewPageOptions{Title: "After the stray", AfterID: stray.ID})
+	key := func(id string) string {
+		p, _ := s.Page(id)
+		return p.SortKey
+	}
+	order := []string{a.ID, before.ID, orphan.ID, stray.ID, after.ID, filed.ID, last.ID}
+	if !slices.IsSortedFunc(order, func(x, y string) int { return strings.Compare(key(x), key(y)) }) {
+		for _, id := range order {
+			p, _ := s.Page(id)
+			t.Logf("%s %q", p.Title, p.SortKey)
+		}
+		t.Error("the top level is out of order")
 	}
 }
 
@@ -3223,6 +3481,70 @@ func TestRequeuedFileMovesToItsSpace(t *testing.T) {
 	}
 	if got, _ := s.File(f.ID); got.SpaceID != "other" || got.StoragePath != "other/"+f.ID+"/notes.txt" {
 		t.Errorf("space %q, path %q", got.SpaceID, got.StoragePath)
+	}
+}
+
+// A page whose title is longer than the server takes, as one from another
+// device's older Leaflet may be, goes up with its title cut to the bound,
+// whole or as a change, and keeps it whole here.
+func TestPageGoesUpWithItsTitleWithinBounds(t *testing.T) {
+	s := open(t)
+	long := strings.Repeat("é", maxTitleLen+10)
+	r := PageToRemote(Page{ID: "00000000-0000-0000-0000-0000000000f2", SpaceID: s.Session().SpaceID, Title: "Plan", SortKey: "a0"})
+	if r["title"] != "Plan" {
+		t.Errorf("title %v", r["title"])
+	}
+	r["title"], r["updated_at"] = long, time.Now().UTC().Format(time.RFC3339Nano)
+	if err := s.PutRemotePage(r); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Requeue("pages", S(r, "id")); err != nil {
+		t.Fatal(err)
+	}
+	var row map[string]any
+	for _, e := range mustPending(t, s) {
+		if e.Entity == "pages" {
+			if err := json.Unmarshal([]byte(e.Payload), &row); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if got, _ := row["title"].(string); got != long[:len(ClampTitle(long))] || len([]rune(got)) != maxTitleLen {
+		t.Errorf("queued a title of %d characters", len([]rune(got)))
+	}
+	if p, _ := s.Page(S(r, "id")); p.Title != long {
+		t.Errorf("kept a title of %d characters", len([]rune(p.Title)))
+	}
+}
+
+// A recording sent again goes whole, marked with when it last changed
+// here, as a page sent again does, so a newer row the server has stays.
+func TestRequeuedRecordingGoesAsAdopted(t *testing.T) {
+	s := open(t)
+	p, _ := s.CreatePage(NewPageOptions{Title: "Call"})
+	r, err := s.CreateRecording(p.ID, "b1", "", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err = s.FinishRecording(r.ID, false, func(x *Recording) { x.Status = "ready" }); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range mustPending(t, s) {
+		_ = s.Dequeue(e)
+	}
+	if err := s.RequeueRecording(r.ID); err != nil {
+		t.Fatal(err)
+	}
+	var row map[string]any
+	for _, e := range mustPending(t, s) {
+		if e.Entity == "recordings" && e.EntityID == r.ID {
+			if err := json.Unmarshal([]byte(e.Payload), &row); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if at := Time(row[AdoptKey]); !at.Equal(r.UpdatedAt.Truncate(time.Millisecond)) || row["status"] != "ready" {
+		t.Errorf("queued %v, want it whole and changed at %v", row, r.UpdatedAt)
 	}
 }
 

@@ -167,10 +167,10 @@ says where whatever other keys the position has.
 | `move_block` | `id`, `position` | `{ id }` |
 | `delete_blocks` | `ids: [...]` | `{ deleted_ids: [...] }` |
 | `create_subpage` | `title`, `markdown?` or `blocks?: [BlockSpec]` | `{ page_id }` (inside this page, its subpage block inserted at the end of this page: an `insert` op, then `create_page`) |
-| `create_page` | `title`, `folder_id?`, `markdown?` or `blocks?: [BlockSpec]` | `{ page_id }` (a page of its own in the user's own space, at the top level or in their folder, last there; this page is left as it is). Only on a page no one else writes or reads, as for reading other pages: a page of the user's own made from one someone else shares, comments on as a guest or reads by a public link could take what they wrote into the user's pages, where the workspace agent reads it as theirs. On one, the agent makes a subpage instead |
+| `create_page` | `title`, `folder_id?`, `markdown?` or `blocks?: [BlockSpec]` | `{ page_id }` (a page of its own in the user's own space, at the top level or in their folder, last there; this page is left as it is). Only on a page no one else writes or reads, as for reading other pages: a page of the user's own made from one someone else shares, comments on as a guest or reads by a public link could take what they wrote into the user's pages, where the workspace agent reads it as theirs. On one, the agent makes a subpage instead. After the run, or an earlier turn of its conversation, read such a page with `read_other_page`, it and `create_subpage` refuse (below) |
 | `list_pages` | — | `{ pages: [{id, title, parent_id}] }` (only when cross-page reading is on): at most 500, fewer where they would take more of the result than a model reads at once (60,000 UTF-16 units, each page's JSON counted at the most either side writes it) |
 | `read_other_page` | `page_id` | same shape as `read_page` |
-| `list_folders` | — | `{ folders: [{id, name}] }` (the user's own, only when cross-page reading is on; not reading beyond the page: the URL guard and the web stay as they were) |
+| `list_folders` | — | `{ folders: [{id, name}] }` (the user's own, only when cross-page reading is on). It spends the run's one free `read_web_page`, leaving the run as a first `read_web_page` does: from then on `read_web_page` goes only to the URLs the user gave and those found already, and the run counts as guarded. It closes no web, and is not reading the user's pages |
 | `web_search` | `query` | `{ query, answer, results: [{url, title?, snippet?}] }` (only when the web is on and the provider searches) |
 | `read_web_page` | `url` | `{ url, title, text, truncated? }` (only when the web is on) |
 
@@ -215,11 +215,35 @@ a link's is read in any case (`HTTPS://` is `https://`). A run whose
 conversation has earlier turns that read beyond their page keeps to the
 same URLs from its start: an earlier turn may hold what a run read. Where
 cross-page reading is off for it, as the page is shared now, those turns
-are left out of what the model reads. A run whose conversation has earlier
-turns whose URL guard was on (`guarded`: they read the web) keeps to the
-URLs it may write after reading the web, below, from its start, with none
-found yet. A tool's result reaches the model cut to 60,000 characters of
+are left out of what the model reads. A run that reads, with
+`read_other_page`, a page that is not the user's alone (as the run's own
+page is counted for `create_page`: no one else has it, no guest commented
+on it, it has no public link) makes no page of the user's own after it:
+`create_page` and `create_subpage` refuse, "This run read a page someone
+else writes or reads: a page of the user's own made now could take what
+they wrote into the user's own pages." So does every later turn of its
+conversation, which may hold what it read: a turn records it as
+`read_others: true` (`ai_jobs.result`, and the app's chat), judged over the
+whole conversation, a turn undone or failed left out. A run whose
+conversation has earlier turns whose URL guard was on (`guarded`: they read
+the web) keeps to the URLs it may write after reading the web, below, from
+its start, with none found yet. A tool's result reaches the model cut to 60,000 characters of
 its JSON.
+
+A public link can start on the page while a run that may read the user's
+other pages works on it, on its device or another. The run reads again
+whether the page has one, a public link this device serves, the server's
+lease (`public_link_until`) or, signed out, another device's in iCloud
+Drive (§8), once a call: before each `list_pages`, `read_other_page` and
+`list_folders`, and, once it has read beyond its page (it called
+`list_pages` or `read_other_page`, or follows turns that did), before each
+call that edits (`write_markdown`, `insert_blocks`, `replace_block`,
+`move_block`, `delete_blocks`, `create_subpage`, `create_page`); one it has
+found it keeps. With a link, the cross-page tools refuse, "This page has a
+public link now: its visitors read what you write here, so this run reads
+no other page. Work from this page.", and a run that has read beyond its
+page ends there instead of making the call, keeping what it did, as a run
+the user stops does.
 
 `web_search` and `read_web_page` are offered when the user lets agents use
 the web (`allow_web`, the setting "Let agents use the web") and no earlier
@@ -263,7 +287,9 @@ changes no page's blocks, which the agent on the page does. It sees the
 pages of the user's own space, templates left out, and changes nothing of a
 page someone else reads or writes (`shared`: shared with others, an invite
 to it still waiting too, commented on by a guest, or with a public link
-open; or whose title they read, as its card is on such a page), nor puts a
+open; or whose title they read, as it is inside such a page, or its card,
+or an inline mention of it, which shows its title as the page opens, is on
+one), nor puts a
 page in one. A page shared with other people, who write in it too
 (`shared_with_people`), it does not read either: what they wrote could
 steer what it does to the user's other pages.
@@ -271,9 +297,9 @@ steer what it does to the user's other pages.
 | name | arguments | returns |
 | --- | --- | --- |
 | `list_pages` | — | `{ folders: [{id, name}], more_pages?, pages: [{id, title, tags?, parent_id?, folder_id?, shared?, shared_with_people?}] }`: at most 500 pages, fewer where they would take more of the result than a model reads at once, as on a page; `more_pages` how many more there are (only when reading is on) |
-| `search_pages` | `query` | `{ results: [{page_id, title, snippet?}] }`, 20 at most: titles and tags that hold the words first, then text, each the most recently changed page first, a match in text with the 40 characters either side; words starting with `#` keep to the pages with each of those tags, in any case. No `snippet` of a page shared with people, or of one the run does not know, as one made since it began (only when reading is on) |
+| `search_pages` | `query` | `{ results: [{page_id, title, snippet?}] }`, 20 at most: titles and tags that hold the words first, then text, each the most recently changed page first, a match in text with the 40 characters either side; words starting with `#` keep to the pages with each of those tags, in any case. A snippet is cut from the page's own text, without what its sites wrote of its blocks (link cards' titles and descriptions, videos' titles), which `read_page` leaves out too: a page whose match is only there is found with none. No `snippet` of a page shared with people, or of one the run does not know, as one made since it began (only when reading is on) |
 | `read_page` | `page_id` | `{ page: {id, title, tags?}, blocks: [BlockView], subpages: [{id, title}] }`, refused for a page shared with people (only when reading is on) |
-| `list_folders` | — | `{ folders: [{id, name}] }` |
+| `list_folders` | — | `{ folders: [{id, name}] }`, spending the run's one free `read_web_page`, as on a page |
 | `create_page` | `title`, `parent_id?` or `folder_id?`, `markdown?` or `blocks?` | `{ page_id }`, a page inside `parent_id` linked at its end |
 | `move_page` | `page_id`, `parent_id?` or `folder_id?` | `{ page_id }`: inside a page, linked at its end, into a folder, or with neither to the top level; where it is already, it stays as it is, and the call makes no op |
 | `rename_page` | `page_id`, `title` | `{ page_id }` |
@@ -640,7 +666,8 @@ ask with `public_link_until=gt.now`, by the server's clock), agent runs, the
 agent function's and the apps' on other devices, which ask the server as
 they start, read none of the user's other pages into the page. A change of
 it alone leaves the page's `updated_at` as it was, and pages sync without
-it.
+it. Signed out, syncing through iCloud Drive, the app says so in its
+device.json instead (§8).
 `pages.is_template` marks a template and every subpage of one (a subpage
 made under a template is one too); templates stay out of the page list,
 search and `list_pages`. `pages.tags` is a page's tags (`text[]`, at most 50,
@@ -686,7 +713,7 @@ changes, which a reader finds by listing.
 Leaflet/
   space.json                 {format, space_id, created_at, created_by_device}
   devices/<device-id>/       written by that device alone
-    device.json              {format, id, name, platform, last_active_at, log_from}
+    device.json              {format, id, name, platform, last_active_at, log_from, public_links?}
     log/<seq>.json           a batch: seq is 16 digits, from 1, one more each batch
     pages/<page-id>.json     the device's version of a page
   blobs/files/<file-id>/<name>
@@ -769,6 +796,18 @@ Leaflet/
   once a batch of its own has the deletion; one that sends everything
   again sends deleted files' rows too, so a deletion in a batch that was
   lost goes again.
+- **Public links.** A device serving a public link of a page (§7's
+  `public_link_until`, where pages go through the server) says so in its
+  device.json: `public_links` is `{<page-id>: <until>}`, each when its link
+  stops counting, an hour on by the device's own clock, said again every 15
+  minutes while it serves and left out as it stops. Each has the device's
+  next pass, asked for then, write device.json again (it is written at
+  most hourly otherwise). While a lease is to come, give or take 15
+  minutes for the devices' clocks, agent runs on the other devices, which
+  read the other devices' device.json as they start, read none of the
+  user's other pages into the page. A device's own leases are its own to
+  know. A device.json iCloud has not downloaded says none until it has. A
+  Leaflet from before writes no `public_links`, and reads none.
 - **Not downloaded.** A file iCloud has not downloaded (on macOS before 14,
   `.<name>.icloud` beside where it goes; after, a file flagged dataless) is
   asked for, and read on a later pass. A reader that stops at a batch not

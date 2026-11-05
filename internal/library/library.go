@@ -21,7 +21,9 @@ type Tree struct {
 	Folders []store.Folder
 	// Top are the user's pages at the top level in no folder, in order. A
 	// page of a folder that is gone, as another device deleted it while
-	// this one put the page in it, is among them, not in no place at all.
+	// this one put the page in it, is among them, not in no place at all;
+	// so is one whose parent page is gone, as deleted on another device
+	// while this one made the page in it.
 	Top []store.Page
 	// InFolder are the top-level pages of each folder, by its ID, in
 	// order.
@@ -35,6 +37,9 @@ type Tree struct {
 	Tags []store.TagCount
 
 	folders map[string]bool
+	// parentGone are the user's pages whose parent is not among the pages,
+	// by ID: they are at the top level, or in their folder.
+	parentGone map[string]bool
 	// tagged are the pages with each tag, by the tag in lower case.
 	tagged map[string][]store.Page
 }
@@ -44,7 +49,8 @@ type Tree struct {
 // are under them. Equal sort keys, from another client or before keys
 // were made apart, go by ID, as every device sorts them alike.
 func Arrange(spaceID string, pages []store.Page, folders []store.Folder) *Tree {
-	t := &Tree{InFolder: map[string][]store.Page{}, Children: map[string][]store.Page{}, folders: map[string]bool{}}
+	t := &Tree{InFolder: map[string][]store.Page{}, Children: map[string][]store.Page{}, folders: map[string]bool{},
+		parentGone: map[string]bool{}}
 	for _, f := range folders {
 		if f.SpaceID == spaceID {
 			t.Folders = append(t.Folders, f)
@@ -64,14 +70,20 @@ func Arrange(spaceID string, pages []store.Page, folders []store.Folder) *Tree {
 	})
 	for _, p := range ordered {
 		shared := p.SpaceID != spaceID
+		// Under a parent that is gone, a page of the user's would show
+		// nowhere.
+		parentGone := p.ParentID != "" && !have[p.ParentID] && !p.Template && !shared
 		switch {
-		case p.ParentID != "":
+		case p.ParentID != "" && !parentGone:
 			t.Children[p.ParentID] = append(t.Children[p.ParentID], p)
 		case p.Template || shared:
 		case t.folders[p.FolderID]:
 			t.InFolder[p.FolderID] = append(t.InFolder[p.FolderID], p)
 		default:
 			t.Top = append(t.Top, p)
+		}
+		if parentGone {
+			t.parentGone[p.ID] = true
 		}
 		if shared && !p.Template && (p.ParentID == "" || !have[p.ParentID]) {
 			t.Shared = append(t.Shared, p)
@@ -118,7 +130,7 @@ func (t *Tree) HasFolder(id string) bool { return t.folders[id] }
 // top-level pages of its folder, or the user's in none.
 func (t *Tree) Siblings(p store.Page) []store.Page {
 	switch {
-	case p.ParentID != "":
+	case p.ParentID != "" && !t.parentGone[p.ID]:
 		return t.Children[p.ParentID]
 	case t.folders[p.FolderID]:
 		return t.InFolder[p.FolderID]

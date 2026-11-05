@@ -95,7 +95,8 @@ func adopting(row map[string]any, at time.Time) map[string]any {
 // queueChange queues row, changed here from old, the row as stored before
 // the change (nil for a new one), naming the columns that changed, with
 // those of any change to it still queued. One still queued whole stays
-// whole; a change that changes nothing queues nothing.
+// whole; a change that changes nothing queues nothing. A row changed is no
+// longer the server's copy (unpulled).
 func queueChange(q querier, entity, id string, old, row map[string]any, label, pageID string) error {
 	if old == nil {
 		return queue(q, entity, id, row, label, pageID)
@@ -105,10 +106,16 @@ func queueChange(q querier, entity, id string, old, row map[string]any, label, p
 		return err
 	}
 	if queued && cols == nil {
+		if err := unpulled(q, entity, id); err != nil {
+			return err
+		}
 		return queue(q, entity, id, row, label, pageID)
 	}
 	if cols = withChanged(cols, old, row); len(cols) == 0 {
 		return nil
+	}
+	if err := unpulled(q, entity, id); err != nil {
+		return err
 	}
 	changed := maps.Clone(row)
 	changed[ChangedKey] = cols
@@ -143,10 +150,11 @@ func queuedCols(q querier, entity, id string) (cols []string, queued bool, err e
 }
 
 // withChanged is cols with the columns of row whose values differ from
-// old's, in order.
+// old's, in order. When the row changed (changed_at) is no change of its
+// own: it goes with the columns that did (sync's pushChanged).
 func withChanged(cols []string, old, row map[string]any) []string {
 	for k, v := range row {
-		if !slices.Contains(cols, k) && !sameJSON(v, old[k]) {
+		if k != "changed_at" && !slices.Contains(cols, k) && !sameJSON(v, old[k]) {
 			cols = append(cols, k)
 		}
 	}

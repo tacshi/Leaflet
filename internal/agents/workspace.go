@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"log"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"unicode/utf8"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
@@ -28,9 +30,10 @@ type WorkspacePage struct {
 	Tags                          []string
 	// Shared is a page someone else reads or writes: shared with others,
 	// with a guest's comment or a public link, or whose title they read,
-	// as its card is on such a page. The agent changes nothing of it, nor
-	// puts a page in it: what someone else wrote there could have it copy
-	// the user's other pages in, or write them where others read it.
+	// as it is inside such a page, or its card or a mention of it is on
+	// one. The agent changes nothing of it, nor puts a page in it: what
+	// someone else wrote there could have it copy the user's other pages
+	// in, or write them where others read it.
 	Shared bool
 	// People is a page shared with other people, who write in it too: the
 	// agent reads none of it either, as what they wrote could steer what
@@ -165,7 +168,10 @@ func (x *Executor) workspace(name string, args map[string]any) (map[string]any, 
 		return out, nil
 	case "list_folders":
 		// Only the user names their folders: as on a page, listing them
-		// reads nothing someone else wrote.
+		// reads nothing someone else wrote, and spends the run's one read
+		// of the web that may go to any page, whose link could spell them
+		// out (saw).
+		x.saw()
 		return map[string]any{"folders": w.Folders()}, nil
 	case "create_page":
 		return x.workspaceCreate(args)
@@ -318,8 +324,9 @@ func (x *Executor) workspaceRename(args map[string]any) (map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
-	// Without the spaces around it, as a new page's.
-	title = strings.TrimSpace(title)
+	// Without the spaces around it, and no longer than the store keeps
+	// one, as a new page's.
+	title = store.ClampTitle(strings.TrimSpace(title))
 	if err := x.checkURLs(nil, title); err != nil {
 		return nil, err
 	}
@@ -406,9 +413,10 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 	// as the run starts, is read by others too.
 	elsewhere := h.publicElsewhereIn(ctx, space, online)
 	read := func(p store.Page, private func(store.Page) bool) bool { return !private(p) || elsewhere[p.ID] }
-	// Those whose titles someone else reads, as their cards are on a page
-	// they read: read once a run, of all the pages they read, and only for
-	// a page no one reads itself. Unread, every page is taken for one.
+	// Those whose titles someone else reads, as their cards or mentions of
+	// them are on a page they read: read once a run, of all the pages they
+	// read, and only for a page no one reads itself. Unread, every page is
+	// taken for one.
 	shown := sync.OnceValue(func() func(id string) bool {
 		pages, err := st.Pages()
 		if err != nil {
@@ -421,7 +429,10 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 				others[p.ID] = true
 			}
 		}
-		// Their subpages, whose cards they may have, and the cards they have.
+		// Their subpages, whose cards they may have, the cards they have,
+		// and the pages they mention, each of which shows its title now as
+		// the page opens (doc.Content.RefreshPageMentions), and keeps it
+		// with the page's next edit.
 		on := map[string]bool{}
 		for _, p := range pages {
 			if others[p.ParentID] {
@@ -433,6 +444,14 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 				c.Walk(func(n, _ *doc.Node) {
 					if n.Type == "subpage" {
 						on[n.Str("page_id")] = true
+					}
+					if !n.IsText() {
+						return
+					}
+					for _, r := range n.Delta() {
+						if m := r.Attrs.Mention; m != nil && m.Kind == "page" {
+							on[m.ID] = true
+						}
 					}
 				})
 			}
@@ -506,11 +525,17 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 			if err != nil {
 				return nil, err
 			}
+			_, words := store.SplitTagQuery(query)
 			out := []map[string]any{}
 			for _, hit := range hits {
 				r := map[string]any{"page_id": hit.PageID, "title": hit.Title}
+				// The words around a match in the page's text, cut from its
+				// own: what its sites wrote of its blocks, which read_page
+				// leaves out, is the web's writing.
 				if hit.Snippet != "" {
-					r["snippet"] = hit.Snippet
+					if s := ownSnippet(st, hit.PageID, words); s != "" {
+						r["snippet"] = s
+					}
 				}
 				out = append(out, r)
 			}
@@ -582,6 +607,27 @@ func (h *Hub) workspaceTools(ctx context.Context, agent string, settings store.S
 		},
 	}
 	return ToolContext{Content: doc.Empty(), PageID: WorkspaceID, AgentName: agent, Workspace: w}
+}
+
+// ownSnippet is the words around a match of words in page id's own text
+// (ownText), as the store's search cuts them from all its text: from 40
+// characters before the match, as many as words has and 80 more; "" when
+// its own text has none, the match being in what its sites wrote.
+func ownSnippet(st *store.Store, id, words string) string {
+	c := st.Content(id)
+	if c == nil {
+		return ""
+	}
+	text := ownText(c)
+	if !strings.Contains(strings.ToLower(text), strings.ToLower(words)) {
+		return ""
+	}
+	from := 0
+	if loc := regexp.MustCompile("(?i)" + regexp.QuoteMeta(words)).FindStringIndex(text); loc != nil {
+		from = max(utf8.RuneCountInString(text[:loc[0]])-40, 0)
+	}
+	runes := []rune(text)
+	return string(runes[min(from, len(runes)):min(from+utf8.RuneCountInString(words)+80, len(runes))])
 }
 
 // onMain runs fn on the main thread, where pages change as the app has

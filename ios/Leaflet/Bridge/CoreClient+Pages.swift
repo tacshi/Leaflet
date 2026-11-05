@@ -152,10 +152,15 @@ extension CoreClient {
     /// picture reads a picture an image block links to on the web, as the
     /// desktop's image blocks read one: through the core, from a public
     /// address only, http too, which the app's own loading refuses. A few
-    /// come at a time, as files do.
+    /// come at a time, as files do, but beside them, for the files kept
+    /// with pages not to wait behind a slow site; one whose task is
+    /// cancelled, as its block leaves the window, stops waiting on its site
+    /// and leaves its turn to the next.
     nonisolated(nonsending) func picture(_ link: String) async throws -> Data {
-        try await Downloads.shared.run {
-            try await self.call(waiting: true) { try $0.picture(link) }
+        try await Downloads.pictures.run {
+            try await self.cancellable { core, token in
+                try core.pictureCancellable(link, token: token)
+            }
         }
     }
 
@@ -177,6 +182,9 @@ extension CoreClient {
 /// pictures, each asking for its own, would hold many.
 actor Downloads {
     static let shared = Downloads(most: 4)
+    /// pictures are the web's pictures, which wait on sites the app has no
+    /// say over.
+    static let pictures = Downloads(most: 4)
 
     private let most: Int
     private var running = 0

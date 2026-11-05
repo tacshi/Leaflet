@@ -2178,3 +2178,111 @@ func TestICloudPageFileBehindItsBatchIsReadAgain(t *testing.T) {
 		t.Errorf("B has %q", got)
 	}
 }
+
+// A device serving a public link says so in its device.json, which the
+// other devices read, and says so no more once it stops; what a Leaflet
+// from before reads of the file is as it was.
+func TestICloudPublicLinkLeases(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Shared", para("a1", "one"))
+	syncAll(a, b)
+	leases := func(n int) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); len(a.st.ValuesWithPrefix(linkPrefix)) != n; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("leases %v, want %d", a.st.ValuesWithPrefix(linkPrefix), n)
+			}
+		}
+	}
+	stop := a.svc.ICloudLease(p.ID)
+	leases(1)
+	a.sync()
+	links := b.svc.ICloudLinksElsewhere()
+	if until := links[p.ID]; len(links) != 1 || until.Before(time.Now().Add(iCloudLinkLease-time.Minute)) {
+		t.Errorf("the other device reads %v", links)
+	}
+	if own := a.svc.ICloudLinksElsewhere(); len(own) != 0 {
+		t.Errorf("the device serving the link reads its own: %v", own)
+	}
+	rel, err := icloud.DevicePath(a.st.DeviceID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var before icloud.Device
+	if err := a.svc.folder().ReadJSON(rel, &before); err != nil || before.ID != a.st.DeviceID() || before.Format != icloud.Format {
+		t.Errorf("device.json as read before: %+v, %v", before, err)
+	}
+
+	// Another lease of the page, as the link started again, stands when
+	// the first stops.
+	again := a.svc.ICloudLease(p.ID)
+	leases(2)
+	stop()
+	stop()
+	leases(1)
+	a.sync()
+	if links := b.svc.ICloudLinksElsewhere(); len(links) != 1 {
+		t.Errorf("with the link started again, the other device reads %v", links)
+	}
+	again()
+	leases(0)
+	a.sync()
+	if links := b.svc.ICloudLinksElsewhere(); len(links) != 0 {
+		t.Errorf("once stopped, the other device reads %v", links)
+	}
+	b.svc.cloudOn.Store(false)
+	if links := b.svc.ICloudLinksElsewhere(); links != nil {
+		t.Errorf("with iCloud sync off: %v", links)
+	}
+}
+
+// A lease that ends as iCloud sync turns off, as the app ends it then, or
+// as signing in turns iCloud sync off, is gone from device.json at once,
+// though no pass writes it with iCloud sync off.
+func TestICloudPublicLinkEndsWithICloudOff(t *testing.T) {
+	root := cloudRoot(t)
+	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
+	p := a.page("Shared", para("a1", "one"))
+	syncAll(a, b)
+	stop := a.svc.ICloudLease(p.ID)
+	for deadline := time.Now().Add(5 * time.Second); len(a.st.ValuesWithPrefix(linkPrefix)) != 1; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("no lease")
+		}
+	}
+	a.sync()
+	if links := b.svc.ICloudLinksElsewhere(); len(links) != 1 {
+		t.Fatalf("the other device reads %v", links)
+	}
+	a.svc.SetICloud(false)
+	stop()
+	for deadline := time.Now().Add(5 * time.Second); len(b.svc.ICloudLinksElsewhere()) != 0; time.Sleep(10 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatalf("with iCloud sync off, the other device still reads %v", b.svc.ICloudLinksElsewhere())
+		}
+	}
+}
+
+// A lease of a run of the app that quit without stopping it ends with its
+// time: the next device.json leaves it out, and it is forgotten.
+func TestICloudPublicLinkLeaseRunsOut(t *testing.T) {
+	d := newCloudDevice(t, cloudRoot(t))
+	now := time.Now()
+	for key, v := range map[string]string{
+		linkPrefix + "old":  "p1|" + strconv.FormatInt(now.Add(-time.Minute).UnixMilli(), 10),
+		linkPrefix + "live": "p2|" + strconv.FormatInt(now.Add(time.Hour).UnixMilli(), 10),
+		linkPrefix + "bad":  "p3",
+	} {
+		if err := d.st.SetValue(key, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	links := d.svc.ownLinks(now)
+	if len(links) != 1 || links["p2"].IsZero() {
+		t.Errorf("links %v", links)
+	}
+	if left := d.st.ValuesWithPrefix(linkPrefix); len(left) != 1 || left["live"] == "" {
+		t.Errorf("leases kept %v", left)
+	}
+}

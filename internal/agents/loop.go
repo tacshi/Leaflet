@@ -46,8 +46,11 @@ type Request struct {
 	// History holds earlier turns of the conversation.
 	History []Turn
 	// KeptToPage is a History whose runs read nothing beyond their page:
-	// this run may then use the web (RunLocal).
+	// this run may then use the web (RunLocal). ReadOthers is one of a
+	// conversation a turn of which read a page someone else writes or
+	// reads: this run makes no page of the user's own either.
 	KeptToPage     bool
+	ReadOthers     bool
 	AllowCrossPage bool
 	// Web is a run that may search and read the web.
 	Web bool
@@ -88,11 +91,23 @@ type ThreadComment struct {
 	Body   string `json:"body"`
 }
 
-// JobRequest is the request as ai_jobs.request stores it.
+// maxRequestText is the most of a request's free text, in characters, a
+// run reads and a job's row keeps: of the selection, and of the
+// instruction, each. With the rest of the request they stay well under the
+// most the server keeps of one (1 MiB of its JSON), each character six
+// bytes there at the most. maxAgentName is the most of the agent's name.
+const (
+	maxRequestText = 60_000
+	maxAgentName   = 1_000
+)
+
+// JobRequest is the request as ai_jobs.request stores it: its free text cut
+// to maxRequestText and maxAgentName, at a character's boundary.
 func (r Request) JobRequest() map[string]any {
-	m := map[string]any{"instruction": r.Instruction, "allow_cross_page": r.AllowCrossPage, "agent_name": r.AgentName, "allow_web": r.Web}
+	m := map[string]any{"instruction": clip(r.Instruction, maxRequestText), "allow_cross_page": r.AllowCrossPage,
+		"agent_name": clip(r.AgentName, maxAgentName), "allow_web": r.Web}
 	if r.SelectionText != "" {
-		m["selection_text"] = r.SelectionText
+		m["selection_text"] = clip(r.SelectionText, maxRequestText)
 	}
 	// The server finds the rest of it, as it finds a page's.
 	if r.OpenPage != nil {
@@ -131,6 +146,10 @@ type Result struct {
 	// Guarded): its reply may carry what it read beyond its page or on
 	// the web.
 	Guarded bool
+	// ReadOthers is a run that read a page someone else writes or reads,
+	// or followed turns that did: the turns after it make no page of the
+	// user's own.
+	ReadOthers bool
 }
 
 // Models that think aloud write their thinking in <think> tags, in any
@@ -202,13 +221,13 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 	if tc.Captions == nil {
 		tc.Captions = func(v doc.Video) (web.Captions, error) { return web.ReadCaptions(ctx, v) }
 	}
-	exec := &Executor{Ctx: tc, OnOp: ev.Op, OnRevise: ev.Revise, armed: pagesBefore}
+	exec := &Executor{Ctx: tc, OnOp: ev.Op, OnRevise: ev.Revise, armed: pagesBefore, readOthers: req.ReadOthers}
 	if webBefore {
 		exec.saw()
 	}
 	exec.begin()
 	result := func(reply string) Result {
-		return Result{Reply: reply, Edits: exec.Edits, Ops: exec.Ops, KeptToPage: !exec.readPages, Guarded: exec.Guarded()}
+		return Result{Reply: reply, Edits: exec.Edits, Ops: exec.Ops, KeptToPage: !exec.readPages, Guarded: exec.Guarded(), ReadOthers: exec.readOthers}
 	}
 	if ev.Status != nil {
 		ev.Status("running")
@@ -273,8 +292,10 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 					drafting = drafting && ok
 				}
 				current, name = i, n
-				// A call past the most an answer makes does not run.
-				drafting = drafting && drafts[n] && i < maxRoundCalls
+				// A call past the most an answer makes does not run, and
+				// one that ends the run, as its page has a public link
+				// now, goes in none of it (Executor.endsHere).
+				drafting = drafting && drafts[n] && i < maxRoundCalls && !exec.endsHere()
 			}
 			args = a
 			if drafting && time.Since(shown) >= draftEvery {
@@ -348,6 +369,10 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 			}
 			raw, _ := json.Marshal(made.out)
 			messages = append(messages, map[string]any{"role": "tool", "tool_call_id": call.ID, "content": cutResult(string(raw))})
+			// Its page has a public link now: the run ends with what it did.
+			if exec.ended {
+				return result(""), errLinkedStop
+			}
 		}
 	}
 	return result(locales.AgentStoppedAfterRounds(MaxRounds)), nil
@@ -419,8 +444,9 @@ func userMessage(req Request, views, focus []map[string]any) string {
 	if len(focus) > 0 {
 		parts = append(parts, "Focus blocks (JSON):\n"+asData(focus))
 	}
+	// As much of the selection as a cloud run's request keeps (JobRequest).
 	if req.SelectionText != "" {
-		parts = append(parts, "Selected text (JSON):\n"+asData(req.SelectionText))
+		parts = append(parts, "Selected text (JSON):\n"+asData(clip(req.SelectionText, maxRequestText)))
 	}
 	// An "@agent answer Sam's question above" needs Sam's question.
 	if len(req.Thread) > 0 {
@@ -552,6 +578,7 @@ func RunCloud(ctx context.Context, be Streamer, jobID string, ev Events) (Result
 		case "done":
 			res.Reply, _ = e["reply"].(string)
 			res.KeptToPage, _ = e["kept_to_page"].(bool)
+			res.ReadOthers, _ = e["read_others"].(bool)
 			guarded, _ := e["guarded"].(bool)
 			res.Guarded = res.Guarded || guarded || !res.KeptToPage
 			done = true
@@ -594,10 +621,12 @@ type cloudJob struct {
 	Result struct {
 		Reply string   `json:"reply"`
 		Ops   []doc.Op `json:"ops"`
-		// KeptToPage is a run that read nothing beyond its page, and
-		// Guarded one whose URL guard was on.
+		// KeptToPage is a run that read nothing beyond its page, Guarded
+		// one whose URL guard was on, and ReadOthers one that read a page
+		// someone else writes or reads.
 		KeptToPage bool `json:"kept_to_page"`
 		Guarded    bool `json:"guarded"`
+		ReadOthers bool `json:"read_others"`
 		// An edit for each op, naming the call that made it.
 		Edits []struct {
 			Tool string `json:"tool"`
@@ -631,6 +660,7 @@ func (j cloudJob) result(streamed Result) (Result, error) {
 		return res, errors.New(msg)
 	}
 	res.Reply, res.KeptToPage = j.Result.Reply, j.Result.KeptToPage
+	res.ReadOthers = streamed.ReadOthers || j.Result.ReadOthers
 	// The calls streamed before the cut say the run's guard was on too.
 	res.Guarded = streamed.Guarded || j.Result.Guarded || !res.KeptToPage
 	return res, nil

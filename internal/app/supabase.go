@@ -87,9 +87,10 @@ func (a *App) signInWithSupabase() {
 	run := a.nextRun()
 	a.supa = supabaseState{run: run, step: stepBrowser, cancel: cancel}
 	a.signIn.err, a.signIn.info = "", ""
+	cr := a.core()
 	go func() {
 		wait, stop := context.WithTimeout(ctx, 5*time.Minute)
-		api, err := a.core().SignInWithSupabase(wait, func(u string) {
+		api, err := cr.SignInWithSupabase(wait, func(u string) {
 			a.supaStep(run, func() { a.supa.link = u })
 		})
 		stop()
@@ -106,7 +107,7 @@ func (a *App) signInWithSupabase() {
 		// One Leaflet project is used at once. A project that is not one
 		// yet, though named so, may be the person's own: they choose.
 		if len(found.Projects) == 1 {
-			a.connectProject(ctx, run, api, found.Projects[0])
+			a.connectProject(ctx, cr, run, api, found.Projects[0])
 			return
 		}
 		a.supaStep(run, func() {
@@ -129,7 +130,7 @@ func (a *App) chooseProject(p *supabaseapi.Project) {
 	if a.supa.cancel != nil {
 		a.supa.cancel()
 	}
-	api, org := a.supa.api, a.supa.org
+	api, org, cr := a.supa.api, a.supa.org, a.core()
 	ctx, cancel := context.WithCancel(context.Background())
 	run := a.nextRun()
 	a.supa.run, a.supa.cancel = run, cancel
@@ -137,7 +138,7 @@ func (a *App) chooseProject(p *supabaseapi.Project) {
 	if p != nil {
 		// The list goes at once; the setup says its steps as they come.
 		a.supa.step = stepSetup
-		go a.connectProject(ctx, run, api, *p)
+		go a.connectProject(ctx, cr, run, api, *p)
 		return
 	}
 	a.supa.step = stepCreating
@@ -147,14 +148,15 @@ func (a *App) chooseProject(p *supabaseapi.Project) {
 			a.supabaseFailed(run, err)
 			return
 		}
-		a.connectProject(ctx, run, api, created)
+		a.connectProject(ctx, cr, run, api, created)
 	}()
 }
 
 // connectProject sets p up for this version of Leaflet, once it is up,
-// makes it the project, and signs in to it as its owner.
-func (a *App) connectProject(ctx context.Context, run int, api *supabaseapi.Client, p supabaseapi.Project) {
-	pending, err := a.core().ConnectProject(ctx, api, p, func(step string, done, all int) {
+// makes it the project, and signs in to it as its owner, through the
+// app's core cr.
+func (a *App) connectProject(ctx context.Context, cr *core.Core, run int, api *supabaseapi.Client, p supabaseapi.Project) {
+	pending, err := cr.ConnectProject(ctx, api, p, func(step string, done, all int) {
 		a.supaStep(run, func() {
 			a.supa.step = step
 			if step == stepSetup {
@@ -174,7 +176,7 @@ func (a *App) connectProject(ctx context.Context, run int, api *supabaseapi.Clie
 			go a.backend.Discard(pending)
 			return
 		}
-		user, err := a.core().AdoptProject(pending, api)
+		user, err := cr.AdoptProject(pending, api)
 		if err != nil {
 			a.supa = supabaseState{}
 			a.signIn.err = err.Error()

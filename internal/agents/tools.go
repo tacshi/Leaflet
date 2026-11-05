@@ -218,6 +218,17 @@ type ToolContext struct {
 	ListPages     func() []map[string]any
 	ReadOtherPage func(id string) map[string]any
 	ListFolders   func() []map[string]any
+	// Alone reports whether page pageID is the user's alone, as the page a
+	// run makes pages of the user's own from must be (CreatePage): once the
+	// run reads, with ReadOtherPage, a page that is not, what someone else
+	// wrote there could go into the pages it makes, and it makes none, nor
+	// a subpage. Nil takes every page for one.
+	Alone func(pageID string) bool
+	// LinkedNow reports whether the page the run is on has a public link
+	// now, read again as the run goes on: one started since it began, on
+	// this device or another, has visitors read what the run writes there.
+	// Nil takes the page to have none.
+	LinkedNow func() bool
 	// Transcript is the transcript of a recording on page pageID as text,
 	// "" when there is none, or the recording is another page's.
 	Transcript func(pageID, recordingID string) string
@@ -528,6 +539,23 @@ func withoutSiteInfo(v map[string]any) {
 	}
 }
 
+// ownText is the plain text of content c without what sites wrote of its
+// blocks, as withoutSiteInfo leaves a block's view: a link card's title and
+// description, and a video's title. A card's link stays, as its text.
+func ownText(c *doc.Content) string {
+	c = c.Copy()
+	c.Walk(func(n, _ *doc.Node) {
+		switch n.Type {
+		case "link_preview":
+			delete(n.Data, "title")
+			delete(n.Data, "description")
+		case "video":
+			delete(n.Data, "title")
+		}
+	})
+	return c.PlainText()
+}
+
 // Edit is a short description of a change, with the blocks it touched,
 // or the page it made.
 type Edit struct {
@@ -560,6 +588,14 @@ type Executor struct {
 	// armed is a run that has read beyond this page, or follows turns
 	// that may have; readPages, one that has itself.
 	armed, readPages bool
+	// readOthers is a run that has read a page someone else writes or
+	// reads (Alone), or follows turns of its conversation that did: it
+	// makes no page of the user's own.
+	readOthers bool
+	// linked is a run whose page has had a public link since it began
+	// (LinkedNow), and ended one that stopped there for it, after it had
+	// read beyond its page.
+	linked, ended bool
 	// found are the URLs the run came on in the web: those its searches
 	// found, and those on the pages it read. Nil before it reads the web,
 	// after which what it writes, and the pages it reads, keep to them
@@ -759,6 +795,29 @@ func (x *Executor) find(u string, source bool) {
 // errWebClosed is a web tool's answer once the run has read the user's
 // other pages, or follows turns that did.
 const errWebClosed = "This run has read the user's other pages, or follows turns of this conversation that did, so it cannot use the web: what it asked for there could carry what it read. Work from what you have."
+
+// errNowLinked refuses reading beyond a page whose public link started
+// while the run went on (LinkedNow).
+const errNowLinked = "This page has a public link now: its visitors read what you write here, so this run reads no other page. Work from this page."
+
+// errLinkedStop ends a run that read beyond its page, whose public link
+// started since it began, before it writes there: it ends as one the user
+// stopped, keeping what it did (Hub.finish).
+var errLinkedStop = errors.New("the run's page has a public link now")
+
+// linkedNow reports whether the run's page has a public link now, read
+// again (LinkedNow) while it has had none: one it has had, it keeps.
+func (x *Executor) linkedNow() bool {
+	if !x.linked && x.Ctx.LinkedNow != nil && x.Ctx.LinkedNow() {
+		x.linked = true
+	}
+	return x.linked
+}
+
+// endsHere reports whether a call that writes to the page ends the run
+// instead: it has read beyond its page, or follows turns that did, and the
+// page has a public link now, whose visitors would read what it writes.
+func (x *Executor) endsHere() bool { return x.armed && x.linkedNow() }
 
 // addressRe finds a web address in a search's query, with its scheme, its
 // www. or a path after its host.
@@ -1004,7 +1063,7 @@ func reason(err error) string {
 // it keeps none, as it needs none.
 func (x *Executor) begin() {
 	c := x.Ctx
-	if x.allowed == nil && (x.armed || x.found != nil || c.ListPages != nil || c.ReadOtherPage != nil || c.ReadWeb != nil || c.SearchWeb != nil || c.Captions != nil || c.Workspace != nil) {
+	if x.allowed == nil && (x.armed || x.found != nil || c.ListPages != nil || c.ReadOtherPage != nil || c.ListFolders != nil || c.ReadWeb != nil || c.SearchWeb != nil || c.Captions != nil || c.Workspace != nil) {
 		x.allowed = map[string]bool{}
 		views := doc.BlockViews(c.Content)
 		for _, v := range views {
@@ -1034,6 +1093,10 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		if x.Ctx.ReadOnly {
 			return nil, terr("You can read this page but not edit it: the user has view access only.")
 		}
+		if x.endsHere() {
+			x.ended = true
+			return nil, terr(errNowLinked)
+		}
 	}
 	switch name {
 	case "read_page":
@@ -1056,14 +1119,23 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 		if x.Ctx.ListFolders == nil {
 			return nil, terr("Reading other pages is off.")
 		}
+		if x.linkedNow() {
+			return nil, terr(errNowLinked)
+		}
 		// Only the user names their folders, and no page's words are in
 		// them: a run that lists them has read nothing beyond this page, so
-		// the URLs it may write stay those it may (checkURLs), and the web
-		// stays open.
+		// the web's links stay the run's to write. But the names are the
+		// user's to keep: the run's one read of the web that may go to any
+		// page, whose link could spell them out, is spent, as by a first
+		// read (saw), and it reads and writes only the URLs it may then.
+		x.saw()
 		return map[string]any{"folders": x.Ctx.ListFolders()}, nil
 	case "list_pages":
 		if x.Ctx.ListPages == nil {
 			return nil, terr("Reading other pages is off.")
+		}
+		if x.linkedNow() {
+			return nil, terr(errNowLinked)
 		}
 		// The titles it lists are read too.
 		x.armed, x.readPages = true, true
@@ -1071,6 +1143,9 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 	case "read_other_page":
 		if x.Ctx.ReadOtherPage == nil {
 			return nil, terr("Reading other pages is off.")
+		}
+		if x.linkedNow() {
+			return nil, terr(errNowLinked)
 		}
 		id, err := str(args, "page_id")
 		if err != nil {
@@ -1081,6 +1156,9 @@ func (x *Executor) dispatch(name string, args map[string]any) (map[string]any, e
 			return nil, terr("No page %s.", id)
 		}
 		x.armed, x.readPages = true, true
+		if x.Ctx.Alone != nil && !x.Ctx.Alone(id) {
+			x.readOthers = true
+		}
 		return p, nil
 	case "web_search":
 		return x.searchWeb(args)
@@ -1412,13 +1490,19 @@ func PageNodes(args map[string]any, author string) (string, []*doc.Node, error) 
 			return "", nil, err
 		}
 	}
-	// Without the spaces around it, as the server keeps it.
-	return strings.TrimSpace(title), nodes, nil
+	// Without the spaces around it, and no longer than the store keeps
+	// one, as the server keeps it.
+	return store.ClampTitle(strings.TrimSpace(title)), nodes, nil
 }
 
 // errNoOwnPages refuses a page of the user's own on a page someone else
 // writes or reads, as the server words it.
 const errNoOwnPages = "Someone else writes or reads this page: a page of the user's own made from it could take what they wrote into the user's own pages. Make a subpage of this page with create_subpage instead."
+
+// errReadOthers refuses a page of the user's own, a subpage of the page
+// the run is on among them, after the run read one someone else writes or
+// reads (ToolContext.Alone).
+const errReadOthers = "This run read a page someone else writes or reads: a page of the user's own made now could take what they wrote into the user's own pages."
 
 // optionalString is the text args has at key: "" when it has none, and an
 // error when it has something else.
@@ -1442,6 +1526,10 @@ func (x *Executor) record(op doc.Op, summary string) {
 }
 
 func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
+	// A subpage of a page of the user's alone is a page of their own too.
+	if x.readOthers {
+		return nil, terr(errReadOthers)
+	}
 	title, nodes, err := PageNodes(args, x.Ctx.AgentName)
 	if err != nil {
 		return nil, err
@@ -1474,6 +1562,9 @@ func (x *Executor) createSubpage(args map[string]any) (map[string]any, error) {
 func (x *Executor) createPage(args map[string]any) (map[string]any, error) {
 	if x.Ctx.CreatePage == nil {
 		return nil, terr(errNoOwnPages)
+	}
+	if x.readOthers {
+		return nil, terr(errReadOthers)
 	}
 	title, nodes, err := PageNodes(args, x.Ctx.AgentName)
 	if err != nil {

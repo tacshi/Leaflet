@@ -55,6 +55,10 @@ type App struct {
 	sync    *syncsvc.Service
 	hub     *agents.Hub
 	rec     *recording.Controller
+	// cr is the core over these parts (core), the one Open made, kept for
+	// as long as the app runs: what it has under way is its own, as the
+	// project brought up to date while sync waits for it.
+	cr *core.Core
 	// capture is the recordings' microphone, once the window is there.
 	capture *webCapture
 	// winMu guards win, starting and early for update, which other
@@ -427,6 +431,7 @@ func (a *App) start() error {
 	}
 	st := c.Store
 	a.st, a.backend, a.sync, a.hub, a.rec = st, c.Remote, c.Sync, c.Hub, c.Rec
+	a.keepCore(c)
 	a.settings = st.Settings()
 	a.sidebarW = a.settings.SidebarWidth
 	a.panelW = a.settings.PanelWidth
@@ -557,16 +562,25 @@ func (a *App) start() error {
 }
 
 // core is the app's parts as the core wires them, with the app's hooks:
-// for tests too, which make an App of their own parts.
+// the one core the app keeps (cr), asked for on the main thread. Tests,
+// which make an App of their own parts, get one made over them, and
+// another once they change a part.
 func (a *App) core() *core.Core {
-	return &core.Core{
-		Store: a.st, Remote: a.backend, Sync: a.sync, Hub: a.hub, Rec: a.rec,
-		OpenURL:     func(u string) { _ = mygo.Shell.OpenExternal(u) },
-		WatchICloud: a.watchICloud,
-		// On the main thread, the settings as the app shows them.
-		Settings:     func() store.Settings { return a.settings },
-		SaveSettings: func(s store.Settings) { a.settings = s; a.saveSettings() },
+	if c := a.cr; c != nil && c.Store == a.st && c.Remote == a.backend && c.Sync == a.sync && c.Hub == a.hub && c.Rec == a.rec {
+		return c
 	}
+	return a.keepCore(&core.Core{Store: a.st, Remote: a.backend, Sync: a.sync, Hub: a.hub, Rec: a.rec})
+}
+
+// keepCore makes c the app's core, with the app's hooks, and returns it.
+func (a *App) keepCore(c *core.Core) *core.Core {
+	c.OpenURL = func(u string) { _ = mygo.Shell.OpenExternal(u) }
+	c.WatchICloud = a.watchICloud
+	// On the main thread, the settings as the app shows them.
+	c.Settings = func() store.Settings { return a.settings }
+	c.SaveSettings = func(s store.Settings) { a.settings = s; a.saveSettings() }
+	a.cr = c
+	return c
 }
 
 // headless reports whether the app has no window, nor one on its way, nor
@@ -1049,12 +1063,13 @@ func (a *App) closePage() bool {
 // a comment or a prompt not sent yet and the dialogs changing its blocks,
 // goes with it: they would act on the page opened next.
 func (a *App) discardPage() {
-	a.sync.SetOpen(a.page.id, false)
+	id := a.page.id
 	a.page.live.Close()
 	if t := a.page.titleTimer; t != nil {
 		t.Stop()
 	}
 	a.page = nil
+	a.pullStops(id)
 	d := &a.dialogs
 	d.newComment, d.inline = nil, nil
 	d.chartOpen, d.chartEditor = false, nil

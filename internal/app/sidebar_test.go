@@ -164,6 +164,63 @@ func TestSidebarDragPages(t *testing.T) {
 	}
 }
 
+// A page whose parent is gone, as deleted on another device while this
+// one made the page in it, shows at the top level, and a page dropped
+// beside it goes there, not under the page gone.
+func TestSidebarDragBesideAPageWhoseParentIsGone(t *testing.T) {
+	a := templatesApp(t)
+	a.settings.SidebarOpen = true
+	alpha, _ := a.st.CreatePage(store.NewPageOptions{Title: "Alpha"})
+	parent, _ := a.st.CreatePage(store.NewPageOptions{Title: "Parent"})
+	orphan, _ := a.st.CreatePage(store.NewPageOptions{Title: "Orphan", ParentID: parent.ID})
+	if _, err := a.st.DB().Exec(`UPDATE pages SET deleted_at = ? WHERE id = ?`, time.Now().UnixMilli(), parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Column(c).Width(260).FillHeight().Children(func() { a.sidebar(c) })
+	}, 260, 600)
+	tt.Frame()
+	top := func() (out []string) {
+		for _, p := range a.library().Top {
+			out = append(out, p.Title)
+		}
+		return out
+	}
+	if got := top(); len(got) != 2 || !slices.Contains(got, "Orphan") {
+		t.Fatalf("top level %v", got)
+	}
+	drag := func(onto string, dy float32) {
+		t.Helper()
+		f, ok1 := tt.Find("Alpha")
+		o, ok2 := tt.Find(onto)
+		if !ok1 || !ok2 {
+			t.Fatalf("no Alpha or %s in %v", onto, tt.Texts())
+		}
+		x, y := f.X+f.W/2, f.Y+f.H/2
+		ty := o.Y + o.H/2 + dy
+		tt.Press(x, y)
+		for i := 1; i <= 4; i++ {
+			tt.Move(x, y+(ty-y)*float32(i)/4)
+		}
+		tt.Release(x, ty)
+		a.reloadAll()
+		tt.Frame()
+	}
+	// Before Orphan, by its top edge; then after it, by its bottom.
+	drag("Orphan", -10)
+	if p := a.pageByID(alpha.ID); p == nil || p.ParentID != "" || fmt.Sprint(top()) != "[Alpha Orphan]" || len(a.toasts) != 0 {
+		t.Fatalf("before: top level %v, toasts %+v", top(), a.toasts)
+	}
+	drag("Orphan", 10)
+	if p := a.pageByID(alpha.ID); p == nil || p.ParentID != "" || fmt.Sprint(top()) != "[Orphan Alpha]" || len(a.toasts) != 0 {
+		t.Errorf("after: top level %v, toasts %+v", top(), a.toasts)
+	}
+	if p := a.pageByID(orphan.ID); p == nil || p.ParentID != parent.ID {
+		t.Error("the page beside moved")
+	}
+}
+
 // A subpage comes out of its page by the bottom edge of the last
 // subpage with the pointer left of it, or by the room below the tree.
 func TestSidebarDragOut(t *testing.T) {

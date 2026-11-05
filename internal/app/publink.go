@@ -72,10 +72,12 @@ type pubLink struct {
 	qr  *ui.Bitmap
 	cmd *exec.Cmd
 	srv *http.Server
-	// lease, set while signed in, stops saying on the server that this
-	// device serves the link (agents' ServePublicLink), so agents on other
-	// devices and in the cloud read no other pages into the page.
-	lease func()
+	// lease, set while the pages go to other devices, stops saying that
+	// this device serves the link (agents' ServePublicLink), so agents on
+	// other devices and in the cloud read no other pages into the page;
+	// leaseWay is the way it said so (leasePub).
+	lease    func()
+	leaseWay string
 	// timer waits for saves to settle before the page renders again; seq
 	// numbers the renders asked for.
 	timer *time.Timer
@@ -316,11 +318,21 @@ func (a *App) startPub(page string, emails []string, comments bool) {
 		threads = maps.Clone(old.threads)
 		old.mu.Unlock()
 	}
+	linked := a.publiclyLinked(page)
 	a.stopPub()
 	p := &pubLink{page: page, token: randomToken(), emails: emails, state: "starting",
 		comments: comments, threads: threads, posts: map[string][]time.Time{}}
 	a.setPub(p)
 	a.leasePub()
+	// Agents at work on a page that had no link may read the user's other
+	// pages into it, which its visitors would read: they stop, each
+	// keeping what it did, and those asked for from now on keep to the
+	// page. Its content comes down as it changes elsewhere, as an open
+	// page's does, for visitors to read it as it is saved.
+	if !linked {
+		a.stopRunsOn(page)
+	}
+	a.sync.SetOpen(page, true)
 	fail := func(err error) { a.pubFailed(p, err.Error()) }
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -398,6 +410,7 @@ func (a *App) stopPub() {
 	if p := a.pub; p != nil {
 		a.setPub(nil)
 		p.close()
+		a.pullStops(p.page)
 	}
 }
 
@@ -407,6 +420,7 @@ func (a *App) stopPub() {
 func (a *App) pubFailed(p *pubLink, why string) {
 	p.state, p.err = "failed", why
 	p.close()
+	a.pullStops(p.page)
 	if d := &a.dialogs; !d.shareOpen || d.sharePage != p.page {
 		a.toastAction(locales.PubLinkStopped(a.pageTitleOf(p.page)), locales.PageShare(), func() { a.openShare(p.page) })
 	}
@@ -415,22 +429,67 @@ func (a *App) pubFailed(p *pubLink, why string) {
 // serving says whether the link still serves the page, or will once live.
 func (p *pubLink) serving() bool { return p.state != "failed" }
 
-// leasePub says on the server that this device serves the public link,
-// while it does and the person is signed in: from when the link starts,
-// or they sign in with one serving, which no server heard of before,
-// until they sign out, after which what other devices write to the page
-// no longer reaches the page the link serves.
+// pulled reports whether page id's content comes down as it changes
+// elsewhere, as sync brings an open page's (SetOpen): it is open, or a
+// public link serves it.
+func (a *App) pulled(id string) bool {
+	return a.page != nil && a.page.id == id || a.pub != nil && a.pub.page == id && a.pub.serving()
+}
+
+// pullStops has sync no longer bring page id's content down as it changes
+// elsewhere, once neither the page open nor a public link needs it.
+func (a *App) pullStops(id string) {
+	if a.sync != nil && !a.pulled(id) {
+		a.sync.SetOpen(id, false)
+	}
+}
+
+// stopRunsOn stops the agent runs at work on page id on this device, each
+// keeping what it did, as its chat's Stop does. A run in the cloud has no
+// Stop here: it goes on on the server.
+func (a *App) stopRunsOn(id string) {
+	if a.hub == nil {
+		return
+	}
+	for _, r := range a.hub.Session(id).Runs {
+		if r.Stoppable() {
+			a.hub.Stop(id, r.ID)
+		}
+	}
+}
+
+// leaseWay is the way the pages go to the other devices, which a public
+// link's lease goes too: "server" signed in, "icloud" while iCloud sync is
+// on, or "" for neither, the pages kept on this device alone.
+func (a *App) leaseWay() string {
+	switch {
+	case a.session.SignedIn:
+		return "server"
+	case a.sync != nil && a.sync.ICloudOn():
+		return "icloud"
+	}
+	return ""
+}
+
+// leasePub says that this device serves the public link, while it does,
+// the way the pages go to the other devices (leaseWay): on the server or
+// in iCloud Drive, from when the link starts, or the pages start going
+// another way with one serving, which no device heard of before; until
+// they go there no more, after which what other devices write to the page
+// no longer reaches the page the link serves. Call it again as the way
+// changes: signing in or out, or iCloud sync turning on or off.
 func (a *App) leasePub() {
 	p := a.pub
 	if p == nil || a.hub == nil {
 		return
 	}
-	switch {
-	case !a.session.SignedIn && p.lease != nil:
+	way := a.leaseWay()
+	if p.lease != nil && p.leaseWay != way {
 		p.lease()
-		p.lease = nil
-	case a.session.SignedIn && p.serving() && p.lease == nil:
-		p.lease = a.hub.ServePublicLink(p.page)
+		p.lease, p.leaseWay = nil, ""
+	}
+	if way != "" && p.serving() && p.lease == nil {
+		p.lease, p.leaseWay = a.hub.ServePublicLink(p.page), way
 	}
 }
 

@@ -2,6 +2,7 @@ package editor
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"slices"
 	"strings"
@@ -268,6 +269,207 @@ func TestBlockTopFollowsFolds(t *testing.T) {
 	}
 	if _, ok := e.BlockTop(nodes[0].ID); !ok {
 		t.Error("the folded heading has no place")
+	}
+}
+
+// shapeOf is a page written out whole, its blocks' IDs, kinds and data, to
+// tell one page from another.
+func shapeOf(c *doc.Content) string {
+	var b strings.Builder
+	c.Walk(func(n, parent *doc.Node) {
+		fmt.Fprintf(&b, "%s<%v %s %v|", n.ID, parent != nil, n.Type, n.Data)
+	})
+	return b.String()
+}
+
+// wholePage fails the test where the editor is not whole: a block for the
+// caret, every block's ID its own, the selection in blocks of the page,
+// and each layout of the text its block holds.
+func wholePage(t *testing.T, e *Editor, after string) {
+	t.Helper()
+	if len(e.Content.Children) == 0 {
+		t.Fatalf("after %s: no blocks", after)
+	}
+	seen := map[string]bool{}
+	e.Content.Walk(func(n, _ *doc.Node) {
+		if seen[n.ID] {
+			t.Fatalf("after %s: two blocks %s", after, n.ID)
+		}
+		seen[n.ID] = true
+	})
+	for _, p := range []Pos{e.anchor, e.focus} {
+		if n := e.node(p.ID); n == nil || p.Off < 0 || p.Off > textLen(n) {
+			t.Fatalf("after %s: the selection at %+v", after, p)
+		}
+	}
+	for id, l := range e.layouts {
+		if n := e.node(id); n != nil && l.text == textIDOf(n) && !sameRuns(l.runs, n.Delta()) {
+			t.Fatalf("after %s: %s laid out as text it no longer holds", after, id)
+		}
+	}
+}
+
+// Edits made at random, with changes from outside, agents' ops and
+// compositions among them, leave the page whole after each, and its steps
+// go back and forward again through the pages they kept.
+func TestRandomEditsKeepThePageWhole(t *testing.T) {
+	words := []string{"a", "hé", "👍", "👨‍👩‍👧", "日本", "**b**", "x ", " ", "/", "@", "# ", "- ", "1. ", "[] ", "> ", "```", "---", "*i*", "`c`", "é"}
+	pastes := []string{"one\ntwo", "- a\n  - b\n- c", "| a | b |\n| - | - |\n| 1 | 2 |", "```\ncode\n```\nafter", "# h\npara", "x"}
+	kinds := []string{"heading", "bulleted_list", "todo_list", "toggle_list", "code", "quote", "paragraph"}
+	for seed := range uint64(24) {
+		e, tt, _ := setup(t)
+		rng := rand.New(rand.NewPCG(seed, 7)) // #nosec G404 -- seeded, for runs a test can repeat.
+		pick := func(n int) int { return rng.IntN(n) }
+		var done []string
+		anyBlock := func() *doc.Node {
+			var all []*doc.Node
+			e.Content.Walk(func(n, _ *doc.Node) {
+				if n.Type != "table/cell" {
+					all = append(all, n)
+				}
+			})
+			return all[pick(len(all))]
+		}
+		for range 120 {
+			var op string
+			switch pick(24) {
+			case 0, 1, 2:
+				w := words[pick(len(words))]
+				op = "typing " + w
+				tt.Type(w)
+			case 3:
+				op = "Enter"
+				tt.Key(0, ui.KeyEnter)
+			case 4:
+				op = "Backspace"
+				tt.Key(0, ui.KeyBackspace)
+			case 5:
+				op = "Delete"
+				tt.Key(0, ui.KeyDelete)
+			case 6:
+				us := e.withSections()
+				a, b := us[pick(len(us))], us[pick(len(us))]
+				from, to := Pos{a.ID, pick(textLen(a) + 1)}, Pos{b.ID, pick(textLen(b) + 1)}
+				op = fmt.Sprintf("selecting %v to %v", from, to)
+				e.Select(from, to)
+			case 7:
+				op = "bold"
+				e.ToggleBold()
+			case 8:
+				op = "indenting"
+				e.Indent()
+			case 9:
+				op = "outdenting"
+				e.Outdent()
+			case 10:
+				kind := kinds[pick(len(kinds))]
+				op = "turning into " + kind
+				e.SetType(kind, 1+pick(3))
+			case 11:
+				text := pastes[pick(len(pastes))]
+				op = "pasting " + text
+				e.paste(text)
+			case 12:
+				op = "cutting"
+				tt.Command("copy")
+				tt.Command("cut")
+			case 13:
+				op = "pasting the clipboard"
+				tt.Command("paste")
+			case 14, 15:
+				op = "undo"
+				e.Undo()
+			case 16:
+				op = "redo"
+				e.Redo()
+			case 17:
+				op = "folding"
+				if hs := e.Headings(); len(hs) > 0 {
+					e.ToggleFold(hs[pick(len(hs))].ID)
+				}
+				for _, n := range e.withSections() {
+					if n.Type == "toggle_list" {
+						e.ToggleCollapsed(n.ID)
+						break
+					}
+				}
+			case 18:
+				// Another device changes a block's text, takes one out or
+				// puts one in.
+				next := e.Content.Copy()
+				var all []*doc.Node
+				next.Walk(func(n, _ *doc.Node) {
+					if n.Type != "table/cell" {
+						all = append(all, n)
+					}
+				})
+				n := all[pick(len(all))]
+				switch pick(3) {
+				case 0:
+					if n.IsText() {
+						n.SetDelta(doc.Delta{{Text: "from outside"}})
+					}
+				case 1:
+					next.Remove(n.ID)
+				case 2:
+					_ = next.Insert(doc.Position{After: n.ID}, newText("paragraph", doc.Delta{{Text: "new"}}))
+				}
+				op = "a change from outside"
+				e.Replace(next)
+			case 19:
+				op = "an agent's insert"
+				_ = e.ApplyOp(doc.InsertOp(doc.Position{At: "end"}, newText("paragraph", doc.Delta{{Text: "agent"}})), pick(2) == 0)
+			case 20:
+				n := anyBlock()
+				op = "an agent's delete of " + n.ID
+				_ = e.ApplyOp(doc.Op{Op: "delete", IDs: []string{n.ID}}, pick(2) == 0)
+			case 21:
+				n := anyBlock()
+				op = "an agent's replace of " + n.ID
+				_ = e.ApplyOps([]doc.Op{e.Content.ReplaceOp(n.ID, newText("heading", doc.Delta{{Text: "agent"}}))})
+			case 22:
+				op = "composing"
+				tt.Compose("ni", 2)
+				if pick(2) == 0 {
+					_ = e.Doc()
+				}
+				switch pick(3) {
+				case 0:
+					tt.Type("你好")
+				case 1:
+					e.UnmarkText()
+				}
+			case 23:
+				op = "arrows"
+				keys := []ui.Key{ui.KeyLeft, ui.KeyRight, ui.KeyUp, ui.KeyDown}
+				mods := []ui.Modifiers{0, ui.Shift, ui.Alt, ui.Cmd, ui.Shift | ui.Alt}
+				for range 1 + pick(3) {
+					tt.Key(mods[pick(len(mods))], keys[pick(len(keys))])
+				}
+			}
+			done = append(done, op)
+			tt.Frame()
+			wholePage(t, e, fmt.Sprintf("seed %d: %s", seed, strings.Join(done, ", ")))
+		}
+		// Back through every step, then forward again through as many,
+		// each to the page it went back from.
+		pages := []string{shapeOf(e.Content)}
+		for len(e.undo) > 0 {
+			kept := len(e.redo)
+			e.Undo()
+			tt.Frame()
+			wholePage(t, e, fmt.Sprintf("seed %d: undo", seed))
+			if len(e.redo) > kept {
+				pages = append(pages, shapeOf(e.Content))
+			}
+		}
+		for i := len(pages) - 2; i >= 0; i-- {
+			e.Redo()
+			tt.Frame()
+			if got := shapeOf(e.Content); got != pages[i] {
+				t.Fatalf("seed %d: redo %d of %d made %s, want %s", seed, len(pages)-1-i, len(pages)-1, got, pages[i])
+			}
+		}
 	}
 }
 

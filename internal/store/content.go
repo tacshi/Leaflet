@@ -64,6 +64,19 @@ func (s *Store) RemoteAt(pageID string) (time.Time, error) {
 	return fromMs(at), err
 }
 
+// MergedRemoteAt records that the server's version of a page's content at
+// revision, which this device has merged, is the server's as of at too: the
+// server stamps content again without changing it, as a move of its page or
+// a save of the same content does, and RemoteAt then says the device has
+// it as of then. It moves the time only on, and only while the device
+// still has that revision; the content and its base stay as they are.
+func (s *Store) MergedRemoteAt(pageID string, revision int64, at time.Time) error {
+	_, err := s.db.Exec(`UPDATE page_contents SET remote_updated_at = ?
+		WHERE page_id = ? AND remote_revision = ? AND remote_updated_at IS NOT NULL AND remote_updated_at < ?`,
+		at.UnixMilli(), pageID, revision, at.UnixMilli())
+	return err
+}
+
 // WriteID tells the write of a page's content stored now apart from every
 // other, its content unread: every write of it, this process's or
 // another's, draws a new one (textTriggers). It is sql.ErrNoRows for a

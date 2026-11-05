@@ -112,7 +112,10 @@ func (s *Store) RequeueFile(id, spaceID string) error {
 }
 
 // RequeueRecording queues a finished recording to go up whole, as stored
-// now, as Requeue does a page, with its audio when this device has it.
+// now, as Requeue does a page, with its audio when this device has it. It
+// goes marked with when it last changed here (AdoptKey), so it goes over
+// the server's only when it changed here later: the server may have
+// transcribed it since, as for another device.
 func (s *Store) RequeueRecording(id string) error {
 	var r Recording
 	err := s.inTx(func(tx *sql.Tx) error {
@@ -123,7 +126,7 @@ func (s *Store) RequeueRecording(id string) error {
 		if r.Status != "ready" && r.Status != "failed" {
 			return nil
 		}
-		if err := queue(tx, "recordings", r.ID, RecordingToRemote(r), "", r.PageID); err != nil {
+		if err := requeueRow(tx, "recordings", r.ID, nil, adopting(RecordingToRemote(r), r.UpdatedAt), "", r.PageID); err != nil {
 			return err
 		}
 		if !OnDevice(r.LocalPath) {

@@ -73,6 +73,10 @@ var ErrMoveIntoSelf = errors.New("a page cannot move inside itself")
 // and the server would refuse the move every time it went up.
 var ErrMoveAcrossSpaces = errors.New("a page cannot move into another space")
 
+// ErrMoveIntoDeleted is returned for a move under a page deleted, as on
+// another device since: under it, the page would show nowhere.
+var ErrMoveIntoDeleted = errors.New("a page cannot move inside a deleted page")
+
 // MovePage moves a page under parentID (or to the top level, into
 // folderID), after afterID among its new siblings, or last.
 func (s *Store) MovePage(id, parentID, folderID, afterID string) error {
@@ -91,7 +95,8 @@ func (s *Store) MovePageBefore(id, parentID, folderID, beforeID string) error {
 
 // PlacePage puts a page back where it was: under parentID, or at the top
 // level, into folderID, at sortKey among its siblings, or last when that
-// is "".
+// is "". A parent deleted since is no place to put it, as for any move
+// (ErrMoveIntoDeleted).
 func (s *Store) PlacePage(id, parentID, folderID, sortKey string) error {
 	return s.movePage(id, parentID, folderID, func(q querier, spaceID string) (string, error) {
 		if sortKey != "" {
@@ -114,6 +119,8 @@ func (s *Store) movePage(id, parentID, folderID string, key func(q querier, spac
 			switch parent, err := pageIn(tx, parentID); {
 			case err == nil && parent.SpaceID != p.SpaceID:
 				return false, ErrMoveAcrossSpaces
+			case err == nil && !parent.DeletedAt.IsZero():
+				return false, ErrMoveIntoDeleted
 			case err != nil && !errors.Is(err, sql.ErrNoRows):
 				return false, err
 			}
@@ -189,17 +196,32 @@ func keyBefore(q querier, parentID, spaceID, folderID, beforeID, skip string) (s
 }
 
 // siblings are the pages under parentID, or the top-level pages of
-// folderID, in order, but skip.
+// folderID, in order, but skip. The top level is as the library shows it
+// (library.Arrange): with the pages whose parent is gone, deleted or not
+// on this device, and in no folder the pages of a folder that is gone.
 func siblings(q querier, parentID, spaceID, folderID, skip string) ([]Page, error) {
-	all, err := childrenIn(q, parentID, spaceID)
+	if parentID != "" {
+		all, err := childrenIn(q, parentID, spaceID)
+		return slices.DeleteFunc(all, func(p Page) bool { return p.ID == skip }), err
+	}
+	all, err := pagesIn(q, `deleted_at IS NULL AND space_id = ? AND (parent_id IS NULL OR NOT EXISTS
+		(SELECT 1 FROM pages parent WHERE parent.id = pages.parent_id AND parent.deleted_at IS NULL))
+		ORDER BY sort_key, id`, spaceID)
 	if err != nil {
 		return nil, err
 	}
-	var out []Page
-	for _, q := range all {
-		if q.ID != skip && (parentID != "" || q.FolderID == folderID) {
-			out = append(out, q)
-		}
+	rows, err := q.Query(`SELECT id FROM folders WHERE deleted_at IS NULL AND space_id = ?`, spaceID)
+	folders, err := collect(rows, err, scanString)
+	if err != nil {
+		return nil, err
 	}
-	return out, nil
+	// shown is the folder a page of folder shows in: none for one gone.
+	shown := func(folder string) string {
+		if slices.Contains(folders, folder) {
+			return folder
+		}
+		return ""
+	}
+	folderID = shown(folderID)
+	return slices.DeleteFunc(all, func(p Page) bool { return p.ID == skip || shown(p.FolderID) != folderID }), nil
 }

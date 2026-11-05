@@ -468,12 +468,17 @@ func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (
 		return 0, "", 0, false
 	}
 	top := a.canMoveInside(d.id, "")
+	// Whether a page shows under another, rather than at the top level.
+	under := func(t *store.Page) bool {
+		parent, _ := a.shownIn(*t)
+		return parent != ""
+	}
 	switch {
 	case y < h/4 && id != d.id:
-		return dropBefore, key, 0, t.ParentID != "" || top
+		return dropBefore, key, 0, under(t) || top
 	case y > h*3/4:
 		indent := a.treeIndent(c)
-		for levels := int(-x/indent) + 1; x < 0 && levels > 0 && t.ParentID != "" && a.lastSibling(t, d.id); levels-- {
+		for levels := int(-x/indent) + 1; x < 0 && levels > 0 && under(t) && a.lastSibling(t, d.id); levels-- {
 			if t, out = a.pageByID(t.ParentID), out+1; t == nil {
 				return 0, "", 0, false
 			}
@@ -481,7 +486,7 @@ func (a *App) dropSpot(c *ui.Context, d pageDrag, key string, x, y, h float32) (
 		// After a page showing its subpages is before the first of them.
 		key = "page:" + t.ID
 		first := out == 0 && a.treeState.Open.Has(key) && len(a.children(t.ID)) > 0
-		return dropAfter, key, out, t.ID != d.id && (t.ParentID != "" || top || first && a.canMoveInside(d.id, key))
+		return dropAfter, key, out, t.ID != d.id && (under(t) || top || first && a.canMoveInside(d.id, key))
 	case id != d.id:
 		return dropInside, key, 0, a.canMoveInside(d.id, key)
 	}
@@ -600,6 +605,17 @@ func (a *App) treeDrop(c *ui.Context, list ui.Element) {
 	}
 }
 
+// shownIn is where page p shows in the tree, which a page dropped beside
+// it goes to: under its parent, or at the top level, in its folder or
+// none, as one of the user's whose parent is gone shows there
+// (library.Arrange).
+func (a *App) shownIn(p store.Page) (parent, folder string) {
+	if p.ParentID != "" && a.pageByID(p.ParentID) == nil && !p.Template && !a.isShared(p) {
+		return "", p.FolderID
+	}
+	return p.ParentID, p.FolderID
+}
+
 // dropTint is the tint of the row of key when a page dragged would go
 // inside it, see-through, for the tree paints it over the row's text: the
 // accent's, or on the open page's row, in the accent already, its text's.
@@ -649,14 +665,16 @@ func (a *App) dropPage(id, key string, at int, out bool) {
 		if t == nil {
 			return
 		}
-		parent = t.ParentID
+		// Beside the page, where it shows.
+		var folder string
+		parent, folder = a.shownIn(*t)
 		switch {
 		case at == dropBefore:
-			move = func() error { return a.st.MovePageBefore(id, t.ParentID, t.FolderID, t.ID) }
+			move = func() error { return a.st.MovePageBefore(id, parent, folder, t.ID) }
 		case !out && a.treeState.Open.Has(key) && len(a.children(t.ID)) > 0:
 			parent, move = t.ID, func() error { return a.st.MovePageBefore(id, t.ID, "", "") }
 		default:
-			move = func() error { return a.st.MovePage(id, t.ParentID, t.FolderID, t.ID) }
+			move = func() error { return a.st.MovePage(id, parent, folder, t.ID) }
 		}
 	}
 	if err := a.pageCore().MovePage(id, parent, move); err != nil {

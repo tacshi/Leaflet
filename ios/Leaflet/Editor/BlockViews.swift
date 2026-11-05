@@ -996,18 +996,28 @@ struct TableGrid: View {
 
     /// rows are the table's cells' text, by row, as the core reads its
     /// cells (mobile.TableText): the rows and columns it says it has, as
-    /// far as it has cells for them. The table's last are kept, as it is
-    /// laid out and drawn again and again.
+    /// far as it has cells for them. The tables' last are kept, as each is
+    /// laid out and drawn again and again, up to kept of them: those of
+    /// the pages opened in a long session, one after another, would
+    /// otherwise all stay.
     static func rows(_ node: DocNode) -> [[String]] {
         if let (table, rows) = read[node.id], table == node { return rows }
-        let raw = (try? JSONEncoder().encode(node)).map { String(decoding: $0, as: UTF8.self) }
-        var error: NSError?
-        let json = MobileTableText(raw ?? "{}", &error)
-        let rows = (try? JSONDecoder().decode([[String]].self, from: Data(json.utf8))) ?? []
+        let rows = cells(node)
+        if read.count >= kept { read.removeAll(keepingCapacity: true) }
         read[node.id] = (node, rows)
         return rows
     }
     @MainActor private static var read: [String: (DocNode, [[String]])] = [:]
+    private static let kept = 256
+
+    /// cells are the table's cells' text, by row, as rows has them, read
+    /// again each time: from any thread.
+    nonisolated static func cells(_ node: DocNode) -> [[String]] {
+        let raw = (try? JSONEncoder().encode(node)).map { String(decoding: $0, as: UTF8.self) }
+        var error: NSError?
+        let json = MobileTableText(raw ?? "{}", &error)
+        return (try? JSONDecoder().decode([[String]].self, from: Data(json.utf8))) ?? []
+    }
 
     var body: some View {
         GeometryReader { page in

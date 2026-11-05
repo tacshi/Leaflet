@@ -80,22 +80,57 @@ func TestDropEmbedsForgetsDeletedBlocks(t *testing.T) {
 	ed.Edit(func(c *doc.Content) {
 		c.Children = []*doc.Node{{ID: "kept", Type: "embed", Data: map[string]any{"html": "<p>a</p>"}}}
 	})
+	kept, gone := blockView("kept"), blockView("gone")
 	a := &App{page: &pageState{editor: ed}, embeds: map[string]*mygo.WebView{},
-		embedIn:     map[string]embedInput{"kept": {src: "a"}, "gone": {src: "b"}, "full:gone": {src: "c"}},
-		embedSizes:  map[string]embedSize{"kept": {h: 1}, "gone": {h: 2}},
-		embedZoomed: map[string]bool{"full:kept": true, "full:gone": true},
-		embedToPage: map[string]bool{"kept": true, "gone": true},
-		embedFailed: map[string]string{"kept": "no view", "gone": "no view"}}
+		embedIn:     map[string]embedInput{kept: {src: "a"}, gone: {src: "b"}, fullView("gone"): {src: "c"}},
+		embedSizes:  map[string]embedSize{kept: {h: 1}, gone: {h: 2}},
+		embedZoomed: map[string]bool{fullView("kept"): true, fullView("gone"): true},
+		embedToPage: map[string]bool{kept: true, gone: true},
+		embedFailed: map[string]string{kept: "no view", gone: "no view"}}
 	a.dropEmbeds()
-	if len(a.embedIn) != 1 || a.embedIn["kept"].src != "a" || len(a.embedSizes) != 1 || a.embedSizes["kept"].h != 1 ||
-		len(a.embedZoomed) != 1 || !a.embedZoomed["full:kept"] || len(a.embedToPage) != 1 || !a.embedToPage["kept"] ||
-		len(a.embedFailed) != 1 || a.embedFailed["kept"] == "" {
+	if len(a.embedIn) != 1 || a.embedIn[kept].src != "a" || len(a.embedSizes) != 1 || a.embedSizes[kept].h != 1 ||
+		len(a.embedZoomed) != 1 || !a.embedZoomed[fullView("kept")] || len(a.embedToPage) != 1 || !a.embedToPage[kept] ||
+		len(a.embedFailed) != 1 || a.embedFailed[kept] == "" {
 		t.Errorf("after dropping: %v %v %v %v %v", a.embedIn, a.embedSizes, a.embedZoomed, a.embedToPage, a.embedFailed)
 	}
 	a.page = nil
 	a.dropEmbeds()
 	if len(a.embedIn)+len(a.embedSizes)+len(a.embedZoomed)+len(a.embedToPage)+len(a.embedFailed) != 0 {
 		t.Errorf("with no page: %v %v %v %v", a.embedIn, a.embedSizes, a.embedZoomed, a.embedFailed)
+	}
+}
+
+// A block's web view and a diagram's full screen one have keys no block's
+// ID can make alike: a block whose ID starts as a full screen key does
+// keeps its view in the page, whether or not a block has the ID after
+// it, apart from that block's full screen view.
+func TestEmbedViewKeysNameOneBlockEach(t *testing.T) {
+	if blockView("full:x") == fullView("x") {
+		t.Fatal("a block's view and another's full screen view have one key")
+	}
+	for key, want := range map[string]struct {
+		id   string
+		full bool
+	}{blockView("full:x"): {"full:x", false}, fullView("x"): {"x", true}, blockView("block:y"): {"block:y", false}} {
+		if id, full := viewBlock(key); id != want.id || full != want.full {
+			t.Errorf("viewBlock(%q) = %q, %v; want %q, %v", key, id, full, want.id, want.full)
+		}
+	}
+	ed := editor.New(doc.Empty(), nil)
+	ed.Edit(func(c *doc.Content) {
+		c.Children = []*doc.Node{
+			{ID: "full:x", Type: "embed", Data: map[string]any{"html": "<p>a</p>"}},
+			{ID: "x", Type: "diagram", Data: map[string]any{"source": "graph TD; a-->b"}},
+			{ID: "full:y", Type: "embed", Data: map[string]any{"html": "<p>b</p>"}},
+		}
+	})
+	a := &App{page: &pageState{editor: ed, fullDiagram: "x"},
+		embeds:     map[string]*mygo.WebView{blockView("full:x"): {}, fullView("x"): {}, blockView("full:y"): {}},
+		embedBuilt: map[string]bool{blockView("full:x"): true, blockView("full:y"): true},
+		embedSizes: map[string]embedSize{blockView("full:x"): {h: 1}, blockView("full:y"): {h: 2}}}
+	a.dropEmbeds()
+	if len(a.embeds) != 3 || a.embedSizes[blockView("full:x")].h != 1 || a.embedSizes[blockView("full:y")].h != 2 {
+		t.Errorf("after dropping: views %v, sizes %v", a.embeds, a.embedSizes)
 	}
 }
 

@@ -8,10 +8,12 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
+	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
@@ -436,6 +438,159 @@ func TestPublicLinkKeepsAgentsToThePage(t *testing.T) {
 	a.setPub(nil)
 	if a.publiclyLinked("p1") {
 		t.Error("a stopped link still counts")
+	}
+}
+
+// An agent at work on a page whose link starts stops, keeping what it did:
+// it may read the user's other pages into the page, which visitors would
+// read. One asked for once the page has a link, which keeps to the page,
+// goes on as a new link for the page starts.
+func TestPublicLinkStopsRunsOnItsPage(t *testing.T) {
+	asked, done := make(chan struct{}, 1), make(chan struct{})
+	hs := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case asked <- struct{}{}:
+		default:
+		}
+		// A model that takes its time, till the test is over.
+		select {
+		case <-r.Context().Done():
+		case <-done:
+		}
+	}))
+	t.Cleanup(hs.Close)
+	t.Cleanup(func() { close(done) })
+	a := templatesApp(t)
+	var mu sync.Mutex
+	var posted []func()
+	a.post = func(fn func()) {
+		mu.Lock()
+		posted = append(posted, fn)
+		mu.Unlock()
+	}
+	frame := func() {
+		mu.Lock()
+		fns := posted
+		posted = nil
+		mu.Unlock()
+		for _, fn := range fns {
+			fn()
+		}
+	}
+	a.online = true
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	// An ID of its own, which has no key in the keychain.
+	if err := a.st.PutProvider(store.Provider{ID: "test-pub-" + t.Name(), Preset: "ollama", Name: "Ollama", BaseURL: hs.URL,
+		AuthKind: "none", DefaultModel: "llama3", IsLocal: true}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := a.st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.reloadAll()
+	a.openPage(p.ID)
+	sess := a.hub.Session(p.ID)
+	ask := func() *agents.Run {
+		t.Helper()
+		a.hub.Chat(p.ID, "Summarize this page", nil)
+		select {
+		case <-asked:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the model was never asked")
+		}
+		return sess.Runs[len(sess.Runs)-1]
+	}
+	waitIdle := func() {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); sess.Running; time.Sleep(10 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("the run still works")
+			}
+			frame()
+		}
+	}
+
+	run := ask()
+	// No cloudflared: the link fails as it starts, and stays, failed.
+	a.startPub(p.ID, nil, false)
+	if !run.Stopped {
+		t.Fatal("the run on the page goes on as its link starts")
+	}
+	waitIdle()
+	if run.Status != "done" || run.Error != "" {
+		t.Errorf("run %q, error %q", run.Status, run.Error)
+	}
+
+	run = ask()
+	a.startPub(p.ID, nil, false)
+	if run.Stopped || !sess.Running {
+		t.Error("a run that keeps to the page stopped as its link started again")
+	}
+	a.hub.Stop(p.ID, run.ID)
+	waitIdle()
+	a.stopPub()
+}
+
+// A public link's lease goes the way the pages go to the other devices:
+// none kept on this device alone, in iCloud Drive while iCloud sync is on,
+// and on the server signed in, each ended as the way changes.
+func TestPublicLinkLeasesTheWayPagesSync(t *testing.T) {
+	a, p, _, pg := pubTest(t)
+	var leases []string
+	hub := func(be *remote.Client) {
+		a.hub = agents.NewHub(a.st, be, a)
+		a.hub.ICloudLease = func(id string) func() {
+			leases = append(leases, "icloud "+id)
+			return func() { leases = append(leases, "stop icloud "+id) }
+		}
+	}
+	hub(a.backend)
+	a.leasePub()
+	if len(leases) != 0 || p.lease != nil {
+		t.Fatalf("with the pages on this device alone, leases %q", leases)
+	}
+	a.sync.SetICloud(true)
+	a.leasePub()
+	a.leasePub()
+	if !slices.Equal(leases, []string{"icloud " + pg.ID}) || p.leaseWay != "icloud" {
+		t.Errorf("with iCloud sync on, leases %q, way %q", leases, p.leaseWay)
+	}
+	// Signed in, iCloud sync goes off, and the lease goes to the server,
+	// which this one has none of.
+	a.sync.SetICloud(false)
+	hub(remote.SignedInForTest("http://127.0.0.1:1", a.st, "u1"))
+	a.session.SignedIn = true
+	a.leasePub()
+	if !slices.Equal(leases, []string{"icloud " + pg.ID, "stop icloud " + pg.ID}) || p.leaseWay != "server" || p.lease == nil {
+		t.Errorf("signed in, leases %q, way %q", leases, p.leaseWay)
+	}
+	a.session.SignedIn = false
+	a.leasePub()
+	if p.lease != nil || p.leaseWay != "" {
+		t.Errorf("signed out again, way %q", p.leaseWay)
+	}
+}
+
+// A page a public link serves has its content come down as it changes
+// elsewhere, as an open page's does, until the link stops; open, it
+// keeps it after.
+func TestPublicLinkKeepsItsPagePulled(t *testing.T) {
+	a, p, _, pg := pubTest(t)
+	if !a.pulled(pg.ID) || a.pulled("other") {
+		t.Error("the page a link serves is not kept as an open page")
+	}
+	a.pubFailed(p, "gone")
+	if a.pulled(pg.ID) {
+		t.Error("a failed link keeps its page")
+	}
+	a.openPage(pg.ID)
+	if a.page == nil || !a.pulled(pg.ID) {
+		t.Fatal("the open page is not kept")
+	}
+	a.stopPub()
+	if !a.pulled(pg.ID) {
+		t.Error("the open page went with its link")
 	}
 }
 

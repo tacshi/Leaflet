@@ -1,7 +1,9 @@
 package mobile
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -143,5 +145,34 @@ func TestLocalFileDownloadsAFileFromElsewhere(t *testing.T) {
 	}
 	if n := asked.Load(); n != 1 {
 		t.Fatalf("downloaded %d times", n)
+	}
+}
+
+// A picture the app gives up on, as its page closes, stops waiting on
+// its site at once.
+func TestPictureEndsAsItIsGivenUp(t *testing.T) {
+	c, _ := open(t)
+	started := make(chan struct{})
+	was := fetchPicture
+	fetchPicture = func(ctx context.Context, _ string) ([]byte, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	t.Cleanup(func() { fetchPicture = was })
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.PictureCancellable("https://example.com/a.png", 7)
+		done <- err
+	}()
+	<-started
+	c.Cancel(7)
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("a picture given up on: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a picture given up on went on waiting")
 	}
 }

@@ -735,6 +735,42 @@ func TestInlineMarkdownLinks(t *testing.T) {
 	}
 }
 
+// Links are read in time in proportion to the text: one of [s that no ]
+// closes, or of links whose url no ) closes, as a comment can be written
+// to make, reads in about eight times what one an eighth as long takes,
+// not the sixty-four times of reading on to the end from each [, both as
+// rich text and as Markdown's lines written out. So does one with a [ and
+// code spans after it, of two backticks, or of runs that close none or
+// another's.
+func TestInlineLinksReadInLinearTime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("times reads")
+	}
+	for _, tc := range []struct{ lead, unit string }{
+		{"", "["}, {"", "[a]("}, {"", "[a\n"}, {"[", "``x`` "}, {"[", "`x`` ```y`` "},
+	} {
+		read := func(n int) time.Duration {
+			md := tc.lead + strings.Repeat(tc.unit, n)
+			best := time.Duration(math.MaxInt64)
+			for range 3 {
+				runtime.GC()
+				start := time.Now()
+				FromMarkdown(md)
+				markdownLines(md)
+				best = min(best, time.Since(start))
+			}
+			return best
+		}
+		small, large := read(2000), read(16000)
+		if large > 24*small {
+			t.Errorf("%q: 2000 read in %v, 16000 in %v", tc.lead+tc.unit, small, large)
+		}
+	}
+	if d := FromMarkdown("[[a](b) [c](d)"); len(d) != 4 || d[1].Attrs.Href != "b" || d[3].Attrs.Href != "d" {
+		t.Errorf("links among [s read as %+v", d)
+	}
+}
+
 // Runs side by side in any formats Markdown can say read back as they
 // were: bold and italic together, one run's markers touching the next's,
 // code beside code, markup characters in the text.
@@ -963,21 +999,24 @@ func sameShown(a, b Delta) bool {
 
 func TestEscapeBlockStart(t *testing.T) {
 	for in, want := range map[string]string{
-		"# x":       `\# x`,
-		"### x":     `\### x`,
-		"#tag":      "#tag",
-		"- x":       `\- x`,
-		"-5 below":  "-5 below",
-		"+ x":       `\+ x`,
-		"> x":       `\> x`,
-		"| a |":     `\| a |`,
-		"1. x":      `1\. x`,
-		"12) x":     `12\) x`,
-		"3.14 is π": "3.14 is π",
-		"$$":        `\$$`,
-		"---":       `\---`,
-		"  # x":     `  \# x`,
-		"plain":     "plain",
+		"# x":          `\# x`,
+		"### x":        `\### x`,
+		"#tag":         "#tag",
+		"- x":          `\- x`,
+		"-5 below":     "-5 below",
+		"+ x":          `\+ x`,
+		"> x":          `\> x`,
+		"| a |":        `\| a |`,
+		"1. x":         `1\. x`,
+		"12) x":        `12\) x`,
+		"3.14 is π":    "3.14 is π",
+		"$$":           `\$$`,
+		"---":          `\---`,
+		"  # x":        `  \# x`,
+		" $$":          " \\$$",
+		"　| a":         "　\\| a",
+		"\v</details>": "\v\\</details>",
+		"plain":        "plain",
 	} {
 		if got := EscapeBlockStart(in); got != want {
 			t.Errorf("%q escaped as %q, want %q", in, got, want)

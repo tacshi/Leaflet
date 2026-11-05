@@ -78,6 +78,9 @@ func (st *replyStream) show() {
 type delivery struct {
 	sent int
 	ed   LiveDoc
+	// read is what the user was composing in the page as the run read it
+	// (LiveDoc.Composition), which its ops can hold.
+	read uint64
 	// conflict keeps an open page's content in history before an op takes
 	// a change of it away; nil keeps none.
 	conflict func(*doc.Content) error
@@ -111,14 +114,16 @@ func (d *delivery) to(ed LiveDoc, ops []doc.Op) {
 // read it keeps the page as it is in history first (conflict), as
 // storeOps does on a closed page. Each op is checked against the page
 // just before it, which has the run's earlier ops by then, so the agent's
-// own edits are no change.
+// own edits are no change. The page is read for that, and kept, through
+// Peek, which counts no read of what the user is composing: the op can
+// hold that only where the run read the page with it (read).
 func (d *delivery) apply(ed LiveDoc, op doc.Op) {
-	if d.conflict != nil && overwrites(ed.Doc(), []doc.Op{op}) {
-		if err := d.conflict(ed.Doc()); err != nil {
+	if d.conflict != nil && overwrites(ed.Peek(), []doc.Op{op}) {
+		if err := d.conflict(ed.Peek()); err != nil {
 			log.Printf("agent op on the open page: %v", err)
 		}
 	}
-	if err := ed.ApplyOp(op, ed != d.ed); err != nil {
+	if err := ed.ApplyOpFrom(op, ed != d.ed, d.read); err != nil {
 		log.Printf("agent op on the open page: %v", err)
 	}
 	d.ed = ed

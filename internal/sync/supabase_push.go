@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"log"
@@ -131,7 +132,7 @@ func (s *Service) pushChanged(ctx context.Context, table string, payload map[str
 	cols, partial := payload[store.ChangedKey].([]any)
 	delete(payload, store.ChangedKey)
 	if partial {
-		changes := make(map[string]any, len(cols))
+		changes := make(map[string]any, len(cols)+1)
 		for _, c := range cols {
 			if k, ok := c.(string); ok {
 				changes[k] = payload[k]
@@ -140,6 +141,7 @@ func (s *Service) pushChanged(ctx context.Context, table string, payload map[str
 		if len(changes) == 0 {
 			return true, nil
 		}
+		withChangedAt(changes, payload)
 		rows, err := s.be.Update(ctx, table, []string{remote.Eq("id", store.S(payload, "id"))}, changes)
 		if err != nil || len(rows) > 0 {
 			return err == nil, err
@@ -147,6 +149,27 @@ func (s *Service) pushChanged(ctx context.Context, table string, payload map[str
 	}
 	_, err := s.be.Upsert(ctx, table, payload, "")
 	return err == nil, err
+}
+
+// withChangedAt has a change of some of a row's columns go with when the
+// row changed here (store's changed_at), which the server keeps for the row
+// then: without it, the server takes the time the change reached it, which
+// for one made offline is long after it was made. A row queued by a version
+// of Leaflet from before has none, and goes without.
+func withChangedAt(changes, payload map[string]any) {
+	if at, ok := payload["changed_at"]; ok && at != nil {
+		changes["changed_at"] = at
+	}
+}
+
+// changedAt is when a row on the server last changed where it was changed,
+// as its writer sent it (changed_at), or, for a row a server from before
+// keeps no such time of, when the server wrote it.
+func changedAt(row map[string]any) time.Time {
+	if at, ok := row["changed_at"]; ok && at != nil {
+		return store.Time(at)
+	}
+	return store.Time(row["updated_at"])
 }
 
 // pushRow is pushChanged for a row the server may refuse to change: one
@@ -197,7 +220,19 @@ func (s *Service) waitsForParent(payload map[string]any) bool {
 // after it last did here, as another device that synced with this one
 // through iCloud Drive renamed, moved or deleted it since: sent whole, this
 // device's older copy would undo that. It returns that row then. The row
-// goes up when the server has none, or it changed here later.
+// goes up when the server has none, or it changed here later. The times
+// compared are both of changes, where they were made (changedAt): a copy
+// another device sent late, as it joined the account first, is as old as
+// its change, not as its upload, so a change made here since still goes.
+//
+// A row this device took from the server and has not changed since
+// (store.RowPulledAt) has no change of its own to send, whatever its time,
+// which is when the server wrote it: the server's row stays, with any
+// change made there since, even one a device that was offline made before
+// this one took the row. Sent whole, it would move the row on for every
+// device, and undo that change. Of the others, one that holds what the
+// server's does already (sameAsThere), as a row from a database from
+// before that kept no such time, sends nothing either.
 func (s *Service) newerThere(ctx context.Context, e store.OutboxEntry, payload map[string]any) (row map[string]any, newer bool, err error) {
 	at, ok := payload[store.AdoptKey].(string)
 	delete(payload, store.AdoptKey)
@@ -206,11 +241,50 @@ func (s *Service) newerThere(ctx context.Context, e store.OutboxEntry, payload m
 		return nil, false, nil
 	}
 	row, err = s.be.SelectOne(ctx, e.Entity, remote.Query{Select: "*", Filters: []string{remote.Eq("id", e.EntityID)}})
-	if err != nil || row == nil || store.Time(row["updated_at"]).Before(here) {
+	if err != nil || row == nil {
 		return nil, false, err
+	}
+	if _, pulled := s.st.RowPulledAt(e.Entity, e.EntityID); pulled || sameAsThere(payload, row) {
+		return row, true, nil
+	}
+	if changedAt(row).Before(here) {
+		return nil, false, nil
 	}
 	log.Printf("outbox %s/%s: changed on the server since; taking its row", e.Entity, e.EntityID)
 	return row, true, nil
+}
+
+// sameAsThere reports whether a row as this device would send it holds
+// what the server's row has, column by column, and its times as the
+// instants they name; when it changed (changed_at) is left out. Any column
+// that differs, or that the server's row lacks, makes it another.
+func sameAsThere(payload, there map[string]any) bool {
+	for k, v := range payload {
+		if k == "changed_at" {
+			continue
+		}
+		w, ok := there[k]
+		if !ok || !sameValue(v, w) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameValue reports whether two column values are the same as JSON, or, for
+// two times, name the same instant to the millisecond kept here, as the
+// server writes a time otherwise than this device does.
+func sameValue(a, b any) bool {
+	if sa, ok := a.(string); ok {
+		if sb, ok := b.(string); ok && sa != sb {
+			ta, errA := time.Parse(time.RFC3339Nano, sa)
+			tb, errB := time.Parse(time.RFC3339Nano, sb)
+			return errA == nil && errB == nil && ta.UnixMilli() == tb.UnixMilli()
+		}
+	}
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && string(ja) == string(jb)
 }
 
 // giveWay has a change the server refused give way to the server's row,
@@ -258,6 +332,7 @@ func (s *Service) pushRecording(ctx context.Context, e store.OutboxEntry, payloa
 	for _, k := range []string{"status", "error", "transcript", "duration_ms"} {
 		changes[k] = payload[k]
 	}
+	withChangedAt(changes, payload)
 	rows, err := s.be.Update(ctx, "recordings", []string{remote.Eq("id", e.EntityID), remote.Eq("status", status)}, changes)
 	if err != nil && !remote.IsForbidden(err) || len(rows) > 0 {
 		return err == nil, err
@@ -313,6 +388,7 @@ func (s *Service) pushComment(ctx context.Context, uid string, e store.OutboxEnt
 	if partial && len(changes) == 0 {
 		return true, nil
 	}
+	withChangedAt(changes, payload)
 	rows, err := s.be.Update(ctx, "comments", []string{remote.Eq("id", id)}, changes)
 	if err != nil || len(rows) > 0 {
 		return err == nil, err

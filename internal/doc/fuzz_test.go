@@ -89,6 +89,10 @@ func FuzzPageMarkdownRoundTrip(f *testing.F) {
 	f.Add("\v---", uint8(0), -1)
 	f.Add("\u0085---", uint8(0), -1)
 	f.Add("-\t-\t-", uint8(0), -1)
+	// A line after a break that starts with another kind of space, before
+	// what would end a toggle or start math.
+	f.Add("\n\v</detAils>", uint8(0), 12)
+	f.Add("a\n　$$", uint8(1), -1)
 	f.Fuzz(func(t *testing.T, text string, kind uint8, code int) {
 		text = strings.ReplaceAll(text, "\r", "")
 		if !utf8.ValidString(text) || len(text) > 2000 || strings.ContainsRune(text, 0) {

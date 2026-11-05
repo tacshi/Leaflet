@@ -107,7 +107,7 @@ begin
       'can_view_page',
       'can_write_file_path', 'claim_starter_pages',
       'decline_page_invite', 'has_space_access', 'has_stt_secret', 'is_space_owner', 'lease_public_link', 'owns_recording_path',
-      'owns_space_path', 'page_history_since', 'page_invites', 'page_members', 'page_role',
+      'owns_space_path', 'page_history_since', 'page_invites', 'page_members', 'page_own_text', 'page_role',
       'set_provider_secret', 'set_stt_secret', 'share_page', 'shares_page_with', 'sign_out_device', 'tags_in_bounds',
       'unshare_page'
     ]) f
@@ -1179,6 +1179,564 @@ begin
   end if;
   if not exists (select 1 from auth.sessions where id = '5e550000-0000-0000-0000-000000000001') then
     raise exception 'signing a device out ended another''s session';
+  end if;
+end;
+$$;
+
+-- A template is the space owner's. An editor of a shared page cannot mark
+-- it a template, or make a template subpage of it; the owner marks their
+-- own.
+set local role authenticated;
+do $$
+declare
+  v_page constant uuid := 'fa000000-0000-0000-0000-0000000000e9';
+  v_space uuid;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title) values (v_page, v_space, 'Shared');
+  perform public.share_page(v_page, 'editor@example.com', 'editor');
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  perform public.accept_page_invite(v_page);
+  perform pg_temp.refused(
+    format('update public.pages set is_template = true where id = %L', v_page),
+    'forbidden_template');
+  perform pg_temp.refused(
+    format('insert into public.pages (space_id, parent_id, title, is_template) '
+           'select space_id, %L, ''T'', true from public.pages where id = %L', v_page, v_page),
+    'forbidden_template');
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  update public.pages set is_template = true where id = v_page;
+  if not found then
+    raise exception 'the owner could not mark their own page a template';
+  end if;
+  update public.pages set is_template = false where id = v_page;
+end;
+$$;
+
+-- A page's title is at most 2,000 characters.
+do $$
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  begin
+    update public.pages set title = repeat('t', 2001) where id = 'e0000000-0000-0000-0000-0000000000e1';
+    raise exception 'a title of 2,001 characters went in';
+  exception when check_violation then
+    if sqlerrm not like '%pages_title_length%' then
+      raise;
+    end if;
+  end;
+end;
+$$;
+
+-- A deletion is stamped no later than the server's clock: a write cannot
+-- date it ahead and so keep deleted content readable to those who came
+-- after.
+do $$
+declare
+  v_page constant uuid := 'fa000000-0000-0000-0000-000000000001';
+  v_space uuid;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title) values (v_page, v_space, 'Soon gone');
+  update public.pages set deleted_at = now() + interval '1 day' where id = v_page;
+  if (select deleted_at from public.pages where id = v_page) > now() then
+    raise exception 'a deletion was dated ahead of the server''s clock';
+  end if;
+end;
+$$;
+
+-- A page under a deleted one, not deleted itself, is not moved out from
+-- under it by anyone but the space's owner who never had what was on it:
+-- the move needs the page readable where it was. A page they can read
+-- moves as before.
+do $$
+declare
+  v_root constant uuid := 'fa000000-0000-0000-0000-000000000002';
+  v_gone constant uuid := 'fa000000-0000-0000-0000-000000000003';
+  v_under constant uuid := 'fa000000-0000-0000-0000-000000000004';
+  v_one constant uuid := 'fa000000-0000-0000-0000-000000000005';
+  v_two constant uuid := 'fa000000-0000-0000-0000-000000000006';
+  v_space uuid;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title) values (v_root, v_space, 'Shared root');
+  insert into public.page_content (page_id) values (v_root);
+  insert into public.pages (id, space_id, parent_id, title) values
+    (v_gone, v_space, v_root, 'Deleted parent'),
+    (v_under, v_space, v_gone, 'Live under it'),
+    (v_one, v_space, v_root, 'One'),
+    (v_two, v_space, v_root, 'Two');
+  insert into public.page_content (page_id, plain_text) values (v_under, 'what was taken off');
+  update public.pages set deleted_at = now() - interval '1 hour' where id = v_gone;
+  perform public.share_page(v_root, 'editor@example.com', 'editor');
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  perform public.accept_page_invite(v_root);
+
+  if public.can_read_page(v_under) then
+    raise exception 'the editor read a page under one deleted before they had it';
+  end if;
+  perform pg_temp.refused(format('update public.pages set parent_id = %L where id = %L', v_root, v_under), 'forbidden_move');
+  -- A page they can read moves under another they can.
+  update public.pages set parent_id = v_two where id = v_one;
+  if not found or (select parent_id from public.pages where id = v_one) is distinct from v_two then
+    raise exception 'the editor could not move a page they had';
+  end if;
+end;
+$$;
+
+-- A deleted file's row reaches the members of its page, so their devices
+-- drop their copies, but says only that it was deleted: no name, type,
+-- size or path, which holds its name, for them or anyone the page is
+-- shared with later.
+do $$
+declare
+  v_file constant uuid := 'fa000000-0000-0000-0000-0000000000f1';
+  v_root constant uuid := 'fa000000-0000-0000-0000-000000000002';
+  v_space uuid;
+  v_before timestamptz;
+  r record;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.files (id, space_id, page_id, name, storage_path, mime_type, size_bytes)
+  values (v_file, v_space, v_root, 'secret.txt', v_space || '/' || v_file || '/secret.txt', 'text/plain', 42);
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  select updated_at into v_before from public.files where id = v_file and name = 'secret.txt';
+  if v_before is null then
+    raise exception 'the editor could not read a file still on a page they have';
+  end if;
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  update public.files set deleted_at = now() where id = v_file;
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  select * into r from public.files where id = v_file and updated_at > v_before;
+  if r.id is null or r.deleted_at is null then
+    raise exception 'a file''s deletion did not reach a member of its page';
+  end if;
+  if r.name <> '' or r.mime_type is not null or r.size_bytes is not null or r.storage_path is not null then
+    raise exception 'a deleted file kept "%", %, % bytes at %', r.name, r.mime_type, r.size_bytes, r.storage_path;
+  end if;
+
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  perform public.share_page(v_root, 'viewer@example.com', 'viewer');
+  perform pg_temp.act_as('a3000000-0000-0000-0000-000000000003');
+  perform public.accept_page_invite(v_root);
+  select * into r from public.files where id = v_file;
+  if r.id is null or r.name <> '' or r.storage_path is not null then
+    raise exception 'a member who came later read a deleted file''s name: %', r.name;
+  end if;
+end;
+$$;
+
+-- The server posting a comment keeps to a page's bounds by the row's
+-- author, clamps an agent's name, and checks the thread is on the page.
+-- A thread on another page, and the owner's page the replies go on.
+reset role;
+insert into public.comments (id, page_id, block_id, author_id, body)
+values ('fa000000-0000-0000-0000-0000000000c1', 'e0000000-0000-0000-0000-0000000000e1', 'b1',
+        'a1000000-0000-0000-0000-000000000001', 'Root');
+-- The service role posts an agent's reply: its name is clamped to 80, and
+-- its parent must be on the page. It carries no person's sub, and its
+-- claim names the role, as PostgREST sets them from the service key.
+set local role service_role;
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+insert into public.comments (id, page_id, block_id, author_id, author_kind, agent_name, body)
+values ('fa000000-0000-0000-0000-0000000000c2', 'fa000000-0000-0000-0000-000000000001', 'b1',
+        'a1000000-0000-0000-0000-000000000001', 'agent', repeat('n', 200), 'An answer');
+do $$
+begin
+  if (select char_length(agent_name) from public.comments where id = 'fa000000-0000-0000-0000-0000000000c2') <> 80 then
+    raise exception 'an agent''s name was not clamped to 80 characters';
+  end if;
+  begin
+    insert into public.comments (page_id, block_id, author_id, author_kind, parent_comment_id, body)
+    values ('fa000000-0000-0000-0000-000000000001', 'b1', 'a1000000-0000-0000-0000-000000000001', 'agent',
+            'fa000000-0000-0000-0000-0000000000c1', 'Reply on the wrong page');
+    raise exception 'the server threaded a reply onto another page';
+  exception when check_violation then
+    if sqlerrm not like '%parent_comment_on_other_page%' then
+      raise;
+    end if;
+  end;
+end;
+$$;
+-- 2,000 of the viewer's on a page, seeded with no bound as the migrations
+-- do: one more, posted by the server as the viewer, is refused.
+reset role;
+select set_config('request.jwt.claims', '', true);
+insert into public.comments (page_id, block_id, body, author_id)
+select 'fa000000-0000-0000-0000-000000000001', 'b1', 'y', 'a3000000-0000-0000-0000-000000000003'
+from generate_series(1, 2000);
+set local role service_role;
+select set_config('request.jwt.claim.sub', '', true);
+select set_config('request.jwt.claims', '{"role":"service_role"}', true);
+do $$
+begin
+  begin
+    insert into public.comments (page_id, block_id, author_id, body)
+    values ('fa000000-0000-0000-0000-000000000001', 'b1', 'a3000000-0000-0000-0000-000000000003', 'One more');
+    raise exception 'the server posted past 2,000 of one person''s comments on a page';
+  exception when check_violation then
+    if sqlerrm <> 'too_many_comments' then
+      raise;
+    end if;
+  end;
+end;
+$$;
+select set_config('request.jwt.claims', '', true);
+-- A comment keeps its created_at: its author cannot move it.
+reset role;
+insert into public.comments (id, page_id, block_id, author_id, body)
+values ('fa000000-0000-0000-0000-0000000000c3', 'fa000000-0000-0000-0000-000000000001', 'b1',
+        'a1000000-0000-0000-0000-000000000001', 'Mine');
+set local role authenticated;
+select pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+select pg_temp.refused(
+  'update public.comments set created_at = now() - interval ''1 day'' where id = ''fa000000-0000-0000-0000-0000000000c3''',
+  'comment_immutable');
+
+-- A device's name and platform are in bounds, and a user has at most 100.
+do $$
+declare
+  v_them constant uuid := 'a5000000-0000-0000-0000-000000000005';
+begin
+  perform pg_temp.act_as(v_them);
+  begin
+    insert into public.devices (user_id, name) values (v_them, repeat('n', 257));
+    raise exception 'a device name of 257 characters went in';
+  exception when check_violation then
+    if sqlerrm not like '%devices_name_length%' then
+      raise;
+    end if;
+  end;
+  insert into public.devices (user_id, name)
+  select v_them, 'd' from generate_series(1, 100);
+  begin
+    insert into public.devices (user_id, name) values (v_them, 'one too many');
+    raise exception 'a 101st device went in';
+  exception when check_violation then
+    if sqlerrm <> 'too_many_devices' then
+      raise;
+    end if;
+  end;
+end;
+$$;
+
+-- 100 devices signed out, whose rows stay, keep no new one out.
+reset role;
+insert into public.devices (user_id, name, revoked_at)
+select 'a4000000-0000-0000-0000-000000000004', 'Signed out', now() from generate_series(1, 100);
+set local role authenticated;
+select pg_temp.act_as('a4000000-0000-0000-0000-000000000004');
+insert into public.devices (user_id, name) values ('a4000000-0000-0000-0000-000000000004', 'New one');
+
+-- An AI job's request is in bounds as it is written; the apps and the
+-- function send far less.
+do $$
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  begin
+    insert into public.ai_jobs (surface, request)
+    values ('workspace', jsonb_build_object('instruction', repeat('x', 1048577)));
+    raise exception 'an AI job request over 1 MB went in';
+  exception when check_violation then
+    if sqlerrm <> 'ai_job_request_too_long' then
+      raise;
+    end if;
+  end;
+end;
+$$;
+-- A job already past the bounds, from before they were kept, still
+-- changes: it is marked failed, and given a result; its request is not
+-- made longer.
+reset role;
+alter table public.ai_jobs disable trigger ai_jobs_in_bounds;
+insert into public.ai_jobs (id, user_id, surface, status, request)
+values ('fa000000-0000-0000-0000-0000000000a9', 'a1000000-0000-0000-0000-000000000001', 'workspace', 'running',
+        jsonb_build_object('instruction', repeat('x', 1048577)));
+alter table public.ai_jobs enable trigger ai_jobs_in_bounds;
+set local role authenticated;
+do $$
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  update public.ai_jobs set status = 'failed', error = 'The run stopped before it finished'
+  where id = 'fa000000-0000-0000-0000-0000000000a9';
+  update public.ai_jobs set result = '{"reply": ""}' where id = 'fa000000-0000-0000-0000-0000000000a9';
+  if (select status from public.ai_jobs where id = 'fa000000-0000-0000-0000-0000000000a9') <> 'failed' then
+    raise exception 'a job past the bounds could not be marked failed';
+  end if;
+  begin
+    update public.ai_jobs set request = jsonb_build_object('instruction', repeat('y', 1048577))
+    where id = 'fa000000-0000-0000-0000-0000000000a9';
+    raise exception 'a job''s request was written past 1 MB';
+  exception when check_violation then
+    if sqlerrm <> 'ai_job_request_too_long' then
+      raise;
+    end if;
+  end;
+end;
+$$;
+
+-- A speech-to-text key is saved for Soniox alone.
+do $$
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  begin
+    perform public.set_stt_secret('made-up', 'k');
+    raise exception 'a key was saved for a provider that has none here';
+  exception when invalid_parameter_value then
+    if sqlerrm <> 'unknown_stt_provider' then
+      raise;
+    end if;
+  end;
+  perform public.set_stt_secret('soniox', 'k');
+  if not public.has_stt_secret('soniox') then
+    raise exception 'Soniox''s key was not saved';
+  end if;
+  perform public.set_stt_secret('soniox', '');
+end;
+$$;
+
+-- The workspace agent reads a page's title as one others read when its
+-- card is on a page they read, by a subpage block or an inline mention in
+-- its text.
+do $$
+declare
+  v_host constant uuid := 'fa000000-0000-0000-0000-00000000000a';
+  v_mentioned constant uuid := 'fa000000-0000-0000-0000-00000000000b';
+  v_carded constant uuid := 'fa000000-0000-0000-0000-00000000000c';
+  v_space uuid;
+  v_found uuid[];
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title) values
+    (v_host, v_space, 'Host'), (v_mentioned, v_space, 'Mentioned'), (v_carded, v_space, 'Carded');
+  insert into public.page_content (page_id, content) values (v_host, jsonb_build_object(
+    'document', jsonb_build_object('type', 'page', 'id', 'root', 'children', jsonb_build_array(
+      jsonb_build_object('id', 'b1', 'type', 'paragraph', 'data', jsonb_build_object('delta', jsonb_build_array(
+        jsonb_build_object('insert', 'see '),
+        jsonb_build_object('insert', 'Mentioned', 'attributes', jsonb_build_object(
+          'mention', jsonb_build_object('kind', 'page', 'id', v_mentioned::text, 'name', 'Mentioned')))))),
+      jsonb_build_object('id', 'b2', 'type', 'subpage', 'data', jsonb_build_object('page_id', v_carded::text)))),
+    'meta', jsonb_build_object('v', 1, 'blocks', '{}'::jsonb, 'deleted', '{}'::jsonb)));
+  select array_agg(page_id::uuid order by page_id) into v_found
+  from public.agent_card_pages(array[v_host]);
+  if not (v_found @> array[v_mentioned, v_carded]) then
+    raise exception 'the agent did not read a title through a mention and a card: %', v_found;
+  end if;
+end;
+$$;
+
+-- The workspace agent's search cuts a match's words from a page's own
+-- text: not from what its sites wrote, a link card's title and description
+-- and a video's title, though the page is found by them still, in its
+-- place, with no words. A card's link and a video's notes are its own.
+do $$
+declare
+  v_older constant uuid := 'fa000000-0000-0000-0000-0000000000b1';
+  v_newer constant uuid := 'fa000000-0000-0000-0000-0000000000b2';
+  v_space uuid;
+  v_hits text[];
+  v_snippets text[];
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title) values (v_older, v_space, 'Snippet host');
+  insert into public.page_content (page_id, content, plain_text) values (v_older, jsonb_build_object(
+    'document', jsonb_build_object('type', 'page', 'id', 'root', 'children', jsonb_build_array(
+      jsonb_build_object('id', 'b1', 'type', 'paragraph', 'data', jsonb_build_object('delta', jsonb_build_array(
+        jsonb_build_object('insert', 'my own words about '),
+        jsonb_build_object('insert', 'quokkas', 'attributes', jsonb_build_object('bold', true))))),
+      jsonb_build_object('id', 'b2', 'type', 'link_preview', 'data', jsonb_build_object(
+        'url', 'https://example.com/z', 'title', 'Sites write zebras here', 'description', 'zebras galore')),
+      jsonb_build_object('id', 'b3', 'type', 'video', 'data', jsonb_build_object(
+        'url', 'https://example.com/v', 'title', 'Elephant video', 'notes', 'Notes I took')))),
+    'meta', jsonb_build_object('v', 1, 'blocks', '{}'::jsonb, 'deleted', '{}'::jsonb)),
+    E'my own words about quokkas\nSites write zebras here\nElephant video\nNotes I took');
+  insert into public.pages (id, space_id, title) values (v_newer, v_space, 'Second host');
+  insert into public.page_content (page_id, content, plain_text) values (v_newer, jsonb_build_object(
+    'document', jsonb_build_object('type', 'page', 'id', 'root', 'children', jsonb_build_array(
+      jsonb_build_object('id', 'b1', 'type', 'paragraph', 'data', jsonb_build_object('delta', jsonb_build_array(
+        jsonb_build_object('insert', 'zebras of my own')))))),
+    'meta', jsonb_build_object('v', 1, 'blocks', '{}'::jsonb, 'deleted', '{}'::jsonb)),
+    'zebras of my own');
+
+  if public.page_own_text((select content from public.page_content where page_id = v_older))
+     is distinct from E'my own words about quokkas\nhttps://example.com/z\nNotes I took' then
+    raise exception 'a page''s own text kept what its sites wrote, or lost its own';
+  end if;
+
+  -- Found by the newer page's own text and the older page's card, the
+  -- newer first, as before; the older has no words.
+  select array_agg(page_id::text order by ord), array_agg(coalesce(snippet, '-') order by ord)
+  into v_hits, v_snippets
+  from public.agent_search_pages('zebras', '{}', 20) with ordinality s (page_id, title, snippet, ord);
+  if v_hits is distinct from array[v_newer::text, v_older::text]
+     or v_snippets is distinct from array['zebras of my own', '-'] then
+    raise exception 'a search found %, with %', v_hits, v_snippets;
+  end if;
+  if (select snippet from public.agent_search_pages('Elephant', '{}', 20) where page_id = v_older) is not null then
+    raise exception 'a search''s words were a video''s title';
+  end if;
+  if (select snippet from public.agent_search_pages('quokkas', '{}', 20) where page_id = v_older)
+     is distinct from E'my own words about quokkas\nhttps://example.com/z\nNotes I took' then
+    raise exception 'a search''s words were not cut from the page''s own text';
+  end if;
+  if (select snippet from public.agent_search_pages('took', '{}', 20) where page_id = v_older) is null then
+    raise exception 'a search found no words in a video''s notes';
+  end if;
+end;
+$$;
+
+-- changed_at is when a row was changed where it was changed: the time its
+-- writer sends, no later than the server's clock, or the server's when it
+-- sends none or the same as before. A lease of a page's public link alone
+-- is no change. Clients read and write it on pages, folders, comments,
+-- files and recordings alike, and a page's owner deletes a member's file
+-- on it with the time the device changed it.
+do $$
+declare
+  v_space uuid;
+  v_copy constant uuid := 'fa000000-0000-0000-0000-0000000000d1';
+  v_ahead constant uuid := 'fa000000-0000-0000-0000-0000000000d2';
+  v_none constant uuid := 'fa000000-0000-0000-0000-0000000000d3';
+  v_folder constant uuid := 'fa000000-0000-0000-0000-0000000000d4';
+  v_comment constant uuid := 'fa000000-0000-0000-0000-0000000000d5';
+  v_file constant uuid := 'fa000000-0000-0000-0000-0000000000d6';
+  v_rec constant uuid := 'fa000000-0000-0000-0000-0000000000d7';
+  v_theirs constant uuid := 'fa000000-0000-0000-0000-0000000000d8';
+  v_root constant uuid := 'fa000000-0000-0000-0000-000000000002';
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+
+  -- Made: a time sent stays, one ahead of the server is the server's, and
+  -- none is the server's.
+  insert into public.pages (id, space_id, title, changed_at) values
+    (v_copy, v_space, 'Old copy', now() - interval '1 day'),
+    (v_ahead, v_space, 'Ahead', now() + interval '1 day');
+  insert into public.pages (id, space_id, title) values (v_none, v_space, 'None sent');
+  if (select changed_at from public.pages where id = v_copy) is distinct from now() - interval '1 day'
+     or (select changed_at from public.pages where id = v_ahead) is distinct from now()
+     or (select changed_at from public.pages where id = v_none) is distinct from now() then
+    raise exception 'a new row''s changed_at is not the time sent, no later than now, or now';
+  end if;
+
+  -- Changed: none sent, or the same, is now; another time sent stays, no
+  -- later than now.
+  update public.pages set title = 'Renamed' where id = v_copy;
+  if (select changed_at from public.pages where id = v_copy) is distinct from now() then
+    raise exception 'a change with no changed_at sent did not move it to now';
+  end if;
+  update public.pages set title = 'Again', changed_at = now() - interval '2 hours' where id = v_copy;
+  if (select changed_at from public.pages where id = v_copy) is distinct from now() - interval '2 hours' then
+    raise exception 'a change lost the changed_at it sent';
+  end if;
+  update public.pages set title = 'Same time', changed_at = now() - interval '2 hours' where id = v_copy;
+  if (select changed_at from public.pages where id = v_copy) is distinct from now() then
+    raise exception 'a change that sent the same changed_at did not move it to now';
+  end if;
+  update public.pages set changed_at = now() + interval '1 hour' where id = v_copy;
+  if (select changed_at from public.pages where id = v_copy) is distinct from now() then
+    raise exception 'a change dated its changed_at ahead of the server''s clock';
+  end if;
+
+  -- A lease alone moves neither changed_at nor updated_at.
+  update public.pages set changed_at = now() - interval '3 hours' where id = v_copy;
+  perform public.lease_public_link(v_copy);
+  if (select changed_at from public.pages where id = v_copy) is distinct from now() - interval '3 hours' then
+    raise exception 'a public link''s lease moved the page''s changed_at';
+  end if;
+
+  -- The other tables keep a time sent too.
+  insert into public.folders (id, space_id, name, changed_at) values (v_folder, v_space, 'F', now() - interval '1 day');
+  insert into public.comments (id, page_id, block_id, body, changed_at)
+  values (v_comment, v_copy, 'b1', 'Hi', now() - interval '1 day');
+  insert into public.files (id, space_id, page_id, name, changed_at)
+  values (v_file, v_space, v_copy, 'c.txt', now() - interval '1 day');
+  insert into public.recordings (id, page_id, changed_at) values (v_rec, v_copy, now() - interval '1 day');
+  if (select count(*) from public.folders where id = v_folder and changed_at = now() - interval '1 day')
+     + (select count(*) from public.comments where id = v_comment and changed_at = now() - interval '1 day')
+     + (select count(*) from public.files where id = v_file and changed_at = now() - interval '1 day')
+     + (select count(*) from public.recordings where id = v_rec and changed_at = now() - interval '1 day') <> 4 then
+    raise exception 'a folder, comment, file or recording lost the changed_at it was made with';
+  end if;
+  update public.comments set resolved = true where id = v_comment;
+  if (select changed_at from public.comments where id = v_comment) is distinct from now() then
+    raise exception 'a comment''s change did not move its changed_at to now';
+  end if;
+
+  -- A member's file on the owner's page: the owner deletes it, with the
+  -- time their device changed it.
+  perform pg_temp.act_as('a2000000-0000-0000-0000-000000000002');
+  insert into public.files (id, space_id, page_id, name)
+  select v_theirs, s.id, v_root, 'theirs.txt' from public.spaces s where s.owner_id = auth.uid();
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  update public.files set deleted_at = now(), changed_at = now() - interval '1 minute' where id = v_theirs;
+  if not found or (select changed_at from public.files where id = v_theirs) is distinct from now() - interval '1 minute' then
+    raise exception 'the page''s owner could not delete a member''s file with the time it was changed';
+  end if;
+  -- Sent again as the device had it, the row stays deleted and emptied.
+  update public.files set name = 'theirs.txt', storage_path = 'x/y/theirs.txt'
+  where id = v_theirs;
+  if (select name from public.files where id = v_theirs) <> '' then
+    raise exception 'a deleted file took back its name';
+  end if;
+end;
+$$;
+
+-- A write another trigger makes keeps changed_at: the touch of a subtree a
+-- move brings under a share, so its readers pull it, and a foreign key's
+-- set null. The page moved is changed now.
+do $$
+declare
+  v_space uuid;
+  v_root constant uuid := 'fa000000-0000-0000-0000-000000000002';
+  v_top constant uuid := 'fa000000-0000-0000-0000-0000000000e1';
+  v_sub constant uuid := 'fa000000-0000-0000-0000-0000000000e2';
+  v_comment constant uuid := 'fa000000-0000-0000-0000-0000000000e3';
+  v_file constant uuid := 'fa000000-0000-0000-0000-0000000000e4';
+  v_rec constant uuid := 'fa000000-0000-0000-0000-0000000000e5';
+  v_folder constant uuid := 'fa000000-0000-0000-0000-0000000000e6';
+  v_filed constant uuid := 'fa000000-0000-0000-0000-0000000000e7';
+  v_then constant timestamptz := now() - interval '1 day';
+  v_before timestamptz;
+begin
+  perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
+  select id into v_space from public.spaces where owner_id = auth.uid();
+  insert into public.pages (id, space_id, title, changed_at) values (v_top, v_space, 'Private', v_then);
+  insert into public.pages (id, space_id, parent_id, title, changed_at) values (v_sub, v_space, v_top, 'Under it', v_then);
+  insert into public.comments (id, page_id, block_id, body, changed_at) values (v_comment, v_sub, 'b1', 'Hi', v_then);
+  insert into public.files (id, space_id, page_id, name, changed_at) values (v_file, v_space, v_sub, 'f.txt', v_then);
+  insert into public.recordings (id, page_id, changed_at) values (v_rec, v_sub, v_then);
+  v_before := clock_timestamp();
+
+  update public.pages set parent_id = v_root where id = v_top;
+  if (select updated_at from public.pages where id = v_sub) <= v_before
+     or (select updated_at from public.comments where id = v_comment) <= v_before then
+    raise exception 'a move under a share did not touch the subtree';
+  end if;
+  if (select changed_at from public.pages where id = v_sub) is distinct from v_then
+     or (select changed_at from public.comments where id = v_comment) is distinct from v_then
+     or (select changed_at from public.files where id = v_file) is distinct from v_then
+     or (select changed_at from public.recordings where id = v_rec) is distinct from v_then then
+    raise exception 'the touch of a moved subtree moved its changed_at';
+  end if;
+  if (select changed_at from public.pages where id = v_top) is distinct from now() then
+    raise exception 'the page moved was not changed now';
+  end if;
+
+  -- A folder that goes takes its pages out of it, a foreign key's set null.
+  insert into public.folders (id, space_id, name) values (v_folder, v_space, 'Going');
+  insert into public.pages (id, space_id, folder_id, title, changed_at) values (v_filed, v_space, v_folder, 'Filed', v_then);
+  delete from public.folders where id = v_folder;
+  if (select folder_id from public.pages where id = v_filed) is not null
+     or (select changed_at from public.pages where id = v_filed) is distinct from v_then then
+    raise exception 'a foreign key''s set null moved changed_at';
   end if;
 end;
 $$;

@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/egoist/mygo/i18n"
 
@@ -497,5 +498,38 @@ func TestDraftsNewBlocksTogether(t *testing.T) {
 	}
 	if got := texts(x.Ctx.Content); strings.Join(got, "|") != "Plan|Ship the editor first.|First line|Second|Third|Fourth|Fifth|item" {
 		t.Errorf("page %q", got)
+	}
+}
+
+// A cloud run's request keeps to well under the most the server keeps of
+// one (1 MiB of its JSON), however much the user selected or wrote, even
+// of characters JSON writes six bytes each: its free text is cut at a
+// character's boundary, as the device's own run reads the selection.
+func TestJobRequestKeepsUnderTheServersMost(t *testing.T) {
+	huge := strings.Repeat("\x01é日", 400_000)
+	req := Request{Instruction: "Sum up " + huge, SelectionText: huge, AgentName: huge}
+	raw, err := json.Marshal(req.JobRequest())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) > 900_000 {
+		t.Errorf("the request is %d bytes", len(raw))
+	}
+	got := req.JobRequest()
+	for key, most := range map[string]int{"instruction": maxRequestText, "selection_text": maxRequestText, "agent_name": maxAgentName} {
+		s, _ := got[key].(string)
+		if n := utf8.RuneCountInString(s); n != most || !utf8.ValidString(s) || !strings.HasSuffix(s, "…") {
+			t.Errorf("%s: %d characters, valid %v", key, n, utf8.ValidString(s))
+		}
+	}
+	if s, _ := got["instruction"].(string); !strings.HasPrefix(s, "Sum up \x01é日") {
+		t.Errorf("instruction starts %q", s[:20])
+	}
+	small := Request{Instruction: "Sum it up", SelectionText: "the plan", AgentName: "Claude"}.JobRequest()
+	if small["instruction"] != "Sum it up" || small["selection_text"] != "the plan" || small["agent_name"] != "Claude" {
+		t.Errorf("request %v", small)
+	}
+	if turn := userMessage(Request{Instruction: "Sum it up", SelectionText: huge}, nil, nil); strings.Count(turn, "é") > maxRequestText/3+1 {
+		t.Errorf("the run's turn holds the whole selection: %d characters", utf8.RuneCountInString(turn))
 	}
 }

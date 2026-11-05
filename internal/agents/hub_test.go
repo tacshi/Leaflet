@@ -14,12 +14,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egoist/mygo/ui"
+
 	"leaflet/internal/doc"
 	"leaflet/internal/editor"
+	"leaflet/internal/live"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
 	"leaflet/internal/web"
+	"leaflet/locales"
 )
 
 func insertAfter(after, id, text string) doc.Op {
@@ -281,6 +285,90 @@ func openPage(t *testing.T, st *store.Store) (store.Page, *editor.Editor) {
 		t.Fatal(err)
 	}
 	return p, editor.New(st.Content(p.ID), nil)
+}
+
+// liveEditor is the editor as an open page's live.Editor, as the app's.
+type liveEditor struct{ *editor.Editor }
+
+func (liveEditor) SetReadOnly(bool) {}
+
+// An op an agent writes on the block the user is composing in, while they
+// compose, keeps its own text: telling whether the op takes a change of
+// theirs away, and keeping the page in history before it does, only looks
+// at the page, which takes no composition out with it. The op, written
+// without the composition, cannot hold it, and the same text at its place
+// is the agent's.
+func TestOpWhileComposingKeepsItsText(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	open, _ := live.Open(st, p.ID, live.Options{})
+	open.Attach(liveEditor{ed})
+	read := ed.Content.Find("p1").Clone()
+	ed.PlaceCaret("p1", -1)
+	ed.SetMarkedText(nil, "an", ui.TextInputRange{Start: 2, End: 2})
+	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the editor first.an" {
+		t.Fatalf("composing %q", got)
+	}
+	rewrite := read.Clone()
+	rewrite.SetDelta(doc.Delta{{Text: "Ship the editor first.and more"}})
+	h := NewHub(st, nil, stubHost{})
+	d := h.newDelivery(p.ID, &Run{ID: "r1"}, Option{Provider: store.Provider{ID: "ollama", IsLocal: true}})
+	d.apply(open, doc.Op{Op: "replace", ID: "p1", Node: rewrite, PrevNode: read})
+	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the editor first.and more" {
+		t.Errorf("the agent's line is %q", got)
+	}
+	// What the op took away, the line as the user was composing it, is
+	// kept first.
+	hist, err := st.History(p.ID)
+	if err != nil || len(hist) != 1 || hist[0].Reason != "conflict" {
+		t.Fatalf("history %+v: %v", hist, err)
+	}
+}
+
+// An op of a run that read the page while the user composed in it holds
+// the composition as the run read it: given up as the op changes its
+// block, it goes from the op's text, as the input method composes it on at
+// the caret. An op of a run that read the page before keeps its text, the
+// page saved with the composition since or not.
+func TestOpOfARunThatReadTheCompositionTakesItOut(t *testing.T) {
+	st := openStore(t)
+	p, ed := openPage(t, st)
+	open, _ := live.Open(st, p.ID, live.Options{})
+	open.Attach(liveEditor{ed})
+	h := NewHub(st, nil, stubHost{})
+	local := Option{Provider: store.Provider{ID: "ollama", IsLocal: true}}
+	rewrite := func(text string) doc.Op {
+		was := ed.Content.Find("p1").Clone()
+		n := was.Clone()
+		n.SetDelta(doc.Delta{{Text: text}})
+		return doc.Op{Op: "replace", ID: "p1", Node: n, PrevNode: was}
+	}
+
+	before, _ := open.Composition()
+	op := rewrite("Ship the editor first.and more")
+	ed.PlaceCaret("p1", -1)
+	ed.SetMarkedText(nil, "an", ui.TextInputRange{Start: 2, End: 2})
+	_ = open.Doc() // a save
+	d := h.newDelivery(p.ID, &Run{ID: "r1"}, local)
+	d.read = before
+	d.apply(open, op)
+	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the editor first.and more" {
+		t.Errorf("the line of a run that read it before the composition is %q", got)
+	}
+
+	ed.PlaceCaret("p1", -1)
+	ed.SetMarkedText(nil, "an", ui.TextInputRange{Start: 2, End: 2})
+	composing, _ := open.Composition()
+	if composing == 0 {
+		t.Fatal("no composition")
+	}
+	op = rewrite("Ship the editor first.and morean, then the rest.")
+	d = h.newDelivery(p.ID, &Run{ID: "r2"}, local)
+	d.read = composing
+	d.apply(open, op)
+	if got := ed.Content.Find("p1").Delta().Plain(); got != "Ship the editor first.and more, then the rest." {
+		t.Errorf("the line of a run that read the composition is %q", got)
+	}
 }
 
 // A local run on an open page keeps the page as it was in history when
@@ -1410,6 +1498,38 @@ func TestPublicLinkLeases(t *testing.T) {
 	NewHub(st, nil, stubHost{}).ServePublicLink("p1")()
 }
 
+// Signed out, the pages go to other devices through iCloud Drive, where a
+// device serving a public link says so (ICloudLease), and the others read
+// it (ICloudLinks): a lease counts by that device's clock, which may be
+// off from this one's by iCloudLinkDrift, for the page alone, and for a
+// workspace run's pages too.
+func TestPublicLinkThroughICloud(t *testing.T) {
+	st := openStore(t)
+	h := NewHub(st, nil, stubHost{})
+	var leased []string
+	h.ICloudLease = func(id string) func() {
+		leased = append(leased, id)
+		return func() { leased = append(leased, "stop "+id) }
+	}
+	h.ServePublicLink("p1")()
+	if !slices.Equal(leased, []string{"p1", "stop p1"}) {
+		t.Errorf("leases %q", leased)
+	}
+	now := time.Now()
+	h.ICloudLinks = func() map[string]time.Time {
+		return map[string]time.Time{"p1": now.Add(time.Hour), "p2": now.Add(-iCloudLinkDrift / 2), "p3": now.Add(-2 * iCloudLinkDrift)}
+	}
+	ctx := context.Background()
+	for id, want := range map[string]bool{"p1": true, "p2": true, "p3": false, "p4": false} {
+		if got := h.publicElsewhere(ctx, id, true); got != want {
+			t.Errorf("%s: public %v, want %v", id, got, want)
+		}
+	}
+	if got := h.publicElsewhereIn(ctx, st.Session().SpaceID, true); len(got) != 2 || !got["p1"] || !got["p2"] {
+		t.Errorf("a workspace run's pages with a link: %v", got)
+	}
+}
+
 // serialHost is a host that lets agents read other pages, and runs its
 // updates one at a time, as the main thread does.
 type serialHost struct {
@@ -1464,6 +1584,119 @@ func TestRunOnAPageLinkedElsewhere(t *testing.T) {
 		f.mu.Unlock()
 		if offered := strings.Contains(string(raw), `"list_pages"`); offered == live {
 			t.Errorf("linked elsewhere %v: other pages offered %v", live, offered)
+		}
+	}
+}
+
+// A run reads again whether its page has a public link before each call
+// that reads beyond the page, and, once it has read beyond it, before each
+// that writes there: once a call to it, and not again once it has one.
+func TestRunReadsItsPagesLinkOncePerCall(t *testing.T) {
+	x := executor(page())
+	x.Ctx.ListPages = func() []map[string]any { return []map[string]any{} }
+	x.Ctx.ReadOtherPage = func(id string) map[string]any { return map[string]any{"page": map[string]any{"id": id}} }
+	x.Ctx.ListFolders = func() []map[string]any { return []map[string]any{} }
+	checks, linked := 0, false
+	x.Ctx.LinkedNow = func() bool {
+		checks++
+		return linked
+	}
+	insert := map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "paragraph", "text": "x"}}}
+	for _, c := range []struct {
+		tool   string
+		args   map[string]any
+		link   bool
+		ok     bool
+		checks int
+	}{
+		{"insert_blocks", insert, false, true, 0},
+		{"list_folders", nil, false, true, 1},
+		{"read_other_page", map[string]any{"page_id": "other"}, false, true, 2},
+		{"insert_blocks", insert, false, true, 3},
+		{"list_pages", nil, true, false, 4},
+		{"insert_blocks", insert, true, false, 4},
+	} {
+		linked = c.link
+		out := x.Call(c.tool, c.args)
+		if (out["error"] == nil) != c.ok || checks != c.checks {
+			t.Errorf("%s with a link %v: %v, %d checks, want ok %v and %d", c.tool, c.link, out, checks, c.ok, c.checks)
+		}
+	}
+	if !x.ended {
+		t.Error("the run goes on writing to a page others read now")
+	}
+}
+
+// A public link started on a run's page as it works, on another device as
+// the server says, keeps the run to its page: it reads no other page from
+// then on, the model told why, and one that read another page already
+// ends before it writes here, keeping what it did, as a run the user
+// stopped does.
+func TestRunKeepsToItsPageLinkedSince(t *testing.T) {
+	insert := map[string]any{"position": map[string]any{"at": "end"}, "blocks": []any{map[string]any{"type": "paragraph", "text": "More"}}}
+	for _, read := range []bool{true, false} {
+		st := openStore(t)
+		l := &leaseServer{}
+		hs := httptest.NewServer(l)
+		f := &fakeModel{}
+		other, err := st.CreatePage(store.NewPageOptions{Title: "Other"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if read {
+			f.replies = []map[string]any{
+				{"content": "", "tool_calls": []any{call("read_other_page", map[string]any{"page_id": other.ID})}},
+				{"content": "", "tool_calls": []any{call("insert_blocks", insert), call("list_pages", map[string]any{})}},
+				{"content": "Done."},
+			}
+		} else {
+			f.replies = []map[string]any{
+				{"content": "", "tool_calls": []any{call("list_folders", map[string]any{})}},
+				{"content": "", "tool_calls": []any{call("read_other_page", map[string]any{"page_id": other.ID}), call("insert_blocks", insert)}},
+				{"content": "Done."},
+			}
+		}
+		// The link starts on another device as the model answers the
+		// run's second time.
+		var asked atomic.Int32
+		models := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if asked.Add(1) == 2 {
+				l.mu.Lock()
+				l.live = true
+				l.mu.Unlock()
+			}
+			f.ServeHTTP(w, r)
+		}))
+		if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true, SupportsTools: new(true)}); err != nil {
+			t.Fatal(err)
+		}
+		p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := NewHub(st, remote.SignedInForTest(hs.URL, st, "u1"), serialHost{mu: &sync.Mutex{}})
+		done := make(chan *Run, 1)
+		h.Start(p.ID, RunOptions{Surface: "sidebar", Instruction: "Add what my notes say", Done: func(r *Run) { done <- r }})
+		var run *Run
+		select {
+		case run = <-done:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the run never ended")
+		}
+		models.Close()
+		hs.Close()
+		f.mu.Lock()
+		requests := f.requests
+		f.mu.Unlock()
+		if read {
+			if run.Status != "done" || !run.Stopped || len(run.Ops) != 0 || len(requests) != 2 || Describe(run) != locales.AgentStoppedBefore() {
+				t.Errorf("after reading another page: %s, stopped %v, %d ops, %d answers: %q", run.Status, run.Stopped, len(run.Ops), len(requests), Describe(run))
+			}
+			continue
+		}
+		raw, _ := json.Marshal(requests[len(requests)-1]["messages"])
+		if run.Status != "done" || run.Stopped || len(run.Ops) != 1 || !strings.Contains(string(raw), "This page has a public link now") {
+			t.Errorf("having read no other page: %s, stopped %v, %d ops, told %s", run.Status, run.Stopped, len(run.Ops), raw)
 		}
 	}
 }

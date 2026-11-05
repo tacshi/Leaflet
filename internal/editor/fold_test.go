@@ -405,6 +405,103 @@ func TestReplaceKeepsUndo(t *testing.T) {
 	}
 }
 
+// Going back past a change from outside that took every block the step
+// did not make leaves the page an empty paragraph for the caret, as every
+// edit does: with none, typing went nowhere, and the keys to the page's
+// first and last blocks found no block.
+func TestUndoPastAChangeFromOutsideKeepsABlock(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("hello")
+	tt.Key(0, ui.KeyEnter)
+	tt.Type("world")
+	// Another device takes the first line out.
+	next := e.Content.Copy()
+	next.Remove(next.Children[0].ID)
+	e.Replace(next)
+	e.Undo() // the typing of "world"
+	e.Undo() // the new line, which was all the first line left
+	tt.Frame()
+	if len(e.Content.Children) != 1 || e.node(e.focus.ID) == nil || e.anchor != e.focus {
+		t.Fatalf("after undo the page is %v, the caret at %+v", texts(e), e.focus)
+	}
+	tt.Key(ui.Cmd, ui.KeyA)
+	tt.Key(ui.Cmd, ui.KeyDown)
+	tt.Key(ui.Cmd, ui.KeyUp)
+	tt.Type("x")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:x"}) {
+		t.Errorf("typing after undo %v", got)
+	}
+}
+
+// A change from outside to the composition's block takes its text out of
+// the change only where the change can hold it, having been made from the
+// page with the composition in it: content saved with it, or an agent's op
+// written from a read of the page while it was there. An agent's op from a
+// read before it began, saved or not since, has the same text at its
+// place, as its rewrite of the line goes on with it, as its own, which
+// stays.
+func TestChangeToTheCompositionsBlockKeepsItsOwnText(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("hello ")
+	id := e.Content.Children[0].ID
+	tt.Compose("wo", 2)
+	earlier, _ := e.Composition()
+	_ = e.ApplyOp(e.Content.ReplaceOp(id, para("", "hello world")), true)
+	tt.Type("我")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:hello 我world"}) {
+		t.Errorf("composing over an agent's rewrite of the line %v", got)
+	}
+
+	// Saved as it goes, the composition went out with the page; the
+	// agent's op, written from a read during an earlier one, still holds
+	// none of it.
+	e.Edit(func(c *doc.Content) { c.Find(id).SetDelta(doc.Delta{{Text: "hello "}}) })
+	e.PlaceCaret(id, -1)
+	tt.Compose("wo", 2)
+	_ = e.Doc()
+	_ = e.ApplyOpFrom(e.Content.ReplaceOp(id, para("", "hello world")), true, earlier)
+	tt.Type("我")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:hello 我world"}) {
+		t.Errorf("composing over an agent's rewrite of the line, saved since %v", got)
+	}
+
+	// Read while it was in the page, the agent's op holds it, and it goes.
+	e.PlaceCaret(id, -1)
+	tt.Compose("ni", 2)
+	read, _ := e.Composition()
+	_ = e.ApplyOpFrom(e.Content.ReplaceOp(id, para("", "hello 我worldni.")), true, read)
+	tt.Compose("nih", 3)
+	tt.Type("你")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:hello 我world你."}) {
+		t.Errorf("composing on over an op that held the composition %v", got)
+	}
+
+	// Saved with the page, the composition comes back in another device's
+	// change to the line, and goes, as the input method composes it on.
+	e.PlaceCaret(id, -1)
+	tt.Compose("ni", 2)
+	_ = e.Doc()
+	next := e.Content.Copy()
+	next.Find(id).SetDelta(doc.Delta{{Text: "hello 我world你.ni!"}})
+	e.Replace(next)
+	tt.Compose("nih", 3)
+	tt.Type("你")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:hello 我world你.你!"}) {
+		t.Errorf("composing on over a change that held the composition %v", got)
+	}
+
+	// Never gone out with the page, it is in no content from outside.
+	e.PlaceCaret(id, -1)
+	tt.Compose("!", 1)
+	next = e.Content.Copy()
+	next.Find(id).SetDelta(doc.Delta{{Text: "hello 我world你.你!!."}})
+	e.Replace(next)
+	tt.Type("？")
+	if got := texts(e); !slices.Equal(got, []string{"paragraph:hello 我world你.你!？!."}) {
+		t.Errorf("composing over a change made without the composition %v", got)
+	}
+}
+
 // A change from outside to other blocks keeps a composition: MyGo never
 // tells the input method it ended, so it composes on, and its next update
 // replaces it as before. A change to its block gives it up and takes its

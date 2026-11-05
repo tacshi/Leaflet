@@ -21,11 +21,15 @@ import {
 import {
   agentViews,
   applyOps,
+  clampTitle,
   jsonCost,
+  MAX_TITLE,
   MAX_VIEW_HTML,
+  NO_OWN_PAGES,
   type Op,
   overwrites,
   PageEditSession,
+  READ_OTHERS,
   toolDefinitions,
   ToolError,
   type ToolHooks,
@@ -389,19 +393,26 @@ Deno.test("create_page makes a page of its own", async () => {
 });
 
 // Listing the folders reads nothing someone else wrote: the web's links
-// stay the run's to write, as they are before it reads another page.
-Deno.test("list_folders reads nothing beyond the page", async () => {
-  const session = new PageEditSession(sample(), {
+// stay the run's to write, as they are before it reads another page. But
+// it spends the run's one read of the web that may go to any page, which
+// could carry the folders' names: it reads only a page the person gave
+// after, or one it found, as after its first.
+Deno.test("list_folders reads nothing beyond the page, and spends the run's free read", async () => {
+  const read: string[] = [];
+  const web: ToolHooks = {
     ...hooks,
-    readWebPage: (url) =>
-      Promise.resolve({
+    readWebPage: (url) => {
+      read.push(url);
+      return Promise.resolve({
         url,
         title: "Article",
         text: "See https://example.com/found.png",
         links: ["https://example.com/found.png"],
         truncated: false,
-      }),
-  }, { canEdit: true, crossPage: true });
+      });
+    },
+  };
+  const session = new PageEditSession(sample(), web, { canEdit: true, crossPage: true });
   await session.call("read_web_page", { url: "https://example.com/article" });
   assertEquals((await session.call("list_folders", {})).result, { folders: [{ id: "folder-1", name: "Clippings" }] });
   assertEquals(session.keptToPage, true);
@@ -410,11 +421,73 @@ Deno.test("list_folders reads nothing beyond the page", async () => {
     blocks: [{ type: "paragraph", text: "See https://example.com/found.png" }],
   });
   assertEquals((out.result as { error?: string }).error, undefined);
+  const first = new PageEditSession(sample(), web, {
+    canEdit: true,
+    crossPage: true,
+    request: "Save https://example.com/given",
+  });
+  await first.call("list_folders", {});
+  assertEquals([first.keptToPage, first.guarded], [true, true]);
+  const refused = ((await first.call("read_web_page", { url: "https://elsewhere.example/?f=Clippings" })).result as {
+    error?: string;
+  }).error;
+  assert(refused?.startsWith("After reading the web, read only"), refused);
+  assertEquals(
+    ((await first.call("read_web_page", { url: "https://example.com/given" })).result as { url: string }).url,
+    "https://example.com/given",
+  );
+  assertEquals(read, ["https://example.com/article", "https://example.com/given"]);
   const off = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false });
   assertEquals(
     ((await off.call("list_folders", {})).result as { error?: string }).error,
     "Reading other pages is turned off for this user",
   );
+});
+
+// A run that read another page someone else writes or reads makes no page
+// of the person's own after, nor a subpage of this page, which is one of
+// theirs too: what they wrote would go into it. One that read only the
+// person's own does.
+Deno.test("a run that read a page someone else has makes no page of the person's own", async () => {
+  for (const alone of [false, true]) {
+    const asked: string[] = [];
+    const session = new PageEditSession(sample(), {
+      ...hooks,
+      pageAlone: (id) => {
+        asked.push(id);
+        return Promise.resolve(alone);
+      },
+    }, { canEdit: true, crossPage: true });
+    await session.call("read_other_page", { page_id: "page-9" });
+    await session.call("read_other_page", { page_id: "page-8" });
+    const errors = await Promise.all(
+      ["create_page", "create_subpage"].map(async (tool) =>
+        ((await session.call(tool, { title: "Copy" })).result as { error?: string }).error
+      ),
+    );
+    assertEquals(errors, alone ? [undefined, undefined] : [READ_OTHERS, READ_OTHERS], `alone ${alone}`);
+    // Once one is someone else's, the rest are not asked of.
+    assertEquals(asked, alone ? ["page-9", "page-8"] : ["page-9"]);
+  }
+  const shared = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false, ownPages: false });
+  assertEquals(
+    ((await shared.call("create_page", { title: "Copy" })).result as { error?: string }).error,
+    NO_OWN_PAGES,
+  );
+});
+
+// A new page's blocks, in Markdown or as blocks, are as many as one call
+// makes, as write_markdown's are (doc.CallNodes).
+Deno.test("a new page's Markdown makes at most a call's blocks", async () => {
+  const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false });
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => `para ${i}`).join("\n");
+  for (const tool of ["create_page", "create_subpage"]) {
+    const over = await session.call(tool, { title: "Long", markdown: lines(MAX_SPEC_NODES + 1) });
+    assertEquals((over.result as { error?: string }).error, `At most ${MAX_SPEC_NODES} blocks in all per call`, tool);
+    assertEquals(over.ops, [], tool);
+  }
+  const fits = await session.call("create_page", { title: "Long", markdown: lines(MAX_SPEC_NODES) });
+  assertEquals((fits.result as { error?: string }).error, undefined);
 });
 
 Deno.test("views flatten nesting and fold tables", () => {
@@ -1750,4 +1823,19 @@ Deno.test("values are counted as Go counts them", async () => {
   const made = values.map((value) => ({ value, cost: jsonCost(value) }));
   for (const { value, cost } of made) assert(JSON.stringify(value).length <= cost, JSON.stringify(value));
   await fixture("json_costs.json", made, jsonCosts);
+});
+
+// A title longer than the pages table takes is cut to MAX_TITLE
+// characters, counted as code points as the database counts them, so the
+// page is made with it rather than refused.
+Deno.test("a new page's title is cut to the longest the pages table takes", async () => {
+  const session = new PageEditSession(sample(), hooks, { canEdit: true, crossPage: false });
+  const long = "😀".repeat(MAX_TITLE + 500);
+  for (const tool of ["create_page", "create_subpage"]) {
+    const out = await session.call(tool, { title: long });
+    const made = out.ops.find((o) => o.op === "create_page") as Extract<Op, { op: "create_page" }>;
+    assertEquals([...made.page.title].length, MAX_TITLE, tool);
+    assertEquals(made.page.title, "😀".repeat(MAX_TITLE), tool);
+  }
+  assertEquals(clampTitle("Plan"), "Plan");
 });

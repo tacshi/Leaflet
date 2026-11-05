@@ -81,6 +81,47 @@ func TestResolveConflict(t *testing.T) {
 	}
 }
 
+// item is a list item with text and the blocks under it.
+func item(id, text string, kids ...*doc.Node) *doc.Node {
+	n := block(id, text)
+	n.Type = "bulleted_list"
+	n.Children = kids
+	return n
+}
+
+// A version put back is of the block alone: what is under it stays as
+// the page has it, as the other device added it or the user moved it out
+// since, not as the merge found it; and a block deleted since comes back
+// without what of it the page has elsewhere.
+func TestResolveConflictKeepsWhatIsUnder(t *testing.T) {
+	f := newPagesFixture(t)
+	p := f.page(t, "Plans", "", item("x", "Theirs", item("a1", "child"), item("r1", "added there")))
+	cf := f.conflict(t, p.ID, doc.Conflict{BlockID: "x", Local: item("x", "Mine", item("a1", "child")),
+		Remote: item("x", "Theirs", item("a1", "child"), item("r1", "added there")), LocalEditedAt: 1, RemoteEditedAt: 2})
+	if err := f.ResolveConflict(cf.ID, UseThisDevice); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.st.Content(p.ID).PlainText(); got != "Mine\nchild\nadded there" {
+		t.Errorf("put back %q", got)
+	}
+
+	// The user moves a1 out, deletes x, and puts this device's x back.
+	if err := f.EditPage(p.ID, func(c *doc.Content) bool {
+		_ = c.Move("a1", doc.Position{At: "start"})
+		c.Remove("x")
+		return true
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cf = f.conflict(t, p.ID, doc.Conflict{BlockID: "x", Local: item("x", "Mine", item("a1", "child")), Remote: item("x", "Theirs"), LocalEditedAt: 1, RemoteEditedAt: 2})
+	if err := f.ResolveConflict(cf.ID, UseThisDevice); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.st.Content(p.ID).PlainText(); got != "child\nMine" {
+		t.Errorf("put back after a delete %q", got)
+	}
+}
+
 // A conflict whose version kept is this device's, the newer, can bring
 // back the other device's: keeping the newer would keep this one's again.
 func TestResolveConflictWithTheOtherDevicesVersion(t *testing.T) {

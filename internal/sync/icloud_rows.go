@@ -141,6 +141,10 @@ func (s *Service) applyRow(e icloud.Entry, changed map[string]bool) error {
 	if _, ok := r["space_id"]; ok {
 		r["space_id"] = s.st.Session().SpaceID
 	}
+	// Another device's change, which the server may not have: the row is no
+	// longer the server's copy, and goes up as this device's pages join an
+	// account (newerThere).
+	r[store.PeerKey] = true
 	if err := s.putRow(e.Table, r, s.putCloudPage); err != nil {
 		return err
 	}

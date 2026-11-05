@@ -223,14 +223,9 @@ struct CommentRow: View {
                 // desktop shows it.
                 Text(L.panelCommentDeleted).font(.subheadline).foregroundStyle(palette.textMuted)
             } else {
-                Text(
-                    (try? AttributedString(
-                        markdown: comment.body,
-                        options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-                        ?? AttributedString(comment.body)
-                )
-                .font(.subheadline)
-                .textSelection(.enabled)
+                Text(Self.text(comment.body))
+                    .font(.subheadline)
+                    .textSelection(.enabled)
             }
         }
         .contextMenu {
@@ -238,6 +233,22 @@ struct CommentRow: View {
                 deleteButton
             }
         }
+    }
+
+    /// text is a comment's text, its inline Markdown read, with only the
+    /// links the page itself opens (EditorStyle.linkTarget): a web, mail
+    /// or page link. Whoever comments, a guest by a public link too, could
+    /// otherwise link a file, or another app to do as the link says.
+    static func text(_ body: String) -> AttributedString {
+        var out =
+            (try? AttributedString(
+                markdown: body, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(body)
+        let links = out.runs[\.link].compactMap { link, range in link.map { ($0, range) } }
+        for (link, range) in links {
+            out[range].link = EditorStyle.linkTarget([.leafletHref: link.absoluteString])
+        }
+        return out
     }
 
     /// deleteButton deletes the comment.

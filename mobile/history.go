@@ -296,8 +296,23 @@ func (c *Core) AddFile(pageID, path string) (_ string, err error) {
 // loading refuses. It waits on the network.
 func (c *Core) Picture(link string) (_ []byte, err error) {
 	defer catch(&err)
-	return web.Fetch(link)
+	return c.PictureCancellable(link, 0)
 }
+
+// PictureCancellable is Picture, which the app may give up on by token,
+// as Cancel says, 0 for never: a picture whose page closed, or that left
+// the window, stops waiting on a slow site, and leaves its turn to the
+// pictures still to show.
+func (c *Core) PictureCancellable(link string, token int64) (_ []byte, err error) {
+	defer catch(&err)
+	ctx, done := c.cancellable(token, time.Minute)
+	defer done()
+	return fetchPicture(ctx, link)
+}
+
+// fetchPicture reads a picture from the web, as web.FetchContext does.
+// Tests replace it.
+var fetchPicture = web.FetchContext
 
 // LocalFile returns the path on this device of a file kept with a page,
 // by the file_id of the block that shows it, downloading it first when

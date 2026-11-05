@@ -13,13 +13,13 @@ CREATE TABLE IF NOT EXISTS spaces (
 CREATE TABLE IF NOT EXISTS folders (
   id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_folder_id TEXT, name TEXT NOT NULL,
   sort_key TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
-  default_template_id TEXT);
+  default_template_id TEXT, pulled_at INTEGER);
 CREATE TABLE IF NOT EXISTS pages (
   id TEXT PRIMARY KEY, space_id TEXT NOT NULL, parent_id TEXT, folder_id TEXT,
   title TEXT NOT NULL DEFAULT '', icon TEXT, sort_key TEXT NOT NULL, created_by TEXT,
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER,
   keep_offline INTEGER NOT NULL DEFAULT 1, is_template INTEGER NOT NULL DEFAULT 0,
-  tags TEXT NOT NULL DEFAULT '[]', default_template_id TEXT);
+  tags TEXT NOT NULL DEFAULT '[]', default_template_id TEXT, pulled_at INTEGER);
 CREATE INDEX IF NOT EXISTS pages_space ON pages (space_id, parent_id);
 CREATE INDEX IF NOT EXISTS pages_parent ON pages (parent_id, sort_key);
 CREATE TABLE IF NOT EXISTS page_contents (
@@ -31,17 +31,17 @@ CREATE TABLE IF NOT EXISTS comments (
   id TEXT PRIMARY KEY, page_id TEXT NOT NULL, block_id TEXT NOT NULL, parent_comment_id TEXT,
   author_id TEXT, author_kind TEXT NOT NULL DEFAULT 'user', author_name TEXT NOT NULL DEFAULT '',
   body TEXT NOT NULL, quote TEXT, resolved INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER);
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, pulled_at INTEGER);
 CREATE INDEX IF NOT EXISTS comments_page ON comments (page_id, block_id);
 CREATE TABLE IF NOT EXISTS recordings (
   id TEXT PRIMARY KEY, page_id TEXT NOT NULL, block_id TEXT NOT NULL, audio_path TEXT, local_path TEXT,
   duration_ms INTEGER NOT NULL DEFAULT 0, stt_provider TEXT NOT NULL DEFAULT '', stt_model TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'recording', transcript TEXT NOT NULL DEFAULT '[]', language TEXT, error TEXT,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, uploaded_at INTEGER);
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, uploaded_at INTEGER, pulled_at INTEGER);
 CREATE TABLE IF NOT EXISTS files (
   id TEXT PRIMARY KEY, space_id TEXT NOT NULL, folder_id TEXT, page_id TEXT, name TEXT NOT NULL,
   storage_path TEXT, local_path TEXT, mime_type TEXT NOT NULL DEFAULT '', size_bytes INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER);
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, pulled_at INTEGER);
 CREATE TABLE IF NOT EXISTS ai_jobs (
   id TEXT PRIMARY KEY, page_id TEXT NOT NULL, surface TEXT NOT NULL, focus_block_ids TEXT NOT NULL DEFAULT '[]',
   comment_id TEXT, conversation_id TEXT, provider_id TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL,
@@ -189,6 +189,16 @@ var migrations = []func(context.Context, *sql.Conn) error{
 			}
 		}
 		return nil
+	},
+	// 9: the server's time of each synced row this device took from the
+	// server and has not changed since (pulled_at). A row from before has
+	// none, and counts as changed here, as every row did until now.
+	func(ctx context.Context, c *sql.Conn) error {
+		var cols [][3]string
+		for _, t := range pulledTables {
+			cols = append(cols, [3]string{t, "pulled_at", "INTEGER"})
+		}
+		return addColumns(ctx, c, cols)
 	},
 }
 

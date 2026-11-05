@@ -92,6 +92,9 @@ func (a *App) setICloud(on bool) {
 		a.update(func() {
 			a.icloudBusy = false
 			c.KeepICloud(on && err == nil)
+			// A public link served now says so in iCloud Drive, or there
+			// no more.
+			a.leasePub()
 			if err != nil {
 				a.toast(a.iCloudFailed(err))
 			}

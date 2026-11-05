@@ -1104,8 +1104,15 @@ func TestFrameWithSelectionIsLinear(t *testing.T) {
 		for range 5 {
 			runtime.GC()
 			start := time.Now()
-			tt.Frame()
-			best = min(best, time.Since(start))
+			// Until the clock has moved far enough to read: Windows' moves in
+			// ticks, and reads 0 for what ends within one.
+			for runs := 1; ; runs++ {
+				tt.Frame()
+				if took := time.Since(start); took >= 32*time.Millisecond {
+					best = min(best, took/time.Duration(runs))
+					break
+				}
+			}
 		}
 		return best
 	}

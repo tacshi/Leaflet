@@ -1716,13 +1716,20 @@ func TestMergeIsLinear(t *testing.T) {
 
 // bestInTurns times small and large in turns, five times each, and gives
 // the best time of each: a load on the machine meanwhile, as the other
-// packages' tests running beside these, slows both alike, not one.
+// packages' tests running beside these, slows both alike, not one. Each
+// runs again until the clock has moved far enough to read, and its time is
+// that of one run: Windows' clock moves in ticks, and reads 0 for what ends
+// within one.
 func bestInTurns(small, large func()) (time.Duration, time.Duration) {
 	timed := func(fn func()) time.Duration {
 		runtime.GC()
 		start := time.Now()
-		fn()
-		return time.Since(start)
+		for runs := 1; ; runs++ {
+			fn()
+			if took := time.Since(start); took >= 32*time.Millisecond {
+				return took / time.Duration(runs)
+			}
+		}
 	}
 	bestSmall, bestLarge := time.Duration(math.MaxInt64), time.Duration(math.MaxInt64)
 	for range 5 {

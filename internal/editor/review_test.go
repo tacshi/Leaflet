@@ -261,11 +261,18 @@ func TestTabOverASelectionIsLinear(t *testing.T) {
 		for range 3 {
 			runtime.GC()
 			start := time.Now()
-			// The first block has none before it to go under, and the page's
-			// are in none to come out of.
-			e.Indent()
-			e.Outdent()
-			best = min(best, time.Since(start))
+			// Until the clock has moved far enough to read: Windows' moves in
+			// ticks, and reads 0 for what ends within one.
+			for runs := 1; ; runs++ {
+				// The first block has none before it to go under, and the
+				// page's are in none to come out of.
+				e.Indent()
+				e.Outdent()
+				if took := time.Since(start); took >= 32*time.Millisecond {
+					best = min(best, took/time.Duration(runs))
+					break
+				}
+			}
 		}
 		return best
 	}

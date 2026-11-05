@@ -359,11 +359,16 @@ type pageState struct {
 	// scroll is where the page is scrolled to, and view its scroll area,
 	// whose box in the window its Bounds gives. scrollTo is a block to
 	// bring to the top of it once the page has laid it out, scrollWait the
-	// frames it has waited for that.
+	// frames it has waited for that. held is the block brought there,
+	// kept there until heldUntil while what is above it loads, unless the
+	// page scrolls from heldAt, where it was put.
 	scroll     ui.ScrollState
 	view       ui.Handle
 	scrollTo   string
 	scrollWait int
+	held       string
+	heldUntil  time.Time
+	heldAt     float32
 	// fullDiagram is the diagram block filling the page's body, if one
 	// is.
 	fullDiagram string

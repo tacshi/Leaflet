@@ -88,7 +88,7 @@ func (a *App) goToBlock(id string, focus bool) {
 	if focus {
 		ps.editor.Focus()
 	}
-	ps.scrollTo, ps.scrollWait = id, 0
+	ps.scrollTo, ps.scrollWait, ps.held = id, 0, ""
 	if a.win != nil {
 		a.win.Invalidate()
 	}
@@ -210,16 +210,21 @@ const scrollMargin = 24
 // laid out, as one hidden never is.
 const scrollWaitMax = 10
 
+// scrollHold is how long scrollToBlock keeps a block it brought to the
+// top of the page there, as pictures and embeds above it load and push
+// it down, unless the page is scrolled meanwhile.
+const scrollHold = 5 * time.Second
+
 // scrollToBlock brings the block asked for to the top of the page, once
-// the page has laid it out.
+// the page has laid it out, and holds it there for scrollHold.
 func (a *App) scrollToBlock(c *ui.Context) {
 	ps := a.page
 	if ps.scrollTo == "" {
+		a.holdBlock(c)
 		return
 	}
-	top, ok := ps.editor.BlockTop(ps.scrollTo)
-	view := ps.view.Bounds(c)
-	if !ok || view.H == 0 {
+	y, ok := ps.scrollFor(c, ps.scrollTo)
+	if !ok {
 		// Not laid out yet: the next frame has it.
 		if ps.scrollWait++; ps.scrollWait > scrollWaitMax {
 			ps.scrollTo = ""
@@ -230,8 +235,45 @@ func (a *App) scrollToBlock(c *ui.Context) {
 		}
 		return
 	}
-	ps.scroll.Y = max(ps.scroll.Y+top-view.Y-scrollMargin, 0)
+	ps.scroll.Y = y
+	ps.held, ps.heldUntil, ps.heldAt = ps.scrollTo, c.Now().Add(scrollHold), y
 	ps.scrollTo = ""
+}
+
+// holdBlock keeps the block scrollToBlock brought to the top of the page
+// there as what is above it grows, until the page is scrolled from where
+// it was put: the page's end, short of that, is where the page keeps it.
+func (a *App) holdBlock(c *ui.Context) {
+	ps := a.page
+	if ps.held == "" {
+		return
+	}
+	atEnd := ps.scroll.Y == ps.scroll.MaxY
+	if c.Now().After(ps.heldUntil) || ps.scroll.Y != ps.heldAt && !(atEnd && ps.heldAt > ps.scroll.MaxY) {
+		ps.held = ""
+		return
+	}
+	y, ok := ps.scrollFor(c, ps.held)
+	if !ok {
+		return
+	}
+	// There already, or as near as the page's end lets it be.
+	if d := y - ps.scroll.Y; d > -1 && d < 1 || atEnd && y > ps.scroll.MaxY {
+		ps.heldAt = ps.scroll.Y
+		return
+	}
+	ps.scroll.Y, ps.heldAt = y, y
+}
+
+// scrollFor is how far to scroll the page for block id to be at its top,
+// and whether the page has laid the block out.
+func (ps *pageState) scrollFor(c *ui.Context, id string) (float32, bool) {
+	top, ok := ps.editor.BlockTop(id)
+	view := ps.view.Bounds(c)
+	if !ok || view.H == 0 {
+		return 0, false
+	}
+	return max(ps.scroll.Y+top-view.Y-scrollMargin, 0), true
 }
 
 // currentHeading is the last heading shown at or above line, the top of

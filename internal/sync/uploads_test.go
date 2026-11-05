@@ -34,6 +34,10 @@ type storageServer struct {
 	closing chan struct{}
 	// refuse has it refuse every key.
 	refuse bool
+	// reads, while set, keeps each read unanswered, once an upload began,
+	// until it closes; began says one did.
+	reads chan struct{}
+	began bool
 }
 
 var validKey = regexp.MustCompile(`^[A-Za-z0-9_/!.*'() &$=@;:+,?-]*$`)
@@ -44,6 +48,9 @@ func (s *storageServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	hold, unread := s.hold, s.unread
 	s.mu.Unlock()
 	if key, ok := strings.CutPrefix(r.URL.Path, "/storage/v1/object/files/"); ok && r.Method == http.MethodPost {
+		s.mu.Lock()
+		s.began = true
+		s.mu.Unlock()
 		if unread != "" && strings.Contains(key, unread) {
 			<-s.closing
 			return
@@ -78,6 +85,15 @@ func (s *storageServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		_ = json.NewEncoder(w).Encode([]map[string]any{row})
 		return
+	}
+	s.mu.Lock()
+	reads := s.reads
+	if !s.began {
+		reads = nil
+	}
+	s.mu.Unlock()
+	if reads != nil {
+		<-reads
 	}
 	_, _ = io.WriteString(w, "[]")
 }
@@ -452,6 +468,36 @@ func TestDrainWaitsForAnUploadToEnd(t *testing.T) {
 	release := make(chan struct{})
 	srv.hold = release
 	time.AfterFunc(100*time.Millisecond, func() { close(release) })
+	if err := svc.Drain(); err != nil {
+		t.Fatal(err)
+	}
+	if st.PendingCount() != 0 || len(srv.rowsOf("files")) != 1 {
+		t.Errorf("%d queued, rows %v", st.PendingCount(), srv.rowsOf("files"))
+	}
+}
+
+// An upload that ends while the pass that left it is still pulling is
+// over by the time the pass is: the row that waited for it goes all the
+// same, however slow the pull.
+func TestDrainTakesARowAfterAnUploadThatEndedInThePass(t *testing.T) {
+	shortened(t, 10*time.Millisecond, time.Minute)
+	st := openStore(t)
+	f := addedFile(t, st, "film.mov", 0)
+	svc, srv := uploading(t, st)
+	release, reads := make(chan struct{}), make(chan struct{})
+	srv.hold, srv.reads = release, reads
+	entity, deadline := "files/"+f.ID, time.Now().Add(5*time.Second)
+	go func() {
+		defer close(reads)
+		for !svc.uploadRuns(entity) && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+		time.Sleep(50 * time.Millisecond)
+		close(release)
+		for svc.uploadRuns(entity) && time.Now().Before(deadline) {
+			time.Sleep(time.Millisecond)
+		}
+	}()
 	if err := svc.Drain(); err != nil {
 		t.Fatal(err)
 	}

@@ -76,8 +76,9 @@ type Service struct {
 	// cut cancels the pass running, loop's or SyncNow's, for Stop to cut
 	// it short; nil between passes.
 	cut context.CancelFunc
-	// uploading is the upload under way, nil while none is; guarded by mu.
-	uploading *upload
+	// uploading is the upload under way, nil while none is, and lastUpload
+	// the one started last, which may have ended; guarded by mu.
+	uploading, lastUpload *upload
 	// contentsAt is how many pages' content a request fetches now, 0 for
 	// contentBatch, fewer after one took too long (fetchContents);
 	// contentsAsked says this pull asked for some, and contentsSlow that a

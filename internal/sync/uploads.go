@@ -59,20 +59,25 @@ type upload struct {
 // Drain sends what waits to go up, as signing out does before it counts
 // what has not: a pass, and for an upload that goes on past the wait of
 // its push, up to drainWait for it to end, and another pass for what waited
-// for it, as its file's row. An upload that ends without its file gone up,
-// as one the server stopped taking (uploadStall), ends the wait: what is
-// still queued then is for the caller to count.
+// for it, as its file's row, until a pass starts none. The upload that
+// counts is the one started last, not one under way: it may end before
+// the pass that left it does, with what waited for it still queued. An
+// upload that ends without its file gone up, as one the server stopped
+// taking (uploadStall), ends the wait: what is still queued then is for
+// the caller to count.
 func (s *Service) Drain() error {
 	limit := time.NewTimer(drainWait)
 	defer limit.Stop()
+	var seen *upload
 	for {
 		err := s.SyncNow()
 		s.mu.Lock()
-		up := s.uploading
+		up := s.lastUpload
 		s.mu.Unlock()
-		if up == nil {
+		if up == seen {
 			return err
 		}
+		seen = up
 		select {
 		case <-up.done:
 		case <-limit.C:
@@ -126,7 +131,7 @@ func (s *Service) startUpload(uid string, e store.OutboxEntry, payload map[strin
 	}
 	ctx, stop := context.WithCancelCause(base)
 	up := &upload{entity: e.EntityID, stop: stop, done: make(chan struct{})}
-	s.uploading = up
+	s.uploading, s.lastUpload = up, up
 	guard.Go(func() { s.watchUpload(ctx, up, session, stall) })
 	guard.Go(func() { s.runUpload(ctx, up, uid, e, payload) })
 	return up

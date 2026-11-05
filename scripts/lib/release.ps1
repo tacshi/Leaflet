@@ -95,6 +95,28 @@ function Get-GoArch([string]$Arch) {
 	}
 }
 
+# Build-Cli builds the command line for the app named $Name, version
+# $Version, on Go's architecture $GoArch (cmd/leaflet), into what the app
+# ships as bin\<command>.exe: the app is a GUI program, which a terminal
+# neither waits for nor shows the output of. Its name is the app's, in
+# lower case with dashes, as cli.CommandName has it: leaflet, or
+# leaflet-debug beside it. MyGo signs it with the app.
+function Build-Cli([string]$Name, [string]$Version, [string]$GoArch) {
+	$bin = Join-Path $RootDir "resources\windows-$GoArch\bin"
+	$cmd = ($Name.Trim().ToLowerInvariant() -split '\s+') -join '-'
+	# The other build's command must not ship in this one.
+	if (Test-Path $bin) { Remove-Item -Recurse -Force $bin }
+	Info "building $cmd.exe for windows/$GoArch"
+	$saved = @{ GOOS = $env:GOOS; GOARCH = $env:GOARCH; CGO_ENABLED = $env:CGO_ENABLED }
+	$env:GOOS, $env:GOARCH, $env:CGO_ENABLED = 'windows', $GoArch, '0'
+	try {
+		& go build -trimpath -ldflags "-s -w -X 'main.appName=$Name' -X 'main.version=$Version' $env:MYGO_LDFLAGS" -o (Join-Path $bin "$cmd.exe") ./cmd/leaflet
+		if ($LASTEXITCODE -ne 0) { Fail "building $cmd.exe failed" }
+	} finally {
+		foreach ($key in $saved.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key]) }
+	}
+}
+
 # Get-HostArch returns this machine's architecture, arm64 or x64.
 function Get-HostArch {
 	switch ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture) {

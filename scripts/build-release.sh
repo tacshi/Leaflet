@@ -213,6 +213,11 @@ if $MAC; then
 	"$ROOT_DIR/scripts/build-speech.sh" "${SPEECH_ARCHES[@]}"
 fi
 
+# The command line, which the Windows apps ship beside them.
+if $WIN; then
+	for arch in "${WIN_ARCHES[@]}"; do build_cli "$(config_value name)" "$VERSION" "$(goarch "$arch")"; done
+fi
+
 info "building Leaflet $VERSION for ${PLATFORMS[*]}"
 go tool mygo build -platform "$(
 	IFS=,

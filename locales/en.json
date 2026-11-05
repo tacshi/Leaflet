@@ -5092,6 +5092,112 @@
       }
     }
   },
+  "externalCommandLine": "Command line",
+  "@externalCommandLine": {
+    "description": "Settings › External agents: the label over the command line's card."
+  },
+  "externalCommandTitle": "The {command} command",
+  "@externalCommandTitle": {
+    "description": "Settings › External agents: the command line's row; command is its name, as typed in a terminal, not translated.",
+    "placeholders": {
+      "command": {
+        "type": "String",
+        "example": "leaflet"
+      }
+    }
+  },
+  "externalCommandDesc": "Find, read, make and add to your pages from a terminal, and in scripts.",
+  "@externalCommandDesc": {
+    "description": "Settings › External agents: under the command line's row, while it is not installed."
+  },
+  "externalCommandInstalled": "Installed · run {command} --help in a terminal",
+  "@externalCommandInstalled": {
+    "description": "Settings › External agents: the command line, installed on a Mac; command is its name, not translated.",
+    "placeholders": {
+      "command": {
+        "type": "String",
+        "example": "leaflet"
+      }
+    }
+  },
+  "externalCommandOnPath": "Added to your Path · run {command} --help in a new terminal",
+  "@externalCommandOnPath": {
+    "description": "Settings › External agents: the command line, installed on Windows, whose terminals find it once opened again; “Path” is Windows' list of the folders of commands. command is its name, not translated.",
+    "placeholders": {
+      "command": {
+        "type": "String",
+        "example": "leaflet"
+      }
+    }
+  },
+  "externalCommandOther": "Runs another copy of Leaflet",
+  "@externalCommandOther": {
+    "description": "Settings › External agents: the command line installed for another copy of Leaflet; Update points it at this one."
+  },
+  "externalCommandTaken": "{path} is another program",
+  "@externalCommandTaken": {
+    "description": "Settings › External agents: a file of another program's where the command line would go, which Leaflet leaves as it is.",
+    "placeholders": {
+      "path": {
+        "type": "String",
+        "example": "/usr/local/bin/leaflet"
+      }
+    }
+  },
+  "externalCommandInstall": "Install",
+  "@externalCommandInstall": {
+    "description": "Settings › External agents: the button that installs the command line."
+  },
+  "externalCommandRemove": "Remove",
+  "@externalCommandRemove": {
+    "description": "Settings › External agents: the button that removes the command line."
+  },
+  "externalCommandInstalling": "Installing…",
+  "@externalCommandInstalling": {
+    "description": "Settings › External agents: the button while the command line is installed."
+  },
+  "externalCommandRemoving": "Removing…",
+  "@externalCommandRemoving": {
+    "description": "Settings › External agents: the button while the command line is removed."
+  },
+  "externalCommandPrompt": "Leaflet wants to change the {command} command.",
+  "@externalCommandPrompt": {
+    "description": "macOS's password dialog, when installing or removing the command line needs an administrator; command is its name, not translated.",
+    "placeholders": {
+      "command": {
+        "type": "String",
+        "example": "leaflet"
+      }
+    }
+  },
+  "externalCommandFailed": "Could not install {command}: {error}",
+  "@externalCommandFailed": {
+    "description": "Settings › External agents: a toast when installing the command line failed.",
+    "placeholders": {
+      "command": {
+        "type": "String",
+        "example": "leaflet"
+      },
+      "error": {
+        "type": "String",
+        "example": "permission denied"
+      }
+    }
+  },
+  "externalCommandRemoveFailed": "Could not remove {command}: {error}",
+  "@externalCommandRemoveFailed": {
+    "description": "Settings › External agents: a toast when removing the command line failed.",
+    "placeholders": {
+      "command": {
+        "type": "String",
+        "example": "leaflet"
+      },
+      "error": {
+        "type": "String",
+        "example": "permission denied"
+      }
+    }
+  },
   "signinTitle": "Sync with Supabase",
   "@signinTitle": {
     "description": "The sign-in page's title."

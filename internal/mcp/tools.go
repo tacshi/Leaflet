@@ -531,12 +531,20 @@ func conflictSince(read, now *doc.Content, ops []doc.Op) bool {
 var beforeSave = func(pageID string) {}
 
 // snapshot keeps the page as it was before this client's edits, once per
-// stretch of them: none while the last edit saved is recent.
+// stretch of them: none while the last edit saved is recent, nor while
+// the page's newest snapshot is a recent one of this client's. A client
+// started again for each edit, as the command line is, remembers no edit
+// of its own, and would otherwise keep one a run, pushing the page's
+// older history out.
 func (t *pageTools) snapshot(pageID string, before *doc.Content) error {
 	if last, ok := t.edited[pageID]; ok && doc.NowMs()-last < historyGap.Milliseconds() {
 		return nil
 	}
-	return t.s.st.AddHistory(pageID, before, "agent_run", "", "Before "+t.s.agent)
+	label := "Before " + t.s.agent
+	if h, err := t.s.st.NewestHistory(pageID); err == nil && h.Reason == "agent_run" && h.Label == label && time.Since(h.CreatedAt) < historyGap {
+		return nil
+	}
+	return t.s.st.AddHistory(pageID, before, "agent_run", "", label)
 }
 
 func (t *pageTools) createPage(args map[string]any) (map[string]any, error) {

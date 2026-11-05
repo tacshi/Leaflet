@@ -94,6 +94,7 @@ else
 	command -v makensis >/dev/null 2>&1 || warn "NSIS is not installed, so there will be no installer (brew install makensis)"
 	utf8_locale
 	OUT="build/win-debug"
+	build_cli "$NAME" "$(config_value version)" "$GOARCH"
 	info "building $NAME for windows/$GOARCH"
 	go tool mygo build -debug -platform "windows/$GOARCH" -o "$OUT"
 	[[ -f "$OUT/windows-$GOARCH/$NAME.exe" ]] || die "expected $OUT/windows-$GOARCH/$NAME.exe after the build"

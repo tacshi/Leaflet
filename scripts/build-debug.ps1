@@ -39,6 +39,7 @@ try {
 	# identifier, both from mygo.json, which this build alone sees changed.
 	# Without updates, the app has no updater.
 	Set-Config "name=$Name", "identifier=$(Get-ConfigValue identifier).debug", '-updates'
+	Build-Cli $Name (Get-ConfigValue version) $GoArch
 	Info "building $Name for windows/$GoArch"
 	Invoke-Mygo build, -debug, -platform, "windows/$GoArch", -o, $Out
 } finally {

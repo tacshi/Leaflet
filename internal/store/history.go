@@ -76,6 +76,18 @@ func (s *Store) HistoryEntry(id string) (HistoryEntry, error) {
 	return h, err
 }
 
+// NewestHistory returns a page's newest snapshot, without its content:
+// sql.ErrNoRows when it has none.
+func (s *Store) NewestHistory(pageID string) (HistoryEntry, error) {
+	h := HistoryEntry{PageID: pageID}
+	var job sql.NullString
+	var created int64
+	err := s.db.QueryRow(`SELECT id, reason, ai_job_id, label, created_at FROM page_history WHERE page_id = ?
+		ORDER BY created_at DESC, rowid DESC LIMIT 1`, pageID).Scan(&h.ID, &h.Reason, &job, &h.Label, &created)
+	h.AIJobID, h.CreatedAt = job.String, time.UnixMilli(created)
+	return h, err
+}
+
 // History returns a page's newest 50 snapshots, and the versions named
 // before them.
 func (s *Store) History(pageID string) ([]HistoryEntry, error) {

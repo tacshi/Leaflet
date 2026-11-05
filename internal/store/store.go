@@ -49,9 +49,11 @@ func Open(dir string) (*Store, error) {
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return nil, err
 	}
-	path := filepath.Join(dir, "leaflet.db")
-	return OpenPath(path, dir)
+	return OpenPath(Path(dir), dir)
 }
+
+// Path is the database's file in the data folder dir.
+func Path(dir string) string { return filepath.Join(dir, "leaflet.db") }
 
 // OpenMemory opens an empty database in memory, for tests.
 func OpenMemory(dir string) (*Store, error) {

@@ -94,6 +94,8 @@ try {
 	# The version, the changelog and the certificate go into mygo.json for
 	# this build only.
 	Set-Config $Config
+	# The command line, which the apps ship beside them.
+	foreach ($a in $Arches) { Build-Cli (Get-ConfigValue name) $Version (Get-GoArch $a) }
 	Info "building Leaflet $Version for $($Platforms -join ' ')"
 	Invoke-Mygo $BuildArgs
 } finally {

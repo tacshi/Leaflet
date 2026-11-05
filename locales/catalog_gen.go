@@ -14405,6 +14405,238 @@ func (msgs Messages) ExternalDisconnectFailed(app string, error string) string {
 	return Catalog.Format(msgs.locale, "externalDisconnectFailed", map[string]any{"app": app, "error": error})
 }
 
+// ExternalCommandLine says "Command line"
+// in the language the app shows.
+//
+// Settings › External agents: the label over the command line's card.
+func ExternalCommandLine() string { return In(i18n.Locale()).ExternalCommandLine() }
+
+// ExternalCommandLine says "Command line"
+// in the language of msgs.
+//
+// Settings › External agents: the label over the command line's card.
+func (msgs Messages) ExternalCommandLine() string {
+	return Catalog.Format(msgs.locale, "externalCommandLine", nil)
+}
+
+// ExternalCommandTitle says "The {command} command"
+// in the language the app shows.
+//
+// Settings › External agents: the command line's row; command is its
+// name, as typed in a terminal, not translated.
+func ExternalCommandTitle(command string) string {
+	return In(i18n.Locale()).ExternalCommandTitle(command)
+}
+
+// ExternalCommandTitle says "The {command} command"
+// in the language of msgs.
+//
+// Settings › External agents: the command line's row; command is its
+// name, as typed in a terminal, not translated.
+func (msgs Messages) ExternalCommandTitle(command string) string {
+	return Catalog.Format(msgs.locale, "externalCommandTitle", map[string]any{"command": command})
+}
+
+// ExternalCommandDesc says "Find, read, make and add to your pages from a terminal, and in scripts."
+// in the language the app shows.
+//
+// Settings › External agents: under the command line's row, while it is
+// not installed.
+func ExternalCommandDesc() string { return In(i18n.Locale()).ExternalCommandDesc() }
+
+// ExternalCommandDesc says "Find, read, make and add to your pages from a terminal, and in scripts."
+// in the language of msgs.
+//
+// Settings › External agents: under the command line's row, while it is
+// not installed.
+func (msgs Messages) ExternalCommandDesc() string {
+	return Catalog.Format(msgs.locale, "externalCommandDesc", nil)
+}
+
+// ExternalCommandInstalled says "Installed · run {command} --help in a terminal"
+// in the language the app shows.
+//
+// Settings › External agents: the command line, installed on a Mac;
+// command is its name, not translated.
+func ExternalCommandInstalled(command string) string {
+	return In(i18n.Locale()).ExternalCommandInstalled(command)
+}
+
+// ExternalCommandInstalled says "Installed · run {command} --help in a terminal"
+// in the language of msgs.
+//
+// Settings › External agents: the command line, installed on a Mac;
+// command is its name, not translated.
+func (msgs Messages) ExternalCommandInstalled(command string) string {
+	return Catalog.Format(msgs.locale, "externalCommandInstalled", map[string]any{"command": command})
+}
+
+// ExternalCommandOnPath says "Added to your Path · run {command} --help in a new terminal"
+// in the language the app shows.
+//
+// Settings › External agents: the command line, installed on Windows,
+// whose terminals find it once opened again; “Path” is Windows' list of
+// the folders of commands. command is its name, not translated.
+func ExternalCommandOnPath(command string) string {
+	return In(i18n.Locale()).ExternalCommandOnPath(command)
+}
+
+// ExternalCommandOnPath says "Added to your Path · run {command} --help in a new terminal"
+// in the language of msgs.
+//
+// Settings › External agents: the command line, installed on Windows,
+// whose terminals find it once opened again; “Path” is Windows' list of
+// the folders of commands. command is its name, not translated.
+func (msgs Messages) ExternalCommandOnPath(command string) string {
+	return Catalog.Format(msgs.locale, "externalCommandOnPath", map[string]any{"command": command})
+}
+
+// ExternalCommandOther says "Runs another copy of Leaflet"
+// in the language the app shows.
+//
+// Settings › External agents: the command line installed for another copy
+// of Leaflet; Update points it at this one.
+func ExternalCommandOther() string { return In(i18n.Locale()).ExternalCommandOther() }
+
+// ExternalCommandOther says "Runs another copy of Leaflet"
+// in the language of msgs.
+//
+// Settings › External agents: the command line installed for another copy
+// of Leaflet; Update points it at this one.
+func (msgs Messages) ExternalCommandOther() string {
+	return Catalog.Format(msgs.locale, "externalCommandOther", nil)
+}
+
+// ExternalCommandTaken says "{path} is another program"
+// in the language the app shows.
+//
+// Settings › External agents: a file of another program's where the
+// command line would go, which Leaflet leaves as it is.
+func ExternalCommandTaken(path string) string { return In(i18n.Locale()).ExternalCommandTaken(path) }
+
+// ExternalCommandTaken says "{path} is another program"
+// in the language of msgs.
+//
+// Settings › External agents: a file of another program's where the
+// command line would go, which Leaflet leaves as it is.
+func (msgs Messages) ExternalCommandTaken(path string) string {
+	return Catalog.Format(msgs.locale, "externalCommandTaken", map[string]any{"path": path})
+}
+
+// ExternalCommandInstall says "Install"
+// in the language the app shows.
+//
+// Settings › External agents: the button that installs the command line.
+func ExternalCommandInstall() string { return In(i18n.Locale()).ExternalCommandInstall() }
+
+// ExternalCommandInstall says "Install"
+// in the language of msgs.
+//
+// Settings › External agents: the button that installs the command line.
+func (msgs Messages) ExternalCommandInstall() string {
+	return Catalog.Format(msgs.locale, "externalCommandInstall", nil)
+}
+
+// ExternalCommandRemove says "Remove"
+// in the language the app shows.
+//
+// Settings › External agents: the button that removes the command line.
+func ExternalCommandRemove() string { return In(i18n.Locale()).ExternalCommandRemove() }
+
+// ExternalCommandRemove says "Remove"
+// in the language of msgs.
+//
+// Settings › External agents: the button that removes the command line.
+func (msgs Messages) ExternalCommandRemove() string {
+	return Catalog.Format(msgs.locale, "externalCommandRemove", nil)
+}
+
+// ExternalCommandInstalling says "Installing…"
+// in the language the app shows.
+//
+// Settings › External agents: the button while the command line is
+// installed.
+func ExternalCommandInstalling() string { return In(i18n.Locale()).ExternalCommandInstalling() }
+
+// ExternalCommandInstalling says "Installing…"
+// in the language of msgs.
+//
+// Settings › External agents: the button while the command line is
+// installed.
+func (msgs Messages) ExternalCommandInstalling() string {
+	return Catalog.Format(msgs.locale, "externalCommandInstalling", nil)
+}
+
+// ExternalCommandRemoving says "Removing…"
+// in the language the app shows.
+//
+// Settings › External agents: the button while the command line is
+// removed.
+func ExternalCommandRemoving() string { return In(i18n.Locale()).ExternalCommandRemoving() }
+
+// ExternalCommandRemoving says "Removing…"
+// in the language of msgs.
+//
+// Settings › External agents: the button while the command line is
+// removed.
+func (msgs Messages) ExternalCommandRemoving() string {
+	return Catalog.Format(msgs.locale, "externalCommandRemoving", nil)
+}
+
+// ExternalCommandPrompt says "Leaflet wants to change the {command} command."
+// in the language the app shows.
+//
+// macOS's password dialog, when installing or removing the command line
+// needs an administrator; command is its name, not translated.
+func ExternalCommandPrompt(command string) string {
+	return In(i18n.Locale()).ExternalCommandPrompt(command)
+}
+
+// ExternalCommandPrompt says "Leaflet wants to change the {command} command."
+// in the language of msgs.
+//
+// macOS's password dialog, when installing or removing the command line
+// needs an administrator; command is its name, not translated.
+func (msgs Messages) ExternalCommandPrompt(command string) string {
+	return Catalog.Format(msgs.locale, "externalCommandPrompt", map[string]any{"command": command})
+}
+
+// ExternalCommandFailed says "Could not install {command}: {error}"
+// in the language the app shows.
+//
+// Settings › External agents: a toast when installing the command line
+// failed.
+func ExternalCommandFailed(command string, error string) string {
+	return In(i18n.Locale()).ExternalCommandFailed(command, error)
+}
+
+// ExternalCommandFailed says "Could not install {command}: {error}"
+// in the language of msgs.
+//
+// Settings › External agents: a toast when installing the command line
+// failed.
+func (msgs Messages) ExternalCommandFailed(command string, error string) string {
+	return Catalog.Format(msgs.locale, "externalCommandFailed", map[string]any{"command": command, "error": error})
+}
+
+// ExternalCommandRemoveFailed says "Could not remove {command}: {error}"
+// in the language the app shows.
+//
+// Settings › External agents: a toast when removing the command line
+// failed.
+func ExternalCommandRemoveFailed(command string, error string) string {
+	return In(i18n.Locale()).ExternalCommandRemoveFailed(command, error)
+}
+
+// ExternalCommandRemoveFailed says "Could not remove {command}: {error}"
+// in the language of msgs.
+//
+// Settings › External agents: a toast when removing the command line
+// failed.
+func (msgs Messages) ExternalCommandRemoveFailed(command string, error string) string {
+	return Catalog.Format(msgs.locale, "externalCommandRemoveFailed", map[string]any{"command": command, "error": error})
+}
+
 // SigninTitle says "Sync with Supabase"
 // in the language the app shows.
 //

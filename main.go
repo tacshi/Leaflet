@@ -2,7 +2,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"net/http"
@@ -11,7 +10,7 @@ import (
 	"github.com/egoist/mygo/netproxy"
 
 	"leaflet/internal/app"
-	"leaflet/internal/mcp"
+	"leaflet/internal/cli"
 )
 
 func main() {
@@ -21,13 +20,15 @@ func main() {
 	if t, ok := http.DefaultTransport.(*http.Transport); ok {
 		t.Proxy = netproxy.Proxy
 	}
-	// `leaflet mcp` serves the pages to agents outside the app, on stdio.
-	if len(os.Args) == 2 && os.Args[1] == "mcp" {
-		if err := mcp.Main(app.DataDir(), mygo.App.Version(), os.Stdin, os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, "leaflet mcp:", err)
-			os.Exit(1)
-		}
-		return
+	// The command line, `leaflet mcp` among its commands: through the link
+	// Settings installs, or with a command. Windows' terminals run
+	// cmd/leaflet instead, as this is no console program there.
+	name := cli.CommandName(mygo.App.Name())
+	if cli.Invoked(os.Args, name) {
+		os.Exit(cli.Main(os.Args[1:], cli.Options{
+			Name: name, Dir: app.DataDir(), Version: mygo.App.Version(),
+			In: os.Stdin, Out: os.Stdout, Err: os.Stderr,
+		}))
 	}
 	app.Run()
 }

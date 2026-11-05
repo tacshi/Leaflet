@@ -61,7 +61,7 @@ func TestInstallCommand(t *testing.T) {
 	t.Cleanup(func() { commandDir = "/usr/local/bin" })
 	app := func(name string) string {
 		exe := filepath.Join(root, name+".app", "Contents", "MacOS", name)
-		if err := os.MkdirAll(filepath.Dir(exe), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(exe), 0o750); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(exe, nil, 0o755); err != nil { // #nosec G306 -- an executable, as an app's is.

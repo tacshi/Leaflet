@@ -579,7 +579,11 @@ func TestLaterWaitsWithAWindow(t *testing.T) {
 	a.post = func(fn func()) { posted <- fn }
 	ran := 0
 	stopped := a.later(time.Millisecond, func() { ran += 10 })
-	stopped.Stop()
+	if !stopped.Stop() {
+		// It fired before it could be stopped, on a busy machine: what it
+		// posted is no stopped timer's.
+		<-posted
+	}
 	if a.later(20*time.Millisecond, func() { ran++ }) == nil || ran != 0 {
 		t.Fatalf("ran %d before the wait", ran)
 	}

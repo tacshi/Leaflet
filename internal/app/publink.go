@@ -419,6 +419,11 @@ func (a *App) stopPub() {
 // link that stops while the dialog doesn't show it says so in a toast.
 func (a *App) pubFailed(p *pubLink, why string) {
 	p.state, p.err = "failed", why
+	if a.pub == p {
+		a.pubPage.Lock()
+		a.pubPage.served = false
+		a.pubPage.Unlock()
+	}
 	p.close()
 	a.pullStops(p.page)
 	if d := &a.dialogs; !d.shareOpen || d.sharePage != p.page {

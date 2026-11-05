@@ -262,7 +262,34 @@ func (s *Service) refreshRemote(ctx context.Context, pageID string) (*doc.Conten
 		}
 		return c, nil
 	}
-	if remoteRow, err = s.be.SelectOne(ctx, "page_content", remote.Query{Select: contentCols, Filters: []string{remote.Eq("page_id", pageID)}}); err != nil {
+	return s.fetchRemote(ctx, pageID)
+}
+
+// checkRemote brings a page's content up to date with the server's, as
+// refreshRemote does, for the checks of the open pages every few seconds
+// (watchOpen): the revision this device merged is read from its index, so
+// the content, here or there, is read only once the server's moved.
+func (s *Service) checkRemote(ctx context.Context, pageID string) error {
+	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: savedCols, Filters: []string{remote.Eq("page_id", pageID)}})
+	if err != nil || remoteRow == nil {
+		return err
+	}
+	at, revision, err := s.st.RemoteAt(pageID)
+	if err != nil {
+		return err
+	}
+	if !behind(store.ContentRow{RemoteUpdatedAt: at, RemoteRevision: revision}, remoteRow) {
+		return nil
+	}
+	_, err = s.fetchRemote(ctx, pageID)
+	return err
+}
+
+// fetchRemote merges the server's content of a page into this device's, as
+// it has a revision this device has not merged.
+func (s *Service) fetchRemote(ctx context.Context, pageID string) (*doc.Content, error) {
+	remoteRow, err := s.be.SelectOne(ctx, "page_content", remote.Query{Select: contentCols, Filters: []string{remote.Eq("page_id", pageID)}})
+	if err != nil {
 		return nil, err
 	}
 	if remoteRow == nil {
@@ -531,6 +558,6 @@ func (s *Service) fetchContents(ctx context.Context, ids []string, waiting map[s
 // hasContentAt reports whether this device has merged the server's
 // content of a page as of a time, or later. The content is not read.
 func (s *Service) hasContentAt(pageID string, at time.Time) bool {
-	merged, err := s.st.RemoteAt(pageID)
+	merged, _, err := s.st.RemoteAt(pageID)
 	return err == nil && !merged.IsZero() && merged.UnixMilli() >= at.UnixMilli()
 }

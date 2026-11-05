@@ -56,6 +56,13 @@ type Service struct {
 	// this version of Leaflet, while which the changes wait to go up: sent
 	// before, they may name columns its schema lacks yet. nil is never.
 	Updating func() bool
+	// Watched reports whether someone sees an open page as it changes
+	// elsewhere, on screen or served to a public link's visitors, for sync
+	// to hear its saves on the server through Realtime (listen), or to
+	// check it every few seconds (watchOpen). Sync asks from its own
+	// goroutines; nil is every open page, as on iOS, where the loop stops
+	// in the background.
+	Watched func(pageID string) bool
 
 	cloudOn atomic.Bool
 	kick    chan struct{}
@@ -82,6 +89,17 @@ type Service struct {
 	// busyUntil is when the server asked the loop's passes to wait for,
 	// as it answered busy with a Retry-After (backOff); guarded by mu.
 	busyUntil time.Time
+	// watchAfter is when the checks of the open pages ask the server
+	// again, after one failed (rest); guarded by mu.
+	watchAfter time.Time
+	// live are the open pages whose saves Realtime tells of, by the
+	// connection whose channel does (listen), which the checks every few
+	// seconds leave out; guarded by mu.
+	live map[string]*remote.Realtime
+	// heard are the open pages Realtime told of a save of, for the loop to
+	// check at once (checkHeard), which hear wakes; guarded by mu.
+	heard map[string]bool
+	hear  chan struct{}
 	// wantPull is set by Kick for the loop's next pass to pull too, which
 	// one KickPush asked for alone would not.
 	wantPull atomic.Bool
@@ -109,7 +127,8 @@ type mergedFile struct {
 // New returns the sync service.
 func New(st *store.Store, be *remote.Client) *Service {
 	return &Service{st: st, be: be, kick: make(chan struct{}, 1), open: map[string]bool{},
-		membersAt: map[string]time.Time{}, retryAt: map[outboxKey]time.Time{}, pageFiles: map[string]mergedFile{}}
+		membersAt: map[string]time.Time{}, retryAt: map[outboxKey]time.Time{}, pageFiles: map[string]mergedFile{},
+		live: map[string]*remote.Realtime{}, heard: map[string]bool{}, hear: make(chan struct{}, 1)}
 }
 
 // folder is the Leaflet folder in iCloud Drive as it is now.

@@ -1,6 +1,7 @@
 # Leaflet backend (Supabase)
 
-Postgres schema, row-level security, storage buckets, and four Edge Functions.
+Postgres schema, row-level security, storage buckets, Realtime broadcasts of
+page saves, and four Edge Functions.
 The contract with the Go client is [`../docs/protocol.md`](../docs/protocol.md).
 
 ```

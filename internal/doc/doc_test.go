@@ -737,11 +737,13 @@ func TestInlineMarkdownLinks(t *testing.T) {
 
 // Links are read in time in proportion to the text: one of [s that no ]
 // closes, or of links whose url no ) closes, as a comment can be written
-// to make, reads in about eight times what one an eighth as long takes,
-// not the sixty-four times of reading on to the end from each [, both as
+// to make, reads in about sixteen times what one a sixteenth as long
+// takes, not the 256 times of reading on to the end from each [, both as
 // rich text and as Markdown's lines written out. So does one with a [ and
 // code spans after it, of two backticks, or of runs that close none or
-// another's.
+// another's. The text a sixteenth as long fits in the processor's cache,
+// which the longer one leaves, more so on a busy machine: up to 64 times
+// passes.
 func TestInlineLinksReadInLinearTime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times reads")
@@ -749,21 +751,16 @@ func TestInlineLinksReadInLinearTime(t *testing.T) {
 	for _, tc := range []struct{ lead, unit string }{
 		{"", "["}, {"", "[a]("}, {"", "[a\n"}, {"[", "``x`` "}, {"[", "`x`` ```y`` "},
 	} {
-		read := func(n int) time.Duration {
+		read := func(n int) func() {
 			md := tc.lead + strings.Repeat(tc.unit, n)
-			best := time.Duration(math.MaxInt64)
-			for range 3 {
-				runtime.GC()
-				start := time.Now()
+			return func() {
 				FromMarkdown(md)
 				markdownLines(md)
-				best = min(best, time.Since(start))
 			}
-			return best
 		}
-		small, large := read(2000), read(16000)
-		if large > 24*small {
-			t.Errorf("%q: 2000 read in %v, 16000 in %v", tc.lead+tc.unit, small, large)
+		small, large := bestInTurns(read(4000), read(64000))
+		if large > 64*small {
+			t.Errorf("%q: 4000 read in %v, 64000 in %v", tc.lead+tc.unit, small, large)
 		}
 	}
 	if d := FromMarkdown("[[a](b) [c](d)"); len(d) != 4 || d[1].Attrs.Href != "b" || d[3].Attrs.Href != "d" {
@@ -1469,7 +1466,7 @@ func TestMergeIsLinear(t *testing.T) {
 	if testing.Short() {
 		t.Skip("times merges")
 	}
-	merge := func(n int) time.Duration {
+	merge := func(n int) func() {
 		blocks := make([]*Node, n)
 		for i := range blocks {
 			blocks[i] = para(fmt.Sprintf("b%d", i), fmt.Sprintf("line %d with some words", i))
@@ -1479,19 +1476,30 @@ func TestMergeIsLinear(t *testing.T) {
 		local.Find("b1").SetDelta(Delta{{Text: "local"}})
 		remote.Find(fmt.Sprintf("b%d", n-2)).SetDelta(Delta{{Text: "remote"}})
 		local, remote = local.Stamped(base, NowMs()+1), remote.Stamped(base, NowMs()+2)
-		best := time.Duration(math.MaxInt64)
-		for range 3 {
-			runtime.GC()
-			start := time.Now()
-			Merge(base, local, remote)
-			best = min(best, time.Since(start))
-		}
-		return best
+		return func() { Merge(base, local, remote) }
 	}
-	small, large := merge(1000), merge(8000)
+	small, large := bestInTurns(merge(1000), merge(8000))
 	if large > 24*small {
 		t.Errorf("a merge of 1000 blocks takes %v, of 8000 %v", small, large)
 	}
+}
+
+// bestInTurns times small and large in turns, five times each, and gives
+// the best time of each: a load on the machine meanwhile, as the other
+// packages' tests running beside these, slows both alike, not one.
+func bestInTurns(small, large func()) (time.Duration, time.Duration) {
+	timed := func(fn func()) time.Duration {
+		runtime.GC()
+		start := time.Now()
+		fn()
+		return time.Since(start)
+	}
+	bestSmall, bestLarge := time.Duration(math.MaxInt64), time.Duration(math.MaxInt64)
+	for range 5 {
+		bestSmall = min(bestSmall, timed(small))
+		bestLarge = min(bestLarge, timed(large))
+	}
+	return bestSmall, bestLarge
 }
 
 // Page ops go as the protocol has them and come back the same, and each

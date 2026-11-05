@@ -45,6 +45,10 @@ func para(id, text string) *doc.Node {
 
 func textOf(c *doc.Content, id string) string { return c.Find(id).Delta().Plain() }
 
+// newerKind is page content this version of Leaflet cannot read, as a
+// newer one may write.
+const newerKind = `{"document": {"type": "page", "id": "root", "children": [{"id": "x", "type": "paragraph", "data": ["of a newer kind"]}]}, "meta": {"v": 1, "blocks": {"x": 5}}}`
+
 // putSynced stores c as a page's content that came from the server, the
 // base it agrees on, over what the page has.
 func putSynced(t *testing.T, st *store.Store, pageID string, c *doc.Content) {

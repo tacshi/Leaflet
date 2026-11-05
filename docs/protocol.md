@@ -499,6 +499,30 @@ and a `transcribe` whose settings name one are refused (400).
   with it. Each pull reads again from 10 seconds behind its cursor, since a
   row is stamped before its transaction commits and one that commits late
   can carry an earlier time; rows already stored here are skipped.
+- Between the pulls, the pages open on a device while someone sees them,
+  on screen or through a public link, take another device's edits as they
+  are saved. Each save of a page's content is told on the page's private
+  Realtime channel, `page:<page id>`, as a broadcast `saved` with
+  `{"page_id", "revision"}` (the trigger `page_content_told`); only those
+  who may read the page may join it (`page_saves_heard`, on
+  `realtime.messages`), and no one sends on it. A device joins the channel
+  of each such page, private, with the person's access token, which it
+  sends again as it is renewed (`access_token`), over one connection to
+  `/realtime/v1/websocket?apikey=<publishable key>&vsn=1.0.0` that beats
+  every 25 seconds. A save heard, or the channel just joined, has the
+  device check the page at once: it reads the page's `page_content`
+  revision (`select=revision,updated_at&page_id=eq.<id>`), and its content
+  only when that moved, merging it as a pull does. A save of a revision
+  the device has, as its own, is not checked.
+- A page whose channel the device has not joined (Realtime unreachable,
+  the connection dropped, or the join refused, as on a project without
+  the policy) is checked so every 5 seconds instead. A connection that
+  fails is made again after 5 seconds, then twice as long each time up to
+  5 minutes; a join refused as `Unauthorized` is asked again after 5
+  minutes, one refused for the moment after 5 seconds. A check that the
+  server fails, or that takes over 10 seconds, leaves the server to the
+  pulls for 30 seconds, or as long as a `Retry-After` asks. Through iCloud
+  Drive (§8) there is neither: a change to the folder starts a pass.
 - Page content from the server that a device cannot read (a newer format)
   is neither merged nor stored, so it never stands in for an empty page:
   that page's change here stays queued, and its content is asked for again

@@ -52,16 +52,17 @@ func (s *Store) StoredContent(pageID string) (content string, writeID int64, err
 	return content, written.Int64, err
 }
 
-// RemoteAt is the time of the server's version of a page's content this
-// device last merged, read from its index, not its row: zero before the
-// first, and for a page whose content this device does not keep.
-func (s *Store) RemoteAt(pageID string) (time.Time, error) {
+// RemoteAt is the time and revision of the server's version of a page's
+// content this device last merged, read from its index, not its row: zero
+// before the first, and for a page whose content this device does not keep.
+func (s *Store) RemoteAt(pageID string) (time.Time, int64, error) {
 	var at sql.NullInt64
-	err := s.db.QueryRow(`SELECT remote_updated_at FROM page_contents INDEXED BY page_contents_remote WHERE page_id = ?`, pageID).Scan(&at)
+	var revision int64
+	err := s.db.QueryRow(`SELECT remote_updated_at, remote_revision FROM page_contents INDEXED BY page_contents_remote WHERE page_id = ?`, pageID).Scan(&at, &revision)
 	if errors.Is(err, sql.ErrNoRows) {
-		return time.Time{}, nil
+		return time.Time{}, 0, nil
 	}
-	return fromMs(at), err
+	return fromMs(at), revision, err
 }
 
 // MergedRemoteAt records that the server's version of a page's content at

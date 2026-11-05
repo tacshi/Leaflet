@@ -2,6 +2,7 @@
   "name": "Leaflet",
   "identifier": "app.capyvibe.leaflet",
   "version": "0.1.0",
+  "copyright": "Copyright © 2026 Rocky Shi",
   "out": "build",
   "i18n": {
     "dir": "locales",

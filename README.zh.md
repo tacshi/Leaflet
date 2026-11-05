@@ -10,12 +10,14 @@
 
 <p align="center">
   <a href="https://github.com/tacshi/Leaflet/releases/latest"><img src="https://img.shields.io/github/v/release/tacshi/Leaflet?sort=semver&label=release" alt="最新版本"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT 许可证"></a>
   <a href="#系统要求"><img src="https://img.shields.io/badge/macOS-12%2B-000000?logo=apple&logoColor=white" alt="macOS 12 或更高版本"></a>
   <a href="#系统要求"><img src="https://img.shields.io/badge/Windows-x64%20%7C%20arm64-0078D4?logo=windows&logoColor=white" alt="Windows x64 和 arm64"></a>
   <a href="#ios"><img src="https://img.shields.io/badge/iOS%20%7C%20iPadOS-26%2B%20(in%20progress)-000000?logo=apple&logoColor=white" alt="iOS 和 iPadOS 26 或更高版本（开发中）"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go 1.27"></a>
   <a href="#应用外的智能体-mcp"><img src="https://img.shields.io/badge/MCP-supported-6E56CF" alt="支持 MCP"></a>
   <a href="https://github.com/egoist/mygo"><img src="https://img.shields.io/badge/built%20with-MyGo-F2545B" alt="基于 MyGo 构建"></a>
+  <a href="https://awesomemygo.dev/apps/leaflet"><img src="https://awesomemygo.dev/badge.svg" height="20" alt="已收录于 Awesome MyGo"></a>
 </p>
 
 <p align="center">
@@ -43,6 +45,7 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 - [项目结构](#项目结构)
 - [已知限制](#已知限制)
 - [致谢](#致谢)
+- [许可证](#许可证)
 
 ## 功能
 
@@ -340,3 +343,8 @@ Open Font License 授权的 [Figtree](https://github.com/erikdkennedy/figtree)
 以 MIT 许可证授权、用于数学公式和示意图的 [KaTeX](https://katex.org) 和
 [Pele](https://github.com/obsidianmd/pele)
 （[`internal/rendered/third_party`](internal/rendered/third_party/README.md)）。
+
+## 许可证
+
+Leaflet 以 [MIT 许可证](LICENSE)发布。它内置的字体、图标和库沿用各自的
+许可证，见[致谢](#致谢)。

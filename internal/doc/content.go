@@ -128,20 +128,20 @@ func (c *Content) read(raw []byte) error {
 	return nil
 }
 
-func (c *Content) dropNil() {
-	var clean func([]*Node) []*Node
-	clean = func(nodes []*Node) []*Node {
-		out := nodes[:0]
-		for _, n := range nodes {
-			if n == nil {
-				continue
-			}
-			n.Children = clean(n.Children)
-			out = append(out, n)
+func (c *Content) dropNil() { c.Children = withoutNil(c.Children) }
+
+// withoutNil is nodes and the blocks under them without the nulls JSON can
+// hold among them.
+func withoutNil(nodes []*Node) []*Node {
+	out := nodes[:0]
+	for _, n := range nodes {
+		if n == nil {
+			continue
 		}
-		return out
+		n.Children = withoutNil(n.Children)
+		out = append(out, n)
 	}
-	c.Children = clean(c.Children)
+	return out
 }
 
 // Decode reads stored content; blank content is an empty page.

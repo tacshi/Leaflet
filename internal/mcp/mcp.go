@@ -127,6 +127,7 @@ type response struct {
 // Serve reads one JSON-RPC message a line until in ends: a request or a
 // notification, or a batch of them.
 func (s *Server) Serve(in io.Reader, out io.Writer) error {
+	s.pages.app = true
 	sc := bufio.NewScanner(in)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
 	enc := json.NewEncoder(out)

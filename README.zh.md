@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/tacshi/Leaflet/releases/latest"><img src="https://img.shields.io/github/v/release/tacshi/Leaflet?sort=semver&label=release" alt="最新版本"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT 许可证"></a>
-  <a href="#系统要求"><img src="https://img.shields.io/badge/macOS-12%2B-000000?logo=apple&logoColor=white" alt="macOS 12 或更高版本"></a>
+  <a href="#系统要求"><img src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white" alt="macOS 13 或更高版本"></a>
   <a href="#系统要求"><img src="https://img.shields.io/badge/Windows-x64%20%7C%20arm64-0078D4?logo=windows&logoColor=white" alt="Windows x64 和 arm64"></a>
   <a href="#ios"><img src="https://img.shields.io/badge/iOS%20%7C%20iPadOS-26%2B%20(in%20progress)-000000?logo=apple&logoColor=white" alt="iOS 和 iPadOS 26 或更高版本（开发中）"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go 1.27"></a>
@@ -122,7 +122,7 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 
 ## 系统要求
 
-- macOS 12 或更高版本（Apple 芯片或 Intel）；或 x64、arm64 上的 Windows。
+- macOS 13 或更高版本（Apple 芯片或 Intel）；或 x64、arm64 上的 Windows。
 - 从源码构建：Go 1.27.3 或更高版本；Go 代码不需要 cgo 或 C 编译器。Mac
   应用的设备端语音识别助手（[`speech`](speech)）用 Swift 编写，
   由 `scripts/build-speech.sh` 使用 Xcode 26 或更高版本（macOS 26 SDK）
@@ -137,7 +137,7 @@ Leaflet 把你的笔记、规格文档和会议记录保存为由块组成的页
 
 从[最新版本](https://github.com/tacshi/Leaflet/releases/latest)下载
 macOS 磁盘映像或 Windows 安装程序。安装后的应用会从 GitHub Releases
-自动更新。
+自动更新。Windows 安装程序目前还没有代码签名，首次运行时 SmartScreen 可能会发出警告。
 
 ## 从源码运行
 
@@ -234,7 +234,7 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 | `leaflet ls` | 列出文件夹和页面，以及它们的 ID 和标签 |
 | `leaflet search QUERY` | 按标题、标签或正文查找页面，以及查找录音和评论 |
 | `leaflet cat PAGE` | 以 Markdown 输出页面 |
-| `leaflet new [TITLE]` | 用管道传入的 Markdown 新建页面，并输出它的 ID |
+| `leaflet new [TITLE]` | 新建页面并输出它的 ID；`--stdin` 用管道传入的 Markdown 作为内容 |
 | `leaflet append PAGE [TEXT...]` | 把 Markdown 添加到页面末尾：给出的文字，或管道传入的内容 |
 | `leaflet rename PAGE TITLE` | 修改页面标题 |
 | `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | 把页面移入其他页面、文件夹，或移到顶层 |
@@ -247,7 +247,7 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 
 ```bash
 make test 2>&1 | leaflet append "CI log"
-leaflet new "Meeting notes" --folder Work < notes.md
+leaflet new "Meeting notes" --folder Work --stdin < notes.md
 leaflet cat Roadmap > roadmap.md
 ```
 
@@ -274,7 +274,7 @@ Windows 构建，除非用 `--mac` 或 `--win` 选定其一；调试脚本为 ma
 | --- | --- |
 | `scripts/build-debug.sh [--mac\|--win] [--open]` | 名为 Leaflet Debug 的调试版本，有自己的标识符和数据文件夹，从不自动更新，因此可以与正式版并存 |
 | `scripts/build-release.sh [--mac] [--win] [<version>]` | 已签名并公证的 Apple 芯片、Intel 和通用磁盘映像，以及 Windows x64 和 arm64 安装程序，附带已签名的更新包 |
-| `scripts/publish.sh <version> [--mac\|--win] [--dry-run]` | 面向 macOS 和 Windows（或指定的一个）的 GitHub 发布：检查、取自 `CHANGELOG.md` 的发布说明、构建、打标签和发布 |
+| `scripts/publish.sh <version> [--mac\|--win] [--allow-partial] [--dry-run]` | 面向 macOS 和 Windows 的 GitHub 发布：检查、取自 `CHANGELOG.md` 的发布说明、构建、打标签和发布。只指定一个平台时，发布会保持为草稿，直到另一平台的构建也加入：缺少某个平台更新清单的发布，会让该平台已安装的应用得不到更新；`--allow-partial` 仍然发布它 |
 
 在 Windows 上，PowerShell 7 脚本在本机构建 Windows 应用。如果没有安装
 NSIS，MyGo 会下载它；签名使用 Windows SDK 中的 `signtool`：

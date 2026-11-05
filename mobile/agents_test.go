@@ -2,6 +2,7 @@ package mobile
 
 import (
 	"encoding/json"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -11,6 +12,7 @@ import (
 
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
+	"leaflet/internal/store"
 	"leaflet/locales"
 )
 
@@ -57,6 +59,41 @@ func TestTestProvider(t *testing.T) {
 	}
 }
 
+// The app's form never holds a key kept here: a model server moved to
+// another address without one typed is refused, with why, and keeps its
+// key and its address, rather than lose the key at the save.
+func TestMovedLocalProviderKeepsItsKey(t *testing.T) {
+	c, _ := open(t)
+	save := func(p providerJSON) error {
+		in, _ := json.Marshal(p) // #nosec G117 -- test keys only.
+		return c.SaveProvider(string(in))
+	}
+	providers := func() []providerJSON {
+		raw, _ := c.Providers()
+		var ps []providerJSON
+		_ = json.Unmarshal([]byte(raw), &ps)
+		return ps
+	}
+	if err := save(providerJSON{Preset: "lmstudio", BaseURL: "http://127.0.0.1:1234/v1", DefaultModel: "m", APIKey: "sk-test"}); err != nil {
+		t.Fatal(err)
+	}
+	moved := providers()[0]
+	moved.BaseURL = "http://127.0.0.1:1235/v1"
+	if err := save(moved); err == nil || err.Error() != locales.SettingsKeyStaysBehind() {
+		t.Fatalf("moved: %v", err)
+	}
+	if p := providers()[0]; p.BaseURL != "http://127.0.0.1:1234/v1" || !p.HasKey {
+		t.Fatalf("refused, and changed: %+v", p)
+	}
+	moved.APIKey = "sk-new"
+	if err := save(moved); err != nil {
+		t.Fatal(err)
+	}
+	if p := providers()[0]; p.BaseURL != moved.BaseURL || !p.HasKey {
+		t.Fatalf("typed: %+v", p)
+	}
+}
+
 func TestSaveCloudProviderSignedOut(t *testing.T) {
 	c, _ := open(t)
 	save := func(p providerJSON) error {
@@ -86,6 +123,20 @@ func TestSaveCloudProviderSignedOut(t *testing.T) {
 	}
 	raw, _ = c.Providers()
 	_ = json.Unmarshal([]byte(raw), &ps)
+	// Moved to another server it takes a key of its own, not the one it
+	// has, which stays with its address.
+	moved := ps[0]
+	moved.BaseURL = "https://proxy.example/v1"
+	if err := save(moved); err == nil {
+		t.Fatal("moved with the key kept for its address")
+	}
+	moved.APIKey = "sk-proxy"
+	if err := save(moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := save(ps[0]); err == nil {
+		t.Fatal("moved back with the key kept for the other address")
+	}
 	if ps[0].DefaultModel != "deepseek-v4-pro" || !ps[0].HasKey {
 		t.Fatalf("changed: %+v", ps)
 	}
@@ -290,5 +341,50 @@ func TestAgentStateNamesThePagesMade(t *testing.T) {
 	}
 	if len(s.Runs) != 1 || !slices.Equal(s.Runs[0].EditPages, []string{"", "page-2"}) {
 		t.Errorf("runs %+v", s.Runs)
+	}
+}
+
+// An agent's comment says who else had it written, by their name among
+// the page's members, as the desktop's comments do; one the user asked
+// for, and any that is no agent's, says nothing.
+func TestCommentsSayWhoAskedTheAgent(t *testing.T) {
+	c, _ := open(t)
+	page := create(t, c, `{"title":"Plan"}`)
+	var uid string
+	var err error
+	c.q.do(func() {
+		uid = c.core.Store.Session().UserID
+		err = c.core.Store.SetMembers(page.ID, []store.Member{{UserID: "ann", DisplayName: "Ann", Role: "editor", Accepted: true}})
+		for id, by := range map[string][2]string{
+			"ann":    {"ann", "agent"},
+			"gone":   {"gone", "agent"},
+			"mine":   {uid, "agent"},
+			"person": {"ann", "user"},
+		} {
+			if err == nil {
+				err = c.core.Store.PutComment(store.Comment{ID: id, PageID: page.ID, BlockID: "b", AuthorID: by[0], AuthorKind: by[1], Body: "Hi"})
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := c.Threads(page.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var threads []threadJSON
+	if err := json.Unmarshal([]byte(raw), &threads); err != nil {
+		t.Fatal(err)
+	}
+	asked := map[string]string{}
+	for _, th := range threads {
+		asked[th.Root.ID] = th.Root.AskedBy
+	}
+	want := map[string]string{
+		"ann": locales.PanelAskedBy("Ann"), "gone": locales.PanelAskedBySomeone(), "mine": "", "person": "",
+	}
+	if !maps.Equal(asked, want) {
+		t.Errorf("asked by %v, want %v", asked, want)
 	}
 }

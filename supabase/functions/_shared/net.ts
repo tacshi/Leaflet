@@ -74,6 +74,7 @@ function privateIPv6(w: number[]): boolean {
     return true;
   }
   if (w.slice(0, 5).every((x) => x === 0) && w[5] === 0xffff) return privateIPv4(embedded()); // IPv4-mapped
+  if (w.slice(0, 4).every((x) => x === 0) && w[4] === 0xffff && w[5] === 0) return privateIPv4(embedded()); // IPv4-translated
   if (w[0] === 0x64 && w[1] === 0xff9b) {
     // NAT64: the well-known prefix carries an IPv4 address; the local-use one is private.
     return w[2] === 1 || privateIPv4(embedded());

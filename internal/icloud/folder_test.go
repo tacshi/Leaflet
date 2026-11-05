@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -272,6 +273,9 @@ func TestFileBlobsHaveNamesWindowsHolds(t *testing.T) {
 	rel, err := FileBlobPath(page, "Q3: report.pdf")
 	if err != nil || rel != "blobs/files/"+page+"/Q3_ report.pdf" {
 		t.Fatalf("path %q, %v", rel, err)
+	}
+	if runtime.GOOS == "windows" {
+		return // no copy has that name there: a ":" names a part of a file
 	}
 	old := f.abs("blobs/files/" + page + "/Q3: report.pdf")
 	if err := os.MkdirAll(filepath.Dir(old), 0o750); err != nil {

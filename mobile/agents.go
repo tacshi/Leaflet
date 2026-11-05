@@ -283,6 +283,8 @@ type commentJSON struct {
 	// MayDelete is whether the user may delete it, as the server lets
 	// them: their own, or a guest's on a page of theirs.
 	MayDelete bool `json:"may_delete"`
+	// AskedBy says who else had an agent write it, in words for the user.
+	AskedBy string `json:"asked_by,omitempty"`
 }
 
 type threadJSON struct {
@@ -294,8 +296,9 @@ type threadJSON struct {
 	MayResolve bool `json:"may_resolve"`
 }
 
-// commentOf is m as Threads lists it to uid, on a page of theirs or not.
-func commentOf(m store.Comment, uid string, owns bool) commentJSON {
+// commentOf is m as Threads lists it to uid, on a page of theirs or not,
+// shared with members.
+func commentOf(m store.Comment, uid string, owns bool, members []store.Member) commentJSON {
 	j := commentJSON{
 		ID: m.ID, BlockID: m.BlockID, AuthorKind: m.AuthorKind, AuthorName: m.AuthorName, Body: m.Body,
 		Quote: m.Quote, Resolved: m.Resolved, CreatedAt: millis(m.CreatedAt),
@@ -305,6 +308,7 @@ func commentOf(m store.Comment, uid string, owns bool) commentJSON {
 		return j
 	}
 	j.MayDelete = mine(m, uid) || m.AuthorKind == "guest" && owns
+	j.AskedBy = askedBy(m, uid, members)
 	return j
 }
 
@@ -313,10 +317,25 @@ func mine(m store.Comment, uid string) bool {
 	return m.AuthorKind == "user" && (m.AuthorID == "" || m.AuthorID == uid)
 }
 
+// askedBy says who other than uid had an agent write comment m, as the
+// desktop's comments say it; "" for another comment, or one uid asked for.
+func askedBy(m store.Comment, uid string, members []store.Member) string {
+	if m.AuthorKind != "agent" || m.AuthorID == "" || m.AuthorID == uid {
+		return ""
+	}
+	for _, p := range members {
+		if p.UserID == m.AuthorID && p.Name() != "" {
+			return locales.PanelAskedBy(p.Name())
+		}
+	}
+	return locales.PanelAskedBySomeone()
+}
+
 // Threads returns a page's comment threads, as JSON.
 func (c *Core) Threads(pageID string) (_ string, err error) {
 	defer catch(&err)
 	var ts []store.Thread
+	var members []store.Member
 	var uid string
 	var owns, canEdit bool
 	c.q.do(func() {
@@ -328,6 +347,7 @@ func (c *Core) Threads(pageID string) (_ string, err error) {
 		p, perr := c.core.Store.Page(pageID)
 		owns = perr == nil && p.SpaceID == sess.SpaceID
 		canEdit = c.canEdit(pageID)
+		members = c.core.Store.MembersOrNil(pageID)
 	})
 	if err != nil {
 		return "", err
@@ -336,9 +356,9 @@ func (c *Core) Threads(pageID string) (_ string, err error) {
 	for _, t := range ts {
 		replies := make([]commentJSON, 0, len(t.Replies))
 		for _, r := range t.Replies {
-			replies = append(replies, commentOf(r, uid, owns))
+			replies = append(replies, commentOf(r, uid, owns, members))
 		}
-		out = append(out, threadJSON{Root: commentOf(t.Root, uid, owns), Replies: replies, MayResolve: canEdit || mine(t.Root, uid)})
+		out = append(out, threadJSON{Root: commentOf(t.Root, uid, owns, members), Replies: replies, MayResolve: canEdit || mine(t.Root, uid)})
 	}
 	return encode(out)
 }
@@ -445,7 +465,7 @@ func providerForm(in providerJSON) agents.Form {
 		key = agents.LocalKey(in.ID)
 	}
 	return agents.Form{
-		ID: in.ID, Preset: in.Preset, Name: in.Name, BaseURL: in.BaseURL, APIKey: key, Model: in.DefaultModel,
+		ID: in.ID, Preset: in.Preset, Name: in.Name, BaseURL: in.BaseURL, APIKey: key, KeyTyped: strings.TrimSpace(in.APIKey) != "", Model: in.DefaultModel,
 		Models: in.Models, SupportsTools: in.SupportsTools,
 	}
 }

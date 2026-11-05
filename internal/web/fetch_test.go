@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"net/url"
+	"slices"
 	"testing"
 	"time"
 )
@@ -34,6 +35,7 @@ func TestFetchOnlyThePublicWeb(t *testing.T) {
 		"64:ff9b::7f00:1": false, "64:ff9b::a9fe:a9fe": false, "64:ff9b::5db8:d822": true, "64:ff9b:1::a00:1": false,
 		"2002:7f00:1::1": false, "2002:c0a8:101::1": false, "2002:5db8:d822::1": true,
 		"::127.0.0.1": false, "::10.0.0.1": false, "fec0::1": false,
+		"::ffff:0:127.0.0.1": false, "::ffff:0:a9fe:a9fe": false, "::ffff:0:5db8:d822": true,
 		// Ranges kept for protocols, for later, and for a network's
 		// broadcast; but the benchmarks' range, which fake-IP proxies
 		// answer every name with.
@@ -112,6 +114,47 @@ func TestFetchThroughAProxyAsksForTheCheckedAddress(t *testing.T) {
 	case got := <-asked:
 		t.Errorf("the proxy was asked %q for a name that resolves inside", got)
 	default:
+	}
+}
+
+// A page read through a proxy is at its link, not at the address the proxy
+// was asked for: where it says it is, and what its relative links lead to.
+func TestReadThroughAProxyKeepsThePagesLink(t *testing.T) {
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write([]byte(`<p><a href="/next">next</a></p>`))
+	}))
+	defer site.Close()
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		to, err := net.Dial("tcp", site.Listener.Addr().String())
+		if err != nil {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		conn, buf, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			_ = to.Close()
+			return
+		}
+		go func() { _, _ = io.Copy(to, buf); _ = to.Close() }()
+		_, _ = io.Copy(conn, to)
+		_ = conn.Close()
+	}))
+	defer proxy.Close()
+	proxyURL, _ := url.Parse(proxy.URL)
+	was, wasLookup := systemProxy, lookupIP
+	t.Cleanup(func() { systemProxy, lookupIP = was, wasLookup })
+	systemProxy = func(*http.Request) (*url.URL, error) { return proxyURL, nil }
+	lookupIP = func(context.Context, string, string) ([]netip.Addr, error) {
+		return []netip.Addr{netip.MustParseAddr("93.184.216.34")}, nil
+	}
+	p, err := Read(context.Background(), "http://news.test/a/b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.URL != "http://news.test/a/b" || !slices.Equal(p.Links, []string{"http://news.test/next"}) {
+		t.Errorf("read at %q, links %q", p.URL, p.Links)
 	}
 }
 

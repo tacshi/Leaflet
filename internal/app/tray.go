@@ -111,21 +111,55 @@ func (a *App) newRecordingPage() {
 	a.startRecording(p.ID)
 }
 
-// checkForUpdate looks for a newer version as the app starts and installs
-// it in the background, quietly; the update runs once the app starts
-// again, from the icon beside Settings or the menu bar. "Check for
-// Updates…" of the menus is the updater plugin's, with its window.
+// updateEvery is how long a running app waits to look for a newer version
+// again: with the menu bar icon, closing its window leaves it running, for
+// weeks perhaps.
+var updateEvery = 4 * time.Hour
+
+// newerVersion is a version to update to, and how to install it.
+type newerVersion struct {
+	version string
+	install func(context.Context) error
+}
+
+// lookForUpdate asks for a version newer than this one, nil when this is
+// the latest. Tests stand in for it, as mygo.Updater only looks in a build
+// with updates.
+var lookForUpdate = func(ctx context.Context) (*newerVersion, error) {
+	up, err := mygo.Updater.Check(ctx)
+	if err != nil || up == nil {
+		return nil, err
+	}
+	return &newerVersion{up.Version, func(ctx context.Context) error { return up.Install(ctx, nil) }}, nil
+}
+
+// checkForUpdate looks for a newer version as the app starts, and every
+// updateEvery while it runs, and installs it in the background, quietly;
+// the update runs once the app starts again, from the icon beside Settings
+// or the menu bar. "Check for Updates…" of the menus is the updater
+// plugin's, with its window.
 func (a *App) checkForUpdate() {
 	time.Sleep(5 * time.Second) // let the app open first
-	a.update(func() { a.findUpdate(false) })
+	a.update(a.keepLookingForUpdates)
+}
+
+// keepLookingForUpdates looks for a newer version now, and again every
+// updateEvery. It runs on the main thread.
+func (a *App) keepLookingForUpdates() {
+	if !a.updatable {
+		return
+	}
+	a.findUpdate(false)
+	a.later(updateEvery, a.keepLookingForUpdates)
 }
 
 // findUpdate checks for a newer version and installs it in the
 // background, unless a check is under way or an update waits already.
 // asked is set when the user asked, from the icon beside Settings: the
-// app then says it is up to date, or that the check or the install
-// failed; otherwise what goes wrong is only logged. It runs on the main
-// thread.
+// app then says it is up to date, or that the check failed; otherwise a
+// check that fails, as one made offline, is only logged. An install that
+// fails says so asked or not, unasked once for each version: nothing else
+// would show why the app stays as it is. It runs on the main thread.
 func (a *App) findUpdate(asked bool) {
 	if !a.updatable || a.updateBusy != "" || a.updateReady != "" {
 		return
@@ -134,12 +168,12 @@ func (a *App) findUpdate(asked bool) {
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 		defer cancel()
-		up, err := mygo.Updater.Check(ctx)
+		up, err := lookForUpdate(ctx)
 		var installErr error
 		if err == nil && up != nil {
-			a.update(func() { a.updateBusy = locales.SidebarDownloadingUpdate(up.Version) })
-			if installErr = up.Install(ctx, nil); installErr != nil {
-				log.Printf("update %s: %v", up.Version, installErr)
+			a.update(func() { a.updateBusy = locales.SidebarDownloadingUpdate(up.version) })
+			if installErr = up.install(ctx); installErr != nil {
+				log.Printf("update %s: %v", up.version, installErr)
 			}
 		}
 		if err != nil {
@@ -153,15 +187,16 @@ func (a *App) findUpdate(asked bool) {
 					a.toast(locales.SidebarCheckForUpdatesFailed())
 				}
 			case installErr != nil:
-				if asked {
-					a.toast(locales.SidebarInstallUpdateFailed(up.Version))
+				if asked || a.updateFailed != up.version {
+					a.toast(locales.SidebarInstallUpdateFailed(up.version))
 				}
+				a.updateFailed = up.version
 			case up == nil:
 				if asked {
 					a.toast(locales.SidebarUpToDate(mygo.App.Version()))
 				}
 			default:
-				a.updateReady = up.Version
+				a.updateReady = up.version
 				a.refreshTray()
 			}
 		})

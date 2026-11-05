@@ -107,7 +107,9 @@ $$;
 -- What is on a subpage deleted after they accepted it, before
 -- 20261031000000 filled placed_at in, is theirs still, and they may
 -- restore the page; what is on one deleted before, is not, nor may they.
--- Both pages they see.
+-- Both pages they see. A tree deeper than a tree may now go stays read to
+-- its deepest page, by those it is shared with, and takes no new page
+-- under it.
 create function pg_temp.act_as(p_user uuid) returns void
 language sql as $$ select set_config('request.jwt.claim.sub', p_user::text, true) $$;
 set local role authenticated;
@@ -150,6 +152,94 @@ begin
       raise;
     end if;
   end;
+
+  if not exists (select 1 from public.pages where title = 'Deep 300') then
+    raise exception 'the editor does not reach the deepest page of a tree deeper than a tree may go';
+  end if;
+  begin
+    insert into public.pages (space_id, parent_id, title)
+    select space_id, id, 'Deeper' from public.pages where title = 'Deep 300';
+    raise exception 'a page was made under a tree deeper than a tree may go';
+  exception when check_violation then
+    if sqlerrm <> 'page_too_deep' then
+      raise;
+    end if;
+  end;
+end;
+$$;
+
+-- What is in a tree deeper than a tree may now go stays its people's to
+-- change, sent whole or not, and it moves as long as it goes no deeper.
+do $$
+declare
+  v_deep uuid := (select id from public.pages where title = 'Deep 300');
+  v_parent uuid := (select parent_id from public.pages where title = 'Deep 300');
+  v_higher uuid := (select id from public.pages where title = 'Deep 280');
+  v_space uuid := (select space_id from public.pages where title = 'Deep 300');
+begin
+  perform pg_temp.act_as('5eed0000-0000-0000-0000-000000000001');
+  insert into public.pages (id, space_id, parent_id, title)
+  values (v_deep, v_space, v_parent, 'Deep 300, renamed')
+  on conflict (id) do update set title = excluded.title;
+  insert into public.pages (id, space_id, parent_id, title, deleted_at)
+  values (v_deep, v_space, v_parent, 'Deep 300, renamed', now())
+  on conflict (id) do update set deleted_at = excluded.deleted_at;
+  if (select deleted_at from public.pages where id = v_deep) is null then
+    raise exception 'a page past the depth did not take its deletion sent whole';
+  end if;
+  update public.pages set deleted_at = null, parent_id = v_higher where id = v_deep;
+  if (select parent_id from public.pages where id = v_deep) is distinct from v_higher then
+    raise exception 'a page past the depth did not move up';
+  end if;
+  begin
+    update public.pages set parent_id = v_deep where id = '5eed0000-0000-0000-0000-0000000000a2';
+    raise exception 'a page went under a tree deeper than a tree may go';
+  exception when check_violation then
+    if sqlerrm <> 'page_too_deep' then
+      raise;
+    end if;
+  end;
+end;
+$$;
+
+-- Who had a page hears of its deletion, whatever the clock of the device
+-- that deleted it said, and whatever moved since. The owner's device, a
+-- minute behind, deletes a page and moves the page above it, inside the
+-- share; the editor still reads the deleted row. The editor's device,
+-- offline meanwhile, deletes a page and the one under it: the first
+-- deletion hides neither from them. A device's clock far behind, past when
+-- they accepted the share, hides nothing either.
+do $$
+declare
+  v_owner constant uuid := '5eed0000-0000-0000-0000-000000000001';
+  v_editor constant uuid := '5eed0000-0000-0000-0000-000000000002';
+  v_moved constant uuid := '5eed0000-0000-0000-0000-0000000000d1';
+  v_there constant uuid := '5eed0000-0000-0000-0000-0000000000d2';
+  v_gone constant uuid := '5eed0000-0000-0000-0000-0000000000d3';
+  v_top constant uuid := '5eed0000-0000-0000-0000-0000000000d4';
+  v_under constant uuid := '5eed0000-0000-0000-0000-0000000000d5';
+  v_behind constant uuid := '5eed0000-0000-0000-0000-0000000000d6';
+begin
+  perform pg_temp.act_as(v_owner);
+  update public.pages set deleted_at = now() - interval '1 minute' where id = v_gone;
+  update public.pages set parent_id = v_there where id = v_moved;
+  update public.pages set deleted_at = '2025-01-01' where id = v_behind;
+
+  perform pg_temp.act_as(v_editor);
+  if not exists (select 1 from public.pages where id = v_gone and deleted_at is not null) then
+    raise exception 'the editor does not hear of a page deleted before the page above it moved';
+  end if;
+  if not exists (select 1 from public.pages where id = v_behind and deleted_at is not null) then
+    raise exception 'the editor does not hear of a page deleted by a clock behind their share';
+  end if;
+  update public.pages set deleted_at = now() - interval '1 minute' where id = v_top;
+  if not found then
+    raise exception 'the editor could not delete a page that moved under them';
+  end if;
+  update public.pages set deleted_at = now() - interval '1 minute' where id = v_under;
+  if not found then
+    raise exception 'deleting a page hid the rest of its tree from the editor deleting it';
+  end if;
 end;
 $$;
 reset role;

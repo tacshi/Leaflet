@@ -263,6 +263,23 @@ func (c *Core) CopyText(nodes string) (_ string, err error) {
 	return out, nil
 }
 
+// AppendBlock puts a block, as JSON, at the end of page pageID, open in
+// the app or not: AddFile's, when the page left the window as the file was
+// copied, and no editor of it has a caret to put the block at.
+func (c *Core) AppendBlock(pageID, node string) (err error) {
+	defer catch(&err)
+	var n doc.Node
+	if err := json.Unmarshal([]byte(node), &n); err != nil {
+		return err
+	}
+	c.q.do(func() {
+		err = c.editContent(pageID, func(content *doc.Content) bool {
+			return content.Insert(doc.Position{At: "end"}, &n) == nil
+		})
+	})
+	return err
+}
+
 // AddFile keeps the file at path with page pageID, as the desktop's
 // Upload does, and returns the block that shows it, as JSON: a picture as
 // an image, another file as a file card.

@@ -51,6 +51,32 @@ export interface ChatMessage {
   tool_call_id?: string;
 }
 
+/**
+ * The answer as the conversation goes back to the provider with it: a call
+ * whose arguments are no JSON object, as one cut off, goes with {}. A
+ * server that reads them back refuses the whole conversation over them,
+ * and the model is told what was wrong by the call's result (Go's
+ * sentArguments).
+ */
+export function sentMessage(message: ChatMessage): ChatMessage {
+  if (!message.tool_calls) return message;
+  const sent = (raw: string) => {
+    try {
+      const args = JSON.parse(raw);
+      return args !== null && typeof args === "object" && !Array.isArray(args) ? raw : "{}";
+    } catch {
+      return "{}";
+    }
+  };
+  return {
+    ...message,
+    tool_calls: message.tool_calls.map((c) => ({
+      ...c,
+      function: { ...c.function, arguments: sent(c.function.arguments) },
+    })),
+  };
+}
+
 export interface ToolDef {
   type: "function";
   function: {
@@ -149,7 +175,7 @@ function providerMessage(body: string): string {
   if (typeof detail !== "string") return "";
   // deno-lint-ignore no-control-regex
   const line = detail.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
-  return line.length > 200 ? `${line.slice(0, 200)}…` : line;
+  return line.length > 200 ? `${line.slice(0, 200).toWellFormed()}…` : line;
 }
 
 const STATUS_MESSAGES: Record<number, string> = {

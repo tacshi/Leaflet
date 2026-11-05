@@ -9,9 +9,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	gosync "sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +28,9 @@ func TestUploadOfAFileItCannotReadWaits(t *testing.T) {
 	if os.Getuid() == 0 {
 		t.Skip("root reads every file")
 	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no mode that keeps a file from being read")
+	}
 	st := openStore(t)
 	local := filepath.Join(t.TempDir(), "locked.txt")
 	if err := os.WriteFile(local, []byte("hello"), 0o000); err != nil {
@@ -33,11 +38,11 @@ func TestUploadOfAFileItCannotReadWaits(t *testing.T) {
 	}
 	svc := New(st, remote.SignedInForTest("http://127.0.0.1:1", st, "u1"))
 	payload := map[string]any{"bucket": "files", "path": "s/f/locked.txt", "local_path": local, "content_type": "text/plain"}
-	if done, err := svc.pushFile(context.Background(), "u1", payload); done || err == nil {
+	if done, err := svc.pushFile(context.Background(), "u1", payload, new(atomic.Int64)); done || err == nil {
 		t.Errorf("unreadable: done %v, %v", done, err)
 	}
 	payload["local_path"] = filepath.Join(t.TempDir(), "gone.txt")
-	if done, err := svc.pushFile(context.Background(), "u1", payload); !done || err != nil {
+	if done, err := svc.pushFile(context.Background(), "u1", payload, new(atomic.Int64)); !done || err != nil {
 		t.Errorf("gone: done %v, %v", done, err)
 	}
 }
@@ -1437,5 +1442,364 @@ func TestBusyServerCountsNoFailure(t *testing.T) {
 	_ = svc.syncNow(loop, true, true)
 	if ran {
 		t.Error("the loop's pass ran in the wait the server asked for")
+	}
+}
+
+// A page whose parent neither waits here nor is on the server, as one that
+// came through iCloud Drive before its parent did, is refused with a 500
+// (parent_not_found, P0002), which is that page's own: the rest of the
+// queue and the pull go on, and it waits as a failure does.
+func TestAPageWithoutItsParentHoldsUpNothing(t *testing.T) {
+	st := openStore(t)
+	const child = "00000000-0000-0000-0000-0000000000c1"
+	if err := st.PutRemotePage(map[string]any{"id": child, "space_id": st.Session().SpaceID, "parent_id": "00000000-0000-0000-0000-0000000000a9",
+		"title": "Child", "sort_key": "a1", "created_at": "2026-11-01T00:00:00Z", "updated_at": "2026-11-01T00:00:00Z", store.PeerKey: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Requeue("pages", child); err != nil {
+		t.Fatal(err)
+	}
+	later, err := st.CreatePage(store.NewPageOptions{Title: "Later"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetValue("space.u1", st.Session().SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var went []string
+	pulled := false
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		pulled = pulled || r.Method == http.MethodGet && r.URL.Path == "/rest/v1/folders"
+		if r.Method == http.MethodPost && r.URL.Path == "/rest/v1/pages" {
+			var row map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&row)
+			if store.S(row, "parent_id") != "" {
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = io.WriteString(w, `{"code":"P0002","message":"parent_not_found"}`)
+				return
+			}
+			went = append(went, store.S(row, "id"))
+		}
+		_, _ = io.WriteString(w, "[]")
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.syncNow(context.Background(), false, true); err != nil {
+		t.Fatalf("the pass stopped: %v", err)
+	}
+	if !slices.Equal(went, []string{later.ID}) || !pulled {
+		t.Errorf("went %q, pulled %v", went, pulled)
+	}
+	if n := attempts(t, st, "pages", child); n != 1 {
+		t.Errorf("%d failures", n)
+	}
+}
+
+// A comment queued before comments were cut to what the server keeps goes
+// up cut: whole, it would be refused every time.
+func TestACommentTooLongGoesUpCut(t *testing.T) {
+	st := openStore(t)
+	long := strings.Repeat("字", 100005)
+	c := store.Comment{ID: "00000000-0000-0000-0000-0000000000c2", PageID: "00000000-0000-0000-0000-0000000000a1", BlockID: "b1", AuthorKind: "user",
+		Body: long, Quote: long, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := st.PutComment(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Queue("comments", c.ID, store.CommentToRemote(c), "new comment", c.PageID); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	var sent map[string]any
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.Method == http.MethodPost {
+			var row map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&row)
+			if len([]rune(store.S(row, "body"))) > 100000 || len([]rune(store.S(row, "quote"))) > 100000 {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `{"code":"23514","message":"comments_body_length"}`)
+				return
+			}
+			sent = row
+		}
+		_, _ = io.WriteString(w, "[]")
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if st.PendingCount() != 0 || sent == nil {
+		t.Errorf("%d queued, sent %v", st.PendingCount(), sent != nil)
+	}
+}
+
+// The account having as many devices as it may leaves this one out of its
+// list, and it syncs all the same.
+func TestTooManyDevicesStopsNoPass(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetValue("space.u1", st.Session().SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	var mu gosync.Mutex
+	asked, pages := 0, 0
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Path {
+		case "/rest/v1/devices":
+			asked++
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"code":"23514","message":"too_many_devices"}`)
+			return
+		case "/rest/v1/pages":
+			if r.Method == http.MethodPost {
+				pages++
+			}
+		}
+		_, _ = io.WriteString(w, "[]")
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+	for range 2 {
+		if err := svc.pass(ctx, false); err != nil {
+			t.Fatalf("the pass stopped: %v", err)
+		}
+	}
+	if pages == 0 || asked != 1 || st.HasPending("pages", p.ID) {
+		t.Errorf("%d pages up, asked %d times, still queued %v", pages, asked, st.HasPending("pages", p.ID))
+	}
+}
+
+// refusesNUL is a server that refuses what Postgres does, in text or jsonb,
+// and keeps the rows of the writes it takes.
+type refusesNUL struct {
+	mu      gosync.Mutex
+	refused int
+	writes  map[string][]string
+}
+
+func (s *refusesNUL) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r.Method == http.MethodGet {
+		_, _ = io.WriteString(w, "[]")
+		return
+	}
+	var sent any
+	_ = json.Unmarshal(body, &sent)
+	if holdsNUL(sent) {
+		s.refused++
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"code":"22P05","message":"unsupported Unicode escape sequence"}`)
+		return
+	}
+	if s.writes == nil {
+		s.writes = map[string][]string{}
+	}
+	s.writes[r.URL.Path] = append(s.writes[r.URL.Path], string(body))
+	row := map[string]any{}
+	_ = json.Unmarshal(body, &row)
+	row["revision"], row["updated_at"] = 0, time.Now().UTC().Format(time.RFC3339Nano)
+	_ = json.NewEncoder(w).Encode([]map[string]any{row})
+}
+
+// holdsNUL reports whether a NUL is in a value decoded from JSON.
+func holdsNUL(v any) bool {
+	switch v := v.(type) {
+	case string:
+		return strings.ContainsRune(v, 0)
+	case []any:
+		return slices.ContainsFunc(v, holdsNUL)
+	case map[string]any:
+		for k, e := range v {
+			if strings.ContainsRune(k, 0) || holdsNUL(e) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// A page, its title and its comment holding a NUL, which Postgres refuses
+// whole, go up with U+FFFD for it, a new page and an entry queued long ago
+// alike, and the page here takes what went: it and the server agree.
+func TestWhatPostgresRefusesGoesUpClean(t *testing.T) {
+	st := openStore(t)
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &doc.Content{Children: []*doc.Node{para("a", "before\x00after"), para("b", `shown as \u0000 in code`)}, Blocks: map[string]int64{}, Deleted: map[string]int64{}}
+	if _, _, err := st.SaveContent(p.ID, c); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RenamePage(p.ID, "Plan\x00B"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddComment(p.ID, "a", "Look\x00", "", "quote\x00", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddHistory(p.ID, c, "autosave", "", "Autosave"); err != nil {
+		t.Fatal(err)
+	}
+	srv := &refusesNUL{}
+	hs := httptest.NewServer(srv)
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	got := 0
+	svc.OnPageContent = func(string) { got++ }
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if srv.refused != 0 || st.PendingCount() != 0 {
+		t.Fatalf("%d refused, %d queued", srv.refused, st.PendingCount())
+	}
+	for _, path := range []string{"/rest/v1/pages", "/rest/v1/page_content", "/rest/v1/comments", "/rest/v1/page_history"} {
+		if n := len(srv.writes[path]); n == 0 {
+			t.Errorf("nothing went to %s", path)
+		}
+	}
+	row, err := st.ContentRow(p.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := doc.Decode(row.Content)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if textOf(stored, "a") != "before\uFFFDafter" || textOf(stored, "b") != `shown as \u0000 in code` {
+		t.Errorf("stored %q and %q", textOf(stored, "a"), textOf(stored, "b"))
+	}
+	if strings.Contains(row.PlainText, "\x00") || row.BaseContent != row.Content {
+		t.Errorf("plain text %q, base as the content %v", row.PlainText, row.BaseContent == row.Content)
+	}
+	if got == 0 {
+		t.Error("the page open here was not told of its content")
+	}
+}
+
+// timingOut is a server that ends statements as out of time: every one, or
+// with heavy, those heavy says, a light read of spaces answered all the
+// same. It counts the requests.
+type timingOut struct {
+	mu       gosync.Mutex
+	requests int
+	heavy    func(r *http.Request, body string) bool
+	bodies   []string
+}
+
+func (s *timingOut) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	raw, _ := io.ReadAll(r.Body)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.requests++
+	if s.heavy == nil || r.URL.Path != "/rest/v1/spaces" && s.heavy(r, string(raw)) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"code":"57014","message":"canceling statement due to statement timeout"}`)
+		return
+	}
+	if r.Method != http.MethodGet {
+		s.bodies = append(s.bodies, string(raw))
+		_, _ = io.WriteString(w, `[{"id":"x","revision":0,"updated_at":"2026-11-06T00:00:00Z"}]`)
+		return
+	}
+	_, _ = io.WriteString(w, "[]")
+}
+
+// A database whose statements all run out of time is the server in
+// trouble: the push stops at once, counting against no entry, or each
+// would wait long after the server is back.
+func TestADatabaseTimingOutCountsAgainstNoEntry(t *testing.T) {
+	st := openStore(t)
+	for range 10 {
+		if _, err := st.CreatePage(store.NewPageOptions{Title: "Plan"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := &timingOut{}
+	hs := httptest.NewServer(srv)
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); !remote.IsBusy(err) {
+		t.Fatalf("push: %v", err)
+	}
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		if e.Attempts != 0 {
+			t.Errorf("%s/%s counted %d failures", e.Entity, e.EntityID, e.Attempts)
+		}
+	}
+	if srv.requests > 2 {
+		t.Errorf("%d requests to a server in trouble", srv.requests)
+	}
+}
+
+// A statement too heavy for a server that answers otherwise is its entry's
+// own: it waits, and the queue behind it goes, which it would stop each
+// pass for good.
+func TestAPageTooHeavyToSaveHoldsUpNothing(t *testing.T) {
+	st := openStore(t)
+	heavy, err := st.CreatePage(store.NewPageOptions{Title: "Heavy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	later, err := st.CreatePage(store.NewPageOptions{Title: "Later"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &timingOut{heavy: func(r *http.Request, body string) bool {
+		return r.Method != http.MethodGet && strings.Contains(body, heavy.ID)
+	}}
+	hs := httptest.NewServer(srv)
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); err != nil {
+		t.Fatalf("the push stopped: %v", err)
+	}
+	if n := attempts(t, st, "pages", heavy.ID); n != 1 {
+		t.Errorf("%d failures", n)
+	}
+	if st.HasPending("pages", later.ID) {
+		t.Error("the page behind it did not go")
+	}
+}
+
+// A server that answers reads and times out every write is in trouble
+// however it reads: past a few, the push stops counting them against their
+// entries.
+func TestAServerTimingOutEveryWriteStopsCounting(t *testing.T) {
+	st := openStore(t)
+	for range 10 {
+		if _, err := st.CreatePage(store.NewPageOptions{Title: "Plan"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	srv := &timingOut{heavy: func(r *http.Request, _ string) bool { return r.Method != http.MethodGet }}
+	hs := httptest.NewServer(srv)
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.push(context.Background()); !remote.IsBusy(err) {
+		t.Fatalf("push: %v", err)
+	}
+	counted := 0
+	entries, _ := st.Pending()
+	for _, e := range entries {
+		if e.Attempts > 0 {
+			counted++
+		}
+	}
+	if counted != ownTimeouts {
+		t.Errorf("%d of %d entries counted a failure", counted, len(entries))
 	}
 }

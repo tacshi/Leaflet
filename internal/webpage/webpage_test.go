@@ -154,6 +154,36 @@ func decoded(t *testing.T, data []byte) image.Image {
 // no wider: a photo as a JPEG, one that is not opaque as a PNG, each
 // turned as its EXIF says to see it; a picture already that small, or
 // one that can't be read, is as it was.
+// A picture wider than it prints and thinner than that, as a line drawn
+// across a page, prints as it looks, not blank.
+func TestThinPicturesPrint(t *testing.T) {
+	line := image.NewNRGBA(image.Rect(0, 0, 3000, 1))
+	for x := range 3000 {
+		// In noise, for a smaller picture to come out smaller.
+		line.Set(x, 0, color.NRGBA{uint8(x * x * 31 >> 3), uint8(x * 7 * x >> 5), uint8(x * 113), 255})
+	}
+	var data bytes.Buffer
+	if err := png.Encode(&data, line); err != nil {
+		t.Fatal(err)
+	}
+	small, _, ok := forPrint(data.Bytes())
+	if !ok {
+		t.Fatal("kept as it was")
+	}
+	got, _, err := image.Decode(bytes.NewReader(small))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := got.Bounds(); b.Dx() != printPixels || b.Dy() != 1 {
+		t.Errorf("printed %v", b)
+	}
+	for x := range printPixels {
+		if _, _, _, a := got.At(x, 0).RGBA(); a == 0 {
+			t.Fatalf("clear at %d", x)
+		}
+	}
+}
+
 func TestPicturesPrintSmall(t *testing.T) {
 	big := encodeJPEG(t, photo(3000, 2000, 255), 0)
 	small, typ, ok := forPrint(big)

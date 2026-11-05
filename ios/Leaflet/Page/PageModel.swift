@@ -79,7 +79,7 @@ final class PageModel {
     /// edit was taken, is from before it, and would take it away.
     @ObservationIgnored private var edited: Int64 = 0
     /// closed says the window let the page go, opened yet or not.
-    @ObservationIgnored private var closed = false
+    @ObservationIgnored private(set) var closed = false
     /// blank says the page is one empty paragraph, which offers ways to
     /// start it.
     var blank = false

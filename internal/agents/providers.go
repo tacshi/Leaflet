@@ -166,13 +166,29 @@ func (h *Hub) Available() bool {
 	return err == nil
 }
 
-// LocalKey is the API key of a local provider, kept in the keychain.
+// LocalKey is the API key of a local provider, kept in the keychain: ""
+// when there is none, or it could not be read (keptKey).
 func LocalKey(providerID string) string {
+	key, _ := keptKey(providerID)
+	return key
+}
+
+// keptKey is the API key of a local provider, "" when there is none, and
+// an error when one may be there but could not be read, as the user turned
+// the system's prompt down: that is no provider without a key.
+func keptKey(providerID string) (string, error) {
 	raw, err := keychain.Get("provider." + providerID + ".key")
-	if err != nil {
-		return ""
+	if errors.Is(err, keychain.ErrNotFound) {
+		return "", nil
 	}
-	return string(raw)
+	return string(raw), err
+}
+
+// keyKept reports whether a local provider may have a key in the keychain:
+// one that could not be read counts.
+func keyKept(providerID string) bool {
+	key, err := keptKey(providerID)
+	return key != "" || err != nil
 }
 
 // SetLocalKey keeps a local provider's API key in the keychain.
@@ -193,12 +209,24 @@ func (h *Hub) ModelFor(p store.Provider) (Model, error) {
 	if p.AuthKind == "account" {
 		return h.ChatGPT(p.ID)
 	}
-	return NewClient(p.BaseURL, LocalKey(p.ID)), nil
+	key, err := keptKey(p.ID)
+	if err != nil && p.AuthKind == "api_key" {
+		return nil, errors.New(locales.AgentKeyUnread(p.Name))
+	}
+	return NewClient(p.BaseURL, key), nil
 }
 
 var (
+	// chatgptMu guards chatgptClients and chatgptDrops, never across the
+	// keychain, which may wait on the user: what is drawn reads them.
 	chatgptMu      sync.Mutex
 	chatgptClients = map[string]*ChatGPT{}
+	// chatgptDrops counts, by provider, the sign-ins taken off the keychain,
+	// for a read of it under way to tell that what it found is gone.
+	chatgptDrops = map[string]int{}
+	// chatgptSaves keeps the keychain's writes of the sign-ins in the order
+	// the sign-ins change.
+	chatgptSaves sync.Mutex
 )
 
 // KnownChatGPT is the provider's ChatGPT sign-in if it was read from the
@@ -213,11 +241,12 @@ func (h *Hub) KnownChatGPT(providerID string) *ChatGPT {
 // ChatGPT returns the ChatGPT sign-in of a provider, kept in the keychain.
 func (h *Hub) ChatGPT(providerID string) (*ChatGPT, error) {
 	chatgptMu.Lock()
-	defer chatgptMu.Unlock()
-	if g := chatgptClients[providerID]; g != nil {
+	g, drops := chatgptClients[providerID], chatgptDrops[providerID]
+	chatgptMu.Unlock()
+	if g != nil {
 		return g, nil
 	}
-	raw, err := keychain.Get("chatgpt." + providerID)
+	raw, err := readSecret("chatgpt." + providerID)
 	if err != nil {
 		return nil, errors.New(locales.AgentChatgptSignInAgain())
 	}
@@ -225,7 +254,16 @@ func (h *Hub) ChatGPT(providerID string) (*ChatGPT, error) {
 	if err := json.Unmarshal(raw, &acct); err != nil {
 		return nil, err
 	}
-	g := NewChatGPT(acct)
+	chatgptMu.Lock()
+	defer chatgptMu.Unlock()
+	switch {
+	case chatgptClients[providerID] != nil:
+		return chatgptClients[providerID], nil
+	case chatgptDrops[providerID] != drops:
+		// Signed out as it was read: what came is no sign-in any more.
+		return nil, errors.New(locales.AgentChatgptSignInAgain())
+	}
+	g = NewChatGPT(acct)
 	keepRefreshed(providerID, g)
 	chatgptClients[providerID] = g
 	return g, nil
@@ -234,13 +272,16 @@ func (h *Hub) ChatGPT(providerID string) (*ChatGPT, error) {
 // keepRefreshed keeps g's account as its refresh token rotates, while g
 // is still the provider's sign-in: a run may hold one that another
 // sign-in replaced, or that was signed out, and its renewal must not
-// put it back. Under chatgptMu, the saves go in the order the sign-ins
+// put it back. Under chatgptSaves, the saves go in the order the sign-ins
 // change, and g renews one at a time, so its saves go in order too.
 func keepRefreshed(providerID string, g *ChatGPT) {
 	g.OnRefresh = func(a ChatGPTAccount) {
+		chatgptSaves.Lock()
+		defer chatgptSaves.Unlock()
 		chatgptMu.Lock()
-		defer chatgptMu.Unlock()
-		if chatgptClients[providerID] != g {
+		current := chatgptClients[providerID] == g
+		chatgptMu.Unlock()
+		if !current {
 			return
 		}
 		if err := SaveChatGPT(providerID, a); err != nil {
@@ -252,15 +293,18 @@ func keepRefreshed(providerID string, g *ChatGPT) {
 // UseChatGPT keeps a new ChatGPT sign-in for a provider.
 func UseChatGPT(providerID string, g *ChatGPT) error {
 	keepRefreshed(providerID, g)
+	chatgptSaves.Lock()
+	defer chatgptSaves.Unlock()
 	chatgptMu.Lock()
-	defer chatgptMu.Unlock()
 	chatgptClients[providerID] = g
+	chatgptMu.Unlock()
 	return SaveChatGPT(providerID, g.Account())
 }
 
-// keepSecret and forgetSecret write the keychain; tests keep the
-// sign-ins elsewhere.
+// readSecret, keepSecret and forgetSecret read and write the keychain;
+// tests keep the sign-ins elsewhere.
 var (
+	readSecret   = keychain.Get
 	keepSecret   = keychain.Set
 	forgetSecret = keychain.Delete
 )
@@ -271,15 +315,69 @@ func SaveChatGPT(providerID string, a ChatGPTAccount) error {
 	return keepSecret("chatgpt."+providerID, raw)
 }
 
-// ForgetChatGPT signs a provider out of ChatGPT on this device.
-func ForgetChatGPT(ctx context.Context, providerID string) {
-	chatgptMu.Lock()
-	g := chatgptClients[providerID]
-	delete(chatgptClients, providerID)
-	_ = forgetSecret("chatgpt." + providerID)
-	chatgptMu.Unlock()
+// ForgetChatGPT signs a provider out of ChatGPT on this device, and reports
+// whether its sign-in could not be taken off the keychain. A sign-in not
+// read yet is read first: OpenAI ends it only if told its refresh token.
+func ForgetChatGPT(ctx context.Context, providerID string) error {
+	g, err := dropChatGPT(providerID)
 	if g != nil {
 		g.SignOut(ctx)
+	}
+	return err
+}
+
+// dropChatGPT takes a provider's sign-in off this device, and returns it
+// to revoke, nil when it has none that can be read.
+func dropChatGPT(providerID string) (*ChatGPT, error) {
+	chatgptSaves.Lock()
+	defer chatgptSaves.Unlock()
+	chatgptMu.Lock()
+	g := chatgptClients[providerID]
+	chatgptMu.Unlock()
+	if g == nil {
+		if raw, err := readSecret("chatgpt." + providerID); err == nil {
+			var acct ChatGPTAccount
+			if json.Unmarshal(raw, &acct) == nil {
+				g = NewChatGPT(acct)
+			}
+		}
+	}
+	err := forgetSecret("chatgpt." + providerID)
+	// Only with the secret gone, however long the keychain took: a read of
+	// it that began meanwhile finds this, and one that has ended, the
+	// sign-in it left here, whose renewals keepRefreshed then keeps nowhere.
+	chatgptMu.Lock()
+	defer chatgptMu.Unlock()
+	if read := chatgptClients[providerID]; read != nil {
+		g = read
+	}
+	delete(chatgptClients, providerID)
+	chatgptDrops[providerID]++
+	return g, err
+}
+
+// ForgetProviders takes every provider's key and sign-in off this device,
+// as the account and all it kept here leave with Store.Wipe, which removes
+// the providers' rows: under IDs nothing names any more they would stay in
+// the keychain for good, a ChatGPT sign-in still good at OpenAI. What could
+// not be taken off is logged: the account is gone by then, and goes from
+// this device all the same.
+func (h *Hub) ForgetProviders(ctx context.Context) {
+	ps, err := h.st.Providers()
+	if err != nil {
+		log.Printf("forget providers: %v", err)
+		return
+	}
+	for _, p := range ps {
+		if err := SetLocalKey(p.ID, ""); err != nil {
+			log.Printf("forget provider key: %v", err)
+		}
+		if p.AuthKind != "account" {
+			continue
+		}
+		if err := ForgetChatGPT(ctx, p.ID); err != nil {
+			log.Printf("forget ChatGPT sign-in: %v", err)
+		}
 	}
 }
 

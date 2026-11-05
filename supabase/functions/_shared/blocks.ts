@@ -155,8 +155,35 @@ export function emptyContent(): PageContent {
   };
 }
 
+/** A page with one empty paragraph to type in, stamped now (doc.Empty). */
+export function blankContent(now = Date.now()): PageContent {
+  const content = emptyContent();
+  const id = randomId();
+  content.document.children = [{ id, type: "paragraph", data: { delta: [] } }];
+  content.meta.blocks[id] = now;
+  return content;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * Text as the database can keep it: without NUL, which text and jsonb
+ * refuse, and with half a surrogate pair, which jsonb refuses too, as
+ * U+FFFD, as Go reads one from JSON. One such character a model wrote
+ * would otherwise fail the save of all a run did.
+ */
+export function storable(text: string): string {
+  return text.replaceAll("\u0000", "").toWellFormed();
+}
+
+/** A value parsed from JSON with every string value in it storable. */
+export function storableValue(value: unknown): unknown {
+  if (typeof value === "string") return storable(value);
+  if (Array.isArray(value)) return value.map(storableValue);
+  if (isRecord(value)) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, storableValue(v)]));
+  return value;
 }
 
 /**
@@ -633,8 +660,12 @@ function codeSpan(s: string): string {
   return ticks + s + ticks;
 }
 
-/** A link's url, in angle brackets when it holds what would end it or read as markup. */
+/**
+ * A link's url, in angle brackets when it holds what would end it or read
+ * as markup, and a backtick as a url can hold one (doc.LinkDestination).
+ */
 function linkDestination(href: string): string {
+  href = href.replaceAll("`", "%60");
   if (!/[()<>\\ \t\n]/.test(href)) return href;
   return "<" + href.replace(/[\\<>]/g, "\\$&").replace(/\n/g, "%0A") + ">";
 }

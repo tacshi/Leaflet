@@ -53,8 +53,9 @@ func forPrint(data []byte) (small []byte, typ string, ok bool) {
 	}
 	// Each pixel is first the mean of those it stands for, as many each
 	// way as the picture is times wider than it prints, and then what is
-	// left to shrink, less than half, is taken between those.
-	scaled := shrunk(img, seenWidth/printPixels)
+	// left to shrink, less than half, is taken between those. A picture
+	// thinner than that, as a line, keeps a pixel across.
+	scaled := shrunk(img, min(seenWidth/printPixels, cfg.Width, cfg.Height))
 	scale := float64(printPixels) / float64(seenWidth)
 	w, h := max(1, int(float64(cfg.Width)*scale+0.5)), max(1, int(float64(cfg.Height)*scale+0.5))
 	if scaled.Rect.Dx() != w || scaled.Rect.Dy() != h {

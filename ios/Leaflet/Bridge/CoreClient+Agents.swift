@@ -111,6 +111,15 @@ struct AgentState: Codable, Sendable {
 
     static let empty = AgentState(
         messages: [], runs: [], running: false, options: [], available: false)
+
+    /// runToUndo is the run Undo in the page takes back: the latest with
+    /// edits, once it is done. While one works, Undo takes back nothing:
+    /// the steps on screen are its own, and an earlier run's are not what
+    /// the user sees written.
+    var runToUndo: Run? {
+        guard !running, !runs.contains(where: \.running) else { return nil }
+        return runs.last { !$0.edits.isEmpty && !$0.undone }
+    }
 }
 
 /// CommentThread is a first comment and its replies.
@@ -129,6 +138,9 @@ struct CommentThread: Codable, Hashable, Identifiable, Sendable {
         var deleted: Bool?
         /// mayDelete says the user may delete it, as the server lets them.
         var mayDelete: Bool
+        /// askedBy says who else had an agent write it, in words for the
+        /// user.
+        var askedBy: String?
 
         enum CodingKeys: String, CodingKey {
             case id, body, quote, resolved, deleted
@@ -137,6 +149,7 @@ struct CommentThread: Codable, Hashable, Identifiable, Sendable {
             case authorName = "author_name"
             case createdAt = "created_at"
             case mayDelete = "may_delete"
+            case askedBy = "asked_by"
         }
 
         var created: Date { Date(timeIntervalSince1970: TimeInterval(createdAt) / 1000) }

@@ -192,6 +192,43 @@ struct PageTests {
         #expect(!AskSheet.closes(run("failed", edits: ["Inserted a block"], error: "No key")))
     }
 
+    /// Undo in the page takes back the latest run with edits, once it is
+    /// done: while a run works, nothing, and never the run before it, whose
+    /// edits are not what the user sees being written.
+    @Test func undoInThePageWaitsForTheRunThatWorks() {
+        var older = run("done", edits: ["Inserted a block"])
+        older.id = "older"
+        var state = AgentState.empty
+        state.runs = [older]
+        #expect(state.runToUndo?.id == "older")
+
+        state.runs.append(run("running"))
+        state.running = true
+        #expect(state.runToUndo == nil)
+        state.runs[1] = run("running", edits: ["Inserted a block"])
+        #expect(state.runToUndo == nil)
+
+        state.runs[1] = run("done", edits: ["Inserted a block"])
+        state.running = false
+        #expect(state.runToUndo?.id == "r")
+        state.runs[1].undone = true
+        #expect(state.runToUndo?.id == "older")
+    }
+
+    /// A comment says how it came beside its author, as on the desktop: by
+    /// the page's public link, through which a guest names themself, or who
+    /// had an agent write it.
+    @Test func aCommentSaysHowItCame() {
+        let comment = { (kind: String, asked: String?) in
+            CommentThread.Comment(
+                id: "c", blockID: "b", authorKind: kind, authorName: "Ann", body: "Hi",
+                resolved: false, createdAt: 0, mayDelete: false, askedBy: asked)
+        }
+        #expect(CommentRow.note(comment("guest", nil)) == L.panelViaPublicLink)
+        #expect(CommentRow.note(comment("agent", "asked by Ann")) == "asked by Ann")
+        #expect(CommentRow.note(comment("user", nil)) == nil)
+    }
+
     /// What the microphone hears becomes the core's 16 kHz, 16-bit mono
     /// PCM: a third as many samples, at the level heard. The converter
     /// holds back a little of the first buffer, as it resamples a stream,

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"leaflet/internal/doc"
+	"leaflet/internal/keychain"
 	"leaflet/internal/store"
 )
 
@@ -348,12 +349,217 @@ func TestOldChatGPTSignInKeepsNothing(t *testing.T) {
 	if got := refresh(); got != "new2" {
 		t.Errorf("kept %q after the sign-in renewed", got)
 	}
-	ForgetChatGPT(context.Background(), "p")
+	if err := ForgetChatGPT(context.Background(), "p"); err != nil {
+		t.Fatal(err)
+	}
 	now.OnRefresh(ChatGPTAccount{RefreshToken: "new3"})
 	mu.Lock()
 	defer mu.Unlock()
 	if _, ok := kept["chatgpt.p"]; ok {
 		t.Errorf("a sign-out came back: %v", kept)
+	}
+}
+
+// What is drawn asks for a sign-in without waiting on the keychain, which
+// may be waiting on the user while another goroutine reads it.
+func TestKnownChatGPTDoesNotWaitOnTheKeychain(t *testing.T) {
+	reading, answer := make(chan struct{}), make(chan struct{})
+	was := readSecret
+	readSecret = func(string) ([]byte, error) {
+		close(reading)
+		<-answer
+		return []byte(`{"refresh_token":"r"}`), nil
+	}
+	t.Cleanup(func() {
+		readSecret = was
+		chatgptMu.Lock()
+		defer chatgptMu.Unlock()
+		delete(chatgptClients, "slow")
+	})
+	h := &Hub{}
+	read := make(chan *ChatGPT, 1)
+	go func() {
+		g, _ := h.ChatGPT("slow")
+		read <- g
+	}()
+	<-reading
+	known := make(chan *ChatGPT, 1)
+	go func() { known <- h.KnownChatGPT("slow") }()
+	select {
+	case g := <-known:
+		if g != nil {
+			t.Errorf("known before it was read: %v", g)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("KnownChatGPT waited on the keychain")
+	}
+	close(answer)
+	if g := <-read; g == nil || h.KnownChatGPT("slow") != g {
+		t.Errorf("read %v, known %v", g, h.KnownChatGPT("slow"))
+	}
+}
+
+// A sign-in signed out while the keychain was reading it does not come
+// back from what the keychain gave.
+func TestChatGPTSignedOutAsItIsRead(t *testing.T) {
+	useMemKeys(t)
+	reading, answer := make(chan struct{}), make(chan struct{})
+	was := readSecret
+	first := true
+	readSecret = func(name string) ([]byte, error) {
+		if first {
+			first = false
+			close(reading)
+			<-answer
+			return []byte(`{"refresh_token":"r"}`), nil
+		}
+		return nil, keychain.ErrNotFound
+	}
+	t.Cleanup(func() { readSecret = was })
+	h := &Hub{}
+	failed := make(chan error, 1)
+	go func() {
+		_, err := h.ChatGPT("gone")
+		failed <- err
+	}()
+	<-reading
+	if err := ForgetChatGPT(context.Background(), "gone"); err != nil {
+		t.Fatal(err)
+	}
+	close(answer)
+	if err := <-failed; err == nil || h.KnownChatGPT("gone") != nil {
+		t.Errorf("signed out, and kept: %v", err)
+	}
+}
+
+// A sign-in that leaves the keychain slowly, as a prompt can make it, is
+// not kept by a read that came in the meantime: one that ended before it
+// has gone hands on what will be no sign-in, whose renewals go nowhere, and
+// one that ends after finds it gone.
+func TestChatGPTReadWhileItGoes(t *testing.T) {
+	keys := useMemKeys(t)
+	fakeDiscovery(t, &chatgptDiscovery{})
+	if err := SaveChatGPT("going", ChatGPTAccount{RefreshToken: "r"}); err != nil {
+		t.Fatal(err)
+	}
+	dropping, goOn, reading, late := make(chan struct{}), make(chan struct{}), make(chan struct{}), make(chan struct{})
+	was := readSecret
+	var reads atomic.Int32
+	readSecret = func(name string) ([]byte, error) {
+		switch reads.Add(1) {
+		case 1: // the sign-out's
+			close(dropping)
+			<-goOn
+		case 2: // the read that ends after it
+			close(reading)
+			<-late
+		}
+		return was(name)
+	}
+	t.Cleanup(func() { readSecret = was })
+	h := &Hub{}
+	gone := make(chan error, 1)
+	go func() { gone <- ForgetChatGPT(context.Background(), "going") }()
+	<-dropping
+	failed := make(chan error, 1)
+	go func() {
+		_, err := h.ChatGPT("going")
+		failed <- err
+	}()
+	<-reading
+	g, err := h.ChatGPT("going")
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(goOn)
+	if err := <-gone; err != nil {
+		t.Fatal(err)
+	}
+	if h.KnownChatGPT("going") != nil {
+		t.Error("kept a sign-in read as it went")
+	}
+	close(late)
+	if err := <-failed; err == nil || h.KnownChatGPT("going") != nil {
+		t.Errorf("read after it went, and kept: %v", err)
+	}
+	g.OnRefresh(ChatGPTAccount{RefreshToken: "r2"})
+	if len(keys.keys) != 0 {
+		t.Errorf("a renewal brought it back: %v", keys.keys)
+	}
+}
+
+// One provider's sign-ins coming and going are no change to another's: a
+// read of it under way goes on.
+func TestChatGPTReadsKeepToTheirProvider(t *testing.T) {
+	useMemKeys(t)
+	fakeDiscovery(t, &chatgptDiscovery{})
+	for _, id := range []string{"mine", "other"} {
+		if err := SaveChatGPT(id, ChatGPTAccount{RefreshToken: "r"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	reading, answer := make(chan struct{}), make(chan struct{})
+	was := readSecret
+	readSecret = func(name string) ([]byte, error) {
+		if name == "chatgpt.mine" {
+			close(reading)
+			<-answer
+		}
+		return was(name)
+	}
+	t.Cleanup(func() {
+		readSecret = was
+		chatgptMu.Lock()
+		defer chatgptMu.Unlock()
+		delete(chatgptClients, "mine")
+		delete(chatgptClients, "new")
+	})
+	h := &Hub{}
+	failed := make(chan error, 1)
+	go func() {
+		_, err := h.ChatGPT("mine")
+		failed <- err
+	}()
+	<-reading
+	if err := ForgetChatGPT(context.Background(), "other"); err != nil {
+		t.Fatal(err)
+	}
+	if err := UseChatGPT("new", NewChatGPT(ChatGPTAccount{RefreshToken: "n"})); err != nil {
+		t.Fatal(err)
+	}
+	close(answer)
+	if err := <-failed; err != nil || h.KnownChatGPT("mine") == nil {
+		t.Errorf("read of another provider's: %v", err)
+	}
+}
+
+// Signing a provider out tells OpenAI, though no run has read its sign-in
+// from the keychain yet: its refresh token goes on working otherwise, kept
+// nowhere.
+func TestForgetChatGPTRevokesOneNotRead(t *testing.T) {
+	keys := useMemKeys(t)
+	revoked := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		revoked <- r.FormValue("token")
+	}))
+	defer srv.Close()
+	fakeDiscovery(t, &chatgptDiscovery{RevocationEndpoint: srv.URL + "/revoke"})
+	if err := SaveChatGPT("p", ChatGPTAccount{ClientID: "c", RefreshToken: "r1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := ForgetChatGPT(context.Background(), "p"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-revoked:
+		if got != "r1" {
+			t.Errorf("revoked %q", got)
+		}
+	default:
+		t.Error("the sign-in was not revoked")
+	}
+	if len(keys.keys) != 0 {
+		t.Errorf("kept %v", keys.keys)
 	}
 }
 

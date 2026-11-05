@@ -1,6 +1,7 @@
 package agents
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -971,6 +972,75 @@ type queueHost struct {
 
 func (h queueHost) Update(_ string, fn func()) { h.q <- fn }
 
+// busyHost is a host whose main thread does not get to what Forget leaves
+// it, as the account's pages go right after.
+type busyHost struct{ queueHost }
+
+func (h busyHost) Update(pageID string, fn func()) {
+	if pageID != "" {
+		h.q <- fn
+	}
+}
+
+// Forget ends a run there and then, not when the main thread gets to it:
+// the account's pages go right after it, and what the run's tools made
+// from then on would stay for the next account.
+func TestForgetEndsARunAtOnce(t *testing.T) {
+	st := openStore(t)
+	asked, answer := make(chan struct{}), make(chan struct{})
+	models := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		select {
+		case asked <- struct{}{}:
+		default:
+		}
+		<-answer
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"finish_reason": "tool_calls", "message": map[string]any{
+			"content": "", "tool_calls": []any{call("create_subpage", map[string]any{"title": "Secret"})},
+		}}}})
+	}))
+	defer models.Close()
+	defer close(answer)
+	if err := st.PutProvider(store.Provider{ID: "local", Preset: "custom", Name: "Local", BaseURL: models.URL, AuthKind: "none", DefaultModel: "m", IsLocal: true, SupportsTools: new(true)}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Plan", Content: page()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := busyHost{queueHost{q: make(chan func(), 16)}}
+	h := NewHub(st, nil, host)
+	done := make(chan *Run, 1)
+	h.Start(p.ID, RunOptions{Surface: "sidebar", Instruction: "go", Done: func(r *Run) { done <- r }})
+	select {
+	case <-asked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the model was never asked")
+	}
+	h.Forget()
+	answer <- struct{}{}
+	for {
+		select {
+		case fn := <-host.q:
+			fn()
+			continue
+		case r := <-done:
+			if r.Error != ErrAccountLeft.Error() {
+				t.Errorf("ended with %q", r.Error)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("the run went on")
+		}
+		break
+	}
+	if kids, err := st.Children(p.ID, ""); err != nil || len(kids) != 0 {
+		t.Errorf("made after its account left: %v, %v", kids, err)
+	}
+	// The next account's runs are not ended with it.
+	if ctx := h.runContext(); ctx.Err() != nil {
+		t.Errorf("a run of the next account: %v", ctx.Err())
+	}
+}
+
 // A chat reply shows the answer as it streams, its thinking left out, and
 // not an answer an edit of the page went on from.
 func TestReplyStreamShowsTheAnswerSoFar(t *testing.T) {
@@ -1698,5 +1768,26 @@ func TestRunKeepsToItsPageLinkedSince(t *testing.T) {
 		if run.Status != "done" || run.Stopped || len(run.Ops) != 1 || !strings.Contains(string(raw), "This page has a public link now") {
 			t.Errorf("having read no other page: %s, stopped %v, %d ops, told %s", run.Status, run.Stopped, len(run.Ops), raw)
 		}
+	}
+}
+
+// A job goes up as Postgres keeps it: what a page gave its request can
+// hold a NUL, or bytes that are no UTF-8, which would refuse the whole row.
+func TestJobGoesUpClean(t *testing.T) {
+	var sent []byte
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent, _ = io.ReadAll(r.Body)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+	st := openStore(t)
+	h := NewHub(st, remote.SignedInForTest(srv.URL, st, "u1"), stubHost{})
+	req := Request{JobID: "j", Surface: "sidebar", Instruction: "a\x00b", SelectionText: "c\xffd"}
+	if err := h.insertJob(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(sent, []byte(`\u0000`)) || !bytes.Contains(sent, []byte("a�b")) || !bytes.Contains(sent, []byte("c�d")) {
+		t.Errorf("sent %s", sent)
 	}
 }

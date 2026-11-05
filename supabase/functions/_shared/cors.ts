@@ -5,7 +5,7 @@ export const corsHeaders: Record<string, string> = {
 };
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(public status: number, message: string, public code?: string) {
     super(message);
   }
 }
@@ -26,7 +26,7 @@ export function json(body: unknown, status = 200): Response {
 
 export function errorResponse(error: unknown): Response {
   if (error instanceof HttpError) {
-    return json({ error: error.message }, error.status);
+    return json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, error.status);
   }
   const message = error instanceof Error ? error.message : String(error);
   console.error(error);

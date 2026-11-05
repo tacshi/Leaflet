@@ -152,11 +152,25 @@ function Get-WindowsCertificate {
 	$cert
 }
 
-# Import-UpdateKey sets MYGO_UPDATER_PRIVATE_KEY, which signs updates, from
-# the file LEAFLET_UPDATE_KEY names (by default the one
-# `go tool mygo keygen -o $env:APPDATA\mygo\update-keys\Leaflet` wrote)
-# unless it is set.
-function Import-UpdateKey {
+# Test-Signed fails unless each of the Windows programs $Paths carries a
+# signature: a certificate that signed some of a build should leave none of
+# it to go out unsigned.
+function Test-Signed([string[]]$Paths) {
+	foreach ($program in $Paths) {
+		if (-not (Get-AuthenticodeSignature -LiteralPath $program).SignerCertificate) {
+			Fail "$program is not signed, though a Windows certificate was given"
+		}
+	}
+}
+
+# Get-UpdateKeyFile returns the file of the key that signs updates, the one
+# LEAFLET_UPDATE_KEY names (by default the one
+# `go tool mygo keygen -o $env:APPDATA\mygo\update-keys\Leaflet` wrote), for
+# updates.privateKey: read there, the key stays out of what every program
+# the release runs inherits. It returns nothing when
+# MYGO_UPDATER_PRIVATE_KEY, which MyGo takes first, is set, and fails when
+# there is neither.
+function Get-UpdateKeyFile {
 	if ($env:MYGO_UPDATER_PRIVATE_KEY) { return }
 	$file = $env:LEAFLET_UPDATE_KEY
 	if (-not $file) { $file = Join-Path $env:APPDATA 'mygo\update-keys\Leaflet\mygo-update.key' }
@@ -164,7 +178,7 @@ function Import-UpdateKey {
 	if (-not (Test-Path -PathType Leaf $file)) {
 		Fail "no update signing key at $file; set LEAFLET_UPDATE_KEY or MYGO_UPDATER_PRIVATE_KEY"
 	}
-	$env:MYGO_UPDATER_PRIVATE_KEY = (Get-Content -Raw $file).TrimEnd("`r", "`n")
+	$file
 }
 
 # Test-Gh fails unless the GitHub CLI is there to upload with, signed in.
@@ -187,8 +201,145 @@ function Test-Draft([string]$Version) {
 	}
 }
 
+# Test-DraftCommit fails when the draft release v$Version of updates.github
+# holds a build of another commit than $Commit, which Send-Release records
+# on it as it makes it (--target): a release tags one commit, and a build of
+# another would go out under it. No release yet passes.
+function Test-DraftCommit([string]$Version, [string]$Commit) {
+	$repo = Get-ConfigValue updates.github
+	$target = & gh release view "v$Version" --repo $repo --json targetCommitish --jq .targetCommitish 2>$null
+	if ($LASTEXITCODE -eq 0 -and "$target".Trim() -ne $Commit) {
+		Fail "the draft release v$Version of $repo holds a build of $("$target".Trim()), not of $Commit; delete the draft and run again"
+	}
+}
+
+# Test-Pushed fails unless updates.github has the commit $Commit, which a
+# draft can record only then: found out before the long build, not after it.
+function Test-Pushed([string]$Commit) {
+	$repo = Get-ConfigValue updates.github
+	& gh api "repos/$repo/commits/$Commit" --silent *> $null
+	if ($LASTEXITCODE -ne 0) {
+		Fail "$repo does not have the commit $Commit, which its draft release would record; push it first"
+	}
+}
+
 # Invoke-Mygo runs go tool mygo with $Arguments and fails when it does.
 function Invoke-Mygo([string[]]$Arguments) {
 	& go tool mygo @Arguments
 	if ($LASTEXITCODE -ne 0) { Fail "go tool mygo $($Arguments[0]) failed" }
+}
+
+# Invoke-Gh runs gh with its arguments and fails when it does.
+function Invoke-Gh {
+	& gh @args
+	if ($LASTEXITCODE -ne 0) { Fail "gh $($args[0]) $($args[1]) failed" }
+}
+
+# Get-ChangelogNotes returns the section of the changelog $Path under
+# "## <version>" (or "## [<version>]") for $Version, as MyGo reads it, or
+# nothing.
+function Get-ChangelogNotes([string]$Path, [string]$Version) {
+	if (-not (Test-Path -PathType Leaf $Path)) { return '' }
+	$section = @()
+	$inside = $false
+	foreach ($line in [IO.File]::ReadAllLines($Path)) {
+		if ($line.StartsWith('## ')) {
+			if ($inside) { break }
+			$fields = @(-split $line.Substring(3))
+			$heading = if ($fields.Count) { $fields[0] } else { '' }
+			if ($heading.StartsWith('[')) { $heading = $heading.Substring(1).Split(']', 2)[0] }
+			$inside = ($heading -creplace '^v', '') -eq $Version
+			continue
+		}
+		if ($inside) { $section += $line }
+	}
+	($section -join "`n").Trim()
+}
+
+# Read-Checksums returns the lines of the SHA256SUMS $Path, each file's sum
+# by its name.
+function Read-Checksums([string]$Path) {
+	$sums = @{}
+	foreach ($line in [IO.File]::ReadAllLines($Path)) {
+		if ($line -match '^([0-9a-f]{64}) [ *](.+)$') { $sums[$Matches[2]] = $Matches[1] }
+	}
+	$sums
+}
+
+# Merge-Checksums adds to the SHA256SUMS $Path the lines of the SHA256SUMS
+# $Earlier, an earlier upload's to the same release, for the files $Path
+# doesn't list, keeping the lines sorted by name, as MyGo writes them.
+function Merge-Checksums([string]$Path, [string]$Earlier) {
+	$sums = Read-Checksums $Path
+	$before = Read-Checksums $Earlier
+	foreach ($name in $before.Keys) {
+		if (-not $sums.ContainsKey($name)) { $sums[$name] = $before[$name] }
+	}
+	$names = [string[]]$sums.Keys
+	[Array]::Sort($names, [StringComparer]::Ordinal)
+	$text = ($names | ForEach-Object { "$($sums[$_])  $_`n" }) -join ''
+	[IO.File]::WriteAllText($Path, $text, [Text.UTF8Encoding]::new($false))
+}
+
+# Send-Release puts what go tool mygo build wrote in the output directory
+# $Out, built from the commit $Commit, for the platform folders $Dirs, on the
+# GitHub release v$Version of updates.github, with gh, as mygo build -upload
+# does: the files the build's SHA256SUMS lists, which MyGo writes for the
+# files it would upload (the installers, update archives, deltas and install
+# scripts), and SHA256SUMS, first, then the update manifests, so that none
+# ever names a file not there yet. They keep MyGo's names, by which
+# SHA256SUMS lists them and install.ps1 finds its installer. A release there
+# already must be a draft of that commit, and keeps the checksums of the
+# files other builds put on it; else it is made, as a draft of it, with the
+# notes in the file $Notes.
+function Send-Release([string]$Version, [string]$Out, [string]$Notes, [string]$Commit, [string[]]$Dirs) {
+	$repo = Get-ConfigValue updates.github
+	$tag = "v$Version"
+	$sumsFile = Join-Path $Out 'SHA256SUMS'
+	if (-not (Test-Path -PathType Leaf $sumsFile)) {
+		Fail "no SHA256SUMS in $Out, which lists what the build made to upload"
+	}
+	# By MyGo's own list, a kind of file it starts to make goes up too,
+	# rather than being left out. One install script serves every
+	# architecture of a system, so the first folder's goes.
+	$files = @()
+	foreach ($name in (Read-Checksums $sumsFile).Keys) {
+		$found = $null
+		foreach ($dir in $Dirs) {
+			$candidate = Join-Path $Out "$dir\$name"
+			if (Test-Path -PathType Leaf $candidate) {
+				$found = $candidate
+				break
+			}
+		}
+		if (-not $found) { Fail "SHA256SUMS lists $name, which is in none of the build's folders ($($Dirs -join ', '))" }
+		$files += $found
+	}
+	$manifests = @()
+	foreach ($dir in $Dirs) {
+		$manifests += @(Get-ChildItem -LiteralPath (Join-Path $Out $dir) -Filter 'update-*.json' -File | ForEach-Object FullName)
+	}
+	if ($files.Count + $manifests.Count -eq 0) { Fail "nothing to upload in $Out" }
+	Test-Draft $Version
+	Test-DraftCommit $Version $Commit
+	$assets = & gh release view $tag --repo $repo --json assets --jq '.assets[].name' 2>$null
+	if ($LASTEXITCODE -eq 0) {
+		if (@($assets) -contains 'SHA256SUMS') {
+			$earlier = Join-Path ([IO.Path]::GetTempPath()) ([IO.Path]::GetRandomFileName())
+			New-Item -ItemType Directory $earlier | Out-Null
+			try {
+				Invoke-Gh release download $tag --repo $repo --pattern SHA256SUMS --dir $earlier
+				Merge-Checksums $sumsFile (Join-Path $earlier 'SHA256SUMS')
+			} finally {
+				Remove-Item -Recurse -Force $earlier
+			}
+		}
+	} else {
+		Info "creating the draft release $tag of $repo"
+		Invoke-Gh release create $tag --repo $repo --draft --target $Commit --title $tag --notes-file $Notes | Out-Null
+	}
+	$files += $sumsFile
+	Info "uploading $($files.Count) files, then $($manifests.Count) manifests, to $tag of $repo"
+	Invoke-Gh release upload $tag --repo $repo --clobber @files
+	if ($manifests.Count -gt 0) { Invoke-Gh release upload $tag --repo $repo --clobber @manifests }
 }

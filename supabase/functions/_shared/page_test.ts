@@ -1,6 +1,6 @@
 import { assert, assertEquals, assertRejects, assertThrows } from "jsr:@std/assert@1";
 import { parse } from "npm:parse5@8.0.1";
-import { MAX_PAGE_BYTES, MAX_PAGE_TEXT, readHtml, readPage, truncate } from "./page.ts";
+import { MAX_PAGE_BYTES, MAX_PAGE_TEXT, ParseBudget, readHtml, readPage, truncate } from "./page.ts";
 import pages from "./testdata/pages.json" with { type: "json" };
 import { fixture } from "../_testing/fixture.ts";
 
@@ -133,6 +133,28 @@ Deno.test("a page too deep or too slow to parse is not read", () => {
   start = performance.now();
   assertThrows(() => readHtml("https://example.com/", slow), Error, "too long");
   assert(performance.now() - start < 5000, "a slow page was parsed whole");
+});
+
+// A run reads pages as far as its CPU goes: what each took to parse comes
+// off what the run has, and with none left the next is not read.
+Deno.test("a run's pages share what parsing it has", () => {
+  const budget = new ParseBudget();
+  const page = `<p>${"word ".repeat(100_000)}</p>`;
+  const before = budget.leftMs;
+  assert(readHtml("https://example.com/", page, budget).text.length > 0);
+  assert(budget.leftMs < before);
+
+  budget.leftMs = 0;
+  assertThrows(() => readHtml("https://example.com/", "<p>Next</p>", budget), Error, "read as much");
+
+  // What is left is the most the next may take.
+  budget.leftMs = 1;
+  const deep = "<div>".repeat(500);
+  const slow = deep + "</p>".repeat((MAX_PAGE_BYTES - deep.length) / 4);
+  const start = performance.now();
+  assertThrows(() => readHtml("https://example.com/", slow, budget), Error, "too long");
+  assert(performance.now() - start < 500, "a slow page went on past what the run had left");
+  assert(budget.leftMs < 0);
 });
 
 /** Answers fetch with these, in turn, keeping what it was asked. */

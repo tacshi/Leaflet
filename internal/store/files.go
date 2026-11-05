@@ -3,9 +3,12 @@ package store
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"leaflet/internal/doc"
@@ -82,6 +85,102 @@ func putFile(q querier, dir string, f File) error {
 	return err
 }
 
+// storageKeyChars are what Storage takes in an object's key besides ASCII's
+// letters and digits: it refuses a key with any other (InvalidKey).
+const storageKeyChars = "_/!.*'() &$=@;:+,?-"
+
+// inStorageKey reports whether Storage takes r in an object's key.
+func inStorageKey(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune(storageKeyChars, r)
+}
+
+// StorageKey is where a file is stored (its storage_path): under its space
+// and ID, which tell it from every other, by its name with "_" for each
+// character Storage takes in no key. The name itself stays in the row, for
+// people, so "报告.pdf" is kept as "__.pdf". A name Storage takes is
+// its key as it is.
+func StorageKey(spaceID, id, name string) string {
+	return spaceID + "/" + id + "/" + strings.Map(func(r rune) rune {
+		if r != '/' && inStorageKey(r) {
+			return r
+		}
+		return '_'
+	}, name)
+}
+
+// ValidStorageKey reports whether Storage takes key for an object.
+func ValidStorageKey(key string) bool {
+	return key != "" && strings.IndexFunc(key, func(r rune) bool { return !inStorageKey(r) }) < 0
+}
+
+// RekeyFile gives a file a key Storage takes (StorageKey) in place of one
+// it refuses, in its row and in what waits to go up, which goes at once:
+// an earlier version kept the name as it was, which such a file could
+// never go up under. It returns the key the file has now, which it leaves
+// when Storage takes it. A file that is gone is not found.
+func (s *Store) RekeyFile(id string) (string, error) {
+	var key, pageID string
+	changed := false
+	err := s.inTx(func(tx *sql.Tx) error {
+		files, err := filesIn(tx, s.Dir, `id = ?`, id)
+		if err != nil {
+			return err
+		}
+		if len(files) == 0 {
+			return errNotFound
+		}
+		f := files[0]
+		if key = f.StoragePath; ValidStorageKey(key) {
+			return nil
+		}
+		old := FileToRemote(f)
+		f.StoragePath = StorageKey(f.SpaceID, f.ID, f.Name)
+		key, pageID, changed = f.StoragePath, f.PageID, true
+		if err := putFile(tx, s.Dir, f); err != nil {
+			return err
+		}
+		row := FileToRemote(f)
+		_, queued, err := queuedCols(tx, "files", f.ID)
+		if err != nil {
+			return err
+		}
+		if queued {
+			err = requeueRow(tx, "files", f.ID, old, adopting(row, f.UpdatedAt), "", f.PageID)
+		} else {
+			err = queueChange(tx, "files", f.ID, old, row, "file", f.PageID)
+		}
+		if err != nil {
+			return err
+		}
+		return rekeyUpload(tx, f)
+	})
+	if err == nil && changed {
+		s.Notify("outbox", pageID)
+		s.Notify("files", "")
+	}
+	return key, err
+}
+
+// rekeyUpload has a file's upload still waiting go to its key, as it was
+// queued but for that: one an earlier version queued may read what it
+// copies from elsewhere.
+func rekeyUpload(tx *sql.Tx, f File) error {
+	var raw string
+	err := tx.QueryRow(`SELECT payload FROM outbox WHERE entity = 'storage' AND entity_id = ?`, "files/"+f.ID).Scan(&raw)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	var upload map[string]any
+	if err := json.Unmarshal([]byte(raw), &upload); err != nil {
+		return err
+	}
+	upload["path"] = f.StoragePath
+	return queue(tx, "storage", "files/"+f.ID, upload, "", f.PageID)
+}
+
 // AddFile copies a file into the app and adds it to a folder (or page).
 // The copy is whole on the disk before the row naming it is stored, and
 // is removed if the row is not.
@@ -98,7 +197,7 @@ func (s *Store) AddFile(source, folderID, pageID, mime string) (File, error) {
 	now := time.Now()
 	f := File{ID: id, SpaceID: s.Session().SpaceID, FolderID: folderID, PageID: pageID, Name: name,
 		LocalPath: local, MimeType: mime, SizeBytes: size, CreatedAt: now, UpdatedAt: now}
-	f.StoragePath = f.SpaceID + "/" + id + "/" + name
+	f.StoragePath = StorageKey(f.SpaceID, id, name)
 	// The file and its entries in the outbox are stored together, as a
 	// page is: a file without them would never go to the server.
 	err = s.inTx(func(tx *sql.Tx) error {

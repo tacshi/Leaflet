@@ -509,6 +509,9 @@ func TestWriteAtomicFollowsLinks(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(filepath.Join("dotfiles", "config.toml"), link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows makes links only for administrators and in Developer Mode")
+		}
 		t.Fatal(err)
 	}
 	if err := writeAtomic(link, []byte("new")); err != nil {
@@ -519,7 +522,8 @@ func TestWriteAtomicFollowsLinks(t *testing.T) {
 	}
 	fi, err := os.Stat(real)
 	b, _ := os.ReadFile(real) // #nosec G304 -- a file in the test's own temporary folder.
-	if err != nil || string(b) != "new" || fi.Mode().Perm() != 0o640 {
+	// Windows has no such permissions.
+	if err != nil || string(b) != "new" || runtime.GOOS != "windows" && fi.Mode().Perm() != 0o640 {
 		t.Errorf("linked file %q, mode %v", b, fi.Mode())
 	}
 }

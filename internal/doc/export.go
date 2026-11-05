@@ -166,7 +166,7 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 					block(indent, notesMarkdown(n.Str("notes"), v))
 				}
 			case "math_equation":
-				block(indent, "$$\n"+n.Str("formula")+"\n$$")
+				block(indent, mathMarkdown(n.Str("formula")))
 			case "diagram":
 				block(indent, CodeMarkdown(&Node{Type: "code", Data: map[string]any{"language": "mermaid", "delta": Delta{{Text: n.Str("source")}}.JSON()}}))
 			case "link_preview", "file":
@@ -191,6 +191,18 @@ func PageMarkdown(title string, c *Content, o MarkdownOptions) string {
 	}
 	visit(c.Children, "")
 	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// mathMarkdown writes a formula between lines of $$. One with a line of
+// $$ in it, which no TeX draws, goes in a code block instead: that line
+// would end it, and the last open a formula of the blocks after it.
+func mathMarkdown(formula string) string {
+	for l := range strings.Lines(formula) {
+		if strings.TrimSpace(l) == "$$" {
+			return CodeMarkdown(&Node{Type: "code", Data: map[string]any{"language": "latex", "delta": Delta{{Text: formula}}.JSON()}})
+		}
+	}
+	return "$$\n" + formula + "\n$$"
 }
 
 // notesMarkdown writes a video's notes as a list, a line an item, its
@@ -398,7 +410,7 @@ func summaryMarkdown(md string) string {
 					continue
 				}
 			case '<':
-				if _, ok := cutFold(string(s[j:]), "</summary>"); ok {
+				if _, ok := cutFold(tagText(s, j), "</summary>"); ok {
 					b.WriteByte('\\')
 				}
 			}
@@ -483,7 +495,7 @@ func cellMarkdown(md string) string {
 			i++
 			continue
 		case '<':
-			if brTagAt(string(s[i:])) != "" {
+			if brTagAt(tagText(s, i)) != "" {
 				b.WriteByte('\\')
 			}
 		}

@@ -416,3 +416,90 @@ func TestPullReadsEveryPageOfChanges(t *testing.T) {
 		}
 	}
 }
+
+// A comment comes only as it changes, so one whose author's name could not
+// be read waits for it, the cursor where it was, rather than be stored as
+// "Someone" for good.
+func TestCommentsWaitForTheirAuthorsNames(t *testing.T) {
+	st := openStore(t)
+	down := true
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/rest/v1/profiles":
+			if down {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"message":"no"}`))
+				return
+			}
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "u2", "display_name": "Ann"}})
+		case "/rest/v1/comments":
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "c1", "page_id": "p1", "block_id": "b1", "author_id": "u2", "author_kind": "user",
+				"body": "Look", "created_at": "2026-10-26T09:00:00Z", "updated_at": "2026-10-26T09:00:00Z"}})
+		}
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+	if err := svc.pullComments(ctx); err == nil {
+		t.Error("the names' failure went unsaid")
+	}
+	if c, err := st.Comment("c1"); err == nil {
+		t.Fatalf("stored with its author as %q", c.AuthorName)
+	}
+	if _, ok := st.Value("sync.cursor.comments"); ok {
+		t.Error("the cursor passed the comment")
+	}
+	down = false
+	if err := svc.pullComments(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if c, err := st.Comment("c1"); err != nil || c.AuthorName != "Ann" {
+		t.Errorf("comment %+v, %v", c, err)
+	}
+}
+
+// A share brings every page under it, as deep as a tree goes, and a loop
+// of parents ends with the pages seen.
+func TestASharedTreeComesWhole(t *testing.T) {
+	st := openStore(t)
+	const depth = 80
+	id := func(i int) string { return fmt.Sprintf("00000000-0000-0000-0000-%012d", i) }
+	row := func(i int) map[string]any {
+		r := map[string]any{"id": id(i), "space_id": "00000000-0000-0000-0000-0000000000ff", "title": "Page", "sort_key": "a1",
+			"created_at": "2026-10-26T09:00:00Z", "updated_at": "2026-10-26T09:00:00Z"}
+		if i > 0 {
+			r["parent_id"] = id(i - 1)
+		}
+		return r
+	}
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		out := []map[string]any{}
+		if r.URL.Path == "/rest/v1/pages" {
+			if q := r.URL.Query().Get("id"); q == "eq."+id(0) {
+				out = append(out, row(0))
+			}
+			parents := r.URL.Query().Get("parent_id")
+			for i := 1; i < depth; i++ {
+				if strings.Contains(parents, id(i-1)) {
+					out = append(out, row(i))
+				}
+			}
+			// The last page holds the first, as no server would have it.
+			if strings.Contains(parents, id(depth-1)) {
+				out = append(out, row(0))
+			}
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	if err := svc.pullTree(context.Background(), id(0)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Page(id(depth - 1)); err != nil {
+		t.Errorf("the deepest page did not come: %v", err)
+	}
+	if waiting := svc.waiting(); len(waiting) != depth {
+		t.Errorf("%d pages wait for their content", len(waiting))
+	}
+}

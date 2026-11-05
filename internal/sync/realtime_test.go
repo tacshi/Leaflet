@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -205,5 +206,32 @@ func TestTheLoopHearsSaves(t *testing.T) {
 	}
 	if c := svc.st.Content(id); c == nil || textOf(c, "a") != "from another device" {
 		t.Errorf("stored %v", c)
+	}
+}
+
+// A save heard while the server rests after failing a check is left to the
+// passes, as a check every few seconds is: heard during an outage, each
+// would ask it again.
+func TestAHeardSaveWaitsWhileTheServerRests(t *testing.T) {
+	svc, srv, _, id := realtimePage(t)
+	gets := 0
+	srv.between = nil
+	be := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		gets++
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer be.Close()
+	svc.be = remote.SignedInForTest(be.URL, svc.st, "u1")
+	svc.rest(errors.New("the server failed"))
+	svc.hearPage(id)
+	<-svc.hear
+	svc.checkHeard(t.Context())
+	if gets != 0 {
+		t.Errorf("asked the server %d times", gets)
+	}
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if len(svc.heard) != 0 {
+		t.Errorf("still heard %v", svc.heard)
 	}
 }

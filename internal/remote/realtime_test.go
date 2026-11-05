@@ -190,3 +190,21 @@ func TestRealtimeEnds(t *testing.T) {
 		t.Fatal("the connection outlived the session")
 	}
 }
+
+// A heartbeat answered before the sender goes on is answered all the same,
+// as a server close by may: the connection stays.
+func TestRealtimeHeartbeatAnsweredAtOnce(t *testing.T) {
+	beat, beaten := realtimeBeat, realtimeBeaten
+	realtimeBeat = 30 * time.Millisecond
+	realtimeBeaten = func() { time.Sleep(15 * time.Millisecond) }
+	t.Cleanup(func() { realtimeBeat, realtimeBeaten = beat, beaten })
+	_, f, r := realtimeTest(t)
+	if !f.Await(5*time.Second, func() bool { return len(f.Sent("heartbeat")) >= 4 }) {
+		t.Fatalf("%d heartbeats", len(f.Sent("heartbeat")))
+	}
+	select {
+	case <-r.Done():
+		t.Fatalf("the connection ended: %v", r.Err())
+	default:
+	}
+}

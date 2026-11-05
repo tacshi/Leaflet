@@ -313,28 +313,34 @@ func (s *Service) pullSharedPage(ctx context.Context) (bool, error) {
 	return full, failed
 }
 
-// pullTree stores a page and the pages under it, their comments, files
-// and recordings, and has their content fetched. A row with a change
-// waiting here keeps it, as in the other pulls.
+// pullTree stores a page and the pages under it, however deep they go,
+// their comments, files and recordings, and has their content fetched. A
+// row with a change waiting here keeps it, as in the other pulls. A loop
+// of parents ends with the pages seen.
 func (s *Service) pullTree(ctx context.Context, rootID string) error {
 	var ids []string
+	seen := map[string]bool{}
 	rows, err := s.be.Select(ctx, "pages", remote.Query{Select: "*", Filters: []string{remote.Eq("id", rootID)}})
-	for depth := 0; depth < 64; depth++ {
+	for {
 		if err != nil {
 			return err
-		}
-		if len(rows) == 0 {
-			break
 		}
 		var level []string
 		for _, r := range rows {
 			id := store.S(r, "id")
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
 			if !s.st.HasPending("pages", id) {
 				if err := s.putServerPage(r); err != nil {
 					return err
 				}
 			}
 			level = append(level, id)
+		}
+		if len(level) == 0 {
+			break
 		}
 		ids = append(ids, level...)
 		rows, err = s.selectIn(ctx, "pages", "parent_id", level)
@@ -347,7 +353,10 @@ func (s *Service) pullTree(ctx context.Context, rootID string) error {
 	if err != nil {
 		return err
 	}
-	names := s.authorNames(ctx, comments)
+	names, err := s.authorNames(ctx, comments)
+	if err != nil {
+		return err
+	}
 	for _, r := range comments {
 		if s.st.HasPending("comments", store.S(r, "id")) {
 			continue
@@ -422,7 +431,10 @@ func (s *Service) pullComments(ctx context.Context) error {
 		if err != nil || len(rows) == 0 {
 			return false, err
 		}
-		names := s.authorNames(ctx, rows)
+		names, err := s.authorNames(ctx, rows)
+		if err != nil {
+			return false, err
+		}
 		s.store("comments", "id", rows, have, func(r map[string]any) error {
 			return s.st.PutRemoteComment(r, names[store.S(r, "author_id")])
 		})
@@ -431,8 +443,10 @@ func (s *Service) pullComments(ctx context.Context) error {
 }
 
 // authorNames are the names of comments' authors, by their IDs, with
-// "Someone" for one without a name.
-func (s *Service) authorNames(ctx context.Context, comments []map[string]any) map[string]string {
+// "Someone" for one without a name. Names that could not be read are an
+// error, as a comment stored without its author's would keep that: it
+// comes again only as it changes.
+func (s *Service) authorNames(ctx context.Context, comments []map[string]any) (map[string]string, error) {
 	ids := map[string]bool{}
 	for _, r := range comments {
 		ids[store.S(r, "author_id")] = true
@@ -447,13 +461,14 @@ func (s *Service) authorNames(ctx context.Context, comments []map[string]any) ma
 	}
 	if len(list) > 0 {
 		profiles, err := s.be.Select(ctx, "profiles", remote.Query{Select: "id, display_name", Filters: []string{remote.In("id", list)}})
-		if err == nil {
-			for _, p := range profiles {
-				if n := store.S(p, "display_name"); n != "" {
-					names[store.S(p, "id")] = n
-				}
+		if err != nil {
+			return nil, err
+		}
+		for _, p := range profiles {
+			if n := store.S(p, "display_name"); n != "" {
+				names[store.S(p, "id")] = n
 			}
 		}
 	}
-	return names
+	return names, nil
 }

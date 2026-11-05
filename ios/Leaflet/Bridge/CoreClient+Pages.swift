@@ -149,6 +149,13 @@ extension CoreClient {
         }
     }
 
+    /// appendBlock puts a block at the end of a page: one addFile returned,
+    /// once its page left the window.
+    nonisolated(nonsending) func appendBlock(_ pageID: String, _ node: DocNode) async throws {
+        let json = String(decoding: try JSONEncoder().encode(node), as: UTF8.self)
+        try await call { try $0.appendBlock(pageID, node: json) }
+    }
+
     /// picture reads a picture an image block links to on the web, as the
     /// desktop's image blocks read one: through the core, from a public
     /// address only, http too, which the app's own loading refuses. A few

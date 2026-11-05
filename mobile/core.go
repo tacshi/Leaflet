@@ -69,8 +69,8 @@ type Core struct {
 // config is how the app opens the core, as JSON.
 type config struct {
 	// DataDir is the folder of the database and the files kept on this
-	// device: Application Support, which isn't backed up to iCloud as
-	// Documents is.
+	// device: Application Support, which the device's backups hold, for
+	// pages kept on this device alone the only other copy of them.
 	DataDir string `json:"data_dir"`
 	// ICloudRoot is the Leaflet folder in iCloud Drive the user picked,
 	// or "" while none is.

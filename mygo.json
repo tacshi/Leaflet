@@ -9,6 +9,7 @@
     "source": "en"
   },
   "macos": {
+    "minimumSystemVersion": "13.0",
     "entitlements": "entitlements.plist",
     "infoPlist": {
       "NSMicrophoneUsageDescription": "Leaflet records audio into recording blocks when you press Record."

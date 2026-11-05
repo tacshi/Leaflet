@@ -122,8 +122,14 @@ func TestWelcomeHalfMadeGoes(t *testing.T) {
 		t.Fatal(err)
 	}
 	co := &Core{Store: st}
+	// The system's temporary folder, by each system's name for it.
+	setTemp := func(dir string) {
+		for _, name := range []string{"TMPDIR", "TMP", "TEMP"} {
+			t.Setenv(name, dir)
+		}
+	}
 	// No folder to write the guide's picture in, once the guide is made.
-	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "gone"))
+	setTemp(filepath.Join(t.TempDir(), "gone"))
 	if err := co.createWelcome(); err == nil {
 		t.Fatal("the guide was made without its picture")
 	}
@@ -132,7 +138,7 @@ func TestWelcomeHalfMadeGoes(t *testing.T) {
 	if pending := st.PendingCount(); len(pages) != 0 || len(files) != 0 || pending != 0 {
 		t.Errorf("%d pages, %d files and %d changes to go up stay", len(pages), len(files), pending)
 	}
-	t.Setenv("TMPDIR", t.TempDir())
+	setTemp(t.TempDir())
 	if err := co.createWelcome(); err != nil {
 		t.Fatal(err)
 	}

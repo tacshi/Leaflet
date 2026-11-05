@@ -20,6 +20,7 @@ import {
   SpecError,
   type SpecOptions,
   specToNode,
+  storableValue,
   TEXT_TYPES,
   transcriptText,
   trimSpace,
@@ -356,6 +357,16 @@ export const MAX_LISTED_PAGES = 500;
 export const TOOL_RESULT_LIMIT = 60_000;
 
 /**
+ * A tool's result as the model reads it, cut off past TOOL_RESULT_LIMIT
+ * (Go's cutResult): a cut inside a surrogate pair leaves U+FFFD, as half a
+ * pair is JSON a provider may refuse, which would fail the run every time
+ * it read the page.
+ */
+export function cutResult(text: string): string {
+  return text.length > TOOL_RESULT_LIMIT ? `${text.slice(0, TOOL_RESULT_LIMIT).toWellFormed()}…(truncated)` : text;
+}
+
+/**
  * How much of a tool's result, by jsonCost, the pages list_pages lists take
  * at most, with what is listed with them, with room for the keys around
  * them (Go's listBudget): past it, the rest are left for a search to find,
@@ -434,6 +445,13 @@ export const MAX_RUN_BLOCKS = 5000;
 
 /** The most tool calls of one answer that run (Go's maxRoundCalls): those past it are refused, for the next answer. */
 export const MAX_ROUND_CALLS = 50;
+
+/**
+ * The most links picked from pages it read a run reads (Go's
+ * maxFollowedLinks): the pages the person gave it or a search found are
+ * not counted.
+ */
+const MAX_FOLLOWED_LINKS = 10;
 
 /** What the model is told of a call past MAX_ROUND_CALLS. */
 export const TOO_MANY_CALLS =
@@ -1132,10 +1150,12 @@ export interface SessionOptions {
 // it read. Not one it made up. A block the app loads by itself keeps to
 // fewer: a search's result, or a page the run read but did not pick from
 // another it read, not a link on one, read or not, which its writer could
-// have put there by the hundred for the run to pick from. And once it
-// reads the person's other pages, it does not use the web at all
-// (WEB_CLOSED), as what it asked for there could carry what it read, and
-// what it writes keeps to the URLs the person gave it, as above.
+// have put there by the hundred for the run to pick from. Reading such a
+// link tells its site the same, with no block at all, so a run reads a few
+// of them and no more (MAX_FOLLOWED_LINKS). And once it reads the person's
+// other pages, it does not use the web at all (WEB_CLOSED), as what it asked
+// for there could carry what it read, and what it writes keeps to the URLs
+// the person gave it, as above.
 
 /**
  * The URLs in v, as allow takes them, their schemes in lower case
@@ -1252,6 +1272,8 @@ export class PageEditSession {
   private readonly idx: BlockIndex;
   /** Every id the page has or had, which a new block may not take. */
   private readonly taken: Set<string>;
+  /** The links the run has read that it picked from pages it read, toward MAX_FOLLOWED_LINKS. */
+  private followed = 0;
   /** The blocks the run's calls have written, toward MAX_RUN_BLOCKS. */
   private written = 0;
 
@@ -1313,6 +1335,7 @@ export class PageEditSession {
     } catch {
       return unchanged({ error: "Arguments must be a JSON object" });
     }
+    args = storableValue(args) as Record<string, unknown>;
     // A call that fails part way, such as write_markdown whose last block
     // is refused, leaves the page as it was: the model is told it failed,
     // so nothing it did may stay. Each tool makes all its blocks and finds
@@ -1512,6 +1535,15 @@ export class PageEditSession {
     // a page had, read, stays a link: reading it does not make it one a
     // block may load.
     const source = !this.found || this.mayLoad(url) || this.mayLoad(url.split("#")[0]);
+    if (!source) {
+      if (this.followed >= MAX_FOLLOWED_LINKS) {
+        throw new ToolError(
+          `This run has followed ${MAX_FOLLOWED_LINKS} links from the pages it read, the most one run follows. Work from what you have, or search for what is missing.`,
+        );
+      }
+      // Counted though it fails: its site heard the request all the same.
+      this.followed++;
+    }
     let page: WebPage;
     try {
       page = await this.hooks.readWebPage(url);

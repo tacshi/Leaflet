@@ -92,11 +92,7 @@ struct PageScreen: View {
                         }
                         c.pageID = pageID
                         c.onUndoRun = { [weak model, app] in
-                            guard let model,
-                                let run = model.agents.runs.last(where: {
-                                    !$0.edits.isEmpty && !$0.undone && !$0.running
-                                })
-                            else { return }
+                            guard let model, let run = model.agents.runToUndo else { return }
                             Task {
                                 do {
                                     try await app.client?.undoRun(model.id, runID: run.id)
@@ -353,16 +349,21 @@ struct PageScreen: View {
     }
 
     /// upload keeps files with the page and puts them in it at the caret:
-    /// pictures as images, others as file cards.
+    /// pictures as images, others as file cards. Copying one takes a while,
+    /// and the window may have moved on: it goes at the end of its page
+    /// then.
     private func upload(_ urls: [URL]) async {
+        guard let client = app.client else { return }
         for url in urls {
             let scoped = url.startAccessingSecurityScopedResource()
             defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do {
-                guard let node = try await app.client?.addFile(pageID, path: url.path) else {
-                    return
+                let node = try await client.addFile(pageID, path: url.path)
+                if let editor = scene.editor(of: pageID) {
+                    editor.insertBlock(node)
+                } else {
+                    try await client.appendBlock(pageID, node)
                 }
-                scene.editor?.insertBlock(node)
             } catch {
                 app.show(Toast(message: L.hostErrorAddFile(error: error.localizedDescription)))
             }

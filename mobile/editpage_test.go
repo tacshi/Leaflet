@@ -60,3 +60,36 @@ func TestEditPageReturnsTheRevItLeftThePageAt(t *testing.T) {
 		t.Fatalf("an unknown editor left the page at %d, err %v", left, err)
 	}
 }
+
+// An editor that goes on editing over the rev it shows, as one does while
+// text being composed holds back a change from outside, merges with the
+// change, though it is the page's only editor and has no other edit to
+// merge with: its edit is not taken for the page as it now is.
+func TestAnEditOverTheRevShownKeepsAChangeNotShown(t *testing.T) {
+	c, ev := open(t)
+	row := create(t, c, `{"title":"Plan"}`)
+	a := openEditor(t, c, row.ID)
+	start := doc.FromBlocks([]*doc.Node{paragraph("a", ""), paragraph("b", "Other")})
+	if _, err := c.EditPage(row.ID, a.Editor, start.Encode(), a.Rev); err != nil {
+		t.Fatal(err)
+	}
+
+	// Another window changes the page, and goes.
+	b := openEditor(t, c, row.ID)
+	edit := b.Content.Copy()
+	edit.Find("b").SetDelta(doc.Delta{{Text: "Changed"}})
+	if _, err := c.EditPage(row.ID, b.Editor, edit.Encode(), b.Rev); err != nil {
+		t.Fatal(err)
+	}
+	wait(t, ev, "merge")
+	c.ClosePage(row.ID, b.Editor)
+
+	composed := start.Copy()
+	composed.Find("a").SetDelta(doc.Delta{{Text: "か"}})
+	if _, err := c.EditPage(row.ID, a.Editor, composed.Encode(), a.Rev); err != nil {
+		t.Fatal(err)
+	}
+	if u := wait(t, ev, "merge"); texts(doc.MustDecode(u.content)) != "か|Changed" {
+		t.Fatalf("merged %q", texts(doc.MustDecode(u.content)))
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/doc"
 	"leaflet/internal/store"
+	syncsvc "leaflet/internal/sync"
 )
 
 func newStore(t *testing.T) *store.Store {
@@ -103,9 +104,14 @@ func TestHandshake(t *testing.T) {
 	if required[0] != "page_id" {
 		t.Errorf("insert_blocks requires %v", required)
 	}
-	for name, want := range map[string][2]any{"read_page": {true, nil}, "insert_blocks": {false, false}, "delete_blocks": {false, true}} {
+	// What a tool writes goes on with sync, to whoever else has the page, and
+	// what it changes rather than adds to says so.
+	for name, want := range map[string][3]any{
+		"read_page": {true, nil, false}, "insert_blocks": {false, false, true}, "delete_blocks": {false, true, true},
+		"move_page": {false, true, true}, "rename_page": {false, true, true}, "move_block": {false, true, true},
+	} {
 		a := names[name]["annotations"].(map[string]any)
-		if a["readOnlyHint"] != want[0] || a["destructiveHint"] != want[1] || a["openWorldHint"] != false || a["title"] == "" {
+		if a["readOnlyHint"] != want[0] || a["destructiveHint"] != want[1] || a["openWorldHint"] != want[2] || a["title"] == "" {
 			t.Errorf("%s annotations %v", name, a)
 		}
 	}
@@ -219,6 +225,151 @@ func TestCreateAndEditPage(t *testing.T) {
 	edit("Codex")
 	if history, _ := st.History(id); len(history) != 2 || history[0].Label != "Before Codex" {
 		t.Errorf("history after clients started again %+v", history)
+	}
+}
+
+// What the user typed since a client's edit is kept before its next edit,
+// from the same client or the next it starts: it read the page with it
+// there, so it is no conflict, and the client's last snapshot holds
+// autosave back for as long as it skips its own.
+func TestSnapshotKeepsWhatTheUserTyped(t *testing.T) {
+	for _, again := range []bool{false, true} {
+		st := newStore(t)
+		p, err := st.CreatePage(store.NewPageOptions{Title: "Notes"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := NewServer(st, "0.1.0")
+		s.SetAgent("Claude Code")
+		if out := s.Call("write_markdown", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "markdown": "Its own."}); out["error"] != nil {
+			t.Fatal(out["error"])
+		}
+		c := st.Content(p.ID)
+		typed := &doc.Node{ID: doc.NewBlockID(), Type: "paragraph"}
+		typed.SetDelta(doc.FromMarkdown("Typed in the app."))
+		if err := c.Insert(doc.Position{At: "end"}, typed); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := st.SaveContent(p.ID, c); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.MaybeAutosave(p.ID, c); err != nil {
+			t.Fatal(err)
+		}
+		if again {
+			s = NewServer(st, "0.1.0")
+			s.SetAgent("Claude Code")
+		}
+		if out := s.Call("read_page", map[string]any{"page_id": p.ID}); out["error"] != nil {
+			t.Fatal(out["error"])
+		}
+		if out := s.Call("delete_blocks", map[string]any{"page_id": p.ID, "ids": []any{typed.ID}}); out["error"] != nil {
+			t.Fatal(out["error"])
+		}
+		history, _ := st.History(p.ID)
+		if !slices.ContainsFunc(history, func(h store.HistoryEntry) bool { return strings.Contains(h.Content, "Typed in the app.") }) {
+			t.Errorf("started again %v: the user's text is in none of %d snapshots", again, len(history))
+		}
+		// With the page as it left it, its next edit keeps none more.
+		s = NewServer(st, "0.1.0")
+		s.SetAgent("Claude Code")
+		if out := s.Call("write_markdown", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "markdown": "More."}); out["error"] != nil {
+			t.Fatal(out["error"])
+		}
+		if after, _ := st.History(p.ID); len(after) != len(history) {
+			t.Errorf("started again %v: %d snapshots became %d", again, len(history), len(after))
+		}
+	}
+}
+
+// An AI app does not take a page the user alone has inside one others
+// have, which would make it, and its subpages, theirs to read, whatever a
+// page told it. Between pages others have it may, and so may the user's
+// own command.
+func TestMoveIntoAPageOthersHave(t *testing.T) {
+	st := newStore(t)
+	newPage := func(title string) string {
+		p, err := st.CreatePage(store.NewPageOptions{Title: title})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.ID
+	}
+	secret, team, also := newPage("Secret"), newPage("Team"), newPage("Also the team's")
+	for _, id := range []string{team, also} {
+		if err := st.SetMembers(id, []store.Member{{UserID: "sam", Role: "editor"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewServer(st, "0.1.0")
+	got := session(t, s, initialize,
+		call(2, "move_page", map[string]any{"page_id": secret, "parent_id": team}),
+		call(3, "move_page", map[string]any{"page_id": also, "parent_id": team}))
+	if out, failed := result(t, got[2]); !failed || !strings.Contains(out["error"].(string), "Other people may have that page") {
+		t.Errorf("moved into a page others have: %v", out)
+	}
+	if p, _ := st.Page(secret); p.ParentID != "" {
+		t.Errorf("the page is inside %q", p.ParentID)
+	}
+	if out, failed := result(t, got[3]); failed {
+		t.Errorf("moved between pages others have: %v", out)
+	}
+	if out := NewServer(st, "0.1.0").Call("move_page", map[string]any{"page_id": secret, "parent_id": team}); out["error"] != nil {
+		t.Errorf("the user's own command: %v", out)
+	}
+	if p, _ := st.Page(secret); p.ParentID != team {
+		t.Errorf("the page is inside %q", p.ParentID)
+	}
+}
+
+// Until sync has read who the user's pages are shared with, any of them
+// counts as had by others, which says nothing of the page moved: an AI app
+// moves none of the user's own inside another until then. Those of someone
+// else's space others have for certain, and may move among themselves.
+func TestMoveBeforeMembersAreKnown(t *testing.T) {
+	st := newStore(t)
+	if _, err := st.LoadSession(&store.User{ID: "u1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetValue("account", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutSpace("theirs", "Theirs", "sam"); err != nil {
+		t.Fatal(err)
+	}
+	newPage := func(title, space string) string {
+		p, err := st.CreatePage(store.NewPageOptions{Title: title, SpaceID: space})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p.ID
+	}
+	secret, mine := newPage("Secret", ""), newPage("Mine", "")
+	report, plans := newPage("Report", "theirs"), newPage("Plans", "theirs")
+	for _, id := range []string{report, plans} {
+		if err := st.SetMembers(id, []store.Member{{UserID: "u1", Role: "editor"}, {UserID: "sam", Role: "owner"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := NewServer(st, "0.1.0")
+	got := session(t, s, initialize,
+		call(2, "move_page", map[string]any{"page_id": secret, "parent_id": mine}),
+		call(3, "move_page", map[string]any{"page_id": report, "parent_id": plans}))
+	if out, failed := result(t, got[2]); !failed || !strings.Contains(out["error"].(string), "Other people may have that page") {
+		t.Errorf("moved before members were known: %v", out)
+	}
+	if p, _ := st.Page(secret); p.ParentID != "" {
+		t.Errorf("the page is inside %q", p.ParentID)
+	}
+	if out, failed := result(t, got[3]); failed {
+		t.Errorf("moved within someone else's space: %v", out)
+	}
+	if err := st.SetValue(syncsvc.OwnMembersKey, "1"); err != nil {
+		t.Fatal(err)
+	}
+	got = session(t, s, call(4, "move_page", map[string]any{"page_id": secret, "parent_id": mine}))
+	if out, failed := result(t, got[4]); failed {
+		t.Errorf("moved once no one else has it: %v", out)
 	}
 }
 

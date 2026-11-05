@@ -661,3 +661,266 @@ func TestSaveKeepsTheChangeQueuedWhenItCannotStore(t *testing.T) {
 		t.Errorf("push: done %v, %v", done, err)
 	}
 }
+
+// Pages whose content together takes longer than a request may come in
+// fewer at a time, and the next pass starts from there: asked for the same
+// way, they would never come.
+func TestContentTooSlowToComeTogetherComesApart(t *testing.T) {
+	old := contentBatch
+	contentBatch = 4
+	defer func() { contentBatch = old }()
+	st := openStore(t)
+	var ids []string
+	for range 6 {
+		p, err := st.CreatePage(store.NewPageOptions{Title: "Heavy"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, p.ID)
+	}
+	dequeueAll(t, st)
+	var mu gosync.Mutex
+	var asked []int
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		list := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Query().Get("page_id"), "in."), "()"), ",")
+		mu.Lock()
+		asked = append(asked, len(list))
+		mu.Unlock()
+		if len(list) > 1 {
+			time.Sleep(300 * time.Millisecond)
+		}
+		out := []map[string]any{}
+		for _, id := range list {
+			c := &doc.Content{Children: []*doc.Node{para("a", "from the server")}, Blocks: map[string]int64{"a": 1000}, Deleted: map[string]int64{}}
+			out = append(out, map[string]any{"page_id": strings.Trim(id, `"`), "content": json.RawMessage(c.Encode()), "revision": 1,
+				"updated_at": "2026-10-26T09:00:00Z"})
+		}
+		_ = json.NewEncoder(w).Encode(out)
+	}))
+	defer hs.Close()
+	be := remote.SignedInForTest(hs.URL, st, "u1")
+	be.TimeoutForTest(100 * time.Millisecond)
+	svc := New(st, be)
+	waiting := map[string]bool{}
+	done, err := svc.fetchContents(context.Background(), ids[:3], waiting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(done) != 3 || len(waiting) != 0 {
+		t.Errorf("%d done, %d waiting", len(done), len(waiting))
+	}
+	for _, id := range ids[:3] {
+		if c := st.Content(id); c == nil || textOf(c, "a") != "from the server" {
+			t.Errorf("%s: %v", id, c)
+		}
+	}
+	mu.Lock()
+	first := len(asked)
+	mu.Unlock()
+	if first < 3 {
+		t.Fatalf("asked for %d times", first)
+	}
+	if _, err := svc.fetchContents(context.Background(), ids[3:5], waiting); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if asked[first] != 1 {
+		t.Errorf("the next pass began with %d pages at a time", asked[first])
+	}
+}
+
+// slowContent is page_content on a server that gives up, as answer says, on
+// a request for more pages than it can take, and counts how many each
+// asked for. It answers a light read of spaces.
+type slowContent struct {
+	mu    gosync.Mutex
+	asked []int
+	take  int
+	fail  func(w http.ResponseWriter)
+}
+
+func (s *slowContent) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/rest/v1/spaces" {
+		_, _ = w.Write([]byte("[]"))
+		return
+	}
+	list := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Query().Get("page_id"), "in."), "()"), ",")
+	s.mu.Lock()
+	s.asked = append(s.asked, len(list))
+	s.mu.Unlock()
+	if len(list) > s.take {
+		s.fail(w)
+		return
+	}
+	out := []map[string]any{}
+	for _, id := range list {
+		c := &doc.Content{Children: []*doc.Node{para("a", "from the server")}, Blocks: map[string]int64{"a": 1000}, Deleted: map[string]int64{}}
+		out = append(out, map[string]any{"page_id": strings.Trim(id, `"`), "content": json.RawMessage(c.Encode()), "revision": 1,
+			"updated_at": "2026-10-26T09:00:00Z"})
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// heavyPages makes pages, none of them waiting to go up.
+func heavyPages(t *testing.T, st *store.Store, n int) []string {
+	t.Helper()
+	var ids []string
+	for range n {
+		p, err := st.CreatePage(store.NewPageOptions{Title: "Heavy"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, p.ID)
+	}
+	dequeueAll(t, st)
+	return ids
+}
+
+// Pages whose content is too much for a request come apart however the
+// request ended: the database out of time, or a gateway giving up.
+func TestContentComesApartWhoeverGaveUp(t *testing.T) {
+	old := contentBatch
+	contentBatch = 4
+	defer func() { contentBatch = old }()
+	for name, fail := range map[string]func(w http.ResponseWriter){
+		"statement timeout": func(w http.ResponseWriter) {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"code":"57014","message":"canceling statement due to statement timeout"}`))
+		},
+		"gateway": func(w http.ResponseWriter) {
+			w.WriteHeader(http.StatusGatewayTimeout)
+			_, _ = w.Write([]byte(`{"message":"gateway timeout"}`))
+		},
+		"cloudflare": func(w http.ResponseWriter) {
+			w.WriteHeader(524)
+			_, _ = w.Write([]byte(`<html>A timeout occurred</html>`))
+		},
+	} {
+		st := openStore(t)
+		ids := heavyPages(t, st, 3)
+		srv := &slowContent{take: 1, fail: fail}
+		hs := httptest.NewServer(srv)
+		svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+		waiting := map[string]bool{}
+		done, err := svc.fetchContents(context.Background(), ids, waiting)
+		hs.Close()
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if len(done) != 3 || len(waiting) != 0 || svc.contentsAt != 1 {
+			t.Errorf("%s: %d done, %d waiting, %d at a time, asked %v", name, len(done), len(waiting), svc.contentsAt, srv.asked)
+		}
+		for _, id := range ids {
+			if c := st.Content(id); c == nil || textOf(c, "a") != "from the server" {
+				t.Errorf("%s: %s did not come", name, id)
+			}
+		}
+	}
+}
+
+// A page too heavy alone waits, and the others come: left to stop the pull,
+// it would hold back every page after it for good.
+func TestAPageTooHeavyAloneWaits(t *testing.T) {
+	st := openStore(t)
+	ids := heavyPages(t, st, 3)
+	heavy := ids[1]
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/rest/v1/spaces":
+			_, _ = w.Write([]byte("[]"))
+		case strings.Contains(r.URL.Query().Get("page_id"), heavy):
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"code":"57014","message":"canceling statement due to statement timeout"}`))
+		default:
+			c := &doc.Content{Children: []*doc.Node{para("a", "from the server")}, Blocks: map[string]int64{"a": 1000}, Deleted: map[string]int64{}}
+			id := strings.Trim(strings.TrimPrefix(r.URL.Query().Get("page_id"), "in."), `()"`)
+			_ = json.NewEncoder(w).Encode([]map[string]any{{"page_id": id, "content": json.RawMessage(c.Encode()), "revision": 1, "updated_at": "2026-10-26T09:00:00Z"}})
+		}
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	waiting := map[string]bool{}
+	done, err := svc.fetchContents(context.Background(), ids, waiting)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(done) != 3 || !waiting[heavy] || len(waiting) != 1 {
+		t.Errorf("%d done, waiting %v", len(done), waiting)
+	}
+	if c := st.Content(ids[2]); c == nil || textOf(c, "a") != "from the server" {
+		t.Error("the page after it did not come")
+	}
+}
+
+// A database timing out on every statement stops the pull, with what it
+// asked for waiting: no page is passed over for a server in trouble.
+func TestContentStopsForADatabaseInTrouble(t *testing.T) {
+	st := openStore(t)
+	ids := heavyPages(t, st, 3)
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"code":"57014","message":"canceling statement due to statement timeout"}`))
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	done, err := svc.fetchContents(context.Background(), ids, map[string]bool{})
+	if !remote.IsStatementTimeout(err) || len(done) != 0 {
+		t.Errorf("%d done, %v", len(done), err)
+	}
+}
+
+// The size a slow request left is kept through pulls that fetched nothing,
+// which tell nothing of it, and grows at most once a pull, by those that
+// fetched and took no such wait.
+func TestContentSizeGrowsOncePerPullThatFetched(t *testing.T) {
+	old := contentBatch
+	contentBatch = 8
+	defer func() { contentBatch = old }()
+	st := openStore(t)
+	const at = "2026-10-26T09:00:00Z"
+	ids := heavyPages(t, st, 2)
+	var mu gosync.Mutex
+	var rows []map[string]any
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if strings.Contains(r.URL.Query().Get("select"), "content") {
+			c := &doc.Content{Children: []*doc.Node{para("a", "from the server")}, Blocks: map[string]int64{"a": 1000}, Deleted: map[string]int64{}}
+			out := []map[string]any{}
+			for _, id := range ids {
+				if strings.Contains(r.URL.Query().Get("page_id"), id) {
+					out = append(out, map[string]any{"page_id": id, "content": json.RawMessage(c.Encode()), "revision": 1, "updated_at": at})
+				}
+			}
+			_ = json.NewEncoder(w).Encode(out)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(rows)
+	}))
+	defer hs.Close()
+	svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+	ctx := context.Background()
+	svc.contentsAt = 1
+	for range 3 {
+		if err := svc.pullContents(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if svc.contentsAt != 1 {
+		t.Fatalf("pulls that fetched nothing left %d at a time", svc.contentsAt)
+	}
+	// One pull fetches twice, the content changed and the pages that wait.
+	mu.Lock()
+	rows = []map[string]any{{"page_id": ids[0], "updated_at": at}}
+	mu.Unlock()
+	if err := svc.setWaiting(map[string]bool{ids[1]: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.pullContents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if svc.contentsAt != 2 {
+		t.Errorf("a pull left %d at a time", svc.contentsAt)
+	}
+}

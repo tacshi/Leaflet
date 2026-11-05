@@ -17,6 +17,8 @@ export interface Rules {
   writes?(table: string, row: Row, caller: Caller): boolean;
   /** Changes a row as the table's triggers would, before an update is stored. */
   onUpdate?(table: string, row: Row, old: Row): void;
+  /** Why the database refuses this update, as a check or a trigger raises; none takes it. */
+  refuses?(table: string, patch: Row): string | undefined;
   /** The most rows a read answers with, as the API's max_rows has it (supabase/config.toml); no most when absent. */
   maxRows?: number;
 }
@@ -148,6 +150,8 @@ export class Project {
       }
       case "PATCH": {
         const patch = await req.json();
+        const refused = this.rules.refuses?.(name, patch);
+        if (refused) return reply({ code: "23514", message: refused }, 400);
         const changed: Row[] = [];
         for (const row of table.filter(match)) {
           if (this.rules.writes && !this.rules.writes(name, row, caller)) continue;

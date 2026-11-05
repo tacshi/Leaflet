@@ -13,7 +13,7 @@ let package = Package(
     name: "LeafletSpeech",
     // The helper runs on the Mac app's oldest macOS, and says there that
     // it can't transcribe: SpeechTranscriber is macOS 26's.
-    platforms: [.macOS(.v12), .iOS(.v26)],
+    platforms: [.macOS(.v13), .iOS(.v26)],
     products: [
         .library(name: "LeafletSpeech", targets: ["LeafletSpeech"]),
         .executable(name: "leaflet-speech", targets: ["leaflet-speech"]),

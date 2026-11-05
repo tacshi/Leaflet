@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +15,11 @@ import (
 func TestAgentSetup(t *testing.T) {
 	exe := "/Applications/Leaflet.app/Contents/MacOS/Leaflet"
 	dir := "/Users/me/Library/Application Support/Leaflet"
+	// dir as one word of the shell a terminal here opens.
+	word := "'" + dir + "'"
+	if runtime.GOOS == "windows" {
+		word = `"` + dir + `"`
+	}
 	for _, cl := range externalClients {
 		where, snippet := agentSetup(cl.id, exe, dir)
 		if where == "" || snippet == "" {
@@ -22,12 +28,12 @@ func TestAgentSetup(t *testing.T) {
 		}
 		switch cl.id {
 		case "claude":
-			want := "claude mcp add -s user leaflet -e LEAFLET_DATA_DIR='/Users/me/Library/Application Support/Leaflet' -- " + exe + " mcp"
+			want := "claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=" + word + " -- " + exe + " mcp"
 			if snippet != want {
 				t.Errorf("claude:\n%s\nwant\n%s", snippet, want)
 			}
 		case "opencode":
-			want := "opencode mcp add --global leaflet --env LEAFLET_DATA_DIR='/Users/me/Library/Application Support/Leaflet' -- " + exe + " mcp"
+			want := "opencode mcp add --global leaflet --env LEAFLET_DATA_DIR=" + word + " -- " + exe + " mcp"
 			if snippet != want {
 				t.Errorf("opencode:\n%s\nwant\n%s", snippet, want)
 			}

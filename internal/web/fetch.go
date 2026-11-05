@@ -187,12 +187,20 @@ func viaProxy(r *http.Request, proxy *url.URL) (*http.Response, error) {
 	default:
 		return nil, fmt.Errorf("web: proxy scheme %q", proxy.Scheme)
 	}
+	asked := r
 	r = r.Clone(r.Context())
 	if r.Host == "" {
 		r.Host = r.URL.Host
 	}
 	r.URL.Host = addr
-	return t.RoundTrip(r)
+	res, err := t.RoundTrip(r)
+	if err != nil {
+		return nil, err
+	}
+	// The address is the proxy's to know: to the caller the answer is the
+	// link's, as what comes of it, its relative links and redirects, is.
+	res.Request = asked
+	return res, nil
 }
 
 // tunnel opens a connection to addr through an HTTP proxy, which CONNECT
@@ -268,8 +276,9 @@ func publicControl(_, address string, _ syscall.RawConn) error {
 // 0.0.0.0/8, protocolSpace 192.0.0.0/24, kept for protocols' own
 // addresses, and futureSpace 240.0.0.0/4, kept for later, as is
 // 255.255.255.255, a network's broadcast. IPv6 addresses of nat64,
-// sixToFour and v4Compat stand for IPv4 ones, in their last 4 bytes, or
-// 6to4's 2 bytes in; nat64Local's and siteLocal's are a network's own.
+// sixToFour, v4Compat and v4Translated stand for IPv4 ones, in their last
+// 4 bytes, or 6to4's 2 bytes in; nat64Local's and siteLocal's are a
+// network's own.
 var (
 	sharedSpace   = netip.MustParsePrefix("100.64.0.0/10")
 	thisNetwork   = netip.MustParsePrefix("0.0.0.0/8")
@@ -279,6 +288,7 @@ var (
 	nat64Local    = netip.MustParsePrefix("64:ff9b:1::/48")
 	sixToFour     = netip.MustParsePrefix("2002::/16")
 	v4Compat      = netip.MustParsePrefix("::/96")
+	v4Translated  = netip.MustParsePrefix("::ffff:0:0:0/96")
 	siteLocal     = netip.MustParsePrefix("fec0::/10")
 )
 
@@ -290,7 +300,7 @@ func publicAddr(ip netip.Addr) bool {
 	b := ip.As16()
 	switch {
 	case !ip.Is6():
-	case nat64.Contains(ip), v4Compat.Contains(ip):
+	case nat64.Contains(ip), v4Compat.Contains(ip), v4Translated.Contains(ip):
 		ip = netip.AddrFrom4([4]byte(b[12:16]))
 	case sixToFour.Contains(ip):
 		ip = netip.AddrFrom4([4]byte(b[2:6]))

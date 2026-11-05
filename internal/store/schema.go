@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"regexp"
+	"slices"
+	"sync"
 )
 
 var schema = `
@@ -214,9 +217,36 @@ func execIfTable(ctx context.Context, c *sql.Conn, table, query string) error {
 	return err
 }
 
+// schemaObjects are the names of what schema makes.
+var schemaObjects = sync.OnceValue(func() []string {
+	made := regexp.MustCompile(`CREATE (?:VIRTUAL )?(?:TABLE|INDEX|TRIGGER) IF NOT EXISTS (\w+)`)
+	var names []string
+	for _, m := range made.FindAllStringSubmatch(schema, -1) {
+		names = append(names, m[1])
+	}
+	return names
+})
+
+// upToDate reports whether the database is of this version with all that
+// schema makes, read without taking the write lock.
+func upToDate(ctx context.Context, c *sql.Conn) (bool, error) {
+	var version int
+	if err := c.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil || version != len(migrations) {
+		return false, err
+	}
+	rows, err := c.QueryContext(ctx, `SELECT name FROM sqlite_master`)
+	names, err := collect(rows, err, scanString)
+	if err != nil {
+		return false, err
+	}
+	return !slices.ContainsFunc(schemaObjects(), func(name string) bool { return !slices.Contains(names, name) }), nil
+}
+
 // migrate creates the tables, or brings those an earlier version made up
 // to date, in one transaction that another process opening the database
-// waits for.
+// waits for. A database up to date is left as it is: a command that only
+// reads neither waits for the write lock nor tells the app that the
+// database changed (WatchOthers).
 func migrate(db *sql.DB) error {
 	ctx := context.Background()
 	c, err := db.Conn(ctx)
@@ -224,6 +254,9 @@ func migrate(db *sql.DB) error {
 		return err
 	}
 	defer func() { _ = c.Close() }()
+	if current, err := upToDate(ctx, c); err != nil || current {
+		return err
+	}
 	if _, err := c.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}

@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"leaflet/internal/doc"
 )
@@ -114,7 +113,7 @@ func TestStarterPagesTakenUpStay(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s := open(t)
 			guide, sub, tmpl, _, _ := starter(t, s)
-			time.Sleep(2 * time.Millisecond)
+			nextStamp()
 			if err := take(s, guide, sub, tmpl); err != nil {
 				t.Fatal(err)
 			}
@@ -134,7 +133,7 @@ func TestStarterPagesTakenUpStay(t *testing.T) {
 	t.Run("deleted", func(t *testing.T) {
 		s := open(t)
 		guide, _, _, _, _ := starter(t, s)
-		time.Sleep(2 * time.Millisecond)
+		nextStamp()
 		if _, err := s.DeletePage(guide.ID); err != nil {
 			t.Fatal(err)
 		}

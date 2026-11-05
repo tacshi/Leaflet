@@ -437,6 +437,19 @@ class TooDeep extends Error {}
  */
 const MAX_PARSE_MS = 1000;
 
+/**
+ * How long a run's pages may take to parse in all, in ms: a run has its
+ * two seconds of CPU for everything it does, however many pages it reads,
+ * and ordinary pages of a megabyte or two take a tenth of a second each or
+ * more. What the pages it read left of this is what the next may take.
+ */
+export const MAX_RUN_PARSE_MS = 1000;
+
+/** What a run has left of MAX_RUN_PARSE_MS. */
+export class ParseBudget {
+  leftMs = MAX_RUN_PARSE_MS;
+}
+
 /** How much of a page is parsed at a time, between looks at the time. */
 const PARSE_CHUNK = 1 << 16;
 
@@ -444,7 +457,9 @@ const PARSE_CHUNK = 1 << 16;
  * Parses a page, or undefined for one nested deeper than
  * MAX_OPEN_ELEMENTS, which Go's parser refuses at the same element.
  */
-function parseHtml(src: string): Node | undefined {
+function parseHtml(src: string, budget?: ParseBudget): Node | undefined {
+  if (budget && budget.leftMs <= 0) throw new Error("This run has read as much of the web as it can");
+  const limit = Math.min(MAX_PARSE_MS, budget?.leftMs ?? MAX_PARSE_MS);
   const parser = new Parser<DefaultTreeAdapterMap>();
   const stack = parser.openElements;
   const push = stack.push.bind(stack);
@@ -461,7 +476,7 @@ function parseHtml(src: string): Node | undefined {
       const c = src.charCodeAt(end - 1);
       if (end < src.length && c >= 0xd800 && c < 0xdc00) end++;
       parser.tokenizer.write(src.slice(at, end), end === src.length);
-      if (end < src.length && performance.now() - start > MAX_PARSE_MS) {
+      if (end < src.length && performance.now() - start > limit) {
         throw new Error("The page takes too long to read");
       }
       at = end;
@@ -469,12 +484,14 @@ function parseHtml(src: string): Node | undefined {
   } catch (e) {
     if (e instanceof TooDeep) return undefined;
     throw e;
+  } finally {
+    if (budget) budget.leftMs -= performance.now() - start;
   }
   return parser.document as unknown as Node;
 }
 
 /** Reads a page's HTML, page being where it was read (Go's ReadHTML). */
-export function readHtml(page: string, src: string): WebPage {
+export function readHtml(page: string, src: string, budget?: ParseBudget): WebPage {
   const result: WebPage = { url: page, title: "", text: "", links: [], truncated: false };
   let base: URL;
   try {
@@ -482,7 +499,7 @@ export function readHtml(page: string, src: string): WebPage {
   } catch {
     return result;
   }
-  const root = parseHtml(src);
+  const root = parseHtml(src, budget);
   if (!root) return result;
   const reader = new PageReader(base, linkString(base));
   const head = find(root, "head");
@@ -576,7 +593,12 @@ function isText(type: string): boolean {
  * http:// page is asked for over https, which the server's own network has
  * no certificate for (net.ts safeFetch).
  */
-export async function readPage(raw: string, signal?: AbortSignal, resolve?: Resolver): Promise<WebPage> {
+export async function readPage(
+  raw: string,
+  signal?: AbortSignal,
+  resolve?: Resolver,
+  budget?: ParseBudget,
+): Promise<WebPage> {
   let url = raw.trim().replace(/^http:\/\//i, "https://");
   let res: Response | undefined;
   for (let hop = 0; hop <= MAX_REDIRECTS && !res; hop++) {
@@ -609,7 +631,7 @@ export async function readPage(raw: string, signal?: AbortSignal, resolve?: Reso
   }
   const bytes = await readBytes(res, MAX_PAGE_BYTES, true);
   const src = new TextDecoder(encodingOf(bytes, contentType)).decode(bytes);
-  if (type === "text/html" || type === "application/xhtml+xml") return readHtml(url, src);
+  if (type === "text/html" || type === "application/xhtml+xml") return readHtml(url, src, budget);
   const [text, truncated] = truncate(trimSpace(src));
   return { url, title: "", text, links: urlsOf(text), truncated };
 }

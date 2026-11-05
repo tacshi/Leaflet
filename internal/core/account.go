@@ -112,6 +112,7 @@ func (c *Core) Leave(clear func() error, synced bool) (unsynced int, err error) 
 			}
 		}
 		c.stopRuns()
+		device, _ := c.Store.Value("device.id")
 		if err = clear(); errors.Is(err, store.ErrUnsynced) {
 			unsynced, err = max(c.unsynced(), 1), nil
 			return
@@ -120,10 +121,26 @@ func (c *Core) Leave(clear func() error, synced bool) (unsynced int, err error) 
 		// back from it in between, as the workspace agent's it draws,
 		// would stay with the next account.
 		c.stopRuns()
+		c.revokeDevice(device)
 		c.Remote.SignOut()
 		c.ForgetProject()
 	})
 	return unsynced, err
+}
+
+// revokeDevice revokes the row of this device, as it leaves the account
+// under an ID it forgets: kept, each sign-in here would count as one more
+// of the devices an account may have. It is best tried: signing out goes on
+// without the server, and a device not registered yet has no row.
+func (c *Core) revokeDevice(id string) {
+	if id == "" || !c.Remote.SignedIn() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := c.Remote.RPC(ctx, "sign_out_device", map[string]any{"p_device_id": id}); err != nil {
+		log.Printf("sign out: this device's row: %v", err)
+	}
 }
 
 // ForgetProject forgets the project chosen and the Supabase account's
@@ -194,12 +211,13 @@ func (c *Core) ConnectProject(ctx context.Context, api *supabaseapi.Client, p su
 		}
 	}
 	progress(StepSetup, 0, 0)
-	// Sign-ups it could not close yet leave the project set up but for
-	// them: the sign-in goes on, and the next start closes them.
+	// Sign-ups it could not close yet, or a Realtime not ready, leave the
+	// project set up but for them: the sign-in goes on, and the next start
+	// does the rest.
 	switch err := provision.Setup(ctx, api, p.Ref, func(done, all int) { progress(StepSetup, done, all) }); {
 	case err == nil:
 		c.projectUpdated(p.Ref)
-	case errors.Is(err, provision.ErrSignUpsOpen):
+	case errors.Is(err, provision.ErrSignUpsOpen), errors.Is(err, provision.ErrRealtimeWaits):
 		log.Printf("set up project %s: %v", p.Ref, err)
 	default:
 		return nil, err

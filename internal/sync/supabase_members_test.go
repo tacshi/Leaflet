@@ -15,6 +15,33 @@ import (
 	"leaflet/internal/store"
 )
 
+// An answer that is no list of members, as a network's sign-in page in the
+// server's place, or none at all, keeps the members there are: read as
+// none, the page would look shared with no one.
+func TestMembersStayWhenTheAnswerSaysNothing(t *testing.T) {
+	for _, answer := range []string{"<html>Sign in to the wifi</html>", ""} {
+		st := openStore(t)
+		const page = "00000000-0000-0000-0000-0000000000a1"
+		if err := st.SetMembers(page, []store.Member{{UserID: "u2", Role: "editor", Accepted: true}}); err != nil {
+			t.Fatal(err)
+		}
+		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(answer))
+		}))
+		svc := New(st, remote.SignedInForTest(hs.URL, st, "u1"))
+		if err := svc.LoadMembers(context.Background(), page); err == nil {
+			t.Errorf("%q: read as members", answer)
+		}
+		hs.Close()
+		if got := st.MembersOrNil(page); len(got) != 1 {
+			t.Errorf("%q: %d members", answer, len(got))
+		}
+		if _, loaded := svc.membersAt[page]; loaded {
+			t.Errorf("%q: counted as loaded", answer)
+		}
+	}
+}
+
 // A page whose share the server could not be asked about keeps its
 // members until it can: forgotten, the page would turn read-only here.
 func TestWithdrawnKeepsMembersWhenTheServerFails(t *testing.T) {

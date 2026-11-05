@@ -22,6 +22,7 @@ import {
   agentViews,
   applyOps,
   clampTitle,
+  cutResult,
   jsonCost,
   MAX_TITLE,
   MAX_VIEW_HTML,
@@ -30,6 +31,7 @@ import {
   overwrites,
   PageEditSession,
   READ_OTHERS,
+  TOOL_RESULT_LIMIT,
   toolDefinitions,
   ToolError,
   type ToolHooks,
@@ -1710,7 +1712,9 @@ Deno.test("a run stops at the most blocks it writes", async () => {
 // loads, no link of a page read, though the run read it too, but the pages
 // it did not pick from one it read; no
 // source a query named; no address in a query once it has read the web;
-// and no web at all once it has read other pages.
+// no web at all once it has read other pages; and only so many links
+// picked from pages it read, though those of a search or the person's go
+// on.
 Deno.test("the web's tools keep to the URLs the run may use (testdata/web_calls.json)", async () => {
   const request = "Find videos like https://given.example/r";
   const search = {
@@ -1774,6 +1778,17 @@ Deno.test("the web's tools keep to the URLs the run may use (testdata/web_calls.
         ["insert_blocks", image("HTTPS://found.example/a")],
       ],
     },
+    {
+      armed: false,
+      calls: [
+        ["read_web_page", { url: "https://any.example/" }],
+        ...Array.from({ length: 11 }, (): [string, Record<string, unknown>] => [
+          "read_web_page",
+          { url: "https://found.example/b" },
+        ]),
+        ["read_web_page", { url: "https://given.example/r" }],
+      ],
+    },
   ];
   const made = [];
   for (const seq of sequences) {
@@ -1794,7 +1809,8 @@ Deno.test("the web's tools keep to the URLs the run may use (testdata/web_calls.
   assertEquals(made[1].calls.map((c) => c.ok), [true, false, false, true, false, true, true, false, false, false]);
   assertEquals(made[2].calls.map((c) => c.ok), [false, false]);
   assertEquals(made[3].calls.map((c) => c.ok), [true, false, true, true, false, false, false, false, true, true]);
-  assertEquals(made.map((m) => m.kept_to_page), [true, false, true, true]);
+  assertEquals(made[4].calls.map((c) => c.ok), [true, ...Array(10).fill(true), false, true]);
+  assertEquals(made.map((m) => m.kept_to_page), [true, false, true, true, true]);
   await fixture("web_calls.json", { request, search, sequences: made }, webCalls);
 });
 
@@ -1838,4 +1854,13 @@ Deno.test("a new page's title is cut to the longest the pages table takes", asyn
     assertEquals(made.page.title, "😀".repeat(MAX_TITLE), tool);
   }
   assertEquals(clampTitle("Plan"), "Plan");
+});
+
+// A cut inside a surrogate pair leaves no half of one for a provider to
+// refuse the whole request for, as Go's utf16.Decode leaves none.
+Deno.test("a result cut inside a pair of surrogates stays well formed", () => {
+  const cut = cutResult(JSON.stringify({ text: `xy${"😀".repeat(TOOL_RESULT_LIMIT)}` }));
+  assert(cut.isWellFormed());
+  assert(cut.endsWith("\ufffd…(truncated)"), cut.slice(-20));
+  assertEquals(cutResult("a".repeat(TOOL_RESULT_LIMIT)), "a".repeat(TOOL_RESULT_LIMIT));
 });

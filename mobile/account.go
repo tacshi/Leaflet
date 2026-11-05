@@ -216,7 +216,7 @@ func (c *Core) SignOut(anyway bool) (unsynced int, err error) {
 	}
 	forget := c.core.Store.ForgetAccount
 	if !anyway {
-		_ = c.core.Sync.SyncNow()
+		_ = c.core.Sync.Drain()
 		forget = c.core.Store.ForgetSyncedAccount
 		// What was typed during the pass is saved now, as the desktop
 		// saves again before it leaves, for Leave to count it among the

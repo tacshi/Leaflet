@@ -1219,11 +1219,7 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 	if stt.Language != "auto" && stt.Language != "" {
 		body["language"] = stt.Language
 	}
-	// The function fetches the audio, up to 100 MB, and waits on the
-	// provider for up to two minutes: past the other calls' timeout.
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-	res, err := r.be.InvokeLong(ctx, "stt", body)
+	res, err := r.transcribed(ctx, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1239,6 +1235,28 @@ func (r *Controller) transcribe(rec store.Recording, path string, stream Stream,
 		segs = append(segs, seg)
 	}
 	return segs, nil
+}
+
+// stillEvery spaces the calls that ask for a recording the transcriber
+// goes on with, and stillFor is how long they go on asking. Tests shorten
+// them.
+var stillEvery, stillFor = 15 * time.Second, 30 * time.Minute
+
+// transcribed is the stt function's answer, a call of which fetches the
+// audio, up to 100 MB, and waits on the provider for up to two minutes:
+// past the other calls' timeout. A long recording outlasts that, and goes
+// on at the provider: it is asked for again until it is done.
+func (r *Controller) transcribed(ctx context.Context, body map[string]any) (map[string]any, error) {
+	start := time.Now()
+	for {
+		call, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		res, err := r.be.InvokeLong(call, "stt", body)
+		cancel()
+		if !remote.IsStillTranscribing(err) || time.Since(start) >= stillFor {
+			return res, err
+		}
+		time.Sleep(stillEvery)
+	}
 }
 
 // transcribeOnDevice transcribes a recording with the device's engine,

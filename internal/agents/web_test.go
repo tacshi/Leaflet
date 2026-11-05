@@ -3,6 +3,7 @@ package agents
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -119,6 +120,39 @@ func TestWebToolsAsTheServerHasThem(t *testing.T) {
 			t.Errorf("sequence %d kept to its page %v, the server's %v", i, !x.readPages, seq.KeptToPage)
 		}
 	}
+}
+
+// A run follows so many links of the pages it read and no more, which
+// could spell out what it read by the links it picks: one that fails
+// counts, as its site heard it; the pages the user gave it or a search
+// found are not counted, and go on.
+func TestFollowedLinksEnd(t *testing.T) {
+	x := webExecutor("Read https://given.example/r", Search{Sources: []Source{{URL: "https://found.example/a"}}})
+	read := x.Ctx.ReadWeb
+	x.Ctx.ReadWeb = func(link string) (web.Page, error) {
+		if link == "https://found.example/b#fails" {
+			return web.Page{}, errors.New("gone")
+		}
+		return read(link)
+	}
+	must := func(link string, refused bool) {
+		t.Helper()
+		out := x.Call("read_web_page", map[string]any{"url": link})
+		if got := out["error"] != nil && !strings.Contains(out["error"].(string), "gone"); got != refused {
+			t.Errorf("%s: %v", link, out)
+		}
+	}
+	must("https://any.example/", false)
+	must("https://found.example/b#fails", false)
+	for range maxFollowedLinks - 1 {
+		must("https://found.example/b", false)
+	}
+	must("https://found.example/b", true)
+	must("https://given.example/r", false)
+	if _, err := x.searchWeb(map[string]any{"query": "more"}); err != nil {
+		t.Fatal(err)
+	}
+	must("https://found.example/a", false)
 }
 
 // webExecutor is an executor on page() with the web: its searches find

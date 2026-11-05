@@ -148,16 +148,20 @@ struct PageEditorView<Header: View, Footer: View>: UIViewRepresentable {
                     controller.load(content, tinted: model.tinted)
                     tinted = model.tinted
                     model.shown = model.rev
-                } else if controller.hasPendingEdit, !model.readOnly {
+                } else if controller.hasPendingEdit, !controller.composing, !model.readOnly {
                     // What was typed and not yet sent goes first, over the
                     // rev the editor shows: the core merges it with this
                     // change, and the editor shows the merge as it comes
                     // instead.
                     controller.send()
                 } else {
-                    controller.update(content, tinted: model.tinted, byAgent: model.byAgent)
+                    // A composition holds the change, which the editor
+                    // doesn't show: what is composed goes over the rev it
+                    // does, for the core to merge the two.
+                    if controller.update(content, tinted: model.tinted, byAgent: model.byAgent) {
+                        model.shown = model.rev
+                    }
                     tinted = model.tinted
-                    model.shown = model.rev
                 }
                 loaded = model.external
             }

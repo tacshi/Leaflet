@@ -54,11 +54,24 @@ func (r ChatResult) AssistantMessage() map[string]any {
 	if len(r.ToolCalls) > 0 {
 		var calls []any
 		for _, c := range r.ToolCalls {
-			calls = append(calls, map[string]any{"id": c.ID, "type": "function", "function": map[string]any{"name": c.Name, "arguments": c.Arguments}})
+			calls = append(calls, map[string]any{"id": c.ID, "type": "function", "function": map[string]any{"name": c.Name, "arguments": sentArguments(c.Arguments)}})
 		}
 		m["tool_calls"] = calls
 	}
 	return m
+}
+
+// sentArguments are a call's arguments as the conversation goes back to
+// the server with them: {} for what is no JSON object, as a call cut off.
+// A server that reads them back, as Ollama's does, refuses the whole
+// conversation over them, and the model is told what was wrong by the
+// call's result.
+func sentArguments(raw string) string {
+	var args map[string]any
+	if json.Unmarshal([]byte(raw), &args) != nil || args == nil {
+		return "{}"
+	}
+	return raw
 }
 
 // Client talks to any OpenAI-compatible API: OpenAI, Claude's compatibility

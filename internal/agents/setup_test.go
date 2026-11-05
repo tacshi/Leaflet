@@ -26,11 +26,16 @@ type memKeys struct {
 	mu     sync.Mutex
 	keys   map[string][]byte
 	locked bool
+	// denied has every read turned down, as the system's prompt can be.
+	denied bool
 }
 
 func (k *memKeys) Get(name string) ([]byte, error) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	if k.denied {
+		return nil, keychain.ErrDenied
+	}
 	v, ok := k.keys[name]
 	if !ok {
 		return nil, keychain.ErrNotFound
@@ -207,6 +212,162 @@ func TestSaveProviderKeptHere(t *testing.T) {
 	}
 	if got := LocalKey(p.ID); got != "sk-1" {
 		t.Errorf("key %q", got)
+	}
+}
+
+// A key kept here goes only to the address it was saved for: a provider
+// moved to another server takes a key typed for it, as the server's do,
+// and one at the same address keeps its own. Testing it says so too,
+// rather than try the old key out there.
+func TestKeptKeyStaysWithItsAddress(t *testing.T) {
+	useMemKeys(t)
+	h := setupHub(t, nil)
+	heard := make(chan string, 4)
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case heard <- r.Header.Get("Authorization"):
+		default:
+		}
+		_, _ = w.Write([]byte(`{"data":[]}`))
+	}))
+	defer other.Close()
+	cloud, err := h.SaveProvider(Form{Preset: "custom", BaseURL: "https://one.example/v1", Model: "m", APIKey: "sk-one", KeyTyped: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	moved := Form{ID: cloud.ID, Preset: "custom", BaseURL: other.URL + "/v1", Model: "m", APIKey: "sk-one"}
+	if res := h.TestProvider(moved); res.Message != locales.SettingsPasteKeyToTest() {
+		t.Errorf("tested with %q", res.Message)
+	}
+	select {
+	case got := <-heard:
+		t.Errorf("the key went to another server: %q", got)
+	default:
+	}
+	if _, err := h.SaveProvider(moved); err == nil || err.Error() != locales.SettingsKeyStaysBehind() {
+		t.Errorf("moved with its old key: %v", err)
+	}
+	if p, _ := h.st.Provider(cloud.ID); p.BaseURL != "https://one.example/v1" || LocalKey(cloud.ID) != "sk-one" {
+		t.Errorf("refused, and changed: %+v, key %q", p, LocalKey(cloud.ID))
+	}
+	// Another path at the same address keeps it.
+	if _, err := h.SaveProvider(Form{ID: cloud.ID, Preset: "custom", BaseURL: "https://one.example/v2", Model: "m", APIKey: "sk-one"}); err != nil || LocalKey(cloud.ID) != "sk-one" {
+		t.Errorf("same address: %v, key %q", err, LocalKey(cloud.ID))
+	}
+	// Typed for the new address, even the same key, it goes there.
+	moved.KeyTyped = true
+	if res := h.TestProvider(moved); !strings.Contains(<-heard, "sk-one") {
+		t.Errorf("typed key not tried: %+v", res)
+	}
+	if _, err := h.SaveProvider(moved); err != nil || LocalKey(cloud.ID) != "sk-one" {
+		t.Errorf("typed key: %v, key %q", err, LocalKey(cloud.ID))
+	}
+
+	// One on this device's network is told so too, rather than lose its key
+	// without a word, as an app that never holds it would have it.
+	local, err := h.SaveProvider(Form{Preset: "lmstudio", BaseURL: "http://127.0.0.1:1234/v1", Model: "m", APIKey: "sk-two", KeyTyped: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	away := Form{ID: local.ID, Preset: "lmstudio", BaseURL: "http://127.0.0.1:1235/v1", Model: "m"}
+	if _, err := h.SaveProvider(away); err == nil || err.Error() != locales.SettingsKeyStaysBehind() {
+		t.Errorf("moved without a word: %v", err)
+	}
+	if p, _ := h.st.Provider(local.ID); p.BaseURL != "http://127.0.0.1:1234/v1" || LocalKey(local.ID) != "sk-two" {
+		t.Errorf("refused, and changed: %+v, key %q", p, LocalKey(local.ID))
+	}
+	// A key typed for the new address takes its place.
+	away.APIKey, away.KeyTyped = "sk-three", true
+	if p, err := h.SaveProvider(away); err != nil || p.AuthKind != "api_key" || LocalKey(local.ID) != "sk-three" {
+		t.Errorf("typed: %+v, %v, key %q", p, err, LocalKey(local.ID))
+	}
+	// Shown gone by the app, it goes.
+	away.BaseURL, away.APIKey = "http://127.0.0.1:1236/v1", ""
+	if p, err := h.SaveProvider(away); err != nil || p.AuthKind != "none" || LocalKey(local.ID) != "" {
+		t.Errorf("shown gone: %+v, %v, key %q", p, err, LocalKey(local.ID))
+	}
+	// One with no key has none to lose, and moves as it is.
+	away.BaseURL, away.KeyTyped = "http://127.0.0.1:1237/v1", false
+	if p, err := h.SaveProvider(away); err != nil || p.BaseURL != away.BaseURL {
+		t.Errorf("no key: %+v, %v", p, err)
+	}
+}
+
+// A key the keychain would not give is no provider without one: a run says
+// so rather than ask its server with none, and saving the provider leaves
+// the key as it is, for when it can be read again.
+func TestKeyThatCouldNotBeRead(t *testing.T) {
+	keys := useMemKeys(t)
+	h := setupHub(t, nil)
+	p, err := h.SaveProvider(Form{Preset: "local", BaseURL: "http://127.0.0.1:8080/v1", Model: "m", APIKey: "sk-1", KeyTyped: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keychain.Use(keys) // forgets what the save kept in memory
+	keys.denied = true
+	if _, err := h.ModelFor(p); err == nil || err.Error() != locales.AgentKeyUnread(p.Name) {
+		t.Errorf("model with a key unread: %v", err)
+	}
+	if key := LocalKey(p.ID); key != "" {
+		t.Fatalf("read %q", key)
+	}
+	saved, err := h.SaveProvider(Form{ID: p.ID, Preset: "local", BaseURL: p.BaseURL, Model: "m2", APIKey: LocalKey(p.ID)})
+	if err != nil || saved.AuthKind != "api_key" || saved.DefaultModel != "m2" {
+		t.Errorf("saved %+v, %v", saved, err)
+	}
+	// Moved, it may be the one the provider has: it is not left behind,
+	// or lost, unsaid.
+	if _, err := h.SaveProvider(Form{ID: p.ID, Preset: "local", BaseURL: "http://127.0.0.1:9090/v1", Model: "m2"}); err == nil || err.Error() != locales.SettingsKeyStaysBehind() {
+		t.Errorf("moved with a key unread: %v", err)
+	}
+	keys.denied = false
+	keychain.Use(keys)
+	if key := LocalKey(p.ID); key != "sk-1" {
+		t.Errorf("key %q after a save that could not read it", key)
+	}
+	if _, err := h.ModelFor(p); err != nil {
+		t.Error(err)
+	}
+	// Emptied by the user it goes: that is no key unread.
+	if _, err := h.SaveProvider(Form{ID: p.ID, Preset: "local", BaseURL: p.BaseURL, Model: "m2", KeyTyped: true}); err != nil || LocalKey(p.ID) != "" {
+		t.Errorf("emptied: %v, key %q", err, LocalKey(p.ID))
+	}
+}
+
+// Leaving with the account deleted takes every provider's key and sign-in
+// off the keychain, which no row names after Store.Wipe, and ends the
+// sign-ins at OpenAI.
+func TestForgetProviders(t *testing.T) {
+	keys := useMemKeys(t)
+	h := setupHub(t, nil)
+	revoked := make(chan string, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		revoked <- r.FormValue("token")
+	}))
+	defer srv.Close()
+	fakeDiscovery(t, &chatgptDiscovery{RevocationEndpoint: srv.URL + "/revoke"})
+	for _, p := range []store.Provider{{ID: "key", Preset: "openai", IsLocal: true, AuthKind: "api_key"}, {ID: "plan", Preset: "chatgpt", IsLocal: true, AuthKind: "account"}, {ID: "plain", Preset: "ollama", IsLocal: true, AuthKind: "none"}} {
+		if err := h.st.PutProvider(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SetLocalKey("key", "sk-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := UseChatGPT("plan", NewChatGPT(ChatGPTAccount{RefreshToken: "r1"})); err != nil {
+		t.Fatal(err)
+	}
+	h.ForgetProviders(context.Background())
+	if len(keys.keys) != 0 || h.KnownChatGPT("plan") != nil {
+		t.Errorf("kept %v, sign-in %v", keys.keys, h.KnownChatGPT("plan"))
+	}
+	select {
+	case got := <-revoked:
+		if got != "r1" {
+			t.Errorf("revoked %q", got)
+		}
+	default:
+		t.Error("the sign-in was not revoked")
 	}
 }
 

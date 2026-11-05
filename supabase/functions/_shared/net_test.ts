@@ -28,6 +28,8 @@ Deno.test("private and reserved addresses", () => {
       "::ffff:7f00:1",
       "::ffff:a9fe:a9fe",
       "::ffff:240.0.0.1",
+      "::ffff:0:127.0.0.1",
+      "::ffff:0:a9fe:a9fe",
       "64:ff9b::c000:aa",
       "64:ff9b::a9fe:a9fe",
       "64:ff9b:1::1",
@@ -58,6 +60,7 @@ Deno.test("public addresses", () => {
       "2606:4700:4700::1111",
       "2a00:1450:4001:80b::200e",
       "::ffff:8.8.8.8",
+      "::ffff:0:8.8.8.8",
       "64:ff9b::808:808",
     ]
   ) {

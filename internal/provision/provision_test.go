@@ -48,6 +48,10 @@ type fakeProject struct {
 	signUpPatches int
 	authRefused   bool
 	authDown      bool
+	// realtimeWaits is a project whose Realtime has not made its messages
+	// yet, and heard how often Setup had the policy for them made.
+	realtimeWaits bool
+	heard         int
 }
 
 func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
@@ -104,6 +108,15 @@ func (f *fakeProject) serve(t *testing.T) *supabaseapi.Client {
 				Query string `json:"query"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.Query == ensureSavesHeard {
+				f.heard++
+				if f.realtimeWaits {
+					http.Error(w, `{"message":"Failed to run sql query: ERROR:  P0001: leaflet_realtime_waits\n"}`, http.StatusBadRequest)
+					return
+				}
+				w.WriteHeader(http.StatusCreated)
+				return
+			}
 			f.queries = append(f.queries, body.Query)
 			for _, v := range f.meanwhile {
 				if strings.Contains(body.Query, "where version = '"+v+"') then raise exception") {
@@ -356,6 +369,7 @@ var functionsHashes = map[int]string{
 	9:  "1d347915d7cb4ee0886e09c50bc5c9c86ba8fd68d521d1f6e973be2f38d0bb91",
 	10: "7f8fcfc6d8d75569bbf529cf648d778181c35849d23fc57752555bbf274b576f",
 	11: "1b056001d96569c7dcdcbcbe7e4e5f638a7d4931f3f3b4e50c4a24e030a24dee",
+	12: "c05888e1f0892591a0d2da9abcdbe302dc1f3d16a32c839977555584ea701547",
 }
 
 // The functions a project gets import their packages at exact versions:
@@ -586,6 +600,50 @@ func TestSetupClosesSignUps(t *testing.T) {
 	f = &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, authRefused: true}
 	if err := Setup(context.Background(), f.serve(t), "p", nil); err != nil || len(f.deployed) != len(Functions) {
 		t.Errorf("with Auth refused: %v, deployed %v", err, f.deployed)
+	}
+}
+
+// A project whose Realtime has not made its messages yet does the rest of
+// the setup, and says so, for it to run again; once they are there, Setup
+// has the policy made, with nothing else to apply.
+func TestSetupWaitsForRealtime(t *testing.T) {
+	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}, realtimeWaits: true}
+	api := f.serve(t)
+	if err := Setup(context.Background(), api, "p", nil); !errors.Is(err, ErrRealtimeWaits) || len(f.deployed) != len(Functions) || len(f.queries) == 0 {
+		t.Errorf("with no messages: %v, deployed %v, %d queries", err, f.deployed, len(f.queries))
+	}
+	all, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.mu.Lock()
+	f.realtimeWaits = false
+	f.queries, f.deployed, f.heard = nil, nil, 0
+	f.applied["p"] = nil
+	for _, m := range all {
+		f.applied["p"] = append(f.applied["p"], supabaseapi.Migration{Version: m.Version})
+	}
+	f.mu.Unlock()
+	if err := Setup(context.Background(), api, "p", nil); err != nil || f.heard != 1 || len(f.queries) != 0 {
+		t.Errorf("once they are there: %v, heard %d, %d queries", err, f.heard, len(f.queries))
+	}
+}
+
+// A policy that could not be made, as with the API failing, is ErrRealtimeWaits
+// too, and only that: the rest of the setup is done.
+func TestSetupGoesOnPastARefusedPolicy(t *testing.T) {
+	f := &fakeProject{applied: map[string][]supabaseapi.Migration{"p": nil}}
+	api := f.serve(t)
+	all, err := Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range all {
+		f.applied["p"] = append(f.applied["p"], supabaseapi.Migration{Version: m.Version})
+	}
+	f.refused = true
+	if err := Setup(context.Background(), api, "p", nil); !errors.Is(err, ErrRealtimeWaits) || len(f.deployed) != len(Functions) {
+		t.Errorf("refused: %v, deployed %v", err, f.deployed)
 	}
 }
 

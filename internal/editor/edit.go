@@ -661,9 +661,11 @@ func (e *Editor) Outdent() {
 	if e.ReadOnly {
 		return
 	}
+	nested := map[string]bool{}
+	e.Content.Walk(func(n, parent *doc.Node) { nested[n.ID] = parent != nil })
 	var nodes []*doc.Node
 	for _, n := range e.topSelected() {
-		if loc := e.Content.Locate(n.ID); loc != nil && loc.Parent != nil {
+		if nested[n.ID] {
 			nodes = append(nodes, n)
 		}
 	}
@@ -685,9 +687,11 @@ func (e *Editor) Outdent() {
 // the focus block alone for a caret.
 func (e *Editor) topSelected() []*doc.Node {
 	in := map[string]bool{}
-	for _, n := range e.selectedNodes() {
-		in[n.ID] = true
-	}
+	e.indexed(func() {
+		for _, n := range e.selectedNodes() {
+			in[n.ID] = true
+		}
+	})
 	var out []*doc.Node
 	var visit func([]*doc.Node)
 	visit = func(nodes []*doc.Node) {

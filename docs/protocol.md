@@ -263,7 +263,10 @@ which the app loads by itself, holds only a search's result, or a page the
 run read that it did not pick from one it read (its first page of the web,
 one in the instruction or on the page, or a search's result): a page could
 list many addresses for the run to choose from, and reading the one chosen
-makes it no better. Once a run reads another page, the web is closed to it.
+makes it no better. Reading one tells its site the same, so a run reads at
+most 10 links it picked from pages it read, one that failed among them; the
+pages the instruction, this page or a search gave it are not counted. Once a
+run reads another page, the web is closed to it.
 
 `read_video_transcript` is offered with `read_page`, with the web or
 without it: it reads only the site of a video block of the page, which the
@@ -382,7 +385,11 @@ takes a page away by its ID.
      `kept_to_page` saying the run read nothing beyond its page, and
      `guarded` that its URL guard was on (it read beyond its page or the
      web, or followed turns that did), so its reply may carry what it read:
-     the app puts the pictures of such a reply in a page as links
+     the app puts the pictures of such a reply in a page as links. A run
+     that read, or follows turns that read, a page someone else writes or
+     reads adds `"read_others": true`, as `ai_jobs.result` has it: the
+     app's chat keeps it, for its next turn on a model on the device, whose
+     job the server has no row of
    - `{ "type": "error", "message": "…" }`
 3. The worker loads the page, focus blocks, the last 10 turns of the
    conversation, and (if allowed) titles of other pages; calls the model with
@@ -405,6 +412,18 @@ takes a page away by its ID.
    only those on blocks it has as the run read them (by `meta.blocks` and
    `meta.deleted`): a client with the page open saved the ops as they
    streamed, and a block changed since keeps what a person wrote over it.
+   A run's time is its worker's: a worker serves requests through the first
+   half of its wall clock (150 s on the free plan, 400 s on paid ones) and
+   all it runs stops at the end of it, so a run stops calling the model at
+   its deadline, or sooner on a worker already that old. As the platform
+   says it will shut the worker down (`beforeunload`), the run ends at once
+   as a failed one does, with the error "The platform stopped the run before
+   it finished.", saving what it changed. One stopped with no word cannot
+   say so: as it works its ops go on its job every 10 seconds, with
+   `status: running`, as `result: { reply: "", ops, edits }`, and the
+   caller's next run marks the job failed, keeping them. A result past the
+   job's bound ends it `done` with `ops` and `edits` empty, the app having
+   them as they streamed.
 4. The client applies streamed ops to the open editor as one undo step.
 
 A workspace run's job is of no page: `page_id` is null, `surface` is
@@ -459,6 +478,25 @@ that fails says so in the function's own words, in the recording's `error`
 and to the caller: what the transcriber answered, and the address it went
 to, go to the function's log only.
 
+A call has about two minutes, on every plan: its answer comes only at its
+end, and the gateway gives up on one that has not begun at 150 seconds. A
+long recording outlasts that at Soniox, which goes on with it. A
+transcription started is kept (`stt_jobs`, by recording and caller) until
+Soniox has finished it and its transcript is saved, so a call that runs out
+of time answers 504, "Soniox is still transcribing this recording…", with
+`code: "still_transcribing"`, leaves the recording `failed` with those words,
+and the next call by the same person picks it up, with no audio sent and no
+key spent again. The app asks again by itself, every 15 seconds for up to 30
+minutes. Only Soniox's own end
+of a transcription removes what went there, as Soniox keeps what it is still
+transcribing; one never asked for again, as of a recording deleted since,
+goes by Soniox's retention, in 30 days. Audio that could not reach the
+transcriber in time, or an OpenAI-compatible endpoint that outlasts a call,
+leaves nothing to pick up, and is refused as too long for the server, unless
+the call's worker cost it 10 seconds of its time or more, or was shutting
+down: that says nothing of the recording, and answers 504 with the same
+`code`, for the app to ask again, on a worker with its time.
+
 `transcribe` streams the audio from Storage to the transcriber as it reads
 it, never holding a recording whole, in a multipart body with no length
 (chunked, or in HTTP/2 frames), and reads it again for a second request.
@@ -489,10 +527,25 @@ and a `transcribe` whose settings name one are refused (400).
   The rows a device sends again whole as its pages join an account, which
   the server may have already from a device it synced with through iCloud
   Drive, go over the server's only when they changed on the device after
-  the server's `updated_at`; otherwise the device takes the server's row.
-  A row the server refuses (403) while the page or folder it is in still
-  waits to go up from the device waits for it, and goes after it in the
-  same push; any other refusal gives way to the server's row.
+  the server's row last changed where it was changed (`changed_at`, which
+  `updated_at` is not for a row sent late); otherwise the device takes the
+  server's row. A row the server refuses (403) while the page or folder it
+  is in still waits to go up from the device waits for it, and goes after
+  it in the same push; any other refusal gives way to the server's row.
+  A page whose parent neither waits here nor is on the server, as one that
+  came through iCloud Drive before its parent did, stays queued
+  (`parent_not_found`, `P0002`, which PostgREST answers 500): an error a
+  trigger raises (class `P0`) is that row's own, and the rest of the queue
+  and the pull go on. Any other 5xx, or a 429, is the server's: it stops
+  the pass, counting against no entry. A statement that ran out of time
+  (`57014`) is the row's own only while the server answers a light read
+  after it, and at most twice in a push: a page too heavy to save waits as
+  a failed entry does, and a database in trouble stops the pass.
+- Postgres keeps no NUL, no text that is not UTF-8, and in `jsonb` no
+  surrogate without its other half, and refuses a whole row for one. What
+  a device holds of these goes up as U+FFFD, in rows and in page content,
+  and the device's own content takes what went, as the base both agree on;
+  its row takes it with the pull that brings its change back.
 - Each table is pulled in `(updated_at, key)` order from a cursor of the
   last row stored here (`key` is `id`, or `page_id` for `page_content`). A
   row that cannot be stored stops that table's pull, and the next pull starts
@@ -505,7 +558,9 @@ and a `transcribe` whose settings name one are refused (400).
   Realtime channel, `page:<page id>`, as a broadcast `saved` with
   `{"page_id", "revision"}` (the trigger `page_content_told`); only those
   who may read the page may join it (`page_saves_heard`, on
-  `realtime.messages`), and no one sends on it. A device joins the channel
+  `realtime.messages`, which Realtime makes in its own time: the app makes
+  the policy as it sets a project up, and sets it up again until the table
+  is there), and no one sends on it. A device joins the channel
   of each such page, private, with the person's access token, which it
   sends again as it is renewed (`access_token`), over one connection to
   `/realtime/v1/websocket?apikey=<publishable key>&vsn=1.0.0` that beats
@@ -548,6 +603,30 @@ and a `transcribe` whose settings name one are refused (400).
   still uploading for one that is gone. A recording's row goes first, as
   Storage takes audio only for a recording row, and its `audio_path` is
   set once its audio is up.
+- An upload to the server takes as long as the connection does, and goes
+  on beside the passes, one at a time: a push waits 15 seconds for it, so a
+  small file and its row go together, and past that the push and the pull
+  go on. The upload settles its entry as it ends, and asks for a pass for
+  its row and the next upload. One the server takes none of for 2 minutes
+  is given up on, and waits as a failed entry does. One ends with its
+  entry, its session, or sync stopping, counting no failure, and a deleted
+  file's object is removed only once its upload has ended. Signing out
+  waits up to 5 minutes for an upload under way, and for what waited for
+  it, unless it stalls or fails: only then does it count what has not gone
+  up.
+- Pages' content is fetched in requests of up to 50 pages. One that takes
+  too long, by the device's wait, the database's (`57014`) or a gateway's
+  (504, 524), goes again for half as many, which holds from then on, and
+  a pull that fetched some with no such wait doubles it again, once. A page
+  too heavy alone, of a server that answers a light read after it, waits as
+  a page of content it cannot read does, so the others come.
+- A file's object is under a key Storage takes: only ASCII's letters and
+  digits and `_/!.*'() &$=@;:+,?-`, with `_` for any other character of the
+  file's name (§7), which stays as it was in `name`. An upload an earlier
+  version queued under a name Storage refuses (`InvalidKey`) moves to such
+  a key as it goes, in its row and its entry; a key Storage takes stays as
+  it is. A key Storage refuses all the same is refused for good, and a
+  removal of an object under one is done.
 - A copy of a page (duplicating it, saving it as a template, or starting a
   page from one) gives each file and recording on it one of its own, which
   goes up with contents and audio copied on the device that made the copy,
@@ -577,7 +656,11 @@ and a `transcribe` whose settings name one are refused (400).
 - A device keeps one account's pages. Pages made before signing in are moved
   into the account's space on its first sync. Signing out uploads what is
   waiting, then removes the account's pages, queue and cursors from the
-  device; signing in as another account does the same first.
+  device, and revokes its `devices` row where the server can be reached
+  (`sign_out_device`), as it leaves under an ID it forgets; signing in as
+  another account does the same first. A device an account has no room
+  for (`too_many_devices`) stays out of Account › Devices, and syncs all
+  the same.
 - A device whose `devices` row is revoked signs out and forgets its ID:
   signing in again, it registers as a new device. What iCloud sync kept
   under the old ID goes too, so a later turn-on joins the folder afresh;
@@ -642,9 +725,10 @@ someone who may read what is on a deleted page restores it, or changes
 its `deleted_at` (`forbidden_restore`). A page, comment and recording keep
 their `id`, and a `page_content` row its `page_id`, on update
 (`page_id_immutable`, `comment_immutable`, `recording_id_immutable`,
-`content_page_immutable`). A tree is at most 1,000 pages deep, a page and
+`content_page_immutable`). A tree is at most 256 pages deep, a page and
 those above it: making a page, or moving one, deeper is refused
-(`page_too_deep`).
+(`page_too_deep`); a tree already deeper stays, read to its deepest page,
+and what is in it may change, or move no deeper.
 Moving a page under a new parent requires edit access to both, and anyone
 but the space owner moves a page only between parents that the same shares
 reach (`forbidden_move` otherwise), so a move never shows a page to people
@@ -672,8 +756,8 @@ owner's device, is inserted only by the page's owner
 `deleted_at`, never as a row, so its replies stay and the deletion reaches
 every device; once it is set, `body` is empty, `quote` null and `mentions`
 empty. A comment's `body` and `quote` are at most 100,000 characters,
-its `mentions` a list of at most 64 KB, and its `block_id` at most 256
-characters; anyone but the page's owner adds at most 2,000 comments to a
+which a device cuts them to, its `mentions` a list of at most 64 KB, and
+its `block_id` at most 256 characters; anyone but the page's owner adds at most 2,000 comments to a
 page, of 10 MB in all, mentions with the text (`too_many_comments`,
 `comments_too_long`). A profile is read by its owner and by those who
 share a page with them: the space's owner and someone shared one of its
@@ -704,7 +788,7 @@ find leaves new pages blank. `model_providers.encrypted_secret` and `refresh_tok
 and are not selectable by clients.
 
 Storage buckets: `recordings` (`{user_id}/{recording_id}.wav`, 16 kHz mono WAV), `files`
-(`{space_id}/{file_id}/{name}`), `images` (`{space_id}/{page_id}/{image_id}.{ext}`).
+(`{space_id}/{file_id}/{name}`, `{name}` being the file's with `_` for what Storage takes in no key: §6), `images` (`{space_id}/{page_id}/{image_id}.{ext}`).
 
 RPCs: `share_page(p_page_id, p_email, p_role)` (an invite to the account
 that confirmed the address, or one waiting for it; it returns no rows
@@ -814,7 +898,11 @@ Leaflet/
   the characters Windows takes in no name (`<>:"/\|?*` and control
   characters) become `_`, the dots and spaces at its end go, and a name
   Windows keeps for a device (`CON`, `NUL`, `COM1`…) gets `_` before it.
-  A reader finds one an earlier version kept by the name it had. A device
+  A file's blob goes by the last part of its `storage_path` (§7), so a
+  file named beyond what Storage takes has it as Storage does; a device
+  that sends a file again keeps that part of the path unless the file goes
+  up from it. A reader finds one an earlier version kept by the name it
+  had. A device
   that deletes a file removes its blob, whoever wrote it, with the copies
   iCloud made of it beside it when two wrote it at once ("notes 2.pdf"),
   once a batch of its own has the deletion; one that sends everything

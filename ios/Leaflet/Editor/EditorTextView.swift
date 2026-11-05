@@ -440,6 +440,13 @@ final class EditorTextView: UITextView {
         super.setAttributedMarkedText(markedText, selectedRange: selectedRange)
     }
 
+    /// unmarkText ends a composition, which may leave the text as it was:
+    /// the editor hears of no change then.
+    override func unmarkText() {
+        super.unmarkText()
+        controller?.composed()
+    }
+
     override var isEditable: Bool {
         didSet { if isEditable != oldValue { blocks.editable = isEditable } }
     }

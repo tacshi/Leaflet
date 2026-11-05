@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"testing"
@@ -15,6 +16,16 @@ import (
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 )
+
+// nextStamp waits for the clock to read a later millisecond, so what is
+// done next is stamped after what was done before. A sleep of a few
+// milliseconds does not do that on Windows, whose clock moves on every
+// 15 ms or so.
+func nextStamp() {
+	for now := time.Now().UnixMilli(); time.Now().UnixMilli() == now; {
+		time.Sleep(time.Millisecond)
+	}
+}
 
 // cloudDevice is a device that syncs through a folder standing in for
 // iCloud Drive's.
@@ -175,7 +186,7 @@ func TestICloudRowsAgree(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.sync()
-	time.Sleep(2 * time.Millisecond)
+	nextStamp()
 	if err := b.st.RenamePage(p.ID, "Plan B"); err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +235,7 @@ func TestICloudChangesGoColumnByColumn(t *testing.T) {
 	if err := b.st.RenamePage(r.ID, "Old B"); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2 * time.Millisecond)
+	nextStamp()
 	if err := a.st.MovePage(p.ID, q.ID, "", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +342,7 @@ func TestICloudMergesContent(t *testing.T) {
 	// The same block on both: the later edit wins on both, and only the
 	// device whose edit lost hears of it.
 	a.edit(p.ID, "x", "mine")
-	time.Sleep(2 * time.Millisecond)
+	nextStamp()
 	b.edit(p.ID, "x", "theirs")
 	syncAll(a, b)
 	if a.text(p.ID, "x") != "theirs" || b.text(p.ID, "x") != "theirs" {
@@ -387,7 +398,7 @@ func TestICloudRelayedEditIsNoConflict(t *testing.T) {
 	a.edit(p.ID, "x", "a")
 	a.sync()
 	b.sync() // B takes A's edit
-	time.Sleep(2 * time.Millisecond)
+	nextStamp()
 	c.edit(p.ID, "x", "c")
 	c.sync()
 	syncAll(b, a, c)
@@ -836,6 +847,9 @@ func TestICloudWaitsForThePageFileABatchNames(t *testing.T) {
 func TestICloudSendsAgainAfterABatchFailed(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("a folder made read-only stops no one running as root")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no mode that keeps files out of a folder")
 	}
 	root := cloudRoot(t)
 	a, b := newCloudDevice(t, root), newCloudDevice(t, root)
@@ -1371,7 +1385,7 @@ func TestICloudDeletedFolderKeepsAFileDeletedElsewhere(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.sync()
-	time.Sleep(3 * time.Millisecond)
+	nextStamp()
 	if err := a.st.DeleteFolder(folder); err != nil {
 		t.Fatal(err)
 	}
@@ -1403,7 +1417,7 @@ func TestRequeueKeepsAFileDeletedWhileItWaits(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(3 * time.Millisecond)
+		nextStamp()
 		return f
 	}
 	// Newest first: the file that waits goes before the other.
@@ -1791,7 +1805,7 @@ func TestICloudSendingAgainKeepsAHeldFileChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.sync()
-	time.Sleep(3 * time.Millisecond)
+	nextStamp()
 	if err := a.st.DeleteFolder(folder); err != nil {
 		t.Fatal(err)
 	}
@@ -1964,14 +1978,14 @@ func TestICloudSettledRecordingGivesWayToAFinishedOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	syncAll(a, b)
-	time.Sleep(5 * time.Millisecond)
+	nextStamp()
 	if _, err := a.st.UpdateRecording(rec.ID, func(r *store.Recording) {
 		r.Status, r.Transcript = "ready", []store.Segment{{Text: "Hello"}}
 	}); err != nil {
 		t.Fatal(err)
 	}
 	a.sync()
-	time.Sleep(5 * time.Millisecond)
+	nextStamp()
 	if _, err := b.st.SettleRecording(rec.ID, "transcribing", false, func(r *store.Recording) { r.Status = "failed" }); err != nil {
 		t.Fatal(err)
 	}

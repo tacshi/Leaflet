@@ -596,6 +596,109 @@ func TestSignedOutSavesAProviderKeptHere(t *testing.T) {
 	}
 }
 
+// The key kept for a provider goes only to the address it was saved for:
+// typing another takes it out of the dialog, so the models listed as the
+// typing pauses, a test and a save send none there. Back at its address it
+// comes back, and a key typed goes where the dialog says.
+func TestKeptKeyStaysWithItsAddress(t *testing.T) {
+	keychain.Use(keys{})
+	t.Cleanup(func() { keychain.Use(mygoSecrets{}) })
+	a := templatesApp(t)
+	t.Cleanup(func() {
+		if a.form.keyTimer != nil {
+			a.form.keyTimer.Stop()
+		}
+	})
+	a.hub = agents.NewHub(a.st, a.backend, a)
+	server := func() (*httptest.Server, chan string) {
+		heard := make(chan string, 8)
+		hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			heard <- r.Header.Get("Authorization")
+			_, _ = w.Write([]byte(`{"data":[]}`))
+		}))
+		t.Cleanup(hs.Close)
+		return hs, heard
+	}
+	saved, atSaved := server()
+	other, atOther := server()
+	posted := make(chan func(), 8)
+	a.post = func(fn func()) { posted <- fn }
+	p := store.Provider{ID: "00000000-0000-0000-0000-0000000000ce", Preset: "custom", Name: "Mine", BaseURL: saved.URL, AuthKind: "api_key", DefaultModel: "m", IsLocal: true}
+	if err := a.st.PutProvider(p); err != nil {
+		t.Fatal(err)
+	}
+	if err := agents.SetLocalKey(p.ID, "sk-kept"); err != nil {
+		t.Fatal(err)
+	}
+	a.editProvider(&p)
+	for a.form.reading {
+		select {
+		case fn := <-posted:
+			fn()
+		case <-time.After(5 * time.Second):
+			t.Fatal("the key never came")
+		}
+	}
+	select {
+	case got := <-atSaved:
+		if got != "Bearer sk-kept" {
+			t.Errorf("listed its address's models with %q", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("its address's models were not listed")
+	}
+
+	tt := ui.NewTester(a.providerDialog, 900, 800)
+	tt.Frame()
+	if err := tt.Click(locales.SettingsBaseURL()); err != nil {
+		t.Fatalf("no address field in %v: %v", tt.Texts(), err)
+	}
+	tt.Type("9")
+	tt.Frame()
+	if a.form.apiKey != "" {
+		t.Errorf("typing another address left the key %q", a.form.apiKey)
+	}
+	a.form.baseURL = other.URL
+	a.keyFollowsAddress()
+	a.fetchModels()
+	if res := a.hub.TestProvider(a.providerForm()); res.Message != locales.SettingsPasteKeyToTest() {
+		t.Errorf("tested with %q", res.Message)
+	}
+	select {
+	case got := <-atOther:
+		t.Errorf("another address heard %q", got)
+	default:
+	}
+	// The dialog shows it gone, so saving what it shows is no key lost
+	// unsaid.
+	if !a.providerForm().KeyTyped {
+		t.Error("the key the dialog took out counts as not seen")
+	}
+
+	a.form.baseURL = saved.URL + "/v1"
+	a.keyFollowsAddress()
+	if a.form.apiKey != "sk-kept" || a.providerForm().KeyTyped {
+		t.Errorf("back at its address, the key is %q, typed %v", a.form.apiKey, a.providerForm().KeyTyped)
+	}
+
+	if err := tt.Click(locales.SettingsAPIKey()); err != nil {
+		t.Fatalf("no key field in %v: %v", tt.Texts(), err)
+	}
+	tt.Type("2")
+	tt.Frame()
+	a.form.baseURL = other.URL
+	a.keyFollowsAddress()
+	a.fetchModels()
+	select {
+	case got := <-atOther:
+		if got != "Bearer "+a.form.apiKey || !a.form.keyTyped {
+			t.Errorf("heard %q of the key typed, %q", got, a.form.apiKey)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the key typed was not tried")
+	}
+}
+
 // Sync errors are in words for the user, as a pass hands them on: the
 // session ended, the pass ran out of time, or the server refused it; and
 // iCloud sync failing to turn on says what failed.

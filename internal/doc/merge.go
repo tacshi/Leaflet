@@ -1,6 +1,9 @@
 package doc
 
-import "slices"
+import (
+	"maps"
+	"slices"
+)
 
 // Conflict is a block both sides changed since they last agreed. Last write
 // wins, and the losing version is kept so the user can bring it back. A
@@ -321,9 +324,7 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 
 	// Blocks only on the other side: add those that stay. Walk the other
 	// side in order, so inserted runs keep their order; a block that stays
-	// comes with the blocks under it. added are the cells it adds to the
-	// tables both sides have, by table.
-	added := map[string][]string{}
+	// comes with the blocks under it.
 	for _, n := range other.All() {
 		id := n.ID
 		if _, ok := primaryFlat[id]; ok {
@@ -362,16 +363,11 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		}
 		shared(node)
 		_ = result.Insert(pos, node)
-		if node.Type == "table/cell" && o.parent != "" {
-			added[o.parent] = append(added[o.parent], id)
-		}
 		times[id] = timeOf(other, id)
-		delete(tombstones, id)
 		var kids func(*Node)
 		kids = func(n *Node) {
 			for _, k := range n.Children {
 				times[k.ID] = timeOf(other, k.ID)
-				delete(tombstones, k.ID)
 				kids(k)
 			}
 		}
@@ -391,13 +387,17 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 		}
 	}
 
-	// Rows or columns both sides added to a table take the same places,
-	// as each numbers its own from the end of the table as it was: the
-	// other side's go after the primary's. They change now, after every
-	// time either side has, so a merge with either side's version as it
-	// was keeps them there.
-	for table, cells := range added {
-		placeAdded(result, baseFlat[table], table, cells, times, max(localLatest, remoteLatest)+1)
+	// Each side numbers the rows and columns of a table among those it
+	// has, and a cell keeps one side's place: what both added takes the
+	// same places, a cell another's, or a row comes apart, and the table's
+	// size is one side's too. They go in the order both sides have them.
+	// They change now, after every time either side has, so a merge with
+	// either side's version as it was keeps them there.
+	for _, n := range result.All() {
+		p, o := primaryFlat[n.ID], otherFlat[n.ID]
+		if n.Type == "table" && p != nil && o != nil && !samePlaces(p.node, o.node) {
+			placeCells(n, p.node, o.node, times, max(localLatest, remoteLatest)+1)
+		}
 	}
 
 	// A block one side gave children while the other made it one that
@@ -412,6 +412,12 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 	result.Blocks = map[string]int64{}
 	for id := range live {
 		result.Blocks[id] = times[id]
+		// A block kept over a delete is newer than the delete, whenever it
+		// was edited: the side that deleted it has the tombstone till this
+		// merge reaches it, and would drop the block again as older.
+		if t, ok := tombstones[id]; ok {
+			result.Blocks[id] = max(times[id], t+1)
+		}
 	}
 	result.Deleted = map[string]int64{}
 	for id, t := range tombstones {
@@ -422,65 +428,158 @@ func Merge(base, local, remote *Content) (*Content, []Conflict) {
 	return result, conflicts
 }
 
-// placeAdded moves the cells the other side added to a table, cells, off
-// the places the primary's cells have, as when both sides added a row:
-// the other side's new rows go after the primary's, and its new columns
-// after the primary's, and the table grows to hold them. base is the
-// table as both sides last agreed on it; at is when they move.
-func placeAdded(result *Content, base *flat, tableID string, cells []string, times map[string]int64, at int64) {
-	table := result.Find(tableID)
-	if table == nil || base == nil || table.Type != "table" {
-		return
-	}
-	baseRows, baseCols := TableSize(base.node)
-	isAdded := map[string]bool{}
-	for _, id := range cells {
-		isAdded[id] = true
+// samePlaces reports whether two versions of a table have the same cells
+// in the same places.
+func samePlaces(a, b *Node) bool {
+	if len(a.Children) != len(b.Children) {
+		return false
 	}
 	type place struct{ r, c int }
-	taken := map[place]bool{}
-	rows, cols := 0, 0
-	for _, cell := range table.Children {
-		r, c := cell.Int("rowPosition", -1), cell.Int("colPosition", -1)
-		if !isAdded[cell.ID] && r >= 0 && c >= 0 {
-			taken[place{r, c}] = true
-			rows, cols = max(rows, r+1), max(cols, c+1)
+	places := make(map[string]place, len(a.Children))
+	for _, cell := range a.Children {
+		places[cell.ID] = place{cell.Int("rowPosition", -1), cell.Int("colPosition", -1)}
+	}
+	for _, cell := range b.Children {
+		if at, ok := places[cell.ID]; !ok || at != (place{cell.Int("rowPosition", -1), cell.Int("colPosition", -1)}) {
+			return false
 		}
 	}
-	newRows, newCols := false, false
-	for _, cell := range table.Children {
-		r, c := cell.Int("rowPosition", -1), cell.Int("colPosition", -1)
-		if isAdded[cell.ID] && taken[place{r, c}] {
-			newRows = newRows || r >= baseRows
-			newCols = newCols || c >= baseCols
-		}
+	return true
+}
+
+// placeCells puts table's cells in the rows and columns of the table as
+// each side has it, primary and other, in the order they have them: one
+// only a side has stays among those around it, the other side's after the
+// primary's, and the table grows to hold them. Sides that share no cell,
+// as when both wrote the table anew, share no columns to tell apart, and
+// the other's rows go under the primary's as they are. What moves changes
+// at at.
+func placeCells(table, primary, other *Node, times map[string]int64, at int64) {
+	rows, shared := cellLines(table, primary, other, "rowPosition")
+	cols := map[string]int{}
+	if shared {
+		cols, _ = cellLines(table, primary, other, "colPosition")
 	}
-	// The table holds every cell, as one side's rows and the other's
-	// columns: each side's size alone leaves out the other's.
-	lastRow, lastCol := rows, cols
-	for _, cell := range table.Children {
-		if !isAdded[cell.ID] {
-			continue
-		}
-		r, c := cell.Int("rowPosition", -1), cell.Int("colPosition", -1)
-		if newRows && r >= baseRows {
-			r += rows - baseRows
-			cell.Set("rowPosition", r)
+	move := func(cell *Node, key string, line int, ok bool) {
+		if ok && cell.Int(key, -1) != line {
+			cell.Set(key, line)
 			times[cell.ID] = at
 		}
-		if newCols && c >= baseCols {
-			c += cols - baseCols
-			cell.Set("colPosition", c)
-			times[cell.ID] = at
-		}
-		lastRow, lastCol = max(lastRow, r+1), max(lastCol, c+1)
 	}
-	if table.Int("rowsLen", 0) < lastRow || table.Int("colsLen", 0) < lastCol {
-		table.Set("rowsLen", max(table.Int("rowsLen", 0), lastRow))
-		table.Set("colsLen", max(table.Int("colsLen", 0), lastCol))
-		times[tableID] = at
+	rowCount, colCount := 0, 0
+	for _, cell := range table.Children {
+		r, ok := rows[cell.ID]
+		move(cell, "rowPosition", r, ok)
+		c, ok := cols[cell.ID]
+		move(cell, "colPosition", c, ok)
+		rowCount, colCount = max(rowCount, cell.Int("rowPosition", -1)+1), max(colCount, cell.Int("colPosition", -1)+1)
+	}
+	if rowsLen, colsLen := table.Int("rowsLen", 0), table.Int("colsLen", 0); rowsLen < rowCount || colsLen < colCount {
+		table.Set("rowsLen", max(rowsLen, rowCount))
+		table.Set("colsLen", max(colsLen, colCount))
+		times[table.ID] = at
 	}
 	SortTableCells(table)
+}
+
+// cellLines reads the rows of a table's cells, or its columns, by key: a
+// line is the cells a side has at one place, and cells a line on either
+// side holds are in one line. It returns where each cell of table goes,
+// and whether the sides share any line.
+func cellLines(table, primary, other *Node, key string) (lines map[string]int, shared bool) {
+	kept := map[string]bool{}
+	for _, cell := range table.Children {
+		kept[cell.ID] = true
+	}
+	// joined leads from a cell to one of its line, and at last to the one
+	// that stands for the line.
+	joined := map[string]string{}
+	var line func(id string) string
+	line = func(id string) string {
+		up, ok := joined[id]
+		if !ok {
+			return id
+		}
+		top := line(up)
+		joined[id] = top
+		return top
+	}
+	// sideLines are the first cells of a side's lines, in order.
+	sideLines := func(side *Node) []string {
+		first := map[int]string{}
+		for _, cell := range side.Children {
+			at := cell.Int(key, -1)
+			if at < 0 || !kept[cell.ID] {
+				continue
+			}
+			if id, ok := first[at]; !ok {
+				first[at] = cell.ID
+			} else if a, b := line(id), line(cell.ID); a != b {
+				joined[b] = a
+			}
+		}
+		out := make([]string, 0, len(first))
+		for _, at := range slices.Sorted(maps.Keys(first)) {
+			out = append(out, first[at])
+		}
+		return out
+	}
+	mine, theirs := sideLines(primary), sideLines(other)
+	// Once both are read, each line once, as the first it is in.
+	tops := func(cells []string) []string {
+		seen := map[string]bool{}
+		var out []string
+		for _, id := range cells {
+			if top := line(id); !seen[top] {
+				seen[top] = true
+				out = append(out, top)
+			}
+		}
+		return out
+	}
+	order, shared := bothOrders(tops(mine), tops(theirs))
+	places := make(map[string]int, len(order))
+	for i, top := range order {
+		places[top] = i
+	}
+	lines = make(map[string]int, len(table.Children))
+	for _, cell := range table.Children {
+		if at, ok := places[line(cell.ID)]; ok {
+			lines[cell.ID] = at
+		}
+	}
+	return lines, shared
+}
+
+// bothOrders is the lines of two orders together: those both have in the
+// first's order, with the first's own, then the second's, each after the
+// line it follows in its order; and whether they have any in common.
+func bothOrders(first, second []string) (order []string, shared bool) {
+	inFirst, inSecond := map[string]bool{}, map[string]bool{}
+	for _, id := range first {
+		inFirst[id] = true
+	}
+	for _, id := range second {
+		inSecond[id] = true
+	}
+	j := 0
+	own := func(end func() bool) {
+		for ; j < len(second) && !end(); j++ {
+			if !inFirst[second[j]] {
+				order = append(order, second[j])
+			}
+		}
+	}
+	for _, id := range first {
+		if inSecond[id] {
+			shared = true
+			own(func() bool { return second[j] == id })
+			j++
+		}
+		order = append(order, id)
+	}
+	own(func() bool { return false })
+	return order, shared
 }
 
 // onlyPlaced reports whether two versions of a block differ only in where

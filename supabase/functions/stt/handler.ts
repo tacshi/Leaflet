@@ -8,17 +8,31 @@ import { errorResponse, HttpError, json, preflight, readJson } from "../_shared/
 import { type Clients, loadProvider, providerSecret, requireTokenUntil, requireUser } from "../_shared/supabase.ts";
 import { LOCAL_PRESETS, MAX_ANSWER_BYTES, normalizeBaseUrl, readText } from "../_shared/openai.ts";
 import { isTimeout, type safeFetch, UnsafeUrlError } from "../_shared/net.ts";
-import { SAVE_MS } from "../_shared/deadline.ts";
+import { SAVE_MS, timeoutSignal, workDeadline } from "../_shared/deadline.ts";
+import { storable } from "../_shared/blocks.ts";
 import { type Segment, tokensToSegments } from "../_shared/segments.ts";
 
 const SONIOX_API = "https://api.soniox.com/v1";
 const SONIOX_ASYNC_MODEL = "stt-async-v3";
 const POLL_MS = 2_000;
-// Removing the audio and transcription from Soniox, after the deadline too.
+// Removing the audio and transcription from Soniox, once it is done with them.
 const CLEANUP_MS = 5_000;
 // The quick calls: a temporary key, checking a key.
 const TIMEOUT_MS = 20_000;
-const TOO_LONG = "The transcription took too long on the server. Try again, or choose an on-device model.";
+// Sending the audio or waiting on an endpoint outlasted the deadline, as it
+// would again.
+const TOO_LONG =
+  "This recording took too long to transcribe on the server, and would take as long again. Choose an on-device model for it.";
+// Soniox has the audio and goes on with it past the deadline, which a long
+// recording is often past: the next call picks its transcription up.
+const STILL =
+  "Soniox is still transcribing this recording. Ask again in a minute or two: it goes on there, and asking again costs nothing more.";
+const still = () => new HttpError(504, STILL, "still_transcribing");
+// A call on a worker old enough to cut its time short, or shutting down,
+// says nothing of how long a recording takes: asked again, it has a new
+// worker's whole time. Less lost than this, a call had its time.
+const CUT_SHORT = "The server had too little time for this recording just now. Ask again in a minute.";
+const CUT_SHORT_MS = 10_000;
 // What a transcription that failed says, in the recording, which everyone
 // who can view the page reads, and to the caller: the transcriber's own
 // words, and the address it was sent to, go to the log only.
@@ -32,12 +46,15 @@ export interface SttDeps {
   /** fetch for an endpoint someone typed: safeFetch, which keeps it off private addresses. */
   send: typeof safeFetch;
   /**
-   * When a transcription gives up, from its start, before the platform
-   * stops the function (150 s on the free plan, 400 s on paid plans),
-   * keeping time to mark the recording failed and remove what went to
-   * Soniox.
+   * When a call gives up, from its start, before the gateway gives up on
+   * its answer, which comes only at the end (150 s on any plan), and before
+   * the platform stops its worker, keeping time to say how it ended.
    */
   deadlineMs: number;
+  /** When the worker serving this started; none counts from the request. */
+  workerStarted?: number;
+  /** Aborts as the platform is about to shut the worker down. */
+  unloading?: AbortSignal;
   /**
    * The longest audio transcribed here. It is streamed from Storage to the
    * transcriber, never held whole, so the deadline bounds it, not memory.
@@ -80,7 +97,7 @@ export async function handle(req: Request, deps: SttDeps): Promise<Response> {
         return json(await saveKey(uc, body, deps));
       case "transcribe":
         // The recording's transcript, or its failure, is saved as the caller.
-        requireTokenUntil(req, started + deps.deadlineMs + SAVE_MS);
+        requireTokenUntil(req, workDeadline(started, deps.deadlineMs, deps.workerStarted) + SAVE_MS);
         return json(await transcribe(uc, sc, user, body, started, deps));
       default:
         throw new HttpError(400, "Unknown action");
@@ -155,9 +172,9 @@ function languageCode(raw?: string | null): string | null {
   return /^[a-z]{2,3}$/.test(code) ? code : null;
 }
 
-/** A signal that aborts the provider calls at the transcription's deadline. */
-function until(deadline: number): AbortSignal {
-  return AbortSignal.timeout(Math.max(1, deadline - Date.now()));
+/** A signal that aborts the provider calls at the transcription's deadline, or as the worker is shut down. */
+function until(deadline: number, deps: SttDeps): AbortSignal {
+  return timeoutSignal(Math.max(1, deadline - Date.now()), deps.unloading);
 }
 
 /**
@@ -196,7 +213,7 @@ async function transcribe(
   started: number,
   deps: SttDeps,
 ) {
-  const deadline = started + deps.deadlineMs;
+  const deadline = workDeadline(started, deps.deadlineMs, deps.workerStarted);
   if (!body.recording_id) throw new HttpError(400, "recording_id is required");
   const { data: rec, error } = await uc
     .from("recordings")
@@ -282,8 +299,8 @@ async function transcribe(
     open: (signal) => openAudio(uc, rec.audio_path, deps.maxAudioBytes, signal),
   };
   try {
-    const { segments, model } = sonioxApiKey
-      ? await sonioxFile(sonioxApiKey, audio, settings, language, deadline, deps)
+    const { segments, model, finish } = sonioxApiKey
+      ? await sonioxFile(sc, rec.id, user, sonioxApiKey, audio, settings, language, deadline, deps)
       : await openAiCompatible(endpoint!, audio, settings, language, rec.duration_ms ?? 0, deadline, deps);
 
     const { data: saved, error: saveError } = await uc.from("recordings").update({
@@ -296,6 +313,7 @@ async function transcribe(
       transcribing_at: null,
     }).eq("id", rec.id).select("id");
     if (saveError) throw new Error(saveError.message);
+    await finish?.();
     // Its page was shared view-only, or the recording deleted, meanwhile.
     if (!saved?.length) {
       throw new HttpError(403, "The transcript could not be saved: the recording is no longer yours to edit");
@@ -303,11 +321,15 @@ async function transcribe(
     return { segments };
   } catch (e) {
     // A provider call stopped at the deadline: the recording fails rather
-    // than staying transcribing when the platform stops the function.
+    // than staying transcribing when the platform stops the function,
+    // Soniox's going on from there at the next call.
     // Only this function's own words are told: what the transcriber
     // answered, which may be anything, goes to the log.
     const timedOut = isTimeout(e);
-    const told = timedOut
+    const cutShort = timedOut && (started + deps.deadlineMs - deadline >= CUT_SHORT_MS || !!deps.unloading?.aborted);
+    const told = cutShort
+      ? CUT_SHORT
+      : timedOut
       ? TOO_LONG
       : e instanceof HttpError
       ? e.message
@@ -316,8 +338,16 @@ async function transcribe(
       : FAILED;
     if (!timedOut && !(e instanceof HttpError)) console.error("transcription:", e);
     await uc.from("recordings").update({ status: "failed", error: told, transcribing_at: null }).eq("id", rec.id);
+    if (cutShort) throw new HttpError(504, told, "still_transcribing");
     throw e instanceof HttpError ? e : new HttpError(timedOut ? 504 : 502, told);
   }
+}
+
+/** What a transcriber made, and what is to go once it is saved. */
+interface Transcribed {
+  segments: Segment[];
+  model: string;
+  finish?(): Promise<void>;
 }
 
 /**
@@ -414,14 +444,14 @@ async function openAiCompatible(
   durationMs: number,
   deadline: number,
   deps: SttDeps,
-): Promise<{ segments: Segment[]; model: string }> {
+): Promise<Transcribed> {
   const model = settings.model || "whisper-1";
 
   const send = (format: "verbose_json" | "json") => {
     const fields: [string, string][] = [["model", model], ["response_format", format]];
     if (format === "verbose_json") fields.push(["timestamp_granularities[]", "segment"]);
     if (language) fields.push(["language", language]);
-    const signal = until(deadline);
+    const signal = until(deadline, deps);
     // The base URL is the user's: safeFetch keeps it off private addresses.
     return postAudio(audio, fields, signal, (body, contentType) =>
       deps.send(`${baseUrl}/audio/transcriptions`, {
@@ -457,88 +487,146 @@ async function openAiCompatible(
       .map((s: { start?: number; end?: number; text?: string; speaker?: string }) => ({
         start_ms: Math.round((s.start ?? 0) * 1000),
         end_ms: Math.round((s.end ?? 0) * 1000),
-        text: String(s.text ?? "").trim(),
-        ...(s.speaker ? { speaker: String(s.speaker) } : {}),
+        text: storable(String(s.text ?? "")).trim(),
+        ...(s.speaker ? { speaker: storable(String(s.speaker)) } : {}),
       }))
       .filter((s: Segment) => s.text)
-    : String(data?.text ?? "").trim()
-    ? [{ start_ms: 0, end_ms: durationMs, text: String(data.text).trim() }]
+    : storable(String(data?.text ?? "")).trim()
+    ? [{ start_ms: 0, end_ms: durationMs, text: storable(String(data.text)).trim() }]
     : [];
   return { segments, model };
 }
 
+/** A transcription Soniox has of a recording, which a later call can pick up (stt_jobs). */
+interface SonioxJob {
+  file_id: string;
+  transcription_id: string;
+  model: string;
+}
+
+/**
+ * Transcribes a recording through Soniox's files and transcriptions. What
+ * it spends goes once: the audio is sent and a transcription started, kept
+ * as the caller's job on the recording before anything waits on it, and a
+ * call that runs out of time, or is stopped, leaves it going on at Soniox
+ * for the next call to pick up, with no audio sent and no key spent again.
+ * What went to Soniox goes from it only once it is done with it, as it
+ * keeps what it is still transcribing, and with nothing done it deletes it
+ * by itself within 30 days.
+ */
 async function sonioxFile(
+  sc: SupabaseClient,
+  recordingId: string,
+  user: User,
   key: string,
   audio: Audio,
   settings: SttSettings,
   language: string | null,
   deadline: number,
   deps: SttDeps,
-): Promise<{ segments: Segment[]; model: string }> {
+): Promise<Transcribed> {
   const fetch = deps.fetch;
   const pollMs = deps.pollMs ?? POLL_MS;
   const auth = { Authorization: `Bearer ${key}` };
-  const model = settings.model?.startsWith("stt-async") ? settings.model : SONIOX_ASYNC_MODEL;
+  const mine = { recording_id: recordingId, user_id: user.id };
 
-  const signal = until(deadline);
-  const upload = await postAudio(audio, [], signal, (body, contentType) =>
-    fetch(`${SONIOX_API}/files`, {
-      method: "POST",
-      headers: { ...auth, "Content-Type": contentType },
-      body,
-      signal,
-    }));
-  if (!upload.ok) throw await sonioxFailure(upload, "upload");
-  const fileId: string = (await upload.json()).id;
+  const remove = (path: string) =>
+    fetch(`${SONIOX_API}/${path}`, { method: "DELETE", headers: auth, signal: AbortSignal.timeout(CLEANUP_MS) })
+      .then((res) => res.body?.cancel())
+      .catch(() => {});
+  const forget = async () => {
+    const { error } = await sc.from("stt_jobs").delete().match(mine);
+    if (error) console.error("stt_jobs:", error.message);
+  };
+  const finish = async (job: SonioxJob) => {
+    await remove(`transcriptions/${job.transcription_id}`);
+    await remove(`files/${job.file_id}`);
+    await forget();
+  };
 
-  let transcriptionId: string | null = null;
-  try {
-    const create = await fetch(`${SONIOX_API}/transcriptions`, {
-      method: "POST",
-      headers: { ...auth, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        file_id: fileId,
-        language_hints: language ? [language] : ["en", "zh"],
-        enable_speaker_diarization: settings.speaker_labels,
-      }),
-      signal: until(deadline),
-    });
-    if (!create.ok) throw await sonioxFailure(create, "transcription");
-    transcriptionId = (await create.json()).id as string;
-
-    while (true) {
-      const status = await fetch(`${SONIOX_API}/transcriptions/${transcriptionId}`, {
-        headers: auth,
-        signal: until(deadline),
+  // Sends the audio and starts transcribing it.
+  const start = async (): Promise<SonioxJob> => {
+    const model = settings.model?.startsWith("stt-async") ? settings.model : SONIOX_ASYNC_MODEL;
+    const signal = until(deadline, deps);
+    const upload = await postAudio(audio, [], signal, (body, contentType) =>
+      fetch(`${SONIOX_API}/files`, {
+        method: "POST",
+        headers: { ...auth, "Content-Type": contentType },
+        body,
+        signal,
+      }));
+    if (!upload.ok) throw await sonioxFailure(upload, "upload");
+    const fileId: string = (await upload.json()).id;
+    try {
+      const create = await fetch(`${SONIOX_API}/transcriptions`, {
+        method: "POST",
+        headers: { ...auth, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          file_id: fileId,
+          language_hints: language ? [language] : ["en", "zh"],
+          enable_speaker_diarization: settings.speaker_labels,
+        }),
+        signal: until(deadline, deps),
       });
-      if (!status.ok) throw await sonioxFailure(status, "status");
-      const info = await status.json();
-      if (info.status === "completed") break;
-      if (info.status === "error") {
-        console.error("Soniox transcription:", info.error_message);
-        throw new HttpError(502, "Soniox could not transcribe the recording");
-      }
-      if (Date.now() + pollMs >= deadline) {
-        throw new HttpError(504, "Soniox is still transcribing; try again in a minute");
-      }
-      await new Promise((r) => setTimeout(r, pollMs));
+      if (!create.ok) throw await sonioxFailure(create, "transcription");
+      const job = { file_id: fileId, transcription_id: (await create.json()).id as string, model };
+      const { error } = await sc.from("stt_jobs").insert({ ...mine, ...job });
+      if (error) throw new Error(error.message);
+      return job;
+    } catch (e) {
+      await remove(`files/${fileId}`);
+      throw e;
     }
+  };
 
-    const transcript = await fetch(`${SONIOX_API}/transcriptions/${transcriptionId}/transcript`, {
-      headers: auth,
-      signal: until(deadline),
-    });
-    if (!transcript.ok) throw await sonioxFailure(transcript, "transcript");
-    const data = await transcript.json();
-    return { segments: tokensToSegments(data.tokens ?? []), model };
-  } finally {
-    // Past the deadline too, each on its own short timeout.
-    const remove = (path: string) =>
-      fetch(`${SONIOX_API}/${path}`, { method: "DELETE", headers: auth, signal: AbortSignal.timeout(CLEANUP_MS) })
-        .then((res) => res.body?.cancel())
-        .catch(() => {});
-    if (transcriptionId) await remove(`transcriptions/${transcriptionId}`);
-    await remove(`files/${fileId}`);
+  // Waits on a job as long as this call may, or null when Soniox no longer
+  // has it. A failure of a call here, Soniox's or the network's, leaves the
+  // job as it is for the next call: only its own end is one.
+  const wait = async (job: SonioxJob): Promise<Transcribed | null> => {
+    try {
+      while (true) {
+        const status = await fetch(`${SONIOX_API}/transcriptions/${job.transcription_id}`, {
+          headers: auth,
+          signal: until(deadline, deps),
+        });
+        if (status.status === 404) {
+          await status.body?.cancel().catch(() => {});
+          return null;
+        }
+        if (!status.ok) throw await sonioxFailure(status, "status");
+        const info = await status.json();
+        if (info.status === "completed") break;
+        if (info.status === "error") {
+          console.error("Soniox transcription:", info.error_message);
+          await finish(job);
+          throw new HttpError(502, "Soniox could not transcribe the recording");
+        }
+        if (Date.now() + pollMs >= deadline || deps.unloading?.aborted) throw still();
+        await new Promise((r) => setTimeout(r, pollMs));
+      }
+
+      const transcript = await fetch(`${SONIOX_API}/transcriptions/${job.transcription_id}/transcript`, {
+        headers: auth,
+        signal: until(deadline, deps),
+      });
+      if (!transcript.ok) throw await sonioxFailure(transcript, "transcript");
+      const data = await transcript.json();
+      return { segments: tokensToSegments(data.tokens ?? []), model: job.model, finish: () => finish(job) };
+    } catch (e) {
+      throw isTimeout(e) ? still() : e;
+    }
+  };
+
+  const { data: left, error } = await sc.from("stt_jobs").select("file_id, transcription_id, model").match(mine)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (left) {
+    const done = await wait(left as SonioxJob);
+    if (done) return done;
+    await forget();
   }
+  const done = await wait(await start());
+  if (!done) throw new HttpError(502, "Soniox could not transcribe the recording");
+  return done;
 }

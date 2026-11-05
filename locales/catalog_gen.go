@@ -5403,6 +5403,22 @@ func (msgs Messages) AgentChatgptSignInEnded() string {
 	return Catalog.Format(msgs.locale, "agentChatgptSignInEnded", nil)
 }
 
+// AgentKeyUnread says "Leaflet could not read the API key of {agent} from the keychain. Open Leaflet again and allow it, or paste the key ag…"
+// in the language the app shows.
+//
+// Why an agent can't run: the API key kept on this device for its provider
+// could not be read, as the user turned the system's prompt down.
+func AgentKeyUnread(agent string) string { return In(i18n.Locale()).AgentKeyUnread(agent) }
+
+// AgentKeyUnread says "Leaflet could not read the API key of {agent} from the keychain. Open Leaflet again and allow it, or paste the key ag…"
+// in the language of msgs.
+//
+// Why an agent can't run: the API key kept on this device for its provider
+// could not be read, as the user turned the system's prompt down.
+func (msgs Messages) AgentKeyUnread(agent string) string {
+	return Catalog.Format(msgs.locale, "agentKeyUnread", map[string]any{"agent": agent})
+}
+
 // OauthPortTaken says "Leaflet couldn't wait for {name}'s sign-in on port {port}, which another app is using. Quit it, then try again."
 // in the language the app shows.
 //
@@ -12985,6 +13001,22 @@ func SettingsNeedKey() string { return In(i18n.Locale()).SettingsNeedKey() }
 // its key.
 func (msgs Messages) SettingsNeedKey() string {
 	return Catalog.Format(msgs.locale, "settingsNeedKey", nil)
+}
+
+// SettingsKeyStaysBehind says "Paste the API key again: a key kept on this device goes only to the address it was saved for."
+// in the language the app shows.
+//
+// The provider dialog: saving a provider at another server without typing
+// its key, which would otherwise be lost.
+func SettingsKeyStaysBehind() string { return In(i18n.Locale()).SettingsKeyStaysBehind() }
+
+// SettingsKeyStaysBehind says "Paste the API key again: a key kept on this device goes only to the address it was saved for."
+// in the language of msgs.
+//
+// The provider dialog: saving a provider at another server without typing
+// its key, which would otherwise be lost.
+func (msgs Messages) SettingsKeyStaysBehind() string {
+	return Catalog.Format(msgs.locale, "settingsKeyStaysBehind", nil)
 }
 
 // SettingsKeepSignInFailed says "Could not keep the sign-in: {error}"

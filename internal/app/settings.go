@@ -16,6 +16,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"leaflet/internal/agents"
+	"leaflet/internal/agents/endpoint"
 	"leaflet/internal/core"
 	"leaflet/internal/icloud"
 	"leaflet/internal/store"
@@ -569,7 +570,7 @@ func (a *App) signOut() {
 	}
 	a.account.signingOut = true
 	go func() {
-		_ = a.sync.SyncNow()
+		_ = a.sync.Drain()
 		a.update(func() {
 			a.account.signingOut = false
 			a.leave(a.st.ForgetSyncedAccount, true)
@@ -656,6 +657,11 @@ type providerForm struct {
 	// reading is set while the key or sign-in kept here of the provider
 	// edited is read (editProvider): saving waits, not to drop it.
 	reading bool
+	// keptKey is the key read of the provider edited, for its address
+	// keptURL alone (keyFollowsAddress); keyTyped is a key the user wrote
+	// in the dialog in its place.
+	keptKey, keptURL string
+	keyTyped         bool
 	// gen tells this dialog from the ones opened before it: what a test,
 	// sign-in or save started in one of those finds goes nowhere.
 	gen int
@@ -821,7 +827,7 @@ func (a *App) editProvider(p *store.Provider) {
 	// Its key or sign-in kept here is read off the main thread, as the
 	// keychain can take a while, or ask first; its models are listed
 	// with it, and it saves only once it has come.
-	id, gen := p.ID, a.form.gen
+	id, base, gen := p.ID, p.BaseURL, a.form.gen
 	local, account := p.IsLocal && p.AuthKind != "account", p.AuthKind == "account"
 	var key string
 	var g *agents.ChatGPT
@@ -840,11 +846,30 @@ func (a *App) editProvider(p *store.Provider) {
 		if a.form.apiKey == "" {
 			a.form.apiKey = key
 		}
+		a.form.keptKey, a.form.keptURL = key, base
+		a.keyFollowsAddress()
 		if g != nil && a.form.chatgpt == nil {
 			a.form.chatgpt, a.form.email = g, g.Account().Email
 		}
 		a.fetchModels()
 	})
+}
+
+// keyFollowsAddress keeps the key kept for the provider edited to the
+// address it was saved for: the dialog holds it only while its address is
+// at that origin, as saving and testing send what the dialog holds, and a
+// pause in typing lists the address's models with it. Moved to another
+// server, the provider takes a key typed for it, as the server's do
+// (keyStaysWith).
+func (a *App) keyFollowsAddress() {
+	f := &a.form
+	if f.keptKey == "" || f.keyTyped {
+		return
+	}
+	f.apiKey = ""
+	if endpoint.SameOrigin(f.keptURL, f.baseURL) {
+		f.apiKey = f.keptKey
+	}
 }
 
 // chatgptOf is the provider's ChatGPT sign-in, for what is drawn: nil
@@ -899,6 +924,7 @@ func (a *App) providerDialog(c *ui.Context) {
 					}
 					// Another address has other models.
 					if field(c, "url", &a.form.baseURL, ph).Changed() {
+						a.keyFollowsAddress()
 						a.fetchModelsSoon()
 					}
 				})
@@ -925,6 +951,7 @@ func (a *App) providerDialog(c *ui.Context) {
 						var in ui.Element
 						ui.Box(c).Grow(1).Children(func() { in = password(c, "key", &a.form.apiKey, ph) })
 						if in.Changed() {
+							a.form.keyTyped = true
 							a.fetchModelsSoon()
 						}
 						testButton()
@@ -1093,7 +1120,7 @@ func (a *App) fetchModels() {
 	switch {
 	case preset.Auth == "account" && g == nil:
 		return
-	case preset.Auth == "key" && key == "" && (id == "" || !a.backend.SignedIn()):
+	case preset.Auth == "key" && key == "" && (id == "" || !a.backend.SignedIn() || a.form.keptKey != ""):
 		return
 	}
 	at, gen := base+"|"+key, a.form.gen
@@ -1153,7 +1180,9 @@ func listAny(v any) []any {
 func (a *App) providerForm() agents.Form {
 	f := &a.form
 	return agents.Form{
-		ID: f.id, Preset: f.preset, Name: f.name, BaseURL: f.baseURL, APIKey: f.apiKey, Model: f.model,
+		// A key kept that the dialog took out for another address shows
+		// gone, as saving leaves it.
+		ID: f.id, Preset: f.preset, Name: f.name, BaseURL: f.baseURL, APIKey: f.apiKey, KeyTyped: f.keyTyped || f.keptKey != "" && f.apiKey == "", Model: f.model,
 		Models: f.models, SupportsTools: f.tools, ChatGPT: f.chatgpt,
 	}
 }

@@ -25,7 +25,10 @@ var lineEnds = strings.NewReplacer("\r\n", "\n", "\r", "\n")
 // </details>, the lines of a Markdown table make a table, and a fenced
 // block a code block.
 func ParseLines(text string) []*Node {
-	text = lineEnds.Replace(text)
+	// Bytes that are no UTF-8, as a clipboard can hold, read as U+FFFD, as
+	// they do in rich text: lines are read by characters and by bytes,
+	// which have to count alike.
+	text = strings.ToValidUTF8(lineEnds.Replace(text), "\uFFFD")
 	var p lineParser
 	for _, line := range strings.Split(text, "\n") {
 		p.line(line)
@@ -472,7 +475,7 @@ func summaryEnd(s string) int {
 				i += n - 1
 			}
 		case '<':
-			if _, ok := cutFold(string(r[i:]), "</summary>"); ok {
+			if _, ok := cutFold(tagText(r, i), "</summary>"); ok {
 				return len(string(r[:i]))
 			}
 		}
@@ -574,8 +577,7 @@ func cellBreaks(md string) string {
 			i = j
 			continue
 		case '<':
-			rest := string(s[i:])
-			if tag := brTagAt(rest); tag != "" {
+			if tag := brTagAt(tagText(s, i)); tag != "" {
 				b.WriteByte('\n')
 				i += len([]rune(tag))
 				continue
@@ -585,6 +587,12 @@ func cellBreaks(md string) string {
 		i++
 	}
 	return b.String()
+}
+
+// tagText is s from i, as much of it as the longest tag read in text
+// takes, so that reading many a < costs no more than one.
+func tagText(s []rune, i int) string {
+	return string(s[i:min(i+len("</summary>"), len(s))])
 }
 
 // brTagAt is the <br> at the start of s, or "".

@@ -422,7 +422,11 @@ func mentionOf(href string) (kind, id string, ok bool) {
 
 // LinkDestination writes a link's url, in angle brackets when it holds
 // what would end it or read as markup: parentheses, spaces, backslashes.
+// A backtick is written as a url can hold one: what looks for code spans
+// around a link, in a table's row or a toggle's summary, reads Markdown
+// before it reads links.
 func LinkDestination(href string) string {
+	href = strings.ReplaceAll(href, "`", "%60")
 	if !strings.ContainsAny(href, "()<>\\ \t\n") {
 		return href
 	}
@@ -471,9 +475,13 @@ func toggleTag(s string) bool {
 // FromMarkdown reads the inline markdown dialect.
 func FromMarkdown(markdown string) Delta {
 	var out Delta
-	parseInline([]rune(markdown), Attrs{}, &out)
+	parseInline([]rune(markdown), Attrs{}, &out, 0)
 	return out.Compact()
 }
+
+// maxInlineDepth is how deep formats and links nest: past it, text is read
+// as it is written. Each level reads its text again.
+const maxInlineDepth = 32
 
 // linkScan reads the links of a text, s, at its [s. Where the ] that ends
 // a link's text is from each place, and the ) that ends its url, are
@@ -488,6 +496,9 @@ type linkScan struct {
 	// first ) at its depth is, a ( and its ) in between, an escaped one not
 	// counting, or -1 past a space.
 	closes, urlEnds []int
+	// found is, of each marker, where it is first found from each place
+	// passed (first).
+	found map[string]map[int]int
 }
 
 // scan works out closes and urlEnds, each place from the places after it.
@@ -607,7 +618,11 @@ func isPunct(c rune) bool {
 	return c < 0x80 && (unicode.IsPunct(c) || unicode.IsSymbol(c))
 }
 
-func parseInline(s []rune, attrs Attrs, out *Delta) {
+func parseInline(s []rune, attrs Attrs, out *Delta, depth int) {
+	if depth > maxInlineDepth {
+		*out = append(*out, Run{Text: string(s), Attrs: attrs})
+		return
+	}
 	links := &linkScan{s: s}
 	var plain strings.Builder
 	flush := func() {
@@ -643,7 +658,7 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 				// link, with its own text.
 				if id, ok := PageLinkID(href); ok && LinkBlock(href) == "" {
 					var inner Delta
-					parseInline(text, attrs, &inner)
+					parseInline(text, attrs, &inner, depth+1)
 					title := inner.Plain()
 					a, m := sharedAttrs(inner, attrs), PageMention(id, title)
 					a.Href, a.Mention = m.Href, m.Mention
@@ -654,7 +669,9 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 				// A link to mention:user:<id> or mention:agent:<id> is a
 				// mention of that person or agent, by the name it shows.
 				if kind, id, ok := mentionOf(href); ok {
-					name := strings.TrimPrefix(FromMarkdown(string(text)).Plain(), "@")
+					var inner Delta
+					parseInline(text, Attrs{}, &inner, depth+1)
+					name := strings.TrimPrefix(inner.Plain(), "@")
 					a := attrs
 					a.Mention = &Mention{Kind: kind, ID: id, Name: name}
 					*out = append(*out, Run{Text: "@" + name, Attrs: a})
@@ -663,7 +680,7 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 				}
 				a := attrs
 				a.Href = href
-				parseInline(text, a, out)
+				parseInline(text, a, out, depth+1)
 				i += n
 				continue
 			}
@@ -675,7 +692,7 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 				flush()
 				a := attrs
 				a.Bold, a.Italic = true, true
-				parseInline(s[i+3:end], a, out)
+				parseInline(s[i+3:end], a, out, depth+1)
 				i = end + 3
 				continue
 			}
@@ -690,7 +707,7 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 				} else {
 					a.Bold = true
 				}
-				parseInline(s[i+2:end], a, out)
+				parseInline(s[i+2:end], a, out, depth+1)
 				i = end + 2
 				continue
 			}
@@ -702,7 +719,7 @@ func parseInline(s []rune, attrs Attrs, out *Delta) {
 					flush()
 					a := attrs
 					a.Italic = true
-					parseInline(s[i+1:end], a, out)
+					parseInline(s[i+1:end], a, out, depth+1)
 					i = end + 1
 					continue
 				}
@@ -789,33 +806,72 @@ func skipSpan(links *linkScan, j int) int {
 	return j
 }
 
+// first is where scanning from p for a marker, key, first finds one, a
+// place at a time as next has it, or -1: each place passed is told what
+// was found, so no place is scanned from twice.
+func (l *linkScan) first(key string, p, end int, next func(int) int, takes func(int) bool) int {
+	if l.found == nil {
+		l.found = map[string]map[int]int{}
+	}
+	known := l.found[key]
+	if known == nil {
+		known = map[int]int{}
+		l.found[key] = known
+	}
+	var passed []int
+	at := -1
+	for p < end {
+		if k, ok := known[p]; ok {
+			at = k
+			break
+		}
+		if takes(p) {
+			at = p
+			break
+		}
+		passed = append(passed, p)
+		p = next(p)
+	}
+	for _, q := range passed {
+		known[q] = at
+	}
+	return at
+}
+
+// findSingle is where a single * or _ closes from from: one not doubled,
+// not before a word for _, nor after a space but right at from, outside
+// code spans and links.
 func findSingle(links *linkScan, marker rune, from int) int {
 	s := links.s
-	for j := from; j < len(s); j++ {
+	next := func(j int) int {
 		if s[j] == '\\' {
-			j++
-			continue
+			return j + 2
 		}
 		if k := skipSpan(links, j); k > j {
-			j = k - 1
-			continue
+			return k
 		}
-		if s[j] != marker {
-			continue
+		if s[j] == marker && j+1 < len(s) && s[j+1] == marker {
+			return j + 2
 		}
-		if j+1 < len(s) && s[j+1] == marker {
-			j++
-			continue
-		}
-		if marker == '_' && j+1 < len(s) && isWord(s[j+1]) {
-			continue
-		}
-		if j > from && s[j-1] == ' ' {
-			continue
-		}
-		return j
+		return j + 1
 	}
-	return -1
+	closes := func(j int) bool {
+		if s[j] != marker {
+			return false
+		}
+		if j+1 == len(s) {
+			return true
+		}
+		return s[j+1] != marker && (marker != '_' || !isWord(s[j+1]))
+	}
+	if from >= len(s) {
+		return -1
+	}
+	// Right at from, a space before it does not count.
+	if closes(from) {
+		return from
+	}
+	return links.first(string(marker)+"1", next(from), len(s), next, func(j int) bool { return closes(j) && s[j-1] != ' ' })
 }
 
 func isWord(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }
@@ -823,18 +879,15 @@ func isWord(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }
 func indexString(links *linkScan, sub string, from int) int {
 	s := links.s
 	m := []rune(sub)
-	for j := from; j+len(m) <= len(s); j++ {
+	next := func(j int) int {
 		if s[j] == '\\' {
-			j++
-			continue
+			return j + 2
 		}
 		if k := skipSpan(links, j); k > j {
-			j = k - 1
-			continue
+			return k
 		}
-		if string(s[j:j+len(m)]) == sub {
-			return j
-		}
+		return j + 1
 	}
-	return -1
+	// A marker's characters are never a backslash, nor what opens a span.
+	return links.first(sub, from, len(s)-len(m)+1, next, func(j int) bool { return string(s[j:j+len(m)]) == sub })
 }

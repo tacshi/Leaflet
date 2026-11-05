@@ -19,6 +19,7 @@ import (
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/internal/supabaseapi"
+	syncsvc "leaflet/internal/sync"
 )
 
 func TestBeginSupabaseSignIn(t *testing.T) {
@@ -284,6 +285,53 @@ func TestSignOutOfAnAccount(t *testing.T) {
 	own := create(t, c, `{"title":"Mine"}`)
 	if n, err := c.SignOut(false); err != nil || n != 0 || !hasPage(t, c, own.ID) {
 		t.Fatalf("SignOut signed out: %d, %v; the page stayed %v", n, err, hasPage(t, c, own.ID))
+	}
+}
+
+// onlinePlatform is a device with a connection.
+type onlinePlatform struct{ fakePlatform }
+
+func (*onlinePlatform) Online() bool { return true }
+
+// A file that takes longer to go up than a push waits is waited for: it
+// is no change left behind, to ask about.
+func TestSignOutWaitsForAnUpload(t *testing.T) {
+	defer syncsvc.UploadWaitForTest(10 * time.Millisecond)()
+	cfg, _ := json.Marshal(config{DataDir: t.TempDir(), Locale: "en"})
+	p := &onlinePlatform{fakePlatform{t: t, secrets: map[string][]byte{}}}
+	p.logUntilEnd()
+	ev := &fakeEvents{updates: make(chan update, 64), saving: make(chan bool, 64), readOnly: make(chan bool, 16), notices: make(chan string, 16)}
+	c, err := Open(string(cfg), p, ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		c.Stop()
+		_ = c.core.Store.Close()
+	})
+	signInRockyTo(t, c, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/storage/") {
+			_, _ = io.Copy(io.Discard, r.Body)
+			time.Sleep(200 * time.Millisecond)
+		}
+		_, _ = io.WriteString(w, "[]")
+	})
+	st := c.core.Store
+	if err := st.SetValue("space.00000000-0000-0000-0000-0000000000a1", st.Session().SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir() + "/film.mov"
+	if err := os.WriteFile(source, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddFile(source, "", "", "video/quicktime"); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := c.SignOut(false); err != nil || n != 0 {
+		t.Fatalf("SignOut: %d, %v", n, err)
+	}
+	if account0(t, c).SignedIn {
+		t.Error("still signed in")
 	}
 }
 

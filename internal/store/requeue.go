@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"path"
 )
 
 // Requeue queues a page (with its content), folder or comment to go up
@@ -88,7 +89,7 @@ func (s *Store) RequeueFile(id, spaceID string) error {
 		f = files[0]
 		old := FileToRemote(f)
 		f.SpaceID = spaceID
-		f.StoragePath = spaceID + "/" + f.ID + "/" + f.Name
+		f.StoragePath = requeuedKey(f, spaceID)
 		if err := putFile(tx, s.Dir, f); err != nil {
 			return err
 		}
@@ -109,6 +110,17 @@ func (s *Store) RequeueFile(id, spaceID string) error {
 	}
 	s.Notify("outbox", f.PageID)
 	return nil
+}
+
+// requeuedKey is the key of a file sent again in space spaceID. One that
+// goes up from here gets a key Storage takes; any other stays by the name
+// it is stored under, which is where the devices find it, as a file in
+// iCloud Drive this device has not brought here.
+func requeuedKey(f File, spaceID string) string {
+	if f.StoragePath == "" || f.DeletedAt.IsZero() && OnDevice(f.LocalPath) {
+		return StorageKey(spaceID, f.ID, f.Name)
+	}
+	return spaceID + "/" + f.ID + "/" + path.Base(f.StoragePath)
 }
 
 // RequeueRecording queues a finished recording to go up whole, as stored

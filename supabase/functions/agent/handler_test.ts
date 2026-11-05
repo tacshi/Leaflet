@@ -3,6 +3,7 @@ import { type AgentDeps, handle, withoutThinking } from "./handler.ts";
 import { type ChatMessage, type ChatRequest, type ChatResult, ProviderError } from "../_shared/openai.ts";
 import { type NodeJSON, type PageContent, walk } from "../_shared/blocks.ts";
 import { NOW_LINKED, READ_OTHERS, TOO_MANY_CALLS } from "../_shared/tools.ts";
+import { ParseBudget } from "../_shared/page.ts";
 import { Project, type Row } from "../_testing/project.ts";
 
 function para(id: string, text: string): NodeJSON {
@@ -1323,8 +1324,10 @@ Deno.test("a turn that read a page someone else has keeps the chat from making p
     }),
   ];
   const first = model(calls(["read_other_page", { page_id: "other" }]), says("It says what Bo wrote."));
-  await run(p, deps(p, first.chat), "one");
+  const { events } = await run(p, deps(p, first.chat), "one");
   assertEquals((jobOf(p, "one").result as { read_others?: boolean }).read_others, true);
+  // The app's chat keeps it from here, for a next turn of a model on the device.
+  assertEquals(events.at(-1)?.read_others, true);
   const second = model(
     calls(["create_page", { title: "Copy" }], ["create_subpage", { title: "Sub" }]),
     says("I can't."),
@@ -1417,4 +1420,277 @@ Deno.test("a workspace job leaves a page shared since it began as it is", async 
     assert(String(answer.error).includes("shared with others"), `${how}: ${answer.error}`);
     assertEquals(p.rows("pages").find((r) => r.id === "plan")!.title, "Plan", how);
   }
+});
+
+// A turn that read nothing of anyone else's says nothing of it.
+Deno.test("done says read_others only of a run that did", async () => {
+  const p = project();
+  const { events } = await run(p, deps(p, model(says("Hello.")).chat));
+  assertEquals(events.at(-1)?.type, "done");
+  assertEquals("read_others" in events.at(-1)!, false);
+});
+
+/** Runs fn with the clock moved on by the ms it adds, as a long model call moves it. */
+function advancing() {
+  const real = Date.now;
+  let ahead = 0;
+  Date.now = () => real() + ahead;
+  return { add: (ms: number) => ahead += ms, restore: () => Date.now = real };
+}
+
+// A worker's wall clock is its own: a run on one 70 s old has what is left
+// of it, and stops in time to save, where a request alone would count two
+// minutes and be stopped by the platform with nothing saved.
+Deno.test("a run stops by its worker's age, keeping time to save", async () => {
+  const clock = advancing();
+  try {
+    const p = project();
+    const m = model(
+      () => {
+        clock.add(46_000);
+        return calls(["insert_blocks", { position: "end", blocks: [{ type: "paragraph", text: "Next" }] }]);
+      },
+      says("Asked once too often."),
+    );
+    const { events } = await run(p, deps(p, m.chat, { deadlineMs: 120_000, workerStarted: Date.now() - 70_000 }));
+    assertEquals(m.asked.length, 1);
+    assert(String(events.at(-1)?.reply).startsWith("I ran out of time and stopped."));
+    assertEquals(texts(contentOf(p).content).includes("Next"), true);
+  } finally {
+    clock.restore();
+  }
+});
+
+// The platform says it will shut the worker down: the run ends there, as
+// a failed run does, saving its edits and keeping their ops.
+Deno.test("a run the platform shuts down saves what it did and ends failed", async () => {
+  const p = project();
+  const unloading = new AbortController();
+  const write = (text: string) => calls(["insert_blocks", { position: "end", blocks: [{ type: "paragraph", text }] }]);
+  const m = model(write("Next"), () => (unloading.abort(), write("Unwritten")));
+  const { events } = await run(p, deps(p, m.chat, { unloading: unloading.signal }));
+  assertEquals(events.at(-1), { type: "error", message: "The platform stopped the run before it finished." });
+  assertEquals(jobOf(p).status, "failed");
+  assertEquals((jobOf(p).result as { ops: { op: string }[] }).ops.map((o) => o.op), ["insert"]);
+  assertEquals(texts(contentOf(p).content).includes("Next"), true);
+});
+
+// In the middle of asking the model too, which stops waiting at once.
+Deno.test("a model call stops as the platform shuts the worker down", async () => {
+  const p = project();
+  const unloading = new AbortController();
+  const chat: AgentDeps["chat"] = (_conn, _request, signal) =>
+    new Promise((_, reject) => {
+      signal!.addEventListener("abort", () => reject(signal!.reason));
+      unloading.abort();
+    });
+  const start = performance.now();
+  const { events } = await run(p, deps(p, chat, { unloading: unloading.signal }));
+  assert(performance.now() - start < 5000, "the call went on to its own timeout");
+  assertEquals(events.at(-1)?.type, "error");
+  assertEquals(jobOf(p).status, "failed");
+});
+
+// An answer that came whole as the word came is done, as any other.
+Deno.test("a run that finished as the platform spoke is done", async () => {
+  const p = project();
+  const unloading = new AbortController();
+  const m = model(() => (unloading.abort(), says("All done.")));
+  const { events } = await run(p, deps(p, m.chat, { unloading: unloading.signal }));
+  assertEquals(events.at(-1)?.type, "done");
+  assertEquals(jobOf(p).status, "done");
+});
+
+// A workspace run is shut down alike, and its ops stay to undo it by.
+Deno.test("a workspace run the platform shuts down keeps its ops", async () => {
+  const p = workspaceProject();
+  const unloading = new AbortController();
+  const m = model(
+    calls(["create_folder", { name: "Clips" }]),
+    () => (unloading.abort(), calls(["create_folder", { name: "Unmade" }])),
+  );
+  const { events } = await run(p, deps(p, m.chat, { unloading: unloading.signal }));
+  assertEquals(events.at(-1)?.type, "error");
+  assertEquals(jobOf(p).status, "failed");
+  assertEquals((jobOf(p).result as { ops: { op: string }[] }).ops.map((o) => o.op), ["create_folder"]);
+});
+
+// The platform may stop a run with no word: what it did so far is on its
+// job as it goes, for whoever finds the job left running.
+Deno.test("a run's ops go on its job as it works", async () => {
+  const p = project();
+  p.tables.spaces = [{ id: "ann-space", owner_id: "ann" }];
+  let kept: unknown;
+  const m = model(
+    calls(["create_page", { title: "Article" }]),
+    () => (kept = structuredClone(jobOf(p)), says("Made it.")),
+  );
+  await run(p, deps(p, m.chat, { keepOpsMs: 0 }));
+  const job = kept as Row & { result: { ops: { op: string; content?: unknown }[]; edits: unknown[] } };
+  assertEquals(job.status, "running");
+  assertEquals(job.result.ops.map((o) => o.op), ["create_page"]);
+  assertEquals("content" in job.result.ops[0], false);
+  assertEquals(job.result.edits.length, 1);
+});
+
+// A run stopped with no word keeps those ops as the next run marks it failed.
+Deno.test("a run left running is failed with the ops it kept", async () => {
+  const p = project();
+  const left = { reply: "", ops: [{ op: "insert" }], edits: [{ summary: "Wrote a block", block_ids: [], tool: "t" }] };
+  p.tables.ai_jobs.push(job("left", {
+    status: "running",
+    updated_at: new Date(Date.now() - 3_600_000).toISOString(),
+    result: left,
+  }));
+  await run(p, deps(p, model(says("Hello.")).chat));
+  assertEquals([jobOf(p, "left").status, jobOf(p, "left").result], ["failed", left]);
+});
+
+// Ops kept on the way do not outlast a failure that keeps fewer: the page
+// was not saved, so its edits' ops are not the job's.
+Deno.test("a run whose save failed leaves none of the ops it kept on the way", async () => {
+  const p = project();
+  p.rules.writes = (table) => table !== "page_content";
+  const m = model(
+    calls(["insert_blocks", { position: "end", blocks: [{ type: "paragraph", text: "More" }] }]),
+    says("Done."),
+  );
+  await run(p, deps(p, m.chat, { keepOpsMs: 0 }));
+  assertEquals([jobOf(p).status, jobOf(p).result], ["failed", null]);
+});
+
+// One result the job can't hold costs the job its ops, which the app has
+// as they streamed, not its end, nor what the next turns go by.
+Deno.test("a result past the job's bound still ends the job", async () => {
+  const p = project();
+  p.rules.refuses = (table, patch) =>
+    table === "ai_jobs" && ((patch.result as { ops?: unknown[] } | undefined)?.ops?.length ?? 0) > 0
+      ? "ai_job_result_too_long"
+      : undefined;
+  const m = model(
+    calls(["insert_blocks", { position: "end", blocks: [{ type: "paragraph", text: "More" }] }]),
+    says("Added it."),
+  );
+  const { events } = await run(p, deps(p, m.chat));
+  assertEquals(events.at(-1)?.type, "done");
+  const end = jobOf(p);
+  assertEquals(end.status, "done");
+  assertEquals(end.result, { reply: "Added it.", ops: [], edits: [], kept_to_page: true, guarded: false });
+});
+
+// Any other failure of that write says nothing of the ops: the job is not
+// written again without them.
+Deno.test("a job's ops stay through any other failure of its last write", async () => {
+  const p = project();
+  const written: Row[] = [];
+  p.rules.refuses = (table, patch) => {
+    if (table !== "ai_jobs" || patch.status !== "done") return undefined;
+    written.push(patch);
+    return "canceling statement due to statement timeout";
+  };
+  const m = model(
+    calls(["insert_blocks", { position: "end", blocks: [{ type: "paragraph", text: "More" }] }]),
+    says("Added it."),
+  );
+  await run(p, deps(p, m.chat));
+  assertEquals(written.length, 1);
+  assertEquals((written[0].result as { ops: unknown[] }).ops.length, 1);
+});
+
+// What a model writes that the database can't keep goes before it reaches
+// the page, the job or a comment: one such character would fail them all.
+Deno.test("what a model writes keeps to what the database takes", async () => {
+  const p = project();
+  const args = '{"position":"end","blocks":[{"type":"paragraph","text":"Ne\\u0000xt \\ud83d."}]}';
+  const m = model(
+    {
+      message: {
+        role: "assistant",
+        content: null,
+        tool_calls: [{ id: "c", type: "function", function: { name: "insert_blocks", arguments: args } }],
+      },
+      finishReason: "tool_calls",
+    },
+    says("Add\u0000ed \ud83d."),
+  );
+  await run(p, deps(p, m.chat));
+  assertEquals(texts(contentOf(p).content).at(-1), "Next \ufffd.");
+  assertEquals((jobOf(p).result as { reply: string }).reply, "Added \ufffd.");
+});
+
+// A failure's words go on the job too, whatever they quote.
+Deno.test("a failure's words keep to what the database takes", async () => {
+  const p = project();
+  await run(p, deps(p, model(new Error("bro\u0000ken \ud83d")).chat));
+  assertEquals(jobOf(p).error, "broken \ufffd");
+});
+
+// All of a run's pages share what parsing it has: each it reads comes off
+// the same budget.
+Deno.test("a run's pages share one parsing budget", async () => {
+  const p = project();
+  p.tables.ai_jobs = [
+    job("job", { request: { instruction: "Read https://a.test/ and https://b.test/", allow_web: true } }),
+  ];
+  const budgets: unknown[] = [];
+  const m = model(
+    calls(["read_web_page", { url: "https://a.test/" }], ["read_web_page", { url: "https://b.test/" }]),
+    says("Read them."),
+  );
+  await run(
+    p,
+    deps(p, m.chat, {
+      readPage: (url, _signal, _resolve, budget) => {
+        budgets.push(budget);
+        return Promise.resolve({ url, title: "", text: "", links: [], truncated: false });
+      },
+    }),
+  );
+  assertEquals(budgets.length, 2);
+  assert(budgets[0] instanceof ParseBudget);
+  assert(budgets[0] === budgets[1]);
+});
+
+// Thinking is found in one pass, however many tags nothing closes.
+Deno.test("an answer of tags that close nowhere reads in time about its length", () => {
+  const start = performance.now();
+  assertEquals(withoutThinking("Done.<think>".repeat(200_000)), "Done.");
+  assert(performance.now() - start < 1000, "the answer was read again for each tag");
+});
+
+// A page asked for empty has a block to type in, as one made in the app.
+Deno.test("a page made empty has a block to type in", async () => {
+  const p = project();
+  const m = model(calls(["create_subpage", { title: "Notes" }]), says("Made it."));
+  await run(p, deps(p, m.chat));
+  const sub = p.rows("pages").find((row) => row.title === "Notes")!;
+  const stored = p.rows("page_content").find((c) => c.page_id === sub.id)!.content as PageContent;
+  const [block] = stored.document.children!;
+  assertEquals([stored.document.children!.length, block.type, block.data], [1, "paragraph", { delta: [] }]);
+  assertEquals(typeof stored.meta.blocks[block.id], "number");
+});
+
+// A card that was all a page held leaves it a block to type in, as the
+// app's moves do (core.Pages.UnlinkSubpage).
+Deno.test("a page that loses its only card keeps a block to type in", async () => {
+  const p = workspaceProject();
+  p.rows("pages").push({
+    id: "child",
+    space_id: "space",
+    parent_id: "plan",
+    folder_id: null,
+    title: "Child",
+    tags: [],
+    sort_key: "a1",
+    is_template: false,
+    deleted_at: null,
+  });
+  contentOf(p).content = page({ id: "card", type: "subpage", data: { page_id: "child" } });
+  const m = model(calls(["move_page", { page_id: "child" }]), says("Done."));
+  await run(p, deps(p, m.chat));
+  const left = contentOf(p).content as PageContent;
+  const [block] = left.document.children!;
+  assertEquals([left.document.children!.length, block.type], [1, "paragraph"]);
+  assertEquals(typeof left.meta.blocks[block.id], "number");
+  assertEquals(typeof left.meta.deleted.card, "number");
 });

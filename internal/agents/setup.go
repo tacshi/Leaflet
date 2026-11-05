@@ -30,7 +30,12 @@ type Form struct {
 	// APIKey is the key typed, or the one kept here of a provider edited;
 	// "" is none.
 	APIKey string
-	Model  string
+	// KeyTyped says APIKey is what the user has before them, typed just now
+	// or shown gone, "" among it to take a key away. Not typed, it is the
+	// key kept here, or none that could be read: it goes only to the
+	// address it was saved for, and saving leaves the one kept as it is.
+	KeyTyped bool
+	Model    string
 	// Models are those the provider lists, as the dialog has them.
 	Models []string
 	// SupportsTools is what a test in the dialog found, or the provider
@@ -39,6 +44,20 @@ type Form struct {
 	// ChatGPT is the sign-in a ChatGPT provider runs on: the one made in
 	// the dialog, else its own; nil before signing in.
 	ChatGPT *ChatGPT
+}
+
+// movedKey reports whether the form moves its provider to another origin
+// without a key typed for it: the key kept here does not go along, as the
+// server's providers' do not (keyStaysWith), or it would go to whatever
+// server the form now names. Saving refuses that while a key is kept, so
+// it goes neither there nor away unsaid; an app that shows it gone says so
+// by KeyTyped.
+func (h *Hub) movedKey(f Form) bool {
+	if f.KeyTyped || f.ID == "" || PresetByID(f.Preset).Auth == "account" {
+		return false
+	}
+	p, err := h.st.Provider(f.ID)
+	return err == nil && !endpoint.SameOrigin(p.BaseURL, f.BaseURL)
 }
 
 // KeptHere reports whether the form's cloud provider is kept on this
@@ -68,6 +87,9 @@ func (h *Hub) TestProvider(f Form) TestResult {
 	defer cancel()
 	preset := PresetByID(f.Preset)
 	key := strings.TrimSpace(f.APIKey)
+	if h.movedKey(f) {
+		key = ""
+	}
 	var res TestResult
 	switch {
 	case preset.Auth == "account":
@@ -82,7 +104,7 @@ func (h *Hub) TestProvider(f Form) TestResult {
 		}
 	case preset.Local || key != "":
 		res = NewClient(f.BaseURL, key).Test(ctx, f.Model)
-	case f.ID != "" && h.st.Session().SignedIn:
+	case f.ID != "" && h.st.Session().SignedIn && !h.KeptHere(f):
 		res = h.testOnServer(ctx, f.ID, f.Model)
 	default:
 		res.Message = locales.SettingsPasteKeyToTest()
@@ -130,9 +152,19 @@ func (h *Hub) SaveProvider(f Form) (store.Provider, error) {
 		name = preset.Name
 	}
 	key := strings.TrimSpace(f.APIKey)
+	moved := h.movedKey(f)
+	if moved {
+		key = ""
+	}
+	old, oldErr := h.st.Provider(f.ID)
+	// None typed and none read, as the keychain's prompt was turned down:
+	// the one kept stays as it is, for the provider's next read of it.
+	unread := oldErr == nil && !f.KeyTyped && key == "" && !moved && !account
 	here := h.KeptHere(f)
 	switch {
-	case here && key == "":
+	case moved && (preset.Local || here) && keyKept(f.ID):
+		return store.Provider{}, errors.New(locales.SettingsKeyStaysBehind())
+	case here && key == "" && !unread:
 		return store.Provider{}, errors.New(locales.SettingsNeedKey())
 	case account && f.ChatGPT == nil && f.ID == "":
 		return store.Provider{}, errors.New(locales.SettingsChatGPTSignInFirst())
@@ -149,6 +181,9 @@ func (h *Hub) SaveProvider(f Form) (store.Provider, error) {
 	if key != "" {
 		p.AuthKind = "api_key"
 	}
+	if unread {
+		p.AuthKind = old.AuthKind
+	}
 	if account {
 		p.AuthKind, p.BaseURL = "account", preset.BaseURL
 		// Without a sign-in of the form's, it keeps the one it has.
@@ -158,13 +193,13 @@ func (h *Hub) SaveProvider(f Form) (store.Provider, error) {
 			}
 		}
 	}
-	if old, err := h.st.Provider(p.ID); err == nil {
+	if oldErr == nil {
 		p.CreatedAt = old.CreatedAt
 	}
 	if err := h.st.PutProvider(p); err != nil {
 		return store.Provider{}, err
 	}
-	if !account {
+	if !account && !unread {
 		if err := SetLocalKey(p.ID, key); err != nil {
 			return store.Provider{}, errors.New(locales.SettingsSaveKeyFailed(err.Error()))
 		}
@@ -234,11 +269,17 @@ func (h *Hub) RemoveProvider(id string) error {
 		return errors.New(locales.SettingsDeleteKeyFailed(err.Error()))
 	}
 	if p.AuthKind == "account" {
-		guard.Go(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-			defer cancel()
-			ForgetChatGPT(ctx, id)
-		})
+		g, err := dropChatGPT(id)
+		if err != nil {
+			return errors.New(locales.SettingsDeleteKeyFailed(err.Error()))
+		}
+		if g != nil {
+			guard.Go(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+				defer cancel()
+				g.SignOut(ctx)
+			})
+		}
 	}
 	if err := h.st.DeleteProvider(id); err != nil {
 		return errors.New(locales.SettingsDeleteFailed(err.Error()))

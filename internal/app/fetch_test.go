@@ -11,6 +11,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -27,6 +28,9 @@ func TestImagesReadOnlyTheirOwnFiles(t *testing.T) {
 		}
 	}
 	if err := os.Symlink(secret, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows makes links only for administrators and in Developer Mode")
+		}
 		t.Fatal(err)
 	}
 	ic := newImageCache(root)

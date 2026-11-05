@@ -3,6 +3,7 @@ package recording
 import (
 	"encoding/binary"
 	"errors"
+	"io"
 	"math"
 	"os"
 )
@@ -13,9 +14,20 @@ const SampleRate = 16000
 
 // WavWriter writes PCM16 mono audio to a WAV file as it arrives.
 type WavWriter struct {
-	Path  string
-	f     *os.File
-	bytes int64
+	Path string
+	f    wavFile
+	// bytes is the audio the file holds, and heard the audio that came to
+	// be written, more than it holds once a disk filled up.
+	bytes, heard int64
+}
+
+// wavFile is what a WavWriter writes to: the file, or in tests one that
+// fills up.
+type wavFile interface {
+	io.Writer
+	io.WriterAt
+	io.Seeker
+	io.Closer
 }
 
 // CreateWav starts a WAV file, new and readable only by the user: a test
@@ -49,13 +61,21 @@ var errWavFull = errors.New("the recording is as long as a WAV file can be")
 // DurationMs is how long the audio written so far lasts.
 func (w *WavWriter) DurationMs() int { return int(w.bytes * 1000 / 2 / SampleRate) }
 
-// Write adds PCM16 little-endian samples.
+// Write adds PCM16 little-endian samples. A disk that fills up can take
+// only part of them: half a sample left at the end comes off, or all the
+// audio after it, once there is room again, would play as noise.
 func (w *WavWriter) Write(pcm []byte) error {
 	if w.bytes+int64(len(pcm)) > maxWavData {
 		return errWavFull
 	}
+	w.heard += int64(len(pcm))
 	n, err := w.f.Write(pcm)
 	w.bytes += int64(n)
+	if err != nil && (w.heard-w.bytes)%2 != 0 && w.bytes > 0 {
+		if _, serr := w.f.Seek(-1, io.SeekCurrent); serr == nil {
+			w.bytes--
+		}
+	}
 	return err
 }
 

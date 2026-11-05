@@ -91,10 +91,14 @@ final class SceneModel {
     /// another page, or none.
     @ObservationIgnored private var held: PageModel?
 
+    /// closing says the window's views went: a page view's task ends after
+    /// them, and no page opens after, to close its model.
+    @ObservationIgnored private var closing = false
+
     /// release closes a page's model as its view goes: at once when the
-    /// window shows another page, or once it does.
+    /// window shows another page, or closes, or once it does.
     func release(_ model: PageModel) {
-        if model.id == selection {
+        if model.id == selection, !closing {
             if let held, held !== model { close(held) }
             held = model
             return
@@ -102,11 +106,19 @@ final class SceneModel {
         close(model)
     }
 
-    /// closeHeld closes the page model the window holds, as it closes.
+    /// closeHeld closes the page model the window holds, as it closes, and
+    /// has release close the one whose view is still going.
     func closeHeld() {
+        closing = true
         if let held { close(held) }
         held = nil
     }
+
+    /// reopened says the window's views came back.
+    func reopened() { closing = false }
+
+    /// editor(of:) is the editor of page id, while the window shows it.
+    func editor(of id: String) -> EditorController? { page?.id == id ? editor : nil }
 
     private func close(_ model: PageModel) {
         letGo(model)

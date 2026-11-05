@@ -1,6 +1,7 @@
 package recording
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"math"
@@ -201,6 +202,63 @@ func TestRepairOddWav(t *testing.T) {
 	}
 	if pcm, err := ReadWav(path); err != nil || len(pcm) != 2*SampleRate {
 		t.Errorf("repaired: %d bytes, %v", len(pcm), err)
+	}
+}
+
+// fullFile is a file on a disk with room bytes left.
+type fullFile struct {
+	*os.File
+	room int
+}
+
+func (f *fullFile) Write(p []byte) (int, error) {
+	if len(p) <= f.room {
+		f.room -= len(p)
+		return f.File.Write(p)
+	}
+	n, err := f.File.Write(p[:f.room])
+	f.room = 0
+	if err == nil {
+		err = errors.New("no space left on device")
+	}
+	return n, err
+}
+
+// A disk filled up in the middle of a sample leaves no half of it in the
+// file: what is written once there is room again stays on a sample's edge.
+func TestWavFullDiskKeepsSamples(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		room  int
+		chunk []byte
+		want  []byte
+	}{
+		{"half a sample", 3, []byte{3, 0, 4, 0}, []byte{1, 0, 2, 0, 3, 0, 5, 0}},
+		{"whole samples", 2, []byte{3, 0, 4, 0}, []byte{1, 0, 2, 0, 3, 0, 5, 0}},
+		{"no room", 0, []byte{3, 0, 4, 0}, []byte{1, 0, 2, 0, 5, 0}},
+	} {
+		w, err := CreateWav(filepath.Join(t.TempDir(), "a.wav"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Write([]byte{1, 0, 2, 0}); err != nil {
+			t.Fatal(err)
+		}
+		file := w.f
+		w.f = &fullFile{File: file.(*os.File), room: c.room}
+		if err := w.Write(c.chunk); err == nil {
+			t.Errorf("%s: no error", c.name)
+		}
+		w.f = file
+		if err := w.Write([]byte{5, 0}); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if pcm, err := ReadWav(w.Path); err != nil || !bytes.Equal(pcm, c.want) {
+			t.Errorf("%s: read %v, %v, want %v", c.name, pcm, err, c.want)
+		}
 	}
 }
 

@@ -50,6 +50,18 @@ func TestTheProjectIsUpdatedOnceAndOnlyWhenNew(t *testing.T) {
 	if c.updatingProject.Load() {
 		t.Error("starting again holds the changes back")
 	}
+	triesEnd(t, c)
+}
+
+// triesEnd waits for a run of tries to end. One left going would log into
+// the test after it, which counts what the log says of its own.
+func triesEnd(t *testing.T, c *Core) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); c.updatingRun.Load(); time.Sleep(5 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the tries never ended")
+		}
+	}
 }
 
 // A run of tries that ended without bringing the project up to date, as
@@ -75,11 +87,7 @@ func TestAFailedProjectUpdateIsTriedAgainOnStart(t *testing.T) {
 	t.Cleanup(func() { log.SetOutput(os.Stderr) })
 	tries := func() int {
 		t.Helper()
-		for deadline := time.Now().Add(5 * time.Second); c.updatingRun.Load(); time.Sleep(5 * time.Millisecond) {
-			if time.Now().After(deadline) {
-				t.Fatal("the tries never ended")
-			}
-		}
+		triesEnd(t, c)
 		return logged.count("update project")
 	}
 	c.Start()

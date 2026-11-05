@@ -67,7 +67,61 @@ func TestRefreshPageMentions(t *testing.T) {
 	}
 }
 
-func TestCopyFor(t *testing.T) {
+// A mention takes its page's new title in the formats it had.
+func TestRefreshPageMentionsKeepsFormats(t *testing.T) {
+	a := PageMention("p1", "Old")
+	a.Bold, a.Color = true, "#ef4444"
+	n := textNode("paragraph", Delta{{Text: "Old", Attrs: a}})
+	c := &Content{Children: []*Node{n}}
+	if !c.RefreshPageMentions(func(string) (string, bool) { return "New", true }) {
+		t.Fatal("no change")
+	}
+	r := n.Delta()[0]
+	if m := r.Attrs.Mention; r.Text != "New" || m == nil || m.Name != "New" || r.Attrs.Href != PageLink("p1") {
+		t.Errorf("mention %+v", r)
+	}
+	if !r.Attrs.Bold || r.Attrs.Color != "#ef4444" {
+		t.Errorf("formats %+v", r.Attrs)
+	}
+}
+
+// A copy's links to its own blocks go to the copies of those blocks, as a
+// list of a page's headings, and to the moments of its own videos; so does
+// one to a block of another page copied with it, and one to a block that
+// page no longer has goes to the page.
+func TestCopyPagesKeepsBlockLinks(t *testing.T) {
+	head := &Node{ID: "h", Type: "heading"}
+	head.SetDelta(Delta{{Text: "Part"}})
+	video := &Node{ID: "v", Type: "video", Data: map[string]any{"url": "https://youtu.be/dQw4w9WgXcQ"}}
+	links := &Node{ID: "l", Type: "paragraph"}
+	links.SetDelta(Delta{{Text: "part", Attrs: Attrs{Href: BlockLink("old", "h")}}, {Text: " "},
+		{Text: "1:23", Attrs: Attrs{Href: MomentLink("old", "v", 83)}}, {Text: " "},
+		{Text: "elsewhere", Attrs: Attrs{Href: BlockLink("sub", "x")}}, {Text: " "},
+		{Text: "kept", Attrs: Attrs{Href: BlockLink("other", "h")}}, {Text: " "},
+		{Text: "gone", Attrs: Attrs{Href: BlockLink("sub", "h")}}})
+	c := FromBlocks([]*Node{links, head, video})
+	sub := FromBlocks([]*Node{para("x", "there")})
+	copies := CopyPages(map[string]*Content{"old": c, "sub": sub}, map[string]string{"old": "new", "sub": "sub2"})
+	out := copies["old"]
+	d := out.Children[0].Delta()
+	if want := BlockLink("new", out.Children[1].ID); d[0].Attrs.Href != want {
+		t.Errorf("link to a block %q, want %q", d[0].Attrs.Href, want)
+	}
+	if want := MomentLink("new", out.Children[2].ID, 83); d[2].Attrs.Href != want {
+		t.Errorf("link to a moment %q, want %q", d[2].Attrs.Href, want)
+	}
+	if want := BlockLink("sub2", copies["sub"].Children[0].ID); d[4].Attrs.Href != want {
+		t.Errorf("link to another copied page's block %q, want %q", d[4].Attrs.Href, want)
+	}
+	if want := BlockLink("other", "h"); d[6].Attrs.Href != want {
+		t.Errorf("link to a page not copied %q, want %q", d[6].Attrs.Href, want)
+	}
+	if want := PageLink("sub2"); d[8].Attrs.Href != want {
+		t.Errorf("link to a block its page lacks %q, want %q", d[8].Attrs.Href, want)
+	}
+}
+
+func TestCopyPages(t *testing.T) {
 	p := &Node{ID: "p", Type: "paragraph"}
 	p.SetDelta(Delta{{Text: "Notes", Attrs: PageMention("notes", "Notes")}, {Text: " and "}, {Text: "RFC", Attrs: PageMention("rfc", "RFC")}})
 	kid := &Node{ID: "k", Type: "paragraph"}
@@ -76,7 +130,7 @@ func TestCopyFor(t *testing.T) {
 	list.SetDelta(Delta{{Text: "item"}})
 	sub := &Node{ID: "s", Type: "subpage", Data: map[string]any{"page_id": "notes"}}
 	c := FromBlocks([]*Node{p, list, sub})
-	out := c.CopyFor(map[string]string{"notes": "notes2"})
+	out := CopyPages(map[string]*Content{"me": c}, map[string]string{"notes": "notes2"})["me"]
 
 	seen := map[string]bool{}
 	out.Walk(func(n, _ *Node) {

@@ -10,6 +10,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -35,6 +36,16 @@ func open(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+// nextStamp waits for the clock to read a later millisecond, so what is
+// done next is stamped after what was done before. A sleep of a few
+// milliseconds does not do that on Windows, whose clock moves on every
+// 15 ms or so.
+func nextStamp() {
+	for now := time.Now().UnixMilli(); time.Now().UnixMilli() == now; {
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func TestKeyBetween(t *testing.T) {
@@ -378,7 +389,7 @@ func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 	}
 	// What sync does on A's first sign-in: adopt the device's space.
 	local := s.Session().SpaceID
-	for k, v := range map[string]string{"space.A": "remote-a", "space.local": "remote-a", "account": "A", "sync.cursor.pages": "t|p"} {
+	for k, v := range map[string]string{"space.A": "remote-a", "space.local": "remote-a", "account": "A", "sync.cursor.pages": "t|p", "mcp_edited:p1": "mark"} {
 		_ = s.SetValue(k, v)
 	}
 	if err := s.MoveSpace(local, "remote-a"); err != nil {
@@ -420,7 +431,7 @@ func TestSignInAsAnotherAccountForgetsThePrevious(t *testing.T) {
 	if s.DeviceID() == device {
 		t.Error("B uses the device row A registered")
 	}
-	for _, k := range []string{"space.A", "account", "sync.cursor.pages"} {
+	for _, k := range []string{"space.A", "account", "sync.cursor.pages", "mcp_edited:p1"} {
 		if _, ok := s.Value(k); ok {
 			t.Errorf("%s kept", k)
 		}
@@ -965,7 +976,7 @@ func TestSearchTextListsTheLatestFirst(t *testing.T) {
 			t.Fatal(err)
 		}
 		ids = append(ids, p.ID)
-		time.Sleep(2 * time.Millisecond)
+		nextStamp()
 	}
 	// The first page changed last.
 	if err := s.RenamePage(ids[0], "A again"); err != nil {
@@ -1319,7 +1330,11 @@ func TestARelativeDataFolderFindsItsFiles(t *testing.T) {
 // A data folder whose name has a character URIs treat specially opens the
 // database in that folder, with the pragmas, and not one beside it.
 func TestOpensTheDatabaseInAFolderOfAnyName(t *testing.T) {
-	for _, name := range []string{"Notes #1", "What?", "100%", "a%20b", "Notizen ü"} {
+	names := []string{"Notes #1", "100%", "a%20b", "Notizen ü"}
+	if runtime.GOOS != "windows" { // which takes no "?" in a name
+		names = append(names, "What?")
+	}
+	for _, name := range names {
 		base := t.TempDir()
 		dir := filepath.Join(base, name)
 		s, err := Open(dir)
@@ -3114,6 +3129,9 @@ func TestCommentChangesQueueOnlyTheirColumns(t *testing.T) {
 // A copy that fails part way makes nothing: its pages, recordings and
 // files are stored together, or the half made would go up as a copy.
 func TestCopyPageIsAllOrNothing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no mode that keeps a file from being read")
+	}
 	s := open(t)
 	p, _ := s.CreatePage(NewPageOptions{Title: "Meeting"})
 	if _, err := s.CreatePage(NewPageOptions{Title: "Notes", ParentID: p.ID}); err != nil {

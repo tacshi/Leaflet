@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"slices"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -89,7 +91,7 @@ func FileToRemote(f File) map[string]any {
 // HistoryToRemote is a snapshot as the page_history table has it, without
 // its job: a local run's job has no server row for ai_job_id to name.
 func HistoryToRemote(h HistoryEntry, userID string) map[string]any {
-	var content any = rawJSON(h.Content)
+	var content any = rawJSON(CleanJSON(h.Content))
 	var by any = userID
 	if userID == LocalUserID {
 		by = nil
@@ -97,6 +99,94 @@ func HistoryToRemote(h HistoryEntry, userID string) map[string]any {
 	return map[string]any{
 		"id": h.ID, "page_id": h.PageID, "content": content, "reason": h.Reason, "created_by": by, "created_at": iso(h.CreatedAt),
 	}
+}
+
+// Postgres keeps neither a NUL nor text that is not UTF-8, in text or
+// jsonb, nor a surrogate without its other half in jsonb, and refuses the
+// whole row for one: a page holding any would be refused every time it went
+// up. A device may hold them, as an agent writes what a model gave it.
+// Each goes up as U+FFFD (CleanRow, CleanJSON), and comes back so.
+
+// CleanText is text as Postgres keeps it.
+func CleanText(text string) string {
+	return strings.ReplaceAll(strings.ToValidUTF8(text, "\uFFFD"), "\x00", "\uFFFD")
+}
+
+// CleanRow makes a row as it goes up, decoded from JSON, one Postgres
+// keeps: each string in it, nested ones too (CleanText).
+func CleanRow(row map[string]any) {
+	for k, v := range row {
+		row[k] = cleanValue(v)
+	}
+}
+
+func cleanValue(v any) any {
+	switch v := v.(type) {
+	case string:
+		return CleanText(v)
+	case []any:
+		for i, e := range v {
+			v[i] = cleanValue(e)
+		}
+	case map[string]any:
+		CleanRow(v)
+	}
+	return v
+}
+
+// CleanJSON is encoded JSON as Postgres keeps it, as CleanText does text:
+// escapes that name a NUL, or a surrogate without its other half, are
+// replaced where they stand. Backslashes come in pairs of what they escape,
+// so one spelled out in text, as "\\u0000" in a code block, stays text.
+func CleanJSON(encoded string) string {
+	encoded = strings.ToValidUTF8(encoded, "\uFFFD")
+	if !strings.Contains(encoded, `\u`) {
+		return encoded
+	}
+	var b strings.Builder
+	b.Grow(len(encoded))
+	for i := 0; i < len(encoded); {
+		if encoded[i] != '\\' || i+1 == len(encoded) {
+			b.WriteByte(encoded[i])
+			i++
+			continue
+		}
+		n, ok := escapeLen(encoded[i:])
+		if ok {
+			b.WriteString(encoded[i : i+n])
+		} else {
+			b.WriteString(`\ufffd`)
+		}
+		i += n
+	}
+	return b.String()
+}
+
+// escapeLen is how long the escape s starts with is, and whether Postgres
+// keeps it.
+func escapeLen(s string) (int, bool) {
+	unit, ok := escapedUnit(s)
+	switch {
+	case !ok:
+		return 2, true
+	case unit == 0, unit >= 0xDC00 && unit <= 0xDFFF:
+		return 6, false
+	case unit >= 0xD800 && unit <= 0xDBFF:
+		if low, ok := escapedUnit(s[6:]); ok && low >= 0xDC00 && low <= 0xDFFF {
+			return 12, true
+		}
+		return 6, false
+	}
+	return 6, true
+}
+
+// escapedUnit reads the \uXXXX s starts with.
+func escapedUnit(s string) (uint16, bool) {
+	if len(s) < 6 || s[0] != '\\' || s[1] != 'u' {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(s[2:6], 16, 16)
+	return uint16(n), err == nil
 }
 
 // rawJSON keeps stored JSON as it is inside a payload.

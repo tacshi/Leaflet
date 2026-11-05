@@ -1,8 +1,10 @@
 import Foundation
+import ImageIO
 import LeafletCore
 import SwiftUI
 import Testing
 import UIKit
+import UniformTypeIdentifiers
 
 @testable import Leaflet
 
@@ -1822,6 +1824,180 @@ struct EditorTests {
         c.textView.unmarkText()
         for _ in 0..<20 where sent == nil { try await Task.sleep(for: .milliseconds(20)) }
         #expect(sent?.blocks.first?.text == "か")
+    }
+
+    /// editing is a model of a new page of two blocks, over host, and an
+    /// editor showing it through the coordinator the page's view has, whose
+    /// edits go to the model.
+    private func editing(_ host: PageTests.Host) async throws -> (
+        PageModel, EditorController, PageEditorView<EmptyView, EmptyView>.Coordinator
+    ) {
+        let page = try await host.core.client.createPage(NewPage(title: "Notes"))
+        let model = PageModel(id: page.id, app: host)
+        await model.open()
+        var two = try #require(model.content)
+        two.document.children = [block("a", "paragraph", ""), block("b", "paragraph", "Other")]
+        model.edit(two)
+        await model.flush()
+        let c = editor([])
+        c.onEdit = { [weak model] in model?.edit($0) }
+        let coordinator = PageEditorView<EmptyView, EmptyView>.Coordinator(controller: c)
+        coordinator.show(model)
+        return (model, c, coordinator)
+    }
+
+    /// A change from outside moves the rev the editor's edits go over, once
+    /// the editor shows it.
+    @Test func aChangeFromOutsideMovesTheRevTheEditorShows() async throws {
+        let host = try PageTests.Host()
+        let (model, c, coordinator) = try await editing(host)
+        let rev = model.rev + 1
+        model.handle(
+            .pageUpdated(
+                pageID: model.id,
+                content: content([
+                    block("a", "paragraph", "Synced"), block("b", "paragraph", "Other"),
+                ]),
+                rev: rev, reason: "external", newStep: false))
+        coordinator.show(model)
+        #expect(c.textView.text == "Synced\nOther")
+        #expect(model.shown == rev)
+        await model.close()
+    }
+
+    /// A change from outside that comes while text is composed stays out of
+    /// the editor, and so out of the rev its edits go over: what is composed
+    /// goes to the core over the rev the editor shows, for the core to merge
+    /// with the change. Over the change's own rev, it would take the change
+    /// away, and a page's only editor would save the page without it.
+    @Test func aCompositionMergesWithTheChangeItHeld() async throws {
+        let host = try PageTests.Host()
+        let client = host.core.client
+        let (model, c, coordinator) = try await editing(host)
+        let (_, done) = try show(c)
+        defer { done() }
+        try await settle(c)
+        let rev = model.shown
+        c.textView.selectedRange = NSRange(location: 0, length: 0)
+        c.textView.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0))
+        c.edited(NSRange(location: 0, length: 1))
+
+        // Another window changes the page and goes, as sync or an agent
+        // would change it: this editor is the page's only one again.
+        let other = try await client.openPage(model.id)
+        var changed = other.content
+        changed.document.children = [
+            block("a", "paragraph", ""), block("b", "paragraph", "Changed"),
+        ]
+        let left = try await client.editPage(
+            model.id, editor: other.editor, content: changed, rev: other.rev)
+        await client.closePage(model.id, editor: other.editor)
+        model.handle(
+            .pageUpdated(
+                pageID: model.id, content: changed, rev: left, reason: "external", newStep: false))
+        coordinator.show(model)
+        #expect(model.rev == left)
+        #expect(model.shown == rev)
+        #expect(c.textView.text == "か\nOther")
+
+        c.textView.unmarkText()
+        await model.flush()
+        let merged = try await client.openPage(model.id)
+        #expect(merged.content.blocks.map(\.text) == ["か", "Changed"])
+        #expect(host.toasts.isEmpty)
+        await client.closePage(model.id, editor: merged.editor)
+        await model.close()
+    }
+
+    /// What a composition keeps from going counts as not sent: the page
+    /// closing or the app leaving the screen sends it, with the typing it
+    /// held up, which would otherwise go with the editor.
+    @Test func aCompositionLeavesItsEditPending() async throws {
+        let c = editor([block("a", "paragraph", "One")])
+        let (_, done) = try show(c)
+        defer { done() }
+        try await settle(c)
+        var sent: DocContent?
+        c.onEdit = { sent = $0 }
+        c.textView.selectedRange = NSRange(location: 3, length: 0)
+        c.textView.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0))
+        c.edited(NSRange(location: 3, length: 1))
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(sent == nil)
+        #expect(c.hasPendingEdit)
+        c.send()
+        #expect(sent?.blocks.first?.text == "Oneか")
+        #expect(!c.hasPendingEdit)
+    }
+
+    /// A composition that ends with no change of the text is sent all the
+    /// same, though no edit follows it to send it.
+    @Test func aCompositionEndingUnchangedIsSent() async throws {
+        let c = editor([block("a", "paragraph", "")])
+        let (_, done) = try show(c)
+        defer { done() }
+        try await settle(c)
+        var sent: DocContent?
+        c.onEdit = { sent = $0 }
+        c.textView.selectedRange = NSRange(location: 0, length: 0)
+        c.textView.setMarkedText("か", selectedRange: NSRange(location: 1, length: 0))
+        c.edited(NSRange(location: 0, length: 1))
+        #expect(sent == nil)
+        c.textView.unmarkText()
+        for _ in 0..<50 where sent == nil { try await Task.sleep(for: .milliseconds(20)) }
+        #expect(sent?.blocks.first?.text == "か")
+        #expect(!c.hasPendingEdit)
+    }
+
+    /// png is a picture of width by height pixels, in shades of gray.
+    private func png(_ width: Int, _ height: Int) throws -> Data {
+        let context = try #require(
+            CGContext(
+                data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceGray(), bitmapInfo: CGImageAlphaInfo.none.rawValue))
+        let image = try #require(context.makeImage())
+        let out = NSMutableData()
+        let file = try #require(
+            CGImageDestinationCreateWithData(out, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(file, image, nil)
+        #expect(CGImageDestinationFinalize(file))
+        return out as Data
+    }
+
+    /// A picture of more pixels than one may have is not decoded, as a
+    /// small file can say it is far larger; one of as many is, and what is
+    /// no bitmap passes on to what reads it. The file here is small for
+    /// its pixels, as such a file is.
+    @Test func aPictureOfTooManyPixelsIsNotDecoded() throws {
+        let limit = Int(MobileMaxPixels)
+        #expect(limit == 50_000_000)
+        let huge = try png(5000, limit / 5000 + 1)
+        #expect(huge.count < 1 << 20)
+        #expect(!Pictures.fit(huge))
+        #expect(Pictures.bitmap(huge) == nil)
+        #expect(Pictures.fit(try png(5000, limit / 5000)))
+        #expect(Pictures.bitmap(try png(20, 10)) != nil)
+        #expect(Pictures.fit(Data("<svg xmlns=\"http://www.w3.org/2000/svg\"/>".utf8)))
+    }
+
+    /// A picture a block links to on this device is read only from the
+    /// app's data folder, wherever the folder is now: the link can come
+    /// from another device or person.
+    @Test func onlyTheDataFoldersFilesAreRead() throws {
+        let files = FileManager.default
+        let dir = files.temporaryDirectory.appending(
+            path: "LocalFiles-" + UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? files.removeItem(at: dir) }
+        let folder = dir.appending(path: "Leaflet", directoryHint: .isDirectory)
+        try files.createDirectory(at: folder, withIntermediateDirectories: true)
+        let inside = folder.appending(path: "a.png")
+        let outside = dir.appending(path: "b.png")
+        try Data("picture".utf8).write(to: inside)
+        try Data("picture".utf8).write(to: outside)
+        #expect(LocalFiles.resolve(inside.path, in: folder) == inside.path)
+        #expect(LocalFiles.resolve("/gone/Leaflet/a.png", in: folder) == inside.path)
+        #expect(LocalFiles.resolve(outside.path, in: folder) == nil)
+        #expect(LocalFiles.resolve("/gone/Leaflet/../b.png", in: folder) == nil)
     }
 
     /// A table copied pastes back with IDs of its own, its cells' too, and

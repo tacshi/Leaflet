@@ -1,6 +1,5 @@
 // Settings every build of the iOS app shares. The version is the App
-// Store's, separate from the desktop's in mygo.json; releases are tagged
-// ios-v<MARKETING_VERSION>.
+// Store's, separate from the desktop's in mygo.json.
 
 MARKETING_VERSION = 0.1.0
 CURRENT_PROJECT_VERSION = 1

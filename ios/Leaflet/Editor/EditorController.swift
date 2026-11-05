@@ -188,8 +188,10 @@ final class EditorController: NSObject, UITextViewDelegate {
     }
 
     /// update brings content from outside the editor (sync, an agent, a
-    /// merge) into the text, as DocumentSession.update does.
-    func update(_ content: DocContent, tinted: Set<String>, byAgent: Bool = false) {
+    /// merge) into the text, as DocumentSession.update does, and reports
+    /// whether it went in.
+    @discardableResult
+    func update(_ content: DocContent, tinted: Set<String>, byAgent: Bool = false) -> Bool {
         session.update(content, tinted: tinted, byAgent: byAgent)
     }
 
@@ -200,6 +202,13 @@ final class EditorController: NSObject, UITextViewDelegate {
     func send() { session.send() }
 
     var hasPendingEdit: Bool { session.hasPendingEdit }
+
+    /// composing says text is being composed, as DocumentSession has it.
+    var composing: Bool { session.composing }
+
+    /// composed follows a composition's end, as DocumentSession.composed
+    /// does.
+    func composed() { session.composed() }
 
     /// close lets the page's views go as it closes: the blocks' views
     /// joined the view controller the page is in, which outlives it.
@@ -382,7 +391,7 @@ final class EditorController: NSObject, UITextViewDelegate {
     func textViewDidChangeSelection(_ textView: UITextView) {
         // A composition can end with no change of the text, as the caret
         // moves away from it.
-        _ = session.sendComposed()
+        session.composed()
         format.updateTypingAttributes()
         if !session.updating { caretMenu.update() }
         due.updateDateOffer()

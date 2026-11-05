@@ -268,6 +268,13 @@ struct ProviderForm: View {
         return desc
     }
 
+    /// takesKey says the form asks for an API key: a model server takes
+    /// none, but for one that keeps a key, which the core has typed again
+    /// as the server moves to another address.
+    static func takesKey(_ draft: Draft) -> Bool {
+        draft.preset?.auth != "none" || draft.provider.hasKey
+    }
+
     /// models are the ones to pick from: the provider's own once a test
     /// has listed them, else the preset's suggestions.
     private var models: [String] {
@@ -295,7 +302,7 @@ struct ProviderForm: View {
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        if draft.preset?.auth != "none" {
+                        if Self.takesKey(draft) {
                             SecureField(
                                 L.settingsAPIKey, text: $key,
                                 prompt: Text(

@@ -1,0 +1,302 @@
+[
+{"pad":60000,"end":"","cut":"","answer":"</think><tHinK></Think><think><tHinK>a</think>","reply":""},
+{"pad":59999,"end":"\n","cut":"\n","answer":"<thinK><thinK>b</ </Think>\t字<think","reply":"字<think"},
+{"pad":59995,"end":"a\"","cut":"a\"","answer":"<Kthink></think></think>>>think>","reply":">>think>"},
+{"pad":59995,"end":"\"😀é𝔸\"","cut":"\"😀é�…(truncated)","answer":"字　</Think></a<think<think>athink>a<Kthink>","reply":"</a<think"},
+{"pad":59997,"end":"\"","cut":"\"","answer":"字</字\t<thinK>","reply":"字</字"},
+{"pad":59997,"end":"\"","cut":"\"","answer":"b😀😀","reply":"b😀😀"},
+{"pad":60000,"end":"\n","cut":"…(truncated)","answer":"<think<think ﻿<tHinK>a字😀<thinK>","reply":"<think<think ﻿"},
+{"pad":59996,"end":"\"字é字a","cut":"\"字é字…(truncated)","answer":"<THINK></think>a字<think<think>","reply":"a字<think"},
+{"pad":59997,"end":"a𝔸a","cut":"a𝔸…(truncated)","answer":"","reply":""},
+{"pad":59996,"end":"é\"éé","cut":"é\"éé","answer":"","reply":""},
+{"pad":59998,"end":"","cut":"","answer":"","reply":""},
+{"pad":59995,"end":"a字\n𝔸a","cut":"a字\n𝔸…(truncated)","answer":"<tHinK>","reply":""},
+{"pad":59999,"end":"","cut":"","answer":"<THINK><THINK><tHinK>bthink><think><Kthink>\t\t字","reply":""},
+{"pad":59999,"end":"a𝔸éé\n","cut":"a…(truncated)","answer":"<Kthink>>﻿　</think>","reply":""},
+{"pad":59997,"end":"字","cut":"字","answer":"　>b<tHinK>😀","reply":">b"},
+{"pad":59999,"end":"é\n","cut":"é…(truncated)","answer":"<think><think>b ></think><thinK>","reply":""},
+{"pad":59995,"end":"","cut":"","answer":"\n</><think>>字</<tHinK><thinK><thinK>","reply":"</>"},
+{"pad":59995,"end":"😀aé𝔸","cut":"😀aé�…(truncated)","answer":"<tHinK></Think>","reply":""},
+{"pad":59999,"end":"字éé","cut":"字…(truncated)","answer":"</Think>","reply":""},
+{"pad":59997,"end":"\né","cut":"\né","answer":"a　think><THINK><think><THINK></Think>","reply":"a　think>"},
+{"pad":59995,"end":"𝔸\né字a","cut":"𝔸\né字…(truncated)","answer":"　 >\n<think</\t","reply":">\n<think</"},
+{"pad":59997,"end":"字aé😀","cut":"字aé…(truncated)","answer":"　a<thinK>　","reply":"a"},
+{"pad":59998,"end":"\né𝔸\n字𝔸","cut":"\né…(truncated)","answer":"<thinK><Kthink>\tb>think> ","reply":""},
+{"pad":59998,"end":"","cut":"","answer":"</Think>>😀</\n","reply":">😀</"},
+{"pad":59998,"end":"字𝔸\n\n𝔸\n","cut":"字�…(truncated)","answer":"<think></think></think><Kthink><THINK><THINK>","reply":"<Kthink>"},
+{"pad":59999,"end":"","cut":"","answer":"<tHinK>\n<thinK>","reply":""},
+{"pad":60000,"end":"\n字\"𝔸aé","cut":"…(truncated)","answer":"<thinkb</","reply":"<thinkb</"},
+{"pad":59995,"end":"aaé字","cut":"aaé字","answer":"<thinK>\t<thinK>😀　😀","reply":""},
+{"pad":59998,"end":"","cut":"","answer":"","reply":""},
+{"pad":59996,"end":"\"😀𝔸é\n𝔸","cut":"\"😀�…(truncated)","answer":"😀","reply":"😀"},
+{"pad":59996,"end":"é😀é\"\"","cut":"é😀é…(truncated)","answer":"","reply":""},
+{"pad":59996,"end":"\n字𝔸𝔸","cut":"\n字𝔸…(truncated)","answer":"<think><think>","reply":""},
+{"pad":59997,"end":"\néa字","cut":"\néa…(truncated)","answer":"</Think> ﻿<THINK></Think>","reply":"﻿"},
+{"pad":59998,"end":"\"a","cut":"\"a","answer":"think>bthink>　﻿<think<THINK><think>","reply":"think>bthink>　﻿<think"},
+{"pad":60000,"end":"\n\n","cut":"…(truncated)","answer":">b<think<think><think\n﻿><thinK>","reply":">b<think"},
+{"pad":59995,"end":"a\"𝔸","cut":"a\"𝔸","answer":"<tHinK><think><Kthink>\nthink>\n</Think></\n","reply":"</"},
+{"pad":59996,"end":"𝔸𝔸\n","cut":"𝔸𝔸…(truncated)","answer":"b 字<Kthink><THINK><tHinK></Think>","reply":"b 字<Kthink>"},
+{"pad":60000,"end":"𝔸𝔸𝔸\n\"字","cut":"…(truncated)","answer":"<Kthink><tHinK>","reply":"<Kthink>"},
+{"pad":59996,"end":"\né😀é","cut":"\né😀…(truncated)","answer":"　","reply":""},
+{"pad":59995,"end":"aaé\"𝔸\"","cut":"aaé\"�…(truncated)","answer":"></think> b😀","reply":"b😀"},
+{"pad":59995,"end":"字","cut":"字","answer":"a</Think><thinkba<think\n　</Think>","reply":""},
+{"pad":59996,"end":"é\"a\n字\n","cut":"é\"a\n…(truncated)","answer":"<think字<think</think><THINK>","reply":""},
+{"pad":59996,"end":"𝔸\n😀a","cut":"𝔸\n�…(truncated)","answer":"<THINK><THINK><Kthink><think><Kthink>","reply":""},
+{"pad":60000,"end":"😀😀","cut":"…(truncated)","answer":"<thinK>\nthink>a 字","reply":""},
+{"pad":60000,"end":"","cut":"","answer":"b字　<tHinK><Kthink></字\n<think><think ","reply":"b字"},
+{"pad":59997,"end":"\"é","cut":"\"é","answer":"<THINK>","reply":""},
+{"pad":59996,"end":"é字𝔸","cut":"é字𝔸","answer":"<think><think>😀﻿think></<tHinK><tHinK>","reply":""},
+{"pad":59995,"end":"😀😀","cut":"😀😀","answer":"</Think>","reply":""},
+{"pad":59997,"end":"😀éa","cut":"😀é…(truncated)","answer":"</think><tHinK>","reply":""},
+{"pad":60000,"end":"😀𝔸","cut":"…(truncated)","answer":" ﻿","reply":"﻿"},
+{"pad":59998,"end":"","cut":"","answer":"a","reply":"a"},
+{"pad":59996,"end":"\na","cut":"\na","answer":"<THINK><tHinK><think></Think>字 </","reply":"字 </"},
+{"pad":60000,"end":"𝔸😀\"","cut":"…(truncated)","answer":">字字","reply":">字字"},
+{"pad":60000,"end":"éé\"𝔸\"\"","cut":"…(truncated)","answer":"﻿\n\n\t<THINK>","reply":"﻿"},
+{"pad":59995,"end":"a字😀字字","cut":"a字😀字…(truncated)","answer":"\n</Think>😀\n<think><tHinK>","reply":"😀"},
+{"pad":59998,"end":"\n\"𝔸\né\"","cut":"\n\"…(truncated)","answer":"</think>😀</ ﻿ <think>","reply":"😀</ ﻿"},
+{"pad":60000,"end":"\n","cut":"…(truncated)","answer":"</b字\n","reply":"</b字"},
+{"pad":59995,"end":"字","cut":"字","answer":"<think><think　","reply":""},
+{"pad":59995,"end":"😀\"😀😀","cut":"😀\"😀…(truncated)","answer":"<tHinK>b</\n</","reply":""},
+{"pad":59997,"end":"","cut":"","answer":"","reply":""},
+{"pad":59997,"end":"a\"\né\n𝔸","cut":"a\"\n…(truncated)","answer":"<Kthink><Kthink></think><thinK><thinK>","reply":""},
+{"pad":59995,"end":"","cut":"","answer":"　think>\tthink>﻿\t<Kthink><think>","reply":"think>\tthink>﻿\t<Kthink>"},
+{"pad":59998,"end":"𝔸😀é😀😀","cut":"𝔸…(truncated)","answer":"　<think>a字<THINK>>>字<THINK></Think>a<think\n","reply":"a<think"},
+{"pad":59996,"end":"\"","cut":"\"","answer":"","reply":""},
+{"pad":60000,"end":"𝔸字字","cut":"…(truncated)","answer":"","reply":""},
+{"pad":59996,"end":"\n\n","cut":"\n\n","answer":"","reply":""},
+{"pad":60000,"end":"😀😀","cut":"…(truncated)","answer":"字😀﻿<tHinK>\t a  \n﻿　","reply":"字😀﻿"},
+{"pad":59997,"end":"a\n","cut":"a\n","answer":"<tHinK></Think>字think><think><Kthink>","reply":"字think>"},
+{"pad":59995,"end":"\né","cut":"\né","answer":"<think😀","reply":"<think😀"},
+{"pad":59996,"end":"𝔸\"😀a","cut":"𝔸\"�…(truncated)","answer":"","reply":""},
+{"pad":59999,"end":"\"\"字é\"","cut":"\"…(truncated)","answer":"</think>><think</Think>","reply":""},
+{"pad":59996,"end":"字\"\"","cut":"字\"\"","answer":"\t</Think><tHinK>","reply":""},
+{"pad":59998,"end":"𝔸😀😀\"\n","cut":"𝔸…(truncated)","answer":"\t<THINK><tHinK><THINK>　b<Kthink>","reply":""},
+{"pad":59995,"end":"𝔸𝔸é😀\"é","cut":"𝔸𝔸é…(truncated)","answer":"😀<think>","reply":"😀"},
+{"pad":59998,"end":"😀é\"","cut":"😀…(truncated)","answer":"<think><think<thinK><tHinK>","reply":""},
+{"pad":59997,"end":"é𝔸","cut":"é𝔸","answer":"<THINK><THINK><think  </😀😀","reply":""},
+{"pad":59998,"end":"𝔸😀","cut":"𝔸…(truncated)","answer":"<tHinK><THINK><Kthink>","reply":""},
+{"pad":59999,"end":"é\"𝔸é","cut":"é…(truncated)","answer":"<tHinK><THINK>\n<tHinK> </\n</Think>","reply":""},
+{"pad":60000,"end":"𝔸\na\na","cut":"…(truncated)","answer":"","reply":""},
+{"pad":59997,"end":"","cut":"","answer":"","reply":""},
+{"pad":59995,"end":"𝔸𝔸字","cut":"𝔸𝔸字","answer":"\t</Think></Think>😀\n　</Think>　\nthink>","reply":"think>"},
+{"pad":59999,"end":"😀字𝔸a𝔸","cut":"�…(truncated)","answer":"<thinK>","reply":""},
+{"pad":59998,"end":"😀\"\"😀\"","cut":"😀…(truncated)","answer":"think></</","reply":"think></</"},
+{"pad":59998,"end":"字\"","cut":"字\"","answer":"","reply":""},
+{"pad":59998,"end":"é\n😀aa","cut":"é\n…(truncated)","answer":"a<THINK>字b<THINK>think>think>b\t　 b","reply":"a"},
+{"pad":59995,"end":"字a\"😀\"","cut":"字a\"😀…(truncated)","answer":"😀\tthink><think><THINK></think>><thinK>","reply":"😀\tthink>>"},
+{"pad":59995,"end":"😀字","cut":"😀字","answer":"字字 </　字athink><tHinK><Kthink>","reply":"字字 </　字athink>"},
+{"pad":59999,"end":"\"","cut":"\"","answer":"\n</<thinK>a\t\t</think>","reply":"</"},
+{"pad":59998,"end":"𝔸字\n\n😀","cut":"𝔸…(truncated)","answer":"</Think>\n<thinK><Kthink><THINK>","reply":""},
+{"pad":59999,"end":"字字\na字é","cut":"字…(truncated)","answer":"<THINK>　</Think>","reply":""},
+{"pad":59999,"end":"","cut":"","answer":"","reply":""},
+{"pad":59997,"end":"𝔸𝔸\"\"","cut":"𝔸�…(truncated)","answer":"","reply":""},
+{"pad":59995,"end":"a𝔸\"","cut":"a𝔸\"","answer":"😀a","reply":"😀a"},
+{"pad":59996,"end":"\"\n","cut":"\"\n","answer":"</think>  ","reply":""},
+{"pad":59995,"end":"\né\né𝔸","cut":"\né\né�…(truncated)","answer":"<thinK>　　😀","reply":""},
+{"pad":59995,"end":"","cut":"","answer":"","reply":""},
+{"pad":59995,"end":"é\n字aaa","cut":"é\n字aa…(truncated)","answer":"<thinK>","reply":""},
+{"pad":59999,"end":"𝔸a\"","cut":"�…(truncated)","answer":"<Kthink><thinK>","reply":"<Kthink>"},
+{"pad":59997,"end":"\n😀𝔸","cut":"\n😀…(truncated)","answer":"<think>﻿<THINK>","reply":""},
+{"pad":59996,"end":"\n𝔸","cut":"\n𝔸","answer":"﻿<thinK>\ta><Kthink>","reply":"﻿"},
+{"pad":59995,"end":"😀𝔸","cut":"😀𝔸","answer":"<think></Think><THINK>😀　<think</Think>think>　\nb\t<THINK>","reply":"think>　\nb"},
+{"pad":59995,"end":"字\"𝔸\"","cut":"字\"𝔸\"","answer":"<tHinK></think>\n\n😀<THINK>","reply":"😀"},
+{"pad":59998,"end":"","cut":"","answer":"<tHinK>think>think>\t😀<Kthink><Kthink></Think><Kthink>","reply":"<Kthink>"},
+{"pad":59998,"end":"😀\n𝔸字😀\n","cut":"😀…(truncated)","answer":"\naa<think<tHinK></Think><thinK><think>","reply":"aa<think"},
+{"pad":59999,"end":"a\"\"\"","cut":"a…(truncated)","answer":"<THINK>\n>","reply":""},
+{"pad":59996,"end":"é","cut":"é","answer":"</think>></Think><Kthink><think>","reply":"<Kthink>"},
+{"pad":59995,"end":"a\n\na\n","cut":"a\n\na\n","answer":"<THINK><think>﻿b<Kthink>","reply":""},
+{"pad":60000,"end":"𝔸\"𝔸","cut":"…(truncated)","answer":"think>a字<think>","reply":"think>a字"},
+{"pad":59996,"end":"𝔸😀😀字","cut":"𝔸😀…(truncated)","answer":"<THINK><Kthink><thinK> 字\n>","reply":""},
+{"pad":59999,"end":"é\"","cut":"é…(truncated)","answer":"<Kthink></Think><tHinK>\n\tthink>a</</ab<Kthink>","reply":""},
+{"pad":59995,"end":"𝔸é字𝔸","cut":"𝔸é字�…(truncated)","answer":"<Kthink><think>","reply":"<Kthink>"},
+{"pad":60000,"end":"","cut":"","answer":"<Kthink>﻿</<think></think><Kthink>a</😀","reply":"<Kthink>﻿</<Kthink>a</😀"},
+{"pad":59995,"end":"\"字\"\"𝔸","cut":"\"字\"\"�…(truncated)","answer":"<think>\t　 think>😀<tHinK>","reply":""},
+{"pad":59995,"end":"字\"\né𝔸","cut":"字\"\né�…(truncated)","answer":"<tHinK><think></Think>","reply":""},
+{"pad":59996,"end":"\"字é字","cut":"\"字é字","answer":"\n</think>","reply":""},
+{"pad":60000,"end":"\"","cut":"…(truncated)","answer":"<think﻿b\tb　\t","reply":"<think﻿b\tb"},
+{"pad":59995,"end":"é","cut":"é","answer":"<tHinK>\t</><thinK><thinK><tHinK>","reply":""},
+{"pad":59999,"end":"\"é𝔸","cut":"\"…(truncated)","answer":"<think>","reply":""},
+{"pad":59997,"end":"𝔸é","cut":"𝔸é","answer":"b>\n ","reply":"b>"},
+{"pad":60000,"end":"𝔸","cut":"…(truncated)","answer":"","reply":""},
+{"pad":59995,"end":"😀😀é","cut":"😀😀é","answer":"<THINK>","reply":""},
+{"pad":59999,"end":"\"字","cut":"\"…(truncated)","answer":"<think><tHinK><tHinK>>think> \n<think","reply":""},
+{"pad":59998,"end":"","cut":"","answer":"<thinK><tHinK><Kthink>a\nthink><THINK>","reply":""},
+{"pad":59996,"end":"𝔸a\"字","cut":"𝔸a\"…(truncated)","answer":"</Think> 　\n<THINK><think>","reply":""},
+{"pad":59996,"end":"a字\n𝔸\"a","cut":"a字\n�…(truncated)","answer":"<thinK>\tb<THINK>","reply":""},
+{"pad":59996,"end":"😀\n字\n😀","cut":"😀\n字…(truncated)","answer":"<THINK><think>\t>a","reply":""},
+{"pad":59996,"end":"","cut":"","answer":"</think></<think　</think><tHinK>b ","reply":""},
+{"pad":59997,"end":"\n\n\n𝔸","cut":"\n\n\n…(truncated)","answer":"<Kthink><thinK></Think>","reply":"<Kthink>"},
+{"pad":59995,"end":"é𝔸a\"","cut":"é𝔸a\"","answer":"</<THINK><thinK>","reply":"</"},
+{"pad":59999,"end":"😀\n😀字aa","cut":"�…(truncated)","answer":"","reply":""},
+{"pad":59997,"end":"é😀\n😀é字","cut":"é😀…(truncated)","answer":"</</think>字\n\n<tHinK><Kthink>﻿😀","reply":"字"},
+{"pad":59995,"end":"😀😀é😀éa","cut":"😀😀é…(truncated)","answer":" <thinK>　","reply":""},
+{"pad":59998,"end":"𝔸\n😀","cut":"𝔸…(truncated)","answer":"</﻿","reply":"</﻿"},
+{"pad":59998,"end":"𝔸𝔸aa字😀","cut":"𝔸…(truncated)","answer":"<Kthink>","reply":"<Kthink>"},
+{"pad":59995,"end":"","cut":"","answer":"<think　</a😀　","reply":"<think　</a😀"},
+{"pad":60000,"end":"\n\n\"𝔸","cut":"…(truncated)","answer":"</Think>﻿</think>","reply":""},
+{"pad":59995,"end":"𝔸","cut":"𝔸","answer":"<thinK>b</😀 ","reply":""},
+{"pad":59999,"end":"\n","cut":"\n","answer":"><thinK>","reply":">"},
+{"pad":59996,"end":"\"","cut":"\"","answer":"</Think><Kthink><tHinK>","reply":"<Kthink>"},
+{"pad":59997,"end":"é\na\n😀","cut":"é\na…(truncated)","answer":"<thinK>　<think>","reply":""},
+{"pad":60000,"end":"😀a字字a😀","cut":"…(truncated)","answer":"<think>","reply":""},
+{"pad":59996,"end":"aé😀","cut":"aé😀","answer":"","reply":""},
+{"pad":59995,"end":"","cut":"","answer":"","reply":""},
+{"pad":59998,"end":"字é","cut":"字é","answer":"<thinK><Kthink>","reply":""},
+{"pad":60000,"end":"𝔸é😀a\"\n","cut":"…(truncated)","answer":"　\n<tHinK><thinK><thinK>a😀","reply":""},
+{"pad":59995,"end":"\"𝔸","cut":"\"𝔸","answer":"﻿字think><thinK>a","reply":"﻿字think>"},
+{"pad":59999,"end":"字","cut":"字","answer":"<thinka</Think>","reply":""},
+{"pad":59999,"end":"\n𝔸\na𝔸𝔸","cut":"\n…(truncated)","answer":"<thinK><tHinK>think>a\nthink>\n﻿<tHinK>\t","reply":""},
+{"pad":59997,"end":"a","cut":"a","answer":"","reply":""},
+{"pad":59997,"end":"字é𝔸","cut":"字é�…(truncated)","answer":"\t<tHinK>think><Kthink>","reply":""},
+{"pad":60000,"end":"字","cut":"…(truncated)","answer":"","reply":""},
+{"pad":60000,"end":"😀𝔸é\n\"é","cut":"…(truncated)","answer":"\n 😀</","reply":"😀</"},
+{"pad":59995,"end":"","cut":"","answer":"　","reply":""},
+{"pad":59995,"end":"\"a字𝔸𝔸","cut":"\"a字𝔸…(truncated)","answer":" 　<THINK><thinkba　b <think></think>　\t　think>","reply":"think>"},
+{"pad":59995,"end":"\"𝔸字𝔸","cut":"\"𝔸字�…(truncated)","answer":"","reply":""},
+{"pad":60000,"end":"𝔸\n𝔸","cut":"…(truncated)","answer":"think></Think><think>　","reply":""},
+{"pad":59996,"end":"","cut":"","answer":"<THINK></think></think></Think><THINK></think>　　","reply":""},
+{"pad":59997,"end":"字","cut":"字","answer":"<thinK><thinK><Kthink><THINK><thinka\n字","reply":""},
+{"pad":59996,"end":"é字éé","cut":"é字éé","answer":"<Kthink><thinK> \t</Think><think><think><Kthink>","reply":"<Kthink>"},
+{"pad":59998,"end":"😀😀éé\n\n","cut":"😀…(truncated)","answer":"","reply":""},
+{"pad":59998,"end":"é😀字a𝔸","cut":"é�…(truncated)","answer":"😀字 字<think>","reply":"😀字 字"},
+{"pad":59998,"end":"é","cut":"é","answer":"😀<tHinK>","reply":"😀"},
+{"pad":60000,"end":"字","cut":"…(truncated)","answer":"","reply":""},
+{"pad":59996,"end":"\"é\naé\n","cut":"\"é\na…(truncated)","answer":"think><tHinK>","reply":"think>"},
+{"pad":59997,"end":"a","cut":"a","answer":"</think>think>>\tthink>think>字<think","reply":"think>>\tthink>think>字<think"},
+{"pad":60000,"end":"","cut":"","answer":"<THINK><thinK></Think>　<tHinK><THINK>","reply":""},
+{"pad":59996,"end":"\n\"","cut":"\n\"","answer":"","reply":""},
+{"pad":59998,"end":"\n字é😀\n\"","cut":"\n字…(truncated)","answer":"","reply":""},
+{"pad":59998,"end":"é𝔸","cut":"é�…(truncated)","answer":"</think>\t","reply":""},
+{"pad":59997,"end":"","cut":"","answer":"","reply":""},
+{"pad":59997,"end":"\"","cut":"\"","answer":"<tHinK><THINK></</Think></Think>","reply":""},
+{"pad":59995,"end":"字","cut":"字","answer":"\t😀<think></Think>\n","reply":"😀"},
+{"pad":60000,"end":"\"\naé","cut":"…(truncated)","answer":"<thinK>>think>","reply":""},
+{"pad":59999,"end":"字字😀","cut":"字…(truncated)","answer":"","reply":""},
+{"pad":59997,"end":"字","cut":"字","answer":"","reply":""},
+{"pad":59997,"end":"\"\"é\"\n😀","cut":"\"\"é…(truncated)","answer":"think>a</think><THINK>😀a\t","reply":""},
+{"pad":59998,"end":"\n","cut":"\n","answer":"</Think>","reply":""},
+{"pad":59998,"end":"字\"é\"\"","cut":"字\"…(truncated)","answer":"","reply":""},
+{"pad":59995,"end":"é\"\"😀𝔸","cut":"é\"\"😀…(truncated)","answer":"　</<tHinK><THINK>think>\t<tHinK>","reply":"</"},
+{"pad":60000,"end":"字éa","cut":"…(truncated)","answer":"</think>\n<thinK></Think><tHinK><tHinK><Kthink><thinkthink>","reply":""},
+{"pad":59995,"end":"😀","cut":"😀","answer":"<thinK><Kthink><Kthink>﻿","reply":""},
+{"pad":59999,"end":"\"","cut":"\"","answer":"</Think><THINK></think></think>　 a","reply":"a"},
+{"pad":59999,"end":"a\"é\n","cut":"a…(truncated)","answer":"<think>😀 >😀﻿﻿<Kthink>think>","reply":""},
+{"pad":60000,"end":"😀字字𝔸😀","cut":"…(truncated)","answer":"<think　</think>","reply":""},
+{"pad":60000,"end":"","cut":"","answer":"<thinK>","reply":""},
+{"pad":59998,"end":"😀字字𝔸é","cut":"😀…(truncated)","answer":"<THINK><thinK>字﻿</Think>","reply":""},
+{"pad":59997,"end":"😀字a😀𝔸","cut":"😀字…(truncated)","answer":"</Think><thinK>a \n</think><thinK><think></think>","reply":""},
+{"pad":59995,"end":"","cut":"","answer":"<Kthink> a</Think>","reply":""},
+{"pad":59995,"end":"\n","cut":"\n","answer":"<Kthink>a>\t\n﻿<think></think>","reply":"<Kthink>a>\t\n﻿"},
+{"pad":59998,"end":"","cut":"","answer":"<think>　think>　","reply":""},
+{"pad":59999,"end":"😀\n😀\n","cut":"�…(truncated)","answer":"字 ﻿b字","reply":"字 ﻿b字"},
+{"pad":59996,"end":"a𝔸","cut":"a𝔸","answer":">b</Think><tHinK><think","reply":""},
+{"pad":59996,"end":"😀é字éa","cut":"😀é字…(truncated)","answer":"<thinK>>字<tHinK>字</Think><THINK>字﻿>","reply":""},
+{"pad":59998,"end":"\n字\"é字\"","cut":"\n字…(truncated)","answer":"<think😀 </Think><THINK><thinK>　","reply":""},
+{"pad":59995,"end":"é\"\"😀","cut":"é\"\"😀","answer":"b﻿<thinK>><THINK><THINK><thinK>😀","reply":"b﻿"},
+{"pad":59998,"end":"𝔸\"aaé字","cut":"𝔸…(truncated)","answer":"</think><THINK><thinK><Kthink>","reply":""},
+{"pad":59997,"end":"\"\né𝔸é字","cut":"\"\né…(truncated)","answer":"<thinK></think>","reply":""},
+{"pad":59999,"end":"é𝔸a字😀","cut":"é…(truncated)","answer":"</Think>﻿😀字</Think>","reply":""},
+{"pad":59996,"end":"","cut":"","answer":"<THINK>\n\tthink>","reply":""},
+{"pad":59999,"end":"\n😀字\n字😀","cut":"\n…(truncated)","answer":"think>\t ab\n 字</think>","reply":""},
+{"pad":59997,"end":"𝔸éa𝔸\"𝔸","cut":"𝔸é…(truncated)","answer":"</think><tHinK><think><thinK></Think>","reply":""},
+{"pad":59995,"end":"ééé\"字字","cut":"ééé\"字…(truncated)","answer":"</think><think>think>😀\n","reply":""},
+{"pad":60000,"end":"😀😀a\n","cut":"…(truncated)","answer":"<Kthink><Kthink><Kthink></Think>","reply":""},
+{"pad":60000,"end":"éaa\"\n","cut":"…(truncated)","answer":"think></a<think><thinK><Kthink><tHinK><tHinK>","reply":"think></a"},
+{"pad":60000,"end":"𝔸é\"𝔸\"","cut":"…(truncated)","answer":"","reply":""},
+{"pad":59997,"end":"😀\"\n\n","cut":"😀\"…(truncated)","answer":"<Kthink></think><think>b\na</","reply":""},
+{"pad":59998,"end":"\"aé","cut":"\"a…(truncated)","answer":"a <think>","reply":"a"},
+{"pad":59996,"end":"字é字é\n😀","cut":"字é字é…(truncated)","answer":"</think>b</","reply":"b</"},
+{"pad":59999,"end":"𝔸😀\"\"é","cut":"�…(truncated)","answer":"<think><Kthink></Think>\tb</a　﻿","reply":"b</a　﻿"},
+{"pad":59995,"end":"a𝔸\n😀","cut":"a𝔸\n�…(truncated)","answer":"<THINK><tHinK>字","reply":""},
+{"pad":59999,"end":"","cut":"","answer":"<thinK>></</think>>","reply":">"},
+{"pad":60000,"end":"","cut":"","answer":"<THINK>>\nb 　<thinK>","reply":""},
+{"pad":59995,"end":"é字字\n😀","cut":"é字字\n�…(truncated)","answer":"<THINK>字😀字</Think>","reply":""},
+{"pad":59998,"end":"aa\"é😀","cut":"aa…(truncated)","answer":"\t</think><tHinK><THINK><tHinK>","reply":""},
+{"pad":60000,"end":"","cut":"","answer":"﻿>","reply":"﻿>"},
+{"pad":59999,"end":"","cut":"","answer":"<think>think><THINK> think>","reply":""},
+{"pad":59998,"end":"a😀\n\"","cut":"a�…(truncated)","answer":"","reply":""},
+{"pad":59998,"end":"字字\n𝔸é","cut":"字字…(truncated)","answer":"<tHinK>b\t﻿</","reply":""},
+{"pad":60000,"end":"a\"","cut":"…(truncated)","answer":"","reply":""},
+{"pad":60000,"end":"a\"","cut":"…(truncated)","answer":"<Kthink>﻿\t<Kthink>\n😀\t","reply":"<Kthink>﻿\t<Kthink>\n😀"},
+{"pad":59996,"end":"😀","cut":"😀","answer":"<thinK></think>﻿ a","reply":"﻿ a"},
+{"pad":59998,"end":"𝔸字\n","cut":"𝔸…(truncated)","answer":"</Think></think>","reply":""},
+{"pad":59996,"end":"𝔸𝔸","cut":"𝔸𝔸","answer":">字 <thinK> 字a<Kthink></think>","reply":">字"},
+{"pad":59997,"end":"\"𝔸字\"","cut":"\"𝔸…(truncated)","answer":"<think><THINK><Kthink>>\tb<thinK>","reply":""},
+{"pad":59997,"end":"aé𝔸éé\n","cut":"aé�…(truncated)","answer":"<tHinK>﻿</think><tHinK>","reply":""},
+{"pad":59999,"end":"𝔸\"\n","cut":"�…(truncated)","answer":"","reply":""},
+{"pad":60000,"end":"","cut":"","answer":"","reply":""},
+{"pad":59995,"end":"😀\né","cut":"😀\né","answer":"<think</Think></Think>ba字<thinK><tHinK>","reply":"ba字"},
+{"pad":59998,"end":"é𝔸é","cut":"é�…(truncated)","answer":"","reply":""},
+{"pad":59998,"end":"𝔸\"","cut":"𝔸…(truncated)","answer":"<thinK>字</Think>a</</","reply":"a</</"},
+{"pad":59997,"end":"𝔸\n","cut":"𝔸\n","answer":"😀think><think><think><Kthink>","reply":"😀think>"},
+{"pad":59997,"end":"","cut":"","answer":"a字>","reply":"a字>"},
+{"pad":59999,"end":"😀😀é","cut":"�…(truncated)","answer":"﻿字　>\t<think<THINK><think a<THINK>","reply":"﻿字　>\t<think"},
+{"pad":59999,"end":"😀","cut":"�…(truncated)","answer":"<thinK><Kthink><think>","reply":""},
+{"pad":59996,"end":"é","cut":"é","answer":"<THINK><Kthink></","reply":""},
+{"pad":59998,"end":"\na","cut":"\na","answer":"b</","reply":"b</"},
+{"pad":60000,"end":"aaé\n","cut":"…(truncated)","answer":"<think>\tthink>　<think><tHinK><THINK>think>　","reply":""},
+{"pad":59996,"end":"","cut":"","answer":"😀</think></think>😀\n","reply":"😀"},
+{"pad":59995,"end":"é\"字\"😀","cut":"é\"字\"�…(truncated)","answer":"<think😀😀","reply":"<think😀😀"},
+{"pad":59995,"end":"😀\n字𝔸é\n","cut":"😀\n字�…(truncated)","answer":"<think><Kthink></think><Kthink>","reply":"<Kthink>"},
+{"pad":59997,"end":"a","cut":"a","answer":"<THINK><think> 　😀</think>　","reply":""},
+{"pad":59998,"end":"","cut":"","answer":"<thinK><Kthink></Think>","reply":""},
+{"pad":59997,"end":"aéé\n\"","cut":"aéé…(truncated)","answer":"　﻿bthink><Kthink>","reply":"﻿bthink><Kthink>"},
+{"pad":59997,"end":"😀","cut":"😀","answer":"<Kthink><think>","reply":"<Kthink>"},
+{"pad":60000,"end":"\n\n\"字😀é","cut":"…(truncated)","answer":"<Kthink></think><THINK>﻿>>","reply":""},
+{"pad":59996,"end":"","cut":"","answer":"<thinK><thinK></think>>😀\t<thinkb\t","reply":">😀\t<thinkb"},
+{"pad":59996,"end":"","cut":"","answer":"<Kthink>b　><thinK> \t字</think>","reply":"<Kthink>b　>"},
+{"pad":59999,"end":"é","cut":"é","answer":"<THINK>\n<think字","reply":""},
+{"pad":60000,"end":"\n𝔸\"😀\"😀","cut":"…(truncated)","answer":"字</﻿\n<Kthink></Think>","reply":""},
+{"pad":59999,"end":"","cut":"","answer":"</think><think<think>\t<Kthink>","reply":"<think"},
+{"pad":59998,"end":"😀\né","cut":"😀…(truncated)","answer":"","reply":""},
+{"pad":59997,"end":"😀𝔸字字\"","cut":"😀�…(truncated)","answer":"<think> 😀<THINK></think>\t字　","reply":"字"},
+{"pad":59995,"end":"é","cut":"é","answer":"<think>b\n😀字<thinK>","reply":""},
+{"pad":60000,"end":"😀字a𝔸","cut":"…(truncated)","answer":"<THINK><tHinK>a<tHinK><think><tHinK>","reply":""},
+{"pad":59998,"end":"\n","cut":"\n","answer":"😀😀b<thinK>","reply":"😀😀b"},
+{"pad":60000,"end":"\n𝔸𝔸","cut":"…(truncated)","answer":"</Think>","reply":""},
+{"pad":59997,"end":"字\n字","cut":"字\n字","answer":"</﻿a<tHinK><tHinK><thinK>","reply":"</﻿a"},
+{"pad":59998,"end":"字𝔸\n","cut":"字�…(truncated)","answer":"</Think>><tHinK><Kthink>a　>","reply":">"},
+{"pad":60000,"end":"","cut":"","answer":"</think>","reply":""},
+{"pad":59998,"end":"𝔸😀\n\"\n","cut":"𝔸…(truncated)","answer":"</Think>","reply":""},
+{"pad":59995,"end":"\"","cut":"\"","answer":"<THINK><tHinK>","reply":""},
+{"pad":59999,"end":"😀😀é\"字","cut":"�…(truncated)","answer":"<Kthink>字></a ","reply":"<Kthink>字></a"},
+{"pad":59997,"end":"\né","cut":"\né","answer":"😀></think></a","reply":"</a"},
+{"pad":59999,"end":"é😀","cut":"é…(truncated)","answer":"<THINK><THINK> >a","reply":""},
+{"pad":60000,"end":"","cut":"","answer":"<think>>><Kthink>字　😀","reply":""},
+{"pad":59999,"end":"😀𝔸\"𝔸字","cut":"�…(truncated)","answer":"</Think>bb</<thinK> think>b<THINK></😀</Think>","reply":"bb</"},
+{"pad":59995,"end":"","cut":"","answer":">\n﻿<Kthink><THINK><THINK><thinK>","reply":">\n﻿<Kthink>"},
+{"pad":59996,"end":"\"𝔸é😀","cut":"\"𝔸é…(truncated)","answer":"<tHinK><THINK></Think>","reply":""},
+{"pad":59997,"end":"é","cut":"é","answer":"<thinK>a<think><thinK><thinK>>\n😀","reply":""},
+{"pad":59995,"end":"a𝔸a\né","cut":"a𝔸a\n…(truncated)","answer":"<Kthink></　b\n\n","reply":"<Kthink></　b"},
+{"pad":59999,"end":"a","cut":"a","answer":"</Think><tHinK>","reply":""},
+{"pad":59996,"end":"\"\"a字𝔸","cut":"\"\"a字…(truncated)","answer":"","reply":""},
+{"pad":60000,"end":"éaé\né字","cut":"…(truncated)","answer":"</think>a<think><think><THINK>","reply":"a"},
+{"pad":59997,"end":"\"字\"😀字","cut":"\"字\"…(truncated)","answer":"<THINK>>","reply":""},
+{"pad":59995,"end":"\"😀","cut":"\"😀","answer":"","reply":""},
+{"pad":59995,"end":"\na\"aé","cut":"\na\"aé","answer":"</Think>b<think<THINK><tHinK></Think><thinK>","reply":"b<think"},
+{"pad":59998,"end":"é😀","cut":"é�…(truncated)","answer":"<thinK><Kthink>😀","reply":""},
+{"pad":59999,"end":"é字𝔸","cut":"é…(truncated)","answer":"<THINK><tHinK>","reply":""},
+{"pad":59998,"end":"é","cut":"é","answer":"b\nb<thinkthink>😀字<think>","reply":"b\nb<thinkthink>😀字"},
+{"pad":59996,"end":"字😀","cut":"字😀","answer":"<Kthink><thinK><think>　b>\n\t","reply":"<Kthink>"},
+{"pad":59998,"end":"é\"😀éa","cut":"é\"…(truncated)","answer":"","reply":""},
+{"pad":59997,"end":"","cut":"","answer":"</Think></think><THINK><thinK></　>\n\n﻿a","reply":""},
+{"pad":59997,"end":"éaa字😀","cut":"éaa…(truncated)","answer":"<think><tHinK></Think>","reply":""},
+{"pad":59996,"end":"字é\n😀","cut":"字é\n�…(truncated)","answer":"think>>﻿","reply":"think>>﻿"},
+{"pad":59997,"end":"a𝔸𝔸a\n","cut":"a𝔸…(truncated)","answer":"\taa</think>","reply":""},
+{"pad":59997,"end":"𝔸","cut":"𝔸","answer":"</Think>\n</><THINK>>ba","reply":"</>"},
+{"pad":59996,"end":"𝔸字𝔸a\n𝔸","cut":"𝔸字�…(truncated)","answer":"<THINK><THINK><thinK>﻿ <thinkb>","reply":""},
+{"pad":59996,"end":"\na😀a\"","cut":"\na😀…(truncated)","answer":">　字<think>><think<think😀<think","reply":">　字"},
+{"pad":59998,"end":"aéé","cut":"aé…(truncated)","answer":"</","reply":"</"},
+{"pad":60000,"end":"😀é\n😀𝔸","cut":"…(truncated)","answer":"<thinK>think>　<think<Kthink>","reply":""},
+{"pad":60000,"end":"😀𝔸😀aé𝔸","cut":"…(truncated)","answer":"a😀<think<Kthink>","reply":"a😀<think<Kthink>"},
+{"pad":60000,"end":"字\n\n\"","cut":"…(truncated)","answer":"></<THINK>","reply":"></"},
+{"pad":59997,"end":"\n","cut":"\n","answer":"</Think></Think><tHinK>字😀\n\t<tHinK>","reply":""},
+{"pad":59996,"end":"𝔸é😀é字","cut":"𝔸é�…(truncated)","answer":"</</think><thinK><tHinK>b\na<tHinK></think>","reply":""},
+{"pad":59999,"end":"\"","cut":"\"","answer":"<think>﻿字","reply":""},
+{"pad":59995,"end":"\n","cut":"\n","answer":"<think><tHinK><think><THINK>","reply":""},
+{"pad":59996,"end":"字","cut":"字","answer":"字😀","reply":"字😀"},
+{"pad":59996,"end":"é😀aéaé","cut":"é😀a…(truncated)","answer":"<tHinK><tHinK>　ba\n","reply":""},
+{"pad":59996,"end":"a\"\"𝔸字","cut":"a\"\"�…(truncated)","answer":"\n<THINK>\n\tthink></think><think字","reply":"<think字"},
+{"pad":60000,"end":"a😀","cut":"…(truncated)","answer":"\nthink>😀<tHinK>﻿<thinK>","reply":"think>😀"}
+]

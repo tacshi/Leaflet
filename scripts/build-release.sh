@@ -9,7 +9,7 @@
 #   scripts/build-release.sh --arch arm64     # only some: arm64, x64, universal
 #   scripts/build-release.sh --skip-notarize  # macOS signed, not notarized (faster)
 #   scripts/build-release.sh -o out           # another output directory
-#   scripts/build-release.sh --upload         # and upload to a draft GitHub release
+#   scripts/build-release.sh 0.2.0 --upload   # and upload to a draft GitHub release
 #   scripts/build-release.sh --changelog f.md # notes from f.md, not CHANGELOG.md
 #   scripts/build-release.sh --allow-unsigned # let --upload take unsigned or unnotarized builds
 #
@@ -27,6 +27,9 @@
 # SHA256SUMS lists them and install.ps1 finds its installer. Installed
 # copies see the update once the draft is published. A release that is
 # published already is refused: its files are what installed copies took.
+# So is a draft of another commit, which the draft records as it is made: a
+# release tags one commit. It needs the version named, as mygo.json's is no
+# release's.
 #
 # Signs updates with MYGO_UPDATER_PRIVATE_KEY, else the key in the file
 # LEAFLET_UPDATE_KEY, by default
@@ -44,8 +47,10 @@
 #
 # Windows: needs NSIS (brew install makensis) for the installers. Signs with
 # the .pfx LEAFLET_WINDOWS_CERTIFICATE names, whose password is
-# MYGO_WINDOWS_CERTIFICATE_PASSWORD, using osslsigncode; without it the
-# builds are unsigned and SmartScreen warns about them.
+# MYGO_WINDOWS_CERTIFICATE_PASSWORD, using osslsigncode
+# (scripts/sign-windows.sh), and fails if any program of the build comes out
+# unsigned; without it the builds are unsigned and SmartScreen warns about
+# them.
 #
 # --upload refuses unsigned Windows builds, and macOS ones --skip-notarize
 # leaves unnotarized, which installed copies would update to, unless
@@ -118,6 +123,9 @@ fi
 for tool in go python3; do
 	command -v "$tool" >/dev/null 2>&1 || die "needs $tool"
 done
+if $UPLOAD && [[ -z "$VERSION" ]]; then
+	die "--upload needs the version to release, as in scripts/build-release.sh 0.2.0 --upload"
+fi
 [[ -n "$VERSION" ]] || VERSION="$(config_value version)"
 check_version "$VERSION"
 # The paths given are from where this was run, not ROOT_DIR.
@@ -179,25 +187,31 @@ if $WIN; then
 	utf8_locale
 	WINDOWS_CERTIFICATE="$(windows_certificate)"
 	if [[ -n "$WINDOWS_CERTIFICATE" ]]; then
-		CONFIG+=("windows.certificate=$WINDOWS_CERTIFICATE")
+		# In full, for scripts/sign-windows.sh, which runs in ROOT_DIR.
+		export LEAFLET_WINDOWS_CERTIFICATE="$WINDOWS_CERTIFICATE"
+		CONFIG+=("windows.signCommand=scripts/sign-windows.sh %1")
 	elif $UPLOAD && ! $ALLOW_UNSIGNED; then
 		die "LEAFLET_WINDOWS_CERTIFICATE is not set, so --upload would publish unsigned Windows builds; set it, or add --allow-unsigned (or LEAFLET_ALLOW_UNSIGNED=1) to upload them anyway"
 	else
 		warn "LEAFLET_WINDOWS_CERTIFICATE is not set, so the Windows builds are unsigned"
 	fi
 fi
-load_update_key
+UPDATE_KEY="$(update_key)"
+[[ -z "$UPDATE_KEY" ]] || CONFIG+=("updates.privateKey=$UPDATE_KEY")
 # Uploaded here after the checks below, not by mygo build -upload, which
 # uploads as it finishes. A published release is refused before the long
 # builds, and again as they are uploaded.
 if $UPLOAD; then
 	check_gh
 	check_draft "$VERSION"
+	COMMIT="$(git rev-parse HEAD)"
+	check_pushed "$COMMIT"
+	check_draft_commit "$VERSION" "$COMMIT"
 fi
 
-# The version, the changelog, notarization and the Windows certificate go
-# into mygo.json for this build only: notarizing would fail the ad hoc
-# debug builds, which read it too.
+# The version, the changelog, the update key's file, notarization and how
+# Windows builds are signed go into mygo.json for this build only: notarizing
+# would fail the ad hoc debug builds, which read it too.
 patch_config "${CONFIG[@]}"
 
 # The Mac's speech helper, for each architecture the Mac apps run on: a
@@ -251,6 +265,9 @@ if $WIN; then
 		dir="windows-$(goarch "$arch")"
 		setup="$OUT_DIR/$dir/leaflet-setup-$VERSION-$(goarch "$arch").exe"
 		[[ -f "$setup" ]] || die "expected $setup after the build"
+		if [[ -n "$WINDOWS_CERTIFICATE" ]]; then
+			check_signed "$OUT_DIR/$dir"/*.exe "$OUT_DIR/$dir"/bin/*.exe
+		fi
 		BUILT+=("$setup")
 		NAMES+=("Leaflet-$VERSION-$arch-setup.exe")
 		DIRS+=("$dir")
@@ -260,7 +277,7 @@ fi
 if $UPLOAD; then
 	NOTES="$(mktemp)"
 	changelog_notes "${CHANGELOG:-$ROOT_DIR/CHANGELOG.md}" "$VERSION" >"$NOTES"
-	upload_release "$VERSION" "$OUT_DIR" "$NOTES" "${DIRS[@]}"
+	upload_release "$VERSION" "$OUT_DIR" "$NOTES" "$COMMIT" "${DIRS[@]}"
 	rm -f "$NOTES"
 	info "uploaded to the draft release v$VERSION of $(config_value updates.github); publish it once every platform is there"
 fi

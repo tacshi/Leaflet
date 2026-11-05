@@ -120,6 +120,10 @@ const MaxNotes = doc.MaxNotes
 // they are opened, and FoldsTranscript says n lines are that long.
 const FoldedLines = doc.FoldedLines
 
+// MaxPixels is the most pixels a picture may have to be shown, which the
+// app checks before it decodes one.
+const MaxPixels = doc.MaxPixels
+
 // FoldsTranscript says n lines of notes or a transcript show only their
 // first FoldedLines until they are opened.
 func FoldsTranscript(n int) bool {

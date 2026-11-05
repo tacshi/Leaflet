@@ -1,8 +1,12 @@
 package app
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,6 +18,7 @@ import (
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/internal/supabaseapi"
+	syncsvc "leaflet/internal/sync"
 	"leaflet/locales"
 )
 
@@ -137,6 +142,51 @@ func TestSignInThatFailsSignsOut(t *testing.T) {
 	}
 	if a.session.SignedIn {
 		t.Error("the session is the new account's")
+	}
+}
+
+// A file that takes longer to go up than a push waits is waited for: it
+// is no change left behind, to ask about.
+func TestSignOutWaitsForAnUpload(t *testing.T) {
+	defer syncsvc.UploadWaitForTest(10 * time.Millisecond)()
+	a := templatesApp(t)
+	hs := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/storage/") {
+			_, _ = io.Copy(io.Discard, r.Body)
+			time.Sleep(200 * time.Millisecond)
+		}
+		_, _ = io.WriteString(w, "[]")
+	}))
+	defer hs.Close()
+	a.backend = remote.SignedInForTest(hs.URL, a.st, "u1")
+	a.sync = syncsvc.New(a.st, a.backend)
+	if err := a.st.SetValue("space.u1", a.st.Session().SpaceID); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(t.TempDir(), "film.mov")
+	if err := os.WriteFile(source, []byte("data"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.st.AddFile(source, "", "", "video/quicktime"); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := a.st.Pending()
+	for _, e := range entries {
+		if e.Entity != "files" && e.Entity != "storage" {
+			if err := a.st.Dequeue(e); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	posted := make(chan func(), 4)
+	a.post = func(fn func()) { posted <- fn }
+	a.signOut()
+	(<-posted)()
+	// What is told once the device has left, as it does only with nothing
+	// to ask about, redraws the app, which a test has none of.
+	<-posted
+	if a.account.unsynced != 0 || a.backend.SignedIn() {
+		t.Fatalf("asked about %d, signed in %v", a.account.unsynced, a.backend.SignedIn())
 	}
 }
 

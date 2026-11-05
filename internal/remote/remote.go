@@ -73,6 +73,8 @@ type Error struct {
 	// PostgREST answers with, as "23514" for a check the change fails, or
 	// Storage's status, as "413" for an object too large.
 	Code string
+	// Name is what Storage calls the refusal, as "InvalidKey", or "".
+	Name string
 	// RetryAfter is how long the server asked to be left before it is
 	// asked again (Retry-After), 0 when it did not say.
 	RetryAfter time.Duration
@@ -846,12 +848,18 @@ func (c *Client) requestWith(hc *http.Client, ctx context.Context, lasting time.
 		var m map[string]any
 		_ = json.Unmarshal(data, &m)
 		// Storage says its own status in the body, which may differ from
-		// the response's, as a 400 for an object too large.
+		// the response's, as a 400 for an object too large, and names the
+		// refusal beside it.
 		code, _ := m["code"].(string)
-		if code == "" {
-			code, _ = m["statusCode"].(string)
+		name := ""
+		if status, _ := m["statusCode"].(string); status != "" {
+			name, _ = m["error"].(string)
+			if name == "" {
+				name = code
+			}
+			code = status
 		}
-		return nil, &Error{Status: res.StatusCode, Message: message(m, string(data)), Code: code, RetryAfter: retryAfter(res.Header)}
+		return nil, &Error{Status: res.StatusCode, Message: message(m, string(data)), Code: code, Name: name, RetryAfter: retryAfter(res.Header)}
 	}
 }
 
@@ -1019,11 +1027,21 @@ func IsConflict(err error) bool {
 // IsInvalid reports whether err is the server refusing for good what it
 // was sent, whoever sends it: a change that breaks a rule of its rows (a
 // check, 23514), as moving a page under one another device moved under it
-// meanwhile, or a body larger than it takes (413). Sent again, it fails
-// again.
+// meanwhile, a body larger than it takes (413), or an object's key Storage
+// does not take. Sent again, it fails again.
 func IsInvalid(err error) bool {
 	var re *Error
-	return errors.As(err, &re) && (re.Code == "23514" || re.Code == "413" || re.Status == http.StatusRequestEntityTooLarge)
+	return errors.As(err, &re) && (re.Code == "23514" || re.Code == "413" || re.Status == http.StatusRequestEntityTooLarge || re.Name == invalidKey)
+}
+
+// invalidKey is what Storage calls a refusal of an object's key.
+const invalidKey = "InvalidKey"
+
+// IsInvalidKey reports whether err is Storage refusing an object's key:
+// there can be no object by that key.
+func IsInvalidKey(err error) bool {
+	var re *Error
+	return errors.As(err, &re) && re.Name == invalidKey
 }
 
 // IsForbidden reports whether err is the server refusing a change the
@@ -1076,9 +1094,17 @@ func (c *Client) RPC(ctx context.Context, name string, args map[string]any) (any
 	}
 	defer func() { _ = res.Body.Close() }()
 	var out any
-	data, _ := io.ReadAll(res.Body)
+	data, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	// An answer that does not parse is no answer, as a sign-in page a
+	// network puts in the server's place: read as none, it would say a page
+	// has no members.
 	if len(bytes.TrimSpace(data)) > 0 {
-		_ = json.Unmarshal(data, &out)
+		if err := json.Unmarshal(data, &out); err != nil {
+			return nil, fmt.Errorf("%s: %w", name, err)
+		}
 	}
 	return out, nil
 }
@@ -1224,10 +1250,45 @@ func retryAfter(h http.Header) time.Duration {
 
 // IsBusy reports whether err is the server's trouble, not the request's:
 // one it failed on (5xx), or asked to be left a while for (429). What is
-// sent next would fare alike, so none of it is the request's to count.
+// sent next would fare alike, so none of it is the request's to count. A
+// 5xx with an error a trigger raised (class P0, as parent_not_found,
+// P0002, which PostgREST answers 500) is the request's, which the next one
+// does not meet. A statement that ran out of time may be either: it counts
+// as the server's here, for the caller to tell (IsStatementTimeout).
 func IsBusy(err error) bool {
 	re, ok := errors.AsType[*Error](err)
-	return ok && (re.Status == http.StatusTooManyRequests || re.Status >= 500)
+	return ok && (re.Status == http.StatusTooManyRequests || re.Status >= 500 && !strings.HasPrefix(re.Code, "P0"))
+}
+
+// IsStatementTimeout reports whether err is the database ending a
+// statement that ran out of time (57014), which PostgREST answers 500: a
+// request too heavy, or a database in trouble.
+func IsStatementTimeout(err error) bool {
+	re, ok := errors.AsType[*Error](err)
+	return ok && re.Code == "57014"
+}
+
+// gatewayTimeout is the status Cloudflare, in front of a hosted project,
+// answers when the server takes too long.
+const gatewayTimeout = 524
+
+// IsTooSlow reports whether err is a request that took too long, by the
+// client's own wait or the caller's, the database's (IsStatementTimeout),
+// or that of a gateway on the way: asked for less, it may go.
+func IsTooSlow(err error) bool {
+	if re, ok := errors.AsType[*Error](err); ok {
+		return IsStatementTimeout(err) || re.Status == http.StatusGatewayTimeout || re.Status == gatewayTimeout
+	}
+	ne, ok := errors.AsType[net.Error](err)
+	return ok && ne.Timeout()
+}
+
+// IsStillTranscribing reports whether err is the stt function saying the
+// transcriber goes on with a recording past the call's deadline: the next
+// call picks it up, at no further cost.
+func IsStillTranscribing(err error) bool {
+	re, ok := errors.AsType[*Error](err)
+	return ok && re.Code == "still_transcribing"
 }
 
 // IsNetwork reports whether err means the server could not be reached:

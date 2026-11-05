@@ -177,6 +177,12 @@ type Hub struct {
 	// epoch counts the accounts the hub has worked for: Forget moves it
 	// on, and a run started for an earlier one writes nothing more.
 	epoch atomic.Int64
+	// runs is what the runs of this account work under, and endRuns ends
+	// it: Forget does, there and then, as the pages go right after it,
+	// before the main thread could end them one by one. Guarded by runsMu.
+	runsMu  sync.Mutex
+	runs    context.Context
+	endRuns context.CancelFunc
 	// options is Options as the providers last read made it, until the
 	// store says they changed: the app asks for it as it draws, for every
 	// comment and every agent menu. Guarded by optionsMu.
@@ -191,6 +197,12 @@ type Hub struct {
 // pages go; any goroutine may. A run ending meanwhile writes nothing.
 func (h *Hub) Forget() {
 	h.epoch.Add(1)
+	h.runsMu.Lock()
+	if h.endRuns != nil {
+		h.endRuns()
+	}
+	h.runs, h.endRuns = nil, nil
+	h.runsMu.Unlock()
 	h.host.Update("", func() {
 		for _, s := range h.sessions {
 			for _, run := range s.Runs {
@@ -206,6 +218,16 @@ func (h *Hub) Forget() {
 // gone reports whether a run's account has left this device since it
 // started (Forget).
 func (h *Hub) gone(run *Run) bool { return run.epoch != h.epoch.Load() }
+
+// runContext is what a run of this account works under (Hub.runs).
+func (h *Hub) runContext() context.Context {
+	h.runsMu.Lock()
+	defer h.runsMu.Unlock()
+	if h.runs == nil {
+		h.runs, h.endRuns = context.WithCancel(context.Background())
+	}
+	return h.runs
+}
 
 // NewHub returns the hub.
 func NewHub(st *store.Store, be *remote.Client, host Host) *Hub {
@@ -377,7 +399,7 @@ func (h *Hub) Start(pageID string, o RunOptions) *Run {
 	work := before.Copy()
 	// Asked here, on the main thread, as the host's methods are.
 	online := h.host.Online()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	ctx, cancel := context.WithTimeout(h.runContext(), 10*time.Minute)
 	run.cancel = cancel
 	if option.Local() {
 		run.stop = cancel
@@ -585,6 +607,8 @@ func (h *Hub) insertJob(ctx context.Context, req Request) error {
 	if req.ConversationID != "" {
 		row["conversation_id"] = req.ConversationID
 	}
+	// What a page gave the request can hold what Postgres refuses.
+	store.CleanRow(row)
 	_, err := h.be.Insert(ctx, "ai_jobs", row)
 	return err
 }

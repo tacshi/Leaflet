@@ -72,6 +72,45 @@ jobs:
       - name: Lint for Windows
         run: GOOS=windows golangci-lint run --no-config ./...
 
+  # The jobs above compile the Windows-only files, and go through what the
+  # macOS build reaches: here those files' tests run, and what the Windows
+  # build reaches is gone through too. No run of this job has been seen to
+  # pass yet, so a failure here shows on the run and fails no check; the
+  # line below goes once one has.
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      # As the repository has them: tests compare what files hold.
+      - name: Keep line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Install govulncheck and gosec
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+          go install github.com/securego/gosec/v2/cmd/gosec@v2.29.0
+      - name: Test
+        run: go test ./...
+      - name: Parse the PowerShell scripts
+        run: |
+          foreach ($script in Get-ChildItem scripts -Recurse -Filter *.ps1) {
+            $problems = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$null, [ref]$problems)
+            if ($problems) { $problems; exit 1 }
+          }
+      - name: Known vulnerabilities
+        env:
+          GOOS: windows
+        run: govulncheck ./...
+      - name: Security
+        env:
+          GOOS: windows
+        run: gosec -quiet -tests -exclude-generated ./...
+
   functions:
     name: Edge Functions
     runs-on: ubuntu-latest

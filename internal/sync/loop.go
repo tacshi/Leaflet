@@ -88,13 +88,14 @@ func (s *Service) loopPass(loop context.Context, pull bool) {
 }
 
 // Stop ends the loop Start started, and the pass running, the loop's or
-// one SyncNow asked for, as an iOS app's background time runs out: what
-// that pass had not done yet, the next one does. Passes asked for with
-// SyncNow after it still run, and Start starts the loop again, as an iOS
-// app does when its scene goes to the background and comes back.
+// one SyncNow asked for, and the upload under way, as an iOS app's
+// background time runs out: what they had not done yet, the next pass
+// does. Passes asked for with SyncNow after it still run, and Start starts
+// the loop again, as an iOS app does when its scene goes to the background
+// and comes back.
 func (s *Service) Stop() {
 	s.mu.Lock()
-	stop, cut := s.stop, s.cut
+	stop, cut, up := s.stop, s.cut, s.uploading
 	s.loop, s.stop = nil, nil
 	s.mu.Unlock()
 	if stop != nil {
@@ -102,6 +103,9 @@ func (s *Service) Stop() {
 	}
 	if cut != nil {
 		cut()
+	}
+	if up != nil {
+		up.stop(context.Canceled)
 	}
 }
 
@@ -201,10 +205,11 @@ func (s *Service) watchOpen(loop context.Context) {
 // checkHeard checks the open pages Realtime told of a save of (listen) at
 // once: after the pass or the refresh under way, which may have read them
 // before the save, rather than in its stead. Those it can't check now, as
-// the server asked for a wait, the passes bring.
+// the server asked for a wait or failed the last check (resting), the
+// passes bring.
 func (s *Service) checkHeard(loop context.Context) {
 	defer guard.Recover()
-	if _, server := s.target().(supabaseTarget); !server || !s.CanSync() || s.busy() {
+	if _, server := s.target().(supabaseTarget); !server || !s.CanSync() || s.resting() {
 		s.takeHeard()
 		return
 	}

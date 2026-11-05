@@ -604,6 +604,9 @@ type Executor struct {
 	// it read that it picked from none it read, not the links on those:
 	// the only ones a block the app loads by itself may hold (loads).
 	found, sources map[string]bool
+	// followed counts the links the run has read that it picked from pages
+	// it read, toward maxFollowedLinks.
+	followed int
 	// written counts the blocks the run's calls have written, toward
 	// maxRunBlocks.
 	written int
@@ -715,10 +718,12 @@ func see(set map[string]bool, v any) {
 // fewer: a search's result, or a page the run read but did not pick from
 // another it read, not a link on one, read or not, which its writer could
 // have put there by the hundred for the run to pick from, the one it
-// picked spelling out what it read. And once it
-// reads the user's other pages, it does not use the web at all
-// (errWebClosed), as what it asked for there could carry what it read,
-// and what it writes keeps to the URLs the user gave it, as above.
+// picked spelling out what it read. Reading such a link tells its site the
+// same, with no block at all, so a run reads a few of them and no more
+// (maxFollowedLinks): enough to follow a page on, too few to spell much
+// out. And once it reads the user's other pages, it does not use the web
+// at all (errWebClosed), as what it asked for there could carry what it
+// read, and what it writes keeps to the URLs the user gave it, as above.
 //
 // checkURLs refuses blocks that hold a URL the run may not write, in a
 // block the app loads or in text, and more text that does, as a subpage's
@@ -795,6 +800,11 @@ func (x *Executor) find(u string, source bool) {
 // errWebClosed is a web tool's answer once the run has read the user's
 // other pages, or follows turns that did.
 const errWebClosed = "This run has read the user's other pages, or follows turns of this conversation that did, so it cannot use the web: what it asked for there could carry what it read. Work from what you have."
+
+// maxFollowedLinks is the most links picked from pages it read a run
+// reads, as on the server (checkURLs): the pages the user gave it or a
+// search found are not counted.
+const maxFollowedLinks = 10
 
 // errNowLinked refuses reading beyond a page whose public link started
 // while the run went on (LinkedNow).
@@ -888,6 +898,13 @@ func (x *Executor) readWeb(args map[string]any) (map[string]any, error) {
 	// web, one the user gave, or a search's result. A link a page had, read,
 	// stays a link: reading it does not make it one a block may load.
 	source := x.found == nil || x.mayLoad(link) || x.mayLoad(bare)
+	if !source {
+		if x.followed >= maxFollowedLinks {
+			return nil, terr("This run has followed %d links from the pages it read, the most one run follows. Work from what you have, or search for what is missing.", maxFollowedLinks)
+		}
+		// Counted though it fails: its site heard the request all the same.
+		x.followed++
+	}
 	p, err := x.Ctx.ReadWeb(link)
 	if err != nil {
 		return nil, terr("Could not read %s: %v", link, err)

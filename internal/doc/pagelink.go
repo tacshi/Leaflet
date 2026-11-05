@@ -87,8 +87,9 @@ func (c *Content) RefreshPageMentions(title func(id string) (string, bool)) bool
 				continue
 			}
 			if t, ok := title(m.ID); ok && t != "" && (t != r.Text || t != m.Name) {
+				now := PageMention(m.ID, t)
 				d[i].Text = t
-				d[i].Attrs = PageMention(m.ID, t)
+				d[i].Attrs.Href, d[i].Attrs.Mention = now.Href, now.Mention
 				touched = true
 			}
 		}
@@ -100,18 +101,38 @@ func (c *Content) RefreshPageMentions(title func(id string) (string, bool)) bool
 	return changed
 }
 
-// CopyFor returns a copy of c for a new page: new block IDs, stamped now,
-// and links to the pages in pages, of subpage blocks and inline links
-// alike, pointing to the page each maps to instead, so a page copied with
-// its subpages links to the copies.
-func (c *Content) CopyFor(pages map[string]string) *Content {
-	children := make([]*Node, len(c.Children))
-	for i, n := range c.Children {
-		children[i] = n.Clone()
+// CopyPages returns copies of contents, by page ID, for new pages: new
+// block IDs, stamped now, and links to the pages in pages, of subpage
+// blocks and inline links alike, pointing to the page each maps to
+// instead, so a page copied with its subpages links to the copies. A link
+// to a block of a page copied here, or a moment of it, goes to that block
+// of the copy; one to a block it no longer has, to the page.
+func CopyPages(contents map[string]*Content, pages map[string]string) map[string]*Content {
+	copies := make(map[string]*Content, len(contents))
+	blocks := make(map[string]map[string]string, len(contents))
+	for id, c := range contents {
+		children := make([]*Node, len(c.Children))
+		for i, n := range c.Children {
+			children[i] = n.Clone()
+		}
+		copies[id] = &Content{Children: children}
+		blocks[id] = map[string]string{}
+		copies[id].Walk(func(n, _ *Node) {
+			blocks[id][n.ID] = NewBlockID()
+			n.ID = blocks[id][n.ID]
+		})
 	}
-	out := &Content{Children: children}
-	out.Walk(func(n, _ *Node) {
-		n.ID = ""
+	for id, c := range copies {
+		c.relink(pages, blocks)
+		copies[id] = FromBlocks(c.Children)
+	}
+	return copies
+}
+
+// relink points c's links at the copies of the pages and blocks they name
+// (CopyPages).
+func (c *Content) relink(pages map[string]string, blocks map[string]map[string]string) {
+	c.Walk(func(n, _ *Node) {
 		if to, ok := pages[n.Str("page_id")]; ok && n.Type == "subpage" {
 			n.Set("page_id", to)
 		}
@@ -127,6 +148,12 @@ func (c *Content) CopyFor(pages map[string]string) *Content {
 				continue
 			}
 			d[i].Attrs.Href = PageLink(to)
+			if block, copied := blocks[id][LinkBlock(r.Attrs.Href)]; copied {
+				d[i].Attrs.Href = BlockLink(to, block)
+				if _, moment, ok := strings.Cut(r.Attrs.Href, "?"); ok {
+					d[i].Attrs.Href += "?" + moment
+				}
+			}
 			if m := r.Attrs.Mention; m != nil && m.Kind == "page" {
 				d[i].Attrs.Mention = &Mention{Kind: "page", ID: to, Name: m.Name}
 			}
@@ -136,5 +163,4 @@ func (c *Content) CopyFor(pages map[string]string) *Content {
 			n.SetDelta(d)
 		}
 	})
-	return FromBlocks(out.Children)
 }

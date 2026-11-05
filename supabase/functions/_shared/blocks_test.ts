@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertThrows } from "jsr:@std/assert@1";
 import {
+  blankContent,
   collectIds,
   deltaToMarkdown,
   deltaToPlain,
@@ -9,6 +10,8 @@ import {
   pageViews,
   plainText,
   specToNode,
+  storable,
+  storableValue,
   tableRows,
 } from "./blocks.ts";
 
@@ -170,6 +173,15 @@ Deno.test("a recording's transcript reads as the app's agents read it", () => {
   assertEquals(none.recording, { recording_id: "none", title: undefined, duration_ms: undefined, status: "recording" });
 });
 
+// A backtick in a link's address goes as %60, as the app writes it: what
+// looks for code spans before it reads links finds none there.
+Deno.test("a link's backtick is written as a url can hold one", () => {
+  assertEquals(
+    deltaToMarkdown([{ insert: "a", attributes: { href: "https://a.b/`x" } }]),
+    "[a](https://a.b/%60x)",
+  );
+});
+
 // Text whose markers close nowhere, or nest without end, reads in time
 // about its length: each scan's end is found once, and formats nest at
 // most so deep. Read again from each marker, 60 KB of "_a " takes
@@ -196,4 +208,25 @@ Deno.test("inline markdown reads in time about its length", () => {
   // Within that, nesting reads as the app reads it; past it, as written.
   assertEquals(markdownToDelta("[".repeat(10) + "x" + "](u)".repeat(10)), [{ insert: "x", attributes: { href: "u" } }]);
   assert(deltaToPlain(markdownToDelta("[".repeat(40) + "x" + "](u)".repeat(40))).includes("x](u)"));
+});
+
+// What Postgres's text and jsonb refuse goes: NUL, and half a surrogate
+// pair, as U+FFFD, in every string of a value.
+Deno.test("text is kept as the database can hold it", () => {
+  assertEquals(storable("a\u0000b \ud83d c 😀"), "ab \ufffd c 😀");
+  assertEquals(storableValue({ text: "a\u0000", n: 1, list: ["\udc00", { deep: "\u0000b" }], none: null }), {
+    text: "a",
+    n: 1,
+    list: ["\ufffd", { deep: "b" }],
+    none: null,
+  });
+});
+
+// A blank page holds a block to type in, stamped, as doc.Empty's does.
+Deno.test("a blank page has one empty paragraph", () => {
+  const c = blankContent(1000);
+  const [p] = c.document.children!;
+  assertEquals([c.document.children!.length, p.type, p.data, c.meta.blocks], [1, "paragraph", { delta: [] }, {
+    [p.id]: 1000,
+  }]);
 });

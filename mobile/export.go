@@ -10,6 +10,15 @@ import (
 	"leaflet/locales"
 )
 
+// InFolder reports whether path is in folder dir, links followed, as the
+// app asks of a picture a block links to on this device: a block's link can
+// come from another device or person, and a file outside the app's data
+// folder is not shown.
+func InFolder(dir, path string) bool {
+	defer catch(nil)
+	return export.InFolder(dir, path)
+}
+
 // exportedAll is Export all's zip, as ExportAll returns it.
 type exportedAll struct {
 	// Path is the zip's, in the folder ExportAll was given, for the app

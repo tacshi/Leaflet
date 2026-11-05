@@ -42,6 +42,9 @@ esac
 
 func helper(t *testing.T) *Helper {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake helper is a shell script")
+	}
 	path := filepath.Join(t.TempDir(), Name)
 	if err := os.WriteFile(path, []byte(fake), 0o700); err != nil { // #nosec G306 -- a test's own script.
 		t.Fatal(err)

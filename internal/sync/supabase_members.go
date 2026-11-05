@@ -38,8 +38,13 @@ func (s *Service) LoadMembers(ctx context.Context, pageID string) error {
 	if err != nil {
 		return err
 	}
+	// An answer that is no list says nothing of who has the page: as none,
+	// the page would look shared with no one.
+	list, ok := res.([]any)
+	if !ok {
+		return errors.New("the server's list of a page's members could not be read")
+	}
 	var members []store.Member
-	list, _ := res.([]any)
 	for _, r := range list {
 		m, _ := r.(map[string]any)
 		// A server from before invites says nothing: every share was one.

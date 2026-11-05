@@ -49,6 +49,8 @@ Leaflet, then sets it up from this folder, built into the app:
   never deploys over functions of its version or a newer one, so two
   builds never take turns; a development build replaces those of its own
   version, as they change while it is worked on;
+- the Realtime policy for a page's saves, once Realtime has made the table
+  it goes on: until then the setup runs again as the app starts;
 - a 500 MiB upload limit, where the plan allows it.
 
 It then signs in to the project's Auth as the account's email, making that
@@ -148,7 +150,8 @@ the later migrations made of those rows; `test.sql`, what single migrations
 promise; and `access.sql`, the privileges each role has, and who of a page's
 owner, editor, viewer, invitee and a stranger may read and change it, its
 content, history, comments, files, recordings and images, and their Storage
-objects.
+objects; and last `realtime.sql`, on stand-ins for what Realtime makes in a
+project, who hears a page's channel.
 
 ## Deploying by hand
 
@@ -175,8 +178,15 @@ An agent run stops calling the model at `AGENT_DEADLINE_MS` (default 120000,
 under the 150 s wall-clock limit of the free plan) and saves what it did; each
 model call times out after `AGENT_CALL_TIMEOUT_MS` (default 60000). On a paid
 plan (400 s limit) the deadline may go up to 380000:
-`supabase secrets set AGENT_DEADLINE_MS=360000`. A job left `running` past the
-deadline plus a minute (the platform stopped it) can be claimed again.
+`supabase secrets set AGENT_DEADLINE_MS=360000`. The limit is the worker's, and
+a worker serves many requests: a run on one already old stops sooner, as far
+as its worker lets it, and at once, saving what it did and ending failed, as
+the platform says it will shut the worker down (`beforeunload`). One stopped
+with no word leaves its ops on its job, kept as it worked, for the caller's
+next run to mark it failed; a job left `running` past the deadline plus a
+minute can be claimed again. The plan isn't told: a worker younger than half
+the free plan's limit is taken for the free plan's, which on a paid plan with
+the default deadline only ends a run on a warm worker sooner than it had to.
 
 Buckets cap uploads at 500 MiB for `recordings` (audio only), 200 MiB for
 `files` and 50 MiB for `images` (images only); a hosted project's global upload
@@ -184,7 +194,13 @@ limit (Storage settings) must be at least as high for long recordings. The
 `stt` function transcribes recordings up to `STT_MAX_AUDIO_MB` (default 100,
 about 54 minutes of the app's WAV); longer ones transcribe on the device. It
 streams a recording from Storage to the transcriber rather than holding it,
-so the deadline bounds that size, not the function's memory.
+so the deadline bounds that size, not the function's memory. A call has
+`STT_DEADLINE_MS` (default 120000, the most), on any plan: its answer comes
+at its end, and the gateway gives up on one that has not begun at 150 s. Soniox
+goes on with a long recording past that: its transcription is kept in
+`stt_jobs` (service role only), and asking again picks it up, sending nothing
+and spending nothing more, until it is done. What went to Soniox goes from it
+once it is; Soniox deletes what is never asked for again in 30 days.
 
 Keep email confirmation on (Authentication › Sign In / Providers › Email ›
 Confirm email; `enable_confirmations = true` in `config.toml`, which local
@@ -230,6 +246,13 @@ hosted project can't be checked here, and are worth checking once on one
   (`migrationSQL` in `internal/provision` sends a migration with the row
   that records it).
 
+Realtime makes `realtime.messages` itself, in its own time, which may be after
+the migrations ran. The policy on it, `page_saves_heard`, goes on it through
+`ensure_page_saves_heard()`: the app calls it each time it sets a project up,
+and runs its setup again until it reports the table is there. A project
+deployed by hand calls it once Realtime is up, in its SQL editor, as `postgres`:
+`select public.ensure_page_saves_heard()`.
+
 ## Notes for the client
 
 - **model_providers**: clients can't read or write `encrypted_secret` /
@@ -256,6 +279,9 @@ hosted project can't be checked here, and are worth checking once on one
 - **Account sign-in** (`auth_kind: "account"`) is rejected by `providers.save`
   until provider terms for third-party apps are confirmed (open question in the
   design); use API keys.
+- **Tree depth**: a tree goes at most 256 pages deep (`page_too_deep`); one
+  already deeper stays, read to its deepest page, and its pages may change,
+  or move no deeper.
 - **Soniox keys** live in `stt_secrets` (service role only), not in
   `model_providers`. `has_stt_secret('soniox')` tells the client whether one is
   saved.

@@ -186,6 +186,77 @@
         }
       ],
       "kept_to_page": true
+    },
+    {
+      "armed": false,
+      "calls": [
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://any.example/\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b\"}",
+          "ok": true
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://found.example/b\"}",
+          "ok": false
+        },
+        {
+          "tool": "read_web_page",
+          "args": "{\"url\":\"https://given.example/r\"}",
+          "ok": true
+        }
+      ],
+      "kept_to_page": true
     }
   ]
 }

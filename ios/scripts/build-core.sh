@@ -3,7 +3,7 @@
 # for the app and its tests to link.
 #
 #   ios/scripts/build-core.sh              # devices and the simulator
-#   ios/scripts/build-core.sh simulator    # the simulator only, as CI does
+#   ios/scripts/build-core.sh simulator    # the simulator only
 
 set -euo pipefail
 

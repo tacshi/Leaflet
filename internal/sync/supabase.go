@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"runtime"
 	"time"
 
@@ -165,6 +166,13 @@ func (s *Service) heartbeat(ctx context.Context) error {
 		"id": id, "user_id": uid, "name": s.deviceName(), "platform": runtime.GOOS,
 		"last_active_at": time.Now().UTC().Format(time.RFC3339Nano),
 	}, "", "revoked_at")
+	// The account has as many devices as it may (too_many_devices): this
+	// one stays out of the list, with no row to revoke, and syncs all the
+	// same.
+	if remote.IsInvalid(err) {
+		log.Printf("device %s: %v", id, err)
+		rows, err = nil, nil
+	}
 	if err != nil {
 		return err
 	}

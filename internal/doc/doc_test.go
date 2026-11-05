@@ -284,6 +284,57 @@ func TestMergeDeletesAndEdits(t *testing.T) {
 	}
 }
 
+// A block that comes back over a delete stays when the merge reaches the
+// side that deleted it, with changes of its own, whose base lacks the
+// block: it is newer than the delete, whenever it was edited. So does an
+// item added under it, which has no other place.
+func TestMergeKeepsWhatCameBackOverADelete(t *testing.T) {
+	base := page(map[string]int64{"a": 1, "b": 1}, para("a", "one"), para("b", "two"))
+	edited := base.Copy()
+	edited.Find("a").SetDelta(Delta{{Text: "one?"}})
+	edited = edited.Stamped(base, 100)
+	deleted := base.Copy()
+	deleted.Remove("a")
+	deleted = deleted.Stamped(base, 200)
+
+	merged, conflicts := Merge(base, edited, deleted)
+	if len(conflicts) != 1 || !reflect.DeepEqual(texts(merged), []string{"one?", "two"}) {
+		t.Fatalf("merged %v, conflicts %+v", texts(merged), conflicts)
+	}
+	if merged.Blocks["a"] <= deleted.Deleted["a"] || merged.Deleted["a"] != 0 {
+		t.Errorf("came back at %d over a delete at %d", merged.Blocks["a"], deleted.Deleted["a"])
+	}
+	typed := deleted.Copy()
+	typed.Find("b").SetDelta(Delta{{Text: "two!"}})
+	typed = typed.Stamped(deleted, 300)
+	got, conflicts := Merge(deleted, typed, merged)
+	if !reflect.DeepEqual(texts(got), []string{"one?", "two!"}) || len(conflicts) != 0 {
+		t.Errorf("the side that deleted it has %v, conflicts %+v", texts(got), conflicts)
+	}
+
+	// What came back holds an item only the other side has.
+	list := func(kids ...*Node) *Node {
+		n := textNode("bulleted_list", Delta{{Text: "list"}})
+		n.ID, n.Children = "l", kids
+		return n
+	}
+	base = page(map[string]int64{"l": 1, "b": 1}, list(), para("b", "two"))
+	added := base.Copy()
+	added.Find("l").Children = []*Node{para("k", "new")}
+	added = added.Stamped(base, 100)
+	deleted = base.Copy()
+	deleted.Remove("l")
+	deleted = deleted.Stamped(base, 200)
+	merged, _ = Merge(base, added, deleted)
+	typed = deleted.Copy()
+	typed.Find("b").SetDelta(Delta{{Text: "two!"}})
+	typed = typed.Stamped(deleted, 300)
+	got, _ = Merge(deleted, typed, merged)
+	if !reflect.DeepEqual(texts(got), []string{"list", "new", "two!"}) {
+		t.Errorf("the side that deleted it has %v", texts(got))
+	}
+}
+
 // A list one side deleted comes back whole when the other side edited an
 // item in it, and stays deleted when the other side only added a block
 // beside it.
@@ -765,6 +816,69 @@ func TestInlineLinksReadInLinearTime(t *testing.T) {
 	}
 	if d := FromMarkdown("[[a](b) [c](d)"); len(d) != 4 || d[1].Attrs.Href != "b" || d[3].Attrs.Href != "d" {
 		t.Errorf("links among [s read as %+v", d)
+	}
+}
+
+// Markers that close nowhere read in time in proportion to the text, as
+// links do, and formats and links nest only so deep: past that, text is
+// read as written, as the server's copy reads it.
+func TestInlineFormatsReadInLinearTime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("times reads")
+	}
+	for _, unit := range []string{"*a ", "_a ", "*", "*_[`a", "2 * 3 * "} {
+		read := func(n int) func() {
+			md := strings.Repeat(unit, n)
+			return func() { FromMarkdown(md) }
+		}
+		small, large := bestInTurns(read(1000), read(16000))
+		if large > 64*small {
+			t.Errorf("%q: 1000 read in %v, 16000 in %v", unit, small, large)
+		}
+	}
+	nested := func(n int) string { return strings.Repeat("[", n) + "x" + strings.Repeat("](u)", n) }
+	read := func(n int) func() {
+		md := nested(n)
+		return func() { FromMarkdown(md) }
+	}
+	small, large := bestInTurns(read(1000), read(16000))
+	if large > 64*small {
+		t.Errorf("nested links: 1000 read in %v, 16000 in %v", small, large)
+	}
+	if got := FromMarkdown(nested(10)); len(got) != 1 || got[0].Text != "x" || got[0].Attrs.Href != "u" {
+		t.Errorf("links nested 10 deep read as %+v", got)
+	}
+	if got := FromMarkdown(nested(40)).Plain(); !strings.Contains(got, "x](u)") {
+		t.Errorf("links nested 40 deep read as %q", got)
+	}
+	// A mention's name is read within the same limit.
+	name := "x"
+	for range 40 {
+		name = "[" + name + "](mention:user:u1)"
+	}
+	if got := FromMarkdown(name).Plain(); !strings.Contains(got, "](mention:user:u1)") {
+		t.Errorf("mentions nested 40 deep read as %q", got)
+	}
+}
+
+// Text that is all <s reads in time in proportion to it, in a table's cell
+// and a toggle's summary, each < looked at once.
+func TestTagsInTextReadInLinearTime(t *testing.T) {
+	if testing.Short() {
+		t.Skip("times reads")
+	}
+	read := func(n int) func() {
+		md := strings.Repeat("<", n) + "<br>"
+		return func() {
+			cellMarkdown(md)
+			cellBreaks(md)
+			summaryMarkdown(md)
+			summaryEnd(md)
+		}
+	}
+	small, large := bestInTurns(read(2000), read(32000))
+	if large > 64*small {
+		t.Errorf("2000 read in %v, 32000 in %v", small, large)
 	}
 }
 
@@ -1258,6 +1372,122 @@ func TestPlainCopy(t *testing.T) {
 	}
 }
 
+// Rows and columns each side put inside a table, as Add row below does,
+// each numbered among those it had, come out in the order of both, so no
+// cell has another's place, where only the first shows: whichever side is
+// local, with no conflict, and the same merged with either side again.
+func TestMergeTableLinesAddedInside(t *testing.T) {
+	table, _ := TableNode([][]string{{"h", "i"}, {"a", "b"}, {"c", "d"}}, "T")
+	base := FromBlocks([]*Node{table})
+	for id := range base.Blocks {
+		base.Blocks[id] = 1000
+	}
+	// insert puts text in a new line of a table at place at, moving those
+	// from it on, along key, with sizeKey its size and across the other way.
+	insert := func(c *Content, key, across, sizeKey string, at int, text string) {
+		tt := c.Find("T")
+		size := tt.Int(sizeKey, 0)
+		lines := tt.Int(map[string]string{"rowsLen": "colsLen", "colsLen": "rowsLen"}[sizeKey], 0)
+		for _, cell := range tt.Children {
+			if p := cell.Int(key, 0); p >= at {
+				cell.Set(key, p+1)
+			}
+		}
+		for k := range lines {
+			cell := TableCellNode(0, 0, Delta{{Text: fmt.Sprint(text, k)}})
+			cell.Set(key, at)
+			cell.Set(across, k)
+			tt.Children = append(tt.Children, cell)
+		}
+		tt.Set(sizeKey, size+1)
+		SortTableCells(tt)
+	}
+	row := func(c *Content, at int, text string) { insert(c, "rowPosition", "colPosition", "rowsLen", at, text) }
+	col := func(c *Content, at int, text string) { insert(c, "colPosition", "rowPosition", "colsLen", at, text) }
+	side := func(at int64, edits ...func(*Content)) *Content {
+		c := base.Copy()
+		for _, edit := range edits {
+			edit(c)
+		}
+		return c.Stamped(base, at)
+	}
+	for _, tc := range []struct {
+		name         string
+		mine, theirs *Content
+		want         [][]string
+	}{
+		{"rows in different places", side(2000, func(c *Content) { row(c, 1, "m") }), side(1500, func(c *Content) { row(c, 2, "t") }),
+			[][]string{{"h", "i"}, {"m0", "m1"}, {"a", "b"}, {"t0", "t1"}, {"c", "d"}}},
+		{"the other side first", side(1500, func(c *Content) { row(c, 1, "m") }), side(2000, func(c *Content) { row(c, 2, "t") }),
+			[][]string{{"h", "i"}, {"m0", "m1"}, {"a", "b"}, {"t0", "t1"}, {"c", "d"}}},
+		{"rows in one place", side(2000, func(c *Content) { row(c, 1, "m") }), side(1500, func(c *Content) { row(c, 1, "t") }),
+			[][]string{{"h", "i"}, {"m0", "m1"}, {"t0", "t1"}, {"a", "b"}, {"c", "d"}}},
+		{"two rows and one", side(2000, func(c *Content) { row(c, 2, "m") }), side(1500, func(c *Content) { row(c, 1, "t"); row(c, 1, "u") }),
+			[][]string{{"h", "i"}, {"u0", "u1"}, {"t0", "t1"}, {"a", "b"}, {"m0", "m1"}, {"c", "d"}}},
+		{"inside and at the end", side(2000, func(c *Content) { row(c, 3, "m") }), side(1500, func(c *Content) { row(c, 1, "t") }),
+			[][]string{{"h", "i"}, {"t0", "t1"}, {"a", "b"}, {"c", "d"}, {"m0", "m1"}}},
+		{"columns", side(2000, func(c *Content) { col(c, 1, "m") }), side(1500, func(c *Content) { col(c, 1, "t") }),
+			[][]string{{"h", "m0", "t0", "i"}, {"a", "m1", "t1", "b"}, {"c", "m2", "t2", "d"}}},
+		{"a row and a column", side(2000, func(c *Content) { row(c, 1, "m") }), side(1500, func(c *Content) { col(c, 1, "t") }),
+			[][]string{{"h", "t0", "i"}, {"m0", "", "m1"}, {"a", "t1", "b"}, {"c", "t2", "d"}}},
+	} {
+		var first *Content
+		for _, sides := range [][2]*Content{{tc.mine, tc.theirs}, {tc.theirs, tc.mine}} {
+			got, conflicts := Merge(base, sides[0], sides[1])
+			if rows := TableRows(got.Find("T")); !reflect.DeepEqual(rows, tc.want) {
+				t.Errorf("%s: rows %q, want %q", tc.name, rows, tc.want)
+			}
+			if len(conflicts) != 0 {
+				t.Errorf("%s: conflicts %+v", tc.name, conflicts)
+			}
+			if first == nil {
+				first = got
+			} else if got.Encode() != first.Encode() {
+				t.Errorf("%s: the merge differs as the sides swap", tc.name)
+			}
+		}
+		for _, side := range []*Content{tc.mine, tc.theirs} {
+			again, conflicts := Merge(base, side, first)
+			if rows := TableRows(again.Find("T")); !reflect.DeepEqual(rows, tc.want) || len(conflicts) != 0 {
+				t.Errorf("%s: merged again, rows %q, conflicts %+v", tc.name, rows, conflicts)
+			}
+		}
+	}
+	// A row taken out on one side and a column put in on the other: a row's
+	// cells, each with one side's place, stay a row.
+	less := side(2000, func(c *Content) {
+		tt := c.Find("T")
+		tt.Children = slices.DeleteFunc(tt.Children, func(k *Node) bool { return k.Int("rowPosition", 0) == 1 })
+		for _, cell := range tt.Children {
+			if cell.Int("rowPosition", 0) == 2 {
+				cell.Set("rowPosition", 1)
+			}
+		}
+		tt.Set("rowsLen", 2)
+	})
+	more := side(1500, func(c *Content) { col(c, 1, "t") })
+	for _, sides := range [][2]*Content{{less, more}, {more, less}} {
+		got, _ := Merge(base, sides[0], sides[1])
+		want := [][]string{{"h", "t0", "i"}, {"", "t1", ""}, {"c", "t2", "d"}}
+		if rows := TableRows(got.Find("T")); !reflect.DeepEqual(rows, want) {
+			t.Errorf("a row out and a column in: rows %q, want %q", rows, want)
+		}
+	}
+	// Both wrote it anew, keeping no cell: one's rows after the other's,
+	// in their own columns.
+	anew := func(text string, at int64) *Content {
+		c := base.Copy()
+		fresh, _ := TableNode([][]string{{text, text + "!"}}, "T")
+		c.Children[0].Children = fresh.Children
+		c.Children[0].Set("rowsLen", 1)
+		return c.Stamped(base, at)
+	}
+	got, _ := Merge(base, anew("mine", 2000), anew("theirs", 1500))
+	if rows, want := TableRows(got.Find("T")), [][]string{{"mine", "mine!"}, {"theirs", "theirs!"}}; !reflect.DeepEqual(rows, want) {
+		t.Errorf("written anew on both sides, rows %q", rows)
+	}
+}
+
 // Rows both sides added to a table, at the same places, are both kept, the
 // other side's after the primary's, as every reader shows them; so are
 // columns. Each merge places them alike, whichever side is local, with no
@@ -1430,7 +1660,7 @@ func TestRepairedIDsAreTheSameEachRead(t *testing.T) {
 
 // Blocks two devices make without IDs, each on its own, get IDs of their
 // own, whether an editor sends them (DecodeEdit), a page is made of them
-// (FromBlocks) or a page is copied (CopyFor): merged, both devices' blocks
+// (FromBlocks) or a page is copied (CopyPages): merged, both devices' blocks
 // are kept, not taken for one, as the IDs every reader gives stored
 // content would have them.
 func TestNewBlocksOnTwoDevicesKeepApart(t *testing.T) {
@@ -1449,7 +1679,7 @@ func TestNewBlocksOnTwoDevicesKeepApart(t *testing.T) {
 		t.Errorf("merged %q, want %q", texts(got), want)
 	}
 	made := func() string { return FromBlocks([]*Node{{Type: "paragraph"}}).Children[0].ID }
-	copied := func() string { return base.CopyFor(nil).Children[0].ID }
+	copied := func() string { return CopyPages(map[string]*Content{"p": base}, nil)["p"].Children[0].ID }
 	if a, b := made(), made(); a == b {
 		t.Errorf("two pages made of a block without an ID both have %s", a)
 	}
@@ -1500,6 +1730,43 @@ func bestInTurns(small, large func()) (time.Duration, time.Duration) {
 		bestLarge = min(bestLarge, timed(large))
 	}
 	return bestSmall, bestLarge
+}
+
+// Nulls among an op's blocks, as a run on the server could send, go as
+// they do from stored content: the op applies, and undoes, as it would
+// without them.
+func TestOpsDropNulls(t *testing.T) {
+	var insert Op
+	raw := `{"op":"insert","position":{"at":"end"},"nodes":[null,{"id":"a","type":"bulleted_list","children":[null,{"id":"b","type":"paragraph"}]}]}`
+	if err := json.Unmarshal([]byte(raw), &insert); err != nil {
+		t.Fatal(err)
+	}
+	c := page(map[string]int64{"p": 1}, para("p", "one"))
+	if err := c.Apply(insert); err != nil {
+		t.Fatal(err)
+	}
+	if a := c.Find("a"); a == nil || len(a.Children) != 1 || c.Find("b") == nil {
+		t.Errorf("inserted %+v", c.Children)
+	}
+	var del Op
+	raw = `{"op":"delete","ids":["a"],"previous":[null,{"node":null,"position":{"at":"end"}},{"node":{"id":"a","type":"paragraph","children":[null]},"position":{"at":"end"}}]}`
+	if err := json.Unmarshal([]byte(raw), &del); err != nil {
+		t.Fatal(err)
+	}
+	if len(del.Removed) != 1 || del.Removed[0].Node.ID != "a" || len(del.Removed[0].Node.Children) != 0 {
+		t.Errorf("removed %+v", del.Removed)
+	}
+	var replace Op
+	raw = `{"op":"replace","id":"p","node":{"id":"p","type":"bulleted_list","children":[null]},"previous":{"id":"p","type":"paragraph","children":[null]}}`
+	if err := json.Unmarshal([]byte(raw), &replace); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Apply(replace); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Apply(replace.Invert()[0]); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Page ops go as the protocol has them and come back the same, and each

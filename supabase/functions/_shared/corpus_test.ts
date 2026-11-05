@@ -24,13 +24,16 @@ import { agentURL, webURL } from "./url.ts";
 import {
   agentViews,
   applyOps,
+  cutResult,
   type Op,
   overwrites,
   PageEditSession,
+  TOOL_RESULT_LIMIT,
   ToolError,
   type ToolHooks,
   URL_RE,
 } from "./tools.ts";
+import { withoutThinking } from "../agent/handler.ts";
 import { keyAfter } from "./sortkey.ts";
 import { tokensToSegments } from "./segments.ts";
 import { userMessage } from "./prompt.ts";
@@ -65,6 +68,7 @@ import messagesCorpus from "./testdata/corpus/messages.json" with { type: "json"
 import sortKeysCorpus from "./testdata/corpus/sort_keys.json" with { type: "json" };
 import segmentsCorpus from "./testdata/corpus/segments.json" with { type: "json" };
 import transcriptsCorpus from "./testdata/corpus/transcripts.json" with { type: "json" };
+import cutsCorpus from "./testdata/corpus/cuts.json" with { type: "json" };
 
 /** A block without its IDs, which each side draws at random. */
 function withoutIds(node: NodeJSON): unknown {
@@ -527,4 +531,27 @@ Deno.test("transcripts read as the app's agents read them (testdata/corpus/trans
     return { segments, text: transcriptText(segments) };
   });
   await corpus("corpus/transcripts.json", made, transcriptsCorpus);
+});
+
+// A tool's result reaches the model cut where the app cuts it, half of a
+// surrogate pair and all (agents' cutResult), and what is left of a
+// model's answer without its thinking is the app's (withoutThinking).
+Deno.test("results and answers are cut as the app cuts them (testdata/corpus/cuts.json)", async () => {
+  const r = new Random(16);
+  const tail = ["a", "é", "字", "😀", "𝔸", "\n", '"'];
+  const tags = ["<think>", "</think>", "<THINK>", "</Think>", "<tHinK>", "<\u212Athink>", "<thin\u212A>"];
+  const words = ["a", "b", " ", "\n", "\t", "\u0085", "\ufeff", "\u3000", "字", "😀", "<think", "think>", "</", ">"];
+  const made = Array.from({ length: 300 }, () => {
+    const pad = TOOL_RESULT_LIMIT - r.int(6);
+    const end = r.text(tail, 6);
+    const answer = r.times(0, 8, () => r.chance(0.5) ? r.pick(tags) : r.text(words, 3)).join("");
+    return {
+      pad,
+      end,
+      cut: cutResult("x".repeat(pad) + end).slice(pad),
+      answer,
+      reply: withoutThinking(answer),
+    };
+  });
+  await corpus("corpus/cuts.json", made, cutsCorpus);
 });

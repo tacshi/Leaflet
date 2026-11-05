@@ -79,12 +79,13 @@ func (s *Service) contentsWait(e store.OutboxEntry) bool {
 // removal tells what becomes of a deleted file's stored contents, queued
 // to go (storage_delete). They wait until the row that says the file is
 // deleted has gone, as till then the file is still there for the other
-// devices, and while a copy of it waits to go up from them (copyWaits).
-// They stay for good when the file lives here, as when its deletion gave
-// way to another's row: the entry is done then.
+// devices, while a copy of it waits to go up from them (copyWaits), and
+// while its own upload still ends, which would put them back. They stay
+// for good when the file lives here, as when its deletion gave way to
+// another's row: the entry is done then.
 func (s *Service) removal(payload map[string]any) (waits, stays bool) {
 	id := store.S(payload, "file_id")
-	if s.st.HasPending("files", id) || s.copyWaits(store.S(payload, "bucket"), store.S(payload, "path")) {
+	if s.st.HasPending("files", id) || s.uploadRuns("files/"+id) || s.copyWaits(store.S(payload, "bucket"), store.S(payload, "path")) {
 		return true, false
 	}
 	f, err := s.st.File(id)

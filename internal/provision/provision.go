@@ -53,7 +53,7 @@ var Functions = []string{"agent", "providers", "stt", "account"}
 // FunctionsVersion orders the functions builds deploy: it goes up by one
 // with each change to them, as TestFunctionsVersion holds it to, so a build
 // deploys over older functions only, never over newer ones.
-const FunctionsVersion = 11
+const FunctionsVersion = 12
 
 // hashSecret begins the name of the project secret that says which
 // functions are deployed: the rest of the name is their FunctionsVersion
@@ -359,8 +359,10 @@ func Ready(ctx context.Context, api *supabaseapi.Client, p supabaseapi.Project) 
 // deploying; only a development build deploys its own over them, as they
 // change while it is worked on. A migration another device applied
 // meanwhile, setting the project up at the same time, counts as done.
-// Sign-ups it could not close for now leave it ErrSignUpsOpen, once the
-// rest is done. progress reports steps done of the steps there are.
+// Sign-ups it could not close for now leave it ErrSignUpsOpen, and a
+// Realtime that has not made its messages yet ErrRealtimeWaits, once the
+// rest is done: it runs again until neither does. progress reports steps
+// done of the steps there are.
 func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress func(done, total int)) error {
 	all, err := Migrations()
 	if err != nil {
@@ -408,9 +410,9 @@ func Setup(ctx context.Context, api *supabaseapi.Client, ref string, progress fu
 		}
 		step()
 	}
-	// Sign-ups that could not be closed for now leave the rest to do, and
-	// Setup says so at the end, to be run again.
-	open := closeSignUps(ctx, api, ref)
+	// Sign-ups that could not be closed for now, and a Realtime not ready,
+	// leave the rest to do, and Setup says so at the end, to be run again.
+	open := errors.Join(closeSignUps(ctx, api, ref), hearSaves(ctx, api, ref))
 	if !deploy {
 		return open
 	}
@@ -467,6 +469,33 @@ func closeSignUps(ctx context.Context, api *supabaseapi.Client, ref string) erro
 		return nil
 	}
 	return fmt.Errorf("%w: %w", ErrSignUpsOpen, err)
+}
+
+// ErrRealtimeWaits is Setup's when it did all else, but the project's
+// Realtime has not made realtime.messages yet, as it may only once a
+// device first connects: the policy that lets devices hear a page's
+// saves goes on that table, and Setup is to run again to make it. Until
+// then the project works, and its devices check their open pages.
+var ErrRealtimeWaits = errors.New("provision: Realtime has not made its messages yet")
+
+// realtimeMark is what ensureSavesHeard raises while there is no table.
+const realtimeMark = "leaflet_realtime_waits"
+
+// ensureSavesHeard has the project make the policy, which it can only once
+// the table is there, and raises until it is.
+const ensureSavesHeard = "do $leaflet$ begin if not public.ensure_page_saves_heard() then raise exception '" + realtimeMark + "'; end if; end $leaflet$;"
+
+// hearSaves makes the Realtime policy for a page's saves, when it can, and
+// says why not, as ErrRealtimeWaits, when it can't.
+func hearSaves(ctx context.Context, api *supabaseapi.Client, ref string) error {
+	err := api.Query(ctx, ref, ensureSavesHeard)
+	if e, ok := errors.AsType[*supabaseapi.Error](err); ok && strings.Contains(e.Message, realtimeMark) {
+		return ErrRealtimeWaits
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrRealtimeWaits, err)
+	}
+	return nil
 }
 
 // refusedForGood reports whether the API refused a request as it would

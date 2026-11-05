@@ -176,3 +176,27 @@ func TestPictureEndsAsItIsGivenUp(t *testing.T) {
 		t.Fatal("a picture given up on went on waiting")
 	}
 }
+
+// A file whose page left the window as it was copied goes at the end of
+// the page, closed or open in another window: no editor of it has a caret
+// to put it at.
+func TestAppendBlockGoesAtThePagesEnd(t *testing.T) {
+	c, _ := open(t)
+	page := create(t, c, `{"title":"Notes"}`)
+	if err := c.AppendBlock(page.ID, `{"id":"closed","type":"file","data":{"name":"a.pdf"}}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := content(t, c, page.ID); got.Find("closed") == nil {
+		t.Fatalf("a closed page has none of it: %s", got.Encode())
+	}
+	if err := c.AppendBlock(page.ID, `{"id":"open","type":"file","data":{"name":"b.pdf"}}`); err != nil {
+		t.Fatal(err)
+	}
+	got := content(t, c, page.ID)
+	if n := len(got.Children); n < 2 || got.Children[n-2].ID != "closed" || got.Children[n-1].ID != "open" {
+		t.Fatalf("blocks of an open page: %s", got.Encode())
+	}
+	if err := c.AppendBlock(page.ID, `not a block`); err == nil {
+		t.Error("a block that can't be read was taken")
+	}
+}

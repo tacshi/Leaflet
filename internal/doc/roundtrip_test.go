@@ -29,6 +29,42 @@ func block(typ string, d Delta, kids ...*Node) *Node {
 	return n
 }
 
+// A formula with a line of $$ can't go between lines of $$: it reads back
+// as code, with nothing after it taken in.
+func TestFormulaWithALineOfDollarsReadsBack(t *testing.T) {
+	got := readBack(MathNode("x^2\n$$\ny"), textNode("paragraph", Delta{{Text: "after"}}))
+	if len(got) != 2 || got[0].Type != "code" || got[0].Delta().Plain() != "x^2\n$$\ny" || got[1].Delta().Plain() != "after" {
+		t.Errorf("read back as %q", shape(got))
+	}
+	sameShape(t, MathNode("x^2\n$$y"), textNode("paragraph", Delta{{Text: "after"}}))
+}
+
+// A backtick in a link's address goes as %60, so what looks for code spans
+// before it reads links, a table's row and a toggle's summary, finds none
+// there.
+func TestBacktickInALinkReadsBack(t *testing.T) {
+	link := Attrs{Href: "https://a.b/`x"}
+	code := Attrs{Code: true}
+	table, err := TableNode([][]string{{"h", "h"}, {Delta{{Text: "a", Attrs: link}}.ToMarkdown(), Delta{{Text: "b|c", Attrs: code}}.ToMarkdown()}}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := block("toggle_list", Delta{{Text: "a", Attrs: link}, {Text: " "}, {Text: "</summary>", Attrs: code}})
+	got := readBack(table, summary)
+	if len(got) != 2 {
+		t.Fatalf("read back as %q", shape(got))
+	}
+	if rows := PlainTableRows(got[0]); !slices.Equal(rows[1], []string{"a", "b|c"}) {
+		t.Errorf("rows %q", rows)
+	}
+	if text := got[1].Delta().Plain(); text != "a </summary>" {
+		t.Errorf("summary %q", text)
+	}
+	if href := FromMarkdown(Delta{{Text: "a", Attrs: link}}.ToMarkdown())[0].Attrs.Href; href != "https://a.b/%60x" {
+		t.Errorf("link %q", href)
+	}
+}
+
 // A row of a table that is all dashes is a row, as a cell of "-" is the
 // cell's text; only the line under the header is not.
 func TestTableRowOfDashesReadsBack(t *testing.T) {

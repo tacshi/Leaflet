@@ -150,12 +150,18 @@ func (r *runner) where(l *listing, p listedPage) string {
 	return "at the top level"
 }
 
-// completePage completes a page's title, the first argument and --in's:
-// a shell's completion asks the command line itself (cobra's __complete).
-func (r *runner) completePage(_ *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
+// completePage completes a page's title as the first argument: a shell's
+// completion asks the command line itself (cobra's __complete).
+func (r *runner) completePage(cmd *cobra.Command, args []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 	if len(args) > 0 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
+	return r.completeInto(cmd, args, toComplete)
+}
+
+// completeInto completes a page's title, for --in, whatever comes before
+// it.
+func (r *runner) completeInto(_ *cobra.Command, _ []string, toComplete string) ([]cobra.Completion, cobra.ShellCompDirective) {
 	l, err := r.completing()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError

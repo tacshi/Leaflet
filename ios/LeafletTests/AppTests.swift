@@ -9,6 +9,18 @@ import Testing
 /// the order of the core's answers, and the device's name.
 @MainActor
 struct AppTests {
+    /// A model server asks for no key, unless it keeps one: the core has
+    /// that typed again as the server moves, so the form must take it.
+    @Test func aModelServerThatKeepsAKeyAsksForIt() {
+        let preset = ProviderPreset(
+            id: "lmstudio", name: "LM Studio", baseURL: "http://localhost:1234/v1", auth: "none",
+            group: "Local", local: true, suggested: nil, placeholder: "")
+        var draft = ProviderForm.Draft(preset: preset)
+        #expect(!ProviderForm.takesKey(draft))
+        draft.provider.hasKey = true
+        #expect(ProviderForm.takesKey(draft))
+    }
+
     @Test func openingAnotherPageLetsGoOfWhatWasStartedOnTheLast() {
         let scene = SceneModel()
         scene.open("a")
@@ -70,6 +82,88 @@ struct AppTests {
         #expect(scene.recordOnOpen == "rec")
         scene.open("other")
         #expect(scene.recordOnOpen == nil)
+    }
+
+    /// A page the window still shows stays open as its view goes, for the
+    /// view it moves to: it closes once the window shows another.
+    @Test func aPageTheWindowShowsStaysOpenAsItsViewGoes() async throws {
+        let host = try PageTests.Host()
+        let page = try await host.core.client.createPage(NewPage(title: "Notes"))
+        let scene = SceneModel()
+        scene.open(page.id)
+        let model = PageModel(id: page.id, app: host)
+        await model.open()
+        scene.release(model)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!model.closed)
+        scene.open(nil)
+        for _ in 0..<100 where !model.closed { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(model.closed)
+    }
+
+    /// A window closing closes the page it showed, whose view's task ends
+    /// after the window's views have gone: held then, nothing would close
+    /// it, and the core would keep an editor nobody has.
+    @Test func aWindowClosingClosesThePageItShowed() async throws {
+        let host = try PageTests.Host()
+        let page = try await host.core.client.createPage(NewPage(title: "Notes"))
+        let scene = SceneModel()
+        scene.open(page.id)
+        let model = PageModel(id: page.id, app: host)
+        await model.open()
+        scene.closeHeld()
+        scene.release(model)
+        for _ in 0..<100 where !model.closed { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(model.closed)
+
+        // Back again, a page it shows stays open as its view goes.
+        scene.reopened()
+        let again = PageModel(id: page.id, app: host)
+        await again.open()
+        scene.release(again)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!again.closed)
+        scene.closeHeld()
+        for _ in 0..<100 where !again.closed { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(again.closed)
+    }
+
+    /// A file put in a page goes in through the editor only while the
+    /// window shows that page: copying one takes a while, and the window
+    /// may have moved on.
+    @Test func aWindowGivesTheEditorOfThePageItShowsAlone() throws {
+        let host = try PageTests.Host()
+        let model = PageModel(id: "a", app: host)
+        let editor = EditorController(
+            style: EditorStyle(textSize: 17, palette: Palette.palettes["Indigo"]!["light"]!))
+        let scene = SceneModel()
+        scene.page = model
+        scene.editor = editor
+        #expect(scene.editor(of: "a") === editor)
+        #expect(scene.editor(of: "b") == nil)
+        scene.letGo(model)
+        #expect(scene.editor(of: "a") == nil)
+    }
+
+    /// Only the latest time the app went to the background stops sync: a
+    /// stop cuts short the pass running, which may be the later one's.
+    @Test func onlyTheLatestLeavingStopsSync() {
+        var leavings = Leavings()
+        let first = leavings.begin()
+        #expect(leavings.isLatest(first))
+        let second = leavings.begin()
+        #expect(!leavings.isLatest(first))
+        #expect(leavings.isLatest(second))
+    }
+
+    /// A background pass out of time stops sync, unless a window came to
+    /// the front meanwhile, which sync goes on for.
+    @Test func aPassOutOfTimeLeavesAWindowItsSync() async {
+        var stops = 0
+        await BackgroundSync.outOfTime(inFront: { true }, stop: { stops += 1 })
+        #expect(stops == 0)
+        await BackgroundSync.outOfTime(inFront: { false }, stop: { stops += 1 })
+        #expect(stops == 1)
     }
 
     @Test func anOlderAnswerDoesNotReplaceANewerOne() {

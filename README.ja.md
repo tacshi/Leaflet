@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/tacshi/Leaflet/releases/latest"><img src="https://img.shields.io/github/v/release/tacshi/Leaflet?sort=semver&label=release" alt="最新リリース"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT ライセンス"></a>
-  <a href="#動作環境"><img src="https://img.shields.io/badge/macOS-12%2B-000000?logo=apple&logoColor=white" alt="macOS 12 以降"></a>
+  <a href="#動作環境"><img src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white" alt="macOS 13 以降"></a>
   <a href="#動作環境"><img src="https://img.shields.io/badge/Windows-x64%20%7C%20arm64-0078D4?logo=windows&logoColor=white" alt="Windows x64 と arm64"></a>
   <a href="#ios"><img src="https://img.shields.io/badge/iOS%20%7C%20iPadOS-26%2B%20(in%20progress)-000000?logo=apple&logoColor=white" alt="iOS と iPadOS 26 以降（開発中）"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go 1.27"></a>
@@ -139,7 +139,7 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 
 ## 動作環境
 
-- macOS 12 以降（Apple シリコンまたは Intel）、または x64 / arm64 の Windows。
+- macOS 13 以降（Apple シリコンまたは Intel）、または x64 / arm64 の Windows。
 - ソースからビルドするには Go 1.27.3 以降。Go のコードに cgo や C
   コンパイラは不要です。Mac アプリのオンデバイス音声認識ヘルパー
   （[`speech`](speech)）は Swift で書かれ、`scripts/build-speech.sh`
@@ -158,6 +158,8 @@ Leaflet は Go と [MyGo](https://github.com/egoist/mygo) で書かれていま�
 [最新リリース](https://github.com/tacshi/Leaflet/releases/latest)から macOS
 用のディスクイメージ、または Windows 用のインストーラをダウンロードしてください。
 インストールしたアプリは GitHub Releases から自動でアップデートされます。
+Windows インストーラはまだコード署名されていないため、初回の実行時に SmartScreen
+が警告することがあります。
 
 ## ソースから実行
 
@@ -260,7 +262,7 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 | `leaflet ls` | フォルダとページを ID とタグ付きで一覧する |
 | `leaflet search QUERY` | タイトル、タグ、本文でページを、また録音やコメントを探す |
 | `leaflet cat PAGE` | ページを Markdown で出力する |
-| `leaflet new [TITLE]` | パイプで渡した Markdown からページを作成し、その ID を出力する |
+| `leaflet new [TITLE]` | ページを作成し、その ID を出力する。`--stdin` でパイプで渡した Markdown を内容にする |
 | `leaflet append PAGE [TEXT...]` | ページの末尾に Markdown を追加する：指定した文字列、またはパイプで渡した内容 |
 | `leaflet rename PAGE TITLE` | ページのタイトルを変更する |
 | `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | ページを別のページの中、フォルダ、またはトップレベルへ移動する |
@@ -273,7 +275,7 @@ fish、powershell）はページのタイトルを補完する補完スクリプ
 
 ```bash
 make test 2>&1 | leaflet append "CI log"
-leaflet new "Meeting notes" --folder Work < notes.md
+leaflet new "Meeting notes" --folder Work --stdin < notes.md
 leaflet cat Roadmap > roadmap.md
 ```
 
@@ -303,7 +305,7 @@ go build -o leaflet . && LEAFLET_DATA_DIR="$HOME/Library/Application Support/Lea
 | --- | --- |
 | `scripts/build-debug.sh [--mac\|--win] [--open]` | Leaflet Debug という名前のデバッグビルド。独自の識別子とデータフォルダを持ち、自動アップデートしないため、リリース版と並べて動かせます |
 | `scripts/build-release.sh [--mac] [--win] [<version>]` | 署名・公証済みの Apple シリコン用、Intel 用、ユニバーサルのディスクイメージと、Windows x64 / arm64 用インストーラ、署名付きのアップデートアーカイブ |
-| `scripts/publish.sh <version> [--mac\|--win] [--dry-run]` | macOS と Windows、または指定した方の GitHub リリース：チェック、`CHANGELOG.md` からのリリースノート、ビルド、タグ付け、公開 |
+| `scripts/publish.sh <version> [--mac\|--win] [--allow-partial] [--dry-run]` | macOS と Windows の GitHub リリース：チェック、`CHANGELOG.md` からのリリースノート、ビルド、タグ付け、公開。片方だけ指定すると、もう片方のビルドが加わるまでドラフトのままです。プラットフォームのアップデートマニフェストがないリリースでは、そのインストール済みアプリにアップデートが届かないためです。`--allow-partial` を付けるとそのまま公開します |
 
 Windows では、PowerShell 7 のスクリプトがそのマシン上で Windows アプリを
 ビルドします。NSIS がインストールされていなければ MyGo がダウンロードし、

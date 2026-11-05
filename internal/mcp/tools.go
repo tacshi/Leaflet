@@ -1,9 +1,12 @@
 package mcp
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"math"
 	"slices"
@@ -21,9 +24,9 @@ import (
 // pageToolNames are the in-app tools that work on one page.
 var pageToolNames = []string{"read_page", "write_markdown", "insert_blocks", "replace_block", "move_block", "delete_blocks"}
 
-// hints are each tool's title, and whether it only reads or may undo
-// what is written (the page history keeps it all the same). Every tool
-// stays on this device: none reaches the open world.
+// hints are each tool's title, and whether it only reads, or changes what
+// is there rather than adding to it, as a move does (the page history
+// keeps a page's blocks all the same).
 var hints = map[string]struct {
 	title                 string
 	readOnly, destructive bool
@@ -34,14 +37,14 @@ var hints = map[string]struct {
 	"write_markdown": {"Write Markdown", false, false},
 	"insert_blocks":  {"Insert Blocks", false, false},
 	"replace_block":  {"Replace Block", false, true},
-	"move_block":     {"Move Block", false, false},
+	"move_block":     {"Move Block", false, true},
 	"delete_blocks":  {"Delete Blocks", false, true},
 	"create_page":    {"Create Page", false, false},
-	"rename_page":    {"Rename Page", false, false},
+	"rename_page":    {"Rename Page", false, true},
 	"set_page_tags":  {"Set Page Tags", false, true},
-	"move_page":      {"Move Page", false, false},
+	"move_page":      {"Move Page", false, true},
 	"create_folder":  {"Create Folder", false, false},
-	"rename_folder":  {"Rename Folder", false, false},
+	"rename_folder":  {"Rename Folder", false, true},
 }
 
 func toolList() []map[string]any {
@@ -55,7 +58,10 @@ func toolList() []map[string]any {
 	var out []map[string]any
 	add := func(name, desc string, schema map[string]any) {
 		h := hints[name]
-		annotations := map[string]any{"title": h.title, "readOnlyHint": h.readOnly, "openWorldHint": false}
+		// What a tool reads stays on this device. What it writes does not:
+		// sync sends it on, to whoever else has the page, and the app loads
+		// a picture or a link card in it from its site by itself.
+		annotations := map[string]any{"title": h.title, "readOnlyHint": h.readOnly, "openWorldHint": !h.readOnly}
 		if !h.readOnly {
 			annotations["destructiveHint"] = h.destructive
 		}
@@ -114,6 +120,9 @@ const historyGap = 10 * time.Minute
 
 type pageTools struct {
 	s *Server
+	// app is a client that is an AI app, which what it reads on a page can
+	// steer, not a command the user gave themselves (Server.Call).
+	app bool
 	// edited is when this client last edited each page.
 	edited map[string]int64
 	// read is each page as this client last read or edited it, of the
@@ -144,7 +153,32 @@ func (t *pageTools) keep(id string, c *doc.Content) {
 }
 
 func (t *pageTools) call(name string, args map[string]any) map[string]any {
-	return agents.ToolAnswer(t.dispatch(name, args))
+	clean, _ := cleanArg(args).(map[string]any)
+	return agents.ToolAnswer(t.dispatch(name, clean))
+}
+
+// cleanArg is an argument of a call, its text fit to keep, in titles and
+// names as in Markdown: a NUL, which the server's columns refuse, so that
+// the page would never sync, and bytes that are no UTF-8, which go through
+// JSON no further, each read as U+FFFD.
+func cleanArg(v any) any {
+	switch v := v.(type) {
+	case string:
+		return store.CleanText(v)
+	case []any:
+		out := make([]any, len(v))
+		for i, e := range v {
+			out[i] = cleanArg(e)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		for k, e := range v {
+			out[k] = cleanArg(e)
+		}
+		return out
+	}
+	return v
 }
 
 func toolErr(msg string) error { return &doc.ToolError{Message: msg} }
@@ -426,6 +460,10 @@ func (t *pageTools) onPage(name string, args map[string]any) (map[string]any, er
 	if saved != nil {
 		t.edited[p.ID] = doc.NowMs()
 		t.keep(p.ID, saved.Copy())
+		// Not kept, the client's next edit only keeps a snapshot more.
+		if err := st.SetValue(editedPrefix+p.ID, editMark(t.s.agent, saved)); err != nil {
+			log.Printf("mcp: %v", err)
+		}
 	}
 	return out, nil
 }
@@ -530,19 +568,35 @@ func conflictSince(read, now *doc.Content, ops []doc.Op) bool {
 // standing in for the app.
 var beforeSave = func(pageID string) {}
 
+// editedPrefix starts the key-value settings that say how a client left a
+// page: editedPrefix + its ID is the page's editMark as last saved here.
+const editedPrefix = "mcp_edited:"
+
+// editMark names content as agent saved it, for a client started again to
+// tell the page it finds from one changed since: the blocks alone, as a
+// save stamps their times.
+func editMark(agent string, c *doc.Content) string {
+	sum := sha256.Sum256([]byte(agent + "\x00" + (&doc.Content{Children: c.Children}).Encode()))
+	return hex.EncodeToString(sum[:])
+}
+
 // snapshot keeps the page as it was before this client's edits, once per
 // stretch of them: none while the last edit saved is recent, nor while
 // the page's newest snapshot is a recent one of this client's. A client
 // started again for each edit, as the command line is, remembers no edit
 // of its own, and would otherwise keep one a run, pushing the page's
-// older history out.
+// older history out. Either way the page must be as this client left it:
+// what the user typed since is in no snapshot, as a snapshot this recent
+// holds autosave back, and an edit after it would leave it in none.
 func (t *pageTools) snapshot(pageID string, before *doc.Content) error {
-	if last, ok := t.edited[pageID]; ok && doc.NowMs()-last < historyGap.Milliseconds() {
-		return nil
-	}
 	label := "Before " + t.s.agent
-	if h, err := t.s.st.NewestHistory(pageID); err == nil && h.Reason == "agent_run" && h.Label == label && time.Since(h.CreatedAt) < historyGap {
-		return nil
+	if mark, ok := t.s.st.Value(editedPrefix + pageID); ok && mark == editMark(t.s.agent, before) {
+		if last, ok := t.edited[pageID]; ok && doc.NowMs()-last < historyGap.Milliseconds() {
+			return nil
+		}
+		if h, err := t.s.st.NewestHistory(pageID); err == nil && h.Reason == "agent_run" && h.Label == label && time.Since(h.CreatedAt) < historyGap {
+			return nil
+		}
 	}
 	return t.s.st.AddHistory(pageID, before, "agent_run", "", label)
 }
@@ -598,6 +652,12 @@ func (t *pageTools) movePage(args map[string]any) (map[string]any, error) {
 		return nil, toolErr("A page shared with the user stays inside a page of its space: it cannot move to the top level or into a folder.")
 	case parent.ID != "" && st.IsDescendant(parent.ID, p.ID):
 		return nil, toolErr("A page cannot move inside itself or one of its subpages.")
+	// As the workspace agent's rule has it: with this one call a page the
+	// user alone has would go to others, its subpages with it, on what a
+	// page may have told the client. The user does that themselves, in
+	// the app or with a command of their own.
+	case t.app && parent.ID != "" && agents.ShowsToOthers(st, p, parent):
+		return nil, toolErr("Other people may have that page: inside it, this page and its subpages would be theirs to read. The user can move it there themselves, in the app.")
 	}
 	if p.ParentID == parent.ID && (parent.ID != "" || p.FolderID == folderID) {
 		return map[string]any{"page_id": p.ID}, nil

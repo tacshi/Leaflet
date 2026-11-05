@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Applies every migration in supabase/migrations, oldest first, to a new
 # database, as the app does to each person's own project, then runs the
-# checks in scripts/migrations/seeded.sql, test.sql and access.sql on it.
+# checks in scripts/migrations/seeded.sql, test.sql, access.sql and
+# realtime.sql on it.
 # The database is a throwaway container of the supabase/postgres image,
 # which hosted projects run, made and removed here: only Docker is needed.
 #
@@ -82,4 +83,6 @@ for f in seeded.sql test.sql access.sql; do
 	echo "$f"
 	sql postgres --output /dev/null <"$root/scripts/migrations/$f"
 done
+echo realtime.sql
+sql supabase_admin --output /dev/null <"$root/scripts/migrations/realtime.sql"
 echo "Every migration applies, and the checks pass."

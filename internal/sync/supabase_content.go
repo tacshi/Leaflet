@@ -88,8 +88,16 @@ func (s *Service) saveContent(ctx context.Context, pageID string) (bool, error) 
 		}
 		merged, conflicts = doc.Merge(baseOf(row), local, theirs)
 	}
+	// What the server keeps is what this device keeps then, as the base
+	// they agree on.
 	encoded := merged.Encode()
-	values := map[string]any{"content": json.RawMessage(encoded), "plain_text": merged.PlainText()}
+	if clean := store.CleanJSON(encoded); clean != encoded {
+		if merged, err = doc.Decode(clean); err != nil {
+			return false, errUnreadable
+		}
+		encoded = clean
+	}
+	values := map[string]any{"content": json.RawMessage(encoded), "plain_text": store.CleanText(merged.PlainText())}
 	// The server answers with the revision and time it saved, not the
 	// content this device sent it.
 	var saved []map[string]any
@@ -358,10 +366,17 @@ func (s *Service) storeRemote(pageID string, remoteRow map[string]any) (*doc.Con
 // the cursor, then that of the pages that wait (pullWaiting): the pages
 // that wait never hold up the ones the cursor passes over.
 func (s *Service) pullContents(ctx context.Context) error {
-	if err := s.paged("page_content", func(bool) (bool, error) { return s.pullContentsPage(ctx) }); err != nil {
-		return err
+	s.contentsAsked, s.contentsSlow = false, false
+	err := s.paged("page_content", func(bool) (bool, error) { return s.pullContentsPage(ctx) })
+	if err == nil {
+		err = s.pullWaiting(ctx)
 	}
-	return s.pullWaiting(ctx)
+	// A pull that asked for content, and took no such wait, leaves the
+	// next to ask for more: one that asked for none tells nothing.
+	if err == nil && s.contentsAsked && !s.contentsSlow {
+		s.contentsAt = min(2*s.contentsAt, contentBatch)
+	}
+	return err
 }
 
 // contentBatch is how many pages' content one request fetches; tests make
@@ -509,22 +524,46 @@ func (s *Service) pullWaiting(ctx context.Context) error {
 	return failed
 }
 
-// fetchContents fetches the content of pages from the server, contentBatch
-// at a time, in order, and stores each merged. It reports the pages done
-// with, which leave waiting: those stored, those the server has no content
-// of, and those whose content cannot be read, which wait, so the other
-// pages' content still comes. It stops at the first that fails, which
-// waits too.
+// fetchContents fetches the content of pages from the server, up to
+// contentBatch at a time, in order, and stores each merged. It reports the
+// pages done with, which leave waiting: those stored, those the server has
+// no content of, and those whose content cannot be read, which wait, so
+// the other pages' content still comes. It stops at the first that fails,
+// which waits too. Pages whose content together takes longer than a
+// request may, by this client, the database or a gateway, are asked for in
+// fewer at a time, from then on: asked for the same way, they would never
+// come. A page too heavy alone, of a server that still answers, waits, so
+// the others come.
 func (s *Service) fetchContents(ctx context.Context, ids []string, waiting map[string]bool) (map[string]bool, error) {
 	done := map[string]bool{}
-	for chunk := range slices.Chunk(ids, contentBatch) {
+	s.contentsAsked = s.contentsAsked || len(ids) > 0
+	for len(ids) > 0 {
+		size := contentBatch
+		if s.contentsAt > 0 {
+			size = min(s.contentsAt, size)
+		}
+		chunk := ids[:min(size, len(ids))]
 		rows, err := s.be.Select(ctx, "page_content", remote.Query{Select: "page_id, " + contentCols, Filters: []string{remote.In("page_id", chunk)}})
+		if err != nil && remote.IsTooSlow(err) && ctx.Err() == nil {
+			s.contentsSlow = true
+			if len(chunk) > 1 {
+				s.contentsAt = len(chunk) / 2
+				continue
+			}
+			if s.serverAnswers(ctx) {
+				log.Printf("pull %s: %v", chunk[0], err)
+				waiting[chunk[0]], done[chunk[0]] = true, true
+				ids = ids[1:]
+				continue
+			}
+		}
 		if err != nil {
 			for _, id := range chunk {
 				waiting[id] = true
 			}
 			return done, err
 		}
+		ids = ids[len(chunk):]
 		byID := make(map[string]map[string]any, len(rows))
 		for _, r := range rows {
 			byID[store.S(r, "page_id")] = r

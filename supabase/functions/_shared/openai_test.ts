@@ -9,6 +9,7 @@ import {
   readText,
   retryAfterMs,
   retryWait,
+  sentMessage,
 } from "./openai.ts";
 
 function events(...data: string[]): Response {
@@ -73,6 +74,21 @@ Deno.test("calls numbered with gaps, and one after them without its number, come
     ["c2", "read_page"],
     ["c3", "list_pages"],
   ]);
+});
+
+// A call cut off goes back to the provider without what it wrote, which a
+// server that reads it would refuse the conversation over, as Go's
+// sentArguments has it.
+Deno.test("only a call's arguments that are a JSON object go back to the provider", () => {
+  const call = (args: string) => ({ id: "c", type: "function" as const, function: { name: "t", arguments: args } });
+  const sent = sentMessage({
+    role: "assistant",
+    content: "",
+    tool_calls: [call(`{"a":1}`), call(`{"blocks":[{"type":"para`), call("[1]"), call("null")],
+  });
+  assertEquals(sent.tool_calls!.map((c) => c.function.arguments), [`{"a":1}`, "{}", "{}", "{}"]);
+  const plain = { role: "assistant" as const, content: "done" };
+  assertEquals(sentMessage(plain), plain);
 });
 
 Deno.test("a saved key stays with the address and preset it was saved for", () => {
@@ -146,4 +162,14 @@ Deno.test("only a busy or failing model is asked again", () => {
   assertEquals(retryWait(new ProviderError(503, "down", "", 31_000)), null);
   assertEquals(retryWait(new ProviderError(400, "bad")), null);
   assertEquals(retryWait(new Error("network")), null);
+});
+
+// A provider's message goes on the job as it comes: cut inside a pair of
+// surrogates it would stay half of one, which the database refuses, and
+// the job would stay running.
+Deno.test("a provider's message cut short stays well formed", async () => {
+  const message = (await failure(new Response(JSON.stringify({ message: `x${"😀".repeat(200)}` }), { status: 400 })))
+    .message;
+  assert(message.isWellFormed());
+  assert(message.endsWith("�…"), message.slice(-4));
 });

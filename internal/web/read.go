@@ -86,19 +86,23 @@ func Read(ctx context.Context, link string) (Page, error) {
 	if err != nil {
 		return Page{}, err
 	}
-	// Text in another encoding than UTF-8 is read in it, as a browser reads
-	// it: by its byte order mark, its Content-Type, its own <meta>, or else
-	// as UTF-8 if it is that.
-	enc, _, _ := charset.DetermineEncoding(data, ctype)
-	if decoded, err := enc.NewDecoder().Bytes(data); err == nil {
-		data = decoded
-	}
-	src := strings.ToValidUTF8(string(data), "�")
+	src := pageText(data, ctype)
 	if mt == "text/html" || mt == "application/xhtml+xml" {
 		return readHTML(ctx, final, src)
 	}
 	t, cut := truncate(strings.TrimSpace(src))
 	return Page{URL: final, Text: t, Truncated: cut, Links: urlsOf(t)}, nil
+}
+
+// pageText is a page read from the web as text. Text in another encoding
+// than UTF-8 is read in it, as a browser reads it: by its byte order mark,
+// its Content-Type, its own <meta>, or else as UTF-8 if it is that.
+func pageText(data []byte, ctype string) string {
+	enc, _, _ := charset.DetermineEncoding(data, ctype)
+	if decoded, err := enc.NewDecoder().Bytes(data); err == nil {
+		data = decoded
+	}
+	return strings.ToValidUTF8(string(data), "�")
 }
 
 // readable reports whether a media type is text an agent reads.

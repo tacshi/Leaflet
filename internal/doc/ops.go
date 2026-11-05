@@ -194,6 +194,18 @@ func (o *Op) UnmarshalJSON(raw []byte) error {
 			return err
 		}
 	}
+	// Ops come from outside, as a run on the server sends them: nulls among
+	// their blocks go, as they do from stored content.
+	o.Nodes = withoutNil(o.Nodes)
+	o.Removed = slices.DeleteFunc(o.Removed, func(r Removed) bool { return r.Node == nil })
+	for _, r := range o.Removed {
+		r.Node.Children = withoutNil(r.Node.Children)
+	}
+	for _, n := range []*Node{o.Node, o.PrevNode} {
+		if n != nil {
+			n.Children = withoutNil(n.Children)
+		}
+	}
 	return nil
 }
 

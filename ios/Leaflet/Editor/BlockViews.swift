@@ -1,5 +1,6 @@
 import AVKit
 import Charts
+import ImageIO
 import LeafletCore
 import SwiftDraw
 import SwiftUI
@@ -209,7 +210,7 @@ struct LinkCardBlock: View {
             // From the web through the core, as the desktop reads one: http
             // too, and never this device's network.
             guard let data = try? await ImageBlock.client?.picture(image), !data.isEmpty,
-                let made = await Task.detached(operation: { UIImage(data: data) }).value
+                let made = await Task.detached(operation: { Pictures.bitmap(data) }).value
             else { return }
             Self.pictures.setObject(made, forKey: image as NSString)
             picture = made
@@ -305,8 +306,10 @@ struct ImageBlock: View {
             } else if link.hasPrefix("file://") {
                 // A file the page keeps on this device: its path may have
                 // spaces, which a URL string can't.
-                let path = LocalFiles.resolve(String(link.dropFirst("file://".count)))
-                data = await Task.detached { FileManager.default.contents(atPath: path) }.value
+                let path = String(link.dropFirst("file://".count))
+                data = await Task.detached {
+                    LocalFiles.resolve(path).flatMap { FileManager.default.contents(atPath: $0) }
+                }.value
             } else {
                 // From the web through the core, as the desktop reads one:
                 // http too, and never this device's network.
@@ -324,10 +327,35 @@ struct ImageBlock: View {
     /// picture is data as it shows: a bitmap, an SVG, or nil when it is
     /// neither.
     private nonisolated static func picture(_ data: Data) -> Picture? {
+        guard Pictures.fit(data) else { return nil }
         if let image = UIImage(data: data) {
             return .bitmap(image)
         }
         return SVG(data: SVGPercents.resolved(data)).map { .svg($0) }
+    }
+}
+
+/// Pictures keeps out the pictures too large to show, as the desktop does:
+/// a small file can say it is far larger, and decoding it would take more
+/// memory than the device has. A picture comes from whoever shares a page,
+/// or from the web.
+enum Pictures {
+    /// fit says data, a picture, has no more pixels than one may
+    /// (mobile.MaxPixels), going by its header, before it is decoded. What
+    /// is no bitmap, as an SVG, passes.
+    static func fit(_ data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+            let found = CGImageSourceCopyPropertiesAtIndex(
+                source, CGImageSourceGetPrimaryImageIndex(source), nil) as? [CFString: Any],
+            let width = found[kCGImagePropertyPixelWidth] as? Double,
+            let height = found[kCGImagePropertyPixelHeight] as? Double
+        else { return true }
+        return width * height <= Double(MobileMaxPixels)
+    }
+
+    /// bitmap is data as an image, or nil for what is none, or too large.
+    static func bitmap(_ data: Data) -> UIImage? {
+        fit(data) ? UIImage(data: data) : nil
     }
 }
 
@@ -1180,17 +1208,28 @@ extension Color {
 /// LocalFiles finds the files a page keeps on this device. The core keeps
 /// their paths whole, and the app's data folder can move when the app is
 /// installed again: a path that is gone is looked for in the folder as it
-/// is now.
+/// is now. A file elsewhere is not read, as a block's link to one can come
+/// from another device or person (mobile.InFolder).
 enum LocalFiles {
-    static func resolve(_ path: String) -> String {
-        if FileManager.default.fileExists(atPath: path) { return path }
-        guard let r = path.range(of: "/Leaflet/", options: .backwards),
-            let support = try? FileManager.default.url(
-                for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil,
-                create: false)
-        else { return path }
-        return support.appending(path: "Leaflet").appending(path: String(path[r.upperBound...]))
-            .path
+    /// folder is the app's data folder.
+    private static var folder: URL? {
+        try? FileManager.default.url(
+            for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil,
+            create: false
+        ).appending(path: "Leaflet", directoryHint: .isDirectory)
+    }
+
+    /// resolve is where the file at path is in the data folder, the app's
+    /// or the one given, or nil for one outside it.
+    static func resolve(_ path: String, in given: URL? = nil) -> String? {
+        guard let dir = given ?? folder else { return nil }
+        var found = path
+        if !FileManager.default.fileExists(atPath: path),
+            let r = path.range(of: "/Leaflet/", options: .backwards)
+        {
+            found = dir.appending(path: String(path[r.upperBound...])).path
+        }
+        return MobileInFolder(dir.path, found) ? found : nil
     }
 }
 

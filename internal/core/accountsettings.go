@@ -3,9 +3,11 @@ package core
 import (
 	"context"
 	"errors"
+	"log"
 	"strings"
 	"time"
 
+	"leaflet/internal/recording"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	"leaflet/locales"
@@ -102,13 +104,23 @@ func (c *Core) SignOutDevice(id string) error {
 }
 
 // DeleteAccount deletes the account on the server, its space, pages,
-// recordings and keys. The app then leaves this device with Store.Wipe
-// (Leave), as nothing of the account is left to keep.
+// recordings and keys, and the keys and sign-ins of agents and speech this
+// device's keychain keeps, which Store.Wipe leaves nothing to name. The
+// app then leaves this device with Store.Wipe (Leave), as nothing of the
+// account is left to keep.
 func (c *Core) DeleteAccount() error {
 	ctx, cancel := context.WithTimeout(context.Background(), deleteTimeout)
 	defer cancel()
 	if _, err := c.Remote.Invoke(ctx, "account", map[string]any{"action": "delete"}); err != nil {
 		return errors.New(locales.SettingsDeleteAccountFailed(err.Error()))
+	}
+	if c.Hub != nil {
+		c.Hub.ForgetProviders(ctx)
+	}
+	for _, forget := range []func(string) error{recording.SetEndpointKey, recording.SetLocalSonioxKey} {
+		if err := forget(""); err != nil {
+			log.Printf("forget a speech key: %v", err)
+		}
 	}
 	return nil
 }

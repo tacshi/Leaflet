@@ -13,16 +13,30 @@ enum BackgroundSync {
     @MainActor private static var registered = false
 
     /// register has the system run sync passes through the core opened
-    /// gives, once it is open. It must run before the app finishes
-    /// launching, once, which may be before the core is open.
+    /// gives, once it is open; inFront says a window is in front. It must
+    /// run before the app finishes launching, once, which may be before
+    /// the core is open.
     @MainActor
-    static func register(_ opened: @escaping @MainActor () async -> CoreClient?) {
+    static func register(
+        inFront: @escaping @MainActor () -> Bool,
+        opened: @escaping @MainActor () async -> CoreClient?
+    ) {
         guard !registered else { return }
         registered = BGTaskScheduler.shared.register(
             forTaskWithIdentifier: identifier, using: .main
         ) { task in
-            MainActor.assumeIsolated { run(task, opened) }
+            MainActor.assumeIsolated { run(task, inFront, opened) }
         }
+    }
+
+    /// outOfTime stops sync as a pass's time runs out, unless a window came
+    /// to the front meanwhile, which sync goes on for: the app's start
+    /// found it running then, and nothing would start it again.
+    @MainActor
+    static func outOfTime(
+        inFront: @MainActor () -> Bool, stop: @MainActor () async -> Void
+    ) async {
+        if !inFront() { await stop() }
     }
 
     /// schedule asks for a pass in a quarter of an hour at the earliest,
@@ -43,8 +57,10 @@ enum BackgroundSync {
     /// the task's expiration handler on a queue of its own, so its
     /// closures belong to no actor.
     @MainActor
-    private static func run(_ task: BGTask, _ opened: @escaping @MainActor () async -> CoreClient?)
-    {
+    private static func run(
+        _ task: BGTask, _ inFront: @escaping @MainActor () -> Bool,
+        _ opened: @escaping @MainActor () async -> CoreClient?
+    ) {
         schedule()
         let done = Completion(task)
         let pass = Task {
@@ -52,12 +68,14 @@ enum BackgroundSync {
                 done.complete(success: false)
                 return
             }
-            // Out of time now, sync stops, and the pass ends as it does;
-            // the task is complete at once all the same, as a pass may be
-            // waiting on what no stop cuts short, as a file iCloud Drive
-            // has yet to download: left running, iOS refreshes less.
+            // Out of time now, sync stops (outOfTime), and the pass ends as
+            // it does; the task is complete at once all the same, as a pass
+            // may be waiting on what no stop cuts short, as a file iCloud
+            // Drive has yet to download: left running, iOS refreshes less.
             task.expirationHandler = { @Sendable in
-                Task { await client.stop() }
+                Task { @MainActor in
+                    await outOfTime(inFront: inFront) { await client.stop() }
+                }
                 done.complete(success: false)
             }
             do {

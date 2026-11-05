@@ -1896,6 +1896,16 @@
   "@agentChatgptSignInEnded": {
     "description": "An agent run or Settings › Agent providers: ChatGPT no longer accepts the sign-in kept on this device."
   },
+  "agentKeyUnread": "Leaflet could not read the API key of {agent} from the keychain. Open Leaflet again and allow it, or paste the key again in Settings › Agent providers.",
+  "@agentKeyUnread": {
+    "description": "Why an agent can't run: the API key kept on this device for its provider could not be read, as the user turned the system's prompt down.",
+    "placeholders": {
+      "agent": {
+        "type": "String",
+        "example": "DeepSeek"
+      }
+    }
+  },
   "oauthPortTaken": "Leaflet couldn't wait for {name}'s sign-in on port {port}, which another app is using. Quit it, then try again.",
   "@oauthPortTaken": {
     "description": "Signing in through the browser, as with ChatGPT: the port the browser comes back to is taken by another app; name is the service signed in to.",
@@ -4593,6 +4603,10 @@
   "settingsNeedKey": "Paste the provider's API key.",
   "@settingsNeedKey": {
     "description": "The provider dialog: saving a cloud provider kept on this device without its key."
+  },
+  "settingsKeyStaysBehind": "Paste the API key again: a key kept on this device goes only to the address it was saved for.",
+  "@settingsKeyStaysBehind": {
+    "description": "The provider dialog: saving a provider at another server without typing its key, which would otherwise be lost."
   },
   "settingsKeepSignInFailed": "Could not keep the sign-in: {error}",
   "@settingsKeepSignInFailed": {

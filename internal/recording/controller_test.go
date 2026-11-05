@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -861,5 +862,53 @@ func TestSonioxFinishTellsWhatItDropped(t *testing.T) {
 			t.Errorf("server answers %v: lost %v, want %v", answers, got, want)
 		}
 		srv.Close()
+	}
+}
+
+// A long recording, which the transcriber goes on with past a call's
+// deadline, is asked for again until it is done; another failure, or
+// asking for too long, ends it.
+func TestTranscribeWaitsForALongRecording(t *testing.T) {
+	defer func(every, long time.Duration) { stillEvery, stillFor = every, long }(stillEvery, stillFor)
+	stillEvery = time.Millisecond
+	var calls atomic.Int32
+	still := int32(2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		switch n := calls.Add(1); {
+		case n <= still:
+			w.WriteHeader(http.StatusGatewayTimeout)
+			_, _ = w.Write([]byte(`{"error":"still working","code":"still_transcribing"}`))
+		case still < 0:
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":"failed"}`))
+		default:
+			_, _ = w.Write([]byte(`{"segments":[{"start_ms":0,"end_ms":1000,"text":"at last"}]}`))
+		}
+	}))
+	defer srv.Close()
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	r := &Controller{st: st, be: remote.SignedInForTest(srv.URL, st, "u1")}
+	rec := store.Recording{ID: "r1", AudioPath: "u1/r1.wav"}
+	stt := store.SttSettings{Provider: "soniox"}
+
+	segs, err := r.transcribe(rec, "", nil, stt)
+	if err != nil || len(segs) != 1 || segs[0].Text != "at last" || calls.Load() != 3 {
+		t.Errorf("after %d calls: %+v %v", calls.Load(), segs, err)
+	}
+
+	calls.Store(0)
+	still = -1
+	if _, err := r.transcribe(rec, "", nil, stt); err == nil || calls.Load() != 1 {
+		t.Errorf("a failure was asked again: %d calls, %v", calls.Load(), err)
+	}
+
+	calls.Store(0)
+	still, stillFor = 1<<30, 5*time.Millisecond
+	if _, err := r.transcribe(rec, "", nil, stt); !remote.IsStillTranscribing(err) {
+		t.Errorf("asked for too long: %v", err)
 	}
 }

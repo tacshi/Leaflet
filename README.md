@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://github.com/tacshi/Leaflet/releases/latest"><img src="https://img.shields.io/github/v/release/tacshi/Leaflet?sort=semver&label=release" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License"></a>
-  <a href="#requirements"><img src="https://img.shields.io/badge/macOS-12%2B-000000?logo=apple&logoColor=white" alt="macOS 12 or later"></a>
+  <a href="#requirements"><img src="https://img.shields.io/badge/macOS-13%2B-000000?logo=apple&logoColor=white" alt="macOS 13 or later"></a>
   <a href="#requirements"><img src="https://img.shields.io/badge/Windows-x64%20%7C%20arm64-0078D4?logo=windows&logoColor=white" alt="Windows x64 and arm64"></a>
   <a href="#ios"><img src="https://img.shields.io/badge/iOS%20%7C%20iPadOS-26%2B%20(in%20progress)-000000?logo=apple&logoColor=white" alt="iOS and iPadOS 26 or later, in progress"></a>
   <a href="https://go.dev"><img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go&logoColor=white" alt="Go 1.27"></a>
@@ -140,7 +140,7 @@ itself.
 
 ## Requirements
 
-- macOS 12 or later, on Apple silicon or Intel; or Windows on x64 or arm64.
+- macOS 13 or later, on Apple silicon or Intel; or Windows on x64 or arm64.
 - To build from source: Go 1.27.3 or later; the Go code needs no cgo or C
   compiler. The Mac app's on-device speech helper ([`speech`](speech))
   is Swift, which `scripts/build-speech.sh` builds with Xcode 26 or later
@@ -158,7 +158,8 @@ itself.
 
 Download the disk image for macOS or the installer for Windows from the
 [latest release](https://github.com/tacshi/Leaflet/releases/latest).
-Installed copies update themselves from GitHub Releases.
+Installed copies update themselves from GitHub Releases. Windows installers
+are not code signed yet, so SmartScreen may warn when one first runs.
 
 ## Run from source
 
@@ -261,7 +262,7 @@ adds to them, with the same tools as `leaflet mcp`:
 | `leaflet ls` | List folders and pages, with their IDs and tags |
 | `leaflet search QUERY` | Find pages by title, tag or text, recordings and comments |
 | `leaflet cat PAGE` | Print a page as Markdown |
-| `leaflet new [TITLE]` | Make a page from the Markdown piped in, and print its ID |
+| `leaflet new [TITLE]` | Make a page and print its ID; `--stdin` takes its content from the Markdown piped in |
 | `leaflet append PAGE [TEXT...]` | Add Markdown to the end of a page: the text given, or what is piped in |
 | `leaflet rename PAGE TITLE` | Change a page's title |
 | `leaflet mv PAGE --in PAGE \| --folder FOLDER \| --top` | Move a page inside another, into a folder, or to the top level |
@@ -275,7 +276,7 @@ that completes page titles.
 
 ```bash
 make test 2>&1 | leaflet append "CI log"
-leaflet new "Meeting notes" --folder Work < notes.md
+leaflet new "Meeting notes" --folder Work --stdin < notes.md
 leaflet cat Roadmap > roadmap.md
 ```
 
@@ -305,7 +306,7 @@ script builds for macOS, or for Windows with `--win`:
 | --- | --- |
 | `scripts/build-debug.sh [--mac\|--win] [--open]` | A debug build named Leaflet Debug, with its own identifier and data folder, that never updates itself, so it runs beside a release copy |
 | `scripts/build-release.sh [--mac] [--win] [<version>]` | Signed and notarized disk images for Apple silicon, Intel and universal, and installers for Windows x64 and arm64, with signed update archives |
-| `scripts/publish.sh <version> [--mac\|--win] [--dry-run]` | A GitHub release for macOS and Windows, or the one named: checks, release notes from `CHANGELOG.md`, the build, the tag and publishing |
+| `scripts/publish.sh <version> [--mac\|--win] [--allow-partial] [--dry-run]` | A GitHub release for macOS and Windows: checks, release notes from `CHANGELOG.md`, the build, the tag and publishing. One platform named alone stays a draft until the other's build joins it, as a release without a platform's update manifest leaves that platform's installed copies no update; `--allow-partial` publishes it anyway |
 
 On Windows, the PowerShell 7 scripts build the Windows app on that machine.
 MyGo downloads NSIS if it isn't installed, and signing uses `signtool` from

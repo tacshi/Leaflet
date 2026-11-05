@@ -83,7 +83,14 @@ final class DocumentSession {
         for id in text.takeTouched() { shown[id] = nil }
     }
 
-    var hasPendingEdit: Bool { sendTask != nil }
+    /// hasPendingEdit says what was typed has not gone to the core yet,
+    /// whether it goes soon or waits for a composition: a page closing or
+    /// the app leaving the screen sends it all the same.
+    var hasPendingEdit: Bool { unsentSince != nil }
+
+    /// composing says text is being composed, as Japanese or Chinese is
+    /// typed, which a change from outside waits for.
+    var composing: Bool { textView.markedTextRange != nil }
 
     /// load shows content, as the page opens.
     func load(_ content: DocContent, tinted: Set<String>) {
@@ -118,11 +125,14 @@ final class DocumentSession {
     /// it, the user does. Each block is compared as a node with the one
     /// the text has (shown), and only those that changed are made into
     /// text: an agent writing in a long page changes a block or two of it
-    /// each time.
-    func update(_ content: DocContent, tinted: Set<String>, byAgent: Bool) {
-        if textView.markedTextRange != nil {
+    /// each time. It reports whether content went in: a composition holds
+    /// it (held), and the editor goes on showing what it showed, over
+    /// which the edits it sends are made.
+    @discardableResult
+    func update(_ content: DocContent, tinted: Set<String>, byAgent: Bool) -> Bool {
+        if composing {
             held = (content, tinted)
-            return
+            return false
         }
         held = nil
         defer { editor.reportBlank() }
@@ -234,7 +244,7 @@ final class DocumentSession {
         guard changed else {
             shown = next
             _ = text.takeTouched()
-            return
+            return true
         }
         // In the page's order, for each item's number to go on from those
         // before it as they now are.
@@ -274,6 +284,7 @@ final class DocumentSession {
         editor.format.updateTypingAttributes()
         editor.due.schedule()
         hold(offset)
+        return true
     }
 
     /// tint shows the blocks an agent run last changed, ids, lit, or no
@@ -322,13 +333,18 @@ final class DocumentSession {
     func edited() {
         sendTask?.cancel()
         sendTask = nil
-        let now = ContinuousClock.now
-        let since = unsentSince ?? now
-        unsentSince = since
+        unsentSince = unsentSince ?? ContinuousClock.now
         // Text being composed is not the page's yet: it goes once it is.
-        guard textView.markedTextRange == nil else { return }
+        guard !composing else { return }
         if sendComposed() { return }
-        let wait = min(Self.pause, max(since + Self.maxWait - now, .zero))
+        sendSoon()
+    }
+
+    /// sendSoon sends the page after the pause, or sooner when an edit has
+    /// waited nearly maxWait already.
+    private func sendSoon() {
+        let now = ContinuousClock.now
+        let wait = min(Self.pause, max((unsentSince ?? now) + Self.maxWait - now, .zero))
         sendTask = Task { [weak self] in
             try? await Task.sleep(for: wait)
             guard !Task.isCancelled else { return }
@@ -340,11 +356,19 @@ final class DocumentSession {
     /// waited for a composition that has ended (held), and reports whether
     /// it did: the core merges what was typed with the change, and the
     /// editor shows the merge as it comes.
-    func sendComposed() -> Bool {
-        guard held != nil, textView.markedTextRange == nil else { return false }
+    private func sendComposed() -> Bool {
+        guard held != nil, !composing else { return false }
         held = nil
         send()
         return true
+    }
+
+    /// composed follows a composition that may have ended with no change
+    /// of the text, as the caret moves away from it or the keyboard
+    /// confirms it: no edit comes then to send what it kept back.
+    func composed() {
+        guard !sendComposed(), !composing, sendTask == nil, unsentSince != nil else { return }
+        sendSoon()
     }
 
     /// send passes the page's content now, as the page closes: each block

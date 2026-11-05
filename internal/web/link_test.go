@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/text/encoding/simplifiedchinese"
+
 	"leaflet/internal/doc"
 )
 
@@ -39,6 +41,32 @@ func TestReadLinkInfoLongerWhenLowered(t *testing.T) {
 	src := strings.Repeat("Ⱥ", 50) + "<title>Kept</title></HEAD><title>Not this</title>"
 	if got := ReadLinkInfo("https://x.dev", src); got.Title != "Kept" {
 		t.Errorf("got %+v", got)
+	}
+}
+
+// A page in another encoding than UTF-8 gives its card its title as a
+// browser reads it, by its Content-Type or its own <meta>.
+func TestLookUpReadsThePagesEncoding(t *testing.T) {
+	useServer(t)
+	title, err := simplifiedchinese.GBK.NewEncoder().String("新闻首页")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		meta := `<meta charset="gbk">`
+		if r.URL.Path == "/header" {
+			w.Header().Set("Content-Type", "text/html; charset=gbk")
+			meta = ""
+		}
+		_, _ = w.Write([]byte("<html><head>" + meta + "<title>" + title + "</title></head></html>"))
+	}))
+	defer srv.Close()
+	for _, path := range []string{"/header", "/meta"} {
+		info, err := LookUp(srv.URL + path)
+		if err != nil || info.Title != "新闻首页" {
+			t.Errorf("%s: %q, %v", path, info.Title, err)
+		}
 	}
 }
 

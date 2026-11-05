@@ -563,6 +563,114 @@ func TestIsInvalidReadsTheCode(t *testing.T) {
 	}
 }
 
+// Storage's refusal of a key is told apart by its name, as it has written
+// it either way, and its object-too-large by the status in its body
+// whichever way it writes it.
+func TestStorageRefusalsReadTheirNames(t *testing.T) {
+	answers := map[string]string{
+		"/storage/v1/object/old/x": `{"statusCode":"400","error":"InvalidKey","message":"Invalid key: x"}`,
+		"/storage/v1/object/new/x": `{"statusCode":"400","code":"InvalidKey","error":"InvalidKey","message":"Invalid key: x"}`,
+		"/storage/v1/object/big/x": `{"statusCode":"413","code":"EntityTooLarge","error":"EntityTooLarge","message":"too large"}`,
+		"/storage/v1/object/no/x":  `{"statusCode":"403","error":"Unauthorized","message":"new row violates row-level security policy"}`,
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, answers[r.URL.Path])
+	}))
+	defer srv.Close()
+	c := SignedInForTest(srv.URL, nil, "u")
+	for bucket, want := range map[string]struct{ key, invalid bool }{
+		"old": {true, true}, "new": {true, true}, "big": {false, true}, "no": {false, false},
+	} {
+		err := c.Upload(context.Background(), bucket, "x", strings.NewReader("data"), "text/plain")
+		if IsInvalidKey(err) != want.key || IsInvalid(err) != want.invalid {
+			t.Errorf("%s: key %v, invalid %v: %v", bucket, IsInvalidKey(err), IsInvalid(err), err)
+		}
+	}
+}
+
+// An error a trigger raised is the request's, which the next one does not
+// meet. Any other 5xx is the server's, whatever code it comes with: a
+// database in trouble answers statement after statement so.
+func TestABusyServerIsToldFromARefusedRequest(t *testing.T) {
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{&Error{Status: http.StatusInternalServerError, Code: "P0002"}, false},
+		{&Error{Status: http.StatusInternalServerError, Code: "57014"}, true},
+		{&Error{Status: http.StatusInternalServerError, Code: "57P01"}, true},
+		{&Error{Status: http.StatusInternalServerError, Code: "40001"}, true},
+		{&Error{Status: http.StatusInternalServerError, Code: "40P01"}, true},
+		{&Error{Status: http.StatusInternalServerError, Code: "58000"}, true},
+		{&Error{Status: http.StatusInternalServerError, Code: "XX000"}, true},
+		{&Error{Status: http.StatusInternalServerError}, true},
+		{&Error{Status: http.StatusInternalServerError, Code: "500"}, true},
+		{&Error{Status: http.StatusInternalServerError, Code: "PGRST000"}, true},
+		{&Error{Status: http.StatusBadGateway}, true},
+		{&Error{Status: http.StatusTooManyRequests}, true},
+		{&Error{Status: http.StatusBadRequest, Code: "23514"}, false},
+		{errors.New("no"), false},
+	} {
+		if got := IsBusy(tc.err); got != tc.want {
+			t.Errorf("IsBusy(%+v) = %v", tc.err, got)
+		}
+	}
+}
+
+// A request that took too long is told by whoever gave up on it: this
+// client, the database or a gateway on the way.
+func TestTooSlowIsToldWhoeverGaveUp(t *testing.T) {
+	block := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-block }))
+	defer srv.Close()
+	defer close(block)
+	c := SignedInForTest(srv.URL, nil, "u")
+	c.TimeoutForTest(10 * time.Millisecond)
+	_, client := c.Select(context.Background(), "pages", Query{})
+	for _, tc := range []struct {
+		err  error
+		want bool
+	}{
+		{client, true},
+		{&Error{Status: http.StatusInternalServerError, Code: "57014"}, true},
+		{&Error{Status: http.StatusGatewayTimeout}, true},
+		{&Error{Status: 524}, true},
+		{&Error{Status: http.StatusInternalServerError, Code: "XX000"}, false},
+		{&Error{Status: http.StatusBadGateway}, false},
+		{errors.New("no"), false},
+	} {
+		if got := IsTooSlow(tc.err); got != tc.want {
+			t.Errorf("IsTooSlow(%v) = %v", tc.err, got)
+		}
+	}
+	if !IsStatementTimeout(&Error{Status: http.StatusInternalServerError, Code: "57014"}) || IsStatementTimeout(&Error{Status: http.StatusGatewayTimeout}) {
+		t.Error("IsStatementTimeout told them apart wrongly")
+	}
+}
+
+// An answer that does not parse is an error, as a sign-in page a network
+// puts in the server's place, and no answer at all is none.
+func TestRPCAnswers(t *testing.T) {
+	body := "<html>Sign in to the wifi</html>"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, body)
+	}))
+	defer srv.Close()
+	c := SignedInForTest(srv.URL, nil, "u")
+	if out, err := c.RPC(context.Background(), "page_members", nil); err == nil {
+		t.Errorf("read %v", out)
+	}
+	body = ""
+	if out, err := c.RPC(context.Background(), "sign_out_device", nil); err != nil || out != nil {
+		t.Errorf("no answer: %v, %v", out, err)
+	}
+	body = `[{"user_id":"u1"}]`
+	if out, err := c.RPC(context.Background(), "page_members", nil); err != nil || len(out.([]any)) != 1 {
+		t.Errorf("a list: %v, %v", out, err)
+	}
+}
+
 // What the server's client says to people is in the app's language, and
 // still the error it is to errors.Is.
 func TestErrorsInTheAppsLanguage(t *testing.T) {

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -271,5 +274,37 @@ func TestTodosComeInSections(t *testing.T) {
 	}
 	if strings.Join(got, "; ") != "overdue: late; today: today; upcoming: soon, later" || groups[0].Title != "Overdue" {
 		t.Fatalf("sections %s", raw)
+	}
+}
+
+// A picture a block links to on this device shows only from the app's
+// data folder: the link can come from another device or person, and name
+// any file, by way of ".." or a link too.
+func TestInFolderKeepsToTheDataFolder(t *testing.T) {
+	dir := t.TempDir()
+	root := filepath.Join(dir, "Leaflet")
+	inside, outside := filepath.Join(root, "a.png"), filepath.Join(dir, "b.png")
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{inside, outside} {
+		if err := os.WriteFile(f, []byte("picture"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	link := filepath.Join(root, "link.png")
+	if err := os.Symlink(outside, link); err != nil {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows makes links only for administrators and in Developer Mode")
+		}
+		t.Fatal(err)
+	}
+	if !InFolder(root, inside) {
+		t.Error("a file of the folder is refused")
+	}
+	for _, path := range []string{outside, filepath.Join(root, "..", "b.png"), link, "a.png"} {
+		if InFolder(root, path) {
+			t.Errorf("%s is taken for a file of the folder", path)
+		}
 	}
 }

@@ -1,12 +1,19 @@
 package cli
 
 import (
+	"encoding/binary"
 	"encoding/json/v2"
+	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
+	"unicode/utf16"
+	"unicode/utf8"
 
+	"leaflet/internal/doc"
 	"leaflet/internal/store"
 )
 
@@ -85,14 +92,18 @@ func TestNoPages(t *testing.T) {
 		t.Errorf("ls without pages: exit %d, %q", code, errOut)
 	}
 	// It leaves the folder for the app to set up.
-	if _, err := store.Open(dir); err != nil {
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestPages(t *testing.T) {
 	dir := pages(t)
-	id := strings.TrimSpace(ok(t, dir, "The plan.\n\n- [ ] ship it\n", "new", "Roadmap"))
+	id := strings.TrimSpace(ok(t, dir, "The plan.\n\n- [ ] ship it\n", "new", "Roadmap", "--stdin"))
 	if !regexp.MustCompile(`^[0-9a-f-]{36}$`).MatchString(id) {
 		t.Fatalf("new printed %q, not an ID", id)
 	}
@@ -151,7 +162,7 @@ func TestJSON(t *testing.T) {
 	var made struct {
 		PageID string `json:"page_id"`
 	}
-	if err := json.Unmarshal([]byte(ok(t, dir, "Hello.\n", "new", "Notes", "--json")), &made); err != nil || made.PageID == "" {
+	if err := json.Unmarshal([]byte(ok(t, dir, "Hello.\n", "new", "Notes", "--stdin", "--json")), &made); err != nil || made.PageID == "" {
 		t.Fatalf("new --json: %v, %+v", err, made)
 	}
 	var l listing
@@ -191,6 +202,15 @@ func TestRefusals(t *testing.T) {
 		{[]string{"new", "X", "--folder", "Nowhere"}, "", `no folder "Nowhere"`},
 		{[]string{"tag", "Notes", "a", "--clear"}, "", "give tags or --clear, not both"},
 		{[]string{"rename", "Notes"}, "", "accepts 2 arg(s), received 1"},
+		// What a shell's unset variable gives is no place, nor a tag.
+		{[]string{"mv", "Notes", "--in", ""}, "", "--in names no page"},
+		{[]string{"mv", "Notes", "--folder", " "}, "", "--folder names no folder"},
+		{[]string{"new", "X", "--in", ""}, "", "--in names no page"},
+		{[]string{"new", "X", "--folder", ""}, "", "--folder names no folder"},
+		{[]string{"tag", "Notes", ""}, "", "no tag given"},
+		{[]string{"tag", "Notes", "#"}, "", "no tag given"},
+		// A subcommand mistyped is no help asked for.
+		{[]string{"folder", "nwe", "X"}, "", `unknown command "nwe" for "leaflet folder"`},
 	} {
 		_, errOut, code := run(t, dir, c.in, c.args...)
 		if code != 1 || !strings.Contains(errOut, c.want) || !strings.HasPrefix(errOut, "leaflet: ") {
@@ -214,5 +234,443 @@ func TestComplete(t *testing.T) {
 	}
 	if out := ok(t, dir, "", "__complete", "new", "X", "--folder", ""); !strings.Contains(out, "Work\n") {
 		t.Errorf("completions of --folder:\n%s", out)
+	}
+	// --in completes after the page or title it follows.
+	for _, args := range [][]string{{"mv", "Work", "--in", "r"}, {"new", "X", "--in", "r"}, {"new", "--in", "r"}} {
+		if out := ok(t, dir, "", append([]string{"__complete"}, args...)...); !strings.Contains(out, "Roadmap\t") {
+			t.Errorf("completions of %v:\n%s", args, out)
+		}
+	}
+	// A page's title goes only in the first argument.
+	if out := ok(t, dir, "", "__complete", "rename", "Roadmap", "r"); strings.Contains(out, "Roadmap") {
+		t.Errorf("completions of a new title:\n%s", out)
+	}
+}
+
+// A value left empty changes nothing before it is refused.
+func TestEmptyValuesChangeNothing(t *testing.T) {
+	dir := pages(t)
+	ok(t, dir, "", "new", "Parent")
+	ok(t, dir, "", "new", "Child", "--in", "Parent")
+	ok(t, dir, "", "tag", "Child", "work")
+	before, parent := ok(t, dir, "", "ls"), ok(t, dir, "", "cat", "Parent")
+	for _, args := range [][]string{{"mv", "Child", "--in", ""}, {"mv", "Child", "--folder", ""}, {"tag", "Child", ""}, {"tag", "Child", "#"}} {
+		if _, _, code := run(t, dir, "", args...); code != 1 {
+			t.Errorf("%q: exit %d", args, code)
+		}
+	}
+	if after := ok(t, dir, "", "ls"); after != before {
+		t.Errorf("ls before:\n%s\nafter:\n%s", before, after)
+	}
+	if after := ok(t, dir, "", "cat", "Parent"); after != parent {
+		t.Errorf("cat Parent before:\n%s\nafter:\n%s", parent, after)
+	}
+}
+
+// utf16Text is s as Windows' tools write it: a byte order mark, then
+// UTF-16 in the order given.
+func utf16Text(s string, order binary.AppendByteOrder, mark ...byte) string {
+	out := mark
+	for _, u := range utf16.Encode([]rune(s)) {
+		out = order.AppendUint16(out, u)
+	}
+	return string(out)
+}
+
+func TestPipedEncodings(t *testing.T) {
+	want := "# Café 日本語 🍃\n\nAll well.\n"
+	for name, in := range map[string]string{
+		"UTF-8":        want,
+		"UTF-8 marked": "\xEF\xBB\xBF" + want,
+		"UTF-16 LE":    utf16Text(want, binary.LittleEndian, 0xFF, 0xFE),
+		"UTF-16 BE":    utf16Text(want, binary.BigEndian, 0xFE, 0xFF),
+	} {
+		dir := pages(t)
+		ok(t, dir, in, "new")
+		if md := ok(t, dir, "", "cat", "Café 日本語 🍃"); md != "# Café 日本語 🍃\n\nAll well.\n" {
+			t.Errorf("%s: cat %q", name, md)
+		}
+	}
+}
+
+// Text no page can sync, or JSON carry, is cleaned on its way in, for what
+// is piped in and what is given alike; and Markdown lines with it stay.
+func TestTextIsCleaned(t *testing.T) {
+	dir := pages(t)
+	ok(t, dir, "before\x00after\ncaf\xe9\n", "new", "Bytes", "--stdin")
+	ok(t, dir, "", "append", "Bytes", "given\x00text")
+	ok(t, dir, "# Caf\xe9\x00 notes\n\nhello\n", "new")
+	ok(t, dir, "", "rename", "Bytes", "Odd\xff title")
+	ok(t, dir, "", "folder", "new", "Fold\xffer")
+	ok(t, dir, "", "tag", "Odd\ufffd title", "ta\xffg")
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	rows, err := st.DB().Query(`SELECT title || tags FROM pages UNION ALL SELECT name FROM folders UNION ALL SELECT content || plain_text FROM page_contents`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var text string
+		if err := rows.Scan(&text); err != nil {
+			t.Fatal(err)
+		}
+		if !utf8.ValidString(text) || strings.ContainsRune(text, 0) || strings.Contains(text, `\u0000`) {
+			t.Errorf("kept %q", text)
+		}
+	}
+	for _, want := range []string{"before\ufffdafter", "caf\ufffd", "given\ufffdtext"} {
+		if md := ok(t, dir, "", "cat", "Odd\ufffd title"); !strings.Contains(md, want) {
+			t.Errorf("cat lacks %q:\n%s", want, md)
+		}
+	}
+	if md := ok(t, dir, "", "cat", "Caf\ufffd\ufffd notes"); !strings.HasSuffix(md, "hello\n") {
+		t.Errorf("cat: %q", md)
+	}
+}
+
+// A title kept before text was cleaned stops no command: it is listed,
+// and its page reached by ID, to rename it.
+func TestBadTitleKept(t *testing.T) {
+	dir := pages(t)
+	id := strings.TrimSpace(ok(t, dir, "", "new", "Good"))
+	bad := strings.TrimSpace(ok(t, dir, "Hello.\n", "new", "Bad", "--stdin"))
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RenamePage(bad, "Caf\xe9 notes"); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if ls := ok(t, dir, "", "ls"); !strings.Contains(ls, "Caf\ufffd notes") || !strings.Contains(ls, id[:8]) {
+		t.Errorf("ls:\n%s", ls)
+	}
+	if out := ok(t, dir, "", "ls", "--json"); !strings.Contains(out, "Caf\ufffd notes") {
+		t.Errorf("ls --json:\n%s", out)
+	}
+	ok(t, dir, "", "append", "Good", "more")
+	if md := ok(t, dir, "", "cat", bad); !strings.Contains(md, "Hello.") {
+		t.Errorf("cat by ID: %q", md)
+	}
+	if out := ok(t, dir, "", "search", "Hello"); !strings.Contains(out, bad[:8]) {
+		t.Errorf("search:\n%s", out)
+	}
+	if out := ok(t, dir, "", "search", "Hello", "--json"); !strings.Contains(out, "Caf� notes") {
+		t.Errorf("search --json:\n%s", out)
+	}
+	ok(t, dir, "", "rename", bad, "Café notes")
+	if ls := ok(t, dir, "", "ls"); !strings.Contains(ls, "Café notes") {
+		t.Errorf("ls after rename:\n%s", ls)
+	}
+}
+
+// A title alone reads nothing: not what a loop's next turns read, nor a
+// pipe that stays open.
+func TestNewReadsOnlyWhenAsked(t *testing.T) {
+	dir := pages(t)
+	main := func(in *strings.Reader, args ...string) int {
+		var o, e strings.Builder
+		return Main(args, Options{Name: "leaflet", Dir: dir, Version: "1.0.0", In: in, Out: &o, Err: &e})
+	}
+	in := strings.NewReader("Second\nThird\n")
+	if code := main(in, "new", "First"); code != 0 || in.Len() != len("Second\nThird\n") {
+		t.Errorf("exit %d, %d bytes left", code, in.Len())
+	}
+	if md := ok(t, dir, "", "cat", "First"); strings.Contains(md, "Second") {
+		t.Errorf("cat First: %q", md)
+	}
+	if code := main(in, "new", "Asked", "--stdin"); code != 0 || in.Len() != 0 {
+		t.Errorf("--stdin: exit %d, %d bytes left", code, in.Len())
+	}
+	if md := ok(t, dir, "", "cat", "Asked"); !strings.Contains(md, "Second") || !strings.Contains(md, "Third") {
+		t.Errorf("cat Asked: %q", md)
+	}
+}
+
+// A title alone says when it leaves input unread, reading none of it and
+// waiting for none: a pipe left open with nothing in it is no reason to.
+func TestNewSaysInputWaits(t *testing.T) {
+	dir := pages(t)
+	const note = "leaflet: what is piped in was not read: --stdin reads it\n"
+	main := func(in *os.File, args ...string) (string, int) {
+		var o, e strings.Builder
+		code := Main(args, Options{Name: "leaflet", Dir: dir, Version: "1.0.0", In: in, Out: &o, Err: &e})
+		return e.String(), code
+	}
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close(); _ = w.Close() }()
+	if errOut, code := main(r, "new", "Open pipe"); code != 0 || errOut != "" {
+		t.Errorf("empty pipe: exit %d, %q", code, errOut)
+	}
+	if _, err := w.WriteString("the notes\n"); err != nil {
+		t.Fatal(err)
+	}
+	if errOut, code := main(r, "new", "Full pipe"); code != 0 || errOut != note {
+		t.Errorf("pipe with input: exit %d, %q", code, errOut)
+	}
+	if got := make([]byte, 64); !func() bool { n, err := r.Read(got); return err == nil && string(got[:n]) == "the notes\n" }() {
+		t.Error("the pipe's input was read")
+	}
+	path := filepath.Join(t.TempDir(), "notes.md")
+	if err := os.WriteFile(path, []byte("the notes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Open(path) // #nosec G304 -- the test's own file.
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if errOut, code := main(f, "new", "From a file"); code != 0 || errOut != note {
+		t.Errorf("file: exit %d, %q", code, errOut)
+	}
+	if errOut, code := main(f, "new", "With the file", "--stdin"); code != 0 || errOut != "" {
+		t.Errorf("--stdin: exit %d, %q", code, errOut)
+	}
+	if errOut, code := main(f, "new", "After the file"); code != 0 || errOut != "" {
+		t.Errorf("file read to its end: exit %d, %q", code, errOut)
+	}
+}
+
+// Markdown that starts with a dash is text, as append's help has it, and
+// the command's flags still count after the page.
+func TestAppendText(t *testing.T) {
+	dir := pages(t)
+	ok(t, dir, "", "new", "Inbox")
+	ok(t, dir, "", "append", "Inbox", "- [ ] call the dentist")
+	ok(t, dir, "", "append", "Inbox", "- milk")
+	ok(t, dir, "", "append", "Inbox", "---")
+	ok(t, dir, "", "append", "Inbox", "-", "split", "words")
+	ok(t, dir, "", "append", "Inbox", "--", "- after dashes")
+	ok(t, dir, "", "append", "Inbox", "--", "--json")
+	md := ok(t, dir, "", "cat", "Inbox")
+	for _, want := range []string{"- [ ] call the dentist", "- milk", "---", "- split words", "- after dashes", "--json"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("cat lacks %q:\n%s", want, md)
+		}
+	}
+	for _, args := range [][]string{{"append", "Inbox", "plain", "--json"}, {"append", "--json", "Inbox", "plain"}, {"--json", "append", "Inbox", "plain"}} {
+		if out := ok(t, dir, "", args...); !strings.Contains(out, "inserted_ids") {
+			t.Errorf("%v: %q", args, out)
+		}
+	}
+	// --json after the page is no text, so what is piped in is read.
+	if out := ok(t, dir, "piped\n", "append", "Inbox", "--json"); !strings.Contains(out, "inserted_ids") {
+		t.Errorf("piped --json: %q", out)
+	}
+	if md := ok(t, dir, "", "cat", "Inbox"); !strings.Contains(md, "piped") {
+		t.Errorf("cat lacks what was piped:\n%s", md)
+	}
+	// --stdin asks for what is piped in, wherever it stands; before a "--"
+	// it is no text, and after one it is.
+	ok(t, dir, "one\n", "append", "Inbox", "--stdin")
+	ok(t, dir, "two\n", "append", "--stdin", "Inbox")
+	ok(t, dir, "three\n", "append", "Inbox")
+	ok(t, dir, "ignored\n", "append", "Inbox", "--", "--stdin")
+	md = ok(t, dir, "", "cat", "Inbox")
+	for _, want := range []string{"one\n", "two\n", "three\n", "--stdin\n"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("cat lacks %q:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "ignored") {
+		t.Errorf("text given and what is piped in:\n%s", md)
+	}
+	if _, errOut, code := run(t, dir, "piped\n", "append", "Inbox", "words", "--stdin"); code != 1 || !strings.Contains(errOut, "give the text or --stdin, not both") {
+		t.Errorf("both: exit %d, %q", code, errOut)
+	}
+	if _, errOut, code := run(t, dir, " \n", "append", "Inbox", "--stdin"); code != 1 || !strings.Contains(errOut, "nothing to add") {
+		t.Errorf("--stdin with nothing: exit %d, %q", code, errOut)
+	}
+	before := ok(t, dir, "", "cat", "Inbox")
+	for _, flag := range []string{"--help", "-h"} {
+		if out := ok(t, dir, "", "append", "Inbox", flag); !strings.Contains(out, "Add Markdown to the end of a page") {
+			t.Errorf("%s: %q", flag, out)
+		}
+	}
+	if after := ok(t, dir, "", "cat", "Inbox"); after != before {
+		t.Errorf("help changed the page:\n%s", after)
+	}
+}
+
+// numbered is count lines of Markdown, each a block.
+func numbered(count int) string {
+	var b strings.Builder
+	for i := range count {
+		fmt.Fprintf(&b, "line %d of the log\n", i)
+	}
+	return b.String()
+}
+
+// A log longer than a call takes all goes in, in order, with one version
+// from before it in the page's history.
+func TestLongInput(t *testing.T) {
+	dir := pages(t)
+	ok(t, dir, "Before.\n", "new", "CI log", "--stdin")
+	var added struct {
+		IDs []string `json:"inserted_ids"`
+	}
+	if err := json.Unmarshal([]byte(ok(t, dir, numbered(5000), "append", "CI log", "--json")), &added); err != nil || len(added.IDs) != 5000 {
+		t.Errorf("--json: %d IDs, %v", len(added.IDs), err)
+	}
+	md := ok(t, dir, "", "cat", "CI log")
+	if !strings.Contains(md, "Before.\n") || strings.Count(md, " of the log") != 5000 || strings.Index(md, "line 2499 of") > strings.Index(md, "line 2500 of") {
+		t.Errorf("cat: %d lines", strings.Count(md, " of the log"))
+	}
+	ok(t, dir, "# Long\n\n"+numbered(5000), "new")
+	if md := ok(t, dir, "", "cat", "Long"); strings.Count(md, " of the log") != 5000 {
+		t.Errorf("new: %d lines", strings.Count(md, " of the log"))
+	}
+	st, err := store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	pages, err := st.Pages()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pages {
+		if h, err := st.History(p.ID); p.Title == "CI log" && (err != nil || len(h) != 1) {
+			t.Errorf("history %d, %v", len(h), err)
+		}
+	}
+}
+
+// A block too long to cut is refused before anything is written, so
+// trying again adds nothing twice.
+func TestTooLongWritesNothing(t *testing.T) {
+	dir := pages(t)
+	ok(t, dir, "Before.\n", "new", "Log", "--stdin")
+	before := ok(t, dir, "", "cat", "Log")
+	long := numbered(1500) + "\n| a | b |\n| --- | --- |\n" + strings.Repeat("| 1 | 2 |\n", 3000) + "\n" + numbered(1500)
+	const want = "a block too long to cut, so nothing was written: At most 2000 blocks"
+	if _, errOut, code := run(t, dir, long, "append", "Log"); code != 1 || !strings.Contains(errOut, want) {
+		t.Errorf("append: exit %d, %q", code, errOut)
+	}
+	if after := ok(t, dir, "", "cat", "Log"); after != before {
+		t.Errorf("append wrote %d bytes", len(after)-len(before))
+	}
+	ls := ok(t, dir, "", "ls")
+	if _, errOut, code := run(t, dir, long, "new", "Other", "--stdin"); code != 1 || !strings.Contains(errOut, want) {
+		t.Errorf("new: exit %d, %q", code, errOut)
+	}
+	if after := ok(t, dir, "", "ls"); after != ls {
+		t.Errorf("new made a page:\n%s", after)
+	}
+}
+
+// A numbered list goes in whole however long, its items as a list, with
+// the numbers of the whole list.
+func TestLongNumberedList(t *testing.T) {
+	dir := pages(t)
+	ok(t, dir, "", "new", "List")
+	var b strings.Builder
+	for i := 1; i <= 7000; i++ {
+		fmt.Fprintf(&b, "%d. item %d\n", i, i)
+	}
+	ok(t, dir, b.String(), "append", "List")
+	md := ok(t, dir, "", "cat", "List")
+	for i := 1; i <= 7000; i++ {
+		if want := fmt.Sprintf("%d. item %d\n", i, i); !strings.Contains(md, want) {
+			t.Fatalf("cat lacks %q", want)
+		}
+	}
+}
+
+// shape is blocks as a page reads them: what kind each is, at what depth,
+// and what it says.
+func shape(nodes []*doc.Node, depth int) []string {
+	var out []string
+	for _, n := range nodes {
+		out = append(out, fmt.Sprintf("%d %s %s %q", depth, n.Type, n.Str("tone"), n.Delta().Plain()))
+		out = append(out, shape(n.Children, depth+1)...)
+	}
+	return out
+}
+
+// Text is cut only where each part reads as it does in the whole, however
+// near the middle that falls.
+func TestParts(t *testing.T) {
+	lines, around := numbered(1500), numbered(1200)
+	fence := "```go\n" + strings.Repeat("code\n", 3000) + "```\n"
+	table := "| a | b |\n| --- | --- |\n" + strings.Repeat("| 1 | 2 |\n", 600)
+	details := "<details>\n<summary>More</summary>\n\n" + numbered(10) + "</details>\n"
+	nested := strings.Repeat("- item\n  - under it\n", 1201)
+	var items, spaced, years strings.Builder
+	for i := 1; i <= 3000; i++ {
+		fmt.Fprintf(&items, "%d. item %d\n", i, i)
+		fmt.Fprintf(&spaced, "%d. item %d\n  more of it\n\n", i, i)
+		fmt.Fprintf(&years, "%d. was a year\n\n", i+1000)
+	}
+	for name, md := range map[string]string{
+		"lines":            numbered(10000),
+		"a fence":          lines + fence + lines,
+		"a fence up":       fence + lines + lines,
+		"math":             lines + "$$\n" + strings.Repeat("x\n", 3000) + "$$\n" + lines,
+		"a table":          lines + table + lines,
+		"a toggle":         lines + details + lines,
+		"a list":           nested,
+		"a quote":          around + "> one\n> two\n" + around,
+		"a long quote":     around + strings.Repeat("> a line\n", 301) + around,
+		"a callout":        around + "> [!NOTE]\n> body\n" + around,
+		"under an item":    around + "- item\n\n  under it\n" + around,
+		"a hard break":     around + "first\\\nsecond\n" + around,
+		"numbered":         items.String(),
+		"numbered apart":   spaced.String(),
+		"numbered, more":   items.String() + "After.\n",
+		"paragraphs":       around + "Before.\n" + strings.Repeat("1999. a year\n\n", 100) + around,
+		"numbers, no list": years.String(),
+	} {
+		got, err := parts(md)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(got) < 2 {
+			t.Errorf("%s: %d parts", name, len(got))
+		}
+		var read []string
+		for _, p := range got {
+			blocks := doc.MarkdownBlocks(p)
+			if err := doc.CallNodes(blocks); err != nil {
+				t.Errorf("%s: %v", name, err)
+			}
+			read = append(read, shape(blocks, 0)...)
+		}
+		if whole := shape(doc.MarkdownBlocks(md), 0); !slices.Equal(read, whole) {
+			for i := range min(len(read), len(whole)) {
+				if read[i] != whole[i] {
+					t.Errorf("%s: block %d reads %s, in the whole %s", name, i, read[i], whole[i])
+					break
+				}
+			}
+			t.Errorf("%s: parts read as %d blocks, the whole as %d", name, len(read), len(whole))
+		}
+		// Only a list's numbers change.
+		if !strings.HasPrefix(name, "numbered") && strings.Join(got, "") != md {
+			t.Errorf("%s: parts lose text", name)
+		}
+	}
+	for _, md := range []string{" \n\n", "$$\n$$\n"} {
+		if got, err := parts(md); got != nil || err != nil {
+			t.Errorf("parts(%q) = %q, %v", md, got, err)
+		}
+	}
+	// Past what any line can cut, for nothing to be written.
+	one := "| a | b |\n| --- | --- |\n" + strings.Repeat("| 1 | 2 |\n", 3000)
+	if got, err := parts(one); err == nil {
+		t.Errorf("one long table: %d parts", len(got))
 	}
 }

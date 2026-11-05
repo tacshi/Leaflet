@@ -237,6 +237,19 @@ func TestParseLinesToggles(t *testing.T) {
 // A fence names its language in any case, and an empty diagram or
 // formula, with nothing to draw, makes no block, as a spec of one makes
 // none.
+// Bytes that are no UTF-8, as a clipboard can hold, take a character's
+// place, in a toggle's summary too, which is found by its characters and
+// cut by its bytes.
+func TestParseLinesInvalidUTF8(t *testing.T) {
+	got := ParseLines("<details>\n<summary>caf\xe9 \xe9</summary>after\n</details>")
+	if len(got) != 1 || got[0].Type != "toggle_list" || got[0].Delta().Plain() != "caf\uFFFD \uFFFD" {
+		t.Fatalf("read as %q", shape(got))
+	}
+	if kids := got[0].Children; len(kids) != 1 || kids[0].Delta().Plain() != "after" {
+		t.Errorf("children %q", shape(kids))
+	}
+}
+
 func TestParseLinesFences(t *testing.T) {
 	for text, want := range map[string][]string{
 		"```Mermaid\ngraph TD\n```":              {`diagram source=graph TD`},

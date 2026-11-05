@@ -68,7 +68,15 @@ func (h *Hub) linkedNow(ctx context.Context, id string, online bool) bool {
 // private reports whether no one but the user reads or writes p: no one
 // else has it, no guest commented on it, and it has no public link.
 func (h *Hub) private(p store.Page) bool {
-	return !sharedWithOthers(h.st, p) && !h.st.HasGuestComments(p.ID) && (h.PublicLink == nil || !h.PublicLink(p.ID))
+	return !OthersHave(h.st, p) && (h.PublicLink == nil || !h.PublicLink(p.ID))
+}
+
+// OthersHave reports whether someone else reads or writes p, as far as the
+// store can tell: it is shared with them, or a guest commented on it.
+// leaflet mcp asks it, apart from the app, which alone knows the public
+// link it serves (Hub.private).
+func OthersHave(st *store.Store, p store.Page) bool {
+	return sharedWithOthers(st, p) || st.HasGuestComments(p.ID)
 }
 
 // publicLinkLease is how often the device serving a public link says so
@@ -290,12 +298,35 @@ func sharedWithOthers(st *store.Store, p store.Page) bool {
 	}, st.Page)(p)
 }
 
+// ShowsToOthers reports whether page p inside parent would, or may, show
+// it to someone who has not got it: others have parent, and p is the
+// user's alone. Before sync has read who the user's pages are shared with
+// every page of theirs counts as had by others, which says nothing of p:
+// it may be the user's alone, unless it is of someone else's space.
+func ShowsToOthers(st *store.Store, p, parent store.Page) bool {
+	if !OthersHave(st, parent) {
+		return false
+	}
+	if membersUnread(st) {
+		return p.SpaceID == st.Session().SpaceID
+	}
+	return !OthersHave(st, p)
+}
+
+// membersUnread reports whether sync has yet to read who the user's own
+// pages are shared with: signed in, members are kept of a page only once
+// something loaded them, so none kept says nothing before then.
+func membersUnread(st *store.Store) bool {
+	known, _ := st.Value(syncsvc.OwnMembersKey)
+	return st.Session().SignedIn && known == ""
+}
+
 // sharing is sharedWithOthers over others, which reports whether a page
 // has members other than the user, and page, which finds the page one is
 // inside. What it finds of a page it keeps, for the pages inside it.
 func sharing(st *store.Store, others func(id string) bool, page func(id string) (store.Page, error)) func(store.Page) bool {
 	sess := st.Session()
-	if known, _ := st.Value(syncsvc.OwnMembersKey); sess.SignedIn && known == "" {
+	if membersUnread(st) {
 		return func(store.Page) bool { return true }
 	}
 	found := map[string]bool{}

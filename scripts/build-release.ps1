@@ -7,19 +7,21 @@ update archives, deltas and manifests that installed copies update from.
   scripts\build-release.ps1 0.2.0               # another version
   scripts\build-release.ps1 -Arch arm64         # only some: arm64, x64
   scripts\build-release.ps1 -Out out            # another output directory
-  scripts\build-release.ps1 -Upload             # and upload to a draft GitHub release
+  scripts\build-release.ps1 0.2.0 -Upload       # and upload to a draft GitHub release
   scripts\build-release.ps1 -Changelog f.md     # notes from f.md, not CHANGELOG.md
-  scripts\build-release.ps1 -Upload -AllowUnsigned  # upload unsigned builds too
+  scripts\build-release.ps1 0.2.0 -Upload -AllowUnsigned  # upload unsigned builds too
 
 The installers go to build\release: Leaflet-<version>-{x64,arm64}-setup.exe,
 beside a folder per platform with the app and its updates. NSIS makes them,
-which MyGo downloads when it is not installed. -Upload has MyGo put the
-installers and updates in the draft release v<version> of tacshi/Leaflet,
-with gh, as the build ends and before the installers are renamed: there
-they keep MyGo's names, leaflet-setup-<version>-<arch>.exe, by which
-SHA256SUMS lists them and install.ps1 finds its installer. Installed copies
-see the update once the draft is published. A release that is published
-already is refused: its files are what installed copies took.
+which MyGo downloads when it is not installed. -Upload, once every installer
+is built, puts the installers and updates in the draft release v<version> of
+tacshi/Leaflet, with gh, before the installers are renamed: there they keep
+MyGo's names, leaflet-setup-<version>-<arch>.exe, by which SHA256SUMS lists
+them and install.ps1 finds its installer. Installed copies see the update
+once the draft is published. A release that is published already is refused:
+its files are what installed copies took. So is a draft of another commit,
+which the draft records as it is made: a release tags one commit. It needs
+the version named, as mygo.json's is no release's.
 
 Signs updates with MYGO_UPDATER_PRIVATE_KEY, else the key in the file
 LEAFLET_UPDATE_KEY, by default
@@ -29,10 +31,11 @@ made with
 Its public half is updates.publicKey in mygo.json.
 
 Signs with the .pfx LEAFLET_WINDOWS_CERTIFICATE names, whose password is
-MYGO_WINDOWS_CERTIFICATE_PASSWORD, using signtool from the Windows SDK;
-without it the builds are unsigned and SmartScreen warns about them, and
--Upload refuses them unless -AllowUnsigned, or LEAFLET_ALLOW_UNSIGNED=1,
-says to upload them anyway.
+MYGO_WINDOWS_CERTIFICATE_PASSWORD, using signtool from the Windows SDK, and
+fails if any program of the build comes out unsigned; without it the builds
+are unsigned and SmartScreen warns about them, and -Upload refuses them
+unless -AllowUnsigned, or LEAFLET_ALLOW_UNSIGNED=1, says to upload them
+anyway.
 
 Paths given, -Out, -Changelog and those in LEAFLET_WINDOWS_CERTIFICATE and
 LEAFLET_UPDATE_KEY, are from where this is run.
@@ -57,6 +60,7 @@ Set-Location $RootDir
 
 if (-not $IsWindows) { Fail 'this builds on Windows; elsewhere use scripts/build-release.sh --win' }
 Need go
+if ($Upload -and -not $Version) { Fail '-Upload needs the version to release, as in scripts\build-release.ps1 0.2.0 -Upload' }
 if (-not $Version) { $Version = Get-ConfigValue version }
 $Version = $Version.TrimStart('v')
 Check-Version $Version
@@ -80,19 +84,26 @@ if ($Certificate) {
 } else {
 	Warn 'LEAFLET_WINDOWS_CERTIFICATE is not set, so the Windows builds are unsigned'
 }
-Import-UpdateKey
+$UpdateKey = Get-UpdateKeyFile
+if ($UpdateKey) { $Config += "updates.privateKey=$UpdateKey" }
 $BuildArgs = @('build', '-platform', ($Platforms -join ','), '-o', $Out)
-# MyGo uploads once every platform is built, to a release that it does
-# not check is a draft: a published one is refused here, before the build.
+# Uploaded here after the checks below, not by mygo build -upload, which
+# uploads as it finishes, to a release that it does not check is a draft. A
+# published release is refused before the long build, and again as it is
+# uploaded.
 if ($Upload) {
 	Test-Gh
 	Test-Draft $Version
-	$BuildArgs += '-upload'
+	Need git
+	$Commit = & git rev-parse HEAD
+	if ($LASTEXITCODE -ne 0) { Fail 'git rev-parse HEAD failed' }
+	Test-Pushed $Commit
+	Test-DraftCommit $Version $Commit
 }
 
 try {
-	# The version, the changelog and the certificate go into mygo.json for
-	# this build only.
+	# The version, the changelog, the update key's file and the certificate
+	# go into mygo.json for this build only.
 	Set-Config $Config
 	# The command line, which the apps ship beside them.
 	foreach ($a in $Arches) { Build-Cli (Get-ConfigValue name) $Version (Get-GoArch $a) }
@@ -103,12 +114,33 @@ try {
 }
 
 # MyGo names installers "leaflet-setup-<version>-<arch>.exe", in a folder
-# per platform, and -Upload has uploaded them under that name; they are
-# moved out beside those folders under the usual names.
+# per platform. Each is checked, and uploaded under that name, before it is
+# moved out beside those folders under the usual name.
+foreach ($a in $Arches) {
+	$goArch = Get-GoArch $a
+	$folder = Join-Path $Out "windows-$goArch"
+	$setup = Join-Path $folder "leaflet-setup-$Version-$goArch.exe"
+	if (-not (Test-Path -PathType Leaf $setup)) { Fail "expected $setup after the build" }
+	if ($Certificate) {
+		Test-Signed @(Get-ChildItem -LiteralPath $folder, (Join-Path $folder 'bin') -Filter '*.exe' -File | ForEach-Object FullName)
+	}
+}
+
+if ($Upload) {
+	$NotesFile = [IO.Path]::GetTempFileName()
+	try {
+		$notesFrom = if ($Changelog) { $Changelog } else { Join-Path $RootDir 'CHANGELOG.md' }
+		[IO.File]::WriteAllText($NotesFile, (Get-ChangelogNotes $notesFrom $Version), [Text.UTF8Encoding]::new($false))
+		Send-Release $Version $Out $NotesFile $Commit @($Arches | ForEach-Object { "windows-$(Get-GoArch $_)" })
+	} finally {
+		Remove-Item -Force $NotesFile
+	}
+	Info "uploaded to the draft release v$Version of $(Get-ConfigValue updates.github); publish it once every platform is there"
+}
+
 foreach ($a in $Arches) {
 	$goArch = Get-GoArch $a
 	$setup = Join-Path $Out "windows-$goArch\leaflet-setup-$Version-$goArch.exe"
-	if (-not (Test-Path -PathType Leaf $setup)) { Fail "expected $setup after the build" }
 	$dest = Join-Path $Out "Leaflet-$Version-$a-setup.exe"
 	Move-Item -Force $setup $dest
 	Info $dest

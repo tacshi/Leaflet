@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"leaflet/internal/remote"
@@ -25,6 +26,7 @@ func (s *Service) push(ctx context.Context) error {
 	// page or folder it is in (waitsForParent), which come later in the
 	// queue: it goes once they have, in the same pass.
 	var held []store.OutboxEntry
+	timeouts := 0
 	for range 2 {
 		for _, e := range entries {
 			if !s.CanSync() {
@@ -42,8 +44,10 @@ func (s *Service) push(ctx context.Context) error {
 				// asking for a wait: the rest would fail alike, and none of
 				// it is the entry's to count against it, which would leave
 				// it waiting long after the server is back. Anything else
-				// is this entry's own, which waits while the others go.
-				if remote.IsNetwork(err) || remote.IsBusy(err) || errors.Is(err, remote.ErrSignedOut) || ctx.Err() != nil {
+				// is this entry's own, which waits while the others go, as
+				// a statement too heavy for a server that still answers.
+				if remote.IsNetwork(err) || remote.IsBusy(err) && !s.ownTimeout(ctx, err, &timeouts) ||
+					errors.Is(err, remote.ErrSignedOut) || ctx.Err() != nil {
 					s.backOff(err)
 					return err
 				}
@@ -61,8 +65,37 @@ func (s *Service) push(ctx context.Context) error {
 			break
 		}
 		entries, held = held, nil
+		// As queued now: what went before may have changed them, as an
+		// upload gives its file's row a key.
+		for i := range entries {
+			entries[i].Payload = ""
+		}
 	}
 	return nil
+}
+
+// ownTimeouts is how many statements that ran out of time a push counts as
+// their entries' own: past that, a server that answers reads but no writes
+// is in trouble, not its entries.
+const ownTimeouts = 2
+
+// ownTimeout reports whether err is a statement that ran out of time for
+// being too heavy, as a page's save may be, not as the server is in
+// trouble: then a light read goes unanswered too. Left to the server, such
+// an entry would stop the queue behind it each pass, for good. seen counts
+// them, for this push.
+func (s *Service) ownTimeout(ctx context.Context, err error, seen *int) bool {
+	if !remote.IsStatementTimeout(err) || *seen == ownTimeouts || !s.serverAnswers(ctx) {
+		return false
+	}
+	*seen++
+	return true
+}
+
+// serverAnswers reports whether the server answers a light read.
+func (s *Service) serverAnswers(ctx context.Context) bool {
+	_, err := s.be.SelectOne(ctx, "spaces", remote.Query{Select: "id"})
+	return err == nil
 }
 
 // pushOne sends one entry, as Queued listed it, and reports whether it can
@@ -73,6 +106,7 @@ func (s *Service) pushOne(ctx context.Context, uid string, entry *store.OutboxEn
 	if err != nil || payload == nil {
 		return err == nil, err
 	}
+	store.CleanRow(payload)
 	e := *entry
 	switch e.Entity {
 	case "page_content":
@@ -82,7 +116,11 @@ func (s *Service) pushOne(ctx context.Context, uid string, entry *store.OutboxEn
 		}
 		return done, err
 	case "storage":
-		return s.pushFile(ctx, uid, payload)
+		payload, err := s.keyed(entry, payload)
+		if err != nil || payload == nil {
+			return err == nil, err
+		}
+		return s.pushUpload(ctx, uid, *entry, payload)
 	case "storage_delete":
 		return s.removeStored(ctx, payload)
 	case "pages":
@@ -301,13 +339,17 @@ func (s *Service) giveWay(ctx context.Context, e store.OutboxEntry, refused erro
 // takeServer stores a row from the server over this device's change to
 // it, as the pulls do, and reports the change done.
 func (s *Service) takeServer(ctx context.Context, e store.OutboxEntry, row map[string]any) (bool, error) {
+	if e.Entity == "comments" {
+		names, err := s.authorNames(ctx, []map[string]any{row})
+		if err != nil {
+			return false, err
+		}
+		row["author_name"] = names[store.S(row, "author_id")]
+	}
 	// Off the queue first, so the row goes in; a change made here since
 	// keeps it queued, and the row stays out, as the pulls leave it.
 	if err := s.st.Dequeue(e); err != nil {
 		return false, err
-	}
-	if e.Entity == "comments" {
-		row["author_name"] = s.authorNames(ctx, []map[string]any{row})[store.S(row, "author_id")]
 	}
 	if err := s.putRow(e.Entity, row, s.putServerPage); err != nil {
 		return false, err
@@ -365,6 +407,12 @@ func (s *Service) pushComment(ctx context.Context, uid string, e store.OutboxEnt
 		}
 		return s.takeServer(ctx, e, row)
 	}
+	// One queued before comments were cut to what the server keeps.
+	for _, k := range []string{"body", "quote"} {
+		if text, ok := payload[k].(string); ok {
+			payload[k] = store.ClampComment(text)
+		}
+	}
 	cols, partial := payload[store.ChangedKey].([]any)
 	delete(payload, store.ChangedKey)
 	changes := map[string]any{"resolved": payload["resolved"]}
@@ -407,7 +455,9 @@ func (s *Service) pushComment(ctx context.Context, uid string, e store.OutboxEnt
 	return true, nil
 }
 
-func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]any) (bool, error) {
+// pushFile uploads a storage entry's file or audio, noting in read when it
+// last read some of it, and reports whether the entry can leave the queue.
+func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]any, read *atomic.Int64) (bool, error) {
 	local, waits, err := s.uploadFrom(ctx, payload)
 	if err != nil || waits || local == "" {
 		return err == nil && !waits, err // gone: nothing to upload
@@ -426,7 +476,7 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 		path = uid + "/" + recID + ".wav"
 	}
 	ct, _ := payload["content_type"].(string)
-	err = s.be.Upload(ctx, bucket, path, f, ct)
+	err = s.be.Upload(ctx, bucket, path, timedReader{f, read}, ct)
 	_ = f.Close()
 	if err != nil || recID == "" {
 		return err == nil, err
@@ -440,13 +490,14 @@ func (s *Service) pushFile(ctx context.Context, uid string, payload map[string]a
 }
 
 // removeStored removes a deleted file's object from Storage, once it may
-// go (removal). An object the server does not have is gone already.
+// go (removal). An object the server does not have is gone already, as
+// one under a key it refuses never was.
 func (s *Service) removeStored(ctx context.Context, payload map[string]any) (bool, error) {
 	if waits, stays := s.removal(payload); waits || stays {
 		return stays, nil
 	}
 	err := s.be.Remove(ctx, store.S(payload, "bucket"), store.S(payload, "path"))
-	if remote.IsNotFound(err) {
+	if remote.IsNotFound(err) || remote.IsInvalidKey(err) {
 		return true, nil
 	}
 	return err == nil, err

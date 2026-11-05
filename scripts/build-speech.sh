@@ -38,10 +38,10 @@ for arch in "${ARCHES[@]}"; do
 	# which macOS's frameworks may hold it to.
 	lib="$ROOT_DIR/build/speech/$goarch"
 	mkdir -p "$lib"
-	xcrun swiftc -O -swift-version 6 -parse-as-library -target "$target-apple-macos12" \
+	xcrun swiftc -O -swift-version 6 -parse-as-library -target "$target-apple-macos13" \
 		-module-name LeafletSpeech -emit-library -static -emit-module \
 		-emit-module-path "$lib/LeafletSpeech.swiftmodule" -o "$lib/libLeafletSpeech.a" \
 		"$ROOT_DIR"/speech/Sources/LeafletSpeech/*.swift
-	xcrun swiftc -O -swift-version 6 -parse-as-library -target "$target-apple-macos12" \
+	xcrun swiftc -O -swift-version 6 -parse-as-library -target "$target-apple-macos13" \
 		-I "$lib" -L "$lib" -lLeafletSpeech "$ROOT_DIR"/speech/Sources/leaflet-speech/*.swift -o "$out"
 done

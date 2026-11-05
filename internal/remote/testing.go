@@ -23,6 +23,9 @@ func SignedInToProjectForTest(url, ref string, st *store.Store, userID string) *
 	return c
 }
 
+// TimeoutForTest gives c's requests d in place of their usual time.
+func (c *Client) TimeoutForTest(d time.Duration) { c.http.Timeout = d }
+
 // SignInForTest signs c in again as userID, as a sign-in does, beginning
 // another session.
 func (c *Client) SignInForTest(userID string) {

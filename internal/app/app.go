@@ -245,10 +245,12 @@ type App struct {
 	// updatable is set when the app can update itself; updateBusy names
 	// the check under way, or the download after it, for the icon beside
 	// Settings; updateReady is the version installed in the background,
-	// which runs once the app starts again.
-	updatable   bool
-	updateBusy  string
-	updateReady string
+	// which runs once the app starts again; updateFailed is the last one
+	// that would not install, which the app says once.
+	updatable    bool
+	updateBusy   string
+	updateReady  string
+	updateFailed string
 	// quitting is set as a quit starts, when closing the window closes it
 	// rather than hiding it to the menu bar.
 	quitting bool
@@ -381,15 +383,51 @@ type pageState struct {
 	outlineKeys bool
 }
 
-// Run starts the app.
+// Run starts the app, unless it runs already: then the one running shows
+// its window, and this one ends.
 func Run() {
 	a := &App{embeds: map[string]*mygo.WebView{}, embedIn: map[string]embedInput{}, embedSizes: map[string]embedSize{},
 		embedZoomed: map[string]bool{}, embedToPage: map[string]bool{}, embedFailed: map[string]string{}, videos: map[string]*mygo.WebView{}}
+	if a.firstInstance() {
+		launch(a)
+	}
+}
+
+// singleInstance takes the app's lock, which its identifier and name key,
+// so a release and Leaflet Debug run side by side; it is false in a second
+// instance, once that has told the first. The lock is the window app's
+// alone: the command line and leaflet mcp, the same executable, end up in
+// cli.Main and never here, and run beside it.
+var singleInstance = func() bool { return mygo.App.RequestSingleInstanceLock() }
+
+// launch runs the app; tests stand in for it.
+var launch = (*App).launch
+
+// firstInstance reports whether this process is the app on its data
+// folder. A second one would settle the recording under way as cut off
+// (Controller.RecoverInterrupted) and sync beside the first, and Windows
+// starts one for each launch from the Start menu, while the window hides
+// in the tray: macOS brings the running one back (OnActivate). A copy
+// pointed at a data folder of its own shares nothing with the one running,
+// and starts beside it.
+func (a *App) firstInstance() bool {
+	if os.Getenv("LEAFLET_DATA_DIR") != "" {
+		return true
+	}
+	if !singleInstance() {
+		return false
+	}
+	mygo.App.OnSecondInstance(func([]string, string) { a.update(a.showWindow) })
+	return true
+}
+
+// launch sets up the app and runs it until it quits.
+func (a *App) launch() {
 	theme.RegisterFonts()
 	registerCapture()
 	mygo.BindAs("Embeds", &embedScroll{a: a})
-	// MyGo's updater, with its window for "Check for Updates…"; the check
-	// as the app starts is checkForUpdate's, which installs quietly.
+	// MyGo's updater, with its window for "Check for Updates…"; the checks
+	// as the app starts and runs are checkForUpdate's, which installs quietly.
 	mygo.Use(native.New(updater.Options{DisableAutomaticChecks: true}))
 	// Before Run, to hear the click on a reminder that launched the app.
 	mygo.App.OnNotificationClick(a.notificationClicked)

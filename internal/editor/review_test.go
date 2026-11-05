@@ -249,6 +249,32 @@ func BenchmarkCopyAndDeleteSelection(b *testing.B) {
 	}
 }
 
+// Tab and Shift-Tab with a selection over a long page find what it holds
+// in one walk of it, not one for each block.
+func TestTabOverASelectionIsLinear(t *testing.T) {
+	if testing.Short() {
+		t.Skip("times keys")
+	}
+	tab := func(n int) time.Duration {
+		e := bigPage(t, n)
+		best := time.Duration(math.MaxInt64)
+		for range 3 {
+			runtime.GC()
+			start := time.Now()
+			// The first block has none before it to go under, and the page's
+			// are in none to come out of.
+			e.Indent()
+			e.Outdent()
+			best = min(best, time.Since(start))
+		}
+		return best
+	}
+	small, large := tab(500), tab(4000)
+	if large > 24*small {
+		t.Errorf("Tab over 500 blocks takes %v, over 4000 %v", small, large)
+	}
+}
+
 // A key typed on a long page lays out only the block it changed: the
 // others keep their layouts without reading their text again.
 func BenchmarkTypeOnLongPage(b *testing.B) {

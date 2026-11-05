@@ -45,6 +45,8 @@ type Realtime struct {
 	beat string
 	// every is realtimeBeat as the connection was made.
 	every time.Duration
+	// beaten is realtimeBeaten as the connection was made.
+	beaten func()
 }
 
 // RealtimeEvent is a broadcast on a channel, or the channel's end that
@@ -76,6 +78,10 @@ var errRealtimeClosed = errors.New("realtime: closed")
 // Realtime wants at least every 25 seconds, and renews its channels'
 // access token when the session's was; tests shorten it.
 var realtimeBeat = 25 * time.Second
+
+// realtimeBeaten runs as a heartbeat has gone; tests wait there for its
+// answer, as a server close by may answer before the sender goes on.
+var realtimeBeaten = func() {}
 
 // realtimeWrite is how long a message has to go out.
 const realtimeWrite = 10 * time.Second
@@ -134,7 +140,7 @@ func (c *Client) DialRealtime(ctx context.Context) (*Realtime, error) {
 	}
 	conn.SetReadLimit(1 << 20)
 	r := &Realtime{c: c, conn: conn, events: make(chan RealtimeEvent, 64), done: make(chan struct{}),
-		replies: map[string]chan realtimeReply{}, joined: map[string]string{}, token: tok, every: realtimeBeat}
+		replies: map[string]chan realtimeReply{}, joined: map[string]string{}, token: tok, every: realtimeBeat, beaten: realtimeBeaten}
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	guard.Go(r.read)
 	guard.Go(r.keep)
@@ -226,12 +232,12 @@ func (r *Realtime) Leave(topic string) {
 	delete(r.joined, topic)
 	r.mu.Unlock()
 	if ok {
-		_ = r.send("realtime:"+topic, "phx_leave", &joinRef)
+		r.send("realtime:"+topic, "phx_leave", &joinRef)
 	}
 }
 
-// send sends an event with an empty payload, returning its ref.
-func (r *Realtime) send(topic, event string, joinRef *string, payload ...json.RawMessage) string {
+// send sends an event with an empty payload.
+func (r *Realtime) send(topic, event string, joinRef *string, payload ...json.RawMessage) {
 	r.mu.Lock()
 	r.ref++
 	ref := strconv.Itoa(r.ref)
@@ -240,10 +246,25 @@ func (r *Realtime) send(topic, event string, joinRef *string, payload ...json.Ra
 	if len(payload) > 0 {
 		body = payload[0]
 	}
-	if err := r.write(realtimeMsg{Topic: topic, Event: event, Payload: body, Ref: &ref, JoinRef: joinRef}); err != nil {
+	r.post(realtimeMsg{Topic: topic, Event: event, Payload: body, Ref: &ref, JoinRef: joinRef})
+}
+
+// post writes a message, which ends the connection if it can't.
+func (r *Realtime) post(m realtimeMsg) {
+	if err := r.write(m); err != nil {
 		r.fail(err)
 	}
-	return ref
+}
+
+// heartbeat says the connection is still there. Its ref is kept before it
+// goes, as the answer may come before the write returns.
+func (r *Realtime) heartbeat() {
+	r.mu.Lock()
+	r.ref++
+	ref := strconv.Itoa(r.ref)
+	r.beat = ref
+	r.mu.Unlock()
+	r.post(realtimeMsg{Topic: "phoenix", Event: "heartbeat", Payload: json.RawMessage(`{}`), Ref: &ref})
 }
 
 func (r *Realtime) write(m realtimeMsg) error {
@@ -340,10 +361,8 @@ func (r *Realtime) keep() {
 			r.fail(errRealtimeSilent)
 			return
 		}
-		ref := r.send("phoenix", "heartbeat", nil)
-		r.mu.Lock()
-		r.beat = ref
-		r.mu.Unlock()
+		r.heartbeat()
+		r.beaten()
 		r.renew()
 	}
 }
@@ -374,6 +393,6 @@ func (r *Realtime) renew() {
 	r.mu.Unlock()
 	payload, _ := json.Marshal(map[string]string{"access_token": tok})
 	for topic, joinRef := range joined {
-		_ = r.send("realtime:"+topic, "access_token", &joinRef, payload)
+		r.send("realtime:"+topic, "access_token", &joinRef, payload)
 	}
 }

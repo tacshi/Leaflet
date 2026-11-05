@@ -15,9 +15,11 @@ import {
   PRESET_NAMES,
   ProviderError,
   retryWait,
+  sentMessage,
   type ToolDef,
 } from "../_shared/openai.ts";
 import {
+  blankContent,
   type BlockView,
   emptyContent,
   isPageContent,
@@ -28,6 +30,7 @@ import {
   type Position,
   randomId,
   type RecordingInfo,
+  storable,
   trimSpace,
   type VideoRef,
   walk,
@@ -35,6 +38,7 @@ import {
 import {
   agentViews,
   applyOps,
+  cutResult,
   MAX_ROUND_CALLS,
   type Op,
   overwrites,
@@ -43,7 +47,6 @@ import {
   type PagePlace,
   type PageSummary,
   TOO_MANY_CALLS,
-  TOOL_RESULT_LIMIT,
   toolDefinitions,
   ToolError,
   type ToolHooks,
@@ -67,10 +70,10 @@ import {
   workspaceToolDefinitions,
 } from "../_shared/workspace.ts";
 import { isTimeout } from "../_shared/net.ts";
-import { readPage } from "../_shared/page.ts";
+import { ParseBudget, readPage } from "../_shared/page.ts";
 import { canSearch, searchWeb } from "../_shared/search.ts";
 import { readCaptions } from "../_shared/captions.ts";
-import { SAVE_MS } from "../_shared/deadline.ts";
+import { SAVE_MS, timeoutSignal, workDeadline } from "../_shared/deadline.ts";
 import { lastKey, newKeyAfter } from "../_shared/sortkey.ts";
 
 const MAX_ROUNDS = 12;
@@ -78,6 +81,12 @@ const UNREADABLE = "The page's content cannot be read, so the agent left it as i
 const HEARTBEAT_MS = 15_000;
 // A call with less time than this left is not started.
 const MIN_CALL_MS = 5_000;
+// How often a run's ops go on its job as it works, for what a run the
+// platform stops did to be known.
+const KEEP_OPS_MS = 10_000;
+// A run the platform is shutting down ends as a failed run does, saving
+// what it did.
+const SHUT_DOWN = "The platform stopped the run before it finished.";
 
 export interface AgentDeps {
   clients: Clients;
@@ -86,9 +95,16 @@ export interface AgentDeps {
   /**
    * When a run stops calling the model, from its start, keeping time to
    * save what it did: an Edge Function is stopped at its wall-clock limit
-   * (150 s on the free plan, 400 s on paid plans).
+   * (150 s on the free plan, 400 s on paid plans), which is its worker's,
+   * not the request's (workerStarted).
    */
   deadlineMs: number;
+  /** When the worker serving this started; none counts from the request. */
+  workerStarted?: number;
+  /** Aborts as the platform is about to shut the worker down. */
+  unloading?: AbortSignal;
+  /** How often a run's ops go on its job; tests keep them at once. */
+  keepOpsMs?: number;
   /** One model call; a call never runs past the deadline either. */
   callTimeoutMs: number;
   /** Keeps the run going, and saving, after the client disconnects (EdgeRuntime.waitUntil). */
@@ -153,8 +169,9 @@ export async function handle(req: Request, deps: AgentDeps): Promise<Response> {
     if (!job_id) throw new HttpError(400, "job_id is required");
     const uc = deps.clients.user(req);
     const user = await requireUser(req, uc);
+    const deadline = workDeadline(started, deps.deadlineMs, deps.workerStarted);
     // The run saves as the caller up to its end, its failure too.
-    requireTokenUntil(req, started + deps.deadlineMs + SAVE_MS);
+    requireTokenUntil(req, deadline + SAVE_MS);
 
     const { data: job, error } = await uc
       .from("ai_jobs")
@@ -199,7 +216,7 @@ export async function handle(req: Request, deps: AgentDeps): Promise<Response> {
           }
         };
         const heartbeat = setInterval(() => emit({ type: "status", status: "running" }), HEARTBEAT_MS);
-        const work = runJob(uc, deps.clients.service(), user, job as Job, emit, started + deps.deadlineMs, deps)
+        const work = runJob(uc, deps.clients.service(), user, job as Job, emit, deadline, deps)
           .finally(() => {
             clearInterval(heartbeat);
             if (open) {
@@ -238,19 +255,29 @@ export async function handle(req: Request, deps: AgentDeps): Promise<Response> {
  * answer ends without closing.
  */
 export function withoutThinking(text: string): string {
-  let s = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
-  const closes = [...s.matchAll(/<\/think>/gi)];
+  // Each block found once, in one pass: a regular expression's lazy match
+  // goes back to look past each opening tag that nothing closes, which an
+  // answer of a few hundred kilobytes of them turns into seconds of CPU.
+  let s = "";
+  let from = 0, opened = -1;
+  for (const tag of text.matchAll(/<\/?think>/giu)) {
+    const closing = tag[0][1] === "/";
+    if (opened < 0 && !closing) opened = tag.index;
+    else if (opened >= 0 && closing) {
+      s += text.slice(from, opened);
+      from = tag.index + tag[0].length;
+      opened = -1;
+    }
+  }
+  s += text.slice(from);
+  const closes = [...s.matchAll(/<\/think>/giu)];
   if (closes.length) {
     const last = closes[closes.length - 1];
     s = s.slice(last.index! + last[0].length);
   }
-  const open = s.search(/<think>/i);
+  const open = s.search(/<think>/iu);
   if (open >= 0) s = s.slice(0, open);
-  return s.trim();
-}
-
-function truncate(text: string, limit: number): string {
-  return text.length > limit ? `${text.slice(0, limit)}…(truncated)` : text;
+  return trimSpace(s);
 }
 
 /** A page's title as the app shows it: "Untitled" for a blank one (store.TitleOr). */
@@ -303,6 +330,51 @@ function keptOps(ops: Op[]): unknown[] {
     const { content: _, ...kept } = o;
     return kept;
   });
+}
+
+/**
+ * Keeps a run's ops on its job as it works, at most every keepOpsMs and
+ * only when there are new ones: the platform can stop a run with no word,
+ * and a job left so says what it did, for the sweep that marks it failed
+ * and the app that asks how it ended. An end the run reaches itself writes
+ * over it.
+ */
+function opsKeeper(
+  uc: SupabaseClient,
+  job: Job,
+  run: PageEditSession,
+  edits: unknown[],
+  deps: AgentDeps,
+): () => Promise<void> {
+  const every = deps.keepOpsMs ?? KEEP_OPS_MS;
+  let kept = 0;
+  let at = Date.now();
+  return async () => {
+    if (run.ops.length === kept || Date.now() - at < every) return;
+    kept = run.ops.length;
+    at = Date.now();
+    const result = { reply: "", ops: keptOps(run.ops), edits };
+    const { error } = await uc.from("ai_jobs").update({ result }).eq("id", job.id);
+    if (error) console.error("ai_jobs:", error.message);
+  };
+}
+
+/**
+ * Ends a job as done. One whose result is past its bound ends without its
+ * ops, which the app has as they streamed: its status, its reply and what
+ * the next turns go by matter more, and a job left running would be marked
+ * failed later, for a run that saved its edits. Any other failure of the
+ * write says nothing of the ops, which stay out of it.
+ */
+async function endJob(uc: SupabaseClient, job: Job, result: Record<string, unknown>): Promise<void> {
+  const end = (r: Record<string, unknown>) =>
+    uc.from("ai_jobs").update({ status: "done", result: r, error: null }).eq("id", job.id);
+  const { error } = await end(result);
+  if (!error) return;
+  console.error("ai_jobs:", error.message);
+  if (!error.message.includes("ai_job_result_too_long")) return;
+  const { error: again } = await end({ ...result, ops: [], edits: [] });
+  if (again) console.error("ai_jobs:", again.message);
 }
 
 /** By sort key, then id, as the app's store orders them in its SQLite. */
@@ -484,10 +556,12 @@ async function insertPageOf(uc: SupabaseClient, sc: SupabaseClient, user: User, 
   const id = crypto.randomUUID();
   const { error: insertError } = await uc.from("pages").insert({ id, ...row });
   if (insertError) throw new ToolError(`Could not create the page: ${insertError.message}`);
+  // Asked for empty, it has one block to type in, as the app makes one.
+  const stored = content.document.children?.length ? content : blankContent();
   const { error: contentError } = await uc.from("page_content").insert({
     page_id: id,
-    content,
-    plain_text: plainText(content),
+    content: stored,
+    plain_text: plainText(stored),
     updated_by: user.id,
   });
   if (contentError) {
@@ -518,7 +592,8 @@ async function editContent(
     const { data, error } = await uc.from("page_content").select("content, revision").eq("page_id", id).maybeSingle();
     if (error) throw new Error(error.message);
     if (data && !isPageContent(data.content)) return;
-    const content = normalizeContent(data?.content);
+    // A page with no content yet is an empty one (store.UpdateContent).
+    const content = data ? normalizeContent(data.content) : blankContent();
     if (!edit(content)) return;
     const values = { content, plain_text: plainText(content), updated_by: user.id };
     if (!data) {
@@ -594,7 +669,11 @@ async function unlinkSubpage(
         return true;
       });
     c.document.children = drop(c.document.children);
-    if (gone && !c.document.children?.length) c.document.children = emptyContent().document.children;
+    if (gone && !c.document.children?.length) {
+      const blank = blankContent();
+      c.document.children = blank.document.children;
+      Object.assign(c.meta.blocks, blank.meta.blocks);
+    }
     return gone;
   });
   return was;
@@ -950,7 +1029,9 @@ async function runWorkspaceJob(
     // reading the web from its start, as on a page.
     const webBefore = history.some((turn) => turn.guarded === true);
     const today = new Date().toISOString().slice(0, 10);
-    const webSignal = () => AbortSignal.timeout(Math.max(0, Math.min(deps.callTimeoutMs, deadline - Date.now())));
+    const webSignal = () =>
+      timeoutSignal(Math.max(0, Math.min(deps.callTimeoutMs, deadline - Date.now())), deps.unloading);
+    const parsing = new ParseBudget();
     const open = job.request?.open_page_id ? await pageOf(job.request.open_page_id) : null;
     const openPage = open ? { id: open.id, title: open.title, ...(open.shared ? { shared: true } : {}) } : undefined;
 
@@ -958,7 +1039,7 @@ async function runWorkspaceJob(
       ...NO_PAGE,
       ...(web
         ? {
-          readWebPage: (url: string) => (deps.readPage ?? readPage)(url, webSignal()),
+          readWebPage: (url: string) => (deps.readPage ?? readPage)(url, webSignal(), undefined, parsing),
           ...(canSearch(conn)
             ? { searchWeb: (query: string) => (deps.searchWeb ?? searchWeb)(conn, model, query, today, webSignal()) }
             : {}),
@@ -994,11 +1075,13 @@ async function runWorkspaceJob(
           toolsEnabled = false;
           messages[0] = { role: "system", content: prompt() };
         },
+        keep: opsKeeper(uc, job, session, edits, deps),
       },
       emit,
       deadline,
       deps,
     );
+    if (deps.unloading?.aborted && !finished) throw new Error(SHUT_DOWN);
     // A run that changed pages did something, out of time too.
     if (outOfTime && !session.ops.length) {
       throw new Error("The model took too long to answer. Try again, or choose a faster model.");
@@ -1012,22 +1095,19 @@ async function runWorkspaceJob(
         ? `I ran out of time and stopped.${done ? ` So far: ${done}.` : ""}`
         : `I stopped after ${MAX_ROUNDS} steps.${done ? ` So far: ${done}.` : ""}`;
     }
-    const { error: jobError } = await uc.from("ai_jobs").update({
-      status: "done",
-      result: { reply, ops: keptOps(session.ops), edits, kept_to_page: session.keptToPage, guarded: session.guarded },
-      error: null,
-    }).eq("id", job.id);
-    if (jobError) console.error("ai_jobs:", jobError.message);
-    emit({ type: "done", reply, edits, kept_to_page: session.keptToPage, guarded: session.guarded });
+    const told = {
+      kept_to_page: session.keptToPage,
+      guarded: session.guarded,
+      ...(session.readOtherPeoples ? { read_others: true } : {}),
+    };
+    await endJob(uc, job, { reply, ops: keptOps(session.ops), edits, ...told });
+    emit({ type: "done", reply, edits, ...told });
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = storable(e instanceof Error ? e.message : String(e));
     console.error("agent job failed:", message);
     // What it changed stays, its ops with it, for Undo to take it back by.
-    const result = session?.ops.length ? { reply: "", ops: keptOps(session.ops), edits } : undefined;
-    await uc.from("ai_jobs").update({ status: "failed", error: message, ...(result ? { result } : {}) }).eq(
-      "id",
-      job.id,
-    );
+    const result = session?.ops.length ? { reply: "", ops: keptOps(session.ops), edits } : null;
+    await uc.from("ai_jobs").update({ status: "failed", error: message, result }).eq("id", job.id);
     emit({ type: "error", message });
   }
 }
@@ -1167,7 +1247,9 @@ async function runJob(
     // the provider may search it too (canSearch).
     const allowWeb = job.request?.allow_web === true;
     const today = new Date().toISOString().slice(0, 10);
-    const webSignal = () => AbortSignal.timeout(Math.max(0, Math.min(deps.callTimeoutMs, deadline - Date.now())));
+    const webSignal = () =>
+      timeoutSignal(Math.max(0, Math.min(deps.callTimeoutMs, deadline - Date.now())), deps.unloading);
+    const parsing = new ParseBudget();
 
     // --- history --------------------------------------------------------
     const history = await historyOf(uc, job);
@@ -1291,7 +1373,7 @@ async function runJob(
       readCaptions: (video: VideoRef) => (deps.readCaptions ?? readCaptions)(video, webSignal()),
       ...(web
         ? {
-          readWebPage: (url: string) => (deps.readPage ?? readPage)(url, webSignal()),
+          readWebPage: (url: string) => (deps.readPage ?? readPage)(url, webSignal(), undefined, parsing),
           ...(canSearch(conn)
             ? { searchWeb: (query: string) => (deps.searchWeb ?? searchWeb)(conn, model, query, today, webSignal()) }
             : {}),
@@ -1441,11 +1523,13 @@ async function runJob(
           messages[0] = { role: "system", content: systemPrompt({ ...promptContext, toolsEnabled }) };
           messages[requestAt] = request();
         },
+        keep: opsKeeper(uc, job, session, edits, deps),
       },
       emit,
       deadline,
       deps,
     );
+    if (deps.unloading?.aborted && !finished) throw new Error(SHUT_DOWN);
     let reply = answered;
     // A run that made pages did something, if it changed nothing here.
     if (outOfTime && !session.ops.length) {
@@ -1469,23 +1553,14 @@ async function runJob(
     // --- save -----------------------------------------------------------
     if (session.changed) await save();
 
-    const { error: jobError } = await uc
-      .from("ai_jobs")
-      .update({
-        status: "done",
-        result: {
-          reply,
-          ops: keptOps(session.ops),
-          edits,
-          kept_to_page: session.keptToPage,
-          guarded: session.guarded,
-          // Later turns make no page of the person's own either.
-          ...(session.readOtherPeoples ? { read_others: true } : {}),
-        },
-        error: null,
-      })
-      .eq("id", job.id);
-    if (jobError) console.error("ai_jobs:", jobError.message);
+    const told = {
+      kept_to_page: session.keptToPage,
+      guarded: session.guarded,
+      // Later turns make no page of the person's own either, here or on
+      // a device.
+      ...(session.readOtherPeoples ? { read_others: true } : {}),
+    };
+    await endJob(uc, job, { reply, ops: keptOps(session.ops), edits, ...told });
 
     if (job.surface === "comment" && threadRoot) {
       // The service role posts the reply: comments_guard pins author_id to the
@@ -1502,9 +1577,9 @@ async function runJob(
       if (replyError) console.error("comment reply:", replyError.message);
     }
 
-    emit({ type: "done", reply, edits, kept_to_page: session.keptToPage, guarded: session.guarded });
+    emit({ type: "done", reply, edits, ...told });
   } catch (e) {
-    let message = e instanceof Error ? e.message : String(e);
+    let message = storable(e instanceof Error ? e.message : String(e));
     console.error("agent job failed:", message);
     // A run that failed after it edited the page, as when a later call of
     // the model fails, saves its edits: the app has them already, open or
@@ -1516,7 +1591,7 @@ async function runJob(
       } catch (saveError) {
         const why = saveError instanceof Error ? saveError.message : String(saveError);
         console.error("agent job's edits:", why);
-        message = `${message} Its edits were not saved either: ${why}`;
+        message = storable(`${message} Its edits were not saved either: ${why}`);
       }
     }
     // The pages it made are kept, their ops with them, for Undo to take
@@ -1525,11 +1600,8 @@ async function runJob(
     const kept = (session?.ops ?? []).flatMap((op, i) => savedEdits || PAGE_OPS.has(op.op) ? [i] : []);
     const result = kept.length
       ? { reply: "", ops: keptOps(kept.map((i) => session!.ops[i])), edits: kept.flatMap((i) => edits[i] ?? []) }
-      : undefined;
-    await uc.from("ai_jobs").update({ status: "failed", error: message, ...(result ? { result } : {}) }).eq(
-      "id",
-      job.id,
-    );
+      : null;
+    await uc.from("ai_jobs").update({ status: "failed", error: message, result }).eq("id", job.id);
     emit({ type: "error", message });
   }
 }
@@ -1545,13 +1617,16 @@ interface Conversation {
   edits: { summary: string; block_ids: string[]; tool: string }[];
   /** Words the prompt and the request for a model that turned the tools down: it answers without them. */
   withoutTools(): void;
+  /** Keeps the ops so far on the job, as each answer's calls are made (opsKeeper). */
+  keep(): Promise<void>;
 }
 
 /**
  * Asks the model, round after round, making the calls it asks for, until
- * it answers, runs out of rounds, or of time before deadline, or its page
- * gains a public link after it read beyond the page (session.stopped): a
- * page's run and a workspace run alike.
+ * it answers, runs out of rounds, or of time before deadline or as the
+ * platform shuts the worker down, or its page gains a public link after it
+ * read beyond the page (session.stopped): a page's run and a workspace run
+ * alike.
  */
 async function converse(
   c: Conversation,
@@ -1560,6 +1635,7 @@ async function converse(
   deps: AgentDeps,
 ): Promise<{ reply: string; finished: boolean; outOfTime: boolean }> {
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const shuttingDown = () => !!deps.unloading?.aborted;
   let reply = "";
   let finished = false;
   let outOfTime = false;
@@ -1574,7 +1650,7 @@ async function converse(
         return await deps.chat(
           c.conn,
           { model: c.model, messages: c.messages, tools: c.tools },
-          AbortSignal.timeout(Math.min(deps.callTimeoutMs, deadline - Date.now())),
+          timeoutSignal(Math.min(deps.callTimeoutMs, deadline - Date.now()), deps.unloading),
           (delta) => {
             streamed = true;
             emit({ type: "text", delta, round });
@@ -1589,7 +1665,7 @@ async function converse(
     }
   };
   rounds: for (let round = 0; round < MAX_ROUNDS; round++) {
-    if (deadline - Date.now() < MIN_CALL_MS) {
+    if (shuttingDown() || deadline - Date.now() < MIN_CALL_MS) {
       outOfTime = true;
       break;
     }
@@ -1612,12 +1688,12 @@ async function converse(
       throw e;
     }
     const message = result.message;
-    c.messages.push(message);
+    c.messages.push(sentMessage(message));
     if (message.tool_calls?.length && c.tools.length) {
       for (const [i, call] of message.tool_calls.entries()) {
         // The calls stop at the deadline, as the model's do, keeping
         // time to save what they did.
-        if (Date.now() >= deadline) {
+        if (shuttingDown() || Date.now() >= deadline) {
           outOfTime = true;
           break rounds;
         }
@@ -1640,15 +1716,16 @@ async function converse(
         c.messages.push({
           role: "tool",
           tool_call_id: call.id,
-          content: truncate(JSON.stringify(outcome.result), TOOL_RESULT_LIMIT),
+          content: cutResult(JSON.stringify(outcome.result)),
         });
         // A run whose page's public link started after it read beyond the
         // page ends here, as the app's runs on the page do.
         if (c.session.stopped) break rounds;
       }
+      await c.keep();
       continue;
     }
-    reply = withoutThinking(message.content ?? "");
+    reply = storable(withoutThinking(message.content ?? ""));
     finished = true;
     break;
   }

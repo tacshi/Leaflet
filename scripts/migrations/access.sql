@@ -380,32 +380,32 @@ begin
 end;
 $$;
 
--- A tree goes 1,000 pages deep and no deeper: the shared page and 999
--- under it. The share reaches the deepest; no page is made under it; and
--- a page with a subpage goes under the 997th, but not the 998th, where
--- its subpage would be the 1,001st.
+-- A tree goes 256 pages deep and no deeper: the shared page and 255 under
+-- it. The share reaches the deepest; no page is made under it; and a page
+-- with a subpage goes under the 253rd, but not the 254th, where its
+-- subpage would be the 257th.
 do $$
 declare
   v_deepest uuid := 'e0000000-0000-0000-0000-0000000000e1';
-  v_997 uuid;
-  v_998 uuid;
+  v_253 uuid;
+  v_254 uuid;
   v_moved constant uuid := 'e0000000-0000-0000-0000-0000000000c0';
 begin
   perform pg_temp.act_as('a1000000-0000-0000-0000-000000000001');
-  for i in 1 .. 999 loop
+  for i in 1 .. 255 loop
     insert into public.pages (space_id, parent_id, title)
     select p.space_id, p.id, 'Down ' || i from public.pages p where p.id = v_deepest
     returning id into v_deepest;
-    if i = 997 then
-      v_997 := v_deepest;
-    elsif i = 998 then
-      v_998 := v_deepest;
+    if i = 253 then
+      v_253 := v_deepest;
+    elsif i = 254 then
+      v_254 := v_deepest;
     end if;
   end loop;
   begin
     insert into public.pages (space_id, parent_id, title)
-    select p.space_id, p.id, 'Down 1000' from public.pages p where p.id = v_deepest;
-    raise exception 'a page was made 1,001 pages deep';
+    select p.space_id, p.id, 'Down 256' from public.pages p where p.id = v_deepest;
+    raise exception 'a page was made 257 pages deep';
   exception when check_violation then
     if sqlerrm <> 'page_too_deep' then
       raise;
@@ -417,18 +417,18 @@ begin
   insert into public.pages (space_id, parent_id, title)
   select p.space_id, p.id, 'Under moved' from public.pages p where p.id = v_moved;
   begin
-    update public.pages set parent_id = v_998 where id = v_moved;
-    raise exception 'a move took a tree 1,001 pages deep';
+    update public.pages set parent_id = v_254 where id = v_moved;
+    raise exception 'a move took a tree 257 pages deep';
   exception when check_violation then
     if sqlerrm <> 'page_too_deep' then
       raise;
     end if;
   end;
-  update public.pages set parent_id = v_997 where id = v_moved;
+  update public.pages set parent_id = v_253 where id = v_moved;
 
   perform pg_temp.act_as('a3000000-0000-0000-0000-000000000003');
   if not exists (select 1 from public.pages where id = v_deepest) then
-    raise exception 'the share does not reach 1,000 pages down';
+    raise exception 'the share does not reach 256 pages down';
   end if;
 end;
 $$;

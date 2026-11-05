@@ -347,6 +347,11 @@ func RunLocal(ctx context.Context, client Model, req Request, tc ToolContext, ev
 		}
 		messages = append(messages, res.AssistantMessage())
 		for i, call := range res.ToolCalls {
+			// Stopped, or its account gone, while the calls before it ran:
+			// the rest of the answer is not made.
+			if err := ctx.Err(); err != nil {
+				return result(""), err
+			}
 			made, ok := drafted[i]
 			switch {
 			case ok:

@@ -8,6 +8,16 @@
 
 begin;
 
+-- Realtime has made no messages here: the policy for a page's saves waits,
+-- and the app is told so (realtime.sql has them made).
+do $$
+begin
+  if public.ensure_page_saves_heard() then
+    raise exception 'the policy for a page''s saves was said to be there with no messages';
+  end if;
+end;
+$$;
+
 -- Every foreign key has an index that starts with it, so deleting the row
 -- it points at never scans the whole table.
 do $$

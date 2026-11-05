@@ -11,6 +11,20 @@
 #   scripts/publish.sh 0.2.0 --no-upload     # build into build/release only
 #   scripts/publish.sh 0.2.0 --allow-branch  # release from a branch, not main
 #   scripts/publish.sh 0.2.0 --allow-unsigned # publish unsigned Windows builds
+#   scripts/publish.sh 0.2.0 --mac --allow-partial # publish one platform alone
+#
+# A release needs the update manifest of every platform: installed copies
+# read theirs from the latest release, and find no update in one without it,
+# and a published release takes no more builds. --mac or --win alone so stops
+# with its build on the draft, tagging nothing; running this for the other
+# platform, from the same commit, adds that build and publishes both.
+# --allow-partial publishes without the others, whose installed copies then
+# wait for the next release.
+#
+# A draft records the commit it was made from, and a run from any other is
+# refused, before it builds and again before it publishes: the tag would
+# name that commit, over a build of another. Delete a draft left by a run
+# given up, and run again.
 #
 # The notes are the "## <version>" section of CHANGELOG.md, used verbatim
 # when it has one. Otherwise they are drafted from the subjects of the
@@ -41,6 +55,7 @@ WIN=false
 DRY_RUN=false
 NO_UPLOAD=false
 ALLOW_BRANCH=false
+ALLOW_PARTIAL=false
 ALLOW_UNSIGNED=false
 if [[ "${LEAFLET_ALLOW_UNSIGNED:-}" == 1 ]]; then ALLOW_UNSIGNED=true; fi
 for arg in "$@"; do
@@ -50,6 +65,7 @@ for arg in "$@"; do
 	--dry-run | -n) DRY_RUN=true ;;
 	--no-upload) NO_UPLOAD=true ;;
 	--allow-branch) ALLOW_BRANCH=true ;;
+	--allow-partial) ALLOW_PARTIAL=true ;;
 	--allow-unsigned) ALLOW_UNSIGNED=true ;;
 	-h | --help)
 		sed -n '/^set -euo pipefail/q;2,$p' "$0" | sed 's/^# \{0,1\}//'
@@ -62,10 +78,9 @@ for arg in "$@"; do
 		;;
 	esac
 done
-[[ -n "$VERSION" ]] || die "usage: scripts/publish.sh <version> [--mac] [--win] [--dry-run] [--no-upload] [--allow-branch] [--allow-unsigned]"
+[[ -n "$VERSION" ]] || die "usage: scripts/publish.sh <version> [--mac] [--win] [--dry-run] [--no-upload] [--allow-branch] [--allow-partial] [--allow-unsigned]"
 check_version "$VERSION"
-# Both, unless one is asked for: installed copies on either update only
-# from a release that has their platform's manifest.
+# Both, unless one is asked for.
 if ! $MAC && ! $WIN; then
 	MAC=true
 	WIN=true
@@ -122,6 +137,19 @@ run() {
 	fi
 }
 
+# check_manifests stops a release without the update manifest of every
+# platform, $1 naming what it will hold, a line each.
+check_manifests() {
+	local missing
+	missing="$(missing_manifests "$1" | paste -sd ' ' - | sed 's/ /, /g')"
+	[[ -n "$missing" ]] || return 0
+	if $ALLOW_PARTIAL; then
+		warn "$TAG has no $missing, so installed copies of those platforms will find no update until the next release"
+	else
+		problem "$TAG would have no $missing, so installed copies of those platforms would find no update; run this for the other platform, which adds its build to the draft, or add --allow-partial to publish without it"
+	fi
+}
+
 # ------------------------------------------------------------------- checks
 
 BRANCH="$(git branch --show-current)"
@@ -147,7 +175,7 @@ if $WIN; then
 		fi
 	fi
 fi
-check load_update_key
+check update_key
 $NO_UPLOAD || check check_gh
 
 if [[ "$BRANCH" != "main" ]] && ! $ALLOW_BRANCH; then
@@ -191,6 +219,7 @@ if ! $NO_UPLOAD; then
 		problem "$VERSION does not come after $LATEST, the latest release, and a release is marked the latest"
 	fi
 	check check_draft "$VERSION"
+	check check_draft_commit "$VERSION" "$COMMIT"
 fi
 
 # ------------------------------------------------------------------- notes
@@ -274,6 +303,16 @@ if ! $NO_UPLOAD; then
 	if ! $DRY_RUN && { [[ "$(git rev-parse HEAD)" != "$COMMIT" ]] || [[ -n "$(git status --porcelain --untracked-files=no)" ]]; }; then
 		die "the checkout changed while Leaflet $VERSION was built from $SHORT, so which commit the draft release $TAG holds a build of is not known; delete the draft and run again"
 	fi
+	if $DRY_RUN; then
+		# What a draft from an earlier run has, and what this one would add.
+		ASSETS="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' 2>/dev/null || true)"
+		if $MAC; then ASSETS+=$'\n'"$(update_manifests | grep darwin)"; fi
+		if $WIN; then ASSETS+=$'\n'"$(update_manifests | grep windows)"; fi
+	else
+		check_draft_commit "$VERSION" "$COMMIT"
+		ASSETS="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name')"
+	fi
+	check_manifests "$ASSETS"
 	run git tag -a "$TAG" -F "$STAGE_DIR/notes.md" "$COMMIT"
 	run git push origin "$TAG"
 	run gh release edit "$TAG" --repo "$REPO" --draft=false --latest --title "Leaflet $VERSION" --notes-file "$STAGE_DIR/notes.md"

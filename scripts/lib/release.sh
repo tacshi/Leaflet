@@ -166,6 +166,28 @@ windows_certificate() {
 	printf '%s\n' "$(cd "$(dirname "$cert")" && pwd)/$(basename "$cert")"
 }
 
+# check_signed fails unless each of the Windows programs $@ carries a
+# signature, by the certificate table of its PE header: a certificate that
+# signed some of a build should leave none of it to go out unsigned.
+check_signed() {
+	python3 -I - "$@" <<'EOF' || die "a Windows certificate was given, so every program of the build should be signed"
+import struct, sys
+
+def signed(path):
+    try:
+        with open(path, "rb") as f:
+            data = f.read(4096)
+        pe = struct.unpack_from("<I", data, 0x3c)[0]
+        directories = {0x10b: 96, 0x20b: 112}[struct.unpack_from("<H", data, pe + 24)[0]]
+        # The fifth directory, its size after its offset.
+        return struct.unpack_from("<I", data, pe + 24 + directories + 4 * 8 + 4)[0] != 0
+    except (OSError, KeyError, struct.error):
+        return False
+
+sys.exit("\n".join(f"not signed: {path}" for path in sys.argv[1:] if not signed(path)) or None)
+EOF
+}
+
 # check_nsis fails unless makensis is there to make Windows installers.
 check_nsis() {
 	command -v makensis >/dev/null 2>&1 || die "Windows installers need NSIS (brew install makensis)"
@@ -179,16 +201,18 @@ utf8_locale() {
 	export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
 }
 
-# load_update_key exports MYGO_UPDATER_PRIVATE_KEY, which signs updates, from
-# the file LEAFLET_UPDATE_KEY names (by default the one `go tool mygo keygen`
-# wrote for Leaflet) unless it is set.
-load_update_key() {
-	[[ -n "${MYGO_UPDATER_PRIVATE_KEY:-}" ]] && { export MYGO_UPDATER_PRIVATE_KEY; return; }
+# update_key prints the file of the key that signs updates, the one
+# LEAFLET_UPDATE_KEY names (by default the one `go tool mygo keygen` wrote for
+# Leaflet), for updates.privateKey: read there, the key stays out of what
+# every program the release runs inherits, as $EDITOR and git's hooks. It
+# prints nothing when MYGO_UPDATER_PRIVATE_KEY, which MyGo takes first, is
+# set, and fails when there is neither.
+update_key() {
+	[[ -z "${MYGO_UPDATER_PRIVATE_KEY:-}" ]] || return 0
 	local file
 	file="$(abs_path "${LEAFLET_UPDATE_KEY:-$HOME/Library/Application Support/mygo/update-keys/Leaflet/mygo-update.key}")"
 	[[ -f "$file" ]] || die "no update signing key at $file; set LEAFLET_UPDATE_KEY or MYGO_UPDATER_PRIVATE_KEY"
-	MYGO_UPDATER_PRIVATE_KEY="$(<"$file")"
-	export MYGO_UPDATER_PRIVATE_KEY
+	printf '%s\n' "$file"
 }
 
 # check_gh fails unless the GitHub CLI is there to upload with, signed in.
@@ -206,6 +230,43 @@ check_draft() {
 	if draft="$(gh release view "v$1" --repo "$repo" --json isDraft --jq .isDraft 2>/dev/null)" && [[ "$draft" != true ]]; then
 		die "the release v$1 of $repo is already published; a new build needs a new version"
 	fi
+}
+
+# check_draft_commit fails when the draft release v$1 of updates.github holds
+# a build of another commit than $2, which upload_release records on it as
+# it makes it (--target): a release tags one commit, and a build of another
+# would go out under it. No release yet passes.
+check_draft_commit() {
+	local repo target
+	repo="$(config_value updates.github)"
+	if target="$(gh release view "v$1" --repo "$repo" --json targetCommitish --jq .targetCommitish 2>/dev/null)" && [[ "$target" != "$2" ]]; then
+		die "the draft release v$1 of $repo holds a build of $target, not of $2; delete the draft and run again"
+	fi
+}
+
+# check_pushed fails unless updates.github has the commit $1, which a draft
+# can record only then: found out before the long builds, not after them.
+check_pushed() {
+	local repo
+	repo="$(config_value updates.github)"
+	gh api "repos/$repo/commits/$1" --silent >/dev/null 2>&1 ||
+		die "$repo does not have the commit $1, which its draft release would record; push it first"
+}
+
+# update_manifests prints the update manifest of every platform of a release.
+# Installed copies read their platform's from the latest release, and find
+# no update in one without it.
+update_manifests() {
+	printf 'update-%s.json\n' darwin-arm64 darwin-amd64 darwin-universal windows-amd64 windows-arm64
+}
+
+# missing_manifests prints those of update_manifests that are not among the
+# names, a line each, in $1.
+missing_manifests() {
+	local name
+	while read -r name; do
+		grep -qxF "$name" <<<"$1" || printf '%s\n' "$name"
+	done < <(update_manifests)
 }
 
 # changelog_notes prints the section of the changelog $1 under
@@ -255,18 +316,19 @@ EOF
 }
 
 # upload_release puts what go tool mygo build wrote in the output directory
-# $2, for the platform folders $4…, on the GitHub release v$1 of
-# updates.github, with gh, as mygo build -upload does: the files the
-# build's SHA256SUMS lists, which MyGo writes for the files it would
-# upload (the installers, update archives, deltas and install scripts),
-# and SHA256SUMS, first, then the update manifests, so that none ever
-# names a file not there yet. They keep MyGo's names, by which SHA256SUMS
-# lists them and install.ps1 finds its installer. A release there already
-# must be a draft, and keeps the checksums of the files other builds put
-# on it; else it is made, as a draft, with the notes in the file $3.
+# $2, built from the commit $4, for the platform folders $5…, on the GitHub
+# release v$1 of updates.github, with gh, as mygo build -upload does: the
+# files the build's SHA256SUMS lists, which MyGo writes for the files it
+# would upload (the installers, update archives, deltas and install
+# scripts), and SHA256SUMS, first, then the update manifests, so that none
+# ever names a file not there yet. They keep MyGo's names, by which
+# SHA256SUMS lists them and install.ps1 finds its installer. A release there
+# already must be a draft of that commit, and keeps the checksums of the
+# files other builds put on it; else it is made, as a draft of it, with the
+# notes in the file $3.
 upload_release() {
-	local version="$1" out="$2" notes="$3" repo tag dir f sum name found assets earlier
-	shift 3
+	local version="$1" out="$2" notes="$3" commit="$4" repo tag dir f sum name found assets earlier
+	shift 4
 	local files=() manifests=()
 	repo="$(config_value updates.github)"
 	tag="v$version"
@@ -294,6 +356,7 @@ upload_release() {
 	done
 	((${#files[@]} + ${#manifests[@]} > 0)) || die "nothing to upload in $out"
 	check_draft "$version"
+	check_draft_commit "$version" "$commit"
 	if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
 		assets="$(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name')"
 		if grep -qx SHA256SUMS <<<"$assets"; then
@@ -304,7 +367,7 @@ upload_release() {
 		fi
 	else
 		info "creating the draft release $tag of $repo"
-		gh release create "$tag" --repo "$repo" --draft --title "$tag" --notes-file "$notes" >/dev/null
+		gh release create "$tag" --repo "$repo" --draft --target "$commit" --title "$tag" --notes-file "$notes" >/dev/null
 	fi
 	files+=("$out/SHA256SUMS")
 	info "uploading ${#files[@]} files, then ${#manifests[@]} manifests, to $tag of $repo"

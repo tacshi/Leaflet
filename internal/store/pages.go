@@ -56,15 +56,18 @@ const maxTitleLen = 2000
 
 // ClampTitle is a title as a page keeps it: its first maxTitleLen
 // characters, and nothing else changed.
-func ClampTitle(title string) string {
+func ClampTitle(title string) string { return clampChars(title, maxTitleLen) }
+
+// clampChars is text's first limit characters, and nothing else changed.
+func clampChars(text string, limit int) string {
 	n := 0
-	for i := range title {
-		if n == maxTitleLen {
-			return title[:i]
+	for i := range text {
+		if n == limit {
+			return text[:i]
 		}
 		n++
 	}
-	return title
+	return text
 }
 
 const pageCols = `id, space_id, parent_id, folder_id, title, icon, sort_key, created_by, created_at, updated_at, deleted_at, keep_offline, is_template, tags, default_template_id`

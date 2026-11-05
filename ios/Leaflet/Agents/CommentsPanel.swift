@@ -211,6 +211,9 @@ struct CommentRow: View {
                     .foregroundStyle(palette.accent)
                 Text(comment.authorName.isEmpty ? L.pageBylineSomeone : comment.authorName)
                     .font(.footnote.weight(.semibold))
+                if let note = Self.note(comment) {
+                    Text(note).font(.caption).foregroundStyle(palette.textMuted).lineLimit(1)
+                }
                 // As the byline says when, in the app's language, moving on
                 // as the panel stays open.
                 TimelineView(.everyMinute) { context in
@@ -233,6 +236,13 @@ struct CommentRow: View {
                 deleteButton
             }
         }
+    }
+
+    /// note says how a comment came, after its author, as the desktop's
+    /// comments do: who had an agent write it, or by the page's public
+    /// link, through which a guest names themself, any name.
+    static func note(_ comment: CommentThread.Comment) -> String? {
+        comment.authorKind == "guest" ? L.panelViaPublicLink : comment.askedBy
     }
 
     /// text is a comment's text, its inline Markdown read, with only the

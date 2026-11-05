@@ -147,7 +147,8 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 	for _, p := range tree[1:] {
 		plan.ids[p.ID] = doc.NewRowID()
 	}
-	for i, p := range tree {
+	contents := make(map[string]*doc.Content, len(tree))
+	for _, p := range tree {
 		row, err := s.ContentRow(p.ID)
 		if IsNotFound(err) {
 			return pageCopies{}, fmt.Errorf("%s is not on this device yet", p.DisplayTitle())
@@ -159,8 +160,12 @@ func (s *Store) copyPlan(id, copyID string) (pageCopies, error) {
 		if err != nil {
 			return pageCopies{}, fmt.Errorf("%s: %w", p.DisplayTitle(), err)
 		}
+		contents[p.ID] = c
+	}
+	copies := doc.CopyPages(contents, plan.ids)
+	for i, p := range tree {
 		files := map[string]int{} // the page's files, by where plan.files has their copies
-		plan.contents[i] = c.CopyFor(plan.ids)
+		plan.contents[i] = copies[p.ID]
 		plan.contents[i].Walk(func(n, _ *doc.Node) {
 			if n.Type == "recording" {
 				r, err := s.Recording(n.Str("recording_id"))
@@ -289,7 +294,7 @@ func (s *Store) copyLocal(plan pageCopies) ([]Recording, []File, []string, error
 		now := time.Now()
 		f := File{ID: c.to, SpaceID: s.Session().SpaceID, PageID: c.pageID, Name: fileName(c.Name), MimeType: c.MimeType,
 			SizeBytes: c.SizeBytes, CreatedAt: now, UpdatedAt: now}
-		f.StoragePath = f.SpaceID + "/" + f.ID + "/" + f.Name
+		f.StoragePath = StorageKey(f.SpaceID, f.ID, f.Name)
 		dir := filepath.Join(s.Dir, "files", f.ID)
 		made = append(made, dir)
 		f.LocalPath = filepath.Join(dir, f.Name)

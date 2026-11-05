@@ -91,14 +91,15 @@ func LookUp(link string) (LinkInfo, error) {
 		return LinkInfo{}, err
 	}
 	defer func() { _ = res.Body.Close() }()
-	if mt, _, _ := mime.ParseMediaType(res.Header.Get("Content-Type")); mt != "" && mt != "text/html" && mt != "application/xhtml+xml" {
+	ctype := res.Header.Get("Content-Type")
+	if mt, _, _ := mime.ParseMediaType(ctype); mt != "" && mt != "text/html" && mt != "application/xhtml+xml" {
 		return LinkInfo{}, nil
 	}
 	data, err := io.ReadAll(io.LimitReader(res.Body, maxHeadBytes))
 	if err != nil {
 		return LinkInfo{}, err
 	}
-	return ReadLinkInfo(link, string(data)), nil
+	return ReadLinkInfo(link, pageText(data, ctype)), nil
 }
 
 // Lacking reports whether n is a link card of link without its info yet.

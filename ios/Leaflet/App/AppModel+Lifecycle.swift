@@ -24,10 +24,11 @@ extension AppModel {
         front.remove(scene)
         guard front.allObjects.isEmpty else { return }
         let task = BackgroundTask()
+        let leaving = leavings.begin()
         // Out of time, the pass is cut short, and what it didn't send goes
         // on the next; the system ends an app whose task outlives it.
         task.begin("Save and sync") { [weak self] in
-            guard let self, front.allObjects.isEmpty, let client else { return }
+            guard let self, stays(away: leaving), let client else { return }
             Task.detached { await client.stop() }
         }
         BackgroundSync.schedule()
@@ -48,10 +49,16 @@ extension AppModel {
             _ = await client.saveOpenPages()
             try? await client.syncNow()
             self?.turn { [weak self] client in
-                if self?.front.allObjects.isEmpty ?? true { await client.stop() }
+                if self?.stays(away: leaving) ?? true { await client.stop() }
                 task.end()
             }
         }
+    }
+
+    /// stays says the app is still away as of leaving, for sync to stop:
+    /// no window came back, and it didn't leave again after.
+    private func stays(away leaving: Int) -> Bool {
+        front.allObjects.isEmpty && leavings.isLatest(leaving)
     }
 
     /// turn runs body with the core after sync's starts and stops asked for
@@ -63,6 +70,23 @@ extension AppModel {
             await body(client)
         }
     }
+}
+
+/// Leavings numbers the times the app goes to the background, each of which
+/// sends what waits to go up and then stops sync. Only the latest stops it:
+/// a stop cuts short the pass running, which by then may be the one a later
+/// leaving waited behind, with what was typed in between.
+struct Leavings {
+    private var count = 0
+
+    /// begin numbers a leaving.
+    mutating func begin() -> Int {
+        count += 1
+        return count
+    }
+
+    /// isLatest says leaving is the last that began.
+    func isLatest(_ leaving: Int) -> Bool { leaving == count }
 }
 
 /// BackgroundTask is time the system gives the app to finish its work in

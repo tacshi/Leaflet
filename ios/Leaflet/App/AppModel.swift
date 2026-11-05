@@ -95,6 +95,8 @@ final class AppModel {
     /// come and go, which run in that order: a stop runs after a start
     /// asked for before it, and the other way round.
     @ObservationIgnored var lifecycle: Task<Void, Never>?
+    /// leavings are the times the app went to the background.
+    @ObservationIgnored var leavings = Leavings()
     @ObservationIgnored private var clockChanges: [any NSObjectProtocol] = []
 
     init() {
@@ -105,7 +107,9 @@ final class AppModel {
         iCloud = ICloudSync(folder: folder)
         // As the app launches, as the system has it, for passes that run
         // once the core is open.
-        BackgroundSync.register { [weak self] in await self?.opened() }
+        BackgroundSync.register(
+            inFront: { [weak self] in self?.front.allObjects.isEmpty == false },
+            opened: { [weak self] in await self?.opened() })
         let root = folder.root?.path(percentEncoded: false)
         opening = Task { [weak self] in await self?.open(iCloudRoot: root) }
         // The zone the device is in changes as it travels, and its offset

@@ -17,6 +17,21 @@ func NormalizeBaseURL(u string) string {
 	return u
 }
 
+// SameOrigin reports whether two endpoints are at one origin, the same
+// scheme, host and port, as a key saved for the one may go to the other: a
+// base URL that names another server, or the same one without TLS, is no
+// longer where the key was saved for.
+func SameOrigin(a, b string) bool {
+	origin := func(s string) string {
+		u, err := url.Parse(NormalizeBaseURL(s))
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return ""
+		}
+		return strings.ToLower(u.Scheme + "://" + u.Host)
+	}
+	return origin(a) != "" && origin(a) == origin(b)
+}
+
 // IsLocal reports whether an endpoint is on this machine or its network:
 // localhost, a .local name, or a loopback, private or link-local address.
 func IsLocal(baseURL string) bool {

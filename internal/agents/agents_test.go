@@ -20,6 +20,7 @@ import (
 	"leaflet/internal/doc"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
+	"leaflet/internal/web"
 	"leaflet/locales"
 )
 
@@ -106,6 +107,75 @@ func (f *fakeModel) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func call(name string, args map[string]any) map[string]any {
 	raw, _ := json.Marshal(args)
 	return map[string]any{"id": "c_" + name, "type": "function", "function": map[string]any{"name": name, "arguments": string(raw)}}
+}
+
+// A run stopped while a call of the model's answer works makes none of
+// the calls after it: the user stopped them.
+func TestStopEndsTheAnswersCalls(t *testing.T) {
+	f := &fakeModel{replies: []map[string]any{
+		{"content": "", "tool_calls": []any{
+			call("read_web_page", map[string]any{"url": "https://example.com/a"}),
+			call("delete_blocks", map[string]any{"ids": []any{"p1"}}),
+		}},
+		{"content": "Done."},
+	}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	c := page()
+	before := c.Encode()
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	tc := executor(c).Ctx
+	tc.ReadWeb = func(string) (web.Page, error) {
+		stop()
+		return web.Page{}, ctx.Err()
+	}
+	res, err := RunLocal(ctx, NewClient(srv.URL, ""), Request{Model: "m", AgentName: "Test", SupportsTools: true, Web: true, Instruction: "go"}, tc, Events{})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("ended with %v", err)
+	}
+	if len(res.Ops) != 0 || c.Encode() != before {
+		t.Errorf("%d ops after the run stopped", len(res.Ops))
+	}
+}
+
+// A call cut off, or whose arguments are no JSON object, is refused, and
+// goes back to the server with none: a server that reads them back would
+// refuse the conversation, and the run with it, over what it told the
+// model to write again.
+func TestMalformedArgumentsDoNotGoBack(t *testing.T) {
+	bad := func(id, args string) map[string]any {
+		return map[string]any{"id": id, "type": "function", "function": map[string]any{"name": "insert_blocks", "arguments": args}}
+	}
+	good := call("delete_blocks", map[string]any{"ids": []any{"p1"}})
+	f := &fakeModel{replies: []map[string]any{
+		{"content": "", "tool_calls": []any{bad("c1", `{"position":{"at":"end"},"blocks":[{"type":"para`), bad("c2", "[1]"), bad("c3", "null"), good}},
+		{"content": "Done."},
+	}}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	if _, err := RunLocal(context.Background(), NewClient(srv.URL, ""), Request{Model: "m", AgentName: "Test", SupportsTools: true, Instruction: "go"}, executor(page()).Ctx, Events{}); err != nil {
+		t.Fatal(err)
+	}
+	var sent []string
+	var results []string
+	for _, m := range f.requests[1]["messages"].([]any) {
+		msg := m.(map[string]any)
+		calls, _ := msg["tool_calls"].([]any)
+		for _, c := range calls {
+			sent = append(sent, c.(map[string]any)["function"].(map[string]any)["arguments"].(string))
+		}
+		if msg["role"] == "tool" {
+			results = append(results, msg["content"].(string))
+		}
+	}
+	want := []string{"{}", "{}", "{}", good["function"].(map[string]any)["arguments"].(string)}
+	if !slices.Equal(sent, want) {
+		t.Errorf("arguments sent back %q, want %q", sent, want)
+	}
+	if len(results) != 4 || !strings.Contains(results[0], "not valid JSON") || !strings.Contains(results[1], "must be a JSON object") {
+		t.Errorf("told the model %q", results)
+	}
 }
 
 func TestLoopAppliesAndUndoes(t *testing.T) {

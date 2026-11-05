@@ -6,6 +6,8 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -15,7 +17,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/spf13/cobra"
 
@@ -97,9 +101,11 @@ type runner struct {
 	o    Options
 	root *cobra.Command
 	json bool
-	st   *store.Store
-	srv  *mcp.Server
-	list *listing
+	// stdin is new's and append's --stdin: take what is piped in.
+	stdin bool
+	st    *store.Store
+	srv   *mcp.Server
+	list  *listing
 }
 
 func newRunner(o Options) *runner {
@@ -119,7 +125,7 @@ it; a folder by its name or ID.`,
 			"  " + name + " ls",
 			"  " + name + ` search "launch #work"`,
 			"  " + name + " cat Roadmap > roadmap.md",
-			"  " + name + ` new "Meeting notes" --folder Work < notes.md`,
+			"  " + name + ` new "Meeting notes" --folder Work --stdin < notes.md`,
 			"  make test 2>&1 | " + name + ` append "CI log"`,
 			"  " + name + " append Inbox call the dentist",
 			"  " + name + " tag Roadmap work q4",
@@ -162,24 +168,39 @@ comment.`,
 	var top bool
 	newPage := &cobra.Command{
 		Use:   "new [TITLE]",
-		Short: "Make a page, with the Markdown piped in as its content",
-		Long: `Make a page, with the Markdown piped in as its content, and print its ID.
-Without a title, the piped Markdown's first line names it, when it is a
-# heading.`,
+		Short: "Make a page, with the Markdown piped in as its content if asked",
+		Long: `Make a page, and print its ID. --stdin takes its content from the Markdown
+piped in; a title alone leaves what is piped in to the commands after it, as
+in a loop reading a file.
+Without a title, the Markdown piped in is its content, and its first line,
+a # heading, names it.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: r.with(func(args []string) error { return r.newPage(args, into, folder) }),
 	}
 	r.placeFlags(newPage, &into, &folder, nil)
+	newPage.Flags().BoolVar(&r.stdin, "stdin", false, "take its content from what is piped in")
 	appendTo := &cobra.Command{
 		Use:   "append PAGE [TEXT...]",
 		Short: "Add Markdown to the end of a page: the text given, or what is piped in",
 		Long: `Add Markdown to the end of a page: the text given, or what is piped in.
 Each line is a block: a paragraph, # to ### headings, - or 1. list items,
-- [ ] to-dos, > quotes, fenced code, | tables and --- dividers.`,
+- [ ] to-dos, > quotes, fenced code, | tables and --- dividers. With no text
+what is piped in is added, as --stdin asks for by name. After the page, --json,
+--stdin and --help still count; a -- before the text makes them text too.`,
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: r.completePage,
-		RunE:              r.with(r.appendTo),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			text, help := r.appendText(args[1:])
+			if help {
+				return cmd.Help()
+			}
+			return r.with(func([]string) error { return r.appendTo(args[0], text) })(cmd, args)
+		},
 	}
+	// The flags end at the page: "- [ ] a to-do" and "---" are text, which
+	// the parser would refuse as flags.
+	appendTo.Flags().SetInterspersed(false)
+	appendTo.Flags().BoolVar(&r.stdin, "stdin", false, "add what is piped in")
 	rename := &cobra.Command{
 		Use:               "rename PAGE TITLE",
 		Short:             "Change a page's title",
@@ -212,6 +233,7 @@ given. --clear takes them all off.`,
 		Use:   "folder",
 		Short: "Make and rename folders",
 		Args:  cobra.NoArgs,
+		RunE:  func(cmd *cobra.Command, _ []string) error { return cmd.Help() },
 	}
 	folders.AddCommand(&cobra.Command{
 		Use:   "new NAME",
@@ -251,7 +273,7 @@ given. --clear takes them all off.`,
 func (r *runner) placeFlags(cmd *cobra.Command, into, folder *string, top *bool) {
 	cmd.Flags().StringVar(into, "in", "", "put it inside this page, which links to it at its end")
 	cmd.Flags().StringVar(folder, "folder", "", "put it in this folder, at the top level")
-	_ = cmd.RegisterFlagCompletionFunc("in", r.completePage)
+	_ = cmd.RegisterFlagCompletionFunc("in", r.completeInto)
 	_ = cmd.RegisterFlagCompletionFunc("folder", r.completeFolder)
 	if top != nil {
 		cmd.Flags().BoolVar(top, "top", false, "put it at the top level, outside folders")
@@ -259,6 +281,17 @@ func (r *runner) placeFlags(cmd *cobra.Command, into, folder *string, top *bool)
 		cmd.MarkFlagsMutuallyExclusive("in", "folder", "top")
 	} else {
 		cmd.MarkFlagsMutuallyExclusive("in", "folder")
+	}
+	// An empty one, as a shell's unset variable gives, names nowhere: it
+	// would count as given, and the page would go to the top level.
+	cmd.PreRunE = func(*cobra.Command, []string) error {
+		switch {
+		case cmd.Flags().Changed("in") && strings.TrimSpace(*into) == "":
+			return errors.New("--in names no page")
+		case cmd.Flags().Changed("folder") && strings.TrimSpace(*folder) == "":
+			return errors.New("--folder names no folder")
+		}
+		return nil
 	}
 }
 
@@ -309,9 +342,10 @@ func (r *runner) call(name string, args map[string]any) (map[string]any, error) 
 	return out, nil
 }
 
-// printJSON prints v as JSON, for --json.
+// printJSON prints v as JSON, for --json, each title readable as decode
+// has it.
 func (r *runner) printJSON(v any) error {
-	raw, err := json.Marshal(v, json.Deterministic(true), jsontext.WithIndent("  "))
+	raw, err := json.Marshal(v, json.Deterministic(true), jsontext.WithIndent("  "), jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return err
 	}
@@ -325,9 +359,11 @@ func (r *runner) print(s string) error {
 	return err
 }
 
-// decode reads a tool's result into v, as a client reads its JSON.
+// decode reads a tool's result into v, as a client reads its JSON. A title
+// kept with bytes that are no UTF-8 reads with U+FFFD for them, as it does
+// in the app: it stops no command, and its page can be renamed by its ID.
 func decode(result map[string]any, v any) error {
-	raw, err := json.Marshal(result)
+	raw, err := json.Marshal(result, jsontext.AllowInvalidUTF8(true))
 	if err != nil {
 		return err
 	}
@@ -344,8 +380,8 @@ func (r *runner) changed(out map[string]any, err error) error {
 	return r.printJSON(out)
 }
 
-// input is what is piped in, with Windows' line ends as Markdown has
-// them: "" from a terminal, which would wait for typing.
+// input is what is piped in, as UTF-8, with Windows' line ends as Markdown
+// has them: "" from a terminal, which would wait for typing.
 func (r *runner) input() (string, error) {
 	if f, ok := r.o.In.(*os.File); ok {
 		if info, err := f.Stat(); err != nil || info.Mode()&os.ModeCharDevice != 0 {
@@ -356,7 +392,49 @@ func (r *runner) input() (string, error) {
 		return "", nil
 	}
 	raw, err := io.ReadAll(r.o.In)
-	return strings.ReplaceAll(string(raw), "\r\n", "\n"), err
+	return strings.ReplaceAll(utf8Text(raw), "\r\n", "\n"), err
+}
+
+// inputWaits reports, without reading or waiting, whether what is piped in
+// holds something to read: a file not read to its end, or a pipe with
+// bytes in it. What is still to come through a pipe it cannot tell.
+func (r *runner) inputWaits() bool {
+	f, ok := r.o.In.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	switch {
+	case err != nil:
+		return false
+	case info.Mode().IsRegular():
+		at, err := f.Seek(0, io.SeekCurrent)
+		return err == nil && at < info.Size()
+	case info.Mode()&os.ModeNamedPipe != 0:
+		return pipeHolds(f)
+	}
+	return false
+}
+
+// utf8Text is raw, what a program wrote, as UTF-8. Windows' tools write
+// UTF-16, as PowerShell's > does, or start with a byte order mark, which
+// each say so; a NUL between each letter, or a mark before a # heading,
+// would otherwise go into the page.
+func utf8Text(raw []byte) string {
+	var order binary.ByteOrder
+	switch {
+	case bytes.HasPrefix(raw, []byte{0xFF, 0xFE}):
+		order = binary.LittleEndian
+	case bytes.HasPrefix(raw, []byte{0xFE, 0xFF}):
+		order = binary.BigEndian
+	default:
+		return string(bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF}))
+	}
+	units := make([]uint16, (len(raw)-2)/2)
+	for i := range units {
+		units[i] = order.Uint16(raw[2+2*i:])
+	}
+	return string(utf16.Decode(units))
 }
 
 func (r *runner) ls(_ []string) error {
@@ -502,10 +580,18 @@ func (r *runner) readWhole(p listedPage) error {
 	return r.printJSON(whole)
 }
 
+// newPage makes a page. What is piped in is read only when asked for, or
+// when it is all there is to name the page: a title alone reads nothing,
+// so it neither takes the input of the commands after it nor waits on a
+// pipe that stays open. It only says so, when input is waiting. The
+// content is cut into calls first, so what cannot be makes no page.
 func (r *runner) newPage(args []string, into, folder string) error {
-	md, err := r.input()
-	if err != nil {
-		return err
+	var md string
+	if r.stdin || len(args) == 0 {
+		var err error
+		if md, err = r.input(); err != nil {
+			return err
+		}
 	}
 	var title string
 	if len(args) > 0 {
@@ -516,9 +602,13 @@ func (r *runner) newPage(args []string, into, folder string) error {
 	if strings.TrimSpace(title) == "" {
 		return errors.New("give the page a title, or start what is piped in with a # heading")
 	}
+	rest, err := parts(md)
+	if err != nil {
+		return err
+	}
 	a := map[string]any{"title": title}
-	if strings.TrimSpace(md) != "" {
-		a["markdown"] = md
+	if len(rest) > 0 {
+		a["markdown"], rest = rest[0], rest[1:]
 	}
 	if err := r.place(a, into, folder); err != nil {
 		return err
@@ -526,6 +616,15 @@ func (r *runner) newPage(args []string, into, folder string) error {
 	out, err := r.call("create_page", a)
 	if err != nil {
 		return err
+	}
+	if len(rest) > 0 {
+		id, _ := out["page_id"].(string)
+		if _, err := r.write(id, rest); err != nil {
+			return fmt.Errorf("page %s made without the end of its content: %w", id, err)
+		}
+	}
+	if !r.stdin && r.inputWaits() {
+		_, _ = fmt.Fprintf(r.o.Err, "%s: what is piped in was not read: --stdin reads it\n", r.o.Name)
 	}
 	if r.json {
 		return r.printJSON(out)
@@ -563,22 +662,209 @@ func (r *runner) place(a map[string]any, into, folder string) error {
 	return nil
 }
 
-func (r *runner) appendTo(args []string) error {
-	p, err := r.page(args[0])
+// appendText is what follows append's page, where the flag parser has
+// stopped: its text, without the flags the command takes, which count
+// there as they do on other commands, up to a "--", after which all is
+// text. help says --help is among them; --stdin and --json it sets.
+func (r *runner) appendText(words []string) (text []string, help bool) {
+	for i, w := range words {
+		switch w {
+		case "--":
+			return append(text, words[i+1:]...), help
+		case "--json":
+			r.json = true
+		case "--stdin":
+			r.stdin = true
+		case "--help", "-h":
+			help = true
+		default:
+			text = append(text, w)
+		}
+	}
+	return text, help
+}
+
+func (r *runner) appendTo(ref string, text []string) error {
+	p, err := r.page(ref)
 	if err != nil {
 		return err
 	}
-	md := strings.Join(args[1:], " ")
+	md := strings.Join(text, " ")
+	if r.stdin && md != "" {
+		return errors.New("give the text or --stdin, not both")
+	}
 	if md == "" {
 		if md, err = r.input(); err != nil {
 			return err
 		}
 	}
-	if strings.TrimSpace(md) == "" {
+	todo, err := parts(md)
+	if err != nil {
+		return err
+	}
+	if len(todo) == 0 {
 		return errors.New("nothing to add: give the text after the page, or pipe it in")
 	}
-	out, err := r.call("write_markdown", map[string]any{"page_id": p.ID, "position": map[string]any{"at": "end"}, "markdown": md})
-	return r.changed(out, err)
+	return r.changed(r.write(p.ID, todo))
+}
+
+// write adds the Markdown of parts to the end of a page, a call each, and
+// returns what they added as one call's result.
+func (r *runner) write(pageID string, parts []string) (map[string]any, error) {
+	ids := []string{}
+	for i, md := range parts {
+		out, err := r.call("write_markdown", map[string]any{"page_id": pageID, "position": map[string]any{"at": "end"}, "markdown": md})
+		if err != nil {
+			if i > 0 {
+				err = fmt.Errorf("%d of %d parts added: %w", i, len(parts), err)
+			}
+			return nil, err
+		}
+		var added struct {
+			IDs []string `json:"inserted_ids"`
+		}
+		if err := decode(out, &added); err != nil {
+			return nil, err
+		}
+		ids = append(ids, added.IDs...)
+	}
+	return map[string]any{"inserted_ids": ids}, nil
+}
+
+// parts is md cut at its lines into what a call takes (doc.CallNodes),
+// which a page does not stop at: a long log piped in is many calls. It is
+// none for md that makes no block. Each part is known to go before the
+// first is written: what no line can cut, as one long table, is an error,
+// with nothing written.
+func parts(md string) ([]string, error) {
+	blocks := doc.MarkdownBlocks(md)
+	if len(blocks) == 0 {
+		return nil, nil
+	}
+	err := doc.CallNodes(blocks)
+	if err == nil {
+		return []string{md}, nil
+	}
+	cut, inList := middleLine(md)
+	if cut == 0 {
+		return nil, fmt.Errorf("a block too long to cut, so nothing was written: %w", err)
+	}
+	head, err := parts(md[:cut])
+	if err != nil {
+		return nil, err
+	}
+	rest := md[cut:]
+	if inList {
+		rest = renumbered(rest)
+	}
+	tail, err := parts(rest)
+	if err != nil {
+		return nil, err
+	}
+	return append(head, tail...), nil
+}
+
+// middleLine is where the line of md nearest its middle starts, of those
+// that can start a part and read as they do in md, and 0 when there is
+// none. It starts a block at the top level, so it is no blank line, which
+// a list goes on across, and not indented; it is in no fenced block,
+// formula or toggle; it goes on in no block of the line before, as a table's
+// next row, a quote's or a callout's next line, or the line after a hard
+// break. inList says it is an item with a number of four digits, which
+// only the item before it makes one (renumbered).
+func middleLine(md string) (cut int, inList bool) {
+	var at, toggles, number int
+	var fence string
+	var row, quote, hard bool
+	nearer := func(a, b int) bool { return max(a, len(md)-a) < max(b, len(md)-b) }
+	for line := range strings.Lines(md) {
+		trimmed := strings.TrimSpace(line)
+		top := trimmed != "" && !indented(line)
+		isRow, isQuote := strings.HasPrefix(trimmed, "|"), strings.HasPrefix(trimmed, ">")
+		goesOn := row && isRow || quote && isQuote || hard
+		n, digits := itemNumber(trimmed)
+		counted := digits > 0 && (digits <= 3 || n == number+1)
+		if at > 0 && top && fence == "" && toggles == 0 && !goesOn && nearer(at, cut) {
+			cut, inList = at, digits > 3 && counted
+		}
+		at += len(line)
+		row, quote, hard = isRow, isQuote, hardBreak(line)
+		switch {
+		case !top:
+		case counted:
+			number = n
+		default:
+			number = 0
+		}
+		lower := strings.ToLower(trimmed)
+		_, code := doc.CodeFence(trimmed)
+		switch {
+		case fence == "$$" && trimmed == "$$", fence != "" && fence != "$$" && strings.HasPrefix(trimmed, fence) && strings.Trim(trimmed, "` ") == "":
+			fence = ""
+		case fence != "":
+		case trimmed == "$$":
+			fence = "$$"
+		case code:
+			fence = trimmed[:len(trimmed)-len(strings.TrimLeft(trimmed, "`"))]
+		case strings.HasPrefix(lower, "<details>"), strings.HasPrefix(lower, "<details open>"):
+			toggles++
+		case lower == "</details>" && toggles > 0:
+			toggles--
+		}
+	}
+	return cut, inList
+}
+
+// indented reports whether a line starts with a space or a tab.
+func indented(line string) bool {
+	return strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")
+}
+
+// hardBreak reports whether a line ends in a backslash not itself escaped,
+// which has the next line go on in its block.
+func hardBreak(line string) bool {
+	line = strings.TrimRight(line, "\r\n")
+	return (len(line)-len(strings.TrimRight(line, `\`)))%2 == 1
+}
+
+// itemNumber is the number a numbered item's line starts with, and how
+// many digits it has: none for a line that is no such item.
+func itemNumber(line string) (n, digits int) {
+	digits = len(line) - len(strings.TrimLeft(line, "0123456789"))
+	if digits == 0 || digits > 9 || digits == len(line) || !strings.ContainsRune(".)", rune(line[digits])) {
+		return 0, 0
+	}
+	if rest := line[digits+1:]; rest != "" && rest[0] != ' ' {
+		return 0, 0
+	}
+	n, _ = strconv.Atoi(line[:digits])
+	return n, digits
+}
+
+// renumbered is md, which starts in a numbered list, with that list's
+// items numbered from 1. A number of four digits is an item only right
+// after the item before it, which a part's first line has not. A list's
+// numbers are no part of its items, which count by their place: those of
+// this part go on from the part before it.
+func renumbered(md string) string {
+	var b strings.Builder
+	at, count, last := 0, 0, 0
+	for line := range strings.Lines(md) {
+		trimmed, rest := strings.TrimSpace(line), line
+		if trimmed != "" && !indented(line) {
+			n, digits := itemNumber(trimmed)
+			if digits == 0 || count > 0 && n != last+1 {
+				break
+			}
+			count++
+			last = n
+			b.WriteString(strconv.Itoa(count))
+			rest = line[digits:]
+		}
+		b.WriteString(rest)
+		at += len(line)
+	}
+	return b.String() + md[at:]
 }
 
 func (r *runner) rename(args []string) error {
@@ -612,6 +898,10 @@ func (r *runner) tag(args []string, clear bool) error {
 	switch {
 	case clear && len(tags) > 0:
 		return errors.New("give tags or --clear, not both")
+	case len(tags) > 0 && len(store.NormalizeTags(tags)) == 0:
+		// As a shell's unset variable gives: what would take them all off
+		// is --clear's to ask.
+		return errors.New("no tag given: --clear takes them all off")
 	case !clear && len(tags) == 0:
 		if r.json {
 			return r.printJSON(map[string]any{"page_id": p.ID, "tags": orEmpty(p.Tags)})

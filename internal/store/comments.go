@@ -7,6 +7,16 @@ import (
 	"leaflet/internal/doc"
 )
 
+// maxCommentLen is the most characters a comment's body or quote has, as
+// the server's comments table checks (comments_body_length,
+// comments_quote_length): a comment with a longer one would be refused
+// every time it went up.
+const maxCommentLen = 100000
+
+// ClampComment is a comment's body or quote as it is kept: its first
+// maxCommentLen characters, and nothing else changed.
+func ClampComment(text string) string { return clampChars(text, maxCommentLen) }
+
 // Comment is one comment of a thread anchored to a block.
 type Comment struct {
 	ID              string
@@ -181,7 +191,8 @@ func (s *Store) saveComment(c Comment, label string) error {
 	return nil
 }
 
-// AddComment adds a comment, or a reply when parentID is set. An empty
+// AddComment adds a comment, or a reply when parentID is set, its body and
+// quote cut to the characters one may have (ClampComment). An empty
 // authorName is the user's.
 func (s *Store) AddComment(pageID, blockID, body, parentID, quote, authorKind, authorName string) (Comment, error) {
 	sess := s.Session()
@@ -193,7 +204,7 @@ func (s *Store) AddComment(pageID, blockID, body, parentID, quote, authorKind, a
 	}
 	now := time.Now()
 	c := Comment{ID: doc.NewRowID(), PageID: pageID, BlockID: blockID, ParentCommentID: parentID, AuthorKind: authorKind,
-		AuthorName: authorName, Body: body, Quote: quote, CreatedAt: now, UpdatedAt: now}
+		AuthorName: authorName, Body: ClampComment(body), Quote: ClampComment(quote), CreatedAt: now, UpdatedAt: now}
 	if authorKind == "user" && sess.SignedIn {
 		c.AuthorID = sess.UserID
 	}

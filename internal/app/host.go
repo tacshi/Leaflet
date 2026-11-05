@@ -936,7 +936,7 @@ func (ic *imageCache) forget(url string) {
 // say it is far larger, and decoding it would take more memory than the
 // device has.
 const (
-	maxPixels    = 50_000_000
+	maxPixels    = doc.MaxPixels
 	maxGIFPixels = 200_000_000
 )
 

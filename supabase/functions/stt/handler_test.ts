@@ -146,6 +146,12 @@ Deno.test("a failed transcription says only the function's own words", async () 
     "Soniox could not transcribe the recording",
     null,
   ]);
+  // Soniox's end of it: what went there goes, with nothing left to pick up.
+  assertEquals(s.calls.filter((c) => c.startsWith("DELETE")), [
+    "DELETE /v1/transcriptions/job",
+    "DELETE /v1/files/file",
+  ]);
+  assertEquals(p.rows("stt_jobs"), []);
 
   const q = project({ provider: "openai-compatible", base_url: "https://stt.my-office.example/v1" });
   const unreachable = await transcribe(
@@ -235,4 +241,161 @@ Deno.test("the audio is streamed to the transcriber as it is stored", async () =
     [true, "rec.wav", "whisper-1", "json", audio],
   ]);
   assertEquals((rec(q).transcript as { text: string }[]).map((t) => t.text), ["Hello."]);
+});
+
+// A recording that outlasts a call goes on at Soniox: the next call picks
+// its transcription up, with the audio sent and paid for once, and what
+// went to Soniox goes only as it is done.
+Deno.test("a transcription Soniox is still working on is picked up, not paid for again", async () => {
+  const p = project();
+  const state = { status: "processing" };
+  const s = soniox(state);
+  const short = { ...deps(p, s.fetch), deadlineMs: 5, pollMs: 60_000 };
+  const first = await transcribe(p, short);
+  assertEquals(first.status, 504);
+  assertEquals(first.body.code, "still_transcribing");
+  assert(String(first.body.error).includes("Ask again"), first.body.error);
+  assertEquals([rec(p).status, rec(p).error, rec(p).transcribing_at], ["failed", first.body.error, null]);
+  assertEquals(s.calls.filter((c) => c.startsWith("DELETE")), []);
+  assertEquals(p.rows("stt_jobs").map((j) => [j.recording_id, j.user_id, j.transcription_id]), [["rec", "ann", "job"]]);
+
+  // Not yet, nor does asking again send anything.
+  assertEquals((await transcribe(p, short)).status, 504);
+
+  state.status = "completed";
+  const done = await transcribe(p, short);
+  assertEquals(done.status, 200);
+  assertEquals(rec(p).status, "ready");
+  assertEquals(s.files.length, 1);
+  assertEquals(s.calls.filter((c) => c === "POST /v1/transcriptions").length, 1);
+  assertEquals(s.calls.filter((c) => c.startsWith("DELETE")), [
+    "DELETE /v1/transcriptions/job",
+    "DELETE /v1/files/file",
+  ]);
+  assertEquals(p.rows("stt_jobs"), []);
+});
+
+// Time running out, or the worker shutting down, in the middle of asking
+// Soniox is no end of its transcription either.
+Deno.test("a call stopped while it waits leaves the transcription to the next", async () => {
+  const p = project();
+  const s = soniox({ status: "processing" });
+  const timesOut: typeof globalThis.fetch = (input, init) =>
+    String(input).endsWith("/transcriptions/job")
+      ? Promise.reject(new DOMException("late", "TimeoutError"))
+      : s.fetch(input, init);
+  const late = await transcribe(p, deps(p, timesOut));
+  assertEquals(late.status, 504);
+  assert(String(late.body.error).includes("Ask again"), late.body.error);
+  assertEquals(p.rows("stt_jobs").length, 1);
+
+  const shutting = await transcribe(p, { ...deps(p, s.fetch), unloading: AbortSignal.abort() });
+  assertEquals(shutting.status, 504);
+  assertEquals(s.files.length, 1);
+  assertEquals(p.rows("stt_jobs").length, 1);
+});
+
+// A failure of Soniox's on the way, as a status it can't give for now,
+// leaves what it has: the next call goes on from there.
+Deno.test("Soniox failing for now spends nothing again", async () => {
+  const p = project();
+  const s = soniox();
+  let down = true;
+  const flaky: typeof globalThis.fetch = (input, init) =>
+    down && String(input).endsWith("/transcript")
+      ? Promise.resolve(new Response("busy", { status: 503 }))
+      : s.fetch(input, init);
+  assertEquals((await transcribe(p, deps(p, flaky))).status, 502);
+  assertEquals(p.rows("stt_jobs").length, 1);
+  down = false;
+  assertEquals((await transcribe(p, deps(p, flaky))).status, 200);
+  assertEquals([s.files.length, p.rows("stt_jobs").length], [1, 0]);
+});
+
+// A transcription Soniox no longer has, as after its 30 days, is started
+// again, once.
+Deno.test("a transcription gone from Soniox starts again", async () => {
+  const p = project();
+  p.tables.stt_jobs = [{ recording_id: "rec", user_id: "ann", file_id: "old", transcription_id: "lost", model: "m" }];
+  const s = soniox();
+  const missing: typeof globalThis.fetch = (input, init) =>
+    String(input).endsWith("/transcriptions/lost")
+      ? Promise.resolve(new Response(null, { status: 404 }))
+      : s.fetch(input, init);
+  assertEquals((await transcribe(p, deps(p, missing))).status, 200);
+  assertEquals([s.files.length, rec(p).status, p.rows("stt_jobs").length], [1, "ready", 0]);
+});
+
+// Another caller's transcription is theirs to pick up, by their own key.
+Deno.test("a transcription another caller started is left to them", async () => {
+  const p = project();
+  p.rpcs.can_edit_page = () => true;
+  p.rules.writes = () => true;
+  p.tables.stt_jobs = [{
+    recording_id: "rec",
+    user_id: "bob",
+    file_id: "theirs",
+    transcription_id: "other",
+    model: "m",
+  }];
+  const s = soniox();
+  assertEquals((await transcribe(p, deps(p, s.fetch))).status, 200);
+  assertEquals(s.files.length, 1);
+  assertEquals(p.rows("stt_jobs").map((j) => j.user_id), ["bob"]);
+});
+
+// Audio sent that the deadline cuts off is no job to pick up: it would
+// take as long again, and the words say what to do instead.
+Deno.test("a recording too long to send is refused in words that say so", async () => {
+  const p = project();
+  const late: typeof globalThis.fetch = () => Promise.reject(new DOMException("late", "TimeoutError"));
+  const failed = await transcribe(p, deps(p, late));
+  assertEquals(failed.status, 504);
+  assert(String(failed.body.error).includes("on-device"), failed.body.error);
+  assert(!/try again|ask again/i.test(failed.body.error), failed.body.error);
+  assertEquals(p.rows("stt_jobs"), []);
+});
+
+// A worker old enough to cut a call short says nothing of the recording:
+// it goes back to the app, which asks again and gets a new worker's whole
+// time, not told a recording that would take as long again is too long.
+Deno.test("a call a warm worker cut short is asked again", async () => {
+  const late: SttDeps["send"] = () => Promise.reject(new DOMException("late", "TimeoutError"));
+  const p = project({ provider: "openai-compatible", base_url: "https://stt.example/v1" });
+  const warm = { ...deps(p, soniox().fetch, late), deadlineMs: 120_000, workerStarted: Date.now() - 70_000 };
+  const cut = await transcribe(p, warm);
+  assertEquals([cut.status, cut.body.code], [504, "still_transcribing"]);
+  assert(String(cut.body.error).includes("Ask again"), cut.body.error);
+  assertEquals([rec(p).status, rec(p).error, rec(p).transcribing_at], ["failed", cut.body.error, null]);
+
+  // Audio cut off on its way to Soniox, the same.
+  const q = project();
+  const sending: typeof globalThis.fetch = () => Promise.reject(new DOMException("late", "TimeoutError"));
+  const sent = await transcribe(q, { ...deps(q, sending), deadlineMs: 120_000, workerStarted: Date.now() - 70_000 });
+  assertEquals(sent.body.code, "still_transcribing");
+
+  // So is a worker shutting down, whatever its age.
+  const r = project({ provider: "openai-compatible", base_url: "https://stt.example/v1" });
+  const shutting = await transcribe(r, { ...deps(r, soniox().fetch, late), unloading: AbortSignal.abort() });
+  assertEquals(shutting.body.code, "still_transcribing");
+});
+
+// A call that had its time, on a new worker or one a second or two old,
+// did not outlast it by the worker's doing: the words stand, and the app
+// stops asking.
+Deno.test("a call that had its time is told so", async () => {
+  const late: SttDeps["send"] = () => Promise.reject(new DOMException("late", "TimeoutError"));
+  const p = project({ provider: "openai-compatible", base_url: "https://stt.example/v1" });
+  const fresh = { ...deps(p, soniox().fetch, late), deadlineMs: 120_000, workerStarted: Date.now() - 2_000 };
+  const full = await transcribe(p, fresh);
+  assertEquals([full.status, full.body.code], [504, undefined]);
+  assert(String(full.body.error).includes("on-device"), full.body.error);
+});
+
+// An endpoint's text with what the database can't keep is saved without it.
+Deno.test("a transcript keeps to what the database takes", async () => {
+  const p = project({ provider: "openai-compatible", base_url: "https://stt.example/v1" });
+  const send: SttDeps["send"] = () => Promise.resolve(Response.json({ text: "Hel\u0000lo \ud83d." }));
+  assertEquals((await transcribe(p, deps(p, soniox().fetch, send))).status, 200);
+  assertEquals((rec(p).transcript as { text: string }[]).map((t) => t.text), ["Hello \ufffd."]);
 });

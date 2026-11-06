@@ -1638,3 +1638,24 @@ func TestTypingKeepsTheCaretOfATallBlockInView(t *testing.T) {
 		t.Errorf("the caret at y %.0f, out of the 400 high window", cr.Y)
 	}
 }
+
+// A colored cell opens to its Markdown, its span in it, and keeps the
+// color when its text is edited.
+func TestColoredTableCell(t *testing.T) {
+	e, tt, _ := setup(t)
+	table, _ := doc.TableNode([][]string{{"Name"}, {`<span style="color:#ef4444ff">Blocked</span> item`}}, "")
+	e.Edit(func(c *doc.Content) { c.Children = []*doc.Node{table} })
+	tt.Frame()
+	box := boxOf(e, table.ID)
+	tt.ClickAt(box.X+20, box.Y+box.H*0.75)
+	tt.Frame()
+	if want := `<span style="color:#ef4444ff">Blocked</span> item`; e.cellEdit != cellKey(table.ID, 1, 0) || e.cellText != want {
+		t.Fatalf("editing %q: %q", e.cellEdit, e.cellText)
+	}
+	tt.Type("!")
+	tt.Frame()
+	d := doc.TableCells(table)[1][0].Children[0].Delta()
+	if len(d) != 2 || d[0].Text != "Blocked" || d[0].Attrs.Color != "#ef4444ff" || !strings.Contains(d.Plain(), "!") {
+		t.Fatalf("delta %+v", d)
+	}
+}

@@ -857,3 +857,41 @@ func TestCopyText(t *testing.T) {
 		t.Error("copied what isn't blocks")
 	}
 }
+
+// A colored cell reaches the table sheet as its Markdown, span and all,
+// and saving the sheet keeps the color, of the cell edited too.
+func TestTableRowsKeepColors(t *testing.T) {
+	table, err := doc.TableNode([][]string{{`<span style="color:#ef4444ff">Red</span>`, "b"}}, "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(table)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := TableRows(string(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var grid [][]string
+	if err := json.Unmarshal([]byte(rows), &grid); err != nil {
+		t.Fatal(err)
+	}
+	if grid[0][0] != `<span style="color:#ef4444ff">Red</span>` {
+		t.Fatalf("rows %q", grid)
+	}
+	grid[0][0] = `<span style="color:#ef4444ff">Red</span> edited`
+	cells, _ := json.Marshal(grid)
+	saved, err := SetTableRows(string(raw), string(cells))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got doc.Node
+	if err := json.Unmarshal([]byte(saved), &got); err != nil {
+		t.Fatal(err)
+	}
+	d := got.Children[0].Children[0].Delta()
+	if len(d) != 2 || d[0].Attrs.Color != "#ef4444ff" || d[1].Text != " edited" {
+		t.Fatalf("delta %+v", d)
+	}
+}

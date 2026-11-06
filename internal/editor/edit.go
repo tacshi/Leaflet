@@ -967,6 +967,7 @@ func (e *Editor) Format(has func(doc.Attrs) bool, set func(*doc.Attrs, bool)) {
 			e.typing, e.hasTyping = n.Delta().AttrsAt(e.focus.Off), true
 		}
 		set(&e.typing, !has(e.typing))
+		e.selected()
 		return
 	}
 	a, b := e.ordered()

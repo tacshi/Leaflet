@@ -194,7 +194,7 @@ const blockSpecSchema = {
     text: {
       type: "string",
       description:
-        "Text with inline markdown: **bold**, *italic*, `code`, ~~strike~~, [link](https://…). For text block types. For code, the code itself, verbatim, with its line breaks and no fence.",
+        'Text with inline markdown: **bold**, *italic*, `code`, ~~strike~~, [link](https://…), and text color and highlight as <span style="color:#ef4444;background:#fde68a">text</span>, either alone, in hex, not nested. Keep the spans read_page shows when rewriting text. For text block types. For code, the code itself, verbatim, with its line breaks and no fence.',
     },
     language: { type: "string", description: "For code: the language, such as go, python or typescript" },
     tone: { type: "string", enum: ["info", "tip", "warning", "danger"], description: "For callout: its tone" },

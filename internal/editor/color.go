@@ -38,6 +38,40 @@ func (e *Editor) selectionAttrs() doc.Attrs {
 	return n.Delta().AttrsAt(a.Off + 1)
 }
 
+// SelectionView is the selection as it reads from outside the editor: the
+// start before the end, offsets in runes.
+type SelectionView struct {
+	Start, End Pos
+	Text       string
+	// Color and Highlight are the first selected character's, or at a
+	// caret those of what is typed next. Mixed says that not all the
+	// selected text has them.
+	Color, Highlight string
+	Mixed            bool
+}
+
+// SelectionView reads the selection.
+func (e *Editor) SelectionView() SelectionView {
+	var v SelectionView
+	e.indexed(func() {
+		v.Start, v.End = e.ordered()
+		attrs := e.selectionAttrs()
+		if e.Collapsed() {
+			attrs = doc.Attrs{}
+			if e.hasTyping {
+				attrs = e.typing
+			} else if n := e.node(e.focus.ID); n != nil && n.IsText() {
+				attrs = n.Delta().AttrsAt(e.focus.Off)
+			}
+		} else {
+			_, v.Text = e.SelectedText()
+			v.Mixed = v.Text != "" && !e.Has(func(a doc.Attrs) bool { return a.Color == attrs.Color && a.Background == attrs.Background })
+		}
+		v.Color, v.Highlight = attrs.Color, attrs.Background
+	})
+	return v
+}
+
 // colored reports whether any selected text has a color or a highlight.
 func (e *Editor) colored() bool {
 	return !e.Collapsed() && !e.Has(func(a doc.Attrs) bool { return a.Color == "" && a.Background == "" })

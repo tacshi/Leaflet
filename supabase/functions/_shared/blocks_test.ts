@@ -230,3 +230,21 @@ Deno.test("a blank page has one empty paragraph", () => {
     [p.id]: 1000,
   }]);
 });
+
+Deno.test("colors read and write as spans", () => {
+  const red = "#ef4444ff", mark = "#eab30840";
+  const d = [
+    { insert: "plain " },
+    { insert: "red", attributes: { color: red } },
+    { insert: " both", attributes: { color: red, background: mark } },
+  ];
+  const md = deltaToMarkdown(d);
+  assertEquals(
+    md,
+    'plain <span style="color:#ef4444ff">red</span><span style="color:#ef4444ff;background:#eab30840"> both</span>',
+  );
+  assertEquals(markdownToDelta(md), d);
+  assertEquals(markdownToDelta('<span style="color:red">x</span>'), [{ insert: '<span style="color:red">x</span>' }]);
+  assertEquals(markdownToDelta('<span style="color:#ef4444">x'), [{ insert: '<span style="color:#ef4444">x' }]);
+  assertEquals(deltaToMarkdown([{ insert: "</span>" }]), "\\</span>");
+});

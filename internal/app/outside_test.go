@@ -10,6 +10,7 @@ import (
 	"leaflet/internal/agents"
 	"leaflet/internal/core"
 	"leaflet/internal/doc"
+	"leaflet/internal/editor"
 	"leaflet/internal/remote"
 	"leaflet/internal/store"
 	syncsvc "leaflet/internal/sync"
@@ -595,5 +596,61 @@ func TestLaterWaitsWithAWindow(t *testing.T) {
 	}
 	if ran != 1 {
 		t.Errorf("ran %d", ran)
+	}
+}
+
+// The app publishes the open page and its selection, and takes them away
+// as the page closes.
+func TestViewIsPublished(t *testing.T) {
+	st, err := store.OpenMemory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := st.LoadSession(nil); err != nil {
+		t.Fatal(err)
+	}
+	n := &doc.Node{ID: "p1", Type: "paragraph"}
+	n.SetDelta(doc.FromMarkdown("ship it now"))
+	p, err := st.CreatePage(store.NewPageOptions{Title: "Notes", Content: doc.FromBlocks([]*doc.Node{n})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	be := remote.New(remote.Config(), st)
+	a := &App{st: st, backend: be, sync: syncsvc.New(st, be), session: st.Session()}
+	a.reloadAll()
+	a.openPage(p.ID)
+	if a.page == nil {
+		t.Fatal("the page did not open")
+	}
+	view := func() *store.OpenView {
+		t.Helper()
+		v, err := st.OpenView()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if v := view(); v == nil || v.PageID != p.ID || v.Selection.Text != "" {
+		t.Fatalf("opened: %+v", v)
+	}
+
+	a.page.editor.Select(editor.Pos{ID: "p1", Off: 5}, editor.Pos{ID: "p1", Off: 7})
+	if v := view(); v == nil || v.Selection.Text != "it" || v.Selection.EndOffset != 7 {
+		t.Fatalf("selected: %+v", v)
+	}
+	a.page.editor.SetColor("#ef4444ff")
+	if v := view(); v == nil || v.Selection.Color != "#ef4444ff" {
+		t.Fatalf("colored: %+v", v)
+	}
+
+	if !a.closePage() {
+		t.Fatal("the page did not close")
+	}
+	if v := view(); v != nil {
+		t.Fatalf("closed: %+v", v)
+	}
+	if last, _ := st.Value(store.LastPageKey); last != p.ID {
+		t.Fatalf("last page %q", last)
 	}
 }

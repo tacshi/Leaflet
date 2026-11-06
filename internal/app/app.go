@@ -254,6 +254,10 @@ type App struct {
 	// quitting is set as a quit starts, when closing the window closes it
 	// rather than hiding it to the menu bar.
 	quitting bool
+	// openView is the open page and selection as last published, and
+	// viewTimer publishes them shortly after they change (viewChanged).
+	openView  store.OpenView
+	viewTimer *time.Timer
 
 	// fileToDelete is the file whose deleting the sidebar asks about.
 	fileToDelete *store.File
@@ -529,7 +533,9 @@ func (a *App) start() error {
 	go st.WatchOthers(time.Second, nil, func() { a.update(a.outsideChange) })
 	a.reloadAll()
 	a.route = Route{Kind: "home"}
-	if last, ok := st.Value("last.page"); ok && a.pageByID(last) != nil {
+	// What a crash left of the view is no longer so.
+	_ = st.SetOpenView(nil)
+	if last, ok := st.Value(store.LastPageKey); ok && a.pageByID(last) != nil {
 		a.openPage(last)
 	} else if len(a.pages) > 0 {
 		a.openPage(a.pages[0].ID)
@@ -591,6 +597,7 @@ func (a *App) start() error {
 		// recording ends, keeping what it has. So does a public link.
 		a.rec.Stop()
 		a.stopPub()
+		a.endView()
 	})
 	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
 		// As closing the window: edits not saved stop the quit.
@@ -601,6 +608,7 @@ func (a *App) start() error {
 		}
 		a.quitting = true
 		a.stopPub()
+		a.endView()
 	})
 	mygo.App.OnActivate(func(visible bool) {
 		if !visible {
@@ -1104,7 +1112,11 @@ func (a *App) loadPage(id string) {
 	ed := editor.New(content, &host{a: a})
 	ed.Size = float32(a.settings.TextSize)
 	ed.Tinted = ps.tinted
-	ed.OnChange = func() { a.scheduleSave() }
+	ed.OnChange = func() {
+		a.scheduleSave()
+		a.viewChanged()
+	}
+	ed.OnSelect = a.viewChanged
 	ps.editor = ed
 	lp.Attach(pageEditor{ed})
 	lp.SetReadOnly(!a.canEdit(id) || lp.Unreadable())
@@ -1112,7 +1124,8 @@ func (a *App) loadPage(id string) {
 	ps.members, _ = a.st.Members(id)
 	a.page = ps
 	a.sync.SetOpen(id, true)
-	_ = a.st.SetValue("last.page", id)
+	_ = a.st.SetValue(store.LastPageKey, id)
+	a.viewChanged()
 	if a.backend.SignedIn() {
 		go a.loadMembers(id)
 	}
@@ -1141,6 +1154,7 @@ func (a *App) discardPage() {
 		t.Stop()
 	}
 	a.page = nil
+	a.viewChanged()
 	a.pullStops(id)
 	d := &a.dialogs
 	d.newComment, d.inline = nil, nil

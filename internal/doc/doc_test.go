@@ -471,8 +471,9 @@ func TestColorsRoundTrip(t *testing.T) {
 	if bad[0].Attrs.Color != "" {
 		t.Errorf("kept a color that is not one: %q", bad[0].Attrs.Color)
 	}
-	// Markdown has no colors, as in MyGo's rich text.
-	if md := d.ToMarkdown(); md != "red marked" {
+	// Agents read colors in tags; Markdown for people has none, as in
+	// MyGo's rich text.
+	if md := d.ReadableMarkdown(); md != "red marked" {
 		t.Errorf("markdown %q", md)
 	}
 }
@@ -1823,5 +1824,85 @@ func TestPageOpsRoundTripAndInvert(t *testing.T) {
 	before := c.Encode()
 	if err := c.Apply(ops[0]); err != nil || c.Encode() != before {
 		t.Errorf("apply: %v, %s", err, c.Encode())
+	}
+}
+
+// Colors read and write as spans in agents' Markdown, and stay out of
+// Markdown for people.
+func TestColorSpans(t *testing.T) {
+	red, mark := "#ef4444ff", "#eab30840"
+	d := Delta{
+		{Text: "plain "},
+		{Text: "red ", Attrs: Attrs{Color: red}},
+		{Text: "bold", Attrs: Attrs{Color: red, Bold: true}},
+		{Text: " both", Attrs: Attrs{Color: red, Background: mark}},
+		{Text: " code", Attrs: Attrs{Background: mark, Code: true}},
+		{Text: "link", Attrs: Attrs{Color: red, Href: "https://example.com"}},
+	}
+	md := d.ToMarkdown()
+	if want := `plain <span style="color:#ef4444ff">red **bold**</span><span style="color:#ef4444ff;background:#eab30840"> both</span><span style="background:#eab30840">` + "` code`" + `</span>[<span style="color:#ef4444ff">link</span>](https://example.com)`; md != want {
+		t.Errorf("markdown\n%s\nwant\n%s", md, want)
+	}
+	if back := FromMarkdown(md); !sameRuns(back, d.Compact()) {
+		t.Errorf("read back %+v", back)
+	}
+	if got := d.ReadableMarkdown(); strings.Contains(got, "span") {
+		t.Errorf("readable %q", got)
+	}
+
+	for src, want := range map[string]Delta{
+		`<span style="color: #ef4444; background-color: #fde68a;">x</span>`: {{Text: "x", Attrs: Attrs{Color: "#ef4444", Background: "#fde68a"}}},
+		`**<span style="color:#ef4444">x</span>**`:                          {{Text: "x", Attrs: Attrs{Color: "#ef4444", Bold: true}}},
+		`<span style="color:#ef4444">a *b* c</span>`:                        {{Text: "a ", Attrs: Attrs{Color: "#ef4444"}}, {Text: "b", Attrs: Attrs{Color: "#ef4444", Italic: true}}, {Text: " c", Attrs: Attrs{Color: "#ef4444"}}},
+		`<span style="color:red">x</span>`:                                  {{Text: `<span style="color:red">x</span>`}},
+		`<span style="color:#ef4444;font-size:40px">x</span>`:               {{Text: `<span style="color:#ef4444;font-size:40px">x</span>`}},
+		`<span style="color:#ef4444">x`:                                     {{Text: `<span style="color:#ef4444">x`}},
+		`<span style="color:#ef4444"></span>`:                               {{Text: `<span style="color:#ef4444"></span>`}},
+		"`<span style=\"color:#ef4444\">x</span>`":                          {{Text: `<span style="color:#ef4444">x</span>`, Attrs: Attrs{Code: true}}},
+		`a < b </div>`: {{Text: `a < b </div>`}},
+	} {
+		if got := FromMarkdown(src); !sameRuns(got, want) {
+			t.Errorf("%q read as %+v", src, got)
+		}
+	}
+
+	// Text that looks like a tag reads back as text.
+	for _, text := range []string{`<span style="color:#ef4444">x</span>`, `</span>`, `a <span style="`} {
+		for _, a := range []Attrs{{}, {Color: red}} {
+			d := Delta{{Text: text, Attrs: a}}
+			if md := d.ToMarkdown(); !sameRuns(FromMarkdown(md), d) {
+				t.Errorf("%q read back from %q as %+v", text, md, FromMarkdown(md))
+			}
+		}
+	}
+}
+
+// sameRuns reports whether two texts have the same runs.
+func sameRuns(a, b Delta) bool {
+	return slices.EqualFunc(a, b, func(x, y Run) bool { return x.Text == y.Text && x.Attrs.Equal(y.Attrs) })
+}
+
+// Tags that end nowhere take no longer than other text.
+func TestColorSpansAreLinear(t *testing.T) {
+	src := strings.Repeat(`<span style="color:#ef4444">a `, 20000)
+	start := time.Now()
+	if got := FromMarkdown(src).Plain(); got != src {
+		t.Fatalf("read %d characters of %d", len(got), len(src))
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("took %v", d)
+	}
+}
+
+// Pasted or imported lines read color spans, on lines of any kind.
+func TestColorSpansInLines(t *testing.T) {
+	nodes := MarkdownBlocks("<span style=\"color:#ef4444\">first</span> line\n- <span style=\"color:#ef4444\">item</span>")
+	if len(nodes) != 2 || nodes[0].Type != "paragraph" || nodes[1].Type != "bulleted_list" {
+		t.Fatalf("blocks %+v", nodes)
+	}
+	for _, n := range nodes {
+		if d := n.Delta(); d[0].Attrs.Color != "#ef4444" {
+			t.Errorf("%s: %+v", n.Type, d)
+		}
 	}
 }

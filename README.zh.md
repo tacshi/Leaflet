@@ -206,6 +206,7 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 | 工具 | 作用 |
 | --- | --- |
 | `list_pages`、`search_pages` | 按标题、标签和正文查找页面，以及查找录音和评论 |
+| `current_page` | 查看应用中打开的页面，以及选中的文字和文字颜色 |
 | `read_page` | 读取页面的块及其 ID |
 | `create_page`、`rename_page` | 新建和重命名页面 |
 | `set_page_tags` | 设置页面的标签 |
@@ -216,7 +217,11 @@ claude mcp add -s user leaflet -e LEAFLET_DATA_DIR=<数据文件夹> -- <可执�
 该服务器与应用打开同一个数据库，所以无论应用是否打开都能工作。仅以查看
 权限共享给你的页面是只读的。智能体首次编辑某个页面前会保存一份历史快照，
 之后每十分钟的编辑保存一份，并像其他修改一样同步。打开着的应用会在一秒内
-读到这些修改，并与正在输入的内容合并。
+读到这些修改，并与正在输入的内容合并。应用关闭或没有打开页面时，`current_page`
+给出这台设备上最后打开的页面，不含选区。
+
+智能体在文本字段中用 `<span style="color:#ef4444;background:#fde68a">文字</span>`
+读写文字颜色和高亮，颜色为十六进制。`leaflet cat` 和导出不包含颜色。
 
 要在开发构建上试用，把开发版应用的数据文件夹交给一个二进制文件：
 
@@ -233,6 +238,7 @@ go build -o leaflet . && claude mcp add -s user leaflet -e LEAFLET_DATA_DIR="$HO
 | --- | --- |
 | `leaflet ls` | 列出文件夹和页面，以及它们的 ID 和标签 |
 | `leaflet search QUERY` | 按标题、标签或正文查找页面，以及查找录音和评论 |
+| `leaflet current` | 显示应用中打开的页面，以及选中的文字和文字颜色 |
 | `leaflet cat PAGE` | 以 Markdown 输出页面 |
 | `leaflet new [TITLE]` | 新建页面并输出它的 ID；`--stdin` 用管道传入的 Markdown 作为内容 |
 | `leaflet append PAGE [TEXT...]` | 把 Markdown 添加到页面末尾：给出的文字，或管道传入的内容 |

@@ -146,3 +146,37 @@ func TestSelectionToolbarCopiesPlainText(t *testing.T) {
 		t.Errorf("copied %q from code", got)
 	}
 }
+
+// SelectionView reads the selection as those outside the editor do: its
+// text and blocks, and the colors of what is selected or typed next.
+func TestSelectionView(t *testing.T) {
+	e, tt, _ := setup(t)
+	tt.Type("ship it now")
+	n := e.Content.Children[0]
+	calls := 0
+	e.OnSelect = func() { calls++ }
+
+	e.Select(Pos{n.ID, 5}, Pos{n.ID, 7})
+	if calls == 0 {
+		t.Error("the selection changed unheard")
+	}
+	e.SetColor("#ef4444ff")
+	v := e.SelectionView()
+	if v.Text != "it" || v.Start != (Pos{n.ID, 5}) || v.End != (Pos{n.ID, 7}) || v.Color != "#ef4444ff" || v.Mixed {
+		t.Fatalf("selection %+v", v)
+	}
+
+	// Backwards reads the same; part in color reads as mixed.
+	e.Select(Pos{n.ID, 7}, Pos{n.ID, 2})
+	if v := e.SelectionView(); v.Text != "ip it" || v.Start.Off != 2 || v.End.Off != 7 || v.Color != "" || !v.Mixed {
+		t.Fatalf("mixed selection %+v", v)
+	}
+
+	// A caret has no text, and the colors of what is typed next.
+	e.Select(Pos{n.ID, 11}, Pos{n.ID, 11})
+	calls = 0
+	e.SetColor("#3b82f6ff")
+	if v := e.SelectionView(); v.Text != "" || v.Color != "#3b82f6ff" || v.Mixed || calls == 0 {
+		t.Fatalf("caret %+v, heard %d", v, calls)
+	}
+}

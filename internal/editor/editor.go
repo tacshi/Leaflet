@@ -118,6 +118,9 @@ type Editor struct {
 	Tinted map[string]bool
 	// OnChange runs after each change of the content.
 	OnChange func()
+	// OnSelect runs after each change of the selection, or of the formats
+	// of what is typed next.
+	OnSelect func()
 
 	anchor, focus Pos
 	// affinity is the caret's side where its place shows twice, as at the
@@ -445,6 +448,14 @@ func (e *Editor) setSelection(anchor, focus Pos) {
 	e.blink = time.Now()
 	e.reveal = e.focus.ID
 	e.updateTrigger()
+	e.selected()
+}
+
+// selected tells the host that the selection changed.
+func (e *Editor) selected() {
+	if e.OnSelect != nil {
+		e.OnSelect()
+	}
 }
 
 // PlaceCaret puts the caret in a block, at its end when off is negative.

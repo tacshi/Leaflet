@@ -799,12 +799,13 @@ func codeHTML(code, language string) string {
 }
 
 // pubCommentBody is a comment as the panel shows it: its Markdown's
-// formatting, escaped, or that it was deleted.
+// formatting, escaped, or that it was deleted. Colors stay out: a visitor
+// writes these, and could hide words in the paper's color.
 func pubCommentBody(c store.Comment) string {
 	if !c.DeletedAt.IsZero() {
 		return html.EscapeString(commentBody(c))
 	}
-	return doc.FromMarkdown(c.Body).HTML()
+	return doc.FromMarkdown(c.Body).Uncolored().HTML()
 }
 
 // commentsPanel writes the comments visitors see: a badge for each block

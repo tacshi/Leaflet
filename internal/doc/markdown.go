@@ -469,13 +469,12 @@ func (d Delta) ReadableMarkdown() string {
 			}
 			r.Attrs.Mention = nil
 		}
-		r.Attrs.Color, r.Attrs.Background = "", ""
 		out[i] = r
 	}
 	// Text can read back other than it was where Markdown can't say it, as
 	// a format over a space between runs of another: what it reads back as
 	// is written instead, so the same Markdown comes out each time.
-	md := out.ToMarkdown()
+	md := out.Uncolored().ToMarkdown()
 	for range 3 {
 		again := FromMarkdown(md).ToMarkdown()
 		if again == md {
@@ -484,6 +483,15 @@ func (d Delta) ReadableMarkdown() string {
 		md = again
 	}
 	return md
+}
+
+// Uncolored is d without its colors and highlights.
+func (d Delta) Uncolored() Delta {
+	out := slices.Clone(d)
+	for i := range out {
+		out[i].Attrs.Color, out[i].Attrs.Background = "", ""
+	}
+	return out
 }
 
 // MentionLink is how inline markdown writes a mention of a person or an

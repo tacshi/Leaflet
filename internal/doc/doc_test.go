@@ -1893,3 +1893,16 @@ func TestColorSpansAreLinear(t *testing.T) {
 		t.Errorf("took %v", d)
 	}
 }
+
+// Pasted or imported lines read color spans, on lines of any kind.
+func TestColorSpansInLines(t *testing.T) {
+	nodes := MarkdownBlocks("<span style=\"color:#ef4444\">first</span> line\n- <span style=\"color:#ef4444\">item</span>")
+	if len(nodes) != 2 || nodes[0].Type != "paragraph" || nodes[1].Type != "bulleted_list" {
+		t.Fatalf("blocks %+v", nodes)
+	}
+	for _, n := range nodes {
+		if d := n.Delta(); d[0].Attrs.Color != "#ef4444" {
+			t.Errorf("%s: %+v", n.Type, d)
+		}
+	}
+}

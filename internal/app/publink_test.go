@@ -233,6 +233,14 @@ func postComment(h http.Handler, origin, body string) *httptest.ResponseRecorder
 	return w
 }
 
+// A visitor's comment takes no colors, which could hide its words.
+func TestPubCommentBodyHasNoColors(t *testing.T) {
+	got := pubCommentBody(store.Comment{Body: `<span style="color:#ffffff;background:#ffffff">hidden</span>`})
+	if got != "hidden" {
+		t.Errorf("pubCommentBody = %s", got)
+	}
+}
+
 func TestPubComments(t *testing.T) {
 	a, p, h, pg := pubTest(t)
 	const origin = "https://quiet-river.trycloudflare.com"
